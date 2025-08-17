@@ -7,10 +7,11 @@ import (
 )
 
 type Device struct {
-	ID          uuid.UUID `orm:"column(id);pk"`
-	DeviceToken uuid.UUID
-	Platform    string
-	Model       string
-	CreatedAt   time.Time `orm:"auto_now_add;type(datetime)"`
-	UpdatedAt   time.Time `orm:"auto_now;type(datetime)"`
+	ID          uuid.UUID `bun:",pk,type:uuid,default:uuid_generate_v4()"`
+	DeviceToken uuid.UUID `bun:",notnull,unique,type:uuid"`
+	Platform    string    `bun:",notnull"`
+	Model       string    `bun:",notnull"`
+	CreatedAt   time.Time `bun:",nullzero,notnull,default:current_timestamp"`
+	UpdatedAt   time.Time `bun:",nullzero,notnull,default:current_timestamp"`
+	DeletedAt   time.Time `bun:",soft_delete,nullzero"`
 }

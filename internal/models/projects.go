@@ -7,16 +7,13 @@ import (
 )
 
 type Project struct {
-	ID                uuid.UUID `orm:"column(id);pk"`
-	User              *User `orm:"rel(fk);on_delete(do_nothing);column(id)"`
-	Title             string
-	Description       string
-	URL               string `orm:"column(url)"`
-	Icon              string
-	SplashScreenColor string
-	PackageName       string
-	OneSignalAppID    string    `orm:"column(onesignal_app_id)"`
-	ActiveRelease     *Release  `orm:"rel(one)"`
-	CreatedAt         time.Time `orm:"auto_now_add;type(datetime)"`
-	UpdatedAt         time.Time `orm:"auto_now;type(datetime)"`
+	ID             uuid.UUID `bun:",pk,type:uuid,default:uuid_generate_v4()"`
+	UserID         uuid.UUID `bun:",notnull,unique,type:uuid"`
+	User           User      `bun:"rel:belongs-to,join:user_id=id"`
+	URL            string    `bun:",notnull"`
+	PackageName    string    `bun:",notnull,unique"`
+	OneSignalAppID string    `bun:",notnull,unique"`
+	CreatedAt      time.Time `bun:",nullzero,notnull,default:current_timestamp"`
+	UpdatedAt      time.Time `bun:",nullzero,notnull,default:current_timestamp"`
+	DeletedAt      time.Time `bun:",soft_delete,nullzero"`
 }
