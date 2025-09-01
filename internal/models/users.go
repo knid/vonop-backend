@@ -12,12 +12,12 @@ import (
 type User struct {
 	ID             uuid.UUID                `bun:",pk,type:uuid,default:uuid_generate_v4()"`
 	Name           string                   `bun:",notnull"`
-	Email          string                   `bun:",notnull"`
+	Email          string                   `bun:",unique,notnull"`
 	Password       string                   `bun:",notnull"`
 	Photo          string                   `bun:""`
-	Verified       bool                     `bun:",nullzero,notnull,default:false"`
+	Verified       bool                     `bun:",notnull,default:false"`
 	Provider       string                   `bun:",nullzero,notnull,default:'Wemob'"`
-	SubscriptionID uuid.UUID                `bun:",notnull,unique,type:uuid"`
+	SubscriptionID uuid.UUID                `bun:",type:uuid"`
 	Subscription   StandartUserSubscription `bun:"rel:belongs-to,join:subscription_id=id"`
 	CreatedAt      time.Time                `bun:",nullzero,notnull,default:current_timestamp"`
 	UpdatedAt      time.Time                `bun:",nullzero,notnull,default:current_timestamp"`
