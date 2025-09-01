@@ -7,11 +7,11 @@ import (
 	"github.com/knid/wemob/internal/models"
 )
 
-func (db *Database) GetNotifications(project *models.Project) (*[]models.Notification, error) {
+func (db *Database) GetNotifications(project *models.Project) ([]models.Notification, error) {
 	var notifications []models.Notification
 	err := db.DB.NewSelect().Model(&notifications).Where("project_id = ?", project.ID.String()).Scan(context.Background())
 
-	return &notifications, err
+	return notifications, err
 }
 
 func (db *Database) GetNotificationById(id string) (*models.Notification, error) {
