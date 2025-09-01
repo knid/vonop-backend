@@ -1,35 +1,46 @@
 package requests
 
+import (
+	"github.com/go-playground/validator/v10"
+	"github.com/knid/wemob/internal/utils"
+)
+
 type UserInfoRequest struct {
-	Token string `json:"token" validator:"required"`
+	Token string `json:"token" validate:"required"`
 }
 
 type UserUpdateRequest struct {
-	UserRegisterRequest
+	Name  string `json:"name" validate:"min=3,max=30,required" errormgs:"must be between 3 and 30 characters long"`
+	Email string `json:"email" validate:"email,required" errormgs:"must be a valid email address"`
+	Photo string `json:"photo" validate:"required"`
 }
 
 type UserRegisterRequest struct {
-	Name          string `json:"name" validator:"min=3,max=30,required"`
-	Email         string `json:"email" validator:"email,required"`
+	Name          string `json:"name" validate:"min=3,max=30,required" errormgs:"must be between 3 and 30 characters long"`
+	Email         string `json:"email" validate:"email,required" errormgs:"must be a valid email address"`
 	Photo         string `json:"photo"`
-	Password      string `json:"password" validator:"required,min=8,max=64"`
-	PasswordCheck string `json:"password_check" validator:"required,min=8,max=64"`
+	Password      string `json:"password" validate:"required,min=8,max=64" errormgs:"must be between 8 and 64 characters long"`
+	PasswordCheck string `json:"password_check" validate:"required,min=8,max=64" errormgs:"must be between 8 and 64 characters long"`
+}
+
+func (u *UserRegisterRequest) Validate(validate *validator.Validate) error {
+	return utils.ValidateFunc[UserRegisterRequest](*u, validate)
 }
 
 type UserLoginRequest struct {
-	Email    string `json:"email" validator:"email,required"`
-	Password string `json:"password" validator:"required,min=8,max=64"`
+	Email    string `json:"email" validate:"email,required"`
+	Password string `json:"password" validate:"required,min=8,max=64"`
 }
 
 type UserForgotPasswordRequest struct {
-	Email string `json:"email" validator:"email,required"`
+	Email string `json:"email" validate:"email,required"`
 }
 
 type UserVerifyEmailRequest struct {
-	Email string `json:"email" validator:"email,required"`
-	Token string `json:"token" validator:"required"`
+	Email string `json:"email" validate:"email,required"`
+	Token string `json:"token" validate:"required"`
 }
 
 type UserResendVerifyEmailRequest struct {
-	Email string `json:"email" validator:"email,required"`
+	Email string `json:"email" validate:"email,required"`
 }
