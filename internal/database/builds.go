@@ -15,6 +15,13 @@ func (db *Database) GetProjectBuilds(project *models.Project) ([]models.Build, e
 	return builds, err
 }
 
+func (db *Database) GetActiveProjectBuild(project *models.Project) (*models.Build, error) {
+	var activeBuild models.Build
+	err := db.DB.NewSelect().Model(&activeBuild).Where("project_id = ? AND active = true", project.ID.String()).Scan(context.Background())
+
+	return &activeBuild, err
+}
+
 func (db *Database) GetProjectBuildById(id string) (*models.Build, error) {
 	var build models.Build
 	build.ID = uuid.MustParse(id)
