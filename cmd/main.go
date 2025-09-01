@@ -12,7 +12,7 @@ import (
 	"github.com/knid/wemob/internal/controllers"
 	"github.com/knid/wemob/internal/database"
 	"github.com/knid/wemob/internal/models"
-	"github.com/knid/wemob/internal/requests"
+	"github.com/knid/wemob/internal/views"
 
 	_ "github.com/lib/pq"
 
@@ -55,9 +55,11 @@ func createSchema(db *bun.DB) error {
 
 func main() {
 
-	dsn := "postgres://postgres:asd123@localhost/wemob?sslmode=disable"
+	dsn := "postgres://user:pass123@db/wemob?sslmode=disable"
 	sqldb := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn)))
 	bundb := bun.NewDB(sqldb, pgdialect.New())
+
+	bundb.Exec("CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\";")
 
 	bundb.AddQueryHook(bundebug.NewQueryHook(
 		bundebug.WithVerbose(true),
@@ -68,17 +70,16 @@ func main() {
 
 	db := database.NewDatabase(bundb)
 	controller := controllers.NewController(db)
-	controller.CreateProject(requests.ProjectCreateRequest{Title: "TEST1"})
 
-	httpViews := views.httpViews{
-		Controller: *controller,
+	httpViews := views.HttpViews{
+		Controller: controller,
 	}
 
 	r := chi.NewRouter()
 
 	r.Use(middleware.Logger)
 
-	r.Route("/api/v1", func(r chi.Router) {
+	r.Route("/v1", func(r chi.Router) {
 		r.Route("/users", func(r chi.Router) {
 			r.Get("/me", httpViews.GetUser)
 			r.Put("/me", httpViews.UpdateUser)
@@ -88,20 +89,19 @@ func main() {
 			r.Post("/register", httpViews.UserRegister)
 			r.Post("/forgot-password", httpViews.UserForgotPassword)
 			r.Post("/reset-password", httpViews.UserResetPassword)
-			r.Post("verify-email", httpViews.UserVerifyEmail)
-			r.Post("resend-verifaction", httpViews.UserResendVerifactionEmail)
+			r.Post("/verify-email", httpViews.UserVerifyEmail)
+			r.Post("/resend-verifaction", httpViews.UserResendVerifactionEmail)
 		})
 		r.Route("/projects", func(r chi.Router) {
 			r.Get("/", httpViews.GetProjects)
 			r.Post("/", httpViews.CreateProject)
 			r.Route("/{projectId}", func(r chi.Router) {
 				r.Get("/", httpViews.GetProject)
-				r.Put("/", httpViews.UpdateProject)
 				r.Delete("/", httpViews.DeleteProject)
 				r.Route("/analytics", func(r chi.Router) {
 					// TODO: Make more detailed analytics endpoints
-					r.Get("/usage", httpViews.GetUsageAnalytics)
-					r.Get("/notifications", httpViews.GetNotificationsAnalytics)
+					// r.Get("/usage", httpViews.GetUsageAnalytics)
+					// r.Get("/notifications", httpViews.GetNotificationsAnalytics)
 				})
 				r.Route("/notifications", func(r chi.Router) {
 					r.Get("/", httpViews.GetProjectNotifications)
@@ -111,22 +111,22 @@ func main() {
 				r.Route("/builds", func(r chi.Router) {
 					r.Get("/", httpViews.GetProjectBuilds)
 					r.Post("/", httpViews.CreateProjectBuild)
-					r.Route("{build}", func(r chi.Router) {
+					r.Route("/{buildId}", func(r chi.Router) {
 						r.Get("/", httpViews.GetProjectBuild)
-						r.Post("/", httpViews.SetReleasedBuild)
+						// r.Post("/", httpViews.SetReleasedBuild)
 					})
 				})
 			})
 		})
 		r.Route("/billing", func(r chi.Router) {
 			r.Route("/subscription", func(r chi.Router) {
-				r.Get("/", httpViews.GetSubscription)
-				r.Put("/", httpViews.UpdateSubscription)
-				r.Delete("/", httpViews.CancelSubscription)
+				// r.Get("/", httpViews.GetSubscription)
+				// r.Put("/", httpViews.UpdateSubscription)
+				// r.Delete("/", httpViews.CancelSubscription)
 			})
 			r.Route("/invoices", func(r chi.Router) {
-				r.Get("/", httpViews.GetInvoices)
-				r.Get("/{invoiceId}", httpViews.GetInvoice)
+				// r.Get("/", httpViews.GetInvoices)
+				// r.Get("/{invoiceId}", httpViews.GetInvoice)
 			})
 		})
 
