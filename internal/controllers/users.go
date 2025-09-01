@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/go-playground/validator/v10"
@@ -11,29 +12,49 @@ import (
 	"github.com/knid/wemob/internal/utils"
 )
 
-func (c *Controller) GetUser(tokenStr string) (*models.User, error) {
+func (c *Controller) GetUserModelById(id string) (*models.User, error) {
+	return c.DB.GetUserById(id)
+}
+
+func (c *Controller) GetUser(tokenStr string) (*responses.UserInformationResponse, error) {
 	token, err := c.DB.GetTokenByToken(tokenStr)
 	if err != nil {
 		return nil, err
 	}
 
-	return &token.User, nil
+	if token.ExpiredAt.Before(time.Now()) {
+		return nil, errors.New("token is expired")
+	}
+
+	userId := token.UserID
+	user, err := c.DB.GetUserById(userId.String())
+	if err != nil {
+		return nil, err
+	}
+
+	return &responses.UserInformationResponse{
+		ID:       user.ID,
+		Name:     user.Name,
+		Email:    user.Email,
+		Photo:    user.Photo,
+		Verified: user.Verified,
+		Provider: user.Provider,
+	}, nil
 }
 
 func (c *Controller) UpdateUser(user *models.User, userUpdateReq requests.UserUpdateRequest) (*responses.UserInformationResponse, error) {
-	if userUpdateReq.Password != userUpdateReq.PasswordCheck {
-		return nil, errors.New("Passwords doesn't match")
-	}
-
 	validate := validator.New(validator.WithRequiredStructEnabled())
-	if err := validate.Struct(userUpdateReq); err != nil {
+	if err := utils.ValidateFunc[requests.UserUpdateRequest](userUpdateReq, validate); err != nil {
 		return nil, err
 	}
 
 	user.Name = userUpdateReq.Name
 	user.Email = userUpdateReq.Email
 	user.Photo = userUpdateReq.Photo
-	user.Password = utils.GetSHA256Hash(userUpdateReq.Password)
+
+	if user.Email != userUpdateReq.Email {
+		user.Verified = false
+	}
 
 	updatedUser, err := c.DB.UpdateUser(user)
 	if err != nil {
@@ -52,13 +73,15 @@ func (c *Controller) UpdateUser(user *models.User, userUpdateReq requests.UserUp
 
 func (c *Controller) RegisterUser(userRegisterReq requests.UserRegisterRequest) (*responses.UserInformationResponse, error) {
 	if userRegisterReq.Password != userRegisterReq.PasswordCheck {
-		return nil, errors.New("Passwords doesn't match")
+		return nil, errors.New("passwords doesn't match")
 	}
 
 	validate := validator.New(validator.WithRequiredStructEnabled())
-	if err := validate.Struct(userRegisterReq); err != nil {
+	if err := utils.ValidateFunc[requests.UserRegisterRequest](userRegisterReq, validate); err != nil {
 		return nil, err
 	}
+
+	fmt.Println(validate.Struct(userRegisterReq))
 
 	user := models.User{
 		Name:     userRegisterReq.Name,
@@ -92,8 +115,8 @@ func (c *Controller) LoginUser(userLoginReq requests.UserLoginRequest) (*respons
 		return nil, err
 	}
 
-	if user.Password != utils.GetSHA256Hash(user.Password) {
-		return nil, errors.New("Password is not correct")
+	if user.Password != utils.GetSHA256Hash(userLoginReq.Password) {
+		return nil, errors.New("password is not correct")
 	}
 
 	tokenStr, err := utils.RandomHex(32)
@@ -101,11 +124,14 @@ func (c *Controller) LoginUser(userLoginReq requests.UserLoginRequest) (*respons
 		return nil, err
 	}
 
+	fmt.Println(user.ID)
 	token := models.Token{
-		User:      *user,
+		User:      user,
+		UserID:    user.ID,
 		String:    tokenStr,
 		ExpiredAt: time.Now().AddDate(0, 0, 14),
 	}
+	fmt.Println(token)
 
 	createdToken, err := c.DB.CreateToken(&token)
 	if err != nil {
@@ -125,7 +151,16 @@ func (c *Controller) DeleteUser(tokenStr string) (*models.User, error) {
 		return nil, err
 	}
 
-	deletedUser, err := c.DB.DeleteUser(user)
+	fmt.Println(user)
+
+	userModel, err := c.DB.GetUserById(user.ID.String())
+	if err != nil {
+		return nil, err
+	}
+
+	fmt.Println(userModel)
+
+	deletedUser, err := c.DB.DeleteUser(userModel)
 	if err != nil {
 		return nil, err
 	}
