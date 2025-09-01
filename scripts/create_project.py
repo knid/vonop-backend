@@ -12,5 +12,5 @@ WEMOB_TEMPLATE_FILES = [
 ]
 
 
-def create_project(app_id: str, app_name: str):
+def create_project(task_id: str, app_id: str, app_name: str):
     pass
