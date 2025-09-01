@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"errors"
 	"os/exec"
 
 	"github.com/go-playground/validator/v10"
@@ -9,8 +10,21 @@ import (
 	"github.com/knid/wemob/internal/responses"
 )
 
-func (c *Controller) GetBuilds(project models.Project) ([]models.Build, error) {
-	return c.DB.GetProjectBuilds(&project)
+func (c *Controller) GetBuilds(project *models.Project) ([]models.Build, error) {
+	return c.DB.GetProjectBuilds(project)
+}
+
+func (c *Controller) GetBuild(user *models.User, id string) (*models.Build, error) {
+	build, err := c.DB.GetProjectBuildById(id)
+	if err != nil {
+		return nil, err
+	}
+
+	if build.Project.User.ID.String() != user.ID.String() {
+		return nil, errors.New("you do not have access this resources")
+	}
+
+	return build, nil
 }
 
 func (c *Controller) CreateBuild(buildCreateReq requests.BuildCreateRequest) (*responses.BuildCreateResponse, error) {
@@ -44,7 +58,7 @@ func (c *Controller) CreateBuild(buildCreateReq requests.BuildCreateRequest) (*r
 		return nil, err
 	}
 
-	cmd := exec.Command("./scripts/create_build.py", createdBuild.ID.String(), createdBuild.Title, project.URL)
+	cmd := exec.Command("./scripts/create_build.py", appBuildTask.ID.String(), createdBuild.ID.String(), createdBuild.Title, project.URL)
 	if err := cmd.Run(); err != nil {
 		return nil, err
 	}
