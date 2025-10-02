@@ -2,14 +2,17 @@ package controllers
 
 import (
 	"errors"
-	"fmt"
 	"time"
 
 	"github.com/go-playground/validator/v10"
+	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/utils"
+	"github.com/slack-go/slack"
+	"github.com/stripe/stripe-go/v82"
+	"github.com/stripe/stripe-go/v82/customer"
 )
 
 func (c *Controller) GetUserModelById(id string) (*models.User, error) {
@@ -81,8 +84,6 @@ func (c *Controller) RegisterUser(userRegisterReq requests.UserRegisterRequest) 
 		return nil, err
 	}
 
-	fmt.Println(validate.Struct(userRegisterReq))
-
 	user := models.User{
 		Name:     userRegisterReq.Name,
 		Email:    userRegisterReq.Email,
@@ -93,6 +94,25 @@ func (c *Controller) RegisterUser(userRegisterReq requests.UserRegisterRequest) 
 	if err != nil {
 		return nil, err
 	}
+
+	params := stripe.CustomerParams{
+		Email: &createdUser.Email,
+		Metadata: map[string]string{
+			"user_id": user.ID.String(),
+		},
+	}
+
+	customer, err := customer.New(&params)
+	createdUser.CustomerID = customer.ID
+	c.DB.UpdateUser(createdUser)
+	if err != nil {
+		return nil, err
+	}
+
+	c.SlackService.Client.PostMessage(
+		constants.SLACK_CHANNEL_ID_NEW_USER,
+		slack.MsgOptionText("New registered user: "+user.Email, false),
+	)
 
 	return &responses.UserInformationResponse{
 		ID:       createdUser.ID,
@@ -124,14 +144,12 @@ func (c *Controller) LoginUser(userLoginReq requests.UserLoginRequest) (*respons
 		return nil, err
 	}
 
-	fmt.Println(user.ID)
 	token := models.Token{
 		User:      user,
 		UserID:    user.ID,
 		String:    tokenStr,
 		ExpiredAt: time.Now().AddDate(0, 0, 14),
 	}
-	fmt.Println(token)
 
 	createdToken, err := c.DB.CreateToken(&token)
 	if err != nil {
@@ -151,14 +169,10 @@ func (c *Controller) DeleteUser(tokenStr string) (*models.User, error) {
 		return nil, err
 	}
 
-	fmt.Println(user)
-
 	userModel, err := c.DB.GetUserById(user.ID.String())
 	if err != nil {
 		return nil, err
 	}
-
-	fmt.Println(userModel)
 
 	deletedUser, err := c.DB.DeleteUser(userModel)
 	if err != nil {

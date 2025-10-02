@@ -15,9 +15,16 @@ func (db *Database) GetProjectBuilds(project *models.Project) ([]models.Build, e
 	return builds, err
 }
 
-func (db *Database) GetActiveProjectBuild(project *models.Project) (*models.Build, error) {
+func (db *Database) GetBuildsByUserId(userId string) ([]models.Build, error) {
+	var builds []models.Build
+	err := db.DB.NewSelect().Model(&builds).Join("JOIN projects ON projects.id = builds.project_id").Where("projects.user_id = ?", userId).Scan(context.Background())
+
+	return builds, err
+}
+
+func (db *Database) GetLastProjectBuild(project *models.Project) (*models.Build, error) {
 	var activeBuild models.Build
-	err := db.DB.NewSelect().Model(&activeBuild).Where("project_id = ? AND active = true", project.ID.String()).Scan(context.Background())
+	err := db.DB.NewSelect().Model(&activeBuild).Where("project_id = ?", project.ID.String()).Order("created_at DESC").Limit(1).Scan(context.Background())
 
 	return &activeBuild, err
 }

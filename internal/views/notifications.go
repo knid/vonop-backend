@@ -2,8 +2,10 @@ package views
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/utils"
 )
@@ -25,6 +27,11 @@ func (v *HttpViews) GetProjectNotifications(w http.ResponseWriter, r *http.Reque
 	user, err := v.Controller.GetUserModelById(userInformationRes.ID.String())
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	if !(user.SubscriptionStatus == "active" || user.SubscriptionStatus == "trial") {
+		utils.JSONErrorResponse(w, "you do not have access to this resource", http.StatusForbidden)
 		return
 	}
 
@@ -50,14 +57,77 @@ func (v *HttpViews) GetProjectNotifications(w http.ResponseWriter, r *http.Reque
 }
 
 func (v *HttpViews) SendProjectNotification(w http.ResponseWriter, r *http.Request) {
-	tokenstring, err := utils.ExtractTokenFromHeader(r)
+	tokenString, err := utils.ExtractTokenFromHeader(r)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
 		return
 	}
-	user, err := v.Controller.GetUserModelById(tokenstring)
+
+	userInformationRes, err := v.Controller.GetUser(tokenString)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	user, err := v.Controller.GetUserModelById(userInformationRes.ID.String())
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	if !(user.SubscriptionStatus == "active" || user.SubscriptionStatus == "trial") {
+		utils.JSONErrorResponse(w, "you do not have access to this resource", http.StatusForbidden)
+		return
+	}
+
+	var notifications []models.Notification
+	projects, err := v.Controller.GetProjects(user)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	for _, project := range projects {
+		projectNotifications, err := v.Controller.GetNotifications(project.ID.String())
+		if err != nil {
+			continue
+		}
+
+		notifications = append(notifications, projectNotifications...)
+	}
+
+	subsStart := user.SubscriptionStartAt
+	now := time.Now()
+
+	renewStart := time.Date(now.Year(), now.Month(), subsStart.Day(), 0, 0, 0, 0, now.Location())
+
+	if now.Before(renewStart) {
+		renewStart = renewStart.AddDate(0, -1, 0)
+	}
+
+	renewEnd := renewStart.AddDate(0, 1, 0)
+
+	count := 0
+	for _, notification := range notifications {
+		if notification.CreatedAt.After(renewStart) && notification.CreatedAt.Before(renewEnd) {
+			count++
+		}
+	}
+
+	subsInfo, err := v.Controller.GetSubscription(user)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	limits, err := v.Controller.DB.GetStandartUserLimitsById(subsInfo.Limits.ID.String())
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if count >= limits.MontlyNotificationCount {
+		utils.JSONErrorResponse(w, "you have reached your monthly notification limit", http.StatusForbidden)
 		return
 	}
 

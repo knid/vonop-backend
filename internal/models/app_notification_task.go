@@ -8,7 +8,7 @@ import (
 
 type AppNotificationTask struct {
 	ID             uuid.UUID    `bun:",pk,type:uuid,default:uuid_generate_v4()"`
-	NotificationID uuid.UUID    `bun:",notnull,unique,type:uuid"`
+	NotificationID uuid.UUID    `bun:",notnull,type:uuid"`
 	Notification   Notification `bun:"rel:belongs-to,join:notification_id=id"`
 	Finished       bool         `bun:",notnull"`
 	ExecuteTime    time.Time    `bun:",nullzero,notnull,default:current_timestamp"`

@@ -1,20 +1,22 @@
 package responses
 
-import "github.com/google/uuid"
+import (
+	"time"
+
+	"github.com/google/uuid"
+)
 
 type ProjectInformationResponse struct {
-	ID            uuid.UUID `json:"id"`
-	Title         string    `json:"title"`
-	Description   string    `json:"description"`
-	Icon          string    `json:"icon"`
-	Version       int       `json:"version"`
-	URL           string    `json:"url"`
-	PackageName   string    `json:"package_name"`
-	ActiveBuildID uuid.UUID `json:"active_build"`
+	ID          uuid.UUID `json:"id"`
+	Title       string    `json:"title"`
+	Description string    `json:"description"`
+	URL         string    `json:"url"`
+	PackageName string    `json:"package_name"`
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 type ProjectListResponse struct {
-	ProjectList []*ProjectInformationResponse `json:"project_list"`
+	ProjectList []ProjectInformationResponse `json:"project_list"`
 }
 
 type ProjectCreateResponse struct {

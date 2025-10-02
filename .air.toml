@@ -3,3 +3,4 @@ root = "."
 [build]
 cmd = "make build"
 bin = "bin/app"
+exclude_dir = ["projects", "mobile"]
