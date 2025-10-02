@@ -11,10 +11,11 @@ type StandartUserLimits struct {
 	MaximumProjectCount     int       `bun:",notnull"`
 	MontlyNotificationCount int       `bun:",notnull"`
 	MontlyBuildCount        int       `bun:",notnull"`
-	CanDeployToAndroid      bool      `bun:",notnull"`
-	CanDeployToIOS          bool      `bun:",notnull"`
+	CanBuildToAndroid       bool      `bun:",notnull"`
+	CanBuildToIOS           bool      `bun:",notnull"`
 	CanUseAnalytics         bool      `bun:",notnull"`
 	CanRemoveBrandLogo      bool      `bun:",notnull"`
+	CanSeeActiveUsers       bool      `bun:",notnull"`
 	CreatedAt               time.Time `bun:",nullzero,notnull,default:current_timestamp"`
 	UpdatedAt               time.Time `bun:",nullzero,notnull,default:current_timestamp"`
 	DeletedAt               time.Time `bun:",soft_delete,nullzero"`

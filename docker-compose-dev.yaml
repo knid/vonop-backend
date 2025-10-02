@@ -7,13 +7,8 @@ services:
       - .:/app
     ports:
       - "8001:8001"
-    environment:
-      - PORT=8000
-      - DB_HOST=db
-      - DB_PORT=5432
-      - DB_USER=user
-      - DB_PASSWORD=pass123
-      - DB_NAME=wemob
+    env_file:
+      - ./.env.dev
     depends_on:
       - db
 
@@ -27,13 +22,6 @@ services:
       - db_data:/var/lib/postgresql/data
     ports:
       - "5432:5432"
-
-  redis:
-    image: redis:6
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
 
 volumes:
   db_data:

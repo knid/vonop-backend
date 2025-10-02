@@ -29,15 +29,36 @@ func (db *Database) GetAppNotificationTaskById(id string) (*models.AppNotificati
 }
 
 func (db *Database) CreateAppBuildTask(build models.Build) (*models.AppBuildTask, error) {
-	appBuildTask := models.AppBuildTask{Build: build}
+	appBuildTask := models.AppBuildTask{BuildID: build.ID, ProjectID: build.ProjectID}
 	_, err := db.DB.NewInsert().Model(&appBuildTask).Exec(context.Background())
 
 	return &appBuildTask, err
 }
 
-func (db *Database) GetAppBuildTasks(build models.Build) ([]models.AppBuildTask, error) {
+func (db *Database) GetAppBuildTasksByUser(user *models.User) ([]models.AppBuildTask, error) {
+	projects, err := db.GetProjects(user)
+	if err != nil {
+		return nil, err
+	}
+
 	var appBuildTasks []models.AppBuildTask
-	err := db.DB.NewSelect().Model(&appBuildTasks).Where("build_id = ?", build.ID.String()).Scan(context.Background())
+	for _, project := range projects {
+		appBuildTask, err := db.GetAppBuildTaskByProject(&project)
+		if err != nil {
+			return nil, err
+		}
+		appBuildTasks = append(appBuildTasks, appBuildTask...)
+	}
+
+	return appBuildTasks, nil
+}
+
+func (db *Database) GetPendingAppBuildTasks(project *models.Project) ([]models.AppBuildTask, error) {
+	var appBuildTasks []models.AppBuildTask
+	err := db.DB.NewSelect().Model(&appBuildTasks).
+		Where("project_id = ?", project.ID.String()).
+		Where("finished = false").
+		Scan(context.Background())
 
 	return appBuildTasks, err
 }
@@ -47,6 +68,13 @@ func (db *Database) GetAppBuildTaskById(id string) (*models.AppBuildTask, error)
 	err := db.DB.NewSelect().Model(&appBuildTask).WherePK().Scan(context.Background())
 
 	return &appBuildTask, err
+}
+
+func (db *Database) GetAppBuildTaskByProject(project *models.Project) ([]models.AppBuildTask, error) {
+	var appBuildTasks []models.AppBuildTask
+	err := db.DB.NewSelect().Model(&appBuildTasks).Where("project_id = ?", project.ID).Scan(context.Background())
+
+	return appBuildTasks, err
 }
 
 func (db *Database) CreateAppReleaseTask(release models.Release) (*models.AppReleaseTask, error) {

@@ -15,7 +15,7 @@ func (db *Database) GetProjects(user *models.User) ([]models.Project, error) {
 
 func (db *Database) GetProjectById(id string) (*models.Project, error) {
 	var project models.Project
-	err := db.DB.NewSelect().Model(&project).WherePK(id).Scan(context.Background())
+	err := db.DB.NewSelect().Model(&project).Where("id = ?", id).Scan(context.Background())
 
 	return &project, err
 }

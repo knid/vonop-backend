@@ -8,7 +8,7 @@ import (
 
 type Build struct {
 	ID                uuid.UUID `bun:",pk,type:uuid,default:uuid_generate_v4()"`
-	ProjectID         uuid.UUID `bun:",notnull,unique,type:uuid"`
+	ProjectID         uuid.UUID `bun:",notnull,type:uuid"`
 	Project           Project   `bun:"rel:belongs-to,join:project_id=id"`
 	Active            bool      `bun:",notnull"`
 	Title             string    `bun:",notnull"`

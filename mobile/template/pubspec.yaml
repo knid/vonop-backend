@@ -1,0 +1,36 @@
+name: template # {{ PROJECT_NAME }}
+description: "{{ PROJECT_DESCRIPTION }}"
+publish_to: 'none' 
+version: 1.0.0+1 # {{ PROJECT_VERSION }}+1
+
+environment:
+  sdk: ^3.9.2
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  webview_flutter: ^4.13.0
+  webview_flutter_wkwebview: ^3.23.0
+  url_launcher: ^6.3.2
+  onesignal_flutter: ^5.3.4
+  http: ^1.2.2
+  shared_preferences: ^2.3.1
+  uuid: ^4.4.2
+  device_info_plus: ^11.0.0
+  package_info_plus: ^8.0.0
+  flutter_launcher_icons: ^0.14.4
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+  change_app_package_name: ^1.5.0
+
+flutter:
+  uses-material-design: true
+
+  # To add assets to your application, add an assets section, like this:
+  # assets:
+  #   - images/a_dot_burr.jpeg
+  #   - images/a_dot_ham.jpeg

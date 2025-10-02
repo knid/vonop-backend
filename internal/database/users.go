@@ -64,8 +64,9 @@ func (db *Database) DeleteToken(token *models.Token) error {
 	return err
 }
 
-// TODO:
-//
-// GetSubs
-// SetSubs
-// DeleteSubs
+func (db *Database) GetUserByStripeCustomerID(customerID string) (*models.User, error) {
+	var user models.User
+	err := db.DB.NewSelect().Model(&user).Where("customer_id = ?", customerID).Scan(context.Background())
+
+	return &user, err
+}

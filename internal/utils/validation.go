@@ -27,7 +27,7 @@ func errorTagFunc[T interface{}](obj interface{}, snp string, fieldname string) 
 			if fieldArr[i] == fieldname {
 				customMessage := field.Tag.Get(tagCustom)
 				if customMessage != "" {
-					return fmt.Errorf("%s: %s", strings.ToLower(fieldname), customMessage)
+					return fmt.Errorf("%s: %s", field.Tag.Get("json"), customMessage)
 				}
 				return nil
 			} else {

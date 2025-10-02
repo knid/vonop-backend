@@ -2,12 +2,16 @@ package controllers
 
 import (
 	"errors"
+	"fmt"
+	"os"
 	"os/exec"
 
 	"github.com/go-playground/validator/v10"
+	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/responses"
+	"github.com/slack-go/slack"
 )
 
 func (c *Controller) GetBuilds(project *models.Project) ([]models.Build, error) {
@@ -38,8 +42,18 @@ func (c *Controller) CreateBuild(buildCreateReq requests.BuildCreateRequest) (*r
 		return nil, err
 	}
 
+	pendingTasks, err := c.DB.GetPendingAppBuildTasks(project)
+	fmt.Println("Pending tasks:", pendingTasks)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(pendingTasks) > 0 {
+		return nil, errors.New("you have a pending build task. Please wait until it is finished")
+	}
+
 	build := models.Build{
-		Project:           *project,
+		ProjectID:         project.ID,
 		Active:            false,
 		Title:             buildCreateReq.Title,
 		Description:       buildCreateReq.Description,
@@ -58,7 +72,44 @@ func (c *Controller) CreateBuild(buildCreateReq requests.BuildCreateRequest) (*r
 		return nil, err
 	}
 
-	cmd := exec.Command("./scripts/create_build.py", appBuildTask.ID.String(), createdBuild.ID.String(), createdBuild.Title, project.URL)
+	// Create template project
+	// Make build
+	// Release the new build
+
+	cmd := exec.Command("python3", "scripts/create_build.py")
+	cmd.Args = append(cmd.Args, "--build-task-id", appBuildTask.ID.String())
+	cmd.Args = append(cmd.Args, "--build-id", createdBuild.ID.String())
+	cmd.Args = append(cmd.Args, "--title", createdBuild.Title)
+	cmd.Args = append(cmd.Args, "--url", project.URL)
+	cmd.Args = append(cmd.Args, "--icon", createdBuild.Icon)
+	cmd.Args = append(cmd.Args, "--sscolor", createdBuild.SplashScreenColor)
+
+	if project.BuildForAndroid {
+		cmd.Args = append(cmd.Args, "--build-android")
+		if project.UseAutoDeployForAndroid {
+			c.SlackService.Client.PostMessage(
+				constants.SLACK_CHANNEL_ID_NEW_ANDROID_DEPLOY_REQUEST,
+				slack.MsgOptionText("New android deploy request: ("+project.URL+") "+createdBuild.ID.String(), false),
+			)
+		}
+	}
+
+	if project.BuildForIOS {
+		c.SlackService.Client.PostMessage(
+			constants.SLACK_CHANNEL_ID_NEW_IOS_BUILD_REQUEST,
+			slack.MsgOptionText("New ios build request: ("+project.URL+"), ("+project.UserAppleTeamID+") "+createdBuild.ID.String(), false),
+		)
+
+		if project.UseAutoDeployForIOS {
+			c.SlackService.Client.PostMessage(
+				constants.SLACK_CHANNEL_ID_NEW_IOS_DEPLOY_REQUEST,
+				slack.MsgOptionText("New ios deploy request: ("+project.URL+"), ("+project.UserAppleTeamID+") "+createdBuild.ID.String(), false),
+			)
+		}
+	}
+
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
 		return nil, err
 	}

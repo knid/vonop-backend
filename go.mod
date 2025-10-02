@@ -14,6 +14,13 @@ require (
 )
 
 require (
+	github.com/go-chi/cors v1.2.2 // indirect
+	github.com/gorilla/websocket v1.5.3 // indirect
+	github.com/slack-go/slack v0.17.3 // indirect
+	github.com/stripe/stripe-go/v82 v82.5.1 // indirect
+)
+
+require (
 	github.com/fatih/color v1.18.0 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.8 // indirect
 	github.com/go-playground/locales v0.14.1 // indirect

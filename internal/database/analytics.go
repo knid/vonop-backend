@@ -24,3 +24,30 @@ func (db *Database) UpdateAppUsageEvent(appUsageEvent models.AppUsageEvent) (*mo
 
 	return &appUsageEvent, err
 }
+
+func (db *Database) GetDeviceById(deviceId string) (models.Device, error) {
+	var device models.Device
+	err := db.DB.NewSelect().Model(&device).Where("id = ?", deviceId).Scan(context.Background())
+
+	return device, err
+}
+
+func (db *Database) GetDeviceByToken(token string) (models.Device, error) {
+	var device models.Device
+	err := db.DB.NewSelect().Model(&device).Where("token = ?", token).Scan(context.Background())
+
+	return device, err
+}
+
+func (db *Database) CreateDevice(device *models.Device) (*models.Device, error) {
+	_, err := db.DB.NewInsert().Model(device).Exec(context.Background())
+
+	return device, err
+}
+
+func (db *Database) GetDevicesByProject(project *models.Project) ([]models.Device, error) {
+	var devices []models.Device
+	err := db.DB.NewSelect().Model(&devices).Where("project_id = ?", project.ID.String()).Scan(context.Background())
+
+	return devices, err
+}

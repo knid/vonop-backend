@@ -6,12 +6,15 @@ import (
 	"context"
 	"database/sql"
 	"net/http"
+	"os"
 
 	"github.com/go-chi/chi/middleware"
 	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/cors"
 	"github.com/knid/wemob/internal/controllers"
 	"github.com/knid/wemob/internal/database"
 	"github.com/knid/wemob/internal/models"
+	"github.com/knid/wemob/internal/services"
 	"github.com/knid/wemob/internal/views"
 
 	_ "github.com/lib/pq"
@@ -21,6 +24,8 @@ import (
 	"github.com/uptrace/bun/driver/pgdriver"
 
 	"github.com/uptrace/bun/extra/bundebug"
+
+	"github.com/stripe/stripe-go/v82"
 )
 
 func createSchema(db *bun.DB) error {
@@ -69,7 +74,12 @@ func main() {
 	createSchema(bundb)
 
 	db := database.NewDatabase(bundb)
-	controller := controllers.NewController(db)
+	controller := controllers.NewController(
+		db,
+		services.NewSlackService("TOKEN"),
+	)
+
+	stripe.Key = os.Getenv("STRIPE_API_KEY")
 
 	httpViews := views.HttpViews{
 		Controller: controller,
@@ -77,60 +87,81 @@ func main() {
 
 	r := chi.NewRouter()
 
+	r.Use(cors.Handler(cors.Options{
+		// AllowedOrigins:   []string{"https://foo.com"}, // Use this to allow specific origin hosts
+		AllowedOrigins: []string{"https://*", "http://*"},
+		// AllowOriginFunc:  func(r *http.Request, origin string) bool { return true },
+		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token"},
+		ExposedHeaders:   []string{"Link"},
+		AllowCredentials: false,
+		MaxAge:           300, // Maximum value not ignored by any of major browsers
+	}))
 	r.Use(middleware.Logger)
 
-	r.Route("/v1", func(r chi.Router) {
-		r.Route("/users", func(r chi.Router) {
-			r.Get("/me", httpViews.GetUser)
-			r.Put("/me", httpViews.UpdateUser)
-			r.Delete("/me", httpViews.DeleteUser)
-
-			r.Post("/login", httpViews.UserLogin)
-			r.Post("/register", httpViews.UserRegister)
-			r.Post("/forgot-password", httpViews.UserForgotPassword)
-			r.Post("/reset-password", httpViews.UserResetPassword)
-			r.Post("/verify-email", httpViews.UserVerifyEmail)
-			r.Post("/resend-verifaction", httpViews.UserResendVerifactionEmail)
+	r.Route("/", func(r chi.Router) {
+		r.Route("/webhooks", func(r chi.Router) {
+			r.Post("/stripe", httpViews.Controller.HandleWebhook)
 		})
-		r.Route("/projects", func(r chi.Router) {
-			r.Get("/", httpViews.GetProjects)
-			r.Post("/", httpViews.CreateProject)
-			r.Route("/{projectId}", func(r chi.Router) {
-				r.Get("/", httpViews.GetProject)
-				r.Delete("/", httpViews.DeleteProject)
-				r.Route("/analytics", func(r chi.Router) {
-					// TODO: Make more detailed analytics endpoints
-					// r.Get("/usage", httpViews.GetUsageAnalytics)
-					// r.Get("/notifications", httpViews.GetNotificationsAnalytics)
-				})
-				r.Route("/notifications", func(r chi.Router) {
-					r.Get("/", httpViews.GetProjectNotifications)
-					r.Post("/", httpViews.SendProjectNotification)
-					r.Get("/{notificationId}", httpViews.GetProjectNotification)
-				})
-				r.Route("/builds", func(r chi.Router) {
-					r.Get("/", httpViews.GetProjectBuilds)
-					r.Post("/", httpViews.CreateProjectBuild)
-					r.Route("/{buildId}", func(r chi.Router) {
-						r.Get("/", httpViews.GetProjectBuild)
-						// r.Post("/", httpViews.SetReleasedBuild)
+		r.Route("/v1", func(r chi.Router) {
+			r.Route("/users", func(r chi.Router) {
+				r.Get("/me", httpViews.GetUser)
+				r.Put("/me", httpViews.UpdateUser)
+				r.Delete("/me", httpViews.DeleteUser)
+
+				r.Post("/login", httpViews.UserLogin)
+				r.Post("/register", httpViews.UserRegister)
+				r.Post("/forgot-password", httpViews.UserForgotPassword)
+				r.Post("/reset-password", httpViews.UserResetPassword)
+				r.Post("/verify-email", httpViews.UserVerifyEmail)
+				r.Post("/resend-verifaction", httpViews.UserResendVerifactionEmail)
+			})
+			r.Get("/tasks", httpViews.GetAllTasks)
+			r.Route("/projects", func(r chi.Router) {
+				r.Get("/", httpViews.GetProjects)
+				r.Post("/", httpViews.CreateProject)
+				r.Route("/{projectId}", func(r chi.Router) {
+					r.Get("/", httpViews.GetProject)
+					r.Delete("/", httpViews.DeleteProject)
+					r.Route("/analytics", func(r chi.Router) {
+						r.Route("/events", func(r chi.Router) {
+							r.Post("/", httpViews.LogAppEvent)
+						})
+						r.Get("/devices", httpViews.GetDevices)
+						r.Get("/active-users", httpViews.GetActiveUsers)
+						r.Get("/unique-users", httpViews.GetUniqueUsers)
+					})
+					r.Route("/notifications", func(r chi.Router) {
+						r.Get("/", httpViews.GetProjectNotifications)
+						r.Post("/", httpViews.SendProjectNotification)
+						r.Get("/{notificationId}", httpViews.GetProjectNotification)
+					})
+					r.Route("/builds", func(r chi.Router) {
+						r.Get("/", httpViews.GetProjectBuilds)
+						r.Post("/", httpViews.CreateProjectBuild)
+						r.Route("/{buildId}", func(r chi.Router) {
+							r.Get("/", httpViews.GetProjectBuild)
+							// r.Post("/", httpViews.SetReleasedBuild)
+						})
 					})
 				})
 			})
-		})
-		r.Route("/billing", func(r chi.Router) {
-			r.Route("/subscription", func(r chi.Router) {
-				// r.Get("/", httpViews.GetSubscription)
-				// r.Put("/", httpViews.UpdateSubscription)
-				// r.Delete("/", httpViews.CancelSubscription)
+			r.Route("/billing", func(r chi.Router) {
+				r.Get("/checkout", httpViews.StripeCheckout)
+				r.Route("/subscription", func(r chi.Router) {
+					r.Get("/", httpViews.GetSubscription)
+					r.Put("/", httpViews.UpdateSubscription)
+					r.Delete("/", httpViews.CancelSubscription)
+					r.Get("/limits", httpViews.GetLimits)
+				})
+				r.Route("/invoices", func(r chi.Router) {
+					// r.Get("/", httpViews.GetInvoices)
+					// r.Get("/{invoiceId}", httpViews.GetInvoice)
+				})
 			})
-			r.Route("/invoices", func(r chi.Router) {
-				// r.Get("/", httpViews.GetInvoices)
-				// r.Get("/{invoiceId}", httpViews.GetInvoice)
-			})
-		})
 
-		r.Get("/health", httpViews.Health)
+			r.Get("/health", httpViews.Health)
+		})
 	})
 
 	http.ListenAndServe(":8001", r)
