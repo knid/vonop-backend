@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"net/http"
 	"os"
+	"path/filepath"
 
 	"github.com/go-chi/chi/middleware"
 	"github.com/go-chi/chi/v5"
@@ -31,6 +32,7 @@ import (
 func createSchema(db *bun.DB) error {
 	models := []interface{}{
 		(*models.User)(nil),
+		(*models.UserNotifications)(nil),
 		(*models.Token)(nil),
 		(*models.StandartUserLimits)(nil),
 		(*models.StandartUserSubscription)(nil),
@@ -76,7 +78,7 @@ func main() {
 	db := database.NewDatabase(bundb)
 	controller := controllers.NewController(
 		db,
-		services.NewSlackService("TOKEN"),
+		services.NewSlackService("xoxb-9493000015029-9630636941798-kl16e3RRBmPKqDxOSDlCt1WP"),
 	)
 
 	stripe.Key = os.Getenv("STRIPE_API_KEY")
@@ -84,6 +86,9 @@ func main() {
 	httpViews := views.HttpViews{
 		Controller: controller,
 	}
+
+	workDir, _ := os.Getwd()
+	staticDir := http.Dir(filepath.Join(workDir, "storage/public"))
 
 	r := chi.NewRouter()
 
@@ -104,10 +109,15 @@ func main() {
 			r.Post("/stripe", httpViews.Controller.HandleWebhook)
 		})
 		r.Route("/v1", func(r chi.Router) {
+			r.Handle("/static/*", http.StripPrefix("/v1/static/", http.FileServer(staticDir)))
+			r.Get("/check/{projectId}", httpViews.CheckStatus)
 			r.Route("/users", func(r chi.Router) {
 				r.Get("/me", httpViews.GetUser)
 				r.Put("/me", httpViews.UpdateUser)
 				r.Delete("/me", httpViews.DeleteUser)
+
+				r.Get("/notifications", httpViews.GetUserNotifications)
+				r.Get("/notifications/{userNotificationId}", httpViews.GetUserNotification)
 
 				r.Post("/login", httpViews.UserLogin)
 				r.Post("/register", httpViews.UserRegister)
