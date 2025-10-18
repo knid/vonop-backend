@@ -17,7 +17,21 @@ func (db *Database) GetProjectBuilds(project *models.Project) ([]models.Build, e
 
 func (db *Database) GetBuildsByUserId(userId string) ([]models.Build, error) {
 	var builds []models.Build
-	err := db.DB.NewSelect().Model(&builds).Join("JOIN projects ON projects.id = builds.project_id").Where("projects.user_id = ?", userId).Scan(context.Background())
+	user, err := db.GetUserById(userId)
+	if err != nil {
+		return nil, err
+	}
+	projects, err := db.GetProjects(user)
+	if err != nil {
+		return nil, err
+	}
+	for _, project := range projects {
+		projectBuilds, err := db.GetProjectBuilds(&project)
+		if err != nil {
+			return nil, err
+		}
+		builds = append(builds, projectBuilds...)
+	}
 
 	return builds, err
 }
@@ -32,7 +46,7 @@ func (db *Database) GetLastProjectBuild(project *models.Project) (*models.Build,
 func (db *Database) GetProjectBuildById(id string) (*models.Build, error) {
 	var build models.Build
 	build.ID = uuid.MustParse(id)
-	err := db.DB.NewSelect().Model(&build).WherePK().Scan(context.Background())
+	err := db.DB.NewSelect().Model(&build).Where("id = ?", id).Scan(context.Background())
 
 	return &build, err
 }

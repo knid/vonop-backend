@@ -1,8 +1,11 @@
 package controllers
 
 import (
+	"database/sql"
 	"errors"
 	"fmt"
+	"log"
+	"log/slog"
 	"os"
 	"os/exec"
 
@@ -11,24 +14,61 @@ import (
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/responses"
+	"github.com/knid/wemob/internal/utils"
 	"github.com/slack-go/slack"
 )
 
-func (c *Controller) GetBuilds(project *models.Project) ([]models.Build, error) {
-	return c.DB.GetProjectBuilds(project)
+func (c *Controller) GetBuilds(project *models.Project) ([]responses.BuildInformationResponse, error) {
+	var projectInformationResponses []responses.BuildInformationResponse
+
+	builds, err := c.DB.GetProjectBuilds(project)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, build := range builds {
+		buildInformationResponse := responses.BuildInformationResponse{
+			ID:                  build.ID,
+			Title:               build.Title,
+			Description:         build.Description,
+			Icon:                build.Icon,
+			SplashScreenColor:   build.SplashScreenColor,
+			RemoveWemobBranding: build.RemoveWemobBranding,
+			BuildNumber:         build.BuildNumber,
+			CreatedAt:           build.CreatedAt,
+		}
+		projectInformationResponses = append(projectInformationResponses, buildInformationResponse)
+	}
+	return projectInformationResponses, nil
 }
 
-func (c *Controller) GetBuild(user *models.User, id string) (*models.Build, error) {
+func (c *Controller) GetBuild(user *models.User, id string) (*responses.BuildInformationResponse, error) {
 	build, err := c.DB.GetProjectBuildById(id)
 	if err != nil {
 		return nil, err
 	}
 
-	if build.Project.User.ID.String() != user.ID.String() {
+	project, err := c.DB.GetProjectById(build.ProjectID.String())
+	if err != nil {
+		return nil, err
+	}
+
+	if project.UserID.String() != user.ID.String() {
 		return nil, errors.New("you do not have access this resources")
 	}
 
-	return build, nil
+	buildInformationResponse := responses.BuildInformationResponse{
+		ID:                  build.ID,
+		Title:               build.Title,
+		Description:         build.Description,
+		Icon:                build.Icon,
+		SplashScreenColor:   build.SplashScreenColor,
+		RemoveWemobBranding: build.RemoveWemobBranding,
+		BuildNumber:         build.BuildNumber,
+		CreatedAt:           build.CreatedAt,
+	}
+
+	return &buildInformationResponse, nil
 }
 
 func (c *Controller) CreateBuild(buildCreateReq requests.BuildCreateRequest) (*responses.BuildCreateResponse, error) {
@@ -52,14 +92,23 @@ func (c *Controller) CreateBuild(buildCreateReq requests.BuildCreateRequest) (*r
 		return nil, errors.New("you have a pending build task. Please wait until it is finished")
 	}
 
+	var lastBuildNumber int
+	lastBuild, err := c.DB.GetLastProjectBuild(project)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		lastBuildNumber = 0
+	} else {
+		lastBuildNumber = lastBuild.BuildNumber
+	}
+
 	build := models.Build{
-		ProjectID:         project.ID,
-		Active:            false,
-		Title:             buildCreateReq.Title,
-		Description:       buildCreateReq.Description,
-		Icon:              buildCreateReq.Icon,
-		SplashScreenColor: buildCreateReq.SplashScreenColor,
-		BuildNumber:       1,
+		ProjectID:           project.ID,
+		Active:              false,
+		Title:               buildCreateReq.Title,
+		Description:         buildCreateReq.Description,
+		SplashScreenColor:   buildCreateReq.SplashScreenColor,
+		RemoveWemobBranding: buildCreateReq.RemoveWemobBranding,
+		BuildNumber:         lastBuildNumber + 1,
+		VersionString:       utils.CreateVersionString(lastBuildNumber + 1),
 	}
 
 	createdBuild, err := c.DB.CreateProjectBuild(&build)
@@ -67,9 +116,19 @@ func (c *Controller) CreateBuild(buildCreateReq requests.BuildCreateRequest) (*r
 		return nil, err
 	}
 
-	appBuildTask, err := c.DB.CreateAppBuildTask(*createdBuild)
-	if err != nil {
-		return nil, err
+	if len(buildCreateReq.Icon) < 256 && /* strings.Contains(buildCreateReq.Icon, "wemob.io") && */ project.IconPath != "" {
+
+	} else {
+		_, err = utils.ConvertBase64ToImageSave(buildCreateReq.Icon, "icons/"+createdBuild.ID.String())
+		if err != nil {
+			return nil, err
+		}
+		project.IconPath = createdBuild.ID.String() + ".png"
+
+		_, err = c.DB.UpdateProject(project)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// Create template project
@@ -77,17 +136,27 @@ func (c *Controller) CreateBuild(buildCreateReq requests.BuildCreateRequest) (*r
 	// Release the new build
 
 	cmd := exec.Command("python3", "scripts/create_build.py")
-	cmd.Args = append(cmd.Args, "--build-task-id", appBuildTask.ID.String())
+	cmd.Args = append(cmd.Args, "--project-id", project.ID.String())
 	cmd.Args = append(cmd.Args, "--build-id", createdBuild.ID.String())
 	cmd.Args = append(cmd.Args, "--title", createdBuild.Title)
 	cmd.Args = append(cmd.Args, "--url", project.URL)
-	cmd.Args = append(cmd.Args, "--icon", createdBuild.Icon)
+	cmd.Args = append(cmd.Args, "--icon", project.IconPath)
 	cmd.Args = append(cmd.Args, "--sscolor", createdBuild.SplashScreenColor)
-
+	cmd.Args = append(cmd.Args, "--onesignal-app-id", project.OneSignalAppID)
+	cmd.Args = append(cmd.Args, "--package-name", project.PackageName)
+	if createdBuild.RemoveWemobBranding {
+		cmd.Args = append(cmd.Args, "--remove-wemob-branding")
+	}
 	if project.BuildForAndroid {
+		appBuildTask, err := c.DB.CreateAppBuildTask(*createdBuild, "Android", "Building", project.UseAutoDeployForAndroid)
+		if err != nil {
+			return nil, err
+		}
+		cmd.Args = append(cmd.Args, "--build-task-id", appBuildTask.ID.String())
+
 		cmd.Args = append(cmd.Args, "--build-android")
 		if project.UseAutoDeployForAndroid {
-			c.SlackService.Client.PostMessage(
+			go c.SlackService.Client.PostMessage(
 				constants.SLACK_CHANNEL_ID_NEW_ANDROID_DEPLOY_REQUEST,
 				slack.MsgOptionText("New android deploy request: ("+project.URL+") "+createdBuild.ID.String(), false),
 			)
@@ -95,13 +164,17 @@ func (c *Controller) CreateBuild(buildCreateReq requests.BuildCreateRequest) (*r
 	}
 
 	if project.BuildForIOS {
-		c.SlackService.Client.PostMessage(
+		_, err := c.DB.CreateAppBuildTask(*createdBuild, "IOS", "Reviewing", project.UseAutoDeployForIOS)
+		if err != nil {
+			return nil, err
+		}
+		go c.SlackService.Client.PostMessage(
 			constants.SLACK_CHANNEL_ID_NEW_IOS_BUILD_REQUEST,
 			slack.MsgOptionText("New ios build request: ("+project.URL+"), ("+project.UserAppleTeamID+") "+createdBuild.ID.String(), false),
 		)
 
 		if project.UseAutoDeployForIOS {
-			c.SlackService.Client.PostMessage(
+			go c.SlackService.Client.PostMessage(
 				constants.SLACK_CHANNEL_ID_NEW_IOS_DEPLOY_REQUEST,
 				slack.MsgOptionText("New ios deploy request: ("+project.URL+"), ("+project.UserAppleTeamID+") "+createdBuild.ID.String(), false),
 			)
@@ -110,12 +183,17 @@ func (c *Controller) CreateBuild(buildCreateReq requests.BuildCreateRequest) (*r
 
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return nil, err
-	}
+
+	go func() {
+		c.ConcurrentBuildLimiter <- struct{}{}
+		defer func() { <-c.ConcurrentBuildLimiter }()
+		if err := cmd.Run(); err != nil {
+			log.Println(err)
+			slog.Error("Build process failed", slog.String("build_id", createdBuild.ID.String()), slog.String("error", err.Error()))
+		}
+	}()
 
 	return &responses.BuildCreateResponse{
 		SuccessResponse: responses.SuccessResponse{Success: true},
-		TaskID:          appBuildTask.ID,
 	}, nil
 }
