@@ -13,13 +13,13 @@ import 'navigation_helper.dart';
 import 'utils.dart';
 
 const String analyticsBaseUrl = "https://api.wemob.io";
-const String analyticsProjectId = "WEMOB_PROJECT_ID";
+const String analyticsProjectId = "{{ WEMOB_PROJECT_ID }}";
 
 void main() {
   runApp(MaterialApp(home: const WemobApp()));
 
   OneSignal.Debug.setLogLevel(OSLogLevel.verbose);
-  OneSignal.initialize("{{ onesignal_app_id|default('YOUR_APP_ID') }}");
+  OneSignal.initialize("{{ ONESIGNAL_APP_ID }}");
 }
 
 class WemobApp extends StatefulWidget {
@@ -31,7 +31,7 @@ class WemobApp extends StatefulWidget {
 
 class _WemobAppState extends State<WemobApp> with WidgetsBindingObserver {
   WebViewController? _controller;
-  final String url = "https://knid.me";
+  final String url = "{{ WEMOB_PROJECT_URL }}";
   bool _isLoading = true;
   late final AnalyticsService _analytics;
   String? _lastVisitedUrl;
@@ -51,11 +51,27 @@ class _WemobAppState extends State<WemobApp> with WidgetsBindingObserver {
     _checkProjectStatus();
 
     OneSignal.Notifications.addClickListener((event) {
-      _analytics.logPushNotificationClicked();
+      final data = event.notification.additionalData;
+
+      final notificationId = data?['notification_id']?.toString();
+      if (notificationId != null) {
+        _analytics.logPushNotificationClicked(notificationId);
+      }
+
+      final url = data?['url']?.toString();
+      if (url != null) {
+        _controller?.loadRequest(Uri.parse(url));
+      }
     });
 
     OneSignal.Notifications.addForegroundWillDisplayListener((event) {
-      _analytics.logPushNotificationReceived();
+      final data = event.notification.additionalData;
+
+      final notificationId = data?['notification_id']?.toString();
+      if (notificationId != null) {
+        _analytics.logPushNotificationReceived(notificationId);
+      }
+
       event.notification.display();
     });
   }
@@ -238,7 +254,7 @@ class _WemobAppState extends State<WemobApp> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
-    final String externalHexColor = "#FFFFFF";
+    final String externalHexColor = "{{ WEMOB_SPLASH_SCREEN_COLOR }}";
     final Color externalColor = Color(int.parse(externalHexColor.replaceFirst('#', '0xff')));
     // final externalColor = CupertinoColors.darkBackgroundGray;
     final bool isDark = isDarkColor(externalColor);
