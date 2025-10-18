@@ -4,6 +4,10 @@ import (
 	"github.com/google/uuid"
 )
 
+type CreateSessionResponse struct {
+	SessionID uuid.UUID `json:"session_id"`
+}
+
 type LogAppEventResponse struct {
 	SuccessResponse
 }
