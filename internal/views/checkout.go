@@ -62,6 +62,7 @@ func (v *HttpViews) StripeCheckout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	utils.JSONResponse(w, map[string]string{"url": s.URL}, http.StatusCreated)
 	// Redirect the user's browser to Stripe's hosted checkout page!
-	http.Redirect(w, r, s.URL, http.StatusSeeOther)
+	// http.Redirect(w, r, s.URL, http.StatusSeeOther)
 }
