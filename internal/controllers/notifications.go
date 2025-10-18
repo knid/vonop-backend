@@ -2,20 +2,40 @@ package controllers
 
 import (
 	"errors"
+	"fmt"
+	"time"
 
 	"github.com/go-playground/validator/v10"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/responses"
+	"github.com/knid/wemob/internal/utils"
+	"github.com/knid/wemob/internal/utils/external"
 )
 
-func (c *Controller) GetNotifications(projectId string) ([]models.Notification, error) {
+func (c *Controller) GetNotifications(projectId string) ([]responses.NotificationInformationResponse, error) {
 	project, err := c.DB.GetProjectById(projectId)
 	if err != nil {
 		return nil, err
 	}
 
-	return c.DB.GetNotifications(project)
+	notifications, err := c.DB.GetNotifications(project.ID.String())
+	if err != nil {
+		return nil, err
+	}
+
+	notificationResponses := make([]responses.NotificationInformationResponse, len(notifications))
+	for i, notification := range notifications {
+		notificationResponses[i] = responses.NotificationInformationResponse{
+			ID:          notification.ID,
+			ProjectID:   notification.ProjectID,
+			Title:       notification.Title,
+			Description: notification.Description,
+			CreatedAt:   notification.CreatedAt,
+		}
+	}
+
+	return notificationResponses, nil
 }
 
 func (c *Controller) GetNotification(user *models.User, id string) (*models.Notification, error) {
@@ -32,6 +52,7 @@ func (c *Controller) GetNotification(user *models.User, id string) (*models.Noti
 }
 
 func (c *Controller) SendNotification(user *models.User, notificationCreateReq requests.NotificationCreateRequest) (*responses.NotificationSendResponse, error) {
+	fmt.Println("SendNotification called at " + (string)(time.Now().Format("2006-01-02 15:04:05")))
 	validate := validator.New(validator.WithRequiredStructEnabled())
 	if err := validate.Struct(notificationCreateReq); err != nil {
 		return nil, err
@@ -42,14 +63,30 @@ func (c *Controller) SendNotification(user *models.User, notificationCreateReq r
 	if err != nil {
 		return nil, err
 	}
-	if project.User.ID.String() != user.ID.String() {
+	if project.UserID.String() != user.ID.String() {
 		return nil, errors.New("you do not have access this resources")
 	}
 
-	// TODO:
-	//
-	// Create onesignal notification send request
+	notification := models.Notification{
+		ProjectID:   notificationCreateReq.ProjectID,
+		Title:       notificationCreateReq.Title,
+		Description: notificationCreateReq.Description,
+	}
 
-	return nil, nil
+	fmt.Println("Creating notification in DB")
+	createdNotification, err := c.DB.CreateNotification(&notification)
+	if err != nil {
+		return nil, err
+	}
+
+	fmt.Println("Saving image to: " + "storage/images/" + createdNotification.ID.String() + ".png")
+
+	utils.ConvertBase64ToImageSave(notificationCreateReq.Image, "storage/images/"+createdNotification.ID.String()+".png")
+
+	err = external.SendOneSignalNotification(&notification, project.OneSignalAppID)
+
+	return &responses.NotificationSendResponse{
+		SuccessResponse: responses.SuccessResponse{Success: true},
+	}, err
 
 }
