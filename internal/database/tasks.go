@@ -22,14 +22,14 @@ func (db *Database) GetAppNotificationTasks(notification *models.Notification) (
 }
 
 func (db *Database) GetAppNotificationTaskById(id string) (*models.AppNotificationTask, error) {
-	appNotificationTask := models.AppNotificationTask{ID: uuid.MustParse(id)}
-	err := db.DB.NewSelect().Model(&appNotificationTask).WherePK().Scan(context.Background())
+	var appNotificationTask models.AppNotificationTask
+	err := db.DB.NewSelect().Model(&appNotificationTask).Where("id = ?", id).Scan(context.Background())
 
 	return &appNotificationTask, err
 }
 
-func (db *Database) CreateAppBuildTask(build models.Build) (*models.AppBuildTask, error) {
-	appBuildTask := models.AppBuildTask{BuildID: build.ID, ProjectID: build.ProjectID}
+func (db *Database) CreateAppBuildTask(build models.Build, platform, status string, autoDeploy bool) (*models.AppBuildTask, error) {
+	appBuildTask := models.AppBuildTask{BuildID: build.ID, ProjectID: build.ProjectID, Platform: platform, StatusText: status, AutoDeploy: autoDeploy}
 	_, err := db.DB.NewInsert().Model(&appBuildTask).Exec(context.Background())
 
 	return &appBuildTask, err
@@ -57,6 +57,7 @@ func (db *Database) GetPendingAppBuildTasks(project *models.Project) ([]models.A
 	var appBuildTasks []models.AppBuildTask
 	err := db.DB.NewSelect().Model(&appBuildTasks).
 		Where("project_id = ?", project.ID.String()).
+		Where("platform = ?", "Android").
 		Where("finished = false").
 		Scan(context.Background())
 
@@ -64,8 +65,8 @@ func (db *Database) GetPendingAppBuildTasks(project *models.Project) ([]models.A
 }
 
 func (db *Database) GetAppBuildTaskById(id string) (*models.AppBuildTask, error) {
-	appBuildTask := models.AppBuildTask{ID: uuid.MustParse(id)}
-	err := db.DB.NewSelect().Model(&appBuildTask).WherePK().Scan(context.Background())
+	var appBuildTask models.AppBuildTask
+	err := db.DB.NewSelect().Model(&appBuildTask).Where("id = ?", id).Scan(context.Background())
 
 	return &appBuildTask, err
 }
@@ -93,7 +94,7 @@ func (db *Database) GetAppReleaseTasks(release models.Release) ([]models.AppRele
 
 func (db *Database) GetAppReleaseTaskById(id string) (*models.AppReleaseTask, error) {
 	appReleaseTask := models.AppReleaseTask{ID: uuid.MustParse(id)}
-	err := db.DB.NewSelect().Model(&appReleaseTask).WherePK().Scan(context.Background())
+	err := db.DB.NewSelect().Model(&appReleaseTask).Where("id = ?", id).Scan(context.Background())
 
 	return &appReleaseTask, err
 }
