@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"database/sql"
 	"errors"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/utils"
+	"github.com/markbates/goth"
 	"github.com/slack-go/slack"
 	"github.com/stripe/stripe-go/v82"
 	"github.com/stripe/stripe-go/v82/customer"
@@ -36,12 +38,15 @@ func (c *Controller) GetUser(tokenStr string) (*responses.UserInformationRespons
 	}
 
 	return &responses.UserInformationResponse{
-		ID:       user.ID,
-		Name:     user.Name,
-		Email:    user.Email,
-		Photo:    user.Photo,
-		Verified: user.Verified,
-		Provider: user.Provider,
+		ID:                 user.ID,
+		Name:               user.Name,
+		Email:              user.Email,
+		Photo:              user.Photo,
+		Verified:           user.Verified,
+		Provider:           user.Provider,
+		SubscriptionID:     user.SubscriptionID.String(),
+		SubscriptionStatus: user.SubscriptionStatus,
+		TrialUsed:          user.TrialUsed,
 	}, nil
 }
 
@@ -109,10 +114,14 @@ func (c *Controller) RegisterUser(userRegisterReq requests.UserRegisterRequest) 
 		return nil, err
 	}
 
-	c.SlackService.Client.PostMessage(
+	go c.SlackService.Client.PostMessage(
 		constants.SLACK_CHANNEL_ID_NEW_USER,
-		slack.MsgOptionText("New registered user: "+user.Email, false),
+		slack.MsgOptionText("New registered user (Wemob): "+user.Email, false),
 	)
+
+	go c.CRMService.SendEvent(createdUser, constants.BREVO_EVENT_NEW_USER, map[string]any{
+		"provider": "wemob",
+	})
 
 	return &responses.UserInformationResponse{
 		ID:       createdUser.ID,
@@ -156,6 +165,10 @@ func (c *Controller) LoginUser(userLoginReq requests.UserLoginRequest) (*respons
 		return nil, err
 	}
 
+	go c.CRMService.SendEvent(user, constants.BREVO_EVENT_NEW_LOGIN, map[string]any{
+		"provider": "wemob",
+	})
+
 	return &responses.UserLoginResponse{
 		Token:     createdToken.String,
 		ExpiredAt: createdToken.ExpiredAt,
@@ -179,5 +192,81 @@ func (c *Controller) DeleteUser(tokenStr string) (*models.User, error) {
 		return nil, err
 	}
 
+	go c.CRMService.SendEvent(deletedUser, constants.BREVO_EVENT_USER_DELETED, map[string]any{})
 	return deletedUser, nil
+}
+
+func (c *Controller) GoogleLogin(oauthUser goth.User) (*responses.UserLoginResponse, error) {
+	user, err := c.DB.GetUserByEmail(oauthUser.Email)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			pass, _ := utils.RandomHex(32)
+			/* 			userRegisterReq := requests.UserRegisterRequest{
+			   				Name:          oauthUser.Name,
+			   				Email:         oauthUser.Email,
+			   				Password:      pass,
+			   				PasswordCheck: pass,
+			   			}
+			   			c.RegisterUser(userRegisterReq) */
+			newUser := models.User{
+				Name:     oauthUser.Name,
+				Email:    oauthUser.Email,
+				Photo:    oauthUser.AvatarURL,
+				Password: utils.GetSHA256Hash(pass),
+				Provider: "Google",
+				Verified: true,
+			}
+
+			params := stripe.CustomerParams{
+				Email: &user.Email,
+				Metadata: map[string]string{
+					"user_id": user.ID.String(),
+				},
+			}
+
+			customer, err := customer.New(&params)
+			if err != nil {
+				return nil, err
+			}
+			newUser.CustomerID = customer.ID
+			user, err = c.DB.CreateUser(&newUser)
+
+			go c.SlackService.Client.PostMessage(
+				constants.SLACK_CHANNEL_ID_NEW_USER,
+				slack.MsgOptionText("New registered user (Google): "+user.Email, false))
+
+			go c.CRMService.SendEvent(user, constants.BREVO_EVENT_NEW_USER, map[string]any{
+				"provider": "google",
+			})
+
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	tokenStr, err := utils.RandomHex(32)
+	if err != nil {
+		return nil, err
+	}
+
+	token := models.Token{
+		UserID:    user.ID,
+		String:    tokenStr,
+		ExpiredAt: time.Now().AddDate(0, 0, 14),
+	}
+
+	createdToken, err := c.DB.CreateToken(&token)
+	if err != nil {
+		return nil, err
+	}
+
+	go c.CRMService.SendEvent(user, constants.BREVO_EVENT_NEW_LOGIN, map[string]any{
+		"provider": "google",
+	})
+
+	return &responses.UserLoginResponse{
+		Token:     createdToken.String,
+		ExpiredAt: createdToken.ExpiredAt,
+	}, nil
 }
