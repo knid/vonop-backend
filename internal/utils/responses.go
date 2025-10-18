@@ -2,7 +2,6 @@ package utils
 
 import (
 	"encoding/json"
-	"log"
 	"net/http"
 	"reflect"
 )
@@ -18,6 +17,5 @@ func JSONResponse(w http.ResponseWriter, data interface{}, statusCode int) {
 }
 
 func JSONErrorResponse(w http.ResponseWriter, message string, code int) {
-	log.Println("On JSONErrorResponse, error msg: ", message)
 	JSONResponse(w, map[string]string{"error": message}, code)
 }

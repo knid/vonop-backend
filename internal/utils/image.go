@@ -11,8 +11,8 @@ import (
 	"strings"
 )
 
-func ConvertBase64ToImageSave(base64Str, projectId string) (string, error) {
-	outputPath := "storage/public/icons/" + projectId + ".png"
+func ConvertBase64ToImageSave(base64Str, path string) (string, error) {
+	outputPath := "storage/public/" + path + ".png"
 	// Split the base64 string to get the actual data
 	parts := strings.SplitN(base64Str, ",", 2)
 	if len(parts) != 2 {
