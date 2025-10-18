@@ -8,6 +8,23 @@ import (
 	"github.com/knid/wemob/internal/utils"
 )
 
+func (v *HttpViews) CreateSession(w http.ResponseWriter, r *http.Request) {
+	var createSessionReq requests.CreateSessionRequest
+	err := utils.ParseJSONBody(r, &createSessionReq)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	response, err := v.Controller.CreateSession(r, createSessionReq)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	utils.JSONResponse(w, response, http.StatusOK)
+}
+
 func (v *HttpViews) LogAppEvent(w http.ResponseWriter, r *http.Request) {
 	var logAppEventReq requests.LogAppEventRequest
 	err := utils.ParseJSONBody(r, &logAppEventReq)
@@ -23,7 +40,6 @@ func (v *HttpViews) LogAppEvent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	utils.JSONResponse(w, response, http.StatusOK)
-
 }
 
 func (v *HttpViews) GetDevices(w http.ResponseWriter, r *http.Request) {
