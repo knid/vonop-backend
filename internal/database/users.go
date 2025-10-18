@@ -3,14 +3,12 @@ package database
 import (
 	"context"
 
-	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/models"
 )
 
 func (db *Database) GetUserById(id string) (*models.User, error) {
 	var user models.User
-	user.ID = uuid.MustParse(id)
-	err := db.DB.NewSelect().Model(&user).WherePK().Scan(context.Background())
+	err := db.DB.NewSelect().Model(&user).Where("id = ?", id).Scan(context.Background())
 
 	return &user, err
 }
@@ -29,12 +27,12 @@ func (db *Database) CreateUser(user *models.User) (*models.User, error) {
 }
 
 func (db *Database) UpdateUser(user *models.User) (*models.User, error) {
-	_, err := db.DB.NewUpdate().Model(user).WherePK().Exec(context.Background())
+	_, err := db.DB.NewUpdate().Model(user).Where("id = ?", user.ID).Exec(context.Background())
 	return user, err
 }
 
 func (db *Database) DeleteUser(user *models.User) (*models.User, error) {
-	_, err := db.DB.NewDelete().Model(user).WherePK().Exec(context.Background())
+	_, err := db.DB.NewDelete().Model(user).Where("id = ?", user.ID).Exec(context.Background())
 	return user, err
 }
 
@@ -59,7 +57,7 @@ func (db *Database) CreateToken(token *models.Token) (*models.Token, error) {
 }
 
 func (db *Database) DeleteToken(token *models.Token) error {
-	_, err := db.DB.NewDelete().Model(token).WherePK().Exec(context.Background())
+	_, err := db.DB.NewDelete().Model(token).Where("id = ?", token.ID).Exec(context.Background())
 
 	return err
 }

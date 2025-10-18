@@ -2,7 +2,6 @@ package database
 
 import (
 	"context"
-	"log"
 
 	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/models"
@@ -23,20 +22,19 @@ func (db *Database) GetSubscriptionById(id string) (*models.StandartUserSubscrip
 }
 
 func (db *Database) UpdateSubscription(standartUserSubscription *models.StandartUserSubscription) (*models.StandartUserSubscription, error) {
-	_, err := db.DB.NewUpdate().Model(standartUserSubscription).WherePK().Exec(context.Background())
+	_, err := db.DB.NewUpdate().Model(standartUserSubscription).Where("id = ?", standartUserSubscription.ID).Exec(context.Background())
 
 	return standartUserSubscription, err
 }
 
 func (db *Database) DeleteSubscription(standartUserSubscription *models.StandartUserSubscription) (*models.StandartUserSubscription, error) {
-	_, err := db.DB.NewDelete().Model(standartUserSubscription).WherePK().Exec(context.Background())
+	_, err := db.DB.NewDelete().Model(standartUserSubscription).Where("id = ?", standartUserSubscription.ID).Exec(context.Background())
 
 	return standartUserSubscription, err
 }
 
 func (db *Database) GetStandartUserSubscriptionByUser(user *models.User) (*models.StandartUserSubscription, error) {
 	var subs models.StandartUserSubscription
-	log.Println(user.SubscriptionID)
 	err := db.DB.NewSelect().Model(&subs).Where("id = ?", user.SubscriptionID).Scan(context.Background())
 
 	return &subs, err

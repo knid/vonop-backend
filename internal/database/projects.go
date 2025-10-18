@@ -27,12 +27,12 @@ func (db *Database) CreateProject(project *models.Project) (*models.Project, err
 }
 
 func (db *Database) UpdateProject(project *models.Project) (*models.Project, error) {
-	_, err := db.DB.NewUpdate().Model(project).WherePK().Exec(context.Background())
+	_, err := db.DB.NewUpdate().Model(project).Where("id = ?", project.ID).Exec(context.Background())
 
 	return project, err
 }
 func (db *Database) DeleteProject(project *models.Project) error {
-	_, err := db.DB.NewDelete().Model(project).WherePK().Exec(context.Background())
+	_, err := db.DB.NewDelete().Model(project).Where("id = ?", project.ID).Exec(context.Background())
 
 	return err
 }
