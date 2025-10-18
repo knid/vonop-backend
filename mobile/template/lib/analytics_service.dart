@@ -21,8 +21,10 @@ class AnalyticsService {
   String? _appVersion;
   String? _platform;
   String? _model;
+  String? _sessionId;
 
   Future<void>? _initialization;
+  Future<void>? _sessionInitialization;
 
   Future<void> _ensureInitialized() async {
     _initialization ??= _initialize();
@@ -111,19 +113,26 @@ class AnalyticsService {
     return 'unknown';
   }
 
-  Future<void> logAppOpened() => _logEvent('app_opened');
+  Future<void> logAppOpened() => _logEvent('app_opened', startNewSession: true);
 
   Future<void> logSessionStarted() => _logEvent('session_started');
 
   Future<void> logSessionEnded() => _logEvent('session_ended');
 
-  Future<void> logUrlVisited(String url) => _logEvent('url_visited');
+  Future<void> logUrlVisited(String url) => _logEvent('url_visited', data: {'url': url});
 
-  Future<void> logPushNotificationReceived() => _logEvent('push_notification_received');
+  // Optional notificationId can be provided by callers when available.
+  Future<void> logPushNotificationReceived([String? notificationId]) => _logEventWithoutSession(
+    'push_notification_received',
+    notificationId != null ? {'notification_id': notificationId} : null,
+  );
 
-  Future<void> logPushNotificationClicked() => _logEvent('push_notification_clicked');
+  Future<void> logPushNotificationClicked([String? notificationId]) => _logEventWithoutSession(
+    'push_notification_clicked',
+    notificationId != null ? {'notification_id': notificationId} : null,
+  );
 
-  Future<void> _logEvent(String eventType) async {
+  Future<void> _logEventWithoutSession(String eventType, [Map<String, dynamic>? data]) async {
     if (projectId.isEmpty || baseUrl.isEmpty) {
       debugPrint('Analytics skipped: missing configuration for event $eventType');
       return;
@@ -136,23 +145,62 @@ class AnalyticsService {
       return;
     }
 
-    final deviceId = _deviceId;
-    final appVersion = _appVersion;
-    final platform = _platform;
-    final model = _model;
+    await _sendEvent(eventType, 'none', data);
+  }
 
-    if (deviceId == null || appVersion == null || platform == null || model == null) {
-      debugPrint('Analytics skipped: incomplete metadata for event $eventType');
+  Future<void> _logEvent(
+    String eventType, {
+    bool startNewSession = false,
+    Map<String, dynamic>? data,
+  }) async {
+    if (projectId.isEmpty || baseUrl.isEmpty) {
+      debugPrint('Analytics skipped: missing configuration for event $eventType');
       return;
     }
 
-    final uri = Uri.parse('$baseUrl/v1/projects/{{ WEMOB_PROJECT_ID }}/analytics/events');
+    try {
+      await _ensureInitialized();
+      if (startNewSession) {
+        await _startNewSession();
+      } else {
+        await _waitForActiveSession();
+      }
+    } catch (_) {
+      // Initialization failure already logged. Skip sending event.
+      return;
+    }
+
+    final sessionId = _sessionId;
+
+    if (sessionId == null || sessionId.isEmpty) {
+      debugPrint('Analytics skipped: missing session id for event $eventType');
+      return;
+    }
+
+    await _sendEvent(eventType, sessionId, data);
+  }
+
+  Future<void> _sendEvent(String eventType, String sessionId, [Map<String, dynamic>? data]) async {
+    final uri = Uri.parse('$baseUrl/v1/projects/$projectId/analytics/events');
+
+    // Build the `data` object for the backend. Start with device/app metadata
+    // and merge any event-specific data provided by the caller. Caller data
+    // overrides metadata when keys collide.
+    final Map<String, dynamic> payloadData = {};
+
+    if (sessionId == "none") {
+      if (_deviceId != null) payloadData['device_id'] = _deviceId;
+      if (_appVersion != null) payloadData['app_version'] = _appVersion;
+      if (_platform != null) payloadData['platform'] = _platform;
+      if (_model != null) payloadData['model'] = _model;
+    }
+
+    if (data != null) payloadData.addAll(data);
+
     final body = jsonEncode({
       'event_type': eventType,
-      'device_id': deviceId,
-      'app_version': appVersion,
-      'platform': platform,
-      'model': model,
+      'session_id': sessionId,
+      'data': payloadData,
     });
 
     try {
@@ -167,6 +215,75 @@ class AnalyticsService {
       }
     } catch (error) {
       debugPrint('Error sending analytics event "$eventType": $error');
+    }
+  }
+
+  Future<void> _startNewSession() async {
+    _sessionId = null;
+    final creation = _createSession();
+    _sessionInitialization = creation;
+
+    try {
+      await creation;
+    } catch (error) {
+      _sessionInitialization = null;
+      debugPrint('Analytics session initialization failed: $error');
+      rethrow;
+    }
+  }
+
+  Future<void> _waitForActiveSession() async {
+    final sessionFuture = _sessionInitialization;
+    if (sessionFuture != null) {
+      await sessionFuture;
+    }
+  }
+
+  Future<void> _createSession() async {
+    final deviceId = _deviceId;
+    final appVersion = _appVersion;
+    final platform = _platform;
+    final model = _model;
+
+    if (deviceId == null || appVersion == null || platform == null || model == null) {
+      throw StateError('Analytics session skipped: device metadata is incomplete');
+    }
+
+    final uri = Uri.parse('$baseUrl/v1/projects/$projectId/analytics/session');
+    final body = jsonEncode({
+      'device_id': deviceId,
+      'app_version': appVersion,
+      'platform': platform,
+      'model': model,
+    });
+
+    http.Response response;
+    try {
+      response = await http
+          .post(uri, headers: const {'Content-Type': 'application/json'}, body: body)
+          .timeout(const Duration(seconds: 10));
+    } catch (error) {
+      throw StateError('Error creating analytics session: $error');
+    }
+
+    if (response.statusCode >= 400) {
+      throw StateError(
+        'Failed to create analytics session: ${response.statusCode} ${response.reasonPhrase}',
+      );
+    }
+
+    try {
+      final parsed = jsonDecode(response.body);
+      if (parsed is Map<String, dynamic>) {
+        final sessionId = parsed['session_id'];
+        if (sessionId is String && sessionId.isNotEmpty) {
+          _sessionId = sessionId;
+          return;
+        }
+      }
+      throw const FormatException('Missing session_id in analytics session response');
+    } catch (error) {
+      throw StateError('Failed to parse analytics session response: $error');
     }
   }
 }
