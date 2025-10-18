@@ -55,16 +55,20 @@ def _read_key_properties(path: pathlib.Path):
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Create a Wemob build project.")
+    parser.add_argument("--project-id", required=True, help="Project ID")
     parser.add_argument("--build-task-id", required=True, help="Build task ID")
+    parser.add_argument("--onesignal-app-id", required=True, help="Onesignal app ID")
     parser.add_argument("--build-id", required=True, help="Build ID")
     parser.add_argument("--title", required=True, help="Application title")
     parser.add_argument("--url", required=True, help="URL")
     parser.add_argument("--icon", required=True, help="Icon path or URL")
     parser.add_argument("--sscolor", required=True, help="Splash screen color")
+    parser.add_argument("--package-name", required=True, help="Package name")
     parser.add_argument("--build-android", action="store_true", help="Build for Android")
+    parser.add_argument("--remove-wemob-branding", action="store_true", help="Remove Wemob branding")
     return parser.parse_args()
 
-def render_templates(task_id, app_id, app_name, url, icon, sscolor):
+def render_templates(task_id, app_id, onesignal_app_id, url, icon, sscolor, remove_wemob_branding):
     """
     Compute base template folder as WEMOB_PROJECTS_PATH/{build_id} and update
     template files in-place there, keeping other files unchanged.
@@ -87,12 +91,12 @@ def render_templates(task_id, app_id, app_name, url, icon, sscolor):
 
         template = Template(template_content)
         rendered_content = template.render(
-            task_id=task_id,
-            app_id=app_id,
-            app_name=app_name,
-            url=url,
-            icon=icon,
-            sscolor=sscolor,
+            WEMOB_PROJECT_ID=app_id,
+            ONESIGNAL_APP_ID=onesignal_app_id,
+            WEMOB_PROJECT_URL=url,
+            WEMOB_PROJECT_ICON=icon,
+            WEMOB_SPLASH_SCREEN_COLOR=sscolor,
+            REMOVE_WEMOB_BRANDING=remove_wemob_branding,
         )
 
         with open(template_path, "w") as f:
@@ -240,28 +244,54 @@ def update_db(task_id):
     try:
         with conn:
             with conn.cursor() as cur:
-                cur.execute("UPDATE app_build_tasks SET finished = true WHERE id = %s", (task_id,))
+                cur.execute("UPDATE app_build_tasks SET finished = true, status_text = 'Builded', execute_time = NOW() WHERE id = %s", (task_id,))
     finally:
         conn.close()
 
 
-def create_project(task_id: str, app_id: str, app_name: str, url: str, icon: str, sscolor: str, build_android: bool):
-    render_templates(task_id, app_id, app_name, url, icon, sscolor)
+def create_project(task_id: str, app_id: str, app_name: str, url: str, icon: str, sscolor: str, build_android: bool, onesignal_app_id: str, package_name: str, remove_wemob_branding: bool):
+    render_templates(task_id, app_id, onesignal_app_id, url, icon, sscolor, remove_wemob_branding)
+    update_package_name(app_id, package_name)
     aab_path = create_dummy_aab(app_id, app_name) if build_android else None
     update_db(task_id)
 
+def update_package_name(app_id: str, package_name: str):
+    project_dir = WEMOB_PROJECTS_PATH / app_id
+
+    command = [
+        "dart",
+        "run",
+        "change_app_package_name:main",
+        package_name,
+    ]    
+        
+    subprocess.run(command, check=True, cwd=str(project_dir))
+
+def change_icon(app_id: str):
+    project_dir = WEMOB_PROJECTS_PATH / app_id
+
+    command = [
+        "dart",
+        "run",
+        "flutter_launcher_icons",
+    ]    
+        
+    subprocess.run(command, check=True, cwd=str(project_dir))
 
 def main():
     print("********Creating project...*********")
     args = parse_args()
     create_project(
         task_id=args.build_task_id,
-        app_id=args.build_id,
+        app_id=args.project_id,
         app_name=args.title,
         url=args.url,
         icon=args.icon,
         sscolor=args.sscolor,
         build_android=args.build_android,
+        onesignal_app_id=args.onesignal_app_id,
+        package_name=args.package_name,
+        remove_wemob_branding=args.remove_wemob_branding,
     )
     
 if __name__ == "__main__":
