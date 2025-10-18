@@ -6,6 +6,8 @@ import (
 
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/utils"
+
+	"github.com/knid/wemob/internal/constants"
 )
 
 func (v *HttpViews) GetUser(w http.ResponseWriter, r *http.Request) {
@@ -71,11 +73,19 @@ func (v *HttpViews) DeleteUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	user, err := v.Controller.DB.GetUserById(userInformationRes.ID.String())
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
 	deletedUserRes, err := v.Controller.DeleteUser(userInformationRes.ID.String())
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+
+	go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_USER_DELETED, map[string]any{})
 
 	utils.JSONResponse(w, deletedUserRes, http.StatusOK)
 }
@@ -89,6 +99,11 @@ func (v *HttpViews) UserLogin(w http.ResponseWriter, r *http.Request) {
 	userLoginRes, err := v.Controller.LoginUser(userLoginReq)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
 		return
 	}
 
@@ -125,3 +140,23 @@ func (v *HttpViews) UserVerifyEmail(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) UserResendVerifactionEmail(w http.ResponseWriter, r *http.Request) {
 	//  Implementation of the view to resend verification email to the user
 }
+
+/* func (v *HttpViews) GetUserUsage(w http.ResponseWriter, r *http.Request) {
+	tokenString, err := utils.ExtractTokenFromHeader(r)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	userInformationRes, err := v.Controller.GetUser(tokenString)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	user, err := v.Controller.DB.GetUserById(userInformationRes.ID.String())
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+} */

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/utils"
 )
 
@@ -104,6 +105,10 @@ func (v *HttpViews) UpdateSubscription(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_UPDATED, map[string]any{
+		"subscription_id": subscriptionId,
+	})
+
 	utils.JSONResponse(w, map[string]string{"message": "Subscription updated successfully"}, http.StatusOK)
 }
 
@@ -131,6 +136,8 @@ func (v *HttpViews) CancelSubscription(w http.ResponseWriter, r *http.Request) {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+
+	go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_CANCELLED, map[string]any{})
 
 	utils.JSONResponse(w, map[string]string{"message": "Subscription cancelled successfully"}, http.StatusOK)
 }
