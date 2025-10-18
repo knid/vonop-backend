@@ -1,10 +1,13 @@
 package views
 
 import (
+	"fmt"
 	"net/http"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
+	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/utils"
@@ -57,6 +60,8 @@ func (v *HttpViews) GetProjectNotifications(w http.ResponseWriter, r *http.Reque
 }
 
 func (v *HttpViews) SendProjectNotification(w http.ResponseWriter, r *http.Request) {
+
+	fmt.Println("SendProjectNotification called at " + (string)(time.Now().Format("2006-01-02 15:04:05")))
 	tokenString, err := utils.ExtractTokenFromHeader(r)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
@@ -77,6 +82,9 @@ func (v *HttpViews) SendProjectNotification(w http.ResponseWriter, r *http.Reque
 
 	if !(user.SubscriptionStatus == "active" || user.SubscriptionStatus == "trial") {
 		utils.JSONErrorResponse(w, "you do not have access to this resource", http.StatusForbidden)
+		go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_NEED, map[string]any{
+			"action": "send_notification",
+		})
 		return
 	}
 
@@ -88,7 +96,7 @@ func (v *HttpViews) SendProjectNotification(w http.ResponseWriter, r *http.Reque
 	}
 
 	for _, project := range projects {
-		projectNotifications, err := v.Controller.GetNotifications(project.ID.String())
+		projectNotifications, err := v.Controller.DB.GetNotifications(project.ID.String())
 		if err != nil {
 			continue
 		}
@@ -127,10 +135,20 @@ func (v *HttpViews) SendProjectNotification(w http.ResponseWriter, r *http.Reque
 	}
 
 	if count >= limits.MontlyNotificationCount {
-		utils.JSONErrorResponse(w, "you have reached your monthly notification limit", http.StatusForbidden)
+		utils.JSONErrorResponse(w, "You have reached your monthly notification limit", http.StatusForbidden)
+		go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_QUOTA_REACHED, map[string]any{
+			"action": "send_notification",
+			"limit":  limits.MontlyNotificationCount,
+		})
 		return
 	}
 
+	projectId := chi.URLParam(r, "projectId")
+	projectUUID, err := uuid.Parse(projectId)
+	if err != nil {
+		utils.JSONErrorResponse(w, "project_id is required", http.StatusBadRequest)
+		return
+	}
 	// Implementation of the view to send a notification
 	var notificationCreateReq requests.NotificationCreateRequest
 	if err := utils.ParseJSONBody(r, &notificationCreateReq); err != nil {
@@ -138,6 +156,9 @@ func (v *HttpViews) SendProjectNotification(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	notificationCreateReq.ProjectID = projectUUID
+
+	fmt.Println("Received notification send request for project ID: " + projectId)
 	notificationSendRes, err := v.Controller.SendNotification(user, notificationCreateReq)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)

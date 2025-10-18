@@ -5,8 +5,9 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/knid/wemob/internal/models"
+	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/requests"
+	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/utils"
 )
 
@@ -79,11 +80,16 @@ func (v *HttpViews) CreateProjectBuild(w http.ResponseWriter, r *http.Request) {
 
 	if !(user.SubscriptionStatus == "active" || user.SubscriptionStatus == "trial") {
 		utils.JSONErrorResponse(w, "you do not have access to this resource", http.StatusForbidden)
+		go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_NEED, map[string]any{})
 		return
 	}
 
-	var builds []models.Build
+	var builds []responses.BuildInformationResponse
 	projects, err := v.Controller.GetProjects(user)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 	for _, p := range projects {
 		project, err := v.Controller.GetProject(user, p.ID.String())
 		if err != nil {
@@ -135,6 +141,10 @@ func (v *HttpViews) CreateProjectBuild(w http.ResponseWriter, r *http.Request) {
 
 	if count >= limits.MontlyBuildCount {
 		utils.JSONErrorResponse(w, "you have reached your monthly build limit", http.StatusForbidden)
+		go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_QUOTA_REACHED, map[string]any{
+			"action": "create_build",
+			"limit":  limits.MontlyBuildCount,
+		})
 		return
 	}
 
@@ -160,6 +170,11 @@ func (v *HttpViews) CreateProjectBuild(w http.ResponseWriter, r *http.Request) {
 	}
 
 	buildCreateReq.ProjectID = project.ID
+
+	if buildCreateReq.RemoveWemobBranding && !limits.CanRemoveBrandLogo {
+		utils.JSONErrorResponse(w, "your current subscription plan does not allow removing Wemob branding", http.StatusForbidden)
+		return
+	}
 
 	buildCreateRes, err := v.Controller.CreateBuild(buildCreateReq)
 	if err != nil {
