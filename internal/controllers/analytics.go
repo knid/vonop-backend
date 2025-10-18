@@ -11,50 +11,76 @@ import (
 	"github.com/knid/wemob/internal/responses"
 )
 
-func (c *Controller) LogAppEvent(r *http.Request, logAppEventReq requests.LogAppEventRequest) (*responses.LogAppEventResponse, error) {
+func (c *Controller) CreateSession(r *http.Request, createSessionReq requests.CreateSessionRequest) (*responses.CreateSessionResponse, error) {
 	projectId := chi.URLParam(r, "projectId")
-	err := uuid.Validate(projectId)
-	if projectId == "" {
-		return nil, err
-	}
 	project, err := c.DB.GetProjectById(projectId)
 	if err != nil {
 		return nil, err
 	}
 
-	_, err = c.DB.GetDeviceById(logAppEventReq.DeviceID.String())
+	device, err := c.DB.GetDeviceByToken(createSessionReq.DeviceID.String())
 	if err != nil {
-		device := &models.Device{
-			DeviceToken: logAppEventReq.DeviceID,
-			Platform:    logAppEventReq.Platform,
-			Model:       logAppEventReq.Model,
+		deviceModel := &models.Device{
+			DeviceToken: createSessionReq.DeviceID,
+			Platform:    createSessionReq.Platform,
+			Model:       createSessionReq.Model,
 		}
-		_, err = c.DB.CreateDevice(device)
+		device, err = c.DB.CreateDevice(deviceModel)
 		if err != nil {
 			return nil, err
 		}
 	}
 
-	appUsageEvent := &models.AppUsageEvent{
-		EventType:  logAppEventReq.EventType,
-		ProjectID:  project.ID,
-		DeviceID:   logAppEventReq.DeviceID,
-		AppVersion: logAppEventReq.AppVersion,
-		IP:         r.RemoteAddr,
-		// Geolocation: TODO: Implement geolocation lookup based on IP --- IGNORE ---
+	session := &models.Session{
+		ProjectID:   project.ID,
+		DeviceID:    device.ID,
+		AppVersion:  createSessionReq.AppVersion,
+		IP:          r.RemoteAddr,
+		Geolocation: "",
+		StartTime:   time.Now(),
+		EndTime:     time.Now(),
+		Duration:    0,
+		Status:      "active",
 	}
 
-	_, err = c.DB.CreateAppUsageEvent(appUsageEvent)
+	createdSession, err := c.DB.CreateSession(session)
 	if err != nil {
 		return nil, err
 	}
 
-	return &responses.LogAppEventResponse{
-		SuccessResponse: responses.SuccessResponse{
-			Success: true,
-			Error:   "",
-		},
+	return &responses.CreateSessionResponse{
+		SessionID: createdSession.ID,
 	}, nil
+}
+
+func (c *Controller) LogAppEvent(r *http.Request, logAppEventReq requests.LogAppEventRequest) (*models.AppUsageEvent, error) {
+	var session models.Session
+	var err error
+
+	sessionId := logAppEventReq.SessionID.String()
+
+	if sessionId == "none" {
+		session = models.Session{
+			ID: uuid.Nil,
+		}
+	} else {
+		session, err = c.DB.GetSessionById(sessionId)
+		if err != nil {
+			return nil, err
+		}
+	}
+	appUsageEvent := &models.AppUsageEvent{
+		EventType: logAppEventReq.EventType,
+		SessionID: session.ID.String(),
+		Data:      logAppEventReq.Data,
+	}
+
+	createdAppUsageEvent, err := c.DB.CreateAppUsageEvent(appUsageEvent)
+	if err != nil {
+		return nil, err
+	}
+
+	return createdAppUsageEvent, nil
 }
 
 func (c *Controller) GetDevicesByProjectId(projectId string) ([]responses.GetDeviceResponse, error) {
@@ -88,7 +114,7 @@ func (c *Controller) GetActiveUsers(projectId string) ([]responses.GetDeviceResp
 	}
 
 	// get all app uasage events created in 30 minute for the project then filter unique device ids
-	appUsageEvents, err := c.DB.GetAppUsageEvents(project)
+	sessions, err := c.DB.GetSessionsByProject(project)
 	if err != nil {
 		return nil, err
 	}
@@ -96,11 +122,11 @@ func (c *Controller) GetActiveUsers(projectId string) ([]responses.GetDeviceResp
 	var activeDevicesMap = make(map[uuid.UUID]bool)
 	var activeDevices []responses.GetDeviceResponse
 	timeLimit := time.Now().Add(-30 * time.Minute)
-	for _, appUsageEvent := range *appUsageEvents {
-		if appUsageEvent.CreatedAt.After(timeLimit) {
-			if _, exists := activeDevicesMap[appUsageEvent.DeviceID]; !exists {
-				activeDevicesMap[appUsageEvent.DeviceID] = true
-				device, err := c.DB.GetDeviceById(appUsageEvent.DeviceID.String())
+	for _, session := range sessions {
+		if session.CreatedAt.After(timeLimit) {
+			if _, exists := activeDevicesMap[session.DeviceID]; !exists {
+				activeDevicesMap[session.DeviceID] = true
+				device, err := c.DB.GetDeviceById(session.DeviceID.String())
 				if err != nil {
 					return nil, err
 				}
