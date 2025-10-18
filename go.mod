@@ -3,10 +3,17 @@ module github.com/knid/wemob
 go 1.24.4
 
 require (
+	github.com/getbrevo/brevo-go v1.1.3
 	github.com/go-chi/chi v1.5.5
 	github.com/go-chi/chi/v5 v5.2.2
+	github.com/go-chi/cors v1.2.2
+	github.com/go-chi/httplog/v3 v3.3.0
 	github.com/google/uuid v1.6.0
 	github.com/lib/pq v1.10.5
+	github.com/markbates/goth v1.82.0
+	github.com/samber/slog-betterstack v1.4.2
+	github.com/slack-go/slack v0.17.3
+	github.com/stripe/stripe-go/v82 v82.5.1
 	github.com/uptrace/bun v1.2.15
 	github.com/uptrace/bun/dialect/pgdialect v1.2.15
 	github.com/uptrace/bun/driver/pgdriver v1.2.15
@@ -14,10 +21,16 @@ require (
 )
 
 require (
-	github.com/go-chi/cors v1.2.2 // indirect
+	cloud.google.com/go/compute/metadata v0.3.0 // indirect
+	github.com/antihax/optional v1.0.0 // indirect
+	github.com/gorilla/context v1.1.1 // indirect
+	github.com/gorilla/mux v1.6.2 // indirect
+	github.com/gorilla/securecookie v1.1.1 // indirect
+	github.com/gorilla/sessions v1.1.1 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect
-	github.com/slack-go/slack v0.17.3 // indirect
-	github.com/stripe/stripe-go/v82 v82.5.1 // indirect
+	github.com/samber/lo v1.47.0 // indirect
+	github.com/samber/slog-common v0.18.1 // indirect
+	golang.org/x/oauth2 v0.27.0 // indirect
 )
 
 require (
