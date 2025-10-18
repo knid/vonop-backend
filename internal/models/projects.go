@@ -14,6 +14,7 @@ type Project struct {
 	PackageName             string    `bun:",notnull,unique"`
 	IconPath                string    `bun:",notnull"`
 	OneSignalAppID          string    `bun:",notnull,unique"`
+	OneSignalAppToken       string    `bun:",notnull,unique"`
 	UserAppleTeamID         string    `bun:",nullzero"`
 	BuildForAndroid         bool      `bun:",notnull,default:true"`
 	BuildForIOS             bool      `bun:",notnull,default:false"`
