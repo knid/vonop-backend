@@ -12,6 +12,7 @@ type ProjectInformationResponse struct {
 	Description string    `json:"description"`
 	URL         string    `json:"url"`
 	PackageName string    `json:"package_name"`
+	Icon        string    `json:"icon"`
 	CreatedAt   time.Time `json:"created_at"`
 }
 
