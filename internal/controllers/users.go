@@ -57,7 +57,9 @@ func (c *Controller) UpdateUser(user *models.User, userUpdateReq requests.UserUp
 	}
 
 	user.Name = userUpdateReq.Name
-	user.Email = userUpdateReq.Email
+	if user.Provider == "Wemob" {
+		user.Email = userUpdateReq.Email
+	}
 	user.Photo = userUpdateReq.Photo
 
 	if user.Email != userUpdateReq.Email {
