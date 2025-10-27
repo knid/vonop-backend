@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/knid/wemob/internal/constants"
+	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/utils"
 )
 
@@ -38,7 +39,19 @@ func (v *HttpViews) GetLimits(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	utils.JSONResponse(w, limits, http.StatusOK)
+	limitsResponse := responses.LimitsResponse{
+		ID:                      limits.ID,
+		MaximumProjectCount:     limits.MaximumProjectCount,
+		MontlyBuildCount:        limits.MontlyBuildCount,
+		MontlyNotificationCount: limits.MontlyNotificationCount,
+		CanBuildToAndroid:       limits.CanBuildToAndroid,
+		CanBuildToIOS:           limits.CanBuildToIOS,
+		CanUseAnalytics:         limits.CanUseAnalytics,
+		CanRemoveBrandLogo:      limits.CanRemoveBrandLogo,
+		CanSeeActiveUsers:       limits.CanSeeActiveUsers,
+	}
+
+	utils.JSONResponse(w, limitsResponse, http.StatusOK)
 }
 
 func (v *HttpViews) GetSubscription(w http.ResponseWriter, r *http.Request) {
