@@ -19,7 +19,7 @@ services:
       - caddy_data:/data
       - caddy_config:/config
     depends_on:
-      - backend
+      - api
 
 volumes:
   caddy_data:
