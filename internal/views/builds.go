@@ -176,7 +176,7 @@ func (v *HttpViews) CreateProjectBuild(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	buildCreateRes, err := v.Controller.CreateBuild(buildCreateReq)
+	buildCreateRes, err := v.Controller.CreateBuild(user, buildCreateReq)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
 		return

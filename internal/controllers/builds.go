@@ -3,7 +3,6 @@ package controllers
 import (
 	"database/sql"
 	"errors"
-	"fmt"
 	"log"
 	"log/slog"
 	"os"
@@ -71,7 +70,7 @@ func (c *Controller) GetBuild(user *models.User, id string) (*responses.BuildInf
 	return &buildInformationResponse, nil
 }
 
-func (c *Controller) CreateBuild(buildCreateReq requests.BuildCreateRequest) (*responses.BuildCreateResponse, error) {
+func (c *Controller) CreateBuild(user *models.User, buildCreateReq requests.BuildCreateRequest) (*responses.BuildCreateResponse, error) {
 	validate := validator.New(validator.WithRequiredStructEnabled())
 	if err := validate.Struct(buildCreateReq); err != nil {
 		return nil, err
@@ -83,7 +82,6 @@ func (c *Controller) CreateBuild(buildCreateReq requests.BuildCreateRequest) (*r
 	}
 
 	pendingTasks, err := c.DB.GetPendingAppBuildTasks(project)
-	fmt.Println("Pending tasks:", pendingTasks)
 	if err != nil {
 		return nil, err
 	}
@@ -134,6 +132,8 @@ func (c *Controller) CreateBuild(buildCreateReq requests.BuildCreateRequest) (*r
 	// Create template project
 	// Make build
 	// Release the new build
+
+	var appBuildTask *models.AppBuildTask
 
 	cmd := exec.Command("python3", "scripts/create_build.py")
 	cmd.Args = append(cmd.Args, "--project-id", project.ID.String())
@@ -190,6 +190,20 @@ func (c *Controller) CreateBuild(buildCreateReq requests.BuildCreateRequest) (*r
 		if err := cmd.Run(); err != nil {
 			log.Println(err)
 			slog.Error("Build process failed", slog.String("build_id", createdBuild.ID.String()), slog.String("error", err.Error()))
+		} else {
+			var taskID string
+			if appBuildTask != nil {
+				taskID = appBuildTask.ID.String()
+			}
+			c.CRMService.SendEvent(user, constants.BREVO_EVENT_NEW_BUILD, map[string]any{
+				"build_id":       createdBuild.ID.String(),
+				"task_id":        taskID,
+				"project_id":     project.ID.String(),
+				"android_build":  project.BuildForAndroid,
+				"android_deploy": project.UseAutoDeployForAndroid,
+				"ios_build":      project.BuildForIOS,
+				"ios_deploy":     project.UseAutoDeployForIOS,
+			})
 		}
 	}()
 
