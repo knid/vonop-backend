@@ -54,6 +54,4 @@ RUN go mod download
 
 COPY . .
 
-RUN go build -o wemob-api 
-
 CMD ["make", "run"]
