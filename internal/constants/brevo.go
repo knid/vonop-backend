@@ -21,6 +21,7 @@ const (
 	BREVO_EVENT_TICKET_STATUS_CHANGED        = "ticket_status_changed"
 	BREVO_EVENT_TICKET_COMMENTED             = "ticket_commented"
 	BREVO_EVENT_NEW_PROJECT                  = "new_project"
+	BREVO_EVENT_PROJECT_UPDATED              = "new_project"
 	BREVO_EVENT_PROJECT_DELETED              = "project_deleted"
 	BREVO_EVENT_NEW_BUILD                    = "new_build"
 	BREVO_EVENT_NOTIFICATION_SENT            = "notification_sent"
