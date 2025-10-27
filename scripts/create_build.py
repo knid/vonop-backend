@@ -114,7 +114,7 @@ def zip_project(project_dir, app_id):
     return zip_path
 
 
-def create_dummy_aab(app_id, app_name):
+def create_dummy_aab(app_id, app_name, build_id):
     project_dir = WEMOB_PROJECTS_PATH / app_id
     android_dir = project_dir / "android"
     android_app_dir = android_dir / "app"
@@ -210,7 +210,7 @@ def create_dummy_aab(app_id, app_name):
             f"Expected AAB not found at {built_aab_path}; check Flutter build output"
         )
 
-    aab_path = BASE_PATH / "storage" / "public" / "builds" / f"{app_id}.aab"
+    aab_path = BASE_PATH / "storage" / "public" / "builds" / f"{build_id}.aab"
     aab_path.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(built_aab_path, aab_path)
     return aab_path
@@ -249,10 +249,11 @@ def update_db(task_id):
         conn.close()
 
 
-def create_project(task_id: str, app_id: str, app_name: str, url: str, icon: str, sscolor: str, build_android: bool, onesignal_app_id: str, package_name: str, remove_wemob_branding: bool):
+def create_project(task_id: str, build_id: str, app_id: str, app_name: str, url: str, icon: str, sscolor: str, build_android: bool, onesignal_app_id: str, package_name: str, remove_wemob_branding: bool):
     render_templates(task_id, app_id, onesignal_app_id, url, icon, sscolor, remove_wemob_branding)
     update_package_name(app_id, package_name)
-    aab_path = create_dummy_aab(app_id, app_name) if build_android else None
+    change_icon(app_id, icon)
+    aab_path = create_dummy_aab(app_id, app_name, build_id) if build_android else None
     update_db(task_id)
 
 def update_package_name(app_id: str, package_name: str):
@@ -267,8 +268,13 @@ def update_package_name(app_id: str, package_name: str):
         
     subprocess.run(command, check=True, cwd=str(project_dir))
 
-def change_icon(app_id: str):
+def change_icon(app_id: str, icon: str):
     project_dir = WEMOB_PROJECTS_PATH / app_id
+    
+    assets_icon_dir = project_dir / "assets" / "icon"
+    assets_icon_dir.mkdir(parents=True, exist_ok=True)
+    dest_icon_path = assets_icon_dir / "app_icon.png"
+    shutil.copy2(BASE_PATH / "storage" / "public" / "icons" / icon, dest_icon_path)
 
     command = [
         "dart",
@@ -283,6 +289,7 @@ def main():
     args = parse_args()
     create_project(
         task_id=args.build_task_id,
+        build_id=args.build_id,
         app_id=args.project_id,
         app_name=args.title,
         url=args.url,
