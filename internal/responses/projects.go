@@ -21,7 +21,8 @@ type ProjectListResponse struct {
 }
 
 type ProjectCreateResponse struct {
-	TaskID uuid.UUID `json:"task_id"`
+	ProjectID uuid.UUID `json:"project_id"`
+	TaskID    uuid.UUID `json:"task_id"`
 	SuccessResponse
 	// ProjectInformationResponse
 }

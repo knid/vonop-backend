@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"reflect"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -99,24 +100,12 @@ func (c *Controller) CreateProject(user *models.User, projectCreateReq requests.
 		return nil, errors.New("your subscription does not allow ios builds")
 	}
 
-	/* 	android, ios := false, false // Check subscription
-
-	   	if ios && user.UserAppleTeamID == "" {
-	   		return nil, errors.New("you need to set Apple Team ID in profile settings to use auto deploy for iOS")
-	   	} else if projectCreateReq.UseAutoDeployForIOS && projectCreateReq.UserAppleTeamID != "" {
-	   		user.UserAppleTeamID = projectCreateReq.UserAppleTeamID
-	   		var err error
-	   		user, err = c.DB.UpdateUser(user)
-	   		if err != nil {
-	   			return nil, err
-	   		}
-	   	} */
-
 	pkName, err := utils.RandomHex(5)
 	pkName = "com.wemob.app" + pkName
 	if err != nil {
 		return nil, err
 	}
+
 	project := models.Project{
 		UserID:                  user.ID,
 		URL:                     projectCreateReq.URL,
@@ -148,6 +137,24 @@ func (c *Controller) CreateProject(user *models.User, projectCreateReq requests.
 		return nil, err
 	}
 
+	if projectCreateReq.NavBarItems != nil {
+		navBarItems := models.NavBarItems{
+			ProjectID:       createdProject.ID,
+			BackgroundColor: projectCreateReq.NavBarBackgroundColor,
+			Items:           projectCreateReq.NavBarItems,
+		}
+		c.DB.CreateNavBarItems(&navBarItems)
+	}
+
+	if projectCreateReq.JSInjectionData != "" {
+		jsInjectionData := models.JSInjectData{
+			ProjectID:  createdProject.ID,
+			Base64Data: projectCreateReq.JSInjectionData,
+		}
+
+		c.DB.CreateJSInjectionData(&jsInjectionData)
+	}
+
 	buildCreateReq := requests.BuildCreateRequest{
 		ProjectID:         createdProject.ID,
 		Title:             projectCreateReq.Title,
@@ -168,12 +175,18 @@ func (c *Controller) CreateProject(user *models.User, projectCreateReq requests.
 		slack.MsgOptionText("New project: "+string(jsonProjectCreateReq), false),
 	)
 
-	createdBuildResponse, err := c.CreateBuild(buildCreateReq)
+	createdBuildResponse, err := c.CreateBuild(user, buildCreateReq)
 	if err != nil {
 		return nil, err
 	}
 
+	if !user.SetupFinished {
+		user.SetupFinished = true
+		c.DB.UpdateUser(user)
+	}
+
 	return &responses.ProjectCreateResponse{
+		ProjectID:       createdProject.ID,
 		TaskID:          createdBuildResponse.TaskID,
 		SuccessResponse: responses.SuccessResponse{Success: true},
 	}, nil
@@ -200,6 +213,10 @@ func (c *Controller) UpdateProject(r *http.Request, user *models.User, projectCr
 		return nil, errors.New("your subscription does not allow ios builds")
 	}
 
+	if projectCreateReq.RemoveWemobBranding && !limits.CanRemoveBrandLogo {
+		return nil, errors.New("your subscription does not allow to remove brand logo")
+	}
+
 	projectId := chi.URLParam(r, "projectId")
 	if projectId == "" {
 		return nil, errors.New("project_id is required")
@@ -212,6 +229,64 @@ func (c *Controller) UpdateProject(r *http.Request, user *models.User, projectCr
 
 	if project.UserID.String() != user.ID.String() {
 		return nil, errors.New("you do not have access this resources")
+	}
+
+	lastBuild, err := c.DB.GetLastProjectBuild(project)
+	if err != nil {
+		return nil, err
+	}
+
+	var hasNavBar bool
+	var navBarChanged bool
+	navBarItems, err := c.DB.GetNavBarItemsByProject(projectId)
+	if err == nil {
+		hasNavBar = true
+	}
+
+	if projectCreateReq.NavBarItems != nil {
+		if !hasNavBar {
+			navBarItems := models.NavBarItems{
+				Items:           projectCreateReq.NavBarItems,
+				BackgroundColor: projectCreateReq.NavBarBackgroundColor,
+				ProjectID:       project.ID,
+			}
+			_, err = c.DB.CreateNavBarItems(&navBarItems)
+			if err != nil {
+				return nil, err
+			}
+			navBarChanged = true
+		} else {
+			if !reflect.DeepEqual(navBarItems.Items, projectCreateReq.NavBarItems) || navBarItems.BackgroundColor != projectCreateReq.NavBarBackgroundColor {
+				navBarItems.Items = projectCreateReq.NavBarItems
+				navBarItems.BackgroundColor = projectCreateReq.NavBarBackgroundColor
+				c.DB.UpdateNavBarItems(navBarItems)
+				navBarChanged = true
+			}
+		}
+	} else {
+		if hasNavBar {
+			navBarChanged = true
+			c.DB.DeleteNavBarItems(navBarItems)
+		}
+	}
+
+	/* jsInjectionData, err := c.DB.GetJSInjectionDataByProject(projectId)
+	if err != nil {
+		return nil, err
+	} */
+	/* if jsInjectionData.Base64Data != projectCreateReq.JSInjectionData {
+		jsInjectionData.Base64Data = projectCreateReq.JSInjectionData
+		c.DB.UpdateJSInjectionData(jsInjectionData)
+	} */
+
+	if lastBuild.Title == projectCreateReq.Title && lastBuild.RemoveWemobBranding == projectCreateReq.RemoveWemobBranding &&
+		lastBuild.SplashScreenColor == projectCreateReq.SplashScreenColor && lastBuild.Description == projectCreateReq.Description &&
+		projectCreateReq.AppIcon == "" {
+		if navBarChanged {
+			return nil, errors.New("navbar changed successfuly")
+		} else {
+			return nil, errors.New("no change detected")
+		}
 	}
 
 	buildCreateReq := requests.BuildCreateRequest{
@@ -234,7 +309,7 @@ func (c *Controller) UpdateProject(r *http.Request, user *models.User, projectCr
 		slack.MsgOptionText("New project update: "+string(jsonProjectCreateReq), false),
 	)
 
-	_, err = c.CreateBuild(buildCreateReq)
+	_, err = c.CreateBuild(user, buildCreateReq)
 	if err != nil {
 		return nil, err
 	}
