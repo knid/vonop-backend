@@ -1,7 +1,9 @@
 package views
 
 import (
+	"fmt"
 	"net/http"
+	"net/url"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/knid/wemob/internal/requests"
@@ -35,6 +37,7 @@ func (v *HttpViews) LogAppEvent(w http.ResponseWriter, r *http.Request) {
 
 	response, err := v.Controller.LogAppEvent(r, logAppEventReq)
 	if err != nil {
+		fmt.Println("ERR IN LOG")
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -42,7 +45,7 @@ func (v *HttpViews) LogAppEvent(w http.ResponseWriter, r *http.Request) {
 	utils.JSONResponse(w, response, http.StatusOK)
 }
 
-func (v *HttpViews) GetDevices(w http.ResponseWriter, r *http.Request) {
+func (v *HttpViews) GetAllDevices(w http.ResponseWriter, r *http.Request) {
 
 	tokenString, err := utils.ExtractTokenFromHeader(r)
 	if err != nil {
@@ -92,63 +95,7 @@ func (v *HttpViews) GetDevices(w http.ResponseWriter, r *http.Request) {
 	utils.JSONResponse(w, devices, http.StatusOK)
 }
 
-func (v *HttpViews) GetActiveUsers(w http.ResponseWriter, r *http.Request) {
-	tokenString, err := utils.ExtractTokenFromHeader(r)
-	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
-		return
-	}
-	userInformationRes, err := v.Controller.GetUser(tokenString)
-	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
-		return
-	}
-
-	user, err := v.Controller.GetUserModelById(userInformationRes.ID.String())
-	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
-		return
-	}
-
-	if !(user.SubscriptionStatus == "active" || user.SubscriptionStatus == "trial") {
-		utils.JSONErrorResponse(w, "you do not have access to this resource", http.StatusForbidden)
-		return
-	}
-
-	subs, err := v.Controller.GetSubscription(user)
-	if err != nil || subs == nil || !subs.Limits.CanSeeActiveUsers {
-		utils.JSONErrorResponse(w, "you do not have access to this resource. please upgrade your subscription", http.StatusForbidden)
-		return
-	}
-
-	projectID := chi.URLParam(r, "projectId")
-	if projectID == "" {
-		utils.JSONErrorResponse(w, "project_id is required", http.StatusBadRequest)
-		return
-	}
-
-	projectInformationRes, err := v.Controller.GetProject(user, projectID)
-	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	project, err := v.Controller.GetProjectModelById(projectInformationRes.ID.String())
-	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	devices, err := v.Controller.GetActiveUsers(project.ID.String())
-	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	utils.JSONResponse(w, devices, http.StatusOK)
-
-}
-
-func (v *HttpViews) GetUniqueUsers(w http.ResponseWriter, r *http.Request) {
+func (v *HttpViews) GetUniqueDevices(w http.ResponseWriter, r *http.Request) {
 	tokenString, err := utils.ExtractTokenFromHeader(r)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
@@ -192,6 +139,18 @@ func (v *HttpViews) GetUniqueUsers(w http.ResponseWriter, r *http.Request) {
 	timeStartStr := r.URL.Query().Get("time_start")
 	timeEndStr := r.URL.Query().Get("time_end")
 
+	timeStartStr, err = url.QueryUnescape(timeStartStr)
+	if err != nil {
+		utils.JSONErrorResponse(w, "unsported time_start value", http.StatusBadRequest)
+		return
+	}
+
+	timeEndStr, err = url.QueryUnescape(timeEndStr)
+	if err != nil {
+		utils.JSONErrorResponse(w, "unsported time_end value", http.StatusBadRequest)
+		return
+	}
+
 	if timeStartStr == "" || timeEndStr == "" {
 		utils.JSONErrorResponse(w, "time_start and time_end are required", http.StatusBadRequest)
 		return
@@ -209,11 +168,226 @@ func (v *HttpViews) GetUniqueUsers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	devices, err := v.Controller.GetUniqueUsers(project.ID.String(), timeStart, timeEnd)
+	devices, err := v.Controller.GetUniqueDevices(project.ID.String(), timeStart, timeEnd)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
 	utils.JSONResponse(w, devices, http.StatusOK)
+
+}
+
+func (v *HttpViews) GetActiveDevices(w http.ResponseWriter, r *http.Request) {
+	tokenString, err := utils.ExtractTokenFromHeader(r)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+	userInformationRes, err := v.Controller.GetUser(tokenString)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	user, err := v.Controller.GetUserModelById(userInformationRes.ID.String())
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	if !(user.SubscriptionStatus == "active" || user.SubscriptionStatus == "trial") {
+		utils.JSONErrorResponse(w, "you do not have access to this resource", http.StatusForbidden)
+		return
+	}
+
+	projectID := chi.URLParam(r, "projectId")
+	if projectID == "" {
+		utils.JSONErrorResponse(w, "project_id is required", http.StatusBadRequest)
+		return
+	}
+
+	projectInformationRes, err := v.Controller.GetProject(user, projectID)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	project, err := v.Controller.GetProjectModelById(projectInformationRes.ID.String())
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	devices, err := v.Controller.GetActiveDevices(project.ID.String())
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	utils.JSONResponse(w, devices, http.StatusOK)
+}
+
+func (v *HttpViews) GetSessions(w http.ResponseWriter, r *http.Request) {
+	tokenString, err := utils.ExtractTokenFromHeader(r)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+	userInformationRes, err := v.Controller.GetUser(tokenString)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	user, err := v.Controller.GetUserModelById(userInformationRes.ID.String())
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	if !(user.SubscriptionStatus == "active" || user.SubscriptionStatus == "trial") {
+		utils.JSONErrorResponse(w, "you do not have access to this resource", http.StatusForbidden)
+		return
+	}
+
+	projectID := chi.URLParam(r, "projectId")
+	if projectID == "" {
+		utils.JSONErrorResponse(w, "project_id is required", http.StatusBadRequest)
+		return
+	}
+
+	projectInformationRes, err := v.Controller.GetProject(user, projectID)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	project, err := v.Controller.GetProjectModelById(projectInformationRes.ID.String())
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// extract timeStart and timeEnd from query parameters
+	timeStartStr := r.URL.Query().Get("time_start")
+	timeEndStr := r.URL.Query().Get("time_end")
+
+	timeStartStr, err = url.QueryUnescape(timeStartStr)
+	if err != nil {
+		utils.JSONErrorResponse(w, "unsported time_start value", http.StatusBadRequest)
+		return
+	}
+
+	timeEndStr, err = url.QueryUnescape(timeEndStr)
+	if err != nil {
+		utils.JSONErrorResponse(w, "unsported time_end value", http.StatusBadRequest)
+		return
+	}
+
+	if timeStartStr == "" || timeEndStr == "" {
+		utils.JSONErrorResponse(w, "time_start and time_end are required", http.StatusBadRequest)
+		return
+	}
+
+	timeStart, err := utils.ParseTime(timeStartStr)
+	if err != nil {
+		utils.JSONErrorResponse(w, "invalid time_start format", http.StatusBadRequest)
+		return
+	}
+
+	timeEnd, err := utils.ParseTime(timeEndStr)
+	if err != nil {
+		utils.JSONErrorResponse(w, "invalid time_end format", http.StatusBadRequest)
+		return
+	}
+
+	sessions, err := v.Controller.GetSessionsByProject(project, timeStart, timeEnd)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	utils.JSONResponse(w, sessions, http.StatusOK)
+}
+
+func (v *HttpViews) GetProjectEvents(w http.ResponseWriter, r *http.Request) {
+	tokenString, err := utils.ExtractTokenFromHeader(r)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+	userInformationRes, err := v.Controller.GetUser(tokenString)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	user, err := v.Controller.GetUserModelById(userInformationRes.ID.String())
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	if !(user.SubscriptionStatus == "active" || user.SubscriptionStatus == "trial") {
+		utils.JSONErrorResponse(w, "you do not have access to this resource", http.StatusForbidden)
+		return
+	}
+
+	projectID := chi.URLParam(r, "projectId")
+	if projectID == "" {
+		utils.JSONErrorResponse(w, "project_id is required", http.StatusBadRequest)
+		return
+	}
+
+	projectInformationRes, err := v.Controller.GetProject(user, projectID)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	project, err := v.Controller.GetProjectModelById(projectInformationRes.ID.String())
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// extract timeStart and timeEnd from query parameters
+	timeStartStr := r.URL.Query().Get("time_start")
+	timeEndStr := r.URL.Query().Get("time_end")
+
+	timeStartStr, err = url.QueryUnescape(timeStartStr)
+	if err != nil {
+		utils.JSONErrorResponse(w, "unsported time_start value", http.StatusBadRequest)
+		return
+	}
+
+	timeEndStr, err = url.QueryUnescape(timeEndStr)
+	if err != nil {
+		utils.JSONErrorResponse(w, "unsported time_end value", http.StatusBadRequest)
+		return
+	}
+
+	if timeStartStr == "" || timeEndStr == "" {
+		utils.JSONErrorResponse(w, "time_start and time_end are required", http.StatusBadRequest)
+		return
+	}
+
+	timeStart, err := utils.ParseTime(timeStartStr)
+	if err != nil {
+		utils.JSONErrorResponse(w, "invalid time_start format", http.StatusBadRequest)
+		return
+	}
+
+	timeEnd, err := utils.ParseTime(timeEndStr)
+	if err != nil {
+		utils.JSONErrorResponse(w, "invalid time_end format", http.StatusBadRequest)
+		return
+	}
+
+	projectEvents, err := v.Controller.GetProjectEvents(project, timeStart, timeEnd)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	utils.JSONResponse(w, projectEvents, http.StatusOK)
+
 }

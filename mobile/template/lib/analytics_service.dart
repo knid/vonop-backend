@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -16,12 +17,14 @@ class AnalyticsService {
 
   static const _deviceIdKey = 'wemob_device_id';
   static const _uuid = Uuid();
+  static const _pingInterval = Duration(seconds: 30);
 
   String? _deviceId;
   String? _appVersion;
   String? _platform;
   String? _model;
   String? _sessionId;
+  Timer? _pingTimer;
 
   Future<void>? _initialization;
   Future<void>? _sessionInitialization;
@@ -115,11 +118,19 @@ class AnalyticsService {
 
   Future<void> logAppOpened() => _logEvent('app_opened', startNewSession: true);
 
-  Future<void> logSessionStarted() => _logEvent('session_started');
+  Future<void> logSessionStarted() {
+    _startPingTimer();
+    return _logEvent('session_started');
+  }
 
-  Future<void> logSessionEnded() => _logEvent('session_ended');
+  Future<void> logSessionEnded() {
+    _stopPingTimer();
+    return _logEvent('session_ended');
+  }
 
   Future<void> logUrlVisited(String url) => _logEvent('url_visited', data: {'url': url});
+
+  Future<void> logPing() => _logEvent('ping');
 
   // Optional notificationId can be provided by callers when available.
   Future<void> logPushNotificationReceived([String? notificationId]) => _logEventWithoutSession(
@@ -220,11 +231,13 @@ class AnalyticsService {
 
   Future<void> _startNewSession() async {
     _sessionId = null;
+    _stopPingTimer();
     final creation = _createSession();
     _sessionInitialization = creation;
 
     try {
       await creation;
+      _startPingTimer();
     } catch (error) {
       _sessionInitialization = null;
       debugPrint('Analytics session initialization failed: $error');
@@ -285,5 +298,17 @@ class AnalyticsService {
     } catch (error) {
       throw StateError('Failed to parse analytics session response: $error');
     }
+  }
+
+  void _startPingTimer() {
+    _pingTimer?.cancel();
+    _pingTimer = Timer.periodic(_pingInterval, (_) {
+      unawaited(logPing());
+    });
+  }
+
+  void _stopPingTimer() {
+    _pingTimer?.cancel();
+    _pingTimer = null;
   }
 }

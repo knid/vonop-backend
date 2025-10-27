@@ -3,7 +3,7 @@ package requests
 import "github.com/google/uuid"
 
 type LogAppEventRequest struct {
-	SessionID uuid.UUID      `json:"session_id"`
+	SessionID string         `json:"session_id"`
 	EventType string         `json:"event_type"`
 	Data      map[string]any `json:"data"`
 }
