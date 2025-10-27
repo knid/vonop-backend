@@ -56,4 +56,4 @@ COPY . .
 
 RUN go build -o wemob-api 
 
-CMD ["./wemob-api"]
+CMD ["make", "run"]
