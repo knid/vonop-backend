@@ -10,17 +10,6 @@ api.wemob.io {
         Referrer-Policy "no-referrer-when-downgrade"
     }
 
-    rate_limit {
-        zone global_zone {
-            key {remote_ip}
-            events 100
-            window 1m
-        }
-
-        key {remote_ip}
-        zone global_zone
-    }
-
     log {
         output file /var/log/caddy/access.log
         format console
