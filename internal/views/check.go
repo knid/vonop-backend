@@ -30,5 +30,14 @@ func (v *HttpViews) CheckStatus(w http.ResponseWriter, r *http.Request) {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
 	}
 
-	utils.JSONResponse(w, user.SubscriptionStatus, http.StatusOK)
+	var status string
+	if user.SubscriptionStatus == "active" || user.SubscriptionStatus == "trial" {
+		status = "active"
+	} else {
+		status = "unactive"
+	}
+
+	utils.JSONResponse(w, map[string]string{
+		"status": status,
+	}, http.StatusOK)
 }

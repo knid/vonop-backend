@@ -16,6 +16,7 @@ type UserInformationResponse struct {
 	SubscriptionID     string    `json:"subscription_id"`
 	SubscriptionStatus string    `json:"subscription_status"`
 	TrialUsed          bool      `json:"trial_used"`
+	SetupFinished      bool      `json:"setup_finished"`
 }
 
 type UserLoginResponse struct {
