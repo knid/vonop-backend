@@ -56,10 +56,13 @@ func createSchema(db *bun.DB) error {
 		(*models.Device)(nil),
 		(*models.Notification)(nil),
 		(*models.StorePageImage)(nil),
+		(*models.Session)(nil),
 		(*models.AppUsageEvent)(nil),
 		(*models.AppBuildTask)(nil),
 		(*models.AppReleaseTask)(nil),
 		(*models.Ticket)(nil),
+		(*models.NavBarItems)(nil),
+		(*models.JSInjectData)(nil),
 	}
 
 	for _, model := range models {
@@ -90,7 +93,18 @@ func main() {
 
 	slog.SetDefault(logger)
 
-	dsn := "postgres://user:pass123@db/wemob?sslmode=disable"
+	dbHost := os.Getenv("DB_HOST")
+	dbPort := os.Getenv("DB_PORT")
+	dbName := os.Getenv("DB_NAME")
+	dbUser := os.Getenv("DB_USER")
+	dbPass := os.Getenv("DB_PASSWORD")
+	dbSSL := os.Getenv("DB_SSLMODE")
+
+	dsn := fmt.Sprintf(
+		"postgres://%s:%s@%s:%s/%s?sslmode=%s",
+		dbUser, dbPass, dbHost, dbPort, dbName, dbSSL,
+	)
+
 	sqldb := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn)))
 	bundb := bun.NewDB(sqldb, pgdialect.New())
 
@@ -109,10 +123,11 @@ func main() {
 	createSchema(bundb)
 
 	db := database.NewDatabase(bundb)
+	go utils.CheckSessionStatusJob(db)
 	controller := controllers.NewController(
 		db,
 		make(chan struct{}, constants.MAX_CONCURRENT_BUILDS),
-		services.NewSlackService("xoxb-9493000015029-9630636941798-kl16e3RRBmPKqDxOSDlCt1WP"),
+		services.NewSlackService(os.Getenv("SLACK_API_KEY")),
 		emailServices.NewBrevoEmailService(os.Getenv("BREVO_API_KEY")),
 		crmServices.NewBrevoCRMService(os.Getenv("BREVO_API_KEY")),
 	)
@@ -154,7 +169,6 @@ func main() {
 			httplog.SetAttrs(ctx, slog.String("from", "HTTPLOG"))
 
 			tokenString, err := utils.ExtractTokenFromHeader(r)
-			fmt.Println(tokenString, err)
 			if err == nil {
 				httplog.SetAttrs(ctx, slog.String("user.token", tokenString[0:12]+"..."))
 				userInformationRes, err := httpViews.Controller.GetUser(tokenString)
@@ -186,6 +200,7 @@ func main() {
 		})
 		r.Route("/v1", func(r chi.Router) {
 			r.Handle("/static/*", http.StripPrefix("/v1/static/", http.FileServer(utils.NoDirFileSystem{FS: staticDir})))
+			r.Get("/proxy", httpViews.HandleProxy)
 			r.Get("/check/{projectId}", httpViews.CheckStatus)
 			r.Route("/users", func(r chi.Router) {
 				r.Get("/me", httpViews.GetUser)
@@ -217,14 +232,16 @@ func main() {
 					r.Delete("/", httpViews.DeleteProject)
 					r.Route("/analytics", func(r chi.Router) {
 						r.Route("/events", func(r chi.Router) {
+							r.Get("/", httpViews.GetProjectEvents)
 							r.Post("/", httpViews.LogAppEvent)
 						})
-						r.Route("/sessions", func(r chi.Router) {
-							// r.Post("/", httpViews.LogAppSession)
+						r.Route("/session", func(r chi.Router) {
+							r.Post("/", httpViews.CreateSession)
 						})
-						r.Get("/devices", httpViews.GetDevices)
-						r.Get("/active-users", httpViews.GetActiveUsers)
-						r.Get("/unique-users", httpViews.GetUniqueUsers)
+						r.Get("/devices", httpViews.GetAllDevices)
+						r.Get("/active-users", httpViews.GetActiveDevices)
+						r.Get("/unique-users", httpViews.GetUniqueDevices)
+						r.Get("/sessions", httpViews.GetSessions)
 					})
 					r.Route("/notifications", func(r chi.Router) {
 						r.Get("/", httpViews.GetProjectNotifications)
@@ -239,7 +256,20 @@ func main() {
 							// r.Post("/", httpViews.SetReleasedBuild)
 						})
 					})
+					r.Route("/public", func(r chi.Router) {
+						r.Route("/navbar", func(r chi.Router) {
+							r.Get("/items", httpViews.GetNavBarItems)
+							r.Get("/color", httpViews.GetNavBarItemsBackground)
+						})
+						r.Route("/injection", func(r chi.Router) {
+							r.Get("/js", httpViews.GetJSInjectionData)
+						})
+					})
 				})
+				r.Route("/autofill", func(r chi.Router) {
+					r.Post("/navbar", httpViews.NavBarAutoFillWithAI)
+				})
+
 			})
 			r.Route("/billing", func(r chi.Router) {
 				r.Post("/checkout", httpViews.StripeCheckout)
