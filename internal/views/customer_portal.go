@@ -1,7 +1,6 @@
 package views
 
 import (
-	"fmt"
 	"log"
 	"net/http"
 
@@ -18,7 +17,6 @@ func (v *HttpViews) StripeCustomerPortal(w http.ResponseWriter, r *http.Request)
 	   	} */
 
 	tokenString := r.PostFormValue("token")
-	fmt.Println("Token:", tokenString)
 
 	userInformationRes, err := v.Controller.GetUser(tokenString)
 	if err != nil {

@@ -48,7 +48,6 @@ func ValidateFunc[T interface{}](obj interface{}, validate *validator.Validate) 
 
 	defer func() {
 		if r := recover(); r != nil {
-			fmt.Println("Recovered in Validate:", r)
 			errs = fmt.Errorf("can't validate %+v", r)
 		}
 	}()

@@ -2,8 +2,6 @@ package controllers
 
 import (
 	"errors"
-	"fmt"
-	"time"
 
 	"github.com/go-playground/validator/v10"
 	"github.com/knid/wemob/internal/models"
@@ -52,7 +50,6 @@ func (c *Controller) GetNotification(user *models.User, id string) (*models.Noti
 }
 
 func (c *Controller) SendNotification(user *models.User, notificationCreateReq requests.NotificationCreateRequest) (*responses.NotificationSendResponse, error) {
-	fmt.Println("SendNotification called at " + (string)(time.Now().Format("2006-01-02 15:04:05")))
 	validate := validator.New(validator.WithRequiredStructEnabled())
 	if err := validate.Struct(notificationCreateReq); err != nil {
 		return nil, err
@@ -73,17 +70,18 @@ func (c *Controller) SendNotification(user *models.User, notificationCreateReq r
 		Description: notificationCreateReq.Description,
 	}
 
-	fmt.Println("Creating notification in DB")
+	if notificationCreateReq.Image != "" {
+		notification.Image = "image/id.png"
+	}
+
 	createdNotification, err := c.DB.CreateNotification(&notification)
 	if err != nil {
 		return nil, err
 	}
 
-	fmt.Println("Saving image to: " + "storage/images/" + createdNotification.ID.String() + ".png")
+	utils.ConvertBase64ToImageSave(notificationCreateReq.Image, "images/"+createdNotification.ID.String())
 
-	utils.ConvertBase64ToImageSave(notificationCreateReq.Image, "storage/images/"+createdNotification.ID.String()+".png")
-
-	err = external.SendOneSignalNotification(&notification, project.OneSignalAppID)
+	err = external.SendOneSignalNotification(createdNotification, project)
 
 	return &responses.NotificationSendResponse{
 		SuccessResponse: responses.SuccessResponse{Success: true},
