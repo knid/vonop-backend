@@ -17,11 +17,23 @@ func (c *Controller) GetSubscription(user *models.User) (*responses.UserSubscrip
 		return nil, err
 	}
 
+	limitsResponse := responses.LimitsResponse{
+		ID:                      limits.ID,
+		MaximumProjectCount:     limits.MaximumProjectCount,
+		MontlyBuildCount:        limits.MontlyBuildCount,
+		MontlyNotificationCount: limits.MontlyNotificationCount,
+		CanBuildToAndroid:       limits.CanBuildToAndroid,
+		CanBuildToIOS:           limits.CanBuildToIOS,
+		CanUseAnalytics:         limits.CanUseAnalytics,
+		CanRemoveBrandLogo:      limits.CanRemoveBrandLogo,
+		CanSeeActiveUsers:       limits.CanSeeActiveUsers,
+	}
+
 	return &responses.UserSubscriptionInformationResponse{
 		ID:     subs.ID,
 		Name:   subs.Name,
 		Price:  subs.MonthlyPrice,
-		Limits: *limits,
+		Limits: limitsResponse,
 	}, nil
 
 }
