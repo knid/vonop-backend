@@ -17,8 +17,9 @@ func CreateOneSignalApplication(project models.Project) (string, error) {
 	url := "https://api.onesignal.com/apps"
 
 	payloadStr := map[string]string{
-		"name":            project.PackageName,
-		"organization_id": os.Getenv("ONESIGNAL_ORG_ID"),
+		"name":                        project.PackageName,
+		"organization_id":             os.Getenv("ONESIGNAL_ORG_ID"),
+		"fcm_v1_service_account_json": os.Getenv("FCM_V1_SERVICE_ACCOUNT_JSON_B64"),
 	}
 	marshalled, _ := json.Marshal(payloadStr)
 
@@ -68,9 +69,6 @@ func CreateOneSignalAppToken(project models.Project) (string, error) {
 
 	onesignal_app_api_key, ok := response["formatted_token"]
 	if !ok {
-		fmt.Println("**************************")
-		fmt.Println(response)
-		fmt.Println(project.OneSignalAppID)
 		slog.Error("Error creating OneSignal App Token", "response", response, "project_id", project.ID)
 		return "", errors.New("error creating app token")
 	}
@@ -78,11 +76,11 @@ func CreateOneSignalAppToken(project models.Project) (string, error) {
 	return onesignal_app_api_key.(string), nil
 }
 
-func SendOneSignalNotification(notification *models.Notification, appId string) error {
+func SendOneSignalNotification(notification *models.Notification, project *models.Project) error {
 	url := "https://api.onesignal.com/notifications?c=push"
 
 	payloadStr := map[string]any{
-		"app_id": appId,
+		"app_id": project.OneSignalAppID,
 		"contents": map[string]string{
 			"en": notification.Description,
 		},
@@ -92,9 +90,12 @@ func SendOneSignalNotification(notification *models.Notification, appId string) 
 		"data": map[string]string{
 			"notification_id": notification.ID.String(),
 		},
+		"included_segments": []string{
+			"Total Subscriptions",
+		},
 	}
 	if notification.Image != "" {
-		imgUrl := "https://api.wemob.io/v1/static/images/" + notification.Image + ".png"
+		imgUrl := "https://old-clocks-lick.loca.lt/v1/static/images/" + notification.ID.String() + ".png"
 		payloadStr["ios_attachments"] = map[string]string{
 			"id": imgUrl,
 		}
@@ -106,7 +107,7 @@ func SendOneSignalNotification(notification *models.Notification, appId string) 
 	req, _ := http.NewRequest("POST", url, bytes.NewReader(marshalled))
 
 	req.Header.Add("Content-Type", "application/json")
-	req.Header.Add("Authorization", "Basic "+os.Getenv("ONESIGNAL_ORG_API_KEY"))
+	req.Header.Add("Authorization", "Basic "+project.OneSignalAppToken)
 
 	res, _ := http.DefaultClient.Do(req)
 
