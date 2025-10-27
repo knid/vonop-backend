@@ -72,6 +72,11 @@ func (c *Controller) HandleWebhook(w http.ResponseWriter, req *http.Request) {
 
 			user.TrialUsed = true
 
+			if !user.SetupFinished {
+				user.SetupFinished = true
+				c.DB.UpdateUser(user)
+			}
+
 			if _, err := c.DB.UpdateUser(user); err != nil {
 				break
 			}
@@ -96,6 +101,10 @@ func (c *Controller) HandleWebhook(w http.ResponseWriter, req *http.Request) {
 			switch sub.Status {
 			case "active":
 				user.SubscriptionStatus = "active"
+				if !user.SetupFinished {
+					user.SetupFinished = true
+					c.DB.UpdateUser(user)
+				}
 			case "past_due":
 				user.SubscriptionStatus = "past_due"
 				user.SubscriptionID = uuid.Nil // Remove subscription association
@@ -135,6 +144,10 @@ func (c *Controller) HandleWebhook(w http.ResponseWriter, req *http.Request) {
 			}
 
 			user.SubscriptionStatus = "active"
+			if !user.SetupFinished {
+				user.SetupFinished = true
+				c.DB.UpdateUser(user)
+			}
 
 			go c.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_UPDATED, map[string]any{
 				"subscription_status": user.SubscriptionStatus,
