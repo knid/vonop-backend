@@ -1,6 +1,7 @@
 package views
 
 import (
+	"fmt"
 	"log"
 	"net/http"
 
@@ -10,6 +11,7 @@ import (
 )
 
 func (v *HttpViews) StripeCheckout(w http.ResponseWriter, r *http.Request) {
+	// TODO: Check user location, if user in GB return error with like this text: "We can't provide service for United Kingdom currently. Please try again later.". You can make it more professional.
 	tokenString, err := utils.ExtractTokenFromHeader(r)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
@@ -28,10 +30,12 @@ func (v *HttpViews) StripeCheckout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	fmt.Println("GETTED USER")
+
 	priceID := r.URL.Query().Get("price")
 	mode := string(stripe.CheckoutSessionModeSubscription)
 
-	successURL := "https://dashboard.wemob.io/billing/success?session_id={CHECKOUT_SESSION_ID}"
+	successURL := "https://dashboard.wemob.io/success?session_id={CHECKOUT_SESSION_ID}"
 	cancelURL := "https://example.com/pricing"
 
 	lineItems := []*stripe.CheckoutSessionLineItemParams{
@@ -42,11 +46,12 @@ func (v *HttpViews) StripeCheckout(w http.ResponseWriter, r *http.Request) {
 	}
 
 	params := &stripe.CheckoutSessionParams{
-		Customer:   stripe.String(user.CustomerID),
-		LineItems:  lineItems,
-		Mode:       &mode,
-		SuccessURL: &successURL,
-		CancelURL:  &cancelURL,
+		Customer:            stripe.String(user.CustomerID),
+		LineItems:           lineItems,
+		Mode:                &mode,
+		SuccessURL:          &successURL,
+		CancelURL:           &cancelURL,
+		AllowPromotionCodes: stripe.Bool(true),
 	}
 
 	if !user.TrialUsed {

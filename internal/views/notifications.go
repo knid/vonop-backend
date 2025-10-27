@@ -1,7 +1,6 @@
 package views
 
 import (
-	"fmt"
 	"net/http"
 	"time"
 
@@ -61,7 +60,6 @@ func (v *HttpViews) GetProjectNotifications(w http.ResponseWriter, r *http.Reque
 
 func (v *HttpViews) SendProjectNotification(w http.ResponseWriter, r *http.Request) {
 
-	fmt.Println("SendProjectNotification called at " + (string)(time.Now().Format("2006-01-02 15:04:05")))
 	tokenString, err := utils.ExtractTokenFromHeader(r)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
@@ -158,7 +156,6 @@ func (v *HttpViews) SendProjectNotification(w http.ResponseWriter, r *http.Reque
 
 	notificationCreateReq.ProjectID = projectUUID
 
-	fmt.Println("Received notification send request for project ID: " + projectId)
 	notificationSendRes, err := v.Controller.SendNotification(user, notificationCreateReq)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)

@@ -1,7 +1,6 @@
 package views
 
 import (
-	"fmt"
 	"net/http"
 	"time"
 
@@ -107,7 +106,6 @@ func (v *HttpViews) UpdateProject(w http.ResponseWriter, r *http.Request) {
 
 	if len(builds) >= limits.MontlyBuildCount {
 		utils.JSONErrorResponse(w, "you have reached your montly build limit", http.StatusForbidden)
-		fmt.Println("build count:", count, "limit:", limits.MontlyBuildCount)
 		go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_QUOTA_REACHED, map[string]any{
 			"action": "update_project",
 			"limit":  limits.MontlyBuildCount,
@@ -126,6 +124,10 @@ func (v *HttpViews) UpdateProject(w http.ResponseWriter, r *http.Request) {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+
+	go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_PROJECT_UPDATED, map[string]any{
+		"project_id": projectCreateRes.ID.String(),
+	})
 
 	utils.JSONResponse(w, projectCreateRes, http.StatusOK)
 
@@ -196,6 +198,10 @@ func (v *HttpViews) CreateProject(w http.ResponseWriter, r *http.Request) {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+
+	go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_NEW_PROJECT, map[string]any{
+		"project_id": projectCreateRes.ProjectID.String(),
+	})
 
 	utils.JSONResponse(w, projectCreateRes, http.StatusCreated)
 }
