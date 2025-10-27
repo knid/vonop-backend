@@ -288,8 +288,8 @@ func main() {
 
 			r.Post("/support/ticket", httpViews.CreateTicket)
 
-			r.Get("/health", httpViews.Health)
 		})
+		r.Get("/health", httpViews.Health)
 	})
 
 	http.ListenAndServe(":8001", r)
