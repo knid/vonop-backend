@@ -79,7 +79,7 @@ func createSchema(db *bun.DB) error {
 
 func initOAuth() {
 	goth.UseProviders(
-		google.New(os.Getenv("GOOGLE_CLIENT_ID"), os.Getenv("GOOGLE_SECRET_KEY"), "http://127.0.0.1:8001/v1/users/auth/google/callback", "email", "profile"),
+		google.New(os.Getenv("GOOGLE_CLIENT_ID"), os.Getenv("GOOGLE_SECRET_KEY"), "https://api.wemob.io/v1/users/auth/google/callback", "email", "profile"),
 	)
 }
 
