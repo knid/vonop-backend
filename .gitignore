@@ -1,5 +1,5 @@
-bin/
-builds/
-projects/
-storage/private
-.env.dev
+./bin/
+./builds/
+./projects/
+./storage/private
+./.env.dev
