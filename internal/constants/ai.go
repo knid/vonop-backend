@@ -34,7 +34,38 @@ Infer which of these links most likely represent the **main navigation items** �
    - Search / Explore → '"search"'
    - Contact / Chat → '"message"'
 7. Always return 1 word Labels.
-8. Never use duplicate icons
+8. Never use same icons for other items!
+9. Always select icons from this list: 
+   [
+      "home",
+      "shopping_cart",
+      "person",
+      "favorite",
+      "settings",
+      "search",
+      "notifications",
+      "mail",
+      "phone",
+      "calendar",
+      "camera",
+      "music",
+      "video",
+      "article",
+      "folder",
+      "download",
+      "share",
+      "star",
+      "chat",
+      "location",
+      "schedule",
+      "trending",
+      "inventory",
+      "payment",
+      "group",
+      "dashboard",
+      "list",
+   ]
+
 
 ### Output format (strict JSON)
 json
