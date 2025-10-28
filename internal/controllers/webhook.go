@@ -56,6 +56,10 @@ func (c *Controller) HandleWebhook(w http.ResponseWriter, req *http.Request) {
 
 			if !user.TrialUsed {
 				user.SubscriptionStatus = "trial"
+				go c.CRMService.SendEvent(user, constants.BREVO_EVENT_TRIAL_STARTED, map[string]any{
+					"subscription_status": user.SubscriptionStatus,
+					"subscription_id":     user.SubscriptionID.String(),
+				})
 				go c.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_UPDATED, map[string]any{
 					"subscription_status": user.SubscriptionStatus,
 					"subscription_id":     user.SubscriptionID.String(),
@@ -74,6 +78,7 @@ func (c *Controller) HandleWebhook(w http.ResponseWriter, req *http.Request) {
 
 			if !user.SetupFinished {
 				user.SetupFinished = true
+				go c.CRMService.SendEvent(user, constants.BREVO_EVENT_USER_SETUP_FINISHED, map[string]any{})
 				c.DB.UpdateUser(user)
 			}
 
@@ -103,6 +108,10 @@ func (c *Controller) HandleWebhook(w http.ResponseWriter, req *http.Request) {
 				user.SubscriptionStatus = "active"
 				if !user.SetupFinished {
 					user.SetupFinished = true
+					go c.CRMService.SendEvent(user, constants.BREVO_EVENT_USER_SETUP_FINISHED, map[string]any{})
+					if user.TrialUsed {
+						go c.CRMService.SendEvent(user, constants.BREVO_EVENT_TRIAL_ENDED, map[string]any{})
+					}
 					c.DB.UpdateUser(user)
 				}
 			case "past_due":
@@ -146,6 +155,7 @@ func (c *Controller) HandleWebhook(w http.ResponseWriter, req *http.Request) {
 			user.SubscriptionStatus = "active"
 			if !user.SetupFinished {
 				user.SetupFinished = true
+				go c.CRMService.SendEvent(user, constants.BREVO_EVENT_USER_SETUP_FINISHED, map[string]any{})
 				c.DB.UpdateUser(user)
 			}
 
@@ -219,6 +229,8 @@ func (c *Controller) HandleWebhook(w http.ResponseWriter, req *http.Request) {
 			if _, err := c.DB.UpdateUser(user); err != nil {
 				break
 			}
+
+			c.DB.UpdateUser(user)
 			// TODO: DB'de subscription'ı iptal et, kullanıcının erişimini kapat
 		}
 
@@ -259,6 +271,7 @@ func (c *Controller) HandleWebhook(w http.ResponseWriter, req *http.Request) {
 			user, err := c.DB.GetUserByStripeCustomerID(customerID)
 			if err == nil {
 				go c.CRMService.SendEvent(user, constants.BREVO_EVENT_UNHANDLED_EVENT, map[string]any{
+					"from":       "stripe-webhook",
 					"event_type": event.Type,
 				})
 				break
@@ -266,6 +279,7 @@ func (c *Controller) HandleWebhook(w http.ResponseWriter, req *http.Request) {
 		}
 
 		go c.CRMService.SendEvent(&models.User{}, constants.BREVO_EVENT_UNHANDLED_EVENT, map[string]any{
+			"from":       "stripe-webhook",
 			"event_type": event.Type,
 		})
 	}
