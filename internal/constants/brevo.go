@@ -11,6 +11,7 @@ const (
 	BREVO_EVENT_NEW_USER                     = "new_user"
 	BREVO_EVENT_NEW_LOGIN                    = "new_login"
 	BREVO_EVENT_USER_DELETED                 = "user_deleted"
+	BREVO_EVENT_USER_SETUP_FINISHED          = "user_setup_finished"
 	BREVO_EVENT_EMAIL_VERIFIED               = "email_verified"
 	BREVO_EVENT_USER_PROFILE_UPDATED         = "user_profile_updated"
 	BREVO_EVENT_PASSWORD_RESET               = "password_reset"
