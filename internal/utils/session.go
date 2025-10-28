@@ -7,7 +7,7 @@ import (
 )
 
 func CheckSessionStatusJob(DB *database.Database) {
-	ticker := time.NewTicker(time.Minute * 10)
+	ticker := time.NewTicker(time.Seconds * 30)
 
 	for range ticker.C {
 		sessions, err := DB.GetActiveSessions()
