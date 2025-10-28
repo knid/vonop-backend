@@ -35,28 +35,6 @@ type ChatResponse struct {
 }
 
 func (v *HttpViews) NavBarAutoFillWithAI(w http.ResponseWriter, r *http.Request) {
-	tokenString, err := utils.ExtractTokenFromHeader(r)
-	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
-		return
-	}
-	userInformationRes, err := v.Controller.GetUser(tokenString)
-	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
-		return
-	}
-
-	user, err := v.Controller.GetUserModelById(userInformationRes.ID.String())
-	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
-		return
-	}
-
-	if !(user.SubscriptionStatus == "active" || user.SubscriptionStatus == "trial") {
-		utils.JSONErrorResponse(w, "you do not have access to this resource", http.StatusForbidden)
-		return
-	}
-
 	var navBarAutoFillWithAIReq requests.NavBarAutoFillWithAIRequest
 	if err := utils.ParseJSONBody(r, &navBarAutoFillWithAIReq); err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
