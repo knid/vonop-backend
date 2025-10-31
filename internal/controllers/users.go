@@ -219,8 +219,13 @@ func (c *Controller) GoogleLogin(oauthUser goth.User) (*responses.UserLoginRespo
 				Verified: true,
 			}
 
+			user, err = c.DB.CreateUser(&newUser)
+			if err != nil {
+				return nil, err
+			}
+
 			params := stripe.CustomerParams{
-				Email: &user.Email,
+				Email: stripe.String(user.Email),
 				Metadata: map[string]string{
 					"user_id": user.ID.String(),
 				},
@@ -230,8 +235,8 @@ func (c *Controller) GoogleLogin(oauthUser goth.User) (*responses.UserLoginRespo
 			if err != nil {
 				return nil, err
 			}
-			newUser.CustomerID = customer.ID
-			user, err = c.DB.CreateUser(&newUser)
+			user.CustomerID = customer.ID
+			c.DB.UpdateUser(user)
 
 			go c.SlackService.Client.PostMessage(
 				constants.SLACK_CHANNEL_ID_NEW_USER,
@@ -240,10 +245,6 @@ func (c *Controller) GoogleLogin(oauthUser goth.User) (*responses.UserLoginRespo
 			go c.CRMService.SendEvent(user, constants.BREVO_EVENT_NEW_USER, map[string]any{
 				"provider": "google",
 			})
-
-			if err != nil {
-				return nil, err
-			}
 		}
 	}
 
