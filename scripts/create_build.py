@@ -80,8 +80,10 @@ def render_templates(task_id, app_id, onesignal_app_id, url, icon, sscolor, remo
     
     # Copy WEMOB_MOBILE_TEMPLATE_PATH to WEMOB_PROJECTS_PATH/{app_id}
     if base_template_dir.exists():
-        shutil.rmtree(base_template_dir)
-    shutil.copytree(WEMOB_MOBILE_TEMPLATE_PATH, base_template_dir, symlinks=True, dirs_exist_ok=True)
+        for template_file in WEMOB_TEMPLATE_FILES:
+            shutil.copyfile(WEMOB_MOBILE_TEMPLATE_PATH / template_file, base_template_dir / template_file)    
+    else:
+        shutil.copytree(WEMOB_MOBILE_TEMPLATE_PATH, base_template_dir, symlinks=True, dirs_exist_ok=True)
 
     for template_file in WEMOB_TEMPLATE_FILES:
         template_path = base_template_dir / template_file
@@ -176,7 +178,7 @@ def create_dummy_aab(app_id, app_name, build_id):
                 "Existing Android keystore found but credentials are missing; provide them via key.properties or environment variables"
             )
 
-    android_dir.mkdir(parents=True, exist_ok=True)
+    # android_dir.mkdir(parents=True, exist_ok=True)
     key_properties_content = (
         f"storePassword={store_pass}\n"
         f"keyPassword={key_pass}\n"
