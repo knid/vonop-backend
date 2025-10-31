@@ -46,6 +46,7 @@ func (c *Controller) GetUser(tokenStr string) (*responses.UserInformationRespons
 		Provider:           user.Provider,
 		SubscriptionID:     user.SubscriptionID.String(),
 		SubscriptionStatus: user.SubscriptionStatus,
+		SetupFinished:      user.SetupFinished,
 		TrialUsed:          user.TrialUsed,
 	}, nil
 }
