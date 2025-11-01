@@ -68,7 +68,7 @@ def parse_args():
     parser.add_argument("--remove-wemob-branding", action="store_true", help="Remove Wemob branding")
     return parser.parse_args()
 
-def render_templates(task_id, app_id, onesignal_app_id, url, icon, sscolor, remove_wemob_branding):
+def render_templates(task_id, app_id, onesignal_app_id, url, icon, sscolor, remove_wemob_branding, app_name):
     """
     Compute base template folder as WEMOB_PROJECTS_PATH/{build_id} and update
     template files in-place there, keeping other files unchanged.
@@ -93,6 +93,7 @@ def render_templates(task_id, app_id, onesignal_app_id, url, icon, sscolor, remo
 
         template = Template(template_content)
         rendered_content = template.render(
+            PROJECT_NAME=app_name,
             WEMOB_PROJECT_ID=app_id,
             ONESIGNAL_APP_ID=onesignal_app_id,
             WEMOB_PROJECT_URL=url,
@@ -252,7 +253,7 @@ def update_db(task_id):
 
 
 def create_project(task_id: str, build_id: str, app_id: str, app_name: str, url: str, icon: str, sscolor: str, build_android: bool, onesignal_app_id: str, package_name: str, remove_wemob_branding: bool):
-    render_templates(task_id, app_id, onesignal_app_id, url, icon, sscolor, remove_wemob_branding)
+    render_templates(task_id, app_id, onesignal_app_id, url, icon, sscolor, remove_wemob_branding, app_name)
     update_package_name(app_id, package_name)
     change_icon(app_id, icon)
     aab_path = create_dummy_aab(app_id, app_name, build_id) if build_android else None

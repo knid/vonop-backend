@@ -12,7 +12,7 @@ import 'analytics_service.dart';
 import 'navigation_helper.dart';
 import 'utils.dart';
 
-const String analyticsBaseUrl = "https://7a1d46d1052b.ngrok-free.app";
+const String analyticsBaseUrl = "https://api.wemob.io";
 const String analyticsProjectId = "{{ WEMOB_PROJECT_ID }}";
 const String navigationConfigUrl = "$analyticsBaseUrl/projects/$analyticsProjectId/public/navbar";
 
