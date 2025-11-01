@@ -31,7 +31,7 @@ func (v *HttpViews) StripeCustomerPortal(w http.ResponseWriter, r *http.Request)
 	}
 
 	params := stripe.BillingPortalSessionParams{
-		Configuration: stripe.String("bpc_1SEIoRGdh8XYrKRBeWgGwDLe"),
+		Configuration: stripe.String("bpc_1SOc18K7z6hzuvzBFv67UHIC"),
 		Customer:      stripe.String(user.CustomerID),
 	}
 
