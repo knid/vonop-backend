@@ -100,7 +100,7 @@ func (c *Controller) CreateProject(user *models.User, projectCreateReq requests.
 		return nil, errors.New("your subscription does not allow ios builds")
 	}
 
-	pkName, err := utils.RandomHex(5)
+	pkName, err := utils.RandomHex(3)
 	pkName = "com.wemob.app" + pkName
 	if err != nil {
 		return nil, err
