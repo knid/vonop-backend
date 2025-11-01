@@ -1,5 +1,5 @@
-name: template # {{ PROJECT_NAME }}
-description: "{{ PROJECT_DESCRIPTION }}"
+name: "{{ PROJECT_NAME }}"
+description: "{{ PROJECT_NAME }} - Created by wemob.io"
 publish_to: 'none' 
 version: 1.0.0+1 # {{ PROJECT_VERSION }}+1
 
