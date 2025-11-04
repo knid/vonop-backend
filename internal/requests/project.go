@@ -9,6 +9,8 @@ type ProjectCreateRequest struct {
 	BuildForAndroid         bool             `json:"build_for_android"`
 	BuildForIOS             bool             `json:"build_for_ios"`
 	UserAppleTeamID         string           `json:"user_apple_team_id"`
+	P8PrivateKey            string           `json:"p8_key_file"`
+	UserAppleIssuerID       string           `json:"apple_issuer_id"`
 	UseAutoDeployForIOS     bool             `json:"use_auto_deploy_for_ios"`
 	UseAutoDeployForAndroid bool             `json:"use_auto_deploy_for_android"`
 	RemoveWemobBranding     bool             `json:"remove_wemob_branding"`
