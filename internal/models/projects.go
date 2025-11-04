@@ -16,6 +16,8 @@ type Project struct {
 	OneSignalAppID          string    `bun:",notnull,unique"`
 	OneSignalAppToken       string    `bun:",notnull,unique"`
 	UserAppleTeamID         string    `bun:",nullzero"`
+	UserAppleIssuerID       string    `bun:",nullzero"`
+	UserAppleP8PrivateKey   string    `bun:",nullzero"`
 	BuildForAndroid         bool      `bun:",notnull,default:true"`
 	BuildForIOS             bool      `bun:",notnull,default:false"`
 	UseAutoDeployForIOS     bool      `bun:",notnull,default:false"`
