@@ -17,6 +17,8 @@ WEMOB_PROJECTS_PATH        = BASE_PATH / "projects"
 WEMOB_TEMPLATE_FILES = [
     "pubspec.yaml",
     "lib/main.dart",
+    "android/app/src/main/AndroidManifest.xml",
+    "ios/Runner/Info.plist",
 ]
 
 # Postgres connection settings sourced from environment (POSTGRES_* prefix)

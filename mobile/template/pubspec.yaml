@@ -1,4 +1,4 @@
-name: "{{ PROJECT_NAME }}"
+name: "wemob_app"
 description: "{{ PROJECT_NAME }} - Created by wemob.io"
 publish_to: 'none' 
 version: 1.0.0+1 # {{ PROJECT_VERSION }}+1
