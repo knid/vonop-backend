@@ -14,7 +14,8 @@ import 'utils.dart';
 
 const String analyticsBaseUrl = "https://api.wemob.io";
 const String analyticsProjectId = "{{ WEMOB_PROJECT_ID }}";
-const String navigationConfigUrl = "$analyticsBaseUrl/projects/$analyticsProjectId/public/navbar";
+const String navigationConfigUrl = "$analyticsBaseUrl/v1/projects/$analyticsProjectId/public/navbar/items";
+const String navigationColorUrl = "$analyticsBaseUrl/v1/projects/$analyticsProjectId/public/navbar/color";
 
 class NavItem {
   const NavItem({
@@ -63,6 +64,7 @@ class _WemobAppState extends State<WemobApp> with WidgetsBindingObserver {
   bool _projectCheckCompleted = false;
   bool _projectActive = true;
   List<NavItem> _navItems = <NavItem>[];
+  String _navColor = "";
   int _selectedNavIndex = 0;
 
   @override
@@ -311,7 +313,7 @@ class _WemobAppState extends State<WemobApp> with WidgetsBindingObserver {
           value: overlayStyle,
           child: SafeArea(child: _buildBodyContent(externalColor, isDark)),
         ),
-        bottomNavigationBar: _buildBottomNavigationBar(externalColor, isDark),
+        bottomNavigationBar: _buildBottomNavigationBar(isDark),
       ),
     );
   }
@@ -368,7 +370,7 @@ class _WemobAppState extends State<WemobApp> with WidgetsBindingObserver {
         return;
       }
 
-      final items = decoded is Map<String, dynamic> ? decoded['items'] : null;
+      final items = decoded is Map<String, dynamic> ? decoded['data'] : null;
       if (items is! List) {
         debugPrint('Navigation payload missing items array: ${response.body}');
         return;
@@ -398,20 +400,54 @@ class _WemobAppState extends State<WemobApp> with WidgetsBindingObserver {
     } catch (error) {
       debugPrint('Navigation request failed: $error');
     }
+    
+    try {
+      final response =
+          await http.get(Uri.parse(navigationColorUrl)).timeout(const Duration(seconds: 10));
+
+      if (response.statusCode != 200) {
+        debugPrint('Navigation request failed with status: ${response.statusCode}');
+        return;
+      }
+
+      dynamic decoded;
+      try {
+        decoded = jsonDecode(response.body);
+      } catch (_) {
+        debugPrint('Invalid navigation payload: ${response.body}');
+        return;
+      }
+
+      final color = decoded is Map<String, dynamic> ? decoded['data'] : null;
+      if (color is! String) {
+        debugPrint('Navigation payload missing color string: ${response.body}');
+        return;
+      }
+
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _navColor = color;
+      });
+    } catch (error) {
+      debugPrint('Navigation request failed: $error');
+    }
   }
 
-  Widget? _buildBottomNavigationBar(Color background, bool isDark) {
+  Widget? _buildBottomNavigationBar(bool isDark) {
     if (_navItems.isEmpty) {
       return null;
     }
 
-    final activeColor = isDark ? Colors.white : Colors.black;
-    final inactiveColor = activeColor.withOpacity(0.6);
+    final bgColor = _navColor.isNotEmpty ? Color( int.parse(_navColor.replaceFirst('#', '0xff'))) : (isDark ? Colors.black : Colors.white);
+    final activeColor = bgColor.withValues(alpha: 0.6);
 
     return BottomNavigationBar(
-      backgroundColor: background,
+      backgroundColor: bgColor,
       selectedItemColor: activeColor,
-      unselectedItemColor: inactiveColor,
       type: BottomNavigationBarType.fixed,
       currentIndex: _selectedNavIndex,
       onTap: _handleNavigationTap,
@@ -459,24 +495,64 @@ class _WemobAppState extends State<WemobApp> with WidgetsBindingObserver {
     return baseUri.resolveUri(uri);
   }
 
-  IconData _iconForName(String name) {
+    IconData _iconForName(String name) {
     switch (name) {
       case 'home':
-        return Icons.home;
-      case 'search':
-        return Icons.search;
+        return CupertinoIcons.home;
       case 'shopping_cart':
-        return Icons.shopping_cart;
+        return CupertinoIcons.shopping_cart;
       case 'person':
-        return Icons.person;
+        return CupertinoIcons.person;
       case 'favorite':
-        return Icons.favorite;
-      case 'message':
-        return Icons.message;
-      case 'store':
-        return Icons.store;
+        return CupertinoIcons.heart;
+      case 'settings':
+        return CupertinoIcons.settings;
+      case 'search':
+        return CupertinoIcons.search;
+      case 'notifications':
+        return CupertinoIcons.bell;
+      case 'mail':
+        return CupertinoIcons.mail;
+      case 'phone':
+        return CupertinoIcons.phone;
+      case 'calendar':
+        return CupertinoIcons.calendar;
+      case 'camera':
+        return CupertinoIcons.camera;
+      case 'music':
+        return CupertinoIcons.music_note;
+      case 'video':
+        return CupertinoIcons.video_camera;
+      case 'article':
+        return CupertinoIcons.news;
+      case 'folder':
+        return CupertinoIcons.folder;
+      case 'download':
+        return CupertinoIcons.cloud_download;
+      case 'share':
+        return CupertinoIcons.share;
+      case 'star':
+        return CupertinoIcons.star;
+      case 'chat':
+        return CupertinoIcons.chat_bubble_2;
+      case 'location':
+        return CupertinoIcons.location;
+      case 'schedule':
+        return CupertinoIcons.time;
+      case 'trending':
+        return CupertinoIcons.flame;
+      case 'inventory':
+        return CupertinoIcons.cube_box;
+      case 'payment':
+        return CupertinoIcons.creditcard;
+      case 'group':
+        return CupertinoIcons.group;
+      case 'dashboard':
+        return CupertinoIcons.graph_square;
+      case 'list':
+        return CupertinoIcons.list_bullet;
       default:
-        return Icons.circle;
+        return CupertinoIcons.question_circle;
     }
   }
 
