@@ -36,7 +36,7 @@ func (v *HttpViews) StripeCheckout(w http.ResponseWriter, r *http.Request) {
 	mode := string(stripe.CheckoutSessionModeSubscription)
 
 	successURL := "https://dashboard.wemob.io/success?session_id={CHECKOUT_SESSION_ID}"
-	cancelURL := "https://example.com/pricing"
+	cancelURL := "https://dashboard.wemob.io/subscription"
 
 	lineItems := []*stripe.CheckoutSessionLineItemParams{
 		{
