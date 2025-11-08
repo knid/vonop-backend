@@ -128,7 +128,7 @@ func (db *Database) GetActiveSessions() ([]models.Session, error) {
 
 func (db *Database) GetLastEventBySession(session *models.Session) (*models.AppUsageEvent, error) {
 	var appUsageEvent models.AppUsageEvent
-	err := db.DB.NewSelect().Model(&appUsageEvent).Where("session_id = ?", appUsageEvent.SessionID.String()).Order("created_at DESC").Limit(1).Scan(context.Background())
+	err := db.DB.NewSelect().Model(&appUsageEvent).Where("session_id = ?", session.ID.String()).Order("created_at DESC").Limit(1).Scan(context.Background())
 
 	return &appUsageEvent, err
 }
