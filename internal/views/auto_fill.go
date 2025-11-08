@@ -56,9 +56,15 @@ func (v *HttpViews) NavBarAutoFillWithAI(w http.ResponseWriter, r *http.Request)
 	html, err := utils.FetchHTML(navBarAutoFillWithAIReq.URL)
 	if err != nil {
 		log.Fatalf("❌ Error fetching page: %v", err)
+		utils.JSONErrorResponse(w, "Error fetching website. Try again please.", http.StatusBadRequest)
+		return
 	}
 
 	urls := utils.ExtractAllURLs(html, navBarAutoFillWithAIReq.URL)
+	if len(urls) == 0 {
+		utils.JSONErrorResponse(w, "No navigation URLs found on the page.", http.StatusBadRequest)
+		return
+	}
 	output := map[string]any{"urls": urls}
 
 	data, _ := json.MarshalIndent(output, "", "  ")
@@ -81,7 +87,7 @@ func (v *HttpViews) NavBarAutoFillWithAI(w http.ResponseWriter, r *http.Request)
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.JSONErrorResponse(w, "Error generating items. Try again please.", http.StatusBadRequest)
 		return
 	}
 	defer resp.Body.Close()
@@ -89,7 +95,7 @@ func (v *HttpViews) NavBarAutoFillWithAI(w http.ResponseWriter, r *http.Request)
 	respBody, _ := io.ReadAll(resp.Body)
 	var parsed ChatResponse
 	if err := json.Unmarshal(respBody, &parsed); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.JSONErrorResponse(w, "Error creating items. Try again please.", http.StatusBadRequest)
 		return
 	}
 
