@@ -3,6 +3,7 @@ package controllers
 import (
 	"database/sql"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/go-playground/validator/v10"
@@ -69,6 +70,9 @@ func (c *Controller) UpdateUser(user *models.User, userUpdateReq requests.UserUp
 
 	updatedUser, err := c.DB.UpdateUser(user)
 	if err != nil {
+		if strings.Contains(err.Error(), "23505") {
+			return nil, errors.New("user with this email already exists")
+		}
 		return nil, err
 	}
 
@@ -100,6 +104,9 @@ func (c *Controller) RegisterUser(userRegisterReq requests.UserRegisterRequest) 
 
 	createdUser, err := c.DB.CreateUser(&user)
 	if err != nil {
+		if strings.Contains(err.Error(), "23505") {
+			return nil, errors.New("user with this email already exists")
+		}
 		return nil, err
 	}
 
@@ -144,6 +151,9 @@ func (c *Controller) LoginUser(userLoginReq requests.UserLoginRequest) (*respons
 
 	user, err := c.DB.GetUserByEmail(userLoginReq.Email)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, errors.New("user with this email does not exist")
+		}
 		return nil, err
 	}
 
