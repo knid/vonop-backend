@@ -3,7 +3,6 @@ package controllers
 import (
 	"database/sql"
 	"errors"
-	"log"
 	"log/slog"
 	"os/exec"
 
@@ -192,10 +191,9 @@ func (c *Controller) CreateBuild(user *models.User, buildCreateReq requests.Buil
 	go func() {
 		c.ConcurrentBuildLimiter <- struct{}{}
 		defer func() { <-c.ConcurrentBuildLimiter }()
-		slog.Info("Starting build process", slog.Any("command_list", cmd.Args))
+		slog.Default().With("from", "BUILD CMDS").Info("Starting build process", slog.Any("command_list", cmd.Args))
 		if err := cmd.Run(); err != nil {
-			log.Println(err)
-			slog.Error("Build process failed", slog.String("build_id", createdBuild.ID.String()), slog.String("error", err.Error()))
+			slog.Default().With("from", "BUILD CMDS").Error("Build process failed", slog.String("build_id", createdBuild.ID.String()), slog.String("error", err.Error()))
 		} else {
 			var taskID string
 			if appBuildTask != nil {

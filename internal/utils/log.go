@@ -91,12 +91,12 @@ type CommandLogWriter struct {
 }
 
 func (lw *CommandLogWriter) Write(p []byte) (n int, err error) {
+	logger := slog.Default().With("from", "BUILD CMDS")
 	msg := string(bytes.TrimSpace(p))
 	args := []any{}
 	for k, v := range lw.Meta {
 		args = append(args, k, v)
 	}
-	args = append(args, "output", msg)
-	slog.Log(context.Background(), lw.Level, "cmd output", args...)
+	logger.Log(context.Background(), lw.Level, msg, args...)
 	return len(p), nil
 }
