@@ -5,7 +5,6 @@ import (
 	"errors"
 	"log"
 	"log/slog"
-	"os"
 	"os/exec"
 
 	"github.com/go-playground/validator/v10"
@@ -181,12 +180,19 @@ func (c *Controller) CreateBuild(user *models.User, buildCreateReq requests.Buil
 		}
 	}
 
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	meta := map[string]any{
+		"build_id":   createdBuild.ID.String(),
+		"project_id": project.ID.String(),
+		"user_id":    user.ID.String(),
+	}
+
+	cmd.Stdout = &utils.CommandLogWriter{Level: slog.LevelInfo, Meta: meta}
+	cmd.Stderr = &utils.CommandLogWriter{Level: slog.LevelError, Meta: meta}
 
 	go func() {
 		c.ConcurrentBuildLimiter <- struct{}{}
 		defer func() { <-c.ConcurrentBuildLimiter }()
+		slog.Info("Starting build process", slog.Any("command_list", cmd.Args))
 		if err := cmd.Run(); err != nil {
 			log.Println(err)
 			slog.Error("Build process failed", slog.String("build_id", createdBuild.ID.String()), slog.String("error", err.Error()))
