@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"bytes"
 	"context"
 	"regexp"
 	"time"
@@ -81,4 +82,21 @@ func MaskSensitive(sql string) string {
 		masked = re.ReplaceAllString(masked, "'********'")
 	}
 	return masked
+}
+
+// Command Log Writer
+type CommandLogWriter struct {
+	Level slog.Level
+	Meta  map[string]any
+}
+
+func (lw *CommandLogWriter) Write(p []byte) (n int, err error) {
+	msg := string(bytes.TrimSpace(p))
+	args := []any{}
+	for k, v := range lw.Meta {
+		args = append(args, k, v)
+	}
+	args = append(args, "output", msg)
+	slog.Log(context.Background(), lw.Level, "cmd output", args...)
+	return len(p), nil
 }
