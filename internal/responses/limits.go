@@ -5,6 +5,7 @@ import "github.com/google/uuid"
 type LimitsResponse struct {
 	ID                      uuid.UUID `json:"id"`
 	MaximumProjectCount     int       `json:"maximum_project_count"`
+	MaximumAccessIdCount    int       `json:"maximum_access_id_count"`
 	MontlyNotificationCount int       `json:"montly_notification_count"`
 	MontlyBuildCount        int       `json:"montly_build_count"`
 	CanBuildToAndroid       bool      `json:"can_build_to_android"`

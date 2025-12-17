@@ -9,6 +9,7 @@ import (
 type StandartUserLimits struct {
 	ID                      uuid.UUID `bun:",pk,type:uuid,default:uuid_generate_v4()"`
 	MaximumProjectCount     int       `bun:",notnull"`
+	MaximumCredentialCount  int       `bun:",notnull"`
 	MontlyNotificationCount int       `bun:",notnull"`
 	MontlyBuildCount        int       `bun:",notnull"`
 	CanBuildToAndroid       bool      `bun:",notnull"`
