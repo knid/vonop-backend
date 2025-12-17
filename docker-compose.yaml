@@ -6,9 +6,6 @@ services:
     restart: unless-stopped
     expose:
       - "8001"
-    volumes:
-      - ./projects:/app/projects
-      - ./storage:/app/storage
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:8001/health" ]
       interval: 10s
