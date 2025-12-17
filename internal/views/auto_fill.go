@@ -1,13 +1,9 @@
 package views
 
 import (
-	"bytes"
 	"encoding/json"
-	"fmt"
-	"io"
 	"log"
 	"net/http"
-	"os"
 
 	"github.com/go-playground/validator/v10"
 	"github.com/knid/wemob/internal/constants"
@@ -47,12 +43,6 @@ func (v *HttpViews) NavBarAutoFillWithAI(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	apiKey := os.Getenv("OPENROUTER_API_KEY")
-	if apiKey == "" {
-		fmt.Println("Please set OPENROUTER_API_KEY in your environment.")
-		return
-	}
-
 	html, err := utils.FetchHTML(navBarAutoFillWithAIReq.URL)
 	if err != nil {
 		log.Fatalf("❌ Error fetching page: %v", err)
@@ -69,37 +59,11 @@ func (v *HttpViews) NavBarAutoFillWithAI(w http.ResponseWriter, r *http.Request)
 
 	data, _ := json.MarshalIndent(output, "", "  ")
 
-	// Prepare request
-	reqBody := ChatRequest{
-		Model: "openai/gpt-oss-20b:free", // or "claude-3.5-sonnet", "mistral-large-latest", etc.
-		Messages: []Message{
-			{Role: "system", Content: constants.NAVBAR_ITEM_GENERATOR_PROMPT},
-			{Role: "user", Content: string(data)},
-		},
-	}
-	body, _ := json.Marshal(reqBody)
-
-	req, _ := http.NewRequest("POST", "https://openrouter.ai/api/v1/chat/completions", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+apiKey)
-	req.Header.Set("HTTP-Referer", "https://wemob.io") // Optional branding
-	req.Header.Set("X-Title", "wemob-nav-analyzer")    // Optional project name
-
-	resp, err := http.DefaultClient.Do(req)
+	outputJson, err := utils.GetJSONFromLLM(constants.DEFAULT_LLM_MODEL, constants.NAVBAR_ITEM_GENERATOR_PROMPT, string(data))
 	if err != nil {
 		utils.JSONErrorResponse(w, "Error generating items. Try again please.", http.StatusBadRequest)
 		return
 	}
-	defer resp.Body.Close()
-
-	respBody, _ := io.ReadAll(resp.Body)
-	var parsed ChatResponse
-	if err := json.Unmarshal(respBody, &parsed); err != nil {
-		utils.JSONErrorResponse(w, "Error creating items. Try again please.", http.StatusBadRequest)
-		return
-	}
-
-	outputJson := utils.CleanLLMOutput(parsed.Choices[0].Message.Content)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(200)
