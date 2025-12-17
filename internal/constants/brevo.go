@@ -24,7 +24,7 @@ const (
 	BREVO_EVENT_NEW_PROJECT                  = "new_project"
 	BREVO_EVENT_PROJECT_UPDATED              = "new_project"
 	BREVO_EVENT_PROJECT_DELETED              = "project_deleted"
-	BREVO_EVENT_NEW_BUILD                    = "new_build"
+	BREVO_EVENT_BUILD_FINISHED               = "build_finished"
 	BREVO_EVENT_NOTIFICATION_SENT            = "notification_sent"
 	BREVO_EVENT_SUBSCRIPTION_UPDATED         = "subscription_updated"
 	BREVO_EVENT_SUBSCRIPTION_CANCELLED       = "subscription_cancelled"
