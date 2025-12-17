@@ -11,20 +11,7 @@ import (
 )
 
 func (v *HttpViews) GetProjects(w http.ResponseWriter, r *http.Request) {
-	// Implementation of the view to list all projects for a user
-	tokenString, err := utils.ExtractTokenFromHeader(r)
-	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
-		return
-	}
-
-	userInformationRes, err := v.Controller.GetUser(tokenString)
-	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
-		return
-	}
-
-	user, err := v.Controller.DB.GetUserById(userInformationRes.ID.String())
+	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
 		return
@@ -41,20 +28,7 @@ func (v *HttpViews) GetProjects(w http.ResponseWriter, r *http.Request) {
 }
 
 func (v *HttpViews) UpdateProject(w http.ResponseWriter, r *http.Request) {
-	// Implementation of the view to list all projects for a user
-	tokenString, err := utils.ExtractTokenFromHeader(r)
-	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
-		return
-	}
-
-	userInformationRes, err := v.Controller.GetUser(tokenString)
-	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
-		return
-	}
-
-	user, err := v.Controller.DB.GetUserById(userInformationRes.ID.String())
+	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
 		return
@@ -134,19 +108,7 @@ func (v *HttpViews) UpdateProject(w http.ResponseWriter, r *http.Request) {
 }
 
 func (v *HttpViews) CreateProject(w http.ResponseWriter, r *http.Request) {
-	tokenString, err := utils.ExtractTokenFromHeader(r)
-	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
-		return
-	}
-
-	userInformationRes, err := v.Controller.GetUser(tokenString)
-	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
-		return
-	}
-
-	user, err := v.Controller.DB.GetUserById(userInformationRes.ID.String())
+	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
 		return
@@ -208,19 +170,7 @@ func (v *HttpViews) CreateProject(w http.ResponseWriter, r *http.Request) {
 
 func (v *HttpViews) GetProject(w http.ResponseWriter, r *http.Request) {
 	// Implementation of the view to list all projects for a user
-	tokenString, err := utils.ExtractTokenFromHeader(r)
-	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
-		return
-	}
-
-	userInformationRes, err := v.Controller.GetUser(tokenString)
-	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
-		return
-	}
-
-	user, err := v.Controller.DB.GetUserById(userInformationRes.ID.String())
+	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
 		return
@@ -248,18 +198,7 @@ func (v *HttpViews) GetProject(w http.ResponseWriter, r *http.Request) {
 
 func (v *HttpViews) DeleteProject(w http.ResponseWriter, r *http.Request) {
 	// Implementation of the view to list all projects for a user
-	tokenString, err := utils.ExtractTokenFromHeader(r)
-	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
-		return
-	}
-	userInformationRes, err := v.Controller.GetUser(tokenString)
-	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
-		return
-	}
-
-	user, err := v.Controller.GetUserModelById(userInformationRes.ID.String())
+	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
 		return
