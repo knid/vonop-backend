@@ -1,0 +1,174 @@
+package views
+
+import (
+	"net/http"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/knid/wemob/internal/requests"
+	"github.com/knid/wemob/internal/utils"
+)
+
+func (v *HttpViews) GetDeployments(w http.ResponseWriter, r *http.Request) {
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	if !(user.SubscriptionStatus == "active" || user.SubscriptionStatus == "trial") {
+		utils.JSONErrorResponse(w, "you do not have access to this resource", http.StatusForbidden)
+		return
+	}
+
+	deployments, err := v.Controller.GetDeployments(user)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	utils.JSONResponse(w, deployments, http.StatusOK)
+}
+
+func (v *HttpViews) GetDeployment(w http.ResponseWriter, r *http.Request) {
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	if !(user.SubscriptionStatus == "active" || user.SubscriptionStatus == "trial") {
+		utils.JSONErrorResponse(w, "you do not have access to this resource", http.StatusForbidden)
+		return
+	}
+
+	deploymentID := chi.URLParam(r, "deploymentId")
+	if deploymentID == "" {
+		utils.JSONErrorResponse(w, "deployment ID is required", http.StatusBadRequest)
+		return
+	}
+	deployment, err := v.Controller.GetDeploymentByID(deploymentID)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	utils.JSONResponse(w, deployment, http.StatusOK)
+}
+
+func (v *HttpViews) CreateDeployment(w http.ResponseWriter, r *http.Request) {
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	if !(user.SubscriptionStatus == "active" || user.SubscriptionStatus == "trial") {
+		utils.JSONErrorResponse(w, "you do not have access to this resource", http.StatusForbidden)
+		return
+	}
+
+	var deploymentCreateReq requests.CreateDeploymentRequest
+	if err := utils.ParseJSONBody(r, &deploymentCreateReq); err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	deployment, err := v.Controller.CreateDeploymentTask(user, deploymentCreateReq)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	utils.JSONResponse(w, deployment, http.StatusOK)
+}
+
+func (v *HttpViews) UpdateDeployment(w http.ResponseWriter, r *http.Request) {
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	if !(user.SubscriptionStatus == "active" || user.SubscriptionStatus == "trial") {
+		utils.JSONErrorResponse(w, "you do not have access to this resource", http.StatusForbidden)
+		return
+	}
+
+	var deploymentCreateReq requests.CreateDeploymentRequest
+	if err := utils.ParseJSONBody(r, &deploymentCreateReq); err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	deploymentID := chi.URLParam(r, "deploymentId")
+	if deploymentID == "" {
+		utils.JSONErrorResponse(w, "deployment ID is required", http.StatusBadRequest)
+		return
+	}
+
+	deployment, err := v.Controller.UpdateDeploymentTask(user, deploymentID, deploymentCreateReq)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	utils.JSONResponse(w, deployment, http.StatusOK)
+}
+
+func (v *HttpViews) SignUnsignedIPA(w http.ResponseWriter, r *http.Request) {
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	if !(user.SubscriptionStatus == "active" || user.SubscriptionStatus == "trial") {
+		utils.JSONErrorResponse(w, "you do not have access to this resource", http.StatusForbidden)
+		return
+	}
+
+	var signIPAReq requests.SignIPARequest
+	if err := utils.ParseJSONBody(r, &signIPAReq); err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	task, err := v.Controller.SignUnsignedIPATask(user, signIPAReq)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	utils.JSONResponse(w, map[string]string{"task_id": task.ID.String()}, http.StatusOK)
+}
+
+func (v *HttpViews) CheckSignIPATaskStatus(w http.ResponseWriter, r *http.Request) {
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	if !(user.SubscriptionStatus == "active" || user.SubscriptionStatus == "trial") {
+		utils.JSONErrorResponse(w, "you do not have access to this resource", http.StatusForbidden)
+		return
+	}
+
+	signTaskID := chi.URLParam(r, "signTaskId")
+	if signTaskID == "" {
+		utils.JSONErrorResponse(w, "sign task ID is required", http.StatusBadRequest)
+		return
+	}
+
+	signTask, err := v.Controller.DB.GetIOSSignTaskById(signTaskID)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	utils.JSONResponse(w, map[string]any{
+		"status":   signTask.Status,
+		"message":  signTask.StatusMessage,
+		"finished": signTask.Finished,
+	}, http.StatusOK)
+}
