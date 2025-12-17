@@ -61,25 +61,13 @@ func (v *HttpViews) UpdateUser(w http.ResponseWriter, r *http.Request) {
 }
 
 func (v *HttpViews) DeleteUser(w http.ResponseWriter, r *http.Request) {
-	tokenString, err := utils.ExtractTokenFromHeader(r)
+	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
 		return
 	}
 
-	userInformationRes, err := v.Controller.GetUser(tokenString)
-	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
-		return
-	}
-
-	user, err := v.Controller.DB.GetUserById(userInformationRes.ID.String())
-	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
-		return
-	}
-
-	deletedUserRes, err := v.Controller.DeleteUser(userInformationRes.ID.String())
+	deletedUserRes, err := v.Controller.DeleteUser(user.ID.String())
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
 		return
@@ -142,19 +130,7 @@ func (v *HttpViews) UserResendVerifactionEmail(w http.ResponseWriter, r *http.Re
 }
 
 /* func (v *HttpViews) GetUserUsage(w http.ResponseWriter, r *http.Request) {
-	tokenString, err := utils.ExtractTokenFromHeader(r)
-	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
-		return
-	}
-
-	userInformationRes, err := v.Controller.GetUser(tokenString)
-	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
-		return
-	}
-
-	user, err := v.Controller.DB.GetUserById(userInformationRes.ID.String())
+	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
 		return

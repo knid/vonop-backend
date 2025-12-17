@@ -12,19 +12,7 @@ import (
 
 func (v *HttpViews) StripeCheckout(w http.ResponseWriter, r *http.Request) {
 	// TODO: Check user location, if user in GB return error with like this text: "We can't provide service for United Kingdom currently. Please try again later.". You can make it more professional.
-	tokenString, err := utils.ExtractTokenFromHeader(r)
-	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
-		return
-	}
-
-	userInformationRes, err := v.Controller.GetUser(tokenString)
-	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
-		return
-	}
-
-	user, err := v.Controller.GetUserModelById(userInformationRes.ID.String())
+	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
 		return

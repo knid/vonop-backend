@@ -8,19 +8,7 @@ import (
 )
 
 func (v *HttpViews) GetUserNotifications(w http.ResponseWriter, r *http.Request) {
-	tokenString, err := utils.ExtractTokenFromHeader(r)
-	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
-		return
-	}
-
-	userInformationRes, err := v.Controller.GetUser(tokenString)
-	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
-		return
-	}
-
-	user, err := v.Controller.DB.GetUserById(userInformationRes.ID.String())
+	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
 		return
@@ -31,19 +19,7 @@ func (v *HttpViews) GetUserNotifications(w http.ResponseWriter, r *http.Request)
 }
 
 func (v *HttpViews) GetUserNotification(w http.ResponseWriter, r *http.Request) {
-	tokenString, err := utils.ExtractTokenFromHeader(r)
-	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
-		return
-	}
-
-	userInformationRes, err := v.Controller.GetUser(tokenString)
-	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
-		return
-	}
-
-	user, err := v.Controller.DB.GetUserById(userInformationRes.ID.String())
+	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
 		return
