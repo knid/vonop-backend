@@ -15,6 +15,7 @@ type Build struct {
 	Description         string    `bun:",notnull"`
 	Icon                string    `bun:",notnull"`
 	SplashScreenColor   string    `bun:",notnull"`
+	NavBarStyle         string    `bun:",notnull"`
 	RemoveWemobBranding bool      `bun:",notnull,default:false"`
 	BuildNumber         int       `bun:",notnull"`
 	VersionString       string    `bun:",notnull"`

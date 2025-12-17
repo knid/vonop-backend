@@ -9,5 +9,6 @@ type BuildCreateRequest struct {
 	URL                 string
 	Icon                string
 	SplashScreenColor   string
+	NavBarStyle         string
 	RemoveWemobBranding bool
 }
