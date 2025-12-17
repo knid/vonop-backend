@@ -15,8 +15,10 @@ type UserInformationResponse struct {
 	Provider           string    `json:"provider"`
 	SubscriptionID     string    `json:"subscription_id"`
 	SubscriptionStatus string    `json:"subscription_status"`
+	SubscribedAt       time.Time `json:"subscribed_at"`
 	TrialUsed          bool      `json:"trial_used"`
 	SetupFinished      bool      `json:"setup_finished"`
+	CreatedAt          time.Time `json:"created_at"`
 }
 
 type UserLoginResponse struct {

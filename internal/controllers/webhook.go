@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/constants"
@@ -106,6 +107,7 @@ func (c *Controller) HandleWebhook(w http.ResponseWriter, req *http.Request) {
 			switch sub.Status {
 			case "active":
 				user.SubscriptionStatus = "active"
+				user.SubscriptionStartAt = time.Now()
 				if !user.SetupFinished {
 					user.SetupFinished = true
 					go c.CRMService.SendEvent(user, constants.BREVO_EVENT_USER_SETUP_FINISHED, map[string]any{})
@@ -167,7 +169,6 @@ func (c *Controller) HandleWebhook(w http.ResponseWriter, req *http.Request) {
 			if _, err := c.DB.UpdateUser(user); err != nil {
 				break
 			}
-			// TODO: DB'de invoice'u ödenmiş olarak işaretle, kullanıcının erişimini aktif tut
 		}
 
 	case "invoice.payment_failed":
