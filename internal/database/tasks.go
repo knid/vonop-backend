@@ -98,3 +98,26 @@ func (db *Database) GetAppReleaseTaskById(id string) (*models.AppReleaseTask, er
 
 	return &appReleaseTask, err
 }
+
+func (db *Database) UpdateAppBuildTask(buildTask *models.AppBuildTask) error {
+	_, err := db.DB.NewUpdate().Model(buildTask).Where("id = ?", buildTask.ID.String()).Exec(context.Background())
+	return err
+}
+
+func (db *Database) GetIOSSignTaskById(id string) (*models.SignIPATask, error) {
+	var signTask models.SignIPATask
+	err := db.DB.NewSelect().Model(&signTask).Where("id = ?", id).Scan(context.Background())
+
+	return &signTask, err
+}
+
+func (db *Database) CreateIOSSignTask(signTask models.SignIPATask) (*models.SignIPATask, error) {
+	_, err := db.DB.NewInsert().Model(&signTask).Exec(context.Background())
+
+	return &signTask, err
+}
+
+func (db *Database) UpdateIOSSignTask(signTask *models.SignIPATask) error {
+	_, err := db.DB.NewUpdate().Model(signTask).Where("id = ?", signTask.ID.String()).Exec(context.Background())
+	return err
+}

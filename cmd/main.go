@@ -4,6 +4,7 @@ import (
 	// "net/http"
 
 	"context"
+	"crypto/tls"
 	"database/sql"
 	"fmt"
 	"net/http"
@@ -15,6 +16,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/cors"
 	"github.com/go-chi/httplog/v3"
+	"github.com/hibiken/asynq"
+	"github.com/joho/godotenv"
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/controllers"
 	"github.com/knid/wemob/internal/database"
@@ -22,6 +25,7 @@ import (
 	"github.com/knid/wemob/internal/services"
 	crmServices "github.com/knid/wemob/internal/services/crm"
 	emailServices "github.com/knid/wemob/internal/services/email"
+	"github.com/knid/wemob/internal/services/storage"
 	"github.com/knid/wemob/internal/utils"
 	"github.com/knid/wemob/internal/views"
 	"github.com/markbates/goth"
@@ -63,6 +67,10 @@ func createSchema(db *bun.DB) error {
 		(*models.Ticket)(nil),
 		(*models.NavBarItems)(nil),
 		(*models.JSInjectData)(nil),
+		(*models.GooglePlayCredentials)(nil),
+		(*models.AppStoreCredentials)(nil),
+		(*models.Deployment)(nil),
+		(*models.SignIPATask)(nil),
 	}
 
 	for _, model := range models {
@@ -84,6 +92,7 @@ func initOAuth() {
 }
 
 func main() {
+	godotenv.Load(".env.dev")
 	logger := slog.New(
 		slogbetterstack.Option{
 			Token:    os.Getenv("BETTERSTACK_TOKEN"),
@@ -130,6 +139,14 @@ func main() {
 		services.NewSlackService(os.Getenv("SLACK_API_KEY")),
 		emailServices.NewBrevoEmailService(os.Getenv("BREVO_API_KEY")),
 		crmServices.NewBrevoCRMService(os.Getenv("BREVO_API_KEY")),
+		asynq.NewClient(asynq.RedisClientOpt{
+			Addr:      os.Getenv("REDIS_ADDR"),
+			Username:  os.Getenv("REDIS_USERNAME"),
+			Password:  os.Getenv("REDIS_PASSWORD"),
+			TLSConfig: &tls.Config{},
+		}),
+		storage.NewS3Storage(os.Getenv("AWS_REGION"), os.Getenv("AWS_S3_ASSETS_BUCKET_NAME")),
+		storage.NewS3Storage(os.Getenv("AWS_REGION"), os.Getenv("AWS_S3_USER_API_KEYS_BUCKET_NAME")),
 	)
 
 	initOAuth()
@@ -184,7 +201,7 @@ func main() {
 
 	r.Use(cors.Handler(cors.Options{
 		// AllowedOrigins:   []string{"https://foo.com"}, // Use this to allow specific origin hosts
-		AllowedOrigins: []string{"https://*", "http://*"},
+		AllowedOrigins: []string{"https://*", "http://*", "http://127.0.0.1:3000"},
 		// AllowOriginFunc:  func(r *http.Request, origin string) bool { return true },
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token", "Location"},
@@ -200,7 +217,42 @@ func main() {
 		})
 		r.Route("/v1", func(r chi.Router) {
 			r.Handle("/static/*", http.StripPrefix("/v1/static/", http.FileServer(utils.NoDirFileSystem{FS: staticDir})))
-			r.Get("/proxy", httpViews.HandleProxy)
+			r.Route("/storage", func(r chi.Router) {
+				r.Route("/credentials", func(r chi.Router) {
+					r.Route("/apple", func(r chi.Router) {
+						r.Post("/", httpViews.PutP8KeyToS3Presign)
+					})
+					r.Route("/google", func(r chi.Router) {
+						r.Post("/", httpViews.PutServiceAccountToS3Presign)
+					})
+				})
+				r.Route("/users", func(r chi.Router) {
+					r.Get("/me/photo", httpViews.GetProfilePhotoFromS3Presign)
+					r.Post("/me/photo", httpViews.PutProfilePhotoToS3Presign)
+				})
+				r.Route("/deployments", func(r chi.Router) {
+					r.Route("/screenshots", func(r chi.Router) {
+						r.Get("/{screenshotId}", httpViews.GetScreenshotFromS3Presign)
+						r.Post("/", httpViews.PutScreenshotToS3Presign)
+					})
+					r.Route("/icons", func(r chi.Router) {
+						r.Get("/{iconId}", httpViews.GetIconFromS3Presign)
+						r.Post("/", httpViews.PutIconToS3Presign)
+					})
+				})
+				r.Route("/builds", func(r chi.Router) {
+					r.Get("/aab/{buildId}", httpViews.DownloadAABFromS3Presign)
+					r.Get("/ipa/{buildId}", httpViews.DownloadIPAFromS3Presign)
+				})
+				r.Route("/projects", func(r chi.Router) {
+					r.Route("/icons", func(r chi.Router) {
+						r.Get("/{iconId}", httpViews.GetIconFromS3Presign)
+						r.Post("/", httpViews.PutIconToS3Presign)
+					})
+				})
+			})
+			r.Get("/proxy", httpViews.ProxyHandler)
+			r.Post("/proxy", httpViews.ProxyHandler)
 			r.Get("/check/{projectId}", httpViews.CheckStatus)
 			r.Route("/users", func(r chi.Router) {
 				r.Get("/me", httpViews.GetUser)
@@ -269,7 +321,43 @@ func main() {
 				r.Route("/autofill", func(r chi.Router) {
 					r.Post("/navbar", httpViews.NavBarAutoFillWithAI)
 				})
-
+			})
+			r.Route("/credentials", func(r chi.Router) {
+				r.Route("/google", func(r chi.Router) {
+					r.Get("/", httpViews.ListGooglePlayCredentials)
+					r.Post("/", httpViews.CreateGooglePlayCredential)
+					r.Route("/{credentialId}", func(r chi.Router) {
+						r.Get("/", httpViews.GetGooglePlayCredential)
+						r.Put("/", httpViews.UpdateGooglePlayCredential)
+						r.Delete("/", httpViews.DeleteGooglePlayCredential)
+					})
+				})
+				r.Route("/appstore", func(r chi.Router) {
+					r.Get("/", httpViews.ListAppStoreCredentials)
+					r.Post("/", httpViews.CreateAppStoreCredential)
+					r.Route("/{credentialId}", func(r chi.Router) {
+						r.Get("/", httpViews.GetAppStoreCredential)
+						r.Put("/", httpViews.UpdateAppStoreCredential)
+						r.Delete("/", httpViews.DeleteAppStoreCredential)
+					})
+				})
+			})
+			r.Route("/deployments", func(r chi.Router) {
+				r.Get("/", httpViews.GetDeployments)
+				r.Get("/{deploymentId}", httpViews.GetDeployment)
+				r.Put("/{deploymentId}", httpViews.UpdateDeployment)
+				r.Post("/", httpViews.CreateDeployment)
+				r.Route("/tools", func(r chi.Router) {
+					r.Post("/generate_screenshots", httpViews.AutoGenerateScreenshots)
+					r.Post("/sign_ipa", httpViews.SignUnsignedIPA)
+					r.Get("/sign_ipa/{signTaskId}", httpViews.CheckSignIPATaskStatus)
+					// r.Post("/fetch_metadata", httpViews.FetchWebSiteMetadata)
+				})
+			})
+			r.Route("/reports", func(r chi.Router) {
+				r.Post("/build", httpViews.UpdateBuildTaskStatus)
+				r.Post("/sign", httpViews.UpdateSignIPATaskStatus)
+				r.Post("/deploy", httpViews.UpdateDeploymentStatus)
 			})
 			r.Route("/billing", func(r chi.Router) {
 				r.Post("/checkout", httpViews.StripeCheckout)
