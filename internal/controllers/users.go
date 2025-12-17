@@ -3,6 +3,7 @@ package controllers
 import (
 	"database/sql"
 	"errors"
+	"net/http"
 	"strings"
 	"time"
 
@@ -49,6 +50,7 @@ func (c *Controller) GetUser(tokenStr string) (*responses.UserInformationRespons
 		SubscriptionStatus: user.SubscriptionStatus,
 		SetupFinished:      user.SetupFinished,
 		TrialUsed:          user.TrialUsed,
+		CreatedAt:          user.CreatedAt,
 	}, nil
 }
 
@@ -283,4 +285,28 @@ func (c *Controller) GoogleLogin(oauthUser goth.User) (*responses.UserLoginRespo
 		Token:     createdToken.String,
 		ExpiredAt: createdToken.ExpiredAt,
 	}, nil
+}
+
+func (c *Controller) GetUserFromReq(r *http.Request) (*models.User, error) {
+	tokenString, err := utils.ExtractTokenFromHeader(r)
+	if err != nil {
+		return nil, err
+	}
+
+	token, err := c.DB.GetTokenByToken(tokenString)
+	if err != nil {
+		return nil, err
+	}
+
+	if token.ExpiredAt.Before(time.Now()) {
+		return nil, errors.New("token is expired")
+	}
+
+	userId := token.UserID
+	user, err := c.DB.GetUserById(userId.String())
+	if err != nil {
+		return nil, err
+	}
+
+	return user, nil
 }
