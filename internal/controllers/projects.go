@@ -100,23 +100,18 @@ func (c *Controller) CreateProject(user *models.User, projectCreateReq requests.
 		return nil, errors.New("your subscription does not allow ios builds")
 	}
 
-	pkName, err := utils.RandomHex(3)
-	pkName = "com.wemob.app" + pkName
+	pkName, err := utils.RandomHex(5)
+	pkName = "com.wemob.app" + pkName[0:5]
 	if err != nil {
 		return nil, err
 	}
 
 	project := models.Project{
-		UserID:                  user.ID,
-		URL:                     projectCreateReq.URL,
-		UserAppleP8PrivateKey:   projectCreateReq.P8PrivateKey,
-		UserAppleTeamID:         projectCreateReq.UserAppleTeamID,
-		UserAppleIssuerID:       projectCreateReq.UserAppleIssuerID,
-		UseAutoDeployForIOS:     projectCreateReq.UseAutoDeployForIOS,
-		UseAutoDeployForAndroid: projectCreateReq.UseAutoDeployForAndroid,
-		BuildForAndroid:         projectCreateReq.BuildForAndroid,
-		BuildForIOS:             projectCreateReq.BuildForIOS,
-		PackageName:             pkName,
+		UserID:          user.ID,
+		URL:             projectCreateReq.URL,
+		BuildForAndroid: projectCreateReq.BuildForAndroid,
+		BuildForIOS:     projectCreateReq.BuildForIOS,
+		PackageName:     pkName,
 	}
 
 	onesignal_app_id, err := external.CreateOneSignalApplication(project)
@@ -164,6 +159,7 @@ func (c *Controller) CreateProject(user *models.User, projectCreateReq requests.
 		URL:               projectCreateReq.URL,
 		Icon:              projectCreateReq.AppIcon,
 		SplashScreenColor: projectCreateReq.SplashScreenColor,
+		NavBarStyle:       projectCreateReq.NavBarStyle,
 	}
 
 	projectCreateReq.AppIcon = ""
@@ -283,12 +279,7 @@ func (c *Controller) UpdateProject(r *http.Request, user *models.User, projectCr
 
 	if lastBuild.Title == projectCreateReq.Title && lastBuild.RemoveWemobBranding == projectCreateReq.RemoveWemobBranding &&
 		lastBuild.SplashScreenColor == projectCreateReq.SplashScreenColor && lastBuild.Description == projectCreateReq.Description &&
-		projectCreateReq.AppIcon == "" && project.UserAppleP8PrivateKey == projectCreateReq.P8PrivateKey &&
-		project.UserAppleTeamID == projectCreateReq.UserAppleTeamID &&
-		project.UserAppleIssuerID == projectCreateReq.UserAppleIssuerID &&
-		project.UseAutoDeployForIOS == projectCreateReq.UseAutoDeployForIOS &&
-		project.UseAutoDeployForAndroid == projectCreateReq.UseAutoDeployForAndroid &&
-		project.BuildForAndroid == projectCreateReq.BuildForAndroid &&
+		projectCreateReq.AppIcon == "" && project.BuildForAndroid == projectCreateReq.BuildForAndroid &&
 		project.BuildForIOS == projectCreateReq.BuildForIOS {
 		if navBarChanged {
 			return nil, errors.New("navbar changed successfuly")
@@ -322,17 +313,6 @@ func (c *Controller) UpdateProject(r *http.Request, user *models.User, projectCr
 		return nil, err
 	}
 
-	if projectCreateReq.UserAppleTeamID != "" {
-		project.UserAppleTeamID = projectCreateReq.UserAppleTeamID
-	}
-	if projectCreateReq.P8PrivateKey != "" {
-		project.UserAppleP8PrivateKey = projectCreateReq.P8PrivateKey
-	}
-	if projectCreateReq.UserAppleIssuerID != "" {
-		project.UserAppleIssuerID = projectCreateReq.UserAppleIssuerID
-	}
-	project.UseAutoDeployForIOS = projectCreateReq.UseAutoDeployForIOS
-	project.UseAutoDeployForAndroid = projectCreateReq.UseAutoDeployForAndroid
 	project.BuildForAndroid = projectCreateReq.BuildForAndroid
 	project.BuildForIOS = projectCreateReq.BuildForIOS
 
