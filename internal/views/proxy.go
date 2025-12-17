@@ -1,229 +1,227 @@
 package views
 
 import (
-	"encoding/base64"
-	"fmt"
+	"bytes"
 	"io"
 	"net/http"
+	"net/http/httputil"
 	"net/url"
-	"regexp"
 	"strconv"
 	"strings"
-	"time"
 )
 
-const (
-	DefaultWidth     = 375
-	DefaultScale     = 0.25
-	MaxInlineJSBytes = 100 * 1024
-	ServerUserAgent  = "Wemob-Viewport-Proxy/1.6"
-	ListenAddr       = ":8080"
-	ProxyBase        = "https://7a1d46d1052b.ngrok-free.app/v1/proxy?url=" // 👈 kendi domainini yaz
-)
+func (v *HttpViews) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 
-func (v *HttpViews) HandleProxy(w http.ResponseWriter, r *http.Request) {
-	rawURL := r.URL.Query().Get("url")
-	if rawURL == "" {
-		http.Error(w, "missing ?url=", http.StatusBadRequest)
-		return
-	}
-	u, err := url.Parse(rawURL)
-	if err != nil || !u.IsAbs() {
-		http.Error(w, "invalid url", http.StatusBadRequest)
+	targetParam := r.URL.Query().Get("url")
+	if targetParam == "" {
+		http.Error(w, "Url parametresi gerekli", http.StatusBadRequest)
 		return
 	}
 
-	width := intFromQuery(r, "width", DefaultWidth)
-	scale := floatFromQuery(r, "scale", DefaultScale)
+	targetURL, err := url.Parse(targetParam)
+	if err != nil {
+		http.Error(w, "Geçersiz URL", http.StatusBadRequest)
+		return
+	}
 
-	injectJSUrl := r.URL.Query().Get("inject_js_url")
-	injectJSBase64 := r.URL.Query().Get("inject_js_base64")
+	// Cookie'ye hedefi kaydet
+	http.SetCookie(w, &http.Cookie{
+		Name:     "wemob_target",
+		Value:    targetURL.String(),
+		Path:     "/",
+		HttpOnly: true,
+	})
 
-	var inlineJS string
-	if injectJSBase64 != "" {
-		decoded, decErr := decodeBase64Flexible(injectJSBase64, MaxInlineJSBytes)
-		if decErr != nil {
-			http.Error(w, fmt.Sprintf("invalid inject_js_base64: %v", decErr), http.StatusBadRequest)
+	proxy := httputil.NewSingleHostReverseProxy(targetURL)
+
+	// --- DIRECTOR (İSTEK DÜZENLEYİCİ) ---
+	originalDirector := proxy.Director
+	proxy.Director = func(req *http.Request) {
+		originalDirector(req)
+
+		req.Host = targetURL.Host
+		req.URL.Scheme = targetURL.Scheme
+		req.URL.Host = targetURL.Host
+		req.URL.Path = targetURL.Path
+		req.URL.RawQuery = targetURL.RawQuery
+		req.RequestURI = ""
+
+		// KRİTİK DEĞİŞİKLİK 1: SIKIŞTIRMAYI İPTAL ET
+		// Sunucuya "Ben sıkıştırma desteklemiyorum, bana DÜZ METİN (Plain Text) yolla" diyoruz.
+		// Bu sayede Gzip/Brotli çözme hatası veya bozuk dosya inme riski SIFIRA iniyor.
+		req.Header.Del("Accept-Encoding")
+
+		req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+		// req.Header.Del("Cookie")
+	}
+
+	// --- MODIFY RESPONSE (YANIT DÜZENLEYİCİ) ---
+	proxy.ModifyResponse = func(resp *http.Response) error {
+		// 1. HTTP 103 (Early Hints) gibi ara yanıtları yoksay
+		if resp.StatusCode < 200 {
+			resp.Header.Del("Link") // Tarayıcının önden yükleme yapmasını engelle
+			return nil
+		}
+
+		cookies := resp.Cookies()
+		resp.Header.Del("Set-Cookie") // Orijinal, domain kısıtlamalı çerezleri sil
+
+		for _, cookie := range cookies {
+			cookie.Domain = ""                     // Domain'i boşalt (Localhost kabul etsin)
+			cookie.Secure = false                  // Localhost genelde http olduğu için secure kaldırılabilir
+			cookie.SameSite = http.SameSiteLaxMode // İframe/Proxy uyumu için
+
+			// Düzenlenmiş çerezi tekrar ekle
+			resp.Header.Add("Set-Cookie", cookie.String())
+		}
+
+		// 2. İndirmeyi ve Sorun Çıkaran Headerları SİL
+		resp.Header.Del("X-Frame-Options")
+		resp.Header.Del("Content-Security-Policy")
+		resp.Header.Del("Content-Disposition") // İndirme emrini sil
+		resp.Header.Del("Transfer-Encoding")   // Chunked veriyi iptal et
+		resp.Header.Del("Content-Encoding")    // Sıkıştırma başlığını sil (Zaten düz metin istedik)
+
+		// 3. Redirect Yakalama
+		if resp.StatusCode >= 300 && resp.StatusCode < 400 {
+			location, err := resp.Location()
+			if err == nil {
+				newLoc := "/v1/proxy?url=" + url.QueryEscape(location.String())
+				resp.Header.Set("Location", newLoc)
+			}
+			return nil
+		}
+
+		// 4. Sadece HTML ise işle
+		contentType := strings.ToLower(resp.Header.Get("Content-Type"))
+		if !strings.Contains(contentType, "text/html") {
+			return nil
+		}
+
+		// 5. Body Okuma (ARTIK GZIP YOK, DİREKT OKU)
+		// Request'te sıkıştırmayı kapattığımız için burası her zaman düz metindir.
+		bodyBytes, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return nil
+		}
+		resp.Body.Close()
+
+		// 6. HTML Manipülasyonu
+		htmlContent := string(bodyBytes)
+
+		targetURLStr := targetURL.Scheme + "://" + targetURL.Host + "/"
+		baseTag := `<base href="` + targetURLStr + `">`
+
+		scriptTag := `
+        <script>
+        // 1. LİNKLERİ YAKALA (Mevcut kodun)
+        document.addEventListener('click', function(e) {
+            var target = e.target.closest('a');
+            if (!target) return;
+
+            var href = target.getAttribute('href');
+            if (!href || href.startsWith('#') || href.startsWith('javascript:') || 
+                href.startsWith('mailto:') || href.startsWith('tel:') || href.startsWith('sms:') || href.startsWith('whatsapp:')) {
+                return;
+            }
+
+            e.preventDefault();
+            var fullUrl = target.href;
+            
+            // Recursive URL temizliği
+            try {
+                var urlObj = new URL(fullUrl);
+                if(urlObj.searchParams.has("url") && urlObj.searchParams.get("url").startsWith("http")) {
+                     fullUrl = urlObj.searchParams.get("url");
+                }
+            } catch(ex) {}
+
+            var proxyHost = window.location.origin;
+            window.location.href = proxyHost + '/v1/proxy?url=' + encodeURIComponent(fullUrl);
+        });
+
+        // 2. FORMLARI YAKALA (YENİ EKLENEN KISIM)
+        // Sepete ekle butonları bir form submit eder. Bunu yakalamazsak kaçar.
+        document.addEventListener('submit', function(e) {
+            var form = e.target;
+            var action = form.action; // Base tag sayesinde full url gelir (https://shootgrip.com/cart/add)
+
+            // Eğer zaten proxy üzerindeyse dokunma
+            var proxyHost = window.location.origin;
+            if (action.startsWith(proxyHost)) return;
+
+            // Formun action adresini bizim proxy adresimize çeviriyoruz
+            // Tarayıcı POST verilerini alıp bu yeni adrese gönderecek.
+            // Backend de bu verileri alıp gerçek adrese iletecek.
+            var newAction = proxyHost + '/v1/proxy?url=' + encodeURIComponent(action);
+            
+            form.action = newAction;
+            // preventDefault yapmıyoruz, formun yeni adrese normal şekilde gitmesine izin veriyoruz.
+        });
+        </script>
+        `
+
+		if strings.Contains(htmlContent, "<head>") {
+			injectContent := "<head>" + baseTag + scriptTag
+			htmlContent = strings.Replace(htmlContent, "<head>", injectContent, 1)
+		} else {
+			htmlContent = baseTag + scriptTag + htmlContent
+		}
+
+		// 7. Yeni Body'yi Oluştur
+		buf := bytes.NewBufferString(htmlContent)
+		resp.Body = io.NopCloser(buf)
+
+		// 8. KRİTİK: Tarayıcıya bunun HTML olduğunu ZORLA
+		resp.ContentLength = int64(buf.Len())
+		resp.Header.Set("Content-Length", strconv.Itoa(buf.Len()))
+		// Charset ekleyerek tarayıcının doğru render etmesini garantile
+		resp.Header.Set("Content-Type", "text/html; charset=utf-8")
+
+		return nil
+	}
+
+	proxy.ServeHTTP(w, r)
+}
+
+func handleFallback(w http.ResponseWriter, r *http.Request) {
+	// Gereksiz logları sustur
+	ignoredPaths := []string{"/.well-known", "/monorail", "/produce_batch", "/shop_events", "/wpm@"}
+	for _, path := range ignoredPaths {
+		if strings.Contains(r.URL.Path, path) {
+			w.WriteHeader(http.StatusOK)
 			return
 		}
-		inlineJS = decoded
 	}
 
-	client := &http.Client{Timeout: 20 * time.Second}
-	req, _ := http.NewRequest("GET", u.String(), nil)
-	req.Header.Set("User-Agent", ServerUserAgent)
-
-	resp, err := client.Do(req)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("fetch error: %v", err), http.StatusBadGateway)
+	cookie, err := r.Cookie("wemob_target")
+	if err != nil || cookie.Value == "" {
+		http.NotFound(w, r)
 		return
 	}
-	defer resp.Body.Close()
 
-	h := cloneHeaders(resp.Header)
-	h.Del("Content-Length")
-	h.Del("X-Frame-Options")
-	h.Del("Content-Security-Policy")
-
-	bodyBytes, _ := io.ReadAll(resp.Body)
-	ct := resp.Header.Get("Content-Type")
-
-	if strings.Contains(strings.ToLower(ct), "text/html") {
-		html := string(bodyBytes)
-		html = injectViewportString(html, width, scale)
-		html = injectProxyBaseTag(html, u) // 👈 sadece burası eklendi
-		html = injectJSToHTML(html, inlineJS, injectJSUrl)
-		bodyBytes = []byte(html)
-		h.Set("Content-Type", "text/html; charset=utf-8")
+	targetURL, err := url.Parse(cookie.Value)
+	if err != nil {
+		http.NotFound(w, r)
+		return
 	}
 
-	for k, vs := range h {
-		for _, v := range vs {
-			w.Header().Add(k, v)
-		}
-	}
-	w.WriteHeader(resp.StatusCode)
-	w.Write(bodyBytes)
-}
+	proxy := httputil.NewSingleHostReverseProxy(targetURL)
 
-/* ---------- Proxy-tabanlı base href ---------- */
+	proxy.Director = func(req *http.Request) {
+		req.Host = targetURL.Host
+		req.URL.Scheme = targetURL.Scheme
+		req.URL.Host = targetURL.Host
+		req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 
-func injectProxyBaseTag(html string, targetURL *url.URL) string {
-	reBase := regexp.MustCompile(`(?is)<base[^>]+href\s*=\s*["'][^"']*["'][^>]*>`)
-	// hedef siteyi encode et
-	baseHref := fmt.Sprintf("%s%s://%s/", ProxyBase, targetURL.Scheme, targetURL.Host)
-	baseTag := fmt.Sprintf(`<base href="%s">`, baseHref)
-
-	if reBase.MatchString(html) {
-		return reBase.ReplaceAllString(html, baseTag)
+		// Fallback isteklerinde de sıkıştırmayı kapatalım ki sorun çıkmasın
+		req.Header.Del("Accept-Encoding")
 	}
 
-	reHead := regexp.MustCompile(`(?i)<head[^>]*>`)
-	if reHead.MatchString(html) {
-		return reHead.ReplaceAllString(html, "${0}\n"+baseTag)
+	proxy.ModifyResponse = func(resp *http.Response) error {
+		resp.Header.Set("Access-Control-Allow-Origin", "*")
+		return nil
 	}
 
-	return baseTag + "\n" + html
-}
-
-/* ---------- Viewport injection ---------- */
-
-var (
-	reViewport  = regexp.MustCompile(`(?is)<meta[^>]+name\s*=\s*["']viewport["'][^>]*>`)
-	reHeadOpen  = regexp.MustCompile(`(?i)<head[^>]*>`)
-	reBodyClose = regexp.MustCompile(`(?i)</body\s*>`)
-)
-
-func injectViewportString(html string, width int, scale float64) string {
-	meta := fmt.Sprintf(`<meta name="viewport" content="width=%d, initial-scale=%g, user-scalable=no">`, width, scale)
-	if reViewport.MatchString(html) {
-		html = reViewport.ReplaceAllString(html, meta)
-	} else if reHeadOpen.MatchString(html) {
-		html = reHeadOpen.ReplaceAllString(html, "${0}\n"+meta)
-	} else {
-		html = meta + "\n" + html
-	}
-	return html
-}
-
-/* ---------- JS injection ---------- */
-
-func injectJSToHTML(html string, inlineJS string, jsURL string) string {
-	var scriptTag string
-	if jsURL != "" {
-		scriptTag = fmt.Sprintf(`<script src="%s" defer></script>`, htmlEscapeAttr(jsURL))
-	} else if inlineJS != "" {
-		scriptTag = "<script>\n" + inlineJS + "\n</script>"
-	} else {
-		return html
-	}
-
-	if reBodyClose.MatchString(html) {
-		return reBodyClose.ReplaceAllString(html, scriptTag+"$0")
-	}
-	if reHeadOpen.MatchString(html) {
-		return reHeadOpen.ReplaceAllString(html, "${0}\n"+scriptTag)
-	}
-	return scriptTag + "\n" + html
-}
-
-/* ---------- Helpers ---------- */
-
-func htmlEscapeAttr(s string) string {
-	s = strings.ReplaceAll(s, `"`, "&quot;")
-	s = strings.ReplaceAll(s, "'", "&#39;")
-	return s
-}
-
-func decodeBase64Flexible(b64 string, maxBytes int) (string, error) {
-	s := strings.TrimSpace(b64)
-	s = strings.ReplaceAll(s, "\n", "")
-	s = strings.ReplaceAll(s, "\r", "")
-	if strings.Contains(s, " ") {
-		s = strings.ReplaceAll(s, " ", "+")
-	}
-
-	addPadding := func(in string) string {
-		pad := (4 - (len(in) % 4)) % 4
-		if pad == 0 {
-			return in
-		}
-		return in + strings.Repeat("=", pad)
-	}
-
-	try := func(dec func(string) ([]byte, error), input string) (string, error) {
-		if b, err := dec(input); err == nil {
-			if len(b) > maxBytes {
-				return "", fmt.Errorf("decoded JS too large (%d bytes, max %d)", len(b), maxBytes)
-			}
-			return string(b), nil
-		}
-		return "", fmt.Errorf("decode failed")
-	}
-
-	if out, err := try(base64.RawURLEncoding.DecodeString, s); err == nil {
-		return out, nil
-	}
-	if out, err := try(base64.URLEncoding.DecodeString, addPadding(s)); err == nil {
-		return out, nil
-	}
-	if out, err := try(base64.RawStdEncoding.DecodeString, s); err == nil {
-		return out, nil
-	}
-	if out, err := try(base64.StdEncoding.DecodeString, addPadding(s)); err == nil {
-		return out, nil
-	}
-	return "", fmt.Errorf("base64 decode failed")
-}
-
-func cloneHeaders(src http.Header) http.Header {
-	dst := make(http.Header, len(src))
-	for k, vs := range src {
-		cp := make([]string, len(vs))
-		copy(cp, vs)
-		dst[k] = cp
-	}
-	return dst
-}
-
-func intFromQuery(r *http.Request, key string, def int) int {
-	raw := r.URL.Query().Get(key)
-	if raw == "" {
-		return def
-	}
-	if v, err := strconv.Atoi(raw); err == nil && v > 0 {
-		return v
-	}
-	return def
-}
-
-func floatFromQuery(r *http.Request, key string, def float64) float64 {
-	raw := r.URL.Query().Get(key)
-	if raw == "" {
-		return def
-	}
-	if v, err := strconv.ParseFloat(raw, 64); err == nil && v > 0 {
-		return v
-	}
-	return def
+	proxy.ServeHTTP(w, r)
 }
