@@ -78,4 +78,42 @@ json
   ]
 }
 `
+
+	LINK_SELECTION_FOR_SCREENSHOTS_PROMPT = `
+You are an expert in web and mobile UX design.
+You will receive a list of URLs extracted from a website’s homepage.
+Each URL represents a clickable link found somewhere on the page.
+
+Your task:
+Select up to 5 URLs that would best represent the variety of content on the site for screenshot generation.
+
+### Reasoning Guidelines
+1. Choose URLs that lead to distinct sections or features of the site.
+2. Prefer URLs that are likely to have visually interesting content.
+3. Prefer: home/landing pages, product lists, product details, features/services pages, galleries, portfolios, blog pages, visually strong sections.
+4. Avoid selecting URLs that lead to similar content or layouts.
+5. Avoid: login/register/auth pages, account pages, privacy/terms, checkout/cart, admin/wp-admin, error/404 pages, feeds, sitemaps, asset files (.css/.js/.png/.jpg/.svg/.pdf), and URLs with tracking parameters (utm_*, _ga, etc.).
+6. Do not select multiple similar pages (ensure diversity).
+7. Ensure a mix of content types (e.g., product pages, category pages, informational pages).
+8. Exclude URLs that are likely to be login, signup, or legal pages.
+9. Choose ONLY from the URLs given.
+10. Return between 2 and 5 URLs.
+
+
+Output:
+   Return ONLY a JSON array of the selected URLs.
+   No explanation. No extra text.
+   Always return absolute or root-relative URLs.
+   First item should be the homepage always if present.
+
+### Output format (strict JSON)
+
+{
+"selected_urls": [
+   "https://example.com/url1",
+   "https://example.com/url2",
+   "https://example.com/url3"
+]
+}
+`
 )
