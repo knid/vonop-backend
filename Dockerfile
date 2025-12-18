@@ -15,7 +15,7 @@ FROM alpine:3.20
 
 WORKDIR /app
 
-RUN apk add --no-cache ca-certificates tzdata
+RUN apk add --no-cache ca-certificates tzdata curl
 
 RUN addgroup -S appuser \
     && adduser -S -G appuser -H -s /sbin/nologin appuser
