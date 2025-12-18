@@ -1,21 +1,26 @@
 api.wemob.io {
     encode zstd gzip
 
-    reverse_proxy api:8001
+    handle /v1/proxy* {
+        reverse_proxy api:8001 {
+            header_down -X-Frame-Options
+            header_down -Content-Security-Policy
+        }
+    }
 
-    header {
-        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
-        X-Content-Type-Options "nosniff"
-        X-Frame-Options "DENY"
-        Referrer-Policy "no-referrer-when-downgrade"
+    handle {
+        reverse_proxy api:8001
+        
+        header {
+            Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+            X-Content-Type-Options "nosniff"
+            X-Frame-Options "DENY" 
+            Referrer-Policy "no-referrer-when-downgrade"
+        }
     }
 
     log {
         output file /var/log/caddy/access.log
         format console
     }
-}
-
-http://api.wemob.io {
-    redir https://api.wemob.io{uri}
 }
