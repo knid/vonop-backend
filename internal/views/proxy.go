@@ -2,10 +2,13 @@ package views
 
 import (
 	"bytes"
+	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -32,7 +35,16 @@ func (v *HttpViews) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 		HttpOnly: true,
 	})
 
+	proxyURL, err := url.Parse(fmt.Sprintf("http://%s@%s", os.Getenv("PREVIEW_PROXY_AUTH"), os.Getenv("PREVIEW_PROXY_HOST")))
+	if err != nil {
+		slog.Error("Error parsing proxy URL: " + err.Error())
+		return
+	}
+
 	proxy := httputil.NewSingleHostReverseProxy(targetURL)
+	proxy.Transport = &http.Transport{
+		Proxy: http.ProxyURL(proxyURL),
+	}
 
 	originalDirector := proxy.Director
 	proxy.Director = func(req *http.Request) {
