@@ -105,49 +105,62 @@ func (v *HttpViews) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 
 		scriptTag := `
         <script>
-        // 1. LİNKLERİ YAKALA (Mevcut kodun)
+        function wrapUrl(url) {
+            if (!url) return url;
+            if (url.startsWith('data:') || url.startsWith('#') || url.startsWith('javascript:') || url.startsWith('mailto:')) return url;
+            
+            var proxyOrigin = window.location.origin + '/v1/proxy';
+            if (url.startsWith(proxyOrigin)) return url;
+
+            if (url.startsWith('http')) {
+                return window.location.origin + '/v1/proxy?url=' + encodeURIComponent(url);
+            }
+            
+            var base = document.querySelector('base').href;
+            if (base.endsWith('/') && url.startsWith('/')) {
+                url = url.substring(1);
+            }
+            var fullUrl = base + url;
+            return window.location.origin + '/v1/proxy?url=' + encodeURIComponent(fullUrl);
+        }
+
+        const originalFetch = window.fetch;
+        window.fetch = function(input, init) {
+            var url = input;
+            if (typeof input === 'string') {
+                input = wrapUrl(input);
+            } else if (input instanceof Request) {
+                input = wrapUrl(input.url);
+            }
+            return originalFetch(input, init);
+        };
+
+        const originalOpen = XMLHttpRequest.prototype.open;
+        XMLHttpRequest.prototype.open = function(method, url, async, user, password) {
+            var newUrl = wrapUrl(url);
+            return originalOpen.apply(this, [method, newUrl, async, user, password]);
+        };
+
         document.addEventListener('click', function(e) {
             var target = e.target.closest('a');
             if (!target) return;
-
             var href = target.getAttribute('href');
             if (!href || href.startsWith('#') || href.startsWith('javascript:') || 
-                href.startsWith('mailto:') || href.startsWith('tel:') || href.startsWith('sms:') || href.startsWith('whatsapp:')) {
-                return;
-            }
+                href.startsWith('mailto:') || href.startsWith('tel:')) return;
 
             e.preventDefault();
-            var fullUrl = target.href;
-            
-            // Recursive URL temizliği
-            try {
-                var urlObj = new URL(fullUrl);
-                if(urlObj.searchParams.has("url") && urlObj.searchParams.get("url").startsWith("http")) {
-                     fullUrl = urlObj.searchParams.get("url");
-                }
-            } catch(ex) {}
-
-            var proxyHost = window.location.origin;
-            window.location.href = proxyHost + '/v1/proxy?url=' + encodeURIComponent(fullUrl);
+            window.location.href = wrapUrl(target.href);
         });
 
-        // 2. FORMLARI YAKALA (YENİ EKLENEN KISIM)
-        // Sepete ekle butonları bir form submit eder. Bunu yakalamazsak kaçar.
         document.addEventListener('submit', function(e) {
             var form = e.target;
-            var action = form.action; // Base tag sayesinde full url gelir (https://shootgrip.com/cart/add)
-
-            // Eğer zaten proxy üzerindeyse dokunma
-            var proxyHost = window.location.origin;
-            if (action.startsWith(proxyHost)) return;
-
-            // Formun action adresini bizim proxy adresimize çeviriyoruz
-            // Tarayıcı POST verilerini alıp bu yeni adrese gönderecek.
-            // Backend de bu verileri alıp gerçek adrese iletecek.
-            var newAction = proxyHost + '/v1/proxy?url=' + encodeURIComponent(action);
-            
-            form.action = newAction;
-            // preventDefault yapmıyoruz, formun yeni adrese normal şekilde gitmesine izin veriyoruz.
+            var action = form.action;
+            if (action) {
+                var newAction = wrapUrl(action);
+                if (form.action !== newAction) {
+                    form.action = newAction;
+                }
+            }
         });
         </script>
         `
