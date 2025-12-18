@@ -17,7 +17,6 @@ import (
 	"github.com/go-chi/cors"
 	"github.com/go-chi/httplog/v3"
 	"github.com/hibiken/asynq"
-	"github.com/joho/godotenv"
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/controllers"
 	"github.com/knid/wemob/internal/database"
@@ -92,7 +91,7 @@ func initOAuth() {
 }
 
 func main() {
-	godotenv.Load(".env.dev")
+	// godotenv.Load(".env.dev")
 	logger := slog.New(
 		slogbetterstack.Option{
 			Token:    os.Getenv("BETTERSTACK_TOKEN"),
