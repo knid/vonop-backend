@@ -61,6 +61,22 @@ func (v *HttpViews) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 			return nil
 		}
 
+		if resp.StatusCode >= 300 && resp.StatusCode < 400 {
+			location, err := resp.Location()
+			if err == nil {
+				redirectURL := location.String()
+
+				if strings.HasPrefix(redirectURL, "/") {
+					redirectURL = targetURL.Scheme + "://" + targetURL.Host + redirectURL
+				}
+
+				newLoc := "/v1/proxy?url=" + url.QueryEscape(redirectURL)
+				resp.Header.Set("Location", newLoc)
+			}
+			// Redirect olduğu için body okumaya gerek yok, dön.
+			return nil
+		}
+
 		cookies := resp.Cookies()
 		resp.Header.Del("Set-Cookie")
 
