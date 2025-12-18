@@ -14,17 +14,16 @@ func (v *HttpViews) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 
 	targetParam := r.URL.Query().Get("url")
 	if targetParam == "" {
-		http.Error(w, "Url parametresi gerekli", http.StatusBadRequest)
+		http.Error(w, "url param is required", http.StatusBadRequest)
 		return
 	}
 
 	targetURL, err := url.Parse(targetParam)
 	if err != nil {
-		http.Error(w, "Geçersiz URL", http.StatusBadRequest)
+		http.Error(w, "Invalid URL", http.StatusBadRequest)
 		return
 	}
 
-	// Cookie'ye hedefi kaydet
 	http.SetCookie(w, &http.Cookie{
 		Name:     "wemob_target",
 		Value:    targetURL.String(),
@@ -34,7 +33,6 @@ func (v *HttpViews) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 
 	proxy := httputil.NewSingleHostReverseProxy(targetURL)
 
-	// --- DIRECTOR (İSTEK DÜZENLEYİCİ) ---
 	originalDirector := proxy.Director
 	proxy.Director = func(req *http.Request) {
 		originalDirector(req)
@@ -46,43 +44,40 @@ func (v *HttpViews) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 		req.URL.RawQuery = targetURL.RawQuery
 		req.RequestURI = ""
 
-		// KRİTİK DEĞİŞİKLİK 1: SIKIŞTIRMAYI İPTAL ET
-		// Sunucuya "Ben sıkıştırma desteklemiyorum, bana DÜZ METİN (Plain Text) yolla" diyoruz.
-		// Bu sayede Gzip/Brotli çözme hatası veya bozuk dosya inme riski SIFIRA iniyor.
 		req.Header.Del("Accept-Encoding")
+
+		req.Header.Del("If-None-Match")
+		req.Header.Del("If-Modified-Since")
+		req.Header.Set("Origin", targetURL.Scheme+"://"+targetURL.Host)
+		req.Header.Set("Referer", targetURL.String())
 
 		req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 		// req.Header.Del("Cookie")
 	}
 
-	// --- MODIFY RESPONSE (YANIT DÜZENLEYİCİ) ---
 	proxy.ModifyResponse = func(resp *http.Response) error {
-		// 1. HTTP 103 (Early Hints) gibi ara yanıtları yoksay
 		if resp.StatusCode < 200 {
-			resp.Header.Del("Link") // Tarayıcının önden yükleme yapmasını engelle
+			resp.Header.Del("Link")
 			return nil
 		}
 
 		cookies := resp.Cookies()
-		resp.Header.Del("Set-Cookie") // Orijinal, domain kısıtlamalı çerezleri sil
+		resp.Header.Del("Set-Cookie")
 
 		for _, cookie := range cookies {
-			cookie.Domain = ""                     // Domain'i boşalt (Localhost kabul etsin)
-			cookie.Secure = false                  // Localhost genelde http olduğu için secure kaldırılabilir
-			cookie.SameSite = http.SameSiteLaxMode // İframe/Proxy uyumu için
+			cookie.Domain = ""
+			cookie.Secure = false
+			cookie.SameSite = http.SameSiteLaxMode
 
-			// Düzenlenmiş çerezi tekrar ekle
 			resp.Header.Add("Set-Cookie", cookie.String())
 		}
 
-		// 2. İndirmeyi ve Sorun Çıkaran Headerları SİL
 		resp.Header.Del("X-Frame-Options")
 		resp.Header.Del("Content-Security-Policy")
-		resp.Header.Del("Content-Disposition") // İndirme emrini sil
-		resp.Header.Del("Transfer-Encoding")   // Chunked veriyi iptal et
-		resp.Header.Del("Content-Encoding")    // Sıkıştırma başlığını sil (Zaten düz metin istedik)
+		resp.Header.Del("Content-Disposition")
+		resp.Header.Del("Transfer-Encoding")
+		resp.Header.Del("Content-Encoding")
 
-		// 3. Redirect Yakalama
 		if resp.StatusCode >= 300 && resp.StatusCode < 400 {
 			location, err := resp.Location()
 			if err == nil {
@@ -92,21 +87,17 @@ func (v *HttpViews) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 			return nil
 		}
 
-		// 4. Sadece HTML ise işle
 		contentType := strings.ToLower(resp.Header.Get("Content-Type"))
 		if !strings.Contains(contentType, "text/html") {
 			return nil
 		}
 
-		// 5. Body Okuma (ARTIK GZIP YOK, DİREKT OKU)
-		// Request'te sıkıştırmayı kapattığımız için burası her zaman düz metindir.
 		bodyBytes, err := io.ReadAll(resp.Body)
 		if err != nil {
 			return nil
 		}
 		resp.Body.Close()
 
-		// 6. HTML Manipülasyonu
 		htmlContent := string(bodyBytes)
 
 		targetURLStr := targetURL.Scheme + "://" + targetURL.Host + "/"
@@ -168,14 +159,11 @@ func (v *HttpViews) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 			htmlContent = baseTag + scriptTag + htmlContent
 		}
 
-		// 7. Yeni Body'yi Oluştur
 		buf := bytes.NewBufferString(htmlContent)
 		resp.Body = io.NopCloser(buf)
 
-		// 8. KRİTİK: Tarayıcıya bunun HTML olduğunu ZORLA
 		resp.ContentLength = int64(buf.Len())
 		resp.Header.Set("Content-Length", strconv.Itoa(buf.Len()))
-		// Charset ekleyerek tarayıcının doğru render etmesini garantile
 		resp.Header.Set("Content-Type", "text/html; charset=utf-8")
 
 		return nil
@@ -185,7 +173,6 @@ func (v *HttpViews) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleFallback(w http.ResponseWriter, r *http.Request) {
-	// Gereksiz logları sustur
 	ignoredPaths := []string{"/.well-known", "/monorail", "/produce_batch", "/shop_events", "/wpm@"}
 	for _, path := range ignoredPaths {
 		if strings.Contains(r.URL.Path, path) {
@@ -214,7 +201,6 @@ func handleFallback(w http.ResponseWriter, r *http.Request) {
 		req.URL.Host = targetURL.Host
 		req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 
-		// Fallback isteklerinde de sıkıştırmayı kapatalım ki sorun çıkmasın
 		req.Header.Del("Accept-Encoding")
 	}
 
