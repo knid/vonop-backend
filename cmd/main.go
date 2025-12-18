@@ -251,8 +251,7 @@ func main() {
 					})
 				})
 			})
-			r.Get("/proxy", httpViews.ProxyHandler)
-			r.Post("/proxy", httpViews.ProxyHandler)
+			r.HandleFunc("/proxy", httpViews.ProxyHandler)
 			r.Get("/check/{projectId}", httpViews.CheckStatus)
 			r.Route("/users", func(r chi.Router) {
 				r.Get("/me", httpViews.GetUser)
