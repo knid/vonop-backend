@@ -15,6 +15,11 @@ import (
 )
 
 func (v *HttpViews) ProxyHandler(w http.ResponseWriter, r *http.Request) {
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil || user == nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
 
 	targetParam := r.URL.Query().Get("url")
 	if targetParam == "" {
@@ -37,7 +42,12 @@ func (v *HttpViews) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 
 	proxyURL, err := url.Parse(fmt.Sprintf("http://%s@%s", os.Getenv("PREVIEW_PROXY_AUTH"), os.Getenv("PREVIEW_PROXY_HOST")))
 	if err != nil {
-		slog.Error("Error parsing proxy URL: " + err.Error())
+		slog.Error("Error parsing proxy URL: "+err.Error(),
+			slog.String("from", "PROXY"),
+			slog.String("user.id", user.ID.String()),
+			slog.String("user.email", user.Email),
+			slog.String("target.url", targetURL.String()),
+			slog.String("proxy.host", os.Getenv("PREVIEW_PROXY_HOST")))
 		return
 	}
 
@@ -306,6 +316,14 @@ func (v *HttpViews) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 
 		return nil
 	}
+
+	slog.Info("Proxying request to "+targetURL.String(),
+		slog.String("from", "PROXY"),
+		slog.String("user.id", user.ID.String()),
+		slog.String("user.email", user.Email),
+		slog.String("target.url", targetURL.String()),
+		slog.String("proxy.host", os.Getenv("PREVIEW_PROXY_HOST")),
+	)
 
 	proxy.ServeHTTP(w, r)
 }
