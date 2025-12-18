@@ -46,14 +46,17 @@ func (v *HttpViews) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 		req.RequestURI = ""
 
 		req.Header.Del("Accept-Encoding")
-
 		req.Header.Del("If-None-Match")
 		req.Header.Del("If-Modified-Since")
-		req.Header.Set("Origin", targetURL.Scheme+"://"+targetURL.Host)
-		req.Header.Set("Referer", targetURL.String())
+		req.Header.Del("X-Forwarded-For")
+		req.Header.Del("X-Forwarded-Host")
+		req.Header.Del("X-Forwarded-Proto")
+		req.Header.Del("Forwarded")
+		req.Header.Del("Via")
 
+		req.Header.Set("Referer", targetURL.Scheme+"://"+targetURL.Host+"/")
+		req.Header.Set("Origin", targetURL.Scheme+"://"+targetURL.Host)
 		req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-		// req.Header.Del("Cookie")
 	}
 
 	proxy.ModifyResponse = func(resp *http.Response) error {
@@ -122,6 +125,28 @@ func (v *HttpViews) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 		reIntegrity := regexp.MustCompile(`\sintegrity=["'][^"']*["']`)
 		htmlContent = reIntegrity.ReplaceAllString(htmlContent, "")
 
+		reXlink := regexp.MustCompile(`xlink:href=["']([^"']+)["']`)
+		htmlContent = reXlink.ReplaceAllStringFunc(htmlContent, func(match string) string {
+			// match: xlink:href="/styles/icons.svg#search"
+			content := match[12 : len(match)-1]
+
+			if strings.HasPrefix(content, "data:") || strings.HasPrefix(content, "#") {
+				return match
+			}
+
+			fullUrl := content
+			if strings.HasPrefix(content, "//") {
+				fullUrl = targetURL.Scheme + ":" + content
+			} else if strings.HasPrefix(content, "/") {
+				fullUrl = targetURL.Scheme + "://" + targetURL.Host + content
+			} else if !strings.HasPrefix(content, "http") {
+				fullUrl = targetURL.String() + content
+			}
+
+			proxyUrl := "/v1/proxy?url=" + url.QueryEscape(fullUrl)
+			return `xlink:href="` + proxyUrl + `"`
+		})
+
 		targetURLStr := targetURL.Scheme + "://" + targetURL.Host + "/"
 		baseTag := `<base href="` + targetURLStr + `">`
 
@@ -129,20 +154,92 @@ func (v *HttpViews) ProxyHandler(w http.ResponseWriter, r *http.Request) {
         <script>
         function wrapUrl(url) {
             if (!url) return url;
-            if (url.startsWith('data:') || url.startsWith('#') || url.startsWith('javascript:') || url.startsWith('mailto:')) return url;
-            
+            if (url.startsWith('data:') || url.startsWith('javascript:') || url.startsWith('mailto:')) return url;
+            if (url.startsWith('#')) return url;
+
             var proxyOrigin = window.location.origin + '/v1/proxy';
             if (url.startsWith(proxyOrigin)) return url;
 
-            if (url.startsWith('http')) {
-                return window.location.origin + '/v1/proxy?url=' + encodeURIComponent(url);
+            var urlPart = url;
+            var hashPart = "";
+            var hashIdx = url.indexOf('#');
+            if (hashIdx > -1) {
+                urlPart = url.substring(0, hashIdx);
+                hashPart = url.substring(hashIdx);
             }
+
+            var fullUrl = urlPart;
+            if (fullUrl.startsWith('http')) {
+            } else {
+                var base = document.querySelector('base').href;
+                if (base.endsWith('/') && fullUrl.startsWith('/')) fullUrl = fullUrl.substring(1);
+                fullUrl = base + fullUrl;
+            }
+
+            return window.location.origin + '/v1/proxy?url=' + encodeURIComponent(fullUrl) + hashPart;
+        }
+
+        function fixInlineJs() {
+            var elements = document.querySelectorAll('[onclick], [onmousedown], [onmouseup]');
             
-            var base = document.querySelector('base').href;
-            if (base.endsWith('/') && url.startsWith('/')) url = url.substring(1);
-            var fullUrl = base + url;
-            
-            return window.location.origin + '/v1/proxy?url=' + encodeURIComponent(fullUrl);
+            elements.forEach(function(el) {
+                if (el.getAttribute('data-proxy-patched')) return;
+
+                ['onclick', 'onmousedown', 'onmouseup'].forEach(function(attr) {
+                    var code = el.getAttribute(attr);
+                    if (!code) return;
+
+                    var newCode = code.replace(
+                        /(window\.location|location\.href|location)\s*=\s*['"]([^'"]+)['"]/gi, 
+                        function(match, variable, url) {
+                            if (url.includes('/v1/proxy')) return match;
+                            return variable + "=wrapUrl('" + url + "')";
+                        }
+                    );
+
+                    if (code !== newCode) {
+                        el.setAttribute(attr, newCode);
+                        el.setAttribute('data-proxy-patched', 'true'); // İşaretle
+                    }
+                });
+            });
+        }
+
+        window.addEventListener('load', function() {
+            fixInlineJs();    
+            fixSvgs();         
+            fixSrcset();      
+        });
+        
+        setInterval(fixInlineJs, 1000); 
+        setInterval(fixSvgs, 2000);
+
+        function fixSvgs() {
+            document.querySelectorAll('use').forEach(el => {
+                let xlink = el.getAttribute('xlink:href');
+                if (xlink && !xlink.startsWith('data:') && !xlink.includes('/v1/proxy')) {
+                    el.setAttribute('xlink:href', wrapUrl(xlink));
+                }
+                let href = el.getAttribute('href');
+                if (href && !href.startsWith('data:') && !href.includes('/v1/proxy')) {
+                    el.setAttribute('href', wrapUrl(href));
+                }
+            });
+        }
+
+        function fixSrcset() {
+            document.querySelectorAll('[srcset]').forEach(el => {
+                let srcset = el.getAttribute('srcset');
+                if (!srcset || srcset.includes('/v1/proxy')) return;
+                let newSrcset = srcset.split(',').map(part => {
+                    part = part.trim();
+                    let spaceIdx = part.indexOf(' ');
+                    let url = spaceIdx > -1 ? part.substring(0, spaceIdx) : part;
+                    let desc = spaceIdx > -1 ? part.substring(spaceIdx) : '';
+                    return wrapUrl(url) + desc;
+                }).join(', ');
+                el.setAttribute('srcset', newSrcset);
+            });
         }
 
         const originalLocation = window.location;
@@ -195,46 +292,6 @@ func (v *HttpViews) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 		resp.Header.Set("Content-Length", strconv.Itoa(buf.Len()))
 		resp.Header.Set("Content-Type", "text/html; charset=utf-8")
 
-		return nil
-	}
-
-	proxy.ServeHTTP(w, r)
-}
-
-func handleFallback(w http.ResponseWriter, r *http.Request) {
-	ignoredPaths := []string{"/.well-known", "/monorail", "/produce_batch", "/shop_events", "/wpm@"}
-	for _, path := range ignoredPaths {
-		if strings.Contains(r.URL.Path, path) {
-			w.WriteHeader(http.StatusOK)
-			return
-		}
-	}
-
-	cookie, err := r.Cookie("wemob_target")
-	if err != nil || cookie.Value == "" {
-		http.NotFound(w, r)
-		return
-	}
-
-	targetURL, err := url.Parse(cookie.Value)
-	if err != nil {
-		http.NotFound(w, r)
-		return
-	}
-
-	proxy := httputil.NewSingleHostReverseProxy(targetURL)
-
-	proxy.Director = func(req *http.Request) {
-		req.Host = targetURL.Host
-		req.URL.Scheme = targetURL.Scheme
-		req.URL.Host = targetURL.Host
-		req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-
-		req.Header.Del("Accept-Encoding")
-	}
-
-	proxy.ModifyResponse = func(resp *http.Response) error {
-		resp.Header.Set("Access-Control-Allow-Origin", "*")
 		return nil
 	}
 
