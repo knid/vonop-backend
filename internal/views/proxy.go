@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -73,7 +74,6 @@ func (v *HttpViews) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 				newLoc := "/v1/proxy?url=" + url.QueryEscape(redirectURL)
 				resp.Header.Set("Location", newLoc)
 			}
-			// Redirect olduğu için body okumaya gerek yok, dön.
 			return nil
 		}
 
@@ -116,6 +116,12 @@ func (v *HttpViews) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 
 		htmlContent := string(bodyBytes)
 
+		reCSP := regexp.MustCompile(`(?i)<meta\s+http-equiv=["']Content-Security-Policy["'][^>]*>`)
+		htmlContent = reCSP.ReplaceAllString(htmlContent, "")
+
+		reIntegrity := regexp.MustCompile(`\sintegrity=["'][^"']*["']`)
+		htmlContent = reIntegrity.ReplaceAllString(htmlContent, "")
+
 		targetURLStr := targetURL.Scheme + "://" + targetURL.Host + "/"
 		baseTag := `<base href="` + targetURLStr + `">`
 
@@ -133,37 +139,33 @@ func (v *HttpViews) ProxyHandler(w http.ResponseWriter, r *http.Request) {
             }
             
             var base = document.querySelector('base').href;
-            if (base.endsWith('/') && url.startsWith('/')) {
-                url = url.substring(1);
-            }
+            if (base.endsWith('/') && url.startsWith('/')) url = url.substring(1);
             var fullUrl = base + url;
+            
             return window.location.origin + '/v1/proxy?url=' + encodeURIComponent(fullUrl);
         }
 
+        const originalLocation = window.location;
+        window.location.assign = function(url) { window.location.href = wrapUrl(url); };
+        window.location.replace = function(url) { window.location.href = wrapUrl(url); };
+
         const originalFetch = window.fetch;
         window.fetch = function(input, init) {
-            var url = input;
-            if (typeof input === 'string') {
-                input = wrapUrl(input);
-            } else if (input instanceof Request) {
-                input = wrapUrl(input.url);
-            }
+            if (typeof input === 'string') input = wrapUrl(input);
+            else if (input instanceof Request) input = wrapUrl(input.url);
             return originalFetch(input, init);
         };
 
         const originalOpen = XMLHttpRequest.prototype.open;
         XMLHttpRequest.prototype.open = function(method, url, async, user, password) {
-            var newUrl = wrapUrl(url);
-            return originalOpen.apply(this, [method, newUrl, async, user, password]);
+            return originalOpen.apply(this, [method, wrapUrl(url), async, user, password]);
         };
 
         document.addEventListener('click', function(e) {
             var target = e.target.closest('a');
             if (!target) return;
             var href = target.getAttribute('href');
-            if (!href || href.startsWith('#') || href.startsWith('javascript:') || 
-                href.startsWith('mailto:') || href.startsWith('tel:')) return;
-
+            if (!href || href.startsWith('#') || href.startsWith('javascript:') || href.startsWith('mailto:')) return;
             e.preventDefault();
             window.location.href = wrapUrl(target.href);
         });
@@ -173,9 +175,7 @@ func (v *HttpViews) ProxyHandler(w http.ResponseWriter, r *http.Request) {
             var action = form.action;
             if (action) {
                 var newAction = wrapUrl(action);
-                if (form.action !== newAction) {
-                    form.action = newAction;
-                }
+                if (form.action !== newAction) form.action = newAction;
             }
         });
         </script>
