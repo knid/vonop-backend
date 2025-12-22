@@ -210,6 +210,7 @@ func main() {
 		MaxAge:           300, // Maximum value not ignored by any of major browsers
 	}))
 	r.Use(middleware.Logger)
+	r.Use(middleware.Recoverer)
 
 	r.Route("/", func(r chi.Router) {
 		r.Route("/webhooks", func(r chi.Router) {
