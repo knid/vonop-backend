@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"slices"
@@ -13,6 +14,7 @@ import (
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/tasks"
+	"github.com/knid/wemob/internal/utils/external"
 	"github.com/slack-go/slack"
 )
 
@@ -159,6 +161,19 @@ func (c *Controller) CreateDeploymentTask(user *models.User, deploymentReq reque
 
 			taskType = tasks.TypeDeployIOS
 			taskPayload, err = json.Marshal(iosDeployPayload)
+			if err != nil {
+				return nil, err
+			}
+
+			// Get APNS P8 Key content from s3
+			apnsP8KeyBytes, err := c.UserApiKeysStorage.ReadObjectBytes(context.TODO(), cred.APNSP8KeyPath)
+			if err != nil {
+				return nil, err
+			}
+			apnsP8Key := string(apnsP8KeyBytes)
+
+			// Upload APNS P8 Key to OneSignal
+			err = external.UploadAPNSP8KeyToOneSignal(*project, apnsP8Key, cred.KeyID, cred.TeamID, project.PackageName)
 			if err != nil {
 				return nil, err
 			}

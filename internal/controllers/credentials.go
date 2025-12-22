@@ -54,12 +54,13 @@ func (c *Controller) GetAppStoreCredentialById(user *models.User, id string) (*r
 
 func (c *Controller) CreateAppStoreCredential(user *models.User, credentialCreateReq requests.AppStoreCredentialsCreateRequest) (*responses.AppStoreCredentialsResponse, error) {
 	credential := &models.AppStoreCredentials{
-		UserID:    user.ID,
-		Name:      credentialCreateReq.Name,
-		TeamID:    credentialCreateReq.TeamID,
-		P8KeyPath: "p8_keys/" + credentialCreateReq.P8Key + ".p8",
-		KeyID:     credentialCreateReq.KeyID,
-		IssuerID:  credentialCreateReq.IssuerID,
+		UserID:        user.ID,
+		Name:          credentialCreateReq.Name,
+		TeamID:        credentialCreateReq.TeamID,
+		P8KeyPath:     "p8_keys/" + credentialCreateReq.P8Key + ".p8",
+		APNSP8KeyPath: "apns_keys/" + credentialCreateReq.APNSP8Key + ".p8",
+		KeyID:         credentialCreateReq.KeyID,
+		IssuerID:      credentialCreateReq.IssuerID,
 	}
 	cred, err := c.DB.CreateAppStoreCredentials(credential)
 	if err != nil {
@@ -93,14 +94,21 @@ func (c *Controller) UpdateAppStoreCredential(user *models.User, credID string, 
 		p8KeyPath = credentialCreateReq.P8Key
 	}
 
+	apnsP8KeyPath := cred.APNSP8KeyPath
+	if credentialCreateReq.APNSP8Key != "" {
+		// upload new apns p8 key to storage
+		apnsP8KeyPath = credentialCreateReq.APNSP8Key
+	}
+
 	credentials := &models.AppStoreCredentials{
-		ID:        cred.ID,
-		UserID:    user.ID,
-		Name:      credentialCreateReq.Name,
-		P8KeyPath: p8KeyPath,
-		KeyID:     credentialCreateReq.KeyID,
-		TeamID:    credentialCreateReq.TeamID,
-		IssuerID:  credentialCreateReq.IssuerID,
+		ID:            cred.ID,
+		UserID:        user.ID,
+		Name:          credentialCreateReq.Name,
+		P8KeyPath:     p8KeyPath,
+		APNSP8KeyPath: apnsP8KeyPath,
+		KeyID:         credentialCreateReq.KeyID,
+		TeamID:        credentialCreateReq.TeamID,
+		IssuerID:      credentialCreateReq.IssuerID,
 	}
 
 	cred, err = c.DB.UpdateAppStoreCredentials(credentials)
