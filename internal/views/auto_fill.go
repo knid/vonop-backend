@@ -2,7 +2,7 @@ package views
 
 import (
 	"encoding/json"
-	"log"
+	"log/slog"
 	"net/http"
 
 	"github.com/go-playground/validator/v10"
@@ -45,7 +45,7 @@ func (v *HttpViews) NavBarAutoFillWithAI(w http.ResponseWriter, r *http.Request)
 
 	html, err := utils.FetchHTML(navBarAutoFillWithAIReq.URL)
 	if err != nil {
-		log.Fatalf("❌ Error fetching page: %v", err)
+		slog.Error("❌ Error fetching page", "error", err, "from", "AUTOFILL")
 		utils.JSONErrorResponse(w, "Error fetching website. Try again please.", http.StatusBadRequest)
 		return
 	}
