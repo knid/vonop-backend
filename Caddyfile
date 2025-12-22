@@ -1,13 +1,6 @@
 api.wemob.io {
     encode zstd gzip
 
-    handle /v1/proxy* {
-        reverse_proxy api:8001 {
-            header_down -X-Frame-Options
-            header_down -Content-Security-Policy
-        }
-    }
-
     handle {
         reverse_proxy api:8001
         
@@ -20,7 +13,25 @@ api.wemob.io {
     }
 
     log {
-        output file /var/log/caddy/access.log
+        output file /var/log/caddy/api_access.log
+        format console
+    }
+}
+
+proxy.wemob.io {
+    encode zstd gzip
+
+    handle {
+
+        reverse_proxy api:9001 {
+            header_down -X-Frame-Options
+            header_down -Content-Security-Policy
+            header_down -Content-Security-Policy-Report-Only
+        }
+    }
+
+    log {
+        output file /var/log/caddy/proxy_access.log
         format console
     }
 }
