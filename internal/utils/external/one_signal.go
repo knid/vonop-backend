@@ -31,7 +31,10 @@ func CreateOneSignalApplication(project models.Project) (string, error) {
 	res, _ := http.DefaultClient.Do(req)
 
 	defer res.Body.Close()
-	body, _ := io.ReadAll(res.Body)
+	body, err := io.ReadAll(res.Body)
+	if err != nil {
+		return "", err
+	}
 
 	var response map[string]interface{}
 	json.Unmarshal(body, &response)
@@ -59,7 +62,10 @@ func CreateOneSignalAppToken(project models.Project) (string, error) {
 	req.Header.Add("Content-Type", "application/json")
 	req.Header.Add("Authorization", "Basic "+os.Getenv("ONESIGNAL_ORG_API_KEY"))
 
-	res, _ := http.DefaultClient.Do(req)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", err
+	}
 
 	defer res.Body.Close()
 	body, _ := io.ReadAll(res.Body)
@@ -74,6 +80,44 @@ func CreateOneSignalAppToken(project models.Project) (string, error) {
 	}
 
 	return onesignal_app_api_key.(string), nil
+}
+
+func UploadAPNSP8KeyToOneSignal(project models.Project, apnsP8Key string, apnsKeyID string, apnsTeamID string, apnsBundleID string) error {
+	url := fmt.Sprintf("https://api.onesignal.com/apps/%s", project.OneSignalAppID)
+	payloadStr := map[string]string{
+		"organization_id": os.Getenv("ONESIGNAL_ORG_ID"),
+		"apns_p8":         apnsP8Key,
+		"apns_key_id":     apnsKeyID,
+		"apns_team_id":    apnsTeamID,
+		"apns_bundle_id":  apnsBundleID,
+	}
+	marshalled, _ := json.Marshal(payloadStr)
+
+	req, _ := http.NewRequest("PUT", url, bytes.NewReader(marshalled))
+
+	req.Header.Add("Content-Type", "application/json")
+	req.Header.Add("Authorization", "Basic "+os.Getenv("ONESIGNAL_ORG_API_KEY"))
+
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+
+	defer res.Body.Close()
+	body, err := io.ReadAll(res.Body)
+	if err != nil {
+		return err
+	}
+
+	var response map[string]interface{}
+	json.Unmarshal(body, &response)
+
+	if res.StatusCode != 200 {
+		slog.Error("Error uploading APNS P8 Key to OneSignal", "response", response, "project_id", project.ID)
+		return errors.New("error uploading APNS P8 Key to OneSignal")
+	}
+
+	return nil
 }
 
 func SendOneSignalNotification(notification *models.Notification, project *models.Project) error {
@@ -109,7 +153,10 @@ func SendOneSignalNotification(notification *models.Notification, project *model
 	req.Header.Add("Content-Type", "application/json")
 	req.Header.Add("Authorization", "Basic "+project.OneSignalAppToken)
 
-	res, _ := http.DefaultClient.Do(req)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
 
 	defer res.Body.Close()
 	body, _ := io.ReadAll(res.Body)
