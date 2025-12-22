@@ -38,8 +38,8 @@ func ProxyHandler(w http.ResponseWriter, r *http.Request) {
 			Value:    targetURL.String(),
 			Path:     "/",
 			HttpOnly: true,
-			Secure:   false, // SSL arkasında çalışıyorsa true yapın
-			SameSite: http.SameSiteLaxMode,
+			Secure:   true,
+			SameSite: http.SameSiteNoneMode,
 			Expires:  time.Now().Add(24 * time.Hour),
 		})
 
