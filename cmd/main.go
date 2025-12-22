@@ -381,7 +381,7 @@ func main() {
 
 	// Proxy
 	proxyRoute := chi.NewRouter()
-	r.Use(func(next http.Handler) http.Handler {
+	proxyRoute.Use(func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			ctx := r.Context()
 			httplog.SetAttrs(ctx, slog.String("from", "PROXYLOG"))
@@ -406,7 +406,7 @@ func main() {
 		})
 	})
 
-	r.Use(cors.Handler(cors.Options{
+	proxyRoute.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   []string{"https://*", "http://*", "http://127.0.0.1:3000"},
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token", "Location"},
@@ -414,9 +414,9 @@ func main() {
 		AllowCredentials: false,
 		MaxAge:           300,
 	}))
-	r.Use(middleware.Logger)
-	r.Use(middleware.Recoverer)
-	r.Use(middleware.Timeout(60 * time.Second))
+	proxyRoute.Use(middleware.Logger)
+	proxyRoute.Use(middleware.Recoverer)
+	proxyRoute.Use(middleware.Timeout(60 * time.Second))
 	proxyRoute.HandleFunc("/*", proxy.ProxyHandler)
 	go http.ListenAndServe(":9001", proxyRoute)
 
