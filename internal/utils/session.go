@@ -21,6 +21,13 @@ func CheckSessionStatusJob(DB *database.Database) {
 						session.Status = "inactive"
 						DB.UpdateSession(&session)
 					}
+				} else {
+					if session.CreatedAt.Add(30 * time.Second).Before(time.Now()) {
+						session.Duration = session.Duration + 30
+						session.UpdatedAt = time.Now()
+						session.Status = "inactive"
+						DB.UpdateSession(&session)
+					}
 				}
 			}
 		}
