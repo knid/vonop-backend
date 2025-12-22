@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -43,6 +44,8 @@ func ProxyHandler(w http.ResponseWriter, r *http.Request) {
 			Expires:  time.Now().Add(24 * time.Hour),
 		})
 
+		slog.Info("🌐 New proxy session started", "target", targetURL.String(), "from", "PROXY")
+
 		// Temiz bir başlangıç için ana sayfaya yönlendir
 		// Tarayıcı artık cookiye sahip olduğu için bir sonraki istekte proxy devreye girecek.
 		http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
@@ -70,6 +73,8 @@ func ProxyHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid session target", http.StatusInternalServerError)
 		return
 	}
+
+	slog.Info("🔁 Existing proxy session used", "target", targetURL.String(), "from", "PROXY")
 
 	// 3. Reverse Proxy Oluştur
 	proxy := httputil.NewSingleHostReverseProxy(targetURL)
