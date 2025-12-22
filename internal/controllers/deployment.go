@@ -8,10 +8,12 @@ import (
 
 	"github.com/go-playground/validator/v10"
 	"github.com/hibiken/asynq"
+	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/tasks"
+	"github.com/slack-go/slack"
 )
 
 func (c *Controller) GetDeployments(user *models.User) ([]responses.DeploymentResponse, error) {
@@ -76,17 +78,24 @@ func (c *Controller) CreateDeploymentTask(user *models.User, deploymentReq reque
 		return nil, err
 	}
 
-	/* 	deployments, err := c.GetDeployments(user)
-	   	if err != nil {
-	   		return nil, err
-	   	}
-	*/
-	/* for _, d := range deployments {
-		if d.ProjectID.String() == deploymentReq.ProjectID && d.Platform == deploymentReq.Platform && d.Method == deploymentReq.Method {
+	deployments, err := c.GetDeployments(user)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, d := range deployments {
+		if d.ProjectID.String() == deploymentReq.ProjectID && d.Method == "wemob" {
 			return nil, errors.New("deployment for this project and platform already exists")
 		}
+		if d.ProjectID.String() == deploymentReq.ProjectID && d.Method == "user" {
+			for _, p := range d.Platforms {
+				if slices.Contains(deploymentReq.Platforms, p) {
+					return nil, errors.New("deployment for this project and platform already exists")
+				}
+			}
+		}
 	}
-	*/
+
 	project, err := c.DB.GetProjectById(deploymentReq.ProjectID)
 	if err != nil {
 		return nil, err
@@ -154,6 +163,12 @@ func (c *Controller) CreateDeploymentTask(user *models.User, deploymentReq reque
 				return nil, err
 			}
 
+			go c.CRMService.SendEvent(user, constants.BREVO_EVENT_USER_APPLE_DEPLOYMENT_STARTED, map[string]interface{}{
+				"project_id":       project.ID.String(),
+				"deployment_id":    deployment.ID.String(),
+				"build_id":         build.ID.String(),
+				"deployment_title": deploymentReq.Title,
+			})
 		} else if slices.Contains(deploymentReq.Platforms, "android") {
 			cred, err := c.DB.GetGooglePlayCredentialById(deploymentReq.GooglePlayCredentialsID)
 			if err != nil {
@@ -182,15 +197,27 @@ func (c *Controller) CreateDeploymentTask(user *models.User, deploymentReq reque
 			if err != nil {
 				return nil, err
 			}
+			go c.CRMService.SendEvent(user, constants.BREVO_EVENT_USER_ANDROID_DEPLOYMENT_STARTED, map[string]interface{}{
+				"project_id":       project.ID.String(),
+				"deployment_id":    deployment.ID.String(),
+				"build_id":         build.ID.String(),
+				"deployment_title": deploymentReq.Title,
+			})
 		} else {
 			return nil, errors.New("unsupported platform")
 		}
-	}
 
-	task = asynq.NewTask(taskType, taskPayload)
-	_, err = c.TaskService.Enqueue(task, asynq.MaxRetry(2), asynq.Timeout(time.Minute*3))
-	if err != nil {
-		return nil, err
+		task = asynq.NewTask(taskType, taskPayload)
+		_, err = c.TaskService.Enqueue(task, asynq.MaxRetry(2), asynq.Timeout(time.Minute*3))
+		if err != nil {
+			return nil, err
+		}
+
+	} else if deploymentReq.Method == "wemob" {
+		go c.SlackService.Client.PostMessage(
+			constants.SLACK_CHANNEL_ID_NEW_ANDROID_DEPLOY_REQUEST,
+			slack.MsgOptionText("New android deploy request: ("+project.URL+") "+deployment.ID.String(), false),
+		)
 	}
 
 	return &responses.DeploymentResponse{
