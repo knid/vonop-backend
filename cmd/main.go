@@ -222,6 +222,7 @@ func main() {
 				r.Route("/credentials", func(r chi.Router) {
 					r.Route("/apple", func(r chi.Router) {
 						r.Post("/", httpViews.PutP8KeyToS3Presign)
+						r.Post("/apns", httpViews.PutAPNsKeyToS3Presign)
 					})
 					r.Route("/google", func(r chi.Router) {
 						r.Post("/", httpViews.PutServiceAccountToS3Presign)
