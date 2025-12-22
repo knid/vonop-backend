@@ -78,6 +78,19 @@ func (s *S3Storage) UploadFile(ctx context.Context, s3URL string, sourcePath str
 	return nil
 }
 
+func (s *S3Storage) ReadObjectBytes(ctx context.Context, key string) ([]byte, error) {
+	resp, err := s.Client.GetObject(ctx, &s3.GetObjectInput{
+		Bucket: &s.Bucket,
+		Key:    &key,
+	})
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	return io.ReadAll(resp.Body)
+}
+
 func (s *S3Storage) UploadFileByte(ctx context.Context, s3URL string, data []byte) error {
 	_, err := s.Client.PutObject(ctx, &s3.PutObjectInput{
 		Bucket: &s.Bucket,
