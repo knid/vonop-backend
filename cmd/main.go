@@ -21,6 +21,7 @@ import (
 	"github.com/knid/wemob/internal/controllers"
 	"github.com/knid/wemob/internal/database"
 	"github.com/knid/wemob/internal/models"
+	"github.com/knid/wemob/internal/proxy"
 	"github.com/knid/wemob/internal/services"
 	crmServices "github.com/knid/wemob/internal/services/crm"
 	emailServices "github.com/knid/wemob/internal/services/email"
@@ -378,6 +379,47 @@ func main() {
 		r.Get("/health", httpViews.Health)
 	})
 
-	http.ListenAndServe(":8001", r)
+	// Proxy
+	proxyRoute := chi.NewRouter()
+	r.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ctx := r.Context()
+			httplog.SetAttrs(ctx, slog.String("from", "PROXYLOG"))
+			httplog.SetAttrs(ctx, slog.String("proxy.path", r.URL.Path))
 
+			urlCookie, err := r.Cookie(constants.SessionCookieName)
+			if err == nil {
+				httplog.SetAttrs(ctx, slog.String("proxy.url", urlCookie.Value))
+			}
+
+			tokenString, err := utils.ExtractTokenFromHeader(r)
+			if err == nil {
+				httplog.SetAttrs(ctx, slog.String("user.token", tokenString[0:12]+"..."))
+				userInformationRes, err := httpViews.Controller.GetUser(tokenString)
+				if err == nil {
+					httplog.SetAttrs(ctx, slog.String("user.id", userInformationRes.ID.String()))
+					httplog.SetAttrs(ctx, slog.String("user.email", userInformationRes.Email))
+				}
+			}
+
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	})
+
+	r.Use(cors.Handler(cors.Options{
+		AllowedOrigins:   []string{"https://*", "http://*", "http://127.0.0.1:3000"},
+		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token", "Location"},
+		ExposedHeaders:   []string{"Link"},
+		AllowCredentials: false,
+		MaxAge:           300,
+	}))
+	r.Use(middleware.Logger)
+	r.Use(middleware.Recoverer)
+	r.Use(middleware.Timeout(60 * time.Second))
+	proxyRoute.HandleFunc("/*", proxy.ProxyHandler)
+	go http.ListenAndServe(":9001", proxyRoute)
+
+	// Main
+	http.ListenAndServe(":8001", r)
 }
