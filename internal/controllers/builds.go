@@ -15,7 +15,6 @@ import (
 	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/tasks"
 	"github.com/knid/wemob/internal/utils"
-	"github.com/slack-go/slack"
 )
 
 func (c *Controller) GetBuilds(project *models.Project) ([]responses.BuildInformationResponse, error) {
@@ -148,6 +147,15 @@ func (c *Controller) CreateBuild(user *models.User, buildCreateReq requests.Buil
 		task := asynq.NewTask(tasks.TypeBuildAndroid, taskPayload)
 		c.TaskService.Enqueue(task, asynq.MaxRetry(2), asynq.Timeout(time.Minute*10))
 
+		go c.CRMService.SendEvent(user, constants.BREVO_EVENT_BUILD_STARTED_ANDROID, map[string]interface{}{
+			"build_id":     createdBuild.ID.String(),
+			"task_id":      appBuildTask.ID.String(),
+			"project_id":   project.ID.String(),
+			"build_title":  createdBuild.Title,
+			"build_number": createdBuild.BuildNumber,
+			"package_name": project.PackageName,
+		})
+
 		/* if project.UseAutoDeployForAndroid {
 			go c.SlackService.Client.PostMessage(
 				constants.SLACK_CHANNEL_ID_NEW_ANDROID_DEPLOY_REQUEST,
@@ -184,17 +192,14 @@ func (c *Controller) CreateBuild(user *models.User, buildCreateReq requests.Buil
 		task := asynq.NewTask(tasks.TypeBuildUnsignedIpa, taskPayload)
 		c.TaskService.Enqueue(task, asynq.MaxRetry(2), asynq.Timeout(time.Minute*10))
 
-		go c.SlackService.Client.PostMessage(
-			constants.SLACK_CHANNEL_ID_NEW_IOS_BUILD_REQUEST,
-			slack.MsgOptionText("New ios build request: ("+project.URL+"), ("+project.UserAppleTeamID+") "+createdBuild.ID.String(), false),
-		)
-
-		if project.UseAutoDeployForIOS {
-			go c.SlackService.Client.PostMessage(
-				constants.SLACK_CHANNEL_ID_NEW_IOS_DEPLOY_REQUEST,
-				slack.MsgOptionText("New ios deploy request: ("+project.URL+"), ("+project.UserAppleTeamID+") "+createdBuild.ID.String(), false),
-			)
-		}
+		go c.CRMService.SendEvent(user, constants.BREVO_EVENT_BUILD_STARTED_IOS, map[string]interface{}{
+			"build_id":     createdBuild.ID.String(),
+			"task_id":      appBuildTask.ID.String(),
+			"project_id":   project.ID.String(),
+			"build_title":  createdBuild.Title,
+			"build_number": createdBuild.BuildNumber,
+			"package_name": project.PackageName,
+		})
 	}
 
 	/* meta := map[string]any{
