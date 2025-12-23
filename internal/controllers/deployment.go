@@ -173,7 +173,7 @@ func (c *Controller) CreateDeploymentTask(user *models.User, deploymentReq reque
 			apnsP8Key := string(apnsP8KeyBytes)
 
 			// Upload APNS P8 Key to OneSignal
-			err = external.UploadAPNSP8KeyToOneSignal(*project, apnsP8Key, cred.KeyID, cred.TeamID, project.PackageName)
+			err = external.UploadAPNSP8KeyToOneSignal(*project, apnsP8Key, cred.APNSP8KeyID, cred.TeamID, project.PackageName)
 			if err != nil {
 				return nil, err
 			}
