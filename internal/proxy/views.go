@@ -217,46 +217,51 @@ func rewriteHTML(resp *http.Response, targetURL *url.URL) error {
 	proxyScript := fmt.Sprintf(`
 	<script>
 		(function() {
-			// Hedef sitenin orijinal adresi
 			const TARGET_ORIGIN = '%s://%s';
 			
 			// Linkleri Proxy formatına çeviren fonksiyon
 			function wrapUrl(u) {
 				if (!u) return u;
-				// Zaten proxy ise dokunma
 				if (u.includes('?url=')) return u;
-				// JS veya hash ise dokunma
 				if (u.startsWith('#') || u.startsWith('javascript:') || u.startsWith('mailto:')) return u;
 
 				try {
-					// URL'i tam hale getir (Absolute)
-					let fullUrl = new URL(u, TARGET_ORIGIN).href;
+					let fullUrl = new URL(u, window.location.href).href;
 					
-					// Sadece hedef siteye giden linkleri yakala
+					// Eğer link hedef siteye gidiyorsa (https://gumastore.com/checkout)
 					if (fullUrl.startsWith(TARGET_ORIGIN)) {
-						return '/?url=' + encodeURIComponent(fullUrl);
+						// KRİTİK DÜZELTME:
+						// Eskiden: return '/?url=' + encodeURIComponent(fullUrl); 
+						// Bu, her tıklamada session'ı sıfırlayıp ana sayfaya atıyordu.
+						
+						// Yeni: Domain kısmını sil, sadece path kalsın.
+						// Örnek: https://gumastore.com/checkout -> /checkout
+						let path = fullUrl.replace(TARGET_ORIGIN, '');
+						if (path === '') path = '/';
+						return path;
 					}
 				} catch (e) {}
 				return u;
 			}
 
-			// 1. Tıklamaları Yakala (Delegation)
+			// 1. Tıklamaları Yakala
 			document.addEventListener('click', function(e) {
-				// Tıklanan elementin A etiketi olup olmadığına bak
 				const link = e.target.closest('a, area');
 				if (link) {
 					const href = link.getAttribute('href');
 					if (href) {
+						// Target="_blank" varsa onu iptal et, proxy içinde kalsın
+						if (link.target === '_blank') link.target = '_self';
+
 						const newUrl = wrapUrl(href);
-						// Eğer URL değiştiyse (yani proxy formatına girdiyse)
-						if (newUrl !== href) {
+						if (newUrl !== href && !href.startsWith('/')) {
 							e.preventDefault();
 							e.stopPropagation();
-							window.location.href = newUrl;
+							window.location.assign(newUrl);
 						}
 					}
 				}
-			}, true); // Capture phase (En önce çalışır)
+			}, true);
 
 			// 2. Form Gönderimlerini Yakala
 			document.addEventListener('submit', function(e) {
@@ -265,20 +270,31 @@ func rewriteHTML(resp *http.Response, targetURL *url.URL) error {
 				if (action) {
 					const newAction = wrapUrl(action);
 					if (newAction !== action) {
-						e.preventDefault();
-						// Formu manuel oluşturup göndermek gerekebilir ama
-						// şimdilik basitçe action değiştirip bırakıyoruz (GET formları için)
-						if(form.method.toLowerCase() === 'get') {
-							// Basit yönlendirme
-							const formData = new FormData(form);
-							const params = new URLSearchParams(formData);
-							window.location.href = newAction + '&' + params.toString();
-						}
+						// Form action'ı fiziksel olarak değiştir
+						form.setAttribute('action', newAction);
 					}
 				}
 			}, true);
+            
+            // 3. History API Patch (React/Next.js Router'ın kafası karışmasın diye)
+            // Eğer uygulama history.pushState ile tam domainli URL iterse, onu temizliyoruz.
+            const originalPushState = history.pushState;
+            history.pushState = function(state, unused, url) {
+                if (url && typeof url === 'string' && url.startsWith(TARGET_ORIGIN)) {
+                    url = url.replace(TARGET_ORIGIN, '');
+                }
+                return originalPushState.apply(this, [state, unused, url]);
+            };
 
-			console.log('WeMob Proxy Interceptor Loaded');
+            const originalReplaceState = history.replaceState;
+            history.replaceState = function(state, unused, url) {
+                if (url && typeof url === 'string' && url.startsWith(TARGET_ORIGIN)) {
+                    url = url.replace(TARGET_ORIGIN, '');
+                }
+                return originalReplaceState.apply(this, [state, unused, url]);
+            };
+
+			console.log('WeMob Proxy: Navigation Loop Fix Loaded');
 		})();
 	</script>
 	`, targetURL.Scheme, targetURL.Host)
