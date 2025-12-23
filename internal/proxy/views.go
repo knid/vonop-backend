@@ -173,54 +173,130 @@ func ProxyHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func rewriteHTML(resp *http.Response, targetURL *url.URL) error {
-	if resp.Body == nil {
-		return fmt.Errorf("response body is nil")
-	}
-
+	// 1. Body Okuma ve Gzip Açma (Burası aynı kalıyor, çünkü içeriği okumamız lazım)
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return fmt.Errorf("read body failed: %v", err)
+		return err
 	}
 	resp.Body.Close()
 
 	encoding := resp.Header.Get("Content-Encoding")
 	if strings.Contains(encoding, "gzip") {
-		log.Printf("📦 [GZIP] Decompressing Gzip content...")
 		gr, err := gzip.NewReader(bytes.NewReader(bodyBytes))
-		if err != nil {
-			log.Printf("⚠️ [GZIP-FAIL] Failed to create gzip reader: %v. Using raw body.", err)
-		} else {
-			decompressedBytes, err := io.ReadAll(gr)
+		if err == nil {
+			bodyBytes, _ = io.ReadAll(gr)
 			gr.Close()
-			if err != nil {
-				log.Printf("⚠️ [GZIP-READ-FAIL] Failed to read gzip stream: %v", err)
-			} else {
-				bodyBytes = decompressedBytes
-				resp.Header.Del("Content-Encoding")
-			}
+			resp.Header.Del("Content-Encoding")
 		}
 	} else if encoding != "" {
-		log.Printf("⚠️ [UNKNOWN-ENCODING] Content-Encoding is '%s'. Skipping rewrite to avoid corruption.", encoding)
-		resp.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
+		// Tanımadığımız sıkıştırma varsa dokunmuyoruz
+		resp.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 		return nil
 	}
 
 	htmlContent := string(bodyBytes)
 
+	// ---------------------------------------------------------
+	// DEĞİŞİKLİK BURADA: Artık Domainleri "ReplaceAll" ile silmiyoruz!
+	// Bu işlem React'ın JSON verisini bozup siteyi çökertiyor.
+	// Bunun yerine <head> içine bir Script enjekte ediyoruz.
+	// ---------------------------------------------------------
+
+	// 1. Base Tag Varsa Sil (Bu hala gerekli)
 	reBase := regexp.MustCompile(`(?i)<base[^>]*>`)
 	htmlContent = reBase.ReplaceAllString(htmlContent, "")
 
-	targetString := targetURL.String()
-	targetStringNoSlash := strings.TrimRight(targetString, "/")
-	htmlContent = strings.ReplaceAll(htmlContent, targetString, "")
-	htmlContent = strings.ReplaceAll(htmlContent, targetStringNoSlash, "")
-
+	// 2. Integrity Korumasını Kaldır (Script ekleyeceğimiz için hash tutmaz)
 	reIntegrity := regexp.MustCompile(`\s*integrity=["'][^"']*["']`)
 	htmlContent = reIntegrity.ReplaceAllString(htmlContent, "")
+
+	// 3. JAVASCRIPT ENJEKSİYONU (Navigasyon Kontrolcüsü)
+	// Bu script, kullanıcı bir linke tıkladığında devreye girer.
+	// React'ın çalışmasını bozmaz ama kullanıcıyı proxy'de tutar.
+
+	proxyScript := fmt.Sprintf(`
+	<script>
+		(function() {
+			// Hedef sitenin orijinal adresi
+			const TARGET_ORIGIN = '%s://%s';
+			
+			// Linkleri Proxy formatına çeviren fonksiyon
+			function wrapUrl(u) {
+				if (!u) return u;
+				// Zaten proxy ise dokunma
+				if (u.includes('?url=')) return u;
+				// JS veya hash ise dokunma
+				if (u.startsWith('#') || u.startsWith('javascript:') || u.startsWith('mailto:')) return u;
+
+				try {
+					// URL'i tam hale getir (Absolute)
+					let fullUrl = new URL(u, TARGET_ORIGIN).href;
+					
+					// Sadece hedef siteye giden linkleri yakala
+					if (fullUrl.startsWith(TARGET_ORIGIN)) {
+						return '/?url=' + encodeURIComponent(fullUrl);
+					}
+				} catch (e) {}
+				return u;
+			}
+
+			// 1. Tıklamaları Yakala (Delegation)
+			document.addEventListener('click', function(e) {
+				// Tıklanan elementin A etiketi olup olmadığına bak
+				const link = e.target.closest('a, area');
+				if (link) {
+					const href = link.getAttribute('href');
+					if (href) {
+						const newUrl = wrapUrl(href);
+						// Eğer URL değiştiyse (yani proxy formatına girdiyse)
+						if (newUrl !== href) {
+							e.preventDefault();
+							e.stopPropagation();
+							window.location.href = newUrl;
+						}
+					}
+				}
+			}, true); // Capture phase (En önce çalışır)
+
+			// 2. Form Gönderimlerini Yakala
+			document.addEventListener('submit', function(e) {
+				const form = e.target;
+				const action = form.getAttribute('action');
+				if (action) {
+					const newAction = wrapUrl(action);
+					if (newAction !== action) {
+						e.preventDefault();
+						// Formu manuel oluşturup göndermek gerekebilir ama
+						// şimdilik basitçe action değiştirip bırakıyoruz (GET formları için)
+						if(form.method.toLowerCase() === 'get') {
+							// Basit yönlendirme
+							const formData = new FormData(form);
+							const params = new URLSearchParams(formData);
+							window.location.href = newAction + '&' + params.toString();
+						}
+					}
+				}
+			}, true);
+
+			console.log('WeMob Proxy Interceptor Loaded');
+		})();
+	</script>
+	`, targetURL.Scheme, targetURL.Host)
+
+	// Scripti <head> bitiminden hemen önceye ekle
+	if strings.Contains(htmlContent, "</head>") {
+		htmlContent = strings.Replace(htmlContent, "</head>", proxyScript+"</head>", 1)
+	} else {
+		// Head yoksa body başına ekle
+		htmlContent = proxyScript + htmlContent
+	}
+
+	// ---------------------------------------------------------
 
 	buf := bytes.NewBufferString(htmlContent)
 	resp.Body = io.NopCloser(buf)
 
+	// Chunked transfer
 	resp.ContentLength = -1
 	resp.Header.Del("Content-Length")
 
