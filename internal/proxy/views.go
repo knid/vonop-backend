@@ -6,7 +6,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"io"
-	"log/slog"
+	"log"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -20,35 +20,70 @@ import (
 	"github.com/knid/wemob/internal/constants"
 )
 
+// Global Transport (Performans için)
+var customTransport = &http.Transport{
+	Proxy: http.ProxyFromEnvironment,
+	DialContext: (&net.Dialer{
+		Timeout:   30 * time.Second,
+		KeepAlive: 30 * time.Second,
+	}).DialContext,
+	ForceAttemptHTTP2:     true,
+	MaxIdleConns:          1000,
+	MaxIdleConnsPerHost:   100,
+	IdleConnTimeout:       90 * time.Second,
+	TLSHandshakeTimeout:   10 * time.Second,
+	ExpectContinueTimeout: 1 * time.Second,
+	TLSClientConfig:       &tls.Config{InsecureSkipVerify: true},
+}
+
 func ProxyHandler(w http.ResponseWriter, r *http.Request) {
+	// DEBUG LOG: İstek geldi
+	log.Printf("🔹 [START] Request received for: %s", r.URL.Path)
+
 	UpstreamProxyHost := os.Getenv("PREVIEW_PROXY_HOST")
 	UpstreamProxyAuth := os.Getenv("PREVIEW_PROXY_AUTH")
 
+	// Upstream Proxy ayarı
+	if UpstreamProxyHost != "" {
+		upstreamUrl := &url.URL{Scheme: "http", Host: UpstreamProxyHost}
+		if UpstreamProxyAuth != "" {
+			parts := strings.Split(UpstreamProxyAuth, ":")
+			if len(parts) == 2 {
+				upstreamUrl.User = url.UserPassword(parts[0], parts[1])
+			}
+		}
+		customTransport.Proxy = http.ProxyURL(upstreamUrl)
+	}
+
 	// 1. Yeni Oturum Başlatma (?url=...)
-	// Kullanıcı siteye ilk kez giriş yapıyorsa veya site değiştirmek istiyorsa.
 	queryParam := r.URL.Query().Get("url")
 	if queryParam != "" {
 		targetURL, err := url.Parse(queryParam)
 		if err != nil || targetURL.Scheme == "" || targetURL.Host == "" {
-			http.Error(w, "Invalid 'url' parameter. Must be absolute (e.g., https://site.com)", http.StatusBadRequest)
+			http.Error(w, "Invalid 'url'", http.StatusBadRequest)
 			return
 		}
 
-		// Cookie oluştur ve tarayıcıya ver
+		isSecure := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
+		secureMode := false
+		sameSiteMode := http.SameSiteLaxMode
+
+		if isSecure {
+			secureMode = true
+			sameSiteMode = http.SameSiteNoneMode
+		}
+
 		http.SetCookie(w, &http.Cookie{
 			Name:     constants.SessionCookieName,
 			Value:    targetURL.String(),
 			Path:     "/",
 			HttpOnly: true,
-			Secure:   true,
-			SameSite: http.SameSiteNoneMode,
+			Secure:   secureMode,
+			SameSite: sameSiteMode,
 			Expires:  time.Now().Add(24 * time.Hour),
 		})
 
-		slog.Info("🌐 New proxy session started", "target", targetURL.String(), "from", "PROXY")
-
-		// Temiz bir başlangıç için ana sayfaya yönlendir
-		// Tarayıcı artık cookiye sahip olduğu için bir sonraki istekte proxy devreye girecek.
+		log.Printf("✅ [SESSION] New session for: %s", targetURL.String())
 		http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
 		return
 	}
@@ -56,181 +91,155 @@ func ProxyHandler(w http.ResponseWriter, r *http.Request) {
 	// 2. Mevcut Oturumu Kontrol Et
 	cookie, err := r.Cookie(constants.SessionCookieName)
 	if err != nil || cookie.Value == "" {
-		// Session yoksa ve favicon gibi gereksiz bir şeyse 404 ver
-		/* if r.URL.Path == "/favicon.ico" {
+		if r.URL.Path == "/favicon.ico" {
 			w.WriteHeader(http.StatusNotFound)
 			return
-		} */
-		// Ana sayfaya session olmadan geldiyse kullanım mesajı göster
+		}
+		log.Printf("⚠️ [AUTH] No active session cookie found")
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusBadRequest)
-		fmt.Fprintf(w, `<h1>No Active Session</h1><p>Please use <code>?url=https://target.com</code> to start.</p>`)
+		fmt.Fprintf(w, `<h3>No Active Session</h3>`)
 		return
 	}
 
 	targetBase := cookie.Value
 	targetURL, err := url.Parse(targetBase)
 	if err != nil {
+		log.Printf("❌ [ERROR] Invalid target URL in cookie: %v", err)
 		http.Error(w, "Invalid session target", http.StatusInternalServerError)
 		return
 	}
 
-	slog.Info("🔁 Existing proxy session used", "target", targetURL.String(), "from", "PROXY")
-
-	// 3. Reverse Proxy Oluştur
+	// 3. Proxy Oluştur
 	proxy := httputil.NewSingleHostReverseProxy(targetURL)
+	proxy.Transport = customTransport
 
-	// Upstream Proxy Ayarları (Varsa)
-	if UpstreamProxyHost != "" {
-		upstreamUrl := &url.URL{
-			Scheme: "http",
-			Host:   UpstreamProxyHost,
-		}
-		if UpstreamProxyAuth != "" {
-			parts := strings.Split(UpstreamProxyAuth, ":")
-			if len(parts) == 2 {
-				upstreamUrl.User = url.UserPassword(parts[0], parts[1])
-			}
-		}
+	// DEBUG: Proxy'nin kendi iç loglarını görelim
+	proxy.ErrorLog = log.New(os.Stderr, "🔥 [PROXY-INTERNAL] ", log.LstdFlags)
 
-		proxy.Transport = &http.Transport{
-			Proxy: http.ProxyURL(upstreamUrl),
-			DialContext: (&net.Dialer{
-				Timeout:   30 * time.Second,
-				KeepAlive: 30 * time.Second,
-			}).DialContext,
-			ForceAttemptHTTP2:     true, // HTTP/2 desteği
-			MaxIdleConns:          1000, // Toplam açık bağlantı limiti
-			MaxIdleConnsPerHost:   100,  // AYNI SİTEYE (Host) aynı anda açılacak bağlantı limiti (Varsayılan 2'ydi, artırdık)
-			IdleConnTimeout:       90 * time.Second,
-			TLSHandshakeTimeout:   10 * time.Second,
-			ExpectContinueTimeout: 1 * time.Second,
-			TLSClientConfig:       &tls.Config{InsecureSkipVerify: true}, // Bazı SSL hatalarını yoksaymak için
-		}
-	}
-
-	// 4. Request Düzenleme (Director)
+	// 4. Director
 	originalDirector := proxy.Director
 	proxy.Director = func(req *http.Request) {
 		originalDirector(req)
-
-		// Host başlığını hedef siteye göre ayarla (Çok önemli, yoksa 404 alırsın)
 		req.Host = targetURL.Host
 		req.URL.Scheme = targetURL.Scheme
 		req.URL.Host = targetURL.Host
 
-		// Path'i olduğu gibi koru (Catch-All mantığı)
-		// /checkout geldiyse hedef siteye de /checkout gitmeli.
-
-		// Gereksiz Headerları Temizle
-		req.Header.Del("Accept-Encoding") // Response'u manipüle edebilmek için gzip kapalı olmalı (veya decode etmeliyiz)
+		// Encoding'i siliyoruz ki sunucu bize Gzip veya Brotli göndermesin (Plain text istiyoruz)
+		req.Header.Del("Accept-Encoding")
 		req.Header.Del("X-Forwarded-For")
 
-		// Tarayıcı gibi davran
 		req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 		req.Header.Set("Referer", targetURL.String())
 		req.Header.Set("Origin", targetURL.Scheme+"://"+targetURL.Host)
+
+		log.Printf("📡 [UPSTREAM] Sending request to: %s", req.URL.String())
 	}
 
-	// 5. Response Düzenleme (ModifyResponse)
+	// 5. Response Modifier
 	proxy.ModifyResponse = func(resp *http.Response) error {
-		// Güvenlik Duvarlarını Kaldır (Iframe ve CORS için)
+		log.Printf("🔙 [RESPONSE] Got status %d from upstream. Type: %s", resp.StatusCode, resp.Header.Get("Content-Type"))
+
 		resp.Header.Del("X-Frame-Options")
 		resp.Header.Del("Content-Security-Policy")
-		resp.Header.Del("Content-Security-Policy-Report-Only")
 		resp.Header.Del("Strict-Transport-Security")
 		resp.Header.Set("Access-Control-Allow-Origin", "*")
 		resp.Header.Set("Access-Control-Allow-Credentials", "true")
 
-		// 301/302 Redirect Düzeltme
-		// Hedef site bizi https://google.com'a atıyorsa karışma.
-		// Ama https://gumastore.com/cart'a atıyorsa, bunu /cart yapmalıyız ki bizde kalsın.
+		// Redirect Düzeltme
 		if resp.StatusCode >= 300 && resp.StatusCode < 400 {
 			loc := resp.Header.Get("Location")
 			if loc != "" {
 				u, err := url.Parse(loc)
-				if err == nil {
-					// Eğer redirect hedef domain içindeyse, host kısmını sil, sadece path kalsın.
-					if u.Host == targetURL.Host || u.Host == "" {
-						newPath := u.Path
-						if u.RawQuery != "" {
-							newPath += "?" + u.RawQuery
-						}
-						resp.Header.Set("Location", newPath)
+				if err == nil && (u.Host == targetURL.Host || u.Host == "") {
+					newPath := u.Path
+					if u.RawQuery != "" {
+						newPath += "?" + u.RawQuery
 					}
+					resp.Header.Set("Location", newPath)
+					log.Printf("🔀 [REDIRECT] Rewrote location to: %s", newPath)
 				}
 			}
 		}
 
-		// Sadece HTML içeriği düzenle
 		contentType := strings.ToLower(resp.Header.Get("Content-Type"))
 		if strings.Contains(contentType, "text/html") {
-			return rewriteHTML(resp, targetURL)
+			log.Printf("📝 [REWRITE] Starting HTML rewrite...")
+			err := rewriteHTML(resp, targetURL)
+			if err != nil {
+				log.Printf("❌ [REWRITE-ERROR] Failed to rewrite HTML: %v", err)
+				// Hata dönmek yerine nil dönüyoruz ki proxy patlamasın, orijinal haliyle devam etsin.
+				// return err
+			} else {
+				log.Printf("✅ [REWRITE] HTML rewrite success")
+			}
 		}
-
 		return nil
 	}
 
-	// Hata Yönetimi
+	// 6. Error Handler
 	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
-		fmt.Printf("Proxy Error: %v", err)
-		slog.Error("Proxy Error", "error", err, "target", targetURL.String())
+		// Eğer bağlantı koptuysa veya transport hatası varsa buraya düşer
+		log.Printf("❌ [HANDLER-ERROR] Proxy Error for %s: %v", r.URL.Path, err)
 		w.WriteHeader(http.StatusBadGateway)
-		fmt.Fprintf(w, "Proxy Error: %v", err)
+		fmt.Fprintf(w, "Proxy Gateway Error: %v", err)
 	}
 
 	proxy.ServeHTTP(w, r)
 }
 
-// rewriteHTML: HTML içindeki absolute linkleri (https://gumastore.com/...)
-// relative linklere (/...) çevirir. Bu sayede kullanıcı proxy'de kalır.
 func rewriteHTML(resp *http.Response, targetURL *url.URL) error {
-	// Body'yi oku
+	// Body'yi okumadan önce hata kontrolü
+	if resp.Body == nil {
+		return fmt.Errorf("response body is nil")
+	}
+
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return err
+		return fmt.Errorf("read body failed: %v", err)
 	}
 	resp.Body.Close()
 
-	// Eğer Gzip ise aç (Bazı sunucular Accept-Encoding headerını dinlemez)
-	if strings.Contains(resp.Header.Get("Content-Encoding"), "gzip") {
+	// Gzip kontrolü
+	encoding := resp.Header.Get("Content-Encoding")
+	if strings.Contains(encoding, "gzip") {
+		log.Printf("📦 [GZIP] Decompressing Gzip content...")
 		gr, err := gzip.NewReader(bytes.NewReader(bodyBytes))
-		if err == nil {
-			bodyBytes, _ = io.ReadAll(gr)
+		if err != nil {
+			// Bazen header gzip der ama içerik değildir, bu durumda raw içeriği kullan
+			log.Printf("⚠️ [GZIP-FAIL] Failed to create gzip reader: %v. Using raw body.", err)
+		} else {
+			decompressedBytes, err := io.ReadAll(gr)
 			gr.Close()
-			resp.Header.Del("Content-Encoding") // Artık düz text
+			if err != nil {
+				log.Printf("⚠️ [GZIP-READ-FAIL] Failed to read gzip stream: %v", err)
+			} else {
+				bodyBytes = decompressedBytes
+				resp.Header.Del("Content-Encoding")
+			}
 		}
+	} else if encoding != "" {
+		log.Printf("⚠️ [UNKNOWN-ENCODING] Content-Encoding is '%s'. Skipping rewrite to avoid corruption.", encoding)
+		// Encoding gzip değilse (br, deflate vb.) ve biz decode edemiyorsak,
+		// body'yi olduğu gibi geri koyup çıkmalıyız, yoksa bozuk veri göndeririz.
+		resp.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
+		return nil
 	}
 
 	htmlContent := string(bodyBytes)
 
-	// 1. Base Tag'i Sil
-	// Base tag relative linkleri bozar, proxy ortamında en büyük düşmandır.
+	// Rewrite işlemleri
 	reBase := regexp.MustCompile(`(?i)<base[^>]*>`)
 	htmlContent = reBase.ReplaceAllString(htmlContent, "")
 
-	// 2. Domain Stripping (Domain Temizliği) - EN KRİTİK KISIM
-	// Sayfadaki "https://gumastore.com/checkout" linklerini "/checkout" yapar.
-	// Böylece linke tıklandığında tarayıcı "proxy.wemob.io/checkout" adresine gider.
-	// Catch-All router'ımız da bunu yakalayıp tekrar hedefe iletir.
-
-	targetString := targetURL.String() // https://gumastore.com
+	targetString := targetURL.String()
 	targetStringNoSlash := strings.TrimRight(targetString, "/")
-
-	// Hem https://... hem http://... versiyonlarını temizle
 	htmlContent = strings.ReplaceAll(htmlContent, targetString, "")
 	htmlContent = strings.ReplaceAll(htmlContent, targetStringNoSlash, "")
 
-	// Çıplak domainleri de temizlemeyi deneyebiliriz ama riskli olabilir.
-	// Şimdilik sadece tam protokol içerenleri temizliyoruz.
-
-	// 3. Integrity Attribute Silme (SRI)
-	// İçeriği değiştirdiğimiz için (base tag silme vb.) scriptlerin hash'i tutmayacaktır.
-	// Browser engellemesin diye integrity kontrolünü siliyoruz.
 	reIntegrity := regexp.MustCompile(`\s*integrity=["'][^"']*["']`)
 	htmlContent = reIntegrity.ReplaceAllString(htmlContent, "")
 
-	// Yeni body'yi yaz
 	buf := bytes.NewBufferString(htmlContent)
 	resp.Body = io.NopCloser(buf)
 	resp.ContentLength = int64(buf.Len())
