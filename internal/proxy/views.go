@@ -13,14 +13,12 @@ import (
 	"net/url"
 	"os"
 	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/knid/wemob/internal/constants"
 )
 
-// Global Transport (Performans için)
 var customTransport = &http.Transport{
 	Proxy: http.ProxyFromEnvironment,
 	DialContext: (&net.Dialer{
@@ -37,13 +35,11 @@ var customTransport = &http.Transport{
 }
 
 func ProxyHandler(w http.ResponseWriter, r *http.Request) {
-	// DEBUG LOG: İstek geldi
 	log.Printf("🔹 [START] Request received for: %s", r.URL.Path)
 
 	UpstreamProxyHost := os.Getenv("PREVIEW_PROXY_HOST")
 	UpstreamProxyAuth := os.Getenv("PREVIEW_PROXY_AUTH")
 
-	// Upstream Proxy ayarı
 	if UpstreamProxyHost != "" {
 		upstreamUrl := &url.URL{Scheme: "http", Host: UpstreamProxyHost}
 		if UpstreamProxyAuth != "" {
@@ -55,7 +51,6 @@ func ProxyHandler(w http.ResponseWriter, r *http.Request) {
 		customTransport.Proxy = http.ProxyURL(upstreamUrl)
 	}
 
-	// 1. Yeni Oturum Başlatma (?url=...)
 	queryParam := r.URL.Query().Get("url")
 	if queryParam != "" {
 		targetURL, err := url.Parse(queryParam)
@@ -88,7 +83,6 @@ func ProxyHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 2. Mevcut Oturumu Kontrol Et
 	cookie, err := r.Cookie(constants.SessionCookieName)
 	if err != nil || cookie.Value == "" {
 		if r.URL.Path == "/favicon.ico" {
@@ -110,14 +104,11 @@ func ProxyHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 3. Proxy Oluştur
 	proxy := httputil.NewSingleHostReverseProxy(targetURL)
 	proxy.Transport = customTransport
 
-	// DEBUG: Proxy'nin kendi iç loglarını görelim
 	proxy.ErrorLog = log.New(os.Stderr, "🔥 [PROXY-INTERNAL] ", log.LstdFlags)
 
-	// 4. Director
 	originalDirector := proxy.Director
 	proxy.Director = func(req *http.Request) {
 		originalDirector(req)
@@ -125,7 +116,6 @@ func ProxyHandler(w http.ResponseWriter, r *http.Request) {
 		req.URL.Scheme = targetURL.Scheme
 		req.URL.Host = targetURL.Host
 
-		// Encoding'i siliyoruz ki sunucu bize Gzip veya Brotli göndermesin (Plain text istiyoruz)
 		req.Header.Del("Accept-Encoding")
 		req.Header.Del("X-Forwarded-For")
 
@@ -136,7 +126,6 @@ func ProxyHandler(w http.ResponseWriter, r *http.Request) {
 		log.Printf("📡 [UPSTREAM] Sending request to: %s", req.URL.String())
 	}
 
-	// 5. Response Modifier
 	proxy.ModifyResponse = func(resp *http.Response) error {
 		log.Printf("🔙 [RESPONSE] Got status %d from upstream. Type: %s", resp.StatusCode, resp.Header.Get("Content-Type"))
 
@@ -146,7 +135,6 @@ func ProxyHandler(w http.ResponseWriter, r *http.Request) {
 		resp.Header.Set("Access-Control-Allow-Origin", "*")
 		resp.Header.Set("Access-Control-Allow-Credentials", "true")
 
-		// Redirect Düzeltme
 		if resp.StatusCode >= 300 && resp.StatusCode < 400 {
 			loc := resp.Header.Get("Location")
 			if loc != "" {
@@ -168,8 +156,6 @@ func ProxyHandler(w http.ResponseWriter, r *http.Request) {
 			err := rewriteHTML(resp, targetURL)
 			if err != nil {
 				log.Printf("❌ [REWRITE-ERROR] Failed to rewrite HTML: %v", err)
-				// Hata dönmek yerine nil dönüyoruz ki proxy patlamasın, orijinal haliyle devam etsin.
-				// return err
 			} else {
 				log.Printf("✅ [REWRITE] HTML rewrite success")
 			}
@@ -177,9 +163,7 @@ func ProxyHandler(w http.ResponseWriter, r *http.Request) {
 		return nil
 	}
 
-	// 6. Error Handler
 	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
-		// Eğer bağlantı koptuysa veya transport hatası varsa buraya düşer
 		log.Printf("❌ [HANDLER-ERROR] Proxy Error for %s: %v", r.URL.Path, err)
 		w.WriteHeader(http.StatusBadGateway)
 		fmt.Fprintf(w, "Proxy Gateway Error: %v", err)
@@ -189,7 +173,6 @@ func ProxyHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func rewriteHTML(resp *http.Response, targetURL *url.URL) error {
-	// Body'yi okumadan önce hata kontrolü
 	if resp.Body == nil {
 		return fmt.Errorf("response body is nil")
 	}
@@ -200,13 +183,11 @@ func rewriteHTML(resp *http.Response, targetURL *url.URL) error {
 	}
 	resp.Body.Close()
 
-	// Gzip kontrolü
 	encoding := resp.Header.Get("Content-Encoding")
 	if strings.Contains(encoding, "gzip") {
 		log.Printf("📦 [GZIP] Decompressing Gzip content...")
 		gr, err := gzip.NewReader(bytes.NewReader(bodyBytes))
 		if err != nil {
-			// Bazen header gzip der ama içerik değildir, bu durumda raw içeriği kullan
 			log.Printf("⚠️ [GZIP-FAIL] Failed to create gzip reader: %v. Using raw body.", err)
 		} else {
 			decompressedBytes, err := io.ReadAll(gr)
@@ -220,15 +201,12 @@ func rewriteHTML(resp *http.Response, targetURL *url.URL) error {
 		}
 	} else if encoding != "" {
 		log.Printf("⚠️ [UNKNOWN-ENCODING] Content-Encoding is '%s'. Skipping rewrite to avoid corruption.", encoding)
-		// Encoding gzip değilse (br, deflate vb.) ve biz decode edemiyorsak,
-		// body'yi olduğu gibi geri koyup çıkmalıyız, yoksa bozuk veri göndeririz.
 		resp.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
 		return nil
 	}
 
 	htmlContent := string(bodyBytes)
 
-	// Rewrite işlemleri
 	reBase := regexp.MustCompile(`(?i)<base[^>]*>`)
 	htmlContent = reBase.ReplaceAllString(htmlContent, "")
 
@@ -242,8 +220,9 @@ func rewriteHTML(resp *http.Response, targetURL *url.URL) error {
 
 	buf := bytes.NewBufferString(htmlContent)
 	resp.Body = io.NopCloser(buf)
-	resp.ContentLength = int64(buf.Len())
-	resp.Header.Set("Content-Length", strconv.Itoa(buf.Len()))
+
+	resp.ContentLength = -1
+	resp.Header.Del("Content-Length")
 
 	return nil
 }
