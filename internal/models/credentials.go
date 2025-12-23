@@ -16,6 +16,7 @@ type AppStoreCredentials struct {
 	IssuerID      string    `bun:",notnull"`
 	P8KeyPath     string    `bun:",notnull"`
 	APNSP8KeyPath string    `bun:",notnull"`
+	APNSP8KeyID   string    `bun:",notnull"`
 	CreatedAt     time.Time `bun:"created_at,nullzero,notnull,default:current_timestamp"`
 	UpdatedAt     time.Time `bun:"updated_at,nullzero,notnull,default:current_timestamp"`
 	DeletedAt     time.Time `bun:",soft_delete,nullzero"`

@@ -7,6 +7,7 @@ type AppStoreCredentialsCreateRequest struct {
 	IssuerID  string `json:"issuer_id" validate:"required" errormgs:"is required"`
 	P8Key     string `json:"p8_key" validate:"required" errormgs:"is required"`
 	APNSP8Key string `json:"apns_p8_key" validate:"required" errormgs:"is required"`
+	APNSKeyID string `json:"apns_key_id" validate:"required" errormgs:"is required"`
 }
 
 type GooglePlayCredentialsCreateRequest struct {
