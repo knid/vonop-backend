@@ -3,10 +3,11 @@ package proxy
 import (
 	"bytes"
 	"compress/gzip"
+	"crypto/tls"
 	"fmt"
 	"io"
-	"log"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -56,10 +57,10 @@ func ProxyHandler(w http.ResponseWriter, r *http.Request) {
 	cookie, err := r.Cookie(constants.SessionCookieName)
 	if err != nil || cookie.Value == "" {
 		// Session yoksa ve favicon gibi gereksiz bir şeyse 404 ver
-		if r.URL.Path == "/favicon.ico" {
+		/* if r.URL.Path == "/favicon.ico" {
 			w.WriteHeader(http.StatusNotFound)
 			return
-		}
+		} */
 		// Ana sayfaya session olmadan geldiyse kullanım mesajı göster
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusBadRequest)
@@ -94,6 +95,17 @@ func ProxyHandler(w http.ResponseWriter, r *http.Request) {
 
 		proxy.Transport = &http.Transport{
 			Proxy: http.ProxyURL(upstreamUrl),
+			DialContext: (&net.Dialer{
+				Timeout:   30 * time.Second,
+				KeepAlive: 30 * time.Second,
+			}).DialContext,
+			ForceAttemptHTTP2:     true, // HTTP/2 desteği
+			MaxIdleConns:          1000, // Toplam açık bağlantı limiti
+			MaxIdleConnsPerHost:   100,  // AYNI SİTEYE (Host) aynı anda açılacak bağlantı limiti (Varsayılan 2'ydi, artırdık)
+			IdleConnTimeout:       90 * time.Second,
+			TLSHandshakeTimeout:   10 * time.Second,
+			ExpectContinueTimeout: 1 * time.Second,
+			TLSClientConfig:       &tls.Config{InsecureSkipVerify: true}, // Bazı SSL hatalarını yoksaymak için
 		}
 	}
 
@@ -161,7 +173,8 @@ func ProxyHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Hata Yönetimi
 	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
-		log.Printf("Proxy Error: %v", err)
+		fmt.Printf("Proxy Error: %v", err)
+		slog.Error("Proxy Error", "error", err, "target", targetURL.String())
 		w.WriteHeader(http.StatusBadGateway)
 		fmt.Fprintf(w, "Proxy Error: %v", err)
 	}
