@@ -9,9 +9,9 @@ import (
 type AppBuildTask struct {
 	ID         uuid.UUID `bun:",pk,type:uuid,default:uuid_generate_v4()"`
 	ProjectID  uuid.UUID `bun:",notnull,type:uuid"`
-	Project    Project   `bun:"rel:belongs-to,join:project_id=id"`
+	Project    *Project  `bun:"rel:belongs-to,join:project_id=id"`
 	BuildID    uuid.UUID `bun:",notnull,type:uuid"`
-	Build      Build     `bun:"rel:belongs-to,join:build_id=id"`
+	Build      *Build    `bun:"rel:belongs-to,join:build_id=id"`
 	Finished   bool      `bun:",notnull"`
 	Platform   string    `bun:",notnull"`
 	AutoDeploy bool      `bun:",notnull,default:false"`
