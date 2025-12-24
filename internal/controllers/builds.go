@@ -9,7 +9,6 @@ import (
 
 	"github.com/go-playground/validator/v10"
 	"github.com/hibiken/asynq"
-	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/responses"
@@ -146,22 +145,6 @@ func (c *Controller) CreateBuild(user *models.User, buildCreateReq requests.Buil
 		}
 		task := asynq.NewTask(tasks.TypeBuildAndroid, taskPayload)
 		c.TaskService.Enqueue(task, asynq.MaxRetry(2), asynq.Timeout(time.Minute*10))
-
-		go c.CRMService.SendEvent(user, constants.BREVO_EVENT_BUILD_STARTED_ANDROID, map[string]interface{}{
-			"build_id":     createdBuild.ID.String(),
-			"task_id":      appBuildTask.ID.String(),
-			"project_id":   project.ID.String(),
-			"build_title":  createdBuild.Title,
-			"build_number": createdBuild.BuildNumber,
-			"package_name": project.PackageName,
-		})
-
-		/* if project.UseAutoDeployForAndroid {
-			go c.SlackService.Client.PostMessage(
-				constants.SLACK_CHANNEL_ID_NEW_ANDROID_DEPLOY_REQUEST,
-				slack.MsgOptionText("New android deploy request: ("+project.URL+") "+createdBuild.ID.String(), false),
-			)
-		} */
 	}
 
 	if project.BuildForIOS {
@@ -191,48 +174,7 @@ func (c *Controller) CreateBuild(user *models.User, buildCreateReq requests.Buil
 		}
 		task := asynq.NewTask(tasks.TypeBuildUnsignedIpa, taskPayload)
 		c.TaskService.Enqueue(task, asynq.MaxRetry(2), asynq.Timeout(time.Minute*10))
-
-		go c.CRMService.SendEvent(user, constants.BREVO_EVENT_BUILD_STARTED_IOS, map[string]interface{}{
-			"build_id":     createdBuild.ID.String(),
-			"task_id":      appBuildTask.ID.String(),
-			"project_id":   project.ID.String(),
-			"build_title":  createdBuild.Title,
-			"build_number": createdBuild.BuildNumber,
-			"package_name": project.PackageName,
-		})
 	}
-
-	/* meta := map[string]any{
-		"build_id":   createdBuild.ID.String(),
-		"project_id": project.ID.String(),
-		"user_id":    user.ID.String(),
-	} */
-
-	/* cmd.Stdout = &utils.CommandLogWriter{Level: slog.LevelInfo, Meta: meta}
-	cmd.Stderr = &utils.CommandLogWriter{Level: slog.LevelError, Meta: meta} */
-
-	/* go func() {
-		c.ConcurrentBuildLimiter <- struct{}{}
-		defer func() { <-c.ConcurrentBuildLimiter }()
-		slog.Default().With("from", "BUILD CMDS").Info("Starting build process", slog.Any("command_list", cmd.Args))
-		if err := cmd.Run(); err != nil {
-			slog.Default().With("from", "BUILD CMDS").Error("Build process failed", slog.String("build_id", createdBuild.ID.String()), slog.String("error", err.Error()))
-		} else {
-			var taskID string
-			if appBuildTask != nil {
-				taskID = appBuildTask.ID.String()
-			}
-			c.CRMService.SendEvent(user, constants.BREVO_EVENT_BUILD_FINISHED, map[string]any{
-				"build_id":       createdBuild.ID.String(),
-				"task_id":        taskID,
-				"project_id":     project.ID.String(),
-				"android_build":  project.BuildForAndroid,
-				"android_deploy": project.UseAutoDeployForAndroid,
-				"ios_build":      project.BuildForIOS,
-				"ios_deploy":     project.UseAutoDeployForIOS,
-			})
-		}
-	}() */
 
 	return &responses.BuildCreateResponse{
 		SuccessResponse: responses.SuccessResponse{Success: true},
