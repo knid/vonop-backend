@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"slices"
@@ -170,7 +171,7 @@ func (c *Controller) CreateDeploymentTask(user *models.User, deploymentReq reque
 			if err != nil {
 				return nil, err
 			}
-			apnsP8Key := string(apnsP8KeyBytes)
+			apnsP8Key := base64.StdEncoding.EncodeToString(apnsP8KeyBytes)
 
 			// Upload APNS P8 Key to OneSignal
 			err = external.UploadAPNSP8KeyToOneSignal(*project, apnsP8Key, cred.APNSP8KeyID, cred.TeamID, project.PackageName)
