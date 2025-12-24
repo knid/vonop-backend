@@ -93,6 +93,8 @@ func UploadAPNSP8KeyToOneSignal(project models.Project, apnsP8Key string, apnsKe
 	}
 	marshalled, _ := json.Marshal(payloadStr)
 
+	fmt.Println("payload: ", payloadStr)
+
 	req, _ := http.NewRequest("PUT", url, bytes.NewReader(marshalled))
 
 	req.Header.Add("Content-Type", "application/json")
