@@ -245,7 +245,7 @@ func (v *HttpViews) DownloadIPAFromS3Presign(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	objectKey := "ipas/" + id + ".ipa"
+	objectKey := "ipas/unsigned/" + id + ".ipa"
 
 	presignedRequest, err := v.Controller.AssetsStorage.GetObject(r.Context(), objectKey, 300)
 	if err != nil {
