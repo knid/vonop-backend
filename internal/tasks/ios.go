@@ -37,6 +37,7 @@ type IOSSignPayload struct {
 type IOSDeployPayload struct {
 	BuildID            string
 	PackageName        string
+	TeamID             string
 	KeyID              string
 	IssuerID           string
 	P8KeyPath          string
