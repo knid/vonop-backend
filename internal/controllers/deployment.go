@@ -186,7 +186,8 @@ func (c *Controller) CreateDeploymentTask(user *models.User, deploymentReq reque
 				"build_id":         build.ID.String(),
 				"deployment_title": deploymentReq.Title,
 			})
-		} else if slices.Contains(deploymentReq.Platforms, "android") {
+		}
+		if slices.Contains(deploymentReq.Platforms, "android") {
 			cred, err := c.DB.GetGooglePlayCredentialById(deploymentReq.GooglePlayCredentialsID)
 			if err != nil {
 				return nil, err
