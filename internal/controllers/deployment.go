@@ -144,6 +144,7 @@ func (c *Controller) CreateDeploymentTask(user *models.User, deploymentReq reque
 			iosDeployPayload := tasks.IOSDeployPayload{
 				BuildID:            deploymentReq.BuildID,
 				PackageName:        project.PackageName,
+				TeamID:             cred.TeamID,
 				KeyID:              cred.KeyID,
 				IssuerID:           cred.IssuerID,
 				P8KeyPath:          cred.P8KeyPath,
