@@ -21,6 +21,7 @@ RUN addgroup -S appuser \
     && adduser -S -G appuser -H -s /sbin/nologin appuser
 
 COPY --from=builder --chown=appuser:appuser /app/bin /app/bin
+COPY --from=builder --chown=appuser:appuser /app/storage /app/storage
 
 USER appuser
 
