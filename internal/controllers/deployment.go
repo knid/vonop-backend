@@ -114,16 +114,18 @@ func (c *Controller) CreateDeploymentTask(user *models.User, deploymentReq reque
 	}
 
 	deployment, err := c.DB.CreateDeployment(&models.Deployment{
-		UserID:          user.ID,
-		ProjectID:       project.ID,
-		BuildID:         build.ID,
-		Platforms:       deploymentReq.Platforms,
-		IconPath:        deploymentReq.IconID,
-		Title:           deploymentReq.Title,
-		Description:     deploymentReq.Description,
-		Status:          "Queued",
-		Method:          deploymentReq.Method,
-		ScreenshotPaths: deploymentReq.ScreenshotPaths,
+		UserID:                  user.ID,
+		ProjectID:               project.ID,
+		BuildID:                 build.ID,
+		Platforms:               deploymentReq.Platforms,
+		IconPath:                deploymentReq.IconID,
+		Title:                   deploymentReq.Title,
+		Description:             deploymentReq.Description,
+		AppStoreCredentialsID:   deploymentReq.AppStoreCredentialsID,
+		GooglePlayCredentialsID: deploymentReq.GooglePlayCredentialsID,
+		Status:                  "Queued",
+		Method:                  deploymentReq.Method,
+		ScreenshotPaths:         deploymentReq.ScreenshotPaths,
 	})
 	if err != nil {
 		return nil, err
@@ -135,7 +137,7 @@ func (c *Controller) CreateDeploymentTask(user *models.User, deploymentReq reque
 
 	if deploymentReq.Method == "user" {
 		if slices.Contains(deploymentReq.Platforms, "ios") {
-			cred, err := c.DB.GetAppStoreCredentialById(deploymentReq.AppStoreCredentialsID)
+			cred, err := c.DB.GetAppStoreCredentialById(deploymentReq.AppStoreCredentialsID.String())
 			if err != nil {
 				return nil, err
 			}
@@ -188,7 +190,7 @@ func (c *Controller) CreateDeploymentTask(user *models.User, deploymentReq reque
 			})
 		}
 		if slices.Contains(deploymentReq.Platforms, "android") {
-			cred, err := c.DB.GetGooglePlayCredentialById(deploymentReq.GooglePlayCredentialsID)
+			cred, err := c.DB.GetGooglePlayCredentialById(deploymentReq.GooglePlayCredentialsID.String())
 			if err != nil {
 				return nil, err
 			}
@@ -332,7 +334,7 @@ func (c *Controller) UpdateDeploymentTask(user *models.User, deploymentID string
 	var taskType string
 
 	if slices.Contains(deployment.Platforms, "ios") {
-		cred, err := c.DB.GetAppStoreCredentialById(deploymentReq.AppStoreCredentialsID)
+		cred, err := c.DB.GetAppStoreCredentialById(deploymentReq.AppStoreCredentialsID.String())
 		if err != nil {
 			return nil, err
 		}
@@ -364,7 +366,7 @@ func (c *Controller) UpdateDeploymentTask(user *models.User, deploymentID string
 		}
 
 	} else if slices.Contains(deploymentReq.Platforms, "android") {
-		cred, err := c.DB.GetGooglePlayCredentialById(deploymentReq.GooglePlayCredentialsID)
+		cred, err := c.DB.GetGooglePlayCredentialById(deploymentReq.GooglePlayCredentialsID.String())
 		if err != nil {
 			return nil, err
 		}
