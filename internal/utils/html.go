@@ -1,21 +1,61 @@
 package utils
 
 import (
+	"crypto/tls"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"golang.org/x/net/html"
 )
 
+var customTransport = &http.Transport{
+	Proxy: http.ProxyFromEnvironment,
+	DialContext: (&net.Dialer{
+		Timeout:   30 * time.Second,
+		KeepAlive: 30 * time.Second,
+	}).DialContext,
+	ForceAttemptHTTP2:     true,
+	MaxIdleConns:          1000,
+	MaxIdleConnsPerHost:   100,
+	IdleConnTimeout:       90 * time.Second,
+	TLSHandshakeTimeout:   10 * time.Second,
+	ExpectContinueTimeout: 1 * time.Second,
+	TLSClientConfig:       &tls.Config{InsecureSkipVerify: true},
+}
+
 // fetchHTML downloads the HTML of the given page via GET.
 func FetchHTML(targetURL string) (string, error) {
+	UpstreamProxyHost := os.Getenv("PREVIEW_PROXY_HOST")
+	UpstreamProxyAuth := os.Getenv("PREVIEW_PROXY_AUTH")
+
+	if UpstreamProxyHost != "" {
+		upstreamUrl := &url.URL{Scheme: "http", Host: UpstreamProxyHost}
+		if UpstreamProxyAuth != "" {
+			parts := strings.Split(UpstreamProxyAuth, ":")
+			if len(parts) == 2 {
+				upstreamUrl.User = url.UserPassword(parts[0], parts[1])
+			}
+		}
+		customTransport.Proxy = http.ProxyURL(upstreamUrl)
+	}
+
+	client := &http.Client{
+		Timeout:   15 * time.Second,
+		Transport: customTransport,
+	}
+
 	req, _ := http.NewRequest("GET", targetURL, nil)
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3")
-	resp, err := http.DefaultClient.Do(req)
+
+	resp, err := client.Do(req)
+
 	if err != nil {
 		return "", fmt.Errorf("failed to GET: %v", err)
 	}
@@ -85,6 +125,7 @@ func ExtractAllURLs(htmlContent string, baseURL string) []string {
 func CleanLLMOutput(raw string) string {
 	raw = strings.TrimSpace(raw)
 	raw = strings.TrimPrefix(raw, "```json")
+	raw = strings.TrimPrefix(raw, "json")
 	raw = strings.TrimPrefix(raw, "```")
 	raw = strings.TrimSuffix(raw, "```")
 	return strings.TrimSpace(raw)
