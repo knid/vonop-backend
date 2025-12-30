@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/go-playground/validator/v10"
+	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/models"
@@ -113,6 +114,23 @@ func (c *Controller) CreateDeploymentTask(user *models.User, deploymentReq reque
 		return nil, err
 	}
 
+	appStoreCredId, err := uuid.Parse(deploymentReq.AppStoreCredentialsID)
+	if err != nil {
+		if deploymentReq.Method == "wemob" {
+			appStoreCredId = uuid.Nil
+		} else {
+			return nil, errors.New("invalid app store credentials id")
+		}
+	}
+	googlePlayCredId, err := uuid.Parse(deploymentReq.GooglePlayCredentialsID)
+	if err != nil {
+		if deploymentReq.Method == "wemob" {
+			googlePlayCredId = uuid.Nil
+		} else {
+			return nil, errors.New("invalid google play credentials id")
+		}
+	}
+
 	deployment, err := c.DB.CreateDeployment(&models.Deployment{
 		UserID:                  user.ID,
 		ProjectID:               project.ID,
@@ -121,8 +139,8 @@ func (c *Controller) CreateDeploymentTask(user *models.User, deploymentReq reque
 		IconPath:                deploymentReq.IconID,
 		Title:                   deploymentReq.Title,
 		Description:             deploymentReq.Description,
-		AppStoreCredentialsID:   deploymentReq.AppStoreCredentialsID,
-		GooglePlayCredentialsID: deploymentReq.GooglePlayCredentialsID,
+		AppStoreCredentialsID:   appStoreCredId,
+		GooglePlayCredentialsID: googlePlayCredId,
 		Status:                  "Queued",
 		Method:                  deploymentReq.Method,
 		ScreenshotPaths:         deploymentReq.ScreenshotPaths,
@@ -137,7 +155,7 @@ func (c *Controller) CreateDeploymentTask(user *models.User, deploymentReq reque
 
 	if deploymentReq.Method == "user" {
 		if slices.Contains(deploymentReq.Platforms, "ios") {
-			cred, err := c.DB.GetAppStoreCredentialById(deploymentReq.AppStoreCredentialsID.String())
+			cred, err := c.DB.GetAppStoreCredentialById(appStoreCredId.String())
 			if err != nil {
 				return nil, err
 			}
@@ -190,7 +208,7 @@ func (c *Controller) CreateDeploymentTask(user *models.User, deploymentReq reque
 			})
 		}
 		if slices.Contains(deploymentReq.Platforms, "android") {
-			cred, err := c.DB.GetGooglePlayCredentialById(deploymentReq.GooglePlayCredentialsID.String())
+			cred, err := c.DB.GetGooglePlayCredentialById(googlePlayCredId.String())
 			if err != nil {
 				return nil, err
 			}
@@ -329,12 +347,29 @@ func (c *Controller) UpdateDeploymentTask(user *models.User, deploymentID string
 		return nil, err
 	}
 
+	appStoreCredId, err := uuid.Parse(deploymentReq.AppStoreCredentialsID)
+	if err != nil {
+		if deploymentReq.Method == "wemob" {
+			appStoreCredId = uuid.Nil
+		} else {
+			return nil, errors.New("invalid app store credentials id")
+		}
+	}
+	googlePlayCredId, err := uuid.Parse(deploymentReq.GooglePlayCredentialsID)
+	if err != nil {
+		if deploymentReq.Method == "wemob" {
+			googlePlayCredId = uuid.Nil
+		} else {
+			return nil, errors.New("invalid google play credentials id")
+		}
+	}
+
 	var taskPayload []byte
 	var task *asynq.Task
 	var taskType string
 
 	if slices.Contains(deployment.Platforms, "ios") {
-		cred, err := c.DB.GetAppStoreCredentialById(deploymentReq.AppStoreCredentialsID.String())
+		cred, err := c.DB.GetAppStoreCredentialById(appStoreCredId.String())
 		if err != nil {
 			return nil, err
 		}
@@ -366,7 +401,7 @@ func (c *Controller) UpdateDeploymentTask(user *models.User, deploymentID string
 		}
 
 	} else if slices.Contains(deploymentReq.Platforms, "android") {
-		cred, err := c.DB.GetGooglePlayCredentialById(deploymentReq.GooglePlayCredentialsID.String())
+		cred, err := c.DB.GetGooglePlayCredentialById(googlePlayCredId.String())
 		if err != nil {
 			return nil, err
 		}
