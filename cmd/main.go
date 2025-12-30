@@ -21,7 +21,6 @@ import (
 	"github.com/knid/wemob/internal/controllers"
 	"github.com/knid/wemob/internal/database"
 	"github.com/knid/wemob/internal/models"
-	"github.com/knid/wemob/internal/proxy"
 	"github.com/knid/wemob/internal/services"
 	crmServices "github.com/knid/wemob/internal/services/crm"
 	emailServices "github.com/knid/wemob/internal/services/email"
@@ -419,7 +418,7 @@ func main() {
 	proxyRoute.Use(middleware.Logger)
 	proxyRoute.Use(middleware.Recoverer)
 	proxyRoute.Use(middleware.Timeout(60 * time.Second))
-	proxyRoute.HandleFunc("/*", proxy.ProxyHandler)
+	proxyRoute.HandleFunc("/*", httpViews.ProxyHandler)
 	go http.ListenAndServe(":9001", proxyRoute)
 
 	// Main
