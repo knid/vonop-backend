@@ -68,7 +68,6 @@ Infer which of these links most likely represent the **main navigation items** â
 
 
 ### Output format (strict JSON)
-json
 {
   "items": [
     { "label": "Home", "url": "/", "icon": "home", "order": 1 },
