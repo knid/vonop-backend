@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log"
+	"log/slog"
 	"net/http"
 	"sync"
 
@@ -51,13 +52,13 @@ func (v *HttpViews) AutoGenerateScreenshots(w http.ResponseWriter, r *http.Reque
 
 	outputJson, err := utils.GetJSONFromLLM(constants.DEFAULT_LLM_MODEL, constants.LINK_SELECTION_FOR_SCREENSHOTS_PROMPT, string(data))
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.JSONErrorResponse(w, "Could not generate screenshots. Try again please.", http.StatusBadRequest)
 		return
 	}
 
 	var screenshots Screenshots
 	if err := json.Unmarshal([]byte(outputJson), &screenshots); err != nil {
-		utils.JSONErrorResponse(w, "Error parsing generated items. Try again please.", http.StatusBadRequest)
+		utils.JSONErrorResponse(w, "Could not generate screenshots. Try again please.", http.StatusBadRequest)
 		return
 	}
 
@@ -77,25 +78,25 @@ func (v *HttpViews) AutoGenerateScreenshots(w http.ResponseWriter, r *http.Reque
 			defer waitGroup.Done()
 			screenshot, err := external.GetScreenshotOfURL(screenshotUrl)
 			if err != nil {
-				log.Printf("Error getting screenshot for %s: %v", screenshotUrl, err)
+				slog.Error("Error getting screenshot for %s: %v", screenshotUrl, err)
 				return
 			}
 			mockupBytes, err := utils.ComposeMockup(screenshot)
 			if err != nil {
-				log.Printf("Error composing mockup for %s: %v", screenshotUrl, err)
+				slog.Error("Error composing mockup for %s: %v", screenshotUrl, err)
 				return
 			}
 
 			id := uuid.New().String()
 			err = v.Controller.AssetsStorage.UploadFileByte(context.TODO(), "screenshots/"+id+".png", mockupBytes)
 			if err != nil {
-				log.Printf("Error uploading screenshot for %s: %v", screenshotUrl, err)
+				slog.Error("Error uploading screenshot for %s: %v", screenshotUrl, err)
 				return
 			}
 
 			req, err := v.Controller.AssetsStorage.GetObject(context.TODO(), "screenshots/"+id+".png", 60*60*24*7)
 			if err != nil {
-				log.Printf("Error getting presigned URL for %s: %v", screenshotUrl, err)
+				slog.Error("Error getting presigned URL for %s: %v", screenshotUrl, err)
 				return
 			}
 			screenshotLinks.Screenshots = append(screenshotLinks.Screenshots,
