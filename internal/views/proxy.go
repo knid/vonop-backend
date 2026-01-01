@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -18,7 +17,6 @@ import (
 	"time"
 
 	"github.com/knid/wemob/internal/constants"
-	"github.com/knid/wemob/internal/utils"
 )
 
 var customTransport = &http.Transport{
@@ -37,23 +35,23 @@ var customTransport = &http.Transport{
 }
 
 func (v *HttpViews) ProxyHandler(w http.ResponseWriter, r *http.Request) {
-	tokenString, err := utils.ExtractTokenFromHeader(r)
-	if err != nil {
-		slog.Error("Failed to extract token", "error", err, "from", "PROXY")
-		http.Error(w, "Unauthorized: Failed to extract token", http.StatusUnauthorized)
-		return
-	}
+	// tokenString, err := utils.ExtractTokenFromHeader(r)
+	// if err != nil {
+	// slog.Error("Failed to extract token", "error", err, "from", "PROXY")
+	// http.Error(w, "Unauthorized: Failed to extract token", http.StatusUnauthorized)
+	// return
+	// }
 
-	userInformationRes, err := v.Controller.GetUser(tokenString)
-	if err != nil {
-		slog.Error("Failed to get user information", "error", err, "user.token", tokenString[0:12]+"...", "from", "PROXY")
-		http.Error(w, "Unauthorized: Failed to get user information", http.StatusUnauthorized)
-		return
-	}
+	// userInformationRes, err := v.Controller.GetUser(tokenString)
+	// if err != nil {
+	// slog.Error("Failed to get user information", "error", err, "user.token", tokenString[0:12]+"...", "from", "PROXY")
+	// http.Error(w, "Unauthorized: Failed to get user information", http.StatusUnauthorized)
+	// return
+	// }
 
-	slog.Info(fmt.Sprintf("Proxy start request received for: %s", r.URL.Path),
-		"user.token", tokenString[0:12]+"...", "user.id", userInformationRes.ID.String(),
-		"user.email", userInformationRes.Email, "from", "PROXY")
+	/* slog.Info(fmt.Sprintf("Proxy start request received for: %s", r.URL.Path),
+	"user.token", tokenString[0:12]+"...", "user.id", userInformationRes.ID.String(),
+	"user.email", userInformationRes.Email, "from", "PROXY") */
 
 	UpstreamProxyHost := os.Getenv("PREVIEW_PROXY_HOST")
 	UpstreamProxyAuth := os.Getenv("PREVIEW_PROXY_AUTH")
@@ -96,9 +94,9 @@ func (v *HttpViews) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 			Expires:  time.Now().Add(24 * time.Hour),
 		})
 
-		slog.Info(fmt.Sprintf("New session for: %s", targetURL.String()),
-			"user.token", tokenString[0:12]+"...", "user.id", userInformationRes.ID.String(),
-			"user.email", userInformationRes.Email, "from", "PROXY")
+		/* slog.Info(fmt.Sprintf("New session for: %s", targetURL.String()),
+		"user.token", tokenString[0:12]+"...", "user.id", userInformationRes.ID.String(),
+		"user.email", userInformationRes.Email, "from", "PROXY") */
 		http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
 		return
 	}
@@ -109,9 +107,9 @@ func (v *HttpViews) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
-		slog.Error("No active session cookie found",
-			"user.token", tokenString[0:12]+"...", "user.id", userInformationRes.ID.String(),
-			"user.email", userInformationRes.Email, "from", "PROXY")
+		/* slog.Error("No active session cookie found",
+		"user.token", tokenString[0:12]+"...", "user.id", userInformationRes.ID.String(),
+		"user.email", userInformationRes.Email, "from", "PROXY") */
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusBadRequest)
 		fmt.Fprintf(w, `<h3>No Active Session</h3>`)
@@ -121,9 +119,9 @@ func (v *HttpViews) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 	targetBase := cookie.Value
 	targetURL, err := url.Parse(targetBase)
 	if err != nil {
-		slog.Error(fmt.Sprintf("Invalid target URL in cookie: %v", err),
-			"user.token", tokenString[0:12]+"...", "user.id", userInformationRes.ID.String(),
-			"user.email", userInformationRes.Email, "from", "PROXY")
+		/* slog.Error(fmt.Sprintf("Invalid target URL in cookie: %v", err),
+		"user.token", tokenString[0:12]+"...", "user.id", userInformationRes.ID.String(),
+		"user.email", userInformationRes.Email, "from", "PROXY") */
 		http.Error(w, "Invalid session target", http.StatusInternalServerError)
 		return
 	}
@@ -147,9 +145,9 @@ func (v *HttpViews) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 		req.Header.Set("Referer", targetURL.String())
 		req.Header.Set("Origin", targetURL.Scheme+"://"+targetURL.Host)
 
-		slog.Info(fmt.Sprintf("[UPSTREAM] Sending request to: %s", req.URL.String()),
-			"user.token", tokenString[0:12]+"...", "user.id", userInformationRes.ID.String(),
-			"user.email", userInformationRes.Email, "from", "PROXY")
+		/* slog.Info(fmt.Sprintf("[UPSTREAM] Sending request to: %s", req.URL.String()),
+		"user.token", tokenString[0:12]+"...", "user.id", userInformationRes.ID.String(),
+		"user.email", userInformationRes.Email, "from", "PROXY") */
 	}
 
 	proxy.ModifyResponse = func(resp *http.Response) error {
@@ -172,37 +170,37 @@ func (v *HttpViews) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 					}
 					resp.Header.Set("Location", newPath)
 
-					slog.Info(fmt.Sprintf("[REDIRECT] Rewrote location to: %s", newPath),
-						"user.token", tokenString[0:12]+"...", "user.id", userInformationRes.ID.String(),
-						"user.email", userInformationRes.Email, "from", "PROXY")
+					/* slog.Info(fmt.Sprintf("[REDIRECT] Rewrote location to: %s", newPath),
+					"user.token", tokenString[0:12]+"...", "user.id", userInformationRes.ID.String(),
+					"user.email", userInformationRes.Email, "from", "PROXY") */
 				}
 			}
 		}
 
 		contentType := strings.ToLower(resp.Header.Get("Content-Type"))
 		if strings.Contains(contentType, "text/html") {
-			slog.Info("Starting HTML rewrite...",
-				"user.token", tokenString[0:12]+"...", "user.id", userInformationRes.ID.String(),
-				"user.email", userInformationRes.Email, "from", "PROXY")
+			/* slog.Info("Starting HTML rewrite...",
+			"user.token", tokenString[0:12]+"...", "user.id", userInformationRes.ID.String(),
+			"user.email", userInformationRes.Email, "from", "PROXY") */
 
 			err := rewriteHTML(resp, targetURL)
 			if err != nil {
-				slog.Error(fmt.Sprintf("Failed to rewrite HTML: %v", err),
-					"user.token", tokenString[0:12]+"...", "user.id", userInformationRes.ID.String(),
-					"user.email", userInformationRes.Email, "from", "PROXY")
+				/* slog.Error(fmt.Sprintf("Failed to rewrite HTML: %v", err),
+				"user.token", tokenString[0:12]+"...", "user.id", userInformationRes.ID.String(),
+				"user.email", userInformationRes.Email, "from", "PROXY") */
 			} else {
-				slog.Info("HTML rewrite success",
-					"user.token", tokenString[0:12]+"...", "user.id", userInformationRes.ID.String(),
-					"user.email", userInformationRes.Email, "from", "PROXY")
+				/* slog.Info("HTML rewrite success",
+				"user.token", tokenString[0:12]+"...", "user.id", userInformationRes.ID.String(),
+				"user.email", userInformationRes.Email, "from", "PROXY") */
 			}
 		}
 		return nil
 	}
 
 	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
-		slog.Error(fmt.Sprintf("Proxy Error for %s: %v", r.URL.Path, err),
-			"user.token", tokenString[0:12]+"...", "user.id", userInformationRes.ID.String(),
-			"user.email", userInformationRes.Email, "from", "PROXY")
+		/* slog.Error(fmt.Sprintf("Proxy Error for %s: %v", r.URL.Path, err),
+		"user.token", tokenString[0:12]+"...", "user.id", userInformationRes.ID.String(),
+		"user.email", userInformationRes.Email, "from", "PROXY") */
 		w.WriteHeader(http.StatusBadGateway)
 		fmt.Fprintf(w, "Proxy Gateway Error: %v", err)
 	}
