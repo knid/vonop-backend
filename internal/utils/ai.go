@@ -61,6 +61,8 @@ func GetJSONFromLLM(model, system, message string) (string, error) {
 
 	respBody, _ := io.ReadAll(resp.Body)
 	fmt.Println("LLM Response:", string(respBody))
+	slog.Info("LLM Response received", "FROM", "LLM_UTILS", "resp", resp, "body", body)
+
 	var parsed ChatResponse
 	if err := json.Unmarshal(respBody, &parsed); err != nil {
 		slog.Error("error creating items.", "error", err, "FROM", "LLM_UTILS", "resp", resp, "body", body)
