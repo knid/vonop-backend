@@ -6,6 +6,7 @@ import (
 	"log"
 	"log/slog"
 	"net/http"
+	"os"
 	"sync"
 
 	"github.com/go-playground/validator/v10"
@@ -50,7 +51,7 @@ func (v *HttpViews) AutoGenerateScreenshots(w http.ResponseWriter, r *http.Reque
 
 	data, _ := json.MarshalIndent(output, "", "  ")
 
-	outputJson, err := utils.GetJSONFromLLM(constants.DEFAULT_LLM_MODEL, constants.LINK_SELECTION_FOR_SCREENSHOTS_PROMPT, string(data))
+	outputJson, err := utils.GetJSONFromLLM(os.Getenv("DEFAULT_LLM_MODEL"), constants.LINK_SELECTION_FOR_SCREENSHOTS_PROMPT, string(data))
 	if err != nil {
 		utils.JSONErrorResponse(w, "Could not generate screenshots. Try again please.", http.StatusBadRequest)
 		return

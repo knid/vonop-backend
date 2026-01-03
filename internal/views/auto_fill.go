@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"os"
 
 	"github.com/go-playground/validator/v10"
 	"github.com/knid/wemob/internal/constants"
@@ -59,7 +60,7 @@ func (v *HttpViews) NavBarAutoFillWithAI(w http.ResponseWriter, r *http.Request)
 
 	data, _ := json.MarshalIndent(output, "", "  ")
 
-	outputJson, err := utils.GetJSONFromLLM(constants.DEFAULT_LLM_MODEL, constants.NAVBAR_ITEM_GENERATOR_PROMPT, string(data))
+	outputJson, err := utils.GetJSONFromLLM(os.Getenv("DEFAULT_LLM_MODEL"), constants.NAVBAR_ITEM_GENERATOR_PROMPT, string(data))
 	if err != nil {
 		utils.JSONErrorResponse(w, "Error generating items. Try again please.", http.StatusBadRequest)
 		return
