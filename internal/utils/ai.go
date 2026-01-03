@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 )
@@ -53,6 +54,7 @@ func GetJSONFromLLM(model, system, message string) (string, error) {
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
+		slog.Error("Error making request to LLM:", "error", err, "FROM", "LLM_UTILS", "resp", resp, "body", body)
 		return "", fmt.Errorf("error generating items. try again please")
 	}
 	defer resp.Body.Close()
@@ -61,10 +63,12 @@ func GetJSONFromLLM(model, system, message string) (string, error) {
 	fmt.Println("LLM Response:", string(respBody))
 	var parsed ChatResponse
 	if err := json.Unmarshal(respBody, &parsed); err != nil {
+		slog.Error("error creating items.", "error", err, "FROM", "LLM_UTILS", "resp", resp, "body", body)
 		return "", fmt.Errorf("error creating items. try again please")
 	}
 
 	if len(parsed.Choices) == 0 {
+		slog.Error("no choices returned from LLM", "FROM", "LLM_UTILS", "resp", resp, "body", body)
 		return "", fmt.Errorf("no choices returned from LLM")
 	}
 
