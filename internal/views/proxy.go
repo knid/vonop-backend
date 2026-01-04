@@ -300,16 +300,33 @@ func rewriteHTML(resp *http.Response, targetURL *url.URL) error {
                 }
                 return originalReplaceState.apply(this, [state, unused, url]);
             };
-
-			console.log('WeMob Proxy: Navigation Loop Fix Loaded');
 		})();
 	</script>
 	`, targetURL.Scheme, targetURL.Host)
 
+	proxyStyle := `
+	<style>
+		html, body {
+			height: 100%;
+			overflow: auto;
+			-webkit-overflow-scrolling: touch;
+		}
+
+		html, body {
+			scrollbar-width: none;
+		}
+
+		html::-webkit-scrollbar, body::-webkit-scrollbar {
+			width: 0;
+			height: 0;
+		}
+	</style>
+	`
+
 	if strings.Contains(htmlContent, "</head>") {
-		htmlContent = strings.Replace(htmlContent, "</head>", proxyScript+"</head>", 1)
+		htmlContent = strings.Replace(htmlContent, "</head>", proxyScript+proxyStyle+"</head>", 1)
 	} else {
-		htmlContent = proxyScript + htmlContent
+		htmlContent = proxyScript + proxyStyle + htmlContent
 	}
 
 	buf := bytes.NewBufferString(htmlContent)
