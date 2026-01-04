@@ -88,7 +88,7 @@ func createSchema(db *bun.DB) error {
 
 func main() {
 	infisicalClient := infisical.NewInfisicalClient(context.Background(), infisical.Config{
-		SiteUrl: "eu.infisical.com",
+		SiteUrl: "https://eu.infisical.com",
 	})
 
 	infisicalClientID := os.Getenv("INFISICAL_CLIENT_ID")
