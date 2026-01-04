@@ -11,7 +11,6 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
-	"os"
 	"regexp"
 	"strings"
 	"time"
@@ -53,8 +52,8 @@ func (v *HttpViews) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 	"user.token", tokenString[0:12]+"...", "user.id", userInformationRes.ID.String(),
 	"user.email", userInformationRes.Email, "from", "PROXY") */
 
-	UpstreamProxyHost := os.Getenv("PREVIEW_PROXY_HOST")
-	UpstreamProxyAuth := os.Getenv("PREVIEW_PROXY_AUTH")
+	UpstreamProxyHost := v.Controller.SecretManager.GetSecret("PREVIEW_PROXY_HOST")
+	UpstreamProxyAuth := v.Controller.SecretManager.GetSecret("PREVIEW_PROXY_AUTH")
 
 	if UpstreamProxyHost != "" {
 		upstreamUrl := &url.URL{Scheme: "http", Host: UpstreamProxyHost}

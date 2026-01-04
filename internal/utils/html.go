@@ -7,7 +7,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"os"
 	"sort"
 	"strings"
 	"time"
@@ -31,14 +30,12 @@ var customTransport = &http.Transport{
 }
 
 // fetchHTML downloads the HTML of the given page via GET.
-func FetchHTML(targetURL string) (string, error) {
-	UpstreamProxyHost := os.Getenv("PREVIEW_PROXY_HOST")
-	UpstreamProxyAuth := os.Getenv("PREVIEW_PROXY_AUTH")
+func FetchHTML(targetURL, proxyHost, proxyAuth string) (string, error) {
 
-	if UpstreamProxyHost != "" {
-		upstreamUrl := &url.URL{Scheme: "http", Host: UpstreamProxyHost}
-		if UpstreamProxyAuth != "" {
-			parts := strings.Split(UpstreamProxyAuth, ":")
+	if proxyHost != "" {
+		upstreamUrl := &url.URL{Scheme: "http", Host: proxyHost}
+		if proxyAuth != "" {
+			parts := strings.Split(proxyAuth, ":")
 			if len(parts) == 2 {
 				upstreamUrl.User = url.UserPassword(parts[0], parts[1])
 			}
