@@ -66,14 +66,17 @@ Infer which of these links most likely represent the **main navigation items** â
       "list",
    ]
 
+Output:
+   Return ONLY a JSON array of the selected URLs.
+   No explanation. No extra text.
+   Always return relative URLs.
 
 ### Output format (strict JSON)
 {
   "items": [
     { "label": "Home", "url": "/", "icon": "home", "order": 1 },
-    { "label": "Shop", "url": "/shop", "icon": "store", "order": 2 },
-    { "label": "Cart", "url": "/cart", "icon": "shopping_cart", "order": 3 },
-    { "label": "Account", "url": "/account", "icon": "person", "order": 4 }
+    { "label": "Account", "url": "/account", "icon": "person", "order": 2 }
+    { "label": "Settings", "url": "/settings", "icon": "settings", "order": 3 }
   ]
 }
 `
