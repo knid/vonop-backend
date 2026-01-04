@@ -6,11 +6,13 @@ import (
 	"github.com/knid/wemob/internal/services"
 	crmServices "github.com/knid/wemob/internal/services/crm"
 	emailServices "github.com/knid/wemob/internal/services/email"
+	"github.com/knid/wemob/internal/services/secret"
 	"github.com/knid/wemob/internal/services/storage"
 )
 
 type Controller struct {
 	DB                     *database.Database
+	SecretManager          secret.SecretManager
 	SlackService           *services.SlackService
 	EmailService           emailServices.EmailService
 	CRMService             crmServices.CRMService
@@ -22,7 +24,8 @@ type Controller struct {
 
 func NewController(db *database.Database, concurrentBuildLimiter chan struct{},
 	slackService *services.SlackService, emailService emailServices.EmailService,
-	crmService crmServices.CRMService, taskService *asynq.Client, assetsStorage *storage.S3Storage, userApiKeysStorage *storage.S3Storage) *Controller {
+	crmService crmServices.CRMService, taskService *asynq.Client, assetsStorage *storage.S3Storage,
+	userApiKeysStorage *storage.S3Storage, secretManager secret.SecretManager) *Controller {
 
 	return &Controller{
 		DB:                     db,
@@ -33,5 +36,6 @@ func NewController(db *database.Database, concurrentBuildLimiter chan struct{},
 		TaskService:            taskService,
 		AssetsStorage:          assetsStorage,
 		UserApiKeysStorage:     userApiKeysStorage,
+		SecretManager:          secretManager,
 	}
 }

@@ -7,7 +7,6 @@ import (
 	"log"
 	"log/slog"
 	"net/http"
-	"os"
 	"time"
 
 	"github.com/google/uuid"
@@ -35,7 +34,7 @@ func (c *Controller) HandleWebhook(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	endpointSecret := os.Getenv("STRIPE_WEBHOOK_SECRET")
+	endpointSecret := c.SecretManager.GetSecret("STRIPE_WEBHOOK_SECRET")
 	signatureHeader := req.Header.Get("Stripe-Signature")
 	event, err = webhook.ConstructEvent(payload, signatureHeader, endpointSecret)
 	if err != nil {

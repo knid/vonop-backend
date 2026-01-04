@@ -24,6 +24,7 @@ import (
 	"github.com/knid/wemob/internal/services"
 	crmServices "github.com/knid/wemob/internal/services/crm"
 	emailServices "github.com/knid/wemob/internal/services/email"
+	"github.com/knid/wemob/internal/services/secret"
 	"github.com/knid/wemob/internal/services/storage"
 	"github.com/knid/wemob/internal/utils"
 	"github.com/knid/wemob/internal/views"
@@ -42,6 +43,7 @@ import (
 
 	"log/slog"
 
+	infisical "github.com/infisical/go-sdk"
 	slogbetterstack "github.com/samber/slog-betterstack"
 )
 
@@ -84,29 +86,45 @@ func createSchema(db *bun.DB) error {
 	return nil
 }
 
-func initOAuth() {
-	goth.UseProviders(
-		google.New(os.Getenv("GOOGLE_CLIENT_ID"), os.Getenv("GOOGLE_SECRET_KEY"), "https://api.wemob.io/v1/users/auth/google/callback", "email", "profile"),
-	)
-}
-
 func main() {
-	// godotenv.Load(".env.dev")
+	infisicalClient := infisical.NewInfisicalClient(context.Background(), infisical.Config{})
+
+	infisicalClientID := os.Getenv("INFISICAL_CLIENT_ID")
+	infisicalClientSecret := os.Getenv("INFISICAL_CLIENT_SECRET")
+
+	if infisicalClientID == "" || infisicalClientSecret == "" {
+		slog.Error("Infisical client ID or secret is not set in environment variables")
+		return
+	}
+
+	_, err := infisicalClient.Auth().UniversalAuthLogin(infisicalClientID, infisicalClientSecret)
+	if err != nil {
+		slog.Error("Failed to authenticate with Infisical:", slog.String("error", err.Error()))
+		return
+	}
+
+	var sm secret.SecretManager
+	sm = secret.NewInfisicalSecretManager(
+		infisicalClient.(*infisical.InfisicalClient),
+		os.Getenv("INFISICAL_PROJECT_ID"),
+		os.Getenv("ENVIRONMENT"),
+	)
+
 	logger := slog.New(
 		slogbetterstack.Option{
-			Token:    os.Getenv("BETTERSTACK_TOKEN"),
-			Endpoint: os.Getenv("BETTERSTACK_ENDPOINT"),
+			Token:    sm.GetSecret("BETTERSTACK_TOKEN"),
+			Endpoint: sm.GetSecret("BETTERSTACK_ENDPOINT"),
 		}.NewBetterstackHandler(),
 	)
 
 	slog.SetDefault(logger)
 
-	dbHost := os.Getenv("DB_HOST")
-	dbPort := os.Getenv("DB_PORT")
-	dbName := os.Getenv("DB_NAME")
-	dbUser := os.Getenv("DB_USER")
-	dbPass := os.Getenv("DB_PASSWORD")
-	dbSSL := os.Getenv("DB_SSLMODE")
+	dbHost := sm.GetSecret("DB_HOST")
+	dbPort := sm.GetSecret("DB_PORT")
+	dbName := sm.GetSecret("DB_NAME")
+	dbUser := sm.GetSecret("DB_USER")
+	dbPass := sm.GetSecret("DB_PASSWORD")
+	dbSSL := sm.GetSecret("DB_SSLMODE")
 
 	dsn := fmt.Sprintf(
 		"postgres://%s:%s@%s:%s/%s?sslmode=%s",
@@ -135,22 +153,25 @@ func main() {
 	controller := controllers.NewController(
 		db,
 		make(chan struct{}, constants.MAX_CONCURRENT_BUILDS),
-		services.NewSlackService(os.Getenv("SLACK_API_KEY")),
-		emailServices.NewBrevoEmailService(os.Getenv("BREVO_API_KEY")),
-		crmServices.NewBrevoCRMService(os.Getenv("BREVO_API_KEY")),
+		services.NewSlackService(sm.GetSecret("SLACK_API_KEY")),
+		emailServices.NewBrevoEmailService(sm.GetSecret("BREVO_API_KEY")),
+		crmServices.NewBrevoCRMService(sm.GetSecret("BREVO_API_KEY")),
 		asynq.NewClient(asynq.RedisClientOpt{
-			Addr:      os.Getenv("REDIS_ADDR"),
-			Username:  os.Getenv("REDIS_USERNAME"),
-			Password:  os.Getenv("REDIS_PASSWORD"),
+			Addr:      sm.GetSecret("REDIS_ADDR"),
+			Username:  sm.GetSecret("REDIS_USERNAME"),
+			Password:  sm.GetSecret("REDIS_PASSWORD"),
 			TLSConfig: &tls.Config{},
 		}),
-		storage.NewS3Storage(os.Getenv("AWS_REGION"), os.Getenv("AWS_S3_ASSETS_BUCKET_NAME")),
-		storage.NewS3Storage(os.Getenv("AWS_REGION"), os.Getenv("AWS_S3_USER_API_KEYS_BUCKET_NAME")),
+		storage.NewS3Storage(sm.GetSecret("AWS_REGION"), sm.GetSecret("AWS_S3_ASSETS_BUCKET_NAME")),
+		storage.NewS3Storage(sm.GetSecret("AWS_REGION"), sm.GetSecret("AWS_S3_USER_API_KEYS_BUCKET_NAME")),
+		sm,
 	)
 
-	initOAuth()
+	goth.UseProviders(
+		google.New(sm.GetSecret("GOOGLE_CLIENT_ID"), sm.GetSecret("GOOGLE_SECRET_KEY"), "https://api.wemob.io/v1/users/auth/google/callback", "email", "profile"),
+	)
 
-	stripe.Key = os.Getenv("STRIPE_API_KEY")
+	stripe.Key = sm.GetSecret("STRIPE_API_KEY")
 
 	httpViews := views.HttpViews{
 		Controller: controller,

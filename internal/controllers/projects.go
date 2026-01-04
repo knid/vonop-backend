@@ -110,7 +110,7 @@ func (c *Controller) CreateProject(user *models.User, projectCreateReq requests.
 		PackageName:     pkName,
 	}
 
-	onesignal_app_id, err := external.CreateOneSignalApplication(project)
+	onesignal_app_id, err := external.CreateOneSignalApplication(project, c.SecretManager.GetSecret("ONESIGNAL_ORG_ID"), c.SecretManager.GetSecret("ONESIGNAL_ORG_API_KEY"), c.SecretManager.GetSecret("FCM_V1_SERVICE_ACCOUNT_JSON_B64"))
 	if err != nil {
 		return nil, err
 	}
@@ -119,7 +119,7 @@ func (c *Controller) CreateProject(user *models.User, projectCreateReq requests.
 
 	time.Sleep(2 * time.Second)
 
-	onesignal_app_api_key, err := external.CreateOneSignalAppToken(project)
+	onesignal_app_api_key, err := external.CreateOneSignalAppToken(project, c.SecretManager.GetSecret("ONESIGNAL_ORG_API_KEY"))
 	if err != nil {
 		return nil, err
 	}

@@ -195,7 +195,7 @@ func (c *Controller) CreateDeploymentTask(user *models.User, deploymentReq reque
 			apnsP8Key := base64.StdEncoding.EncodeToString(apnsP8KeyBytes)
 
 			// Upload APNS P8 Key to OneSignal
-			err = external.UploadAPNSP8KeyToOneSignal(*project, apnsP8Key, cred.APNSP8KeyID, cred.TeamID, project.PackageName)
+			err = external.UploadAPNSP8KeyToOneSignal(*project, apnsP8Key, cred.APNSP8KeyID, cred.TeamID, project.PackageName, c.SecretManager.GetSecret("ONESIGNAL_ORG_ID"), c.SecretManager.GetSecret("ONESIGNAL_ORG_API_KEY"))
 			if err != nil {
 				return nil, err
 			}

@@ -6,7 +6,6 @@ import (
 	"log"
 	"log/slog"
 	"net/http"
-	"os"
 	"sync"
 
 	"github.com/go-playground/validator/v10"
@@ -34,7 +33,7 @@ func (v *HttpViews) AutoGenerateScreenshots(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	html, err := utils.FetchHTML(autoGenerateScreenshotsReq.URL)
+	html, err := utils.FetchHTML(autoGenerateScreenshotsReq.URL, v.Controller.SecretManager.GetSecret("PROXY_HOST"), v.Controller.SecretManager.GetSecret("PROXY_AUTH"))
 	if err != nil {
 		log.Printf(" Error fetching page: %v", err)
 		utils.JSONErrorResponse(w, "Error fetching website. Try again please.", http.StatusBadRequest)
@@ -51,7 +50,7 @@ func (v *HttpViews) AutoGenerateScreenshots(w http.ResponseWriter, r *http.Reque
 
 	data, _ := json.MarshalIndent(output, "", "  ")
 
-	outputJson, err := utils.GetJSONFromLLM(os.Getenv("DEFAULT_LLM_MODEL"), constants.LINK_SELECTION_FOR_SCREENSHOTS_PROMPT, string(data))
+	outputJson, err := utils.GetJSONFromLLM(v.Controller.SecretManager.GetSecret("DEFAULT_LLM_MODEL"), constants.LINK_SELECTION_FOR_SCREENSHOTS_PROMPT, string(data), v.Controller.SecretManager.GetSecret("OPENROUTER_API_KEY"))
 	if err != nil {
 		utils.JSONErrorResponse(w, "Could not generate screenshots. Try again please.", http.StatusBadRequest)
 		return
@@ -77,7 +76,7 @@ func (v *HttpViews) AutoGenerateScreenshots(w http.ResponseWriter, r *http.Reque
 	for _, screenshotUrl := range screenshots.URLs {
 		go func() {
 			defer waitGroup.Done()
-			screenshot, err := external.GetScreenshotOfURL(screenshotUrl)
+			screenshot, err := external.GetScreenshotOfURL(screenshotUrl, v.Controller.SecretManager.GetSecret("SITESHOT_API_KEY"))
 			if err != nil {
 				slog.Error("Error getting screenshot for %s: %v", screenshotUrl, err)
 				return

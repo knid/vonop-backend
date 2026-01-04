@@ -8,25 +8,24 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"os"
 
 	"github.com/knid/wemob/internal/models"
 )
 
-func CreateOneSignalApplication(project models.Project) (string, error) {
+func CreateOneSignalApplication(project models.Project, orgId, orgApiKey, fcmB64 string) (string, error) {
 	url := "https://api.onesignal.com/apps"
 
 	payloadStr := map[string]string{
 		"name":                        project.PackageName,
-		"organization_id":             os.Getenv("ONESIGNAL_ORG_ID"),
-		"fcm_v1_service_account_json": os.Getenv("FCM_V1_SERVICE_ACCOUNT_JSON_B64"),
+		"organization_id":             orgId,
+		"fcm_v1_service_account_json": fcmB64,
 	}
 	marshalled, _ := json.Marshal(payloadStr)
 
 	req, _ := http.NewRequest("POST", url, bytes.NewReader(marshalled))
 
 	req.Header.Add("Content-Type", "application/json")
-	req.Header.Add("Authorization", "Basic "+os.Getenv("ONESIGNAL_ORG_API_KEY"))
+	req.Header.Add("Authorization", "Basic "+orgApiKey)
 
 	res, _ := http.DefaultClient.Do(req)
 
@@ -48,7 +47,7 @@ func CreateOneSignalApplication(project models.Project) (string, error) {
 	return onesignal_app_id.(string), nil
 }
 
-func CreateOneSignalAppToken(project models.Project) (string, error) {
+func CreateOneSignalAppToken(project models.Project, orgApiKey string) (string, error) {
 	url := fmt.Sprintf("https://api.onesignal.com/apps/%s/auth/tokens", project.OneSignalAppID)
 
 	payloadStr := map[string]string{
@@ -60,7 +59,7 @@ func CreateOneSignalAppToken(project models.Project) (string, error) {
 	req, _ := http.NewRequest("POST", url, bytes.NewReader(marshalled))
 
 	req.Header.Add("Content-Type", "application/json")
-	req.Header.Add("Authorization", "Basic "+os.Getenv("ONESIGNAL_ORG_API_KEY"))
+	req.Header.Add("Authorization", "Basic "+orgApiKey)
 
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -82,10 +81,10 @@ func CreateOneSignalAppToken(project models.Project) (string, error) {
 	return onesignal_app_api_key.(string), nil
 }
 
-func UploadAPNSP8KeyToOneSignal(project models.Project, apnsP8Key string, apnsKeyID string, apnsTeamID string, apnsBundleID string) error {
+func UploadAPNSP8KeyToOneSignal(project models.Project, apnsP8Key string, apnsKeyID string, apnsTeamID string, apnsBundleID string, orgId, orgApiKey string) error {
 	url := fmt.Sprintf("https://api.onesignal.com/apps/%s", project.OneSignalAppID)
 	payloadStr := map[string]string{
-		"organization_id": os.Getenv("ONESIGNAL_ORG_ID"),
+		"organization_id": orgId,
 		"apns_p8":         apnsP8Key,
 		"apns_key_id":     apnsKeyID,
 		"apns_team_id":    apnsTeamID,
@@ -98,7 +97,7 @@ func UploadAPNSP8KeyToOneSignal(project models.Project, apnsP8Key string, apnsKe
 	req, _ := http.NewRequest("PUT", url, bytes.NewReader(marshalled))
 
 	req.Header.Add("Content-Type", "application/json")
-	req.Header.Add("Authorization", "Basic "+os.Getenv("ONESIGNAL_ORG_API_KEY"))
+	req.Header.Add("Authorization", "Basic "+orgApiKey)
 
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {

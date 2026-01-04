@@ -7,7 +7,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"os"
 )
 
 type ChatRequest struct {
@@ -30,8 +29,7 @@ type ChatResponse struct {
 }
 
 // create name for this func
-func GetJSONFromLLM(model, system, message string) (string, error) {
-	apiKey := os.Getenv("OPENROUTER_API_KEY")
+func GetJSONFromLLM(model, system, message, apiKey string) (string, error) {
 	if apiKey == "" {
 		fmt.Println("Please set OPENROUTER_API_KEY in your environment.")
 		return "", fmt.Errorf("missing OPENROUTER_API_KEY")

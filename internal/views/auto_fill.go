@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
-	"os"
 
 	"github.com/go-playground/validator/v10"
 	"github.com/knid/wemob/internal/constants"
@@ -44,7 +43,7 @@ func (v *HttpViews) NavBarAutoFillWithAI(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	html, err := utils.FetchHTML(navBarAutoFillWithAIReq.URL)
+	html, err := utils.FetchHTML(navBarAutoFillWithAIReq.URL, v.Controller.SecretManager.GetSecret("PROXY_HOST"), v.Controller.SecretManager.GetSecret("PROXY_AUTH"))
 	if err != nil {
 		slog.Error("❌ Error fetching page", "error", err, "from", "AUTOFILL")
 		utils.JSONErrorResponse(w, "Error fetching website. Try again please.", http.StatusBadRequest)
@@ -60,7 +59,7 @@ func (v *HttpViews) NavBarAutoFillWithAI(w http.ResponseWriter, r *http.Request)
 
 	data, _ := json.MarshalIndent(output, "", "  ")
 
-	outputJson, err := utils.GetJSONFromLLM(os.Getenv("DEFAULT_LLM_MODEL"), constants.NAVBAR_ITEM_GENERATOR_PROMPT, string(data))
+	outputJson, err := utils.GetJSONFromLLM(v.Controller.SecretManager.GetSecret("DEFAULT_LLM_MODEL"), constants.NAVBAR_ITEM_GENERATOR_PROMPT, string(data), v.Controller.SecretManager.GetSecret("OPENROUTER_API_KEY"))
 	if err != nil {
 		utils.JSONErrorResponse(w, "Error generating items. Try again please.", http.StatusBadRequest)
 		return
