@@ -69,10 +69,6 @@ func (c *Controller) GetProject(user *models.User, project_id string) (*response
 }
 
 func (c *Controller) CreateProject(user *models.User, projectCreateReq requests.ProjectCreateRequest) (*responses.ProjectCreateResponse, error) {
-	// Create OneSignal App
-	// Create new build
-	// Release the new build
-
 	validate := validator.New(validator.WithRequiredStructEnabled())
 	if err := utils.ValidateFunc[requests.ProjectCreateRequest](projectCreateReq, validate); err != nil {
 		return nil, err
@@ -282,10 +278,26 @@ func (c *Controller) UpdateProject(r *http.Request, user *models.User, projectCr
 		projectCreateReq.AppIcon == "" && project.BuildForAndroid == projectCreateReq.BuildForAndroid &&
 		project.BuildForIOS == projectCreateReq.BuildForIOS {
 		if navBarChanged {
-			return nil, errors.New("navbar changed successfuly")
+			return &responses.ProjectInformationResponse{
+				ID:          project.ID,
+				Title:       lastBuild.Title,
+				Description: lastBuild.Description,
+				URL:         project.URL,
+				PackageName: project.PackageName,
+				Icon:        project.IconPath,
+				CreatedAt:   project.CreatedAt,
+			}, nil
 		} else {
 			return nil, errors.New("no change detected")
 		}
+	}
+
+	project.BuildForAndroid = projectCreateReq.BuildForAndroid
+	project.BuildForIOS = projectCreateReq.BuildForIOS
+
+	updatedProject, err := c.DB.UpdateProject(project)
+	if err != nil {
+		return nil, err
 	}
 
 	buildCreateReq := requests.BuildCreateRequest{
@@ -309,14 +321,6 @@ func (c *Controller) UpdateProject(r *http.Request, user *models.User, projectCr
 	)
 
 	_, err = c.CreateBuild(user, buildCreateReq)
-	if err != nil {
-		return nil, err
-	}
-
-	project.BuildForAndroid = projectCreateReq.BuildForAndroid
-	project.BuildForIOS = projectCreateReq.BuildForIOS
-
-	updatedProject, err := c.DB.UpdateProject(project)
 	if err != nil {
 		return nil, err
 	}
