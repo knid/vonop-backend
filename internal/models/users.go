@@ -21,6 +21,7 @@ type User struct {
 	Subscription        *StandartUserSubscription `bun:"rel:belongs-to,join:subscription_id=id"`
 	SubscriptionStatus  string                    `bun:",notnull,default:'inactive'"`
 	SubscriptionStartAt time.Time                 `bun:""`
+	TrialStartAt        time.Time                 `bun:""`
 	CustomerID          string                    `bun:",nullzero"`
 	TrialUsed           bool                      `bun:",notnull,default:false"`
 	SetupFinished       bool                      `bun:",notnull,default:false"`
