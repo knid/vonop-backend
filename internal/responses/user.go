@@ -16,6 +16,7 @@ type UserInformationResponse struct {
 	SubscriptionID     string    `json:"subscription_id"`
 	SubscriptionStatus string    `json:"subscription_status"`
 	SubscribedAt       time.Time `json:"subscribed_at"`
+	TrialStartedAt     time.Time `json:"trial_started_at"`
 	TrialUsed          bool      `json:"trial_used"`
 	SetupFinished      bool      `json:"setup_finished"`
 	CreatedAt          time.Time `json:"created_at"`

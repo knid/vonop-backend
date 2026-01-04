@@ -57,6 +57,7 @@ func (c *Controller) HandleWebhook(w http.ResponseWriter, req *http.Request) {
 
 			if !user.TrialUsed {
 				user.SubscriptionStatus = "trial"
+				user.TrialStartAt = time.Now()
 				go c.CRMService.SendEvent(user, constants.BREVO_EVENT_TRIAL_STARTED, map[string]any{
 					"subscription_status": user.SubscriptionStatus,
 					"subscription_id":     user.SubscriptionID.String(),
