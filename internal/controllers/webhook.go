@@ -61,13 +61,15 @@ func (c *Controller) HandleWebhook(w http.ResponseWriter, req *http.Request) {
 					"subscription_status": user.SubscriptionStatus,
 					"subscription_id":     user.SubscriptionID.String(),
 				})
-				go c.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_UPDATED, map[string]any{
-					"subscription_status": user.SubscriptionStatus,
-					"subscription_id":     user.SubscriptionID.String(),
-				})
 			} else {
 				user.SubscriptionStatus = "active"
+				user.SubscriptionStartAt = time.Now()
 			}
+
+			go c.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_UPDATED, map[string]any{
+				"subscription_status": user.SubscriptionStatus,
+				"subscription_id":     user.SubscriptionID.String(),
+			})
 
 			subs, err := c.DB.GetSubscriptionByPriceID(sub.Items.Data[0].Price.ID)
 			if err != nil {
