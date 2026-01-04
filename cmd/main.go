@@ -255,9 +255,13 @@ func main() {
 			r.HandleFunc("/proxy", httpViews.ProxyHandler)
 			r.Get("/check/{projectId}", httpViews.CheckStatus)
 			r.Route("/users", func(r chi.Router) {
-				r.Get("/me", httpViews.GetUser)
-				r.Put("/me", httpViews.UpdateUser)
-				r.Delete("/me", httpViews.DeleteUser)
+				r.Route("/me", func(r chi.Router) {
+					r.Get("/", httpViews.GetUser)
+					r.Put("/", httpViews.UpdateUser)
+					r.Delete("/", httpViews.DeleteUser)
+
+					r.Get("/usage", httpViews.GetMontlyUsage)
+				})
 
 				r.Get("/notifications", httpViews.GetUserNotifications)
 				r.Get("/notifications/{userNotificationId}", httpViews.GetUserNotification)
