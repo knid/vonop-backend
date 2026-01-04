@@ -371,6 +371,7 @@ func main() {
 					r.Put("/", httpViews.UpdateSubscription)
 					r.Delete("/", httpViews.CancelSubscription)
 					r.Get("/limits", httpViews.GetLimits)
+					r.Post("/end_trial", httpViews.EndTrialNowAndChargeForUser)
 				})
 				r.Route("/invoices", func(r chi.Router) {
 					// r.Get("/", httpViews.GetInvoices)
