@@ -15,7 +15,6 @@ func (v *HttpViews) GetMontlyUsage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var notifications []models.Notification
 	buildTasks, err := v.Controller.DB.GetAppBuildTasksByUser(user)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
@@ -28,6 +27,7 @@ func (v *HttpViews) GetMontlyUsage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var notifications []models.Notification
 	for _, project := range projects {
 		projectNotifications, err := v.Controller.DB.GetNotifications(project.ID.String())
 		if err != nil {
@@ -65,8 +65,6 @@ func (v *HttpViews) GetMontlyUsage(w http.ResponseWriter, r *http.Request) {
 	output := map[string]any{
 		"notifications_used":    notificationCount,
 		"app_builds_used":       appBuildTaskCount,
-		"notification_limit":    user.Subscription.Limits.MontlyNotificationCount,
-		"app_builds_limit":      user.Subscription.Limits.MontlyBuildCount,
 		"subscription_status":   user.SubscriptionStatus,
 		"subscription_plan_id":  user.SubscriptionID,
 		"subscription_start_at": user.SubscriptionStartAt,
