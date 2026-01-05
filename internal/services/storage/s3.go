@@ -11,6 +11,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	v4 "github.com/aws/aws-sdk-go-v2/aws/signer/v4"
 	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
 
@@ -22,8 +23,11 @@ type S3Storage struct {
 	PresignClient *s3.PresignClient
 }
 
-func NewS3Storage(region, bucket string) *S3Storage {
-	cfg, _ := config.LoadDefaultConfig(context.TODO(), config.WithRegion(region))
+func NewS3Storage(region, bucket, accessKey, secretKey string) *S3Storage {
+	cfg, _ := config.LoadDefaultConfig(context.TODO(),
+		config.WithRegion(region),
+		config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(accessKey, secretKey, "")),
+	)
 	client := s3.NewFromConfig(cfg)
 	presignClient := s3.NewPresignClient(client)
 
