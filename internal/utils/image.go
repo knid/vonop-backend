@@ -101,7 +101,7 @@ func ComposeMockup(screenshot []byte) ([]byte, error) {
 	final := image.NewRGBA(mockupImg.Bounds())
 
 	// 1) Put screenshot FIRST (underlay)
-	screenRect := image.Rect(68, 60, 68+1290, 60+2800)
+	screenRect := image.Rect(68, 58, 68+1290, 58+2800)
 	draw.Draw(final, screenRect, rounded, image.Point{0, 0}, draw.Src)
 
 	// 2) Put mockup OVERLAY (transparent areas allow screenshot to show)
