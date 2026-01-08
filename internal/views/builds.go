@@ -20,11 +20,10 @@ func (v *HttpViews) GetProjectBuilds(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !(user.SubscriptionStatus == "active" || user.SubscriptionStatus == "trial") {
+	/* 	if !(user.SubscriptionStatus == "active" || user.SubscriptionStatus == "trial") {
 		utils.JSONErrorResponse(w, "you do not have access to this resource", http.StatusForbidden)
 		return
-	}
-
+	} */
 	projectID := chi.URLParam(r, "projectId")
 	if projectID == "" {
 		utils.JSONErrorResponse(w, "project_id is required", http.StatusBadRequest)
