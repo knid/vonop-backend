@@ -10,14 +10,18 @@ type UserInfoRequest struct {
 }
 
 type UserUpdateRequest struct {
-	Name  string `json:"name" validate:"min=3,max=30,required" errormgs:"must be between 3 and 30 characters long"`
-	Email string `json:"email" validate:"email,required" errormgs:"must be a valid email address"`
-	Photo string `json:"photo" validate:"required"`
+	Name    string `json:"name" validate:"min=3,max=30,required" errormgs:"must be between 3 and 30 characters long"`
+	Email   string `json:"email" validate:"email,required" errormgs:"must be a valid email address"`
+	Company string `json:"company"`
+	Type    string `json:"type"`
+	Photo   string `json:"photo" validate:"required"`
 }
 
 type UserRegisterRequest struct {
 	Name          string `json:"name" validate:"min=3,max=30,required" errormgs:"must be between 3 and 30 characters long"`
 	Email         string `json:"email" validate:"email,required" errormgs:"must be a valid email address"`
+	Company       string `json:"company"`
+	Type          string `json:"type"`
 	Photo         string `json:"photo"`
 	Password      string `json:"password" validate:"required,min=8,max=64" errormgs:"must be between 8 and 64 characters long"`
 	PasswordCheck string `json:"password_check" validate:"required,min=8,max=64" errormgs:"must be between 8 and 64 characters long"`

@@ -13,6 +13,9 @@ type UserInformationResponse struct {
 	Photo              string    `json:"profile_photo"`
 	Verified           bool      `json:"verified"`
 	Provider           string    `json:"provider"`
+	Type               string    `json:"type"`
+	Company            string    `json:"company"`
+	CompanyLogo        string    `json:"company_logo"`
 	SubscriptionID     string    `json:"subscription_id"`
 	SubscriptionStatus string    `json:"subscription_status"`
 	SubscribedAt       time.Time `json:"subscribed_at"`

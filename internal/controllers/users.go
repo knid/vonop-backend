@@ -46,6 +46,9 @@ func (c *Controller) GetUser(tokenStr string) (*responses.UserInformationRespons
 		Photo:              user.Photo,
 		Verified:           user.Verified,
 		Provider:           user.Provider,
+		Type:               user.Type,
+		Company:            user.Company,
+		CompanyLogo:        user.CompanyLogo,
 		SubscriptionID:     user.SubscriptionID.String(),
 		SubscriptionStatus: user.SubscriptionStatus,
 		SubscribedAt:       user.SubscriptionStartAt,
@@ -81,12 +84,22 @@ func (c *Controller) UpdateUser(user *models.User, userUpdateReq requests.UserUp
 	}
 
 	return &responses.UserInformationResponse{
-		ID:       updatedUser.ID,
-		Name:     updatedUser.Name,
-		Email:    updatedUser.Email,
-		Photo:    updatedUser.Photo,
-		Verified: updatedUser.Verified,
-		Provider: updatedUser.Provider,
+		ID:                 updatedUser.ID,
+		Name:               updatedUser.Name,
+		Email:              updatedUser.Email,
+		Photo:              updatedUser.Photo,
+		Verified:           updatedUser.Verified,
+		Provider:           updatedUser.Provider,
+		Type:               updatedUser.Type,
+		Company:            updatedUser.Company,
+		CompanyLogo:        updatedUser.CompanyLogo,
+		SubscriptionID:     updatedUser.SubscriptionID.String(),
+		SubscriptionStatus: updatedUser.SubscriptionStatus,
+		SubscribedAt:       updatedUser.SubscriptionStartAt,
+		TrialStartedAt:     updatedUser.TrialStartAt,
+		SetupFinished:      updatedUser.SetupFinished,
+		TrialUsed:          updatedUser.TrialUsed,
+		CreatedAt:          updatedUser.CreatedAt,
 	}, nil
 }
 
@@ -138,12 +151,22 @@ func (c *Controller) RegisterUser(userRegisterReq requests.UserRegisterRequest) 
 	})
 
 	return &responses.UserInformationResponse{
-		ID:       createdUser.ID,
-		Name:     createdUser.Name,
-		Email:    createdUser.Email,
-		Photo:    createdUser.Photo,
-		Verified: createdUser.Verified,
-		Provider: createdUser.Provider,
+		ID:                 user.ID,
+		Name:               user.Name,
+		Email:              user.Email,
+		Photo:              user.Photo,
+		Verified:           user.Verified,
+		Provider:           user.Provider,
+		Type:               user.Type,
+		Company:            user.Company,
+		CompanyLogo:        user.CompanyLogo,
+		SubscriptionID:     user.SubscriptionID.String(),
+		SubscriptionStatus: user.SubscriptionStatus,
+		SubscribedAt:       user.SubscriptionStartAt,
+		TrialStartedAt:     user.TrialStartAt,
+		SetupFinished:      user.SetupFinished,
+		TrialUsed:          user.TrialUsed,
+		CreatedAt:          user.CreatedAt,
 	}, nil
 }
 
