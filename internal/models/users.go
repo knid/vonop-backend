@@ -15,7 +15,10 @@ type User struct {
 	Email               string                    `bun:",unique,notnull"`
 	Password            string                    `bun:",notnull"`
 	Photo               string                    `bun:""`
+	CompanyLogo         string                    `bun:""`
 	Verified            bool                      `bun:",notnull,default:false"`
+	Type                string                    `bun:",notnull,default:'standart'"`
+	Company             string                    `bun:",nullzero"`
 	Provider            string                    `bun:",nullzero,notnull,default:'Wemob'"`
 	SubscriptionID      uuid.UUID                 `bun:",type:uuid"`
 	Subscription        *StandartUserSubscription `bun:"rel:belongs-to,join:subscription_id=id"`
