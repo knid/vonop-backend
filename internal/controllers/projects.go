@@ -84,6 +84,30 @@ func (c *Controller) CreateProject(user *models.User, projectCreateReq requests.
 		return nil, err
 	}
 
+	projectsInOneYear := 0
+	subsStart := user.SubscriptionStartAt
+	now := time.Now()
+
+	renewStart := time.Date(now.Year(), now.Month(), subsStart.Day(), 0, 0, 0, 0, now.Location())
+
+	if now.Before(renewStart) {
+		renewStart = renewStart.AddDate(0, -1, 0)
+	}
+
+	renewEnd := renewStart.AddDate(0, 1, 0)
+
+	if user.Type == "agency" {
+		for _, project := range projects {
+			if project.CreatedAt.After(renewStart) && project.CreatedAt.Before(renewEnd) {
+				projectsInOneYear++
+			}
+		}
+
+		if projectsInOneYear >= limits.MaximumProjectCount {
+			return nil, errors.New("you have reached your project limit for this subscription period")
+		}
+	}
+
 	if len(projects) >= limits.MaximumProjectCount {
 		return nil, errors.New("you have reached your project limit")
 	}
