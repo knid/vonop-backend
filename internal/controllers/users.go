@@ -116,6 +116,9 @@ func (c *Controller) RegisterUser(userRegisterReq requests.UserRegisterRequest) 
 	user := models.User{
 		Name:     userRegisterReq.Name,
 		Email:    userRegisterReq.Email,
+		Provider: "Wemob",
+		Type:     userRegisterReq.Type,
+		Company:  userRegisterReq.Company,
 		Password: utils.GetSHA256Hash(userRegisterReq.Password),
 	}
 
