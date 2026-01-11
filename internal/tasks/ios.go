@@ -45,6 +45,7 @@ type IOSDeployPayload struct {
 	Description        string
 	Screenshots        []string
 	Icon               string
+	Locale             string
 	NewApp             bool
 	ChangedStoreInfo   bool
 	ChangedBuild       bool

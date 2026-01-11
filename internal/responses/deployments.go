@@ -19,6 +19,7 @@ type DeploymentResponse struct {
 	StatusMessage           string    `json:"status_message"`
 	ScreenshotIDs           []string  `json:"screenshot_ids"`
 	Method                  string    `json:"method"`
+	Locale                  string    `json:"locale"`
 	AppStoreCredentialsID   uuid.UUID `json:"app_store_credentials_id"`
 	GooglePlayCredentialsID uuid.UUID `json:"google_play_credentials_id"`
 	CreatedAt               time.Time `json:"created_at"`

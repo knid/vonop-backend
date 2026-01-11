@@ -22,6 +22,7 @@ type Deployment struct {
 	StatusMessage           string                 `bun:",notnull"`
 	ScreenshotPaths         []string               `bun:",array,notnull"`
 	Method                  string                 `bun:",notnull"`
+	Locale                  string                 `bun:",notnull"`
 	AppStoreCredentialsID   uuid.UUID              `bun:",type:uuid"`
 	GooglePlayCredentialsID uuid.UUID              `bun:",type:uuid"`
 	AppStoreCredentials     *AppStoreCredentials   `bun:"rel:belongs-to,join:app_store_credentials_id=id"`

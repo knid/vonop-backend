@@ -30,6 +30,7 @@ type AndroidDeployPayload struct {
 	Description        string
 	Screenshots        []string
 	Version            int
+	Locale             string
 	ChangedStoreInfo   bool
 	ChangedBuild       bool
 	IconChanged        bool
