@@ -184,13 +184,25 @@ func (v *HttpViews) EndTrialNowAndChargeForUser(w http.ResponseWriter, r *http.R
 	inv, err := invoice.Pay(updated.LatestInvoice.ID, pay)
 
 	resp := map[string]any{
-		"user_id":            user.ID,
-		"customer_id":        user.CustomerID,
+		"user_id": user.ID,
+		// "customer_id":        user.CustomerID,
 		"subscription_id":    updated.ID,
 		"invoice_id":         inv.ID,
 		"status":             inv.Status,
 		"hosted_invoice_url": inv.HostedInvoiceURL,
 	}
 
-	utils.JSONResponse(w, resp, http.StatusPaymentRequired)
+	if err != nil {
+		resp["error"] = err.Error()
+		resp["status"] = "payment_failed"
+		resp["message"] = "invoice created but payment failed"
+		utils.JSONResponse(w, resp, http.StatusPaymentRequired)
+		return
+	}
+
+	if resp["status"] != "paid" {
+		utils.JSONResponse(w, resp, http.StatusPaymentRequired)
+	}
+
+	utils.JSONResponse(w, resp, http.StatusOK)
 }
