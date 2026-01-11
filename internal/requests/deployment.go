@@ -11,6 +11,7 @@ type CreateDeploymentRequest struct {
 	GooglePlayCredentialsID string   `json:"google_play_credentials_id"`
 	AppStoreCredentialsID   string   `json:"app_store_credentials_id"`
 	ScreenshotPaths         []string `json:"screenshot_paths"`
+	Locale                  string   `json:"locale"`
 }
 
 type SignIPARequest struct {
