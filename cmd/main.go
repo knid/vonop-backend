@@ -183,6 +183,8 @@ func main() {
 	staticDir := http.Dir(filepath.Join(workDir, "storage/public"))
 
 	r := chi.NewRouter()
+	r.Use(middleware.RequestID)
+	r.Use(middleware.RealIP)
 
 	r.Use(httplog.RequestLogger(logger, &httplog.Options{
 		// Level defines the verbosity of the request logs:
@@ -206,6 +208,12 @@ func main() {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			ctx := r.Context()
 			httplog.SetAttrs(ctx, slog.String("from", "HTTPLOG"))
+
+			httplog.SetAttrs(ctx,
+				slog.String("client.ip", r.RemoteAddr),
+				slog.String("client.xff", r.Header.Get("X-Forwarded-For")),
+				slog.String("client.xri", r.Header.Get("X-Real-IP")),
+			)
 
 			tokenString, err := utils.ExtractTokenFromHeader(r)
 			if err == nil {
@@ -231,7 +239,6 @@ func main() {
 		AllowCredentials: false,
 		MaxAge:           300, // Maximum value not ignored by any of major browsers
 	}))
-	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 
 	r.Route("/", func(r chi.Router) {
