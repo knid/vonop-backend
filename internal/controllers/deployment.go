@@ -249,7 +249,8 @@ func (c *Controller) CreateDeploymentTask(user *models.User, deploymentReq reque
 				"build_id":         build.ID.String(),
 				"deployment_title": deploymentReq.Title,
 			})
-		} else {
+		}
+		if !slices.Contains(deploymentReq.Platforms, "ios") && !slices.Contains(deploymentReq.Platforms, "android") {
 			return nil, errors.New("unsupported platform")
 		}
 
