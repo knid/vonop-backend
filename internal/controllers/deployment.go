@@ -119,7 +119,9 @@ func (c *Controller) CreateDeploymentTask(user *models.User, deploymentReq reque
 		if deploymentReq.Method == "wemob" {
 			appStoreCredId = uuid.Nil
 		} else {
-			return nil, errors.New("invalid app store credentials id")
+			if slices.Contains(deploymentReq.Platforms, "ios") {
+				return nil, errors.New("invalid app store credentials id")
+			}
 		}
 	}
 	googlePlayCredId, err := uuid.Parse(deploymentReq.GooglePlayCredentialsID)
@@ -127,7 +129,9 @@ func (c *Controller) CreateDeploymentTask(user *models.User, deploymentReq reque
 		if deploymentReq.Method == "wemob" {
 			googlePlayCredId = uuid.Nil
 		} else {
-			return nil, errors.New("invalid google play credentials id")
+			if slices.Contains(deploymentReq.Platforms, "android") {
+				return nil, errors.New("invalid google play credentials id")
+			}
 		}
 	}
 
@@ -189,18 +193,19 @@ func (c *Controller) CreateDeploymentTask(user *models.User, deploymentReq reque
 				return nil, err
 			}
 
-			// Get APNS P8 Key content from s3
-			apnsP8KeyBytes, err := c.UserApiKeysStorage.ReadObjectBytes(context.TODO(), cred.APNSP8KeyPath)
-			if err != nil {
-				return nil, err
-			}
-			apnsP8Key := base64.StdEncoding.EncodeToString(apnsP8KeyBytes)
+			/*
+				// Get APNS P8 Key content from s3
+				apnsP8KeyBytes, err := c.UserApiKeysStorage.ReadObjectBytes(context.TODO(), cred.APNSP8KeyPath)
+				if err != nil {
+					return nil, err
+				}
+				apnsP8Key := base64.StdEncoding.EncodeToString(apnsP8KeyBytes)
 
-			// Upload APNS P8 Key to OneSignal
-			err = external.UploadAPNSP8KeyToOneSignal(*project, apnsP8Key, cred.APNSP8KeyID, cred.TeamID, project.PackageName, c.SecretManager.GetSecret("ONESIGNAL_ORG_ID"), c.SecretManager.GetSecret("ONESIGNAL_ORG_API_KEY"))
-			if err != nil {
-				return nil, err
-			}
+				 // Upload APNS P8 Key to OneSignal
+				err = external.UploadAPNSP8KeyToOneSignal(*project, apnsP8Key, cred.APNSP8KeyID, cred.TeamID, project.PackageName, c.SecretManager.GetSecret("ONESIGNAL_ORG_ID"), c.SecretManager.GetSecret("ONESIGNAL_ORG_API_KEY"))
+				if err != nil {
+					return nil, err
+				} */
 
 			go c.CRMService.SendEvent(user, constants.BREVO_EVENT_USER_APPLE_DEPLOYMENT_STARTED, map[string]interface{}{
 				"project_id":       project.ID.String(),
@@ -486,6 +491,18 @@ func (c *Controller) SignUnsignedIPATask(user *models.User, signReq requests.Sig
 	}
 
 	cred, err := c.DB.GetAppStoreCredentialById(signReq.CredentialsID)
+	if err != nil {
+		return nil, err
+	}
+
+	apnsP8KeyBytes, err := c.UserApiKeysStorage.ReadObjectBytes(context.TODO(), cred.APNSP8KeyPath)
+	if err != nil {
+		return nil, err
+	}
+	apnsP8Key := base64.StdEncoding.EncodeToString(apnsP8KeyBytes)
+
+	// Upload APNS P8 Key to OneSignal
+	err = external.UploadAPNSP8KeyToOneSignal(*project, apnsP8Key, cred.APNSP8KeyID, cred.TeamID, project.PackageName, c.SecretManager.GetSecret("ONESIGNAL_ORG_ID"), c.SecretManager.GetSecret("ONESIGNAL_ORG_API_KEY"))
 	if err != nil {
 		return nil, err
 	}
