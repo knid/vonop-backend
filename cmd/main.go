@@ -261,6 +261,10 @@ func main() {
 					r.Get("/me/photo", httpViews.GetProfilePhotoFromS3Presign)
 					r.Post("/me/photo", httpViews.PutProfilePhotoToS3Presign)
 				})
+				r.Route("/notifications", func(r chi.Router) {
+					r.Get("/image", httpViews.GetNotificationImageFromS3Presign)
+					r.Post("/image", httpViews.PutNotificationImageToS3Presign)
+				})
 				r.Route("/deployments", func(r chi.Router) {
 					r.Route("/screenshots", func(r chi.Router) {
 						r.Get("/{screenshotId}", httpViews.GetScreenshotFromS3Presign)
