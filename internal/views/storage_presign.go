@@ -258,3 +258,50 @@ func (v *HttpViews) DownloadIPAFromS3Presign(w http.ResponseWriter, r *http.Requ
 		"presigned_request": presignedRequest,
 	}, http.StatusOK)
 }
+
+func (v *HttpViews) GetNotificationImageFromS3Presign(w http.ResponseWriter, r *http.Request) {
+	if _, err := v.Controller.GetUserFromReq(r); err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	id := chi.URLParam(r, "notificationId")
+	if id == "" {
+		utils.JSONErrorResponse(w, "notification ID is required", http.StatusBadRequest)
+		return
+	}
+
+	objectKey := "notifications/" + id + ".png"
+
+	presignedRequest, err := v.Controller.AssetsStorage.GetObject(r.Context(), objectKey, 60*60*24)
+	if err != nil {
+		utils.JSONErrorResponse(w, "Couldn't generate presigned request: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	utils.JSONResponse(w, map[string]interface{}{
+		"id":                id,
+		"presigned_request": presignedRequest,
+	}, http.StatusOK)
+}
+
+func (v *HttpViews) PutNotificationImageToS3Presign(w http.ResponseWriter, r *http.Request) {
+	if _, err := v.Controller.GetUserFromReq(r); err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	id := uuid.New().String()
+	objectKey := "notifications/" + id + ".png"
+
+	presignedRequest, err := v.Controller.AssetsStorage.PutObject(r.Context(), objectKey, 300)
+	if err != nil {
+		utils.JSONErrorResponse(w, "Couldn't generate presigned request: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	utils.JSONResponse(w, map[string]interface{}{
+		"id":                id,
+		"presigned_request": presignedRequest,
+	}, http.StatusOK)
+}
