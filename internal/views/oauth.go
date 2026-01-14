@@ -31,33 +31,6 @@ func (v *HttpViews) OAuthCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	html := fmt.Sprintf(`
-	<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"/></head>
-		<body>
-		<script>
-		(function () {
-		var token = %q;
-
-		try {
-			if (window.opener && window.opener.postMessage) {
-			window.opener.postMessage({ token: token }, "*");
-			}
-		} catch (e) {}
-
-		try {
-			if (window.flutter_inappwebview && window.flutter_inappwebview.callHandler) {
-			window.flutter_inappwebview.callHandler("wemob_oauth", token);
-			}
-		} catch (e) {}
-
-		try { window.close(); } catch (e) {}
-
-		setTimeout(function () {
-			document.body.innerHTML = "<p style='font-family: -apple-system; padding:16px'>Done. You can close this window.</p>";
-		}, 300);
-		})();
-		</script>
-	</body></html>`, userLoginRes.Token)
-
-	w.Write([]byte(html))
+	url := fmt.Sprintf("https://dashboard.wemob.io/login/handleGoogle?token=%s", userLoginRes.Token)
+	http.Redirect(w, r, url, http.StatusTemporaryRedirect)
 }
