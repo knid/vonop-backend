@@ -7,7 +7,6 @@ import (
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/responses"
-	"github.com/knid/wemob/internal/utils"
 	"github.com/knid/wemob/internal/utils/external"
 )
 
@@ -29,6 +28,8 @@ func (c *Controller) GetNotifications(projectId string) ([]responses.Notificatio
 			ProjectID:   notification.ProjectID,
 			Title:       notification.Title,
 			Description: notification.Description,
+			URL:         notification.URL,
+			Image:       notification.Image,
 			CreatedAt:   notification.CreatedAt,
 		}
 	}
@@ -68,10 +69,8 @@ func (c *Controller) SendNotification(user *models.User, notificationCreateReq r
 		ProjectID:   notificationCreateReq.ProjectID,
 		Title:       notificationCreateReq.Title,
 		Description: notificationCreateReq.Description,
-	}
-
-	if notificationCreateReq.Image != "" {
-		notification.Image = "image/id.png"
+		URL:         notificationCreateReq.URL,
+		Image:       notificationCreateReq.Image,
 	}
 
 	createdNotification, err := c.DB.CreateNotification(&notification)
@@ -79,7 +78,7 @@ func (c *Controller) SendNotification(user *models.User, notificationCreateReq r
 		return nil, err
 	}
 
-	utils.ConvertBase64ToImageSave(notificationCreateReq.Image, "images/"+createdNotification.ID.String())
+	// utils.ConvertBase64ToImageSave(notificationCreateReq.Image, "images/"+createdNotification.ID.String())
 
 	err = external.SendOneSignalNotification(createdNotification, project)
 

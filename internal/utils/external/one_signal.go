@@ -134,17 +134,21 @@ func SendOneSignalNotification(notification *models.Notification, project *model
 		},
 		"data": map[string]string{
 			"notification_id": notification.ID.String(),
+			"url":             notification.URL,
 		},
 		"included_segments": []string{
 			"Total Subscriptions",
 		},
 	}
 	if notification.Image != "" {
-		imgUrl := "https://old-clocks-lick.loca.lt/v1/static/images/" + notification.ID.String() + ".png"
 		payloadStr["ios_attachments"] = map[string]string{
-			"id": imgUrl,
+			"id": notification.Image,
 		}
-		payloadStr["big_picture"] = imgUrl
+		payloadStr["big_picture"] = notification.Image
+	}
+
+	if !notification.SendAfter.IsZero() {
+		payloadStr["send_after"] = notification.SendAfter.Format("2025-09-24T14:00:00-07:00")
 	}
 
 	marshalled, _ := json.Marshal(payloadStr)
