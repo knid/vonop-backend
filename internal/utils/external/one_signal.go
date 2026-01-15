@@ -147,8 +147,8 @@ func SendOneSignalNotification(notification *models.Notification, project *model
 		payloadStr["big_picture"] = notification.Image
 	}
 
-	if !notification.SendAfter.IsZero() {
-		payloadStr["send_after"] = notification.SendAfter.Format("2025-09-24T14:00:00-07:00")
+	if notification.SendAfter != "" {
+		payloadStr["send_after"] = notification.SendAfter
 	}
 
 	marshalled, _ := json.Marshal(payloadStr)
