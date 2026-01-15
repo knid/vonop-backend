@@ -8,4 +8,5 @@ type NotificationCreateRequest struct {
 	Description string    `json:"description"`
 	Image       string    `json:"image"`
 	URL         string    `json:"url"`
+	SendAfter   string    `json:"send_after"`
 }
