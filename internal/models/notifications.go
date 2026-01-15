@@ -14,7 +14,7 @@ type Notification struct {
 	Description string    `bun:",notnull"`
 	Image       string    `bun:",notnull"`
 	URL         string    `bun:",notnull"`
-	SendAfter   time.Time `bun:",nullzero"`
+	SendAfter   string    `bun:",nullzero"`
 	CreatedAt   time.Time `bun:"created_at,nullzero,notnull,default:current_timestamp"`
 	UpdatedAt   time.Time `bun:"updated_at,nullzero,notnull,default:current_timestamp"`
 	DeletedAt   time.Time `bun:",soft_delete,nullzero"`

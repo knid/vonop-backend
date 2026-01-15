@@ -13,7 +13,7 @@ type NotificationInformationResponse struct {
 	Description string    `json:"description"`
 	Image       string    `json:"image"`
 	URL         string    `json:"url"`
-	SendAfter   time.Time `json:"send_after"`
+	SendAfter   string    `json:"send_after"`
 	CreatedAt   time.Time `json:"created_at"`
 	SentAt      time.Time `json:"sent_at"`
 }
