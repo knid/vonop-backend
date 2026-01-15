@@ -71,6 +71,7 @@ func (c *Controller) SendNotification(user *models.User, notificationCreateReq r
 		Description: notificationCreateReq.Description,
 		URL:         notificationCreateReq.URL,
 		Image:       notificationCreateReq.Image,
+		SendAfter:   notificationCreateReq.SendAfter,
 	}
 
 	createdNotification, err := c.DB.CreateNotification(&notification)
