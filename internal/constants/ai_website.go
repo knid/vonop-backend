@@ -27,6 +27,13 @@ Given the user's description of a website they want to create, generate a struct
     "background": "#hex",
     "text": "#hex"
   },
+  "darkColorScheme": {
+    "primary": "#hex",
+    "secondary": "#hex",
+    "accent": "#hex",
+    "background": "#hex (dark background)",
+    "text": "#hex (light text for dark mode)"
+  },
   "files": [
     {
       "path": "/index.html",
@@ -81,7 +88,9 @@ Generate a shared CSS file for the website based on the provided color scheme an
 2. Include base styles, typography, and utility classes that complement Tailwind.
 3. Add custom animations and transitions.
 4. Keep it clean and organized with clear comments.
-5. Return ONLY the CSS code. No markdown wrapping, no explanation.`
+5. Include dark mode CSS variables inside a @media (prefers-color-scheme: dark) block, overriding the :root variables with dark-mode colors.
+6. Also support a .dark class on <html> for manual toggle: html.dark { ... } with the same dark variables.
+7. Return ONLY the CSS code. No markdown wrapping, no explanation.`
 
 const WEBSITE_FILE_JS_PROMPT = `You are an expert JavaScript developer.
 
@@ -92,8 +101,9 @@ Generate a shared JavaScript file for the website.
 2. Include smooth scroll for anchor links.
 3. Include scroll-based animations (intersection observer for fade-in effects).
 4. Include any other common interactive features relevant to the website type.
-5. Use vanilla JavaScript only — no frameworks.
-6. Return ONLY the JavaScript code. No markdown wrapping, no explanation.`
+5. Include a dark mode toggle that adds/removes the "dark" class on <html> and persists the preference in localStorage.
+6. Use vanilla JavaScript only — no frameworks.
+7. Return ONLY the JavaScript code. No markdown wrapping, no explanation.`
 
 // Keep legacy prompts for backward compatibility with existing page-based websites
 const WEBSITE_PAGE_HTML_PROMPT = `You are an expert frontend developer specializing in modern, beautiful websites.
@@ -185,3 +195,54 @@ These placeholders will be replaced with real values at preview/publish time.
   ],
   "summary": "Added a contact page with a form and updated the navigation on all pages."
 }`
+
+const WEBSITE_SCREENSHOT_TO_CODE_PROMPT = `You are an expert web designer and frontend developer.
+
+Analyze the provided screenshot of a website and generate a structured plan to recreate it as a file-based project.
+
+### Rules
+1. Identify the website name or purpose from the screenshot.
+2. Extract the color scheme (primary, secondary, accent, background, text) from the visual design.
+3. Also generate a darkColorScheme with appropriate dark-mode variants.
+4. Plan the files needed to recreate the website structure shown in the screenshot.
+5. There MUST be an "/index.html" file as the homepage.
+6. Create a "/css/styles.css" file for shared styles.
+7. Create a "/js/main.js" file for shared JavaScript.
+8. Describe each file's content based on what you see in the screenshot.
+
+### Output format (strict JSON, no explanation, no markdown)
+{
+  "name": "Website Name",
+  "colorScheme": {
+    "primary": "#hex",
+    "secondary": "#hex",
+    "accent": "#hex",
+    "background": "#hex",
+    "text": "#hex"
+  },
+  "darkColorScheme": {
+    "primary": "#hex",
+    "secondary": "#hex",
+    "accent": "#hex",
+    "background": "#hex",
+    "text": "#hex"
+  },
+  "files": [
+    {
+      "path": "/index.html",
+      "type": "html",
+      "description": "Detailed description of the page layout from the screenshot"
+    }
+  ]
+}`
+
+const WEBSITE_EDIT_ELEMENT_PROMPT = `You are an expert frontend developer. You will receive the current content of a file, a CSS selector identifying a specific element, and an edit instruction.
+
+### Rules
+1. Locate the element matching the given CSS selector in the file content.
+2. Apply the edit instruction ONLY to that specific element and its children.
+3. Do NOT modify any other parts of the file.
+4. Maintain the existing styling and design consistency.
+5. Return the COMPLETE updated file content — not just the changed element.
+6. Return ONLY the file content. No markdown wrapping, no explanation.
+7. If the file is HTML, it must start with <!DOCTYPE html> and end with </html>.`

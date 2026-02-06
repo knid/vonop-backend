@@ -574,6 +574,9 @@ func (c *Controller) PublishWebsiteFiles(user *models.User, websiteId string) (*
 		}
 	}
 
+	// Load SEO settings
+	seo, _ := c.DB.GetSEOByWebsiteId(websiteId)
+
 	contentTypeMap := map[string]string{
 		"html": "text/html",
 		"css":  "text/css",
@@ -581,12 +584,20 @@ func (c *Controller) PublishWebsiteFiles(user *models.User, websiteId string) (*
 		"json": "application/json",
 	}
 
+	publishedURL := fmt.Sprintf("https://sites.wemob.io/%s", website.Slug)
+	var publishedFilePaths []string
+
 	for _, file := range files {
 		content := file.Content
 
 		// Replace integration placeholders with real values
 		if len(integrationCreds) > 0 {
 			content = utils.ReplaceIntegrationPlaceholders(content, integrationCreds)
+		}
+
+		// Inject SEO meta tags into HTML files
+		if file.FileType == "html" && seo != nil {
+			content = InjectSEOMetaTags(content, seo)
 		}
 
 		s3Path := fmt.Sprintf("sites/%s%s", website.Slug, file.FilePath)
@@ -605,9 +616,29 @@ func (c *Controller) PublishWebsiteFiles(user *models.User, websiteId string) (*
 			slog.Error("failed to upload file to S3", "error", err, "path", s3Path)
 			return nil, fmt.Errorf("failed to publish file: %s", file.FilePath)
 		}
+
+		publishedFilePaths = append(publishedFilePaths, file.FilePath)
 	}
 
-	publishedURL := fmt.Sprintf("https://sites.wemob.io/%s", website.Slug)
+	// Generate and upload sitemap.xml
+	sitemapURL := publishedURL + "/sitemap.xml"
+	sitemapContent := GenerateSitemap(publishedURL, publishedFilePaths)
+	c.AssetsStorage.UploadFileByteWithContentType(
+		context.Background(),
+		fmt.Sprintf("sites/%s/sitemap.xml", website.Slug),
+		[]byte(sitemapContent),
+		"application/xml",
+	)
+
+	// Generate and upload robots.txt
+	robotsContent := GenerateRobotsTxt(sitemapURL)
+	c.AssetsStorage.UploadFileByteWithContentType(
+		context.Background(),
+		fmt.Sprintf("sites/%s/robots.txt", website.Slug),
+		[]byte(robotsContent),
+		"text/plain",
+	)
+
 	website.Status = "published"
 	website.PublishedURL = publishedURL
 	website.UpdatedAt = time.Now()

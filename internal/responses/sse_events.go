@@ -64,3 +64,7 @@ type FileGenerationStartEvent struct {
 	TotalFiles int      `json:"total_files"`
 	FilePaths  []string `json:"file_paths"`
 }
+
+type ChatThinkingEvent struct {
+	Chunk string `json:"chunk"`
+}

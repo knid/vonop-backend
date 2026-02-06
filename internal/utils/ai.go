@@ -251,6 +251,152 @@ func GetJSONFromLLMWithMessages(model string, messages []Message, apiKey string)
 	return CleanLLMOutput(parsed.Choices[0].Message.Content), nil
 }
 
+// StreamJSONFromLLMWithMessages streams an LLM response from a multi-turn conversation.
+// Sends chunks via onChunk and returns the cleaned JSON.
+func StreamJSONFromLLMWithMessages(ctx context.Context, model string, messages []Message, apiKey string, onChunk func(chunk string)) (string, error) {
+	if apiKey == "" {
+		return "", fmt.Errorf("missing OPENROUTER_API_KEY")
+	}
+
+	reqBody := ChatRequest{
+		Model:    model,
+		Stream:   true,
+		Messages: messages,
+	}
+	body, _ := json.Marshal(reqBody)
+
+	req, _ := http.NewRequestWithContext(ctx, "POST", "https://openrouter.ai/api/v1/chat/completions", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("HTTP-Referer", "https://wemob.io")
+	req.Header.Set("X-Title", "wemob-web-builder")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		slog.Error("Error making streaming request to LLM:", "error", err)
+		return "", fmt.Errorf("error generating content. try again please")
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		slog.Error("LLM streaming returned non-200", "status", resp.StatusCode, "body", string(respBody))
+		return "", fmt.Errorf("error generating content. try again please")
+	}
+
+	var fullText strings.Builder
+	scanner := bufio.NewScanner(resp.Body)
+
+	for scanner.Scan() {
+		if ctx.Err() != nil {
+			return fullText.String(), ctx.Err()
+		}
+
+		line := scanner.Text()
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+
+		data := strings.TrimPrefix(line, "data: ")
+		if data == "[DONE]" {
+			break
+		}
+
+		var chunk StreamChunk
+		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+			continue
+		}
+
+		if len(chunk.Choices) > 0 && chunk.Choices[0].Delta.Content != "" {
+			content := chunk.Choices[0].Delta.Content
+			fullText.WriteString(content)
+			if onChunk != nil {
+				onChunk(content)
+			}
+		}
+	}
+
+	return CleanLLMOutput(fullText.String()), nil
+}
+
+// MultiContentPart represents a content part in a multimodal message.
+type MultiContentPart struct {
+	Type     string            `json:"type"`
+	Text     string            `json:"text,omitempty"`
+	ImageURL *ImageURLContent  `json:"image_url,omitempty"`
+}
+
+type ImageURLContent struct {
+	URL string `json:"url"`
+}
+
+type MultiMessage struct {
+	Role    string        `json:"role"`
+	Content any           `json:"content"`
+}
+
+type MultiChatRequest struct {
+	Model    string         `json:"model"`
+	Messages []MultiMessage `json:"messages"`
+}
+
+// GetJSONFromLLMWithVision sends a multimodal request with an image to the LLM.
+func GetJSONFromLLMWithVision(model, system, userText, base64Image, apiKey string) (string, error) {
+	if apiKey == "" {
+		return "", fmt.Errorf("missing OPENROUTER_API_KEY")
+	}
+
+	messages := []MultiMessage{
+		{Role: "system", Content: system},
+		{
+			Role: "user",
+			Content: []MultiContentPart{
+				{Type: "text", Text: userText},
+				{
+					Type: "image_url",
+					ImageURL: &ImageURLContent{
+						URL: "data:image/png;base64," + base64Image,
+					},
+				},
+			},
+		},
+	}
+
+	reqBody := MultiChatRequest{
+		Model:    model,
+		Messages: messages,
+	}
+	body, _ := json.Marshal(reqBody)
+
+	req, _ := http.NewRequest("POST", "https://openrouter.ai/api/v1/chat/completions", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("HTTP-Referer", "https://wemob.io")
+	req.Header.Set("X-Title", "wemob-web-builder")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		slog.Error("Error making vision request to LLM:", "error", err)
+		return "", fmt.Errorf("error generating content. try again please")
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(resp.Body)
+	slog.Info("LLM Vision Response received", "FROM", "LLM_UTILS_VISION")
+
+	var parsed ChatResponse
+	if err := json.Unmarshal(respBody, &parsed); err != nil {
+		slog.Error("error parsing LLM vision response", "error", err)
+		return "", fmt.Errorf("error generating content. try again please")
+	}
+
+	if len(parsed.Choices) == 0 {
+		return "", fmt.Errorf("no choices returned from LLM")
+	}
+
+	return CleanLLMOutput(parsed.Choices[0].Message.Content), nil
+}
+
 // ReplaceIntegrationPlaceholders replaces {{PLACEHOLDER}} tokens in content with real values from integrations.
 func ReplaceIntegrationPlaceholders(content string, integrations map[string]map[string]any) string {
 	replacements := map[string]struct {

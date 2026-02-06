@@ -431,16 +431,17 @@ func (c *Controller) GetWebsites(user *models.User) ([]responses.WebsiteResponse
 	websiteResponses := make([]responses.WebsiteResponse, len(websites))
 	for i, w := range websites {
 		websiteResponses[i] = responses.WebsiteResponse{
-			ID:           w.ID,
-			Name:         w.Name,
-			Slug:         w.Slug,
-			Prompt:       w.Prompt,
-			ColorScheme:  w.ColorScheme,
-			Status:       w.Status,
-			PublishedURL: w.PublishedURL,
-			ProjectID:    w.ProjectID,
-			CreatedAt:    w.CreatedAt,
-			UpdatedAt:    w.UpdatedAt,
+			ID:              w.ID,
+			Name:            w.Name,
+			Slug:            w.Slug,
+			Prompt:          w.Prompt,
+			ColorScheme:     w.ColorScheme,
+			DarkColorScheme: w.DarkColorScheme,
+			Status:          w.Status,
+			PublishedURL:    w.PublishedURL,
+			ProjectID:       w.ProjectID,
+			CreatedAt:       w.CreatedAt,
+			UpdatedAt:       w.UpdatedAt,
 		}
 	}
 	return websiteResponses, nil
@@ -491,16 +492,17 @@ func (c *Controller) GetWebsite(user *models.User, websiteId string) (*responses
 
 	return &responses.WebsiteDetailResponse{
 		WebsiteResponse: responses.WebsiteResponse{
-			ID:           website.ID,
-			Name:         website.Name,
-			Slug:         website.Slug,
-			Prompt:       website.Prompt,
-			ColorScheme:  website.ColorScheme,
-			Status:       website.Status,
-			PublishedURL: website.PublishedURL,
-			ProjectID:    website.ProjectID,
-			CreatedAt:    website.CreatedAt,
-			UpdatedAt:    website.UpdatedAt,
+			ID:              website.ID,
+			Name:            website.Name,
+			Slug:            website.Slug,
+			Prompt:          website.Prompt,
+			ColorScheme:     website.ColorScheme,
+			DarkColorScheme: website.DarkColorScheme,
+			Status:          website.Status,
+			PublishedURL:    website.PublishedURL,
+			ProjectID:       website.ProjectID,
+			CreatedAt:       website.CreatedAt,
+			UpdatedAt:       website.UpdatedAt,
 		},
 		Pages: pageResponses,
 		Files: fileResponses,
@@ -537,16 +539,54 @@ func (c *Controller) UpdateWebsiteInfo(user *models.User, websiteId string, req 
 	}
 
 	return &responses.WebsiteResponse{
-		ID:           updatedWebsite.ID,
-		Name:         updatedWebsite.Name,
-		Slug:         updatedWebsite.Slug,
-		Prompt:       updatedWebsite.Prompt,
-		ColorScheme:  updatedWebsite.ColorScheme,
-		Status:       updatedWebsite.Status,
-		PublishedURL: updatedWebsite.PublishedURL,
-		ProjectID:    updatedWebsite.ProjectID,
-		CreatedAt:    updatedWebsite.CreatedAt,
-		UpdatedAt:    updatedWebsite.UpdatedAt,
+		ID:              updatedWebsite.ID,
+		Name:            updatedWebsite.Name,
+		Slug:            updatedWebsite.Slug,
+		Prompt:          updatedWebsite.Prompt,
+		ColorScheme:     updatedWebsite.ColorScheme,
+		DarkColorScheme: updatedWebsite.DarkColorScheme,
+		Status:          updatedWebsite.Status,
+		PublishedURL:    updatedWebsite.PublishedURL,
+		ProjectID:       updatedWebsite.ProjectID,
+		CreatedAt:       updatedWebsite.CreatedAt,
+		UpdatedAt:       updatedWebsite.UpdatedAt,
+	}, nil
+}
+
+func (c *Controller) UpdateWebsiteTheme(user *models.User, websiteId string, req requests.UpdateThemeRequest) (*responses.WebsiteResponse, error) {
+	validate := validator.New(validator.WithRequiredStructEnabled())
+	if err := utils.ValidateFunc[requests.UpdateThemeRequest](req, validate); err != nil {
+		return nil, err
+	}
+
+	website, err := c.verifyWebsiteOwnership(user, websiteId)
+	if err != nil {
+		return nil, err
+	}
+
+	website.ColorScheme = req.ColorScheme
+	if req.DarkColorScheme != nil {
+		website.DarkColorScheme = req.DarkColorScheme
+	}
+	website.UpdatedAt = time.Now()
+
+	updatedWebsite, err := c.DB.UpdateWebsite(website)
+	if err != nil {
+		return nil, err
+	}
+
+	return &responses.WebsiteResponse{
+		ID:              updatedWebsite.ID,
+		Name:            updatedWebsite.Name,
+		Slug:            updatedWebsite.Slug,
+		Prompt:          updatedWebsite.Prompt,
+		ColorScheme:     updatedWebsite.ColorScheme,
+		DarkColorScheme: updatedWebsite.DarkColorScheme,
+		Status:          updatedWebsite.Status,
+		PublishedURL:    updatedWebsite.PublishedURL,
+		ProjectID:       updatedWebsite.ProjectID,
+		CreatedAt:       updatedWebsite.CreatedAt,
+		UpdatedAt:       updatedWebsite.UpdatedAt,
 	}, nil
 }
 
