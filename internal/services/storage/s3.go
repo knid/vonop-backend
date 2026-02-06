@@ -148,6 +148,16 @@ func (s S3Storage) DeleteObject(ctx context.Context, objectKey string) (*v4.Pres
 	return request, err
 }
 
+func (s *S3Storage) UploadFileByteWithContentType(ctx context.Context, s3URL string, data []byte, contentType string) error {
+	_, err := s.Client.PutObject(ctx, &s3.PutObjectInput{
+		Bucket:      &s.Bucket,
+		Key:         &s3URL,
+		Body:        bytes.NewReader(data),
+		ContentType: aws.String(contentType),
+	})
+	return err
+}
+
 func (s S3Storage) PresignPostObject(ctx context.Context, objectKey string, lifetimeSecs int64) (*s3.PresignedPostRequest, error) {
 	request, err := s.PresignClient.PresignPostObject(ctx, &s3.PutObjectInput{
 		Bucket: aws.String(s.Bucket),
