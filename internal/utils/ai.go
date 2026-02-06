@@ -76,3 +76,47 @@ func GetJSONFromLLM(model, system, message, apiKey string) (string, error) {
 
 	return outputJson, nil
 }
+
+func GetTextFromLLM(model, system, message, apiKey string) (string, error) {
+	if apiKey == "" {
+		return "", fmt.Errorf("missing OPENROUTER_API_KEY")
+	}
+
+	reqBody := ChatRequest{
+		Model: model,
+		Messages: []Message{
+			{Role: "system", Content: system},
+			{Role: "user", Content: message},
+		},
+	}
+	body, _ := json.Marshal(reqBody)
+
+	req, _ := http.NewRequest("POST", "https://openrouter.ai/api/v1/chat/completions", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("HTTP-Referer", "https://wemob.io")
+	req.Header.Set("X-Title", "wemob-web-builder")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		slog.Error("Error making request to LLM:", "error", err, "FROM", "LLM_UTILS")
+		return "", fmt.Errorf("error generating content. try again please")
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(resp.Body)
+	slog.Info("LLM Response received", "FROM", "LLM_UTILS_TEXT")
+
+	var parsed ChatResponse
+	if err := json.Unmarshal(respBody, &parsed); err != nil {
+		slog.Error("error parsing LLM response", "error", err, "FROM", "LLM_UTILS_TEXT")
+		return "", fmt.Errorf("error generating content. try again please")
+	}
+
+	if len(parsed.Choices) == 0 {
+		slog.Error("no choices returned from LLM", "FROM", "LLM_UTILS_TEXT")
+		return "", fmt.Errorf("no choices returned from LLM")
+	}
+
+	return parsed.Choices[0].Message.Content, nil
+}

@@ -72,6 +72,11 @@ func createSchema(db *bun.DB) error {
 		(*models.AppStoreCredentials)(nil),
 		(*models.Deployment)(nil),
 		(*models.SignIPATask)(nil),
+		(*models.Website)(nil),
+		(*models.WebsitePage)(nil),
+		(*models.WebsiteAsset)(nil),
+		(*models.WebsiteTemplate)(nil),
+		(*models.AIGenerationLog)(nil),
 	}
 
 	for _, model := range models {
@@ -410,6 +415,32 @@ func main() {
 				r.Route("/invoices", func(r chi.Router) {
 					// r.Get("/", httpViews.GetInvoices)
 					// r.Get("/{invoiceId}", httpViews.GetInvoice)
+				})
+			})
+
+			r.Route("/websites", func(r chi.Router) {
+				r.Post("/generate", httpViews.GenerateWebsite)
+				r.Get("/", httpViews.GetWebsites)
+				r.Get("/templates", httpViews.GetWebsiteTemplates)
+				r.Route("/{id}", func(r chi.Router) {
+					r.Get("/", httpViews.GetWebsite)
+					r.Put("/", httpViews.UpdateWebsite)
+					r.Delete("/", httpViews.DeleteWebsite)
+					r.Route("/pages", func(r chi.Router) {
+						r.Get("/", httpViews.GetWebsitePages)
+						r.Post("/", httpViews.CreateWebsitePage)
+						r.Route("/{pid}", func(r chi.Router) {
+							r.Put("/", httpViews.UpdateWebsitePage)
+							r.Delete("/", httpViews.DeleteWebsitePage)
+						})
+					})
+					r.Route("/ai", func(r chi.Router) {
+						r.Post("/edit-page/{pid}", httpViews.AIEditPage)
+						r.Post("/add-page", httpViews.AIAddPage)
+					})
+					r.Post("/assets", httpViews.UploadWebsiteAsset)
+					r.Post("/publish", httpViews.PublishWebsite)
+					r.Post("/convert-to-mobile", httpViews.ConvertWebsiteToMobile)
 				})
 			})
 
