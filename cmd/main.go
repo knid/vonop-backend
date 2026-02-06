@@ -77,6 +77,9 @@ func createSchema(db *bun.DB) error {
 		(*models.WebsiteAsset)(nil),
 		(*models.WebsiteTemplate)(nil),
 		(*models.AIGenerationLog)(nil),
+		(*models.WebsiteFile)(nil),
+		(*models.WebsiteConversation)(nil),
+		(*models.WebsiteIntegration)(nil),
 	}
 
 	for _, model := range models {
@@ -419,14 +422,20 @@ func main() {
 			})
 
 			r.Route("/websites", func(r chi.Router) {
+				// Legacy page-based generation
 				r.Post("/generate", httpViews.GenerateWebsite)
 				r.Post("/generate/stream", httpViews.GenerateWebsiteSSE)
+				// File-based generation (v2)
+				r.Post("/generate/v2", httpViews.GenerateWebsiteFiles)
+				r.Post("/generate/v2/stream", httpViews.GenerateWebsiteFilesSSE)
+
 				r.Get("/", httpViews.GetWebsites)
 				r.Get("/templates", httpViews.GetWebsiteTemplates)
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", httpViews.GetWebsite)
 					r.Put("/", httpViews.UpdateWebsite)
 					r.Delete("/", httpViews.DeleteWebsite)
+					// Legacy page-based CRUD
 					r.Route("/pages", func(r chi.Router) {
 						r.Get("/", httpViews.GetWebsitePages)
 						r.Post("/", httpViews.CreateWebsitePage)
@@ -435,15 +444,43 @@ func main() {
 							r.Delete("/", httpViews.DeleteWebsitePage)
 						})
 					})
+					// File-based CRUD (v2)
+					r.Route("/files", func(r chi.Router) {
+						r.Get("/", httpViews.GetWebsiteFiles)
+						r.Post("/", httpViews.CreateWebsiteFile)
+						r.Route("/{fid}", func(r chi.Router) {
+							r.Get("/", httpViews.GetWebsiteFile)
+							r.Put("/", httpViews.UpdateWebsiteFile)
+							r.Delete("/", httpViews.DeleteWebsiteFile)
+						})
+					})
+					// Chat (v2)
+					r.Post("/chat", httpViews.ChatWebsite)
+					r.Get("/conversation", httpViews.GetWebsiteConversation)
+					// Preview (v2)
+					r.Get("/preview/*", httpViews.PreviewWebsiteFile)
+					// Integrations (v2)
+					r.Route("/integrations", func(r chi.Router) {
+						r.Get("/", httpViews.GetWebsiteIntegrations)
+						r.Post("/", httpViews.ConnectIntegration)
+						r.Route("/{iid}", func(r chi.Router) {
+							r.Put("/", httpViews.UpdateIntegration)
+							r.Delete("/", httpViews.DisconnectIntegration)
+						})
+					})
+					// Legacy AI endpoints
 					r.Route("/ai", func(r chi.Router) {
 						r.Post("/edit-page/{pid}", httpViews.AIEditPage)
 						r.Post("/add-page", httpViews.AIAddPage)
 					})
 					r.Post("/assets", httpViews.UploadWebsiteAsset)
 					r.Post("/publish", httpViews.PublishWebsite)
+					r.Post("/publish/v2", httpViews.PublishWebsiteFiles)
 					r.Post("/convert-to-mobile", httpViews.ConvertWebsiteToMobile)
 				})
 			})
+			// Global integrations info (no auth needed)
+			r.Get("/integrations/providers", httpViews.GetIntegrationProviders)
 
 			r.Post("/support/ticket", httpViews.CreateTicket)
 

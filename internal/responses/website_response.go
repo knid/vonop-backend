@@ -35,6 +35,50 @@ type PageResponse struct {
 type WebsiteDetailResponse struct {
 	WebsiteResponse
 	Pages []PageResponse `json:"pages"`
+	Files []FileResponse `json:"files"`
+}
+
+type FileResponse struct {
+	ID        uuid.UUID `json:"id"`
+	WebsiteID uuid.UUID `json:"website_id"`
+	FilePath  string    `json:"file_path"`
+	Content   string    `json:"content"`
+	FileType  string    `json:"file_type"`
+	Layer     string    `json:"layer"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+type ConversationResponse struct {
+	ID        uuid.UUID                `json:"id"`
+	WebsiteID uuid.UUID                `json:"website_id"`
+	Messages  []ConversationMessageDTO `json:"messages"`
+	CreatedAt time.Time                `json:"created_at"`
+	UpdatedAt time.Time                `json:"updated_at"`
+}
+
+type ConversationMessageDTO struct {
+	Role      string `json:"role"`
+	Content   string `json:"content"`
+	Timestamp int64  `json:"timestamp"`
+}
+
+type IntegrationResponse struct {
+	ID        uuid.UUID      `json:"id"`
+	WebsiteID uuid.UUID      `json:"website_id"`
+	Provider  string         `json:"provider"`
+	Config    map[string]any `json:"config"`
+	Status    string         `json:"status"`
+	CreatedAt time.Time      `json:"created_at"`
+	UpdatedAt time.Time      `json:"updated_at"`
+}
+
+type IntegrationProviderInfo struct {
+	Provider       string   `json:"provider"`
+	Name           string   `json:"name"`
+	Description    string   `json:"description"`
+	RequiredFields []string `json:"required_fields"`
+	Website        string   `json:"website"`
 }
 
 type WebsiteListResponse struct {

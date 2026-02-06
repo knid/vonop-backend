@@ -44,6 +44,11 @@ func (c *Controller) verifyWebsiteOwnership(user *models.User, websiteId string)
 	return website, nil
 }
 
+// VerifyWebsiteOwnershipPublic is an exported version of verifyWebsiteOwnership for use in views.
+func (c *Controller) VerifyWebsiteOwnershipPublic(user *models.User, websiteId string) (*models.Website, error) {
+	return c.verifyWebsiteOwnership(user, websiteId)
+}
+
 func (c *Controller) getWebsiteLLMModel() string {
 	model := c.SecretManager.GetSecret("WEBSITE_BUILDER_LLM_MODEL")
 	if model == "" {
@@ -468,6 +473,22 @@ func (c *Controller) GetWebsite(user *models.User, websiteId string) (*responses
 		}
 	}
 
+	// Also load files (new file-based model)
+	files, _ := c.DB.GetFilesByWebsiteId(website.ID.String())
+	fileResponses := make([]responses.FileResponse, len(files))
+	for i, f := range files {
+		fileResponses[i] = responses.FileResponse{
+			ID:        f.ID,
+			WebsiteID: f.WebsiteID,
+			FilePath:  f.FilePath,
+			Content:   f.Content,
+			FileType:  f.FileType,
+			Layer:     f.Layer,
+			CreatedAt: f.CreatedAt,
+			UpdatedAt: f.UpdatedAt,
+		}
+	}
+
 	return &responses.WebsiteDetailResponse{
 		WebsiteResponse: responses.WebsiteResponse{
 			ID:           website.ID,
@@ -482,6 +503,7 @@ func (c *Controller) GetWebsite(user *models.User, websiteId string) (*responses
 			UpdatedAt:    website.UpdatedAt,
 		},
 		Pages: pageResponses,
+		Files: fileResponses,
 	}, nil
 }
 

@@ -207,3 +207,75 @@ func StreamTextFromLLM(ctx context.Context, model, system, message, apiKey strin
 
 	return fullText.String(), nil
 }
+
+// GetJSONFromLLMWithMessages sends a multi-turn conversation to the LLM and expects JSON output.
+// Used for chat-based interactions where conversation history matters.
+func GetJSONFromLLMWithMessages(model string, messages []Message, apiKey string) (string, error) {
+	if apiKey == "" {
+		return "", fmt.Errorf("missing OPENROUTER_API_KEY")
+	}
+
+	reqBody := ChatRequest{
+		Model:    model,
+		Messages: messages,
+	}
+	body, _ := json.Marshal(reqBody)
+
+	req, _ := http.NewRequest("POST", "https://openrouter.ai/api/v1/chat/completions", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("HTTP-Referer", "https://wemob.io")
+	req.Header.Set("X-Title", "wemob-web-builder")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		slog.Error("Error making request to LLM:", "error", err, "FROM", "LLM_UTILS_CHAT")
+		return "", fmt.Errorf("error generating content. try again please")
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(resp.Body)
+	slog.Info("LLM Chat Response received", "FROM", "LLM_UTILS_CHAT")
+
+	var parsed ChatResponse
+	if err := json.Unmarshal(respBody, &parsed); err != nil {
+		slog.Error("error parsing LLM response", "error", err, "FROM", "LLM_UTILS_CHAT")
+		return "", fmt.Errorf("error generating content. try again please")
+	}
+
+	if len(parsed.Choices) == 0 {
+		slog.Error("no choices returned from LLM", "FROM", "LLM_UTILS_CHAT")
+		return "", fmt.Errorf("no choices returned from LLM")
+	}
+
+	return CleanLLMOutput(parsed.Choices[0].Message.Content), nil
+}
+
+// ReplaceIntegrationPlaceholders replaces {{PLACEHOLDER}} tokens in content with real values from integrations.
+func ReplaceIntegrationPlaceholders(content string, integrations map[string]map[string]any) string {
+	replacements := map[string]struct {
+		provider string
+		key      string
+	}{
+		"{{SUPABASE_URL}}":         {provider: "supabase", key: "url"},
+		"{{SUPABASE_ANON_KEY}}":    {provider: "supabase", key: "anon_key"},
+		"{{STRIPE_PK}}":            {provider: "stripe", key: "publishable_key"},
+		"{{FIREBASE_CONFIG}}":      {provider: "firebase", key: "config"},
+		"{{IYZICO_API_KEY}}":       {provider: "iyzico", key: "api_key"},
+		"{{RESEND_API_KEY}}":       {provider: "resend", key: "api_key"},
+		"{{CLOUDINARY_CLOUD_NAME}}": {provider: "cloudinary", key: "cloud_name"},
+		"{{GOOGLE_SHEETS_API_KEY}}": {provider: "google_sheets", key: "api_key"},
+	}
+
+	for placeholder, info := range replacements {
+		if creds, ok := integrations[info.provider]; ok {
+			if val, ok := creds[info.key]; ok {
+				if strVal, ok := val.(string); ok {
+					content = strings.ReplaceAll(content, placeholder, strVal)
+				}
+			}
+		}
+	}
+
+	return content
+}
