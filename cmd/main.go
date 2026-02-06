@@ -420,6 +420,7 @@ func main() {
 
 			r.Route("/websites", func(r chi.Router) {
 				r.Post("/generate", httpViews.GenerateWebsite)
+				r.Post("/generate/stream", httpViews.GenerateWebsiteSSE)
 				r.Get("/", httpViews.GetWebsites)
 				r.Get("/templates", httpViews.GetWebsiteTemplates)
 				r.Route("/{id}", func(r chi.Router) {
