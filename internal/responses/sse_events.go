@@ -36,3 +36,31 @@ type CodeChunkEvent struct {
 	Chunk      string `json:"chunk"`
 	TotalPages int    `json:"total_pages"`
 }
+
+// File-based SSE events (chat + generation)
+
+type FileOperationEvent struct {
+	Action   string `json:"action"` // create, modify, delete
+	FilePath string `json:"file_path"`
+	FileType string `json:"file_type"`
+	Chunk    string `json:"chunk"`
+}
+
+type FileCompleteEvent struct {
+	Action   string    `json:"action"`
+	FilePath string    `json:"file_path"`
+	FileID   uuid.UUID `json:"file_id"`
+	FileType string    `json:"file_type"`
+}
+
+type ChatCompleteEvent struct {
+	WebsiteID    uuid.UUID `json:"website_id"`
+	Summary      string    `json:"summary"`
+	FilesChanged int       `json:"files_changed"`
+}
+
+type FileGenerationStartEvent struct {
+	WebsiteResponse
+	TotalFiles int      `json:"total_files"`
+	FilePaths  []string `json:"file_paths"`
+}
