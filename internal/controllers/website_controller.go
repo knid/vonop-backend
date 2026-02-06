@@ -206,6 +206,217 @@ func (c *Controller) GenerateWebsite(user *models.User, req requests.WebsiteGene
 	}, nil
 }
 
+func (c *Controller) GenerateWebsiteStream(ctx context.Context, user *models.User, req requests.WebsiteGenerateRequest, events chan<- responses.SSEEvent) {
+	defer close(events)
+
+	sendEvent := func(eventName string, data any) bool {
+		select {
+		case <-ctx.Done():
+			return false
+		case events <- responses.SSEEvent{Event: eventName, Data: data}:
+			return true
+		}
+	}
+
+	sendError := func(phase string, errMsg string) {
+		sendEvent("error", responses.GenerationErrorEvent{
+			Error: errMsg,
+			Phase: phase,
+		})
+	}
+
+	validate := validator.New(validator.WithRequiredStructEnabled())
+	if err := utils.ValidateFunc[requests.WebsiteGenerateRequest](req, validate); err != nil {
+		sendError("validation", err.Error())
+		return
+	}
+
+	apiKey := c.SecretManager.GetSecret("OPENROUTER_API_KEY")
+	model := c.getWebsiteLLMModel()
+
+	// Step 1: Generate website structure via LLM
+	templateHint := ""
+	if req.TemplateID != nil {
+		template, err := c.DB.GetTemplateById(req.TemplateID.String())
+		if err == nil && template.PromptHint != "" {
+			templateHint = "\n\nTemplate context: " + template.PromptHint
+		}
+	}
+
+	if ctx.Err() != nil {
+		return
+	}
+
+	structureJSON, err := utils.GetJSONFromLLM(
+		model,
+		constants.WEBSITE_STRUCTURE_PROMPT,
+		req.Prompt+templateHint,
+		apiKey,
+	)
+	if err != nil {
+		slog.Error("failed to generate website structure", "error", err)
+		sendError("structure", "failed to generate website structure. try again please")
+		return
+	}
+
+	var structure websiteStructure
+	if err := json.Unmarshal([]byte(structureJSON), &structure); err != nil {
+		slog.Error("failed to parse website structure", "error", err, "json", structureJSON)
+		sendError("structure", "failed to parse website structure. try again please")
+		return
+	}
+
+	if len(structure.Pages) == 0 {
+		sendError("structure", "failed to generate website pages. try again please")
+		return
+	}
+
+	// Step 2: Generate slug
+	slug := generateSlug(structure.Name)
+	if _, err := c.DB.GetWebsiteBySlug(slug); err == nil {
+		suffix, _ := utils.RandomHex(3)
+		slug = slug + "-" + suffix
+	}
+
+	// Step 3: Create website record
+	website := models.Website{
+		UserID:      user.ID,
+		Name:        structure.Name,
+		Slug:        slug,
+		Prompt:      req.Prompt,
+		ColorScheme: structure.ColorScheme,
+		Status:      "draft",
+	}
+
+	if req.TemplateID != nil {
+		website.TemplateID = *req.TemplateID
+	}
+
+	createdWebsite, err := c.DB.CreateWebsite(&website)
+	if err != nil {
+		sendError("database", fmt.Sprintf("failed to create website: %v", err))
+		return
+	}
+
+	// Send website_created event
+	pageTitles := make([]string, len(structure.Pages))
+	for i, p := range structure.Pages {
+		pageTitles[i] = p.Title
+	}
+
+	if !sendEvent("website_created", responses.WebsiteCreatedEvent{
+		WebsiteResponse: responses.WebsiteResponse{
+			ID:          createdWebsite.ID,
+			Name:        createdWebsite.Name,
+			Slug:        createdWebsite.Slug,
+			Prompt:      createdWebsite.Prompt,
+			ColorScheme: createdWebsite.ColorScheme,
+			Status:      createdWebsite.Status,
+			CreatedAt:   createdWebsite.CreatedAt,
+			UpdatedAt:   createdWebsite.UpdatedAt,
+		},
+		TotalPages: len(structure.Pages),
+		PageTitles: pageTitles,
+	}) {
+		return
+	}
+
+	// Step 4: Generate HTML for each page
+	colorSchemeJSON, _ := json.Marshal(structure.ColorScheme)
+	pageNames := make([]string, len(structure.Pages))
+	for i, p := range structure.Pages {
+		pageNames[i] = fmt.Sprintf("%s (%s)", p.Title, p.Path)
+	}
+	allPagesContext := strings.Join(pageNames, ", ")
+
+	for i, pageStruct := range structure.Pages {
+		if ctx.Err() != nil {
+			return
+		}
+
+		sectionsJSON, _ := json.Marshal(pageStruct.Sections)
+		pagePrompt := fmt.Sprintf(
+			"Website name: %s\nColor scheme: %s\nAll pages: %s\nCurrent page: %s (path: %s)\nSections for this page: %s\n\nUser's original description: %s",
+			structure.Name,
+			string(colorSchemeJSON),
+			allPagesContext,
+			pageStruct.Title,
+			pageStruct.Path,
+			string(sectionsJSON),
+			req.Prompt,
+		)
+
+		htmlContent, err := utils.StreamTextFromLLM(
+			ctx,
+			model,
+			constants.WEBSITE_PAGE_HTML_PROMPT,
+			pagePrompt,
+			apiKey,
+			func(chunk string) {
+				sendEvent("code_chunk", responses.CodeChunkEvent{
+					PageIndex:  i,
+					PageTitle:  pageStruct.Title,
+					Chunk:      chunk,
+					TotalPages: len(structure.Pages),
+				})
+			},
+		)
+		if err != nil {
+			slog.Error("failed to generate page HTML", "error", err, "page", pageStruct.Title)
+			htmlContent = fmt.Sprintf("<!DOCTYPE html><html><head><title>%s</title></head><body><h1>%s</h1><p>Page generation failed. Please try editing this page.</p></body></html>", pageStruct.Title, pageStruct.Title)
+		}
+
+		htmlContent = cleanHTMLOutput(htmlContent)
+
+		page := models.WebsitePage{
+			WebsiteID:   createdWebsite.ID,
+			Path:        pageStruct.Path,
+			Title:       pageStruct.Title,
+			HTMLContent: htmlContent,
+			SortOrder:   i,
+		}
+
+		createdPage, err := c.DB.CreatePage(&page)
+		if err != nil {
+			slog.Error("failed to create page", "error", err, "page", pageStruct.Title)
+			continue
+		}
+
+		if !sendEvent("page_generated", responses.PageGeneratedEvent{
+			PageResponse: responses.PageResponse{
+				ID:          createdPage.ID,
+				WebsiteID:   createdPage.WebsiteID,
+				Path:        createdPage.Path,
+				Title:       createdPage.Title,
+				HTMLContent: createdPage.HTMLContent,
+				CSSContent:  createdPage.CSSContent,
+				JSContent:   createdPage.JSContent,
+				SortOrder:   createdPage.SortOrder,
+				CreatedAt:   createdPage.CreatedAt,
+				UpdatedAt:   createdPage.UpdatedAt,
+			},
+			PageIndex:  i,
+			TotalPages: len(structure.Pages),
+		}) {
+			return
+		}
+	}
+
+	// Step 5: Log generation
+	c.DB.CreateAIGenerationLog(&models.AIGenerationLog{
+		WebsiteID: createdWebsite.ID,
+		UserID:    user.ID,
+		Prompt:    req.Prompt,
+		Model:     model,
+	})
+
+	sendEvent("complete", responses.GenerationCompleteEvent{
+		WebsiteID: createdWebsite.ID,
+		Success:   true,
+		Message:   "website generation completed",
+	})
+}
+
 func (c *Controller) GetWebsites(user *models.User) ([]responses.WebsiteResponse, error) {
 	websites, err := c.DB.GetWebsitesByUserId(user.ID.String())
 	if err != nil {
