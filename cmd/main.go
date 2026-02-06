@@ -80,6 +80,12 @@ func createSchema(db *bun.DB) error {
 		(*models.WebsiteFile)(nil),
 		(*models.WebsiteConversation)(nil),
 		(*models.WebsiteIntegration)(nil),
+		(*models.WebsiteSnapshot)(nil),
+		(*models.WebsiteComponent)(nil),
+		(*models.WebsiteDomain)(nil),
+		(*models.WebsiteSEO)(nil),
+		(*models.WebsiteForm)(nil),
+		(*models.WebsiteFormSubmission)(nil),
 	}
 
 	for _, model := range models {
@@ -159,6 +165,7 @@ func main() {
 	createSchema(bundb)
 
 	db := database.NewDatabase(bundb)
+	db.SeedComponents()
 	go utils.CheckSessionStatusJob(db)
 	controller := controllers.NewController(
 		db,
@@ -428,9 +435,19 @@ func main() {
 				// File-based generation (v2)
 				r.Post("/generate/v2", httpViews.GenerateWebsiteFiles)
 				r.Post("/generate/v2/stream", httpViews.GenerateWebsiteFilesSSE)
+				// Screenshot-to-code
+				r.Post("/generate/from-image", httpViews.GenerateWebsiteFromScreenshot)
 
 				r.Get("/", httpViews.GetWebsites)
 				r.Get("/templates", httpViews.GetWebsiteTemplates)
+
+				// Component library (public)
+				r.Get("/components", httpViews.GetComponents)
+				r.Get("/components/{cid}", httpViews.GetComponent)
+
+				// Public form submission
+				r.Post("/forms/{fmid}/submit", httpViews.SubmitWebsiteForm)
+
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", httpViews.GetWebsite)
 					r.Put("/", httpViews.UpdateWebsite)
@@ -472,11 +489,45 @@ func main() {
 					r.Route("/ai", func(r chi.Router) {
 						r.Post("/edit-page/{pid}", httpViews.AIEditPage)
 						r.Post("/add-page", httpViews.AIAddPage)
+						r.Post("/edit-element", httpViews.AIEditElement)
 					})
 					r.Post("/assets", httpViews.UploadWebsiteAsset)
 					r.Post("/publish", httpViews.PublishWebsite)
 					r.Post("/publish/v2", httpViews.PublishWebsiteFiles)
 					r.Post("/convert-to-mobile", httpViews.ConvertWebsiteToMobile)
+					// Snapshots
+					r.Route("/snapshots", func(r chi.Router) {
+						r.Get("/", httpViews.GetWebsiteSnapshots)
+						r.Post("/", httpViews.CreateWebsiteSnapshot)
+						r.Post("/{sid}/restore", httpViews.RestoreWebsiteSnapshot)
+					})
+					// Undo
+					r.Post("/undo", httpViews.UndoWebsiteChange)
+					// Export
+					r.Get("/export", httpViews.ExportWebsiteZIP)
+					// Theme
+					r.Put("/theme", httpViews.UpdateWebsiteTheme)
+					// Component insert
+					r.Post("/insert-component", httpViews.InsertComponent)
+					// Domains
+					r.Route("/domains", func(r chi.Router) {
+						r.Get("/", httpViews.GetWebsiteDomains)
+						r.Post("/", httpViews.AddWebsiteDomain)
+						r.Post("/{did}/verify", httpViews.VerifyWebsiteDomain)
+						r.Delete("/{did}", httpViews.RemoveWebsiteDomain)
+					})
+					// SEO
+					r.Get("/seo", httpViews.GetWebsiteSEO)
+					r.Put("/seo", httpViews.UpdateWebsiteSEO)
+					// Forms
+					r.Route("/forms", func(r chi.Router) {
+						r.Get("/", httpViews.GetWebsiteForms)
+						r.Post("/", httpViews.CreateWebsiteForm)
+						r.Route("/{fmid}", func(r chi.Router) {
+							r.Get("/submissions", httpViews.GetFormSubmissions)
+							r.Delete("/", httpViews.DeleteWebsiteForm)
+						})
+					})
 				})
 			})
 			// Global integrations info (no auth needed)

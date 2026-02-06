@@ -14,8 +14,9 @@ type Website struct {
 	Name         string         `bun:",notnull"`
 	Slug         string         `bun:",notnull,unique"`
 	Prompt       string         `bun:",notnull,type:text"`
-	ColorScheme  map[string]any `bun:",type:jsonb,default:'{}'"`
-	Status       string         `bun:",notnull,default:'draft'"`
+	ColorScheme     map[string]any `bun:",type:jsonb,default:'{}'"`
+	DarkColorScheme map[string]any `bun:",type:jsonb,default:'{}'"`
+	Status          string         `bun:",notnull,default:'draft'"`
 	PublishedURL string         `bun:",nullzero"`
 	TemplateID   uuid.UUID      `bun:",type:uuid,nullzero"`
 	CreatedAt    time.Time      `bun:"created_at,nullzero,notnull,default:current_timestamp"`

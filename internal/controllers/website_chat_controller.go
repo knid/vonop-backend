@@ -169,8 +169,19 @@ func (c *Controller) ChatStream(ctx context.Context, user *models.User, websiteI
 		return
 	}
 
-	// Call LLM
-	responseJSON, err := utils.GetJSONFromLLMWithMessages(model, llmMessages, apiKey)
+	// Create auto-snapshot before making changes
+	c.CreateSnapshotBeforeEdit(website.ID, user.ID, "Auto-save before chat edit")
+
+	// Call LLM with streaming
+	responseJSON, err := utils.StreamJSONFromLLMWithMessages(
+		ctx,
+		model,
+		llmMessages,
+		apiKey,
+		func(chunk string) {
+			sendEvent("chat_thinking", responses.ChatThinkingEvent{Chunk: chunk})
+		},
+	)
 	if err != nil {
 		slog.Error("failed to get chat response from LLM", "error", err)
 		sendError("ai", "failed to generate changes. try again please")
