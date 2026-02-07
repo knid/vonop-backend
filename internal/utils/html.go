@@ -121,9 +121,79 @@ func ExtractAllURLs(htmlContent string, baseURL string) []string {
 
 func CleanLLMOutput(raw string) string {
 	raw = strings.TrimSpace(raw)
-	raw = strings.TrimPrefix(raw, "```json")
-	raw = strings.TrimPrefix(raw, "json")
-	raw = strings.TrimPrefix(raw, "```")
-	raw = strings.TrimSuffix(raw, "```")
+
+	// Strip markdown code fences (```json, ```\n, etc.)
+	if strings.HasPrefix(raw, "```") {
+		if idx := strings.Index(raw, "\n"); idx != -1 {
+			raw = raw[idx+1:]
+		} else {
+			raw = strings.TrimPrefix(raw, "```")
+		}
+		raw = strings.TrimSuffix(strings.TrimSpace(raw), "```")
+		raw = strings.TrimSpace(raw)
+	}
+
+	// If the result isn't valid JSON, try to extract the outermost JSON object/array
+	if len(raw) > 0 && raw[0] != '{' && raw[0] != '[' {
+		raw = ExtractJSON(raw)
+	}
+
 	return strings.TrimSpace(raw)
+}
+
+// ExtractJSON finds the outermost JSON object or array in a string by matching braces/brackets.
+func ExtractJSON(raw string) string {
+	startObj := strings.Index(raw, "{")
+	startArr := strings.Index(raw, "[")
+
+	start := -1
+	openChar := byte('{')
+	closeChar := byte('}')
+
+	if startObj >= 0 && (startArr < 0 || startObj <= startArr) {
+		start = startObj
+		openChar = '{'
+		closeChar = '}'
+	} else if startArr >= 0 {
+		start = startArr
+		openChar = '['
+		closeChar = ']'
+	}
+
+	if start < 0 {
+		return raw
+	}
+
+	depth := 0
+	inString := false
+	escaped := false
+	for i := start; i < len(raw); i++ {
+		ch := raw[i]
+		if escaped {
+			escaped = false
+			continue
+		}
+		if ch == '\\' && inString {
+			escaped = true
+			continue
+		}
+		if ch == '"' {
+			inString = !inString
+			continue
+		}
+		if inString {
+			continue
+		}
+		if ch == openChar {
+			depth++
+		} else if ch == closeChar {
+			depth--
+			if depth == 0 {
+				return raw[start : i+1]
+			}
+		}
+	}
+
+	// No balanced closing found — return from start to end as best effort
+	return raw[start:]
 }

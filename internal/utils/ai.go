@@ -175,6 +175,7 @@ func StreamTextFromLLM(ctx context.Context, model, system, message, apiKey strin
 
 	var fullText strings.Builder
 	scanner := bufio.NewScanner(resp.Body)
+	scanner.Buffer(make([]byte, 0, 64*1024), 512*1024)
 
 	for scanner.Scan() {
 		if ctx.Err() != nil {
@@ -203,6 +204,11 @@ func StreamTextFromLLM(ctx context.Context, model, system, message, apiKey strin
 				onChunk(content)
 			}
 		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		slog.Error("scanner error during LLM streaming", "error", err)
+		return "", fmt.Errorf("error reading streaming response. try again please")
 	}
 
 	return fullText.String(), nil
@@ -286,6 +292,7 @@ func StreamJSONFromLLMWithMessages(ctx context.Context, model string, messages [
 
 	var fullText strings.Builder
 	scanner := bufio.NewScanner(resp.Body)
+	scanner.Buffer(make([]byte, 0, 64*1024), 512*1024)
 
 	for scanner.Scan() {
 		if ctx.Err() != nil {
@@ -314,6 +321,11 @@ func StreamJSONFromLLMWithMessages(ctx context.Context, model string, messages [
 				onChunk(content)
 			}
 		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		slog.Error("scanner error during LLM streaming", "error", err)
+		return "", fmt.Errorf("error reading streaming response. try again please")
 	}
 
 	return CleanLLMOutput(fullText.String()), nil

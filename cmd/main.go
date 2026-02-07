@@ -97,6 +97,19 @@ func createSchema(db *bun.DB) error {
 			return err
 		}
 	}
+
+	// Add columns that were introduced after initial table creation.
+	// Each statement uses IF NOT EXISTS so it is safe to run repeatedly.
+	alterStatements := []string{
+		`ALTER TABLE websites ADD COLUMN IF NOT EXISTS dark_color_scheme jsonb DEFAULT '{}'`,
+		`ALTER TABLE websites ADD COLUMN IF NOT EXISTS template_id uuid`,
+	}
+	for _, stmt := range alterStatements {
+		if _, err := db.ExecContext(context.Background(), stmt); err != nil {
+			slog.Error("alter table failed", "statement", stmt, "error", err)
+		}
+	}
+
 	return nil
 }
 

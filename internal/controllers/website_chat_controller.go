@@ -134,12 +134,18 @@ func (c *Controller) ChatStream(ctx context.Context, user *models.User, websiteI
 		}
 	}
 
-	// Append user message
+	// Append user message and persist immediately so it's not lost on LLM failure
 	conversation.Messages = append(conversation.Messages, models.ConversationMessage{
 		Role:      "user",
 		Content:   req.Message,
 		Timestamp: time.Now().Unix(),
 	})
+	conversation.UpdatedAt = time.Now()
+	if _, err := c.DB.UpdateConversation(conversation); err != nil {
+		slog.Error("failed to persist user message", "error", err)
+		sendError("database", "failed to save message")
+		return
+	}
 
 	// Build LLM messages
 	llmMessages := []utils.Message{
@@ -190,9 +196,13 @@ func (c *Controller) ChatStream(ctx context.Context, user *models.User, websiteI
 
 	var chatResp chatResponse
 	if err := json.Unmarshal([]byte(responseJSON), &chatResp); err != nil {
-		slog.Error("failed to parse chat response", "error", err, "json", responseJSON)
-		sendError("ai", "failed to parse AI response. try again please")
-		return
+		// Fallback: try to extract JSON object from the response
+		extracted := utils.ExtractJSON(responseJSON)
+		if err2 := json.Unmarshal([]byte(extracted), &chatResp); err2 != nil {
+			slog.Error("failed to parse chat response", "error", err, "extractErr", err2, "json", responseJSON)
+			sendError("ai", "failed to parse AI response. try again please")
+			return
+		}
 	}
 
 	// Apply operations
@@ -204,7 +214,7 @@ func (c *Controller) ChatStream(ctx context.Context, user *models.User, websiteI
 
 		switch op.Action {
 		case "create":
-			content := cleanHTMLOutput(op.Content)
+			content := cleanCodeOutput(op.Content)
 			file := models.WebsiteFile{
 				WebsiteID: website.ID,
 				FilePath:  op.Path,
@@ -217,12 +227,14 @@ func (c *Controller) ChatStream(ctx context.Context, user *models.User, websiteI
 				slog.Error("failed to create file", "error", err, "path", op.Path)
 				continue
 			}
-			sendEvent("file_complete", responses.FileCompleteEvent{
+			if !sendEvent("file_complete", responses.FileCompleteEvent{
 				Action:   "create",
 				FilePath: op.Path,
 				FileID:   createdFile.ID,
 				FileType: op.Type,
-			})
+			}) {
+				return
+			}
 			filesChanged++
 
 		case "modify":
@@ -231,7 +243,7 @@ func (c *Controller) ChatStream(ctx context.Context, user *models.User, websiteI
 				slog.Error("file not found for modify", "error", err, "path", op.Path)
 				continue
 			}
-			content := cleanHTMLOutput(op.Content)
+			content := cleanCodeOutput(op.Content)
 			existingFile.Content = content
 			existingFile.UpdatedAt = time.Now()
 			_, err = c.DB.UpdateFile(existingFile)
@@ -239,12 +251,14 @@ func (c *Controller) ChatStream(ctx context.Context, user *models.User, websiteI
 				slog.Error("failed to update file", "error", err, "path", op.Path)
 				continue
 			}
-			sendEvent("file_complete", responses.FileCompleteEvent{
+			if !sendEvent("file_complete", responses.FileCompleteEvent{
 				Action:   "modify",
 				FilePath: op.Path,
 				FileID:   existingFile.ID,
 				FileType: existingFile.FileType,
-			})
+			}) {
+				return
+			}
 			filesChanged++
 
 		case "delete":
@@ -253,10 +267,12 @@ func (c *Controller) ChatStream(ctx context.Context, user *models.User, websiteI
 				continue
 			}
 			c.DB.DeleteFile(existingFile)
-			sendEvent("file_complete", responses.FileCompleteEvent{
+			if !sendEvent("file_complete", responses.FileCompleteEvent{
 				Action:   "delete",
 				FilePath: op.Path,
-			})
+			}) {
+				return
+			}
 			filesChanged++
 		}
 	}
@@ -268,7 +284,9 @@ func (c *Controller) ChatStream(ctx context.Context, user *models.User, websiteI
 		Timestamp: time.Now().Unix(),
 	})
 	conversation.UpdatedAt = time.Now()
-	c.DB.UpdateConversation(conversation)
+	if _, err := c.DB.UpdateConversation(conversation); err != nil {
+		slog.Error("failed to save assistant response to conversation", "error", err)
+	}
 
 	// Log generation
 	c.DB.CreateAIGenerationLog(&models.AIGenerationLog{

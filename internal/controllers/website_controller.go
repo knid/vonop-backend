@@ -158,7 +158,7 @@ func (c *Controller) GenerateWebsite(user *models.User, req requests.WebsiteGene
 			htmlContent = fmt.Sprintf("<!DOCTYPE html><html><head><title>%s</title></head><body><h1>%s</h1><p>Page generation failed. Please try editing this page.</p></body></html>", pageStruct.Title, pageStruct.Title)
 		}
 
-		htmlContent = cleanHTMLOutput(htmlContent)
+		htmlContent = cleanCodeOutput(htmlContent)
 
 		page := models.WebsitePage{
 			WebsiteID:   createdWebsite.ID,
@@ -371,7 +371,7 @@ func (c *Controller) GenerateWebsiteStream(ctx context.Context, user *models.Use
 			htmlContent = fmt.Sprintf("<!DOCTYPE html><html><head><title>%s</title></head><body><h1>%s</h1><p>Page generation failed. Please try editing this page.</p></body></html>", pageStruct.Title, pageStruct.Title)
 		}
 
-		htmlContent = cleanHTMLOutput(htmlContent)
+		htmlContent = cleanCodeOutput(htmlContent)
 
 		page := models.WebsitePage{
 			WebsiteID:   createdWebsite.ID,
@@ -826,7 +826,7 @@ func (c *Controller) AIEditPage(user *models.User, websiteId string, pageId stri
 		return nil, fmt.Errorf("failed to edit page. try again please")
 	}
 
-	newHTML = cleanHTMLOutput(newHTML)
+	newHTML = cleanCodeOutput(newHTML)
 
 	page.HTMLContent = newHTML
 	page.UpdatedAt = time.Now()
@@ -903,7 +903,7 @@ func (c *Controller) AIAddPage(user *models.User, websiteId string, req requests
 		return nil, fmt.Errorf("failed to generate new page. try again please")
 	}
 
-	htmlContent = cleanHTMLOutput(htmlContent)
+	htmlContent = cleanCodeOutput(htmlContent)
 
 	// Determine path and title from prompt (simple heuristic)
 	pageTitle := req.Prompt
@@ -1119,10 +1119,17 @@ func pagePath(path string) string {
 	return path + "/index.html"
 }
 
-func cleanHTMLOutput(html string) string {
-	html = strings.TrimSpace(html)
-	html = strings.TrimPrefix(html, "```html")
-	html = strings.TrimPrefix(html, "```")
-	html = strings.TrimSuffix(html, "```")
-	return strings.TrimSpace(html)
+func cleanCodeOutput(code string) string {
+	code = strings.TrimSpace(code)
+	// Strip markdown code fences for any language (```html, ```css, ```js, etc.)
+	if strings.HasPrefix(code, "```") {
+		// Remove opening fence line (e.g. "```html\n", "```css\n", "```\n")
+		if idx := strings.Index(code, "\n"); idx != -1 {
+			code = code[idx+1:]
+		} else {
+			code = strings.TrimPrefix(code, "```")
+		}
+		code = strings.TrimSuffix(code, "```")
+	}
+	return strings.TrimSpace(code)
 }
