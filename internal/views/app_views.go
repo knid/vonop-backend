@@ -1,0 +1,852 @@
+package views
+
+import (
+	"archive/zip"
+	"bytes"
+	"encoding/json"
+	"net/http"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/go-playground/validator/v10"
+	"github.com/knid/wemob/internal/models"
+	"github.com/knid/wemob/internal/requests"
+	"github.com/knid/wemob/internal/responses"
+	"github.com/knid/wemob/internal/utils"
+)
+
+// POST /v2/apps/generate — non-streaming generation (redirects to stream)
+func (v *HttpViews) GenerateApp(w http.ResponseWriter, r *http.Request) {
+	// For non-streaming, just create the project and return; frontend should use /generate/stream
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+	if requireActiveSubscription(w, user) {
+		return
+	}
+	if v.deductAICredits(w, user, models.AICreditCostGenerateApp, "generate_app", "") {
+		return
+	}
+
+	var req requests.GenerateAppRequest
+	if err := utils.ParseJSONBody(r, &req); err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	project, err := v.Controller.CreateAppProject(user, req)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// Plan structure and generate files synchronously (code-first)
+	structure, err := v.Controller.PlanAppFileStructure(r.Context(), req.Prompt, req.ProjectType)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Update project with generated info
+	if structure.Name != "" {
+		project.Name = structure.Name
+	}
+	if structure.Slug != "" {
+		project.Slug = structure.Slug
+	}
+	themeData := models.AppTheme{
+		ColorScheme:     structure.ColorScheme,
+		DarkColorScheme: structure.DarkColorScheme,
+		Typography:      structure.Typography,
+	}
+	themeJSON, _ := json.Marshal(themeData)
+	project.Theme = themeJSON
+	project.Status = "ready"
+	v.Controller.DB.UpdateAppProject(project)
+
+	// If ecommerce, create store
+	if req.ProjectType == "ecommerce" {
+		v.Controller.CreateStore(project, user, project.Name+" Store")
+	}
+
+	var theme map[string]any
+	json.Unmarshal(project.Theme, &theme)
+
+	hasStore := req.ProjectType == "ecommerce"
+
+	utils.JSONResponse(w, responses.AppProjectDetailResponse{
+		AppProjectResponse: responses.AppProjectResponse{
+			ID:          project.ID,
+			Name:        project.Name,
+			Slug:        project.Slug,
+			Prompt:      project.Prompt,
+			ProjectType: project.ProjectType,
+			Theme:       theme,
+			Settings:    project.Settings,
+			Status:      project.Status,
+			HasStore:    hasStore,
+			CreatedAt:   project.CreatedAt,
+			UpdatedAt:   project.UpdatedAt,
+		},
+	}, http.StatusCreated)
+}
+
+// POST /v2/apps/generate/ecommerce
+func (v *HttpViews) GenerateEcommerceApp(w http.ResponseWriter, r *http.Request) {
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+	if requireActiveSubscription(w, user) {
+		return
+	}
+	if v.deductAICredits(w, user, models.AICreditCostGenerateApp, "generate_ecommerce_app", "") {
+		return
+	}
+
+	var req requests.GenerateAppRequest
+	if err := utils.ParseJSONBody(r, &req); err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	req.ProjectType = "ecommerce"
+
+	project, err := v.Controller.CreateAppProject(user, req)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	structure, err := v.Controller.PlanAppFileStructure(r.Context(), req.Prompt, "ecommerce")
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if structure.Name != "" {
+		project.Name = structure.Name
+	}
+	if structure.Slug != "" {
+		project.Slug = structure.Slug
+	}
+	themeData := models.AppTheme{
+		ColorScheme:     structure.ColorScheme,
+		DarkColorScheme: structure.DarkColorScheme,
+		Typography:      structure.Typography,
+	}
+	themeJSON, _ := json.Marshal(themeData)
+	project.Theme = themeJSON
+	project.Status = "ready"
+	v.Controller.DB.UpdateAppProject(project)
+	v.Controller.CreateStore(project, user, project.Name+" Store")
+
+	var theme map[string]any
+	json.Unmarshal(project.Theme, &theme)
+
+	utils.JSONResponse(w, responses.AppProjectDetailResponse{
+		AppProjectResponse: responses.AppProjectResponse{
+			ID:          project.ID,
+			Name:        project.Name,
+			Slug:        project.Slug,
+			Prompt:      project.Prompt,
+			ProjectType: project.ProjectType,
+			Theme:       theme,
+			Settings:    project.Settings,
+			Status:      project.Status,
+			HasStore:    true,
+			CreatedAt:   project.CreatedAt,
+			UpdatedAt:   project.UpdatedAt,
+		},
+	}, http.StatusCreated)
+}
+
+// POST /v2/apps/generate/from-image
+func (v *HttpViews) GenerateAppFromImage(w http.ResponseWriter, r *http.Request) {
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+	if requireActiveSubscription(w, user) {
+		return
+	}
+	if v.deductAICredits(w, user, models.AICreditCostGenerateApp, "generate_from_image", "") {
+		return
+	}
+
+	var req requests.ScreenshotToAppRequest
+	if err := utils.ParseJSONBody(r, &req); err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	structure, err := v.Controller.PlanAppFileStructureFromScreenshot(req.ImageBase64)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	genReq := requests.GenerateAppRequest{Prompt: "Generated from screenshot"}
+	project, err := v.Controller.CreateAppProject(user, genReq)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if structure.Name != "" {
+		project.Name = structure.Name
+	}
+	if structure.Slug != "" {
+		project.Slug = structure.Slug
+	}
+	themeData := models.AppTheme{
+		ColorScheme:     structure.ColorScheme,
+		DarkColorScheme: structure.DarkColorScheme,
+		Typography:      structure.Typography,
+	}
+	themeJSON, _ := json.Marshal(themeData)
+	project.Theme = themeJSON
+	project.Status = "ready"
+	v.Controller.DB.UpdateAppProject(project)
+
+	var theme map[string]any
+	json.Unmarshal(project.Theme, &theme)
+
+	utils.JSONResponse(w, responses.AppProjectDetailResponse{
+		AppProjectResponse: responses.AppProjectResponse{
+			ID:          project.ID,
+			Name:        project.Name,
+			Slug:        project.Slug,
+			Prompt:      project.Prompt,
+			ProjectType: project.ProjectType,
+			Theme:       theme,
+			Settings:    project.Settings,
+			Status:      project.Status,
+			CreatedAt:   project.CreatedAt,
+			UpdatedAt:   project.UpdatedAt,
+		},
+	}, http.StatusCreated)
+}
+
+// GET /v2/apps/
+func (v *HttpViews) GetApps(w http.ResponseWriter, r *http.Request) {
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	projects, err := v.Controller.GetAppProjectsByUser(user)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	var resp []responses.AppProjectResponse
+	for _, p := range projects {
+		var theme map[string]any
+		json.Unmarshal(p.Theme, &theme)
+
+		hasStore := false
+		store, err := v.Controller.GetStore(p.ID.String())
+		if err == nil && store != nil {
+			hasStore = true
+		}
+
+		resp = append(resp, responses.AppProjectResponse{
+			ID:          p.ID,
+			Name:        p.Name,
+			Slug:        p.Slug,
+			Prompt:      p.Prompt,
+			ProjectType: p.ProjectType,
+			Theme:       theme,
+			Settings:    p.Settings,
+			Status:      p.Status,
+			HasStore:    hasStore,
+			CreatedAt:   p.CreatedAt,
+			UpdatedAt:   p.UpdatedAt,
+		})
+	}
+
+	utils.JSONResponse(w, resp, http.StatusOK)
+}
+
+// GET /v2/apps/{appId}
+func (v *HttpViews) GetApp(w http.ResponseWriter, r *http.Request) {
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	appID := chi.URLParam(r, "appId")
+	project, err := v.Controller.GetAppProject(appID, user)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	var theme map[string]any
+	json.Unmarshal(project.Theme, &theme)
+
+	hasStore := false
+	store, storeErr := v.Controller.GetStore(project.ID.String())
+	if storeErr == nil && store != nil {
+		hasStore = true
+	}
+
+	// Get files for the response
+	files, _ := v.Controller.GetAppGeneratedFiles(project.ID.String(), "nextjs")
+	var fileResp []responses.AppFileResponse
+	for _, f := range files {
+		fileResp = append(fileResp, responses.AppFileResponse{
+			ID:        f.ID,
+			Platform:  f.Platform,
+			FilePath:  f.FilePath,
+			Content:   f.Content,
+			FileType:  f.FileType,
+			CreatedAt: f.CreatedAt,
+			UpdatedAt: f.UpdatedAt,
+		})
+	}
+
+	utils.JSONResponse(w, responses.AppProjectDetailResponse{
+		AppProjectResponse: responses.AppProjectResponse{
+			ID:          project.ID,
+			Name:        project.Name,
+			Slug:        project.Slug,
+			Prompt:      project.Prompt,
+			ProjectType: project.ProjectType,
+			Theme:       theme,
+			Settings:    project.Settings,
+			Status:      project.Status,
+			HasStore:    hasStore,
+			CreatedAt:   project.CreatedAt,
+			UpdatedAt:   project.UpdatedAt,
+		},
+		Files: fileResp,
+	}, http.StatusOK)
+}
+
+// PUT /v2/apps/{appId}
+func (v *HttpViews) UpdateApp(w http.ResponseWriter, r *http.Request) {
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	appID := chi.URLParam(r, "appId")
+	var req requests.UpdateAppProjectRequest
+	if err := utils.ParseJSONBody(r, &req); err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	project, err := v.Controller.UpdateAppProject(appID, user, req)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	var theme map[string]any
+	json.Unmarshal(project.Theme, &theme)
+
+	utils.JSONResponse(w, responses.AppProjectResponse{
+		ID:          project.ID,
+		Name:        project.Name,
+		Slug:        project.Slug,
+		Prompt:      project.Prompt,
+		ProjectType: project.ProjectType,
+		Theme:       theme,
+		Settings:    project.Settings,
+		Status:      project.Status,
+		CreatedAt:   project.CreatedAt,
+		UpdatedAt:   project.UpdatedAt,
+	}, http.StatusOK)
+}
+
+// DELETE /v2/apps/{appId}
+func (v *HttpViews) DeleteApp(w http.ResponseWriter, r *http.Request) {
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	appID := chi.URLParam(r, "appId")
+	if err := v.Controller.DeleteAppProject(appID, user); err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	utils.JSONResponse(w, responses.SuccessResponse{Success: true}, http.StatusOK)
+}
+
+// GET /v2/apps/{appId}/files/{platform}
+func (v *HttpViews) GetAppFiles(w http.ResponseWriter, r *http.Request) {
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	appID := chi.URLParam(r, "appId")
+	platform := chi.URLParam(r, "platform")
+	project, err := v.Controller.GetAppProject(appID, user)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	files, err := v.Controller.GetAppGeneratedFiles(project.ID.String(), platform)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	var resp []responses.AppFileResponse
+	for _, f := range files {
+		resp = append(resp, responses.AppFileResponse{
+			ID:        f.ID,
+			Platform:  f.Platform,
+			FilePath:  f.FilePath,
+			Content:   f.Content,
+			FileType:  f.FileType,
+			CreatedAt: f.CreatedAt,
+			UpdatedAt: f.UpdatedAt,
+		})
+	}
+
+	utils.JSONResponse(w, resp, http.StatusOK)
+}
+
+// POST /v2/apps/{appId}/files — Create a new file
+func (v *HttpViews) CreateAppFile(w http.ResponseWriter, r *http.Request) {
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	appID := chi.URLParam(r, "appId")
+	project, err := v.Controller.GetAppProject(appID, user)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	var req requests.AppFileCreateRequest
+	if err := utils.ParseJSONBody(r, &req); err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	validate := validator.New()
+	if err := req.Validate(validate); err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	file, err := v.Controller.CreateAppFile(project, req.FilePath, req.Content, req.FileType)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	utils.JSONResponse(w, responses.AppFileResponse{
+		ID:        file.ID,
+		Platform:  file.Platform,
+		FilePath:  file.FilePath,
+		Content:   file.Content,
+		FileType:  file.FileType,
+		CreatedAt: file.CreatedAt,
+		UpdatedAt: file.UpdatedAt,
+	}, http.StatusCreated)
+}
+
+// PUT /v2/apps/{appId}/files/{fid} — Update a file's content
+func (v *HttpViews) UpdateAppFile(w http.ResponseWriter, r *http.Request) {
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	appID := chi.URLParam(r, "appId")
+	fid := chi.URLParam(r, "fid")
+	project, err := v.Controller.GetAppProject(appID, user)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	var req requests.AppFileUpdateRequest
+	if err := utils.ParseJSONBody(r, &req); err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	validate := validator.New()
+	if err := req.Validate(validate); err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	file, err := v.Controller.UpdateAppFile(project, fid, req.Content)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	utils.JSONResponse(w, responses.AppFileResponse{
+		ID:        file.ID,
+		Platform:  file.Platform,
+		FilePath:  file.FilePath,
+		Content:   file.Content,
+		FileType:  file.FileType,
+		CreatedAt: file.CreatedAt,
+		UpdatedAt: file.UpdatedAt,
+	}, http.StatusOK)
+}
+
+// DELETE /v2/apps/{appId}/files/{fid} — Delete a file
+func (v *HttpViews) DeleteAppFile(w http.ResponseWriter, r *http.Request) {
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	appID := chi.URLParam(r, "appId")
+	fid := chi.URLParam(r, "fid")
+	project, err := v.Controller.GetAppProject(appID, user)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	if err := v.Controller.DeleteAppFile(project, fid); err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	utils.JSONResponse(w, responses.SuccessResponse{Success: true}, http.StatusOK)
+}
+
+// Snapshots
+
+// GET /v2/apps/{appId}/snapshots
+func (v *HttpViews) GetAppSnapshots(w http.ResponseWriter, r *http.Request) {
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	appID := chi.URLParam(r, "appId")
+	project, err := v.Controller.GetAppProject(appID, user)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	snapshots, err := v.Controller.GetAppSnapshots(project.ID.String())
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	var resp []responses.AppSnapshotResponse
+	for _, s := range snapshots {
+		resp = append(resp, responses.AppSnapshotResponse{
+			ID:          s.ID,
+			Description: s.Description,
+			Source:      s.Source,
+			CreatedAt:   s.CreatedAt,
+		})
+	}
+
+	utils.JSONResponse(w, resp, http.StatusOK)
+}
+
+// POST /v2/apps/{appId}/snapshots
+func (v *HttpViews) CreateAppSnapshot(w http.ResponseWriter, r *http.Request) {
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	appID := chi.URLParam(r, "appId")
+	project, err := v.Controller.GetAppProject(appID, user)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	var req requests.CreateAppSnapshotRequest
+	if err := utils.ParseJSONBody(r, &req); err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	snapshot, err := v.Controller.CreateAppSnapshot(project, req.Description, "manual")
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	utils.JSONResponse(w, responses.AppSnapshotResponse{
+		ID:          snapshot.ID,
+		Description: snapshot.Description,
+		Source:      snapshot.Source,
+		CreatedAt:   snapshot.CreatedAt,
+	}, http.StatusCreated)
+}
+
+// POST /v2/apps/{appId}/snapshots/{sid}/restore
+func (v *HttpViews) RestoreAppSnapshot(w http.ResponseWriter, r *http.Request) {
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	appID := chi.URLParam(r, "appId")
+	sid := chi.URLParam(r, "sid")
+	project, err := v.Controller.GetAppProject(appID, user)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	_, err = v.Controller.RestoreAppSnapshot(project, sid)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	utils.JSONResponse(w, responses.SuccessResponse{Success: true}, http.StatusOK)
+}
+
+// GET /v2/apps/{appId}/export/{platform}
+func (v *HttpViews) ExportApp(w http.ResponseWriter, r *http.Request) {
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	appID := chi.URLParam(r, "appId")
+	platform := chi.URLParam(r, "platform")
+	project, err := v.Controller.GetAppProject(appID, user)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	files, err := v.Controller.ExportAppAsZIP(project.ID.String(), platform)
+	if err != nil || len(files) == 0 {
+		utils.JSONErrorResponse(w, "no files to export", http.StatusNotFound)
+		return
+	}
+
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	for _, f := range files {
+		fw, err := zw.Create(f.FilePath)
+		if err != nil {
+			continue
+		}
+		fw.Write([]byte(f.Content))
+	}
+	zw.Close()
+
+	w.Header().Set("Content-Type", "application/zip")
+	w.Header().Set("Content-Disposition", "attachment; filename="+project.Slug+"-"+platform+".zip")
+	w.WriteHeader(http.StatusOK)
+	w.Write(buf.Bytes())
+}
+
+// Integrations
+
+// GET /v2/apps/{appId}/integrations
+func (v *HttpViews) GetAppIntegrations(w http.ResponseWriter, r *http.Request) {
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	appID := chi.URLParam(r, "appId")
+	project, err := v.Controller.GetAppProject(appID, user)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	integrations, err := v.Controller.GetAppIntegrations(project.ID.String())
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	var resp []responses.AppIntegrationResp
+	for _, i := range integrations {
+		resp = append(resp, responses.AppIntegrationResp{
+			ID:        i.ID,
+			Provider:  i.Provider,
+			Config:    i.Config,
+			Status:    i.Status,
+			CreatedAt: i.CreatedAt,
+		})
+	}
+
+	utils.JSONResponse(w, resp, http.StatusOK)
+}
+
+// POST /v2/apps/{appId}/integrations
+func (v *HttpViews) ConnectAppIntegration(w http.ResponseWriter, r *http.Request) {
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	appID := chi.URLParam(r, "appId")
+	project, err := v.Controller.GetAppProject(appID, user)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	var req requests.ConnectIntegrationRequest
+	if err := utils.ParseJSONBody(r, &req); err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	integ, err := v.Controller.ConnectAppIntegration(project, req)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	utils.JSONResponse(w, responses.AppIntegrationResp{
+		ID:        integ.ID,
+		Provider:  integ.Provider,
+		Config:    integ.Config,
+		Status:    integ.Status,
+		CreatedAt: integ.CreatedAt,
+	}, http.StatusCreated)
+}
+
+// PUT /v2/apps/{appId}/integrations/{iid}
+func (v *HttpViews) UpdateAppIntegration(w http.ResponseWriter, r *http.Request) {
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	appID := chi.URLParam(r, "appId")
+	iid := chi.URLParam(r, "iid")
+	project, err := v.Controller.GetAppProject(appID, user)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	var req requests.UpdateIntegrationRequest
+	if err := utils.ParseJSONBody(r, &req); err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	integ, err := v.Controller.UpdateAppIntegration(iid, project, req)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	utils.JSONResponse(w, responses.AppIntegrationResp{
+		ID:        integ.ID,
+		Provider:  integ.Provider,
+		Config:    integ.Config,
+		Status:    integ.Status,
+		CreatedAt: integ.CreatedAt,
+	}, http.StatusOK)
+}
+
+// DELETE /v2/apps/{appId}/integrations/{iid}
+func (v *HttpViews) DisconnectAppIntegration(w http.ResponseWriter, r *http.Request) {
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	appID := chi.URLParam(r, "appId")
+	iid := chi.URLParam(r, "iid")
+	project, err := v.Controller.GetAppProject(appID, user)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	if err := v.Controller.DisconnectAppIntegration(iid, project); err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	utils.JSONResponse(w, responses.SuccessResponse{Success: true}, http.StatusOK)
+}
+
+// GET /v2/apps/{appId}/conversation
+func (v *HttpViews) GetAppConversation(w http.ResponseWriter, r *http.Request) {
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	appID := chi.URLParam(r, "appId")
+	project, err := v.Controller.GetAppProject(appID, user)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	conv, err := v.Controller.GetAppConversation(project.ID.String())
+	if err != nil {
+		utils.JSONResponse(w, responses.AppConversationResponse{
+			Messages: []responses.AppConversationMessageResp{},
+		}, http.StatusOK)
+		return
+	}
+
+	var messages []models.AppConversationMessage
+	json.Unmarshal(conv.Messages, &messages)
+
+	var msgResp []responses.AppConversationMessageResp
+	for _, m := range messages {
+		msgResp = append(msgResp, responses.AppConversationMessageResp{
+			Role:      m.Role,
+			Content:   m.Content,
+			Timestamp: m.Timestamp,
+		})
+	}
+
+	utils.JSONResponse(w, responses.AppConversationResponse{
+		ID:        conv.ID,
+		Messages:  msgResp,
+		CreatedAt: conv.CreatedAt,
+		UpdatedAt: conv.UpdatedAt,
+	}, http.StatusOK)
+}
+
+// GET /v2/integrations/providers
+func (v *HttpViews) GetV2IntegrationProviders(w http.ResponseWriter, r *http.Request) {
+	v.GetIntegrationProviders(w, r)
+}

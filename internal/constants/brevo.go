@@ -50,4 +50,12 @@ const (
 	BREVO_EVENT_PAYMENT_FAILED                   = "payment_failed"
 	BREVO_EVENT_PAYMENT_USER_ACTION_REQUIRED     = "payment_user_action_required"
 	BREVO_EVENT_UNHANDLED_EVENT                  = "unhandled_event"
+
+	// Usage alert events
+	BREVO_EVENT_USAGE_APPROACHING_LIMIT = "usage_approaching_limit"
+	BREVO_EVENT_USAGE_LIMIT_REACHED     = "usage_limit_reached"
+	BREVO_EVENT_TRIAL_HALFWAY           = "trial_halfway"
+	BREVO_EVENT_TRIAL_ENDING_SOON       = "trial_ending_soon"
+	BREVO_EVENT_AI_CREDITS_LOW          = "ai_credits_low"
+	BREVO_EVENT_AI_CREDITS_DEPLETED     = "ai_credits_depleted"
 )

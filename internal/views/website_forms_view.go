@@ -1,9 +1,11 @@
 package views
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/utils"
@@ -142,6 +144,14 @@ func (v *HttpViews) GenerateWebsiteFromScreenshot(w http.ResponseWriter, r *http
 		return
 	}
 
+	if requireActiveSubscription(w, user) {
+		return
+	}
+
+	if v.deductAICredits(w, user, models.AICreditCostScreenshotCode, "screenshot_to_code", "") {
+		return
+	}
+
 	var req requests.ScreenshotToCodeRequest
 	if err := utils.ParseJSONBody(r, &req); err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
@@ -157,11 +167,49 @@ func (v *HttpViews) GenerateWebsiteFromScreenshot(w http.ResponseWriter, r *http
 	utils.JSONResponse(w, result, http.StatusCreated)
 }
 
+// Screenshot-to-code streaming view
+func (v *HttpViews) GenerateWebsiteFromScreenshotSSE(w http.ResponseWriter, r *http.Request) {
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	if requireActiveSubscription(w, user) {
+		return
+	}
+
+	if v.deductAICredits(w, user, models.AICreditCostScreenshotCode, "screenshot_to_code_stream", "") {
+		return
+	}
+
+	var req requests.ScreenshotToCodeRequest
+	if err := utils.ParseJSONBody(r, &req); err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	v.handleStreamOrAsync(w, r, user, StreamConfig{
+		JobType: "screenshot_to_code",
+		StreamFunc: func(ctx context.Context, events chan<- responses.SSEEvent) {
+			v.Controller.GenerateWebsiteFromScreenshotStream(ctx, user, req, events)
+		},
+	})
+}
+
 // Edit element view (SSE)
 func (v *HttpViews) AIEditElement(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	if requireActiveSubscription(w, user) {
+		return
+	}
+
+	if v.deductAICredits(w, user, models.AICreditCostElementEdit, "edit_element", "") {
 		return
 	}
 
@@ -177,23 +225,12 @@ func (v *HttpViews) AIEditElement(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		utils.JSONErrorResponse(w, "streaming not supported", http.StatusInternalServerError)
-		return
-	}
-
-	utils.SetSSEHeaders(w)
-	flusher.Flush()
-
-	events := make(chan responses.SSEEvent, 10)
-	go v.Controller.AIEditElementStream(r.Context(), user, websiteID, req, events)
-
-	for event := range events {
-		if err := utils.WriteSSEEvent(w, flusher, event.Event, event.Data); err != nil {
-			return
-		}
-	}
+	v.handleStreamOrAsync(w, r, user, StreamConfig{
+		JobType: "edit_element",
+		StreamFunc: func(ctx context.Context, events chan<- responses.SSEEvent) {
+			v.Controller.AIEditElementStream(ctx, user, websiteID, req, events)
+		},
+	})
 }
 
 // Theme update view

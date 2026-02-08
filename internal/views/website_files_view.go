@@ -1,9 +1,11 @@
 package views
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/utils"
@@ -15,6 +17,14 @@ func (v *HttpViews) GenerateWebsiteFiles(w http.ResponseWriter, r *http.Request)
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	if requireActiveSubscription(w, user) {
+		return
+	}
+
+	if v.deductAICredits(w, user, models.AICreditCostGenerate, "generate_files", "") {
 		return
 	}
 
@@ -40,29 +50,26 @@ func (v *HttpViews) GenerateWebsiteFilesSSE(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	if requireActiveSubscription(w, user) {
+		return
+	}
+
+	if v.deductAICredits(w, user, models.AICreditCostGenerate, "generate_files_stream", "") {
+		return
+	}
+
 	var req requests.WebsiteGenerateRequest
 	if err := utils.ParseJSONBody(r, &req); err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		utils.JSONErrorResponse(w, "streaming not supported", http.StatusInternalServerError)
-		return
-	}
-
-	utils.SetSSEHeaders(w)
-	flusher.Flush()
-
-	events := make(chan responses.SSEEvent, 10)
-	go v.Controller.GenerateWebsiteFilesStream(r.Context(), user, req, events)
-
-	for event := range events {
-		if err := utils.WriteSSEEvent(w, flusher, event.Event, event.Data); err != nil {
-			return
-		}
-	}
+	v.handleStreamOrAsync(w, r, user, StreamConfig{
+		JobType: "website_generate_v2",
+		StreamFunc: func(ctx context.Context, events chan<- responses.SSEEvent) {
+			v.Controller.GenerateWebsiteFilesStream(ctx, user, req, events)
+		},
+	})
 }
 
 // File CRUD endpoints
@@ -201,9 +208,17 @@ func (v *HttpViews) PublishWebsiteFiles(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	if requireActiveSubscription(w, user) {
+		return
+	}
+
 	websiteID := chi.URLParam(r, "id")
 	if websiteID == "" {
 		utils.JSONErrorResponse(w, "website id is required", http.StatusBadRequest)
+		return
+	}
+
+	if v.deductAICredits(w, user, models.AICreditCostPublish, "publish_files", websiteID) {
 		return
 	}
 

@@ -1,8 +1,6 @@
 package main
 
 import (
-	// "net/http"
-
 	"context"
 	"crypto/tls"
 	"database/sql"
@@ -20,16 +18,19 @@ import (
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/controllers"
 	"github.com/knid/wemob/internal/database"
+	appMiddleware "github.com/knid/wemob/internal/middleware"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/services"
 	crmServices "github.com/knid/wemob/internal/services/crm"
 	emailServices "github.com/knid/wemob/internal/services/email"
 	"github.com/knid/wemob/internal/services/secret"
 	"github.com/knid/wemob/internal/services/storage"
+	"github.com/knid/wemob/internal/services/vercel"
 	"github.com/knid/wemob/internal/utils"
 	"github.com/knid/wemob/internal/views"
 	"github.com/markbates/goth"
 	"github.com/markbates/goth/providers/google"
+	"github.com/redis/go-redis/v9"
 
 	_ "github.com/lib/pq"
 
@@ -86,6 +87,37 @@ func createSchema(db *bun.DB) error {
 		(*models.WebsiteSEO)(nil),
 		(*models.WebsiteForm)(nil),
 		(*models.WebsiteFormSubmission)(nil),
+		(*models.AICreditsBalance)(nil),
+		(*models.AICreditTransaction)(nil),
+		(*models.Organization)(nil),
+		(*models.OrganizationMember)(nil),
+		(*models.OrganizationInvite)(nil),
+		(*models.APIKey)(nil),
+		(*models.ReferralCode)(nil),
+		(*models.Referral)(nil),
+		(*models.WebhookEndpoint)(nil),
+		// V2 app builder models
+		(*models.AppProject)(nil),
+		(*models.AppDeployment)(nil),
+		(*models.AppIntegration)(nil),
+		(*models.AppConversation)(nil),
+		(*models.AppGeneratedFile)(nil),
+		(*models.AppSnapshot)(nil),
+		(*models.VercelProject)(nil),
+		(*models.FlutterBuild)(nil),
+		(*models.AppDomain)(nil),
+		// E-commerce models
+		(*models.Store)(nil),
+		(*models.Product)(nil),
+		(*models.ProductVariant)(nil),
+		(*models.ProductCategory)(nil),
+		(*models.Discount)(nil),
+		(*models.Cart)(nil),
+		(*models.CartItem)(nil),
+		(*models.Order)(nil),
+		(*models.OrderItem)(nil),
+		// Background jobs
+		(*models.GenerationJob)(nil),
 	}
 
 	for _, model := range models {
@@ -103,6 +135,21 @@ func createSchema(db *bun.DB) error {
 	alterStatements := []string{
 		`ALTER TABLE websites ADD COLUMN IF NOT EXISTS dark_color_scheme jsonb DEFAULT '{}'`,
 		`ALTER TABLE websites ADD COLUMN IF NOT EXISTS template_id uuid`,
+		// AI credits fields on limits
+		`ALTER TABLE standart_user_limits ADD COLUMN IF NOT EXISTS monthly_ai_credits int NOT NULL DEFAULT 0`,
+		`ALTER TABLE standart_user_limits ADD COLUMN IF NOT EXISTS monthly_website_count int NOT NULL DEFAULT 0`,
+		`ALTER TABLE standart_user_limits ADD COLUMN IF NOT EXISTS can_use_ai_chat boolean NOT NULL DEFAULT false`,
+		`ALTER TABLE standart_user_limits ADD COLUMN IF NOT EXISTS can_use_screenshot_code boolean NOT NULL DEFAULT false`,
+		`ALTER TABLE standart_user_limits ADD COLUMN IF NOT EXISTS can_use_custom_domains boolean NOT NULL DEFAULT false`,
+		// Annual billing fields on subscriptions
+		`ALTER TABLE standart_user_subscriptions ADD COLUMN IF NOT EXISTS annual_price int DEFAULT 0`,
+		`ALTER TABLE standart_user_subscriptions ADD COLUMN IF NOT EXISTS annual_price_id text DEFAULT ''`,
+		// V2 app builder fields on limits
+		`ALTER TABLE standart_user_limits ADD COLUMN IF NOT EXISTS monthly_app_count int NOT NULL DEFAULT 0`,
+		`ALTER TABLE standart_user_limits ADD COLUMN IF NOT EXISTS monthly_deploy_count int NOT NULL DEFAULT 0`,
+		`ALTER TABLE standart_user_limits ADD COLUMN IF NOT EXISTS can_use_ecommerce boolean NOT NULL DEFAULT false`,
+		`ALTER TABLE standart_user_limits ADD COLUMN IF NOT EXISTS can_deploy_to_vercel boolean NOT NULL DEFAULT false`,
+		`ALTER TABLE standart_user_limits ADD COLUMN IF NOT EXISTS can_build_flutter boolean NOT NULL DEFAULT false`,
 	}
 	for _, stmt := range alterStatements {
 		if _, err := db.ExecContext(context.Background(), stmt); err != nil {
@@ -139,12 +186,19 @@ func main() {
 		os.Getenv("ENVIRONMENT"),
 	)
 
-	logger := slog.New(
-		slogbetterstack.Option{
-			Token:    sm.GetSecret("BETTERSTACK_TOKEN"),
-			Endpoint: sm.GetSecret("BETTERSTACK_ENDPOINT"),
-		}.NewBetterstackHandler(),
-	)
+	betterstackHandler := slogbetterstack.Option{
+		Token:    sm.GetSecret("BETTERSTACK_TOKEN"),
+		Endpoint: sm.GetSecret("BETTERSTACK_ENDPOINT"),
+	}.NewBetterstackHandler()
+
+	var logger *slog.Logger
+	if sm.GetEnv() == "dev" {
+		// In dev, log to both stdout and BetterStack
+		stdoutHandler := slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug})
+		logger = slog.New(utils.NewFanoutHandler(stdoutHandler, betterstackHandler))
+	} else {
+		logger = slog.New(betterstackHandler)
+	}
 
 	slog.SetDefault(logger)
 
@@ -166,7 +220,7 @@ func main() {
 	bundb.Exec("CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\";")
 
 	bundb.AddQueryHook(bundebug.NewQueryHook(
-		bundebug.WithVerbose(true),
+		bundebug.WithVerbose(os.Getenv("BUNDEBUG") == "2"),
 		bundebug.FromEnv("BUNDEBUG"),
 	))
 
@@ -180,6 +234,9 @@ func main() {
 	db := database.NewDatabase(bundb)
 	db.SeedComponents()
 	go utils.CheckSessionStatusJob(db)
+	go utils.CheckUsageAlertsJob(db, crmServices.NewBrevoCRMService(sm.GetSecret("BREVO_API_KEY")))
+	vercelService := vercel.NewService(sm.GetSecret("VERCEL_API_TOKEN"), sm.GetSecret("VERCEL_TEAM_ID"))
+
 	controller := controllers.NewController(
 		db,
 		make(chan struct{}, constants.MAX_CONCURRENT_BUILDS),
@@ -195,6 +252,7 @@ func main() {
 		storage.NewS3Storage(sm.GetSecret("AWS_REGION"), sm.GetSecret("AWS_S3_ASSETS_BUCKET_NAME"), sm.GetSecret("AWS_ACCESS_KEY_ID"), sm.GetSecret("AWS_SECRET_ACCESS_KEY")),
 		storage.NewS3Storage(sm.GetSecret("AWS_REGION"), sm.GetSecret("AWS_S3_USER_API_KEYS_BUCKET_NAME"), sm.GetSecret("AWS_ACCESS_KEY_ID"), sm.GetSecret("AWS_SECRET_ACCESS_KEY")),
 		sm,
+		vercelService,
 	)
 
 	goth.UseProviders(
@@ -202,6 +260,15 @@ func main() {
 	)
 
 	stripe.Key = sm.GetSecret("STRIPE_API_KEY")
+
+	// Redis client for rate limiting (reuses same Redis as Asynq)
+	redisClient := redis.NewClient(&redis.Options{
+		Addr:      sm.GetSecret("REDIS_ADDR"),
+		Username:  sm.GetSecret("REDIS_USERNAME"),
+		Password:  sm.GetSecret("REDIS_PASSWORD"),
+		TLSConfig: &tls.Config{},
+	})
+	rateLimiter := appMiddleware.NewRateLimiter(redisClient)
 
 	httpViews := views.HttpViews{
 		Controller: controller,
@@ -213,6 +280,8 @@ func main() {
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
+	r.Use(middleware.Timeout(120 * time.Second))
+	r.Use(rateLimiter.RateLimit(100, time.Minute, appMiddleware.IPKey))
 
 	r.Use(httplog.RequestLogger(logger, &httplog.Options{
 		// Level defines the verbosity of the request logs:
@@ -272,8 +341,12 @@ func main() {
 	r.Route("/", func(r chi.Router) {
 		r.Route("/webhooks", func(r chi.Router) {
 			r.Post("/stripe", httpViews.Controller.HandleWebhook)
+			// Store payment webhooks
+			r.Post("/store/stripe/{storeId}", httpViews.HandleStoreStripeWebhook)
+			r.Post("/store/iyzico/{storeId}", httpViews.HandleStoreIyzicoWebhook)
 		})
 		r.Route("/v1", func(r chi.Router) {
+			r.Use(rateLimiter.RateLimit(300, time.Minute, appMiddleware.UserKey))
 			r.Handle("/static/*", http.StripPrefix("/v1/static/", http.FileServer(utils.NoDirFileSystem{FS: staticDir})))
 			r.Route("/storage", func(r chi.Router) {
 				r.Route("/credentials", func(r chi.Router) {
@@ -337,8 +410,6 @@ func main() {
 
 				r.Get("/auth/{provider}/callback", httpViews.OAuthCallback)
 				r.Get("/auth/{provider}", httpViews.OAuthBegin)
-
-				// r.Get("/usage", httpViews.GetUserUsage)
 			})
 			r.Get("/tasks", httpViews.GetAllTasks)
 			r.Route("/projects", func(r chi.Router) {
@@ -371,7 +442,6 @@ func main() {
 						r.Post("/", httpViews.CreateProjectBuild)
 						r.Route("/{buildId}", func(r chi.Router) {
 							r.Get("/", httpViews.GetProjectBuild)
-							// r.Post("/", httpViews.SetReleasedBuild)
 						})
 					})
 					r.Route("/public", func(r chi.Router) {
@@ -417,7 +487,6 @@ func main() {
 					r.Post("/generate_screenshots", httpViews.AutoGenerateScreenshots)
 					r.Post("/sign_ipa", httpViews.SignUnsignedIPA)
 					r.Get("/sign_ipa/{signTaskId}", httpViews.CheckSignIPATaskStatus)
-					// r.Post("/fetch_metadata", httpViews.FetchWebSiteMetadata)
 				})
 			})
 			r.Route("/reports", func(r chi.Router) {
@@ -426,6 +495,7 @@ func main() {
 				r.Post("/deploy", httpViews.UpdateDeploymentStatus)
 			})
 			r.Route("/billing", func(r chi.Router) {
+				r.Get("/plans", httpViews.GetBillingPlans)
 				r.Post("/checkout", httpViews.StripeCheckout)
 				r.Route("/subscription", func(r chi.Router) {
 					r.Post("/portal", httpViews.StripeCustomerPortal)
@@ -435,21 +505,63 @@ func main() {
 					r.Get("/limits", httpViews.GetLimits)
 					r.Post("/end_trial", httpViews.EndTrialNowAndChargeForUser)
 				})
-				r.Route("/invoices", func(r chi.Router) {
-					// r.Get("/", httpViews.GetInvoices)
-					// r.Get("/{invoiceId}", httpViews.GetInvoice)
+				r.Route("/credits", func(r chi.Router) {
+					r.Get("/", httpViews.GetAICreditsBalance)
+					r.Get("/transactions", httpViews.GetAICreditTransactions)
 				})
 			})
 
+			r.Route("/organizations", func(r chi.Router) {
+				r.Get("/", httpViews.GetUserOrganizations)
+				r.Post("/", httpViews.CreateOrganization)
+				r.Post("/invites/{token}/accept", httpViews.AcceptOrganizationInvite)
+				r.Route("/{orgId}", func(r chi.Router) {
+					r.Get("/", httpViews.GetOrganization)
+					r.Put("/", httpViews.UpdateOrganization)
+					r.Delete("/", httpViews.DeleteOrganization)
+					r.Route("/members", func(r chi.Router) {
+						r.Get("/", httpViews.GetOrganizationMembers)
+						r.Post("/invite", httpViews.InviteOrganizationMember)
+						r.Route("/{memberId}", func(r chi.Router) {
+							r.Put("/role", httpViews.UpdateMemberRole)
+							r.Delete("/", httpViews.RemoveOrganizationMember)
+						})
+					})
+				})
+			})
+			r.Route("/api-keys", func(r chi.Router) {
+				r.Get("/", httpViews.ListAPIKeys)
+				r.Post("/", httpViews.CreateAPIKey)
+				r.Delete("/{keyId}", httpViews.DeleteAPIKey)
+			})
+			r.Route("/referrals", func(r chi.Router) {
+				r.Get("/code", httpViews.GetReferralCode)
+				r.Get("/stats", httpViews.GetReferralStats)
+				r.Post("/apply", httpViews.ApplyReferralCode)
+			})
+			r.Route("/webhooks", func(r chi.Router) {
+				r.Get("/", httpViews.ListWebhookEndpoints)
+				r.Post("/", httpViews.CreateWebhookEndpoint)
+				r.Route("/{webhookId}", func(r chi.Router) {
+					r.Put("/", httpViews.UpdateWebhookEndpoint)
+					r.Delete("/", httpViews.DeleteWebhookEndpoint)
+				})
+			})
+			r.Route("/admin", func(r chi.Router) {
+				r.Get("/dashboard", httpViews.GetAdminDashboard)
+			})
+
 			r.Route("/websites", func(r chi.Router) {
-				// Legacy page-based generation
-				r.Post("/generate", httpViews.GenerateWebsite)
-				r.Post("/generate/stream", httpViews.GenerateWebsiteSSE)
+				r.Use(rateLimiter.RateLimit(10, time.Minute, appMiddleware.AIUserKey))
+				// Legacy page-based generation (deprecated — use /generate/v2)
+				r.With(appMiddleware.SunsetHeader("2026-06-01")).Post("/generate", httpViews.GenerateWebsite)
+				r.With(appMiddleware.SunsetHeader("2026-06-01")).Post("/generate/stream", httpViews.GenerateWebsiteSSE)
 				// File-based generation (v2)
 				r.Post("/generate/v2", httpViews.GenerateWebsiteFiles)
 				r.Post("/generate/v2/stream", httpViews.GenerateWebsiteFilesSSE)
 				// Screenshot-to-code
 				r.Post("/generate/from-image", httpViews.GenerateWebsiteFromScreenshot)
+				r.Post("/generate/from-image/stream", httpViews.GenerateWebsiteFromScreenshotSSE)
 
 				r.Get("/", httpViews.GetWebsites)
 				r.Get("/templates", httpViews.GetWebsiteTemplates)
@@ -498,14 +610,15 @@ func main() {
 							r.Delete("/", httpViews.DisconnectIntegration)
 						})
 					})
-					// Legacy AI endpoints
+					// Legacy AI endpoints (deprecated)
 					r.Route("/ai", func(r chi.Router) {
+						r.Use(appMiddleware.SunsetHeader("2026-06-01"))
 						r.Post("/edit-page/{pid}", httpViews.AIEditPage)
 						r.Post("/add-page", httpViews.AIAddPage)
 						r.Post("/edit-element", httpViews.AIEditElement)
 					})
 					r.Post("/assets", httpViews.UploadWebsiteAsset)
-					r.Post("/publish", httpViews.PublishWebsite)
+					r.With(appMiddleware.SunsetHeader("2026-06-01")).Post("/publish", httpViews.PublishWebsite)
 					r.Post("/publish/v2", httpViews.PublishWebsiteFiles)
 					r.Post("/convert-to-mobile", httpViews.ConvertWebsiteToMobile)
 					// Snapshots
@@ -522,6 +635,7 @@ func main() {
 					r.Put("/theme", httpViews.UpdateWebsiteTheme)
 					// Component insert
 					r.Post("/insert-component", httpViews.InsertComponent)
+					r.Post("/insert-component/stream", httpViews.InsertComponentSSE)
 					// Domains
 					r.Route("/domains", func(r chi.Router) {
 						r.Get("/", httpViews.GetWebsiteDomains)
@@ -548,7 +662,157 @@ func main() {
 
 			r.Post("/support/ticket", httpViews.CreateTicket)
 
+			r.Route("/jobs", func(r chi.Router) {
+				r.Get("/active", httpViews.GetActiveJobs)
+				r.Get("/{jobId}", httpViews.GetJob)
+				r.Delete("/{jobId}", httpViews.CancelJob)
+			})
 		})
+		// V2 App Builder routes
+		r.Route("/v2", func(r chi.Router) {
+			r.Use(rateLimiter.RateLimit(300, time.Minute, appMiddleware.UserKey))
+
+			r.Route("/apps", func(r chi.Router) {
+				r.Use(appMiddleware.RequireAuth(controller))
+				r.Use(appMiddleware.RequireSubscription("active", "trial"))
+
+				// Generation endpoints (AI rate limited)
+				r.With(rateLimiter.RateLimit(10, time.Minute, appMiddleware.AIUserKey)).Post("/generate", httpViews.GenerateApp)
+				r.With(rateLimiter.RateLimit(10, time.Minute, appMiddleware.AIUserKey)).Post("/generate/ecommerce", httpViews.GenerateEcommerceApp)
+				r.With(rateLimiter.RateLimit(10, time.Minute, appMiddleware.AIUserKey)).Post("/generate/from-image", httpViews.GenerateAppFromImage)
+				r.With(rateLimiter.RateLimit(10, time.Minute, appMiddleware.AIUserKey)).Post("/generate/stream", httpViews.GenerateAppStream)
+				r.With(rateLimiter.RateLimit(10, time.Minute, appMiddleware.AIUserKey)).Post("/generate/ecommerce/stream", httpViews.GenerateEcommerceAppStream)
+
+				// Migration endpoints
+				r.With(rateLimiter.RateLimit(10, time.Minute, appMiddleware.AIUserKey)).Post("/migrate/{websiteId}", httpViews.MigrateWebsite)
+				r.With(rateLimiter.RateLimit(10, time.Minute, appMiddleware.AIUserKey)).Post("/migrate/{websiteId}/stream", httpViews.MigrateWebsiteStream)
+
+				r.Get("/", httpViews.GetApps)
+
+				r.Route("/{appId}", func(r chi.Router) {
+					r.Get("/", httpViews.GetApp)
+					r.Put("/", httpViews.UpdateApp)
+					r.Delete("/", httpViews.DeleteApp)
+
+					// Files (code-first CRUD)
+					r.Get("/files/{platform}", httpViews.GetAppFiles)
+					r.Post("/files", httpViews.CreateAppFile)
+					r.Put("/files/{fid}", httpViews.UpdateAppFile)
+					r.Delete("/files/{fid}", httpViews.DeleteAppFile)
+
+					// Chat
+					r.With(rateLimiter.RateLimit(10, time.Minute, appMiddleware.AIUserKey)).Post("/chat", httpViews.ChatApp)
+					r.Get("/conversation", httpViews.GetAppConversation)
+
+					// Integrations
+					r.Route("/integrations", func(r chi.Router) {
+						r.Get("/", httpViews.GetAppIntegrations)
+						r.Post("/", httpViews.ConnectAppIntegration)
+						r.Route("/{iid}", func(r chi.Router) {
+							r.Put("/", httpViews.UpdateAppIntegration)
+							r.Delete("/", httpViews.DisconnectAppIntegration)
+						})
+					})
+
+					// Deploy
+					r.Route("/deploy", func(r chi.Router) {
+						r.Post("/web", httpViews.DeployAppWeb)
+						r.Post("/android", httpViews.DeployAppAndroid)
+						r.Post("/ios", httpViews.DeployAppIOS)
+						r.Get("/status", httpViews.GetDeployStatus)
+						r.Get("/history", httpViews.GetDeployHistory)
+					})
+
+					// Snapshots
+					r.Route("/snapshots", func(r chi.Router) {
+						r.Get("/", httpViews.GetAppSnapshots)
+						r.Post("/", httpViews.CreateAppSnapshot)
+						r.Post("/{sid}/restore", httpViews.RestoreAppSnapshot)
+					})
+
+					// Export
+					r.Get("/export/{platform}", httpViews.ExportApp)
+
+					// Domains
+					r.Route("/domains", func(r chi.Router) {
+						r.Get("/", httpViews.GetAppDomains)
+						r.Post("/", httpViews.AddAppDomain)
+						r.Delete("/{did}", httpViews.RemoveAppDomain)
+					})
+
+					// E-commerce store (only for ecommerce projects)
+					r.Route("/store", func(r chi.Router) {
+						r.Get("/", httpViews.GetAppStore)
+						r.Put("/settings", httpViews.UpdateAppStoreSettings)
+						r.With(rateLimiter.RateLimit(10, time.Minute, appMiddleware.AIUserKey)).Post("/chat", httpViews.ChatStoreManagement)
+
+						r.Route("/products", func(r chi.Router) {
+							r.Get("/", httpViews.GetStoreProducts)
+							r.Post("/", httpViews.CreateStoreProduct)
+							r.Route("/{productId}", func(r chi.Router) {
+								r.Get("/", httpViews.GetStoreProduct)
+								r.Put("/", httpViews.UpdateStoreProduct)
+								r.Delete("/", httpViews.DeleteStoreProduct)
+								r.Route("/variants", func(r chi.Router) {
+									r.Post("/", httpViews.CreateProductVariant)
+									r.Route("/{variantId}", func(r chi.Router) {
+										r.Put("/", httpViews.UpdateProductVariant)
+										r.Delete("/", httpViews.DeleteProductVariant)
+									})
+								})
+							})
+						})
+
+						r.Route("/categories", func(r chi.Router) {
+							r.Get("/", httpViews.GetStoreCategories)
+							r.Post("/", httpViews.CreateStoreCategory)
+							r.Route("/{categoryId}", func(r chi.Router) {
+								r.Put("/", httpViews.UpdateStoreCategory)
+								r.Delete("/", httpViews.DeleteStoreCategory)
+							})
+						})
+
+						r.Route("/discounts", func(r chi.Router) {
+							r.Get("/", httpViews.GetStoreDiscounts)
+							r.Post("/", httpViews.CreateStoreDiscount)
+							r.Route("/{discountId}", func(r chi.Router) {
+								r.Put("/", httpViews.UpdateStoreDiscount)
+								r.Delete("/", httpViews.DeleteStoreDiscount)
+							})
+						})
+
+						r.Route("/orders", func(r chi.Router) {
+							r.Get("/", httpViews.GetStoreOrders)
+							r.Route("/{orderId}", func(r chi.Router) {
+								r.Get("/", httpViews.GetStoreOrder)
+								r.Put("/", httpViews.UpdateStoreOrderStatus)
+							})
+						})
+
+						r.Get("/analytics", httpViews.GetStoreAnalytics)
+					})
+				})
+			})
+
+			// Public storefront (no auth)
+			r.Route("/storefront/{storeId}", func(r chi.Router) {
+				r.Get("/products", httpViews.StorefrontGetProducts)
+				r.Get("/products/{slug}", httpViews.StorefrontGetProduct)
+				r.Get("/categories", httpViews.StorefrontGetCategories)
+				r.Post("/cart", httpViews.StorefrontCreateCart)
+				r.Get("/cart/{sessionId}", httpViews.StorefrontGetCart)
+				r.Post("/cart/{sessionId}/items", httpViews.StorefrontAddCartItem)
+				r.Put("/cart/{sessionId}/items/{itemId}", httpViews.StorefrontUpdateCartItem)
+				r.Delete("/cart/{sessionId}/items/{itemId}", httpViews.StorefrontDeleteCartItem)
+				r.Post("/cart/{sessionId}/discount", httpViews.StorefrontApplyDiscount)
+				r.Post("/checkout", httpViews.StorefrontCheckout)
+				r.Post("/checkout/confirm", httpViews.StorefrontConfirmCheckout)
+			})
+
+			// Public integration providers
+			r.Get("/integrations/providers", httpViews.GetV2IntegrationProviders)
+		})
+
 		r.Get("/health", httpViews.Health)
 	})
 

@@ -3,6 +3,8 @@ package utils
 import (
 	"bytes"
 	"context"
+	"database/sql"
+	"errors"
 	"regexp"
 	"time"
 
@@ -58,8 +60,11 @@ func (qh QueryHook) AfterQuery(ctx context.Context, event *bun.QueryEvent) {
 		slog.String("from", "BUNDB"),
 	}
 
-	// Errors will always be logged
+	// Log errors, but skip sql.ErrNoRows (normal "not found" result)
 	if event.Err != nil {
+		if errors.Is(event.Err, sql.ErrNoRows) {
+			return
+		}
 		fields = append(fields, slog.String("ERROR", event.Err.Error()))
 		qh.logger.Error(maskedQuery, fields...)
 		return

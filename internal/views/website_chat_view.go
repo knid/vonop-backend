@@ -1,9 +1,11 @@
 package views
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/utils"
@@ -13,6 +15,14 @@ func (v *HttpViews) ChatWebsite(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	if requireActiveSubscription(w, user) {
+		return
+	}
+
+	if v.deductAICredits(w, user, models.AICreditCostChat, "chat", "") {
 		return
 	}
 
@@ -28,23 +38,12 @@ func (v *HttpViews) ChatWebsite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		utils.JSONErrorResponse(w, "streaming not supported", http.StatusInternalServerError)
-		return
-	}
-
-	utils.SetSSEHeaders(w)
-	flusher.Flush()
-
-	events := make(chan responses.SSEEvent, 10)
-	go v.Controller.ChatStream(r.Context(), user, websiteID, req, events)
-
-	for event := range events {
-		if err := utils.WriteSSEEvent(w, flusher, event.Event, event.Data); err != nil {
-			return
-		}
-	}
+	v.handleStreamOrAsync(w, r, user, StreamConfig{
+		JobType: "website_chat",
+		StreamFunc: func(ctx context.Context, events chan<- responses.SSEEvent) {
+			v.Controller.ChatStream(ctx, user, websiteID, req, events)
+		},
+	})
 }
 
 func (v *HttpViews) GetWebsiteConversation(w http.ResponseWriter, r *http.Request) {
