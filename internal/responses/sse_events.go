@@ -68,3 +68,8 @@ type FileGenerationStartEvent struct {
 type ChatThinkingEvent struct {
 	Chunk string `json:"chunk"`
 }
+
+type PlanningChunkEvent struct {
+	Chunk string `json:"chunk"`
+	Phase string `json:"phase"` // "structure", "vision"
+}

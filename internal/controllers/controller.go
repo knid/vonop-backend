@@ -1,6 +1,8 @@
 package controllers
 
 import (
+	"sync"
+
 	"github.com/hibiken/asynq"
 	"github.com/knid/wemob/internal/database"
 	"github.com/knid/wemob/internal/services"
@@ -8,6 +10,7 @@ import (
 	emailServices "github.com/knid/wemob/internal/services/email"
 	"github.com/knid/wemob/internal/services/secret"
 	"github.com/knid/wemob/internal/services/storage"
+	"github.com/knid/wemob/internal/services/vercel"
 )
 
 type Controller struct {
@@ -20,12 +23,15 @@ type Controller struct {
 	AssetsStorage          *storage.S3Storage
 	UserApiKeysStorage     *storage.S3Storage
 	ConcurrentBuildLimiter chan struct{}
+	VercelService          *vercel.Service
+	RunningJobs            sync.Map // map[string]context.CancelFunc for in-flight background jobs
 }
 
 func NewController(db *database.Database, concurrentBuildLimiter chan struct{},
 	slackService *services.SlackService, emailService emailServices.EmailService,
 	crmService crmServices.CRMService, taskService *asynq.Client, assetsStorage *storage.S3Storage,
-	userApiKeysStorage *storage.S3Storage, secretManager secret.SecretManager) *Controller {
+	userApiKeysStorage *storage.S3Storage, secretManager secret.SecretManager,
+	vercelService *vercel.Service) *Controller {
 
 	return &Controller{
 		DB:                     db,
@@ -37,5 +43,6 @@ func NewController(db *database.Database, concurrentBuildLimiter chan struct{},
 		AssetsStorage:          assetsStorage,
 		UserApiKeysStorage:     userApiKeysStorage,
 		SecretManager:          secretManager,
+		VercelService:          vercelService,
 	}
 }

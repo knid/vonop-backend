@@ -2,7 +2,6 @@ package views
 
 import (
 	"net/http"
-	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/knid/wemob/internal/constants"
@@ -37,52 +36,7 @@ func (v *HttpViews) UpdateProject(w http.ResponseWriter, r *http.Request) {
 	if !(user.SubscriptionStatus == "active" || user.SubscriptionStatus == "trial") {
 		utils.JSONErrorResponse(w, "you do not have access to this resource", http.StatusForbidden)
 		go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_NEED, map[string]any{
-			"action": "create_project",
-		})
-		return
-	}
-
-	builds, err := v.Controller.DB.GetBuildsByUserId(user.ID.String())
-	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	subsStart := user.SubscriptionStartAt
-	now := time.Now()
-
-	renewStart := time.Date(now.Year(), now.Month(), subsStart.Day(), 0, 0, 0, 0, now.Location())
-
-	if now.Before(renewStart) {
-		renewStart = renewStart.AddDate(0, -1, 0)
-	}
-
-	renewEnd := renewStart.AddDate(0, 1, 0)
-
-	count := 0
-	for _, build := range builds {
-		if build.CreatedAt.After(renewStart) && build.CreatedAt.Before(renewEnd) {
-			count++
-		}
-	}
-
-	subsInfo, err := v.Controller.GetSubscription(user)
-	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	limits, err := v.Controller.DB.GetStandartUserLimitsById(subsInfo.Limits.ID.String())
-	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	if len(builds) >= limits.MontlyBuildCount {
-		utils.JSONErrorResponse(w, "you have reached your montly build limit", http.StatusForbidden)
-		go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_QUOTA_REACHED, map[string]any{
 			"action": "update_project",
-			"limit":  limits.MontlyBuildCount,
 		})
 		return
 	}
@@ -104,7 +58,6 @@ func (v *HttpViews) UpdateProject(w http.ResponseWriter, r *http.Request) {
 	})
 
 	utils.JSONResponse(w, projectCreateRes, http.StatusOK)
-
 }
 
 func (v *HttpViews) CreateProject(w http.ResponseWriter, r *http.Request) {

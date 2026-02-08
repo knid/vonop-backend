@@ -233,7 +233,12 @@ func (c *Controller) GenerateWebsiteFilesStream(ctx context.Context, user *model
 		return
 	}
 
-	structureJSON, err := utils.GetJSONFromLLM(model, constants.WEBSITE_STRUCTURE_PROMPT, req.Prompt+templateHint, apiKey)
+	structureJSON, err := utils.StreamJSONFromLLM(ctx, model, constants.WEBSITE_STRUCTURE_PROMPT, req.Prompt+templateHint, apiKey, func(chunk string) {
+		sendEvent("planning_chunk", responses.PlanningChunkEvent{
+			Chunk: chunk,
+			Phase: "structure",
+		})
+	})
 	if err != nil {
 		slog.Error("failed to generate website structure", "error", err)
 		sendError("structure", "failed to generate website structure. try again please")

@@ -113,13 +113,18 @@ func (c *Controller) RegisterUser(userRegisterReq requests.UserRegisterRequest) 
 		return nil, err
 	}
 
+	hashedPassword, err := utils.HashPassword(userRegisterReq.Password)
+	if err != nil {
+		return nil, errors.New("failed to hash password")
+	}
+
 	user := models.User{
 		Name:     userRegisterReq.Name,
 		Email:    userRegisterReq.Email,
 		Provider: "Wemob",
 		Type:     userRegisterReq.Type,
 		Company:  userRegisterReq.Company,
-		Password: utils.GetSHA256Hash(userRegisterReq.Password),
+		Password: hashedPassword,
 	}
 
 	createdUser, err := c.DB.CreateUser(&user)
@@ -187,8 +192,16 @@ func (c *Controller) LoginUser(userLoginReq requests.UserLoginRequest) (*respons
 		return nil, err
 	}
 
-	if user.Password != utils.GetSHA256Hash(userLoginReq.Password) {
+	if !utils.CheckPassword(userLoginReq.Password, user.Password) {
 		return nil, errors.New("password is not correct")
+	}
+
+	// Lazy-migrate SHA-256 passwords to bcrypt on successful login
+	if !utils.IsBcryptHash(user.Password) {
+		if bcryptHash, hashErr := utils.HashPassword(userLoginReq.Password); hashErr == nil {
+			user.Password = bcryptHash
+			c.DB.UpdateUser(user)
+		}
 	}
 
 	tokenStr, err := utils.RandomHex(32)
