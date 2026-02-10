@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 )
 
 const vercelAPIBase = "https://api.vercel.com"
@@ -263,6 +264,112 @@ func (s *Service) GetDeployment(deploymentID string) (*DeployResponse, error) {
 		return nil, fmt.Errorf("unmarshal deployment response: %w", err)
 	}
 	return &resp, nil
+}
+
+// DisableDeploymentProtection disables SSO protection on all deployments
+// so that deployed URLs are publicly accessible without Vercel login.
+func (s *Service) DisableDeploymentProtection(projectID string) error {
+	_, err := s.doRequest("PATCH", fmt.Sprintf("/v9/projects/%s", projectID), map[string]any{
+		"ssoProtection": nil,
+	})
+	if err != nil {
+		slog.Warn("Failed to disable deployment protection", "project_id", projectID, "error", err)
+	}
+	return err
+}
+
+// GetDeploymentBuildLog fetches build log events for a deployment and returns build output text.
+func (s *Service) GetDeploymentBuildLog(deploymentID string) (string, error) {
+	// Build URL with builds=1 to get build output and direction=backward to get latest events
+	path := fmt.Sprintf("/v3/deployments/%s/events?builds=1&direction=forward", deploymentID)
+
+	// Use custom request with Accept header to ensure JSON (not streaming) response
+	reqURL := vercelAPIBase + path + "&teamId=" + s.TeamID
+	if s.TeamID == "" {
+		reqURL = vercelAPIBase + path
+	}
+
+	req, err := http.NewRequest("GET", reqURL, nil)
+	if err != nil {
+		return "", fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+s.Token)
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("do request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		slog.Warn("Vercel events API error", "status", resp.StatusCode, "deployment_id", deploymentID, "body", string(body[:min(len(body), 500)]))
+		return "", fmt.Errorf("vercel events API error: status %d", resp.StatusCode)
+	}
+
+	// The response can be either a JSON array or newline-delimited JSON objects.
+	// Try JSON array first.
+	type eventPayload struct {
+		Text string `json:"text"`
+	}
+	type buildEvent struct {
+		Type    string       `json:"type"`
+		Created int64        `json:"created"`
+		Payload eventPayload `json:"payload"`
+	}
+
+	var events []buildEvent
+	if err := json.Unmarshal(body, &events); err != nil {
+		// Fallback: try newline-delimited JSON
+		lines := bytes.Split(body, []byte("\n"))
+		for _, line := range lines {
+			line = bytes.TrimSpace(line)
+			if len(line) == 0 {
+				continue
+			}
+			var ev buildEvent
+			if json.Unmarshal(line, &ev) == nil {
+				events = append(events, ev)
+			}
+		}
+		if len(events) == 0 {
+			// Last resort: return raw body as text (capped)
+			raw := string(body)
+			if len(raw) > 4000 {
+				raw = raw[:4000] + "\n... [truncated]"
+			}
+			return raw, nil
+		}
+	}
+
+	// Collect log lines
+	var result strings.Builder
+	for _, ev := range events {
+		text := ev.Payload.Text
+		if text == "" {
+			continue
+		}
+		if result.Len()+len(text) > 8000 {
+			result.WriteString("\n... [truncated]")
+			break
+		}
+		result.WriteString(text)
+		result.WriteString("\n")
+	}
+
+	return result.String(), nil
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 // DeleteProject deletes a Vercel project

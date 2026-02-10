@@ -214,3 +214,125 @@ func (v *HttpViews) GetDeployHistory(w http.ResponseWriter, r *http.Request) {
 
 	utils.JSONResponse(w, resp, http.StatusOK)
 }
+
+// POST /v2/apps/{appId}/preview
+func (v *HttpViews) StartAppPreview(w http.ResponseWriter, r *http.Request) {
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+	if requireActiveSubscription(w, user) {
+		return
+	}
+
+	appID := chi.URLParam(r, "appId")
+	project, err := v.Controller.GetAppProject(appID, user)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	status, err := v.Controller.StartPreview(project)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	utils.JSONResponse(w, status, http.StatusOK)
+}
+
+// GET /v2/apps/{appId}/preview/status
+func (v *HttpViews) GetAppPreviewStatus(w http.ResponseWriter, r *http.Request) {
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	appID := chi.URLParam(r, "appId")
+	project, err := v.Controller.GetAppProject(appID, user)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	status, err := v.Controller.GetPreviewStatus(project.ID.String())
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	utils.JSONResponse(w, status, http.StatusOK)
+}
+
+// GET /v2/apps/{appId}/preview/logs
+func (v *HttpViews) GetAppPreviewLogs(w http.ResponseWriter, r *http.Request) {
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	appID := chi.URLParam(r, "appId")
+	project, err := v.Controller.GetAppProject(appID, user)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	logs, err := v.Controller.GetPreviewLogs(project.ID.String())
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	utils.JSONResponse(w, map[string]string{"logs": logs}, http.StatusOK)
+}
+
+// DELETE /v2/apps/{appId}/preview
+func (v *HttpViews) StopAppPreview(w http.ResponseWriter, r *http.Request) {
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	appID := chi.URLParam(r, "appId")
+	project, err := v.Controller.GetAppProject(appID, user)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	if err := v.Controller.StopPreview(project.ID.String()); err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	utils.JSONResponse(w, map[string]string{"status": "stopped"}, http.StatusOK)
+}
+
+// POST /v2/apps/{appId}/deploy/validate
+func (v *HttpViews) ValidateAppFiles(w http.ResponseWriter, r *http.Request) {
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	appID := chi.URLParam(r, "appId")
+	project, err := v.Controller.GetAppProject(appID, user)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	result, err := v.Controller.ValidateAppFiles(project.ID.String())
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	utils.JSONResponse(w, result, http.StatusOK)
+}

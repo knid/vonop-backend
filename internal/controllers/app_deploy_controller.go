@@ -4,9 +4,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 
+	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/models"
+	"github.com/knid/wemob/internal/services/preview"
 	"github.com/knid/wemob/internal/tasks"
+	"github.com/knid/wemob/internal/utils"
 
 	"github.com/hibiken/asynq"
 )
@@ -36,6 +40,10 @@ func (c *Controller) DeployToVercel(project *models.AppProject, user *models.Use
 			slog.Error("Failed to create Vercel project", "error", err)
 			return nil, fmt.Errorf("failed to create Vercel project")
 		}
+
+		// Disable deployment protection so URLs are publicly accessible
+		c.VercelService.DisableDeploymentProtection(vp.ID)
+
 		vercelProject = &models.VercelProject{
 			AppProjectID:    project.ID,
 			VercelProjectID: vp.ID,
@@ -59,6 +67,9 @@ func (c *Controller) DeployToVercel(project *models.AppProject, user *models.Use
 			slog.Warn("Failed to set some env vars", "error", err)
 		}
 	}
+
+	// Ensure deployment protection is disabled (idempotent)
+	c.VercelService.DisableDeploymentProtection(vercelProject.VercelProjectID)
 
 	// Build file map from DB files
 	fileMap := make(map[string]string)
@@ -216,7 +227,16 @@ func (c *Controller) GetLatestDeploymentStatus(projectID string) (*models.AppDep
 				newStatus = "deployed"
 			case "ERROR":
 				newStatus = "failed"
-				errorMessage = "Build failed on Vercel"
+				// Fetch actual build log from Vercel
+				buildLog, logErr := c.VercelService.GetDeploymentBuildLog(deploymentID)
+				if logErr != nil {
+					slog.Warn("Failed to fetch build log", "error", logErr, "deployment_id", deploymentID)
+					errorMessage = "Build failed on Vercel"
+				} else if buildLog != "" {
+					errorMessage = buildLog
+				} else {
+					errorMessage = "Build failed on Vercel"
+				}
 			case "CANCELED":
 				newStatus = "failed"
 				errorMessage = "Build was canceled"
@@ -237,4 +257,167 @@ func (c *Controller) GetLatestDeploymentStatus(projectID string) (*models.AppDep
 	}
 
 	return deployment, nil
+}
+
+type AppValidationError struct {
+	File  string `json:"file"`
+	Line  int    `json:"line,omitempty"`
+	Error string `json:"error"`
+	Fix   string `json:"fix,omitempty"`
+}
+
+type AppValidationResult struct {
+	Valid  bool                 `json:"valid"`
+	Errors []AppValidationError `json:"errors"`
+}
+
+// ValidateAppFiles runs deterministic checks + optional LLM validation on project files.
+func (c *Controller) ValidateAppFiles(projectID string) (*AppValidationResult, error) {
+	files, err := c.DB.GetAppGeneratedFilesByProjectID(projectID, "nextjs")
+	if err != nil || len(files) == 0 {
+		return nil, fmt.Errorf("no files found to validate")
+	}
+
+	// Build file map for deterministic checks
+	fileMap := make(map[string]string)
+	for _, f := range files {
+		fileMap[f.FilePath] = f.Content
+	}
+
+	// Run deterministic checks first
+	detErrors := runDeterministicChecks(fileMap)
+
+	var result AppValidationResult
+	if len(detErrors) > 0 {
+		result.Valid = false
+		for _, e := range detErrors {
+			result.Errors = append(result.Errors, AppValidationError{
+				File:  e.File,
+				Error: e.Error,
+			})
+		}
+	}
+
+	// Also run LLM-based validation for deeper checks
+	apiKey := c.SecretManager.GetSecret("OPENROUTER_API_KEY")
+	model := c.SecretManager.GetSecret("NEXTJS_BUILDER_LLM_MODEL")
+	if model == "" {
+		model = constants.DEFAULT_NEXTJS_LLM_MODEL
+	}
+
+	var fileContext strings.Builder
+	fileContext.WriteString("Project files:\n")
+	for _, f := range files {
+		fileContext.WriteString(fmt.Sprintf("\n--- %s (%s) ---\n%s\n", f.FilePath, f.FileType, f.Content))
+	}
+
+	responseJSON, err := utils.GetJSONFromLLM(model, constants.NEXTJS_VALIDATE_PROMPT, fileContext.String(), apiKey)
+	if err != nil {
+		slog.Error("validation LLM call failed", "error", err)
+		// Still return deterministic results
+		if len(result.Errors) == 0 {
+			result.Valid = true
+		}
+		return &result, nil
+	}
+
+	var llmResult AppValidationResult
+	if err := json.Unmarshal([]byte(responseJSON), &llmResult); err != nil {
+		cleaned := utils.ExtractJSON(responseJSON)
+		if err2 := json.Unmarshal([]byte(cleaned), &llmResult); err2 != nil {
+			slog.Warn("failed to parse validation response", "error", err2)
+			if len(result.Errors) == 0 {
+				result.Valid = true
+			}
+			return &result, nil
+		}
+	}
+
+	// Merge LLM errors with deterministic errors
+	if !llmResult.Valid {
+		result.Valid = false
+		result.Errors = append(result.Errors, llmResult.Errors...)
+	} else if len(result.Errors) == 0 {
+		result.Valid = true
+	}
+
+	return &result, nil
+}
+
+// StartPreview creates a Docker-based preview for the project
+func (c *Controller) StartPreview(project *models.AppProject) (*preview.PreviewStatus, error) {
+	if c.PreviewService == nil {
+		return nil, fmt.Errorf("preview service not configured")
+	}
+
+	// Read all files from DB
+	dbFiles, err := c.DB.GetAppGeneratedFilesByProjectID(project.ID.String(), "nextjs")
+	if err != nil || len(dbFiles) == 0 {
+		return nil, fmt.Errorf("no generated files found for preview")
+	}
+
+	fileMap := make(map[string]string)
+	for _, f := range dbFiles {
+		fileMap[f.FilePath] = f.Content
+	}
+
+	// Collect env vars from integrations
+	integrations, _ := c.DB.GetAppIntegrationsByProjectID(project.ID.String())
+	envVars := make(map[string]string)
+	for _, integ := range integrations {
+		for k, v := range integ.EnvVars {
+			envVars[k] = v
+		}
+	}
+
+	status, err := c.PreviewService.CreatePreview(project.ID.String(), fileMap, envVars)
+	if err != nil {
+		slog.Error("Failed to start preview", "error", err, "project_id", project.ID)
+		return nil, fmt.Errorf("failed to start preview")
+	}
+
+	return status, nil
+}
+
+// SyncPreviewFiles updates files in a running preview container
+func (c *Controller) SyncPreviewFiles(projectID string) error {
+	if c.PreviewService == nil {
+		return nil
+	}
+
+	dbFiles, err := c.DB.GetAppGeneratedFilesByProjectID(projectID, "nextjs")
+	if err != nil || len(dbFiles) == 0 {
+		return fmt.Errorf("no files to sync")
+	}
+
+	fileMap := make(map[string]string)
+	for _, f := range dbFiles {
+		fileMap[f.FilePath] = f.Content
+	}
+
+	return c.PreviewService.UpdateFiles(projectID, fileMap)
+}
+
+// StopPreview stops and removes a preview container
+func (c *Controller) StopPreview(projectID string) error {
+	if c.PreviewService == nil {
+		return fmt.Errorf("preview service not configured")
+	}
+	return c.PreviewService.DeletePreview(projectID)
+}
+
+// GetPreviewLogs returns container logs for the preview
+func (c *Controller) GetPreviewLogs(projectID string) (string, error) {
+	if c.PreviewService == nil {
+		return "", fmt.Errorf("preview service not configured")
+	}
+	return c.PreviewService.GetLogs(projectID)
+}
+
+// GetPreviewStatus returns the current preview status
+func (c *Controller) GetPreviewStatus(projectID string) (*preview.PreviewStatus, error) {
+	if c.PreviewService == nil {
+		return nil, fmt.Errorf("preview service not configured")
+	}
+	return c.PreviewService.GetStatus(projectID)
 }

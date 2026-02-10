@@ -9,29 +9,71 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 )
 
-// llmHTTPClient is a shared HTTP client for all LLM calls with a 5-minute timeout.
+// llmHTTPClient is a shared HTTP client for all LLM calls with a 10-minute timeout.
 var llmHTTPClient = &http.Client{
-	Timeout: 5 * time.Minute,
+	Timeout: 10 * time.Minute,
 }
 
+type ResponseFormat struct {
+	Type string `json:"type"`
+}
+
+// --- Tool calling types ---
+
+type Tool struct {
+	Type     string       `json:"type"` // "function"
+	Function ToolFunction `json:"function"`
+}
+
+type ToolFunction struct {
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	Parameters  map[string]any `json:"parameters"` // JSON Schema
+}
+
+type ToolCall struct {
+	Index    *int          `json:"index,omitempty"`
+	ID       string        `json:"id,omitempty"`
+	Type     string        `json:"type,omitempty"`
+	Function *FunctionCall `json:"function,omitempty"`
+}
+
+type FunctionCall struct {
+	Name      string `json:"name,omitempty"`
+	Arguments string `json:"arguments,omitempty"`
+}
+
+// ToolExecutor is called when the LLM wants to use a tool.
+// Returns the tool result as a string.
+type ToolExecutor func(name string, arguments string) (string, error)
+
 type ChatRequest struct {
-	Model    string    `json:"model"`
-	Messages []Message `json:"messages"`
-	Stream   bool      `json:"stream,omitempty"`
+	Model          string          `json:"model"`
+	Messages       []Message       `json:"messages"`
+	Stream         bool            `json:"stream,omitempty"`
+	MaxTokens      int             `json:"max_tokens,omitempty"`
+	ResponseFormat *ResponseFormat `json:"response_format,omitempty"`
+	Tools          []Tool          `json:"tools,omitempty"`
+	ToolChoice     any             `json:"tool_choice,omitempty"`
 }
 
 type Message struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role       string     `json:"role"`
+	Content    string     `json:"content,omitempty"`
+	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
+	ToolCallID string     `json:"tool_call_id,omitempty"`
+	Name       string     `json:"name,omitempty"`
 }
 
 // Response structure for parsing the LLM output
 type Choice struct {
-	Message Message `json:"message"`
+	Message      Message `json:"message"`
+	FinishReason string  `json:"finish_reason,omitempty"`
 }
 
 type UsageInfo struct {
@@ -146,11 +188,13 @@ func GetTextFromLLM(model, system, message, apiKey string) (string, error) {
 }
 
 type StreamDelta struct {
-	Content string `json:"content"`
+	Content   string     `json:"content,omitempty"`
+	ToolCalls []ToolCall `json:"tool_calls,omitempty"`
 }
 
 type StreamChoice struct {
-	Delta StreamDelta `json:"delta"`
+	Delta        StreamDelta `json:"delta"`
+	FinishReason *string     `json:"finish_reason"`
 }
 
 type StreamChunk struct {
@@ -165,8 +209,9 @@ func StreamTextFromLLM(ctx context.Context, model, system, message, apiKey strin
 	}
 
 	reqBody := ChatRequest{
-		Model:  model,
-		Stream: true,
+		Model:     model,
+		Stream:    true,
+		MaxTokens: 16384,
 		Messages: []Message{
 			{Role: "system", Content: system},
 			{Role: "user", Content: message},
@@ -246,8 +291,10 @@ func GetJSONFromLLMWithMessages(model string, messages []Message, apiKey string)
 	}
 
 	reqBody := ChatRequest{
-		Model:    model,
-		Messages: messages,
+		Model:          model,
+		Messages:       messages,
+		MaxTokens:      16384,
+		ResponseFormat: &ResponseFormat{Type: "json_object"},
 	}
 	body, _ := json.Marshal(reqBody)
 
@@ -293,9 +340,11 @@ func StreamJSONFromLLMWithMessages(ctx context.Context, model string, messages [
 	}
 
 	reqBody := ChatRequest{
-		Model:    model,
-		Stream:   true,
-		Messages: messages,
+		Model:          model,
+		Stream:         true,
+		Messages:       messages,
+		MaxTokens:      16384,
+		ResponseFormat: &ResponseFormat{Type: "json_object"},
 	}
 	body, _ := json.Marshal(reqBody)
 
@@ -319,6 +368,7 @@ func StreamJSONFromLLMWithMessages(ctx context.Context, model string, messages [
 	}
 
 	var fullText strings.Builder
+	var lastFinishReason string
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 0, 64*1024), 512*1024)
 
@@ -342,11 +392,16 @@ func StreamJSONFromLLMWithMessages(ctx context.Context, model string, messages [
 			continue
 		}
 
-		if len(chunk.Choices) > 0 && chunk.Choices[0].Delta.Content != "" {
-			content := chunk.Choices[0].Delta.Content
-			fullText.WriteString(content)
-			if onChunk != nil {
-				onChunk(content)
+		if len(chunk.Choices) > 0 {
+			if chunk.Choices[0].Delta.Content != "" {
+				content := chunk.Choices[0].Delta.Content
+				fullText.WriteString(content)
+				if onChunk != nil {
+					onChunk(content)
+				}
+			}
+			if chunk.Choices[0].FinishReason != nil {
+				lastFinishReason = *chunk.Choices[0].FinishReason
 			}
 		}
 	}
@@ -358,6 +413,10 @@ func StreamJSONFromLLMWithMessages(ctx context.Context, model string, messages [
 		}
 		slog.Error("scanner error during LLM streaming", "error", err)
 		return "", fmt.Errorf("error reading streaming response. try again please")
+	}
+
+	if lastFinishReason == "length" {
+		slog.Warn("LLM chat response truncated (finish_reason=length)", "response_length", fullText.Len())
 	}
 
 	return CleanLLMOutput(fullText.String()), nil
@@ -453,8 +512,9 @@ func StreamJSONFromLLM(ctx context.Context, model, system, message, apiKey strin
 	}
 
 	reqBody := ChatRequest{
-		Model:  model,
-		Stream: true,
+		Model:     model,
+		Stream:    true,
+		MaxTokens: 16384,
 		Messages: []Message{
 			{Role: "system", Content: system},
 			{Role: "user", Content: message},
@@ -624,6 +684,245 @@ func StreamJSONFromLLMWithVision(ctx context.Context, model, system, userText, b
 	}
 
 	return CleanLLMOutput(fullText.String()), nil
+}
+
+// StreamWithTools sends messages to LLM with tools, handles the tool call loop,
+// and returns the final JSON response. Max 10 tool call rounds to prevent infinite loops.
+// onToolCall is called for each tool invocation (for SSE progress).
+// onChunk is called for content streaming.
+func StreamWithTools(
+	ctx context.Context,
+	model string,
+	messages []Message,
+	tools []Tool,
+	apiKey string,
+	responseFormat *ResponseFormat,
+	executor ToolExecutor,
+	onToolCall func(toolName string, args string),
+	onChunk func(chunk string),
+) (string, error) {
+	if apiKey == "" {
+		return "", fmt.Errorf("missing OPENROUTER_API_KEY")
+	}
+
+	const maxRounds = 25
+	currentMessages := make([]Message, len(messages))
+	copy(currentMessages, messages)
+
+	for round := 0; round < maxRounds; round++ {
+		if ctx.Err() != nil {
+			return "", ctx.Err()
+		}
+
+		reqBody := ChatRequest{
+			Model:          model,
+			Stream:         true,
+			MaxTokens:      16384,
+			Messages:       currentMessages,
+			Tools:          tools,
+			ResponseFormat: responseFormat,
+		}
+		body, _ := json.Marshal(reqBody)
+
+		req, _ := http.NewRequestWithContext(ctx, "POST", "https://openrouter.ai/api/v1/chat/completions", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+apiKey)
+		req.Header.Set("HTTP-Referer", "https://wemob.io")
+		req.Header.Set("X-Title", "wemob-app-builder")
+
+		resp, err := llmHTTPClient.Do(req)
+		if err != nil {
+			slog.Error("Error making streaming request to LLM:", "error", err, "round", round)
+			return "", fmt.Errorf("error generating content. try again please")
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			respBody, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			slog.Error("LLM streaming returned non-200", "status", resp.StatusCode, "body", string(respBody), "round", round)
+			return "", fmt.Errorf("error generating content. try again please")
+		}
+
+		var fullText strings.Builder
+		var lastFinishReason string
+		toolCallsMap := make(map[int]*ToolCall)
+
+		scanner := bufio.NewScanner(resp.Body)
+		scanner.Buffer(make([]byte, 0, 64*1024), 512*1024)
+
+		for scanner.Scan() {
+			if ctx.Err() != nil {
+				resp.Body.Close()
+				return fullText.String(), ctx.Err()
+			}
+
+			line := scanner.Text()
+			if !strings.HasPrefix(line, "data: ") {
+				continue
+			}
+
+			data := strings.TrimPrefix(line, "data: ")
+			if data == "[DONE]" {
+				break
+			}
+
+			var chunk StreamChunk
+			if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+				continue
+			}
+
+			if len(chunk.Choices) > 0 {
+				choice := chunk.Choices[0]
+
+				// Accumulate content
+				if choice.Delta.Content != "" {
+					fullText.WriteString(choice.Delta.Content)
+					if onChunk != nil {
+						onChunk(choice.Delta.Content)
+					}
+				}
+
+				// Accumulate tool calls
+				for _, tc := range choice.Delta.ToolCalls {
+					idx := 0
+					if tc.Index != nil {
+						idx = *tc.Index
+					}
+
+					if _, exists := toolCallsMap[idx]; !exists {
+						name := ""
+						if tc.Function != nil {
+							name = tc.Function.Name
+						}
+						toolCallsMap[idx] = &ToolCall{
+							ID:   tc.ID,
+							Type: tc.Type,
+							Function: &FunctionCall{
+								Name: name,
+							},
+						}
+					} else {
+						// Update ID/Type if provided in later chunks
+						if tc.ID != "" {
+							toolCallsMap[idx].ID = tc.ID
+						}
+						if tc.Type != "" {
+							toolCallsMap[idx].Type = tc.Type
+						}
+						if tc.Function != nil && tc.Function.Name != "" {
+							toolCallsMap[idx].Function.Name = tc.Function.Name
+						}
+					}
+
+					// Append arguments incrementally
+					if tc.Function != nil && tc.Function.Arguments != "" {
+						toolCallsMap[idx].Function.Arguments += tc.Function.Arguments
+					}
+				}
+
+				if choice.FinishReason != nil {
+					lastFinishReason = *choice.FinishReason
+				}
+			}
+		}
+
+		scanErr := scanner.Err()
+		resp.Body.Close()
+
+		if scanErr != nil {
+			if ctx.Err() != nil {
+				return fullText.String(), ctx.Err()
+			}
+			slog.Error("scanner error during LLM streaming with tools", "error", scanErr, "round", round)
+			return "", fmt.Errorf("error reading streaming response. try again please")
+		}
+
+		// If LLM wants to call tools
+		if lastFinishReason == "tool_calls" && len(toolCallsMap) > 0 {
+			// Build sorted tool calls list
+			indices := make([]int, 0, len(toolCallsMap))
+			for idx := range toolCallsMap {
+				indices = append(indices, idx)
+			}
+			sort.Ints(indices)
+
+			toolCalls := make([]ToolCall, 0, len(indices))
+			for _, idx := range indices {
+				toolCalls = append(toolCalls, *toolCallsMap[idx])
+			}
+
+			// Append assistant message with tool calls
+			currentMessages = append(currentMessages, Message{
+				Role:      "assistant",
+				Content:   fullText.String(),
+				ToolCalls: toolCalls,
+			})
+
+			// Execute each tool and append results
+			for _, tc := range toolCalls {
+				if ctx.Err() != nil {
+					return "", ctx.Err()
+				}
+
+				toolName := ""
+				toolArgs := ""
+				if tc.Function != nil {
+					toolName = tc.Function.Name
+					toolArgs = tc.Function.Arguments
+				}
+
+				slog.Info("Executing tool call", "tool", toolName, "round", round)
+
+				if onToolCall != nil {
+					onToolCall(toolName, toolArgs)
+				}
+
+				result, err := executor(toolName, toolArgs)
+				if err != nil {
+					result = fmt.Sprintf("Error executing tool %s: %v", toolName, err)
+				}
+
+				currentMessages = append(currentMessages, Message{
+					Role:       "tool",
+					Content:    result,
+					ToolCallID: tc.ID,
+					Name:       toolName,
+				})
+			}
+
+			// Continue the loop — re-call LLM with tool results
+			continue
+		}
+
+		// No tool calls — return final response
+		if lastFinishReason == "length" {
+			slog.Warn("LLM response truncated (finish_reason=length)", "response_length", fullText.Len(), "round", round)
+		}
+
+		if responseFormat != nil && responseFormat.Type == "json_object" {
+			return CleanLLMOutput(fullText.String()), nil
+		}
+		return fullText.String(), nil
+	}
+
+	return "", fmt.Errorf("tool calling exceeded maximum rounds (%d)", maxRounds)
+}
+
+// StreamTextWithTools is like StreamTextFromLLM but with tool calling support.
+// Uses system+user messages format. Returns the final text content after all tool rounds.
+func StreamTextWithTools(
+	ctx context.Context,
+	model, system, message, apiKey string,
+	tools []Tool,
+	executor ToolExecutor,
+	onToolCall func(toolName string, args string),
+	onChunk func(chunk string),
+) (string, error) {
+	messages := []Message{
+		{Role: "system", Content: system},
+		{Role: "user", Content: message},
+	}
+	return StreamWithTools(ctx, model, messages, tools, apiKey, nil, executor, onToolCall, onChunk)
 }
 
 // ReplaceIntegrationPlaceholders replaces {{PLACEHOLDER}} tokens in content with real values from integrations.
