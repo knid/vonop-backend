@@ -23,6 +23,7 @@ import (
 	"github.com/knid/wemob/internal/services"
 	crmServices "github.com/knid/wemob/internal/services/crm"
 	emailServices "github.com/knid/wemob/internal/services/email"
+	"github.com/knid/wemob/internal/services/preview"
 	"github.com/knid/wemob/internal/services/secret"
 	"github.com/knid/wemob/internal/services/storage"
 	"github.com/knid/wemob/internal/services/vercel"
@@ -151,6 +152,26 @@ func createSchema(db *bun.DB) error {
 		`ALTER TABLE standart_user_limits ADD COLUMN IF NOT EXISTS can_deploy_to_vercel boolean NOT NULL DEFAULT false`,
 		`ALTER TABLE standart_user_limits ADD COLUMN IF NOT EXISTS can_build_flutter boolean NOT NULL DEFAULT false`,
 	}
+
+	// Deduplicate before creating unique indexes (keep the latest row per group)
+	dedupeStatements := []string{
+		`DELETE FROM app_generated_files a USING app_generated_files b
+		 WHERE a.id < b.id AND a.app_project_id = b.app_project_id AND a.platform = b.platform AND a.file_path = b.file_path`,
+		`DELETE FROM app_conversations a USING app_conversations b
+		 WHERE a.id < b.id AND a.app_project_id = b.app_project_id`,
+	}
+	for _, stmt := range dedupeStatements {
+		if _, err := db.ExecContext(context.Background(), stmt); err != nil {
+			slog.Warn("dedup statement skipped", "error", err)
+		}
+	}
+
+	// Create unique indexes needed for upsert operations
+	indexStatements := []string{
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_app_generated_files_project_platform_path ON app_generated_files (app_project_id, platform, file_path)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_app_conversations_project ON app_conversations (app_project_id)`,
+	}
+	alterStatements = append(alterStatements, indexStatements...)
 	for _, stmt := range alterStatements {
 		if _, err := db.ExecContext(context.Background(), stmt); err != nil {
 			slog.Error("alter table failed", "statement", stmt, "error", err)
@@ -237,6 +258,13 @@ func main() {
 	go utils.CheckUsageAlertsJob(db, crmServices.NewBrevoCRMService(sm.GetSecret("BREVO_API_KEY")))
 	vercelService := vercel.NewService(sm.GetSecret("VERCEL_API_TOKEN"), sm.GetSecret("VERCEL_TEAM_ID"))
 
+	// Preview service (optional — only enabled when secrets are set)
+	var previewService *preview.Service
+	if previewURL := sm.GetSecret("PREVIEW_SERVER_URL"); previewURL != "" {
+		previewService = preview.NewService(previewURL, sm.GetSecret("PREVIEW_SERVER_SECRET"))
+		slog.Info("Preview service enabled", "url", previewURL)
+	}
+
 	controller := controllers.NewController(
 		db,
 		make(chan struct{}, constants.MAX_CONCURRENT_BUILDS),
@@ -253,6 +281,7 @@ func main() {
 		storage.NewS3Storage(sm.GetSecret("AWS_REGION"), sm.GetSecret("AWS_S3_USER_API_KEYS_BUCKET_NAME"), sm.GetSecret("AWS_ACCESS_KEY_ID"), sm.GetSecret("AWS_SECRET_ACCESS_KEY")),
 		sm,
 		vercelService,
+		previewService,
 	)
 
 	goth.UseProviders(
@@ -714,8 +743,15 @@ func main() {
 						})
 					})
 
+					// Preview (Docker-based live preview)
+					r.Post("/preview", httpViews.StartAppPreview)
+					r.Get("/preview/status", httpViews.GetAppPreviewStatus)
+					r.Get("/preview/logs", httpViews.GetAppPreviewLogs)
+					r.Delete("/preview", httpViews.StopAppPreview)
+
 					// Deploy
 					r.Route("/deploy", func(r chi.Router) {
+						r.Post("/validate", httpViews.ValidateAppFiles)
 						r.Post("/web", httpViews.DeployAppWeb)
 						r.Post("/android", httpViews.DeployAppAndroid)
 						r.Post("/ios", httpViews.DeployAppIOS)

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"time"
 
@@ -18,12 +19,150 @@ type appChatOperation struct {
 	Action  string `json:"action"`
 	Path    string `json:"path"`
 	Type    string `json:"type"`
-	Content string `json:"content"`
+	Content string `json:"-"`
+}
+
+// UnmarshalJSON handles content being either a string or an inline JSON object.
+// LLMs sometimes return JSON file content as an object instead of a string.
+func (o *appChatOperation) UnmarshalJSON(data []byte) error {
+	type Alias appChatOperation
+	aux := &struct {
+		Content json.RawMessage `json:"content"`
+		*Alias
+	}{Alias: (*Alias)(o)}
+
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+
+	if len(aux.Content) == 0 {
+		return nil
+	}
+
+	// Try string first
+	var s string
+	if err := json.Unmarshal(aux.Content, &s); err == nil {
+		o.Content = s
+		return nil
+	}
+
+	// Content is a JSON object/array — re-marshal it to a formatted string
+	o.Content = string(aux.Content)
+	// Pretty-print for readability
+	var pretty json.RawMessage
+	if json.Unmarshal(aux.Content, &pretty) == nil {
+		if formatted, err := json.MarshalIndent(pretty, "", "  "); err == nil {
+			o.Content = string(formatted)
+		}
+	}
+	return nil
 }
 
 type appChatResponse struct {
 	Operations []appChatOperation `json:"operations"`
 	Summary    string             `json:"summary"`
+}
+
+// appChatTools defines the tools available to the chat LLM for on-demand file access.
+var appChatTools = []utils.Tool{
+	{
+		Type: "function",
+		Function: utils.ToolFunction{
+			Name:        "read_file",
+			Description: "Read the full content of a project file by its path. Use this to see a file's current implementation before modifying it.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"file_path": map[string]any{
+						"type":        "string",
+						"description": "Relative file path, e.g. 'app/page.tsx' or 'components/header.tsx'",
+					},
+				},
+				"required": []string{"file_path"},
+			},
+		},
+	},
+	{
+		Type: "function",
+		Function: utils.ToolFunction{
+			Name:        "list_files",
+			Description: "List all files in the project with their types and sizes. Use this to understand the project structure.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{},
+			},
+		},
+	},
+	{
+		Type: "function",
+		Function: utils.ToolFunction{
+			Name:        "search_files",
+			Description: "Search for files containing a specific text pattern. Returns matching file paths and the matching lines.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"query": map[string]any{
+						"type":        "string",
+						"description": "Text to search for in file contents (case-insensitive)",
+					},
+				},
+				"required": []string{"query"},
+			},
+		},
+	},
+}
+
+// buildChatToolExecutor returns a ToolExecutor that can read/list/search project files.
+// fileMap is the in-memory map of path→content for the current project.
+func buildChatToolExecutor(fileMap map[string]string) utils.ToolExecutor {
+	return func(name string, arguments string) (string, error) {
+		switch name {
+		case "read_file":
+			var args struct {
+				FilePath string `json:"file_path"`
+			}
+			json.Unmarshal([]byte(arguments), &args)
+			content, ok := fileMap[args.FilePath]
+			if !ok {
+				return fmt.Sprintf("Error: file '%s' not found in project", args.FilePath), nil
+			}
+			return content, nil
+
+		case "list_files":
+			var lines []string
+			for path, content := range fileMap {
+				lines = append(lines, fmt.Sprintf("%s (%d chars)", path, len(content)))
+			}
+			sort.Strings(lines)
+			return strings.Join(lines, "\n"), nil
+
+		case "search_files":
+			var args struct {
+				Query string `json:"query"`
+			}
+			json.Unmarshal([]byte(arguments), &args)
+			query := strings.ToLower(args.Query)
+			var results []string
+			for path, content := range fileMap {
+				lines := strings.Split(content, "\n")
+				for i, line := range lines {
+					if strings.Contains(strings.ToLower(line), query) {
+						results = append(results, fmt.Sprintf("%s:%d: %s", path, i+1, strings.TrimSpace(line)))
+					}
+				}
+			}
+			if len(results) == 0 {
+				return "No matches found.", nil
+			}
+			if len(results) > 50 {
+				results = results[:50]
+			}
+			return strings.Join(results, "\n"), nil
+
+		default:
+			return fmt.Sprintf("Unknown tool: %s", name), nil
+		}
+	}
 }
 
 // StreamChatAppFileOps processes a chat message and applies file operations with SSE streaming.
@@ -60,12 +199,25 @@ func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.A
 		return
 	}
 
-	// Build file tree context
+	// Build in-memory file map for tool executor
+	currentFiles := make(map[string]string)
+	for _, f := range files {
+		currentFiles[f.FilePath] = f.Content
+	}
+
+	// Build lightweight file tree (paths + sizes only) — LLM will use tools to read files
 	var fileTree strings.Builder
 	fileTree.WriteString("Current project files:\n")
+	filePaths := make([]string, 0, len(files))
 	for _, f := range files {
-		fileTree.WriteString(fmt.Sprintf("\n--- %s (%s) ---\n%s\n", f.FilePath, f.FileType, f.Content))
+		filePaths = append(filePaths, f.FilePath)
 	}
+	sort.Strings(filePaths)
+	for _, fp := range filePaths {
+		content := currentFiles[fp]
+		fileTree.WriteString(fmt.Sprintf("- %s (%d chars)\n", fp, len(content)))
+	}
+	fileTree.WriteString("\nUse the read_file tool to view any file's content before modifying it.")
 
 	// Get connected integrations
 	integrations, _ := c.DB.GetAppIntegrationsByProjectID(project.ID.String())
@@ -103,7 +255,9 @@ func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.A
 		Timestamp: time.Now().Unix(),
 	})
 	conv.Messages, _ = json.Marshal(messages)
-	c.DB.UpdateAppConversation(conv)
+	if _, err := c.DB.UpdateAppConversation(conv); err != nil {
+		slog.Error("failed to save user message to conversation", "error", err, "conv_id", conv.ID)
+	}
 
 	// Build LLM messages
 	llmMessages := []utils.Message{
@@ -138,17 +292,31 @@ func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.A
 	// Create auto-snapshot before making changes
 	c.CreateAppSnapshot(project, "Auto-save before chat edit", "auto")
 
-	// Call LLM with streaming (don't stream raw JSON chunks to chat — the frontend
-	// shows "Thinking..." while we wait, and we send the summary at the end)
-	responseJSON, err := utils.StreamJSONFromLLMWithMessages(
+	// Send thinking event so the frontend shows progress
+	sendEvent("chat_thinking", responses.ChatThinkingEvent{Chunk: ""})
+
+	slog.Info("Calling LLM for chat", "model", model, "project_id", project.ID, "message_count", len(llmMessages))
+
+	// Call LLM with tool calling — LLM reads files on demand instead of all files in context
+	executor := buildChatToolExecutor(currentFiles)
+	responseJSON, err := utils.StreamWithTools(
 		ctx,
 		model,
 		llmMessages,
+		appChatTools,
 		apiKey,
+		&utils.ResponseFormat{Type: "json_object"},
+		executor,
+		func(toolName, args string) {
+			sendEvent("tool_call", responses.ToolCallEvent{
+				Tool:      toolName,
+				Arguments: args,
+			})
+		},
 		nil,
 	)
 	if err != nil {
-		slog.Error("failed to get chat response from LLM", "error", err)
+		slog.Error("failed to get chat response from LLM", "error", err, "response_so_far", len(responseJSON))
 		// Save the error as assistant message so it persists on refresh
 		messages = append(messages, models.AppConversationMessage{
 			Role:      "assistant",
@@ -156,33 +324,57 @@ func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.A
 			Timestamp: time.Now().Unix(),
 		})
 		conv.Messages, _ = json.Marshal(messages)
-		c.DB.UpdateAppConversation(conv)
+		if _, err := c.DB.UpdateAppConversation(conv); err != nil {
+			slog.Error("failed to save error message to conversation", "error", err, "conv_id", conv.ID)
+		}
 		sendError("ai", "failed to generate changes. try again please")
 		return
 	}
 
-	// Clean the response: strip markdown code fences that LLMs often add
-	cleaned := strings.TrimSpace(responseJSON)
-	cleaned = strings.TrimPrefix(cleaned, "```json")
-	cleaned = strings.TrimPrefix(cleaned, "```")
-	cleaned = strings.TrimSuffix(cleaned, "```")
-	cleaned = strings.TrimSpace(cleaned)
+	slog.Info("Chat LLM response received", "response_length", len(responseJSON), "project_id", project.ID)
 
+	// StreamJSONFromLLMWithMessages already calls CleanLLMOutput, so responseJSON
+	// should be clean JSON. Try direct parse first.
 	var chatResp appChatResponse
-	if err := json.Unmarshal([]byte(cleaned), &chatResp); err != nil {
-		// Fallback: try to extract JSON object from the response
-		extracted := utils.ExtractJSON(responseJSON)
-		if err2 := json.Unmarshal([]byte(extracted), &chatResp); err2 != nil {
-			slog.Error("failed to parse chat response", "error", err, "extractErr", err2, "json", responseJSON)
-			// Last resort: treat the whole response as a summary with no operations
-			chatResp = appChatResponse{
-				Operations: []appChatOperation{},
-				Summary:    "I wasn't able to generate the changes properly. Please try again with a more specific request.",
+	if err := json.Unmarshal([]byte(responseJSON), &chatResp); err != nil {
+		// Fallback: strip any remaining markdown fences
+		cleaned := strings.TrimSpace(responseJSON)
+		cleaned = strings.TrimPrefix(cleaned, "```json")
+		cleaned = strings.TrimPrefix(cleaned, "```")
+		cleaned = strings.TrimSuffix(cleaned, "```")
+		cleaned = strings.TrimSpace(cleaned)
+
+		if err2 := json.Unmarshal([]byte(cleaned), &chatResp); err2 != nil {
+			// Last fallback: extract JSON object from response
+			extracted := utils.ExtractJSON(responseJSON)
+			if err3 := json.Unmarshal([]byte(extracted), &chatResp); err3 != nil {
+				// Log details for debugging
+				preview := responseJSON
+				if len(preview) > 500 {
+					preview = preview[:250] + "\n...[truncated]...\n" + preview[len(preview)-250:]
+				}
+				slog.Error("failed to parse chat response — all attempts failed",
+					"parse_err", err,
+					"clean_err", err2,
+					"extract_err", err3,
+					"response_length", len(responseJSON),
+					"response_preview", preview,
+				)
+				chatResp = appChatResponse{
+					Operations: []appChatOperation{},
+					Summary:    "I wasn't able to generate the changes properly. Please try again with a more specific request.",
+				}
 			}
 		}
 	}
 
-	// Apply operations
+	slog.Info("Chat response parsed",
+		"operations_count", len(chatResp.Operations),
+		"summary_length", len(chatResp.Summary),
+		"project_id", project.ID,
+	)
+
+	// Apply operations (filter out template files)
 	filesChanged := 0
 	for _, op := range chatResp.Operations {
 		if ctx.Err() != nil {
@@ -208,6 +400,7 @@ func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.A
 				slog.Error("failed to create file", "error", err, "path", op.Path)
 				continue
 			}
+			currentFiles[op.Path] = content
 			if !sendEvent("file_complete", responses.FileCompleteEvent{
 				Action:   "create",
 				FilePath: op.Path,
@@ -221,7 +414,39 @@ func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.A
 		case "modify":
 			existingFile, err := c.DB.GetAppGeneratedFileByPath(project.ID.String(), "nextjs", op.Path)
 			if err != nil {
-				slog.Error("file not found for modify", "error", err, "path", op.Path)
+				// File not found — fall back to creating it instead of silently skipping
+				slog.Warn("file not found for modify, creating instead", "path", op.Path)
+				content := cleanAppFileOutput(op.Content, op.Type)
+				fileType := op.Type
+				if fileType == "" {
+					_, fileType = guessFileType(op.Path)
+				}
+				if fileType == "tsx" || fileType == "ts" {
+					content, _ = stripForbiddenImports(content, op.Path)
+				}
+				newFile := models.AppGeneratedFile{
+					AppProjectID: project.ID,
+					Platform:     "nextjs",
+					FilePath:     op.Path,
+					Content:      content,
+					FileType:     fileType,
+					IsGenerated:  true,
+				}
+				createdFile, createErr := c.DB.CreateAppGeneratedFile(&newFile)
+				if createErr != nil {
+					slog.Error("failed to create file (modify fallback)", "error", createErr, "path", op.Path)
+					continue
+				}
+				currentFiles[op.Path] = content
+				if !sendEvent("file_complete", responses.FileCompleteEvent{
+					Action:   "create",
+					FilePath: op.Path,
+					FileID:   createdFile.ID,
+					FileType: fileType,
+				}) {
+					return
+				}
+				filesChanged++
 				continue
 			}
 			content := cleanAppFileOutput(op.Content, op.Type)
@@ -230,11 +455,12 @@ func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.A
 			}
 			existingFile.Content = content
 			existingFile.UpdatedAt = time.Now()
-			_, err = c.DB.UpsertAppGeneratedFile(existingFile)
+			_, err = c.DB.UpdateAppGeneratedFile(existingFile)
 			if err != nil {
 				slog.Error("failed to update file", "error", err, "path", op.Path)
 				continue
 			}
+			currentFiles[op.Path] = content
 			if !sendEvent("file_complete", responses.FileCompleteEvent{
 				Action:   "modify",
 				FilePath: op.Path,
@@ -251,6 +477,7 @@ func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.A
 				continue
 			}
 			c.DB.DeleteAppGeneratedFile(existingFile)
+			delete(currentFiles, op.Path)
 			if !sendEvent("file_complete", responses.FileCompleteEvent{
 				Action:   "delete",
 				FilePath: op.Path,
@@ -261,6 +488,19 @@ func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.A
 		}
 	}
 
+	// Run deterministic validation + LLM fix on modified files
+	if filesChanged > 0 {
+		fixedCount := c.validateAndFixFiles(ctx, project, currentFiles, nil, sendEvent)
+		if fixedCount > 0 {
+			slog.Info("Chat validation fixed files", "project_id", project.ID, "fixed_count", fixedCount)
+		}
+
+		// Auto-sync to preview container if running
+		if c.PreviewService != nil {
+			go c.SyncPreviewFiles(project.ID.String())
+		}
+	}
+
 	// Save assistant response to conversation
 	messages = append(messages, models.AppConversationMessage{
 		Role:      "assistant",
@@ -268,29 +508,8 @@ func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.A
 		Timestamp: time.Now().Unix(),
 	})
 	conv.Messages, _ = json.Marshal(messages)
-	c.DB.UpdateAppConversation(conv)
-
-	// Auto-deploy to Vercel after chat edits
-	if c.VercelService != nil && filesChanged > 0 {
-		sendEvent("deploying", map[string]string{"status": "starting"})
-
-		deployment, err := c.DeployToVercel(project, user, "production")
-		if err != nil {
-			slog.Error("Auto-deploy after chat failed", "project_id", project.ID, "error", err)
-			sendEvent("deploy_error", map[string]string{"error": err.Error()})
-		} else {
-			sendEvent("deployed", responses.AppDeploymentResponse{
-				ID:           deployment.ID,
-				AppProjectID: deployment.AppProjectID,
-				Platform:     deployment.Platform,
-				Provider:     deployment.Provider,
-				Status:       deployment.Status,
-				DeployedURL:  deployment.DeployedURL,
-				Version:      deployment.Version,
-				CreatedAt:    deployment.CreatedAt,
-				UpdatedAt:    deployment.UpdatedAt,
-			})
-		}
+	if _, err := c.DB.UpdateAppConversation(conv); err != nil {
+		slog.Error("failed to save assistant message to conversation", "error", err, "conv_id", conv.ID)
 	}
 
 	sendEvent("chat_complete", map[string]any{

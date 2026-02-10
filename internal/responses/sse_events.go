@@ -73,3 +73,14 @@ type PlanningChunkEvent struct {
 	Chunk string `json:"chunk"`
 	Phase string `json:"phase"` // "structure", "vision"
 }
+
+type ValidationEvent struct {
+	Iteration int      `json:"iteration"`
+	Errors    []string `json:"errors"`
+	Fixing    bool     `json:"fixing"`
+}
+
+type ToolCallEvent struct {
+	Tool      string `json:"tool"`
+	Arguments string `json:"arguments"`
+}

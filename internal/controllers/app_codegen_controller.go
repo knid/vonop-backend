@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -29,6 +30,486 @@ type appFilePlanEntry struct {
 	Path        string `json:"path"`
 	Type        string `json:"type"`
 	Description string `json:"description"`
+}
+
+// validationError represents a deterministic check failure
+type validationError struct {
+	File  string `json:"file"`
+	Error string `json:"error"`
+	Type  string `json:"type"`
+}
+
+// llmFixResponse is the expected JSON from the fix LLM pass
+type llmFixResponse struct {
+	Fixes []struct {
+		Path    string `json:"path"`
+		Content string `json:"content"`
+	} `json:"fixes"`
+}
+
+// --- Regex patterns for deterministic checks ---
+var hookPattern = regexp.MustCompile(`\b(useState|useEffect|useRef|useCallback|useMemo|useReducer|useContext)\s*[\(<]`)
+var fontVariableUsagePattern = regexp.MustCompile(`\.\s*variable\b`)
+var fontVariableOptionPattern = regexp.MustCompile(`variable\s*:\s*['"]--font-`)
+var fontConstructorPattern = regexp.MustCompile(`(?:const|let|var)\s+\w+\s*=\s*\w+\s*\(`)
+
+// --- Template helpers ---
+
+// isTemplateFile checks if a file path is managed by hardcoded templates
+func isTemplateFile(path string) bool {
+	for _, tp := range constants.NEXTJS_TEMPLATE_FILE_PATHS {
+		if path == tp {
+			return true
+		}
+	}
+	return false
+}
+
+// getColor safely extracts a color hex value from a scheme map
+func getColor(scheme map[string]any, key, fallback string) string {
+	if v, ok := scheme[key]; ok {
+		if s, ok := v.(string); ok && s != "" {
+			return s
+		}
+	}
+	return fallback
+}
+
+// buildTailwindConfig injects hex colors into the tailwind template
+func buildTailwindConfig(colorScheme map[string]any) string {
+	config := constants.NEXTJS_TEMPLATE_TAILWIND_CONFIG
+	config = strings.ReplaceAll(config, "{{PRIMARY}}", getColor(colorScheme, "primary", "#3B82F6"))
+	config = strings.ReplaceAll(config, "{{SECONDARY}}", getColor(colorScheme, "secondary", "#6366F1"))
+	config = strings.ReplaceAll(config, "{{ACCENT}}", getColor(colorScheme, "accent", "#F59E0B"))
+	config = strings.ReplaceAll(config, "{{BACKGROUND}}", getColor(colorScheme, "background", "#FFFFFF"))
+	config = strings.ReplaceAll(config, "{{SURFACE}}", getColor(colorScheme, "surface", "#F3F4F6"))
+	config = strings.ReplaceAll(config, "{{TEXT}}", getColor(colorScheme, "text", "#111827"))
+	return config
+}
+
+// getTemplateContent returns the hardcoded content for a template file
+func getTemplateContent(path string, colorScheme map[string]any) string {
+	switch path {
+	case "package.json":
+		return constants.NEXTJS_TEMPLATE_PACKAGE_JSON
+	case "tsconfig.json":
+		return constants.NEXTJS_TEMPLATE_TSCONFIG
+	case "postcss.config.mjs":
+		return constants.NEXTJS_TEMPLATE_POSTCSS_CONFIG
+	case "next.config.mjs":
+		return constants.NEXTJS_TEMPLATE_NEXT_CONFIG
+	case "tailwind.config.ts":
+		return buildTailwindConfig(colorScheme)
+	}
+	return ""
+}
+
+// appCodegenTools defines the tools available to per-file codegen for reading sibling files.
+var appCodegenTools = []utils.Tool{
+	{
+		Type: "function",
+		Function: utils.ToolFunction{
+			Name:        "read_file",
+			Description: "Read the content of an already-generated project file. Use this to see exact exports, types, and implementations from sibling files so your imports match.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"file_path": map[string]any{
+						"type":        "string",
+						"description": "Relative file path, e.g. 'components/header.tsx'",
+					},
+				},
+				"required": []string{"file_path"},
+			},
+		},
+	},
+	{
+		Type: "function",
+		Function: utils.ToolFunction{
+			Name:        "list_files",
+			Description: "List all already-generated files in the project.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{},
+			},
+		},
+	},
+}
+
+// categorizeFiles sorts files into generation tiers.
+// Tier 0 is not returned (template files are filtered out before calling this).
+// Returns tiers 1-4 as separate slices.
+func categorizeFiles(files []appFilePlanEntry) [][]appFilePlanEntry {
+	tiers := make([][]appFilePlanEntry, 4) // index 0=tier1, 1=tier2, 2=tier3, 3=tier4
+
+	for _, f := range files {
+		switch {
+		// Tier 4: root layout and globals.css
+		case f.Path == "app/layout.tsx" || f.Path == "app/globals.css":
+			tiers[3] = append(tiers[3], f)
+		// Tier 1: lib, utils, types, data, hooks, contexts, stores
+		case strings.HasPrefix(f.Path, "lib/") ||
+			strings.HasPrefix(f.Path, "utils/") ||
+			strings.HasPrefix(f.Path, "types/") ||
+			strings.HasPrefix(f.Path, "data/") ||
+			strings.HasPrefix(f.Path, "hooks/") ||
+			strings.HasPrefix(f.Path, "contexts/") ||
+			strings.HasPrefix(f.Path, "store/"):
+			tiers[0] = append(tiers[0], f)
+		// Tier 2: components
+		case strings.HasPrefix(f.Path, "components/"):
+			tiers[1] = append(tiers[1], f)
+		// Tier 3: pages (app/**/page.tsx) and API routes
+		default:
+			tiers[2] = append(tiers[2], f)
+		}
+	}
+
+	return tiers
+}
+
+// augmentPackageJSON scans generated files for third-party npm imports and adds them
+// to the base template package.json if not already present
+func augmentPackageJSON(baseTemplate string, files map[string]string) string {
+	// Known packages that are already in the template or are built-in
+	knownPackages := map[string]bool{
+		"react": true, "react-dom": true, "next": true,
+		"lucide-react": true, "clsx": true, "framer-motion": true,
+		"typescript": true, "tailwindcss": true, "postcss": true, "autoprefixer": true,
+		// Next.js built-in
+		"next/image": true, "next/link": true, "next/font": true,
+		"next/navigation": true, "next/headers": true, "next/server": true,
+		"next/font/google": true, "next/font/local": true, "next/dynamic": true,
+		// React built-in
+		"react/jsx-runtime": true,
+	}
+
+	// Scan all files for import statements
+	importRegex := regexp.MustCompile(`(?m)^import\s+.*\s+from\s+['"]([^'"@./][^'"]*?)(?:/[^'"]*)?['"]`)
+
+	foundPackages := make(map[string]bool)
+	for _, content := range files {
+		matches := importRegex.FindAllStringSubmatch(content, -1)
+		for _, match := range matches {
+			pkg := match[1]
+			if !knownPackages[pkg] && !strings.HasPrefix(pkg, "@types/") {
+				foundPackages[pkg] = true
+			}
+		}
+	}
+
+	if len(foundPackages) == 0 {
+		return baseTemplate
+	}
+
+	// Parse base template and add packages
+	var pkgJSON map[string]any
+	if err := json.Unmarshal([]byte(baseTemplate), &pkgJSON); err != nil {
+		return baseTemplate
+	}
+
+	deps, ok := pkgJSON["dependencies"].(map[string]any)
+	if !ok {
+		deps = make(map[string]any)
+		pkgJSON["dependencies"] = deps
+	}
+
+	// Known version mappings for common packages
+	versionMap := map[string]string{
+		"zustand":             "^4.5.0",
+		"axios":               "^1.7.0",
+		"date-fns":            "^3.6.0",
+		"zod":                 "^3.23.0",
+		"react-hook-form":     "^7.51.0",
+		"@hookform/resolvers": "^3.3.0",
+		"embla-carousel-react": "^8.0.0",
+		"recharts":            "^2.12.0",
+		"react-icons":         "^5.0.0",
+		"swiper":              "^11.0.0",
+		"@radix-ui/react-dialog":   "^1.0.0",
+		"@radix-ui/react-dropdown-menu": "^2.0.0",
+		"@radix-ui/react-tabs":     "^1.0.0",
+		"@radix-ui/react-slot":     "^1.0.0",
+		"class-variance-authority":  "^0.7.0",
+		"tailwind-merge":            "^2.2.0",
+	}
+
+	for pkg := range foundPackages {
+		if _, exists := deps[pkg]; !exists {
+			if version, ok := versionMap[pkg]; ok {
+				deps[pkg] = version
+			} else {
+				deps[pkg] = "latest"
+			}
+			slog.Info("Added discovered dependency to package.json", "package", pkg)
+		}
+	}
+
+	result, err := json.MarshalIndent(pkgJSON, "", "  ")
+	if err != nil {
+		return baseTemplate
+	}
+	return string(result)
+}
+
+// --- Deterministic Validators ---
+
+// runDeterministicChecks runs regex-based checks on generated files and returns errors
+func runDeterministicChecks(files map[string]string) []validationError {
+	var errors []validationError
+
+	// Build known paths set for import resolution
+	knownPaths := make(map[string]bool)
+	for path := range files {
+		knownPaths[path] = true
+		withoutExt := strings.TrimSuffix(strings.TrimSuffix(strings.TrimSuffix(path, ".tsx"), ".ts"), ".js")
+		knownPaths[withoutExt] = true
+		if strings.HasSuffix(withoutExt, "/index") {
+			knownPaths[strings.TrimSuffix(withoutExt, "/index")] = true
+		}
+	}
+
+	for filePath, content := range files {
+		// Skip template/config files
+		if isTemplateFile(filePath) || isConfigFile(filePath) {
+			continue
+		}
+
+		if !strings.HasSuffix(filePath, ".tsx") && !strings.HasSuffix(filePath, ".ts") {
+			continue // only check TS/TSX files
+		}
+
+		// Check 1: Missing @/ imports
+		importMatches := importPathRegex.FindAllStringSubmatch(content, -1)
+		for _, match := range importMatches {
+			importPath := match[1]
+			if !knownPaths[importPath] &&
+				!knownPaths[importPath+".tsx"] &&
+				!knownPaths[importPath+".ts"] &&
+				!knownPaths[importPath+"/index.tsx"] &&
+				!knownPaths[importPath+"/index.ts"] {
+				errors = append(errors, validationError{
+					File:  filePath,
+					Error: fmt.Sprintf("Import '@/%s' does not resolve to any file in the project", importPath),
+					Type:  "missing_import",
+				})
+			}
+		}
+
+		// Check 2: React hooks without "use client"
+		if hookPattern.MatchString(content) {
+			hasUseClient := strings.Contains(content, `"use client"`) || strings.Contains(content, `'use client'`)
+			if !hasUseClient {
+				errors = append(errors, validationError{
+					File:  filePath,
+					Error: "File uses React hooks (useState/useEffect/etc.) but is missing \"use client\" directive",
+					Type:  "missing_use_client",
+				})
+			}
+		}
+
+		// Check 3: Font .variable used without variable: option in constructor
+		if fontVariableUsagePattern.MatchString(content) {
+			// Check if any font constructor has variable: option
+			if !fontVariableOptionPattern.MatchString(content) {
+				errors = append(errors, validationError{
+					File:  filePath,
+					Error: "Uses font.variable but no font constructor has variable: '--font-...' option. Add variable option to the font constructor.",
+					Type:  "font_variable",
+				})
+			}
+		}
+
+		// Check 4: Forbidden Node.js/build-time imports
+		forbiddenMatches := forbiddenImportRegex.FindAllString(content, -1)
+		for _, m := range forbiddenMatches {
+			errors = append(errors, validationError{
+				File:  filePath,
+				Error: fmt.Sprintf("Forbidden import in browser code: %s", strings.TrimSpace(m)),
+				Type:  "forbidden_import",
+			})
+		}
+	}
+
+	return errors
+}
+
+// appFixTools defines the tools available to the fix LLM for on-demand file access.
+var appFixTools = []utils.Tool{
+	{
+		Type: "function",
+		Function: utils.ToolFunction{
+			Name:        "read_file",
+			Description: "Read the full content of a project file by its path. Use this to see the current implementation before fixing it.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"file_path": map[string]any{
+						"type":        "string",
+						"description": "Relative file path, e.g. 'app/page.tsx'",
+					},
+				},
+				"required": []string{"file_path"},
+			},
+		},
+	},
+	{
+		Type: "function",
+		Function: utils.ToolFunction{
+			Name:        "list_files",
+			Description: "List all files in the project.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{},
+			},
+		},
+	},
+	{
+		Type: "function",
+		Function: utils.ToolFunction{
+			Name:        "search_files",
+			Description: "Search for files containing a specific text pattern.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"query": map[string]any{
+						"type":        "string",
+						"description": "Text to search for (case-insensitive)",
+					},
+				},
+				"required": []string{"query"},
+			},
+		},
+	},
+}
+
+// llmFixPass sends validation errors to LLM with tool access for auto-fix
+func (c *Controller) llmFixPass(ctx context.Context, files map[string]string, valErrors []validationError, structure *appFileStructure) map[string]string {
+	apiKey := c.SecretManager.GetSecret("OPENROUTER_API_KEY")
+	model := c.SecretManager.GetSecret("NEXTJS_BUILDER_LLM_MODEL")
+	if model == "" {
+		model = constants.DEFAULT_NEXTJS_LLM_MODEL
+	}
+
+	// Build lightweight file list + error list (LLM will use tools to read files)
+	var fileList strings.Builder
+	fileList.WriteString("Project files:\n")
+	paths := make([]string, 0, len(files))
+	for path := range files {
+		if !isTemplateFile(path) {
+			paths = append(paths, path)
+		}
+	}
+	sort.Strings(paths)
+	for _, path := range paths {
+		fileList.WriteString(fmt.Sprintf("- %s (%d chars)\n", path, len(files[path])))
+	}
+
+	var errList strings.Builder
+	errList.WriteString("\nValidation errors found:\n")
+	for i, e := range valErrors {
+		errList.WriteString(fmt.Sprintf("%d. [%s] %s: %s\n", i+1, e.Type, e.File, e.Error))
+	}
+
+	userMessage := fileList.String() + errList.String() + "\nUse read_file to inspect the files with errors, then provide fixes."
+
+	executor := buildChatToolExecutor(files)
+	responseJSON, err := utils.StreamWithTools(
+		ctx,
+		model,
+		[]utils.Message{
+			{Role: "system", Content: constants.NEXTJS_FIX_PROMPT},
+			{Role: "user", Content: userMessage},
+		},
+		appFixTools,
+		apiKey,
+		&utils.ResponseFormat{Type: "json_object"},
+		executor,
+		nil,
+		nil,
+	)
+	if err != nil {
+		slog.Error("LLM fix pass failed", "error", err)
+		return nil
+	}
+
+	var fixResp llmFixResponse
+	if err := json.Unmarshal([]byte(responseJSON), &fixResp); err != nil {
+		cleaned := utils.ExtractJSON(responseJSON)
+		if err2 := json.Unmarshal([]byte(cleaned), &fixResp); err2 != nil {
+			slog.Error("Failed to parse LLM fix response", "error", err2)
+			return nil
+		}
+	}
+
+	fixes := make(map[string]string)
+	for _, fix := range fixResp.Fixes {
+		if fix.Path != "" && fix.Content != "" && !isTemplateFile(fix.Path) {
+			fixes[fix.Path] = cleanAppFileOutput(fix.Content, "tsx")
+		}
+	}
+
+	return fixes
+}
+
+// validateAndFixFiles runs deterministic checks and LLM fix loop. Max 2 iterations.
+// Returns total number of fixed files.
+func (c *Controller) validateAndFixFiles(ctx context.Context, project *models.AppProject, files map[string]string, structure *appFileStructure, sendEvent func(string, any) bool) int {
+	totalFixed := 0
+
+	for iteration := 1; iteration <= 2; iteration++ {
+		if ctx.Err() != nil {
+			return totalFixed
+		}
+
+		valErrors := runDeterministicChecks(files)
+		if len(valErrors) == 0 {
+			slog.Info("Validation passed with no errors", "project_id", project.ID, "iteration", iteration)
+			sendEvent("validation", responses.ValidationEvent{
+				Iteration: iteration,
+				Errors:    []string{},
+				Fixing:    false,
+			})
+			return totalFixed
+		}
+
+		// Report errors
+		errStrings := make([]string, len(valErrors))
+		for i, e := range valErrors {
+			errStrings[i] = fmt.Sprintf("[%s] %s: %s", e.Type, e.File, e.Error)
+		}
+		slog.Info("Validation found errors", "project_id", project.ID, "iteration", iteration, "count", len(valErrors))
+
+		sendEvent("validation", responses.ValidationEvent{
+			Iteration: iteration,
+			Errors:    errStrings,
+			Fixing:    true,
+		})
+
+		// Call LLM fix pass
+		fixes := c.llmFixPass(ctx, files, valErrors, structure)
+		if fixes == nil || len(fixes) == 0 {
+			slog.Warn("LLM fix pass returned no fixes", "project_id", project.ID, "iteration", iteration)
+			break
+		}
+
+		// Apply fixes to DB and in-memory map
+		for path, content := range fixes {
+			files[path] = content
+
+			dbFile, err := c.DB.GetAppGeneratedFileByPath(project.ID.String(), "nextjs", path)
+			if err == nil && dbFile != nil {
+				dbFile.Content = content
+				dbFile.UpdatedAt = time.Now()
+				c.DB.UpdateAppGeneratedFile(dbFile)
+			}
+			totalFixed++
+		}
+
+		slog.Info("Applied LLM fixes", "project_id", project.ID, "iteration", iteration, "files_fixed", len(fixes))
+	}
+
+	return totalFixed
 }
 
 // PlanAppFileStructure calls LLM to generate a file plan for the app
@@ -122,10 +603,6 @@ func (c *Controller) getAppFilePrompt(fileType string) string {
 	switch fileType {
 	case "css":
 		return constants.NEXTJS_FILE_CSS_PROMPT
-	case "json":
-		return constants.NEXTJS_FILE_JSON_PROMPT
-	case "ts":
-		return constants.NEXTJS_FILE_CONFIG_PROMPT
 	default: // tsx, ts components
 		return constants.NEXTJS_FILE_TSX_PROMPT
 	}
@@ -138,17 +615,15 @@ func (c *Controller) getAppFileFallback(filePlan appFilePlanEntry) string {
 		return fmt.Sprintf("export default function Page() {\n  return <div><h1>%s</h1><p>Generation failed. Please edit this file.</p></div>\n}", filePlan.Description)
 	case "css":
 		return "@tailwind base;\n@tailwind components;\n@tailwind utilities;\n\n/* Generation failed. Please edit manually. */"
-	case "json":
-		return `{"name":"app","version":"0.1.0","private":true,"scripts":{"dev":"next dev","build":"next build","start":"next start"},"dependencies":{"next":"^14.0.0","react":"^18.0.0","react-dom":"^18.0.0"},"devDependencies":{"typescript":"^5.0.0","@types/react":"^18.0.0","@types/node":"^20.0.0","tailwindcss":"^3.4.0","postcss":"^8.0.0","autoprefixer":"^10.0.0"}}`
 	case "ts":
-		return "// Config generation failed. Please edit manually."
+		return "// Generation failed. Please edit manually.\nexport {}"
 	default:
 		return ""
 	}
 }
 
 // StreamGenerateAppFiles generates app files one by one with SSE streaming.
-// Mirrors the GenerateWebsiteFilesStream pattern.
+// Uses tiered generation with context accumulation and deterministic validation.
 func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models.AppProject, user *models.User, prompt string, projectType string, events chan<- responses.SSEEvent) {
 	defer close(events)
 
@@ -204,23 +679,33 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 	project.Theme = themeJSON
 	project, _ = c.DB.UpdateAppProject(project)
 
-	// Step 3: Send project_created event with file plan
-	filePaths := make([]string, len(structure.Files))
-	for i, f := range structure.Files {
-		filePaths[i] = f.Path
+	// Step 3: Filter template files from structure (strip them even if LLM included them)
+	var appFiles []appFilePlanEntry
+	for _, f := range structure.Files {
+		if !isTemplateFile(f.Path) {
+			appFiles = append(appFiles, f)
+		}
+	}
+
+	// Build total file list (template + app files)
+	templatePaths := constants.NEXTJS_TEMPLATE_FILE_PATHS
+	allFilePaths := make([]string, 0, len(templatePaths)+len(appFiles))
+	allFilePaths = append(allFilePaths, templatePaths...)
+	for _, f := range appFiles {
+		allFilePaths = append(allFilePaths, f.Path)
 	}
 
 	if !sendEvent("project_created", map[string]any{
 		"id":         project.ID,
 		"name":       project.Name,
 		"slug":       project.Slug,
-		"files":      filePaths,
-		"totalFiles": len(structure.Files),
+		"files":      allFilePaths,
+		"totalFiles": len(allFilePaths),
 	}) {
 		return
 	}
 
-	// Step 4: Create conversation early with user message (so it persists even if generation fails)
+	// Step 4: Create conversation early with user message
 	convMessages := []models.AppConversationMessage{
 		{Role: "user", Content: project.Prompt, Timestamp: time.Now().Unix()},
 	}
@@ -236,89 +721,148 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 	// Step 5: Delete existing generated files for this project
 	c.DB.DeleteAppGeneratedFilesByProjectPlatform(project.ID.String(), "nextjs")
 
-	// Step 6: Generate each file with streaming
-	colorSchemeJSON, _ := json.Marshal(structure.ColorScheme)
-	allFilesContext := strings.Join(filePaths, ", ")
-
-	for _, filePlan := range structure.Files {
-		if ctx.Err() != nil {
-			return
+	// Step 6: Inject template files (tier 0)
+	generatedFiles := make(map[string]string) // accumulated content for context
+	for _, tp := range templatePaths {
+		content := getTemplateContent(tp, structure.ColorScheme)
+		fileType := "json"
+		switch {
+		case strings.HasSuffix(tp, ".ts"):
+			fileType = "ts"
+		case strings.HasSuffix(tp, ".mjs"):
+			fileType = "mjs"
 		}
 
-		prompt := c.getAppFilePrompt(filePlan.Type)
-		filePrompt := fmt.Sprintf(
-			"App name: %s\nColor scheme: %s\nTypography: %v\nAll files: %s\nCurrent file: %s\nDescription: %s\n\nUser's original description: %s",
-			structure.Name,
-			string(colorSchemeJSON),
-			structure.Typography,
-			allFilesContext,
-			filePlan.Path,
-			filePlan.Description,
-			project.Prompt,
-		)
-
-		content, err := utils.StreamTextFromLLM(
-			ctx,
-			model,
-			prompt,
-			filePrompt,
-			apiKey,
-			func(chunk string) {
-				sendEvent("file_chunk", responses.FileOperationEvent{
-					Action:   "create",
-					FilePath: filePlan.Path,
-					FileType: filePlan.Type,
-					Chunk:    chunk,
-				})
-			},
-		)
-		if err != nil {
-			slog.Error("failed to generate app file", "error", err, "path", filePlan.Path)
-			content = c.getAppFileFallback(filePlan)
-		}
-
-		content = cleanAppFileOutput(content, filePlan.Type)
-
-		// Strip forbidden imports (tailwindcss, Node.js builtins, etc.)
-		if filePlan.Type == "tsx" || filePlan.Type == "ts" {
-			content, _ = stripForbiddenImports(content, filePlan.Path)
-		}
-
-		// Save to DB
 		file := models.AppGeneratedFile{
 			AppProjectID: project.ID,
 			Platform:     "nextjs",
-			FilePath:     filePlan.Path,
+			FilePath:     tp,
 			Content:      content,
-			FileType:     filePlan.Type,
-			IsGenerated:  true,
+			FileType:     fileType,
+			IsGenerated:  false, // template-managed
 		}
-
 		createdFile, err := c.DB.CreateAppGeneratedFile(&file)
 		if err != nil {
-			slog.Error("failed to save app file", "error", err, "path", filePlan.Path)
+			slog.Error("failed to save template file", "error", err, "path", tp)
+			continue
+		}
+		generatedFiles[tp] = content
+
+		sendEvent("file_complete", responses.FileCompleteEvent{
+			Action:   "create",
+			FilePath: tp,
+			FileID:   createdFile.ID,
+			FileType: fileType,
+		})
+	}
+
+	// Step 7: Categorize remaining files into tiers and generate with context accumulation
+	tiers := categorizeFiles(appFiles)
+	colorSchemeJSON, _ := json.Marshal(structure.ColorScheme)
+
+	for tierIdx, tier := range tiers {
+		if len(tier) == 0 {
 			continue
 		}
 
-		if !sendEvent("file_complete", responses.FileCompleteEvent{
-			Action:   "create",
-			FilePath: filePlan.Path,
-			FileID:   createdFile.ID,
-			FileType: filePlan.Type,
-		}) {
-			return
+		slog.Info("Generating tier", "project_id", project.ID, "tier", tierIdx+1, "files", len(tier))
+
+		for _, filePlan := range tier {
+			if ctx.Err() != nil {
+				return
+			}
+
+			filePrompt := c.getAppFilePrompt(filePlan.Type)
+
+			// Build lightweight file list (paths + sizes) — LLM uses tools to read siblings
+			var generatedFileList strings.Builder
+			if len(generatedFiles) > 0 {
+				generatedFileList.WriteString("\n\nAlready-generated files (use read_file to view):\n")
+				genPaths := make([]string, 0, len(generatedFiles))
+				for p := range generatedFiles {
+					genPaths = append(genPaths, p)
+				}
+				sort.Strings(genPaths)
+				for _, p := range genPaths {
+					generatedFileList.WriteString(fmt.Sprintf("- %s (%d chars)\n", p, len(generatedFiles[p])))
+				}
+			}
+
+			allFilesContext := strings.Join(allFilePaths, ", ")
+			userPrompt := fmt.Sprintf(
+				"App name: %s\nColor scheme: %s\nTypography: %v\nAll files: %s\nCurrent file: %s\nDescription: %s\n\nUser's original description: %s%s",
+				structure.Name,
+				string(colorSchemeJSON),
+				structure.Typography,
+				allFilesContext,
+				filePlan.Path,
+				filePlan.Description,
+				project.Prompt,
+				generatedFileList.String(),
+			)
+
+			codegenExecutor := buildChatToolExecutor(generatedFiles)
+			content, err := utils.StreamTextWithTools(
+				ctx,
+				model,
+				filePrompt,
+				userPrompt,
+				apiKey,
+				appCodegenTools,
+				codegenExecutor,
+				nil,
+				func(chunk string) {
+					sendEvent("file_chunk", responses.FileOperationEvent{
+						Action:   "create",
+						FilePath: filePlan.Path,
+						FileType: filePlan.Type,
+						Chunk:    chunk,
+					})
+				},
+			)
+			if err != nil {
+				slog.Error("failed to generate app file", "error", err, "path", filePlan.Path)
+				content = c.getAppFileFallback(filePlan)
+			}
+
+			content = cleanAppFileOutput(content, filePlan.Type)
+
+			// Strip forbidden imports
+			if filePlan.Type == "tsx" || filePlan.Type == "ts" {
+				content, _ = stripForbiddenImports(content, filePlan.Path)
+			}
+
+			// Save to DB
+			file := models.AppGeneratedFile{
+				AppProjectID: project.ID,
+				Platform:     "nextjs",
+				FilePath:     filePlan.Path,
+				Content:      content,
+				FileType:     filePlan.Type,
+				IsGenerated:  true,
+			}
+
+			createdFile, err := c.DB.CreateAppGeneratedFile(&file)
+			if err != nil {
+				slog.Error("failed to save app file", "error", err, "path", filePlan.Path)
+				continue
+			}
+
+			// Add to accumulated context
+			generatedFiles[filePlan.Path] = content
+
+			if !sendEvent("file_complete", responses.FileCompleteEvent{
+				Action:   "create",
+				FilePath: filePlan.Path,
+				FileID:   createdFile.ID,
+				FileType: filePlan.Type,
+			}) {
+				return
+			}
 		}
 	}
 
-	// Step 6b: Validate imports — find missing files and generate them
-	generatedFiles := make(map[string]string)
-	for _, filePlan := range structure.Files {
-		dbFile, err := c.DB.GetAppGeneratedFileByPath(project.ID.String(), "nextjs", filePlan.Path)
-		if err == nil && dbFile != nil {
-			generatedFiles[filePlan.Path] = dbFile.Content
-		}
-	}
-
+	// Step 8: Find and generate missing imports
 	missingImports := findMissingImports(generatedFiles)
 	if len(missingImports) > 0 {
 		slog.Info("Found missing imports, generating files", "project_id", project.ID, "missing", missingImports)
@@ -329,7 +873,7 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 			}
 
 			filePath, fileType := guessFileType(importPath)
-			prompt := c.getAppFilePrompt(fileType)
+			filePrompt := c.getAppFilePrompt(fileType)
 
 			// Build context about what files import this missing module
 			importedBy := []string{}
@@ -339,8 +883,24 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 				}
 			}
 
-			filePrompt := fmt.Sprintf(
-				"App name: %s\nColor scheme: %s\nTypography: %v\nAll files: %s\nCurrent file: %s\nDescription: This file is imported by: %s. Generate the implementation based on how it is used in those files.\n\nUser's original description: %s",
+			// Build lightweight file list for context
+			var genFileList strings.Builder
+			if len(generatedFiles) > 0 {
+				genFileList.WriteString("\n\nAlready-generated files (use read_file to view):\n")
+				genPaths := make([]string, 0, len(generatedFiles))
+				for p := range generatedFiles {
+					genPaths = append(genPaths, p)
+				}
+				sort.Strings(genPaths)
+				for _, p := range genPaths {
+					genFileList.WriteString(fmt.Sprintf("- %s (%d chars)\n", p, len(generatedFiles[p])))
+				}
+			}
+
+			allFilesContext := strings.Join(allFilePaths, ", ")
+
+			userPrompt := fmt.Sprintf(
+				"App name: %s\nColor scheme: %s\nTypography: %v\nAll files: %s\nCurrent file: %s\nDescription: This file is imported by: %s. Generate the implementation based on how it is used in those files.\n\nUser's original description: %s%s",
 				structure.Name,
 				string(colorSchemeJSON),
 				structure.Typography,
@@ -348,14 +908,19 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 				filePath,
 				strings.Join(importedBy, ", "),
 				project.Prompt,
+				genFileList.String(),
 			)
 
-			content, err := utils.StreamTextFromLLM(
+			missingExecutor := buildChatToolExecutor(generatedFiles)
+			content, err := utils.StreamTextWithTools(
 				ctx,
 				model,
-				prompt,
 				filePrompt,
+				userPrompt,
 				apiKey,
+				appCodegenTools,
+				missingExecutor,
+				nil,
 				func(chunk string) {
 					sendEvent("file_chunk", responses.FileOperationEvent{
 						Action:   "create",
@@ -367,13 +932,11 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 			)
 			if err != nil {
 				slog.Error("failed to generate missing import file", "error", err, "path", filePath)
-				// Generate a minimal export stub so the build doesn't fail
 				if fileType == "tsx" {
 					baseName := importPath
 					if idx := strings.LastIndex(importPath, "/"); idx >= 0 {
 						baseName = importPath[idx+1:]
 					}
-					// Convert kebab-case to PascalCase for component name
 					parts := strings.Split(baseName, "-")
 					for i, p := range parts {
 						if len(p) > 0 {
@@ -415,19 +978,27 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 		}
 	}
 
-	// Step 6c: Ensure package.json includes lucide-react
-	if fixedPkgJSON := ensureLucideReact(generatedFiles); fixedPkgJSON != "" {
+	// Step 9: Run deterministic validation + LLM fix loop
+	fixedCount := c.validateAndFixFiles(ctx, project, generatedFiles, structure, sendEvent)
+	if fixedCount > 0 {
+		slog.Info("Validation fixed files", "project_id", project.ID, "fixed_count", fixedCount)
+	}
+
+	// Step 10: Augment package.json with any discovered third-party deps
+	augmented := augmentPackageJSON(generatedFiles["package.json"], generatedFiles)
+	if augmented != generatedFiles["package.json"] {
 		dbFile, err := c.DB.GetAppGeneratedFileByPath(project.ID.String(), "nextjs", "package.json")
 		if err == nil && dbFile != nil {
-			dbFile.Content = fixedPkgJSON
+			dbFile.Content = augmented
 			c.DB.UpdateAppGeneratedFile(dbFile)
-			slog.Info("Added lucide-react to package.json", "project_id", project.ID)
+			slog.Info("Augmented package.json with discovered deps", "project_id", project.ID)
 		}
 	}
 
-	// Step 7: Update conversation with assistant message
+	// Step 11: Update conversation with assistant message
+	totalFiles := len(templatePaths) + len(appFiles) + len(missingImports)
 	if conv != nil {
-		assistantMsg := fmt.Sprintf("Created app \"%s\" with %d files.", project.Name, len(structure.Files)+len(missingImports))
+		assistantMsg := fmt.Sprintf("Created app \"%s\" with %d files.", project.Name, totalFiles)
 		convMessages = []models.AppConversationMessage{
 			{Role: "user", Content: project.Prompt, Timestamp: time.Now().Unix()},
 			{Role: "assistant", Content: assistantMsg, Timestamp: time.Now().Unix()},
@@ -439,33 +1010,22 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 		}
 	}
 
-	// Step 8: Update project status
+	// Step 12: Update project status
 	c.UpdateAppProjectStatus(project, "ready")
 
-	// Step 9: Auto-deploy to Vercel
-	if c.VercelService != nil {
-		sendEvent("deploying", map[string]string{"status": "starting"})
-
-		deployment, err := c.DeployToVercel(project, user, "production")
-		if err != nil {
-			slog.Error("Auto-deploy failed", "project_id", project.ID, "error", err)
-			sendEvent("deploy_error", map[string]string{"error": err.Error()})
-		} else {
-			sendEvent("deployed", responses.AppDeploymentResponse{
-				ID:           deployment.ID,
-				AppProjectID: deployment.AppProjectID,
-				Platform:     deployment.Platform,
-				Provider:     deployment.Provider,
-				Status:       deployment.Status,
-				DeployedURL:  deployment.DeployedURL,
-				Version:      deployment.Version,
-				CreatedAt:    deployment.CreatedAt,
-				UpdatedAt:    deployment.UpdatedAt,
-			})
-		}
+	// Step 13: Auto-start preview if service is configured
+	if c.PreviewService != nil {
+		go func() {
+			status, err := c.StartPreview(project)
+			if err != nil {
+				slog.Error("Failed to auto-start preview", "error", err, "project_id", project.ID)
+			} else {
+				slog.Info("Auto-started preview", "project_id", project.ID, "preview_url", status.PreviewURL)
+			}
+		}()
 	}
 
-	// Step 9: Send done event
+	// Step 14: Send done event
 	sendEvent("done", map[string]any{
 		"project_id": project.ID,
 		"success":    true,
@@ -479,9 +1039,21 @@ var importPathRegex = regexp.MustCompile(`from\s+['"]@/([^'"]+)['"]`)
 // forbiddenImportRegex matches imports of build-time/Node.js packages in component files
 var forbiddenImportRegex = regexp.MustCompile(`(?m)^import\s+.*\s+from\s+['"](tailwindcss|tailwindcss/.*|postcss|autoprefixer|eslint|webpack|jiti|fs|path|os|module|crypto|stream|child_process|net|http|https|url|util|assert|buffer|cluster|dgram|dns|events|querystring|readline|repl|string_decoder|tls|tty|v8|vm|zlib)['"].*$`)
 
+// isConfigFile returns true for config files that legitimately need build-time imports
+func isConfigFile(filePath string) bool {
+	lower := strings.ToLower(filePath)
+	return strings.Contains(lower, "tailwind.config") ||
+		strings.Contains(lower, "postcss.config") ||
+		strings.Contains(lower, "next.config") ||
+		strings.Contains(lower, "tsconfig")
+}
+
 // stripForbiddenImports removes import lines for build-time/Node.js packages from component code.
-// These packages cannot be bundled for the browser and cause build failures.
 func stripForbiddenImports(content string, filePath string) (string, bool) {
+	if isConfigFile(filePath) {
+		return content, false
+	}
+
 	matches := forbiddenImportRegex.FindAllString(content, -1)
 	if len(matches) == 0 {
 		return content, false
@@ -494,14 +1066,11 @@ func stripForbiddenImports(content string, filePath string) (string, bool) {
 
 // findMissingImports scans all generated files for @/ imports and returns paths that don't exist in the file set.
 func findMissingImports(files map[string]string) []string {
-	// Build a set of known file paths (without extensions for flexible matching)
 	knownPaths := make(map[string]bool)
 	for path := range files {
 		knownPaths[path] = true
-		// Also register without extension for import resolution
 		withoutExt := strings.TrimSuffix(strings.TrimSuffix(strings.TrimSuffix(path, ".tsx"), ".ts"), ".js")
 		knownPaths[withoutExt] = true
-		// Handle index files: components/foo/index.tsx -> components/foo
 		if strings.HasSuffix(withoutExt, "/index") {
 			knownPaths[strings.TrimSuffix(withoutExt, "/index")] = true
 		}
@@ -512,7 +1081,6 @@ func findMissingImports(files map[string]string) []string {
 		matches := importPathRegex.FindAllStringSubmatch(content, -1)
 		for _, match := range matches {
 			importPath := match[1]
-			// Check if the import resolves to any known file
 			if !knownPaths[importPath] &&
 				!knownPaths[importPath+".tsx"] &&
 				!knownPaths[importPath+".ts"] &&
@@ -536,50 +1104,6 @@ func guessFileType(importPath string) (filePath string, fileType string) {
 		return importPath + ".ts", "ts"
 	}
 	return importPath + ".tsx", "tsx"
-}
-
-// ensureLucideReact checks if package.json includes lucide-react and adds it if missing
-func ensureLucideReact(files map[string]string) string {
-	pkgJSON, ok := files["package.json"]
-	if !ok {
-		return ""
-	}
-
-	if strings.Contains(pkgJSON, "lucide-react") {
-		return "" // already present
-	}
-
-	// Simple string insertion: add lucide-react to dependencies
-	pkgJSON = strings.Replace(pkgJSON,
-		`"react-dom"`,
-		`"react-dom"`,
-		1)
-
-	// Try to add after "react-dom" line in dependencies
-	lines := strings.Split(pkgJSON, "\n")
-	var result []string
-	for _, line := range lines {
-		result = append(result, line)
-		if strings.Contains(line, `"react-dom"`) && strings.Contains(line, ":") {
-			// Add comma to current line if not present, then add lucide-react
-			trimmed := strings.TrimRight(line, " \t")
-			if !strings.HasSuffix(trimmed, ",") {
-				result[len(result)-1] = trimmed + ","
-			}
-			// Match indentation
-			indent := ""
-			for _, ch := range line {
-				if ch == ' ' || ch == '\t' {
-					indent += string(ch)
-				} else {
-					break
-				}
-			}
-			result = append(result, indent+`"lucide-react": "^0.460.0"`)
-		}
-	}
-
-	return strings.Join(result, "\n")
 }
 
 // cleanAppFileOutput strips markdown code fences from LLM output

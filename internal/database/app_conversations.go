@@ -13,11 +13,16 @@ func (db *Database) GetAppConversationByProjectID(projectID string) (*models.App
 }
 
 func (db *Database) CreateAppConversation(c *models.AppConversation) (*models.AppConversation, error) {
-	_, err := db.DB.NewInsert().Model(c).Exec(context.Background())
+	_, err := db.DB.NewInsert().Model(c).Returning("*").Exec(context.Background())
 	return c, err
 }
 
 func (db *Database) UpdateAppConversation(c *models.AppConversation) (*models.AppConversation, error) {
-	_, err := db.DB.NewUpdate().Model(c).Where("id = ?", c.ID).Exec(context.Background())
+	_, err := db.DB.NewUpdate().
+		Model((*models.AppConversation)(nil)).
+		Set("messages = ?::jsonb", string(c.Messages)).
+		Set("updated_at = current_timestamp").
+		Where("id = ?", c.ID).
+		Exec(context.Background())
 	return c, err
 }

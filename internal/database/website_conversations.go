@@ -15,11 +15,16 @@ func (db *Database) GetConversationByWebsiteId(websiteId string) (*models.Websit
 }
 
 func (db *Database) CreateConversation(c *models.WebsiteConversation) (*models.WebsiteConversation, error) {
-	_, err := db.DB.NewInsert().Model(c).Exec(context.Background())
+	_, err := db.DB.NewInsert().Model(c).Returning("*").Exec(context.Background())
 	return c, err
 }
 
 func (db *Database) UpdateConversation(c *models.WebsiteConversation) (*models.WebsiteConversation, error) {
-	_, err := db.DB.NewUpdate().Model(c).Where("id = ?", c.ID).Exec(context.Background())
+	_, err := db.DB.NewUpdate().
+		Model((*models.WebsiteConversation)(nil)).
+		Set("messages = ?", c.Messages).
+		Set("updated_at = current_timestamp").
+		Where("id = ?", c.ID).
+		Exec(context.Background())
 	return c, err
 }
