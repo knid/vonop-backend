@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -119,7 +120,14 @@ func ExtractAllURLs(htmlContent string, baseURL string) []string {
 	return results
 }
 
+// llmControlTokenRegex matches LLM control tokens like <|control619|>, <|endoftext|>, etc.
+var llmControlTokenRegex = regexp.MustCompile(`<\|[a-zA-Z0-9_]+\|>`)
+
 func CleanLLMOutput(raw string) string {
+	raw = strings.TrimSpace(raw)
+
+	// Strip control tokens from thinking models (e.g. Kimi K2.5 via OpenRouter)
+	raw = llmControlTokenRegex.ReplaceAllString(raw, "")
 	raw = strings.TrimSpace(raw)
 
 	// Strip markdown code fences (```json, ```\n, etc.)
