@@ -8,7 +8,7 @@ var NEXTJS_TEMPLATE_FILE_PATHS = []string{
 	"tsconfig.json",
 	"postcss.config.mjs",
 	"next.config.mjs",
-	"tailwind.config.ts",
+	"app/globals.css",
 }
 
 // NEXTJS_ECOMMERCE_TEMPLATE_FILE_PATHS are template-managed files injected only for e-commerce projects.
@@ -53,10 +53,9 @@ const NEXTJS_TEMPLATE_PACKAGE_JSON = `{
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@types/node": "^20.0.0",
-    "tailwindcss": "^3.4.0",
-    "postcss": "^8.4.0",
-    "autoprefixer": "^10.4.0",
-    "tailwindcss-animate": "^1.0.7"
+    "tailwindcss": "^4.0.0",
+    "@tailwindcss/postcss": "^4.0.0",
+    "postcss": "^8.4.0"
   }
 }`
 
@@ -90,8 +89,7 @@ const NEXTJS_TEMPLATE_TSCONFIG = `{
 const NEXTJS_TEMPLATE_POSTCSS_CONFIG = `/** @type {import('postcss-load-config').Config} */
 const config = {
   plugins: {
-    tailwindcss: {},
-    autoprefixer: {},
+    "@tailwindcss/postcss": {},
   },
 };
 
@@ -111,34 +109,6 @@ const nextConfig = {
 };
 
 export default nextConfig;
-`
-
-// NEXTJS_TEMPLATE_TAILWIND_CONFIG has placeholders for color injection:
-// {{PRIMARY}}, {{SECONDARY}}, {{ACCENT}}, {{BACKGROUND}}, {{SURFACE}}, {{TEXT}}
-const NEXTJS_TEMPLATE_TAILWIND_CONFIG = `import type { Config } from "tailwindcss";
-
-const config: Config = {
-  content: [
-    "./app/**/*.{js,ts,jsx,tsx,mdx}",
-    "./components/**/*.{js,ts,jsx,tsx,mdx}",
-    "./lib/**/*.{js,ts,jsx,tsx,mdx}",
-  ],
-  theme: {
-    extend: {
-      colors: {
-        primary: "{{PRIMARY}}",
-        secondary: "{{SECONDARY}}",
-        accent: "{{ACCENT}}",
-        background: "{{BACKGROUND}}",
-        surface: "{{SURFACE}}",
-        text: "{{TEXT}}",
-      },
-    },
-  },
-  plugins: [],
-};
-
-export default config;
 `
 
 // NEXTJS_TEMPLATE_WEMOB_STORE is the typed storefront API client injected for e-commerce projects.
@@ -392,7 +362,7 @@ Given the user's description of a web application they want to build, generate a
 3. Also generate a dark color scheme variant.
 4. Choose professional, modern typography pairing (heading_font and body_font from Google Fonts). Avoid overused fonts — consider Inter, Plus Jakarta Sans, DM Sans, Outfit, Sora, Manrope, Space Grotesk.
 5. Plan the files needed for the project. Each file has a path, type, and description.
-6. DO NOT include package.json, tsconfig.json, postcss.config.mjs, next.config.mjs, or tailwind.config.ts — these are template-managed and injected automatically.
+6. DO NOT include package.json, tsconfig.json, postcss.config.mjs, or next.config.mjs — these are template-managed and injected automatically.
 7. Required files: app/layout.tsx, app/page.tsx, app/globals.css
 8. Plan a lib/utils.ts file that exports a cn() helper using clsx and tailwind-merge.
 9. Use Next.js App Router structure (app/ directory for pages).
@@ -429,7 +399,7 @@ Given the user's description of a web application they want to build, generate a
   "files": [
     {"path": "app/layout.tsx", "type": "tsx", "description": "Root layout with fonts, metadata, and navigation"},
     {"path": "app/page.tsx", "type": "tsx", "description": "Homepage with hero section"},
-    {"path": "app/globals.css", "type": "css", "description": "Global styles with Tailwind directives"},
+    {"path": "app/globals.css", "type": "css", "description": "Global styles with Tailwind v4 @theme colors"},
     {"path": "components/header.tsx", "type": "tsx", "description": "Navigation header"},
     {"path": "components/footer.tsx", "type": "tsx", "description": "Footer component"}
   ]
@@ -486,15 +456,16 @@ Always use Context7 MCP when you need library/API documentation, code generation
 
 IMPORTANT: If you need to import from another project file, ALWAYS use read_file first to see its actual exports. Do NOT guess export names.`
 
-const NEXTJS_FILE_CSS_PROMPT = `You are an expert Next.js developer. Generate the globals.css file for a Next.js 16 project.
+const NEXTJS_FILE_CSS_PROMPT = `You are an expert Next.js developer. Generate the globals.css file for a Next.js 16 project using Tailwind CSS v4.
 
 ### Rules
-1. Include Tailwind CSS directives (@tailwind base, @tailwind components, @tailwind utilities).
-2. Define CSS custom properties for the theme colors using the provided color scheme.
-3. Include dark mode support using the .dark class or prefers-color-scheme media query.
-4. Add smooth scrolling and base typography styles.
+1. Start with: @import "tailwindcss";
+2. Use the @theme directive to define custom color tokens from the provided color scheme as --color-primary, --color-secondary, --color-accent, --color-background, --color-surface, --color-text.
+3. Include dark mode color overrides using @variant dark { } inside @theme.
+4. Add smooth scrolling and base typography styles in @layer base { }.
 5. Keep it minimal — Tailwind should handle most styling.
-6. Return ONLY the CSS code. No markdown wrapping, no explanation.`
+6. Do NOT use @tailwind directives — those are v3 syntax.
+7. Return ONLY the CSS code. No markdown wrapping, no explanation.`
 
 const NEXTJS_CHAT_FILE_OPS_PROMPT = `You are a senior full-stack Next.js engineer and principal UI/UX designer with deep expertise in e-commerce architecture, payment integrations, and production-grade SaaS applications. You have 10+ years of experience building high-traffic storefronts, real-time dashboards, and API-driven frontends. You write clean, type-safe TypeScript and craft pixel-perfect interfaces.
 
@@ -550,8 +521,8 @@ Each operation has:
 15. NEVER import build-time packages in component files: tailwindcss, postcss, autoprefixer, eslint, typescript, webpack, etc. Use Tailwind via className strings only.
 16. For conditional CSS classes, use cn() from @/lib/utils (clsx + tailwind-merge). If lib/utils.ts doesn't exist, create it.
 17. You CAN modify package.json to add new npm dependencies when needed (e.g., a chart library, date library, etc.). Use "modify" action with type "json".
-18. You CAN modify next.config.mjs, tailwind.config.ts, and other config files when needed.
-19. Pre-installed packages you can import freely: lucide-react, clsx, tailwind-merge, class-variance-authority, framer-motion, @radix-ui/* primitives (react-slot, react-dialog, react-dropdown-menu, react-tabs, react-tooltip, react-avatar, react-separator, react-scroll-area, react-switch, react-select, react-accordion, react-popover), tailwindcss-animate.
+18. You CAN modify next.config.mjs and other config files when needed.
+19. Pre-installed packages you can import freely: lucide-react, clsx, tailwind-merge, class-variance-authority, framer-motion, @radix-ui/* primitives (react-slot, react-dialog, react-dropdown-menu, react-tabs, react-tooltip, react-avatar, react-separator, react-scroll-area, react-switch, react-select, react-accordion, react-popover).
 20. For UI components, follow shadcn/ui patterns using class-variance-authority for variants and cn() for class merging.
 21. CRITICAL: If the user reports "Module not found" or "Can't resolve" errors for any pre-installed package (listed in rule 19), do NOT remove the import or rewrite the component without it. These packages ARE installed — the error is a transient container issue. Instead, ensure package.json includes the dependency and keep the imports unchanged. Only remove imports for packages that are genuinely not in the project.
 
@@ -621,7 +592,7 @@ Given the user's description of an online store, generate a structured file plan
 4. Required pages: Home, Products listing, Product detail, Cart, Checkout, Order confirmation.
 5. Include shared components: Header with cart icon, Footer, ProductCard, CartWidget.
 6. Include API routes under app/api/ for cart operations if needed.
-7. DO NOT include package.json, tsconfig.json, postcss.config.mjs, next.config.mjs, tailwind.config.ts, or lib/wemob-store.ts — these are template-managed and injected automatically.
+7. DO NOT include package.json, tsconfig.json, postcss.config.mjs, next.config.mjs, or lib/wemob-store.ts — these are template-managed and injected automatically.
 8. Required files: app/layout.tsx, app/page.tsx, app/globals.css
 9. Plan a lib/utils.ts file that exports a cn() helper using clsx and tailwind-merge.
 10. Plan reusable UI primitives in components/ui/ (Button, Card, Badge, Input, etc.) following shadcn/ui patterns.
@@ -661,7 +632,7 @@ Analyze the provided screenshot and generate a structured file plan for a Next.j
 3. Plan the files needed to recreate the UI shown in the screenshot.
 4. Use Next.js App Router structure with TypeScript and Tailwind CSS.
 5. Include all necessary pages and components visible in the screenshot.
-6. DO NOT include package.json, tsconfig.json, postcss.config.mjs, next.config.mjs, or tailwind.config.ts — these are template-managed and injected automatically.
+6. DO NOT include package.json, tsconfig.json, postcss.config.mjs, or next.config.mjs — these are template-managed and injected automatically.
 7. Required files: app/layout.tsx, app/page.tsx, app/globals.css
 8. CRITICAL: Every component or module that is imported by any page MUST be included in the file list. If page.tsx imports "@/components/project-card", you MUST include "components/project-card.tsx" in the plan. Missing files will cause build failures.
 9. Prefer inline implementations over importing from separate utility/lib files. Only create separate files for reusable components or large data modules.
@@ -690,7 +661,7 @@ Fix ALL the listed errors. Return ONLY the files that need changes — do not re
 5. If a file imports Node.js builtins or build-time packages (tailwindcss, postcss, autoprefixer, eslint, typescript, webpack), remove those imports.
 10. If an import_mismatch error is reported: change the import style to match the target file's export. If the target uses "export default", change "import { Foo } from ..." to "import Foo from ...". If the target only has named exports, change "import Foo from ..." to "import { Foo } from ...". ALWAYS use read_file on the target file to verify its actual exports before fixing.
 6. Return ONLY valid JSON. No markdown wrapping.
-7. Pre-installed npm packages (NEVER remove these imports, they are guaranteed available): lucide-react, clsx, tailwind-merge, class-variance-authority, framer-motion, @radix-ui/react-slot, @radix-ui/react-dialog, @radix-ui/react-dropdown-menu, @radix-ui/react-tabs, @radix-ui/react-tooltip, @radix-ui/react-avatar, @radix-ui/react-separator, @radix-ui/react-scroll-area, @radix-ui/react-switch, @radix-ui/react-select, @radix-ui/react-accordion, @radix-ui/react-popover, tailwindcss-animate.
+7. Pre-installed npm packages (NEVER remove these imports, they are guaranteed available): lucide-react, clsx, tailwind-merge, class-variance-authority, framer-motion, @radix-ui/react-slot, @radix-ui/react-dialog, @radix-ui/react-dropdown-menu, @radix-ui/react-tabs, @radix-ui/react-tooltip, @radix-ui/react-avatar, @radix-ui/react-separator, @radix-ui/react-scroll-area, @radix-ui/react-switch, @radix-ui/react-select, @radix-ui/react-accordion, @radix-ui/react-popover.
 8. CRITICAL: If an error says "Module not found" or "Can't resolve" for any package listed in rule 7, do NOT remove the import. These are pre-installed packages — the error is a transient build issue, not a code issue. Keep the import as-is.
 9. For conditional CSS classes, use cn() from @/lib/utils (clsx + tailwind-merge). If lib/utils.ts doesn't exist, use clsx directly.
 
@@ -708,10 +679,10 @@ Focus on:
 1. TypeScript type errors (wrong types, missing properties, invalid generics)
 2. Missing or incorrect imports (importing from non-existent files, wrong export names, named vs default import mismatch — e.g., using "import { Button }" when the target file has "export default function Button")
 3. Next.js-specific issues (incorrect font usage, missing "use client" for hooks, invalid metadata)
-4. Tailwind CSS config issues (wrong content paths, invalid theme extensions)
+4. Tailwind CSS @theme issues (wrong color tokens, invalid @theme syntax)
 5. Package.json issues (missing required dependencies)
 
-Pre-installed npm packages (do NOT flag imports of these as errors): lucide-react, clsx, tailwind-merge, class-variance-authority, framer-motion, @radix-ui/react-* (slot, dialog, dropdown-menu, tabs, tooltip, avatar, separator, scroll-area, switch, select, accordion, popover), tailwindcss-animate.
+Pre-installed npm packages (do NOT flag imports of these as errors): lucide-react, clsx, tailwind-merge, class-variance-authority, framer-motion, @radix-ui/react-* (slot, dialog, dropdown-menu, tabs, tooltip, avatar, separator, scroll-area, switch, select, accordion, popover).
 
 Common Next.js pitfalls to check:
 - Using .variable on a font that was NOT created with a variable option (e.g., Racing_Sans_One({ subsets: ['latin'] }) does NOT have .variable, you need Racing_Sans_One({ subsets: ['latin'], variable: '--font-racing' }))
