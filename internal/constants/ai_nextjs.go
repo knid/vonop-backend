@@ -306,8 +306,9 @@ Each operation has:
 16. For conditional CSS classes, use cn() from @/lib/utils (clsx + tailwind-merge). If lib/utils.ts doesn't exist, create it.
 17. You CAN modify package.json to add new npm dependencies when needed (e.g., a chart library, date library, etc.). Use "modify" action with type "json".
 18. You CAN modify next.config.mjs, tailwind.config.ts, and other config files when needed.
-19. Pre-installed packages you can import freely: lucide-react, clsx, tailwind-merge, class-variance-authority, framer-motion, @radix-ui/* primitives, tailwindcss-animate.
+19. Pre-installed packages you can import freely: lucide-react, clsx, tailwind-merge, class-variance-authority, framer-motion, @radix-ui/* primitives (react-slot, react-dialog, react-dropdown-menu, react-tabs, react-tooltip, react-avatar, react-separator, react-scroll-area, react-switch, react-select, react-accordion, react-popover), tailwindcss-animate.
 20. For UI components, follow shadcn/ui patterns using class-variance-authority for variants and cn() for class merging.
+21. CRITICAL: If the user reports "Module not found" or "Can't resolve" errors for any pre-installed package (listed in rule 19), do NOT remove the import or rewrite the component without it. These packages ARE installed — the error is a transient container issue. Instead, ensure package.json includes the dependency and keep the imports unchanged. Only remove imports for packages that are genuinely not in the project.
 
 ### Output format (strict JSON)
 {
@@ -399,11 +400,12 @@ Fix ALL the listed errors. Return ONLY the files that need changes — do not re
 1. Fix each error precisely. Do not refactor or change unrelated code.
 2. If a file uses React hooks (useState, useEffect, etc.) without "use client", add the directive at the top.
 3. If a file uses font.variable without the variable option in the font constructor, add it (e.g., variable: '--font-name').
-4. If a file imports from a path that doesn't exist, either remove the import and inline the code, or fix the path.
-5. If a file imports Node.js builtins or build-time packages, remove those imports.
+4. If a file imports from a LOCAL project path (@/ or ./) that doesn't exist, either remove the import and inline the code, or fix the path.
+5. If a file imports Node.js builtins or build-time packages (tailwindcss, postcss, autoprefixer, eslint, typescript, webpack), remove those imports.
 6. Return ONLY valid JSON. No markdown wrapping.
-7. The project uses pre-installed deps: lucide-react, clsx, framer-motion. These can be imported freely.
-8. For conditional CSS classes, use clsx or template literals. Never import cn from tailwindcss.
+7. Pre-installed npm packages (NEVER remove these imports, they are guaranteed available): lucide-react, clsx, tailwind-merge, class-variance-authority, framer-motion, @radix-ui/react-slot, @radix-ui/react-dialog, @radix-ui/react-dropdown-menu, @radix-ui/react-tabs, @radix-ui/react-tooltip, @radix-ui/react-avatar, @radix-ui/react-separator, @radix-ui/react-scroll-area, @radix-ui/react-switch, @radix-ui/react-select, @radix-ui/react-accordion, @radix-ui/react-popover, tailwindcss-animate.
+8. CRITICAL: If an error says "Module not found" or "Can't resolve" for any package listed in rule 7, do NOT remove the import. These are pre-installed packages — the error is a transient build issue, not a code issue. Keep the import as-is.
+9. For conditional CSS classes, use cn() from @/lib/utils (clsx + tailwind-merge). If lib/utils.ts doesn't exist, use clsx directly.
 
 ### Output format (strict JSON)
 {
@@ -422,11 +424,13 @@ Focus on:
 4. Tailwind CSS config issues (wrong content paths, invalid theme extensions)
 5. Package.json issues (missing required dependencies)
 
+Pre-installed npm packages (do NOT flag imports of these as errors): lucide-react, clsx, tailwind-merge, class-variance-authority, framer-motion, @radix-ui/react-* (slot, dialog, dropdown-menu, tabs, tooltip, avatar, separator, scroll-area, switch, select, accordion, popover), tailwindcss-animate.
+
 Common Next.js pitfalls to check:
 - Using .variable on a font that was NOT created with a variable option (e.g., Racing_Sans_One({ subsets: ['latin'] }) does NOT have .variable, you need Racing_Sans_One({ subsets: ['latin'], variable: '--font-racing' }))
 - Importing server-only modules in "use client" components
 - Using hooks (useState, useEffect) without "use client" directive
-- Importing from paths that don't exist in the project
+- Importing from LOCAL project paths (@/ or ./) that don't exist in the project (do NOT flag npm package imports)
 
 ### Output format (strict JSON, no explanation, no markdown wrapping)
 If there are errors:

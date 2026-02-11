@@ -163,6 +163,8 @@ func (cm *containerManager) createContainer(projectID string, files map[string]s
 
 // updateFiles writes files to the project directory on disk. The Next.js dev
 // server inside the container picks up changes via hot module reload.
+// If package.json is among the updated files, npm install is re-run inside the
+// container so newly added dependencies are available immediately.
 func (cm *containerManager) updateFiles(projectID string, files map[string]string) error {
 	cm.mu.RLock()
 	info, ok := cm.containers[projectID]
@@ -174,6 +176,19 @@ func (cm *containerManager) updateFiles(projectID string, files map[string]strin
 
 	if err := writeFilesToDisk(info.ProjectDir, files); err != nil {
 		return fmt.Errorf("writing files: %w", err)
+	}
+
+	// If package.json changed, install new deps inside the container.
+	if _, hasPackageJSON := files["package.json"]; hasPackageJSON {
+		containerName := fmt.Sprintf("wemob-preview-%s", projectID)
+		go func() {
+			out, err := execCommand("docker", "exec", containerName, "npm", "install", "--prefer-offline")
+			if err != nil {
+				slog.Warn("npm install after file sync failed", "project_id", projectID, "error", err, "output", out)
+			} else {
+				slog.Info("npm install after file sync completed", "project_id", projectID)
+			}
+		}()
 	}
 
 	cm.touchContainer(projectID)
