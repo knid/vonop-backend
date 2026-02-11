@@ -1121,6 +1121,8 @@ func pagePath(path string) string {
 
 func cleanCodeOutput(code string) string {
 	code = strings.TrimSpace(code)
+	// Strip control tokens (e.g. <|control619|>, <|endoftext|>)
+	code = controlTokenRegex.ReplaceAllString(code, "")
 	// Strip markdown code fences for any language (```html, ```css, ```js, etc.)
 	if strings.HasPrefix(code, "```") {
 		// Remove opening fence line (e.g. "```html\n", "```css\n", "```\n")
@@ -1129,7 +1131,12 @@ func cleanCodeOutput(code string) string {
 		} else {
 			code = strings.TrimPrefix(code, "```")
 		}
-		code = strings.TrimSuffix(code, "```")
+		// Find the last closing fence — discard any reasoning/explanation text after it
+		if closingIdx := strings.LastIndex(code, "\n```"); closingIdx >= 0 {
+			code = code[:closingIdx]
+		} else {
+			code = strings.TrimSuffix(code, "```")
+		}
 	}
 	return strings.TrimSpace(code)
 }

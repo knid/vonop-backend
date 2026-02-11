@@ -745,6 +745,7 @@ func StreamWithTools(
 		}
 
 		var fullText strings.Builder
+		var roundChunks []string // buffer chunks per round to suppress intermediate reasoning
 		var lastFinishReason string
 		toolCallsMap := make(map[int]*ToolCall)
 
@@ -775,12 +776,11 @@ func StreamWithTools(
 			if len(chunk.Choices) > 0 {
 				choice := chunk.Choices[0]
 
-				// Accumulate content
+				// Buffer content — only flush to onChunk after confirming this isn't
+				// an intermediate tool-calling round (which contains reasoning, not code)
 				if choice.Delta.Content != "" {
 					fullText.WriteString(choice.Delta.Content)
-					if onChunk != nil {
-						onChunk(choice.Delta.Content)
-					}
+					roundChunks = append(roundChunks, choice.Delta.Content)
 				}
 
 				// Accumulate tool calls
@@ -838,8 +838,10 @@ func StreamWithTools(
 			return "", fmt.Errorf("error reading streaming response. try again please")
 		}
 
-		// If LLM wants to call tools
+		// If LLM wants to call tools — discard buffered chunks (they're reasoning, not code)
 		if lastFinishReason == "tool_calls" && len(toolCallsMap) > 0 {
+			roundChunks = nil // discard intermediate reasoning chunks
+
 			// Build sorted tool calls list
 			indices := make([]int, 0, len(toolCallsMap))
 			for idx := range toolCallsMap {
@@ -893,6 +895,13 @@ func StreamWithTools(
 
 			// Continue the loop — re-call LLM with tool results
 			continue
+		}
+
+		// Final round (no tool calls) — flush buffered chunks to onChunk
+		if onChunk != nil {
+			for _, c := range roundChunks {
+				onChunk(c)
+			}
 		}
 
 		// No tool calls — return final response

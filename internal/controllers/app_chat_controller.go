@@ -631,6 +631,7 @@ func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.A
 				FilePath: op.Path,
 				FileID:   createdFile.ID,
 				FileType: op.Type,
+				Content:  content,
 			}) {
 				return
 			}
@@ -668,6 +669,7 @@ func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.A
 					FilePath: op.Path,
 					FileID:   createdFile.ID,
 					FileType: fileType,
+					Content:  content,
 				}) {
 					return
 				}
@@ -691,6 +693,7 @@ func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.A
 				FilePath: op.Path,
 				FileID:   existingFile.ID,
 				FileType: existingFile.FileType,
+				Content:  content,
 			}) {
 				return
 			}

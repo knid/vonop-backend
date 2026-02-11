@@ -51,6 +51,7 @@ type FileCompleteEvent struct {
 	FilePath string    `json:"file_path"`
 	FileID   uuid.UUID `json:"file_id"`
 	FileType string    `json:"file_type"`
+	Content  string    `json:"content,omitempty"` // cleaned final content (replaces accumulated chunks)
 }
 
 type ChatCompleteEvent struct {

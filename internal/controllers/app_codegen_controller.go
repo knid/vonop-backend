@@ -1001,6 +1001,7 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 				FilePath: filePlan.Path,
 				FileID:   createdFile.ID,
 				FileType: filePlan.Type,
+				Content:  content,
 			}) {
 				return
 			}
@@ -1122,6 +1123,7 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 				FilePath: filePath,
 				FileID:   createdFile.ID,
 				FileType: fileType,
+				Content:  content,
 			})
 		}
 	}
@@ -1258,36 +1260,43 @@ func guessFileType(importPath string) (filePath string, fileType string) {
 // controlTokenRegex matches LLM control tokens like <|control619|>, <|endoftext|>, etc.
 var controlTokenRegex = regexp.MustCompile(`<\|[a-zA-Z0-9_]+\|>`)
 
-// cleanAppFileOutput strips markdown code fences and control tokens from LLM output.
+// cleanAppFileOutput strips markdown code fences, control tokens, and any
+// reasoning/explanation text outside code fences from LLM output.
 func cleanAppFileOutput(content string, fileType string) string {
 	content = strings.TrimSpace(content)
 
 	// Strip control tokens (e.g. <|control619|>, <|endoftext|>)
 	content = controlTokenRegex.ReplaceAllString(content, "")
 
-	// Strip markdown code fences
+	// Determine which fence prefixes to check based on file type
+	var fencePrefixes []string
 	switch fileType {
 	case "tsx":
-		content = strings.TrimPrefix(content, "```tsx")
-		content = strings.TrimPrefix(content, "```typescript")
-		content = strings.TrimPrefix(content, "```")
-		content = strings.TrimSuffix(content, "```")
+		fencePrefixes = []string{"```tsx", "```typescript", "```"}
 	case "ts":
-		content = strings.TrimPrefix(content, "```typescript")
-		content = strings.TrimPrefix(content, "```ts")
-		content = strings.TrimPrefix(content, "```")
-		content = strings.TrimSuffix(content, "```")
+		fencePrefixes = []string{"```typescript", "```ts", "```"}
 	case "css":
-		content = strings.TrimPrefix(content, "```css")
-		content = strings.TrimPrefix(content, "```")
-		content = strings.TrimSuffix(content, "```")
+		fencePrefixes = []string{"```css", "```"}
 	case "json":
-		content = strings.TrimPrefix(content, "```json")
-		content = strings.TrimPrefix(content, "```")
-		content = strings.TrimSuffix(content, "```")
+		fencePrefixes = []string{"```json", "```"}
 	default:
-		content = strings.TrimPrefix(content, "```")
-		content = strings.TrimSuffix(content, "```")
+		fencePrefixes = []string{"```"}
+	}
+
+	// Extract code between markdown fences, discarding any text after closing fence
+	for _, prefix := range fencePrefixes {
+		if strings.HasPrefix(content, prefix) {
+			inner := content[len(prefix):]
+			// Find the last closing fence on its own line
+			closingIdx := strings.LastIndex(inner, "\n```")
+			if closingIdx >= 0 {
+				content = inner[:closingIdx]
+			} else {
+				// No closing fence on its own line — try plain suffix
+				content = strings.TrimSuffix(inner, "```")
+			}
+			break
+		}
 	}
 
 	return strings.TrimSpace(content)
