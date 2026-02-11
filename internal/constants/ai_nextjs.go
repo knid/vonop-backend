@@ -11,6 +11,11 @@ var NEXTJS_TEMPLATE_FILE_PATHS = []string{
 	"tailwind.config.ts",
 }
 
+// NEXTJS_ECOMMERCE_TEMPLATE_FILE_PATHS are template-managed files injected only for e-commerce projects.
+var NEXTJS_ECOMMERCE_TEMPLATE_FILE_PATHS = []string{
+	"lib/wemob-store.ts",
+}
+
 const NEXTJS_TEMPLATE_PACKAGE_JSON = `{
   "name": "app",
   "version": "0.1.0",
@@ -136,6 +141,239 @@ const config: Config = {
 export default config;
 `
 
+// NEXTJS_TEMPLATE_WEMOB_STORE is the typed storefront API client injected for e-commerce projects.
+// Go raw strings cannot contain backticks, so TypeScript template literals use string concatenation.
+const NEXTJS_TEMPLATE_WEMOB_STORE = `// lib/wemob-store.ts — Wemob Storefront API Client
+// This file is template-managed. Do not modify.
+
+const API_URL = process.env.NEXT_PUBLIC_WEMOB_API_URL || "";
+const STORE_ID = process.env.NEXT_PUBLIC_STORE_ID || "";
+
+// --- Types ---
+
+export interface StorefrontProduct {
+  id: string;
+  name: string;
+  slug: string;
+  description: string;
+  images: string[];
+  category: string;
+  tags: string[];
+  variants: StorefrontVariant[];
+  min_price_cents: number;
+  max_price_cents: number;
+}
+
+export interface StorefrontVariant {
+  id: string;
+  name: string;
+  price_in_cents: number;
+  compare_at_price: number;
+  inventory: number;
+  in_stock: boolean;
+  options: Record<string, unknown>;
+}
+
+export interface StorefrontCategory {
+  id: string;
+  name: string;
+  slug: string;
+  image: string;
+  description: string;
+}
+
+export interface StorefrontCart {
+  id: string;
+  session_id: string;
+  items: StorefrontCartItem[];
+  subtotal_cents: number;
+  discount_code: string;
+  discount_cents: number;
+  total_cents: number;
+}
+
+export interface StorefrontCartItem {
+  id: string;
+  product_id: string;
+  product_name: string;
+  product_image: string;
+  variant_id: string;
+  variant_name: string;
+  quantity: number;
+  price_cents: number;
+  total_cents: number;
+}
+
+export interface StorefrontCheckout {
+  order_id: string;
+  order_number: string;
+  total_cents: number;
+  currency: string;
+  payment_url?: string;
+  client_secret?: string;
+}
+
+export interface CheckoutConfirm {
+  order_id: string;
+  order_number: string;
+  status: string;
+}
+
+export interface ShippingAddress {
+  line1: string;
+  line2?: string;
+  city: string;
+  state: string;
+  postal_code: string;
+  country: string;
+}
+
+// --- API Helpers ---
+
+async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
+  const url = ` + "`${API_URL}/v2/storefront/${STORE_ID}${path}`" + `;
+  const res = await fetch(url, {
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    ...options,
+  });
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(` + "`API error ${res.status}: ${body}`" + `);
+  }
+  return res.json();
+}
+
+// --- Products ---
+
+export async function getProducts(): Promise<StorefrontProduct[]> {
+  return apiFetch<StorefrontProduct[]>("/products");
+}
+
+export async function getProduct(slug: string): Promise<StorefrontProduct> {
+  return apiFetch<StorefrontProduct>(` + "`/products/${slug}`" + `);
+}
+
+// --- Categories ---
+
+export async function getCategories(): Promise<StorefrontCategory[]> {
+  return apiFetch<StorefrontCategory[]>("/categories");
+}
+
+// --- Cart ---
+
+export async function createCart(sessionId: string): Promise<StorefrontCart> {
+  return apiFetch<StorefrontCart>("/cart", {
+    method: "POST",
+    body: JSON.stringify({ session_id: sessionId }),
+  });
+}
+
+export async function getCart(sessionId: string): Promise<StorefrontCart> {
+  return apiFetch<StorefrontCart>(` + "`/cart/${sessionId}`" + `);
+}
+
+export async function addCartItem(
+  sessionId: string,
+  productId: string,
+  variantId: string,
+  quantity: number
+): Promise<StorefrontCart> {
+  return apiFetch<StorefrontCart>(` + "`/cart/${sessionId}/items`" + `, {
+    method: "POST",
+    body: JSON.stringify({ product_id: productId, variant_id: variantId, quantity }),
+  });
+}
+
+export async function updateCartItem(
+  sessionId: string,
+  itemId: string,
+  quantity: number
+): Promise<StorefrontCart> {
+  return apiFetch<StorefrontCart>(` + "`/cart/${sessionId}/items/${itemId}`" + `, {
+    method: "PUT",
+    body: JSON.stringify({ quantity }),
+  });
+}
+
+export async function removeCartItem(
+  sessionId: string,
+  itemId: string
+): Promise<StorefrontCart> {
+  return apiFetch<StorefrontCart>(` + "`/cart/${sessionId}/items/${itemId}`" + `, {
+    method: "DELETE",
+  });
+}
+
+export async function applyDiscount(
+  sessionId: string,
+  code: string
+): Promise<StorefrontCart> {
+  return apiFetch<StorefrontCart>(` + "`/cart/${sessionId}/discount`" + `, {
+    method: "POST",
+    body: JSON.stringify({ code }),
+  });
+}
+
+// --- Checkout ---
+
+export async function checkout(params: {
+  sessionId: string;
+  customerEmail: string;
+  customerName: string;
+  shippingAddress: ShippingAddress;
+  billingAddress?: ShippingAddress;
+  paymentProvider: "stripe" | "iyzico";
+}): Promise<StorefrontCheckout> {
+  return apiFetch<StorefrontCheckout>("/checkout", {
+    method: "POST",
+    body: JSON.stringify({
+      session_id: params.sessionId,
+      customer_email: params.customerEmail,
+      customer_name: params.customerName,
+      shipping_address: params.shippingAddress,
+      billing_address: params.billingAddress,
+      payment_provider: params.paymentProvider,
+    }),
+  });
+}
+
+export async function confirmCheckout(
+  orderId: string,
+  paymentId: string
+): Promise<CheckoutConfirm> {
+  return apiFetch<CheckoutConfirm>("/checkout/confirm", {
+    method: "POST",
+    body: JSON.stringify({ order_id: orderId, payment_id: paymentId }),
+  });
+}
+
+// --- Helpers ---
+
+export function formatPrice(cents: number, currency = "USD"): string {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency,
+  }).format(cents / 100);
+}
+
+const SESSION_KEY = "wemob_session_id";
+
+export function getSessionId(): string {
+  if (typeof window === "undefined") return "";
+  let id = localStorage.getItem(SESSION_KEY);
+  if (!id) {
+    id = crypto.randomUUID();
+    localStorage.setItem(SESSION_KEY, id);
+  }
+  return id;
+}
+
+export function clearSession(): void {
+  if (typeof window === "undefined") return;
+  localStorage.removeItem(SESSION_KEY);
+}
+`
+
 const NEXTJS_STRUCTURE_PROMPT = `You are an expert Next.js developer, application architect, and UI/UX designer who creates modern, visually stunning web applications.
 
 Given the user's description of a web application they want to build, generate a structured file plan for a Next.js 14 App Router project.
@@ -218,7 +456,7 @@ Generate the content for a single TSX/TS file in a Next.js 14 App Router project
 5. Server Components by default. Only add "use client" when truly needed (hooks, event handlers, or framer-motion).
 6. Mobile-first responsive design using sm:, md:, lg: breakpoints.
 7. Production-quality, clean code with proper accessibility attributes.
-8. ALWAYS export components as default export (export default function ComponentName). NEVER use named exports for components. When importing components, use default import syntax (import Button from '@/components/ui/button'), NOT named imports (import { Button } from '...'). The only exception is lib/utils.ts which uses named exports.
+8. ALWAYS export components as default export (export default function ComponentName). NEVER use named exports for components. When importing components, use default import syntax (import Button from '@/components/ui/button'), NOT named imports (import { Button } from '...'). The exceptions are lib/utils.ts and lib/wemob-store.ts which use named exports.
 9. For page.tsx files in app/ directory, the component should be the page component.
 10. For layout.tsx, include proper metadata export and children prop typing.
 11. Use semantic HTML elements (nav, main, section, article, footer, header).
@@ -298,7 +536,7 @@ Each operation has:
 6. When creating new pages, follow the Next.js App Router conventions (app/route/page.tsx).
 7. Respect the existing color scheme and design patterns. Elevate the design quality when possible.
 8. Keep navigation consistent across pages.
-22. ALWAYS use default exports for components (export default function ComponentName). When importing components, use default import syntax (import Button from '@/components/ui/button'), NOT named imports (import { Button } from '...'). The only exception is lib/utils.ts which uses named exports. Mismatched import styles cause "type is invalid" React errors.
+22. ALWAYS use default exports for components (export default function ComponentName). When importing components, use default import syntax (import Button from '@/components/ui/button'), NOT named imports (import { Button } from '...'). The exceptions are lib/utils.ts and lib/wemob-store.ts which use named exports. Mismatched import styles cause "type is invalid" React errors.
 9. Return ONLY the JSON response. No markdown wrapping.
 10. CRITICAL: If any file imports from a path that does not exist in the current project files, you MUST include a "create" operation for that file. Every import must resolve to an existing file. Missing files cause build failures.
 11. Only import from paths that exist in the current project files or that you are creating in the same operations array.
@@ -322,7 +560,8 @@ You are an experienced e-commerce engineer. When building storefronts, apply rea
   - Each product automatically gets a default variant with the specified price.
   - Generate 3-6 sample products that match the user's store concept unless they specified exact products.
   - THEN generate the storefront code that fetches from the real API.
-- If the project context shows "E-commerce store: active", generate code that calls the REAL Wemob Storefront API — never generate mock product data. Build proper API client utilities with error handling, loading states, and TypeScript types for all API responses.
+- If the project context shows "E-commerce store: active", generate code that calls the REAL Wemob Storefront API — never generate mock product data. Use the pre-built API client at @/lib/wemob-store for all storefront API calls. Do NOT create custom fetch utilities — the template-managed client already provides typed functions with error handling.
+- lib/wemob-store.ts is a template-managed file that is automatically injected for e-commerce projects. It exports: getProducts, getProduct, getCategories, createCart, getCart, addCartItem, updateCartItem, removeCartItem, applyDiscount, checkout, confirmCheckout, formatPrice, getSessionId, clearSession, and TypeScript types: StorefrontProduct, StorefrontVariant, StorefrontCategory, StorefrontCart, StorefrontCartItem, StorefrontCheckout, CheckoutConfirm, ShippingAddress. Do NOT create, modify, or delete this file — it is template-managed.
 - You can also use manage_store at any time to add more products, categories, or discounts when the user asks (e.g., "add a 20% discount code SUMMER20").
 - Storefront API endpoints (all public, no auth needed):
   GET  {NEXT_PUBLIC_WEMOB_API_URL}/v2/storefront/{NEXT_PUBLIC_STORE_ID}/products — list products
@@ -378,13 +617,14 @@ Given the user's description of an online store, generate a structured file plan
 4. Required pages: Home, Products listing, Product detail, Cart, Checkout, Order confirmation.
 5. Include shared components: Header with cart icon, Footer, ProductCard, CartWidget.
 6. Include API routes under app/api/ for cart operations if needed.
-7. DO NOT include package.json, tsconfig.json, postcss.config.mjs, next.config.mjs, or tailwind.config.ts — these are template-managed and injected automatically.
+7. DO NOT include package.json, tsconfig.json, postcss.config.mjs, next.config.mjs, tailwind.config.ts, or lib/wemob-store.ts — these are template-managed and injected automatically.
 8. Required files: app/layout.tsx, app/page.tsx, app/globals.css
 9. Plan a lib/utils.ts file that exports a cn() helper using clsx and tailwind-merge.
 10. Plan reusable UI primitives in components/ui/ (Button, Card, Badge, Input, etc.) following shadcn/ui patterns.
 11. Use Next.js App Router structure.
-12. CRITICAL: Every component or module that is imported by any page MUST be included in the file list. If page.tsx imports "@/components/product-card", you MUST include "components/product-card.tsx" in the plan. If page.tsx imports "@/lib/store", you MUST include "lib/store.ts" in the plan. Missing files will cause build failures.
+12. CRITICAL: Every component or module that is imported by any page MUST be included in the file list. If page.tsx imports "@/components/product-card", you MUST include "components/product-card.tsx" in the plan. If page.tsx imports "@/lib/store", you MUST include "lib/store.ts" in the plan. Missing files will cause build failures. Exception: @/lib/wemob-store is template-injected and does not need to be in the file list.
 13. Prefer inline implementations over importing from separate utility/lib files. Only create separate files for reusable components or large data modules.
+14. A pre-built API client is available at lib/wemob-store.ts (template-injected). Use import { getProducts, getProduct, getCategories, createCart, getCart, addCartItem, updateCartItem, removeCartItem, applyDiscount, checkout, confirmCheckout, formatPrice, getSessionId, clearSession } from "@/lib/wemob-store" for all storefront API calls. Do NOT create custom fetch utilities for the storefront API.
 
 ### Output format: Same as NEXTJS_STRUCTURE_PROMPT (strict JSON, no explanation, no markdown)
 {

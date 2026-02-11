@@ -67,6 +67,11 @@ func isTemplateFile(path string) bool {
 			return true
 		}
 	}
+	for _, tp := range constants.NEXTJS_ECOMMERCE_TEMPLATE_FILE_PATHS {
+		if path == tp {
+			return true
+		}
+	}
 	return false
 }
 
@@ -105,6 +110,15 @@ func getTemplateContent(path string, colorScheme map[string]any) string {
 		return constants.NEXTJS_TEMPLATE_NEXT_CONFIG
 	case "tailwind.config.ts":
 		return buildTailwindConfig(colorScheme)
+	}
+	return ""
+}
+
+// getEcommerceTemplateContent returns the hardcoded content for an e-commerce template file
+func getEcommerceTemplateContent(path string) string {
+	switch path {
+	case "lib/wemob-store.ts":
+		return constants.NEXTJS_TEMPLATE_WEMOB_STORE
 	}
 	return ""
 }
@@ -763,8 +777,11 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 
 	// Build total file list (template + app files)
 	templatePaths := constants.NEXTJS_TEMPLATE_FILE_PATHS
-	allFilePaths := make([]string, 0, len(templatePaths)+len(appFiles))
+	allFilePaths := make([]string, 0, len(templatePaths)+len(appFiles)+len(constants.NEXTJS_ECOMMERCE_TEMPLATE_FILE_PATHS))
 	allFilePaths = append(allFilePaths, templatePaths...)
+	if projectType == "ecommerce" {
+		allFilePaths = append(allFilePaths, constants.NEXTJS_ECOMMERCE_TEMPLATE_FILE_PATHS...)
+	}
 	for _, f := range appFiles {
 		allFilePaths = append(allFilePaths, f.Path)
 	}
@@ -828,6 +845,38 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 			FileID:   createdFile.ID,
 			FileType: fileType,
 		})
+	}
+
+	// Step 6b: Inject e-commerce template files (conditional on project type)
+	if projectType == "ecommerce" {
+		for _, tp := range constants.NEXTJS_ECOMMERCE_TEMPLATE_FILE_PATHS {
+			content := getEcommerceTemplateContent(tp)
+			if content == "" {
+				continue
+			}
+			fileType := "ts"
+			file := models.AppGeneratedFile{
+				AppProjectID: project.ID,
+				Platform:     "nextjs",
+				FilePath:     tp,
+				Content:      content,
+				FileType:     fileType,
+				IsGenerated:  false, // template-managed
+			}
+			createdFile, err := c.DB.CreateAppGeneratedFile(&file)
+			if err != nil {
+				slog.Error("failed to save e-commerce template file", "error", err, "path", tp)
+				continue
+			}
+			generatedFiles[tp] = content
+
+			sendEvent("file_complete", responses.FileCompleteEvent{
+				Action:   "create",
+				FilePath: tp,
+				FileID:   createdFile.ID,
+				FileType: fileType,
+			})
+		}
 	}
 
 	// Step 7: Categorize remaining files into tiers and generate with context accumulation
