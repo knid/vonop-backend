@@ -52,14 +52,8 @@ func (c *Controller) DeployToVercel(project *models.AppProject, user *models.Use
 		vercelProject, _ = c.DB.CreateVercelProject(vercelProject)
 	}
 
-	// Collect env vars from integrations
-	integrations, _ := c.DB.GetAppIntegrationsByProjectID(project.ID.String())
-	envVars := make(map[string]string)
-	for _, integ := range integrations {
-		for k, v := range integ.EnvVars {
-			envVars[k] = v
-		}
-	}
+	// Collect all env vars (integrations + custom + auto-injected store vars)
+	envVars := c.CollectAllEnvVars(project)
 
 	// Set env vars on Vercel project
 	if len(envVars) > 0 {
@@ -361,14 +355,8 @@ func (c *Controller) StartPreview(project *models.AppProject) (*preview.PreviewS
 		fileMap[f.FilePath] = f.Content
 	}
 
-	// Collect env vars from integrations
-	integrations, _ := c.DB.GetAppIntegrationsByProjectID(project.ID.String())
-	envVars := make(map[string]string)
-	for _, integ := range integrations {
-		for k, v := range integ.EnvVars {
-			envVars[k] = v
-		}
-	}
+	// Collect all env vars (integrations + custom + auto-injected store vars)
+	envVars := c.CollectAllEnvVars(project)
 
 	status, err := c.PreviewService.CreatePreview(project.ID.String(), fileMap, envVars)
 	if err != nil {

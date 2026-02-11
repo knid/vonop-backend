@@ -474,7 +474,7 @@ func (c *Controller) llmFixPass(ctx context.Context, files map[string]string, va
 
 	userMessage := fileList.String() + errList.String() + "\nUse read_file to inspect the files with errors, then provide fixes."
 
-	executor := buildChatToolExecutor(files)
+	executor := c.buildChatToolExecutor(nil, nil, files)
 	responseJSON, err := utils.StreamWithTools(
 		ctx,
 		model,
@@ -862,7 +862,7 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 				generatedFileList.String(),
 			)
 
-			codegenExecutor := buildChatToolExecutor(generatedFiles)
+			codegenExecutor := c.buildChatToolExecutor(nil, nil, generatedFiles)
 			content, err := utils.StreamTextWithTools(
 				ctx,
 				model,
@@ -972,7 +972,7 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 				genFileList.String(),
 			)
 
-			missingExecutor := buildChatToolExecutor(generatedFiles)
+			missingExecutor := c.buildChatToolExecutor(nil, nil, generatedFiles)
 			content, err := utils.StreamTextWithTools(
 				ctx,
 				model,
