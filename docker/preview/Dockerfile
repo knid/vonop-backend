@@ -10,9 +10,9 @@ WORKDIR /app
 
 EXPOSE 3000
 
-# At startup: copy cached node_modules, run install for any extra deps, start with local next binary
+# At startup: copy cached node_modules, preserve project's package.json, install extras, start
 CMD sh -c "\
-  cp /deps/package.json /app/package.json 2>/dev/null; \
+  if [ ! -f /app/package.json ]; then cp /deps/package.json /app/package.json; fi; \
   cp -a /deps/node_modules /app/node_modules 2>/dev/null; \
   npm install --prefer-offline 2>&1; \
   exec ./node_modules/.bin/next dev --port 3000 --hostname 0.0.0.0"

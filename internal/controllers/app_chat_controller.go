@@ -495,6 +495,20 @@ func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.A
 			slog.Info("Chat validation fixed files", "project_id", project.ID, "fixed_count", fixedCount)
 		}
 
+		// Augment package.json with any new third-party imports added by the chat
+		if pkgContent, ok := currentFiles["package.json"]; ok {
+			augmented := augmentPackageJSON(pkgContent, currentFiles)
+			if augmented != pkgContent {
+				dbFile, err := c.DB.GetAppGeneratedFileByPath(project.ID.String(), "nextjs", "package.json")
+				if err == nil && dbFile != nil {
+					dbFile.Content = augmented
+					c.DB.UpdateAppGeneratedFile(dbFile)
+					currentFiles["package.json"] = augmented
+					slog.Info("Chat augmented package.json with discovered deps", "project_id", project.ID)
+				}
+			}
+		}
+
 		// Auto-sync to preview container if running
 		if c.PreviewService != nil {
 			go c.SyncPreviewFiles(project.ID.String())
