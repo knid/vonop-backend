@@ -52,6 +52,10 @@ var hookPattern = regexp.MustCompile(`\b(useState|useEffect|useRef|useCallback|u
 var fontVariableUsagePattern = regexp.MustCompile(`\.\s*variable\b`)
 var fontVariableOptionPattern = regexp.MustCompile(`variable\s*:\s*['"]--font-`)
 var fontConstructorPattern = regexp.MustCompile(`(?:const|let|var)\s+\w+\s*=\s*\w+\s*\(`)
+var namedImportRegex = regexp.MustCompile(`import\s+\{[^}]+\}\s+from\s+['"]@/([^'"]+)['"]`)
+var defaultImportRegex = regexp.MustCompile(`import\s+([A-Z]\w*)\s+from\s+['"]@/([^'"]+)['"]`)
+var exportDefaultPattern = regexp.MustCompile(`(?m)^export\s+default\s+`)
+var namedExportPattern = regexp.MustCompile(`(?m)^export\s+(function|const|class|type|interface|enum)\s+`)
 
 // --- Template helpers ---
 
@@ -329,9 +333,66 @@ func runDeterministicChecks(files map[string]string) []validationError {
 				Type:  "forbidden_import",
 			})
 		}
+
+		// Check 5: Named import from a file that only has export default (or vice versa)
+		namedMatches := namedImportRegex.FindAllStringSubmatch(content, -1)
+		for _, match := range namedMatches {
+			importPath := match[1]
+			targetContent := resolveFileContent(files, importPath)
+			if targetContent == "" {
+				continue // file doesn't exist yet, skip
+			}
+			hasDefault := exportDefaultPattern.MatchString(targetContent)
+			hasNamed := namedExportPattern.MatchString(targetContent)
+			if hasDefault && !hasNamed {
+				errors = append(errors, validationError{
+					File:  filePath,
+					Error: fmt.Sprintf("Named import { ... } from '@/%s' but that file only has a default export. Use: import ComponentName from '@/%s'", importPath, importPath),
+					Type:  "import_mismatch",
+				})
+			}
+		}
+
+		defaultMatches := defaultImportRegex.FindAllStringSubmatch(content, -1)
+		for _, match := range defaultMatches {
+			importPath := match[2]
+			targetContent := resolveFileContent(files, importPath)
+			if targetContent == "" {
+				continue
+			}
+			hasDefault := exportDefaultPattern.MatchString(targetContent)
+			hasNamed := namedExportPattern.MatchString(targetContent)
+			if !hasDefault && hasNamed {
+				errors = append(errors, validationError{
+					File:  filePath,
+					Error: fmt.Sprintf("Default import from '@/%s' but that file has no default export, only named exports. Use: import { ... } from '@/%s'", importPath, importPath),
+					Type:  "import_mismatch",
+				})
+			}
+		}
 	}
 
 	return errors
+}
+
+// resolveFileContent finds the content of a file by its import path (without extension)
+func resolveFileContent(files map[string]string, importPath string) string {
+	if content, ok := files[importPath]; ok {
+		return content
+	}
+	if content, ok := files[importPath+".tsx"]; ok {
+		return content
+	}
+	if content, ok := files[importPath+".ts"]; ok {
+		return content
+	}
+	if content, ok := files[importPath+"/index.tsx"]; ok {
+		return content
+	}
+	if content, ok := files[importPath+"/index.ts"]; ok {
+		return content
+	}
+	return ""
 }
 
 // appFixTools defines the tools available to the fix LLM for on-demand file access.
