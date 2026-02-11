@@ -501,7 +501,10 @@ func (c *Controller) llmFixPass(ctx context.Context, files map[string]string, va
 
 	userMessage := fileList.String() + errList.String() + "\nUse read_file to inspect the files with errors, then provide fixes."
 
-	executor := c.buildChatToolExecutor(nil, nil, files)
+	fixLocalExecutor := c.buildChatToolExecutor(nil, nil, files)
+	executor := c.compositeToolExecutor(fixLocalExecutor)
+	fixTools := append([]utils.Tool{}, appFixTools...)
+	fixTools = append(fixTools, c.mcpTools()...)
 	responseJSON, err := utils.StreamWithTools(
 		ctx,
 		model,
@@ -509,7 +512,7 @@ func (c *Controller) llmFixPass(ctx context.Context, files map[string]string, va
 			{Role: "system", Content: constants.NEXTJS_FIX_PROMPT},
 			{Role: "user", Content: userMessage},
 		},
-		appFixTools,
+		fixTools,
 		apiKey,
 		&utils.ResponseFormat{Type: "json_object"},
 		executor,
@@ -924,14 +927,17 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 				generatedFileList.String(),
 			)
 
-			codegenExecutor := c.buildChatToolExecutor(nil, nil, generatedFiles)
+			codegenLocalExecutor := c.buildChatToolExecutor(nil, nil, generatedFiles)
+			codegenExecutor := c.compositeToolExecutor(codegenLocalExecutor)
+			codegenTools := append([]utils.Tool{}, appCodegenTools...)
+			codegenTools = append(codegenTools, c.mcpTools()...)
 			content, err := utils.StreamTextWithTools(
 				ctx,
 				model,
 				filePrompt,
 				userPrompt,
 				apiKey,
-				appCodegenTools,
+				codegenTools,
 				codegenExecutor,
 				nil,
 				func(chunk string) {
@@ -1034,14 +1040,17 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 				genFileList.String(),
 			)
 
-			missingExecutor := c.buildChatToolExecutor(nil, nil, generatedFiles)
+			missingLocalExecutor := c.buildChatToolExecutor(nil, nil, generatedFiles)
+			missingExecutor := c.compositeToolExecutor(missingLocalExecutor)
+			missingTools := append([]utils.Tool{}, appCodegenTools...)
+			missingTools = append(missingTools, c.mcpTools()...)
 			content, err := utils.StreamTextWithTools(
 				ctx,
 				model,
 				filePrompt,
 				userPrompt,
 				apiKey,
-				appCodegenTools,
+				missingTools,
 				missingExecutor,
 				nil,
 				func(chunk string) {

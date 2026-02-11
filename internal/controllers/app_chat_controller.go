@@ -314,6 +314,37 @@ func (c *Controller) buildChatToolExecutor(project *models.AppProject, user *mod
 	}
 }
 
+// compositeToolExecutor wraps a local ToolExecutor and routes MCP-prefixed tool calls
+// to the MCP service, while passing everything else to the local executor.
+func (c *Controller) compositeToolExecutor(local utils.ToolExecutor) utils.ToolExecutor {
+	return func(name string, arguments string) (string, error) {
+		// Route to MCP if the service recognises this tool name
+		if c.MCPService != nil && c.MCPService.IsMCPTool(name) {
+			return c.MCPService.ToolExecutor()(name, arguments)
+		}
+		// Try local executor
+		result, err := local(name, arguments)
+		if err != nil {
+			return result, err
+		}
+		// If local returns "Unknown tool:" and MCP is available, try MCP as fallback
+		if strings.HasPrefix(result, "Unknown tool:") && c.MCPService != nil {
+			if mcpResult, mcpErr := c.MCPService.ToolExecutor()(name, arguments); mcpErr == nil && !strings.HasPrefix(mcpResult, "Unknown MCP tool:") {
+				return mcpResult, nil
+			}
+		}
+		return result, nil
+	}
+}
+
+// mcpTools returns MCP tools if the service is available, or nil.
+func (c *Controller) mcpTools() []utils.Tool {
+	if c.MCPService != nil && c.MCPService.HasTools() {
+		return c.MCPService.Tools()
+	}
+	return nil
+}
+
 // StreamChatAppFileOps processes a chat message and applies file operations with SSE streaming.
 // Mirrors the ChatStream pattern from website_chat_controller.go.
 func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.AppProject, user *models.User, message string, events chan<- responses.SSEEvent) {
@@ -489,12 +520,15 @@ func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.A
 	slog.Info("Calling LLM for chat", "model", model, "project_id", project.ID, "message_count", len(llmMessages))
 
 	// Call LLM with tool calling — LLM reads files on demand instead of all files in context
-	executor := c.buildChatToolExecutor(project, user, currentFiles)
+	localExecutor := c.buildChatToolExecutor(project, user, currentFiles)
+	executor := c.compositeToolExecutor(localExecutor)
+	chatTools := append([]utils.Tool{}, appChatTools...)
+	chatTools = append(chatTools, c.mcpTools()...)
 	responseJSON, err := utils.StreamWithTools(
 		ctx,
 		model,
 		llmMessages,
-		appChatTools,
+		chatTools,
 		apiKey,
 		&utils.ResponseFormat{Type: "json_object"},
 		executor,

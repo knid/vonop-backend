@@ -17,6 +17,7 @@ require (
 	github.com/infisical/go-sdk v0.6.3
 	github.com/lib/pq v1.10.5
 	github.com/markbates/goth v1.82.0
+	github.com/modelcontextprotocol/go-sdk v1.3.0
 	github.com/redis/go-redis/v9 v9.17.0
 	github.com/samber/slog-betterstack v1.4.2
 	github.com/slack-go/slack v0.17.3
@@ -57,6 +58,7 @@ require (
 	github.com/gofrs/flock v0.8.1 // indirect
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect
 	github.com/golang/protobuf v1.5.4 // indirect
+	github.com/google/jsonschema-go v0.4.2 // indirect
 	github.com/google/s2a-go v0.1.7 // indirect
 	github.com/googleapis/enterprise-certificate-proxy v0.3.2 // indirect
 	github.com/googleapis/gax-go/v2 v2.12.5 // indirect
@@ -73,13 +75,14 @@ require (
 	github.com/samber/slog-common v0.18.1 // indirect
 	github.com/sony/gobreaker v0.5.0 // indirect
 	github.com/spf13/cast v1.10.0 // indirect
+	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	github.com/youmark/pkcs8 v0.0.0-20240726163527-a2c0da244d78 // indirect
 	go.opencensus.io v0.24.0 // indirect
 	go.opentelemetry.io/auto/sdk v1.1.0 // indirect
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.49.0 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.49.0 // indirect
 	go.opentelemetry.io/otel/metric v1.37.0 // indirect
-	golang.org/x/oauth2 v0.27.0 // indirect
+	golang.org/x/oauth2 v0.30.0 // indirect
 	golang.org/x/sync v0.16.0 // indirect
 	golang.org/x/time v0.14.0 // indirect
 	google.golang.org/api v0.188.0 // indirect
