@@ -214,8 +214,8 @@ Generate the content for a single TSX/TS file in a Next.js 14 App Router project
 1. Use TypeScript with proper type annotations.
 2. Use Tailwind CSS for ALL styling. No inline styles or CSS modules.
 3. Use next/image for images, next/link for navigation.
-4. Use "use client" directive ONLY when the component needs interactivity (event handlers, useState, useEffect).
-5. Server Components by default. Only add "use client" when truly needed.
+4. Use "use client" directive ONLY when the component needs interactivity (event handlers, useState, useEffect) OR imports from framer-motion. framer-motion components (motion, AnimatePresence, etc.) ONLY work in Client Components.
+5. Server Components by default. Only add "use client" when truly needed (hooks, event handlers, or framer-motion).
 6. Mobile-first responsive design using sm:, md:, lg: breakpoints.
 7. Production-quality, clean code with proper accessibility attributes.
 8. ALWAYS export components as default export (export default function ComponentName). NEVER use named exports for components. When importing components, use default import syntax (import Button from '@/components/ui/button'), NOT named imports (import { Button } from '...'). The only exception is lib/utils.ts which uses named exports.
@@ -292,7 +292,7 @@ Each operation has:
 ### Rules
 1. Maintain design consistency across all files. Always aim for modern, polished aesthetics.
 2. Use TypeScript, Tailwind CSS, next/image, next/link.
-3. Use "use client" only when the component needs interactivity.
+3. Use "use client" when the component needs interactivity (hooks, event handlers) OR imports framer-motion. framer-motion ONLY works in Client Components.
 4. Mobile-first responsive design with sm/md/lg breakpoints.
 5. When modifying a file, return the COMPLETE updated file content, not a diff.
 6. When creating new pages, follow the Next.js App Router conventions (app/route/page.tsx).
@@ -438,7 +438,7 @@ Fix ALL the listed errors. Return ONLY the files that need changes — do not re
 
 ### Rules
 1. Fix each error precisely. Do not refactor or change unrelated code.
-2. If a file uses React hooks (useState, useEffect, etc.) without "use client", add the directive at the top.
+2. If a file uses React hooks (useState, useEffect, etc.) or imports from framer-motion without "use client", add the directive at the top.
 3. If a file uses font.variable without the variable option in the font constructor, add it (e.g., variable: '--font-name').
 4. If a file imports from a LOCAL project path (@/ or ./) that doesn't exist, either remove the import and inline the code, or fix the path.
 5. If a file imports Node.js builtins or build-time packages (tailwindcss, postcss, autoprefixer, eslint, typescript, webpack), remove those imports.
@@ -470,7 +470,7 @@ Pre-installed npm packages (do NOT flag imports of these as errors): lucide-reac
 Common Next.js pitfalls to check:
 - Using .variable on a font that was NOT created with a variable option (e.g., Racing_Sans_One({ subsets: ['latin'] }) does NOT have .variable, you need Racing_Sans_One({ subsets: ['latin'], variable: '--font-racing' }))
 - Importing server-only modules in "use client" components
-- Using hooks (useState, useEffect) without "use client" directive
+- Using hooks (useState, useEffect) or framer-motion without "use client" directive
 - Importing from LOCAL project paths (@/ or ./) that don't exist in the project (do NOT flag npm package imports)
 
 ### Output format (strict JSON, no explanation, no markdown wrapping)
