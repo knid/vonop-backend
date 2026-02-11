@@ -696,11 +696,11 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 	}
 
 	if !sendEvent("project_created", map[string]any{
-		"id":         project.ID,
-		"name":       project.Name,
-		"slug":       project.Slug,
-		"files":      allFilePaths,
-		"totalFiles": len(allFilePaths),
+		"id":          project.ID,
+		"name":        project.Name,
+		"slug":        project.Slug,
+		"file_paths":  allFilePaths,
+		"total_files": len(allFilePaths),
 	}) {
 		return
 	}
@@ -1011,7 +1011,9 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 	}
 
 	// Step 12: Update project status
-	c.UpdateAppProjectStatus(project, "ready")
+	if _, err := c.UpdateAppProjectStatus(project, "ready"); err != nil {
+		slog.Error("failed to update project status to ready", "project_id", project.ID, "error", err)
+	}
 
 	// Step 13: Auto-start preview if service is configured
 	if c.PreviewService != nil {
@@ -1027,9 +1029,9 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 
 	// Step 14: Send done event
 	sendEvent("done", map[string]any{
-		"project_id": project.ID,
-		"success":    true,
-		"message":    "app generation completed",
+		"app_project_id": project.ID,
+		"success":        true,
+		"message":        "app generation completed",
 	})
 }
 
