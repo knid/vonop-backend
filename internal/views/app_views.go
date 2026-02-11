@@ -244,6 +244,23 @@ func (v *HttpViews) GetApps(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Auto-heal: check if any "generating" apps are stale (no active job)
+	hasGenerating := false
+	for _, p := range projects {
+		if p.Status == "generating" {
+			hasGenerating = true
+			break
+		}
+	}
+	var activeGenJobTypes map[string]bool
+	if hasGenerating {
+		activeGenJobTypes = make(map[string]bool)
+		activeJobs, _ := v.Controller.GetActiveJobs(user.ID)
+		for _, j := range activeJobs {
+			activeGenJobTypes[j.Type] = true
+		}
+	}
+
 	var resp []responses.AppProjectResponse
 	for _, p := range projects {
 		var theme map[string]any
@@ -255,6 +272,13 @@ func (v *HttpViews) GetApps(w http.ResponseWriter, r *http.Request) {
 			hasStore = true
 		}
 
+		status := p.Status
+		if status == "generating" && activeGenJobTypes != nil &&
+			!activeGenJobTypes["generate_app"] && !activeGenJobTypes["generate_ecommerce_app"] {
+			status = "ready"
+			go v.Controller.UpdateAppProjectStatus(&p, "ready")
+		}
+
 		resp = append(resp, responses.AppProjectResponse{
 			ID:          p.ID,
 			Name:        p.Name,
@@ -263,7 +287,7 @@ func (v *HttpViews) GetApps(w http.ResponseWriter, r *http.Request) {
 			ProjectType: p.ProjectType,
 			Theme:       theme,
 			Settings:    p.Settings,
-			Status:      p.Status,
+			Status:      status,
 			HasStore:    hasStore,
 			CreatedAt:   p.CreatedAt,
 			UpdatedAt:   p.UpdatedAt,
@@ -295,6 +319,22 @@ func (v *HttpViews) GetApp(w http.ResponseWriter, r *http.Request) {
 	store, storeErr := v.Controller.GetStore(project.ID.String())
 	if storeErr == nil && store != nil {
 		hasStore = true
+	}
+
+	// Auto-heal: if status is "generating" but no active generation job exists, update to "ready"
+	if project.Status == "generating" {
+		activeJobs, _ := v.Controller.GetActiveJobs(user.ID)
+		hasActiveGenJob := false
+		for _, j := range activeJobs {
+			if j.Type == "generate_app" || j.Type == "generate_ecommerce_app" {
+				hasActiveGenJob = true
+				break
+			}
+		}
+		if !hasActiveGenJob {
+			project.Status = "ready"
+			v.Controller.UpdateAppProjectStatus(project, "ready")
+		}
 	}
 
 	// Get files for the response
