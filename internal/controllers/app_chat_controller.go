@@ -218,10 +218,38 @@ func (c *Controller) buildChatToolExecutor(project *models.AppProject, user *mod
 				args.StoreName = project.Name + " Store"
 			}
 
+			// Inject e-commerce template files into fileMap and DB if not already present
+			injectEcommerceTemplates := func() {
+				for _, tp := range constants.NEXTJS_ECOMMERCE_TEMPLATE_FILE_PATHS {
+					if _, exists := fileMap[tp]; exists {
+						continue
+					}
+					content := getEcommerceTemplateContent(tp)
+					if content == "" {
+						continue
+					}
+					// Check DB before creating
+					existingFile, err := c.DB.GetAppGeneratedFileByPath(project.ID.String(), "nextjs", tp)
+					if err != nil || existingFile == nil {
+						file := &models.AppGeneratedFile{
+							AppProjectID: project.ID,
+							Platform:     "nextjs",
+							FilePath:     tp,
+							Content:      content,
+							FileType:     "ts",
+							IsGenerated:  false, // template-managed
+						}
+						c.DB.CreateAppGeneratedFile(file)
+					}
+					fileMap[tp] = content
+				}
+			}
+
 			// Check if store already exists
 			existingStore, err := c.DB.GetStoreByAppProjectID(project.ID.String())
 			if err == nil && existingStore != nil {
-				return fmt.Sprintf("E-commerce store already exists.\nStore ID: %s\nStore name: %s\nStorefront API: %s/v2/storefront/%s\nUse NEXT_PUBLIC_STORE_ID and NEXT_PUBLIC_WEMOB_API_URL env vars in your code.\nNEXT STEP: Call the manage_store tool to add products, categories, and variants to the store.",
+				injectEcommerceTemplates()
+				return fmt.Sprintf("E-commerce store already exists.\nStore ID: %s\nStore name: %s\nStorefront API: %s/v2/storefront/%s\nUse NEXT_PUBLIC_STORE_ID and NEXT_PUBLIC_WEMOB_API_URL env vars in your code.\nlib/wemob-store.ts is available with typed API client functions — import from \"@/lib/wemob-store\".\nNEXT STEP: Call the manage_store tool to add products, categories, and variants to the store.",
 					existingStore.ID.String(), existingStore.StoreName, constants.WEMOB_API_BASE_URL, existingStore.ID.String()), nil
 			}
 
@@ -237,7 +265,8 @@ func (c *Controller) buildChatToolExecutor(project *models.AppProject, user *mod
 				return fmt.Sprintf("Failed to create store: %s", err.Error()), nil
 			}
 
-			return fmt.Sprintf("E-commerce store created successfully!\nStore ID: %s\nStore name: %s\nStorefront API: %s/v2/storefront/%s\nUse these env vars in generated code:\n- NEXT_PUBLIC_STORE_ID = \"%s\"\n- NEXT_PUBLIC_WEMOB_API_URL = \"%s\"\nNEXT STEP: Call the manage_store tool to add products, categories, and variants to the store.",
+			injectEcommerceTemplates()
+			return fmt.Sprintf("E-commerce store created successfully!\nStore ID: %s\nStore name: %s\nStorefront API: %s/v2/storefront/%s\nUse these env vars in generated code:\n- NEXT_PUBLIC_STORE_ID = \"%s\"\n- NEXT_PUBLIC_WEMOB_API_URL = \"%s\"\nlib/wemob-store.ts is available with typed API client functions — import from \"@/lib/wemob-store\".\nNEXT STEP: Call the manage_store tool to add products, categories, and variants to the store.",
 				store.ID.String(), store.StoreName, constants.WEMOB_API_BASE_URL, store.ID.String(), store.ID.String(), constants.WEMOB_API_BASE_URL), nil
 
 		case "manage_store":
