@@ -60,23 +60,33 @@ type ReasoningConfig struct {
 	Enabled *bool  `json:"enabled,omitempty"`    // explicitly enable/disable
 }
 
+// ThinkingConfig controls thinking mode on ZAI (GLM-4.7).
+// See https://docs.z.ai/guides/capabilities/thinking-mode
+type ThinkingConfig struct {
+	Type          string `json:"type"`                     // "enabled" or "disabled"
+	ClearThinking bool   `json:"clear_thinking,omitempty"` // false = preserve for cache
+}
+
 type ChatRequest struct {
 	Model          string           `json:"model"`
 	Messages       []Message        `json:"messages"`
 	Stream         bool             `json:"stream,omitempty"`
 	MaxTokens      int              `json:"max_tokens,omitempty"`
+	Temperature    *float64         `json:"temperature,omitempty"`
 	ResponseFormat *ResponseFormat  `json:"response_format,omitempty"`
 	Tools          []Tool           `json:"tools,omitempty"`
 	ToolChoice     any              `json:"tool_choice,omitempty"`
 	Reasoning      *ReasoningConfig `json:"reasoning,omitempty"`
+	Thinking       *ThinkingConfig  `json:"thinking,omitempty"`
 }
 
 type Message struct {
-	Role       string     `json:"role"`
-	Content    string     `json:"content,omitempty"`
-	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
-	ToolCallID string     `json:"tool_call_id,omitempty"`
-	Name       string     `json:"name,omitempty"`
+	Role             string     `json:"role"`
+	Content          string     `json:"content,omitempty"`
+	ReasoningContent string     `json:"reasoning_content,omitempty"` // ZAI: preserve thinking across tool rounds
+	ToolCalls        []ToolCall `json:"tool_calls,omitempty"`
+	ToolCallID       string     `json:"tool_call_id,omitempty"`
+	Name             string     `json:"name,omitempty"`
 }
 
 // Response structure for parsing the LLM output
@@ -96,6 +106,35 @@ type ChatResponse struct {
 	Usage   UsageInfo `json:"usage"`
 }
 
+// prepareChatRequest translates provider-agnostic ChatRequest fields into the
+// format expected by the target LLM provider. For ZAI, it converts the
+// OpenRouter-style "reasoning" config into ZAI's "thinking" format.
+func prepareChatRequest(req ChatRequest, provider *LLMProvider) ChatRequest {
+	if provider == nil || !provider.IsZAI() || req.Reasoning == nil {
+		return req
+	}
+
+	// Translate reasoning -> thinking for ZAI
+	thinkingType := "disabled"
+	if req.Reasoning.Effort != "" && req.Reasoning.Effort != "none" {
+		thinkingType = "enabled"
+	}
+
+	req.Thinking = &ThinkingConfig{
+		Type:          thinkingType,
+		ClearThinking: false, // preserve for cache
+	}
+	req.Reasoning = nil // don't send OpenRouter format to ZAI
+
+	// ZAI requires temperature=1 when thinking is enabled
+	if thinkingType == "enabled" && req.Temperature == nil {
+		t := 1.0
+		req.Temperature = &t
+	}
+
+	return req
+}
+
 // GetJSONFromLLM sends a system+user message to the LLM and returns the raw response text.
 func GetJSONFromLLM(model, system, message string, provider *LLMProvider) (string, error) {
 	if provider == nil || provider.APIKey == "" {
@@ -103,13 +142,13 @@ func GetJSONFromLLM(model, system, message string, provider *LLMProvider) (strin
 		return "", fmt.Errorf("missing LLM provider configuration")
 	}
 
-	reqBody := ChatRequest{
+	reqBody := prepareChatRequest(ChatRequest{
 		Model: model,
 		Messages: []Message{
 			{Role: "system", Content: system},
 			{Role: "user", Content: message},
 		},
-	}
+	}, provider)
 	body, _ := json.Marshal(reqBody)
 
 	req, _ := http.NewRequest("POST", provider.Endpoint(), bytes.NewReader(body))
@@ -150,13 +189,13 @@ func GetTextFromLLM(model, system, message string, provider *LLMProvider) (strin
 		return "", fmt.Errorf("missing LLM provider configuration")
 	}
 
-	reqBody := ChatRequest{
+	reqBody := prepareChatRequest(ChatRequest{
 		Model: model,
 		Messages: []Message{
 			{Role: "system", Content: system},
 			{Role: "user", Content: message},
 		},
-	}
+	}, provider)
 	body, _ := json.Marshal(reqBody)
 
 	req, _ := http.NewRequest("POST", provider.Endpoint(), bytes.NewReader(body))
@@ -191,9 +230,18 @@ func GetTextFromLLM(model, system, message string, provider *LLMProvider) (strin
 }
 
 type StreamDelta struct {
-	Content   string     `json:"content,omitempty"`
-	Reasoning string     `json:"reasoning,omitempty"`
-	ToolCalls []ToolCall `json:"tool_calls,omitempty"`
+	Content          string     `json:"content,omitempty"`
+	Reasoning        string     `json:"reasoning,omitempty"`          // OpenRouter
+	ReasoningContent string     `json:"reasoning_content,omitempty"`  // ZAI
+	ToolCalls        []ToolCall `json:"tool_calls,omitempty"`
+}
+
+// GetReasoning returns the reasoning text from whichever field the provider uses.
+func (d *StreamDelta) GetReasoning() string {
+	if d.ReasoningContent != "" {
+		return d.ReasoningContent
+	}
+	return d.Reasoning
 }
 
 type StreamChoice struct {
@@ -212,7 +260,7 @@ func StreamTextFromLLM(ctx context.Context, model, system, message string, provi
 		return "", fmt.Errorf("missing LLM provider configuration")
 	}
 
-	reqBody := ChatRequest{
+	reqBody := prepareChatRequest(ChatRequest{
 		Model:     model,
 		Stream:    true,
 		MaxTokens: 16384,
@@ -221,7 +269,7 @@ func StreamTextFromLLM(ctx context.Context, model, system, message string, provi
 			{Role: "system", Content: system},
 			{Role: "user", Content: message},
 		},
-	}
+	}, provider)
 	body, _ := json.Marshal(reqBody)
 
 	req, _ := http.NewRequestWithContext(ctx, "POST", provider.Endpoint(), bytes.NewReader(body))
@@ -292,12 +340,12 @@ func GetJSONFromLLMWithMessages(model string, messages []Message, provider *LLMP
 		return "", fmt.Errorf("missing LLM provider configuration")
 	}
 
-	reqBody := ChatRequest{
+	reqBody := prepareChatRequest(ChatRequest{
 		Model:          model,
 		Messages:       messages,
 		MaxTokens:      16384,
 		ResponseFormat: &ResponseFormat{Type: "json_object"},
-	}
+	}, provider)
 	body, _ := json.Marshal(reqBody)
 
 	req, _ := http.NewRequest("POST", provider.Endpoint(), bytes.NewReader(body))
@@ -338,13 +386,13 @@ func StreamJSONFromLLMWithMessages(ctx context.Context, model string, messages [
 		return "", fmt.Errorf("missing LLM provider configuration")
 	}
 
-	reqBody := ChatRequest{
+	reqBody := prepareChatRequest(ChatRequest{
 		Model:          model,
 		Stream:         true,
 		Messages:       messages,
 		MaxTokens:      16384,
 		ResponseFormat: &ResponseFormat{Type: "json_object"},
-	}
+	}, provider)
 	body, _ := json.Marshal(reqBody)
 
 	req, _ := http.NewRequestWithContext(ctx, "POST", provider.Endpoint(), bytes.NewReader(body))
@@ -444,6 +492,9 @@ func GetJSONFromLLMWithVision(model, system, userText, base64Image string, provi
 	if provider == nil || provider.APIKey == "" {
 		return "", fmt.Errorf("missing LLM provider configuration")
 	}
+	if !provider.SupportsVision() {
+		return "", fmt.Errorf("vision is not supported by %s provider", provider.Name)
+	}
 
 	messages := []MultiMessage{
 		{Role: "system", Content: system},
@@ -504,7 +555,7 @@ func StreamJSONFromLLM(ctx context.Context, model, system, message string, provi
 		return "", fmt.Errorf("missing LLM provider configuration")
 	}
 
-	reqBody := ChatRequest{
+	reqBody := prepareChatRequest(ChatRequest{
 		Model:     model,
 		Stream:    true,
 		MaxTokens: 16384,
@@ -512,7 +563,7 @@ func StreamJSONFromLLM(ctx context.Context, model, system, message string, provi
 			{Role: "system", Content: system},
 			{Role: "user", Content: message},
 		},
-	}
+	}, provider)
 	body, _ := json.Marshal(reqBody)
 
 	req, _ := http.NewRequestWithContext(ctx, "POST", provider.Endpoint(), bytes.NewReader(body))
@@ -581,6 +632,9 @@ func StreamJSONFromLLM(ctx context.Context, model, system, message string, provi
 func StreamJSONFromLLMWithVision(ctx context.Context, model, system, userText, base64Image string, provider *LLMProvider, onChunk func(chunk string)) (string, error) {
 	if provider == nil || provider.APIKey == "" {
 		return "", fmt.Errorf("missing LLM provider configuration")
+	}
+	if !provider.SupportsVision() {
+		return "", fmt.Errorf("vision is not supported by %s provider", provider.Name)
 	}
 
 	type streamMultiChatRequest struct {
@@ -702,7 +756,7 @@ func StreamWithTools(
 			return "", ctx.Err()
 		}
 
-		reqBody := ChatRequest{
+		reqBody := prepareChatRequest(ChatRequest{
 			Model:          model,
 			Stream:         true,
 			MaxTokens:      16384,
@@ -710,7 +764,7 @@ func StreamWithTools(
 			Messages:       currentMessages,
 			Tools:          tools,
 			ResponseFormat: responseFormat,
-		}
+		}, provider)
 		body, _ := json.Marshal(reqBody)
 
 		req, _ := http.NewRequestWithContext(ctx, "POST", provider.Endpoint(), bytes.NewReader(body))
@@ -730,7 +784,8 @@ func StreamWithTools(
 		}
 
 		var fullText strings.Builder
-		var roundChunks []string // buffer chunks per round to suppress intermediate reasoning
+		var fullReasoning strings.Builder // ZAI: accumulate reasoning_content for cache continuity
+		var roundChunks []string          // buffer chunks per round to suppress intermediate reasoning
 		var lastFinishReason string
 		toolCallsMap := make(map[int]*ToolCall)
 
@@ -766,6 +821,11 @@ func StreamWithTools(
 				if choice.Delta.Content != "" {
 					fullText.WriteString(choice.Delta.Content)
 					roundChunks = append(roundChunks, choice.Delta.Content)
+				}
+
+				// Accumulate reasoning (ZAI: reasoning_content, OpenRouter: reasoning)
+				if r := choice.Delta.GetReasoning(); r != "" {
+					fullReasoning.WriteString(r)
 				}
 
 				// Accumulate tool calls
@@ -840,11 +900,15 @@ func StreamWithTools(
 			}
 
 			// Append assistant message with tool calls
-			currentMessages = append(currentMessages, Message{
+			assistantMsg := Message{
 				Role:      "assistant",
 				Content:   fullText.String(),
 				ToolCalls: toolCalls,
-			})
+			}
+			if provider.IsZAI() && fullReasoning.Len() > 0 {
+				assistantMsg.ReasoningContent = fullReasoning.String()
+			}
+			currentMessages = append(currentMessages, assistantMsg)
 
 			// Execute each tool and append results
 			for _, tc := range toolCalls {

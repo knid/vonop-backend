@@ -20,6 +20,16 @@ func (p *LLMProvider) IsOpenRouter() bool {
 	return p.Name == "openrouter"
 }
 
+// IsZAI returns true when using the ZAI (GLM-4.7) provider.
+func (p *LLMProvider) IsZAI() bool {
+	return p.Name == "zai"
+}
+
+// SupportsVision returns true if the provider supports multimodal (image) input.
+func (p *LLMProvider) SupportsVision() bool {
+	return !p.IsZAI()
+}
+
 // setLLMHeaders applies auth and provider-specific headers to an HTTP request.
 func setLLMHeaders(req *http.Request, provider *LLMProvider) {
 	req.Header.Set("Content-Type", "application/json")
