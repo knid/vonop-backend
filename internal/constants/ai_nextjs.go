@@ -218,7 +218,7 @@ Generate the content for a single TSX/TS file in a Next.js 14 App Router project
 5. Server Components by default. Only add "use client" when truly needed.
 6. Mobile-first responsive design using sm:, md:, lg: breakpoints.
 7. Production-quality, clean code with proper accessibility attributes.
-8. Export the component as default export.
+8. ALWAYS export components as default export (export default function ComponentName). NEVER use named exports for components. When importing components, use default import syntax (import Button from '@/components/ui/button'), NOT named imports (import { Button } from '...'). The only exception is lib/utils.ts which uses named exports.
 9. For page.tsx files in app/ directory, the component should be the page component.
 10. For layout.tsx, include proper metadata export and children prop typing.
 11. Use semantic HTML elements (nav, main, section, article, footer, header).
@@ -296,6 +296,7 @@ Each operation has:
 6. When creating new pages, follow the Next.js App Router conventions (app/route/page.tsx).
 7. Respect the existing color scheme and design patterns. Elevate the design quality when possible.
 8. Keep navigation consistent across pages.
+22. ALWAYS use default exports for components (export default function ComponentName). When importing components, use default import syntax (import Button from '@/components/ui/button'), NOT named imports (import { Button } from '...'). The only exception is lib/utils.ts which uses named exports. Mismatched import styles cause "type is invalid" React errors.
 9. Return ONLY the JSON response. No markdown wrapping.
 10. CRITICAL: If any file imports from a path that does not exist in the current project files, you MUST include a "create" operation for that file. Every import must resolve to an existing file. Missing files cause build failures.
 11. Only import from paths that exist in the current project files or that you are creating in the same operations array.
@@ -402,6 +403,7 @@ Fix ALL the listed errors. Return ONLY the files that need changes — do not re
 3. If a file uses font.variable without the variable option in the font constructor, add it (e.g., variable: '--font-name').
 4. If a file imports from a LOCAL project path (@/ or ./) that doesn't exist, either remove the import and inline the code, or fix the path.
 5. If a file imports Node.js builtins or build-time packages (tailwindcss, postcss, autoprefixer, eslint, typescript, webpack), remove those imports.
+10. If an import_mismatch error is reported: change the import style to match the target file's export. If the target uses "export default", change "import { Foo } from ..." to "import Foo from ...". If the target only has named exports, change "import Foo from ..." to "import { Foo } from ...". ALWAYS use read_file on the target file to verify its actual exports before fixing.
 6. Return ONLY valid JSON. No markdown wrapping.
 7. Pre-installed npm packages (NEVER remove these imports, they are guaranteed available): lucide-react, clsx, tailwind-merge, class-variance-authority, framer-motion, @radix-ui/react-slot, @radix-ui/react-dialog, @radix-ui/react-dropdown-menu, @radix-ui/react-tabs, @radix-ui/react-tooltip, @radix-ui/react-avatar, @radix-ui/react-separator, @radix-ui/react-scroll-area, @radix-ui/react-switch, @radix-ui/react-select, @radix-ui/react-accordion, @radix-ui/react-popover, tailwindcss-animate.
 8. CRITICAL: If an error says "Module not found" or "Can't resolve" for any package listed in rule 7, do NOT remove the import. These are pre-installed packages — the error is a transient build issue, not a code issue. Keep the import as-is.
@@ -419,7 +421,7 @@ const NEXTJS_VALIDATE_PROMPT = `You are an expert TypeScript and Next.js 14 type
 
 Focus on:
 1. TypeScript type errors (wrong types, missing properties, invalid generics)
-2. Missing or incorrect imports (importing from non-existent files, wrong export names)
+2. Missing or incorrect imports (importing from non-existent files, wrong export names, named vs default import mismatch — e.g., using "import { Button }" when the target file has "export default function Button")
 3. Next.js-specific issues (incorrect font usage, missing "use client" for hooks, invalid metadata)
 4. Tailwind CSS config issues (wrong content paths, invalid theme extensions)
 5. Package.json issues (missing required dependencies)
