@@ -482,7 +482,7 @@ You have tools to inspect already-generated project files:
 - read_file: Read a file's content to see its exact exports and types.
 - list_files: See all generated files so far.
 
-You may also have documentation lookup tools available (prefixed names like ctx7__query-docs, ctx7__resolve-library-id). When working with third-party libraries or unfamiliar APIs, use these tools to look up current documentation before writing code. Prefer looking up docs over guessing.
+Always use Context7 MCP when you need library/API documentation, code generation, setup or configuration steps — without the user having to explicitly ask. You have documentation lookup tools available (prefixed names like ctx7__query-docs, ctx7__resolve-library-id). First call ctx7__resolve-library-id to get the library ID, then ctx7__query-docs to fetch the docs. Prefer looking up docs over guessing.
 
 IMPORTANT: If you need to import from another project file, ALWAYS use read_file first to see its actual exports. Do NOT guess export names.`
 
@@ -515,7 +515,7 @@ You have tools to inspect the project:
 - list_files: See all files in the project with sizes.
 - search_files: Search for text across all files.
 
-You may also have documentation lookup tools available (prefixed names like ctx7__query-docs, ctx7__resolve-library-id). When working with third-party libraries or unfamiliar APIs, use these tools to look up current documentation before writing code. Prefer looking up docs over guessing.
+Always use Context7 MCP when you need library/API documentation, code generation, setup or configuration steps — without the user having to explicitly ask. You have documentation lookup tools available (prefixed names like ctx7__query-docs, ctx7__resolve-library-id). First call ctx7__resolve-library-id to get the library ID, then ctx7__query-docs to fetch the docs. Prefer looking up docs over guessing.
 
 IMPORTANT: Before generating a "modify" operation, you MUST use read_file for that file first to see its current content. Do not guess file content.
 IMPORTANT: Call multiple tools in parallel when possible. For example, if you need to read 3 files, call read_file for all 3 in a single round instead of reading them one by one. Only read files that are directly relevant to the user's request.
@@ -676,7 +676,7 @@ You have tools to inspect the project:
 - list_files: See all files in the project.
 - search_files: Search for text across all files.
 
-You may also have documentation lookup tools available (prefixed names like ctx7__query-docs, ctx7__resolve-library-id). When working with third-party libraries or unfamiliar APIs, use these tools to look up current documentation before writing code. Prefer looking up docs over guessing.
+Always use Context7 MCP when you need library/API documentation, code generation, setup or configuration steps — without the user having to explicitly ask. You have documentation lookup tools available (prefixed names like ctx7__query-docs, ctx7__resolve-library-id). First call ctx7__resolve-library-id to get the library ID, then ctx7__query-docs to fetch the docs. Prefer looking up docs over guessing.
 
 IMPORTANT: Use read_file to read the files that have errors before generating fixes. Do not guess file content.
 
