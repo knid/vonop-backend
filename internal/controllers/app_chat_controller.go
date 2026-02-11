@@ -128,6 +128,38 @@ var appChatTools = []utils.Tool{
 			},
 		},
 	},
+	{
+		Type: "function",
+		Function: utils.ToolFunction{
+			Name:        "manage_store",
+			Description: "Create or manage products, categories, variants, and discounts in the e-commerce store. Use this after setup_ecommerce to populate the store with products. Supports batch operations.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"operations": map[string]any{
+						"type":        "array",
+						"description": "Array of store operations to execute",
+						"items": map[string]any{
+							"type": "object",
+							"properties": map[string]any{
+								"action": map[string]any{
+									"type":        "string",
+									"enum":        []string{"create_product", "create_category", "create_discount", "update_store_settings"},
+									"description": "The operation to perform",
+								},
+								"data": map[string]any{
+									"type":        "object",
+									"description": "Operation data. For create_product: {name, description, price (in cents), images, tags}. For create_category: {name, description}. For create_discount: {code, type (percentage/fixed), value, min_order_cents, max_uses}. For update_store_settings: {currency, tax_rate, notify_email}.",
+								},
+							},
+							"required": []string{"action", "data"},
+						},
+					},
+				},
+				"required": []string{"operations"},
+			},
+		},
+	},
 }
 
 // buildChatToolExecutor returns a ToolExecutor that can read/list/search project files
@@ -189,7 +221,7 @@ func (c *Controller) buildChatToolExecutor(project *models.AppProject, user *mod
 			// Check if store already exists
 			existingStore, err := c.DB.GetStoreByAppProjectID(project.ID.String())
 			if err == nil && existingStore != nil {
-				return fmt.Sprintf("E-commerce store already exists.\nStore ID: %s\nStore name: %s\nStorefront API: %s/v2/storefront/%s\nUse NEXT_PUBLIC_STORE_ID and NEXT_PUBLIC_WEMOB_API_URL env vars in your code.",
+				return fmt.Sprintf("E-commerce store already exists.\nStore ID: %s\nStore name: %s\nStorefront API: %s/v2/storefront/%s\nUse NEXT_PUBLIC_STORE_ID and NEXT_PUBLIC_WEMOB_API_URL env vars in your code.\nNEXT STEP: Call the manage_store tool to add products, categories, and variants to the store.",
 					existingStore.ID.String(), existingStore.StoreName, constants.WEMOB_API_BASE_URL, existingStore.ID.String()), nil
 			}
 
@@ -205,8 +237,47 @@ func (c *Controller) buildChatToolExecutor(project *models.AppProject, user *mod
 				return fmt.Sprintf("Failed to create store: %s", err.Error()), nil
 			}
 
-			return fmt.Sprintf("E-commerce store created successfully!\nStore ID: %s\nStore name: %s\nStorefront API: %s/v2/storefront/%s\nUse these env vars in generated code:\n- NEXT_PUBLIC_STORE_ID = \"%s\"\n- NEXT_PUBLIC_WEMOB_API_URL = \"%s\"",
+			return fmt.Sprintf("E-commerce store created successfully!\nStore ID: %s\nStore name: %s\nStorefront API: %s/v2/storefront/%s\nUse these env vars in generated code:\n- NEXT_PUBLIC_STORE_ID = \"%s\"\n- NEXT_PUBLIC_WEMOB_API_URL = \"%s\"\nNEXT STEP: Call the manage_store tool to add products, categories, and variants to the store.",
 				store.ID.String(), store.StoreName, constants.WEMOB_API_BASE_URL, store.ID.String(), store.ID.String(), constants.WEMOB_API_BASE_URL), nil
+
+		case "manage_store":
+			var args struct {
+				Operations []struct {
+					Action string         `json:"action"`
+					Data   map[string]any `json:"data"`
+				} `json:"operations"`
+			}
+			if err := json.Unmarshal([]byte(arguments), &args); err != nil {
+				return fmt.Sprintf("Failed to parse manage_store arguments: %s", err.Error()), nil
+			}
+
+			// Get store for this project
+			store, err := c.DB.GetStoreByAppProjectID(project.ID.String())
+			if err != nil || store == nil {
+				return "Error: No e-commerce store found. Call setup_ecommerce first to create a store.", nil
+			}
+
+			var results []string
+			var errCount int
+			for _, op := range args.Operations {
+				if err := c.executeStoreOperation(store, op.Action, op.Data); err != nil {
+					slog.Warn("manage_store operation failed", "action", op.Action, "error", err)
+					results = append(results, fmt.Sprintf("FAILED %s: %s", op.Action, err.Error()))
+					errCount++
+				} else {
+					name, _ := op.Data["name"].(string)
+					code, _ := op.Data["code"].(string)
+					label := name
+					if label == "" {
+						label = code
+					}
+					results = append(results, fmt.Sprintf("OK %s: %s", op.Action, label))
+				}
+			}
+
+			summary := fmt.Sprintf("Executed %d operations (%d succeeded, %d failed):\n%s",
+				len(args.Operations), len(args.Operations)-errCount, errCount, strings.Join(results, "\n"))
+			return summary, nil
 
 		default:
 			return fmt.Sprintf("Unknown tool: %s", name), nil
