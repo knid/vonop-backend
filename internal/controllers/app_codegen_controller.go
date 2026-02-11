@@ -49,6 +49,7 @@ type llmFixResponse struct {
 
 // --- Regex patterns for deterministic checks ---
 var hookPattern = regexp.MustCompile(`\b(useState|useEffect|useRef|useCallback|useMemo|useReducer|useContext)\s*[\(<]`)
+var framerMotionImportPattern = regexp.MustCompile(`import\s+.*\s+from\s+['"]framer-motion['"]`)
 var fontVariableUsagePattern = regexp.MustCompile(`\.\s*variable\b`)
 var fontVariableOptionPattern = regexp.MustCompile(`variable\s*:\s*['"]--font-`)
 var fontConstructorPattern = regexp.MustCompile(`(?:const|let|var)\s+\w+\s*=\s*\w+\s*\(`)
@@ -307,6 +308,18 @@ func runDeterministicChecks(files map[string]string) []validationError {
 				errors = append(errors, validationError{
 					File:  filePath,
 					Error: "File uses React hooks (useState/useEffect/etc.) but is missing \"use client\" directive",
+					Type:  "missing_use_client",
+				})
+			}
+		}
+
+		// Check 2b: framer-motion import without "use client"
+		if framerMotionImportPattern.MatchString(content) {
+			hasUseClient := strings.Contains(content, `"use client"`) || strings.Contains(content, `'use client'`)
+			if !hasUseClient {
+				errors = append(errors, validationError{
+					File:  filePath,
+					Error: "File imports from framer-motion but is missing \"use client\" directive. framer-motion components only work in Client Components.",
 					Type:  "missing_use_client",
 				})
 			}
