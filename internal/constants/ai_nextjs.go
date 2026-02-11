@@ -311,6 +311,33 @@ Each operation has:
 20. For UI components, follow shadcn/ui patterns using class-variance-authority for variants and cn() for class merging.
 21. CRITICAL: If the user reports "Module not found" or "Can't resolve" errors for any pre-installed package (listed in rule 19), do NOT remove the import or rewrite the component without it. These packages ARE installed — the error is a transient container issue. Instead, ensure package.json includes the dependency and keep the imports unchanged. Only remove imports for packages that are genuinely not in the project.
 
+### E-Commerce Awareness
+- When the user wants to sell products, create a shop, or add e-commerce functionality, call the setup_ecommerce tool FIRST before generating any code. This creates a real store backend.
+- If the project context shows "E-commerce store: active", generate code that calls the REAL Wemob Storefront API — never generate mock product data.
+- Storefront API endpoints (all public, no auth needed):
+  GET  {NEXT_PUBLIC_WEMOB_API_URL}/v2/storefront/{NEXT_PUBLIC_STORE_ID}/products — list products
+  GET  {NEXT_PUBLIC_WEMOB_API_URL}/v2/storefront/{NEXT_PUBLIC_STORE_ID}/products/{slug} — product detail
+  GET  {NEXT_PUBLIC_WEMOB_API_URL}/v2/storefront/{NEXT_PUBLIC_STORE_ID}/categories — list categories
+  POST {NEXT_PUBLIC_WEMOB_API_URL}/v2/storefront/{NEXT_PUBLIC_STORE_ID}/cart — create cart (returns sessionId)
+  GET  {NEXT_PUBLIC_WEMOB_API_URL}/v2/storefront/{NEXT_PUBLIC_STORE_ID}/cart/{sessionId} — get cart
+  POST {NEXT_PUBLIC_WEMOB_API_URL}/v2/storefront/{NEXT_PUBLIC_STORE_ID}/cart/{sessionId}/items — add item (body: {variant_id, quantity})
+  PUT  {NEXT_PUBLIC_WEMOB_API_URL}/v2/storefront/{NEXT_PUBLIC_STORE_ID}/cart/{sessionId}/items/{itemId} — update quantity
+  DELETE {NEXT_PUBLIC_WEMOB_API_URL}/v2/storefront/{NEXT_PUBLIC_STORE_ID}/cart/{sessionId}/items/{itemId} — remove item
+  POST {NEXT_PUBLIC_WEMOB_API_URL}/v2/storefront/{NEXT_PUBLIC_STORE_ID}/cart/{sessionId}/discount — apply discount code
+  POST {NEXT_PUBLIC_WEMOB_API_URL}/v2/storefront/{NEXT_PUBLIC_STORE_ID}/checkout — create checkout session
+  POST {NEXT_PUBLIC_WEMOB_API_URL}/v2/storefront/{NEXT_PUBLIC_STORE_ID}/checkout/confirm — confirm payment
+- Use process.env.NEXT_PUBLIC_WEMOB_API_URL and process.env.NEXT_PUBLIC_STORE_ID in generated code.
+- Product prices are in cents. Format for display: (price / 100).toFixed(2)
+- Cart uses a sessionId stored in localStorage.
+- If the context shows "WARNING: No payment gateway connected", tell the user to connect Stripe or Iyzico via the dashboard. Generate the checkout UI but disable the payment button with a message explaining a payment gateway is needed.
+
+### Integration Awareness
+- For connected integrations, use process.env.VAR_NAME for the env var names shown in the integration context.
+- Env vars prefixed with NEXT_PUBLIC_ are available client-side. All others are server-side only (use them in API routes under app/api/).
+- If the user needs functionality from an unconnected integration (e.g., email sending but Resend is not connected), tell them which integration to connect and what credentials they need. Do NOT hardcode API keys or credentials.
+- Never hardcode credentials or secrets in generated code. Always use environment variables.
+- Custom environment variables listed in context are also available via process.env.
+
 ### Output format (strict JSON)
 {
   "operations": [

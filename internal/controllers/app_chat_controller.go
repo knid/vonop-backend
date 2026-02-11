@@ -12,6 +12,7 @@ import (
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/responses"
+	"github.com/knid/wemob/internal/services/integrations"
 	"github.com/knid/wemob/internal/utils"
 )
 
@@ -110,11 +111,28 @@ var appChatTools = []utils.Tool{
 			},
 		},
 	},
+	{
+		Type: "function",
+		Function: utils.ToolFunction{
+			Name:        "setup_ecommerce",
+			Description: "Set up e-commerce for this project. Creates a store and configures the project for e-commerce. Call this when the user wants to sell products, create a shop, or add e-commerce functionality.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"store_name": map[string]any{
+						"type":        "string",
+						"description": "Name for the store, e.g. 'My Shoe Store'",
+					},
+				},
+				"required": []string{"store_name"},
+			},
+		},
+	},
 }
 
-// buildChatToolExecutor returns a ToolExecutor that can read/list/search project files.
-// fileMap is the in-memory map of path→content for the current project.
-func buildChatToolExecutor(fileMap map[string]string) utils.ToolExecutor {
+// buildChatToolExecutor returns a ToolExecutor that can read/list/search project files
+// and perform actions like setting up e-commerce.
+func (c *Controller) buildChatToolExecutor(project *models.AppProject, user *models.User, fileMap map[string]string) utils.ToolExecutor {
 	return func(name string, arguments string) (string, error) {
 		switch name {
 		case "read_file":
@@ -158,6 +176,37 @@ func buildChatToolExecutor(fileMap map[string]string) utils.ToolExecutor {
 				results = results[:50]
 			}
 			return strings.Join(results, "\n"), nil
+
+		case "setup_ecommerce":
+			var args struct {
+				StoreName string `json:"store_name"`
+			}
+			json.Unmarshal([]byte(arguments), &args)
+			if args.StoreName == "" {
+				args.StoreName = project.Name + " Store"
+			}
+
+			// Check if store already exists
+			existingStore, err := c.DB.GetStoreByAppProjectID(project.ID.String())
+			if err == nil && existingStore != nil {
+				return fmt.Sprintf("E-commerce store already exists.\nStore ID: %s\nStore name: %s\nStorefront API: %s/v2/storefront/%s\nUse NEXT_PUBLIC_STORE_ID and NEXT_PUBLIC_WEMOB_API_URL env vars in your code.",
+					existingStore.ID.String(), existingStore.StoreName, constants.WEMOB_API_BASE_URL, existingStore.ID.String()), nil
+			}
+
+			// Set project type to ecommerce
+			if project.ProjectType != "ecommerce" {
+				project.ProjectType = "ecommerce"
+				c.DB.UpdateAppProject(project)
+			}
+
+			// Create store
+			store, err := c.CreateStore(project, user, args.StoreName)
+			if err != nil {
+				return fmt.Sprintf("Failed to create store: %s", err.Error()), nil
+			}
+
+			return fmt.Sprintf("E-commerce store created successfully!\nStore ID: %s\nStore name: %s\nStorefront API: %s/v2/storefront/%s\nUse these env vars in generated code:\n- NEXT_PUBLIC_STORE_ID = \"%s\"\n- NEXT_PUBLIC_WEMOB_API_URL = \"%s\"",
+				store.ID.String(), store.StoreName, constants.WEMOB_API_BASE_URL, store.ID.String(), store.ID.String(), constants.WEMOB_API_BASE_URL), nil
 
 		default:
 			return fmt.Sprintf("Unknown tool: %s", name), nil
@@ -219,16 +268,58 @@ func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.A
 	}
 	fileTree.WriteString("\nUse the read_file tool to view any file's content before modifying it.")
 
-	// Get connected integrations
-	integrations, _ := c.DB.GetAppIntegrationsByProjectID(project.ID.String())
+	// Build rich integration context for AI
+	appIntegrations, _ := c.DB.GetAppIntegrationsByProjectID(project.ID.String())
 	var integrationContext strings.Builder
-	if len(integrations) > 0 {
+	hasPaymentGateway := false
+	if len(appIntegrations) > 0 {
 		integrationContext.WriteString("\nConnected integrations:\n")
-		for _, integ := range integrations {
-			integrationContext.WriteString(fmt.Sprintf("- %s (status: %s)\n", integ.Provider, integ.Status))
+		for _, integ := range appIntegrations {
+			config, err := integrations.GetProviderConfig(integ.Provider)
+			if err != nil {
+				integrationContext.WriteString(fmt.Sprintf("- %s (status: %s)\n", integ.Provider, integ.Status))
+				continue
+			}
+			integrationContext.WriteString(fmt.Sprintf("- %s (category: %s, status: %s)\n", integ.Provider, config.Category, integ.Status))
+			// Show env var names (not values) so AI knows what to reference
+			var envNames []string
+			for _, envName := range config.EnvVarMapping {
+				envNames = append(envNames, envName)
+			}
+			if len(envNames) > 0 {
+				integrationContext.WriteString(fmt.Sprintf("  Env vars: %s\n", strings.Join(envNames, ", ")))
+			}
+			if config.Category == "payment" {
+				hasPaymentGateway = true
+			}
 		}
 	} else {
 		integrationContext.WriteString("\nNo integrations connected.\n")
+	}
+
+	// E-commerce store context
+	if project.ProjectType == "ecommerce" {
+		store, err := c.DB.GetStoreByAppProjectID(project.ID.String())
+		if err == nil && store != nil {
+			integrationContext.WriteString(fmt.Sprintf("\nE-commerce store: %s (store_id: %s)\n", store.Status, store.ID.String()))
+			integrationContext.WriteString(fmt.Sprintf("Storefront API: %s/v2/storefront/%s\n", constants.WEMOB_API_BASE_URL, store.ID.String()))
+		}
+		if !hasPaymentGateway {
+			integrationContext.WriteString("\nWARNING: No payment gateway connected. Tell the user to connect Stripe or Iyzico via the dashboard to enable checkout.\n")
+		}
+	}
+
+	// Custom env vars (key names only)
+	customEnvVars, _ := c.DB.GetAppEnvVarsByProjectID(project.ID.String())
+	if len(customEnvVars) > 0 {
+		integrationContext.WriteString("\nCustom environment variables:\n")
+		for _, ev := range customEnvVars {
+			key := ev.Key
+			if ev.IsPublic && !strings.HasPrefix(key, "NEXT_PUBLIC_") {
+				key = "NEXT_PUBLIC_" + key
+			}
+			integrationContext.WriteString(fmt.Sprintf("- %s\n", key))
+		}
 	}
 
 	// Get or create conversation
@@ -298,7 +389,7 @@ func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.A
 	slog.Info("Calling LLM for chat", "model", model, "project_id", project.ID, "message_count", len(llmMessages))
 
 	// Call LLM with tool calling — LLM reads files on demand instead of all files in context
-	executor := buildChatToolExecutor(currentFiles)
+	executor := c.buildChatToolExecutor(project, user, currentFiles)
 	responseJSON, err := utils.StreamWithTools(
 		ctx,
 		model,

@@ -86,3 +86,12 @@ type AppDomainResponse struct {
 	DNSRecord string    `json:"dns_record,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
 }
+
+type EnvVarResponse struct {
+	ID        uuid.UUID `json:"id"`
+	Key       string    `json:"key"`
+	Value     string    `json:"value"`
+	IsPublic  bool      `json:"is_public"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}

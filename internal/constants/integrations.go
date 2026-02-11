@@ -16,6 +16,7 @@ type IntegrationProviderConfig struct {
 	Provider       string            `json:"provider"`
 	Name           string            `json:"name"`
 	Description    string            `json:"description"`
+	Category       string            `json:"category"` // "database", "payment", "ai", "cache", "email"
 	RequiredFields []string          `json:"required_fields"`
 	EnvVarMapping  map[string]string `json:"env_var_mapping"` // credential key -> Vercel env var name
 	Website        string            `json:"website"`
@@ -27,6 +28,7 @@ var IntegrationProviders = []IntegrationProviderConfig{
 		Provider:       IntegrationSupabase,
 		Name:           "Supabase",
 		Description:    "Open-source Firebase alternative with PostgreSQL database, authentication, and realtime.",
+		Category:       "database",
 		RequiredFields: []string{"url", "anon_key"},
 		EnvVarMapping: map[string]string{
 			"url":      "NEXT_PUBLIC_SUPABASE_URL",
@@ -38,6 +40,7 @@ var IntegrationProviders = []IntegrationProviderConfig{
 		Provider:       IntegrationNeon,
 		Name:           "Neon Database",
 		Description:    "Serverless PostgreSQL with branching and auto-scaling.",
+		Category:       "database",
 		RequiredFields: []string{"connection_string"},
 		EnvVarMapping: map[string]string{
 			"connection_string": "DATABASE_URL",
@@ -48,6 +51,7 @@ var IntegrationProviders = []IntegrationProviderConfig{
 		Provider:       IntegrationStripe,
 		Name:           "Stripe",
 		Description:    "Payment processing platform for online businesses.",
+		Category:       "payment",
 		RequiredFields: []string{"publishable_key", "secret_key"},
 		EnvVarMapping: map[string]string{
 			"publishable_key": "NEXT_PUBLIC_STRIPE_PK",
@@ -59,6 +63,7 @@ var IntegrationProviders = []IntegrationProviderConfig{
 		Provider:       IntegrationIyzico,
 		Name:           "Iyzico",
 		Description:    "Turkish payment gateway for local and international payments.",
+		Category:       "payment",
 		RequiredFields: []string{"api_key", "secret_key"},
 		EnvVarMapping: map[string]string{
 			"api_key":    "IYZICO_API_KEY",
@@ -70,6 +75,7 @@ var IntegrationProviders = []IntegrationProviderConfig{
 		Provider:       IntegrationFal,
 		Name:           "Fal.ai",
 		Description:    "AI model inference platform for image generation and processing.",
+		Category:       "ai",
 		RequiredFields: []string{"api_key"},
 		EnvVarMapping: map[string]string{
 			"api_key": "FAL_KEY",
@@ -80,6 +86,7 @@ var IntegrationProviders = []IntegrationProviderConfig{
 		Provider:       IntegrationUpstash,
 		Name:           "Upstash",
 		Description:    "Serverless Redis and Kafka for caching and messaging.",
+		Category:       "cache",
 		RequiredFields: []string{"rest_url", "rest_token"},
 		EnvVarMapping: map[string]string{
 			"rest_url":   "UPSTASH_REDIS_REST_URL",
@@ -91,6 +98,7 @@ var IntegrationProviders = []IntegrationProviderConfig{
 		Provider:       IntegrationResend,
 		Name:           "Resend",
 		Description:    "Email API for developers with React Email support.",
+		Category:       "email",
 		RequiredFields: []string{"api_key"},
 		EnvVarMapping: map[string]string{
 			"api_key": "RESEND_API_KEY",

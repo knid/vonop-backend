@@ -123,3 +123,18 @@ func (r *AppFileUpdateRequest) Validate(validate *validator.Validate) error {
 type MigrateWebsiteRequest struct {
 	// No body needed; websiteId comes from URL
 }
+
+type SetEnvVarRequest struct {
+	Key      string `json:"key" validate:"required,min=1,max=100" errormgs:"must be between 1 and 100 characters"`
+	Value    string `json:"value" validate:"required" errormgs:"is required"`
+	IsPublic bool   `json:"is_public"`
+}
+
+func (r *SetEnvVarRequest) Validate(validate *validator.Validate) error {
+	return utils.ValidateFunc[SetEnvVarRequest](*r, validate)
+}
+
+type UpdateEnvVarRequest struct {
+	Value    *string `json:"value"`
+	IsPublic *bool   `json:"is_public"`
+}

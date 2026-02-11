@@ -107,6 +107,8 @@ func createSchema(db *bun.DB) error {
 		(*models.VercelProject)(nil),
 		(*models.FlutterBuild)(nil),
 		(*models.AppDomain)(nil),
+		// Custom environment variables
+		(*models.AppEnvVar)(nil),
 		// E-commerce models
 		(*models.Store)(nil),
 		(*models.Product)(nil),
@@ -740,6 +742,16 @@ func main() {
 						r.Route("/{iid}", func(r chi.Router) {
 							r.Put("/", httpViews.UpdateAppIntegration)
 							r.Delete("/", httpViews.DisconnectAppIntegration)
+						})
+					})
+
+					// Custom environment variables
+					r.Route("/env-vars", func(r chi.Router) {
+						r.Get("/", httpViews.GetAppEnvVars)
+						r.Post("/", httpViews.SetAppEnvVar)
+						r.Route("/{evid}", func(r chi.Router) {
+							r.Put("/", httpViews.UpdateAppEnvVar)
+							r.Delete("/", httpViews.DeleteAppEnvVar)
 						})
 					})
 

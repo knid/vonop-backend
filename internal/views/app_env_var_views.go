@@ -1,0 +1,156 @@
+package views
+
+import (
+	"net/http"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/knid/wemob/internal/requests"
+	"github.com/knid/wemob/internal/responses"
+	"github.com/knid/wemob/internal/utils"
+)
+
+// GET /v2/apps/{appId}/env-vars
+func (v *HttpViews) GetAppEnvVars(w http.ResponseWriter, r *http.Request) {
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	appID := chi.URLParam(r, "appId")
+	project, err := v.Controller.GetAppProject(appID, user)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	envVars, err := v.Controller.GetAppEnvVars(project.ID.String())
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Mask values in list response
+	var resp []responses.EnvVarResponse
+	for _, ev := range envVars {
+		masked := ev.Value
+		if len(masked) > 4 {
+			masked = masked[:4] + "••••••••"
+		} else {
+			masked = "••••••••"
+		}
+		resp = append(resp, responses.EnvVarResponse{
+			ID:        ev.ID,
+			Key:       ev.Key,
+			Value:     masked,
+			IsPublic:  ev.IsPublic,
+			CreatedAt: ev.CreatedAt,
+			UpdatedAt: ev.UpdatedAt,
+		})
+	}
+
+	if resp == nil {
+		resp = []responses.EnvVarResponse{}
+	}
+
+	utils.JSONResponse(w, resp, http.StatusOK)
+}
+
+// POST /v2/apps/{appId}/env-vars
+func (v *HttpViews) SetAppEnvVar(w http.ResponseWriter, r *http.Request) {
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	appID := chi.URLParam(r, "appId")
+	project, err := v.Controller.GetAppProject(appID, user)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	var req requests.SetEnvVarRequest
+	if err := utils.ParseJSONBody(r, &req); err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	envVar, err := v.Controller.SetAppEnvVar(project, req)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	utils.JSONResponse(w, responses.EnvVarResponse{
+		ID:        envVar.ID,
+		Key:       envVar.Key,
+		Value:     envVar.Value,
+		IsPublic:  envVar.IsPublic,
+		CreatedAt: envVar.CreatedAt,
+		UpdatedAt: envVar.UpdatedAt,
+	}, http.StatusCreated)
+}
+
+// PUT /v2/apps/{appId}/env-vars/{evid}
+func (v *HttpViews) UpdateAppEnvVar(w http.ResponseWriter, r *http.Request) {
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	appID := chi.URLParam(r, "appId")
+	evID := chi.URLParam(r, "evid")
+	project, err := v.Controller.GetAppProject(appID, user)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	var req requests.UpdateEnvVarRequest
+	if err := utils.ParseJSONBody(r, &req); err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	envVar, err := v.Controller.UpdateAppEnvVar(evID, project, req)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	utils.JSONResponse(w, responses.EnvVarResponse{
+		ID:        envVar.ID,
+		Key:       envVar.Key,
+		Value:     envVar.Value,
+		IsPublic:  envVar.IsPublic,
+		CreatedAt: envVar.CreatedAt,
+		UpdatedAt: envVar.UpdatedAt,
+	}, http.StatusOK)
+}
+
+// DELETE /v2/apps/{appId}/env-vars/{evid}
+func (v *HttpViews) DeleteAppEnvVar(w http.ResponseWriter, r *http.Request) {
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	appID := chi.URLParam(r, "appId")
+	evID := chi.URLParam(r, "evid")
+	project, err := v.Controller.GetAppProject(appID, user)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	if err := v.Controller.DeleteAppEnvVar(evID, project); err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	utils.JSONResponse(w, responses.SuccessResponse{Success: true}, http.StatusOK)
+}
