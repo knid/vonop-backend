@@ -85,16 +85,32 @@ func getColor(scheme map[string]any, key, fallback string) string {
 	return fallback
 }
 
-// buildTailwindConfig injects hex colors into the tailwind template
-func buildTailwindConfig(colorScheme map[string]any) string {
-	config := constants.NEXTJS_TEMPLATE_TAILWIND_CONFIG
-	config = strings.ReplaceAll(config, "{{PRIMARY}}", getColor(colorScheme, "primary", "#3B82F6"))
-	config = strings.ReplaceAll(config, "{{SECONDARY}}", getColor(colorScheme, "secondary", "#6366F1"))
-	config = strings.ReplaceAll(config, "{{ACCENT}}", getColor(colorScheme, "accent", "#F59E0B"))
-	config = strings.ReplaceAll(config, "{{BACKGROUND}}", getColor(colorScheme, "background", "#FFFFFF"))
-	config = strings.ReplaceAll(config, "{{SURFACE}}", getColor(colorScheme, "surface", "#F3F4F6"))
-	config = strings.ReplaceAll(config, "{{TEXT}}", getColor(colorScheme, "text", "#111827"))
-	return config
+// buildGlobalsCSSTheme generates the globals.css content with Tailwind v4 @theme colors
+func buildGlobalsCSSTheme(colorScheme map[string]any) string {
+	return fmt.Sprintf(`@import "tailwindcss";
+
+@theme {
+  --color-primary: %s;
+  --color-secondary: %s;
+  --color-accent: %s;
+  --color-background: %s;
+  --color-surface: %s;
+  --color-text: %s;
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+}
+`,
+		getColor(colorScheme, "primary", "#3B82F6"),
+		getColor(colorScheme, "secondary", "#6366F1"),
+		getColor(colorScheme, "accent", "#F59E0B"),
+		getColor(colorScheme, "background", "#FFFFFF"),
+		getColor(colorScheme, "surface", "#F3F4F6"),
+		getColor(colorScheme, "text", "#111827"),
+	)
 }
 
 // getTemplateContent returns the hardcoded content for a template file
@@ -108,8 +124,8 @@ func getTemplateContent(path string, colorScheme map[string]any) string {
 		return constants.NEXTJS_TEMPLATE_POSTCSS_CONFIG
 	case "next.config.mjs":
 		return constants.NEXTJS_TEMPLATE_NEXT_CONFIG
-	case "tailwind.config.ts":
-		return buildTailwindConfig(colorScheme)
+	case "app/globals.css":
+		return buildGlobalsCSSTheme(colorScheme)
 	}
 	return ""
 }
@@ -194,7 +210,7 @@ func augmentPackageJSON(baseTemplate string, files map[string]string) string {
 	knownPackages := map[string]bool{
 		"react": true, "react-dom": true, "next": true,
 		"lucide-react": true, "clsx": true, "framer-motion": true,
-		"typescript": true, "tailwindcss": true, "postcss": true, "autoprefixer": true,
+		"typescript": true, "tailwindcss": true, "postcss": true, "@tailwindcss/postcss": true,
 		// Next.js built-in
 		"next/image": true, "next/link": true, "next/font": true,
 		"next/navigation": true, "next/headers": true, "next/server": true,
@@ -705,7 +721,7 @@ func (c *Controller) getAppFileFallback(filePlan appFilePlanEntry) string {
 	case "tsx":
 		return fmt.Sprintf("export default function Page() {\n  return <div><h1>%s</h1><p>Generation failed. Please edit this file.</p></div>\n}", filePlan.Description)
 	case "css":
-		return "@tailwind base;\n@tailwind components;\n@tailwind utilities;\n\n/* Generation failed. Please edit manually. */"
+		return "@import \"tailwindcss\";\n\n/* Generation failed. Please edit manually. */"
 	case "ts":
 		return "// Generation failed. Please edit manually.\nexport {}"
 	default:
@@ -1171,13 +1187,12 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 var importPathRegex = regexp.MustCompile(`from\s+['"]@/([^'"]+)['"]`)
 
 // forbiddenImportRegex matches imports of build-time/Node.js packages in component files
-var forbiddenImportRegex = regexp.MustCompile(`(?m)^import\s+.*\s+from\s+['"](tailwindcss|tailwindcss/.*|postcss|autoprefixer|eslint|webpack|jiti|fs|path|os|module|crypto|stream|child_process|net|http|https|url|util|assert|buffer|cluster|dgram|dns|events|querystring|readline|repl|string_decoder|tls|tty|v8|vm|zlib)['"].*$`)
+var forbiddenImportRegex = regexp.MustCompile(`(?m)^import\s+.*\s+from\s+['"](tailwindcss|tailwindcss/.*|@tailwindcss/postcss|postcss|autoprefixer|eslint|webpack|jiti|fs|path|os|module|crypto|stream|child_process|net|http|https|url|util|assert|buffer|cluster|dgram|dns|events|querystring|readline|repl|string_decoder|tls|tty|v8|vm|zlib)['"].*$`)
 
 // isConfigFile returns true for config files that legitimately need build-time imports
 func isConfigFile(filePath string) bool {
 	lower := strings.ToLower(filePath)
-	return strings.Contains(lower, "tailwind.config") ||
-		strings.Contains(lower, "postcss.config") ||
+	return strings.Contains(lower, "postcss.config") ||
 		strings.Contains(lower, "next.config") ||
 		strings.Contains(lower, "tsconfig")
 }
