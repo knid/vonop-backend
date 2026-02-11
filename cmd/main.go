@@ -23,6 +23,7 @@ import (
 	"github.com/knid/wemob/internal/services"
 	crmServices "github.com/knid/wemob/internal/services/crm"
 	emailServices "github.com/knid/wemob/internal/services/email"
+	"github.com/knid/wemob/internal/services/mcpclient"
 	"github.com/knid/wemob/internal/services/preview"
 	"github.com/knid/wemob/internal/services/secret"
 	"github.com/knid/wemob/internal/services/storage"
@@ -267,6 +268,21 @@ func main() {
 		slog.Info("Preview service enabled", "url", previewURL)
 	}
 
+	// MCP service (optional — only enabled when MCP_SERVERS_CONFIG secret is set)
+	var mcpService *mcpclient.Service
+	if mcpConfig := sm.GetSecret("MCP_SERVERS_CONFIG"); mcpConfig != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		svc, err := mcpclient.NewService(ctx, mcpConfig)
+		cancel()
+		if err != nil {
+			slog.Warn("MCP service initialization had errors", "error", err)
+		}
+		if svc != nil && svc.HasTools() {
+			mcpService = svc
+			slog.Info("MCP service enabled", "tool_count", len(svc.Tools()))
+		}
+	}
+
 	controller := controllers.NewController(
 		db,
 		make(chan struct{}, constants.MAX_CONCURRENT_BUILDS),
@@ -284,6 +300,7 @@ func main() {
 		sm,
 		vercelService,
 		previewService,
+		mcpService,
 	)
 
 	goth.UseProviders(
