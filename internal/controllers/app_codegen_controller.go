@@ -489,7 +489,7 @@ var appFixTools = []utils.Tool{
 
 // llmFixPass sends validation errors to LLM with tool access for auto-fix
 func (c *Controller) llmFixPass(ctx context.Context, files map[string]string, valErrors []validationError, structure *appFileStructure) map[string]string {
-	apiKey := c.SecretManager.GetSecret("OPENROUTER_API_KEY")
+	provider := c.llmProvider()
 	model := c.SecretManager.GetSecret("NEXTJS_BUILDER_LLM_MODEL")
 	if model == "" {
 		model = constants.DEFAULT_NEXTJS_LLM_MODEL
@@ -529,8 +529,9 @@ func (c *Controller) llmFixPass(ctx context.Context, files map[string]string, va
 			{Role: "user", Content: userMessage},
 		},
 		fixTools,
-		apiKey,
+		provider,
 		&utils.ResponseFormat{Type: "json_object"},
+		c.reasoningConfig(),
 		executor,
 		nil,
 		nil,
@@ -621,7 +622,7 @@ func (c *Controller) validateAndFixFiles(ctx context.Context, project *models.Ap
 
 // PlanAppFileStructure calls LLM to generate a file plan for the app
 func (c *Controller) PlanAppFileStructure(ctx context.Context, prompt string, projectType string) (*appFileStructure, error) {
-	apiKey := c.SecretManager.GetSecret("OPENROUTER_API_KEY")
+	provider := c.llmProvider()
 	model := c.SecretManager.GetSecret("NEXTJS_BUILDER_LLM_MODEL")
 	if model == "" {
 		model = constants.DEFAULT_NEXTJS_LLM_MODEL
@@ -632,7 +633,7 @@ func (c *Controller) PlanAppFileStructure(ctx context.Context, prompt string, pr
 		systemPrompt = constants.NEXTJS_ECOMMERCE_STRUCTURE_PROMPT
 	}
 
-	structureJSON, err := utils.GetJSONFromLLM(model, systemPrompt, prompt, apiKey)
+	structureJSON, err := utils.GetJSONFromLLM(model, systemPrompt, prompt, provider)
 	if err != nil {
 		slog.Error("failed to generate app structure", "error", err)
 		return nil, fmt.Errorf("failed to generate app structure. try again please")
@@ -654,7 +655,7 @@ func (c *Controller) PlanAppFileStructure(ctx context.Context, prompt string, pr
 // PlanAppFileStructureStream is the streaming variant of PlanAppFileStructure.
 // It sends planning chunks via onChunk as the LLM generates the structure.
 func (c *Controller) PlanAppFileStructureStream(ctx context.Context, prompt string, projectType string, onChunk func(chunk string)) (*appFileStructure, error) {
-	apiKey := c.SecretManager.GetSecret("OPENROUTER_API_KEY")
+	provider := c.llmProvider()
 	model := c.SecretManager.GetSecret("NEXTJS_BUILDER_LLM_MODEL")
 	if model == "" {
 		model = constants.DEFAULT_NEXTJS_LLM_MODEL
@@ -665,7 +666,7 @@ func (c *Controller) PlanAppFileStructureStream(ctx context.Context, prompt stri
 		systemPrompt = constants.NEXTJS_ECOMMERCE_STRUCTURE_PROMPT
 	}
 
-	structureJSON, err := utils.StreamJSONFromLLM(ctx, model, systemPrompt, prompt, apiKey, onChunk)
+	structureJSON, err := utils.StreamJSONFromLLM(ctx, model, systemPrompt, prompt, provider, onChunk)
 	if err != nil {
 		slog.Error("failed to generate app structure", "error", err)
 		return nil, fmt.Errorf("failed to generate app structure. try again please")
@@ -686,13 +687,13 @@ func (c *Controller) PlanAppFileStructureStream(ctx context.Context, prompt stri
 
 // PlanAppFileStructureFromScreenshot uses vision LLM to plan files from a screenshot
 func (c *Controller) PlanAppFileStructureFromScreenshot(imageBase64 string) (*appFileStructure, error) {
-	apiKey := c.SecretManager.GetSecret("OPENROUTER_API_KEY")
+	provider := c.llmProvider()
 	model := c.SecretManager.GetSecret("NEXTJS_BUILDER_LLM_MODEL")
 	if model == "" {
 		model = constants.DEFAULT_NEXTJS_LLM_MODEL
 	}
 
-	response, err := utils.GetJSONFromLLMWithVision(model, constants.NEXTJS_SCREENSHOT_TO_FILES_PROMPT, "Analyze this screenshot and generate the file structure plan.", imageBase64, apiKey)
+	response, err := utils.GetJSONFromLLMWithVision(model, constants.NEXTJS_SCREENSHOT_TO_FILES_PROMPT, "Analyze this screenshot and generate the file structure plan.", imageBase64, provider)
 	if err != nil {
 		return nil, fmt.Errorf("failed to analyze screenshot")
 	}
@@ -750,7 +751,7 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 		})
 	}
 
-	apiKey := c.SecretManager.GetSecret("OPENROUTER_API_KEY")
+	provider := c.llmProvider()
 	model := c.SecretManager.GetSecret("NEXTJS_BUILDER_LLM_MODEL")
 	if model == "" {
 		model = constants.DEFAULT_NEXTJS_LLM_MODEL
@@ -952,8 +953,9 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 				model,
 				filePrompt,
 				userPrompt,
-				apiKey,
+				provider,
 				codegenTools,
+				c.reasoningConfig(),
 				codegenExecutor,
 				nil,
 				func(chunk string) {
@@ -1066,8 +1068,9 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 				model,
 				filePrompt,
 				userPrompt,
-				apiKey,
+				provider,
 				missingTools,
+				c.reasoningConfig(),
 				missingExecutor,
 				nil,
 				func(chunk string) {

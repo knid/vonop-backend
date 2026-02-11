@@ -89,7 +89,7 @@ func (c *Controller) InsertComponent(user *models.User, websiteId string, req re
 	// Create snapshot before editing
 	c.CreateSnapshotBeforeEdit(website.ID, user.ID, "Auto-save before component insert")
 
-	apiKey := c.SecretManager.GetSecret("OPENROUTER_API_KEY")
+	provider := c.llmProvider()
 	model := c.getWebsiteLLMModel()
 
 	colorSchemeJSON, _ := json.Marshal(website.ColorScheme)
@@ -106,7 +106,7 @@ func (c *Controller) InsertComponent(user *models.User, websiteId string, req re
 		model,
 		constants.WEBSITE_EDIT_PAGE_PROMPT,
 		prompt,
-		apiKey,
+		provider,
 	)
 	if err != nil {
 		slog.Error("failed to insert component", "error", err)
@@ -186,7 +186,7 @@ func (c *Controller) InsertComponentStream(ctx context.Context, user *models.Use
 	// Create snapshot before editing
 	c.CreateSnapshotBeforeEdit(website.ID, user.ID, "Auto-save before component insert")
 
-	apiKey := c.SecretManager.GetSecret("OPENROUTER_API_KEY")
+	provider := c.llmProvider()
 	model := c.getWebsiteLLMModel()
 
 	colorSchemeJSON, _ := json.Marshal(website.ColorScheme)
@@ -215,7 +215,8 @@ func (c *Controller) InsertComponentStream(ctx context.Context, user *models.Use
 		model,
 		constants.WEBSITE_EDIT_PAGE_PROMPT,
 		prompt,
-		apiKey,
+		provider,
+		c.reasoningConfig(),
 		func(chunk string) {
 			sendEvent("file_chunk", responses.FileOperationEvent{
 				Action:   "modify",

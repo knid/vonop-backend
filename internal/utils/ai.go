@@ -52,14 +52,23 @@ type FunctionCall struct {
 // Returns the tool result as a string.
 type ToolExecutor func(name string, arguments string) (string, error)
 
+// ReasoningConfig controls thinking/reasoning mode on OpenRouter.
+// See https://openrouter.ai/docs/guides/best-practices/reasoning-tokens
+type ReasoningConfig struct {
+	Effort  string `json:"effort,omitempty"`     // "none", "low", "medium", "high", "xhigh"
+	Exclude bool   `json:"exclude,omitempty"`    // true = model thinks but doesn't return reasoning tokens
+	Enabled *bool  `json:"enabled,omitempty"`    // explicitly enable/disable
+}
+
 type ChatRequest struct {
-	Model          string          `json:"model"`
-	Messages       []Message       `json:"messages"`
-	Stream         bool            `json:"stream,omitempty"`
-	MaxTokens      int             `json:"max_tokens,omitempty"`
-	ResponseFormat *ResponseFormat `json:"response_format,omitempty"`
-	Tools          []Tool          `json:"tools,omitempty"`
-	ToolChoice     any             `json:"tool_choice,omitempty"`
+	Model          string           `json:"model"`
+	Messages       []Message        `json:"messages"`
+	Stream         bool             `json:"stream,omitempty"`
+	MaxTokens      int              `json:"max_tokens,omitempty"`
+	ResponseFormat *ResponseFormat  `json:"response_format,omitempty"`
+	Tools          []Tool           `json:"tools,omitempty"`
+	ToolChoice     any              `json:"tool_choice,omitempty"`
+	Reasoning      *ReasoningConfig `json:"reasoning,omitempty"`
 }
 
 type Message struct {
@@ -87,15 +96,15 @@ type ChatResponse struct {
 	Usage   UsageInfo `json:"usage"`
 }
 
-// create name for this func
-func GetJSONFromLLM(model, system, message, apiKey string) (string, error) {
-	if apiKey == "" {
-		slog.Error("OPENROUTER_API_KEY is not configured")
-		return "", fmt.Errorf("missing OPENROUTER_API_KEY")
+// GetJSONFromLLM sends a system+user message to the LLM and returns the raw response text.
+func GetJSONFromLLM(model, system, message string, provider *LLMProvider) (string, error) {
+	if provider == nil || provider.APIKey == "" {
+		slog.Error("LLM provider is not configured")
+		return "", fmt.Errorf("missing LLM provider configuration")
 	}
 
 	reqBody := ChatRequest{
-		Model: model, // or "claude-3.5-sonnet", "mistral-large-latest", etc.
+		Model: model,
 		Messages: []Message{
 			{Role: "system", Content: system},
 			{Role: "user", Content: message},
@@ -103,11 +112,8 @@ func GetJSONFromLLM(model, system, message, apiKey string) (string, error) {
 	}
 	body, _ := json.Marshal(reqBody)
 
-	req, _ := http.NewRequest("POST", "https://openrouter.ai/api/v1/chat/completions", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+apiKey)
-	req.Header.Set("HTTP-Referer", "https://wemob.io") // Optional branding
-	req.Header.Set("X-Title", "wemob-nav-analyzer")    // Optional project name
+	req, _ := http.NewRequest("POST", provider.Endpoint(), bytes.NewReader(body))
+	setLLMHeaders(req, provider)
 
 	resp, err := llmHTTPClient.Do(req)
 	if err != nil {
@@ -139,9 +145,9 @@ func GetJSONFromLLM(model, system, message, apiKey string) (string, error) {
 	return outputJson, nil
 }
 
-func GetTextFromLLM(model, system, message, apiKey string) (string, error) {
-	if apiKey == "" {
-		return "", fmt.Errorf("missing OPENROUTER_API_KEY")
+func GetTextFromLLM(model, system, message string, provider *LLMProvider) (string, error) {
+	if provider == nil || provider.APIKey == "" {
+		return "", fmt.Errorf("missing LLM provider configuration")
 	}
 
 	reqBody := ChatRequest{
@@ -153,11 +159,8 @@ func GetTextFromLLM(model, system, message, apiKey string) (string, error) {
 	}
 	body, _ := json.Marshal(reqBody)
 
-	req, _ := http.NewRequest("POST", "https://openrouter.ai/api/v1/chat/completions", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+apiKey)
-	req.Header.Set("HTTP-Referer", "https://wemob.io")
-	req.Header.Set("X-Title", "wemob-web-builder")
+	req, _ := http.NewRequest("POST", provider.Endpoint(), bytes.NewReader(body))
+	setLLMHeaders(req, provider)
 
 	resp, err := llmHTTPClient.Do(req)
 	if err != nil {
@@ -204,15 +207,16 @@ type StreamChunk struct {
 
 // StreamTextFromLLM streams LLM response tokens and calls onChunk for each text chunk.
 // Returns the full accumulated text.
-func StreamTextFromLLM(ctx context.Context, model, system, message, apiKey string, onChunk func(chunk string)) (string, error) {
-	if apiKey == "" {
-		return "", fmt.Errorf("missing OPENROUTER_API_KEY")
+func StreamTextFromLLM(ctx context.Context, model, system, message string, provider *LLMProvider, reasoning *ReasoningConfig, onChunk func(chunk string)) (string, error) {
+	if provider == nil || provider.APIKey == "" {
+		return "", fmt.Errorf("missing LLM provider configuration")
 	}
 
 	reqBody := ChatRequest{
 		Model:     model,
 		Stream:    true,
 		MaxTokens: 16384,
+		Reasoning: reasoning,
 		Messages: []Message{
 			{Role: "system", Content: system},
 			{Role: "user", Content: message},
@@ -220,11 +224,8 @@ func StreamTextFromLLM(ctx context.Context, model, system, message, apiKey strin
 	}
 	body, _ := json.Marshal(reqBody)
 
-	req, _ := http.NewRequestWithContext(ctx, "POST", "https://openrouter.ai/api/v1/chat/completions", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+apiKey)
-	req.Header.Set("HTTP-Referer", "https://wemob.io")
-	req.Header.Set("X-Title", "wemob-web-builder")
+	req, _ := http.NewRequestWithContext(ctx, "POST", provider.Endpoint(), bytes.NewReader(body))
+	setLLMHeaders(req, provider)
 
 	resp, err := llmHTTPClient.Do(req)
 	if err != nil {
@@ -286,9 +287,9 @@ func StreamTextFromLLM(ctx context.Context, model, system, message, apiKey strin
 
 // GetJSONFromLLMWithMessages sends a multi-turn conversation to the LLM and expects JSON output.
 // Used for chat-based interactions where conversation history matters.
-func GetJSONFromLLMWithMessages(model string, messages []Message, apiKey string) (string, error) {
-	if apiKey == "" {
-		return "", fmt.Errorf("missing OPENROUTER_API_KEY")
+func GetJSONFromLLMWithMessages(model string, messages []Message, provider *LLMProvider) (string, error) {
+	if provider == nil || provider.APIKey == "" {
+		return "", fmt.Errorf("missing LLM provider configuration")
 	}
 
 	reqBody := ChatRequest{
@@ -299,11 +300,8 @@ func GetJSONFromLLMWithMessages(model string, messages []Message, apiKey string)
 	}
 	body, _ := json.Marshal(reqBody)
 
-	req, _ := http.NewRequest("POST", "https://openrouter.ai/api/v1/chat/completions", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+apiKey)
-	req.Header.Set("HTTP-Referer", "https://wemob.io")
-	req.Header.Set("X-Title", "wemob-web-builder")
+	req, _ := http.NewRequest("POST", provider.Endpoint(), bytes.NewReader(body))
+	setLLMHeaders(req, provider)
 
 	resp, err := llmHTTPClient.Do(req)
 	if err != nil {
@@ -335,9 +333,9 @@ func GetJSONFromLLMWithMessages(model string, messages []Message, apiKey string)
 
 // StreamJSONFromLLMWithMessages streams an LLM response from a multi-turn conversation.
 // Sends chunks via onChunk and returns the cleaned JSON.
-func StreamJSONFromLLMWithMessages(ctx context.Context, model string, messages []Message, apiKey string, onChunk func(chunk string)) (string, error) {
-	if apiKey == "" {
-		return "", fmt.Errorf("missing OPENROUTER_API_KEY")
+func StreamJSONFromLLMWithMessages(ctx context.Context, model string, messages []Message, provider *LLMProvider, onChunk func(chunk string)) (string, error) {
+	if provider == nil || provider.APIKey == "" {
+		return "", fmt.Errorf("missing LLM provider configuration")
 	}
 
 	reqBody := ChatRequest{
@@ -349,11 +347,8 @@ func StreamJSONFromLLMWithMessages(ctx context.Context, model string, messages [
 	}
 	body, _ := json.Marshal(reqBody)
 
-	req, _ := http.NewRequestWithContext(ctx, "POST", "https://openrouter.ai/api/v1/chat/completions", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+apiKey)
-	req.Header.Set("HTTP-Referer", "https://wemob.io")
-	req.Header.Set("X-Title", "wemob-web-builder")
+	req, _ := http.NewRequestWithContext(ctx, "POST", provider.Endpoint(), bytes.NewReader(body))
+	setLLMHeaders(req, provider)
 
 	resp, err := llmHTTPClient.Do(req)
 	if err != nil {
@@ -445,9 +440,9 @@ type MultiChatRequest struct {
 }
 
 // GetJSONFromLLMWithVision sends a multimodal request with an image to the LLM.
-func GetJSONFromLLMWithVision(model, system, userText, base64Image, apiKey string) (string, error) {
-	if apiKey == "" {
-		return "", fmt.Errorf("missing OPENROUTER_API_KEY")
+func GetJSONFromLLMWithVision(model, system, userText, base64Image string, provider *LLMProvider) (string, error) {
+	if provider == nil || provider.APIKey == "" {
+		return "", fmt.Errorf("missing LLM provider configuration")
 	}
 
 	messages := []MultiMessage{
@@ -472,11 +467,8 @@ func GetJSONFromLLMWithVision(model, system, userText, base64Image, apiKey strin
 	}
 	body, _ := json.Marshal(reqBody)
 
-	req, _ := http.NewRequest("POST", "https://openrouter.ai/api/v1/chat/completions", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+apiKey)
-	req.Header.Set("HTTP-Referer", "https://wemob.io")
-	req.Header.Set("X-Title", "wemob-web-builder")
+	req, _ := http.NewRequest("POST", provider.Endpoint(), bytes.NewReader(body))
+	setLLMHeaders(req, provider)
 
 	resp, err := llmHTTPClient.Do(req)
 	if err != nil {
@@ -507,9 +499,9 @@ func GetJSONFromLLMWithVision(model, system, userText, base64Image, apiKey strin
 
 // StreamJSONFromLLM streams LLM response tokens for a JSON-expecting call.
 // Sends chunks via onChunk and returns the cleaned JSON output.
-func StreamJSONFromLLM(ctx context.Context, model, system, message, apiKey string, onChunk func(chunk string)) (string, error) {
-	if apiKey == "" {
-		return "", fmt.Errorf("missing OPENROUTER_API_KEY")
+func StreamJSONFromLLM(ctx context.Context, model, system, message string, provider *LLMProvider, onChunk func(chunk string)) (string, error) {
+	if provider == nil || provider.APIKey == "" {
+		return "", fmt.Errorf("missing LLM provider configuration")
 	}
 
 	reqBody := ChatRequest{
@@ -523,11 +515,8 @@ func StreamJSONFromLLM(ctx context.Context, model, system, message, apiKey strin
 	}
 	body, _ := json.Marshal(reqBody)
 
-	req, _ := http.NewRequestWithContext(ctx, "POST", "https://openrouter.ai/api/v1/chat/completions", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+apiKey)
-	req.Header.Set("HTTP-Referer", "https://wemob.io")
-	req.Header.Set("X-Title", "wemob-web-builder")
+	req, _ := http.NewRequestWithContext(ctx, "POST", provider.Endpoint(), bytes.NewReader(body))
+	setLLMHeaders(req, provider)
 
 	resp, err := llmHTTPClient.Do(req)
 	if err != nil {
@@ -589,9 +578,9 @@ func StreamJSONFromLLM(ctx context.Context, model, system, message, apiKey strin
 
 // StreamJSONFromLLMWithVision streams a multimodal (vision) LLM response.
 // Sends chunks via onChunk and returns the cleaned JSON output.
-func StreamJSONFromLLMWithVision(ctx context.Context, model, system, userText, base64Image, apiKey string, onChunk func(chunk string)) (string, error) {
-	if apiKey == "" {
-		return "", fmt.Errorf("missing OPENROUTER_API_KEY")
+func StreamJSONFromLLMWithVision(ctx context.Context, model, system, userText, base64Image string, provider *LLMProvider, onChunk func(chunk string)) (string, error) {
+	if provider == nil || provider.APIKey == "" {
+		return "", fmt.Errorf("missing LLM provider configuration")
 	}
 
 	type streamMultiChatRequest struct {
@@ -623,11 +612,8 @@ func StreamJSONFromLLMWithVision(ctx context.Context, model, system, userText, b
 	}
 	body, _ := json.Marshal(reqBody)
 
-	req, _ := http.NewRequestWithContext(ctx, "POST", "https://openrouter.ai/api/v1/chat/completions", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+apiKey)
-	req.Header.Set("HTTP-Referer", "https://wemob.io")
-	req.Header.Set("X-Title", "wemob-web-builder")
+	req, _ := http.NewRequestWithContext(ctx, "POST", provider.Endpoint(), bytes.NewReader(body))
+	setLLMHeaders(req, provider)
 
 	resp, err := llmHTTPClient.Do(req)
 	if err != nil {
@@ -696,14 +682,15 @@ func StreamWithTools(
 	model string,
 	messages []Message,
 	tools []Tool,
-	apiKey string,
+	provider *LLMProvider,
 	responseFormat *ResponseFormat,
+	reasoning *ReasoningConfig,
 	executor ToolExecutor,
 	onToolCall func(toolName string, args string),
 	onChunk func(chunk string),
 ) (string, error) {
-	if apiKey == "" {
-		return "", fmt.Errorf("missing OPENROUTER_API_KEY")
+	if provider == nil || provider.APIKey == "" {
+		return "", fmt.Errorf("missing LLM provider configuration")
 	}
 
 	const maxRounds = 25
@@ -719,17 +706,15 @@ func StreamWithTools(
 			Model:          model,
 			Stream:         true,
 			MaxTokens:      16384,
+			Reasoning:      reasoning,
 			Messages:       currentMessages,
 			Tools:          tools,
 			ResponseFormat: responseFormat,
 		}
 		body, _ := json.Marshal(reqBody)
 
-		req, _ := http.NewRequestWithContext(ctx, "POST", "https://openrouter.ai/api/v1/chat/completions", bytes.NewReader(body))
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Authorization", "Bearer "+apiKey)
-		req.Header.Set("HTTP-Referer", "https://wemob.io")
-		req.Header.Set("X-Title", "wemob-app-builder")
+		req, _ := http.NewRequestWithContext(ctx, "POST", provider.Endpoint(), bytes.NewReader(body))
+		setLLMHeaders(req, provider)
 
 		resp, err := llmHTTPClient.Do(req)
 		if err != nil {
@@ -922,8 +907,10 @@ func StreamWithTools(
 // Uses system+user messages format. Returns the final text content after all tool rounds.
 func StreamTextWithTools(
 	ctx context.Context,
-	model, system, message, apiKey string,
+	model, system, message string,
+	provider *LLMProvider,
 	tools []Tool,
+	reasoning *ReasoningConfig,
 	executor ToolExecutor,
 	onToolCall func(toolName string, args string),
 	onChunk func(chunk string),
@@ -932,7 +919,7 @@ func StreamTextWithTools(
 		{Role: "system", Content: system},
 		{Role: "user", Content: message},
 	}
-	return StreamWithTools(ctx, model, messages, tools, apiKey, nil, executor, onToolCall, onChunk)
+	return StreamWithTools(ctx, model, messages, tools, provider, nil, reasoning, executor, onToolCall, onChunk)
 }
 
 // ReplaceIntegrationPlaceholders replaces {{PLACEHOLDER}} tokens in content with real values from integrations.

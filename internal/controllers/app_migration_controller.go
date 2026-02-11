@@ -113,7 +113,7 @@ Extract the color scheme from the existing styles.
 	}
 
 	// 5. Generate Next.js files from the plan (code-first)
-	apiKey := c.SecretManager.GetSecret("OPENROUTER_API_KEY")
+	provider := c.llmProvider()
 	model := c.SecretManager.GetSecret("NEXTJS_BUILDER_LLM_MODEL")
 	if model == "" {
 		model = constants.DEFAULT_NEXTJS_LLM_MODEL
@@ -139,7 +139,7 @@ Extract the color scheme from the existing styles.
 			website.Prompt,
 		)
 
-		content, err := utils.GetTextFromLLM(model, prompt, filePrompt, apiKey)
+		content, err := utils.GetTextFromLLM(model, prompt, filePrompt, provider)
 		if err != nil {
 			slog.Error("failed to generate migration file", "error", err, "path", filePlan.Path)
 			content = c.getAppFileFallback(filePlan)
@@ -319,7 +319,7 @@ Extract the color scheme from the existing styles.
 	}
 
 	// 5. Generate files (streamed)
-	apiKey := c.SecretManager.GetSecret("OPENROUTER_API_KEY")
+	provider := c.llmProvider()
 	model := c.SecretManager.GetSecret("NEXTJS_BUILDER_LLM_MODEL")
 	if model == "" {
 		model = constants.DEFAULT_NEXTJS_LLM_MODEL
@@ -350,7 +350,8 @@ Extract the color scheme from the existing styles.
 			model,
 			prompt,
 			filePrompt,
-			apiKey,
+			provider,
+			c.reasoningConfig(),
 			func(chunk string) {
 				sendEvent("file_chunk", responses.FileOperationEvent{
 					Action:   "create",

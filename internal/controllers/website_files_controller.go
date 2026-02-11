@@ -37,7 +37,7 @@ func (c *Controller) GenerateWebsiteFiles(user *models.User, req requests.Websit
 		return nil, err
 	}
 
-	apiKey := c.SecretManager.GetSecret("OPENROUTER_API_KEY")
+	provider := c.llmProvider()
 	model := c.getWebsiteLLMModel()
 
 	// Step 1: Generate file structure via LLM
@@ -53,7 +53,7 @@ func (c *Controller) GenerateWebsiteFiles(user *models.User, req requests.Websit
 		model,
 		constants.WEBSITE_STRUCTURE_PROMPT,
 		req.Prompt+templateHint,
-		apiKey,
+		provider,
 	)
 	if err != nil {
 		slog.Error("failed to generate website structure", "error", err)
@@ -118,7 +118,7 @@ func (c *Controller) GenerateWebsiteFiles(user *models.User, req requests.Websit
 			req.Prompt,
 		)
 
-		content, err := utils.GetTextFromLLM(model, prompt, filePrompt, apiKey)
+		content, err := utils.GetTextFromLLM(model, prompt, filePrompt, provider)
 		if err != nil {
 			slog.Error("failed to generate file content", "error", err, "path", filePlan.Path)
 			content = c.getFallbackContent(filePlan)
@@ -218,7 +218,7 @@ func (c *Controller) GenerateWebsiteFilesStream(ctx context.Context, user *model
 		return
 	}
 
-	apiKey := c.SecretManager.GetSecret("OPENROUTER_API_KEY")
+	provider := c.llmProvider()
 	model := c.getWebsiteLLMModel()
 
 	templateHint := ""
@@ -233,7 +233,7 @@ func (c *Controller) GenerateWebsiteFilesStream(ctx context.Context, user *model
 		return
 	}
 
-	structureJSON, err := utils.StreamJSONFromLLM(ctx, model, constants.WEBSITE_STRUCTURE_PROMPT, req.Prompt+templateHint, apiKey, func(chunk string) {
+	structureJSON, err := utils.StreamJSONFromLLM(ctx, model, constants.WEBSITE_STRUCTURE_PROMPT, req.Prompt+templateHint, provider, func(chunk string) {
 		sendEvent("planning_chunk", responses.PlanningChunkEvent{
 			Chunk: chunk,
 			Phase: "structure",
@@ -330,7 +330,8 @@ func (c *Controller) GenerateWebsiteFilesStream(ctx context.Context, user *model
 			model,
 			prompt,
 			filePrompt,
-			apiKey,
+			provider,
+			c.reasoningConfig(),
 			func(chunk string) {
 				sendEvent("file_chunk", responses.FileOperationEvent{
 					Action:   "create",
