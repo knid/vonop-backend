@@ -63,7 +63,7 @@ func (c *Controller) GenerateWebsite(user *models.User, req requests.WebsiteGene
 		return nil, err
 	}
 
-	apiKey := c.SecretManager.GetSecret("OPENROUTER_API_KEY")
+	provider := c.llmProvider()
 	model := c.getWebsiteLLMModel()
 
 	// Step 1: Generate website structure via LLM
@@ -79,7 +79,7 @@ func (c *Controller) GenerateWebsite(user *models.User, req requests.WebsiteGene
 		model,
 		constants.WEBSITE_STRUCTURE_PROMPT,
 		req.Prompt+templateHint,
-		apiKey,
+		provider,
 	)
 	if err != nil {
 		slog.Error("failed to generate website structure", "error", err)
@@ -151,7 +151,7 @@ func (c *Controller) GenerateWebsite(user *models.User, req requests.WebsiteGene
 			model,
 			constants.WEBSITE_PAGE_HTML_PROMPT,
 			pagePrompt,
-			apiKey,
+			provider,
 		)
 		if err != nil {
 			slog.Error("failed to generate page HTML", "error", err, "page", pageStruct.Title)
@@ -236,7 +236,7 @@ func (c *Controller) GenerateWebsiteStream(ctx context.Context, user *models.Use
 		return
 	}
 
-	apiKey := c.SecretManager.GetSecret("OPENROUTER_API_KEY")
+	provider := c.llmProvider()
 	model := c.getWebsiteLLMModel()
 
 	// Step 1: Generate website structure via LLM
@@ -252,7 +252,7 @@ func (c *Controller) GenerateWebsiteStream(ctx context.Context, user *models.Use
 		return
 	}
 
-	structureJSON, err := utils.StreamJSONFromLLM(ctx, model, constants.WEBSITE_STRUCTURE_PROMPT, req.Prompt+templateHint, apiKey, func(chunk string) {
+	structureJSON, err := utils.StreamJSONFromLLM(ctx, model, constants.WEBSITE_STRUCTURE_PROMPT, req.Prompt+templateHint, provider, func(chunk string) {
 		sendEvent("planning_chunk", responses.PlanningChunkEvent{
 			Chunk: chunk,
 			Phase: "structure",
@@ -356,7 +356,8 @@ func (c *Controller) GenerateWebsiteStream(ctx context.Context, user *models.Use
 			model,
 			constants.WEBSITE_PAGE_HTML_PROMPT,
 			pagePrompt,
-			apiKey,
+			provider,
+			c.reasoningConfig(),
 			func(chunk string) {
 				sendEvent("code_chunk", responses.CodeChunkEvent{
 					PageIndex:  i,
@@ -807,7 +808,7 @@ func (c *Controller) AIEditPage(user *models.User, websiteId string, pageId stri
 		return nil, errors.New("page does not belong to this website")
 	}
 
-	apiKey := c.SecretManager.GetSecret("OPENROUTER_API_KEY")
+	provider := c.llmProvider()
 	model := c.getWebsiteLLMModel()
 
 	editPrompt := fmt.Sprintf(
@@ -820,7 +821,7 @@ func (c *Controller) AIEditPage(user *models.User, websiteId string, pageId stri
 		model,
 		constants.WEBSITE_EDIT_PAGE_PROMPT,
 		editPrompt,
-		apiKey,
+		provider,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to edit page. try again please")
@@ -882,7 +883,7 @@ func (c *Controller) AIAddPage(user *models.User, websiteId string, req requests
 	}
 	existingPages := strings.Join(pageNames, ", ")
 
-	apiKey := c.SecretManager.GetSecret("OPENROUTER_API_KEY")
+	provider := c.llmProvider()
 	model := c.getWebsiteLLMModel()
 
 	addPrompt := fmt.Sprintf(
@@ -897,7 +898,7 @@ func (c *Controller) AIAddPage(user *models.User, websiteId string, req requests
 		model,
 		constants.WEBSITE_ADD_PAGE_PROMPT,
 		addPrompt,
-		apiKey,
+		provider,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate new page. try again please")

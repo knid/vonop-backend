@@ -23,7 +23,7 @@ func (c *Controller) GenerateWebsiteFromScreenshot(user *models.User, req reques
 		return nil, err
 	}
 
-	apiKey := c.SecretManager.GetSecret("OPENROUTER_API_KEY")
+	provider := c.llmProvider()
 	model := c.getWebsiteLLMModel()
 
 	// Step 1: Analyze screenshot with vision LLM
@@ -32,7 +32,7 @@ func (c *Controller) GenerateWebsiteFromScreenshot(user *models.User, req reques
 		constants.WEBSITE_SCREENSHOT_TO_CODE_PROMPT,
 		"Analyze this screenshot and generate a website structure.",
 		req.ImageBase64,
-		apiKey,
+		provider,
 	)
 	if err != nil {
 		slog.Error("failed to analyze screenshot", "error", err)
@@ -96,7 +96,7 @@ func (c *Controller) GenerateWebsiteFromScreenshot(user *models.User, req reques
 			filePlan.Description,
 		)
 
-		content, err := utils.GetTextFromLLM(model, prompt, filePrompt, apiKey)
+		content, err := utils.GetTextFromLLM(model, prompt, filePrompt, provider)
 		if err != nil {
 			slog.Error("failed to generate file content", "error", err, "path", filePlan.Path)
 			content = c.getFallbackContent(filePlan)
@@ -196,7 +196,7 @@ func (c *Controller) GenerateWebsiteFromScreenshotStream(ctx context.Context, us
 		return
 	}
 
-	apiKey := c.SecretManager.GetSecret("OPENROUTER_API_KEY")
+	provider := c.llmProvider()
 	model := c.getWebsiteLLMModel()
 
 	if ctx.Err() != nil {
@@ -210,7 +210,7 @@ func (c *Controller) GenerateWebsiteFromScreenshotStream(ctx context.Context, us
 		constants.WEBSITE_SCREENSHOT_TO_CODE_PROMPT,
 		"Analyze this screenshot and generate a website structure.",
 		req.ImageBase64,
-		apiKey,
+		provider,
 		func(chunk string) {
 			sendEvent("planning_chunk", responses.PlanningChunkEvent{
 				Chunk: chunk,
@@ -308,7 +308,8 @@ func (c *Controller) GenerateWebsiteFromScreenshotStream(ctx context.Context, us
 			model,
 			prompt,
 			filePrompt,
-			apiKey,
+			provider,
+			c.reasoningConfig(),
 			func(chunk string) {
 				sendEvent("file_chunk", responses.FileOperationEvent{
 					Action:   "create",

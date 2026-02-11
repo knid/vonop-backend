@@ -91,7 +91,7 @@ func (c *Controller) ChatStream(ctx context.Context, user *models.User, websiteI
 		return
 	}
 
-	apiKey := c.SecretManager.GetSecret("OPENROUTER_API_KEY")
+	provider := c.llmProvider()
 	model := c.getWebsiteLLMModel()
 
 	// Get current files
@@ -183,7 +183,7 @@ func (c *Controller) ChatStream(ctx context.Context, user *models.User, websiteI
 		ctx,
 		model,
 		llmMessages,
-		apiKey,
+		provider,
 		func(chunk string) {
 			sendEvent("chat_thinking", responses.ChatThinkingEvent{Chunk: chunk})
 		},

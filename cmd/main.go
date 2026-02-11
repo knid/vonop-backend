@@ -268,21 +268,6 @@ func main() {
 		slog.Info("Preview service enabled", "url", previewURL)
 	}
 
-	// MCP service (optional — only enabled when MCP_SERVERS_CONFIG secret is set)
-	var mcpService *mcpclient.Service
-	if mcpConfig := sm.GetSecret("MCP_SERVERS_CONFIG"); mcpConfig != "" {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		svc, err := mcpclient.NewService(ctx, mcpConfig)
-		cancel()
-		if err != nil {
-			slog.Warn("MCP service initialization had errors", "error", err)
-		}
-		if svc != nil && svc.HasTools() {
-			mcpService = svc
-			slog.Info("MCP service enabled", "tool_count", len(svc.Tools()))
-		}
-	}
-
 	controller := controllers.NewController(
 		db,
 		make(chan struct{}, constants.MAX_CONCURRENT_BUILDS),
@@ -300,8 +285,24 @@ func main() {
 		sm,
 		vercelService,
 		previewService,
-		mcpService,
+		nil, // MCP service initialized async below
 	)
+
+	// MCP service (optional — connect in background so it doesn't block server startup)
+	if mcpConfig := sm.GetSecret("MCP_SERVERS_CONFIG"); mcpConfig != "" {
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			svc, err := mcpclient.NewService(ctx, mcpConfig)
+			if err != nil {
+				slog.Warn("MCP service initialization had errors", "error", err)
+			}
+			if svc != nil && svc.HasTools() {
+				controller.MCPService = svc
+				slog.Info("MCP service enabled", "tool_count", len(svc.Tools()))
+			}
+		}()
+	}
 
 	goth.UseProviders(
 		google.New(sm.GetSecret("GOOGLE_CLIENT_ID"), sm.GetSecret("GOOGLE_SECRET_KEY"), "https://api.wemob.io/v1/users/auth/google/callback", "email", "profile"),

@@ -60,7 +60,7 @@ func (c *Controller) AIEditElementStream(ctx context.Context, user *models.User,
 	// Create snapshot before editing
 	c.CreateSnapshotBeforeEdit(website.ID, user.ID, "Auto-save before element edit")
 
-	apiKey := c.SecretManager.GetSecret("OPENROUTER_API_KEY")
+	provider := c.llmProvider()
 	model := c.getWebsiteLLMModel()
 
 	editPrompt := fmt.Sprintf(
@@ -83,7 +83,7 @@ func (c *Controller) AIEditElementStream(ctx context.Context, user *models.User,
 		ctx,
 		model,
 		llmMessages,
-		apiKey,
+		provider,
 		func(chunk string) {
 			sendEvent("chat_thinking", responses.ChatThinkingEvent{Chunk: chunk})
 		},

@@ -50,7 +50,7 @@ func (v *HttpViews) AutoGenerateScreenshots(w http.ResponseWriter, r *http.Reque
 
 	data, _ := json.MarshalIndent(output, "", "  ")
 
-	outputJson, err := utils.GetJSONFromLLM(v.Controller.SecretManager.GetSecret("DEFAULT_LLM_MODEL"), constants.LINK_SELECTION_FOR_SCREENSHOTS_PROMPT, string(data), v.Controller.SecretManager.GetSecret("OPENROUTER_API_KEY"))
+	outputJson, err := utils.GetJSONFromLLM(v.Controller.SecretManager.GetSecret("DEFAULT_LLM_MODEL"), constants.LINK_SELECTION_FOR_SCREENSHOTS_PROMPT, string(data), v.Controller.LLMProvider())
 	if err != nil {
 		utils.JSONErrorResponse(w, "Could not generate screenshots. Try again please.", http.StatusBadRequest)
 		return

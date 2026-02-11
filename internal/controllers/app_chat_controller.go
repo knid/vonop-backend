@@ -366,7 +366,7 @@ func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.A
 		})
 	}
 
-	apiKey := c.SecretManager.GetSecret("OPENROUTER_API_KEY")
+	provider := c.llmProvider()
 	model := c.SecretManager.GetSecret("NEXTJS_BUILDER_LLM_MODEL")
 	if model == "" {
 		model = constants.DEFAULT_NEXTJS_LLM_MODEL
@@ -529,8 +529,9 @@ func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.A
 		model,
 		llmMessages,
 		chatTools,
-		apiKey,
+		provider,
 		&utils.ResponseFormat{Type: "json_object"},
+		c.reasoningConfig(),
 		executor,
 		func(toolName, args string) {
 			sendEvent("tool_call", responses.ToolCallEvent{
@@ -743,10 +744,19 @@ func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.A
 		}
 	}
 
-	// Save assistant response to conversation
+	// Save assistant response to conversation (include operations so the LLM
+	// remembers what files were changed in previous turns)
+	assistantContent := chatResp.Summary
+	if len(chatResp.Operations) > 0 {
+		var opLines []string
+		for _, op := range chatResp.Operations {
+			opLines = append(opLines, fmt.Sprintf("- %s %s", op.Action, op.Path))
+		}
+		assistantContent = fmt.Sprintf("%s\n\nFiles changed:\n%s", chatResp.Summary, strings.Join(opLines, "\n"))
+	}
 	messages = append(messages, models.AppConversationMessage{
 		Role:      "assistant",
-		Content:   chatResp.Summary,
+		Content:   assistantContent,
 		Timestamp: time.Now().Unix(),
 	})
 	conv.Messages, _ = json.Marshal(messages)

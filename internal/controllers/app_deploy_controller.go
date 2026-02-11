@@ -293,7 +293,7 @@ func (c *Controller) ValidateAppFiles(projectID string) (*AppValidationResult, e
 	}
 
 	// Also run LLM-based validation for deeper checks
-	apiKey := c.SecretManager.GetSecret("OPENROUTER_API_KEY")
+	provider := c.llmProvider()
 	model := c.SecretManager.GetSecret("NEXTJS_BUILDER_LLM_MODEL")
 	if model == "" {
 		model = constants.DEFAULT_NEXTJS_LLM_MODEL
@@ -305,7 +305,7 @@ func (c *Controller) ValidateAppFiles(projectID string) (*AppValidationResult, e
 		fileContext.WriteString(fmt.Sprintf("\n--- %s (%s) ---\n%s\n", f.FilePath, f.FileType, f.Content))
 	}
 
-	responseJSON, err := utils.GetJSONFromLLM(model, constants.NEXTJS_VALIDATE_PROMPT, fileContext.String(), apiKey)
+	responseJSON, err := utils.GetJSONFromLLM(model, constants.NEXTJS_VALIDATE_PROMPT, fileContext.String(), provider)
 	if err != nil {
 		slog.Error("validation LLM call failed", "error", err)
 		// Still return deterministic results
