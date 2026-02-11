@@ -137,7 +137,12 @@ func CleanLLMOutput(raw string) string {
 		} else {
 			raw = strings.TrimPrefix(raw, "```")
 		}
-		raw = strings.TrimSuffix(strings.TrimSpace(raw), "```")
+		// Find last closing fence — discard any reasoning/explanation text after it
+		if closingIdx := strings.LastIndex(raw, "\n```"); closingIdx >= 0 {
+			raw = raw[:closingIdx]
+		} else {
+			raw = strings.TrimSuffix(strings.TrimSpace(raw), "```")
+		}
 		raw = strings.TrimSpace(raw)
 	}
 
