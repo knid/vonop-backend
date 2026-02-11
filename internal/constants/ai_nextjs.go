@@ -24,12 +24,12 @@ const NEXTJS_TEMPLATE_PACKAGE_JSON = `{
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "eslint ."
   },
   "dependencies": {
-    "next": "^14.2.0",
-    "react": "^18.3.0",
-    "react-dom": "^18.3.0",
+    "next": "^16.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
     "lucide-react": "^0.460.0",
     "clsx": "^2.1.0",
     "tailwind-merge": "^2.6.0",
@@ -50,8 +50,8 @@ const NEXTJS_TEMPLATE_PACKAGE_JSON = `{
   },
   "devDependencies": {
     "typescript": "^5.4.0",
-    "@types/react": "^18.3.0",
-    "@types/react-dom": "^18.3.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
     "@types/node": "^20.0.0",
     "tailwindcss": "^3.4.0",
     "postcss": "^8.4.0",
@@ -72,7 +72,7 @@ const NEXTJS_TEMPLATE_TSCONFIG = `{
     "moduleResolution": "bundler",
     "resolveJsonModule": true,
     "isolatedModules": true,
-    "jsx": "preserve",
+    "jsx": "react-jsx",
     "incremental": true,
     "plugins": [
       {
@@ -376,7 +376,7 @@ export function clearSession(): void {
 
 const NEXTJS_STRUCTURE_PROMPT = `You are an expert Next.js developer, application architect, and UI/UX designer who creates modern, visually stunning web applications.
 
-Given the user's description of a web application they want to build, generate a structured file plan for a Next.js 14 App Router project.
+Given the user's description of a web application they want to build, generate a structured file plan for a Next.js 16 App Router project.
 
 ### Design Philosophy
 - Design like a top-tier design agency. Think Linear, Vercel, Stripe, Notion level quality.
@@ -437,7 +437,7 @@ Given the user's description of a web application they want to build, generate a
 
 const NEXTJS_FILE_TSX_PROMPT = `You are an expert Next.js developer and senior UI/UX designer who builds modern, visually stunning interfaces.
 
-Generate the content for a single TSX/TS file in a Next.js 14 App Router project.
+Generate the content for a single TSX/TS file in a Next.js 16 App Router project.
 
 ### Design Philosophy
 - Build interfaces that look like they were designed by a top agency (think Linear, Vercel, Stripe, Notion quality).
@@ -484,7 +484,7 @@ You have tools to inspect already-generated project files:
 
 IMPORTANT: If you need to import from another project file, ALWAYS use read_file first to see its actual exports. Do NOT guess export names.`
 
-const NEXTJS_FILE_CSS_PROMPT = `You are an expert Next.js developer. Generate the globals.css file for a Next.js 14 project.
+const NEXTJS_FILE_CSS_PROMPT = `You are an expert Next.js developer. Generate the globals.css file for a Next.js 16 project.
 
 ### Rules
 1. Include Tailwind CSS directives (@tailwind base, @tailwind components, @tailwind utilities).
@@ -601,7 +601,7 @@ As a senior engineer, you understand the security and architecture implications 
 
 const NEXTJS_ECOMMERCE_STRUCTURE_PROMPT = `You are an expert Next.js e-commerce developer and senior UI/UX designer who builds world-class online shopping experiences.
 
-Given the user's description of an online store, generate a structured file plan for a Next.js 14 App Router e-commerce application.
+Given the user's description of an online store, generate a structured file plan for a Next.js 16 App Router e-commerce application.
 
 ### Design Philosophy
 - Design a premium, modern e-commerce experience. Think Shopify themes, Apple Store, or luxury fashion brand quality.
@@ -649,7 +649,7 @@ Given the user's description of an online store, generate a structured file plan
 
 const NEXTJS_SCREENSHOT_TO_FILES_PROMPT = `You are an expert web designer and Next.js developer.
 
-Analyze the provided screenshot and generate a structured file plan for a Next.js 14 App Router project that recreates the design shown.
+Analyze the provided screenshot and generate a structured file plan for a Next.js 16 App Router project that recreates the design shown.
 
 ### Rules
 1. Identify the application's purpose and generate a name and slug.
@@ -664,7 +664,7 @@ Analyze the provided screenshot and generate a structured file plan for a Next.j
 
 ### Output format: Same as NEXTJS_STRUCTURE_PROMPT (strict JSON, no explanation, no markdown)`
 
-const NEXTJS_FIX_PROMPT = `You are an expert Next.js/TypeScript error fixer. You will receive a list of validation errors found in project files.
+const NEXTJS_FIX_PROMPT = `You are an expert Next.js 16/TypeScript error fixer. You will receive a list of validation errors found in project files.
 
 ### Tools Available
 You have tools to inspect the project:
@@ -696,7 +696,7 @@ Fix ALL the listed errors. Return ONLY the files that need changes — do not re
   ]
 }`
 
-const NEXTJS_VALIDATE_PROMPT = `You are an expert TypeScript and Next.js 14 type checker. Review the following project files for TypeScript errors, missing imports, and build-time issues.
+const NEXTJS_VALIDATE_PROMPT = `You are an expert TypeScript and Next.js 16 type checker. Review the following project files for TypeScript errors, missing imports, and build-time issues.
 
 Focus on:
 1. TypeScript type errors (wrong types, missing properties, invalid generics)
