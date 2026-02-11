@@ -189,6 +189,7 @@ func GetTextFromLLM(model, system, message, apiKey string) (string, error) {
 
 type StreamDelta struct {
 	Content   string     `json:"content,omitempty"`
+	Reasoning string     `json:"reasoning,omitempty"`
 	ToolCalls []ToolCall `json:"tool_calls,omitempty"`
 }
 

@@ -1240,9 +1240,17 @@ func guessFileType(importPath string) (filePath string, fileType string) {
 	return importPath + ".tsx", "tsx"
 }
 
-// cleanAppFileOutput strips markdown code fences from LLM output
+// controlTokenRegex matches LLM control tokens like <|control619|>, <|endoftext|>, etc.
+var controlTokenRegex = regexp.MustCompile(`<\|[a-zA-Z0-9_]+\|>`)
+
+// cleanAppFileOutput strips markdown code fences and control tokens from LLM output.
 func cleanAppFileOutput(content string, fileType string) string {
 	content = strings.TrimSpace(content)
+
+	// Strip control tokens (e.g. <|control619|>, <|endoftext|>)
+	content = controlTokenRegex.ReplaceAllString(content, "")
+
+	// Strip markdown code fences
 	switch fileType {
 	case "tsx":
 		content = strings.TrimPrefix(content, "```tsx")
@@ -1266,5 +1274,6 @@ func cleanAppFileOutput(content string, fileType string) string {
 		content = strings.TrimPrefix(content, "```")
 		content = strings.TrimSuffix(content, "```")
 	}
+
 	return strings.TrimSpace(content)
 }
