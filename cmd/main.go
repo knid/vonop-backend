@@ -148,6 +148,9 @@ func createSchema(db *bun.DB) error {
 		// Annual billing fields on subscriptions
 		`ALTER TABLE standart_user_subscriptions ADD COLUMN IF NOT EXISTS annual_price int DEFAULT 0`,
 		`ALTER TABLE standart_user_subscriptions ADD COLUMN IF NOT EXISTS annual_price_id text DEFAULT ''`,
+		// Snapshot file capture
+		`ALTER TABLE app_snapshots ADD COLUMN IF NOT EXISTS files jsonb DEFAULT '[]'`,
+		`ALTER TABLE app_snapshots ADD COLUMN IF NOT EXISTS message_id text DEFAULT ''`,
 		// V2 app builder fields on limits
 		`ALTER TABLE standart_user_limits ADD COLUMN IF NOT EXISTS monthly_app_count int NOT NULL DEFAULT 0`,
 		`ALTER TABLE standart_user_limits ADD COLUMN IF NOT EXISTS monthly_deploy_count int NOT NULL DEFAULT 0`,
@@ -752,6 +755,7 @@ func main() {
 					// Chat
 					r.With(rateLimiter.RateLimit(10, time.Minute, appMiddleware.AIUserKey)).Post("/chat", httpViews.ChatApp)
 					r.Get("/conversation", httpViews.GetAppConversation)
+					r.Delete("/conversation", httpViews.ClearAppConversation)
 
 					// Integrations
 					r.Route("/integrations", func(r chi.Router) {

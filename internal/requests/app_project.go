@@ -24,7 +24,8 @@ func (r *UpdateAppProjectRequest) Validate(validate *validator.Validate) error {
 }
 
 type AppChatRequest struct {
-	Message string `json:"message" validate:"required,min=2" errormgs:"must be at least 2 characters long"`
+	Message string   `json:"message" validate:"required,min=2" errormgs:"must be at least 2 characters long"`
+	Images  []string `json:"images,omitempty"` // base64 encoded images
 }
 
 func (r *AppChatRequest) Validate(validate *validator.Validate) error {

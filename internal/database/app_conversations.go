@@ -26,3 +26,11 @@ func (db *Database) UpdateAppConversation(c *models.AppConversation) (*models.Ap
 		Exec(context.Background())
 	return c, err
 }
+
+func (db *Database) DeleteAppConversation(projectID string) error {
+	_, err := db.DB.NewDelete().
+		Model((*models.AppConversation)(nil)).
+		Where("app_project_id = ?", projectID).
+		Exec(context.Background())
+	return err
+}

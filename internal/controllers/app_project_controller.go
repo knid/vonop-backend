@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -113,10 +114,23 @@ func (c *Controller) GetAppSnapshots(projectID string) ([]models.AppSnapshot, er
 }
 
 func (c *Controller) CreateAppSnapshot(project *models.AppProject, description string, source string) (*models.AppSnapshot, error) {
+	// Capture current generated files
+	files, _ := c.DB.GetAppGeneratedFilesByProjectID(project.ID.String(), "nextjs")
+	var snapshotFiles []models.SnapshotFile
+	for _, f := range files {
+		snapshotFiles = append(snapshotFiles, models.SnapshotFile{
+			FilePath: f.FilePath,
+			Content:  f.Content,
+			FileType: f.FileType,
+		})
+	}
+	filesJSON, _ := json.Marshal(snapshotFiles)
+
 	snapshot := &models.AppSnapshot{
 		AppProjectID: project.ID,
 		AST:          project.AST,
 		Theme:        project.Theme,
+		Files:        filesJSON,
 		Description:  description,
 		Source:       source,
 	}
@@ -138,6 +152,32 @@ func (c *Controller) RestoreAppSnapshot(project *models.AppProject, snapshotID s
 	project.AST = snapshot.AST
 	project.Theme = snapshot.Theme
 	project.UpdatedAt = time.Now()
+
+	// Restore files if the snapshot captured them
+	if len(snapshot.Files) > 2 { // more than just "[]"
+		var snapshotFiles []models.SnapshotFile
+		if err := json.Unmarshal(snapshot.Files, &snapshotFiles); err == nil && len(snapshotFiles) > 0 {
+			// Delete current generated files
+			currentFiles, _ := c.DB.GetAppGeneratedFilesByProjectID(project.ID.String(), "nextjs")
+			for _, f := range currentFiles {
+				c.DB.DeleteAppGeneratedFile(&f)
+			}
+			// Recreate from snapshot
+			for _, sf := range snapshotFiles {
+				file := &models.AppGeneratedFile{
+					AppProjectID: project.ID,
+					Platform:     "nextjs",
+					FilePath:     sf.FilePath,
+					Content:      sf.Content,
+					FileType:     sf.FileType,
+					IsGenerated:  true,
+				}
+				c.DB.CreateAppGeneratedFile(file)
+			}
+			slog.Info("Restored files from snapshot", "project_id", project.ID, "snapshot_id", snapshotID, "file_count", len(snapshotFiles))
+		}
+	}
+
 	return c.DB.UpdateAppProject(project)
 }
 

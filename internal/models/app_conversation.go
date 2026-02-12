@@ -16,7 +16,18 @@ type AppConversation struct {
 }
 
 type AppConversationMessage struct {
-	Role      string `json:"role"`      // "user", "assistant", "system"
-	Content   string `json:"content"`
-	Timestamp int64  `json:"timestamp"`
+	ID             string           `json:"id"`
+	Role           string           `json:"role"` // "user", "assistant", "system"
+	Content        string           `json:"content"`
+	Timestamp      int64            `json:"timestamp"`
+	FileOperations []AppChatFileOp  `json:"file_operations,omitempty"`
+	ImageURLs      []string         `json:"image_urls,omitempty"`
+	SnapshotID     string           `json:"snapshot_id,omitempty"`
+	Suggestions    []string         `json:"suggestions,omitempty"`
+}
+
+type AppChatFileOp struct {
+	Action   string `json:"action"`
+	FilePath string `json:"file_path"`
+	FileType string `json:"file_type,omitempty"`
 }

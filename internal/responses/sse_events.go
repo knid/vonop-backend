@@ -70,6 +70,10 @@ type ChatThinkingEvent struct {
 	Chunk string `json:"chunk"`
 }
 
+type ChatTextEvent struct {
+	Chunk string `json:"chunk"`
+}
+
 type PlanningChunkEvent struct {
 	Chunk string `json:"chunk"`
 	Phase string `json:"phase"` // "structure", "vision"
