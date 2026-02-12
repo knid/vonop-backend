@@ -257,17 +257,19 @@ func (v *HttpViews) StorefrontCheckout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	order, err := v.Controller.StorefrontCheckout(storeID, req.SessionID, req.CustomerEmail, req.CustomerName, req.ShippingAddress, req.BillingAddress, req.PaymentProvider)
+	order, paymentURL, clientSecret, err := v.Controller.StorefrontCheckout(storeID, req.SessionID, req.CustomerEmail, req.CustomerName, req.ShippingAddress, req.BillingAddress, req.PaymentProvider)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
 	utils.JSONResponse(w, responses.StorefrontCheckoutResponse{
-		OrderID:     order.ID,
-		OrderNumber: order.OrderNumber,
-		TotalCents:  order.TotalCents,
-		Currency:    order.Currency,
+		OrderID:      order.ID,
+		OrderNumber:  order.OrderNumber,
+		TotalCents:   order.TotalCents,
+		Currency:     order.Currency,
+		PaymentURL:   paymentURL,
+		ClientSecret: clientSecret,
 	}, http.StatusCreated)
 }
 
@@ -290,5 +292,67 @@ func (v *HttpViews) StorefrontConfirmCheckout(w http.ResponseWriter, r *http.Req
 		OrderID:         order.ID,
 		OrderNumber:     order.OrderNumber,
 		Status:          order.Status,
+	}, http.StatusOK)
+}
+
+// GET /v2/storefront/{storeId}/config
+func (v *HttpViews) StorefrontGetStoreConfig(w http.ResponseWriter, r *http.Request) {
+	storeID := chi.URLParam(r, "storeId")
+
+	store, paymentProviders, err := v.Controller.StorefrontGetStoreConfig(storeID)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	shippingEnabled := len(store.ShippingConfig) > 0
+	if enabled, ok := store.ShippingConfig["enabled"].(bool); ok {
+		shippingEnabled = enabled
+	}
+
+	utils.JSONResponse(w, responses.StoreConfigResponse{
+		Name:             store.StoreName,
+		Currency:         store.Currency,
+		Locale:           store.Locale,
+		TaxRate:          store.TaxRate,
+		PaymentProviders: paymentProviders,
+		ShippingEnabled:  shippingEnabled,
+	}, http.StatusOK)
+}
+
+// GET /v2/storefront/{storeId}/orders/{orderId}
+func (v *HttpViews) StorefrontGetOrder(w http.ResponseWriter, r *http.Request) {
+	storeID := chi.URLParam(r, "storeId")
+	orderID := chi.URLParam(r, "orderId")
+
+	order, items, err := v.Controller.StorefrontGetOrder(storeID, orderID)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	var respItems []responses.OrderTrackingItemResponse
+	for _, item := range items {
+		respItems = append(respItems, responses.OrderTrackingItemResponse{
+			ProductName:  item.ProductName,
+			VariantName:  item.VariantName,
+			Quantity:     item.Quantity,
+			PriceInCents: item.PriceInCents,
+			TotalCents:   item.TotalCents,
+		})
+	}
+
+	utils.JSONResponse(w, responses.OrderTrackingResponse{
+		OrderID:       order.ID,
+		OrderNumber:   order.OrderNumber,
+		Status:        order.Status,
+		PaymentStatus: order.PaymentStatus,
+		Items:         respItems,
+		SubtotalCents: order.SubtotalCents,
+		DiscountCents: order.DiscountCents,
+		TaxCents:      order.TaxCents,
+		TotalCents:    order.TotalCents,
+		Currency:      order.Currency,
+		CreatedAt:     order.CreatedAt,
 	}, http.StatusOK)
 }

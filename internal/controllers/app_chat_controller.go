@@ -144,12 +144,12 @@ var appChatTools = []utils.Tool{
 							"properties": map[string]any{
 								"action": map[string]any{
 									"type":        "string",
-									"enum":        []string{"create_product", "create_category", "create_discount", "update_store_settings"},
+									"enum":        []string{"create_product", "update_product", "delete_product", "create_variant", "create_variant_with_options", "bulk_create_products", "create_category", "update_category", "delete_category", "create_discount", "update_discount", "delete_discount", "update_store_settings", "list_products", "list_categories"},
 									"description": "The operation to perform",
 								},
 								"data": map[string]any{
 									"type":        "object",
-									"description": "Operation data. For create_product: {name, description, price (in cents), images, tags}. For create_category: {name, description}. For create_discount: {code, type (percentage/fixed), value, min_order_cents, max_uses}. For update_store_settings: {currency, tax_rate, notify_email}.",
+									"description": "Operation data varies by action. create_product: {name, description, price (cents), images, tags, status}. update_product: {id, name, description, status}. delete_product: {id}. create_variant: {product_id or product_slug, name, sku, price_in_cents, inventory, is_default}. create_variant_with_options: {product_id or product_slug, name, price_in_cents, sku, inventory, options: {size, color, ...}, is_default}. bulk_create_products: {products: [{name, description, price, images, tags}, ...]}. create_category: {name, slug, description}. update_category: {id, name, description, sort_order}. delete_category: {id}. create_discount: {code, type (percentage/fixed), value, min_order_cents, max_uses}. update_discount: {id, code, is_active}. delete_discount: {id}. update_store_settings: {currency, tax_rate, notify_email}. list_products: {}. list_categories: {}.",
 								},
 							},
 							"required": []string{"action", "data"},
@@ -434,6 +434,39 @@ func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.A
 		if err == nil && store != nil {
 			integrationContext.WriteString(fmt.Sprintf("\nE-commerce store: %s (store_id: %s)\n", store.Status, store.ID.String()))
 			integrationContext.WriteString(fmt.Sprintf("Storefront API: %s/v2/storefront/%s\n", constants.WEMOB_API_BASE_URL, store.ID.String()))
+			integrationContext.WriteString(fmt.Sprintf("Currency: %s, Locale: %s, Tax rate: %.2f%%\n", store.Currency, store.Locale, store.TaxRate))
+
+			// Product count
+			products, _ := c.DB.GetProductsByStoreID(store.ID.String())
+			integrationContext.WriteString(fmt.Sprintf("Products: %d\n", len(products)))
+
+			// Category list
+			categories, _ := c.DB.GetCategoriesByStoreID(store.ID.String())
+			if len(categories) > 0 {
+				var catNames []string
+				for _, cat := range categories {
+					catNames = append(catNames, cat.Name)
+				}
+				integrationContext.WriteString(fmt.Sprintf("Categories: %s\n", strings.Join(catNames, ", ")))
+			}
+
+			// Payment providers
+			var paymentProviders []string
+			for _, integ := range appIntegrations {
+				if integ.Status == "connected" {
+					for _, cfg := range constants.IntegrationProviders {
+						if cfg.Provider == integ.Provider && cfg.Category == "payment" {
+							paymentProviders = append(paymentProviders, cfg.Name)
+						}
+					}
+				}
+			}
+			if len(paymentProviders) > 0 {
+				integrationContext.WriteString(fmt.Sprintf("Payment providers: %s\n", strings.Join(paymentProviders, ", ")))
+			}
+
+			// SDK hint
+			integrationContext.WriteString("SDK: lib/wemob-store.ts provides CartProvider, useCart, useProducts, useProduct, useCategories, useStoreConfig hooks. Wrap layout.tsx with <CartProvider>.\n")
 		}
 		if !hasPaymentGateway {
 			integrationContext.WriteString("\nWARNING: No payment gateway connected. Tell the user to connect Stripe or Iyzico via the dashboard to enable checkout.\n")

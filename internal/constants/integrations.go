@@ -18,6 +18,7 @@ type IntegrationProviderConfig struct {
 	Description    string            `json:"description"`
 	Category       string            `json:"category"` // "database", "payment", "ai", "cache", "email"
 	RequiredFields []string          `json:"required_fields"`
+	OptionalFields []string          `json:"optional_fields,omitempty"`
 	EnvVarMapping  map[string]string `json:"env_var_mapping"` // credential key -> Vercel env var name
 	Website        string            `json:"website"`
 }
@@ -53,9 +54,11 @@ var IntegrationProviders = []IntegrationProviderConfig{
 		Description:    "Payment processing platform for online businesses.",
 		Category:       "payment",
 		RequiredFields: []string{"publishable_key", "secret_key"},
+		OptionalFields: []string{"webhook_secret"},
 		EnvVarMapping: map[string]string{
 			"publishable_key": "NEXT_PUBLIC_STRIPE_PK",
 			"secret_key":      "STRIPE_SK",
+			"webhook_secret":  "STRIPE_WEBHOOK_SECRET",
 		},
 		Website: "https://stripe.com",
 	},

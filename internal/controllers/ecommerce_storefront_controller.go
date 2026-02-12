@@ -1,11 +1,16 @@
 package controllers
 
 import (
+	"encoding/json"
 	"fmt"
+	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/models"
+	"github.com/stripe/stripe-go/v82"
+	"github.com/stripe/stripe-go/v82/client"
 )
 
 // Storefront - public facing API for generated storefronts
@@ -163,18 +168,18 @@ func (c *Controller) StorefrontApplyDiscount(storeID string, sessionID string, c
 	return discount, nil
 }
 
-func (c *Controller) StorefrontCheckout(storeID string, sessionID string, customerEmail string, customerName string, shippingAddress map[string]any, billingAddress map[string]any, paymentProvider string) (*models.Order, error) {
+func (c *Controller) StorefrontCheckout(storeID string, sessionID string, customerEmail string, customerName string, shippingAddress map[string]any, billingAddress map[string]any, paymentProvider string) (*models.Order, string, string, error) {
 	cart, items, err := c.StorefrontGetCart(storeID, sessionID)
 	if err != nil {
-		return nil, err
+		return nil, "", "", err
 	}
 	if len(items) == 0 {
-		return nil, fmt.Errorf("cart is empty")
+		return nil, "", "", fmt.Errorf("cart is empty")
 	}
 
 	store, err := c.DB.GetStoreByID(storeID)
 	if err != nil {
-		return nil, fmt.Errorf("store not found")
+		return nil, "", "", fmt.Errorf("store not found")
 	}
 
 	// Calculate totals
@@ -230,7 +235,7 @@ func (c *Controller) StorefrontCheckout(storeID string, sessionID string, custom
 
 	order, err = c.DB.CreateOrder(order)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create order")
+		return nil, "", "", fmt.Errorf("failed to create order")
 	}
 
 	// Create order items
@@ -262,7 +267,14 @@ func (c *Controller) StorefrontCheckout(storeID string, sessionID string, custom
 	}
 	c.DB.BulkCreateOrderItems(orderItems)
 
-	return order, nil
+	// Initiate payment if a payment provider is specified and connected
+	paymentURL, clientSecret, err := c.StorefrontInitiatePayment(storeID, order, orderItems)
+	if err != nil {
+		slog.Warn("Payment initiation failed, order created without payment", "error", err, "order_id", order.ID)
+		// Order still exists with pending payment — frontend can retry or use manual payment
+	}
+
+	return order, paymentURL, clientSecret, nil
 }
 
 func (c *Controller) StorefrontConfirmPayment(orderID string, paymentID string) (*models.Order, error) {
@@ -277,4 +289,198 @@ func (c *Controller) StorefrontConfirmPayment(orderID string, paymentID string) 
 	order.UpdatedAt = time.Now()
 
 	return c.DB.UpdateOrder(order)
+}
+
+func (c *Controller) StorefrontGetStoreConfig(storeID string) (*models.Store, []string, error) {
+	store, err := c.DB.GetStoreByID(storeID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("store not found")
+	}
+
+	// Discover connected payment providers via AppIntegration
+	var paymentProviders []string
+	integrations, err := c.DB.GetAppIntegrationsByProjectID(store.AppProjectID.String())
+	if err == nil {
+		for _, integ := range integrations {
+			if integ.Status != "connected" {
+				continue
+			}
+			if integ.Provider == "stripe" || integ.Provider == "iyzico" {
+				paymentProviders = append(paymentProviders, integ.Provider)
+			}
+		}
+	}
+
+	return store, paymentProviders, nil
+}
+
+func (c *Controller) StorefrontGetOrder(storeID string, orderID string) (*models.Order, []models.OrderItem, error) {
+	order, err := c.DB.GetOrderByID(orderID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("order not found")
+	}
+	if order.StoreID.String() != storeID {
+		return nil, nil, fmt.Errorf("order not found")
+	}
+
+	items, _ := c.DB.GetOrderItemsByOrderID(orderID)
+	return order, items, nil
+}
+
+// StorefrontInitiatePayment creates a payment session for a given order.
+// Returns (paymentURL, clientSecret, error). Only one of paymentURL/clientSecret will be non-empty.
+func (c *Controller) StorefrontInitiatePayment(storeID string, order *models.Order, orderItems []models.OrderItem) (string, string, error) {
+	store, err := c.DB.GetStoreByID(storeID)
+	if err != nil {
+		return "", "", fmt.Errorf("store not found")
+	}
+
+	integrations, err := c.DB.GetAppIntegrationsByProjectID(store.AppProjectID.String())
+	if err != nil {
+		return "", "", fmt.Errorf("no integrations found")
+	}
+
+	// Find the matching payment integration
+	var paymentInteg *models.AppIntegration
+	for _, integ := range integrations {
+		if integ.Provider == order.PaymentProvider && integ.Status == "connected" {
+			paymentInteg = &integ
+			break
+		}
+	}
+	if paymentInteg == nil {
+		return "", "", fmt.Errorf("payment provider %s not connected", order.PaymentProvider)
+	}
+
+	var creds map[string]any
+	if err := json.Unmarshal(paymentInteg.Credentials, &creds); err != nil {
+		return "", "", fmt.Errorf("invalid payment credentials")
+	}
+
+	switch order.PaymentProvider {
+	case "stripe":
+		return c.initiateStripePayment(store, order, orderItems, creds)
+	case "iyzico":
+		return c.initiateIyzicoPayment(store, order, orderItems, creds)
+	default:
+		return "", "", fmt.Errorf("unsupported payment provider: %s", order.PaymentProvider)
+	}
+}
+
+func (c *Controller) initiateStripePayment(store *models.Store, order *models.Order, orderItems []models.OrderItem, creds map[string]any) (string, string, error) {
+	secretKey, _ := creds["secret_key"].(string)
+	if secretKey == "" {
+		return "", "", fmt.Errorf("stripe secret key not configured")
+	}
+
+	// Create a per-store Stripe client (uses the store's own secret key, not the platform key)
+	sc := &client.API{}
+	sc.Init(secretKey, nil)
+
+	// Build Stripe line items from order items
+	var lineItems []*stripe.CheckoutSessionLineItemParams
+	for _, item := range orderItems {
+		lineItems = append(lineItems, &stripe.CheckoutSessionLineItemParams{
+			PriceData: &stripe.CheckoutSessionLineItemPriceDataParams{
+				Currency:   stripe.String(strings.ToLower(order.Currency)),
+				UnitAmount: stripe.Int64(int64(item.PriceInCents)),
+				ProductData: &stripe.CheckoutSessionLineItemPriceDataProductDataParams{
+					Name: stripe.String(item.ProductName),
+				},
+			},
+			Quantity: stripe.Int64(int64(item.Quantity)),
+		})
+	}
+
+	// Determine success/cancel URLs from the project slug
+	project, _ := c.DB.GetAppProjectByID(store.AppProjectID.String())
+	baseURL := fmt.Sprintf("https://%s.wemob.app", store.AppProjectID.String()[:8])
+	if project != nil {
+		baseURL = fmt.Sprintf("https://%s.wemob.app", project.Slug)
+	}
+
+	successURL := baseURL + "/checkout/success?order_id=" + order.ID.String()
+	cancelURL := baseURL + "/checkout/cancel?order_id=" + order.ID.String()
+
+	params := &stripe.CheckoutSessionParams{
+		Mode:       stripe.String(string(stripe.CheckoutSessionModePayment)),
+		LineItems:  lineItems,
+		SuccessURL: stripe.String(successURL),
+		CancelURL:  stripe.String(cancelURL),
+		CustomerEmail: stripe.String(order.CustomerEmail),
+	}
+	params.AddMetadata("order_id", order.ID.String())
+	params.AddMetadata("order_number", order.OrderNumber)
+	params.AddMetadata("store_id", store.ID.String())
+
+	session, err := sc.CheckoutSessions.New(params)
+	if err != nil {
+		slog.Error("Stripe checkout session creation failed", "error", err, "store_id", store.ID)
+		return "", "", fmt.Errorf("failed to create stripe checkout session")
+	}
+
+	return session.URL, "", nil
+}
+
+func (c *Controller) initiateIyzicoPayment(store *models.Store, order *models.Order, orderItems []models.OrderItem, creds map[string]any) (string, string, error) {
+	apiKey, _ := creds["api_key"].(string)
+	secretKey, _ := creds["secret_key"].(string)
+	if apiKey == "" || secretKey == "" {
+		return "", "", fmt.Errorf("iyzico credentials not configured")
+	}
+
+	// Iyzico payment form creation
+	// Build the payment request body for Iyzico's checkout form API
+	project, _ := c.DB.GetAppProjectByID(store.AppProjectID.String())
+	baseURL := fmt.Sprintf("https://%s.wemob.app", store.AppProjectID.String()[:8])
+	if project != nil {
+		baseURL = fmt.Sprintf("https://%s.wemob.app", project.Slug)
+	}
+
+	callbackURL := baseURL + "/checkout/callback?order_id=" + order.ID.String()
+
+	// Build basket items for Iyzico
+	var basketItems []map[string]any
+	for _, item := range orderItems {
+		basketItems = append(basketItems, map[string]any{
+			"id":               item.ProductID.String(),
+			"name":             item.ProductName,
+			"category1":        "General",
+			"itemType":         "PHYSICAL",
+			"price":            fmt.Sprintf("%.2f", float64(item.TotalCents)/100),
+		})
+	}
+
+	iyzicoPayload := map[string]any{
+		"locale":          store.Locale,
+		"conversationId":  order.ID.String(),
+		"price":           fmt.Sprintf("%.2f", float64(order.SubtotalCents)/100),
+		"paidPrice":       fmt.Sprintf("%.2f", float64(order.TotalCents)/100),
+		"currency":        order.Currency,
+		"basketId":        order.OrderNumber,
+		"paymentGroup":    "PRODUCT",
+		"callbackUrl":     callbackURL,
+		"enabledInstallments": []int{1, 2, 3, 6, 9},
+		"buyer": map[string]any{
+			"id":                 order.CustomerEmail,
+			"name":               order.CustomerName,
+			"email":              order.CustomerEmail,
+			"registrationAddress": "N/A",
+			"city":               "N/A",
+			"country":            "N/A",
+		},
+		"basketItems": basketItems,
+	}
+
+	// Store the Iyzico payload in order metadata for webhook reconciliation
+	order.Metadata["iyzico_callback_url"] = callbackURL
+	order.UpdatedAt = time.Now()
+	c.DB.UpdateOrder(order)
+
+	payloadJSON, _ := json.Marshal(iyzicoPayload)
+	slog.Info("Iyzico payment form requested", "store_id", store.ID, "order_id", order.ID, "payload_size", len(payloadJSON))
+
+	// Return the client secret (the payload) for the frontend to render the Iyzico form
+	// The frontend will submit this to Iyzico's checkout form endpoint
+	return "", string(payloadJSON), nil
 }

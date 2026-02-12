@@ -1,6 +1,8 @@
 package responses
 
 import (
+	"time"
+
 	"github.com/google/uuid"
 )
 
@@ -71,4 +73,35 @@ type CheckoutConfirmResponse struct {
 	OrderID     uuid.UUID `json:"order_id"`
 	OrderNumber string    `json:"order_number"`
 	Status      string    `json:"status"`
+}
+
+type StoreConfigResponse struct {
+	Name             string   `json:"name"`
+	Currency         string   `json:"currency"`
+	Locale           string   `json:"locale"`
+	TaxRate          float64  `json:"tax_rate"`
+	PaymentProviders []string `json:"payment_providers"`
+	ShippingEnabled  bool     `json:"shipping_enabled"`
+}
+
+type OrderTrackingResponse struct {
+	OrderID       uuid.UUID                  `json:"order_id"`
+	OrderNumber   string                     `json:"order_number"`
+	Status        string                     `json:"status"`
+	PaymentStatus string                     `json:"payment_status"`
+	Items         []OrderTrackingItemResponse `json:"items"`
+	SubtotalCents int                        `json:"subtotal_cents"`
+	DiscountCents int                        `json:"discount_cents"`
+	TaxCents      int                        `json:"tax_cents"`
+	TotalCents    int                        `json:"total_cents"`
+	Currency      string                     `json:"currency"`
+	CreatedAt     time.Time                  `json:"created_at"`
+}
+
+type OrderTrackingItemResponse struct {
+	ProductName  string `json:"product_name"`
+	VariantName  string `json:"variant_name,omitempty"`
+	Quantity     int    `json:"quantity"`
+	PriceInCents int    `json:"price_in_cents"`
+	TotalCents   int    `json:"total_cents"`
 }

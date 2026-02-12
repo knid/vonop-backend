@@ -862,6 +862,7 @@ func main() {
 
 			// Public storefront (no auth)
 			r.Route("/storefront/{storeId}", func(r chi.Router) {
+				r.Get("/config", httpViews.StorefrontGetStoreConfig)
 				r.Get("/products", httpViews.StorefrontGetProducts)
 				r.Get("/products/{slug}", httpViews.StorefrontGetProduct)
 				r.Get("/categories", httpViews.StorefrontGetCategories)
@@ -873,6 +874,7 @@ func main() {
 				r.Post("/cart/{sessionId}/discount", httpViews.StorefrontApplyDiscount)
 				r.Post("/checkout", httpViews.StorefrontCheckout)
 				r.Post("/checkout/confirm", httpViews.StorefrontConfirmCheckout)
+				r.Get("/orders/{orderId}", httpViews.StorefrontGetOrder)
 			})
 
 			// Public integration providers
