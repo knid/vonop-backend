@@ -11,6 +11,29 @@ import (
 	"github.com/knid/wemob/internal/utils"
 )
 
+// DELETE /v2/apps/{appId}/conversation
+func (v *HttpViews) ClearAppConversation(w http.ResponseWriter, r *http.Request) {
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	appID := chi.URLParam(r, "appId")
+	_, err = v.Controller.GetAppProject(appID, user)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	if err := v.Controller.ClearAppConversation(appID); err != nil {
+		utils.JSONErrorResponse(w, "failed to clear conversation", http.StatusInternalServerError)
+		return
+	}
+
+	utils.JSONResponse(w, map[string]any{"success": true}, http.StatusOK)
+}
+
 // POST /v2/apps/{appId}/chat
 func (v *HttpViews) ChatApp(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
@@ -41,7 +64,7 @@ func (v *HttpViews) ChatApp(w http.ResponseWriter, r *http.Request) {
 	v.handleStreamOrAsync(w, r, user, StreamConfig{
 		JobType: "app_chat",
 		StreamFunc: func(ctx context.Context, events chan<- responses.SSEEvent) {
-			v.Controller.StreamChatAppFileOps(ctx, project, user, req.Message, events)
+			v.Controller.StreamChatAppFileOps(ctx, project, user, req.Message, req.Images, events)
 		},
 	})
 }

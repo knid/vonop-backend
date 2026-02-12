@@ -838,6 +838,11 @@ func StreamWithTools(
 				if choice.Delta.Content != "" {
 					fullText.WriteString(choice.Delta.Content)
 					roundChunks = append(roundChunks, choice.Delta.Content)
+					// Stream in real-time for UX; if this round is a tool-call
+					// round, frontend replaces streaming text on chat_complete
+					if onChunk != nil {
+						onChunk(choice.Delta.Content)
+					}
 				}
 
 				// Accumulate reasoning (ZAI: reasoning_content, OpenRouter: reasoning)
@@ -966,13 +971,7 @@ func StreamWithTools(
 			continue
 		}
 
-		// Final round (no tool calls) — flush buffered chunks to onChunk
-		if onChunk != nil {
-			for _, c := range roundChunks {
-				onChunk(c)
-			}
-		}
-
+		// Chunks were already streamed in real-time via onChunk above.
 		// No tool calls — return final response
 		if lastFinishReason == "length" {
 			slog.Warn("LLM response truncated (finish_reason=length)", "response_length", fullText.Len(), "round", round)

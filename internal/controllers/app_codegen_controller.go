@@ -642,8 +642,12 @@ func (c *Controller) PlanAppFileStructure(ctx context.Context, prompt string, pr
 
 	var structure appFileStructure
 	if err := json.Unmarshal([]byte(structureJSON), &structure); err != nil {
-		slog.Error("failed to parse app structure", "error", err, "json", structureJSON)
-		return nil, fmt.Errorf("failed to parse app structure. try again please")
+		// LLM sometimes wraps JSON in markdown code fences — try extracting
+		cleaned := utils.ExtractJSON(structureJSON)
+		if err2 := json.Unmarshal([]byte(cleaned), &structure); err2 != nil {
+			slog.Error("failed to parse app structure", "error", err2, "json", structureJSON)
+			return nil, fmt.Errorf("failed to parse app structure. try again please")
+		}
 	}
 
 	if len(structure.Files) == 0 {
@@ -675,8 +679,12 @@ func (c *Controller) PlanAppFileStructureStream(ctx context.Context, prompt stri
 
 	var structure appFileStructure
 	if err := json.Unmarshal([]byte(structureJSON), &structure); err != nil {
-		slog.Error("failed to parse app structure", "error", err, "json", structureJSON)
-		return nil, fmt.Errorf("failed to parse app structure. try again please")
+		// LLM sometimes wraps JSON in markdown code fences — try extracting
+		cleaned := utils.ExtractJSON(structureJSON)
+		if err2 := json.Unmarshal([]byte(cleaned), &structure); err2 != nil {
+			slog.Error("failed to parse app structure", "error", err2, "json", structureJSON)
+			return nil, fmt.Errorf("failed to parse app structure. try again please")
+		}
 	}
 
 	if len(structure.Files) == 0 {
@@ -701,7 +709,12 @@ func (c *Controller) PlanAppFileStructureFromScreenshot(imageBase64 string) (*ap
 
 	var structure appFileStructure
 	if err := json.Unmarshal([]byte(response), &structure); err != nil {
-		return nil, fmt.Errorf("failed to parse generated structure")
+		// LLM sometimes wraps JSON in markdown code fences — try extracting
+		cleaned := utils.ExtractJSON(response)
+		if err2 := json.Unmarshal([]byte(cleaned), &structure); err2 != nil {
+			slog.Error("failed to parse screenshot structure", "error", err2, "json", response)
+			return nil, fmt.Errorf("failed to parse generated structure")
+		}
 	}
 
 	return &structure, nil

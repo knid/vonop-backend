@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/responses"
@@ -60,8 +61,9 @@ func (o *appChatOperation) UnmarshalJSON(data []byte) error {
 }
 
 type appChatResponse struct {
-	Operations []appChatOperation `json:"operations"`
-	Summary    string             `json:"summary"`
+	Operations  []appChatOperation `json:"operations"`
+	Summary     string             `json:"summary"`
+	Suggestions []string           `json:"suggestions,omitempty"`
 }
 
 // appChatTools defines the tools available to the chat LLM for on-demand file access.
@@ -347,7 +349,7 @@ func (c *Controller) mcpTools() []utils.Tool {
 
 // StreamChatAppFileOps processes a chat message and applies file operations with SSE streaming.
 // Mirrors the ChatStream pattern from website_chat_controller.go.
-func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.AppProject, user *models.User, message string, events chan<- responses.SSEEvent) {
+func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.AppProject, user *models.User, message string, images []string, events chan<- responses.SSEEvent) {
 	defer close(events)
 
 	sendEvent := func(eventName string, data any) bool {
@@ -504,10 +506,25 @@ func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.A
 	var messages []models.AppConversationMessage
 	json.Unmarshal(conv.Messages, &messages)
 
+	// Convert base64 images to data URIs for storage and LLM context
+	var imageURLs []string
+	for _, img := range images {
+		if img == "" {
+			continue
+		}
+		// Store as data URI (works for frontend <img> rendering and LLM references)
+		if !strings.HasPrefix(img, "data:") {
+			img = "data:image/png;base64," + img
+		}
+		imageURLs = append(imageURLs, img)
+	}
+
 	messages = append(messages, models.AppConversationMessage{
+		ID:        uuid.New().String(),
 		Role:      "user",
 		Content:   message,
 		Timestamp: time.Now().Unix(),
+		ImageURLs: imageURLs,
 	})
 	conv.Messages, _ = json.Marshal(messages)
 	if _, err := c.DB.UpdateAppConversation(conv); err != nil {
@@ -537,7 +554,12 @@ func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.A
 		startIdx = len(messages) - 20
 	}
 	for _, msg := range messages[startIdx:] {
-		llmMessages = append(llmMessages, utils.Message{Role: msg.Role, Content: msg.Content})
+		content := msg.Content
+		// Annotate user messages that had image attachments
+		if msg.Role == "user" && len(msg.ImageURLs) > 0 {
+			content += fmt.Sprintf("\n\n[User attached %d image(s) for visual reference]", len(msg.ImageURLs))
+		}
+		llmMessages = append(llmMessages, utils.Message{Role: msg.Role, Content: content})
 	}
 
 	if ctx.Err() != nil {
@@ -545,7 +567,11 @@ func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.A
 	}
 
 	// Create auto-snapshot before making changes
-	c.CreateAppSnapshot(project, "Auto-save before chat edit", "auto")
+	preSnapshot, _ := c.CreateAppSnapshot(project, "Auto-save before chat edit", "auto")
+	var preSnapshotID string
+	if preSnapshot != nil {
+		preSnapshotID = preSnapshot.ID.String()
+	}
 
 
 	slog.Info("Calling LLM for chat", "model", model, "project_id", project.ID, "message_count", len(llmMessages))
@@ -561,7 +587,7 @@ func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.A
 		llmMessages,
 		chatTools,
 		provider,
-		&utils.ResponseFormat{Type: "json_object"},
+		nil, // no json_object format — response is explanation text + fenced JSON
 		c.reasoningConfig(),
 		executor,
 		func(toolName, args string) {
@@ -570,7 +596,34 @@ func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.A
 				Arguments: args,
 			})
 		},
-		nil,
+		func() func(chunk string) {
+			var buf strings.Builder
+			jsonStarted := false
+			return func(chunk string) {
+				if jsonStarted {
+					return // don't stream the JSON block to the frontend
+				}
+				buf.WriteString(chunk)
+				s := buf.String()
+				if strings.Contains(s, "```") {
+					// JSON block starting — send only the part before it
+					idx := strings.Index(s, "```")
+					remaining := s[idx:]
+					_ = remaining
+					jsonStarted = true
+					// Send the pre-fence text that hasn't been sent yet
+					preFence := chunk
+					if ci := strings.Index(chunk, "```"); ci >= 0 {
+						preFence = chunk[:ci]
+					}
+					if preFence != "" {
+						sendEvent("chat_text", responses.ChatTextEvent{Chunk: preFence})
+					}
+					return
+				}
+				sendEvent("chat_text", responses.ChatTextEvent{Chunk: chunk})
+			}
+		}(),
 		func(chunk string) {
 			sendEvent("chat_thinking", responses.ChatThinkingEvent{Chunk: chunk})
 		},
@@ -579,6 +632,7 @@ func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.A
 		slog.Error("failed to get chat response from LLM", "error", err, "response_so_far", len(responseJSON))
 		// Save the error as assistant message so it persists on refresh
 		messages = append(messages, models.AppConversationMessage{
+			ID:        uuid.New().String(),
 			Role:      "assistant",
 			Content:   "Sorry, I couldn't process your request. Please try again.",
 			Timestamp: time.Now().Unix(),
@@ -593,16 +647,33 @@ func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.A
 
 	slog.Info("Chat LLM response received", "response_length", len(responseJSON), "project_id", project.ID)
 
-	var chatResp appChatResponse
-	if err := json.Unmarshal([]byte(responseJSON), &chatResp); err != nil {
-		// Fallback: strip any remaining markdown fences
-		cleaned := strings.TrimSpace(responseJSON)
-		cleaned = strings.TrimPrefix(cleaned, "```json")
-		cleaned = strings.TrimPrefix(cleaned, "```")
-		cleaned = strings.TrimSuffix(cleaned, "```")
-		cleaned = strings.TrimSpace(cleaned)
+	// Extract explanation text (everything before the JSON block) and the JSON itself
+	explanationText := ""
+	jsonPart := responseJSON
 
-		if err2 := json.Unmarshal([]byte(cleaned), &chatResp); err2 != nil {
+	// Try to split on fenced JSON block
+	if idx := strings.Index(responseJSON, "```json"); idx >= 0 {
+		explanationText = strings.TrimSpace(responseJSON[:idx])
+		rest := responseJSON[idx+7:] // skip ```json
+		if endIdx := strings.Index(rest, "```"); endIdx >= 0 {
+			jsonPart = strings.TrimSpace(rest[:endIdx])
+		} else {
+			jsonPart = strings.TrimSpace(rest)
+		}
+	} else if idx := strings.Index(responseJSON, "```"); idx >= 0 {
+		explanationText = strings.TrimSpace(responseJSON[:idx])
+		rest := responseJSON[idx+3:]
+		if endIdx := strings.Index(rest, "```"); endIdx >= 0 {
+			jsonPart = strings.TrimSpace(rest[:endIdx])
+		} else {
+			jsonPart = strings.TrimSpace(rest)
+		}
+	}
+
+	var chatResp appChatResponse
+	if err := json.Unmarshal([]byte(jsonPart), &chatResp); err != nil {
+		// Fallback: try direct parse of the full response
+		if err2 := json.Unmarshal([]byte(responseJSON), &chatResp); err2 != nil {
 			// Last fallback: extract JSON object from response
 			extracted := utils.ExtractJSON(responseJSON)
 			if err3 := json.Unmarshal([]byte(extracted), &chatResp); err3 != nil {
@@ -613,7 +684,7 @@ func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.A
 				}
 				slog.Error("failed to parse chat response — all attempts failed",
 					"parse_err", err,
-					"clean_err", err2,
+					"direct_err", err2,
 					"extract_err", err3,
 					"response_length", len(responseJSON),
 					"response_preview", preview,
@@ -778,32 +849,66 @@ func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.A
 
 	// Save assistant response to conversation (include operations so the LLM
 	// remembers what files were changed in previous turns)
+	// Prefer explanation text (streamed in real-time) over the JSON summary
 	assistantContent := chatResp.Summary
+	if explanationText != "" {
+		assistantContent = explanationText
+	}
+	// Append file list context so the LLM remembers what changed in history
 	if len(chatResp.Operations) > 0 {
 		var opLines []string
 		for _, op := range chatResp.Operations {
 			opLines = append(opLines, fmt.Sprintf("- %s %s", op.Action, op.Path))
 		}
-		assistantContent = fmt.Sprintf("%s\n\nFiles changed:\n%s", chatResp.Summary, strings.Join(opLines, "\n"))
+		assistantContent += "\n\nFiles changed:\n" + strings.Join(opLines, "\n")
 	}
-	messages = append(messages, models.AppConversationMessage{
-		Role:      "assistant",
-		Content:   assistantContent,
-		Timestamp: time.Now().Unix(),
-	})
+
+	// Build file operations for the message
+	var fileOps []models.AppChatFileOp
+	for _, op := range chatResp.Operations {
+		fileOps = append(fileOps, models.AppChatFileOp{
+			Action:   op.Action,
+			FilePath: op.Path,
+			FileType: op.Type,
+		})
+	}
+
+	assistantMsg := models.AppConversationMessage{
+		ID:             uuid.New().String(),
+		Role:           "assistant",
+		Content:        assistantContent,
+		Timestamp:      time.Now().Unix(),
+		FileOperations: fileOps,
+		SnapshotID:     preSnapshotID,
+		Suggestions:    chatResp.Suggestions,
+	}
+	messages = append(messages, assistantMsg)
 	conv.Messages, _ = json.Marshal(messages)
 	if _, err := c.DB.UpdateAppConversation(conv); err != nil {
 		slog.Error("failed to save assistant message to conversation", "error", err, "conv_id", conv.ID)
 	}
 
+	// Send explanation text (or summary fallback) as the display content
+	displayContent := chatResp.Summary
+	if explanationText != "" {
+		displayContent = explanationText
+	}
 	sendEvent("chat_complete", map[string]any{
-		"project_id":    project.ID,
-		"summary":       chatResp.Summary,
-		"files_changed": filesChanged,
+		"project_id":      project.ID,
+		"summary":         displayContent,
+		"files_changed":   filesChanged,
+		"file_operations": fileOps,
+		"snapshot_id":     preSnapshotID,
+		"suggestions":     chatResp.Suggestions,
 	})
 }
 
 // GetAppConversation returns the conversation history for a project
 func (c *Controller) GetAppConversation(projectID string) (*models.AppConversation, error) {
 	return c.DB.GetAppConversationByProjectID(projectID)
+}
+
+// ClearAppConversation deletes the conversation for a project so the user can start fresh
+func (c *Controller) ClearAppConversation(projectID string) error {
+	return c.DB.DeleteAppConversation(projectID)
 }

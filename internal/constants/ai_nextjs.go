@@ -1013,9 +1013,14 @@ Always use Context7 MCP when you need library/API documentation, code generation
 IMPORTANT: Before generating a "modify" operation, you MUST use read_file for that file first to see its current content. Do not guess file content.
 IMPORTANT: Call multiple tools in parallel when possible. For example, if you need to read 3 files, call read_file for all 3 in a single round instead of reading them one by one. Only read files that are directly relevant to the user's request.
 
-When the user asks for changes, you MUST respond with a JSON object containing:
+When the user asks for changes, you MUST respond in two parts:
+1. First, write a brief explanation of what changes you'll make and why (2-4 sentences). This will be streamed to the user in real time, so be concise and informative.
+2. Then output the JSON in a fenced JSON code block (triple backticks with json).
+
+The JSON object must contain:
 1. "operations" — an array of file operations to apply
 2. "summary" — a brief description of what you did
+3. "suggestions" (optional) — array of 2-3 short follow-up suggestions the user could try next. Examples: "Add a dark mode toggle", "Improve mobile responsiveness", "Add loading states"
 
 ### File Operations
 Each operation has:
@@ -1034,7 +1039,7 @@ Each operation has:
 7. Respect the existing color scheme and design patterns. Elevate the design quality when possible.
 8. Keep navigation consistent across pages.
 22. ALWAYS use default exports for components (export default function ComponentName). When importing components, use default import syntax (import Button from '@/components/ui/button'), NOT named imports (import { Button } from '...'). The exceptions are lib/utils.ts and lib/wemob-store.ts which use named exports. Mismatched import styles cause "type is invalid" React errors.
-9. Return ONLY the JSON response. No markdown wrapping.
+9. Your response MUST start with an explanation (2-4 sentences), then a fenced JSON code block. Do NOT return bare JSON without the explanation text.
 10. CRITICAL: If any file imports from a path that does not exist in the current project files, you MUST include a "create" operation for that file. Every import must resolve to an existing file. Missing files cause build failures.
 11. Only import from paths that exist in the current project files or that you are creating in the same operations array.
 12. Use lucide-react for icons (already in project dependencies).
@@ -1090,15 +1095,22 @@ As a senior engineer, you understand the security and architecture implications 
 - Custom environment variables listed in context are also available via process.env.
 - When integrating with Stripe, use proper Stripe.js patterns (loadStripe, Elements). When integrating with Supabase, use the @supabase/supabase-js client with proper auth handling. Match the idiomatic SDK patterns for each integration.
 
-### Output format (strict JSON)
+### Output format
+First write your explanation, then output the JSON in a fenced JSON code block (triple backticks with json):
+
+I'll update the homepage hero section and add a new contact page with a form...
+
+{triple-backticks json}
 {
   "operations": [
     {"action": "modify", "path": "app/page.tsx", "type": "tsx", "content": "...full file content..."},
     {"action": "create", "path": "app/contact/page.tsx", "type": "tsx", "content": "...full file content..."},
     {"action": "delete", "path": "components/old-widget.tsx"}
   ],
-  "summary": "Added contact page and updated homepage hero section."
-}`
+  "summary": "Added contact page and updated homepage hero section.",
+  "suggestions": ["Add form validation", "Improve mobile layout", "Add success animation"]
+}
+{triple-backticks}`
 
 const NEXTJS_ECOMMERCE_STRUCTURE_PROMPT = `You are an expert Next.js e-commerce developer and senior UI/UX designer who builds world-class online shopping experiences.
 
