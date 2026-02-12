@@ -9,6 +9,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/knid/wemob/internal/utils"
+	"github.com/stripe/stripe-go/v82/webhook"
 )
 
 // POST /webhooks/store/stripe/{storeId}
@@ -32,6 +33,26 @@ func (v *HttpViews) HandleStoreStripeWebhook(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	defer r.Body.Close()
+
+	// Verify Stripe webhook signature if the store has a webhook_secret configured
+	integrations, _ := v.Controller.DB.GetAppIntegrationsByProjectID(store.AppProjectID.String())
+	for _, integ := range integrations {
+		if integ.Provider == "stripe" && integ.Status == "connected" {
+			var creds map[string]any
+			if err := json.Unmarshal(integ.Credentials, &creds); err == nil {
+				if webhookSecret, ok := creds["webhook_secret"].(string); ok && webhookSecret != "" {
+					sigHeader := r.Header.Get("Stripe-Signature")
+					if _, err := webhook.ConstructEvent(body, sigHeader, webhookSecret); err != nil {
+						slog.Error("Stripe webhook signature verification failed", "error", err, "storeId", storeID)
+						utils.JSONErrorResponse(w, "invalid signature", http.StatusBadRequest)
+						return
+					}
+					slog.Info("Stripe webhook signature verified", "storeId", storeID)
+				}
+			}
+			break
+		}
+	}
 
 	var payload struct {
 		Type string `json:"type"`

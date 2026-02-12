@@ -183,15 +183,31 @@ func (c *Controller) executeStoreOperation(store *models.Store, action string, d
 	case "delete_product":
 		return c.deleteProductFromChat(data)
 	case "create_variant":
-		return c.createVariantFromChat(data)
+		return c.createVariantFromChat(store, data)
+	case "create_variant_with_options":
+		return c.createVariantWithOptionsFromChat(store, data)
+	case "bulk_create_products":
+		return c.bulkCreateProductsFromChat(store, data)
 	case "create_category":
 		return c.createCategoryFromChat(store, data)
+	case "update_category":
+		return c.updateCategoryFromChat(data)
+	case "delete_category":
+		return c.deleteCategoryFromChat(data)
 	case "create_discount":
 		return c.createDiscountFromChat(store, data)
 	case "update_discount":
 		return c.updateDiscountFromChat(data)
+	case "delete_discount":
+		return c.deleteDiscountFromChat(data)
 	case "update_store_settings":
 		return c.updateStoreFromChat(store, data)
+	case "list_products":
+		_, err := c.DB.GetProductsByStoreID(store.ID.String())
+		return err
+	case "list_categories":
+		_, err := c.DB.GetCategoriesByStoreID(store.ID.String())
+		return err
 	default:
 		return fmt.Errorf("unknown action: %s", action)
 	}
@@ -290,17 +306,21 @@ func (c *Controller) deleteProductFromChat(data map[string]any) error {
 	return err
 }
 
-func (c *Controller) createVariantFromChat(data map[string]any) error {
+func (c *Controller) createVariantFromChat(store *models.Store, data map[string]any) error {
 	productSlug, _ := data["product_slug"].(string)
-	// Find product by slug - need storeID context
 	productID, _ := data["product_id"].(string)
 
 	var pid uuid.UUID
 	if productID != "" {
 		pid, _ = uuid.Parse(productID)
 	} else if productSlug != "" {
-		// Try to find by iterating (simplified)
-		return fmt.Errorf("product_id required for variant creation")
+		product, err := c.DB.GetProductBySlug(store.ID.String(), productSlug)
+		if err != nil {
+			return fmt.Errorf("product not found by slug %q: %w", productSlug, err)
+		}
+		pid = product.ID
+	} else {
+		return fmt.Errorf("product_id or product_slug required for variant creation")
 	}
 
 	name, _ := data["name"].(string)
@@ -321,6 +341,146 @@ func (c *Controller) createVariantFromChat(data map[string]any) error {
 
 	_, err := c.DB.CreateVariant(variant)
 	return err
+}
+
+func (c *Controller) createVariantWithOptionsFromChat(store *models.Store, data map[string]any) error {
+	productID, _ := data["product_id"].(string)
+	productSlug, _ := data["product_slug"].(string)
+
+	if productID == "" && productSlug != "" {
+		product, err := c.DB.GetProductBySlug(store.ID.String(), productSlug)
+		if err != nil {
+			return fmt.Errorf("product not found by slug %q: %w", productSlug, err)
+		}
+		productID = product.ID.String()
+	}
+	if productID == "" {
+		return fmt.Errorf("create_variant_with_options requires product_id or product_slug")
+	}
+
+	pid, err := uuid.Parse(productID)
+	if err != nil {
+		return fmt.Errorf("invalid product_id %q: %w", productID, err)
+	}
+
+	name, _ := data["name"].(string)
+	if name == "" {
+		name = "Default"
+	}
+	sku, _ := data["sku"].(string)
+	priceInCents := chatIntFromAny(data["price_in_cents"])
+	inventory := chatIntFromAny(data["inventory"])
+	isDefault, _ := data["is_default"].(bool)
+
+	var options map[string]any
+	if opts, ok := data["options"].(map[string]any); ok {
+		options = opts
+	} else {
+		options = map[string]any{}
+	}
+
+	variant := &models.ProductVariant{
+		ProductID:    pid,
+		Name:         name,
+		SKU:          sku,
+		PriceInCents: priceInCents,
+		Inventory:    inventory,
+		IsDefault:    isDefault,
+		Options:      options,
+	}
+
+	_, err = c.DB.CreateVariant(variant)
+	return err
+}
+
+func (c *Controller) bulkCreateProductsFromChat(store *models.Store, data map[string]any) error {
+	productsRaw, ok := data["products"].([]any)
+	if !ok || len(productsRaw) == 0 {
+		return fmt.Errorf("bulk_create_products requires a non-empty products array")
+	}
+
+	var errs []string
+	for i, raw := range productsRaw {
+		pData, ok := raw.(map[string]any)
+		if !ok {
+			errs = append(errs, fmt.Sprintf("product[%d]: invalid format", i))
+			continue
+		}
+		if err := c.createProductFromChat(store, pData); err != nil {
+			name, _ := pData["name"].(string)
+			if name == "" {
+				name = fmt.Sprintf("index %d", i)
+			}
+			errs = append(errs, fmt.Sprintf("product %q: %v", name, err))
+		}
+	}
+
+	if len(errs) > 0 {
+		return fmt.Errorf("bulk_create_products had %d/%d failures: %s",
+			len(errs), len(productsRaw), strings.Join(errs, "; "))
+	}
+	return nil
+}
+
+func (c *Controller) updateCategoryFromChat(data map[string]any) error {
+	id, _ := data["id"].(string)
+	if id == "" {
+		return fmt.Errorf("update_category requires id")
+	}
+	cat, err := c.DB.GetCategoryByID(id)
+	if err != nil {
+		return fmt.Errorf("category %q not found: %w", id, err)
+	}
+	if name, ok := data["name"].(string); ok && name != "" {
+		cat.Name = name
+	}
+	if desc, ok := data["description"].(string); ok {
+		cat.Description = desc
+	}
+	if _, ok := data["sort_order"]; ok {
+		cat.SortOrder = chatIntFromAny(data["sort_order"])
+	}
+	cat.UpdatedAt = time.Now()
+	_, err = c.DB.UpdateCategory(cat)
+	return err
+}
+
+func (c *Controller) deleteCategoryFromChat(data map[string]any) error {
+	id, _ := data["id"].(string)
+	if id == "" {
+		return fmt.Errorf("delete_category requires id")
+	}
+	cat, err := c.DB.GetCategoryByID(id)
+	if err != nil {
+		return fmt.Errorf("category %q not found: %w", id, err)
+	}
+	return c.DB.DeleteCategory(cat)
+}
+
+func (c *Controller) deleteDiscountFromChat(data map[string]any) error {
+	id, _ := data["id"].(string)
+	if id == "" {
+		return fmt.Errorf("delete_discount requires id")
+	}
+	discount, err := c.DB.GetDiscountByID(id)
+	if err != nil {
+		return fmt.Errorf("discount %q not found: %w", id, err)
+	}
+	return c.DB.DeleteDiscount(discount)
+}
+
+// chatIntFromAny extracts an int from a value that may be float64 (from JSON) or int.
+func chatIntFromAny(v any) int {
+	switch n := v.(type) {
+	case float64:
+		return int(n)
+	case int:
+		return n
+	case int64:
+		return int(n)
+	default:
+		return 0
+	}
 }
 
 func (c *Controller) createCategoryFromChat(store *models.Store, data map[string]any) error {

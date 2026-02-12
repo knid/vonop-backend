@@ -111,15 +111,33 @@ const nextConfig = {
 export default nextConfig;
 `
 
-// NEXTJS_TEMPLATE_WEMOB_STORE is the typed storefront API client injected for e-commerce projects.
-// Go raw strings cannot contain backticks, so TypeScript template literals use string concatenation.
-const NEXTJS_TEMPLATE_WEMOB_STORE = `// lib/wemob-store.ts — Wemob Storefront API Client
+// NEXTJS_TEMPLATE_WEMOB_STORE is the typed storefront SDK with React context, hooks, and API client
+// injected for e-commerce projects. No JS template literals are used, so a single Go raw string works.
+const NEXTJS_TEMPLATE_WEMOB_STORE = `"use client";
+// lib/wemob-store.ts — Wemob Storefront SDK
 // This file is template-managed. Do not modify.
+
+import React from "react";
+
+// ---------------------------------------------------------------------------
+// Environment
+// ---------------------------------------------------------------------------
 
 const API_URL = process.env.NEXT_PUBLIC_WEMOB_API_URL || "";
 const STORE_ID = process.env.NEXT_PUBLIC_STORE_ID || "";
 
-// --- Types ---
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+export interface StoreConfig {
+  name: string;
+  currency: string;
+  locale: string;
+  tax_rate: number;
+  payment_providers: string[];
+  shipping_enabled: boolean;
+}
 
 export interface StorefrontProduct {
   id: string;
@@ -189,6 +207,28 @@ export interface CheckoutConfirm {
   status: string;
 }
 
+export interface OrderTracking {
+  order_id: string;
+  order_number: string;
+  status: string;
+  payment_status: string;
+  items: OrderTrackingItem[];
+  subtotal_cents: number;
+  discount_cents: number;
+  tax_cents: number;
+  total_cents: number;
+  currency: string;
+  created_at: string;
+}
+
+export interface OrderTrackingItem {
+  product_name: string;
+  variant_name: string;
+  quantity: number;
+  price_in_cents: number;
+  total_cents: number;
+}
+
 export interface ShippingAddress {
   line1: string;
   line2?: string;
@@ -198,38 +238,67 @@ export interface ShippingAddress {
   country: string;
 }
 
-// --- API Helpers ---
+export interface CheckoutParams {
+  sessionId: string;
+  customerEmail: string;
+  customerName: string;
+  shippingAddress: ShippingAddress;
+  billingAddress?: ShippingAddress;
+  paymentProvider: string;
+}
+
+// ---------------------------------------------------------------------------
+// API Fetch Helper
+// ---------------------------------------------------------------------------
 
 async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
-  const url = ` + "`${API_URL}/v2/storefront/${STORE_ID}${path}`" + `;
+  const url = API_URL + "/v2/storefront/" + STORE_ID + path;
   const res = await fetch(url, {
     headers: { "Content-Type": "application/json", ...options?.headers },
     ...options,
   });
   if (!res.ok) {
     const body = await res.text();
-    throw new Error(` + "`API error ${res.status}: ${body}`" + `);
+    throw new Error("API error " + res.status + ": " + body);
   }
   return res.json();
 }
 
-// --- Products ---
+// ---------------------------------------------------------------------------
+// Store Config
+// ---------------------------------------------------------------------------
 
+/** Fetch the store configuration (name, currency, locale, tax, etc.). */
+export async function getStoreConfig(): Promise<StoreConfig> {
+  return apiFetch<StoreConfig>("/config");
+}
+
+// ---------------------------------------------------------------------------
+// Products (standalone — usable in server components)
+// ---------------------------------------------------------------------------
+
+/** Fetch all products. */
 export async function getProducts(): Promise<StorefrontProduct[]> {
   return apiFetch<StorefrontProduct[]>("/products");
 }
 
+/** Fetch a single product by slug. */
 export async function getProduct(slug: string): Promise<StorefrontProduct> {
-  return apiFetch<StorefrontProduct>(` + "`/products/${slug}`" + `);
+  return apiFetch<StorefrontProduct>("/products/" + slug);
 }
 
-// --- Categories ---
+// ---------------------------------------------------------------------------
+// Categories (standalone)
+// ---------------------------------------------------------------------------
 
+/** Fetch all categories. */
 export async function getCategories(): Promise<StorefrontCategory[]> {
   return apiFetch<StorefrontCategory[]>("/categories");
 }
 
-// --- Cart ---
+// ---------------------------------------------------------------------------
+// Cart API (standalone)
+// ---------------------------------------------------------------------------
 
 export async function createCart(sessionId: string): Promise<StorefrontCart> {
   return apiFetch<StorefrontCart>("/cart", {
@@ -239,7 +308,7 @@ export async function createCart(sessionId: string): Promise<StorefrontCart> {
 }
 
 export async function getCart(sessionId: string): Promise<StorefrontCart> {
-  return apiFetch<StorefrontCart>(` + "`/cart/${sessionId}`" + `);
+  return apiFetch<StorefrontCart>("/cart/" + sessionId);
 }
 
 export async function addCartItem(
@@ -248,7 +317,7 @@ export async function addCartItem(
   variantId: string,
   quantity: number
 ): Promise<StorefrontCart> {
-  return apiFetch<StorefrontCart>(` + "`/cart/${sessionId}/items`" + `, {
+  return apiFetch<StorefrontCart>("/cart/" + sessionId + "/items", {
     method: "POST",
     body: JSON.stringify({ product_id: productId, variant_id: variantId, quantity }),
   });
@@ -259,7 +328,7 @@ export async function updateCartItem(
   itemId: string,
   quantity: number
 ): Promise<StorefrontCart> {
-  return apiFetch<StorefrontCart>(` + "`/cart/${sessionId}/items/${itemId}`" + `, {
+  return apiFetch<StorefrontCart>("/cart/" + sessionId + "/items/" + itemId, {
     method: "PUT",
     body: JSON.stringify({ quantity }),
   });
@@ -269,31 +338,27 @@ export async function removeCartItem(
   sessionId: string,
   itemId: string
 ): Promise<StorefrontCart> {
-  return apiFetch<StorefrontCart>(` + "`/cart/${sessionId}/items/${itemId}`" + `, {
+  return apiFetch<StorefrontCart>("/cart/" + sessionId + "/items/" + itemId, {
     method: "DELETE",
   });
 }
 
-export async function applyDiscount(
+export async function applyDiscountCode(
   sessionId: string,
   code: string
 ): Promise<StorefrontCart> {
-  return apiFetch<StorefrontCart>(` + "`/cart/${sessionId}/discount`" + `, {
+  return apiFetch<StorefrontCart>("/cart/" + sessionId + "/discount", {
     method: "POST",
     body: JSON.stringify({ code }),
   });
 }
 
-// --- Checkout ---
+// ---------------------------------------------------------------------------
+// Checkout API (standalone)
+// ---------------------------------------------------------------------------
 
-export async function checkout(params: {
-  sessionId: string;
-  customerEmail: string;
-  customerName: string;
-  shippingAddress: ShippingAddress;
-  billingAddress?: ShippingAddress;
-  paymentProvider: "stripe" | "iyzico";
-}): Promise<StorefrontCheckout> {
+/** Create a checkout session. Redirects to payment_url when present. */
+export async function checkout(params: CheckoutParams): Promise<StorefrontCheckout> {
   return apiFetch<StorefrontCheckout>("/checkout", {
     method: "POST",
     body: JSON.stringify({
@@ -307,6 +372,7 @@ export async function checkout(params: {
   });
 }
 
+/** Confirm payment after redirect. */
 export async function confirmCheckout(
   orderId: string,
   paymentId: string
@@ -317,30 +383,485 @@ export async function confirmCheckout(
   });
 }
 
-// --- Helpers ---
+// ---------------------------------------------------------------------------
+// Order Tracking (standalone)
+// ---------------------------------------------------------------------------
 
-export function formatPrice(cents: number, currency = "USD"): string {
-  return new Intl.NumberFormat("en-US", {
+/** Fetch order details for tracking / confirmation page. */
+export async function getOrder(orderId: string): Promise<OrderTracking> {
+  return apiFetch<OrderTracking>("/orders/" + orderId);
+}
+
+// ---------------------------------------------------------------------------
+// Price Utilities
+// ---------------------------------------------------------------------------
+
+let _configCache: StoreConfig | null = null;
+
+/**
+ * Format a price in cents to a human-readable currency string.
+ * Uses the store config currency/locale when available.
+ */
+export function formatPrice(cents: number, currency?: string): string {
+  const cur = currency || (_configCache ? _configCache.currency : "USD");
+  const locale = _configCache ? _configCache.locale : "en-US";
+  return new Intl.NumberFormat(locale, {
     style: "currency",
-    currency,
+    currency: cur,
   }).format(cents / 100);
 }
 
-const SESSION_KEY = "wemob_session_id";
+// ---------------------------------------------------------------------------
+// Session Management (cookie + localStorage, SSR-safe)
+// ---------------------------------------------------------------------------
 
+const SESSION_COOKIE = "wemob_session";
+const SESSION_LS_KEY = "wemob_session_id";
+const SESSION_MAX_AGE = 30 * 24 * 60 * 60; // 30 days in seconds
+
+function isBrowser(): boolean {
+  return typeof window !== "undefined";
+}
+
+function setCookie(name: string, value: string, maxAge: number): void {
+  if (!isBrowser()) return;
+  document.cookie =
+    name +
+    "=" +
+    encodeURIComponent(value) +
+    "; path=/; max-age=" +
+    maxAge +
+    "; SameSite=Lax";
+}
+
+function getCookie(name: string): string | null {
+  if (!isBrowser()) return null;
+  const match = document.cookie.match(
+    new RegExp("(?:^|; )" + name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "=([^;]*)")
+  );
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
+function deleteCookie(name: string): void {
+  if (!isBrowser()) return;
+  document.cookie = name + "=; path=/; max-age=0; SameSite=Lax";
+}
+
+/** Get or create a persistent session ID, stored in both cookie and localStorage. */
 export function getSessionId(): string {
-  if (typeof window === "undefined") return "";
-  let id = localStorage.getItem(SESSION_KEY);
+  if (!isBrowser()) return "";
+
+  // Try cookie first, then localStorage
+  let id = getCookie(SESSION_COOKIE);
+  if (!id) {
+    id = localStorage.getItem(SESSION_LS_KEY);
+  }
   if (!id) {
     id = crypto.randomUUID();
-    localStorage.setItem(SESSION_KEY, id);
   }
+
+  // Persist to both stores
+  setCookie(SESSION_COOKIE, id, SESSION_MAX_AGE);
+  try {
+    localStorage.setItem(SESSION_LS_KEY, id);
+  } catch {
+    // localStorage may be unavailable (private browsing, quota)
+  }
+
   return id;
 }
 
+/** Clear all session data. */
 export function clearSession(): void {
-  if (typeof window === "undefined") return;
-  localStorage.removeItem(SESSION_KEY);
+  if (!isBrowser()) return;
+  deleteCookie(SESSION_COOKIE);
+  try {
+    localStorage.removeItem(SESSION_LS_KEY);
+  } catch {
+    // ignore
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Cart Context
+// ---------------------------------------------------------------------------
+
+interface CartContextValue {
+  cart: StorefrontCart | null;
+  isLoading: boolean;
+  itemCount: number;
+  addItem: (productId: string, variantId?: string, quantity?: number) => Promise<void>;
+  updateItem: (itemId: string, quantity: number) => Promise<void>;
+  removeItem: (itemId: string) => Promise<void>;
+  applyDiscount: (code: string) => Promise<void>;
+  checkout: (params: CheckoutParams) => Promise<StorefrontCheckout>;
+  clearCart: () => void;
+}
+
+const CartContext = React.createContext<CartContextValue | null>(null);
+
+// ---------------------------------------------------------------------------
+// CartProvider
+// ---------------------------------------------------------------------------
+
+export function CartProvider({ children }: { children: React.ReactNode }) {
+  const [cart, setCart] = React.useState<StorefrontCart | null>(null);
+  const [isLoading, setIsLoading] = React.useState(true);
+  const sessionIdRef = React.useRef<string>("");
+
+  // Compute item count
+  const itemCount = React.useMemo(() => {
+    if (!cart || !cart.items) return 0;
+    return cart.items.reduce((sum, item) => sum + item.quantity, 0);
+  }, [cart]);
+
+  // Initialize cart from session on mount
+  React.useEffect(() => {
+    let cancelled = false;
+
+    async function init() {
+      const sid = getSessionId();
+      if (!sid) {
+        setIsLoading(false);
+        return;
+      }
+      sessionIdRef.current = sid;
+
+      try {
+        const existing = await getCart(sid);
+        if (!cancelled) setCart(existing);
+      } catch {
+        // Cart does not exist yet — create one
+        try {
+          const fresh = await createCart(sid);
+          if (!cancelled) setCart(fresh);
+        } catch {
+          // API unreachable; start with empty state
+        }
+      }
+      if (!cancelled) setIsLoading(false);
+    }
+
+    init();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // --- Optimistic helpers ---
+
+  const withOptimistic = React.useCallback(
+    async (
+      optimisticCart: StorefrontCart | null,
+      apiCall: () => Promise<StorefrontCart>
+    ) => {
+      const previous = cart;
+      if (optimisticCart) setCart(optimisticCart);
+
+      try {
+        const updated = await apiCall();
+        setCart(updated);
+      } catch (err) {
+        // Rollback on failure
+        setCart(previous);
+        throw err;
+      }
+    },
+    [cart]
+  );
+
+  // --- Actions ---
+
+  const handleAddItem = React.useCallback(
+    async (productId: string, variantId?: string, quantity?: number) => {
+      const sid = sessionIdRef.current || getSessionId();
+      sessionIdRef.current = sid;
+      const qty = quantity ?? 1;
+      const vid = variantId ?? "";
+
+      // Optimistic: add a placeholder item
+      const optimistic = cart
+        ? {
+            ...cart,
+            items: [
+              ...cart.items,
+              {
+                id: "__optimistic__" + Date.now(),
+                product_id: productId,
+                product_name: "",
+                product_image: "",
+                variant_id: vid,
+                variant_name: "",
+                quantity: qty,
+                price_cents: 0,
+                total_cents: 0,
+              },
+            ],
+          }
+        : null;
+
+      await withOptimistic(optimistic, () =>
+        addCartItem(sid, productId, vid, qty)
+      );
+    },
+    [cart, withOptimistic]
+  );
+
+  const handleUpdateItem = React.useCallback(
+    async (itemId: string, quantity: number) => {
+      const sid = sessionIdRef.current;
+      if (!sid || !cart) return;
+
+      // Optimistic: update quantity in-place
+      const optimistic: StorefrontCart = {
+        ...cart,
+        items: cart.items.map((item) =>
+          item.id === itemId
+            ? { ...item, quantity, total_cents: item.price_cents * quantity }
+            : item
+        ),
+      };
+
+      await withOptimistic(optimistic, () =>
+        updateCartItem(sid, itemId, quantity)
+      );
+    },
+    [cart, withOptimistic]
+  );
+
+  const handleRemoveItem = React.useCallback(
+    async (itemId: string) => {
+      const sid = sessionIdRef.current;
+      if (!sid || !cart) return;
+
+      // Optimistic: remove item
+      const optimistic: StorefrontCart = {
+        ...cart,
+        items: cart.items.filter((item) => item.id !== itemId),
+      };
+
+      await withOptimistic(optimistic, () =>
+        removeCartItem(sid, itemId)
+      );
+    },
+    [cart, withOptimistic]
+  );
+
+  const handleApplyDiscount = React.useCallback(
+    async (code: string) => {
+      const sid = sessionIdRef.current;
+      if (!sid) return;
+
+      const updated = await applyDiscountCode(sid, code);
+      setCart(updated);
+    },
+    []
+  );
+
+  const handleCheckout = React.useCallback(
+    async (params: CheckoutParams): Promise<StorefrontCheckout> => {
+      const result = await checkout({
+        ...params,
+        sessionId: params.sessionId || sessionIdRef.current,
+      });
+
+      // Auto-redirect to hosted payment page when available
+      if (result.payment_url && isBrowser()) {
+        window.location.href = result.payment_url;
+      }
+
+      return result;
+    },
+    []
+  );
+
+  const handleClearCart = React.useCallback(() => {
+    setCart(null);
+    clearSession();
+  }, []);
+
+  const value = React.useMemo<CartContextValue>(
+    () => ({
+      cart,
+      isLoading,
+      itemCount,
+      addItem: handleAddItem,
+      updateItem: handleUpdateItem,
+      removeItem: handleRemoveItem,
+      applyDiscount: handleApplyDiscount,
+      checkout: handleCheckout,
+      clearCart: handleClearCart,
+    }),
+    [
+      cart,
+      isLoading,
+      itemCount,
+      handleAddItem,
+      handleUpdateItem,
+      handleRemoveItem,
+      handleApplyDiscount,
+      handleCheckout,
+      handleClearCart,
+    ]
+  );
+
+  return React.createElement(CartContext.Provider, { value }, children);
+}
+
+// ---------------------------------------------------------------------------
+// Hooks
+// ---------------------------------------------------------------------------
+
+/** Access cart state and actions. Must be used within a CartProvider. */
+export function useCart(): CartContextValue {
+  const ctx = React.useContext(CartContext);
+  if (!ctx) {
+    throw new Error("useCart must be used within a <CartProvider>");
+  }
+  return ctx;
+}
+
+/** Fetch and return all products. */
+export function useProducts(): {
+  products: StorefrontProduct[];
+  isLoading: boolean;
+  error: Error | null;
+} {
+  const [products, setProducts] = React.useState<StorefrontProduct[]>([]);
+  const [isLoading, setIsLoading] = React.useState(true);
+  const [error, setError] = React.useState<Error | null>(null);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    setIsLoading(true);
+    setError(null);
+
+    getProducts()
+      .then((data) => {
+        if (!cancelled) {
+          setProducts(data);
+          setIsLoading(false);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setError(err instanceof Error ? err : new Error(String(err)));
+          setIsLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return { products, isLoading, error };
+}
+
+/** Fetch and return a single product by slug. */
+export function useProduct(slug: string): {
+  product: StorefrontProduct | null;
+  isLoading: boolean;
+  error: Error | null;
+} {
+  const [product, setProduct] = React.useState<StorefrontProduct | null>(null);
+  const [isLoading, setIsLoading] = React.useState(true);
+  const [error, setError] = React.useState<Error | null>(null);
+
+  React.useEffect(() => {
+    if (!slug) {
+      setProduct(null);
+      setIsLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setIsLoading(true);
+    setError(null);
+
+    getProduct(slug)
+      .then((data) => {
+        if (!cancelled) {
+          setProduct(data);
+          setIsLoading(false);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setError(err instanceof Error ? err : new Error(String(err)));
+          setIsLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [slug]);
+
+  return { product, isLoading, error };
+}
+
+/** Fetch and return all categories. */
+export function useCategories(): {
+  categories: StorefrontCategory[];
+  isLoading: boolean;
+} {
+  const [categories, setCategories] = React.useState<StorefrontCategory[]>([]);
+  const [isLoading, setIsLoading] = React.useState(true);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    setIsLoading(true);
+
+    getCategories()
+      .then((data) => {
+        if (!cancelled) {
+          setCategories(data);
+          setIsLoading(false);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setIsLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return { categories, isLoading };
+}
+
+/** Fetch and return the store configuration. Also warms the formatPrice cache. */
+export function useStoreConfig(): {
+  config: StoreConfig | null;
+  isLoading: boolean;
+} {
+  const [config, setConfig] = React.useState<StoreConfig | null>(null);
+  const [isLoading, setIsLoading] = React.useState(true);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    setIsLoading(true);
+
+    getStoreConfig()
+      .then((data) => {
+        if (!cancelled) {
+          _configCache = data;
+          setConfig(data);
+          setIsLoading(false);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setIsLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return { config, isLoading };
 }
 `
 
@@ -446,6 +967,7 @@ Generate the content for a single TSX/TS file in a Next.js 16 App Router project
 25. When "Already-generated files" context is provided, use the exact export names, prop types, and function signatures from those files. Do NOT guess — match what was actually exported.
 26. For UI components (Button, Card, Input, Badge, etc.), follow shadcn/ui patterns using class-variance-authority for variants and cn() for class merging.
 27. If you need a new npm package that's not pre-installed, you can modify package.json to add it.
+28. For e-commerce projects, use hooks from @/lib/wemob-store: useCart for cart state/actions, useProducts/useProduct for product data, useStoreConfig for store config, useCategories for categories. Wrap app/layout.tsx with CartProvider from @/lib/wemob-store. lib/wemob-store.ts exports BOTH standalone functions AND React hooks. In React components, prefer hooks. Use standalone functions only in server components or non-React contexts.
 
 ### Tools Available
 You have tools to inspect already-generated project files:
@@ -536,7 +1058,9 @@ You are an experienced e-commerce engineer. When building storefronts, apply rea
   - Generate 3-6 sample products that match the user's store concept unless they specified exact products.
   - THEN generate the storefront code that fetches from the real API.
 - If the project context shows "E-commerce store: active", generate code that calls the REAL Wemob Storefront API — never generate mock product data. Use the pre-built API client at @/lib/wemob-store for all storefront API calls. Do NOT create custom fetch utilities — the template-managed client already provides typed functions with error handling.
-- lib/wemob-store.ts is a template-managed file that is automatically injected for e-commerce projects. It exports: getProducts, getProduct, getCategories, createCart, getCart, addCartItem, updateCartItem, removeCartItem, applyDiscount, checkout, confirmCheckout, formatPrice, getSessionId, clearSession, and TypeScript types: StorefrontProduct, StorefrontVariant, StorefrontCategory, StorefrontCart, StorefrontCartItem, StorefrontCheckout, CheckoutConfirm, ShippingAddress. Do NOT create, modify, or delete this file — it is template-managed.
+- lib/wemob-store.ts is a template-managed file that is automatically injected for e-commerce projects. It exports: getStoreConfig, getProducts, getProduct, getCategories, createCart, getCart, addCartItem, updateCartItem, removeCartItem, applyDiscountCode, checkout, confirmCheckout, getOrder, formatPrice, getSessionId, clearSession, CartProvider, useCart, useProducts, useProduct, useCategories, useStoreConfig, and TypeScript types: StoreConfig, StorefrontProduct, StorefrontVariant, StorefrontCategory, StorefrontCart, StorefrontCartItem, StorefrontCheckout, CheckoutConfirm, CheckoutParams, OrderTracking, OrderTrackingItem, ShippingAddress. Do NOT create, modify, or delete this file — it is template-managed.
+- CartProvider wraps the app with cart context (add to layout.tsx). useCart() provides cart state with optimistic updates, addItem, updateItem, removeItem, applyDiscount, checkout (auto-redirects to payment_url), and clearCart.
+- Session is persisted via both a "wemob_session" cookie (30-day, SameSite=Lax) and localStorage fallback. SSR-safe.
 - You can also use manage_store at any time to add more products, categories, or discounts when the user asks (e.g., "add a 20% discount code SUMMER20").
 - Storefront API endpoints (all public, no auth needed):
   GET  {NEXT_PUBLIC_WEMOB_API_URL}/v2/storefront/{NEXT_PUBLIC_STORE_ID}/products — list products
@@ -550,9 +1074,11 @@ You are an experienced e-commerce engineer. When building storefronts, apply rea
   POST {NEXT_PUBLIC_WEMOB_API_URL}/v2/storefront/{NEXT_PUBLIC_STORE_ID}/cart/{sessionId}/discount — apply discount code
   POST {NEXT_PUBLIC_WEMOB_API_URL}/v2/storefront/{NEXT_PUBLIC_STORE_ID}/checkout — create checkout session
   POST {NEXT_PUBLIC_WEMOB_API_URL}/v2/storefront/{NEXT_PUBLIC_STORE_ID}/checkout/confirm — confirm payment
+  GET  {NEXT_PUBLIC_WEMOB_API_URL}/v2/storefront/{NEXT_PUBLIC_STORE_ID}/config — store config (name, currency, payment providers)
+  GET  {NEXT_PUBLIC_WEMOB_API_URL}/v2/storefront/{NEXT_PUBLIC_STORE_ID}/orders/{orderId} — order tracking/confirmation
 - Use process.env.NEXT_PUBLIC_WEMOB_API_URL and process.env.NEXT_PUBLIC_STORE_ID in generated code.
-- Product prices are in cents. Format for display: (price / 100).toFixed(2)
-- Cart uses a sessionId stored in localStorage.
+- Product prices are in cents. Use formatPrice(cents) from @/lib/wemob-store for display (uses store currency/locale).
+- Cart uses a sessionId stored in both cookie and localStorage (SSR-safe).
 - If the context shows "WARNING: No payment gateway connected", tell the user to connect Stripe or Iyzico via the dashboard. Generate the checkout UI but disable the payment button with a message explaining a payment gateway is needed.
 
 ### Integration Awareness
@@ -589,8 +1115,8 @@ Given the user's description of an online store, generate a structured file plan
 1. Generate a store name and URL-safe slug.
 2. Generate a sophisticated, modern color scheme suited for e-commerce. Avoid generic palettes.
 3. Also generate a dark color scheme variant.
-4. Required pages: Home, Products listing, Product detail, Cart, Checkout, Order confirmation.
-5. Include shared components: Header with cart icon, Footer, ProductCard, CartWidget.
+4. Required pages: Home, Products listing, Product detail, Cart, Checkout, Checkout success (order confirmation), Checkout cancel (payment cancelled).
+5. Include shared components: Header with cart icon, Footer, ProductCard, CartDrawer (slide-out cart sidebar).
 6. Include API routes under app/api/ for cart operations if needed.
 7. DO NOT include package.json, tsconfig.json, postcss.config.mjs, next.config.mjs, or lib/wemob-store.ts — these are template-managed and injected automatically.
 8. Required files: app/layout.tsx, app/page.tsx, app/globals.css
@@ -599,7 +1125,7 @@ Given the user's description of an online store, generate a structured file plan
 11. Use Next.js App Router structure.
 12. CRITICAL: Every component or module that is imported by any page MUST be included in the file list. If page.tsx imports "@/components/product-card", you MUST include "components/product-card.tsx" in the plan. If page.tsx imports "@/lib/store", you MUST include "lib/store.ts" in the plan. Missing files will cause build failures. Exception: @/lib/wemob-store is template-injected and does not need to be in the file list.
 13. Prefer inline implementations over importing from separate utility/lib files. Only create separate files for reusable components or large data modules.
-14. A pre-built API client is available at lib/wemob-store.ts (template-injected). Use import { getProducts, getProduct, getCategories, createCart, getCart, addCartItem, updateCartItem, removeCartItem, applyDiscount, checkout, confirmCheckout, formatPrice, getSessionId, clearSession } from "@/lib/wemob-store" for all storefront API calls. Do NOT create custom fetch utilities for the storefront API.
+14. A pre-built storefront SDK is available at lib/wemob-store.ts (template-injected). It provides standalone API functions AND React hooks/context. Use import { getProducts, getProduct, getCategories, getStoreConfig, createCart, getCart, addCartItem, updateCartItem, removeCartItem, applyDiscountCode, checkout, confirmCheckout, getOrder, formatPrice, getSessionId, clearSession, CartProvider, useCart, useProducts, useProduct, useCategories, useStoreConfig } from "@/lib/wemob-store" for all storefront API calls. Wrap the app in <CartProvider> in layout.tsx. Use useCart() for cart state with optimistic updates. Do NOT create custom fetch utilities for the storefront API.
 
 ### Output format: Same as NEXTJS_STRUCTURE_PROMPT (strict JSON, no explanation, no markdown)
 {
@@ -616,9 +1142,12 @@ Given the user's description of an online store, generate a structured file plan
     {"path":"app/products/[slug]/page.tsx","type":"tsx","description":"Product detail page"},
     {"path":"app/cart/page.tsx","type":"tsx","description":"Shopping cart page"},
     {"path":"app/checkout/page.tsx","type":"tsx","description":"Checkout form"},
-    {"path":"components/header.tsx","type":"tsx","description":"Header with cart icon and count"},
+    {"path":"app/checkout/success/page.tsx","type":"tsx","description":"Order confirmation page using getOrder()"},
+    {"path":"app/checkout/cancel/page.tsx","type":"tsx","description":"Payment cancelled page with retry option"},
+    {"path":"components/header.tsx","type":"tsx","description":"Header with cart icon and count badge"},
     {"path":"components/footer.tsx","type":"tsx","description":"Footer"},
-    {"path":"components/product-card.tsx","type":"tsx","description":"Product card component"}
+    {"path":"components/product-card.tsx","type":"tsx","description":"Product card with variant selector"},
+    {"path":"components/cart-drawer.tsx","type":"tsx","description":"Slide-out cart sidebar using useCart()"}
   ]
 }`
 
