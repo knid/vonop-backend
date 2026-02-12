@@ -17,13 +17,9 @@ type StandartUserLimits struct {
 	CanUseAnalytics         bool      `bun:",notnull"`
 	CanRemoveBrandLogo      bool      `bun:",notnull"`
 	CanSeeActiveUsers       bool      `bun:",notnull"`
-	// AI website builder limits
+	// AI limits
 	MonthlyAICredits       int  `bun:",notnull,default:0"`
-	MonthlyWebsiteCount    int  `bun:",notnull,default:0"`
-	CanUseAIChat           bool `bun:",notnull,default:false"`
-	CanUseScreenshotCode   bool `bun:",notnull,default:false"`
-	CanUseCustomDomains    bool `bun:",notnull,default:false"`
-	// V2 app builder limits
+	// App builder limits
 	MonthlyAppCount    int  `bun:",notnull,default:0"`
 	MonthlyDeployCount int  `bun:",notnull,default:0"`
 	CanUseEcommerce    bool `bun:",notnull,default:false"`

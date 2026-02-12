@@ -29,7 +29,6 @@ type AppProject struct {
 	DataModels      []byte         `bun:",type:jsonb,default:'[]'"` // stores data model definitions
 	Settings        map[string]any `bun:",type:jsonb,default:'{}'"`
 	Status          string         `bun:",notnull,default:'draft'"` // draft, generating, ready, deployed
-	LegacyWebsiteID uuid.UUID     `bun:",type:uuid,nullzero"`     // link to old Website for migration
 	CreatedAt       time.Time      `bun:"created_at,nullzero,notnull,default:current_timestamp"`
 	UpdatedAt       time.Time      `bun:"updated_at,nullzero,notnull,default:current_timestamp"`
 	DeletedAt       time.Time      `bun:",soft_delete,nullzero"`

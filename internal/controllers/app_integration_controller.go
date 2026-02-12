@@ -7,8 +7,65 @@ import (
 	"github.com/go-playground/validator/v10"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/requests"
+	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/services/integrations"
 )
+
+var integrationProviders = []responses.IntegrationProviderInfo{
+	{
+		Provider:       "supabase",
+		Name:           "Supabase",
+		Description:    "Database, authentication, and storage. Use as your website's backend.",
+		RequiredFields: []string{"url", "anon_key"},
+		Website:        "https://supabase.com",
+	},
+	{
+		Provider:       "firebase",
+		Name:           "Firebase",
+		Description:    "Database, authentication, and storage by Google.",
+		RequiredFields: []string{"config"},
+		Website:        "https://firebase.google.com",
+	},
+	{
+		Provider:       "stripe",
+		Name:           "Stripe",
+		Description:    "Accept payments and sell products on your website.",
+		RequiredFields: []string{"publishable_key"},
+		Website:        "https://stripe.com",
+	},
+	{
+		Provider:       "iyzico",
+		Name:           "Iyzico",
+		Description:    "Accept payments in Turkey and surrounding regions.",
+		RequiredFields: []string{"api_key"},
+		Website:        "https://www.iyzico.com",
+	},
+	{
+		Provider:       "resend",
+		Name:           "Resend",
+		Description:    "Send transactional emails from your website.",
+		RequiredFields: []string{"api_key"},
+		Website:        "https://resend.com",
+	},
+	{
+		Provider:       "cloudinary",
+		Name:           "Cloudinary",
+		Description:    "Image and video optimization, upload, and transformation.",
+		RequiredFields: []string{"cloud_name", "upload_preset"},
+		Website:        "https://cloudinary.com",
+	},
+	{
+		Provider:       "google_sheets",
+		Name:           "Google Sheets",
+		Description:    "Use Google Sheets as a simple database for your website content.",
+		RequiredFields: []string{"api_key", "sheet_id"},
+		Website:        "https://sheets.google.com",
+	},
+}
+
+func (c *Controller) GetIntegrationProviders() []responses.IntegrationProviderInfo {
+	return integrationProviders
+}
 
 func (c *Controller) GetAppIntegrations(projectID string) ([]models.AppIntegration, error) {
 	return c.DB.GetAppIntegrationsByProjectID(projectID)

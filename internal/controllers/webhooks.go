@@ -28,10 +28,9 @@ func (c *Controller) CreateWebhookEndpoint(user *models.User, req requests.Creat
 
 	// Validate events
 	validEvents := map[string]bool{
-		models.WebhookEventFormSubmitted:    true,
-		models.WebhookEventWebsitePublished: true,
-		models.WebhookEventBuildCompleted:   true,
-		models.WebhookEventBuildFailed:      true,
+		models.WebhookEventFormSubmitted:  true,
+		models.WebhookEventBuildCompleted: true,
+		models.WebhookEventBuildFailed:    true,
 	}
 	for _, event := range strings.Split(req.Events, ",") {
 		if !validEvents[strings.TrimSpace(event)] {

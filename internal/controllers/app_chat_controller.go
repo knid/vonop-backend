@@ -348,7 +348,6 @@ func (c *Controller) mcpTools() []utils.Tool {
 }
 
 // StreamChatAppFileOps processes a chat message and applies file operations with SSE streaming.
-// Mirrors the ChatStream pattern from website_chat_controller.go.
 func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.AppProject, user *models.User, message string, images []string, events chan<- responses.SSEEvent) {
 	defer close(events)
 
