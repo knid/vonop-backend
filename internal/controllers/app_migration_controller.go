@@ -114,7 +114,7 @@ Extract the color scheme from the existing styles.
 
 	// 5. Generate Next.js files from the plan (code-first)
 	provider := c.llmProvider()
-	model := c.SecretManager.GetSecret("NEXTJS_BUILDER_LLM_MODEL")
+	model := c.SecretManager.GetSecret("WEBSITE_BUILDER_LLM_MODEL")
 	if model == "" {
 		model = constants.DEFAULT_NEXTJS_LLM_MODEL
 	}
@@ -144,8 +144,7 @@ Extract the color scheme from the existing styles.
 			slog.Error("failed to generate migration file", "error", err, "path", filePlan.Path)
 			content = c.getAppFileFallback(filePlan)
 		}
-
-		content = cleanAppFileOutput(content, filePlan.Type)
+		content = utils.StripCodeFences(content)
 
 		file := &models.AppGeneratedFile{
 			AppProjectID: project.ID,
@@ -254,7 +253,7 @@ Extract the color scheme from the existing styles.
 			Chunk: chunk,
 			Phase: "structure",
 		})
-	})
+	}, nil)
 	if err != nil {
 		slog.Error("LLM migration error", "error", err, "websiteId", websiteID)
 		sendError("structure", "failed to analyze website for migration")
@@ -320,7 +319,7 @@ Extract the color scheme from the existing styles.
 
 	// 5. Generate files (streamed)
 	provider := c.llmProvider()
-	model := c.SecretManager.GetSecret("NEXTJS_BUILDER_LLM_MODEL")
+	model := c.SecretManager.GetSecret("WEBSITE_BUILDER_LLM_MODEL")
 	if model == "" {
 		model = constants.DEFAULT_NEXTJS_LLM_MODEL
 	}
@@ -351,7 +350,7 @@ Extract the color scheme from the existing styles.
 			prompt,
 			filePrompt,
 			provider,
-			c.reasoningConfig(),
+			nil,
 			func(chunk string) {
 				sendEvent("file_chunk", responses.FileOperationEvent{
 					Action:   "create",
@@ -360,13 +359,13 @@ Extract the color scheme from the existing styles.
 					Chunk:    chunk,
 				})
 			},
+			nil,
 		)
 		if err != nil {
 			slog.Error("failed to generate migration file", "error", err, "path", filePlan.Path)
 			content = c.getAppFileFallback(filePlan)
 		}
-
-		content = cleanAppFileOutput(content, filePlan.Type)
+		content = utils.StripCodeFences(content)
 
 		file := &models.AppGeneratedFile{
 			AppProjectID: project.ID,

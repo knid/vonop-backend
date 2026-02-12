@@ -113,9 +113,7 @@ func (c *Controller) InsertComponent(user *models.User, websiteId string, req re
 		return nil, fmt.Errorf("failed to insert component. try again please")
 	}
 
-	newContent = cleanFileOutput(newContent, file.FileType)
-
-	file.Content = newContent
+	file.Content = utils.StripCodeFences(newContent)
 	file.UpdatedAt = time.Now()
 	updatedFile, err := c.DB.UpdateFile(file)
 	if err != nil {
@@ -216,7 +214,7 @@ func (c *Controller) InsertComponentStream(ctx context.Context, user *models.Use
 		constants.WEBSITE_EDIT_PAGE_PROMPT,
 		prompt,
 		provider,
-		c.reasoningConfig(),
+		nil,
 		func(chunk string) {
 			sendEvent("file_chunk", responses.FileOperationEvent{
 				Action:   "modify",
@@ -225,6 +223,7 @@ func (c *Controller) InsertComponentStream(ctx context.Context, user *models.Use
 				Chunk:    chunk,
 			})
 		},
+		nil,
 	)
 	if err != nil {
 		slog.Error("failed to insert component", "error", err)
@@ -232,9 +231,7 @@ func (c *Controller) InsertComponentStream(ctx context.Context, user *models.Use
 		return
 	}
 
-	newContent = cleanFileOutput(newContent, file.FileType)
-
-	file.Content = newContent
+	file.Content = utils.StripCodeFences(newContent)
 	file.UpdatedAt = time.Now()
 	updatedFile, err := c.DB.UpdateFile(file)
 	if err != nil {

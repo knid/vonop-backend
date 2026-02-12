@@ -367,7 +367,7 @@ func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.A
 	}
 
 	provider := c.llmProvider()
-	model := c.SecretManager.GetSecret("NEXTJS_BUILDER_LLM_MODEL")
+	model := c.SecretManager.GetSecret("WEBSITE_BUILDER_LLM_MODEL")
 	if model == "" {
 		model = constants.DEFAULT_NEXTJS_LLM_MODEL
 	}
@@ -514,8 +514,6 @@ func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.A
 	// Create auto-snapshot before making changes
 	c.CreateAppSnapshot(project, "Auto-save before chat edit", "auto")
 
-	// Send thinking event so the frontend shows progress
-	sendEvent("chat_thinking", responses.ChatThinkingEvent{Chunk: ""})
 
 	slog.Info("Calling LLM for chat", "model", model, "project_id", project.ID, "message_count", len(llmMessages))
 
@@ -540,6 +538,9 @@ func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.A
 			})
 		},
 		nil,
+		func(chunk string) {
+			sendEvent("chat_thinking", responses.ChatThinkingEvent{Chunk: chunk})
+		},
 	)
 	if err != nil {
 		slog.Error("failed to get chat response from LLM", "error", err, "response_so_far", len(responseJSON))
@@ -559,8 +560,6 @@ func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.A
 
 	slog.Info("Chat LLM response received", "response_length", len(responseJSON), "project_id", project.ID)
 
-	// StreamJSONFromLLMWithMessages already calls CleanLLMOutput, so responseJSON
-	// should be clean JSON. Try direct parse first.
 	var chatResp appChatResponse
 	if err := json.Unmarshal([]byte(responseJSON), &chatResp); err != nil {
 		// Fallback: strip any remaining markdown fences
@@ -609,7 +608,7 @@ func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.A
 
 		switch op.Action {
 		case "create":
-			content := cleanAppFileOutput(op.Content, op.Type)
+			content := utils.StripCodeFences(op.Content)
 			if op.Type == "tsx" || op.Type == "ts" {
 				content, _ = stripForbiddenImports(content, op.Path)
 			}
@@ -643,7 +642,7 @@ func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.A
 			if err != nil {
 				// File not found — fall back to creating it instead of silently skipping
 				slog.Warn("file not found for modify, creating instead", "path", op.Path)
-				content := cleanAppFileOutput(op.Content, op.Type)
+				content := utils.StripCodeFences(op.Content)
 				fileType := op.Type
 				if fileType == "" {
 					_, fileType = guessFileType(op.Path)
@@ -677,7 +676,7 @@ func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.A
 				filesChanged++
 				continue
 			}
-			content := cleanAppFileOutput(op.Content, op.Type)
+			content := utils.StripCodeFences(op.Content)
 			if op.Type == "tsx" || op.Type == "ts" || existingFile.FileType == "tsx" || existingFile.FileType == "ts" {
 				content, _ = stripForbiddenImports(content, op.Path)
 			}

@@ -184,6 +184,7 @@ func (c *Controller) ChatStream(ctx context.Context, user *models.User, websiteI
 		model,
 		llmMessages,
 		provider,
+		nil,
 		func(chunk string) {
 			sendEvent("chat_thinking", responses.ChatThinkingEvent{Chunk: chunk})
 		},
@@ -214,7 +215,7 @@ func (c *Controller) ChatStream(ctx context.Context, user *models.User, websiteI
 
 		switch op.Action {
 		case "create":
-			content := cleanCodeOutput(op.Content)
+			content := utils.StripCodeFences(op.Content)
 			file := models.WebsiteFile{
 				WebsiteID: website.ID,
 				FilePath:  op.Path,
@@ -243,8 +244,7 @@ func (c *Controller) ChatStream(ctx context.Context, user *models.User, websiteI
 				slog.Error("file not found for modify", "error", err, "path", op.Path)
 				continue
 			}
-			content := cleanCodeOutput(op.Content)
-			existingFile.Content = content
+			existingFile.Content = utils.StripCodeFences(op.Content)
 			existingFile.UpdatedAt = time.Now()
 			_, err = c.DB.UpdateFile(existingFile)
 			if err != nil {

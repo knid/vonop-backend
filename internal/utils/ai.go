@@ -175,13 +175,11 @@ func GetJSONFromLLM(model, system, message string, provider *LLMProvider) (strin
 		return "", fmt.Errorf("no choices returned from LLM")
 	}
 
-	outputJson := CleanLLMOutput(parsed.Choices[0].Message.Content)
-
 	if parsed.Usage.TotalTokens > 0 {
 		slog.Info("LLM usage", "FROM", "LLM_UTILS", "prompt_tokens", parsed.Usage.PromptTokens, "completion_tokens", parsed.Usage.CompletionTokens, "total_tokens", parsed.Usage.TotalTokens)
 	}
 
-	return outputJson, nil
+	return parsed.Choices[0].Message.Content, nil
 }
 
 func GetTextFromLLM(model, system, message string, provider *LLMProvider) (string, error) {
@@ -255,7 +253,7 @@ type StreamChunk struct {
 
 // StreamTextFromLLM streams LLM response tokens and calls onChunk for each text chunk.
 // Returns the full accumulated text.
-func StreamTextFromLLM(ctx context.Context, model, system, message string, provider *LLMProvider, reasoning *ReasoningConfig, onChunk func(chunk string)) (string, error) {
+func StreamTextFromLLM(ctx context.Context, model, system, message string, provider *LLMProvider, reasoning *ReasoningConfig, onChunk func(chunk string), onReasoning func(chunk string)) (string, error) {
 	if provider == nil || provider.APIKey == "" {
 		return "", fmt.Errorf("missing LLM provider configuration")
 	}
@@ -312,11 +310,16 @@ func StreamTextFromLLM(ctx context.Context, model, system, message string, provi
 			continue
 		}
 
-		if len(chunk.Choices) > 0 && chunk.Choices[0].Delta.Content != "" {
-			content := chunk.Choices[0].Delta.Content
-			fullText.WriteString(content)
-			if onChunk != nil {
-				onChunk(content)
+		if len(chunk.Choices) > 0 {
+			if r := chunk.Choices[0].Delta.GetReasoning(); r != "" && onReasoning != nil {
+				onReasoning(r)
+			}
+			if chunk.Choices[0].Delta.Content != "" {
+				content := chunk.Choices[0].Delta.Content
+				fullText.WriteString(content)
+				if onChunk != nil {
+					onChunk(content)
+				}
 			}
 		}
 	}
@@ -376,12 +379,12 @@ func GetJSONFromLLMWithMessages(model string, messages []Message, provider *LLMP
 		slog.Info("LLM usage", "FROM", "LLM_UTILS_CHAT", "prompt_tokens", parsed.Usage.PromptTokens, "completion_tokens", parsed.Usage.CompletionTokens, "total_tokens", parsed.Usage.TotalTokens)
 	}
 
-	return CleanLLMOutput(parsed.Choices[0].Message.Content), nil
+	return parsed.Choices[0].Message.Content, nil
 }
 
 // StreamJSONFromLLMWithMessages streams an LLM response from a multi-turn conversation.
 // Sends chunks via onChunk and returns the cleaned JSON.
-func StreamJSONFromLLMWithMessages(ctx context.Context, model string, messages []Message, provider *LLMProvider, onChunk func(chunk string)) (string, error) {
+func StreamJSONFromLLMWithMessages(ctx context.Context, model string, messages []Message, provider *LLMProvider, onChunk func(chunk string), onReasoning func(chunk string)) (string, error) {
 	if provider == nil || provider.APIKey == "" {
 		return "", fmt.Errorf("missing LLM provider configuration")
 	}
@@ -437,6 +440,9 @@ func StreamJSONFromLLMWithMessages(ctx context.Context, model string, messages [
 		}
 
 		if len(chunk.Choices) > 0 {
+			if r := chunk.Choices[0].Delta.GetReasoning(); r != "" && onReasoning != nil {
+				onReasoning(r)
+			}
 			if chunk.Choices[0].Delta.Content != "" {
 				content := chunk.Choices[0].Delta.Content
 				fullText.WriteString(content)
@@ -463,7 +469,7 @@ func StreamJSONFromLLMWithMessages(ctx context.Context, model string, messages [
 		slog.Warn("LLM chat response truncated (finish_reason=length)", "response_length", fullText.Len())
 	}
 
-	return CleanLLMOutput(fullText.String()), nil
+	return fullText.String(), nil
 }
 
 // MultiContentPart represents a content part in a multimodal message.
@@ -545,12 +551,12 @@ func GetJSONFromLLMWithVision(model, system, userText, base64Image string, provi
 		slog.Info("LLM usage", "FROM", "LLM_UTILS_VISION", "prompt_tokens", parsed.Usage.PromptTokens, "completion_tokens", parsed.Usage.CompletionTokens, "total_tokens", parsed.Usage.TotalTokens)
 	}
 
-	return CleanLLMOutput(parsed.Choices[0].Message.Content), nil
+	return parsed.Choices[0].Message.Content, nil
 }
 
 // StreamJSONFromLLM streams LLM response tokens for a JSON-expecting call.
 // Sends chunks via onChunk and returns the cleaned JSON output.
-func StreamJSONFromLLM(ctx context.Context, model, system, message string, provider *LLMProvider, onChunk func(chunk string)) (string, error) {
+func StreamJSONFromLLM(ctx context.Context, model, system, message string, provider *LLMProvider, onChunk func(chunk string), onReasoning func(chunk string)) (string, error) {
 	if provider == nil || provider.APIKey == "" {
 		return "", fmt.Errorf("missing LLM provider configuration")
 	}
@@ -606,11 +612,16 @@ func StreamJSONFromLLM(ctx context.Context, model, system, message string, provi
 			continue
 		}
 
-		if len(chunk.Choices) > 0 && chunk.Choices[0].Delta.Content != "" {
-			content := chunk.Choices[0].Delta.Content
-			fullText.WriteString(content)
-			if onChunk != nil {
-				onChunk(content)
+		if len(chunk.Choices) > 0 {
+			if r := chunk.Choices[0].Delta.GetReasoning(); r != "" && onReasoning != nil {
+				onReasoning(r)
+			}
+			if chunk.Choices[0].Delta.Content != "" {
+				content := chunk.Choices[0].Delta.Content
+				fullText.WriteString(content)
+				if onChunk != nil {
+					onChunk(content)
+				}
 			}
 		}
 	}
@@ -624,12 +635,12 @@ func StreamJSONFromLLM(ctx context.Context, model, system, message string, provi
 		return "", fmt.Errorf("error reading streaming response. try again please")
 	}
 
-	return CleanLLMOutput(fullText.String()), nil
+	return fullText.String(), nil
 }
 
 // StreamJSONFromLLMWithVision streams a multimodal (vision) LLM response.
 // Sends chunks via onChunk and returns the cleaned JSON output.
-func StreamJSONFromLLMWithVision(ctx context.Context, model, system, userText, base64Image string, provider *LLMProvider, onChunk func(chunk string)) (string, error) {
+func StreamJSONFromLLMWithVision(ctx context.Context, model, system, userText, base64Image string, provider *LLMProvider, onChunk func(chunk string), onReasoning func(chunk string)) (string, error) {
 	if provider == nil || provider.APIKey == "" {
 		return "", fmt.Errorf("missing LLM provider configuration")
 	}
@@ -706,11 +717,16 @@ func StreamJSONFromLLMWithVision(ctx context.Context, model, system, userText, b
 			continue
 		}
 
-		if len(chunk.Choices) > 0 && chunk.Choices[0].Delta.Content != "" {
-			content := chunk.Choices[0].Delta.Content
-			fullText.WriteString(content)
-			if onChunk != nil {
-				onChunk(content)
+		if len(chunk.Choices) > 0 {
+			if r := chunk.Choices[0].Delta.GetReasoning(); r != "" && onReasoning != nil {
+				onReasoning(r)
+			}
+			if chunk.Choices[0].Delta.Content != "" {
+				content := chunk.Choices[0].Delta.Content
+				fullText.WriteString(content)
+				if onChunk != nil {
+					onChunk(content)
+				}
 			}
 		}
 	}
@@ -724,7 +740,7 @@ func StreamJSONFromLLMWithVision(ctx context.Context, model, system, userText, b
 		return "", fmt.Errorf("error reading streaming response. try again please")
 	}
 
-	return CleanLLMOutput(fullText.String()), nil
+	return fullText.String(), nil
 }
 
 // StreamWithTools sends messages to LLM with tools, handles the tool call loop,
@@ -742,6 +758,7 @@ func StreamWithTools(
 	executor ToolExecutor,
 	onToolCall func(toolName string, args string),
 	onChunk func(chunk string),
+	onReasoning func(chunk string),
 ) (string, error) {
 	if provider == nil || provider.APIKey == "" {
 		return "", fmt.Errorf("missing LLM provider configuration")
@@ -826,6 +843,9 @@ func StreamWithTools(
 				// Accumulate reasoning (ZAI: reasoning_content, OpenRouter: reasoning)
 				if r := choice.Delta.GetReasoning(); r != "" {
 					fullReasoning.WriteString(r)
+					if onReasoning != nil {
+						onReasoning(r)
+					}
 				}
 
 				// Accumulate tool calls
@@ -958,9 +978,6 @@ func StreamWithTools(
 			slog.Warn("LLM response truncated (finish_reason=length)", "response_length", fullText.Len(), "round", round)
 		}
 
-		if responseFormat != nil && responseFormat.Type == "json_object" {
-			return CleanLLMOutput(fullText.String()), nil
-		}
 		return fullText.String(), nil
 	}
 
@@ -978,12 +995,13 @@ func StreamTextWithTools(
 	executor ToolExecutor,
 	onToolCall func(toolName string, args string),
 	onChunk func(chunk string),
+	onReasoning func(chunk string),
 ) (string, error) {
 	messages := []Message{
 		{Role: "system", Content: system},
 		{Role: "user", Content: message},
 	}
-	return StreamWithTools(ctx, model, messages, tools, provider, nil, reasoning, executor, onToolCall, onChunk)
+	return StreamWithTools(ctx, model, messages, tools, provider, nil, reasoning, executor, onToolCall, onChunk, onReasoning)
 }
 
 // ReplaceIntegrationPlaceholders replaces {{PLACEHOLDER}} tokens in content with real values from integrations.

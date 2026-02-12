@@ -157,8 +157,7 @@ func (c *Controller) GenerateWebsite(user *models.User, req requests.WebsiteGene
 			slog.Error("failed to generate page HTML", "error", err, "page", pageStruct.Title)
 			htmlContent = fmt.Sprintf("<!DOCTYPE html><html><head><title>%s</title></head><body><h1>%s</h1><p>Page generation failed. Please try editing this page.</p></body></html>", pageStruct.Title, pageStruct.Title)
 		}
-
-		htmlContent = cleanCodeOutput(htmlContent)
+		htmlContent = utils.StripCodeFences(htmlContent)
 
 		page := models.WebsitePage{
 			WebsiteID:   createdWebsite.ID,
@@ -257,7 +256,7 @@ func (c *Controller) GenerateWebsiteStream(ctx context.Context, user *models.Use
 			Chunk: chunk,
 			Phase: "structure",
 		})
-	})
+	}, nil)
 	if err != nil {
 		slog.Error("failed to generate website structure", "error", err)
 		sendError("structure", "failed to generate website structure. try again please")
@@ -357,7 +356,7 @@ func (c *Controller) GenerateWebsiteStream(ctx context.Context, user *models.Use
 			constants.WEBSITE_PAGE_HTML_PROMPT,
 			pagePrompt,
 			provider,
-			c.reasoningConfig(),
+			nil,
 			func(chunk string) {
 				sendEvent("code_chunk", responses.CodeChunkEvent{
 					PageIndex:  i,
@@ -366,13 +365,13 @@ func (c *Controller) GenerateWebsiteStream(ctx context.Context, user *models.Use
 					TotalPages: len(structure.Pages),
 				})
 			},
+			nil,
 		)
 		if err != nil {
 			slog.Error("failed to generate page HTML", "error", err, "page", pageStruct.Title)
 			htmlContent = fmt.Sprintf("<!DOCTYPE html><html><head><title>%s</title></head><body><h1>%s</h1><p>Page generation failed. Please try editing this page.</p></body></html>", pageStruct.Title, pageStruct.Title)
 		}
-
-		htmlContent = cleanCodeOutput(htmlContent)
+		htmlContent = utils.StripCodeFences(htmlContent)
 
 		page := models.WebsitePage{
 			WebsiteID:   createdWebsite.ID,
@@ -827,9 +826,7 @@ func (c *Controller) AIEditPage(user *models.User, websiteId string, pageId stri
 		return nil, fmt.Errorf("failed to edit page. try again please")
 	}
 
-	newHTML = cleanCodeOutput(newHTML)
-
-	page.HTMLContent = newHTML
+	page.HTMLContent = utils.StripCodeFences(newHTML)
 	page.UpdatedAt = time.Now()
 
 	updatedPage, err := c.DB.UpdatePage(page)
@@ -903,8 +900,7 @@ func (c *Controller) AIAddPage(user *models.User, websiteId string, req requests
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate new page. try again please")
 	}
-
-	htmlContent = cleanCodeOutput(htmlContent)
+	htmlContent = utils.StripCodeFences(htmlContent)
 
 	// Determine path and title from prompt (simple heuristic)
 	pageTitle := req.Prompt
@@ -1120,24 +1116,3 @@ func pagePath(path string) string {
 	return path + "/index.html"
 }
 
-func cleanCodeOutput(code string) string {
-	code = strings.TrimSpace(code)
-	// Strip control tokens (e.g. <|control619|>, <|endoftext|>)
-	code = controlTokenRegex.ReplaceAllString(code, "")
-	// Strip markdown code fences for any language (```html, ```css, ```js, etc.)
-	if strings.HasPrefix(code, "```") {
-		// Remove opening fence line (e.g. "```html\n", "```css\n", "```\n")
-		if idx := strings.Index(code, "\n"); idx != -1 {
-			code = code[idx+1:]
-		} else {
-			code = strings.TrimPrefix(code, "```")
-		}
-		// Find the last closing fence — discard any reasoning/explanation text after it
-		if closingIdx := strings.LastIndex(code, "\n```"); closingIdx >= 0 {
-			code = code[:closingIdx]
-		} else {
-			code = strings.TrimSuffix(code, "```")
-		}
-	}
-	return strings.TrimSpace(code)
-}

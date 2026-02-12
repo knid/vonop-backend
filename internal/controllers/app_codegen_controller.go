@@ -490,7 +490,7 @@ var appFixTools = []utils.Tool{
 // llmFixPass sends validation errors to LLM with tool access for auto-fix
 func (c *Controller) llmFixPass(ctx context.Context, files map[string]string, valErrors []validationError, structure *appFileStructure) map[string]string {
 	provider := c.llmProvider()
-	model := c.SecretManager.GetSecret("NEXTJS_BUILDER_LLM_MODEL")
+	model := c.SecretManager.GetSecret("WEBSITE_BUILDER_LLM_MODEL")
 	if model == "" {
 		model = constants.DEFAULT_NEXTJS_LLM_MODEL
 	}
@@ -531,8 +531,9 @@ func (c *Controller) llmFixPass(ctx context.Context, files map[string]string, va
 		fixTools,
 		provider,
 		&utils.ResponseFormat{Type: "json_object"},
-		c.reasoningConfig(),
+		nil,
 		executor,
+		nil,
 		nil,
 		nil,
 	)
@@ -553,7 +554,7 @@ func (c *Controller) llmFixPass(ctx context.Context, files map[string]string, va
 	fixes := make(map[string]string)
 	for _, fix := range fixResp.Fixes {
 		if fix.Path != "" && fix.Content != "" && !isTemplateFile(fix.Path) {
-			fixes[fix.Path] = cleanAppFileOutput(fix.Content, "tsx")
+			fixes[fix.Path] = utils.StripCodeFences(fix.Content)
 		}
 	}
 
@@ -623,7 +624,7 @@ func (c *Controller) validateAndFixFiles(ctx context.Context, project *models.Ap
 // PlanAppFileStructure calls LLM to generate a file plan for the app
 func (c *Controller) PlanAppFileStructure(ctx context.Context, prompt string, projectType string) (*appFileStructure, error) {
 	provider := c.llmProvider()
-	model := c.SecretManager.GetSecret("NEXTJS_BUILDER_LLM_MODEL")
+	model := c.SecretManager.GetSecret("WEBSITE_BUILDER_LLM_MODEL")
 	if model == "" {
 		model = constants.DEFAULT_NEXTJS_LLM_MODEL
 	}
@@ -654,9 +655,9 @@ func (c *Controller) PlanAppFileStructure(ctx context.Context, prompt string, pr
 
 // PlanAppFileStructureStream is the streaming variant of PlanAppFileStructure.
 // It sends planning chunks via onChunk as the LLM generates the structure.
-func (c *Controller) PlanAppFileStructureStream(ctx context.Context, prompt string, projectType string, onChunk func(chunk string)) (*appFileStructure, error) {
+func (c *Controller) PlanAppFileStructureStream(ctx context.Context, prompt string, projectType string, onChunk func(chunk string), onReasoning func(chunk string)) (*appFileStructure, error) {
 	provider := c.llmProvider()
-	model := c.SecretManager.GetSecret("NEXTJS_BUILDER_LLM_MODEL")
+	model := c.SecretManager.GetSecret("WEBSITE_BUILDER_LLM_MODEL")
 	if model == "" {
 		model = constants.DEFAULT_NEXTJS_LLM_MODEL
 	}
@@ -666,7 +667,7 @@ func (c *Controller) PlanAppFileStructureStream(ctx context.Context, prompt stri
 		systemPrompt = constants.NEXTJS_ECOMMERCE_STRUCTURE_PROMPT
 	}
 
-	structureJSON, err := utils.StreamJSONFromLLM(ctx, model, systemPrompt, prompt, provider, onChunk)
+	structureJSON, err := utils.StreamJSONFromLLM(ctx, model, systemPrompt, prompt, provider, onChunk, onReasoning)
 	if err != nil {
 		slog.Error("failed to generate app structure", "error", err)
 		return nil, fmt.Errorf("failed to generate app structure. try again please")
@@ -688,7 +689,7 @@ func (c *Controller) PlanAppFileStructureStream(ctx context.Context, prompt stri
 // PlanAppFileStructureFromScreenshot uses vision LLM to plan files from a screenshot
 func (c *Controller) PlanAppFileStructureFromScreenshot(imageBase64 string) (*appFileStructure, error) {
 	provider := c.llmProvider()
-	model := c.SecretManager.GetSecret("NEXTJS_BUILDER_LLM_MODEL")
+	model := c.SecretManager.GetSecret("WEBSITE_BUILDER_LLM_MODEL")
 	if model == "" {
 		model = constants.DEFAULT_NEXTJS_LLM_MODEL
 	}
@@ -752,7 +753,7 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 	}
 
 	provider := c.llmProvider()
-	model := c.SecretManager.GetSecret("NEXTJS_BUILDER_LLM_MODEL")
+	model := c.SecretManager.GetSecret("WEBSITE_BUILDER_LLM_MODEL")
 	if model == "" {
 		model = constants.DEFAULT_NEXTJS_LLM_MODEL
 	}
@@ -763,6 +764,8 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 			Chunk: chunk,
 			Phase: "structure",
 		})
+	}, func(chunk string) {
+		sendEvent("chat_thinking", responses.ChatThinkingEvent{Chunk: chunk})
 	})
 	if err != nil {
 		sendError("structure", err.Error())
@@ -955,7 +958,7 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 				userPrompt,
 				provider,
 				codegenTools,
-				c.reasoningConfig(),
+				nil,
 				codegenExecutor,
 				nil,
 				func(chunk string) {
@@ -966,13 +969,14 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 						Chunk:    chunk,
 					})
 				},
+				nil,
 			)
 			if err != nil {
 				slog.Error("failed to generate app file", "error", err, "path", filePlan.Path)
 				content = c.getAppFileFallback(filePlan)
 			}
 
-			content = cleanAppFileOutput(content, filePlan.Type)
+			content = utils.StripCodeFences(content)
 
 			// Strip forbidden imports
 			if filePlan.Type == "tsx" || filePlan.Type == "ts" {
@@ -1070,7 +1074,7 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 				userPrompt,
 				provider,
 				missingTools,
-				c.reasoningConfig(),
+				nil,
 				missingExecutor,
 				nil,
 				func(chunk string) {
@@ -1081,6 +1085,7 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 						Chunk:    chunk,
 					})
 				},
+				nil,
 			)
 			if err != nil {
 				slog.Error("failed to generate missing import file", "error", err, "path", filePath)
@@ -1102,7 +1107,7 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 				}
 			}
 
-			content = cleanAppFileOutput(content, fileType)
+			content = utils.StripCodeFences(content)
 
 			file := models.AppGeneratedFile{
 				AppProjectID: project.ID,
@@ -1260,47 +1265,3 @@ func guessFileType(importPath string) (filePath string, fileType string) {
 	return importPath + ".tsx", "tsx"
 }
 
-// controlTokenRegex matches LLM control tokens like <|control619|>, <|endoftext|>, etc.
-var controlTokenRegex = regexp.MustCompile(`<\|[a-zA-Z0-9_]+\|>`)
-
-// cleanAppFileOutput strips markdown code fences, control tokens, and any
-// reasoning/explanation text outside code fences from LLM output.
-func cleanAppFileOutput(content string, fileType string) string {
-	content = strings.TrimSpace(content)
-
-	// Strip control tokens (e.g. <|control619|>, <|endoftext|>)
-	content = controlTokenRegex.ReplaceAllString(content, "")
-
-	// Determine which fence prefixes to check based on file type
-	var fencePrefixes []string
-	switch fileType {
-	case "tsx":
-		fencePrefixes = []string{"```tsx", "```typescript", "```"}
-	case "ts":
-		fencePrefixes = []string{"```typescript", "```ts", "```"}
-	case "css":
-		fencePrefixes = []string{"```css", "```"}
-	case "json":
-		fencePrefixes = []string{"```json", "```"}
-	default:
-		fencePrefixes = []string{"```"}
-	}
-
-	// Extract code between markdown fences, discarding any text after closing fence
-	for _, prefix := range fencePrefixes {
-		if strings.HasPrefix(content, prefix) {
-			inner := content[len(prefix):]
-			// Find the last closing fence on its own line
-			closingIdx := strings.LastIndex(inner, "\n```")
-			if closingIdx >= 0 {
-				content = inner[:closingIdx]
-			} else {
-				// No closing fence on its own line — try plain suffix
-				content = strings.TrimSuffix(inner, "```")
-			}
-			break
-		}
-	}
-
-	return strings.TrimSpace(content)
-}
