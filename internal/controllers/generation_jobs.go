@@ -17,13 +17,9 @@ var milestoneEvents = map[string]bool{
 	"chat_complete":          true,
 	"generation_complete":    true,
 	"file_generation_start":  true,
-	"website_created":        true,
 	"project_created":        true,
 	"error":                  true,
 	"done":                   true,
-	"page_generated":         true,
-	"component_inserted":     true,
-	"migration_complete":     true,
 	"store_chat_complete":    true,
 	"app_generation_started": true,
 }

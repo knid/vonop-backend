@@ -888,5 +888,6 @@ func (v *HttpViews) GetAppConversation(w http.ResponseWriter, r *http.Request) {
 
 // GET /v2/integrations/providers
 func (v *HttpViews) GetV2IntegrationProviders(w http.ResponseWriter, r *http.Request) {
-	v.GetIntegrationProviders(w, r)
+	providers := v.Controller.GetIntegrationProviders()
+	utils.JSONResponse(w, providers, http.StatusOK)
 }

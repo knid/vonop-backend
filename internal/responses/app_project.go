@@ -95,3 +95,11 @@ type EnvVarResponse struct {
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
+
+type IntegrationProviderInfo struct {
+	Provider       string   `json:"provider"`
+	Name           string   `json:"name"`
+	Description    string   `json:"description"`
+	RequiredFields []string `json:"required_fields"`
+	Website        string   `json:"website"`
+}

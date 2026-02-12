@@ -121,10 +121,6 @@ func (r *AppFileUpdateRequest) Validate(validate *validator.Validate) error {
 	return utils.ValidateFunc[AppFileUpdateRequest](*r, validate)
 }
 
-type MigrateWebsiteRequest struct {
-	// No body needed; websiteId comes from URL
-}
-
 type SetEnvVarRequest struct {
 	Key      string `json:"key" validate:"required,min=1,max=100" errormgs:"must be between 1 and 100 characters"`
 	Value    string `json:"value" validate:"required" errormgs:"is required"`

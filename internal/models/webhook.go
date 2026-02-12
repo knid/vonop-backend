@@ -13,7 +13,7 @@ type WebhookEndpoint struct {
 	User      *User     `bun:"rel:belongs-to,join:user_id=id"`
 	URL       string    `bun:",notnull"`
 	Secret    string    `bun:",notnull"` // HMAC signing secret
-	Events    string    `bun:",notnull"` // comma-separated: "form.submitted,website.published,build.completed"
+	Events    string    `bun:",notnull"` // comma-separated: "form.submitted,build.completed"
 	Active    bool      `bun:",notnull,default:true"`
 	CreatedAt time.Time `bun:"created_at,nullzero,notnull,default:current_timestamp"`
 	UpdatedAt time.Time `bun:"updated_at,nullzero,notnull,default:current_timestamp"`
@@ -22,8 +22,7 @@ type WebhookEndpoint struct {
 
 // Webhook event type constants
 const (
-	WebhookEventFormSubmitted    = "form.submitted"
-	WebhookEventWebsitePublished = "website.published"
-	WebhookEventBuildCompleted   = "build.completed"
+	WebhookEventFormSubmitted  = "form.submitted"
+	WebhookEventBuildCompleted = "build.completed"
 	WebhookEventBuildFailed      = "build.failed"
 )

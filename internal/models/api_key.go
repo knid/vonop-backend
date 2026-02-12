@@ -14,7 +14,7 @@ type APIKey struct {
 	Name      string    `bun:",notnull"`
 	KeyHash   string    `bun:",notnull"`          // SHA-256 hash of the key (never store raw key)
 	KeyPrefix string    `bun:",notnull"`          // first 8 chars of the key for identification
-	Scopes    string    `bun:",notnull"`          // comma-separated scopes: "websites:read,websites:write,builds:create"
+	Scopes    string    `bun:",notnull"`          // comma-separated scopes: "apps:read,apps:write,builds:create"
 	LastUsed  time.Time `bun:",nullzero"`
 	ExpiresAt time.Time `bun:",nullzero"`         // zero = never expires
 	CreatedAt time.Time `bun:"created_at,nullzero,notnull,default:current_timestamp"`

@@ -24,9 +24,9 @@ func (c *Controller) CreateAPIKey(user *models.User, req requests.CreateAPIKeyRe
 
 	// Validate scopes
 	validScopes := map[string]bool{
-		"websites:read": true, "websites:write": true,
 		"builds:read": true, "builds:create": true,
 		"projects:read": true, "projects:write": true,
+		"apps:read": true, "apps:write": true,
 	}
 	for _, scope := range strings.Split(req.Scopes, ",") {
 		if !validScopes[strings.TrimSpace(scope)] {

@@ -6,7 +6,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// Organization represents a team/company that can own projects and websites.
+// Organization represents a team/company that can own projects and apps.
 type Organization struct {
 	ID        uuid.UUID `bun:",pk,type:uuid,default:uuid_generate_v4()"`
 	Name      string    `bun:",notnull"`

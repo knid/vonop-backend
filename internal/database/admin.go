@@ -11,7 +11,6 @@ type AdminStats struct {
 	TrialUsers       int `json:"trial_users"`
 	PaidUsers        int `json:"paid_users"`
 	InactiveUsers    int `json:"inactive_users"`
-	TotalWebsites    int `json:"total_websites"`
 	TotalProjects    int `json:"total_projects"`
 	TotalBuilds      int `json:"total_builds"`
 	NewUsersToday    int `json:"new_users_today"`
@@ -54,12 +53,6 @@ func (db *Database) GetAdminStats() (*AdminStats, error) {
 
 	stats.PaidUsers = active
 	stats.InactiveUsers = total - active - trial
-
-	websites, err := db.DB.NewSelect().TableExpr("websites").Where("deleted_at IS NULL").Count(ctx)
-	if err != nil {
-		return nil, err
-	}
-	stats.TotalWebsites = websites
 
 	projects, err := db.DB.NewSelect().TableExpr("projects").Where("deleted_at IS NULL").Count(ctx)
 	if err != nil {

@@ -19,4 +19,8 @@ type AppSnapshot struct {
 	CreatedAt    time.Time   `bun:"created_at,nullzero,notnull,default:current_timestamp"`
 }
 
-// SnapshotFile is defined in website_snapshot.go and reused here
+type SnapshotFile struct {
+	FilePath string `json:"file_path"`
+	Content  string `json:"content"`
+	FileType string `json:"file_type"`
+}

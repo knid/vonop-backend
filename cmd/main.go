@@ -75,20 +75,6 @@ func createSchema(db *bun.DB) error {
 		(*models.AppStoreCredentials)(nil),
 		(*models.Deployment)(nil),
 		(*models.SignIPATask)(nil),
-		(*models.Website)(nil),
-		(*models.WebsitePage)(nil),
-		(*models.WebsiteAsset)(nil),
-		(*models.WebsiteTemplate)(nil),
-		(*models.AIGenerationLog)(nil),
-		(*models.WebsiteFile)(nil),
-		(*models.WebsiteConversation)(nil),
-		(*models.WebsiteIntegration)(nil),
-		(*models.WebsiteSnapshot)(nil),
-		(*models.WebsiteComponent)(nil),
-		(*models.WebsiteDomain)(nil),
-		(*models.WebsiteSEO)(nil),
-		(*models.WebsiteForm)(nil),
-		(*models.WebsiteFormSubmission)(nil),
 		(*models.AICreditsBalance)(nil),
 		(*models.AICreditTransaction)(nil),
 		(*models.Organization)(nil),
@@ -137,14 +123,8 @@ func createSchema(db *bun.DB) error {
 	// Add columns that were introduced after initial table creation.
 	// Each statement uses IF NOT EXISTS so it is safe to run repeatedly.
 	alterStatements := []string{
-		`ALTER TABLE websites ADD COLUMN IF NOT EXISTS dark_color_scheme jsonb DEFAULT '{}'`,
-		`ALTER TABLE websites ADD COLUMN IF NOT EXISTS template_id uuid`,
 		// AI credits fields on limits
 		`ALTER TABLE standart_user_limits ADD COLUMN IF NOT EXISTS monthly_ai_credits int NOT NULL DEFAULT 0`,
-		`ALTER TABLE standart_user_limits ADD COLUMN IF NOT EXISTS monthly_website_count int NOT NULL DEFAULT 0`,
-		`ALTER TABLE standart_user_limits ADD COLUMN IF NOT EXISTS can_use_ai_chat boolean NOT NULL DEFAULT false`,
-		`ALTER TABLE standart_user_limits ADD COLUMN IF NOT EXISTS can_use_screenshot_code boolean NOT NULL DEFAULT false`,
-		`ALTER TABLE standart_user_limits ADD COLUMN IF NOT EXISTS can_use_custom_domains boolean NOT NULL DEFAULT false`,
 		// Annual billing fields on subscriptions
 		`ALTER TABLE standart_user_subscriptions ADD COLUMN IF NOT EXISTS annual_price int DEFAULT 0`,
 		`ALTER TABLE standart_user_subscriptions ADD COLUMN IF NOT EXISTS annual_price_id text DEFAULT ''`,
@@ -259,7 +239,6 @@ func main() {
 	createSchema(bundb)
 
 	db := database.NewDatabase(bundb)
-	db.SeedComponents()
 	go utils.CheckSessionStatusJob(db)
 	go utils.CheckUsageAlertsJob(db, crmServices.NewBrevoCRMService(sm.GetSecret("BREVO_API_KEY")))
 	vercelService := vercel.NewService(sm.GetSecret("VERCEL_API_TOKEN"), sm.GetSecret("VERCEL_TEAM_ID"))
@@ -603,115 +582,6 @@ func main() {
 				r.Get("/dashboard", httpViews.GetAdminDashboard)
 			})
 
-			r.Route("/websites", func(r chi.Router) {
-				r.Use(rateLimiter.RateLimit(10, time.Minute, appMiddleware.AIUserKey))
-				// Legacy page-based generation (deprecated — use /generate/v2)
-				r.With(appMiddleware.SunsetHeader("2026-06-01")).Post("/generate", httpViews.GenerateWebsite)
-				r.With(appMiddleware.SunsetHeader("2026-06-01")).Post("/generate/stream", httpViews.GenerateWebsiteSSE)
-				// File-based generation (v2)
-				r.Post("/generate/v2", httpViews.GenerateWebsiteFiles)
-				r.Post("/generate/v2/stream", httpViews.GenerateWebsiteFilesSSE)
-				// Screenshot-to-code
-				r.Post("/generate/from-image", httpViews.GenerateWebsiteFromScreenshot)
-				r.Post("/generate/from-image/stream", httpViews.GenerateWebsiteFromScreenshotSSE)
-
-				r.Get("/", httpViews.GetWebsites)
-				r.Get("/templates", httpViews.GetWebsiteTemplates)
-
-				// Component library (public)
-				r.Get("/components", httpViews.GetComponents)
-				r.Get("/components/{cid}", httpViews.GetComponent)
-
-				// Public form submission
-				r.Post("/forms/{fmid}/submit", httpViews.SubmitWebsiteForm)
-
-				r.Route("/{id}", func(r chi.Router) {
-					r.Get("/", httpViews.GetWebsite)
-					r.Put("/", httpViews.UpdateWebsite)
-					r.Delete("/", httpViews.DeleteWebsite)
-					// Legacy page-based CRUD
-					r.Route("/pages", func(r chi.Router) {
-						r.Get("/", httpViews.GetWebsitePages)
-						r.Post("/", httpViews.CreateWebsitePage)
-						r.Route("/{pid}", func(r chi.Router) {
-							r.Put("/", httpViews.UpdateWebsitePage)
-							r.Delete("/", httpViews.DeleteWebsitePage)
-						})
-					})
-					// File-based CRUD (v2)
-					r.Route("/files", func(r chi.Router) {
-						r.Get("/", httpViews.GetWebsiteFiles)
-						r.Post("/", httpViews.CreateWebsiteFile)
-						r.Route("/{fid}", func(r chi.Router) {
-							r.Get("/", httpViews.GetWebsiteFile)
-							r.Put("/", httpViews.UpdateWebsiteFile)
-							r.Delete("/", httpViews.DeleteWebsiteFile)
-						})
-					})
-					// Chat (v2)
-					r.Post("/chat", httpViews.ChatWebsite)
-					r.Get("/conversation", httpViews.GetWebsiteConversation)
-					// Preview (v2)
-					r.Get("/preview/*", httpViews.PreviewWebsiteFile)
-					// Integrations (v2)
-					r.Route("/integrations", func(r chi.Router) {
-						r.Get("/", httpViews.GetWebsiteIntegrations)
-						r.Post("/", httpViews.ConnectIntegration)
-						r.Route("/{iid}", func(r chi.Router) {
-							r.Put("/", httpViews.UpdateIntegration)
-							r.Delete("/", httpViews.DisconnectIntegration)
-						})
-					})
-					// Legacy AI endpoints (deprecated)
-					r.Route("/ai", func(r chi.Router) {
-						r.Use(appMiddleware.SunsetHeader("2026-06-01"))
-						r.Post("/edit-page/{pid}", httpViews.AIEditPage)
-						r.Post("/add-page", httpViews.AIAddPage)
-						r.Post("/edit-element", httpViews.AIEditElement)
-					})
-					r.Post("/assets", httpViews.UploadWebsiteAsset)
-					r.With(appMiddleware.SunsetHeader("2026-06-01")).Post("/publish", httpViews.PublishWebsite)
-					r.Post("/publish/v2", httpViews.PublishWebsiteFiles)
-					r.Post("/convert-to-mobile", httpViews.ConvertWebsiteToMobile)
-					// Snapshots
-					r.Route("/snapshots", func(r chi.Router) {
-						r.Get("/", httpViews.GetWebsiteSnapshots)
-						r.Post("/", httpViews.CreateWebsiteSnapshot)
-						r.Post("/{sid}/restore", httpViews.RestoreWebsiteSnapshot)
-					})
-					// Undo
-					r.Post("/undo", httpViews.UndoWebsiteChange)
-					// Export
-					r.Get("/export", httpViews.ExportWebsiteZIP)
-					// Theme
-					r.Put("/theme", httpViews.UpdateWebsiteTheme)
-					// Component insert
-					r.Post("/insert-component", httpViews.InsertComponent)
-					r.Post("/insert-component/stream", httpViews.InsertComponentSSE)
-					// Domains
-					r.Route("/domains", func(r chi.Router) {
-						r.Get("/", httpViews.GetWebsiteDomains)
-						r.Post("/", httpViews.AddWebsiteDomain)
-						r.Post("/{did}/verify", httpViews.VerifyWebsiteDomain)
-						r.Delete("/{did}", httpViews.RemoveWebsiteDomain)
-					})
-					// SEO
-					r.Get("/seo", httpViews.GetWebsiteSEO)
-					r.Put("/seo", httpViews.UpdateWebsiteSEO)
-					// Forms
-					r.Route("/forms", func(r chi.Router) {
-						r.Get("/", httpViews.GetWebsiteForms)
-						r.Post("/", httpViews.CreateWebsiteForm)
-						r.Route("/{fmid}", func(r chi.Router) {
-							r.Get("/submissions", httpViews.GetFormSubmissions)
-							r.Delete("/", httpViews.DeleteWebsiteForm)
-						})
-					})
-				})
-			})
-			// Global integrations info (no auth needed)
-			r.Get("/integrations/providers", httpViews.GetIntegrationProviders)
-
 			r.Post("/support/ticket", httpViews.CreateTicket)
 
 			r.Route("/jobs", func(r chi.Router) {
@@ -734,10 +604,6 @@ func main() {
 				r.With(rateLimiter.RateLimit(10, time.Minute, appMiddleware.AIUserKey)).Post("/generate/from-image", httpViews.GenerateAppFromImage)
 				r.With(rateLimiter.RateLimit(10, time.Minute, appMiddleware.AIUserKey)).Post("/generate/stream", httpViews.GenerateAppStream)
 				r.With(rateLimiter.RateLimit(10, time.Minute, appMiddleware.AIUserKey)).Post("/generate/ecommerce/stream", httpViews.GenerateEcommerceAppStream)
-
-				// Migration endpoints
-				r.With(rateLimiter.RateLimit(10, time.Minute, appMiddleware.AIUserKey)).Post("/migrate/{websiteId}", httpViews.MigrateWebsite)
-				r.With(rateLimiter.RateLimit(10, time.Minute, appMiddleware.AIUserKey)).Post("/migrate/{websiteId}/stream", httpViews.MigrateWebsiteStream)
 
 				r.Get("/", httpViews.GetApps)
 
