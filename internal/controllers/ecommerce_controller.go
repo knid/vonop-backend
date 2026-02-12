@@ -73,7 +73,7 @@ func (c *Controller) UpdateStoreSettings(store *models.Store, req requests.Updat
 // ChatStoreManagement processes LLM-driven store management
 func (c *Controller) ChatStoreManagement(store *models.Store, message string) (string, error) {
 	provider := c.llmProvider()
-	model := c.SecretManager.GetSecret("NEXTJS_BUILDER_LLM_MODEL")
+	model := c.SecretManager.GetSecret("WEBSITE_BUILDER_LLM_MODEL")
 	if model == "" {
 		model = constants.DEFAULT_NEXTJS_LLM_MODEL
 	}
@@ -129,7 +129,7 @@ func (c *Controller) ChatStoreManagement(store *models.Store, message string) (s
 // StreamChatStoreManagement streams store management chat
 func (c *Controller) StreamChatStoreManagement(ctx context.Context, store *models.Store, message string, onChunk func(chunk string)) (string, error) {
 	provider := c.llmProvider()
-	model := c.SecretManager.GetSecret("NEXTJS_BUILDER_LLM_MODEL")
+	model := c.SecretManager.GetSecret("WEBSITE_BUILDER_LLM_MODEL")
 	if model == "" {
 		model = constants.DEFAULT_NEXTJS_LLM_MODEL
 	}
@@ -152,7 +152,7 @@ func (c *Controller) StreamChatStoreManagement(ctx context.Context, store *model
 		{Role: "user", Content: message},
 	}
 
-	response, err := utils.StreamJSONFromLLMWithMessages(ctx, model, llmMessages, provider, onChunk)
+	response, err := utils.StreamJSONFromLLMWithMessages(ctx, model, llmMessages, provider, onChunk, nil)
 	if err != nil {
 		return "", err
 	}

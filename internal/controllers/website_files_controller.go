@@ -123,8 +123,7 @@ func (c *Controller) GenerateWebsiteFiles(user *models.User, req requests.Websit
 			slog.Error("failed to generate file content", "error", err, "path", filePlan.Path)
 			content = c.getFallbackContent(filePlan)
 		}
-
-		content = cleanFileOutput(content, filePlan.Type)
+		content = utils.StripCodeFences(content)
 
 		file := models.WebsiteFile{
 			WebsiteID: createdWebsite.ID,
@@ -238,7 +237,7 @@ func (c *Controller) GenerateWebsiteFilesStream(ctx context.Context, user *model
 			Chunk: chunk,
 			Phase: "structure",
 		})
-	})
+	}, nil)
 	if err != nil {
 		slog.Error("failed to generate website structure", "error", err)
 		sendError("structure", "failed to generate website structure. try again please")
@@ -331,7 +330,7 @@ func (c *Controller) GenerateWebsiteFilesStream(ctx context.Context, user *model
 			prompt,
 			filePrompt,
 			provider,
-			c.reasoningConfig(),
+			nil,
 			func(chunk string) {
 				sendEvent("file_chunk", responses.FileOperationEvent{
 					Action:   "create",
@@ -340,13 +339,13 @@ func (c *Controller) GenerateWebsiteFilesStream(ctx context.Context, user *model
 					Chunk:    chunk,
 				})
 			},
+			nil,
 		)
 		if err != nil {
 			slog.Error("failed to generate file", "error", err, "path", filePlan.Path)
 			content = c.getFallbackContent(filePlan)
 		}
-
-		content = cleanFileOutput(content, filePlan.Type)
+		content = utils.StripCodeFences(content)
 
 		file := models.WebsiteFile{
 			WebsiteID: createdWebsite.ID,
@@ -686,26 +685,3 @@ func (c *Controller) getFallbackContent(filePlan filePlanEntry) string {
 	}
 }
 
-func cleanFileOutput(content string, fileType string) string {
-	content = strings.TrimSpace(content)
-	switch fileType {
-	case "html":
-		content = strings.TrimPrefix(content, "```html")
-		content = strings.TrimPrefix(content, "```")
-		content = strings.TrimSuffix(content, "```")
-	case "css":
-		content = strings.TrimPrefix(content, "```css")
-		content = strings.TrimPrefix(content, "```")
-		content = strings.TrimSuffix(content, "```")
-	case "js":
-		content = strings.TrimPrefix(content, "```javascript")
-		content = strings.TrimPrefix(content, "```js")
-		content = strings.TrimPrefix(content, "```")
-		content = strings.TrimSuffix(content, "```")
-	case "json":
-		content = strings.TrimPrefix(content, "```json")
-		content = strings.TrimPrefix(content, "```")
-		content = strings.TrimSuffix(content, "```")
-	}
-	return strings.TrimSpace(content)
-}

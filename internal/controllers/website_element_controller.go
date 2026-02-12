@@ -84,6 +84,7 @@ func (c *Controller) AIEditElementStream(ctx context.Context, user *models.User,
 		model,
 		llmMessages,
 		provider,
+		nil,
 		func(chunk string) {
 			sendEvent("chat_thinking", responses.ChatThinkingEvent{Chunk: chunk})
 		},
@@ -94,10 +95,7 @@ func (c *Controller) AIEditElementStream(ctx context.Context, user *models.User,
 		return
 	}
 
-	// The LLM returns the full file content, clean it
-	newContent = cleanFileOutput(newContent, file.FileType)
-
-	file.Content = newContent
+	file.Content = utils.StripCodeFences(newContent)
 	file.UpdatedAt = time.Now()
 	_, err = c.DB.UpdateFile(file)
 	if err != nil {

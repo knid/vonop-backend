@@ -294,7 +294,7 @@ func (c *Controller) ValidateAppFiles(projectID string) (*AppValidationResult, e
 
 	// Also run LLM-based validation for deeper checks
 	provider := c.llmProvider()
-	model := c.SecretManager.GetSecret("NEXTJS_BUILDER_LLM_MODEL")
+	model := c.SecretManager.GetSecret("WEBSITE_BUILDER_LLM_MODEL")
 	if model == "" {
 		model = constants.DEFAULT_NEXTJS_LLM_MODEL
 	}

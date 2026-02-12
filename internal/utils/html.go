@@ -7,7 +7,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -120,38 +119,28 @@ func ExtractAllURLs(htmlContent string, baseURL string) []string {
 	return results
 }
 
-// llmControlTokenRegex matches LLM control tokens like <|control619|>, <|endoftext|>, etc.
-var llmControlTokenRegex = regexp.MustCompile(`<\|[a-zA-Z0-9_]+\|>`)
+// StripCodeFences removes markdown code fences (```lang ... ```) from LLM output.
+// Searches anywhere in the content, not just at the start, to handle preamble text.
+func StripCodeFences(content string) string {
+	content = strings.TrimSpace(content)
 
-func CleanLLMOutput(raw string) string {
-	raw = strings.TrimSpace(raw)
-
-	// Strip control tokens from thinking models (e.g. Kimi K2.5 via OpenRouter)
-	raw = llmControlTokenRegex.ReplaceAllString(raw, "")
-	raw = strings.TrimSpace(raw)
-
-	// Strip markdown code fences (```json, ```\n, etc.)
-	if strings.HasPrefix(raw, "```") {
-		if idx := strings.Index(raw, "\n"); idx != -1 {
-			raw = raw[idx+1:]
-		} else {
-			raw = strings.TrimPrefix(raw, "```")
-		}
-		// Find last closing fence — discard any reasoning/explanation text after it
-		if closingIdx := strings.LastIndex(raw, "\n```"); closingIdx >= 0 {
-			raw = raw[:closingIdx]
-		} else {
-			raw = strings.TrimSuffix(strings.TrimSpace(raw), "```")
-		}
-		raw = strings.TrimSpace(raw)
+	idx := strings.Index(content, "```")
+	if idx < 0 {
+		return content
 	}
 
-	// If the result isn't valid JSON, try to extract the outermost JSON object/array
-	if len(raw) > 0 && raw[0] != '{' && raw[0] != '[' {
-		raw = ExtractJSON(raw)
+	// Skip past the opening fence line (e.g. "```tsx\n")
+	inner := content[idx+3:]
+	if nlIdx := strings.Index(inner, "\n"); nlIdx >= 0 {
+		inner = inner[nlIdx+1:]
 	}
 
-	return strings.TrimSpace(raw)
+	// Find the last closing fence
+	if closingIdx := strings.LastIndex(inner, "\n```"); closingIdx >= 0 {
+		return strings.TrimSpace(inner[:closingIdx])
+	}
+
+	return strings.TrimSpace(strings.TrimSuffix(inner, "```"))
 }
 
 // ExtractJSON finds the outermost JSON object or array in a string by matching braces/brackets.

@@ -101,8 +101,7 @@ func (c *Controller) GenerateWebsiteFromScreenshot(user *models.User, req reques
 			slog.Error("failed to generate file content", "error", err, "path", filePlan.Path)
 			content = c.getFallbackContent(filePlan)
 		}
-
-		content = cleanFileOutput(content, filePlan.Type)
+		content = utils.StripCodeFences(content)
 
 		file := models.WebsiteFile{
 			WebsiteID: createdWebsite.ID,
@@ -217,6 +216,7 @@ func (c *Controller) GenerateWebsiteFromScreenshotStream(ctx context.Context, us
 				Phase: "vision",
 			})
 		},
+		nil,
 	)
 	if err != nil {
 		slog.Error("failed to analyze screenshot", "error", err)
@@ -309,7 +309,7 @@ func (c *Controller) GenerateWebsiteFromScreenshotStream(ctx context.Context, us
 			prompt,
 			filePrompt,
 			provider,
-			c.reasoningConfig(),
+			nil,
 			func(chunk string) {
 				sendEvent("file_chunk", responses.FileOperationEvent{
 					Action:   "create",
@@ -318,13 +318,13 @@ func (c *Controller) GenerateWebsiteFromScreenshotStream(ctx context.Context, us
 					Chunk:    chunk,
 				})
 			},
+			nil,
 		)
 		if err != nil {
 			slog.Error("failed to generate file", "error", err, "path", filePlan.Path)
 			content = c.getFallbackContent(filePlan)
 		}
-
-		content = cleanFileOutput(content, filePlan.Type)
+		content = utils.StripCodeFences(content)
 
 		file := models.WebsiteFile{
 			WebsiteID: createdWebsite.ID,
