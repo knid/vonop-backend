@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -744,6 +745,104 @@ func (c *Controller) getAppFileFallback(filePlan appFilePlanEntry) string {
 	}
 }
 
+// generateSingleAppFile generates a single app file with a per-file timeout.
+// It reads generatedFiles under mu lock for context building, and returns the raw content.
+func (c *Controller) generateSingleAppFile(
+	ctx context.Context,
+	project *models.AppProject,
+	filePlan appFilePlanEntry,
+	structure *appFileStructure,
+	model string,
+	provider *utils.LLMProvider,
+	generatedFiles map[string]string,
+	mu *sync.Mutex,
+	allFilePaths []string,
+	colorSchemeJSON []byte,
+	sendEvent func(string, any) bool,
+) (string, error) {
+	fileCtx, fileCancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer fileCancel()
+
+	filePrompt := c.getAppFilePrompt(filePlan.Type)
+
+	// Build lightweight file list under read lock
+	mu.Lock()
+	var generatedFileList strings.Builder
+	if len(generatedFiles) > 0 {
+		generatedFileList.WriteString("\n\nAlready-generated files (use read_file to view):\n")
+		genPaths := make([]string, 0, len(generatedFiles))
+		for p := range generatedFiles {
+			genPaths = append(genPaths, p)
+		}
+		sort.Strings(genPaths)
+		for _, p := range genPaths {
+			generatedFileList.WriteString(fmt.Sprintf("- %s (%d chars)\n", p, len(generatedFiles[p])))
+		}
+	}
+	// Snapshot the file map for the tool executor
+	fileSnapshot := make(map[string]string, len(generatedFiles))
+	for k, v := range generatedFiles {
+		fileSnapshot[k] = v
+	}
+	mu.Unlock()
+
+	allFilesContext := strings.Join(allFilePaths, ", ")
+	userPrompt := fmt.Sprintf(
+		"App name: %s\nColor scheme: %s\nTypography: %v\nAll files: %s\nCurrent file: %s\nDescription: %s\n\nUser's original description: %s%s",
+		structure.Name,
+		string(colorSchemeJSON),
+		structure.Typography,
+		allFilesContext,
+		filePlan.Path,
+		filePlan.Description,
+		project.Prompt,
+		generatedFileList.String(),
+	)
+
+	// Inline wemob-store.ts so the LLM sees the full SDK API without needing a tool call
+	if project.ProjectType == "ecommerce" {
+		if storeContent, ok := fileSnapshot["lib/wemob-store.ts"]; ok {
+			userPrompt += fmt.Sprintf("\n\n--- lib/wemob-store.ts (INJECTED SDK — use these exports, do NOT create custom API utilities) ---\n%s", storeContent)
+		}
+	}
+
+	codegenLocalExecutor := c.buildChatToolExecutor(nil, nil, fileSnapshot)
+	codegenExecutor := c.compositeToolExecutor(codegenLocalExecutor)
+	codegenTools := append([]utils.Tool{}, appCodegenTools...)
+	codegenTools = append(codegenTools, c.mcpTools()...)
+
+	content, err := utils.StreamTextWithTools(
+		fileCtx,
+		model,
+		filePrompt,
+		userPrompt,
+		provider,
+		codegenTools,
+		nil,
+		codegenExecutor,
+		nil,
+		func(chunk string) {
+			sendEvent("file_chunk", responses.FileOperationEvent{
+				Action:   "create",
+				FilePath: filePlan.Path,
+				FileType: filePlan.Type,
+				Chunk:    chunk,
+			})
+		},
+		nil,
+	)
+	if err != nil {
+		// If it was a per-file timeout (not parent ctx cancellation), use fallback
+		if fileCtx.Err() != nil && ctx.Err() == nil {
+			slog.Warn("Per-file timeout, using fallback", "path", filePlan.Path)
+			return c.getAppFileFallback(filePlan), nil
+		}
+		return "", err
+	}
+
+	return content, nil
+}
+
 // StreamGenerateAppFiles generates app files one by one with SSE streaming.
 // Uses tiered generation with context accumulation and deterministic validation.
 func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models.AppProject, user *models.User, prompt string, projectType string, events chan<- responses.SSEEvent) {
@@ -809,6 +908,49 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 		if !isTemplateFile(f.Path) {
 			appFiles = append(appFiles, f)
 		}
+	}
+
+	// Step 3b: Auto-detect ecommerce from planned files if not already set
+	if projectType != "ecommerce" {
+		for _, f := range appFiles {
+			if strings.HasPrefix(f.Path, "app/cart/") ||
+				strings.HasPrefix(f.Path, "app/shop/") ||
+				strings.HasPrefix(f.Path, "app/product/") ||
+				strings.HasPrefix(f.Path, "components/cart") ||
+				strings.HasPrefix(f.Path, "components/product") {
+				projectType = "ecommerce"
+				project.ProjectType = "ecommerce"
+				project, _ = c.DB.UpdateAppProject(project)
+				slog.Info("Auto-detected ecommerce project from file plan", "project_id", project.ID)
+				break
+			}
+		}
+	}
+
+	// Step 3c: When ecommerce is detected (explicitly or auto), strip LLM-planned lib files
+	// that duplicate wemob-store.ts functionality. The template SDK covers cart, products,
+	// store config, and API calls — generating custom versions causes the SDK to be ignored.
+	if projectType == "ecommerce" {
+		ecommerceDuplicateLibFiles := map[string]bool{
+			"lib/products.ts":     true,
+			"lib/cart.ts":         true,
+			"lib/cart.tsx":        true,
+			"lib/cart-context.ts": true,
+			"lib/cart-context.tsx": true,
+			"lib/store.ts":       true,
+			"lib/store-api.ts":   true,
+			"lib/api.ts":         true,
+			"lib/types.ts":       true,
+		}
+		filtered := appFiles[:0]
+		for _, f := range appFiles {
+			if ecommerceDuplicateLibFiles[f.Path] {
+				slog.Info("Stripping duplicate ecommerce lib file from plan (covered by wemob-store.ts)", "path", f.Path, "project_id", project.ID)
+				continue
+			}
+			filtered = append(filtered, f)
+		}
+		appFiles = filtered
 	}
 
 	// Build total file list (template + app files)
@@ -899,7 +1041,7 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 				FileType:     fileType,
 				IsGenerated:  false, // template-managed
 			}
-			createdFile, err := c.DB.CreateAppGeneratedFile(&file)
+			createdFile, err := c.DB.UpsertAppGeneratedFile(&file)
 			if err != nil {
 				slog.Error("failed to save e-commerce template file", "error", err, "path", tp)
 				continue
@@ -919,6 +1061,8 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 	tiers := categorizeFiles(appFiles)
 	colorSchemeJSON, _ := json.Marshal(structure.ColorScheme)
 
+	var mu sync.Mutex // protects generatedFiles map
+
 	for tierIdx, tier := range tiers {
 		if len(tier) == 0 {
 			continue
@@ -926,236 +1070,327 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 
 		slog.Info("Generating tier", "project_id", project.ID, "tier", tierIdx+1, "files", len(tier))
 
+		sem := make(chan struct{}, 5) // limit to 5 concurrent LLM calls
+		var wg sync.WaitGroup
+
 		for _, filePlan := range tier {
 			if ctx.Err() != nil {
-				return
+				break
 			}
 
-			filePrompt := c.getAppFilePrompt(filePlan.Type)
+			wg.Add(1)
+			sem <- struct{}{} // acquire semaphore slot
+			go func(fp appFilePlanEntry) {
+				defer wg.Done()
+				defer func() { <-sem }() // release semaphore slot
 
-			// Build lightweight file list (paths + sizes) — LLM uses tools to read siblings
-			var generatedFileList strings.Builder
-			if len(generatedFiles) > 0 {
-				generatedFileList.WriteString("\n\nAlready-generated files (use read_file to view):\n")
-				genPaths := make([]string, 0, len(generatedFiles))
-				for p := range generatedFiles {
-					genPaths = append(genPaths, p)
+				var content string
+				for attempt := 0; attempt < 3; attempt++ {
+					if attempt > 0 {
+						slog.Info("Retrying file generation", "path", fp.Path, "attempt", attempt+1)
+					}
+					var err error
+					content, err = c.generateSingleAppFile(ctx, project, fp, structure, model, provider, generatedFiles, &mu, allFilePaths, colorSchemeJSON, sendEvent)
+					if err != nil {
+						slog.Error("failed to generate app file", "error", err, "path", fp.Path, "attempt", attempt+1)
+						content = c.getAppFileFallback(fp)
+					}
+					content = utils.StripCodeFences(content)
+					if fp.Type == "tsx" || fp.Type == "ts" {
+						content, _ = stripForbiddenImports(content, fp.Path)
+					}
+					// If we got real content (not fallback), stop retrying
+					if !strings.Contains(content, "Generation failed") {
+						break
+					}
 				}
-				sort.Strings(genPaths)
-				for _, p := range genPaths {
-					generatedFileList.WriteString(fmt.Sprintf("- %s (%d chars)\n", p, len(generatedFiles[p])))
+
+				// Save to DB
+				file := models.AppGeneratedFile{
+					AppProjectID: project.ID,
+					Platform:     "nextjs",
+					FilePath:     fp.Path,
+					Content:      content,
+					FileType:     fp.Type,
+					IsGenerated:  true,
 				}
-			}
 
-			allFilesContext := strings.Join(allFilePaths, ", ")
-			userPrompt := fmt.Sprintf(
-				"App name: %s\nColor scheme: %s\nTypography: %v\nAll files: %s\nCurrent file: %s\nDescription: %s\n\nUser's original description: %s%s",
-				structure.Name,
-				string(colorSchemeJSON),
-				structure.Typography,
-				allFilesContext,
-				filePlan.Path,
-				filePlan.Description,
-				project.Prompt,
-				generatedFileList.String(),
-			)
+				createdFile, dbErr := c.DB.UpsertAppGeneratedFile(&file)
+				if dbErr != nil {
+					slog.Error("failed to save app file", "error", dbErr, "path", fp.Path)
+					return
+				}
 
-			codegenLocalExecutor := c.buildChatToolExecutor(nil, nil, generatedFiles)
-			codegenExecutor := c.compositeToolExecutor(codegenLocalExecutor)
-			codegenTools := append([]utils.Tool{}, appCodegenTools...)
-			codegenTools = append(codegenTools, c.mcpTools()...)
-			content, err := utils.StreamTextWithTools(
-				ctx,
-				model,
-				filePrompt,
-				userPrompt,
-				provider,
-				codegenTools,
-				nil,
-				codegenExecutor,
-				nil,
-				func(chunk string) {
-					sendEvent("file_chunk", responses.FileOperationEvent{
-						Action:   "create",
-						FilePath: filePlan.Path,
-						FileType: filePlan.Type,
-						Chunk:    chunk,
-					})
-				},
-				nil,
-			)
-			if err != nil {
-				slog.Error("failed to generate app file", "error", err, "path", filePlan.Path)
-				content = c.getAppFileFallback(filePlan)
-			}
+				mu.Lock()
+				generatedFiles[fp.Path] = content
+				mu.Unlock()
 
-			content = utils.StripCodeFences(content)
+				sendEvent("file_complete", responses.FileCompleteEvent{
+					Action:   "create",
+					FilePath: fp.Path,
+					FileID:   createdFile.ID,
+					FileType: fp.Type,
+					Content:  content,
+				})
+			}(filePlan)
+		}
 
-			// Strip forbidden imports
-			if filePlan.Type == "tsx" || filePlan.Type == "ts" {
-				content, _ = stripForbiddenImports(content, filePlan.Path)
-			}
+		wg.Wait()
 
-			// Save to DB
-			file := models.AppGeneratedFile{
-				AppProjectID: project.ID,
-				Platform:     "nextjs",
-				FilePath:     filePlan.Path,
-				Content:      content,
-				FileType:     filePlan.Type,
-				IsGenerated:  true,
-			}
-
-			createdFile, err := c.DB.CreateAppGeneratedFile(&file)
-			if err != nil {
-				slog.Error("failed to save app file", "error", err, "path", filePlan.Path)
-				continue
-			}
-
-			// Add to accumulated context
-			generatedFiles[filePlan.Path] = content
-
-			if !sendEvent("file_complete", responses.FileCompleteEvent{
-				Action:   "create",
-				FilePath: filePlan.Path,
-				FileID:   createdFile.ID,
-				FileType: filePlan.Type,
-				Content:  content,
-			}) {
-				return
-			}
+		if ctx.Err() != nil {
+			return
 		}
 	}
 
-	// Step 8: Find and generate missing imports
+	// Step 8: Find and generate missing imports (parallelized)
 	missingImports := findMissingImports(generatedFiles)
 	if len(missingImports) > 0 {
 		slog.Info("Found missing imports, generating files", "project_id", project.ID, "missing", missingImports)
 
+		missingSem := make(chan struct{}, 5)
+		var missingWg sync.WaitGroup
+
 		for _, importPath := range missingImports {
 			if ctx.Err() != nil {
-				return
+				break
 			}
 
-			filePath, fileType := guessFileType(importPath)
-			filePrompt := c.getAppFilePrompt(fileType)
+			missingWg.Add(1)
+			missingSem <- struct{}{}
+			go func(impPath string) {
+				defer missingWg.Done()
+				defer func() { <-missingSem }()
 
-			// Build context about what files import this missing module
-			importedBy := []string{}
-			for path, content := range generatedFiles {
-				if strings.Contains(content, "@/"+importPath) {
-					importedBy = append(importedBy, path)
-				}
-			}
+				filePath, fileType := guessFileType(impPath)
+				filePrompt := c.getAppFilePrompt(fileType)
 
-			// Build lightweight file list for context
-			var genFileList strings.Builder
-			if len(generatedFiles) > 0 {
-				genFileList.WriteString("\n\nAlready-generated files (use read_file to view):\n")
-				genPaths := make([]string, 0, len(generatedFiles))
-				for p := range generatedFiles {
-					genPaths = append(genPaths, p)
-				}
-				sort.Strings(genPaths)
-				for _, p := range genPaths {
-					genFileList.WriteString(fmt.Sprintf("- %s (%d chars)\n", p, len(generatedFiles[p])))
-				}
-			}
+				fileCtx, fileCancel := context.WithTimeout(ctx, 5*time.Minute)
+				defer fileCancel()
 
-			allFilesContext := strings.Join(allFilePaths, ", ")
-
-			userPrompt := fmt.Sprintf(
-				"App name: %s\nColor scheme: %s\nTypography: %v\nAll files: %s\nCurrent file: %s\nDescription: This file is imported by: %s. Generate the implementation based on how it is used in those files.\n\nUser's original description: %s%s",
-				structure.Name,
-				string(colorSchemeJSON),
-				structure.Typography,
-				allFilesContext+", "+filePath,
-				filePath,
-				strings.Join(importedBy, ", "),
-				project.Prompt,
-				genFileList.String(),
-			)
-
-			missingLocalExecutor := c.buildChatToolExecutor(nil, nil, generatedFiles)
-			missingExecutor := c.compositeToolExecutor(missingLocalExecutor)
-			missingTools := append([]utils.Tool{}, appCodegenTools...)
-			missingTools = append(missingTools, c.mcpTools()...)
-			content, err := utils.StreamTextWithTools(
-				ctx,
-				model,
-				filePrompt,
-				userPrompt,
-				provider,
-				missingTools,
-				nil,
-				missingExecutor,
-				nil,
-				func(chunk string) {
-					sendEvent("file_chunk", responses.FileOperationEvent{
-						Action:   "create",
-						FilePath: filePath,
-						FileType: fileType,
-						Chunk:    chunk,
-					})
-				},
-				nil,
-			)
-			if err != nil {
-				slog.Error("failed to generate missing import file", "error", err, "path", filePath)
-				if fileType == "tsx" {
-					baseName := importPath
-					if idx := strings.LastIndex(importPath, "/"); idx >= 0 {
-						baseName = importPath[idx+1:]
+				// Build context about what files import this missing module (under lock)
+				mu.Lock()
+				importedBy := []string{}
+				for path, content := range generatedFiles {
+					if strings.Contains(content, "@/"+impPath) {
+						importedBy = append(importedBy, path)
 					}
-					parts := strings.Split(baseName, "-")
-					for i, p := range parts {
-						if len(p) > 0 {
-							parts[i] = strings.ToUpper(p[:1]) + p[1:]
+				}
+
+				var genFileList strings.Builder
+				if len(generatedFiles) > 0 {
+					genFileList.WriteString("\n\nAlready-generated files (use read_file to view):\n")
+					genPaths := make([]string, 0, len(generatedFiles))
+					for p := range generatedFiles {
+						genPaths = append(genPaths, p)
+					}
+					sort.Strings(genPaths)
+					for _, p := range genPaths {
+						genFileList.WriteString(fmt.Sprintf("- %s (%d chars)\n", p, len(generatedFiles[p])))
+					}
+				}
+
+				fileSnapshot := make(map[string]string, len(generatedFiles))
+				for k, v := range generatedFiles {
+					fileSnapshot[k] = v
+				}
+				mu.Unlock()
+
+				allFilesContext := strings.Join(allFilePaths, ", ")
+
+				userPrompt := fmt.Sprintf(
+					"App name: %s\nColor scheme: %s\nTypography: %v\nAll files: %s\nCurrent file: %s\nDescription: This file is imported by: %s. Generate the implementation based on how it is used in those files.\n\nUser's original description: %s%s",
+					structure.Name,
+					string(colorSchemeJSON),
+					structure.Typography,
+					allFilesContext+", "+filePath,
+					filePath,
+					strings.Join(importedBy, ", "),
+					project.Prompt,
+					genFileList.String(),
+				)
+
+				// Inline wemob-store.ts so the LLM sees the full SDK API without needing a tool call
+				if project.ProjectType == "ecommerce" {
+					if storeContent, ok := fileSnapshot["lib/wemob-store.ts"]; ok {
+						userPrompt += fmt.Sprintf("\n\n--- lib/wemob-store.ts (INJECTED SDK — use these exports, do NOT create custom API utilities) ---\n%s", storeContent)
+					}
+				}
+
+				missingLocalExecutor := c.buildChatToolExecutor(nil, nil, fileSnapshot)
+				missingExecutor := c.compositeToolExecutor(missingLocalExecutor)
+				missingTools := append([]utils.Tool{}, appCodegenTools...)
+				missingTools = append(missingTools, c.mcpTools()...)
+				content, err := utils.StreamTextWithTools(
+					fileCtx,
+					model,
+					filePrompt,
+					userPrompt,
+					provider,
+					missingTools,
+					nil,
+					missingExecutor,
+					nil,
+					func(chunk string) {
+						sendEvent("file_chunk", responses.FileOperationEvent{
+							Action:   "create",
+							FilePath: filePath,
+							FileType: fileType,
+							Chunk:    chunk,
+						})
+					},
+					nil,
+				)
+				if err != nil {
+					slog.Error("failed to generate missing import file", "error", err, "path", filePath)
+					if fileType == "tsx" {
+						baseName := impPath
+						if idx := strings.LastIndex(impPath, "/"); idx >= 0 {
+							baseName = impPath[idx+1:]
 						}
+						parts := strings.Split(baseName, "-")
+						for i, p := range parts {
+							if len(p) > 0 {
+								parts[i] = strings.ToUpper(p[:1]) + p[1:]
+							}
+						}
+						componentName := strings.Join(parts, "")
+						content = fmt.Sprintf("export default function %s() {\n  return <div>%s</div>\n}", componentName, impPath)
+					} else {
+						content = "// Auto-generated stub\nexport {}"
 					}
-					componentName := strings.Join(parts, "")
-					content = fmt.Sprintf("export default function %s() {\n  return <div>%s</div>\n}", componentName, importPath)
-				} else {
-					content = "// Auto-generated stub\nexport {}"
+				}
+
+				content = utils.StripCodeFences(content)
+
+				file := models.AppGeneratedFile{
+					AppProjectID: project.ID,
+					Platform:     "nextjs",
+					FilePath:     filePath,
+					Content:      content,
+					FileType:     fileType,
+					IsGenerated:  true,
+				}
+
+				createdFile, dbErr := c.DB.UpsertAppGeneratedFile(&file)
+				if dbErr != nil {
+					slog.Error("failed to save missing import file", "error", dbErr, "path", filePath)
+					return
+				}
+
+				mu.Lock()
+				generatedFiles[filePath] = content
+				mu.Unlock()
+
+				sendEvent("file_complete", responses.FileCompleteEvent{
+					Action:   "create",
+					FilePath: filePath,
+					FileID:   createdFile.ID,
+					FileType: fileType,
+					Content:  content,
+				})
+			}(importPath)
+		}
+
+		missingWg.Wait()
+	}
+
+	// Step 9: Repair pass — regenerate files that contain placeholder "Generation failed" content
+	brokenFiles := findBrokenFiles(generatedFiles)
+	if len(brokenFiles) > 0 {
+		slog.Info("Found broken files, running repair pass", "project_id", project.ID, "broken_count", len(brokenFiles))
+		sendEvent("repair", map[string]any{
+			"phase":        "start",
+			"broken_files": brokenFiles,
+		})
+
+		repairSem := make(chan struct{}, 3) // lower concurrency for repairs
+		var repairWg sync.WaitGroup
+
+		for _, brokenPath := range brokenFiles {
+			if ctx.Err() != nil {
+				break
+			}
+
+			// Find the original file plan entry for this path
+			var fp appFilePlanEntry
+			found := false
+			for _, f := range appFiles {
+				if f.Path == brokenPath {
+					fp = f
+					found = true
+					break
 				}
 			}
-
-			content = utils.StripCodeFences(content)
-
-			file := models.AppGeneratedFile{
-				AppProjectID: project.ID,
-				Platform:     "nextjs",
-				FilePath:     filePath,
-				Content:      content,
-				FileType:     fileType,
-				IsGenerated:  true,
-			}
-
-			createdFile, err := c.DB.CreateAppGeneratedFile(&file)
-			if err != nil {
-				slog.Error("failed to save missing import file", "error", err, "path", filePath)
+			if !found {
 				continue
 			}
 
-			generatedFiles[filePath] = content
+			repairWg.Add(1)
+			repairSem <- struct{}{}
+			go func(fp appFilePlanEntry) {
+				defer repairWg.Done()
+				defer func() { <-repairSem }()
 
-			sendEvent("file_complete", responses.FileCompleteEvent{
-				Action:   "create",
-				FilePath: filePath,
-				FileID:   createdFile.ID,
-				FileType: fileType,
-				Content:  content,
-			})
+				content, err := c.generateSingleAppFile(ctx, project, fp, structure, model, provider, generatedFiles, &mu, allFilePaths, colorSchemeJSON, sendEvent)
+				if err != nil {
+					slog.Warn("Repair pass failed for file", "path", fp.Path, "error", err)
+					return
+				}
+				content = utils.StripCodeFences(content)
+				if fp.Type == "tsx" || fp.Type == "ts" {
+					content, _ = stripForbiddenImports(content, fp.Path)
+				}
+
+				// Only apply if the repair actually produced real content
+				if strings.Contains(content, "Generation failed") {
+					slog.Warn("Repair pass still produced placeholder", "path", fp.Path)
+					return
+				}
+
+				slog.Info("Repair pass fixed broken file", "path", fp.Path)
+
+				// Update DB
+				dbFile, dbErr := c.DB.GetAppGeneratedFileByPath(project.ID.String(), "nextjs", fp.Path)
+				if dbErr == nil && dbFile != nil {
+					dbFile.Content = content
+					dbFile.UpdatedAt = time.Now()
+					c.DB.UpdateAppGeneratedFile(dbFile)
+				}
+
+				mu.Lock()
+				generatedFiles[fp.Path] = content
+				mu.Unlock()
+
+				sendEvent("repair", map[string]any{
+					"phase": "fixed",
+					"path":  fp.Path,
+				})
+			}(fp)
 		}
+
+		repairWg.Wait()
+
+		// Report how many were fixed
+		remainingBroken := findBrokenFiles(generatedFiles)
+		slog.Info("Repair pass complete",
+			"project_id", project.ID,
+			"repaired", len(brokenFiles)-len(remainingBroken),
+			"still_broken", len(remainingBroken),
+		)
+		sendEvent("repair", map[string]any{
+			"phase":        "complete",
+			"repaired":     len(brokenFiles) - len(remainingBroken),
+			"still_broken": len(remainingBroken),
+		})
 	}
 
-	// Step 9: Run deterministic validation + LLM fix loop
+	// Step 10: Run deterministic validation + LLM fix loop
 	fixedCount := c.validateAndFixFiles(ctx, project, generatedFiles, structure, sendEvent)
 	if fixedCount > 0 {
 		slog.Info("Validation fixed files", "project_id", project.ID, "fixed_count", fixedCount)
 	}
 
-	// Step 10: Augment package.json with any discovered third-party deps
+	// Step 11: Augment package.json with any discovered third-party deps
 	augmented := augmentPackageJSON(generatedFiles["package.json"], generatedFiles)
 	if augmented != generatedFiles["package.json"] {
 		dbFile, err := c.DB.GetAppGeneratedFileByPath(project.ID.String(), "nextjs", "package.json")
@@ -1166,7 +1401,7 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 		}
 	}
 
-	// Step 11: Update conversation with assistant message
+	// Step 12: Update conversation with assistant message
 	totalFiles := len(templatePaths) + len(appFiles) + len(missingImports)
 	if conv != nil {
 		assistantMsg := fmt.Sprintf("Created app \"%s\" with %d files.", project.Name, totalFiles)
@@ -1181,12 +1416,12 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 		}
 	}
 
-	// Step 12: Update project status
+	// Step 13: Update project status
 	if _, err := c.UpdateAppProjectStatus(project, "ready"); err != nil {
 		slog.Error("failed to update project status to ready", "project_id", project.ID, "error", err)
 	}
 
-	// Step 13: Auto-start preview if service is configured
+	// Step 14: Auto-start preview if service is configured
 	if c.PreviewService != nil {
 		go func() {
 			status, err := c.StartPreview(project)
@@ -1198,7 +1433,7 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 		}()
 	}
 
-	// Step 14: Send done event
+	// Step 15: Send done event
 	sendEvent("done", map[string]any{
 		"app_project_id": project.ID,
 		"success":        true,
@@ -1276,5 +1511,17 @@ func guessFileType(importPath string) (filePath string, fileType string) {
 		return importPath + ".ts", "ts"
 	}
 	return importPath + ".tsx", "tsx"
+}
+
+// findBrokenFiles returns paths of files that contain "Generation failed" placeholder content.
+func findBrokenFiles(files map[string]string) []string {
+	var broken []string
+	for path, content := range files {
+		if strings.Contains(content, "Generation failed") {
+			broken = append(broken, path)
+		}
+	}
+	sort.Strings(broken)
+	return broken
 }
 
