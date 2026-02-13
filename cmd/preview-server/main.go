@@ -50,6 +50,7 @@ func main() {
 
 	apiRouter.Post("/projects/{id}", handleCreateProject(cm))
 	apiRouter.Put("/projects/{id}/files", handleUpdateFiles(cm))
+	apiRouter.Put("/projects/{id}/env", handleUpdateEnvVars(cm))
 	apiRouter.Delete("/projects/{id}", handleDeleteProject(cm))
 	apiRouter.Get("/projects/{id}/status", handleGetStatus(cm))
 	apiRouter.Get("/projects/{id}/logs", handleGetLogs(cm))

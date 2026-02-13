@@ -40,6 +40,10 @@ type updateFilesRequest struct {
 	Files map[string]string `json:"files"`
 }
 
+type updateEnvVarsRequest struct {
+	EnvVars map[string]string `json:"env_vars"`
+}
+
 func (s *Service) doRequest(method, path string, body any) ([]byte, error) {
 	var reqBody io.Reader
 	if body != nil {
@@ -97,6 +101,14 @@ func (s *Service) CreatePreview(projectID string, files map[string]string, envVa
 func (s *Service) UpdateFiles(projectID string, files map[string]string) error {
 	_, err := s.doRequest("PUT", "/projects/"+projectID+"/files", updateFilesRequest{
 		Files: files,
+	})
+	return err
+}
+
+// UpdateEnvVars updates environment variables in a running preview container
+func (s *Service) UpdateEnvVars(projectID string, envVars map[string]string) error {
+	_, err := s.doRequest("PUT", "/projects/"+projectID+"/env", updateEnvVarsRequest{
+		EnvVars: envVars,
 	})
 	return err
 }

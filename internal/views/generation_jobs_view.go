@@ -3,6 +3,7 @@ package views
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -33,10 +34,10 @@ func (v *HttpViews) handleStreamOrAsync(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 	v.Controller.RunningJobs.Store(job.ID.String(), cancel)
 
-	events := make(chan responses.SSEEvent, 10)
+	events := make(chan responses.SSEEvent, 100)
 	go cfg.StreamFunc(ctx, events)
 
 	if r.URL.Query().Get("background") == "true" {
@@ -68,31 +69,53 @@ func (v *HttpViews) handleStreamOrAsync(w http.ResponseWriter, r *http.Request, 
 	eventIndex := 0
 	var lastEvent *responses.SSEEvent
 
-	for event := range events {
-		lastEvent = &event
+	keepalive := time.NewTicker(15 * time.Second)
+	defer keepalive.Stop()
 
-		// Always persist milestone events to DB
-		if controllers.IsMilestoneEvent(event.Event) {
-			jobEvent := models.JobEvent{
-				Index: eventIndex,
-				Event: event.Event,
-				Data:  event.Data,
-				Time:  time.Now().UnixMilli(),
+	for {
+		select {
+		case event, ok := <-events:
+			if !ok {
+				// Channel closed — generation finished
+				goto done
 			}
-			if err := v.Controller.DB.AppendGenerationJobEvent(job.ID.String(), jobEvent); err != nil {
-				slog.Error("failed to persist job event", "job_id", job.ID, "error", err)
-			}
-			eventIndex++
-		}
+			lastEvent = &event
 
-		// Write to SSE if client is still connected
-		if !clientGone {
-			if err := utils.WriteSSEEvent(w, flusher, event.Event, event.Data); err != nil {
-				clientGone = true
-				slog.Info("SSE client disconnected, continuing job in background", "job_id", job.ID)
+			// Always persist milestone events to DB
+			if controllers.IsMilestoneEvent(event.Event) {
+				jobEvent := models.JobEvent{
+					Index: eventIndex,
+					Event: event.Event,
+					Data:  event.Data,
+					Time:  time.Now().UnixMilli(),
+				}
+				if err := v.Controller.DB.AppendGenerationJobEvent(job.ID.String(), jobEvent); err != nil {
+					slog.Error("failed to persist job event", "job_id", job.ID, "error", err)
+				}
+				eventIndex++
+			}
+
+			// Write to SSE if client is still connected
+			if !clientGone {
+				if err := utils.WriteSSEEvent(w, flusher, event.Event, event.Data); err != nil {
+					clientGone = true
+					slog.Info("SSE client disconnected, continuing job in background", "job_id", job.ID)
+				}
+			}
+
+		case <-keepalive.C:
+			// Send SSE keepalive comment to prevent proxy/client timeout
+			if !clientGone {
+				if _, err := fmt.Fprintf(w, ":keepalive\n\n"); err != nil {
+					clientGone = true
+					slog.Info("SSE client disconnected during keepalive, continuing job in background", "job_id", job.ID)
+				} else {
+					flusher.Flush()
+				}
 			}
 		}
 	}
+done:
 
 	// StreamFunc finished (channel closed) — finalize job
 	cancel()

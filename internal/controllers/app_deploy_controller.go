@@ -386,6 +386,25 @@ func (c *Controller) SyncPreviewFiles(projectID string) error {
 	return c.PreviewService.UpdateFiles(projectID, fileMap)
 }
 
+// SyncPreviewAll updates both files and environment variables in a running preview container.
+// Use this instead of SyncPreviewFiles when env vars may have changed (e.g. after setup_ecommerce).
+func (c *Controller) SyncPreviewAll(project *models.AppProject) {
+	if c.PreviewService == nil {
+		return
+	}
+
+	if err := c.SyncPreviewFiles(project.ID.String()); err != nil {
+		slog.Warn("SyncPreviewAll: failed to sync files", "error", err, "project_id", project.ID)
+	}
+
+	envVars := c.CollectAllEnvVars(project)
+	if len(envVars) > 0 {
+		if err := c.PreviewService.UpdateEnvVars(project.ID.String(), envVars); err != nil {
+			slog.Warn("SyncPreviewAll: failed to sync env vars", "error", err, "project_id", project.ID)
+		}
+	}
+}
+
 // StopPreview stops and removes a preview container
 func (c *Controller) StopPreview(projectID string) error {
 	if c.PreviewService == nil {
