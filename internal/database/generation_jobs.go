@@ -63,6 +63,7 @@ func (db *Database) GetUserRunningJobs(userID string) (int, error) {
 		Model((*models.GenerationJob)(nil)).
 		Where("user_id = ?", userID).
 		Where("status = ?", "running").
+		Where("created_at > ?", time.Now().Add(-15*time.Minute)).
 		Count(context.Background())
 	return count, err
 }

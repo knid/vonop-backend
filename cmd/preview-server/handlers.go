@@ -21,6 +21,10 @@ type UpdateFilesRequest struct {
 	Files map[string]string `json:"files"`
 }
 
+type UpdateEnvVarsRequest struct {
+	EnvVars map[string]string `json:"env_vars"`
+}
+
 type ProjectStatusResponse struct {
 	Status     string `json:"status"`
 	PreviewURL string `json:"preview_url,omitempty"`
@@ -91,6 +95,34 @@ func handleUpdateFiles(cm *containerManager) http.HandlerFunc {
 
 		if err := cm.updateFiles(projectID, req.Files); err != nil {
 			slog.Error("failed to update files", "project_id", projectID, "error", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	}
+}
+
+// handleUpdateEnvVars writes a .env.local file to the project directory and
+// restarts the container so the Next.js dev server picks up the new variables.
+func handleUpdateEnvVars(cm *containerManager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		projectID := chi.URLParam(r, "id")
+		if projectID == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "project id is required"})
+			return
+		}
+
+		var req UpdateEnvVarsRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+			return
+		}
+
+		slog.Info("updating env vars", "project_id", projectID, "var_count", len(req.EnvVars))
+
+		if err := cm.updateEnvVars(projectID, req.EnvVars); err != nil {
+			slog.Error("failed to update env vars", "project_id", projectID, "error", err)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}

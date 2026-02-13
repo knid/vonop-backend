@@ -91,6 +91,17 @@ func (cm *containerManager) createContainer(projectID string, files map[string]s
 		return nil, fmt.Errorf("writing files: %w", err)
 	}
 
+	// Write .env.local so env vars persist across container restarts
+	if len(envVars) > 0 {
+		var envContent strings.Builder
+		for k, v := range envVars {
+			envContent.WriteString(fmt.Sprintf("%s=%s\n", k, v))
+		}
+		if err := os.WriteFile(filepath.Join(projectDir, ".env.local"), []byte(envContent.String()), 0644); err != nil {
+			slog.Warn("failed to write .env.local during create", "project_id", projectID, "error", err)
+		}
+	}
+
 	// Force-remove any leftover container with the same name (e.g. from a previous server run).
 	containerName := fmt.Sprintf("wemob-preview-%s", projectID)
 	_ = execCommandNoOutput("docker", "rm", "-f", containerName)
@@ -190,6 +201,43 @@ func (cm *containerManager) updateFiles(projectID string, files map[string]strin
 			}
 		}()
 	}
+
+	cm.touchContainer(projectID)
+	return nil
+}
+
+// updateEnvVars writes a .env.local file to the project directory and restarts
+// the container so the Next.js dev server reads the updated variables.
+func (cm *containerManager) updateEnvVars(projectID string, envVars map[string]string) error {
+	cm.mu.RLock()
+	info, ok := cm.containers[projectID]
+	cm.mu.RUnlock()
+
+	if !ok {
+		return fmt.Errorf("container not found for project %s", projectID)
+	}
+
+	// Build .env.local content
+	var envContent strings.Builder
+	for k, v := range envVars {
+		envContent.WriteString(fmt.Sprintf("%s=%s\n", k, v))
+	}
+
+	envPath := filepath.Join(info.ProjectDir, ".env.local")
+	if err := os.WriteFile(envPath, []byte(envContent.String()), 0644); err != nil {
+		return fmt.Errorf("writing .env.local: %w", err)
+	}
+
+	// Restart the container so Next.js picks up the new env vars from .env.local
+	containerName := fmt.Sprintf("wemob-preview-%s", projectID)
+	go func() {
+		out, err := execCommand("docker", "restart", "-t", "2", containerName)
+		if err != nil {
+			slog.Warn("failed to restart container after env update", "project_id", projectID, "error", err, "output", out)
+		} else {
+			slog.Info("container restarted for env var update", "project_id", projectID)
+		}
+	}()
 
 	cm.touchContainer(projectID)
 	return nil
