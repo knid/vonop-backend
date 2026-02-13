@@ -867,6 +867,8 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 	if model == "" {
 		model = constants.DEFAULT_NEXTJS_LLM_MODEL
 	}
+	concurrency := c.llmConcurrency()
+	slog.Info("LLM concurrency limit", "concurrency", concurrency)
 
 	// Step 1: Plan file structure (streamed)
 	structure, err := c.PlanAppFileStructureStream(ctx, prompt, projectType, func(chunk string) {
@@ -1068,7 +1070,7 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 
 		slog.Info("Generating tier", "project_id", project.ID, "tier", tierIdx+1, "files", len(tier))
 
-		sem := make(chan struct{}, 5) // limit to 5 concurrent LLM calls
+		sem := make(chan struct{}, concurrency)
 		var wg sync.WaitGroup
 
 		for _, filePlan := range tier {
@@ -1157,7 +1159,7 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 	if len(missingImports) > 0 {
 		slog.Info("Found missing imports, generating files", "project_id", project.ID, "missing", missingImports)
 
-		missingSem := make(chan struct{}, 5)
+		missingSem := make(chan struct{}, concurrency)
 		var missingWg sync.WaitGroup
 
 		for _, importPath := range missingImports {
@@ -1312,7 +1314,7 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 			"broken_files": brokenFiles,
 		})
 
-		repairSem := make(chan struct{}, 3) // lower concurrency for repairs
+		repairSem := make(chan struct{}, concurrency)
 		var repairWg sync.WaitGroup
 
 		for _, brokenPath := range brokenFiles {
