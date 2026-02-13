@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -65,6 +66,9 @@ type appChatResponse struct {
 	Summary     string             `json:"summary"`
 	Suggestions []string           `json:"suggestions,omitempty"`
 }
+
+// ansiRegex strips ANSI escape sequences that some LLM providers emit in streamed text.
+var ansiRegex = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
 
 // appChatTools defines the tools available to the chat LLM for on-demand file access.
 var appChatTools = []utils.Tool{
@@ -230,18 +234,16 @@ func (c *Controller) buildChatToolExecutor(project *models.AppProject, user *mod
 					if content == "" {
 						continue
 					}
-					// Check DB before creating
-					existingFile, err := c.DB.GetAppGeneratedFileByPath(project.ID.String(), "nextjs", tp)
-					if err != nil || existingFile == nil {
-						file := &models.AppGeneratedFile{
-							AppProjectID: project.ID,
-							Platform:     "nextjs",
-							FilePath:     tp,
-							Content:      content,
-							FileType:     "ts",
-							IsGenerated:  false, // template-managed
-						}
-						c.DB.CreateAppGeneratedFile(file)
+					file := &models.AppGeneratedFile{
+						AppProjectID: project.ID,
+						Platform:     "nextjs",
+						FilePath:     tp,
+						Content:      content,
+						FileType:     "ts",
+						IsGenerated:  false, // template-managed
+					}
+					if _, err := c.DB.UpsertAppGeneratedFile(file); err != nil {
+						slog.Error("failed to upsert ecommerce template file", "path", tp, "error", err)
 					}
 					fileMap[tp] = content
 				}
@@ -394,9 +396,18 @@ func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.A
 		filePaths = append(filePaths, f.FilePath)
 	}
 	sort.Strings(filePaths)
+	brokenCount := 0
 	for _, fp := range filePaths {
 		content := currentFiles[fp]
-		fileTree.WriteString(fmt.Sprintf("- %s (%d chars)\n", fp, len(content)))
+		if strings.Contains(content, "Generation failed") {
+			fileTree.WriteString(fmt.Sprintf("- %s (%d chars) [BROKEN: contains placeholder, needs full implementation]\n", fp, len(content)))
+			brokenCount++
+		} else {
+			fileTree.WriteString(fmt.Sprintf("- %s (%d chars)\n", fp, len(content)))
+		}
+	}
+	if brokenCount > 0 {
+		fileTree.WriteString(fmt.Sprintf("\nWARNING: %d file(s) marked [BROKEN] contain placeholder content from failed generation. These need to be fully regenerated with proper implementations.\n", brokenCount))
 	}
 	fileTree.WriteString("\nUse the read_file tool to view any file's content before modifying it.")
 
@@ -599,6 +610,11 @@ func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.A
 			var buf strings.Builder
 			jsonStarted := false
 			return func(chunk string) {
+				// Strip ANSI escape codes that some LLM providers emit
+				chunk = ansiRegex.ReplaceAllString(chunk, "")
+				if chunk == "" {
+					return
+				}
 				if jsonStarted {
 					return // don't stream the JSON block to the frontend
 				}
@@ -840,9 +856,48 @@ func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.A
 			}
 		}
 
-		// Auto-sync to preview container if running
+		// Auto-sync to preview container if running (including env vars)
 		if c.PreviewService != nil {
-			go c.SyncPreviewFiles(project.ID.String())
+			go c.SyncPreviewAll(project)
+		}
+	}
+
+	// Emit file_complete events for e-commerce template files injected by setup_ecommerce.
+	// These were added to currentFiles and DB by the tool executor but the frontend
+	// doesn't know about them unless we send explicit events.
+	if project.ProjectType == "ecommerce" {
+		for _, tp := range constants.NEXTJS_ECOMMERCE_TEMPLATE_FILE_PATHS {
+			content, exists := currentFiles[tp]
+			if !exists {
+				continue
+			}
+			// Skip if the LLM already emitted a file operation for this path
+			alreadyEmitted := false
+			for _, op := range chatResp.Operations {
+				if op.Path == tp {
+					alreadyEmitted = true
+					break
+				}
+			}
+			if alreadyEmitted {
+				continue
+			}
+			dbFile, err := c.DB.GetAppGeneratedFileByPath(project.ID.String(), "nextjs", tp)
+			if err == nil && dbFile != nil {
+				sendEvent("file_complete", responses.FileCompleteEvent{
+					Action:   "create",
+					FilePath: tp,
+					FileID:   dbFile.ID,
+					FileType: dbFile.FileType,
+					Content:  content,
+				})
+				filesChanged++
+			}
+		}
+
+		// Sync preview even if no LLM file ops, since setup_ecommerce injected templates and env vars changed
+		if filesChanged > 0 && c.PreviewService != nil {
+			go c.SyncPreviewAll(project)
 		}
 	}
 
