@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"log/slog"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -83,6 +84,16 @@ func (c *Controller) llmProvider() *utils.LLMProvider {
 // LLMProvider is the exported version of llmProvider for use in views.
 func (c *Controller) LLMProvider() *utils.LLMProvider {
 	return c.llmProvider()
+}
+
+// llmConcurrency returns the max number of concurrent LLM calls allowed.
+// Controlled by the LLM_CONCURRENCY_LIMIT secret. Defaults to 5.
+func (c *Controller) llmConcurrency() int {
+	raw := c.SecretManager.GetSecret("LLM_CONCURRENCY_LIMIT")
+	if n, err := strconv.Atoi(strings.TrimSpace(raw)); err == nil && n > 0 {
+		return n
+	}
+	return 5
 }
 
 // reasoningConfig returns the ReasoningConfig from the LLM_REASONING_EFFORT secret.
