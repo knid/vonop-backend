@@ -974,8 +974,6 @@ You have tools to inspect already-generated project files:
 - read_file: Read a file's content to see its exact exports and types.
 - list_files: See all generated files so far.
 
-Always use Context7 MCP when you need library/API documentation, code generation, setup or configuration steps — without the user having to explicitly ask. You have documentation lookup tools available (prefixed names like ctx7__query-docs, ctx7__resolve-library-id). First call ctx7__resolve-library-id to get the library ID, then ctx7__query-docs to fetch the docs. Prefer looking up docs over guessing.
-
 IMPORTANT: If you need to import from another project file, ALWAYS use read_file first to see its actual exports. Do NOT guess export names.`
 
 const NEXTJS_FILE_CSS_PROMPT = `You are an expert Next.js developer. Generate the globals.css file for a Next.js 16 project using Tailwind CSS v4.
@@ -1188,8 +1186,6 @@ You have tools to inspect the project:
 - read_file: Read any file's content to see its current implementation.
 - list_files: See all files in the project.
 - search_files: Search for text across all files.
-
-Always use Context7 MCP when you need library/API documentation, code generation, setup or configuration steps — without the user having to explicitly ask. You have documentation lookup tools available (prefixed names like ctx7__query-docs, ctx7__resolve-library-id). First call ctx7__resolve-library-id to get the library ID, then ctx7__query-docs to fetch the docs. Prefer looking up docs over guessing.
 
 IMPORTANT: Use read_file to read the files that have errors before generating fixes. Do not guess file content.
 

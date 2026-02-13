@@ -521,7 +521,6 @@ func (c *Controller) llmFixPass(ctx context.Context, files map[string]string, va
 	fixLocalExecutor := c.buildChatToolExecutor(nil, nil, files)
 	executor := c.compositeToolExecutor(fixLocalExecutor)
 	fixTools := append([]utils.Tool{}, appFixTools...)
-	fixTools = append(fixTools, c.mcpTools()...)
 	responseJSON, err := utils.StreamWithTools(
 		ctx,
 		model,
@@ -809,7 +808,6 @@ func (c *Controller) generateSingleAppFile(
 	codegenLocalExecutor := c.buildChatToolExecutor(nil, nil, fileSnapshot)
 	codegenExecutor := c.compositeToolExecutor(codegenLocalExecutor)
 	codegenTools := append([]utils.Tool{}, appCodegenTools...)
-	codegenTools = append(codegenTools, c.mcpTools()...)
 
 	content, err := utils.StreamTextWithTools(
 		fileCtx,
@@ -1087,6 +1085,7 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 				var content string
 				for attempt := 0; attempt < 3; attempt++ {
 					if attempt > 0 {
+						time.Sleep(time.Duration(attempt) * 2 * time.Second)
 						slog.Info("Retrying file generation", "path", fp.Path, "attempt", attempt+1)
 					}
 					var err error
@@ -1096,6 +1095,9 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 						content = c.getAppFileFallback(fp)
 					}
 					content = utils.StripCodeFences(content)
+					if strings.TrimSpace(content) == "" {
+						content = c.getAppFileFallback(fp)
+					}
 					if fp.Type == "tsx" || fp.Type == "ts" {
 						content, _ = stripForbiddenImports(content, fp.Path)
 					}
@@ -1103,6 +1105,14 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 					if !strings.Contains(content, "Generation failed") {
 						break
 					}
+				}
+
+				// Surface error if all retries failed
+				if strings.Contains(content, "Generation failed") {
+					sendEvent("file_error", map[string]any{
+						"path":    fp.Path,
+						"message": fmt.Sprintf("All retries exhausted for %s — using placeholder content", fp.Path),
+					})
 				}
 
 				// Save to DB
@@ -1219,7 +1229,6 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 				missingLocalExecutor := c.buildChatToolExecutor(nil, nil, fileSnapshot)
 				missingExecutor := c.compositeToolExecutor(missingLocalExecutor)
 				missingTools := append([]utils.Tool{}, appCodegenTools...)
-				missingTools = append(missingTools, c.mcpTools()...)
 				content, err := utils.StreamTextWithTools(
 					fileCtx,
 					model,
