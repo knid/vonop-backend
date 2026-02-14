@@ -67,3 +67,14 @@ func (db *Database) DeleteVariant(v *models.ProductVariant) error {
 	_, err := db.DB.NewDelete().Model(v).Where("id = ?", v.ID).Exec(context.Background())
 	return err
 }
+
+func (db *Database) GetVariantsByStoreID(storeID string) ([]models.ProductVariant, error) {
+	var variants []models.ProductVariant
+	err := db.DB.NewSelect().
+		Model(&variants).
+		Join("JOIN products ON products.id = product_variant.product_id").
+		Where("products.store_id = ?", storeID).
+		Where("products.deleted_at IS NULL").
+		Scan(context.Background())
+	return variants, err
+}

@@ -118,7 +118,7 @@ func (c *Controller) ChatStoreManagement(store *models.Store, message string) (s
 	}
 
 	for _, op := range result.Operations {
-		if err := c.executeStoreOperation(store, op.Action, op.Data); err != nil {
+		if _, err := c.executeStoreOperation(store, op.Action, op.Data); err != nil {
 			slog.Warn("Store operation failed", "action", op.Action, "error", err)
 		}
 	}
@@ -167,49 +167,59 @@ func (c *Controller) StreamChatStoreManagement(ctx context.Context, store *model
 	}
 	if err := json.Unmarshal([]byte(response), &result); err == nil {
 		for _, op := range result.Operations {
-			c.executeStoreOperation(store, op.Action, op.Data)
+			_, _ = c.executeStoreOperation(store, op.Action, op.Data)
 		}
 	}
 
 	return response, nil
 }
 
-func (c *Controller) executeStoreOperation(store *models.Store, action string, data map[string]any) error {
+// Fix 18/23: executeStoreOperation returns (data string, error) so list operations
+// can surface results to the LLM tool caller.
+func (c *Controller) executeStoreOperation(store *models.Store, action string, data map[string]any) (string, error) {
 	switch action {
 	case "create_product":
-		return c.createProductFromChat(store, data)
+		return "", c.createProductFromChat(store, data)
 	case "update_product":
-		return c.updateProductFromChat(data)
+		return "", c.updateProductFromChat(data)
 	case "delete_product":
-		return c.deleteProductFromChat(data)
+		return "", c.deleteProductFromChat(data)
 	case "create_variant":
-		return c.createVariantFromChat(store, data)
+		return "", c.createVariantFromChat(store, data)
 	case "create_variant_with_options":
-		return c.createVariantWithOptionsFromChat(store, data)
+		return "", c.createVariantWithOptionsFromChat(store, data)
 	case "bulk_create_products":
-		return c.bulkCreateProductsFromChat(store, data)
+		return "", c.bulkCreateProductsFromChat(store, data)
 	case "create_category":
-		return c.createCategoryFromChat(store, data)
+		return "", c.createCategoryFromChat(store, data)
 	case "update_category":
-		return c.updateCategoryFromChat(data)
+		return "", c.updateCategoryFromChat(data)
 	case "delete_category":
-		return c.deleteCategoryFromChat(data)
+		return "", c.deleteCategoryFromChat(data)
 	case "create_discount":
-		return c.createDiscountFromChat(store, data)
+		return "", c.createDiscountFromChat(store, data)
 	case "update_discount":
-		return c.updateDiscountFromChat(data)
+		return "", c.updateDiscountFromChat(data)
 	case "delete_discount":
-		return c.deleteDiscountFromChat(data)
+		return "", c.deleteDiscountFromChat(data)
 	case "update_store_settings":
-		return c.updateStoreFromChat(store, data)
+		return "", c.updateStoreFromChat(store, data)
 	case "list_products":
-		_, err := c.DB.GetProductsByStoreID(store.ID.String())
-		return err
+		products, err := c.DB.GetProductsByStoreID(store.ID.String())
+		if err != nil {
+			return "", err
+		}
+		result, _ := json.Marshal(products)
+		return string(result), nil
 	case "list_categories":
-		_, err := c.DB.GetCategoriesByStoreID(store.ID.String())
-		return err
+		categories, err := c.DB.GetCategoriesByStoreID(store.ID.String())
+		if err != nil {
+			return "", err
+		}
+		result, _ := json.Marshal(categories)
+		return string(result), nil
 	default:
-		return fmt.Errorf("unknown action: %s", action)
+		return "", fmt.Errorf("unknown action: %s", action)
 	}
 }
 
@@ -219,6 +229,8 @@ func (c *Controller) createProductFromChat(store *models.Store, data map[string]
 	if slug == "" {
 		slug = strings.ToLower(strings.ReplaceAll(name, " ", "-"))
 	}
+	// Fix 17: Ensure slug uniqueness like the direct API does
+	slug = slug + "-" + uuid.New().String()[:8]
 	description, _ := data["description"].(string)
 	status := "active"
 	if s, ok := data["status"].(string); ok {
@@ -518,6 +530,18 @@ func (c *Controller) createDiscountFromChat(store *models.Store, data map[string
 		MaxUses:       int(maxUses),
 		IsActive:      true,
 		AppliesTo:     map[string]any{},
+	}
+
+	// Fix 19: Parse StartsAt/EndsAt timestamps
+	if startsAt, ok := data["starts_at"].(string); ok && startsAt != "" {
+		if t, err := time.Parse(time.RFC3339, startsAt); err == nil {
+			discount.StartsAt = t
+		}
+	}
+	if endsAt, ok := data["ends_at"].(string); ok && endsAt != "" {
+		if t, err := time.Parse(time.RFC3339, endsAt); err == nil {
+			discount.EndsAt = t
+		}
 	}
 
 	_, err := c.DB.CreateDiscount(discount)
@@ -845,6 +869,18 @@ func (c *Controller) CreateDiscount(store *models.Store, req requests.CreateDisc
 	}
 	if discount.AppliesTo == nil {
 		discount.AppliesTo = map[string]any{}
+	}
+
+	// Fix 19: Parse StartsAt/EndsAt timestamps
+	if req.StartsAt != "" {
+		if t, err := time.Parse(time.RFC3339, req.StartsAt); err == nil {
+			discount.StartsAt = t
+		}
+	}
+	if req.EndsAt != "" {
+		if t, err := time.Parse(time.RFC3339, req.EndsAt); err == nil {
+			discount.EndsAt = t
+		}
 	}
 
 	return c.DB.CreateDiscount(discount)

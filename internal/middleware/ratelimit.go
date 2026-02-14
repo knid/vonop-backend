@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/knid/wemob/internal/utils"
 	"github.com/redis/go-redis/v9"
 )
@@ -92,4 +93,16 @@ func AIUserKey(r *http.Request) string {
 		return "ai:" + user.ID.String()
 	}
 	return "ai:" + IPKey(r)
+}
+
+// StorefrontIPKey returns a per-store-per-IP rate-limit key using the storeId URL param.
+func StorefrontIPKey(r *http.Request) string {
+	storeID := chi.URLParam(r, "storeId")
+	ip := r.RemoteAddr
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		ip = xff
+	} else if xri := r.Header.Get("X-Real-IP"); xri != "" {
+		ip = xri
+	}
+	return "sf:" + storeID + ":" + ip
 }
