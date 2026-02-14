@@ -110,6 +110,18 @@ func (c *Controller) CollectAllEnvVars(project *models.AppProject) map[string]st
 	return envVars
 }
 
+// BuildDotEnvLocal generates .env.local content from an env vars map.
+func BuildDotEnvLocal(envVars map[string]string) string {
+	if len(envVars) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	for k, v := range envVars {
+		sb.WriteString(fmt.Sprintf("%s=%s\n", k, v))
+	}
+	return sb.String()
+}
+
 // GetEnvVarKeysForChat returns env var key names (no values) for AI chat context.
 // Includes integration env vars, custom env vars, and auto-injected store vars.
 func (c *Controller) GetEnvVarKeysForChat(project *models.AppProject) []string {

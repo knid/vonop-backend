@@ -72,6 +72,11 @@ func (c *Controller) DeployToVercel(project *models.AppProject, user *models.Use
 		fileMap[f.FilePath] = f.Content
 	}
 
+	// Inject .env.local so Next.js can inline NEXT_PUBLIC_* vars at build time
+	if dotEnv := BuildDotEnvLocal(envVars); dotEnv != "" {
+		fileMap[".env.local"] = dotEnv
+	}
+
 	deployResp, err := c.VercelService.DeployFiles(vercelProject.VercelProjectID, fileMap, target)
 	if err != nil {
 		slog.Error("Failed to deploy to Vercel", "error", err)
@@ -369,6 +374,11 @@ func (c *Controller) StartPreview(project *models.AppProject) (*preview.PreviewS
 	// Collect all env vars (integrations + custom + auto-injected store vars)
 	envVars := c.CollectAllEnvVars(project)
 
+	// Inject .env.local so Next.js can inline NEXT_PUBLIC_* vars at build/dev time
+	if dotEnv := BuildDotEnvLocal(envVars); dotEnv != "" {
+		fileMap[".env.local"] = dotEnv
+	}
+
 	status, err := c.PreviewService.CreatePreview(project.ID.String(), fileMap, envVars)
 	if err != nil {
 		slog.Error("Failed to start preview", "error", err, "project_id", project.ID)
@@ -404,11 +414,28 @@ func (c *Controller) SyncPreviewAll(project *models.AppProject) {
 		return
 	}
 
-	if err := c.SyncPreviewFiles(project.ID.String()); err != nil {
+	// Sync files from DB
+	dbFiles, err := c.DB.GetAppGeneratedFilesByProjectID(project.ID.String(), "nextjs")
+	if err != nil || len(dbFiles) == 0 {
+		slog.Warn("SyncPreviewAll: no files to sync", "error", err, "project_id", project.ID)
+		return
+	}
+
+	fileMap := make(map[string]string)
+	for _, f := range dbFiles {
+		fileMap[f.FilePath] = f.Content
+	}
+
+	// Collect env vars and inject .env.local into file map
+	envVars := c.CollectAllEnvVars(project)
+	if dotEnv := BuildDotEnvLocal(envVars); dotEnv != "" {
+		fileMap[".env.local"] = dotEnv
+	}
+
+	if err := c.PreviewService.UpdateFiles(project.ID.String(), fileMap); err != nil {
 		slog.Warn("SyncPreviewAll: failed to sync files", "error", err, "project_id", project.ID)
 	}
 
-	envVars := c.CollectAllEnvVars(project)
 	if len(envVars) > 0 {
 		if err := c.PreviewService.UpdateEnvVars(project.ID.String(), envVars); err != nil {
 			slog.Warn("SyncPreviewAll: failed to sync env vars", "error", err, "project_id", project.ID)
