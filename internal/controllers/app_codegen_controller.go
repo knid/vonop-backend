@@ -1377,6 +1377,33 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 		}
 	}
 
+	// Step 6c: Generate .env.local for ecommerce projects so NEXT_PUBLIC_* vars are available
+	if projectType == "ecommerce" {
+		envVars := c.CollectAllEnvVars(project)
+		if dotEnv := BuildDotEnvLocal(envVars); dotEnv != "" {
+			file := models.AppGeneratedFile{
+				AppProjectID: project.ID,
+				Platform:     "nextjs",
+				FilePath:     ".env.local",
+				Content:      dotEnv,
+				FileType:     "env",
+				IsGenerated:  false, // managed by system
+			}
+			createdFile, err := c.DB.UpsertAppGeneratedFile(&file)
+			if err != nil {
+				slog.Error("failed to save .env.local file", "error", err)
+			} else {
+				generatedFiles[".env.local"] = dotEnv
+				sendEvent("file_complete", responses.FileCompleteEvent{
+					Action:   "create",
+					FilePath: ".env.local",
+					FileID:   createdFile.ID,
+					FileType: "env",
+				})
+			}
+		}
+	}
+
 	// Step 7: Build e-commerce store context for per-file codegen
 	var storeContext string
 	if projectType == "ecommerce" {
