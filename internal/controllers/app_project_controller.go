@@ -9,6 +9,7 @@ import (
 
 	"github.com/go-playground/validator/v10"
 	"github.com/google/uuid"
+	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/requests"
 )
@@ -74,11 +75,43 @@ func (c *Controller) UpdateAppProject(id string, user *models.User, req requests
 		return nil, err
 	}
 
+	oldSlug := project.Slug
+
 	project.Name = req.Name
 	project.Slug = req.Slug
 	project.UpdatedAt = time.Now()
 
-	return c.DB.UpdateAppProject(project)
+	updated, err := c.DB.UpdateAppProject(project)
+	if err != nil {
+		return nil, err
+	}
+
+	// If slug changed and a Vercel project exists, reassign the wemob.app subdomain
+	if oldSlug != req.Slug && c.VercelService != nil {
+		go func() {
+			vp, vpErr := c.DB.GetVercelProjectByAppProjectID(id)
+			if vpErr != nil || vp == nil {
+				return
+			}
+
+			oldDomain := oldSlug + "." + constants.WEMOB_APP_BASE_DOMAIN
+			newDomain := req.Slug + "." + constants.WEMOB_APP_BASE_DOMAIN
+
+			if err := c.VercelService.RemoveDomain(vp.VercelProjectID, oldDomain); err != nil {
+				slog.Warn("Failed to remove old wemob.app subdomain", "domain", oldDomain, "error", err)
+			}
+			if err := c.VercelService.AddDomain(vp.VercelProjectID, newDomain); err != nil {
+				slog.Warn("Failed to add new wemob.app subdomain", "domain", newDomain, "error", err)
+				return
+			}
+
+			vp.CustomDomain = newDomain
+			vp.ProductionURL = "https://" + newDomain
+			c.DB.UpdateVercelProject(vp)
+		}()
+	}
+
+	return updated, nil
 }
 
 func (c *Controller) DeleteAppProject(id string, user *models.User) error {

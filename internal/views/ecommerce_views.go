@@ -132,7 +132,7 @@ func (v *HttpViews) ChatStoreManagement(w http.ResponseWriter, r *http.Request) 
 
 	v.handleStreamOrAsync(w, r, user, StreamConfig{
 		JobType: "store_chat",
-		StreamFunc: func(ctx context.Context, events chan<- responses.SSEEvent) {
+		StreamFunc: func(ctx context.Context, events chan<- responses.SSEEvent, jobID string) {
 			defer close(events)
 			response, streamErr := v.Controller.StreamChatStoreManagement(ctx, store, req.Message, func(chunk string) {
 				events <- responses.SSEEvent{Event: "chat_thinking", Data: responses.ChatThinkingEvent{Chunk: chunk}}

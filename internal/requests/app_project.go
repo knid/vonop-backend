@@ -135,3 +135,17 @@ type UpdateEnvVarRequest struct {
 	Value    *string `json:"value"`
 	IsPublic *bool   `json:"is_public"`
 }
+
+type ClarifyJobAnswer struct {
+	ID     string `json:"id" validate:"required" errormgs:"is required"`
+	Answer string `json:"answer" validate:"required" errormgs:"is required"`
+}
+
+type ClarifyJobRequest struct {
+	Answers []ClarifyJobAnswer `json:"answers" validate:"omitempty,dive" errormgs:"must contain valid answers"`
+	Skip    bool               `json:"skip"`
+}
+
+func (r *ClarifyJobRequest) Validate(validate *validator.Validate) error {
+	return utils.ValidateFunc[ClarifyJobRequest](*r, validate)
+}

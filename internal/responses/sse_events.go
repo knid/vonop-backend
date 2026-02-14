@@ -60,3 +60,13 @@ type SeedProgressEvent struct {
 	Total   int    `json:"total,omitempty"`
 	Summary string `json:"summary,omitempty"`
 }
+
+type ClarificationNeededEvent struct {
+	JobID          string `json:"job_id"`
+	Questions      any    `json:"questions"` // []ClarificationQuestion from controllers
+	TimeoutSeconds int    `json:"timeout_seconds"`
+}
+
+type ClarificationReceivedEvent struct {
+	Message string `json:"message"`
+}

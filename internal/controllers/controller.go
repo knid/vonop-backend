@@ -35,6 +35,7 @@ type Controller struct {
 	MCPService             *mcpclient.Service
 	PostHog                posthog.Client // nil = disabled
 	RunningJobs            sync.Map       // map[string]context.CancelFunc for in-flight background jobs
+	PendingClarifications  sync.Map       // map[string]chan ClarificationResult for jobs awaiting user input
 }
 
 func NewController(db *database.Database, concurrentBuildLimiter chan struct{},
