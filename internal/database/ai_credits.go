@@ -2,9 +2,11 @@ package database
 
 import (
 	"context"
+	"database/sql"
 	"time"
 
 	"github.com/knid/wemob/internal/models"
+	"github.com/uptrace/bun"
 )
 
 func (db *Database) GetAICreditsBalance(userID string) (*models.AICreditsBalance, error) {
@@ -44,6 +46,71 @@ func (db *Database) GetAICreditTransactions(userID string, limit int) ([]models.
 		Limit(limit).
 		Scan(context.Background())
 	return txs, err
+}
+
+// --- Atomic Credit Operations ---
+
+// AtomicDeductCredits atomically deducts credits, failing if balance < cost.
+// Returns the new balance. Returns sql.ErrNoRows if insufficient funds.
+func (db *Database) AtomicDeductCredits(tx bun.IDB, balanceID string, cost int) (int, error) {
+	var newBalance int
+	err := tx.NewRaw(
+		"UPDATE ai_credits_balances SET balance = balance - ?, updated_at = NOW() WHERE id = ? AND balance >= ? RETURNING balance",
+		cost, balanceID, cost,
+	).Scan(context.Background(), &newBalance)
+	return newBalance, err
+}
+
+// AtomicDeductCreditsUnchecked atomically deducts credits, allowing negative balance down to floor.
+// Returns sql.ErrNoRows if deduction would push balance below floor.
+func (db *Database) AtomicDeductCreditsUnchecked(tx bun.IDB, balanceID string, cost int, floor int) (int, error) {
+	var newBalance int
+	err := tx.NewRaw(
+		"UPDATE ai_credits_balances SET balance = balance - ?, updated_at = NOW() WHERE id = ? AND balance - ? >= ? RETURNING balance",
+		cost, balanceID, cost, floor,
+	).Scan(context.Background(), &newBalance)
+	return newBalance, err
+}
+
+// AtomicAddCredits atomically adds credits. Returns the new balance.
+func (db *Database) AtomicAddCredits(tx bun.IDB, balanceID string, amount int) (int, error) {
+	var newBalance int
+	err := tx.NewRaw(
+		"UPDATE ai_credits_balances SET balance = balance + ?, updated_at = NOW() WHERE id = ? RETURNING balance",
+		amount, balanceID,
+	).Scan(context.Background(), &newBalance)
+	return newBalance, err
+}
+
+// AtomicResetPeriod atomically resets the billing period if it has expired.
+// Returns (newBalance, true, nil) if the reset happened, or (0, false, nil) if
+// the period was already current (another request won the race).
+func (db *Database) AtomicResetPeriod(balanceID string, newBalance int, periodStart, periodEnd time.Time) (int, bool, error) {
+	var bal int
+	err := db.DB.NewRaw(
+		"UPDATE ai_credits_balances SET balance = ?, period_start = ?, period_end = ?, updated_at = NOW() WHERE id = ? AND period_end < NOW() RETURNING balance",
+		newBalance, periodStart, periodEnd, balanceID,
+	).Scan(context.Background(), &bal)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return 0, false, nil // already reset by another request
+		}
+		return 0, false, err
+	}
+	return bal, true, nil
+}
+
+// CreateAICreditTransactionTx inserts a credit transaction within an existing DB transaction.
+func (db *Database) CreateAICreditTransactionTx(tx bun.IDB, t *models.AICreditTransaction) (*models.AICreditTransaction, error) {
+	_, err := tx.NewInsert().Model(t).Exec(context.Background())
+	return t, err
+}
+
+// RunInTx executes fn inside a database transaction. If fn returns an error, the transaction is rolled back.
+func (db *Database) RunInTx(fn func(tx bun.Tx) error) error {
+	return db.DB.RunInTx(context.Background(), &sql.TxOptions{}, func(ctx context.Context, tx bun.Tx) error {
+		return fn(tx)
+	})
 }
 
 // --- LLM Token Usage ---

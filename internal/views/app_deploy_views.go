@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/utils"
@@ -22,10 +21,6 @@ func (v *HttpViews) DeployAppWeb(w http.ResponseWriter, r *http.Request) {
 	if requireActiveSubscription(w, user) {
 		return
 	}
-	if v.deductAICredits(w, user, models.AICreditCostDeployWeb, "deploy_web", "") {
-		return
-	}
-
 	appID := chi.URLParam(r, "appId")
 	project, err := v.Controller.GetAppProject(appID, user)
 	if err != nil {
@@ -53,8 +48,7 @@ func (v *HttpViews) DeployAppWeb(w http.ResponseWriter, r *http.Request) {
 		Set("app_id", project.ID.String()).
 		Set("project_type", project.ProjectType).
 		Set("deploy_duration_seconds", deployDuration).
-		Set("deploy_version", deployment.Version).
-		Set("credits_used", models.AICreditCostDeployWeb))
+		Set("deploy_version", deployment.Version))
 
 	utils.JSONResponse(w, responses.AppDeploymentResponse{
 		ID:           deployment.ID,
@@ -79,10 +73,6 @@ func (v *HttpViews) DeployAppAndroid(w http.ResponseWriter, r *http.Request) {
 	if requireActiveSubscription(w, user) {
 		return
 	}
-	if v.deductAICredits(w, user, models.AICreditCostBuildFlutter, "build_flutter_android", "") {
-		return
-	}
-
 	appID := chi.URLParam(r, "appId")
 	project, err := v.Controller.GetAppProject(appID, user)
 	if err != nil {
@@ -104,8 +94,7 @@ func (v *HttpViews) DeployAppAndroid(w http.ResponseWriter, r *http.Request) {
 
 	v.Controller.TrackUserEvent(user, "app_deployed_android", posthog.NewProperties().
 		Set("app_id", project.ID.String()).
-		Set("project_type", project.ProjectType).
-		Set("credits_used", models.AICreditCostBuildFlutter))
+		Set("project_type", project.ProjectType))
 
 	utils.JSONResponse(w, map[string]any{
 		"build_id": build.ID,
@@ -125,10 +114,6 @@ func (v *HttpViews) DeployAppIOS(w http.ResponseWriter, r *http.Request) {
 	if requireActiveSubscription(w, user) {
 		return
 	}
-	if v.deductAICredits(w, user, models.AICreditCostBuildFlutter, "build_flutter_ios", "") {
-		return
-	}
-
 	appID := chi.URLParam(r, "appId")
 	project, err := v.Controller.GetAppProject(appID, user)
 	if err != nil {
@@ -150,8 +135,7 @@ func (v *HttpViews) DeployAppIOS(w http.ResponseWriter, r *http.Request) {
 
 	v.Controller.TrackUserEvent(user, "app_deployed_ios", posthog.NewProperties().
 		Set("app_id", project.ID.String()).
-		Set("project_type", project.ProjectType).
-		Set("credits_used", models.AICreditCostBuildFlutter))
+		Set("project_type", project.ProjectType))
 
 	utils.JSONResponse(w, map[string]any{
 		"build_id": build.ID,

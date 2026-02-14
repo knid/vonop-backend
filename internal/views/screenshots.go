@@ -42,7 +42,7 @@ func (v *HttpViews) AutoGenerateScreenshots(w http.ResponseWriter, r *http.Reque
 	if requireActiveSubscription(w, user) {
 		return
 	}
-	if v.deductAICredits(w, user, models.AICreditCostScreenshotGenerate, "screenshot_generate", "") {
+	if v.checkMinimumCredits(w, user) {
 		return
 	}
 
@@ -63,7 +63,11 @@ func (v *HttpViews) AutoGenerateScreenshots(w http.ResponseWriter, r *http.Reque
 
 	data, _ := json.MarshalIndent(output, "", "  ")
 
-	outputJson, err := utils.GetJSONFromLLM(r.Context(), v.Controller.SecretManager.GetSecret("DEFAULT_LLM_MODEL"), constants.LINK_SELECTION_FOR_SCREENSHOTS_PROMPT, string(data), v.Controller.LLMProvider())
+	// Token tracking for post-hoc billing
+	tracker := utils.NewTokenTracker()
+	ctx := utils.WithTokenTracker(r.Context(), tracker)
+
+	outputJson, err := utils.GetJSONFromLLM(ctx, v.Controller.SecretManager.GetSecret("DEFAULT_LLM_MODEL"), constants.LINK_SELECTION_FOR_SCREENSHOTS_PROMPT, string(data), v.Controller.LLMProvider())
 	if err != nil {
 		utils.JSONErrorResponse(w, "Could not generate screenshots. Try again please.", http.StatusBadRequest)
 		return
@@ -137,6 +141,16 @@ func (v *HttpViews) AutoGenerateScreenshots(w http.ResponseWriter, r *http.Reque
 				screenshotLinks.Screenshots[0], screenshotLinks.Screenshots[i] = screenshotLinks.Screenshots[i], screenshotLinks.Screenshots[0]
 				break
 			}
+		}
+	}
+
+	// Post-hoc token-based billing
+	_, _, total, _ := tracker.Totals()
+	if total > 0 {
+		credits := models.TokensToCredits(total)
+		if err := v.Controller.DeductAICreditsUnchecked(user, credits, "screenshot_generate", ""); err != nil {
+			slog.Warn("failed to deduct AI credits from tokens", "error", err,
+				"user_id", user.ID, "credits", credits, "tokens", total)
 		}
 	}
 
