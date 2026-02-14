@@ -16,6 +16,7 @@ import (
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/utils"
+	"github.com/posthog/posthog-go"
 )
 
 // --- Clarification types ---
@@ -1096,6 +1097,14 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 		})
 	}
 
+	// Timing and metrics variables (hoisted for defer closure access)
+	genStart := time.Now()
+	var planDuration, codegenDuration, repairDuration, validationDuration float64
+	var generatedFiles map[string]string
+	var appFiles []appFilePlanEntry
+	var missingImportsCount, brokenFilesCount, fixedCount int
+	var genSuccess bool
+
 	provider := c.llmProvider()
 	model := c.SecretManager.GetSecret("WEBSITE_BUILDER_LLM_MODEL")
 	if model == "" {
@@ -1110,13 +1119,35 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 	defer func() {
 		c.RecordTokenUsage(user.ID, "generate_app", model, provider.Name, project.ID.String(), tracker)
 		// Token-based credit deduction
-		_, _, total, _ := tracker.Totals()
+		prompt, completion, total, callCount := tracker.Totals()
 		if total > 0 {
 			credits := models.TokensToCredits(total)
 			if err := c.DeductAICreditsUnchecked(user, credits, "generate_app", project.ID.String()); err != nil {
 				slog.Warn("failed to deduct AI credits from tokens", "error", err,
 					"user_id", user.ID, "credits", credits, "tokens", total)
 			}
+			genDuration := time.Since(genStart).Seconds()
+			c.TrackEvent(user.ID, "app_generation_completed", posthog.NewProperties().
+				Set("app_id", project.ID.String()).
+				Set("project_type", projectType).
+				Set("duration_seconds", genDuration).
+				Set("total_tokens", total).
+				Set("prompt_tokens", prompt).
+				Set("completion_tokens", completion).
+				Set("llm_call_count", callCount).
+				Set("credits_used", credits).
+				Set("file_count", len(generatedFiles)).
+				Set("planned_file_count", len(appFiles)).
+				Set("missing_imports_count", missingImportsCount).
+				Set("broken_files_count", brokenFilesCount).
+				Set("validation_fixes", fixedCount).
+				Set("model", model).
+				Set("is_ecommerce", projectType == "ecommerce").
+				Set("success", genSuccess).
+				Set("phase_plan_seconds", planDuration).
+				Set("phase_codegen_seconds", codegenDuration).
+				Set("phase_repair_seconds", repairDuration).
+				Set("phase_validation_seconds", validationDuration))
 		}
 	}()
 
@@ -1172,6 +1203,7 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 		sendError("structure", err.Error())
 		return
 	}
+	planDuration = time.Since(genStart).Seconds()
 
 	// Step 2: Update project with name/slug/theme from structure
 	if structure.Name != "" {
@@ -1192,7 +1224,6 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 	project, _ = c.DB.UpdateAppProject(project)
 
 	// Step 3: Filter template files from structure (strip them even if LLM included them)
-	var appFiles []appFilePlanEntry
 	for _, f := range structure.Files {
 		if !isTemplateFile(f.Path) {
 			appFiles = append(appFiles, f)
@@ -1280,7 +1311,7 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 	c.DB.DeleteAppGeneratedFilesByProjectPlatform(project.ID.String(), "nextjs")
 
 	// Step 6: Inject template files (tier 0)
-	generatedFiles := make(map[string]string) // accumulated content for context
+	generatedFiles = make(map[string]string) // accumulated content for context
 	for _, tp := range templatePaths {
 		content := getTemplateContent(tp, structure.ColorScheme)
 		fileType := "json"
@@ -1483,6 +1514,7 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 
 	// Step 8: Find and generate missing imports (parallelized)
 	missingImports := findMissingImports(generatedFiles)
+	missingImportsCount = len(missingImports)
 	if len(missingImports) > 0 {
 		slog.Info("Found missing imports, generating files", "project_id", project.ID, "missing", missingImports)
 
@@ -1621,9 +1653,11 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 
 		missingWg.Wait()
 	}
+	codegenDuration = time.Since(genStart).Seconds() - planDuration
 
 	// Step 9: Repair pass — regenerate files that contain placeholder "Generation failed" content
 	brokenFiles := findBrokenFiles(generatedFiles)
+	brokenFilesCount = len(brokenFiles)
 	if len(brokenFiles) > 0 {
 		slog.Info("Found broken files, running repair pass", "project_id", project.ID, "broken_count", len(brokenFiles))
 		sendEvent("repair", map[string]any{
@@ -1742,7 +1776,9 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 	}
 
 	// Step 10: Run deterministic validation + LLM fix loop
-	fixedCount := c.validateAndFixFiles(ctx, project, generatedFiles, structure, sendEvent)
+	repairDuration = time.Since(genStart).Seconds() - planDuration - codegenDuration
+	fixedCount = c.validateAndFixFiles(ctx, project, generatedFiles, structure, sendEvent)
+	validationDuration = time.Since(genStart).Seconds() - planDuration - codegenDuration - repairDuration
 	if fixedCount > 0 {
 		slog.Info("Validation fixed files", "project_id", project.ID, "fixed_count", fixedCount)
 	}
@@ -1808,6 +1844,7 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 	}
 
 	// Step 15: Send done event
+	genSuccess = true
 	sendEvent("done", map[string]any{
 		"app_project_id": project.ID,
 		"success":        true,
