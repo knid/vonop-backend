@@ -56,6 +56,7 @@ func (v *HttpViews) deductAICredits(w http.ResponseWriter, user *models.User, co
 	}
 	v.Controller.TrackEvent(user.ID, "ai_credits_deducted", posthog.NewProperties().
 		Set("action", action).
-		Set("cost", cost))
+		Set("cost", cost).
+		Set("reference", reference))
 	return false
 }

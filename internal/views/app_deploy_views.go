@@ -2,6 +2,7 @@ package views
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/knid/wemob/internal/models"
@@ -40,14 +41,20 @@ func (v *HttpViews) DeployAppWeb(w http.ResponseWriter, r *http.Request) {
 		target = req.Target
 	}
 
+	deployStart := time.Now()
 	deployment, err := v.Controller.DeployToVercel(project, user, target)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	deployDuration := time.Since(deployStart).Seconds()
 
 	v.Controller.TrackEvent(user.ID, "app_deployed_web", posthog.NewProperties().
-		Set("app_id", project.ID.String()))
+		Set("app_id", project.ID.String()).
+		Set("project_type", project.ProjectType).
+		Set("deploy_duration_seconds", deployDuration).
+		Set("deploy_version", deployment.Version).
+		Set("credits_used", models.AICreditCostDeployWeb))
 
 	utils.JSONResponse(w, responses.AppDeploymentResponse{
 		ID:           deployment.ID,
@@ -96,7 +103,9 @@ func (v *HttpViews) DeployAppAndroid(w http.ResponseWriter, r *http.Request) {
 	}
 
 	v.Controller.TrackEvent(user.ID, "app_deployed_android", posthog.NewProperties().
-		Set("app_id", project.ID.String()))
+		Set("app_id", project.ID.String()).
+		Set("project_type", project.ProjectType).
+		Set("credits_used", models.AICreditCostBuildFlutter))
 
 	utils.JSONResponse(w, map[string]any{
 		"build_id": build.ID,
@@ -140,7 +149,9 @@ func (v *HttpViews) DeployAppIOS(w http.ResponseWriter, r *http.Request) {
 	}
 
 	v.Controller.TrackEvent(user.ID, "app_deployed_ios", posthog.NewProperties().
-		Set("app_id", project.ID.String()))
+		Set("app_id", project.ID.String()).
+		Set("project_type", project.ProjectType).
+		Set("credits_used", models.AICreditCostBuildFlutter))
 
 	utils.JSONResponse(w, map[string]any{
 		"build_id": build.ID,

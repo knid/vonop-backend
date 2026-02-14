@@ -16,6 +16,7 @@ import (
 	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/services/integrations"
 	"github.com/knid/wemob/internal/utils"
+	"github.com/posthog/posthog-go"
 )
 
 type appChatOperation struct {
@@ -386,13 +387,21 @@ func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.A
 	defer func() {
 		c.RecordTokenUsage(user.ID, "app_chat", model, provider.Name, project.ID.String(), tracker)
 		// Token-based credit deduction
-		_, _, total, _ := tracker.Totals()
+		prompt, completion, total, callCount := tracker.Totals()
 		if total > 0 {
 			credits := models.TokensToCredits(total)
 			if err := c.DeductAICreditsUnchecked(user, credits, "app_chat", project.ID.String()); err != nil {
 				slog.Warn("failed to deduct AI credits from tokens", "error", err,
 					"user_id", user.ID, "credits", credits, "tokens", total)
 			}
+			c.TrackEvent(user.ID, "app_chat_completed", posthog.NewProperties().
+				Set("app_id", project.ID.String()).
+				Set("total_tokens", total).
+				Set("prompt_tokens", prompt).
+				Set("completion_tokens", completion).
+				Set("credits_used", credits).
+				Set("llm_call_count", callCount).
+				Set("has_images", len(images) > 0))
 		}
 	}()
 

@@ -41,7 +41,7 @@ func (v *HttpViews) GenerateAppStream(w http.ResponseWriter, r *http.Request) {
 		v.Controller.CreateStore(project, user, project.Name+" Store")
 	}
 
-	v.Controller.TrackEvent(user.ID, "app_generated", posthog.NewProperties().
+	v.Controller.TrackEvent(user.ID, "app_generation_started", posthog.NewProperties().
 		Set("project_type", req.ProjectType).
 		Set("app_id", project.ID.String()))
 
@@ -83,7 +83,8 @@ func (v *HttpViews) GenerateEcommerceAppStream(w http.ResponseWriter, r *http.Re
 
 	v.Controller.CreateStore(project, user, project.Name+" Store")
 
-	v.Controller.TrackEvent(user.ID, "app_generated_ecommerce", posthog.NewProperties().
+	v.Controller.TrackEvent(user.ID, "app_generation_started", posthog.NewProperties().
+		Set("project_type", "ecommerce").
 		Set("app_id", project.ID.String()))
 
 	v.handleStreamOrAsync(w, r, user, StreamConfig{
