@@ -44,6 +44,18 @@ func (c *Controller) TrackUserEvent(user *models.User, event string, props posth
 	})
 }
 
+// EnsureIdentified lazily identifies a user in PostHog at most once per process lifetime.
+func (c *Controller) EnsureIdentified(user *models.User) {
+	if c.PostHog == nil || user == nil {
+		return
+	}
+	uid := user.ID.String()
+	if _, loaded := c.identifiedUsers.LoadOrStore(uid, struct{}{}); loaded {
+		return // already identified this process
+	}
+	c.IdentifyUser(user)
+}
+
 // TrackStorefrontEvent sends an anonymous storefront event to PostHog keyed by store ID.
 // Used for public storefront actions (cart, checkout) where there is no authenticated user.
 func (c *Controller) TrackStorefrontEvent(storeID string, event string, props posthog.Properties) {

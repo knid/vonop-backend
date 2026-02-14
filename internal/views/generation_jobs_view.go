@@ -69,6 +69,7 @@ func (v *HttpViews) handleStreamOrAsync(w http.ResponseWriter, r *http.Request, 
 	clientGone := false
 	eventIndex := 0
 	var lastEvent *responses.SSEEvent
+	var allMilestoneEvents []models.JobEvent
 
 	keepalive := time.NewTicker(15 * time.Second)
 	defer keepalive.Stop()
@@ -90,6 +91,7 @@ func (v *HttpViews) handleStreamOrAsync(w http.ResponseWriter, r *http.Request, 
 					Data:  controllers.StripHeavyFields(event.Event, event.Data),
 					Time:  time.Now().UnixMilli(),
 				}
+				allMilestoneEvents = append(allMilestoneEvents, jobEvent)
 				if err := v.Controller.DB.AppendGenerationJobEvent(job.ID.String(), jobEvent); err != nil {
 					slog.Error("failed to persist job event", "job_id", job.ID, "error", err)
 				}
@@ -118,6 +120,15 @@ func (v *HttpViews) handleStreamOrAsync(w http.ResponseWriter, r *http.Request, 
 	}
 done:
 
+	// Final consistency write: replace the events array with the complete in-memory
+	// copy. Individual AppendGenerationJobEvent calls may have failed under DB pressure,
+	// so this ensures the persisted state matches what was actually streamed.
+	if len(allMilestoneEvents) > 0 {
+		if err := v.Controller.DB.SetGenerationJobEvents(job.ID.String(), allMilestoneEvents); err != nil {
+			slog.Error("failed to batch-write job events", "job_id", job.ID, "error", err)
+		}
+	}
+
 	// StreamFunc finished (channel closed) — finalize job before cancelling context,
 	// otherwise FinalizeJob sees ctx.Err() != nil and marks the job as "cancelled".
 	v.Controller.FinalizeJob(job.ID.String(), ctx, lastEvent)
@@ -131,6 +142,7 @@ func (v *HttpViews) drainEventsToJob(ctx context.Context, cancel context.CancelF
 
 	eventIndex := 0
 	var lastEvent *responses.SSEEvent
+	var allMilestoneEvents []models.JobEvent
 
 	for event := range events {
 		lastEvent = &event
@@ -142,10 +154,18 @@ func (v *HttpViews) drainEventsToJob(ctx context.Context, cancel context.CancelF
 				Data:  controllers.StripHeavyFields(event.Event, event.Data),
 				Time:  time.Now().UnixMilli(),
 			}
+			allMilestoneEvents = append(allMilestoneEvents, jobEvent)
 			if err := v.Controller.DB.AppendGenerationJobEvent(job.ID.String(), jobEvent); err != nil {
 				slog.Error("failed to persist job event", "job_id", job.ID, "error", err)
 			}
 			eventIndex++
+		}
+	}
+
+	// Final consistency write: replace with complete in-memory copy
+	if len(allMilestoneEvents) > 0 {
+		if err := v.Controller.DB.SetGenerationJobEvents(job.ID.String(), allMilestoneEvents); err != nil {
+			slog.Error("failed to batch-write job events", "job_id", job.ID, "error", err)
 		}
 	}
 

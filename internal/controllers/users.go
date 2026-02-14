@@ -349,5 +349,7 @@ func (c *Controller) GetUserFromReq(r *http.Request) (*models.User, error) {
 		return nil, err
 	}
 
+	c.EnsureIdentified(user)
+
 	return user, nil
 }

@@ -115,9 +115,13 @@ func getColor(scheme map[string]any, key, fallback string) string {
 	return fallback
 }
 
-// buildGlobalsCSSTheme generates the globals.css content with Tailwind v4 @theme colors
-func buildGlobalsCSSTheme(colorScheme map[string]any) string {
-	return fmt.Sprintf(`@import "tailwindcss";
+// buildGlobalsCSSTheme generates the globals.css content with Tailwind v4 @theme colors,
+// body base styles, dark mode overrides, and mobile utilities when isMobile is true.
+func buildGlobalsCSSTheme(colorScheme, darkColorScheme map[string]any, isMobile bool) string {
+	var sb strings.Builder
+
+	// --- @import + @theme ---
+	sb.WriteString(fmt.Sprintf(`@import "tailwindcss";
 
 @theme {
   --color-primary: %s;
@@ -127,12 +131,6 @@ func buildGlobalsCSSTheme(colorScheme map[string]any) string {
   --color-surface: %s;
   --color-text: %s;
 }
-
-@layer base {
-  html {
-    scroll-behavior: smooth;
-  }
-}
 `,
 		getColor(colorScheme, "primary", "#3B82F6"),
 		getColor(colorScheme, "secondary", "#6366F1"),
@@ -140,11 +138,69 @@ func buildGlobalsCSSTheme(colorScheme map[string]any) string {
 		getColor(colorScheme, "background", "#FFFFFF"),
 		getColor(colorScheme, "surface", "#F3F4F6"),
 		getColor(colorScheme, "text", "#111827"),
-	)
+	))
+
+	// --- @layer base: html + body ---
+	sb.WriteString(`
+@layer base {
+  html {
+    scroll-behavior: smooth;
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    background-color: var(--color-background);
+    color: var(--color-text);
+    font-synthesis: none;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+`)
+
+	// Mobile-specific base styles
+	if isMobile {
+		sb.WriteString(`  html {
+    overscroll-behavior: none;
+  }
+  body {
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+    overscroll-behavior-y: contain;
+    -webkit-tap-highlight-color: transparent;
+    min-height: 100dvh;
+  }
+`)
+	}
+
+	sb.WriteString("}\n")
+
+	// --- Dark mode: override theme colors via prefers-color-scheme ---
+	if len(darkColorScheme) > 0 {
+		sb.WriteString(fmt.Sprintf(`
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-primary: %s;
+    --color-secondary: %s;
+    --color-accent: %s;
+    --color-background: %s;
+    --color-surface: %s;
+    --color-text: %s;
+  }
+}
+`,
+			getColor(darkColorScheme, "primary", getColor(colorScheme, "primary", "#3B82F6")),
+			getColor(darkColorScheme, "secondary", getColor(colorScheme, "secondary", "#6366F1")),
+			getColor(darkColorScheme, "accent", getColor(colorScheme, "accent", "#F59E0B")),
+			getColor(darkColorScheme, "background", getColor(colorScheme, "background", "#111827")),
+			getColor(darkColorScheme, "surface", getColor(colorScheme, "surface", "#1F2937")),
+			getColor(darkColorScheme, "text", getColor(colorScheme, "text", "#F9FAFB")),
+		))
+	}
+
+	return sb.String()
 }
 
 // getTemplateContent returns the hardcoded content for a template file
-func getTemplateContent(path string, colorScheme map[string]any) string {
+func getTemplateContent(path string, colorScheme, darkColorScheme map[string]any, projectType string) string {
 	switch path {
 	case "package.json":
 		return constants.NEXTJS_TEMPLATE_PACKAGE_JSON
@@ -155,7 +211,7 @@ func getTemplateContent(path string, colorScheme map[string]any) string {
 	case "next.config.mjs":
 		return constants.NEXTJS_TEMPLATE_NEXT_CONFIG
 	case "app/globals.css":
-		return buildGlobalsCSSTheme(colorScheme)
+		return buildGlobalsCSSTheme(colorScheme, darkColorScheme, projectType == "mobile_app")
 	}
 	return ""
 }
@@ -763,6 +819,8 @@ func (c *Controller) PlanAppFileStructure(ctx context.Context, prompt string, pr
 	systemPrompt := constants.NEXTJS_STRUCTURE_PROMPT
 	if projectType == "ecommerce" {
 		systemPrompt = constants.NEXTJS_ECOMMERCE_STRUCTURE_PROMPT
+	} else if projectType == "mobile_app" {
+		systemPrompt = constants.NEXTJS_MOBILE_STRUCTURE_PROMPT
 	}
 
 	structureJSON, err := utils.GetJSONFromLLM(ctx, model, systemPrompt, prompt, provider)
@@ -800,6 +858,8 @@ func (c *Controller) PlanAppFileStructureStream(ctx context.Context, prompt stri
 	systemPrompt := constants.NEXTJS_STRUCTURE_PROMPT
 	if projectType == "ecommerce" {
 		systemPrompt = constants.NEXTJS_ECOMMERCE_STRUCTURE_PROMPT
+	} else if projectType == "mobile_app" {
+		systemPrompt = constants.NEXTJS_MOBILE_STRUCTURE_PROMPT
 	}
 
 	structureJSON, err := utils.StreamJSONFromLLM(ctx, model, systemPrompt, prompt, provider, onChunk, onReasoning)
@@ -918,11 +978,16 @@ func (c *Controller) generateSingleAppFile(
 		}
 	}
 
+	// Inject mobile design rules for mobile_app projects
+	if project.ProjectType == "mobile_app" {
+		systemPrompt.WriteString("\n\n" + constants.NEXTJS_MOBILE_DESIGN_RULES)
+	}
+
 	// Build compact per-file user prompt
 	mu.Lock()
 	var generatedFileList strings.Builder
 	if len(generatedFiles) > 0 {
-		generatedFileList.WriteString("\nAlready-generated files (use read_file to view):\n")
+		generatedFileList.WriteString("\nAlready-generated files (only use read_file if you need to check a specific import or type — do NOT read all files):\n")
 		genPaths := make([]string, 0, len(generatedFiles))
 		for p := range generatedFiles {
 			genPaths = append(genPaths, p)
@@ -1023,6 +1088,10 @@ func (c *Controller) repairSingleAppFile(
 	mu.Unlock()
 
 	repairPrompt := constants.NEXTJS_REPAIR_PROMPT
+	// Inject mobile design rules for mobile_app projects
+	if project.ProjectType == "mobile_app" {
+		repairPrompt += "\n\n" + constants.NEXTJS_MOBILE_DESIGN_RULES
+	}
 
 	var userPrompt strings.Builder
 	userPrompt.WriteString(fmt.Sprintf("File to repair: %s\n", filePlan.Path))
@@ -1079,7 +1148,8 @@ func (c *Controller) repairSingleAppFile(
 // StreamGenerateAppFiles generates app files one by one with SSE streaming.
 // Uses tiered generation with context accumulation and deterministic validation.
 func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models.AppProject, user *models.User, prompt string, projectType string, events chan<- responses.SSEEvent, jobID string) {
-	defer close(events)
+	var closeEvents sync.Once
+	defer func() { closeEvents.Do(func() { close(events) }) }()
 
 	sendEvent := func(eventName string, data any) bool {
 		select {
@@ -1096,6 +1166,16 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 			Phase: phase,
 		})
 	}
+
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("StreamGenerateAppFiles panicked", "error", r, "project_id", project.ID)
+			sendEvent("error", responses.GenerationErrorEvent{
+				Error: fmt.Sprintf("internal error: %v", r),
+				Phase: "generation",
+			})
+		}
+	}()
 
 	// Timing and metrics variables (hoisted for defer closure access)
 	genStart := time.Now()
@@ -1117,6 +1197,10 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 	tracker := utils.NewTokenTracker()
 	ctx = utils.WithTokenTracker(ctx, tracker)
 	defer func() {
+		// Close events channel FIRST so the job finalizes promptly,
+		// even if tracking/credit operations below are slow.
+		closeEvents.Do(func() { close(events) })
+
 		c.RecordTokenUsage(user.ID, "generate_app", model, provider.Name, project.ID.String(), tracker)
 		// Token-based credit deduction
 		prompt, completion, total, callCount := tracker.Totals()
@@ -1290,6 +1374,7 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 	allFilePaths = append(allFilePaths, templatePaths...)
 	if projectType == "ecommerce" {
 		allFilePaths = append(allFilePaths, constants.NEXTJS_ECOMMERCE_TEMPLATE_FILE_PATHS...)
+		allFilePaths = append(allFilePaths, ".env.local")
 	}
 	for _, f := range appFiles {
 		allFilePaths = append(allFilePaths, f.Path)
@@ -1324,7 +1409,7 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 	// Step 6: Inject template files (tier 0)
 	generatedFiles = make(map[string]string) // accumulated content for context
 	for _, tp := range templatePaths {
-		content := getTemplateContent(tp, structure.ColorScheme)
+		content := getTemplateContent(tp, structure.ColorScheme, structure.DarkColorScheme, projectType)
 		fileType := "json"
 		switch {
 		case strings.HasSuffix(tp, ".ts"):
@@ -1835,7 +1920,9 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 	if projectType == "ecommerce" {
 		store, err := c.DB.GetStoreByAppProjectID(project.ID.String())
 		if err == nil && store != nil {
-			summary, seedErr := c.SeedEcommerceData(ctx, store, project.Prompt, sendEvent)
+			seedCtx, seedCancel := context.WithTimeout(ctx, 2*time.Minute)
+			summary, seedErr := c.SeedEcommerceData(seedCtx, store, project.Prompt, sendEvent)
+			seedCancel()
 			if seedErr != nil {
 				slog.Warn("Failed to seed e-commerce data", "error", seedErr, "project_id", project.ID)
 			} else {
@@ -1885,6 +1972,7 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 		"app_project_id": project.ID,
 		"success":        true,
 		"message":        "app generation completed",
+		"total_files":    len(generatedFiles),
 	})
 }
 
