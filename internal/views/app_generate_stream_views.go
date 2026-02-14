@@ -4,7 +4,6 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/utils"
@@ -21,7 +20,7 @@ func (v *HttpViews) GenerateAppStream(w http.ResponseWriter, r *http.Request) {
 	if requireActiveSubscription(w, user) {
 		return
 	}
-	if v.deductAICredits(w, user, models.AICreditCostGenerateApp, "generate_app_stream", "") {
+	if v.checkMinimumCredits(w, user) {
 		return
 	}
 
@@ -64,7 +63,7 @@ func (v *HttpViews) GenerateEcommerceAppStream(w http.ResponseWriter, r *http.Re
 	if requireActiveSubscription(w, user) {
 		return
 	}
-	if v.deductAICredits(w, user, models.AICreditCostGenerateApp, "generate_ecommerce_app_stream", "") {
+	if v.checkMinimumCredits(w, user) {
 		return
 	}
 

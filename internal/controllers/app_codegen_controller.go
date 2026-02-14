@@ -762,6 +762,7 @@ func (c *Controller) generateSingleAppFile(
 	mu *sync.Mutex,
 	allFilePaths []string,
 	colorSchemeJSON []byte,
+	storeContext string,
 	sendEvent func(string, any) bool,
 ) (string, error) {
 	fileCtx, fileCancel := context.WithTimeout(ctx, 5*time.Minute)
@@ -779,13 +780,16 @@ func (c *Controller) generateSingleAppFile(
 		strings.Join(allFilePaths, ", "),
 		project.Prompt,
 	))
-	// Inline wemob-store.ts in system prompt for e-commerce
+	// Inline wemob-store.ts and store context in system prompt for e-commerce
 	if project.ProjectType == "ecommerce" {
 		mu.Lock()
 		if storeContent, ok := generatedFiles["lib/wemob-store.ts"]; ok {
 			systemPrompt.WriteString(fmt.Sprintf("\n\n--- lib/wemob-store.ts (INJECTED SDK — use these exports, do NOT create custom API utilities) ---\n%s", storeContent))
 		}
 		mu.Unlock()
+		if storeContext != "" {
+			systemPrompt.WriteString(fmt.Sprintf("\n\n### Store Context\n%s", storeContext))
+		}
 	}
 
 	// Build compact per-file user prompt
@@ -980,6 +984,15 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 	ctx = utils.WithTokenTracker(ctx, tracker)
 	defer func() {
 		c.RecordTokenUsage(user.ID, "generate_app", model, provider.Name, project.ID.String(), tracker)
+		// Token-based credit deduction
+		_, _, total, _ := tracker.Totals()
+		if total > 0 {
+			credits := models.TokensToCredits(total)
+			if err := c.DeductAICreditsUnchecked(user, credits, "generate_app", project.ID.String()); err != nil {
+				slog.Warn("failed to deduct AI credits from tokens", "error", err,
+					"user_id", user.ID, "credits", credits, "tokens", total)
+			}
+		}
 	}()
 
 	// Start SSE keepalive goroutine to prevent proxy/firewall timeouts
@@ -1187,7 +1200,31 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 		}
 	}
 
-	// Step 7: Categorize remaining files into tiers and generate with context accumulation
+	// Step 7: Build e-commerce store context for per-file codegen
+	var storeContext string
+	if projectType == "ecommerce" {
+		store, err := c.DB.GetStoreByAppProjectID(project.ID.String())
+		if err == nil && store != nil {
+			var sb strings.Builder
+			sb.WriteString(fmt.Sprintf("This is an e-commerce project with a REAL backend store. ALL product/category data MUST be fetched from the API — NEVER hardcode products, prices, or categories.\n"))
+			sb.WriteString(fmt.Sprintf("Store: %s (ID: %s, Currency: %s, Locale: %s, Tax: %.2f%%)\n", store.StoreName, store.ID.String(), store.Currency, store.Locale, store.TaxRate))
+			products, _ := c.DB.GetProductsByStoreID(store.ID.String())
+			sb.WriteString(fmt.Sprintf("Products in database: %d\n", len(products)))
+			categories, _ := c.DB.GetCategoriesByStoreID(store.ID.String())
+			if len(categories) > 0 {
+				var catNames []string
+				for _, cat := range categories {
+					catNames = append(catNames, cat.Name)
+				}
+				sb.WriteString(fmt.Sprintf("Categories: %s\n", strings.Join(catNames, ", ")))
+			}
+			sb.WriteString("Use import { getProducts, getProduct, getCategories, useProducts, useProduct, useCategories, useCart, useStoreConfig, CartProvider, formatPrice, getSessionId } from \"@/lib/wemob-store\";\n")
+			sb.WriteString("Prices are in cents — use formatPrice(cents) for display.\n")
+			storeContext = sb.String()
+		}
+	}
+
+	// Categorize remaining files into tiers and generate with context accumulation
 	tiers := categorizeFiles(appFiles)
 	colorSchemeJSON, _ := json.Marshal(structure.ColorScheme)
 
@@ -1223,7 +1260,7 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 						slog.Info("Retrying file generation", "path", fp.Path, "attempt", attempt+1)
 					}
 					var err error
-					content, err = c.generateSingleAppFile(ctx, project, fp, structure, model, provider, generatedFiles, &mu, allFilePaths, colorSchemeJSON, sendEvent)
+					content, err = c.generateSingleAppFile(ctx, project, fp, structure, model, provider, generatedFiles, &mu, allFilePaths, colorSchemeJSON, storeContext, sendEvent)
 					if err != nil {
 						slog.Error("failed to generate app file", "error", err, "path", fp.Path, "attempt", attempt+1)
 						lastFailReason = fmt.Sprintf("error: %s", err.Error())

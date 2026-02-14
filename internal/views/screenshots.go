@@ -11,6 +11,7 @@ import (
 	"github.com/go-playground/validator/v10"
 	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/constants"
+	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/utils"
 	"github.com/knid/wemob/internal/utils/external"
@@ -30,6 +31,18 @@ func (v *HttpViews) AutoGenerateScreenshots(w http.ResponseWriter, r *http.Reque
 	validate := validator.New(validator.WithRequiredStructEnabled())
 	if err := utils.ValidateFunc[requests.NavBarAutoFillWithAIRequest](autoGenerateScreenshotsReq, validate); err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+	if requireActiveSubscription(w, user) {
+		return
+	}
+	if v.deductAICredits(w, user, models.AICreditCostScreenshotGenerate, "screenshot_generate", "") {
 		return
 	}
 

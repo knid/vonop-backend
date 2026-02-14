@@ -936,12 +936,21 @@ const NEXTJS_SHARED_RULES = `
 - Mobile-first responsive design (sm:, md:, lg: breakpoints). Semantic HTML. Accessibility attributes.
 - ONLY import from files in the "All files" context. Missing imports cause build failures. If a file isn't listed, implement it inline.
 - NEVER import Node.js builtins (fs, path, os, crypto, etc.) or build-time packages (tailwindcss, postcss, eslint, webpack, etc.).
-- Define mock/placeholder data inline as const arrays/objects. Do NOT import from external data files.
+- For NON-e-commerce projects: define mock/placeholder data inline as const arrays/objects. Do NOT import from external data files.
 - cn() from @/lib/utils for conditional classes (clsx + tailwind-merge). If lib/utils.ts absent, use clsx directly.
 - Custom Tailwind theme colors: primary, secondary, accent, background, surface, text. Use as classes (bg-primary, text-accent).
 - Pre-installed deps: lucide-react, clsx, tailwind-merge, class-variance-authority, framer-motion, @radix-ui/* primitives.
 - Use read_file tool to check actual exports before importing from sibling files. Do NOT guess export names.
-- For e-commerce: use @/lib/wemob-store hooks (useCart, useProducts, useProduct, useCategories, useStoreConfig). Wrap layout with CartProvider.`
+
+### E-Commerce Projects (CRITICAL)
+If lib/wemob-store.ts exists or the project is e-commerce, you MUST follow these rules:
+- NEVER define hardcoded/mock product data, categories, prices, or store config in component files. ALL product and category data MUST come from the Wemob Storefront API via @/lib/wemob-store.
+- Use the SDK hooks in client components: useProducts(), useProduct(slug), useCategories(), useStoreConfig(), useCart(). Wrap the root layout with <CartProvider>.
+- Use the SDK standalone functions in server components: getProducts(), getProduct(slug), getCategories(), getStoreConfig().
+- Use formatPrice(cents) from @/lib/wemob-store for all price display — never format prices manually.
+- Cart operations: useCart() provides addItem, updateItem, removeItem, applyDiscount, checkout, clearCart with optimistic updates.
+- Session management is handled automatically by the SDK (cookie + localStorage). Use getSessionId() if needed.
+- If you see a "Store context" section below, use that information (currency, categories, product count) to inform your UI structure, but ALWAYS fetch real data from the API at runtime.`
 
 const NEXTJS_FILE_TSX_PROMPT = `You are an expert Next.js 16 developer and UI/UX designer. Generate a single TSX/TS file.
 
@@ -1043,7 +1052,7 @@ Each operation has:
 11. Only import from paths that exist in the current project files or that you are creating in the same operations array.
 12. Use lucide-react for icons (already in project dependencies).
 13. NEVER import Node.js built-in modules (fs, path, module, os, crypto, stream, etc.). This is a browser-side Next.js app.
-14. For mock/placeholder data, define it inline as const arrays or objects. Do NOT import from external data files unless they exist.
+14. For NON-e-commerce projects: define mock/placeholder data inline as const arrays or objects. For e-commerce projects: NEVER hardcode product/category/price data — always fetch from the API via @/lib/wemob-store.
 15. NEVER import build-time packages in component files: tailwindcss, postcss, autoprefixer, eslint, typescript, webpack, etc. Use Tailwind via className strings only.
 16. For conditional CSS classes, use cn() from @/lib/utils (clsx + tailwind-merge). If lib/utils.ts doesn't exist, create it.
 17. You CAN modify package.json to add new npm dependencies when needed (e.g., a chart library, date library, etc.). Use "modify" action with type "json".

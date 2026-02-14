@@ -385,6 +385,15 @@ func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.A
 	ctx = utils.WithTokenTracker(ctx, tracker)
 	defer func() {
 		c.RecordTokenUsage(user.ID, "app_chat", model, provider.Name, project.ID.String(), tracker)
+		// Token-based credit deduction
+		_, _, total, _ := tracker.Totals()
+		if total > 0 {
+			credits := models.TokensToCredits(total)
+			if err := c.DeductAICreditsUnchecked(user, credits, "app_chat", project.ID.String()); err != nil {
+				slog.Warn("failed to deduct AI credits from tokens", "error", err,
+					"user_id", user.ID, "credits", credits, "tokens", total)
+			}
+		}
 	}()
 
 	// Load current files
