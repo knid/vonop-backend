@@ -375,6 +375,13 @@ func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.A
 		model = constants.DEFAULT_NEXTJS_LLM_MODEL
 	}
 
+	// Token usage tracking
+	tracker := utils.NewTokenTracker()
+	ctx = utils.WithTokenTracker(ctx, tracker)
+	defer func() {
+		c.RecordTokenUsage(user.ID, "app_chat", model, provider.Name, project.ID.String(), tracker)
+	}()
+
 	// Load current files
 	files, err := c.DB.GetAppGeneratedFilesByProjectID(project.ID.String(), "nextjs")
 	if err != nil {
@@ -591,6 +598,9 @@ func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.A
 	executor := c.compositeToolExecutor(localExecutor)
 	chatTools := append([]utils.Tool{}, appChatTools...)
 	chatTools = append(chatTools, c.mcpTools()...)
+	if wsTool := provider.WebSearchTool(); wsTool != nil {
+		chatTools = append(chatTools, *wsTool)
+	}
 	responseJSON, err := utils.StreamWithTools(
 		ctx,
 		model,

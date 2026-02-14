@@ -5,6 +5,7 @@ import (
 
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/utils"
+	"github.com/posthog/posthog-go"
 )
 
 func (v *HttpViews) GetReferralCode(w http.ResponseWriter, r *http.Request) {
@@ -57,6 +58,9 @@ func (v *HttpViews) ApplyReferralCode(w http.ResponseWriter, r *http.Request) {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+
+	v.Controller.TrackEvent(user.ID, "referral_code_applied", posthog.NewProperties().
+		Set("code", req.Code))
 
 	utils.JSONResponse(w, map[string]string{"message": "referral code applied successfully"}, http.StatusOK)
 }

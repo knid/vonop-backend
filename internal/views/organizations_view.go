@@ -6,6 +6,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/utils"
+	"github.com/posthog/posthog-go"
 )
 
 func (v *HttpViews) CreateOrganization(w http.ResponseWriter, r *http.Request) {
@@ -30,6 +31,9 @@ func (v *HttpViews) CreateOrganization(w http.ResponseWriter, r *http.Request) {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+
+	v.Controller.TrackEvent(user.ID, "organization_created", posthog.NewProperties().
+		Set("org_name", req.Name))
 
 	utils.JSONResponse(w, result, http.StatusCreated)
 }
@@ -168,6 +172,9 @@ func (v *HttpViews) InviteOrganizationMember(w http.ResponseWriter, r *http.Requ
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+
+	v.Controller.TrackEvent(user.ID, "organization_member_invited", posthog.NewProperties().
+		Set("org_id", orgID))
 
 	utils.JSONResponse(w, result, http.StatusCreated)
 }

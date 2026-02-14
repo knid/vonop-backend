@@ -9,6 +9,7 @@ import (
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/utils"
+	"github.com/posthog/posthog-go"
 	"github.com/stripe/stripe-go/v82"
 	"github.com/stripe/stripe-go/v82/invoice"
 	"github.com/stripe/stripe-go/v82/subscription"
@@ -199,6 +200,8 @@ func (v *HttpViews) EndTrialNowAndChargeForUser(w http.ResponseWriter, r *http.R
 		utils.JSONResponse(w, resp, http.StatusPaymentRequired)
 		return
 	}
+
+	v.Controller.TrackEvent(user.ID, "trial_ended_manually", posthog.NewProperties())
 
 	if resp["status"] != "paid" {
 		utils.JSONResponse(w, resp, http.StatusPaymentRequired)

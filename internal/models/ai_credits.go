@@ -29,6 +29,21 @@ type AICreditTransaction struct {
 	CreatedAt time.Time `bun:"created_at,nullzero,notnull,default:current_timestamp"`
 }
 
+// LLMTokenUsage records per-request token consumption for billing visibility and dashboards.
+type LLMTokenUsage struct {
+	ID               uuid.UUID `bun:",pk,type:uuid,default:uuid_generate_v4()"`
+	UserID           uuid.UUID `bun:",notnull,type:uuid"`
+	User             *User     `bun:"rel:belongs-to,join:user_id=id"`
+	Action           string    `bun:",notnull"`          // "generate_app", "app_chat", etc.
+	Model            string    `bun:",notnull"`
+	PromptTokens     int       `bun:",notnull,default:0"`
+	CompletionTokens int       `bun:",notnull,default:0"`
+	TotalTokens      int       `bun:",notnull,default:0"`
+	CallCount        int       `bun:",notnull,default:0"`
+	Reference        string    `bun:",nullzero"`         // project/app ID
+	CreatedAt        time.Time `bun:"created_at,nullzero,notnull,default:current_timestamp"`
+}
+
 // AI credit costs per action
 const (
 	AICreditCostGenerate       = 10

@@ -8,6 +8,7 @@ import (
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/utils"
+	"github.com/posthog/posthog-go"
 )
 
 // POST /v2/apps/generate/stream
@@ -40,6 +41,10 @@ func (v *HttpViews) GenerateAppStream(w http.ResponseWriter, r *http.Request) {
 	if req.ProjectType == "ecommerce" {
 		v.Controller.CreateStore(project, user, project.Name+" Store")
 	}
+
+	v.Controller.TrackEvent(user.ID, "app_generated", posthog.NewProperties().
+		Set("project_type", req.ProjectType).
+		Set("app_id", project.ID.String()))
 
 	v.handleStreamOrAsync(w, r, user, StreamConfig{
 		JobType: "generate_app",
@@ -78,6 +83,9 @@ func (v *HttpViews) GenerateEcommerceAppStream(w http.ResponseWriter, r *http.Re
 	}
 
 	v.Controller.CreateStore(project, user, project.Name+" Store")
+
+	v.Controller.TrackEvent(user.ID, "app_generated_ecommerce", posthog.NewProperties().
+		Set("app_id", project.ID.String()))
 
 	v.handleStreamOrAsync(w, r, user, StreamConfig{
 		JobType: "generate_ecommerce_app",

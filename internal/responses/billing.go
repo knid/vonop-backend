@@ -16,3 +16,25 @@ type AICreditsBalanceResponse struct {
 	PeriodStart string `json:"period_start"`
 	PeriodEnd   string `json:"period_end"`
 }
+
+type TokenUsageEntry struct {
+	Action           string `json:"action"`
+	Model            string `json:"model"`
+	PromptTokens     int    `json:"prompt_tokens"`
+	CompletionTokens int    `json:"completion_tokens"`
+	TotalTokens      int    `json:"total_tokens"`
+	CallCount        int    `json:"call_count"`
+	Reference        string `json:"reference,omitempty"`
+	CreatedAt        string `json:"created_at"`
+}
+
+type TokenUsageSummary struct {
+	TotalPromptTokens     int `json:"total_prompt_tokens"`
+	TotalCompletionTokens int `json:"total_completion_tokens"`
+	TotalTokens           int `json:"total_tokens"`
+}
+
+type TokenUsageResponse struct {
+	Entries []TokenUsageEntry `json:"entries"`
+	Summary TokenUsageSummary `json:"summary"`
+}

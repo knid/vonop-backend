@@ -4,9 +4,13 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/models"
+	"github.com/knid/wemob/internal/utils"
+	"github.com/posthog/posthog-go"
 )
 
 // GetOrCreateCreditsBalance returns the user's credit balance, creating one if needed.
@@ -113,4 +117,59 @@ func (c *Controller) AddAICredits(user *models.User, amount int, action string, 
 		Reference: reference,
 	})
 	return err
+}
+
+// RecordTokenUsage persists LLM token usage to the DB and sends PostHog
+// $ai_generation (per LLM call) + $ai_trace (grouping) events for the
+// built-in LLM Analytics dashboard.
+func (c *Controller) RecordTokenUsage(userID uuid.UUID, action, model, provider, reference string, tracker *utils.TokenTracker) {
+	prompt, completion, total, callCount := tracker.Totals()
+	if total == 0 {
+		return
+	}
+
+	if err := c.DB.CreateLLMTokenUsage(&models.LLMTokenUsage{
+		UserID:           userID,
+		Action:           action,
+		Model:            model,
+		PromptTokens:     prompt,
+		CompletionTokens: completion,
+		TotalTokens:      total,
+		CallCount:        callCount,
+		Reference:        reference,
+	}); err != nil {
+		slog.Error("failed to record LLM token usage", "error", err, "user_id", userID, "action", action)
+	}
+
+	if c.PostHog != nil {
+		traceID := uuid.New().String()
+
+		// Per-call $ai_generation events
+		for _, entry := range tracker.Entries() {
+			c.PostHog.Enqueue(posthog.Capture{
+				DistinctId: userID.String(),
+				Event:      "$ai_generation",
+				Properties: posthog.NewProperties().
+					Set("$ai_provider", provider).
+					Set("$ai_model", entry.Model).
+					Set("$ai_input_tokens", entry.PromptTokens).
+					Set("$ai_output_tokens", entry.CompletionTokens).
+					Set("$ai_trace_id", traceID).
+					Set("$ai_latency", float64(entry.LatencyMs)/1000.0).
+					Set("$ai_is_error", false).
+					Set("$ai_stream", entry.IsStreaming),
+			})
+		}
+
+		// Grouping $ai_trace event
+		c.PostHog.Enqueue(posthog.Capture{
+			DistinctId: userID.String(),
+			Event:      "$ai_trace",
+			Properties: posthog.NewProperties().
+				Set("$ai_trace_id", traceID).
+				Set("$ai_trace_name", action).
+				Set("$ai_input_tokens", prompt).
+				Set("$ai_output_tokens", completion),
+		})
+	}
 }

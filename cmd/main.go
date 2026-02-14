@@ -47,6 +47,7 @@ import (
 	"log/slog"
 
 	infisical "github.com/infisical/go-sdk"
+	"github.com/posthog/posthog-go"
 	slogbetterstack "github.com/samber/slog-betterstack"
 )
 
@@ -106,6 +107,8 @@ func createSchema(db *bun.DB) error {
 		(*models.CartItem)(nil),
 		(*models.Order)(nil),
 		(*models.OrderItem)(nil),
+		// LLM token usage tracking
+		(*models.LLMTokenUsage)(nil),
 		// Background jobs
 		(*models.GenerationJob)(nil),
 	}
@@ -250,6 +253,20 @@ func main() {
 		slog.Info("Preview service enabled", "url", previewURL)
 	}
 
+	// PostHog client (optional — only enabled when API key is set)
+	var posthogClient posthog.Client
+	if phKey := sm.GetSecret("POSTHOG_API_KEY"); phKey != "" {
+		phClient, phErr := posthog.NewWithConfig(phKey, posthog.Config{
+			Endpoint: "https://eu.i.posthog.com",
+		})
+		if phErr != nil {
+			slog.Warn("PostHog initialization failed", "error", phErr)
+		} else {
+			posthogClient = phClient
+			slog.Info("PostHog analytics enabled")
+		}
+	}
+
 	controller := controllers.NewController(
 		db,
 		make(chan struct{}, constants.MAX_CONCURRENT_BUILDS),
@@ -268,6 +285,7 @@ func main() {
 		vercelService,
 		previewService,
 		nil, // MCP service initialized async below
+		posthogClient,
 	)
 
 	// MCP service (optional — connect in background so it doesn't block server startup)
@@ -540,6 +558,7 @@ func main() {
 					r.Get("/", httpViews.GetAICreditsBalance)
 					r.Get("/transactions", httpViews.GetAICreditTransactions)
 				})
+				r.Get("/token-usage", httpViews.GetTokenUsage)
 			})
 
 			r.Route("/organizations", func(r chi.Router) {
@@ -794,6 +813,11 @@ func main() {
 	proxyRoute.Use(middleware.Timeout(60 * time.Second))
 	proxyRoute.HandleFunc("/*", httpViews.ProxyHandler)
 	go http.ListenAndServe(":9001", proxyRoute)
+
+	// Flush PostHog events on shutdown
+	if posthogClient != nil {
+		defer posthogClient.Close()
+	}
 
 	// Main
 	http.ListenAndServe(":8001", r)
