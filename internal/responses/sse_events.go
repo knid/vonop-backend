@@ -52,3 +52,11 @@ type ToolCallEvent struct {
 	Tool      string `json:"tool"`
 	Arguments string `json:"arguments"`
 }
+
+type SeedProgressEvent struct {
+	Phase   string `json:"phase"`
+	Action  string `json:"action,omitempty"`
+	Current int    `json:"current,omitempty"`
+	Total   int    `json:"total,omitempty"`
+	Summary string `json:"summary,omitempty"`
+}
