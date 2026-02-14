@@ -1059,6 +1059,87 @@ Given the user's description of a web application they want to build, generate a
   ]
 }`
 
+const NEXTJS_MOBILE_STRUCTURE_PROMPT = `You are an expert mobile-first web developer, application architect, and UI/UX designer who creates beautiful, native-feeling mobile web applications.
+
+Given the user's description of a mobile app they want to build, generate a structured file plan for a Next.js 16 App Router project optimized for mobile devices.
+
+### Design Philosophy
+- Design like a native mobile app. Think iOS/Android native quality rendered as a responsive web app.
+- Mobile-first and mobile-only — target max-width ~430px viewport. No desktop layouts.
+- Use mobile UI patterns: bottom tabs, swipe gestures, touch-friendly tap targets (min 44px), pull-to-refresh.
+- Smooth animations, spring physics, haptic-like feedback, and native-feeling transitions.
+- Bottom sheets instead of modals, slide-up panels, card-based navigation.
+- Safe area insets for modern devices. Status bar awareness.
+- Dark mode support by default.
+
+### Rules
+1. Generate an app name and URL-safe slug from the user's prompt.
+2. Generate a sophisticated, harmonious color scheme with primary, secondary, accent, background, surface, and text colors (hex values). Use vibrant, modern mobile-friendly palettes.
+3. Also generate a dark color scheme variant.
+4. Choose professional, modern typography pairing (heading_font and body_font from Google Fonts). Consider Inter, SF Pro-like alternatives, DM Sans, Plus Jakarta Sans.
+5. Plan the files needed for the project. Each file has a path, type, and description.
+6. DO NOT include package.json, tsconfig.json, postcss.config.mjs, or next.config.mjs — these are template-managed and injected automatically.
+7. Required files: app/layout.tsx, app/page.tsx, app/globals.css
+8. Plan a lib/utils.ts file that exports a cn() helper using clsx and tailwind-merge.
+9. Use Next.js App Router structure (app/ directory for pages).
+10. Plan 3-8 pages depending on complexity.
+11. Include shared UI components in a components/ directory. Plan reusable primitives (Button, Card, Badge, Input, etc.) in components/ui/ following shadcn/ui patterns.
+12. Keep the structure clean and well-organized.
+13. CRITICAL: Every component or module that is imported by any page MUST be included in the file list. Missing files will cause build failures.
+14. Prefer inline implementations over importing from separate utility/lib files. Only create separate files for reusable components or large data modules.
+15. MOBILE-SPECIFIC: Include viewport meta tag configuration for mobile. Use touch-friendly sizing. Plan bottom tab navigation component. Use mobile-appropriate components (bottom sheets, slide-up modals, swipeable cards). All layouts must work within 430px max width. NO desktop-only layouts.
+16. Generate mobile-first CSS — use Tailwind's default breakpoint as the base (mobile), never require larger breakpoints for core functionality.
+17. Include PWA-ready manifest hints in the layout description.
+
+### Output format (strict JSON, no explanation, no markdown)
+{
+  "name": "App Name",
+  "slug": "app-name",
+  "colorScheme": {
+    "primary": "#hex",
+    "secondary": "#hex",
+    "accent": "#hex",
+    "background": "#hex",
+    "surface": "#hex",
+    "text": "#hex"
+  },
+  "darkColorScheme": {
+    "primary": "#hex",
+    "secondary": "#hex",
+    "accent": "#hex",
+    "background": "#hex",
+    "surface": "#hex",
+    "text": "#hex"
+  },
+  "typography": {
+    "heading_font": "Inter",
+    "body_font": "Inter"
+  },
+  "files": [
+    {"path": "app/layout.tsx", "type": "tsx", "description": "Root layout with mobile viewport, fonts, metadata, and bottom navigation"},
+    {"path": "app/page.tsx", "type": "tsx", "description": "Home screen with mobile-optimized layout"},
+    {"path": "app/globals.css", "type": "css", "description": "Global styles with Tailwind v4 @theme colors and mobile utilities"},
+    {"path": "components/bottom-nav.tsx", "type": "tsx", "description": "Bottom tab navigation bar"},
+    {"path": "components/mobile-header.tsx", "type": "tsx", "description": "Mobile header with back button and title"}
+  ]
+}`
+
+// NEXTJS_MOBILE_DESIGN_RULES is injected into per-file system prompts for mobile_app projects.
+const NEXTJS_MOBILE_DESIGN_RULES = `
+### Mobile App Design Rules (CRITICAL)
+This is a MOBILE APP — design like a native iOS/Android app, NOT a desktop website.
+- Target max-width 430px. All layouts must work in a phone viewport.
+- Touch-friendly: minimum 44px tap targets, generous spacing between interactive elements.
+- Use mobile UI patterns: bottom tab navigation, swipe gestures, pull-to-refresh, bottom sheets instead of modals.
+- Safe area awareness: respect env(safe-area-inset-*) for notched devices.
+- Use 100dvh instead of 100vh for full-height layouts (fixes iOS Safari).
+- Smooth native-feeling animations with framer-motion (spring physics, 200-300ms transitions).
+- Card-based layouts, rounded corners (rounded-2xl), subtle shadows.
+- NO desktop patterns: no hover-dependent interactions, no sidebar navigation, no wide multi-column layouts.
+- Typography: 16px minimum for body text (prevents iOS zoom on input focus).
+- Sticky headers and bottom bars — use fixed/sticky positioning for navigation.
+- Use the theme colors (bg-background, text-text, bg-primary, etc.) from globals.css — they are already applied to body.`
+
 // NEXTJS_SHARED_RULES contains coding rules shared across file-generation and repair prompts.
 const NEXTJS_SHARED_RULES = `
 ### Coding Rules

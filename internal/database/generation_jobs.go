@@ -37,6 +37,23 @@ func (db *Database) AppendGenerationJobEvent(jobID string, event models.JobEvent
 	return err
 }
 
+// SetGenerationJobEvents replaces the entire events array with the provided events.
+// Used as a final consistency write to ensure all milestone events are persisted,
+// even if individual AppendGenerationJobEvent calls failed under DB pressure.
+func (db *Database) SetGenerationJobEvents(jobID string, events []models.JobEvent) error {
+	eventsJSON, err := json.Marshal(events)
+	if err != nil {
+		return err
+	}
+	_, err = db.DB.NewUpdate().
+		Model((*models.GenerationJob)(nil)).
+		Set("events = ?", string(eventsJSON)).
+		Set("updated_at = ?", time.Now()).
+		Where("id = ?", jobID).
+		Exec(context.Background())
+	return err
+}
+
 func (db *Database) SetGenerationJobResult(jobID string, result json.RawMessage) error {
 	_, err := db.DB.NewUpdate().
 		Model((*models.GenerationJob)(nil)).

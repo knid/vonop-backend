@@ -7,7 +7,7 @@ import (
 
 type GenerateAppRequest struct {
 	Prompt      string `json:"prompt" validate:"required,min=10" errormgs:"must be at least 10 characters long"`
-	ProjectType string `json:"project_type" validate:"omitempty,oneof=app ecommerce" errormgs:"must be 'app' or 'ecommerce'"`
+	ProjectType string `json:"project_type" validate:"omitempty,oneof=app ecommerce mobile_app" errormgs:"must be 'app', 'ecommerce', or 'mobile_app'"`
 }
 
 func (r *GenerateAppRequest) Validate(validate *validator.Validate) error {

@@ -949,7 +949,7 @@ func StreamWithTools(
 	}
 
 	const maxRounds = 10
-	const nudgeAfter = 5 // inject "generate now" nudge after this many tool rounds
+	const nudgeAfter = 3 // inject "generate now" nudge and strip tools after this many consecutive tool rounds
 	currentMessages := make([]Message, len(messages))
 	copy(currentMessages, messages)
 	toolCallHistory := make(map[string]string) // "tool:args" → result (dedup cache)
@@ -957,12 +957,15 @@ func StreamWithTools(
 
 	for round := 0; round < maxRounds; round++ {
 		// After several consecutive tool rounds, nudge the AI to stop researching
+		// and strip tools from the request to force a text response.
+		roundTools := tools
 		if consecutiveToolRounds >= nudgeAfter {
 			currentMessages = append(currentMessages, Message{
 				Role:    "system",
-				Content: "You have already gathered sufficient context from tool calls. Do NOT call any more tools. Generate your final response with the operations JSON now.",
+				Content: "You have already gathered sufficient context from tool calls. Do NOT call any more tools. Generate your final complete response now using the information you have collected.",
 			})
-			slog.Warn("Injecting stop-researching nudge", "round", round, "consecutive_tool_rounds", consecutiveToolRounds)
+			roundTools = nil // remove tools to force text generation
+			slog.Warn("Injecting stop-researching nudge and removing tools", "round", round, "consecutive_tool_rounds", consecutiveToolRounds)
 		}
 		if ctx.Err() != nil {
 			return "", ctx.Err()
@@ -975,7 +978,7 @@ func StreamWithTools(
 			MaxTokens:      16384,
 			Reasoning:      reasoning,
 			Messages:       currentMessages,
-			Tools:          tools,
+			Tools:          roundTools,
 			ResponseFormat: responseFormat,
 		}, provider)
 		body, _ := json.Marshal(reqBody)
