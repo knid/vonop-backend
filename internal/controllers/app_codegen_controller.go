@@ -1242,6 +1242,17 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 				project.ProjectType = "ecommerce"
 				project, _ = c.DB.UpdateAppProject(project)
 				slog.Info("Auto-detected ecommerce project from file plan", "project_id", project.ID)
+
+				// Auto-create store if it doesn't exist yet (user typed a free-form prompt
+				// instead of using the explicit ecommerce endpoint)
+				existingStore, _ := c.DB.GetStoreByAppProjectID(project.ID.String())
+				if existingStore == nil || existingStore.ID.String() == "00000000-0000-0000-0000-000000000000" {
+					if _, err := c.CreateStore(project, user, project.Name+" Store"); err != nil {
+						slog.Error("Failed to auto-create store for detected ecommerce project", "error", err, "project_id", project.ID)
+					} else {
+						slog.Info("Auto-created store for detected ecommerce project", "project_id", project.ID)
+					}
+				}
 				break
 			}
 		}

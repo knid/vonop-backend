@@ -38,7 +38,10 @@ func (v *HttpViews) GenerateAppStream(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.ProjectType == "ecommerce" {
-		v.Controller.CreateStore(project, user, project.Name+" Store")
+		if _, err := v.Controller.CreateStore(project, user, project.Name+" Store"); err != nil {
+			utils.JSONErrorResponse(w, "failed to create store: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
 	}
 
 	v.Controller.TrackEvent(user.ID, "app_generation_started", posthog.NewProperties().
@@ -81,7 +84,10 @@ func (v *HttpViews) GenerateEcommerceAppStream(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	v.Controller.CreateStore(project, user, project.Name+" Store")
+	if _, err := v.Controller.CreateStore(project, user, project.Name+" Store"); err != nil {
+		utils.JSONErrorResponse(w, "failed to create store: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
 
 	v.Controller.TrackEvent(user.ID, "app_generation_started", posthog.NewProperties().
 		Set("project_type", "ecommerce").
