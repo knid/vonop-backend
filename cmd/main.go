@@ -749,22 +749,32 @@ func main() {
 				})
 			})
 
-			// Public storefront (no auth)
+			// Public storefront (no auth, per-store-per-IP rate limiting)
 			r.Route("/storefront/{storeId}", func(r chi.Router) {
+				// Fix 3: Read endpoints — relaxed rate limit
+				r.Use(rateLimiter.RateLimit(60, time.Minute, appMiddleware.StorefrontIPKey))
 				r.Get("/config", httpViews.StorefrontGetStoreConfig)
 				r.Get("/products", httpViews.StorefrontGetProducts)
 				r.Get("/products/{slug}", httpViews.StorefrontGetProduct)
 				r.Get("/categories", httpViews.StorefrontGetCategories)
-				r.Post("/cart", httpViews.StorefrontCreateCart)
 				r.Get("/cart/{sessionId}", httpViews.StorefrontGetCart)
-				r.Post("/cart/{sessionId}/items", httpViews.StorefrontAddCartItem)
-				r.Put("/cart/{sessionId}/items/{itemId}", httpViews.StorefrontUpdateCartItem)
-				r.Delete("/cart/{sessionId}/items/{itemId}", httpViews.StorefrontDeleteCartItem)
-				r.Post("/cart/{sessionId}/discount", httpViews.StorefrontApplyDiscount)
-				r.Post("/checkout", httpViews.StorefrontCheckout)
-				r.Post("/checkout/confirm", httpViews.StorefrontConfirmCheckout)
 				r.Get("/orders/{orderId}", httpViews.StorefrontGetOrder)
+
+				// Fix 3: Write endpoints — tighter rate limit
+				r.With(rateLimiter.RateLimit(20, time.Minute, appMiddleware.StorefrontIPKey)).Post("/cart", httpViews.StorefrontCreateCart)
+				r.With(rateLimiter.RateLimit(20, time.Minute, appMiddleware.StorefrontIPKey)).Post("/cart/{sessionId}/items", httpViews.StorefrontAddCartItem)
+				r.With(rateLimiter.RateLimit(20, time.Minute, appMiddleware.StorefrontIPKey)).Put("/cart/{sessionId}/items/{itemId}", httpViews.StorefrontUpdateCartItem)
+				r.With(rateLimiter.RateLimit(20, time.Minute, appMiddleware.StorefrontIPKey)).Delete("/cart/{sessionId}/items/{itemId}", httpViews.StorefrontDeleteCartItem)
+				r.With(rateLimiter.RateLimit(20, time.Minute, appMiddleware.StorefrontIPKey)).Post("/cart/{sessionId}/discount", httpViews.StorefrontApplyDiscount)
+				r.With(rateLimiter.RateLimit(10, time.Minute, appMiddleware.StorefrontIPKey)).Post("/checkout", httpViews.StorefrontCheckout)
+				r.With(rateLimiter.RateLimit(10, time.Minute, appMiddleware.StorefrontIPKey)).Post("/checkout/confirm", httpViews.StorefrontConfirmCheckout)
+
+				// Fix 14: Iyzico payment callback
+				r.Post("/checkout/iyzico-callback", httpViews.StorefrontIyzicoCallback)
 			})
+
+			// Fix 15: Stripe webhook for per-store accounts (outside storeId route)
+			r.Post("/storefront/webhooks/stripe", httpViews.StorefrontStripeWebhook)
 
 			// Public integration providers
 			r.Get("/integrations/providers", httpViews.GetV2IntegrationProviders)

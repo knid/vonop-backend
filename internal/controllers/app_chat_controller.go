@@ -293,7 +293,8 @@ func (c *Controller) buildChatToolExecutor(project *models.AppProject, user *mod
 			var results []string
 			var errCount int
 			for _, op := range args.Operations {
-				if err := c.executeStoreOperation(store, op.Action, op.Data); err != nil {
+				opData, err := c.executeStoreOperation(store, op.Action, op.Data)
+				if err != nil {
 					slog.Warn("manage_store operation failed", "action", op.Action, "error", err)
 					results = append(results, fmt.Sprintf("FAILED %s: %s", op.Action, err.Error()))
 					errCount++
@@ -304,7 +305,11 @@ func (c *Controller) buildChatToolExecutor(project *models.AppProject, user *mod
 					if label == "" {
 						label = code
 					}
-					results = append(results, fmt.Sprintf("OK %s: %s", op.Action, label))
+					if opData != "" {
+						results = append(results, fmt.Sprintf("OK %s: %s\n%s", op.Action, label, opData))
+					} else {
+						results = append(results, fmt.Sprintf("OK %s: %s", op.Action, label))
+					}
 				}
 			}
 

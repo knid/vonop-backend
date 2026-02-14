@@ -1,19 +1,35 @@
 package views
 
 import (
+	"io"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
-	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/utils"
 	"github.com/posthog/posthog-go"
 )
 
+// storefrontGuard checks that the store exists and is active. Returns false if rejected.
+func (v *HttpViews) storefrontGuard(w http.ResponseWriter, r *http.Request) bool {
+	storeID := chi.URLParam(r, "storeId")
+	_, err := v.Controller.StorefrontGuard(storeID)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		return false
+	}
+	return true
+}
+
 // GET /v2/storefront/{storeId}/products
+// Fix 16: N+1 query fix — loads all variants in a single query
 func (v *HttpViews) StorefrontGetProducts(w http.ResponseWriter, r *http.Request) {
 	storeID := chi.URLParam(r, "storeId")
+
+	if !v.storefrontGuard(w, r) {
+		return
+	}
 
 	products, err := v.Controller.StorefrontGetProducts(storeID)
 	if err != nil {
@@ -21,31 +37,35 @@ func (v *HttpViews) StorefrontGetProducts(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	// Load all variants at once to avoid N+1 queries
+	allVariants, _ := v.Controller.GetVariantsByStoreID(storeID)
+	variantMap := make(map[uuid.UUID][]responses.StorefrontVariant)
+	minPriceMap := make(map[uuid.UUID]int)
+	maxPriceMap := make(map[uuid.UUID]int)
+	for _, vr := range allVariants {
+		inStock := !vr.TrackInventory || vr.Inventory > 0
+		sfVariant := responses.StorefrontVariant{
+			ID: vr.ID, Name: vr.Name, PriceInCents: vr.PriceInCents,
+			CompareAtPrice: vr.CompareAtPrice, Inventory: vr.Inventory,
+			InStock: inStock, Options: vr.Options,
+		}
+		variantMap[vr.ProductID] = append(variantMap[vr.ProductID], sfVariant)
+
+		if cur, ok := minPriceMap[vr.ProductID]; !ok || vr.PriceInCents < cur {
+			minPriceMap[vr.ProductID] = vr.PriceInCents
+		}
+		if cur, ok := maxPriceMap[vr.ProductID]; !ok || vr.PriceInCents > cur {
+			maxPriceMap[vr.ProductID] = vr.PriceInCents
+		}
+	}
+
 	var resp []responses.StorefrontProductResponse
 	for _, p := range products {
-		variants, _ := v.Controller.GetVariants(p.ID.String())
-		var sfVariants []responses.StorefrontVariant
-		minPrice, maxPrice := 0, 0
-		for i, vr := range variants {
-			inStock := !vr.TrackInventory || vr.Inventory > 0
-			sfVariants = append(sfVariants, responses.StorefrontVariant{
-				ID: vr.ID, Name: vr.Name, PriceInCents: vr.PriceInCents,
-				CompareAtPrice: vr.CompareAtPrice, Inventory: vr.Inventory,
-				InStock: inStock, Options: vr.Options,
-			})
-			if i == 0 || vr.PriceInCents < minPrice {
-				minPrice = vr.PriceInCents
-			}
-			if vr.PriceInCents > maxPrice {
-				maxPrice = vr.PriceInCents
-			}
-		}
-
 		resp = append(resp, responses.StorefrontProductResponse{
 			ID: p.ID, Name: p.Name, Slug: p.Slug,
 			Description: p.Description, Images: p.Images,
-			Tags: p.Tags, Variants: sfVariants,
-			MinPrice: minPrice, MaxPrice: maxPrice,
+			Tags: p.Tags, Variants: variantMap[p.ID],
+			MinPrice: minPriceMap[p.ID], MaxPrice: maxPriceMap[p.ID],
 		})
 	}
 
@@ -56,6 +76,10 @@ func (v *HttpViews) StorefrontGetProducts(w http.ResponseWriter, r *http.Request
 func (v *HttpViews) StorefrontGetProduct(w http.ResponseWriter, r *http.Request) {
 	storeID := chi.URLParam(r, "storeId")
 	slug := chi.URLParam(r, "slug")
+
+	if !v.storefrontGuard(w, r) {
+		return
+	}
 
 	product, variants, err := v.Controller.StorefrontGetProduct(storeID, slug)
 	if err != nil {
@@ -84,6 +108,10 @@ func (v *HttpViews) StorefrontGetProduct(w http.ResponseWriter, r *http.Request)
 func (v *HttpViews) StorefrontGetCategories(w http.ResponseWriter, r *http.Request) {
 	storeID := chi.URLParam(r, "storeId")
 
+	if !v.storefrontGuard(w, r) {
+		return
+	}
+
 	categories, err := v.Controller.StorefrontGetCategories(storeID)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
@@ -105,7 +133,13 @@ func (v *HttpViews) StorefrontGetCategories(w http.ResponseWriter, r *http.Reque
 func (v *HttpViews) StorefrontCreateCart(w http.ResponseWriter, r *http.Request) {
 	storeID := chi.URLParam(r, "storeId")
 
-	var req requests.CreateCartRequest
+	if !v.storefrontGuard(w, r) {
+		return
+	}
+
+	var req struct {
+		SessionID string `json:"session_id"`
+	}
 	if err := utils.ParseJSONBody(r, &req); err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
 		return
@@ -130,6 +164,10 @@ func (v *HttpViews) StorefrontCreateCart(w http.ResponseWriter, r *http.Request)
 func (v *HttpViews) StorefrontGetCart(w http.ResponseWriter, r *http.Request) {
 	storeID := chi.URLParam(r, "storeId")
 	sessionID := chi.URLParam(r, "sessionId")
+
+	if !v.storefrontGuard(w, r) {
+		return
+	}
 
 	cart, items, err := v.Controller.StorefrontGetCart(storeID, sessionID)
 	if err != nil {
@@ -179,7 +217,15 @@ func (v *HttpViews) StorefrontAddCartItem(w http.ResponseWriter, r *http.Request
 	storeID := chi.URLParam(r, "storeId")
 	sessionID := chi.URLParam(r, "sessionId")
 
-	var req requests.AddCartItemRequest
+	if !v.storefrontGuard(w, r) {
+		return
+	}
+
+	var req struct {
+		ProductID string `json:"product_id"`
+		VariantID string `json:"variant_id"`
+		Quantity  int    `json:"quantity"`
+	}
 	if err := utils.ParseJSONBody(r, &req); err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
 		return
@@ -203,16 +249,25 @@ func (v *HttpViews) StorefrontAddCartItem(w http.ResponseWriter, r *http.Request
 }
 
 // PUT /v2/storefront/{storeId}/cart/{sessionId}/items/{itemId}
+// Fix 2: passes storeID and sessionID for IDOR verification
 func (v *HttpViews) StorefrontUpdateCartItem(w http.ResponseWriter, r *http.Request) {
+	storeID := chi.URLParam(r, "storeId")
+	sessionID := chi.URLParam(r, "sessionId")
 	itemID := chi.URLParam(r, "itemId")
 
-	var req requests.UpdateCartItemRequest
+	if !v.storefrontGuard(w, r) {
+		return
+	}
+
+	var req struct {
+		Quantity int `json:"quantity"`
+	}
 	if err := utils.ParseJSONBody(r, &req); err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	_, err := v.Controller.StorefrontUpdateCartItem(itemID, req.Quantity)
+	_, err := v.Controller.StorefrontUpdateCartItem(storeID, sessionID, itemID, req.Quantity)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
 		return
@@ -222,10 +277,17 @@ func (v *HttpViews) StorefrontUpdateCartItem(w http.ResponseWriter, r *http.Requ
 }
 
 // DELETE /v2/storefront/{storeId}/cart/{sessionId}/items/{itemId}
+// Fix 2: passes storeID and sessionID for IDOR verification
 func (v *HttpViews) StorefrontDeleteCartItem(w http.ResponseWriter, r *http.Request) {
+	storeID := chi.URLParam(r, "storeId")
+	sessionID := chi.URLParam(r, "sessionId")
 	itemID := chi.URLParam(r, "itemId")
 
-	if err := v.Controller.StorefrontDeleteCartItem(itemID); err != nil {
+	if !v.storefrontGuard(w, r) {
+		return
+	}
+
+	if err := v.Controller.StorefrontDeleteCartItem(storeID, sessionID, itemID); err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -238,7 +300,13 @@ func (v *HttpViews) StorefrontApplyDiscount(w http.ResponseWriter, r *http.Reque
 	storeID := chi.URLParam(r, "storeId")
 	sessionID := chi.URLParam(r, "sessionId")
 
-	var req requests.ApplyDiscountRequest
+	if !v.storefrontGuard(w, r) {
+		return
+	}
+
+	var req struct {
+		Code string `json:"code"`
+	}
 	if err := utils.ParseJSONBody(r, &req); err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
 		return
@@ -257,7 +325,18 @@ func (v *HttpViews) StorefrontApplyDiscount(w http.ResponseWriter, r *http.Reque
 func (v *HttpViews) StorefrontCheckout(w http.ResponseWriter, r *http.Request) {
 	storeID := chi.URLParam(r, "storeId")
 
-	var req requests.StorefrontCheckoutRequest
+	if !v.storefrontGuard(w, r) {
+		return
+	}
+
+	var req struct {
+		SessionID       string         `json:"session_id"`
+		CustomerEmail   string         `json:"customer_email"`
+		CustomerName    string         `json:"customer_name"`
+		ShippingAddress map[string]any `json:"shipping_address"`
+		BillingAddress  map[string]any `json:"billing_address"`
+		PaymentProvider string         `json:"payment_provider"`
+	}
 	if err := utils.ParseJSONBody(r, &req); err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
 		return
@@ -284,20 +363,25 @@ func (v *HttpViews) StorefrontCheckout(w http.ResponseWriter, r *http.Request) {
 }
 
 // POST /v2/storefront/{storeId}/checkout/confirm
+// Fix 1: passes storeID for server-side payment verification
 func (v *HttpViews) StorefrontConfirmCheckout(w http.ResponseWriter, r *http.Request) {
-	var req requests.ConfirmCheckoutRequest
+	storeID := chi.URLParam(r, "storeId")
+
+	var req struct {
+		OrderID   string `json:"order_id"`
+		PaymentID string `json:"payment_id"`
+	}
 	if err := utils.ParseJSONBody(r, &req); err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	order, err := v.Controller.StorefrontConfirmPayment(req.OrderID, req.PaymentID)
+	order, err := v.Controller.StorefrontConfirmPayment(storeID, req.OrderID, req.PaymentID)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	storeID := chi.URLParam(r, "storeId")
 	v.Controller.TrackEvent(uuid.Nil, "store_order_received", posthog.NewProperties().
 		Set("store_id", storeID).
 		Set("order_total", order.TotalCents))
@@ -308,6 +392,54 @@ func (v *HttpViews) StorefrontConfirmCheckout(w http.ResponseWriter, r *http.Req
 		OrderNumber:     order.OrderNumber,
 		Status:          order.Status,
 	}, http.StatusOK)
+}
+
+// POST /v2/storefront/{storeId}/checkout/iyzico-callback
+// Fix 14: Iyzico callback endpoint
+func (v *HttpViews) StorefrontIyzicoCallback(w http.ResponseWriter, r *http.Request) {
+	storeID := chi.URLParam(r, "storeId")
+	orderID := r.URL.Query().Get("order_id")
+
+	// Iyzico sends the token as a form value
+	token := r.FormValue("token")
+	if token == "" {
+		// Try JSON body as fallback
+		var req struct {
+			Token string `json:"token"`
+		}
+		utils.ParseJSONBody(r, &req)
+		token = req.Token
+	}
+
+	if orderID == "" || token == "" {
+		utils.JSONErrorResponse(w, "missing order_id or token", http.StatusBadRequest)
+		return
+	}
+
+	redirectURL, err := v.Controller.StorefrontHandleIyzicoCallback(storeID, orderID, token)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	http.Redirect(w, r, redirectURL, http.StatusFound)
+}
+
+// POST /v2/storefront/webhooks/stripe
+// Fix 15: Stripe webhook for per-store accounts
+func (v *HttpViews) StorefrontStripeWebhook(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		utils.JSONErrorResponse(w, "failed to read request body", http.StatusBadRequest)
+		return
+	}
+
+	if err := v.Controller.StorefrontHandleStripeWebhook(body); err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	utils.JSONResponse(w, responses.SuccessResponse{Success: true}, http.StatusOK)
 }
 
 // GET /v2/storefront/{storeId}/config
