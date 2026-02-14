@@ -11,6 +11,13 @@ func (c *Controller) TrackEvent(userID uuid.UUID, event string, props posthog.Pr
 	if c.PostHog == nil {
 		return
 	}
+
+	// Attach user email if available
+	user, err := c.DB.GetUserById(userID.String())
+	if err == nil && user != nil && user.Email != "" {
+		props.Set("$email", user.Email)
+	}
+
 	c.PostHog.Enqueue(posthog.Capture{
 		DistinctId: userID.String(),
 		Event:      event,

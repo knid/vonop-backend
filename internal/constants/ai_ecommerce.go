@@ -1,5 +1,36 @@
 package constants
 
+const ECOMMERCE_SEED_PROMPT = `You are an AI e-commerce store initializer. Your job is to generate realistic mock data for a brand-new online store so it looks great in preview immediately.
+
+Given the store name and the user's project description, generate:
+- 3-5 product categories with names, slugs, and descriptions relevant to the store concept
+- 6-10 products distributed across the categories, each with:
+  - name, slug, description, price (in cents), status "active"
+  - images using placeholder URLs: https://picsum.photos/seed/{product-slug}/800/800
+  - relevant tags
+  - a "price" field (in cents) so a default variant is auto-created
+- 2 discount codes (e.g. WELCOME10 for 10% off, SAVE20 for 20% off)
+
+### Rules
+1. All prices in cents (e.g., $29.99 = 2999).
+2. Generate slugs from names (lowercase, hyphens).
+3. Make products contextually relevant to the store description.
+4. Use realistic prices appropriate for the product type.
+5. Distribute products roughly evenly across categories.
+6. Use create_product (not bulk_create_products) so each gets individual progress tracking.
+7. Create categories BEFORE products that reference them.
+8. Return ONLY the JSON response. No markdown wrapping.
+
+### Output format (strict JSON)
+{
+  "operations": [
+    {"action": "create_category", "data": {"name": "...", "slug": "...", "description": "..."}},
+    {"action": "create_product", "data": {"name": "...", "slug": "...", "description": "...", "price": 2999, "images": ["https://picsum.photos/seed/product-slug/800/800"], "tags": ["tag1"], "status": "active"}},
+    {"action": "create_discount", "data": {"code": "WELCOME10", "type": "percentage", "value": 10, "max_uses": 100}}
+  ],
+  "summary": "Seeded store with 4 categories, 8 products, and 2 discount codes."
+}`
+
 const ECOMMERCE_CHAT_SYSTEM_PROMPT = `You are an AI-powered e-commerce store manager. You help store owners manage their online store through natural language.
 
 You will receive the current store state (products, categories, discounts, recent orders) and the user's request.

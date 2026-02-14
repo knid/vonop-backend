@@ -1612,10 +1612,27 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 		}
 	}
 
+	// Step 11b: Auto-seed e-commerce store with mock data
+	var seedSummary string
+	if projectType == "ecommerce" {
+		store, err := c.DB.GetStoreByAppProjectID(project.ID.String())
+		if err == nil && store != nil {
+			summary, seedErr := c.SeedEcommerceData(ctx, store, project.Prompt, sendEvent)
+			if seedErr != nil {
+				slog.Warn("Failed to seed e-commerce data", "error", seedErr, "project_id", project.ID)
+			} else {
+				seedSummary = summary
+			}
+		}
+	}
+
 	// Step 12: Update conversation with assistant message
 	totalFiles := len(templatePaths) + len(appFiles) + len(missingImports)
 	if conv != nil {
 		assistantMsg := fmt.Sprintf("Created app \"%s\" with %d files.", project.Name, totalFiles)
+		if seedSummary != "" {
+			assistantMsg += " " + seedSummary
+		}
 		convMessages = []models.AppConversationMessage{
 			{Role: "user", Content: project.Prompt, Timestamp: time.Now().Unix()},
 			{Role: "assistant", Content: assistantMsg, Timestamp: time.Now().Unix()},
