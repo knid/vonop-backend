@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -26,7 +27,7 @@ func (v *HttpViews) GenerateApp(w http.ResponseWriter, r *http.Request) {
 	if requireActiveSubscription(w, user) {
 		return
 	}
-	if v.deductAICredits(w, user, models.AICreditCostGenerateApp, "generate_app", "") {
+	if v.checkMinimumCredits(w, user) {
 		return
 	}
 
@@ -42,8 +43,12 @@ func (v *HttpViews) GenerateApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Token tracking for post-hoc billing
+	tracker := utils.NewTokenTracker()
+	ctx := utils.WithTokenTracker(r.Context(), tracker)
+
 	// Plan structure and generate files synchronously (code-first)
-	structure, err := v.Controller.PlanAppFileStructure(r.Context(), req.Prompt, req.ProjectType)
+	structure, err := v.Controller.PlanAppFileStructure(ctx, req.Prompt, req.ProjectType)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -92,6 +97,16 @@ func (v *HttpViews) GenerateApp(w http.ResponseWriter, r *http.Request) {
 		},
 	}, http.StatusCreated)
 
+	// Post-hoc token-based billing
+	_, _, total, _ := tracker.Totals()
+	if total > 0 {
+		credits := models.TokensToCredits(total)
+		if err := v.Controller.DeductAICreditsUnchecked(user, credits, "generate_app", project.ID.String()); err != nil {
+			slog.Warn("failed to deduct AI credits from tokens", "error", err,
+				"user_id", user.ID, "credits", credits, "tokens", total)
+		}
+	}
+
 	v.Controller.TrackUserEvent(user, "app_created", posthog.NewProperties().
 		Set("project_type", req.ProjectType).
 		Set("app_id", project.ID.String()))
@@ -107,7 +122,7 @@ func (v *HttpViews) GenerateEcommerceApp(w http.ResponseWriter, r *http.Request)
 	if requireActiveSubscription(w, user) {
 		return
 	}
-	if v.deductAICredits(w, user, models.AICreditCostGenerateApp, "generate_ecommerce_app", "") {
+	if v.checkMinimumCredits(w, user) {
 		return
 	}
 
@@ -124,7 +139,11 @@ func (v *HttpViews) GenerateEcommerceApp(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	structure, err := v.Controller.PlanAppFileStructure(r.Context(), req.Prompt, "ecommerce")
+	// Token tracking for post-hoc billing
+	tracker := utils.NewTokenTracker()
+	ctx := utils.WithTokenTracker(r.Context(), tracker)
+
+	structure, err := v.Controller.PlanAppFileStructure(ctx, req.Prompt, "ecommerce")
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -166,6 +185,16 @@ func (v *HttpViews) GenerateEcommerceApp(w http.ResponseWriter, r *http.Request)
 		},
 	}, http.StatusCreated)
 
+	// Post-hoc token-based billing
+	_, _, total, _ := tracker.Totals()
+	if total > 0 {
+		credits := models.TokensToCredits(total)
+		if err := v.Controller.DeductAICreditsUnchecked(user, credits, "generate_ecommerce_app", project.ID.String()); err != nil {
+			slog.Warn("failed to deduct AI credits from tokens", "error", err,
+				"user_id", user.ID, "credits", credits, "tokens", total)
+		}
+	}
+
 	v.Controller.TrackUserEvent(user, "app_created", posthog.NewProperties().
 		Set("project_type", "ecommerce").
 		Set("app_id", project.ID.String()))
@@ -181,7 +210,7 @@ func (v *HttpViews) GenerateAppFromImage(w http.ResponseWriter, r *http.Request)
 	if requireActiveSubscription(w, user) {
 		return
 	}
-	if v.deductAICredits(w, user, models.AICreditCostGenerateApp, "generate_from_image", "") {
+	if v.checkMinimumCredits(w, user) {
 		return
 	}
 
@@ -191,7 +220,11 @@ func (v *HttpViews) GenerateAppFromImage(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	structure, err := v.Controller.PlanAppFileStructureFromScreenshot(req.ImageBase64)
+	// Token tracking for post-hoc billing
+	tracker := utils.NewTokenTracker()
+	ctx := utils.WithTokenTracker(r.Context(), tracker)
+
+	structure, err := v.Controller.PlanAppFileStructureFromScreenshot(ctx, req.ImageBase64)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -237,6 +270,16 @@ func (v *HttpViews) GenerateAppFromImage(w http.ResponseWriter, r *http.Request)
 			UpdatedAt:   project.UpdatedAt,
 		},
 	}, http.StatusCreated)
+
+	// Post-hoc token-based billing
+	_, _, total, _ := tracker.Totals()
+	if total > 0 {
+		credits := models.TokensToCredits(total)
+		if err := v.Controller.DeductAICreditsUnchecked(user, credits, "generate_from_image", project.ID.String()); err != nil {
+			slog.Warn("failed to deduct AI credits from tokens", "error", err,
+				"user_id", user.ID, "credits", credits, "tokens", total)
+		}
+	}
 
 	v.Controller.TrackUserEvent(user, "app_generated_from_image", posthog.NewProperties().
 		Set("app_id", project.ID.String()))

@@ -52,7 +52,7 @@ func (v *HttpViews) NavBarAutoFillWithAI(w http.ResponseWriter, r *http.Request)
 	if requireActiveSubscription(w, user) {
 		return
 	}
-	if v.deductAICredits(w, user, models.AICreditCostNavbarAutoFill, "navbar_autofill", "") {
+	if v.checkMinimumCredits(w, user) {
 		return
 	}
 
@@ -72,15 +72,27 @@ func (v *HttpViews) NavBarAutoFillWithAI(w http.ResponseWriter, r *http.Request)
 
 	data, _ := json.MarshalIndent(output, "", "  ")
 
-	outputJson, err := utils.GetJSONFromLLM(r.Context(), v.Controller.SecretManager.GetSecret("DEFAULT_LLM_MODEL"), constants.NAVBAR_ITEM_GENERATOR_PROMPT, string(data), v.Controller.LLMProvider())
+	// Token tracking for post-hoc billing
+	tracker := utils.NewTokenTracker()
+	ctx := utils.WithTokenTracker(r.Context(), tracker)
+
+	outputJson, err := utils.GetJSONFromLLM(ctx, v.Controller.SecretManager.GetSecret("DEFAULT_LLM_MODEL"), constants.NAVBAR_ITEM_GENERATOR_PROMPT, string(data), v.Controller.LLMProvider())
 	if err != nil {
 		utils.JSONErrorResponse(w, "Error generating items. Try again please.", http.StatusBadRequest)
 		return
 	}
 
+	// Post-hoc token-based billing
+	_, _, total, _ := tracker.Totals()
+	if total > 0 {
+		credits := models.TokensToCredits(total)
+		if err := v.Controller.DeductAICreditsUnchecked(user, credits, "navbar_autofill", ""); err != nil {
+			slog.Warn("failed to deduct AI credits from tokens", "error", err,
+				"user_id", user.ID, "credits", credits, "tokens", total)
+		}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(200)
 	w.Write([]byte(outputJson))
-	// utils.JSONResponse(w, outputJson, http.StatusOK)
-
 }

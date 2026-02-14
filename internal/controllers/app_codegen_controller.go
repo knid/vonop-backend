@@ -826,14 +826,14 @@ func (c *Controller) PlanAppFileStructureStream(ctx context.Context, prompt stri
 }
 
 // PlanAppFileStructureFromScreenshot uses vision LLM to plan files from a screenshot
-func (c *Controller) PlanAppFileStructureFromScreenshot(imageBase64 string) (*appFileStructure, error) {
+func (c *Controller) PlanAppFileStructureFromScreenshot(ctx context.Context, imageBase64 string) (*appFileStructure, error) {
 	provider := c.llmProvider()
 	model := c.SecretManager.GetSecret("WEBSITE_BUILDER_LLM_MODEL")
 	if model == "" {
 		model = constants.DEFAULT_NEXTJS_LLM_MODEL
 	}
 
-	response, err := utils.GetJSONFromLLMWithVision(context.Background(), model, constants.NEXTJS_SCREENSHOT_TO_FILES_PROMPT, "Analyze this screenshot and generate the file structure plan.", imageBase64, provider)
+	response, err := utils.GetJSONFromLLMWithVision(ctx, model, constants.NEXTJS_SCREENSHOT_TO_FILES_PROMPT, "Analyze this screenshot and generate the file structure plan.", imageBase64, provider)
 	if err != nil {
 		return nil, fmt.Errorf("failed to analyze screenshot")
 	}

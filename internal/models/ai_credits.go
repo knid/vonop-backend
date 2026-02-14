@@ -44,6 +44,9 @@ type LLMTokenUsage struct {
 	CreatedAt        time.Time `bun:"created_at,nullzero,notnull,default:current_timestamp"`
 }
 
+// AICreditsMinBalance is the maximum allowed overdraft (negative floor).
+const AICreditsMinBalance = -100
+
 // Token-to-credit conversion: 1 credit per 10,000 tokens
 const AICreditsTokensPerCredit = 10_000
 
@@ -55,22 +58,3 @@ func TokensToCredits(totalTokens int) int {
 	return (totalTokens + AICreditsTokensPerCredit - 1) / AICreditsTokensPerCredit
 }
 
-// AI credit costs per action
-const (
-	AICreditCostGenerate       = 10
-	AICreditCostChat           = 5
-	AICreditCostScreenshotCode = 15
-	AICreditCostElementEdit    = 3
-	AICreditCostAddPage        = 8
-	AICreditCostPublish        = 2
-
-	// V2 app builder costs
-	AICreditCostGenerateApp  = 15
-	AICreditCostDeployWeb    = 5
-	AICreditCostBuildFlutter = 10
-	AICreditCostStoreChat    = 5
-
-	// V1 legacy endpoint costs
-	AICreditCostNavbarAutoFill     = 3
-	AICreditCostScreenshotGenerate = 5
-)

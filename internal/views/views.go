@@ -6,7 +6,6 @@ import (
 	"github.com/knid/wemob/internal/controllers"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/utils"
-	"github.com/posthog/posthog-go"
 )
 
 type HttpViews struct {
@@ -43,20 +42,3 @@ func (v *HttpViews) checkMinimumCredits(w http.ResponseWriter, user *models.User
 	return false
 }
 
-// deductAICredits attempts to deduct AI credits for the given action.
-// Returns true if the request should be blocked (insufficient credits, response already written).
-func (v *HttpViews) deductAICredits(w http.ResponseWriter, user *models.User, cost int, action string, reference string) bool {
-	err := v.Controller.DeductAICredits(user, cost, action, reference)
-	if err != nil {
-		utils.JSONCodedErrorResponse(w, "AI_CREDITS_DEPLETED", err.Error(), http.StatusPaymentRequired, map[string]any{
-			"credits_required": cost,
-			"action":           action,
-		})
-		return true
-	}
-	v.Controller.TrackUserEvent(user, "ai_credits_deducted", posthog.NewProperties().
-		Set("action", action).
-		Set("cost", cost).
-		Set("reference", reference))
-	return false
-}
