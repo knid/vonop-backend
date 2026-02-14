@@ -12,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/knid/wemob/internal/controllers"
 	"github.com/knid/wemob/internal/models"
+	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/utils"
 )
@@ -19,7 +20,7 @@ import (
 // StreamConfig holds the configuration for handleStreamOrAsync.
 type StreamConfig struct {
 	JobType    string
-	StreamFunc func(ctx context.Context, events chan<- responses.SSEEvent)
+	StreamFunc func(ctx context.Context, events chan<- responses.SSEEvent, jobID string)
 }
 
 // handleStreamOrAsync always creates a background job that persists milestone events.
@@ -38,7 +39,7 @@ func (v *HttpViews) handleStreamOrAsync(w http.ResponseWriter, r *http.Request, 
 	v.Controller.RunningJobs.Store(job.ID.String(), cancel)
 
 	events := make(chan responses.SSEEvent, 100)
-	go cfg.StreamFunc(ctx, events)
+	go cfg.StreamFunc(ctx, events, job.ID.String())
 
 	if r.URL.Query().Get("background") == "true" {
 		// Pure background mode: drain events in goroutine, return job ID immediately
@@ -230,6 +231,56 @@ func (v *HttpViews) GetActiveJobs(w http.ResponseWriter, r *http.Request) {
 	}
 
 	utils.JSONResponse(w, resp, http.StatusOK)
+}
+
+// POST /v2/apps/jobs/{jobId}/clarify
+func (v *HttpViews) ClarifyJob(w http.ResponseWriter, r *http.Request) {
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	jobID := chi.URLParam(r, "jobId")
+	if jobID == "" {
+		utils.JSONErrorResponse(w, "job id is required", http.StatusBadRequest)
+		return
+	}
+
+	// Verify ownership and status
+	job, err := v.Controller.GetJob(jobID, user.ID)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	if job.Status != "awaiting_input" {
+		utils.JSONErrorResponse(w, "job is not awaiting input", http.StatusBadRequest)
+		return
+	}
+
+	var req requests.ClarifyJobRequest
+	if err := utils.ParseJSONBody(r, &req); err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// Convert request answers to controller type
+	answers := make([]controllers.ClarificationAnswer, len(req.Answers))
+	for i, a := range req.Answers {
+		answers[i] = controllers.ClarificationAnswer{ID: a.ID, Answer: a.Answer}
+	}
+
+	result := controllers.ClarificationResult{
+		Answers: answers,
+		Skip:    req.Skip,
+	}
+
+	if err := v.Controller.SubmitClarification(jobID, result); err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	utils.JSONResponse(w, responses.SuccessResponse{Success: true}, http.StatusOK)
 }
 
 // DELETE /v1/jobs/{jobId}

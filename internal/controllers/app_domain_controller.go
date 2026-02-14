@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/go-playground/validator/v10"
+	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/responses"
@@ -42,6 +43,11 @@ func (c *Controller) AddAppDomain(project *models.AppProject, user *models.User,
 	}
 
 	domainName := strings.ToLower(req.Domain)
+
+	// Block manual additions of *.wemob.app subdomains — these are managed automatically
+	if strings.HasSuffix(domainName, "."+constants.WEMOB_APP_BASE_DOMAIN) {
+		return nil, errors.New("wemob.app subdomains are managed automatically")
+	}
 
 	// Check domain is not already in use
 	existing, err := c.DB.GetAppDomainByName(domainName)

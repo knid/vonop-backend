@@ -686,9 +686,9 @@ func (c *Controller) initiateStripePayment(store *models.Store, order *models.Or
 
 	// Determine success/cancel URLs from the project slug
 	project, _ := c.DB.GetAppProjectByID(store.AppProjectID.String())
-	baseURL := fmt.Sprintf("https://%s.wemob.app", store.AppProjectID.String()[:8])
+	baseURL := fmt.Sprintf("https://%s.%s", store.AppProjectID.String()[:8], constants.WEMOB_APP_BASE_DOMAIN)
 	if project != nil {
-		baseURL = fmt.Sprintf("https://%s.wemob.app", project.Slug)
+		baseURL = fmt.Sprintf("https://%s.%s", project.Slug, constants.WEMOB_APP_BASE_DOMAIN)
 	}
 
 	successURL := baseURL + "/checkout/success?order_id=" + order.ID.String()
@@ -845,9 +845,9 @@ func (c *Controller) StorefrontHandleIyzicoCallback(storeID string, orderID stri
 
 	// Determine redirect URL
 	project, _ := c.DB.GetAppProjectByID(store.AppProjectID.String())
-	baseURL := fmt.Sprintf("https://%s.wemob.app", store.AppProjectID.String()[:8])
+	baseURL := fmt.Sprintf("https://%s.%s", store.AppProjectID.String()[:8], constants.WEMOB_APP_BASE_DOMAIN)
 	if project != nil {
-		baseURL = fmt.Sprintf("https://%s.wemob.app", project.Slug)
+		baseURL = fmt.Sprintf("https://%s.%s", project.Slug, constants.WEMOB_APP_BASE_DOMAIN)
 	}
 
 	if err != nil {

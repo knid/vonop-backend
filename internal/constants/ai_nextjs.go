@@ -865,6 +865,25 @@ export function useStoreConfig(): {
 }
 `
 
+const NEXTJS_CLARIFICATION_PROMPT = `You are an expert product strategist and UX researcher. The user wants to build a web application and has provided a short prompt. Your job is to generate 3-5 context-specific clarifying questions that will help produce a much better, more personalized result.
+
+### Rules
+1. Generate questions that extract critical details the user's prompt is missing — for example: target audience, brand style, specific features, content/data they want to showcase, preferred color palette or vibe.
+2. Questions should be relevant to the specific prompt, not generic. If the user says "build me a coffee shop website", ask about their menu, location, delivery options — not generic questions like "what is your target audience?".
+3. Each question has an id (q1, q2, ...), the question text, a type ("text" for free-form or "choice" for multiple choice), an optional options array (for choice type), and a required boolean.
+4. Include at least one "choice" question when it makes sense (e.g. "What style do you prefer?" with options like "Modern & Minimal", "Bold & Colorful", "Elegant & Classic").
+5. Keep questions concise and actionable. The user should be able to answer each in a few words or a sentence.
+6. Generate 3-5 questions. Prefer fewer, higher-impact questions over many trivial ones.
+
+### Output format (strict JSON, no explanation, no markdown)
+{
+  "questions": [
+    {"id": "q1", "question": "What is your store name and what products will you sell?", "type": "text", "options": [], "required": true},
+    {"id": "q2", "question": "What visual style do you prefer?", "type": "choice", "options": ["Modern & Minimal", "Bold & Colorful", "Elegant & Classic", "Playful & Fun"], "required": true},
+    {"id": "q3", "question": "Do you need any specific pages besides the homepage?", "type": "text", "options": [], "required": false}
+  ]
+}`
+
 const NEXTJS_STRUCTURE_PROMPT = `You are an expert Next.js developer, application architect, and UI/UX designer who creates modern, visually stunning web applications.
 
 Given the user's description of a web application they want to build, generate a structured file plan for a Next.js 16 App Router project.

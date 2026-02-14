@@ -18,6 +18,34 @@ import (
 	"github.com/knid/wemob/internal/utils"
 )
 
+// --- Clarification types ---
+
+// ClarificationQuestion is a single question the LLM generates to gather context.
+type ClarificationQuestion struct {
+	ID       string   `json:"id"`
+	Question string   `json:"question"`
+	Type     string   `json:"type"`     // "text" or "choice"
+	Options  []string `json:"options"`  // non-empty when Type == "choice"
+	Required bool     `json:"required"`
+}
+
+// ClarificationResponse is the LLM output containing generated questions.
+type ClarificationResponse struct {
+	Questions []ClarificationQuestion `json:"questions"`
+}
+
+// ClarificationAnswer is a single user answer to a clarification question.
+type ClarificationAnswer struct {
+	ID     string `json:"id"`
+	Answer string `json:"answer"`
+}
+
+// ClarificationResult is sent through the pending channel from the clarify endpoint.
+type ClarificationResult struct {
+	Answers []ClarificationAnswer
+	Skip    bool
+}
+
 type appFileStructure struct {
 	Name            string             `json:"name"`
 	Slug            string             `json:"slug"`
@@ -626,6 +654,103 @@ func (c *Controller) validateAndFixFiles(ctx context.Context, project *models.Ap
 	return totalFixed
 }
 
+// GenerateClarificationQuestions calls the LLM to generate context-specific questions.
+func (c *Controller) GenerateClarificationQuestions(ctx context.Context, prompt string, projectType string) ([]ClarificationQuestion, error) {
+	provider := c.llmProvider()
+	model := c.SecretManager.GetSecret("WEBSITE_BUILDER_LLM_MODEL")
+	if model == "" {
+		model = constants.DEFAULT_NEXTJS_LLM_MODEL
+	}
+
+	userMsg := fmt.Sprintf("User prompt: %s\nProject type: %s", prompt, projectType)
+	responseJSON, err := utils.GetJSONFromLLM(ctx, model, constants.NEXTJS_CLARIFICATION_PROMPT, userMsg, provider)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate clarification questions: %w", err)
+	}
+
+	var resp ClarificationResponse
+	if err := json.Unmarshal([]byte(responseJSON), &resp); err != nil {
+		cleaned := utils.ExtractJSON(responseJSON)
+		if err2 := json.Unmarshal([]byte(cleaned), &resp); err2 != nil {
+			return nil, fmt.Errorf("failed to parse clarification questions: %w", err2)
+		}
+	}
+
+	if len(resp.Questions) == 0 {
+		return nil, fmt.Errorf("LLM returned no clarification questions")
+	}
+
+	return resp.Questions, nil
+}
+
+// waitForClarification emits a clarification_needed SSE event, sets job status to awaiting_input,
+// and blocks until the user responds or the timeout expires.
+// Returns the enriched prompt (original prompt + Q&A context) or the original prompt on timeout/skip.
+func (c *Controller) waitForClarification(ctx context.Context, jobID string, prompt string, questions []ClarificationQuestion, sendEvent func(string, any) bool) string {
+	ch := make(chan ClarificationResult, 1)
+	c.PendingClarifications.Store(jobID, ch)
+	defer c.PendingClarifications.Delete(jobID)
+
+	// Set job status to awaiting_input
+	c.DB.UpdateGenerationJobStatus(jobID, "awaiting_input", "")
+
+	// Emit SSE event
+	if !sendEvent("clarification_needed", responses.ClarificationNeededEvent{
+		JobID:          jobID,
+		Questions:      questions,
+		TimeoutSeconds: 300,
+	}) {
+		return prompt
+	}
+
+	// Block with 5-minute timeout
+	select {
+	case <-ctx.Done():
+		return prompt
+	case result := <-ch:
+		if result.Skip || len(result.Answers) == 0 {
+			slog.Info("Clarification skipped", "job_id", jobID)
+			// Restore job status to running
+			c.DB.UpdateGenerationJobStatus(jobID, "running", "")
+			return prompt
+		}
+		slog.Info("Clarification answers received", "job_id", jobID, "answers", len(result.Answers))
+
+		// Emit received event
+		sendEvent("clarification_received", responses.ClarificationReceivedEvent{
+			Message: "Answers received, starting generation...",
+		})
+
+		// Restore job status to running
+		c.DB.UpdateGenerationJobStatus(jobID, "running", "")
+
+		return buildEnrichedPrompt(prompt, questions, result.Answers)
+	case <-time.After(5 * time.Minute):
+		slog.Info("Clarification timed out, proceeding with original prompt", "job_id", jobID)
+		// Restore job status to running
+		c.DB.UpdateGenerationJobStatus(jobID, "running", "")
+		return prompt
+	}
+}
+
+// buildEnrichedPrompt combines the original prompt with clarification Q&A.
+func buildEnrichedPrompt(original string, questions []ClarificationQuestion, answers []ClarificationAnswer) string {
+	answerMap := make(map[string]string, len(answers))
+	for _, a := range answers {
+		answerMap[a.ID] = a.Answer
+	}
+
+	var sb strings.Builder
+	sb.WriteString(original)
+	sb.WriteString("\n\n### Additional Context from User\n")
+	for _, q := range questions {
+		if answer, ok := answerMap[q.ID]; ok && answer != "" {
+			sb.WriteString(fmt.Sprintf("Q: %s\nA: %s\n\n", q.Question, answer))
+		}
+	}
+	return sb.String()
+}
+
 // PlanAppFileStructure calls LLM to generate a file plan for the app
 func (c *Controller) PlanAppFileStructure(ctx context.Context, prompt string, projectType string) (*appFileStructure, error) {
 	provider := c.llmProvider()
@@ -952,7 +1077,7 @@ func (c *Controller) repairSingleAppFile(
 
 // StreamGenerateAppFiles generates app files one by one with SSE streaming.
 // Uses tiered generation with context accumulation and deterministic validation.
-func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models.AppProject, user *models.User, prompt string, projectType string, events chan<- responses.SSEEvent) {
+func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models.AppProject, user *models.User, prompt string, projectType string, events chan<- responses.SSEEvent, jobID string) {
 	defer close(events)
 
 	sendEvent := func(eventName string, data any) bool {
@@ -1012,6 +1137,27 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 		}
 	}()
 	defer close(keepaliveDone)
+
+	// Step 0: Clarification — ask the user context-specific questions before generating
+	if jobID != "" {
+		clarifyCtx, clarifyCancel := context.WithTimeout(ctx, 30*time.Second)
+		questions, err := c.GenerateClarificationQuestions(clarifyCtx, prompt, projectType)
+		clarifyCancel()
+
+		if err != nil {
+			slog.Warn("Skipping clarification: failed to generate questions", "error", err, "job_id", jobID)
+		} else if len(questions) > 0 {
+			enriched := c.waitForClarification(ctx, jobID, prompt, questions, sendEvent)
+			if enriched != prompt {
+				prompt = enriched
+				slog.Info("Using enriched prompt after clarification", "job_id", jobID)
+			}
+		}
+
+		if ctx.Err() != nil {
+			return
+		}
+	}
 
 	// Step 1: Plan file structure (streamed)
 	structure, err := c.PlanAppFileStructureStream(ctx, prompt, projectType, func(chunk string) {

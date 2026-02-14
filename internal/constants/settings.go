@@ -6,4 +6,7 @@ const (
 
 	// WEMOB_API_BASE_URL is the public base URL for the Wemob API (used for storefront API references)
 	WEMOB_API_BASE_URL = "https://api.wemob.io"
+
+	// WEMOB_APP_BASE_DOMAIN is the base domain for deployed V2 apps (e.g. {slug}.wemob.app)
+	WEMOB_APP_BASE_DOMAIN = "wemob.app"
 )

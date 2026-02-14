@@ -323,6 +323,13 @@ func main() {
 		Controller: controller,
 	}
 
+	// Fail stale awaiting_input jobs from previous server runs
+	if staleCount, err := db.FailStaleAwaitingInputJobs(10 * time.Minute); err != nil {
+		slog.Error("Failed to clean up stale awaiting_input jobs", "error", err)
+	} else if staleCount > 0 {
+		slog.Info("Cleaned up stale awaiting_input jobs", "count", staleCount)
+	}
+
 	workDir, _ := os.Getwd()
 	staticDir := http.Dir(filepath.Join(workDir, "storage/public"))
 
@@ -623,6 +630,9 @@ func main() {
 				r.With(rateLimiter.RateLimit(10, time.Minute, appMiddleware.AIUserKey)).Post("/generate/from-image", httpViews.GenerateAppFromImage)
 				r.With(rateLimiter.RateLimit(10, time.Minute, appMiddleware.AIUserKey)).Post("/generate/stream", httpViews.GenerateAppStream)
 				r.With(rateLimiter.RateLimit(10, time.Minute, appMiddleware.AIUserKey)).Post("/generate/ecommerce/stream", httpViews.GenerateEcommerceAppStream)
+
+				// Job clarification endpoint
+				r.Post("/jobs/{jobId}/clarify", httpViews.ClarifyJob)
 
 				r.Get("/", httpViews.GetApps)
 

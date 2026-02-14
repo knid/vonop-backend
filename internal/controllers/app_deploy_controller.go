@@ -78,6 +78,15 @@ func (c *Controller) DeployToVercel(project *models.AppProject, user *models.Use
 		return nil, fmt.Errorf("deployment failed")
 	}
 
+	// Auto-assign {slug}.wemob.app subdomain (best-effort)
+	subdomain := project.Slug + "." + constants.WEMOB_APP_BASE_DOMAIN
+	if err := c.VercelService.AddDomain(vercelProject.VercelProjectID, subdomain); err != nil {
+		slog.Warn("Failed to assign wemob.app subdomain", "subdomain", subdomain, "error", err)
+	}
+
+	// Use branded URL as the deployed URL; raw Vercel URL stays in ProviderData as fallback
+	deployedURL := "https://" + subdomain
+
 	// Track deployment
 	deployment := &models.AppDeployment{
 		AppProjectID: project.ID,
@@ -89,7 +98,7 @@ func (c *Controller) DeployToVercel(project *models.AppProject, user *models.Use
 			"deployment_id": deployResp.ID,
 			"url":           deployResp.URL,
 		},
-		DeployedURL: "https://" + deployResp.URL,
+		DeployedURL: deployedURL,
 		Version:     1,
 		ASTSnapshot: project.AST,
 	}
@@ -106,7 +115,8 @@ func (c *Controller) DeployToVercel(project *models.AppProject, user *models.Use
 	}
 
 	// Update Vercel project record
-	vercelProject.ProductionURL = "https://" + deployResp.URL
+	vercelProject.ProductionURL = deployedURL
+	vercelProject.CustomDomain = subdomain
 	c.DB.UpdateVercelProject(vercelProject)
 
 	// Update project status

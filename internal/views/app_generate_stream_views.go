@@ -47,8 +47,8 @@ func (v *HttpViews) GenerateAppStream(w http.ResponseWriter, r *http.Request) {
 
 	v.handleStreamOrAsync(w, r, user, StreamConfig{
 		JobType: "generate_app",
-		StreamFunc: func(ctx context.Context, events chan<- responses.SSEEvent) {
-			v.Controller.StreamGenerateAppFiles(ctx, project, user, req.Prompt, req.ProjectType, events)
+		StreamFunc: func(ctx context.Context, events chan<- responses.SSEEvent, jobID string) {
+			v.Controller.StreamGenerateAppFiles(ctx, project, user, req.Prompt, req.ProjectType, events, jobID)
 		},
 	})
 }
@@ -88,8 +88,8 @@ func (v *HttpViews) GenerateEcommerceAppStream(w http.ResponseWriter, r *http.Re
 
 	v.handleStreamOrAsync(w, r, user, StreamConfig{
 		JobType: "generate_ecommerce_app",
-		StreamFunc: func(ctx context.Context, events chan<- responses.SSEEvent) {
-			v.Controller.StreamGenerateAppFiles(ctx, project, user, req.Prompt, "ecommerce", events)
+		StreamFunc: func(ctx context.Context, events chan<- responses.SSEEvent, jobID string) {
+			v.Controller.StreamGenerateAppFiles(ctx, project, user, req.Prompt, "ecommerce", events, jobID)
 		},
 	})
 }

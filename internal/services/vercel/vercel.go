@@ -252,6 +252,12 @@ func (s *Service) AddDomain(projectID string, domain string) error {
 	return err
 }
 
+// RemoveDomain removes a custom domain from a project
+func (s *Service) RemoveDomain(projectID string, domain string) error {
+	_, err := s.doRequest("DELETE", fmt.Sprintf("/v10/projects/%s/domains/%s", projectID, domain), nil)
+	return err
+}
+
 // GetDeployment gets the current status of a deployment
 func (s *Service) GetDeployment(deploymentID string) (*DeployResponse, error) {
 	body, err := s.doRequest("GET", fmt.Sprintf("/v13/deployments/%s", deploymentID), nil)

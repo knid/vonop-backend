@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/knid/wemob/internal/models"
+	"github.com/uptrace/bun"
 )
 
 func (db *Database) CreateGenerationJob(job *models.GenerationJob) (*models.GenerationJob, error) {
@@ -62,7 +63,7 @@ func (db *Database) GetUserRunningJobs(userID string) (int, error) {
 	count, err := db.DB.NewSelect().
 		Model((*models.GenerationJob)(nil)).
 		Where("user_id = ?", userID).
-		Where("status = ?", "running").
+		Where("status IN (?)", bun.In([]string{"running", "awaiting_input"})).
 		Where("created_at > ?", time.Now().Add(-15*time.Minute)).
 		Count(context.Background())
 	return count, err
@@ -73,8 +74,25 @@ func (db *Database) GetUserActiveJobs(userID string) ([]models.GenerationJob, er
 	err := db.DB.NewSelect().
 		Model(&jobs).
 		Where("user_id = ?", userID).
-		Where("status = ?", "running").
+		Where("status IN (?)", bun.In([]string{"running", "awaiting_input"})).
 		OrderExpr("created_at DESC").
 		Scan(context.Background())
 	return jobs, err
+}
+
+// FailStaleAwaitingInputJobs transitions awaiting_input jobs older than the given duration to failed.
+func (db *Database) FailStaleAwaitingInputJobs(maxAge time.Duration) (int, error) {
+	res, err := db.DB.NewUpdate().
+		Model((*models.GenerationJob)(nil)).
+		Set("status = ?", "failed").
+		Set("error = ?", "timed out while awaiting user input").
+		Set("updated_at = ?", time.Now()).
+		Where("status = ?", "awaiting_input").
+		Where("updated_at < ?", time.Now().Add(-maxAge)).
+		Exec(context.Background())
+	if err != nil {
+		return 0, err
+	}
+	rows, _ := res.RowsAffected()
+	return int(rows), nil
 }

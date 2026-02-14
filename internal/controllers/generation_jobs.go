@@ -13,15 +13,17 @@ import (
 // milestoneEvents are event types worth persisting to the database.
 // High-frequency events like chunk/thinking are skipped.
 var milestoneEvents = map[string]bool{
-	"file_complete":          true,
-	"chat_complete":          true,
-	"generation_complete":    true,
-	"file_generation_start":  true,
-	"project_created":        true,
-	"error":                  true,
-	"done":                   true,
-	"store_chat_complete":    true,
-	"app_generation_started": true,
+	"file_complete":           true,
+	"chat_complete":           true,
+	"generation_complete":     true,
+	"file_generation_start":   true,
+	"project_created":         true,
+	"error":                   true,
+	"done":                    true,
+	"store_chat_complete":     true,
+	"app_generation_started":  true,
+	"clarification_needed":    true,
+	"clarification_received":  true,
 }
 
 const maxConcurrentJobsPerUser = 3
@@ -51,7 +53,7 @@ func (c *Controller) CreateJob(userID uuid.UUID, jobType string) (*models.Genera
 	return job, nil
 }
 
-// CancelJob cancels a running job by calling its stored cancel function.
+// CancelJob cancels a running or awaiting_input job by calling its stored cancel function.
 func (c *Controller) CancelJob(jobID string, userID uuid.UUID) error {
 	job, err := c.DB.GetGenerationJob(jobID)
 	if err != nil {
@@ -60,8 +62,13 @@ func (c *Controller) CancelJob(jobID string, userID uuid.UUID) error {
 	if job.UserID != userID {
 		return fmt.Errorf("job not found")
 	}
-	if job.Status != "running" {
+	if job.Status != "running" && job.Status != "awaiting_input" {
 		return fmt.Errorf("job is not running")
+	}
+
+	// Clean up pending clarification channel if present
+	if ch, ok := c.PendingClarifications.LoadAndDelete(jobID); ok {
+		close(ch.(chan ClarificationResult))
 	}
 
 	if cancelFn, ok := c.RunningJobs.LoadAndDelete(jobID); ok {
@@ -88,6 +95,22 @@ func (c *Controller) GetActiveJobs(userID uuid.UUID) ([]models.GenerationJob, er
 	return c.DB.GetUserActiveJobs(userID.String())
 }
 
+// SubmitClarification sends user answers to a job awaiting clarification.
+func (c *Controller) SubmitClarification(jobID string, result ClarificationResult) error {
+	val, ok := c.PendingClarifications.Load(jobID)
+	if !ok {
+		return fmt.Errorf("no pending clarification for this job")
+	}
+	ch := val.(chan ClarificationResult)
+	// Non-blocking send — channel is buffered with size 1
+	select {
+	case ch <- result:
+		return nil
+	default:
+		return fmt.Errorf("clarification already submitted")
+	}
+}
+
 // IsMilestoneEvent returns true if the event type should be persisted.
 func IsMilestoneEvent(eventName string) bool {
 	return milestoneEvents[eventName]
@@ -96,6 +119,7 @@ func IsMilestoneEvent(eventName string) bool {
 // FinalizeJob updates job status based on the last event and context state.
 func (c *Controller) FinalizeJob(jobID string, ctx context.Context, lastEvent *responses.SSEEvent) {
 	c.RunningJobs.Delete(jobID)
+	c.PendingClarifications.Delete(jobID)
 
 	if ctx.Err() != nil {
 		c.DB.UpdateGenerationJobStatus(jobID, "cancelled", "job was cancelled or timed out")
