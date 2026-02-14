@@ -55,7 +55,7 @@ func (v *HttpViews) StripeCheckout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	v.Controller.TrackEvent(user.ID, "checkout_started", posthog.NewProperties().
+	v.Controller.TrackUserEvent(user, "checkout_started", posthog.NewProperties().
 		Set("price_id", priceID).
 		Set("trial_eligible", !user.TrialUsed))
 

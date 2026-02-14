@@ -116,6 +116,7 @@ export default nextConfig;
 const NEXTJS_TEMPLATE_WEMOB_STORE = `"use client";
 // lib/wemob-store.ts — Wemob Storefront SDK
 // This file is template-managed. Do not modify.
+// All exports are client-side only (hooks, context, and async fetch functions).
 
 import React from "react";
 
@@ -274,12 +275,19 @@ export async function getStoreConfig(): Promise<StoreConfig> {
 }
 
 // ---------------------------------------------------------------------------
-// Products (standalone — usable in server components)
+// Products — async functions for use in client components or route handlers
 // ---------------------------------------------------------------------------
 
-/** Fetch all products. */
-export async function getProducts(): Promise<StorefrontProduct[]> {
-  return apiFetch<StorefrontProduct[]>("/products");
+/** Fetch products. Optionally filter by category slug or search query. */
+export async function getProducts(params?: {
+  category?: string;
+  q?: string;
+}): Promise<StorefrontProduct[]> {
+  const query = new URLSearchParams();
+  if (params?.category) query.set("category", params.category);
+  if (params?.q) query.set("q", params.q);
+  const qs = query.toString();
+  return apiFetch<StorefrontProduct[]>("/products" + (qs ? "?" + qs : ""));
 }
 
 /** Fetch a single product by slug. */
@@ -288,7 +296,7 @@ export async function getProduct(slug: string): Promise<StorefrontProduct> {
 }
 
 // ---------------------------------------------------------------------------
-// Categories (standalone)
+// Categories
 // ---------------------------------------------------------------------------
 
 /** Fetch all categories. */
@@ -297,7 +305,7 @@ export async function getCategories(): Promise<StorefrontCategory[]> {
 }
 
 // ---------------------------------------------------------------------------
-// Cart API (standalone)
+// Cart API
 // ---------------------------------------------------------------------------
 
 export async function createCart(sessionId: string): Promise<StorefrontCart> {
@@ -353,11 +361,18 @@ export async function applyDiscountCode(
   });
 }
 
+/** Remove the currently applied discount code from the cart. */
+export async function removeDiscount(sessionId: string): Promise<StorefrontCart> {
+  return apiFetch<StorefrontCart>("/cart/" + sessionId + "/discount", {
+    method: "DELETE",
+  });
+}
+
 // ---------------------------------------------------------------------------
-// Checkout API (standalone)
+// Checkout API
 // ---------------------------------------------------------------------------
 
-/** Create a checkout session. Redirects to payment_url when present. */
+/** Create a checkout session. Returns payment info for redirect or form rendering. */
 export async function checkout(params: CheckoutParams): Promise<StorefrontCheckout> {
   return apiFetch<StorefrontCheckout>("/checkout", {
     method: "POST",
@@ -384,12 +399,51 @@ export async function confirmCheckout(
 }
 
 // ---------------------------------------------------------------------------
-// Order Tracking (standalone)
+// Order Tracking
 // ---------------------------------------------------------------------------
 
 /** Fetch order details for tracking / confirmation page. */
 export async function getOrder(orderId: string): Promise<OrderTracking> {
   return apiFetch<OrderTracking>("/orders/" + orderId);
+}
+
+// ---------------------------------------------------------------------------
+// Payment Form Helper (Iyzico)
+// ---------------------------------------------------------------------------
+
+/**
+ * Safely render an Iyzico checkout form (HTML string with embedded scripts)
+ * into a container element. Uses DOMParser for safe HTML parsing, then
+ * re-executes script tags so the Iyzico JS runs correctly.
+ */
+export function renderPaymentForm(container: HTMLElement, htmlContent: string): void {
+  // Clear previous content safely
+  while (container.firstChild) {
+    container.removeChild(container.firstChild);
+  }
+
+  // Parse HTML safely via DOMParser
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(htmlContent, "text/html");
+
+  // Adopt nodes into the current document
+  const fragment = document.createDocumentFragment();
+  Array.from(doc.body.childNodes).forEach((node) => {
+    const adopted = document.adoptNode(node);
+    fragment.appendChild(adopted);
+  });
+  container.appendChild(fragment);
+
+  // Re-execute script tags (adopted scripts don't execute automatically)
+  const scripts = container.querySelectorAll("script");
+  scripts.forEach((oldScript) => {
+    const newScript = document.createElement("script");
+    Array.from(oldScript.attributes).forEach((attr) => {
+      newScript.setAttribute(attr.name, attr.value);
+    });
+    newScript.textContent = oldScript.textContent;
+    oldScript.parentNode?.replaceChild(newScript, oldScript);
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -483,6 +537,19 @@ export function clearSession(): void {
 }
 
 // ---------------------------------------------------------------------------
+// Internal: recalculate cart totals from items
+// ---------------------------------------------------------------------------
+
+function recalcTotals(c: StorefrontCart): StorefrontCart {
+  const subtotal_cents = c.items.reduce((sum, i) => sum + i.price_cents * i.quantity, 0);
+  return {
+    ...c,
+    subtotal_cents,
+    total_cents: subtotal_cents - c.discount_cents,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Cart Context
 // ---------------------------------------------------------------------------
 
@@ -494,6 +561,7 @@ interface CartContextValue {
   updateItem: (itemId: string, quantity: number) => Promise<void>;
   removeItem: (itemId: string) => Promise<void>;
   applyDiscount: (code: string) => Promise<void>;
+  removeDiscountCode: () => Promise<void>;
   checkout: (params: CheckoutParams) => Promise<StorefrontCheckout>;
   clearCart: () => void;
 }
@@ -508,6 +576,12 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   const [cart, setCart] = React.useState<StorefrontCart | null>(null);
   const [isLoading, setIsLoading] = React.useState(true);
   const sessionIdRef = React.useRef<string>("");
+  const cartRef = React.useRef<StorefrontCart | null>(null);
+
+  // Keep ref in sync with state
+  React.useEffect(() => {
+    cartRef.current = cart;
+  }, [cart]);
 
   // Compute item count
   const itemCount = React.useMemo(() => {
@@ -548,14 +622,14 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  // --- Optimistic helpers ---
+  // --- Optimistic helper (uses ref to avoid stale closures) ---
 
   const withOptimistic = React.useCallback(
     async (
       optimisticCart: StorefrontCart | null,
       apiCall: () => Promise<StorefrontCart>
     ) => {
-      const previous = cart;
+      const previous = cartRef.current;
       if (optimisticCart) setCart(optimisticCart);
 
       try {
@@ -567,7 +641,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         throw err;
       }
     },
-    [cart]
+    []
   );
 
   // --- Actions ---
@@ -576,15 +650,16 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     async (productId: string, variantId?: string, quantity?: number) => {
       const sid = sessionIdRef.current || getSessionId();
       sessionIdRef.current = sid;
-      const qty = quantity ?? 1;
+      const qty = Math.max(1, quantity ?? 1);
       const vid = variantId ?? "";
 
-      // Optimistic: add a placeholder item
-      const optimistic = cart
-        ? {
-            ...cart,
+      // Optimistic: add a placeholder item and recalculate totals
+      const current = cartRef.current;
+      const optimistic = current
+        ? recalcTotals({
+            ...current,
             items: [
-              ...cart.items,
+              ...current.items,
               {
                 id: "__optimistic__" + Date.now(),
                 product_id: productId,
@@ -597,54 +672,56 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
                 total_cents: 0,
               },
             ],
-          }
+          })
         : null;
 
       await withOptimistic(optimistic, () =>
         addCartItem(sid, productId, vid, qty)
       );
     },
-    [cart, withOptimistic]
+    [withOptimistic]
   );
 
   const handleUpdateItem = React.useCallback(
     async (itemId: string, quantity: number) => {
       const sid = sessionIdRef.current;
-      if (!sid || !cart) return;
+      const current = cartRef.current;
+      if (!sid || !current) return;
 
-      // Optimistic: update quantity in-place
-      const optimistic: StorefrontCart = {
-        ...cart,
-        items: cart.items.map((item) =>
+      // Optimistic: update quantity in-place and recalculate totals
+      const optimistic = recalcTotals({
+        ...current,
+        items: current.items.map((item) =>
           item.id === itemId
             ? { ...item, quantity, total_cents: item.price_cents * quantity }
             : item
         ),
-      };
+      });
 
       await withOptimistic(optimistic, () =>
         updateCartItem(sid, itemId, quantity)
       );
     },
-    [cart, withOptimistic]
+    [withOptimistic]
   );
 
   const handleRemoveItem = React.useCallback(
     async (itemId: string) => {
       const sid = sessionIdRef.current;
-      if (!sid || !cart) return;
+      const current = cartRef.current;
+      if (!sid || !current) return;
 
-      // Optimistic: remove item
-      const optimistic: StorefrontCart = {
-        ...cart,
-        items: cart.items.filter((item) => item.id !== itemId),
-      };
+      // Optimistic: remove item and recalculate totals
+      const optimistic = recalcTotals({
+        ...current,
+        items: current.items.filter((item) => item.id !== itemId),
+      });
 
       await withOptimistic(optimistic, () =>
         removeCartItem(sid, itemId)
       );
     },
-    [cart, withOptimistic]
+    [withOptimistic]
   );
 
   const handleApplyDiscount = React.useCallback(
@@ -658,6 +735,17 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     []
   );
 
+  const handleRemoveDiscount = React.useCallback(
+    async () => {
+      const sid = sessionIdRef.current;
+      if (!sid) return;
+
+      const updated = await removeDiscount(sid);
+      setCart(updated);
+    },
+    []
+  );
+
   const handleCheckout = React.useCallback(
     async (params: CheckoutParams): Promise<StorefrontCheckout> => {
       const result = await checkout({
@@ -665,9 +753,18 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         sessionId: params.sessionId || sessionIdRef.current,
       });
 
-      // Auto-redirect to hosted payment page when available
+      // Auto-redirect to hosted payment page (Stripe) when available
       if (result.payment_url && isBrowser()) {
         window.location.href = result.payment_url;
+        return result;
+      }
+
+      // Iyzico: client_secret contains checkout form HTML — don't redirect,
+      // let the caller render it via renderPaymentForm().
+
+      // No payment provider (COD / manual): clear cart, return result for confirmation page
+      if (!result.payment_url && !result.client_secret) {
+        setCart(null);
       }
 
       return result;
@@ -689,6 +786,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       updateItem: handleUpdateItem,
       removeItem: handleRemoveItem,
       applyDiscount: handleApplyDiscount,
+      removeDiscountCode: handleRemoveDiscount,
       checkout: handleCheckout,
       clearCart: handleClearCart,
     }),
@@ -700,6 +798,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       handleUpdateItem,
       handleRemoveItem,
       handleApplyDiscount,
+      handleRemoveDiscount,
       handleCheckout,
       handleClearCart,
     ]
@@ -721,8 +820,8 @@ export function useCart(): CartContextValue {
   return ctx;
 }
 
-/** Fetch and return all products. */
-export function useProducts(): {
+/** Fetch and return products. Optionally filter by category slug or search query. */
+export function useProducts(params?: { category?: string; q?: string }): {
   products: StorefrontProduct[];
   isLoading: boolean;
   error: Error | null;
@@ -731,12 +830,15 @@ export function useProducts(): {
   const [isLoading, setIsLoading] = React.useState(true);
   const [error, setError] = React.useState<Error | null>(null);
 
+  const category = params?.category;
+  const q = params?.q;
+
   React.useEffect(() => {
     let cancelled = false;
     setIsLoading(true);
     setError(null);
 
-    getProducts()
+    getProducts({ category, q })
       .then((data) => {
         if (!cancelled) {
           setProducts(data);
@@ -753,7 +855,7 @@ export function useProducts(): {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [category, q]);
 
   return { products, isLoading, error };
 }
@@ -805,13 +907,16 @@ export function useProduct(slug: string): {
 export function useCategories(): {
   categories: StorefrontCategory[];
   isLoading: boolean;
+  error: Error | null;
 } {
   const [categories, setCategories] = React.useState<StorefrontCategory[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
+  const [error, setError] = React.useState<Error | null>(null);
 
   React.useEffect(() => {
     let cancelled = false;
     setIsLoading(true);
+    setError(null);
 
     getCategories()
       .then((data) => {
@@ -820,8 +925,11 @@ export function useCategories(): {
           setIsLoading(false);
         }
       })
-      .catch(() => {
-        if (!cancelled) setIsLoading(false);
+      .catch((err) => {
+        if (!cancelled) {
+          setError(err instanceof Error ? err : new Error(String(err)));
+          setIsLoading(false);
+        }
       });
 
     return () => {
@@ -829,20 +937,23 @@ export function useCategories(): {
     };
   }, []);
 
-  return { categories, isLoading };
+  return { categories, isLoading, error };
 }
 
 /** Fetch and return the store configuration. Also warms the formatPrice cache. */
 export function useStoreConfig(): {
   config: StoreConfig | null;
   isLoading: boolean;
+  error: Error | null;
 } {
   const [config, setConfig] = React.useState<StoreConfig | null>(null);
   const [isLoading, setIsLoading] = React.useState(true);
+  const [error, setError] = React.useState<Error | null>(null);
 
   React.useEffect(() => {
     let cancelled = false;
     setIsLoading(true);
+    setError(null);
 
     getStoreConfig()
       .then((data) => {
@@ -852,8 +963,11 @@ export function useStoreConfig(): {
           setIsLoading(false);
         }
       })
-      .catch(() => {
-        if (!cancelled) setIsLoading(false);
+      .catch((err) => {
+        if (!cancelled) {
+          setError(err instanceof Error ? err : new Error(String(err)));
+          setIsLoading(false);
+        }
       });
 
     return () => {
@@ -861,7 +975,7 @@ export function useStoreConfig(): {
     };
   }, []);
 
-  return { config, isLoading };
+  return { config, isLoading, error };
 }
 `
 
@@ -965,9 +1079,12 @@ const NEXTJS_SHARED_RULES = `
 If lib/wemob-store.ts exists or the project is e-commerce, you MUST follow these rules:
 - NEVER define hardcoded/mock product data, categories, prices, or store config in component files. ALL product and category data MUST come from the Wemob Storefront API via @/lib/wemob-store.
 - Use the SDK hooks in client components: useProducts(), useProduct(slug), useCategories(), useStoreConfig(), useCart(). Wrap the root layout with <CartProvider>.
-- Use the SDK standalone functions in server components: getProducts(), getProduct(slug), getCategories(), getStoreConfig().
+- The lib/wemob-store.ts file has "use client" — its functions can only be called from client components or route handlers. Do NOT call them in Server Components.
 - Use formatPrice(cents) from @/lib/wemob-store for all price display — never format prices manually.
-- Cart operations: useCart() provides addItem, updateItem, removeItem, applyDiscount, checkout, clearCart with optimistic updates.
+- Cart operations: useCart() provides addItem, updateItem, removeItem, applyDiscount, removeDiscountCode, checkout, clearCart with optimistic updates.
+- Product filtering: getProducts({ category: "slug", q: "search" }) and useProducts({ category: "slug", q: "search" }) accept optional filter params.
+- Discount management: applyDiscount(code) to apply, removeDiscountCode() to remove. All cart mutations return the full updated cart state.
+- Payment handling: checkout() auto-redirects for Stripe (payment_url). For Iyzico, use renderPaymentForm(container, result.client_secret) to render the payment form. If neither payment_url nor client_secret is returned, it's a COD/manual order — show confirmation directly.
 - Session management is handled automatically by the SDK (cookie + localStorage). Use getSessionId() if needed.
 - If you see a "Store context" section below, use that information (currency, categories, product count) to inform your UI structure, but ALWAYS fetch real data from the API at runtime.`
 
@@ -1091,12 +1208,14 @@ You are an experienced e-commerce engineer. When building storefronts, apply rea
   - Generate 3-6 sample products that match the user's store concept unless they specified exact products.
   - THEN generate the storefront code that fetches from the real API.
 - If the project context shows "E-commerce store: active", generate code that calls the REAL Wemob Storefront API — never generate mock product data. Use the pre-built API client at @/lib/wemob-store for all storefront API calls. Do NOT create custom fetch utilities — the template-managed client already provides typed functions with error handling.
-- lib/wemob-store.ts is a template-managed file that is automatically injected for e-commerce projects. It exports: getStoreConfig, getProducts, getProduct, getCategories, createCart, getCart, addCartItem, updateCartItem, removeCartItem, applyDiscountCode, checkout, confirmCheckout, getOrder, formatPrice, getSessionId, clearSession, CartProvider, useCart, useProducts, useProduct, useCategories, useStoreConfig, and TypeScript types: StoreConfig, StorefrontProduct, StorefrontVariant, StorefrontCategory, StorefrontCart, StorefrontCartItem, StorefrontCheckout, CheckoutConfirm, CheckoutParams, OrderTracking, OrderTrackingItem, ShippingAddress. Do NOT create, modify, or delete this file — it is template-managed.
-- CartProvider wraps the app with cart context (add to layout.tsx). useCart() provides cart state with optimistic updates, addItem, updateItem, removeItem, applyDiscount, checkout (auto-redirects to payment_url), and clearCart.
+- lib/wemob-store.ts is a template-managed file that is automatically injected for e-commerce projects. It has "use client" — all its exports are client-side only. It exports: getStoreConfig, getProducts, getProduct, getCategories, createCart, getCart, addCartItem, updateCartItem, removeCartItem, applyDiscountCode, removeDiscount, checkout, confirmCheckout, getOrder, formatPrice, renderPaymentForm, getSessionId, clearSession, CartProvider, useCart, useProducts, useProduct, useCategories, useStoreConfig, and TypeScript types: StoreConfig, StorefrontProduct, StorefrontVariant, StorefrontCategory, StorefrontCart, StorefrontCartItem, StorefrontCheckout, CheckoutConfirm, CheckoutParams, OrderTracking, OrderTrackingItem, ShippingAddress. Do NOT create, modify, or delete this file — it is template-managed.
+- CartProvider wraps the app with cart context (add to layout.tsx). useCart() provides cart state with optimistic updates, addItem, updateItem, removeItem, applyDiscount, removeDiscountCode, checkout (auto-redirects for Stripe, returns client_secret for Iyzico), and clearCart.
+- Product filtering: getProducts({ category: "slug", q: "search" }) and useProducts({ category, q }) support optional category slug filter and text search.
+- Payment flow: For Stripe, checkout() auto-redirects to payment_url. For Iyzico, checkout() returns client_secret (HTML form content) — use renderPaymentForm(container, clientSecret) to render it. If neither is returned, it's a COD/manual order — the cart is auto-cleared and the result can be used for a confirmation page.
 - Session is persisted via both a "wemob_session" cookie (30-day, SameSite=Lax) and localStorage fallback. SSR-safe.
 - You can also use manage_store at any time to add more products, categories, or discounts when the user asks (e.g., "add a 20% discount code SUMMER20").
-- Storefront API endpoints (all public, no auth needed):
-  GET  {NEXT_PUBLIC_WEMOB_API_URL}/v2/storefront/{NEXT_PUBLIC_STORE_ID}/products — list products
+- Storefront API endpoints (all public, no auth needed). All cart mutation endpoints return the full StorefrontCart object:
+  GET  {NEXT_PUBLIC_WEMOB_API_URL}/v2/storefront/{NEXT_PUBLIC_STORE_ID}/products?category=slug&q=search — list products (optional filters)
   GET  {NEXT_PUBLIC_WEMOB_API_URL}/v2/storefront/{NEXT_PUBLIC_STORE_ID}/products/{slug} — product detail
   GET  {NEXT_PUBLIC_WEMOB_API_URL}/v2/storefront/{NEXT_PUBLIC_STORE_ID}/categories — list categories
   POST {NEXT_PUBLIC_WEMOB_API_URL}/v2/storefront/{NEXT_PUBLIC_STORE_ID}/cart — create cart (returns sessionId)
@@ -1105,6 +1224,7 @@ You are an experienced e-commerce engineer. When building storefronts, apply rea
   PUT  {NEXT_PUBLIC_WEMOB_API_URL}/v2/storefront/{NEXT_PUBLIC_STORE_ID}/cart/{sessionId}/items/{itemId} — update quantity
   DELETE {NEXT_PUBLIC_WEMOB_API_URL}/v2/storefront/{NEXT_PUBLIC_STORE_ID}/cart/{sessionId}/items/{itemId} — remove item
   POST {NEXT_PUBLIC_WEMOB_API_URL}/v2/storefront/{NEXT_PUBLIC_STORE_ID}/cart/{sessionId}/discount — apply discount code
+  DELETE {NEXT_PUBLIC_WEMOB_API_URL}/v2/storefront/{NEXT_PUBLIC_STORE_ID}/cart/{sessionId}/discount — remove discount code
   POST {NEXT_PUBLIC_WEMOB_API_URL}/v2/storefront/{NEXT_PUBLIC_STORE_ID}/checkout — create checkout session
   POST {NEXT_PUBLIC_WEMOB_API_URL}/v2/storefront/{NEXT_PUBLIC_STORE_ID}/checkout/confirm — confirm payment
   GET  {NEXT_PUBLIC_WEMOB_API_URL}/v2/storefront/{NEXT_PUBLIC_STORE_ID}/config — store config (name, currency, payment providers)
@@ -1165,7 +1285,7 @@ Given the user's description of an online store, generate a structured file plan
 11. Use Next.js App Router structure.
 12. CRITICAL: Every component or module that is imported by any page MUST be included in the file list. If page.tsx imports "@/components/product-card", you MUST include "components/product-card.tsx" in the plan. If page.tsx imports "@/lib/store", you MUST include "lib/store.ts" in the plan. Missing files will cause build failures. Exception: @/lib/wemob-store is template-injected and does not need to be in the file list.
 13. Prefer inline implementations over importing from separate utility/lib files. Only create separate files for reusable components or large data modules.
-14. A pre-built storefront SDK is available at lib/wemob-store.ts (template-injected). It provides standalone API functions AND React hooks/context. Use import { getProducts, getProduct, getCategories, getStoreConfig, createCart, getCart, addCartItem, updateCartItem, removeCartItem, applyDiscountCode, checkout, confirmCheckout, getOrder, formatPrice, getSessionId, clearSession, CartProvider, useCart, useProducts, useProduct, useCategories, useStoreConfig } from "@/lib/wemob-store" for all storefront API calls. Wrap the app in <CartProvider> in layout.tsx. Use useCart() for cart state with optimistic updates. Do NOT create custom fetch utilities for the storefront API.
+14. A pre-built storefront SDK is available at lib/wemob-store.ts (template-injected, "use client"). It provides async API functions AND React hooks/context. Use import { getProducts, getProduct, getCategories, getStoreConfig, createCart, getCart, addCartItem, updateCartItem, removeCartItem, applyDiscountCode, removeDiscount, checkout, confirmCheckout, getOrder, formatPrice, renderPaymentForm, getSessionId, clearSession, CartProvider, useCart, useProducts, useProduct, useCategories, useStoreConfig } from "@/lib/wemob-store" for all storefront API calls. Wrap the app in <CartProvider> in layout.tsx. Use useCart() for cart state with optimistic updates (includes removeDiscountCode). getProducts/useProducts accept optional { category, q } filter params. Do NOT create custom fetch utilities for the storefront API.
 
 ### Output format: Same as NEXTJS_STRUCTURE_PROMPT (strict JSON, no explanation, no markdown)
 {

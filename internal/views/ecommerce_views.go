@@ -104,7 +104,7 @@ func (v *HttpViews) ChatStoreManagement(w http.ResponseWriter, r *http.Request) 
 	if requireActiveSubscription(w, user) {
 		return
 	}
-	if v.deductAICredits(w, user, models.AICreditCostStoreChat, "store_chat", "") {
+	if v.checkMinimumCredits(w, user) {
 		return
 	}
 
@@ -127,14 +127,14 @@ func (v *HttpViews) ChatStoreManagement(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	v.Controller.TrackEvent(user.ID, "store_chat_sent", posthog.NewProperties().
+	v.Controller.TrackUserEvent(user, "store_chat_sent", posthog.NewProperties().
 		Set("store_id", store.ID.String()))
 
 	v.handleStreamOrAsync(w, r, user, StreamConfig{
 		JobType: "store_chat",
 		StreamFunc: func(ctx context.Context, events chan<- responses.SSEEvent, jobID string) {
 			defer close(events)
-			response, streamErr := v.Controller.StreamChatStoreManagement(ctx, store, req.Message, func(chunk string) {
+			response, streamErr := v.Controller.StreamChatStoreManagement(ctx, store, user, req.Message, func(chunk string) {
 				events <- responses.SSEEvent{Event: "chat_thinking", Data: responses.ChatThinkingEvent{Chunk: chunk}}
 			})
 			if streamErr != nil {
@@ -205,7 +205,7 @@ func (v *HttpViews) CreateStoreProduct(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if u, authErr := v.Controller.GetUserFromReq(r); authErr == nil {
-		v.Controller.TrackEvent(u.ID, "store_product_created", posthog.NewProperties().
+		v.Controller.TrackUserEvent(u, "store_product_created", posthog.NewProperties().
 			Set("store_id", store.ID.String()).
 			Set("product_name", product.Name))
 	}
@@ -502,7 +502,7 @@ func (v *HttpViews) CreateStoreDiscount(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if u, authErr := v.Controller.GetUserFromReq(r); authErr == nil {
-		v.Controller.TrackEvent(u.ID, "store_discount_created", posthog.NewProperties().
+		v.Controller.TrackUserEvent(u, "store_discount_created", posthog.NewProperties().
 			Set("store_id", store.ID.String()))
 	}
 

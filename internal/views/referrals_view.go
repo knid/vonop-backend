@@ -59,7 +59,7 @@ func (v *HttpViews) ApplyReferralCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	v.Controller.TrackEvent(user.ID, "referral_code_applied", posthog.NewProperties().
+	v.Controller.TrackUserEvent(user, "referral_code_applied", posthog.NewProperties().
 		Set("code", req.Code))
 
 	utils.JSONResponse(w, map[string]string{"message": "referral code applied successfully"}, http.StatusOK)

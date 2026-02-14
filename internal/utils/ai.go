@@ -257,7 +257,7 @@ func GetJSONFromLLM(ctx context.Context, model, system, message string, provider
 	}, provider)
 	body, _ := json.Marshal(reqBody)
 
-	req, _ := http.NewRequest("POST", provider.Endpoint(), bytes.NewReader(body))
+	req, _ := http.NewRequestWithContext(ctx, "POST", provider.Endpoint(), bytes.NewReader(body))
 	setLLMHeaders(req, provider)
 
 	start := time.Now()
@@ -307,7 +307,7 @@ func GetTextFromLLM(ctx context.Context, model, system, message string, provider
 	}, provider)
 	body, _ := json.Marshal(reqBody)
 
-	req, _ := http.NewRequest("POST", provider.Endpoint(), bytes.NewReader(body))
+	req, _ := http.NewRequestWithContext(ctx, "POST", provider.Endpoint(), bytes.NewReader(body))
 	setLLMHeaders(req, provider)
 
 	start := time.Now()
@@ -482,7 +482,7 @@ func GetJSONFromLLMWithMessages(ctx context.Context, model string, messages []Me
 	}, provider)
 	body, _ := json.Marshal(reqBody)
 
-	req, _ := http.NewRequest("POST", provider.Endpoint(), bytes.NewReader(body))
+	req, _ := http.NewRequestWithContext(ctx, "POST", provider.Endpoint(), bytes.NewReader(body))
 	setLLMHeaders(req, provider)
 
 	start := time.Now()
@@ -674,7 +674,7 @@ func GetJSONFromLLMWithVision(ctx context.Context, model, system, userText, base
 	}
 	body, _ := json.Marshal(reqBody)
 
-	req, _ := http.NewRequest("POST", provider.Endpoint(), bytes.NewReader(body))
+	req, _ := http.NewRequestWithContext(ctx, "POST", provider.Endpoint(), bytes.NewReader(body))
 	setLLMHeaders(req, provider)
 
 	start := time.Now()

@@ -699,12 +699,12 @@ func (c *Controller) waitForClarification(ctx context.Context, jobID string, pro
 	if !sendEvent("clarification_needed", responses.ClarificationNeededEvent{
 		JobID:          jobID,
 		Questions:      questions,
-		TimeoutSeconds: 300,
+		TimeoutSeconds: 90,
 	}) {
 		return prompt
 	}
 
-	// Block with 5-minute timeout
+	// Block with 90-second timeout
 	select {
 	case <-ctx.Done():
 		return prompt
@@ -726,7 +726,7 @@ func (c *Controller) waitForClarification(ctx context.Context, jobID string, pro
 		c.DB.UpdateGenerationJobStatus(jobID, "running", "")
 
 		return buildEnrichedPrompt(prompt, questions, result.Answers)
-	case <-time.After(5 * time.Minute):
+	case <-time.After(90 * time.Second):
 		slog.Info("Clarification timed out, proceeding with original prompt", "job_id", jobID)
 		// Restore job status to running
 		c.DB.UpdateGenerationJobStatus(jobID, "running", "")
@@ -1127,7 +1127,7 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 					"user_id", user.ID, "credits", credits, "tokens", total)
 			}
 			genDuration := time.Since(genStart).Seconds()
-			c.TrackEvent(user.ID, "app_generation_completed", posthog.NewProperties().
+			c.TrackUserEvent(user, "app_generation_completed", posthog.NewProperties().
 				Set("app_id", project.ID.String()).
 				Set("project_type", projectType).
 				Set("duration_seconds", genDuration).
@@ -1538,7 +1538,6 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 					FilePath: fp.Path,
 					FileID:   createdFile.ID,
 					FileType: fp.Type,
-					Content:  content,
 				})
 			}(filePlan)
 		}
@@ -1684,7 +1683,6 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 					FilePath: filePath,
 					FileID:   createdFile.ID,
 					FileType: fileType,
-					Content:  content,
 				})
 			}(importPath)
 		}

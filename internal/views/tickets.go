@@ -66,7 +66,9 @@ func (v *HttpViews) CreateTicket(w http.ResponseWriter, r *http.Request) {
 		"ticket_id":      ticket.ID.String(),
 	})
 
-	v.Controller.TrackEvent(user.ID, "support_ticket_created", posthog.NewProperties())
+	v.Controller.TrackUserEvent(user, "support_ticket_created", posthog.NewProperties().
+		Set("ticket_id", ticket.ID.String()).
+		Set("subject", ticketCreateReq.Subject))
 
 	utils.JSONResponse(w, map[string]string{}, http.StatusCreated)
 

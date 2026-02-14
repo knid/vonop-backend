@@ -61,7 +61,7 @@ func (v *HttpViews) ChatApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	v.Controller.TrackEvent(user.ID, "app_chat_sent", posthog.NewProperties().
+	v.Controller.TrackUserEvent(user, "app_chat_sent", posthog.NewProperties().
 		Set("app_id", project.ID.String()).
 		Set("has_images", len(req.Images) > 0))
 

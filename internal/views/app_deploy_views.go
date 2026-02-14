@@ -49,7 +49,7 @@ func (v *HttpViews) DeployAppWeb(w http.ResponseWriter, r *http.Request) {
 	}
 	deployDuration := time.Since(deployStart).Seconds()
 
-	v.Controller.TrackEvent(user.ID, "app_deployed_web", posthog.NewProperties().
+	v.Controller.TrackUserEvent(user, "app_deployed_web", posthog.NewProperties().
 		Set("app_id", project.ID.String()).
 		Set("project_type", project.ProjectType).
 		Set("deploy_duration_seconds", deployDuration).
@@ -102,7 +102,7 @@ func (v *HttpViews) DeployAppAndroid(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	v.Controller.TrackEvent(user.ID, "app_deployed_android", posthog.NewProperties().
+	v.Controller.TrackUserEvent(user, "app_deployed_android", posthog.NewProperties().
 		Set("app_id", project.ID.String()).
 		Set("project_type", project.ProjectType).
 		Set("credits_used", models.AICreditCostBuildFlutter))
@@ -148,7 +148,7 @@ func (v *HttpViews) DeployAppIOS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	v.Controller.TrackEvent(user.ID, "app_deployed_ios", posthog.NewProperties().
+	v.Controller.TrackUserEvent(user, "app_deployed_ios", posthog.NewProperties().
 		Set("app_id", project.ID.String()).
 		Set("project_type", project.ProjectType).
 		Set("credits_used", models.AICreditCostBuildFlutter))
@@ -260,7 +260,7 @@ func (v *HttpViews) StartAppPreview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	v.Controller.TrackEvent(user.ID, "app_preview_started", posthog.NewProperties().
+	v.Controller.TrackUserEvent(user, "app_preview_started", posthog.NewProperties().
 		Set("app_id", project.ID.String()))
 
 	utils.JSONResponse(w, status, http.StatusOK)
@@ -334,7 +334,7 @@ func (v *HttpViews) StopAppPreview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	v.Controller.TrackEvent(user.ID, "app_preview_stopped", posthog.NewProperties().
+	v.Controller.TrackUserEvent(user, "app_preview_stopped", posthog.NewProperties().
 		Set("app_id", project.ID.String()))
 
 	utils.JSONResponse(w, map[string]string{"status": "stopped"}, http.StatusOK)

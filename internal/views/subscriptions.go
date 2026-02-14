@@ -201,7 +201,10 @@ func (v *HttpViews) EndTrialNowAndChargeForUser(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	v.Controller.TrackEvent(user.ID, "trial_ended_manually", posthog.NewProperties())
+	v.Controller.TrackUserEvent(user, "trial_ended_manually", posthog.NewProperties().
+		Set("subscription_id", updated.ID).
+		Set("invoice_id", inv.ID).
+		Set("invoice_status", string(inv.Status)))
 
 	if resp["status"] != "paid" {
 		utils.JSONResponse(w, resp, http.StatusPaymentRequired)
