@@ -97,6 +97,29 @@ func (c *Controller) DeductAICredits(user *models.User, cost int, action string,
 	return err
 }
 
+// DeductAICreditsUnchecked deducts credits without checking sufficiency (balance may go negative).
+// Used for post-hoc token-based billing where the pre-check already ran.
+func (c *Controller) DeductAICreditsUnchecked(user *models.User, cost int, action string, reference string) error {
+	balance, err := c.GetOrCreateCreditsBalance(user)
+	if err != nil {
+		return err
+	}
+
+	balance.Balance -= cost
+	_, err = c.DB.UpdateAICreditsBalance(balance)
+	if err != nil {
+		return err
+	}
+
+	_, err = c.DB.CreateAICreditTransaction(&models.AICreditTransaction{
+		UserID:    user.ID,
+		Amount:    -cost,
+		Action:    action,
+		Reference: reference,
+	})
+	return err
+}
+
 // AddAICredits adds credits to a user's balance (for purchases or grants).
 func (c *Controller) AddAICredits(user *models.User, amount int, action string, reference string) error {
 	balance, err := c.GetOrCreateCreditsBalance(user)

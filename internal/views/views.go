@@ -23,6 +23,26 @@ func requireActiveSubscription(w http.ResponseWriter, user *models.User) bool {
 	return true
 }
 
+// checkMinimumCredits verifies the user has at least 1 AI credit.
+// Returns true if blocked (response already written).
+func (v *HttpViews) checkMinimumCredits(w http.ResponseWriter, user *models.User) bool {
+	balance, err := v.Controller.GetOrCreateCreditsBalance(user)
+	if err != nil {
+		utils.JSONErrorResponse(w, "failed to check credits", http.StatusInternalServerError)
+		return true
+	}
+	if balance.Balance < 1 {
+		utils.JSONCodedErrorResponse(w, "AI_CREDITS_DEPLETED",
+			"insufficient AI credits: have 0, need at least 1",
+			http.StatusPaymentRequired, map[string]any{
+				"credits_required": 1,
+				"action":           "ai_generation",
+			})
+		return true
+	}
+	return false
+}
+
 // deductAICredits attempts to deduct AI credits for the given action.
 // Returns true if the request should be blocked (insufficient credits, response already written).
 func (v *HttpViews) deductAICredits(w http.ResponseWriter, user *models.User, cost int, action string, reference string) bool {

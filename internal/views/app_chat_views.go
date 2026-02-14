@@ -5,7 +5,6 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/utils"
@@ -45,7 +44,7 @@ func (v *HttpViews) ChatApp(w http.ResponseWriter, r *http.Request) {
 	if requireActiveSubscription(w, user) {
 		return
 	}
-	if v.deductAICredits(w, user, models.AICreditCostChat, "app_chat", "") {
+	if v.checkMinimumCredits(w, user) {
 		return
 	}
 

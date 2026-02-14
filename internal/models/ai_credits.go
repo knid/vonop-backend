@@ -44,6 +44,17 @@ type LLMTokenUsage struct {
 	CreatedAt        time.Time `bun:"created_at,nullzero,notnull,default:current_timestamp"`
 }
 
+// Token-to-credit conversion: 1 credit per 1000 tokens
+const AICreditsTokensPerCredit = 1000
+
+// TokensToCredits converts total token count to credit cost (rounds up).
+func TokensToCredits(totalTokens int) int {
+	if totalTokens <= 0 {
+		return 0
+	}
+	return (totalTokens + AICreditsTokensPerCredit - 1) / AICreditsTokensPerCredit
+}
+
 // AI credit costs per action
 const (
 	AICreditCostGenerate       = 10
@@ -58,4 +69,8 @@ const (
 	AICreditCostDeployWeb    = 5
 	AICreditCostBuildFlutter = 10
 	AICreditCostStoreChat    = 5
+
+	// V1 legacy endpoint costs
+	AICreditCostNavbarAutoFill     = 3
+	AICreditCostScreenshotGenerate = 5
 )
