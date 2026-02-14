@@ -87,7 +87,7 @@ func (v *HttpViews) handleStreamOrAsync(w http.ResponseWriter, r *http.Request, 
 				jobEvent := models.JobEvent{
 					Index: eventIndex,
 					Event: event.Event,
-					Data:  event.Data,
+					Data:  controllers.StripHeavyFields(event.Event, event.Data),
 					Time:  time.Now().UnixMilli(),
 				}
 				if err := v.Controller.DB.AppendGenerationJobEvent(job.ID.String(), jobEvent); err != nil {
@@ -118,9 +118,10 @@ func (v *HttpViews) handleStreamOrAsync(w http.ResponseWriter, r *http.Request, 
 	}
 done:
 
-	// StreamFunc finished (channel closed) — finalize job
-	cancel()
+	// StreamFunc finished (channel closed) — finalize job before cancelling context,
+	// otherwise FinalizeJob sees ctx.Err() != nil and marks the job as "cancelled".
 	v.Controller.FinalizeJob(job.ID.String(), ctx, lastEvent)
+	cancel()
 }
 
 // drainEventsToJob reads all events from the channel, persists milestone events,
@@ -138,7 +139,7 @@ func (v *HttpViews) drainEventsToJob(ctx context.Context, cancel context.CancelF
 			jobEvent := models.JobEvent{
 				Index: eventIndex,
 				Event: event.Event,
-				Data:  event.Data,
+				Data:  controllers.StripHeavyFields(event.Event, event.Data),
 				Time:  time.Now().UnixMilli(),
 			}
 			if err := v.Controller.DB.AppendGenerationJobEvent(job.ID.String(), jobEvent); err != nil {

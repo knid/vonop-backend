@@ -394,7 +394,7 @@ func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.A
 				slog.Warn("failed to deduct AI credits from tokens", "error", err,
 					"user_id", user.ID, "credits", credits, "tokens", total)
 			}
-			c.TrackEvent(user.ID, "app_chat_completed", posthog.NewProperties().
+			c.TrackUserEvent(user, "app_chat_completed", posthog.NewProperties().
 				Set("app_id", project.ID.String()).
 				Set("total_tokens", total).
 				Set("prompt_tokens", prompt).

@@ -44,7 +44,7 @@ func (v *HttpViews) GenerateAppStream(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	v.Controller.TrackEvent(user.ID, "app_generation_started", posthog.NewProperties().
+	v.Controller.TrackUserEvent(user, "app_generation_started", posthog.NewProperties().
 		Set("project_type", req.ProjectType).
 		Set("app_id", project.ID.String()))
 
@@ -89,7 +89,7 @@ func (v *HttpViews) GenerateEcommerceAppStream(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	v.Controller.TrackEvent(user.ID, "app_generation_started", posthog.NewProperties().
+	v.Controller.TrackUserEvent(user, "app_generation_started", posthog.NewProperties().
 		Set("project_type", "ecommerce").
 		Set("app_id", project.ID.String()))
 

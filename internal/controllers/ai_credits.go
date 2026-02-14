@@ -117,6 +117,13 @@ func (c *Controller) DeductAICreditsUnchecked(user *models.User, cost int, actio
 		Action:    action,
 		Reference: reference,
 	})
+
+	c.TrackUserEvent(user, "ai_credits_deducted", posthog.NewProperties().
+		Set("action", action).
+		Set("cost", cost).
+		Set("remaining_balance", balance.Balance).
+		Set("reference", reference))
+
 	return err
 }
 
@@ -167,32 +174,46 @@ func (c *Controller) RecordTokenUsage(userID uuid.UUID, action, model, provider,
 	if c.PostHog != nil {
 		traceID := uuid.New().String()
 
+		// Resolve email for PostHog user attribution
+		var email string
+		if user, err := c.DB.GetUserById(userID.String()); err == nil && user != nil {
+			email = user.Email
+		}
+
 		// Per-call $ai_generation events
 		for _, entry := range tracker.Entries() {
+			props := posthog.NewProperties().
+				Set("$ai_provider", provider).
+				Set("$ai_model", entry.Model).
+				Set("$ai_input_tokens", entry.PromptTokens).
+				Set("$ai_output_tokens", entry.CompletionTokens).
+				Set("$ai_trace_id", traceID).
+				Set("$ai_latency", float64(entry.LatencyMs)/1000.0).
+				Set("$ai_is_error", false).
+				Set("$ai_stream", entry.IsStreaming)
+			if email != "" {
+				props.Set("$email", email)
+			}
 			c.PostHog.Enqueue(posthog.Capture{
 				DistinctId: userID.String(),
 				Event:      "$ai_generation",
-				Properties: posthog.NewProperties().
-					Set("$ai_provider", provider).
-					Set("$ai_model", entry.Model).
-					Set("$ai_input_tokens", entry.PromptTokens).
-					Set("$ai_output_tokens", entry.CompletionTokens).
-					Set("$ai_trace_id", traceID).
-					Set("$ai_latency", float64(entry.LatencyMs)/1000.0).
-					Set("$ai_is_error", false).
-					Set("$ai_stream", entry.IsStreaming),
+				Properties: props,
 			})
 		}
 
 		// Grouping $ai_trace event
+		traceProps := posthog.NewProperties().
+			Set("$ai_trace_id", traceID).
+			Set("$ai_trace_name", action).
+			Set("$ai_input_tokens", prompt).
+			Set("$ai_output_tokens", completion)
+		if email != "" {
+			traceProps.Set("$email", email)
+		}
 		c.PostHog.Enqueue(posthog.Capture{
 			DistinctId: userID.String(),
 			Event:      "$ai_trace",
-			Properties: posthog.NewProperties().
-				Set("$ai_trace_id", traceID).
-				Set("$ai_trace_name", action).
-				Set("$ai_input_tokens", prompt).
-				Set("$ai_output_tokens", completion),
+			Properties: traceProps,
 		})
 	}
 }

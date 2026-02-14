@@ -3,9 +3,11 @@ package views
 import (
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/utils"
 	"github.com/posthog/posthog-go"
@@ -23,7 +25,7 @@ func (v *HttpViews) storefrontGuard(w http.ResponseWriter, r *http.Request) bool
 }
 
 // GET /v2/storefront/{storeId}/products
-// Fix 16: N+1 query fix — loads all variants in a single query
+// Supports ?category=slug and ?q=search query params
 func (v *HttpViews) StorefrontGetProducts(w http.ResponseWriter, r *http.Request) {
 	storeID := chi.URLParam(r, "storeId")
 
@@ -31,10 +33,49 @@ func (v *HttpViews) StorefrontGetProducts(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	categorySlug := r.URL.Query().Get("category")
+	searchQuery := r.URL.Query().Get("q")
+
 	products, err := v.Controller.StorefrontGetProducts(storeID)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
 		return
+	}
+
+	// Load categories for name lookup and optional category filtering
+	categories, _ := v.Controller.StorefrontGetCategories(storeID)
+	categoryNameMap := make(map[uuid.UUID]string)
+	categorySlugMap := make(map[string]uuid.UUID)
+	for _, c := range categories {
+		categoryNameMap[c.ID] = c.Name
+		categorySlugMap[c.Slug] = c.ID
+	}
+
+	// Apply category filter
+	var categoryFilterID uuid.UUID
+	if categorySlug != "" {
+		if cid, ok := categorySlugMap[categorySlug]; ok {
+			categoryFilterID = cid
+		} else {
+			// Category slug not found — return empty list
+			utils.JSONResponse(w, []responses.StorefrontProductResponse{}, http.StatusOK)
+			return
+		}
+	}
+
+	// Filter products by category and search
+	var filtered []models.Product
+	for _, p := range products {
+		if categoryFilterID != uuid.Nil && p.CategoryID != categoryFilterID {
+			continue
+		}
+		if searchQuery != "" {
+			q := strings.ToLower(searchQuery)
+			if !strings.Contains(strings.ToLower(p.Name), q) && !strings.Contains(strings.ToLower(p.Description), q) {
+				continue
+			}
+		}
+		filtered = append(filtered, p)
 	}
 
 	// Load all variants at once to avoid N+1 queries
@@ -60,13 +101,18 @@ func (v *HttpViews) StorefrontGetProducts(w http.ResponseWriter, r *http.Request
 	}
 
 	var resp []responses.StorefrontProductResponse
-	for _, p := range products {
+	for _, p := range filtered {
 		resp = append(resp, responses.StorefrontProductResponse{
 			ID: p.ID, Name: p.Name, Slug: p.Slug,
 			Description: p.Description, Images: p.Images,
+			Category: categoryNameMap[p.CategoryID],
 			Tags: p.Tags, Variants: variantMap[p.ID],
 			MinPrice: minPriceMap[p.ID], MaxPrice: maxPriceMap[p.ID],
 		})
+	}
+
+	if resp == nil {
+		resp = []responses.StorefrontProductResponse{}
 	}
 
 	utils.JSONResponse(w, resp, http.StatusOK)
@@ -88,19 +134,38 @@ func (v *HttpViews) StorefrontGetProduct(w http.ResponseWriter, r *http.Request)
 	}
 
 	var sfVariants []responses.StorefrontVariant
-	for _, vr := range variants {
+	minPrice := 0
+	maxPrice := 0
+	for i, vr := range variants {
 		inStock := !vr.TrackInventory || vr.Inventory > 0
 		sfVariants = append(sfVariants, responses.StorefrontVariant{
 			ID: vr.ID, Name: vr.Name, PriceInCents: vr.PriceInCents,
 			CompareAtPrice: vr.CompareAtPrice, Inventory: vr.Inventory,
 			InStock: inStock, Options: vr.Options,
 		})
+		if i == 0 || vr.PriceInCents < minPrice {
+			minPrice = vr.PriceInCents
+		}
+		if i == 0 || vr.PriceInCents > maxPrice {
+			maxPrice = vr.PriceInCents
+		}
+	}
+
+	// Resolve category name
+	categoryName := ""
+	if product.CategoryID != uuid.Nil {
+		cat, catErr := v.Controller.StorefrontGetCategoryByID(product.CategoryID.String())
+		if catErr == nil {
+			categoryName = cat.Name
+		}
 	}
 
 	utils.JSONResponse(w, responses.StorefrontProductResponse{
 		ID: product.ID, Name: product.Name, Slug: product.Slug,
 		Description: product.Description, Images: product.Images,
+		Category: categoryName,
 		Tags: product.Tags, Variants: sfVariants,
+		MinPrice: minPrice, MaxPrice: maxPrice,
 	}, http.StatusOK)
 }
 
@@ -160,19 +225,13 @@ func (v *HttpViews) StorefrontCreateCart(w http.ResponseWriter, r *http.Request)
 	}, http.StatusCreated)
 }
 
-// GET /v2/storefront/{storeId}/cart/{sessionId}
-func (v *HttpViews) StorefrontGetCart(w http.ResponseWriter, r *http.Request) {
-	storeID := chi.URLParam(r, "storeId")
-	sessionID := chi.URLParam(r, "sessionId")
-
-	if !v.storefrontGuard(w, r) {
-		return
-	}
-
+// buildCartResponse fetches the full cart state (items + discount) and returns a
+// StorefrontCartResponse. Used by GetCart and all cart mutation endpoints so the
+// client always receives a consistent, complete cart shape.
+func (v *HttpViews) buildCartResponse(storeID, sessionID string) (*responses.StorefrontCartResponse, error) {
 	cart, items, err := v.Controller.StorefrontGetCart(storeID, sessionID)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
-		return
+		return nil, err
 	}
 
 	subtotal := 0
@@ -203,13 +262,59 @@ func (v *HttpViews) StorefrontGetCart(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	utils.JSONResponse(w, responses.StorefrontCartResponse{
+	// Resolve discount if applied
+	discountCents := 0
+	discountCode := ""
+	if cart.DiscountID != uuid.Nil {
+		discount, dErr := v.Controller.StorefrontGetDiscountByID(cart.DiscountID.String())
+		if dErr == nil && discount.IsActive {
+			discountCode = discount.Code
+			if discount.Type == "percentage" {
+				discountCents = subtotal * discount.Value / 100
+			} else {
+				discountCents = discount.Value
+			}
+			// Enforce MinOrderCents
+			if discount.MinOrderCents > 0 && subtotal < discount.MinOrderCents {
+				discountCents = 0
+			}
+			if discountCents > subtotal {
+				discountCents = subtotal
+			}
+		}
+	}
+
+	if cartItems == nil {
+		cartItems = []responses.StorefrontCartItem{}
+	}
+
+	return &responses.StorefrontCartResponse{
 		ID:            cart.ID,
 		SessionID:     cart.SessionID,
 		Items:         cartItems,
 		SubtotalCents: subtotal,
-		TotalCents:    subtotal,
-	}, http.StatusOK)
+		DiscountCode:  discountCode,
+		DiscountCents: discountCents,
+		TotalCents:    subtotal - discountCents,
+	}, nil
+}
+
+// GET /v2/storefront/{storeId}/cart/{sessionId}
+func (v *HttpViews) StorefrontGetCart(w http.ResponseWriter, r *http.Request) {
+	storeID := chi.URLParam(r, "storeId")
+	sessionID := chi.URLParam(r, "sessionId")
+
+	if !v.storefrontGuard(w, r) {
+		return
+	}
+
+	resp, err := v.buildCartResponse(storeID, sessionID)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	utils.JSONResponse(w, resp, http.StatusOK)
 }
 
 // POST /v2/storefront/{storeId}/cart/{sessionId}/items
@@ -231,21 +336,23 @@ func (v *HttpViews) StorefrontAddCartItem(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	item, err := v.Controller.StorefrontAddCartItem(storeID, sessionID, req.ProductID, req.VariantID, req.Quantity)
+	_, err := v.Controller.StorefrontAddCartItem(storeID, sessionID, req.ProductID, req.VariantID, req.Quantity)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	v.Controller.TrackEvent(uuid.Nil, "storefront_cart_item_added", posthog.NewProperties().
+	v.Controller.TrackStorefrontEvent(storeID, "storefront_cart_item_added", posthog.NewProperties().
 		Set("store_id", storeID).
 		Set("product_id", req.ProductID))
 
-	utils.JSONResponse(w, map[string]any{
-		"id":       item.ID,
-		"quantity": item.Quantity,
-		"price":    item.PriceAtAddCents,
-	}, http.StatusCreated)
+	resp, err := v.buildCartResponse(storeID, sessionID)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	utils.JSONResponse(w, resp, http.StatusCreated)
 }
 
 // PUT /v2/storefront/{storeId}/cart/{sessionId}/items/{itemId}
@@ -273,7 +380,13 @@ func (v *HttpViews) StorefrontUpdateCartItem(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	utils.JSONResponse(w, responses.SuccessResponse{Success: true}, http.StatusOK)
+	resp, cartErr := v.buildCartResponse(storeID, sessionID)
+	if cartErr != nil {
+		utils.JSONErrorResponse(w, cartErr.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	utils.JSONResponse(w, resp, http.StatusOK)
 }
 
 // DELETE /v2/storefront/{storeId}/cart/{sessionId}/items/{itemId}
@@ -292,7 +405,13 @@ func (v *HttpViews) StorefrontDeleteCartItem(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	utils.JSONResponse(w, responses.SuccessResponse{Success: true}, http.StatusOK)
+	resp, cartErr := v.buildCartResponse(storeID, sessionID)
+	if cartErr != nil {
+		utils.JSONErrorResponse(w, cartErr.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	utils.JSONResponse(w, resp, http.StatusOK)
 }
 
 // POST /v2/storefront/{storeId}/cart/{sessionId}/discount
@@ -318,7 +437,36 @@ func (v *HttpViews) StorefrontApplyDiscount(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	utils.JSONResponse(w, responses.SuccessResponse{Success: true}, http.StatusOK)
+	resp, cartErr := v.buildCartResponse(storeID, sessionID)
+	if cartErr != nil {
+		utils.JSONErrorResponse(w, cartErr.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	utils.JSONResponse(w, resp, http.StatusOK)
+}
+
+// DELETE /v2/storefront/{storeId}/cart/{sessionId}/discount
+func (v *HttpViews) StorefrontRemoveDiscount(w http.ResponseWriter, r *http.Request) {
+	storeID := chi.URLParam(r, "storeId")
+	sessionID := chi.URLParam(r, "sessionId")
+
+	if !v.storefrontGuard(w, r) {
+		return
+	}
+
+	if err := v.Controller.StorefrontRemoveDiscount(storeID, sessionID); err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	resp, cartErr := v.buildCartResponse(storeID, sessionID)
+	if cartErr != nil {
+		utils.JSONErrorResponse(w, cartErr.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	utils.JSONResponse(w, resp, http.StatusOK)
 }
 
 // POST /v2/storefront/{storeId}/checkout
@@ -348,7 +496,7 @@ func (v *HttpViews) StorefrontCheckout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	v.Controller.TrackEvent(uuid.Nil, "storefront_checkout_started", posthog.NewProperties().
+	v.Controller.TrackStorefrontEvent(storeID, "storefront_checkout_started", posthog.NewProperties().
 		Set("store_id", storeID).
 		Set("cart_total", order.TotalCents))
 
@@ -382,7 +530,7 @@ func (v *HttpViews) StorefrontConfirmCheckout(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	v.Controller.TrackEvent(uuid.Nil, "store_order_received", posthog.NewProperties().
+	v.Controller.TrackStorefrontEvent(storeID, "store_order_received", posthog.NewProperties().
 		Set("store_id", storeID).
 		Set("order_total", order.TotalCents))
 

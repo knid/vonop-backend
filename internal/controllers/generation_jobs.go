@@ -116,6 +116,25 @@ func IsMilestoneEvent(eventName string) bool {
 	return milestoneEvents[eventName]
 }
 
+// StripHeavyFields removes bulky fields (like file content) from event data
+// before persisting to the DB. The content is already saved in AppGeneratedFile.
+func StripHeavyFields(eventName string, data any) any {
+	if eventName != "file_complete" && eventName != "chat_complete" {
+		return data
+	}
+	// Marshal to JSON, strip the "content" key, return as map
+	raw, err := json.Marshal(data)
+	if err != nil {
+		return data
+	}
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return data
+	}
+	delete(m, "content")
+	return m
+}
+
 // FinalizeJob updates job status based on the last event and context state.
 func (c *Controller) FinalizeJob(jobID string, ctx context.Context, lastEvent *responses.SSEEvent) {
 	c.RunningJobs.Delete(jobID)

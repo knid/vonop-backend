@@ -34,7 +34,7 @@ func (v *HttpViews) OAuthCallback(w http.ResponseWriter, r *http.Request) {
 
 	go func() {
 		if u, lookupErr := v.Controller.DB.GetUserByEmail(oauthUser.Email); lookupErr == nil {
-			v.Controller.TrackEvent(u.ID, "user_oauth_logged_in", posthog.NewProperties().
+			v.Controller.TrackUserEvent(u, "user_oauth_logged_in", posthog.NewProperties().
 				Set("provider", "Google"))
 			v.Controller.IdentifyUser(u)
 		}

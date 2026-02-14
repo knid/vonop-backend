@@ -94,7 +94,20 @@ func (c *Controller) CreateStore(project *models.AppProject, user *models.User, 
 		PaymentConfig:  map[string]any{},
 		Status:         "active",
 	}
-	return c.DB.CreateStore(store)
+	store, err := c.DB.CreateStore(store)
+	if err != nil {
+		return nil, err
+	}
+
+	// Persist ecommerce env vars so they appear in dashboard and are always available
+	c.SetAppEnvVar(project, requests.SetEnvVarRequest{
+		Key: "NEXT_PUBLIC_STORE_ID", Value: store.ID.String(), IsPublic: true,
+	})
+	c.SetAppEnvVar(project, requests.SetEnvVarRequest{
+		Key: "NEXT_PUBLIC_WEMOB_API_URL", Value: constants.WEMOB_API_BASE_URL, IsPublic: true,
+	})
+
+	return store, nil
 }
 
 // GetStore returns the store for a project
@@ -192,12 +205,27 @@ func (c *Controller) ChatStoreManagement(store *models.Store, message string) (s
 }
 
 // StreamChatStoreManagement streams store management chat
-func (c *Controller) StreamChatStoreManagement(ctx context.Context, store *models.Store, message string, onChunk func(chunk string)) (string, error) {
+func (c *Controller) StreamChatStoreManagement(ctx context.Context, store *models.Store, user *models.User, message string, onChunk func(chunk string)) (string, error) {
 	provider := c.llmProvider()
 	model := c.SecretManager.GetSecret("WEBSITE_BUILDER_LLM_MODEL")
 	if model == "" {
 		model = constants.DEFAULT_NEXTJS_LLM_MODEL
 	}
+
+	// Token usage tracking
+	tracker := utils.NewTokenTracker()
+	ctx = utils.WithTokenTracker(ctx, tracker)
+	defer func() {
+		c.RecordTokenUsage(user.ID, "store_chat", model, provider.Name, store.ID.String(), tracker)
+		_, _, total, _ := tracker.Totals()
+		if total > 0 {
+			credits := models.TokensToCredits(total)
+			if err := c.DeductAICreditsUnchecked(user, credits, "store_chat", store.ID.String()); err != nil {
+				slog.Warn("failed to deduct AI credits from tokens", "error", err,
+					"user_id", user.ID, "credits", credits, "tokens", total)
+			}
+		}
+	}()
 
 	products, _ := c.DB.GetProductsByStoreID(store.ID.String())
 	categories, _ := c.DB.GetCategoriesByStoreID(store.ID.String())

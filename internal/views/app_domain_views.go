@@ -61,7 +61,7 @@ func (v *HttpViews) AddAppDomain(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	v.Controller.TrackEvent(user.ID, "domain_added", posthog.NewProperties().
+	v.Controller.TrackUserEvent(user, "domain_added", posthog.NewProperties().
 		Set("app_id", project.ID.String()).
 		Set("domain", req.Domain))
 
@@ -89,7 +89,7 @@ func (v *HttpViews) RemoveAppDomain(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	v.Controller.TrackEvent(user.ID, "domain_removed", posthog.NewProperties().
+	v.Controller.TrackUserEvent(user, "domain_removed", posthog.NewProperties().
 		Set("app_id", project.ID.String()))
 
 	utils.JSONResponse(w, responses.SuccessResponse{Success: true}, http.StatusOK)

@@ -75,7 +75,7 @@ func (v *HttpViews) DeleteUser(w http.ResponseWriter, r *http.Request) {
 
 	go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_USER_DELETED, map[string]any{})
 
-	v.Controller.TrackEvent(user.ID, "user_deleted", posthog.NewProperties().
+	v.Controller.TrackUserEvent(user, "user_deleted", posthog.NewProperties().
 		Set("subscription_status", user.SubscriptionStatus))
 
 	utils.JSONResponse(w, deletedUserRes, http.StatusOK)
@@ -100,7 +100,7 @@ func (v *HttpViews) UserLogin(w http.ResponseWriter, r *http.Request) {
 
 	go func() {
 		if u, lookupErr := v.Controller.DB.GetUserByEmail(userLoginReq.Email); lookupErr == nil {
-			v.Controller.TrackEvent(u.ID, "user_logged_in", posthog.NewProperties().
+			v.Controller.TrackUserEvent(u, "user_logged_in", posthog.NewProperties().
 				Set("provider", u.Provider).
 				Set("subscription_status", u.SubscriptionStatus))
 			v.Controller.IdentifyUser(u)
@@ -123,10 +123,10 @@ func (v *HttpViews) UserRegister(w http.ResponseWriter, r *http.Request) {
 	}
 
 	go func() {
-		v.Controller.TrackEvent(userInformationRes.ID, "user_registered", posthog.NewProperties().
-			Set("provider", userInformationRes.Provider).
-			Set("email", userInformationRes.Email))
 		if u, lookupErr := v.Controller.DB.GetUserById(userInformationRes.ID.String()); lookupErr == nil {
+			v.Controller.TrackUserEvent(u, "user_registered", posthog.NewProperties().
+				Set("provider", u.Provider).
+				Set("email", u.Email))
 			v.Controller.IdentifyUser(u)
 		}
 	}()

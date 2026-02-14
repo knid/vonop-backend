@@ -583,6 +583,26 @@ func (c *Controller) verifyIyzicoPayment(token string, creds map[string]any) err
 	return nil
 }
 
+func (c *Controller) StorefrontGetDiscountByID(discountID string) (*models.Discount, error) {
+	return c.DB.GetDiscountByID(discountID)
+}
+
+func (c *Controller) StorefrontGetCategoryByID(categoryID string) (*models.ProductCategory, error) {
+	return c.DB.GetCategoryByID(categoryID)
+}
+
+func (c *Controller) StorefrontRemoveDiscount(storeID string, sessionID string) error {
+	cart, err := c.DB.GetCartBySessionID(storeID, sessionID)
+	if err != nil {
+		return fmt.Errorf("cart not found")
+	}
+
+	cart.DiscountID = uuid.Nil
+	cart.UpdatedAt = time.Now()
+	_, err = c.DB.UpdateCart(cart)
+	return err
+}
+
 func (c *Controller) StorefrontGetStoreConfig(storeID string) (*models.Store, []string, error) {
 	store, err := c.DB.GetStoreByID(storeID)
 	if err != nil {
