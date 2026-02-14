@@ -4,9 +4,11 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/utils"
+	"github.com/posthog/posthog-go"
 )
 
 // GET /v2/storefront/{storeId}/products
@@ -189,6 +191,10 @@ func (v *HttpViews) StorefrontAddCartItem(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	v.Controller.TrackEvent(uuid.Nil, "storefront_cart_item_added", posthog.NewProperties().
+		Set("store_id", storeID).
+		Set("product_id", req.ProductID))
+
 	utils.JSONResponse(w, map[string]any{
 		"id":       item.ID,
 		"quantity": item.Quantity,
@@ -263,6 +269,10 @@ func (v *HttpViews) StorefrontCheckout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	v.Controller.TrackEvent(uuid.Nil, "storefront_checkout_started", posthog.NewProperties().
+		Set("store_id", storeID).
+		Set("cart_total", order.TotalCents))
+
 	utils.JSONResponse(w, responses.StorefrontCheckoutResponse{
 		OrderID:      order.ID,
 		OrderNumber:  order.OrderNumber,
@@ -286,6 +296,11 @@ func (v *HttpViews) StorefrontConfirmCheckout(w http.ResponseWriter, r *http.Req
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+
+	storeID := chi.URLParam(r, "storeId")
+	v.Controller.TrackEvent(uuid.Nil, "store_order_received", posthog.NewProperties().
+		Set("store_id", storeID).
+		Set("order_total", order.TotalCents))
 
 	utils.JSONResponse(w, responses.CheckoutConfirmResponse{
 		SuccessResponse: responses.SuccessResponse{Success: true},

@@ -8,6 +8,7 @@ import (
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/utils"
+	"github.com/posthog/posthog-go"
 )
 
 // POST /v2/apps/{appId}/deploy/web
@@ -44,6 +45,9 @@ func (v *HttpViews) DeployAppWeb(w http.ResponseWriter, r *http.Request) {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+
+	v.Controller.TrackEvent(user.ID, "app_deployed_web", posthog.NewProperties().
+		Set("app_id", project.ID.String()))
 
 	utils.JSONResponse(w, responses.AppDeploymentResponse{
 		ID:           deployment.ID,
@@ -91,6 +95,9 @@ func (v *HttpViews) DeployAppAndroid(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	v.Controller.TrackEvent(user.ID, "app_deployed_android", posthog.NewProperties().
+		Set("app_id", project.ID.String()))
+
 	utils.JSONResponse(w, map[string]any{
 		"build_id": build.ID,
 		"platform": build.Platform,
@@ -131,6 +138,9 @@ func (v *HttpViews) DeployAppIOS(w http.ResponseWriter, r *http.Request) {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+
+	v.Controller.TrackEvent(user.ID, "app_deployed_ios", posthog.NewProperties().
+		Set("app_id", project.ID.String()))
 
 	utils.JSONResponse(w, map[string]any{
 		"build_id": build.ID,
@@ -239,6 +249,9 @@ func (v *HttpViews) StartAppPreview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	v.Controller.TrackEvent(user.ID, "app_preview_started", posthog.NewProperties().
+		Set("app_id", project.ID.String()))
+
 	utils.JSONResponse(w, status, http.StatusOK)
 }
 
@@ -309,6 +322,9 @@ func (v *HttpViews) StopAppPreview(w http.ResponseWriter, r *http.Request) {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+
+	v.Controller.TrackEvent(user.ID, "app_preview_stopped", posthog.NewProperties().
+		Set("app_id", project.ID.String()))
 
 	utils.JSONResponse(w, map[string]string{"status": "stopped"}, http.StatusOK)
 }

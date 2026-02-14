@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/knid/wemob/internal/utils"
+	"github.com/posthog/posthog-go"
 	"github.com/stripe/stripe-go/v82"
 	"github.com/stripe/stripe-go/v82/checkout/session"
 )
@@ -53,6 +54,10 @@ func (v *HttpViews) StripeCheckout(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to create checkout session. Please try again.", http.StatusInternalServerError)
 		return
 	}
+
+	v.Controller.TrackEvent(user.ID, "checkout_started", posthog.NewProperties().
+		Set("price_id", priceID).
+		Set("trial_eligible", !user.TrialUsed))
 
 	utils.JSONResponse(w, map[string]string{"url": s.URL}, http.StatusCreated)
 	// Redirect the user's browser to Stripe's hosted checkout page!

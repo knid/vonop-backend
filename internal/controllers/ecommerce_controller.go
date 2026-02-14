@@ -97,7 +97,7 @@ func (c *Controller) ChatStoreManagement(store *models.Store, message string) (s
 		{Role: "user", Content: message},
 	}
 
-	response, err := utils.GetJSONFromLLMWithMessages(model, llmMessages, provider)
+	response, err := utils.GetJSONFromLLMWithMessages(context.Background(), model, llmMessages, provider)
 	if err != nil {
 		slog.Error("LLM store chat error", "error", err)
 		return "", fmt.Errorf("failed to process store management request")

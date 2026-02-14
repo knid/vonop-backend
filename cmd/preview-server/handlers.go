@@ -5,10 +5,14 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
 )
+
+// ansiRegex strips ANSI escape sequences from container log output.
+var ansiRegex = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
 
 // Request and response types.
 
@@ -303,7 +307,7 @@ func filterErrorLogs(raw string) string {
 		}
 	}
 
-	return strings.Join(result, "\n")
+	return ansiRegex.ReplaceAllString(strings.Join(result, "\n"), "")
 }
 
 // writeJSON marshals v as JSON and writes it to the response.

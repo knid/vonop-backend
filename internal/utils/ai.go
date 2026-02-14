@@ -11,8 +11,79 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
+
+// --- Token usage tracking ---
+
+// TokenEntry records usage from a single LLM call.
+type TokenEntry struct {
+	Model            string
+	PromptTokens     int
+	CompletionTokens int
+	TotalTokens      int
+	LatencyMs        int64
+	IsStreaming      bool
+}
+
+// TokenTracker is a thread-safe accumulator that collects token usage across multiple LLM calls.
+type TokenTracker struct {
+	mu      sync.Mutex
+	entries []TokenEntry
+}
+
+func NewTokenTracker() *TokenTracker {
+	return &TokenTracker{}
+}
+
+// Record adds a usage entry to the tracker.
+func (t *TokenTracker) Record(model string, usage UsageInfo, latencyMs int64, isStreaming bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.entries = append(t.entries, TokenEntry{
+		Model:            model,
+		PromptTokens:     usage.PromptTokens,
+		CompletionTokens: usage.CompletionTokens,
+		TotalTokens:      usage.TotalTokens,
+		LatencyMs:        latencyMs,
+		IsStreaming:      isStreaming,
+	})
+}
+
+// Entries returns a copy of all recorded token entries.
+func (t *TokenTracker) Entries() []TokenEntry {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	entries := make([]TokenEntry, len(t.entries))
+	copy(entries, t.entries)
+	return entries
+}
+
+// Totals returns aggregated token counts and the number of LLM calls recorded.
+func (t *TokenTracker) Totals() (prompt, completion, total, callCount int) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	for _, e := range t.entries {
+		prompt += e.PromptTokens
+		completion += e.CompletionTokens
+		total += e.TotalTokens
+	}
+	callCount = len(t.entries)
+	return
+}
+
+// Context helpers for passing a TokenTracker through context.
+type tokenTrackerKey struct{}
+
+func WithTokenTracker(ctx context.Context, t *TokenTracker) context.Context {
+	return context.WithValue(ctx, tokenTrackerKey{}, t)
+}
+
+func TokenTrackerFromContext(ctx context.Context) *TokenTracker {
+	t, _ := ctx.Value(tokenTrackerKey{}).(*TokenTracker)
+	return t
+}
 
 // llmHTTPClient is a shared HTTP client for all LLM calls with a 10-minute timeout.
 var llmHTTPClient = &http.Client{
@@ -32,8 +103,8 @@ type Tool struct {
 
 type ToolFunction struct {
 	Name        string         `json:"name"`
-	Description string         `json:"description"`
-	Parameters  map[string]any `json:"parameters"` // JSON Schema
+	Description string         `json:"description,omitempty"`
+	Parameters  map[string]any `json:"parameters,omitempty"` // JSON Schema
 }
 
 type ToolCall struct {
@@ -67,17 +138,24 @@ type ThinkingConfig struct {
 	ClearThinking bool   `json:"clear_thinking,omitempty"` // false = preserve for cache
 }
 
+type StreamOptionsConfig struct {
+	IncludeUsage bool `json:"include_usage"`
+}
+
 type ChatRequest struct {
-	Model          string           `json:"model"`
-	Messages       []Message        `json:"messages"`
-	Stream         bool             `json:"stream,omitempty"`
-	MaxTokens      int              `json:"max_tokens,omitempty"`
-	Temperature    *float64         `json:"temperature,omitempty"`
-	ResponseFormat *ResponseFormat  `json:"response_format,omitempty"`
-	Tools          []Tool           `json:"tools,omitempty"`
-	ToolChoice     any              `json:"tool_choice,omitempty"`
-	Reasoning      *ReasoningConfig `json:"reasoning,omitempty"`
-	Thinking       *ThinkingConfig  `json:"thinking,omitempty"`
+	Model               string               `json:"model"`
+	Messages            []Message             `json:"messages"`
+	Stream              bool                  `json:"stream,omitempty"`
+	StreamOptions       *StreamOptionsConfig  `json:"stream_options,omitempty"`
+	MaxTokens           int                   `json:"max_tokens,omitempty"`
+	MaxCompletionTokens int                   `json:"max_completion_tokens,omitempty"`
+	Temperature         *float64              `json:"temperature,omitempty"`
+	TopP                *float64              `json:"top_p,omitempty"`
+	ResponseFormat      *ResponseFormat       `json:"response_format,omitempty"`
+	Tools               []Tool                `json:"tools,omitempty"`
+	ToolChoice          any                   `json:"tool_choice,omitempty"`
+	Reasoning           *ReasoningConfig      `json:"reasoning,omitempty"`
+	Thinking            *ThinkingConfig       `json:"thinking,omitempty"`
 }
 
 type Message struct {
@@ -107,36 +185,64 @@ type ChatResponse struct {
 }
 
 // prepareChatRequest translates provider-agnostic ChatRequest fields into the
-// format expected by the target LLM provider. For ZAI, it converts the
-// OpenRouter-style "reasoning" config into ZAI's "thinking" format.
+// format expected by the target LLM provider. For providers that use the
+// "thinking" format (ZAI, Moonshot/Kimi), it converts the OpenRouter-style
+// "reasoning" config into the thinking config and sets required defaults.
 func prepareChatRequest(req ChatRequest, provider *LLMProvider) ChatRequest {
-	if provider == nil || !provider.IsZAI() || req.Reasoning == nil {
+	if provider == nil {
 		return req
 	}
 
-	// Translate reasoning -> thinking for ZAI
-	thinkingType := "disabled"
-	if req.Reasoning.Effort != "" && req.Reasoning.Effort != "none" {
-		thinkingType = "enabled"
+	// Apply provider's default reasoning when no explicit config was supplied
+	if provider.UsesThinkingFormat() && req.Reasoning == nil && req.Thinking == nil && provider.DefaultReasoning != nil {
+		req.Reasoning = provider.DefaultReasoning
 	}
 
-	req.Thinking = &ThinkingConfig{
-		Type:          thinkingType,
-		ClearThinking: false, // preserve for cache
-	}
-	req.Reasoning = nil // don't send OpenRouter format to ZAI
+	// Translate reasoning -> thinking for providers that use the thinking format
+	if provider.UsesThinkingFormat() && req.Reasoning != nil {
+		thinkingType := "disabled"
+		if req.Reasoning.Effort != "" && req.Reasoning.Effort != "none" {
+			thinkingType = "enabled"
+		}
 
-	// ZAI requires temperature=1 when thinking is enabled
-	if thinkingType == "enabled" && req.Temperature == nil {
-		t := 1.0
-		req.Temperature = &t
+		req.Thinking = &ThinkingConfig{
+			Type:          thinkingType,
+			ClearThinking: false, // preserve for cache
+		}
+		req.Reasoning = nil // don't send OpenRouter format
+
+		if thinkingType == "enabled" {
+			// K2.5 thinking: temperature MUST be 1.0, top_p MUST be 0.95
+			t := 1.0
+			req.Temperature = &t
+			tp := 0.95
+			req.TopP = &tp
+			// Swap max_tokens -> max_completion_tokens so reasoning tokens
+			// don't eat into the output budget
+			if req.MaxTokens > 0 && req.MaxCompletionTokens == 0 {
+				req.MaxCompletionTokens = req.MaxTokens
+				req.MaxTokens = 0
+			}
+		} else if provider.IsMoonshot() {
+			// K2.5 non-thinking: temperature MUST be 0.6, top_p MUST be 0.95
+			t := 0.6
+			req.Temperature = &t
+			tp := 0.95
+			req.TopP = &tp
+		}
+	}
+
+	// Moonshot/K2.5: always prefer max_completion_tokens over max_tokens
+	if provider.IsMoonshot() && req.MaxTokens > 0 && req.MaxCompletionTokens == 0 {
+		req.MaxCompletionTokens = req.MaxTokens
+		req.MaxTokens = 0
 	}
 
 	return req
 }
 
 // GetJSONFromLLM sends a system+user message to the LLM and returns the raw response text.
-func GetJSONFromLLM(model, system, message string, provider *LLMProvider) (string, error) {
+func GetJSONFromLLM(ctx context.Context, model, system, message string, provider *LLMProvider) (string, error) {
 	if provider == nil || provider.APIKey == "" {
 		slog.Error("LLM provider is not configured")
 		return "", fmt.Errorf("missing LLM provider configuration")
@@ -154,6 +260,7 @@ func GetJSONFromLLM(model, system, message string, provider *LLMProvider) (strin
 	req, _ := http.NewRequest("POST", provider.Endpoint(), bytes.NewReader(body))
 	setLLMHeaders(req, provider)
 
+	start := time.Now()
 	resp, err := llmHTTPClient.Do(req)
 	if err != nil {
 		slog.Error("Error making request to LLM:", "error", err, "FROM", "LLM_UTILS", "resp", resp, "body", body)
@@ -162,6 +269,7 @@ func GetJSONFromLLM(model, system, message string, provider *LLMProvider) (strin
 	defer resp.Body.Close()
 
 	respBody, _ := io.ReadAll(resp.Body)
+	latencyMs := time.Since(start).Milliseconds()
 	slog.Info("LLM Response received", "FROM", "LLM_UTILS")
 
 	var parsed ChatResponse
@@ -177,12 +285,15 @@ func GetJSONFromLLM(model, system, message string, provider *LLMProvider) (strin
 
 	if parsed.Usage.TotalTokens > 0 {
 		slog.Info("LLM usage", "FROM", "LLM_UTILS", "prompt_tokens", parsed.Usage.PromptTokens, "completion_tokens", parsed.Usage.CompletionTokens, "total_tokens", parsed.Usage.TotalTokens)
+		if tracker := TokenTrackerFromContext(ctx); tracker != nil {
+			tracker.Record(model, parsed.Usage, latencyMs, false)
+		}
 	}
 
 	return parsed.Choices[0].Message.Content, nil
 }
 
-func GetTextFromLLM(model, system, message string, provider *LLMProvider) (string, error) {
+func GetTextFromLLM(ctx context.Context, model, system, message string, provider *LLMProvider) (string, error) {
 	if provider == nil || provider.APIKey == "" {
 		return "", fmt.Errorf("missing LLM provider configuration")
 	}
@@ -199,6 +310,7 @@ func GetTextFromLLM(model, system, message string, provider *LLMProvider) (strin
 	req, _ := http.NewRequest("POST", provider.Endpoint(), bytes.NewReader(body))
 	setLLMHeaders(req, provider)
 
+	start := time.Now()
 	resp, err := llmHTTPClient.Do(req)
 	if err != nil {
 		slog.Error("Error making request to LLM:", "error", err, "FROM", "LLM_UTILS")
@@ -207,6 +319,7 @@ func GetTextFromLLM(model, system, message string, provider *LLMProvider) (strin
 	defer resp.Body.Close()
 
 	respBody, _ := io.ReadAll(resp.Body)
+	latencyMs := time.Since(start).Milliseconds()
 	slog.Info("LLM Response received", "FROM", "LLM_UTILS_TEXT")
 
 	var parsed ChatResponse
@@ -222,6 +335,9 @@ func GetTextFromLLM(model, system, message string, provider *LLMProvider) (strin
 
 	if parsed.Usage.TotalTokens > 0 {
 		slog.Info("LLM usage", "FROM", "LLM_UTILS_TEXT", "prompt_tokens", parsed.Usage.PromptTokens, "completion_tokens", parsed.Usage.CompletionTokens, "total_tokens", parsed.Usage.TotalTokens)
+		if tracker := TokenTrackerFromContext(ctx); tracker != nil {
+			tracker.Record(model, parsed.Usage, latencyMs, false)
+		}
 	}
 
 	return parsed.Choices[0].Message.Content, nil
@@ -249,6 +365,7 @@ type StreamChoice struct {
 
 type StreamChunk struct {
 	Choices []StreamChoice `json:"choices"`
+	Usage   *UsageInfo     `json:"usage,omitempty"`
 }
 
 // StreamTextFromLLM streams LLM response tokens and calls onChunk for each text chunk.
@@ -259,10 +376,11 @@ func StreamTextFromLLM(ctx context.Context, model, system, message string, provi
 	}
 
 	reqBody := prepareChatRequest(ChatRequest{
-		Model:     model,
-		Stream:    true,
-		MaxTokens: 16384,
-		Reasoning: reasoning,
+		Model:         model,
+		Stream:        true,
+		StreamOptions: &StreamOptionsConfig{IncludeUsage: true},
+		MaxTokens:     16384,
+		Reasoning:     reasoning,
 		Messages: []Message{
 			{Role: "system", Content: system},
 			{Role: "user", Content: message},
@@ -273,6 +391,7 @@ func StreamTextFromLLM(ctx context.Context, model, system, message string, provi
 	req, _ := http.NewRequestWithContext(ctx, "POST", provider.Endpoint(), bytes.NewReader(body))
 	setLLMHeaders(req, provider)
 
+	start := time.Now()
 	resp, err := llmHTTPClient.Do(req)
 	if err != nil {
 		slog.Error("Error making streaming request to LLM:", "error", err)
@@ -287,6 +406,7 @@ func StreamTextFromLLM(ctx context.Context, model, system, message string, provi
 	}
 
 	var fullText strings.Builder
+	var lastUsage UsageInfo
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 0, 64*1024), 512*1024)
 
@@ -308,6 +428,10 @@ func StreamTextFromLLM(ctx context.Context, model, system, message string, provi
 		var chunk StreamChunk
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
 			continue
+		}
+
+		if chunk.Usage != nil {
+			lastUsage = *chunk.Usage
 		}
 
 		if len(chunk.Choices) > 0 {
@@ -333,12 +457,19 @@ func StreamTextFromLLM(ctx context.Context, model, system, message string, provi
 		return "", fmt.Errorf("error reading streaming response. try again please")
 	}
 
+	if lastUsage.TotalTokens > 0 {
+		slog.Info("LLM usage", "FROM", "LLM_STREAM_TEXT", "prompt_tokens", lastUsage.PromptTokens, "completion_tokens", lastUsage.CompletionTokens, "total_tokens", lastUsage.TotalTokens)
+		if tracker := TokenTrackerFromContext(ctx); tracker != nil {
+			tracker.Record(model, lastUsage, time.Since(start).Milliseconds(), true)
+		}
+	}
+
 	return fullText.String(), nil
 }
 
 // GetJSONFromLLMWithMessages sends a multi-turn conversation to the LLM and expects JSON output.
 // Used for chat-based interactions where conversation history matters.
-func GetJSONFromLLMWithMessages(model string, messages []Message, provider *LLMProvider) (string, error) {
+func GetJSONFromLLMWithMessages(ctx context.Context, model string, messages []Message, provider *LLMProvider) (string, error) {
 	if provider == nil || provider.APIKey == "" {
 		return "", fmt.Errorf("missing LLM provider configuration")
 	}
@@ -354,6 +485,7 @@ func GetJSONFromLLMWithMessages(model string, messages []Message, provider *LLMP
 	req, _ := http.NewRequest("POST", provider.Endpoint(), bytes.NewReader(body))
 	setLLMHeaders(req, provider)
 
+	start := time.Now()
 	resp, err := llmHTTPClient.Do(req)
 	if err != nil {
 		slog.Error("Error making request to LLM:", "error", err, "FROM", "LLM_UTILS_CHAT")
@@ -362,6 +494,7 @@ func GetJSONFromLLMWithMessages(model string, messages []Message, provider *LLMP
 	defer resp.Body.Close()
 
 	respBody, _ := io.ReadAll(resp.Body)
+	latencyMs := time.Since(start).Milliseconds()
 	slog.Info("LLM Chat Response received", "FROM", "LLM_UTILS_CHAT")
 
 	var parsed ChatResponse
@@ -377,6 +510,9 @@ func GetJSONFromLLMWithMessages(model string, messages []Message, provider *LLMP
 
 	if parsed.Usage.TotalTokens > 0 {
 		slog.Info("LLM usage", "FROM", "LLM_UTILS_CHAT", "prompt_tokens", parsed.Usage.PromptTokens, "completion_tokens", parsed.Usage.CompletionTokens, "total_tokens", parsed.Usage.TotalTokens)
+		if tracker := TokenTrackerFromContext(ctx); tracker != nil {
+			tracker.Record(model, parsed.Usage, latencyMs, false)
+		}
 	}
 
 	return parsed.Choices[0].Message.Content, nil
@@ -392,6 +528,7 @@ func StreamJSONFromLLMWithMessages(ctx context.Context, model string, messages [
 	reqBody := prepareChatRequest(ChatRequest{
 		Model:          model,
 		Stream:         true,
+		StreamOptions:  &StreamOptionsConfig{IncludeUsage: true},
 		Messages:       messages,
 		MaxTokens:      16384,
 		ResponseFormat: &ResponseFormat{Type: "json_object"},
@@ -401,6 +538,7 @@ func StreamJSONFromLLMWithMessages(ctx context.Context, model string, messages [
 	req, _ := http.NewRequestWithContext(ctx, "POST", provider.Endpoint(), bytes.NewReader(body))
 	setLLMHeaders(req, provider)
 
+	start := time.Now()
 	resp, err := llmHTTPClient.Do(req)
 	if err != nil {
 		slog.Error("Error making streaming request to LLM:", "error", err)
@@ -416,6 +554,7 @@ func StreamJSONFromLLMWithMessages(ctx context.Context, model string, messages [
 
 	var fullText strings.Builder
 	var lastFinishReason string
+	var lastUsage UsageInfo
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 0, 64*1024), 512*1024)
 
@@ -437,6 +576,10 @@ func StreamJSONFromLLMWithMessages(ctx context.Context, model string, messages [
 		var chunk StreamChunk
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
 			continue
+		}
+
+		if chunk.Usage != nil {
+			lastUsage = *chunk.Usage
 		}
 
 		if len(chunk.Choices) > 0 {
@@ -469,6 +612,13 @@ func StreamJSONFromLLMWithMessages(ctx context.Context, model string, messages [
 		slog.Warn("LLM chat response truncated (finish_reason=length)", "response_length", fullText.Len())
 	}
 
+	if lastUsage.TotalTokens > 0 {
+		slog.Info("LLM usage", "FROM", "LLM_STREAM_CHAT", "prompt_tokens", lastUsage.PromptTokens, "completion_tokens", lastUsage.CompletionTokens, "total_tokens", lastUsage.TotalTokens)
+		if tracker := TokenTrackerFromContext(ctx); tracker != nil {
+			tracker.Record(model, lastUsage, time.Since(start).Milliseconds(), true)
+		}
+	}
+
 	return fullText.String(), nil
 }
 
@@ -494,7 +644,7 @@ type MultiChatRequest struct {
 }
 
 // GetJSONFromLLMWithVision sends a multimodal request with an image to the LLM.
-func GetJSONFromLLMWithVision(model, system, userText, base64Image string, provider *LLMProvider) (string, error) {
+func GetJSONFromLLMWithVision(ctx context.Context, model, system, userText, base64Image string, provider *LLMProvider) (string, error) {
 	if provider == nil || provider.APIKey == "" {
 		return "", fmt.Errorf("missing LLM provider configuration")
 	}
@@ -527,6 +677,7 @@ func GetJSONFromLLMWithVision(model, system, userText, base64Image string, provi
 	req, _ := http.NewRequest("POST", provider.Endpoint(), bytes.NewReader(body))
 	setLLMHeaders(req, provider)
 
+	start := time.Now()
 	resp, err := llmHTTPClient.Do(req)
 	if err != nil {
 		slog.Error("Error making vision request to LLM:", "error", err)
@@ -535,6 +686,7 @@ func GetJSONFromLLMWithVision(model, system, userText, base64Image string, provi
 	defer resp.Body.Close()
 
 	respBody, _ := io.ReadAll(resp.Body)
+	latencyMs := time.Since(start).Milliseconds()
 	slog.Info("LLM Vision Response received", "FROM", "LLM_UTILS_VISION")
 
 	var parsed ChatResponse
@@ -549,6 +701,9 @@ func GetJSONFromLLMWithVision(model, system, userText, base64Image string, provi
 
 	if parsed.Usage.TotalTokens > 0 {
 		slog.Info("LLM usage", "FROM", "LLM_UTILS_VISION", "prompt_tokens", parsed.Usage.PromptTokens, "completion_tokens", parsed.Usage.CompletionTokens, "total_tokens", parsed.Usage.TotalTokens)
+		if tracker := TokenTrackerFromContext(ctx); tracker != nil {
+			tracker.Record(model, parsed.Usage, latencyMs, false)
+		}
 	}
 
 	return parsed.Choices[0].Message.Content, nil
@@ -562,9 +717,10 @@ func StreamJSONFromLLM(ctx context.Context, model, system, message string, provi
 	}
 
 	reqBody := prepareChatRequest(ChatRequest{
-		Model:     model,
-		Stream:    true,
-		MaxTokens: 16384,
+		Model:         model,
+		Stream:        true,
+		StreamOptions: &StreamOptionsConfig{IncludeUsage: true},
+		MaxTokens:     16384,
 		Messages: []Message{
 			{Role: "system", Content: system},
 			{Role: "user", Content: message},
@@ -575,6 +731,7 @@ func StreamJSONFromLLM(ctx context.Context, model, system, message string, provi
 	req, _ := http.NewRequestWithContext(ctx, "POST", provider.Endpoint(), bytes.NewReader(body))
 	setLLMHeaders(req, provider)
 
+	start := time.Now()
 	resp, err := llmHTTPClient.Do(req)
 	if err != nil {
 		slog.Error("Error making streaming request to LLM:", "error", err)
@@ -589,6 +746,7 @@ func StreamJSONFromLLM(ctx context.Context, model, system, message string, provi
 	}
 
 	var fullText strings.Builder
+	var lastUsage UsageInfo
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 0, 64*1024), 512*1024)
 
@@ -610,6 +768,10 @@ func StreamJSONFromLLM(ctx context.Context, model, system, message string, provi
 		var chunk StreamChunk
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
 			continue
+		}
+
+		if chunk.Usage != nil {
+			lastUsage = *chunk.Usage
 		}
 
 		if len(chunk.Choices) > 0 {
@@ -635,6 +797,13 @@ func StreamJSONFromLLM(ctx context.Context, model, system, message string, provi
 		return "", fmt.Errorf("error reading streaming response. try again please")
 	}
 
+	if lastUsage.TotalTokens > 0 {
+		slog.Info("LLM usage", "FROM", "LLM_STREAM_JSON", "prompt_tokens", lastUsage.PromptTokens, "completion_tokens", lastUsage.CompletionTokens, "total_tokens", lastUsage.TotalTokens)
+		if tracker := TokenTrackerFromContext(ctx); tracker != nil {
+			tracker.Record(model, lastUsage, time.Since(start).Milliseconds(), true)
+		}
+	}
+
 	return fullText.String(), nil
 }
 
@@ -649,9 +818,10 @@ func StreamJSONFromLLMWithVision(ctx context.Context, model, system, userText, b
 	}
 
 	type streamMultiChatRequest struct {
-		Model    string         `json:"model"`
-		Stream   bool           `json:"stream"`
-		Messages []MultiMessage `json:"messages"`
+		Model         string               `json:"model"`
+		Stream        bool                 `json:"stream"`
+		StreamOptions *StreamOptionsConfig `json:"stream_options,omitempty"`
+		Messages      []MultiMessage       `json:"messages"`
 	}
 
 	messages := []MultiMessage{
@@ -671,15 +841,17 @@ func StreamJSONFromLLMWithVision(ctx context.Context, model, system, userText, b
 	}
 
 	reqBody := streamMultiChatRequest{
-		Model:    model,
-		Stream:   true,
-		Messages: messages,
+		Model:         model,
+		Stream:        true,
+		StreamOptions: &StreamOptionsConfig{IncludeUsage: true},
+		Messages:      messages,
 	}
 	body, _ := json.Marshal(reqBody)
 
 	req, _ := http.NewRequestWithContext(ctx, "POST", provider.Endpoint(), bytes.NewReader(body))
 	setLLMHeaders(req, provider)
 
+	start := time.Now()
 	resp, err := llmHTTPClient.Do(req)
 	if err != nil {
 		slog.Error("Error making vision streaming request to LLM:", "error", err)
@@ -694,6 +866,7 @@ func StreamJSONFromLLMWithVision(ctx context.Context, model, system, userText, b
 	}
 
 	var fullText strings.Builder
+	var lastUsage UsageInfo
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 0, 64*1024), 512*1024)
 
@@ -717,6 +890,10 @@ func StreamJSONFromLLMWithVision(ctx context.Context, model, system, userText, b
 			continue
 		}
 
+		if chunk.Usage != nil {
+			lastUsage = *chunk.Usage
+		}
+
 		if len(chunk.Choices) > 0 {
 			if r := chunk.Choices[0].Delta.GetReasoning(); r != "" && onReasoning != nil {
 				onReasoning(r)
@@ -738,6 +915,13 @@ func StreamJSONFromLLMWithVision(ctx context.Context, model, system, userText, b
 		}
 		slog.Error("scanner error during vision LLM streaming", "error", err)
 		return "", fmt.Errorf("error reading streaming response. try again please")
+	}
+
+	if lastUsage.TotalTokens > 0 {
+		slog.Info("LLM usage", "FROM", "LLM_STREAM_VISION", "prompt_tokens", lastUsage.PromptTokens, "completion_tokens", lastUsage.CompletionTokens, "total_tokens", lastUsage.TotalTokens)
+		if tracker := TokenTrackerFromContext(ctx); tracker != nil {
+			tracker.Record(model, lastUsage, time.Since(start).Milliseconds(), true)
+		}
 	}
 
 	return fullText.String(), nil
@@ -764,11 +948,22 @@ func StreamWithTools(
 		return "", fmt.Errorf("missing LLM provider configuration")
 	}
 
-	const maxRounds = 25
+	const maxRounds = 10
+	const nudgeAfter = 5 // inject "generate now" nudge after this many tool rounds
 	currentMessages := make([]Message, len(messages))
 	copy(currentMessages, messages)
+	toolCallHistory := make(map[string]string) // "tool:args" → result (dedup cache)
+	consecutiveToolRounds := 0
 
 	for round := 0; round < maxRounds; round++ {
+		// After several consecutive tool rounds, nudge the AI to stop researching
+		if consecutiveToolRounds >= nudgeAfter {
+			currentMessages = append(currentMessages, Message{
+				Role:    "system",
+				Content: "You have already gathered sufficient context from tool calls. Do NOT call any more tools. Generate your final response with the operations JSON now.",
+			})
+			slog.Warn("Injecting stop-researching nudge", "round", round, "consecutive_tool_rounds", consecutiveToolRounds)
+		}
 		if ctx.Err() != nil {
 			return "", ctx.Err()
 		}
@@ -776,6 +971,7 @@ func StreamWithTools(
 		reqBody := prepareChatRequest(ChatRequest{
 			Model:          model,
 			Stream:         true,
+			StreamOptions:  &StreamOptionsConfig{IncludeUsage: true},
 			MaxTokens:      16384,
 			Reasoning:      reasoning,
 			Messages:       currentMessages,
@@ -787,6 +983,7 @@ func StreamWithTools(
 		req, _ := http.NewRequestWithContext(ctx, "POST", provider.Endpoint(), bytes.NewReader(body))
 		setLLMHeaders(req, provider)
 
+		roundStart := time.Now()
 		resp, err := llmHTTPClient.Do(req)
 		if err != nil {
 			slog.Error("Error making streaming request to LLM:", "error", err, "round", round)
@@ -804,6 +1001,7 @@ func StreamWithTools(
 		var fullReasoning strings.Builder // ZAI: accumulate reasoning_content for cache continuity
 		var roundChunks []string          // buffer chunks per round to suppress intermediate reasoning
 		var lastFinishReason string
+		var roundUsage UsageInfo
 		toolCallsMap := make(map[int]*ToolCall)
 
 		scanner := bufio.NewScanner(resp.Body)
@@ -828,6 +1026,10 @@ func StreamWithTools(
 			var chunk StreamChunk
 			if err := json.Unmarshal([]byte(data), &chunk); err != nil {
 				continue
+			}
+
+			if chunk.Usage != nil {
+				roundUsage = *chunk.Usage
 			}
 
 			if len(chunk.Choices) > 0 {
@@ -908,8 +1110,17 @@ func StreamWithTools(
 			return "", fmt.Errorf("error reading streaming response. try again please")
 		}
 
+		// Record usage from this round
+		if roundUsage.TotalTokens > 0 {
+			slog.Info("LLM usage", "FROM", "LLM_STREAM_TOOLS", "round", round, "prompt_tokens", roundUsage.PromptTokens, "completion_tokens", roundUsage.CompletionTokens, "total_tokens", roundUsage.TotalTokens)
+			if tracker := TokenTrackerFromContext(ctx); tracker != nil {
+				tracker.Record(model, roundUsage, time.Since(roundStart).Milliseconds(), true)
+			}
+		}
+
 		// If LLM wants to call tools — discard buffered chunks (they're reasoning, not code)
 		if lastFinishReason == "tool_calls" && len(toolCallsMap) > 0 {
+			consecutiveToolRounds++
 			roundChunks = nil // discard intermediate reasoning chunks
 
 			// Build sorted tool calls list
@@ -930,12 +1141,12 @@ func StreamWithTools(
 				Content:   fullText.String(),
 				ToolCalls: toolCalls,
 			}
-			if provider.IsZAI() && fullReasoning.Len() > 0 {
+			if provider.UsesThinkingFormat() && fullReasoning.Len() > 0 {
 				assistantMsg.ReasoningContent = fullReasoning.String()
 			}
 			currentMessages = append(currentMessages, assistantMsg)
 
-			// Execute each tool and append results
+			// Execute each tool (with dedup) and append results
 			for _, tc := range toolCalls {
 				if ctx.Err() != nil {
 					return "", ctx.Err()
@@ -948,15 +1159,26 @@ func StreamWithTools(
 					toolArgs = tc.Function.Arguments
 				}
 
-				slog.Info("Executing tool call", "tool", toolName, "round", round)
+				cacheKey := toolName + ":" + toolArgs
+				var result string
 
-				if onToolCall != nil {
-					onToolCall(toolName, toolArgs)
-				}
+				if cached, ok := toolCallHistory[cacheKey]; ok {
+					// Return cached result instead of re-executing
+					result = cached
+					slog.Info("Tool call deduped (cached)", "tool", toolName, "round", round)
+				} else {
+					slog.Info("Executing tool call", "tool", toolName, "round", round)
 
-				result, err := executor(toolName, toolArgs)
-				if err != nil {
-					result = fmt.Sprintf("Error executing tool %s: %v", toolName, err)
+					if onToolCall != nil {
+						onToolCall(toolName, toolArgs)
+					}
+
+					var err error
+					result, err = executor(toolName, toolArgs)
+					if err != nil {
+						result = fmt.Sprintf("Error executing tool %s: %v", toolName, err)
+					}
+					toolCallHistory[cacheKey] = result
 				}
 
 				currentMessages = append(currentMessages, Message{
@@ -969,6 +1191,8 @@ func StreamWithTools(
 
 			// Continue the loop — re-call LLM with tool results
 			continue
+		} else {
+			consecutiveToolRounds = 0
 		}
 
 		// Chunks were already streamed in real-time via onChunk above.

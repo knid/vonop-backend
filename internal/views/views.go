@@ -6,6 +6,7 @@ import (
 	"github.com/knid/wemob/internal/controllers"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/utils"
+	"github.com/posthog/posthog-go"
 )
 
 type HttpViews struct {
@@ -33,5 +34,8 @@ func (v *HttpViews) deductAICredits(w http.ResponseWriter, user *models.User, co
 		})
 		return true
 	}
+	v.Controller.TrackEvent(user.ID, "ai_credits_deducted", posthog.NewProperties().
+		Set("action", action).
+		Set("cost", cost))
 	return false
 }

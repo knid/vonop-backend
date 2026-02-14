@@ -9,6 +9,7 @@ import (
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/utils"
+	"github.com/posthog/posthog-go"
 )
 
 // DELETE /v2/apps/{appId}/conversation
@@ -60,6 +61,10 @@ func (v *HttpViews) ChatApp(w http.ResponseWriter, r *http.Request) {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+
+	v.Controller.TrackEvent(user.ID, "app_chat_sent", posthog.NewProperties().
+		Set("app_id", project.ID.String()).
+		Set("has_images", len(req.Images) > 0))
 
 	v.handleStreamOrAsync(w, r, user, StreamConfig{
 		JobType: "app_chat",

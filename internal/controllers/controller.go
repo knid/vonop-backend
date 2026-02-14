@@ -17,6 +17,7 @@ import (
 	"github.com/knid/wemob/internal/services/storage"
 	"github.com/knid/wemob/internal/utils"
 	"github.com/knid/wemob/internal/services/vercel"
+	"github.com/posthog/posthog-go"
 )
 
 type Controller struct {
@@ -32,7 +33,8 @@ type Controller struct {
 	VercelService          *vercel.Service
 	PreviewService         *preview.Service
 	MCPService             *mcpclient.Service
-	RunningJobs            sync.Map // map[string]context.CancelFunc for in-flight background jobs
+	PostHog                posthog.Client // nil = disabled
+	RunningJobs            sync.Map       // map[string]context.CancelFunc for in-flight background jobs
 }
 
 func NewController(db *database.Database, concurrentBuildLimiter chan struct{},
@@ -40,7 +42,7 @@ func NewController(db *database.Database, concurrentBuildLimiter chan struct{},
 	crmService crmServices.CRMService, taskService *asynq.Client, assetsStorage *storage.S3Storage,
 	userApiKeysStorage *storage.S3Storage, secretManager secret.SecretManager,
 	vercelService *vercel.Service, previewService *preview.Service,
-	mcpService *mcpclient.Service) *Controller {
+	mcpService *mcpclient.Service, posthogClient posthog.Client) *Controller {
 
 	return &Controller{
 		DB:                     db,
@@ -55,6 +57,7 @@ func NewController(db *database.Database, concurrentBuildLimiter chan struct{},
 		VercelService:          vercelService,
 		PreviewService:         previewService,
 		MCPService:             mcpService,
+		PostHog:                posthogClient,
 	}
 }
 
@@ -72,9 +75,9 @@ func (c *Controller) llmProvider() *utils.LLMProvider {
 	case "google":
 		return &utils.LLMProvider{Name: "google", BaseURL: "https://generativelanguage.googleapis.com/v1beta/openai", APIKey: c.SecretManager.GetSecret("GOOGLE_API_KEY")}
 	case "moonshot":
-		return &utils.LLMProvider{Name: "moonshot", BaseURL: "https://api.moonshot.ai/v1", APIKey: c.SecretManager.GetSecret("MOONSHOT_API_KEY")}
+		return &utils.LLMProvider{Name: "moonshot", BaseURL: "https://api.moonshot.ai/v1", APIKey: c.SecretManager.GetSecret("MOONSHOT_API_KEY"), DefaultReasoning: c.reasoningConfig()}
 	case "zai":
-		return &utils.LLMProvider{Name: "zai", BaseURL: "https://api.z.ai/api/paas/v4", APIKey: c.SecretManager.GetSecret("ZAI_API_KEY")}
+		return &utils.LLMProvider{Name: "zai", BaseURL: "https://api.z.ai/api/paas/v4", APIKey: c.SecretManager.GetSecret("ZAI_API_KEY"), DefaultReasoning: c.reasoningConfig()}
 	default:
 		slog.Warn("Unknown or empty LLM_PROVIDER, falling back to openrouter", "raw", raw)
 		return &utils.LLMProvider{Name: "openrouter", BaseURL: "https://openrouter.ai/api/v1", APIKey: c.SecretManager.GetSecret("OPENROUTER_API_KEY")}

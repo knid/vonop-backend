@@ -9,6 +9,7 @@ import (
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/utils"
+	"github.com/posthog/posthog-go"
 )
 
 // helper to get store from app project
@@ -126,6 +127,9 @@ func (v *HttpViews) ChatStoreManagement(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	v.Controller.TrackEvent(user.ID, "store_chat_sent", posthog.NewProperties().
+		Set("store_id", store.ID.String()))
+
 	v.handleStreamOrAsync(w, r, user, StreamConfig{
 		JobType: "store_chat",
 		StreamFunc: func(ctx context.Context, events chan<- responses.SSEEvent) {
@@ -198,6 +202,12 @@ func (v *HttpViews) CreateStoreProduct(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
 		return
+	}
+
+	if u, authErr := v.Controller.GetUserFromReq(r); authErr == nil {
+		v.Controller.TrackEvent(u.ID, "store_product_created", posthog.NewProperties().
+			Set("store_id", store.ID.String()).
+			Set("product_name", product.Name))
 	}
 
 	utils.JSONResponse(w, responses.ProductResponse{
@@ -489,6 +499,11 @@ func (v *HttpViews) CreateStoreDiscount(w http.ResponseWriter, r *http.Request) 
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
 		return
+	}
+
+	if u, authErr := v.Controller.GetUserFromReq(r); authErr == nil {
+		v.Controller.TrackEvent(u.ID, "store_discount_created", posthog.NewProperties().
+			Set("store_id", store.ID.String()))
 	}
 
 	utils.JSONResponse(w, responses.DiscountResponse{

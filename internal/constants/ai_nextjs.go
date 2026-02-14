@@ -926,55 +926,56 @@ Given the user's description of a web application they want to build, generate a
   ]
 }`
 
-const NEXTJS_FILE_TSX_PROMPT = `You are an expert Next.js developer and senior UI/UX designer who builds modern, visually stunning interfaces.
+// NEXTJS_SHARED_RULES contains coding rules shared across file-generation and repair prompts.
+const NEXTJS_SHARED_RULES = `
+### Coding Rules
+- TypeScript with proper type annotations. Tailwind CSS for ALL styling (no inline styles/CSS modules).
+- next/image for images, next/link for navigation. lucide-react for icons (pre-installed).
+- "use client" ONLY when needed: hooks (useState/useEffect/etc.), event handlers, or framer-motion imports. Server Components by default.
+- ALWAYS default-export components (export default function Name). Use default import syntax (import Button from '@/components/ui/button'). Exceptions: lib/utils.ts and lib/wemob-store.ts use named exports.
+- Mobile-first responsive design (sm:, md:, lg: breakpoints). Semantic HTML. Accessibility attributes.
+- ONLY import from files in the "All files" context. Missing imports cause build failures. If a file isn't listed, implement it inline.
+- NEVER import Node.js builtins (fs, path, os, crypto, etc.) or build-time packages (tailwindcss, postcss, eslint, webpack, etc.).
+- Define mock/placeholder data inline as const arrays/objects. Do NOT import from external data files.
+- cn() from @/lib/utils for conditional classes (clsx + tailwind-merge). If lib/utils.ts absent, use clsx directly.
+- Custom Tailwind theme colors: primary, secondary, accent, background, surface, text. Use as classes (bg-primary, text-accent).
+- Pre-installed deps: lucide-react, clsx, tailwind-merge, class-variance-authority, framer-motion, @radix-ui/* primitives.
+- Use read_file tool to check actual exports before importing from sibling files. Do NOT guess export names.
+- For e-commerce: use @/lib/wemob-store hooks (useCart, useProducts, useProduct, useCategories, useStoreConfig). Wrap layout with CartProvider.`
 
-Generate the content for a single TSX/TS file in a Next.js 16 App Router project.
+const NEXTJS_FILE_TSX_PROMPT = `You are an expert Next.js 16 developer and UI/UX designer. Generate a single TSX/TS file.
 
-### Design Philosophy
-- Build interfaces that look like they were designed by a top agency (think Linear, Vercel, Stripe, Notion quality).
-- Use modern design patterns: subtle gradients, glass morphism, smooth Framer Motion animations, micro-interactions, layered shadows.
-- Generous whitespace, strong visual hierarchy, refined spacing.
-- Beautiful hover/focus states with smooth transitions (transition-all duration-200).
-- Use Radix UI primitives for accessible interactive components (dialogs, dropdowns, tabs, tooltips, etc.).
-- Follow shadcn/ui component patterns — use cn() from @/lib/utils for conditional classes.
-- Rich visual details: rounded corners (rounded-xl, rounded-2xl), soft shadows (shadow-sm, shadow-lg), border opacity (border-white/10).
+### Design Standards
+- Top-tier agency quality (Linear, Vercel, Stripe level). Modern patterns: subtle gradients, glass morphism, Framer Motion animations, layered shadows.
+- Generous whitespace, strong visual hierarchy. Polished hover/focus states (transition-all duration-200).
+- Radix UI for interactive components. shadcn/ui patterns with class-variance-authority for variants.
+- Rich visual details: rounded-xl/2xl, soft shadows, border opacity.
+` + NEXTJS_SHARED_RULES + `
 
-### Rules
-1. Use TypeScript with proper type annotations.
-2. Use Tailwind CSS for ALL styling. No inline styles or CSS modules.
-3. Use next/image for images, next/link for navigation.
-4. Use "use client" directive ONLY when the component needs interactivity (event handlers, useState, useEffect) OR imports from framer-motion. framer-motion components (motion, AnimatePresence, etc.) ONLY work in Client Components.
-5. Server Components by default. Only add "use client" when truly needed (hooks, event handlers, or framer-motion).
-6. Mobile-first responsive design using sm:, md:, lg: breakpoints.
-7. Production-quality, clean code with proper accessibility attributes.
-8. ALWAYS export components as default export (export default function ComponentName). NEVER use named exports for components. When importing components, use default import syntax (import Button from '@/components/ui/button'), NOT named imports (import { Button } from '...'). The exceptions are lib/utils.ts and lib/wemob-store.ts which use named exports.
-9. For page.tsx files in app/ directory, the component should be the page component.
-10. For layout.tsx, include proper metadata export and children prop typing.
-11. Use semantic HTML elements (nav, main, section, article, footer, header).
-12. Use the provided color scheme via Tailwind theme classes (primary, secondary, accent, etc.).
-13. Include polished hover states, transitions, and micro-interactions. Use framer-motion for page/section animations.
-14. For images, use placeholder URLs from picsum.photos or unsplash with proper alt text.
-15. Return ONLY the code. No markdown wrapping, no explanation.
-16. CRITICAL: You can ONLY import from files listed in the "All files" context. Do NOT import from any path that is not in the file list. If you need a component or utility, implement it inline or define it in the same file. Importing from non-existent files will cause build failures.
-17. For icons, use lucide-react (it is included in the project dependencies). Do NOT import from other icon libraries.
-18. Do NOT import from @/lib/, @/utils/, or @/data/ paths unless those files are explicitly listed in the "All files" context.
-19. NEVER import Node.js built-in modules (fs, path, module, os, crypto, stream, etc.). This is a browser-side Next.js app. Use only browser-compatible APIs and npm packages listed in package.json.
-20. For mock/placeholder data, define it as const arrays or objects directly in the file. Do NOT import data from external files or modules.
-21. NEVER import build-time packages in component files: tailwindcss, postcss, autoprefixer, eslint, typescript, @types/*, webpack, babel, jiti, etc. These are config/build tools only. Use Tailwind via className strings, not by importing the package.
-22. For conditional CSS classes, use the cn() helper from @/lib/utils (which uses clsx + tailwind-merge). If lib/utils.ts is not in the file list, use clsx directly.
-23. Pre-installed dependencies you can freely import: lucide-react, clsx, tailwind-merge, class-variance-authority, framer-motion, @radix-ui/* primitives.
-24. The Tailwind theme defines custom colors: primary, secondary, accent, background, surface, text. Use these as Tailwind classes (e.g., bg-primary, text-accent).
-25. When "Already-generated files" context is provided, use the exact export names, prop types, and function signatures from those files. Do NOT guess — match what was actually exported.
-26. For UI components (Button, Card, Input, Badge, etc.), follow shadcn/ui patterns using class-variance-authority for variants and cn() for class merging.
-27. If you need a new npm package that's not pre-installed, you can modify package.json to add it.
-28. For e-commerce projects, use hooks from @/lib/wemob-store: useCart for cart state/actions, useProducts/useProduct for product data, useStoreConfig for store config, useCategories for categories. Wrap app/layout.tsx with CartProvider from @/lib/wemob-store. lib/wemob-store.ts exports BOTH standalone functions AND React hooks. In React components, prefer hooks. Use standalone functions only in server components or non-React contexts.
+### File-Specific Rules
+- page.tsx: export default page component. layout.tsx: include metadata export + children prop typing.
+- Use placeholder images from picsum.photos or unsplash with alt text.
+- Return ONLY code. No markdown wrapping, no explanation.
 
 ### Tools Available
-You have tools to inspect already-generated project files:
-- read_file: Read a file's content to see its exact exports and types.
-- list_files: See all generated files so far.
+- read_file: Read a file's content to see exact exports and types.
+- list_files: See all generated files so far.`
 
-IMPORTANT: If you need to import from another project file, ALWAYS use read_file first to see its actual exports. Do NOT guess export names.`
+// NEXTJS_REPAIR_PROMPT is a focused prompt for repairing broken/placeholder files.
+// Unlike the full TSX prompt, it receives specific error context and broken content.
+const NEXTJS_REPAIR_PROMPT = `You are an expert Next.js 16 developer. A file in the project failed to generate and contains placeholder content. Your job is to generate a complete, production-quality implementation.
+` + NEXTJS_SHARED_RULES + `
+
+### Repair Instructions
+- You will receive: the file path, its description, the failure reason, and (if short) the current broken content.
+- You will also see which files import this module and how they use it — match those expected exports exactly.
+- Generate a COMPLETE implementation. Do not output placeholder or stub content.
+- Use read_file to inspect sibling files for context (types, props, exports).
+- Return ONLY the code. No markdown wrapping, no explanation.
+
+### Tools Available
+- read_file: Read a file's content to see exact exports and types.
+- list_files: See all generated files so far.`
 
 const NEXTJS_FILE_CSS_PROMPT = `You are an expert Next.js developer. Generate the globals.css file for a Next.js 16 project using Tailwind CSS v4.
 

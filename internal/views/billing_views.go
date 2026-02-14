@@ -2,6 +2,7 @@ package views
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/utils"
@@ -70,4 +71,48 @@ func (v *HttpViews) GetAICreditTransactions(w http.ResponseWriter, r *http.Reque
 	}
 
 	utils.JSONResponse(w, txs, http.StatusOK)
+}
+
+func (v *HttpViews) GetTokenUsage(w http.ResponseWriter, r *http.Request) {
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	entries, err := v.Controller.DB.GetLLMTokenUsageByUser(user.ID.String(), 100)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	since := time.Now().AddDate(0, -1, 0)
+	promptTotal, completionTotal, totalTokens, err := v.Controller.DB.GetLLMTokenUsageSummary(user.ID.String(), since)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	var responseEntries []responses.TokenUsageEntry
+	for _, e := range entries {
+		responseEntries = append(responseEntries, responses.TokenUsageEntry{
+			Action:           e.Action,
+			Model:            e.Model,
+			PromptTokens:     e.PromptTokens,
+			CompletionTokens: e.CompletionTokens,
+			TotalTokens:      e.TotalTokens,
+			CallCount:        e.CallCount,
+			Reference:        e.Reference,
+			CreatedAt:        e.CreatedAt.Format("2006-01-02T15:04:05Z"),
+		})
+	}
+
+	utils.JSONResponse(w, responses.TokenUsageResponse{
+		Entries: responseEntries,
+		Summary: responses.TokenUsageSummary{
+			TotalPromptTokens:     promptTotal,
+			TotalCompletionTokens: completionTotal,
+			TotalTokens:           totalTokens,
+		},
+	}, http.StatusOK)
 }

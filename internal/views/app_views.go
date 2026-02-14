@@ -12,6 +12,7 @@ import (
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/utils"
+	"github.com/posthog/posthog-go"
 )
 
 // POST /v2/apps/generate — non-streaming generation (redirects to stream)
@@ -90,6 +91,10 @@ func (v *HttpViews) GenerateApp(w http.ResponseWriter, r *http.Request) {
 			UpdatedAt:   project.UpdatedAt,
 		},
 	}, http.StatusCreated)
+
+	v.Controller.TrackEvent(user.ID, "app_created", posthog.NewProperties().
+		Set("project_type", req.ProjectType).
+		Set("app_id", project.ID.String()))
 }
 
 // POST /v2/apps/generate/ecommerce
@@ -160,6 +165,10 @@ func (v *HttpViews) GenerateEcommerceApp(w http.ResponseWriter, r *http.Request)
 			UpdatedAt:   project.UpdatedAt,
 		},
 	}, http.StatusCreated)
+
+	v.Controller.TrackEvent(user.ID, "app_created", posthog.NewProperties().
+		Set("project_type", "ecommerce").
+		Set("app_id", project.ID.String()))
 }
 
 // POST /v2/apps/generate/from-image
@@ -228,6 +237,9 @@ func (v *HttpViews) GenerateAppFromImage(w http.ResponseWriter, r *http.Request)
 			UpdatedAt:   project.UpdatedAt,
 		},
 	}, http.StatusCreated)
+
+	v.Controller.TrackEvent(user.ID, "app_generated_from_image", posthog.NewProperties().
+		Set("app_id", project.ID.String()))
 }
 
 // GET /v2/apps/
@@ -394,6 +406,9 @@ func (v *HttpViews) UpdateApp(w http.ResponseWriter, r *http.Request) {
 	var theme map[string]any
 	json.Unmarshal(project.Theme, &theme)
 
+	v.Controller.TrackEvent(user.ID, "app_updated", posthog.NewProperties().
+		Set("app_id", project.ID.String()))
+
 	utils.JSONResponse(w, responses.AppProjectResponse{
 		ID:          project.ID,
 		Name:        project.Name,
@@ -421,6 +436,9 @@ func (v *HttpViews) DeleteApp(w http.ResponseWriter, r *http.Request) {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+
+	v.Controller.TrackEvent(user.ID, "app_deleted", posthog.NewProperties().
+		Set("app_id", appID))
 
 	utils.JSONResponse(w, responses.SuccessResponse{Success: true}, http.StatusOK)
 }
@@ -495,6 +513,10 @@ func (v *HttpViews) CreateAppFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	v.Controller.TrackEvent(user.ID, "app_file_created", posthog.NewProperties().
+		Set("app_id", project.ID.String()).
+		Set("file_path", req.FilePath))
+
 	utils.JSONResponse(w, responses.AppFileResponse{
 		ID:        file.ID,
 		Platform:  file.Platform,
@@ -539,6 +561,10 @@ func (v *HttpViews) UpdateAppFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	v.Controller.TrackEvent(user.ID, "app_file_updated", posthog.NewProperties().
+		Set("app_id", project.ID.String()).
+		Set("file_path", file.FilePath))
+
 	utils.JSONResponse(w, responses.AppFileResponse{
 		ID:        file.ID,
 		Platform:  file.Platform,
@@ -570,6 +596,9 @@ func (v *HttpViews) DeleteAppFile(w http.ResponseWriter, r *http.Request) {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+
+	v.Controller.TrackEvent(user.ID, "app_file_deleted", posthog.NewProperties().
+		Set("app_id", project.ID.String()))
 
 	utils.JSONResponse(w, responses.SuccessResponse{Success: true}, http.StatusOK)
 }
@@ -637,6 +666,9 @@ func (v *HttpViews) CreateAppSnapshot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	v.Controller.TrackEvent(user.ID, "app_snapshot_created", posthog.NewProperties().
+		Set("app_id", project.ID.String()))
+
 	utils.JSONResponse(w, responses.AppSnapshotResponse{
 		ID:          snapshot.ID,
 		Description: snapshot.Description,
@@ -666,6 +698,10 @@ func (v *HttpViews) RestoreAppSnapshot(w http.ResponseWriter, r *http.Request) {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+
+	v.Controller.TrackEvent(user.ID, "app_snapshot_restored", posthog.NewProperties().
+		Set("app_id", project.ID.String()).
+		Set("snapshot_id", sid))
 
 	utils.JSONResponse(w, responses.SuccessResponse{Success: true}, http.StatusOK)
 }
@@ -702,6 +738,10 @@ func (v *HttpViews) ExportApp(w http.ResponseWriter, r *http.Request) {
 		fw.Write([]byte(f.Content))
 	}
 	zw.Close()
+
+	v.Controller.TrackEvent(user.ID, "app_exported", posthog.NewProperties().
+		Set("app_id", project.ID.String()).
+		Set("platform", platform))
 
 	w.Header().Set("Content-Type", "application/zip")
 	w.Header().Set("Content-Disposition", "attachment; filename="+project.Slug+"-"+platform+".zip")
@@ -773,6 +813,10 @@ func (v *HttpViews) ConnectAppIntegration(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	v.Controller.TrackEvent(user.ID, "integration_connected", posthog.NewProperties().
+		Set("app_id", project.ID.String()).
+		Set("provider", integ.Provider))
+
 	utils.JSONResponse(w, responses.AppIntegrationResp{
 		ID:        integ.ID,
 		Provider:  integ.Provider,
@@ -839,6 +883,9 @@ func (v *HttpViews) DisconnectAppIntegration(w http.ResponseWriter, r *http.Requ
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+
+	v.Controller.TrackEvent(user.ID, "integration_disconnected", posthog.NewProperties().
+		Set("app_id", project.ID.String()))
 
 	utils.JSONResponse(w, responses.SuccessResponse{Success: true}, http.StatusOK)
 }

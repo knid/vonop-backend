@@ -599,7 +599,12 @@ func (c *Controller) validateAndFixFiles(ctx context.Context, project *models.Ap
 		fixes := c.llmFixPass(ctx, files, valErrors, structure)
 		if fixes == nil || len(fixes) == 0 {
 			slog.Warn("LLM fix pass returned no fixes", "project_id", project.ID, "iteration", iteration)
-			break
+			// Only break if this is the last iteration or no errors changed
+			if iteration >= 2 {
+				break
+			}
+			// Continue to next iteration — LLM might succeed on retry with different context
+			continue
 		}
 
 		// Apply fixes to DB and in-memory map
@@ -634,7 +639,7 @@ func (c *Controller) PlanAppFileStructure(ctx context.Context, prompt string, pr
 		systemPrompt = constants.NEXTJS_ECOMMERCE_STRUCTURE_PROMPT
 	}
 
-	structureJSON, err := utils.GetJSONFromLLM(model, systemPrompt, prompt, provider)
+	structureJSON, err := utils.GetJSONFromLLM(ctx, model, systemPrompt, prompt, provider)
 	if err != nil {
 		slog.Error("failed to generate app structure", "error", err)
 		return nil, fmt.Errorf("failed to generate app structure. try again please")
@@ -702,7 +707,7 @@ func (c *Controller) PlanAppFileStructureFromScreenshot(imageBase64 string) (*ap
 		model = constants.DEFAULT_NEXTJS_LLM_MODEL
 	}
 
-	response, err := utils.GetJSONFromLLMWithVision(model, constants.NEXTJS_SCREENSHOT_TO_FILES_PROMPT, "Analyze this screenshot and generate the file structure plan.", imageBase64, provider)
+	response, err := utils.GetJSONFromLLMWithVision(context.Background(), model, constants.NEXTJS_SCREENSHOT_TO_FILES_PROMPT, "Analyze this screenshot and generate the file structure plan.", imageBase64, provider)
 	if err != nil {
 		return nil, fmt.Errorf("failed to analyze screenshot")
 	}
@@ -762,20 +767,39 @@ func (c *Controller) generateSingleAppFile(
 	fileCtx, fileCancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer fileCancel()
 
-	filePrompt := c.getAppFilePrompt(filePlan.Type)
+	basePrompt := c.getAppFilePrompt(filePlan.Type)
 
-	// Build lightweight file list under read lock
+	// Build system prompt with project-level context (sent once, cached by providers)
+	var systemPrompt strings.Builder
+	systemPrompt.WriteString(basePrompt)
+	systemPrompt.WriteString(fmt.Sprintf("\n\n### Project Context\nApp: %s\nColor scheme: %s\nTypography: %v\nAll files in project: %s\n\nUser's original description: %s",
+		structure.Name,
+		string(colorSchemeJSON),
+		structure.Typography,
+		strings.Join(allFilePaths, ", "),
+		project.Prompt,
+	))
+	// Inline wemob-store.ts in system prompt for e-commerce
+	if project.ProjectType == "ecommerce" {
+		mu.Lock()
+		if storeContent, ok := generatedFiles["lib/wemob-store.ts"]; ok {
+			systemPrompt.WriteString(fmt.Sprintf("\n\n--- lib/wemob-store.ts (INJECTED SDK — use these exports, do NOT create custom API utilities) ---\n%s", storeContent))
+		}
+		mu.Unlock()
+	}
+
+	// Build compact per-file user prompt
 	mu.Lock()
 	var generatedFileList strings.Builder
 	if len(generatedFiles) > 0 {
-		generatedFileList.WriteString("\n\nAlready-generated files (use read_file to view):\n")
+		generatedFileList.WriteString("\nAlready-generated files (use read_file to view):\n")
 		genPaths := make([]string, 0, len(generatedFiles))
 		for p := range generatedFiles {
 			genPaths = append(genPaths, p)
 		}
 		sort.Strings(genPaths)
 		for _, p := range genPaths {
-			generatedFileList.WriteString(fmt.Sprintf("- %s (%d chars)\n", p, len(generatedFiles[p])))
+			generatedFileList.WriteString(fmt.Sprintf("- %s\n", p))
 		}
 	}
 	// Snapshot the file map for the tool executor
@@ -785,25 +809,11 @@ func (c *Controller) generateSingleAppFile(
 	}
 	mu.Unlock()
 
-	allFilesContext := strings.Join(allFilePaths, ", ")
-	userPrompt := fmt.Sprintf(
-		"App name: %s\nColor scheme: %s\nTypography: %v\nAll files: %s\nCurrent file: %s\nDescription: %s\n\nUser's original description: %s%s",
-		structure.Name,
-		string(colorSchemeJSON),
-		structure.Typography,
-		allFilesContext,
+	userPrompt := fmt.Sprintf("Generate: %s\nDescription: %s%s",
 		filePlan.Path,
 		filePlan.Description,
-		project.Prompt,
 		generatedFileList.String(),
 	)
-
-	// Inline wemob-store.ts so the LLM sees the full SDK API without needing a tool call
-	if project.ProjectType == "ecommerce" {
-		if storeContent, ok := fileSnapshot["lib/wemob-store.ts"]; ok {
-			userPrompt += fmt.Sprintf("\n\n--- lib/wemob-store.ts (INJECTED SDK — use these exports, do NOT create custom API utilities) ---\n%s", storeContent)
-		}
-	}
 
 	codegenLocalExecutor := c.buildChatToolExecutor(nil, nil, fileSnapshot)
 	codegenExecutor := c.compositeToolExecutor(codegenLocalExecutor)
@@ -812,7 +822,7 @@ func (c *Controller) generateSingleAppFile(
 	content, err := utils.StreamTextWithTools(
 		fileCtx,
 		model,
-		filePrompt,
+		systemPrompt.String(),
 		userPrompt,
 		provider,
 		codegenTools,
@@ -833,6 +843,101 @@ func (c *Controller) generateSingleAppFile(
 		// If it was a per-file timeout (not parent ctx cancellation), use fallback
 		if fileCtx.Err() != nil && ctx.Err() == nil {
 			slog.Warn("Per-file timeout, using fallback", "path", filePlan.Path)
+			return c.getAppFileFallback(filePlan), nil
+		}
+		return "", err
+	}
+
+	return content, nil
+}
+
+// repairSingleAppFile generates a replacement for a broken file using a focused repair prompt.
+// It includes the failure reason and broken content as context so the LLM can produce a better result.
+func (c *Controller) repairSingleAppFile(
+	ctx context.Context,
+	project *models.AppProject,
+	filePlan appFilePlanEntry,
+	structure *appFileStructure,
+	model string,
+	provider *utils.LLMProvider,
+	generatedFiles map[string]string,
+	mu *sync.Mutex,
+	allFilePaths []string,
+	colorSchemeJSON []byte,
+	sendEvent func(string, any) bool,
+	failReason string,
+	brokenContent string,
+) (string, error) {
+	fileCtx, fileCancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer fileCancel()
+
+	// Build context about files that import this broken file
+	mu.Lock()
+	var importContext strings.Builder
+	for path, content := range generatedFiles {
+		if strings.Contains(content, "@/"+strings.TrimSuffix(strings.TrimSuffix(filePlan.Path, ".tsx"), ".ts")) {
+			// Extract just the import lines referencing this file
+			for _, line := range strings.Split(content, "\n") {
+				trimmed := strings.TrimSpace(line)
+				if strings.HasPrefix(trimmed, "import") && strings.Contains(line, "@/"+strings.TrimSuffix(strings.TrimSuffix(filePlan.Path, ".tsx"), ".ts")) {
+					importContext.WriteString(fmt.Sprintf("  %s (from %s)\n", trimmed, path))
+				}
+			}
+		}
+	}
+
+	fileSnapshot := make(map[string]string, len(generatedFiles))
+	for k, v := range generatedFiles {
+		fileSnapshot[k] = v
+	}
+	mu.Unlock()
+
+	repairPrompt := constants.NEXTJS_REPAIR_PROMPT
+
+	var userPrompt strings.Builder
+	userPrompt.WriteString(fmt.Sprintf("File to repair: %s\n", filePlan.Path))
+	userPrompt.WriteString(fmt.Sprintf("File type: %s\n", filePlan.Type))
+	userPrompt.WriteString(fmt.Sprintf("Description: %s\n", filePlan.Description))
+	userPrompt.WriteString(fmt.Sprintf("App name: %s\n", structure.Name))
+	userPrompt.WriteString(fmt.Sprintf("Color scheme: %s\n", string(colorSchemeJSON)))
+	if failReason != "" {
+		userPrompt.WriteString(fmt.Sprintf("\nPrevious failure reason: %s\n", failReason))
+	}
+	if brokenContent != "" && len(brokenContent) < 500 {
+		userPrompt.WriteString(fmt.Sprintf("\nCurrent broken content:\n%s\n", brokenContent))
+	}
+	if importContext.Len() > 0 {
+		userPrompt.WriteString(fmt.Sprintf("\nFiles that import this module:\n%s", importContext.String()))
+	}
+	userPrompt.WriteString(fmt.Sprintf("\nUser's original description: %s\n", project.Prompt))
+
+	codegenLocalExecutor := c.buildChatToolExecutor(nil, nil, fileSnapshot)
+	codegenExecutor := c.compositeToolExecutor(codegenLocalExecutor)
+	codegenTools := append([]utils.Tool{}, appCodegenTools...)
+
+	content, err := utils.StreamTextWithTools(
+		fileCtx,
+		model,
+		repairPrompt,
+		userPrompt.String(),
+		provider,
+		codegenTools,
+		nil,
+		codegenExecutor,
+		nil,
+		func(chunk string) {
+			sendEvent("file_chunk", responses.FileOperationEvent{
+				Action:   "create",
+				FilePath: filePlan.Path,
+				FileType: filePlan.Type,
+				Chunk:    chunk,
+			})
+		},
+		nil,
+	)
+	if err != nil {
+		if fileCtx.Err() != nil && ctx.Err() == nil {
+			slog.Warn("Repair per-file timeout, using fallback", "path", filePlan.Path)
 			return c.getAppFileFallback(filePlan), nil
 		}
 		return "", err
@@ -869,6 +974,31 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 	}
 	concurrency := c.llmConcurrency()
 	slog.Info("LLM concurrency limit", "concurrency", concurrency)
+
+	// Token usage tracking
+	tracker := utils.NewTokenTracker()
+	ctx = utils.WithTokenTracker(ctx, tracker)
+	defer func() {
+		c.RecordTokenUsage(user.ID, "generate_app", model, provider.Name, project.ID.String(), tracker)
+	}()
+
+	// Start SSE keepalive goroutine to prevent proxy/firewall timeouts
+	keepaliveDone := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(15 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-keepaliveDone:
+				return
+			case <-ticker.C:
+				sendEvent("keepalive", map[string]any{"ts": time.Now().Unix()})
+			}
+		}
+	}()
+	defer close(keepaliveDone)
 
 	// Step 1: Plan file structure (streamed)
 	structure, err := c.PlanAppFileStructureStream(ctx, prompt, projectType, func(chunk string) {
@@ -1061,7 +1191,8 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 	tiers := categorizeFiles(appFiles)
 	colorSchemeJSON, _ := json.Marshal(structure.ColorScheme)
 
-	var mu sync.Mutex // protects generatedFiles map
+	var mu sync.Mutex // protects generatedFiles map and failureReasons
+	failureReasons := make(map[string]string) // tracks why each file failed (for repair context)
 
 	for tierIdx, tier := range tiers {
 		if len(tier) == 0 {
@@ -1085,6 +1216,7 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 				defer func() { <-sem }() // release semaphore slot
 
 				var content string
+				var lastFailReason string
 				for attempt := 0; attempt < 3; attempt++ {
 					if attempt > 0 {
 						time.Sleep(time.Duration(attempt) * 2 * time.Second)
@@ -1094,10 +1226,12 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 					content, err = c.generateSingleAppFile(ctx, project, fp, structure, model, provider, generatedFiles, &mu, allFilePaths, colorSchemeJSON, sendEvent)
 					if err != nil {
 						slog.Error("failed to generate app file", "error", err, "path", fp.Path, "attempt", attempt+1)
+						lastFailReason = fmt.Sprintf("error: %s", err.Error())
 						content = c.getAppFileFallback(fp)
 					}
 					content = utils.StripCodeFences(content)
 					if strings.TrimSpace(content) == "" {
+						lastFailReason = "empty response from LLM"
 						content = c.getAppFileFallback(fp)
 					}
 					if fp.Type == "tsx" || fp.Type == "ts" {
@@ -1105,12 +1239,22 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 					}
 					// If we got real content (not fallback), stop retrying
 					if !strings.Contains(content, "Generation failed") {
+						lastFailReason = ""
 						break
+					}
+					if lastFailReason == "" {
+						lastFailReason = "LLM returned placeholder/fallback content"
 					}
 				}
 
-				// Surface error if all retries failed
+				// Surface error if all retries failed and track reason for repair pass
 				if strings.Contains(content, "Generation failed") {
+					if lastFailReason == "" {
+						lastFailReason = "all retries exhausted"
+					}
+					mu.Lock()
+					failureReasons[fp.Path] = lastFailReason
+					mu.Unlock()
 					sendEvent("file_error", map[string]any{
 						"path":    fp.Path,
 						"message": fmt.Sprintf("All retries exhausted for %s — using placeholder content", fp.Path),
@@ -1174,30 +1318,22 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 				defer func() { <-missingSem }()
 
 				filePath, fileType := guessFileType(impPath)
-				filePrompt := c.getAppFilePrompt(fileType)
+				basePrompt := c.getAppFilePrompt(fileType)
 
 				fileCtx, fileCancel := context.WithTimeout(ctx, 5*time.Minute)
 				defer fileCancel()
 
-				// Build context about what files import this missing module (under lock)
+				// Build context: actual import lines from consuming files (shows exactly what to export)
 				mu.Lock()
-				importedBy := []string{}
+				var importLines strings.Builder
 				for path, content := range generatedFiles {
 					if strings.Contains(content, "@/"+impPath) {
-						importedBy = append(importedBy, path)
-					}
-				}
-
-				var genFileList strings.Builder
-				if len(generatedFiles) > 0 {
-					genFileList.WriteString("\n\nAlready-generated files (use read_file to view):\n")
-					genPaths := make([]string, 0, len(generatedFiles))
-					for p := range generatedFiles {
-						genPaths = append(genPaths, p)
-					}
-					sort.Strings(genPaths)
-					for _, p := range genPaths {
-						genFileList.WriteString(fmt.Sprintf("- %s (%d chars)\n", p, len(generatedFiles[p])))
+						for _, line := range strings.Split(content, "\n") {
+							trimmed := strings.TrimSpace(line)
+							if strings.HasPrefix(trimmed, "import") && strings.Contains(line, "@/"+impPath) {
+								importLines.WriteString(fmt.Sprintf("  %s (from %s)\n", trimmed, path))
+							}
+						}
 					}
 				}
 
@@ -1207,26 +1343,24 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 				}
 				mu.Unlock()
 
-				allFilesContext := strings.Join(allFilePaths, ", ")
-
-				userPrompt := fmt.Sprintf(
-					"App name: %s\nColor scheme: %s\nTypography: %v\nAll files: %s\nCurrent file: %s\nDescription: This file is imported by: %s. Generate the implementation based on how it is used in those files.\n\nUser's original description: %s%s",
-					structure.Name,
-					string(colorSchemeJSON),
-					structure.Typography,
-					allFilesContext+", "+filePath,
-					filePath,
-					strings.Join(importedBy, ", "),
-					project.Prompt,
-					genFileList.String(),
-				)
-
-				// Inline wemob-store.ts so the LLM sees the full SDK API without needing a tool call
+				// System prompt with project context
+				var sysPrompt strings.Builder
+				sysPrompt.WriteString(basePrompt)
+				sysPrompt.WriteString(fmt.Sprintf("\n\n### Project Context\nApp: %s\nColor scheme: %s\nUser's description: %s",
+					structure.Name, string(colorSchemeJSON), project.Prompt))
 				if project.ProjectType == "ecommerce" {
 					if storeContent, ok := fileSnapshot["lib/wemob-store.ts"]; ok {
-						userPrompt += fmt.Sprintf("\n\n--- lib/wemob-store.ts (INJECTED SDK — use these exports, do NOT create custom API utilities) ---\n%s", storeContent)
+						sysPrompt.WriteString(fmt.Sprintf("\n\n--- lib/wemob-store.ts (INJECTED SDK) ---\n%s", storeContent))
 					}
 				}
+
+				// Compact user prompt with import context
+				var userPrompt strings.Builder
+				userPrompt.WriteString(fmt.Sprintf("Generate: %s\n", filePath))
+				if importLines.Len() > 0 {
+					userPrompt.WriteString(fmt.Sprintf("\nThis file is imported with these exact import statements — match these exports:\n%s", importLines.String()))
+				}
+				userPrompt.WriteString("\nGenerate the complete implementation based on how it is used in consuming files.")
 
 				missingLocalExecutor := c.buildChatToolExecutor(nil, nil, fileSnapshot)
 				missingExecutor := c.compositeToolExecutor(missingLocalExecutor)
@@ -1234,8 +1368,8 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 				content, err := utils.StreamTextWithTools(
 					fileCtx,
 					model,
-					filePrompt,
-					userPrompt,
+					sysPrompt.String(),
+					userPrompt.String(),
 					provider,
 					missingTools,
 					nil,
@@ -1336,13 +1470,19 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 				continue
 			}
 
+			// Get failure reason for context
+			mu.Lock()
+			failReason := failureReasons[brokenPath]
+			brokenContent := generatedFiles[brokenPath]
+			mu.Unlock()
+
 			repairWg.Add(1)
 			repairSem <- struct{}{}
-			go func(fp appFilePlanEntry) {
+			go func(fp appFilePlanEntry, failReason string, brokenContent string) {
 				defer repairWg.Done()
 				defer func() { <-repairSem }()
 
-				content, err := c.generateSingleAppFile(ctx, project, fp, structure, model, provider, generatedFiles, &mu, allFilePaths, colorSchemeJSON, sendEvent)
+				content, err := c.repairSingleAppFile(ctx, project, fp, structure, model, provider, generatedFiles, &mu, allFilePaths, colorSchemeJSON, sendEvent, failReason, brokenContent)
 				if err != nil {
 					slog.Warn("Repair pass failed for file", "path", fp.Path, "error", err)
 					return
@@ -1360,12 +1500,25 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 
 				slog.Info("Repair pass fixed broken file", "path", fp.Path)
 
-				// Update DB
+				// Update DB — only update in-memory map after successful write
 				dbFile, dbErr := c.DB.GetAppGeneratedFileByPath(project.ID.String(), "nextjs", fp.Path)
-				if dbErr == nil && dbFile != nil {
-					dbFile.Content = content
-					dbFile.UpdatedAt = time.Now()
-					c.DB.UpdateAppGeneratedFile(dbFile)
+				if dbErr != nil || dbFile == nil {
+					slog.Error("failed to find file for repair update", "error", dbErr, "path", fp.Path)
+					sendEvent("file_error", map[string]any{
+						"path":    fp.Path,
+						"message": fmt.Sprintf("Repair succeeded but failed to save %s to database", fp.Path),
+					})
+					return
+				}
+				dbFile.Content = content
+				dbFile.UpdatedAt = time.Now()
+				if _, updateErr := c.DB.UpdateAppGeneratedFile(dbFile); updateErr != nil {
+					slog.Error("failed to save repaired file", "error", updateErr, "path", fp.Path)
+					sendEvent("file_error", map[string]any{
+						"path":    fp.Path,
+						"message": fmt.Sprintf("Repair succeeded but failed to save %s to database", fp.Path),
+					})
+					return
 				}
 
 				mu.Lock()
@@ -1376,7 +1529,7 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 					"phase": "fixed",
 					"path":  fp.Path,
 				})
-			}(fp)
+			}(fp, failReason, brokenContent)
 		}
 
 		repairWg.Wait()
@@ -1388,10 +1541,20 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 			"repaired", len(brokenFiles)-len(remainingBroken),
 			"still_broken", len(remainingBroken),
 		)
+
+		// Send file_error for each file that remains broken
+		for _, brokenPath := range remainingBroken {
+			sendEvent("file_error", map[string]any{
+				"path":    brokenPath,
+				"message": fmt.Sprintf("File %s still contains placeholder content after repair", brokenPath),
+			})
+		}
+
 		sendEvent("repair", map[string]any{
-			"phase":        "complete",
-			"repaired":     len(brokenFiles) - len(remainingBroken),
-			"still_broken": len(remainingBroken),
+			"phase":             "complete",
+			"repaired":          len(brokenFiles) - len(remainingBroken),
+			"still_broken":      len(remainingBroken),
+			"broken_file_paths": remainingBroken,
 		})
 	}
 

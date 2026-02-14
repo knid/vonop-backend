@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -305,7 +306,7 @@ func (c *Controller) ValidateAppFiles(projectID string) (*AppValidationResult, e
 		fileContext.WriteString(fmt.Sprintf("\n--- %s (%s) ---\n%s\n", f.FilePath, f.FileType, f.Content))
 	}
 
-	responseJSON, err := utils.GetJSONFromLLM(model, constants.NEXTJS_VALIDATE_PROMPT, fileContext.String(), provider)
+	responseJSON, err := utils.GetJSONFromLLM(context.Background(), model, constants.NEXTJS_VALIDATE_PROMPT, fileContext.String(), provider)
 	if err != nil {
 		slog.Error("validation LLM call failed", "error", err)
 		// Still return deterministic results
