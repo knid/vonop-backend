@@ -44,8 +44,8 @@ type LLMTokenUsage struct {
 	CreatedAt        time.Time `bun:"created_at,nullzero,notnull,default:current_timestamp"`
 }
 
-// Token-to-credit conversion: 1 credit per 1000 tokens
-const AICreditsTokensPerCredit = 1000
+// Token-to-credit conversion: 1 credit per 10,000 tokens
+const AICreditsTokensPerCredit = 10_000
 
 // TokensToCredits converts total token count to credit cost (rounds up).
 func TokensToCredits(totalTokens int) int {
