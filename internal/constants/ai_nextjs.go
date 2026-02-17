@@ -1025,6 +1025,7 @@ Given the user's description of a web application they want to build, generate a
 12. Keep the structure clean and well-organized.
 13. CRITICAL: Every component or module that is imported by any page MUST be included in the file list. If page.tsx imports "@/components/project-card", you MUST include "components/project-card.tsx" in the plan. If page.tsx imports "@/lib/projects", you MUST include "lib/projects.ts" in the plan. Missing files will cause build failures.
 14. Prefer inline implementations over importing from separate utility/lib files. Only create separate files for reusable components or large data modules.
+15. If the application requires external API keys or secrets (payment gateways, databases, third-party APIs, etc.), list them in "required_env_vars". Each entry: "key" (env var name, e.g. "STRIPE_SK"), "description" (what it's for), "is_public" (true if NEXT_PUBLIC_ prefixed for client-side), "provider" (optional, matching integration: "stripe", "iyzico", "supabase", etc.). Do NOT include NEXT_PUBLIC_STORE_ID or NEXT_PUBLIC_WEMOB_API_URL (auto-injected).
 
 ### Output format (strict JSON, no explanation, no markdown)
 {
@@ -1056,6 +1057,9 @@ Given the user's description of a web application they want to build, generate a
     {"path": "app/globals.css", "type": "css", "description": "Global styles with Tailwind v4 @theme colors"},
     {"path": "components/header.tsx", "type": "tsx", "description": "Navigation header"},
     {"path": "components/footer.tsx", "type": "tsx", "description": "Footer component"}
+  ],
+  "required_env_vars": [
+    {"key": "STRIPE_SK", "description": "Stripe secret key for payments", "is_public": false, "provider": "stripe"}
   ]
 }`
 
@@ -1090,6 +1094,7 @@ Given the user's description of a mobile app they want to build, generate a stru
 15. MOBILE-SPECIFIC: Include viewport meta tag configuration for mobile. Use touch-friendly sizing. Plan bottom tab navigation component. Use mobile-appropriate components (bottom sheets, slide-up modals, swipeable cards). All layouts must work within 430px max width. NO desktop-only layouts.
 16. Generate mobile-first CSS — use Tailwind's default breakpoint as the base (mobile), never require larger breakpoints for core functionality.
 17. Include PWA-ready manifest hints in the layout description.
+18. If the application requires external API keys or secrets (payment gateways, databases, third-party APIs, etc.), list them in "required_env_vars". Each entry: "key" (env var name, e.g. "STRIPE_SK"), "description" (what it's for), "is_public" (true if NEXT_PUBLIC_ prefixed for client-side), "provider" (optional, matching integration: "stripe", "iyzico", "supabase", etc.). Do NOT include NEXT_PUBLIC_STORE_ID or NEXT_PUBLIC_WEMOB_API_URL (auto-injected).
 
 ### Output format (strict JSON, no explanation, no markdown)
 {
@@ -1121,6 +1126,9 @@ Given the user's description of a mobile app they want to build, generate a stru
     {"path": "app/globals.css", "type": "css", "description": "Global styles with Tailwind v4 @theme colors and mobile utilities"},
     {"path": "components/bottom-nav.tsx", "type": "tsx", "description": "Bottom tab navigation bar"},
     {"path": "components/mobile-header.tsx", "type": "tsx", "description": "Mobile header with back button and title"}
+  ],
+  "required_env_vars": [
+    {"key": "STRIPE_SK", "description": "Stripe secret key for payments", "is_public": false, "provider": "stripe"}
   ]
 }`
 
@@ -1367,6 +1375,7 @@ Given the user's description of an online store, generate a structured file plan
 12. CRITICAL: Every component or module that is imported by any page MUST be included in the file list. If page.tsx imports "@/components/product-card", you MUST include "components/product-card.tsx" in the plan. If page.tsx imports "@/lib/store", you MUST include "lib/store.ts" in the plan. Missing files will cause build failures. Exception: @/lib/wemob-store is template-injected and does not need to be in the file list.
 13. Prefer inline implementations over importing from separate utility/lib files. Only create separate files for reusable components or large data modules.
 14. A pre-built storefront SDK is available at lib/wemob-store.ts (template-injected, "use client"). It provides async API functions AND React hooks/context. Use import { getProducts, getProduct, getCategories, getStoreConfig, createCart, getCart, addCartItem, updateCartItem, removeCartItem, applyDiscountCode, removeDiscount, checkout, confirmCheckout, getOrder, formatPrice, renderPaymentForm, getSessionId, clearSession, CartProvider, useCart, useProducts, useProduct, useCategories, useStoreConfig } from "@/lib/wemob-store" for all storefront API calls. Wrap the app in <CartProvider> in layout.tsx. Use useCart() for cart state with optimistic updates (includes removeDiscountCode). getProducts/useProducts accept optional { category, q } filter params. Do NOT create custom fetch utilities for the storefront API.
+15. If the application requires external API keys or secrets (payment gateways, databases, third-party APIs, etc.), list them in "required_env_vars". Each entry: "key" (env var name, e.g. "STRIPE_SK"), "description" (what it's for), "is_public" (true if NEXT_PUBLIC_ prefixed for client-side), "provider" (optional, matching integration: "stripe", "iyzico", "supabase", etc.). Do NOT include NEXT_PUBLIC_STORE_ID or NEXT_PUBLIC_WEMOB_API_URL (auto-injected).
 
 ### Output format: Same as NEXTJS_STRUCTURE_PROMPT (strict JSON, no explanation, no markdown)
 {
@@ -1389,6 +1398,9 @@ Given the user's description of an online store, generate a structured file plan
     {"path":"components/footer.tsx","type":"tsx","description":"Footer"},
     {"path":"components/product-card.tsx","type":"tsx","description":"Product card with variant selector"},
     {"path":"components/cart-drawer.tsx","type":"tsx","description":"Slide-out cart sidebar using useCart()"}
+  ],
+  "required_env_vars": [
+    {"key": "STRIPE_SK", "description": "Stripe secret key for payments", "is_public": false, "provider": "stripe"}
   ]
 }`
 

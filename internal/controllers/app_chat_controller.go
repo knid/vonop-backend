@@ -980,6 +980,18 @@ func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.A
 	if explanationText != "" {
 		displayContent = explanationText
 	}
+	// Detect missing env vars after file changes
+	var chatMissingVars []RequiredEnvVar
+	if filesChanged > 0 {
+		codeKeys := detectEnvVarsFromCode(currentFiles)
+		var storedRequired []RequiredEnvVar
+		if raw, ok := project.Settings["required_env_vars"]; ok {
+			b, _ := json.Marshal(raw)
+			json.Unmarshal(b, &storedRequired)
+		}
+		chatMissingVars = c.computeMissingEnvVars(project, storedRequired, codeKeys)
+	}
+
 	sendEvent("chat_complete", map[string]any{
 		"project_id":      project.ID,
 		"summary":         displayContent,
@@ -987,6 +999,7 @@ func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.A
 		"file_operations": fileOps,
 		"snapshot_id":     preSnapshotID,
 		"suggestions":     chatResp.Suggestions,
+		"missing_env_vars": chatMissingVars,
 	})
 }
 

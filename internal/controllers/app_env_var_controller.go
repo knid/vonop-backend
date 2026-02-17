@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -124,6 +125,23 @@ func BuildDotEnvLocal(envVars map[string]string) string {
 		sb.WriteString(fmt.Sprintf("%s=%s\n", k, v))
 	}
 	return sb.String()
+}
+
+// GetMissingEnvVars returns required env vars that are not yet configured for a project.
+func (c *Controller) GetMissingEnvVars(project *models.AppProject) ([]RequiredEnvVar, error) {
+	var required []RequiredEnvVar
+	if raw, ok := project.Settings["required_env_vars"]; ok {
+		b, _ := json.Marshal(raw)
+		json.Unmarshal(b, &required)
+	}
+
+	files, _ := c.DB.GetAppGeneratedFilesByProjectID(project.ID.String(), "nextjs")
+	fileMap := make(map[string]string)
+	for _, f := range files {
+		fileMap[f.FilePath] = f.Content
+	}
+	codeKeys := detectEnvVarsFromCode(fileMap)
+	return c.computeMissingEnvVars(project, required, codeKeys), nil
 }
 
 // GetEnvVarKeysForChat returns env var key names (no values) for AI chat context.
