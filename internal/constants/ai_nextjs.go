@@ -511,7 +511,7 @@ export function getSessionId(): string {
     id = localStorage.getItem(SESSION_LS_KEY);
   }
   if (!id) {
-    id = crypto.randomUUID();
+    id = (typeof crypto !== "undefined" && crypto.randomUUID) ? crypto.randomUUID() : (Math.random().toString(36).slice(2) + Date.now().toString(36));
   }
 
   // Persist to both stores
