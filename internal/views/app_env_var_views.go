@@ -30,19 +30,12 @@ func (v *HttpViews) GetAppEnvVars(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Mask values in list response
 	var resp []responses.EnvVarResponse
 	for _, ev := range envVars {
-		masked := ev.Value
-		if len(masked) > 4 {
-			masked = masked[:4] + "••••••••"
-		} else {
-			masked = "••••••••"
-		}
 		resp = append(resp, responses.EnvVarResponse{
 			ID:        ev.ID,
 			Key:       ev.Key,
-			Value:     masked,
+			Value:     ev.Value,
 			IsPublic:  ev.IsPublic,
 			CreatedAt: ev.CreatedAt,
 			UpdatedAt: ev.UpdatedAt,
