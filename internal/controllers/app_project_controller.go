@@ -53,6 +53,13 @@ func (c *Controller) GetAppProjectsByUser(user *models.User) ([]models.AppProjec
 	return c.DB.GetAppProjectsByUserID(user.ID.String())
 }
 
+func (c *Controller) GetAppProjectsByUserFiltered(user *models.User, types []string) ([]models.AppProject, error) {
+	if len(types) == 0 {
+		return c.DB.GetAppProjectsByUserID(user.ID.String())
+	}
+	return c.DB.GetAppProjectsByUserIDAndTypes(user.ID.String(), types)
+}
+
 func (c *Controller) GetAppProject(id string, user *models.User) (*models.AppProject, error) {
 	project, err := c.DB.GetAppProjectByID(id)
 	if err != nil {
@@ -79,6 +86,14 @@ func (c *Controller) UpdateAppProject(id string, user *models.User, req requests
 
 	project.Name = req.Name
 	project.Slug = req.Slug
+	if len(req.Settings) > 0 {
+		if project.Settings == nil {
+			project.Settings = make(map[string]any)
+		}
+		for k, v := range req.Settings {
+			project.Settings[k] = v
+		}
+	}
 	project.UpdatedAt = time.Now()
 
 	updated, err := c.DB.UpdateAppProject(project)
