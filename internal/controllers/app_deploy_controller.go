@@ -379,6 +379,22 @@ func (c *Controller) StartPreview(project *models.AppProject) (*preview.PreviewS
 		fileMap[".env.local"] = dotEnv
 	}
 
+	// Patch lib/wemob-store.ts with hardcoded env values so the SDK works even
+	// when NEXT_PUBLIC_* vars are not inlined at compile time (e.g. preview containers).
+	if sdkContent, ok := fileMap["lib/wemob-store.ts"]; ok {
+		if storeID := envVars["NEXT_PUBLIC_STORE_ID"]; storeID != "" {
+			sdkContent = strings.Replace(sdkContent,
+				`process.env.NEXT_PUBLIC_STORE_ID || ""`,
+				fmt.Sprintf(`process.env.NEXT_PUBLIC_STORE_ID || "%s"`, storeID), 1)
+		}
+		if apiURL := envVars["NEXT_PUBLIC_WEMOB_API_URL"]; apiURL != "" {
+			sdkContent = strings.Replace(sdkContent,
+				`process.env.NEXT_PUBLIC_WEMOB_API_URL || ""`,
+				fmt.Sprintf(`process.env.NEXT_PUBLIC_WEMOB_API_URL || "%s"`, apiURL), 1)
+		}
+		fileMap["lib/wemob-store.ts"] = sdkContent
+	}
+
 	status, err := c.PreviewService.CreatePreview(project.ID.String(), fileMap, envVars)
 	if err != nil {
 		slog.Error("Failed to start preview", "error", err, "project_id", project.ID)

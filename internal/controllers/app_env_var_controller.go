@@ -98,12 +98,16 @@ func (c *Controller) CollectAllEnvVars(project *models.AppProject) map[string]st
 		envVars[key] = ev.Value
 	}
 
-	// 3. Auto-injected e-commerce vars
+	// 3. Auto-injected e-commerce vars (only set defaults, never overwrite user values)
 	if project.ProjectType == "ecommerce" {
 		store, err := c.DB.GetStoreByAppProjectID(project.ID.String())
 		if err == nil && store != nil {
-			envVars["NEXT_PUBLIC_STORE_ID"] = store.ID.String()
-			envVars["NEXT_PUBLIC_WEMOB_API_URL"] = constants.WEMOB_API_BASE_URL
+			if envVars["NEXT_PUBLIC_STORE_ID"] == "" {
+				envVars["NEXT_PUBLIC_STORE_ID"] = store.ID.String()
+			}
+			if envVars["NEXT_PUBLIC_WEMOB_API_URL"] == "" {
+				envVars["NEXT_PUBLIC_WEMOB_API_URL"] = constants.WEMOB_API_BASE_URL
+			}
 		}
 	}
 
