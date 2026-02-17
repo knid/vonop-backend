@@ -1,13 +1,41 @@
 package views
 
 import (
+	"log/slog"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/knid/wemob/internal/controllers"
+	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/utils"
 )
+
+// syncEnvVarsToPreview pushes the latest env vars to the running preview container
+// and regenerates .env.local in the DB so future preview restarts also pick them up.
+func (v *HttpViews) syncEnvVarsToPreview(project *models.AppProject) {
+	envVars := v.Controller.CollectAllEnvVars(project)
+
+	// Update .env.local file in DB
+	if dotEnv := controllers.BuildDotEnvLocal(envVars); dotEnv != "" {
+		v.Controller.DB.UpsertAppGeneratedFile(&models.AppGeneratedFile{
+			AppProjectID: project.ID,
+			Platform:     "nextjs",
+			FilePath:     ".env.local",
+			Content:      dotEnv,
+			FileType:     "env",
+			IsGenerated:  false,
+		})
+	}
+
+	// Push to running preview container
+	if v.Controller.PreviewService != nil {
+		if err := v.Controller.PreviewService.UpdateEnvVars(project.ID.String(), envVars); err != nil {
+			slog.Debug("env var preview sync skipped (preview may not be running)", "error", err)
+		}
+	}
+}
 
 // GET /v2/apps/{appId}/env-vars
 func (v *HttpViews) GetAppEnvVars(w http.ResponseWriter, r *http.Request) {
@@ -76,6 +104,8 @@ func (v *HttpViews) SetAppEnvVar(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	go v.syncEnvVarsToPreview(project)
+
 	utils.JSONResponse(w, responses.EnvVarResponse{
 		ID:        envVar.ID,
 		Key:       envVar.Key,
@@ -114,6 +144,8 @@ func (v *HttpViews) UpdateAppEnvVar(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	go v.syncEnvVarsToPreview(project)
+
 	utils.JSONResponse(w, responses.EnvVarResponse{
 		ID:        envVar.ID,
 		Key:       envVar.Key,
@@ -144,6 +176,8 @@ func (v *HttpViews) DeleteAppEnvVar(w http.ResponseWriter, r *http.Request) {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+
+	go v.syncEnvVarsToPreview(project)
 
 	utils.JSONResponse(w, responses.SuccessResponse{Success: true}, http.StatusOK)
 }
