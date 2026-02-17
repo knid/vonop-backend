@@ -37,6 +37,30 @@ func (v *HttpViews) syncEnvVarsToPreview(project *models.AppProject) {
 	}
 }
 
+// GET /v2/apps/{appId}/env-vars/missing
+func (v *HttpViews) GetMissingEnvVars(w http.ResponseWriter, r *http.Request) {
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	appID := chi.URLParam(r, "appId")
+	project, err := v.Controller.GetAppProject(appID, user)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	missing, err := v.Controller.GetMissingEnvVars(project)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	utils.JSONResponse(w, missing, http.StatusOK)
+}
+
 // GET /v2/apps/{appId}/env-vars
 func (v *HttpViews) GetAppEnvVars(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)

@@ -54,6 +54,14 @@ type appFileStructure struct {
 	DarkColorScheme map[string]any     `json:"darkColorScheme,omitempty"`
 	Typography      map[string]any     `json:"typography,omitempty"`
 	Files           []appFilePlanEntry `json:"files"`
+	RequiredEnvVars []RequiredEnvVar   `json:"required_env_vars,omitempty"`
+}
+
+type RequiredEnvVar struct {
+	Key         string `json:"key"`
+	Description string `json:"description"`
+	IsPublic    bool   `json:"is_public"`
+	Provider    string `json:"provider,omitempty"`
 }
 
 type appFilePlanEntry struct {
@@ -75,6 +83,62 @@ type llmFixResponse struct {
 		Path    string `json:"path"`
 		Content string `json:"content"`
 	} `json:"fixes"`
+}
+
+// --- Regex for env var detection ---
+var processEnvRegex = regexp.MustCompile(`process\.env\.([A-Z_][A-Z0-9_]+)`)
+
+// detectEnvVarsFromCode scans all generated file contents for process.env.* references
+// and returns a sorted list of unique env var keys, excluding auto-injected ones.
+func detectEnvVarsFromCode(files map[string]string) []string {
+	excluded := map[string]bool{
+		"NODE_ENV":                  true,
+		"NEXT_PUBLIC_STORE_ID":      true,
+		"NEXT_PUBLIC_WEMOB_API_URL": true,
+	}
+	seen := map[string]bool{}
+	for _, content := range files {
+		for _, m := range processEnvRegex.FindAllStringSubmatch(content, -1) {
+			if !excluded[m[1]] {
+				seen[m[1]] = true
+			}
+		}
+	}
+	keys := make([]string, 0, len(seen))
+	for k := range seen {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// computeMissingEnvVars merges LLM-declared env vars with code-scanned keys,
+// then returns only those not yet configured in the project.
+func (c *Controller) computeMissingEnvVars(project *models.AppProject, llmVars []RequiredEnvVar, codeKeys []string) []RequiredEnvVar {
+	existing := c.CollectAllEnvVars(project)
+
+	required := map[string]RequiredEnvVar{}
+	for _, v := range llmVars {
+		required[v.Key] = v
+	}
+	for _, key := range codeKeys {
+		if _, ok := required[key]; !ok {
+			required[key] = RequiredEnvVar{
+				Key:         key,
+				Description: "Used in generated code",
+				IsPublic:    strings.HasPrefix(key, "NEXT_PUBLIC_"),
+			}
+		}
+	}
+
+	var missing []RequiredEnvVar
+	for _, v := range required {
+		if existing[v.Key] == "" {
+			missing = append(missing, v)
+		}
+	}
+	sort.Slice(missing, func(i, j int) bool { return missing[i].Key < missing[j].Key })
+	return missing
 }
 
 // --- Regex patterns for deterministic checks ---
@@ -1915,6 +1979,19 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 		}
 	}
 
+	// Step 11c: Detect required env vars
+	codeKeys := detectEnvVarsFromCode(generatedFiles)
+	missingVars := c.computeMissingEnvVars(project, structure.RequiredEnvVars, codeKeys)
+
+	// Persist all required vars in project settings
+	if project.Settings == nil {
+		project.Settings = make(map[string]any)
+	}
+	if len(structure.RequiredEnvVars) > 0 {
+		project.Settings["required_env_vars"] = structure.RequiredEnvVars
+		c.DB.UpdateAppProject(project)
+	}
+
 	// Step 11b: Auto-seed e-commerce store with mock data
 	var seedSummary string
 	if projectType == "ecommerce" {
@@ -1969,10 +2046,11 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 	// Step 15: Send done event
 	genSuccess = true
 	sendEvent("done", map[string]any{
-		"app_project_id": project.ID,
-		"success":        true,
-		"message":        "app generation completed",
-		"total_files":    len(generatedFiles),
+		"app_project_id":   project.ID,
+		"success":          true,
+		"message":          "app generation completed",
+		"total_files":      len(generatedFiles),
+		"missing_env_vars": missingVars,
 	})
 }
 

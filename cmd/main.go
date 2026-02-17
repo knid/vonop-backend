@@ -666,6 +666,7 @@ func main() {
 					r.Route("/env-vars", func(r chi.Router) {
 						r.Get("/", httpViews.GetAppEnvVars)
 						r.Post("/", httpViews.SetAppEnvVar)
+						r.Get("/missing", httpViews.GetMissingEnvVars)
 						r.Route("/{evid}", func(r chi.Router) {
 							r.Put("/", httpViews.UpdateAppEnvVar)
 							r.Delete("/", httpViews.DeleteAppEnvVar)
