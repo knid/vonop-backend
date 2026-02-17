@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-playground/validator/v10"
@@ -293,7 +294,12 @@ func (v *HttpViews) GetApps(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	projects, err := v.Controller.GetAppProjectsByUser(user)
+	var types []string
+	if typeParam := r.URL.Query().Get("type"); typeParam != "" {
+		types = strings.Split(typeParam, ",")
+	}
+
+	projects, err := v.Controller.GetAppProjectsByUserFiltered(user, types)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
 		return

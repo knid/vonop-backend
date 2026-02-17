@@ -15,8 +15,9 @@ func (r *GenerateAppRequest) Validate(validate *validator.Validate) error {
 }
 
 type UpdateAppProjectRequest struct {
-	Name string `json:"name" validate:"required,min=2,max=100" errormgs:"must be between 2 and 100 characters long"`
-	Slug string `json:"slug" validate:"required,min=2,max=100" errormgs:"must be between 2 and 100 characters long"`
+	Name     string         `json:"name" validate:"required,min=2,max=100" errormgs:"must be between 2 and 100 characters long"`
+	Slug     string         `json:"slug" validate:"required,min=2,max=100" errormgs:"must be between 2 and 100 characters long"`
+	Settings map[string]any `json:"settings,omitempty"`
 }
 
 func (r *UpdateAppProjectRequest) Validate(validate *validator.Validate) error {
