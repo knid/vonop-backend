@@ -111,6 +111,9 @@ func createSchema(db *bun.DB) error {
 		(*models.LLMTokenUsage)(nil),
 		// Background jobs
 		(*models.GenerationJob)(nil),
+		// Dashboard analytics
+		(*models.AppDashboard)(nil),
+		(*models.AppDashboardPanel)(nil),
 	}
 
 	for _, model := range models {
@@ -704,6 +707,28 @@ func main() {
 						r.Get("/", httpViews.GetAppDomains)
 						r.Post("/", httpViews.AddAppDomain)
 						r.Delete("/{did}", httpViews.RemoveAppDomain)
+					})
+
+					// Dashboard analytics
+					r.Route("/dashboard", func(r chi.Router) {
+						r.With(rateLimiter.RateLimit(10, time.Minute, appMiddleware.AIUserKey)).Post("/", httpViews.CreateDashboard)
+						r.Get("/", httpViews.GetDashboard)
+						r.Put("/", httpViews.UpdateDashboard)
+						r.Delete("/", httpViews.DeleteDashboard)
+
+						r.Get("/panels", httpViews.GetDashboardPanels)
+						r.Route("/panels/{pid}", func(r chi.Router) {
+							r.Put("/", httpViews.UpdateDashboardPanel)
+							r.Delete("/", httpViews.DeleteDashboardPanel)
+							r.Get("/data", httpViews.GetPanelData)
+						})
+
+						r.Get("/data", httpViews.GetDashboardData)
+
+						r.With(rateLimiter.RateLimit(10, time.Minute, appMiddleware.AIUserKey)).Post("/chat", httpViews.ChatDashboard)
+
+						r.Get("/schema", httpViews.GetDashboardSchema)
+						r.With(rateLimiter.RateLimit(10, time.Minute, appMiddleware.AIUserKey)).Post("/schema/refresh", httpViews.RefreshDashboardSchema)
 					})
 
 					// E-commerce store (only for ecommerce projects)
