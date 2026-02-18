@@ -24,41 +24,69 @@ const (
 
 var queryHTTPClient = &http.Client{Timeout: supabaseHTTPTimeout}
 
-// QueryPanel executes the query for a single panel and returns the result.
-func (c *Controller) QueryPanel(dashboard *models.AppDashboard, panel *models.AppDashboardPanel, integration *models.AppIntegration) responses.PanelDataResponse {
-	var query models.DashboardQuery
-	if err := json.Unmarshal(panel.Query, &query); err != nil {
-		// Try parsing as generic map — LLM might produce extra fields
-		var raw map[string]any
-		if jsonErr := json.Unmarshal(panel.Query, &raw); jsonErr == nil {
-			if sqlVal, ok := raw["sql"].(string); ok {
-				query.SQL = sqlVal
-			}
-			if tableVal, ok := raw["table"].(string); ok {
-				query.Table = tableVal
-			}
-			if selVal, ok := raw["select"].(string); ok {
-				query.Select = selVal
-			}
-			if tVal, ok := raw["transform"].(string); ok {
-				query.Transform = tVal
-			}
-			if limVal, ok := raw["limit"].(float64); ok {
-				query.Limit = int(limVal)
-			}
-			if ordVal, ok := raw["order"].(string); ok {
-				query.Order = ordVal
-			}
-		} else {
-			slog.Warn("failed to unmarshal panel query", "panel_id", panel.ID, "error", err, "raw", string(panel.Query))
-			return responses.PanelDataResponse{
-				PanelID: panel.ID,
-				Title:   panel.Title,
-				Type:    panel.PanelType,
-				Error:   "invalid query configuration",
+// parseQueryFromRaw builds a DashboardQuery from a generic map, handling LLM type quirks.
+func parseQueryFromRaw(raw map[string]any) models.DashboardQuery {
+	var q models.DashboardQuery
+	if v, ok := raw["sql"].(string); ok {
+		q.SQL = v
+	}
+	if v, ok := raw["table"].(string); ok {
+		q.Table = v
+	}
+	if v, ok := raw["select"].(string); ok {
+		q.Select = v
+	}
+	if v, ok := raw["transform"].(string); ok {
+		q.Transform = v
+	}
+	if v, ok := raw["order"].(string); ok {
+		q.Order = v
+	}
+	if v, ok := raw["group_by"].(string); ok {
+		q.GroupBy = v
+	}
+	if v, ok := raw["agg_field"].(string); ok {
+		q.AggField = v
+	}
+	if v, ok := raw["time_field"].(string); ok {
+		q.TimeField = v
+	}
+	if v, ok := raw["time_range"].(string); ok {
+		q.TimeRange = v
+	}
+	if v, ok := raw["limit"].(float64); ok {
+		q.Limit = int(v)
+	}
+	// Parse filters array
+	if filters, ok := raw["filters"].([]any); ok {
+		for _, f := range filters {
+			if fm, ok := f.(map[string]any); ok {
+				col, _ := fm["column"].(string)
+				op, _ := fm["operator"].(string)
+				val := fmt.Sprintf("%v", fm["value"])
+				if col != "" {
+					q.Filters = append(q.Filters, models.QueryFilter{Column: col, Operator: op, Value: val})
+				}
 			}
 		}
 	}
+	return q
+}
+
+// QueryPanel executes the query for a single panel and returns the result.
+func (c *Controller) QueryPanel(dashboard *models.AppDashboard, panel *models.AppDashboardPanel, integration *models.AppIntegration) responses.PanelDataResponse {
+	// Always parse via generic map to handle LLM type quirks (e.g. number vs string)
+	var raw map[string]any
+	if err := json.Unmarshal(panel.Query, &raw); err != nil || raw == nil {
+		slog.Warn("failed to parse panel query", "panel_id", panel.ID, "raw", string(panel.Query), "error", err)
+		return responses.PanelDataResponse{
+			PanelID: panel.ID,
+			Title:   panel.Title,
+			Type:    panel.PanelType,
+			Error:   fmt.Sprintf("invalid query configuration: %s", string(panel.Query)),
+		}
+	}
+	query := parseQueryFromRaw(raw)
 
 	var data any
 	var err error

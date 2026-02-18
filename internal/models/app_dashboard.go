@@ -1,6 +1,7 @@
 package models
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/google/uuid"
@@ -14,8 +15,8 @@ type AppDashboard struct {
 	User         *User          `bun:"rel:belongs-to,join:user_id=id"`
 	Name         string         `bun:",notnull"`
 	Description  string         `bun:",type:text"`
-	Schema       []byte         `bun:",type:jsonb,default:'[]'"`
-	Layout       []byte         `bun:",type:jsonb,default:'[]'"`
+	Schema       json.RawMessage `bun:",type:jsonb,default:'[]'"`
+	Layout       json.RawMessage `bun:",type:jsonb,default:'[]'"`
 	Settings     map[string]any `bun:",type:jsonb,default:'{}'"`
 	Provider     string         `bun:",notnull"` // "supabase", "neon", or "platform"
 	Status       string         `bun:",notnull,default:'generating'"` // generating, ready, error
@@ -30,7 +31,7 @@ type AppDashboardPanel struct {
 	Dashboard   *AppDashboard  `bun:"rel:belongs-to,join:dashboard_id=id"`
 	Title       string         `bun:",notnull"`
 	PanelType   string         `bun:",notnull"` // stat_card, bar_chart, line_chart, pie_chart, table, area_chart
-	Query       []byte         `bun:",type:jsonb,default:'{}'"`
+	Query       json.RawMessage `bun:",type:jsonb,default:'{}'"`
 	Config      map[string]any `bun:",type:jsonb,default:'{}'"`
 	SortOrder   int            `bun:",notnull,default:0"`
 	GridWidth   int            `bun:",notnull,default:6"` // 1-12
