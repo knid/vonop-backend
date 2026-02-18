@@ -17,7 +17,7 @@ type AppDashboard struct {
 	Schema       []byte         `bun:",type:jsonb,default:'[]'"`
 	Layout       []byte         `bun:",type:jsonb,default:'[]'"`
 	Settings     map[string]any `bun:",type:jsonb,default:'{}'"`
-	Provider     string         `bun:",notnull"` // "supabase" or "neon"
+	Provider     string         `bun:",notnull"` // "supabase", "neon", or "platform"
 	Status       string         `bun:",notnull,default:'generating'"` // generating, ready, error
 	CreatedAt    time.Time      `bun:"created_at,nullzero,notnull,default:current_timestamp"`
 	UpdatedAt    time.Time      `bun:"updated_at,nullzero,notnull,default:current_timestamp"`
