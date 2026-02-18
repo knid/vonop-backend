@@ -44,6 +44,8 @@ func (c *Controller) QueryPanel(dashboard *models.AppDashboard, panel *models.Ap
 		data, err = c.querySupabase(integration, &query)
 	case "neon":
 		data, err = c.queryNeon(integration, &query)
+	case "platform":
+		data, err = c.queryPlatform(&query)
 	default:
 		err = fmt.Errorf("unsupported provider: %s", dashboard.Provider)
 	}
@@ -256,6 +258,78 @@ func (c *Controller) queryNeon(integration *models.AppIntegration, query *models
 		for i, col := range columns {
 			val := values[i]
 			// Convert []byte to string for readability
+			if b, ok := val.([]byte); ok {
+				row[col] = string(b)
+			} else {
+				row[col] = val
+			}
+		}
+		results = append(results, row)
+		rowCount++
+	}
+
+	if query.Transform == "count" {
+		return map[string]any{"value": len(results)}, nil
+	}
+
+	return results, nil
+}
+
+// queryPlatform executes a read-only SQL query against the platform's own Postgres database.
+func (c *Controller) queryPlatform(query *models.DashboardQuery) (any, error) {
+	if query.SQL == "" {
+		return nil, fmt.Errorf("sql query is required for platform provider")
+	}
+
+	if err := validateReadOnlySQL(query.SQL); err != nil {
+		return nil, err
+	}
+
+	db := c.DB.DB.DB
+
+	tx, err := db.Begin()
+	if err != nil {
+		return nil, fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec("SET TRANSACTION READ ONLY"); err != nil {
+		return nil, fmt.Errorf("failed to set read-only: %w", err)
+	}
+	if _, err := tx.Exec("SET statement_timeout = '5s'"); err != nil {
+		slog.Warn("failed to set statement_timeout", "error", err)
+	}
+
+	rows, err := tx.Query(query.SQL)
+	if err != nil {
+		return nil, fmt.Errorf("query failed: %w", err)
+	}
+	defer rows.Close()
+
+	columns, err := rows.Columns()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get columns: %w", err)
+	}
+
+	var results []map[string]any
+	rowCount := 0
+	for rows.Next() {
+		if rowCount >= maxQueryRows {
+			break
+		}
+		values := make([]any, len(columns))
+		valuePtrs := make([]any, len(columns))
+		for i := range values {
+			valuePtrs[i] = &values[i]
+		}
+
+		if err := rows.Scan(valuePtrs...); err != nil {
+			return nil, fmt.Errorf("failed to scan row: %w", err)
+		}
+
+		row := make(map[string]any)
+		for i, col := range columns {
+			val := values[i]
 			if b, ok := val.([]byte); ok {
 				row[col] = string(b)
 			} else {

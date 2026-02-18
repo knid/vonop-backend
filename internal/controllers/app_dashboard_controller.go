@@ -116,26 +116,16 @@ func (c *Controller) CreateDashboard(ctx context.Context, project *models.AppPro
 		}
 	}()
 
-	// Find database integration
+	// Find database integration (optional — falls back to platform DB)
+	dbProvider := "platform"
 	integrations, err := c.DB.GetAppIntegrationsByProjectID(project.ID.String())
-	if err != nil {
-		sendError("database", "failed to load integrations")
-		return
-	}
-
-	var dbIntegration *models.AppIntegration
-	var dbProvider string
-	for i, integ := range integrations {
-		if integ.Provider == "supabase" || integ.Provider == "neon" {
-			dbIntegration = &integrations[i]
-			dbProvider = integ.Provider
-			break
+	if err == nil {
+		for _, integ := range integrations {
+			if integ.Provider == "supabase" || integ.Provider == "neon" {
+				dbProvider = integ.Provider
+				break
+			}
 		}
-	}
-
-	if dbIntegration == nil {
-		sendError("validation", "no database integration found. Connect Supabase or Neon first.")
-		return
 	}
 
 	sendEvent("status", map[string]string{"phase": "extracting_schema"})

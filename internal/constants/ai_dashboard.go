@@ -58,7 +58,7 @@ Rules:
 
 Provider-specific query format:
 - For "supabase" provider: use table, select, filters, order, limit fields
-- For "neon" provider: use sql field with a SELECT query
+- For "neon" or "platform" provider: use sql field with a SELECT query
 
 Return a JSON object with this structure:
 {
@@ -119,7 +119,7 @@ Important rules:
 1. Only use tables and columns from the extracted schema
 2. Ensure queries are valid for the database provider (supabase REST or neon SQL)
 3. For supabase: use table, select, filters, order, limit fields
-4. For neon: use sql field with SELECT-only queries
+4. For neon or platform: use sql field with SELECT-only queries
 5. Panel types: stat_card, bar_chart, line_chart, pie_chart, table, area_chart
 6. Grid widths must be between 1 and 12
 7. Keep panel titles concise and descriptive`

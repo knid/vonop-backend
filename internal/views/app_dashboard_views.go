@@ -287,10 +287,13 @@ func (v *HttpViews) GetDashboardData(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	integration, err := v.getDBIntegration(project, dashboard.Provider)
-	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
-		return
+	var integration *models.AppIntegration
+	if dashboard.Provider != "platform" {
+		integration, err = v.getDBIntegration(project, dashboard.Provider)
+		if err != nil {
+			utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 	}
 
 	results := v.Controller.QueryAllPanels(dashboard, panels, integration)
@@ -330,10 +333,13 @@ func (v *HttpViews) GetPanelData(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	integration, err := v.getDBIntegration(project, dashboard.Provider)
-	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
-		return
+	var integration *models.AppIntegration
+	if dashboard.Provider != "platform" {
+		integration, err = v.getDBIntegration(project, dashboard.Provider)
+		if err != nil {
+			utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 	}
 
 	result := v.Controller.QueryPanel(dashboard, panel, integration)
