@@ -753,6 +753,7 @@ func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.A
 
 	// Apply operations (filter out template files)
 	filesChanged := 0
+	var appliedOps []appChatOperation // track only operations that were actually applied
 	for _, op := range chatResp.Operations {
 		if ctx.Err() != nil {
 			return
@@ -787,6 +788,7 @@ func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.A
 			}) {
 				return
 			}
+			appliedOps = append(appliedOps, op)
 			filesChanged++
 
 		case "modify":
@@ -825,12 +827,17 @@ func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.A
 				}) {
 					return
 				}
+				appliedOps = append(appliedOps, op)
 				filesChanged++
 				continue
 			}
 			content := utils.StripCodeFences(op.Content)
 			if op.Type == "tsx" || op.Type == "ts" || existingFile.FileType == "tsx" || existingFile.FileType == "ts" {
 				content, _ = stripForbiddenImports(content, op.Path)
+			}
+			// Skip no-op modifications — LLM sometimes returns unchanged files
+			if content == existingFile.Content {
+				continue
 			}
 			existingFile.Content = content
 			existingFile.UpdatedAt = time.Now()
@@ -849,6 +856,7 @@ func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.A
 			}) {
 				return
 			}
+			appliedOps = append(appliedOps, op)
 			filesChanged++
 
 		case "delete":
@@ -864,6 +872,7 @@ func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.A
 			}) {
 				return
 			}
+			appliedOps = append(appliedOps, op)
 			filesChanged++
 		}
 	}
@@ -942,9 +951,9 @@ func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.A
 		assistantContent = explanationText
 	}
 	// Append file list context so the LLM remembers what changed in history
-	if len(chatResp.Operations) > 0 {
+	if len(appliedOps) > 0 {
 		var opLines []string
-		for _, op := range chatResp.Operations {
+		for _, op := range appliedOps {
 			opLines = append(opLines, fmt.Sprintf("- %s %s", op.Action, op.Path))
 		}
 		assistantContent += "\n\nFiles changed:\n" + strings.Join(opLines, "\n")
@@ -952,7 +961,7 @@ func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.A
 
 	// Build file operations for the message
 	var fileOps []models.AppChatFileOp
-	for _, op := range chatResp.Operations {
+	for _, op := range appliedOps {
 		fileOps = append(fileOps, models.AppChatFileOp{
 			Action:   op.Action,
 			FilePath: op.Path,
