@@ -28,11 +28,35 @@ var queryHTTPClient = &http.Client{Timeout: supabaseHTTPTimeout}
 func (c *Controller) QueryPanel(dashboard *models.AppDashboard, panel *models.AppDashboardPanel, integration *models.AppIntegration) responses.PanelDataResponse {
 	var query models.DashboardQuery
 	if err := json.Unmarshal(panel.Query, &query); err != nil {
-		return responses.PanelDataResponse{
-			PanelID: panel.ID,
-			Title:   panel.Title,
-			Type:    panel.PanelType,
-			Error:   "invalid query configuration",
+		// Try parsing as generic map — LLM might produce extra fields
+		var raw map[string]any
+		if jsonErr := json.Unmarshal(panel.Query, &raw); jsonErr == nil {
+			if sqlVal, ok := raw["sql"].(string); ok {
+				query.SQL = sqlVal
+			}
+			if tableVal, ok := raw["table"].(string); ok {
+				query.Table = tableVal
+			}
+			if selVal, ok := raw["select"].(string); ok {
+				query.Select = selVal
+			}
+			if tVal, ok := raw["transform"].(string); ok {
+				query.Transform = tVal
+			}
+			if limVal, ok := raw["limit"].(float64); ok {
+				query.Limit = int(limVal)
+			}
+			if ordVal, ok := raw["order"].(string); ok {
+				query.Order = ordVal
+			}
+		} else {
+			slog.Warn("failed to unmarshal panel query", "panel_id", panel.ID, "error", err, "raw", string(panel.Query))
+			return responses.PanelDataResponse{
+				PanelID: panel.ID,
+				Title:   panel.Title,
+				Type:    panel.PanelType,
+				Error:   "invalid query configuration",
+			}
 		}
 	}
 
@@ -275,10 +299,75 @@ func (c *Controller) queryNeon(integration *models.AppIntegration, query *models
 	return results, nil
 }
 
+// buildSQLFromTableQuery converts a Supabase-style table/select/filters query to SQL.
+func buildSQLFromTableQuery(query *models.DashboardQuery) string {
+	selectClause := "*"
+	if query.Select != "" {
+		selectClause = query.Select
+	}
+
+	sql := fmt.Sprintf("SELECT %s FROM %s", selectClause, query.Table)
+
+	if len(query.Filters) > 0 {
+		var conditions []string
+		for _, f := range query.Filters {
+			op := "="
+			switch f.Operator {
+			case "eq":
+				op = "="
+			case "neq":
+				op = "!="
+			case "gt":
+				op = ">"
+			case "gte":
+				op = ">="
+			case "lt":
+				op = "<"
+			case "lte":
+				op = "<="
+			case "like":
+				op = "LIKE"
+			case "ilike":
+				op = "ILIKE"
+			case "is":
+				op = "IS"
+			}
+			conditions = append(conditions, fmt.Sprintf("%s %s '%s'", f.Column, op, f.Value))
+		}
+		sql += " WHERE " + strings.Join(conditions, " AND ")
+	}
+
+	if query.Order != "" {
+		sql += " ORDER BY " + query.Order
+	}
+
+	limit := query.Limit
+	if limit <= 0 || limit > maxQueryRows {
+		limit = maxQueryRows
+	}
+	sql += fmt.Sprintf(" LIMIT %d", limit)
+
+	return sql
+}
+
 // queryPlatform executes a read-only SQL query against the platform's own Postgres database.
 func (c *Controller) queryPlatform(query *models.DashboardQuery) (any, error) {
+	// Auto-build SQL from table-based query if no SQL provided
+	if query.SQL == "" && query.Table != "" {
+		query.SQL = buildSQLFromTableQuery(query)
+	}
 	if query.SQL == "" {
 		return nil, fmt.Errorf("sql query is required for platform provider")
+	}
+
+	// For count transform, wrap the query
+	if query.Transform == "count" && query.Table != "" {
+		query.SQL = fmt.Sprintf("SELECT COUNT(*) AS value FROM %s", query.Table)
+		if len(query.Filters) > 0 {
+			// Re-build with just filters
+			base := buildSQLFromTableQuery(&models.DashboardQuery{Table: query.Table, Select: "*", Filters: query.Filters})
+			query.SQL = fmt.Sprintf("SELECT COUNT(*) AS value FROM (%s) sub", base)
+		}
 	}
 
 	if err := validateReadOnlySQL(query.SQL); err != nil {
