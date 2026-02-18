@@ -9,6 +9,7 @@ type DashboardResponse struct {
 	Provider    string                   `json:"provider"`
 	Status      string                   `json:"status"`
 	Settings    map[string]any           `json:"settings"`
+	Schema      any                      `json:"schema,omitempty"`
 	Panels      []DashboardPanelResponse `json:"panels,omitempty"`
 	CreatedAt   int64                    `json:"created_at"`
 	UpdatedAt   int64                    `json:"updated_at"`
@@ -34,4 +35,11 @@ type PanelDataResponse struct {
 	Type    string    `json:"type"`
 	Data    any       `json:"data"`
 	Error   string    `json:"error,omitempty"`
+}
+
+type CellUpdateResponse struct {
+	Success bool   `json:"success"`
+	Table   string `json:"table"`
+	Column  string `json:"column"`
+	Value   any    `json:"value"`
 }

@@ -451,6 +451,77 @@ func (v *HttpViews) RefreshDashboardSchema(w http.ResponseWriter, r *http.Reques
 	utils.JSONResponse(w, map[string]any{"schema": parsed}, http.StatusOK)
 }
 
+// PATCH /v2/apps/{appId}/dashboard/panels/{pid}/data
+func (v *HttpViews) UpdatePanelCell(w http.ResponseWriter, r *http.Request) {
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	appID := chi.URLParam(r, "appId")
+	project, err := v.Controller.GetAppProject(appID, user)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	panelID := chi.URLParam(r, "pid")
+
+	dashboard, _, err := v.Controller.GetDashboard(appID)
+	if err != nil {
+		utils.JSONErrorResponse(w, "dashboard not found", http.StatusNotFound)
+		return
+	}
+
+	panel, err := v.Controller.DB.GetAppDashboardPanelByID(panelID)
+	if err != nil {
+		utils.JSONErrorResponse(w, "panel not found", http.StatusNotFound)
+		return
+	}
+	if panel.DashboardID != dashboard.ID {
+		utils.JSONErrorResponse(w, "panel does not belong to this dashboard", http.StatusBadRequest)
+		return
+	}
+	if panel.PanelType != "table" {
+		utils.JSONErrorResponse(w, "cell editing is only supported for table panels", http.StatusBadRequest)
+		return
+	}
+
+	var req requests.UpdateCellRequest
+	if err := utils.ParseJSONBody(r, &req); err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	validate := validator.New()
+	if err := req.Validate(validate); err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	var integration *models.AppIntegration
+	if dashboard.Provider != "platform" {
+		integration, err = v.getDBIntegration(project, dashboard.Provider)
+		if err != nil {
+			utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+	}
+
+	if err := v.Controller.UpdateCell(dashboard, integration, req.Table, req.Column, req.Value, req.PrimaryKey); err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	utils.JSONResponse(w, responses.CellUpdateResponse{
+		Success: true,
+		Table:   req.Table,
+		Column:  req.Column,
+		Value:   req.Value,
+	}, http.StatusOK)
+}
+
 // getDBIntegration finds the database integration for a project.
 func (v *HttpViews) getDBIntegration(project *models.AppProject, provider string) (*models.AppIntegration, error) {
 	integration, err := v.Controller.DB.GetAppIntegrationByProvider(project.ID.String(), provider)
@@ -470,6 +541,11 @@ func buildDashboardViewResponse(d *models.AppDashboard, panels []models.AppDashb
 		Settings:    d.Settings,
 		CreatedAt:   d.CreatedAt.Unix(),
 		UpdatedAt:   d.UpdatedAt.Unix(),
+	}
+	if len(d.Schema) > 0 {
+		var schema any
+		json.Unmarshal(d.Schema, &schema)
+		resp.Schema = schema
 	}
 
 	var panelResps []responses.DashboardPanelResponse

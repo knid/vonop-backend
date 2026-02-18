@@ -14,6 +14,7 @@ For each table found, extract:
 - Table name
 - Column names with their types
 - Whether each column is nullable
+- Whether each column is a primary key
 
 Return a JSON array of table definitions. Do NOT include any explanation, just the JSON.
 
@@ -22,21 +23,21 @@ Example output:
   {
     "name": "users",
     "columns": [
-      {"name": "id", "type": "uuid", "nullable": false},
-      {"name": "email", "type": "text", "nullable": false},
-      {"name": "name", "type": "text", "nullable": true},
-      {"name": "created_at", "type": "timestamp", "nullable": false}
+      {"name": "id", "type": "uuid", "nullable": false, "is_primary_key": true},
+      {"name": "email", "type": "text", "nullable": false, "is_primary_key": false},
+      {"name": "name", "type": "text", "nullable": true, "is_primary_key": false},
+      {"name": "created_at", "type": "timestamp", "nullable": false, "is_primary_key": false}
     ]
   },
   {
     "name": "posts",
     "columns": [
-      {"name": "id", "type": "uuid", "nullable": false},
-      {"name": "title", "type": "text", "nullable": false},
-      {"name": "content", "type": "text", "nullable": true},
-      {"name": "author_id", "type": "uuid", "nullable": false},
-      {"name": "published", "type": "boolean", "nullable": false},
-      {"name": "created_at", "type": "timestamp", "nullable": false}
+      {"name": "id", "type": "uuid", "nullable": false, "is_primary_key": true},
+      {"name": "title", "type": "text", "nullable": false, "is_primary_key": false},
+      {"name": "content", "type": "text", "nullable": true, "is_primary_key": false},
+      {"name": "author_id", "type": "uuid", "nullable": false, "is_primary_key": false},
+      {"name": "published", "type": "boolean", "nullable": false, "is_primary_key": false},
+      {"name": "created_at", "type": "timestamp", "nullable": false, "is_primary_key": false}
     ]
   }
 ]

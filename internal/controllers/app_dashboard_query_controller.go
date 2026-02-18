@@ -524,3 +524,224 @@ func containsKeyword(sql, keyword string) bool {
 func isAlphanumeric(b byte) bool {
 	return (b >= 'A' && b <= 'Z') || (b >= 'a' && b <= 'z') || (b >= '0' && b <= '9') || b == '_'
 }
+
+// quoteIdentifier wraps an identifier in double quotes, escaping internal quotes.
+func quoteIdentifier(name string) string {
+	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
+}
+
+// schemaTable/schemaColumn represent the parsed cached schema for validation.
+type schemaTable struct {
+	Name    string         `json:"name"`
+	Columns []schemaColumn `json:"columns"`
+}
+
+type schemaColumn struct {
+	Name         string `json:"name"`
+	Type         string `json:"type"`
+	Nullable     bool   `json:"nullable"`
+	IsPrimaryKey bool   `json:"is_primary_key"`
+}
+
+// validateCellUpdate verifies that table, column, and PK columns exist in the schema.
+func validateCellUpdate(schema json.RawMessage, table, column string, primaryKey map[string]any) error {
+	var tables []schemaTable
+	if err := json.Unmarshal(schema, &tables); err != nil {
+		return fmt.Errorf("failed to parse schema")
+	}
+
+	var targetTable *schemaTable
+	for i, t := range tables {
+		if t.Name == table {
+			targetTable = &tables[i]
+			break
+		}
+	}
+	if targetTable == nil {
+		return fmt.Errorf("table %q not found in schema", table)
+	}
+
+	// Verify column exists
+	columnFound := false
+	for _, col := range targetTable.Columns {
+		if col.Name == column {
+			columnFound = true
+			break
+		}
+	}
+	if !columnFound {
+		return fmt.Errorf("column %q not found in table %q", column, table)
+	}
+
+	// Verify all PK columns from schema are present in primaryKey map
+	var pkCols []string
+	for _, col := range targetTable.Columns {
+		if col.IsPrimaryKey {
+			pkCols = append(pkCols, col.Name)
+		}
+	}
+	if len(pkCols) == 0 {
+		return fmt.Errorf("no primary key found for table %q", table)
+	}
+	for _, pk := range pkCols {
+		if _, ok := primaryKey[pk]; !ok {
+			return fmt.Errorf("missing primary key column %q", pk)
+		}
+	}
+
+	return nil
+}
+
+// UpdateCell updates a single cell value in the database.
+func (c *Controller) UpdateCell(dashboard *models.AppDashboard, integration *models.AppIntegration, table, column string, value any, primaryKey map[string]any) error {
+	if err := validateCellUpdate(dashboard.Schema, table, column, primaryKey); err != nil {
+		return err
+	}
+
+	switch dashboard.Provider {
+	case "supabase":
+		return c.updateCellSupabase(integration, table, column, value, primaryKey)
+	case "neon":
+		return c.updateCellNeon(integration, table, column, value, primaryKey)
+	case "platform":
+		return c.updateCellPlatform(table, column, value, primaryKey)
+	default:
+		return fmt.Errorf("unsupported provider: %s", dashboard.Provider)
+	}
+}
+
+// updateCellSupabase updates a cell via Supabase PostgREST PATCH.
+func (c *Controller) updateCellSupabase(integration *models.AppIntegration, table, column string, value any, primaryKey map[string]any) error {
+	var creds map[string]any
+	if err := json.Unmarshal(integration.Credentials, &creds); err != nil {
+		return fmt.Errorf("invalid integration credentials")
+	}
+
+	url, _ := creds["url"].(string)
+	anonKey, _ := creds["anon_key"].(string)
+	if url == "" || anonKey == "" {
+		return fmt.Errorf("missing supabase url or anon_key")
+	}
+
+	// Build PostgREST PATCH URL with PK filter
+	endpoint := strings.TrimRight(url, "/") + "/rest/v1/" + table
+	params := []string{}
+	for k, v := range primaryKey {
+		params = append(params, fmt.Sprintf("%s=eq.%v", k, v))
+	}
+	fullURL := endpoint + "?" + strings.Join(params, "&")
+
+	body, _ := json.Marshal(map[string]any{column: value})
+	req, err := http.NewRequest("PATCH", fullURL, strings.NewReader(string(body)))
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("apikey", anonKey)
+	req.Header.Set("Authorization", "Bearer "+anonKey)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Prefer", "return=minimal")
+
+	resp, err := queryHTTPClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("supabase request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("supabase error (status %d): %s", resp.StatusCode, string(respBody))
+	}
+
+	return nil
+}
+
+// updateCellNeon updates a cell via a parameterized UPDATE on a Neon Postgres database.
+func (c *Controller) updateCellNeon(integration *models.AppIntegration, table, column string, value any, primaryKey map[string]any) error {
+	var creds map[string]any
+	if err := json.Unmarshal(integration.Credentials, &creds); err != nil {
+		return fmt.Errorf("invalid integration credentials")
+	}
+
+	connStr, _ := creds["connection_string"].(string)
+	if connStr == "" {
+		return fmt.Errorf("missing neon connection string")
+	}
+
+	db := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(connStr)))
+	defer db.Close()
+
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to connect to database: %w", err)
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec("SET statement_timeout = '5s'"); err != nil {
+		slog.Warn("failed to set statement_timeout", "error", err)
+	}
+
+	// Build parameterized UPDATE
+	sqlStr, args := buildUpdateSQL(table, column, value, primaryKey)
+
+	result, err := tx.Exec(sqlStr, args...)
+	if err != nil {
+		return fmt.Errorf("update failed: %w", err)
+	}
+
+	rowsAffected, _ := result.RowsAffected()
+	if rowsAffected == 0 {
+		return fmt.Errorf("no rows updated — row may not exist")
+	}
+
+	return tx.Commit()
+}
+
+// updateCellPlatform updates a cell on the platform's own Postgres database.
+func (c *Controller) updateCellPlatform(table, column string, value any, primaryKey map[string]any) error {
+	db := c.DB.DB.DB
+
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec("SET statement_timeout = '5s'"); err != nil {
+		slog.Warn("failed to set statement_timeout", "error", err)
+	}
+
+	sqlStr, args := buildUpdateSQL(table, column, value, primaryKey)
+
+	result, err := tx.Exec(sqlStr, args...)
+	if err != nil {
+		return fmt.Errorf("update failed: %w", err)
+	}
+
+	rowsAffected, _ := result.RowsAffected()
+	if rowsAffected == 0 {
+		return fmt.Errorf("no rows updated — row may not exist")
+	}
+
+	return tx.Commit()
+}
+
+// buildUpdateSQL constructs a parameterized UPDATE statement.
+func buildUpdateSQL(table, column string, value any, primaryKey map[string]any) (string, []any) {
+	args := []any{value}
+	paramIdx := 2
+
+	whereParts := []string{}
+	for k, v := range primaryKey {
+		whereParts = append(whereParts, fmt.Sprintf("%s = $%d", quoteIdentifier(k), paramIdx))
+		args = append(args, v)
+		paramIdx++
+	}
+
+	sqlStr := fmt.Sprintf("UPDATE %s SET %s = $1 WHERE %s",
+		quoteIdentifier(table),
+		quoteIdentifier(column),
+		strings.Join(whereParts, " AND "),
+	)
+
+	return sqlStr, args
+}
