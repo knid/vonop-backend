@@ -82,9 +82,14 @@ func (c *Controller) ExtractSchemaFromPlatformDB() (json.RawMessage, error) {
 	db := c.DB.DB.DB
 
 	rows, err := db.Query(`
-		SELECT t.table_name, c.column_name, c.data_type, c.is_nullable
+		SELECT t.table_name, c.column_name, c.data_type, c.is_nullable,
+			CASE WHEN kcu.column_name IS NOT NULL THEN 'YES' ELSE 'NO' END AS is_primary_key
 		FROM information_schema.tables t
 		JOIN information_schema.columns c ON c.table_name = t.table_name AND c.table_schema = t.table_schema
+		LEFT JOIN information_schema.table_constraints tc
+			ON tc.table_name = t.table_name AND tc.table_schema = t.table_schema AND tc.constraint_type = 'PRIMARY KEY'
+		LEFT JOIN information_schema.key_column_usage kcu
+			ON kcu.constraint_name = tc.constraint_name AND kcu.table_schema = tc.table_schema AND kcu.column_name = c.column_name
 		WHERE t.table_schema = 'public' AND t.table_type = 'BASE TABLE'
 		ORDER BY t.table_name, c.ordinal_position
 	`)
@@ -94,9 +99,10 @@ func (c *Controller) ExtractSchemaFromPlatformDB() (json.RawMessage, error) {
 	defer rows.Close()
 
 	type column struct {
-		Name     string `json:"name"`
-		Type     string `json:"type"`
-		Nullable bool   `json:"nullable"`
+		Name         string `json:"name"`
+		Type         string `json:"type"`
+		Nullable     bool   `json:"nullable"`
+		IsPrimaryKey bool   `json:"is_primary_key"`
 	}
 	type table struct {
 		Name    string   `json:"name"`
@@ -107,8 +113,8 @@ func (c *Controller) ExtractSchemaFromPlatformDB() (json.RawMessage, error) {
 	var tableOrder []string
 
 	for rows.Next() {
-		var tableName, colName, dataType, isNullable string
-		if err := rows.Scan(&tableName, &colName, &dataType, &isNullable); err != nil {
+		var tableName, colName, dataType, isNullable, isPK string
+		if err := rows.Scan(&tableName, &colName, &dataType, &isNullable, &isPK); err != nil {
 			continue
 		}
 		t, ok := tableMap[tableName]
@@ -118,9 +124,10 @@ func (c *Controller) ExtractSchemaFromPlatformDB() (json.RawMessage, error) {
 			tableOrder = append(tableOrder, tableName)
 		}
 		t.Columns = append(t.Columns, column{
-			Name:     colName,
-			Type:     dataType,
-			Nullable: isNullable == "YES",
+			Name:         colName,
+			Type:         dataType,
+			Nullable:     isNullable == "YES",
+			IsPrimaryKey: isPK == "YES",
 		})
 	}
 
@@ -706,6 +713,11 @@ func buildDashboardResponse(d *models.AppDashboard, panels []models.AppDashboard
 		Settings:    d.Settings,
 		CreatedAt:   d.CreatedAt.Unix(),
 		UpdatedAt:   d.UpdatedAt.Unix(),
+	}
+	if len(d.Schema) > 0 {
+		var schema any
+		json.Unmarshal(d.Schema, &schema)
+		resp.Schema = schema
 	}
 	resp.Panels = buildPanelResponses(panels)
 	return resp

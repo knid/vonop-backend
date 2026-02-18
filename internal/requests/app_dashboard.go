@@ -42,3 +42,14 @@ type DashboardChatRequest struct {
 func (r *DashboardChatRequest) Validate(validate *validator.Validate) error {
 	return utils.ValidateFunc[DashboardChatRequest](*r, validate)
 }
+
+type UpdateCellRequest struct {
+	Table      string         `json:"table" validate:"required" errormgs:"table is required"`
+	Column     string         `json:"column" validate:"required" errormgs:"column is required"`
+	Value      any            `json:"value"`
+	PrimaryKey map[string]any `json:"primary_key" validate:"required" errormgs:"primary key is required"`
+}
+
+func (r *UpdateCellRequest) Validate(validate *validator.Validate) error {
+	return utils.ValidateFunc[UpdateCellRequest](*r, validate)
+}

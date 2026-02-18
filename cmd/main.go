@@ -721,6 +721,7 @@ func main() {
 							r.Put("/", httpViews.UpdateDashboardPanel)
 							r.Delete("/", httpViews.DeleteDashboardPanel)
 							r.Get("/data", httpViews.GetPanelData)
+							r.Patch("/data", httpViews.UpdatePanelCell)
 						})
 
 						r.Get("/data", httpViews.GetDashboardData)
