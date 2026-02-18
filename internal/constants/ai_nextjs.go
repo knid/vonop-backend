@@ -1272,7 +1272,7 @@ Each operation has:
 6. When creating new pages, follow the Next.js App Router conventions (app/route/page.tsx).
 7. Respect the existing color scheme and design patterns. Elevate the design quality when possible.
 8. Keep navigation consistent across pages.
-22. ALWAYS use default exports for components (export default function ComponentName). When importing components, use default import syntax (import Button from '@/components/ui/button'), NOT named imports (import { Button } from '...'). The exceptions are lib/utils.ts and lib/wemob-store.ts which use named exports. Mismatched import styles cause "type is invalid" React errors.
+22. Default-export page and standalone components (export default function HeroSection). UI primitives in components/ui/ use named exports following shadcn/ui convention (export function Button). Match your import style to the file's exports: use import { Button } from '@/components/ui/button' for named exports, import Hero from '@/components/hero' for default exports. Exceptions: lib/utils.ts and lib/wemob-store.ts always use named exports. ALWAYS use read_file to check a file's actual exports before importing from it. Mismatched import styles cause "type is invalid" React errors.
 9. Your response MUST start with an explanation (2-4 sentences), then a fenced JSON code block. Do NOT return bare JSON without the explanation text.
 10. CRITICAL: If any file imports from a path that does not exist in the current project files, you MUST include a "create" operation for that file. Every import must resolve to an existing file. Missing files cause build failures.
 11. Only import from paths that exist in the current project files or that you are creating in the same operations array.

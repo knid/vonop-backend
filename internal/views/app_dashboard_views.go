@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-playground/validator/v10"
+	"github.com/knid/wemob/internal/controllers"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/responses"
@@ -509,7 +510,24 @@ func (v *HttpViews) UpdatePanelCell(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := v.Controller.UpdateCell(dashboard, integration, req.Table, req.Column, req.Value, req.PrimaryKey); err != nil {
+	// Resolve column aliases from the panel's SQL query so the UPDATE targets the real column
+	resolvedTable := req.Table
+	resolvedColumn := req.Column
+	var raw map[string]any
+	if err := json.Unmarshal(panel.Query, &raw); err == nil {
+		if panelSQL, ok := raw["sql"].(string); ok && panelSQL != "" {
+			realCol, tableAlias := controllers.ResolveColumnFromSQL(panelSQL, req.Column)
+			resolvedColumn = realCol
+			if tableAlias != "" {
+				refs := controllers.ParseTableReferences(panelSQL)
+				if realTable := controllers.ResolveTableFromRef(refs, tableAlias); realTable != "" {
+					resolvedTable = realTable
+				}
+			}
+		}
+	}
+
+	if err := v.Controller.UpdateCell(dashboard, integration, resolvedTable, resolvedColumn, req.Value, req.PrimaryKey); err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
 		return
 	}

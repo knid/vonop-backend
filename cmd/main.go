@@ -114,6 +114,8 @@ func createSchema(db *bun.DB) error {
 		// Dashboard analytics
 		(*models.AppDashboard)(nil),
 		(*models.AppDashboardPanel)(nil),
+		// Web analytics (deployed sites)
+		(*models.WebAnalyticsEvent)(nil),
 	}
 
 	for _, model := range models {
@@ -162,6 +164,10 @@ func createSchema(db *bun.DB) error {
 	indexStatements := []string{
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_app_generated_files_project_platform_path ON app_generated_files (app_project_id, platform, file_path)`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_app_conversations_project ON app_conversations (app_project_id)`,
+		// Web analytics indexes
+		`CREATE INDEX IF NOT EXISTS idx_web_analytics_project_created ON web_analytics_events (project_id, created_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_web_analytics_project_type_created ON web_analytics_events (project_id, event_type, created_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_web_analytics_project_session ON web_analytics_events (project_id, session_id)`,
 	}
 	alterStatements = append(alterStatements, indexStatements...)
 	for _, stmt := range alterStatements {
@@ -389,7 +395,7 @@ func main() {
 		// AllowedOrigins:   []string{"https://foo.com"}, // Use this to allow specific origin hosts
 		AllowedOrigins: []string{"https://*", "http://*", "http://127.0.0.1:3000"},
 		// AllowOriginFunc:  func(r *http.Request, origin string) bool { return true },
-		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token", "Location"},
 		ExposedHeaders:   []string{"Link"},
 		AllowCredentials: false,
@@ -618,6 +624,13 @@ func main() {
 				r.Get("/{jobId}", httpViews.GetJob)
 				r.Delete("/{jobId}", httpViews.CancelJob)
 			})
+
+			// Web analytics collection (public, rate-limited per IP)
+			r.Route("/analytics", func(r chi.Router) {
+				r.Use(rateLimiter.RateLimit(120, time.Minute, appMiddleware.IPKey))
+				r.Post("/collect", httpViews.CollectAnalytics)
+				r.Post("/collect/batch", httpViews.CollectAnalyticsBatch)
+			})
 		})
 		// V2 App Builder routes
 		r.Route("/v2", func(r chi.Router) {
@@ -730,6 +743,18 @@ func main() {
 
 						r.Get("/schema", httpViews.GetDashboardSchema)
 						r.With(rateLimiter.RateLimit(10, time.Minute, appMiddleware.AIUserKey)).Post("/schema/refresh", httpViews.RefreshDashboardSchema)
+					})
+
+					// Web analytics for deployed sites
+					r.Route("/analytics", func(r chi.Router) {
+						r.Get("/overview", httpViews.GetAppAnalyticsOverview)
+						r.Get("/pageviews", httpViews.GetAppAnalyticsPageviews)
+						r.Get("/pages", httpViews.GetAppAnalyticsPages)
+						r.Get("/referrers", httpViews.GetAppAnalyticsReferrers)
+						r.Get("/devices", httpViews.GetAppAnalyticsDevices)
+						r.Get("/locations", httpViews.GetAppAnalyticsLocations)
+						r.Get("/events", httpViews.GetAppAnalyticsEvents)
+						r.Get("/realtime", httpViews.GetAppAnalyticsRealtime)
 					})
 
 					// E-commerce store (only for ecommerce projects)
@@ -850,7 +875,7 @@ func main() {
 
 	proxyRoute.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   []string{"https://*", "http://*", "http://127.0.0.1:3000"},
-		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token", "Location"},
 		ExposedHeaders:   []string{"Link"},
 		AllowCredentials: false,

@@ -73,6 +73,254 @@ func parseQueryFromRaw(raw map[string]any) models.DashboardQuery {
 	return q
 }
 
+// sqlKeywords used to detect table aliases (word after table name that isn't a keyword).
+var sqlKeywords = map[string]bool{
+	"WHERE": true, "ORDER": true, "GROUP": true, "HAVING": true, "LIMIT": true,
+	"JOIN": true, "LEFT": true, "RIGHT": true, "INNER": true, "OUTER": true,
+	"CROSS": true, "NATURAL": true, "FULL": true, "ON": true, "USING": true,
+	"UNION": true, "INTERSECT": true, "EXCEPT": true, "OFFSET": true, "FETCH": true,
+	"FOR": true, "WINDOW": true, "RETURNING": true,
+}
+
+// TableRef represents a table reference in a SQL FROM/JOIN clause.
+type TableRef struct {
+	Name  string // actual table name
+	Alias string // alias (or table name if no alias)
+}
+
+// ParseTableReferences extracts all table references (main + JOINed) from a SQL query.
+func ParseTableReferences(sqlQuery string) []TableRef {
+	trimmed := strings.TrimSpace(sqlQuery)
+	upper := strings.ToUpper(trimmed)
+
+	fromIdx := strings.Index(upper, " FROM ")
+	if fromIdx == -1 {
+		return nil
+	}
+
+	afterFrom := strings.TrimSpace(trimmed[fromIdx+6:])
+	if strings.HasPrefix(afterFrom, "(") {
+		return nil
+	}
+
+	// Parse main table
+	rawName := extractNextWord(afterFrom)
+	name := strings.Trim(rawName, `"'`)
+	if name == "" {
+		return nil
+	}
+
+	rest := strings.TrimSpace(afterFrom[len(rawName):])
+	if strings.HasPrefix(rest, ",") {
+		return nil // comma-separated tables, skip
+	}
+
+	alias := name
+	nextWord := strings.ToUpper(extractNextWord(rest))
+	if nextWord != "" && !sqlKeywords[nextWord] {
+		alias = extractNextWord(rest)
+	}
+
+	refs := []TableRef{{Name: name, Alias: alias}}
+
+	// Parse JOINed tables: look for " JOIN " keywords
+	searchPos := fromIdx + 6
+	for {
+		joinIdx := strings.Index(upper[searchPos:], " JOIN ")
+		if joinIdx == -1 {
+			break
+		}
+		absIdx := searchPos + joinIdx + 6 // skip " JOIN "
+		afterJoin := strings.TrimSpace(trimmed[absIdx:])
+
+		jRaw := extractNextWord(afterJoin)
+		jName := strings.Trim(jRaw, `"'`)
+		if jName == "" || jName == "(" {
+			searchPos = absIdx + 1
+			continue
+		}
+
+		jRest := strings.TrimSpace(afterJoin[len(jRaw):])
+		jAlias := jName
+		jNext := strings.ToUpper(extractNextWord(jRest))
+		if jNext != "" && !sqlKeywords[jNext] {
+			jAlias = extractNextWord(jRest)
+		}
+
+		refs = append(refs, TableRef{Name: jName, Alias: jAlias})
+		searchPos = absIdx + len(jRaw)
+	}
+
+	return refs
+}
+
+// ensurePKColumnsInSQL injects primary key columns for ALL tables (main + JOINed)
+// into a SQL SELECT using __pk__tablename__colname aliases to avoid conflicts.
+// Skips subqueries, CTEs, and UNIONs.
+func ensurePKColumnsInSQL(sqlQuery string, schema json.RawMessage) string {
+	trimmed := strings.TrimSpace(sqlQuery)
+	upper := strings.ToUpper(trimmed)
+
+	// Only handle SELECT — skip WITH/CTEs, UNION, subqueries
+	if !strings.HasPrefix(upper, "SELECT") {
+		return sqlQuery
+	}
+	for _, kw := range []string{" UNION ", " INTERSECT ", " EXCEPT "} {
+		if strings.Contains(upper, kw) {
+			return sqlQuery
+		}
+	}
+
+	fromIdx := strings.Index(upper, " FROM ")
+	if fromIdx == -1 {
+		return sqlQuery
+	}
+
+	// Parse all table references
+	refs := ParseTableReferences(sqlQuery)
+	if len(refs) == 0 {
+		return sqlQuery
+	}
+
+	var tables []schemaTable
+	if err := json.Unmarshal(schema, &tables); err != nil {
+		return sqlQuery
+	}
+
+	selectPart := trimmed[6:fromIdx]
+	selectUpper := strings.ToUpper(strings.TrimSpace(selectPart))
+
+	// SELECT * already includes everything (but we still need aliased PKs for identification)
+	isSelectStar := selectUpper == "*" || strings.HasPrefix(selectUpper, "* ") || strings.HasPrefix(selectUpper, "*,") || strings.Contains(selectUpper, ".*")
+
+	// Build injections for ALL tables
+	var injections []string
+	for _, ref := range refs {
+		for _, t := range tables {
+			if t.Name == ref.Name {
+				for _, col := range t.Columns {
+					if col.IsPrimaryKey {
+						alias := fmt.Sprintf("__pk__%s__%s", ref.Name, col.Name)
+						injection := fmt.Sprintf(`%s.%s AS "%s"`, ref.Alias, quoteIdentifier(col.Name), alias)
+						injections = append(injections, injection)
+					}
+				}
+				break
+			}
+		}
+	}
+
+	if len(injections) == 0 {
+		return sqlQuery
+	}
+
+	if isSelectStar {
+		// For SELECT *, prepend aliased PKs so they're available for identification
+		newSelect := strings.Join(injections, ", ") + "," + selectPart
+		return "SELECT " + newSelect + trimmed[fromIdx:]
+	}
+
+	newSelect := strings.Join(injections, ", ") + "," + selectPart
+	return "SELECT " + newSelect + trimmed[fromIdx:]
+}
+
+// extractNextWord returns the first whitespace-delimited word from s.
+func extractNextWord(s string) string {
+	s = strings.TrimSpace(s)
+	for i, ch := range s {
+		if ch == ' ' || ch == '\n' || ch == '\t' || ch == ',' || ch == ';' || ch == '(' {
+			return s[:i]
+		}
+	}
+	return s
+}
+
+// splitSelectItems splits a SELECT column list by commas, respecting parentheses.
+func splitSelectItems(selectPart string) []string {
+	var items []string
+	depth := 0
+	start := 0
+	for i, ch := range selectPart {
+		switch ch {
+		case '(':
+			depth++
+		case ')':
+			depth--
+		case ',':
+			if depth == 0 {
+				items = append(items, selectPart[start:i])
+				start = i + 1
+			}
+		}
+	}
+	items = append(items, selectPart[start:])
+	return items
+}
+
+// ResolveColumnFromSQL parses the SELECT clause to find the real column name
+// and table reference for a given result column name (which may be an alias).
+// Returns (realColumn, tableAlias). If no alias is found, returns (columnName, "").
+func ResolveColumnFromSQL(sqlQuery, columnName string) (string, string) {
+	trimmed := strings.TrimSpace(sqlQuery)
+	upper := strings.ToUpper(trimmed)
+
+	if !strings.HasPrefix(upper, "SELECT") {
+		return columnName, ""
+	}
+
+	fromIdx := strings.Index(upper, " FROM ")
+	if fromIdx == -1 {
+		return columnName, ""
+	}
+
+	selectPart := trimmed[7:fromIdx] // skip "SELECT " (7 chars including space)
+	items := splitSelectItems(selectPart)
+
+	for _, item := range items {
+		item = strings.TrimSpace(item)
+		itemUpper := strings.ToUpper(item)
+
+		// Check for AS alias
+		asIdx := strings.LastIndex(itemUpper, " AS ")
+		if asIdx != -1 {
+			itemAlias := strings.TrimSpace(item[asIdx+4:])
+			itemAlias = strings.Trim(itemAlias, `"' `)
+
+			if strings.EqualFold(itemAlias, columnName) {
+				expr := strings.TrimSpace(item[:asIdx])
+				expr = strings.Trim(expr, `"'`)
+				if dotIdx := strings.LastIndex(expr, "."); dotIdx != -1 {
+					return strings.Trim(expr[dotIdx+1:], `"'`), strings.Trim(expr[:dotIdx], `"'`)
+				}
+				return expr, ""
+			}
+			continue
+		}
+
+		// No alias — check if this is a [table.]column that matches the column name
+		stripped := strings.Trim(item, `"' `)
+		if dotIdx := strings.LastIndex(stripped, "."); dotIdx != -1 {
+			col := strings.Trim(stripped[dotIdx+1:], `"'`)
+			tRef := strings.Trim(stripped[:dotIdx], `"'`)
+			if strings.EqualFold(col, columnName) {
+				return col, tRef
+			}
+		}
+	}
+
+	return columnName, ""
+}
+
+// ResolveTableFromRef maps a table alias back to the real table name using parsed references.
+func ResolveTableFromRef(refs []TableRef, alias string) string {
+	for _, ref := range refs {
+		if strings.EqualFold(ref.Alias, alias) || strings.EqualFold(ref.Name, alias) {
+			return ref.Name
+		}
+	}
+	return ""
+}
+
 // QueryPanel executes the query for a single panel and returns the result.
 func (c *Controller) QueryPanel(dashboard *models.AppDashboard, panel *models.AppDashboardPanel, integration *models.AppIntegration) responses.PanelDataResponse {
 	// Always parse via generic map to handle LLM type quirks (e.g. number vs string)
@@ -87,6 +335,11 @@ func (c *Controller) QueryPanel(dashboard *models.AppDashboard, panel *models.Ap
 		}
 	}
 	query := parseQueryFromRaw(raw)
+
+	// For table panels, ensure PK columns are in the SQL so rows can be identified for editing
+	if panel.PanelType == "table" && query.SQL != "" && len(dashboard.Schema) > 0 {
+		query.SQL = ensurePKColumnsInSQL(query.SQL, dashboard.Schema)
+	}
 
 	var data any
 	var err error
@@ -543,8 +796,8 @@ type schemaColumn struct {
 	IsPrimaryKey bool   `json:"is_primary_key"`
 }
 
-// validateCellUpdate verifies that table, column, and PK columns exist in the schema.
-func validateCellUpdate(schema json.RawMessage, table, column string, primaryKey map[string]any) error {
+// validateCellUpdate verifies that the table and PK columns exist in the schema.
+func validateCellUpdate(schema json.RawMessage, table string, primaryKey map[string]any) error {
 	var tables []schemaTable
 	if err := json.Unmarshal(schema, &tables); err != nil {
 		return fmt.Errorf("failed to parse schema")
@@ -561,17 +814,9 @@ func validateCellUpdate(schema json.RawMessage, table, column string, primaryKey
 		return fmt.Errorf("table %q not found in schema", table)
 	}
 
-	// Verify column exists
-	columnFound := false
-	for _, col := range targetTable.Columns {
-		if col.Name == column {
-			columnFound = true
-			break
-		}
-	}
-	if !columnFound {
-		return fmt.Errorf("column %q not found in table %q", column, table)
-	}
+	// Column name is not validated against schema because SQL queries may use
+	// aliases (e.g. "price AS price_in_cents"). PostgreSQL will reject invalid
+	// column names with a clear error.
 
 	// Verify all PK columns from schema are present in primaryKey map
 	var pkCols []string
@@ -592,19 +837,41 @@ func validateCellUpdate(schema json.RawMessage, table, column string, primaryKey
 	return nil
 }
 
+// extractPrefixedPKs extracts PK values from __pk__tablename__colname entries.
+func extractPrefixedPKs(primaryKey map[string]any, tableName string) map[string]any {
+	prefix := "__pk__" + tableName + "__"
+	result := map[string]any{}
+	for k, v := range primaryKey {
+		if strings.HasPrefix(k, prefix) {
+			realCol := strings.TrimPrefix(k, prefix)
+			result[realCol] = v
+		}
+	}
+	return result
+}
+
 // UpdateCell updates a single cell value in the database.
+// The caller (view handler) is responsible for resolving column aliases and table names.
 func (c *Controller) UpdateCell(dashboard *models.AppDashboard, integration *models.AppIntegration, table, column string, value any, primaryKey map[string]any) error {
-	if err := validateCellUpdate(dashboard.Schema, table, column, primaryKey); err != nil {
+	resolvedPK := primaryKey
+
+	// Extract real PK values from __pk__ prefixed entries if present
+	extracted := extractPrefixedPKs(primaryKey, table)
+	if len(extracted) > 0 {
+		resolvedPK = extracted
+	}
+
+	if err := validateCellUpdate(dashboard.Schema, table, resolvedPK); err != nil {
 		return err
 	}
 
 	switch dashboard.Provider {
 	case "supabase":
-		return c.updateCellSupabase(integration, table, column, value, primaryKey)
+		return c.updateCellSupabase(integration, table, column, value, resolvedPK)
 	case "neon":
-		return c.updateCellNeon(integration, table, column, value, primaryKey)
+		return c.updateCellNeon(integration, table, column, value, resolvedPK)
 	case "platform":
-		return c.updateCellPlatform(table, column, value, primaryKey)
+		return c.updateCellPlatform(table, column, value, resolvedPK)
 	default:
 		return fmt.Errorf("unsupported provider: %s", dashboard.Provider)
 	}

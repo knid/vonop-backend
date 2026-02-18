@@ -326,12 +326,45 @@ func (c *Controller) GetDashboard(projectID string) (*models.AppDashboard, []mod
 		return nil, nil, fmt.Errorf("dashboard not found")
 	}
 
+	// Auto-upgrade schema with PK info for platform provider (cheap DB introspection)
+	if dashboard.Provider == "platform" && len(dashboard.Schema) > 0 {
+		c.ensureSchemaPKInfo(dashboard)
+	}
+
 	panels, err := c.DB.GetAppDashboardPanelsByDashboardID(dashboard.ID.String())
 	if err != nil {
 		return dashboard, nil, nil
 	}
 
 	return dashboard, panels, nil
+}
+
+// ensureSchemaPKInfo checks if the cached schema has PK info and re-extracts if missing.
+func (c *Controller) ensureSchemaPKInfo(dashboard *models.AppDashboard) {
+	var tables []struct {
+		Columns []struct {
+			IsPrimaryKey *bool `json:"is_primary_key"`
+		} `json:"columns"`
+	}
+	if err := json.Unmarshal(dashboard.Schema, &tables); err != nil {
+		return
+	}
+	// Check if any column has is_primary_key field
+	for _, t := range tables {
+		for _, col := range t.Columns {
+			if col.IsPrimaryKey != nil {
+				return // already has PK info
+			}
+		}
+	}
+	// Re-extract schema with PK info
+	schema, err := c.ExtractSchemaFromPlatformDB()
+	if err != nil {
+		return
+	}
+	dashboard.Schema = schema
+	dashboard.UpdatedAt = time.Now()
+	c.DB.UpdateAppDashboard(dashboard)
 }
 
 // UpdateDashboard updates the dashboard metadata.

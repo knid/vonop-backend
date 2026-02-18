@@ -77,6 +77,9 @@ func (c *Controller) DeployToVercel(project *models.AppProject, user *models.Use
 		fileMap[".env.local"] = dotEnv
 	}
 
+	// Inject web analytics tracking script into the root layout
+	injectAnalyticsScript(fileMap, project.ID.String())
+
 	deployResp, err := c.VercelService.DeployFiles(vercelProject.VercelProjectID, fileMap, target)
 	if err != nil {
 		slog.Error("Failed to deploy to Vercel", "error", err)
@@ -481,4 +484,40 @@ func (c *Controller) GetPreviewStatus(projectID string) (*preview.PreviewStatus,
 		return nil, fmt.Errorf("preview service not configured")
 	}
 	return c.PreviewService.GetStatus(projectID)
+}
+
+// injectAnalyticsScript adds the web analytics tracking script into the root
+// layout file's <head> (preferred) or before </body> (fallback). The
+// __PROJECT_ID__ placeholder in the script constant is replaced with the
+// actual project UUID.
+func injectAnalyticsScript(fileMap map[string]string, projectID string) {
+	script := strings.Replace(constants.WEB_ANALYTICS_SCRIPT, "__PROJECT_ID__", projectID, 1)
+
+	// Try common root layout paths
+	layoutPaths := []string{
+		"app/layout.tsx",
+		"app/layout.jsx",
+		"src/app/layout.tsx",
+		"src/app/layout.jsx",
+	}
+
+	for _, path := range layoutPaths {
+		content, ok := fileMap[path]
+		if !ok {
+			continue
+		}
+
+		// Prefer injecting before </head>
+		if idx := strings.Index(content, "</head>"); idx != -1 {
+			fileMap[path] = content[:idx] + script + "\n" + content[idx:]
+			return
+		}
+		// Fallback: inject before </body>
+		if idx := strings.Index(content, "</body>"); idx != -1 {
+			fileMap[path] = content[:idx] + script + "\n" + content[idx:]
+			return
+		}
+	}
+
+	slog.Warn("analytics script injection: no suitable layout found", "project_id", projectID)
 }

@@ -154,6 +154,16 @@ var namedExportPattern = regexp.MustCompile(`(?m)^export\s+(function|const|class
 var namedExportIdentRegex = regexp.MustCompile(`(?m)^export\s+(?:function|const|class|type|interface|enum)\s+(\w+)`)
 var singleNamedImportRegex = regexp.MustCompile(`import\s+\{\s*(\w+)\s*\}\s+from\s+['"]@/([^'"]+)['"]`)
 
+// namedValueExportPattern matches only runtime named exports (excludes type/interface)
+var namedValueExportPattern = regexp.MustCompile(`(?m)^export\s+(function|const|class|enum)\s+`)
+var namedValueExportIdentRegex = regexp.MustCompile(`(?m)^export\s+(?:function|const|class|enum)\s+(\w+)`)
+
+// exportDefaultFuncNameRegex extracts function name from "export default function Foo"
+var exportDefaultFuncNameRegex = regexp.MustCompile(`(?m)^export\s+default\s+function\s+(\w+)`)
+
+// multiNamedImportRegex matches: import { A, B } from '@/path' (2+ names)
+var multiNamedImportRegex = regexp.MustCompile(`import\s+\{\s*(\w+(?:\s*,\s*\w+)+)\s*\}\s+from\s+['"]@/([^'"]+)['"]`)
+
 // --- Template helpers ---
 
 // isTemplateFile checks if a file path is managed by hardcoded templates
@@ -530,6 +540,7 @@ func runDeterministicChecks(files map[string]string) []validationError {
 		}
 
 		// Check 5: Named import from a file that only has export default (or vice versa)
+		// Use namedValueExportPattern to ignore type/interface exports (they don't exist at runtime)
 		namedMatches := namedImportRegex.FindAllStringSubmatch(content, -1)
 		for _, match := range namedMatches {
 			importPath := match[1]
@@ -538,8 +549,8 @@ func runDeterministicChecks(files map[string]string) []validationError {
 				continue // file doesn't exist yet, skip
 			}
 			hasDefault := exportDefaultPattern.MatchString(targetContent)
-			hasNamed := namedExportPattern.MatchString(targetContent)
-			if hasDefault && !hasNamed {
+			hasNamedValue := namedValueExportPattern.MatchString(targetContent)
+			if hasDefault && !hasNamedValue {
 				errors = append(errors, validationError{
 					File:  filePath,
 					Error: fmt.Sprintf("Named import { ... } from '@/%s' but that file only has a default export. Use: import ComponentName from '@/%s'", importPath, importPath),
@@ -556,8 +567,8 @@ func runDeterministicChecks(files map[string]string) []validationError {
 				continue
 			}
 			hasDefault := exportDefaultPattern.MatchString(targetContent)
-			hasNamed := namedExportPattern.MatchString(targetContent)
-			if !hasDefault && hasNamed {
+			hasNamedValue := namedValueExportPattern.MatchString(targetContent)
+			if !hasDefault && hasNamedValue {
 				errors = append(errors, validationError{
 					File:  filePath,
 					Error: fmt.Sprintf("Default import from '@/%s' but that file has no default export, only named exports. Use: import { ... } from '@/%s'", importPath, importPath),
@@ -621,11 +632,11 @@ func autoFixImportMismatches(files map[string]string) (int, []string) {
 			}
 
 			hasDefault := exportDefaultPattern.MatchString(targetContent)
-			hasNamed := namedExportPattern.MatchString(targetContent)
+			hasNamedValue := namedValueExportPattern.MatchString(targetContent)
 
-			if !hasDefault && hasNamed {
+			if !hasDefault && hasNamedValue {
 				// Verify the imported name matches a named export in the target
-				for _, ne := range namedExportIdentRegex.FindAllStringSubmatch(targetContent, -1) {
+				for _, ne := range namedValueExportIdentRegex.FindAllStringSubmatch(targetContent, -1) {
 					if ne[1] == importName {
 						newImport := fmt.Sprintf("import { %s } from '@/%s'", importName, importPath)
 						updated = strings.Replace(updated, fullMatch, newImport, 1)
@@ -649,13 +660,62 @@ func autoFixImportMismatches(files map[string]string) (int, []string) {
 			}
 
 			hasDefault := exportDefaultPattern.MatchString(targetContent)
-			hasNamed := namedExportPattern.MatchString(targetContent)
+			hasNamedValue := namedValueExportPattern.MatchString(targetContent)
 
-			if hasDefault && !hasNamed {
+			if hasDefault && !hasNamedValue {
 				newImport := fmt.Sprintf("import %s from '@/%s'", importName, importPath)
 				updated = strings.Replace(updated, fullMatch, newImport, 1)
 				changed = true
 			}
+		}
+
+		// Case 3: Multi-named import from default-export-only file (type exports don't count)
+		// import { Hero, HeroProps } from '@/components/hero' → import Hero from '@/components/hero' + import type { HeroProps } from '...'
+		for _, match := range multiNamedImportRegex.FindAllStringSubmatch(updated, -1) {
+			fullMatch := match[0]
+			namesList := match[1]
+			importPath := match[2]
+
+			targetContent := resolveFileContent(files, importPath)
+			if targetContent == "" {
+				continue
+			}
+
+			hasDefault := exportDefaultPattern.MatchString(targetContent)
+			hasNamedValue := namedValueExportPattern.MatchString(targetContent)
+			if !hasDefault || hasNamedValue {
+				continue
+			}
+
+			// Extract default export function name
+			defaultNameMatch := exportDefaultFuncNameRegex.FindStringSubmatch(targetContent)
+			if defaultNameMatch == nil {
+				continue
+			}
+			defaultName := defaultNameMatch[1]
+
+			// Split import names, find which is the default export
+			names := strings.Split(namesList, ",")
+			var typeNames []string
+			foundDefault := false
+			for _, n := range names {
+				n = strings.TrimSpace(n)
+				if n == defaultName {
+					foundDefault = true
+				} else {
+					typeNames = append(typeNames, n)
+				}
+			}
+			if !foundDefault {
+				continue
+			}
+
+			newImport := fmt.Sprintf("import %s from '@/%s'", defaultName, importPath)
+			if len(typeNames) > 0 {
+				newImport += fmt.Sprintf("\nimport type { %s } from '@/%s'", strings.Join(typeNames, ", "), importPath)
+			}
+			updated = strings.Replace(updated, fullMatch, newImport, 1)
+			changed = true
 		}
 
 		if changed {
@@ -863,6 +923,20 @@ func (c *Controller) validateAndFixFiles(ctx context.Context, project *models.Ap
 		}
 
 		slog.Info("Applied LLM fixes", "project_id", project.ID, "iteration", iteration, "files_fixed", len(fixes))
+
+		// Post-LLM auto-fix: LLM fixes may introduce new import/export mismatches
+		postAutoFixed, postChangedPaths := autoFixImportMismatches(files)
+		if postAutoFixed > 0 {
+			for _, path := range postChangedPaths {
+				if dbFile, err := c.DB.GetAppGeneratedFileByPath(project.ID.String(), "nextjs", path); err == nil && dbFile != nil {
+					dbFile.Content = files[path]
+					dbFile.UpdatedAt = time.Now()
+					c.DB.UpdateAppGeneratedFile(dbFile)
+				}
+			}
+			totalFixed += postAutoFixed
+			slog.Info("Post-LLM auto-fixed import/export mismatches", "project_id", project.ID, "iteration", iteration, "files_fixed", postAutoFixed)
+		}
 	}
 
 	return totalFixed
