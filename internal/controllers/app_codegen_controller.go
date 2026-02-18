@@ -151,6 +151,8 @@ var namedImportRegex = regexp.MustCompile(`import\s+\{[^}]+\}\s+from\s+['"]@/([^
 var defaultImportRegex = regexp.MustCompile(`import\s+([A-Z]\w*)\s+from\s+['"]@/([^'"]+)['"]`)
 var exportDefaultPattern = regexp.MustCompile(`(?m)^export\s+default\s+`)
 var namedExportPattern = regexp.MustCompile(`(?m)^export\s+(function|const|class|type|interface|enum)\s+`)
+var namedExportIdentRegex = regexp.MustCompile(`(?m)^export\s+(?:function|const|class|type|interface|enum)\s+(\w+)`)
+var singleNamedImportRegex = regexp.MustCompile(`import\s+\{\s*(\w+)\s*\}\s+from\s+['"]@/([^'"]+)['"]`)
 
 // --- Template helpers ---
 
@@ -588,6 +590,83 @@ func resolveFileContent(files map[string]string, importPath string) string {
 	return ""
 }
 
+// autoFixImportMismatches performs deterministic fixes for import/export style mismatches.
+// Case 1: default import from a named-export-only file → rewrite to named import.
+// Case 2: single named import from a default-export-only file → rewrite to default import.
+// Returns the number of fixed files and the list of changed file paths.
+func autoFixImportMismatches(files map[string]string) (int, []string) {
+	var changedPaths []string
+
+	for filePath, content := range files {
+		if isTemplateFile(filePath) || isConfigFile(filePath) {
+			continue
+		}
+		if !strings.HasSuffix(filePath, ".tsx") && !strings.HasSuffix(filePath, ".ts") {
+			continue
+		}
+
+		updated := content
+		changed := false
+
+		// Case 1: Default import from named-export-only file
+		// import Button from '@/components/ui/button' → import { Button } from '@/components/ui/button'
+		for _, match := range defaultImportRegex.FindAllStringSubmatch(updated, -1) {
+			fullMatch := match[0]
+			importName := match[1]
+			importPath := match[2]
+
+			targetContent := resolveFileContent(files, importPath)
+			if targetContent == "" {
+				continue
+			}
+
+			hasDefault := exportDefaultPattern.MatchString(targetContent)
+			hasNamed := namedExportPattern.MatchString(targetContent)
+
+			if !hasDefault && hasNamed {
+				// Verify the imported name matches a named export in the target
+				for _, ne := range namedExportIdentRegex.FindAllStringSubmatch(targetContent, -1) {
+					if ne[1] == importName {
+						newImport := fmt.Sprintf("import { %s } from '@/%s'", importName, importPath)
+						updated = strings.Replace(updated, fullMatch, newImport, 1)
+						changed = true
+						break
+					}
+				}
+			}
+		}
+
+		// Case 2: Single named import from default-export-only file
+		// import { Hero } from '@/components/hero' → import Hero from '@/components/hero'
+		for _, match := range singleNamedImportRegex.FindAllStringSubmatch(updated, -1) {
+			fullMatch := match[0]
+			importName := match[1]
+			importPath := match[2]
+
+			targetContent := resolveFileContent(files, importPath)
+			if targetContent == "" {
+				continue
+			}
+
+			hasDefault := exportDefaultPattern.MatchString(targetContent)
+			hasNamed := namedExportPattern.MatchString(targetContent)
+
+			if hasDefault && !hasNamed {
+				newImport := fmt.Sprintf("import %s from '@/%s'", importName, importPath)
+				updated = strings.Replace(updated, fullMatch, newImport, 1)
+				changed = true
+			}
+		}
+
+		if changed {
+			files[filePath] = updated
+			changedPaths = append(changedPaths, filePath)
+		}
+	}
+
+	return len(changedPaths), changedPaths
+}
+
 // appFixTools defines the tools available to the fix LLM for on-demand file access.
 var appFixTools = []utils.Tool{
 	{
@@ -714,6 +793,20 @@ func (c *Controller) llmFixPass(ctx context.Context, files map[string]string, va
 // Returns total number of fixed files.
 func (c *Controller) validateAndFixFiles(ctx context.Context, project *models.AppProject, files map[string]string, structure *appFileStructure, sendEvent func(string, any) bool) int {
 	totalFixed := 0
+
+	// Phase 0: deterministic auto-fix for import/export mismatches (before LLM pass)
+	autoFixed, changedPaths := autoFixImportMismatches(files)
+	if autoFixed > 0 {
+		for _, path := range changedPaths {
+			if dbFile, err := c.DB.GetAppGeneratedFileByPath(project.ID.String(), "nextjs", path); err == nil && dbFile != nil {
+				dbFile.Content = files[path]
+				dbFile.UpdatedAt = time.Now()
+				c.DB.UpdateAppGeneratedFile(dbFile)
+			}
+		}
+		totalFixed += autoFixed
+		slog.Info("Auto-fixed import/export mismatches", "project_id", project.ID, "files_fixed", autoFixed)
+	}
 
 	for iteration := 1; iteration <= 2; iteration++ {
 		if ctx.Err() != nil {

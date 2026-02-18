@@ -1154,7 +1154,7 @@ const NEXTJS_SHARED_RULES = `
 - TypeScript with proper type annotations. Tailwind CSS for ALL styling (no inline styles/CSS modules).
 - next/image for images, next/link for navigation. lucide-react for icons (pre-installed).
 - "use client" ONLY when needed: hooks (useState/useEffect/etc.), event handlers, or framer-motion imports. Server Components by default.
-- ALWAYS default-export components (export default function Name). Use default import syntax (import Button from '@/components/ui/button'). Exceptions: lib/utils.ts and lib/wemob-store.ts use named exports.
+- Default-export page and standalone components (export default function HeroSection). UI primitives in components/ui/ use named exports following shadcn/ui convention (export function Button). Match your import style to the file's exports: use import { Button } from '@/components/ui/button' for named exports, import Hero from '@/components/hero' for default exports. Exceptions: lib/utils.ts and lib/wemob-store.ts always use named exports.
 - Mobile-first responsive design (sm:, md:, lg: breakpoints). Semantic HTML. Accessibility attributes.
 - ONLY import from files in the "All files" context. Missing imports cause build failures. If a file isn't listed, implement it inline.
 - NEVER import Node.js builtins (fs, path, os, crypto, etc.) or build-time packages (tailwindcss, postcss, eslint, webpack, etc.).
@@ -1188,6 +1188,7 @@ const NEXTJS_FILE_TSX_PROMPT = `You are an expert Next.js 16 developer and UI/UX
 
 ### File-Specific Rules
 - page.tsx: export default page component. layout.tsx: include metadata export + children prop typing.
+- components/ui/ files: use named exports (export function ComponentName). All other components: use default export.
 - Use placeholder images from picsum.photos or unsplash with alt text.
 - Return ONLY code. No markdown wrapping, no explanation.
 
