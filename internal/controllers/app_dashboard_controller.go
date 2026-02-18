@@ -76,6 +76,67 @@ func (c *Controller) ExtractSchemaFromGeneratedFiles(ctx context.Context, projec
 	return schema, nil
 }
 
+// ExtractSchemaFromPlatformDB introspects the platform's own PostgreSQL database
+// and returns table/column definitions from information_schema.
+func (c *Controller) ExtractSchemaFromPlatformDB() (json.RawMessage, error) {
+	db := c.DB.DB.DB
+
+	rows, err := db.Query(`
+		SELECT t.table_name, c.column_name, c.data_type, c.is_nullable
+		FROM information_schema.tables t
+		JOIN information_schema.columns c ON c.table_name = t.table_name AND c.table_schema = t.table_schema
+		WHERE t.table_schema = 'public' AND t.table_type = 'BASE TABLE'
+		ORDER BY t.table_name, c.ordinal_position
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query information_schema: %w", err)
+	}
+	defer rows.Close()
+
+	type column struct {
+		Name     string `json:"name"`
+		Type     string `json:"type"`
+		Nullable bool   `json:"nullable"`
+	}
+	type table struct {
+		Name    string   `json:"name"`
+		Columns []column `json:"columns"`
+	}
+
+	tableMap := map[string]*table{}
+	var tableOrder []string
+
+	for rows.Next() {
+		var tableName, colName, dataType, isNullable string
+		if err := rows.Scan(&tableName, &colName, &dataType, &isNullable); err != nil {
+			continue
+		}
+		t, ok := tableMap[tableName]
+		if !ok {
+			t = &table{Name: tableName}
+			tableMap[tableName] = t
+			tableOrder = append(tableOrder, tableName)
+		}
+		t.Columns = append(t.Columns, column{
+			Name:     colName,
+			Type:     dataType,
+			Nullable: isNullable == "YES",
+		})
+	}
+
+	var tables []table
+	for _, name := range tableOrder {
+		tables = append(tables, *tableMap[name])
+	}
+
+	schema, err := json.Marshal(tables)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal schema: %w", err)
+	}
+
+	return schema, nil
+}
+
 // CreateDashboard creates a new dashboard for a project with AI-generated panels.
 func (c *Controller) CreateDashboard(ctx context.Context, project *models.AppProject, user *models.User, prompt string, events chan<- responses.SSEEvent) {
 	defer close(events)
@@ -130,11 +191,16 @@ func (c *Controller) CreateDashboard(ctx context.Context, project *models.AppPro
 
 	sendEvent("status", map[string]string{"phase": "extracting_schema"})
 
-	// Extract schema from generated files
-	schema, err := c.ExtractSchemaFromGeneratedFiles(ctx, project.ID.String())
+	// Extract schema
+	var schema json.RawMessage
+	if dbProvider == "platform" {
+		schema, err = c.ExtractSchemaFromPlatformDB()
+	} else {
+		schema, err = c.ExtractSchemaFromGeneratedFiles(ctx, project.ID.String())
+	}
 	if err != nil {
 		slog.Error("schema extraction failed", "error", err, "project_id", project.ID)
-		sendError("schema", "failed to extract database schema from your code")
+		sendError("schema", "failed to extract database schema")
 		return
 	}
 
@@ -142,7 +208,7 @@ func (c *Controller) CreateDashboard(ctx context.Context, project *models.AppPro
 	var tables []any
 	json.Unmarshal(schema, &tables)
 	if len(tables) == 0 {
-		sendError("schema", "no database tables found in your code. Make sure your app has database schema definitions.")
+		sendError("schema", "no database tables found")
 		return
 	}
 
@@ -605,14 +671,22 @@ func (c *Controller) RefreshDashboardSchema(ctx context.Context, projectID strin
 		}
 	}()
 
-	schema, err := c.ExtractSchemaFromGeneratedFiles(ctx, projectID)
-	if err != nil {
-		return nil, err
+	// Check if dashboard uses platform provider
+	dashboard, dashErr := c.DB.GetAppDashboardByProjectID(projectID)
+
+	var schema json.RawMessage
+	var schemaErr error
+	if dashErr == nil && dashboard.Provider == "platform" {
+		schema, schemaErr = c.ExtractSchemaFromPlatformDB()
+	} else {
+		schema, schemaErr = c.ExtractSchemaFromGeneratedFiles(ctx, projectID)
+	}
+	if schemaErr != nil {
+		return nil, schemaErr
 	}
 
 	// Update dashboard schema if exists
-	dashboard, err := c.DB.GetAppDashboardByProjectID(projectID)
-	if err == nil {
+	if dashErr == nil {
 		dashboard.Schema = schema
 		dashboard.UpdatedAt = time.Now()
 		c.DB.UpdateAppDashboard(dashboard)
