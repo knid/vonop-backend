@@ -58,19 +58,46 @@ Rules:
 
 Provider-specific query format:
 - For "supabase" provider: use table, select, filters, order, limit fields
-- For "neon" or "platform" provider: use sql field with a SELECT query
+- For "neon" or "platform" provider: use sql field with a PostgreSQL SELECT query
 
-Return a JSON object with this structure:
+IMPORTANT: Check the "Database provider" value in the user message. If it is "neon" or "platform", you MUST use the "sql" field in every query. Do NOT use table/select/filters format for neon or platform providers.
+
+Return a JSON object with this structure.
+
+Example for supabase provider:
 {
   "name": "Dashboard name based on the app",
   "description": "Brief description of what this dashboard shows",
   "panels": [
     {
-      "title": "Panel Title",
+      "title": "Total Users",
       "panel_type": "stat_card",
       "query": {
         "table": "users",
         "select": "*",
+        "transform": "count"
+      },
+      "config": {
+        "label": "Total Users",
+        "icon": "users",
+        "color": "#3B82F6"
+      },
+      "sort_order": 0,
+      "grid_width": 3
+    }
+  ]
+}
+
+Example for neon or platform provider:
+{
+  "name": "Dashboard name based on the app",
+  "description": "Brief description of what this dashboard shows",
+  "panels": [
+    {
+      "title": "Total Users",
+      "panel_type": "stat_card",
+      "query": {
+        "sql": "SELECT COUNT(*) AS value FROM users",
         "transform": "count"
       },
       "config": {
@@ -85,12 +112,7 @@ Return a JSON object with this structure:
       "title": "Revenue Over Time",
       "panel_type": "line_chart",
       "query": {
-        "table": "orders",
-        "select": "created_at,total",
-        "transform": "time_series",
-        "time_field": "created_at",
-        "time_range": "30d",
-        "agg_field": "total"
+        "sql": "SELECT DATE(created_at) AS date, SUM(total) AS total FROM orders WHERE created_at >= NOW() - INTERVAL '30 days' GROUP BY DATE(created_at) ORDER BY date"
       },
       "config": {
         "x_axis": "date",
@@ -99,6 +121,16 @@ Return a JSON object with this structure:
       },
       "sort_order": 1,
       "grid_width": 6
+    },
+    {
+      "title": "Recent Orders",
+      "panel_type": "table",
+      "query": {
+        "sql": "SELECT id, customer_name, total, status, created_at FROM orders ORDER BY created_at DESC LIMIT 20"
+      },
+      "config": {},
+      "sort_order": 2,
+      "grid_width": 12
     }
   ]
 }
