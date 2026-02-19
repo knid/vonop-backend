@@ -956,7 +956,7 @@ func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.A
 		func(chunk string) {
 			sendEvent("chat_thinking", responses.ChatThinkingEvent{Chunk: chunk})
 		},
-		utils.ToolCallConfig{MaxRounds: 25, NudgeAfter: 5, StripAfter: 8},
+		utils.ToolCallConfig{MaxRounds: 15, NudgeAfter: 5, StripAfter: 8},
 	)
 	if err != nil {
 		slog.Error("failed to get chat response from LLM", "error", err, "response_so_far", len(responseJSON))
@@ -1170,58 +1170,41 @@ func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.A
 		"project_id", project.ID,
 	)
 
-	// Run deterministic validation + LLM fix on modified files (up to 3 verification rounds)
+	// Run fast deterministic auto-fixes on modified files (no LLM calls).
+	// We skip the slow llmFixPass here to avoid blocking the chat response for minutes.
+	// The LLM already had a chance to fix issues via tools during the main chat loop.
 	if filesChanged > 0 {
-		const maxVerifyRounds = 3
-		for verifyRound := 0; verifyRound < maxVerifyRounds; verifyRound++ {
-			if ctx.Err() != nil {
-				break
-			}
+		// Auto-fix import/export mismatches
+		autoFixed, changedPaths := autoFixImportMismatches(currentFiles)
+		// Auto-fix missing "use client" directives
+		autoFixed2, changedPaths2 := autoFixMissingUseClient(currentFiles)
+		autoFixed += autoFixed2
+		changedPaths = append(changedPaths, changedPaths2...)
 
-			// Snapshot file contents before validation so we can detect what changed
-			preValidation := make(map[string]string, len(currentFiles))
-			for k, v := range currentFiles {
-				preValidation[k] = v
-			}
-
-			fixedCount, fixedPaths := c.validateAndFixFiles(ctx, project, currentFiles, nil, sendEvent)
-			if fixedCount > 0 {
-				slog.Info("Chat validation fixed files", "project_id", project.ID, "fixed_count", fixedCount, "verify_round", verifyRound)
-
-				// Emit file_complete SSE events for validation fixes so frontend updates without refresh
-				for _, fixedPath := range fixedPaths {
-					if currentFiles[fixedPath] != preValidation[fixedPath] {
-						dbFile, err := c.DB.GetAppGeneratedFileByPath(project.ID.String(), "nextjs", fixedPath)
-						if err == nil && dbFile != nil {
-							sendEvent("file_complete", responses.FileCompleteEvent{
-								Action:   "modify",
-								FilePath: fixedPath,
-								FileID:   dbFile.ID,
-								FileType: dbFile.FileType,
-								Content:  currentFiles[fixedPath],
-							})
-							appliedOps = append(appliedOps, appChatOperation{
-								Action: "modify",
-								Path:   fixedPath,
-								Type:   dbFile.FileType,
-							})
-							filesChanged++
-						}
-					}
+		if autoFixed > 0 {
+			slog.Info("Chat deterministic auto-fix applied", "project_id", project.ID, "files_fixed", autoFixed)
+			for _, fixedPath := range changedPaths {
+				// Persist to DB
+				dbFile, err := c.DB.GetAppGeneratedFileByPath(project.ID.String(), "nextjs", fixedPath)
+				if err == nil && dbFile != nil {
+					dbFile.Content = currentFiles[fixedPath]
+					dbFile.UpdatedAt = time.Now()
+					c.DB.UpdateAppGeneratedFile(dbFile)
+					sendEvent("file_complete", responses.FileCompleteEvent{
+						Action:   "modify",
+						FilePath: fixedPath,
+						FileID:   dbFile.ID,
+						FileType: dbFile.FileType,
+						Content:  currentFiles[fixedPath],
+					})
+					appliedOps = append(appliedOps, appChatOperation{
+						Action: "modify",
+						Path:   fixedPath,
+						Type:   dbFile.FileType,
+					})
+					filesChanged++
 				}
 			}
-
-			// Post-validation check: run deterministic checks to see if issues remain
-			remainingErrors := runDeterministicChecks(currentFiles)
-			if len(remainingErrors) == 0 {
-				slog.Info("Chat verification passed with no remaining errors", "project_id", project.ID, "verify_round", verifyRound)
-				break
-			}
-			if verifyRound == maxVerifyRounds-1 {
-				slog.Warn("Chat verification still has errors after max rounds", "project_id", project.ID, "remaining_errors", len(remainingErrors))
-				break
-			}
-			slog.Info("Chat verification found remaining errors, retrying", "project_id", project.ID, "remaining_errors", len(remainingErrors), "verify_round", verifyRound)
 		}
 
 		// Augment package.json with any new third-party imports added by the chat
