@@ -895,6 +895,11 @@ func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.A
 		appliedOps: &toolAppliedOps,
 	}
 
+	// Accumulators for persisting thinking + tool calls in conversation history
+	var thinkingBuf strings.Builder
+	var accToolCalls []models.AppChatToolCall
+	thinkingStart := time.Time{}
+
 	// Call LLM with tool calling — LLM reads/writes files on demand via tools
 	localExecutor := c.buildChatToolExecutor(project, user, currentFiles, toolCallbacks)
 	executor := c.compositeToolExecutor(localExecutor)
@@ -913,6 +918,7 @@ func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.A
 		c.reasoningConfig(),
 		executor,
 		func(toolName, args string) {
+			accToolCalls = append(accToolCalls, models.AppChatToolCall{Tool: toolName, Arguments: args})
 			sendEvent("tool_call", responses.ToolCallEvent{
 				Tool:      toolName,
 				Arguments: args,
@@ -952,6 +958,10 @@ func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.A
 			}
 		}(),
 		func(chunk string) {
+			if thinkingStart.IsZero() {
+				thinkingStart = time.Now()
+			}
+			thinkingBuf.WriteString(chunk)
 			sendEvent("chat_thinking", responses.ChatThinkingEvent{Chunk: chunk})
 		},
 		utils.ToolCallConfig{MaxRounds: 15, NudgeAfter: 5, StripAfter: 8},
@@ -1290,14 +1300,21 @@ func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.A
 		})
 	}
 
+	var thinkingDurationMs int
+	if !thinkingStart.IsZero() {
+		thinkingDurationMs = int(time.Since(thinkingStart).Milliseconds())
+	}
 	assistantMsg := models.AppConversationMessage{
-		ID:             uuid.New().String(),
-		Role:           "assistant",
-		Content:        assistantContent,
-		Timestamp:      time.Now().Unix(),
-		FileOperations: fileOps,
-		SnapshotID:     preSnapshotID,
-		Suggestions:    chatResp.Suggestions,
+		ID:                 uuid.New().String(),
+		Role:               "assistant",
+		Content:            assistantContent,
+		Timestamp:          time.Now().Unix(),
+		FileOperations:     fileOps,
+		SnapshotID:         preSnapshotID,
+		Suggestions:        chatResp.Suggestions,
+		ThinkingText:       thinkingBuf.String(),
+		ThinkingDurationMs: thinkingDurationMs,
+		ToolCalls:          accToolCalls,
 	}
 	messages = append(messages, assistantMsg)
 	conv.Messages, _ = json.Marshal(messages)

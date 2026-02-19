@@ -999,15 +999,25 @@ func (v *HttpViews) GetAppConversation(w http.ResponseWriter, r *http.Request) {
 				FileType: op.FileType,
 			})
 		}
+		var toolCalls []responses.AppChatToolCallResp
+		for _, tc := range m.ToolCalls {
+			toolCalls = append(toolCalls, responses.AppChatToolCallResp{
+				Tool:      tc.Tool,
+				Arguments: tc.Arguments,
+			})
+		}
 		msgResp = append(msgResp, responses.AppConversationMessageResp{
-			ID:             m.ID,
-			Role:           m.Role,
-			Content:        m.Content,
-			Timestamp:      m.Timestamp,
-			FileOperations: fileOps,
-			ImageURLs:      m.ImageURLs,
-			SnapshotID:     m.SnapshotID,
-			Suggestions:    m.Suggestions,
+			ID:                 m.ID,
+			Role:               m.Role,
+			Content:            m.Content,
+			Timestamp:          m.Timestamp,
+			FileOperations:     fileOps,
+			ImageURLs:          m.ImageURLs,
+			SnapshotID:         m.SnapshotID,
+			Suggestions:        m.Suggestions,
+			ThinkingText:       m.ThinkingText,
+			ThinkingDurationMs: m.ThinkingDurationMs,
+			ToolCalls:          toolCalls,
 		})
 	}
 
