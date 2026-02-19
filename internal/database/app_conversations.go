@@ -3,6 +3,7 @@ package database
 import (
 	"context"
 
+	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/models"
 )
 
@@ -17,14 +18,15 @@ func (db *Database) CreateAppConversation(c *models.AppConversation) (*models.Ap
 	return c, err
 }
 
-// GetOrCreateAppConversation atomically inserts a conversation or returns the existing one.
-// Uses ON CONFLICT to avoid race conditions on the unique app_project_id constraint.
+// GetOrCreateAppConversation returns the existing conversation for the project,
+// or creates a new one if none exists.
 func (db *Database) GetOrCreateAppConversation(c *models.AppConversation) (*models.AppConversation, error) {
-	err := db.DB.NewInsert().
-		Model(c).
-		On("CONFLICT (app_project_id) DO UPDATE SET updated_at = current_timestamp").
-		Returning("*").
-		Scan(context.Background())
+	existing, err := db.GetAppConversationByProjectID(c.AppProjectID.String())
+	if err == nil && existing.ID != uuid.Nil {
+		return existing, nil
+	}
+	// No existing conversation — create a new one
+	_, err = db.DB.NewInsert().Model(c).Returning("*").Exec(context.Background())
 	return c, err
 }
 
