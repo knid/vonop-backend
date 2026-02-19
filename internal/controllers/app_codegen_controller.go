@@ -2006,12 +2006,12 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 		return
 	}
 
-	// Step 4: Create conversation early with user message
+	// Step 4: Create conversation early with user message (atomic upsert)
 	convMessages := []models.AppConversationMessage{
 		{Role: "user", Content: project.Prompt, Timestamp: time.Now().Unix()},
 	}
 	convJSON, _ := json.Marshal(convMessages)
-	conv, convErr := c.DB.CreateAppConversation(&models.AppConversation{
+	conv, convErr := c.DB.GetOrCreateAppConversation(&models.AppConversation{
 		AppProjectID: project.ID,
 		Messages:     convJSON,
 	})
