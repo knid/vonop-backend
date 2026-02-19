@@ -1165,7 +1165,14 @@ func (c *Controller) llmFixPass(ctx context.Context, files map[string]string, va
 		errList.WriteString(fmt.Sprintf("%d. [%s] %s: %s\n", i+1, e.Type, e.File, e.Error))
 	}
 
-	userMessage := fileList.String() + errList.String() + "\nUse read_file to inspect the files with errors, then provide fixes."
+	// Include export manifest so the LLM can see all available exports without needing tool calls
+	exportManifest := buildExportManifest(files)
+	var manifestSection string
+	if exportManifest != "" {
+		manifestSection = "\nExport manifest (shows what each file exports):\n" + exportManifest + "\n"
+	}
+
+	userMessage := fileList.String() + errList.String() + manifestSection + "\nUse the export manifest above to understand available exports. Use read_file to inspect files that need fixing, then provide fixes."
 
 	fixLocalExecutor := c.buildChatToolExecutor(nil, nil, files, nil)
 	executor := c.compositeToolExecutor(fixLocalExecutor)
@@ -1210,7 +1217,7 @@ func (c *Controller) llmFixPass(ctx context.Context, files map[string]string, va
 	return fixes
 }
 
-// validateAndFixFiles runs deterministic checks and LLM fix loop. Max 2 iterations.
+// validateAndFixFiles runs deterministic checks and LLM fix loop. Max 3 iterations.
 // Returns total number of fixed files and the list of changed file paths.
 func (c *Controller) validateAndFixFiles(ctx context.Context, project *models.AppProject, files map[string]string, structure *appFileStructure, sendEvent func(string, any) bool) (int, []string) {
 	totalFixed := 0
@@ -1240,7 +1247,7 @@ func (c *Controller) validateAndFixFiles(ctx context.Context, project *models.Ap
 		return result
 	}
 
-	for iteration := 1; iteration <= 2; iteration++ {
+	for iteration := 1; iteration <= 3; iteration++ {
 		if ctx.Err() != nil {
 			return totalFixed, collectChanged()
 		}
@@ -1274,7 +1281,7 @@ func (c *Controller) validateAndFixFiles(ctx context.Context, project *models.Ap
 		if fixes == nil || len(fixes) == 0 {
 			slog.Warn("LLM fix pass returned no fixes", "project_id", project.ID, "iteration", iteration)
 			// Only break if this is the last iteration or no errors changed
-			if iteration >= 2 {
+			if iteration >= 3 {
 				break
 			}
 			// Continue to next iteration — LLM might succeed on retry with different context
@@ -1311,6 +1318,27 @@ func (c *Controller) validateAndFixFiles(ctx context.Context, project *models.Ap
 			totalFixed += postAutoFixed
 			slog.Info("Post-LLM auto-fixed import/export mismatches", "project_id", project.ID, "iteration", iteration, "files_fixed", postAutoFixed)
 		}
+	}
+
+	// Final validation: run checks one more time and report remaining errors to the frontend
+	finalErrors := runDeterministicChecks(files)
+	if len(finalErrors) > 0 {
+		errStrings := make([]string, len(finalErrors))
+		for i, e := range finalErrors {
+			errStrings[i] = fmt.Sprintf("[%s] %s: %s", e.Type, e.File, e.Error)
+		}
+		slog.Warn("Fix loop ended with remaining errors", "project_id", project.ID, "count", len(finalErrors))
+		sendEvent("validation", responses.ValidationEvent{
+			Iteration: 0,
+			Errors:    errStrings,
+			Fixing:    false,
+		})
+	} else {
+		sendEvent("validation", responses.ValidationEvent{
+			Iteration: 0,
+			Errors:    []string{},
+			Fixing:    false,
+		})
 	}
 
 	return totalFixed, collectChanged()
