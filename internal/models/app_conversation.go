@@ -17,14 +17,22 @@ type AppConversation struct {
 }
 
 type AppConversationMessage struct {
-	ID             string           `json:"id"`
-	Role           string           `json:"role"` // "user", "assistant", "system"
-	Content        string           `json:"content"`
-	Timestamp      int64            `json:"timestamp"`
-	FileOperations []AppChatFileOp  `json:"file_operations,omitempty"`
-	ImageURLs      []string         `json:"image_urls,omitempty"`
-	SnapshotID     string           `json:"snapshot_id,omitempty"`
-	Suggestions    []string         `json:"suggestions,omitempty"`
+	ID                 string           `json:"id"`
+	Role               string           `json:"role"` // "user", "assistant", "system"
+	Content            string           `json:"content"`
+	Timestamp          int64            `json:"timestamp"`
+	FileOperations     []AppChatFileOp  `json:"file_operations,omitempty"`
+	ImageURLs          []string         `json:"image_urls,omitempty"`
+	SnapshotID         string           `json:"snapshot_id,omitempty"`
+	Suggestions        []string         `json:"suggestions,omitempty"`
+	ThinkingText       string           `json:"thinking_text,omitempty"`
+	ThinkingDurationMs int              `json:"thinking_duration_ms,omitempty"`
+	ToolCalls          []AppChatToolCall `json:"tool_calls,omitempty"`
+}
+
+type AppChatToolCall struct {
+	Tool      string `json:"tool"`
+	Arguments string `json:"arguments"`
 }
 
 type AppChatFileOp struct {

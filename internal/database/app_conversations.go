@@ -20,11 +20,11 @@ func (db *Database) CreateAppConversation(c *models.AppConversation) (*models.Ap
 // GetOrCreateAppConversation atomically inserts a conversation or returns the existing one.
 // Uses ON CONFLICT to avoid race conditions on the unique app_project_id constraint.
 func (db *Database) GetOrCreateAppConversation(c *models.AppConversation) (*models.AppConversation, error) {
-	_, err := db.DB.NewInsert().
+	err := db.DB.NewInsert().
 		Model(c).
 		On("CONFLICT (app_project_id) DO UPDATE SET updated_at = current_timestamp").
 		Returning("*").
-		Exec(context.Background())
+		Scan(context.Background())
 	return c, err
 }
 

@@ -74,14 +74,22 @@ type AppConversationResponse struct {
 }
 
 type AppConversationMessageResp struct {
-	ID             string                `json:"id,omitempty"`
-	Role           string                `json:"role"`
-	Content        string                `json:"content"`
-	Timestamp      int64                 `json:"timestamp"`
-	FileOperations []AppChatFileOpResp   `json:"file_operations,omitempty"`
-	ImageURLs      []string              `json:"image_urls,omitempty"`
-	SnapshotID     string                `json:"snapshot_id,omitempty"`
-	Suggestions    []string              `json:"suggestions,omitempty"`
+	ID                 string                    `json:"id,omitempty"`
+	Role               string                    `json:"role"`
+	Content            string                    `json:"content"`
+	Timestamp          int64                     `json:"timestamp"`
+	FileOperations     []AppChatFileOpResp       `json:"file_operations,omitempty"`
+	ImageURLs          []string                  `json:"image_urls,omitempty"`
+	SnapshotID         string                    `json:"snapshot_id,omitempty"`
+	Suggestions        []string                  `json:"suggestions,omitempty"`
+	ThinkingText       string                    `json:"thinking_text,omitempty"`
+	ThinkingDurationMs int                       `json:"thinking_duration_ms,omitempty"`
+	ToolCalls          []AppChatToolCallResp     `json:"tool_calls,omitempty"`
+}
+
+type AppChatToolCallResp struct {
+	Tool      string `json:"tool"`
+	Arguments string `json:"arguments"`
 }
 
 type AppChatFileOpResp struct {
