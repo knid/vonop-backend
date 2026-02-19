@@ -941,6 +941,48 @@ func autoFixImportMismatches(files map[string]string) (int, []string) {
 	return len(changedPaths), changedPaths
 }
 
+// autoFixMissingUseClient scans files for patterns that require "use client" and
+// prepends the directive if missing. This is a fast deterministic fix that avoids
+// needing an LLM call for common cases (React hooks, framer-motion, wemob-store).
+func autoFixMissingUseClient(files map[string]string) (int, []string) {
+	var changedPaths []string
+
+	for filePath, content := range files {
+		if isTemplateFile(filePath) || isConfigFile(filePath) {
+			continue
+		}
+		if !strings.HasSuffix(filePath, ".tsx") && !strings.HasSuffix(filePath, ".ts") {
+			continue
+		}
+
+		hasUseClient := strings.Contains(content, `"use client"`) || strings.Contains(content, `'use client'`)
+		if hasUseClient {
+			continue
+		}
+
+		needsUseClient := false
+		// React hooks
+		if hookPattern.MatchString(content) {
+			needsUseClient = true
+		}
+		// framer-motion
+		if framerMotionImportPattern.MatchString(content) {
+			needsUseClient = true
+		}
+		// @/lib/wemob-store (client-only module)
+		if strings.Contains(content, `@/lib/wemob-store`) {
+			needsUseClient = true
+		}
+
+		if needsUseClient {
+			files[filePath] = "\"use client\"\n\n" + content
+			changedPaths = append(changedPaths, filePath)
+		}
+	}
+
+	return len(changedPaths), changedPaths
+}
+
 // isPascalCase returns true if the string starts with an uppercase letter (component naming convention).
 func isPascalCase(s string) bool {
 	if len(s) == 0 {
