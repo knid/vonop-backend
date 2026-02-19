@@ -335,15 +335,20 @@ var appCodegenTools = []utils.Tool{
 
 // categorizeFiles sorts files into generation tiers.
 // Tier 0 is not returned (template files are filtered out before calling this).
-// Returns tiers 1-4 as separate slices.
+// Returns tiers 1-5 as separate slices:
+//   - Tier 1: lib/, utils/, types/, data/, hooks/, contexts/, store/
+//   - Tier 2: components/ui/ (UI primitives — generated first)
+//   - Tier 3: components/* (non-ui components — can read ui/ files)
+//   - Tier 4: app pages and API routes
+//   - Tier 5: layout + globals.css
 func categorizeFiles(files []appFilePlanEntry) [][]appFilePlanEntry {
-	tiers := make([][]appFilePlanEntry, 4) // index 0=tier1, 1=tier2, 2=tier3, 3=tier4
+	tiers := make([][]appFilePlanEntry, 5)
 
 	for _, f := range files {
 		switch {
-		// Tier 4: root layout and globals.css
+		// Tier 5: root layout and globals.css
 		case f.Path == "app/layout.tsx" || f.Path == "app/globals.css":
-			tiers[3] = append(tiers[3], f)
+			tiers[4] = append(tiers[4], f)
 		// Tier 1: lib, utils, types, data, hooks, contexts, stores
 		case strings.HasPrefix(f.Path, "lib/") ||
 			strings.HasPrefix(f.Path, "utils/") ||
@@ -353,12 +358,15 @@ func categorizeFiles(files []appFilePlanEntry) [][]appFilePlanEntry {
 			strings.HasPrefix(f.Path, "contexts/") ||
 			strings.HasPrefix(f.Path, "store/"):
 			tiers[0] = append(tiers[0], f)
-		// Tier 2: components
-		case strings.HasPrefix(f.Path, "components/"):
+		// Tier 2: components/ui/ (UI primitives)
+		case strings.HasPrefix(f.Path, "components/ui/"):
 			tiers[1] = append(tiers[1], f)
-		// Tier 3: pages (app/**/page.tsx) and API routes
-		default:
+		// Tier 3: components/* (non-ui — can reference ui/ files)
+		case strings.HasPrefix(f.Path, "components/"):
 			tiers[2] = append(tiers[2], f)
+		// Tier 4: pages (app/**/page.tsx) and API routes
+		default:
+			tiers[3] = append(tiers[3], f)
 		}
 	}
 
@@ -576,6 +584,60 @@ func runDeterministicChecks(files map[string]string) []validationError {
 				})
 			}
 		}
+
+		// Check 6: Verify named import names actually exist in target file exports
+		for _, match := range namedImportRegex.FindAllStringSubmatch(content, -1) {
+			importPath := match[1]
+			targetContent := resolveFileContent(files, importPath)
+			if targetContent == "" {
+				continue
+			}
+
+			// Build set of all export names from target (values + types + default func name)
+			targetExports := make(map[string]bool)
+			for _, ne := range namedExportIdentRegex.FindAllStringSubmatch(targetContent, -1) {
+				targetExports[ne[1]] = true
+			}
+			if dm := exportDefaultFuncNameRegex.FindStringSubmatch(targetContent); dm != nil {
+				targetExports[dm[1]] = true
+			}
+
+			if len(targetExports) == 0 {
+				continue // can't verify if no exports found
+			}
+
+			// Extract individual imported names from the { A, B, C } portion
+			fullImport := match[0]
+			braceStart := strings.Index(fullImport, "{")
+			braceEnd := strings.Index(fullImport, "}")
+			if braceStart < 0 || braceEnd < 0 {
+				continue
+			}
+			namesPart := fullImport[braceStart+1 : braceEnd]
+			importedNames := strings.Split(namesPart, ",")
+			for _, name := range importedNames {
+				name = strings.TrimSpace(name)
+				// Skip type imports like "type Foo"
+				if strings.HasPrefix(name, "type ") {
+					continue
+				}
+				if name == "" {
+					continue
+				}
+				if !targetExports[name] {
+					available := make([]string, 0, len(targetExports))
+					for e := range targetExports {
+						available = append(available, e)
+					}
+					sort.Strings(available)
+					errors = append(errors, validationError{
+						File:  filePath,
+						Error: fmt.Sprintf("Named import '%s' does not exist in '@/%s'. Available exports: %s", name, importPath, strings.Join(available, ", ")),
+						Type:  "invalid_named_import",
+					})
+				}
+			}
+		}
 	}
 
 	return errors
@@ -599,6 +661,60 @@ func resolveFileContent(files map[string]string, importPath string) string {
 		return content
 	}
 	return ""
+}
+
+// buildExportManifest scans already-generated .ts/.tsx files and produces a compact
+// text listing of each file's exports, e.g.:
+//
+//	components/ui/button.tsx: export { Button }
+//	lib/utils.ts: export { cn }
+//	components/hero.tsx: export default Hero
+func buildExportManifest(files map[string]string) string {
+	paths := make([]string, 0, len(files))
+	for p := range files {
+		if strings.HasSuffix(p, ".ts") || strings.HasSuffix(p, ".tsx") {
+			paths = append(paths, p)
+		}
+	}
+	sort.Strings(paths)
+
+	var sb strings.Builder
+	for _, p := range paths {
+		content := files[p]
+		var exports []string
+
+		// Default export function name
+		if m := exportDefaultFuncNameRegex.FindStringSubmatch(content); m != nil {
+			exports = append(exports, "default "+m[1])
+		} else if exportDefaultPattern.MatchString(content) {
+			exports = append(exports, "default")
+		}
+
+		// Named value exports (function, const, class, enum)
+		for _, m := range namedValueExportIdentRegex.FindAllStringSubmatch(content, -1) {
+			exports = append(exports, m[1])
+		}
+
+		// Named type exports (type, interface) — useful for TS imports
+		for _, m := range namedExportIdentRegex.FindAllStringSubmatch(content, -1) {
+			// Skip if already captured as a value export
+			found := false
+			for _, e := range exports {
+				if e == m[1] {
+					found = true
+					break
+				}
+			}
+			if !found {
+				exports = append(exports, m[1])
+			}
+		}
+
+		if len(exports) > 0 {
+			sb.WriteString(fmt.Sprintf("%s: export { %s }\n", p, strings.Join(exports, ", ")))
+		}
+	}
+	return sb.String()
 }
 
 // autoFixImportMismatches performs deterministic fixes for import/export style mismatches.
@@ -718,6 +834,46 @@ func autoFixImportMismatches(files map[string]string) (int, []string) {
 			changed = true
 		}
 
+		// Case 4: Single named import with wrong name from a file that has exactly one named value export
+		// import { Badge } from '@/components/ui/button' where button only exports Button
+		// → import { Button } from '@/components/ui/button'
+		for _, match := range singleNamedImportRegex.FindAllStringSubmatch(updated, -1) {
+			fullMatch := match[0]
+			importName := match[1]
+			importPath := match[2]
+
+			targetContent := resolveFileContent(files, importPath)
+			if targetContent == "" {
+				continue
+			}
+
+			// Check if the import name actually exists as an export — if so, skip
+			allNamedExports := namedValueExportIdentRegex.FindAllStringSubmatch(targetContent, -1)
+			found := false
+			for _, ne := range allNamedExports {
+				if ne[1] == importName {
+					found = true
+					break
+				}
+			}
+			if found {
+				continue // import is correct
+			}
+
+			// Only fix when target has exactly one named value export and both names are PascalCase
+			if len(allNamedExports) != 1 {
+				continue
+			}
+			actualExport := allNamedExports[0][1]
+			if !isPascalCase(importName) || !isPascalCase(actualExport) {
+				continue
+			}
+
+			newImport := fmt.Sprintf("import { %s } from '@/%s'", actualExport, importPath)
+			updated = strings.Replace(updated, fullMatch, newImport, 1)
+			changed = true
+		}
+
 		if changed {
 			files[filePath] = updated
 			changedPaths = append(changedPaths, filePath)
@@ -725,6 +881,14 @@ func autoFixImportMismatches(files map[string]string) (int, []string) {
 	}
 
 	return len(changedPaths), changedPaths
+}
+
+// isPascalCase returns true if the string starts with an uppercase letter (component naming convention).
+func isPascalCase(s string) bool {
+	if len(s) == 0 {
+		return false
+	}
+	return s[0] >= 'A' && s[0] <= 'Z'
 }
 
 // appFixTools defines the tools available to the fix LLM for on-demand file access.
@@ -850,9 +1014,10 @@ func (c *Controller) llmFixPass(ctx context.Context, files map[string]string, va
 }
 
 // validateAndFixFiles runs deterministic checks and LLM fix loop. Max 2 iterations.
-// Returns total number of fixed files.
-func (c *Controller) validateAndFixFiles(ctx context.Context, project *models.AppProject, files map[string]string, structure *appFileStructure, sendEvent func(string, any) bool) int {
+// Returns total number of fixed files and the list of changed file paths.
+func (c *Controller) validateAndFixFiles(ctx context.Context, project *models.AppProject, files map[string]string, structure *appFileStructure, sendEvent func(string, any) bool) (int, []string) {
 	totalFixed := 0
+	allChangedPaths := make(map[string]bool)
 
 	// Phase 0: deterministic auto-fix for import/export mismatches (before LLM pass)
 	autoFixed, changedPaths := autoFixImportMismatches(files)
@@ -863,14 +1028,24 @@ func (c *Controller) validateAndFixFiles(ctx context.Context, project *models.Ap
 				dbFile.UpdatedAt = time.Now()
 				c.DB.UpdateAppGeneratedFile(dbFile)
 			}
+			allChangedPaths[path] = true
 		}
 		totalFixed += autoFixed
 		slog.Info("Auto-fixed import/export mismatches", "project_id", project.ID, "files_fixed", autoFixed)
 	}
 
+	collectChanged := func() []string {
+		result := make([]string, 0, len(allChangedPaths))
+		for p := range allChangedPaths {
+			result = append(result, p)
+		}
+		sort.Strings(result)
+		return result
+	}
+
 	for iteration := 1; iteration <= 2; iteration++ {
 		if ctx.Err() != nil {
-			return totalFixed
+			return totalFixed, collectChanged()
 		}
 
 		valErrors := runDeterministicChecks(files)
@@ -881,7 +1056,7 @@ func (c *Controller) validateAndFixFiles(ctx context.Context, project *models.Ap
 				Errors:    []string{},
 				Fixing:    false,
 			})
-			return totalFixed
+			return totalFixed, collectChanged()
 		}
 
 		// Report errors
@@ -919,6 +1094,7 @@ func (c *Controller) validateAndFixFiles(ctx context.Context, project *models.Ap
 				dbFile.UpdatedAt = time.Now()
 				c.DB.UpdateAppGeneratedFile(dbFile)
 			}
+			allChangedPaths[path] = true
 			totalFixed++
 		}
 
@@ -933,13 +1109,14 @@ func (c *Controller) validateAndFixFiles(ctx context.Context, project *models.Ap
 					dbFile.UpdatedAt = time.Now()
 					c.DB.UpdateAppGeneratedFile(dbFile)
 				}
+				allChangedPaths[path] = true
 			}
 			totalFixed += postAutoFixed
 			slog.Info("Post-LLM auto-fixed import/export mismatches", "project_id", project.ID, "iteration", iteration, "files_fixed", postAutoFixed)
 		}
 	}
 
-	return totalFixed
+	return totalFixed, collectChanged()
 }
 
 // GenerateClarificationQuestions calls the LLM to generate context-specific questions.
@@ -1235,10 +1412,19 @@ func (c *Controller) generateSingleAppFile(
 	}
 	mu.Unlock()
 
-	userPrompt := fmt.Sprintf("Generate: %s\nDescription: %s%s",
+	// Build export manifest from already-generated files so LLM knows exact exports
+	exportManifest := buildExportManifest(fileSnapshot)
+
+	var manifestSection string
+	if exportManifest != "" {
+		manifestSection = "\n\nAvailable exports from already-generated files:\n" + exportManifest
+	}
+
+	userPrompt := fmt.Sprintf("Generate: %s\nDescription: %s%s%s",
 		filePlan.Path,
 		filePlan.Description,
 		generatedFileList.String(),
+		manifestSection,
 	)
 
 	codegenLocalExecutor := c.buildChatToolExecutor(nil, nil, fileSnapshot)
@@ -2129,7 +2315,7 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 
 	// Step 10: Run deterministic validation + LLM fix loop
 	repairDuration = time.Since(genStart).Seconds() - planDuration - codegenDuration
-	fixedCount = c.validateAndFixFiles(ctx, project, generatedFiles, structure, sendEvent)
+	fixedCount, _ = c.validateAndFixFiles(ctx, project, generatedFiles, structure, sendEvent)
 	validationDuration = time.Since(genStart).Seconds() - planDuration - codegenDuration - repairDuration
 	if fixedCount > 0 {
 		slog.Info("Validation fixed files", "project_id", project.ID, "fixed_count", fixedCount)

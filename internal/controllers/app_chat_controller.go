@@ -68,6 +68,19 @@ type appChatResponse struct {
 	Suggestions []string           `json:"suggestions,omitempty"`
 }
 
+// normalizeContent trims trailing whitespace from each line, normalizes line endings,
+// and ensures a single trailing newline — used for no-op comparison.
+func normalizeContent(s string) string {
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	lines := strings.Split(s, "\n")
+	for i, line := range lines {
+		lines[i] = strings.TrimRight(line, " \t")
+	}
+	result := strings.Join(lines, "\n")
+	result = strings.TrimRight(result, "\n") + "\n"
+	return result
+}
+
 // ansiRegex strips ANSI escape sequences that some LLM providers emit in streamed text.
 var ansiRegex = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
 
@@ -836,7 +849,7 @@ func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.A
 				content, _ = stripForbiddenImports(content, op.Path)
 			}
 			// Skip no-op modifications — LLM sometimes returns unchanged files
-			if content == existingFile.Content {
+			if normalizeContent(content) == normalizeContent(existingFile.Content) {
 				continue
 			}
 			existingFile.Content = content
@@ -879,9 +892,38 @@ func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.A
 
 	// Run deterministic validation + LLM fix on modified files
 	if filesChanged > 0 {
-		fixedCount := c.validateAndFixFiles(ctx, project, currentFiles, nil, sendEvent)
+		// Snapshot file contents before validation so we can detect what changed
+		preValidation := make(map[string]string, len(currentFiles))
+		for k, v := range currentFiles {
+			preValidation[k] = v
+		}
+
+		fixedCount, fixedPaths := c.validateAndFixFiles(ctx, project, currentFiles, nil, sendEvent)
 		if fixedCount > 0 {
 			slog.Info("Chat validation fixed files", "project_id", project.ID, "fixed_count", fixedCount)
+
+			// Emit file_complete SSE events for validation fixes so frontend updates without refresh
+			for _, fixedPath := range fixedPaths {
+				if currentFiles[fixedPath] != preValidation[fixedPath] {
+					dbFile, err := c.DB.GetAppGeneratedFileByPath(project.ID.String(), "nextjs", fixedPath)
+					if err == nil && dbFile != nil {
+						sendEvent("file_complete", responses.FileCompleteEvent{
+							Action:   "modify",
+							FilePath: fixedPath,
+							FileID:   dbFile.ID,
+							FileType: dbFile.FileType,
+							Content:  currentFiles[fixedPath],
+						})
+						// Add to appliedOps so it appears in "Files changed" message
+						appliedOps = append(appliedOps, appChatOperation{
+							Action: "modify",
+							Path:   fixedPath,
+							Type:   dbFile.FileType,
+						})
+						filesChanged++
+					}
+				}
+			}
 		}
 
 		// Augment package.json with any new third-party imports added by the chat
