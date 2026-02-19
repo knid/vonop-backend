@@ -770,18 +770,14 @@ func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.A
 		}
 	}
 
-	// Get or create conversation
-	conv, err := c.DB.GetAppConversationByProjectID(project.ID.String())
+	// Get or create conversation (atomic upsert to avoid race conditions)
+	conv, err := c.DB.GetOrCreateAppConversation(&models.AppConversation{
+		AppProjectID: project.ID,
+		Messages:     []byte("[]"),
+	})
 	if err != nil {
-		conv = &models.AppConversation{
-			AppProjectID: project.ID,
-			Messages:     []byte("[]"),
-		}
-		conv, err = c.DB.CreateAppConversation(conv)
-		if err != nil {
-			sendError("database", "failed to create conversation")
-			return
-		}
+		sendError("database", "failed to create conversation")
+		return
 	}
 
 	// Parse existing messages and append user message
