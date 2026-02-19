@@ -35,7 +35,7 @@ func (v *HttpViews) handleStreamOrAsync(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Minute)
 	v.Controller.RunningJobs.Store(job.ID.String(), cancel)
 
 	events := make(chan responses.SSEEvent, 100)
@@ -116,6 +116,11 @@ func (v *HttpViews) handleStreamOrAsync(w http.ResponseWriter, r *http.Request, 
 					flusher.Flush()
 				}
 			}
+
+		case <-ctx.Done():
+			// Context expired (timeout) — stop waiting for events and finalize
+			slog.Warn("Generation job timed out, finalizing", "job_id", job.ID, "elapsed", time.Since(job.CreatedAt))
+			goto done
 		}
 	}
 done:
@@ -144,23 +149,36 @@ func (v *HttpViews) drainEventsToJob(ctx context.Context, cancel context.CancelF
 	var lastEvent *responses.SSEEvent
 	var allMilestoneEvents []models.JobEvent
 
-	for event := range events {
-		lastEvent = &event
+	for {
+		select {
+		case event, ok := <-events:
+			if !ok {
+				// Channel closed — generation finished
+				goto finalize
+			}
+			lastEvent = &event
 
-		if controllers.IsMilestoneEvent(event.Event) {
-			jobEvent := models.JobEvent{
-				Index: eventIndex,
-				Event: event.Event,
-				Data:  controllers.StripHeavyFields(event.Event, event.Data),
-				Time:  time.Now().UnixMilli(),
+			if controllers.IsMilestoneEvent(event.Event) {
+				jobEvent := models.JobEvent{
+					Index: eventIndex,
+					Event: event.Event,
+					Data:  controllers.StripHeavyFields(event.Event, event.Data),
+					Time:  time.Now().UnixMilli(),
+				}
+				allMilestoneEvents = append(allMilestoneEvents, jobEvent)
+				if err := v.Controller.DB.AppendGenerationJobEvent(job.ID.String(), jobEvent); err != nil {
+					slog.Error("failed to persist job event", "job_id", job.ID, "error", err)
+				}
+				eventIndex++
 			}
-			allMilestoneEvents = append(allMilestoneEvents, jobEvent)
-			if err := v.Controller.DB.AppendGenerationJobEvent(job.ID.String(), jobEvent); err != nil {
-				slog.Error("failed to persist job event", "job_id", job.ID, "error", err)
-			}
-			eventIndex++
+
+		case <-ctx.Done():
+			// Context expired — stop draining and finalize
+			slog.Warn("Background job timed out, finalizing", "job_id", job.ID)
+			goto finalize
 		}
 	}
+finalize:
 
 	// Final consistency write: replace with complete in-memory copy
 	if len(allMilestoneEvents) > 0 {

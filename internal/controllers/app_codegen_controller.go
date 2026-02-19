@@ -1964,7 +1964,14 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 			}
 
 			wg.Add(1)
-			sem <- struct{}{} // acquire semaphore slot
+			// Acquire semaphore with context check to avoid blocking after timeout
+			select {
+			case sem <- struct{}{}:
+				// got slot
+			case <-ctx.Done():
+				wg.Done()
+				continue
+			}
 			go func(fp appFilePlanEntry) {
 				defer wg.Done()
 				defer func() { <-sem }() // release semaphore slot
@@ -1972,8 +1979,22 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 				var content string
 				var lastFailReason string
 				for attempt := 0; attempt < 3; attempt++ {
+					if ctx.Err() != nil {
+						lastFailReason = "context cancelled"
+						content = c.getAppFileFallback(fp)
+						break
+					}
 					if attempt > 0 {
-						time.Sleep(time.Duration(attempt) * 2 * time.Second)
+						// Respect context during retry backoff
+						select {
+						case <-time.After(time.Duration(attempt) * 2 * time.Second):
+						case <-ctx.Done():
+						}
+						if ctx.Err() != nil {
+							lastFailReason = "context cancelled during retry"
+							content = c.getAppFileFallback(fp)
+							break
+						}
 						slog.Info("Retrying file generation", "path", fp.Path, "attempt", attempt+1)
 					}
 					var err error
@@ -2066,7 +2087,12 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 			}
 
 			missingWg.Add(1)
-			missingSem <- struct{}{}
+			select {
+			case missingSem <- struct{}{}:
+			case <-ctx.Done():
+				missingWg.Done()
+				continue
+			}
 			go func(impPath string) {
 				defer missingWg.Done()
 				defer func() { <-missingSem }()
@@ -2232,7 +2258,12 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 			mu.Unlock()
 
 			repairWg.Add(1)
-			repairSem <- struct{}{}
+			select {
+			case repairSem <- struct{}{}:
+			case <-ctx.Done():
+				repairWg.Done()
+				continue
+			}
 			go func(fp appFilePlanEntry, failReason string, brokenContent string) {
 				defer repairWg.Done()
 				defer func() { <-repairSem }()
