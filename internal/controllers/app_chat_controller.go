@@ -884,6 +884,8 @@ func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.A
 	var preSnapshotID string
 	if preSnapshot != nil {
 		preSnapshotID = preSnapshot.ID.String()
+		// Clean up old auto-snapshots (keep only latest 20)
+		c.DB.DeleteOldAutoSnapshots(project.ID.String(), 20)
 	}
 
 

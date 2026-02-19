@@ -710,6 +710,7 @@ func main() {
 						r.Get("/", httpViews.GetAppSnapshots)
 						r.Post("/", httpViews.CreateAppSnapshot)
 						r.Post("/{sid}/restore", httpViews.RestoreAppSnapshot)
+						r.Delete("/{sid}", httpViews.DeleteAppSnapshot)
 					})
 
 					// Export
