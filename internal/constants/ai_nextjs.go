@@ -537,6 +537,48 @@ export function clearSession(): void {
 }
 
 // ---------------------------------------------------------------------------
+// Cart Cache (localStorage, SSR-safe)
+// ---------------------------------------------------------------------------
+
+const CART_CACHE_KEY = "wemob_cart_" + STORE_ID;
+
+interface CartCache { cart: StorefrontCart; ts: number; }
+
+function saveCartCache(cart: StorefrontCart | null): void {
+  if (!isBrowser()) return;
+  try {
+    if (cart && cart.items && cart.items.length > 0) {
+      localStorage.setItem(CART_CACHE_KEY, JSON.stringify({ cart, ts: Date.now() }));
+    } else {
+      localStorage.removeItem(CART_CACHE_KEY);
+    }
+  } catch { /* localStorage unavailable */ }
+}
+
+function loadCartCache(): StorefrontCart | null {
+  if (!isBrowser()) return null;
+  try {
+    const raw = localStorage.getItem(CART_CACHE_KEY);
+    if (!raw) return null;
+    const cached: CartCache = JSON.parse(raw);
+    const sid = getCookie(SESSION_COOKIE) || localStorage.getItem(SESSION_LS_KEY);
+    if (cached.cart.session_id && sid && cached.cart.session_id !== sid) {
+      localStorage.removeItem(CART_CACHE_KEY);
+      return null;
+    }
+    return cached.cart;
+  } catch {
+    try { localStorage.removeItem(CART_CACHE_KEY); } catch { /* ignore */ }
+    return null;
+  }
+}
+
+function clearCartCache(): void {
+  if (!isBrowser()) return;
+  try { localStorage.removeItem(CART_CACHE_KEY); } catch { /* ignore */ }
+}
+
+// ---------------------------------------------------------------------------
 // Internal: recalculate cart totals from items
 // ---------------------------------------------------------------------------
 
@@ -595,22 +637,26 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
 
     async function init() {
       const sid = getSessionId();
-      if (!sid) {
-        setIsLoading(false);
-        return;
-      }
+      if (!sid) { setIsLoading(false); return; }
       sessionIdRef.current = sid;
 
+      // Hydrate from cache immediately
+      const cached = loadCartCache();
+      if (cached) {
+        setCart(cached);
+        setIsLoading(false);
+      }
+
+      // Revalidate from API in background
       try {
         const existing = await getCart(sid);
-        if (!cancelled) setCart(existing);
+        if (!cancelled) { setCart(existing); saveCartCache(existing); }
       } catch {
-        // Cart does not exist yet — create one
-        try {
-          const fresh = await createCart(sid);
-          if (!cancelled) setCart(fresh);
-        } catch {
-          // API unreachable; start with empty state
+        if (!cached) {
+          try {
+            const fresh = await createCart(sid);
+            if (!cancelled) { setCart(fresh); saveCartCache(fresh); }
+          } catch { /* API unreachable, stay with cache or empty */ }
         }
       }
       if (!cancelled) setIsLoading(false);
@@ -635,6 +681,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       try {
         const updated = await apiCall();
         setCart(updated);
+        saveCartCache(updated);
       } catch (err) {
         // Rollback on failure
         setCart(previous);
@@ -731,6 +778,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
 
       const updated = await applyDiscountCode(sid, code);
       setCart(updated);
+      saveCartCache(updated);
     },
     []
   );
@@ -742,6 +790,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
 
       const updated = await removeDiscount(sid);
       setCart(updated);
+      saveCartCache(updated);
     },
     []
   );
@@ -765,6 +814,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       // No payment provider (COD / manual): clear cart, return result for confirmation page
       if (!result.payment_url && !result.client_secret) {
         setCart(null);
+        clearCartCache();
       }
 
       return result;
@@ -774,6 +824,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
 
   const handleClearCart = React.useCallback(() => {
     setCart(null);
+    clearCartCache();
     clearSession();
   }, []);
 
@@ -1174,7 +1225,7 @@ If lib/wemob-store.ts exists or the project is e-commerce, you MUST follow these
 - Product filtering: getProducts({ category: "slug", q: "search" }) and useProducts({ category: "slug", q: "search" }) accept optional filter params.
 - Discount management: applyDiscount(code) to apply, removeDiscountCode() to remove. All cart mutations return the full updated cart state.
 - Payment handling: checkout() auto-redirects for Stripe (payment_url). For Iyzico, use renderPaymentForm(container, result.client_secret) to render the payment form. If neither payment_url nor client_secret is returned, it's a COD/manual order — show confirmation directly.
-- Session management is handled automatically by the SDK (cookie + localStorage). Use getSessionId() if needed.
+- Session management is handled automatically by the SDK (cookie + localStorage). Cart data is cached in localStorage for instant loading. Use getSessionId() if needed.
 - If you see a "Store context" section below, use that information (currency, categories, product count) to inform your UI structure, but ALWAYS fetch real data from the API at runtime.`
 
 const NEXTJS_FILE_TSX_PROMPT = `You are an expert Next.js 16 developer and UI/UX designer. Generate a single TSX/TS file.
@@ -1307,7 +1358,7 @@ You are an experienced e-commerce engineer. When building storefronts, apply rea
 - CartProvider wraps the app with cart context (add to layout.tsx). useCart() provides cart state with optimistic updates, addItem, updateItem, removeItem, applyDiscount, removeDiscountCode, checkout (auto-redirects for Stripe, returns client_secret for Iyzico), and clearCart.
 - Product filtering: getProducts({ category: "slug", q: "search" }) and useProducts({ category, q }) support optional category slug filter and text search.
 - Payment flow: For Stripe, checkout() auto-redirects to payment_url. For Iyzico, checkout() returns client_secret (HTML form content) — use renderPaymentForm(container, clientSecret) to render it. If neither is returned, it's a COD/manual order — the cart is auto-cleared and the result can be used for a confirmation page.
-- Session is persisted via both a "wemob_session" cookie (30-day, SameSite=Lax) and localStorage fallback. SSR-safe.
+- Session is persisted via both a "wemob_session" cookie (30-day, SameSite=Lax) and localStorage fallback. Cart data is cached in localStorage for instant loading on revisit. SSR-safe.
 - You can also use manage_store at any time to add more products, categories, or discounts when the user asks (e.g., "add a 20% discount code SUMMER20").
 - Storefront API endpoints (all public, no auth needed). All cart mutation endpoints return the full StorefrontCart object:
   GET  {NEXT_PUBLIC_WEMOB_API_URL}/v2/storefront/{NEXT_PUBLIC_STORE_ID}/products?category=slug&q=search — list products (optional filters)
