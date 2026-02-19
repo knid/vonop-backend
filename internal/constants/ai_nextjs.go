@@ -1487,6 +1487,7 @@ Fix ALL the listed errors. Return ONLY the files that need changes — do not re
 7. Pre-installed npm packages (NEVER remove these imports, they are guaranteed available): lucide-react, clsx, tailwind-merge, class-variance-authority, framer-motion, @radix-ui/react-slot, @radix-ui/react-dialog, @radix-ui/react-dropdown-menu, @radix-ui/react-tabs, @radix-ui/react-tooltip, @radix-ui/react-avatar, @radix-ui/react-separator, @radix-ui/react-scroll-area, @radix-ui/react-switch, @radix-ui/react-select, @radix-ui/react-accordion, @radix-ui/react-popover.
 8. CRITICAL: If an error says "Module not found" or "Can't resolve" for any package listed in rule 7, do NOT remove the import. These are pre-installed packages — the error is a transient build issue, not a code issue. Keep the import as-is.
 9. For conditional CSS classes, use cn() from @/lib/utils (clsx + tailwind-merge). If lib/utils.ts doesn't exist, use clsx directly.
+12. If a broken_link error is reported: the file links to a page that doesn't exist in the project. Either remove the link/navigation element, or change the href to a page that actually exists in the project.
 
 ### Output format (strict JSON)
 {
