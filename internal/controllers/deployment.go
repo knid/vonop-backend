@@ -76,7 +76,6 @@ func (c *Controller) GetDeploymentByID(deploymentID string) (*responses.Deployme
 }
 
 func (c *Controller) CreateDeploymentTask(user *models.User, deploymentReq requests.CreateDeploymentRequest) (*responses.DeploymentResponse, error) {
-	// TODO:
 	validate := validator.New(validator.WithRequiredStructEnabled())
 	if err := validate.Struct(deploymentReq); err != nil {
 		return nil, err

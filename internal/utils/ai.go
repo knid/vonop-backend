@@ -977,10 +977,18 @@ func StreamJSONFromLLMWithVision(ctx context.Context, model, system, userText, b
 	return fullText.String(), nil
 }
 
+// ToolCallConfig holds optional configuration for StreamWithTools.
+type ToolCallConfig struct {
+	MaxRounds  int // Maximum tool-calling rounds (default 10)
+	NudgeAfter int // Inject nudge after this many consecutive tool rounds (default 3)
+	StripAfter int // Strip tools entirely after this many consecutive rounds (default 5)
+}
+
 // StreamWithTools sends messages to LLM with tools, handles the tool call loop,
 // and returns the final JSON response. Max 10 tool call rounds to prevent infinite loops.
 // onToolCall is called for each tool invocation (for SSE progress).
 // onChunk is called for content streaming.
+// An optional ToolCallConfig can be passed to override defaults.
 func StreamWithTools(
 	ctx context.Context,
 	model string,
@@ -993,29 +1001,51 @@ func StreamWithTools(
 	onToolCall func(toolName string, args string),
 	onChunk func(chunk string),
 	onReasoning func(chunk string),
+	opts ...ToolCallConfig,
 ) (string, error) {
 	if provider == nil || provider.APIKey == "" {
 		return "", fmt.Errorf("missing LLM provider configuration")
 	}
 
-	const maxRounds = 10
-	const nudgeAfter = 3 // inject "generate now" nudge and strip tools after this many consecutive tool rounds
+	maxRounds := 10
+	nudgeAfter := 3
+	stripAfter := 5
+	if len(opts) > 0 {
+		if opts[0].MaxRounds > 0 {
+			maxRounds = opts[0].MaxRounds
+		}
+		if opts[0].NudgeAfter > 0 {
+			nudgeAfter = opts[0].NudgeAfter
+		}
+		if opts[0].StripAfter > 0 {
+			stripAfter = opts[0].StripAfter
+		}
+	}
 	currentMessages := make([]Message, len(messages))
 	copy(currentMessages, messages)
 	toolCallHistory := make(map[string]string) // "tool:args" → result (dedup cache)
 	consecutiveToolRounds := 0
+	nudged := false
 
 	for round := 0; round < maxRounds; round++ {
-		// After several consecutive tool rounds, nudge the AI to stop researching
-		// and strip tools from the request to force a text response.
+		// Progressively nudge the AI to stop researching and produce a final response.
+		// Phase 1 (nudgeAfter): inject a nudge message but keep tools available.
+		// Phase 2 (stripAfter): strip tools entirely to force text generation.
 		roundTools := tools
-		if consecutiveToolRounds >= nudgeAfter {
+		if consecutiveToolRounds >= stripAfter {
 			currentMessages = append(currentMessages, Message{
 				Role:    "system",
-				Content: "You have already gathered sufficient context from tool calls. Do NOT call any more tools. Generate your final complete response now using the information you have collected.",
+				Content: "FINAL WARNING: You MUST generate your complete response NOW. All tools have been removed. Use the information you have already gathered.",
 			})
-			roundTools = nil // remove tools to force text generation
-			slog.Warn("Injecting stop-researching nudge and removing tools", "round", round, "consecutive_tool_rounds", consecutiveToolRounds)
+			roundTools = nil
+			slog.Warn("Stripping tools to force final response", "round", round, "consecutive_tool_rounds", consecutiveToolRounds)
+		} else if consecutiveToolRounds >= nudgeAfter && !nudged {
+			currentMessages = append(currentMessages, Message{
+				Role:    "system",
+				Content: "You have already gathered sufficient context from tool calls. Please wrap up your research and generate your final complete response. You may make one or two more targeted tool calls if absolutely necessary, but prioritize producing your response.",
+			})
+			nudged = true
+			slog.Warn("Injecting stop-researching nudge (tools still available)", "round", round, "consecutive_tool_rounds", consecutiveToolRounds)
 		}
 		if ctx.Err() != nil {
 			return "", ctx.Err()
@@ -1178,6 +1208,21 @@ func StreamWithTools(
 
 		// If LLM wants to call tools — discard buffered chunks (they're reasoning, not code)
 		if lastFinishReason == "tool_calls" && len(toolCallsMap) > 0 {
+			// If tools were stripped but LLM still returned tool_calls, treat accumulated
+			// text as the final response. Some providers ignore tool removal.
+			if roundTools == nil {
+				slog.Warn("LLM returned tool_calls after tools were stripped, using accumulated text as response",
+					"round", round, "text_length", fullText.Len())
+				if fullText.Len() > 0 {
+					return fullText.String(), nil
+				}
+				// No text content either — retry one more round with an explicit instruction
+				currentMessages = append(currentMessages, Message{
+					Role:    "system",
+					Content: "Your previous response was empty. Please generate your final response as plain text now.",
+				})
+				continue
+			}
 			consecutiveToolRounds++
 			roundChunks = nil // discard intermediate reasoning chunks
 

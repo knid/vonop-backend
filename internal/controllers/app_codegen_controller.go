@@ -1014,7 +1014,7 @@ func (c *Controller) llmFixPass(ctx context.Context, files map[string]string, va
 
 	userMessage := fileList.String() + errList.String() + "\nUse read_file to inspect the files with errors, then provide fixes."
 
-	fixLocalExecutor := c.buildChatToolExecutor(nil, nil, files)
+	fixLocalExecutor := c.buildChatToolExecutor(nil, nil, files, nil)
 	executor := c.compositeToolExecutor(fixLocalExecutor)
 	fixTools := append([]utils.Tool{}, appFixTools...)
 	responseJSON, err := utils.StreamWithTools(
@@ -1473,7 +1473,7 @@ func (c *Controller) generateSingleAppFile(
 		manifestSection,
 	)
 
-	codegenLocalExecutor := c.buildChatToolExecutor(nil, nil, fileSnapshot)
+	codegenLocalExecutor := c.buildChatToolExecutor(nil, nil, fileSnapshot, nil)
 	codegenExecutor := c.compositeToolExecutor(codegenLocalExecutor)
 	codegenTools := append([]utils.Tool{}, appCodegenTools...)
 
@@ -1573,7 +1573,7 @@ func (c *Controller) repairSingleAppFile(
 	}
 	userPrompt.WriteString(fmt.Sprintf("\nUser's original description: %s\n", project.Prompt))
 
-	codegenLocalExecutor := c.buildChatToolExecutor(nil, nil, fileSnapshot)
+	codegenLocalExecutor := c.buildChatToolExecutor(nil, nil, fileSnapshot, nil)
 	codegenExecutor := c.compositeToolExecutor(codegenLocalExecutor)
 	codegenTools := append([]utils.Tool{}, appCodegenTools...)
 
@@ -2193,7 +2193,7 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 				}
 				userPrompt.WriteString("\nGenerate the complete implementation based on how it is used in consuming files.")
 
-				missingLocalExecutor := c.buildChatToolExecutor(nil, nil, fileSnapshot)
+				missingLocalExecutor := c.buildChatToolExecutor(nil, nil, fileSnapshot, nil)
 				missingExecutor := c.compositeToolExecutor(missingLocalExecutor)
 				missingTools := append([]utils.Tool{}, appCodegenTools...)
 				content, err := utils.StreamTextWithTools(

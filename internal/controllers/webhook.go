@@ -214,8 +214,10 @@ func (c *Controller) HandleWebhook(w http.ResponseWriter, req *http.Request) {
 				break
 			}
 			c.TrackUserEvent(user, "payment_failed", posthog.NewProperties().
-				Set("invoice_url", invoice.HostedInvoiceURL))
-			// TODO: DB'de başarısız ödeme kaydı tut, kullanıcıya uyarı gönder veya erişimi kısıtla
+				Set("invoice_url", invoice.HostedInvoiceURL).
+				Set("amount_due", invoice.AmountDue).
+				Set("attempt_count", invoice.AttemptCount))
+			c.IdentifyUser(user)
 		}
 
 	case "invoice.payment_action_required":
@@ -257,12 +259,9 @@ func (c *Controller) HandleWebhook(w http.ResponseWriter, req *http.Request) {
 				break
 			}
 
-			c.DB.UpdateUser(user)
-
 			c.TrackUserEvent(user, "subscription_canceled", posthog.NewProperties().
 				Set("subscription_id", sub.ID))
 			c.IdentifyUser(user)
-			// TODO: DB'de subscription'ı iptal et, kullanıcının erişimini kapat
 		}
 
 	case "payment_method.attached":
