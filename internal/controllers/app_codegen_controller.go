@@ -164,6 +164,9 @@ var exportDefaultFuncNameRegex = regexp.MustCompile(`(?m)^export\s+default\s+fun
 // multiNamedImportRegex matches: import { A, B } from '@/path' (2+ names)
 var multiNamedImportRegex = regexp.MustCompile(`import\s+\{\s*(\w+(?:\s*,\s*\w+)+)\s*\}\s+from\s+['"]@/([^'"]+)['"]`)
 
+// internalHrefRegex matches href="/path" or href='/path' (skips dynamic href={...})
+var internalHrefRegex = regexp.MustCompile(`href=["'](/[^"']*?)["']`)
+
 // reExportBraces matches barrel-export patterns: export { Foo }, export { Foo } from '...', export type { Foo }
 var reExportBraces = regexp.MustCompile(`(?m)^export\s+(?:type\s+)?\{([^}]+)\}`)
 
@@ -659,6 +662,100 @@ func runDeterministicChecks(files map[string]string) []validationError {
 					})
 				}
 			}
+		}
+	}
+
+	// --- Check 7: Internal links pointing to non-existent pages ---
+
+	// Build known routes from page files in the files map
+	knownRoutes := make(map[string]bool)
+	knownRoutes["/"] = true // root always exists if app/page.tsx exists
+	var dynamicRoutePatterns []*regexp.Regexp
+	for path := range files {
+		if !strings.HasSuffix(path, "/page.tsx") && !strings.HasSuffix(path, "/page.ts") {
+			continue
+		}
+		// Strip "app/" prefix and "/page.tsx" or "/page.ts" suffix
+		route := strings.TrimPrefix(path, "app/")
+		route = strings.TrimSuffix(route, "/page.tsx")
+		route = strings.TrimSuffix(route, "/page.ts")
+		if route == "page.tsx" || route == "page.ts" || route == "" {
+			// root page
+			knownRoutes["/"] = true
+			continue
+		}
+		knownRoutes["/"+route] = true
+
+		// Check if it's a dynamic route (contains [param])
+		if strings.Contains(route, "[") {
+			// Convert dynamic segments to regex: [slug] → [^/]+, [...slug] → .+
+			escaped := regexp.QuoteMeta(route)
+			// Handle catch-all [...param]
+			escaped = regexp.MustCompile(`\\\[\\\.\\\.\\\.\\w+\\\]`).ReplaceAllString(escaped, ".+")
+			// Handle single dynamic [param]
+			escaped = regexp.MustCompile(`\\\[\\w+\\\]`).ReplaceAllString(escaped, "[^/]+")
+			if compiled, err := regexp.Compile("^/" + escaped + "$"); err == nil {
+				dynamicRoutePatterns = append(dynamicRoutePatterns, compiled)
+			}
+		}
+	}
+
+	for filePath, content := range files {
+		if !strings.HasSuffix(filePath, ".tsx") && !strings.HasSuffix(filePath, ".ts") {
+			continue
+		}
+		if isTemplateFile(filePath) || isConfigFile(filePath) {
+			continue
+		}
+
+		hrefMatches := internalHrefRegex.FindAllStringSubmatch(content, -1)
+		for _, match := range hrefMatches {
+			href := match[1]
+
+			// Skip anchors-only, API routes, and hash links
+			if strings.HasPrefix(href, "/#") || href == "/" {
+				continue
+			}
+			// Skip API routes
+			if strings.HasPrefix(href, "/api/") {
+				continue
+			}
+
+			// Normalize: strip query params and trailing slash
+			cleaned := href
+			if idx := strings.Index(cleaned, "?"); idx >= 0 {
+				cleaned = cleaned[:idx]
+			}
+			if idx := strings.Index(cleaned, "#"); idx >= 0 {
+				cleaned = cleaned[:idx]
+			}
+			cleaned = strings.TrimRight(cleaned, "/")
+			if cleaned == "" {
+				cleaned = "/"
+			}
+
+			// Check static routes
+			if knownRoutes[cleaned] {
+				continue
+			}
+
+			// Check dynamic route patterns
+			matchesDynamic := false
+			for _, pattern := range dynamicRoutePatterns {
+				if pattern.MatchString(cleaned) {
+					matchesDynamic = true
+					break
+				}
+			}
+			if matchesDynamic {
+				continue
+			}
+
+			errors = append(errors, validationError{
+				File:  filePath,
+				Error: fmt.Sprintf("Link href=\"%s\" points to a page that does not exist. Either create the page file (app%s/page.tsx) or remove the link.", href, cleaned),
+				Type:  "broken_link",
+			})
 		}
 	}
 

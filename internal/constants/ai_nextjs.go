@@ -1208,6 +1208,7 @@ const NEXTJS_SHARED_RULES = `
 - Default-export page and standalone components (export default function HeroSection). UI primitives in components/ui/ use named exports following shadcn/ui convention (export function Button). Match your import style to the file's exports: use import { Button } from '@/components/ui/button' for named exports, import Hero from '@/components/hero' for default exports. Exceptions: lib/utils.ts and lib/wemob-store.ts always use named exports.
 - Mobile-first responsive design (sm:, md:, lg: breakpoints). Semantic HTML. Accessibility attributes.
 - ONLY import from files in the "All files" context. Missing imports cause build failures. If a file isn't listed, implement it inline.
+- ONLY create <Link href="..."> or <a href="..."> navigation to pages that exist in the "All files" context. If a route's page file (e.g., app/about/page.tsx for "/about") is NOT in the file list, do NOT link to it. Never create dead links.
 - NEVER import Node.js builtins (fs, path, os, crypto, etc.) or build-time packages (tailwindcss, postcss, eslint, webpack, etc.).
 - For NON-e-commerce projects: define mock/placeholder data inline as const arrays/objects. Do NOT import from external data files.
 - cn() from @/lib/utils for conditional classes (clsx + tailwind-merge). If lib/utils.ts absent, use clsx directly.
@@ -1331,18 +1332,19 @@ Do NOT output a JSON code block with operations — use the file tools instead. 
 8. Keep navigation consistent across pages.
 9. Default-export page and standalone components (export default function HeroSection). UI primitives in components/ui/ use named exports following shadcn/ui convention (export function Button). Match your import style to the file's exports: use import { Button } from '@/components/ui/button' for named exports, import Hero from '@/components/hero' for default exports. Exceptions: lib/utils.ts and lib/wemob-store.ts always use named exports. ALWAYS use read_file to check a file's actual exports before importing from it. Mismatched import styles cause "type is invalid" React errors.
 10. CRITICAL: If any file imports from a path that does not exist in the current project files, you MUST use write_file to create that file. Every import must resolve to an existing file. Missing files cause build failures.
-11. Only import from paths that exist in the current project files or that you are creating.
-12. Use lucide-react for icons (already in project dependencies).
-13. NEVER import Node.js built-in modules (fs, path, module, os, crypto, stream, etc.). This is a browser-side Next.js app.
-14. For NON-e-commerce projects: define mock/placeholder data inline as const arrays or objects. For e-commerce projects: NEVER hardcode product/category/price data — always fetch from the API via @/lib/wemob-store.
-15. NEVER import build-time packages in component files: tailwindcss, postcss, autoprefixer, eslint, typescript, webpack, etc. Use Tailwind via className strings only.
-16. For conditional CSS classes, use cn() from @/lib/utils (clsx + tailwind-merge). If lib/utils.ts doesn't exist, create it with write_file.
-17. You CAN modify package.json to add new npm dependencies when needed (e.g., a chart library, date library, etc.).
-18. You CAN modify next.config.mjs and other config files when needed.
-19. Pre-installed packages you can import freely: lucide-react, clsx, tailwind-merge, class-variance-authority, framer-motion, @radix-ui/* primitives (react-slot, react-dialog, react-dropdown-menu, react-tabs, react-tooltip, react-avatar, react-separator, react-scroll-area, react-switch, react-select, react-accordion, react-popover).
-20. For UI components, follow shadcn/ui patterns using class-variance-authority for variants and cn() for class merging.
-21. CRITICAL: If the user reports "Module not found" or "Can't resolve" errors for any pre-installed package (listed in rule 19), do NOT remove the import or rewrite the component without it. These packages ARE installed — the error is a transient container issue. Instead, ensure package.json includes the dependency and keep the imports unchanged. Only remove imports for packages that are genuinely not in the project.
-22. When the file tree shows files marked [BROKEN], these contain placeholder content from failed generation. You MUST: (a) use read_file on sibling files they import to understand the expected interface, (b) use write_file to generate complete, production-quality replacements with full implementations. Do not leave any [BROKEN] file unchanged.
+11. ONLY create <Link href="..."> navigation to pages that exist in the current project files or that you are creating in the same response. If a page doesn't exist, either create it or don't link to it.
+12. Only import from paths that exist in the current project files or that you are creating.
+13. Use lucide-react for icons (already in project dependencies).
+14. NEVER import Node.js built-in modules (fs, path, module, os, crypto, stream, etc.). This is a browser-side Next.js app.
+15. For NON-e-commerce projects: define mock/placeholder data inline as const arrays or objects. For e-commerce projects: NEVER hardcode product/category/price data — always fetch from the API via @/lib/wemob-store.
+16. NEVER import build-time packages in component files: tailwindcss, postcss, autoprefixer, eslint, typescript, webpack, etc. Use Tailwind via className strings only.
+17. For conditional CSS classes, use cn() from @/lib/utils (clsx + tailwind-merge). If lib/utils.ts doesn't exist, create it with write_file.
+18. You CAN modify package.json to add new npm dependencies when needed (e.g., a chart library, date library, etc.).
+19. You CAN modify next.config.mjs and other config files when needed.
+20. Pre-installed packages you can import freely: lucide-react, clsx, tailwind-merge, class-variance-authority, framer-motion, @radix-ui/* primitives (react-slot, react-dialog, react-dropdown-menu, react-tabs, react-tooltip, react-avatar, react-separator, react-scroll-area, react-switch, react-select, react-accordion, react-popover).
+21. For UI components, follow shadcn/ui patterns using class-variance-authority for variants and cn() for class merging.
+22. CRITICAL: If the user reports "Module not found" or "Can't resolve" errors for any pre-installed package (listed in rule 20), do NOT remove the import or rewrite the component without it. These packages ARE installed — the error is a transient container issue. Instead, ensure package.json includes the dependency and keep the imports unchanged. Only remove imports for packages that are genuinely not in the project.
+23. When the file tree shows files marked [BROKEN], these contain placeholder content from failed generation. You MUST: (a) use read_file on sibling files they import to understand the expected interface, (b) use write_file to generate complete, production-quality replacements with full implementations. Do not leave any [BROKEN] file unchanged.
 
 ### E-Commerce Awareness
 You are an experienced e-commerce engineer. When building storefronts, apply real-world patterns: proper loading states, error boundaries, optimistic cart updates, SEO-friendly product pages with structured data, and accessible checkout flows.
