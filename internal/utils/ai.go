@@ -268,6 +268,16 @@ func GetJSONFromLLM(ctx context.Context, model, system, message string, provider
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode != http.StatusOK {
+		errBody, _ := io.ReadAll(resp.Body)
+		bodyStr := string(errBody)
+		if len(bodyStr) > 2000 {
+			bodyStr = bodyStr[:2000] + "...(truncated)"
+		}
+		slog.Error("LLM returned non-200", "status", resp.StatusCode, "body", bodyStr, "model", model, "provider", provider.Name)
+		return "", fmt.Errorf("LLM returned status %d", resp.StatusCode)
+	}
+
 	respBody, _ := io.ReadAll(resp.Body)
 	latencyMs := time.Since(start).Milliseconds()
 	slog.Info("LLM Response received", "FROM", "LLM_UTILS")
@@ -317,6 +327,16 @@ func GetTextFromLLM(ctx context.Context, model, system, message string, provider
 		return "", fmt.Errorf("error generating content. try again please")
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		errBody, _ := io.ReadAll(resp.Body)
+		bodyStr := string(errBody)
+		if len(bodyStr) > 2000 {
+			bodyStr = bodyStr[:2000] + "...(truncated)"
+		}
+		slog.Error("LLM returned non-200", "status", resp.StatusCode, "body", bodyStr, "model", model, "provider", provider.Name)
+		return "", fmt.Errorf("LLM returned status %d", resp.StatusCode)
+	}
 
 	respBody, _ := io.ReadAll(resp.Body)
 	latencyMs := time.Since(start).Milliseconds()
@@ -427,6 +447,11 @@ func StreamTextFromLLM(ctx context.Context, model, system, message string, provi
 
 		var chunk StreamChunk
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+			prefix := data
+			if len(prefix) > 200 {
+				prefix = prefix[:200]
+			}
+			slog.Debug("Skipped malformed SSE chunk", "error", err, "data_prefix", prefix)
 			continue
 		}
 
@@ -492,6 +517,16 @@ func GetJSONFromLLMWithMessages(ctx context.Context, model string, messages []Me
 		return "", fmt.Errorf("error generating content. try again please")
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		errBody, _ := io.ReadAll(resp.Body)
+		bodyStr := string(errBody)
+		if len(bodyStr) > 2000 {
+			bodyStr = bodyStr[:2000] + "...(truncated)"
+		}
+		slog.Error("LLM returned non-200", "status", resp.StatusCode, "body", bodyStr, "model", model, "provider", provider.Name)
+		return "", fmt.Errorf("LLM returned status %d", resp.StatusCode)
+	}
 
 	respBody, _ := io.ReadAll(resp.Body)
 	latencyMs := time.Since(start).Milliseconds()
@@ -575,6 +610,11 @@ func StreamJSONFromLLMWithMessages(ctx context.Context, model string, messages [
 
 		var chunk StreamChunk
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+			prefix := data
+			if len(prefix) > 200 {
+				prefix = prefix[:200]
+			}
+			slog.Debug("Skipped malformed SSE chunk", "error", err, "data_prefix", prefix)
 			continue
 		}
 
@@ -767,6 +807,11 @@ func StreamJSONFromLLM(ctx context.Context, model, system, message string, provi
 
 		var chunk StreamChunk
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+			prefix := data
+			if len(prefix) > 200 {
+				prefix = prefix[:200]
+			}
+			slog.Debug("Skipped malformed SSE chunk", "error", err, "data_prefix", prefix)
 			continue
 		}
 
@@ -887,6 +932,11 @@ func StreamJSONFromLLMWithVision(ctx context.Context, model, system, userText, b
 
 		var chunk StreamChunk
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+			prefix := data
+			if len(prefix) > 200 {
+				prefix = prefix[:200]
+			}
+			slog.Debug("Skipped malformed SSE chunk", "error", err, "data_prefix", prefix)
 			continue
 		}
 
@@ -1028,6 +1078,11 @@ func StreamWithTools(
 
 			var chunk StreamChunk
 			if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+				prefix := data
+				if len(prefix) > 200 {
+					prefix = prefix[:200]
+				}
+				slog.Debug("Skipped malformed SSE chunk", "error", err, "data_prefix", prefix)
 				continue
 			}
 

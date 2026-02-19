@@ -164,6 +164,14 @@ var exportDefaultFuncNameRegex = regexp.MustCompile(`(?m)^export\s+default\s+fun
 // multiNamedImportRegex matches: import { A, B } from '@/path' (2+ names)
 var multiNamedImportRegex = regexp.MustCompile(`import\s+\{\s*(\w+(?:\s*,\s*\w+)+)\s*\}\s+from\s+['"]@/([^'"]+)['"]`)
 
+// reExportBraces matches barrel-export patterns: export { Foo }, export { Foo } from '...', export type { Foo }
+var reExportBraces = regexp.MustCompile(`(?m)^export\s+(?:type\s+)?\{([^}]+)\}`)
+
+// fallbackSentinel is a machine-readable marker injected into fallback content.
+// Used instead of human-readable text to avoid false positives when LLM-generated
+// code legitimately contains phrases like "Generation failed" in UI strings.
+const fallbackSentinel = "/* __WEMOB_FALLBACK__ */"
+
 // --- Template helpers ---
 
 // isTemplateFile checks if a file path is managed by hardcoded templates
@@ -707,6 +715,42 @@ func buildExportManifest(files map[string]string) string {
 			}
 			if !found {
 				exports = append(exports, m[1])
+			}
+		}
+
+		// Barrel exports: export { Foo, Bar }, export { Foo } from '...', export type { Foo }
+		for _, m := range reExportBraces.FindAllStringSubmatch(content, -1) {
+			names := strings.Split(m[1], ",")
+			for _, raw := range names {
+				name := strings.TrimSpace(raw)
+				// Handle "default as Foo" → capture "Foo"
+				if strings.HasPrefix(name, "default as ") {
+					name = strings.TrimPrefix(name, "default as ")
+					name = strings.TrimSpace(name)
+				}
+				// Handle "type Foo" → capture "Foo"
+				if strings.HasPrefix(name, "type ") {
+					name = strings.TrimPrefix(name, "type ")
+					name = strings.TrimSpace(name)
+				}
+				// Handle "Foo as Bar" → capture "Bar" (the exported name)
+				if idx := strings.Index(name, " as "); idx >= 0 {
+					name = strings.TrimSpace(name[idx+4:])
+				}
+				if name == "" {
+					continue
+				}
+				// Skip if already captured
+				already := false
+				for _, e := range exports {
+					if e == name {
+						already = true
+						break
+					}
+				}
+				if !already {
+					exports = append(exports, name)
+				}
 			}
 		}
 
@@ -1329,15 +1373,17 @@ func (c *Controller) getAppFilePrompt(fileType string) string {
 	}
 }
 
-// getAppFileFallback returns fallback content if LLM generation fails for a file
+// getAppFileFallback returns fallback content if LLM generation fails for a file.
+// Each fallback is prefixed with fallbackSentinel so findBrokenFiles can detect it
+// without false positives from LLM-generated code that contains "Generation failed".
 func (c *Controller) getAppFileFallback(filePlan appFilePlanEntry) string {
 	switch filePlan.Type {
 	case "tsx":
-		return fmt.Sprintf("export default function Page() {\n  return <div><h1>%s</h1><p>Generation failed. Please edit this file.</p></div>\n}", filePlan.Description)
+		return fallbackSentinel + fmt.Sprintf("\nexport default function Page() {\n  return <div><h1>%s</h1><p>Generation failed. Please edit this file.</p></div>\n}", filePlan.Description)
 	case "css":
-		return "@import \"tailwindcss\";\n\n/* Generation failed. Please edit manually. */"
+		return fallbackSentinel + "\n@import \"tailwindcss\";\n\n/* Generation failed. Please edit manually. */"
 	case "ts":
-		return "// Generation failed. Please edit manually.\nexport {}"
+		return fallbackSentinel + "\n// Generation failed. Please edit manually.\nexport {}"
 	default:
 		return ""
 	}
@@ -2004,16 +2050,21 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 						lastFailReason = fmt.Sprintf("error: %s", err.Error())
 						content = c.getAppFileFallback(fp)
 					}
-					content = utils.StripCodeFences(content)
+					stripped := utils.StripCodeFences(content)
+					if len(content)-len(stripped) > 100 {
+						slog.Debug("StripCodeFences removed significant content", "path", fp.Path, "removed_chars", len(content)-len(stripped))
+					}
+					content = stripped
 					if strings.TrimSpace(content) == "" {
 						lastFailReason = "empty response from LLM"
 						content = c.getAppFileFallback(fp)
 					}
 					if fp.Type == "tsx" || fp.Type == "ts" {
 						content, _ = stripForbiddenImports(content, fp.Path)
+						checkMultilineForbiddenImports(content, fp.Path)
 					}
 					// If we got real content (not fallback), stop retrying
-					if !strings.Contains(content, "Generation failed") {
+					if !strings.Contains(content, fallbackSentinel) {
 						lastFailReason = ""
 						break
 					}
@@ -2023,7 +2074,7 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 				}
 
 				// Surface error if all retries failed and track reason for repair pass
-				if strings.Contains(content, "Generation failed") {
+				if strings.Contains(content, fallbackSentinel) {
 					if lastFailReason == "" {
 						lastFailReason = "all retries exhausted"
 					}
@@ -2219,7 +2270,7 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 	}
 	codegenDuration = time.Since(genStart).Seconds() - planDuration
 
-	// Step 9: Repair pass — regenerate files that contain placeholder "Generation failed" content
+	// Step 9: Repair pass — regenerate files that contain fallback sentinel placeholder content
 	brokenFiles := findBrokenFiles(generatedFiles)
 	brokenFilesCount = len(brokenFiles)
 	if len(brokenFiles) > 0 {
@@ -2273,13 +2324,18 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 					slog.Warn("Repair pass failed for file", "path", fp.Path, "error", err)
 					return
 				}
-				content = utils.StripCodeFences(content)
+				stripped := utils.StripCodeFences(content)
+				if len(content)-len(stripped) > 100 {
+					slog.Debug("StripCodeFences removed significant content", "path", fp.Path, "removed_chars", len(content)-len(stripped))
+				}
+				content = stripped
 				if fp.Type == "tsx" || fp.Type == "ts" {
 					content, _ = stripForbiddenImports(content, fp.Path)
+					checkMultilineForbiddenImports(content, fp.Path)
 				}
 
 				// Only apply if the repair actually produced real content
-				if strings.Contains(content, "Generation failed") {
+				if strings.Contains(content, fallbackSentinel) {
 					slog.Warn("Repair pass still produced placeholder", "path", fp.Path)
 					return
 				}
@@ -2444,6 +2500,10 @@ var importPathRegex = regexp.MustCompile(`from\s+['"]@/([^'"]+)['"]`)
 // forbiddenImportRegex matches imports of build-time/Node.js packages in component files
 var forbiddenImportRegex = regexp.MustCompile(`(?m)^import\s+.*\s+from\s+['"](tailwindcss|tailwindcss/.*|@tailwindcss/postcss|postcss|autoprefixer|eslint|webpack|jiti|fs|path|os|module|crypto|stream|child_process|net|http|https|url|util|assert|buffer|cluster|dgram|dns|events|querystring|readline|repl|string_decoder|tls|tty|v8|vm|zlib)['"].*$`)
 
+// forbiddenFromRegex detects multiline imports by matching `from '<forbidden-pkg>'` anywhere.
+// Used as a secondary warning-only check since forbiddenImportRegex is line-anchored.
+var forbiddenFromRegex = regexp.MustCompile(`from\s+['"](tailwindcss|tailwindcss/[^'"]*|@tailwindcss/postcss|postcss|autoprefixer|eslint|webpack|jiti|fs|path|os|module|crypto|stream|child_process|net|http|https|url|util|assert|buffer|cluster|dgram|dns|events|querystring|readline|repl|string_decoder|tls|tty|v8|vm|zlib)['"]`)
+
 // isConfigFile returns true for config files that legitimately need build-time imports
 func isConfigFile(filePath string) bool {
 	lower := strings.ToLower(filePath)
@@ -2466,6 +2526,33 @@ func stripForbiddenImports(content string, filePath string) (string, bool) {
 	cleaned := forbiddenImportRegex.ReplaceAllString(content, "// [removed: build-time import not allowed in browser code]")
 	slog.Warn("Stripped forbidden imports from generated file", "path", filePath, "removed", matches)
 	return cleaned, true
+}
+
+// checkMultilineForbiddenImports logs a warning when multiline imports of forbidden
+// packages are detected that the line-anchored forbiddenImportRegex would miss.
+// Warning-only for now to measure frequency before auto-fixing.
+func checkMultilineForbiddenImports(content string, filePath string) {
+	if isConfigFile(filePath) {
+		return
+	}
+	multilineMatches := forbiddenFromRegex.FindAllStringSubmatch(content, -1)
+	if len(multilineMatches) == 0 {
+		return
+	}
+	// Filter out matches already caught by the line-anchored regex
+	lineMatches := forbiddenImportRegex.FindAllString(content, -1)
+	for _, mm := range multilineMatches {
+		alreadyCaught := false
+		for _, lm := range lineMatches {
+			if strings.Contains(lm, mm[1]) {
+				alreadyCaught = true
+				break
+			}
+		}
+		if !alreadyCaught {
+			slog.Warn("Detected multiline forbidden import (not auto-stripped)", "path", filePath, "package", mm[1])
+		}
+	}
 }
 
 // findMissingImports scans all generated files for @/ imports and returns paths that don't exist in the file set.
@@ -2510,11 +2597,11 @@ func guessFileType(importPath string) (filePath string, fileType string) {
 	return importPath + ".tsx", "tsx"
 }
 
-// findBrokenFiles returns paths of files that contain "Generation failed" placeholder content.
+// findBrokenFiles returns paths of files that contain the fallback sentinel marker.
 func findBrokenFiles(files map[string]string) []string {
 	var broken []string
 	for path, content := range files {
-		if strings.Contains(content, "Generation failed") {
+		if strings.Contains(content, fallbackSentinel) {
 			broken = append(broken, path)
 		}
 	}
