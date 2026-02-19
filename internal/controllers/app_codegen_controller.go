@@ -533,6 +533,20 @@ func runDeterministicChecks(files map[string]string) []validationError {
 			}
 		}
 
+		// Check 2c: @/lib/wemob-store import without "use client"
+		// wemob-store.ts is a "use client" module — all exports (getProducts, useCart, etc.)
+		// are client-only. Any file importing from it MUST be a Client Component.
+		if strings.Contains(content, `@/lib/wemob-store`) {
+			hasUseClient := strings.Contains(content, `"use client"`) || strings.Contains(content, `'use client'`)
+			if !hasUseClient {
+				errors = append(errors, validationError{
+					File:  filePath,
+					Error: "File imports from @/lib/wemob-store but is missing \"use client\" directive. wemob-store.ts is a client module — all its exports (getProducts, useCart, etc.) can only be used in Client Components. Add \"use client\" at the top of this file.",
+					Type:  "missing_use_client",
+				})
+			}
+		}
+
 		// Check 3: Font .variable used without variable: option in constructor
 		if fontVariableUsagePattern.MatchString(content) {
 			// Check if any font constructor has variable: option
