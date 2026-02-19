@@ -74,9 +74,20 @@ type AppConversationResponse struct {
 }
 
 type AppConversationMessageResp struct {
-	Role      string `json:"role"`
-	Content   string `json:"content"`
-	Timestamp int64  `json:"timestamp"`
+	ID             string                `json:"id,omitempty"`
+	Role           string                `json:"role"`
+	Content        string                `json:"content"`
+	Timestamp      int64                 `json:"timestamp"`
+	FileOperations []AppChatFileOpResp   `json:"file_operations,omitempty"`
+	ImageURLs      []string              `json:"image_urls,omitempty"`
+	SnapshotID     string                `json:"snapshot_id,omitempty"`
+	Suggestions    []string              `json:"suggestions,omitempty"`
+}
+
+type AppChatFileOpResp struct {
+	Action   string `json:"action"`
+	FilePath string `json:"file_path"`
+	FileType string `json:"file_type,omitempty"`
 }
 
 type AppDomainResponse struct {

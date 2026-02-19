@@ -989,12 +989,25 @@ func (v *HttpViews) GetAppConversation(w http.ResponseWriter, r *http.Request) {
 	var messages []models.AppConversationMessage
 	json.Unmarshal(conv.Messages, &messages)
 
-	var msgResp []responses.AppConversationMessageResp
+	msgResp := make([]responses.AppConversationMessageResp, 0, len(messages))
 	for _, m := range messages {
+		var fileOps []responses.AppChatFileOpResp
+		for _, op := range m.FileOperations {
+			fileOps = append(fileOps, responses.AppChatFileOpResp{
+				Action:   op.Action,
+				FilePath: op.FilePath,
+				FileType: op.FileType,
+			})
+		}
 		msgResp = append(msgResp, responses.AppConversationMessageResp{
-			Role:      m.Role,
-			Content:   m.Content,
-			Timestamp: m.Timestamp,
+			ID:             m.ID,
+			Role:           m.Role,
+			Content:        m.Content,
+			Timestamp:      m.Timestamp,
+			FileOperations: fileOps,
+			ImageURLs:      m.ImageURLs,
+			SnapshotID:     m.SnapshotID,
+			Suggestions:    m.Suggestions,
 		})
 	}
 
