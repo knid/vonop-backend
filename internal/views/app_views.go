@@ -675,7 +675,7 @@ func (v *HttpViews) GetAppSnapshots(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var resp []responses.AppSnapshotResponse
+	resp := make([]responses.AppSnapshotResponse, 0, len(snapshots))
 	for _, s := range snapshots {
 		resp = append(resp, responses.AppSnapshotResponse{
 			ID:          s.ID,
@@ -751,6 +751,30 @@ func (v *HttpViews) RestoreAppSnapshot(w http.ResponseWriter, r *http.Request) {
 	v.Controller.TrackUserEvent(user, "app_snapshot_restored", posthog.NewProperties().
 		Set("app_id", project.ID.String()).
 		Set("snapshot_id", sid))
+
+	utils.JSONResponse(w, responses.SuccessResponse{Success: true}, http.StatusOK)
+}
+
+// DELETE /v2/apps/{appId}/snapshots/{sid}
+func (v *HttpViews) DeleteAppSnapshot(w http.ResponseWriter, r *http.Request) {
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	appID := chi.URLParam(r, "appId")
+	sid := chi.URLParam(r, "sid")
+	project, err := v.Controller.GetAppProject(appID, user)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	if err := v.Controller.DeleteAppSnapshot(project, sid); err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 
 	utils.JSONResponse(w, responses.SuccessResponse{Success: true}, http.StatusOK)
 }

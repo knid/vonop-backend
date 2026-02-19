@@ -163,7 +163,10 @@ func (c *Controller) GetAppSnapshots(projectID string) ([]models.AppSnapshot, er
 
 func (c *Controller) CreateAppSnapshot(project *models.AppProject, description string, source string) (*models.AppSnapshot, error) {
 	// Capture current generated files
-	files, _ := c.DB.GetAppGeneratedFilesByProjectID(project.ID.String(), "nextjs")
+	files, err := c.DB.GetAppGeneratedFilesByProjectID(project.ID.String(), "nextjs")
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch files for snapshot: %w", err)
+	}
 	var snapshotFiles []models.SnapshotFile
 	for _, f := range files {
 		snapshotFiles = append(snapshotFiles, models.SnapshotFile{
@@ -172,7 +175,10 @@ func (c *Controller) CreateAppSnapshot(project *models.AppProject, description s
 			FileType: f.FileType,
 		})
 	}
-	filesJSON, _ := json.Marshal(snapshotFiles)
+	filesJSON, err := json.Marshal(snapshotFiles)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal snapshot files: %w", err)
+	}
 
 	snapshot := &models.AppSnapshot{
 		AppProjectID: project.ID,
@@ -194,8 +200,13 @@ func (c *Controller) RestoreAppSnapshot(project *models.AppProject, snapshotID s
 		return nil, fmt.Errorf("snapshot does not belong to this project")
 	}
 
-	// Create snapshot of current state before restoring
-	c.CreateAppSnapshot(project, "Auto-save before restore", "auto")
+	// Create snapshot of current state before restoring (B5: abort if auto-save fails)
+	_, err = c.CreateAppSnapshot(project, "Auto-save before restore", "auto")
+	if err != nil {
+		return nil, fmt.Errorf("failed to create auto-save before restore: %w", err)
+	}
+	// Clean up old auto-snapshots (B7: keep only latest 20)
+	c.DB.DeleteOldAutoSnapshots(project.ID.String(), 20)
 
 	project.AST = snapshot.AST
 	project.Theme = snapshot.Theme
@@ -205,12 +216,12 @@ func (c *Controller) RestoreAppSnapshot(project *models.AppProject, snapshotID s
 	if len(snapshot.Files) > 2 { // more than just "[]"
 		var snapshotFiles []models.SnapshotFile
 		if err := json.Unmarshal(snapshot.Files, &snapshotFiles); err == nil && len(snapshotFiles) > 0 {
-			// Delete current generated files
-			currentFiles, _ := c.DB.GetAppGeneratedFilesByProjectID(project.ID.String(), "nextjs")
-			for _, f := range currentFiles {
-				c.DB.DeleteAppGeneratedFile(&f)
+			// Delete current generated files in a single query (B2)
+			if err := c.DB.DeleteAppGeneratedFilesByProjectPlatform(project.ID.String(), "nextjs"); err != nil {
+				return nil, fmt.Errorf("failed to delete current files during restore: %w", err)
 			}
-			// Recreate from snapshot
+			// Recreate from snapshot (B4: check errors, log failures)
+			var failedFiles []string
 			for _, sf := range snapshotFiles {
 				file := &models.AppGeneratedFile{
 					AppProjectID: project.ID,
@@ -220,13 +231,40 @@ func (c *Controller) RestoreAppSnapshot(project *models.AppProject, snapshotID s
 					FileType:     sf.FileType,
 					IsGenerated:  true,
 				}
-				c.DB.CreateAppGeneratedFile(file)
+				if _, err := c.DB.CreateAppGeneratedFile(file); err != nil {
+					slog.Error("Failed to restore file from snapshot", "file_path", sf.FilePath, "error", err)
+					failedFiles = append(failedFiles, sf.FilePath)
+				}
 			}
-			slog.Info("Restored files from snapshot", "project_id", project.ID, "snapshot_id", snapshotID, "file_count", len(snapshotFiles))
+			if len(failedFiles) > 0 {
+				slog.Warn("Some files failed to restore", "project_id", project.ID, "failed_count", len(failedFiles))
+			}
+			slog.Info("Restored files from snapshot", "project_id", project.ID, "snapshot_id", snapshotID, "file_count", len(snapshotFiles), "failed_count", len(failedFiles))
 		}
 	}
 
-	return c.DB.UpdateAppProject(project)
+	updated, err := c.DB.UpdateAppProject(project)
+	if err != nil {
+		return nil, err
+	}
+
+	// Sync preview after restore (B1)
+	if c.PreviewService != nil {
+		c.SyncPreviewAll(updated)
+	}
+
+	return updated, nil
+}
+
+func (c *Controller) DeleteAppSnapshot(project *models.AppProject, snapshotID string) error {
+	snapshot, err := c.DB.GetAppSnapshotByID(snapshotID)
+	if err != nil {
+		return fmt.Errorf("snapshot not found")
+	}
+	if snapshot.AppProjectID != project.ID {
+		return fmt.Errorf("snapshot does not belong to this project")
+	}
+	return c.DB.DeleteAppSnapshot(snapshotID)
 }
 
 // Generated Files
