@@ -372,17 +372,5 @@ func (c *Controller) DeleteProject(user *models.User, projectId string) (*respon
 		return nil, err
 	}
 
-	/* projectBuilds, err := c.GetBuilds(*project)
-	if err != nil {
-		return nil, err
-	} */
-
-	// TODO:
-	//
-	// Delete builds
-	// Delete onesignal app
-	// Delete app store and google play apps || push msg to signal
-
 	return nil, nil
-
 }

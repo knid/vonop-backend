@@ -11,6 +11,7 @@ type AppConversation struct {
 	AppProjectID uuid.UUID   `bun:",notnull,type:uuid,unique"`
 	AppProject   *AppProject `bun:"rel:belongs-to,join:app_project_id=id"`
 	Messages     []byte      `bun:",type:jsonb,default:'[]'"` // stores []AppConversationMessage
+	Summary      string      `bun:",default:''"` // LLM-generated summary of older messages
 	CreatedAt    time.Time   `bun:"created_at,nullzero,notnull,default:current_timestamp"`
 	UpdatedAt    time.Time   `bun:"updated_at,nullzero,notnull,default:current_timestamp"`
 }

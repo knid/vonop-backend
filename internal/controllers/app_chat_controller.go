@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -84,7 +85,7 @@ func normalizeContent(s string) string {
 // ansiRegex strips ANSI escape sequences that some LLM providers emit in streamed text.
 var ansiRegex = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
 
-// appChatTools defines the tools available to the chat LLM for on-demand file access.
+// appChatTools defines the tools available to the chat LLM for on-demand file access and modification.
 var appChatTools = []utils.Tool{
 	{
 		Type: "function",
@@ -128,6 +129,69 @@ var appChatTools = []utils.Tool{
 					},
 				},
 				"required": []string{"query"},
+			},
+		},
+	},
+	{
+		Type: "function",
+		Function: utils.ToolFunction{
+			Name:        "write_file",
+			Description: "Create a new file or overwrite an existing file with the given content. Use this to create new files or when you need to replace the entire content of a file. For small targeted changes to existing files, prefer edit_file instead.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"file_path": map[string]any{
+						"type":        "string",
+						"description": "Relative file path, e.g. 'app/page.tsx' or 'components/header.tsx'",
+					},
+					"content": map[string]any{
+						"type":        "string",
+						"description": "The complete file content to write",
+					},
+				},
+				"required": []string{"file_path", "content"},
+			},
+		},
+	},
+	{
+		Type: "function",
+		Function: utils.ToolFunction{
+			Name:        "edit_file",
+			Description: "Apply a targeted edit to an existing file by replacing a specific string with new content. You MUST read_file first to see the exact content to replace. The old_string must match exactly (including whitespace and indentation). For replacing the entire file, use write_file instead.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"file_path": map[string]any{
+						"type":        "string",
+						"description": "Relative file path of the file to edit",
+					},
+					"old_string": map[string]any{
+						"type":        "string",
+						"description": "The exact string to find and replace. Must be unique within the file.",
+					},
+					"new_string": map[string]any{
+						"type":        "string",
+						"description": "The replacement string",
+					},
+				},
+				"required": []string{"file_path", "old_string", "new_string"},
+			},
+		},
+	},
+	{
+		Type: "function",
+		Function: utils.ToolFunction{
+			Name:        "delete_file",
+			Description: "Delete a file from the project. Use this to remove files that are no longer needed.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"file_path": map[string]any{
+						"type":        "string",
+						"description": "Relative file path of the file to delete",
+					},
+				},
+				"required": []string{"file_path"},
 			},
 		},
 	},
@@ -182,9 +246,17 @@ var appChatTools = []utils.Tool{
 	},
 }
 
-// buildChatToolExecutor returns a ToolExecutor that can read/list/search project files
+// chatToolCallbacks holds callbacks for file-mutating tool operations so the
+// executor can emit SSE events and track changes as they happen.
+type chatToolCallbacks struct {
+	sendEvent  func(eventName string, data any) bool
+	appliedOps *[]appChatOperation
+	mu         sync.Mutex
+}
+
+// buildChatToolExecutor returns a ToolExecutor that can read/list/search/write/edit/delete project files
 // and perform actions like setting up e-commerce.
-func (c *Controller) buildChatToolExecutor(project *models.AppProject, user *models.User, fileMap map[string]string) utils.ToolExecutor {
+func (c *Controller) buildChatToolExecutor(project *models.AppProject, user *models.User, fileMap map[string]string, cbs *chatToolCallbacks) utils.ToolExecutor {
 	return func(name string, arguments string) (string, error) {
 		switch name {
 		case "read_file":
@@ -228,6 +300,163 @@ func (c *Controller) buildChatToolExecutor(project *models.AppProject, user *mod
 				results = results[:50]
 			}
 			return strings.Join(results, "\n"), nil
+
+		case "write_file":
+			var args struct {
+				FilePath string `json:"file_path"`
+				Content  string `json:"content"`
+			}
+			if err := json.Unmarshal([]byte(arguments), &args); err != nil {
+				return fmt.Sprintf("Error: invalid arguments: %s", err.Error()), nil
+			}
+			if args.FilePath == "" {
+				return "Error: file_path is required", nil
+			}
+			content := utils.StripCodeFences(args.Content)
+			_, fileType := guessFileType(args.FilePath)
+			if fileType == "tsx" || fileType == "ts" {
+				content, _ = stripForbiddenImports(content, args.FilePath)
+			}
+
+			// Check if file exists — update or create
+			existingFile, err := c.DB.GetAppGeneratedFileByPath(project.ID.String(), "nextjs", args.FilePath)
+			action := "create"
+			var fileID uuid.UUID
+			if err == nil && existingFile != nil {
+				// Skip no-op writes
+				if normalizeContent(content) == normalizeContent(existingFile.Content) {
+					return fmt.Sprintf("File %s is already up to date (no changes needed).", args.FilePath), nil
+				}
+				existingFile.Content = content
+				existingFile.UpdatedAt = time.Now()
+				_, err = c.DB.UpdateAppGeneratedFile(existingFile)
+				if err != nil {
+					return fmt.Sprintf("Error: failed to update file: %s", err.Error()), nil
+				}
+				action = "modify"
+				fileID = existingFile.ID
+			} else {
+				newFile := models.AppGeneratedFile{
+					AppProjectID: project.ID,
+					Platform:     "nextjs",
+					FilePath:     args.FilePath,
+					Content:      content,
+					FileType:     fileType,
+					IsGenerated:  true,
+				}
+				createdFile, err := c.DB.CreateAppGeneratedFile(&newFile)
+				if err != nil {
+					return fmt.Sprintf("Error: failed to create file: %s", err.Error()), nil
+				}
+				fileID = createdFile.ID
+			}
+			fileMap[args.FilePath] = content
+
+			// Emit SSE event and track operation
+			if cbs != nil {
+				cbs.sendEvent("file_complete", responses.FileCompleteEvent{
+					Action:   action,
+					FilePath: args.FilePath,
+					FileID:   fileID,
+					FileType: fileType,
+					Content:  content,
+				})
+				cbs.mu.Lock()
+				*cbs.appliedOps = append(*cbs.appliedOps, appChatOperation{
+					Action: action, Path: args.FilePath, Type: fileType,
+				})
+				cbs.mu.Unlock()
+			}
+			return fmt.Sprintf("Successfully wrote %s (%d chars, action: %s)", args.FilePath, len(content), action), nil
+
+		case "edit_file":
+			var args struct {
+				FilePath  string `json:"file_path"`
+				OldString string `json:"old_string"`
+				NewString string `json:"new_string"`
+			}
+			if err := json.Unmarshal([]byte(arguments), &args); err != nil {
+				return fmt.Sprintf("Error: invalid arguments: %s", err.Error()), nil
+			}
+			if args.FilePath == "" || args.OldString == "" {
+				return "Error: file_path and old_string are required", nil
+			}
+
+			content, ok := fileMap[args.FilePath]
+			if !ok {
+				return fmt.Sprintf("Error: file '%s' not found in project. Use write_file to create it.", args.FilePath), nil
+			}
+
+			// Count occurrences
+			count := strings.Count(content, args.OldString)
+			if count == 0 {
+				// Try with normalized whitespace as fallback
+				return fmt.Sprintf("Error: old_string not found in %s. Make sure it matches exactly (including whitespace). Use read_file to see the current content.", args.FilePath), nil
+			}
+			if count > 1 {
+				return fmt.Sprintf("Error: old_string found %d times in %s. Provide a larger, unique string to match exactly one location.", count, args.FilePath), nil
+			}
+
+			newContent := strings.Replace(content, args.OldString, args.NewString, 1)
+			_, fileType := guessFileType(args.FilePath)
+			if fileType == "tsx" || fileType == "ts" {
+				newContent, _ = stripForbiddenImports(newContent, args.FilePath)
+			}
+
+			existingFile, err := c.DB.GetAppGeneratedFileByPath(project.ID.String(), "nextjs", args.FilePath)
+			if err != nil {
+				return fmt.Sprintf("Error: failed to load file from DB: %s", err.Error()), nil
+			}
+			existingFile.Content = newContent
+			existingFile.UpdatedAt = time.Now()
+			_, err = c.DB.UpdateAppGeneratedFile(existingFile)
+			if err != nil {
+				return fmt.Sprintf("Error: failed to save file: %s", err.Error()), nil
+			}
+			fileMap[args.FilePath] = newContent
+
+			if cbs != nil {
+				cbs.sendEvent("file_complete", responses.FileCompleteEvent{
+					Action:   "modify",
+					FilePath: args.FilePath,
+					FileID:   existingFile.ID,
+					FileType: existingFile.FileType,
+					Content:  newContent,
+				})
+				cbs.mu.Lock()
+				*cbs.appliedOps = append(*cbs.appliedOps, appChatOperation{
+					Action: "modify", Path: args.FilePath, Type: existingFile.FileType,
+				})
+				cbs.mu.Unlock()
+			}
+			return fmt.Sprintf("Successfully edited %s (replaced %d chars with %d chars)", args.FilePath, len(args.OldString), len(args.NewString)), nil
+
+		case "delete_file":
+			var args struct {
+				FilePath string `json:"file_path"`
+			}
+			if err := json.Unmarshal([]byte(arguments), &args); err != nil {
+				return fmt.Sprintf("Error: invalid arguments: %s", err.Error()), nil
+			}
+			existingFile, err := c.DB.GetAppGeneratedFileByPath(project.ID.String(), "nextjs", args.FilePath)
+			if err != nil {
+				return fmt.Sprintf("Error: file '%s' not found in project", args.FilePath), nil
+			}
+			c.DB.DeleteAppGeneratedFile(existingFile)
+			delete(fileMap, args.FilePath)
+
+			if cbs != nil {
+				cbs.sendEvent("file_complete", responses.FileCompleteEvent{
+					Action:   "delete",
+					FilePath: args.FilePath,
+				})
+				cbs.mu.Lock()
+				*cbs.appliedOps = append(*cbs.appliedOps, appChatOperation{
+					Action: "delete", Path: args.FilePath,
+				})
+				cbs.mu.Unlock()
+			}
+			return fmt.Sprintf("Successfully deleted %s", args.FilePath), nil
 
 		case "setup_ecommerce":
 			var args struct {
@@ -601,18 +830,49 @@ func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.A
 	llmMessages = append(llmMessages, utils.Message{Role: "user", Content: contextMsg})
 	llmMessages = append(llmMessages, utils.Message{Role: "assistant", Content: "I understand the current project state. What would you like me to do?"})
 
-	// Add conversation history (last 20 messages)
-	startIdx := 0
-	if len(messages) > 20 {
-		startIdx = len(messages) - 20
-	}
-	for _, msg := range messages[startIdx:] {
-		content := msg.Content
-		// Annotate user messages that had image attachments
-		if msg.Role == "user" && len(msg.ImageURLs) > 0 {
-			content += fmt.Sprintf("\n\n[User attached %d image(s) for visual reference]", len(msg.ImageURLs))
+	// Add conversation history with summarization for long conversations.
+	// Keep last 10 messages verbatim. If older messages exist, summarize them.
+	const keepRecent = 10
+	const summarizeThreshold = 15 // start summarizing when conversation exceeds this
+
+	if len(messages) > summarizeThreshold {
+		// Summarize older messages if not already summarized
+		oldMessages := messages[:len(messages)-keepRecent]
+		if conv.Summary == "" && len(oldMessages) > 0 {
+			conv.Summary = c.summarizeConversation(ctx, oldMessages, model, provider)
+			conv.Messages, _ = json.Marshal(messages) // re-save with summary
+			c.DB.UpdateAppConversation(conv)
 		}
-		llmMessages = append(llmMessages, utils.Message{Role: msg.Role, Content: content})
+
+		// Include summary as context
+		if conv.Summary != "" {
+			llmMessages = append(llmMessages, utils.Message{
+				Role:    "user",
+				Content: fmt.Sprintf("[Earlier conversation summary]\n%s", conv.Summary),
+			})
+			llmMessages = append(llmMessages, utils.Message{
+				Role:    "assistant",
+				Content: "I understand the earlier context. Let me continue from where we left off.",
+			})
+		}
+
+		// Add recent messages verbatim
+		for _, msg := range messages[len(messages)-keepRecent:] {
+			content := msg.Content
+			if msg.Role == "user" && len(msg.ImageURLs) > 0 {
+				content += fmt.Sprintf("\n\n[User attached %d image(s) for visual reference]", len(msg.ImageURLs))
+			}
+			llmMessages = append(llmMessages, utils.Message{Role: msg.Role, Content: content})
+		}
+	} else {
+		// Short conversation — include all messages
+		for _, msg := range messages {
+			content := msg.Content
+			if msg.Role == "user" && len(msg.ImageURLs) > 0 {
+				content += fmt.Sprintf("\n\n[User attached %d image(s) for visual reference]", len(msg.ImageURLs))
+			}
+			llmMessages = append(llmMessages, utils.Message{Role: msg.Role, Content: content})
+		}
 	}
 
 	if ctx.Err() != nil {
@@ -629,8 +889,16 @@ func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.A
 
 	slog.Info("Calling LLM for chat", "model", model, "project_id", project.ID, "message_count", len(llmMessages))
 
-	// Call LLM with tool calling — LLM reads files on demand instead of all files in context
-	localExecutor := c.buildChatToolExecutor(project, user, currentFiles)
+	// Set up tool callbacks so file-mutating tools (write_file, edit_file, delete_file)
+	// can emit SSE events and track changes in real-time as they execute.
+	var toolAppliedOps []appChatOperation
+	toolCallbacks := &chatToolCallbacks{
+		sendEvent:  sendEvent,
+		appliedOps: &toolAppliedOps,
+	}
+
+	// Call LLM with tool calling — LLM reads/writes files on demand via tools
+	localExecutor := c.buildChatToolExecutor(project, user, currentFiles, toolCallbacks)
 	executor := c.compositeToolExecutor(localExecutor)
 	chatTools := append([]utils.Tool{}, appChatTools...)
 	chatTools = append(chatTools, c.mcpTools()...)
@@ -643,7 +911,7 @@ func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.A
 		llmMessages,
 		chatTools,
 		provider,
-		nil, // no json_object format — response is explanation text + fenced JSON
+		nil, // no json_object format — response is explanation text, possibly with fenced JSON fallback
 		c.reasoningConfig(),
 		executor,
 		func(toolName, args string) {
@@ -688,6 +956,7 @@ func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.A
 		func(chunk string) {
 			sendEvent("chat_thinking", responses.ChatThinkingEvent{Chunk: chunk})
 		},
+		utils.ToolCallConfig{MaxRounds: 25, NudgeAfter: 5, StripAfter: 8},
 	)
 	if err != nil {
 		slog.Error("failed to get chat response from LLM", "error", err, "response_so_far", len(responseJSON))
@@ -708,7 +977,14 @@ func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.A
 
 	slog.Info("Chat LLM response received", "response_length", len(responseJSON), "project_id", project.ID)
 
-	// Extract explanation text (everything before the JSON block) and the JSON itself
+	// Collect operations applied by tools during the LLM loop
+	var appliedOps []appChatOperation
+	appliedOps = append(appliedOps, toolAppliedOps...)
+	filesChanged := len(toolAppliedOps)
+
+	// Extract explanation text (everything before any JSON block) and try to parse
+	// a JSON operations block as fallback — the LLM may still use the old JSON format
+	// instead of (or in addition to) the new file tools.
 	explanationText := ""
 	jsonPart := responseJSON
 
@@ -729,105 +1005,64 @@ func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.A
 		} else {
 			jsonPart = strings.TrimSpace(rest)
 		}
+	} else {
+		// No JSON block — the entire response is explanation text
+		explanationText = strings.TrimSpace(responseJSON)
 	}
 
+	// Try to parse JSON block for backward-compat fallback operations
 	var chatResp appChatResponse
-	if err := json.Unmarshal([]byte(jsonPart), &chatResp); err != nil {
-		// Fallback: try direct parse of the full response
-		if err2 := json.Unmarshal([]byte(responseJSON), &chatResp); err2 != nil {
-			// Last fallback: extract JSON object from response
-			extracted := utils.ExtractJSON(responseJSON)
-			if err3 := json.Unmarshal([]byte(extracted), &chatResp); err3 != nil {
-				// Log details for debugging
-				preview := responseJSON
-				if len(preview) > 500 {
-					preview = preview[:250] + "\n...[truncated]...\n" + preview[len(preview)-250:]
+	jsonParsed := false
+	if jsonPart != responseJSON || filesChanged == 0 {
+		// Only attempt JSON parsing if there's a fenced block or no tool ops were applied
+		if err := json.Unmarshal([]byte(jsonPart), &chatResp); err != nil {
+			if err2 := json.Unmarshal([]byte(responseJSON), &chatResp); err2 != nil {
+				extracted := utils.ExtractJSON(responseJSON)
+				if err3 := json.Unmarshal([]byte(extracted), &chatResp); err3 == nil {
+					jsonParsed = true
 				}
-				slog.Error("failed to parse chat response — all attempts failed",
-					"parse_err", err,
-					"direct_err", err2,
-					"extract_err", err3,
-					"response_length", len(responseJSON),
-					"response_preview", preview,
-				)
-				chatResp = appChatResponse{
-					Operations: []appChatOperation{},
-					Summary:    "I wasn't able to generate the changes properly. Please try again with a more specific request.",
-				}
+			} else {
+				jsonParsed = true
 			}
+		} else {
+			jsonParsed = true
 		}
 	}
 
-	slog.Info("Chat response parsed",
-		"operations_count", len(chatResp.Operations),
-		"summary_length", len(chatResp.Summary),
-		"project_id", project.ID,
-	)
-
-	// Apply operations (filter out template files)
-	filesChanged := 0
-	var appliedOps []appChatOperation // track only operations that were actually applied
-	for _, op := range chatResp.Operations {
-		if ctx.Err() != nil {
-			return
+	// Apply fallback JSON operations (only for files not already handled by tools)
+	if jsonParsed && len(chatResp.Operations) > 0 {
+		// Build set of paths already modified by tools to avoid double-applying
+		toolModifiedPaths := make(map[string]bool)
+		for _, op := range toolAppliedOps {
+			toolModifiedPaths[op.Path] = true
 		}
 
-		switch op.Action {
-		case "create":
-			content := utils.StripCodeFences(op.Content)
-			if op.Type == "tsx" || op.Type == "ts" {
-				content, _ = stripForbiddenImports(content, op.Path)
-			}
-			file := models.AppGeneratedFile{
-				AppProjectID: project.ID,
-				Platform:     "nextjs",
-				FilePath:     op.Path,
-				Content:      content,
-				FileType:     op.Type,
-				IsGenerated:  true,
-			}
-			createdFile, err := c.DB.CreateAppGeneratedFile(&file)
-			if err != nil {
-				slog.Error("failed to create file", "error", err, "path", op.Path)
-				continue
-			}
-			currentFiles[op.Path] = content
-			if !sendEvent("file_complete", responses.FileCompleteEvent{
-				Action:   "create",
-				FilePath: op.Path,
-				FileID:   createdFile.ID,
-				FileType: op.Type,
-				Content:  content,
-			}) {
+		for _, op := range chatResp.Operations {
+			if ctx.Err() != nil {
 				return
 			}
-			appliedOps = append(appliedOps, op)
-			filesChanged++
+			// Skip if already handled by tool call
+			if toolModifiedPaths[op.Path] {
+				continue
+			}
 
-		case "modify":
-			existingFile, err := c.DB.GetAppGeneratedFileByPath(project.ID.String(), "nextjs", op.Path)
-			if err != nil {
-				// File not found — fall back to creating it instead of silently skipping
-				slog.Warn("file not found for modify, creating instead", "path", op.Path)
+			switch op.Action {
+			case "create":
 				content := utils.StripCodeFences(op.Content)
-				fileType := op.Type
-				if fileType == "" {
-					_, fileType = guessFileType(op.Path)
-				}
-				if fileType == "tsx" || fileType == "ts" {
+				if op.Type == "tsx" || op.Type == "ts" {
 					content, _ = stripForbiddenImports(content, op.Path)
 				}
-				newFile := models.AppGeneratedFile{
+				file := models.AppGeneratedFile{
 					AppProjectID: project.ID,
 					Platform:     "nextjs",
 					FilePath:     op.Path,
 					Content:      content,
-					FileType:     fileType,
+					FileType:     op.Type,
 					IsGenerated:  true,
 				}
-				createdFile, createErr := c.DB.CreateAppGeneratedFile(&newFile)
-				if createErr != nil {
-					slog.Error("failed to create file (modify fallback)", "error", createErr, "path", op.Path)
+				createdFile, err := c.DB.CreateAppGeneratedFile(&file)
+				if err != nil {
+					slog.Error("failed to create file", "error", err, "path", op.Path)
 					continue
 				}
 				currentFiles[op.Path] = content
@@ -835,95 +1070,158 @@ func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.A
 					Action:   "create",
 					FilePath: op.Path,
 					FileID:   createdFile.ID,
-					FileType: fileType,
+					FileType: op.Type,
 					Content:  content,
 				}) {
 					return
 				}
 				appliedOps = append(appliedOps, op)
 				filesChanged++
-				continue
-			}
-			content := utils.StripCodeFences(op.Content)
-			if op.Type == "tsx" || op.Type == "ts" || existingFile.FileType == "tsx" || existingFile.FileType == "ts" {
-				content, _ = stripForbiddenImports(content, op.Path)
-			}
-			// Skip no-op modifications — LLM sometimes returns unchanged files
-			if normalizeContent(content) == normalizeContent(existingFile.Content) {
-				continue
-			}
-			existingFile.Content = content
-			existingFile.UpdatedAt = time.Now()
-			_, err = c.DB.UpdateAppGeneratedFile(existingFile)
-			if err != nil {
-				slog.Error("failed to update file", "error", err, "path", op.Path)
-				continue
-			}
-			currentFiles[op.Path] = content
-			if !sendEvent("file_complete", responses.FileCompleteEvent{
-				Action:   "modify",
-				FilePath: op.Path,
-				FileID:   existingFile.ID,
-				FileType: existingFile.FileType,
-				Content:  content,
-			}) {
-				return
-			}
-			appliedOps = append(appliedOps, op)
-			filesChanged++
 
-		case "delete":
-			existingFile, err := c.DB.GetAppGeneratedFileByPath(project.ID.String(), "nextjs", op.Path)
-			if err != nil {
-				continue
+			case "modify":
+				existingFile, err := c.DB.GetAppGeneratedFileByPath(project.ID.String(), "nextjs", op.Path)
+				if err != nil {
+					slog.Warn("file not found for modify, creating instead", "path", op.Path)
+					content := utils.StripCodeFences(op.Content)
+					fileType := op.Type
+					if fileType == "" {
+						_, fileType = guessFileType(op.Path)
+					}
+					if fileType == "tsx" || fileType == "ts" {
+						content, _ = stripForbiddenImports(content, op.Path)
+					}
+					newFile := models.AppGeneratedFile{
+						AppProjectID: project.ID,
+						Platform:     "nextjs",
+						FilePath:     op.Path,
+						Content:      content,
+						FileType:     fileType,
+						IsGenerated:  true,
+					}
+					createdFile, createErr := c.DB.CreateAppGeneratedFile(&newFile)
+					if createErr != nil {
+						slog.Error("failed to create file (modify fallback)", "error", createErr, "path", op.Path)
+						continue
+					}
+					currentFiles[op.Path] = content
+					if !sendEvent("file_complete", responses.FileCompleteEvent{
+						Action:   "create",
+						FilePath: op.Path,
+						FileID:   createdFile.ID,
+						FileType: fileType,
+						Content:  content,
+					}) {
+						return
+					}
+					appliedOps = append(appliedOps, op)
+					filesChanged++
+					continue
+				}
+				content := utils.StripCodeFences(op.Content)
+				if op.Type == "tsx" || op.Type == "ts" || existingFile.FileType == "tsx" || existingFile.FileType == "ts" {
+					content, _ = stripForbiddenImports(content, op.Path)
+				}
+				if normalizeContent(content) == normalizeContent(existingFile.Content) {
+					continue
+				}
+				existingFile.Content = content
+				existingFile.UpdatedAt = time.Now()
+				_, err = c.DB.UpdateAppGeneratedFile(existingFile)
+				if err != nil {
+					slog.Error("failed to update file", "error", err, "path", op.Path)
+					continue
+				}
+				currentFiles[op.Path] = content
+				if !sendEvent("file_complete", responses.FileCompleteEvent{
+					Action:   "modify",
+					FilePath: op.Path,
+					FileID:   existingFile.ID,
+					FileType: existingFile.FileType,
+					Content:  content,
+				}) {
+					return
+				}
+				appliedOps = append(appliedOps, op)
+				filesChanged++
+
+			case "delete":
+				existingFile, err := c.DB.GetAppGeneratedFileByPath(project.ID.String(), "nextjs", op.Path)
+				if err != nil {
+					continue
+				}
+				c.DB.DeleteAppGeneratedFile(existingFile)
+				delete(currentFiles, op.Path)
+				if !sendEvent("file_complete", responses.FileCompleteEvent{
+					Action:   "delete",
+					FilePath: op.Path,
+				}) {
+					return
+				}
+				appliedOps = append(appliedOps, op)
+				filesChanged++
 			}
-			c.DB.DeleteAppGeneratedFile(existingFile)
-			delete(currentFiles, op.Path)
-			if !sendEvent("file_complete", responses.FileCompleteEvent{
-				Action:   "delete",
-				FilePath: op.Path,
-			}) {
-				return
-			}
-			appliedOps = append(appliedOps, op)
-			filesChanged++
 		}
 	}
 
-	// Run deterministic validation + LLM fix on modified files
+	slog.Info("Chat operations applied",
+		"tool_ops", len(toolAppliedOps),
+		"json_ops", len(chatResp.Operations),
+		"total_applied", len(appliedOps),
+		"project_id", project.ID,
+	)
+
+	// Run deterministic validation + LLM fix on modified files (up to 3 verification rounds)
 	if filesChanged > 0 {
-		// Snapshot file contents before validation so we can detect what changed
-		preValidation := make(map[string]string, len(currentFiles))
-		for k, v := range currentFiles {
-			preValidation[k] = v
-		}
+		const maxVerifyRounds = 3
+		for verifyRound := 0; verifyRound < maxVerifyRounds; verifyRound++ {
+			if ctx.Err() != nil {
+				break
+			}
 
-		fixedCount, fixedPaths := c.validateAndFixFiles(ctx, project, currentFiles, nil, sendEvent)
-		if fixedCount > 0 {
-			slog.Info("Chat validation fixed files", "project_id", project.ID, "fixed_count", fixedCount)
+			// Snapshot file contents before validation so we can detect what changed
+			preValidation := make(map[string]string, len(currentFiles))
+			for k, v := range currentFiles {
+				preValidation[k] = v
+			}
 
-			// Emit file_complete SSE events for validation fixes so frontend updates without refresh
-			for _, fixedPath := range fixedPaths {
-				if currentFiles[fixedPath] != preValidation[fixedPath] {
-					dbFile, err := c.DB.GetAppGeneratedFileByPath(project.ID.String(), "nextjs", fixedPath)
-					if err == nil && dbFile != nil {
-						sendEvent("file_complete", responses.FileCompleteEvent{
-							Action:   "modify",
-							FilePath: fixedPath,
-							FileID:   dbFile.ID,
-							FileType: dbFile.FileType,
-							Content:  currentFiles[fixedPath],
-						})
-						// Add to appliedOps so it appears in "Files changed" message
-						appliedOps = append(appliedOps, appChatOperation{
-							Action: "modify",
-							Path:   fixedPath,
-							Type:   dbFile.FileType,
-						})
-						filesChanged++
+			fixedCount, fixedPaths := c.validateAndFixFiles(ctx, project, currentFiles, nil, sendEvent)
+			if fixedCount > 0 {
+				slog.Info("Chat validation fixed files", "project_id", project.ID, "fixed_count", fixedCount, "verify_round", verifyRound)
+
+				// Emit file_complete SSE events for validation fixes so frontend updates without refresh
+				for _, fixedPath := range fixedPaths {
+					if currentFiles[fixedPath] != preValidation[fixedPath] {
+						dbFile, err := c.DB.GetAppGeneratedFileByPath(project.ID.String(), "nextjs", fixedPath)
+						if err == nil && dbFile != nil {
+							sendEvent("file_complete", responses.FileCompleteEvent{
+								Action:   "modify",
+								FilePath: fixedPath,
+								FileID:   dbFile.ID,
+								FileType: dbFile.FileType,
+								Content:  currentFiles[fixedPath],
+							})
+							appliedOps = append(appliedOps, appChatOperation{
+								Action: "modify",
+								Path:   fixedPath,
+								Type:   dbFile.FileType,
+							})
+							filesChanged++
+						}
 					}
 				}
 			}
+
+			// Post-validation check: run deterministic checks to see if issues remain
+			remainingErrors := runDeterministicChecks(currentFiles)
+			if len(remainingErrors) == 0 {
+				slog.Info("Chat verification passed with no remaining errors", "project_id", project.ID, "verify_round", verifyRound)
+				break
+			}
+			if verifyRound == maxVerifyRounds-1 {
+				slog.Warn("Chat verification still has errors after max rounds", "project_id", project.ID, "remaining_errors", len(remainingErrors))
+				break
+			}
+			slog.Info("Chat verification found remaining errors, retrying", "project_id", project.ID, "remaining_errors", len(remainingErrors), "verify_round", verifyRound)
 		}
 
 		// Augment package.json with any new third-party imports added by the chat
@@ -955,9 +1253,9 @@ func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.A
 			if !exists {
 				continue
 			}
-			// Skip if the LLM already emitted a file operation for this path
+			// Skip if a file operation already emitted for this path (via tools or JSON fallback)
 			alreadyEmitted := false
-			for _, op := range chatResp.Operations {
+			for _, op := range appliedOps {
 				if op.Path == tp {
 					alreadyEmitted = true
 					break
@@ -1052,6 +1350,52 @@ func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.A
 		"suggestions":     chatResp.Suggestions,
 		"missing_env_vars": chatMissingVars,
 	})
+}
+
+// summarizeConversation generates a concise summary of older conversation messages
+// using a fast LLM call to preserve context without sending all messages.
+func (c *Controller) summarizeConversation(ctx context.Context, messages []models.AppConversationMessage, model string, provider *utils.LLMProvider) string {
+	var conversationText strings.Builder
+	for _, msg := range messages {
+		role := msg.Role
+		content := msg.Content
+		if len(content) > 500 {
+			content = content[:500] + "..."
+		}
+		conversationText.WriteString(fmt.Sprintf("[%s]: %s\n", role, content))
+		if len(msg.FileOperations) > 0 {
+			var ops []string
+			for _, op := range msg.FileOperations {
+				ops = append(ops, fmt.Sprintf("%s %s", op.Action, op.FilePath))
+			}
+			conversationText.WriteString(fmt.Sprintf("  Files: %s\n", strings.Join(ops, ", ")))
+		}
+	}
+
+	system := `Summarize this conversation between a user and an AI assistant that is building/editing a Next.js application. Focus on:
+1. What the user asked for (features, changes, fixes)
+2. What files were created, modified, or deleted
+3. Key design decisions made
+4. Any issues encountered and how they were resolved
+
+Be concise (3-6 sentences). Include specific file paths and component names that were discussed.`
+
+	summary, err := utils.GetTextFromLLM(ctx, model, system, conversationText.String(), provider)
+	if err != nil {
+		slog.Warn("failed to summarize conversation", "error", err, "message_count", len(messages))
+		// Fallback: build a simple file-operation summary
+		var ops []string
+		for _, msg := range messages {
+			for _, op := range msg.FileOperations {
+				ops = append(ops, fmt.Sprintf("%s %s", op.Action, op.FilePath))
+			}
+		}
+		if len(ops) > 0 {
+			return fmt.Sprintf("Previous conversation (%d messages). File operations: %s", len(messages), strings.Join(ops, ", "))
+		}
+		return fmt.Sprintf("Previous conversation with %d messages.", len(messages))
+	}
+	return strings.TrimSpace(summary)
 }
 
 // GetAppConversation returns the conversation history for a project
