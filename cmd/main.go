@@ -785,6 +785,17 @@ func main() {
 						r.With(rateLimiter.RateLimit(10, time.Minute, appMiddleware.AIUserKey)).Post("/schema/refresh", httpViews.RefreshDashboardSchema)
 					})
 
+					// Database Manager
+					r.Route("/database", func(r chi.Router) {
+						r.Get("/schema", httpViews.GetDatabaseSchema)
+						r.Route("/tables/{table}", func(r chi.Router) {
+							r.Get("/rows", httpViews.GetDatabaseTableRows)
+							r.Post("/rows", httpViews.InsertDatabaseRow)
+							r.Patch("/rows", httpViews.UpdateDatabaseRow)
+							r.Delete("/rows", httpViews.DeleteDatabaseRow)
+						})
+					})
+
 					// Web analytics for deployed sites
 					r.Route("/analytics", func(r chi.Router) {
 						r.Get("/overview", httpViews.GetAppAnalyticsOverview)
