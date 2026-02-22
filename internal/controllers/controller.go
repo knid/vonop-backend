@@ -12,6 +12,7 @@ import (
 	crmServices "github.com/knid/wemob/internal/services/crm"
 	emailServices "github.com/knid/wemob/internal/services/email"
 	"github.com/knid/wemob/internal/services/mcpclient"
+	"github.com/knid/wemob/internal/services/neon"
 	"github.com/knid/wemob/internal/services/preview"
 	"github.com/knid/wemob/internal/services/secret"
 	"github.com/knid/wemob/internal/services/storage"
@@ -32,6 +33,7 @@ type Controller struct {
 	ConcurrentBuildLimiter chan struct{}
 	VercelService          *vercel.Service
 	PreviewService         *preview.Service
+	NeonService            *neon.Service
 	MCPService             *mcpclient.Service
 	PostHog                posthog.Client // nil = disabled
 	RunningJobs            sync.Map       // map[string]context.CancelFunc for in-flight background jobs
@@ -44,6 +46,7 @@ func NewController(db *database.Database, concurrentBuildLimiter chan struct{},
 	crmService crmServices.CRMService, taskService *asynq.Client, assetsStorage *storage.S3Storage,
 	userApiKeysStorage *storage.S3Storage, secretManager secret.SecretManager,
 	vercelService *vercel.Service, previewService *preview.Service,
+	neonService *neon.Service,
 	mcpService *mcpclient.Service, posthogClient posthog.Client) *Controller {
 
 	return &Controller{
@@ -58,6 +61,7 @@ func NewController(db *database.Database, concurrentBuildLimiter chan struct{},
 		SecretManager:          secretManager,
 		VercelService:          vercelService,
 		PreviewService:         previewService,
+		NeonService:            neonService,
 		MCPService:             mcpService,
 		PostHog:                posthogClient,
 	}
