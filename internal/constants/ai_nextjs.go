@@ -11,6 +11,12 @@ var NEXTJS_TEMPLATE_FILE_PATHS = []string{
 	"app/globals.css",
 }
 
+// NEXTJS_DB_TEMPLATE_FILE_PATHS are template-managed files injected only after successful Neon provisioning.
+var NEXTJS_DB_TEMPLATE_FILE_PATHS = []string{
+	"lib/db.ts",
+	"lib/schema.ts",
+}
+
 // NEXTJS_ECOMMERCE_TEMPLATE_FILE_PATHS are template-managed files injected only for e-commerce projects.
 var NEXTJS_ECOMMERCE_TEMPLATE_FILE_PATHS = []string{
 	"lib/wemob-store.ts",
@@ -46,7 +52,9 @@ const NEXTJS_TEMPLATE_PACKAGE_JSON = `{
     "@radix-ui/react-switch": "^1.1.0",
     "@radix-ui/react-select": "^2.1.0",
     "@radix-ui/react-accordion": "^1.2.0",
-    "@radix-ui/react-popover": "^1.1.0"
+    "@radix-ui/react-popover": "^1.1.0",
+    "drizzle-orm": "^0.39.0",
+    "@neondatabase/serverless": "^0.10.0"
   },
   "devDependencies": {
     "typescript": "^5.4.0",
@@ -55,7 +63,8 @@ const NEXTJS_TEMPLATE_PACKAGE_JSON = `{
     "@types/node": "^20.0.0",
     "tailwindcss": "^4.0.0",
     "@tailwindcss/postcss": "^4.0.0",
-    "postcss": "^8.4.0"
+    "postcss": "^8.4.0",
+    "drizzle-kit": "^0.30.0"
   }
 }`
 
@@ -109,6 +118,16 @@ const nextConfig = {
 };
 
 export default nextConfig;
+`
+
+// NEXTJS_TEMPLATE_DB_TS is the database connection file using Neon serverless + Drizzle ORM.
+// The %s placeholder is replaced with the actual Neon connection string at codegen time.
+const NEXTJS_TEMPLATE_DB_TS = `import { neon } from '@neondatabase/serverless';
+import { drizzle } from 'drizzle-orm/neon-http';
+import * as schema from './schema';
+
+const sql = neon(process.env.DATABASE_URL || '%s');
+export const db = drizzle(sql, { schema });
 `
 
 // NEXTJS_TEMPLATE_WEMOB_STORE is the typed storefront SDK with React context, hooks, and API client
@@ -1067,7 +1086,7 @@ Given the user's description of a web application they want to build, generate a
 3. Also generate a dark color scheme variant.
 4. Choose professional, modern typography pairing (heading_font and body_font from Google Fonts). Avoid overused fonts — consider Inter, Plus Jakarta Sans, DM Sans, Outfit, Sora, Manrope, Space Grotesk.
 5. Plan the files needed for the project. Each file has a path, type, and description.
-6. DO NOT include package.json, tsconfig.json, postcss.config.mjs, or next.config.mjs — these are template-managed and injected automatically.
+6. DO NOT include package.json, tsconfig.json, postcss.config.mjs, next.config.mjs, lib/db.ts, or lib/schema.ts — these are template-managed and injected automatically.
 7. Required files: app/layout.tsx, app/page.tsx, app/globals.css
 8. Plan a lib/utils.ts file that exports a cn() helper using clsx and tailwind-merge.
 9. Use Next.js App Router structure (app/ directory for pages).
@@ -1076,7 +1095,10 @@ Given the user's description of a web application they want to build, generate a
 12. Keep the structure clean and well-organized.
 13. CRITICAL: Every component or module that is imported by any page MUST be included in the file list. If page.tsx imports "@/components/project-card", you MUST include "components/project-card.tsx" in the plan. If page.tsx imports "@/lib/projects", you MUST include "lib/projects.ts" in the plan. Missing files will cause build failures.
 14. Prefer inline implementations over importing from separate utility/lib files. Only create separate files for reusable components or large data modules.
-15. If the application requires external API keys or secrets (payment gateways, databases, third-party APIs, etc.), list them in "required_env_vars". Each entry: "key" (env var name, e.g. "STRIPE_SK"), "description" (what it's for), "is_public" (true if NEXT_PUBLIC_ prefixed for client-side), "provider" (optional, matching integration: "stripe", "iyzico", "supabase", etc.). Do NOT include NEXT_PUBLIC_STORE_ID or NEXT_PUBLIC_WEMOB_API_URL (auto-injected).
+15. If the application requires external API keys or secrets (payment gateways, databases, third-party APIs, etc.), list them in "required_env_vars". Each entry: "key" (env var name, e.g. "STRIPE_SK"), "description" (what it's for), "is_public" (true if NEXT_PUBLIC_ prefixed for client-side), "provider" (optional, matching integration: "stripe", "iyzico", "supabase", etc.). Do NOT include NEXT_PUBLIC_STORE_ID, NEXT_PUBLIC_WEMOB_API_URL, or DATABASE_URL (auto-provisioned).
+16. Design "data_models" — an array of database tables the app needs for its data. Each table has a "name" and "columns" array. Each column has "name", "type" (text, integer, boolean, timestamp, uuid, jsonb), "primary_key" (bool), "nullable" (bool), optional "default", and optional "references" (e.g. "categories.id"). Every table MUST have an "id" column with type "uuid" and primary_key true. Add "created_at" and "updated_at" timestamp columns. Design the schema based on what the app actually needs — blogs need posts/comments, task apps need tasks/projects, etc. A database will be provisioned automatically from these models.
+17. Plan app/api/ routes for CRUD operations using Drizzle ORM. Each API route should handle GET/POST/PUT/DELETE for its resource.
+18. Do NOT use hardcoded mock data. All data must come from the database via Drizzle queries. Show graceful empty states when no data exists yet.
 
 ### Output format (strict JSON, no explanation, no markdown)
 {
@@ -1102,10 +1124,23 @@ Given the user's description of a web application they want to build, generate a
     "heading_font": "Inter",
     "body_font": "Inter"
   },
+  "data_models": [
+    {
+      "name": "posts",
+      "columns": [
+        {"name": "id", "type": "uuid", "primary_key": true},
+        {"name": "title", "type": "text", "primary_key": false, "nullable": false},
+        {"name": "content", "type": "text", "primary_key": false, "nullable": false},
+        {"name": "created_at", "type": "timestamp", "primary_key": false, "nullable": false, "default": "now()"},
+        {"name": "updated_at", "type": "timestamp", "primary_key": false, "nullable": false, "default": "now()"}
+      ]
+    }
+  ],
   "files": [
     {"path": "app/layout.tsx", "type": "tsx", "description": "Root layout with fonts, metadata, and navigation"},
     {"path": "app/page.tsx", "type": "tsx", "description": "Homepage with hero section"},
     {"path": "app/globals.css", "type": "css", "description": "Global styles with Tailwind v4 @theme colors"},
+    {"path": "app/api/posts/route.ts", "type": "ts", "description": "API route for posts CRUD"},
     {"path": "components/header.tsx", "type": "tsx", "description": "Navigation header"},
     {"path": "components/footer.tsx", "type": "tsx", "description": "Footer component"}
   ],
@@ -1133,7 +1168,7 @@ Given the user's description of a mobile app they want to build, generate a stru
 3. Also generate a dark color scheme variant.
 4. Choose professional, modern typography pairing (heading_font and body_font from Google Fonts). Consider Inter, SF Pro-like alternatives, DM Sans, Plus Jakarta Sans.
 5. Plan the files needed for the project. Each file has a path, type, and description.
-6. DO NOT include package.json, tsconfig.json, postcss.config.mjs, or next.config.mjs — these are template-managed and injected automatically.
+6. DO NOT include package.json, tsconfig.json, postcss.config.mjs, next.config.mjs, lib/db.ts, or lib/schema.ts — these are template-managed and injected automatically.
 7. Required files: app/layout.tsx, app/page.tsx, app/globals.css
 8. Plan a lib/utils.ts file that exports a cn() helper using clsx and tailwind-merge.
 9. Use Next.js App Router structure (app/ directory for pages).
@@ -1210,24 +1245,22 @@ const NEXTJS_SHARED_RULES = `
 - ONLY import from files in the "All files" context. Missing imports cause build failures. If a file isn't listed, implement it inline.
 - ONLY create <Link href="..."> or <a href="..."> navigation to pages that exist in the "All files" context. If a route's page file (e.g., app/about/page.tsx for "/about") is NOT in the file list, do NOT link to it. Never create dead links.
 - NEVER import Node.js builtins (fs, path, os, crypto, etc.) or build-time packages (tailwindcss, postcss, eslint, webpack, etc.).
-- For NON-e-commerce projects: define mock/placeholder data inline as const arrays/objects. Do NOT import from external data files.
+- Use ` + "`" + `import { db } from '@/lib/db'` + "`" + ` and ` + "`" + `import { ... } from '@/lib/schema'` + "`" + ` for all data access. Use Drizzle queries in server components and API routes. Do NOT use hardcoded mock data — all data should come from the database.
 - cn() from @/lib/utils for conditional classes (clsx + tailwind-merge). If lib/utils.ts absent, use clsx directly.
 - Custom Tailwind theme colors: primary, secondary, accent, background, surface, text. Use as classes (bg-primary, text-accent).
 - Pre-installed deps: lucide-react, clsx, tailwind-merge, class-variance-authority, framer-motion, @radix-ui/* primitives.
 - Use read_file tool to check actual exports before importing from sibling files. Do NOT guess export names.
 
 ### E-Commerce Projects (CRITICAL)
-If lib/wemob-store.ts exists or the project is e-commerce, you MUST follow these rules:
-- NEVER define hardcoded/mock product data, categories, prices, or store config in component files. ALL product and category data MUST come from the Wemob Storefront API via @/lib/wemob-store.
-- CRITICAL: lib/wemob-store.ts has "use client" — ALL its exports (getProducts, getProduct, getCategories, useProducts, useCart, CartProvider, formatPrice, etc.) are CLIENT-ONLY. You CANNOT import or call ANY function from @/lib/wemob-store in a Server Component. Any file that imports from @/lib/wemob-store MUST have "use client" at the top. This includes page.tsx files — if a page needs product data, it MUST be a Client Component with "use client".
-- Use the SDK hooks in client components: useProducts(), useProduct(slug), useCategories(), useStoreConfig(), useCart(). Wrap the root layout with <CartProvider>.
-- Use formatPrice(cents) from @/lib/wemob-store for all price display — never format prices manually.
-- Cart operations: useCart() provides addItem, updateItem, removeItem, applyDiscount, removeDiscountCode, checkout, clearCart with optimistic updates.
-- Product filtering: getProducts({ category: "slug", q: "search" }) and useProducts({ category: "slug", q: "search" }) accept optional filter params.
-- Discount management: applyDiscount(code) to apply, removeDiscountCode() to remove. All cart mutations return the full updated cart state.
-- Payment handling: checkout() auto-redirects for Stripe (payment_url). For Iyzico, use renderPaymentForm(container, result.client_secret) to render the payment form. If neither payment_url nor client_secret is returned, it's a COD/manual order — show confirmation directly.
-- Session management is handled automatically by the SDK (cookie + localStorage). Cart data is cached in localStorage for instant loading. Use getSessionId() if needed.
-- If you see a "Store context" section below, use that information (currency, categories, product count) to inform your UI structure, but ALWAYS fetch real data from the API at runtime.`
+If the project is e-commerce, you MUST follow these rules:
+- NEVER define hardcoded/mock product data, categories, prices, or store config. ALL data MUST come from the database via Drizzle ORM.
+- Use ` + "`" + `import { db } from '@/lib/db'` + "`" + ` and ` + "`" + `import { products, categories, carts, cartItems, orders, orderItems, discounts, productVariants } from '@/lib/schema'` + "`" + ` for all data access.
+- Use server-side data fetching by default: ` + "`" + `const allProducts = await db.select().from(products)` + "`" + ` in server components and API routes.
+- Use Drizzle query builder for filtering: ` + "`" + `db.select().from(products).where(eq(products.categoryId, catId))` + "`" + `.
+- Import Drizzle operators from 'drizzle-orm': ` + "`" + `import { eq, and, desc, sql } from 'drizzle-orm'` + "`" + `.
+- Prices are stored in cents. Format with ` + "`" + `(price / 100).toFixed(2)` + "`" + ` for display.
+- Plan app/api/ routes for cart, checkout, and order operations.
+- If you see a "Database schema" section below, use that to understand available tables and columns.`
 
 const NEXTJS_FILE_TSX_PROMPT = `You are an expert Next.js 16 developer and UI/UX designer. Generate a single TSX/TS file.
 
@@ -1336,7 +1369,7 @@ Do NOT output a JSON code block with operations — use the file tools instead. 
 12. Only import from paths that exist in the current project files or that you are creating.
 13. Use lucide-react for icons (already in project dependencies).
 14. NEVER import Node.js built-in modules (fs, path, module, os, crypto, stream, etc.). This is a browser-side Next.js app.
-15. For NON-e-commerce projects: define mock/placeholder data inline as const arrays or objects. For e-commerce projects: NEVER hardcode product/category/price data — always fetch from the API via @/lib/wemob-store.
+15. All data access uses Drizzle ORM with ` + "`" + `import { db } from '@/lib/db'` + "`" + ` and ` + "`" + `import { ... } from '@/lib/schema'` + "`" + `. Use Drizzle queries in server components and API routes. Do NOT use hardcoded mock data.
 16. NEVER import build-time packages in component files: tailwindcss, postcss, autoprefixer, eslint, typescript, webpack, etc. Use Tailwind via className strings only.
 17. For conditional CSS classes, use cn() from @/lib/utils (clsx + tailwind-merge). If lib/utils.ts doesn't exist, create it with write_file.
 18. You CAN modify package.json to add new npm dependencies when needed (e.g., a chart library, date library, etc.).
@@ -1408,16 +1441,17 @@ Given the user's description of an online store, generate a structured file plan
 3. Also generate a dark color scheme variant.
 4. Required pages: Home, Products listing, Product detail, Cart, Checkout, Checkout success (order confirmation), Checkout cancel (payment cancelled).
 5. Include shared components: Header with cart icon, Footer, ProductCard, CartDrawer (slide-out cart sidebar).
-6. Include API routes under app/api/ for cart operations if needed.
-7. DO NOT include package.json, tsconfig.json, postcss.config.mjs, next.config.mjs, or lib/wemob-store.ts — these are template-managed and injected automatically.
+6. Include API routes under app/api/ for cart operations, checkout, products, etc.
+7. DO NOT include package.json, tsconfig.json, postcss.config.mjs, next.config.mjs, lib/db.ts, or lib/schema.ts — these are template-managed and injected automatically.
 8. Required files: app/layout.tsx, app/page.tsx, app/globals.css
 9. Plan a lib/utils.ts file that exports a cn() helper using clsx and tailwind-merge.
 10. Plan reusable UI primitives in components/ui/ (Button, Card, Badge, Input, etc.) following shadcn/ui patterns.
 11. Use Next.js App Router structure.
-12. CRITICAL: Every component or module that is imported by any page MUST be included in the file list. If page.tsx imports "@/components/product-card", you MUST include "components/product-card.tsx" in the plan. If page.tsx imports "@/lib/store", you MUST include "lib/store.ts" in the plan. Missing files will cause build failures. Exception: @/lib/wemob-store is template-injected and does not need to be in the file list.
+12. CRITICAL: Every component or module that is imported by any page MUST be included in the file list. Missing files will cause build failures.
 13. Prefer inline implementations over importing from separate utility/lib files. Only create separate files for reusable components or large data modules.
-14. A pre-built storefront SDK is available at lib/wemob-store.ts (template-injected, "use client"). It provides async API functions AND React hooks/context. Use import { getProducts, getProduct, getCategories, getStoreConfig, createCart, getCart, addCartItem, updateCartItem, removeCartItem, applyDiscountCode, removeDiscount, checkout, confirmCheckout, getOrder, formatPrice, renderPaymentForm, getSessionId, clearSession, CartProvider, useCart, useProducts, useProduct, useCategories, useStoreConfig } from "@/lib/wemob-store" for all storefront API calls. Wrap the app in <CartProvider> in layout.tsx. Use useCart() for cart state with optimistic updates (includes removeDiscountCode). getProducts/useProducts accept optional { category, q } filter params. Do NOT create custom fetch utilities for the storefront API.
-15. If the application requires external API keys or secrets (payment gateways, databases, third-party APIs, etc.), list them in "required_env_vars". Each entry: "key" (env var name, e.g. "STRIPE_SK"), "description" (what it's for), "is_public" (true if NEXT_PUBLIC_ prefixed for client-side), "provider" (optional, matching integration: "stripe", "iyzico", "supabase", etc.). Do NOT include NEXT_PUBLIC_STORE_ID or NEXT_PUBLIC_WEMOB_API_URL (auto-injected).
+14. The e-commerce schema (products, categories, carts, orders, etc.) is pre-defined and injected automatically. You may add additional data_models tables if the store concept needs them (e.g., reviews, wishlists), but do NOT redefine the core ecommerce tables.
+15. All data access uses Drizzle ORM: import { db } from '@/lib/db' and import { products, categories, ... } from '@/lib/schema'. Use db.select().from(products) for queries. Server-side data fetching by default. A database is provisioned automatically.
+16. If the application requires external API keys or secrets, list them in "required_env_vars". Do NOT include DATABASE_URL (auto-provisioned).
 
 ### Output format: Same as NEXTJS_STRUCTURE_PROMPT (strict JSON, no explanation, no markdown)
 {
@@ -1426,20 +1460,22 @@ Given the user's description of an online store, generate a structured file plan
   "colorScheme": {"primary":"#hex","secondary":"#hex","accent":"#hex","background":"#hex","surface":"#hex","text":"#hex"},
   "darkColorScheme": {"primary":"#hex","secondary":"#hex","accent":"#hex","background":"#hex","surface":"#hex","text":"#hex"},
   "typography": {"heading_font":"Inter","body_font":"Inter"},
+  "data_models": [],
   "files": [
-    {"path":"app/layout.tsx","type":"tsx","description":"Root layout with cart provider"},
+    {"path":"app/layout.tsx","type":"tsx","description":"Root layout"},
     {"path":"app/page.tsx","type":"tsx","description":"Homepage with featured products"},
     {"path":"app/globals.css","type":"css","description":"Global styles"},
     {"path":"app/products/page.tsx","type":"tsx","description":"Products listing with filters"},
     {"path":"app/products/[slug]/page.tsx","type":"tsx","description":"Product detail page"},
     {"path":"app/cart/page.tsx","type":"tsx","description":"Shopping cart page"},
     {"path":"app/checkout/page.tsx","type":"tsx","description":"Checkout form"},
-    {"path":"app/checkout/success/page.tsx","type":"tsx","description":"Order confirmation page using getOrder()"},
-    {"path":"app/checkout/cancel/page.tsx","type":"tsx","description":"Payment cancelled page with retry option"},
+    {"path":"app/checkout/success/page.tsx","type":"tsx","description":"Order confirmation page"},
+    {"path":"app/api/products/route.ts","type":"ts","description":"Products API route"},
+    {"path":"app/api/cart/route.ts","type":"ts","description":"Cart API route"},
+    {"path":"app/api/checkout/route.ts","type":"ts","description":"Checkout API route"},
     {"path":"components/header.tsx","type":"tsx","description":"Header with cart icon and count badge"},
     {"path":"components/footer.tsx","type":"tsx","description":"Footer"},
-    {"path":"components/product-card.tsx","type":"tsx","description":"Product card with variant selector"},
-    {"path":"components/cart-drawer.tsx","type":"tsx","description":"Slide-out cart sidebar using useCart()"}
+    {"path":"components/product-card.tsx","type":"tsx","description":"Product card component"}
   ],
   "required_env_vars": [
     {"key": "STRIPE_SK", "description": "Stripe secret key for payments", "is_public": false, "provider": "stripe"}
@@ -1456,7 +1492,7 @@ Analyze the provided screenshot and generate a structured file plan for a Next.j
 3. Plan the files needed to recreate the UI shown in the screenshot.
 4. Use Next.js App Router structure with TypeScript and Tailwind CSS.
 5. Include all necessary pages and components visible in the screenshot.
-6. DO NOT include package.json, tsconfig.json, postcss.config.mjs, or next.config.mjs — these are template-managed and injected automatically.
+6. DO NOT include package.json, tsconfig.json, postcss.config.mjs, next.config.mjs, lib/db.ts, or lib/schema.ts — these are template-managed and injected automatically.
 7. Required files: app/layout.tsx, app/page.tsx, app/globals.css
 8. CRITICAL: Every component or module that is imported by any page MUST be included in the file list. If page.tsx imports "@/components/project-card", you MUST include "components/project-card.tsx" in the plan. Missing files will cause build failures.
 9. Prefer inline implementations over importing from separate utility/lib files. Only create separate files for reusable components or large data modules.

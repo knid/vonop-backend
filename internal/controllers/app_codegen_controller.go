@@ -2,9 +2,11 @@ package controllers
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"regexp"
 	"sort"
 	"strings"
@@ -17,6 +19,8 @@ import (
 	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/utils"
 	"github.com/posthog/posthog-go"
+
+	_ "github.com/lib/pq"
 )
 
 // --- Clarification types ---
@@ -47,6 +51,22 @@ type ClarificationResult struct {
 	Skip    bool
 }
 
+// DataModel represents a database table designed by the AI for the app.
+type DataModel struct {
+	Name    string       `json:"name"`
+	Columns []DataColumn `json:"columns"`
+}
+
+// DataColumn represents a column in a DataModel table.
+type DataColumn struct {
+	Name       string `json:"name"`
+	Type       string `json:"type"`                  // text, integer, boolean, timestamp, uuid, jsonb
+	PrimaryKey bool   `json:"primary_key"`
+	Nullable   bool   `json:"nullable"`
+	Default    string `json:"default,omitempty"`
+	References string `json:"references,omitempty"`  // e.g. "categories.id"
+}
+
 type appFileStructure struct {
 	Name            string             `json:"name"`
 	Slug            string             `json:"slug"`
@@ -54,6 +74,7 @@ type appFileStructure struct {
 	DarkColorScheme map[string]any     `json:"darkColorScheme,omitempty"`
 	Typography      map[string]any     `json:"typography,omitempty"`
 	Files           []appFilePlanEntry `json:"files"`
+	DataModels      []DataModel        `json:"data_models,omitempty"`
 	RequiredEnvVars []RequiredEnvVar   `json:"required_env_vars,omitempty"`
 }
 
@@ -95,6 +116,7 @@ func detectEnvVarsFromCode(files map[string]string) []string {
 		"NODE_ENV":                  true,
 		"NEXT_PUBLIC_STORE_ID":      true,
 		"NEXT_PUBLIC_WEMOB_API_URL": true,
+		"DATABASE_URL":              true,
 	}
 	seen := map[string]bool{}
 	for _, content := range files {
@@ -180,6 +202,11 @@ const fallbackSentinel = "/* __WEMOB_FALLBACK__ */"
 // isTemplateFile checks if a file path is managed by hardcoded templates
 func isTemplateFile(path string) bool {
 	for _, tp := range constants.NEXTJS_TEMPLATE_FILE_PATHS {
+		if path == tp {
+			return true
+		}
+	}
+	for _, tp := range constants.NEXTJS_DB_TEMPLATE_FILE_PATHS {
 		if path == tp {
 			return true
 		}
@@ -286,8 +313,10 @@ func buildGlobalsCSSTheme(colorScheme, darkColorScheme map[string]any, isMobile 
 	return sb.String()
 }
 
-// getTemplateContent returns the hardcoded content for a template file
-func getTemplateContent(path string, colorScheme, darkColorScheme map[string]any, projectType string) string {
+// getTemplateContent returns the hardcoded content for a template file.
+// dataModels is used to generate the dynamic lib/schema.ts file.
+// neonConnStr is embedded into lib/db.ts as a fallback when DATABASE_URL env var is not set.
+func getTemplateContent(path string, colorScheme, darkColorScheme map[string]any, projectType string, dataModels []DataModel, neonConnStr string) string {
 	switch path {
 	case "package.json":
 		return constants.NEXTJS_TEMPLATE_PACKAGE_JSON
@@ -299,6 +328,10 @@ func getTemplateContent(path string, colorScheme, darkColorScheme map[string]any
 		return constants.NEXTJS_TEMPLATE_NEXT_CONFIG
 	case "app/globals.css":
 		return buildGlobalsCSSTheme(colorScheme, darkColorScheme, projectType == "mobile_app")
+	case "lib/db.ts":
+		return fmt.Sprintf(constants.NEXTJS_TEMPLATE_DB_TS, neonConnStr)
+	case "lib/schema.ts":
+		return buildDrizzleSchema(dataModels)
 	}
 	return ""
 }
@@ -310,6 +343,335 @@ func getEcommerceTemplateContent(path string) string {
 		return constants.NEXTJS_TEMPLATE_WEMOB_STORE
 	}
 	return ""
+}
+
+// --- Neon / DataModel helpers ---
+
+// sqlTypeMap maps DataModel column types to PostgreSQL types.
+var sqlTypeMap = map[string]string{
+	"text":      "TEXT",
+	"integer":   "INTEGER",
+	"boolean":   "BOOLEAN",
+	"timestamp": "TIMESTAMPTZ",
+	"uuid":      "UUID",
+	"jsonb":     "JSONB",
+	"serial":    "SERIAL",
+}
+
+// buildCreateTableSQL generates CREATE TABLE statements from DataModels.
+func buildCreateTableSQL(models []DataModel) string {
+	var sb strings.Builder
+	for _, m := range models {
+		sb.WriteString(fmt.Sprintf("CREATE TABLE IF NOT EXISTS %q (\n", m.Name))
+		for i, col := range m.Columns {
+			pgType := sqlTypeMap[col.Type]
+			if pgType == "" {
+				pgType = "TEXT"
+			}
+			sb.WriteString(fmt.Sprintf("  %q %s", col.Name, pgType))
+			if col.PrimaryKey {
+				sb.WriteString(" PRIMARY KEY")
+				if col.Type == "uuid" {
+					sb.WriteString(" DEFAULT gen_random_uuid()")
+				}
+			}
+			if !col.Nullable && !col.PrimaryKey {
+				sb.WriteString(" NOT NULL")
+			}
+			if col.Default != "" && !col.PrimaryKey {
+				sb.WriteString(fmt.Sprintf(" DEFAULT %s", col.Default))
+			}
+			if i < len(m.Columns)-1 {
+				sb.WriteString(",")
+			}
+			sb.WriteString("\n")
+		}
+		sb.WriteString(");\n\n")
+
+		// Add foreign key constraints after table creation
+		for _, col := range m.Columns {
+			if col.References != "" {
+				parts := strings.SplitN(col.References, ".", 2)
+				if len(parts) == 2 {
+					sb.WriteString(fmt.Sprintf("ALTER TABLE %q ADD CONSTRAINT fk_%s_%s FOREIGN KEY (%q) REFERENCES %q(%q) ON DELETE CASCADE;\n",
+						m.Name, m.Name, col.Name, col.Name, parts[0], parts[1]))
+				}
+			}
+		}
+	}
+	return sb.String()
+}
+
+// drizzleTypeMap maps DataModel column types to Drizzle pgTable column functions.
+var drizzleTypeMap = map[string]string{
+	"text":      "text",
+	"integer":   "integer",
+	"boolean":   "boolean",
+	"timestamp": "timestamp",
+	"uuid":      "uuid",
+	"jsonb":     "jsonb",
+	"serial":    "serial",
+}
+
+// buildDrizzleSchema generates a lib/schema.ts file with Drizzle pgTable definitions.
+func buildDrizzleSchema(dataModels []DataModel) string {
+	var sb strings.Builder
+	sb.WriteString("import { pgTable, text, integer, boolean, timestamp, uuid, jsonb, serial } from 'drizzle-orm/pg-core';\n\n")
+
+	for _, m := range dataModels {
+		// Convert table name to camelCase for the export name
+		exportName := toCamelCase(m.Name)
+		sb.WriteString(fmt.Sprintf("export const %s = pgTable('%s', {\n", exportName, m.Name))
+		for _, col := range m.Columns {
+			drizzleType := drizzleTypeMap[col.Type]
+			if drizzleType == "" {
+				drizzleType = "text"
+			}
+			sb.WriteString(fmt.Sprintf("  %s: %s('%s')", toCamelCase(col.Name), drizzleType, col.Name))
+
+			// Chain modifiers
+			if col.PrimaryKey {
+				sb.WriteString(".primaryKey()")
+				if col.Type == "uuid" {
+					sb.WriteString(".defaultRandom()")
+				}
+			}
+			if !col.Nullable && !col.PrimaryKey {
+				sb.WriteString(".notNull()")
+			}
+			if col.Default != "" && !col.PrimaryKey {
+				sb.WriteString(fmt.Sprintf(".default(%s)", col.Default))
+			}
+			if col.References != "" {
+				parts := strings.SplitN(col.References, ".", 2)
+				if len(parts) == 2 {
+					sb.WriteString(fmt.Sprintf(".references(() => %s.%s, { onDelete: 'cascade' })", toCamelCase(parts[0]), toCamelCase(parts[1])))
+				}
+			}
+			sb.WriteString(",\n")
+		}
+		sb.WriteString("});\n\n")
+	}
+
+	return sb.String()
+}
+
+// neonConnStrWithEndpoint appends the endpoint ID option to a Neon connection string
+// so that lib/pq (which lacks SNI support) can route to the correct Neon compute.
+// e.g. postgresql://user:pass@ep-cool-name-123456.us-east-2.aws.neon.tech/neondb?sslmode=require
+// → adds &options=endpoint%3Dep-cool-name-123456
+func neonConnStrWithEndpoint(connStr string) string {
+	u, err := url.Parse(connStr)
+	if err != nil || u.Host == "" {
+		return connStr
+	}
+	// Endpoint ID is the first part of the hostname (before the first dot)
+	host := u.Hostname()
+	parts := strings.SplitN(host, ".", 2)
+	if len(parts) == 0 || !strings.HasPrefix(parts[0], "ep-") {
+		return connStr
+	}
+	endpointID := parts[0]
+	q := u.Query()
+	q.Set("options", "endpoint="+endpointID)
+	u.RawQuery = q.Encode()
+	return u.String()
+}
+
+// sliceContains checks if a string slice contains the given value.
+func sliceContains(slice []string, val string) bool {
+	for _, s := range slice {
+		if s == val {
+			return true
+		}
+	}
+	return false
+}
+
+// toCamelCase converts snake_case to camelCase.
+func toCamelCase(s string) string {
+	parts := strings.Split(s, "_")
+	for i := 1; i < len(parts); i++ {
+		if len(parts[i]) > 0 {
+			parts[i] = strings.ToUpper(parts[i][:1]) + parts[i][1:]
+		}
+	}
+	return strings.Join(parts, "")
+}
+
+// provisionNeonDatabase creates a Neon project, runs the schema SQL, and returns the connection string and project ID.
+func (c *Controller) provisionNeonDatabase(ctx context.Context, project *models.AppProject, dataModels []DataModel, sendEvent func(string, any) bool) (string, string, error) {
+	if c.NeonService == nil {
+		return "", "", fmt.Errorf("Neon service not configured")
+	}
+
+	sendEvent("neon_provision", map[string]any{"phase": "creating_project"})
+
+	projectName := fmt.Sprintf("wemob-%s", project.Slug)
+	if len(projectName) > 60 {
+		projectName = projectName[:60]
+	}
+
+	neonProjectID, connStr, err := c.NeonService.CreateProject(projectName, "")
+	if err != nil {
+		return "", "", fmt.Errorf("create Neon project: %w", err)
+	}
+
+	slog.Info("Neon project created", "neon_project_id", neonProjectID, "conn_str_len", len(connStr), "app_project_id", project.ID)
+
+	// Build and execute schema SQL directly via the connection string.
+	schemaSQL := buildCreateTableSQL(dataModels)
+	if schemaSQL != "" {
+		sendEvent("neon_provision", map[string]any{"phase": "creating_schema"})
+		slog.Info("Executing schema SQL on Neon", "neon_project_id", neonProjectID, "sql_length", len(schemaSQL), "sql", schemaSQL)
+
+		neonDB, err := sql.Open("postgres", neonConnStrWithEndpoint(connStr))
+		if err != nil {
+			slog.Error("Failed to open Neon database driver", "error", err, "neon_project_id", neonProjectID)
+			return connStr, neonProjectID, fmt.Errorf("open Neon driver: %w", err)
+		}
+		defer neonDB.Close()
+
+		// Neon compute needs time to wake up after project creation.
+		// Retry ping up to 5 times with increasing delay.
+		var pingErr error
+		for attempt := 1; attempt <= 5; attempt++ {
+			pingCtx, pingCancel := context.WithTimeout(ctx, 10*time.Second)
+			pingErr = neonDB.PingContext(pingCtx)
+			pingCancel()
+			if pingErr == nil {
+				slog.Info("Neon database ping succeeded", "attempt", attempt, "neon_project_id", neonProjectID)
+				break
+			}
+			slog.Warn("Neon database not ready, retrying...", "attempt", attempt, "error", pingErr, "neon_project_id", neonProjectID)
+			time.Sleep(time.Duration(attempt*2) * time.Second)
+		}
+		if pingErr != nil {
+			slog.Error("Neon database not reachable after retries", "error", pingErr, "neon_project_id", neonProjectID)
+			return connStr, neonProjectID, fmt.Errorf("neon database not reachable: %w", pingErr)
+		}
+
+		execCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+
+		if _, err := neonDB.ExecContext(execCtx, schemaSQL); err != nil {
+			slog.Error("Failed to execute schema SQL on Neon", "error", err, "neon_project_id", neonProjectID, "sql", schemaSQL)
+			return connStr, neonProjectID, fmt.Errorf("execute schema SQL: %w", err)
+		}
+		slog.Info("Neon schema created successfully", "neon_project_id", neonProjectID, "tables", len(dataModels))
+	}
+
+	return connStr, neonProjectID, nil
+}
+
+// storeNeonIntegration saves the Neon connection as an AppIntegration.
+func (c *Controller) storeNeonIntegration(project *models.AppProject, connStr, neonProjectID string) error {
+	integration := &models.AppIntegration{
+		AppProjectID: project.ID,
+		Provider:     "neon",
+		Config: map[string]any{
+			"project_id": neonProjectID,
+		},
+		Status: "connected",
+		EnvVars: map[string]string{
+			"DATABASE_URL": connStr,
+		},
+	}
+
+	_, err := c.DB.CreateAppIntegration(integration)
+	return err
+}
+
+// seedNeonDatabase uses an LLM to generate seed SQL and executes it on the app's Neon database.
+func (c *Controller) seedNeonDatabase(ctx context.Context, project *models.AppProject, dataModels []DataModel, sendEvent func(string, any) bool) (string, error) {
+	// Get connection string from the stored integration
+	connStr := c.neonConnString(project.ID.String())
+	if connStr == "" {
+		return "", fmt.Errorf("no Neon connection string found for project")
+	}
+
+	// Build schema description for the LLM
+	var schemaDesc strings.Builder
+	for _, m := range dataModels {
+		schemaDesc.WriteString(fmt.Sprintf("Table: %s\nColumns: ", m.Name))
+		for i, col := range m.Columns {
+			if i > 0 {
+				schemaDesc.WriteString(", ")
+			}
+			schemaDesc.WriteString(fmt.Sprintf("%s (%s)", col.Name, col.Type))
+		}
+		schemaDesc.WriteString("\n")
+	}
+
+	seedPrompt := fmt.Sprintf(`Generate realistic seed data SQL INSERT statements for a database with the following schema:
+
+%s
+
+The app description: %s
+
+Rules:
+1. Generate 5-15 rows of realistic data for each table.
+2. Use gen_random_uuid() for UUID primary keys.
+3. Respect foreign key relationships — insert parent rows before child rows.
+4. Use NOW() for timestamp columns.
+5. Make the data contextually relevant to the app description.
+6. For JSONB columns, use valid JSON strings.
+7. Return ONLY valid SQL INSERT statements, no explanations.
+8. Use single-line INSERT statements (one per row).
+9. Do NOT include CREATE TABLE or DROP statements.`, schemaDesc.String(), project.Prompt)
+
+	sendEvent("neon_provision", map[string]any{"phase": "seeding_data"})
+
+	model := constants.DEFAULT_NEXTJS_LLM_MODEL
+	provider := c.llmProvider()
+
+	seedSQL, err := utils.GetTextFromLLM(ctx, model, "You are a SQL expert. Generate realistic seed data. Return ONLY valid SQL.", seedPrompt, provider)
+	if err != nil {
+		return "", fmt.Errorf("LLM seed generation: %w", err)
+	}
+
+	// Clean the SQL (strip markdown fences if present)
+	seedSQL = strings.TrimSpace(seedSQL)
+	seedSQL = strings.TrimPrefix(seedSQL, "```sql")
+	seedSQL = strings.TrimPrefix(seedSQL, "```")
+	seedSQL = strings.TrimSuffix(seedSQL, "```")
+	seedSQL = strings.TrimSpace(seedSQL)
+
+	if seedSQL != "" {
+		neonDB, err := sql.Open("postgres", neonConnStrWithEndpoint(connStr))
+		if err != nil {
+			return "", fmt.Errorf("connect to Neon for seeding: %w", err)
+		}
+		defer neonDB.Close()
+
+		execCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+
+		if _, err := neonDB.ExecContext(execCtx, seedSQL); err != nil {
+			slog.Warn("Failed to seed Neon database", "error", err, "project_id", project.ID)
+			return "", fmt.Errorf("execute seed SQL: %w", err)
+		}
+		slog.Info("Neon database seeded", "project_id", project.ID)
+	}
+
+	return "Seeded database with sample data.", nil
+}
+
+// getNeonIntegration returns the Neon integration for a project, if any.
+func (c *Controller) getNeonIntegration(projectID string) *models.AppIntegration {
+	integrations, err := c.DB.GetAppIntegrationsByProjectID(projectID)
+	if err != nil {
+		slog.Error("getNeonIntegration: failed to query integrations", "project_id", projectID, "error", err)
+		return nil
+	}
+	slog.Info("getNeonIntegration: queried integrations", "project_id", projectID, "count", len(integrations))
+	for i, integ := range integrations {
+		slog.Info("getNeonIntegration: checking integration", "provider", integ.Provider, "id", integ.ID, "status", integ.Status)
+		if integ.Provider == "neon" {
+			return &integrations[i]
+		}
+	}
+	return nil
 }
 
 // appCodegenTools defines the tools available to per-file codegen for reading sibling files.
@@ -401,12 +763,22 @@ func augmentPackageJSON(baseTemplate string, files map[string]string) string {
 	}
 
 	// Scan all files for import statements
+	// Non-scoped packages: import ... from 'package-name' or 'package-name/subpath'
 	importRegex := regexp.MustCompile(`(?m)^import\s+.*\s+from\s+['"]([^'"@./][^'"]*?)(?:/[^'"]*)?['"]`)
+	// Scoped packages: import ... from '@scope/package' or '@scope/package/subpath'
+	scopedImportRegex := regexp.MustCompile(`(?m)^import\s+.*\s+from\s+['"](@[^'"\/]+\/[^'"\/]+)`)
 
 	foundPackages := make(map[string]bool)
 	for _, content := range files {
 		matches := importRegex.FindAllStringSubmatch(content, -1)
 		for _, match := range matches {
+			pkg := match[1]
+			if !knownPackages[pkg] && !strings.HasPrefix(pkg, "@types/") {
+				foundPackages[pkg] = true
+			}
+		}
+		scopedMatches := scopedImportRegex.FindAllStringSubmatch(content, -1)
+		for _, match := range scopedMatches {
 			pkg := match[1]
 			if !knownPackages[pkg] && !strings.HasPrefix(pkg, "@types/") {
 				foundPackages[pkg] = true
@@ -442,10 +814,33 @@ func augmentPackageJSON(baseTemplate string, files map[string]string) string {
 		"recharts":            "^2.12.0",
 		"react-icons":         "^5.0.0",
 		"swiper":              "^11.0.0",
-		"@radix-ui/react-dialog":   "^1.0.0",
-		"@radix-ui/react-dropdown-menu": "^2.0.0",
-		"@radix-ui/react-tabs":     "^1.0.0",
-		"@radix-ui/react-slot":     "^1.0.0",
+		"@radix-ui/react-accordion":      "^1.2.0",
+		"@radix-ui/react-alert-dialog":   "^1.1.0",
+		"@radix-ui/react-aspect-ratio":   "^1.1.0",
+		"@radix-ui/react-avatar":         "^1.1.0",
+		"@radix-ui/react-checkbox":       "^1.1.0",
+		"@radix-ui/react-collapsible":    "^1.1.0",
+		"@radix-ui/react-context-menu":   "^2.2.0",
+		"@radix-ui/react-dialog":         "^1.1.0",
+		"@radix-ui/react-dropdown-menu":  "^2.1.0",
+		"@radix-ui/react-hover-card":     "^1.1.0",
+		"@radix-ui/react-label":          "^2.1.0",
+		"@radix-ui/react-menubar":        "^1.1.0",
+		"@radix-ui/react-navigation-menu": "^1.2.0",
+		"@radix-ui/react-popover":        "^1.1.0",
+		"@radix-ui/react-progress":       "^1.1.0",
+		"@radix-ui/react-radio-group":    "^1.2.0",
+		"@radix-ui/react-scroll-area":    "^1.1.0",
+		"@radix-ui/react-select":         "^2.1.0",
+		"@radix-ui/react-separator":      "^1.1.0",
+		"@radix-ui/react-slider":         "^1.2.0",
+		"@radix-ui/react-slot":           "^1.1.0",
+		"@radix-ui/react-switch":         "^1.1.0",
+		"@radix-ui/react-tabs":           "^1.1.0",
+		"@radix-ui/react-toast":          "^1.2.0",
+		"@radix-ui/react-toggle":         "^1.1.0",
+		"@radix-ui/react-toggle-group":   "^1.1.0",
+		"@radix-ui/react-tooltip":        "^1.1.0",
 		"class-variance-authority":  "^0.7.0",
 		"tailwind-merge":            "^2.2.0",
 	}
@@ -1601,6 +1996,16 @@ func (c *Controller) generateSingleAppFile(
 		strings.Join(allFilePaths, ", "),
 		project.Prompt,
 	))
+	// Inject database schema context only when lib/db.ts was actually provisioned
+	mu.Lock()
+	_, hasDB := generatedFiles["lib/db.ts"]
+	schemaContent, hasSchema := generatedFiles["lib/schema.ts"]
+	mu.Unlock()
+	if hasDB && hasSchema {
+		systemPrompt.WriteString(fmt.Sprintf("\n\n--- lib/schema.ts (INJECTED — import tables from '@/lib/schema') ---\n%s", schemaContent))
+		systemPrompt.WriteString("\n\n### Database Access\nUse `import { db } from '@/lib/db'` and `import { ... } from '@/lib/schema'` for data access. Use Drizzle queries: `db.select().from(tableName)`, `db.insert(tableName).values({...})`, etc. Import operators from 'drizzle-orm': `import { eq, and, desc, sql } from 'drizzle-orm'`.\n")
+	}
+
 	// Inline wemob-store.ts and store context in system prompt for e-commerce
 	if project.ProjectType == "ecommerce" {
 		mu.Lock()
@@ -1949,7 +2354,72 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 	}
 	themeJSON, _ := json.Marshal(themeData)
 	project.Theme = themeJSON
+
+	// Step 2b: Store DataModels and provision Neon database
+	dataModels := structure.DataModels
+	slog.Info("Step 2b: DataModels from LLM", "count", len(dataModels), "project_id", project.ID)
+	for _, dm := range dataModels {
+		slog.Info("  DataModel table", "name", dm.Name, "columns", len(dm.Columns))
+	}
+
+	// For ecommerce: merge default ecommerce schema with any extra AI-designed models
+	if projectType == "ecommerce" {
+		var defaultModels []DataModel
+		if err := json.Unmarshal([]byte(constants.ECOMMERCE_DEFAULT_DATA_MODELS), &defaultModels); err != nil {
+			slog.Error("Failed to parse default ecommerce data models", "error", err)
+		} else {
+			// Build a set of existing table names from AI-designed models
+			existingTables := make(map[string]bool)
+			for _, m := range dataModels {
+				existingTables[m.Name] = true
+			}
+			// Prepend default ecommerce models (only if not already defined by AI)
+			for _, dm := range defaultModels {
+				if !existingTables[dm.Name] {
+					dataModels = append([]DataModel{dm}, dataModels...)
+				}
+			}
+		}
+	}
+
+	// Store data models in the project
+	if len(dataModels) > 0 {
+		dmJSON, _ := json.Marshal(dataModels)
+		project.DataModels = dmJSON
+	}
+
 	project, _ = c.DB.UpdateAppProject(project)
+
+	// Step 2c: Provision Neon database (non-blocking on failure)
+	neonProvisioned := false
+	var neonConnStr string
+	if c.NeonService != nil && len(dataModels) > 0 {
+		sendEvent("neon_provision", map[string]any{"phase": "start"})
+		connStr, neonProjectID, neonErr := c.provisionNeonDatabase(ctx, project, dataModels, sendEvent)
+
+		// Store integration whenever we have a valid connection string + project ID,
+		// even if schema creation failed (the Neon project exists and is usable).
+		if connStr != "" && neonProjectID != "" {
+			if neonErr != nil {
+				slog.Warn("Neon schema setup had errors, but project exists — storing integration anyway",
+					"error", neonErr, "project_id", project.ID, "neon_project_id", neonProjectID)
+			}
+			if err := c.storeNeonIntegration(project, connStr, neonProjectID); err != nil {
+				slog.Error("Failed to store Neon integration", "error", err, "project_id", project.ID)
+				sendEvent("neon_provision", map[string]any{"phase": "error", "error": "failed to store integration: " + err.Error()})
+			} else {
+				neonProvisioned = true
+				neonConnStr = connStr
+				slog.Info("Neon integration stored", "project_id", project.ID, "neon_project_id", neonProjectID)
+				sendEvent("neon_provision", map[string]any{"phase": "ready"})
+			}
+		} else if neonErr != nil {
+			slog.Error("Neon project creation failed (non-fatal)", "error", neonErr, "project_id", project.ID)
+			sendEvent("neon_provision", map[string]any{"phase": "error", "error": neonErr.Error()})
+		}
+	} else {
+		slog.Info("Skipping Neon provisioning", "neon_service_nil", c.NeonService == nil, "data_models_count", len(dataModels), "project_id", project.ID)
+	}
 
 	// Step 3: Filter template files from structure (strip them even if LLM included them)
 	for _, f := range structure.Files {
@@ -2014,11 +2484,16 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 
 	// Build total file list (template + app files)
 	templatePaths := constants.NEXTJS_TEMPLATE_FILE_PATHS
-	allFilePaths := make([]string, 0, len(templatePaths)+len(appFiles)+len(constants.NEXTJS_ECOMMERCE_TEMPLATE_FILE_PATHS))
-	allFilePaths = append(allFilePaths, templatePaths...)
+	allFilePaths := make([]string, 0, len(templatePaths)+len(appFiles)+len(constants.NEXTJS_ECOMMERCE_TEMPLATE_FILE_PATHS)+4)
+	for _, tp := range templatePaths {
+		allFilePaths = append(allFilePaths, tp)
+	}
+	// Include db.ts/schema.ts only when Neon database was successfully provisioned
+	if neonProvisioned {
+		allFilePaths = append(allFilePaths, constants.NEXTJS_DB_TEMPLATE_FILE_PATHS...)
+	}
 	if projectType == "ecommerce" {
 		allFilePaths = append(allFilePaths, constants.NEXTJS_ECOMMERCE_TEMPLATE_FILE_PATHS...)
-		allFilePaths = append(allFilePaths, ".env.local")
 	}
 	for _, f := range appFiles {
 		allFilePaths = append(allFilePaths, f.Path)
@@ -2052,16 +2527,18 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 
 	// Step 6: Inject template files (tier 0)
 	generatedFiles = make(map[string]string) // accumulated content for context
-	for _, tp := range templatePaths {
-		content := getTemplateContent(tp, structure.ColorScheme, structure.DarkColorScheme, projectType)
+
+	// Helper to inject a template file
+	injectTemplate := func(tp, content string) {
 		fileType := "json"
 		switch {
 		case strings.HasSuffix(tp, ".ts"):
 			fileType = "ts"
 		case strings.HasSuffix(tp, ".mjs"):
 			fileType = "mjs"
+		case strings.HasSuffix(tp, ".css"):
+			fileType = "css"
 		}
-
 		file := models.AppGeneratedFile{
 			AppProjectID: project.ID,
 			Platform:     "nextjs",
@@ -2073,16 +2550,34 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 		createdFile, err := c.DB.CreateAppGeneratedFile(&file)
 		if err != nil {
 			slog.Error("failed to save template file", "error", err, "path", tp)
-			continue
+			return
 		}
 		generatedFiles[tp] = content
-
 		sendEvent("file_complete", responses.FileCompleteEvent{
 			Action:   "create",
 			FilePath: tp,
 			FileID:   createdFile.ID,
 			FileType: fileType,
 		})
+	}
+
+	for _, tp := range templatePaths {
+		content := getTemplateContent(tp, structure.ColorScheme, structure.DarkColorScheme, projectType, dataModels, "")
+		if content == "" {
+			continue
+		}
+		injectTemplate(tp, content)
+	}
+
+	// Step 6a: Inject database template files only when Neon was successfully provisioned
+	if neonProvisioned {
+		for _, tp := range constants.NEXTJS_DB_TEMPLATE_FILE_PATHS {
+			content := getTemplateContent(tp, structure.ColorScheme, structure.DarkColorScheme, projectType, dataModels, neonConnStr)
+			if content == "" {
+				continue
+			}
+			injectTemplate(tp, content)
+		}
 	}
 
 	// Step 6b: Inject e-commerce template files (conditional on project type)
@@ -2117,8 +2612,8 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 		}
 	}
 
-	// Step 6c: Generate .env.local for ecommerce projects so NEXT_PUBLIC_* vars are available
-	if projectType == "ecommerce" {
+	// Step 6c: Generate .env.local so DATABASE_URL and other env vars are available
+	{
 		envVars := c.CollectAllEnvVars(project)
 		if dotEnv := BuildDotEnvLocal(envVars); dotEnv != "" {
 			file := models.AppGeneratedFile{
@@ -2134,6 +2629,9 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 				slog.Error("failed to save .env.local file", "error", err)
 			} else {
 				generatedFiles[".env.local"] = dotEnv
+				if !sliceContains(allFilePaths, ".env.local") {
+					allFilePaths = append(allFilePaths, ".env.local")
+				}
 				sendEvent("file_complete", responses.FileCompleteEvent{
 					Action:   "create",
 					FilePath: ".env.local",
@@ -2613,9 +3111,20 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 		c.DB.UpdateAppProject(project)
 	}
 
-	// Step 11b: Auto-seed e-commerce store with mock data
+	// Step 11b: Auto-seed data
 	var seedSummary string
-	if projectType == "ecommerce" {
+	if neonProvisioned && len(dataModels) > 0 {
+		// Seed Neon database with LLM-generated sample data
+		seedCtx, seedCancel := context.WithTimeout(ctx, 2*time.Minute)
+		summary, seedErr := c.seedNeonDatabase(seedCtx, project, dataModels, sendEvent)
+		seedCancel()
+		if seedErr != nil {
+			slog.Warn("Failed to seed Neon database", "error", seedErr, "project_id", project.ID)
+		} else {
+			seedSummary = summary
+		}
+	} else if projectType == "ecommerce" {
+		// Fallback: seed via Wemob store API for ecommerce projects without Neon
 		store, err := c.DB.GetStoreByAppProjectID(project.ID.String())
 		if err == nil && store != nil {
 			seedCtx, seedCancel := context.WithTimeout(ctx, 2*time.Minute)

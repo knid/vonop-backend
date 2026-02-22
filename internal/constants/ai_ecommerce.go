@@ -39,14 +39,14 @@ Based on the user's message, return a JSON object with operations to perform and
 
 ### Available Actions
 - create_product: Create a new product with name, description, price (in cents), images, category, tags
-- update_product: Update an existing product's fields
-- delete_product: Mark a product as archived
+- update_product: Update an existing product (MUST include "id" — the product UUID from store state)
+- delete_product: Delete a product (MUST include "id" — the product UUID from store state)
 - create_variant: Create a product variant with name, SKU, price, inventory, options
 - update_variant: Update a variant's fields
 - create_category: Create a product category
-- update_category: Update a category
+- update_category: Update a category (MUST include "id" — the category UUID)
 - create_discount: Create a discount code with type (percentage/fixed), value, conditions
-- update_discount: Update a discount
+- update_discount: Update a discount (MUST include "id" — the discount UUID)
 - update_order_status: Update an order's status
 - update_store_settings: Update store settings (currency, tax rate, shipping, notification email)
 
@@ -73,6 +73,14 @@ Based on the user's message, return a JSON object with operations to perform and
       }
     },
     {
+      "action": "update_product",
+      "data": {
+        "id": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+        "name": "Updated Product Name",
+        "description": "Updated description..."
+      }
+    },
+    {
       "action": "create_variant",
       "data": {
         "product_slug": "classic-t-shirt",
@@ -85,4 +93,119 @@ Based on the user's message, return a JSON object with operations to perform and
     }
   ],
   "summary": "Created a Classic T-Shirt at $29.99 with 100 units in stock."
-}`
+}
+
+IMPORTANT: For update_product, update_category, update_discount, and delete_product — you MUST use the actual UUID "id" from the store state. NEVER use the name or slug as the id.`
+
+// ECOMMERCE_DEFAULT_DATA_MODELS defines the standard ecommerce schema as JSON.
+// This is merged with any extra AI-designed models for ecommerce projects.
+const ECOMMERCE_DEFAULT_DATA_MODELS = `[
+  {
+    "name": "categories",
+    "columns": [
+      {"name": "id", "type": "uuid", "primary_key": true},
+      {"name": "name", "type": "text", "nullable": false},
+      {"name": "slug", "type": "text", "nullable": false},
+      {"name": "description", "type": "text", "nullable": true},
+      {"name": "sort_order", "type": "integer", "nullable": false, "default": "0"},
+      {"name": "created_at", "type": "timestamp", "nullable": false, "default": "now()"},
+      {"name": "updated_at", "type": "timestamp", "nullable": false, "default": "now()"}
+    ]
+  },
+  {
+    "name": "products",
+    "columns": [
+      {"name": "id", "type": "uuid", "primary_key": true},
+      {"name": "name", "type": "text", "nullable": false},
+      {"name": "slug", "type": "text", "nullable": false},
+      {"name": "description", "type": "text", "nullable": true},
+      {"name": "price_cents", "type": "integer", "nullable": false},
+      {"name": "images", "type": "jsonb", "nullable": false, "default": "'[]'::jsonb"},
+      {"name": "category_id", "type": "uuid", "nullable": true, "references": "categories.id"},
+      {"name": "status", "type": "text", "nullable": false, "default": "'active'"},
+      {"name": "tags", "type": "jsonb", "nullable": false, "default": "'[]'::jsonb"},
+      {"name": "created_at", "type": "timestamp", "nullable": false, "default": "now()"},
+      {"name": "updated_at", "type": "timestamp", "nullable": false, "default": "now()"}
+    ]
+  },
+  {
+    "name": "product_variants",
+    "columns": [
+      {"name": "id", "type": "uuid", "primary_key": true},
+      {"name": "product_id", "type": "uuid", "nullable": false, "references": "products.id"},
+      {"name": "name", "type": "text", "nullable": false},
+      {"name": "sku", "type": "text", "nullable": true},
+      {"name": "price_cents", "type": "integer", "nullable": false},
+      {"name": "inventory", "type": "integer", "nullable": false, "default": "0"},
+      {"name": "created_at", "type": "timestamp", "nullable": false, "default": "now()"},
+      {"name": "updated_at", "type": "timestamp", "nullable": false, "default": "now()"}
+    ]
+  },
+  {
+    "name": "carts",
+    "columns": [
+      {"name": "id", "type": "uuid", "primary_key": true},
+      {"name": "session_id", "type": "text", "nullable": false},
+      {"name": "discount_code", "type": "text", "nullable": true},
+      {"name": "discount_cents", "type": "integer", "nullable": false, "default": "0"},
+      {"name": "created_at", "type": "timestamp", "nullable": false, "default": "now()"},
+      {"name": "updated_at", "type": "timestamp", "nullable": false, "default": "now()"}
+    ]
+  },
+  {
+    "name": "cart_items",
+    "columns": [
+      {"name": "id", "type": "uuid", "primary_key": true},
+      {"name": "cart_id", "type": "uuid", "nullable": false, "references": "carts.id"},
+      {"name": "product_id", "type": "uuid", "nullable": false, "references": "products.id"},
+      {"name": "variant_id", "type": "uuid", "nullable": true, "references": "product_variants.id"},
+      {"name": "quantity", "type": "integer", "nullable": false, "default": "1"},
+      {"name": "price_at_add_cents", "type": "integer", "nullable": false},
+      {"name": "created_at", "type": "timestamp", "nullable": false, "default": "now()"}
+    ]
+  },
+  {
+    "name": "orders",
+    "columns": [
+      {"name": "id", "type": "uuid", "primary_key": true},
+      {"name": "order_number", "type": "text", "nullable": false},
+      {"name": "email", "type": "text", "nullable": false},
+      {"name": "shipping_address", "type": "jsonb", "nullable": true},
+      {"name": "total_cents", "type": "integer", "nullable": false},
+      {"name": "status", "type": "text", "nullable": false, "default": "'pending'"},
+      {"name": "payment_provider", "type": "text", "nullable": true},
+      {"name": "payment_id", "type": "text", "nullable": true},
+      {"name": "created_at", "type": "timestamp", "nullable": false, "default": "now()"},
+      {"name": "updated_at", "type": "timestamp", "nullable": false, "default": "now()"}
+    ]
+  },
+  {
+    "name": "order_items",
+    "columns": [
+      {"name": "id", "type": "uuid", "primary_key": true},
+      {"name": "order_id", "type": "uuid", "nullable": false, "references": "orders.id"},
+      {"name": "product_id", "type": "uuid", "nullable": true},
+      {"name": "variant_id", "type": "uuid", "nullable": true},
+      {"name": "product_name", "type": "text", "nullable": false},
+      {"name": "quantity", "type": "integer", "nullable": false},
+      {"name": "price_cents", "type": "integer", "nullable": false},
+      {"name": "created_at", "type": "timestamp", "nullable": false, "default": "now()"}
+    ]
+  },
+  {
+    "name": "discounts",
+    "columns": [
+      {"name": "id", "type": "uuid", "primary_key": true},
+      {"name": "code", "type": "text", "nullable": false},
+      {"name": "type", "type": "text", "nullable": false},
+      {"name": "value", "type": "integer", "nullable": false},
+      {"name": "min_order_cents", "type": "integer", "nullable": false, "default": "0"},
+      {"name": "max_uses", "type": "integer", "nullable": false, "default": "0"},
+      {"name": "used_count", "type": "integer", "nullable": false, "default": "0"},
+      {"name": "starts_at", "type": "timestamp", "nullable": true},
+      {"name": "ends_at", "type": "timestamp", "nullable": true},
+      {"name": "created_at", "type": "timestamp", "nullable": false, "default": "now()"},
+      {"name": "updated_at", "type": "timestamp", "nullable": false, "default": "now()"}
+    ]
+  }
+]`

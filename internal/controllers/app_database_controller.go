@@ -1,12 +1,15 @@
 package controllers
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
 
 	"github.com/knid/wemob/internal/responses"
+
+	_ "github.com/lib/pq"
 )
 
 // scopeKind describes how a table's rows are scoped to a specific app project.
@@ -53,6 +56,44 @@ var appScopedTables = map[string]appScopedTable{
 func IsSystemTable(name string) bool {
 	_, allowed := appScopedTables[name]
 	return !allowed
+}
+
+// isNeonBacked returns true if the project has a Neon integration.
+func (c *Controller) isNeonBacked(projectID string) bool {
+	neon := c.getNeonIntegration(projectID)
+	if neon != nil {
+		slog.Info("isNeonBacked: found Neon integration", "project_id", projectID, "integration_id", neon.ID)
+		return true
+	}
+	slog.Info("isNeonBacked: no Neon integration found", "project_id", projectID)
+	return false
+}
+
+// isEcommerceProject returns true if the project is of type "ecommerce".
+func (c *Controller) isEcommerceProject(projectID string) bool {
+	project, err := c.DB.GetAppProjectByID(projectID)
+	if err != nil {
+		return false
+	}
+	return project.ProjectType == "ecommerce"
+}
+
+// neonConnString returns the DATABASE_URL from the Neon integration, or "".
+func (c *Controller) neonConnString(projectID string) string {
+	integ := c.getNeonIntegration(projectID)
+	if integ == nil {
+		return ""
+	}
+	return integ.EnvVars["DATABASE_URL"]
+}
+
+// openNeonDB opens a direct connection to the app's Neon database.
+func (c *Controller) openNeonDB(projectID string) (*sql.DB, error) {
+	connStr := c.neonConnString(projectID)
+	if connStr == "" {
+		return nil, fmt.Errorf("no Neon connection string found")
+	}
+	return sql.Open("postgres", neonConnStrWithEndpoint(connStr))
 }
 
 // scopeWhereClause returns a WHERE clause and args that limit rows to the given project.
@@ -118,6 +159,17 @@ func (c *Controller) resolveStoreID(projectID string) string {
 
 // GetDatabaseSchema returns the allowlisted tables with their column definitions.
 func (c *Controller) GetDatabaseSchema(projectID string) (*responses.DatabaseSchemaResponse, error) {
+	// For Neon-backed apps, query the Neon database directly
+	if c.isNeonBacked(projectID) {
+		return c.getNeonDatabaseSchema(projectID)
+	}
+
+	// Only show platform ecommerce tables for ecommerce projects that use the storefront.
+	// Non-ecommerce apps without Neon have no database to show.
+	if !c.isEcommerceProject(projectID) {
+		return &responses.DatabaseSchemaResponse{Tables: []responses.DatabaseSchemaTable{}}, nil
+	}
+
 	raw, err := c.ExtractSchemaFromPlatformDB()
 	if err != nil {
 		return nil, fmt.Errorf("failed to extract schema: %w", err)
@@ -134,6 +186,75 @@ func (c *Controller) GetDatabaseSchema(projectID string) (*responses.DatabaseSch
 		if _, ok := appScopedTables[t.Name]; ok {
 			tables = append(tables, t)
 		}
+	}
+
+	return &responses.DatabaseSchemaResponse{Tables: tables}, nil
+}
+
+// getNeonDatabaseSchema queries a Neon database's information_schema to get all tables.
+func (c *Controller) getNeonDatabaseSchema(projectID string) (*responses.DatabaseSchemaResponse, error) {
+	db, err := c.openNeonDB(projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer db.Close()
+
+	// Query all user tables
+	tableRows, err := db.Query(`
+		SELECT table_name FROM information_schema.tables
+		WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
+		ORDER BY table_name
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query tables: %w", err)
+	}
+	defer tableRows.Close()
+
+	var tableNames []string
+	for tableRows.Next() {
+		var name string
+		if err := tableRows.Scan(&name); err != nil {
+			return nil, fmt.Errorf("failed to scan table name: %w", err)
+		}
+		tableNames = append(tableNames, name)
+	}
+
+	var tables []responses.DatabaseSchemaTable
+	for _, tableName := range tableNames {
+		colRows, err := db.Query(`
+			SELECT
+				c.column_name,
+				c.data_type,
+				c.is_nullable = 'YES' AS nullable,
+				COALESCE(tc.constraint_type = 'PRIMARY KEY', false) AS is_pk
+			FROM information_schema.columns c
+			LEFT JOIN information_schema.key_column_usage kcu
+				ON c.table_name = kcu.table_name AND c.column_name = kcu.column_name AND c.table_schema = kcu.table_schema
+			LEFT JOIN information_schema.table_constraints tc
+				ON kcu.constraint_name = tc.constraint_name AND tc.constraint_type = 'PRIMARY KEY'
+			WHERE c.table_schema = 'public' AND c.table_name = $1
+			ORDER BY c.ordinal_position
+		`, tableName)
+		if err != nil {
+			slog.Warn("Failed to query columns for Neon table", "table", tableName, "error", err)
+			continue
+		}
+
+		var columns []responses.DatabaseSchemaColumn
+		for colRows.Next() {
+			var col responses.DatabaseSchemaColumn
+			if err := colRows.Scan(&col.Name, &col.Type, &col.Nullable, &col.IsPrimaryKey); err != nil {
+				colRows.Close()
+				return nil, fmt.Errorf("failed to scan column: %w", err)
+			}
+			columns = append(columns, col)
+		}
+		colRows.Close()
+
+		tables = append(tables, responses.DatabaseSchemaTable{
+			Name:    tableName,
+			Columns: columns,
+		})
 	}
 
 	return &responses.DatabaseSchemaResponse{Tables: tables}, nil
@@ -165,6 +286,15 @@ func (c *Controller) validateAppTable(tableName string) (*schemaTable, error) {
 
 // GetTableRows queries paginated rows scoped to the given app project.
 func (c *Controller) GetTableRows(projectID, tableName string, page, pageSize int, sortCol, sortDir string) (*responses.TableRowsResponse, error) {
+	// For Neon-backed apps, query the Neon database directly (no scoping needed)
+	if c.isNeonBacked(projectID) {
+		return c.getNeonTableRows(projectID, tableName, page, pageSize, sortCol, sortDir)
+	}
+
+	if !c.isEcommerceProject(projectID) {
+		return nil, fmt.Errorf("no database available for this project")
+	}
+
 	targetTable, err := c.validateAppTable(tableName)
 	if err != nil {
 		return nil, err
@@ -255,6 +385,15 @@ func (c *Controller) GetTableRows(projectID, tableName string, page, pageSize in
 
 // InsertTableRow inserts a new row, auto-injecting the scoping FK.
 func (c *Controller) InsertTableRow(projectID, tableName string, data map[string]any) (map[string]any, error) {
+	// For Neon-backed apps, insert directly into the Neon database
+	if c.isNeonBacked(projectID) {
+		return c.insertNeonTableRow(projectID, tableName, data)
+	}
+
+	if !c.isEcommerceProject(projectID) {
+		return nil, fmt.Errorf("no database available for this project")
+	}
+
 	_, err := c.validateAppTable(tableName)
 	if err != nil {
 		return nil, err
@@ -343,6 +482,15 @@ func (c *Controller) InsertTableRow(projectID, tableName string, data map[string
 
 // DeleteTableRow deletes a row, ensuring it belongs to the given app project.
 func (c *Controller) DeleteTableRow(projectID, tableName string, primaryKey map[string]any) error {
+	// For Neon-backed apps, delete directly from the Neon database
+	if c.isNeonBacked(projectID) {
+		return c.deleteNeonTableRow(projectID, tableName, primaryKey)
+	}
+
+	if !c.isEcommerceProject(projectID) {
+		return fmt.Errorf("no database available for this project")
+	}
+
 	if _, ok := appScopedTables[tableName]; !ok {
 		return fmt.Errorf("access denied: table %q is not available", tableName)
 	}
@@ -406,6 +554,15 @@ func (c *Controller) DeleteTableRow(projectID, tableName string, primaryKey map[
 
 // UpdateTableCell updates a single cell, ensuring the row belongs to the given app project.
 func (c *Controller) UpdateTableCell(projectID, tableName, column string, value any, primaryKey map[string]any) error {
+	// For Neon-backed apps, update directly in the Neon database
+	if c.isNeonBacked(projectID) {
+		return c.updateNeonTableCell(projectID, tableName, column, value, primaryKey)
+	}
+
+	if !c.isEcommerceProject(projectID) {
+		return fmt.Errorf("no database available for this project")
+	}
+
 	if _, ok := appScopedTables[tableName]; !ok {
 		return fmt.Errorf("access denied: table %q is not available", tableName)
 	}
@@ -484,6 +641,205 @@ func (c *Controller) verifyFKBelongsToStore(data map[string]any, fkColumn, paren
 	).Scan(&count)
 	if err != nil || count == 0 {
 		return fmt.Errorf("%s does not belong to this app", fkColumn)
+	}
+	return nil
+}
+
+// --- Neon-backed CRUD operations ---
+
+// getNeonTableRows queries rows from a Neon database table (no scoping — entire DB is the app's own).
+func (c *Controller) getNeonTableRows(projectID, tableName string, page, pageSize int, sortCol, sortDir string) (*responses.TableRowsResponse, error) {
+	neonDB, err := c.openNeonDB(projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer neonDB.Close()
+
+	quotedTable := quoteIdentifier(tableName)
+
+	// Count total rows
+	var totalCount int
+	if err := neonDB.QueryRow(fmt.Sprintf("SELECT COUNT(*) FROM %s", quotedTable)).Scan(&totalCount); err != nil {
+		return nil, fmt.Errorf("count query failed: %w", err)
+	}
+
+	// Build SELECT query
+	selectSQL := fmt.Sprintf("SELECT * FROM %s", quotedTable)
+	if sortCol != "" {
+		dir := "ASC"
+		if strings.ToUpper(sortDir) == "DESC" {
+			dir = "DESC"
+		}
+		selectSQL += fmt.Sprintf(" ORDER BY %s %s", quoteIdentifier(sortCol), dir)
+	}
+
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 100 {
+		pageSize = 50
+	}
+	offset := (page - 1) * pageSize
+	selectSQL += fmt.Sprintf(" LIMIT $1 OFFSET $2")
+
+	rows, err := neonDB.Query(selectSQL, pageSize, offset)
+	if err != nil {
+		return nil, fmt.Errorf("query failed: %w", err)
+	}
+	defer rows.Close()
+
+	results, err := scanRowsToMaps(rows)
+	if err != nil {
+		return nil, err
+	}
+
+	// Get column info from information_schema
+	colRows, err := neonDB.Query(`
+		SELECT
+			c.column_name,
+			c.data_type,
+			c.is_nullable = 'YES' AS nullable,
+			COALESCE(tc.constraint_type = 'PRIMARY KEY', false) AS is_pk
+		FROM information_schema.columns c
+		LEFT JOIN information_schema.key_column_usage kcu
+			ON c.table_name = kcu.table_name AND c.column_name = kcu.column_name AND c.table_schema = kcu.table_schema
+		LEFT JOIN information_schema.table_constraints tc
+			ON kcu.constraint_name = tc.constraint_name AND tc.constraint_type = 'PRIMARY KEY'
+		WHERE c.table_schema = 'public' AND c.table_name = $1
+		ORDER BY c.ordinal_position
+	`, tableName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get column info: %w", err)
+	}
+	defer colRows.Close()
+
+	var columns []responses.DatabaseSchemaColumn
+	for colRows.Next() {
+		var col responses.DatabaseSchemaColumn
+		if err := colRows.Scan(&col.Name, &col.Type, &col.Nullable, &col.IsPrimaryKey); err != nil {
+			return nil, fmt.Errorf("failed to scan column info: %w", err)
+		}
+		columns = append(columns, col)
+	}
+
+	return &responses.TableRowsResponse{
+		Rows:       results,
+		TotalCount: totalCount,
+		Page:       page,
+		PageSize:   pageSize,
+		Columns:    columns,
+	}, nil
+}
+
+// insertNeonTableRow inserts a row directly into a Neon database table.
+func (c *Controller) insertNeonTableRow(projectID, tableName string, data map[string]any) (map[string]any, error) {
+	if len(data) == 0 {
+		return nil, fmt.Errorf("no data provided")
+	}
+
+	neonDB, err := c.openNeonDB(projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer neonDB.Close()
+
+	var cols []string
+	var placeholders []string
+	var args []any
+	idx := 1
+	for col, val := range data {
+		cols = append(cols, quoteIdentifier(col))
+		placeholders = append(placeholders, fmt.Sprintf("$%d", idx))
+		args = append(args, val)
+		idx++
+	}
+
+	sqlStr := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s) RETURNING *",
+		quoteIdentifier(tableName),
+		strings.Join(cols, ", "),
+		strings.Join(placeholders, ", "),
+	)
+
+	rows, err := neonDB.Query(sqlStr, args...)
+	if err != nil {
+		return nil, fmt.Errorf("insert failed: %w", err)
+	}
+	defer rows.Close()
+
+	results, err := scanRowsToMaps(rows)
+	if err != nil {
+		return nil, err
+	}
+	if len(results) == 0 {
+		return nil, fmt.Errorf("insert returned no rows")
+	}
+	return results[0], nil
+}
+
+// deleteNeonTableRow deletes a row from a Neon database table.
+func (c *Controller) deleteNeonTableRow(projectID, tableName string, primaryKey map[string]any) error {
+	neonDB, err := c.openNeonDB(projectID)
+	if err != nil {
+		return err
+	}
+	defer neonDB.Close()
+
+	var pkParts []string
+	var args []any
+	idx := 1
+	for col, val := range primaryKey {
+		pkParts = append(pkParts, fmt.Sprintf("%s = $%d", quoteIdentifier(col), idx))
+		args = append(args, val)
+		idx++
+	}
+
+	sqlStr := fmt.Sprintf("DELETE FROM %s WHERE %s",
+		quoteIdentifier(tableName),
+		strings.Join(pkParts, " AND "),
+	)
+
+	result, err := neonDB.Exec(sqlStr, args...)
+	if err != nil {
+		return fmt.Errorf("delete failed: %w", err)
+	}
+	rowsAffected, _ := result.RowsAffected()
+	if rowsAffected == 0 {
+		return fmt.Errorf("no rows deleted — row may not exist")
+	}
+	return nil
+}
+
+// updateNeonTableCell updates a single cell in a Neon database table.
+func (c *Controller) updateNeonTableCell(projectID, tableName, column string, value any, primaryKey map[string]any) error {
+	neonDB, err := c.openNeonDB(projectID)
+	if err != nil {
+		return err
+	}
+	defer neonDB.Close()
+
+	args := []any{value}
+	paramIdx := 2
+
+	var pkParts []string
+	for k, v := range primaryKey {
+		pkParts = append(pkParts, fmt.Sprintf("%s = $%d", quoteIdentifier(k), paramIdx))
+		args = append(args, v)
+		paramIdx++
+	}
+
+	sqlStr := fmt.Sprintf("UPDATE %s SET %s = $1 WHERE %s",
+		quoteIdentifier(tableName),
+		quoteIdentifier(column),
+		strings.Join(pkParts, " AND "),
+	)
+
+	result, err := neonDB.Exec(sqlStr, args...)
+	if err != nil {
+		return fmt.Errorf("update failed: %w", err)
+	}
+	rowsAffected, _ := result.RowsAffected()
+	if rowsAffected == 0 {
+		return fmt.Errorf("no rows updated — row may not exist")
 	}
 	return nil
 }

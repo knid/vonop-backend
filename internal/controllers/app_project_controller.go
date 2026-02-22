@@ -134,6 +134,20 @@ func (c *Controller) DeleteAppProject(id string, user *models.User) error {
 	if err != nil {
 		return err
 	}
+
+	// Clean up Neon database project (best-effort)
+	if c.NeonService != nil {
+		if neonInteg := c.getNeonIntegration(project.ID.String()); neonInteg != nil {
+			if neonProjectID, ok := neonInteg.Config["project_id"].(string); ok && neonProjectID != "" {
+				if err := c.NeonService.DeleteProject(neonProjectID); err != nil {
+					slog.Warn("Failed to delete Neon project during app deletion", "error", err, "neon_project_id", neonProjectID, "app_project_id", project.ID)
+				} else {
+					slog.Info("Deleted Neon project", "neon_project_id", neonProjectID, "app_project_id", project.ID)
+				}
+			}
+		}
+	}
+
 	return c.DB.DeleteAppProject(project)
 }
 

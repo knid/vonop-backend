@@ -24,6 +24,7 @@ import (
 	crmServices "github.com/knid/wemob/internal/services/crm"
 	emailServices "github.com/knid/wemob/internal/services/email"
 	"github.com/knid/wemob/internal/services/mcpclient"
+	"github.com/knid/wemob/internal/services/neon"
 	"github.com/knid/wemob/internal/services/preview"
 	"github.com/knid/wemob/internal/services/secret"
 	"github.com/knid/wemob/internal/services/storage"
@@ -147,6 +148,8 @@ func createSchema(db *bun.DB) error {
 		`ALTER TABLE standart_user_limits ADD COLUMN IF NOT EXISTS can_build_flutter boolean NOT NULL DEFAULT false`,
 		// Conversation summary for older message summarization
 		`ALTER TABLE app_conversations ADD COLUMN IF NOT EXISTS summary text DEFAULT ''`,
+		// Data models for per-app Neon database provisioning
+		`ALTER TABLE app_projects ADD COLUMN IF NOT EXISTS data_models jsonb DEFAULT '[]'`,
 		// soft_delete column for all tables that use bun:",soft_delete,nullzero"
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
 		`ALTER TABLE user_notifications ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
@@ -212,6 +215,29 @@ func createSchema(db *bun.DB) error {
 	for _, stmt := range alterStatements {
 		if _, err := db.ExecContext(context.Background(), stmt); err != nil {
 			slog.Error("alter table failed", "statement", stmt, "error", err)
+		}
+	}
+
+	// Drop legacy website builder tables (replaced by app_* tables in V2)
+	dropStatements := []string{
+		`DROP TABLE IF EXISTS website_form_submissions`,
+		`DROP TABLE IF EXISTS website_forms`,
+		`DROP TABLE IF EXISTS website_assets`,
+		`DROP TABLE IF EXISTS website_components`,
+		`DROP TABLE IF EXISTS website_conversations`,
+		`DROP TABLE IF EXISTS website_domains`,
+		`DROP TABLE IF EXISTS website_files`,
+		`DROP TABLE IF EXISTS website_integrations`,
+		`DROP TABLE IF EXISTS website_pages`,
+		`DROP TABLE IF EXISTS website_seos`,
+		`DROP TABLE IF EXISTS website_snapshots`,
+		`DROP TABLE IF EXISTS website_templates`,
+		`DROP TABLE IF EXISTS websites`,
+		`DROP TABLE IF EXISTS ai_generation_logs`,
+	}
+	for _, stmt := range dropStatements {
+		if _, err := db.ExecContext(context.Background(), stmt); err != nil {
+			slog.Warn("drop legacy table failed", "statement", stmt, "error", err)
 		}
 	}
 
@@ -301,6 +327,13 @@ func main() {
 		slog.Info("Preview service enabled", "url", previewURL)
 	}
 
+	// Neon service (optional — only enabled when API key is set)
+	var neonService *neon.Service
+	if neonKey := sm.GetSecret("NEON_API_KEY"); neonKey != "" {
+		neonService = neon.NewService(neonKey)
+		slog.Info("Neon database service enabled")
+	}
+
 	// PostHog client (optional — only enabled when API key is set)
 	var posthogClient posthog.Client
 	if phKey := sm.GetSecret("POSTHOG_API_KEY"); phKey != "" {
@@ -332,6 +365,7 @@ func main() {
 		sm,
 		vercelService,
 		previewService,
+		neonService,
 		nil, // MCP service initialized async below
 		posthogClient,
 	)
@@ -393,16 +427,12 @@ func main() {
 		// slog.LevelInfo  - log responses (excl. OPTIONS)
 		// slog.LevelWarn  - log 4xx and 5xx responses only (except for 429)
 		// slog.LevelError - log 5xx responses only
-		Level: slog.LevelInfo,
+		Level: slog.LevelWarn,
 
 		Schema:        httplog.SchemaOTEL,
 		RecoverPanics: true,
-		LogRequestBody: func(req *http.Request) bool {
-			return req.RequestURI != "/v1/users/login" && req.RequestURI != "/v1/users/register"
-		},
-		LogResponseBody: func(req *http.Request) bool {
-			return req.RequestURI != "/v1/users/login"
-		},
+		LogRequestBody:  func(req *http.Request) bool { return false },
+		LogResponseBody: func(req *http.Request) bool { return false },
 	}))
 
 	r.Use(func(next http.Handler) http.Handler {

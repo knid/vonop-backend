@@ -274,9 +274,9 @@ func (c *Controller) executeStoreOperation(store *models.Store, action string, d
 	case "create_product":
 		return "", c.createProductFromChat(store, data)
 	case "update_product":
-		return "", c.updateProductFromChat(data)
+		return "", c.updateProductFromChat(store, data)
 	case "delete_product":
-		return "", c.deleteProductFromChat(data)
+		return "", c.deleteProductFromChat(store, data)
 	case "create_variant":
 		return "", c.createVariantFromChat(store, data)
 	case "create_variant_with_options":
@@ -379,9 +379,45 @@ func (c *Controller) createProductFromChat(store *models.Store, data map[string]
 	return nil
 }
 
-func (c *Controller) updateProductFromChat(data map[string]any) error {
+func (c *Controller) findProductByAnyIdentifier(store *models.Store, data map[string]any) (*models.Product, error) {
 	idStr, _ := data["id"].(string)
-	product, err := c.DB.GetProductByID(idStr)
+
+	// 1. Try UUID lookup
+	if _, parseErr := uuid.Parse(idStr); parseErr == nil {
+		if p, err := c.DB.GetProductByID(idStr); err == nil {
+			return p, nil
+		}
+	}
+
+	// 2. Try slug lookup (from explicit slug field or from id field)
+	slug, _ := data["slug"].(string)
+	candidates := []string{slug, idStr}
+	for _, s := range candidates {
+		if s == "" {
+			continue
+		}
+		if p, err := c.DB.GetProductBySlug(store.ID.String(), s); err == nil {
+			return p, nil
+		}
+	}
+
+	// 3. Last resort: search by name among store products
+	products, err := c.DB.GetProductsByStoreID(store.ID.String())
+	if err != nil {
+		return nil, fmt.Errorf("product not found: %s", idStr)
+	}
+	nameQuery := strings.ToLower(idStr)
+	for i := range products {
+		if strings.ToLower(products[i].Name) == nameQuery || strings.ToLower(products[i].Slug) == nameQuery {
+			return &products[i], nil
+		}
+	}
+
+	return nil, fmt.Errorf("product not found: %s", idStr)
+}
+
+func (c *Controller) updateProductFromChat(store *models.Store, data map[string]any) error {
+	product, err := c.findProductByAnyIdentifier(store, data)
 	if err != nil {
 		return err
 	}
@@ -399,9 +435,8 @@ func (c *Controller) updateProductFromChat(data map[string]any) error {
 	return err
 }
 
-func (c *Controller) deleteProductFromChat(data map[string]any) error {
-	idStr, _ := data["id"].(string)
-	product, err := c.DB.GetProductByID(idStr)
+func (c *Controller) deleteProductFromChat(store *models.Store, data map[string]any) error {
+	product, err := c.findProductByAnyIdentifier(store, data)
 	if err != nil {
 		return err
 	}
