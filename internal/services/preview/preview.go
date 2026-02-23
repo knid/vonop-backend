@@ -110,8 +110,14 @@ func (s *Service) CreatePreview(projectID string, files map[string]string, envVa
 			return
 		}
 
-		// Wait a bit for the proxy server to be ready inside the machine
-		time.Sleep(3 * time.Second)
+		// Wait for the proxy server inside the machine to be ready (npm install runs first)
+		slog.Info("waiting for preview proxy to become healthy", "project_id", projectID)
+		if err := s.waitForHealth(previewURL, 120*time.Second); err != nil {
+			slog.Error("preview proxy never became healthy", "project_id", projectID, "error", err)
+			record.Status = "error"
+			_ = s.DB.UpdatePreviewMachine(record)
+			return
+		}
 
 		// Push files via sync endpoint
 		if err := s.syncFiles(previewURL, syncToken, files); err != nil {
@@ -119,11 +125,6 @@ func (s *Service) CreatePreview(projectID string, files map[string]string, envVa
 			record.Status = "error"
 			_ = s.DB.UpdatePreviewMachine(record)
 			return
-		}
-
-		// Wait for Next.js to become ready
-		if err := s.waitForHealth(previewURL, 120*time.Second); err != nil {
-			slog.Warn("preview health check failed, marking as ready anyway", "project_id", projectID, "error", err)
 		}
 
 		record.Status = "ready"
