@@ -29,6 +29,13 @@ func NewRateLimiter(client *redis.Client) *RateLimiter {
 func (rl *RateLimiter) RateLimit(limit int, window time.Duration, keyFunc func(r *http.Request) string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Never rate-limit CORS preflight requests — they are automatic
+			// browser overhead and blocking them breaks the actual request.
+			if r.Method == http.MethodOptions {
+				next.ServeHTTP(w, r)
+				return
+			}
+
 			key := fmt.Sprintf("rl:%s", keyFunc(r))
 			ctx := context.Background()
 
