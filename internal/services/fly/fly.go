@@ -204,10 +204,35 @@ func (s *Service) DestroyMachine(machineID string, force bool) error {
 }
 
 // WaitForState blocks until the machine reaches the desired state or the timeout elapses.
+// Uses a dedicated HTTP client whose timeout exceeds the Fly API long-poll duration.
 func (s *Service) WaitForState(machineID, state string, timeout time.Duration) error {
-	path := fmt.Sprintf("/machines/%s/wait?state=%s&timeout=%d", machineID, state, int(timeout.Seconds()))
-	_, err := s.doRequest("GET", path, nil)
-	return err
+	if err := s.limiter.Wait(context.Background()); err != nil {
+		return fmt.Errorf("rate limiter: %w", err)
+	}
+
+	url := fmt.Sprintf("%s/apps/%s/machines/%s/wait?state=%s&timeout=%d",
+		flyAPIBase, s.AppName, machineID, state, int(timeout.Seconds()))
+
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+s.APIToken)
+
+	// HTTP client timeout must exceed the Fly long-poll timeout + buffer
+	longPollClient := &http.Client{Timeout: timeout + 15*time.Second}
+	resp, err := longPollClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("wait request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("wait failed: status %d: %s", resp.StatusCode, string(body))
+	}
+
+	return nil
 }
 
 // ListMachines returns all machines in the app.
