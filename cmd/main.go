@@ -434,7 +434,7 @@ func main() {
 		MaxAge:           300,
 	}))
 
-	r.Use(rateLimiter.RateLimit(600, time.Minute, appMiddleware.IPKey))
+	r.Use(rateLimiter.RateLimit(1200, time.Minute, appMiddleware.IPKey))
 
 	r.Use(httplog.RequestLogger(logger, &httplog.Options{
 		// Level defines the verbosity of the request logs:
@@ -485,7 +485,7 @@ func main() {
 			r.Post("/store/iyzico/{storeId}", httpViews.HandleStoreIyzicoWebhook)
 		})
 		r.Route("/v1", func(r chi.Router) {
-			r.Use(rateLimiter.RateLimit(300, time.Minute, appMiddleware.UserKey))
+			r.Use(rateLimiter.RateLimit(600, time.Minute, appMiddleware.UserKey))
 			r.Handle("/static/*", http.StripPrefix("/v1/static/", http.FileServer(utils.NoDirFileSystem{FS: staticDir})))
 			r.Route("/storage", func(r chi.Router) {
 				r.Route("/credentials", func(r chi.Router) {
@@ -701,25 +701,25 @@ func main() {
 
 			// Web analytics collection (public, rate-limited per IP)
 			r.Route("/analytics", func(r chi.Router) {
-				r.Use(rateLimiter.RateLimit(120, time.Minute, appMiddleware.IPKey))
+				r.Use(rateLimiter.RateLimit(240, time.Minute, appMiddleware.IPKey))
 				r.Post("/collect", httpViews.CollectAnalytics)
 				r.Post("/collect/batch", httpViews.CollectAnalyticsBatch)
 			})
 		})
 		// V2 App Builder routes
 		r.Route("/v2", func(r chi.Router) {
-			r.Use(rateLimiter.RateLimit(300, time.Minute, appMiddleware.UserKey))
+			r.Use(rateLimiter.RateLimit(600, time.Minute, appMiddleware.UserKey))
 
 			r.Route("/apps", func(r chi.Router) {
 				r.Use(appMiddleware.RequireAuth(controller))
 				r.Use(appMiddleware.RequireSubscription("active", "trial"))
 
 				// Generation endpoints (AI rate limited)
-				r.With(rateLimiter.RateLimit(10, time.Minute, appMiddleware.AIUserKey)).Post("/generate", httpViews.GenerateApp)
-				r.With(rateLimiter.RateLimit(10, time.Minute, appMiddleware.AIUserKey)).Post("/generate/ecommerce", httpViews.GenerateEcommerceApp)
-				r.With(rateLimiter.RateLimit(10, time.Minute, appMiddleware.AIUserKey)).Post("/generate/from-image", httpViews.GenerateAppFromImage)
-				r.With(rateLimiter.RateLimit(10, time.Minute, appMiddleware.AIUserKey)).Post("/generate/stream", httpViews.GenerateAppStream)
-				r.With(rateLimiter.RateLimit(10, time.Minute, appMiddleware.AIUserKey)).Post("/generate/ecommerce/stream", httpViews.GenerateEcommerceAppStream)
+				r.With(rateLimiter.RateLimit(20, time.Minute, appMiddleware.AIUserKey)).Post("/generate", httpViews.GenerateApp)
+				r.With(rateLimiter.RateLimit(20, time.Minute, appMiddleware.AIUserKey)).Post("/generate/ecommerce", httpViews.GenerateEcommerceApp)
+				r.With(rateLimiter.RateLimit(20, time.Minute, appMiddleware.AIUserKey)).Post("/generate/from-image", httpViews.GenerateAppFromImage)
+				r.With(rateLimiter.RateLimit(20, time.Minute, appMiddleware.AIUserKey)).Post("/generate/stream", httpViews.GenerateAppStream)
+				r.With(rateLimiter.RateLimit(20, time.Minute, appMiddleware.AIUserKey)).Post("/generate/ecommerce/stream", httpViews.GenerateEcommerceAppStream)
 
 				// Job clarification endpoint
 				r.Post("/jobs/{jobId}/clarify", httpViews.ClarifyJob)
@@ -738,7 +738,7 @@ func main() {
 					r.Delete("/files/{fid}", httpViews.DeleteAppFile)
 
 					// Chat
-					r.With(rateLimiter.RateLimit(10, time.Minute, appMiddleware.AIUserKey)).Post("/chat", httpViews.ChatApp)
+					r.With(rateLimiter.RateLimit(20, time.Minute, appMiddleware.AIUserKey)).Post("/chat", httpViews.ChatApp)
 					r.Get("/conversation", httpViews.GetAppConversation)
 					r.Delete("/conversation", httpViews.ClearAppConversation)
 
@@ -799,7 +799,7 @@ func main() {
 
 					// Dashboard analytics
 					r.Route("/dashboard", func(r chi.Router) {
-						r.With(rateLimiter.RateLimit(10, time.Minute, appMiddleware.AIUserKey)).Post("/", httpViews.CreateDashboard)
+						r.With(rateLimiter.RateLimit(20, time.Minute, appMiddleware.AIUserKey)).Post("/", httpViews.CreateDashboard)
 						r.Get("/", httpViews.GetDashboard)
 						r.Put("/", httpViews.UpdateDashboard)
 						r.Delete("/", httpViews.DeleteDashboard)
@@ -814,10 +814,10 @@ func main() {
 
 						r.Get("/data", httpViews.GetDashboardData)
 
-						r.With(rateLimiter.RateLimit(10, time.Minute, appMiddleware.AIUserKey)).Post("/chat", httpViews.ChatDashboard)
+						r.With(rateLimiter.RateLimit(20, time.Minute, appMiddleware.AIUserKey)).Post("/chat", httpViews.ChatDashboard)
 
 						r.Get("/schema", httpViews.GetDashboardSchema)
-						r.With(rateLimiter.RateLimit(10, time.Minute, appMiddleware.AIUserKey)).Post("/schema/refresh", httpViews.RefreshDashboardSchema)
+						r.With(rateLimiter.RateLimit(20, time.Minute, appMiddleware.AIUserKey)).Post("/schema/refresh", httpViews.RefreshDashboardSchema)
 					})
 
 					// Database Manager
@@ -847,7 +847,7 @@ func main() {
 					r.Route("/store", func(r chi.Router) {
 						r.Get("/", httpViews.GetAppStore)
 						r.Put("/settings", httpViews.UpdateAppStoreSettings)
-						r.With(rateLimiter.RateLimit(10, time.Minute, appMiddleware.AIUserKey)).Post("/chat", httpViews.ChatStoreManagement)
+						r.With(rateLimiter.RateLimit(20, time.Minute, appMiddleware.AIUserKey)).Post("/chat", httpViews.ChatStoreManagement)
 
 						r.Route("/products", func(r chi.Router) {
 							r.Get("/", httpViews.GetStoreProducts)
@@ -900,7 +900,7 @@ func main() {
 			// Public storefront (no auth, per-store-per-IP rate limiting)
 			r.Route("/storefront/{storeId}", func(r chi.Router) {
 				// Fix 3: Read endpoints — relaxed rate limit
-				r.Use(rateLimiter.RateLimit(60, time.Minute, appMiddleware.StorefrontIPKey))
+				r.Use(rateLimiter.RateLimit(120, time.Minute, appMiddleware.StorefrontIPKey))
 				r.Get("/config", httpViews.StorefrontGetStoreConfig)
 				r.Get("/products", httpViews.StorefrontGetProducts)
 				r.Get("/products/{slug}", httpViews.StorefrontGetProduct)
@@ -909,14 +909,14 @@ func main() {
 				r.Get("/orders/{orderId}", httpViews.StorefrontGetOrder)
 
 				// Fix 3: Write endpoints — tighter rate limit
-				r.With(rateLimiter.RateLimit(20, time.Minute, appMiddleware.StorefrontIPKey)).Post("/cart", httpViews.StorefrontCreateCart)
-				r.With(rateLimiter.RateLimit(20, time.Minute, appMiddleware.StorefrontIPKey)).Post("/cart/{sessionId}/items", httpViews.StorefrontAddCartItem)
-				r.With(rateLimiter.RateLimit(20, time.Minute, appMiddleware.StorefrontIPKey)).Put("/cart/{sessionId}/items/{itemId}", httpViews.StorefrontUpdateCartItem)
-				r.With(rateLimiter.RateLimit(20, time.Minute, appMiddleware.StorefrontIPKey)).Delete("/cart/{sessionId}/items/{itemId}", httpViews.StorefrontDeleteCartItem)
-				r.With(rateLimiter.RateLimit(20, time.Minute, appMiddleware.StorefrontIPKey)).Post("/cart/{sessionId}/discount", httpViews.StorefrontApplyDiscount)
-				r.With(rateLimiter.RateLimit(20, time.Minute, appMiddleware.StorefrontIPKey)).Delete("/cart/{sessionId}/discount", httpViews.StorefrontRemoveDiscount)
-				r.With(rateLimiter.RateLimit(10, time.Minute, appMiddleware.StorefrontIPKey)).Post("/checkout", httpViews.StorefrontCheckout)
-				r.With(rateLimiter.RateLimit(10, time.Minute, appMiddleware.StorefrontIPKey)).Post("/checkout/confirm", httpViews.StorefrontConfirmCheckout)
+				r.With(rateLimiter.RateLimit(40, time.Minute, appMiddleware.StorefrontIPKey)).Post("/cart", httpViews.StorefrontCreateCart)
+				r.With(rateLimiter.RateLimit(40, time.Minute, appMiddleware.StorefrontIPKey)).Post("/cart/{sessionId}/items", httpViews.StorefrontAddCartItem)
+				r.With(rateLimiter.RateLimit(40, time.Minute, appMiddleware.StorefrontIPKey)).Put("/cart/{sessionId}/items/{itemId}", httpViews.StorefrontUpdateCartItem)
+				r.With(rateLimiter.RateLimit(40, time.Minute, appMiddleware.StorefrontIPKey)).Delete("/cart/{sessionId}/items/{itemId}", httpViews.StorefrontDeleteCartItem)
+				r.With(rateLimiter.RateLimit(40, time.Minute, appMiddleware.StorefrontIPKey)).Post("/cart/{sessionId}/discount", httpViews.StorefrontApplyDiscount)
+				r.With(rateLimiter.RateLimit(40, time.Minute, appMiddleware.StorefrontIPKey)).Delete("/cart/{sessionId}/discount", httpViews.StorefrontRemoveDiscount)
+				r.With(rateLimiter.RateLimit(20, time.Minute, appMiddleware.StorefrontIPKey)).Post("/checkout", httpViews.StorefrontCheckout)
+				r.With(rateLimiter.RateLimit(20, time.Minute, appMiddleware.StorefrontIPKey)).Post("/checkout/confirm", httpViews.StorefrontConfirmCheckout)
 
 				// Fix 14: Iyzico payment callback
 				r.Post("/checkout/iyzico-callback", httpViews.StorefrontIyzicoCallback)
