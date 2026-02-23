@@ -1,13 +1,14 @@
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
-const { execFileSync } = require("child_process");
+const { execFile } = require("child_process");
 const httpProxy = require("http-proxy");
 
 const PORT = 3000;
 const NEXT_PORT = 3001;
 const SYNC_TOKEN = process.env.SYNC_TOKEN || "";
 const APP_DIR = "/app";
+const SETUP_MARKER = "/tmp/.setup-complete";
 
 const proxy = httpProxy.createProxyServer({
   target: `http://127.0.0.1:${NEXT_PORT}`,
@@ -52,17 +53,37 @@ function writeFiles(files) {
   return packageChanged;
 }
 
-function npmInstall() {
-  try {
-    execFileSync("npm", ["install", "--prefer-offline"], {
-      cwd: APP_DIR,
-      timeout: 120_000,
-      stdio: "pipe",
-    });
-    console.log("npm install completed");
-  } catch (e) {
-    console.error("npm install failed:", e.message);
+let bunInstallRunning = false;
+let bunInstallQueued = false;
+
+function bunInstall() {
+  // If startup setup hasn't finished, flag for later (avoid concurrent installs)
+  if (!fs.existsSync(SETUP_MARKER)) {
+    fs.writeFileSync("/tmp/.needs-bun-install", "", "utf8");
+    console.log("setup not complete, flagged for bun install after setup");
+    return;
   }
+
+  if (bunInstallRunning) {
+    bunInstallQueued = true;
+    console.log("bun install already running, queued for later");
+    return;
+  }
+
+  bunInstallRunning = true;
+  console.log("starting bun install...");
+  execFile("bun", ["install"], { cwd: APP_DIR, timeout: 60_000 }, (err) => {
+    bunInstallRunning = false;
+    if (err) {
+      console.error("bun install failed:", err.message);
+    } else {
+      console.log("bun install completed");
+    }
+    if (bunInstallQueued) {
+      bunInstallQueued = false;
+      bunInstall();
+    }
+  });
 }
 
 const server = http.createServer(async (req, res) => {
@@ -89,7 +110,7 @@ const server = http.createServer(async (req, res) => {
 
       const packageChanged = writeFiles(files);
       if (packageChanged) {
-        npmInstall();
+        bunInstall();
       }
 
       console.log(`synced ${count} files`);

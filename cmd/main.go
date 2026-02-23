@@ -341,13 +341,13 @@ func main() {
 		previewService = preview.NewService(flySvc, db, previewDomain)
 		slog.Info("Preview service enabled (Fly Machines)", "app", sm.GetSecret("FLY_PREVIEW_APP_NAME"), "domain", previewDomain)
 
-		// Background idle cleanup: stop machines idle >30min, destroy stopped >2h
+		// Background idle cleanup: stop machines idle >1h, destroy stopped >6h
 		go func() {
 			ticker := time.NewTicker(5 * time.Minute)
 			defer ticker.Stop()
 			for range ticker.C {
-				previewService.StopIdleMachines(30 * time.Minute)
-				previewService.DestroyStoppedMachines(2 * time.Hour)
+				previewService.StopIdleMachines(1 * time.Hour)
+				previewService.DestroyStoppedMachines(6 * time.Hour)
 			}
 		}()
 	}
