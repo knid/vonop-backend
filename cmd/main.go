@@ -434,7 +434,7 @@ func main() {
 		MaxAge:           300,
 	}))
 
-	r.Use(rateLimiter.RateLimit(100, time.Minute, appMiddleware.IPKey))
+	r.Use(rateLimiter.RateLimit(600, time.Minute, appMiddleware.IPKey))
 
 	r.Use(httplog.RequestLogger(logger, &httplog.Options{
 		// Level defines the verbosity of the request logs:
