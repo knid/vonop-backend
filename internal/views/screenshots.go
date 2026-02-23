@@ -11,6 +11,7 @@ import (
 	"github.com/go-playground/validator/v10"
 	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/constants"
+	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/utils"
 	"github.com/knid/wemob/internal/utils/external"
@@ -33,6 +34,18 @@ func (v *HttpViews) AutoGenerateScreenshots(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+	if requireActiveSubscription(w, user) {
+		return
+	}
+	if v.checkMinimumCredits(w, user) {
+		return
+	}
+
 	html, err := utils.FetchHTML(autoGenerateScreenshotsReq.URL, v.Controller.SecretManager.GetSecret("PROXY_HOST"), v.Controller.SecretManager.GetSecret("PROXY_AUTH"))
 	if err != nil {
 		log.Printf(" Error fetching page: %v", err)
@@ -50,7 +63,11 @@ func (v *HttpViews) AutoGenerateScreenshots(w http.ResponseWriter, r *http.Reque
 
 	data, _ := json.MarshalIndent(output, "", "  ")
 
-	outputJson, err := utils.GetJSONFromLLM(v.Controller.SecretManager.GetSecret("DEFAULT_LLM_MODEL"), constants.LINK_SELECTION_FOR_SCREENSHOTS_PROMPT, string(data), v.Controller.SecretManager.GetSecret("OPENROUTER_API_KEY"))
+	// Token tracking for post-hoc billing
+	tracker := utils.NewTokenTracker()
+	ctx := utils.WithTokenTracker(r.Context(), tracker)
+
+	outputJson, err := utils.GetJSONFromLLM(ctx, v.Controller.SecretManager.GetSecret("DEFAULT_LLM_MODEL"), constants.LINK_SELECTION_FOR_SCREENSHOTS_PROMPT, string(data), v.Controller.LLMProvider())
 	if err != nil {
 		utils.JSONErrorResponse(w, "Could not generate screenshots. Try again please.", http.StatusBadRequest)
 		return
@@ -124,6 +141,16 @@ func (v *HttpViews) AutoGenerateScreenshots(w http.ResponseWriter, r *http.Reque
 				screenshotLinks.Screenshots[0], screenshotLinks.Screenshots[i] = screenshotLinks.Screenshots[i], screenshotLinks.Screenshots[0]
 				break
 			}
+		}
+	}
+
+	// Post-hoc token-based billing
+	_, _, total, _ := tracker.Totals()
+	if total > 0 {
+		credits := models.TokensToCredits(total)
+		if err := v.Controller.DeductAICreditsUnchecked(user, credits, "screenshot_generate", ""); err != nil {
+			slog.Warn("failed to deduct AI credits from tokens", "error", err,
+				"user_id", user.ID, "credits", credits, "tokens", total)
 		}
 	}
 

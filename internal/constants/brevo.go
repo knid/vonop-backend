@@ -7,6 +7,7 @@ const (
 	BREVO_TICKET_COMMENTED_EMAIL_TEMPLATE_ID = 0
 	BREVO_PASSWORD_RESET_EMAIL_TEMPLATE_ID   = 10
 	BREVO_VERIFACTION_EMAIL_TEMPLATE_ID      = 11
+	BREVO_ORDER_NOTIFICATION_TEMPLATE_ID     = 12
 
 	BREVO_EVENT_NEW_USER                         = "new_user"
 	BREVO_EVENT_NEW_LOGIN                        = "new_login"
@@ -50,4 +51,12 @@ const (
 	BREVO_EVENT_PAYMENT_FAILED                   = "payment_failed"
 	BREVO_EVENT_PAYMENT_USER_ACTION_REQUIRED     = "payment_user_action_required"
 	BREVO_EVENT_UNHANDLED_EVENT                  = "unhandled_event"
+
+	// Usage alert events
+	BREVO_EVENT_USAGE_APPROACHING_LIMIT = "usage_approaching_limit"
+	BREVO_EVENT_USAGE_LIMIT_REACHED     = "usage_limit_reached"
+	BREVO_EVENT_TRIAL_HALFWAY           = "trial_halfway"
+	BREVO_EVENT_TRIAL_ENDING_SOON       = "trial_ending_soon"
+	BREVO_EVENT_AI_CREDITS_LOW          = "ai_credits_low"
+	BREVO_EVENT_AI_CREDITS_DEPLETED     = "ai_credits_depleted"
 )

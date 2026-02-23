@@ -7,6 +7,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/markbates/goth/gothic"
+	"github.com/posthog/posthog-go"
 )
 
 func (v *HttpViews) OAuthBegin(w http.ResponseWriter, r *http.Request) {
@@ -30,6 +31,14 @@ func (v *HttpViews) OAuthCallback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+
+	go func() {
+		if u, lookupErr := v.Controller.DB.GetUserByEmail(oauthUser.Email); lookupErr == nil {
+			v.Controller.TrackUserEvent(u, "user_oauth_logged_in", posthog.NewProperties().
+				Set("provider", "Google"))
+			v.Controller.IdentifyUser(u)
+		}
+	}()
 
 	url := fmt.Sprintf("https://dashboard.wemob.io/login/handleGoogle?token=%s", userLoginRes.Token)
 	http.Redirect(w, r, url, http.StatusTemporaryRedirect)

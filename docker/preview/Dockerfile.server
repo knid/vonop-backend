@@ -1,0 +1,23 @@
+FROM golang:1.24-alpine AS builder
+
+WORKDIR /app
+
+ENV CGO_ENABLED=0 GOOS=linux GOARCH=amd64
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+
+RUN go build -o /preview-server ./cmd/preview-server/
+
+FROM alpine:3.19
+
+RUN apk add --no-cache docker-cli curl
+
+COPY --from=builder /preview-server /usr/local/bin/preview-server
+
+EXPOSE 4000 80
+
+# Ensure Docker socket is accessible at runtime, then start server
+CMD sh -c "chmod 666 /var/run/docker.sock 2>/dev/null; exec preview-server"

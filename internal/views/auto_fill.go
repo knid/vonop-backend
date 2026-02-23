@@ -7,6 +7,7 @@ import (
 
 	"github.com/go-playground/validator/v10"
 	"github.com/knid/wemob/internal/constants"
+	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/utils"
 )
@@ -43,6 +44,18 @@ func (v *HttpViews) NavBarAutoFillWithAI(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+	if requireActiveSubscription(w, user) {
+		return
+	}
+	if v.checkMinimumCredits(w, user) {
+		return
+	}
+
 	html, err := utils.FetchHTML(navBarAutoFillWithAIReq.URL, v.Controller.SecretManager.GetSecret("PROXY_HOST"), v.Controller.SecretManager.GetSecret("PROXY_AUTH"))
 	if err != nil {
 		slog.Error("❌ Error fetching page", "error", err, "from", "AUTOFILL")
@@ -59,15 +72,27 @@ func (v *HttpViews) NavBarAutoFillWithAI(w http.ResponseWriter, r *http.Request)
 
 	data, _ := json.MarshalIndent(output, "", "  ")
 
-	outputJson, err := utils.GetJSONFromLLM(v.Controller.SecretManager.GetSecret("DEFAULT_LLM_MODEL"), constants.NAVBAR_ITEM_GENERATOR_PROMPT, string(data), v.Controller.SecretManager.GetSecret("OPENROUTER_API_KEY"))
+	// Token tracking for post-hoc billing
+	tracker := utils.NewTokenTracker()
+	ctx := utils.WithTokenTracker(r.Context(), tracker)
+
+	outputJson, err := utils.GetJSONFromLLM(ctx, v.Controller.SecretManager.GetSecret("DEFAULT_LLM_MODEL"), constants.NAVBAR_ITEM_GENERATOR_PROMPT, string(data), v.Controller.LLMProvider())
 	if err != nil {
 		utils.JSONErrorResponse(w, "Error generating items. Try again please.", http.StatusBadRequest)
 		return
 	}
 
+	// Post-hoc token-based billing
+	_, _, total, _ := tracker.Totals()
+	if total > 0 {
+		credits := models.TokensToCredits(total)
+		if err := v.Controller.DeductAICreditsUnchecked(user, credits, "navbar_autofill", ""); err != nil {
+			slog.Warn("failed to deduct AI credits from tokens", "error", err,
+				"user_id", user.ID, "credits", credits, "tokens", total)
+		}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(200)
 	w.Write([]byte(outputJson))
-	// utils.JSONResponse(w, outputJson, http.StatusOK)
-
 }
