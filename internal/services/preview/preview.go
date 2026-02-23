@@ -21,6 +21,7 @@ type Service struct {
 	Fly           *fly.Service
 	DB            *database.Database
 	PreviewDomain string // e.g. "preview.wemob.app"
+	FlyAppName    string // e.g. "wemob-previews" — for direct machine access
 	httpClient    *http.Client
 }
 
@@ -29,8 +30,9 @@ func NewService(flyService *fly.Service, db *database.Database, previewDomain st
 		Fly:           flyService,
 		DB:            db,
 		PreviewDomain: previewDomain,
+		FlyAppName:    flyService.AppName,
 		httpClient: &http.Client{
-			Timeout: 60 * time.Second,
+			Timeout: 120 * time.Second,
 		},
 	}
 }
@@ -112,7 +114,7 @@ func (s *Service) CreatePreview(projectID string, files map[string]string, envVa
 
 		// Wait for the proxy server inside the machine to be ready (npm install runs first)
 		slog.Info("waiting for preview proxy to become healthy", "project_id", projectID)
-		if err := s.waitForHealth(previewURL, 120*time.Second); err != nil {
+		if err := s.waitForHealth(machine.ID, 120*time.Second); err != nil {
 			slog.Error("preview proxy never became healthy", "project_id", projectID, "error", err)
 			record.Status = "error"
 			_ = s.DB.UpdatePreviewMachine(record)
@@ -120,7 +122,7 @@ func (s *Service) CreatePreview(projectID string, files map[string]string, envVa
 		}
 
 		// Push files via sync endpoint
-		if err := s.syncFiles(previewURL, syncToken, files); err != nil {
+		if err := s.syncFiles(machine.ID, syncToken, files); err != nil {
 			slog.Error("initial file sync failed", "project_id", projectID, "error", err)
 			record.Status = "error"
 			_ = s.DB.UpdatePreviewMachine(record)
@@ -151,7 +153,7 @@ func (s *Service) UpdateFiles(projectID string, files map[string]string) error {
 	record.LastAccessAt = time.Now()
 	_ = s.DB.UpdatePreviewMachine(record)
 
-	return s.syncFiles(record.PreviewURL, record.SyncToken, files)
+	return s.syncFiles(record.MachineID, record.SyncToken, files)
 }
 
 // UpdateEnvVars pushes a .env.local file via sync and restarts the machine if needed.
@@ -169,7 +171,7 @@ func (s *Service) UpdateEnvVars(projectID string, envVars map[string]string) err
 
 	// Push .env.local via sync
 	files := map[string]string{".env.local": envContent}
-	if err := s.syncFiles(record.PreviewURL, record.SyncToken, files); err != nil {
+	if err := s.syncFiles(record.MachineID, record.SyncToken, files); err != nil {
 		return fmt.Errorf("syncing env vars: %w", err)
 	}
 
@@ -319,8 +321,14 @@ func (s *Service) DestroyStoppedMachines(stoppedThreshold time.Duration) {
 	}
 }
 
-// syncFiles pushes files to the machine's /__wemob/sync endpoint.
-func (s *Service) syncFiles(previewURL, syncToken string, files map[string]string) error {
+// machineBaseURL returns the direct Fly URL for a machine, bypassing the router.
+// Uses the app's .fly.dev domain with Fly-Force-Instance-Id header.
+func (s *Service) machineBaseURL() string {
+	return fmt.Sprintf("https://%s.fly.dev", s.FlyAppName)
+}
+
+// syncFiles pushes files directly to a machine's /__wemob/sync endpoint.
+func (s *Service) syncFiles(machineID, syncToken string, files map[string]string) error {
 	body := map[string]interface{}{
 		"files": files,
 	}
@@ -330,13 +338,14 @@ func (s *Service) syncFiles(previewURL, syncToken string, files map[string]strin
 		return fmt.Errorf("marshaling sync payload: %w", err)
 	}
 
-	syncURL := previewURL + "/__wemob/sync"
+	syncURL := s.machineBaseURL() + "/__wemob/sync"
 	req, err := http.NewRequest("POST", syncURL, bytes.NewReader(data))
 	if err != nil {
 		return fmt.Errorf("creating sync request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+syncToken)
+	req.Header.Set("Fly-Force-Instance-Id", machineID)
 
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
@@ -353,14 +362,21 @@ func (s *Service) syncFiles(previewURL, syncToken string, files map[string]strin
 	return nil
 }
 
-// waitForHealth polls the /__wemob/health endpoint until it returns 200.
-func (s *Service) waitForHealth(previewURL string, timeout time.Duration) error {
+// waitForHealth polls a machine's /__wemob/health endpoint directly until it returns 200.
+func (s *Service) waitForHealth(machineID string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
-	healthURL := previewURL + "/__wemob/health"
+	healthURL := s.machineBaseURL() + "/__wemob/health"
 	client := &http.Client{Timeout: 5 * time.Second}
 
 	for time.Now().Before(deadline) {
-		resp, err := client.Get(healthURL)
+		req, err := http.NewRequest("GET", healthURL, nil)
+		if err != nil {
+			time.Sleep(2 * time.Second)
+			continue
+		}
+		req.Header.Set("Fly-Force-Instance-Id", machineID)
+
+		resp, err := client.Do(req)
 		if err == nil {
 			resp.Body.Close()
 			if resp.StatusCode == 200 {
