@@ -117,6 +117,8 @@ func createSchema(db *bun.DB) error {
 		(*models.AppDashboardPanel)(nil),
 		// Web analytics (deployed sites)
 		(*models.WebAnalyticsEvent)(nil),
+		// Notification tasks
+		(*models.AppNotificationTask)(nil),
 	}
 
 	for _, model := range models {
