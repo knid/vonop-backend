@@ -13,6 +13,11 @@ WORKDIR /app
 COPY package-template.json package.json
 RUN bun install
 
+# Create minimal app directory so Next.js can boot before files are synced
+RUN mkdir -p app && \
+    echo 'export default function RootLayout({ children }) { return <html><body>{children}</body></html> }' > app/layout.tsx && \
+    echo 'export default function Page() { return <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",fontFamily:"system-ui"}}>Loading preview...</div> }' > app/page.tsx
+
 # Startup script: start proxy, install extra deps if needed, then start Next.js
 COPY --chmod=755 <<'STARTUP' /start.sh
 #!/bin/sh
