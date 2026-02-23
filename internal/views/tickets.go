@@ -8,6 +8,7 @@ import (
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/utils"
+	"github.com/posthog/posthog-go"
 )
 
 func (v *HttpViews) CreateTicket(w http.ResponseWriter, r *http.Request) {
@@ -64,6 +65,10 @@ func (v *HttpViews) CreateTicket(w http.ResponseWriter, r *http.Request) {
 		"ticket_message": ticketCreateReq.Message,
 		"ticket_id":      ticket.ID.String(),
 	})
+
+	v.Controller.TrackUserEvent(user, "support_ticket_created", posthog.NewProperties().
+		Set("ticket_id", ticket.ID.String()).
+		Set("subject", ticketCreateReq.Subject))
 
 	utils.JSONResponse(w, map[string]string{}, http.StatusCreated)
 

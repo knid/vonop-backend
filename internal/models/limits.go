@@ -17,6 +17,14 @@ type StandartUserLimits struct {
 	CanUseAnalytics         bool      `bun:",notnull"`
 	CanRemoveBrandLogo      bool      `bun:",notnull"`
 	CanSeeActiveUsers       bool      `bun:",notnull"`
+	// AI limits
+	MonthlyAICredits       int  `bun:",notnull,default:0"`
+	// App builder limits
+	MonthlyAppCount    int  `bun:",notnull,default:0"`
+	MonthlyDeployCount int  `bun:",notnull,default:0"`
+	CanUseEcommerce    bool `bun:",notnull,default:false"`
+	CanDeployToVercel  bool `bun:",notnull,default:false"`
+	CanBuildFlutter    bool `bun:",notnull,default:false"`
 	CreatedAt               time.Time `bun:"created_at,nullzero,notnull,default:current_timestamp"`
 	UpdatedAt               time.Time `bun:"updated_at,nullzero,notnull,default:current_timestamp"`
 	DeletedAt               time.Time `bun:",soft_delete,nullzero"`

@@ -1,11 +1,11 @@
 package views
 
 import (
-	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 
 	"github.com/knid/wemob/internal/utils"
+	"github.com/posthog/posthog-go"
 	"github.com/stripe/stripe-go/v82"
 	"github.com/stripe/stripe-go/v82/checkout/session"
 )
@@ -18,7 +18,7 @@ func (v *HttpViews) StripeCheckout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fmt.Println("GETTED USER")
+	slog.Info("checkout: user authenticated", "user_id", user.ID.String())
 
 	priceID := r.URL.Query().Get("price")
 	mode := string(stripe.CheckoutSessionModeSubscription)
@@ -50,10 +50,14 @@ func (v *HttpViews) StripeCheckout(w http.ResponseWriter, r *http.Request) {
 	// Create the actual Stripe Checkout Session!
 	s, err := session.New(params)
 	if err != nil {
-		log.Printf("session.New: %v", err) // Log the detailed error
+		slog.Error("stripe checkout session creation failed", "error", err)
 		http.Error(w, "Failed to create checkout session. Please try again.", http.StatusInternalServerError)
 		return
 	}
+
+	v.Controller.TrackUserEvent(user, "checkout_started", posthog.NewProperties().
+		Set("price_id", priceID).
+		Set("trial_eligible", !user.TrialUsed))
 
 	utils.JSONResponse(w, map[string]string{"url": s.URL}, http.StatusCreated)
 	// Redirect the user's browser to Stripe's hosted checkout page!

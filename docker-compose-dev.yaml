@@ -3,12 +3,14 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.dev
-    volumes:
-      - .:/app
+    # volumes:
+    #   - .:/app
     ports:
       - "8001:8001"
     env_file:
       - ./.env.dev
+    environment:
+      - BUNDEBUG=1
     depends_on:
       - db
 
@@ -21,7 +23,7 @@ services:
     volumes:
       - db_data:/var/lib/postgresql/data
     ports:
-      - "5432:5432"
+      - "5433:5432"
 
 volumes:
   db_data:

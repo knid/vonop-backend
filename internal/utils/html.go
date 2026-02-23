@@ -119,11 +119,83 @@ func ExtractAllURLs(htmlContent string, baseURL string) []string {
 	return results
 }
 
-func CleanLLMOutput(raw string) string {
-	raw = strings.TrimSpace(raw)
-	raw = strings.TrimPrefix(raw, "```json")
-	raw = strings.TrimPrefix(raw, "json")
-	raw = strings.TrimPrefix(raw, "```")
-	raw = strings.TrimSuffix(raw, "```")
-	return strings.TrimSpace(raw)
+// StripCodeFences removes markdown code fences (```lang ... ```) from LLM output.
+// Searches anywhere in the content, not just at the start, to handle preamble text.
+func StripCodeFences(content string) string {
+	content = strings.TrimSpace(content)
+
+	idx := strings.Index(content, "```")
+	if idx < 0 {
+		return content
+	}
+
+	// Skip past the opening fence line (e.g. "```tsx\n")
+	inner := content[idx+3:]
+	if nlIdx := strings.Index(inner, "\n"); nlIdx >= 0 {
+		inner = inner[nlIdx+1:]
+	}
+
+	// Find the last closing fence
+	if closingIdx := strings.LastIndex(inner, "\n```"); closingIdx >= 0 {
+		return strings.TrimSpace(inner[:closingIdx])
+	}
+
+	return strings.TrimSpace(strings.TrimSuffix(inner, "```"))
+}
+
+// ExtractJSON finds the outermost JSON object or array in a string by matching braces/brackets.
+func ExtractJSON(raw string) string {
+	startObj := strings.Index(raw, "{")
+	startArr := strings.Index(raw, "[")
+
+	start := -1
+	openChar := byte('{')
+	closeChar := byte('}')
+
+	if startObj >= 0 && (startArr < 0 || startObj <= startArr) {
+		start = startObj
+		openChar = '{'
+		closeChar = '}'
+	} else if startArr >= 0 {
+		start = startArr
+		openChar = '['
+		closeChar = ']'
+	}
+
+	if start < 0 {
+		return raw
+	}
+
+	depth := 0
+	inString := false
+	escaped := false
+	for i := start; i < len(raw); i++ {
+		ch := raw[i]
+		if escaped {
+			escaped = false
+			continue
+		}
+		if ch == '\\' && inString {
+			escaped = true
+			continue
+		}
+		if ch == '"' {
+			inString = !inString
+			continue
+		}
+		if inString {
+			continue
+		}
+		if ch == openChar {
+			depth++
+		} else if ch == closeChar {
+			depth--
+			if depth == 0 {
+				return raw[start : i+1]
+			}
+		}
+	}
+
+	// No balanced closing found — return from start to end as best effort
+	return raw[start:]
 }

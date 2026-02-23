@@ -1,0 +1,180 @@
+package controllers
+
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/go-playground/validator/v10"
+	"github.com/knid/wemob/internal/constants"
+	"github.com/knid/wemob/internal/models"
+	"github.com/knid/wemob/internal/requests"
+	"github.com/knid/wemob/internal/services/integrations"
+)
+
+// GetAppEnvVars returns all custom env vars for a project
+func (c *Controller) GetAppEnvVars(projectID string) ([]models.AppEnvVar, error) {
+	return c.DB.GetAppEnvVarsByProjectID(projectID)
+}
+
+// SetAppEnvVar creates or updates an env var by key (upsert)
+func (c *Controller) SetAppEnvVar(project *models.AppProject, req requests.SetEnvVarRequest) (*models.AppEnvVar, error) {
+	validate := validator.New()
+	if err := req.Validate(validate); err != nil {
+		return nil, err
+	}
+
+	// Check if key already exists — upsert
+	existing, err := c.DB.GetAppEnvVarByKey(project.ID.String(), req.Key)
+	if err == nil && existing.ID.String() != "00000000-0000-0000-0000-000000000000" {
+		existing.Value = req.Value
+		existing.IsPublic = req.IsPublic
+		existing.UpdatedAt = time.Now()
+		return c.DB.UpdateAppEnvVar(existing)
+	}
+
+	envVar := &models.AppEnvVar{
+		AppProjectID: project.ID,
+		Key:          req.Key,
+		Value:        req.Value,
+		IsPublic:     req.IsPublic,
+	}
+	return c.DB.CreateAppEnvVar(envVar)
+}
+
+// UpdateAppEnvVar partially updates an env var
+func (c *Controller) UpdateAppEnvVar(id string, project *models.AppProject, req requests.UpdateEnvVarRequest) (*models.AppEnvVar, error) {
+	envVar, err := c.DB.GetAppEnvVarByID(id)
+	if err != nil {
+		return nil, fmt.Errorf("env var not found")
+	}
+	if envVar.AppProjectID != project.ID {
+		return nil, fmt.Errorf("unauthorized")
+	}
+
+	if req.Value != nil {
+		envVar.Value = *req.Value
+	}
+	if req.IsPublic != nil {
+		envVar.IsPublic = *req.IsPublic
+	}
+
+	envVar.UpdatedAt = time.Now()
+	return c.DB.UpdateAppEnvVar(envVar)
+}
+
+// DeleteAppEnvVar deletes an env var
+func (c *Controller) DeleteAppEnvVar(id string, project *models.AppProject) error {
+	envVar, err := c.DB.GetAppEnvVarByID(id)
+	if err != nil {
+		return fmt.Errorf("env var not found")
+	}
+	if envVar.AppProjectID != project.ID {
+		return fmt.Errorf("unauthorized")
+	}
+	return c.DB.DeleteAppEnvVar(envVar)
+}
+
+// CollectAllEnvVars merges integration env vars, custom env vars, and auto-injected store vars
+// into a single map for deployment/preview.
+func (c *Controller) CollectAllEnvVars(project *models.AppProject) map[string]string {
+	envVars := make(map[string]string)
+
+	// 1. Integration env vars
+	appIntegrations, _ := c.DB.GetAppIntegrationsByProjectID(project.ID.String())
+	for _, integ := range appIntegrations {
+		for k, v := range integ.EnvVars {
+			envVars[k] = v
+		}
+	}
+
+	// 2. Custom env vars (with NEXT_PUBLIC_ prefix if IsPublic)
+	customVars, _ := c.DB.GetAppEnvVarsByProjectID(project.ID.String())
+	for _, ev := range customVars {
+		key := ev.Key
+		if ev.IsPublic && !strings.HasPrefix(key, "NEXT_PUBLIC_") {
+			key = "NEXT_PUBLIC_" + key
+		}
+		envVars[key] = ev.Value
+	}
+
+	// 3. Auto-injected e-commerce vars (only set defaults, never overwrite user values)
+	if project.ProjectType == "ecommerce" {
+		store, err := c.DB.GetStoreByAppProjectID(project.ID.String())
+		if err == nil && store != nil {
+			if envVars["NEXT_PUBLIC_STORE_ID"] == "" {
+				envVars["NEXT_PUBLIC_STORE_ID"] = store.ID.String()
+			}
+			if envVars["NEXT_PUBLIC_WEMOB_API_URL"] == "" {
+				envVars["NEXT_PUBLIC_WEMOB_API_URL"] = constants.WEMOB_API_BASE_URL
+			}
+		}
+	}
+
+	return envVars
+}
+
+// BuildDotEnvLocal generates .env.local content from an env vars map.
+func BuildDotEnvLocal(envVars map[string]string) string {
+	if len(envVars) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	for k, v := range envVars {
+		sb.WriteString(fmt.Sprintf("%s=%s\n", k, v))
+	}
+	return sb.String()
+}
+
+// GetMissingEnvVars returns required env vars that are not yet configured for a project.
+func (c *Controller) GetMissingEnvVars(project *models.AppProject) ([]RequiredEnvVar, error) {
+	var required []RequiredEnvVar
+	if raw, ok := project.Settings["required_env_vars"]; ok {
+		b, _ := json.Marshal(raw)
+		json.Unmarshal(b, &required)
+	}
+
+	files, _ := c.DB.GetAppGeneratedFilesByProjectID(project.ID.String(), "nextjs")
+	fileMap := make(map[string]string)
+	for _, f := range files {
+		fileMap[f.FilePath] = f.Content
+	}
+	codeKeys := detectEnvVarsFromCode(fileMap)
+	return c.computeMissingEnvVars(project, required, codeKeys), nil
+}
+
+// GetEnvVarKeysForChat returns env var key names (no values) for AI chat context.
+// Includes integration env vars, custom env vars, and auto-injected store vars.
+func (c *Controller) GetEnvVarKeysForChat(project *models.AppProject) []string {
+	var keys []string
+
+	// Integration env var names
+	appIntegrations, _ := c.DB.GetAppIntegrationsByProjectID(project.ID.String())
+	for _, integ := range appIntegrations {
+		config, err := integrations.GetProviderConfig(integ.Provider)
+		if err != nil {
+			continue
+		}
+		for _, envName := range config.EnvVarMapping {
+			keys = append(keys, envName)
+		}
+	}
+
+	// Custom env var key names
+	customVars, _ := c.DB.GetAppEnvVarsByProjectID(project.ID.String())
+	for _, ev := range customVars {
+		key := ev.Key
+		if ev.IsPublic && !strings.HasPrefix(key, "NEXT_PUBLIC_") {
+			key = "NEXT_PUBLIC_" + key
+		}
+		keys = append(keys, key)
+	}
+
+	// Auto-injected store vars
+	if project.ProjectType == "ecommerce" {
+		keys = append(keys, "NEXT_PUBLIC_STORE_ID", "NEXT_PUBLIC_WEMOB_API_URL")
+	}
+
+	return keys
+}

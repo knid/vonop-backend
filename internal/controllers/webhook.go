@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/models"
+	"github.com/posthog/posthog-go"
 	"github.com/stripe/stripe-go/v82"
 	"github.com/stripe/stripe-go/v82/webhook"
 )
@@ -88,6 +89,12 @@ func (c *Controller) HandleWebhook(w http.ResponseWriter, req *http.Request) {
 			if _, err := c.DB.UpdateUser(user); err != nil {
 				break
 			}
+
+			c.TrackUserEvent(user, "subscription_created", posthog.NewProperties().
+				Set("status", user.SubscriptionStatus).
+				Set("plan_name", subs.Name).
+				Set("price_id", sub.Items.Data[0].Price.ID))
+			c.IdentifyUser(user)
 		}
 
 	case "customer.subscription.updated":
@@ -144,6 +151,12 @@ func (c *Controller) HandleWebhook(w http.ResponseWriter, req *http.Request) {
 			if _, err := c.DB.UpdateUser(user); err != nil {
 				break
 			}
+
+			c.TrackUserEvent(user, "subscription_updated", posthog.NewProperties().
+				Set("status", user.SubscriptionStatus).
+				Set("plan_name", subs.Name).
+				Set("price_id", sub.Items.Data[0].Price.ID))
+			c.IdentifyUser(user)
 		}
 
 	case "invoice.payment_succeeded":
@@ -171,6 +184,12 @@ func (c *Controller) HandleWebhook(w http.ResponseWriter, req *http.Request) {
 			if _, err := c.DB.UpdateUser(user); err != nil {
 				break
 			}
+
+			c.TrackUserEvent(user, "payment_succeeded", posthog.NewProperties().
+				Set("amount_paid", invoice.AmountPaid).
+				Set("currency", string(invoice.Currency)).
+				Set("invoice_id", invoice.ID))
+			c.IdentifyUser(user)
 		}
 
 	case "invoice.payment_failed":
@@ -194,7 +213,11 @@ func (c *Controller) HandleWebhook(w http.ResponseWriter, req *http.Request) {
 			if _, err := c.DB.UpdateUser(user); err != nil {
 				break
 			}
-			// TODO: DB'de başarısız ödeme kaydı tut, kullanıcıya uyarı gönder veya erişimi kısıtla
+			c.TrackUserEvent(user, "payment_failed", posthog.NewProperties().
+				Set("invoice_url", invoice.HostedInvoiceURL).
+				Set("amount_due", invoice.AmountDue).
+				Set("attempt_count", invoice.AttemptCount))
+			c.IdentifyUser(user)
 		}
 
 	case "invoice.payment_action_required":
@@ -212,6 +235,9 @@ func (c *Controller) HandleWebhook(w http.ResponseWriter, req *http.Request) {
 				"subscription_id":     user.SubscriptionID.String(),
 				"pay_invoice_url":     invoice.HostedInvoiceURL,
 			})
+
+			c.TrackUserEvent(user, "payment_action_required", posthog.NewProperties().
+				Set("invoice_url", invoice.HostedInvoiceURL))
 		}
 
 	case "customer.subscription.deleted":
@@ -233,8 +259,9 @@ func (c *Controller) HandleWebhook(w http.ResponseWriter, req *http.Request) {
 				break
 			}
 
-			c.DB.UpdateUser(user)
-			// TODO: DB'de subscription'ı iptal et, kullanıcının erişimini kapat
+			c.TrackUserEvent(user, "subscription_canceled", posthog.NewProperties().
+				Set("subscription_id", sub.ID))
+			c.IdentifyUser(user)
 		}
 
 	case "payment_method.attached":
@@ -247,6 +274,9 @@ func (c *Controller) HandleWebhook(w http.ResponseWriter, req *http.Request) {
 			}
 
 			go c.CRMService.SendEvent(user, constants.BREVO_EVENT_PAYMENT_METHOD_ATTACHED, map[string]any{})
+
+			c.TrackUserEvent(user, "payment_method_attached", posthog.NewProperties().
+				Set("payment_method_type", string(pm.Type)))
 		}
 	case "payment_method.detached":
 		var pm stripe.PaymentMethod
@@ -258,6 +288,9 @@ func (c *Controller) HandleWebhook(w http.ResponseWriter, req *http.Request) {
 			}
 
 			go c.CRMService.SendEvent(user, constants.BREVO_EVENT_PAYMENT_METHOD_DETTACHED, map[string]any{})
+
+			c.TrackUserEvent(user, "payment_method_detached", posthog.NewProperties().
+				Set("payment_method_type", string(pm.Type)))
 		}
 
 	default:

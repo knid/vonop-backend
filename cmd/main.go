@@ -1,8 +1,6 @@
 package main
 
 import (
-	// "net/http"
-
 	"context"
 	"crypto/tls"
 	"database/sql"
@@ -20,16 +18,22 @@ import (
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/controllers"
 	"github.com/knid/wemob/internal/database"
+	appMiddleware "github.com/knid/wemob/internal/middleware"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/services"
 	crmServices "github.com/knid/wemob/internal/services/crm"
 	emailServices "github.com/knid/wemob/internal/services/email"
+	"github.com/knid/wemob/internal/services/mcpclient"
+	"github.com/knid/wemob/internal/services/neon"
+	"github.com/knid/wemob/internal/services/preview"
 	"github.com/knid/wemob/internal/services/secret"
 	"github.com/knid/wemob/internal/services/storage"
+	"github.com/knid/wemob/internal/services/vercel"
 	"github.com/knid/wemob/internal/utils"
 	"github.com/knid/wemob/internal/views"
 	"github.com/markbates/goth"
 	"github.com/markbates/goth/providers/google"
+	"github.com/redis/go-redis/v9"
 
 	_ "github.com/lib/pq"
 
@@ -44,6 +48,7 @@ import (
 	"log/slog"
 
 	infisical "github.com/infisical/go-sdk"
+	"github.com/posthog/posthog-go"
 	slogbetterstack "github.com/samber/slog-betterstack"
 )
 
@@ -72,6 +77,46 @@ func createSchema(db *bun.DB) error {
 		(*models.AppStoreCredentials)(nil),
 		(*models.Deployment)(nil),
 		(*models.SignIPATask)(nil),
+		(*models.AICreditsBalance)(nil),
+		(*models.AICreditTransaction)(nil),
+		(*models.Organization)(nil),
+		(*models.OrganizationMember)(nil),
+		(*models.OrganizationInvite)(nil),
+		(*models.APIKey)(nil),
+		(*models.ReferralCode)(nil),
+		(*models.Referral)(nil),
+		(*models.WebhookEndpoint)(nil),
+		// V2 app builder models
+		(*models.AppProject)(nil),
+		(*models.AppDeployment)(nil),
+		(*models.AppIntegration)(nil),
+		(*models.AppConversation)(nil),
+		(*models.AppGeneratedFile)(nil),
+		(*models.AppSnapshot)(nil),
+		(*models.VercelProject)(nil),
+		(*models.FlutterBuild)(nil),
+		(*models.AppDomain)(nil),
+		// Custom environment variables
+		(*models.AppEnvVar)(nil),
+		// E-commerce models
+		(*models.Store)(nil),
+		(*models.Product)(nil),
+		(*models.ProductVariant)(nil),
+		(*models.ProductCategory)(nil),
+		(*models.Discount)(nil),
+		(*models.Cart)(nil),
+		(*models.CartItem)(nil),
+		(*models.Order)(nil),
+		(*models.OrderItem)(nil),
+		// LLM token usage tracking
+		(*models.LLMTokenUsage)(nil),
+		// Background jobs
+		(*models.GenerationJob)(nil),
+		// Dashboard analytics
+		(*models.AppDashboard)(nil),
+		(*models.AppDashboardPanel)(nil),
+		// Web analytics (deployed sites)
+		(*models.WebAnalyticsEvent)(nil),
 	}
 
 	for _, model := range models {
@@ -83,6 +128,119 @@ func createSchema(db *bun.DB) error {
 			return err
 		}
 	}
+
+	// Add columns that were introduced after initial table creation.
+	// Each statement uses IF NOT EXISTS so it is safe to run repeatedly.
+	alterStatements := []string{
+		// AI credits fields on limits
+		`ALTER TABLE standart_user_limits ADD COLUMN IF NOT EXISTS monthly_ai_credits int NOT NULL DEFAULT 0`,
+		// Annual billing fields on subscriptions
+		`ALTER TABLE standart_user_subscriptions ADD COLUMN IF NOT EXISTS annual_price int DEFAULT 0`,
+		`ALTER TABLE standart_user_subscriptions ADD COLUMN IF NOT EXISTS annual_price_id text DEFAULT ''`,
+		// Snapshot file capture
+		`ALTER TABLE app_snapshots ADD COLUMN IF NOT EXISTS files jsonb DEFAULT '[]'`,
+		`ALTER TABLE app_snapshots ADD COLUMN IF NOT EXISTS message_id text DEFAULT ''`,
+		// V2 app builder fields on limits
+		`ALTER TABLE standart_user_limits ADD COLUMN IF NOT EXISTS monthly_app_count int NOT NULL DEFAULT 0`,
+		`ALTER TABLE standart_user_limits ADD COLUMN IF NOT EXISTS monthly_deploy_count int NOT NULL DEFAULT 0`,
+		`ALTER TABLE standart_user_limits ADD COLUMN IF NOT EXISTS can_use_ecommerce boolean NOT NULL DEFAULT false`,
+		`ALTER TABLE standart_user_limits ADD COLUMN IF NOT EXISTS can_deploy_to_vercel boolean NOT NULL DEFAULT false`,
+		`ALTER TABLE standart_user_limits ADD COLUMN IF NOT EXISTS can_build_flutter boolean NOT NULL DEFAULT false`,
+		// Conversation summary for older message summarization
+		`ALTER TABLE app_conversations ADD COLUMN IF NOT EXISTS summary text DEFAULT ''`,
+		// Data models for per-app Neon database provisioning
+		`ALTER TABLE app_projects ADD COLUMN IF NOT EXISTS data_models jsonb DEFAULT '[]'`,
+		// soft_delete column for all tables that use bun:",soft_delete,nullzero"
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
+		`ALTER TABLE user_notifications ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
+		`ALTER TABLE tokens ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
+		`ALTER TABLE standart_user_limits ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
+		`ALTER TABLE standart_user_subscriptions ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
+		`ALTER TABLE projects ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
+		`ALTER TABLE builds ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
+		`ALTER TABLE releases ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
+		`ALTER TABLE devices ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
+		`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
+		`ALTER TABLE store_page_images ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
+		`ALTER TABLE app_build_tasks ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
+		`ALTER TABLE app_release_tasks ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
+		`ALTER TABLE tickets ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
+		`ALTER TABLE google_play_credentials ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
+		`ALTER TABLE app_store_credentials ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
+		`ALTER TABLE deployments ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
+		`ALTER TABLE sign_ipa_tasks ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
+		`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
+		`ALTER TABLE organization_members ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
+		`ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
+		`ALTER TABLE webhook_endpoints ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
+		`ALTER TABLE app_projects ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
+		`ALTER TABLE app_integrations ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
+		`ALTER TABLE app_domains ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
+		`ALTER TABLE app_env_vars ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
+		`ALTER TABLE stores ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
+		`ALTER TABLE products ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
+		`ALTER TABLE product_variants ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
+		`ALTER TABLE product_categories ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
+		`ALTER TABLE discounts ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
+		`ALTER TABLE carts ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
+		`ALTER TABLE orders ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
+		`ALTER TABLE app_dashboards ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
+		`ALTER TABLE app_dashboard_panels ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
+		`ALTER TABLE app_notification_tasks ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
+	}
+
+	// Deduplicate before creating unique indexes (keep the latest row per group)
+	dedupeStatements := []string{
+		`DELETE FROM app_generated_files a USING app_generated_files b
+		 WHERE a.id < b.id AND a.app_project_id = b.app_project_id AND a.platform = b.platform AND a.file_path = b.file_path`,
+		`DELETE FROM app_conversations a USING app_conversations b
+		 WHERE a.id < b.id AND a.app_project_id = b.app_project_id`,
+	}
+	for _, stmt := range dedupeStatements {
+		if _, err := db.ExecContext(context.Background(), stmt); err != nil {
+			slog.Warn("dedup statement skipped", "error", err)
+		}
+	}
+
+	// Create unique indexes needed for upsert operations
+	indexStatements := []string{
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_app_generated_files_project_platform_path ON app_generated_files (app_project_id, platform, file_path)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_app_conversations_project ON app_conversations (app_project_id)`,
+		// Web analytics indexes
+		`CREATE INDEX IF NOT EXISTS idx_web_analytics_project_created ON web_analytics_events (project_id, created_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_web_analytics_project_type_created ON web_analytics_events (project_id, event_type, created_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_web_analytics_project_session ON web_analytics_events (project_id, session_id)`,
+	}
+	alterStatements = append(alterStatements, indexStatements...)
+	for _, stmt := range alterStatements {
+		if _, err := db.ExecContext(context.Background(), stmt); err != nil {
+			slog.Error("alter table failed", "statement", stmt, "error", err)
+		}
+	}
+
+	// Drop legacy website builder tables (replaced by app_* tables in V2)
+	dropStatements := []string{
+		`DROP TABLE IF EXISTS website_form_submissions`,
+		`DROP TABLE IF EXISTS website_forms`,
+		`DROP TABLE IF EXISTS website_assets`,
+		`DROP TABLE IF EXISTS website_components`,
+		`DROP TABLE IF EXISTS website_conversations`,
+		`DROP TABLE IF EXISTS website_domains`,
+		`DROP TABLE IF EXISTS website_files`,
+		`DROP TABLE IF EXISTS website_integrations`,
+		`DROP TABLE IF EXISTS website_pages`,
+		`DROP TABLE IF EXISTS website_seos`,
+		`DROP TABLE IF EXISTS website_snapshots`,
+		`DROP TABLE IF EXISTS website_templates`,
+		`DROP TABLE IF EXISTS websites`,
+		`DROP TABLE IF EXISTS ai_generation_logs`,
+	}
+	for _, stmt := range dropStatements {
+		if _, err := db.ExecContext(context.Background(), stmt); err != nil {
+			slog.Warn("drop legacy table failed", "statement", stmt, "error", err)
+		}
+	}
+
 	return nil
 }
 
@@ -112,12 +270,19 @@ func main() {
 		os.Getenv("ENVIRONMENT"),
 	)
 
-	logger := slog.New(
-		slogbetterstack.Option{
-			Token:    sm.GetSecret("BETTERSTACK_TOKEN"),
-			Endpoint: sm.GetSecret("BETTERSTACK_ENDPOINT"),
-		}.NewBetterstackHandler(),
-	)
+	betterstackHandler := slogbetterstack.Option{
+		Token:    sm.GetSecret("BETTERSTACK_TOKEN"),
+		Endpoint: sm.GetSecret("BETTERSTACK_ENDPOINT"),
+	}.NewBetterstackHandler()
+
+	var logger *slog.Logger
+	if sm.GetEnv() == "dev" {
+		// In dev, log to both stdout and BetterStack
+		stdoutHandler := slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug})
+		logger = slog.New(utils.NewFanoutHandler(stdoutHandler, betterstackHandler))
+	} else {
+		logger = slog.New(betterstackHandler)
+	}
 
 	slog.SetDefault(logger)
 
@@ -139,7 +304,7 @@ func main() {
 	bundb.Exec("CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\";")
 
 	bundb.AddQueryHook(bundebug.NewQueryHook(
-		bundebug.WithVerbose(true),
+		bundebug.WithVerbose(os.Getenv("BUNDEBUG") == "2"),
 		bundebug.FromEnv("BUNDEBUG"),
 	))
 
@@ -152,6 +317,37 @@ func main() {
 
 	db := database.NewDatabase(bundb)
 	go utils.CheckSessionStatusJob(db)
+	go utils.CheckUsageAlertsJob(db, crmServices.NewBrevoCRMService(sm.GetSecret("BREVO_API_KEY")))
+	vercelService := vercel.NewService(sm.GetSecret("VERCEL_API_TOKEN"), sm.GetSecret("VERCEL_TEAM_ID"))
+
+	// Preview service (optional — only enabled when secrets are set)
+	var previewService *preview.Service
+	if previewURL := sm.GetSecret("PREVIEW_SERVER_URL"); previewURL != "" {
+		previewService = preview.NewService(previewURL, sm.GetSecret("PREVIEW_SERVER_SECRET"))
+		slog.Info("Preview service enabled", "url", previewURL)
+	}
+
+	// Neon service (optional — only enabled when API key is set)
+	var neonService *neon.Service
+	if neonKey := sm.GetSecret("NEON_API_KEY"); neonKey != "" {
+		neonService = neon.NewService(neonKey)
+		slog.Info("Neon database service enabled")
+	}
+
+	// PostHog client (optional — only enabled when API key is set)
+	var posthogClient posthog.Client
+	if phKey := sm.GetSecret("POSTHOG_API_KEY"); phKey != "" {
+		phClient, phErr := posthog.NewWithConfig(phKey, posthog.Config{
+			Endpoint: "https://eu.i.posthog.com",
+		})
+		if phErr != nil {
+			slog.Warn("PostHog initialization failed", "error", phErr)
+		} else {
+			posthogClient = phClient
+			slog.Info("PostHog analytics enabled")
+		}
+	}
+
 	controller := controllers.NewController(
 		db,
 		make(chan struct{}, constants.MAX_CONCURRENT_BUILDS),
@@ -167,7 +363,28 @@ func main() {
 		storage.NewS3Storage(sm.GetSecret("AWS_REGION"), sm.GetSecret("AWS_S3_ASSETS_BUCKET_NAME"), sm.GetSecret("AWS_ACCESS_KEY_ID"), sm.GetSecret("AWS_SECRET_ACCESS_KEY")),
 		storage.NewS3Storage(sm.GetSecret("AWS_REGION"), sm.GetSecret("AWS_S3_USER_API_KEYS_BUCKET_NAME"), sm.GetSecret("AWS_ACCESS_KEY_ID"), sm.GetSecret("AWS_SECRET_ACCESS_KEY")),
 		sm,
+		vercelService,
+		previewService,
+		neonService,
+		nil, // MCP service initialized async below
+		posthogClient,
 	)
+
+	// MCP service (optional — connect in background so it doesn't block server startup)
+	if mcpConfig := sm.GetSecret("MCP_SERVERS_CONFIG"); mcpConfig != "" {
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			svc, err := mcpclient.NewService(ctx, mcpConfig)
+			if err != nil {
+				slog.Warn("MCP service initialization had errors", "error", err)
+			}
+			if svc != nil && svc.HasTools() {
+				controller.MCPService = svc
+				slog.Info("MCP service enabled", "tool_count", len(svc.Tools()))
+			}
+		}()
+	}
 
 	goth.UseProviders(
 		google.New(sm.GetSecret("GOOGLE_CLIENT_ID"), sm.GetSecret("GOOGLE_SECRET_KEY"), "https://api.wemob.io/v1/users/auth/google/callback", "email", "profile"),
@@ -175,8 +392,24 @@ func main() {
 
 	stripe.Key = sm.GetSecret("STRIPE_API_KEY")
 
+	// Redis client for rate limiting (reuses same Redis as Asynq)
+	redisClient := redis.NewClient(&redis.Options{
+		Addr:      sm.GetSecret("REDIS_ADDR"),
+		Username:  sm.GetSecret("REDIS_USERNAME"),
+		Password:  sm.GetSecret("REDIS_PASSWORD"),
+		TLSConfig: &tls.Config{},
+	})
+	rateLimiter := appMiddleware.NewRateLimiter(redisClient)
+
 	httpViews := views.HttpViews{
 		Controller: controller,
+	}
+
+	// Fail stale awaiting_input jobs from previous server runs
+	if staleCount, err := db.FailStaleAwaitingInputJobs(10 * time.Minute); err != nil {
+		slog.Error("Failed to clean up stale awaiting_input jobs", "error", err)
+	} else if staleCount > 0 {
+		slog.Info("Cleaned up stale awaiting_input jobs", "count", staleCount)
 	}
 
 	workDir, _ := os.Getwd()
@@ -185,6 +418,8 @@ func main() {
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
+	r.Use(middleware.Timeout(120 * time.Second))
+	r.Use(rateLimiter.RateLimit(100, time.Minute, appMiddleware.IPKey))
 
 	r.Use(httplog.RequestLogger(logger, &httplog.Options{
 		// Level defines the verbosity of the request logs:
@@ -192,16 +427,12 @@ func main() {
 		// slog.LevelInfo  - log responses (excl. OPTIONS)
 		// slog.LevelWarn  - log 4xx and 5xx responses only (except for 429)
 		// slog.LevelError - log 5xx responses only
-		Level: slog.LevelInfo,
+		Level: slog.LevelWarn,
 
 		Schema:        httplog.SchemaOTEL,
 		RecoverPanics: true,
-		LogRequestBody: func(req *http.Request) bool {
-			return req.RequestURI != "/v1/users/login" && req.RequestURI != "/v1/users/register"
-		},
-		LogResponseBody: func(req *http.Request) bool {
-			return req.RequestURI != "/v1/users/login"
-		},
+		LogRequestBody:  func(req *http.Request) bool { return false },
+		LogResponseBody: func(req *http.Request) bool { return false },
 	}))
 
 	r.Use(func(next http.Handler) http.Handler {
@@ -233,7 +464,7 @@ func main() {
 		// AllowedOrigins:   []string{"https://foo.com"}, // Use this to allow specific origin hosts
 		AllowedOrigins: []string{"https://*", "http://*", "http://127.0.0.1:3000"},
 		// AllowOriginFunc:  func(r *http.Request, origin string) bool { return true },
-		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token", "Location"},
 		ExposedHeaders:   []string{"Link"},
 		AllowCredentials: false,
@@ -244,8 +475,12 @@ func main() {
 	r.Route("/", func(r chi.Router) {
 		r.Route("/webhooks", func(r chi.Router) {
 			r.Post("/stripe", httpViews.Controller.HandleWebhook)
+			// Store payment webhooks
+			r.Post("/store/stripe/{storeId}", httpViews.HandleStoreStripeWebhook)
+			r.Post("/store/iyzico/{storeId}", httpViews.HandleStoreIyzicoWebhook)
 		})
 		r.Route("/v1", func(r chi.Router) {
+			r.Use(rateLimiter.RateLimit(300, time.Minute, appMiddleware.UserKey))
 			r.Handle("/static/*", http.StripPrefix("/v1/static/", http.FileServer(utils.NoDirFileSystem{FS: staticDir})))
 			r.Route("/storage", func(r chi.Router) {
 				r.Route("/credentials", func(r chi.Router) {
@@ -309,8 +544,6 @@ func main() {
 
 				r.Get("/auth/{provider}/callback", httpViews.OAuthCallback)
 				r.Get("/auth/{provider}", httpViews.OAuthBegin)
-
-				// r.Get("/usage", httpViews.GetUserUsage)
 			})
 			r.Get("/tasks", httpViews.GetAllTasks)
 			r.Route("/projects", func(r chi.Router) {
@@ -343,7 +576,6 @@ func main() {
 						r.Post("/", httpViews.CreateProjectBuild)
 						r.Route("/{buildId}", func(r chi.Router) {
 							r.Get("/", httpViews.GetProjectBuild)
-							// r.Post("/", httpViews.SetReleasedBuild)
 						})
 					})
 					r.Route("/public", func(r chi.Router) {
@@ -389,7 +621,6 @@ func main() {
 					r.Post("/generate_screenshots", httpViews.AutoGenerateScreenshots)
 					r.Post("/sign_ipa", httpViews.SignUnsignedIPA)
 					r.Get("/sign_ipa/{signTaskId}", httpViews.CheckSignIPATaskStatus)
-					// r.Post("/fetch_metadata", httpViews.FetchWebSiteMetadata)
 				})
 			})
 			r.Route("/reports", func(r chi.Router) {
@@ -398,6 +629,7 @@ func main() {
 				r.Post("/deploy", httpViews.UpdateDeploymentStatus)
 			})
 			r.Route("/billing", func(r chi.Router) {
+				r.Get("/plans", httpViews.GetBillingPlans)
 				r.Post("/checkout", httpViews.StripeCheckout)
 				r.Route("/subscription", func(r chi.Router) {
 					r.Post("/portal", httpViews.StripeCustomerPortal)
@@ -407,15 +639,291 @@ func main() {
 					r.Get("/limits", httpViews.GetLimits)
 					r.Post("/end_trial", httpViews.EndTrialNowAndChargeForUser)
 				})
-				r.Route("/invoices", func(r chi.Router) {
-					// r.Get("/", httpViews.GetInvoices)
-					// r.Get("/{invoiceId}", httpViews.GetInvoice)
+				r.Route("/credits", func(r chi.Router) {
+					r.Get("/", httpViews.GetAICreditsBalance)
+					r.Get("/transactions", httpViews.GetAICreditTransactions)
 				})
+				r.Get("/token-usage", httpViews.GetTokenUsage)
+			})
+
+			r.Route("/organizations", func(r chi.Router) {
+				r.Get("/", httpViews.GetUserOrganizations)
+				r.Post("/", httpViews.CreateOrganization)
+				r.Post("/invites/{token}/accept", httpViews.AcceptOrganizationInvite)
+				r.Route("/{orgId}", func(r chi.Router) {
+					r.Get("/", httpViews.GetOrganization)
+					r.Put("/", httpViews.UpdateOrganization)
+					r.Delete("/", httpViews.DeleteOrganization)
+					r.Route("/members", func(r chi.Router) {
+						r.Get("/", httpViews.GetOrganizationMembers)
+						r.Post("/invite", httpViews.InviteOrganizationMember)
+						r.Route("/{memberId}", func(r chi.Router) {
+							r.Put("/role", httpViews.UpdateMemberRole)
+							r.Delete("/", httpViews.RemoveOrganizationMember)
+						})
+					})
+				})
+			})
+			r.Route("/api-keys", func(r chi.Router) {
+				r.Get("/", httpViews.ListAPIKeys)
+				r.Post("/", httpViews.CreateAPIKey)
+				r.Delete("/{keyId}", httpViews.DeleteAPIKey)
+			})
+			r.Route("/referrals", func(r chi.Router) {
+				r.Get("/code", httpViews.GetReferralCode)
+				r.Get("/stats", httpViews.GetReferralStats)
+				r.Post("/apply", httpViews.ApplyReferralCode)
+			})
+			r.Route("/webhooks", func(r chi.Router) {
+				r.Get("/", httpViews.ListWebhookEndpoints)
+				r.Post("/", httpViews.CreateWebhookEndpoint)
+				r.Route("/{webhookId}", func(r chi.Router) {
+					r.Put("/", httpViews.UpdateWebhookEndpoint)
+					r.Delete("/", httpViews.DeleteWebhookEndpoint)
+				})
+			})
+			r.Route("/admin", func(r chi.Router) {
+				r.Get("/dashboard", httpViews.GetAdminDashboard)
 			})
 
 			r.Post("/support/ticket", httpViews.CreateTicket)
 
+			r.Route("/jobs", func(r chi.Router) {
+				r.Get("/active", httpViews.GetActiveJobs)
+				r.Get("/{jobId}", httpViews.GetJob)
+				r.Delete("/{jobId}", httpViews.CancelJob)
+			})
+
+			// Web analytics collection (public, rate-limited per IP)
+			r.Route("/analytics", func(r chi.Router) {
+				r.Use(rateLimiter.RateLimit(120, time.Minute, appMiddleware.IPKey))
+				r.Post("/collect", httpViews.CollectAnalytics)
+				r.Post("/collect/batch", httpViews.CollectAnalyticsBatch)
+			})
 		})
+		// V2 App Builder routes
+		r.Route("/v2", func(r chi.Router) {
+			r.Use(rateLimiter.RateLimit(300, time.Minute, appMiddleware.UserKey))
+
+			r.Route("/apps", func(r chi.Router) {
+				r.Use(appMiddleware.RequireAuth(controller))
+				r.Use(appMiddleware.RequireSubscription("active", "trial"))
+
+				// Generation endpoints (AI rate limited)
+				r.With(rateLimiter.RateLimit(10, time.Minute, appMiddleware.AIUserKey)).Post("/generate", httpViews.GenerateApp)
+				r.With(rateLimiter.RateLimit(10, time.Minute, appMiddleware.AIUserKey)).Post("/generate/ecommerce", httpViews.GenerateEcommerceApp)
+				r.With(rateLimiter.RateLimit(10, time.Minute, appMiddleware.AIUserKey)).Post("/generate/from-image", httpViews.GenerateAppFromImage)
+				r.With(rateLimiter.RateLimit(10, time.Minute, appMiddleware.AIUserKey)).Post("/generate/stream", httpViews.GenerateAppStream)
+				r.With(rateLimiter.RateLimit(10, time.Minute, appMiddleware.AIUserKey)).Post("/generate/ecommerce/stream", httpViews.GenerateEcommerceAppStream)
+
+				// Job clarification endpoint
+				r.Post("/jobs/{jobId}/clarify", httpViews.ClarifyJob)
+
+				r.Get("/", httpViews.GetApps)
+
+				r.Route("/{appId}", func(r chi.Router) {
+					r.Get("/", httpViews.GetApp)
+					r.Put("/", httpViews.UpdateApp)
+					r.Delete("/", httpViews.DeleteApp)
+
+					// Files (code-first CRUD)
+					r.Get("/files/{platform}", httpViews.GetAppFiles)
+					r.Post("/files", httpViews.CreateAppFile)
+					r.Put("/files/{fid}", httpViews.UpdateAppFile)
+					r.Delete("/files/{fid}", httpViews.DeleteAppFile)
+
+					// Chat
+					r.With(rateLimiter.RateLimit(10, time.Minute, appMiddleware.AIUserKey)).Post("/chat", httpViews.ChatApp)
+					r.Get("/conversation", httpViews.GetAppConversation)
+					r.Delete("/conversation", httpViews.ClearAppConversation)
+
+					// Integrations
+					r.Route("/integrations", func(r chi.Router) {
+						r.Get("/", httpViews.GetAppIntegrations)
+						r.Post("/", httpViews.ConnectAppIntegration)
+						r.Route("/{iid}", func(r chi.Router) {
+							r.Put("/", httpViews.UpdateAppIntegration)
+							r.Delete("/", httpViews.DisconnectAppIntegration)
+						})
+					})
+
+					// Custom environment variables
+					r.Route("/env-vars", func(r chi.Router) {
+						r.Get("/", httpViews.GetAppEnvVars)
+						r.Post("/", httpViews.SetAppEnvVar)
+						r.Get("/missing", httpViews.GetMissingEnvVars)
+						r.Route("/{evid}", func(r chi.Router) {
+							r.Put("/", httpViews.UpdateAppEnvVar)
+							r.Delete("/", httpViews.DeleteAppEnvVar)
+						})
+					})
+
+					// Preview (Docker-based live preview)
+					r.Post("/preview", httpViews.StartAppPreview)
+					r.Get("/preview/status", httpViews.GetAppPreviewStatus)
+					r.Get("/preview/logs", httpViews.GetAppPreviewLogs)
+					r.Delete("/preview", httpViews.StopAppPreview)
+
+					// Deploy
+					r.Route("/deploy", func(r chi.Router) {
+						r.Post("/validate", httpViews.ValidateAppFiles)
+						r.Post("/web", httpViews.DeployAppWeb)
+						r.Post("/android", httpViews.DeployAppAndroid)
+						r.Post("/ios", httpViews.DeployAppIOS)
+						r.Get("/status", httpViews.GetDeployStatus)
+						r.Get("/history", httpViews.GetDeployHistory)
+					})
+
+					// Snapshots
+					r.Route("/snapshots", func(r chi.Router) {
+						r.Get("/", httpViews.GetAppSnapshots)
+						r.Post("/", httpViews.CreateAppSnapshot)
+						r.Post("/{sid}/restore", httpViews.RestoreAppSnapshot)
+						r.Delete("/{sid}", httpViews.DeleteAppSnapshot)
+					})
+
+					// Export
+					r.Get("/export/{platform}", httpViews.ExportApp)
+
+					// Domains
+					r.Route("/domains", func(r chi.Router) {
+						r.Get("/", httpViews.GetAppDomains)
+						r.Post("/", httpViews.AddAppDomain)
+						r.Delete("/{did}", httpViews.RemoveAppDomain)
+					})
+
+					// Dashboard analytics
+					r.Route("/dashboard", func(r chi.Router) {
+						r.With(rateLimiter.RateLimit(10, time.Minute, appMiddleware.AIUserKey)).Post("/", httpViews.CreateDashboard)
+						r.Get("/", httpViews.GetDashboard)
+						r.Put("/", httpViews.UpdateDashboard)
+						r.Delete("/", httpViews.DeleteDashboard)
+
+						r.Get("/panels", httpViews.GetDashboardPanels)
+						r.Route("/panels/{pid}", func(r chi.Router) {
+							r.Put("/", httpViews.UpdateDashboardPanel)
+							r.Delete("/", httpViews.DeleteDashboardPanel)
+							r.Get("/data", httpViews.GetPanelData)
+							r.Patch("/data", httpViews.UpdatePanelCell)
+						})
+
+						r.Get("/data", httpViews.GetDashboardData)
+
+						r.With(rateLimiter.RateLimit(10, time.Minute, appMiddleware.AIUserKey)).Post("/chat", httpViews.ChatDashboard)
+
+						r.Get("/schema", httpViews.GetDashboardSchema)
+						r.With(rateLimiter.RateLimit(10, time.Minute, appMiddleware.AIUserKey)).Post("/schema/refresh", httpViews.RefreshDashboardSchema)
+					})
+
+					// Database Manager
+					r.Route("/database", func(r chi.Router) {
+						r.Get("/schema", httpViews.GetDatabaseSchema)
+						r.Route("/tables/{table}", func(r chi.Router) {
+							r.Get("/rows", httpViews.GetDatabaseTableRows)
+							r.Post("/rows", httpViews.InsertDatabaseRow)
+							r.Patch("/rows", httpViews.UpdateDatabaseRow)
+							r.Delete("/rows", httpViews.DeleteDatabaseRow)
+						})
+					})
+
+					// Web analytics for deployed sites
+					r.Route("/analytics", func(r chi.Router) {
+						r.Get("/overview", httpViews.GetAppAnalyticsOverview)
+						r.Get("/pageviews", httpViews.GetAppAnalyticsPageviews)
+						r.Get("/pages", httpViews.GetAppAnalyticsPages)
+						r.Get("/referrers", httpViews.GetAppAnalyticsReferrers)
+						r.Get("/devices", httpViews.GetAppAnalyticsDevices)
+						r.Get("/locations", httpViews.GetAppAnalyticsLocations)
+						r.Get("/events", httpViews.GetAppAnalyticsEvents)
+						r.Get("/realtime", httpViews.GetAppAnalyticsRealtime)
+					})
+
+					// E-commerce store (only for ecommerce projects)
+					r.Route("/store", func(r chi.Router) {
+						r.Get("/", httpViews.GetAppStore)
+						r.Put("/settings", httpViews.UpdateAppStoreSettings)
+						r.With(rateLimiter.RateLimit(10, time.Minute, appMiddleware.AIUserKey)).Post("/chat", httpViews.ChatStoreManagement)
+
+						r.Route("/products", func(r chi.Router) {
+							r.Get("/", httpViews.GetStoreProducts)
+							r.Post("/", httpViews.CreateStoreProduct)
+							r.Route("/{productId}", func(r chi.Router) {
+								r.Get("/", httpViews.GetStoreProduct)
+								r.Put("/", httpViews.UpdateStoreProduct)
+								r.Delete("/", httpViews.DeleteStoreProduct)
+								r.Route("/variants", func(r chi.Router) {
+									r.Post("/", httpViews.CreateProductVariant)
+									r.Route("/{variantId}", func(r chi.Router) {
+										r.Put("/", httpViews.UpdateProductVariant)
+										r.Delete("/", httpViews.DeleteProductVariant)
+									})
+								})
+							})
+						})
+
+						r.Route("/categories", func(r chi.Router) {
+							r.Get("/", httpViews.GetStoreCategories)
+							r.Post("/", httpViews.CreateStoreCategory)
+							r.Route("/{categoryId}", func(r chi.Router) {
+								r.Put("/", httpViews.UpdateStoreCategory)
+								r.Delete("/", httpViews.DeleteStoreCategory)
+							})
+						})
+
+						r.Route("/discounts", func(r chi.Router) {
+							r.Get("/", httpViews.GetStoreDiscounts)
+							r.Post("/", httpViews.CreateStoreDiscount)
+							r.Route("/{discountId}", func(r chi.Router) {
+								r.Put("/", httpViews.UpdateStoreDiscount)
+								r.Delete("/", httpViews.DeleteStoreDiscount)
+							})
+						})
+
+						r.Route("/orders", func(r chi.Router) {
+							r.Get("/", httpViews.GetStoreOrders)
+							r.Route("/{orderId}", func(r chi.Router) {
+								r.Get("/", httpViews.GetStoreOrder)
+								r.Put("/", httpViews.UpdateStoreOrderStatus)
+							})
+						})
+
+						r.Get("/analytics", httpViews.GetStoreAnalytics)
+					})
+				})
+			})
+
+			// Public storefront (no auth, per-store-per-IP rate limiting)
+			r.Route("/storefront/{storeId}", func(r chi.Router) {
+				// Fix 3: Read endpoints — relaxed rate limit
+				r.Use(rateLimiter.RateLimit(60, time.Minute, appMiddleware.StorefrontIPKey))
+				r.Get("/config", httpViews.StorefrontGetStoreConfig)
+				r.Get("/products", httpViews.StorefrontGetProducts)
+				r.Get("/products/{slug}", httpViews.StorefrontGetProduct)
+				r.Get("/categories", httpViews.StorefrontGetCategories)
+				r.Get("/cart/{sessionId}", httpViews.StorefrontGetCart)
+				r.Get("/orders/{orderId}", httpViews.StorefrontGetOrder)
+
+				// Fix 3: Write endpoints — tighter rate limit
+				r.With(rateLimiter.RateLimit(20, time.Minute, appMiddleware.StorefrontIPKey)).Post("/cart", httpViews.StorefrontCreateCart)
+				r.With(rateLimiter.RateLimit(20, time.Minute, appMiddleware.StorefrontIPKey)).Post("/cart/{sessionId}/items", httpViews.StorefrontAddCartItem)
+				r.With(rateLimiter.RateLimit(20, time.Minute, appMiddleware.StorefrontIPKey)).Put("/cart/{sessionId}/items/{itemId}", httpViews.StorefrontUpdateCartItem)
+				r.With(rateLimiter.RateLimit(20, time.Minute, appMiddleware.StorefrontIPKey)).Delete("/cart/{sessionId}/items/{itemId}", httpViews.StorefrontDeleteCartItem)
+				r.With(rateLimiter.RateLimit(20, time.Minute, appMiddleware.StorefrontIPKey)).Post("/cart/{sessionId}/discount", httpViews.StorefrontApplyDiscount)
+				r.With(rateLimiter.RateLimit(20, time.Minute, appMiddleware.StorefrontIPKey)).Delete("/cart/{sessionId}/discount", httpViews.StorefrontRemoveDiscount)
+				r.With(rateLimiter.RateLimit(10, time.Minute, appMiddleware.StorefrontIPKey)).Post("/checkout", httpViews.StorefrontCheckout)
+				r.With(rateLimiter.RateLimit(10, time.Minute, appMiddleware.StorefrontIPKey)).Post("/checkout/confirm", httpViews.StorefrontConfirmCheckout)
+
+				// Fix 14: Iyzico payment callback
+				r.Post("/checkout/iyzico-callback", httpViews.StorefrontIyzicoCallback)
+			})
+
+			// Fix 15: Stripe webhook for per-store accounts (outside storeId route)
+			r.Post("/storefront/webhooks/stripe", httpViews.StorefrontStripeWebhook)
+
+			// Public integration providers
+			r.Get("/integrations/providers", httpViews.GetV2IntegrationProviders)
+		})
+
 		r.Get("/health", httpViews.Health)
 	})
 
@@ -448,7 +956,7 @@ func main() {
 
 	proxyRoute.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   []string{"https://*", "http://*", "http://127.0.0.1:3000"},
-		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token", "Location"},
 		ExposedHeaders:   []string{"Link"},
 		AllowCredentials: false,
@@ -459,6 +967,11 @@ func main() {
 	proxyRoute.Use(middleware.Timeout(60 * time.Second))
 	proxyRoute.HandleFunc("/*", httpViews.ProxyHandler)
 	go http.ListenAndServe(":9001", proxyRoute)
+
+	// Flush PostHog events on shutdown
+	if posthogClient != nil {
+		defer posthogClient.Close()
+	}
 
 	// Main
 	http.ListenAndServe(":8001", r)
