@@ -9,8 +9,12 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"strings"
 )
+
+// ansiRegex strips ANSI escape sequences (colors, cursor movement, etc.)
+var ansiRegex = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x1b]*\x1b\\`)
 
 const vercelAPIBase = "https://api.vercel.com"
 
@@ -344,8 +348,8 @@ func (s *Service) GetDeploymentBuildLog(deploymentID string) (string, error) {
 			}
 		}
 		if len(events) == 0 {
-			// Last resort: return raw body as text (capped)
-			raw := string(body)
+			// Last resort: return raw body as text (capped), strip ANSI codes
+			raw := ansiRegex.ReplaceAllString(string(body), "")
 			if len(raw) > 4000 {
 				raw = raw[:4000] + "\n... [truncated]"
 			}
@@ -353,13 +357,14 @@ func (s *Service) GetDeploymentBuildLog(deploymentID string) (string, error) {
 		}
 	}
 
-	// Collect log lines
+	// Collect log lines and strip ANSI escape codes
 	var result strings.Builder
 	for _, ev := range events {
 		text := ev.Payload.Text
 		if text == "" {
 			continue
 		}
+		text = ansiRegex.ReplaceAllString(text, "")
 		if result.Len()+len(text) > 8000 {
 			result.WriteString("\n... [truncated]")
 			break

@@ -487,13 +487,21 @@ func (c *Controller) GetPreviewStatus(projectID string) (*preview.PreviewStatus,
 }
 
 // injectAnalyticsScript adds the web analytics tracking script into the root
-// layout file's <head> (preferred) or before </body> (fallback). The
-// __PROJECT_ID__ placeholder in the script constant is replaced with the
-// actual project UUID.
+// layout file. For JSX files (.tsx/.jsx) it uses the JSX-safe
+// dangerouslySetInnerHTML pattern so the parser doesn't choke on raw JS.
+// The __PROJECT_ID__ placeholder is replaced with the actual project UUID.
+// Note: the script body is a static, server-controlled string (not user input)
+// so there is no XSS risk from using dangerouslySetInnerHTML here.
 func injectAnalyticsScript(fileMap map[string]string, projectID string) {
-	script := strings.Replace(constants.WEB_ANALYTICS_SCRIPT, "__PROJECT_ID__", projectID, 1)
+	jsBody := strings.Replace(constants.WEB_ANALYTICS_SCRIPT_BODY, "__PROJECT_ID__", projectID, 1)
 
-	// Try common root layout paths
+	// Escape backticks so the JS body is safe inside a JSX template literal
+	escapedBody := strings.ReplaceAll(jsBody, "`", "\\`")
+
+	// JSX-compatible: uses dangerouslySetInnerHTML so the JSX parser
+	// doesn't try to interpret the JS as JSX children.
+	jsxScript := `<script data-wemob-analytics dangerouslySetInnerHTML={{ __html: ` + "`" + escapedBody + "`" + ` }} />`
+
 	layoutPaths := []string{
 		"app/layout.tsx",
 		"app/layout.jsx",
@@ -509,12 +517,12 @@ func injectAnalyticsScript(fileMap map[string]string, projectID string) {
 
 		// Prefer injecting before </head>
 		if idx := strings.Index(content, "</head>"); idx != -1 {
-			fileMap[path] = content[:idx] + script + "\n" + content[idx:]
+			fileMap[path] = content[:idx] + jsxScript + "\n" + content[idx:]
 			return
 		}
 		// Fallback: inject before </body>
 		if idx := strings.Index(content, "</body>"); idx != -1 {
-			fileMap[path] = content[:idx] + script + "\n" + content[idx:]
+			fileMap[path] = content[:idx] + jsxScript + "\n" + content[idx:]
 			return
 		}
 	}

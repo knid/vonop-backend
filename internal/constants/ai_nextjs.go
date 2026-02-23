@@ -1099,11 +1099,13 @@ Given the user's description of a web application they want to build, generate a
 16. Design "data_models" — an array of database tables the app needs for its data. Each table has a "name" and "columns" array. Each column has "name", "type" (text, integer, boolean, timestamp, uuid, jsonb), "primary_key" (bool), "nullable" (bool), optional "default", and optional "references" (e.g. "categories.id"). Every table MUST have an "id" column with type "uuid" and primary_key true. Add "created_at" and "updated_at" timestamp columns. Design the schema based on what the app actually needs — blogs need posts/comments, task apps need tasks/projects, etc. A database will be provisioned automatically from these models.
 17. Plan app/api/ routes for CRUD operations using Drizzle ORM. Each API route should handle GET/POST/PUT/DELETE for its resource.
 18. Do NOT use hardcoded mock data. All data must come from the database via Drizzle queries. Show graceful empty states when no data exists yet.
+19. If the application needs user authentication (login, register, user accounts, protected pages, admin panels, dashboards, or user-specific data), set "needs_auth": true. Auth infrastructure (lib/wemob-auth.ts and lib/wemob-auth-client.ts) will be auto-injected. Plan login/register pages and an API route at app/api/auth/[...action]/route.ts to dispatch auth actions. Do NOT plan custom auth utilities — they are template-managed.
 
 ### Output format (strict JSON, no explanation, no markdown)
 {
   "name": "App Name",
   "slug": "app-name",
+  "needs_auth": false,
   "colorScheme": {
     "primary": "#hex",
     "secondary": "#hex",
@@ -1181,11 +1183,13 @@ Given the user's description of a mobile app they want to build, generate a stru
 16. Generate mobile-first CSS — use Tailwind's default breakpoint as the base (mobile), never require larger breakpoints for core functionality.
 17. Include PWA-ready manifest hints in the layout description.
 18. If the application requires external API keys or secrets (payment gateways, databases, third-party APIs, etc.), list them in "required_env_vars". Each entry: "key" (env var name, e.g. "STRIPE_SK"), "description" (what it's for), "is_public" (true if NEXT_PUBLIC_ prefixed for client-side), "provider" (optional, matching integration: "stripe", "iyzico", "supabase", etc.). Do NOT include NEXT_PUBLIC_STORE_ID or NEXT_PUBLIC_WEMOB_API_URL (auto-injected).
+19. If the application needs user authentication (login, register, user accounts, protected pages, admin panels, dashboards, or user-specific data), set "needs_auth": true. Auth infrastructure (lib/wemob-auth.ts and lib/wemob-auth-client.ts) will be auto-injected. Plan login/register pages and an API route at app/api/auth/[...action]/route.ts to dispatch auth actions. Do NOT plan custom auth utilities — they are template-managed.
 
 ### Output format (strict JSON, no explanation, no markdown)
 {
   "name": "App Name",
   "slug": "app-name",
+  "needs_auth": false,
   "colorScheme": {
     "primary": "#hex",
     "secondary": "#hex",
@@ -1260,7 +1264,17 @@ If the project is e-commerce, you MUST follow these rules:
 - Import Drizzle operators from 'drizzle-orm': ` + "`" + `import { eq, and, desc, sql } from 'drizzle-orm'` + "`" + `.
 - Prices are stored in cents. Format with ` + "`" + `(price / 100).toFixed(2)` + "`" + ` for display.
 - Plan app/api/ routes for cart, checkout, and order operations.
-- If you see a "Database schema" section below, use that to understand available tables and columns.`
+- If you see a "Database schema" section below, use that to understand available tables and columns.
+
+### Auth Projects (CRITICAL)
+If the project uses authentication (lib/wemob-auth.ts and lib/wemob-auth-client.ts are injected):
+- Server-side: ` + "`" + `import { register, login, logout, getSession, getCurrentUser, requireAuth, getApiSession } from '@/lib/wemob-auth'` + "`" + `. Use requireAuth() in server components for protected pages. Use getApiSession() in API routes.
+- Client-side: ` + "`" + `import { AuthProvider, useAuth } from '@/lib/wemob-auth-client'` + "`" + `. Wrap root layout with <AuthProvider>. useAuth() returns { user, isLoading, isAuthenticated, login, register, logout, refreshSession }.
+- NEVER create custom auth utilities, JWT handling, password hashing, or session management. Use the injected auth libraries.
+- lib/wemob-auth.ts is a SERVER-ONLY module. NEVER import it in "use client" files. Use lib/wemob-auth-client.ts for client components.
+- lib/wemob-auth-client.ts is a "use client" module. Any file importing from it MUST have "use client" at the top.
+- Create an API route at app/api/auth/[...action]/route.ts that dispatches to register/login/logout/getSession from lib/wemob-auth.
+- The users table (id, email, password_hash, name, avatar_url, role, email_verified, created_at, updated_at) is auto-provisioned in the database.`
 
 const NEXTJS_FILE_TSX_PROMPT = `You are an expert Next.js 16 developer and UI/UX designer. Generate a single TSX/TS file.
 
@@ -1452,11 +1466,13 @@ Given the user's description of an online store, generate a structured file plan
 14. The e-commerce schema (products, categories, carts, orders, etc.) is pre-defined and injected automatically. You may add additional data_models tables if the store concept needs them (e.g., reviews, wishlists), but do NOT redefine the core ecommerce tables.
 15. All data access uses Drizzle ORM: import { db } from '@/lib/db' and import { products, categories, ... } from '@/lib/schema'. Use db.select().from(products) for queries. Server-side data fetching by default. A database is provisioned automatically.
 16. If the application requires external API keys or secrets, list them in "required_env_vars". Do NOT include DATABASE_URL (auto-provisioned).
+17. If the application needs user authentication (login, register, user accounts, protected pages, admin panels, dashboards, or user-specific data), set "needs_auth": true. Auth infrastructure (lib/wemob-auth.ts and lib/wemob-auth-client.ts) will be auto-injected. Plan login/register pages and an API route at app/api/auth/[...action]/route.ts to dispatch auth actions. Do NOT plan custom auth utilities — they are template-managed.
 
 ### Output format: Same as NEXTJS_STRUCTURE_PROMPT (strict JSON, no explanation, no markdown)
 {
   "name": "Store Name",
   "slug": "store-name",
+  "needs_auth": false,
   "colorScheme": {"primary":"#hex","secondary":"#hex","accent":"#hex","background":"#hex","surface":"#hex","text":"#hex"},
   "darkColorScheme": {"primary":"#hex","secondary":"#hex","accent":"#hex","background":"#hex","surface":"#hex","text":"#hex"},
   "typography": {"heading_font":"Inter","body_font":"Inter"},
