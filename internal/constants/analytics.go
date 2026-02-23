@@ -7,8 +7,9 @@ package constants
 // Privacy-friendly: no cookies, uses localStorage for visitor ID and
 // sessionStorage for session ID. Sends data via navigator.sendBeacon().
 // The placeholder __PROJECT_ID__ is replaced at injection time.
-const WEB_ANALYTICS_SCRIPT = `<script data-wemob-analytics>
-(function(){
+// WEB_ANALYTICS_SCRIPT_BODY contains only the JS code (no script tags).
+// The injection function wraps it appropriately for JSX or HTML targets.
+const WEB_ANALYTICS_SCRIPT_BODY = `(function(){
   var API="https://api.wemob.io/v1/analytics/collect";
   var PID="__PROJECT_ID__";
   if(!PID||PID==="__"+"PROJECT_ID__")return;
@@ -37,5 +38,4 @@ const WEB_ANALYTICS_SCRIPT = `<script data-wemob-analytics>
   history.replaceState=function(){origReplace.apply(this,arguments);onNav()};
   window.addEventListener("popstate",onNav);
   window.wmTrack=function(name,props){send("event",{event_name:name,properties:props||{}})};
-})();
-</script>`
+})();`

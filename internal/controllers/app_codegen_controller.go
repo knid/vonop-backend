@@ -70,6 +70,7 @@ type DataColumn struct {
 type appFileStructure struct {
 	Name            string             `json:"name"`
 	Slug            string             `json:"slug"`
+	NeedsAuth       bool               `json:"needs_auth,omitempty"`
 	ColorScheme     map[string]any     `json:"colorScheme"`
 	DarkColorScheme map[string]any     `json:"darkColorScheme,omitempty"`
 	Typography      map[string]any     `json:"typography,omitempty"`
@@ -117,6 +118,7 @@ func detectEnvVarsFromCode(files map[string]string) []string {
 		"NEXT_PUBLIC_STORE_ID":      true,
 		"NEXT_PUBLIC_WEMOB_API_URL": true,
 		"DATABASE_URL":              true,
+		"AUTH_SECRET":               true,
 	}
 	seen := map[string]bool{}
 	for _, content := range files {
@@ -212,6 +214,11 @@ func isTemplateFile(path string) bool {
 		}
 	}
 	for _, tp := range constants.NEXTJS_ECOMMERCE_TEMPLATE_FILE_PATHS {
+		if path == tp {
+			return true
+		}
+	}
+	for _, tp := range constants.NEXTJS_AUTH_TEMPLATE_FILE_PATHS {
 		if path == tp {
 			return true
 		}
@@ -345,6 +352,17 @@ func getEcommerceTemplateContent(path string) string {
 	return ""
 }
 
+// getAuthTemplateContent returns the hardcoded content for an auth template file
+func getAuthTemplateContent(path string) string {
+	switch path {
+	case "lib/wemob-auth.ts":
+		return constants.NEXTJS_TEMPLATE_WEMOB_AUTH
+	case "lib/wemob-auth-client.ts":
+		return constants.NEXTJS_TEMPLATE_WEMOB_AUTH_CLIENT
+	}
+	return ""
+}
+
 // --- Neon / DataModel helpers ---
 
 // sqlTypeMap maps DataModel column types to PostgreSQL types.
@@ -415,8 +433,22 @@ var drizzleTypeMap = map[string]string{
 
 // buildDrizzleSchema generates a lib/schema.ts file with Drizzle pgTable definitions.
 func buildDrizzleSchema(dataModels []DataModel) string {
+	// Scan all columns to determine which imports are needed
+	needsSql := false
+	for _, m := range dataModels {
+		for _, col := range m.Columns {
+			if col.Default != "" && !col.PrimaryKey && isRawSQLDefault(col.Default) {
+				needsSql = true
+			}
+		}
+	}
+
 	var sb strings.Builder
-	sb.WriteString("import { pgTable, text, integer, boolean, timestamp, uuid, jsonb, serial } from 'drizzle-orm/pg-core';\n\n")
+	sb.WriteString("import { pgTable, text, integer, boolean, timestamp, uuid, jsonb, serial } from 'drizzle-orm/pg-core';\n")
+	if needsSql {
+		sb.WriteString("import { sql } from 'drizzle-orm';\n")
+	}
+	sb.WriteString("\n")
 
 	for _, m := range dataModels {
 		// Convert table name to camelCase for the export name
@@ -440,7 +472,12 @@ func buildDrizzleSchema(dataModels []DataModel) string {
 				sb.WriteString(".notNull()")
 			}
 			if col.Default != "" && !col.PrimaryKey {
-				sb.WriteString(fmt.Sprintf(".default(%s)", col.Default))
+				if isRawSQLDefault(col.Default) {
+					// Wrap raw SQL expressions with sql`` template literal
+					sb.WriteString(fmt.Sprintf(".default(sql`%s`)", col.Default))
+				} else {
+					sb.WriteString(fmt.Sprintf(".default(%s)", col.Default))
+				}
 			}
 			if col.References != "" {
 				parts := strings.SplitN(col.References, ".", 2)
@@ -454,6 +491,21 @@ func buildDrizzleSchema(dataModels []DataModel) string {
 	}
 
 	return sb.String()
+}
+
+// isRawSQLDefault returns true if the default value looks like a raw SQL
+// expression (e.g. "now()", "gen_random_uuid()") rather than a JS literal.
+func isRawSQLDefault(def string) bool {
+	d := strings.TrimSpace(strings.ToLower(def))
+	// SQL function calls
+	if strings.HasSuffix(d, "()") {
+		return true
+	}
+	// CURRENT_TIMESTAMP and similar SQL keywords
+	if strings.HasPrefix(d, "current_") {
+		return true
+	}
+	return false
 }
 
 // neonConnStrWithEndpoint appends the endpoint ID option to a Neon connection string
@@ -843,6 +895,9 @@ func augmentPackageJSON(baseTemplate string, files map[string]string) string {
 		"@radix-ui/react-tooltip":        "^1.1.0",
 		"class-variance-authority":  "^0.7.0",
 		"tailwind-merge":            "^2.2.0",
+		"jose":                      "^5.9.0",
+		"bcryptjs":                  "^2.4.3",
+		"@types/bcryptjs":           "^2.4.6",
 	}
 
 	for pkg := range foundPackages {
@@ -853,6 +908,20 @@ func augmentPackageJSON(baseTemplate string, files map[string]string) string {
 				deps[pkg] = "latest"
 			}
 			slog.Info("Added discovered dependency to package.json", "package", pkg)
+		}
+	}
+
+	// Add @types/* packages to devDependencies when their corresponding packages are found
+	if _, hasBcryptjs := deps["bcryptjs"]; hasBcryptjs {
+		devDeps, ok := pkgJSON["devDependencies"].(map[string]any)
+		if !ok {
+			devDeps = make(map[string]any)
+			pkgJSON["devDependencies"] = devDeps
+		}
+		if _, exists := devDeps["@types/bcryptjs"]; !exists {
+			if version, ok := versionMap["@types/bcryptjs"]; ok {
+				devDeps["@types/bcryptjs"] = version
+			}
 		}
 	}
 
@@ -941,6 +1010,30 @@ func runDeterministicChecks(files map[string]string) []validationError {
 					File:  filePath,
 					Error: "File imports from @/lib/wemob-store but is missing \"use client\" directive. wemob-store.ts is a client module — all its exports (getProducts, useCart, etc.) can only be used in Client Components. Add \"use client\" at the top of this file.",
 					Type:  "missing_use_client",
+				})
+			}
+		}
+
+		// Check 2d: @/lib/wemob-auth-client import without "use client"
+		if strings.Contains(content, `@/lib/wemob-auth-client`) {
+			hasUseClient := strings.Contains(content, `"use client"`) || strings.Contains(content, `'use client'`)
+			if !hasUseClient {
+				errors = append(errors, validationError{
+					File:  filePath,
+					Error: "File imports from @/lib/wemob-auth-client but is missing \"use client\" directive. wemob-auth-client.ts is a client module — add \"use client\" at the top of this file.",
+					Type:  "missing_use_client",
+				})
+			}
+		}
+
+		// Check 2e: @/lib/wemob-auth (not -client) imported in "use client" file — server-only module
+		if strings.Contains(content, `@/lib/wemob-auth`) && !strings.Contains(content, `@/lib/wemob-auth-client`) {
+			hasUseClient := strings.Contains(content, `"use client"`) || strings.Contains(content, `'use client'`)
+			if hasUseClient {
+				errors = append(errors, validationError{
+					File:  filePath,
+					Error: "File imports from @/lib/wemob-auth (server-only module) but has \"use client\" directive. Use @/lib/wemob-auth-client for client components instead.",
+					Type:  "server_import_in_client",
 				})
 			}
 		}
@@ -1465,6 +1558,10 @@ func autoFixMissingUseClient(files map[string]string) (int, []string) {
 		if strings.Contains(content, `@/lib/wemob-store`) {
 			needsUseClient = true
 		}
+		// @/lib/wemob-auth-client (client-only module)
+		if strings.Contains(content, `@/lib/wemob-auth-client`) {
+			needsUseClient = true
+		}
 
 		if needsUseClient {
 			files[filePath] = "\"use client\"\n\n" + content
@@ -1979,6 +2076,7 @@ func (c *Controller) generateSingleAppFile(
 	allFilePaths []string,
 	colorSchemeJSON []byte,
 	storeContext string,
+	authContext string,
 	sendEvent func(string, any) bool,
 ) (string, error) {
 	fileCtx, fileCancel := context.WithTimeout(ctx, 5*time.Minute)
@@ -2016,6 +2114,19 @@ func (c *Controller) generateSingleAppFile(
 		if storeContext != "" {
 			systemPrompt.WriteString(fmt.Sprintf("\n\n### Store Context\n%s", storeContext))
 		}
+	}
+
+	// Inline auth templates and context for auth-enabled projects
+	if authContext != "" {
+		mu.Lock()
+		if authContent, ok := generatedFiles["lib/wemob-auth.ts"]; ok {
+			systemPrompt.WriteString(fmt.Sprintf("\n\n--- lib/wemob-auth.ts (INJECTED AUTH — use these exports for server-side auth, do NOT create custom auth utilities) ---\n%s", authContent))
+		}
+		if authClientContent, ok := generatedFiles["lib/wemob-auth-client.ts"]; ok {
+			systemPrompt.WriteString(fmt.Sprintf("\n\n--- lib/wemob-auth-client.ts (INJECTED AUTH CLIENT — use these exports for client-side auth) ---\n%s", authClientContent))
+		}
+		mu.Unlock()
+		systemPrompt.WriteString(fmt.Sprintf("\n\n### Auth Context\n%s", authContext))
 	}
 
 	// Inject mobile design rules for mobile_app projects
@@ -2233,6 +2344,7 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 	var appFiles []appFilePlanEntry
 	var missingImportsCount, brokenFilesCount, fixedCount int
 	var genSuccess bool
+	var needsAuth bool
 
 	provider := c.llmProvider()
 	model := c.SecretManager.GetSecret("WEBSITE_BUILDER_LLM_MODEL")
@@ -2276,6 +2388,7 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 				Set("validation_fixes", fixedCount).
 				Set("model", model).
 				Set("is_ecommerce", projectType == "ecommerce").
+				Set("needs_auth", needsAuth).
 				Set("success", genSuccess).
 				Set("phase_plan_seconds", planDuration).
 				Set("phase_codegen_seconds", codegenDuration).
@@ -2375,6 +2488,62 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 			}
 			// Prepend default ecommerce models (only if not already defined by AI)
 			for _, dm := range defaultModels {
+				if !existingTables[dm.Name] {
+					dataModels = append([]DataModel{dm}, dataModels...)
+				}
+			}
+		}
+	}
+
+	// Detect needsAuth: primary flag from LLM, fallback heuristics
+	needsAuth = structure.NeedsAuth
+	if !needsAuth {
+		// Fallback: check if data_models has a users table with password_hash column
+		for _, dm := range dataModels {
+			if dm.Name == "users" {
+				for _, col := range dm.Columns {
+					if col.Name == "password_hash" {
+						needsAuth = true
+						break
+					}
+				}
+			}
+			if needsAuth {
+				break
+			}
+		}
+	}
+	if !needsAuth {
+		// Fallback: check file plan for login/register/signup/auth pages
+		for _, f := range structure.Files {
+			lp := strings.ToLower(f.Path)
+			if strings.Contains(lp, "login") || strings.Contains(lp, "register") ||
+				strings.Contains(lp, "signup") || strings.Contains(lp, "sign-up") ||
+				strings.Contains(lp, "auth/") {
+				needsAuth = true
+				break
+			}
+		}
+	}
+	if needsAuth {
+		slog.Info("Auth detected for project", "project_id", project.ID, "explicit", structure.NeedsAuth)
+		if project.Settings == nil {
+			project.Settings = make(map[string]any)
+		}
+		project.Settings["needs_auth"] = true
+	}
+
+	// For auth: merge default users table if not already present
+	if needsAuth {
+		var authModels []DataModel
+		if err := json.Unmarshal([]byte(constants.AUTH_DEFAULT_DATA_MODELS), &authModels); err != nil {
+			slog.Error("Failed to parse default auth data models", "error", err)
+		} else {
+			existingTables := make(map[string]bool)
+			for _, m := range dataModels {
+				existingTables[m.Name] = true
+			}
+			for _, dm := range authModels {
 				if !existingTables[dm.Name] {
 					dataModels = append([]DataModel{dm}, dataModels...)
 				}
@@ -2482,9 +2651,54 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 		appFiles = filtered
 	}
 
+	// Step 3d: When auth is detected, strip LLM-planned files that duplicate wemob-auth
+	if needsAuth {
+		authDuplicateLibFiles := map[string]bool{
+			"lib/auth.ts":         true,
+			"lib/auth.tsx":        true,
+			"lib/auth-context.ts": true,
+			"lib/auth-context.tsx": true,
+			"lib/session.ts":     true,
+			"lib/jwt.ts":         true,
+			"lib/password.ts":    true,
+			"lib/auth-utils.ts":  true,
+			"lib/auth-helpers.ts": true,
+			"middleware.ts":      true,
+		}
+		filtered := appFiles[:0]
+		for _, f := range appFiles {
+			if authDuplicateLibFiles[f.Path] {
+				slog.Info("Stripping duplicate auth lib file from plan (covered by wemob-auth)", "path", f.Path, "project_id", project.ID)
+				continue
+			}
+			filtered = append(filtered, f)
+		}
+		appFiles = filtered
+	}
+
+	// Step 3e: Generate AUTH_SECRET env var for auth projects
+	if needsAuth && neonProvisioned {
+		authSecret, err := utils.RandomHex(32)
+		if err != nil {
+			slog.Error("Failed to generate AUTH_SECRET", "error", err, "project_id", project.ID)
+		} else {
+			envVar := &models.AppEnvVar{
+				AppProjectID: project.ID,
+				Key:          "AUTH_SECRET",
+				Value:        authSecret,
+				IsPublic:     false,
+			}
+			if _, err := c.DB.CreateAppEnvVar(envVar); err != nil {
+				slog.Error("Failed to store AUTH_SECRET env var", "error", err, "project_id", project.ID)
+			} else {
+				slog.Info("Generated AUTH_SECRET for auth project", "project_id", project.ID)
+			}
+		}
+	}
+
 	// Build total file list (template + app files)
 	templatePaths := constants.NEXTJS_TEMPLATE_FILE_PATHS
-	allFilePaths := make([]string, 0, len(templatePaths)+len(appFiles)+len(constants.NEXTJS_ECOMMERCE_TEMPLATE_FILE_PATHS)+4)
+	allFilePaths := make([]string, 0, len(templatePaths)+len(appFiles)+len(constants.NEXTJS_ECOMMERCE_TEMPLATE_FILE_PATHS)+len(constants.NEXTJS_AUTH_TEMPLATE_FILE_PATHS)+4)
 	for _, tp := range templatePaths {
 		allFilePaths = append(allFilePaths, tp)
 	}
@@ -2494,6 +2708,9 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 	}
 	if projectType == "ecommerce" {
 		allFilePaths = append(allFilePaths, constants.NEXTJS_ECOMMERCE_TEMPLATE_FILE_PATHS...)
+	}
+	if needsAuth && neonProvisioned {
+		allFilePaths = append(allFilePaths, constants.NEXTJS_AUTH_TEMPLATE_FILE_PATHS...)
 	}
 	for _, f := range appFiles {
 		allFilePaths = append(allFilePaths, f.Path)
@@ -2612,6 +2829,38 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 		}
 	}
 
+	// Step 6b2: Inject auth template files (conditional on needsAuth + neonProvisioned)
+	if needsAuth && neonProvisioned {
+		for _, tp := range constants.NEXTJS_AUTH_TEMPLATE_FILE_PATHS {
+			content := getAuthTemplateContent(tp)
+			if content == "" {
+				continue
+			}
+			fileType := "ts"
+			file := models.AppGeneratedFile{
+				AppProjectID: project.ID,
+				Platform:     "nextjs",
+				FilePath:     tp,
+				Content:      content,
+				FileType:     fileType,
+				IsGenerated:  false, // template-managed
+			}
+			createdFile, err := c.DB.UpsertAppGeneratedFile(&file)
+			if err != nil {
+				slog.Error("failed to save auth template file", "error", err, "path", tp)
+				continue
+			}
+			generatedFiles[tp] = content
+
+			sendEvent("file_complete", responses.FileCompleteEvent{
+				Action:   "create",
+				FilePath: tp,
+				FileID:   createdFile.ID,
+				FileType: fileType,
+			})
+		}
+	}
+
 	// Step 6c: Generate .env.local so DATABASE_URL and other env vars are available
 	{
 		envVars := c.CollectAllEnvVars(project)
@@ -2664,6 +2913,25 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 			sb.WriteString("Prices are in cents — use formatPrice(cents) for display.\n")
 			storeContext = sb.String()
 		}
+	}
+
+	// Step 7b: Build auth context for per-file codegen
+	var authContext string
+	if needsAuth && neonProvisioned {
+		var sb strings.Builder
+		sb.WriteString("This project uses authentication. Auth libraries are injected as template-managed files.\n")
+		sb.WriteString("Server-side (lib/wemob-auth.ts): import { register, login, logout, getSession, getCurrentUser, requireAuth, getApiSession } from '@/lib/wemob-auth'\n")
+		sb.WriteString("Client-side (lib/wemob-auth-client.ts): import { AuthProvider, useAuth } from '@/lib/wemob-auth-client'\n")
+		sb.WriteString("RULES:\n")
+		sb.WriteString("- Wrap root layout with <AuthProvider> for client-side auth state.\n")
+		sb.WriteString("- Use requireAuth() in server components for protected pages. It redirects to /login if not authenticated.\n")
+		sb.WriteString("- Use useAuth() in client components for auth state: { user, isLoading, isAuthenticated, login, register, logout, refreshSession }.\n")
+		sb.WriteString("- Use getApiSession() in API routes to get the current session.\n")
+		sb.WriteString("- Create app/api/auth/[...action]/route.ts that handles POST requests dispatching to register/login/logout/getSession.\n")
+		sb.WriteString("- The users table has: id (uuid), email, password_hash, name, avatar_url, role, email_verified, created_at, updated_at.\n")
+		sb.WriteString("- NEVER import from @/lib/wemob-auth in 'use client' files. Use @/lib/wemob-auth-client instead.\n")
+		sb.WriteString("- NEVER create custom auth, JWT, password hashing, or session management code.\n")
+		authContext = sb.String()
 	}
 
 	// Categorize remaining files into tiers and generate with context accumulation
@@ -2723,7 +2991,7 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 						slog.Info("Retrying file generation", "path", fp.Path, "attempt", attempt+1)
 					}
 					var err error
-					content, err = c.generateSingleAppFile(ctx, project, fp, structure, model, provider, generatedFiles, &mu, allFilePaths, colorSchemeJSON, storeContext, sendEvent)
+					content, err = c.generateSingleAppFile(ctx, project, fp, structure, model, provider, generatedFiles, &mu, allFilePaths, colorSchemeJSON, storeContext, authContext, sendEvent)
 					if err != nil {
 						slog.Error("failed to generate app file", "error", err, "path", fp.Path, "attempt", attempt+1)
 						lastFailReason = fmt.Sprintf("error: %s", err.Error())
@@ -2862,6 +3130,15 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 					if storeContent, ok := fileSnapshot["lib/wemob-store.ts"]; ok {
 						sysPrompt.WriteString(fmt.Sprintf("\n\n--- lib/wemob-store.ts (INJECTED SDK) ---\n%s", storeContent))
 					}
+				}
+				if authContext != "" {
+					if authContent, ok := fileSnapshot["lib/wemob-auth.ts"]; ok {
+						sysPrompt.WriteString(fmt.Sprintf("\n\n--- lib/wemob-auth.ts (INJECTED AUTH) ---\n%s", authContent))
+					}
+					if authClientContent, ok := fileSnapshot["lib/wemob-auth-client.ts"]; ok {
+						sysPrompt.WriteString(fmt.Sprintf("\n\n--- lib/wemob-auth-client.ts (INJECTED AUTH CLIENT) ---\n%s", authClientContent))
+					}
+					sysPrompt.WriteString(fmt.Sprintf("\n\n### Auth Context\n%s", authContext))
 				}
 
 				// Compact user prompt with import context
