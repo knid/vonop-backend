@@ -24,6 +24,7 @@ import (
 	crmServices "github.com/knid/wemob/internal/services/crm"
 	emailServices "github.com/knid/wemob/internal/services/email"
 	"github.com/knid/wemob/internal/services/mcpclient"
+	flyService "github.com/knid/wemob/internal/services/fly"
 	"github.com/knid/wemob/internal/services/neon"
 	"github.com/knid/wemob/internal/services/preview"
 	"github.com/knid/wemob/internal/services/secret"
@@ -119,6 +120,8 @@ func createSchema(db *bun.DB) error {
 		(*models.WebAnalyticsEvent)(nil),
 		// Notification tasks
 		(*models.AppNotificationTask)(nil),
+		// Preview machines (Fly Machines)
+		(*models.AppPreviewMachine)(nil),
 	}
 
 	for _, model := range models {
@@ -322,11 +325,31 @@ func main() {
 	go utils.CheckUsageAlertsJob(db, crmServices.NewBrevoCRMService(sm.GetSecret("BREVO_API_KEY")))
 	vercelService := vercel.NewService(sm.GetSecret("VERCEL_API_TOKEN"), sm.GetSecret("VERCEL_TEAM_ID"))
 
-	// Preview service (optional — only enabled when secrets are set)
+	// Preview service (optional — only enabled when Fly secrets are set)
 	var previewService *preview.Service
-	if previewURL := sm.GetSecret("PREVIEW_SERVER_URL"); previewURL != "" {
-		previewService = preview.NewService(previewURL, sm.GetSecret("PREVIEW_SERVER_SECRET"))
-		slog.Info("Preview service enabled", "url", previewURL)
+	if flyToken := sm.GetSecret("FLY_API_TOKEN"); flyToken != "" {
+		flySvc := flyService.NewService(
+			flyToken,
+			sm.GetSecret("FLY_PREVIEW_APP_NAME"),
+			sm.GetSecret("FLY_PREVIEW_REGION"),
+			sm.GetSecret("FLY_PREVIEW_IMAGE"),
+		)
+		previewDomain := sm.GetSecret("FLY_PREVIEW_DOMAIN")
+		if previewDomain == "" {
+			previewDomain = "preview.wemob.app"
+		}
+		previewService = preview.NewService(flySvc, db, previewDomain)
+		slog.Info("Preview service enabled (Fly Machines)", "app", sm.GetSecret("FLY_PREVIEW_APP_NAME"), "domain", previewDomain)
+
+		// Background idle cleanup: stop machines idle >30min, destroy stopped >2h
+		go func() {
+			ticker := time.NewTicker(5 * time.Minute)
+			defer ticker.Stop()
+			for range ticker.C {
+				previewService.StopIdleMachines(30 * time.Minute)
+				previewService.DestroyStoppedMachines(2 * time.Hour)
+			}
+		}()
 	}
 
 	// Neon service (optional — only enabled when API key is set)
