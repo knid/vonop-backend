@@ -52,16 +52,102 @@ func generateSyncToken() (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
-// CreatePreview creates a new Fly Machine for the project, pushes files, and returns status.
+// CreatePreview creates or reuses a Fly Machine for the project, pushes files, and returns status.
+// Reuse logic: running → sync files, stopped → start + sync, errored → destroy + recreate, none → create new.
 func (s *Service) CreatePreview(projectID string, files map[string]string, envVars map[string]string) (*PreviewStatus, error) {
-	// Destroy existing machine if any
+	previewURL := fmt.Sprintf("https://%s.%s", projectID, s.PreviewDomain)
+
+	// Check for an existing machine record
 	existing, err := s.DB.GetPreviewMachineByProjectID(projectID)
 	if err == nil && existing.MachineID != "" {
-		slog.Info("destroying existing preview machine before recreate", "project_id", projectID, "machine_id", existing.MachineID)
-		_ = s.Fly.DestroyMachine(existing.MachineID, true)
-		_ = s.DB.DeletePreviewMachineByProjectID(projectID)
+		// Verify actual state with Fly API
+		flyMachine, flyErr := s.Fly.GetMachine(existing.MachineID)
+		if flyErr != nil {
+			// Machine doesn't exist on Fly anymore — clean up DB and create fresh
+			slog.Warn("existing machine not found on Fly, will recreate", "project_id", projectID, "machine_id", existing.MachineID, "error", flyErr)
+			_ = s.DB.DeletePreviewMachineByProjectID(projectID)
+		} else {
+			switch flyMachine.State {
+			case "started":
+				// Machine is already running — just sync files
+				slog.Info("reusing running preview machine", "project_id", projectID, "machine_id", existing.MachineID)
+				existing.Status = "ready"
+				existing.LastAccessAt = time.Now()
+				_ = s.DB.UpdatePreviewMachine(existing)
+
+				go func() {
+					if err := s.syncFiles(existing.MachineID, existing.SyncToken, files); err != nil {
+						slog.Error("file sync to running machine failed", "project_id", projectID, "error", err)
+					}
+				}()
+
+				return &PreviewStatus{
+					Status:     "ready",
+					PreviewURL: previewURL,
+				}, nil
+
+			case "stopped", "suspended":
+				// Machine exists but is stopped — start it and sync
+				slog.Info("restarting stopped preview machine", "project_id", projectID, "machine_id", existing.MachineID)
+				existing.Status = "starting"
+				existing.LastAccessAt = time.Now()
+				_ = s.DB.UpdatePreviewMachine(existing)
+
+				go func() {
+					if err := s.Fly.StartMachine(existing.MachineID); err != nil {
+						slog.Error("failed to start stopped machine", "machine_id", existing.MachineID, "error", err)
+						existing.Status = "error"
+						_ = s.DB.UpdatePreviewMachine(existing)
+						return
+					}
+
+					if err := s.Fly.WaitForState(existing.MachineID, "started", 60*time.Second); err != nil {
+						slog.Error("stopped machine did not start", "machine_id", existing.MachineID, "error", err)
+						existing.Status = "error"
+						_ = s.DB.UpdatePreviewMachine(existing)
+						return
+					}
+
+					if err := s.waitForHealth(existing.MachineID, 60*time.Second); err != nil {
+						slog.Error("restarted machine proxy never became healthy", "project_id", projectID, "error", err)
+						existing.Status = "error"
+						_ = s.DB.UpdatePreviewMachine(existing)
+						return
+					}
+
+					if err := s.syncFiles(existing.MachineID, existing.SyncToken, files); err != nil {
+						slog.Error("file sync to restarted machine failed", "project_id", projectID, "error", err)
+						existing.Status = "error"
+						_ = s.DB.UpdatePreviewMachine(existing)
+						return
+					}
+
+					existing.Status = "ready"
+					existing.LastAccessAt = time.Now()
+					_ = s.DB.UpdatePreviewMachine(existing)
+					slog.Info("restarted preview machine ready", "project_id", projectID, "machine_id", existing.MachineID)
+				}()
+
+				return &PreviewStatus{
+					Status:     "starting",
+					PreviewURL: previewURL,
+				}, nil
+
+			default:
+				// Machine is in an error/unknown state — destroy and recreate
+				slog.Info("destroying errored preview machine before recreate", "project_id", projectID, "machine_id", existing.MachineID, "state", flyMachine.State)
+				_ = s.Fly.DestroyMachine(existing.MachineID, true)
+				_ = s.DB.DeletePreviewMachineByProjectID(projectID)
+			}
+		}
 	}
 
+	// No existing machine (or it was cleaned up above) — create a new one
+	return s.createNewMachine(projectID, files, envVars, previewURL)
+}
+
+// createNewMachine provisions a brand new Fly Machine for the project.
+func (s *Service) createNewMachine(projectID string, files map[string]string, envVars map[string]string, previewURL string) (*PreviewStatus, error) {
 	syncToken, err := generateSyncToken()
 	if err != nil {
 		return nil, fmt.Errorf("generating sync token: %w", err)
@@ -84,8 +170,6 @@ func (s *Service) CreatePreview(projectID string, files map[string]string, envVa
 	if err != nil {
 		return nil, fmt.Errorf("creating fly machine: %w", err)
 	}
-
-	previewURL := fmt.Sprintf("https://%s.%s", projectID, s.PreviewDomain)
 
 	// Save to DB
 	record := &models.AppPreviewMachine{
@@ -112,7 +196,7 @@ func (s *Service) CreatePreview(projectID string, files map[string]string, envVa
 			return
 		}
 
-		// Wait for the proxy server inside the machine to be ready (npm install runs first)
+		// Wait for the proxy server inside the machine to be ready
 		slog.Info("waiting for preview proxy to become healthy", "project_id", projectID)
 		if err := s.waitForHealth(machine.ID, 120*time.Second); err != nil {
 			slog.Error("preview proxy never became healthy", "project_id", projectID, "error", err)
