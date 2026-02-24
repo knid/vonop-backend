@@ -76,6 +76,10 @@ func (s *Service) CreatePreview(projectID string, files map[string]string, envVa
 				_ = s.DB.UpdatePreviewMachine(existing)
 
 				go func() {
+					if err := s.waitForHealth(existing.MachineID, 30*time.Second); err != nil {
+						slog.Error("running machine health check failed", "project_id", projectID, "error", err)
+						return
+					}
 					if err := s.syncFiles(existing.MachineID, existing.SyncToken, files); err != nil {
 						slog.Error("file sync to running machine failed", "project_id", projectID, "error", err)
 					}
