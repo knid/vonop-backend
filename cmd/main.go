@@ -192,6 +192,8 @@ func createSchema(db *bun.DB) error {
 		`ALTER TABLE app_dashboards ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
 		`ALTER TABLE app_dashboard_panels ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
 		`ALTER TABLE app_notification_tasks ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
+		// Preview machine env hash for skip-restart optimization
+		`ALTER TABLE app_preview_machines ADD COLUMN IF NOT EXISTS last_env_hash text DEFAULT ''`,
 	}
 
 	// Deduplicate before creating unique indexes (keep the latest row per group)
