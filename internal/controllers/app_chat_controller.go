@@ -1358,7 +1358,10 @@ func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.A
 					deletedPaths = append(deletedPaths, op.Path)
 				}
 			}
+			slog.Info("Chat triggering preview sync", "project_id", project.ID, "files_changed", filesChanged, "deletes", len(deletedPaths))
 			go c.SyncPreviewAll(project, deletedPaths...)
+		} else {
+			slog.Warn("Chat skipping preview sync: PreviewService is nil", "project_id", project.ID)
 		}
 	}
 
