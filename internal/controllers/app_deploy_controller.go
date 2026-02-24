@@ -432,8 +432,11 @@ func (c *Controller) SyncPreviewFiles(projectID string, deletePaths ...string) e
 // deletePaths lists files to remove from the preview machine.
 func (c *Controller) SyncPreviewAll(project *models.AppProject, deletePaths ...string) {
 	if c.PreviewService == nil {
+		slog.Warn("SyncPreviewAll: preview service is nil, skipping", "project_id", project.ID)
 		return
 	}
+
+	slog.Info("SyncPreviewAll: starting", "project_id", project.ID)
 
 	// Sync files from DB
 	dbFiles, err := c.DB.GetAppGeneratedFilesByProjectID(project.ID.String(), "nextjs")
@@ -459,6 +462,8 @@ func (c *Controller) SyncPreviewAll(project *models.AppProject, deletePaths ...s
 
 	if err := c.PreviewService.UpdateFiles(project.ID.String(), fileMap, deletePaths); err != nil {
 		slog.Warn("SyncPreviewAll: failed to sync files", "error", err, "project_id", project.ID)
+	} else {
+		slog.Info("SyncPreviewAll: completed successfully", "project_id", project.ID, "files", len(fileMap), "deletes", len(deletePaths))
 	}
 }
 
