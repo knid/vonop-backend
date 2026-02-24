@@ -625,6 +625,7 @@ func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.A
 
 	// Token usage tracking
 	tracker := utils.NewTokenTracker()
+	tracker.TrackContent = true
 	ctx = utils.WithTokenTracker(ctx, tracker)
 	defer func() {
 		c.RecordTokenUsage(user.ID, "app_chat", model, provider.Name, project.ID.String(), tracker)
@@ -1018,6 +1019,14 @@ func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.A
 		explanationText = strings.TrimSpace(responseJSON)
 	}
 
+	// Record conversation content for PostHog LLM Analytics
+	tracker.TraceInput = message
+	if explanationText != "" {
+		tracker.TraceOutput = explanationText
+	} else {
+		tracker.TraceOutput = responseJSON
+	}
+
 	// Try to parse JSON block for backward-compat fallback operations
 	var chatResp appChatResponse
 	jsonParsed := false
@@ -1231,7 +1240,13 @@ func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.A
 
 		// Auto-sync to preview container if running (including env vars)
 		if c.PreviewService != nil {
-			go c.SyncPreviewAll(project)
+			var deletedPaths []string
+			for _, op := range appliedOps {
+				if op.Action == "delete" {
+					deletedPaths = append(deletedPaths, op.Path)
+				}
+			}
+			go c.SyncPreviewAll(project, deletedPaths...)
 		}
 	}
 
@@ -1270,7 +1285,13 @@ func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.A
 
 		// Sync preview even if no LLM file ops, since setup_ecommerce injected templates and env vars changed
 		if filesChanged > 0 && c.PreviewService != nil {
-			go c.SyncPreviewAll(project)
+			var deletedPaths []string
+			for _, op := range appliedOps {
+				if op.Action == "delete" {
+					deletedPaths = append(deletedPaths, op.Path)
+				}
+			}
+			go c.SyncPreviewAll(project, deletedPaths...)
 		}
 	}
 

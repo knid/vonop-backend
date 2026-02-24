@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -80,7 +81,7 @@ func (s *Service) CreatePreview(projectID string, files map[string]string, envVa
 						slog.Error("running machine health check failed", "project_id", projectID, "error", err)
 						return
 					}
-					if err := s.syncFiles(existing.MachineID, existing.SyncToken, files); err != nil {
+					if err := s.syncFiles(existing.MachineID, existing.SyncToken, files, nil); err != nil {
 						slog.Error("file sync to running machine failed", "project_id", projectID, "error", err)
 					}
 				}()
@@ -119,7 +120,7 @@ func (s *Service) CreatePreview(projectID string, files map[string]string, envVa
 						return
 					}
 
-					if err := s.syncFiles(existing.MachineID, existing.SyncToken, files); err != nil {
+					if err := s.syncFiles(existing.MachineID, existing.SyncToken, files, nil); err != nil {
 						slog.Error("file sync to restarted machine failed", "project_id", projectID, "error", err)
 						existing.Status = "error"
 						_ = s.DB.UpdatePreviewMachine(existing)
@@ -210,7 +211,7 @@ func (s *Service) createNewMachine(projectID string, files map[string]string, en
 		}
 
 		// Push files via sync endpoint
-		if err := s.syncFiles(machine.ID, syncToken, files); err != nil {
+		if err := s.syncFiles(machine.ID, syncToken, files, nil); err != nil {
 			slog.Error("initial file sync failed", "project_id", projectID, "error", err)
 			record.Status = "error"
 			_ = s.DB.UpdatePreviewMachine(record)
@@ -231,7 +232,8 @@ func (s *Service) createNewMachine(projectID string, files map[string]string, en
 }
 
 // UpdateFiles pushes file changes to a running preview machine's sync endpoint.
-func (s *Service) UpdateFiles(projectID string, files map[string]string) error {
+// deletePaths lists files to remove from the preview machine.
+func (s *Service) UpdateFiles(projectID string, files map[string]string, deletePaths []string) error {
 	record, err := s.DB.GetPreviewMachineByProjectID(projectID)
 	if err != nil {
 		return fmt.Errorf("preview machine not found: %w", err)
@@ -241,7 +243,7 @@ func (s *Service) UpdateFiles(projectID string, files map[string]string) error {
 	record.LastAccessAt = time.Now()
 	_ = s.DB.UpdatePreviewMachine(record)
 
-	return s.syncFiles(record.MachineID, record.SyncToken, files)
+	return s.syncFiles(record.MachineID, record.SyncToken, files, deletePaths)
 }
 
 // UpdateEnvVars pushes a .env.local file via sync and restarts the machine if needed.
@@ -259,14 +261,14 @@ func (s *Service) UpdateEnvVars(projectID string, envVars map[string]string) err
 
 	// Push .env.local via sync
 	files := map[string]string{".env.local": envContent}
-	if err := s.syncFiles(record.MachineID, record.SyncToken, files); err != nil {
+	if err := s.syncFiles(record.MachineID, record.SyncToken, files, nil); err != nil {
 		return fmt.Errorf("syncing env vars: %w", err)
 	}
 
 	// Check if any non-NEXT_PUBLIC vars changed — these require a restart
 	hasServerVars := false
 	for k := range envVars {
-		if len(k) < 12 || k[:12] != "NEXT_PUBLIC_" {
+		if !strings.HasPrefix(k, "NEXT_PUBLIC_") {
 			hasServerVars = true
 			break
 		}
@@ -280,6 +282,12 @@ func (s *Service) UpdateEnvVars(projectID string, envVars map[string]string) err
 		_ = s.Fly.WaitForState(record.MachineID, "stopped", 15*time.Second)
 		if err := s.Fly.StartMachine(record.MachineID); err != nil {
 			return fmt.Errorf("restarting machine: %w", err)
+		}
+		if err := s.Fly.WaitForState(record.MachineID, "started", 30*time.Second); err != nil {
+			return fmt.Errorf("machine did not restart: %w", err)
+		}
+		if err := s.waitForHealth(record.MachineID, 60*time.Second); err != nil {
+			return fmt.Errorf("machine not healthy after restart: %w", err)
 		}
 	}
 
@@ -411,9 +419,13 @@ func (s *Service) machineBaseURL() string {
 }
 
 // syncFiles pushes files directly to a machine's /__wemob/sync endpoint.
-func (s *Service) syncFiles(machineID, syncToken string, files map[string]string) error {
+// deletePaths lists files to remove from the preview machine.
+func (s *Service) syncFiles(machineID, syncToken string, files map[string]string, deletePaths []string) error {
 	body := map[string]interface{}{
 		"files": files,
+	}
+	if len(deletePaths) > 0 {
+		body["delete"] = deletePaths
 	}
 
 	data, err := json.Marshal(body)
