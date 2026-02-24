@@ -10,6 +10,33 @@ const SYNC_TOKEN = process.env.SYNC_TOKEN || "";
 const APP_DIR = "/app";
 const SETUP_MARKER = "/tmp/.setup-complete";
 
+// Track whether Next.js is actually responding
+let nextReady = false;
+
+// Probe Next.js readiness every 2s — any response (even 500) means it's up
+setInterval(() => {
+  http
+    .get(`http://127.0.0.1:${NEXT_PORT}/`, (res) => {
+      if (!nextReady) console.log("Next.js is ready");
+      nextReady = true;
+      res.resume();
+    })
+    .on("error", () => {
+      if (nextReady) console.log("Next.js became unavailable");
+      nextReady = false;
+    });
+}, 2000);
+
+const LOADING_HTML = `<!DOCTYPE html>
+<html><head><meta charset="utf-8"><meta http-equiv="refresh" content="3">
+<title>Loading preview...</title>
+<style>body{margin:0;display:flex;align-items:center;justify-content:center;
+height:100vh;font-family:system-ui;background:#fafafa;color:#666}
+.spinner{width:24px;height:24px;border:3px solid #e5e5e5;border-top-color:#999;
+border-radius:50%;animation:spin 0.8s linear infinite;margin-right:12px}
+@keyframes spin{to{transform:rotate(360deg)}}</style></head>
+<body><div class="spinner"></div>Compiling preview&hellip;</body></html>`;
+
 const proxy = httpProxy.createProxyServer({
   target: `http://127.0.0.1:${NEXT_PORT}`,
   ws: true,
@@ -18,8 +45,8 @@ const proxy = httpProxy.createProxyServer({
 proxy.on("error", (err, _req, res) => {
   console.error("proxy error:", err.message);
   if (res.writeHead) {
-    res.writeHead(502, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ error: "backend unavailable" }));
+    res.writeHead(502, { "Content-Type": "text/html" });
+    res.end(LOADING_HTML);
   }
 });
 
@@ -117,10 +144,11 @@ function bunInstall() {
 }
 
 const server = http.createServer(async (req, res) => {
-  // Health check
+  // Health check — only 200 when Next.js is actually responding
   if (req.url === "/__wemob/health" && req.method === "GET") {
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ status: "ok" }));
+    const code = nextReady ? 200 : 503;
+    res.writeHead(code, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ status: nextReady ? "ok" : "starting" }));
     return;
   }
 
@@ -182,6 +210,14 @@ const server = http.createServer(async (req, res) => {
 
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ logs }));
+    return;
+  }
+
+  // If Next.js isn't ready yet, serve a loading page for browser requests
+  // (let __wemob and _next requests through — they're handled above or by proxy)
+  if (!nextReady && !req.url.startsWith("/__wemob/") && !req.url.startsWith("/_next/")) {
+    res.writeHead(503, { "Content-Type": "text/html" });
+    res.end(LOADING_HTML);
     return;
   }
 

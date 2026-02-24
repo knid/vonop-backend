@@ -3,12 +3,14 @@ package preview
 import (
 	"bytes"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -247,16 +249,32 @@ func (s *Service) UpdateFiles(projectID string, files map[string]string, deleteP
 }
 
 // UpdateEnvVars pushes a .env.local file via sync and restarts the machine if needed.
+// Skips the sync+restart entirely when env vars haven't changed (hash comparison).
 func (s *Service) UpdateEnvVars(projectID string, envVars map[string]string) error {
 	record, err := s.DB.GetPreviewMachineByProjectID(projectID)
 	if err != nil {
 		return fmt.Errorf("preview machine not found: %w", err)
 	}
 
-	// Build .env.local content
-	envContent := ""
-	for k, v := range envVars {
-		envContent += fmt.Sprintf("%s=%s\n", k, v)
+	// Build .env.local content with sorted keys for deterministic output
+	keys := make([]string, 0, len(envVars))
+	for k := range envVars {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	var sb strings.Builder
+	for _, k := range keys {
+		sb.WriteString(fmt.Sprintf("%s=%s\n", k, envVars[k]))
+	}
+	envContent := sb.String()
+
+	// Skip if env vars haven't changed
+	hash := fmt.Sprintf("%x", sha256.Sum256([]byte(envContent)))
+	if hash == record.LastEnvHash {
+		record.LastAccessAt = time.Now()
+		_ = s.DB.UpdatePreviewMachine(record)
+		return nil
 	}
 
 	// Push .env.local via sync
@@ -291,6 +309,7 @@ func (s *Service) UpdateEnvVars(projectID string, envVars map[string]string) err
 		}
 	}
 
+	record.LastEnvHash = hash
 	record.LastAccessAt = time.Now()
 	_ = s.DB.UpdatePreviewMachine(record)
 
