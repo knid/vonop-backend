@@ -138,7 +138,9 @@ const server = http.createServer(async (req, res) => {
     try {
       if (fs.existsSync(logPath)) {
         const content = fs.readFileSync(logPath, "utf8");
-        const lines = content.split("\n");
+        // Strip ANSI escape codes (colors, cursor moves, etc.)
+        const clean = content.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");
+        const lines = clean.split("\n");
         logs = lines.slice(-200).join("\n");
       }
     } catch (e) {
