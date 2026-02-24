@@ -15,6 +15,7 @@ type AppPreviewMachine struct {
 	Region       string      `bun:",notnull,default:'iad'"`
 	Status       string      `bun:",notnull,default:'starting'"` // starting, ready, stopped, error
 	PreviewURL   string      `bun:",nullzero"`
+	LastEnvHash  string      `bun:",nullzero"`
 	LastAccessAt time.Time   `bun:"last_access_at,nullzero,notnull,default:current_timestamp"`
 	CreatedAt    time.Time   `bun:"created_at,nullzero,notnull,default:current_timestamp"`
 	UpdatedAt    time.Time   `bun:"updated_at,nullzero,notnull,default:current_timestamp"`
