@@ -148,6 +148,30 @@ func (c *Controller) AddAICredits(user *models.User, amount int, action string, 
 	})
 }
 
+// messagesToPostHogInput converts []utils.Message to the format PostHog expects
+// for $ai_input (array of {role, content} maps). Truncates to last 50 messages
+// and 10K chars per message to keep event payloads reasonable.
+func messagesToPostHogInput(msgs []utils.Message) []map[string]string {
+	const maxMessages = 50
+	const maxChars = 10000
+	start := 0
+	if len(msgs) > maxMessages {
+		start = len(msgs) - maxMessages
+	}
+	out := make([]map[string]string, 0, len(msgs)-start)
+	for _, m := range msgs[start:] {
+		content := m.Content
+		if len(content) > maxChars {
+			content = content[:maxChars] + "..."
+		}
+		out = append(out, map[string]string{
+			"role":    m.Role,
+			"content": content,
+		})
+	}
+	return out
+}
+
 // RecordTokenUsage persists LLM token usage to the DB and sends PostHog
 // $ai_generation (per LLM call) + $ai_trace (grouping) events for the
 // built-in LLM Analytics dashboard.
@@ -193,6 +217,12 @@ func (c *Controller) RecordTokenUsage(userID uuid.UUID, action, model, provider,
 			if email != "" {
 				props.Set("$email", email)
 			}
+			if entry.InputMessages != nil {
+				props.Set("$ai_input", messagesToPostHogInput(entry.InputMessages))
+			}
+			if entry.OutputText != "" {
+				props.Set("$ai_output", entry.OutputText)
+			}
 			c.PostHog.Enqueue(posthog.Capture{
 				DistinctId: userID.String(),
 				Event:      "$ai_generation",
@@ -208,6 +238,12 @@ func (c *Controller) RecordTokenUsage(userID uuid.UUID, action, model, provider,
 			Set("$ai_output_tokens", completion)
 		if email != "" {
 			traceProps.Set("$email", email)
+		}
+		if tracker.TraceInput != "" {
+			traceProps.Set("$ai_input", tracker.TraceInput)
+		}
+		if tracker.TraceOutput != "" {
+			traceProps.Set("$ai_output", tracker.TraceOutput)
 		}
 		c.PostHog.Enqueue(posthog.Capture{
 			DistinctId: userID.String(),

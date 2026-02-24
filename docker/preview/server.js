@@ -53,6 +53,36 @@ function writeFiles(files) {
   return packageChanged;
 }
 
+function deleteFiles(paths) {
+  let deleted = 0;
+  for (const filePath of paths) {
+    const full = path.join(APP_DIR, path.normalize(filePath));
+    if (!full.startsWith(APP_DIR)) {
+      console.warn("skipping path traversal attempt (delete):", filePath);
+      continue;
+    }
+    try {
+      fs.unlinkSync(full);
+      deleted++;
+      // Clean empty parent dirs up to APP_DIR
+      let dir = path.dirname(full);
+      while (dir !== APP_DIR && dir.startsWith(APP_DIR)) {
+        try {
+          fs.rmdirSync(dir);
+          dir = path.dirname(dir);
+        } catch {
+          break; // dir not empty or other error
+        }
+      }
+    } catch (e) {
+      if (e.code !== "ENOENT") {
+        console.error("delete failed:", filePath, e.message);
+      }
+    }
+  }
+  return deleted;
+}
+
 let bunInstallRunning = false;
 let bunInstallQueued = false;
 
@@ -108,14 +138,17 @@ const server = http.createServer(async (req, res) => {
       const files = body.files || {};
       const count = Object.keys(files).length;
 
+      const deletePaths = body.delete || [];
+      const deleted = deleteFiles(deletePaths);
+
       const packageChanged = writeFiles(files);
       if (packageChanged) {
         bunInstall();
       }
 
-      console.log(`synced ${count} files`);
+      console.log(`synced ${count} files, deleted ${deleted} files`);
       res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ status: "ok", files_synced: count }));
+      res.end(JSON.stringify({ status: "ok", files_synced: count, files_deleted: deleted }));
     } catch (e) {
       console.error("sync error:", e.message);
       res.writeHead(400, { "Content-Type": "application/json" });
@@ -164,3 +197,15 @@ server.on("upgrade", (req, socket, head) => {
 server.listen(PORT, "0.0.0.0", () => {
   console.log(`wemob preview proxy listening on :${PORT}, forwarding to :${NEXT_PORT}`);
 });
+
+// Truncate log file periodically to prevent disk fill
+setInterval(() => {
+  try {
+    const stats = fs.statSync("/tmp/nextjs.log");
+    if (stats.size > 5 * 1024 * 1024) {
+      const content = fs.readFileSync("/tmp/nextjs.log", "utf8");
+      fs.writeFileSync("/tmp/nextjs.log", content.split("\n").slice(-1000).join("\n"), "utf8");
+      console.log("truncated /tmp/nextjs.log (was", stats.size, "bytes)");
+    }
+  } catch {}
+}, 5 * 60 * 1000);

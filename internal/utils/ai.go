@@ -25,12 +25,17 @@ type TokenEntry struct {
 	TotalTokens      int
 	LatencyMs        int64
 	IsStreaming      bool
+	InputMessages    []Message // optional: messages sent to LLM (only when TrackContent is set)
+	OutputText       string    // optional: LLM text completion (only when TrackContent is set)
 }
 
 // TokenTracker is a thread-safe accumulator that collects token usage across multiple LLM calls.
 type TokenTracker struct {
-	mu      sync.Mutex
-	entries []TokenEntry
+	mu           sync.Mutex
+	entries      []TokenEntry
+	TrackContent bool   // opt-in: when true, StreamWithTools records message content per round
+	TraceInput   string // user's original message (for $ai_trace)
+	TraceOutput  string // final assistant response (for $ai_trace)
 }
 
 func NewTokenTracker() *TokenTracker {
@@ -48,6 +53,25 @@ func (t *TokenTracker) Record(model string, usage UsageInfo, latencyMs int64, is
 		TotalTokens:      usage.TotalTokens,
 		LatencyMs:        latencyMs,
 		IsStreaming:      isStreaming,
+	})
+}
+
+// RecordWithContent adds a usage entry including the messages and output text.
+func (t *TokenTracker) RecordWithContent(model string, usage UsageInfo, latencyMs int64, isStreaming bool, inputMessages []Message, outputText string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	// Snapshot messages so caller mutations don't affect stored data
+	msgs := make([]Message, len(inputMessages))
+	copy(msgs, inputMessages)
+	t.entries = append(t.entries, TokenEntry{
+		Model:            model,
+		PromptTokens:     usage.PromptTokens,
+		CompletionTokens: usage.CompletionTokens,
+		TotalTokens:      usage.TotalTokens,
+		LatencyMs:        latencyMs,
+		IsStreaming:      isStreaming,
+		InputMessages:    msgs,
+		OutputText:       outputText,
 	})
 }
 
@@ -1202,7 +1226,11 @@ func StreamWithTools(
 		if roundUsage.TotalTokens > 0 {
 			slog.Info("LLM usage", "FROM", "LLM_STREAM_TOOLS", "round", round, "prompt_tokens", roundUsage.PromptTokens, "completion_tokens", roundUsage.CompletionTokens, "total_tokens", roundUsage.TotalTokens)
 			if tracker := TokenTrackerFromContext(ctx); tracker != nil {
-				tracker.Record(model, roundUsage, time.Since(roundStart).Milliseconds(), true)
+				if tracker.TrackContent {
+					tracker.RecordWithContent(model, roundUsage, time.Since(roundStart).Milliseconds(), true, currentMessages, fullText.String())
+				} else {
+					tracker.Record(model, roundUsage, time.Since(roundStart).Milliseconds(), true)
+				}
 			}
 		}
 

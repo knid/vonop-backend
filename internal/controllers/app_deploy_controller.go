@@ -407,8 +407,9 @@ func (c *Controller) StartPreview(project *models.AppProject) (*preview.PreviewS
 	return status, nil
 }
 
-// SyncPreviewFiles updates files in a running preview container
-func (c *Controller) SyncPreviewFiles(projectID string) error {
+// SyncPreviewFiles updates files in a running preview container.
+// deletePaths lists files to remove from the preview machine.
+func (c *Controller) SyncPreviewFiles(projectID string, deletePaths ...string) error {
 	if c.PreviewService == nil {
 		return nil
 	}
@@ -423,12 +424,13 @@ func (c *Controller) SyncPreviewFiles(projectID string) error {
 		fileMap[f.FilePath] = f.Content
 	}
 
-	return c.PreviewService.UpdateFiles(projectID, fileMap)
+	return c.PreviewService.UpdateFiles(projectID, fileMap, deletePaths)
 }
 
 // SyncPreviewAll updates both files and environment variables in a running preview container.
 // Use this instead of SyncPreviewFiles when env vars may have changed (e.g. after setup_ecommerce).
-func (c *Controller) SyncPreviewAll(project *models.AppProject) {
+// deletePaths lists files to remove from the preview machine.
+func (c *Controller) SyncPreviewAll(project *models.AppProject, deletePaths ...string) {
 	if c.PreviewService == nil {
 		return
 	}
@@ -445,13 +447,9 @@ func (c *Controller) SyncPreviewAll(project *models.AppProject) {
 		fileMap[f.FilePath] = f.Content
 	}
 
-	// Collect env vars and inject .env.local into file map
 	envVars := c.CollectAllEnvVars(project)
-	if dotEnv := BuildDotEnvLocal(envVars); dotEnv != "" {
-		fileMap[".env.local"] = dotEnv
-	}
 
-	if err := c.PreviewService.UpdateFiles(project.ID.String(), fileMap); err != nil {
+	if err := c.PreviewService.UpdateFiles(project.ID.String(), fileMap, deletePaths); err != nil {
 		slog.Warn("SyncPreviewAll: failed to sync files", "error", err, "project_id", project.ID)
 	}
 
