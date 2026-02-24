@@ -283,6 +283,13 @@ func (s *Service) UpdateEnvVars(projectID string, envVars map[string]string) err
 		return fmt.Errorf("syncing env vars: %w", err)
 	}
 
+	// Save hash immediately after successful sync — even if the restart or health
+	// check below fails, the env file IS on the machine. Without this, a timeout
+	// leaves the hash empty and every subsequent call triggers another restart.
+	record.LastEnvHash = hash
+	record.LastAccessAt = time.Now()
+	_ = s.DB.UpdatePreviewMachine(record)
+
 	// Check if any non-NEXT_PUBLIC vars changed — these require a restart
 	hasServerVars := false
 	for k := range envVars {
@@ -304,14 +311,11 @@ func (s *Service) UpdateEnvVars(projectID string, envVars map[string]string) err
 		if err := s.Fly.WaitForState(record.MachineID, "started", 30*time.Second); err != nil {
 			return fmt.Errorf("machine did not restart: %w", err)
 		}
-		if err := s.waitForHealth(record.MachineID, 60*time.Second); err != nil {
-			return fmt.Errorf("machine not healthy after restart: %w", err)
+		if err := s.waitForHealth(record.MachineID, 120*time.Second); err != nil {
+			slog.Warn("health check timed out after env restart, machine may still be compiling",
+				"machine_id", record.MachineID, "error", err)
 		}
 	}
-
-	record.LastEnvHash = hash
-	record.LastAccessAt = time.Now()
-	_ = s.DB.UpdatePreviewMachine(record)
 
 	return nil
 }
