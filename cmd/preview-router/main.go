@@ -182,24 +182,29 @@ func (rt *router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// If machine is stopped, start it and show loading page
-	if entry.State == "stopped" {
+	// Only replay to machines that are actually running
+	if entry.State == "started" {
+		w.Header().Set("fly-replay", fmt.Sprintf("instance=%s", entry.MachineID))
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	// Machine exists but isn't running — try to start it if stopped, then show loading page
+	if entry.State == "stopped" || entry.State == "suspended" {
 		slog.Info("starting stopped machine", "project_id", projectID, "machine_id", entry.MachineID)
 		go func() {
 			if err := rt.startMachine(entry.MachineID); err != nil {
 				slog.Error("failed to start machine", "machine_id", entry.MachineID, "error", err)
 			}
 		}()
-
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.WriteHeader(http.StatusServiceUnavailable)
-		fmt.Fprint(w, loadingHTML)
-		return
+	} else {
+		slog.Info("machine not yet running", "project_id", projectID, "machine_id", entry.MachineID, "state", entry.State)
 	}
 
-	// Replay to the correct machine instance
-	w.Header().Set("fly-replay", fmt.Sprintf("instance=%s", entry.MachineID))
-	w.WriteHeader(http.StatusOK)
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Retry-After", "5")
+	w.WriteHeader(http.StatusServiceUnavailable)
+	fmt.Fprint(w, loadingHTML)
 }
 
 const loadingHTML = `<!DOCTYPE html>

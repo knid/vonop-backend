@@ -41,7 +41,7 @@ func NewService(flyService *fly.Service, db *database.Database, previewDomain st
 }
 
 type PreviewStatus struct {
-	Status     string `json:"status"`      // "starting", "ready", "error", "stopped"
+	Status     string `json:"status"`      // "starting", "syncing", "ready", "error", "stopped"
 	PreviewURL string `json:"preview_url"`
 	Error      string `json:"error,omitempty"`
 }
@@ -68,28 +68,47 @@ func (s *Service) CreatePreview(projectID string, files map[string]string, envVa
 		if flyErr != nil {
 			// Machine doesn't exist on Fly anymore — clean up DB and create fresh
 			slog.Warn("existing machine not found on Fly, will recreate", "project_id", projectID, "machine_id", existing.MachineID, "error", flyErr)
-			_ = s.DB.DeletePreviewMachineByProjectID(projectID)
+			if err := s.DB.DeletePreviewMachineByProjectID(projectID); err != nil {
+				slog.Error("failed to delete stale machine record", "project_id", projectID, "error", err)
+			}
 		} else {
 			switch flyMachine.State {
 			case "started":
-				// Machine is already running — just sync files
+				// Machine is already running — sync files before reporting ready
 				slog.Info("reusing running preview machine", "project_id", projectID, "machine_id", existing.MachineID)
-				existing.Status = "ready"
+				existing.Status = "syncing"
 				existing.LastAccessAt = time.Now()
-				_ = s.DB.UpdatePreviewMachine(existing)
+				if err := s.DB.UpdatePreviewMachine(existing); err != nil {
+					slog.Error("failed to update machine status to syncing", "project_id", projectID, "error", err)
+				}
 
 				go func() {
 					if err := s.waitForHealth(existing.MachineID, 30*time.Second); err != nil {
 						slog.Error("running machine health check failed", "project_id", projectID, "error", err)
+						existing.Status = "error"
+						if err := s.DB.UpdatePreviewMachine(existing); err != nil {
+							slog.Error("failed to update machine status", "project_id", projectID, "error", err)
+						}
 						return
 					}
 					if err := s.syncFiles(existing.MachineID, existing.SyncToken, files, nil); err != nil {
 						slog.Error("file sync to running machine failed", "project_id", projectID, "error", err)
+						existing.Status = "error"
+						if err := s.DB.UpdatePreviewMachine(existing); err != nil {
+							slog.Error("failed to update machine status", "project_id", projectID, "error", err)
+						}
+						return
 					}
+					existing.Status = "ready"
+					existing.LastAccessAt = time.Now()
+					if err := s.DB.UpdatePreviewMachine(existing); err != nil {
+						slog.Error("failed to update machine status to ready", "project_id", projectID, "error", err)
+					}
+					slog.Info("running preview machine synced and ready", "project_id", projectID, "machine_id", existing.MachineID)
 				}()
 
 				return &PreviewStatus{
-					Status:     "ready",
+					Status:     "syncing",
 					PreviewURL: previewURL,
 				}, nil
 
@@ -98,40 +117,52 @@ func (s *Service) CreatePreview(projectID string, files map[string]string, envVa
 				slog.Info("restarting stopped preview machine", "project_id", projectID, "machine_id", existing.MachineID)
 				existing.Status = "starting"
 				existing.LastAccessAt = time.Now()
-				_ = s.DB.UpdatePreviewMachine(existing)
+				if err := s.DB.UpdatePreviewMachine(existing); err != nil {
+					slog.Error("failed to update machine status to starting", "project_id", projectID, "error", err)
+				}
 
 				go func() {
 					if err := s.Fly.StartMachine(existing.MachineID); err != nil {
 						slog.Error("failed to start stopped machine", "machine_id", existing.MachineID, "error", err)
 						existing.Status = "error"
-						_ = s.DB.UpdatePreviewMachine(existing)
+						if err := s.DB.UpdatePreviewMachine(existing); err != nil {
+							slog.Error("failed to update machine status", "project_id", projectID, "error", err)
+						}
 						return
 					}
 
 					if err := s.Fly.WaitForState(existing.MachineID, "started", 60*time.Second); err != nil {
 						slog.Error("stopped machine did not start", "machine_id", existing.MachineID, "error", err)
 						existing.Status = "error"
-						_ = s.DB.UpdatePreviewMachine(existing)
+						if err := s.DB.UpdatePreviewMachine(existing); err != nil {
+							slog.Error("failed to update machine status", "project_id", projectID, "error", err)
+						}
 						return
 					}
 
 					if err := s.waitForHealth(existing.MachineID, 60*time.Second); err != nil {
 						slog.Error("restarted machine proxy never became healthy", "project_id", projectID, "error", err)
 						existing.Status = "error"
-						_ = s.DB.UpdatePreviewMachine(existing)
+						if err := s.DB.UpdatePreviewMachine(existing); err != nil {
+							slog.Error("failed to update machine status", "project_id", projectID, "error", err)
+						}
 						return
 					}
 
 					if err := s.syncFiles(existing.MachineID, existing.SyncToken, files, nil); err != nil {
 						slog.Error("file sync to restarted machine failed", "project_id", projectID, "error", err)
 						existing.Status = "error"
-						_ = s.DB.UpdatePreviewMachine(existing)
+						if err := s.DB.UpdatePreviewMachine(existing); err != nil {
+							slog.Error("failed to update machine status", "project_id", projectID, "error", err)
+						}
 						return
 					}
 
 					existing.Status = "ready"
 					existing.LastAccessAt = time.Now()
-					_ = s.DB.UpdatePreviewMachine(existing)
+					if err := s.DB.UpdatePreviewMachine(existing); err != nil {
+						slog.Error("failed to update machine status to ready", "project_id", projectID, "error", err)
+					}
 					slog.Info("restarted preview machine ready", "project_id", projectID, "machine_id", existing.MachineID)
 				}()
 
@@ -143,8 +174,12 @@ func (s *Service) CreatePreview(projectID string, files map[string]string, envVa
 			default:
 				// Machine is in an error/unknown state — destroy and recreate
 				slog.Info("destroying errored preview machine before recreate", "project_id", projectID, "machine_id", existing.MachineID, "state", flyMachine.State)
-				_ = s.Fly.DestroyMachine(existing.MachineID, true)
-				_ = s.DB.DeletePreviewMachineByProjectID(projectID)
+				if err := s.Fly.DestroyMachine(existing.MachineID, true); err != nil {
+					slog.Error("failed to destroy errored machine", "machine_id", existing.MachineID, "error", err)
+				}
+				if err := s.DB.DeletePreviewMachineByProjectID(projectID); err != nil {
+					slog.Error("failed to delete errored machine record", "project_id", projectID, "error", err)
+				}
 			}
 		}
 	}
@@ -183,8 +218,11 @@ func (s *Service) createNewMachine(projectID string, files map[string]string, en
 			if listErr == nil {
 				for _, m := range machines {
 					if m.Name == machineName {
-						_ = s.Fly.DestroyMachine(m.ID, true)
-						slog.Info("destroyed orphaned machine", "machine_id", m.ID, "name", machineName)
+						if err := s.Fly.DestroyMachine(m.ID, true); err != nil {
+							slog.Error("failed to destroy orphaned machine", "machine_id", m.ID, "error", err)
+						} else {
+							slog.Info("destroyed orphaned machine", "machine_id", m.ID, "name", machineName)
+						}
 						break
 					}
 				}
@@ -209,7 +247,9 @@ func (s *Service) createNewMachine(projectID string, files map[string]string, en
 	}
 	if _, err := s.DB.CreatePreviewMachine(record); err != nil {
 		// Best-effort cleanup
-		_ = s.Fly.DestroyMachine(machine.ID, true)
+		if destroyErr := s.Fly.DestroyMachine(machine.ID, true); destroyErr != nil {
+			slog.Error("failed to cleanup machine after DB error", "machine_id", machine.ID, "error", destroyErr)
+		}
 		return nil, fmt.Errorf("saving preview machine to DB: %w", err)
 	}
 
@@ -218,7 +258,13 @@ func (s *Service) createNewMachine(projectID string, files map[string]string, en
 		if err := s.Fly.WaitForState(machine.ID, "started", 60*time.Second); err != nil {
 			slog.Error("machine did not start", "machine_id", machine.ID, "error", err)
 			record.Status = "error"
-			_ = s.DB.UpdatePreviewMachine(record)
+			if err := s.DB.UpdatePreviewMachine(record); err != nil {
+				slog.Error("failed to update machine status", "project_id", projectID, "error", err)
+			}
+			// Destroy orphaned machine that never started
+			if err := s.Fly.DestroyMachine(machine.ID, true); err != nil {
+				slog.Error("failed to destroy machine that never started", "machine_id", machine.ID, "error", err)
+			}
 			return
 		}
 
@@ -227,7 +273,13 @@ func (s *Service) createNewMachine(projectID string, files map[string]string, en
 		if err := s.waitForHealth(machine.ID, 120*time.Second); err != nil {
 			slog.Error("preview proxy never became healthy", "project_id", projectID, "error", err)
 			record.Status = "error"
-			_ = s.DB.UpdatePreviewMachine(record)
+			if err := s.DB.UpdatePreviewMachine(record); err != nil {
+				slog.Error("failed to update machine status", "project_id", projectID, "error", err)
+			}
+			// Destroy orphaned machine that never became healthy
+			if err := s.Fly.DestroyMachine(machine.ID, true); err != nil {
+				slog.Error("failed to destroy unhealthy machine", "machine_id", machine.ID, "error", err)
+			}
 			return
 		}
 
@@ -235,13 +287,17 @@ func (s *Service) createNewMachine(projectID string, files map[string]string, en
 		if err := s.syncFiles(machine.ID, syncToken, files, nil); err != nil {
 			slog.Error("initial file sync failed", "project_id", projectID, "error", err)
 			record.Status = "error"
-			_ = s.DB.UpdatePreviewMachine(record)
+			if err := s.DB.UpdatePreviewMachine(record); err != nil {
+				slog.Error("failed to update machine status", "project_id", projectID, "error", err)
+			}
 			return
 		}
 
 		record.Status = "ready"
 		record.LastAccessAt = time.Now()
-		_ = s.DB.UpdatePreviewMachine(record)
+		if err := s.DB.UpdatePreviewMachine(record); err != nil {
+			slog.Error("failed to update machine status to ready", "project_id", projectID, "error", err)
+		}
 
 		slog.Info("preview machine ready", "project_id", projectID, "machine_id", machine.ID, "url", previewURL)
 	}()
@@ -262,7 +318,9 @@ func (s *Service) UpdateFiles(projectID string, files map[string]string, deleteP
 
 	// Touch last access
 	record.LastAccessAt = time.Now()
-	_ = s.DB.UpdatePreviewMachine(record)
+	if err := s.DB.UpdatePreviewMachine(record); err != nil {
+		slog.Error("failed to update last access time", "project_id", projectID, "error", err)
+	}
 
 	return s.syncFiles(record.MachineID, record.SyncToken, files, deletePaths)
 }
@@ -292,7 +350,9 @@ func (s *Service) UpdateEnvVars(projectID string, envVars map[string]string) err
 	hash := fmt.Sprintf("%x", sha256.Sum256([]byte(envContent)))
 	if hash == record.LastEnvHash {
 		record.LastAccessAt = time.Now()
-		_ = s.DB.UpdatePreviewMachine(record)
+		if err := s.DB.UpdatePreviewMachine(record); err != nil {
+			slog.Error("failed to update last access time", "project_id", projectID, "error", err)
+		}
 		return nil
 	}
 
@@ -307,7 +367,9 @@ func (s *Service) UpdateEnvVars(projectID string, envVars map[string]string) err
 	// leaves the hash empty and every subsequent call triggers another restart.
 	record.LastEnvHash = hash
 	record.LastAccessAt = time.Now()
-	_ = s.DB.UpdatePreviewMachine(record)
+	if err := s.DB.UpdatePreviewMachine(record); err != nil {
+		slog.Error("failed to update env hash", "project_id", projectID, "error", err)
+	}
 
 	// Check if any non-NEXT_PUBLIC vars changed — these require a restart
 	hasServerVars := false
@@ -325,7 +387,9 @@ func (s *Service) UpdateEnvVars(projectID string, envVars map[string]string) err
 		if err := s.Fly.StopMachine(record.MachineID); err != nil {
 			slog.Warn("failed to stop machine for env restart", "machine_id", record.MachineID, "error", err)
 		}
-		_ = s.Fly.WaitForState(record.MachineID, "stopped", 15*time.Second)
+		if err := s.Fly.WaitForState(record.MachineID, "stopped", 15*time.Second); err != nil {
+			slog.Warn("machine did not stop in time", "machine_id", record.MachineID, "error", err)
+		}
 		if err := s.Fly.StartMachine(record.MachineID); err != nil {
 			return fmt.Errorf("restarting machine: %w", err)
 		}
@@ -333,13 +397,12 @@ func (s *Service) UpdateEnvVars(projectID string, envVars map[string]string) err
 			return fmt.Errorf("machine did not restart: %w", err)
 		}
 		if err := s.waitForHealth(record.MachineID, 120*time.Second); err != nil {
-			slog.Warn("health check timed out after env restart, machine may still be compiling",
-				"machine_id", record.MachineID, "error", err)
+			return fmt.Errorf("health check failed after env restart: %w", err)
 		}
 
 		// Re-sync .env.local after restart (filesystem was wiped)
 		if err := s.syncFiles(record.MachineID, record.SyncToken, files, nil); err != nil {
-			slog.Warn("failed to re-sync env file after restart", "error", err)
+			return fmt.Errorf("re-syncing env file after restart: %w", err)
 		}
 	}
 
@@ -381,23 +444,40 @@ func (s *Service) GetStatus(projectID string) (*PreviewStatus, error) {
 		}, nil
 	}
 
-	// Optionally verify with Fly API if status is "ready"
-	if record.Status == "ready" || record.Status == "starting" {
+	// Verify actual state with Fly API
+	if record.Status == "ready" || record.Status == "starting" || record.Status == "syncing" || record.Status == "error" {
 		machine, err := s.Fly.GetMachine(record.MachineID)
 		if err == nil {
-			// Map Fly machine states to our status
 			switch machine.State {
 			case "started":
-				if record.Status == "starting" {
-					// Still starting, keep checking
+				// Fly says it's running — if our DB is stuck on "starting" or "error",
+				// promote to "ready" so the user isn't stuck in a loading state forever.
+				// Don't promote "syncing" — that means files are being pushed right now.
+				if record.Status == "starting" || record.Status == "error" {
+					slog.Info("promoting stale status to ready", "project_id", projectID, "old_status", record.Status)
+					record.Status = "ready"
+					if err := s.DB.UpdatePreviewMachine(record); err != nil {
+						slog.Error("failed to update machine status", "project_id", projectID, "error", err)
+					}
 				}
-			case "stopped":
+			case "stopped", "suspended":
 				record.Status = "stopped"
-				_ = s.DB.UpdatePreviewMachine(record)
+				if err := s.DB.UpdatePreviewMachine(record); err != nil {
+					slog.Error("failed to update machine status", "project_id", projectID, "error", err)
+				}
 			case "destroyed":
-				_ = s.DB.DeletePreviewMachineByProjectID(projectID)
+				if err := s.DB.DeletePreviewMachineByProjectID(projectID); err != nil {
+					slog.Error("failed to delete destroyed machine record", "project_id", projectID, "error", err)
+				}
 				return &PreviewStatus{Status: "not_found", Error: "machine was destroyed"}, nil
 			}
+		} else {
+			// Machine doesn't exist on Fly anymore
+			slog.Warn("machine not found on Fly during status check", "project_id", projectID, "machine_id", record.MachineID, "error", err)
+			if err := s.DB.DeletePreviewMachineByProjectID(projectID); err != nil {
+				slog.Error("failed to delete stale machine record", "project_id", projectID, "error", err)
+			}
+			return &PreviewStatus{Status: "not_found", Error: "machine no longer exists"}, nil
 		}
 	}
 
@@ -422,7 +502,9 @@ func (s *Service) StopIdleMachines(idleThreshold time.Duration) {
 			continue
 		}
 		m.Status = "stopped"
-		_ = s.DB.UpdatePreviewMachine(&m)
+		if err := s.DB.UpdatePreviewMachine(&m); err != nil {
+			slog.Error("failed to update idle machine status", "machine_id", m.MachineID, "error", err)
+		}
 	}
 
 	if len(machines) > 0 {
@@ -453,7 +535,9 @@ func (s *Service) DestroyStoppedMachines(stoppedThreshold time.Duration) {
 		if err := s.Fly.DestroyMachine(m.MachineID, true); err != nil {
 			slog.Warn("failed to destroy machine", "machine_id", m.MachineID, "error", err)
 		}
-		_ = s.DB.DeletePreviewMachineByProjectID(m.AppProjectID.String())
+		if err := s.DB.DeletePreviewMachineByProjectID(m.AppProjectID.String()); err != nil {
+			slog.Error("failed to delete destroyed machine record", "project_id", m.AppProjectID, "error", err)
+		}
 	}
 
 	if len(machines) > 0 {
@@ -563,4 +647,3 @@ func (s *Service) waitForHealth(machineID string, timeout time.Duration) error {
 
 	return fmt.Errorf("health check timed out after %s", timeout)
 }
-
