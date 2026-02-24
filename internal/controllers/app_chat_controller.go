@@ -85,6 +85,32 @@ func normalizeContent(s string) string {
 // ansiRegex strips ANSI escape sequences that some LLM providers emit in streamed text.
 var ansiRegex = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
 
+// fileClaimRegex detects when the AI claims to have modified/fixed/updated files
+// without actually calling write_file or edit_file tools.
+var fileClaimRegex = regexp.MustCompile(`(?i)\b(I (?:fixed|updated|modified|removed|added|completed|wrote|changed|created|replaced|corrected|cleaned|refactored|moved|renamed|deleted|edited|rewrote|patched|resolved|implemented))\b`)
+
+// looksLikeUnappliedFileChanges returns true when the AI response text claims
+// to have modified project files (e.g. "I fixed layout.tsx") but no write_file
+// or edit_file tools were called. Requires both a first-person action verb AND
+// a reference to an existing project file path.
+func looksLikeUnappliedFileChanges(response string, currentFiles map[string]string) bool {
+	if !fileClaimRegex.MatchString(response) {
+		return false
+	}
+	// Check if any existing project file path is mentioned in the response
+	for filePath := range currentFiles {
+		// Match the filename (e.g. "layout.tsx") or a partial path (e.g. "app/layout.tsx")
+		base := filePath
+		if idx := strings.LastIndex(filePath, "/"); idx >= 0 {
+			base = filePath[idx+1:]
+		}
+		if strings.Contains(response, base) {
+			return true
+		}
+	}
+	return false
+}
+
 // appChatTools defines the tools available to the chat LLM for on-demand file access and modification.
 var appChatTools = []utils.Tool{
 	{
@@ -990,6 +1016,48 @@ func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.A
 	var appliedOps []appChatOperation
 	appliedOps = append(appliedOps, toolAppliedOps...)
 	filesChanged := len(toolAppliedOps)
+
+	// Detect hallucinated file claims: the AI says it fixed/updated files in its
+	// explanation text but never actually called write_file or edit_file tools.
+	// When detected, retry once with an explicit instruction to use the tools.
+	if filesChanged == 0 && ctx.Err() == nil && looksLikeUnappliedFileChanges(responseJSON, currentFiles) {
+		slog.Warn("AI claimed file modifications without tool calls, retrying",
+			"project_id", project.ID, "response_length", len(responseJSON))
+
+		retryMessages := make([]utils.Message, len(llmMessages), len(llmMessages)+2)
+		copy(retryMessages, llmMessages)
+		retryMessages = append(retryMessages, utils.Message{
+			Role:    "assistant",
+			Content: responseJSON,
+		}, utils.Message{
+			Role:    "user",
+			Content: "You described changes to files above but did not call write_file or edit_file to apply them. The files are unchanged. Call the tools now to implement every change you described. Do not repeat the explanation — just call the tools.",
+		})
+
+		retryResponse, retryErr := utils.StreamWithTools(
+			ctx, model, retryMessages, chatTools, provider, nil, c.reasoningConfig(), executor,
+			func(toolName, args string) {
+				accToolCalls = append(accToolCalls, models.AppChatToolCall{Tool: toolName, Arguments: args})
+				sendEvent("tool_call", responses.ToolCallEvent{Tool: toolName, Arguments: args})
+			},
+			func(chunk string) {}, // don't stream retry text — explanation was already streamed
+			func(chunk string) {},
+			utils.ToolCallConfig{MaxRounds: 5, NudgeAfter: 3, StripAfter: 4},
+		)
+		if retryErr == nil && len(toolAppliedOps) > 0 {
+			slog.Info("Retry successfully applied file changes",
+				"project_id", project.ID, "tool_ops", len(toolAppliedOps))
+			appliedOps = append(appliedOps[:0], toolAppliedOps...)
+			filesChanged = len(toolAppliedOps)
+		} else {
+			// Retry didn't produce tool calls either — append retry text to response
+			if retryResponse != "" {
+				responseJSON += "\n" + retryResponse
+			}
+			slog.Warn("Retry did not produce tool calls",
+				"project_id", project.ID, "retry_err", retryErr)
+		}
+	}
 
 	// Extract explanation text (everything before any JSON block) and try to parse
 	// a JSON operations block as fallback — the LLM may still use the old JSON format
