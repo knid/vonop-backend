@@ -30,7 +30,7 @@ func NewService(apiToken, appName, region, image string) *Service {
 		AppName:  appName,
 		Region:   region,
 		Image:    image,
-		limiter:  rate.NewLimiter(rate.Every(time.Second), 1),
+		limiter:  rate.NewLimiter(rate.Every(200*time.Millisecond), 5),
 		client: &http.Client{
 			Timeout: 30 * time.Second,
 		},
