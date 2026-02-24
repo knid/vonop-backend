@@ -208,12 +208,103 @@ type ChatResponse struct {
 	Usage   UsageInfo `json:"usage"`
 }
 
+// buildLLMRequestBody marshals a ChatRequest into the correct wire format
+// for the given provider. For Anthropic, it translates to the Messages API format.
+func buildLLMRequestBody(req ChatRequest, provider *LLMProvider) ([]byte, error) {
+	if provider != nil && provider.IsAnthropic() {
+		anthReq := convertToAnthropicRequest(req, provider)
+		return json.Marshal(anthReq)
+	}
+	prepared := prepareChatRequest(req, provider)
+	return json.Marshal(prepared)
+}
+
+// buildVisionRequestBody marshals a vision request into the correct wire format.
+func buildVisionRequestBody(model, system, userText, base64Image string, provider *LLMProvider) ([]byte, error) {
+	if provider != nil && provider.IsAnthropic() {
+		anthReq := convertVisionToAnthropic(model, system, userText, base64Image, provider)
+		return json.Marshal(anthReq)
+	}
+	reqBody := MultiChatRequest{
+		Model: model,
+		Messages: []MultiMessage{
+			{Role: "system", Content: system},
+			{
+				Role: "user",
+				Content: []MultiContentPart{
+					{Type: "text", Text: userText},
+					{
+						Type: "image_url",
+						ImageURL: &ImageURLContent{
+							URL: "data:image/png;base64," + base64Image,
+						},
+					},
+				},
+			},
+		},
+	}
+	return json.Marshal(reqBody)
+}
+
+// buildStreamVisionRequestBody marshals a streaming vision request.
+func buildStreamVisionRequestBody(model, system, userText, base64Image string, provider *LLMProvider) ([]byte, error) {
+	if provider != nil && provider.IsAnthropic() {
+		anthReq := convertVisionToAnthropic(model, system, userText, base64Image, provider)
+		anthReq.Stream = true
+		return json.Marshal(anthReq)
+	}
+	type streamMultiChatRequest struct {
+		Model         string               `json:"model"`
+		Stream        bool                 `json:"stream"`
+		StreamOptions *StreamOptionsConfig `json:"stream_options,omitempty"`
+		Messages      []MultiMessage       `json:"messages"`
+	}
+	reqBody := streamMultiChatRequest{
+		Model:         model,
+		Stream:        true,
+		StreamOptions: &StreamOptionsConfig{IncludeUsage: true},
+		Messages: []MultiMessage{
+			{Role: "system", Content: system},
+			{
+				Role: "user",
+				Content: []MultiContentPart{
+					{Type: "text", Text: userText},
+					{
+						Type: "image_url",
+						ImageURL: &ImageURLContent{
+							URL: "data:image/png;base64," + base64Image,
+						},
+					},
+				},
+			},
+		},
+	}
+	return json.Marshal(reqBody)
+}
+
+// parseLLMResponseBody unmarshals a non-streaming LLM response body.
+func parseLLMResponseBody(body []byte, provider *LLMProvider) (ChatResponse, error) {
+	if provider != nil && provider.IsAnthropic() {
+		return parseAnthropicResponse(body)
+	}
+	var parsed ChatResponse
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return ChatResponse{}, err
+	}
+	return parsed, nil
+}
+
 // prepareChatRequest translates provider-agnostic ChatRequest fields into the
 // format expected by the target LLM provider. For providers that use the
 // "thinking" format (ZAI, Moonshot/Kimi), it converts the OpenRouter-style
 // "reasoning" config into the thinking config and sets required defaults.
 func prepareChatRequest(req ChatRequest, provider *LLMProvider) ChatRequest {
 	if provider == nil {
+		return req
+	}
+
+	// Anthropic uses a different request format entirely (handled by buildLLMRequestBody)
+	if provider.IsAnthropic() {
 		return req
 	}
 
@@ -272,14 +363,16 @@ func GetJSONFromLLM(ctx context.Context, model, system, message string, provider
 		return "", fmt.Errorf("missing LLM provider configuration")
 	}
 
-	reqBody := prepareChatRequest(ChatRequest{
+	body, err := buildLLMRequestBody(ChatRequest{
 		Model: model,
 		Messages: []Message{
 			{Role: "system", Content: system},
 			{Role: "user", Content: message},
 		},
 	}, provider)
-	body, _ := json.Marshal(reqBody)
+	if err != nil {
+		return "", fmt.Errorf("error building request: %w", err)
+	}
 
 	req, _ := http.NewRequestWithContext(ctx, "POST", provider.Endpoint(), bytes.NewReader(body))
 	setLLMHeaders(req, provider)
@@ -306,8 +399,8 @@ func GetJSONFromLLM(ctx context.Context, model, system, message string, provider
 	latencyMs := time.Since(start).Milliseconds()
 	slog.Info("LLM Response received", "FROM", "LLM_UTILS")
 
-	var parsed ChatResponse
-	if err := json.Unmarshal(respBody, &parsed); err != nil {
+	parsed, err := parseLLMResponseBody(respBody, provider)
+	if err != nil {
 		slog.Error("error creating items.", "error", err, "FROM", "LLM_UTILS", "resp", resp, "body", body)
 		return "", fmt.Errorf("error creating items. try again please")
 	}
@@ -332,14 +425,16 @@ func GetTextFromLLM(ctx context.Context, model, system, message string, provider
 		return "", fmt.Errorf("missing LLM provider configuration")
 	}
 
-	reqBody := prepareChatRequest(ChatRequest{
+	body, err := buildLLMRequestBody(ChatRequest{
 		Model: model,
 		Messages: []Message{
 			{Role: "system", Content: system},
 			{Role: "user", Content: message},
 		},
 	}, provider)
-	body, _ := json.Marshal(reqBody)
+	if err != nil {
+		return "", fmt.Errorf("error building request: %w", err)
+	}
 
 	req, _ := http.NewRequestWithContext(ctx, "POST", provider.Endpoint(), bytes.NewReader(body))
 	setLLMHeaders(req, provider)
@@ -366,8 +461,8 @@ func GetTextFromLLM(ctx context.Context, model, system, message string, provider
 	latencyMs := time.Since(start).Milliseconds()
 	slog.Info("LLM Response received", "FROM", "LLM_UTILS_TEXT")
 
-	var parsed ChatResponse
-	if err := json.Unmarshal(respBody, &parsed); err != nil {
+	parsed, err := parseLLMResponseBody(respBody, provider)
+	if err != nil {
 		slog.Error("error parsing LLM response", "error", err, "FROM", "LLM_UTILS_TEXT")
 		return "", fmt.Errorf("error generating content. try again please")
 	}
@@ -419,7 +514,7 @@ func StreamTextFromLLM(ctx context.Context, model, system, message string, provi
 		return "", fmt.Errorf("missing LLM provider configuration")
 	}
 
-	reqBody := prepareChatRequest(ChatRequest{
+	body, err := buildLLMRequestBody(ChatRequest{
 		Model:         model,
 		Stream:        true,
 		StreamOptions: &StreamOptionsConfig{IncludeUsage: true},
@@ -430,7 +525,9 @@ func StreamTextFromLLM(ctx context.Context, model, system, message string, provi
 			{Role: "user", Content: message},
 		},
 	}, provider)
-	body, _ := json.Marshal(reqBody)
+	if err != nil {
+		return "", fmt.Errorf("error building request: %w", err)
+	}
 
 	req, _ := http.NewRequestWithContext(ctx, "POST", provider.Endpoint(), bytes.NewReader(body))
 	setLLMHeaders(req, provider)
@@ -447,6 +544,24 @@ func StreamTextFromLLM(ctx context.Context, model, system, message string, provi
 		respBody, _ := io.ReadAll(resp.Body)
 		slog.Error("LLM streaming returned non-200", "status", resp.StatusCode, "body", string(respBody))
 		return "", fmt.Errorf("error generating content. try again please")
+	}
+
+	// Anthropic SSE format is different — use dedicated parser
+	if provider.IsAnthropic() {
+		result, err := parseAnthropicSSEStream(resp.Body, onChunk, onReasoning)
+		if err != nil {
+			if ctx.Err() != nil {
+				return "", ctx.Err()
+			}
+			return "", fmt.Errorf("error reading streaming response. try again please")
+		}
+		if result.Usage.TotalTokens > 0 {
+			slog.Info("LLM usage", "FROM", "LLM_STREAM_TEXT", "prompt_tokens", result.Usage.PromptTokens, "completion_tokens", result.Usage.CompletionTokens, "total_tokens", result.Usage.TotalTokens)
+			if tracker := TokenTrackerFromContext(ctx); tracker != nil {
+				tracker.Record(model, result.Usage, time.Since(start).Milliseconds(), true)
+			}
+		}
+		return result.Text, nil
 	}
 
 	var fullText strings.Builder
@@ -523,13 +638,15 @@ func GetJSONFromLLMWithMessages(ctx context.Context, model string, messages []Me
 		return "", fmt.Errorf("missing LLM provider configuration")
 	}
 
-	reqBody := prepareChatRequest(ChatRequest{
+	body, err := buildLLMRequestBody(ChatRequest{
 		Model:          model,
 		Messages:       messages,
 		MaxTokens:      16384,
 		ResponseFormat: &ResponseFormat{Type: "json_object"},
 	}, provider)
-	body, _ := json.Marshal(reqBody)
+	if err != nil {
+		return "", fmt.Errorf("error building request: %w", err)
+	}
 
 	req, _ := http.NewRequestWithContext(ctx, "POST", provider.Endpoint(), bytes.NewReader(body))
 	setLLMHeaders(req, provider)
@@ -556,8 +673,8 @@ func GetJSONFromLLMWithMessages(ctx context.Context, model string, messages []Me
 	latencyMs := time.Since(start).Milliseconds()
 	slog.Info("LLM Chat Response received", "FROM", "LLM_UTILS_CHAT")
 
-	var parsed ChatResponse
-	if err := json.Unmarshal(respBody, &parsed); err != nil {
+	parsed, err := parseLLMResponseBody(respBody, provider)
+	if err != nil {
 		slog.Error("error parsing LLM response", "error", err, "FROM", "LLM_UTILS_CHAT")
 		return "", fmt.Errorf("error generating content. try again please")
 	}
@@ -584,7 +701,7 @@ func StreamJSONFromLLMWithMessages(ctx context.Context, model string, messages [
 		return "", fmt.Errorf("missing LLM provider configuration")
 	}
 
-	reqBody := prepareChatRequest(ChatRequest{
+	body, err := buildLLMRequestBody(ChatRequest{
 		Model:          model,
 		Stream:         true,
 		StreamOptions:  &StreamOptionsConfig{IncludeUsage: true},
@@ -592,7 +709,9 @@ func StreamJSONFromLLMWithMessages(ctx context.Context, model string, messages [
 		MaxTokens:      16384,
 		ResponseFormat: &ResponseFormat{Type: "json_object"},
 	}, provider)
-	body, _ := json.Marshal(reqBody)
+	if err != nil {
+		return "", fmt.Errorf("error building request: %w", err)
+	}
 
 	req, _ := http.NewRequestWithContext(ctx, "POST", provider.Endpoint(), bytes.NewReader(body))
 	setLLMHeaders(req, provider)
@@ -609,6 +728,27 @@ func StreamJSONFromLLMWithMessages(ctx context.Context, model string, messages [
 		respBody, _ := io.ReadAll(resp.Body)
 		slog.Error("LLM streaming returned non-200", "status", resp.StatusCode, "body", string(respBody))
 		return "", fmt.Errorf("error generating content. try again please")
+	}
+
+	// Anthropic SSE format — use dedicated parser
+	if provider.IsAnthropic() {
+		result, err := parseAnthropicSSEStream(resp.Body, onChunk, onReasoning)
+		if err != nil {
+			if ctx.Err() != nil {
+				return "", ctx.Err()
+			}
+			return "", fmt.Errorf("error reading streaming response. try again please")
+		}
+		if result.FinishReason == "length" {
+			slog.Warn("LLM chat response truncated (finish_reason=length)")
+		}
+		if result.Usage.TotalTokens > 0 {
+			slog.Info("LLM usage", "FROM", "LLM_STREAM_CHAT", "prompt_tokens", result.Usage.PromptTokens, "completion_tokens", result.Usage.CompletionTokens, "total_tokens", result.Usage.TotalTokens)
+			if tracker := TokenTrackerFromContext(ctx); tracker != nil {
+				tracker.Record(model, result.Usage, time.Since(start).Milliseconds(), true)
+			}
+		}
+		return result.Text, nil
 	}
 
 	var fullText strings.Builder
@@ -716,27 +856,10 @@ func GetJSONFromLLMWithVision(ctx context.Context, model, system, userText, base
 		return "", fmt.Errorf("vision is not supported by %s provider", provider.Name)
 	}
 
-	messages := []MultiMessage{
-		{Role: "system", Content: system},
-		{
-			Role: "user",
-			Content: []MultiContentPart{
-				{Type: "text", Text: userText},
-				{
-					Type: "image_url",
-					ImageURL: &ImageURLContent{
-						URL: "data:image/png;base64," + base64Image,
-					},
-				},
-			},
-		},
+	body, err := buildVisionRequestBody(model, system, userText, base64Image, provider)
+	if err != nil {
+		return "", fmt.Errorf("error building request: %w", err)
 	}
-
-	reqBody := MultiChatRequest{
-		Model:    model,
-		Messages: messages,
-	}
-	body, _ := json.Marshal(reqBody)
 
 	req, _ := http.NewRequestWithContext(ctx, "POST", provider.Endpoint(), bytes.NewReader(body))
 	setLLMHeaders(req, provider)
@@ -753,8 +876,8 @@ func GetJSONFromLLMWithVision(ctx context.Context, model, system, userText, base
 	latencyMs := time.Since(start).Milliseconds()
 	slog.Info("LLM Vision Response received", "FROM", "LLM_UTILS_VISION")
 
-	var parsed ChatResponse
-	if err := json.Unmarshal(respBody, &parsed); err != nil {
+	parsed, err := parseLLMResponseBody(respBody, provider)
+	if err != nil {
 		slog.Error("error parsing LLM vision response", "error", err)
 		return "", fmt.Errorf("error generating content. try again please")
 	}
@@ -780,7 +903,7 @@ func StreamJSONFromLLM(ctx context.Context, model, system, message string, provi
 		return "", fmt.Errorf("missing LLM provider configuration")
 	}
 
-	reqBody := prepareChatRequest(ChatRequest{
+	body, err := buildLLMRequestBody(ChatRequest{
 		Model:         model,
 		Stream:        true,
 		StreamOptions: &StreamOptionsConfig{IncludeUsage: true},
@@ -790,7 +913,9 @@ func StreamJSONFromLLM(ctx context.Context, model, system, message string, provi
 			{Role: "user", Content: message},
 		},
 	}, provider)
-	body, _ := json.Marshal(reqBody)
+	if err != nil {
+		return "", fmt.Errorf("error building request: %w", err)
+	}
 
 	req, _ := http.NewRequestWithContext(ctx, "POST", provider.Endpoint(), bytes.NewReader(body))
 	setLLMHeaders(req, provider)
@@ -807,6 +932,24 @@ func StreamJSONFromLLM(ctx context.Context, model, system, message string, provi
 		respBody, _ := io.ReadAll(resp.Body)
 		slog.Error("LLM streaming returned non-200", "status", resp.StatusCode, "body", string(respBody))
 		return "", fmt.Errorf("error generating content. try again please")
+	}
+
+	// Anthropic SSE format — use dedicated parser
+	if provider.IsAnthropic() {
+		result, err := parseAnthropicSSEStream(resp.Body, onChunk, onReasoning)
+		if err != nil {
+			if ctx.Err() != nil {
+				return "", ctx.Err()
+			}
+			return "", fmt.Errorf("error reading streaming response. try again please")
+		}
+		if result.Usage.TotalTokens > 0 {
+			slog.Info("LLM usage", "FROM", "LLM_STREAM_JSON", "prompt_tokens", result.Usage.PromptTokens, "completion_tokens", result.Usage.CompletionTokens, "total_tokens", result.Usage.TotalTokens)
+			if tracker := TokenTrackerFromContext(ctx); tracker != nil {
+				tracker.Record(model, result.Usage, time.Since(start).Milliseconds(), true)
+			}
+		}
+		return result.Text, nil
 	}
 
 	var fullText strings.Builder
@@ -886,36 +1029,10 @@ func StreamJSONFromLLMWithVision(ctx context.Context, model, system, userText, b
 		return "", fmt.Errorf("vision is not supported by %s provider", provider.Name)
 	}
 
-	type streamMultiChatRequest struct {
-		Model         string               `json:"model"`
-		Stream        bool                 `json:"stream"`
-		StreamOptions *StreamOptionsConfig `json:"stream_options,omitempty"`
-		Messages      []MultiMessage       `json:"messages"`
+	body, err := buildStreamVisionRequestBody(model, system, userText, base64Image, provider)
+	if err != nil {
+		return "", fmt.Errorf("error building request: %w", err)
 	}
-
-	messages := []MultiMessage{
-		{Role: "system", Content: system},
-		{
-			Role: "user",
-			Content: []MultiContentPart{
-				{Type: "text", Text: userText},
-				{
-					Type: "image_url",
-					ImageURL: &ImageURLContent{
-						URL: "data:image/png;base64," + base64Image,
-					},
-				},
-			},
-		},
-	}
-
-	reqBody := streamMultiChatRequest{
-		Model:         model,
-		Stream:        true,
-		StreamOptions: &StreamOptionsConfig{IncludeUsage: true},
-		Messages:      messages,
-	}
-	body, _ := json.Marshal(reqBody)
 
 	req, _ := http.NewRequestWithContext(ctx, "POST", provider.Endpoint(), bytes.NewReader(body))
 	setLLMHeaders(req, provider)
@@ -932,6 +1049,24 @@ func StreamJSONFromLLMWithVision(ctx context.Context, model, system, userText, b
 		respBody, _ := io.ReadAll(resp.Body)
 		slog.Error("LLM vision streaming returned non-200", "status", resp.StatusCode, "body", string(respBody))
 		return "", fmt.Errorf("error generating content. try again please")
+	}
+
+	// Anthropic SSE format — use dedicated parser
+	if provider.IsAnthropic() {
+		result, err := parseAnthropicSSEStream(resp.Body, onChunk, onReasoning)
+		if err != nil {
+			if ctx.Err() != nil {
+				return "", ctx.Err()
+			}
+			return "", fmt.Errorf("error reading streaming response. try again please")
+		}
+		if result.Usage.TotalTokens > 0 {
+			slog.Info("LLM usage", "FROM", "LLM_STREAM_VISION", "prompt_tokens", result.Usage.PromptTokens, "completion_tokens", result.Usage.CompletionTokens, "total_tokens", result.Usage.TotalTokens)
+			if tracker := TokenTrackerFromContext(ctx); tracker != nil {
+				tracker.Record(model, result.Usage, time.Since(start).Milliseconds(), true)
+			}
+		}
+		return result.Text, nil
 	}
 
 	var fullText strings.Builder
@@ -1075,7 +1210,7 @@ func StreamWithTools(
 			return "", ctx.Err()
 		}
 
-		reqBody := prepareChatRequest(ChatRequest{
+		body, err := buildLLMRequestBody(ChatRequest{
 			Model:          model,
 			Stream:         true,
 			StreamOptions:  &StreamOptionsConfig{IncludeUsage: true},
@@ -1085,7 +1220,9 @@ func StreamWithTools(
 			Tools:          roundTools,
 			ResponseFormat: responseFormat,
 		}, provider)
-		body, _ := json.Marshal(reqBody)
+		if err != nil {
+			return "", fmt.Errorf("error building request: %w", err)
+		}
 
 		req, _ := http.NewRequestWithContext(ctx, "POST", provider.Endpoint(), bytes.NewReader(body))
 		setLLMHeaders(req, provider)
@@ -1105,121 +1242,157 @@ func StreamWithTools(
 		}
 
 		var fullText strings.Builder
-		var fullReasoning strings.Builder // ZAI: accumulate reasoning_content for cache continuity
+		var fullReasoning strings.Builder // accumulate reasoning_content for cache continuity
 		var roundChunks []string          // buffer chunks per round to suppress intermediate reasoning
 		var lastFinishReason string
 		var roundUsage UsageInfo
 		toolCallsMap := make(map[int]*ToolCall)
 
-		scanner := bufio.NewScanner(resp.Body)
-		scanner.Buffer(make([]byte, 0, 64*1024), 512*1024)
-
-		for scanner.Scan() {
-			if ctx.Err() != nil {
-				resp.Body.Close()
-				return fullText.String(), ctx.Err()
-			}
-
-			line := scanner.Text()
-			if !strings.HasPrefix(line, "data: ") {
-				continue
-			}
-
-			data := strings.TrimPrefix(line, "data: ")
-			if data == "[DONE]" {
-				break
-			}
-
-			var chunk StreamChunk
-			if err := json.Unmarshal([]byte(data), &chunk); err != nil {
-				prefix := data
-				if len(prefix) > 200 {
-					prefix = prefix[:200]
+		// Anthropic SSE format — use dedicated parser then map to local vars
+		if provider.IsAnthropic() {
+			result, parseErr := parseAnthropicSSEStream(resp.Body, func(chunk string) {
+				roundChunks = append(roundChunks, chunk)
+				if onChunk != nil {
+					onChunk(chunk)
 				}
-				slog.Debug("Skipped malformed SSE chunk", "error", err, "data_prefix", prefix)
-				continue
+			}, func(chunk string) {
+				if onReasoning != nil {
+					onReasoning(chunk)
+				}
+			})
+			resp.Body.Close()
+
+			if parseErr != nil {
+				if ctx.Err() != nil {
+					return "", ctx.Err()
+				}
+				slog.Error("error parsing Anthropic SSE stream", "error", parseErr, "round", round)
+				return "", fmt.Errorf("error reading streaming response. try again please")
 			}
 
-			if chunk.Usage != nil {
-				roundUsage = *chunk.Usage
+			fullText.WriteString(result.Text)
+			fullReasoning.WriteString(result.Reasoning)
+			lastFinishReason = result.FinishReason
+			roundUsage = result.Usage
+			for i, tc := range result.ToolCalls {
+				toolCallsMap[i] = &ToolCall{
+					ID:       tc.ID,
+					Type:     tc.Type,
+					Function: tc.Function,
+				}
 			}
+		} else {
+			// OpenAI-compatible SSE format
+			scanner := bufio.NewScanner(resp.Body)
+			scanner.Buffer(make([]byte, 0, 64*1024), 512*1024)
 
-			if len(chunk.Choices) > 0 {
-				choice := chunk.Choices[0]
-
-				// Buffer content — only flush to onChunk after confirming this isn't
-				// an intermediate tool-calling round (which contains reasoning, not code)
-				if choice.Delta.Content != "" {
-					fullText.WriteString(choice.Delta.Content)
-					roundChunks = append(roundChunks, choice.Delta.Content)
-					// Stream in real-time for UX; if this round is a tool-call
-					// round, frontend replaces streaming text on chat_complete
-					if onChunk != nil {
-						onChunk(choice.Delta.Content)
-					}
+			for scanner.Scan() {
+				if ctx.Err() != nil {
+					resp.Body.Close()
+					return fullText.String(), ctx.Err()
 				}
 
-				// Accumulate reasoning (ZAI: reasoning_content, OpenRouter: reasoning)
-				if r := choice.Delta.GetReasoning(); r != "" {
-					fullReasoning.WriteString(r)
-					if onReasoning != nil {
-						onReasoning(r)
-					}
+				line := scanner.Text()
+				if !strings.HasPrefix(line, "data: ") {
+					continue
 				}
 
-				// Accumulate tool calls
-				for _, tc := range choice.Delta.ToolCalls {
-					idx := 0
-					if tc.Index != nil {
-						idx = *tc.Index
-					}
+				data := strings.TrimPrefix(line, "data: ")
+				if data == "[DONE]" {
+					break
+				}
 
-					if _, exists := toolCallsMap[idx]; !exists {
-						name := ""
-						if tc.Function != nil {
-							name = tc.Function.Name
-						}
-						toolCallsMap[idx] = &ToolCall{
-							ID:   tc.ID,
-							Type: tc.Type,
-							Function: &FunctionCall{
-								Name: name,
-							},
-						}
-					} else {
-						// Update ID/Type if provided in later chunks
-						if tc.ID != "" {
-							toolCallsMap[idx].ID = tc.ID
-						}
-						if tc.Type != "" {
-							toolCallsMap[idx].Type = tc.Type
-						}
-						if tc.Function != nil && tc.Function.Name != "" {
-							toolCallsMap[idx].Function.Name = tc.Function.Name
+				var chunk StreamChunk
+				if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+					prefix := data
+					if len(prefix) > 200 {
+						prefix = prefix[:200]
+					}
+					slog.Debug("Skipped malformed SSE chunk", "error", err, "data_prefix", prefix)
+					continue
+				}
+
+				if chunk.Usage != nil {
+					roundUsage = *chunk.Usage
+				}
+
+				if len(chunk.Choices) > 0 {
+					choice := chunk.Choices[0]
+
+					// Buffer content — only flush to onChunk after confirming this isn't
+					// an intermediate tool-calling round (which contains reasoning, not code)
+					if choice.Delta.Content != "" {
+						fullText.WriteString(choice.Delta.Content)
+						roundChunks = append(roundChunks, choice.Delta.Content)
+						// Stream in real-time for UX; if this round is a tool-call
+						// round, frontend replaces streaming text on chat_complete
+						if onChunk != nil {
+							onChunk(choice.Delta.Content)
 						}
 					}
 
-					// Append arguments incrementally
-					if tc.Function != nil && tc.Function.Arguments != "" {
-						toolCallsMap[idx].Function.Arguments += tc.Function.Arguments
+					// Accumulate reasoning (ZAI: reasoning_content, OpenRouter: reasoning)
+					if r := choice.Delta.GetReasoning(); r != "" {
+						fullReasoning.WriteString(r)
+						if onReasoning != nil {
+							onReasoning(r)
+						}
+					}
+
+					// Accumulate tool calls
+					for _, tc := range choice.Delta.ToolCalls {
+						idx := 0
+						if tc.Index != nil {
+							idx = *tc.Index
+						}
+
+						if _, exists := toolCallsMap[idx]; !exists {
+							name := ""
+							if tc.Function != nil {
+								name = tc.Function.Name
+							}
+							toolCallsMap[idx] = &ToolCall{
+								ID:   tc.ID,
+								Type: tc.Type,
+								Function: &FunctionCall{
+									Name: name,
+								},
+							}
+						} else {
+							// Update ID/Type if provided in later chunks
+							if tc.ID != "" {
+								toolCallsMap[idx].ID = tc.ID
+							}
+							if tc.Type != "" {
+								toolCallsMap[idx].Type = tc.Type
+							}
+							if tc.Function != nil && tc.Function.Name != "" {
+								toolCallsMap[idx].Function.Name = tc.Function.Name
+							}
+						}
+
+						// Append arguments incrementally
+						if tc.Function != nil && tc.Function.Arguments != "" {
+							toolCallsMap[idx].Function.Arguments += tc.Function.Arguments
+						}
+					}
+
+					if choice.FinishReason != nil {
+						lastFinishReason = *choice.FinishReason
 					}
 				}
+			}
 
-				if choice.FinishReason != nil {
-					lastFinishReason = *choice.FinishReason
+			scanErr := scanner.Err()
+			resp.Body.Close()
+
+			if scanErr != nil {
+				if ctx.Err() != nil {
+					return fullText.String(), ctx.Err()
 				}
+				slog.Error("scanner error during LLM streaming with tools", "error", scanErr, "round", round)
+				return "", fmt.Errorf("error reading streaming response. try again please")
 			}
-		}
-
-		scanErr := scanner.Err()
-		resp.Body.Close()
-
-		if scanErr != nil {
-			if ctx.Err() != nil {
-				return fullText.String(), ctx.Err()
-			}
-			slog.Error("scanner error during LLM streaming with tools", "error", scanErr, "round", round)
-			return "", fmt.Errorf("error reading streaming response. try again please")
 		}
 
 		// Record usage from this round
