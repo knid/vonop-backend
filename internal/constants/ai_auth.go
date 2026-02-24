@@ -3,7 +3,7 @@ package constants
 // NEXTJS_AUTH_TEMPLATE_FILE_PATHS are template-managed files injected only for projects that need auth.
 var NEXTJS_AUTH_TEMPLATE_FILE_PATHS = []string{
 	"lib/wemob-auth.ts",
-	"lib/wemob-auth-client.ts",
+	"lib/wemob-auth-client.tsx",
 }
 
 // AUTH_DEFAULT_DATA_MODELS defines the standard users table for auth-enabled projects.

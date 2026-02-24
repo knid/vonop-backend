@@ -357,7 +357,7 @@ func getAuthTemplateContent(path string) string {
 	switch path {
 	case "lib/wemob-auth.ts":
 		return constants.NEXTJS_TEMPLATE_WEMOB_AUTH
-	case "lib/wemob-auth-client.ts":
+	case "lib/wemob-auth-client.tsxx":
 		return constants.NEXTJS_TEMPLATE_WEMOB_AUTH_CLIENT
 	}
 	return ""
@@ -1020,7 +1020,7 @@ func runDeterministicChecks(files map[string]string) []validationError {
 			if !hasUseClient {
 				errors = append(errors, validationError{
 					File:  filePath,
-					Error: "File imports from @/lib/wemob-auth-client but is missing \"use client\" directive. wemob-auth-client.ts is a client module — add \"use client\" at the top of this file.",
+					Error: "File imports from @/lib/wemob-auth-client but is missing \"use client\" directive. wemob-auth-client.tsx is a client module — add \"use client\" at the top of this file.",
 					Type:  "missing_use_client",
 				})
 			}
@@ -2122,8 +2122,8 @@ func (c *Controller) generateSingleAppFile(
 		if authContent, ok := generatedFiles["lib/wemob-auth.ts"]; ok {
 			systemPrompt.WriteString(fmt.Sprintf("\n\n--- lib/wemob-auth.ts (INJECTED AUTH — use these exports for server-side auth, do NOT create custom auth utilities) ---\n%s", authContent))
 		}
-		if authClientContent, ok := generatedFiles["lib/wemob-auth-client.ts"]; ok {
-			systemPrompt.WriteString(fmt.Sprintf("\n\n--- lib/wemob-auth-client.ts (INJECTED AUTH CLIENT — use these exports for client-side auth) ---\n%s", authClientContent))
+		if authClientContent, ok := generatedFiles["lib/wemob-auth-client.tsx"]; ok {
+			systemPrompt.WriteString(fmt.Sprintf("\n\n--- lib/wemob-auth-client.tsx (INJECTED AUTH CLIENT — use these exports for client-side auth) ---\n%s", authClientContent))
 		}
 		mu.Unlock()
 		systemPrompt.WriteString(fmt.Sprintf("\n\n### Auth Context\n%s", authContext))
@@ -2921,7 +2921,7 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 		var sb strings.Builder
 		sb.WriteString("This project uses authentication. Auth libraries are injected as template-managed files.\n")
 		sb.WriteString("Server-side (lib/wemob-auth.ts): import { register, login, logout, getSession, getCurrentUser, requireAuth, getApiSession } from '@/lib/wemob-auth'\n")
-		sb.WriteString("Client-side (lib/wemob-auth-client.ts): import { AuthProvider, useAuth } from '@/lib/wemob-auth-client'\n")
+		sb.WriteString("Client-side (lib/wemob-auth-client.tsx): import { AuthProvider, useAuth } from '@/lib/wemob-auth-client'\n")
 		sb.WriteString("RULES:\n")
 		sb.WriteString("- Wrap root layout with <AuthProvider> for client-side auth state.\n")
 		sb.WriteString("- Use requireAuth() in server components for protected pages. It redirects to /login if not authenticated.\n")
@@ -3135,8 +3135,8 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 					if authContent, ok := fileSnapshot["lib/wemob-auth.ts"]; ok {
 						sysPrompt.WriteString(fmt.Sprintf("\n\n--- lib/wemob-auth.ts (INJECTED AUTH) ---\n%s", authContent))
 					}
-					if authClientContent, ok := fileSnapshot["lib/wemob-auth-client.ts"]; ok {
-						sysPrompt.WriteString(fmt.Sprintf("\n\n--- lib/wemob-auth-client.ts (INJECTED AUTH CLIENT) ---\n%s", authClientContent))
+					if authClientContent, ok := fileSnapshot["lib/wemob-auth-client.tsx"]; ok {
+						sysPrompt.WriteString(fmt.Sprintf("\n\n--- lib/wemob-auth-client.tsx (INJECTED AUTH CLIENT) ---\n%s", authClientContent))
 					}
 					sysPrompt.WriteString(fmt.Sprintf("\n\n### Auth Context\n%s", authContext))
 				}
