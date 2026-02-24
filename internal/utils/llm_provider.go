@@ -13,6 +13,9 @@ type LLMProvider struct {
 
 // Endpoint returns the full chat completions URL for this provider.
 func (p *LLMProvider) Endpoint() string {
+	if p.IsAnthropic() {
+		return p.BaseURL + "/messages"
+	}
 	return p.BaseURL + "/chat/completions"
 }
 
@@ -31,11 +34,15 @@ func (p *LLMProvider) IsMoonshot() bool {
 	return p.Name == "moonshot"
 }
 
-// UsesThinkingFormat returns true for providers that use the ZAI-style
-// "thinking" config (type: "enabled"/"disabled") instead of OpenRouter's
-// "reasoning" config (effort: "high"/"medium"/etc).
+// IsAnthropic returns true when using the native Anthropic Messages API.
+func (p *LLMProvider) IsAnthropic() bool {
+	return p.Name == "anthropic"
+}
+
+// UsesThinkingFormat returns true for providers that use a non-OpenRouter
+// thinking/reasoning format. This includes ZAI, Moonshot, and Anthropic.
 func (p *LLMProvider) UsesThinkingFormat() bool {
-	return p.IsZAI() || p.IsMoonshot()
+	return p.IsZAI() || p.IsMoonshot() || p.IsAnthropic()
 }
 
 // WebSearchTool returns the builtin web search tool for providers that support it, or nil.
@@ -57,6 +64,12 @@ func (p *LLMProvider) SupportsVision() bool {
 // setLLMHeaders applies auth and provider-specific headers to an HTTP request.
 func setLLMHeaders(req *http.Request, provider *LLMProvider) {
 	req.Header.Set("Content-Type", "application/json")
+	if provider.IsAnthropic() {
+		req.Header.Set("x-api-key", provider.APIKey)
+		req.Header.Set("anthropic-version", "2023-06-01")
+		req.Header.Set("anthropic-beta", "interleaved-thinking-2025-05-14")
+		return
+	}
 	req.Header.Set("Authorization", "Bearer "+provider.APIKey)
 	if provider.IsOpenRouter() {
 		req.Header.Set("HTTP-Referer", "https://wemob.io")
