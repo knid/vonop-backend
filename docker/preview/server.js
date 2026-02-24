@@ -124,6 +124,32 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // Logs endpoint — returns last 200 lines of Next.js output
+  if (req.url === "/__wemob/logs" && req.method === "GET") {
+    const auth = req.headers.authorization || "";
+    if (SYNC_TOKEN && auth !== `Bearer ${SYNC_TOKEN}`) {
+      res.writeHead(401, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "unauthorized" }));
+      return;
+    }
+
+    const logPath = "/tmp/nextjs.log";
+    let logs = "";
+    try {
+      if (fs.existsSync(logPath)) {
+        const content = fs.readFileSync(logPath, "utf8");
+        const lines = content.split("\n");
+        logs = lines.slice(-200).join("\n");
+      }
+    } catch (e) {
+      console.error("failed to read logs:", e.message);
+    }
+
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ logs }));
+    return;
+  }
+
   // Everything else proxied to Next.js
   proxy.web(req, res);
 });

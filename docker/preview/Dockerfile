@@ -34,8 +34,9 @@ if [ -f /tmp/.needs-bun-install ]; then
     cd /app && bun install 2>&1
 fi
 
-# Start Next.js dev server (blocks — keeps container alive)
-cd /app && exec ./node_modules/.bin/next dev --port 3001 --hostname 0.0.0.0
+# Start Next.js dev server — pipe to log file so errors are accessible via /__wemob/logs
+cd /app && ./node_modules/.bin/next dev --port 3001 --hostname 0.0.0.0 2>&1 | tee /tmp/nextjs.log &
+wait
 STARTUP
 
 EXPOSE 3000
