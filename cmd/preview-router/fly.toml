@@ -2,6 +2,7 @@ app = "wemob-previews"
 primary_region = "iad"
 
 [build]
+  dockerfile = "Dockerfile"
 
 [env]
   FLY_APP_NAME = "wemob-previews"
