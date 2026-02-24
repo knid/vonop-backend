@@ -449,14 +449,16 @@ func (c *Controller) SyncPreviewAll(project *models.AppProject, deletePaths ...s
 
 	envVars := c.CollectAllEnvVars(project)
 
-	if err := c.PreviewService.UpdateFiles(project.ID.String(), fileMap, deletePaths); err != nil {
-		slog.Warn("SyncPreviewAll: failed to sync files", "error", err, "project_id", project.ID)
-	}
-
+	// Sync env vars FIRST — this may restart the machine, which wipes the
+	// ephemeral filesystem. Files must be synced AFTER any potential restart.
 	if len(envVars) > 0 {
 		if err := c.PreviewService.UpdateEnvVars(project.ID.String(), envVars); err != nil {
 			slog.Warn("SyncPreviewAll: failed to sync env vars", "error", err, "project_id", project.ID)
 		}
+	}
+
+	if err := c.PreviewService.UpdateFiles(project.ID.String(), fileMap, deletePaths); err != nil {
+		slog.Warn("SyncPreviewAll: failed to sync files", "error", err, "project_id", project.ID)
 	}
 }
 

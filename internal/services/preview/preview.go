@@ -300,7 +300,9 @@ func (s *Service) UpdateEnvVars(projectID string, envVars map[string]string) err
 	}
 
 	if hasServerVars {
-		// Restart the machine so Next.js picks up server-side env vars
+		// Restart the machine so Next.js picks up server-side env vars.
+		// Note: restart wipes the ephemeral filesystem, so .env.local must be
+		// re-synced after the machine comes back up.
 		if err := s.Fly.StopMachine(record.MachineID); err != nil {
 			slog.Warn("failed to stop machine for env restart", "machine_id", record.MachineID, "error", err)
 		}
@@ -314,6 +316,11 @@ func (s *Service) UpdateEnvVars(projectID string, envVars map[string]string) err
 		if err := s.waitForHealth(record.MachineID, 120*time.Second); err != nil {
 			slog.Warn("health check timed out after env restart, machine may still be compiling",
 				"machine_id", record.MachineID, "error", err)
+		}
+
+		// Re-sync .env.local after restart (filesystem was wiped)
+		if err := s.syncFiles(record.MachineID, record.SyncToken, files, nil); err != nil {
+			slog.Warn("failed to re-sync env file after restart", "error", err)
 		}
 	}
 
