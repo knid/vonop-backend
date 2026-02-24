@@ -304,19 +304,14 @@ func (s *Service) DeletePreview(projectID string) error {
 	return s.DB.DeletePreviewMachineByProjectID(projectID)
 }
 
-// GetLogs fetches logs from the Fly Machine and filters to error-only output.
+// GetLogs fetches Next.js logs from the preview machine.
 func (s *Service) GetLogs(projectID string) (string, error) {
 	record, err := s.DB.GetPreviewMachineByProjectID(projectID)
 	if err != nil {
 		return "", fmt.Errorf("preview machine not found: %w", err)
 	}
 
-	// Fly Machines API doesn't have a direct logs endpoint on the machines API.
-	// Use the Fly logs API (nats-based). For now, we'll return empty if unavailable.
-	_ = record
-	// TODO: Integrate with Fly's log endpoint when available
-	// For now, return a placeholder indicating logs come from machine output.
-	return "", nil
+	return s.fetchLogs(record.MachineID, record.SyncToken)
 }
 
 // GetStatus returns the current status of a preview machine.
@@ -448,6 +443,37 @@ func (s *Service) syncFiles(machineID, syncToken string, files map[string]string
 	}
 
 	return nil
+}
+
+// fetchLogs retrieves Next.js logs from a machine's /__wemob/logs endpoint.
+func (s *Service) fetchLogs(machineID, syncToken string) (string, error) {
+	logsURL := s.machineBaseURL() + "/__wemob/logs"
+	req, err := http.NewRequest("GET", logsURL, nil)
+	if err != nil {
+		return "", fmt.Errorf("creating logs request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+syncToken)
+	req.Header.Set("Fly-Force-Instance-Id", machineID)
+
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("logs request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 400 {
+		return "", fmt.Errorf("logs returned %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var result struct {
+		Logs string `json:"logs"`
+	}
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return "", fmt.Errorf("parsing logs response: %w", err)
+	}
+
+	return result.Logs, nil
 }
 
 // waitForHealth polls a machine's /__wemob/health endpoint directly until it returns 200.
