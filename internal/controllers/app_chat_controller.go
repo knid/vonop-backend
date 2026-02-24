@@ -1259,12 +1259,56 @@ func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.A
 	// We skip the slow llmFixPass here to avoid blocking the chat response for minutes.
 	// The LLM already had a chance to fix issues via tools during the main chat loop.
 	if filesChanged > 0 {
+		// Auto-fix .ts files containing JSX → rename to .tsx
+		tsxRenamed, tsxChangedPaths := autoFixTSFilesWithJSX(currentFiles)
+		if tsxRenamed > 0 {
+			slog.Info("Chat auto-fix: renamed .ts→.tsx", "project_id", project.ID, "count", tsxRenamed)
+			// Process renames in pairs: [oldPath, newPath, oldPath2, newPath2, ...]
+			for i := 0; i+1 < len(tsxChangedPaths); i += 2 {
+				oldPath := tsxChangedPaths[i]
+				newPath := tsxChangedPaths[i+1]
+				// Delete old .ts file from DB
+				if oldFile, err := c.DB.GetAppGeneratedFileByPath(project.ID.String(), "nextjs", oldPath); err == nil {
+					c.DB.DeleteAppGeneratedFile(oldFile)
+					sendEvent("file_complete", responses.FileCompleteEvent{
+						Action:   "delete",
+						FilePath: oldPath,
+					})
+				}
+				// Create new .tsx file in DB
+				_, fileType := guessFileType(newPath)
+				newFile := models.AppGeneratedFile{
+					AppProjectID: project.ID,
+					Platform:     "nextjs",
+					FilePath:     newPath,
+					Content:      currentFiles[newPath],
+					FileType:     fileType,
+					IsGenerated:  true,
+				}
+				if created, err := c.DB.CreateAppGeneratedFile(&newFile); err == nil {
+					sendEvent("file_complete", responses.FileCompleteEvent{
+						Action:   "create",
+						FilePath: newPath,
+						FileID:   created.ID,
+						FileType: fileType,
+						Content:  currentFiles[newPath],
+					})
+				}
+				filesChanged++
+			}
+		}
+
+		// Auto-fix "use client" + metadata export conflict (metadata requires Server Component)
+		autoFixedMeta, changedPathsMeta := autoFixMetadataInClientComponent(currentFiles)
+
 		// Auto-fix import/export mismatches
 		autoFixed, changedPaths := autoFixImportMismatches(currentFiles)
 		// Auto-fix missing "use client" directives
 		autoFixed2, changedPaths2 := autoFixMissingUseClient(currentFiles)
 		autoFixed += autoFixed2
 		changedPaths = append(changedPaths, changedPaths2...)
+		autoFixed += autoFixedMeta
+		changedPaths = append(changedPaths, changedPathsMeta...)
 
 		if autoFixed > 0 {
 			slog.Info("Chat deterministic auto-fix applied", "project_id", project.ID, "files_fixed", autoFixed)

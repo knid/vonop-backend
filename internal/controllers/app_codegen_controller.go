@@ -188,6 +188,12 @@ var exportDefaultFuncNameRegex = regexp.MustCompile(`(?m)^export\s+default\s+fun
 // multiNamedImportRegex matches: import { A, B } from '@/path' (2+ names)
 var multiNamedImportRegex = regexp.MustCompile(`import\s+\{\s*(\w+(?:\s*,\s*\w+)+)\s*\}\s+from\s+['"]@/([^'"]+)['"]`)
 
+// jsxTagPattern detects JSX syntax in .ts files that should be .tsx.
+var jsxTagPattern = regexp.MustCompile(`<[A-Za-z][A-Za-z0-9.]*(?:\s|>|/)`)
+
+// metadataExportPattern matches "export const metadata" in layout/page files.
+var metadataExportPattern = regexp.MustCompile(`(?m)^export\s+const\s+metadata\b`)
+
 // internalHrefRegex matches href="/path" or href='/path' (skips dynamic href={...})
 var internalHrefRegex = regexp.MustCompile(`href=["'](/[^"']*?)["']`)
 
@@ -1050,6 +1056,27 @@ func runDeterministicChecks(files map[string]string) []validationError {
 			}
 		}
 
+		// Check 3b: JSX in .ts file (should be .tsx)
+		if strings.HasSuffix(filePath, ".ts") && !strings.HasSuffix(filePath, ".d.ts") {
+			if jsxTagPattern.MatchString(content) {
+				errors = append(errors, validationError{
+					File:  filePath,
+					Error: fmt.Sprintf("File '%s' contains JSX but has .ts extension. Rename to .tsx.", filePath),
+					Type:  "ts_with_jsx",
+				})
+			}
+		}
+
+		// Check 3c: metadata export in "use client" component
+		hasUseClientDirective := strings.Contains(content, `"use client"`) || strings.Contains(content, `'use client'`)
+		if hasUseClientDirective && metadataExportPattern.MatchString(content) {
+			errors = append(errors, validationError{
+				File:  filePath,
+				Error: "File exports 'metadata' but has \"use client\" directive. Next.js metadata must be in Server Components — remove \"use client\".",
+				Type:  "metadata_in_client",
+			})
+		}
+
 		// Check 4: Forbidden Node.js/build-time imports
 		forbiddenMatches := forbiddenImportRegex.FindAllString(content, -1)
 		for _, m := range forbiddenMatches {
@@ -1572,6 +1599,91 @@ func autoFixMissingUseClient(files map[string]string) (int, []string) {
 	return len(changedPaths), changedPaths
 }
 
+// autoFixTSFilesWithJSX renames .ts files to .tsx when they contain JSX syntax.
+// This is a common AI mistake — writing JSX into a .ts file, which causes parse errors.
+func autoFixTSFilesWithJSX(files map[string]string) (int, []string) {
+	var changedPaths []string
+	// Collect renames first to avoid mutating map during iteration
+	type rename struct{ from, to string }
+	var renames []rename
+
+	for filePath, content := range files {
+		if !strings.HasSuffix(filePath, ".ts") || strings.HasSuffix(filePath, ".d.ts") {
+			continue
+		}
+		if isTemplateFile(filePath) || isConfigFile(filePath) {
+			continue
+		}
+		// Check for JSX syntax: <Component, <div, etc.
+		if jsxTagPattern.MatchString(content) {
+			newPath := strings.TrimSuffix(filePath, ".ts") + ".tsx"
+			// Only rename if the .tsx version doesn't already exist
+			if _, exists := files[newPath]; !exists {
+				renames = append(renames, rename{from: filePath, to: newPath})
+			}
+		}
+	}
+
+	for _, r := range renames {
+		files[r.to] = files[r.from]
+		delete(files, r.from)
+		changedPaths = append(changedPaths, r.from, r.to)
+	}
+
+	return len(renames), changedPaths
+}
+
+// autoFixMetadataInClientComponent removes "use client" from files that export metadata.
+// In Next.js App Router, metadata must be exported from Server Components — having
+// "use client" alongside metadata export causes a build error.
+func autoFixMetadataInClientComponent(files map[string]string) (int, []string) {
+	var changedPaths []string
+
+	for filePath, content := range files {
+		if !strings.HasSuffix(filePath, ".tsx") && !strings.HasSuffix(filePath, ".ts") {
+			continue
+		}
+		if isTemplateFile(filePath) || isConfigFile(filePath) {
+			continue
+		}
+
+		hasUseClient := strings.Contains(content, `"use client"`) || strings.Contains(content, `'use client'`)
+		if !hasUseClient {
+			continue
+		}
+
+		// Check if file exports metadata (Next.js page/layout metadata)
+		if !metadataExportPattern.MatchString(content) {
+			continue
+		}
+
+		// Remove the "use client" directive — metadata must be in Server Components
+		updated := strings.Replace(content, "\"use client\"\n\n", "", 1)
+		if updated == content {
+			updated = strings.Replace(content, "\"use client\"\n", "", 1)
+		}
+		if updated == content {
+			updated = strings.Replace(content, "'use client'\n\n", "", 1)
+		}
+		if updated == content {
+			updated = strings.Replace(content, "'use client'\n", "", 1)
+		}
+		if updated == content {
+			updated = strings.Replace(content, "\"use client\"", "", 1)
+		}
+		if updated == content {
+			updated = strings.Replace(content, "'use client'", "", 1)
+		}
+
+		if updated != content {
+			files[filePath] = updated
+			changedPaths = append(changedPaths, filePath)
+		}
+	}
+
+	return len(changedPaths), changedPaths
+}
+
 // isPascalCase returns true if the string starts with an uppercase letter (component naming convention).
 func isPascalCase(s string) bool {
 	if len(s) == 0 {
@@ -1715,7 +1827,49 @@ func (c *Controller) validateAndFixFiles(ctx context.Context, project *models.Ap
 	totalFixed := 0
 	allChangedPaths := make(map[string]bool)
 
-	// Phase 0: deterministic auto-fix for import/export mismatches (before LLM pass)
+	// Phase 0: deterministic auto-fixes (before LLM pass)
+
+	// Fix .ts files with JSX → rename to .tsx
+	tsxRenamed, tsxPaths := autoFixTSFilesWithJSX(files)
+	if tsxRenamed > 0 {
+		for i := 0; i+1 < len(tsxPaths); i += 2 {
+			oldPath := tsxPaths[i]
+			newPath := tsxPaths[i+1]
+			if oldFile, err := c.DB.GetAppGeneratedFileByPath(project.ID.String(), "nextjs", oldPath); err == nil {
+				c.DB.DeleteAppGeneratedFile(oldFile)
+			}
+			_, fileType := guessFileType(newPath)
+			newFile := models.AppGeneratedFile{
+				AppProjectID: project.ID,
+				Platform:     "nextjs",
+				FilePath:     newPath,
+				Content:      files[newPath],
+				FileType:     fileType,
+				IsGenerated:  true,
+			}
+			c.DB.CreateAppGeneratedFile(&newFile)
+			allChangedPaths[newPath] = true
+		}
+		totalFixed += tsxRenamed
+		slog.Info("Auto-fixed .ts→.tsx renames", "project_id", project.ID, "count", tsxRenamed)
+	}
+
+	// Fix metadata export in "use client" components
+	metaFixed, metaPaths := autoFixMetadataInClientComponent(files)
+	if metaFixed > 0 {
+		for _, path := range metaPaths {
+			if dbFile, err := c.DB.GetAppGeneratedFileByPath(project.ID.String(), "nextjs", path); err == nil && dbFile != nil {
+				dbFile.Content = files[path]
+				dbFile.UpdatedAt = time.Now()
+				c.DB.UpdateAppGeneratedFile(dbFile)
+			}
+			allChangedPaths[path] = true
+		}
+		totalFixed += metaFixed
+		slog.Info("Auto-fixed metadata in client components", "project_id", project.ID, "files_fixed", metaFixed)
+	}
+
+	// Fix import/export mismatches
 	autoFixed, changedPaths := autoFixImportMismatches(files)
 	if autoFixed > 0 {
 		for _, path := range changedPaths {

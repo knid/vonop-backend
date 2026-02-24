@@ -175,7 +175,26 @@ func (s *Service) createNewMachine(projectID string, files map[string]string, en
 	machineName := fmt.Sprintf("preview-%s", projectID)
 	machine, err := s.Fly.CreateMachine(machineName, machineEnv, metadata)
 	if err != nil {
-		return nil, fmt.Errorf("creating fly machine: %w", err)
+		// Handle 409 conflict: a machine with this name already exists on Fly
+		// but our DB lost track of it. Destroy the orphan and retry.
+		if strings.Contains(err.Error(), "already_exists") || strings.Contains(err.Error(), "status 409") {
+			slog.Warn("machine name conflict, destroying orphaned machine", "name", machineName, "project_id", projectID)
+			machines, listErr := s.Fly.ListMachines()
+			if listErr == nil {
+				for _, m := range machines {
+					if m.Name == machineName {
+						_ = s.Fly.DestroyMachine(m.ID, true)
+						slog.Info("destroyed orphaned machine", "machine_id", m.ID, "name", machineName)
+						break
+					}
+				}
+			}
+			// Retry creation after destroying the orphan
+			machine, err = s.Fly.CreateMachine(machineName, machineEnv, metadata)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("creating fly machine: %w", err)
+		}
 	}
 
 	// Save to DB
