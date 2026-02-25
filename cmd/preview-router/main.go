@@ -185,10 +185,9 @@ func (rt *router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Only replay to machines that are actually running
 	if entry.State == "started" {
 		w.Header().Set("fly-replay", fmt.Sprintf("instance=%s", entry.MachineID))
-		w.Header().Set("Cache-Control", "no-store")
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.WriteHeader(http.StatusOK)
-		fmt.Fprint(w, `<!DOCTYPE html><html><head><meta http-equiv="refresh" content="2"></head><body><p>Connecting...</p></body></html>`)
+		// Fly's proxy intercepts fly-replay and replays the request to the
+		// target instance. The response written here is discarded, so we
+		// keep it minimal — no Content-Type, no body.
 		return
 	}
 

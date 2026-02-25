@@ -452,9 +452,16 @@ func (s *Service) GetStatus(projectID string) (*PreviewStatus, error) {
 			case "started":
 				// Fly says it's running — if our DB is stuck on "starting" or "error",
 				// promote to "ready" so the user isn't stuck in a loading state forever.
-				// Don't promote "syncing" — that means files are being pushed right now.
+				// Also promote "syncing" if it's been stuck for more than 2 minutes
+				// (the sync goroutine may have failed without updating the DB).
 				if record.Status == "starting" || record.Status == "error" {
 					slog.Info("promoting stale status to ready", "project_id", projectID, "old_status", record.Status)
+					record.Status = "ready"
+					if err := s.DB.UpdatePreviewMachine(record); err != nil {
+						slog.Error("failed to update machine status", "project_id", projectID, "error", err)
+					}
+				} else if record.Status == "syncing" && time.Since(record.UpdatedAt) > 2*time.Minute {
+					slog.Info("promoting stuck syncing status to ready", "project_id", projectID, "stuck_since", record.UpdatedAt)
 					record.Status = "ready"
 					if err := s.DB.UpdatePreviewMachine(record); err != nil {
 						slog.Error("failed to update machine status", "project_id", projectID, "error", err)
