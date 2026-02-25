@@ -3059,7 +3059,7 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 	}
 	concurrency := c.llmConcurrency()
 	if provider.IsAnthropic() {
-		concurrency = 1
+		concurrency = 2
 	}
 	slog.Info("LLM concurrency limit", "concurrency", concurrency)
 
@@ -3650,21 +3650,21 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 	var mu sync.Mutex // protects generatedFiles map and failureReasons
 	failureReasons := make(map[string]string) // tracks why each file failed (for repair context)
 
-	for tierIdx, tier := range tiers {
-		if len(tier) == 0 {
-			continue
+	// generateTierWithFallback runs a mega-stream for one tier, falling back to
+	// per-file generation for any files the mega-stream missed.
+	generateTierWithFallback := func(tierIdx int, tier []appFilePlanEntry) {
+		if len(tier) == 0 || ctx.Err() != nil {
+			return
 		}
 
 		slog.Info("Generating tier", "project_id", project.ID, "tier", tierIdx+1, "files", len(tier))
 
-		// Mega-stream: generate all files in this tier via a single LLM call
 		failedFiles := c.generateTierMegaStream(
 			ctx, project, tier, structure, model, provider,
 			generatedFiles, &mu, allFilePaths, colorSchemeJSON,
 			storeContext, authContext, sendEvent,
 		)
 
-		// Fallback: per-file generation for any files the mega-stream missed
 		if len(failedFiles) > 0 {
 			slog.Info("Falling back to per-file generation",
 				"project_id", project.ID,
@@ -3783,11 +3783,41 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 
 			wg.Wait()
 		}
-
-		if ctx.Err() != nil {
-			return
-		}
 	}
+
+	// Phase 1: Tier 1 — foundational files (lib, utils, types, hooks)
+	// Must complete first so components/pages can reference these exports.
+	generateTierWithFallback(0, tiers[0])
+
+	if ctx.Err() != nil {
+		return
+	}
+
+	// Phase 2: Tiers 2+3+4 — components + pages in parallel.
+	// UI components, regular components, and pages run concurrently.
+	// Each tier's mega-stream has read_file/list_files to see earlier files,
+	// and the missing-imports + repair passes fix any gaps.
+	{
+		var tierWg sync.WaitGroup
+		for i := 1; i <= 3; i++ {
+			if len(tiers[i]) == 0 {
+				continue
+			}
+			tierWg.Add(1)
+			go func(idx int) {
+				defer tierWg.Done()
+				generateTierWithFallback(idx, tiers[idx])
+			}(i)
+		}
+		tierWg.Wait()
+	}
+
+	if ctx.Err() != nil {
+		return
+	}
+
+	// Phase 3: Tier 5 — layout + globals (needs all components/pages done)
+	generateTierWithFallback(4, tiers[4])
 
 	// Step 8: Find and generate missing imports (parallelized)
 	missingImports := findMissingImports(generatedFiles)
