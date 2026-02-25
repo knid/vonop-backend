@@ -1274,6 +1274,26 @@ func runDeterministicChecks(files map[string]string) []validationError {
 		}
 	}
 
+	// --- Check 8: Root layout must include <html> and <body> tags ---
+	if layoutContent, ok := files["app/layout.tsx"]; ok {
+		hasHTML := strings.Contains(layoutContent, "<html")
+		hasBody := strings.Contains(layoutContent, "<body")
+		if !hasHTML || !hasBody {
+			missing := []string{}
+			if !hasHTML {
+				missing = append(missing, "<html>")
+			}
+			if !hasBody {
+				missing = append(missing, "<body>")
+			}
+			errors = append(errors, validationError{
+				File:  "app/layout.tsx",
+				Error: fmt.Sprintf("Root layout is missing %s tags. Next.js App Router requires app/layout.tsx to include <html> and <body> tags wrapping {children}.", strings.Join(missing, " and ")),
+				Type:  "missing_root_layout_tags",
+			})
+		}
+	}
+
 	return errors
 }
 
@@ -1684,6 +1704,54 @@ func autoFixMetadataInClientComponent(files map[string]string) (int, []string) {
 	return len(changedPaths), changedPaths
 }
 
+// autoFixRootLayoutTags wraps the root layout's returned JSX with <html> and <body>
+// tags when they are missing. Next.js App Router requires these in app/layout.tsx.
+func autoFixRootLayoutTags(files map[string]string) (bool, string) {
+	content, ok := files["app/layout.tsx"]
+	if !ok {
+		return false, ""
+	}
+
+	hasHTML := strings.Contains(content, "<html")
+	hasBody := strings.Contains(content, "<body")
+	if hasHTML && hasBody {
+		return false, ""
+	}
+
+	// Strategy: find the return statement's JSX and wrap it.
+	// Look for patterns like "return (\n" or "return <" and wrap the JSX.
+
+	// If missing both, wrap {children} or the return JSX with <html><body>...</body></html>
+	// If only missing one, add just that tag.
+
+	if !hasHTML && !hasBody {
+		// Most common case: layout returns a fragment or div instead of <html>
+		// Try to find {children} and wrap it
+		if strings.Contains(content, "{children}") {
+			// Replace the first {children} occurrence that's in JSX context
+			// with <html lang="en"><body>{children}</body></html>
+			content = strings.Replace(content, "{children}", `<html lang="en"><body>{children}</body></html>`, 1)
+			files["app/layout.tsx"] = content
+			return true, "app/layout.tsx"
+		}
+	} else if !hasHTML {
+		// Has <body> but no <html> — wrap <body>...</body> with <html>
+		content = strings.Replace(content, "<body", "<html lang=\"en\"><body", 1)
+		content = strings.Replace(content, "</body>", "</body></html>", 1)
+		files["app/layout.tsx"] = content
+		return true, "app/layout.tsx"
+	} else if !hasBody {
+		// Has <html> but no <body> — add <body> inside <html> around {children}
+		if strings.Contains(content, "{children}") {
+			content = strings.Replace(content, "{children}", "<body>{children}</body>", 1)
+			files["app/layout.tsx"] = content
+			return true, "app/layout.tsx"
+		}
+	}
+
+	return false, ""
+}
+
 // isPascalCase returns true if the string starts with an uppercase letter (component naming convention).
 func isPascalCase(s string) bool {
 	if len(s) == 0 {
@@ -1867,6 +1935,18 @@ func (c *Controller) validateAndFixFiles(ctx context.Context, project *models.Ap
 		}
 		totalFixed += metaFixed
 		slog.Info("Auto-fixed metadata in client components", "project_id", project.ID, "files_fixed", metaFixed)
+	}
+
+	// Fix root layout missing <html> and <body> tags
+	if layoutFixed, layoutPath := autoFixRootLayoutTags(files); layoutFixed {
+		if dbFile, err := c.DB.GetAppGeneratedFileByPath(project.ID.String(), "nextjs", layoutPath); err == nil && dbFile != nil {
+			dbFile.Content = files[layoutPath]
+			dbFile.UpdatedAt = time.Now()
+			c.DB.UpdateAppGeneratedFile(dbFile)
+		}
+		allChangedPaths[layoutPath] = true
+		totalFixed++
+		slog.Info("Auto-fixed root layout missing <html>/<body> tags", "project_id", project.ID)
 	}
 
 	// Fix import/export mismatches
