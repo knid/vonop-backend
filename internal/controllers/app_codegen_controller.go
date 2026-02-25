@@ -955,6 +955,14 @@ func categorizeFiles(files []appFilePlanEntry) [][]appFilePlanEntry {
 	return tiers
 }
 
+// tierLen safely returns the length of a tier slice, returning 0 if tiers is nil or index out of range.
+func tierLen(tiers [][]appFilePlanEntry, idx int) int {
+	if tiers == nil || idx >= len(tiers) {
+		return 0
+	}
+	return len(tiers[idx])
+}
+
 // augmentPackageJSON scans generated files for third-party npm imports and adds them
 // to the base template package.json if not already present
 func augmentPackageJSON(baseTemplate string, files map[string]string) string {
@@ -2678,7 +2686,8 @@ func (c *Controller) generateTierMegaStream(
 		},
 	}
 
-	slog.Info("Starting mega-stream for tier",
+	megaStart := time.Now()
+	slog.Info("Mega-stream: starting",
 		"project_id", project.ID,
 		"files", tierSize,
 		"max_rounds", cfg.MaxRounds,
@@ -2728,13 +2737,14 @@ func (c *Controller) generateTierMegaStream(
 	}
 	mu.Unlock()
 
-	if len(failedFiles) > 0 {
-		slog.Warn("mega-stream missed files, will fallback to per-file generation",
-			"project_id", project.ID,
-			"missed", len(failedFiles),
-			"total", tierSize,
-		)
-	}
+	megaDuration := time.Since(megaStart).Seconds()
+	slog.Info("Mega-stream: complete",
+		"project_id", project.ID,
+		"duration_s", fmt.Sprintf("%.1f", megaDuration),
+		"generated", tierSize-len(failedFiles),
+		"missed", len(failedFiles),
+		"total", tierSize,
+	)
 
 	return failedFiles
 }
@@ -3048,6 +3058,7 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 	var planDuration, codegenDuration, repairDuration, validationDuration float64
 	var generatedFiles map[string]string
 	var appFiles []appFilePlanEntry
+	var tiers [][]appFilePlanEntry
 	var missingImportsCount, brokenFilesCount, fixedCount int
 	var genSuccess bool
 	var needsAuth bool
@@ -3081,6 +3092,27 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 					"user_id", user.ID, "credits", credits, "tokens", total)
 			}
 			genDuration := time.Since(genStart).Seconds()
+			slog.Info("=== APP GENERATION SUMMARY ===",
+				"project_id", project.ID,
+				"success", genSuccess,
+				"total_duration_s", fmt.Sprintf("%.1f", genDuration),
+				"plan_s", fmt.Sprintf("%.1f", planDuration),
+				"codegen_s", fmt.Sprintf("%.1f", codegenDuration),
+				"repair_s", fmt.Sprintf("%.1f", repairDuration),
+				"validation_s", fmt.Sprintf("%.1f", validationDuration),
+				"files_generated", len(generatedFiles),
+				"files_planned", len(appFiles),
+				"missing_imports", missingImportsCount,
+				"broken_files", brokenFilesCount,
+				"validation_fixes", fixedCount,
+				"llm_calls", callCount,
+				"prompt_tokens", prompt,
+				"completion_tokens", completion,
+				"total_tokens", total,
+				"credits_used", credits,
+				"model", model,
+				"provider", provider.Name,
+			)
 			c.TrackUserEvent(user, "app_generation_completed", posthog.NewProperties().
 				Set("app_id", project.ID.String()).
 				Set("project_type", projectType).
@@ -3096,13 +3128,20 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 				Set("broken_files_count", brokenFilesCount).
 				Set("validation_fixes", fixedCount).
 				Set("model", model).
+				Set("provider", provider.Name).
+				Set("concurrency", concurrency).
 				Set("is_ecommerce", projectType == "ecommerce").
 				Set("needs_auth", needsAuth).
 				Set("success", genSuccess).
 				Set("phase_plan_seconds", planDuration).
 				Set("phase_codegen_seconds", codegenDuration).
 				Set("phase_repair_seconds", repairDuration).
-				Set("phase_validation_seconds", validationDuration))
+				Set("phase_validation_seconds", validationDuration).
+				Set("tier1_lib_count", tierLen(tiers, 0)).
+				Set("tier2_ui_count", tierLen(tiers, 1)).
+				Set("tier3_components_count", tierLen(tiers, 2)).
+				Set("tier4_pages_count", tierLen(tiers, 3)).
+				Set("tier5_layout_count", tierLen(tiers, 4)))
 		}
 	}()
 
@@ -3159,6 +3198,12 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 		return
 	}
 	planDuration = time.Since(genStart).Seconds()
+	slog.Info("Phase: planning complete",
+		"project_id", project.ID,
+		"duration_s", fmt.Sprintf("%.1f", planDuration),
+		"files_planned", len(structure.Files),
+		"data_models", len(structure.DataModels),
+	)
 
 	// Step 2: Update project with name/slug/theme from structure
 	if structure.Name != "" {
@@ -3644,8 +3689,20 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 	}
 
 	// Categorize remaining files into tiers and generate with context accumulation
-	tiers := categorizeFiles(appFiles)
+	tiers = categorizeFiles(appFiles)
 	colorSchemeJSON, _ := json.Marshal(structure.ColorScheme)
+	slog.Info("Phase: codegen starting",
+		"project_id", project.ID,
+		"total_files", len(appFiles),
+		"tier1_lib", len(tiers[0]),
+		"tier2_ui", len(tiers[1]),
+		"tier3_components", len(tiers[2]),
+		"tier4_pages", len(tiers[3]),
+		"tier5_layout", len(tiers[4]),
+		"model", model,
+		"provider", provider.Name,
+		"concurrency", concurrency,
+	)
 
 	var mu sync.Mutex // protects generatedFiles map and failureReasons
 	failureReasons := make(map[string]string) // tracks why each file failed (for repair context)
@@ -3787,7 +3844,9 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 
 	// Phase 1: Tier 1 — foundational files (lib, utils, types, hooks)
 	// Must complete first so components/pages can reference these exports.
+	phase1Start := time.Now()
 	generateTierWithFallback(0, tiers[0])
+	slog.Info("Phase 1 complete: foundational files", "project_id", project.ID, "duration_s", fmt.Sprintf("%.1f", time.Since(phase1Start).Seconds()))
 
 	if ctx.Err() != nil {
 		return
@@ -3797,6 +3856,7 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 	// UI components, regular components, and pages run concurrently.
 	// Each tier's mega-stream has read_file/list_files to see earlier files,
 	// and the missing-imports + repair passes fix any gaps.
+	phase2Start := time.Now()
 	{
 		var tierWg sync.WaitGroup
 		for i := 1; i <= 3; i++ {
@@ -3811,19 +3871,23 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 		}
 		tierWg.Wait()
 	}
+	slog.Info("Phase 2 complete: components + pages (parallel)", "project_id", project.ID, "duration_s", fmt.Sprintf("%.1f", time.Since(phase2Start).Seconds()))
 
 	if ctx.Err() != nil {
 		return
 	}
 
 	// Phase 3: Tier 5 — layout + globals (needs all components/pages done)
+	phase3Start := time.Now()
 	generateTierWithFallback(4, tiers[4])
+	slog.Info("Phase 3 complete: layout + globals", "project_id", project.ID, "duration_s", fmt.Sprintf("%.1f", time.Since(phase3Start).Seconds()))
 
 	// Step 8: Find and generate missing imports (parallelized)
+	missingStart := time.Now()
 	missingImports := findMissingImports(generatedFiles)
 	missingImportsCount = len(missingImports)
 	if len(missingImports) > 0 {
-		slog.Info("Found missing imports, generating files", "project_id", project.ID, "missing", missingImports)
+		slog.Info("Phase: missing imports", "project_id", project.ID, "count", len(missingImports), "paths", missingImports)
 
 		missingSem := make(chan struct{}, concurrency)
 		var missingWg sync.WaitGroup
@@ -3973,7 +4037,15 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 
 		missingWg.Wait()
 	}
+	if missingImportsCount > 0 {
+		slog.Info("Phase: missing imports complete", "project_id", project.ID, "count", missingImportsCount, "duration_s", fmt.Sprintf("%.1f", time.Since(missingStart).Seconds()))
+	}
 	codegenDuration = time.Since(genStart).Seconds() - planDuration
+	slog.Info("Phase: codegen complete",
+		"project_id", project.ID,
+		"duration_s", fmt.Sprintf("%.1f", codegenDuration),
+		"files_generated", len(generatedFiles),
+	)
 
 	// Step 9: Repair pass — regenerate files that contain fallback sentinel placeholder content
 	brokenFiles := findBrokenFiles(generatedFiles)
@@ -4107,11 +4179,10 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 
 	// Step 10: Run deterministic validation + LLM fix loop
 	repairDuration = time.Since(genStart).Seconds() - planDuration - codegenDuration
+	slog.Info("Phase: repair complete", "project_id", project.ID, "duration_s", fmt.Sprintf("%.1f", repairDuration), "broken_files", brokenFilesCount)
 	fixedCount, _ = c.validateAndFixFiles(ctx, project, generatedFiles, structure, sendEvent)
 	validationDuration = time.Since(genStart).Seconds() - planDuration - codegenDuration - repairDuration
-	if fixedCount > 0 {
-		slog.Info("Validation fixed files", "project_id", project.ID, "fixed_count", fixedCount)
-	}
+	slog.Info("Phase: validation complete", "project_id", project.ID, "duration_s", fmt.Sprintf("%.1f", validationDuration), "fixed_count", fixedCount)
 
 	// Step 11: Augment package.json with any discovered third-party deps
 	augmented := augmentPackageJSON(generatedFiles["package.json"], generatedFiles)
