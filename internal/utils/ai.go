@@ -631,6 +631,119 @@ func StreamTextFromLLM(ctx context.Context, model, system, message string, provi
 	return fullText.String(), nil
 }
 
+// StreamTextFromLLMWithMessages streams LLM response tokens for a pre-built message array.
+// Useful for multi-block system prompts (caching) without tool calling overhead.
+func StreamTextFromLLMWithMessages(ctx context.Context, model string, messages []Message, provider *LLMProvider, onChunk func(chunk string), onReasoning func(chunk string)) (string, error) {
+	if provider == nil || provider.APIKey == "" {
+		return "", fmt.Errorf("missing LLM provider configuration")
+	}
+
+	body, err := buildLLMRequestBody(ChatRequest{
+		Model:         model,
+		Stream:        true,
+		StreamOptions: &StreamOptionsConfig{IncludeUsage: true},
+		MaxTokens:     16384,
+		Messages:      messages,
+	}, provider)
+	if err != nil {
+		return "", fmt.Errorf("error building request: %w", err)
+	}
+
+	req, _ := http.NewRequestWithContext(ctx, "POST", provider.Endpoint(), bytes.NewReader(body))
+	setLLMHeaders(req, provider)
+
+	start := time.Now()
+	resp, err := llmHTTPClient.Do(req)
+	if err != nil {
+		slog.Error("Error making streaming request to LLM:", "error", err)
+		return "", fmt.Errorf("error generating content. try again please")
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		slog.Error("LLM streaming returned non-200", "status", resp.StatusCode, "body", string(respBody))
+		return "", fmt.Errorf("error generating content. try again please")
+	}
+
+	// Anthropic SSE format — use dedicated parser
+	if provider.IsAnthropic() {
+		result, err := parseAnthropicSSEStream(resp.Body, onChunk, onReasoning)
+		if err != nil {
+			if ctx.Err() != nil {
+				return "", ctx.Err()
+			}
+			return "", fmt.Errorf("error reading streaming response. try again please")
+		}
+		if result.Usage.TotalTokens > 0 {
+			slog.Info("LLM usage", "FROM", "LLM_STREAM_TEXT_MSGS", "prompt_tokens", result.Usage.PromptTokens, "completion_tokens", result.Usage.CompletionTokens, "total_tokens", result.Usage.TotalTokens)
+			if tracker := TokenTrackerFromContext(ctx); tracker != nil {
+				tracker.Record(model, result.Usage, time.Since(start).Milliseconds(), true)
+			}
+		}
+		return result.Text, nil
+	}
+
+	var fullText strings.Builder
+	var lastUsage UsageInfo
+	scanner := bufio.NewScanner(resp.Body)
+	scanner.Buffer(make([]byte, 0, 64*1024), 512*1024)
+
+	for scanner.Scan() {
+		if ctx.Err() != nil {
+			return fullText.String(), ctx.Err()
+		}
+
+		line := scanner.Text()
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+
+		data := strings.TrimPrefix(line, "data: ")
+		if data == "[DONE]" {
+			break
+		}
+
+		var chunk StreamChunk
+		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+			continue
+		}
+
+		if chunk.Usage != nil {
+			lastUsage = *chunk.Usage
+		}
+
+		if len(chunk.Choices) > 0 {
+			if r := chunk.Choices[0].Delta.GetReasoning(); r != "" && onReasoning != nil {
+				onReasoning(r)
+			}
+			if chunk.Choices[0].Delta.Content != "" {
+				content := chunk.Choices[0].Delta.Content
+				fullText.WriteString(content)
+				if onChunk != nil {
+					onChunk(content)
+				}
+			}
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		if ctx.Err() != nil {
+			return fullText.String(), ctx.Err()
+		}
+		return "", fmt.Errorf("error reading streaming response. try again please")
+	}
+
+	if lastUsage.TotalTokens > 0 {
+		slog.Info("LLM usage", "FROM", "LLM_STREAM_TEXT_MSGS", "prompt_tokens", lastUsage.PromptTokens, "completion_tokens", lastUsage.CompletionTokens, "total_tokens", lastUsage.TotalTokens)
+		if tracker := TokenTrackerFromContext(ctx); tracker != nil {
+			tracker.Record(model, lastUsage, time.Since(start).Milliseconds(), true)
+		}
+	}
+
+	return fullText.String(), nil
+}
+
 // GetJSONFromLLMWithMessages sends a multi-turn conversation to the LLM and expects JSON output.
 // Used for chat-based interactions where conversation history matters.
 func GetJSONFromLLMWithMessages(ctx context.Context, model string, messages []Message, provider *LLMProvider) (string, error) {

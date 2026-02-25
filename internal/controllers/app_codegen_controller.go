@@ -1809,13 +1809,11 @@ var appFixTools = []utils.Tool{
 	},
 }
 
-// llmFixPass sends validation errors to LLM with tool access for auto-fix
+// llmFixPass sends validation errors to LLM with tool access for auto-fix.
+// Always uses Sonnet regardless of the main model — fix passes are simple tasks.
 func (c *Controller) llmFixPass(ctx context.Context, files map[string]string, valErrors []validationError, structure *appFileStructure) map[string]string {
 	provider := c.llmProvider()
-	model := c.SecretManager.GetSecret("WEBSITE_BUILDER_LLM_MODEL")
-	if model == "" {
-		model = constants.DEFAULT_NEXTJS_LLM_MODEL
-	}
+	model := constants.DEFAULT_NEXTJS_LLM_MODEL
 
 	// Build lightweight file list + error list (LLM will use tools to read files)
 	var fileList strings.Builder
@@ -2296,8 +2294,57 @@ func (c *Controller) getAppFileFallback(filePlan appFilePlanEntry) string {
 	}
 }
 
+// fileNeedsStoreSDK returns true if the file is likely to need the full wemob-store.ts SDK.
+func fileNeedsStoreSDK(filePath string) bool {
+	lower := strings.ToLower(filePath)
+	if strings.HasPrefix(lower, "components/ui/") || lower == "lib/utils.ts" {
+		return false
+	}
+	return strings.Contains(lower, "cart") ||
+		strings.Contains(lower, "product") ||
+		strings.Contains(lower, "checkout") ||
+		strings.Contains(lower, "shop") ||
+		strings.Contains(lower, "store") ||
+		strings.Contains(lower, "order") ||
+		strings.Contains(lower, "layout") // layout wraps CartProvider
+}
+
+// fileNeedsAuth returns true if the file is likely to need the full auth templates.
+func fileNeedsAuth(filePath string) bool {
+	lower := strings.ToLower(filePath)
+	if strings.HasPrefix(lower, "components/ui/") || lower == "lib/utils.ts" {
+		return false
+	}
+	return strings.Contains(lower, "auth") ||
+		strings.Contains(lower, "login") ||
+		strings.Contains(lower, "register") ||
+		strings.Contains(lower, "signup") ||
+		strings.Contains(lower, "sign-up") ||
+		strings.Contains(lower, "profile") ||
+		strings.Contains(lower, "account") ||
+		strings.Contains(lower, "dashboard") ||
+		strings.Contains(lower, "layout") // layout wraps AuthProvider
+}
+
+// condensedStoreExports is a compact summary of wemob-store.ts for files that don't need the full SDK.
+const condensedStoreExports = `lib/wemob-store.ts exports (client-only "use client" module — any file importing it MUST have "use client"):
+Functions: getStoreConfig, getProducts, getProduct, getCategories, createCart, getCart, addCartItem, updateCartItem, removeCartItem, applyDiscountCode, removeDiscount, checkout, confirmCheckout, getOrder, formatPrice, renderPaymentForm, getSessionId, clearSession
+Components: CartProvider (wrap in layout), useCart, useProducts, useProduct, useCategories, useStoreConfig
+Types: StoreConfig, StorefrontProduct, StorefrontVariant, StorefrontCategory, StorefrontCart, StorefrontCartItem, StorefrontCheckout, CheckoutConfirm, CheckoutParams, OrderTracking, ShippingAddress
+Prices are in cents. Use formatPrice(cents) for display.`
+
+// condensedAuthExports is a compact summary of auth templates for files that don't need the full code.
+const condensedAuthExports = `Auth exports:
+Server-side (lib/wemob-auth.ts): register, login, logout, getSession, getCurrentUser, requireAuth, getApiSession — NEVER import in "use client" files
+Client-side (lib/wemob-auth-client.tsx): AuthProvider (wrap in layout), useAuth → { user, isLoading, isAuthenticated, login, register, logout, refreshSession }
+Users table: id (uuid), email, password_hash, name, avatar_url, role, email_verified, created_at, updated_at`
+
 // generateSingleAppFile generates a single app file with a per-file timeout.
 // It reads generatedFiles under mu lock for context building, and returns the raw content.
+// System prompt is split into multiple blocks for Anthropic prompt caching:
+//   Block 1 (base prompt) — stable across all files of same type
+//   Block 2 (project context + SDK) — stable across all files in same project
+//   Block 3 (per-file variable context) — user message, changes per file
 func (c *Controller) generateSingleAppFile(
 	ctx context.Context,
 	project *models.AppProject,
@@ -2316,63 +2363,84 @@ func (c *Controller) generateSingleAppFile(
 	fileCtx, fileCancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer fileCancel()
 
+	// --- Block 1: Base prompt (stable across ALL files of same type, highly cacheable) ---
 	basePrompt := c.getAppFilePrompt(filePlan.Type)
 
-	// Build system prompt with project-level context (sent once, cached by providers)
-	var systemPrompt strings.Builder
-	systemPrompt.WriteString(basePrompt)
-	systemPrompt.WriteString(fmt.Sprintf("\n\n### Project Context\nApp: %s\nColor scheme: %s\nTypography: %v\nAll files in project: %s\n\nUser's original description: %s",
+	// Strip the "Tools Available" section from the base prompt since we no longer use tools
+	if idx := strings.Index(basePrompt, "\n\n### Tools Available"); idx >= 0 {
+		basePrompt = basePrompt[:idx]
+	}
+
+	// Inject mobile design rules into the base prompt for mobile_app projects
+	if project.ProjectType == "mobile_app" {
+		basePrompt += "\n\n" + constants.NEXTJS_MOBILE_DESIGN_RULES
+	}
+
+	// --- Block 2: Project context + SDK templates (stable across all files in project) ---
+	var projectContext strings.Builder
+	projectContext.WriteString(fmt.Sprintf("### Project Context\nApp: %s\nColor scheme: %s\nTypography: %v\nAll files in project: %s\n\nUser's original description: %s",
 		structure.Name,
 		string(colorSchemeJSON),
 		structure.Typography,
 		strings.Join(allFilePaths, ", "),
 		project.Prompt,
 	))
+
 	// Inject database schema context only when lib/db.ts was actually provisioned
 	mu.Lock()
 	_, hasDB := generatedFiles["lib/db.ts"]
 	schemaContent, hasSchema := generatedFiles["lib/schema.ts"]
 	mu.Unlock()
 	if hasDB && hasSchema {
-		systemPrompt.WriteString(fmt.Sprintf("\n\n--- lib/schema.ts (INJECTED — import tables from '@/lib/schema') ---\n%s", schemaContent))
-		systemPrompt.WriteString("\n\n### Database Access\nUse `import { db } from '@/lib/db'` and `import { ... } from '@/lib/schema'` for data access. Use Drizzle queries: `db.select().from(tableName)`, `db.insert(tableName).values({...})`, etc. Import operators from 'drizzle-orm': `import { eq, and, desc, sql } from 'drizzle-orm'`.\n")
+		projectContext.WriteString(fmt.Sprintf("\n\n--- lib/schema.ts (INJECTED — import tables from '@/lib/schema') ---\n%s", schemaContent))
+		projectContext.WriteString("\n\n### Database Access\nUse `import { db } from '@/lib/db'` and `import { ... } from '@/lib/schema'` for data access. Use Drizzle queries: `db.select().from(tableName)`, `db.insert(tableName).values({...})`, etc. Import operators from 'drizzle-orm': `import { eq, and, desc, sql } from 'drizzle-orm'`.\n")
 	}
 
-	// Inline wemob-store.ts and store context in system prompt for e-commerce
+	// Conditionally inject SDK templates based on what this file actually needs
 	if project.ProjectType == "ecommerce" {
-		mu.Lock()
-		if storeContent, ok := generatedFiles["lib/wemob-store.ts"]; ok {
-			systemPrompt.WriteString(fmt.Sprintf("\n\n--- lib/wemob-store.ts (INJECTED SDK — use these exports, do NOT create custom API utilities) ---\n%s", storeContent))
-		}
-		mu.Unlock()
-		if storeContext != "" {
-			systemPrompt.WriteString(fmt.Sprintf("\n\n### Store Context\n%s", storeContext))
+		if fileNeedsStoreSDK(filePlan.Path) {
+			// Full SDK for files that use cart/products/checkout
+			mu.Lock()
+			if storeContent, ok := generatedFiles["lib/wemob-store.ts"]; ok {
+				projectContext.WriteString(fmt.Sprintf("\n\n--- lib/wemob-store.ts (INJECTED SDK — use these exports, do NOT create custom API utilities) ---\n%s", storeContent))
+			}
+			mu.Unlock()
+			if storeContext != "" {
+				projectContext.WriteString(fmt.Sprintf("\n\n### Store Context\n%s", storeContext))
+			}
+		} else {
+			// Condensed summary for files that don't directly use the SDK
+			projectContext.WriteString("\n\n### E-Commerce SDK (condensed)\n" + condensedStoreExports)
+			if storeContext != "" {
+				projectContext.WriteString(fmt.Sprintf("\n\n### Store Context\n%s", storeContext))
+			}
 		}
 	}
 
-	// Inline auth templates and context for auth-enabled projects
+	// Conditionally inject auth templates
 	if authContext != "" {
-		mu.Lock()
-		if authContent, ok := generatedFiles["lib/wemob-auth.ts"]; ok {
-			systemPrompt.WriteString(fmt.Sprintf("\n\n--- lib/wemob-auth.ts (INJECTED AUTH — use these exports for server-side auth, do NOT create custom auth utilities) ---\n%s", authContent))
+		if fileNeedsAuth(filePlan.Path) {
+			// Full auth templates for auth-related files
+			mu.Lock()
+			if authContent, ok := generatedFiles["lib/wemob-auth.ts"]; ok {
+				projectContext.WriteString(fmt.Sprintf("\n\n--- lib/wemob-auth.ts (INJECTED AUTH — use these exports for server-side auth, do NOT create custom auth utilities) ---\n%s", authContent))
+			}
+			if authClientContent, ok := generatedFiles["lib/wemob-auth-client.tsx"]; ok {
+				projectContext.WriteString(fmt.Sprintf("\n\n--- lib/wemob-auth-client.tsx (INJECTED AUTH CLIENT — use these exports for client-side auth) ---\n%s", authClientContent))
+			}
+			mu.Unlock()
+			projectContext.WriteString(fmt.Sprintf("\n\n### Auth Context\n%s", authContext))
+		} else {
+			// Condensed summary for files that don't directly use auth
+			projectContext.WriteString("\n\n### Auth (condensed)\n" + condensedAuthExports)
 		}
-		if authClientContent, ok := generatedFiles["lib/wemob-auth-client.tsx"]; ok {
-			systemPrompt.WriteString(fmt.Sprintf("\n\n--- lib/wemob-auth-client.tsx (INJECTED AUTH CLIENT — use these exports for client-side auth) ---\n%s", authClientContent))
-		}
-		mu.Unlock()
-		systemPrompt.WriteString(fmt.Sprintf("\n\n### Auth Context\n%s", authContext))
 	}
 
-	// Inject mobile design rules for mobile_app projects
-	if project.ProjectType == "mobile_app" {
-		systemPrompt.WriteString("\n\n" + constants.NEXTJS_MOBILE_DESIGN_RULES)
-	}
-
-	// Build compact per-file user prompt
+	// --- Build per-file user prompt (variable per file) ---
 	mu.Lock()
 	var generatedFileList strings.Builder
 	if len(generatedFiles) > 0 {
-		generatedFileList.WriteString("\nAlready-generated files (only use read_file if you need to check a specific import or type — do NOT read all files):\n")
+		generatedFileList.WriteString("\nAlready-generated files:\n")
 		genPaths := make([]string, 0, len(generatedFiles))
 		for p := range generatedFiles {
 			genPaths = append(genPaths, p)
@@ -2382,7 +2450,6 @@ func (c *Controller) generateSingleAppFile(
 			generatedFileList.WriteString(fmt.Sprintf("- %s\n", p))
 		}
 	}
-	// Snapshot the file map for the tool executor
 	fileSnapshot := make(map[string]string, len(generatedFiles))
 	for k, v := range generatedFiles {
 		fileSnapshot[k] = v
@@ -2404,20 +2471,21 @@ func (c *Controller) generateSingleAppFile(
 		manifestSection,
 	)
 
-	codegenLocalExecutor := c.buildChatToolExecutor(nil, nil, fileSnapshot, nil)
-	codegenExecutor := c.compositeToolExecutor(codegenLocalExecutor)
-	codegenTools := append([]utils.Tool{}, appCodegenTools...)
+	// Build multi-block messages for caching efficiency:
+	// - Block 1 (system): base prompt — same across all files of same type
+	// - Block 2 (system): project context + SDK — same across all files in project
+	// - Block 3 (user): per-file prompt — changes per file
+	messages := []utils.Message{
+		{Role: "system", Content: basePrompt},
+		{Role: "system", Content: projectContext.String()},
+		{Role: "user", Content: userPrompt},
+	}
 
-	content, err := utils.StreamTextWithTools(
+	content, err := utils.StreamTextFromLLMWithMessages(
 		fileCtx,
 		model,
-		systemPrompt.String(),
-		userPrompt,
+		messages,
 		provider,
-		codegenTools,
-		nil,
-		codegenExecutor,
-		nil,
 		func(chunk string) {
 			sendEvent("file_chunk", responses.FileOperationEvent{
 				Action:   "create",
@@ -2442,12 +2510,13 @@ func (c *Controller) generateSingleAppFile(
 
 // repairSingleAppFile generates a replacement for a broken file using a focused repair prompt.
 // It includes the failure reason and broken content as context so the LLM can produce a better result.
+// Always uses Sonnet regardless of the main model — repair is a simple task.
 func (c *Controller) repairSingleAppFile(
 	ctx context.Context,
 	project *models.AppProject,
 	filePlan appFilePlanEntry,
 	structure *appFileStructure,
-	model string,
+	_ string, // model param ignored — always uses Sonnet
 	provider *utils.LLMProvider,
 	generatedFiles map[string]string,
 	mu *sync.Mutex,
@@ -2459,6 +2528,9 @@ func (c *Controller) repairSingleAppFile(
 ) (string, error) {
 	fileCtx, fileCancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer fileCancel()
+
+	// Always use Sonnet for repair — simple task, no need for expensive models
+	repairModel := constants.DEFAULT_NEXTJS_LLM_MODEL
 
 	// Build context about files that import this broken file
 	mu.Lock()
@@ -2510,7 +2582,7 @@ func (c *Controller) repairSingleAppFile(
 
 	content, err := utils.StreamTextWithTools(
 		fileCtx,
-		model,
+		repairModel,
 		repairPrompt,
 		userPrompt.String(),
 		provider,
@@ -2586,6 +2658,9 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 		model = constants.DEFAULT_NEXTJS_LLM_MODEL
 	}
 	concurrency := c.llmConcurrency()
+	if provider.IsAnthropic() {
+		concurrency = 1
+	}
 	slog.Info("LLM concurrency limit", "concurrency", concurrency)
 
 	// Token usage tracking
