@@ -431,13 +431,15 @@ func (c *Controller) StreamBuildApp(
 	trimArgs := func(toolName, args string) string {
 		switch toolName {
 		case "write_file", "write_files":
-			// Strip file content, keep only paths
+			// Strip file content, keep only paths.
+			// IMPORTANT: use "content_written" (not "content") so the LLM
+			// doesn't mistake the summary for a placeholder it needs to fill.
 			var single struct {
 				FilePath string `json:"file_path"`
 				Content  string `json:"content"`
 			}
 			if err := json.Unmarshal([]byte(args), &single); err == nil && single.FilePath != "" {
-				return fmt.Sprintf(`{"file_path":%q,"content":"[%d chars written]"}`, single.FilePath, len(single.Content))
+				return fmt.Sprintf(`{"file_path":%q,"content_written":"%d chars saved to disk"}`, single.FilePath, len(single.Content))
 			}
 			// write_files: strip content from each file in the array
 			var batch struct {
@@ -449,7 +451,7 @@ func (c *Controller) StreamBuildApp(
 			if err := json.Unmarshal([]byte(args), &batch); err == nil && len(batch.Files) > 0 {
 				summaries := make([]string, len(batch.Files))
 				for i, f := range batch.Files {
-					summaries[i] = fmt.Sprintf(`{"file_path":%q,"content":"[%d chars]"}`, f.FilePath, len(f.Content))
+					summaries[i] = fmt.Sprintf(`{"file_path":%q,"content_written":"%d chars saved to disk"}`, f.FilePath, len(f.Content))
 				}
 				return fmt.Sprintf(`{"files":[%s]}`, strings.Join(summaries, ","))
 			}
@@ -461,7 +463,7 @@ func (c *Controller) StreamBuildApp(
 				NewString string `json:"new_string"`
 			}
 			if err := json.Unmarshal([]byte(args), &edit); err == nil {
-				return fmt.Sprintf(`{"file_path":%q,"old_string":"[%d chars]","new_string":"[%d chars]"}`,
+				return fmt.Sprintf(`{"file_path":%q,"edit_applied":"replaced %d chars with %d chars"}`,
 					edit.FilePath, len(edit.OldString), len(edit.NewString))
 			}
 			return args
@@ -506,11 +508,17 @@ func (c *Controller) StreamBuildApp(
 					}
 				}
 				var sb strings.Builder
-				sb.WriteString(fmt.Sprintf("[Progress: %d files created", len(created)))
+				sb.WriteString(fmt.Sprintf("[SYSTEM: %d files fully written with real code to disk", len(created)))
 				if len(modified) > 0 {
 					sb.WriteString(fmt.Sprintf(", %d modified", len(modified)))
 				}
-				sb.WriteString("] Files already written successfully — do NOT re-write them. Continue with remaining files.")
+				sb.WriteString("]\nCompleted files (do NOT re-create): ")
+				sb.WriteString(strings.Join(created, ", "))
+				if len(modified) > 0 {
+					sb.WriteString("\nModified files: ")
+					sb.WriteString(strings.Join(modified, ", "))
+				}
+				sb.WriteString("\nThe tool call arguments above show summaries (not placeholders) — the actual code was written. Continue with remaining files only.")
 
 				// Flush pending files to preview incrementally
 				c.flushPendingPreview(project, toolCallbacks)
