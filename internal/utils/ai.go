@@ -5,15 +5,60 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 )
+
+// --- Rate limit error ---
+
+// ErrRateLimited is returned when the LLM API responds with HTTP 429.
+type ErrRateLimited struct {
+	RetryAfter time.Duration
+	StatusCode int
+	Body       string
+}
+
+func (e *ErrRateLimited) Error() string {
+	return fmt.Sprintf("rate limited (HTTP %d), retry after %s", e.StatusCode, e.RetryAfter)
+}
+
+// IsRateLimited checks if an error is a rate limit error and returns it.
+func IsRateLimited(err error) (*ErrRateLimited, bool) {
+	var rl *ErrRateLimited
+	if errors.As(err, &rl) {
+		return rl, true
+	}
+	return nil, false
+}
+
+// parseRateLimitError returns an ErrRateLimited for 429 responses, nil otherwise.
+func parseRateLimitError(resp *http.Response, body []byte) *ErrRateLimited {
+	if resp.StatusCode != http.StatusTooManyRequests {
+		return nil
+	}
+	retryAfter := 30 * time.Second // default
+	if raHeader := resp.Header.Get("Retry-After"); raHeader != "" {
+		if secs, err := strconv.Atoi(raHeader); err == nil && secs > 0 {
+			retryAfter = time.Duration(secs) * time.Second
+		}
+	}
+	if retryAfter > 120*time.Second {
+		retryAfter = 120 * time.Second
+	}
+	return &ErrRateLimited{
+		RetryAfter: retryAfter,
+		StatusCode: resp.StatusCode,
+		Body:       string(body),
+	}
+}
 
 // --- Token usage tracking ---
 
@@ -543,6 +588,9 @@ func StreamTextFromLLM(ctx context.Context, model, system, message string, provi
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
 		slog.Error("LLM streaming returned non-200", "status", resp.StatusCode, "body", string(respBody))
+		if rlErr := parseRateLimitError(resp, respBody); rlErr != nil {
+			return "", rlErr
+		}
 		return "", fmt.Errorf("error generating content. try again please")
 	}
 
@@ -663,6 +711,9 @@ func StreamTextFromLLMWithMessages(ctx context.Context, model string, messages [
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
 		slog.Error("LLM streaming returned non-200", "status", resp.StatusCode, "body", string(respBody))
+		if rlErr := parseRateLimitError(resp, respBody); rlErr != nil {
+			return "", rlErr
+		}
 		return "", fmt.Errorf("error generating content. try again please")
 	}
 
@@ -840,6 +891,9 @@ func StreamJSONFromLLMWithMessages(ctx context.Context, model string, messages [
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
 		slog.Error("LLM streaming returned non-200", "status", resp.StatusCode, "body", string(respBody))
+		if rlErr := parseRateLimitError(resp, respBody); rlErr != nil {
+			return "", rlErr
+		}
 		return "", fmt.Errorf("error generating content. try again please")
 	}
 
@@ -1044,6 +1098,9 @@ func StreamJSONFromLLM(ctx context.Context, model, system, message string, provi
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
 		slog.Error("LLM streaming returned non-200", "status", resp.StatusCode, "body", string(respBody))
+		if rlErr := parseRateLimitError(resp, respBody); rlErr != nil {
+			return "", rlErr
+		}
 		return "", fmt.Errorf("error generating content. try again please")
 	}
 
@@ -1161,6 +1218,9 @@ func StreamJSONFromLLMWithVision(ctx context.Context, model, system, userText, b
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
 		slog.Error("LLM vision streaming returned non-200", "status", resp.StatusCode, "body", string(respBody))
+		if rlErr := parseRateLimitError(resp, respBody); rlErr != nil {
+			return "", rlErr
+		}
 		return "", fmt.Errorf("error generating content. try again please")
 	}
 
@@ -1251,12 +1311,15 @@ func StreamJSONFromLLMWithVision(ctx context.Context, model, system, userText, b
 
 // ToolCallConfig holds optional configuration for StreamWithTools.
 type ToolCallConfig struct {
-	MaxRounds   int                                  // Maximum tool-calling rounds (default 10)
-	NudgeAfter  int                                  // Inject nudge after this many consecutive tool rounds (default 3)
-	StripAfter  int                                  // Strip tools entirely after this many consecutive rounds (default 5)
-	MaxTokens   int                                  // Max completion tokens per round (default 16384)
-	TrimArgs    func(toolName, args string) string   // Trim tool call arguments in history to reduce token usage
-	TrimResults func(toolName, result string) string // Trim tool result messages in history to reduce token usage
+	MaxRounds        int                                                   // Maximum tool-calling rounds (default 10)
+	NudgeAfter       int                                                   // Inject nudge after this many consecutive tool rounds (default 3)
+	StripAfter       int                                                   // Strip tools entirely after this many consecutive rounds (default 5)
+	MaxTokens        int                                                   // Max completion tokens per round (default 16384)
+	TrimArgs         func(toolName, args string) string                    // Trim tool call arguments in history to reduce token usage
+	TrimResults      func(toolName, result string) string                  // Trim tool result messages in history to reduce token usage
+	InterceptToolCall func(toolName, toolArgs string) (result string, skip bool) // Intercept tool calls before execution; if skip=true, use result and skip executor
+	NudgeMessage     string                                                // Custom nudge message (replaces default "stop researching" text)
+	AfterToolRound   func() string                                         // Called after each tool round; non-empty return is injected as a system message
 }
 
 // StreamWithTools sends messages to LLM with tools, handles the tool call loop,
@@ -1305,6 +1368,7 @@ func StreamWithTools(
 	toolCallHistory := make(map[string]string) // "tool:args" → result (dedup cache)
 	consecutiveToolRounds := 0
 	nudged := false
+	rateLimitRetries := 0
 
 	for round := 0; round < maxRounds; round++ {
 		// Progressively nudge the AI to stop researching and produce a final response.
@@ -1319,9 +1383,13 @@ func StreamWithTools(
 			roundTools = nil
 			slog.Warn("Stripping tools to force final response", "round", round, "consecutive_tool_rounds", consecutiveToolRounds)
 		} else if consecutiveToolRounds >= nudgeAfter && !nudged {
+			nudgeContent := "You have already gathered sufficient context from tool calls. Please wrap up your research and generate your final complete response. You may make one or two more targeted tool calls if absolutely necessary, but prioritize producing your response."
+			if len(opts) > 0 && opts[0].NudgeMessage != "" {
+				nudgeContent = opts[0].NudgeMessage
+			}
 			currentMessages = append(currentMessages, Message{
 				Role:    "system",
-				Content: "You have already gathered sufficient context from tool calls. Please wrap up your research and generate your final complete response. You may make one or two more targeted tool calls if absolutely necessary, but prioritize producing your response.",
+				Content: nudgeContent,
 			})
 			nudged = true
 			slog.Warn("Injecting stop-researching nudge (tools still available)", "round", round, "consecutive_tool_rounds", consecutiveToolRounds)
@@ -1357,9 +1425,25 @@ func StreamWithTools(
 		if resp.StatusCode != http.StatusOK {
 			respBody, _ := io.ReadAll(resp.Body)
 			resp.Body.Close()
+			// Handle 429 rate limit with retry + backoff
+			if rlErr := parseRateLimitError(resp, respBody); rlErr != nil && rateLimitRetries < 5 {
+				rateLimitRetries++
+				slog.Warn("LLM rate limited, retrying", "retry_after", rlErr.RetryAfter, "attempt", rateLimitRetries, "round", round)
+				select {
+				case <-time.After(rlErr.RetryAfter):
+				case <-ctx.Done():
+					return "", ctx.Err()
+				}
+				round-- // retry same round
+				continue
+			}
 			slog.Error("LLM streaming returned non-200", "status", resp.StatusCode, "body", string(respBody), "round", round)
+			if rlErr := parseRateLimitError(resp, respBody); rlErr != nil {
+				return "", rlErr
+			}
 			return "", fmt.Errorf("error generating content. try again please")
 		}
+		rateLimitRetries = 0 // reset after successful request
 
 		var fullText strings.Builder
 		var fullReasoning strings.Builder // accumulate reasoning_content for cache continuity
@@ -1591,27 +1675,39 @@ func StreamWithTools(
 					toolArgs = tc.Function.Arguments
 				}
 
-				cacheKey := toolName + ":" + toolArgs
 				var result string
 
-				if cached, ok := toolCallHistory[cacheKey]; ok {
-					// Return cached result instead of re-executing
-					result = cached
-					slog.Info("Tool call deduped (cached)", "tool", toolName, "round", round)
-				} else {
-					slog.Info("Executing tool call", "tool", toolName, "round", round)
-
-					if onToolCall != nil {
-						onToolCall(toolName, toolArgs)
+				// Intercept tool calls before cache check and execution
+				if len(opts) > 0 && opts[0].InterceptToolCall != nil {
+					if interceptResult, skip := opts[0].InterceptToolCall(toolName, toolArgs); skip {
+						result = interceptResult
+						slog.Info("Tool call intercepted", "tool", toolName, "round", round)
+						goto toolResultDone
 					}
-
-					var err error
-					result, err = executor(toolName, toolArgs)
-					if err != nil {
-						result = fmt.Sprintf("Error executing tool %s: %v", toolName, err)
-					}
-					toolCallHistory[cacheKey] = result
 				}
+
+				{
+					cacheKey := toolName + ":" + toolArgs
+					if cached, ok := toolCallHistory[cacheKey]; ok {
+						// Return cached result instead of re-executing
+						result = cached
+						slog.Info("Tool call deduped (cached)", "tool", toolName, "round", round)
+					} else {
+						slog.Info("Executing tool call", "tool", toolName, "round", round)
+
+						if onToolCall != nil {
+							onToolCall(toolName, toolArgs)
+						}
+
+						var err error
+						result, err = executor(toolName, toolArgs)
+						if err != nil {
+							result = fmt.Sprintf("Error executing tool %s: %v", toolName, err)
+						}
+						toolCallHistory[cacheKey] = result
+					}
+				}
+			toolResultDone:
 
 				currentMessages = append(currentMessages, Message{
 					Role:       "tool",
@@ -1644,6 +1740,16 @@ func StreamWithTools(
 					if i >= 0 && currentMessages[i].Role == "tool" {
 						currentMessages[i].Content = opts[0].TrimResults(currentMessages[i].Name, currentMessages[i].Content)
 					}
+				}
+			}
+
+			// Inject post-round system message (e.g. progress summary)
+			if len(opts) > 0 && opts[0].AfterToolRound != nil {
+				if msg := opts[0].AfterToolRound(); msg != "" {
+					currentMessages = append(currentMessages, Message{
+						Role:    "system",
+						Content: msg,
+					})
 				}
 			}
 
