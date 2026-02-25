@@ -1612,10 +1612,14 @@ func StreamWithTools(
 				})
 			}
 
-			// Trim tool call arguments in history to reduce token usage in subsequent rounds
+			// Trim tool call arguments AND assistant content to reduce history tokens
 			if len(opts) > 0 && opts[0].TrimArgs != nil {
 				assistantMsgIdx := len(currentMessages) - 1 - len(toolCalls)
 				if assistantMsgIdx >= 0 {
+					// Clear reasoning and commentary — LLM doesn't need its own prior reasoning
+					currentMessages[assistantMsgIdx].Content = ""
+					currentMessages[assistantMsgIdx].ReasoningContent = ""
+					// Trim tool call arguments (e.g. strip file content from write_file)
 					for i := range currentMessages[assistantMsgIdx].ToolCalls {
 						tc := &currentMessages[assistantMsgIdx].ToolCalls[i]
 						if tc.Function != nil {
