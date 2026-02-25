@@ -22,6 +22,17 @@ var NEXTJS_ECOMMERCE_TEMPLATE_FILE_PATHS = []string{
 	"lib/wemob-store.ts",
 }
 
+// NEXTJS_UI_TEMPLATE_FILE_PATHS are pre-built UI component templates injected during initial generation
+// so the LLM doesn't waste tokens regenerating them from scratch.
+var NEXTJS_UI_TEMPLATE_FILE_PATHS = []string{
+	"lib/utils.ts",
+	"components/ui/button.tsx",
+	"components/ui/card.tsx",
+	"components/ui/input.tsx",
+	"components/ui/badge.tsx",
+	"components/ui/skeleton.tsx",
+}
+
 const NEXTJS_TEMPLATE_PACKAGE_JSON = `{
   "name": "app",
   "version": "0.1.0",
@@ -1049,6 +1060,182 @@ export function useStoreConfig(): {
 }
 `
 
+// --- Pre-built UI component templates (shadcn/ui patterns) ---
+
+const NEXTJS_TEMPLATE_UTILS_TS = `import { type ClassValue, clsx } from "clsx";
+import { twMerge } from "tailwind-merge";
+
+export function cn(...inputs: ClassValue[]) {
+  return twMerge(clsx(inputs));
+}
+`
+
+const NEXTJS_TEMPLATE_BUTTON_TSX = `import * as React from "react";
+import { Slot } from "@radix-ui/react-slot";
+import { cva, type VariantProps } from "class-variance-authority";
+import { cn } from "@/lib/utils";
+
+const buttonVariants = cva(
+  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
+  {
+    variants: {
+      variant: {
+        default: "bg-primary text-primary-foreground shadow hover:bg-primary/90",
+        destructive: "bg-destructive text-destructive-foreground shadow-sm hover:bg-destructive/90",
+        outline: "border border-input bg-background shadow-sm hover:bg-accent hover:text-accent-foreground",
+        secondary: "bg-secondary text-secondary-foreground shadow-sm hover:bg-secondary/80",
+        ghost: "hover:bg-accent hover:text-accent-foreground",
+        link: "text-primary underline-offset-4 hover:underline",
+      },
+      size: {
+        default: "h-9 px-4 py-2",
+        sm: "h-8 rounded-md px-3 text-xs",
+        lg: "h-10 rounded-md px-8",
+        icon: "h-9 w-9",
+      },
+    },
+    defaultVariants: {
+      variant: "default",
+      size: "default",
+    },
+  }
+);
+
+export interface ButtonProps
+  extends React.ButtonHTMLAttributes<HTMLButtonElement>,
+    VariantProps<typeof buttonVariants> {
+  asChild?: boolean;
+}
+
+const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
+  ({ className, variant, size, asChild = false, ...props }, ref) => {
+    const Comp = asChild ? Slot : "button";
+    return (
+      <Comp
+        className={cn(buttonVariants({ variant, size, className }))}
+        ref={ref}
+        {...props}
+      />
+    );
+  }
+);
+Button.displayName = "Button";
+
+export { Button, buttonVariants };
+`
+
+const NEXTJS_TEMPLATE_CARD_TSX = `import * as React from "react";
+import { cn } from "@/lib/utils";
+
+const Card = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
+  ({ className, ...props }, ref) => (
+    <div ref={ref} className={cn("rounded-xl border bg-card text-card-foreground shadow", className)} {...props} />
+  )
+);
+Card.displayName = "Card";
+
+const CardHeader = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
+  ({ className, ...props }, ref) => (
+    <div ref={ref} className={cn("flex flex-col space-y-1.5 p-6", className)} {...props} />
+  )
+);
+CardHeader.displayName = "CardHeader";
+
+const CardTitle = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
+  ({ className, ...props }, ref) => (
+    <div ref={ref} className={cn("font-semibold leading-none tracking-tight", className)} {...props} />
+  )
+);
+CardTitle.displayName = "CardTitle";
+
+const CardDescription = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
+  ({ className, ...props }, ref) => (
+    <div ref={ref} className={cn("text-sm text-muted-foreground", className)} {...props} />
+  )
+);
+CardDescription.displayName = "CardDescription";
+
+const CardContent = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
+  ({ className, ...props }, ref) => (
+    <div ref={ref} className={cn("p-6 pt-0", className)} {...props} />
+  )
+);
+CardContent.displayName = "CardContent";
+
+const CardFooter = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
+  ({ className, ...props }, ref) => (
+    <div ref={ref} className={cn("flex items-center p-6 pt-0", className)} {...props} />
+  )
+);
+CardFooter.displayName = "CardFooter";
+
+export { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter };
+`
+
+const NEXTJS_TEMPLATE_INPUT_TSX = `import * as React from "react";
+import { cn } from "@/lib/utils";
+
+const Input = React.forwardRef<HTMLInputElement, React.InputHTMLAttributes<HTMLInputElement>>(
+  ({ className, type, ...props }, ref) => {
+    return (
+      <input
+        type={type}
+        className={cn(
+          "flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-base shadow-sm transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 md:text-sm",
+          className
+        )}
+        ref={ref}
+        {...props}
+      />
+    );
+  }
+);
+Input.displayName = "Input";
+
+export { Input };
+`
+
+const NEXTJS_TEMPLATE_BADGE_TSX = `import * as React from "react";
+import { cva, type VariantProps } from "class-variance-authority";
+import { cn } from "@/lib/utils";
+
+const badgeVariants = cva(
+  "inline-flex items-center rounded-md border px-2.5 py-0.5 text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
+  {
+    variants: {
+      variant: {
+        default: "border-transparent bg-primary text-primary-foreground shadow hover:bg-primary/80",
+        secondary: "border-transparent bg-secondary text-secondary-foreground hover:bg-secondary/80",
+        destructive: "border-transparent bg-destructive text-destructive-foreground shadow hover:bg-destructive/80",
+        outline: "text-foreground",
+      },
+    },
+    defaultVariants: {
+      variant: "default",
+    },
+  }
+);
+
+export interface BadgeProps
+  extends React.HTMLAttributes<HTMLDivElement>,
+    VariantProps<typeof badgeVariants> {}
+
+function Badge({ className, variant, ...props }: BadgeProps) {
+  return <div className={cn(badgeVariants({ variant }), className)} {...props} />;
+}
+
+export { Badge, badgeVariants };
+`
+
+const NEXTJS_TEMPLATE_SKELETON_TSX = `import { cn } from "@/lib/utils";
+
+function Skeleton({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
+  return <div className={cn("animate-pulse rounded-md bg-primary/10", className)} {...props} />;
+}
+
+export { Skeleton };
+`
+
 // NEXTJS_BUILDER_SYSTEM_PROMPT is the single unified system prompt used for both
 // initial app generation and chat editing. It replaces all previous per-phase prompts.
 // Block 1 (stable, cacheable): role, tools, framework rules, design philosophy.
@@ -1080,7 +1267,7 @@ You have tools to read, write, edit, and delete project files:
 ### How to Build a New App (Initial Generation)
 When building a new app from a user's prompt:
 1. **Think architecture first**: Decide the page structure, components, data models, and routing.
-2. **Write foundational files first**: Start with lib/utils.ts (cn helper), then components/ui/ primitives (Button, Card, Input, Badge).
+2. **Skip template-managed files**: lib/utils.ts and components/ui/ primitives (button, card, input, badge, skeleton) are already injected. Do NOT recreate them. Import directly: import { Button } from '@/components/ui/button'.
 3. **Write feature components**: Build the reusable feature-specific components (Header, Footer, ProductCard, etc.).
 4. **Write pages**: Build each page using the components you just created.
 5. **Write app/globals.css**: Design a complete, cohesive globals.css with @import "tailwindcss" and @theme directive for custom colors. Choose a sophisticated, modern color palette that fits the app's purpose. Include dark mode support via @media (prefers-color-scheme: dark).
@@ -1113,7 +1300,8 @@ When the user asks for changes to an existing app:
 - ONLY create <Link href="..."> navigation to pages that exist or that you are creating. No dead links.
 - NEVER import Node.js builtins (fs, path, os, crypto, etc.) or build-time packages (tailwindcss, postcss, eslint, webpack, etc.).
 - Use ` + "`" + `import { db } from '@/lib/db'` + "`" + ` and ` + "`" + `import { ... } from '@/lib/schema'` + "`" + ` for all data access. Use Drizzle queries in server components and API routes. Do NOT use hardcoded mock data — all data should come from the database. Import Drizzle operators from 'drizzle-orm': ` + "`" + `import { eq, and, desc, sql } from 'drizzle-orm'` + "`" + `.
-- cn() from @/lib/utils for conditional classes (clsx + tailwind-merge). If lib/utils.ts absent, create it.
+- cn() from @/lib/utils for conditional classes (clsx + tailwind-merge). lib/utils.ts is template-managed — do NOT recreate it.
+- lib/utils.ts and components/ui/ primitives (button, card, input, badge, skeleton) are template-managed. Do NOT recreate or modify them. Import directly: import { Button } from '@/components/ui/button'.
 - Custom Tailwind theme colors: primary, secondary, accent, background, surface, text. Use as classes (bg-primary, text-accent).
 - Pre-installed deps: lucide-react, clsx, tailwind-merge, class-variance-authority, framer-motion, @radix-ui/* primitives (react-slot, react-dialog, react-dropdown-menu, react-tabs, react-tooltip, react-avatar, react-separator, react-scroll-area, react-switch, react-select, react-accordion, react-popover).
 - Use read_file tool to check actual exports before importing from sibling files. Do NOT guess export names.
@@ -1166,14 +1354,13 @@ Given the user's description of a web application they want to build, generate a
 3. Also generate a dark color scheme variant.
 4. Choose professional, modern typography pairing (heading_font and body_font from Google Fonts). Avoid overused fonts — consider Inter, Plus Jakarta Sans, DM Sans, Outfit, Sora, Manrope, Space Grotesk.
 5. Plan the files needed for the project. Each file has a path, type, and description.
-6. DO NOT include package.json, tsconfig.json, postcss.config.mjs, next.config.mjs, lib/db.ts, or lib/schema.ts — these are template-managed and injected automatically.
+6. DO NOT include package.json, tsconfig.json, postcss.config.mjs, next.config.mjs, lib/db.ts, lib/schema.ts, lib/utils.ts, components/ui/button.tsx, components/ui/card.tsx, components/ui/input.tsx, components/ui/badge.tsx, or components/ui/skeleton.tsx — these are template-managed and injected automatically.
 7. Required files: app/layout.tsx, app/page.tsx, app/globals.css
-8. Plan a lib/utils.ts file that exports a cn() helper using clsx and tailwind-merge.
-9. Use Next.js App Router structure (app/ directory for pages).
-10. Plan 3-8 pages depending on complexity.
-11. Include shared UI components in a components/ directory. Plan reusable primitives (Button, Card, Badge, Input, etc.) in components/ui/ following shadcn/ui patterns.
-12. Keep the structure clean and well-organized.
-13. CRITICAL: Every component or module that is imported by any page MUST be included in the file list. If page.tsx imports "@/components/project-card", you MUST include "components/project-card.tsx" in the plan. If page.tsx imports "@/lib/projects", you MUST include "lib/projects.ts" in the plan. Missing files will cause build failures.
+8. Use Next.js App Router structure (app/ directory for pages).
+9. Plan 3-8 pages depending on complexity.
+10. Include shared UI components in a components/ directory. You may plan additional components/ui/ primitives beyond the pre-injected ones (button, card, input, badge, skeleton).
+11. Keep the structure clean and well-organized.
+12. CRITICAL: Every component or module that is imported by any page MUST be included in the file list. If page.tsx imports "@/components/project-card", you MUST include "components/project-card.tsx" in the plan. If page.tsx imports "@/lib/projects", you MUST include "lib/projects.ts" in the plan. Missing files will cause build failures.
 14. Prefer inline implementations over importing from separate utility/lib files. Only create separate files for reusable components or large data modules.
 15. If the application requires external API keys or secrets (payment gateways, databases, third-party APIs, etc.), list them in "required_env_vars". Each entry: "key" (env var name, e.g. "STRIPE_SK"), "description" (what it's for), "is_public" (true if NEXT_PUBLIC_ prefixed for client-side), "provider" (optional, matching integration: "stripe", "iyzico", "supabase", etc.). Do NOT include NEXT_PUBLIC_STORE_ID, NEXT_PUBLIC_WEMOB_API_URL, or DATABASE_URL (auto-provisioned).
 16. Design "data_models" — an array of database tables the app needs for its data. Each table has a "name" and "columns" array. Each column has "name", "type" (text, integer, boolean, timestamp, uuid, jsonb), "primary_key" (bool), "nullable" (bool), optional "default", and optional "references" (e.g. "categories.id"). Every table MUST have an "id" column with type "uuid" and primary_key true. Add "created_at" and "updated_at" timestamp columns. Design the schema based on what the app actually needs — blogs need posts/comments, task apps need tasks/projects, etc. A database will be provisioned automatically from these models.
@@ -1250,14 +1437,13 @@ Given the user's description of a mobile app they want to build, generate a stru
 3. Also generate a dark color scheme variant.
 4. Choose professional, modern typography pairing (heading_font and body_font from Google Fonts). Consider Inter, SF Pro-like alternatives, DM Sans, Plus Jakarta Sans.
 5. Plan the files needed for the project. Each file has a path, type, and description.
-6. DO NOT include package.json, tsconfig.json, postcss.config.mjs, next.config.mjs, lib/db.ts, or lib/schema.ts — these are template-managed and injected automatically.
+6. DO NOT include package.json, tsconfig.json, postcss.config.mjs, next.config.mjs, lib/db.ts, lib/schema.ts, lib/utils.ts, components/ui/button.tsx, components/ui/card.tsx, components/ui/input.tsx, components/ui/badge.tsx, or components/ui/skeleton.tsx — these are template-managed and injected automatically.
 7. Required files: app/layout.tsx, app/page.tsx, app/globals.css
-8. Plan a lib/utils.ts file that exports a cn() helper using clsx and tailwind-merge.
-9. Use Next.js App Router structure (app/ directory for pages).
-10. Plan 3-8 pages depending on complexity.
-11. Include shared UI components in a components/ directory. Plan reusable primitives (Button, Card, Badge, Input, etc.) in components/ui/ following shadcn/ui patterns.
-12. Keep the structure clean and well-organized.
-13. CRITICAL: Every component or module that is imported by any page MUST be included in the file list. Missing files will cause build failures.
+8. Use Next.js App Router structure (app/ directory for pages).
+9. Plan 3-8 pages depending on complexity.
+10. Include shared UI components in a components/ directory. You may plan additional components/ui/ primitives beyond the pre-injected ones (button, card, input, badge, skeleton).
+11. Keep the structure clean and well-organized.
+12. CRITICAL: Every component or module that is imported by any page MUST be included in the file list. Missing files will cause build failures.
 14. Prefer inline implementations over importing from separate utility/lib files. Only create separate files for reusable components or large data modules.
 15. MOBILE-SPECIFIC: Include viewport meta tag configuration for mobile. Use touch-friendly sizing. Plan bottom tab navigation component. Use mobile-appropriate components (bottom sheets, slide-up modals, swipeable cards). All layouts must work within 430px max width. NO desktop-only layouts.
 16. Generate mobile-first CSS — use Tailwind's default breakpoint as the base (mobile), never require larger breakpoints for core functionality.
