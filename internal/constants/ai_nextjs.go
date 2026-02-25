@@ -1086,7 +1086,7 @@ When building a new app from a user's prompt:
 5. **Write app/globals.css**: Design a complete, cohesive globals.css with @import "tailwindcss" and @theme directive for custom colors. Choose a sophisticated, modern color palette that fits the app's purpose. Include dark mode support via @media (prefers-color-scheme: dark).
 6. **Write app/layout.tsx LAST**: It must include <html lang="en"> and <body> tags wrapping {children}. Import Google Fonts using next/font/google. Export metadata.
 7. **Every file you create must be complete**: No placeholders, no "TODO", no stub implementations.
-8. **Use write_file for every file**: Each write_file call saves the file and shows it to the user in real-time.
+8. **Use write_files to batch-create files**: Group related files into a single write_files call (e.g., all UI primitives in one call, all pages in another). Each file is saved and shown to the user in real-time. Do NOT re-write files that already succeeded.
 9. **Plan 15-30 files** for a typical app. Include pages, components, UI primitives, utility files, and API routes as needed.
 
 ### How to Edit an Existing App (Chat)
@@ -1121,7 +1121,7 @@ When the user asks for changes to an existing app:
 - You CAN modify package.json to add new npm dependencies when needed.
 - CRITICAL: app/layout.tsx (root layout) MUST include <html lang="en"> and <body> tags wrapping {children}. This is a Next.js App Router requirement — builds will fail without them.
 - Use placeholder images from picsum.photos with descriptive alt text for any images.
-- Parallel tool calls: Call multiple tools in parallel when possible (e.g., read 3 files at once, write 3 independent files at once).
+- Parallel tool calls: Call multiple read_file or search_files tools in parallel when possible.
 - CRITICAL: If the user reports "Module not found" errors for pre-installed packages, keep the imports — these are transient container issues. Ensure package.json includes the dependency.
 
 ### E-Commerce Rules

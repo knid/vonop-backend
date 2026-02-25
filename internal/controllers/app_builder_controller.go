@@ -437,6 +437,27 @@ func (c *Controller) StreamBuildApp(
 			MaxTokens:   65536,
 			TrimArgs:    trimArgs,
 			TrimResults: trimResults,
+			AfterToolRound: func() string {
+				if len(toolAppliedOps) == 0 {
+					return ""
+				}
+				var created, modified []string
+				for _, op := range toolAppliedOps {
+					switch op.Action {
+					case "create":
+						created = append(created, op.Path)
+					case "modify":
+						modified = append(modified, op.Path)
+					}
+				}
+				var sb strings.Builder
+				sb.WriteString(fmt.Sprintf("[Progress: %d files created", len(created)))
+				if len(modified) > 0 {
+					sb.WriteString(fmt.Sprintf(", %d modified", len(modified)))
+				}
+				sb.WriteString("] Files already written successfully — do NOT re-write them. Continue with remaining files.")
+				return sb.String()
+			},
 		}
 	} else {
 		toolConfig = utils.ToolCallConfig{
@@ -1237,7 +1258,7 @@ func (c *Controller) buildBuilderToolExecutor(ctx context.Context, project *mode
 				})
 				cbs.mu.Unlock()
 			}
-			return fmt.Sprintf("Successfully wrote %s (%d chars, action: %s)", args.FilePath, len(content), action), nil
+			return fmt.Sprintf("Successfully wrote %s (%d chars, action: %s). File is saved — do not re-write.", args.FilePath, len(content), action), nil
 
 		case "write_files":
 			var args struct {
@@ -1313,7 +1334,7 @@ func (c *Controller) buildBuilderToolExecutor(ctx context.Context, project *mode
 				}
 				results = append(results, fmt.Sprintf("OK %s (%d chars, %s)", f.FilePath, len(content), action))
 			}
-			return fmt.Sprintf("Wrote %d files:\n%s", len(args.Files), strings.Join(results, "\n")), nil
+			return fmt.Sprintf("Successfully wrote %d files (all saved to project):\n%s", len(args.Files), strings.Join(results, "\n")), nil
 
 		case "edit_file":
 			var args struct {
