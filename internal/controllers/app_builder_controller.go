@@ -335,7 +335,10 @@ func (c *Controller) StreamBuildApp(
 
 		if len(messages) > summarizeThreshold {
 			oldMessages := messages[:len(messages)-keepRecent]
-			if conv.Summary == "" && len(oldMessages) > 0 {
+			// Re-summarize when no summary exists or when old messages have grown
+			// significantly since last summary (every 10 new messages beyond threshold)
+			needsSummary := conv.Summary == "" || (len(oldMessages) > summarizeThreshold && len(oldMessages)%10 < 2)
+			if needsSummary && len(oldMessages) > 0 {
 				conv.Summary = c.summarizeConversation(ctx, oldMessages, provider)
 				if msgJSON, err := json.Marshal(messages); err != nil {
 					slog.Error("failed to marshal messages after summarization", "error", err, "conv_id", conv.ID)
@@ -402,6 +405,8 @@ func (c *Controller) StreamBuildApp(
 		appliedOps:   &toolAppliedOps,
 		pendingFiles: make(map[string]string),
 	}
+	// Ensure any pending files are flushed to preview even on error/cancellation
+	defer c.flushPendingPreview(project, toolCallbacks)
 
 	var thinkingBuf strings.Builder
 	var accToolCalls []models.AppChatToolCall
@@ -1552,7 +1557,9 @@ func (c *Controller) buildBuilderToolExecutor(ctx context.Context, project *mode
 			var args struct {
 				FilePath string `json:"file_path"`
 			}
-			json.Unmarshal([]byte(arguments), &args)
+			if err := json.Unmarshal([]byte(arguments), &args); err != nil {
+				return fmt.Sprintf("Error: invalid arguments: %s", err.Error()), nil
+			}
 			cbs.fileMu.RLock()
 			content, ok := fileMap[args.FilePath]
 			cbs.fileMu.RUnlock()
@@ -1575,7 +1582,9 @@ func (c *Controller) buildBuilderToolExecutor(ctx context.Context, project *mode
 			var args struct {
 				Query string `json:"query"`
 			}
-			json.Unmarshal([]byte(arguments), &args)
+			if err := json.Unmarshal([]byte(arguments), &args); err != nil {
+				return fmt.Sprintf("Error: invalid arguments: %s", err.Error()), nil
+			}
 			query := strings.ToLower(args.Query)
 			cbs.fileMu.RLock()
 			var results []string
@@ -1817,7 +1826,9 @@ func (c *Controller) buildBuilderToolExecutor(ctx context.Context, project *mode
 			if err != nil {
 				return fmt.Sprintf("Error: file '%s' not found", args.FilePath), nil
 			}
-			c.DB.DeleteAppGeneratedFile(existingFile)
+			if err := c.DB.DeleteAppGeneratedFile(existingFile); err != nil {
+				return fmt.Sprintf("Error: failed to delete file '%s': %s", args.FilePath, err.Error()), nil
+			}
 
 			if cbs != nil {
 				cbs.mu.Lock()
@@ -1842,7 +1853,9 @@ func (c *Controller) buildBuilderToolExecutor(ctx context.Context, project *mode
 			var args struct {
 				StoreName string `json:"store_name"`
 			}
-			json.Unmarshal([]byte(arguments), &args)
+			if err := json.Unmarshal([]byte(arguments), &args); err != nil {
+				return fmt.Sprintf("Error: invalid arguments: %s", err.Error()), nil
+			}
 			if args.StoreName == "" {
 				args.StoreName = project.Name + " Store"
 			}

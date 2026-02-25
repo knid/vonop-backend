@@ -1653,7 +1653,9 @@ func StreamWithTools(
 				"history_msgs", len(currentMessages),
 			)
 			if tracker := TokenTrackerFromContext(ctx); tracker != nil {
-				if tracker.TrackContent {
+				// Only record full message content for the first 10 rounds to cap memory usage.
+				// After that, record usage stats only.
+				if tracker.TrackContent && round < 10 {
 					tracker.RecordWithContent(model, roundUsage, time.Since(roundStart).Milliseconds(), true, currentMessages, fullText.String())
 				} else {
 					tracker.Record(model, roundUsage, time.Since(roundStart).Milliseconds(), true)
@@ -1797,8 +1799,9 @@ func StreamWithTools(
 				}
 			}
 
-			// Inject post-round system message (e.g. progress summary)
-			if len(opts) > 0 && opts[0].AfterToolRound != nil {
+			// Inject post-round system message (e.g. progress summary).
+			// Skip when tools have been stripped — avoid contradicting the "generate now" message.
+			if roundTools != nil && len(opts) > 0 && opts[0].AfterToolRound != nil {
 				if msg := opts[0].AfterToolRound(); msg != "" {
 					currentMessages = append(currentMessages, Message{
 						Role:    "system",
