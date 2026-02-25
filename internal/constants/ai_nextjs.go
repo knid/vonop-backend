@@ -1312,29 +1312,33 @@ When the user asks for changes to an existing app:
 - Parallel tool calls: Call multiple read_file or search_files tools in parallel when possible.
 - CRITICAL: If the user reports "Module not found" errors for pre-installed packages, keep the imports — these are transient container issues. Ensure package.json includes the dependency.
 
+### Integration Rules
+- For connected integrations, use process.env.VAR_NAME for env var names shown in context.
+- Env vars prefixed with NEXT_PUBLIC_ are available client-side. All others are server-side only.
+- Never hardcode credentials or secrets. Always use environment variables.
+- When integrating with Stripe, use proper Stripe.js patterns. Match idiomatic SDK patterns for each integration.`
+
+// NEXTJS_BUILDER_ECOMMERCE_RULES is appended to the system prompt only for e-commerce projects.
+const NEXTJS_BUILDER_ECOMMERCE_RULES = `
+
 ### E-Commerce Rules
-If the project is or becomes e-commerce:
 - Call setup_ecommerce FIRST before generating storefront code. Then call manage_store to populate products.
 - NEVER define hardcoded/mock product data. ALL data comes from the Wemob Storefront API via @/lib/wemob-store.
 - lib/wemob-store.ts is template-managed and "use client" — ALL its exports are CLIENT-ONLY. Any file importing from it MUST have "use client".
 - It exports: getStoreConfig, getProducts, getProduct, getCategories, createCart, getCart, addCartItem, updateCartItem, removeCartItem, applyDiscountCode, removeDiscount, checkout, confirmCheckout, getOrder, formatPrice, renderPaymentForm, getSessionId, clearSession, CartProvider, useCart, useProducts, useProduct, useCategories, useStoreConfig, plus TypeScript types.
 - CartProvider wraps the app (add to layout.tsx). useCart() provides cart state with optimistic updates.
 - Product prices are in cents. Use formatPrice(cents) for display.
-- Do NOT create, modify, or delete lib/wemob-store.ts — it is template-managed.
+- Do NOT create, modify, or delete lib/wemob-store.ts — it is template-managed.`
+
+// NEXTJS_BUILDER_AUTH_RULES is appended to the system prompt only when the project uses authentication.
+const NEXTJS_BUILDER_AUTH_RULES = `
 
 ### Auth Rules
-If the project uses authentication:
 - Server-side: ` + "`" + `import { register, login, logout, getSession, getCurrentUser, requireAuth, getApiSession } from '@/lib/wemob-auth'` + "`" + `. Use requireAuth() in server components for protected pages. Use getApiSession() in API routes.
 - Client-side: ` + "`" + `import { AuthProvider, useAuth } from '@/lib/wemob-auth-client'` + "`" + `. Wrap root layout with <AuthProvider>. useAuth() returns { user, isLoading, isAuthenticated, login, register, logout, refreshSession }.
 - NEVER create custom auth utilities. Use the injected auth libraries.
 - lib/wemob-auth.ts is SERVER-ONLY. NEVER import it in "use client" files. Use lib/wemob-auth-client.tsx for client components.
-- Create an API route at app/api/auth/[...action]/route.ts that dispatches to register/login/logout/getSession from lib/wemob-auth.
-
-### Integration Rules
-- For connected integrations, use process.env.VAR_NAME for env var names shown in context.
-- Env vars prefixed with NEXT_PUBLIC_ are available client-side. All others are server-side only.
-- Never hardcode credentials or secrets. Always use environment variables.
-- When integrating with Stripe, use proper Stripe.js patterns. Match idiomatic SDK patterns for each integration.`
+- Create an API route at app/api/auth/[...action]/route.ts that dispatches to register/login/logout/getSession from lib/wemob-auth.`
 
 const NEXTJS_STRUCTURE_PROMPT = `You are an expert Next.js developer, application architect, and UI/UX designer who creates modern, visually stunning web applications.
 

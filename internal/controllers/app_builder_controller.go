@@ -281,7 +281,7 @@ func (c *Controller) StreamBuildApp(
 
 	// --- Build LLM messages ---
 	llmMessages := []utils.Message{
-		{Role: "system", Content: constants.NEXTJS_BUILDER_SYSTEM_PROMPT},
+		{Role: "system", Content: buildSystemPrompt(project)},
 	}
 
 	// System Block 2: Project context
@@ -298,7 +298,19 @@ func (c *Controller) StreamBuildApp(
 			llmMessages[lastIdx].Content += fmt.Sprintf("\n\n[User attached %d image(s) for visual reference — recreate the design shown]", len(imageURLs))
 		}
 	} else {
-		// For chat: add context + conversation history with summarization
+		// For chat: inject preview build errors if available
+		if c.PreviewService != nil {
+			if logs, err := c.PreviewService.GetLogs(project.ID.String()); err == nil && logs != "" {
+				if buildErrors := parseNextJSErrors(logs); len(buildErrors) > 0 {
+					projectContext += fmt.Sprintf("\n\n⚠ Preview build errors detected:\n%s\n\nFix these errors if the user's request touches affected files, or if they ask about build issues.",
+						strings.Join(buildErrors, "\n"))
+					// Re-set the system block with updated context
+					llmMessages[1] = utils.Message{Role: "system", Content: projectContext}
+				}
+			}
+		}
+
+		// Add context + conversation history with summarization
 		llmMessages = append(llmMessages, utils.Message{Role: "user", Content: "I understand the current project state. What would you like me to do?"})
 
 		const keepRecent = 10
@@ -725,6 +737,66 @@ func (c *Controller) injectTemplateFile(project *models.AppProject, tp string, c
 	})
 }
 
+// --- Helper: build modular system prompt ---
+
+// buildSystemPrompt assembles the system prompt, only including e-commerce and
+// auth rules when the project actually uses those features.
+func buildSystemPrompt(project *models.AppProject) string {
+	prompt := constants.NEXTJS_BUILDER_SYSTEM_PROMPT
+
+	// E-commerce rules
+	if project.ProjectType == "ecommerce" {
+		prompt += constants.NEXTJS_BUILDER_ECOMMERCE_RULES
+	}
+
+	// Auth rules
+	if settings := project.Settings; settings != nil {
+		if needsAuth, ok := settings["needs_auth"].(bool); ok && needsAuth {
+			prompt += constants.NEXTJS_BUILDER_AUTH_RULES
+		}
+	}
+
+	return prompt
+}
+
+// --- Helper: extract file summary for project context ---
+
+// exportPattern matches common TypeScript/JavaScript export patterns.
+var exportPattern = regexp.MustCompile(`(?m)^export\s+(?:default\s+)?(?:function|const|class|type|interface|enum)\s+(\w+)`)
+
+// extractFileSummary produces a brief structural summary of a file's exports.
+// Returns something like "exports: Button, buttonVariants" or "default: HeroSection".
+func extractFileSummary(content string) string {
+	var names []string
+	hasDefault := false
+
+	matches := exportPattern.FindAllStringSubmatch(content, 20)
+	for _, m := range matches {
+		if len(m) > 1 {
+			names = append(names, m[1])
+		}
+	}
+	if strings.Contains(content, "export default") {
+		hasDefault = true
+	}
+	if strings.HasPrefix(strings.TrimSpace(content), `"use client"`) || strings.HasPrefix(strings.TrimSpace(content), `'use client'`) {
+		if len(names) > 0 {
+			return fmt.Sprintf("\"use client\"; exports: %s", strings.Join(names, ", "))
+		}
+		if hasDefault {
+			return "\"use client\"; default export"
+		}
+		return "\"use client\""
+	}
+	if len(names) > 0 {
+		return fmt.Sprintf("exports: %s", strings.Join(names, ", "))
+	}
+	if hasDefault {
+		return "default export"
+	}
+	return ""
+}
+
 // --- Helper: build project context (system block 2) ---
 
 func (c *Controller) buildProjectContext(project *models.AppProject, fileMap map[string]string, isInitialGeneration bool) string {
@@ -740,7 +812,7 @@ func (c *Controller) buildProjectContext(project *models.AppProject, fileMap map
 		sb.WriteString(fmt.Sprintf("Theme: %v\n", theme))
 	}
 
-	// File tree
+	// File tree with structural summaries
 	if len(fileMap) > 0 {
 		sb.WriteString("\nCurrent project files:\n")
 		paths := make([]string, 0, len(fileMap))
@@ -754,8 +826,17 @@ func (c *Controller) buildProjectContext(project *models.AppProject, fileMap map
 			if strings.Contains(content, fallbackSentinel) || strings.Contains(content, "Generation failed") {
 				sb.WriteString(fmt.Sprintf("- %s (%d chars) [BROKEN]\n", fp, len(content)))
 				brokenCount++
+			} else if len(content) <= 500 {
+				// Inline small files so the LLM doesn't need read_file
+				sb.WriteString(fmt.Sprintf("- %s (%d chars) [inline]:\n```\n%s\n```\n", fp, len(content), content))
 			} else {
-				sb.WriteString(fmt.Sprintf("- %s (%d chars)\n", fp, len(content)))
+				// Extract exports summary for larger files
+				summary := extractFileSummary(content)
+				if summary != "" {
+					sb.WriteString(fmt.Sprintf("- %s (%d chars) — %s\n", fp, len(content), summary))
+				} else {
+					sb.WriteString(fmt.Sprintf("- %s (%d chars)\n", fp, len(content)))
+				}
 			}
 		}
 		if brokenCount > 0 {
@@ -765,6 +846,23 @@ func (c *Controller) buildProjectContext(project *models.AppProject, fileMap map
 	} else if isInitialGeneration {
 		sb.WriteString("\nNo files yet — you are building this app from scratch.\n")
 		sb.WriteString("User prompt: " + project.Prompt + "\n")
+
+		// Inject file plan from structure phase if available
+		if raw, ok := project.Settings["file_plan"]; ok {
+			b, _ := json.Marshal(raw)
+			var filePlan []struct {
+				Path        string `json:"path"`
+				Type        string `json:"type"`
+				Description string `json:"description"`
+			}
+			if json.Unmarshal(b, &filePlan) == nil && len(filePlan) > 0 {
+				sb.WriteString("\nPlanned file structure (create these files):\n")
+				for _, f := range filePlan {
+					sb.WriteString(fmt.Sprintf("- %s (%s): %s\n", f.Path, f.Type, f.Description))
+				}
+				sb.WriteString("\nFollow this plan. You may add extra files if needed, but create all planned files.\n")
+			}
+		}
 	}
 
 	// Database schema context
@@ -1049,7 +1147,7 @@ func (c *Controller) validateWithPreviewLogs(
 
 		// 6. Build fix messages
 		fixMessages := []utils.Message{
-			{Role: "system", Content: constants.NEXTJS_BUILDER_SYSTEM_PROMPT},
+			{Role: "system", Content: buildSystemPrompt(project)},
 			{Role: "system", Content: c.buildProjectContext(project, fileMap, false)},
 			{Role: "user", Content: fmt.Sprintf(
 				"The preview build has these errors. Fix them:\n\n%s\n\nUse read_file to check the current content of broken files, then fix with edit_file or write_file.",

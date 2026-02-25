@@ -70,6 +70,7 @@ func (v *HttpViews) GenerateApp(w http.ResponseWriter, r *http.Request) {
 	themeJSON, _ := json.Marshal(themeData)
 	project.Theme = themeJSON
 	project.Status = "ready"
+	v.Controller.ApplyStructureToProject(project, structure)
 	v.Controller.DB.UpdateAppProject(project)
 
 	// If ecommerce, create store
@@ -164,6 +165,7 @@ func (v *HttpViews) GenerateEcommerceApp(w http.ResponseWriter, r *http.Request)
 	themeJSON, _ := json.Marshal(themeData)
 	project.Theme = themeJSON
 	project.Status = "ready"
+	v.Controller.ApplyStructureToProject(project, structure)
 	v.Controller.DB.UpdateAppProject(project)
 	v.Controller.CreateStore(project, user, project.Name+" Store")
 
@@ -252,6 +254,7 @@ func (v *HttpViews) GenerateAppFromImage(w http.ResponseWriter, r *http.Request)
 	themeJSON, _ := json.Marshal(themeData)
 	project.Theme = themeJSON
 	project.Status = "ready"
+	v.Controller.ApplyStructureToProject(project, structure)
 	v.Controller.DB.UpdateAppProject(project)
 
 	var theme map[string]any
