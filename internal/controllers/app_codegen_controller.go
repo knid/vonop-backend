@@ -3939,12 +3939,19 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 		return
 	}
 
-	// Phase 2: Tiers 2+3+4 — components + pages in parallel.
-	// UI components, regular components, and pages run concurrently.
-	// Each tier's mega-stream has read_file/list_files to see earlier files,
-	// and the missing-imports + repair passes fix any gaps.
+	// Phase 2: Tiers 2+3+4 — components + pages.
+	// Run in parallel for providers with generous rate limits, sequentially for
+	// providers with tight per-minute token limits (e.g. Anthropic native API).
 	phase2Start := time.Now()
-	{
+	if provider.IsAnthropic() {
+		// Sequential: avoids blowing past 8k output / 30k input tokens per minute
+		for i := 1; i <= 3; i++ {
+			if ctx.Err() != nil {
+				break
+			}
+			generateTierWithFallback(i, tiers[i])
+		}
+	} else {
 		var tierWg sync.WaitGroup
 		for i := 1; i <= 3; i++ {
 			if len(tiers[i]) == 0 {
@@ -3958,7 +3965,7 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 		}
 		tierWg.Wait()
 	}
-	slog.Info("Phase 2 complete: components + pages (parallel)", "project_id", project.ID, "duration_s", fmt.Sprintf("%.1f", time.Since(phase2Start).Seconds()))
+	slog.Info("Phase 2 complete: components + pages", "project_id", project.ID, "duration_s", fmt.Sprintf("%.1f", time.Since(phase2Start).Seconds()))
 
 	if ctx.Err() != nil {
 		return
