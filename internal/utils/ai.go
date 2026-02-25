@@ -1251,11 +1251,12 @@ func StreamJSONFromLLMWithVision(ctx context.Context, model, system, userText, b
 
 // ToolCallConfig holds optional configuration for StreamWithTools.
 type ToolCallConfig struct {
-	MaxRounds  int                            // Maximum tool-calling rounds (default 10)
-	NudgeAfter int                            // Inject nudge after this many consecutive tool rounds (default 3)
-	StripAfter int                            // Strip tools entirely after this many consecutive rounds (default 5)
-	MaxTokens  int                            // Max completion tokens per round (default 16384)
-	TrimArgs   func(toolName, args string) string // Trim tool call arguments in history to reduce token usage
+	MaxRounds   int                                  // Maximum tool-calling rounds (default 10)
+	NudgeAfter  int                                  // Inject nudge after this many consecutive tool rounds (default 3)
+	StripAfter  int                                  // Strip tools entirely after this many consecutive rounds (default 5)
+	MaxTokens   int                                  // Max completion tokens per round (default 16384)
+	TrimArgs    func(toolName, args string) string   // Trim tool call arguments in history to reduce token usage
+	TrimResults func(toolName, result string) string // Trim tool result messages in history to reduce token usage
 }
 
 // StreamWithTools sends messages to LLM with tools, handles the tool call loop,
@@ -1612,7 +1613,7 @@ func StreamWithTools(
 				})
 			}
 
-			// Trim tool call arguments AND assistant content to reduce history tokens
+			// Trim assistant content, tool call arguments, and tool results to reduce history tokens
 			if len(opts) > 0 && opts[0].TrimArgs != nil {
 				assistantMsgIdx := len(currentMessages) - 1 - len(toolCalls)
 				if assistantMsgIdx >= 0 {
@@ -1625,6 +1626,15 @@ func StreamWithTools(
 						if tc.Function != nil {
 							tc.Function.Arguments = opts[0].TrimArgs(tc.Function.Name, tc.Function.Arguments)
 						}
+					}
+				}
+			}
+
+			// Trim tool result messages (e.g. collapse read_file content to a summary)
+			if len(opts) > 0 && opts[0].TrimResults != nil {
+				for i := len(currentMessages) - len(toolCalls); i < len(currentMessages); i++ {
+					if i >= 0 && currentMessages[i].Role == "tool" {
+						currentMessages[i].Content = opts[0].TrimResults(currentMessages[i].Name, currentMessages[i].Content)
 					}
 				}
 			}
