@@ -146,9 +146,13 @@ func convertToAnthropicRequest(req ChatRequest, provider *LLMProvider) Anthropic
 		})
 	}
 
-	// Apply automatic prompt caching to the last system block
-	if len(systemBlocks) > 0 {
-		systemBlocks[len(systemBlocks)-1].CacheControl = &AnthropicCacheControl{Type: "ephemeral"}
+	// Apply automatic prompt caching to all substantial system blocks.
+	// Anthropic supports up to 4 cache breakpoints; marking each block lets
+	// the stable prefix be reused across per-file codegen requests.
+	for i := range systemBlocks {
+		if len(systemBlocks[i].Text) > 500 {
+			systemBlocks[i].CacheControl = &AnthropicCacheControl{Type: "ephemeral"}
+		}
 	}
 
 	// Convert messages
