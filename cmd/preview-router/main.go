@@ -35,7 +35,7 @@ func newRouter(appName, apiToken, previewDomain string) *router {
 		apiToken:      apiToken,
 		previewDomain: previewDomain,
 		cache:         make(map[string]*machineEntry),
-		cacheTTL:      30 * time.Second,
+		cacheTTL:      5 * time.Second,
 		httpClient:    &http.Client{Timeout: 10 * time.Second},
 	}
 }
@@ -185,7 +185,10 @@ func (rt *router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Only replay to machines that are actually running
 	if entry.State == "started" {
 		w.Header().Set("fly-replay", fmt.Sprintf("instance=%s", entry.MachineID))
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `<!DOCTYPE html><html><head><meta http-equiv="refresh" content="2"></head><body><p>Connecting...</p></body></html>`)
 		return
 	}
 
@@ -202,6 +205,7 @@ func (rt *router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate")
 	w.Header().Set("Retry-After", "5")
 	w.WriteHeader(http.StatusServiceUnavailable)
 	fmt.Fprint(w, loadingHTML)
