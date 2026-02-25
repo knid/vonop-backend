@@ -802,6 +802,36 @@ func (c *Controller) PlanAppFileStructureFromScreenshot(ctx context.Context, ima
 	return &structure, nil
 }
 
+// ApplyStructureToProject saves the structure plan output (file plan, data models,
+// needs_auth, required_env_vars) to the project so it can be injected into the
+// generation context. Call this from views after PlanAppFileStructure.
+func (c *Controller) ApplyStructureToProject(project *models.AppProject, structure *appFileStructure) {
+	if project.Settings == nil {
+		project.Settings = make(map[string]any)
+	}
+
+	// Save file plan
+	if len(structure.Files) > 0 {
+		project.Settings["file_plan"] = structure.Files
+	}
+
+	// Save data models
+	if len(structure.DataModels) > 0 {
+		dmJSON, _ := json.Marshal(structure.DataModels)
+		project.DataModels = dmJSON
+	}
+
+	// Save needs_auth
+	if structure.NeedsAuth {
+		project.Settings["needs_auth"] = true
+	}
+
+	// Save required env vars
+	if len(structure.RequiredEnvVars) > 0 {
+		project.Settings["required_env_vars"] = structure.RequiredEnvVars
+	}
+}
+
 // augmentPackageJSON scans generated files for third-party npm imports and adds them
 // to the base template package.json if not already present
 func augmentPackageJSON(baseTemplate string, files map[string]string) string {
