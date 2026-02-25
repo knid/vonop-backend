@@ -624,7 +624,7 @@ func (c *Controller) mcpTools() []utils.Tool {
 }
 
 // StreamChatAppFileOps processes a chat message and applies file operations with SSE streaming.
-func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.AppProject, user *models.User, message string, images []string, events chan<- responses.SSEEvent) {
+func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.AppProject, user *models.User, message string, images []string, reasoningEffort string, events chan<- responses.SSEEvent) {
 	defer close(events)
 
 	sendEvent := func(eventName string, data any) bool {
@@ -927,6 +927,14 @@ func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.A
 	var accToolCalls []models.AppChatToolCall
 	thinkingStart := time.Time{}
 
+	// Use per-request reasoning effort if provided, else fall back to global config
+	reasoning := c.reasoningConfig()
+	if reasoningEffort != "" && reasoningEffort != "none" {
+		reasoning = &utils.ReasoningConfig{Effort: reasoningEffort}
+	} else if reasoningEffort == "none" {
+		reasoning = nil
+	}
+
 	// Call LLM with tool calling — LLM reads/writes files on demand via tools
 	localExecutor := c.buildChatToolExecutor(project, user, currentFiles, toolCallbacks)
 	executor := c.compositeToolExecutor(localExecutor)
@@ -942,7 +950,7 @@ func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.A
 		chatTools,
 		provider,
 		nil, // no json_object format — response is explanation text, possibly with fenced JSON fallback
-		c.reasoningConfig(),
+		reasoning,
 		executor,
 		func(toolName, args string) {
 			accToolCalls = append(accToolCalls, models.AppChatToolCall{Tool: toolName, Arguments: args})
@@ -1035,7 +1043,7 @@ func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.A
 		})
 
 		retryResponse, retryErr := utils.StreamWithTools(
-			ctx, model, retryMessages, chatTools, provider, nil, c.reasoningConfig(), executor,
+			ctx, model, retryMessages, chatTools, provider, nil, reasoning, executor,
 			func(toolName, args string) {
 				accToolCalls = append(accToolCalls, models.AppChatToolCall{Tool: toolName, Arguments: args})
 				sendEvent("tool_call", responses.ToolCallEvent{Tool: toolName, Arguments: args})
