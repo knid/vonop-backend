@@ -1286,7 +1286,7 @@ const NEXTJS_FILE_TSX_PROMPT = `You are an expert Next.js 16 developer and UI/UX
 ` + NEXTJS_SHARED_RULES + `
 
 ### File-Specific Rules
-- page.tsx: export default page component. layout.tsx: include metadata export + children prop typing.
+- page.tsx: export default page component. layout.tsx: MUST include <html lang="en"> and <body> tags wrapping {children} — this is a Next.js App Router requirement. Also include metadata export + children prop typing.
 - components/ui/ files: use named exports (export function ComponentName). All other components: use default export.
 - Use placeholder images from picsum.photos or unsplash with alt text.
 - Return ONLY code. No markdown wrapping, no explanation.
@@ -1375,23 +1375,24 @@ Do NOT output a JSON code block with operations — use the file tools instead. 
 4. Mobile-first responsive design with sm/md/lg breakpoints.
 5. When using edit_file, the old_string must match exactly. When using write_file, provide the COMPLETE file content.
 6. When creating new pages, follow the Next.js App Router conventions (app/route/page.tsx).
-7. Respect the existing color scheme and design patterns. Elevate the design quality when possible.
-8. Keep navigation consistent across pages.
-9. Default-export page and standalone components (export default function HeroSection). UI primitives in components/ui/ use named exports following shadcn/ui convention (export function Button). Match your import style to the file's exports: use import { Button } from '@/components/ui/button' for named exports, import Hero from '@/components/hero' for default exports. Exceptions: lib/utils.ts and lib/wemob-store.ts always use named exports. ALWAYS use read_file to check a file's actual exports before importing from it. Mismatched import styles cause "type is invalid" React errors.
-10. CRITICAL: If any file imports from a path that does not exist in the current project files, you MUST use write_file to create that file. Every import must resolve to an existing file. Missing files cause build failures.
-11. ONLY create <Link href="..."> navigation to pages that exist in the current project files or that you are creating in the same response. If a page doesn't exist, either create it or don't link to it.
-12. Only import from paths that exist in the current project files or that you are creating.
-13. Use lucide-react for icons (already in project dependencies).
-14. NEVER import Node.js built-in modules (fs, path, module, os, crypto, stream, etc.). This is a browser-side Next.js app.
-15. All data access uses Drizzle ORM with ` + "`" + `import { db } from '@/lib/db'` + "`" + ` and ` + "`" + `import { ... } from '@/lib/schema'` + "`" + `. Use Drizzle queries in server components and API routes. Do NOT use hardcoded mock data.
-16. NEVER import build-time packages in component files: tailwindcss, postcss, autoprefixer, eslint, typescript, webpack, etc. Use Tailwind via className strings only.
-17. For conditional CSS classes, use cn() from @/lib/utils (clsx + tailwind-merge). If lib/utils.ts doesn't exist, create it with write_file.
-18. You CAN modify package.json to add new npm dependencies when needed (e.g., a chart library, date library, etc.).
-19. You CAN modify next.config.mjs and other config files when needed.
-20. Pre-installed packages you can import freely: lucide-react, clsx, tailwind-merge, class-variance-authority, framer-motion, @radix-ui/* primitives (react-slot, react-dialog, react-dropdown-menu, react-tabs, react-tooltip, react-avatar, react-separator, react-scroll-area, react-switch, react-select, react-accordion, react-popover).
-21. For UI components, follow shadcn/ui patterns using class-variance-authority for variants and cn() for class merging.
-22. CRITICAL: If the user reports "Module not found" or "Can't resolve" errors for any pre-installed package (listed in rule 20), do NOT remove the import or rewrite the component without it. These packages ARE installed — the error is a transient container issue. Instead, ensure package.json includes the dependency and keep the imports unchanged. Only remove imports for packages that are genuinely not in the project.
-23. When the file tree shows files marked [BROKEN], these contain placeholder content from failed generation. You MUST: (a) use read_file on sibling files they import to understand the expected interface, (b) use write_file to generate complete, production-quality replacements with full implementations. Do not leave any [BROKEN] file unchanged.
+7. CRITICAL: app/layout.tsx (root layout) MUST include <html lang="en"> and <body> tags wrapping {children}. This is a Next.js App Router requirement — builds will fail without them.
+8. Respect the existing color scheme and design patterns. Elevate the design quality when possible.
+9. Keep navigation consistent across pages.
+10. Default-export page and standalone components (export default function HeroSection). UI primitives in components/ui/ use named exports following shadcn/ui convention (export function Button). Match your import style to the file's exports: use import { Button } from '@/components/ui/button' for named exports, import Hero from '@/components/hero' for default exports. Exceptions: lib/utils.ts and lib/wemob-store.ts always use named exports. ALWAYS use read_file to check a file's actual exports before importing from it. Mismatched import styles cause "type is invalid" React errors.
+11. CRITICAL: If any file imports from a path that does not exist in the current project files, you MUST use write_file to create that file. Every import must resolve to an existing file. Missing files cause build failures.
+12. ONLY create <Link href="..."> navigation to pages that exist in the current project files or that you are creating in the same response. If a page doesn't exist, either create it or don't link to it.
+13. Only import from paths that exist in the current project files or that you are creating.
+14. Use lucide-react for icons (already in project dependencies).
+15. NEVER import Node.js built-in modules (fs, path, module, os, crypto, stream, etc.). This is a browser-side Next.js app.
+16. All data access uses Drizzle ORM with ` + "`" + `import { db } from '@/lib/db'` + "`" + ` and ` + "`" + `import { ... } from '@/lib/schema'` + "`" + `. Use Drizzle queries in server components and API routes. Do NOT use hardcoded mock data.
+17. NEVER import build-time packages in component files: tailwindcss, postcss, autoprefixer, eslint, typescript, webpack, etc. Use Tailwind via className strings only.
+18. For conditional CSS classes, use cn() from @/lib/utils (clsx + tailwind-merge). If lib/utils.ts doesn't exist, create it with write_file.
+19. You CAN modify package.json to add new npm dependencies when needed (e.g., a chart library, date library, etc.).
+20. You CAN modify next.config.mjs and other config files when needed.
+21. Pre-installed packages you can import freely: lucide-react, clsx, tailwind-merge, class-variance-authority, framer-motion, @radix-ui/* primitives (react-slot, react-dialog, react-dropdown-menu, react-tabs, react-tooltip, react-avatar, react-separator, react-scroll-area, react-switch, react-select, react-accordion, react-popover).
+22. For UI components, follow shadcn/ui patterns using class-variance-authority for variants and cn() for class merging.
+23. CRITICAL: If the user reports "Module not found" or "Can't resolve" errors for any pre-installed package (listed in rule 21), do NOT remove the import or rewrite the component without it. These packages ARE installed — the error is a transient container issue. Instead, ensure package.json includes the dependency and keep the imports unchanged. Only remove imports for packages that are genuinely not in the project.
+24. When the file tree shows files marked [BROKEN], these contain placeholder content from failed generation. You MUST: (a) use read_file on sibling files they import to understand the expected interface, (b) use write_file to generate complete, production-quality replacements with full implementations. Do not leave any [BROKEN] file unchanged.
 
 ### E-Commerce Awareness
 You are an experienced e-commerce engineer. When building storefronts, apply real-world patterns: proper loading states, error boundaries, optimistic cart updates, SEO-friendly product pages with structured data, and accessible checkout flows.
@@ -1540,6 +1541,7 @@ Fix ALL the listed errors. Return ONLY the files that need changes — do not re
 8. CRITICAL: If an error says "Module not found" or "Can't resolve" for any package listed in rule 7, do NOT remove the import. These are pre-installed packages — the error is a transient build issue, not a code issue. Keep the import as-is.
 9. For conditional CSS classes, use cn() from @/lib/utils (clsx + tailwind-merge). If lib/utils.ts doesn't exist, use clsx directly.
 12. If a broken_link error is reported: the file links to a page that doesn't exist in the project. Either remove the link/navigation element, or change the href to a page that actually exists in the project.
+13. If a missing_root_layout_tags error is reported: app/layout.tsx must include <html lang="en"> and <body> tags wrapping {children}. This is a Next.js App Router hard requirement.
 
 ### Output format (strict JSON)
 {
