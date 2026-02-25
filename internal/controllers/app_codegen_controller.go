@@ -125,6 +125,9 @@ func detectEnvVarsFromCode(files map[string]string) []string {
 	return keys
 }
 
+// envVarNameRegex validates that an env var name contains only uppercase letters, digits, and underscores.
+var envVarNameRegex = regexp.MustCompile(`^[A-Z_][A-Z0-9_]{0,100}$`)
+
 // computeMissingEnvVars merges LLM-declared env vars with code-scanned keys,
 // then returns only those not yet configured in the project.
 func (c *Controller) computeMissingEnvVars(project *models.AppProject, llmVars []RequiredEnvVar, codeKeys []string) []RequiredEnvVar {
@@ -132,9 +135,16 @@ func (c *Controller) computeMissingEnvVars(project *models.AppProject, llmVars [
 
 	required := map[string]RequiredEnvVar{}
 	for _, v := range llmVars {
+		if !envVarNameRegex.MatchString(v.Key) {
+			slog.Warn("skipping invalid env var name from LLM", "key", v.Key, "project_id", project.ID)
+			continue
+		}
 		required[v.Key] = v
 	}
 	for _, key := range codeKeys {
+		if !envVarNameRegex.MatchString(key) {
+			continue
+		}
 		if _, ok := required[key]; !ok {
 			required[key] = RequiredEnvVar{
 				Key:         key,

@@ -263,8 +263,9 @@ func (c *Controller) StreamBuildApp(
 
 	var messages []models.AppConversationMessage
 	if err := json.Unmarshal(conv.Messages, &messages); err != nil {
-		slog.Warn("failed to unmarshal conversation messages, starting fresh", "error", err, "conv_id", conv.ID)
-		messages = nil
+		slog.Error("conversation messages corrupted, starting fresh (previous messages lost)",
+			"error", err, "conv_id", conv.ID, "raw_length", len(conv.Messages))
+		messages = []models.AppConversationMessage{}
 	}
 
 	// Convert base64 images to data URIs
@@ -339,7 +340,7 @@ func (c *Controller) StreamBuildApp(
 			// significantly since last summary (every 10 new messages beyond threshold)
 			needsSummary := conv.Summary == "" || (len(oldMessages) > summarizeThreshold && len(oldMessages)%10 < 2)
 			if needsSummary && len(oldMessages) > 0 {
-				conv.Summary = c.summarizeConversation(ctx, oldMessages, provider)
+				conv.Summary = c.summarizeConversation(ctx, oldMessages, provider, conv.Summary)
 				if msgJSON, err := json.Marshal(messages); err != nil {
 					slog.Error("failed to marshal messages after summarization", "error", err, "conv_id", conv.ID)
 				} else {
@@ -652,20 +653,20 @@ func (c *Controller) StreamBuildApp(
 			}
 		}
 
-		// Auto-sync to preview container
+		// Sync to preview container (synchronous — validation depends on this)
+		var deletedPaths []string
 		if c.PreviewService != nil {
-			var deletedPaths []string
 			for _, op := range appliedOps {
 				if op.Action == "delete" {
 					deletedPaths = append(deletedPaths, op.Path)
 				}
 			}
-			go c.SyncPreviewAll(project, deletedPaths...)
+			c.SyncPreviewAll(project, deletedPaths...)
 		}
 
-		// Build validation: sync to preview, check logs, fix errors
+		// Build validation: check logs, fix errors
 		c.validateWithPreviewLogs(ctx, project, fileMap, provider,
-			localExecutor, sendEvent, &appliedOps, &filesChanged)
+			localExecutor, sendEvent, &appliedOps, &filesChanged, deletedPaths)
 	}
 
 	// --- Detect missing env vars ---
@@ -1218,6 +1219,7 @@ func (c *Controller) validateWithPreviewLogs(
 	sendEvent func(string, any) bool,
 	appliedOps *[]appBuilderOperation,
 	filesChanged *int,
+	deletedPaths []string,
 ) {
 	if c.PreviewService == nil {
 		return
@@ -1231,8 +1233,8 @@ func (c *Controller) validateWithPreviewLogs(
 			return
 		}
 
-		// 1. Sync all files to preview
-		c.SyncPreviewAll(project)
+		// 1. Sync all files to preview (include deletes so removed files are cleaned up)
+		c.SyncPreviewAll(project, deletedPaths...)
 
 		// 2. Wait for Next.js to recompile (context-aware)
 		select {
@@ -1552,6 +1554,11 @@ var appBuilderTools = []utils.Tool{
 // buildBuilderToolExecutor returns a ToolExecutor for the unified builder.
 func (c *Controller) buildBuilderToolExecutor(ctx context.Context, project *models.AppProject, user *models.User, fileMap map[string]string, cbs *builderToolCallbacks) utils.ToolExecutor {
 	return func(name string, arguments string) (string, error) {
+		// Early exit if context is cancelled — prevents partial writes after timeout
+		if ctx.Err() != nil {
+			return "", ctx.Err()
+		}
+
 		switch name {
 		case "read_file":
 			var args struct {
@@ -2185,7 +2192,9 @@ func (c *Controller) mcpTools() []utils.Tool {
 }
 
 // summarizeConversation generates a concise summary of older conversation messages.
-func (c *Controller) summarizeConversation(ctx context.Context, messages []models.AppConversationMessage, provider *utils.LLMProvider) string {
+// If the LLM call fails and existingSummary is non-empty, it is preserved instead of
+// generating a lossy fallback.
+func (c *Controller) summarizeConversation(ctx context.Context, messages []models.AppConversationMessage, provider *utils.LLMProvider, existingSummary string) string {
 	var conversationText strings.Builder
 	for _, msg := range messages {
 		role := msg.Role
@@ -2214,6 +2223,10 @@ Be concise (3-6 sentences). Include specific file paths and component names.`
 	summary, err := utils.GetTextFromLLM(ctx, c.fixModel(provider), system, conversationText.String(), provider)
 	if err != nil {
 		slog.Warn("failed to summarize conversation", "error", err)
+		// Preserve existing summary if available instead of generating a lossy fallback
+		if existingSummary != "" {
+			return existingSummary
+		}
 		var ops []string
 		for _, msg := range messages {
 			for _, op := range msg.FileOperations {
