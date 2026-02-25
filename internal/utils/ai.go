@@ -1447,9 +1447,13 @@ func StreamWithTools(
 			// Handle 429 rate limit with retry + backoff
 			if rlErr := parseRateLimitError(resp, respBody); rlErr != nil && rateLimitRetries < 5 {
 				rateLimitRetries++
-				slog.Warn("LLM rate limited, retrying", "retry_after", rlErr.RetryAfter, "attempt", rateLimitRetries, "round", round)
+				wait := rlErr.RetryAfter * time.Duration(rateLimitRetries)
+				if wait > 120*time.Second {
+					wait = 120 * time.Second
+				}
+				slog.Warn("LLM rate limited, retrying", "retry_after", wait, "attempt", rateLimitRetries, "round", round)
 				select {
-				case <-time.After(rlErr.RetryAfter):
+				case <-time.After(wait):
 				case <-ctx.Done():
 					return "", ctx.Err()
 				}
@@ -1492,9 +1496,13 @@ func StreamWithTools(
 				// Retry on overloaded/rate-limit errors from SSE stream
 				if rlErr, ok := IsRateLimited(parseErr); ok && rateLimitRetries < 5 {
 					rateLimitRetries++
-					slog.Warn("LLM rate limited (SSE), retrying", "retry_after", rlErr.RetryAfter, "attempt", rateLimitRetries, "round", round)
+					wait := rlErr.RetryAfter * time.Duration(rateLimitRetries)
+					if wait > 120*time.Second {
+						wait = 120 * time.Second
+					}
+					slog.Warn("LLM rate limited (SSE), retrying", "retry_after", wait, "attempt", rateLimitRetries, "round", round)
 					select {
-					case <-time.After(rlErr.RetryAfter):
+					case <-time.After(wait):
 					case <-ctx.Done():
 						return "", ctx.Err()
 					}
@@ -1697,6 +1705,7 @@ func StreamWithTools(
 			currentMessages = append(currentMessages, assistantMsg)
 
 			// Execute each tool (with dedup) and append results
+			dedupCount := 0
 			for _, tc := range toolCalls {
 				if ctx.Err() != nil {
 					return "", ctx.Err()
@@ -1725,6 +1734,7 @@ func StreamWithTools(
 					if cached, ok := toolCallHistory[cacheKey]; ok {
 						// Return cached result instead of re-executing
 						result = cached
+						dedupCount++
 						slog.Info("Tool call deduped (cached)", "tool", toolName, "round", round)
 					} else {
 						slog.Info("Executing tool call", "tool", toolName, "round", round)
@@ -1749,6 +1759,16 @@ func StreamWithTools(
 					ToolCallID: tc.ID,
 					Name:       toolName,
 				})
+			}
+
+			// If all tool calls were deduped, the LLM is stuck in a loop — accelerate nudge/strip
+			if dedupCount > 0 && dedupCount == len(toolCalls) {
+				consecutiveToolRounds += 2
+				currentMessages = append(currentMessages, Message{
+					Role:    "system",
+					Content: "All your tool calls in this round returned cached results — you already have this information. Stop making redundant tool calls and produce your final response.",
+				})
+				slog.Warn("All tool calls deduped, accelerating nudge", "round", round, "dedup_count", dedupCount, "consecutive_tool_rounds", consecutiveToolRounds)
 			}
 
 			// Trim assistant content, tool call arguments, and tool results to reduce history tokens

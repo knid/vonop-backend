@@ -272,7 +272,13 @@ func convertMessagesToAnthropic(messages []Message) []AnthropicMessage {
 				}
 				if tc.Function != nil {
 					block.Name = tc.Function.Name
-					block.Input = json.RawMessage(tc.Function.Arguments)
+					args := tc.Function.Arguments
+					if args == "" || args == "null" {
+						args = "{}"
+					}
+					block.Input = json.RawMessage(args)
+				} else {
+					block.Input = json.RawMessage("{}")
 				}
 				blocks = append(blocks, block)
 			}

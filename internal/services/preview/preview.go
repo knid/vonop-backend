@@ -505,6 +505,14 @@ func (s *Service) StopIdleMachines(idleThreshold time.Duration) {
 	for _, m := range machines {
 		slog.Info("stopping idle preview machine", "project_id", m.AppProjectID, "machine_id", m.MachineID, "last_access", m.LastAccessAt)
 		if err := s.Fly.StopMachine(m.MachineID); err != nil {
+			// Machine already destroyed on Fly — remove stale DB record
+			if strings.Contains(err.Error(), "status 404") {
+				slog.Info("machine already destroyed on Fly, removing stale record", "machine_id", m.MachineID, "project_id", m.AppProjectID)
+				if delErr := s.DB.DeletePreviewMachineByProjectID(m.AppProjectID.String()); delErr != nil {
+					slog.Error("failed to delete stale machine record", "project_id", m.AppProjectID, "error", delErr)
+				}
+				continue
+			}
 			slog.Warn("failed to stop idle machine", "machine_id", m.MachineID, "error", err)
 			continue
 		}
