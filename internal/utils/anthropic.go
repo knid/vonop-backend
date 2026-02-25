@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"sort"
 	"strings"
+	"time"
 )
 
 // --- Anthropic Request Types ---
@@ -594,6 +595,23 @@ func parseAnthropicSSEStream(
 
 		case "error":
 			slog.Error("Anthropic SSE error event", "data", data)
+			// Parse error type to return retryable errors
+			var errEvt struct {
+				Error struct {
+					Type    string `json:"type"`
+					Message string `json:"message"`
+				} `json:"error"`
+			}
+			if json.Unmarshal([]byte(data), &errEvt) == nil {
+				if errEvt.Error.Type == "overloaded_error" || errEvt.Error.Type == "rate_limit_error" {
+					return nil, &ErrRateLimited{
+						RetryAfter: 30 * time.Second,
+						StatusCode: 529,
+						Body:       data,
+					}
+				}
+			}
+			return nil, fmt.Errorf("anthropic stream error: %s", data)
 		}
 
 		currentEvent = "" // reset after processing
