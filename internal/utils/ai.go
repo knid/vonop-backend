@@ -1254,6 +1254,7 @@ type ToolCallConfig struct {
 	MaxRounds  int // Maximum tool-calling rounds (default 10)
 	NudgeAfter int // Inject nudge after this many consecutive tool rounds (default 3)
 	StripAfter int // Strip tools entirely after this many consecutive rounds (default 5)
+	MaxTokens  int // Max completion tokens per round (default 16384)
 }
 
 // StreamWithTools sends messages to LLM with tools, handles the tool call loop,
@@ -1282,6 +1283,7 @@ func StreamWithTools(
 	maxRounds := 10
 	nudgeAfter := 3
 	stripAfter := 5
+	maxTokens := 16384
 	if len(opts) > 0 {
 		if opts[0].MaxRounds > 0 {
 			maxRounds = opts[0].MaxRounds
@@ -1291,6 +1293,9 @@ func StreamWithTools(
 		}
 		if opts[0].StripAfter > 0 {
 			stripAfter = opts[0].StripAfter
+		}
+		if opts[0].MaxTokens > 0 {
+			maxTokens = opts[0].MaxTokens
 		}
 	}
 	currentMessages := make([]Message, len(messages))
@@ -1327,7 +1332,7 @@ func StreamWithTools(
 			Model:          model,
 			Stream:         true,
 			StreamOptions:  &StreamOptionsConfig{IncludeUsage: true},
-			MaxTokens:      16384,
+			MaxTokens:      maxTokens,
 			Reasoning:      reasoning,
 			Messages:       currentMessages,
 			Tools:          roundTools,
