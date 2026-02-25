@@ -533,16 +533,47 @@ func (c *Controller) StreamBuildApp(
 			},
 		}
 	} else {
+		writtenFiles := make(map[string]bool)
 		toolConfig = utils.ToolCallConfig{
-			MaxRounds:   25,
-			NudgeAfter:  15,
-			StripAfter:  20,
-			MaxTokens:   16384,
-			TrimArgs:    trimArgs,
-			TrimResults: trimResults,
+			MaxRounds:    25,
+			NudgeAfter:   10,
+			StripAfter:   18,
+			MaxTokens:    16384,
+			NudgeMessage: "You have made many tool calls. Focus on completing the user's request. Do not re-write files that are already written — the 'content_written' summaries confirm they were saved successfully.",
+			TrimArgs:     trimArgs,
+			TrimResults:  trimResults,
+			InterceptToolCall: func(toolName, toolArgs string) (string, bool) {
+				if toolName != "write_file" {
+					return "", false
+				}
+				var args struct {
+					FilePath string `json:"file_path"`
+				}
+				if err := json.Unmarshal([]byte(toolArgs), &args); err != nil || args.FilePath == "" {
+					return "", false
+				}
+				if writtenFiles[args.FilePath] {
+					return fmt.Sprintf("ALREADY WRITTEN: %s was already written in this session. Do not re-write files unless the user specifically requests changes.", args.FilePath), true
+				}
+				writtenFiles[args.FilePath] = true
+				return "", false
+			},
 			AfterToolRound: func() string {
 				c.flushPendingPreview(project, toolCallbacks)
-				return ""
+				if len(toolAppliedOps) == 0 {
+					return ""
+				}
+				var written []string
+				for _, op := range toolAppliedOps {
+					if op.Action == "create" || op.Action == "modify" {
+						written = append(written, op.Path)
+					}
+				}
+				if len(written) == 0 {
+					return ""
+				}
+				return fmt.Sprintf("[SYSTEM: %d files written to disk. The 'content_written' summaries in tool args above confirm successful writes — do NOT re-write these files unless the user asks for changes to them.]\nWritten: %s",
+					len(written), strings.Join(written, ", "))
 			},
 		}
 	}
