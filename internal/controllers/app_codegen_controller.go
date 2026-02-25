@@ -2646,7 +2646,19 @@ func (c *Controller) generateTierMegaStream(
 		MaxRounds:  tierSize + 5,
 		NudgeAfter: tierSize + 3,
 		StripAfter: tierSize + 5,
-		MaxTokens:  32768,
+		MaxTokens:  65536,
+		TrimArgs: func(name, args string) string {
+			if name == "write_file" {
+				var a struct {
+					FilePath string `json:"file_path"`
+				}
+				if json.Unmarshal([]byte(args), &a) == nil {
+					trimmed, _ := json.Marshal(map[string]string{"file_path": a.FilePath})
+					return string(trimmed)
+				}
+			}
+			return args
+		},
 	}
 
 	slog.Info("Starting mega-stream for tier",
