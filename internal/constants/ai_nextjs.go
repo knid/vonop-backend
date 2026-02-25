@@ -1274,7 +1274,6 @@ When building a new app from a user's prompt:
 6. **Write app/layout.tsx LAST**: It must include <html lang="en"> and <body> tags wrapping {children}. Import Google Fonts using next/font/google. Export metadata.
 7. **Every file you create must be complete**: No placeholders, no "TODO", no stub implementations.
 8. **Use write_files to batch-create files**: Group related files into a single write_files call (e.g., all UI primitives in one call, all pages in another). Each file is saved and shown to the user in real-time. Do NOT re-write files that already succeeded.
-9. **Plan 15-30 files** for a typical app. Include pages, components, UI primitives, utility files, and API routes as needed.
 
 ### How to Edit an Existing App (Chat)
 When the user asks for changes to an existing app:

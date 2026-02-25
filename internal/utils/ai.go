@@ -1775,8 +1775,8 @@ func StreamWithTools(
 			if len(opts) > 0 && opts[0].TrimArgs != nil {
 				assistantMsgIdx := len(currentMessages) - 1 - len(toolCalls)
 				if assistantMsgIdx >= 0 {
-					// Clear reasoning and commentary — LLM doesn't need its own prior reasoning
-					currentMessages[assistantMsgIdx].Content = ""
+					// Clear extended reasoning to save tokens, but keep the assistant's
+					// short text content so the LLM retains context about what it just did.
 					currentMessages[assistantMsgIdx].ReasoningContent = ""
 					// Trim tool call arguments (e.g. strip file content from write_file)
 					for i := range currentMessages[assistantMsgIdx].ToolCalls {
