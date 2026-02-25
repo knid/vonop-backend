@@ -2701,6 +2701,37 @@ func (c *Controller) generateTierMegaStream(
 			return fmt.Sprintf("Progress: %d/%d files written. Remaining files to generate:\n- %s\nGenerate ONLY these remaining files. Do NOT rewrite any already-written file.",
 				written, tierSize, strings.Join(remaining, "\n- "))
 		},
+		FilterTools: func(tools []utils.Tool) []utils.Tool {
+			writeCountMu.Lock()
+			written := len(writeCount)
+			var remaining []string
+			for _, fp := range tier {
+				if writeCount[fp.Path] == 0 {
+					remaining = append(remaining, fp.Path)
+				}
+			}
+			writeCountMu.Unlock()
+
+			// All files written — strip tools to force final response
+			if written >= tierSize {
+				slog.Info("All tier files written, stripping tools", "project_id", project.ID, "written", written)
+				return nil
+			}
+
+			// Update write_file description with remaining paths
+			filtered := make([]utils.Tool, len(tools))
+			copy(filtered, tools)
+			for i := range filtered {
+				if filtered[i].Function.Name == "write_file" {
+					filtered[i].Function.Description = fmt.Sprintf(
+						"Write a complete file to the project. You MUST ONLY write these remaining files:\n- %s\nDo NOT write any other file.",
+						strings.Join(remaining, "\n- "),
+					)
+					break
+				}
+			}
+			return filtered
+		},
 		TrimArgs: func(name, args string) string {
 			if name == "write_file" {
 				var a struct {

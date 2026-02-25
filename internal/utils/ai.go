@@ -1320,6 +1320,7 @@ type ToolCallConfig struct {
 	InterceptToolCall func(toolName, toolArgs string) (result string, skip bool) // Intercept tool calls before execution; if skip=true, use result and skip executor
 	NudgeMessage     string                                                // Custom nudge message (replaces default "stop researching" text)
 	AfterToolRound   func() string                                         // Called after each tool round; non-empty return is injected as a system message
+	FilterTools      func(tools []Tool) []Tool                             // Called each round to filter/modify tools; return nil to strip all tools
 }
 
 // StreamWithTools sends messages to LLM with tools, handles the tool call loop,
@@ -1375,6 +1376,9 @@ func StreamWithTools(
 		// Phase 1 (nudgeAfter): inject a nudge message but keep tools available.
 		// Phase 2 (stripAfter): strip tools entirely to force text generation.
 		roundTools := tools
+		if len(opts) > 0 && opts[0].FilterTools != nil {
+			roundTools = opts[0].FilterTools(roundTools)
+		}
 		if consecutiveToolRounds >= stripAfter {
 			currentMessages = append(currentMessages, Message{
 				Role:    "system",
