@@ -38,9 +38,11 @@ type appBuilderOperation struct {
 // builderToolCallbacks holds callbacks for file-mutating tool operations so the
 // executor can emit SSE events and track changes as they happen.
 type builderToolCallbacks struct {
-	sendEvent  func(eventName string, data any) bool
-	appliedOps *[]appBuilderOperation
-	mu         sync.Mutex
+	sendEvent      func(eventName string, data any) bool
+	appliedOps     *[]appBuilderOperation
+	mu             sync.Mutex
+	pendingFiles   map[string]string // files changed since last preview sync
+	pendingDeletes []string          // files deleted since last preview sync
 }
 
 // StreamBuildApp is the unified entry point for both initial app generation and chat editing.
@@ -198,6 +200,14 @@ func (c *Controller) StreamBuildApp(
 			c.injectTemplateFile(project, tp, content, fileMap, sendEvent)
 		}
 
+		// Inject UI component templates (lib/utils, components/ui/*)
+		for _, tp := range constants.NEXTJS_UI_TEMPLATE_FILE_PATHS {
+			content := getUITemplateContent(tp)
+			if content != "" {
+				c.injectTemplateFile(project, tp, content, fileMap, sendEvent)
+			}
+		}
+
 		// Inject ecommerce templates if applicable
 		if project.ProjectType == "ecommerce" {
 			for _, tp := range constants.NEXTJS_ECOMMERCE_TEMPLATE_FILE_PATHS {
@@ -344,8 +354,9 @@ func (c *Controller) StreamBuildApp(
 	// --- Set up tools and executor ---
 	var toolAppliedOps []appBuilderOperation
 	toolCallbacks := &builderToolCallbacks{
-		sendEvent:  sendEvent,
-		appliedOps: &toolAppliedOps,
+		sendEvent:    sendEvent,
+		appliedOps:   &toolAppliedOps,
+		pendingFiles: make(map[string]string),
 	}
 
 	var thinkingBuf strings.Builder
@@ -456,6 +467,10 @@ func (c *Controller) StreamBuildApp(
 					sb.WriteString(fmt.Sprintf(", %d modified", len(modified)))
 				}
 				sb.WriteString("] Files already written successfully — do NOT re-write them. Continue with remaining files.")
+
+				// Flush pending files to preview incrementally
+				c.flushPendingPreview(project, toolCallbacks)
+
 				return sb.String()
 			},
 		}
@@ -467,6 +482,10 @@ func (c *Controller) StreamBuildApp(
 			MaxTokens:   16384,
 			TrimArgs:    trimArgs,
 			TrimResults: trimResults,
+			AfterToolRound: func() string {
+				c.flushPendingPreview(project, toolCallbacks)
+				return ""
+			},
 		}
 	}
 
@@ -561,6 +580,10 @@ func (c *Controller) StreamBuildApp(
 			}
 			go c.SyncPreviewAll(project, deletedPaths...)
 		}
+
+		// Build validation: sync to preview, check logs, fix errors
+		c.validateWithPreviewLogs(ctx, project, fileMap, model, provider,
+			localExecutor, sendEvent, &appliedOps, &filesChanged)
 	}
 
 	// --- Detect missing env vars ---
@@ -637,6 +660,29 @@ func (c *Controller) StreamBuildApp(
 			"snapshot_id":     preSnapshotID,
 			"missing_env_vars": missingVars,
 		})
+	}
+}
+
+// --- Helper: flush pending files to preview container ---
+
+func (c *Controller) flushPendingPreview(project *models.AppProject, cbs *builderToolCallbacks) {
+	if c.PreviewService == nil || cbs == nil {
+		return
+	}
+
+	cbs.mu.Lock()
+	pending := cbs.pendingFiles
+	deletes := cbs.pendingDeletes
+	cbs.pendingFiles = make(map[string]string)
+	cbs.pendingDeletes = nil
+	cbs.mu.Unlock()
+
+	if len(pending) > 0 || len(deletes) > 0 {
+		go func() {
+			if err := c.PreviewService.UpdateFiles(project.ID.String(), pending, deletes); err != nil {
+				slog.Warn("incremental preview sync failed", "error", err, "project_id", project.ID)
+			}
+		}()
 	}
 }
 
@@ -907,6 +953,128 @@ func (c *Controller) runDeterministicAutoFixes(
 				*filesChanged++
 			}
 		}
+	}
+}
+
+// --- Build validation loop ---
+
+// nextjsErrorPatterns matches common Next.js build/dev error patterns.
+var nextjsErrorPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)Module not found:.*`),
+	regexp.MustCompile(`(?i)Type error:.*`),
+	regexp.MustCompile(`(?i)SyntaxError:.*`),
+	regexp.MustCompile(`(?i)ReferenceError:.*`),
+	regexp.MustCompile(`(?i)Error:\s+.+`),
+	regexp.MustCompile(`\./[^\s]+:\d+:\d+`),
+}
+
+// parseNextJSErrors extracts unique error lines from Next.js dev server logs.
+func parseNextJSErrors(logs string) []string {
+	seen := make(map[string]bool)
+	var errors []string
+
+	for _, line := range strings.Split(logs, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		for _, pat := range nextjsErrorPatterns {
+			if match := pat.FindString(line); match != "" {
+				if !seen[match] {
+					seen[match] = true
+					errors = append(errors, match)
+				}
+				break
+			}
+		}
+		if len(errors) >= 10 {
+			break
+		}
+	}
+	return errors
+}
+
+// validateWithPreviewLogs syncs files to the preview container, waits for Next.js
+// to recompile, checks dev server logs for errors, and if found, calls the LLM
+// for a focused fix pass. Repeats up to 3 times.
+func (c *Controller) validateWithPreviewLogs(
+	ctx context.Context,
+	project *models.AppProject,
+	fileMap map[string]string,
+	model string,
+	provider *utils.LLMProvider,
+	executor utils.ToolExecutor,
+	sendEvent func(string, any) bool,
+	appliedOps *[]appBuilderOperation,
+	filesChanged *int,
+) {
+	if c.PreviewService == nil {
+		return
+	}
+
+	const maxValidationRounds = 3
+	const waitAfterSync = 8 * time.Second
+
+	for round := 0; round < maxValidationRounds; round++ {
+		// 1. Sync all files to preview
+		c.SyncPreviewAll(project)
+
+		// 2. Wait for Next.js to recompile
+		time.Sleep(waitAfterSync)
+
+		// 3. Fetch logs
+		logs, err := c.PreviewService.GetLogs(project.ID.String())
+		if err != nil || logs == "" {
+			return // no preview or no logs — skip validation
+		}
+
+		// 4. Parse errors from logs
+		errors := parseNextJSErrors(logs)
+		if len(errors) == 0 {
+			return // no errors — done
+		}
+
+		slog.Info("Build validation found errors",
+			"project_id", project.ID,
+			"round", round+1,
+			"error_count", len(errors),
+		)
+
+		// 5. Fire validation SSE event
+		sendEvent("validation", responses.ValidationEvent{
+			Iteration: round + 1,
+			Errors:    errors,
+			Fixing:    true,
+		})
+
+		// 6. Build fix messages
+		fixMessages := []utils.Message{
+			{Role: "system", Content: constants.NEXTJS_BUILDER_SYSTEM_PROMPT},
+			{Role: "system", Content: c.buildProjectContext(project, fileMap, false)},
+			{Role: "user", Content: fmt.Sprintf(
+				"The preview build has these errors. Fix them:\n\n%s\n\nUse read_file to check the current content of broken files, then fix with edit_file or write_file.",
+				strings.Join(errors, "\n"),
+			)},
+		}
+
+		// 7. Call LLM with limited rounds
+		fixConfig := utils.ToolCallConfig{
+			MaxRounds:  5,
+			NudgeAfter: 4,
+			StripAfter: 5,
+			MaxTokens:  16384,
+		}
+
+		utils.StreamWithTools(ctx, model, fixMessages, appBuilderTools, provider,
+			nil, nil, executor,
+			func(toolName, args string) { /* silent tool calls */ },
+			func(chunk string) { sendEvent("chat_text", responses.ChatTextEvent{Chunk: chunk}) },
+			func(chunk string) { /* ignore thinking */ },
+			fixConfig,
+		)
+
+		// Run deterministic auto-fixes again after LLM fixes
+		c.runDeterministicAutoFixes(project, fileMap, sendEvent, appliedOps, filesChanged)
 	}
 }
 
@@ -1256,6 +1424,7 @@ func (c *Controller) buildBuilderToolExecutor(ctx context.Context, project *mode
 				*cbs.appliedOps = append(*cbs.appliedOps, appBuilderOperation{
 					Action: action, Path: args.FilePath, Type: fileType,
 				})
+				cbs.pendingFiles[args.FilePath] = content
 				cbs.mu.Unlock()
 			}
 			return fmt.Sprintf("Successfully wrote %s (%d chars, action: %s). File is saved — do not re-write.", args.FilePath, len(content), action), nil
@@ -1330,6 +1499,7 @@ func (c *Controller) buildBuilderToolExecutor(ctx context.Context, project *mode
 					*cbs.appliedOps = append(*cbs.appliedOps, appBuilderOperation{
 						Action: action, Path: f.FilePath, Type: fileType,
 					})
+					cbs.pendingFiles[f.FilePath] = content
 					cbs.mu.Unlock()
 				}
 				results = append(results, fmt.Sprintf("OK %s (%d chars, %s)", f.FilePath, len(content), action))
@@ -1390,6 +1560,7 @@ func (c *Controller) buildBuilderToolExecutor(ctx context.Context, project *mode
 				*cbs.appliedOps = append(*cbs.appliedOps, appBuilderOperation{
 					Action: "modify", Path: args.FilePath, Type: existingFile.FileType,
 				})
+				cbs.pendingFiles[args.FilePath] = newContent
 				cbs.mu.Unlock()
 			}
 			return fmt.Sprintf("Successfully edited %s", args.FilePath), nil
@@ -1416,6 +1587,8 @@ func (c *Controller) buildBuilderToolExecutor(ctx context.Context, project *mode
 				*cbs.appliedOps = append(*cbs.appliedOps, appBuilderOperation{
 					Action: "delete", Path: args.FilePath,
 				})
+				delete(cbs.pendingFiles, args.FilePath)
+				cbs.pendingDeletes = append(cbs.pendingDeletes, args.FilePath)
 				cbs.mu.Unlock()
 			}
 			return fmt.Sprintf("Successfully deleted %s", args.FilePath), nil

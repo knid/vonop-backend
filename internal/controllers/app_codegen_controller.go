@@ -347,12 +347,31 @@ func getEcommerceTemplateContent(path string) string {
 	return ""
 }
 
+// getUITemplateContent returns the hardcoded content for a pre-built UI component template file.
+func getUITemplateContent(path string) string {
+	switch path {
+	case "lib/utils.ts":
+		return constants.NEXTJS_TEMPLATE_UTILS_TS
+	case "components/ui/button.tsx":
+		return constants.NEXTJS_TEMPLATE_BUTTON_TSX
+	case "components/ui/card.tsx":
+		return constants.NEXTJS_TEMPLATE_CARD_TSX
+	case "components/ui/input.tsx":
+		return constants.NEXTJS_TEMPLATE_INPUT_TSX
+	case "components/ui/badge.tsx":
+		return constants.NEXTJS_TEMPLATE_BADGE_TSX
+	case "components/ui/skeleton.tsx":
+		return constants.NEXTJS_TEMPLATE_SKELETON_TSX
+	}
+	return ""
+}
+
 // getAuthTemplateContent returns the hardcoded content for an auth template file
 func getAuthTemplateContent(path string) string {
 	switch path {
 	case "lib/wemob-auth.ts":
 		return constants.NEXTJS_TEMPLATE_WEMOB_AUTH
-	case "lib/wemob-auth-client.tsxx":
+	case "lib/wemob-auth-client.tsx":
 		return constants.NEXTJS_TEMPLATE_WEMOB_AUTH_CLIENT
 	}
 	return ""
