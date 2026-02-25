@@ -2648,6 +2648,10 @@ func (c *Controller) generateTierMegaStream(
 	// Build tool executor
 	executor := c.buildCodegenToolExecutor(project, generatedFiles, mu, sendEvent)
 
+	// Write-loop prevention: track write_file calls per path and block repeats
+	writeCount := make(map[string]int)
+	var writeCountMu sync.Mutex
+
 	// Configure: generous rounds for tool calls, high max tokens
 	tierSize := len(tier)
 	cfg := utils.ToolCallConfig{
@@ -2655,6 +2659,48 @@ func (c *Controller) generateTierMegaStream(
 		NudgeAfter: tierSize + 3,
 		StripAfter: tierSize + 5,
 		MaxTokens:  65536,
+		InterceptToolCall: func(toolName, toolArgs string) (string, bool) {
+			if toolName != "write_file" {
+				return "", false
+			}
+			var a struct {
+				FilePath string `json:"file_path"`
+			}
+			if json.Unmarshal([]byte(toolArgs), &a) != nil || a.FilePath == "" {
+				return "", false
+			}
+			writeCountMu.Lock()
+			writeCount[a.FilePath]++
+			count := writeCount[a.FilePath]
+			writeCountMu.Unlock()
+			if count > 1 {
+				slog.Warn("Blocked duplicate write_file", "path", a.FilePath, "attempt", count, "project_id", project.ID)
+				return fmt.Sprintf("ALREADY WRITTEN: %s was already generated. Do NOT rewrite it. Move on to the next unwritten file.", a.FilePath), true
+			}
+			return "", false
+		},
+		NudgeMessage: "WARNING: You are rewriting files you already generated. Each file should be written EXACTLY ONCE. Check which files you have NOT yet written and generate ONLY those.",
+		AfterToolRound: func() string {
+			writeCountMu.Lock()
+			written := len(writeCount)
+			writeCountMu.Unlock()
+			if written == 0 {
+				return ""
+			}
+			var remaining []string
+			writeCountMu.Lock()
+			for _, fp := range tier {
+				if writeCount[fp.Path] == 0 {
+					remaining = append(remaining, fp.Path)
+				}
+			}
+			writeCountMu.Unlock()
+			if len(remaining) == 0 {
+				return fmt.Sprintf("All %d files written. Generate your final response now.", tierSize)
+			}
+			return fmt.Sprintf("Progress: %d/%d files written. Remaining files to generate:\n- %s\nGenerate ONLY these remaining files. Do NOT rewrite any already-written file.",
+				written, tierSize, strings.Join(remaining, "\n- "))
+		},
 		TrimArgs: func(name, args string) string {
 			if name == "write_file" {
 				var a struct {
@@ -3750,6 +3796,7 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 
 					var content string
 					var lastFailReason string
+					var retryDelay time.Duration // set by rate limit errors
 					for attempt := 0; attempt < 3; attempt++ {
 						if ctx.Err() != nil {
 							lastFailReason = "context cancelled"
@@ -3757,8 +3804,13 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 							break
 						}
 						if attempt > 0 {
+							delay := time.Duration(attempt) * 2 * time.Second
+							if retryDelay > 0 {
+								delay = retryDelay
+								retryDelay = 0
+							}
 							select {
-							case <-time.After(time.Duration(attempt) * 2 * time.Second):
+							case <-time.After(delay):
 							case <-ctx.Done():
 							}
 							if ctx.Err() != nil {
@@ -3771,6 +3823,10 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 						var err error
 						content, err = c.generateSingleAppFile(ctx, project, fp, structure, model, provider, generatedFiles, &mu, allFilePaths, colorSchemeJSON, storeContext, authContext, sendEvent)
 						if err != nil {
+							if rlErr, ok := utils.IsRateLimited(err); ok {
+								retryDelay = rlErr.RetryAfter
+								slog.Warn("Rate limited during per-file generation", "path", fp.Path, "retry_after", retryDelay, "attempt", attempt+1)
+							}
 							slog.Error("failed to generate app file (fallback)", "error", err, "path", fp.Path, "attempt", attempt+1)
 							lastFailReason = fmt.Sprintf("error: %s", err.Error())
 							content = c.getAppFileFallback(fp)
