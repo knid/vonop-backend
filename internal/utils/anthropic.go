@@ -57,9 +57,10 @@ type AnthropicMessage struct {
 
 // AnthropicTool is a tool definition in Anthropic format.
 type AnthropicTool struct {
-	Name        string         `json:"name"`
-	Description string         `json:"description,omitempty"`
-	InputSchema map[string]any `json:"input_schema"` // NOT "parameters"
+	Name         string                `json:"name"`
+	Description  string                `json:"description,omitempty"`
+	InputSchema  map[string]any        `json:"input_schema"`                 // NOT "parameters"
+	CacheControl *AnthropicCacheControl `json:"cache_control,omitempty"`
 }
 
 // AnthropicThinkingConfig controls extended thinking.
@@ -168,6 +169,10 @@ func convertToAnthropicRequest(req ChatRequest, provider *LLMProvider) Anthropic
 				InputSchema: t.Function.Parameters,
 			})
 		}
+	}
+	// Mark last tool cacheable so Anthropic caches the entire tools block
+	if len(anthropicTools) > 0 {
+		anthropicTools[len(anthropicTools)-1].CacheControl = &AnthropicCacheControl{Type: "ephemeral"}
 	}
 
 	// Determine max_tokens

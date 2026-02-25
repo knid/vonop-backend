@@ -2533,11 +2533,11 @@ func (c *Controller) generateTierMegaStream(
 
 	// --- Block 2: Project context + SDK (identical to generateSingleAppFile) ---
 	var projectContext strings.Builder
-	projectContext.WriteString(fmt.Sprintf("### Project Context\nApp: %s\nColor scheme: %s\nTypography: %v\nAll files in project: %s\n\nUser's original description: %s",
+	projectContext.WriteString(fmt.Sprintf("### Project Context\nApp: %s\nColor scheme: %s\nTypography: %v\nProject files: %d total\n\nUser's original description: %s",
 		structure.Name,
 		string(colorSchemeJSON),
 		structure.Typography,
-		strings.Join(allFilePaths, ", "),
+		len(allFilePaths),
 		project.Prompt,
 	))
 
@@ -2659,6 +2659,23 @@ func (c *Controller) generateTierMegaStream(
 			}
 			return args
 		},
+		TrimResults: func(name, result string) string {
+			switch name {
+			case "read_file":
+				// Collapse full file content to first 200 chars + line count
+				lines := strings.Count(result, "\n") + 1
+				if len(result) > 200 {
+					return fmt.Sprintf("%s\n...[truncated, %d lines total]", result[:200], lines)
+				}
+			case "list_files":
+				// Collapse to file count
+				count := strings.Count(result, "\n") + 1
+				if len(result) > 200 {
+					return fmt.Sprintf("[%d files in project]", count)
+				}
+			}
+			return result
+		},
 	}
 
 	slog.Info("Starting mega-stream for tier",
@@ -2761,11 +2778,11 @@ func (c *Controller) generateSingleAppFile(
 
 	// --- Block 2: Project context + SDK templates (stable across all files in project) ---
 	var projectContext strings.Builder
-	projectContext.WriteString(fmt.Sprintf("### Project Context\nApp: %s\nColor scheme: %s\nTypography: %v\nAll files in project: %s\n\nUser's original description: %s",
+	projectContext.WriteString(fmt.Sprintf("### Project Context\nApp: %s\nColor scheme: %s\nTypography: %v\nProject files: %d total\n\nUser's original description: %s",
 		structure.Name,
 		string(colorSchemeJSON),
 		structure.Typography,
-		strings.Join(allFilePaths, ", "),
+		len(allFilePaths),
 		project.Prompt,
 	))
 
