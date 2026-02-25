@@ -73,6 +73,19 @@ func (p *LLMProvider) DefaultModel() string {
 	}
 }
 
+// FastModel returns a cheaper/faster model for non-creative tasks like fix passes
+// and conversation summarization. Falls back to DefaultModel if no fast option exists.
+func (p *LLMProvider) FastModel() string {
+	switch p.Name {
+	case "anthropic":
+		return "claude-haiku-4-5-20251001"
+	case "google":
+		return "gemini-2.5-flash"
+	default:
+		return "anthropic/claude-haiku-4-5-20251001" // OpenRouter format
+	}
+}
+
 // SupportsVision returns true if the provider supports multimodal (image) input.
 func (p *LLMProvider) SupportsVision() bool {
 	return !p.IsZAI()

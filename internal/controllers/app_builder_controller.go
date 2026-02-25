@@ -77,9 +77,18 @@ func (c *Controller) StreamBuildApp(
 		})
 	}
 
+	// Rollback state — captured by panic handler and error paths
+	var rollbackSnapshotID string
+	var rollbackOps *[]appBuilderOperation
+
 	defer func() {
 		if r := recover(); r != nil {
 			slog.Error("StreamBuildApp panicked", "error", r, "project_id", project.ID)
+			// Auto-rollback on panic
+			if rollbackSnapshotID != "" && rollbackOps != nil && len(*rollbackOps) > 0 {
+				slog.Info("Auto-rollback: restoring after panic", "project_id", project.ID)
+				c.RestoreAppSnapshot(project, rollbackSnapshotID)
+			}
 			sendEvent("error", responses.GenerationErrorEvent{
 				Error: fmt.Sprintf("internal error: %v", r),
 				Phase: "generation",
@@ -319,7 +328,7 @@ func (c *Controller) StreamBuildApp(
 		if len(messages) > summarizeThreshold {
 			oldMessages := messages[:len(messages)-keepRecent]
 			if conv.Summary == "" && len(oldMessages) > 0 {
-				conv.Summary = c.summarizeConversation(ctx, oldMessages, model, provider)
+				conv.Summary = c.summarizeConversation(ctx, oldMessages, provider)
 				conv.Messages, _ = json.Marshal(messages)
 				c.DB.UpdateAppConversation(conv)
 			}
@@ -365,6 +374,9 @@ func (c *Controller) StreamBuildApp(
 
 	// --- Set up tools and executor ---
 	var toolAppliedOps []appBuilderOperation
+	rollbackSnapshotID = preSnapshotID
+	rollbackOps = &toolAppliedOps
+
 	toolCallbacks := &builderToolCallbacks{
 		sendEvent:    sendEvent,
 		appliedOps:   &toolAppliedOps,
@@ -544,6 +556,25 @@ func (c *Controller) StreamBuildApp(
 	)
 	if err != nil {
 		slog.Error("LLM build call failed", "error", err, "project_id", project.ID)
+
+		// Auto-rollback: if files were partially written and we have a pre-snapshot, restore it
+		if preSnapshotID != "" && len(toolAppliedOps) > 0 {
+			slog.Info("Auto-rollback: restoring pre-snapshot after failed generation",
+				"project_id", project.ID,
+				"snapshot_id", preSnapshotID,
+				"partial_ops", len(toolAppliedOps),
+			)
+			if _, rollbackErr := c.RestoreAppSnapshot(project, preSnapshotID); rollbackErr != nil {
+				slog.Error("Auto-rollback failed", "error", rollbackErr, "project_id", project.ID)
+			} else {
+				sendEvent("rollback", map[string]any{
+					"snapshot_id": preSnapshotID,
+					"reason":      "generation_failed",
+					"rolled_back":  len(toolAppliedOps),
+				})
+			}
+		}
+
 		messages = append(messages, models.AppConversationMessage{
 			ID:        uuid.New().String(),
 			Role:      "assistant",
@@ -594,7 +625,7 @@ func (c *Controller) StreamBuildApp(
 		}
 
 		// Build validation: sync to preview, check logs, fix errors
-		c.validateWithPreviewLogs(ctx, project, fileMap, model, provider,
+		c.validateWithPreviewLogs(ctx, project, fileMap, provider,
 			localExecutor, sendEvent, &appliedOps, &filesChanged)
 	}
 
@@ -673,6 +704,18 @@ func (c *Controller) StreamBuildApp(
 			"missing_env_vars": missingVars,
 		})
 	}
+}
+
+// --- Helper: resolve model for fix/utility passes ---
+
+// fixModel returns the model to use for validation fix passes and conversation
+// summarization. Uses WEBSITE_BUILDER_FIX_MODEL secret if set, otherwise falls
+// back to the provider's fast (cheap) model.
+func (c *Controller) fixModel(provider *utils.LLMProvider) string {
+	if m := c.SecretManager.GetSecret("WEBSITE_BUILDER_FIX_MODEL"); m != "" {
+		return m
+	}
+	return provider.FastModel()
 }
 
 // --- Helper: flush pending files to preview container ---
@@ -1099,7 +1142,6 @@ func (c *Controller) validateWithPreviewLogs(
 	ctx context.Context,
 	project *models.AppProject,
 	fileMap map[string]string,
-	model string,
 	provider *utils.LLMProvider,
 	executor utils.ToolExecutor,
 	sendEvent func(string, any) bool,
@@ -1163,7 +1205,8 @@ func (c *Controller) validateWithPreviewLogs(
 			MaxTokens:  16384,
 		}
 
-		utils.StreamWithTools(ctx, model, fixMessages, appBuilderTools, provider,
+		fixModel := c.fixModel(provider)
+		utils.StreamWithTools(ctx, fixModel, fixMessages, appBuilderTools, provider,
 			nil, nil, executor,
 			func(toolName, args string) { /* silent tool calls */ },
 			func(chunk string) { sendEvent("chat_text", responses.ChatTextEvent{Chunk: chunk}) },
@@ -2010,7 +2053,7 @@ func (c *Controller) mcpTools() []utils.Tool {
 }
 
 // summarizeConversation generates a concise summary of older conversation messages.
-func (c *Controller) summarizeConversation(ctx context.Context, messages []models.AppConversationMessage, model string, provider *utils.LLMProvider) string {
+func (c *Controller) summarizeConversation(ctx context.Context, messages []models.AppConversationMessage, provider *utils.LLMProvider) string {
 	var conversationText strings.Builder
 	for _, msg := range messages {
 		role := msg.Role
@@ -2036,7 +2079,7 @@ func (c *Controller) summarizeConversation(ctx context.Context, messages []model
 
 Be concise (3-6 sentences). Include specific file paths and component names.`
 
-	summary, err := utils.GetTextFromLLM(ctx, model, system, conversationText.String(), provider)
+	summary, err := utils.GetTextFromLLM(ctx, c.fixModel(provider), system, conversationText.String(), provider)
 	if err != nil {
 		slog.Warn("failed to summarize conversation", "error", err)
 		var ops []string
