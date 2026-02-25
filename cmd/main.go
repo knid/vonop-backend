@@ -217,6 +217,8 @@ func createSchema(db *bun.DB) error {
 		`CREATE INDEX IF NOT EXISTS idx_web_analytics_project_created ON web_analytics_events (project_id, created_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_web_analytics_project_type_created ON web_analytics_events (project_id, event_type, created_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_web_analytics_project_session ON web_analytics_events (project_id, session_id)`,
+		// Token lookup index — covers the soft-delete filter used by GetTokenByToken
+		`CREATE INDEX IF NOT EXISTS idx_tokens_string_active ON tokens (string) WHERE deleted_at IS NULL`,
 	}
 	alterStatements = append(alterStatements, indexStatements...)
 	for _, stmt := range alterStatements {
@@ -445,7 +447,7 @@ func main() {
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
-	r.Use(middleware.Timeout(120 * time.Second))
+	r.Use(middleware.Timeout(20 * time.Minute))
 
 	// CORS must run before rate limiter so 429 responses still carry
 	// Access-Control-Allow-Origin headers (otherwise browsers report a
