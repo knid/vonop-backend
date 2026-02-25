@@ -92,14 +92,7 @@ func (c *Controller) StreamBuildApp(
 	if isInitialGeneration {
 		model = c.SecretManager.GetSecret("WEBSITE_BUILDER_LLM_MODEL")
 		if model == "" {
-			model = provider.DefaultModel()
-		}
-		// Override to Opus for initial generation quality
-		if provider.IsAnthropic() {
-			model = "claude-opus-4-6"
-		} else {
-			// OpenRouter format
-			model = "anthropic/claude-opus-4-6"
+			model = provider.DefaultModel() // defaults to claude-sonnet-4
 		}
 	} else {
 		model = c.SecretManager.GetSecret("WEBSITE_BUILDER_CHAT_MODEL")
@@ -376,21 +369,83 @@ func (c *Controller) StreamBuildApp(
 		tools = append(tools, *wsTool)
 	}
 
-	// Tool call config
+	// Tool call config — trim file content from history to prevent token bloat.
+	// After each tool round, write_file/edit_file args and read_file results are
+	// replaced with short summaries so the LLM doesn't re-read megabytes of code
+	// it already generated.
+	trimArgs := func(toolName, args string) string {
+		switch toolName {
+		case "write_file", "write_files":
+			// Strip file content, keep only paths
+			var single struct {
+				FilePath string `json:"file_path"`
+				Content  string `json:"content"`
+			}
+			if err := json.Unmarshal([]byte(args), &single); err == nil && single.FilePath != "" {
+				return fmt.Sprintf(`{"file_path":%q,"content":"[%d chars written]"}`, single.FilePath, len(single.Content))
+			}
+			// write_files: strip content from each file in the array
+			var batch struct {
+				Files []struct {
+					FilePath string `json:"file_path"`
+					Content  string `json:"content"`
+				} `json:"files"`
+			}
+			if err := json.Unmarshal([]byte(args), &batch); err == nil && len(batch.Files) > 0 {
+				summaries := make([]string, len(batch.Files))
+				for i, f := range batch.Files {
+					summaries[i] = fmt.Sprintf(`{"file_path":%q,"content":"[%d chars]"}`, f.FilePath, len(f.Content))
+				}
+				return fmt.Sprintf(`{"files":[%s]}`, strings.Join(summaries, ","))
+			}
+			return args
+		case "edit_file":
+			var edit struct {
+				FilePath  string `json:"file_path"`
+				OldString string `json:"old_string"`
+				NewString string `json:"new_string"`
+			}
+			if err := json.Unmarshal([]byte(args), &edit); err == nil {
+				return fmt.Sprintf(`{"file_path":%q,"old_string":"[%d chars]","new_string":"[%d chars]"}`,
+					edit.FilePath, len(edit.OldString), len(edit.NewString))
+			}
+			return args
+		default:
+			return args
+		}
+	}
+	trimResults := func(toolName, result string) string {
+		switch toolName {
+		case "read_file":
+			// After LLM has seen the file, collapse to a short confirmation
+			lines := strings.Count(result, "\n") + 1
+			if len(result) > 500 {
+				return fmt.Sprintf("[file read: %d chars, %d lines]", len(result), lines)
+			}
+			return result
+		default:
+			return result
+		}
+	}
+
 	var toolConfig utils.ToolCallConfig
 	if isInitialGeneration {
 		toolConfig = utils.ToolCallConfig{
-			MaxRounds:  80,
-			NudgeAfter: 60,
-			StripAfter: 75,
-			MaxTokens:  65536,
+			MaxRounds:   80,
+			NudgeAfter:  60,
+			StripAfter:  75,
+			MaxTokens:   65536,
+			TrimArgs:    trimArgs,
+			TrimResults: trimResults,
 		}
 	} else {
 		toolConfig = utils.ToolCallConfig{
-			MaxRounds:  25,
-			NudgeAfter: 15,
-			StripAfter: 20,
-			MaxTokens:  16384,
+			MaxRounds:   25,
+			NudgeAfter:  15,
+			StripAfter:  20,
+			MaxTokens:   16384,
+			TrimArgs:    trimArgs,
+			TrimResults: trimResults,
 		}
 	}
 
@@ -907,6 +962,37 @@ var appBuilderTools = []utils.Tool{
 	{
 		Type: "function",
 		Function: utils.ToolFunction{
+			Name:        "write_files",
+			Description: "Create or overwrite multiple files at once. Use this instead of calling write_file repeatedly when you need to create several files. Much more efficient for initial app generation.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"files": map[string]any{
+						"type":        "array",
+						"description": "Array of files to write",
+						"items": map[string]any{
+							"type": "object",
+							"properties": map[string]any{
+								"file_path": map[string]any{
+									"type":        "string",
+									"description": "Relative file path, e.g. 'app/page.tsx'",
+								},
+								"content": map[string]any{
+									"type":        "string",
+									"description": "The complete file content to write",
+								},
+							},
+							"required": []string{"file_path", "content"},
+						},
+					},
+				},
+				"required": []string{"files"},
+			},
+		},
+	},
+	{
+		Type: "function",
+		Function: utils.ToolFunction{
 			Name:        "edit_file",
 			Description: "Apply a targeted edit to an existing file by replacing a specific string with new content. You MUST read_file first to see the exact content to replace. The old_string must match exactly (including whitespace and indentation). For replacing the entire file, use write_file instead.",
 			Parameters: map[string]any{
@@ -1152,6 +1238,82 @@ func (c *Controller) buildBuilderToolExecutor(ctx context.Context, project *mode
 				cbs.mu.Unlock()
 			}
 			return fmt.Sprintf("Successfully wrote %s (%d chars, action: %s)", args.FilePath, len(content), action), nil
+
+		case "write_files":
+			var args struct {
+				Files []struct {
+					FilePath string `json:"file_path"`
+					Content  string `json:"content"`
+				} `json:"files"`
+			}
+			if err := json.Unmarshal([]byte(arguments), &args); err != nil {
+				return fmt.Sprintf("Error: invalid arguments: %s", err.Error()), nil
+			}
+			if len(args.Files) == 0 {
+				return "Error: files array is empty", nil
+			}
+
+			var results []string
+			for _, f := range args.Files {
+				if f.FilePath == "" {
+					results = append(results, "SKIP: empty file_path")
+					continue
+				}
+				content := utils.StripCodeFences(f.Content)
+				_, fileType := guessFileType(f.FilePath)
+				if fileType == "tsx" || fileType == "ts" {
+					content, _ = stripForbiddenImports(content, f.FilePath)
+				}
+
+				existingFile, err := c.DB.GetAppGeneratedFileByPath(project.ID.String(), "nextjs", f.FilePath)
+				action := "create"
+				var fileID uuid.UUID
+				if err == nil && existingFile != nil {
+					if normalizeContent(content) == normalizeContent(existingFile.Content) {
+						results = append(results, fmt.Sprintf("OK %s (no changes)", f.FilePath))
+						continue
+					}
+					existingFile.Content = content
+					existingFile.UpdatedAt = time.Now()
+					_, err = c.DB.UpdateAppGeneratedFile(existingFile)
+					if err != nil {
+						results = append(results, fmt.Sprintf("ERROR %s: %s", f.FilePath, err.Error()))
+						continue
+					}
+					action = "modify"
+					fileID = existingFile.ID
+				} else {
+					newFile := models.AppGeneratedFile{
+						AppProjectID: project.ID,
+						Platform:     "nextjs",
+						FilePath:     f.FilePath,
+						Content:      content,
+						FileType:     fileType,
+						IsGenerated:  true,
+					}
+					createdFile, err := c.DB.CreateAppGeneratedFile(&newFile)
+					if err != nil {
+						results = append(results, fmt.Sprintf("ERROR %s: %s", f.FilePath, err.Error()))
+						continue
+					}
+					fileID = createdFile.ID
+				}
+				fileMap[f.FilePath] = content
+
+				if cbs != nil {
+					cbs.sendEvent("file_complete", responses.FileCompleteEvent{
+						Action: action, FilePath: f.FilePath,
+						FileID: fileID, FileType: fileType, Content: content,
+					})
+					cbs.mu.Lock()
+					*cbs.appliedOps = append(*cbs.appliedOps, appBuilderOperation{
+						Action: action, Path: f.FilePath, Type: fileType,
+					})
+					cbs.mu.Unlock()
+				}
+				results = append(results, fmt.Sprintf("OK %s (%d chars, %s)", f.FilePath, len(content), action))
+			}
+			return fmt.Sprintf("Wrote %d files:\n%s", len(args.Files), strings.Join(results, "\n")), nil
 
 		case "edit_file":
 			var args struct {
