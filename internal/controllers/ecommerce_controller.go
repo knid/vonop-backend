@@ -360,13 +360,62 @@ func (c *Controller) createProductFromChat(store *models.Store, data map[string]
 		SEO:         map[string]any{},
 	}
 
+	// Look up category by slug if category_slug is provided
+	if catSlug, ok := data["category_slug"].(string); ok && catSlug != "" {
+		categories, err := c.DB.GetCategoriesByStoreID(store.ID.String())
+		if err == nil {
+			for _, cat := range categories {
+				if cat.Slug == catSlug {
+					product.CategoryID = cat.ID
+					break
+				}
+			}
+		}
+	}
+
 	product, err := c.DB.CreateProduct(product)
 	if err != nil {
 		return err
 	}
 
-	// Create default variant if price provided
-	if price, ok := data["price"].(float64); ok {
+	// Create variants if provided (multi-variant products)
+	if variantsRaw, ok := data["variants"].([]any); ok && len(variantsRaw) > 0 {
+		for i, vRaw := range variantsRaw {
+			vData, ok := vRaw.(map[string]any)
+			if !ok {
+				continue
+			}
+			vName, _ := vData["name"].(string)
+			vSku, _ := vData["sku"].(string)
+			vPrice := 0
+			if p, ok := vData["price_in_cents"].(float64); ok {
+				vPrice = int(p)
+			}
+			vInventory := 100
+			if inv, ok := vData["inventory"].(float64); ok {
+				vInventory = int(inv)
+			}
+			vCompareAt := 0
+			if cp, ok := vData["compare_at_price"].(float64); ok {
+				vCompareAt = int(cp)
+			}
+			vOptions := map[string]any{}
+			if opts, ok := vData["options"].(map[string]any); ok {
+				vOptions = opts
+			}
+			c.DB.CreateVariant(&models.ProductVariant{
+				ProductID:      product.ID,
+				Name:           vName,
+				SKU:            vSku,
+				PriceInCents:   vPrice,
+				CompareAtPrice: vCompareAt,
+				Inventory:      vInventory,
+				IsDefault:      i == 0,
+				Options:        vOptions,
+			})
+		}
+	} else if price, ok := data["price"].(float64); ok {
+		// Create default variant if price provided (single-variant product)
 		c.DB.CreateVariant(&models.ProductVariant{
 			ProductID:    product.ID,
 			Name:         "Default",
@@ -631,11 +680,14 @@ func (c *Controller) createCategoryFromChat(store *models.Store, data map[string
 	}
 	description, _ := data["description"].(string)
 
+	image, _ := data["image"].(string)
+
 	category := &models.ProductCategory{
 		StoreID:     store.ID,
 		Name:        name,
 		Slug:        slug,
 		Description: description,
+		Image:       image,
 	}
 
 	_, err := c.DB.CreateCategory(category)

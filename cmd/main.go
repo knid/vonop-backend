@@ -109,6 +109,8 @@ func createSchema(db *bun.DB) error {
 		(*models.CartItem)(nil),
 		(*models.Order)(nil),
 		(*models.OrderItem)(nil),
+		(*models.ProductReview)(nil),
+		(*models.Wishlist)(nil),
 		// LLM token usage tracking
 		(*models.LLMTokenUsage)(nil),
 		// Background jobs
@@ -946,6 +948,15 @@ func main() {
 
 				// Fix 14: Iyzico payment callback
 				r.Post("/checkout/iyzico-callback", httpViews.StorefrontIyzicoCallback)
+
+				// Reviews
+				r.Get("/products/{slug}/reviews", httpViews.StorefrontGetReviews)
+				r.With(rateLimiter.RateLimit(10, time.Minute, appMiddleware.StorefrontIPKey)).Post("/products/{slug}/reviews", httpViews.StorefrontSubmitReview)
+
+				// Wishlist
+				r.Get("/wishlist/{sessionId}", httpViews.StorefrontGetWishlist)
+				r.With(rateLimiter.RateLimit(40, time.Minute, appMiddleware.StorefrontIPKey)).Post("/wishlist/{sessionId}", httpViews.StorefrontAddToWishlist)
+				r.With(rateLimiter.RateLimit(40, time.Minute, appMiddleware.StorefrontIPKey)).Delete("/wishlist/{sessionId}/{productId}", httpViews.StorefrontRemoveFromWishlist)
 			})
 
 			// Fix 15: Stripe webhook for per-store accounts (outside storeId route)

@@ -171,3 +171,31 @@ type OrderItem struct {
 	TotalCents   int       `bun:",notnull"`
 	CreatedAt    time.Time `bun:"created_at,nullzero,notnull,default:current_timestamp"`
 }
+
+// ProductReview represents a customer review with a 1-5 star rating
+type ProductReview struct {
+	ID            uuid.UUID `bun:",pk,type:uuid,default:uuid_generate_v4()"`
+	StoreID       uuid.UUID `bun:",notnull,type:uuid"`
+	Store         *Store    `bun:"rel:belongs-to,join:store_id=id"`
+	ProductID     uuid.UUID `bun:",notnull,type:uuid"`
+	Product       *Product  `bun:"rel:belongs-to,join:product_id=id"`
+	CustomerName  string    `bun:",notnull"`
+	CustomerEmail string    `bun:",notnull"`
+	Rating        int       `bun:",notnull"` // 1-5
+	Title         string    `bun:",nullzero"`
+	Body          string    `bun:",type:text,nullzero"`
+	IsVerified    bool      `bun:",notnull,default:false"` // verified purchase
+	Status        string    `bun:",notnull,default:'approved'"` // approved, pending, rejected
+	CreatedAt     time.Time `bun:"created_at,nullzero,notnull,default:current_timestamp"`
+}
+
+// Wishlist represents a saved product per session
+type Wishlist struct {
+	ID        uuid.UUID `bun:",pk,type:uuid,default:uuid_generate_v4()"`
+	StoreID   uuid.UUID `bun:",notnull,type:uuid"`
+	Store     *Store    `bun:"rel:belongs-to,join:store_id=id"`
+	ProductID uuid.UUID `bun:",notnull,type:uuid"`
+	Product   *Product  `bun:"rel:belongs-to,join:product_id=id"`
+	SessionID string    `bun:",notnull"`
+	CreatedAt time.Time `bun:"created_at,nullzero,notnull,default:current_timestamp"`
+}

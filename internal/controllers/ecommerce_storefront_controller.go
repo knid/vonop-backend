@@ -1030,3 +1030,142 @@ func iyzicoRequest(apiKey, secretKey, baseURL, uri string, body []byte) ([]byte,
 
 	return io.ReadAll(resp.Body)
 }
+
+// --- Reviews ---
+
+type ReviewResponse struct {
+	ID           string `json:"id"`
+	CustomerName string `json:"customer_name"`
+	Rating       int    `json:"rating"`
+	Title        string `json:"title"`
+	Body         string `json:"body"`
+	IsVerified   bool   `json:"is_verified"`
+	CreatedAt    string `json:"created_at"`
+}
+
+type ReviewsResult struct {
+	Reviews       []ReviewResponse `json:"reviews"`
+	AverageRating float64          `json:"average_rating"`
+	ReviewCount   int              `json:"review_count"`
+}
+
+func (c *Controller) StorefrontGetReviews(storeID string, productSlug string) (*ReviewsResult, error) {
+	product, err := c.DB.GetProductBySlug(storeID, productSlug)
+	if err != nil {
+		return nil, fmt.Errorf("product not found")
+	}
+
+	reviews, err := c.DB.GetReviewsByProductID(product.ID.String())
+	if err != nil {
+		return nil, err
+	}
+
+	avg, _ := c.DB.GetAverageRating(product.ID.String())
+	count, _ := c.DB.GetReviewCount(product.ID.String())
+
+	var resp []ReviewResponse
+	for _, r := range reviews {
+		resp = append(resp, ReviewResponse{
+			ID:           r.ID.String(),
+			CustomerName: r.CustomerName,
+			Rating:       r.Rating,
+			Title:        r.Title,
+			Body:         r.Body,
+			IsVerified:   r.IsVerified,
+			CreatedAt:    r.CreatedAt.Format(time.RFC3339),
+		})
+	}
+
+	return &ReviewsResult{
+		Reviews:       resp,
+		AverageRating: avg,
+		ReviewCount:   count,
+	}, nil
+}
+
+func (c *Controller) StorefrontSubmitReview(storeID string, productSlug string, customerName, customerEmail string, rating int, title, body string) (*models.ProductReview, error) {
+	store, err := c.StorefrontGuard(storeID)
+	if err != nil {
+		return nil, err
+	}
+
+	product, err := c.DB.GetProductBySlug(storeID, productSlug)
+	if err != nil {
+		return nil, fmt.Errorf("product not found")
+	}
+
+	if rating < 1 || rating > 5 {
+		return nil, fmt.Errorf("rating must be between 1 and 5")
+	}
+
+	review := &models.ProductReview{
+		StoreID:       store.ID,
+		ProductID:     product.ID,
+		CustomerName:  customerName,
+		CustomerEmail: customerEmail,
+		Rating:        rating,
+		Title:         title,
+		Body:          body,
+		Status:        "approved",
+	}
+
+	return c.DB.CreateReview(review)
+}
+
+// --- Wishlist ---
+
+type WishlistItemResponse struct {
+	ID        string `json:"id"`
+	ProductID string `json:"product_id"`
+	CreatedAt string `json:"created_at"`
+}
+
+func (c *Controller) StorefrontGetWishlist(storeID string, sessionID string) ([]WishlistItemResponse, error) {
+	items, err := c.DB.GetWishlistBySessionID(storeID, sessionID)
+	if err != nil {
+		return nil, err
+	}
+
+	var resp []WishlistItemResponse
+	for _, item := range items {
+		resp = append(resp, WishlistItemResponse{
+			ID:        item.ID.String(),
+			ProductID: item.ProductID.String(),
+			CreatedAt: item.CreatedAt.Format(time.RFC3339),
+		})
+	}
+
+	return resp, nil
+}
+
+func (c *Controller) StorefrontAddToWishlist(storeID string, sessionID string, productID string) (*models.Wishlist, error) {
+	store, err := c.StorefrontGuard(storeID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Check if product exists
+	_, err = c.DB.GetProductByID(productID)
+	if err != nil {
+		return nil, fmt.Errorf("product not found")
+	}
+
+	// Check if already in wishlist
+	exists, _ := c.DB.IsInWishlist(storeID, sessionID, productID)
+	if exists {
+		return nil, fmt.Errorf("product already in wishlist")
+	}
+
+	productUUID, _ := uuid.Parse(productID)
+	item := &models.Wishlist{
+		StoreID:   store.ID,
+		ProductID: productUUID,
+		SessionID: sessionID,
+	}
+
+	return c.DB.AddToWishlist(item)
+}
+
+func (c *Controller) StorefrontRemoveFromWishlist(storeID string, sessionID string, productID string) error {
+	return c.DB.RemoveFromWishlist(storeID, sessionID, productID)
+}
