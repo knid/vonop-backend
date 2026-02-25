@@ -102,12 +102,15 @@ func (v *HttpViews) StorefrontGetProducts(w http.ResponseWriter, r *http.Request
 
 	var resp []responses.StorefrontProductResponse
 	for _, p := range filtered {
+		avgRating, _ := v.Controller.DB.GetAverageRating(p.ID.String())
+		reviewCount, _ := v.Controller.DB.GetReviewCount(p.ID.String())
 		resp = append(resp, responses.StorefrontProductResponse{
 			ID: p.ID, Name: p.Name, Slug: p.Slug,
 			Description: p.Description, Images: p.Images,
 			Category: categoryNameMap[p.CategoryID],
 			Tags: p.Tags, Variants: variantMap[p.ID],
 			MinPrice: minPriceMap[p.ID], MaxPrice: maxPriceMap[p.ID],
+			AverageRating: avgRating, ReviewCount: reviewCount,
 		})
 	}
 
@@ -160,12 +163,16 @@ func (v *HttpViews) StorefrontGetProduct(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
+	avgRating, _ := v.Controller.DB.GetAverageRating(product.ID.String())
+	reviewCount, _ := v.Controller.DB.GetReviewCount(product.ID.String())
+
 	utils.JSONResponse(w, responses.StorefrontProductResponse{
 		ID: product.ID, Name: product.Name, Slug: product.Slug,
 		Description: product.Description, Images: product.Images,
 		Category: categoryName,
 		Tags: product.Tags, Variants: sfVariants,
 		MinPrice: minPrice, MaxPrice: maxPrice,
+		AverageRating: avgRating, ReviewCount: reviewCount,
 	}, http.StatusOK)
 }
 
@@ -650,4 +657,135 @@ func (v *HttpViews) StorefrontGetOrder(w http.ResponseWriter, r *http.Request) {
 		Currency:      order.Currency,
 		CreatedAt:     order.CreatedAt,
 	}, http.StatusOK)
+}
+
+// --- Reviews ---
+
+// GET /v2/storefront/{storeId}/products/{slug}/reviews
+func (v *HttpViews) StorefrontGetReviews(w http.ResponseWriter, r *http.Request) {
+	storeID := chi.URLParam(r, "storeId")
+	slug := chi.URLParam(r, "slug")
+
+	if !v.storefrontGuard(w, r) {
+		return
+	}
+
+	result, err := v.Controller.StorefrontGetReviews(storeID, slug)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	utils.JSONResponse(w, result, http.StatusOK)
+}
+
+// POST /v2/storefront/{storeId}/products/{slug}/reviews
+func (v *HttpViews) StorefrontSubmitReview(w http.ResponseWriter, r *http.Request) {
+	storeID := chi.URLParam(r, "storeId")
+	slug := chi.URLParam(r, "slug")
+
+	if !v.storefrontGuard(w, r) {
+		return
+	}
+
+	var body struct {
+		CustomerName  string `json:"customer_name"`
+		CustomerEmail string `json:"customer_email"`
+		Rating        int    `json:"rating"`
+		Title         string `json:"title"`
+		Body          string `json:"body"`
+	}
+
+	if err := utils.ParseJSONBody(r, &body); err != nil {
+		utils.JSONErrorResponse(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if body.CustomerName == "" || body.CustomerEmail == "" || body.Rating == 0 {
+		utils.JSONErrorResponse(w, "customer_name, customer_email, and rating are required", http.StatusBadRequest)
+		return
+	}
+
+	review, err := v.Controller.StorefrontSubmitReview(storeID, slug, body.CustomerName, body.CustomerEmail, body.Rating, body.Title, body.Body)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	utils.JSONResponse(w, map[string]any{
+		"id":      review.ID,
+		"status":  review.Status,
+		"message": "Review submitted successfully",
+	}, http.StatusCreated)
+}
+
+// --- Wishlist ---
+
+// GET /v2/storefront/{storeId}/wishlist/{sessionId}
+func (v *HttpViews) StorefrontGetWishlist(w http.ResponseWriter, r *http.Request) {
+	storeID := chi.URLParam(r, "storeId")
+	sessionID := chi.URLParam(r, "sessionId")
+
+	if !v.storefrontGuard(w, r) {
+		return
+	}
+
+	items, err := v.Controller.StorefrontGetWishlist(storeID, sessionID)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	utils.JSONResponse(w, items, http.StatusOK)
+}
+
+// POST /v2/storefront/{storeId}/wishlist/{sessionId}
+func (v *HttpViews) StorefrontAddToWishlist(w http.ResponseWriter, r *http.Request) {
+	storeID := chi.URLParam(r, "storeId")
+	sessionID := chi.URLParam(r, "sessionId")
+
+	if !v.storefrontGuard(w, r) {
+		return
+	}
+
+	var body struct {
+		ProductID string `json:"product_id"`
+	}
+
+	if err := utils.ParseJSONBody(r, &body); err != nil {
+		utils.JSONErrorResponse(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if body.ProductID == "" {
+		utils.JSONErrorResponse(w, "product_id is required", http.StatusBadRequest)
+		return
+	}
+
+	_, err := v.Controller.StorefrontAddToWishlist(storeID, sessionID, body.ProductID)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	utils.JSONResponse(w, map[string]any{"message": "Added to wishlist"}, http.StatusCreated)
+}
+
+// DELETE /v2/storefront/{storeId}/wishlist/{sessionId}/{productId}
+func (v *HttpViews) StorefrontRemoveFromWishlist(w http.ResponseWriter, r *http.Request) {
+	storeID := chi.URLParam(r, "storeId")
+	sessionID := chi.URLParam(r, "sessionId")
+	productID := chi.URLParam(r, "productId")
+
+	if !v.storefrontGuard(w, r) {
+		return
+	}
+
+	err := v.Controller.StorefrontRemoveFromWishlist(storeID, sessionID, productID)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	utils.JSONResponse(w, map[string]any{"message": "Removed from wishlist"}, http.StatusOK)
 }

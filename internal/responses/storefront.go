@@ -7,16 +7,18 @@ import (
 )
 
 type StorefrontProductResponse struct {
-	ID          uuid.UUID           `json:"id"`
-	Name        string              `json:"name"`
-	Slug        string              `json:"slug"`
-	Description string              `json:"description"`
-	Images      []string            `json:"images"`
-	Category    string              `json:"category,omitempty"`
-	Tags        []string            `json:"tags"`
-	Variants    []StorefrontVariant `json:"variants"`
-	MinPrice    int                 `json:"min_price_cents"`
-	MaxPrice    int                 `json:"max_price_cents"`
+	ID            uuid.UUID           `json:"id"`
+	Name          string              `json:"name"`
+	Slug          string              `json:"slug"`
+	Description   string              `json:"description"`
+	Images        []string            `json:"images"`
+	Category      string              `json:"category,omitempty"`
+	Tags          []string            `json:"tags"`
+	Variants      []StorefrontVariant `json:"variants"`
+	MinPrice      int                 `json:"min_price_cents"`
+	MaxPrice      int                 `json:"max_price_cents"`
+	AverageRating float64             `json:"average_rating"`
+	ReviewCount   int                 `json:"review_count"`
 }
 
 type StorefrontVariant struct {

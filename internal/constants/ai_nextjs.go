@@ -20,6 +20,18 @@ var NEXTJS_DB_TEMPLATE_FILE_PATHS = []string{
 // NEXTJS_ECOMMERCE_TEMPLATE_FILE_PATHS are template-managed files injected only for e-commerce projects.
 var NEXTJS_ECOMMERCE_TEMPLATE_FILE_PATHS = []string{
 	"lib/wemob-store.ts",
+	"components/ecommerce/product-card.tsx",
+	"components/ecommerce/cart-drawer.tsx",
+	"components/ecommerce/price-display.tsx",
+	"components/ecommerce/quantity-selector.tsx",
+	"components/ecommerce/product-gallery.tsx",
+	"components/ecommerce/checkout-form.tsx",
+	"components/ecommerce/category-nav.tsx",
+	"components/ecommerce/cart-item-row.tsx",
+	"components/ecommerce/order-summary.tsx",
+	"components/ecommerce/empty-state.tsx",
+	"components/ecommerce/review-list.tsx",
+	"components/ecommerce/wishlist-button.tsx",
 }
 
 // NEXTJS_UI_TEMPLATE_FILE_PATHS are pre-built UI component templates injected during initial generation
@@ -181,6 +193,8 @@ export interface StorefrontProduct {
   variants: StorefrontVariant[];
   min_price_cents: number;
   max_price_cents: number;
+  average_rating: number;
+  review_count: number;
 }
 
 export interface StorefrontVariant {
@@ -1058,6 +1072,149 @@ export function useStoreConfig(): {
 
   return { config, isLoading, error };
 }
+
+// ---------------------------------------------------------------------------
+// Reviews
+// ---------------------------------------------------------------------------
+
+export interface ProductReview {
+  id: string;
+  customer_name: string;
+  rating: number;
+  title: string;
+  body: string;
+  is_verified: boolean;
+  created_at: string;
+}
+
+export interface ReviewsResult {
+  reviews: ProductReview[];
+  average_rating: number;
+  review_count: number;
+}
+
+/** Fetch reviews for a product by slug. */
+export async function getProductReviews(slug: string): Promise<ReviewsResult> {
+  return apiFetch<ReviewsResult>("/products/" + slug + "/reviews");
+}
+
+/** Submit a review for a product. */
+export async function submitReview(
+  slug: string,
+  data: { customer_name: string; customer_email: string; rating: number; title?: string; body?: string }
+): Promise<{ id: string; status: string; message: string }> {
+  return apiFetch("/products/" + slug + "/reviews", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+/** Hook: fetch and manage reviews for a product. */
+export function useReviews(slug: string) {
+  const [reviews, setReviews] = React.useState<ProductReview[]>([]);
+  const [averageRating, setAverageRating] = React.useState(0);
+  const [reviewCount, setReviewCount] = React.useState(0);
+  const [isLoading, setIsLoading] = React.useState(true);
+
+  const fetchReviews = React.useCallback(async () => {
+    if (!slug) return;
+    try {
+      const result = await getProductReviews(slug);
+      setReviews(result.reviews || []);
+      setAverageRating(result.average_rating);
+      setReviewCount(result.review_count);
+    } catch {
+      // silently handle
+    } finally {
+      setIsLoading(false);
+    }
+  }, [slug]);
+
+  React.useEffect(() => {
+    fetchReviews();
+  }, [fetchReviews]);
+
+  const handleSubmitReview = React.useCallback(
+    async (data: { customer_name: string; customer_email: string; rating: number; title?: string; body?: string }) => {
+      await submitReview(slug, data);
+      // Refresh reviews after submission
+      await fetchReviews();
+    },
+    [slug, fetchReviews]
+  );
+
+  return { reviews, averageRating, reviewCount, isLoading, submitReview: handleSubmitReview };
+}
+
+// ---------------------------------------------------------------------------
+// Wishlist
+// ---------------------------------------------------------------------------
+
+export interface WishlistItem {
+  id: string;
+  product_id: string;
+  created_at: string;
+}
+
+/** Fetch wishlist items for a session. */
+export async function getWishlist(sessionId: string): Promise<WishlistItem[]> {
+  return apiFetch<WishlistItem[]>("/wishlist/" + sessionId);
+}
+
+/** Add a product to the wishlist. */
+export async function addToWishlist(sessionId: string, productId: string): Promise<void> {
+  await apiFetch("/wishlist/" + sessionId, {
+    method: "POST",
+    body: JSON.stringify({ product_id: productId }),
+  });
+}
+
+/** Remove a product from the wishlist. */
+export async function removeFromWishlist(sessionId: string, productId: string): Promise<void> {
+  await apiFetch("/wishlist/" + sessionId + "/" + productId, {
+    method: "DELETE",
+  });
+}
+
+/** Hook: manage wishlist state for the current session. */
+export function useWishlist() {
+  const [items, setItems] = React.useState<WishlistItem[]>([]);
+  const [isLoading, setIsLoading] = React.useState(true);
+
+  React.useEffect(() => {
+    const sid = getSessionId();
+    if (!sid) { setIsLoading(false); return; }
+
+    getWishlist(sid)
+      .then((data) => setItems(data || []))
+      .catch(() => {})
+      .finally(() => setIsLoading(false));
+  }, []);
+
+  const isInWishlist = React.useCallback(
+    (productId: string) => items.some((item) => item.product_id === productId),
+    [items]
+  );
+
+  const toggleWishlist = React.useCallback(
+    async (productId: string) => {
+      const sid = getSessionId();
+      if (!sid) return;
+
+      if (items.some((item) => item.product_id === productId)) {
+        await removeFromWishlist(sid, productId);
+        setItems((prev) => prev.filter((item) => item.product_id !== productId));
+      } else {
+        await addToWishlist(sid, productId);
+        const updated = await getWishlist(sid);
+        setItems(updated || []);
+      }
+    },
+    [items]
+  );
+
+  return { items, isLoading, isInWishlist, toggleWishlist };
+}
 `
 
 // --- Pre-built UI component templates (shadcn/ui patterns) ---
@@ -1321,13 +1478,108 @@ When the user asks for changes to an existing app:
 const NEXTJS_BUILDER_ECOMMERCE_RULES = `
 
 ### E-Commerce Rules
-- Call setup_ecommerce FIRST before generating storefront code. Then call manage_store to populate products.
-- NEVER define hardcoded/mock product data. ALL data comes from the Wemob Storefront API via @/lib/wemob-store.
+
+#### Setup Sequence
+- Call setup_ecommerce FIRST before generating any storefront code. Then call manage_store to seed products/categories.
+- NEVER define hardcoded/mock product data (no ` + "`" + `const products = [...]` + "`" + `). ALL data comes from the Wemob Storefront API via @/lib/wemob-store.
 - lib/wemob-store.ts is template-managed and "use client" — ALL its exports are CLIENT-ONLY. Any file importing from it MUST have "use client".
-- It exports: getStoreConfig, getProducts, getProduct, getCategories, createCart, getCart, addCartItem, updateCartItem, removeCartItem, applyDiscountCode, removeDiscount, checkout, confirmCheckout, getOrder, formatPrice, renderPaymentForm, getSessionId, clearSession, CartProvider, useCart, useProducts, useProduct, useCategories, useStoreConfig, plus TypeScript types.
-- CartProvider wraps the app (add to layout.tsx). useCart() provides cart state with optimistic updates.
-- Product prices are in cents. Use formatPrice(cents) for display.
-- Do NOT create, modify, or delete lib/wemob-store.ts — it is template-managed.`
+- Do NOT create, modify, or delete lib/wemob-store.ts — it is template-managed.
+
+#### SDK Exports Reference
+Functions: getStoreConfig, getProducts, getProduct, getCategories, createCart, getCart, addCartItem, updateCartItem, removeCartItem, applyDiscountCode, removeDiscount, checkout, confirmCheckout, getOrder, formatPrice, renderPaymentForm, getSessionId, clearSession, getProductReviews, submitReview, getWishlist, addToWishlist, removeFromWishlist
+Components: CartProvider
+Hooks: useCart, useProducts, useProduct, useCategories, useStoreConfig, useReviews, useWishlist
+Types: StoreConfig, StorefrontProduct, StorefrontVariant, StorefrontCategory, StorefrontCart, StorefrontCartItem, StorefrontCheckout, CheckoutConfirm, OrderTracking, OrderTrackingItem, ShippingAddress, CheckoutParams, ProductReview, WishlistItem
+
+#### CartProvider — CRITICAL
+- CartProvider MUST wrap the entire app. In app/layout.tsx, create a client wrapper component (e.g., components/providers.tsx with "use client") that wraps children in <CartProvider>. Import and use it in the root layout.
+- useCart() provides: cart, isLoading, itemCount, addItem, updateItem, removeItem, applyDiscount, removeDiscountCode, checkout, clearCart.
+
+#### Required Pages (7 minimum)
+1. app/page.tsx — Homepage with hero section, featured products (useProducts), category highlights (useCategories), promotional banners
+2. app/products/page.tsx — Product grid with category filter pills, search bar, sort dropdown (price low/high, newest). Use useProducts({ category, q }).
+3. app/products/[slug]/page.tsx — Product detail with image gallery, variant selector, price display, add-to-cart button, description, reviews section
+4. app/cart/page.tsx — Full cart page: item list with quantity controls, discount code input, order summary, checkout button. Show EmptyState when cart is empty.
+5. app/checkout/page.tsx — Multi-step or single-page form: shipping address, billing address, payment provider selection. Only show providers from useStoreConfig().config.payment_providers. If payment_providers is empty, show info banner: "Payment not yet configured — contact the store owner."
+6. app/checkout/success/page.tsx — Order confirmation. Read order_id from URL search params, fetch order via getOrder(orderId), display order number, items, total, and confirmation message. Include "Continue Shopping" link.
+7. app/checkout/cancel/page.tsx — Payment cancelled/failed page with retry button linking back to checkout.
+
+#### Price Display Rules
+- Product prices live on VARIANTS, not the product itself. Products have min_price_cents and max_price_cents computed from their variants.
+- For single-price products (min === max): show formatPrice(product.min_price_cents)
+- For price ranges (min !== max): show "formatPrice(min) – formatPrice(max)"
+- Sale prices: if variant.compare_at_price > 0 && variant.compare_at_price > variant.price_in_cents, show original price with line-through and sale price highlighted
+- ALWAYS use formatPrice() for currency formatting. NEVER do manual division (/100) or .toFixed(2).
+- Show "Out of Stock" badge when variant.in_stock === false or variant.inventory <= 0
+
+#### Image Handling
+- Use next/image for all product images with proper width/height and loading="lazy"
+- Provide a placeholder fallback when images array is empty — use a ShoppingBag icon from lucide-react in a gray background div
+- Product grids: use aspect-square containers for consistent card heights
+- Product detail: image gallery with large main image and clickable thumbnail strip below
+
+#### Cart UX
+- Use useCart() for ALL cart operations — never call raw API functions directly for cart management
+- Include a CartDrawer (slide-out sidebar) in the site header, triggered by cart icon with item count badge
+- Quantity controls: minus/plus buttons, disable minus at 1, show remove button
+- Show optimistic updates (useCart provides this automatically)
+- Show toast notification on successful add-to-cart (use a simple toast or the CartDrawer opening)
+
+#### Checkout Flow
+- Get available payment providers from useStoreConfig().config.payment_providers
+- Stripe: checkout() returns payment_url → auto-redirects (handled by SDK). After payment, Stripe redirects to checkout/success?order_id=xxx
+- Iyzico: checkout() returns client_secret (HTML form) → render using renderPaymentForm() in a container div
+- Cash on Delivery (COD) / no provider: checkout() returns order_id directly → navigate to checkout/success?order_id=xxx
+- If payment_providers array is empty, show info banner on checkout page: "Payment not yet configured — contact the store owner."
+
+#### Error Handling
+- Wrap all SDK calls in try/catch. Show user-friendly error messages via toast or inline alert.
+- Out-of-stock: show clear message, disable add-to-cart button, suggest alternatives
+- Payment failure: show error on cancel page with "Try Again" button
+- Network errors: show "Something went wrong. Please try again." with retry option
+
+#### Loading States
+- Use skeleton loaders for product grids (skeleton cards with aspect-square image placeholder + text lines)
+- Use skeleton rows for cart items
+- All hooks return { isLoading } — check it and render skeletons, not empty content
+- Use Suspense boundaries where appropriate
+
+#### Responsive Design
+- Product grid columns: 1 col (mobile) → 2 col (sm) → 3 col (md) → 4 col (lg)
+- Cart: stacked layout on mobile, side-by-side (items + summary) on desktop
+- Checkout form: single column on mobile, two columns on desktop
+- Header: hamburger menu on mobile, full nav on desktop
+
+#### SEO
+- Product detail pages: export async function generateMetadata() that fetches the product and returns title, description, and openGraph.images
+- Category pages: meaningful page titles
+- All pages: proper <title> and meta descriptions
+
+#### Accessibility
+- All product images: descriptive alt text (product name)
+- Form inputs: proper <label> elements with htmlFor
+- Cart count: aria-live="polite" region for screen reader updates
+- Interactive elements: keyboard navigable, visible focus rings
+
+#### Pre-Built Component Templates
+The following components are auto-injected as template files in components/ecommerce/. Do NOT recreate them — import and use them directly:
+- ProductCard — ` + "`" + `import { ProductCard } from "@/components/ecommerce/product-card"` + "`" + `
+- CartDrawer — ` + "`" + `import { CartDrawer } from "@/components/ecommerce/cart-drawer"` + "`" + `
+- PriceDisplay — ` + "`" + `import { PriceDisplay } from "@/components/ecommerce/price-display"` + "`" + `
+- QuantitySelector — ` + "`" + `import { QuantitySelector } from "@/components/ecommerce/quantity-selector"` + "`" + `
+- ProductGallery — ` + "`" + `import { ProductGallery } from "@/components/ecommerce/product-gallery"` + "`" + `
+- CheckoutForm — ` + "`" + `import { CheckoutForm } from "@/components/ecommerce/checkout-form"` + "`" + `
+- CategoryNav — ` + "`" + `import { CategoryNav } from "@/components/ecommerce/category-nav"` + "`" + `
+- CartItemRow — ` + "`" + `import { CartItemRow } from "@/components/ecommerce/cart-item-row"` + "`" + `
+- OrderSummary — ` + "`" + `import { OrderSummary } from "@/components/ecommerce/order-summary"` + "`" + `
+- EmptyState — ` + "`" + `import { EmptyState } from "@/components/ecommerce/empty-state"` + "`" + `
+- ReviewList — ` + "`" + `import { ReviewList } from "@/components/ecommerce/review-list"` + "`" + `
+- WishlistButton — ` + "`" + `import { WishlistButton } from "@/components/ecommerce/wishlist-button"` + "`" + `
+
+#### Reviews & Wishlist
+- Reviews: useReviews(slug) returns { reviews, averageRating, reviewCount, isLoading, submitReview }. Show ReviewList component on product detail page.
+- Wishlist: useWishlist() returns { items, isLoading, isInWishlist, toggleWishlist }. Show WishlistButton on product cards and product detail page.
+- StorefrontProduct includes average_rating and review_count fields for display in product cards.`
 
 // NEXTJS_BUILDER_AUTH_RULES is appended to the system prompt only when the project uses authentication.
 const NEXTJS_BUILDER_AUTH_RULES = `
@@ -1506,20 +1758,27 @@ Given the user's description of an online store, generate a structured file plan
 1. Generate a store name and URL-safe slug.
 2. Generate a sophisticated, modern color scheme suited for e-commerce. Avoid generic palettes.
 3. Also generate a dark color scheme variant.
-4. Required pages: Home, Products listing, Product detail, Cart, Checkout, Checkout success (order confirmation), Checkout cancel (payment cancelled).
-5. Include shared components: Header with cart icon, Footer, ProductCard, CartDrawer (slide-out cart sidebar).
-6. Include API routes under app/api/ for cart operations, checkout, products, etc.
-7. DO NOT include package.json, tsconfig.json, postcss.config.mjs, next.config.mjs, lib/db.ts, or lib/schema.ts — these are template-managed and injected automatically.
-8. Required files: app/layout.tsx, app/page.tsx, app/globals.css
-9. Plan a lib/utils.ts file that exports a cn() helper using clsx and tailwind-merge.
-10. Plan reusable UI primitives in components/ui/ (Button, Card, Badge, Input, etc.) following shadcn/ui patterns.
-11. Use Next.js App Router structure.
-12. CRITICAL: Every component or module that is imported by any page MUST be included in the file list. Missing files will cause build failures.
-13. Prefer inline implementations over importing from separate utility/lib files. Only create separate files for reusable components or large data modules.
-14. The e-commerce schema (products, categories, carts, orders, etc.) is pre-defined and injected automatically. You may add additional data_models tables if the store concept needs them (e.g., reviews, wishlists), but do NOT redefine the core ecommerce tables.
-15. All data access uses Drizzle ORM: import { db } from '@/lib/db' and import { products, categories, ... } from '@/lib/schema'. Use db.select().from(products) for queries. Server-side data fetching by default. A database is provisioned automatically.
-16. If the application requires external API keys or secrets, list them in "required_env_vars". Do NOT include DATABASE_URL (auto-provisioned).
-17. If the application needs user authentication (login, register, user accounts, protected pages, admin panels, dashboards, or user-specific data), set "needs_auth": true. Auth infrastructure (lib/wemob-auth.ts and lib/wemob-auth-client.tsx) will be auto-injected. Plan login/register pages and an API route at app/api/auth/[...action]/route.ts to dispatch auth actions. Do NOT plan custom auth utilities — they are template-managed.
+4. Required pages (ALL of these MUST be in the file list):
+   - app/page.tsx — Homepage with hero, featured products, category highlights
+   - app/products/page.tsx — Product listing with category filter, search, sort
+   - app/products/[slug]/page.tsx — Product detail with gallery, variants, add-to-cart, reviews
+   - app/cart/page.tsx — Shopping cart with items, quantities, discount code, order summary
+   - app/checkout/page.tsx — Checkout form with shipping, billing, payment selection
+   - app/checkout/success/page.tsx — Order confirmation (reads order_id from URL params)
+   - app/checkout/cancel/page.tsx — Payment cancelled/failed with retry
+   - app/categories/[slug]/page.tsx — Category page showing filtered products
+5. Required shared components: ONLY plan components/header.tsx (with cart icon and CartDrawer) and components/footer.tsx. All e-commerce UI components (ProductCard, CartDrawer, PriceDisplay, QuantitySelector, ProductGallery, CheckoutForm, CategoryNav, CartItemRow, OrderSummary, EmptyState, ReviewList, WishlistButton) are auto-injected in components/ecommerce/ — do NOT plan or recreate them.
+6. You may also plan a components/providers.tsx ("use client" wrapper for CartProvider and other context providers to use in layout.tsx).
+7. DO NOT include package.json, tsconfig.json, postcss.config.mjs, next.config.mjs, lib/db.ts, lib/schema.ts, lib/utils.ts, components/ui/button.tsx, components/ui/card.tsx, components/ui/input.tsx, components/ui/badge.tsx, components/ui/skeleton.tsx — these are template-managed and injected automatically.
+8. DO NOT plan components/ecommerce/* files — they are template-managed and injected automatically.
+9. Required files: app/layout.tsx, app/page.tsx, app/globals.css
+10. Use Next.js App Router structure.
+11. CRITICAL: Every component or module that is imported by any page MUST be included in the file list. Missing files cause build failures. Exception: components/ecommerce/* and components/ui/* (auto-injected) do NOT need to be listed.
+12. Prefer inline implementations over importing from separate utility/lib files. Only create separate files for reusable components or large data modules.
+13. The e-commerce schema (products, categories, carts, orders, etc.) is pre-defined and injected automatically. You may add additional data_models tables if the store concept needs them, but do NOT redefine the core ecommerce tables. The following are also pre-defined: product_reviews (id, store_id, product_id, customer_name, customer_email, rating 1-5, title, body, is_verified, status, created_at) and wishlists (id, store_id, product_id, session_id, created_at).
+14. Do NOT plan app/api/ routes for cart, checkout, or product operations — all data access uses the client-side SDK from @/lib/wemob-store.ts (auto-injected). Only plan API routes for custom server-side logic specific to the store concept.
+15. If the application requires external API keys or secrets, list them in "required_env_vars". Do NOT include NEXT_PUBLIC_STORE_ID, NEXT_PUBLIC_WEMOB_API_URL, or DATABASE_URL (auto-provisioned). Consider including STRIPE_SK (Stripe secret key) as a recommended but optional payment provider.
+16. If the application needs user authentication (login, register, user accounts, protected pages, admin panels, dashboards, or user-specific data), set "needs_auth": true. Auth infrastructure will be auto-injected.
 
 ### Output format: Same as NEXTJS_STRUCTURE_PROMPT (strict JSON, no explanation, no markdown)
 {
@@ -1531,23 +1790,22 @@ Given the user's description of an online store, generate a structured file plan
   "typography": {"heading_font":"Inter","body_font":"Inter"},
   "data_models": [],
   "files": [
-    {"path":"app/layout.tsx","type":"tsx","description":"Root layout"},
-    {"path":"app/page.tsx","type":"tsx","description":"Homepage with featured products"},
-    {"path":"app/globals.css","type":"css","description":"Global styles"},
-    {"path":"app/products/page.tsx","type":"tsx","description":"Products listing with filters"},
-    {"path":"app/products/[slug]/page.tsx","type":"tsx","description":"Product detail page"},
-    {"path":"app/cart/page.tsx","type":"tsx","description":"Shopping cart page"},
-    {"path":"app/checkout/page.tsx","type":"tsx","description":"Checkout form"},
-    {"path":"app/checkout/success/page.tsx","type":"tsx","description":"Order confirmation page"},
-    {"path":"app/api/products/route.ts","type":"ts","description":"Products API route"},
-    {"path":"app/api/cart/route.ts","type":"ts","description":"Cart API route"},
-    {"path":"app/api/checkout/route.ts","type":"ts","description":"Checkout API route"},
-    {"path":"components/header.tsx","type":"tsx","description":"Header with cart icon and count badge"},
-    {"path":"components/footer.tsx","type":"tsx","description":"Footer"},
-    {"path":"components/product-card.tsx","type":"tsx","description":"Product card component"}
+    {"path":"app/layout.tsx","type":"tsx","description":"Root layout with CartProvider wrapper, fonts, metadata"},
+    {"path":"app/page.tsx","type":"tsx","description":"Homepage with hero, featured products, category highlights"},
+    {"path":"app/globals.css","type":"css","description":"Global styles with Tailwind v4 @theme colors"},
+    {"path":"app/products/page.tsx","type":"tsx","description":"Products listing with category filter, search, sort"},
+    {"path":"app/products/[slug]/page.tsx","type":"tsx","description":"Product detail with gallery, variants, reviews, add-to-cart"},
+    {"path":"app/categories/[slug]/page.tsx","type":"tsx","description":"Category page showing filtered products"},
+    {"path":"app/cart/page.tsx","type":"tsx","description":"Shopping cart with items, quantities, discount code, order summary"},
+    {"path":"app/checkout/page.tsx","type":"tsx","description":"Checkout form with shipping, billing, payment provider selection"},
+    {"path":"app/checkout/success/page.tsx","type":"tsx","description":"Order confirmation page (reads order_id from URL params)"},
+    {"path":"app/checkout/cancel/page.tsx","type":"tsx","description":"Payment cancelled/failed with retry button"},
+    {"path":"components/header.tsx","type":"tsx","description":"Header with navigation, cart icon with count badge, and CartDrawer"},
+    {"path":"components/footer.tsx","type":"tsx","description":"Footer with links, newsletter signup, store info"},
+    {"path":"components/providers.tsx","type":"tsx","description":"Client wrapper with CartProvider for root layout"}
   ],
   "required_env_vars": [
-    {"key": "STRIPE_SK", "description": "Stripe secret key for payments", "is_public": false, "provider": "stripe"}
+    {"key": "STRIPE_SK", "description": "Stripe secret key for payments (recommended)", "is_public": false, "provider": "stripe"}
   ]
 }`
 

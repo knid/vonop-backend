@@ -353,6 +353,30 @@ func getEcommerceTemplateContent(path string) string {
 	switch path {
 	case "lib/wemob-store.ts":
 		return constants.NEXTJS_TEMPLATE_WEMOB_STORE
+	case "components/ecommerce/product-card.tsx":
+		return constants.ECOMMERCE_TEMPLATE_PRODUCT_CARD
+	case "components/ecommerce/cart-drawer.tsx":
+		return constants.ECOMMERCE_TEMPLATE_CART_DRAWER
+	case "components/ecommerce/price-display.tsx":
+		return constants.ECOMMERCE_TEMPLATE_PRICE_DISPLAY
+	case "components/ecommerce/quantity-selector.tsx":
+		return constants.ECOMMERCE_TEMPLATE_QUANTITY_SELECTOR
+	case "components/ecommerce/product-gallery.tsx":
+		return constants.ECOMMERCE_TEMPLATE_PRODUCT_GALLERY
+	case "components/ecommerce/checkout-form.tsx":
+		return constants.ECOMMERCE_TEMPLATE_CHECKOUT_FORM
+	case "components/ecommerce/category-nav.tsx":
+		return constants.ECOMMERCE_TEMPLATE_CATEGORY_NAV
+	case "components/ecommerce/cart-item-row.tsx":
+		return constants.ECOMMERCE_TEMPLATE_CART_ITEM_ROW
+	case "components/ecommerce/order-summary.tsx":
+		return constants.ECOMMERCE_TEMPLATE_ORDER_SUMMARY
+	case "components/ecommerce/empty-state.tsx":
+		return constants.ECOMMERCE_TEMPLATE_EMPTY_STATE
+	case "components/ecommerce/review-list.tsx":
+		return constants.ECOMMERCE_TEMPLATE_REVIEW_LIST
+	case "components/ecommerce/wishlist-button.tsx":
+		return constants.ECOMMERCE_TEMPLATE_WISHLIST_BUTTON
 	}
 	return ""
 }
@@ -1328,6 +1352,106 @@ func runDeterministicChecks(files map[string]string) []validationError {
 				File:  "app/layout.tsx",
 				Error: fmt.Sprintf("Root layout is missing %s tags. Next.js App Router requires app/layout.tsx to include <html> and <body> tags wrapping {children}.", strings.Join(missing, " and ")),
 				Type:  "missing_root_layout_tags",
+			})
+		}
+	}
+
+	// --- E-Commerce specific checks (only when wemob-store.ts exists) ---
+	if _, hasStore := files["lib/wemob-store.ts"]; hasStore {
+		// Check E1: CartProvider must be present in layout or a providers wrapper
+		layoutContent, hasLayout := files["app/layout.tsx"]
+		if hasLayout {
+			hasCartProvider := strings.Contains(layoutContent, "CartProvider")
+			// Also check if layout imports a providers wrapper that might contain CartProvider
+			if !hasCartProvider {
+				// Check if any imported component file contains CartProvider
+				providerFound := false
+				for fp, fc := range files {
+					if strings.Contains(fp, "provider") && strings.Contains(fc, "CartProvider") {
+						// Verify the layout imports this file
+						fpBase := strings.TrimSuffix(strings.TrimSuffix(fp, ".tsx"), ".ts")
+						if strings.Contains(layoutContent, fpBase) || strings.Contains(layoutContent, "@/"+fpBase) {
+							providerFound = true
+							break
+						}
+					}
+				}
+				if !providerFound {
+					errors = append(errors, validationError{
+						File:  "app/layout.tsx",
+						Error: "E-commerce layout must wrap the app with <CartProvider> from @/lib/wemob-store. Either add it directly to layout.tsx or create a client providers wrapper that includes it.",
+						Type:  "ecommerce_missing_cart_provider",
+					})
+				}
+			}
+		}
+
+		// Check E2: Manual price formatting (should use formatPrice())
+		manualPriceRegex := regexp.MustCompile(`(?:price|cents|amount)\s*[/]\s*100|\.toFixed\(\s*2\s*\)`)
+		for fp, fc := range files {
+			if isTemplateFile(fp) || isConfigFile(fp) || !strings.HasSuffix(fp, ".tsx") && !strings.HasSuffix(fp, ".ts") {
+				continue
+			}
+			if fp == "lib/wemob-store.ts" {
+				continue
+			}
+			if manualPriceRegex.MatchString(fc) {
+				errors = append(errors, validationError{
+					File:  fp,
+					Error: "Manual price formatting detected (dividing by 100 or .toFixed(2)). Use formatPrice() from @/lib/wemob-store instead for proper currency formatting.",
+					Type:  "ecommerce_manual_price",
+				})
+			}
+		}
+
+		// Check E3: Hardcoded product arrays (should use SDK)
+		hardcodedProductsRegex := regexp.MustCompile(`const\s+products\s*=\s*\[`)
+		for fp, fc := range files {
+			if isTemplateFile(fp) || isConfigFile(fp) {
+				continue
+			}
+			if !strings.HasSuffix(fp, ".tsx") && !strings.HasSuffix(fp, ".ts") {
+				continue
+			}
+			if hardcodedProductsRegex.MatchString(fc) && !strings.Contains(fc, "@/lib/wemob-store") {
+				errors = append(errors, validationError{
+					File:  fp,
+					Error: "Hardcoded product data detected. E-commerce projects must fetch all product data from the Wemob Storefront SDK (@/lib/wemob-store). Use useProducts() or getProducts() instead.",
+					Type:  "ecommerce_hardcoded_products",
+				})
+			}
+		}
+
+		// Check E4: Required pages
+		requiredEcommercePages := map[string]string{
+			"app/products/page.tsx":          "Products listing page",
+			"app/cart/page.tsx":              "Shopping cart page",
+			"app/checkout/page.tsx":          "Checkout page",
+			"app/checkout/success/page.tsx":  "Order confirmation page",
+		}
+		for pagePath, pageDesc := range requiredEcommercePages {
+			if _, exists := files[pagePath]; !exists {
+				errors = append(errors, validationError{
+					File:  pagePath,
+					Error: fmt.Sprintf("Required e-commerce page missing: %s (%s). This page is needed for a complete shopping experience.", pagePath, pageDesc),
+					Type:  "ecommerce_missing_page",
+				})
+			}
+		}
+
+		// Check E5: Product detail page (any dynamic slug page under products)
+		hasProductDetail := false
+		for fp := range files {
+			if strings.HasPrefix(fp, "app/products/[") && strings.HasSuffix(fp, "/page.tsx") {
+				hasProductDetail = true
+				break
+			}
+		}
+		if !hasProductDetail {
+			errors = append(errors, validationError{
+				File:  "app/products/[slug]/page.tsx",
+				Error: "Missing product detail page. E-commerce projects need a dynamic route like app/products/[slug]/page.tsx to display individual products.",
+				Type:  "ecommerce_missing_page",
 			})
 		}
 	}
