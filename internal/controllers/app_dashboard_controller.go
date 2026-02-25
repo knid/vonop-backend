@@ -56,7 +56,7 @@ func (c *Controller) ExtractSchemaFromGeneratedFiles(ctx context.Context, projec
 	provider := c.llmProvider()
 	model := c.SecretManager.GetSecret("WEBSITE_BUILDER_LLM_MODEL")
 	if model == "" {
-		model = constants.DEFAULT_NEXTJS_LLM_MODEL
+		model = provider.DefaultModel()
 	}
 
 	message := "Extract the database schema from these source code files:\n\n" + strings.Join(relevantFiles, "\n\n")
@@ -167,7 +167,7 @@ func (c *Controller) CreateDashboard(ctx context.Context, project *models.AppPro
 	provider := c.llmProvider()
 	model := c.SecretManager.GetSecret("WEBSITE_BUILDER_LLM_MODEL")
 	if model == "" {
-		model = constants.DEFAULT_NEXTJS_LLM_MODEL
+		model = provider.DefaultModel()
 	}
 
 	// Token tracking
@@ -464,7 +464,7 @@ func (c *Controller) StreamDashboardChat(ctx context.Context, dashboard *models.
 	provider := c.llmProvider()
 	model := c.SecretManager.GetSecret("WEBSITE_BUILDER_LLM_MODEL")
 	if model == "" {
-		model = constants.DEFAULT_NEXTJS_LLM_MODEL
+		model = provider.DefaultModel()
 	}
 
 	// Token tracking
@@ -697,7 +697,7 @@ func (c *Controller) RefreshDashboardSchema(ctx context.Context, projectID strin
 	provider := c.llmProvider()
 	model := c.SecretManager.GetSecret("WEBSITE_BUILDER_LLM_MODEL")
 	if model == "" {
-		model = constants.DEFAULT_NEXTJS_LLM_MODEL
+		model = provider.DefaultModel()
 	}
 
 	tracker := utils.NewTokenTracker()

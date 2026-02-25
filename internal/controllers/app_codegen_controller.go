@@ -680,8 +680,8 @@ Rules:
 
 	sendEvent("neon_provision", map[string]any{"phase": "seeding_data"})
 
-	model := constants.DEFAULT_NEXTJS_LLM_MODEL
 	provider := c.llmProvider()
+	model := provider.DefaultModel()
 
 	seedSQL, err := utils.GetTextFromLLM(ctx, model, "You are a SQL expert. Generate realistic seed data. Return ONLY valid SQL.", seedPrompt, provider)
 	if err != nil {
@@ -1969,10 +1969,10 @@ var appFixTools = []utils.Tool{
 }
 
 // llmFixPass sends validation errors to LLM with tool access for auto-fix.
-// Always uses Sonnet regardless of the main model — fix passes are simple tasks.
+// Always uses the provider's default model — fix passes are simple tasks.
 func (c *Controller) llmFixPass(ctx context.Context, files map[string]string, valErrors []validationError, structure *appFileStructure) map[string]string {
 	provider := c.llmProvider()
-	model := constants.DEFAULT_NEXTJS_LLM_MODEL
+	model := provider.DefaultModel()
 
 	// Build lightweight file list + error list (LLM will use tools to read files)
 	var fileList strings.Builder
@@ -2232,7 +2232,7 @@ func (c *Controller) GenerateClarificationQuestions(ctx context.Context, prompt 
 	provider := c.llmProvider()
 	model := c.SecretManager.GetSecret("WEBSITE_BUILDER_LLM_MODEL")
 	if model == "" {
-		model = constants.DEFAULT_NEXTJS_LLM_MODEL
+		model = provider.DefaultModel()
 	}
 
 	userMsg := fmt.Sprintf("User prompt: %s\nProject type: %s", prompt, projectType)
@@ -2329,7 +2329,7 @@ func (c *Controller) PlanAppFileStructure(ctx context.Context, prompt string, pr
 	provider := c.llmProvider()
 	model := c.SecretManager.GetSecret("WEBSITE_BUILDER_LLM_MODEL")
 	if model == "" {
-		model = constants.DEFAULT_NEXTJS_LLM_MODEL
+		model = provider.DefaultModel()
 	}
 
 	systemPrompt := constants.NEXTJS_STRUCTURE_PROMPT
@@ -2368,7 +2368,7 @@ func (c *Controller) PlanAppFileStructureStream(ctx context.Context, prompt stri
 	provider := c.llmProvider()
 	model := c.SecretManager.GetSecret("WEBSITE_BUILDER_LLM_MODEL")
 	if model == "" {
-		model = constants.DEFAULT_NEXTJS_LLM_MODEL
+		model = provider.DefaultModel()
 	}
 
 	systemPrompt := constants.NEXTJS_STRUCTURE_PROMPT
@@ -2406,7 +2406,7 @@ func (c *Controller) PlanAppFileStructureFromScreenshot(ctx context.Context, ima
 	provider := c.llmProvider()
 	model := c.SecretManager.GetSecret("WEBSITE_BUILDER_LLM_MODEL")
 	if model == "" {
-		model = constants.DEFAULT_NEXTJS_LLM_MODEL
+		model = provider.DefaultModel()
 	}
 
 	response, err := utils.GetJSONFromLLMWithVision(ctx, model, constants.NEXTJS_SCREENSHOT_TO_FILES_PROMPT, "Analyze this screenshot and generate the file structure plan.", imageBase64, provider)
@@ -2939,8 +2939,8 @@ func (c *Controller) repairSingleAppFile(
 	fileCtx, fileCancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer fileCancel()
 
-	// Always use Sonnet for repair — simple task, no need for expensive models
-	repairModel := constants.DEFAULT_NEXTJS_LLM_MODEL
+	// Always use the provider's default model for repair — simple task, no need for expensive models
+	repairModel := provider.DefaultModel()
 
 	// Build context about files that import this broken file
 	mu.Lock()
@@ -3066,7 +3066,7 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 	provider := c.llmProvider()
 	model := c.SecretManager.GetSecret("WEBSITE_BUILDER_LLM_MODEL")
 	if model == "" {
-		model = constants.DEFAULT_NEXTJS_LLM_MODEL
+		model = provider.DefaultModel()
 	}
 	concurrency := c.llmConcurrency()
 	if provider.IsAnthropic() {

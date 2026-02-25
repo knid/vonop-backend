@@ -56,6 +56,23 @@ func (p *LLMProvider) WebSearchTool() *Tool {
 	return nil
 }
 
+// DefaultModel returns the default model name for this provider.
+// Used as fallback when WEBSITE_BUILDER_LLM_MODEL secret is empty.
+func (p *LLMProvider) DefaultModel() string {
+	switch p.Name {
+	case "anthropic":
+		return "claude-sonnet-4"
+	case "moonshot":
+		return "kimi-k2.5"
+	case "google":
+		return "gemini-2.5-flash"
+	case "zai":
+		return "glm-4.7"
+	default:
+		return "anthropic/claude-sonnet-4" // OpenRouter format
+	}
+}
+
 // SupportsVision returns true if the provider supports multimodal (image) input.
 func (p *LLMProvider) SupportsVision() bool {
 	return !p.IsZAI()

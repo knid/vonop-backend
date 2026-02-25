@@ -23,7 +23,7 @@ func (c *Controller) SeedEcommerceData(ctx context.Context, store *models.Store,
 	provider := c.llmProvider()
 	model := c.SecretManager.GetSecret("WEBSITE_BUILDER_LLM_MODEL")
 	if model == "" {
-		model = constants.DEFAULT_NEXTJS_LLM_MODEL
+		model = provider.DefaultModel()
 	}
 
 	llmMessages := []utils.Message{
@@ -153,7 +153,7 @@ func (c *Controller) ChatStoreManagement(store *models.Store, message string) (s
 	provider := c.llmProvider()
 	model := c.SecretManager.GetSecret("WEBSITE_BUILDER_LLM_MODEL")
 	if model == "" {
-		model = constants.DEFAULT_NEXTJS_LLM_MODEL
+		model = provider.DefaultModel()
 	}
 
 	// Gather store context
@@ -209,7 +209,7 @@ func (c *Controller) StreamChatStoreManagement(ctx context.Context, store *model
 	provider := c.llmProvider()
 	model := c.SecretManager.GetSecret("WEBSITE_BUILDER_LLM_MODEL")
 	if model == "" {
-		model = constants.DEFAULT_NEXTJS_LLM_MODEL
+		model = provider.DefaultModel()
 	}
 
 	// Token usage tracking
