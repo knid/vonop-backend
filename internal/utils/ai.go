@@ -1516,8 +1516,16 @@ func StreamWithTools(
 		}
 
 		// Record usage from this round
+		roundLatency := time.Since(roundStart).Milliseconds()
 		if roundUsage.TotalTokens > 0 {
-			slog.Info("LLM usage", "FROM", "LLM_STREAM_TOOLS", "round", round, "prompt_tokens", roundUsage.PromptTokens, "completion_tokens", roundUsage.CompletionTokens, "total_tokens", roundUsage.TotalTokens)
+			slog.Info("LLM usage", "FROM", "LLM_STREAM_TOOLS", "round", round,
+				"prompt_tokens", roundUsage.PromptTokens,
+				"completion_tokens", roundUsage.CompletionTokens,
+				"total_tokens", roundUsage.TotalTokens,
+				"latency_ms", roundLatency,
+				"tool_calls", len(toolCallsMap),
+				"history_msgs", len(currentMessages),
+			)
 			if tracker := TokenTrackerFromContext(ctx); tracker != nil {
 				if tracker.TrackContent {
 					tracker.RecordWithContent(model, roundUsage, time.Since(roundStart).Milliseconds(), true, currentMessages, fullText.String())
