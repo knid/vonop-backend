@@ -58,6 +58,8 @@ type MachineService struct {
 	Protocol     string         `json:"protocol"`
 	InternalPort int            `json:"internal_port"`
 	Ports        []MachinePort  `json:"ports"`
+	AutoStop     string         `json:"autostop,omitempty"`
+	AutoStart    bool           `json:"autostart,omitempty"`
 }
 
 type MachinePort struct {

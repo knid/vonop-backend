@@ -45,7 +45,7 @@ const proxy = httpProxy.createProxyServer({
 proxy.on("error", (err, _req, res) => {
   console.error("proxy error:", err.message);
   if (res.writeHead) {
-    res.writeHead(502, { "Content-Type": "text/html" });
+    res.writeHead(502, { "Content-Type": "text/html", "Cache-Control": "no-store, no-cache, must-revalidate" });
     res.end(LOADING_HTML);
   }
 });
@@ -216,7 +216,7 @@ const server = http.createServer(async (req, res) => {
   // If Next.js isn't ready yet, serve a loading page for browser requests
   // (let __wemob and _next requests through — they're handled above or by proxy)
   if (!nextReady && !req.url.startsWith("/__wemob/") && !req.url.startsWith("/_next/")) {
-    res.writeHead(503, { "Content-Type": "text/html" });
+    res.writeHead(503, { "Content-Type": "text/html", "Cache-Control": "no-store, no-cache, must-revalidate" });
     res.end(LOADING_HTML);
     return;
   }
