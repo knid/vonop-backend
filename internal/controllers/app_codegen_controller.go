@@ -764,6 +764,157 @@ var appCodegenTools = []utils.Tool{
 	},
 }
 
+// appMegaStreamTools defines the tools available to the mega-stream codegen (write_file + read_file + list_files).
+var appMegaStreamTools = []utils.Tool{
+	{
+		Type: "function",
+		Function: utils.ToolFunction{
+			Name:        "write_file",
+			Description: "Write a complete file to the project. Use this tool for each file you generate.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"file_path": map[string]any{
+						"type":        "string",
+						"description": "Relative file path, e.g. 'components/header.tsx'",
+					},
+					"content": map[string]any{
+						"type":        "string",
+						"description": "The complete file content",
+					},
+				},
+				"required": []string{"file_path", "content"},
+			},
+		},
+	},
+	{
+		Type: "function",
+		Function: utils.ToolFunction{
+			Name:        "read_file",
+			Description: "Read the content of an already-generated project file. Use this to see exact exports, types, and implementations from sibling files so your imports match.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"file_path": map[string]any{
+						"type":        "string",
+						"description": "Relative file path, e.g. 'components/header.tsx'",
+					},
+				},
+				"required": []string{"file_path"},
+			},
+		},
+	},
+	{
+		Type: "function",
+		Function: utils.ToolFunction{
+			Name:        "list_files",
+			Description: "List all already-generated files in the project.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{},
+			},
+		},
+	},
+}
+
+// buildCodegenToolExecutor creates a tool executor for the mega-stream codegen path.
+// It handles write_file (strip fences, upsert DB, update map, emit SSE), read_file, and list_files.
+func (c *Controller) buildCodegenToolExecutor(
+	project *models.AppProject,
+	generatedFiles map[string]string,
+	mu *sync.Mutex,
+	sendEvent func(string, any) bool,
+) utils.ToolExecutor {
+	return func(name string, arguments string) (string, error) {
+		switch name {
+		case "write_file":
+			var args struct {
+				FilePath string `json:"file_path"`
+				Content  string `json:"content"`
+			}
+			if err := json.Unmarshal([]byte(arguments), &args); err != nil {
+				return fmt.Sprintf("Error: invalid arguments: %s", err.Error()), nil
+			}
+			if args.FilePath == "" || args.Content == "" {
+				return "Error: file_path and content are required", nil
+			}
+
+			content := utils.StripCodeFences(args.Content)
+			_, fileType := guessFileType(args.FilePath)
+			// Override fileType for known extensions
+			if strings.HasSuffix(args.FilePath, ".css") {
+				fileType = "css"
+			} else if strings.HasSuffix(args.FilePath, ".tsx") {
+				fileType = "tsx"
+			} else if strings.HasSuffix(args.FilePath, ".ts") {
+				fileType = "ts"
+			}
+
+			if fileType == "tsx" || fileType == "ts" {
+				content, _ = stripForbiddenImports(content, args.FilePath)
+				checkMultilineForbiddenImports(content, args.FilePath)
+			}
+
+			// Upsert to DB
+			file := models.AppGeneratedFile{
+				AppProjectID: project.ID,
+				Platform:     "nextjs",
+				FilePath:     args.FilePath,
+				Content:      content,
+				FileType:     fileType,
+				IsGenerated:  true,
+			}
+			createdFile, dbErr := c.DB.UpsertAppGeneratedFile(&file)
+			if dbErr != nil {
+				slog.Error("mega-stream: failed to save file", "error", dbErr, "path", args.FilePath)
+				return fmt.Sprintf("Error: failed to save file: %s", dbErr.Error()), nil
+			}
+
+			// Update shared map
+			mu.Lock()
+			generatedFiles[args.FilePath] = content
+			mu.Unlock()
+
+			// Emit SSE event
+			sendEvent("file_complete", responses.FileCompleteEvent{
+				Action:   "create",
+				FilePath: args.FilePath,
+				FileID:   createdFile.ID,
+				FileType: fileType,
+			})
+
+			lineCount := strings.Count(content, "\n") + 1
+			return fmt.Sprintf("Created %s (%d lines)", args.FilePath, lineCount), nil
+
+		case "read_file":
+			var args struct {
+				FilePath string `json:"file_path"`
+			}
+			json.Unmarshal([]byte(arguments), &args)
+			mu.Lock()
+			content, ok := generatedFiles[args.FilePath]
+			mu.Unlock()
+			if !ok {
+				return fmt.Sprintf("Error: file '%s' not found in project", args.FilePath), nil
+			}
+			return content, nil
+
+		case "list_files":
+			mu.Lock()
+			var lines []string
+			for path, content := range generatedFiles {
+				lines = append(lines, fmt.Sprintf("%s (%d chars)", path, len(content)))
+			}
+			mu.Unlock()
+			sort.Strings(lines)
+			return strings.Join(lines, "\n"), nil
+
+		default:
+			return fmt.Sprintf("Unknown tool: %s", name), nil
+		}
+	}
+}
+
 // categorizeFiles sorts files into generation tiers.
 // Tier 0 is not returned (template files are filtered out before calling this).
 // Returns tiers 1-5 as separate slices:
@@ -2339,6 +2490,226 @@ Server-side (lib/wemob-auth.ts): register, login, logout, getSession, getCurrent
 Client-side (lib/wemob-auth-client.tsx): AuthProvider (wrap in layout), useAuth → { user, isLoading, isAuthenticated, login, register, logout, refreshSession }
 Users table: id (uuid), email, password_hash, name, avatar_url, role, email_verified, created_at, updated_at`
 
+// generateTierMegaStream generates all files in a tier via a single LLM call using
+// StreamWithTools + write_file tool. Returns the list of files that were NOT successfully
+// generated (for fallback to per-file generation).
+func (c *Controller) generateTierMegaStream(
+	ctx context.Context,
+	project *models.AppProject,
+	tier []appFilePlanEntry,
+	structure *appFileStructure,
+	model string,
+	provider *utils.LLMProvider,
+	generatedFiles map[string]string,
+	mu *sync.Mutex,
+	allFilePaths []string,
+	colorSchemeJSON []byte,
+	storeContext string,
+	authContext string,
+	sendEvent func(string, any) bool,
+) []appFilePlanEntry {
+	tierCtx, tierCancel := context.WithTimeout(ctx, time.Duration(len(tier)+3)*2*time.Minute)
+	defer tierCancel()
+
+	// --- Block 1: Combined base prompt (TSX + CSS rules if tier has CSS files) ---
+	hasCSSFile := false
+	for _, fp := range tier {
+		if fp.Type == "css" {
+			hasCSSFile = true
+			break
+		}
+	}
+	basePrompt := constants.NEXTJS_FILE_TSX_PROMPT
+	// Strip the "Tools Available" section (we define our own tools)
+	if idx := strings.Index(basePrompt, "\n\n### Tools Available"); idx >= 0 {
+		basePrompt = basePrompt[:idx]
+	}
+	if hasCSSFile {
+		basePrompt += "\n\n### CSS File Rules\n" + constants.NEXTJS_FILE_CSS_PROMPT
+	}
+	if project.ProjectType == "mobile_app" {
+		basePrompt += "\n\n" + constants.NEXTJS_MOBILE_DESIGN_RULES
+	}
+
+	// --- Block 2: Project context + SDK (identical to generateSingleAppFile) ---
+	var projectContext strings.Builder
+	projectContext.WriteString(fmt.Sprintf("### Project Context\nApp: %s\nColor scheme: %s\nTypography: %v\nAll files in project: %s\n\nUser's original description: %s",
+		structure.Name,
+		string(colorSchemeJSON),
+		structure.Typography,
+		strings.Join(allFilePaths, ", "),
+		project.Prompt,
+	))
+
+	mu.Lock()
+	_, hasDB := generatedFiles["lib/db.ts"]
+	schemaContent, hasSchema := generatedFiles["lib/schema.ts"]
+	mu.Unlock()
+	if hasDB && hasSchema {
+		projectContext.WriteString(fmt.Sprintf("\n\n--- lib/schema.ts (INJECTED — import tables from '@/lib/schema') ---\n%s", schemaContent))
+		projectContext.WriteString("\n\n### Database Access\nUse `import { db } from '@/lib/db'` and `import { ... } from '@/lib/schema'` for data access. Use Drizzle queries: `db.select().from(tableName)`, `db.insert(tableName).values({...})`, etc. Import operators from 'drizzle-orm': `import { eq, and, desc, sql } from 'drizzle-orm'`.\n")
+	}
+
+	// Check if any file in tier needs store SDK or auth
+	tierNeedsStore := false
+	tierNeedsAuth := false
+	for _, fp := range tier {
+		if fileNeedsStoreSDK(fp.Path) {
+			tierNeedsStore = true
+		}
+		if fileNeedsAuth(fp.Path) {
+			tierNeedsAuth = true
+		}
+	}
+
+	if project.ProjectType == "ecommerce" {
+		if tierNeedsStore {
+			mu.Lock()
+			if storeContent, ok := generatedFiles["lib/wemob-store.ts"]; ok {
+				projectContext.WriteString(fmt.Sprintf("\n\n--- lib/wemob-store.ts (INJECTED SDK — use these exports, do NOT create custom API utilities) ---\n%s", storeContent))
+			}
+			mu.Unlock()
+			if storeContext != "" {
+				projectContext.WriteString(fmt.Sprintf("\n\n### Store Context\n%s", storeContext))
+			}
+		} else {
+			projectContext.WriteString("\n\n### E-Commerce SDK (condensed)\n" + condensedStoreExports)
+			if storeContext != "" {
+				projectContext.WriteString(fmt.Sprintf("\n\n### Store Context\n%s", storeContext))
+			}
+		}
+	}
+
+	if authContext != "" {
+		if tierNeedsAuth {
+			mu.Lock()
+			if authContent, ok := generatedFiles["lib/wemob-auth.ts"]; ok {
+				projectContext.WriteString(fmt.Sprintf("\n\n--- lib/wemob-auth.ts (INJECTED AUTH — use these exports for server-side auth, do NOT create custom auth utilities) ---\n%s", authContent))
+			}
+			if authClientContent, ok := generatedFiles["lib/wemob-auth-client.tsx"]; ok {
+				projectContext.WriteString(fmt.Sprintf("\n\n--- lib/wemob-auth-client.tsx (INJECTED AUTH CLIENT — use these exports for client-side auth) ---\n%s", authClientContent))
+			}
+			mu.Unlock()
+			projectContext.WriteString(fmt.Sprintf("\n\n### Auth Context\n%s", authContext))
+		} else {
+			projectContext.WriteString("\n\n### Auth (condensed)\n" + condensedAuthExports)
+		}
+	}
+
+	// --- Block 3: User prompt listing all files to generate ---
+	mu.Lock()
+	var generatedFileList strings.Builder
+	if len(generatedFiles) > 0 {
+		generatedFileList.WriteString("\nAlready-generated files:\n")
+		genPaths := make([]string, 0, len(generatedFiles))
+		for p := range generatedFiles {
+			genPaths = append(genPaths, p)
+		}
+		sort.Strings(genPaths)
+		for _, p := range genPaths {
+			generatedFileList.WriteString(fmt.Sprintf("- %s\n", p))
+		}
+	}
+	fileSnapshot := make(map[string]string, len(generatedFiles))
+	for k, v := range generatedFiles {
+		fileSnapshot[k] = v
+	}
+	mu.Unlock()
+
+	exportManifest := buildExportManifest(fileSnapshot)
+	var manifestSection string
+	if exportManifest != "" {
+		manifestSection = "\n\nAvailable exports from already-generated files:\n" + exportManifest
+	}
+
+	var userPrompt strings.Builder
+	userPrompt.WriteString("Generate the following files using the write_file tool for EACH file. Call write_file once per file with the complete implementation.\n\n")
+	for i, fp := range tier {
+		userPrompt.WriteString(fmt.Sprintf("%d. %s (%s) — %s\n", i+1, fp.Path, fp.Type, fp.Description))
+	}
+	userPrompt.WriteString(generatedFileList.String())
+	userPrompt.WriteString(manifestSection)
+	userPrompt.WriteString(fmt.Sprintf("\n\nIMPORTANT: You MUST call write_file exactly %d times, once for each file listed above. Generate complete, production-quality implementations. Do not skip any file.", len(tier)))
+
+	messages := []utils.Message{
+		{Role: "system", Content: basePrompt},
+		{Role: "system", Content: projectContext.String()},
+		{Role: "user", Content: userPrompt.String()},
+	}
+
+	// Build tool executor
+	executor := c.buildCodegenToolExecutor(project, generatedFiles, mu, sendEvent)
+
+	// Configure: generous rounds for tool calls, high max tokens
+	tierSize := len(tier)
+	cfg := utils.ToolCallConfig{
+		MaxRounds:  tierSize + 5,
+		NudgeAfter: tierSize + 3,
+		StripAfter: tierSize + 5,
+		MaxTokens:  32768,
+	}
+
+	slog.Info("Starting mega-stream for tier",
+		"project_id", project.ID,
+		"files", tierSize,
+		"max_rounds", cfg.MaxRounds,
+	)
+
+	_, err := utils.StreamWithTools(
+		tierCtx,
+		model,
+		messages,
+		appMegaStreamTools,
+		provider,
+		nil, // no response format
+		nil, // no reasoning
+		executor,
+		func(toolName string, args string) {
+			// Log tool calls for observability
+			if toolName == "write_file" {
+				var a struct {
+					FilePath string `json:"file_path"`
+				}
+				json.Unmarshal([]byte(args), &a)
+				slog.Info("mega-stream write_file", "project_id", project.ID, "path", a.FilePath)
+			}
+		},
+		func(chunk string) {
+			// Stream text chunks as batch progress
+			sendEvent("file_chunk", responses.FileOperationEvent{
+				Action: "create",
+				Chunk:  chunk,
+			})
+		},
+		nil, // no reasoning callback
+		cfg,
+	)
+
+	if err != nil {
+		slog.Error("mega-stream failed", "project_id", project.ID, "error", err)
+	}
+
+	// Determine which files were NOT generated by the mega-stream
+	mu.Lock()
+	var failedFiles []appFilePlanEntry
+	for _, fp := range tier {
+		if _, ok := generatedFiles[fp.Path]; !ok {
+			failedFiles = append(failedFiles, fp)
+		}
+	}
+	mu.Unlock()
+
+	if len(failedFiles) > 0 {
+		slog.Warn("mega-stream missed files, will fallback to per-file generation",
+			"project_id", project.ID,
+			"missed", len(failedFiles),
+			"total", tierSize,
+		)
+	}
+
+	return failedFiles
+}
+
 // generateSingleAppFile generates a single app file with a per-file timeout.
 // It reads generatedFiles under mu lock for context building, and returns the raw content.
 // System prompt is split into multiple blocks for Anthropic prompt caching:
@@ -3257,122 +3628,132 @@ func (c *Controller) StreamGenerateAppFiles(ctx context.Context, project *models
 
 		slog.Info("Generating tier", "project_id", project.ID, "tier", tierIdx+1, "files", len(tier))
 
-		sem := make(chan struct{}, concurrency)
-		var wg sync.WaitGroup
+		// Mega-stream: generate all files in this tier via a single LLM call
+		failedFiles := c.generateTierMegaStream(
+			ctx, project, tier, structure, model, provider,
+			generatedFiles, &mu, allFilePaths, colorSchemeJSON,
+			storeContext, authContext, sendEvent,
+		)
 
-		for _, filePlan := range tier {
-			if ctx.Err() != nil {
-				break
-			}
+		// Fallback: per-file generation for any files the mega-stream missed
+		if len(failedFiles) > 0 {
+			slog.Info("Falling back to per-file generation",
+				"project_id", project.ID,
+				"tier", tierIdx+1,
+				"missed_files", len(failedFiles),
+			)
 
-			wg.Add(1)
-			// Acquire semaphore with context check to avoid blocking after timeout
-			select {
-			case sem <- struct{}{}:
-				// got slot
-			case <-ctx.Done():
-				wg.Done()
-				continue
-			}
-			go func(fp appFilePlanEntry) {
-				defer wg.Done()
-				defer func() { <-sem }() // release semaphore slot
+			sem := make(chan struct{}, concurrency)
+			var wg sync.WaitGroup
 
-				var content string
-				var lastFailReason string
-				for attempt := 0; attempt < 3; attempt++ {
-					if ctx.Err() != nil {
-						lastFailReason = "context cancelled"
-						content = c.getAppFileFallback(fp)
-						break
-					}
-					if attempt > 0 {
-						// Respect context during retry backoff
-						select {
-						case <-time.After(time.Duration(attempt) * 2 * time.Second):
-						case <-ctx.Done():
-						}
+			for _, filePlan := range failedFiles {
+				if ctx.Err() != nil {
+					break
+				}
+
+				wg.Add(1)
+				select {
+				case sem <- struct{}{}:
+				case <-ctx.Done():
+					wg.Done()
+					continue
+				}
+				go func(fp appFilePlanEntry) {
+					defer wg.Done()
+					defer func() { <-sem }()
+
+					var content string
+					var lastFailReason string
+					for attempt := 0; attempt < 3; attempt++ {
 						if ctx.Err() != nil {
-							lastFailReason = "context cancelled during retry"
+							lastFailReason = "context cancelled"
 							content = c.getAppFileFallback(fp)
 							break
 						}
-						slog.Info("Retrying file generation", "path", fp.Path, "attempt", attempt+1)
+						if attempt > 0 {
+							select {
+							case <-time.After(time.Duration(attempt) * 2 * time.Second):
+							case <-ctx.Done():
+							}
+							if ctx.Err() != nil {
+								lastFailReason = "context cancelled during retry"
+								content = c.getAppFileFallback(fp)
+								break
+							}
+							slog.Info("Retrying file generation (fallback)", "path", fp.Path, "attempt", attempt+1)
+						}
+						var err error
+						content, err = c.generateSingleAppFile(ctx, project, fp, structure, model, provider, generatedFiles, &mu, allFilePaths, colorSchemeJSON, storeContext, authContext, sendEvent)
+						if err != nil {
+							slog.Error("failed to generate app file (fallback)", "error", err, "path", fp.Path, "attempt", attempt+1)
+							lastFailReason = fmt.Sprintf("error: %s", err.Error())
+							content = c.getAppFileFallback(fp)
+						}
+						stripped := utils.StripCodeFences(content)
+						if len(content)-len(stripped) > 100 {
+							slog.Debug("StripCodeFences removed significant content", "path", fp.Path, "removed_chars", len(content)-len(stripped))
+						}
+						content = stripped
+						if strings.TrimSpace(content) == "" {
+							lastFailReason = "empty response from LLM"
+							content = c.getAppFileFallback(fp)
+						}
+						if fp.Type == "tsx" || fp.Type == "ts" {
+							content, _ = stripForbiddenImports(content, fp.Path)
+							checkMultilineForbiddenImports(content, fp.Path)
+						}
+						if !strings.Contains(content, fallbackSentinel) {
+							lastFailReason = ""
+							break
+						}
+						if lastFailReason == "" {
+							lastFailReason = "LLM returned placeholder/fallback content"
+						}
 					}
-					var err error
-					content, err = c.generateSingleAppFile(ctx, project, fp, structure, model, provider, generatedFiles, &mu, allFilePaths, colorSchemeJSON, storeContext, authContext, sendEvent)
-					if err != nil {
-						slog.Error("failed to generate app file", "error", err, "path", fp.Path, "attempt", attempt+1)
-						lastFailReason = fmt.Sprintf("error: %s", err.Error())
-						content = c.getAppFileFallback(fp)
-					}
-					stripped := utils.StripCodeFences(content)
-					if len(content)-len(stripped) > 100 {
-						slog.Debug("StripCodeFences removed significant content", "path", fp.Path, "removed_chars", len(content)-len(stripped))
-					}
-					content = stripped
-					if strings.TrimSpace(content) == "" {
-						lastFailReason = "empty response from LLM"
-						content = c.getAppFileFallback(fp)
-					}
-					if fp.Type == "tsx" || fp.Type == "ts" {
-						content, _ = stripForbiddenImports(content, fp.Path)
-						checkMultilineForbiddenImports(content, fp.Path)
-					}
-					// If we got real content (not fallback), stop retrying
-					if !strings.Contains(content, fallbackSentinel) {
-						lastFailReason = ""
-						break
-					}
-					if lastFailReason == "" {
-						lastFailReason = "LLM returned placeholder/fallback content"
-					}
-				}
 
-				// Surface error if all retries failed and track reason for repair pass
-				if strings.Contains(content, fallbackSentinel) {
-					if lastFailReason == "" {
-						lastFailReason = "all retries exhausted"
+					if strings.Contains(content, fallbackSentinel) {
+						if lastFailReason == "" {
+							lastFailReason = "all retries exhausted"
+						}
+						mu.Lock()
+						failureReasons[fp.Path] = lastFailReason
+						mu.Unlock()
+						sendEvent("file_error", map[string]any{
+							"path":    fp.Path,
+							"message": fmt.Sprintf("All retries exhausted for %s — using placeholder content", fp.Path),
+						})
 					}
+
+					file := models.AppGeneratedFile{
+						AppProjectID: project.ID,
+						Platform:     "nextjs",
+						FilePath:     fp.Path,
+						Content:      content,
+						FileType:     fp.Type,
+						IsGenerated:  true,
+					}
+
+					createdFile, dbErr := c.DB.UpsertAppGeneratedFile(&file)
+					if dbErr != nil {
+						slog.Error("failed to save app file (fallback)", "error", dbErr, "path", fp.Path)
+						return
+					}
+
 					mu.Lock()
-					failureReasons[fp.Path] = lastFailReason
+					generatedFiles[fp.Path] = content
 					mu.Unlock()
-					sendEvent("file_error", map[string]any{
-						"path":    fp.Path,
-						"message": fmt.Sprintf("All retries exhausted for %s — using placeholder content", fp.Path),
+
+					sendEvent("file_complete", responses.FileCompleteEvent{
+						Action:   "create",
+						FilePath: fp.Path,
+						FileID:   createdFile.ID,
+						FileType: fp.Type,
 					})
-				}
+				}(filePlan)
+			}
 
-				// Save to DB
-				file := models.AppGeneratedFile{
-					AppProjectID: project.ID,
-					Platform:     "nextjs",
-					FilePath:     fp.Path,
-					Content:      content,
-					FileType:     fp.Type,
-					IsGenerated:  true,
-				}
-
-				createdFile, dbErr := c.DB.UpsertAppGeneratedFile(&file)
-				if dbErr != nil {
-					slog.Error("failed to save app file", "error", dbErr, "path", fp.Path)
-					return
-				}
-
-				mu.Lock()
-				generatedFiles[fp.Path] = content
-				mu.Unlock()
-
-				sendEvent("file_complete", responses.FileCompleteEvent{
-					Action:   "create",
-					FilePath: fp.Path,
-					FileID:   createdFile.ID,
-					FileType: fp.Type,
-				})
-			}(filePlan)
+			wg.Wait()
 		}
-
-		wg.Wait()
 
 		if ctx.Err() != nil {
 			return
