@@ -41,8 +41,9 @@ type builderToolCallbacks struct {
 	sendEvent      func(eventName string, data any) bool
 	appliedOps     *[]appBuilderOperation
 	mu             sync.Mutex
-	pendingFiles   map[string]string // files changed since last preview sync
-	pendingDeletes []string          // files deleted since last preview sync
+	fileMu         sync.RWMutex           // guards fileMap reads/writes
+	pendingFiles   map[string]string       // files changed since last preview sync
+	pendingDeletes []string               // files deleted since last preview sync
 }
 
 // StreamBuildApp is the unified entry point for both initial app generation and chat editing.
@@ -261,7 +262,10 @@ func (c *Controller) StreamBuildApp(
 	}
 
 	var messages []models.AppConversationMessage
-	json.Unmarshal(conv.Messages, &messages)
+	if err := json.Unmarshal(conv.Messages, &messages); err != nil {
+		slog.Warn("failed to unmarshal conversation messages, starting fresh", "error", err, "conv_id", conv.ID)
+		messages = nil
+	}
 
 	// Convert base64 images to data URIs
 	var imageURLs []string
@@ -283,9 +287,13 @@ func (c *Controller) StreamBuildApp(
 		Timestamp: time.Now().Unix(),
 		ImageURLs: imageURLs,
 	})
-	conv.Messages, _ = json.Marshal(messages)
-	if _, err := c.DB.UpdateAppConversation(conv); err != nil {
-		slog.Error("failed to save user message", "error", err, "conv_id", conv.ID)
+	if msgJSON, err := json.Marshal(messages); err != nil {
+		slog.Error("failed to marshal messages after user message", "error", err, "conv_id", conv.ID)
+	} else {
+		conv.Messages = msgJSON
+		if _, err := c.DB.UpdateAppConversation(conv); err != nil {
+			slog.Error("failed to save user message", "error", err, "conv_id", conv.ID)
+		}
 	}
 
 	// --- Build LLM messages ---
@@ -329,8 +337,14 @@ func (c *Controller) StreamBuildApp(
 			oldMessages := messages[:len(messages)-keepRecent]
 			if conv.Summary == "" && len(oldMessages) > 0 {
 				conv.Summary = c.summarizeConversation(ctx, oldMessages, provider)
-				conv.Messages, _ = json.Marshal(messages)
-				c.DB.UpdateAppConversation(conv)
+				if msgJSON, err := json.Marshal(messages); err != nil {
+					slog.Error("failed to marshal messages after summarization", "error", err, "conv_id", conv.ID)
+				} else {
+					conv.Messages = msgJSON
+					if _, err := c.DB.UpdateAppConversation(conv); err != nil {
+						slog.Error("failed to save conversation after summarization", "error", err, "conv_id", conv.ID)
+					}
+				}
 			}
 			if conv.Summary != "" {
 				llmMessages = append(llmMessages, utils.Message{
@@ -365,11 +379,17 @@ func (c *Controller) StreamBuildApp(
 	}
 
 	// --- Create auto-snapshot before changes ---
-	preSnapshot, _ := c.CreateAppSnapshot(project, "Auto-save before changes", "auto")
+	preSnapshot, snapErr := c.CreateAppSnapshot(project, "Auto-save before changes", "auto")
+	if snapErr != nil {
+		slog.Warn("failed to create pre-change snapshot, rollback will not be available",
+			"error", snapErr, "project_id", project.ID)
+	}
 	var preSnapshotID string
 	if preSnapshot != nil {
 		preSnapshotID = preSnapshot.ID.String()
-		c.DB.DeleteOldAutoSnapshots(project.ID.String(), 20)
+		if err := c.DB.DeleteOldAutoSnapshots(project.ID.String(), 20); err != nil {
+			slog.Warn("failed to delete old auto snapshots", "error", err, "project_id", project.ID)
+		}
 	}
 
 	// --- Set up tools and executor ---
@@ -581,8 +601,14 @@ func (c *Controller) StreamBuildApp(
 			Content:   "Sorry, I couldn't process your request. Please try again.",
 			Timestamp: time.Now().Unix(),
 		})
-		conv.Messages, _ = json.Marshal(messages)
-		c.DB.UpdateAppConversation(conv)
+		if msgJSON, err := json.Marshal(messages); err != nil {
+			slog.Error("failed to marshal messages after LLM error", "error", err, "conv_id", conv.ID)
+		} else {
+			conv.Messages = msgJSON
+			if _, err := c.DB.UpdateAppConversation(conv); err != nil {
+				slog.Error("failed to save conversation after LLM error", "error", err, "conv_id", conv.ID)
+			}
+		}
 		sendError("ai", "failed to generate changes. try again please")
 		return
 	}
@@ -635,8 +661,11 @@ func (c *Controller) StreamBuildApp(
 		codeKeys := detectEnvVarsFromCode(fileMap)
 		var storedRequired []RequiredEnvVar
 		if raw, ok := project.Settings["required_env_vars"]; ok {
-			b, _ := json.Marshal(raw)
-			json.Unmarshal(b, &storedRequired)
+			if b, err := json.Marshal(raw); err != nil {
+				slog.Warn("failed to marshal required_env_vars setting", "error", err, "project_id", project.ID)
+			} else if err := json.Unmarshal(b, &storedRequired); err != nil {
+				slog.Warn("failed to unmarshal required_env_vars setting", "error", err, "project_id", project.ID)
+			}
 		}
 		missingVars = c.computeMissingEnvVars(project, storedRequired, codeKeys)
 	}
@@ -676,15 +705,23 @@ func (c *Controller) StreamBuildApp(
 		ToolCalls:          accToolCalls,
 	}
 	messages = append(messages, assistantMsg)
-	conv.Messages, _ = json.Marshal(messages)
-	if _, err := c.DB.UpdateAppConversation(conv); err != nil {
-		slog.Error("failed to save assistant message", "error", err, "conv_id", conv.ID)
+	if msgJSON, err := json.Marshal(messages); err != nil {
+		slog.Error("failed to marshal messages after assistant message", "error", err, "conv_id", conv.ID)
+	} else {
+		conv.Messages = msgJSON
+		if _, err := c.DB.UpdateAppConversation(conv); err != nil {
+			slog.Error("failed to save assistant message", "error", err, "conv_id", conv.ID)
+		}
 	}
 
 	// --- Update project status for initial generation ---
 	if isInitialGeneration && filesChanged > 0 {
 		project.Status = "ready"
-		project, _ = c.DB.UpdateAppProject(project)
+		if updated, err := c.DB.UpdateAppProject(project); err != nil {
+			slog.Error("failed to update project status to ready", "error", err, "project_id", project.ID)
+		} else {
+			project = updated
+		}
 	}
 
 	// --- Send done event ---
@@ -850,7 +887,11 @@ func (c *Controller) buildProjectContext(project *models.AppProject, fileMap map
 
 	// Theme
 	var theme map[string]any
-	json.Unmarshal(project.Theme, &theme)
+	if len(project.Theme) > 0 {
+		if err := json.Unmarshal(project.Theme, &theme); err != nil {
+			slog.Warn("failed to unmarshal project theme", "error", err, "project_id", project.ID)
+		}
+	}
 	if len(theme) > 0 {
 		sb.WriteString(fmt.Sprintf("Theme: %v\n", theme))
 	}
@@ -892,13 +933,16 @@ func (c *Controller) buildProjectContext(project *models.AppProject, fileMap map
 
 		// Inject file plan from structure phase if available
 		if raw, ok := project.Settings["file_plan"]; ok {
-			b, _ := json.Marshal(raw)
+			b, marshalErr := json.Marshal(raw)
+			if marshalErr != nil {
+				slog.Warn("failed to marshal file_plan setting", "error", marshalErr, "project_id", project.ID)
+			}
 			var filePlan []struct {
 				Path        string `json:"path"`
 				Type        string `json:"type"`
 				Description string `json:"description"`
 			}
-			if json.Unmarshal(b, &filePlan) == nil && len(filePlan) > 0 {
+			if marshalErr == nil && json.Unmarshal(b, &filePlan) == nil && len(filePlan) > 0 {
 				sb.WriteString("\nPlanned file structure (create these files):\n")
 				for _, f := range filePlan {
 					sb.WriteString(fmt.Sprintf("- %s (%s): %s\n", f.Path, f.Type, f.Description))
@@ -1034,24 +1078,38 @@ func (c *Controller) runDeterministicAutoFixes(
 		for i := 0; i+1 < len(tsxChangedPaths); i += 2 {
 			oldPath := tsxChangedPaths[i]
 			newPath := tsxChangedPaths[i+1]
-			if oldFile, err := c.DB.GetAppGeneratedFileByPath(project.ID.String(), "nextjs", oldPath); err == nil {
-				c.DB.DeleteAppGeneratedFile(oldFile)
-				sendEvent("file_complete", responses.FileCompleteEvent{Action: "delete", FilePath: oldPath})
-			}
 			_, fileType := guessFileType(newPath)
-			newFile := models.AppGeneratedFile{
-				AppProjectID: project.ID,
-				Platform:     "nextjs",
-				FilePath:     newPath,
-				Content:      fileMap[newPath],
-				FileType:     fileType,
-				IsGenerated:  true,
-			}
-			if created, err := c.DB.CreateAppGeneratedFile(&newFile); err == nil {
-				sendEvent("file_complete", responses.FileCompleteEvent{
-					Action: "create", FilePath: newPath, FileID: created.ID,
-					FileType: fileType, Content: fileMap[newPath],
-				})
+
+			// Preserve file ID by updating in-place instead of delete+create
+			if oldFile, err := c.DB.GetAppGeneratedFileByPath(project.ID.String(), "nextjs", oldPath); err == nil {
+				oldFile.FilePath = newPath
+				oldFile.FileType = fileType
+				oldFile.Content = fileMap[newPath]
+				oldFile.UpdatedAt = time.Now()
+				if _, err := c.DB.UpdateAppGeneratedFile(oldFile); err != nil {
+					slog.Error("failed to rename file in DB", "error", err, "old", oldPath, "new", newPath)
+				} else {
+					sendEvent("file_complete", responses.FileCompleteEvent{
+						Action: "modify", FilePath: newPath, FileID: oldFile.ID,
+						FileType: fileType, Content: fileMap[newPath],
+					})
+				}
+			} else {
+				// Fallback: old file not found, create new
+				newFile := models.AppGeneratedFile{
+					AppProjectID: project.ID,
+					Platform:     "nextjs",
+					FilePath:     newPath,
+					Content:      fileMap[newPath],
+					FileType:     fileType,
+					IsGenerated:  true,
+				}
+				if created, err := c.DB.CreateAppGeneratedFile(&newFile); err == nil {
+					sendEvent("file_complete", responses.FileCompleteEvent{
+						Action: "create", FilePath: newPath, FileID: created.ID,
+						FileType: fileType, Content: fileMap[newPath],
+					})
+				}
 			}
 			*filesChanged++
 		}
@@ -1156,11 +1214,19 @@ func (c *Controller) validateWithPreviewLogs(
 	const waitAfterSync = 8 * time.Second
 
 	for round := 0; round < maxValidationRounds; round++ {
+		if ctx.Err() != nil {
+			return
+		}
+
 		// 1. Sync all files to preview
 		c.SyncPreviewAll(project)
 
-		// 2. Wait for Next.js to recompile
-		time.Sleep(waitAfterSync)
+		// 2. Wait for Next.js to recompile (context-aware)
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(waitAfterSync):
+		}
 
 		// 3. Fetch logs
 		logs, err := c.PreviewService.GetLogs(project.ID.String())
@@ -1206,13 +1272,22 @@ func (c *Controller) validateWithPreviewLogs(
 		}
 
 		fixModel := c.fixModel(provider)
-		utils.StreamWithTools(ctx, fixModel, fixMessages, appBuilderTools, provider,
+		_, fixErr := utils.StreamWithTools(ctx, fixModel, fixMessages, appBuilderTools, provider,
 			nil, nil, executor,
 			func(toolName, args string) { /* silent tool calls */ },
 			func(chunk string) { sendEvent("chat_text", responses.ChatTextEvent{Chunk: chunk}) },
 			func(chunk string) { /* ignore thinking */ },
 			fixConfig,
 		)
+		if fixErr != nil {
+			slog.Error("validation fix pass failed", "error", fixErr, "project_id", project.ID, "round", round+1)
+			sendEvent("validation", responses.ValidationEvent{
+				Iteration: round + 1,
+				Errors:    errors,
+				Fixing:    false,
+			})
+			break
+		}
 
 		// Run deterministic auto-fixes again after LLM fixes
 		c.runDeterministicAutoFixes(project, fileMap, sendEvent, appliedOps, filesChanged)
@@ -1470,17 +1545,21 @@ func (c *Controller) buildBuilderToolExecutor(ctx context.Context, project *mode
 				FilePath string `json:"file_path"`
 			}
 			json.Unmarshal([]byte(arguments), &args)
+			cbs.fileMu.RLock()
 			content, ok := fileMap[args.FilePath]
+			cbs.fileMu.RUnlock()
 			if !ok {
 				return fmt.Sprintf("Error: file '%s' not found in project", args.FilePath), nil
 			}
 			return content, nil
 
 		case "list_files":
+			cbs.fileMu.RLock()
 			var lines []string
 			for path, content := range fileMap {
 				lines = append(lines, fmt.Sprintf("%s (%d chars)", path, len(content)))
 			}
+			cbs.fileMu.RUnlock()
 			sort.Strings(lines)
 			return strings.Join(lines, "\n"), nil
 
@@ -1490,6 +1569,7 @@ func (c *Controller) buildBuilderToolExecutor(ctx context.Context, project *mode
 			}
 			json.Unmarshal([]byte(arguments), &args)
 			query := strings.ToLower(args.Query)
+			cbs.fileMu.RLock()
 			var results []string
 			for path, content := range fileMap {
 				lines := strings.Split(content, "\n")
@@ -1499,6 +1579,7 @@ func (c *Controller) buildBuilderToolExecutor(ctx context.Context, project *mode
 					}
 				}
 			}
+			cbs.fileMu.RUnlock()
 			if len(results) == 0 {
 				return "No matches found.", nil
 			}
@@ -1554,19 +1635,22 @@ func (c *Controller) buildBuilderToolExecutor(ctx context.Context, project *mode
 				}
 				fileID = createdFile.ID
 			}
-			fileMap[args.FilePath] = content
-
 			if cbs != nil {
+				cbs.mu.Lock()
+				cbs.fileMu.Lock()
+				fileMap[args.FilePath] = content
+				cbs.fileMu.Unlock()
 				cbs.sendEvent("file_complete", responses.FileCompleteEvent{
 					Action: action, FilePath: args.FilePath,
 					FileID: fileID, FileType: fileType, Content: content,
 				})
-				cbs.mu.Lock()
 				*cbs.appliedOps = append(*cbs.appliedOps, appBuilderOperation{
 					Action: action, Path: args.FilePath, Type: fileType,
 				})
 				cbs.pendingFiles[args.FilePath] = content
 				cbs.mu.Unlock()
+			} else {
+				fileMap[args.FilePath] = content
 			}
 			return fmt.Sprintf("Successfully wrote %s (%d chars, action: %s). File is saved — do not re-write.", args.FilePath, len(content), action), nil
 
@@ -1629,19 +1713,22 @@ func (c *Controller) buildBuilderToolExecutor(ctx context.Context, project *mode
 					}
 					fileID = createdFile.ID
 				}
-				fileMap[f.FilePath] = content
-
 				if cbs != nil {
+					cbs.mu.Lock()
+					cbs.fileMu.Lock()
+					fileMap[f.FilePath] = content
+					cbs.fileMu.Unlock()
 					cbs.sendEvent("file_complete", responses.FileCompleteEvent{
 						Action: action, FilePath: f.FilePath,
 						FileID: fileID, FileType: fileType, Content: content,
 					})
-					cbs.mu.Lock()
 					*cbs.appliedOps = append(*cbs.appliedOps, appBuilderOperation{
 						Action: action, Path: f.FilePath, Type: fileType,
 					})
 					cbs.pendingFiles[f.FilePath] = content
 					cbs.mu.Unlock()
+				} else {
+					fileMap[f.FilePath] = content
 				}
 				results = append(results, fmt.Sprintf("OK %s (%d chars, %s)", f.FilePath, len(content), action))
 			}
@@ -1660,7 +1747,9 @@ func (c *Controller) buildBuilderToolExecutor(ctx context.Context, project *mode
 				return "Error: file_path and old_string are required", nil
 			}
 
+			cbs.fileMu.RLock()
 			content, ok := fileMap[args.FilePath]
+			cbs.fileMu.RUnlock()
 			if !ok {
 				return fmt.Sprintf("Error: file '%s' not found. Use write_file to create it.", args.FilePath), nil
 			}
@@ -1689,20 +1778,23 @@ func (c *Controller) buildBuilderToolExecutor(ctx context.Context, project *mode
 			if err != nil {
 				return fmt.Sprintf("Error: failed to save: %s", err.Error()), nil
 			}
-			fileMap[args.FilePath] = newContent
-
 			if cbs != nil {
+				cbs.mu.Lock()
+				cbs.fileMu.Lock()
+				fileMap[args.FilePath] = newContent
+				cbs.fileMu.Unlock()
 				cbs.sendEvent("file_complete", responses.FileCompleteEvent{
 					Action: "modify", FilePath: args.FilePath,
 					FileID: existingFile.ID, FileType: existingFile.FileType,
 					Content: newContent,
 				})
-				cbs.mu.Lock()
 				*cbs.appliedOps = append(*cbs.appliedOps, appBuilderOperation{
 					Action: "modify", Path: args.FilePath, Type: existingFile.FileType,
 				})
 				cbs.pendingFiles[args.FilePath] = newContent
 				cbs.mu.Unlock()
+			} else {
+				fileMap[args.FilePath] = newContent
 			}
 			return fmt.Sprintf("Successfully edited %s", args.FilePath), nil
 
@@ -1718,19 +1810,23 @@ func (c *Controller) buildBuilderToolExecutor(ctx context.Context, project *mode
 				return fmt.Sprintf("Error: file '%s' not found", args.FilePath), nil
 			}
 			c.DB.DeleteAppGeneratedFile(existingFile)
-			delete(fileMap, args.FilePath)
 
 			if cbs != nil {
+				cbs.mu.Lock()
+				cbs.fileMu.Lock()
+				delete(fileMap, args.FilePath)
+				cbs.fileMu.Unlock()
 				cbs.sendEvent("file_complete", responses.FileCompleteEvent{
 					Action: "delete", FilePath: args.FilePath,
 				})
-				cbs.mu.Lock()
 				*cbs.appliedOps = append(*cbs.appliedOps, appBuilderOperation{
 					Action: "delete", Path: args.FilePath,
 				})
 				delete(cbs.pendingFiles, args.FilePath)
 				cbs.pendingDeletes = append(cbs.pendingDeletes, args.FilePath)
 				cbs.mu.Unlock()
+			} else {
+				delete(fileMap, args.FilePath)
 			}
 			return fmt.Sprintf("Successfully deleted %s", args.FilePath), nil
 
@@ -1878,9 +1974,16 @@ func (c *Controller) buildBuilderToolExecutor(ctx context.Context, project *mode
 			}
 
 			// Store data models in project
-			dmJSON, _ := json.Marshal(dataModels)
+			dmJSON, err := json.Marshal(dataModels)
+			if err != nil {
+				return fmt.Sprintf("Error: failed to marshal data models: %s", err.Error()), nil
+			}
 			project.DataModels = dmJSON
-			project, _ = c.DB.UpdateAppProject(project)
+			if updated, err := c.DB.UpdateAppProject(project); err != nil {
+				slog.Error("failed to save data models to project", "error", err, "project_id", project.ID)
+			} else {
+				project = updated
+			}
 
 			// Provision Neon database
 			if c.NeonService == nil {
@@ -1945,12 +2048,16 @@ func (c *Controller) buildBuilderToolExecutor(ctx context.Context, project *mode
 			}
 
 			// Seed the database
-			c.seedNeonDatabase(ctx, project, dataModels, func(eventName string, data any) bool {
+			seedResult, seedErr := c.seedNeonDatabase(ctx, project, dataModels, func(eventName string, data any) bool {
 				if cbs != nil {
 					return cbs.sendEvent(eventName, data)
 				}
 				return true
 			})
+			if seedErr != nil {
+				slog.Warn("database seeding failed, tables will be empty", "error", seedErr, "project_id", project.ID)
+			}
+			_ = seedResult
 
 			if cbs != nil {
 				cbs.sendEvent("neon_provision", map[string]any{"phase": "ready"})
@@ -2008,19 +2115,23 @@ func (c *Controller) injectTemplateFileForTool(project *models.AppProject, tp st
 		slog.Error("failed to save template file via tool", "path", tp, "error", err)
 		return
 	}
-	fileMap[tp] = content
-
 	if cbs != nil {
+		cbs.mu.Lock()
+		cbs.fileMu.Lock()
+		fileMap[tp] = content
+		cbs.fileMu.Unlock()
 		cbs.sendEvent("file_complete", responses.FileCompleteEvent{
 			Action: "create", FilePath: tp,
 			FileID: createdFile.ID, FileType: fileType,
 			Content: content,
 		})
-		cbs.mu.Lock()
 		*cbs.appliedOps = append(*cbs.appliedOps, appBuilderOperation{
 			Action: "create", Path: tp, Type: fileType,
 		})
+		cbs.pendingFiles[tp] = content
 		cbs.mu.Unlock()
+	} else {
+		fileMap[tp] = content
 	}
 }
 
