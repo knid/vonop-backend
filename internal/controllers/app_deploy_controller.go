@@ -315,7 +315,7 @@ func (c *Controller) ValidateAppFiles(projectID string) (*AppValidationResult, e
 	provider := c.llmProvider()
 	model := c.SecretManager.GetSecret("WEBSITE_BUILDER_LLM_MODEL")
 	if model == "" {
-		model = constants.DEFAULT_NEXTJS_LLM_MODEL
+		model = provider.DefaultModel()
 	}
 
 	var fileContext strings.Builder

@@ -646,7 +646,7 @@ func (c *Controller) StreamChatAppFileOps(ctx context.Context, project *models.A
 	provider := c.llmProvider()
 	model := c.SecretManager.GetSecret("WEBSITE_BUILDER_LLM_MODEL")
 	if model == "" {
-		model = constants.DEFAULT_NEXTJS_LLM_MODEL
+		model = provider.DefaultModel()
 	}
 
 	// Token usage tracking
