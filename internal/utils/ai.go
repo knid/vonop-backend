@@ -39,9 +39,9 @@ func IsRateLimited(err error) (*ErrRateLimited, bool) {
 	return nil, false
 }
 
-// parseRateLimitError returns an ErrRateLimited for 429 responses, nil otherwise.
+// parseRateLimitError returns an ErrRateLimited for 429/529 responses, nil otherwise.
 func parseRateLimitError(resp *http.Response, body []byte) *ErrRateLimited {
-	if resp.StatusCode != http.StatusTooManyRequests {
+	if resp.StatusCode != http.StatusTooManyRequests && resp.StatusCode != 529 {
 		return nil
 	}
 	retryAfter := 30 * time.Second // default
@@ -601,6 +601,9 @@ func StreamTextFromLLM(ctx context.Context, model, system, message string, provi
 			if ctx.Err() != nil {
 				return "", ctx.Err()
 			}
+			if rlErr, ok := IsRateLimited(err); ok {
+				return "", rlErr
+			}
 			return "", fmt.Errorf("error reading streaming response. try again please")
 		}
 		if result.Usage.TotalTokens > 0 {
@@ -723,6 +726,9 @@ func StreamTextFromLLMWithMessages(ctx context.Context, model string, messages [
 		if err != nil {
 			if ctx.Err() != nil {
 				return "", ctx.Err()
+			}
+			if rlErr, ok := IsRateLimited(err); ok {
+				return "", rlErr
 			}
 			return "", fmt.Errorf("error reading streaming response. try again please")
 		}
@@ -903,6 +909,9 @@ func StreamJSONFromLLMWithMessages(ctx context.Context, model string, messages [
 		if err != nil {
 			if ctx.Err() != nil {
 				return "", ctx.Err()
+			}
+			if rlErr, ok := IsRateLimited(err); ok {
+				return "", rlErr
 			}
 			return "", fmt.Errorf("error reading streaming response. try again please")
 		}
@@ -1111,6 +1120,9 @@ func StreamJSONFromLLM(ctx context.Context, model, system, message string, provi
 			if ctx.Err() != nil {
 				return "", ctx.Err()
 			}
+			if rlErr, ok := IsRateLimited(err); ok {
+				return "", rlErr
+			}
 			return "", fmt.Errorf("error reading streaming response. try again please")
 		}
 		if result.Usage.TotalTokens > 0 {
@@ -1230,6 +1242,9 @@ func StreamJSONFromLLMWithVision(ctx context.Context, model, system, userText, b
 		if err != nil {
 			if ctx.Err() != nil {
 				return "", ctx.Err()
+			}
+			if rlErr, ok := IsRateLimited(err); ok {
+				return "", rlErr
 			}
 			return "", fmt.Errorf("error reading streaming response. try again please")
 		}
@@ -1474,7 +1489,22 @@ func StreamWithTools(
 				if ctx.Err() != nil {
 					return "", ctx.Err()
 				}
+				// Retry on overloaded/rate-limit errors from SSE stream
+				if rlErr, ok := IsRateLimited(parseErr); ok && rateLimitRetries < 5 {
+					rateLimitRetries++
+					slog.Warn("LLM rate limited (SSE), retrying", "retry_after", rlErr.RetryAfter, "attempt", rateLimitRetries, "round", round)
+					select {
+					case <-time.After(rlErr.RetryAfter):
+					case <-ctx.Done():
+						return "", ctx.Err()
+					}
+					round-- // retry same round
+					continue
+				}
 				slog.Error("error parsing Anthropic SSE stream", "error", parseErr, "round", round)
+				if rlErr, ok := IsRateLimited(parseErr); ok {
+					return "", rlErr
+				}
 				return "", fmt.Errorf("error reading streaming response. try again please")
 			}
 
