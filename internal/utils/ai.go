@@ -1251,10 +1251,11 @@ func StreamJSONFromLLMWithVision(ctx context.Context, model, system, userText, b
 
 // ToolCallConfig holds optional configuration for StreamWithTools.
 type ToolCallConfig struct {
-	MaxRounds  int // Maximum tool-calling rounds (default 10)
-	NudgeAfter int // Inject nudge after this many consecutive tool rounds (default 3)
-	StripAfter int // Strip tools entirely after this many consecutive rounds (default 5)
-	MaxTokens  int // Max completion tokens per round (default 16384)
+	MaxRounds  int                            // Maximum tool-calling rounds (default 10)
+	NudgeAfter int                            // Inject nudge after this many consecutive tool rounds (default 3)
+	StripAfter int                            // Strip tools entirely after this many consecutive rounds (default 5)
+	MaxTokens  int                            // Max completion tokens per round (default 16384)
+	TrimArgs   func(toolName, args string) string // Trim tool call arguments in history to reduce token usage
 }
 
 // StreamWithTools sends messages to LLM with tools, handles the tool call loop,
@@ -1609,6 +1610,19 @@ func StreamWithTools(
 					ToolCallID: tc.ID,
 					Name:       toolName,
 				})
+			}
+
+			// Trim tool call arguments in history to reduce token usage in subsequent rounds
+			if len(opts) > 0 && opts[0].TrimArgs != nil {
+				assistantMsgIdx := len(currentMessages) - 1 - len(toolCalls)
+				if assistantMsgIdx >= 0 {
+					for i := range currentMessages[assistantMsgIdx].ToolCalls {
+						tc := &currentMessages[assistantMsgIdx].ToolCalls[i]
+						if tc.Function != nil {
+							tc.Function.Arguments = opts[0].TrimArgs(tc.Function.Name, tc.Function.Arguments)
+						}
+					}
+				}
 			}
 
 			// Continue the loop — re-call LLM with tool results
