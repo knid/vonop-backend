@@ -31,9 +31,14 @@ func (db *Database) GetOrCreateAppConversation(c *models.AppConversation) (*mode
 }
 
 func (db *Database) UpdateAppConversation(c *models.AppConversation) (*models.AppConversation, error) {
+	msg := string(c.Messages)
+	if msg == "" || msg == "null" || msg == `"null"` {
+		msg = "[]"
+	}
 	_, err := db.DB.NewUpdate().
 		Model((*models.AppConversation)(nil)).
-		Set("messages = ?::jsonb", string(c.Messages)).
+		Set("messages = ?::jsonb", msg).
+		Set("summary = ?", c.Summary).
 		Set("updated_at = current_timestamp").
 		Where("id = ?", c.ID).
 		Exec(context.Background())
