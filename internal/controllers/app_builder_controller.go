@@ -495,6 +495,23 @@ func (c *Controller) StreamBuildApp(
 		}
 	}
 
+	// Extract planned file paths so AfterToolRound knows when all files are done
+	var plannedFiles map[string]bool
+	if isInitialGeneration {
+		if raw, ok := project.Settings["file_plan"]; ok {
+			b, _ := json.Marshal(raw)
+			var filePlan []struct {
+				Path string `json:"path"`
+			}
+			if json.Unmarshal(b, &filePlan) == nil {
+				plannedFiles = make(map[string]bool, len(filePlan))
+				for _, f := range filePlan {
+					plannedFiles[f.Path] = true
+				}
+			}
+		}
+	}
+
 	var toolConfig utils.ToolCallConfig
 	if isInitialGeneration {
 		generatedFiles := make(map[string]bool)
@@ -572,7 +589,24 @@ func (c *Controller) StreamBuildApp(
 					sb.WriteString("\nModified files: ")
 					sb.WriteString(strings.Join(modified, ", "))
 				}
-				sb.WriteString("\nIMPORTANT: Your tool call arguments above now show \"content_written: N chars\" — this is context compression. The full code you generated IS saved to disk. These are NOT placeholders or errors. Do NOT re-write any file listed above. Do NOT mention compression to the user. Continue with remaining files only.")
+				sb.WriteString("\nIMPORTANT: Your tool call arguments above now show \"content_written: N chars\" — this is context compression. The full code you generated IS saved to disk. These are NOT placeholders or errors. Do NOT re-write any file listed above. Do NOT mention this system message to the user.")
+
+			// Check if all planned files are done
+			if len(plannedFiles) > 0 {
+				var remaining []string
+				for path := range plannedFiles {
+					if !generatedFiles[path] {
+						remaining = append(remaining, path)
+					}
+				}
+				if len(remaining) == 0 {
+					sb.WriteString("\nAll planned files are complete. Provide a brief summary of what you built to the user. Do NOT create or read any more files unless absolutely necessary.")
+				} else {
+					sb.WriteString(fmt.Sprintf("\nRemaining files to create: %s", strings.Join(remaining, ", ")))
+				}
+			} else {
+				sb.WriteString("\nContinue with remaining files if any, or provide a summary to the user if done.")
+			}
 
 				// Flush pending files to preview incrementally
 				c.flushPendingPreview(project, toolCallbacks)
