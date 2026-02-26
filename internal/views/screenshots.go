@@ -145,9 +145,9 @@ func (v *HttpViews) AutoGenerateScreenshots(w http.ResponseWriter, r *http.Reque
 	}
 
 	// Post-hoc token-based billing
-	_, _, total, _ := tracker.Totals()
+	prompt, completion, total, _ := tracker.Totals()
 	if total > 0 {
-		credits := models.TokensToCredits(total)
+		credits := models.TokensToCredits(prompt, completion)
 		if err := v.Controller.DeductAICreditsUnchecked(user, credits, "screenshot_generate", ""); err != nil {
 			slog.Warn("failed to deduct AI credits from tokens", "error", err,
 				"user_id", user.ID, "credits", credits, "tokens", total)

@@ -100,9 +100,9 @@ func (v *HttpViews) GenerateApp(w http.ResponseWriter, r *http.Request) {
 	}, http.StatusCreated)
 
 	// Post-hoc token-based billing
-	_, _, total, _ := tracker.Totals()
+	prompt, completion, total, _ := tracker.Totals()
 	if total > 0 {
-		credits := models.TokensToCredits(total)
+		credits := models.TokensToCredits(prompt, completion)
 		if err := v.Controller.DeductAICreditsUnchecked(user, credits, "generate_app", project.ID.String()); err != nil {
 			slog.Warn("failed to deduct AI credits from tokens", "error", err,
 				"user_id", user.ID, "credits", credits, "tokens", total)
@@ -189,9 +189,9 @@ func (v *HttpViews) GenerateEcommerceApp(w http.ResponseWriter, r *http.Request)
 	}, http.StatusCreated)
 
 	// Post-hoc token-based billing
-	_, _, total, _ := tracker.Totals()
+	prompt, completion, total, _ := tracker.Totals()
 	if total > 0 {
-		credits := models.TokensToCredits(total)
+		credits := models.TokensToCredits(prompt, completion)
 		if err := v.Controller.DeductAICreditsUnchecked(user, credits, "generate_ecommerce_app", project.ID.String()); err != nil {
 			slog.Warn("failed to deduct AI credits from tokens", "error", err,
 				"user_id", user.ID, "credits", credits, "tokens", total)
@@ -276,9 +276,9 @@ func (v *HttpViews) GenerateAppFromImage(w http.ResponseWriter, r *http.Request)
 	}, http.StatusCreated)
 
 	// Post-hoc token-based billing
-	_, _, total, _ := tracker.Totals()
+	prompt, completion, total, _ := tracker.Totals()
 	if total > 0 {
-		credits := models.TokensToCredits(total)
+		credits := models.TokensToCredits(prompt, completion)
 		if err := v.Controller.DeductAICreditsUnchecked(user, credits, "generate_from_image", project.ID.String()); err != nil {
 			slog.Warn("failed to deduct AI credits from tokens", "error", err,
 				"user_id", user.ID, "credits", credits, "tokens", total)

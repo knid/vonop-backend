@@ -217,9 +217,9 @@ func (c *Controller) StreamChatStoreManagement(ctx context.Context, store *model
 	ctx = utils.WithTokenTracker(ctx, tracker)
 	defer func() {
 		c.RecordTokenUsage(user.ID, "store_chat", model, provider.Name, store.ID.String(), tracker)
-		_, _, total, _ := tracker.Totals()
+		prompt, completion, total, _ := tracker.Totals()
 		if total > 0 {
-			credits := models.TokensToCredits(total)
+			credits := models.TokensToCredits(prompt, completion)
 			if err := c.DeductAICreditsUnchecked(user, credits, "store_chat", store.ID.String()); err != nil {
 				slog.Warn("failed to deduct AI credits from tokens", "error", err,
 					"user_id", user.ID, "credits", credits, "tokens", total)
