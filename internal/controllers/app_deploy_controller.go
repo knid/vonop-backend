@@ -483,6 +483,16 @@ func (c *Controller) GetPreviewLogs(projectID string) (string, error) {
 	return c.PreviewService.GetLogs(projectID)
 }
 
+// GetPreviewLogsWithErrors returns container logs and parsed Next.js errors
+func (c *Controller) GetPreviewLogsWithErrors(projectID string) (string, []string, error) {
+	logs, err := c.GetPreviewLogs(projectID)
+	if err != nil {
+		return "", nil, err
+	}
+	errors := parseNextJSErrors(logs)
+	return logs, errors, nil
+}
+
 // GetPreviewStatus returns the current preview status
 func (c *Controller) GetPreviewStatus(projectID string) (*preview.PreviewStatus, error) {
 	if c.PreviewService == nil {
