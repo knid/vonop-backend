@@ -289,13 +289,13 @@ func (v *HttpViews) GetAppPreviewLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	logs, err := v.Controller.GetPreviewLogs(project.ID.String())
+	logs, errors, err := v.Controller.GetPreviewLogsWithErrors(project.ID.String())
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	utils.JSONResponse(w, map[string]string{"logs": logs}, http.StatusOK)
+	utils.JSONResponse(w, map[string]any{"logs": logs, "errors": errors}, http.StatusOK)
 }
 
 // DELETE /v2/apps/{appId}/preview
