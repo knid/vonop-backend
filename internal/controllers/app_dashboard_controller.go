@@ -175,9 +175,9 @@ func (c *Controller) CreateDashboard(ctx context.Context, project *models.AppPro
 	ctx = utils.WithTokenTracker(ctx, tracker)
 	defer func() {
 		c.RecordTokenUsage(user.ID, "dashboard_create", model, provider.Name, project.ID.String(), tracker)
-		_, _, total, _ := tracker.Totals()
+		prompt, completion, total, _ := tracker.Totals()
 		if total > 0 {
-			credits := models.TokensToCredits(total)
+			credits := models.TokensToCredits(prompt, completion)
 			if err := c.DeductAICreditsUnchecked(user, credits, "dashboard_create", project.ID.String()); err != nil {
 				slog.Warn("failed to deduct AI credits for dashboard", "error", err, "user_id", user.ID, "credits", credits)
 			}
@@ -472,9 +472,9 @@ func (c *Controller) StreamDashboardChat(ctx context.Context, dashboard *models.
 	ctx = utils.WithTokenTracker(ctx, tracker)
 	defer func() {
 		c.RecordTokenUsage(user.ID, "dashboard_chat", model, provider.Name, dashboard.AppProjectID.String(), tracker)
-		_, _, total, _ := tracker.Totals()
+		prompt, completion, total, _ := tracker.Totals()
 		if total > 0 {
-			credits := models.TokensToCredits(total)
+			credits := models.TokensToCredits(prompt, completion)
 			if err := c.DeductAICreditsUnchecked(user, credits, "dashboard_chat", dashboard.AppProjectID.String()); err != nil {
 				slog.Warn("failed to deduct AI credits for dashboard chat", "error", err)
 			}
@@ -704,9 +704,9 @@ func (c *Controller) RefreshDashboardSchema(ctx context.Context, projectID strin
 	ctx = utils.WithTokenTracker(ctx, tracker)
 	defer func() {
 		c.RecordTokenUsage(user.ID, "dashboard_schema_refresh", model, provider.Name, projectID, tracker)
-		_, _, total, _ := tracker.Totals()
+		prompt, completion, total, _ := tracker.Totals()
 		if total > 0 {
-			credits := models.TokensToCredits(total)
+			credits := models.TokensToCredits(prompt, completion)
 			c.DeductAICreditsUnchecked(user, credits, "dashboard_schema_refresh", projectID)
 		}
 	}()

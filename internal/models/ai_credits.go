@@ -47,14 +47,19 @@ type LLMTokenUsage struct {
 // AICreditsMinBalance is the maximum allowed overdraft (negative floor).
 const AICreditsMinBalance = -100
 
-// Token-to-credit conversion: 1 credit per 10,000 tokens
-const AICreditsTokensPerCredit = 10_000
+// Token-to-credit conversion: 1 credit per 10,000 weighted tokens.
+// Output tokens are weighted at 5× input tokens to reflect API pricing
+// (input: $3/MTok, output: $15/MTok for Sonnet 4.6).
+const AICreditsTokensPerCredit = 5_000
+const AICreditsOutputMultiplier = 5
 
-// TokensToCredits converts total token count to credit cost (rounds up).
-func TokensToCredits(totalTokens int) int {
-	if totalTokens <= 0 {
+// TokensToCredits converts prompt and completion token counts to credit cost
+// using weighted tokens (output × 5) and rounds up.
+func TokensToCredits(promptTokens, completionTokens int) int {
+	weighted := promptTokens + (completionTokens * AICreditsOutputMultiplier)
+	if weighted <= 0 {
 		return 0
 	}
-	return (totalTokens + AICreditsTokensPerCredit - 1) / AICreditsTokensPerCredit
+	return (weighted + AICreditsTokensPerCredit - 1) / AICreditsTokensPerCredit
 }
 

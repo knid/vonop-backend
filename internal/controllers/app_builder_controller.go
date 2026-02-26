@@ -140,7 +140,7 @@ func (c *Controller) StreamBuildApp(
 		c.RecordTokenUsage(user.ID, actionLabel, model, provider.Name, project.ID.String(), tracker)
 		prompt, completion, total, callCount := tracker.Totals()
 		if total > 0 {
-			credits := models.TokensToCredits(total)
+			credits := models.TokensToCredits(prompt, completion)
 			if err := c.DeductAICreditsUnchecked(user, credits, actionLabel, project.ID.String()); err != nil {
 				slog.Warn("failed to deduct AI credits", "error", err,
 					"user_id", user.ID, "credits", credits, "tokens", total)
