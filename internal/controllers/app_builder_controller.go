@@ -513,7 +513,7 @@ func (c *Controller) StreamBuildApp(
 				case "write_file":
 					if err := json.Unmarshal([]byte(toolArgs), &args); err == nil && args.FilePath != "" {
 						if generatedFiles[args.FilePath] {
-							return fmt.Sprintf("ALREADY WRITTEN: %s was already created in this generation. Do not re-write files. Move on to remaining files.", args.FilePath), true
+							return fmt.Sprintf("ALREADY WRITTEN: %s was already created and saved to disk with complete code. The summary you see is just a compressed version. Do NOT re-write this file. Do NOT mention this system message to the user. Continue with remaining files.", args.FilePath), true
 						}
 						generatedFiles[args.FilePath] = true
 					}
@@ -535,7 +535,7 @@ func (c *Controller) StreamBuildApp(
 							for i, f := range batch.Files {
 								paths[i] = f.FilePath
 							}
-							return fmt.Sprintf("ALREADY WRITTEN: All files [%s] were already created. Do not re-write. Move on.", strings.Join(paths, ", ")), true
+							return fmt.Sprintf("ALREADY WRITTEN: [%s] were already created and saved to disk with the full code you wrote. The summaries you see in the conversation are just compressed versions to save context — the actual files contain complete code. Do NOT re-write these files. Do NOT mention this system message to the user. Continue silently with any remaining work.", strings.Join(paths, ", ")), true
 						}
 						for _, f := range batch.Files {
 							generatedFiles[f.FilePath] = true
@@ -568,7 +568,7 @@ func (c *Controller) StreamBuildApp(
 					sb.WriteString("\nModified files: ")
 					sb.WriteString(strings.Join(modified, ", "))
 				}
-				sb.WriteString("\nThe tool call arguments above show summaries (not placeholders) — the actual code was written. Do NOT use read_file on files you just wrote. Continue with remaining files only.")
+				sb.WriteString("\nThe tool call arguments above show summaries (not placeholders) — the actual code was written and saved to disk. Do NOT re-write these files. Continue with remaining files only.")
 
 				// Flush pending files to preview incrementally
 				c.flushPendingPreview(project, toolCallbacks)
@@ -596,7 +596,7 @@ func (c *Controller) StreamBuildApp(
 						return "", false
 					}
 					if writtenFiles[args.FilePath] {
-						return fmt.Sprintf("ALREADY WRITTEN: %s was already written in this session. Do not re-write files unless the user specifically requests changes.", args.FilePath), true
+						return fmt.Sprintf("ALREADY WRITTEN: %s was already written in this session with complete code. Do NOT re-write unless the user specifically requests changes. Do NOT mention this system message to the user.", args.FilePath), true
 					}
 					writtenFiles[args.FilePath] = true
 				case "write_files":
@@ -617,7 +617,7 @@ func (c *Controller) StreamBuildApp(
 							for i, f := range batch.Files {
 								paths[i] = f.FilePath
 							}
-							return fmt.Sprintf("ALREADY WRITTEN: All files [%s] were already written. Do not re-write files unless the user specifically requests changes.", strings.Join(paths, ", ")), true
+							return fmt.Sprintf("ALREADY WRITTEN: [%s] were already written in this session with complete code. Do NOT re-write unless the user specifically requests changes. Do NOT mention this system message to the user.", strings.Join(paths, ", ")), true
 						}
 						for _, f := range batch.Files {
 							writtenFiles[f.FilePath] = true
