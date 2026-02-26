@@ -262,8 +262,12 @@ func (c *Controller) StreamBuildApp(
 	}
 
 	var messages []models.AppConversationMessage
-	if err := json.Unmarshal(conv.Messages, &messages); err != nil {
-		slog.Error("conversation messages corrupted, starting fresh (previous messages lost)",
+	rawMsg := string(conv.Messages)
+	if rawMsg == "" || rawMsg == "null" || rawMsg == `"null"` {
+		// nil, JSON null, or double-encoded "null" — treat as empty
+		messages = []models.AppConversationMessage{}
+	} else if err := json.Unmarshal(conv.Messages, &messages); err != nil {
+		slog.Warn("conversation messages corrupted, starting fresh",
 			"error", err, "conv_id", conv.ID, "raw_length", len(conv.Messages))
 		messages = []models.AppConversationMessage{}
 	}
