@@ -1334,7 +1334,7 @@ type ToolCallConfig struct {
 	TrimResults      func(toolName, result string) string                  // Trim tool result messages in history to reduce token usage
 	InterceptToolCall func(toolName, toolArgs string) (result string, skip bool) // Intercept tool calls before execution; if skip=true, use result and skip executor
 	NudgeMessage     string                                                // Custom nudge message (replaces default "stop researching" text)
-	AfterToolRound   func() string                                         // Called after each tool round; non-empty return is injected as a system message
+	AfterToolRound   func(allIntercepted bool) string                      // Called after each tool round; allIntercepted=true when every call was intercepted; non-empty return is injected as a system message
 	FilterTools      func(tools []Tool) []Tool                             // Called each round to filter/modify tools; return nil to strip all tools
 	OnToolCallStart  func(toolName string)                                  // Called when a tool call name is first detected during SSE streaming (before args are complete)
 }
@@ -1716,6 +1716,7 @@ func StreamWithTools(
 
 			// Execute each tool (with dedup) and append results
 			dedupCount := 0
+			interceptCount := 0
 			for _, tc := range toolCalls {
 				if ctx.Err() != nil {
 					return "", ctx.Err()
@@ -1734,6 +1735,7 @@ func StreamWithTools(
 				if len(opts) > 0 && opts[0].InterceptToolCall != nil {
 					if interceptResult, skip := opts[0].InterceptToolCall(toolName, toolArgs); skip {
 						result = interceptResult
+						interceptCount++
 						slog.Info("Tool call intercepted", "tool", toolName, "round", round)
 						goto toolResultDone
 					}
@@ -1771,14 +1773,23 @@ func StreamWithTools(
 				})
 			}
 
-			// If all tool calls were deduped, the LLM is stuck in a loop — accelerate nudge/strip
-			if dedupCount > 0 && dedupCount == len(toolCalls) {
+			// If all tool calls were deduped or intercepted, the LLM is stuck — accelerate nudge/strip
+			wastedCount := dedupCount + interceptCount
+			if wastedCount > 0 && wastedCount == len(toolCalls) {
 				consecutiveToolRounds += 2
-				currentMessages = append(currentMessages, Message{
-					Role:    "system",
-					Content: "All your tool calls in this round returned cached results — you already have this information. Stop making redundant tool calls and produce your final response.",
-				})
-				slog.Warn("All tool calls deduped, accelerating nudge", "round", round, "dedup_count", dedupCount, "consecutive_tool_rounds", consecutiveToolRounds)
+				if interceptCount == len(toolCalls) {
+					currentMessages = append(currentMessages, Message{
+						Role:    "system",
+						Content: "All your tool calls in this round were blocked because those files already exist. Do NOT attempt to re-write files. Move on to files that have NOT been created yet, or provide a summary to the user if all files are done.",
+					})
+					slog.Warn("All tool calls intercepted, accelerating nudge", "round", round, "intercept_count", interceptCount, "consecutive_tool_rounds", consecutiveToolRounds)
+				} else {
+					currentMessages = append(currentMessages, Message{
+						Role:    "system",
+						Content: "All your tool calls in this round returned cached results — you already have this information. Stop making redundant tool calls and produce your final response.",
+					})
+					slog.Warn("All tool calls deduped, accelerating nudge", "round", round, "dedup_count", dedupCount, "consecutive_tool_rounds", consecutiveToolRounds)
+				}
 			}
 
 			// Trim assistant content, tool call arguments, and tool results to reduce history tokens
@@ -1809,8 +1820,9 @@ func StreamWithTools(
 
 			// Inject post-round system message (e.g. progress summary).
 			// Skip when tools have been stripped — avoid contradicting the "generate now" message.
+			allIntercepted := interceptCount > 0 && interceptCount == len(toolCalls)
 			if roundTools != nil && len(opts) > 0 && opts[0].AfterToolRound != nil {
-				if msg := opts[0].AfterToolRound(); msg != "" {
+				if msg := opts[0].AfterToolRound(allIntercepted); msg != "" {
 					currentMessages = append(currentMessages, Message{
 						Role:    "system",
 						Content: msg,
