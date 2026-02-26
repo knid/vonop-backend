@@ -7,6 +7,8 @@ const httpProxy = require("http-proxy");
 const PORT = 3000;
 const NEXT_PORT = 3001;
 const SYNC_TOKEN = process.env.SYNC_TOKEN || "";
+const PROJECT_ID = process.env.PROJECT_ID || "";
+const PREVIEW_DOMAIN = process.env.PREVIEW_DOMAIN || "";
 const APP_DIR = "/app";
 const SETUP_MARKER = "/tmp/.setup-complete";
 
@@ -150,6 +152,21 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(code, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ status: nextReady ? "ok" : "starting" }));
     return;
+  }
+
+  // Route guard: if this request is for a different project, bounce it via fly-replay
+  // so Fly's proxy re-routes to the correct machine (or the router).
+  if (PROJECT_ID && PREVIEW_DOMAIN) {
+    const host = (req.headers.host || "").split(":")[0];
+    const suffix = "." + PREVIEW_DOMAIN;
+    if (host.endsWith(suffix)) {
+      const requestedProject = host.slice(0, -suffix.length);
+      if (requestedProject && requestedProject !== PROJECT_ID) {
+        res.writeHead(200, { "fly-replay": "elsewhere=true" });
+        res.end();
+        return;
+      }
+    }
   }
 
   // File sync endpoint

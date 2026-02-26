@@ -201,6 +201,8 @@ func (s *Service) createNewMachine(projectID string, files map[string]string, en
 		machineEnv[k] = v
 	}
 	machineEnv["SYNC_TOKEN"] = syncToken
+	machineEnv["PROJECT_ID"] = projectID
+	machineEnv["PREVIEW_DOMAIN"] = s.PreviewDomain
 
 	metadata := map[string]string{
 		"project_id": projectID,
