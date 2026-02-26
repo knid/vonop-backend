@@ -493,6 +493,7 @@ func (c *Controller) StreamBuildApp(
 
 	var toolConfig utils.ToolCallConfig
 	if isInitialGeneration {
+		generatedFiles := make(map[string]bool)
 		toolConfig = utils.ToolCallConfig{
 			MaxRounds:   80,
 			NudgeAfter:  60,
@@ -500,6 +501,36 @@ func (c *Controller) StreamBuildApp(
 			MaxTokens:   65536,
 			TrimArgs:    trimArgs,
 			TrimResults: trimResults,
+			InterceptToolCall: func(toolName, toolArgs string) (string, bool) {
+				var args struct {
+					FilePath string `json:"file_path"`
+				}
+				switch toolName {
+				case "read_file":
+					if err := json.Unmarshal([]byte(toolArgs), &args); err == nil && generatedFiles[args.FilePath] {
+						return "SKIP: You just created this file — you already know its content. Do not read back files you just wrote. Move on to the next file.", true
+					}
+				case "write_file":
+					if err := json.Unmarshal([]byte(toolArgs), &args); err == nil && generatedFiles[args.FilePath] {
+						return fmt.Sprintf("ALREADY WRITTEN: %s was already created in this generation. Do not re-write files. Move on to remaining files.", args.FilePath), true
+					}
+					if err == nil && args.FilePath != "" {
+						generatedFiles[args.FilePath] = true
+					}
+				case "write_files":
+					var batch struct {
+						Files []struct {
+							FilePath string `json:"file_path"`
+						} `json:"files"`
+					}
+					if err := json.Unmarshal([]byte(toolArgs), &batch); err == nil {
+						for _, f := range batch.Files {
+							generatedFiles[f.FilePath] = true
+						}
+					}
+				}
+				return "", false
+			},
 			AfterToolRound: func() string {
 				if len(toolAppliedOps) == 0 {
 					return ""
@@ -518,13 +549,13 @@ func (c *Controller) StreamBuildApp(
 				if len(modified) > 0 {
 					sb.WriteString(fmt.Sprintf(", %d modified", len(modified)))
 				}
-				sb.WriteString("]\nCompleted files (do NOT re-create): ")
+				sb.WriteString("]\nCompleted files (do NOT re-read or re-create): ")
 				sb.WriteString(strings.Join(created, ", "))
 				if len(modified) > 0 {
 					sb.WriteString("\nModified files: ")
 					sb.WriteString(strings.Join(modified, ", "))
 				}
-				sb.WriteString("\nThe tool call arguments above show summaries (not placeholders) — the actual code was written. Continue with remaining files only.")
+				sb.WriteString("\nThe tool call arguments above show summaries (not placeholders) — the actual code was written. Do NOT use read_file on files you just wrote. Continue with remaining files only.")
 
 				// Flush pending files to preview incrementally
 				c.flushPendingPreview(project, toolCallbacks)
