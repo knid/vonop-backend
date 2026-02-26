@@ -1321,7 +1321,7 @@ var nextjsErrorPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)SyntaxError:.*`),
 	regexp.MustCompile(`(?i)ReferenceError:.*`),
 	regexp.MustCompile(`(?i)Error:\s+.+`),
-	regexp.MustCompile(`\./[^\s]+:\d+:\d+`),
+	regexp.MustCompile(`\./[^\s]+:\d+:\d+.*`),
 }
 
 // parseNextJSErrors extracts unique error lines from Next.js dev server logs.
