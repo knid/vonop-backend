@@ -487,6 +487,7 @@ func parseAnthropicSSEStream(
 	body io.Reader,
 	onChunk func(chunk string),
 	onReasoning func(chunk string),
+	onToolStart func(toolName string),
 ) (*AnthropicStreamResult, error) {
 	var fullText strings.Builder
 	var fullReasoning strings.Builder
@@ -549,6 +550,9 @@ func parseAnthropicSSEStream(
 					blockType: block.ContentBlock.Type,
 					id:        block.ContentBlock.ID,
 					name:      block.ContentBlock.Name,
+				}
+				if block.ContentBlock.Type == "tool_use" && block.ContentBlock.Name != "" && onToolStart != nil {
+					onToolStart(block.ContentBlock.Name)
 				}
 			}
 
