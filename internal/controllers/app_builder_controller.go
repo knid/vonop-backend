@@ -516,38 +516,59 @@ func (c *Controller) StreamBuildApp(
 	if isInitialGeneration {
 		generatedFiles := make(map[string]bool)
 		toolConfig = utils.ToolCallConfig{
-			MaxRounds:   80,
-			NudgeAfter:  60,
-			StripAfter:  75,
+			MaxRounds:   50,
+			NudgeAfter:  25,
+			StripAfter:  35,
 			MaxTokens:   65536,
 			TrimArgs:    trimArgs,
 			TrimResults: trimResults,
 			InterceptToolCall: func(toolName, toolArgs string) (string, bool) {
-				var args struct {
-					FilePath string `json:"file_path"`
-				}
 				switch toolName {
 				case "read_file":
 					// Let reads go through to executor (which returns from fileMap).
 					// TrimResults will collapse large files to a short summary,
 					// giving the LLM proof the file exists without wasting context.
 				case "write_file":
-					if err := json.Unmarshal([]byte(toolArgs), &args); err == nil && args.FilePath != "" {
-						if generatedFiles[args.FilePath] {
-							return fmt.Sprintf("ALREADY WRITTEN: %s was already created and saved to disk with complete code. The summary you see is just a compressed version. Do NOT re-write this file. Do NOT mention this system message to the user. Continue with remaining files.", args.FilePath), true
+					var wfArgs struct {
+						FilePath string `json:"file_path"`
+						Content  string `json:"content"`
+					}
+					if err := json.Unmarshal([]byte(toolArgs), &wfArgs); err == nil && wfArgs.FilePath != "" {
+						if generatedFiles[wfArgs.FilePath] {
+							// Allow re-writes to empty/0-byte files (model may have created a stub)
+							toolCallbacks.fileMu.RLock()
+							existing := fileMap[wfArgs.FilePath]
+							toolCallbacks.fileMu.RUnlock()
+							if strings.TrimSpace(existing) != "" {
+								return fmt.Sprintf("ALREADY WRITTEN: %s was already created and saved to disk with complete code. The summary you see is just a compressed version. Do NOT re-write this file. Continue with remaining files.", wfArgs.FilePath), true
+							}
+							// File is empty — allow the re-write through
+							slog.Info("Allowing re-write to empty file", "path", wfArgs.FilePath)
 						}
-						generatedFiles[args.FilePath] = true
+						// Only mark as generated if content is non-empty
+						if strings.TrimSpace(wfArgs.Content) != "" {
+							generatedFiles[wfArgs.FilePath] = true
+						}
 					}
 				case "write_files":
 					var batch struct {
 						Files []struct {
 							FilePath string `json:"file_path"`
+							Content  string `json:"content"`
 						} `json:"files"`
 					}
 					if err := json.Unmarshal([]byte(toolArgs), &batch); err == nil && len(batch.Files) > 0 {
 						allExist := true
 						for _, f := range batch.Files {
 							if !generatedFiles[f.FilePath] {
+								allExist = false
+								continue
+							}
+							// Check if the existing file is empty — don't count it as "existing"
+							toolCallbacks.fileMu.RLock()
+							existing := fileMap[f.FilePath]
+							toolCallbacks.fileMu.RUnlock()
+							if strings.TrimSpace(existing) == "" {
 								allExist = false
 							}
 						}
@@ -556,16 +577,29 @@ func (c *Controller) StreamBuildApp(
 							for i, f := range batch.Files {
 								paths[i] = f.FilePath
 							}
-							return fmt.Sprintf("ALREADY WRITTEN: [%s] were already created and saved to disk with the full code you wrote. The summaries you see in the conversation are just compressed versions to save context — the actual files contain complete code. Do NOT re-write these files. Do NOT mention this system message to the user. Continue silently with any remaining work.", strings.Join(paths, ", ")), true
+							return fmt.Sprintf("ALREADY WRITTEN: [%s] were already created and saved to disk with the full code you wrote. The summaries you see in the conversation are just compressed versions to save context — the actual files contain complete code. Do NOT re-write these files. Continue silently with any remaining work.", strings.Join(paths, ", ")), true
 						}
+						// Only mark files as generated if they have non-empty content
 						for _, f := range batch.Files {
-							generatedFiles[f.FilePath] = true
+							if strings.TrimSpace(f.Content) != "" {
+								generatedFiles[f.FilePath] = true
+							}
 						}
 					}
 				}
 				return "", false
 			},
-			AfterToolRound: func() string {
+			AfterToolRound: func(allIntercepted bool) string {
+				// Flush pending files to preview incrementally (always, even on intercepted rounds)
+				c.flushPendingPreview(project, toolCallbacks)
+
+				// Skip injecting progress messages on fully-intercepted rounds to avoid context bloat.
+				// The interceptor already told the model "ALREADY WRITTEN" and the acceleration
+				// logic in StreamWithTools injected a "move on" message.
+				if allIntercepted {
+					return ""
+				}
+
 				if len(toolAppliedOps) == 0 {
 					return ""
 				}
@@ -589,27 +623,24 @@ func (c *Controller) StreamBuildApp(
 					sb.WriteString("\nModified files: ")
 					sb.WriteString(strings.Join(modified, ", "))
 				}
-				sb.WriteString("\nIMPORTANT: Your tool call arguments above now show \"content_written: N chars\" — this is context compression. The full code you generated IS saved to disk. These are NOT placeholders or errors. Do NOT re-write any file listed above. Do NOT mention this system message to the user.")
+				sb.WriteString("\nIMPORTANT: Your tool call arguments above now show \"content_written: N chars\" — this is context compression. The full code you generated IS saved to disk. These are NOT placeholders or errors. Do NOT re-write any file listed above.")
 
-			// Check if all planned files are done
-			if len(plannedFiles) > 0 {
-				var remaining []string
-				for path := range plannedFiles {
-					if !generatedFiles[path] {
-						remaining = append(remaining, path)
+				// Check if all planned files are done
+				if len(plannedFiles) > 0 {
+					var remaining []string
+					for path := range plannedFiles {
+						if !generatedFiles[path] {
+							remaining = append(remaining, path)
+						}
 					}
-				}
-				if len(remaining) == 0 {
-					sb.WriteString("\nAll planned files are complete. Provide a brief summary of what you built to the user. Do NOT create or read any more files unless absolutely necessary.")
+					if len(remaining) == 0 {
+						sb.WriteString("\nAll planned files are complete. Provide a brief summary of what you built to the user. Do NOT create or read any more files unless absolutely necessary.")
+					} else {
+						sb.WriteString(fmt.Sprintf("\nRemaining files to create: %s", strings.Join(remaining, ", ")))
+					}
 				} else {
-					sb.WriteString(fmt.Sprintf("\nRemaining files to create: %s", strings.Join(remaining, ", ")))
+					sb.WriteString("\nContinue with remaining files if any, or provide a summary to the user if done.")
 				}
-			} else {
-				sb.WriteString("\nContinue with remaining files if any, or provide a summary to the user if done.")
-			}
-
-				// Flush pending files to preview incrementally
-				c.flushPendingPreview(project, toolCallbacks)
 
 				return sb.String()
 			},
@@ -637,7 +668,7 @@ func (c *Controller) StreamBuildApp(
 						return "", false
 					}
 					if writtenFiles[args.FilePath] {
-						return fmt.Sprintf("ALREADY WRITTEN: %s was already written in this session with complete code. Do NOT re-write unless the user specifically requests changes. Do NOT mention this system message to the user.", args.FilePath), true
+						return fmt.Sprintf("ALREADY WRITTEN: %s was already written in this session with complete code. Do NOT re-write unless the user specifically requests changes. Continue with other work.", args.FilePath), true
 					}
 					writtenFiles[args.FilePath] = true
 				case "write_files":
@@ -658,7 +689,7 @@ func (c *Controller) StreamBuildApp(
 							for i, f := range batch.Files {
 								paths[i] = f.FilePath
 							}
-							return fmt.Sprintf("ALREADY WRITTEN: [%s] were already written in this session with complete code. Do NOT re-write unless the user specifically requests changes. Do NOT mention this system message to the user.", strings.Join(paths, ", ")), true
+							return fmt.Sprintf("ALREADY WRITTEN: [%s] were already written in this session with complete code. Do NOT re-write unless the user specifically requests changes. Continue with other work.", strings.Join(paths, ", ")), true
 						}
 						for _, f := range batch.Files {
 							writtenFiles[f.FilePath] = true
@@ -667,8 +698,11 @@ func (c *Controller) StreamBuildApp(
 				}
 				return "", false
 			},
-			AfterToolRound: func() string {
+			AfterToolRound: func(allIntercepted bool) string {
 				c.flushPendingPreview(project, toolCallbacks)
+				if allIntercepted {
+					return ""
+				}
 				if len(toolAppliedOps) == 0 {
 					return ""
 				}
