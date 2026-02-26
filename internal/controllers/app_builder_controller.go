@@ -507,9 +507,9 @@ func (c *Controller) StreamBuildApp(
 				}
 				switch toolName {
 				case "read_file":
-					if err := json.Unmarshal([]byte(toolArgs), &args); err == nil && generatedFiles[args.FilePath] {
-						return "SKIP: You just created this file — you already know its content. Do not read back files you just wrote. Move on to the next file.", true
-					}
+					// Let reads go through to executor (which returns from fileMap).
+					// TrimResults will collapse large files to a short summary,
+					// giving the LLM proof the file exists without wasting context.
 				case "write_file":
 					if err := json.Unmarshal([]byte(toolArgs), &args); err == nil && args.FilePath != "" {
 						if generatedFiles[args.FilePath] {
@@ -523,7 +523,20 @@ func (c *Controller) StreamBuildApp(
 							FilePath string `json:"file_path"`
 						} `json:"files"`
 					}
-					if err := json.Unmarshal([]byte(toolArgs), &batch); err == nil {
+					if err := json.Unmarshal([]byte(toolArgs), &batch); err == nil && len(batch.Files) > 0 {
+						allExist := true
+						for _, f := range batch.Files {
+							if !generatedFiles[f.FilePath] {
+								allExist = false
+							}
+						}
+						if allExist {
+							paths := make([]string, len(batch.Files))
+							for i, f := range batch.Files {
+								paths[i] = f.FilePath
+							}
+							return fmt.Sprintf("ALREADY WRITTEN: All files [%s] were already created. Do not re-write. Move on.", strings.Join(paths, ", ")), true
+						}
 						for _, f := range batch.Files {
 							generatedFiles[f.FilePath] = true
 						}
@@ -574,19 +587,43 @@ func (c *Controller) StreamBuildApp(
 			TrimArgs:     trimArgs,
 			TrimResults:  trimResults,
 			InterceptToolCall: func(toolName, toolArgs string) (string, bool) {
-				if toolName != "write_file" {
-					return "", false
+				switch toolName {
+				case "write_file":
+					var args struct {
+						FilePath string `json:"file_path"`
+					}
+					if err := json.Unmarshal([]byte(toolArgs), &args); err != nil || args.FilePath == "" {
+						return "", false
+					}
+					if writtenFiles[args.FilePath] {
+						return fmt.Sprintf("ALREADY WRITTEN: %s was already written in this session. Do not re-write files unless the user specifically requests changes.", args.FilePath), true
+					}
+					writtenFiles[args.FilePath] = true
+				case "write_files":
+					var batch struct {
+						Files []struct {
+							FilePath string `json:"file_path"`
+						} `json:"files"`
+					}
+					if err := json.Unmarshal([]byte(toolArgs), &batch); err == nil && len(batch.Files) > 0 {
+						allExist := true
+						for _, f := range batch.Files {
+							if !writtenFiles[f.FilePath] {
+								allExist = false
+							}
+						}
+						if allExist {
+							paths := make([]string, len(batch.Files))
+							for i, f := range batch.Files {
+								paths[i] = f.FilePath
+							}
+							return fmt.Sprintf("ALREADY WRITTEN: All files [%s] were already written. Do not re-write files unless the user specifically requests changes.", strings.Join(paths, ", ")), true
+						}
+						for _, f := range batch.Files {
+							writtenFiles[f.FilePath] = true
+						}
+					}
 				}
-				var args struct {
-					FilePath string `json:"file_path"`
-				}
-				if err := json.Unmarshal([]byte(toolArgs), &args); err != nil || args.FilePath == "" {
-					return "", false
-				}
-				if writtenFiles[args.FilePath] {
-					return fmt.Sprintf("ALREADY WRITTEN: %s was already written in this session. Do not re-write files unless the user specifically requests changes.", args.FilePath), true
-				}
-				writtenFiles[args.FilePath] = true
 				return "", false
 			},
 			AfterToolRound: func() string {
