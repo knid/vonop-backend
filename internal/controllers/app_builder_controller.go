@@ -511,10 +511,10 @@ func (c *Controller) StreamBuildApp(
 						return "SKIP: You just created this file — you already know its content. Do not read back files you just wrote. Move on to the next file.", true
 					}
 				case "write_file":
-					if err := json.Unmarshal([]byte(toolArgs), &args); err == nil && generatedFiles[args.FilePath] {
-						return fmt.Sprintf("ALREADY WRITTEN: %s was already created in this generation. Do not re-write files. Move on to remaining files.", args.FilePath), true
-					}
-					if err == nil && args.FilePath != "" {
+					if err := json.Unmarshal([]byte(toolArgs), &args); err == nil && args.FilePath != "" {
+						if generatedFiles[args.FilePath] {
+							return fmt.Sprintf("ALREADY WRITTEN: %s was already created in this generation. Do not re-write files. Move on to remaining files.", args.FilePath), true
+						}
 						generatedFiles[args.FilePath] = true
 					}
 				case "write_files":
