@@ -579,6 +579,9 @@ func (c *Controller) StreamBuildApp(
 
 				return sb.String()
 			},
+			OnToolCallStart: func(toolName string) {
+				sendEvent("tool_start", map[string]any{"tool": toolName})
+			},
 		}
 	} else {
 		writtenFiles := make(map[string]bool)
@@ -646,6 +649,9 @@ func (c *Controller) StreamBuildApp(
 				}
 				return fmt.Sprintf("[SYSTEM: %d files written to disk. The 'content_written' summaries in tool args above confirm successful writes — do NOT re-write these files unless the user asks for changes to them.]\nWritten: %s",
 					len(written), strings.Join(written, ", "))
+			},
+			OnToolCallStart: func(toolName string) {
+				sendEvent("tool_start", map[string]any{"tool": toolName})
 			},
 		}
 	}

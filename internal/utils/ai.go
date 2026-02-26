@@ -596,7 +596,7 @@ func StreamTextFromLLM(ctx context.Context, model, system, message string, provi
 
 	// Anthropic SSE format is different — use dedicated parser
 	if provider.IsAnthropic() {
-		result, err := parseAnthropicSSEStream(resp.Body, onChunk, onReasoning)
+		result, err := parseAnthropicSSEStream(resp.Body, onChunk, onReasoning, nil)
 		if err != nil {
 			if ctx.Err() != nil {
 				return "", ctx.Err()
@@ -722,7 +722,7 @@ func StreamTextFromLLMWithMessages(ctx context.Context, model string, messages [
 
 	// Anthropic SSE format — use dedicated parser
 	if provider.IsAnthropic() {
-		result, err := parseAnthropicSSEStream(resp.Body, onChunk, onReasoning)
+		result, err := parseAnthropicSSEStream(resp.Body, onChunk, onReasoning, nil)
 		if err != nil {
 			if ctx.Err() != nil {
 				return "", ctx.Err()
@@ -905,7 +905,7 @@ func StreamJSONFromLLMWithMessages(ctx context.Context, model string, messages [
 
 	// Anthropic SSE format — use dedicated parser
 	if provider.IsAnthropic() {
-		result, err := parseAnthropicSSEStream(resp.Body, onChunk, onReasoning)
+		result, err := parseAnthropicSSEStream(resp.Body, onChunk, onReasoning, nil)
 		if err != nil {
 			if ctx.Err() != nil {
 				return "", ctx.Err()
@@ -1115,7 +1115,7 @@ func StreamJSONFromLLM(ctx context.Context, model, system, message string, provi
 
 	// Anthropic SSE format — use dedicated parser
 	if provider.IsAnthropic() {
-		result, err := parseAnthropicSSEStream(resp.Body, onChunk, onReasoning)
+		result, err := parseAnthropicSSEStream(resp.Body, onChunk, onReasoning, nil)
 		if err != nil {
 			if ctx.Err() != nil {
 				return "", ctx.Err()
@@ -1238,7 +1238,7 @@ func StreamJSONFromLLMWithVision(ctx context.Context, model, system, userText, b
 
 	// Anthropic SSE format — use dedicated parser
 	if provider.IsAnthropic() {
-		result, err := parseAnthropicSSEStream(resp.Body, onChunk, onReasoning)
+		result, err := parseAnthropicSSEStream(resp.Body, onChunk, onReasoning, nil)
 		if err != nil {
 			if ctx.Err() != nil {
 				return "", ctx.Err()
@@ -1336,6 +1336,7 @@ type ToolCallConfig struct {
 	NudgeMessage     string                                                // Custom nudge message (replaces default "stop researching" text)
 	AfterToolRound   func() string                                         // Called after each tool round; non-empty return is injected as a system message
 	FilterTools      func(tools []Tool) []Tool                             // Called each round to filter/modify tools; return nil to strip all tools
+	OnToolCallStart  func(toolName string)                                  // Called when a tool call name is first detected during SSE streaming (before args are complete)
 }
 
 // StreamWithTools sends messages to LLM with tools, handles the tool call loop,
@@ -1477,6 +1478,10 @@ func StreamWithTools(
 
 		// Anthropic SSE format — use dedicated parser then map to local vars
 		if provider.IsAnthropic() {
+			var toolStartCb func(string)
+			if len(opts) > 0 && opts[0].OnToolCallStart != nil {
+				toolStartCb = opts[0].OnToolCallStart
+			}
 			result, parseErr := parseAnthropicSSEStream(resp.Body, func(chunk string) {
 				roundChunks = append(roundChunks, chunk)
 				if onChunk != nil {
@@ -1486,7 +1491,7 @@ func StreamWithTools(
 				if onReasoning != nil {
 					onReasoning(chunk)
 				}
-			})
+			}, toolStartCb)
 			resp.Body.Close()
 
 			if parseErr != nil {
@@ -1603,6 +1608,9 @@ func StreamWithTools(
 								Function: &FunctionCall{
 									Name: name,
 								},
+							}
+							if name != "" && len(opts) > 0 && opts[0].OnToolCallStart != nil {
+								opts[0].OnToolCallStart(name)
 							}
 						} else {
 							// Update ID/Type if provided in later chunks
