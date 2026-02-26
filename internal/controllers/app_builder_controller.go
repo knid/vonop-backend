@@ -515,10 +515,11 @@ func (c *Controller) StreamBuildApp(
 	var toolConfig utils.ToolCallConfig
 	if isInitialGeneration {
 		generatedFiles := make(map[string]bool)
+		lastReportedOpsCount := 0
 		toolConfig = utils.ToolCallConfig{
 			MaxRounds:   50,
-			NudgeAfter:  25,
-			StripAfter:  35,
+			NudgeAfter:  15,
+			StripAfter:  22,
 			MaxTokens:   65536,
 			TrimArgs:    trimArgs,
 			TrimResults: trimResults,
@@ -558,28 +559,43 @@ func (c *Controller) StreamBuildApp(
 						} `json:"files"`
 					}
 					if err := json.Unmarshal([]byte(toolArgs), &batch); err == nil && len(batch.Files) > 0 {
-						allExist := true
+						type batchFile struct {
+							FilePath string `json:"file_path"`
+							Content  string `json:"content"`
+						}
+						var newFiles []batchFile
+						var skippedPaths []string
+
 						for _, f := range batch.Files {
-							if !generatedFiles[f.FilePath] {
-								allExist = false
-								continue
+							if generatedFiles[f.FilePath] {
+								toolCallbacks.fileMu.RLock()
+								existing := fileMap[f.FilePath]
+								toolCallbacks.fileMu.RUnlock()
+								if strings.TrimSpace(existing) != "" {
+									skippedPaths = append(skippedPaths, f.FilePath)
+									continue
+								}
 							}
-							// Check if the existing file is empty — don't count it as "existing"
-							toolCallbacks.fileMu.RLock()
-							existing := fileMap[f.FilePath]
-							toolCallbacks.fileMu.RUnlock()
-							if strings.TrimSpace(existing) == "" {
-								allExist = false
+							newFiles = append(newFiles, batchFile{FilePath: f.FilePath, Content: f.Content})
+							if strings.TrimSpace(f.Content) != "" {
+								generatedFiles[f.FilePath] = true
 							}
 						}
-						if allExist {
-							paths := make([]string, len(batch.Files))
-							for i, f := range batch.Files {
-								paths[i] = f.FilePath
+
+						if len(skippedPaths) > 0 {
+							if len(newFiles) == 0 {
+								// All files already exist — block entire batch
+								return fmt.Sprintf("ALREADY WRITTEN: [%s] were already created and saved to disk with the full code you wrote. The summaries you see in the conversation are just compressed versions to save context — the actual files contain complete code. Do NOT re-write these files. Continue silently with any remaining work.", strings.Join(skippedPaths, ", ")), true
 							}
-							return fmt.Sprintf("ALREADY WRITTEN: [%s] were already created and saved to disk with the full code you wrote. The summaries you see in the conversation are just compressed versions to save context — the actual files contain complete code. Do NOT re-write these files. Continue silently with any remaining work.", strings.Join(paths, ", ")), true
+							// Partial: strip already-written files, pass only new ones to executor.
+							// Return modified args JSON (non-empty result with skip=false).
+							modifiedBatch, _ := json.Marshal(map[string]any{"files": newFiles})
+							slog.Info("Stripped already-written files from write_files batch",
+								"skipped", skippedPaths, "remaining", len(newFiles))
+							return string(modifiedBatch), false
 						}
-						// Only mark files as generated if they have non-empty content
+
+						// No files skipped — mark all as generated and let through
 						for _, f := range batch.Files {
 							if strings.TrimSpace(f.Content) != "" {
 								generatedFiles[f.FilePath] = true
@@ -600,30 +616,49 @@ func (c *Controller) StreamBuildApp(
 					return ""
 				}
 
-				if len(toolAppliedOps) == 0 {
+				// Only report NEW ops since the last AfterToolRound to avoid repeating the full list.
+				newOps := toolAppliedOps[lastReportedOpsCount:]
+				if len(newOps) == 0 {
 					return ""
 				}
-				var created, modified []string
-				for _, op := range toolAppliedOps {
+				var newCreated, newModified []string
+				for _, op := range newOps {
 					switch op.Action {
 					case "create":
-						created = append(created, op.Path)
+						newCreated = append(newCreated, op.Path)
 					case "modify":
-						modified = append(modified, op.Path)
+						newModified = append(newModified, op.Path)
 					}
 				}
+				isFirstReport := lastReportedOpsCount == 0
+				lastReportedOpsCount = len(toolAppliedOps)
+
 				var sb strings.Builder
-				sb.WriteString(fmt.Sprintf("[SYSTEM: %d files fully written with real code to disk", len(created)))
-				if len(modified) > 0 {
-					sb.WriteString(fmt.Sprintf(", %d modified", len(modified)))
+				if isFirstReport {
+					// First round: full message with compression explanation
+					sb.WriteString(fmt.Sprintf("[SYSTEM: %d files fully written with real code to disk", len(newCreated)))
+					if len(newModified) > 0 {
+						sb.WriteString(fmt.Sprintf(", %d modified", len(newModified)))
+					}
+					sb.WriteString("]\nCompleted files (do NOT re-read or re-create): ")
+					sb.WriteString(strings.Join(newCreated, ", "))
+					if len(newModified) > 0 {
+						sb.WriteString("\nModified files: ")
+						sb.WriteString(strings.Join(newModified, ", "))
+					}
+					sb.WriteString("\nIMPORTANT: Your tool call arguments above now show \"content_written: N chars\" — this is context compression. The full code you generated IS saved to disk. These are NOT placeholders or errors. Do NOT re-write any file listed above.")
+				} else {
+					// Subsequent rounds: concise update with only new files
+					sb.WriteString(fmt.Sprintf("[SYSTEM: +%d files written]", len(newCreated)+len(newModified)))
+					if len(newCreated) > 0 {
+						sb.WriteString(" New: ")
+						sb.WriteString(strings.Join(newCreated, ", "))
+					}
+					if len(newModified) > 0 {
+						sb.WriteString(" Modified: ")
+						sb.WriteString(strings.Join(newModified, ", "))
+					}
 				}
-				sb.WriteString("]\nCompleted files (do NOT re-read or re-create): ")
-				sb.WriteString(strings.Join(created, ", "))
-				if len(modified) > 0 {
-					sb.WriteString("\nModified files: ")
-					sb.WriteString(strings.Join(modified, ", "))
-				}
-				sb.WriteString("\nIMPORTANT: Your tool call arguments above now show \"content_written: N chars\" — this is context compression. The full code you generated IS saved to disk. These are NOT placeholders or errors. Do NOT re-write any file listed above.")
 
 				// Check if all planned files are done
 				if len(plannedFiles) > 0 {
@@ -675,24 +710,35 @@ func (c *Controller) StreamBuildApp(
 					var batch struct {
 						Files []struct {
 							FilePath string `json:"file_path"`
+							Content  string `json:"content"`
 						} `json:"files"`
 					}
 					if err := json.Unmarshal([]byte(toolArgs), &batch); err == nil && len(batch.Files) > 0 {
-						allExist := true
-						for _, f := range batch.Files {
-							if !writtenFiles[f.FilePath] {
-								allExist = false
-							}
+						type batchFile struct {
+							FilePath string `json:"file_path"`
+							Content  string `json:"content"`
 						}
-						if allExist {
-							paths := make([]string, len(batch.Files))
-							for i, f := range batch.Files {
-								paths[i] = f.FilePath
-							}
-							return fmt.Sprintf("ALREADY WRITTEN: [%s] were already written in this session with complete code. Do NOT re-write unless the user specifically requests changes. Continue with other work.", strings.Join(paths, ", ")), true
-						}
+						var newFiles []batchFile
+						var skippedPaths []string
+
 						for _, f := range batch.Files {
+							if writtenFiles[f.FilePath] {
+								skippedPaths = append(skippedPaths, f.FilePath)
+								continue
+							}
+							newFiles = append(newFiles, batchFile{FilePath: f.FilePath, Content: f.Content})
 							writtenFiles[f.FilePath] = true
+						}
+
+						if len(skippedPaths) > 0 {
+							if len(newFiles) == 0 {
+								return fmt.Sprintf("ALREADY WRITTEN: [%s] were already written in this session with complete code. Do NOT re-write unless the user specifically requests changes. Continue with other work.", strings.Join(skippedPaths, ", ")), true
+							}
+							// Partial: strip already-written files, pass only new ones to executor
+							modifiedBatch, _ := json.Marshal(map[string]any{"files": newFiles})
+							slog.Info("Stripped already-written files from write_files batch (chat)",
+								"skipped", skippedPaths, "remaining", len(newFiles))
+							return string(modifiedBatch), false
 						}
 					}
 				}

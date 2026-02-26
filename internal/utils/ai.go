@@ -1733,11 +1733,20 @@ func StreamWithTools(
 
 				// Intercept tool calls before cache check and execution
 				if len(opts) > 0 && opts[0].InterceptToolCall != nil {
-					if interceptResult, skip := opts[0].InterceptToolCall(toolName, toolArgs); skip {
+					interceptResult, skip := opts[0].InterceptToolCall(toolName, toolArgs)
+					if skip {
 						result = interceptResult
 						interceptCount++
 						slog.Info("Tool call intercepted", "tool", toolName, "round", round)
 						goto toolResultDone
+					}
+					// Non-empty result with skip=false means modified args
+					// (e.g. write_files batch with already-written files stripped out)
+					if interceptResult != "" {
+						toolArgs = interceptResult
+						if tc.Function != nil {
+							tc.Function.Arguments = interceptResult
+						}
 					}
 				}
 
@@ -1773,14 +1782,19 @@ func StreamWithTools(
 				})
 			}
 
-			// If all tool calls were deduped or intercepted, the LLM is stuck — accelerate nudge/strip
+			// If all tool calls were deduped or intercepted, the LLM is stuck — accelerate nudge/strip.
+			// Jump close to the nudge threshold so the next productive round triggers it.
 			wastedCount := dedupCount + interceptCount
 			if wastedCount > 0 && wastedCount == len(toolCalls) {
-				consecutiveToolRounds += 2
+				if consecutiveToolRounds < nudgeAfter-1 {
+					consecutiveToolRounds = nudgeAfter - 1
+				} else {
+					consecutiveToolRounds += 2
+				}
 				if interceptCount == len(toolCalls) {
 					currentMessages = append(currentMessages, Message{
 						Role:    "system",
-						Content: "All your tool calls in this round were blocked because those files already exist. Do NOT attempt to re-write files. Move on to files that have NOT been created yet, or provide a summary to the user if all files are done.",
+						Content: "All your tool calls in this round were served from memory. Move on to files that have NOT been created yet, or provide a summary to the user if all files are done.",
 					})
 					slog.Warn("All tool calls intercepted, accelerating nudge", "round", round, "intercept_count", interceptCount, "consecutive_tool_rounds", consecutiveToolRounds)
 				} else {
