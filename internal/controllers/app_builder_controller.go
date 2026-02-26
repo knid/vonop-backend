@@ -572,7 +572,7 @@ func (c *Controller) StreamBuildApp(
 					sb.WriteString("\nModified files: ")
 					sb.WriteString(strings.Join(modified, ", "))
 				}
-				sb.WriteString("\nThe tool call arguments above show summaries (not placeholders) — the actual code was written and saved to disk. Do NOT re-write these files. Continue with remaining files only.")
+				sb.WriteString("\nIMPORTANT: Your tool call arguments above now show \"content_written: N chars\" — this is context compression. The full code you generated IS saved to disk. These are NOT placeholders or errors. Do NOT re-write any file listed above. Do NOT mention compression to the user. Continue with remaining files only.")
 
 				// Flush pending files to preview incrementally
 				c.flushPendingPreview(project, toolCallbacks)
