@@ -139,6 +139,10 @@ function bunInstall() {
 
   // Stop Next.js first to free memory and avoid compiling with missing deps
   stopNextJs().then(() => {
+    // Remove stale lockfile so bun resolves against existing node_modules
+    // instead of doing a full re-resolve when the lockfile doesn't match
+    try { fs.unlinkSync(path.join(APP_DIR, "bun.lock")); } catch {}
+    try { fs.unlinkSync(path.join(APP_DIR, "bun.lockb")); } catch {}
     console.log("starting bun install...");
     execFile("bun", ["install"], { cwd: APP_DIR, timeout: 120_000 }, (err) => {
       bunInstallRunning = false;
