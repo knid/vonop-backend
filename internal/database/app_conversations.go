@@ -35,6 +35,11 @@ func (db *Database) UpdateAppConversation(c *models.AppConversation) (*models.Ap
 	if msg == "" || msg == "null" || msg == `"null"` {
 		msg = "[]"
 	}
+	// Guard: ensure messages is a JSON array, not a string or object.
+	// A bare string like "null" would be valid JSONB but corrupt our data.
+	if len(msg) == 0 || msg[0] != '[' {
+		msg = "[]"
+	}
 	_, err := db.DB.NewUpdate().
 		Model((*models.AppConversation)(nil)).
 		Set("messages = ?::jsonb", msg).

@@ -263,8 +263,12 @@ func (c *Controller) StreamBuildApp(
 
 	var messages []models.AppConversationMessage
 	rawMsg := string(conv.Messages)
-	if rawMsg == "" || rawMsg == "null" || rawMsg == `"null"` {
-		// nil, JSON null, or double-encoded "null" — treat as empty
+	if rawMsg == "" || rawMsg == "null" || rawMsg == `"null"` || (len(rawMsg) > 0 && rawMsg[0] != '[') {
+		// nil, JSON null, double-encoded "null", or non-array JSONB — treat as empty
+		if len(rawMsg) > 0 && rawMsg[0] != '[' && rawMsg != "null" && rawMsg != `"null"` {
+			slog.Warn("conversation messages corrupted (not a JSON array), starting fresh",
+				"conv_id", conv.ID, "raw_length", len(conv.Messages), "first_byte", rawMsg[0])
+		}
 		messages = []models.AppConversationMessage{}
 	} else if err := json.Unmarshal(conv.Messages, &messages); err != nil {
 		slog.Warn("conversation messages corrupted, starting fresh",
@@ -1053,9 +1057,18 @@ func (c *Controller) buildProjectContext(project *models.AppProject, fileMap map
 
 	// Theme
 	var theme map[string]any
-	if len(project.Theme) > 0 {
+	if len(project.Theme) > 0 && project.Theme[0] == '{' {
 		if err := json.Unmarshal(project.Theme, &theme); err != nil {
 			slog.Warn("failed to unmarshal project theme", "error", err, "project_id", project.ID)
+		}
+	} else if len(project.Theme) > 0 {
+		// Theme is not a JSON object (possibly a string or corrupted) — try to unwrap
+		var raw string
+		if json.Unmarshal(project.Theme, &raw) == nil && len(raw) > 0 && raw[0] == '{' {
+			// Double-encoded JSON string — unwrap and parse
+			if err := json.Unmarshal([]byte(raw), &theme); err != nil {
+				slog.Warn("failed to unmarshal double-encoded project theme", "error", err, "project_id", project.ID)
+			}
 		}
 	}
 	if len(theme) > 0 {

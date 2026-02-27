@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -14,6 +15,43 @@ import (
 )
 
 const flyAPIBase = "https://api.machines.dev/v1"
+
+// APIError is returned when the Fly API responds with an HTTP error status.
+type APIError struct {
+	StatusCode int
+	Body       string
+}
+
+func (e *APIError) Error() string {
+	return fmt.Sprintf("fly API error: status %d: %s", e.StatusCode, e.Body)
+}
+
+// IsNotFound returns true if the error is (or wraps) a Fly API 404.
+func IsNotFound(err error) bool {
+	var apiErr *APIError
+	if errors.As(err, &apiErr) {
+		return apiErr.StatusCode == 404
+	}
+	return false
+}
+
+// IsRateLimit returns true if the error is (or wraps) a Fly API 429.
+func IsRateLimit(err error) bool {
+	var apiErr *APIError
+	if errors.As(err, &apiErr) {
+		return apiErr.StatusCode == 429
+	}
+	return false
+}
+
+// IsRetryable returns true if the error is a transient Fly API error (429 or 5xx).
+func IsRetryable(err error) bool {
+	var apiErr *APIError
+	if errors.As(err, &apiErr) {
+		return apiErr.StatusCode == 429 || apiErr.StatusCode >= 500
+	}
+	return false
+}
 
 type Service struct {
 	APIToken string
@@ -124,7 +162,7 @@ func (s *Service) doRequest(method, path string, body any) ([]byte, error) {
 
 	if resp.StatusCode >= 400 {
 		slog.Error("Fly API error", "status", resp.StatusCode, "path", path, "body", string(respBody))
-		return nil, fmt.Errorf("fly API error: status %d: %s", resp.StatusCode, string(respBody))
+		return nil, &APIError{StatusCode: resp.StatusCode, Body: string(respBody)}
 	}
 
 	return respBody, nil
