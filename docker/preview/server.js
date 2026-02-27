@@ -26,6 +26,7 @@ let restartTimestamps = [];
 let bunInstallFailed = false;
 let bunInstallError = "";
 let nextCrashLimitReached = false;
+let firstSyncDone = false;
 
 // Probe Next.js readiness every 2s — any response (even 500) means it's up
 setInterval(() => {
@@ -288,6 +289,10 @@ const server = http.createServer(async (req, res) => {
     } else if (nextCrashLimitReached) {
       status = "crashed";
       code = 500;
+    } else if (!firstSyncDone) {
+      // Proxy is up but waiting for files — backend can send sync now
+      status = "awaiting_sync";
+      code = 200;
     } else {
       status = "starting";
       code = 503;
@@ -365,7 +370,11 @@ const server = http.createServer(async (req, res) => {
         }
         bunInstall();
         installing = true;
+      } else if (!firstSyncDone) {
+        // First sync with no package.json change — just start Next.js
+        startNextJs();
       }
+      firstSyncDone = true;
 
       console.log(`synced ${count} files, deleted ${deleted} files`);
       res.writeHead(200, { "Content-Type": "application/json" });
@@ -431,23 +440,18 @@ server.listen(PORT, "0.0.0.0", () => {
 
 fs.writeFileSync(SETUP_MARKER, "", "utf8");
 
+// Don't start Next.js yet — wait for the first file sync.
+// Starting Next.js with the stub template wastes ~14s (boot + compile)
+// that gets thrown away when real files arrive and trigger a restart.
+// The proxy serves a loading page in the meantime.
+console.log("waiting for first file sync before starting Next.js...");
+
 // Check if early sync flagged bun install (before we were ready)
 if (fs.existsSync("/tmp/.needs-bun-install")) {
   try { fs.unlinkSync("/tmp/.needs-bun-install"); } catch {}
-  console.log("running deferred bun install before starting Next.js...");
-  execFile("bun", ["install"], { cwd: APP_DIR, timeout: 120_000 }, (err) => {
-    if (err) {
-      console.error("initial bun install failed:", err.message);
-      bunInstallFailed = true;
-      bunInstallError = err.message;
-      // DON'T start Next.js if initial install fails
-      return;
-    }
-    console.log("initial bun install completed");
-    startNextJs();
-  });
-} else {
-  startNextJs();
+  console.log("running deferred bun install...");
+  bunInstall();
+  firstSyncDone = true;
 }
 
 // ─── Graceful shutdown ──────────────────────────────────────────────────────
