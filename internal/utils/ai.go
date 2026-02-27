@@ -745,7 +745,11 @@ func StreamTextFromLLMWithMessages(ctx context.Context, model string, messages [
 		if result.Usage.TotalTokens > 0 {
 			slog.Info("LLM usage", "FROM", "LLM_STREAM_TEXT_MSGS", "prompt_tokens", result.Usage.PromptTokens, "completion_tokens", result.Usage.CompletionTokens, "total_tokens", result.Usage.TotalTokens)
 			if tracker := TokenTrackerFromContext(ctx); tracker != nil {
-				tracker.Record(model, result.Usage, time.Since(start).Milliseconds(), true)
+				if tracker.TrackContent {
+					tracker.RecordWithContent(model, result.Usage, time.Since(start).Milliseconds(), true, messages, result.Text)
+				} else {
+					tracker.Record(model, result.Usage, time.Since(start).Milliseconds(), true)
+				}
 			}
 		}
 		return result.Text, nil
@@ -804,7 +808,11 @@ func StreamTextFromLLMWithMessages(ctx context.Context, model string, messages [
 	if lastUsage.TotalTokens > 0 {
 		slog.Info("LLM usage", "FROM", "LLM_STREAM_TEXT_MSGS", "prompt_tokens", lastUsage.PromptTokens, "completion_tokens", lastUsage.CompletionTokens, "total_tokens", lastUsage.TotalTokens)
 		if tracker := TokenTrackerFromContext(ctx); tracker != nil {
-			tracker.Record(model, lastUsage, time.Since(start).Milliseconds(), true)
+			if tracker.TrackContent {
+				tracker.RecordWithContent(model, lastUsage, time.Since(start).Milliseconds(), true, messages, fullText.String())
+			} else {
+				tracker.Record(model, lastUsage, time.Since(start).Milliseconds(), true)
+			}
 		}
 	}
 
