@@ -400,296 +400,146 @@ func (c *Controller) StreamBuildApp(
 		}
 	}
 
-	// --- Set up tools and executor ---
+	// --- Generation: branch between single-shot (initial) and tool-calling (chat) ---
 	var toolAppliedOps []appBuilderOperation
 	rollbackSnapshotID = preSnapshotID
 	rollbackOps = &toolAppliedOps
 
-	toolCallbacks := &builderToolCallbacks{
-		sendEvent:    sendEvent,
-		appliedOps:   &toolAppliedOps,
-		pendingFiles: make(map[string]string),
-	}
-	// Ensure any pending files are flushed to preview even on error/cancellation
-	defer c.flushPendingPreview(project, toolCallbacks)
-
+	var responseText string
 	var thinkingBuf strings.Builder
 	var accToolCalls []models.AppChatToolCall
 	thinkingStart := time.Time{}
 
-	// Reasoning config
-	reasoning := c.reasoningConfig()
-	if reasoningEffort != "" && reasoningEffort != "none" {
-		reasoning = &utils.ReasoningConfig{Effort: reasoningEffort}
-	} else if reasoningEffort == "none" {
-		reasoning = nil
-	}
+	if isInitialGeneration {
+		// === Single-shot path: one LLM call, no tool loop ===
+		singleShotText, singleShotOps, singleShotErr := c.streamSingleShotGeneration(
+			ctx, project, user, model, provider, fileMap, sendEvent, message, imageURLs,
+		)
+		if singleShotErr != nil {
+			slog.Error("Single-shot generation failed", "error", singleShotErr, "project_id", project.ID)
 
-	// Build tools list
-	localExecutor := c.buildBuilderToolExecutor(ctx, project, user, fileMap, toolCallbacks)
-	executor := c.compositeToolExecutor(localExecutor)
-	tools := append([]utils.Tool{}, appBuilderTools...)
-	tools = append(tools, c.mcpTools()...)
-	if wsTool := provider.WebSearchTool(); wsTool != nil {
-		tools = append(tools, *wsTool)
-	}
+			// Auto-rollback on failure
+			if preSnapshotID != "" && len(singleShotOps) > 0 {
+				slog.Info("Auto-rollback: restoring pre-snapshot after failed single-shot generation",
+					"project_id", project.ID,
+					"snapshot_id", preSnapshotID,
+					"partial_ops", len(singleShotOps),
+				)
+				if _, rollbackErr := c.RestoreAppSnapshot(project, preSnapshotID); rollbackErr != nil {
+					slog.Error("Auto-rollback failed", "error", rollbackErr, "project_id", project.ID)
+				} else {
+					sendEvent("rollback", map[string]any{
+						"snapshot_id": preSnapshotID,
+						"reason":      "generation_failed",
+						"rolled_back": len(singleShotOps),
+					})
+				}
+			}
 
-	// Tool call config — trim file content from history to prevent token bloat.
-	// After each tool round, write_file/edit_file args and read_file results are
-	// replaced with short summaries so the LLM doesn't re-read megabytes of code
-	// it already generated.
-	trimArgs := func(toolName, args string) string {
-		switch toolName {
-		case "write_file", "write_files":
-			// Strip file content, keep only paths.
-			// IMPORTANT: use "content_written" (not "content") so the LLM
-			// doesn't mistake the summary for a placeholder it needs to fill.
-			var single struct {
-				FilePath string `json:"file_path"`
-				Content  string `json:"content"`
+			messages = append(messages, models.AppConversationMessage{
+				ID:        uuid.New().String(),
+				Role:      "assistant",
+				Content:   "Sorry, I couldn't process your request. Please try again.",
+				Timestamp: time.Now().Unix(),
+			})
+			if msgJSON, err := json.Marshal(messages); err != nil {
+				slog.Error("failed to marshal messages after LLM error", "error", err, "conv_id", conv.ID)
+			} else {
+				conv.Messages = msgJSON
+				if _, err := c.DB.UpdateAppConversation(conv); err != nil {
+					slog.Error("failed to save conversation after LLM error", "error", err, "conv_id", conv.ID)
+				}
 			}
-			if err := json.Unmarshal([]byte(args), &single); err == nil && single.FilePath != "" {
-				return fmt.Sprintf(`{"file_path":%q,"content_written":"%d chars saved to disk"}`, single.FilePath, len(single.Content))
-			}
-			// write_files: strip content from each file in the array
-			var batch struct {
-				Files []struct {
+			sendError("ai", "failed to generate changes. try again please")
+			return
+		}
+		responseText = singleShotText
+		toolAppliedOps = singleShotOps
+	} else {
+		// === Chat path: existing StreamWithTools flow (unchanged) ===
+		toolCallbacks := &builderToolCallbacks{
+			sendEvent:    sendEvent,
+			appliedOps:   &toolAppliedOps,
+			pendingFiles: make(map[string]string),
+		}
+		// Ensure any pending files are flushed to preview even on error/cancellation
+		defer c.flushPendingPreview(project, toolCallbacks)
+
+		// Reasoning config
+		reasoning := c.reasoningConfig()
+		if reasoningEffort != "" && reasoningEffort != "none" {
+			reasoning = &utils.ReasoningConfig{Effort: reasoningEffort}
+		} else if reasoningEffort == "none" {
+			reasoning = nil
+		}
+
+		// Build tools list
+		localExecutor := c.buildBuilderToolExecutor(ctx, project, user, fileMap, toolCallbacks)
+		executor := c.compositeToolExecutor(localExecutor)
+		tools := append([]utils.Tool{}, appBuilderTools...)
+		tools = append(tools, c.mcpTools()...)
+		if wsTool := provider.WebSearchTool(); wsTool != nil {
+			tools = append(tools, *wsTool)
+		}
+
+		// Tool call config — trim file content from history to prevent token bloat.
+		trimArgs := func(toolName, args string) string {
+			switch toolName {
+			case "write_file", "write_files":
+				var single struct {
 					FilePath string `json:"file_path"`
 					Content  string `json:"content"`
-				} `json:"files"`
-			}
-			if err := json.Unmarshal([]byte(args), &batch); err == nil && len(batch.Files) > 0 {
-				summaries := make([]string, len(batch.Files))
-				for i, f := range batch.Files {
-					summaries[i] = fmt.Sprintf(`{"file_path":%q,"content_written":"%d chars saved to disk"}`, f.FilePath, len(f.Content))
 				}
-				return fmt.Sprintf(`{"files":[%s]}`, strings.Join(summaries, ","))
-			}
-			// Neither single-file nor batch parse succeeded — truncate to prevent context bloat
-			if len(args) > 200 {
-				return fmt.Sprintf(`{"error":"malformed write_files arguments truncated","original_length":%d}`, len(args))
-			}
-			return args
-		case "edit_file":
-			var edit struct {
-				FilePath  string `json:"file_path"`
-				OldString string `json:"old_string"`
-				NewString string `json:"new_string"`
-			}
-			if err := json.Unmarshal([]byte(args), &edit); err == nil {
-				return fmt.Sprintf(`{"file_path":%q,"edit_applied":"replaced %d chars with %d chars"}`,
-					edit.FilePath, len(edit.OldString), len(edit.NewString))
-			}
-			return args
-		default:
-			return args
-		}
-	}
-	trimResults := func(toolName, result string) string {
-		switch toolName {
-		case "read_file":
-			// After LLM has seen the file, collapse to a short confirmation
-			lines := strings.Count(result, "\n") + 1
-			if len(result) > 500 {
-				return fmt.Sprintf("[file read: %d chars, %d lines]", len(result), lines)
-			}
-			return result
-		default:
-			return result
-		}
-	}
-
-	// Extract planned file paths so AfterToolRound knows when all files are done
-	var plannedFiles map[string]bool
-	if isInitialGeneration {
-		if raw, ok := project.Settings["file_plan"]; ok {
-			b, _ := json.Marshal(raw)
-			var filePlan []struct {
-				Path string `json:"path"`
-			}
-			if json.Unmarshal(b, &filePlan) == nil {
-				plannedFiles = make(map[string]bool, len(filePlan))
-				for _, f := range filePlan {
-					plannedFiles[f.Path] = true
+				if err := json.Unmarshal([]byte(args), &single); err == nil && single.FilePath != "" {
+					return fmt.Sprintf(`{"file_path":%q,"content_written":"%d chars saved to disk"}`, single.FilePath, len(single.Content))
 				}
-			}
-		}
-	}
-
-	var toolConfig utils.ToolCallConfig
-	if isInitialGeneration {
-		generatedFiles := make(map[string]bool)
-		lastReportedOpsCount := 0
-		toolConfig = utils.ToolCallConfig{
-			MaxRounds:   50,
-			NudgeAfter:  15,
-			StripAfter:  22,
-			MaxTokens:   65536,
-			TrimArgs:    trimArgs,
-			TrimResults: trimResults,
-			InterceptToolCall: func(toolName, toolArgs string) (string, bool) {
-				switch toolName {
-				case "read_file":
-					// Let reads go through to executor (which returns from fileMap).
-					// TrimResults will collapse large files to a short summary,
-					// giving the LLM proof the file exists without wasting context.
-				case "write_file":
-					var wfArgs struct {
+				var batch struct {
+					Files []struct {
 						FilePath string `json:"file_path"`
 						Content  string `json:"content"`
-					}
-					if err := json.Unmarshal([]byte(toolArgs), &wfArgs); err == nil && wfArgs.FilePath != "" {
-						if generatedFiles[wfArgs.FilePath] {
-							// Allow re-writes to empty/0-byte files (model may have created a stub)
-							toolCallbacks.fileMu.RLock()
-							existing := fileMap[wfArgs.FilePath]
-							toolCallbacks.fileMu.RUnlock()
-							if strings.TrimSpace(existing) != "" {
-								return fmt.Sprintf("ALREADY WRITTEN: %s was already created and saved to disk with complete code. The summary you see is just a compressed version. Do NOT re-write this file. Continue with remaining files.", wfArgs.FilePath), true
-							}
-							// File is empty — allow the re-write through
-							slog.Info("Allowing re-write to empty file", "path", wfArgs.FilePath)
-						}
-						// Only mark as generated if content is non-empty
-						if strings.TrimSpace(wfArgs.Content) != "" {
-							generatedFiles[wfArgs.FilePath] = true
-						}
-					}
-				case "write_files":
-					var batch struct {
-						Files []struct {
-							FilePath string `json:"file_path"`
-							Content  string `json:"content"`
-						} `json:"files"`
-					}
-					if err := json.Unmarshal([]byte(toolArgs), &batch); err == nil && len(batch.Files) > 0 {
-						type batchFile struct {
-							FilePath string `json:"file_path"`
-							Content  string `json:"content"`
-						}
-						var newFiles []batchFile
-						var skippedPaths []string
-
-						for _, f := range batch.Files {
-							if generatedFiles[f.FilePath] {
-								toolCallbacks.fileMu.RLock()
-								existing := fileMap[f.FilePath]
-								toolCallbacks.fileMu.RUnlock()
-								if strings.TrimSpace(existing) != "" {
-									skippedPaths = append(skippedPaths, f.FilePath)
-									continue
-								}
-							}
-							newFiles = append(newFiles, batchFile{FilePath: f.FilePath, Content: f.Content})
-							if strings.TrimSpace(f.Content) != "" {
-								generatedFiles[f.FilePath] = true
-							}
-						}
-
-						if len(skippedPaths) > 0 {
-							if len(newFiles) == 0 {
-								// All files already exist — block entire batch
-								return fmt.Sprintf("ALREADY WRITTEN: [%s] were already created and saved to disk with the full code you wrote. The summaries you see in the conversation are just compressed versions to save context — the actual files contain complete code. Do NOT re-write these files. Continue silently with any remaining work.", strings.Join(skippedPaths, ", ")), true
-							}
-							// Partial: strip already-written files, pass only new ones to executor.
-							// Return modified args JSON (non-empty result with skip=false).
-							modifiedBatch, _ := json.Marshal(map[string]any{"files": newFiles})
-							slog.Info("Stripped already-written files from write_files batch",
-								"skipped", skippedPaths, "remaining", len(newFiles))
-							return string(modifiedBatch), false
-						}
-
-						// No files skipped — mark all as generated and let through
-						for _, f := range batch.Files {
-							if strings.TrimSpace(f.Content) != "" {
-								generatedFiles[f.FilePath] = true
-							}
-						}
-					}
+					} `json:"files"`
 				}
-				return "", false
-			},
-			AfterToolRound: func(allIntercepted bool) string {
-				// Flush pending files to preview incrementally (always, even on intercepted rounds)
-				c.flushPendingPreview(project, toolCallbacks)
-
-				// Skip injecting progress messages on fully-intercepted rounds to avoid context bloat.
-				// The interceptor already told the model "ALREADY WRITTEN" and the acceleration
-				// logic in StreamWithTools injected a "move on" message.
-				if allIntercepted {
-					return ""
+				if err := json.Unmarshal([]byte(args), &batch); err == nil && len(batch.Files) > 0 {
+					summaries := make([]string, len(batch.Files))
+					for i, f := range batch.Files {
+						summaries[i] = fmt.Sprintf(`{"file_path":%q,"content_written":"%d chars saved to disk"}`, f.FilePath, len(f.Content))
+					}
+					return fmt.Sprintf(`{"files":[%s]}`, strings.Join(summaries, ","))
 				}
-
-				// Only report NEW ops since the last AfterToolRound to avoid repeating the full list.
-				newOps := toolAppliedOps[lastReportedOpsCount:]
-				if len(newOps) == 0 {
-					return ""
+				if len(args) > 200 {
+					return fmt.Sprintf(`{"error":"malformed write_files arguments truncated","original_length":%d}`, len(args))
 				}
-				var newCreated, newModified []string
-				for _, op := range newOps {
-					switch op.Action {
-					case "create":
-						newCreated = append(newCreated, op.Path)
-					case "modify":
-						newModified = append(newModified, op.Path)
-					}
+				return args
+			case "edit_file":
+				var edit struct {
+					FilePath  string `json:"file_path"`
+					OldString string `json:"old_string"`
+					NewString string `json:"new_string"`
 				}
-				isFirstReport := lastReportedOpsCount == 0
-				lastReportedOpsCount = len(toolAppliedOps)
-
-				var sb strings.Builder
-				if isFirstReport {
-					// First round: full message with compression explanation
-					sb.WriteString(fmt.Sprintf("[SYSTEM: %d files fully written with real code to disk", len(newCreated)))
-					if len(newModified) > 0 {
-						sb.WriteString(fmt.Sprintf(", %d modified", len(newModified)))
-					}
-					sb.WriteString("]\nCompleted files (do NOT re-read or re-create): ")
-					sb.WriteString(strings.Join(newCreated, ", "))
-					if len(newModified) > 0 {
-						sb.WriteString("\nModified files: ")
-						sb.WriteString(strings.Join(newModified, ", "))
-					}
-					sb.WriteString("\nIMPORTANT: Your tool call arguments above now show \"content_written: N chars\" — this is context compression. The full code you generated IS saved to disk. These are NOT placeholders or errors. Do NOT re-write any file listed above.")
-				} else {
-					// Subsequent rounds: concise update with only new files
-					sb.WriteString(fmt.Sprintf("[SYSTEM: +%d files written]", len(newCreated)+len(newModified)))
-					if len(newCreated) > 0 {
-						sb.WriteString(" New: ")
-						sb.WriteString(strings.Join(newCreated, ", "))
-					}
-					if len(newModified) > 0 {
-						sb.WriteString(" Modified: ")
-						sb.WriteString(strings.Join(newModified, ", "))
-					}
+				if err := json.Unmarshal([]byte(args), &edit); err == nil {
+					return fmt.Sprintf(`{"file_path":%q,"edit_applied":"replaced %d chars with %d chars"}`,
+						edit.FilePath, len(edit.OldString), len(edit.NewString))
 				}
-
-				// Check if all planned files are done
-				if len(plannedFiles) > 0 {
-					var remaining []string
-					for path := range plannedFiles {
-						if !generatedFiles[path] {
-							remaining = append(remaining, path)
-						}
-					}
-					if len(remaining) == 0 {
-						sb.WriteString("\nAll planned files are complete. Provide a brief summary of what you built to the user. Do NOT create or read any more files unless absolutely necessary.")
-					} else {
-						sb.WriteString(fmt.Sprintf("\nRemaining files to create: %s", strings.Join(remaining, ", ")))
-					}
-				} else {
-					sb.WriteString("\nContinue with remaining files if any, or provide a summary to the user if done.")
-				}
-
-				return sb.String()
-			},
-			OnToolCallStart: func(toolName string) {
-				sendEvent("tool_start", map[string]any{"tool": toolName})
-			},
+				return args
+			default:
+				return args
+			}
 		}
-	} else {
+		trimResults := func(toolName, result string) string {
+			switch toolName {
+			case "read_file":
+				lines := strings.Count(result, "\n") + 1
+				if len(result) > 500 {
+					return fmt.Sprintf("[file read: %d chars, %d lines]", len(result), lines)
+				}
+				return result
+			default:
+				return result
+			}
+		}
+
 		writtenFiles := make(map[string]bool)
-		toolConfig = utils.ToolCallConfig{
+		toolConfig := utils.ToolCallConfig{
 			MaxRounds:    25,
 			NudgeAfter:   10,
 			StripAfter:   18,
@@ -738,7 +588,6 @@ func (c *Controller) StreamBuildApp(
 							if len(newFiles) == 0 {
 								return fmt.Sprintf("ALREADY WRITTEN: [%s] were already written in this session with complete code. Do NOT re-write unless the user specifically requests changes. Continue with other work.", strings.Join(skippedPaths, ", ")), true
 							}
-							// Partial: strip already-written files, pass only new ones to executor
 							modifiedBatch, _ := json.Marshal(map[string]any{"files": newFiles})
 							slog.Info("Stripped already-written files from write_files batch (chat)",
 								"skipped", skippedPaths, "remaining", len(newFiles))
@@ -772,86 +621,86 @@ func (c *Controller) StreamBuildApp(
 				sendEvent("tool_start", map[string]any{"tool": toolName})
 			},
 		}
-	}
 
-	slog.Info("Calling LLM for build",
-		"model", model,
-		"project_id", project.ID,
-		"is_generation", isInitialGeneration,
-		"message_count", len(llmMessages),
-		"tool_count", len(tools),
-	)
+		slog.Info("Calling LLM for build",
+			"model", model,
+			"project_id", project.ID,
+			"is_generation", isInitialGeneration,
+			"message_count", len(llmMessages),
+			"tool_count", len(tools),
+		)
 
-	// --- Call LLM with tools ---
-	responseText, err := utils.StreamWithTools(
-		ctx,
-		model,
-		llmMessages,
-		tools,
-		provider,
-		nil, // no forced JSON format
-		reasoning,
-		executor,
-		func(toolName, args string) {
-			accToolCalls = append(accToolCalls, models.AppChatToolCall{Tool: toolName, Arguments: args})
-			sendEvent("tool_call", responses.ToolCallEvent{
-				Tool:      toolName,
-				Arguments: args,
-			})
-		},
-		func(chunk string) {
-			// Strip ANSI escape codes
-			chunk = ansiRegex.ReplaceAllString(chunk, "")
-			if chunk != "" {
-				sendEvent("chat_text", responses.ChatTextEvent{Chunk: chunk})
-			}
-		},
-		func(chunk string) {
-			if thinkingStart.IsZero() {
-				thinkingStart = time.Now()
-			}
-			thinkingBuf.WriteString(chunk)
-			sendEvent("chat_thinking", responses.ChatThinkingEvent{Chunk: chunk})
-		},
-		toolConfig,
-	)
-	if err != nil {
-		slog.Error("LLM build call failed", "error", err, "project_id", project.ID)
-
-		// Auto-rollback: if files were partially written and we have a pre-snapshot, restore it
-		if preSnapshotID != "" && len(toolAppliedOps) > 0 {
-			slog.Info("Auto-rollback: restoring pre-snapshot after failed generation",
-				"project_id", project.ID,
-				"snapshot_id", preSnapshotID,
-				"partial_ops", len(toolAppliedOps),
-			)
-			if _, rollbackErr := c.RestoreAppSnapshot(project, preSnapshotID); rollbackErr != nil {
-				slog.Error("Auto-rollback failed", "error", rollbackErr, "project_id", project.ID)
-			} else {
-				sendEvent("rollback", map[string]any{
-					"snapshot_id": preSnapshotID,
-					"reason":      "generation_failed",
-					"rolled_back":  len(toolAppliedOps),
+		// --- Call LLM with tools ---
+		var err error
+		responseText, err = utils.StreamWithTools(
+			ctx,
+			model,
+			llmMessages,
+			tools,
+			provider,
+			nil, // no forced JSON format
+			reasoning,
+			executor,
+			func(toolName, args string) {
+				accToolCalls = append(accToolCalls, models.AppChatToolCall{Tool: toolName, Arguments: args})
+				sendEvent("tool_call", responses.ToolCallEvent{
+					Tool:      toolName,
+					Arguments: args,
 				})
-			}
-		}
+			},
+			func(chunk string) {
+				chunk = ansiRegex.ReplaceAllString(chunk, "")
+				if chunk != "" {
+					sendEvent("chat_text", responses.ChatTextEvent{Chunk: chunk})
+				}
+			},
+			func(chunk string) {
+				if thinkingStart.IsZero() {
+					thinkingStart = time.Now()
+				}
+				thinkingBuf.WriteString(chunk)
+				sendEvent("chat_thinking", responses.ChatThinkingEvent{Chunk: chunk})
+			},
+			toolConfig,
+		)
+		if err != nil {
+			slog.Error("LLM build call failed", "error", err, "project_id", project.ID)
 
-		messages = append(messages, models.AppConversationMessage{
-			ID:        uuid.New().String(),
-			Role:      "assistant",
-			Content:   "Sorry, I couldn't process your request. Please try again.",
-			Timestamp: time.Now().Unix(),
-		})
-		if msgJSON, err := json.Marshal(messages); err != nil {
-			slog.Error("failed to marshal messages after LLM error", "error", err, "conv_id", conv.ID)
-		} else {
-			conv.Messages = msgJSON
-			if _, err := c.DB.UpdateAppConversation(conv); err != nil {
-				slog.Error("failed to save conversation after LLM error", "error", err, "conv_id", conv.ID)
+			// Auto-rollback: if files were partially written and we have a pre-snapshot, restore it
+			if preSnapshotID != "" && len(toolAppliedOps) > 0 {
+				slog.Info("Auto-rollback: restoring pre-snapshot after failed generation",
+					"project_id", project.ID,
+					"snapshot_id", preSnapshotID,
+					"partial_ops", len(toolAppliedOps),
+				)
+				if _, rollbackErr := c.RestoreAppSnapshot(project, preSnapshotID); rollbackErr != nil {
+					slog.Error("Auto-rollback failed", "error", rollbackErr, "project_id", project.ID)
+				} else {
+					sendEvent("rollback", map[string]any{
+						"snapshot_id": preSnapshotID,
+						"reason":      "generation_failed",
+						"rolled_back": len(toolAppliedOps),
+					})
+				}
 			}
+
+			messages = append(messages, models.AppConversationMessage{
+				ID:        uuid.New().String(),
+				Role:      "assistant",
+				Content:   "Sorry, I couldn't process your request. Please try again.",
+				Timestamp: time.Now().Unix(),
+			})
+			if msgJSON, err := json.Marshal(messages); err != nil {
+				slog.Error("failed to marshal messages after LLM error", "error", err, "conv_id", conv.ID)
+			} else {
+				conv.Messages = msgJSON
+				if _, err := c.DB.UpdateAppConversation(conv); err != nil {
+					slog.Error("failed to save conversation after LLM error", "error", err, "conv_id", conv.ID)
+				}
+			}
+			sendError("ai", "failed to generate changes. try again please")
+			return
 		}
-		sendError("ai", "failed to generate changes. try again please")
-		return
 	}
 
 	// Record conversation tracing
@@ -892,8 +741,10 @@ func (c *Controller) StreamBuildApp(
 		}
 
 		// Build validation: check logs, fix errors
+		// Create a tool executor for validation fix passes (used by both paths)
+		validationExecutor := c.buildBuilderToolExecutor(ctx, project, user, fileMap, nil)
 		c.validateWithPreviewLogs(ctx, project, fileMap, provider,
-			localExecutor, sendEvent, &appliedOps, &filesChanged, deletedPaths)
+			validationExecutor, sendEvent, &appliedOps, &filesChanged, deletedPaths)
 	}
 
 	// --- Detect missing env vars ---
@@ -1058,10 +909,66 @@ func (c *Controller) injectTemplateFile(project *models.AppProject, tp string, c
 	})
 }
 
+// --- Helper: save a generated file to DB, fileMap, and SSE ---
+
+// saveGeneratedFile persists a generated file to the database, updates fileMap,
+// emits a file_complete SSE event, and tracks the operation. Used by both the
+// single-shot parser and the tool executor.
+func (c *Controller) saveGeneratedFile(
+	project *models.AppProject,
+	path string,
+	content string,
+	fileType string,
+	fileMap map[string]string,
+	sendEvent func(string, any) bool,
+	ops *[]appBuilderOperation,
+) {
+	existingFile, err := c.DB.GetAppGeneratedFileByPath(project.ID.String(), "nextjs", path)
+	action := "create"
+	var fileID uuid.UUID
+	if err == nil && existingFile != nil {
+		if normalizeContent(content) == normalizeContent(existingFile.Content) {
+			// No changes — skip
+			return
+		}
+		existingFile.Content = content
+		existingFile.UpdatedAt = time.Now()
+		if _, err := c.DB.UpdateAppGeneratedFile(existingFile); err != nil {
+			slog.Error("saveGeneratedFile: failed to update", "path", path, "error", err)
+			return
+		}
+		action = "modify"
+		fileID = existingFile.ID
+	} else {
+		newFile := models.AppGeneratedFile{
+			AppProjectID: project.ID,
+			Platform:     "nextjs",
+			FilePath:     path,
+			Content:      content,
+			FileType:     fileType,
+			IsGenerated:  true,
+		}
+		createdFile, err := c.DB.CreateAppGeneratedFile(&newFile)
+		if err != nil {
+			slog.Error("saveGeneratedFile: failed to create", "path", path, "error", err)
+			return
+		}
+		fileID = createdFile.ID
+	}
+	fileMap[path] = content
+	sendEvent("file_complete", responses.FileCompleteEvent{
+		Action: action, FilePath: path,
+		FileID: fileID, FileType: fileType, Content: content,
+	})
+	*ops = append(*ops, appBuilderOperation{
+		Action: action, Path: path, Type: fileType,
+	})
+}
+
 // --- Helper: build modular system prompt ---
 
-// buildSystemPrompt assembles the system prompt, only including e-commerce and
-// auth rules when the project actually uses those features.
+// buildSystemPrompt assembles the system prompt for the tool-calling path,
+// only including e-commerce and auth rules when the project actually uses those features.
 func buildSystemPrompt(project *models.AppProject) string {
 	prompt := constants.NEXTJS_BUILDER_SYSTEM_PROMPT
 
@@ -1071,6 +978,24 @@ func buildSystemPrompt(project *models.AppProject) string {
 	}
 
 	// Auth rules
+	if settings := project.Settings; settings != nil {
+		if needsAuth, ok := settings["needs_auth"].(bool); ok && needsAuth {
+			prompt += constants.NEXTJS_BUILDER_AUTH_RULES
+		}
+	}
+
+	return prompt
+}
+
+// buildSingleShotSystemPrompt assembles the system prompt for single-shot initial
+// generation using <file> block output format instead of tool calls.
+func buildSingleShotSystemPrompt(project *models.AppProject) string {
+	prompt := constants.NEXTJS_BUILDER_COMMON_RULES + constants.NEXTJS_BUILDER_SINGLESHOT_INSTRUCTIONS
+
+	if project.ProjectType == "ecommerce" {
+		prompt += constants.NEXTJS_BUILDER_ECOMMERCE_RULES
+	}
+
 	if settings := project.Settings; settings != nil {
 		if needsAuth, ok := settings["needs_auth"].(bool); ok && needsAuth {
 			prompt += constants.NEXTJS_BUILDER_AUTH_RULES
@@ -1171,8 +1096,11 @@ func (c *Controller) buildProjectContext(project *models.AppProject, fileMap map
 	} else if isInitialGeneration {
 		sb.WriteString("\nNo files yet — you are building this app from scratch.\n")
 		sb.WriteString("User prompt: " + project.Prompt + "\n")
+	}
 
-		// Inject file plan from structure phase if available
+	// Inject file plan from structure phase if available (for initial gen regardless of fileMap state,
+	// since template files may already be injected before the LLM runs).
+	if isInitialGeneration {
 		if raw, ok := project.Settings["file_plan"]; ok {
 			b, marshalErr := json.Marshal(raw)
 			if marshalErr != nil {
@@ -2435,6 +2363,311 @@ func (c *Controller) mcpTools() []utils.Tool {
 		return c.MCPService.Tools()
 	}
 	return nil
+}
+
+// --- Single-shot initial generation ---
+
+// runPreGenerationSetup handles stateful operations (e-commerce, database, auth)
+// BEFORE the single-shot LLM call so the LLM doesn't need tools for setup.
+func (c *Controller) runPreGenerationSetup(
+	ctx context.Context,
+	project *models.AppProject,
+	user *models.User,
+	fileMap map[string]string,
+	sendEvent func(string, any) bool,
+	provider *utils.LLMProvider,
+	model string,
+	userPrompt string,
+) error {
+	// --- E-commerce setup ---
+	if project.ProjectType == "ecommerce" {
+		store, _ := c.DB.GetStoreByAppProjectID(project.ID.String())
+		if store == nil {
+			var err error
+			store, err = c.CreateStore(project, user, project.Name+" Store")
+			if err != nil {
+				slog.Error("pre-gen: failed to create store", "error", err, "project_id", project.ID)
+				return fmt.Errorf("failed to create store: %w", err)
+			}
+			slog.Info("pre-gen: created ecommerce store", "store_id", store.ID, "project_id", project.ID)
+		}
+
+		// Inject e-commerce template files (if not already present from template injection)
+		for _, tp := range constants.NEXTJS_ECOMMERCE_TEMPLATE_FILE_PATHS {
+			if _, exists := fileMap[tp]; exists {
+				continue
+			}
+			content := getEcommerceTemplateContent(tp)
+			if content != "" {
+				c.injectTemplateFile(project, tp, content, fileMap, sendEvent)
+			}
+		}
+
+		// Quick LLM call to seed store with products/categories tailored to the prompt
+		seedData := c.generateStoreSeedData(ctx, project, userPrompt, provider, model)
+		if seedData != nil {
+			for _, op := range seedData.Operations {
+				if _, err := c.executeStoreOperation(store, op.Action, op.Data); err != nil {
+					slog.Warn("pre-gen: store seed op failed", "action", op.Action, "error", err)
+				}
+			}
+			slog.Info("pre-gen: seeded store", "operations", len(seedData.Operations), "project_id", project.ID)
+		}
+
+		// Update .env.local with store env vars
+		envVars := c.CollectAllEnvVars(project)
+		if dotEnv := BuildDotEnvLocal(envVars); dotEnv != "" {
+			c.injectTemplateFile(project, ".env.local", dotEnv, fileMap, sendEvent)
+		}
+	}
+
+	// --- Database setup ---
+	if len(project.DataModels) > 0 && c.NeonService != nil {
+		var dataModels []DataModel
+		if err := json.Unmarshal(project.DataModels, &dataModels); err != nil {
+			slog.Warn("pre-gen: failed to unmarshal data models", "error", err, "project_id", project.ID)
+		}
+
+		if len(dataModels) > 0 {
+			// Check if already provisioned
+			appIntegrations, _ := c.DB.GetAppIntegrationsByProjectID(project.ID.String())
+			alreadyProvisioned := false
+			for _, integ := range appIntegrations {
+				if integ.Provider == "neon" && integ.Status == "connected" {
+					alreadyProvisioned = true
+					break
+				}
+			}
+
+			if !alreadyProvisioned {
+				sendEvent("neon_provision", map[string]any{"phase": "start"})
+
+				// Merge auth models if needed
+				needsAuth := false
+				if settings := project.Settings; settings != nil {
+					needsAuth, _ = settings["needs_auth"].(bool)
+				}
+				if needsAuth {
+					var authModels []DataModel
+					if err := json.Unmarshal([]byte(constants.AUTH_DEFAULT_DATA_MODELS), &authModels); err == nil {
+						existing := make(map[string]bool)
+						for _, m := range dataModels {
+							existing[m.Name] = true
+						}
+						for _, dm := range authModels {
+							if !existing[dm.Name] {
+								dataModels = append([]DataModel{dm}, dataModels...)
+							}
+						}
+					}
+				}
+
+				// Merge ecommerce models if needed
+				if project.ProjectType == "ecommerce" {
+					var defaultModels []DataModel
+					if err := json.Unmarshal([]byte(constants.ECOMMERCE_DEFAULT_DATA_MODELS), &defaultModels); err == nil {
+						existing := make(map[string]bool)
+						for _, m := range dataModels {
+							existing[m.Name] = true
+						}
+						for _, dm := range defaultModels {
+							if !existing[dm.Name] {
+								dataModels = append([]DataModel{dm}, dataModels...)
+							}
+						}
+					}
+				}
+
+				connStr, neonProjectID, neonErr := c.provisionNeonDatabase(ctx, project, dataModels, sendEvent)
+				if connStr != "" && neonProjectID != "" {
+					if err := c.storeNeonIntegration(project, connStr, neonProjectID); err != nil {
+						slog.Error("pre-gen: failed to store neon integration", "error", err, "project_id", project.ID)
+					}
+
+					// Inject DB template files
+					dbContent := fmt.Sprintf(constants.NEXTJS_TEMPLATE_DB_TS, connStr)
+					c.injectTemplateFile(project, "lib/db.ts", dbContent, fileMap, sendEvent)
+
+					schemaContent := buildDrizzleSchema(dataModels)
+					c.injectTemplateFile(project, "lib/schema.ts", schemaContent, fileMap, sendEvent)
+
+					// Seed database
+					if _, seedErr := c.seedNeonDatabase(ctx, project, dataModels, sendEvent); seedErr != nil {
+						slog.Warn("pre-gen: database seeding failed", "error", seedErr, "project_id", project.ID)
+					}
+				} else {
+					slog.Error("pre-gen: database provisioning failed", "error", neonErr, "project_id", project.ID)
+				}
+
+				sendEvent("neon_provision", map[string]any{"phase": "ready"})
+			}
+		}
+	}
+
+	// --- Auth setup ---
+	if settings := project.Settings; settings != nil {
+		if needsAuth, ok := settings["needs_auth"].(bool); ok && needsAuth {
+			// Check if auth templates are already injected
+			if _, exists := fileMap["lib/wemob-auth.ts"]; !exists {
+				authSecret, err := utils.RandomHex(32)
+				if err == nil {
+					envVar := &models.AppEnvVar{
+						AppProjectID: project.ID,
+						Key:          "AUTH_SECRET",
+						Value:        authSecret,
+						IsPublic:     false,
+					}
+					c.DB.CreateAppEnvVar(envVar)
+				}
+
+				for _, tp := range constants.NEXTJS_AUTH_TEMPLATE_FILE_PATHS {
+					content := getAuthTemplateContent(tp)
+					if content != "" {
+						c.injectTemplateFile(project, tp, content, fileMap, sendEvent)
+					}
+				}
+			}
+
+			// Update .env.local with auth vars
+			envVars := c.CollectAllEnvVars(project)
+			if dotEnv := BuildDotEnvLocal(envVars); dotEnv != "" {
+				c.injectTemplateFile(project, ".env.local", dotEnv, fileMap, sendEvent)
+			}
+		}
+	}
+
+	return nil
+}
+
+// storeSeedResult is the expected JSON output from generateStoreSeedData.
+type storeSeedResult struct {
+	Operations []struct {
+		Action string         `json:"action"`
+		Data   map[string]any `json:"data"`
+	} `json:"operations"`
+}
+
+// generateStoreSeedData uses a cheap LLM call to generate product/category seed
+// data tailored to the user's prompt.
+func (c *Controller) generateStoreSeedData(
+	ctx context.Context,
+	project *models.AppProject,
+	userPrompt string,
+	provider *utils.LLMProvider,
+	model string,
+) *storeSeedResult {
+	fixModel := c.fixModel(provider)
+
+	system := "You are a product catalog designer. Generate seed data for an e-commerce store. Output strict JSON only, no explanation."
+	prompt := fmt.Sprintf(`Generate seed data for an e-commerce store based on this description: %q
+
+Store name: %s
+
+Generate 5-8 products with realistic names, descriptions, prices (in cents), and images (use picsum.photos URLs).
+Generate 2-3 categories that make sense for this store.
+
+Output strict JSON with this format:
+{
+  "operations": [
+    {"action": "create_category", "data": {"name": "Category Name", "description": "..."}},
+    {"action": "create_product", "data": {"name": "Product Name", "description": "...", "price_in_cents": 2999, "images": ["https://picsum.photos/seed/product1/400/400"], "category_name": "Category Name"}}
+  ]
+}
+
+Rules:
+- Prices must be integers (cents). E.g., $29.99 = 2999
+- Create categories BEFORE products that reference them
+- Use descriptive, realistic product names and descriptions
+- No markdown, no explanation, only JSON`, userPrompt, project.Name)
+
+	result, err := utils.GetJSONFromLLM(ctx, fixModel, system, prompt, provider)
+	if err != nil {
+		slog.Warn("pre-gen: store seed LLM call failed", "error", err, "project_id", project.ID)
+		return nil
+	}
+
+	var seedData storeSeedResult
+	if err := json.Unmarshal([]byte(result), &seedData); err != nil {
+		slog.Warn("pre-gen: failed to parse store seed data", "error", err, "project_id", project.ID)
+		return nil
+	}
+	return &seedData
+}
+
+// streamSingleShotGeneration performs initial app generation in a single LLM call.
+// The LLM outputs all files using <file path="...">content</file> blocks which are
+// parsed incrementally and saved as they complete.
+func (c *Controller) streamSingleShotGeneration(
+	ctx context.Context,
+	project *models.AppProject,
+	user *models.User,
+	model string,
+	provider *utils.LLMProvider,
+	fileMap map[string]string,
+	sendEvent func(string, any) bool,
+	message string,
+	imageURLs []string,
+) (responseText string, ops []appBuilderOperation, err error) {
+	// 1. Run pre-generation setup (e-commerce, database, auth)
+	if setupErr := c.runPreGenerationSetup(ctx, project, user, fileMap, sendEvent, provider, model, message); setupErr != nil {
+		return "", nil, fmt.Errorf("pre-generation setup failed: %w", setupErr)
+	}
+
+	// 2. Build messages with single-shot system prompt
+	llmMessages := []utils.Message{
+		{Role: "system", Content: buildSingleShotSystemPrompt(project)},
+		{Role: "system", Content: c.buildProjectContext(project, fileMap, true)},
+	}
+
+	userContent := message
+	if len(imageURLs) > 0 {
+		userContent += fmt.Sprintf("\n\n[User attached %d image(s) for visual reference — recreate the design shown]", len(imageURLs))
+	}
+	llmMessages = append(llmMessages, utils.Message{Role: "user", Content: userContent})
+
+	// 3. Set up streaming file parser
+	var responseBuilder strings.Builder
+	parser := &utils.FileStreamParser{
+		OnFile: func(path, content string) {
+			content = utils.StripCodeFences(content)
+			_, fileType := guessFileType(path)
+			if fileType == "tsx" || fileType == "ts" {
+				content, _ = stripForbiddenImports(content, path)
+			}
+			c.saveGeneratedFile(project, path, content, fileType, fileMap, sendEvent, &ops)
+		},
+		OnText: func(text string) {
+			responseBuilder.WriteString(text)
+			cleaned := ansiRegex.ReplaceAllString(text, "")
+			if cleaned != "" {
+				sendEvent("chat_text", responses.ChatTextEvent{Chunk: cleaned})
+			}
+		},
+	}
+
+	// 4. Single LLM call — no tools, no rounds
+	slog.Info("Starting single-shot generation",
+		"model", model,
+		"project_id", project.ID,
+		"message_count", len(llmMessages),
+	)
+
+	_, err = utils.StreamTextFromLLMWithMessages(
+		ctx, model, llmMessages, provider,
+		func(chunk string) { parser.Feed(chunk) },
+		func(chunk string) {
+			sendEvent("chat_thinking", responses.ChatThinkingEvent{Chunk: chunk})
+		},
+		utils.StreamTextConfig{MaxTokens: 65536},
+	)
+	parser.Flush()
+
+	// 5. Sync all files to preview
+	if c.PreviewService != nil {
+		c.SyncPreviewAll(project)
+	}
+
+	return responseBuilder.String(), ops, err
 }
 
 // summarizeConversation generates a concise summary of older conversation messages.

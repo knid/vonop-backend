@@ -682,18 +682,28 @@ func StreamTextFromLLM(ctx context.Context, model, system, message string, provi
 	return fullText.String(), nil
 }
 
+// StreamTextConfig provides optional configuration for StreamTextFromLLMWithMessages.
+type StreamTextConfig struct {
+	MaxTokens int // 0 means default (16384)
+}
+
 // StreamTextFromLLMWithMessages streams LLM response tokens for a pre-built message array.
 // Useful for multi-block system prompts (caching) without tool calling overhead.
-func StreamTextFromLLMWithMessages(ctx context.Context, model string, messages []Message, provider *LLMProvider, onChunk func(chunk string), onReasoning func(chunk string)) (string, error) {
+func StreamTextFromLLMWithMessages(ctx context.Context, model string, messages []Message, provider *LLMProvider, onChunk func(chunk string), onReasoning func(chunk string), opts ...StreamTextConfig) (string, error) {
 	if provider == nil || provider.APIKey == "" {
 		return "", fmt.Errorf("missing LLM provider configuration")
+	}
+
+	maxTokens := 16384
+	if len(opts) > 0 && opts[0].MaxTokens > 0 {
+		maxTokens = opts[0].MaxTokens
 	}
 
 	body, err := buildLLMRequestBody(ChatRequest{
 		Model:         model,
 		Stream:        true,
 		StreamOptions: &StreamOptionsConfig{IncludeUsage: true},
-		MaxTokens:     16384,
+		MaxTokens:     maxTokens,
 		Messages:      messages,
 	}, provider)
 	if err != nil {
