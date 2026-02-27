@@ -75,9 +75,7 @@ const NEXTJS_TEMPLATE_PACKAGE_JSON = `{
     "@radix-ui/react-switch": "^1.1.0",
     "@radix-ui/react-select": "^2.1.0",
     "@radix-ui/react-accordion": "^1.2.0",
-    "@radix-ui/react-popover": "^1.1.0",
-    "drizzle-orm": "^0.39.0",
-    "@neondatabase/serverless": "^0.10.0"
+    "@radix-ui/react-popover": "^1.1.0"
   },
   "devDependencies": {
     "typescript": "^5.4.0",
@@ -86,8 +84,7 @@ const NEXTJS_TEMPLATE_PACKAGE_JSON = `{
     "@types/node": "^20.0.0",
     "tailwindcss": "^4.0.0",
     "@tailwindcss/postcss": "^4.0.0",
-    "postcss": "^8.4.0",
-    "drizzle-kit": "^0.30.0"
+    "postcss": "^8.4.0"
   }
 }`
 

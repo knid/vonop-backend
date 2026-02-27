@@ -17,6 +17,11 @@ const SETUP_MARKER = "/tmp/.setup-complete";
 let nextReady = false;
 let nextProcess = null;
 
+// Auto-restart tracking: max 5 restarts within a 5-minute window
+const MAX_RESTARTS = 5;
+const RESTART_WINDOW_MS = 5 * 60 * 1000;
+let restartTimestamps = [];
+
 // Probe Next.js readiness every 2s — any response (even 500) means it's up
 setInterval(() => {
   http
@@ -59,6 +64,24 @@ function startNextJs() {
     nextProcess = null;
     nextReady = false;
     logStream.end();
+
+    // Auto-restart with exponential backoff (skip if bun install will restart it)
+    if (bunInstallRunning) return;
+
+    const now = Date.now();
+    restartTimestamps = restartTimestamps.filter((t) => now - t < RESTART_WINDOW_MS);
+    if (restartTimestamps.length >= MAX_RESTARTS) {
+      console.error(`Next.js crashed ${MAX_RESTARTS} times in ${RESTART_WINDOW_MS / 1000}s, not restarting`);
+      return;
+    }
+
+    const attempt = restartTimestamps.length + 1;
+    const delay = Math.min(1000 * Math.pow(2, attempt - 1), 30000);
+    restartTimestamps.push(now);
+    console.log(`auto-restarting Next.js in ${delay}ms (attempt ${attempt}/${MAX_RESTARTS})`);
+    setTimeout(() => {
+      if (!nextProcess && !bunInstallRunning) startNextJs();
+    }, delay);
   });
 
   nextProcess = child;
@@ -155,10 +178,21 @@ proxy.on("error", (err, _req, res) => {
   }
 });
 
+const MAX_BODY_SIZE = 50 * 1024 * 1024; // 50MB
+
 function parseBody(req) {
   return new Promise((resolve, reject) => {
     const chunks = [];
-    req.on("data", (c) => chunks.push(c));
+    let totalSize = 0;
+    req.on("data", (c) => {
+      totalSize += c.length;
+      if (totalSize > MAX_BODY_SIZE) {
+        req.destroy();
+        reject(new Error(`payload too large (>${MAX_BODY_SIZE / 1024 / 1024}MB)`));
+        return;
+      }
+      chunks.push(c);
+    });
     req.on("end", () => {
       try {
         resolve(JSON.parse(Buffer.concat(chunks).toString()));

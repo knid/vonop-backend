@@ -33,6 +33,22 @@ var customTransport = &http.Transport{
 	TLSClientConfig:       &tls.Config{InsecureSkipVerify: true},
 }
 
+// InitProxyTransport configures the upstream proxy once at startup.
+// Must be called before any requests hit ProxyHandler.
+func InitProxyTransport(host, auth string) {
+	if host == "" {
+		return
+	}
+	upstreamURL := &url.URL{Scheme: "http", Host: host}
+	if auth != "" {
+		parts := strings.Split(auth, ":")
+		if len(parts) == 2 {
+			upstreamURL.User = url.UserPassword(parts[0], parts[1])
+		}
+	}
+	customTransport.Proxy = http.ProxyURL(upstreamURL)
+}
+
 func (v *HttpViews) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 	// tokenString, err := utils.ExtractTokenFromHeader(r)
 	// if err != nil {
@@ -51,20 +67,6 @@ func (v *HttpViews) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 	/* slog.Info(fmt.Sprintf("Proxy start request received for: %s", r.URL.Path),
 	"user.token", tokenString[0:12]+"...", "user.id", userInformationRes.ID.String(),
 	"user.email", userInformationRes.Email, "from", "PROXY") */
-
-	UpstreamProxyHost := v.Controller.SecretManager.GetSecret("PREVIEW_PROXY_HOST")
-	UpstreamProxyAuth := v.Controller.SecretManager.GetSecret("PREVIEW_PROXY_AUTH")
-
-	if UpstreamProxyHost != "" {
-		upstreamUrl := &url.URL{Scheme: "http", Host: UpstreamProxyHost}
-		if UpstreamProxyAuth != "" {
-			parts := strings.Split(UpstreamProxyAuth, ":")
-			if len(parts) == 2 {
-				upstreamUrl.User = url.UserPassword(parts[0], parts[1])
-			}
-		}
-		customTransport.Proxy = http.ProxyURL(upstreamUrl)
-	}
 
 	queryParam := r.URL.Query().Get("url")
 	if queryParam != "" {

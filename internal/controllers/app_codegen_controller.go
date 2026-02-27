@@ -869,17 +869,26 @@ func (c *Controller) ApplyStructureToProject(project *models.AppProject, structu
 // augmentPackageJSON scans generated files for third-party npm imports and adds them
 // to the base template package.json if not already present
 func augmentPackageJSON(baseTemplate string, files map[string]string) string {
-	// Known packages that are already in the template or are built-in
+	// Build knownPackages dynamically from the base template to stay in sync
 	knownPackages := map[string]bool{
-		"react": true, "react-dom": true, "next": true,
-		"lucide-react": true, "clsx": true, "framer-motion": true,
-		"typescript": true, "tailwindcss": true, "postcss": true, "@tailwindcss/postcss": true,
-		// Next.js built-in
+		// Next.js built-in subpaths (not real npm packages)
 		"next/image": true, "next/link": true, "next/font": true,
 		"next/navigation": true, "next/headers": true, "next/server": true,
 		"next/font/google": true, "next/font/local": true, "next/dynamic": true,
-		// React built-in
 		"react/jsx-runtime": true,
+	}
+	var basePkg map[string]any
+	if err := json.Unmarshal([]byte(baseTemplate), &basePkg); err == nil {
+		if deps, ok := basePkg["dependencies"].(map[string]any); ok {
+			for pkg := range deps {
+				knownPackages[pkg] = true
+			}
+		}
+		if devDeps, ok := basePkg["devDependencies"].(map[string]any); ok {
+			for pkg := range devDeps {
+				knownPackages[pkg] = true
+			}
+		}
 	}
 
 	// Scan all files for import statements
@@ -966,6 +975,34 @@ func augmentPackageJSON(baseTemplate string, files map[string]string) string {
 		"jose":                      "^5.9.0",
 		"bcryptjs":                  "^2.4.3",
 		"@types/bcryptjs":           "^2.4.6",
+		// Drizzle/Neon (only added for DB projects via import scanning)
+		"drizzle-orm":              "^0.39.0",
+		"@neondatabase/serverless": "^0.10.0",
+		"drizzle-kit":              "^0.30.0",
+		// Commonly LLM-generated packages
+		"@tanstack/react-query":     "^5.0.0",
+		"@tanstack/react-table":     "^8.0.0",
+		"sonner":                    "^1.0.0",
+		"next-themes":               "^0.3.0",
+		"vaul":                      "^0.9.0",
+		"cmdk":                      "^0.2.0",
+		"input-otp":                 "^1.0.0",
+		"react-day-picker":          "^8.10.0",
+		"react-resizable-panels":    "^2.0.0",
+		"swr":                       "^2.2.0",
+		"uuid":                      "^9.0.0",
+		"lodash":                    "^4.17.0",
+		"sharp":                     "^0.33.0",
+		"stripe":                    "^14.0.0",
+		"next-intl":                 "^3.0.0",
+		"@stripe/stripe-js":         "^2.0.0",
+		"@stripe/react-stripe-js":   "^2.0.0",
+		"resend":                    "^3.0.0",
+		"nodemailer":                "^6.9.0",
+		"react-hot-toast":           "^2.4.0",
+		"react-markdown":            "^9.0.0",
+		"chart.js":                  "^4.4.0",
+		"react-chartjs-2":           "^5.2.0",
 	}
 
 	for pkg := range foundPackages {
@@ -973,6 +1010,7 @@ func augmentPackageJSON(baseTemplate string, files map[string]string) string {
 			if version, ok := versionMap[pkg]; ok {
 				deps[pkg] = version
 			} else {
+				slog.Warn("Unknown package falling back to 'latest' — consider adding to versionMap", "package", pkg)
 				deps[pkg] = "latest"
 			}
 			slog.Info("Added discovered dependency to package.json", "package", pkg)

@@ -29,6 +29,15 @@ func (db *Database) DeletePreviewMachineByProjectID(projectID string) error {
 	return err
 }
 
+// CountActivePreviewMachines returns the number of machines that are not stopped/destroyed.
+func (db *Database) CountActivePreviewMachines() (int, error) {
+	count, err := db.DB.NewSelect().
+		Model((*models.AppPreviewMachine)(nil)).
+		Where("status NOT IN (?)", "stopped").
+		Count(context.Background())
+	return count, err
+}
+
 // ListIdlePreviewMachines returns machines whose last_access_at is older than the given duration.
 func (db *Database) ListIdlePreviewMachines(olderThan time.Duration) ([]models.AppPreviewMachine, error) {
 	var machines []models.AppPreviewMachine

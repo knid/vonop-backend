@@ -1394,7 +1394,8 @@ func (c *Controller) validateWithPreviewLogs(
 	}
 
 	const maxValidationRounds = 3
-	const waitAfterSync = 8 * time.Second
+	const pollInterval = 2 * time.Second
+	const maxPollWait = 20 * time.Second
 
 	for round := 0; round < maxValidationRounds; round++ {
 		if ctx.Err() != nil {
@@ -1404,21 +1405,57 @@ func (c *Controller) validateWithPreviewLogs(
 		// 1. Sync all files to preview (include deletes so removed files are cleaned up)
 		c.SyncPreviewAll(project, deletedPaths...)
 
-		// 2. Wait for Next.js to recompile (context-aware)
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(waitAfterSync):
+		// 2. Poll logs until compilation markers appear (or timeout)
+		var errors []string
+		pollDeadline := time.Now().Add(maxPollWait)
+		foundMarker := false
+		for time.Now().Before(pollDeadline) {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(pollInterval):
+			}
+
+			logs, err := c.PreviewService.GetLogs(project.ID.String())
+			if err != nil || logs == "" {
+				continue
+			}
+
+			// Check for compilation success markers
+			if strings.Contains(logs, "Compiled") || strings.Contains(logs, "compiled client and server") {
+				foundMarker = true
+			}
+
+			// Check for error markers
+			if strings.Contains(logs, "Error:") || strings.Contains(logs, "error TS") || strings.Contains(logs, "Module not found") {
+				foundMarker = true
+			}
+
+			if foundMarker {
+				// One more poll to let logs settle
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(pollInterval):
+				}
+				logs, _ = c.PreviewService.GetLogs(project.ID.String())
+				if logs != "" {
+					errors = parseNextJSErrors(logs)
+				}
+				break
+			}
 		}
 
-		// 3. Fetch logs
-		logs, err := c.PreviewService.GetLogs(project.ID.String())
-		if err != nil || logs == "" {
-			return // no preview or no logs — skip validation
+		// If no marker found by deadline, parse whatever logs are available
+		if !foundMarker {
+			logs, err := c.PreviewService.GetLogs(project.ID.String())
+			if err != nil || logs == "" {
+				return
+			}
+			errors = parseNextJSErrors(logs)
 		}
 
-		// 4. Parse errors from logs
-		errors := parseNextJSErrors(logs)
+		// 3. No errors — done
 		if len(errors) == 0 {
 			return // no errors — done
 		}
