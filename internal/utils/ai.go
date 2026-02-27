@@ -1782,14 +1782,18 @@ func StreamWithTools(
 				})
 			}
 
-			// If all tool calls were deduped or intercepted, the LLM is stuck — accelerate nudge/strip.
-			// Jump close to the nudge threshold so the next productive round triggers it.
+			// If all tool calls were deduped or intercepted, accelerate toward nudge/strip.
+			// Use an additive bump (~20% of nudgeAfter, min 2) instead of jumping directly
+			// to threshold — a single wasted round shouldn't trigger premature nudging.
 			wastedCount := dedupCount + interceptCount
 			if wastedCount > 0 && wastedCount == len(toolCalls) {
-				if consecutiveToolRounds < nudgeAfter-1 {
-					consecutiveToolRounds = nudgeAfter - 1
-				} else {
-					consecutiveToolRounds += 2
+				bump := nudgeAfter / 5
+				if bump < 2 {
+					bump = 2
+				}
+				consecutiveToolRounds += bump
+				if consecutiveToolRounds > stripAfter {
+					consecutiveToolRounds = stripAfter
 				}
 				if interceptCount == len(toolCalls) {
 					currentMessages = append(currentMessages, Message{

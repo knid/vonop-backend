@@ -465,6 +465,10 @@ func (c *Controller) StreamBuildApp(
 				}
 				return fmt.Sprintf(`{"files":[%s]}`, strings.Join(summaries, ","))
 			}
+			// Neither single-file nor batch parse succeeded — truncate to prevent context bloat
+			if len(args) > 200 {
+				return fmt.Sprintf(`{"error":"malformed write_files arguments truncated","original_length":%d}`, len(args))
+			}
 			return args
 		case "edit_file":
 			var edit struct {
@@ -1909,10 +1913,29 @@ func (c *Controller) buildBuilderToolExecutor(ctx context.Context, project *mode
 				} `json:"files"`
 			}
 			if err := json.Unmarshal([]byte(arguments), &args); err != nil {
-				return fmt.Sprintf("Error: invalid arguments: %s", err.Error()), nil
+				preview := arguments
+				if len(preview) > 200 {
+					preview = preview[:200]
+				}
+				slog.Warn("write_files: malformed arguments", "error", err, "args_preview", preview)
+
+				// Fallback: LLM may have sent write_file format (file_path + content at top level)
+				var single struct {
+					FilePath string `json:"file_path"`
+					Content  string `json:"content"`
+				}
+				if sErr := json.Unmarshal([]byte(arguments), &single); sErr == nil && single.FilePath != "" && single.Content != "" {
+					slog.Info("write_files: recovered malformed args as single file", "path", single.FilePath)
+					args.Files = append(args.Files, struct {
+						FilePath string `json:"file_path"`
+						Content  string `json:"content"`
+					}{FilePath: single.FilePath, Content: single.Content})
+				} else {
+					return `Error: invalid arguments for write_files. The "files" field must be a JSON array. Expected: {"files": [{"file_path": "app/page.tsx", "content": "..."}]}. Parse error: ` + err.Error(), nil
+				}
 			}
 			if len(args.Files) == 0 {
-				return "Error: files array is empty", nil
+				return `Error: files array is empty. Expected: {"files": [{"file_path": "app/page.tsx", "content": "..."}]}`, nil
 			}
 
 			var results []string
