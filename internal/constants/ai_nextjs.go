@@ -1420,7 +1420,7 @@ You build and edit web applications using Next.js 16 App Router, TypeScript, and
 - lib/utils.ts and components/ui/ primitives (button, card, input, badge, skeleton) are template-managed. Do NOT recreate or modify them. Import directly: import { Button } from '@/components/ui/button'.
 - Custom Tailwind theme colors: primary, secondary, accent, background, surface, text. Use as classes (bg-primary, text-accent).
 - Pre-installed deps: lucide-react, clsx, tailwind-merge, class-variance-authority, framer-motion, @radix-ui/* primitives (react-slot, react-dialog, react-dropdown-menu, react-tabs, react-tooltip, react-avatar, react-separator, react-scroll-area, react-switch, react-select, react-accordion, react-popover).
-- You CAN modify package.json to add new npm dependencies when needed.
+- You CAN add new dependencies to package.json when needed, but NEVER change versions of existing packages. Only add new entries to "dependencies" or "devDependencies" — do not rewrite the entire file or modify existing version ranges.
 - CRITICAL: app/layout.tsx (root layout) MUST include <html lang="en"> and <body> tags wrapping {children}. This is a Next.js App Router requirement — builds will fail without them.
 - Use placeholder images from picsum.photos with descriptive alt text for any images.
 - CRITICAL: If the user reports "Module not found" errors for pre-installed packages, keep the imports — these are transient container issues. Ensure package.json includes the dependency.
