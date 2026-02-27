@@ -1,7 +1,7 @@
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
-const { execFile } = require("child_process");
+const { execFile, spawn } = require("child_process");
 const httpProxy = require("http-proxy");
 
 const PORT = 3000;
@@ -12,8 +12,10 @@ const PREVIEW_DOMAIN = process.env.PREVIEW_DOMAIN || "";
 const APP_DIR = "/app";
 const SETUP_MARKER = "/tmp/.setup-complete";
 
-// Track whether Next.js is actually responding
+// ─── Next.js lifecycle ──────────────────────────────────────────────────────
+
 let nextReady = false;
+let nextProcess = null;
 
 // Probe Next.js readiness every 2s — any response (even 500) means it's up
 setInterval(() => {
@@ -28,6 +30,107 @@ setInterval(() => {
       nextReady = false;
     });
 }, 2000);
+
+function startNextJs() {
+  if (nextProcess) return;
+  console.log("starting Next.js dev server...");
+
+  // Clear stale logs so validation doesn't see old errors
+  try { fs.writeFileSync("/tmp/nextjs.log", "", "utf8"); } catch {}
+
+  const logStream = fs.createWriteStream("/tmp/nextjs.log", { flags: "a" });
+  const child = spawn(
+    "./node_modules/.bin/next",
+    ["dev", "--port", String(NEXT_PORT), "--hostname", "0.0.0.0"],
+    { cwd: APP_DIR, stdio: ["ignore", "pipe", "pipe"] }
+  );
+
+  child.stdout.on("data", (data) => {
+    process.stdout.write(data);
+    logStream.write(data);
+  });
+  child.stderr.on("data", (data) => {
+    process.stderr.write(data);
+    logStream.write(data);
+  });
+
+  child.on("exit", (code, signal) => {
+    console.log(`Next.js exited (code=${code}, signal=${signal})`);
+    nextProcess = null;
+    nextReady = false;
+    logStream.end();
+  });
+
+  nextProcess = child;
+}
+
+function stopNextJs() {
+  return new Promise((resolve) => {
+    if (!nextProcess) {
+      resolve();
+      return;
+    }
+    console.log("stopping Next.js for dependency install...");
+    nextReady = false;
+    const proc = nextProcess;
+    proc.once("exit", () => {
+      nextProcess = null;
+      resolve();
+    });
+    proc.kill("SIGTERM");
+    // Force kill after 5s if SIGTERM doesn't work
+    setTimeout(() => {
+      if (nextProcess === proc) {
+        try { proc.kill("SIGKILL"); } catch {}
+      }
+    }, 5000);
+  });
+}
+
+// ─── bun install (stops Next.js first to prevent OOM) ───────────────────────
+
+let bunInstallRunning = false;
+let bunInstallQueued = false;
+
+function bunInstall() {
+  // If startup setup hasn't finished, flag for later (avoid concurrent installs)
+  if (!fs.existsSync(SETUP_MARKER)) {
+    fs.writeFileSync("/tmp/.needs-bun-install", "", "utf8");
+    console.log("setup not complete, flagged for bun install after setup");
+    return;
+  }
+
+  if (bunInstallRunning) {
+    bunInstallQueued = true;
+    console.log("bun install already running, queued for later");
+    return;
+  }
+
+  bunInstallRunning = true;
+
+  // Stop Next.js first to free memory and avoid compiling with missing deps
+  stopNextJs().then(() => {
+    console.log("starting bun install...");
+    execFile("bun", ["install"], { cwd: APP_DIR, timeout: 120_000 }, (err) => {
+      bunInstallRunning = false;
+      if (err) {
+        console.error("bun install failed:", err.message);
+      } else {
+        console.log("bun install completed");
+      }
+
+      if (bunInstallQueued) {
+        bunInstallQueued = false;
+        bunInstall(); // nextProcess is already null, stopNextJs will resolve immediately
+      } else {
+        // Only restart Next.js when no more queued installs
+        startNextJs();
+      }
+    });
+  });
+}
+
+// ─── HTTP helpers ───────────────────────────────────────────────────────────
 
 const LOADING_HTML = `<!DOCTYPE html>
 <html><head><meta charset="utf-8"><meta http-equiv="refresh" content="3">
@@ -112,38 +215,7 @@ function deleteFiles(paths) {
   return deleted;
 }
 
-let bunInstallRunning = false;
-let bunInstallQueued = false;
-
-function bunInstall() {
-  // If startup setup hasn't finished, flag for later (avoid concurrent installs)
-  if (!fs.existsSync(SETUP_MARKER)) {
-    fs.writeFileSync("/tmp/.needs-bun-install", "", "utf8");
-    console.log("setup not complete, flagged for bun install after setup");
-    return;
-  }
-
-  if (bunInstallRunning) {
-    bunInstallQueued = true;
-    console.log("bun install already running, queued for later");
-    return;
-  }
-
-  bunInstallRunning = true;
-  console.log("starting bun install...");
-  execFile("bun", ["install"], { cwd: APP_DIR, timeout: 60_000 }, (err) => {
-    bunInstallRunning = false;
-    if (err) {
-      console.error("bun install failed:", err.message);
-    } else {
-      console.log("bun install completed");
-    }
-    if (bunInstallQueued) {
-      bunInstallQueued = false;
-      bunInstall();
-    }
-  });
-}
+// ─── HTTP server ────────────────────────────────────────────────────────────
 
 const server = http.createServer(async (req, res) => {
   // Health check — only 200 when Next.js is actually responding
@@ -249,6 +321,31 @@ server.on("upgrade", (req, socket, head) => {
 
 server.listen(PORT, "0.0.0.0", () => {
   console.log(`wemob preview proxy listening on :${PORT}, forwarding to :${NEXT_PORT}`);
+});
+
+// ─── Startup: manage Next.js from here ──────────────────────────────────────
+
+fs.writeFileSync(SETUP_MARKER, "", "utf8");
+
+// Check if early sync flagged bun install (before we were ready)
+if (fs.existsSync("/tmp/.needs-bun-install")) {
+  try { fs.unlinkSync("/tmp/.needs-bun-install"); } catch {}
+  console.log("running deferred bun install before starting Next.js...");
+  execFile("bun", ["install"], { cwd: APP_DIR, timeout: 120_000 }, (err) => {
+    if (err) console.error("initial bun install failed:", err.message);
+    else console.log("initial bun install completed");
+    startNextJs();
+  });
+} else {
+  startNextJs();
+}
+
+// ─── Graceful shutdown ──────────────────────────────────────────────────────
+
+process.on("SIGTERM", () => {
+  console.log("received SIGTERM, shutting down...");
+  if (nextProcess) nextProcess.kill("SIGTERM");
+  process.exit(0);
 });
 
 // Truncate log file periodically to prevent disk fill
