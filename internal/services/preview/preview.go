@@ -763,7 +763,8 @@ func (s *Service) waitForReady(machineID string, timeout time.Duration) (*health
 		lastStatus = hs
 
 		switch hs.Status {
-		case "ok":
+		case "ok", "awaiting_sync":
+			// "ok" = Next.js ready, "awaiting_sync" = proxy up, waiting for files
 			return &hs, nil
 		case "install_failed", "crashed":
 			// Terminal error — no point polling further
