@@ -45,7 +45,11 @@ func (p *FileStreamParser) Feed(chunk string) {
 			// Found closing tag — emit the file
 			p.fileContent.WriteString(p.buffer[:closeIdx])
 			if p.OnFile != nil {
-				p.OnFile(p.currentPath, p.fileContent.String())
+				content := p.fileContent.String()
+				// Trim leading/trailing newline that typically surrounds file content
+				content = strings.TrimPrefix(content, "\n")
+				content = strings.TrimSuffix(content, "\n")
+				p.OnFile(p.currentPath, content)
 			}
 			p.fileContent.Reset()
 			p.inFileBlock = false
@@ -56,14 +60,42 @@ func (p *FileStreamParser) Feed(chunk string) {
 			// Look for opening <file path="..."> tag
 			loc := fileTagRegex.FindStringIndex(p.buffer)
 			if loc == nil {
-				// No opening tag found — emit text up to a safe boundary.
-				// Keep last 20 chars in buffer in case a partial tag is forming.
-				if len(p.buffer) > 20 {
-					safe := p.buffer[:len(p.buffer)-20]
-					if p.OnText != nil && safe != "" {
-						p.OnText(safe)
+				// No opening tag found — emit safe text.
+				// Keep everything from the last '<' in the buffer since it could
+				// be the start of a partial <file ...> tag forming across chunks.
+				// The tag can be 50+ chars (e.g. <file path="components/ecommerce/checkout-form.tsx">),
+				// so a fixed buffer size is not safe.
+				lastLT := strings.LastIndex(p.buffer, "<")
+				if lastLT >= 0 {
+					tail := p.buffer[lastLT:]
+					// If the tail starts with "<" but is long enough that we can tell
+					// it's NOT going to be "<file ...", flush it as text to avoid
+					// indefinite buffering (e.g. "a < b" in explanatory text).
+					isPartialFileTag := strings.HasPrefix(tail, "<f") ||
+						strings.HasPrefix(tail, "<F") ||
+						tail == "<"
+					if !isPartialFileTag {
+						// Not a file tag — emit everything
+						if p.OnText != nil {
+							p.OnText(p.buffer)
+						}
+						p.buffer = ""
+						return
 					}
-					p.buffer = p.buffer[len(p.buffer)-20:]
+					// Emit everything before the '<' as text
+					if lastLT > 0 {
+						if p.OnText != nil {
+							p.OnText(p.buffer[:lastLT])
+						}
+						p.buffer = p.buffer[lastLT:]
+					}
+					// Buffer holds from '<' onward — wait for more data
+				} else {
+					// No '<' at all — safe to emit everything
+					if p.OnText != nil && p.buffer != "" {
+						p.OnText(p.buffer)
+					}
+					p.buffer = ""
 				}
 				return
 			}
@@ -96,7 +128,10 @@ func (p *FileStreamParser) Flush() {
 		// Stream ended mid-file — emit what we have
 		p.fileContent.WriteString(p.buffer)
 		if p.OnFile != nil {
-			p.OnFile(p.currentPath, p.fileContent.String())
+			content := p.fileContent.String()
+			content = strings.TrimPrefix(content, "\n")
+			content = strings.TrimSuffix(content, "\n")
+			p.OnFile(p.currentPath, content)
 		}
 		p.fileContent.Reset()
 		p.inFileBlock = false
