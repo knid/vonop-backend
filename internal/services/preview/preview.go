@@ -37,7 +37,7 @@ func NewService(flyService *fly.Service, db *database.Database, previewDomain st
 		PreviewDomain: previewDomain,
 		FlyAppName:    flyService.AppName,
 		httpClient: &http.Client{
-			Timeout: 120 * time.Second,
+			Timeout: 180 * time.Second,
 		},
 	}
 }
@@ -111,6 +111,19 @@ func (s *Service) CreatePreview(projectID string, files map[string]string, envVa
 						}
 						return
 					}
+					// Wait for install to complete (sync may have triggered bun install)
+					existing.Status = "installing"
+					if err := s.DB.UpdatePreviewMachine(existing); err != nil {
+						slog.Error("failed to update machine status to installing", "project_id", projectID, "error", err)
+					}
+					if err := s.waitForReadyWithRetry(existing.MachineID, existing.SyncToken, 180*time.Second); err != nil {
+						slog.Error("running machine not ready after sync", "project_id", projectID, "error", err)
+						existing.Status = "error"
+						if err := s.DB.UpdatePreviewMachine(existing); err != nil {
+							slog.Error("failed to update machine status", "project_id", projectID, "error", err)
+						}
+						return
+					}
 					existing.Status = "ready"
 					existing.LastAccessAt = time.Now()
 					if err := s.DB.UpdatePreviewMachine(existing); err != nil {
@@ -163,6 +176,20 @@ func (s *Service) CreatePreview(projectID string, files map[string]string, envVa
 
 					if err := s.syncFiles(existing.MachineID, existing.SyncToken, files, nil); err != nil {
 						slog.Error("file sync to restarted machine failed", "project_id", projectID, "error", err)
+						existing.Status = "error"
+						if err := s.DB.UpdatePreviewMachine(existing); err != nil {
+							slog.Error("failed to update machine status", "project_id", projectID, "error", err)
+						}
+						return
+					}
+
+					// Wait for install to complete (sync may have triggered bun install)
+					existing.Status = "installing"
+					if err := s.DB.UpdatePreviewMachine(existing); err != nil {
+						slog.Error("failed to update machine status to installing", "project_id", projectID, "error", err)
+					}
+					if err := s.waitForReadyWithRetry(existing.MachineID, existing.SyncToken, 180*time.Second); err != nil {
+						slog.Error("restarted machine not ready after sync", "project_id", projectID, "error", err)
 						existing.Status = "error"
 						if err := s.DB.UpdatePreviewMachine(existing); err != nil {
 							slog.Error("failed to update machine status", "project_id", projectID, "error", err)
@@ -311,6 +338,20 @@ func (s *Service) createNewMachine(projectID string, files map[string]string, en
 		// Push files via sync endpoint
 		if err := s.syncFiles(machine.ID, syncToken, files, nil); err != nil {
 			slog.Error("initial file sync failed", "project_id", projectID, "error", err)
+			record.Status = "error"
+			if err := s.DB.UpdatePreviewMachine(record); err != nil {
+				slog.Error("failed to update machine status", "project_id", projectID, "error", err)
+			}
+			return
+		}
+
+		// Wait for install to complete (sync may have triggered bun install for new deps)
+		record.Status = "installing"
+		if err := s.DB.UpdatePreviewMachine(record); err != nil {
+			slog.Error("failed to update machine status to installing", "project_id", projectID, "error", err)
+		}
+		if err := s.waitForReadyWithRetry(machine.ID, syncToken, 180*time.Second); err != nil {
+			slog.Error("new machine not ready after sync", "project_id", projectID, "error", err)
 			record.Status = "error"
 			if err := s.DB.UpdatePreviewMachine(record); err != nil {
 				slog.Error("failed to update machine status", "project_id", projectID, "error", err)
@@ -473,23 +514,23 @@ func (s *Service) GetStatus(projectID string) (*PreviewStatus, error) {
 	}
 
 	// Verify actual state with Fly API
-	if record.Status == "ready" || record.Status == "starting" || record.Status == "syncing" || record.Status == "error" {
+	if record.Status == "ready" || record.Status == "starting" || record.Status == "syncing" || record.Status == "installing" || record.Status == "error" {
 		machine, err := s.Fly.GetMachine(record.MachineID)
 		if err == nil {
 			switch machine.State {
 			case "started":
 				// Fly says it's running — if our DB is stuck on "starting" or "error",
 				// promote to "ready" so the user isn't stuck in a loading state forever.
-				// Also promote "syncing" if it's been stuck for more than 2 minutes
-				// (the sync goroutine may have failed without updating the DB).
+				// Also promote "syncing"/"installing" if stuck for more than 3 minutes
+				// (the goroutine may have failed without updating the DB).
 				if record.Status == "starting" || record.Status == "error" {
 					slog.Info("promoting stale status to ready", "project_id", projectID, "old_status", record.Status)
 					record.Status = "ready"
 					if err := s.DB.UpdatePreviewMachine(record); err != nil {
 						slog.Error("failed to update machine status", "project_id", projectID, "error", err)
 					}
-				} else if record.Status == "syncing" && time.Since(record.UpdatedAt) > 2*time.Minute {
-					slog.Info("promoting stuck syncing status to ready", "project_id", projectID, "stuck_since", record.UpdatedAt)
+				} else if (record.Status == "syncing" || record.Status == "installing") && time.Since(record.UpdatedAt) > 3*time.Minute {
+					slog.Info("promoting stuck status to ready", "project_id", projectID, "old_status", record.Status, "stuck_since", record.UpdatedAt)
 					record.Status = "ready"
 					if err := s.DB.UpdatePreviewMachine(record); err != nil {
 						slog.Error("failed to update machine status", "project_id", projectID, "error", err)
@@ -682,12 +723,21 @@ func (s *Service) fetchLogs(machineID, syncToken string) (string, error) {
 	return result.Logs, nil
 }
 
-// waitForHealth polls a machine's /__wemob/health endpoint directly until it returns 200.
-func (s *Service) waitForHealth(machineID string, timeout time.Duration) error {
+// healthStatus represents the parsed response from /__wemob/health.
+type healthStatus struct {
+	Status string `json:"status"` // "ok", "installing", "install_failed", "crashed", "starting"
+	Error  string `json:"error,omitempty"`
+}
+
+// waitForReady polls a machine's /__wemob/health endpoint and interprets the rich status.
+// Returns nil on "ok", error immediately on terminal states ("install_failed", "crashed"),
+// and keeps polling on transient states ("installing", "starting").
+func (s *Service) waitForReady(machineID string, timeout time.Duration) (*healthStatus, error) {
 	deadline := time.Now().Add(timeout)
 	healthURL := s.machineBaseURL() + "/__wemob/health"
 	client := &http.Client{Timeout: 5 * time.Second}
 
+	var lastStatus healthStatus
 	for time.Now().Before(deadline) {
 		req, err := http.NewRequest("GET", healthURL, nil)
 		if err != nil {
@@ -697,14 +747,95 @@ func (s *Service) waitForHealth(machineID string, timeout time.Duration) error {
 		req.Header.Set("Fly-Force-Instance-Id", machineID)
 
 		resp, err := client.Do(req)
-		if err == nil {
-			resp.Body.Close()
-			if resp.StatusCode == 200 {
-				return nil
+		if err != nil {
+			time.Sleep(2 * time.Second)
+			continue
+		}
+
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+
+		var hs healthStatus
+		if err := json.Unmarshal(body, &hs); err != nil {
+			time.Sleep(2 * time.Second)
+			continue
+		}
+		lastStatus = hs
+
+		switch hs.Status {
+		case "ok":
+			return &hs, nil
+		case "install_failed", "crashed":
+			// Terminal error — no point polling further
+			errMsg := hs.Status
+			if hs.Error != "" {
+				errMsg += ": " + hs.Error
 			}
+			return &hs, fmt.Errorf("preview machine terminal error: %s", errMsg)
+		default:
+			// "installing", "starting" — transient, keep polling
 		}
 		time.Sleep(2 * time.Second)
 	}
 
-	return fmt.Errorf("health check timed out after %s", timeout)
+	return &lastStatus, fmt.Errorf("health check timed out after %s (last status: %s)", timeout, lastStatus.Status)
+}
+
+// waitForHealth is a backward-compatible wrapper around waitForReady.
+// It returns nil when the machine is ready, error otherwise.
+func (s *Service) waitForHealth(machineID string, timeout time.Duration) error {
+	_, err := s.waitForReady(machineID, timeout)
+	return err
+}
+
+// retryInstall sends a POST to /__wemob/retry to clear error state and re-run bun install.
+func (s *Service) retryInstall(machineID, syncToken string) error {
+	retryURL := s.machineBaseURL() + "/__wemob/retry"
+	req, err := http.NewRequest("POST", retryURL, nil)
+	if err != nil {
+		return fmt.Errorf("creating retry request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+syncToken)
+	req.Header.Set("Fly-Force-Instance-Id", machineID)
+
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("retry request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("retry returned %d: %s", resp.StatusCode, string(body))
+	}
+	return nil
+}
+
+// waitForReadyWithRetry polls health and auto-retries once on terminal errors.
+func (s *Service) waitForReadyWithRetry(machineID, syncToken string, timeout time.Duration) error {
+	hs, err := s.waitForReady(machineID, timeout)
+	if err == nil {
+		return nil
+	}
+
+	// Only auto-retry on terminal errors (install_failed, crashed)
+	if hs != nil && (hs.Status == "install_failed" || hs.Status == "crashed") {
+		slog.Warn("preview machine hit terminal error, attempting retry",
+			"machine_id", machineID, "status", hs.Status, "error", hs.Error)
+
+		if retryErr := s.retryInstall(machineID, syncToken); retryErr != nil {
+			slog.Error("retry install failed", "machine_id", machineID, "error", retryErr)
+			return fmt.Errorf("retry failed: %w (original: %w)", retryErr, err)
+		}
+
+		// Re-poll after retry with remaining time (min 60s)
+		retryTimeout := 60 * time.Second
+		_, retryErr := s.waitForReady(machineID, retryTimeout)
+		if retryErr != nil {
+			return fmt.Errorf("still failing after retry: %w", retryErr)
+		}
+		return nil
+	}
+
+	return err
 }

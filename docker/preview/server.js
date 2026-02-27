@@ -22,6 +22,11 @@ const MAX_RESTARTS = 5;
 const RESTART_WINDOW_MS = 5 * 60 * 1000;
 let restartTimestamps = [];
 
+// State flags for install/crash tracking
+let bunInstallFailed = false;
+let bunInstallError = "";
+let nextCrashLimitReached = false;
+
 // Probe Next.js readiness every 2s — any response (even 500) means it's up
 setInterval(() => {
   http
@@ -72,6 +77,7 @@ function startNextJs() {
     restartTimestamps = restartTimestamps.filter((t) => now - t < RESTART_WINDOW_MS);
     if (restartTimestamps.length >= MAX_RESTARTS) {
       console.error(`Next.js crashed ${MAX_RESTARTS} times in ${RESTART_WINDOW_MS / 1000}s, not restarting`);
+      nextCrashLimitReached = true;
       return;
     }
 
@@ -138,15 +144,26 @@ function bunInstall() {
       bunInstallRunning = false;
       if (err) {
         console.error("bun install failed:", err.message);
-      } else {
-        console.log("bun install completed");
+        bunInstallFailed = true;
+        bunInstallError = err.message;
+        // DON'T start Next.js on failure — it will just crash without deps
+        // Still process queued installs (a retry may fix it)
+        if (bunInstallQueued) {
+          bunInstallQueued = false;
+          bunInstall();
+        }
+        return;
       }
+
+      console.log("bun install completed");
+      bunInstallFailed = false;
+      bunInstallError = "";
 
       if (bunInstallQueued) {
         bunInstallQueued = false;
         bunInstall(); // nextProcess is already null, stopNextJs will resolve immediately
       } else {
-        // Only restart Next.js when no more queued installs
+        // Only restart Next.js when no more queued installs AND install succeeded
         startNextJs();
       }
     });
@@ -252,11 +269,53 @@ function deleteFiles(paths) {
 // ─── HTTP server ────────────────────────────────────────────────────────────
 
 const server = http.createServer(async (req, res) => {
-  // Health check — only 200 when Next.js is actually responding
+  // Health check — returns rich status for backend polling
   if (req.url === "/__wemob/health" && req.method === "GET") {
-    const code = nextReady ? 200 : 503;
+    let status, code;
+    if (nextReady) {
+      status = "ok";
+      code = 200;
+    } else if (bunInstallRunning) {
+      status = "installing";
+      code = 503;
+    } else if (bunInstallFailed) {
+      status = "install_failed";
+      code = 500;
+    } else if (nextCrashLimitReached) {
+      status = "crashed";
+      code = 500;
+    } else {
+      status = "starting";
+      code = 503;
+    }
+    const body = { status };
+    if (status === "install_failed") {
+      body.error = bunInstallError;
+    }
     res.writeHead(code, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ status: nextReady ? "ok" : "starting" }));
+    res.end(JSON.stringify(body));
+    return;
+  }
+
+  // Retry endpoint — clears error state and re-triggers bun install
+  if (req.url === "/__wemob/retry" && req.method === "POST") {
+    const auth = req.headers.authorization || "";
+    if (SYNC_TOKEN && auth !== `Bearer ${SYNC_TOKEN}`) {
+      res.writeHead(401, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "unauthorized" }));
+      return;
+    }
+
+    console.log("retry requested: clearing error state and re-running bun install");
+    bunInstallFailed = false;
+    bunInstallError = "";
+    nextCrashLimitReached = false;
+    restartTimestamps = [];
+
+    bunInstall();
+
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ status: "retrying" }));
     return;
   }
 
@@ -293,13 +352,20 @@ const server = http.createServer(async (req, res) => {
       const deleted = deleteFiles(deletePaths);
 
       const packageChanged = writeFiles(files);
-      if (packageChanged) {
+      let installing = false;
+
+      if (packageChanged || bunInstallFailed) {
+        // Re-run bun install if package.json changed OR if previous install failed
+        if (bunInstallFailed) {
+          console.log("previous bun install failed, re-running on sync");
+        }
         bunInstall();
+        installing = true;
       }
 
       console.log(`synced ${count} files, deleted ${deleted} files`);
       res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ status: "ok", files_synced: count, files_deleted: deleted }));
+      res.end(JSON.stringify({ status: "ok", files_synced: count, files_deleted: deleted, installing }));
     } catch (e) {
       console.error("sync error:", e.message);
       res.writeHead(400, { "Content-Type": "application/json" });
@@ -366,8 +432,14 @@ if (fs.existsSync("/tmp/.needs-bun-install")) {
   try { fs.unlinkSync("/tmp/.needs-bun-install"); } catch {}
   console.log("running deferred bun install before starting Next.js...");
   execFile("bun", ["install"], { cwd: APP_DIR, timeout: 120_000 }, (err) => {
-    if (err) console.error("initial bun install failed:", err.message);
-    else console.log("initial bun install completed");
+    if (err) {
+      console.error("initial bun install failed:", err.message);
+      bunInstallFailed = true;
+      bunInstallError = err.message;
+      // DON'T start Next.js if initial install fails
+      return;
+    }
+    console.log("initial bun install completed");
     startNextJs();
   });
 } else {

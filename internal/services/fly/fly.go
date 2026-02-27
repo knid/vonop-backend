@@ -179,7 +179,7 @@ func (s *Service) CreateMachine(name string, env map[string]string, metadata map
 			Guest: GuestConfig{
 				CPUKind:  "shared",
 				CPUs:     2,
-				MemoryMB: 1024,
+				MemoryMB: 2048,
 			},
 			Services: []MachineService{
 				{
