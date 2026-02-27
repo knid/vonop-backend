@@ -66,7 +66,17 @@ func (s *Service) CreatePreview(projectID string, files map[string]string, envVa
 		// Verify actual state with Fly API
 		flyMachine, flyErr := s.Fly.GetMachine(existing.MachineID)
 		if flyErr != nil {
-			// Machine doesn't exist on Fly anymore — clean up DB and create fresh
+			// Transient errors (429 rate limit, 5xx) — don't delete the DB record,
+			// just return the cached status so the user can retry.
+			if fly.IsRetryable(flyErr) {
+				slog.Warn("transient Fly API error checking machine, returning cached status",
+					"project_id", projectID, "machine_id", existing.MachineID, "error", flyErr)
+				return &PreviewStatus{
+					Status:     existing.Status,
+					PreviewURL: previewURL,
+				}, nil
+			}
+			// Machine genuinely doesn't exist on Fly (404 or other) — clean up DB and create fresh
 			slog.Warn("existing machine not found on Fly, will recreate", "project_id", projectID, "machine_id", existing.MachineID, "error", flyErr)
 			if err := s.DB.DeletePreviewMachineByProjectID(projectID); err != nil {
 				slog.Error("failed to delete stale machine record", "project_id", projectID, "error", err)
@@ -212,6 +222,10 @@ func (s *Service) createNewMachine(projectID string, files map[string]string, en
 	machineName := fmt.Sprintf("preview-%s", projectID)
 	machine, err := s.Fly.CreateMachine(machineName, machineEnv, metadata)
 	if err != nil {
+		// If rate limited, don't try anything clever — just fail and let the caller retry
+		if fly.IsRetryable(err) {
+			return nil, fmt.Errorf("creating fly machine: %w", err)
+		}
 		// Handle 409 conflict: a machine with this name already exists on Fly
 		// but our DB lost track of it. Destroy the orphan and retry.
 		if strings.Contains(err.Error(), "already_exists") || strings.Contains(err.Error(), "status 409") {
@@ -481,12 +495,18 @@ func (s *Service) GetStatus(projectID string) (*PreviewStatus, error) {
 				return &PreviewStatus{Status: "not_found", Error: "machine was destroyed"}, nil
 			}
 		} else {
-			// Machine doesn't exist on Fly anymore
-			slog.Warn("machine not found on Fly during status check", "project_id", projectID, "machine_id", record.MachineID, "error", err)
-			if err := s.DB.DeletePreviewMachineByProjectID(projectID); err != nil {
-				slog.Error("failed to delete stale machine record", "project_id", projectID, "error", err)
+			// Transient errors (429, 5xx) — return cached status instead of deleting
+			if fly.IsRetryable(err) {
+				slog.Warn("transient Fly API error during status check, returning cached status",
+					"project_id", projectID, "machine_id", record.MachineID, "error", err)
+			} else {
+				// Machine genuinely doesn't exist on Fly anymore (404 or other)
+				slog.Warn("machine not found on Fly during status check", "project_id", projectID, "machine_id", record.MachineID, "error", err)
+				if err := s.DB.DeletePreviewMachineByProjectID(projectID); err != nil {
+					slog.Error("failed to delete stale machine record", "project_id", projectID, "error", err)
+				}
+				return &PreviewStatus{Status: "not_found", Error: "machine no longer exists"}, nil
 			}
-			return &PreviewStatus{Status: "not_found", Error: "machine no longer exists"}, nil
 		}
 	}
 
@@ -507,12 +527,16 @@ func (s *Service) StopIdleMachines(idleThreshold time.Duration) {
 	for _, m := range machines {
 		slog.Info("stopping idle preview machine", "project_id", m.AppProjectID, "machine_id", m.MachineID, "last_access", m.LastAccessAt)
 		if err := s.Fly.StopMachine(m.MachineID); err != nil {
-			// Machine already destroyed on Fly — remove stale DB record
-			if strings.Contains(err.Error(), "status 404") {
+			if fly.IsNotFound(err) {
+				// Machine already destroyed on Fly — remove stale DB record
 				slog.Info("machine already destroyed on Fly, removing stale record", "machine_id", m.MachineID, "project_id", m.AppProjectID)
 				if delErr := s.DB.DeletePreviewMachineByProjectID(m.AppProjectID.String()); delErr != nil {
 					slog.Error("failed to delete stale machine record", "project_id", m.AppProjectID, "error", delErr)
 				}
+				continue
+			}
+			if fly.IsRetryable(err) {
+				slog.Warn("transient Fly API error stopping idle machine, skipping", "machine_id", m.MachineID, "error", err)
 				continue
 			}
 			slog.Warn("failed to stop idle machine", "machine_id", m.MachineID, "error", err)
@@ -550,7 +574,15 @@ func (s *Service) DestroyStoppedMachines(stoppedThreshold time.Duration) {
 	for _, m := range machines {
 		slog.Info("destroying stopped preview machine", "project_id", m.AppProjectID, "machine_id", m.MachineID)
 		if err := s.Fly.DestroyMachine(m.MachineID, true); err != nil {
-			slog.Warn("failed to destroy machine", "machine_id", m.MachineID, "error", err)
+			if fly.IsNotFound(err) {
+				// Already gone on Fly — just clean up DB
+				slog.Info("machine already destroyed on Fly", "machine_id", m.MachineID)
+			} else if fly.IsRetryable(err) {
+				slog.Warn("transient Fly API error destroying machine, skipping", "machine_id", m.MachineID, "error", err)
+				continue // Skip DB deletion, retry next cycle
+			} else {
+				slog.Warn("failed to destroy machine", "machine_id", m.MachineID, "error", err)
+			}
 		}
 		if err := s.DB.DeletePreviewMachineByProjectID(m.AppProjectID.String()); err != nil {
 			slog.Error("failed to delete destroyed machine record", "project_id", m.AppProjectID, "error", err)

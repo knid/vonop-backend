@@ -1396,8 +1396,19 @@ func StreamWithTools(
 	consecutiveToolRounds := 0
 	nudged := false
 	rateLimitRetries := 0
+	prevToolResultRange := [2]int{0, 0} // [start, end) of previous round's tool result messages
 
 	for round := 0; round < maxRounds; round++ {
+		// Trim the PREVIOUS round's tool results now (deferred from last iteration).
+		// This ensures the model sees full results for one round before they're compressed.
+		if len(opts) > 0 && opts[0].TrimResults != nil && prevToolResultRange[1] > prevToolResultRange[0] {
+			for i := prevToolResultRange[0]; i < prevToolResultRange[1] && i < len(currentMessages); i++ {
+				if currentMessages[i].Role == "tool" {
+					currentMessages[i].Content = opts[0].TrimResults(currentMessages[i].Name, currentMessages[i].Content)
+				}
+			}
+			prevToolResultRange = [2]int{0, 0}
+		}
 		// Progressively nudge the AI to stop researching and produce a final response.
 		// Phase 1 (nudgeAfter): inject a nudge message but keep tools available.
 		// Phase 2 (stripAfter): strip tools entirely to force text generation.
@@ -1837,13 +1848,14 @@ func StreamWithTools(
 				}
 			}
 
-			// Trim tool result messages (e.g. collapse read_file content to a summary)
+			// Record the range of this round's tool result messages for deferred trimming.
+			// We defer trimming to the next round so the model sees full results once.
 			if len(opts) > 0 && opts[0].TrimResults != nil {
-				for i := len(currentMessages) - len(toolCalls); i < len(currentMessages); i++ {
-					if i >= 0 && currentMessages[i].Role == "tool" {
-						currentMessages[i].Content = opts[0].TrimResults(currentMessages[i].Name, currentMessages[i].Content)
-					}
+				start := len(currentMessages) - len(toolCalls)
+				if start < 0 {
+					start = 0
 				}
+				prevToolResultRange = [2]int{start, len(currentMessages)}
 			}
 
 			// Inject post-round system message (e.g. progress summary).

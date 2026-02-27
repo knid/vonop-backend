@@ -738,6 +738,18 @@ func main() {
 				r.Post("/collect", httpViews.CollectAnalytics)
 				r.Post("/collect/batch", httpViews.CollectAnalyticsBatch)
 			})
+
+			// V1 stubs for endpoints the dashboard calls but that only exist on v2 or don't exist yet.
+			// Return empty arrays/objects instead of 404 to avoid noisy logs.
+			r.Get("/websites", func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.Write([]byte(`{"data":[]}`))
+			})
+			r.Get("/billing/credits/packages", func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.Write([]byte(`{"data":[]}`))
+			})
+			r.Get("/integrations/providers", httpViews.GetV2IntegrationProviders)
 		})
 		// V2 App Builder routes
 		r.Route("/v2", func(r chi.Router) {
