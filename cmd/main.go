@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 	"time"
 
 	"github.com/go-chi/chi/middleware"
@@ -310,8 +312,8 @@ func main() {
 	)
 
 	sqldb := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn)))
-	sqldb.SetMaxOpenConns(20)
-	sqldb.SetMaxIdleConns(10)
+	sqldb.SetMaxOpenConns(50)
+	sqldb.SetMaxIdleConns(25)
 	sqldb.SetConnMaxLifetime(30 * time.Minute)
 	sqldb.SetConnMaxIdleTime(5 * time.Minute)
 	bundb := bun.NewDB(sqldb, pgdialect.New())
@@ -427,12 +429,20 @@ func main() {
 
 	stripe.Key = sm.GetSecret("STRIPE_API_KEY")
 
+	// Configure upstream proxy transport once at startup (prevents per-request data race)
+	views.InitProxyTransport(
+		sm.GetSecret("PREVIEW_PROXY_HOST"),
+		sm.GetSecret("PREVIEW_PROXY_AUTH"),
+	)
+
 	// Redis client for rate limiting (reuses same Redis as Asynq)
 	redisClient := redis.NewClient(&redis.Options{
-		Addr:      sm.GetSecret("REDIS_ADDR"),
-		Username:  sm.GetSecret("REDIS_USERNAME"),
-		Password:  sm.GetSecret("REDIS_PASSWORD"),
-		TLSConfig: &tls.Config{},
+		Addr:         sm.GetSecret("REDIS_ADDR"),
+		Username:     sm.GetSecret("REDIS_USERNAME"),
+		Password:     sm.GetSecret("REDIS_PASSWORD"),
+		TLSConfig:    &tls.Config{},
+		PoolSize:     20,
+		MinIdleConns: 5,
 	})
 	rateLimiter := appMiddleware.NewRateLimiter(redisClient)
 
@@ -1024,13 +1034,55 @@ func main() {
 	proxyRoute.Use(middleware.Recoverer)
 	proxyRoute.Use(middleware.Timeout(60 * time.Second))
 	proxyRoute.HandleFunc("/*", httpViews.ProxyHandler)
-	go http.ListenAndServe(":9001", proxyRoute)
 
-	// Flush PostHog events on shutdown
-	if posthogClient != nil {
-		defer posthogClient.Close()
+	// Create explicit http.Server instances for graceful shutdown
+	mainServer := &http.Server{Addr: ":8001", Handler: r}
+	proxyServer := &http.Server{Addr: ":9001", Handler: proxyRoute}
+
+	go func() {
+		slog.Info("Proxy server listening on :9001")
+		if err := proxyServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			slog.Error("Proxy server error", "error", err)
+		}
+	}()
+
+	// Graceful shutdown on SIGINT/SIGTERM
+	go func() {
+		quit := make(chan os.Signal, 1)
+		signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+		sig := <-quit
+		slog.Info("Received shutdown signal", "signal", sig)
+
+		// Cancel all running background jobs
+		controller.RunningJobs.Range(func(key, value any) bool {
+			if cancel, ok := value.(context.CancelFunc); ok {
+				cancel()
+			}
+			return true
+		})
+
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		// Flush PostHog events
+		if posthogClient != nil {
+			posthogClient.Close()
+		}
+
+		// Shutdown both servers
+		if err := proxyServer.Shutdown(ctx); err != nil {
+			slog.Error("Proxy server shutdown error", "error", err)
+		}
+		if err := mainServer.Shutdown(ctx); err != nil {
+			slog.Error("Main server shutdown error", "error", err)
+		}
+
+		slog.Info("Servers shut down gracefully")
+	}()
+
+	// Main server (blocks until Shutdown is called)
+	slog.Info("Main server listening on :8001")
+	if err := mainServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		slog.Error("Main server error", "error", err)
 	}
-
-	// Main
-	http.ListenAndServe(":8001", r)
 }

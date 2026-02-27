@@ -20,6 +20,8 @@ import (
 	"github.com/knid/wemob/internal/services/fly"
 )
 
+const maxActiveMachines = 50
+
 type Service struct {
 	Fly           *fly.Service
 	DB            *database.Database
@@ -194,7 +196,14 @@ func (s *Service) CreatePreview(projectID string, files map[string]string, envVa
 		}
 	}
 
-	// No existing machine (or it was cleaned up above) — create a new one
+	// No existing machine (or it was cleaned up above) — check capacity before creating
+	activeCount, err := s.DB.CountActivePreviewMachines()
+	if err != nil {
+		slog.Error("failed to count active preview machines", "error", err)
+	} else if activeCount >= maxActiveMachines {
+		return nil, fmt.Errorf("preview machine limit reached (%d/%d active machines)", activeCount, maxActiveMachines)
+	}
+
 	return s.createNewMachine(projectID, files, envVars, previewURL)
 }
 
@@ -398,8 +407,11 @@ func (s *Service) UpdateEnvVars(projectID string, envVars map[string]string) err
 
 	if hasServerVars {
 		// Restart the machine so Next.js picks up server-side env vars.
-		// Note: restart wipes the ephemeral filesystem, so .env.local must be
-		// re-synced after the machine comes back up.
+		// Note: restart wipes the ephemeral filesystem (Fly Machine rootfs is ephemeral),
+		// so .env.local AND all project files must be re-synced after the machine comes
+		// back up. The caller (SyncPreviewAll) handles the full file re-sync after this
+		// returns. This cold-start penalty is ~30-60s but unavoidable for server-side
+		// env var changes.
 		if err := s.Fly.StopMachine(record.MachineID); err != nil {
 			slog.Warn("failed to stop machine for env restart", "machine_id", record.MachineID, "error", err)
 		}
