@@ -37,12 +37,8 @@ func (v *HttpViews) GenerateAppStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.ProjectType == "ecommerce" {
-		if _, err := v.Controller.CreateStore(project, user, project.Name+" Store"); err != nil {
-			utils.JSONErrorResponse(w, "failed to create store: "+err.Error(), http.StatusInternalServerError)
-			return
-		}
-	}
+	// Store creation is handled by runPreGenerationSetup inside StreamBuildApp
+	// (with existence check), so no need to create it here.
 
 	v.Controller.TrackUserEvent(user, "app_generation_started", posthog.NewProperties().
 		Set("project_type", req.ProjectType).
