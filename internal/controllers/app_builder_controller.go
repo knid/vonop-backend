@@ -930,6 +930,19 @@ func (c *Controller) saveGeneratedFile(
 		return
 	}
 
+	// Guard: e-commerce projects must not have API routes (except auth) or drizzle files.
+	// All store data comes from the SDK, not custom API routes.
+	if project.ProjectType == "ecommerce" {
+		if strings.HasPrefix(path, "app/api/") && !strings.HasPrefix(path, "app/api/auth/") {
+			slog.Warn("saveGeneratedFile: blocking API route in e-commerce project", "path", path)
+			return
+		}
+		if path == "lib/db.ts" || path == "lib/schema.ts" {
+			slog.Warn("saveGeneratedFile: blocking drizzle file in e-commerce project", "path", path)
+			return
+		}
+	}
+
 	existingFile, err := c.DB.GetAppGeneratedFileByPath(project.ID.String(), "nextjs", path)
 	action := "create"
 	var fileID uuid.UUID
@@ -979,12 +992,12 @@ func (c *Controller) saveGeneratedFile(
 func buildSystemPrompt(project *models.AppProject) string {
 	prompt := constants.NEXTJS_BUILDER_SYSTEM_PROMPT
 
-	// E-commerce rules
 	if project.ProjectType == "ecommerce" {
 		prompt += constants.NEXTJS_BUILDER_ECOMMERCE_RULES
+	} else {
+		prompt += constants.NEXTJS_BUILDER_DATABASE_RULES
 	}
 
-	// Auth rules
 	if settings := project.Settings; settings != nil {
 		if needsAuth, ok := settings["needs_auth"].(bool); ok && needsAuth {
 			prompt += constants.NEXTJS_BUILDER_AUTH_RULES
@@ -1001,6 +1014,8 @@ func buildSingleShotSystemPrompt(project *models.AppProject) string {
 
 	if project.ProjectType == "ecommerce" {
 		prompt += constants.NEXTJS_BUILDER_ECOMMERCE_RULES
+	} else {
+		prompt += constants.NEXTJS_BUILDER_DATABASE_RULES
 	}
 
 	if settings := project.Settings; settings != nil {
