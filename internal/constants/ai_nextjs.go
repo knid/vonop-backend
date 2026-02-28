@@ -32,6 +32,14 @@ var NEXTJS_ECOMMERCE_TEMPLATE_FILE_PATHS = []string{
 	"components/ecommerce/empty-state.tsx",
 	"components/ecommerce/review-list.tsx",
 	"components/ecommerce/wishlist-button.tsx",
+	"components/ecommerce/site-header.tsx",
+	"components/ecommerce/site-footer.tsx",
+	"components/ecommerce/providers.tsx",
+	"components/ecommerce/newsletter-section.tsx",
+	"app/cart/page.tsx",
+	"app/checkout/page.tsx",
+	"app/checkout/success/page.tsx",
+	"app/checkout/cancel/page.tsx",
 }
 
 // NEXTJS_UI_TEMPLATE_FILE_PATHS are pre-built UI component templates injected during initial generation
@@ -1514,9 +1522,21 @@ const NEXTJS_BUILDER_ECOMMERCE_RULES = `
 
 ### E-Commerce Rules
 
+#### CRITICAL: This Is NOT a Landing Page
+You are building a FULLY FUNCTIONAL e-commerce application, NOT a marketing landing page.
+A landing page has: hero section, features grid, testimonials, single CTA button.
+An e-commerce app has: browsable product catalog, product detail pages, shopping cart, checkout flow, order confirmation.
+You MUST create ALL required pages listed below. If you only create a homepage, the build will FAIL validation.
+ZERO hardcoded product/category data — ALL store data comes from SDK hooks (useProducts, useCategories, useCart).
+
 #### Setup Sequence
 - Call setup_ecommerce FIRST before generating any storefront code. Then call manage_store to seed products/categories.
-- NEVER define hardcoded/mock product data (no ` + "`" + `const products = [...]` + "`" + `). ALL data comes from the Wemob Storefront API via @/lib/wemob-store.
+- NEVER define hardcoded/mock product data. This includes ALL of these patterns:
+  - const products/items/bestSellers/featuredProducts/featured/newArrivals/topProducts/deals = [...]
+  - const categories/collections/popularProducts/relatedProducts = [...]
+  - ANY array of objects with name/price/image fields
+  ALL product and category data MUST come from SDK hooks: useProducts(), useCategories(), useStoreConfig().
+  Acceptable hardcoded arrays: FAQ items, testimonials, team members, social links, navigation menu items.
 - lib/wemob-store.ts is template-managed and "use client" — ALL its exports are CLIENT-ONLY. Any file importing from it MUST have "use client".
 - Do NOT create, modify, or delete lib/wemob-store.ts — it is template-managed.
 
@@ -1530,14 +1550,25 @@ Types: StoreConfig, StorefrontProduct, StorefrontVariant, StorefrontCategory, St
 - CartProvider MUST wrap the entire app. In app/layout.tsx, create a client wrapper component (e.g., components/providers.tsx with "use client") that wraps children in <CartProvider>. Import and use it in the root layout.
 - useCart() provides: cart, isLoading, itemCount, addItem, updateItem, removeItem, applyDiscount, removeDiscountCode, checkout, clearCart.
 
-#### Required Pages (7 minimum)
+#### Required Pages
+Pages you MUST generate (not auto-injected):
 1. app/page.tsx — Homepage with hero section, featured products (useProducts), category highlights (useCategories), promotional banners
 2. app/products/page.tsx — Product grid with category filter pills, search bar, sort dropdown (price low/high, newest). Use useProducts({ category, q }).
 3. app/products/[slug]/page.tsx — Product detail with image gallery, variant selector, price display, add-to-cart button, description, reviews section
-4. app/cart/page.tsx — Full cart page: item list with quantity controls, discount code input, order summary, checkout button. Show EmptyState when cart is empty.
-5. app/checkout/page.tsx — Multi-step or single-page form: shipping address, billing address, payment provider selection. Only show providers from useStoreConfig().config.payment_providers. If payment_providers is empty, show info banner: "Payment not yet configured — contact the store owner."
-6. app/checkout/success/page.tsx — Order confirmation. Read order_id from URL search params, fetch order via getOrder(orderId), display order number, items, total, and confirmation message. Include "Continue Shopping" link.
-7. app/checkout/cancel/page.tsx — Payment cancelled/failed page with retry button linking back to checkout.
+4. app/categories/[slug]/page.tsx — Category page showing filtered products for the selected category
+5. app/about/page.tsx — Brand story, mission (compelling content relevant to store concept)
+6. app/contact/page.tsx — Contact form or information
+7. app/faq/page.tsx — 8-12 relevant FAQs for the store type
+8. app/policies/shipping/page.tsx — Shipping policy
+9. app/policies/returns/page.tsx — Return & exchange policy
+10. app/policies/privacy/page.tsx — Privacy policy
+11. app/policies/terms/page.tsx — Terms of service
+
+Pages auto-injected as templates (do NOT recreate):
+- app/cart/page.tsx — Full cart page with item list, discount code, order summary
+- app/checkout/page.tsx — Checkout form with shipping, billing, payment selection
+- app/checkout/success/page.tsx — Order confirmation (reads order_id from URL params)
+- app/checkout/cancel/page.tsx — Payment cancelled/failed with retry button
 
 #### Price Display Rules
 - Product prices live on VARIANTS, not the product itself. Products have min_price_cents and max_price_cents computed from their variants.
@@ -1555,7 +1586,8 @@ Types: StoreConfig, StorefrontProduct, StorefrontVariant, StorefrontCategory, St
 
 #### Cart UX
 - Use useCart() for ALL cart operations — never call raw API functions directly for cart management
-- Include a CartDrawer (slide-out sidebar) in the site header, triggered by cart icon with item count badge
+- The site header is auto-injected as components/ecommerce/site-header.tsx — do NOT recreate it.
+  Use <SiteHeader /> in app/layout.tsx. It includes CartDrawer, live cart count, navigation, and mobile menu.
 - Quantity controls: minus/plus buttons, disable minus at 1, show remove button
 - Show optimistic updates (useCart provides this automatically)
 - Show toast notification on successful add-to-cart (use a simple toast or the CartDrawer opening)
@@ -1596,6 +1628,19 @@ Types: StoreConfig, StorefrontProduct, StorefrontVariant, StorefrontCategory, St
 - Cart count: aria-live="polite" region for screen reader updates
 - Interactive elements: keyboard navigable, visible focus rings
 
+#### Navigation & Link Completeness
+- NEVER use href="#" as a placeholder link. Every link MUST point to a real route or valid external URL.
+- SiteHeader and SiteFooter are auto-injected templates — do NOT recreate header or footer components.
+- Required informational pages (LLM must generate these):
+  - app/about/page.tsx — Brand story, mission (compelling content relevant to store concept)
+  - app/contact/page.tsx — Contact form or information
+  - app/faq/page.tsx — 8-12 relevant FAQs
+  - app/policies/shipping/page.tsx — Shipping policy
+  - app/policies/returns/page.tsx — Return & exchange policy
+  - app/policies/privacy/page.tsx — Privacy policy
+  - app/policies/terms/page.tsx — Terms of service
+- "See All Products" / "Shop Now" / "Browse" buttons MUST link to /products — never href="#"
+
 #### Pre-Built Component Templates
 The following components are auto-injected as template files in components/ecommerce/. Do NOT recreate them — import and use them directly:
 - ProductCard — ` + "`" + `import { ProductCard } from "@/components/ecommerce/product-card"` + "`" + `
@@ -1610,6 +1655,16 @@ The following components are auto-injected as template files in components/ecomm
 - EmptyState — ` + "`" + `import { EmptyState } from "@/components/ecommerce/empty-state"` + "`" + `
 - ReviewList — ` + "`" + `import { ReviewList } from "@/components/ecommerce/review-list"` + "`" + `
 - WishlistButton — ` + "`" + `import { WishlistButton } from "@/components/ecommerce/wishlist-button"` + "`" + `
+- SiteHeader — ` + "`" + `import { SiteHeader } from "@/components/ecommerce/site-header"` + "`" + ` — use in app/layout.tsx
+- SiteFooter — ` + "`" + `import { SiteFooter } from "@/components/ecommerce/site-footer"` + "`" + ` — use in app/layout.tsx
+- Providers — ` + "`" + `import { Providers } from "@/components/ecommerce/providers"` + "`" + ` — wrap children in app/layout.tsx
+- NewsletterSection — ` + "`" + `import { NewsletterSection } from "@/components/ecommerce/newsletter-section"` + "`" + `
+
+The following PAGES are auto-injected as template files. Do NOT recreate them:
+- app/cart/page.tsx — Shopping cart (uses CartItemRow, OrderSummary, useCart)
+- app/checkout/page.tsx — Checkout (uses CheckoutForm)
+- app/checkout/success/page.tsx — Order confirmation (uses getOrder)
+- app/checkout/cancel/page.tsx — Payment cancelled with retry
 
 #### Reviews & Wishlist
 - Reviews: useReviews(slug) returns { reviews, averageRating, reviewCount, isLoading, submitReview }. Show ReviewList component on product detail page.
@@ -1797,13 +1852,20 @@ Given the user's description of an online store, generate a structured file plan
    - app/page.tsx — Homepage with hero, featured products, category highlights
    - app/products/page.tsx — Product listing with category filter, search, sort
    - app/products/[slug]/page.tsx — Product detail with gallery, variants, add-to-cart, reviews
-   - app/cart/page.tsx — Shopping cart with items, quantities, discount code, order summary
-   - app/checkout/page.tsx — Checkout form with shipping, billing, payment selection
-   - app/checkout/success/page.tsx — Order confirmation (reads order_id from URL params)
-   - app/checkout/cancel/page.tsx — Payment cancelled/failed with retry
    - app/categories/[slug]/page.tsx — Category page showing filtered products
-5. Required shared components: ONLY plan components/header.tsx (with cart icon and CartDrawer) and components/footer.tsx. All e-commerce UI components (ProductCard, CartDrawer, PriceDisplay, QuantitySelector, ProductGallery, CheckoutForm, CategoryNav, CartItemRow, OrderSummary, EmptyState, ReviewList, WishlistButton) are auto-injected in components/ecommerce/ — do NOT plan or recreate them.
-6. You may also plan a components/providers.tsx ("use client" wrapper for CartProvider and other context providers to use in layout.tsx).
+   - app/about/page.tsx — Brand story and company information
+   - app/contact/page.tsx — Contact form or details
+   - app/faq/page.tsx — Frequently asked questions
+   - app/policies/shipping/page.tsx — Shipping policy
+   - app/policies/returns/page.tsx — Return & exchange policy
+   - app/policies/privacy/page.tsx — Privacy policy
+   - app/policies/terms/page.tsx — Terms of service
+5. Required shared components: ONLY plan custom homepage sections (hero, featured-products, testimonials, etc.).
+   The following are auto-injected — do NOT plan them:
+   - components/ecommerce/* (ProductCard, CartDrawer, SiteHeader, SiteFooter, Providers, Newsletter, etc.)
+   - components/ui/* (Button, Card, Input, Badge, Skeleton)
+6. DO NOT plan these pages — they are auto-injected templates:
+   - app/cart/page.tsx, app/checkout/page.tsx, app/checkout/success/page.tsx, app/checkout/cancel/page.tsx
 7. DO NOT include package.json, tsconfig.json, postcss.config.mjs, next.config.mjs, lib/db.ts, lib/schema.ts, lib/utils.ts, components/ui/button.tsx, components/ui/card.tsx, components/ui/input.tsx, components/ui/badge.tsx, components/ui/skeleton.tsx — these are template-managed and injected automatically.
 8. DO NOT plan components/ecommerce/* files — they are template-managed and injected automatically.
 9. Required files: app/layout.tsx, app/page.tsx, app/globals.css
@@ -1825,19 +1887,19 @@ Given the user's description of an online store, generate a structured file plan
   "typography": {"heading_font":"Inter","body_font":"Inter"},
   "data_models": [],
   "files": [
-    {"path":"app/layout.tsx","type":"tsx","description":"Root layout with CartProvider wrapper, fonts, metadata"},
-    {"path":"app/page.tsx","type":"tsx","description":"Homepage with hero, featured products, category highlights"},
+    {"path":"app/layout.tsx","type":"tsx","description":"Root layout with Providers wrapper, SiteHeader, SiteFooter, fonts, metadata"},
+    {"path":"app/page.tsx","type":"tsx","description":"Homepage with hero, featured products (useProducts), category highlights (useCategories)"},
     {"path":"app/globals.css","type":"css","description":"Global styles with Tailwind v4 @theme colors"},
-    {"path":"app/products/page.tsx","type":"tsx","description":"Products listing with category filter, search, sort"},
-    {"path":"app/products/[slug]/page.tsx","type":"tsx","description":"Product detail with gallery, variants, reviews, add-to-cart"},
+    {"path":"app/products/page.tsx","type":"tsx","description":"Products listing with category filter, search, sort (useProducts)"},
+    {"path":"app/products/[slug]/page.tsx","type":"tsx","description":"Product detail with gallery, variants, reviews, add-to-cart (useProduct)"},
     {"path":"app/categories/[slug]/page.tsx","type":"tsx","description":"Category page showing filtered products"},
-    {"path":"app/cart/page.tsx","type":"tsx","description":"Shopping cart with items, quantities, discount code, order summary"},
-    {"path":"app/checkout/page.tsx","type":"tsx","description":"Checkout form with shipping, billing, payment provider selection"},
-    {"path":"app/checkout/success/page.tsx","type":"tsx","description":"Order confirmation page (reads order_id from URL params)"},
-    {"path":"app/checkout/cancel/page.tsx","type":"tsx","description":"Payment cancelled/failed with retry button"},
-    {"path":"components/header.tsx","type":"tsx","description":"Header with navigation, cart icon with count badge, and CartDrawer"},
-    {"path":"components/footer.tsx","type":"tsx","description":"Footer with links, newsletter signup, store info"},
-    {"path":"components/providers.tsx","type":"tsx","description":"Client wrapper with CartProvider for root layout"}
+    {"path":"app/about/page.tsx","type":"tsx","description":"Brand story and company information"},
+    {"path":"app/contact/page.tsx","type":"tsx","description":"Contact form or details"},
+    {"path":"app/faq/page.tsx","type":"tsx","description":"Frequently asked questions (8-12 relevant FAQs)"},
+    {"path":"app/policies/shipping/page.tsx","type":"tsx","description":"Shipping policy"},
+    {"path":"app/policies/returns/page.tsx","type":"tsx","description":"Return and exchange policy"},
+    {"path":"app/policies/privacy/page.tsx","type":"tsx","description":"Privacy policy"},
+    {"path":"app/policies/terms/page.tsx","type":"tsx","description":"Terms of service"}
   ],
   "required_env_vars": [
     {"key": "STRIPE_SK", "description": "Stripe secret key for payments (recommended)", "is_public": false, "provider": "stripe"}

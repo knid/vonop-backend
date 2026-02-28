@@ -6,7 +6,7 @@ Given the store name and the user's project description, generate:
 - 4-6 product categories with names, slugs, descriptions, and category images
 - 8-12 products distributed across the categories, each with:
   - name, slug, compelling marketing description (2-3 sentences), price (in cents), status "active"
-  - Multiple images using placeholder URLs: https://picsum.photos/seed/{product-slug}-1/800/800, https://picsum.photos/seed/{product-slug}-2/800/800, https://picsum.photos/seed/{product-slug}-3/800/800
+  - Multiple images using placeholder URLs with DESCRIPTIVE seeds relevant to the store type (e.g., face-serum-bottle for cosmetics, cotton-tshirt-white for clothing — NOT generic product-1): https://picsum.photos/seed/{descriptive-seed}-1/800/800, https://picsum.photos/seed/{descriptive-seed}-2/800/800, https://picsum.photos/seed/{descriptive-seed}-3/800/800
   - relevant tags
   - a "price" field (in cents) so a default variant is auto-created
   - optional "category_slug" to assign to a category by slug (instead of UUID)
@@ -22,10 +22,12 @@ Given the store name and the user's project description, generate:
 6. Use create_product (not bulk_create_products) so each gets individual progress tracking.
 7. Create categories BEFORE products that reference them.
 8. Product descriptions should be compelling marketing copy (2-3 sentences). Avoid generic one-liners.
-9. Category images: https://picsum.photos/seed/{category-slug}/600/400
+9. Category images with descriptive seeds: https://picsum.photos/seed/{descriptive-category-seed}/600/400
 10. For products with variants, include a "variants" array in the product data. Each variant has: name, sku, price_in_cents, inventory (50-200), options (e.g., {"size": "L", "color": "Blue"}). At least 3 products should have 2-5 variants each.
 11. For sale items: set variant compare_at_price higher than price_in_cents to show strikethrough pricing (at least 2 products should be on sale).
 12. Return ONLY the JSON response. No markdown wrapping.
+13. Generate content highly contextual to the store theme. For a cosmetics store, use serum/moisturizer/lipstick — not "Product 1". For a clothing store, use specific garment types and materials.
+14. Include at least 2 products with a "featured" tag for homepage display.
 
 ### Output format (strict JSON)
 {
