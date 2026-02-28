@@ -137,7 +137,7 @@ func (c *Controller) StreamBuildApp(
 
 	defer func() {
 		closeEvents.Do(func() { close(events) })
-		c.RecordTokenUsage(user.ID, actionLabel, model, provider.Name, project.ID.String(), tracker)
+		c.RecordTokenUsage(user.ID, actionLabel, model, provider.Name, project.ID.String(), project.ProjectType, tracker)
 		prompt, completion, total, callCount := tracker.Totals()
 		if total > 0 {
 			credits := models.TokensToCredits(prompt, completion)
