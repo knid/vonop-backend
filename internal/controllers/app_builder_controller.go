@@ -990,12 +990,11 @@ func (c *Controller) saveGeneratedFile(
 // buildSystemPrompt assembles the system prompt for the tool-calling path,
 // only including e-commerce and auth rules when the project actually uses those features.
 func buildSystemPrompt(project *models.AppProject) string {
-	prompt := constants.NEXTJS_BUILDER_SYSTEM_PROMPT
-
+	var prompt string
 	if project.ProjectType == "ecommerce" {
-		prompt += constants.NEXTJS_BUILDER_ECOMMERCE_RULES
+		prompt = constants.NEXTJS_ECOMMERCE_COMMON_RULES + constants.NEXTJS_BUILDER_TOOL_INSTRUCTIONS
 	} else {
-		prompt += constants.NEXTJS_BUILDER_DATABASE_RULES
+		prompt = constants.NEXTJS_BUILDER_SYSTEM_PROMPT + constants.NEXTJS_BUILDER_DATABASE_RULES
 	}
 
 	if settings := project.Settings; settings != nil {
@@ -1010,12 +1009,11 @@ func buildSystemPrompt(project *models.AppProject) string {
 // buildSingleShotSystemPrompt assembles the system prompt for single-shot initial
 // generation using <file> block output format instead of tool calls.
 func buildSingleShotSystemPrompt(project *models.AppProject) string {
-	prompt := constants.NEXTJS_BUILDER_COMMON_RULES + constants.NEXTJS_BUILDER_SINGLESHOT_INSTRUCTIONS
-
+	var prompt string
 	if project.ProjectType == "ecommerce" {
-		prompt += constants.NEXTJS_BUILDER_ECOMMERCE_RULES
+		prompt = constants.NEXTJS_ECOMMERCE_COMMON_RULES + constants.NEXTJS_BUILDER_SINGLESHOT_INSTRUCTIONS
 	} else {
-		prompt += constants.NEXTJS_BUILDER_DATABASE_RULES
+		prompt = constants.NEXTJS_BUILDER_COMMON_RULES + constants.NEXTJS_BUILDER_SINGLESHOT_INSTRUCTIONS + constants.NEXTJS_BUILDER_DATABASE_RULES
 	}
 
 	if settings := project.Settings; settings != nil {
