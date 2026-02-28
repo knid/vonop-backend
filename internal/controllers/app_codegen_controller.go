@@ -434,6 +434,22 @@ func getEcommerceTemplateContent(path string) string {
 		return constants.ECOMMERCE_TEMPLATE_REVIEW_LIST
 	case "components/ecommerce/wishlist-button.tsx":
 		return constants.ECOMMERCE_TEMPLATE_WISHLIST_BUTTON
+	case "components/ecommerce/site-header.tsx":
+		return constants.ECOMMERCE_TEMPLATE_SITE_HEADER
+	case "components/ecommerce/site-footer.tsx":
+		return constants.ECOMMERCE_TEMPLATE_SITE_FOOTER
+	case "components/ecommerce/providers.tsx":
+		return constants.ECOMMERCE_TEMPLATE_PROVIDERS
+	case "components/ecommerce/newsletter-section.tsx":
+		return constants.ECOMMERCE_TEMPLATE_NEWSLETTER
+	case "app/cart/page.tsx":
+		return constants.ECOMMERCE_TEMPLATE_CART_PAGE
+	case "app/checkout/page.tsx":
+		return constants.ECOMMERCE_TEMPLATE_CHECKOUT_PAGE
+	case "app/checkout/success/page.tsx":
+		return constants.ECOMMERCE_TEMPLATE_CHECKOUT_SUCCESS_PAGE
+	case "app/checkout/cancel/page.tsx":
+		return constants.ECOMMERCE_TEMPLATE_CHECKOUT_CANCEL_PAGE
 	}
 	return ""
 }
@@ -1453,33 +1469,6 @@ func runDeterministicChecks(files map[string]string) []validationError {
 
 	// --- E-Commerce specific checks (only when wemob-store.ts exists) ---
 	if _, hasStore := files["lib/wemob-store.ts"]; hasStore {
-		// Check E1: CartProvider must be present in layout or a providers wrapper
-		layoutContent, hasLayout := files["app/layout.tsx"]
-		if hasLayout {
-			hasCartProvider := strings.Contains(layoutContent, "CartProvider")
-			// Also check if layout imports a providers wrapper that might contain CartProvider
-			if !hasCartProvider {
-				// Check if any imported component file contains CartProvider
-				providerFound := false
-				for fp, fc := range files {
-					if strings.Contains(fp, "provider") && strings.Contains(fc, "CartProvider") {
-						// Verify the layout imports this file
-						fpBase := strings.TrimSuffix(strings.TrimSuffix(fp, ".tsx"), ".ts")
-						if strings.Contains(layoutContent, fpBase) || strings.Contains(layoutContent, "@/"+fpBase) {
-							providerFound = true
-							break
-						}
-					}
-				}
-				if !providerFound {
-					errors = append(errors, validationError{
-						File:  "app/layout.tsx",
-						Error: "E-commerce layout must wrap the app with <CartProvider> from @/lib/wemob-store. Either add it directly to layout.tsx or create a client providers wrapper that includes it.",
-						Type:  "ecommerce_missing_cart_provider",
-					})
-				}
-			}
-		}
 
 		// Check E2: Manual price formatting (should use formatPrice())
 		manualPriceRegex := regexp.MustCompile(`(?:price|cents|amount)\s*[/]\s*100|\.toFixed\(\s*2\s*\)`)
@@ -1499,8 +1488,11 @@ func runDeterministicChecks(files map[string]string) []validationError {
 			}
 		}
 
-		// Check E3: Hardcoded product arrays (should use SDK)
-		hardcodedProductsRegex := regexp.MustCompile(`const\s+products\s*=\s*\[`)
+		// Check E3: Hardcoded product/category arrays (should use SDK)
+		hardcodedDataPatterns := []*regexp.Regexp{
+			regexp.MustCompile(`(?i)const\s+(?:products|items|bestSellers|best_sellers|featuredProducts|featured_products|featured|newArrivals|new_arrivals|topProducts|top_products|deals|popularProducts|popular_products|relatedProducts|related_products|allProducts|all_products)\s*(?::\s*\w+(?:\[\])?\s*)?=\s*\[`),
+			regexp.MustCompile(`(?i)const\s+(?:categories|collections|productCategories|product_categories)\s*(?::\s*\w+(?:\[\])?\s*)?=\s*\[`),
+		}
 		for fp, fc := range files {
 			if isTemplateFile(fp) || isConfigFile(fp) {
 				continue
@@ -1508,21 +1500,25 @@ func runDeterministicChecks(files map[string]string) []validationError {
 			if !strings.HasSuffix(fp, ".tsx") && !strings.HasSuffix(fp, ".ts") {
 				continue
 			}
-			if hardcodedProductsRegex.MatchString(fc) && !strings.Contains(fc, "@/lib/wemob-store") {
-				errors = append(errors, validationError{
-					File:  fp,
-					Error: "Hardcoded product data detected. E-commerce projects must fetch all product data from the Wemob Storefront SDK (@/lib/wemob-store). Use useProducts() or getProducts() instead.",
-					Type:  "ecommerce_hardcoded_products",
-				})
+			// Skip files that also import from SDK (may define local filtered subsets)
+			if strings.Contains(fc, "@/lib/wemob-store") {
+				continue
+			}
+			for _, pat := range hardcodedDataPatterns {
+				if pat.MatchString(fc) {
+					errors = append(errors, validationError{
+						File:  fp,
+						Error: "Hardcoded product/category data detected. E-commerce projects must fetch all product and category data from the Wemob Storefront SDK (@/lib/wemob-store). Use useProducts(), useCategories(), or getProducts() instead.",
+						Type:  "ecommerce_hardcoded_products",
+					})
+					break // one error per file
+				}
 			}
 		}
 
-		// Check E4: Required pages
+		// Check E4: Required LLM-generated pages (cart/checkout are now templates)
 		requiredEcommercePages := map[string]string{
-			"app/products/page.tsx":          "Products listing page",
-			"app/cart/page.tsx":              "Shopping cart page",
-			"app/checkout/page.tsx":          "Checkout page",
-			"app/checkout/success/page.tsx":  "Order confirmation page",
+			"app/products/page.tsx": "Products listing page",
 		}
 		for pagePath, pageDesc := range requiredEcommercePages {
 			if _, exists := files[pagePath]; !exists {
@@ -1548,6 +1544,106 @@ func runDeterministicChecks(files map[string]string) []validationError {
 				Error: "Missing product detail page. E-commerce projects need a dynamic route like app/products/[slug]/page.tsx to display individual products.",
 				Type:  "ecommerce_missing_page",
 			})
+		}
+
+		// Check E5b: Category page (any dynamic slug page under categories)
+		hasCategoryPage := false
+		for fp := range files {
+			if strings.HasPrefix(fp, "app/categories/[") && strings.HasSuffix(fp, "/page.tsx") {
+				hasCategoryPage = true
+				break
+			}
+		}
+		if !hasCategoryPage {
+			errors = append(errors, validationError{
+				File:  "app/categories/[slug]/page.tsx",
+				Error: "Missing category page. E-commerce projects need a dynamic route like app/categories/[slug]/page.tsx to display products by category.",
+				Type:  "ecommerce_missing_page",
+			})
+		}
+
+		// Check E6: href="#" placeholder links (threshold > 2 per file)
+		placeholderHrefRegex := regexp.MustCompile(`href=["']#["']`)
+		for fp, fc := range files {
+			if isTemplateFile(fp) || isConfigFile(fp) {
+				continue
+			}
+			if !strings.HasSuffix(fp, ".tsx") && !strings.HasSuffix(fp, ".ts") {
+				continue
+			}
+			matches := placeholderHrefRegex.FindAllStringIndex(fc, -1)
+			if len(matches) > 2 {
+				errors = append(errors, validationError{
+					File:  fp,
+					Error: fmt.Sprintf("Found %d placeholder href=\"#\" links. Every link must point to a real route or valid external URL. Replace with actual page routes (e.g., /products, /about, /contact).", len(matches)),
+					Type:  "ecommerce_placeholder_links",
+				})
+			}
+		}
+
+		// Check E7: SDK usage in LLM-generated pages
+		sdkUsageChecks := map[string][]string{
+			"app/products/page.tsx": {"useProducts", "getProducts"},
+			"app/page.tsx":         {"useProducts", "useCategories"},
+		}
+		for fp := range files {
+			if strings.HasPrefix(fp, "app/products/[") && strings.HasSuffix(fp, "/page.tsx") {
+				sdkUsageChecks[fp] = []string{"useProduct", "getProduct"}
+			}
+		}
+		for fp, requiredImports := range sdkUsageChecks {
+			fc, exists := files[fp]
+			if !exists {
+				continue
+			}
+			if isTemplateFile(fp) {
+				continue
+			}
+			hasSDK := false
+			for _, imp := range requiredImports {
+				if strings.Contains(fc, imp) {
+					hasSDK = true
+					break
+				}
+			}
+			if !hasSDK {
+				errors = append(errors, validationError{
+					File:  fp,
+					Error: fmt.Sprintf("E-commerce page %s does not use SDK hooks (%s). All product/category data must come from the Wemob Storefront SDK, not hardcoded data.", fp, strings.Join(requiredImports, " or ")),
+					Type:  "ecommerce_missing_sdk_usage",
+				})
+			}
+		}
+
+		// Check E8: Providers wrapper in layout
+		if layoutContent, ok := files["app/layout.tsx"]; ok {
+			hasProviders := strings.Contains(layoutContent, "Providers") && (strings.Contains(layoutContent, "@/components/ecommerce/providers") || strings.Contains(layoutContent, "components/providers"))
+			hasDirectCartProvider := strings.Contains(layoutContent, "CartProvider")
+			if !hasProviders && !hasDirectCartProvider {
+				errors = append(errors, validationError{
+					File:  "app/layout.tsx",
+					Error: "E-commerce layout must use <Providers> from @/components/ecommerce/providers (or directly wrap with <CartProvider>). Import and wrap {children} with it in app/layout.tsx.",
+					Type:  "ecommerce_missing_providers",
+				})
+			}
+		}
+
+		// Check E9: SiteHeader and SiteFooter in layout
+		if layoutContent, ok := files["app/layout.tsx"]; ok {
+			if !strings.Contains(layoutContent, "SiteHeader") {
+				errors = append(errors, validationError{
+					File:  "app/layout.tsx",
+					Error: "E-commerce layout must include <SiteHeader /> from @/components/ecommerce/site-header. This template provides navigation, cart icon, and CartDrawer.",
+					Type:  "ecommerce_missing_layout_components",
+				})
+			}
+			if !strings.Contains(layoutContent, "SiteFooter") {
+				errors = append(errors, validationError{
+					File:  "app/layout.tsx",
+					Error: "E-commerce layout must include <SiteFooter /> from @/components/ecommerce/site-footer. This template provides footer links to all pages.",
+					Type:  "ecommerce_missing_layout_components",
+				})
+			}
 		}
 	}
 

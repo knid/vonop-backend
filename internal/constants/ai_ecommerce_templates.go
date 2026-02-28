@@ -1042,3 +1042,719 @@ export function WishlistButton({ productId, size = "md", className = "" }: Wishl
   );
 }
 `
+
+const ECOMMERCE_TEMPLATE_SITE_HEADER = `"use client";
+
+import React, { useState, useEffect } from "react";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { ShoppingBag, Search, Menu, X } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
+import { useCart, useCategories, useStoreConfig } from "@/lib/wemob-store";
+import { CartDrawer } from "@/components/ecommerce/cart-drawer";
+
+export function SiteHeader() {
+  const pathname = usePathname();
+  const { itemCount } = useCart();
+  const categories = useCategories();
+  const storeConfig = useStoreConfig();
+
+  const [cartOpen, setCartOpen] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [scrolled, setScrolled] = useState(false);
+
+  useEffect(() => {
+    const handleScroll = () => setScrolled(window.scrollY > 10);
+    window.addEventListener("scroll", handleScroll, { passive: true });
+    return () => window.removeEventListener("scroll", handleScroll);
+  }, []);
+
+  useEffect(() => {
+    setMobileMenuOpen(false);
+  }, [pathname]);
+
+  const navLinks = [
+    { label: "Home", href: "/" },
+    { label: "Products", href: "/products" },
+    ...categories.map((cat) => ({
+      label: cat.name,
+      href: "/categories/" + cat.slug,
+    })),
+    { label: "About", href: "/about" },
+    { label: "Contact", href: "/contact" },
+  ];
+
+  const isActive = (href: string) =>
+    href === "/" ? pathname === "/" : pathname.startsWith(href);
+
+  return (
+    <>
+      <header
+        className={
+          "sticky top-0 z-50 w-full transition-all duration-300 " +
+          (scrolled
+            ? "bg-background/80 backdrop-blur-md border-b border-border shadow-sm"
+            : "bg-background")
+        }
+      >
+        <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
+          <Link href="/" className="text-xl font-bold tracking-tight text-foreground">
+            {storeConfig.name}
+          </Link>
+
+          <nav className="hidden items-center gap-1 md:flex">
+            {navLinks.map((link) => (
+              <Link
+                key={link.href}
+                href={link.href}
+                className={
+                  "rounded-md px-3 py-2 text-sm font-medium transition-colors " +
+                  (isActive(link.href)
+                    ? "bg-primary/10 text-primary"
+                    : "text-muted-foreground hover:bg-accent hover:text-foreground")
+                }
+              >
+                {link.label}
+              </Link>
+            ))}
+          </nav>
+
+          <div className="flex items-center gap-2">
+            <Link
+              href="/products?q="
+              className="flex h-10 w-10 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              aria-label="Search products"
+            >
+              <Search className="h-5 w-5" />
+            </Link>
+
+            <button
+              onClick={() => setCartOpen(true)}
+              className="relative flex h-10 w-10 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              aria-label="Open cart"
+            >
+              <ShoppingBag className="h-5 w-5" />
+              {itemCount > 0 && (
+                <span className="absolute -right-0.5 -top-0.5 flex h-5 w-5 items-center justify-center rounded-full bg-primary text-[11px] font-semibold text-primary-foreground">
+                  {itemCount > 99 ? "99+" : itemCount}
+                </span>
+              )}
+            </button>
+
+            <button
+              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+              className="flex h-10 w-10 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-foreground md:hidden"
+              aria-label={mobileMenuOpen ? "Close menu" : "Open menu"}
+            >
+              {mobileMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+            </button>
+          </div>
+        </div>
+
+        <AnimatePresence>
+          {mobileMenuOpen && (
+            <motion.nav
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: "auto", opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              className="overflow-hidden border-t border-border bg-background md:hidden"
+            >
+              <div className="flex flex-col gap-1 px-4 py-3">
+                {navLinks.map((link) => (
+                  <Link
+                    key={link.href}
+                    href={link.href}
+                    className={
+                      "rounded-md px-3 py-2.5 text-sm font-medium transition-colors " +
+                      (isActive(link.href)
+                        ? "bg-primary/10 text-primary"
+                        : "text-muted-foreground hover:bg-accent hover:text-foreground")
+                    }
+                  >
+                    {link.label}
+                  </Link>
+                ))}
+              </div>
+            </motion.nav>
+          )}
+        </AnimatePresence>
+      </header>
+
+      <CartDrawer isOpen={cartOpen} onClose={() => setCartOpen(false)} />
+    </>
+  );
+}
+`
+
+const ECOMMERCE_TEMPLATE_SITE_FOOTER = `"use client";
+
+import Link from "next/link";
+import { useCategories, useStoreConfig } from "@/lib/wemob-store";
+
+export function SiteFooter() {
+  const categories = useCategories();
+  const storeConfig = useStoreConfig();
+
+  const shopLinks = [
+    { label: "Products", href: "/products" },
+    ...categories.map((cat) => ({
+      label: cat.name,
+      href: "/categories/" + cat.slug,
+    })),
+  ];
+
+  const companyLinks = [
+    { label: "About", href: "/about" },
+    { label: "Contact", href: "/contact" },
+  ];
+
+  const supportLinks = [
+    { label: "FAQ", href: "/faq" },
+    { label: "Shipping Policy", href: "/policies/shipping" },
+    { label: "Returns", href: "/policies/returns" },
+  ];
+
+  const legalLinks = [
+    { label: "Privacy Policy", href: "/policies/privacy" },
+    { label: "Terms of Service", href: "/policies/terms" },
+  ];
+
+  return (
+    <footer className="border-t border-border bg-muted">
+      <div className="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8">
+        <div className="grid grid-cols-1 gap-8 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="sm:col-span-2 lg:col-span-1">
+            <Link href="/" className="text-lg font-bold tracking-tight text-foreground">
+              {storeConfig.name}
+            </Link>
+            <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
+              Quality products curated for you. Shop with confidence and enjoy a
+              seamless shopping experience.
+            </p>
+          </div>
+
+          <div>
+            <h3 className="text-sm font-semibold uppercase tracking-wider text-foreground">
+              Shop
+            </h3>
+            <ul className="mt-4 space-y-2.5">
+              {shopLinks.map((link) => (
+                <li key={link.href}>
+                  <Link
+                    href={link.href}
+                    className="text-sm text-muted-foreground transition-colors hover:text-foreground"
+                  >
+                    {link.label}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          <div>
+            <h3 className="text-sm font-semibold uppercase tracking-wider text-foreground">
+              Company
+            </h3>
+            <ul className="mt-4 space-y-2.5">
+              {companyLinks.map((link) => (
+                <li key={link.href}>
+                  <Link
+                    href={link.href}
+                    className="text-sm text-muted-foreground transition-colors hover:text-foreground"
+                  >
+                    {link.label}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+
+            <h3 className="mt-8 text-sm font-semibold uppercase tracking-wider text-foreground">
+              Support
+            </h3>
+            <ul className="mt-4 space-y-2.5">
+              {supportLinks.map((link) => (
+                <li key={link.href}>
+                  <Link
+                    href={link.href}
+                    className="text-sm text-muted-foreground transition-colors hover:text-foreground"
+                  >
+                    {link.label}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          <div>
+            <h3 className="text-sm font-semibold uppercase tracking-wider text-foreground">
+              Legal
+            </h3>
+            <ul className="mt-4 space-y-2.5">
+              {legalLinks.map((link) => (
+                <li key={link.href}>
+                  <Link
+                    href={link.href}
+                    className="text-sm text-muted-foreground transition-colors hover:text-foreground"
+                  >
+                    {link.label}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+
+        <div className="mt-12 border-t border-border pt-8">
+          <p className="text-center text-sm text-muted-foreground">
+            &copy; {new Date().getFullYear()} {storeConfig.name}. All rights reserved.
+          </p>
+        </div>
+      </div>
+    </footer>
+  );
+}
+`
+
+const ECOMMERCE_TEMPLATE_PROVIDERS = `"use client";
+
+import React from "react";
+import { CartProvider } from "@/lib/wemob-store";
+
+export function Providers({ children }: { children: React.ReactNode }) {
+  return <CartProvider>{children}</CartProvider>;
+}
+`
+
+const ECOMMERCE_TEMPLATE_NEWSLETTER = `"use client";
+
+import React, { useState } from "react";
+import { Mail, CheckCircle, ArrowRight } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
+
+export function NewsletterSection() {
+  const [email, setEmail] = useState("");
+  const [status, setStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
+  const [message, setMessage] = useState("");
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setStatus("error");
+      setMessage("Please enter a valid email address.");
+      return;
+    }
+
+    setStatus("loading");
+    setMessage("");
+
+    setTimeout(() => {
+      setStatus("success");
+      setMessage("Thank you for subscribing! Check your inbox for a confirmation.");
+      setEmail("");
+    }, 1000);
+  };
+
+  return (
+    <section className="py-16 sm:py-20">
+      <div className="mx-auto max-w-2xl px-4 sm:px-6 lg:px-8">
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true }}
+          transition={{ duration: 0.5 }}
+          className="rounded-2xl border border-border bg-gradient-to-br from-primary/5 to-accent/5 p-8 text-center sm:p-12"
+        >
+          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
+            <Mail className="h-6 w-6 text-primary" />
+          </div>
+
+          <h2 className="text-2xl font-bold tracking-tight text-foreground sm:text-3xl">
+            Stay in the Loop
+          </h2>
+          <p className="mt-2 text-muted-foreground">
+            Subscribe for exclusive deals, new arrivals, and style inspiration.
+          </p>
+
+          <form onSubmit={handleSubmit} className="mt-6">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-center">
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => {
+                  setEmail(e.target.value);
+                  if (status === "error") setStatus("idle");
+                }}
+                placeholder="Enter your email"
+                className="h-11 w-full rounded-lg border border-border bg-background px-4 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 sm:max-w-xs"
+                disabled={status === "loading"}
+              />
+              <button
+                type="submit"
+                disabled={status === "loading"}
+                className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-primary px-6 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+              >
+                {status === "loading" ? "Subscribing..." : "Subscribe"}
+                {status !== "loading" && <ArrowRight className="h-4 w-4" />}
+              </button>
+            </div>
+          </form>
+
+          <AnimatePresence mode="wait">
+            {status === "success" && (
+              <motion.div
+                initial={{ opacity: 0, y: 5 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0 }}
+                className="mt-4 flex items-center justify-center gap-2 text-sm text-green-600 dark:text-green-400"
+              >
+                <CheckCircle className="h-4 w-4" />
+                {message}
+              </motion.div>
+            )}
+            {status === "error" && (
+              <motion.p
+                initial={{ opacity: 0, y: 5 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0 }}
+                className="mt-4 text-sm text-red-600 dark:text-red-400"
+              >
+                {message}
+              </motion.p>
+            )}
+          </AnimatePresence>
+
+          <p className="mt-4 text-xs text-muted-foreground">
+            No spam, ever. Unsubscribe at any time.
+          </p>
+        </motion.div>
+      </div>
+    </section>
+  );
+}
+`
+
+const ECOMMERCE_TEMPLATE_CART_PAGE = `"use client";
+
+import React, { useState } from "react";
+import Link from "next/link";
+import { ShoppingBag, ArrowLeft } from "lucide-react";
+import { useCart, formatPrice } from "@/lib/wemob-store";
+import { CartItemRow } from "@/components/ecommerce/cart-item-row";
+import { QuantitySelector } from "@/components/ecommerce/quantity-selector";
+import { OrderSummary } from "@/components/ecommerce/order-summary";
+import { EmptyState } from "@/components/ecommerce/empty-state";
+
+export default function CartPage() {
+  const { cart, isLoading, itemCount, applyDiscount, removeDiscountCode } = useCart();
+
+  const [discountCode, setDiscountCode] = useState("");
+  const [discountLoading, setDiscountLoading] = useState(false);
+  const [discountError, setDiscountError] = useState("");
+
+  const handleApplyDiscount = async () => {
+    if (!discountCode.trim()) return;
+    setDiscountLoading(true);
+    setDiscountError("");
+    try {
+      await applyDiscount(discountCode.trim());
+    } catch {
+      setDiscountError("Invalid or expired discount code.");
+    } finally {
+      setDiscountLoading(false);
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <div className="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8">
+        <h1 className="text-3xl font-bold tracking-tight text-foreground">Shopping Cart</h1>
+        <div className="mt-8 space-y-4">
+          {[1, 2, 3].map((i) => (
+            <div key={i} className="h-24 animate-pulse rounded-lg bg-muted" />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  if (!cart || itemCount === 0) {
+    return (
+      <div className="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8">
+        <h1 className="text-3xl font-bold tracking-tight text-foreground">Shopping Cart</h1>
+        <div className="mt-12">
+          <EmptyState
+            icon={ShoppingBag}
+            title="Your cart is empty"
+            description="Looks like you haven't added anything to your cart yet."
+            action={{ label: "Continue Shopping", href: "/products" }}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8">
+      <div className="flex items-center justify-between">
+        <h1 className="text-3xl font-bold tracking-tight text-foreground">
+          Shopping Cart ({itemCount})
+        </h1>
+        <Link
+          href="/products"
+          className="inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
+        >
+          <ArrowLeft className="h-4 w-4" />
+          Continue Shopping
+        </Link>
+      </div>
+
+      <div className="mt-8 gap-8 lg:grid lg:grid-cols-[1fr_400px]">
+        <div>
+          <div className="divide-y divide-border rounded-lg border border-border">
+            {cart.items.map((item) => (
+              <CartItemRow key={item.id} item={item} />
+            ))}
+          </div>
+
+          <div className="mt-6 flex items-end gap-3">
+            <div className="flex-1">
+              <label htmlFor="discount" className="mb-1.5 block text-sm font-medium text-foreground">
+                Discount Code
+              </label>
+              <input
+                id="discount"
+                type="text"
+                value={discountCode}
+                onChange={(e) => {
+                  setDiscountCode(e.target.value);
+                  setDiscountError("");
+                }}
+                placeholder="Enter code"
+                className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+              />
+              {discountError && (
+                <p className="mt-1 text-sm text-red-600 dark:text-red-400">{discountError}</p>
+              )}
+            </div>
+            <button
+              onClick={handleApplyDiscount}
+              disabled={discountLoading || !discountCode.trim()}
+              className="h-10 rounded-lg bg-secondary px-4 text-sm font-medium text-secondary-foreground transition-colors hover:bg-secondary/80 disabled:opacity-50"
+            >
+              {discountLoading ? "Applying..." : "Apply"}
+            </button>
+          </div>
+
+          {cart.discountCode && (
+            <div className="mt-3 flex items-center gap-2 text-sm">
+              <span className="rounded-md bg-green-100 px-2 py-0.5 font-medium text-green-700 dark:bg-green-900/30 dark:text-green-400">
+                {cart.discountCode}
+              </span>
+              <button
+                onClick={() => removeDiscountCode()}
+                className="text-muted-foreground transition-colors hover:text-foreground"
+              >
+                Remove
+              </button>
+            </div>
+          )}
+        </div>
+
+        <div className="mt-8 lg:mt-0">
+          <OrderSummary />
+          <Link
+            href="/checkout"
+            className="mt-4 flex h-12 w-full items-center justify-center rounded-lg bg-primary text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90"
+          >
+            Proceed to Checkout
+          </Link>
+        </div>
+      </div>
+    </div>
+  );
+}
+`
+
+const ECOMMERCE_TEMPLATE_CHECKOUT_PAGE = `"use client";
+
+import Link from "next/link";
+import { ChevronLeft } from "lucide-react";
+import { CheckoutForm } from "@/components/ecommerce/checkout-form";
+
+export default function CheckoutPage() {
+  return (
+    <div className="mx-auto max-w-3xl px-4 py-12 sm:px-6 lg:px-8">
+      <nav className="mb-6 flex items-center gap-2 text-sm text-muted-foreground">
+        <Link
+          href="/cart"
+          className="inline-flex items-center gap-1 transition-colors hover:text-foreground"
+        >
+          <ChevronLeft className="h-4 w-4" />
+          Back to Cart
+        </Link>
+      </nav>
+
+      <h1 className="text-3xl font-bold tracking-tight text-foreground">Checkout</h1>
+      <p className="mt-1 text-muted-foreground">
+        Complete your order by filling in the details below.
+      </p>
+
+      <div className="mt-8">
+        <CheckoutForm />
+      </div>
+    </div>
+  );
+}
+`
+
+const ECOMMERCE_TEMPLATE_CHECKOUT_SUCCESS_PAGE = `"use client";
+
+import React, { useEffect, useState } from "react";
+import Link from "next/link";
+import { useSearchParams } from "next/navigation";
+import { CheckCircle, Package, Loader2 } from "lucide-react";
+import { getOrder, formatPrice } from "@/lib/wemob-store";
+
+export default function CheckoutSuccessPage() {
+  const searchParams = useSearchParams();
+  const orderId = searchParams.get("order_id");
+
+  const [order, setOrder] = useState<any | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!orderId) {
+      setLoading(false);
+      setError("No order ID provided.");
+      return;
+    }
+    getOrder(orderId)
+      .then((data) => {
+        setOrder(data);
+        setLoading(false);
+      })
+      .catch(() => {
+        setError("Order not found.");
+        setLoading(false);
+      });
+  }, [orderId]);
+
+  if (loading) {
+    return (
+      <div className="flex min-h-[50vh] flex-col items-center justify-center px-4">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        <p className="mt-4 text-muted-foreground">Loading order details...</p>
+      </div>
+    );
+  }
+
+  if (error || !order) {
+    return (
+      <div className="flex min-h-[50vh] flex-col items-center justify-center px-4 text-center">
+        <Package className="h-12 w-12 text-muted-foreground" />
+        <h1 className="mt-4 text-xl font-semibold text-foreground">
+          {error || "Order not found"}
+        </h1>
+        <p className="mt-2 text-muted-foreground">
+          We couldn&apos;t find this order. It may have expired or the link is invalid.
+        </p>
+        <Link
+          href="/products"
+          className="mt-6 inline-flex h-10 items-center rounded-lg bg-primary px-5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+        >
+          Continue Shopping
+        </Link>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mx-auto max-w-lg px-4 py-16 text-center sm:px-6">
+      <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-green-100 dark:bg-green-900/30">
+        <CheckCircle className="h-8 w-8 text-green-600 dark:text-green-400" />
+      </div>
+
+      <h1 className="mt-6 text-3xl font-bold tracking-tight text-foreground">
+        Order Confirmed!
+      </h1>
+      <p className="mt-2 text-muted-foreground">
+        Thank you for your purchase. Your order number is{" "}
+        <span className="font-semibold text-foreground">{order.orderNumber || orderId}</span>.
+      </p>
+
+      <div className="mt-8 rounded-lg border border-border bg-card p-6 text-left">
+        <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+          Order Summary
+        </h2>
+        <ul className="mt-4 divide-y divide-border">
+          {order.items?.map((item: any, idx: number) => (
+            <li key={idx} className="flex items-center justify-between py-3">
+              <div>
+                <p className="text-sm font-medium text-foreground">{item.name}</p>
+                <p className="text-xs text-muted-foreground">Qty: {item.quantity}</p>
+              </div>
+              <p className="text-sm font-medium text-foreground">
+                {formatPrice(item.price * item.quantity)}
+              </p>
+            </li>
+          ))}
+        </ul>
+        <div className="mt-4 flex items-center justify-between border-t border-border pt-4">
+          <span className="text-sm font-semibold text-foreground">Total</span>
+          <span className="text-sm font-semibold text-foreground">
+            {formatPrice(order.total)}
+          </span>
+        </div>
+      </div>
+
+      <Link
+        href="/products"
+        className="mt-8 inline-flex h-10 items-center rounded-lg bg-primary px-5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+      >
+        Continue Shopping
+      </Link>
+    </div>
+  );
+}
+`
+
+const ECOMMERCE_TEMPLATE_CHECKOUT_CANCEL_PAGE = `"use client";
+
+import Link from "next/link";
+import { XCircle } from "lucide-react";
+
+export default function CheckoutCancelPage() {
+  return (
+    <div className="flex min-h-[50vh] flex-col items-center justify-center px-4 text-center">
+      <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-red-100 dark:bg-red-900/30">
+        <XCircle className="h-8 w-8 text-red-600 dark:text-red-400" />
+      </div>
+
+      <h1 className="mt-6 text-2xl font-bold tracking-tight text-foreground">
+        Payment Cancelled
+      </h1>
+      <p className="mx-auto mt-2 max-w-md text-muted-foreground">
+        Your payment was not completed. You can try again or continue shopping.
+      </p>
+
+      <div className="mt-8 flex flex-col gap-3 sm:flex-row">
+        <Link
+          href="/checkout"
+          className="inline-flex h-10 items-center justify-center rounded-lg bg-primary px-5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+        >
+          Try Again
+        </Link>
+        <Link
+          href="/products"
+          className="inline-flex h-10 items-center justify-center rounded-lg border border-border bg-background px-5 text-sm font-medium text-foreground transition-colors hover:bg-accent"
+        >
+          Continue Shopping
+        </Link>
+      </div>
+    </div>
+  );
+}
+`
