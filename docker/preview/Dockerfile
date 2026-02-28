@@ -11,6 +11,9 @@ WORKDIR /srv
 COPY server.js /srv/server.js
 RUN bun init -y && bun install http-proxy && rm -rf /root/.bun/install/cache
 
+# Save template package.json for runtime dep comparison (skip bun install when all deps pre-installed)
+COPY package-template.json /srv/package-template.json
+
 # Pre-install common deps directly in /app (no copy needed at runtime)
 WORKDIR /app
 COPY package-template.json package.json

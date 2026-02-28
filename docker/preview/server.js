@@ -12,6 +12,19 @@ const PREVIEW_DOMAIN = process.env.PREVIEW_DOMAIN || "";
 const APP_DIR = "/app";
 const SETUP_MARKER = "/tmp/.setup-complete";
 
+// Load pre-installed deps from Docker image template for install-skip logic
+const PREINSTALLED_DEPS = (() => {
+  try {
+    const tpl = JSON.parse(fs.readFileSync("/srv/package-template.json", "utf8"));
+    return new Set([
+      ...Object.keys(tpl.dependencies || {}),
+      ...Object.keys(tpl.devDependencies || {}),
+    ]);
+  } catch {
+    return new Set();
+  }
+})();
+
 // ─── Next.js lifecycle ──────────────────────────────────────────────────────
 
 let nextReady = false;
@@ -228,6 +241,7 @@ function parseBody(req) {
 
 function writeFiles(files) {
   let packageChanged = false;
+  let packageContent = null;
   for (const [filePath, content] of Object.entries(files)) {
     const full = path.join(APP_DIR, path.normalize(filePath));
     if (!full.startsWith(APP_DIR)) {
@@ -236,9 +250,31 @@ function writeFiles(files) {
     }
     fs.mkdirSync(path.dirname(full), { recursive: true });
     fs.writeFileSync(full, content, "utf8");
-    if (filePath === "package.json") packageChanged = true;
+    if (filePath === "package.json") {
+      packageChanged = true;
+      packageContent = content;
+    }
   }
-  return packageChanged;
+  return { packageChanged, packageContent };
+}
+
+// Check if synced package.json has deps not already pre-installed in the Docker image.
+// Returns true only if there are NEW packages that require `bun install`.
+function hasNewDeps(packageJsonContent) {
+  if (!PREINSTALLED_DEPS.size) return true; // no template loaded, install to be safe
+  try {
+    const pkg = JSON.parse(packageJsonContent);
+    const allDeps = { ...pkg.dependencies, ...pkg.devDependencies };
+    for (const name of Object.keys(allDeps)) {
+      if (!PREINSTALLED_DEPS.has(name)) {
+        console.log(`new dependency not in template: ${name}`);
+        return true;
+      }
+    }
+    return false;
+  } catch {
+    return true; // can't parse, install to be safe
+  }
 }
 
 function deleteFiles(paths) {
@@ -360,16 +396,22 @@ const server = http.createServer(async (req, res) => {
       const deletePaths = body.delete || [];
       const deleted = deleteFiles(deletePaths);
 
-      const packageChanged = writeFiles(files);
+      const { packageChanged, packageContent } = writeFiles(files);
       let installing = false;
 
-      if (packageChanged || bunInstallFailed) {
-        // Re-run bun install if package.json changed OR if previous install failed
-        if (bunInstallFailed) {
-          console.log("previous bun install failed, re-running on sync");
-        }
+      if (bunInstallFailed) {
+        // Previous install failed — retry regardless
+        console.log("previous bun install failed, re-running on sync");
         bunInstall();
         installing = true;
+      } else if (packageChanged && hasNewDeps(packageContent)) {
+        // package.json has deps not in the pre-installed template — must install
+        bunInstall();
+        installing = true;
+      } else if (packageChanged) {
+        // package.json changed but all deps already pre-installed — skip install
+        console.log("all dependencies already pre-installed, skipping bun install");
+        if (!firstSyncDone) startNextJs();
       } else if (!firstSyncDone) {
         // First sync with no package.json change — just start Next.js
         startNextJs();
