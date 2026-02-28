@@ -2679,12 +2679,8 @@ func (c *Controller) streamSingleShotGeneration(
 	message string,
 	imageURLs []string,
 ) (responseText string, ops []appBuilderOperation, err error) {
-	// 1. Run pre-generation setup (e-commerce, database, auth)
-	if setupErr := c.runPreGenerationSetup(ctx, project, user, fileMap, sendEvent, provider, model, message); setupErr != nil {
-		return "", nil, fmt.Errorf("pre-generation setup failed: %w", setupErr)
-	}
-
-	// 1b. Structure planning — gives the LLM a file plan, theme, and data models
+	// 1. Structure planning — must run BEFORE pre-gen setup so that data_models
+	// and needs_auth are available for Neon provisioning and auth template injection.
 	structure, planErr := c.PlanAppFileStructure(ctx, message, project.ProjectType)
 	if planErr != nil {
 		slog.Warn("single-shot: structure planning failed, proceeding without plan",
@@ -2709,6 +2705,13 @@ func (c *Controller) streamSingleShotGeneration(
 		c.DB.UpdateAppProject(project)
 	}
 
+	// 2. Run pre-generation setup (e-commerce store, Neon database, auth templates).
+	// Now that structure planning has set data_models and needs_auth on the project,
+	// this step can properly provision the database and inject auth files.
+	if setupErr := c.runPreGenerationSetup(ctx, project, user, fileMap, sendEvent, provider, model, message); setupErr != nil {
+		return "", nil, fmt.Errorf("pre-generation setup failed: %w", setupErr)
+	}
+
 	// Send project_created event (with planned files when available)
 	projectCreatedPayload := map[string]any{
 		"id":   project.ID,
@@ -2724,7 +2727,7 @@ func (c *Controller) streamSingleShotGeneration(
 	}
 	sendEvent("project_created", projectCreatedPayload)
 
-	// 2. Build messages with single-shot system prompt
+	// 3. Build messages with single-shot system prompt
 	llmMessages := []utils.Message{
 		{Role: "system", Content: buildSingleShotSystemPrompt(project)},
 		{Role: "system", Content: c.buildProjectContext(project, fileMap, true)},
@@ -2736,7 +2739,7 @@ func (c *Controller) streamSingleShotGeneration(
 	}
 	llmMessages = append(llmMessages, utils.Message{Role: "user", Content: userContent})
 
-	// 3. Set up streaming file parser
+	// 4. Set up streaming file parser
 	var responseBuilder strings.Builder
 	parser := &utils.FileStreamParser{
 		OnFile: func(path, content string) {
@@ -2756,7 +2759,7 @@ func (c *Controller) streamSingleShotGeneration(
 		},
 	}
 
-	// 4. Single LLM call — no tools, no rounds
+	// 5. Single LLM call — no tools, no rounds
 	slog.Info("Starting single-shot generation",
 		"model", model,
 		"project_id", project.ID,
@@ -2773,7 +2776,7 @@ func (c *Controller) streamSingleShotGeneration(
 	)
 	parser.Flush()
 
-	// 5. Sync all files to preview
+	// 6. Sync all files to preview
 	if c.PreviewService != nil {
 		c.SyncPreviewAll(project)
 	}
