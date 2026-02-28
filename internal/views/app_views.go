@@ -48,7 +48,7 @@ func (v *HttpViews) GenerateAppFromImage(w http.ResponseWriter, r *http.Request)
 	}
 
 	genReq := requests.GenerateAppRequest{Prompt: "Generated from screenshot"}
-	project, err := v.Controller.CreateAppProject(user, genReq)
+	project, err := v.Controller.CreateAppProject(r.Context(), user, genReq)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
 		return

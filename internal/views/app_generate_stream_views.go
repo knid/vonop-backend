@@ -31,7 +31,7 @@ func (v *HttpViews) GenerateAppStream(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Pre-step: create project synchronously
-	project, err := v.Controller.CreateAppProject(user, req)
+	project, err := v.Controller.CreateAppProject(r.Context(), user, req)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
 		return

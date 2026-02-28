@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -14,7 +15,7 @@ import (
 	"github.com/knid/wemob/internal/requests"
 )
 
-func (c *Controller) CreateAppProject(user *models.User, req requests.GenerateAppRequest) (*models.AppProject, error) {
+func (c *Controller) CreateAppProject(ctx context.Context, user *models.User, req requests.GenerateAppRequest) (*models.AppProject, error) {
 	validate := validator.New()
 	if err := req.Validate(validate); err != nil {
 		return nil, err
@@ -22,8 +23,9 @@ func (c *Controller) CreateAppProject(user *models.User, req requests.GenerateAp
 
 	projectType := req.ProjectType
 	if projectType == "" || projectType == "app" {
-		if looksLikeEcommerce(req.Prompt) {
-			projectType = "ecommerce"
+		classified := c.classifyProjectType(ctx, req.Prompt)
+		if classified != "" {
+			projectType = classified
 		}
 	}
 	if projectType == "" {

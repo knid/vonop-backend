@@ -216,6 +216,42 @@ func isProtectedTemplateFile(path string) bool {
 }
 
 // looksLikeEcommerce returns true if the prompt strongly suggests an e-commerce app.
+func (c *Controller) classifyProjectType(ctx context.Context, prompt string) string {
+	provider := c.llmProvider()
+	// Use a fast/cheap model for classification
+	model := "anthropic/claude-haiku-4-5-20251001"
+	if provider.IsAnthropic() {
+		model = "claude-haiku-4-5-20251001"
+	}
+
+	system := `Classify the user's project description into exactly one category.
+Reply with ONLY the category name, nothing else.
+
+Categories:
+- ecommerce: Online store, shop, marketplace with products, cart, checkout, payments
+- app: Any other web application (blog, dashboard, portfolio, SaaS, etc.)
+
+Examples:
+- "build me an online clothing store" → ecommerce
+- "kozmetik markamız için e ticaret sitesi" → ecommerce
+- "create a project management dashboard" → app
+- "boutique de vêtements en ligne" → ecommerce`
+
+	result, err := utils.GetTextFromLLM(ctx, model, system, prompt, provider)
+	if err != nil {
+		slog.Warn("LLM classification failed, falling back to keyword detection", "error", err)
+		if looksLikeEcommerce(prompt) {
+			return "ecommerce"
+		}
+		return ""
+	}
+	result = strings.TrimSpace(strings.ToLower(result))
+	if result == "ecommerce" || result == "e-commerce" {
+		return "ecommerce"
+	}
+	return "app"
+}
+
 func looksLikeEcommerce(prompt string) bool {
 	lower := strings.ToLower(prompt)
 
