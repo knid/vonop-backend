@@ -217,6 +217,52 @@ func isLockedConfigFile(path string) bool {
 	return false
 }
 
+// isProtectedTemplateFile returns true for template-managed files the LLM must not overwrite.
+// globals.css is excluded because it is LLM-generated, not template-injected.
+func isProtectedTemplateFile(path string) bool {
+	if path == "app/globals.css" {
+		return false
+	}
+	return isTemplateFile(path)
+}
+
+// looksLikeEcommerce returns true if the prompt strongly suggests an e-commerce app.
+func looksLikeEcommerce(prompt string) bool {
+	lower := strings.ToLower(prompt)
+
+	// Strong signals — any one suffices
+	strongSignals := []string{
+		"e-commerce", "ecommerce", "online store", "online shop",
+		"shopping cart", "storefront", "product catalog",
+		"product listing", "product page", "checkout page",
+		"add to cart", "buy now", "shopping platform",
+	}
+	for _, s := range strongSignals {
+		if strings.Contains(lower, s) {
+			return true
+		}
+	}
+
+	// Combination signals — "store"/"shop" + commerce indicator
+	storeWords := []string{"store", "shop", "marketplace", "boutique"}
+	commerceIndicators := []string{
+		"product", "cart", "payment", "price", "order",
+		"checkout", "inventory", "catalog", "shipping",
+		"purchase", "sell", "buy",
+	}
+	for _, sw := range storeWords {
+		if strings.Contains(lower, sw) {
+			for _, ci := range commerceIndicators {
+				if strings.Contains(lower, ci) {
+					return true
+				}
+			}
+		}
+	}
+
+	return false
+}
+
 // isTemplateFile checks if a file path is managed by hardcoded templates
 func isTemplateFile(path string) bool {
 	for _, tp := range constants.NEXTJS_TEMPLATE_FILE_PATHS {

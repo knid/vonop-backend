@@ -927,6 +927,12 @@ func (c *Controller) saveGeneratedFile(
 	sendEvent func(string, any) bool,
 	ops *[]appBuilderOperation,
 ) {
+	// Guard: never let the LLM overwrite template-managed files
+	if isProtectedTemplateFile(path) {
+		slog.Warn("saveGeneratedFile: skipping protected template file", "path", path)
+		return
+	}
+
 	existingFile, err := c.DB.GetAppGeneratedFileByPath(project.ID.String(), "nextjs", path)
 	action := "create"
 	var fileID uuid.UUID
@@ -1828,8 +1834,8 @@ func (c *Controller) buildBuilderToolExecutor(ctx context.Context, project *mode
 			if args.FilePath == "" {
 				return "Error: file_path is required", nil
 			}
-			// Block writes to locked config files that are template-managed
-			if isLockedConfigFile(args.FilePath) {
+			// Block writes to template-managed files
+			if isProtectedTemplateFile(args.FilePath) {
 				return fmt.Sprintf("Error: %s is template-managed and cannot be written directly. Dependencies are auto-detected from imports.", args.FilePath), nil
 			}
 
@@ -1927,8 +1933,8 @@ func (c *Controller) buildBuilderToolExecutor(ctx context.Context, project *mode
 					results = append(results, "SKIP: empty file_path")
 					continue
 				}
-				// Block writes to locked config files
-				if isLockedConfigFile(f.FilePath) {
+				// Block writes to template-managed files
+				if isProtectedTemplateFile(f.FilePath) {
 					results = append(results, fmt.Sprintf("SKIP %s: template-managed, dependencies are auto-detected from imports", f.FilePath))
 					continue
 				}
@@ -2004,8 +2010,8 @@ func (c *Controller) buildBuilderToolExecutor(ctx context.Context, project *mode
 			if args.FilePath == "" || args.OldString == "" {
 				return "Error: file_path and old_string are required", nil
 			}
-			// Block edits to locked config files
-			if isLockedConfigFile(args.FilePath) {
+			// Block edits to template-managed files
+			if isProtectedTemplateFile(args.FilePath) {
 				return fmt.Sprintf("Error: %s is template-managed and cannot be edited directly. Dependencies are auto-detected from imports.", args.FilePath), nil
 			}
 
@@ -2066,6 +2072,10 @@ func (c *Controller) buildBuilderToolExecutor(ctx context.Context, project *mode
 			}
 			if err := json.Unmarshal([]byte(arguments), &args); err != nil {
 				return fmt.Sprintf("Error: invalid arguments: %s", err.Error()), nil
+			}
+			// Block deletion of template-managed files
+			if isProtectedTemplateFile(args.FilePath) {
+				return fmt.Sprintf("Error: %s is template-managed and cannot be deleted.", args.FilePath), nil
 			}
 			existingFile, err := c.DB.GetAppGeneratedFileByPath(project.ID.String(), "nextjs", args.FilePath)
 			if err != nil {
