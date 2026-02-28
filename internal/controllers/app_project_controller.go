@@ -20,9 +20,14 @@ func (c *Controller) CreateAppProject(user *models.User, req requests.GenerateAp
 		return nil, err
 	}
 
-	projectType := "app"
-	if req.ProjectType != "" {
-		projectType = req.ProjectType
+	projectType := req.ProjectType
+	if projectType == "" || projectType == "app" {
+		if looksLikeEcommerce(req.Prompt) {
+			projectType = "ecommerce"
+		}
+	}
+	if projectType == "" {
+		projectType = "app"
 	}
 
 	slug := generateAppSlug(req.Prompt)
