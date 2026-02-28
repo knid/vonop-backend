@@ -149,33 +149,52 @@ func (c *Controller) AddAICredits(user *models.User, amount int, action string, 
 }
 
 // messagesToPostHogInput converts []utils.Message to the format PostHog expects
-// for $ai_input (array of {role, content} maps). Truncates to last 50 messages
-// and 10K chars per message to keep event payloads reasonable.
-func messagesToPostHogInput(msgs []utils.Message) []map[string]string {
+// for $ai_input: [{role, content: [{type: "text", text: "..."}]}].
+// Truncates to last 50 messages and 10K chars per message.
+func messagesToPostHogInput(msgs []utils.Message) []map[string]interface{} {
 	const maxMessages = 50
 	const maxChars = 10000
 	start := 0
 	if len(msgs) > maxMessages {
 		start = len(msgs) - maxMessages
 	}
-	out := make([]map[string]string, 0, len(msgs)-start)
+	out := make([]map[string]interface{}, 0, len(msgs)-start)
 	for _, m := range msgs[start:] {
 		content := m.Content
 		if len(content) > maxChars {
 			content = content[:maxChars] + "..."
 		}
-		out = append(out, map[string]string{
-			"role":    m.Role,
-			"content": content,
+		out = append(out, map[string]interface{}{
+			"role": m.Role,
+			"content": []map[string]string{
+				{"type": "text", "text": content},
+			},
 		})
 	}
 	return out
 }
 
+// textToOutputChoices wraps a plain text string into the PostHog $ai_output_choices
+// format: [{"role": "assistant", "content": [{"type": "text", "text": "..."}]}].
+func textToOutputChoices(text string) []map[string]interface{} {
+	const maxChars = 10000
+	if len(text) > maxChars {
+		text = text[:maxChars] + "..."
+	}
+	return []map[string]interface{}{
+		{
+			"role": "assistant",
+			"content": []map[string]string{
+				{"type": "text", "text": text},
+			},
+		},
+	}
+}
+
 // RecordTokenUsage persists LLM token usage to the DB and sends PostHog
 // $ai_generation (per LLM call) + $ai_trace (grouping) events for the
 // built-in LLM Analytics dashboard.
-func (c *Controller) RecordTokenUsage(userID uuid.UUID, action, model, provider, reference string, tracker *utils.TokenTracker) {
+func (c *Controller) RecordTokenUsage(userID uuid.UUID, action, model, provider, reference, appType string, tracker *utils.TokenTracker) {
 	prompt, completion, total, callCount := tracker.Totals()
 	if total == 0 {
 		return
@@ -205,15 +224,29 @@ func (c *Controller) RecordTokenUsage(userID uuid.UUID, action, model, provider,
 
 		// Per-call $ai_generation events
 		for _, entry := range tracker.Entries() {
+			// PostHog $ai_input_tokens should be non-cache input tokens only;
+			// cache tokens go into their own properties for correct pricing.
+			inputTokens := entry.PromptTokens - entry.CacheCreationInputTokens - entry.CacheReadInputTokens
+			if inputTokens < 0 {
+				inputTokens = 0
+			}
 			props := posthog.NewProperties().
 				Set("$ai_provider", provider).
 				Set("$ai_model", entry.Model).
-				Set("$ai_input_tokens", entry.PromptTokens).
+				Set("$ai_input_tokens", inputTokens).
 				Set("$ai_output_tokens", entry.CompletionTokens).
 				Set("$ai_trace_id", traceID).
+				Set("$ai_session_id", reference).
 				Set("$ai_latency", float64(entry.LatencyMs)/1000.0).
 				Set("$ai_is_error", false).
-				Set("$ai_stream", entry.IsStreaming)
+				Set("$ai_stream", entry.IsStreaming).
+				Set("app_type", appType)
+			if entry.CacheCreationInputTokens > 0 {
+				props.Set("$ai_cache_creation_input_tokens", entry.CacheCreationInputTokens)
+			}
+			if entry.CacheReadInputTokens > 0 {
+				props.Set("$ai_cache_read_input_tokens", entry.CacheReadInputTokens)
+			}
 			if email != "" {
 				props.Set("$email", email)
 			}
@@ -221,7 +254,7 @@ func (c *Controller) RecordTokenUsage(userID uuid.UUID, action, model, provider,
 				props.Set("$ai_input", messagesToPostHogInput(entry.InputMessages))
 			}
 			if entry.OutputText != "" {
-				props.Set("$ai_output", entry.OutputText)
+				props.Set("$ai_output_choices", textToOutputChoices(entry.OutputText))
 			}
 			c.PostHog.Enqueue(posthog.Capture{
 				DistinctId: userID.String(),
@@ -234,16 +267,18 @@ func (c *Controller) RecordTokenUsage(userID uuid.UUID, action, model, provider,
 		traceProps := posthog.NewProperties().
 			Set("$ai_trace_id", traceID).
 			Set("$ai_trace_name", action).
+			Set("$ai_session_id", reference).
 			Set("$ai_input_tokens", prompt).
-			Set("$ai_output_tokens", completion)
+			Set("$ai_output_tokens", completion).
+			Set("app_type", appType)
 		if email != "" {
 			traceProps.Set("$email", email)
 		}
 		if tracker.TraceInput != "" {
-			traceProps.Set("$ai_input", tracker.TraceInput)
+			traceProps.Set("$ai_input_state", tracker.TraceInput)
 		}
 		if tracker.TraceOutput != "" {
-			traceProps.Set("$ai_output", tracker.TraceOutput)
+			traceProps.Set("$ai_output_state", tracker.TraceOutput)
 		}
 		c.PostHog.Enqueue(posthog.Capture{
 			DistinctId: userID.String(),

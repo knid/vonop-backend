@@ -110,11 +110,15 @@ type AnthropicUsage struct {
 }
 
 // ToUsageInfo converts Anthropic usage to internal UsageInfo.
+// PromptTokens includes all input tokens (regular + cache) for internal billing.
+// Cache tokens are preserved separately so PostHog can apply correct per-category pricing.
 func (u AnthropicUsage) ToUsageInfo() UsageInfo {
 	return UsageInfo{
-		PromptTokens:     u.InputTokens + u.CacheCreationInputTokens + u.CacheReadInputTokens,
-		CompletionTokens: u.OutputTokens,
-		TotalTokens:      u.InputTokens + u.OutputTokens + u.CacheCreationInputTokens + u.CacheReadInputTokens,
+		PromptTokens:             u.InputTokens + u.CacheCreationInputTokens + u.CacheReadInputTokens,
+		CompletionTokens:         u.OutputTokens,
+		TotalTokens:              u.InputTokens + u.OutputTokens + u.CacheCreationInputTokens + u.CacheReadInputTokens,
+		CacheCreationInputTokens: u.CacheCreationInputTokens,
+		CacheReadInputTokens:     u.CacheReadInputTokens,
 	}
 }
 

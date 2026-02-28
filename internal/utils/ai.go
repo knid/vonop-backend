@@ -64,14 +64,16 @@ func parseRateLimitError(resp *http.Response, body []byte) *ErrRateLimited {
 
 // TokenEntry records usage from a single LLM call.
 type TokenEntry struct {
-	Model            string
-	PromptTokens     int
-	CompletionTokens int
-	TotalTokens      int
-	LatencyMs        int64
-	IsStreaming      bool
-	InputMessages    []Message // optional: messages sent to LLM (only when TrackContent is set)
-	OutputText       string    // optional: LLM text completion (only when TrackContent is set)
+	Model                    string
+	PromptTokens             int
+	CompletionTokens         int
+	TotalTokens              int
+	CacheCreationInputTokens int
+	CacheReadInputTokens     int
+	LatencyMs                int64
+	IsStreaming              bool
+	InputMessages            []Message // optional: messages sent to LLM (only when TrackContent is set)
+	OutputText               string    // optional: LLM text completion (only when TrackContent is set)
 }
 
 // TokenTracker is a thread-safe accumulator that collects token usage across multiple LLM calls.
@@ -92,12 +94,14 @@ func (t *TokenTracker) Record(model string, usage UsageInfo, latencyMs int64, is
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.entries = append(t.entries, TokenEntry{
-		Model:            model,
-		PromptTokens:     usage.PromptTokens,
-		CompletionTokens: usage.CompletionTokens,
-		TotalTokens:      usage.TotalTokens,
-		LatencyMs:        latencyMs,
-		IsStreaming:      isStreaming,
+		Model:                    model,
+		PromptTokens:             usage.PromptTokens,
+		CompletionTokens:         usage.CompletionTokens,
+		TotalTokens:              usage.TotalTokens,
+		CacheCreationInputTokens: usage.CacheCreationInputTokens,
+		CacheReadInputTokens:     usage.CacheReadInputTokens,
+		LatencyMs:                latencyMs,
+		IsStreaming:              isStreaming,
 	})
 }
 
@@ -109,14 +113,16 @@ func (t *TokenTracker) RecordWithContent(model string, usage UsageInfo, latencyM
 	msgs := make([]Message, len(inputMessages))
 	copy(msgs, inputMessages)
 	t.entries = append(t.entries, TokenEntry{
-		Model:            model,
-		PromptTokens:     usage.PromptTokens,
-		CompletionTokens: usage.CompletionTokens,
-		TotalTokens:      usage.TotalTokens,
-		LatencyMs:        latencyMs,
-		IsStreaming:      isStreaming,
-		InputMessages:    msgs,
-		OutputText:       outputText,
+		Model:                    model,
+		PromptTokens:             usage.PromptTokens,
+		CompletionTokens:         usage.CompletionTokens,
+		TotalTokens:              usage.TotalTokens,
+		CacheCreationInputTokens: usage.CacheCreationInputTokens,
+		CacheReadInputTokens:     usage.CacheReadInputTokens,
+		LatencyMs:                latencyMs,
+		IsStreaming:              isStreaming,
+		InputMessages:            msgs,
+		OutputText:               outputText,
 	})
 }
 
@@ -243,9 +249,11 @@ type Choice struct {
 }
 
 type UsageInfo struct {
-	PromptTokens     int `json:"prompt_tokens"`
-	CompletionTokens int `json:"completion_tokens"`
-	TotalTokens      int `json:"total_tokens"`
+	PromptTokens             int `json:"prompt_tokens"`
+	CompletionTokens         int `json:"completion_tokens"`
+	TotalTokens              int `json:"total_tokens"`
+	CacheCreationInputTokens int `json:"cache_creation_input_tokens,omitempty"`
+	CacheReadInputTokens     int `json:"cache_read_input_tokens,omitempty"`
 }
 
 type ChatResponse struct {

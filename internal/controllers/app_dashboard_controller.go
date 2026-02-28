@@ -172,9 +172,10 @@ func (c *Controller) CreateDashboard(ctx context.Context, project *models.AppPro
 
 	// Token tracking
 	tracker := utils.NewTokenTracker()
+	tracker.TrackContent = true
 	ctx = utils.WithTokenTracker(ctx, tracker)
 	defer func() {
-		c.RecordTokenUsage(user.ID, "dashboard_create", model, provider.Name, project.ID.String(), tracker)
+		c.RecordTokenUsage(user.ID, "dashboard_create", model, provider.Name, project.ID.String(), project.ProjectType, tracker)
 		prompt, completion, total, _ := tracker.Totals()
 		if total > 0 {
 			credits := models.TokensToCredits(prompt, completion)
@@ -469,9 +470,10 @@ func (c *Controller) StreamDashboardChat(ctx context.Context, dashboard *models.
 
 	// Token tracking
 	tracker := utils.NewTokenTracker()
+	tracker.TrackContent = true
 	ctx = utils.WithTokenTracker(ctx, tracker)
 	defer func() {
-		c.RecordTokenUsage(user.ID, "dashboard_chat", model, provider.Name, dashboard.AppProjectID.String(), tracker)
+		c.RecordTokenUsage(user.ID, "dashboard_chat", model, provider.Name, dashboard.AppProjectID.String(), "dashboard", tracker)
 		prompt, completion, total, _ := tracker.Totals()
 		if total > 0 {
 			credits := models.TokensToCredits(prompt, completion)
@@ -701,9 +703,10 @@ func (c *Controller) RefreshDashboardSchema(ctx context.Context, projectID strin
 	}
 
 	tracker := utils.NewTokenTracker()
+	tracker.TrackContent = true
 	ctx = utils.WithTokenTracker(ctx, tracker)
 	defer func() {
-		c.RecordTokenUsage(user.ID, "dashboard_schema_refresh", model, provider.Name, projectID, tracker)
+		c.RecordTokenUsage(user.ID, "dashboard_schema_refresh", model, provider.Name, projectID, "dashboard", tracker)
 		prompt, completion, total, _ := tracker.Totals()
 		if total > 0 {
 			credits := models.TokensToCredits(prompt, completion)
