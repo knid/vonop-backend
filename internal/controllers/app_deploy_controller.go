@@ -407,28 +407,7 @@ func (c *Controller) StartPreview(project *models.AppProject) (*preview.PreviewS
 	return status, nil
 }
 
-// SyncPreviewFiles updates files in a running preview container.
-// deletePaths lists files to remove from the preview machine.
-func (c *Controller) SyncPreviewFiles(projectID string, deletePaths ...string) error {
-	if c.PreviewService == nil {
-		return nil
-	}
-
-	dbFiles, err := c.DB.GetAppGeneratedFilesByProjectID(projectID, "nextjs")
-	if err != nil || len(dbFiles) == 0 {
-		return fmt.Errorf("no files to sync")
-	}
-
-	fileMap := make(map[string]string)
-	for _, f := range dbFiles {
-		fileMap[f.FilePath] = f.Content
-	}
-
-	return c.PreviewService.UpdateFiles(projectID, fileMap, deletePaths)
-}
-
 // SyncPreviewAll updates both files and environment variables in a running preview container.
-// Use this instead of SyncPreviewFiles when env vars may have changed (e.g. after setup_ecommerce).
 // deletePaths lists files to remove from the preview machine.
 func (c *Controller) SyncPreviewAll(project *models.AppProject, deletePaths ...string) {
 	if c.PreviewService == nil {

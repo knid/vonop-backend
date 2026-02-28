@@ -27,6 +27,3 @@ type BuildCreateResponse struct {
 	SuccessResponse
 }
 
-type BuildSetReleasedBuildResponse struct {
-	SuccessResponse
-}

@@ -13,73 +13,8 @@ import (
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/requests"
-	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/utils"
 )
-
-// SeedEcommerceData generates and inserts mock store data (categories, products, discounts)
-// using an LLM call. Non-fatal — returns ("", err) on failure so callers can continue.
-func (c *Controller) SeedEcommerceData(ctx context.Context, store *models.Store, userPrompt string, sendEvent func(string, any) bool) (string, error) {
-	provider := c.llmProvider()
-	model := c.SecretManager.GetSecret("WEBSITE_BUILDER_LLM_MODEL")
-	if model == "" {
-		model = provider.DefaultModel()
-	}
-
-	llmMessages := []utils.Message{
-		{Role: "system", Content: constants.ECOMMERCE_SEED_PROMPT},
-		{Role: "user", Content: fmt.Sprintf("Store name: %s\nProject description: %s", store.StoreName, userPrompt)},
-	}
-
-	response, err := utils.GetJSONFromLLMWithMessages(ctx, model, llmMessages, provider)
-	if err != nil {
-		return "", fmt.Errorf("seed LLM call failed: %w", err)
-	}
-
-	var result struct {
-		Operations []struct {
-			Action string         `json:"action"`
-			Data   map[string]any `json:"data"`
-		} `json:"operations"`
-		Summary string `json:"summary"`
-	}
-
-	if err := json.Unmarshal([]byte(response), &result); err != nil {
-		cleaned := utils.ExtractJSON(response)
-		if err2 := json.Unmarshal([]byte(cleaned), &result); err2 != nil {
-			return "", fmt.Errorf("failed to parse seed response: %w", err2)
-		}
-	}
-
-	if len(result.Operations) == 0 {
-		return "", fmt.Errorf("seed response contained no operations")
-	}
-
-	sendEvent("seed_progress", responses.SeedProgressEvent{
-		Phase: "start",
-		Total: len(result.Operations),
-	})
-
-	for i, op := range result.Operations {
-		if _, err := c.executeStoreOperation(store, op.Action, op.Data); err != nil {
-			slog.Warn("Seed operation failed", "action", op.Action, "error", err)
-		}
-
-		sendEvent("seed_progress", responses.SeedProgressEvent{
-			Phase:   "progress",
-			Action:  op.Action,
-			Current: i + 1,
-			Total:   len(result.Operations),
-		})
-	}
-
-	sendEvent("seed_progress", responses.SeedProgressEvent{
-		Phase:   "complete",
-		Summary: result.Summary,
-	})
-
-	return result.Summary, nil
-}
 
 // CreateStore creates an e-commerce store for an app project
 func (c *Controller) CreateStore(project *models.AppProject, user *models.User, storeName string) (*models.Store, error) {
@@ -146,62 +81,6 @@ func (c *Controller) UpdateStoreSettings(store *models.Store, req requests.Updat
 
 	store.UpdatedAt = time.Now()
 	return c.DB.UpdateStore(store)
-}
-
-// ChatStoreManagement processes LLM-driven store management
-func (c *Controller) ChatStoreManagement(store *models.Store, message string) (string, error) {
-	provider := c.llmProvider()
-	model := c.SecretManager.GetSecret("WEBSITE_BUILDER_LLM_MODEL")
-	if model == "" {
-		model = provider.DefaultModel()
-	}
-
-	// Gather store context
-	products, _ := c.DB.GetProductsByStoreID(store.ID.String())
-	categories, _ := c.DB.GetCategoriesByStoreID(store.ID.String())
-	discounts, _ := c.DB.GetDiscountsByStoreID(store.ID.String())
-
-	storeContext := map[string]any{
-		"store":      store,
-		"products":   products,
-		"categories": categories,
-		"discounts":  discounts,
-	}
-	contextJSON, _ := json.Marshal(storeContext)
-
-	llmMessages := []utils.Message{
-		{Role: "system", Content: constants.ECOMMERCE_CHAT_SYSTEM_PROMPT},
-		{Role: "system", Content: fmt.Sprintf("Current store state:\n%s", string(contextJSON))},
-		{Role: "user", Content: message},
-	}
-
-	response, err := utils.GetJSONFromLLMWithMessages(context.Background(), model, llmMessages, provider)
-	if err != nil {
-		slog.Error("LLM store chat error", "error", err)
-		return "", fmt.Errorf("failed to process store management request")
-	}
-
-	// Parse and execute operations
-	var result struct {
-		Operations []struct {
-			Action string         `json:"action"`
-			Data   map[string]any `json:"data"`
-		} `json:"operations"`
-		Summary string `json:"summary"`
-	}
-
-	if err := json.Unmarshal([]byte(response), &result); err != nil {
-		slog.Error("Failed to parse LLM store response", "error", err)
-		return response, nil
-	}
-
-	for _, op := range result.Operations {
-		if _, err := c.executeStoreOperation(store, op.Action, op.Data); err != nil {
-			slog.Warn("Store operation failed", "action", op.Action, "error", err)
-		}
-	}
-
-	return response, nil
 }
 
 // StreamChatStoreManagement streams store management chat

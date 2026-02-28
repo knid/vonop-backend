@@ -466,10 +466,6 @@ func (c *Controller) UpdateDeploymentTask(user *models.User, deploymentID string
 	}, nil
 }
 
-func (c *Controller) DeleteDeploymentTask(deploymentID string) error {
-	return nil
-}
-
 func (c *Controller) SignUnsignedIPATask(user *models.User, signReq requests.SignIPARequest) (*models.SignIPATask, error) {
 	validate := validator.New(validator.WithRequiredStructEnabled())
 	if err := validate.Struct(signReq); err != nil {

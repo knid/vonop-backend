@@ -50,17 +50,6 @@ func (db *Database) GetAICreditTransactions(userID string, limit int) ([]models.
 
 // --- Atomic Credit Operations ---
 
-// AtomicDeductCredits atomically deducts credits, failing if balance < cost.
-// Returns the new balance. Returns sql.ErrNoRows if insufficient funds.
-func (db *Database) AtomicDeductCredits(tx bun.IDB, balanceID string, cost int) (int, error) {
-	var newBalance int
-	err := tx.NewRaw(
-		"UPDATE ai_credits_balances SET balance = balance - ?, updated_at = NOW() WHERE id = ? AND balance >= ? RETURNING balance",
-		cost, balanceID, cost,
-	).Scan(context.Background(), &newBalance)
-	return newBalance, err
-}
-
 // AtomicDeductCreditsUnchecked atomically deducts credits, allowing negative balance down to floor.
 // Returns sql.ErrNoRows if deduction would push balance below floor.
 func (db *Database) AtomicDeductCreditsUnchecked(tx bun.IDB, balanceID string, cost int, floor int) (int, error) {

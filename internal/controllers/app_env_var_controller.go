@@ -10,7 +10,6 @@ import (
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/requests"
-	"github.com/knid/wemob/internal/services/integrations"
 )
 
 // GetAppEnvVars returns all custom env vars for a project
@@ -144,37 +143,3 @@ func (c *Controller) GetMissingEnvVars(project *models.AppProject) ([]RequiredEn
 	return c.computeMissingEnvVars(project, required, codeKeys), nil
 }
 
-// GetEnvVarKeysForChat returns env var key names (no values) for AI chat context.
-// Includes integration env vars, custom env vars, and auto-injected store vars.
-func (c *Controller) GetEnvVarKeysForChat(project *models.AppProject) []string {
-	var keys []string
-
-	// Integration env var names
-	appIntegrations, _ := c.DB.GetAppIntegrationsByProjectID(project.ID.String())
-	for _, integ := range appIntegrations {
-		config, err := integrations.GetProviderConfig(integ.Provider)
-		if err != nil {
-			continue
-		}
-		for _, envName := range config.EnvVarMapping {
-			keys = append(keys, envName)
-		}
-	}
-
-	// Custom env var key names
-	customVars, _ := c.DB.GetAppEnvVarsByProjectID(project.ID.String())
-	for _, ev := range customVars {
-		key := ev.Key
-		if ev.IsPublic && !strings.HasPrefix(key, "NEXT_PUBLIC_") {
-			key = "NEXT_PUBLIC_" + key
-		}
-		keys = append(keys, key)
-	}
-
-	// Auto-injected store vars
-	if project.ProjectType == "ecommerce" {
-		keys = append(keys, "NEXT_PUBLIC_STORE_ID", "NEXT_PUBLIC_WEMOB_API_URL")
-	}
-
-	return keys
-}

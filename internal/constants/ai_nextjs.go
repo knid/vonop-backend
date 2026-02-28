@@ -1,7 +1,5 @@
 package constants
 
-const DEFAULT_NEXTJS_LLM_MODEL = "anthropic/claude-sonnet-4"
-
 // Template file paths that are managed by hardcoded templates, not LLM-generated.
 var NEXTJS_TEMPLATE_FILE_PATHS = []string{
 	"package.json",

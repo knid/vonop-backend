@@ -68,7 +68,6 @@ func createSchema(db *bun.DB) error {
 		(*models.Release)(nil),
 		(*models.Device)(nil),
 		(*models.Notification)(nil),
-		(*models.StorePageImage)(nil),
 		(*models.Session)(nil),
 		(*models.AppUsageEvent)(nil),
 		(*models.AppBuildTask)(nil),
@@ -585,10 +584,6 @@ func main() {
 
 				r.Post("/login", httpViews.UserLogin)
 				r.Post("/register", httpViews.UserRegister)
-				r.Post("/forgot-password", httpViews.UserForgotPassword)
-				r.Post("/reset-password", httpViews.UserResetPassword)
-				r.Post("/verify-email", httpViews.UserVerifyEmail)
-				r.Post("/resend-verifaction", httpViews.UserResendVerifactionEmail)
 
 				r.Get("/auth/{provider}/callback", httpViews.OAuthCallback)
 				r.Get("/auth/{provider}", httpViews.OAuthBegin)
@@ -749,16 +744,6 @@ func main() {
 				r.Post("/collect/batch", httpViews.CollectAnalyticsBatch)
 			})
 
-			// V1 stubs for endpoints the dashboard calls but that only exist on v2 or don't exist yet.
-			// Return empty arrays/objects instead of 404 to avoid noisy logs.
-			r.Get("/websites", func(w http.ResponseWriter, r *http.Request) {
-				w.Header().Set("Content-Type", "application/json")
-				w.Write([]byte(`{"data":[]}`))
-			})
-			r.Get("/billing/credits/packages", func(w http.ResponseWriter, r *http.Request) {
-				w.Header().Set("Content-Type", "application/json")
-				w.Write([]byte(`{"data":[]}`))
-			})
 			r.Get("/integrations/providers", httpViews.GetV2IntegrationProviders)
 		})
 		// V2 App Builder routes
@@ -770,8 +755,6 @@ func main() {
 				r.Use(appMiddleware.RequireSubscription("active", "trial"))
 
 				// Generation endpoints (AI rate limited)
-				r.With(rateLimiter.RateLimit(20, time.Minute, appMiddleware.AIUserKey)).Post("/generate", httpViews.GenerateApp)
-				r.With(rateLimiter.RateLimit(20, time.Minute, appMiddleware.AIUserKey)).Post("/generate/ecommerce", httpViews.GenerateEcommerceApp)
 				r.With(rateLimiter.RateLimit(20, time.Minute, appMiddleware.AIUserKey)).Post("/generate/from-image", httpViews.GenerateAppFromImage)
 				r.With(rateLimiter.RateLimit(20, time.Minute, appMiddleware.AIUserKey)).Post("/generate/stream", httpViews.GenerateAppStream)
 

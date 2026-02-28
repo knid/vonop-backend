@@ -34,22 +34,6 @@ func (r *AppChatRequest) Validate(validate *validator.Validate) error {
 	return utils.ValidateFunc[AppChatRequest](*r, validate)
 }
 
-type UpdateASTNodeRequest struct {
-	Node map[string]any `json:"node" validate:"required" errormgs:"is required"`
-}
-
-func (r *UpdateASTNodeRequest) Validate(validate *validator.Validate) error {
-	return utils.ValidateFunc[UpdateASTNodeRequest](*r, validate)
-}
-
-type UpdateFullASTRequest struct {
-	AST []map[string]any `json:"ast" validate:"required" errormgs:"is required"`
-}
-
-func (r *UpdateFullASTRequest) Validate(validate *validator.Validate) error {
-	return utils.ValidateFunc[UpdateFullASTRequest](*r, validate)
-}
-
 type ConnectIntegrationRequest struct {
 	Provider    string         `json:"provider" validate:"required" errormgs:"is required"`
 	Credentials map[string]any `json:"credentials" validate:"required" errormgs:"is required"`

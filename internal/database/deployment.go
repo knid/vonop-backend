@@ -40,10 +40,3 @@ func (db *Database) UpdateDeployment(deployment *models.Deployment) (*models.Dep
 	return deployment, nil
 }
 
-func (db *Database) DeleteDeployment(deployment *models.Deployment) error {
-	_, err := db.DB.NewDelete().Model(deployment).Where("id = ?", deployment.ID).Exec(context.Background())
-	if err != nil {
-		return err
-	}
-	return nil
-}

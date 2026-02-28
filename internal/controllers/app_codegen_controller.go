@@ -206,17 +206,6 @@ const fallbackSentinel = "/* __WEMOB_FALLBACK__ */"
 
 // --- Template helpers ---
 
-// isLockedConfigFile returns true for config files the LLM must never write or edit.
-// These are injected from hardcoded templates and must not be overwritten.
-// Note: globals.css is in NEXTJS_TEMPLATE_FILE_PATHS but is LLM-generated, so it's not locked.
-func isLockedConfigFile(path string) bool {
-	switch path {
-	case "package.json", "tsconfig.json", "postcss.config.mjs", "next.config.mjs":
-		return true
-	}
-	return false
-}
-
 // isProtectedTemplateFile returns true for template-managed files the LLM must not overwrite.
 // globals.css is excluded because it is LLM-generated, not template-injected.
 func isProtectedTemplateFile(path string) bool {
@@ -651,15 +640,7 @@ func neonConnStrWithEndpoint(connStr string) string {
 	return u.String()
 }
 
-// sliceContains checks if a string slice contains the given value.
-func sliceContains(slice []string, val string) bool {
-	for _, s := range slice {
-		if s == val {
-			return true
-		}
-	}
-	return false
-}
+
 
 // toCamelCase converts snake_case to camelCase.
 func toCamelCase(s string) string {
@@ -2034,10 +2015,6 @@ var importPathRegex = regexp.MustCompile(`from\s+['"]@/([^'"]+)['"]`)
 // forbiddenImportRegex matches imports of build-time/Node.js packages in component files
 var forbiddenImportRegex = regexp.MustCompile(`(?m)^import\s+.*\s+from\s+['"](tailwindcss|tailwindcss/.*|@tailwindcss/postcss|postcss|autoprefixer|eslint|webpack|jiti|fs|path|os|module|crypto|stream|child_process|net|http|https|url|util|assert|buffer|cluster|dgram|dns|events|querystring|readline|repl|string_decoder|tls|tty|v8|vm|zlib)['"].*$`)
 
-// forbiddenFromRegex detects multiline imports by matching `from '<forbidden-pkg>'` anywhere.
-// Used as a secondary warning-only check since forbiddenImportRegex is line-anchored.
-var forbiddenFromRegex = regexp.MustCompile(`from\s+['"](tailwindcss|tailwindcss/[^'"]*|@tailwindcss/postcss|postcss|autoprefixer|eslint|webpack|jiti|fs|path|os|module|crypto|stream|child_process|net|http|https|url|util|assert|buffer|cluster|dgram|dns|events|querystring|readline|repl|string_decoder|tls|tty|v8|vm|zlib)['"]`)
-
 // isConfigFile returns true for config files that legitimately need build-time imports
 func isConfigFile(filePath string) bool {
 	lower := strings.ToLower(filePath)
@@ -2060,33 +2037,6 @@ func stripForbiddenImports(content string, filePath string) (string, bool) {
 	cleaned := forbiddenImportRegex.ReplaceAllString(content, "// [removed: build-time import not allowed in browser code]")
 	slog.Warn("Stripped forbidden imports from generated file", "path", filePath, "removed", matches)
 	return cleaned, true
-}
-
-// checkMultilineForbiddenImports logs a warning when multiline imports of forbidden
-// packages are detected that the line-anchored forbiddenImportRegex would miss.
-// Warning-only for now to measure frequency before auto-fixing.
-func checkMultilineForbiddenImports(content string, filePath string) {
-	if isConfigFile(filePath) {
-		return
-	}
-	multilineMatches := forbiddenFromRegex.FindAllStringSubmatch(content, -1)
-	if len(multilineMatches) == 0 {
-		return
-	}
-	// Filter out matches already caught by the line-anchored regex
-	lineMatches := forbiddenImportRegex.FindAllString(content, -1)
-	for _, mm := range multilineMatches {
-		alreadyCaught := false
-		for _, lm := range lineMatches {
-			if strings.Contains(lm, mm[1]) {
-				alreadyCaught = true
-				break
-			}
-		}
-		if !alreadyCaught {
-			slog.Warn("Detected multiline forbidden import (not auto-stripped)", "path", filePath, "package", mm[1])
-		}
-	}
 }
 
 // guessFileType returns the likely file path (with extension) and the file type string

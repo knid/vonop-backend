@@ -134,26 +134,3 @@ func (v *HttpViews) UserRegister(w http.ResponseWriter, r *http.Request) {
 	utils.JSONResponse(w, userInformationRes, http.StatusOK)
 }
 
-func (v *HttpViews) UserForgotPassword(w http.ResponseWriter, r *http.Request) {
-	// Implementation of the view to send forgot password email
-}
-
-func (v *HttpViews) UserResetPassword(w http.ResponseWriter, r *http.Request) {
-	// Implementation of the view to reset user password after receiving the reset token
-}
-
-func (v *HttpViews) UserVerifyEmail(w http.ResponseWriter, r *http.Request) {
-	// Implementation of the view to verify user email using a token
-}
-
-func (v *HttpViews) UserResendVerifactionEmail(w http.ResponseWriter, r *http.Request) {
-	//  Implementation of the view to resend verification email to the user
-}
-
-/* func (v *HttpViews) GetUserUsage(w http.ResponseWriter, r *http.Request) {
-	user, err := v.Controller.GetUserFromReq(r)
-	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
-		return
-	}
-} */

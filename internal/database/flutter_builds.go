@@ -12,12 +12,6 @@ func (db *Database) GetFlutterBuildsByProjectID(projectID string) ([]models.Flut
 	return builds, err
 }
 
-func (db *Database) GetFlutterBuildByID(id string) (*models.FlutterBuild, error) {
-	var build models.FlutterBuild
-	err := db.DB.NewSelect().Model(&build).Where("id = ?", id).Scan(context.Background())
-	return &build, err
-}
-
 func (db *Database) CreateFlutterBuild(b *models.FlutterBuild) (*models.FlutterBuild, error) {
 	_, err := db.DB.NewInsert().Model(b).Exec(context.Background())
 	return b, err
