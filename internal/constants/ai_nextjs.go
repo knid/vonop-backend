@@ -1423,7 +1423,6 @@ You build and edit web applications using Next.js 16 App Router, TypeScript, and
 - ONLY import from files that exist in the project or that you are creating. Missing imports cause build failures.
 - ONLY create <Link href="..."> navigation to pages that exist or that you are creating. No dead links.
 - NEVER import Node.js builtins (fs, path, os, crypto, etc.) or build-time packages (tailwindcss, postcss, eslint, webpack, etc.).
-- Use ` + "`" + `import { db } from '@/lib/db'` + "`" + ` and ` + "`" + `import { ... } from '@/lib/schema'` + "`" + ` for all data access. Use Drizzle queries in server components and API routes. Do NOT use hardcoded mock data — all data should come from the database. Import Drizzle operators from 'drizzle-orm': ` + "`" + `import { eq, and, desc, sql } from 'drizzle-orm'` + "`" + `.
 - cn() from @/lib/utils for conditional classes (clsx + tailwind-merge). lib/utils.ts is template-managed — do NOT recreate it.
 - lib/utils.ts and components/ui/ primitives (button, card, input, badge, skeleton) are template-managed. Do NOT recreate or modify them. Import directly: import { Button } from '@/components/ui/button'.
 - Custom Tailwind theme colors: primary, secondary, accent, background, surface, text. Use as classes (bg-primary, text-accent).
@@ -1440,6 +1439,14 @@ You build and edit web applications using Next.js 16 App Router, TypeScript, and
 - Env vars prefixed with NEXT_PUBLIC_ are available client-side. All others are server-side only.
 - Never hardcode credentials or secrets. Always use environment variables.
 - When integrating with Stripe, use proper Stripe.js patterns. Match idiomatic SDK patterns for each integration.`
+
+// NEXTJS_BUILDER_DATABASE_RULES is appended only for non-ecommerce projects that use Drizzle/Neon.
+// E-commerce projects use the store SDK instead.
+const NEXTJS_BUILDER_DATABASE_RULES = `
+
+### Database Rules
+- Use ` + "`" + `import { db } from '@/lib/db'` + "`" + ` and ` + "`" + `import { ... } from '@/lib/schema'` + "`" + ` for all data access. Use Drizzle queries in server components and API routes. Do NOT use hardcoded mock data — all data should come from the database. Import Drizzle operators from 'drizzle-orm': ` + "`" + `import { eq, and, desc, sql } from 'drizzle-orm'` + "`" + `.
+- lib/db.ts and lib/schema.ts are template-managed — do NOT recreate them. Import directly.`
 
 // NEXTJS_BUILDER_TOOL_INSTRUCTIONS contains the tools section, build/edit workflows,
 // and response format used by the tool-calling path (chat editing and legacy initial gen).
@@ -1529,8 +1536,10 @@ An e-commerce app has: browsable product catalog, product detail pages, shopping
 You MUST create ALL required pages listed below. If you only create a homepage, the build will FAIL validation.
 ZERO hardcoded product/category data — ALL store data comes from SDK hooks (useProducts, useCategories, useCart).
 
-#### Data Access Override
-- IGNORE the database/drizzle instructions above (lib/db, lib/schema, Drizzle queries). E-commerce apps do NOT use Drizzle or direct database access. ALL product, category, cart, and order data comes exclusively from the client-side SDK at @/lib/wemob-store.ts. Do NOT create lib/db.ts, lib/schema.ts, or any app/api/ routes for store data.
+#### Data Access — SDK Only
+- E-commerce apps do NOT use Drizzle, lib/db.ts, lib/schema.ts, or direct database access. ALL product, category, cart, and order data comes exclusively from the client-side SDK at @/lib/wemob-store.ts.
+- Do NOT create lib/db.ts, lib/schema.ts, or any app/api/ routes for store data. These files will be blocked by the system even if you output them.
+- The ONLY allowed API route is app/api/auth/[...action]/route.ts (if auth is enabled).
 
 #### Setup Sequence
 - The e-commerce store backend is pre-provisioned automatically. Do NOT call setup_ecommerce or manage_store — these are handled by the system before your code runs.
