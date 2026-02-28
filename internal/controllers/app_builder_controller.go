@@ -234,11 +234,8 @@ func (c *Controller) StreamBuildApp(
 			c.injectTemplateFile(project, ".env.local", dotEnv, fileMap, sendEvent)
 		}
 
-		sendEvent("project_created", map[string]any{
-			"id":   project.ID,
-			"name": project.Name,
-			"slug": project.Slug,
-		})
+		// project_created event is sent by streamSingleShotGeneration
+		// (with planned_files when structure planning succeeds)
 	} else {
 		// Load existing files for chat editing
 		files, err := c.DB.GetAppGeneratedFilesByProjectID(project.ID.String(), "nextjs")
@@ -2686,6 +2683,46 @@ func (c *Controller) streamSingleShotGeneration(
 	if setupErr := c.runPreGenerationSetup(ctx, project, user, fileMap, sendEvent, provider, model, message); setupErr != nil {
 		return "", nil, fmt.Errorf("pre-generation setup failed: %w", setupErr)
 	}
+
+	// 1b. Structure planning — gives the LLM a file plan, theme, and data models
+	structure, planErr := c.PlanAppFileStructure(ctx, message, project.ProjectType)
+	if planErr != nil {
+		slog.Warn("single-shot: structure planning failed, proceeding without plan",
+			"error", planErr, "project_id", project.ID)
+	} else {
+		// Apply name/slug/theme/file_plan/data_models/needs_auth to project
+		if structure.Name != "" {
+			project.Name = structure.Name
+		}
+		if structure.Slug != "" {
+			project.Slug = structure.Slug
+		}
+		themeData := models.AppTheme{
+			ColorScheme:     structure.ColorScheme,
+			DarkColorScheme: structure.DarkColorScheme,
+			Typography:      structure.Typography,
+		}
+		if themeJSON, err := json.Marshal(themeData); err == nil {
+			project.Theme = themeJSON
+		}
+		c.ApplyStructureToProject(project, structure)
+		c.DB.UpdateAppProject(project)
+	}
+
+	// Send project_created event (with planned files when available)
+	projectCreatedPayload := map[string]any{
+		"id":   project.ID,
+		"name": project.Name,
+		"slug": project.Slug,
+	}
+	if structure != nil && len(structure.Files) > 0 {
+		plannedPaths := make([]string, 0, len(structure.Files))
+		for _, f := range structure.Files {
+			plannedPaths = append(plannedPaths, f.Path)
+		}
+		projectCreatedPayload["planned_files"] = plannedPaths
+	}
+	sendEvent("project_created", projectCreatedPayload)
 
 	// 2. Build messages with single-shot system prompt
 	llmMessages := []utils.Message{
