@@ -411,8 +411,8 @@ func (c *Controller) StreamBuildApp(
 	var accToolCalls []models.AppChatToolCall
 	thinkingStart := time.Time{}
 
-	if isInitialGeneration {
-		// === Single-shot path: one LLM call, no tool loop ===
+	if isInitialGeneration && project.ProjectType != "ecommerce" {
+		// === Single-shot path: one LLM call, no tool loop (non-ecommerce only) ===
 		singleShotText, singleShotOps, singleShotErr := c.streamSingleShotGeneration(
 			ctx, project, user, model, provider, fileMap, sendEvent, message, imageURLs,
 		)
@@ -457,7 +457,18 @@ func (c *Controller) StreamBuildApp(
 		responseText = singleShotText
 		toolAppliedOps = singleShotOps
 	} else {
-		// === Chat path: existing StreamWithTools flow (unchanged) ===
+		// === Tool-calling path: chat edits + e-commerce initial gen ===
+
+		// For e-commerce initial gen, send project_created here since
+		// it won't go through streamSingleShotGeneration.
+		if isInitialGeneration && project.ProjectType == "ecommerce" {
+			sendEvent("project_created", map[string]any{
+				"id":   project.ID,
+				"name": project.Name,
+				"slug": project.Slug,
+			})
+		}
+
 		toolCallbacks := &builderToolCallbacks{
 			sendEvent:    sendEvent,
 			appliedOps:   &toolAppliedOps,
@@ -2153,6 +2164,10 @@ func (c *Controller) buildBuilderToolExecutor(ctx context.Context, project *mode
 			existingStore, err := c.DB.GetStoreByAppProjectID(project.ID.String())
 			if err == nil && existingStore != nil {
 				injectEcommerceTemplates()
+				envVars := c.CollectAllEnvVars(project)
+				if dotEnv := BuildDotEnvLocal(envVars); dotEnv != "" {
+					c.injectTemplateFileForTool(project, ".env.local", dotEnv, fileMap, cbs)
+				}
 				return fmt.Sprintf("E-commerce store already exists.\nStore ID: %s\nStore name: %s\nStorefront API: %s/v2/storefront/%s\nUse NEXT_PUBLIC_STORE_ID and NEXT_PUBLIC_WEMOB_API_URL env vars.\nlib/wemob-store.ts is available — import from \"@/lib/wemob-store\".\nNEXT STEP: Call manage_store to add products.",
 					existingStore.ID.String(), existingStore.StoreName, constants.WEMOB_API_BASE_URL, existingStore.ID.String()), nil
 			}
@@ -2168,6 +2183,10 @@ func (c *Controller) buildBuilderToolExecutor(ctx context.Context, project *mode
 			}
 
 			injectEcommerceTemplates()
+			envVars := c.CollectAllEnvVars(project)
+			if dotEnv := BuildDotEnvLocal(envVars); dotEnv != "" {
+				c.injectTemplateFileForTool(project, ".env.local", dotEnv, fileMap, cbs)
+			}
 			return fmt.Sprintf("E-commerce store created!\nStore ID: %s\nStore name: %s\nStorefront API: %s/v2/storefront/%s\nEnv vars: NEXT_PUBLIC_STORE_ID=\"%s\", NEXT_PUBLIC_WEMOB_API_URL=\"%s\"\nlib/wemob-store.ts is available.\nNEXT STEP: Call manage_store to add products.",
 				store.ID.String(), store.StoreName, constants.WEMOB_API_BASE_URL, store.ID.String(), store.ID.String(), constants.WEMOB_API_BASE_URL), nil
 
@@ -2463,48 +2482,6 @@ func (c *Controller) runPreGenerationSetup(
 	model string,
 	userPrompt string,
 ) error {
-	// --- E-commerce setup ---
-	if project.ProjectType == "ecommerce" {
-		store, _ := c.DB.GetStoreByAppProjectID(project.ID.String())
-		if store == nil {
-			var err error
-			store, err = c.CreateStore(project, user, project.Name+" Store")
-			if err != nil {
-				slog.Error("pre-gen: failed to create store", "error", err, "project_id", project.ID)
-				return fmt.Errorf("failed to create store: %w", err)
-			}
-			slog.Info("pre-gen: created ecommerce store", "store_id", store.ID, "project_id", project.ID)
-		}
-
-		// Inject e-commerce template files (if not already present from template injection)
-		for _, tp := range constants.NEXTJS_ECOMMERCE_TEMPLATE_FILE_PATHS {
-			if _, exists := fileMap[tp]; exists {
-				continue
-			}
-			content := getEcommerceTemplateContent(tp)
-			if content != "" {
-				c.injectTemplateFile(project, tp, content, fileMap, sendEvent)
-			}
-		}
-
-		// Quick LLM call to seed store with products/categories tailored to the prompt
-		seedData := c.generateStoreSeedData(ctx, project, userPrompt, provider, model)
-		if seedData != nil {
-			for _, op := range seedData.Operations {
-				if _, err := c.executeStoreOperation(store, op.Action, op.Data); err != nil {
-					slog.Warn("pre-gen: store seed op failed", "action", op.Action, "error", err)
-				}
-			}
-			slog.Info("pre-gen: seeded store", "operations", len(seedData.Operations), "project_id", project.ID)
-		}
-
-		// Update .env.local with store env vars
-		envVars := c.CollectAllEnvVars(project)
-		if dotEnv := BuildDotEnvLocal(envVars); dotEnv != "" {
-			c.injectTemplateFile(project, ".env.local", dotEnv, fileMap, sendEvent)
-		}
-	}
-
 	// --- Database setup ---
 	if len(project.DataModels) > 0 && c.NeonService != nil {
 		var dataModels []DataModel
@@ -2621,61 +2598,6 @@ func (c *Controller) runPreGenerationSetup(
 	}
 
 	return nil
-}
-
-// storeSeedResult is the expected JSON output from generateStoreSeedData.
-type storeSeedResult struct {
-	Operations []struct {
-		Action string         `json:"action"`
-		Data   map[string]any `json:"data"`
-	} `json:"operations"`
-}
-
-// generateStoreSeedData uses a cheap LLM call to generate product/category seed
-// data tailored to the user's prompt.
-func (c *Controller) generateStoreSeedData(
-	ctx context.Context,
-	project *models.AppProject,
-	userPrompt string,
-	provider *utils.LLMProvider,
-	model string,
-) *storeSeedResult {
-	fixModel := c.fixModel(provider)
-
-	system := "You are a product catalog designer. Generate seed data for an e-commerce store. Output strict JSON only, no explanation."
-	prompt := fmt.Sprintf(`Generate seed data for an e-commerce store based on this description: %q
-
-Store name: %s
-
-Generate 5-8 products with realistic names, descriptions, prices (in cents), and images (use picsum.photos URLs).
-Generate 2-3 categories that make sense for this store.
-
-Output strict JSON with this format:
-{
-  "operations": [
-    {"action": "create_category", "data": {"name": "Category Name", "description": "..."}},
-    {"action": "create_product", "data": {"name": "Product Name", "description": "...", "price_in_cents": 2999, "images": ["https://picsum.photos/seed/product1/400/400"], "category_name": "Category Name"}}
-  ]
-}
-
-Rules:
-- Prices must be integers (cents). E.g., $29.99 = 2999
-- Create categories BEFORE products that reference them
-- Use descriptive, realistic product names and descriptions
-- No markdown, no explanation, only JSON`, userPrompt, project.Name)
-
-	result, err := utils.GetJSONFromLLM(ctx, fixModel, system, prompt, provider)
-	if err != nil {
-		slog.Warn("pre-gen: store seed LLM call failed", "error", err, "project_id", project.ID)
-		return nil
-	}
-
-	var seedData storeSeedResult
-	if err := json.Unmarshal([]byte(result), &seedData); err != nil {
-		slog.Warn("pre-gen: failed to parse store seed data", "error", err, "project_id", project.ID)
-		return nil
-	}
-	return &seedData
 }
 
 // streamSingleShotGeneration performs initial app generation in a single LLM call.
