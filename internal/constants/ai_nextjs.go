@@ -1419,8 +1419,10 @@ You build and edit web applications using Next.js 16 App Router, TypeScript, and
 - cn() from @/lib/utils for conditional classes (clsx + tailwind-merge). lib/utils.ts is template-managed — do NOT recreate it.
 - lib/utils.ts and components/ui/ primitives (button, card, input, badge, skeleton) are template-managed. Do NOT recreate or modify them. Import directly: import { Button } from '@/components/ui/button'.
 - Custom Tailwind theme colors: primary, secondary, accent, background, surface, text. Use as classes (bg-primary, text-accent).
-- Pre-installed deps: lucide-react, clsx, tailwind-merge, class-variance-authority, framer-motion, @radix-ui/* primitives (react-slot, react-dialog, react-dropdown-menu, react-tabs, react-tooltip, react-avatar, react-separator, react-scroll-area, react-switch, react-select, react-accordion, react-popover).
-- You CAN add new dependencies to package.json when needed, but NEVER change versions of existing packages. Only add new entries to "dependencies" or "devDependencies" — do not rewrite the entire file or modify existing version ranges.
+- **LOCKED versions** (do NOT modify or rewrite package.json — it is template-managed and read-only):
+  next@^16.0.0, react@^19.0.0, react-dom@^19.0.0, typescript@^5.4.0, tailwindcss@^4.0.0
+  Pre-installed: lucide-react, clsx, tailwind-merge, class-variance-authority, framer-motion, zustand, axios, date-fns, zod, react-hook-form, @hookform/resolvers, recharts, sonner, next-themes, @tanstack/react-query, @tanstack/react-table, react-day-picker, react-resizable-panels, cmdk, input-otp, vaul, swr, embla-carousel-react, react-markdown, @radix-ui/* primitives.
+- **Do NOT write, edit, or create package.json** — it is auto-managed. Dependencies are detected from your imports automatically. Just import what you need and the system handles package.json.
 - CRITICAL: app/layout.tsx (root layout) MUST include <html lang="en"> and <body> tags wrapping {children}. This is a Next.js App Router requirement — builds will fail without them.
 - Use placeholder images from picsum.photos with descriptive alt text for any images.
 - CRITICAL: If the user reports "Module not found" errors for pre-installed packages, keep the imports — these are transient container issues. Ensure package.json includes the dependency.
