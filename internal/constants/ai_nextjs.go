@@ -1529,8 +1529,11 @@ An e-commerce app has: browsable product catalog, product detail pages, shopping
 You MUST create ALL required pages listed below. If you only create a homepage, the build will FAIL validation.
 ZERO hardcoded product/category data — ALL store data comes from SDK hooks (useProducts, useCategories, useCart).
 
+#### Data Access Override
+- IGNORE the database/drizzle instructions above (lib/db, lib/schema, Drizzle queries). E-commerce apps do NOT use Drizzle or direct database access. ALL product, category, cart, and order data comes exclusively from the client-side SDK at @/lib/wemob-store.ts. Do NOT create lib/db.ts, lib/schema.ts, or any app/api/ routes for store data.
+
 #### Setup Sequence
-- Call setup_ecommerce FIRST before generating any storefront code. Then call manage_store to seed products/categories.
+- The e-commerce store backend is pre-provisioned automatically. Do NOT call setup_ecommerce or manage_store — these are handled by the system before your code runs.
 - NEVER define hardcoded/mock product data. This includes ALL of these patterns:
   - const products/items/bestSellers/featuredProducts/featured/newArrivals/topProducts/deals = [...]
   - const categories/collections/popularProducts/relatedProducts = [...]
