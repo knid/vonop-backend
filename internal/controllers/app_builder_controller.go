@@ -1828,6 +1828,11 @@ func (c *Controller) buildBuilderToolExecutor(ctx context.Context, project *mode
 			if args.FilePath == "" {
 				return "Error: file_path is required", nil
 			}
+			// Block writes to template-managed config files (package.json, tsconfig, etc.)
+			if isTemplateFile(args.FilePath) {
+				return fmt.Sprintf("Error: %s is template-managed and cannot be written directly. Dependencies are auto-detected from imports.", args.FilePath), nil
+			}
+
 			content := utils.StripCodeFences(args.Content)
 			_, fileType := guessFileType(args.FilePath)
 			if fileType == "tsx" || fileType == "ts" {
@@ -1922,6 +1927,11 @@ func (c *Controller) buildBuilderToolExecutor(ctx context.Context, project *mode
 					results = append(results, "SKIP: empty file_path")
 					continue
 				}
+				// Block writes to template-managed config files
+				if isTemplateFile(f.FilePath) {
+					results = append(results, fmt.Sprintf("SKIP %s: template-managed, dependencies are auto-detected from imports", f.FilePath))
+					continue
+				}
 				content := utils.StripCodeFences(f.Content)
 				_, fileType := guessFileType(f.FilePath)
 				if fileType == "tsx" || fileType == "ts" {
@@ -1993,6 +2003,10 @@ func (c *Controller) buildBuilderToolExecutor(ctx context.Context, project *mode
 			}
 			if args.FilePath == "" || args.OldString == "" {
 				return "Error: file_path and old_string are required", nil
+			}
+			// Block edits to template-managed config files
+			if isTemplateFile(args.FilePath) {
+				return fmt.Sprintf("Error: %s is template-managed and cannot be edited directly. Dependencies are auto-detected from imports.", args.FilePath), nil
 			}
 
 			cbs.fileMu.RLock()
