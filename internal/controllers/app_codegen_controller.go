@@ -206,6 +206,17 @@ const fallbackSentinel = "/* __WEMOB_FALLBACK__ */"
 
 // --- Template helpers ---
 
+// isLockedConfigFile returns true for config files the LLM must never write or edit.
+// These are injected from hardcoded templates and must not be overwritten.
+// Note: globals.css is in NEXTJS_TEMPLATE_FILE_PATHS but is LLM-generated, so it's not locked.
+func isLockedConfigFile(path string) bool {
+	switch path {
+	case "package.json", "tsconfig.json", "postcss.config.mjs", "next.config.mjs":
+		return true
+	}
+	return false
+}
+
 // isTemplateFile checks if a file path is managed by hardcoded templates
 func isTemplateFile(path string) bool {
 	for _, tp := range constants.NEXTJS_TEMPLATE_FILE_PATHS {
