@@ -54,10 +54,6 @@ func (c *Controller) CreateAppProject(user *models.User, req requests.GenerateAp
 	return project, nil
 }
 
-func (c *Controller) GetAppProjectsByUser(user *models.User) ([]models.AppProject, error) {
-	return c.DB.GetAppProjectsByUserID(user.ID.String())
-}
-
 func (c *Controller) GetAppProjectsByUserFiltered(user *models.User, types []string) ([]models.AppProject, error) {
 	if len(types) == 0 {
 		return c.DB.GetAppProjectsByUserID(user.ID.String())
@@ -154,18 +150,6 @@ func (c *Controller) DeleteAppProject(id string, user *models.User) error {
 	}
 
 	return c.DB.DeleteAppProject(project)
-}
-
-func (c *Controller) UpdateAppProjectAST(project *models.AppProject, ast []byte) (*models.AppProject, error) {
-	project.AST = ast
-	project.UpdatedAt = time.Now()
-	return c.DB.UpdateAppProject(project)
-}
-
-func (c *Controller) UpdateAppProjectTheme(project *models.AppProject, theme []byte) (*models.AppProject, error) {
-	project.Theme = theme
-	project.UpdatedAt = time.Now()
-	return c.DB.UpdateAppProject(project)
 }
 
 func (c *Controller) UpdateAppProjectStatus(project *models.AppProject, status string) (*models.AppProject, error) {
@@ -290,29 +274,6 @@ func (c *Controller) DeleteAppSnapshot(project *models.AppProject, snapshotID st
 
 func (c *Controller) GetAppGeneratedFiles(projectID string, platform string) ([]models.AppGeneratedFile, error) {
 	return c.DB.GetAppGeneratedFilesByProjectID(projectID, platform)
-}
-
-func (c *Controller) SaveGeneratedFiles(projectID uuid.UUID, platform string, files []struct {
-	Path     string
-	Content  string
-	FileType string
-}) error {
-	// Delete existing files for this platform
-	c.DB.DeleteAppGeneratedFilesByProjectPlatform(projectID.String(), platform)
-
-	var dbFiles []models.AppGeneratedFile
-	for _, f := range files {
-		dbFiles = append(dbFiles, models.AppGeneratedFile{
-			AppProjectID: projectID,
-			Platform:     platform,
-			FilePath:     f.Path,
-			Content:      f.Content,
-			FileType:     f.FileType,
-			IsGenerated:  true,
-		})
-	}
-
-	return c.DB.BulkCreateAppGeneratedFiles(dbFiles)
 }
 
 // File CRUD

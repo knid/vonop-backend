@@ -36,13 +36,6 @@ func (db *Database) DeleteUser(user *models.User) (*models.User, error) {
 	return user, err
 }
 
-func (db *Database) GetToken(user *models.User) (*models.Token, error) {
-	var token models.Token
-	err := db.DB.NewSelect().Model(&token).Where("user_id = ?", user.ID.String()).Scan(context.Background())
-
-	return &token, err
-}
-
 func (db *Database) GetTokenByToken(tokenStr string) (*models.Token, error) {
 	var token models.Token
 	err := db.DB.NewSelect().Model(&token).Where("string = ?", tokenStr).Scan(context.Background())
@@ -54,12 +47,6 @@ func (db *Database) CreateToken(token *models.Token) (*models.Token, error) {
 	_, err := db.DB.NewInsert().Model(token).Exec(context.Background())
 
 	return token, err
-}
-
-func (db *Database) DeleteToken(token *models.Token) error {
-	_, err := db.DB.NewDelete().Model(token).Where("id = ?", token.ID).Exec(context.Background())
-
-	return err
 }
 
 func (db *Database) GetUserByStripeCustomerID(customerID string) (*models.User, error) {

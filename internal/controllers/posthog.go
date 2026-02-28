@@ -1,30 +1,9 @@
 package controllers
 
 import (
-	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/models"
 	"github.com/posthog/posthog-go"
 )
-
-// TrackEvent sends a named event to PostHog. No-op if PostHog is nil.
-// Looks up user email from DB — prefer TrackUserEvent when *User is already available.
-func (c *Controller) TrackEvent(userID uuid.UUID, event string, props posthog.Properties) {
-	if c.PostHog == nil {
-		return
-	}
-
-	// Attach user email if available
-	user, err := c.DB.GetUserById(userID.String())
-	if err == nil && user != nil && user.Email != "" {
-		props.Set("$email", user.Email)
-	}
-
-	c.PostHog.Enqueue(posthog.Capture{
-		DistinctId: userID.String(),
-		Event:      event,
-		Properties: props,
-	})
-}
 
 // TrackUserEvent sends a named event to PostHog using an already-loaded user.
 // Avoids the extra DB lookup that TrackEvent performs.

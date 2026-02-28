@@ -95,13 +95,3 @@ func RequireAdmin() func(http.Handler) http.Handler {
 	}
 }
 
-// SunsetHeader adds a Sunset header to legacy endpoints to indicate deprecation.
-func SunsetHeader(date string) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Sunset", date)
-			w.Header().Set("Deprecation", "true")
-			next.ServeHTTP(w, r)
-		})
-	}
-}
