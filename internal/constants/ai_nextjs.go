@@ -38,6 +38,13 @@ var NEXTJS_ECOMMERCE_TEMPLATE_FILE_PATHS = []string{
 	"app/checkout/page.tsx",
 	"app/checkout/success/page.tsx",
 	"app/checkout/cancel/page.tsx",
+	"app/products/page.tsx",
+	"app/products/[slug]/page.tsx",
+	"app/categories/[slug]/page.tsx",
+	"app/policies/shipping/page.tsx",
+	"app/policies/returns/page.tsx",
+	"app/policies/privacy/page.tsx",
+	"app/policies/terms/page.tsx",
 }
 
 // NEXTJS_UI_TEMPLATE_FILE_PATHS are pre-built UI component templates injected during initial generation
@@ -1581,7 +1588,6 @@ You MUST create ALL required pages listed below. If you only create a homepage, 
   next@^16.0.0, react@^19.0.0, react-dom@^19.0.0, typescript@^5.4.0, tailwindcss@^4.0.0
   Pre-installed: lucide-react, clsx, tailwind-merge, class-variance-authority, framer-motion, zustand, axios, date-fns, zod, react-hook-form, @hookform/resolvers, recharts, sonner, next-themes, @tanstack/react-query, @tanstack/react-table, react-day-picker, react-resizable-panels, cmdk, input-otp, vaul, swr, embla-carousel-react, react-markdown, @radix-ui/* primitives.
 - **Do NOT write, edit, or create package.json** — it is auto-managed. Dependencies are detected from your imports automatically.
-- CRITICAL: app/layout.tsx (root layout) MUST include <html lang="en"> and <body> tags wrapping {children}. This is a Next.js App Router requirement.
 - Use placeholder images from picsum.photos with descriptive alt text for any images.
 
 ### Language
@@ -1627,22 +1633,24 @@ The following components are auto-injected as template files in components/ecomm
 ### Required Pages
 Pages you MUST generate (not auto-injected):
 1. app/page.tsx — Homepage with hero section, featured products (useProducts), category highlights (useCategories), promotional banners
-2. app/products/page.tsx — Product grid with category filter pills, search bar, sort dropdown (price low/high, newest). Use useProducts({ category, q }).
-3. app/products/[slug]/page.tsx — Product detail with image gallery, price display, add-to-cart button, description, reviews section
-4. app/categories/[slug]/page.tsx — Category page showing filtered products for the selected category
-5. app/about/page.tsx — Brand story, mission (compelling content relevant to store concept)
-6. app/contact/page.tsx — Contact form or information
-7. app/faq/page.tsx — 8-12 relevant FAQs for the store type
-8. app/policies/shipping/page.tsx — Shipping policy
-9. app/policies/returns/page.tsx — Return & exchange policy
-10. app/policies/privacy/page.tsx — Privacy policy
-11. app/policies/terms/page.tsx — Terms of service
+2. app/about/page.tsx — Brand story, mission (compelling content relevant to store concept)
+3. app/contact/page.tsx — Contact form or information
+4. app/faq/page.tsx — 8-12 relevant FAQs for the store type
 
 Pages auto-injected as templates (do NOT recreate):
+- app/layout.tsx — Root layout with Providers, SiteHeader, SiteFooter, fonts, metadata
+- app/globals.css — Global styles with Tailwind v4 @theme, dark mode, animations
+- app/products/page.tsx — Product listing with filters, search, sort
+- app/products/[slug]/page.tsx — Product detail with gallery, price, add-to-cart, reviews
+- app/categories/[slug]/page.tsx — Category page with filtered product grid
 - app/cart/page.tsx — Shopping cart (uses CartItemRow, OrderSummary, useCart)
 - app/checkout/page.tsx — Checkout (uses CheckoutForm)
 - app/checkout/success/page.tsx — Order confirmation (uses getOrder)
 - app/checkout/cancel/page.tsx — Payment cancelled with retry
+- app/policies/shipping/page.tsx — Shipping policy
+- app/policies/returns/page.tsx — Returns policy
+- app/policies/privacy/page.tsx — Privacy policy
+- app/policies/terms/page.tsx — Terms of service
 
 ### Price Display Rules
 - Product prices live directly on the product: product.price_in_cents, product.compare_at_price.
@@ -1889,25 +1897,21 @@ Given the user's description of an online store, generate a structured file plan
 3. Also generate a dark color scheme variant.
 4. Required pages (ALL of these MUST be in the file list):
    - app/page.tsx — Homepage with hero, featured products, category highlights
-   - app/products/page.tsx — Product listing with category filter, search, sort
-   - app/products/[slug]/page.tsx — Product detail with gallery, price, add-to-cart, reviews
-   - app/categories/[slug]/page.tsx — Category page showing filtered products
    - app/about/page.tsx — Brand story and company information
    - app/contact/page.tsx — Contact form or details
    - app/faq/page.tsx — Frequently asked questions
-   - app/policies/shipping/page.tsx — Shipping policy
-   - app/policies/returns/page.tsx — Return & exchange policy
-   - app/policies/privacy/page.tsx — Privacy policy
-   - app/policies/terms/page.tsx — Terms of service
 5. Required shared components: ONLY plan custom homepage sections (hero, featured-products, testimonials, etc.).
    The following are auto-injected — do NOT plan them:
    - components/ecommerce/* (ProductCard, CartDrawer, SiteHeader, SiteFooter, Providers, Newsletter, etc.)
    - components/ui/* (Button, Card, Input, Badge, Skeleton)
 6. DO NOT plan these pages — they are auto-injected templates:
    - app/cart/page.tsx, app/checkout/page.tsx, app/checkout/success/page.tsx, app/checkout/cancel/page.tsx
+   - app/layout.tsx, app/globals.css
+   - app/products/page.tsx, app/products/[slug]/page.tsx, app/categories/[slug]/page.tsx
+   - app/policies/shipping/page.tsx, app/policies/returns/page.tsx, app/policies/privacy/page.tsx, app/policies/terms/page.tsx
 7. DO NOT include package.json, tsconfig.json, postcss.config.mjs, next.config.mjs, lib/db.ts, lib/schema.ts, lib/utils.ts, components/ui/button.tsx, components/ui/card.tsx, components/ui/input.tsx, components/ui/badge.tsx, components/ui/skeleton.tsx — these are template-managed and injected automatically.
 8. DO NOT plan components/ecommerce/* files — they are template-managed and injected automatically.
-9. Required files: app/layout.tsx, app/page.tsx, app/globals.css
+9. Required files: app/page.tsx
 10. Use Next.js App Router structure.
 11. CRITICAL: Every component or module that is imported by any page MUST be included in the file list. Missing files cause build failures. Exception: components/ecommerce/* and components/ui/* (auto-injected) do NOT need to be listed.
 12. Prefer inline implementations over importing from separate utility/lib files. Only create separate files for reusable components or large data modules.
@@ -1926,19 +1930,10 @@ Given the user's description of an online store, generate a structured file plan
   "typography": {"heading_font":"Inter","body_font":"Inter"},
   "data_models": [],
   "files": [
-    {"path":"app/layout.tsx","type":"tsx","description":"Root layout with Providers wrapper, SiteHeader, SiteFooter, fonts, metadata"},
     {"path":"app/page.tsx","type":"tsx","description":"Homepage with hero, featured products (useProducts), category highlights (useCategories)"},
-    {"path":"app/globals.css","type":"css","description":"Global styles with Tailwind v4 @theme colors"},
-    {"path":"app/products/page.tsx","type":"tsx","description":"Products listing with category filter, search, sort (useProducts)"},
-    {"path":"app/products/[slug]/page.tsx","type":"tsx","description":"Product detail with gallery, price, reviews, add-to-cart (useProduct)"},
-    {"path":"app/categories/[slug]/page.tsx","type":"tsx","description":"Category page showing filtered products"},
     {"path":"app/about/page.tsx","type":"tsx","description":"Brand story and company information"},
     {"path":"app/contact/page.tsx","type":"tsx","description":"Contact form or details"},
-    {"path":"app/faq/page.tsx","type":"tsx","description":"Frequently asked questions (8-12 relevant FAQs)"},
-    {"path":"app/policies/shipping/page.tsx","type":"tsx","description":"Shipping policy"},
-    {"path":"app/policies/returns/page.tsx","type":"tsx","description":"Return and exchange policy"},
-    {"path":"app/policies/privacy/page.tsx","type":"tsx","description":"Privacy policy"},
-    {"path":"app/policies/terms/page.tsx","type":"tsx","description":"Terms of service"}
+    {"path":"app/faq/page.tsx","type":"tsx","description":"Frequently asked questions (8-12 relevant FAQs)"}
   ],
   "required_env_vars": [
     {"key": "STRIPE_SK", "description": "Stripe secret key for payments (recommended)", "is_public": false, "provider": "stripe"}

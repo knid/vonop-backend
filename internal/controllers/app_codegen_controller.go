@@ -407,6 +407,187 @@ func buildGlobalsCSSTheme(colorScheme, darkColorScheme map[string]any, isMobile 
 	return sb.String()
 }
 
+// buildEcommerceGlobalsCSSTheme generates the globals.css content for e-commerce projects.
+// It extends the standard theme with e-commerce-specific utility classes and animations.
+func buildEcommerceGlobalsCSSTheme(colorScheme, darkColorScheme map[string]any) string {
+	base := buildGlobalsCSSTheme(colorScheme, darkColorScheme, false)
+
+	primary := getColor(colorScheme, "primary", "#3B82F6")
+
+	return base + fmt.Sprintf(`
+/* E-commerce utilities */
+@layer utilities {
+  .gradient-text {
+    background: linear-gradient(135deg, var(--color-primary), var(--color-accent));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .glow-primary {
+    box-shadow: 0 0 20px color-mix(in srgb, var(--color-primary) 30%%, transparent);
+  }
+
+  .glow-accent {
+    box-shadow: 0 0 20px color-mix(in srgb, var(--color-accent) 30%%, transparent);
+  }
+
+  .glass {
+    background: color-mix(in srgb, var(--color-surface) 80%%, transparent);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+  }
+
+  .glass-dark {
+    background: color-mix(in srgb, var(--color-background) 60%%, transparent);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+  }
+
+  .grid-pattern {
+    background-image: radial-gradient(circle, color-mix(in srgb, var(--color-text) 10%%, transparent) 1px, transparent 1px);
+    background-size: 24px 24px;
+  }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: %s40;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: %s60;
+}
+
+/* E-commerce animations */
+@keyframes marquee {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%%); }
+}
+@keyframes float {
+  0%%, 100%% { transform: translateY(0); }
+  50%% { transform: translateY(-10px); }
+}
+@keyframes pulse-glow {
+  0%%, 100%% { opacity: 0.6; }
+  50%% { opacity: 1; }
+}
+@keyframes shimmer {
+  0%% { background-position: -200%% 0; }
+  100%% { background-position: 200%% 0; }
+}
+
+.animate-marquee { animation: marquee 30s linear infinite; }
+.animate-float { animation: float 3s ease-in-out infinite; }
+.animate-pulse-glow { animation: pulse-glow 2s ease-in-out infinite; }
+.animate-shimmer {
+  background: linear-gradient(90deg, transparent 25%%, color-mix(in srgb, var(--color-primary) 10%%, transparent) 50%%, transparent 75%%);
+  background-size: 200%% 100%%;
+  animation: shimmer 2s infinite;
+}
+`, primary, primary)
+}
+
+// buildEcommerceLayout generates the root layout.tsx for e-commerce projects.
+// It includes font imports, metadata, and wraps children with Providers, SiteHeader, SiteFooter, and Toaster.
+func buildEcommerceLayout(storeName string, typography map[string]any) string {
+	if storeName == "" {
+		storeName = "Store"
+	}
+
+	headingFont := "Inter"
+	bodyFont := "Inter"
+	if typography != nil {
+		if v, ok := typography["heading_font"].(string); ok && v != "" {
+			headingFont = v
+		}
+		if v, ok := typography["body_font"].(string); ok && v != "" {
+			bodyFont = v
+		}
+	}
+
+	// Convert font names to import and variable names
+	// e.g. "Space Grotesk" -> import "Space_Grotesk", var "spaceGrotesk"
+	toImportName := func(name string) string {
+		return strings.ReplaceAll(name, " ", "_")
+	}
+	toVarName := func(name string) string {
+		parts := strings.Fields(name)
+		if len(parts) == 1 {
+			r := []rune(parts[0])
+			r[0] = []rune(strings.ToLower(string(r[0])))[0]
+			return string(r)
+		}
+		result := strings.ToLower(parts[0])
+		for _, p := range parts[1:] {
+			if len(p) > 0 {
+				result += strings.ToUpper(p[:1]) + p[1:]
+			}
+		}
+		return result
+	}
+
+	headingImport := toImportName(headingFont)
+	headingVar := toVarName(headingFont)
+	bodyImport := toImportName(bodyFont)
+	bodyVar := toVarName(bodyFont)
+
+	sameFont := headingFont == bodyFont
+
+	var fontImports string
+	var fontConstructors string
+	var bodyClassName string
+
+	if sameFont {
+		fontImports = fmt.Sprintf(`import { %s } from "next/font/google";`, headingImport)
+		fontConstructors = fmt.Sprintf(`const %s = %s({ subsets: ["latin"], display: "swap" });`, headingVar, headingImport)
+		bodyClassName = fmt.Sprintf("${%s.className}", headingVar)
+	} else {
+		fontImports = fmt.Sprintf(`import { %s, %s } from "next/font/google";`, headingImport, bodyImport)
+		fontConstructors = fmt.Sprintf(`const %s = %s({ subsets: ["latin"], display: "swap", variable: "--font-heading" });
+const %s = %s({ subsets: ["latin"], display: "swap" });`, headingVar, headingImport, bodyVar, bodyImport)
+		bodyClassName = fmt.Sprintf("${%s.variable} ${%s.className}", headingVar, bodyVar)
+	}
+
+	return fmt.Sprintf(`import type { Metadata } from "next";
+%s
+import { Toaster } from "sonner";
+import { Providers } from "@/components/ecommerce/providers";
+import { SiteHeader } from "@/components/ecommerce/site-header";
+import { SiteFooter } from "@/components/ecommerce/site-footer";
+import "./globals.css";
+
+%s
+
+export const metadata: Metadata = {
+  title: "%s",
+  description: "Welcome to %s — browse our collection and find what you love.",
+};
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <html lang="en" suppressHydrationWarning>
+      <body className={`+"`"+`%s antialiased`+"`"+`}>
+        <Providers>
+          <SiteHeader />
+          <main className="min-h-screen">{children}</main>
+          <SiteFooter />
+          <Toaster position="bottom-right" richColors />
+        </Providers>
+      </body>
+    </html>
+  );
+}
+`, fontImports, fontConstructors, storeName, storeName, bodyClassName)
+}
+
 // getTemplateContent returns the hardcoded content for a template file.
 // dataModels is used to generate the dynamic lib/schema.ts file.
 // neonConnStr is embedded into lib/db.ts as a fallback when DATABASE_URL env var is not set.
@@ -475,6 +656,20 @@ func getEcommerceTemplateContent(path string) string {
 		return constants.ECOMMERCE_TEMPLATE_CHECKOUT_SUCCESS_PAGE
 	case "app/checkout/cancel/page.tsx":
 		return constants.ECOMMERCE_TEMPLATE_CHECKOUT_CANCEL_PAGE
+	case "app/products/page.tsx":
+		return constants.ECOMMERCE_TEMPLATE_PRODUCTS_PAGE
+	case "app/products/[slug]/page.tsx":
+		return constants.ECOMMERCE_TEMPLATE_PRODUCT_DETAIL_PAGE
+	case "app/categories/[slug]/page.tsx":
+		return constants.ECOMMERCE_TEMPLATE_CATEGORY_PAGE
+	case "app/policies/shipping/page.tsx":
+		return constants.ECOMMERCE_TEMPLATE_SHIPPING_POLICY
+	case "app/policies/returns/page.tsx":
+		return constants.ECOMMERCE_TEMPLATE_RETURNS_POLICY
+	case "app/policies/privacy/page.tsx":
+		return constants.ECOMMERCE_TEMPLATE_PRIVACY_POLICY
+	case "app/policies/terms/page.tsx":
+		return constants.ECOMMERCE_TEMPLATE_TERMS_POLICY
 	}
 	return ""
 }
@@ -1533,19 +1728,8 @@ func runDeterministicChecks(files map[string]string) []validationError {
 			}
 		}
 
-		// Check E4: Required LLM-generated pages (cart/checkout are now templates)
-		requiredEcommercePages := map[string]string{
-			"app/products/page.tsx": "Products listing page",
-		}
-		for pagePath, pageDesc := range requiredEcommercePages {
-			if _, exists := files[pagePath]; !exists {
-				errors = append(errors, validationError{
-					File:  pagePath,
-					Error: fmt.Sprintf("Required e-commerce page missing: %s (%s). This page is needed for a complete shopping experience.", pagePath, pageDesc),
-					Type:  "ecommerce_missing_page",
-				})
-			}
-		}
+		// Check E4: Required LLM-generated pages
+		// Products, product detail, category, and policy pages are now templates — no required LLM pages remain.
 
 		// Check E5: Product detail page (any dynamic slug page under products)
 		hasProductDetail := false
@@ -1600,13 +1784,7 @@ func runDeterministicChecks(files map[string]string) []validationError {
 
 		// Check E7: SDK usage in LLM-generated pages
 		sdkUsageChecks := map[string][]string{
-			"app/products/page.tsx": {"useProducts", "getProducts"},
-			"app/page.tsx":         {"useProducts", "useCategories"},
-		}
-		for fp := range files {
-			if strings.HasPrefix(fp, "app/products/[") && strings.HasSuffix(fp, "/page.tsx") {
-				sdkUsageChecks[fp] = []string{"useProduct", "getProduct"}
-			}
+			"app/page.tsx": {"useProducts", "useCategories"},
 		}
 		for fp, requiredImports := range sdkUsageChecks {
 			fc, exists := files[fp]
