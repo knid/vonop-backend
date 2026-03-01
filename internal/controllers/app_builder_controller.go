@@ -2838,8 +2838,10 @@ func (c *Controller) streamEcommerceGeneration(
 	sendEvent("project_created", projectCreatedPayload)
 
 	// === Phase 1: Setup (tool-calling with setup_ecommerce + manage_store only) ===
+	// Use fast model — setup is just tool calling to create products, no code generation.
+	setupModel := c.fixModel(provider)
 	slog.Info("ecommerce-gen: starting Phase 1 (store setup)",
-		"model", model, "project_id", project.ID)
+		"model", setupModel, "project_id", project.ID)
 
 	setupTools := filterToolsByName("setup_ecommerce", "manage_store")
 
@@ -2858,11 +2860,11 @@ func (c *Controller) streamEcommerceGeneration(
 	}
 
 	setupConfig := utils.ToolCallConfig{
-		MaxRounds:  10,
-		NudgeAfter: 6,
-		StripAfter: 8,
-		MaxTokens:  8192,
-		NudgeMessage: "You have made many tool calls. Finish populating the store and provide a brief summary.",
+		MaxRounds:  8,
+		NudgeAfter: 5,
+		StripAfter: 6,
+		MaxTokens:  4096,
+		NudgeMessage: "Finish populating the store and provide a brief summary.",
 		TrimArgs: func(toolName, args string) string {
 			// manage_store args contain full product data (images, descriptions) —
 			// compress in history to avoid token bloat across rounds.
@@ -2888,7 +2890,7 @@ func (c *Controller) streamEcommerceGeneration(
 	}
 
 	_, setupErr := utils.StreamWithTools(
-		ctx, model, setupMessages, setupTools, provider,
+		ctx, setupModel, setupMessages, setupTools, provider,
 		nil, // no forced JSON format
 		nil, // no reasoning for setup phase
 		executor,
