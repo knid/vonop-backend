@@ -1,0 +1,23 @@
+{
+  "mcpServers": {
+    "postgres": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@anthropic-ai/mcp-server-postgres",
+        "postgresql://localhost:5432/wemob"
+      ],
+      "env": {}
+    },
+    "github": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-github"
+      ],
+      "env": {}
+    }
+  }
+}
