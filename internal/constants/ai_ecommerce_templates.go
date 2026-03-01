@@ -1056,7 +1056,7 @@ import { CartDrawer } from "@/components/ecommerce/cart-drawer";
 export function SiteHeader() {
   const pathname = usePathname();
   const { itemCount } = useCart();
-  const categories = useCategories();
+  const { categories } = useCategories();
   const storeConfig = useStoreConfig();
 
   const [cartOpen, setCartOpen] = useState(false);
@@ -1076,7 +1076,7 @@ export function SiteHeader() {
   const navLinks = [
     { label: "Home", href: "/" },
     { label: "Products", href: "/products" },
-    ...categories.map((cat) => ({
+    ...(categories ?? []).map((cat) => ({
       label: cat.name,
       href: "/categories/" + cat.slug,
     })),
@@ -1193,12 +1193,12 @@ import Link from "next/link";
 import { useCategories, useStoreConfig } from "@/lib/wemob-store";
 
 export function SiteFooter() {
-  const categories = useCategories();
+  const { categories } = useCategories();
   const storeConfig = useStoreConfig();
 
   const shopLinks = [
     { label: "Products", href: "/products" },
-    ...categories.map((cat) => ({
+    ...(categories ?? []).map((cat) => ({
       label: cat.name,
       href: "/categories/" + cat.slug,
     })),
