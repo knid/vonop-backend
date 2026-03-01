@@ -2853,7 +2853,7 @@ func (c *Controller) streamEcommerceGeneration(
 	executor := c.compositeToolExecutor(setupExecutor)
 
 	setupMessages := []utils.Message{
-		{Role: "system", Content: constants.NEXTJS_ECOMMERCE_COMMON_RULES + constants.NEXTJS_ECOMMERCE_SETUP_INSTRUCTIONS},
+		{Role: "system", Content: constants.NEXTJS_ECOMMERCE_SETUP_INSTRUCTIONS},
 		{Role: "user", Content: message},
 	}
 
@@ -2863,6 +2863,25 @@ func (c *Controller) streamEcommerceGeneration(
 		StripAfter: 8,
 		MaxTokens:  8192,
 		NudgeMessage: "You have made many tool calls. Finish populating the store and provide a brief summary.",
+		TrimArgs: func(toolName, args string) string {
+			// manage_store args contain full product data (images, descriptions) —
+			// compress in history to avoid token bloat across rounds.
+			if toolName == "manage_store" && len(args) > 300 {
+				var parsed struct {
+					Operations []struct {
+						Action string `json:"action"`
+					} `json:"operations"`
+				}
+				if err := json.Unmarshal([]byte(args), &parsed); err == nil {
+					actions := make([]string, len(parsed.Operations))
+					for i, op := range parsed.Operations {
+						actions[i] = op.Action
+					}
+					return fmt.Sprintf(`{"operations_summary":"%d ops: %s"}`, len(parsed.Operations), strings.Join(actions, ", "))
+				}
+			}
+			return args
+		},
 		OnToolCallStart: func(toolName string) {
 			sendEvent("tool_start", map[string]any{"tool": toolName})
 		},
