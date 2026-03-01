@@ -1,0 +1,26 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "filepath=$(echo \"$CLAUDE_TOOL_INPUT\" | grep -o '\"file_path\":\"[^\"]*\"' | head -1 | sed 's/\"file_path\":\"//;s/\"//'); if echo \"$filepath\" | grep -qE '\\.env($|\\.)'; then echo 'BLOCKED: Do not edit .env files directly. Secrets are managed via Infisical.' >&2; exit 1; fi"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "filepath=$(echo \"$CLAUDE_TOOL_INPUT\" | grep -o '\"file_path\":\"[^\"]*\"' | head -1 | sed 's/\"file_path\":\"//;s/\"//'); if echo \"$filepath\" | grep -qE '\\.go$'; then cd /Users/knid/Projects/wemob-backend && go vet ./... 2>&1 | head -20; fi"
+          }
+        ]
+      }
+    ]
+  }
+}
