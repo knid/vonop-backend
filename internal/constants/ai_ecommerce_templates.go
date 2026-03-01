@@ -1724,3 +1724,702 @@ export default function CheckoutCancelPage() {
   );
 }
 `
+
+const ECOMMERCE_TEMPLATE_PRODUCTS_PAGE = `"use client";
+
+import React, { useState, useMemo } from "react";
+import { Search, SlidersHorizontal, ChevronDown } from "lucide-react";
+import { useProducts, useCategories } from "@/lib/wemob-store";
+import { ProductCard } from "@/components/ecommerce/product-card";
+import { Skeleton } from "@/components/ui/skeleton";
+import { EmptyState } from "@/components/ecommerce/empty-state";
+
+type SortOption = "newest" | "price-asc" | "price-desc" | "name";
+
+export default function ProductsPage() {
+  const { products, isLoading } = useProducts();
+  const { categories } = useCategories();
+  const [search, setSearch] = useState("");
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const [sort, setSort] = useState<SortOption>("newest");
+  const [showSort, setShowSort] = useState(false);
+
+  const sortLabels: Record<SortOption, string> = {
+    newest: "Newest",
+    "price-asc": "Price: Low to High",
+    "price-desc": "Price: High to Low",
+    name: "Name A–Z",
+  };
+
+  const filtered = useMemo(() => {
+    let result = products ?? [];
+
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      result = result.filter(
+        (p) =>
+          p.name.toLowerCase().includes(q) ||
+          (p.description && p.description.toLowerCase().includes(q))
+      );
+    }
+
+    if (selectedCategory) {
+      result = result.filter(
+        (p) => p.category_slug === selectedCategory || p.category === selectedCategory
+      );
+    }
+
+    switch (sort) {
+      case "price-asc":
+        result = [...result].sort((a, b) => a.price_in_cents - b.price_in_cents);
+        break;
+      case "price-desc":
+        result = [...result].sort((a, b) => b.price_in_cents - a.price_in_cents);
+        break;
+      case "name":
+        result = [...result].sort((a, b) => a.name.localeCompare(b.name));
+        break;
+      default:
+        break;
+    }
+
+    return result;
+  }, [products, search, selectedCategory, sort]);
+
+  return (
+    <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+      <div className="mb-8">
+        <h1 className="text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
+          All Products
+        </h1>
+        <p className="mt-2 text-muted-foreground">
+          Browse our complete collection
+        </p>
+      </div>
+
+      {/* Search & Sort Bar */}
+      <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="relative flex-1 sm:max-w-sm">
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search products..."
+            className="h-10 w-full rounded-lg border border-border bg-background pl-10 pr-4 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+          />
+        </div>
+
+        <div className="relative">
+          <button
+            onClick={() => setShowSort(!showSort)}
+            className="inline-flex h-10 items-center gap-2 rounded-lg border border-border bg-background px-4 text-sm font-medium text-foreground transition-colors hover:bg-accent"
+          >
+            <SlidersHorizontal className="h-4 w-4" />
+            {sortLabels[sort]}
+            <ChevronDown className="h-4 w-4" />
+          </button>
+          {showSort && (
+            <div className="absolute right-0 top-full z-20 mt-1 w-48 rounded-lg border border-border bg-background py-1 shadow-lg">
+              {(Object.entries(sortLabels) as [SortOption, string][]).map(([key, label]) => (
+                <button
+                  key={key}
+                  onClick={() => {
+                    setSort(key);
+                    setShowSort(false);
+                  }}
+                  className={"w-full px-4 py-2 text-left text-sm transition-colors hover:bg-accent " + (sort === key ? "font-medium text-primary" : "text-foreground")}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Category Filter Pills */}
+      {categories && categories.length > 0 && (
+        <div className="mb-8 flex flex-wrap gap-2">
+          <button
+            onClick={() => setSelectedCategory(null)}
+            className={"rounded-full px-4 py-1.5 text-sm font-medium transition-colors " + (selectedCategory === null ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:bg-accent hover:text-foreground")}
+          >
+            All
+          </button>
+          {categories.map((cat) => (
+            <button
+              key={cat.id}
+              onClick={() => setSelectedCategory(selectedCategory === cat.slug ? null : cat.slug)}
+              className={"rounded-full px-4 py-1.5 text-sm font-medium transition-colors " + (selectedCategory === cat.slug ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:bg-accent hover:text-foreground")}
+            >
+              {cat.name}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Product Grid */}
+      {isLoading ? (
+        <div className="grid grid-cols-2 gap-4 sm:gap-6 lg:grid-cols-3 xl:grid-cols-4">
+          {Array.from({ length: 8 }).map((_, i) => (
+            <div key={i} className="space-y-3">
+              <Skeleton className="aspect-square w-full rounded-xl" />
+              <Skeleton className="h-4 w-3/4" />
+              <Skeleton className="h-4 w-1/2" />
+            </div>
+          ))}
+        </div>
+      ) : filtered.length === 0 ? (
+        <EmptyState
+          icon={Search}
+          title="No products found"
+          description={search ? "Try adjusting your search or filters." : "Check back soon for new arrivals."}
+          action={search || selectedCategory ? { label: "Clear Filters", href: "/products" } : undefined}
+        />
+      ) : (
+        <div className="grid grid-cols-2 gap-4 sm:gap-6 lg:grid-cols-3 xl:grid-cols-4">
+          {filtered.map((product) => (
+            <ProductCard key={product.id} product={product} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+`
+
+const ECOMMERCE_TEMPLATE_PRODUCT_DETAIL_PAGE = `"use client";
+
+import React, { useState } from "react";
+import { useParams } from "next/navigation";
+import Link from "next/link";
+import { ChevronRight, Minus, Plus, ShoppingCart, Truck, RotateCcw, Shield } from "lucide-react";
+import { useProduct, useCart, formatPrice } from "@/lib/wemob-store";
+import { ProductGallery } from "@/components/ecommerce/product-gallery";
+import { PriceDisplay } from "@/components/ecommerce/price-display";
+import { ReviewList } from "@/components/ecommerce/review-list";
+import { WishlistButton } from "@/components/ecommerce/wishlist-button";
+import { Skeleton } from "@/components/ui/skeleton";
+
+export default function ProductDetailPage() {
+  const params = useParams();
+  const slug = params?.slug as string;
+  const { product, isLoading } = useProduct(slug);
+  const { addItem } = useCart();
+  const [quantity, setQuantity] = useState(1);
+  const [isAdding, setIsAdding] = useState(false);
+  const [addedToCart, setAddedToCart] = useState(false);
+
+  const handleAddToCart = async () => {
+    if (!product || product.in_stock === false) return;
+    setIsAdding(true);
+    try {
+      await addItem(product.id, quantity);
+      setAddedToCart(true);
+      setTimeout(() => setAddedToCart(false), 2000);
+    } catch {
+      // handled by cart provider
+    } finally {
+      setIsAdding(false);
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+        <Skeleton className="mb-6 h-5 w-64" />
+        <div className="grid gap-8 lg:grid-cols-2">
+          <Skeleton className="aspect-square w-full rounded-xl" />
+          <div className="space-y-4">
+            <Skeleton className="h-8 w-3/4" />
+            <Skeleton className="h-6 w-1/3" />
+            <Skeleton className="h-24 w-full" />
+            <Skeleton className="h-12 w-full" />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!product) {
+    return (
+      <div className="flex min-h-[40vh] flex-col items-center justify-center px-4 text-center">
+        <h1 className="text-2xl font-bold text-foreground">Product not found</h1>
+        <p className="mt-2 text-muted-foreground">The product you are looking for does not exist.</p>
+        <Link
+          href="/products"
+          className="mt-6 inline-flex h-10 items-center rounded-lg bg-primary px-5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+        >
+          Browse Products
+        </Link>
+      </div>
+    );
+  }
+
+  const outOfStock = product.in_stock === false;
+
+  return (
+    <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+      {/* Breadcrumbs */}
+      <nav className="mb-6 flex items-center gap-1.5 text-sm text-muted-foreground">
+        <Link href="/" className="transition-colors hover:text-foreground">Home</Link>
+        <ChevronRight className="h-3.5 w-3.5" />
+        <Link href="/products" className="transition-colors hover:text-foreground">Products</Link>
+        {product.category && (
+          <>
+            <ChevronRight className="h-3.5 w-3.5" />
+            <Link href={"/categories/" + (product.category_slug || product.category)} className="transition-colors hover:text-foreground">
+              {product.category}
+            </Link>
+          </>
+        )}
+        <ChevronRight className="h-3.5 w-3.5" />
+        <span className="truncate font-medium text-foreground">{product.name}</span>
+      </nav>
+
+      <div className="grid gap-8 lg:grid-cols-2 lg:gap-12">
+        {/* Image Gallery */}
+        <ProductGallery images={product.images || []} name={product.name} />
+
+        {/* Product Info */}
+        <div>
+          {product.category && (
+            <p className="mb-2 text-sm font-medium uppercase tracking-wide text-muted-foreground">
+              {product.category}
+            </p>
+          )}
+          <h1 className="text-2xl font-bold tracking-tight text-foreground sm:text-3xl">
+            {product.name}
+          </h1>
+
+          <div className="mt-4 flex items-center gap-3">
+            <PriceDisplay product={product} size="lg" />
+            <WishlistButton productId={product.id} />
+          </div>
+
+          {product.description && (
+            <div className="mt-6 text-sm leading-relaxed text-muted-foreground">
+              <p>{product.description}</p>
+            </div>
+          )}
+
+          {/* Quantity & Add to Cart */}
+          <div className="mt-8 space-y-4">
+            {!outOfStock && (
+              <div className="flex items-center gap-3">
+                <span className="text-sm font-medium text-foreground">Quantity</span>
+                <div className="flex items-center rounded-lg border border-border">
+                  <button
+                    onClick={() => setQuantity(Math.max(1, quantity - 1))}
+                    className="flex h-10 w-10 items-center justify-center text-muted-foreground transition-colors hover:text-foreground"
+                    aria-label="Decrease quantity"
+                  >
+                    <Minus className="h-4 w-4" />
+                  </button>
+                  <span className="flex h-10 w-12 items-center justify-center text-sm font-medium text-foreground">
+                    {quantity}
+                  </span>
+                  <button
+                    onClick={() => setQuantity(quantity + 1)}
+                    className="flex h-10 w-10 items-center justify-center text-muted-foreground transition-colors hover:text-foreground"
+                    aria-label="Increase quantity"
+                  >
+                    <Plus className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <button
+              onClick={handleAddToCart}
+              disabled={outOfStock || isAdding}
+              className="flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-primary text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {outOfStock ? (
+                "Out of Stock"
+              ) : addedToCart ? (
+                "Added to Cart!"
+              ) : (
+                <>
+                  <ShoppingCart className="h-4 w-4" />
+                  {isAdding ? "Adding..." : "Add to Cart"}
+                </>
+              )}
+            </button>
+          </div>
+
+          {/* Trust Badges */}
+          <div className="mt-8 grid grid-cols-3 gap-4 border-t border-border pt-6">
+            <div className="flex flex-col items-center gap-1.5 text-center">
+              <Truck className="h-5 w-5 text-muted-foreground" />
+              <span className="text-xs text-muted-foreground">Free Shipping</span>
+            </div>
+            <div className="flex flex-col items-center gap-1.5 text-center">
+              <RotateCcw className="h-5 w-5 text-muted-foreground" />
+              <span className="text-xs text-muted-foreground">Easy Returns</span>
+            </div>
+            <div className="flex flex-col items-center gap-1.5 text-center">
+              <Shield className="h-5 w-5 text-muted-foreground" />
+              <span className="text-xs text-muted-foreground">Secure Payment</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Reviews Section */}
+      <div className="mt-16">
+        <ReviewList productId={product.id} />
+      </div>
+    </div>
+  );
+}
+`
+
+const ECOMMERCE_TEMPLATE_CATEGORY_PAGE = `"use client";
+
+import React from "react";
+import { useParams } from "next/navigation";
+import Link from "next/link";
+import { ChevronRight } from "lucide-react";
+import { useProducts, useCategories } from "@/lib/wemob-store";
+import { ProductCard } from "@/components/ecommerce/product-card";
+import { EmptyState } from "@/components/ecommerce/empty-state";
+import { Skeleton } from "@/components/ui/skeleton";
+
+export default function CategoryPage() {
+  const params = useParams();
+  const slug = params?.slug as string;
+  const { products, isLoading: productsLoading } = useProducts();
+  const { categories, isLoading: categoriesLoading } = useCategories();
+
+  const isLoading = productsLoading || categoriesLoading;
+  const category = categories?.find((c) => c.slug === slug);
+  const filtered = products?.filter(
+    (p) => p.category_slug === slug || p.category === category?.name
+  ) ?? [];
+
+  if (isLoading) {
+    return (
+      <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+        <Skeleton className="mb-2 h-5 w-48" />
+        <Skeleton className="mb-8 h-9 w-64" />
+        <div className="grid grid-cols-2 gap-4 sm:gap-6 lg:grid-cols-3 xl:grid-cols-4">
+          {Array.from({ length: 8 }).map((_, i) => (
+            <div key={i} className="space-y-3">
+              <Skeleton className="aspect-square w-full rounded-xl" />
+              <Skeleton className="h-4 w-3/4" />
+              <Skeleton className="h-4 w-1/2" />
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  const categoryName = category?.name ?? slug.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+
+  return (
+    <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+      {/* Breadcrumbs */}
+      <nav className="mb-6 flex items-center gap-1.5 text-sm text-muted-foreground">
+        <Link href="/" className="transition-colors hover:text-foreground">Home</Link>
+        <ChevronRight className="h-3.5 w-3.5" />
+        <Link href="/products" className="transition-colors hover:text-foreground">Products</Link>
+        <ChevronRight className="h-3.5 w-3.5" />
+        <span className="font-medium text-foreground">{categoryName}</span>
+      </nav>
+
+      <div className="mb-8">
+        <h1 className="text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
+          {categoryName}
+        </h1>
+        {category?.description && (
+          <p className="mt-2 text-muted-foreground">{category.description}</p>
+        )}
+        <p className="mt-1 text-sm text-muted-foreground">
+          {filtered.length} {filtered.length === 1 ? "product" : "products"}
+        </p>
+      </div>
+
+      {filtered.length === 0 ? (
+        <EmptyState
+          icon={ChevronRight}
+          title="No products in this category"
+          description="Check back soon for new arrivals in this category."
+          action={{ label: "Browse All Products", href: "/products" }}
+        />
+      ) : (
+        <div className="grid grid-cols-2 gap-4 sm:gap-6 lg:grid-cols-3 xl:grid-cols-4">
+          {filtered.map((product) => (
+            <ProductCard key={product.id} product={product} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+`
+
+const ECOMMERCE_TEMPLATE_SHIPPING_POLICY = `"use client";
+
+import { useStoreConfig } from "@/lib/wemob-store";
+
+export default function ShippingPolicyPage() {
+  const { config } = useStoreConfig();
+  const storeName = config?.name || "Our Store";
+
+  return (
+    <div className="mx-auto max-w-3xl px-4 py-12 sm:px-6 lg:px-8">
+      <h1 className="text-3xl font-bold tracking-tight text-foreground">Shipping Policy</h1>
+      <p className="mt-2 text-sm text-muted-foreground">Last updated: {new Date().toLocaleDateString("en-US", { month: "long", year: "numeric" })}</p>
+
+      <div className="mt-8 space-y-8 text-sm leading-relaxed text-muted-foreground">
+        <section>
+          <h2 className="mb-3 text-lg font-semibold text-foreground">Processing Time</h2>
+          <p>All orders placed with {storeName} are processed within 1–3 business days. Orders placed on weekends or holidays will be processed on the next business day. You will receive a confirmation email with tracking information once your order has shipped.</p>
+        </section>
+
+        <section>
+          <h2 className="mb-3 text-lg font-semibold text-foreground">Shipping Rates & Delivery Times</h2>
+          <div className="overflow-hidden rounded-lg border border-border">
+            <table className="w-full text-left">
+              <thead className="bg-muted">
+                <tr>
+                  <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-foreground">Method</th>
+                  <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-foreground">Estimated Delivery</th>
+                  <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-foreground">Cost</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                <tr>
+                  <td className="px-4 py-3">Standard Shipping</td>
+                  <td className="px-4 py-3">5–7 business days</td>
+                  <td className="px-4 py-3">Free on orders over $50</td>
+                </tr>
+                <tr>
+                  <td className="px-4 py-3">Express Shipping</td>
+                  <td className="px-4 py-3">2–3 business days</td>
+                  <td className="px-4 py-3">$9.99</td>
+                </tr>
+                <tr>
+                  <td className="px-4 py-3">Overnight Shipping</td>
+                  <td className="px-4 py-3">1 business day</td>
+                  <td className="px-4 py-3">$19.99</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section>
+          <h2 className="mb-3 text-lg font-semibold text-foreground">International Shipping</h2>
+          <p>We currently ship to select international destinations. International shipping rates and delivery times vary by location and will be calculated at checkout. Please note that international orders may be subject to customs duties and taxes, which are the responsibility of the recipient.</p>
+        </section>
+
+        <section>
+          <h2 className="mb-3 text-lg font-semibold text-foreground">Order Tracking</h2>
+          <p>Once your order ships, you will receive an email with a tracking number. You can use this number to track your package on the carrier's website. If you have any questions about your shipment, please don't hesitate to contact our support team.</p>
+        </section>
+
+        <section>
+          <h2 className="mb-3 text-lg font-semibold text-foreground">Shipping Restrictions</h2>
+          <p>Some items may have shipping restrictions due to size, weight, or destination regulations. If an item cannot be shipped to your address, you will be notified during checkout. We are unable to ship to P.O. boxes for express and overnight orders.</p>
+        </section>
+      </div>
+    </div>
+  );
+}
+`
+
+const ECOMMERCE_TEMPLATE_RETURNS_POLICY = `"use client";
+
+import { useStoreConfig } from "@/lib/wemob-store";
+
+export default function ReturnsPolicyPage() {
+  const { config } = useStoreConfig();
+  const storeName = config?.name || "Our Store";
+
+  return (
+    <div className="mx-auto max-w-3xl px-4 py-12 sm:px-6 lg:px-8">
+      <h1 className="text-3xl font-bold tracking-tight text-foreground">Return & Exchange Policy</h1>
+      <p className="mt-2 text-sm text-muted-foreground">Last updated: {new Date().toLocaleDateString("en-US", { month: "long", year: "numeric" })}</p>
+
+      <div className="mt-8 space-y-8 text-sm leading-relaxed text-muted-foreground">
+        <section>
+          <h2 className="mb-3 text-lg font-semibold text-foreground">Our Return Promise</h2>
+          <p>At {storeName}, we want you to be completely satisfied with your purchase. If for any reason you are not happy with your order, we offer a hassle-free return and exchange policy within 30 days of delivery.</p>
+        </section>
+
+        <section>
+          <h2 className="mb-3 text-lg font-semibold text-foreground">Eligibility</h2>
+          <ul className="ml-4 list-disc space-y-1.5">
+            <li>Items must be returned within 30 days of delivery.</li>
+            <li>Products must be in their original condition, unworn, unwashed, and with all tags attached.</li>
+            <li>Items must be in their original packaging when possible.</li>
+            <li>Sale items and gift cards are final sale and cannot be returned.</li>
+            <li>Personalized or custom-made items are non-returnable.</li>
+          </ul>
+        </section>
+
+        <section>
+          <h2 className="mb-3 text-lg font-semibold text-foreground">How to Return</h2>
+          <ol className="ml-4 list-decimal space-y-1.5">
+            <li>Contact our support team to initiate a return request.</li>
+            <li>You will receive a return authorization and prepaid shipping label via email.</li>
+            <li>Pack the item securely in its original packaging.</li>
+            <li>Attach the shipping label and drop off the package at the designated carrier.</li>
+            <li>Once we receive and inspect the item, your refund will be processed within 5–7 business days.</li>
+          </ol>
+        </section>
+
+        <section>
+          <h2 className="mb-3 text-lg font-semibold text-foreground">Exchanges</h2>
+          <p>If you would like to exchange an item for a different size or color, please follow the return process above and place a new order for the desired item. This ensures the fastest processing time.</p>
+        </section>
+
+        <section>
+          <h2 className="mb-3 text-lg font-semibold text-foreground">Refunds</h2>
+          <p>Refunds will be issued to the original payment method. Please allow 5–7 business days for the refund to appear on your statement after we have received and processed your return. Shipping costs are non-refundable unless the return is due to a defective or incorrect item.</p>
+        </section>
+
+        <section>
+          <h2 className="mb-3 text-lg font-semibold text-foreground">Damaged or Defective Items</h2>
+          <p>If you received a damaged or defective item, please contact us within 48 hours of delivery with photos of the issue. We will arrange a replacement or full refund at no additional cost to you.</p>
+        </section>
+      </div>
+    </div>
+  );
+}
+`
+
+const ECOMMERCE_TEMPLATE_PRIVACY_POLICY = `"use client";
+
+import { useStoreConfig } from "@/lib/wemob-store";
+
+export default function PrivacyPolicyPage() {
+  const { config } = useStoreConfig();
+  const storeName = config?.name || "Our Store";
+
+  return (
+    <div className="mx-auto max-w-3xl px-4 py-12 sm:px-6 lg:px-8">
+      <h1 className="text-3xl font-bold tracking-tight text-foreground">Privacy Policy</h1>
+      <p className="mt-2 text-sm text-muted-foreground">Last updated: {new Date().toLocaleDateString("en-US", { month: "long", year: "numeric" })}</p>
+
+      <div className="mt-8 space-y-8 text-sm leading-relaxed text-muted-foreground">
+        <section>
+          <h2 className="mb-3 text-lg font-semibold text-foreground">Introduction</h2>
+          <p>{storeName} ("we", "our", or "us") is committed to protecting your privacy. This Privacy Policy explains how we collect, use, disclose, and safeguard your information when you visit our website and make purchases from our store.</p>
+        </section>
+
+        <section>
+          <h2 className="mb-3 text-lg font-semibold text-foreground">Information We Collect</h2>
+          <p className="mb-2">We may collect information about you in a variety of ways, including:</p>
+          <ul className="ml-4 list-disc space-y-1.5">
+            <li><strong className="text-foreground">Personal Data:</strong> Name, email address, shipping address, phone number, and payment information provided when you place an order.</li>
+            <li><strong className="text-foreground">Order Data:</strong> Products purchased, order history, and transaction details.</li>
+            <li><strong className="text-foreground">Usage Data:</strong> Browser type, IP address, pages visited, and time spent on our website, collected automatically through cookies and similar technologies.</li>
+            <li><strong className="text-foreground">Communication Data:</strong> Information you provide when contacting our support team or subscribing to our newsletter.</li>
+          </ul>
+        </section>
+
+        <section>
+          <h2 className="mb-3 text-lg font-semibold text-foreground">How We Use Your Information</h2>
+          <ul className="ml-4 list-disc space-y-1.5">
+            <li>Process and fulfill your orders, including shipping and payment processing.</li>
+            <li>Send order confirmations, shipping updates, and receipts.</li>
+            <li>Respond to your inquiries and provide customer support.</li>
+            <li>Send promotional emails and newsletters (with your consent).</li>
+            <li>Improve our website, products, and services.</li>
+            <li>Prevent fraudulent transactions and protect against unauthorized activity.</li>
+          </ul>
+        </section>
+
+        <section>
+          <h2 className="mb-3 text-lg font-semibold text-foreground">Cookies</h2>
+          <p>We use cookies and similar tracking technologies to enhance your browsing experience, analyze site traffic, and personalize content. You can control cookie preferences through your browser settings. Disabling cookies may affect some website functionality.</p>
+        </section>
+
+        <section>
+          <h2 className="mb-3 text-lg font-semibold text-foreground">Data Sharing</h2>
+          <p>We do not sell your personal information. We may share your data with trusted third-party service providers who assist us in operating our website, processing payments, and delivering orders. These providers are obligated to protect your information and use it only for the purposes we specify.</p>
+        </section>
+
+        <section>
+          <h2 className="mb-3 text-lg font-semibold text-foreground">Data Security</h2>
+          <p>We implement industry-standard security measures to protect your personal information, including SSL encryption for all data transmission. However, no method of internet transmission is 100% secure, and we cannot guarantee absolute security.</p>
+        </section>
+
+        <section>
+          <h2 className="mb-3 text-lg font-semibold text-foreground">Your Rights</h2>
+          <p>Depending on your location, you may have the right to access, correct, delete, or port your personal data. You may also opt out of marketing communications at any time by clicking the unsubscribe link in our emails or contacting us directly.</p>
+        </section>
+
+        <section>
+          <h2 className="mb-3 text-lg font-semibold text-foreground">Contact Us</h2>
+          <p>If you have questions about this Privacy Policy or our data practices, please contact us through our contact page.</p>
+        </section>
+      </div>
+    </div>
+  );
+}
+`
+
+const ECOMMERCE_TEMPLATE_TERMS_POLICY = `"use client";
+
+import { useStoreConfig } from "@/lib/wemob-store";
+
+export default function TermsOfServicePage() {
+  const { config } = useStoreConfig();
+  const storeName = config?.name || "Our Store";
+
+  return (
+    <div className="mx-auto max-w-3xl px-4 py-12 sm:px-6 lg:px-8">
+      <h1 className="text-3xl font-bold tracking-tight text-foreground">Terms of Service</h1>
+      <p className="mt-2 text-sm text-muted-foreground">Last updated: {new Date().toLocaleDateString("en-US", { month: "long", year: "numeric" })}</p>
+
+      <div className="mt-8 space-y-8 text-sm leading-relaxed text-muted-foreground">
+        <section>
+          <h2 className="mb-3 text-lg font-semibold text-foreground">Acceptance of Terms</h2>
+          <p>By accessing and using the {storeName} website, you agree to be bound by these Terms of Service and all applicable laws and regulations. If you do not agree with any of these terms, you are prohibited from using this site.</p>
+        </section>
+
+        <section>
+          <h2 className="mb-3 text-lg font-semibold text-foreground">Products & Pricing</h2>
+          <p>All product descriptions, images, and prices are subject to change without notice. We reserve the right to modify or discontinue any product at any time. Prices are displayed in the store's configured currency and include applicable taxes unless otherwise stated. We make every effort to ensure pricing accuracy, but errors may occur. In the event of a pricing error, we reserve the right to cancel or refuse orders placed at the incorrect price.</p>
+        </section>
+
+        <section>
+          <h2 className="mb-3 text-lg font-semibold text-foreground">Orders & Payment</h2>
+          <p>By placing an order, you represent that the information provided is accurate and that you are authorized to use the payment method. We reserve the right to refuse or cancel any order for reasons including product availability, errors in pricing or product information, or suspected fraudulent activity.</p>
+        </section>
+
+        <section>
+          <h2 className="mb-3 text-lg font-semibold text-foreground">Intellectual Property</h2>
+          <p>All content on this website, including text, graphics, logos, images, and software, is the property of {storeName} or its content suppliers and is protected by intellectual property laws. You may not reproduce, distribute, modify, or create derivative works from any content without our express written permission.</p>
+        </section>
+
+        <section>
+          <h2 className="mb-3 text-lg font-semibold text-foreground">User Accounts</h2>
+          <p>If you create an account, you are responsible for maintaining the confidentiality of your account credentials and for all activities under your account. You agree to notify us immediately of any unauthorized use of your account. We reserve the right to terminate accounts that violate these terms.</p>
+        </section>
+
+        <section>
+          <h2 className="mb-3 text-lg font-semibold text-foreground">Limitation of Liability</h2>
+          <p>{storeName} shall not be liable for any indirect, incidental, special, consequential, or punitive damages resulting from your use of or inability to use the website or products. Our total liability for any claim arising from these terms shall not exceed the amount you paid for the product giving rise to the claim.</p>
+        </section>
+
+        <section>
+          <h2 className="mb-3 text-lg font-semibold text-foreground">Governing Law</h2>
+          <p>These Terms of Service shall be governed by and construed in accordance with applicable local laws, without regard to conflict of law principles.</p>
+        </section>
+
+        <section>
+          <h2 className="mb-3 text-lg font-semibold text-foreground">Changes to Terms</h2>
+          <p>We reserve the right to update these Terms of Service at any time. Changes will be effective immediately upon posting. Your continued use of the website after changes constitutes acceptance of the updated terms.</p>
+        </section>
+      </div>
+    </div>
+  );
+}
+`

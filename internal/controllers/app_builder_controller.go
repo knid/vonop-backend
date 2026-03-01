@@ -2708,6 +2708,20 @@ func (c *Controller) streamSingleShotGeneration(
 		return "", nil, fmt.Errorf("pre-generation setup failed: %w", setupErr)
 	}
 
+	// Inject parameterized e-commerce templates (layout + globals.css)
+	if project.ProjectType == "ecommerce" {
+		var theme models.AppTheme
+		if len(project.Theme) > 0 {
+			json.Unmarshal(project.Theme, &theme)
+		}
+		if layoutContent := buildEcommerceLayout(project.Name, theme.Typography); layoutContent != "" {
+			c.injectTemplateFile(project, "app/layout.tsx", layoutContent, fileMap, sendEvent)
+		}
+		if cssContent := buildEcommerceGlobalsCSSTheme(theme.ColorScheme, theme.DarkColorScheme); cssContent != "" {
+			c.injectTemplateFile(project, "app/globals.css", cssContent, fileMap, sendEvent)
+		}
+	}
+
 	// Send project_created event (with planned files when available)
 	projectCreatedPayload := map[string]any{
 		"id":   project.ID,
@@ -2931,6 +2945,20 @@ func (c *Controller) streamEcommerceGeneration(
 	// Run pre-generation setup (injects e-commerce templates, auth files, etc.)
 	if setupErr := c.runPreGenerationSetup(ctx, project, user, fileMap, sendEvent, provider, model, message); setupErr != nil {
 		return "", ops, fmt.Errorf("pre-generation setup failed: %w", setupErr)
+	}
+
+	// Inject parameterized e-commerce templates (layout + globals.css)
+	if project.ProjectType == "ecommerce" {
+		var theme models.AppTheme
+		if len(project.Theme) > 0 {
+			json.Unmarshal(project.Theme, &theme)
+		}
+		if layoutContent := buildEcommerceLayout(project.Name, theme.Typography); layoutContent != "" {
+			c.injectTemplateFile(project, "app/layout.tsx", layoutContent, fileMap, sendEvent)
+		}
+		if cssContent := buildEcommerceGlobalsCSSTheme(theme.ColorScheme, theme.DarkColorScheme); cssContent != "" {
+			c.injectTemplateFile(project, "app/globals.css", cssContent, fileMap, sendEvent)
+		}
 	}
 
 	// Rebuild messages with fresh context (now includes store data from Phase 1)
