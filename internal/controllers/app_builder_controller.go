@@ -2232,6 +2232,14 @@ func (c *Controller) buildBuilderToolExecutor(ctx context.Context, project *mode
 				return fmt.Sprintf("Failed to create store: %s", err.Error()), nil
 			}
 
+			// Emit visible event so the user sees store creation feedback
+			if cbs != nil {
+				cbs.sendEvent("store_created", map[string]any{
+					"store_id":   store.ID.String(),
+					"store_name": store.StoreName,
+				})
+			}
+
 			injectEcommerceTemplates()
 			envVars := c.CollectAllEnvVars(project)
 			if dotEnv := BuildDotEnvLocal(envVars); dotEnv != "" {
