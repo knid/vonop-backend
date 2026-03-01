@@ -1611,6 +1611,14 @@ Components: CartProvider
 Hooks: useCart, useProducts, useProduct, useCategories, useStoreConfig, useReviews, useWishlist
 Types: StoreConfig, StorefrontProduct, StorefrontCategory, StorefrontCart, StorefrontCartItem, StorefrontCheckout, CheckoutConfirm, OrderTracking, OrderTrackingItem, ShippingAddress, CheckoutParams, ProductReview, WishlistItem
 
+### SDK Usage Rules
+- useProducts() accepts ONLY { category?: string; q?: string }. There is NO limit parameter — use .slice() to limit results.
+- useStoreConfig() returns { config: StoreConfig | null; isLoading; error }. You MUST destructure: const { config } = useStoreConfig(). Then access config?.name, config?.currency, etc.
+- StorefrontProduct has: id, name, slug, description, images, category (name string), tags, price_in_cents, compare_at_price, min_price_cents, max_price_cents, in_stock, average_rating, review_count. There is NO category_slug field — use category (the name).
+- StorefrontCategory has: id, name, slug, image, description. There is NO product_count field.
+- OrderTrackingItem has: product_name (NOT name), quantity, price_in_cents, total_cents (NOT price). OrderTracking has: total_cents (NOT total), order_number (NOT orderNumber).
+- EmptyState accepts icon?: ReactNode and action?: ReactNode. Pass JSX elements, NOT component references or plain objects. Correct: icon={<Search className="h-12 w-12" />} action={<Link href="/products">Browse</Link>}. Wrong: icon={Search} action={{ label: "Browse", href: "/products" }}.
+
 ### Pre-Built Component Templates
 The following components are auto-injected as template files in components/ecommerce/. Do NOT recreate them — import and use them directly:
 - ProductCard — ` + "`" + `import { ProductCard } from "@/components/ecommerce/product-card"` + "`" + `

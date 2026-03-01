@@ -1023,7 +1023,7 @@ export function SiteHeader() {
   const pathname = usePathname();
   const { itemCount } = useCart();
   const { categories } = useCategories();
-  const storeConfig = useStoreConfig();
+  const { config: storeConfig } = useStoreConfig();
 
   const [cartOpen, setCartOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -1065,7 +1065,7 @@ export function SiteHeader() {
       >
         <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
           <Link href="/" className="text-xl font-bold tracking-tight text-foreground">
-            {storeConfig.name}
+            {storeConfig?.name}
           </Link>
 
           <nav className="hidden items-center gap-1 md:flex">
@@ -1160,7 +1160,7 @@ import { useCategories, useStoreConfig } from "@/lib/wemob-store";
 
 export function SiteFooter() {
   const { categories } = useCategories();
-  const storeConfig = useStoreConfig();
+  const { config: storeConfig } = useStoreConfig();
 
   const shopLinks = [
     { label: "Products", href: "/products" },
@@ -1192,7 +1192,7 @@ export function SiteFooter() {
         <div className="grid grid-cols-1 gap-8 sm:grid-cols-2 lg:grid-cols-4">
           <div className="sm:col-span-2 lg:col-span-1">
             <Link href="/" className="text-lg font-bold tracking-tight text-foreground">
-              {storeConfig.name}
+              {storeConfig?.name}
             </Link>
             <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
               Quality products curated for you. Shop with confidence and enjoy a
@@ -1273,7 +1273,7 @@ export function SiteFooter() {
 
         <div className="mt-12 border-t border-border pt-8">
           <p className="text-center text-sm text-muted-foreground">
-            &copy; {new Date().getFullYear()} {storeConfig.name}. All rights reserved.
+            &copy; {new Date().getFullYear()} {storeConfig?.name}. All rights reserved.
           </p>
         </div>
       </div>
@@ -1451,10 +1451,10 @@ export default function CartPage() {
         <h1 className="text-3xl font-bold tracking-tight text-foreground">Shopping Cart</h1>
         <div className="mt-12">
           <EmptyState
-            icon={ShoppingBag}
+            icon={<ShoppingBag className="h-12 w-12" />}
             title="Your cart is empty"
             description="Looks like you haven't added anything to your cart yet."
-            action={{ label: "Continue Shopping", href: "/products" }}
+            action={<Link href="/products" className="inline-flex h-10 items-center rounded-lg bg-primary px-5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90">Continue Shopping</Link>}
           />
         </div>
       </div>
@@ -1648,7 +1648,7 @@ export default function CheckoutSuccessPage() {
       </h1>
       <p className="mt-2 text-muted-foreground">
         Thank you for your purchase. Your order number is{" "}
-        <span className="font-semibold text-foreground">{order.orderNumber || orderId}</span>.
+        <span className="font-semibold text-foreground">{order.order_number || orderId}</span>.
       </p>
 
       <div className="mt-8 rounded-lg border border-border bg-card p-6 text-left">
@@ -1659,11 +1659,11 @@ export default function CheckoutSuccessPage() {
           {order.items?.map((item: any, idx: number) => (
             <li key={idx} className="flex items-center justify-between py-3">
               <div>
-                <p className="text-sm font-medium text-foreground">{item.name}</p>
+                <p className="text-sm font-medium text-foreground">{item.product_name}</p>
                 <p className="text-xs text-muted-foreground">Qty: {item.quantity}</p>
               </div>
               <p className="text-sm font-medium text-foreground">
-                {formatPrice(item.price * item.quantity)}
+                {formatPrice(item.total_cents)}
               </p>
             </li>
           ))}
@@ -1671,7 +1671,7 @@ export default function CheckoutSuccessPage() {
         <div className="mt-4 flex items-center justify-between border-t border-border pt-4">
           <span className="text-sm font-semibold text-foreground">Total</span>
           <span className="text-sm font-semibold text-foreground">
-            {formatPrice(order.total)}
+            {formatPrice(order.total_cents)}
           </span>
         </div>
       </div>
@@ -1728,6 +1728,7 @@ export default function CheckoutCancelPage() {
 const ECOMMERCE_TEMPLATE_PRODUCTS_PAGE = `"use client";
 
 import React, { useState, useMemo } from "react";
+import Link from "next/link";
 import { Search, SlidersHorizontal, ChevronDown } from "lucide-react";
 import { useProducts, useCategories } from "@/lib/wemob-store";
 import { ProductCard } from "@/components/ecommerce/product-card";
@@ -1764,9 +1765,8 @@ export default function ProductsPage() {
     }
 
     if (selectedCategory) {
-      result = result.filter(
-        (p) => p.category_slug === selectedCategory || p.category === selectedCategory
-      );
+      const catName = categories?.find((c) => c.slug === selectedCategory)?.name;
+      result = result.filter((p) => p.category === catName);
     }
 
     switch (sort) {
@@ -1784,7 +1784,7 @@ export default function ProductsPage() {
     }
 
     return result;
-  }, [products, search, selectedCategory, sort]);
+  }, [products, categories, search, selectedCategory, sort]);
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
@@ -1872,10 +1872,10 @@ export default function ProductsPage() {
         </div>
       ) : filtered.length === 0 ? (
         <EmptyState
-          icon={Search}
+          icon={<Search className="h-12 w-12" />}
           title="No products found"
           description={search ? "Try adjusting your search or filters." : "Check back soon for new arrivals."}
-          action={search || selectedCategory ? { label: "Clear Filters", href: "/products" } : undefined}
+          action={(search || selectedCategory) ? <Link href="/products" className="inline-flex h-10 items-center rounded-lg bg-primary px-5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90">Clear Filters</Link> : undefined}
         />
       ) : (
         <div className="grid grid-cols-2 gap-4 sm:gap-6 lg:grid-cols-3 xl:grid-cols-4">
@@ -1969,7 +1969,7 @@ export default function ProductDetailPage() {
         {product.category && (
           <>
             <ChevronRight className="h-3.5 w-3.5" />
-            <Link href={"/categories/" + (product.category_slug || product.category)} className="transition-colors hover:text-foreground">
+            <Link href={"/categories/" + product.category.toLowerCase().replace(/\s+/g, "-")} className="transition-colors hover:text-foreground">
               {product.category}
             </Link>
           </>
@@ -1980,7 +1980,7 @@ export default function ProductDetailPage() {
 
       <div className="grid gap-8 lg:grid-cols-2 lg:gap-12">
         {/* Image Gallery */}
-        <ProductGallery images={product.images || []} name={product.name} />
+        <ProductGallery images={product.images || []} productName={product.name} />
 
         {/* Product Info */}
         <div>
@@ -2069,7 +2069,7 @@ export default function ProductDetailPage() {
 
       {/* Reviews Section */}
       <div className="mt-16">
-        <ReviewList productId={product.id} />
+        <ReviewList productSlug={product.slug} />
       </div>
     </div>
   );
@@ -2096,7 +2096,7 @@ export default function CategoryPage() {
   const isLoading = productsLoading || categoriesLoading;
   const category = categories?.find((c) => c.slug === slug);
   const filtered = products?.filter(
-    (p) => p.category_slug === slug || p.category === category?.name
+    (p) => p.category === category?.name
   ) ?? [];
 
   if (isLoading) {
@@ -2144,10 +2144,10 @@ export default function CategoryPage() {
 
       {filtered.length === 0 ? (
         <EmptyState
-          icon={ChevronRight}
+          icon={<ChevronRight className="h-12 w-12" />}
           title="No products in this category"
           description="Check back soon for new arrivals in this category."
-          action={{ label: "Browse All Products", href: "/products" }}
+          action={<Link href="/products" className="inline-flex h-10 items-center rounded-lg bg-primary px-5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90">Browse All Products</Link>}
         />
       ) : (
         <div className="grid grid-cols-2 gap-4 sm:gap-6 lg:grid-cols-3 xl:grid-cols-4">
