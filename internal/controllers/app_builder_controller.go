@@ -811,13 +811,6 @@ func (c *Controller) StreamBuildApp(
 
 	// --- Save assistant message to conversation ---
 	assistantContent := strings.TrimSpace(responseText)
-	if len(appliedOps) > 0 {
-		var opLines []string
-		for _, op := range appliedOps {
-			opLines = append(opLines, fmt.Sprintf("- %s %s", op.Action, op.Path))
-		}
-		assistantContent += "\n\nFiles changed:\n" + strings.Join(opLines, "\n")
-	}
 
 	var fileOps []models.AppChatFileOp
 	for _, op := range appliedOps {
