@@ -1529,7 +1529,7 @@ export default function CartPage() {
         </div>
 
         <div className="mt-8 lg:mt-0">
-          <OrderSummary />
+          <OrderSummary cart={cart} />
           <Link
             href="/checkout"
             className="mt-4 flex h-12 w-full items-center justify-center rounded-lg bg-primary text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90"
