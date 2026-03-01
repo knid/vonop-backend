@@ -213,6 +213,8 @@ func (c *Controller) RecordTokenUsage(userID uuid.UUID, action, model, provider,
 		slog.Error("failed to record LLM token usage", "error", err, "user_id", userID, "action", action)
 	}
 
+	creditsSpent := models.TokensToCredits(prompt, completion)
+
 	if c.PostHog != nil {
 		traceID := uuid.New().String()
 
@@ -240,7 +242,8 @@ func (c *Controller) RecordTokenUsage(userID uuid.UUID, action, model, provider,
 				Set("$ai_latency", float64(entry.LatencyMs)/1000.0).
 				Set("$ai_is_error", false).
 				Set("$ai_stream", entry.IsStreaming).
-				Set("app_type", appType)
+				Set("app_type", appType).
+				Set("credits_spent", models.TokensToCredits(entry.PromptTokens, entry.CompletionTokens))
 			if entry.CacheCreationInputTokens > 0 {
 				props.Set("$ai_cache_creation_input_tokens", entry.CacheCreationInputTokens)
 			}
@@ -270,7 +273,8 @@ func (c *Controller) RecordTokenUsage(userID uuid.UUID, action, model, provider,
 			Set("$ai_session_id", reference).
 			Set("$ai_input_tokens", prompt).
 			Set("$ai_output_tokens", completion).
-			Set("app_type", appType)
+			Set("app_type", appType).
+			Set("credits_spent", creditsSpent)
 		if email != "" {
 			traceProps.Set("$email", email)
 		}
