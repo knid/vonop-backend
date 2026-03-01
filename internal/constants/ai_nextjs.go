@@ -194,21 +194,13 @@ export interface StorefrontProduct {
   images: string[];
   category: string;
   tags: string[];
-  variants: StorefrontVariant[];
-  min_price_cents: number;
-  max_price_cents: number;
-  average_rating: number;
-  review_count: number;
-}
-
-export interface StorefrontVariant {
-  id: string;
-  name: string;
   price_in_cents: number;
   compare_at_price: number;
-  inventory: number;
+  min_price_cents: number;
+  max_price_cents: number;
   in_stock: boolean;
-  options: Record<string, unknown>;
+  average_rating: number;
+  review_count: number;
 }
 
 export interface StorefrontCategory {
@@ -234,8 +226,6 @@ export interface StorefrontCartItem {
   product_id: string;
   product_name: string;
   product_image: string;
-  variant_id: string;
-  variant_name: string;
   quantity: number;
   price_cents: number;
   total_cents: number;
@@ -272,7 +262,6 @@ export interface OrderTracking {
 
 export interface OrderTrackingItem {
   product_name: string;
-  variant_name: string;
   quantity: number;
   price_in_cents: number;
   total_cents: number;
@@ -370,12 +359,11 @@ export async function getCart(sessionId: string): Promise<StorefrontCart> {
 export async function addCartItem(
   sessionId: string,
   productId: string,
-  variantId: string,
   quantity: number
 ): Promise<StorefrontCart> {
   return apiFetch<StorefrontCart>("/cart/" + sessionId + "/items", {
     method: "POST",
-    body: JSON.stringify({ product_id: productId, variant_id: variantId, quantity }),
+    body: JSON.stringify({ product_id: productId, quantity }),
   });
 }
 
@@ -647,7 +635,7 @@ interface CartContextValue {
   cart: StorefrontCart | null;
   isLoading: boolean;
   itemCount: number;
-  addItem: (productId: string, variantId?: string, quantity?: number) => Promise<void>;
+  addItem: (productId: string, quantity?: number) => Promise<void>;
   updateItem: (itemId: string, quantity: number) => Promise<void>;
   removeItem: (itemId: string) => Promise<void>;
   applyDiscount: (code: string) => Promise<void>;
@@ -742,11 +730,10 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   // --- Actions ---
 
   const handleAddItem = React.useCallback(
-    async (productId: string, variantId?: string, quantity?: number) => {
+    async (productId: string, quantity?: number) => {
       const sid = sessionIdRef.current || getSessionId();
       sessionIdRef.current = sid;
       const qty = Math.max(1, quantity ?? 1);
-      const vid = variantId ?? "";
 
       // Optimistic: add a placeholder item and recalculate totals
       const current = cartRef.current;
@@ -760,8 +747,6 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
                 product_id: productId,
                 product_name: "",
                 product_image: "",
-                variant_id: vid,
-                variant_name: "",
                 quantity: qty,
                 price_cents: 0,
                 total_cents: 0,
@@ -771,7 +756,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         : null;
 
       await withOptimistic(optimistic, () =>
-        addCartItem(sid, productId, vid, qty)
+        addCartItem(sid, productId, qty)
       );
     },
     [withOptimistic]
@@ -1462,7 +1447,7 @@ You have tools to read, write, edit, and delete project files:
 - edit_file: Apply a targeted string replacement in a file (old_string → new_string). More efficient than write_file for small changes.
 - delete_file: Remove a file from the project.
 - setup_ecommerce: Create an e-commerce store backend when the app needs product/cart/checkout features.
-- manage_store: Add products, categories, variants, and discounts to an existing store.
+- manage_store: Add products, categories, and discounts to an existing store.
 - setup_database: Provision a PostgreSQL database with schema tables when the app needs persistent data storage.
 
 ### How to Build a New App (Initial Generation)
@@ -1471,7 +1456,7 @@ When building a new app from a user's prompt:
 2. **Skip template-managed files**: lib/utils.ts and components/ui/ primitives (button, card, input, badge, skeleton) are already injected. Do NOT recreate them. Import directly: import { Button } from '@/components/ui/button'.
 3. **For e-commerce apps, set up the store first**:
    a. Call setup_ecommerce to create the store backend and inject template files.
-   b. Call manage_store to populate the store with realistic products (8-12), categories (4-6), and discount codes relevant to the store concept. Use picsum.photos images with descriptive seeds. Create categories before products. Include variants for at least 3 products.
+   b. Call manage_store to populate the store with realistic products (8-12), categories (4-6), and discount codes relevant to the store concept. Use picsum.photos images with descriptive seeds. Create categories before products. Include price_in_cents on every product.
    c. Then proceed to write all code files below.
 4. **Write feature components**: Build the reusable feature-specific components (Header, Footer, ProductCard, etc.).
 5. **Write pages**: Build each page using the components you just created.
@@ -1529,14 +1514,14 @@ complete file content here
 // e-commerce setup phase (Phase 1). The LLM should ONLY call setup_ecommerce
 // and manage_store tools — no file generation happens in this phase.
 const NEXTJS_ECOMMERCE_SETUP_INSTRUCTIONS = `
-You are in the SETUP PHASE of building an e-commerce store. Your ONLY job is to set up the store and populate it with products, categories, variants, and discount codes using the provided tools.
+You are in the SETUP PHASE of building an e-commerce store. Your ONLY job is to set up the store and populate it with products, categories, and discount codes using the provided tools.
 
 ### What To Do — FOLLOW THIS ORDER STRICTLY
 1. FIRST, before calling any tools, write a brief introduction (2-3 sentences, in the user's language) explaining what you're about to create: the store name, what kind of products it will have, and the overall vibe/theme. This text streams to the user in real time — they need to see your plan before anything else happens.
 2. Call setup_ecommerce with a fitting store name derived from the user's request.
 3. Call manage_store ONCE with ALL operations batched into a single call — categories, products (use bulk_create_products), and discount codes together. This is critical for speed. Do NOT make separate manage_store calls for categories, then products, then discounts — put them all in one call.
    - 4-6 categories that logically organize the store's products.
-   - 8-12 products spread across categories (use bulk_create_products), each with a compelling name, description, realistic price, 2-3 product images from picsum.photos, and at least one variant where appropriate.
+   - 8-12 products spread across categories (use bulk_create_products), each with a compelling name, description, realistic price_in_cents, 2-3 product images from picsum.photos, and inventory.
    - 1-2 discount codes (e.g., "WELCOME10" for 10% off).
 4. After populating the store, respond with a brief summary of what was created.
 
@@ -1618,7 +1603,7 @@ You MUST create ALL required pages listed below. If you only create a homepage, 
 Functions: getStoreConfig, getProducts, getProduct, getCategories, createCart, getCart, addCartItem, updateCartItem, removeCartItem, applyDiscountCode, removeDiscount, checkout, confirmCheckout, getOrder, formatPrice, renderPaymentForm, getSessionId, clearSession, getProductReviews, submitReview, getWishlist, addToWishlist, removeFromWishlist
 Components: CartProvider
 Hooks: useCart, useProducts, useProduct, useCategories, useStoreConfig, useReviews, useWishlist
-Types: StoreConfig, StorefrontProduct, StorefrontVariant, StorefrontCategory, StorefrontCart, StorefrontCartItem, StorefrontCheckout, CheckoutConfirm, OrderTracking, OrderTrackingItem, ShippingAddress, CheckoutParams, ProductReview, WishlistItem
+Types: StoreConfig, StorefrontProduct, StorefrontCategory, StorefrontCart, StorefrontCartItem, StorefrontCheckout, CheckoutConfirm, OrderTracking, OrderTrackingItem, ShippingAddress, CheckoutParams, ProductReview, WishlistItem
 
 ### Pre-Built Component Templates
 The following components are auto-injected as template files in components/ecommerce/. Do NOT recreate them — import and use them directly:
@@ -1643,7 +1628,7 @@ The following components are auto-injected as template files in components/ecomm
 Pages you MUST generate (not auto-injected):
 1. app/page.tsx — Homepage with hero section, featured products (useProducts), category highlights (useCategories), promotional banners
 2. app/products/page.tsx — Product grid with category filter pills, search bar, sort dropdown (price low/high, newest). Use useProducts({ category, q }).
-3. app/products/[slug]/page.tsx — Product detail with image gallery, variant selector, price display, add-to-cart button, description, reviews section
+3. app/products/[slug]/page.tsx — Product detail with image gallery, price display, add-to-cart button, description, reviews section
 4. app/categories/[slug]/page.tsx — Category page showing filtered products for the selected category
 5. app/about/page.tsx — Brand story, mission (compelling content relevant to store concept)
 6. app/contact/page.tsx — Contact form or information
@@ -1660,12 +1645,11 @@ Pages auto-injected as templates (do NOT recreate):
 - app/checkout/cancel/page.tsx — Payment cancelled with retry
 
 ### Price Display Rules
-- Product prices live on VARIANTS, not the product itself. Products have min_price_cents and max_price_cents computed from their variants.
-- For single-price products (min === max): show formatPrice(product.min_price_cents)
-- For price ranges (min !== max): show "formatPrice(min) – formatPrice(max)"
-- Sale prices: if variant.compare_at_price > 0 && variant.compare_at_price > variant.price_in_cents, show original price with line-through and sale price highlighted
+- Product prices live directly on the product: product.price_in_cents, product.compare_at_price.
+- Display price: formatPrice(product.price_in_cents)
+- Sale prices: if product.compare_at_price > 0 && product.compare_at_price > product.price_in_cents, show original price with line-through and sale price highlighted
 - ALWAYS use formatPrice() for currency formatting. NEVER do manual division (/100) or .toFixed(2).
-- Show "Out of Stock" badge when variant.in_stock === false or variant.inventory <= 0
+- Show "Out of Stock" badge when product.in_stock === false
 
 ### Image Handling
 - Use next/image for all product images with proper width/height and loading="lazy"
@@ -1906,7 +1890,7 @@ Given the user's description of an online store, generate a structured file plan
 4. Required pages (ALL of these MUST be in the file list):
    - app/page.tsx — Homepage with hero, featured products, category highlights
    - app/products/page.tsx — Product listing with category filter, search, sort
-   - app/products/[slug]/page.tsx — Product detail with gallery, variants, add-to-cart, reviews
+   - app/products/[slug]/page.tsx — Product detail with gallery, price, add-to-cart, reviews
    - app/categories/[slug]/page.tsx — Category page showing filtered products
    - app/about/page.tsx — Brand story and company information
    - app/contact/page.tsx — Contact form or details
@@ -1946,7 +1930,7 @@ Given the user's description of an online store, generate a structured file plan
     {"path":"app/page.tsx","type":"tsx","description":"Homepage with hero, featured products (useProducts), category highlights (useCategories)"},
     {"path":"app/globals.css","type":"css","description":"Global styles with Tailwind v4 @theme colors"},
     {"path":"app/products/page.tsx","type":"tsx","description":"Products listing with category filter, search, sort (useProducts)"},
-    {"path":"app/products/[slug]/page.tsx","type":"tsx","description":"Product detail with gallery, variants, reviews, add-to-cart (useProduct)"},
+    {"path":"app/products/[slug]/page.tsx","type":"tsx","description":"Product detail with gallery, price, reviews, add-to-cart (useProduct)"},
     {"path":"app/categories/[slug]/page.tsx","type":"tsx","description":"Category page showing filtered products"},
     {"path":"app/about/page.tsx","type":"tsx","description":"Brand story and company information"},
     {"path":"app/contact/page.tsx","type":"tsx","description":"Contact form or details"},

@@ -15,7 +15,6 @@ func (r *CreateCartRequest) Validate(validate *validator.Validate) error {
 
 type AddCartItemRequest struct {
 	ProductID string `json:"product_id" validate:"required" errormgs:"is required"`
-	VariantID string `json:"variant_id"`
 	Quantity  int    `json:"quantity" validate:"required,min=1" errormgs:"must be at least 1"`
 }
 

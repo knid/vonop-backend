@@ -103,7 +103,6 @@ func createSchema(db *bun.DB) error {
 		// E-commerce models
 		(*models.Store)(nil),
 		(*models.Product)(nil),
-		(*models.ProductVariant)(nil),
 		(*models.ProductCategory)(nil),
 		(*models.Discount)(nil),
 		(*models.Cart)(nil),
@@ -187,7 +186,6 @@ func createSchema(db *bun.DB) error {
 		`ALTER TABLE app_env_vars ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
 		`ALTER TABLE stores ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
 		`ALTER TABLE products ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
-		`ALTER TABLE product_variants ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
 		`ALTER TABLE product_categories ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
 		`ALTER TABLE discounts ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
 		`ALTER TABLE carts ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
@@ -197,6 +195,26 @@ func createSchema(db *bun.DB) error {
 		`ALTER TABLE app_notification_tasks ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
 		// Preview machine env hash for skip-restart optimization
 		`ALTER TABLE app_preview_machines ADD COLUMN IF NOT EXISTS last_env_hash text DEFAULT ''`,
+		// Flatten price onto products (remove variant dependency)
+		`ALTER TABLE products ADD COLUMN IF NOT EXISTS price_in_cents integer NOT NULL DEFAULT 0`,
+		`ALTER TABLE products ADD COLUMN IF NOT EXISTS compare_at_price integer DEFAULT 0`,
+		`ALTER TABLE products ADD COLUMN IF NOT EXISTS sku text DEFAULT ''`,
+		`ALTER TABLE products ADD COLUMN IF NOT EXISTS inventory integer NOT NULL DEFAULT 0`,
+		`ALTER TABLE products ADD COLUMN IF NOT EXISTS track_inventory boolean NOT NULL DEFAULT false`,
+		// Migrate default variant prices into products
+		`UPDATE products SET
+			price_in_cents = COALESCE(pv.price_in_cents, 0),
+			compare_at_price = COALESCE(pv.compare_at_price, 0),
+			sku = COALESCE(pv.sku, ''),
+			inventory = COALESCE(pv.inventory, 0),
+			track_inventory = COALESCE(pv.track_inventory, false)
+		FROM (
+			SELECT DISTINCT ON (product_id) product_id, price_in_cents, compare_at_price, sku, inventory, track_inventory
+			FROM product_variants
+			WHERE deleted_at IS NULL
+			ORDER BY product_id, is_default DESC, created_at ASC
+		) pv
+		WHERE products.id = pv.product_id AND products.price_in_cents = 0`,
 	}
 
 	// Deduplicate before creating unique indexes (keep the latest row per group)
@@ -893,13 +911,6 @@ func main() {
 								r.Get("/", httpViews.GetStoreProduct)
 								r.Put("/", httpViews.UpdateStoreProduct)
 								r.Delete("/", httpViews.DeleteStoreProduct)
-								r.Route("/variants", func(r chi.Router) {
-									r.Post("/", httpViews.CreateProductVariant)
-									r.Route("/{variantId}", func(r chi.Router) {
-										r.Put("/", httpViews.UpdateProductVariant)
-										r.Delete("/", httpViews.DeleteProductVariant)
-									})
-								})
 							})
 						})
 

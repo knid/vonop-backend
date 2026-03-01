@@ -1755,7 +1755,7 @@ var appBuilderTools = []utils.Tool{
 		Type: "function",
 		Function: utils.ToolFunction{
 			Name:        "manage_store",
-			Description: "Create or manage products, categories, variants, and discounts in the e-commerce store. Use this after setup_ecommerce to populate the store with products. Supports batch operations.",
+			Description: "Create or manage products, categories, and discounts in the e-commerce store. Use this after setup_ecommerce to populate the store with products. Supports batch operations.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -1767,7 +1767,7 @@ var appBuilderTools = []utils.Tool{
 							"properties": map[string]any{
 								"action": map[string]any{
 									"type":        "string",
-									"enum":        []string{"create_product", "update_product", "delete_product", "create_variant", "create_variant_with_options", "bulk_create_products", "create_category", "update_category", "delete_category", "create_discount", "update_discount", "delete_discount", "update_store_settings", "list_products", "list_categories"},
+									"enum":        []string{"create_product", "update_product", "delete_product", "bulk_create_products", "create_category", "update_category", "delete_category", "create_discount", "update_discount", "delete_discount", "update_store_settings", "list_products", "list_categories"},
 									"description": "The operation to perform",
 								},
 								"data": map[string]any{

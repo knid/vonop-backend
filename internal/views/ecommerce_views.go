@@ -163,21 +163,12 @@ func (v *HttpViews) GetStoreProducts(w http.ResponseWriter, r *http.Request) {
 
 	var resp []responses.ProductResponse
 	for _, p := range products {
-		variants, _ := v.Controller.GetVariants(p.ID.String())
-		var variantResp []responses.ProductVariantResp
-		for _, vr := range variants {
-			variantResp = append(variantResp, responses.ProductVariantResp{
-				ID: vr.ID, Name: vr.Name, SKU: vr.SKU,
-				PriceInCents: vr.PriceInCents, CompareAtPrice: vr.CompareAtPrice,
-				CostInCents: vr.CostInCents, Inventory: vr.Inventory,
-				TrackInventory: vr.TrackInventory, Weight: vr.Weight,
-				Options: vr.Options, IsDefault: vr.IsDefault,
-			})
-		}
 		resp = append(resp, responses.ProductResponse{
 			ID: p.ID, StoreID: p.StoreID, Name: p.Name, Slug: p.Slug,
 			Description: p.Description, Images: p.Images, CategoryID: p.CategoryID,
-			Tags: p.Tags, Status: p.Status, Variants: variantResp,
+			Tags: p.Tags, Status: p.Status,
+			PriceInCents: p.PriceInCents, CompareAtPrice: p.CompareAtPrice,
+			SKU: p.SKU, Inventory: p.Inventory, TrackInventory: p.TrackInventory,
 			CreatedAt: p.CreatedAt, UpdatedAt: p.UpdatedAt,
 		})
 	}
@@ -214,6 +205,8 @@ func (v *HttpViews) CreateStoreProduct(w http.ResponseWriter, r *http.Request) {
 		ID: product.ID, StoreID: product.StoreID, Name: product.Name,
 		Slug: product.Slug, Description: product.Description,
 		Images: product.Images, Tags: product.Tags, Status: product.Status,
+		PriceInCents: product.PriceInCents, CompareAtPrice: product.CompareAtPrice,
+		SKU: product.SKU, Inventory: product.Inventory, TrackInventory: product.TrackInventory,
 		CreatedAt: product.CreatedAt, UpdatedAt: product.UpdatedAt,
 	}, http.StatusCreated)
 }
@@ -232,21 +225,12 @@ func (v *HttpViews) GetStoreProduct(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	variants, _ := v.Controller.GetVariants(product.ID.String())
-	var variantResp []responses.ProductVariantResp
-	for _, vr := range variants {
-		variantResp = append(variantResp, responses.ProductVariantResp{
-			ID: vr.ID, Name: vr.Name, SKU: vr.SKU,
-			PriceInCents: vr.PriceInCents, CompareAtPrice: vr.CompareAtPrice,
-			Inventory: vr.Inventory, Options: vr.Options, IsDefault: vr.IsDefault,
-		})
-	}
-
 	utils.JSONResponse(w, responses.ProductResponse{
 		ID: product.ID, StoreID: product.StoreID, Name: product.Name,
 		Slug: product.Slug, Description: product.Description,
 		Images: product.Images, Tags: product.Tags, Status: product.Status,
-		Variants: variantResp,
+		PriceInCents: product.PriceInCents, CompareAtPrice: product.CompareAtPrice,
+		SKU: product.SKU, Inventory: product.Inventory, TrackInventory: product.TrackInventory,
 		CreatedAt: product.CreatedAt, UpdatedAt: product.UpdatedAt,
 	}, http.StatusOK)
 }
@@ -272,8 +256,12 @@ func (v *HttpViews) UpdateStoreProduct(w http.ResponseWriter, r *http.Request) {
 	}
 
 	utils.JSONResponse(w, responses.ProductResponse{
-		ID: product.ID, Name: product.Name, Slug: product.Slug,
-		Status: product.Status, CreatedAt: product.CreatedAt, UpdatedAt: product.UpdatedAt,
+		ID: product.ID, StoreID: product.StoreID, Name: product.Name, Slug: product.Slug,
+		Description: product.Description, Images: product.Images, Tags: product.Tags,
+		Status: product.Status,
+		PriceInCents: product.PriceInCents, CompareAtPrice: product.CompareAtPrice,
+		SKU: product.SKU, Inventory: product.Inventory, TrackInventory: product.TrackInventory,
+		CreatedAt: product.CreatedAt, UpdatedAt: product.UpdatedAt,
 	}, http.StatusOK)
 }
 
@@ -286,75 +274,6 @@ func (v *HttpViews) DeleteStoreProduct(w http.ResponseWriter, r *http.Request) {
 
 	productID := chi.URLParam(r, "productId")
 	if err := v.Controller.DeleteProduct(productID, store); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	utils.JSONResponse(w, responses.SuccessResponse{Success: true}, http.StatusOK)
-}
-
-// Variants
-
-// POST /v2/apps/{appId}/store/products/{productId}/variants
-func (v *HttpViews) CreateProductVariant(w http.ResponseWriter, r *http.Request) {
-	_, store, ok := v.getStoreForApp(w, r)
-	if !ok {
-		return
-	}
-
-	productID := chi.URLParam(r, "productId")
-	var req requests.CreateVariantRequest
-	if err := utils.ParseJSONBody(r, &req); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	variant, err := v.Controller.CreateVariant(productID, store, req)
-	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	utils.JSONResponse(w, responses.ProductVariantResp{
-		ID: variant.ID, Name: variant.Name, SKU: variant.SKU,
-		PriceInCents: variant.PriceInCents, IsDefault: variant.IsDefault,
-	}, http.StatusCreated)
-}
-
-// PUT /v2/apps/{appId}/store/products/{productId}/variants/{variantId}
-func (v *HttpViews) UpdateProductVariant(w http.ResponseWriter, r *http.Request) {
-	_, store, ok := v.getStoreForApp(w, r)
-	if !ok {
-		return
-	}
-
-	variantID := chi.URLParam(r, "variantId")
-	var req requests.UpdateVariantRequest
-	if err := utils.ParseJSONBody(r, &req); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	variant, err := v.Controller.UpdateVariant(variantID, store, req)
-	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	utils.JSONResponse(w, responses.ProductVariantResp{
-		ID: variant.ID, Name: variant.Name, PriceInCents: variant.PriceInCents,
-	}, http.StatusOK)
-}
-
-// DELETE /v2/apps/{appId}/store/products/{productId}/variants/{variantId}
-func (v *HttpViews) DeleteProductVariant(w http.ResponseWriter, r *http.Request) {
-	_, store, ok := v.getStoreForApp(w, r)
-	if !ok {
-		return
-	}
-
-	variantID := chi.URLParam(r, "variantId")
-	if err := v.Controller.DeleteVariant(variantID, store); err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -599,7 +518,7 @@ func (v *HttpViews) GetStoreOrder(w http.ResponseWriter, r *http.Request) {
 	var itemResp []responses.OrderItemResp
 	for _, i := range items {
 		itemResp = append(itemResp, responses.OrderItemResp{
-			ID: i.ID, ProductName: i.ProductName, VariantName: i.VariantName,
+			ID: i.ID, ProductName: i.ProductName,
 			Quantity: i.Quantity, PriceInCents: i.PriceInCents, TotalCents: i.TotalCents,
 		})
 	}

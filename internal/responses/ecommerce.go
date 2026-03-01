@@ -22,34 +22,24 @@ type StoreResponse struct {
 }
 
 type ProductResponse struct {
-	ID          uuid.UUID            `json:"id"`
-	StoreID     uuid.UUID            `json:"store_id"`
-	Name        string               `json:"name"`
-	Slug        string               `json:"slug"`
-	Description string               `json:"description"`
-	Images      []string             `json:"images"`
-	CategoryID  uuid.UUID            `json:"category_id,omitempty"`
-	Tags        []string             `json:"tags"`
-	Status      string               `json:"status"`
-	Variants    []ProductVariantResp `json:"variants,omitempty"`
-	Metadata    map[string]any       `json:"metadata,omitempty"`
-	SEO         map[string]any       `json:"seo,omitempty"`
-	CreatedAt   time.Time            `json:"created_at"`
-	UpdatedAt   time.Time            `json:"updated_at"`
-}
-
-type ProductVariantResp struct {
 	ID             uuid.UUID      `json:"id"`
+	StoreID        uuid.UUID      `json:"store_id"`
 	Name           string         `json:"name"`
-	SKU            string         `json:"sku"`
+	Slug           string         `json:"slug"`
+	Description    string         `json:"description"`
+	Images         []string       `json:"images"`
+	CategoryID     uuid.UUID      `json:"category_id,omitempty"`
+	Tags           []string       `json:"tags"`
+	Status         string         `json:"status"`
 	PriceInCents   int            `json:"price_in_cents"`
 	CompareAtPrice int            `json:"compare_at_price"`
-	CostInCents    int            `json:"cost_in_cents"`
+	SKU            string         `json:"sku"`
 	Inventory      int            `json:"inventory"`
 	TrackInventory bool           `json:"track_inventory"`
-	Weight         float64        `json:"weight"`
-	Options        map[string]any `json:"options"`
-	IsDefault      bool           `json:"is_default"`
+	Metadata       map[string]any `json:"metadata,omitempty"`
+	SEO            map[string]any `json:"seo,omitempty"`
+	CreatedAt      time.Time      `json:"created_at"`
+	UpdatedAt      time.Time      `json:"updated_at"`
 }
 
 type CategoryResponse struct {
@@ -101,7 +91,6 @@ type OrderResponse struct {
 type OrderItemResp struct {
 	ID           uuid.UUID `json:"id"`
 	ProductName  string    `json:"product_name"`
-	VariantName  string    `json:"variant_name"`
 	Quantity     int       `json:"quantity"`
 	PriceInCents int       `json:"price_in_cents"`
 	TotalCents   int       `json:"total_cents"`

@@ -21,10 +21,8 @@ export function ProductCard({ product, onQuickAdd }: ProductCardProps) {
   const { addItem } = useCart();
   const [isAdding, setIsAdding] = React.useState(false);
   const image = product.images?.[0];
-  const hasRange = product.min_price_cents !== product.max_price_cents;
-  const defaultVariant = product.variants?.[0];
-  const onSale = defaultVariant?.compare_at_price > 0 && defaultVariant.compare_at_price > defaultVariant.price_in_cents;
-  const outOfStock = product.variants?.length > 0 && product.variants.every((v) => !v.in_stock);
+  const onSale = product.compare_at_price > 0 && product.compare_at_price > product.price_in_cents;
+  const outOfStock = product.in_stock === false;
 
   const handleQuickAdd = async (e: React.MouseEvent) => {
     e.preventDefault();
@@ -34,8 +32,8 @@ export function ProductCard({ product, onQuickAdd }: ProductCardProps) {
     try {
       if (onQuickAdd) {
         onQuickAdd();
-      } else if (defaultVariant) {
-        await addItem(product.id, defaultVariant.id, 1);
+      } else {
+        await addItem(product.id, 1);
       }
     } catch {
       // silently fail — toast handled by parent
@@ -95,17 +93,13 @@ export function ProductCard({ product, onQuickAdd }: ProductCardProps) {
           )}
           <h3 className="truncate text-sm font-semibold text-foreground">{product.name}</h3>
           <div className="mt-1 flex items-center gap-2">
-            {onSale && defaultVariant ? (
+            {onSale ? (
               <>
-                <span className="text-sm font-bold text-red-500">{formatPrice(defaultVariant.price_in_cents)}</span>
-                <span className="text-xs text-muted-foreground line-through">{formatPrice(defaultVariant.compare_at_price)}</span>
+                <span className="text-sm font-bold text-red-500">{formatPrice(product.price_in_cents)}</span>
+                <span className="text-xs text-muted-foreground line-through">{formatPrice(product.compare_at_price)}</span>
               </>
-            ) : hasRange ? (
-              <span className="text-sm font-bold text-foreground">
-                {formatPrice(product.min_price_cents)} – {formatPrice(product.max_price_cents)}
-              </span>
             ) : (
-              <span className="text-sm font-bold text-foreground">{formatPrice(product.min_price_cents)}</span>
+              <span className="text-sm font-bold text-foreground">{formatPrice(product.price_in_cents)}</span>
             )}
           </div>
           {product.average_rating !== undefined && product.average_rating > 0 && (
@@ -247,75 +241,42 @@ export function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
 const ECOMMERCE_TEMPLATE_PRICE_DISPLAY = `"use client";
 
 import React from "react";
-import { formatPrice, type StorefrontProduct, type StorefrontVariant } from "@/lib/wemob-store";
+import { formatPrice, type StorefrontProduct } from "@/lib/wemob-store";
 
 interface PriceDisplayProps {
   product?: StorefrontProduct;
-  variant?: StorefrontVariant;
   size?: "sm" | "md" | "lg";
   className?: string;
 }
 
-export function PriceDisplay({ product, variant, size = "md", className = "" }: PriceDisplayProps) {
+export function PriceDisplay({ product, size = "md", className = "" }: PriceDisplayProps) {
   const sizeClasses = {
     sm: "text-sm",
     md: "text-base",
     lg: "text-2xl",
   };
 
-  // Single variant display
-  if (variant) {
-    const onSale = variant.compare_at_price > 0 && variant.compare_at_price > variant.price_in_cents;
-    return (
-      <div className={"flex items-center gap-2 " + className}>
-        <span className={sizeClasses[size] + " font-bold " + (onSale ? "text-red-500" : "text-foreground")}>
-          {formatPrice(variant.price_in_cents)}
+  if (!product) return null;
+
+  const onSale = product.compare_at_price > 0 && product.compare_at_price > product.price_in_cents;
+
+  return (
+    <div className={"flex items-center gap-2 " + className}>
+      <span className={sizeClasses[size] + " font-bold " + (onSale ? "text-red-500" : "text-foreground")}>
+        {formatPrice(product.price_in_cents)}
+      </span>
+      {onSale && (
+        <span className={"text-muted-foreground line-through " + (size === "lg" ? "text-base" : "text-xs")}>
+          {formatPrice(product.compare_at_price)}
         </span>
-        {onSale && (
-          <span className={"text-muted-foreground line-through " + (size === "lg" ? "text-base" : "text-xs")}>
-            {formatPrice(variant.compare_at_price)}
-          </span>
-        )}
-        {!variant.in_stock && (
-          <span className="rounded-full bg-destructive/10 px-2 py-0.5 text-xs font-medium text-destructive">
-            Out of Stock
-          </span>
-        )}
-      </div>
-    );
-  }
-
-  // Product-level display (range or single)
-  if (product) {
-    const hasRange = product.min_price_cents !== product.max_price_cents;
-    const defaultVariant = product.variants?.[0];
-    const onSale = defaultVariant?.compare_at_price > 0 && defaultVariant.compare_at_price > defaultVariant.price_in_cents;
-
-    return (
-      <div className={"flex items-center gap-2 " + className}>
-        {onSale && defaultVariant ? (
-          <>
-            <span className={sizeClasses[size] + " font-bold text-red-500"}>
-              {formatPrice(defaultVariant.price_in_cents)}
-            </span>
-            <span className={"text-muted-foreground line-through " + (size === "lg" ? "text-base" : "text-xs")}>
-              {formatPrice(defaultVariant.compare_at_price)}
-            </span>
-          </>
-        ) : hasRange ? (
-          <span className={sizeClasses[size] + " font-bold text-foreground"}>
-            {formatPrice(product.min_price_cents)} – {formatPrice(product.max_price_cents)}
-          </span>
-        ) : (
-          <span className={sizeClasses[size] + " font-bold text-foreground"}>
-            {formatPrice(product.min_price_cents)}
-          </span>
-        )}
-      </div>
-    );
-  }
-
-  return null;
+      )}
+      {product.in_stock === false && (
+        <span className="rounded-full bg-destructive/10 px-2 py-0.5 text-xs font-medium text-destructive">
+          Out of Stock
+        </span>
+      )}
+    </div>
+  );
 }
 `
 
@@ -749,9 +710,6 @@ export function CartItemRow({ item, compact = false }: CartItemRowProps) {
       <div className="flex flex-1 flex-col justify-between">
         <div>
           <h3 className={"font-medium " + (compact ? "text-sm" : "text-base")}>{item.product_name}</h3>
-          {item.variant_name && item.variant_name !== "Default" && (
-            <p className="text-xs text-muted-foreground">{item.variant_name}</p>
-          )}
         </div>
         <div className="flex items-center justify-between">
           <QuantitySelector value={item.quantity} onChange={handleQuantityChange} size={compact ? "sm" : "md"} />

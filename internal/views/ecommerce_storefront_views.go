@@ -78,39 +78,22 @@ func (v *HttpViews) StorefrontGetProducts(w http.ResponseWriter, r *http.Request
 		filtered = append(filtered, p)
 	}
 
-	// Load all variants at once to avoid N+1 queries
-	allVariants, _ := v.Controller.GetVariantsByStoreID(storeID)
-	variantMap := make(map[uuid.UUID][]responses.StorefrontVariant)
-	minPriceMap := make(map[uuid.UUID]int)
-	maxPriceMap := make(map[uuid.UUID]int)
-	for _, vr := range allVariants {
-		inStock := !vr.TrackInventory || vr.Inventory > 0
-		sfVariant := responses.StorefrontVariant{
-			ID: vr.ID, Name: vr.Name, PriceInCents: vr.PriceInCents,
-			CompareAtPrice: vr.CompareAtPrice, Inventory: vr.Inventory,
-			InStock: inStock, Options: vr.Options,
-		}
-		variantMap[vr.ProductID] = append(variantMap[vr.ProductID], sfVariant)
-
-		if cur, ok := minPriceMap[vr.ProductID]; !ok || vr.PriceInCents < cur {
-			minPriceMap[vr.ProductID] = vr.PriceInCents
-		}
-		if cur, ok := maxPriceMap[vr.ProductID]; !ok || vr.PriceInCents > cur {
-			maxPriceMap[vr.ProductID] = vr.PriceInCents
-		}
-	}
-
 	var resp []responses.StorefrontProductResponse
 	for _, p := range filtered {
 		avgRating, _ := v.Controller.DB.GetAverageRating(p.ID.String())
 		reviewCount, _ := v.Controller.DB.GetReviewCount(p.ID.String())
+		inStock := !p.TrackInventory || p.Inventory > 0
 		resp = append(resp, responses.StorefrontProductResponse{
 			ID: p.ID, Name: p.Name, Slug: p.Slug,
 			Description: p.Description, Images: p.Images,
 			Category: categoryNameMap[p.CategoryID],
-			Tags: p.Tags, Variants: variantMap[p.ID],
-			MinPrice: minPriceMap[p.ID], MaxPrice: maxPriceMap[p.ID],
-			AverageRating: avgRating, ReviewCount: reviewCount,
+			Tags:           p.Tags,
+			PriceInCents:   p.PriceInCents,
+			CompareAtPrice: p.CompareAtPrice,
+			MinPrice:       p.PriceInCents,
+			MaxPrice:       p.PriceInCents,
+			InStock:        inStock,
+			AverageRating:  avgRating, ReviewCount: reviewCount,
 		})
 	}
 
@@ -130,28 +113,10 @@ func (v *HttpViews) StorefrontGetProduct(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	product, variants, err := v.Controller.StorefrontGetProduct(storeID, slug)
+	product, err := v.Controller.StorefrontGetProduct(storeID, slug)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
 		return
-	}
-
-	var sfVariants []responses.StorefrontVariant
-	minPrice := 0
-	maxPrice := 0
-	for i, vr := range variants {
-		inStock := !vr.TrackInventory || vr.Inventory > 0
-		sfVariants = append(sfVariants, responses.StorefrontVariant{
-			ID: vr.ID, Name: vr.Name, PriceInCents: vr.PriceInCents,
-			CompareAtPrice: vr.CompareAtPrice, Inventory: vr.Inventory,
-			InStock: inStock, Options: vr.Options,
-		})
-		if i == 0 || vr.PriceInCents < minPrice {
-			minPrice = vr.PriceInCents
-		}
-		if i == 0 || vr.PriceInCents > maxPrice {
-			maxPrice = vr.PriceInCents
-		}
 	}
 
 	// Resolve category name
@@ -165,14 +130,19 @@ func (v *HttpViews) StorefrontGetProduct(w http.ResponseWriter, r *http.Request)
 
 	avgRating, _ := v.Controller.DB.GetAverageRating(product.ID.String())
 	reviewCount, _ := v.Controller.DB.GetReviewCount(product.ID.String())
+	inStock := !product.TrackInventory || product.Inventory > 0
 
 	utils.JSONResponse(w, responses.StorefrontProductResponse{
 		ID: product.ID, Name: product.Name, Slug: product.Slug,
 		Description: product.Description, Images: product.Images,
-		Category: categoryName,
-		Tags: product.Tags, Variants: sfVariants,
-		MinPrice: minPrice, MaxPrice: maxPrice,
-		AverageRating: avgRating, ReviewCount: reviewCount,
+		Category:       categoryName,
+		Tags:           product.Tags,
+		PriceInCents:   product.PriceInCents,
+		CompareAtPrice: product.CompareAtPrice,
+		MinPrice:       product.PriceInCents,
+		MaxPrice:       product.PriceInCents,
+		InStock:        inStock,
+		AverageRating:  avgRating, ReviewCount: reviewCount,
 	}, http.StatusOK)
 }
 
@@ -255,15 +225,10 @@ func (v *HttpViews) buildCartResponse(storeID, sessionID string) (*responses.Sto
 				productImage = item.Product.Images[0]
 			}
 		}
-		variantName := ""
-		if item.Variant != nil {
-			variantName = item.Variant.Name
-		}
 
 		cartItems = append(cartItems, responses.StorefrontCartItem{
 			ID: item.ID, ProductID: item.ProductID,
 			ProductName: productName, ProductImage: productImage,
-			VariantID: item.VariantID, VariantName: variantName,
 			Quantity: item.Quantity, PriceCents: item.PriceAtAddCents,
 			TotalCents: total,
 		})
@@ -335,7 +300,6 @@ func (v *HttpViews) StorefrontAddCartItem(w http.ResponseWriter, r *http.Request
 
 	var req struct {
 		ProductID string `json:"product_id"`
-		VariantID string `json:"variant_id"`
 		Quantity  int    `json:"quantity"`
 	}
 	if err := utils.ParseJSONBody(r, &req); err != nil {
@@ -343,7 +307,7 @@ func (v *HttpViews) StorefrontAddCartItem(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	_, err := v.Controller.StorefrontAddCartItem(storeID, sessionID, req.ProductID, req.VariantID, req.Quantity)
+	_, err := v.Controller.StorefrontAddCartItem(storeID, sessionID, req.ProductID, req.Quantity)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
 		return
@@ -637,7 +601,6 @@ func (v *HttpViews) StorefrontGetOrder(w http.ResponseWriter, r *http.Request) {
 	for _, item := range items {
 		respItems = append(respItems, responses.OrderTrackingItemResponse{
 			ProductName:  item.ProductName,
-			VariantName:  item.VariantName,
 			Quantity:     item.Quantity,
 			PriceInCents: item.PriceInCents,
 			TotalCents:   item.TotalCents,

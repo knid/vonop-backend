@@ -32,7 +32,7 @@ func (db *Database) UpdateCart(c *models.Cart) (*models.Cart, error) {
 
 func (db *Database) GetCartItemsByCartID(cartID string) ([]models.CartItem, error) {
 	var items []models.CartItem
-	err := db.DB.NewSelect().Model(&items).Where("cart_id = ?", cartID).Relation("Product").Relation("Variant").Scan(context.Background())
+	err := db.DB.NewSelect().Model(&items).Where("cart_id = ?", cartID).Relation("Product").Scan(context.Background())
 	return items, err
 }
 
