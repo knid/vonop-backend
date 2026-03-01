@@ -411,8 +411,53 @@ func (c *Controller) StreamBuildApp(
 	var accToolCalls []models.AppChatToolCall
 	thinkingStart := time.Time{}
 
-	if isInitialGeneration && project.ProjectType != "ecommerce" {
-		// === Single-shot path: one LLM call, no tool loop (non-ecommerce only) ===
+	if isInitialGeneration && project.ProjectType == "ecommerce" {
+		// === E-commerce two-phase path: setup tools → single-shot file gen ===
+		ecomText, ecomOps, ecomErr := c.streamEcommerceGeneration(
+			ctx, project, user, model, provider, fileMap, sendEvent, message, imageURLs,
+		)
+		if ecomErr != nil {
+			slog.Error("E-commerce generation failed", "error", ecomErr, "project_id", project.ID)
+
+			// Auto-rollback on failure
+			if preSnapshotID != "" && len(ecomOps) > 0 {
+				slog.Info("Auto-rollback: restoring pre-snapshot after failed e-commerce generation",
+					"project_id", project.ID,
+					"snapshot_id", preSnapshotID,
+					"partial_ops", len(ecomOps),
+				)
+				if _, rollbackErr := c.RestoreAppSnapshot(project, preSnapshotID); rollbackErr != nil {
+					slog.Error("Auto-rollback failed", "error", rollbackErr, "project_id", project.ID)
+				} else {
+					sendEvent("rollback", map[string]any{
+						"snapshot_id": preSnapshotID,
+						"reason":      "generation_failed",
+						"rolled_back": len(ecomOps),
+					})
+				}
+			}
+
+			messages = append(messages, models.AppConversationMessage{
+				ID:        uuid.New().String(),
+				Role:      "assistant",
+				Content:   "Sorry, I couldn't process your request. Please try again.",
+				Timestamp: time.Now().Unix(),
+			})
+			if msgJSON, err := json.Marshal(messages); err != nil {
+				slog.Error("failed to marshal messages after LLM error", "error", err, "conv_id", conv.ID)
+			} else {
+				conv.Messages = msgJSON
+				if _, err := c.DB.UpdateAppConversation(conv); err != nil {
+					slog.Error("failed to save conversation after LLM error", "error", err, "conv_id", conv.ID)
+				}
+			}
+			sendError("ai", "failed to generate changes. try again please")
+			return
+		}
+		responseText = ecomText
+		toolAppliedOps = ecomOps
+	} else if isInitialGeneration {
+		// === Single-shot path: one LLM call, no tool loop (non-ecommerce) ===
 		singleShotText, singleShotOps, singleShotErr := c.streamSingleShotGeneration(
 			ctx, project, user, model, provider, fileMap, sendEvent, message, imageURLs,
 		)
@@ -457,17 +502,7 @@ func (c *Controller) StreamBuildApp(
 		responseText = singleShotText
 		toolAppliedOps = singleShotOps
 	} else {
-		// === Tool-calling path: chat edits + e-commerce initial gen ===
-
-		// For e-commerce initial gen, send project_created here since
-		// it won't go through streamSingleShotGeneration.
-		if isInitialGeneration && project.ProjectType == "ecommerce" {
-			sendEvent("project_created", map[string]any{
-				"id":   project.ID,
-				"name": project.Name,
-				"slug": project.Slug,
-			})
-		}
+		// === Tool-calling path: chat edits ===
 
 		toolCallbacks := &builderToolCallbacks{
 			sendEvent:    sendEvent,
@@ -1542,6 +1577,21 @@ func (c *Controller) validateWithPreviewLogs(
 }
 
 // --- Tool definitions ---
+
+// filterToolsByName extracts tools from appBuilderTools matching the given names.
+func filterToolsByName(names ...string) []utils.Tool {
+	wanted := make(map[string]bool, len(names))
+	for _, n := range names {
+		wanted[n] = true
+	}
+	var out []utils.Tool
+	for _, t := range appBuilderTools {
+		if wanted[t.Function.Name] {
+			out = append(out, t)
+		}
+	}
+	return out
+}
 
 // appBuilderTools defines the tools available to the unified builder LLM.
 var appBuilderTools = []utils.Tool{
@@ -2712,6 +2762,192 @@ func (c *Controller) streamSingleShotGeneration(
 	parser.Flush()
 
 	// 6. Sync all files to preview
+	if c.PreviewService != nil {
+		c.SyncPreviewAll(project)
+	}
+
+	return responseBuilder.String(), ops, err
+}
+
+// streamEcommerceGeneration performs initial e-commerce app generation in two phases:
+//   Phase 1: Tool-calling with only setup_ecommerce + manage_store (populates the store).
+//   Phase 2: Single-shot file generation using <file> blocks (generates all code files).
+// This is faster and cheaper than running a single tool loop for everything.
+func (c *Controller) streamEcommerceGeneration(
+	ctx context.Context,
+	project *models.AppProject,
+	user *models.User,
+	model string,
+	provider *utils.LLMProvider,
+	fileMap map[string]string,
+	sendEvent func(string, any) bool,
+	message string,
+	imageURLs []string,
+) (responseText string, ops []appBuilderOperation, err error) {
+	// 1. Structure planning (same as single-shot)
+	structure, planErr := c.PlanAppFileStructure(ctx, message, project.ProjectType)
+	if planErr != nil {
+		slog.Warn("ecommerce-gen: structure planning failed, proceeding without plan",
+			"error", planErr, "project_id", project.ID)
+	} else {
+		if structure.Name != "" {
+			project.Name = structure.Name
+		}
+		if structure.Slug != "" {
+			project.Slug = structure.Slug
+		}
+		themeData := models.AppTheme{
+			ColorScheme:     structure.ColorScheme,
+			DarkColorScheme: structure.DarkColorScheme,
+			Typography:      structure.Typography,
+		}
+		if themeJSON, err := json.Marshal(themeData); err == nil {
+			project.Theme = themeJSON
+		}
+		c.ApplyStructureToProject(project, structure)
+		c.DB.UpdateAppProject(project)
+	}
+
+	// Send project_created event
+	projectCreatedPayload := map[string]any{
+		"id":   project.ID,
+		"name": project.Name,
+		"slug": project.Slug,
+	}
+	if structure != nil && len(structure.Files) > 0 {
+		plannedPaths := make([]string, 0, len(structure.Files))
+		for _, f := range structure.Files {
+			plannedPaths = append(plannedPaths, f.Path)
+		}
+		projectCreatedPayload["planned_files"] = plannedPaths
+	}
+	sendEvent("project_created", projectCreatedPayload)
+
+	// === Phase 1: Setup (tool-calling with setup_ecommerce + manage_store only) ===
+	slog.Info("ecommerce-gen: starting Phase 1 (store setup)",
+		"model", model, "project_id", project.ID)
+
+	setupTools := filterToolsByName("setup_ecommerce", "manage_store")
+
+	setupCallbacks := &builderToolCallbacks{
+		sendEvent:    sendEvent,
+		appliedOps:   &ops,
+		pendingFiles: make(map[string]string),
+	}
+
+	setupExecutor := c.buildBuilderToolExecutor(ctx, project, user, fileMap, setupCallbacks)
+	executor := c.compositeToolExecutor(setupExecutor)
+
+	setupMessages := []utils.Message{
+		{Role: "system", Content: constants.NEXTJS_ECOMMERCE_COMMON_RULES + constants.NEXTJS_ECOMMERCE_SETUP_INSTRUCTIONS},
+		{Role: "user", Content: message},
+	}
+
+	setupConfig := utils.ToolCallConfig{
+		MaxRounds:  10,
+		NudgeAfter: 6,
+		StripAfter: 8,
+		MaxTokens:  8192,
+		NudgeMessage: "You have made many tool calls. Finish populating the store and provide a brief summary.",
+		OnToolCallStart: func(toolName string) {
+			sendEvent("tool_start", map[string]any{"tool": toolName})
+		},
+	}
+
+	_, setupErr := utils.StreamWithTools(
+		ctx, model, setupMessages, setupTools, provider,
+		nil, // no forced JSON format
+		nil, // no reasoning for setup phase
+		executor,
+		func(toolName, args string) {
+			sendEvent("tool_call", responses.ToolCallEvent{
+				Tool:      toolName,
+				Arguments: args,
+			})
+		},
+		func(chunk string) {
+			chunk = ansiRegex.ReplaceAllString(chunk, "")
+			if chunk != "" {
+				sendEvent("chat_text", responses.ChatTextEvent{Chunk: chunk})
+			}
+		},
+		func(chunk string) {
+			sendEvent("chat_thinking", responses.ChatThinkingEvent{Chunk: chunk})
+		},
+		setupConfig,
+	)
+
+	// Flush any pending preview files from Phase 1
+	c.flushPendingPreview(project, setupCallbacks)
+
+	if setupErr != nil {
+		return "", ops, fmt.Errorf("ecommerce setup phase failed: %w", setupErr)
+	}
+
+	// Check context cancellation between phases
+	if ctx.Err() != nil {
+		return "", ops, ctx.Err()
+	}
+
+	// === Phase 2: File generation (single-shot, no tools) ===
+	slog.Info("ecommerce-gen: starting Phase 2 (file generation)",
+		"model", model, "project_id", project.ID)
+
+	// Run pre-generation setup (injects e-commerce templates, auth files, etc.)
+	if setupErr := c.runPreGenerationSetup(ctx, project, user, fileMap, sendEvent, provider, model, message); setupErr != nil {
+		return "", ops, fmt.Errorf("pre-generation setup failed: %w", setupErr)
+	}
+
+	// Rebuild messages with fresh context (now includes store data from Phase 1)
+	llmMessages := []utils.Message{
+		{Role: "system", Content: buildSingleShotSystemPrompt(project)},
+		{Role: "system", Content: c.buildProjectContext(project, fileMap, true)},
+	}
+
+	userContent := message
+	if len(imageURLs) > 0 {
+		userContent += fmt.Sprintf("\n\n[User attached %d image(s) for visual reference — recreate the design shown]", len(imageURLs))
+	}
+	llmMessages = append(llmMessages, utils.Message{Role: "user", Content: userContent})
+
+	// Set up streaming file parser
+	var responseBuilder strings.Builder
+	parser := &utils.FileStreamParser{
+		OnFile: func(path, content string) {
+			content = utils.StripCodeFences(content)
+			_, fileType := guessFileType(path)
+			if fileType == "tsx" || fileType == "ts" {
+				content, _ = stripForbiddenImports(content, path)
+			}
+			c.saveGeneratedFile(project, path, content, fileType, fileMap, sendEvent, &ops)
+		},
+		OnText: func(text string) {
+			responseBuilder.WriteString(text)
+			cleaned := ansiRegex.ReplaceAllString(text, "")
+			if cleaned != "" {
+				sendEvent("chat_text", responses.ChatTextEvent{Chunk: cleaned})
+			}
+		},
+	}
+
+	// Single LLM call — no tools
+	slog.Info("ecommerce-gen: Phase 2 LLM call",
+		"model", model,
+		"project_id", project.ID,
+		"message_count", len(llmMessages),
+	)
+
+	_, err = utils.StreamTextFromLLMWithMessages(
+		ctx, model, llmMessages, provider,
+		func(chunk string) { parser.Feed(chunk) },
+		func(chunk string) {
+			sendEvent("chat_thinking", responses.ChatThinkingEvent{Chunk: chunk})
+		},
+		utils.StreamTextConfig{MaxTokens: 65536},
+	)
+	parser.Flush()
+
+	// Sync all files to preview
 	if c.PreviewService != nil {
 		c.SyncPreviewAll(project)
 	}

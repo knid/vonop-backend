@@ -1525,6 +1525,32 @@ complete file content here
 - Write app/layout.tsx LAST — it must have <html lang="en"> and <body> tags wrapping {children}. Import Google Fonts using next/font/google. Export metadata.
 - Every file you create must be complete: no placeholders, no "TODO", no stub implementations.`
 
+// NEXTJS_ECOMMERCE_SETUP_INSTRUCTIONS contains focused instructions for the
+// e-commerce setup phase (Phase 1). The LLM should ONLY call setup_ecommerce
+// and manage_store tools — no file generation happens in this phase.
+const NEXTJS_ECOMMERCE_SETUP_INSTRUCTIONS = `
+You are in the SETUP PHASE of building an e-commerce store. Your ONLY job is to set up the store and populate it with products, categories, variants, and discount codes using the provided tools.
+
+### What To Do
+1. Call setup_ecommerce with a fitting store name derived from the user's request.
+2. Call manage_store (one or more times) to populate the store:
+   - Create 4-6 categories that logically organize the store's products.
+   - Create 8-12 products spread across categories, each with:
+     - A compelling name, description, and realistic price
+     - 2-4 product images from picsum.photos (use different seeds for variety)
+     - At least one variant (e.g., size, color) where appropriate
+   - Create 1-2 discount codes (e.g., "WELCOME10" for 10% off, "FREESHIP" for free shipping).
+3. After populating the store, respond with a brief summary of what was created.
+
+### Rules
+- Do NOT generate any code files — no write_file, no edit_file, no delete_file. File generation happens in a separate phase.
+- Do NOT call read_file, list_files, or search_files.
+- Focus on creating a rich, realistic product catalog that matches the user's description.
+- Use the user's language for product names and descriptions (if the user writes in Turkish, products should be in Turkish, etc.).
+- Make prices realistic for the product category and currency.
+- Use bulk operations (bulk_create_products, multiple operations in one manage_store call) for efficiency.
+- When done, briefly summarize what you created (in the user's language). Do NOT discuss code or file structure.`
+
 // NEXTJS_BUILDER_SYSTEM_PROMPT is the composed prompt for the tool-calling path
 // (chat editing and fallback). It combines COMMON_RULES + TOOL_INSTRUCTIONS.
 const NEXTJS_BUILDER_SYSTEM_PROMPT = NEXTJS_BUILDER_COMMON_RULES + NEXTJS_BUILDER_TOOL_INSTRUCTIONS
