@@ -321,12 +321,12 @@ export function PriceDisplay({ product, variant, size = "md", className = "" }: 
 
 const ECOMMERCE_TEMPLATE_QUANTITY_SELECTOR = `"use client";
 
-import React from "react";
+import React, { useState } from "react";
 import { Minus, Plus } from "lucide-react";
 
 interface QuantitySelectorProps {
-  value: number;
-  onChange: (value: number) => void;
+  value?: number;
+  onChange?: (value: number) => void;
   min?: number;
   max?: number;
   size?: "sm" | "md";
@@ -334,13 +334,21 @@ interface QuantitySelectorProps {
 }
 
 export function QuantitySelector({
-  value,
+  value: controlledValue,
   onChange,
   min = 1,
   max = 99,
   size = "md",
   disabled = false,
 }: QuantitySelectorProps) {
+  const [internalValue, setInternalValue] = useState(controlledValue ?? min);
+  const value = controlledValue ?? internalValue;
+
+  const handleChange = (next: number) => {
+    setInternalValue(next);
+    onChange?.(next);
+  };
+
   const btnSize = size === "sm" ? "h-7 w-7" : "h-9 w-9";
   const textSize = size === "sm" ? "text-sm w-8" : "text-base w-10";
   const iconSize = size === "sm" ? "h-3 w-3" : "h-4 w-4";
@@ -348,7 +356,7 @@ export function QuantitySelector({
   return (
     <div className="inline-flex items-center rounded-lg border border-border">
       <button
-        onClick={() => onChange(Math.max(min, value - 1))}
+        onClick={() => handleChange(Math.max(min, value - 1))}
         disabled={disabled || value <= min}
         className={"flex items-center justify-center rounded-l-lg transition-colors hover:bg-muted disabled:opacity-40 " + btnSize}
         aria-label="Decrease quantity"
@@ -357,7 +365,7 @@ export function QuantitySelector({
       </button>
       <span className={"text-center font-medium tabular-nums " + textSize}>{value}</span>
       <button
-        onClick={() => onChange(Math.min(max, value + 1))}
+        onClick={() => handleChange(Math.min(max, value + 1))}
         disabled={disabled || value >= max}
         className={"flex items-center justify-center rounded-r-lg transition-colors hover:bg-muted disabled:opacity-40 " + btnSize}
         aria-label="Increase quantity"
