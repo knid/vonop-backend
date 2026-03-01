@@ -2676,7 +2676,7 @@ func (c *Controller) streamSingleShotGeneration(
 			project.Name = structure.Name
 		}
 		if structure.Slug != "" {
-			project.Slug = structure.Slug
+			project.Slug = structure.Slug + "-" + uuid.New().String()[:8]
 		}
 		themeData := models.AppTheme{
 			ColorScheme:     structure.ColorScheme,
@@ -2687,7 +2687,10 @@ func (c *Controller) streamSingleShotGeneration(
 			project.Theme = themeJSON
 		}
 		c.ApplyStructureToProject(project, structure)
-		c.DB.UpdateAppProject(project)
+		if _, err := c.DB.UpdateAppProject(project); err != nil {
+			slog.Warn("single-shot: failed to update project after structure planning",
+				"error", err, "project_id", project.ID)
+		}
 	}
 
 	// 2. Run pre-generation setup (e-commerce store, Neon database, auth templates).
@@ -2794,7 +2797,7 @@ func (c *Controller) streamEcommerceGeneration(
 			project.Name = structure.Name
 		}
 		if structure.Slug != "" {
-			project.Slug = structure.Slug
+			project.Slug = structure.Slug + "-" + uuid.New().String()[:8]
 		}
 		themeData := models.AppTheme{
 			ColorScheme:     structure.ColorScheme,
@@ -2805,7 +2808,10 @@ func (c *Controller) streamEcommerceGeneration(
 			project.Theme = themeJSON
 		}
 		c.ApplyStructureToProject(project, structure)
-		c.DB.UpdateAppProject(project)
+		if _, err := c.DB.UpdateAppProject(project); err != nil {
+			slog.Warn("ecommerce-gen: failed to update project after structure planning",
+				"error", err, "project_id", project.ID)
+		}
 	}
 
 	// Send project_created event
