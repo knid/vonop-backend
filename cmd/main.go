@@ -329,8 +329,8 @@ func main() {
 	)
 
 	sqldb := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn)))
-	sqldb.SetMaxOpenConns(50)
-	sqldb.SetMaxIdleConns(25)
+	sqldb.SetMaxOpenConns(20)
+	sqldb.SetMaxIdleConns(10)
 	sqldb.SetConnMaxLifetime(30 * time.Minute)
 	sqldb.SetConnMaxIdleTime(5 * time.Minute)
 	bundb := bun.NewDB(sqldb, pgdialect.New())
