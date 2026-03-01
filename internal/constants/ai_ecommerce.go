@@ -7,11 +7,9 @@ You will receive the current store state (products, categories, discounts, recen
 Based on the user's message, return a JSON object with operations to perform and a friendly summary.
 
 ### Available Actions
-- create_product: Create a new product with name, description, price (in cents), images, category, tags
+- create_product: Create a new product with name, description, price_in_cents, images, category, tags, inventory, sku
 - update_product: Update an existing product (MUST include "id" — the product UUID from store state)
 - delete_product: Delete a product (MUST include "id" — the product UUID from store state)
-- create_variant: Create a product variant with name, SKU, price, inventory, options
-- update_variant: Update a variant's fields
 - create_category: Create a product category
 - update_category: Update a category (MUST include "id" — the category UUID)
 - create_discount: Create a discount code with type (percentage/fixed), value, conditions
@@ -22,7 +20,7 @@ Based on the user's message, return a JSON object with operations to perform and
 ### Rules
 1. Always use price values in cents (e.g., $29.99 = 2999).
 2. Generate sensible slugs from product/category names.
-3. When creating products, also create a default variant if no variants are specified.
+3. Always include price_in_cents when creating products.
 4. For bulk operations (e.g., "add 5 t-shirts"), create each product individually.
 5. Generate realistic descriptions if not provided.
 6. Return ONLY the JSON response. No markdown wrapping.
@@ -36,6 +34,9 @@ Based on the user's message, return a JSON object with operations to perform and
         "name": "Classic T-Shirt",
         "slug": "classic-t-shirt",
         "description": "Comfortable cotton t-shirt...",
+        "price_in_cents": 2999,
+        "inventory": 100,
+        "sku": "TS-001",
         "images": [],
         "tags": ["clothing", "t-shirt"],
         "status": "active"
@@ -46,18 +47,7 @@ Based on the user's message, return a JSON object with operations to perform and
       "data": {
         "id": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
         "name": "Updated Product Name",
-        "description": "Updated description..."
-      }
-    },
-    {
-      "action": "create_variant",
-      "data": {
-        "product_slug": "classic-t-shirt",
-        "name": "Default",
-        "sku": "TS-001",
-        "price_in_cents": 2999,
-        "inventory": 100,
-        "is_default": true
+        "price_in_cents": 3499
       }
     }
   ],
@@ -88,24 +78,15 @@ const ECOMMERCE_DEFAULT_DATA_MODELS = `[
       {"name": "name", "type": "text", "nullable": false},
       {"name": "slug", "type": "text", "nullable": false},
       {"name": "description", "type": "text", "nullable": true},
-      {"name": "price_cents", "type": "integer", "nullable": false},
+      {"name": "price_in_cents", "type": "integer", "nullable": false, "default": "0"},
+      {"name": "compare_at_price", "type": "integer", "nullable": true, "default": "0"},
+      {"name": "sku", "type": "text", "nullable": true},
+      {"name": "inventory", "type": "integer", "nullable": false, "default": "0"},
+      {"name": "track_inventory", "type": "boolean", "nullable": false, "default": "false"},
       {"name": "images", "type": "jsonb", "nullable": false, "default": "'[]'::jsonb"},
       {"name": "category_id", "type": "uuid", "nullable": true, "references": "categories.id"},
       {"name": "status", "type": "text", "nullable": false, "default": "'active'"},
       {"name": "tags", "type": "jsonb", "nullable": false, "default": "'[]'::jsonb"},
-      {"name": "created_at", "type": "timestamp", "nullable": false, "default": "now()"},
-      {"name": "updated_at", "type": "timestamp", "nullable": false, "default": "now()"}
-    ]
-  },
-  {
-    "name": "product_variants",
-    "columns": [
-      {"name": "id", "type": "uuid", "primary_key": true},
-      {"name": "product_id", "type": "uuid", "nullable": false, "references": "products.id"},
-      {"name": "name", "type": "text", "nullable": false},
-      {"name": "sku", "type": "text", "nullable": true},
-      {"name": "price_cents", "type": "integer", "nullable": false},
-      {"name": "inventory", "type": "integer", "nullable": false, "default": "0"},
       {"name": "created_at", "type": "timestamp", "nullable": false, "default": "now()"},
       {"name": "updated_at", "type": "timestamp", "nullable": false, "default": "now()"}
     ]
@@ -127,7 +108,6 @@ const ECOMMERCE_DEFAULT_DATA_MODELS = `[
       {"name": "id", "type": "uuid", "primary_key": true},
       {"name": "cart_id", "type": "uuid", "nullable": false, "references": "carts.id"},
       {"name": "product_id", "type": "uuid", "nullable": false, "references": "products.id"},
-      {"name": "variant_id", "type": "uuid", "nullable": true, "references": "product_variants.id"},
       {"name": "quantity", "type": "integer", "nullable": false, "default": "1"},
       {"name": "price_at_add_cents", "type": "integer", "nullable": false},
       {"name": "created_at", "type": "timestamp", "nullable": false, "default": "now()"}
@@ -154,7 +134,6 @@ const ECOMMERCE_DEFAULT_DATA_MODELS = `[
       {"name": "id", "type": "uuid", "primary_key": true},
       {"name": "order_id", "type": "uuid", "nullable": false, "references": "orders.id"},
       {"name": "product_id", "type": "uuid", "nullable": true},
-      {"name": "variant_id", "type": "uuid", "nullable": true},
       {"name": "product_name", "type": "text", "nullable": false},
       {"name": "quantity", "type": "integer", "nullable": false},
       {"name": "price_cents", "type": "integer", "nullable": false},

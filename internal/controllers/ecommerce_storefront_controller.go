@@ -51,16 +51,15 @@ func (c *Controller) StorefrontGetProducts(storeID string) ([]models.Product, er
 	return active, nil
 }
 
-func (c *Controller) StorefrontGetProduct(storeID string, slug string) (*models.Product, []models.ProductVariant, error) {
+func (c *Controller) StorefrontGetProduct(storeID string, slug string) (*models.Product, error) {
 	product, err := c.DB.GetProductBySlug(storeID, slug)
 	if err != nil {
-		return nil, nil, fmt.Errorf("product not found")
+		return nil, fmt.Errorf("product not found")
 	}
 	if product.Status != "active" {
-		return nil, nil, fmt.Errorf("product not found")
+		return nil, fmt.Errorf("product not found")
 	}
-	variants, _ := c.DB.GetVariantsByProductID(product.ID.String())
-	return product, variants, nil
+	return product, nil
 }
 
 func (c *Controller) StorefrontGetCategories(storeID string) ([]models.ProductCategory, error) {
@@ -91,7 +90,7 @@ func (c *Controller) StorefrontGetCart(storeID string, sessionID string) (*model
 	return cart, items, nil
 }
 
-func (c *Controller) StorefrontAddCartItem(storeID string, sessionID string, productID string, variantID string, quantity int) (*models.CartItem, error) {
+func (c *Controller) StorefrontAddCartItem(storeID string, sessionID string, productID string, quantity int) (*models.CartItem, error) {
 	cart, err := c.DB.GetCartBySessionID(storeID, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("cart not found")
@@ -102,54 +101,19 @@ func (c *Controller) StorefrontAddCartItem(storeID string, sessionID string, pro
 		return nil, fmt.Errorf("product not found")
 	}
 
-	// Determine price from variant or default variant
-	price := 0
-	var vid uuid.UUID
-	if variantID != "" {
-		vid, _ = uuid.Parse(variantID)
-		variant, err := c.DB.GetVariantByID(variantID)
-		if err != nil {
-			return nil, fmt.Errorf("variant not found")
-		}
-		price = variant.PriceInCents
-		// Fix 8: Check inventory before adding to cart
-		if variant.TrackInventory && variant.Inventory < quantity {
-			return nil, fmt.Errorf("insufficient stock: only %d available", variant.Inventory)
-		}
-	} else {
-		// Use default variant
-		variants, _ := c.DB.GetVariantsByProductID(productID)
-		for _, v := range variants {
-			if v.IsDefault {
-				vid = v.ID
-				price = v.PriceInCents
-				if v.TrackInventory && v.Inventory < quantity {
-					return nil, fmt.Errorf("insufficient stock: only %d available", v.Inventory)
-				}
-				break
-			}
-		}
-		if price == 0 && len(variants) > 0 {
-			vid = variants[0].ID
-			price = variants[0].PriceInCents
-			if variants[0].TrackInventory && variants[0].Inventory < quantity {
-				return nil, fmt.Errorf("insufficient stock: only %d available", variants[0].Inventory)
-			}
-		}
-	}
-
-	// Fix 22: Reject items with no valid price or variant
+	price := product.PriceInCents
 	if price == 0 {
 		return nil, fmt.Errorf("product has no valid price configuration")
 	}
-	if vid == uuid.Nil {
-		return nil, fmt.Errorf("no variant available for this product")
+
+	if product.TrackInventory && product.Inventory < quantity {
+		return nil, fmt.Errorf("insufficient stock: only %d available", product.Inventory)
 	}
 
-	// Fix 10: Merge duplicate cart items
+	// Merge duplicate cart items
 	existingItems, _ := c.DB.GetCartItemsByCartID(cart.ID.String())
 	for _, existing := range existingItems {
-		if existing.ProductID.String() == productID && existing.VariantID == vid {
+		if existing.ProductID.String() == productID {
 			existing.Quantity += quantity
 			existing.UpdatedAt = time.Now()
 			return c.DB.UpdateCartItem(&existing)
@@ -160,12 +124,10 @@ func (c *Controller) StorefrontAddCartItem(storeID string, sessionID string, pro
 	item := &models.CartItem{
 		CartID:          cart.ID,
 		ProductID:       pid,
-		VariantID:       vid,
 		Quantity:        quantity,
 		PriceAtAddCents: price,
 	}
 
-	_ = product // used for validation above
 	return c.DB.CreateCartItem(item)
 }
 
@@ -261,17 +223,11 @@ func (c *Controller) StorefrontCheckout(storeID string, sessionID string, custom
 		return nil, "", "", fmt.Errorf("store not found")
 	}
 
-	// Fix 8: Re-validate inventory at checkout time
+	// Re-validate inventory at checkout time
 	for _, item := range items {
-		if item.VariantID != uuid.Nil {
-			variant, err := c.DB.GetVariantByID(item.VariantID.String())
-			if err == nil && variant.TrackInventory && variant.Inventory < item.Quantity {
-				productName := ""
-				if p, _ := c.DB.GetProductByID(item.ProductID.String()); p != nil {
-					productName = p.Name
-				}
-				return nil, "", "", fmt.Errorf("insufficient stock for %s: only %d available", productName, variant.Inventory)
-			}
+		product, err := c.DB.GetProductByID(item.ProductID.String())
+		if err == nil && product.TrackInventory && product.Inventory < item.Quantity {
+			return nil, "", "", fmt.Errorf("insufficient stock for %s: only %d available", product.Name, product.Inventory)
 		}
 	}
 
@@ -371,20 +327,11 @@ func (c *Controller) StorefrontCheckout(storeID string, sessionID string, custom
 		if product != nil {
 			productName = product.Name
 		}
-		variantName := ""
-		if item.VariantID != uuid.Nil {
-			variant, _ := c.DB.GetVariantByID(item.VariantID.String())
-			if variant != nil {
-				variantName = variant.Name
-			}
-		}
 
 		orderItems = append(orderItems, models.OrderItem{
 			OrderID:      order.ID,
 			ProductID:    item.ProductID,
-			VariantID:    item.VariantID,
 			ProductName:  productName,
-			VariantName:  variantName,
 			Quantity:     item.Quantity,
 			PriceInCents: item.PriceAtAddCents,
 			TotalCents:   item.PriceAtAddCents * item.Quantity,
@@ -399,18 +346,16 @@ func (c *Controller) StorefrontCheckout(storeID string, sessionID string, custom
 		c.DB.UpdateDiscount(discount)
 	}
 
-	// Fix 7: Decrement inventory
+	// Decrement inventory
 	for _, item := range items {
-		if item.VariantID != uuid.Nil {
-			variant, err := c.DB.GetVariantByID(item.VariantID.String())
-			if err == nil && variant.TrackInventory {
-				variant.Inventory -= item.Quantity
-				if variant.Inventory < 0 {
-					variant.Inventory = 0
-				}
-				variant.UpdatedAt = time.Now()
-				c.DB.UpdateVariant(variant)
+		product, err := c.DB.GetProductByID(item.ProductID.String())
+		if err == nil && product.TrackInventory {
+			product.Inventory -= item.Quantity
+			if product.Inventory < 0 {
+				product.Inventory = 0
 			}
+			product.UpdatedAt = time.Now()
+			c.DB.UpdateProduct(product)
 		}
 	}
 
@@ -967,11 +912,6 @@ func (c *Controller) StorefrontHandleStripeWebhook(body []byte) error {
 	}
 
 	return nil
-}
-
-// GetVariantsByStoreID loads all variants for a store in a single query (N+1 fix).
-func (c *Controller) GetVariantsByStoreID(storeID string) ([]models.ProductVariant, error) {
-	return c.DB.GetVariantsByStoreID(storeID)
 }
 
 // --- Iyzico helper functions ---

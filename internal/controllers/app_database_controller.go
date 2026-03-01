@@ -43,7 +43,6 @@ var appScopedTables = map[string]appScopedTable{
 	"stores":              {DisplayName: "Stores", Scope: scopeByAppProjectID},
 	"products":            {DisplayName: "Products", Scope: scopeByStoreID},
 	"product_categories":  {DisplayName: "Categories", Scope: scopeByStoreID},
-	"product_variants":    {DisplayName: "Variants", Scope: scopeByStoreViaProduct},
 	"discounts":           {DisplayName: "Discounts", Scope: scopeByStoreID},
 	"carts":               {DisplayName: "Carts", Scope: scopeByStoreID},
 	"cart_items":          {DisplayName: "Cart Items", Scope: scopeByStoreViaCart},

@@ -28,14 +28,19 @@ func (r *StoreChatRequest) Validate(validate *validator.Validate) error {
 }
 
 type CreateProductRequest struct {
-	Name        string         `json:"name" validate:"required,min=1,max=200" errormgs:"must be between 1 and 200 characters"`
-	Description string         `json:"description"`
-	Images      []string       `json:"images"`
-	CategoryID  string         `json:"category_id"`
-	Tags        []string       `json:"tags"`
-	Status      string         `json:"status" validate:"omitempty,oneof=active draft archived" errormgs:"must be active, draft, or archived"`
-	Metadata    map[string]any `json:"metadata"`
-	SEO         map[string]any `json:"seo"`
+	Name           string         `json:"name" validate:"required,min=1,max=200" errormgs:"must be between 1 and 200 characters"`
+	Description    string         `json:"description"`
+	Images         []string       `json:"images"`
+	CategoryID     string         `json:"category_id"`
+	Tags           []string       `json:"tags"`
+	Status         string         `json:"status" validate:"omitempty,oneof=active draft archived" errormgs:"must be active, draft, or archived"`
+	PriceInCents   int            `json:"price_in_cents" validate:"min=0" errormgs:"must be a non-negative number"`
+	CompareAtPrice int            `json:"compare_at_price"`
+	SKU            string         `json:"sku"`
+	Inventory      int            `json:"inventory"`
+	TrackInventory bool           `json:"track_inventory"`
+	Metadata       map[string]any `json:"metadata"`
+	SEO            map[string]any `json:"seo"`
 }
 
 func (r *CreateProductRequest) Validate(validate *validator.Validate) error {
@@ -43,48 +48,23 @@ func (r *CreateProductRequest) Validate(validate *validator.Validate) error {
 }
 
 type UpdateProductRequest struct {
-	Name        *string        `json:"name" validate:"omitempty,min=1,max=200" errormgs:"must be between 1 and 200 characters"`
-	Description *string        `json:"description"`
-	Images      []string       `json:"images"`
-	CategoryID  *string        `json:"category_id"`
-	Tags        []string       `json:"tags"`
-	Status      *string        `json:"status" validate:"omitempty,oneof=active draft archived" errormgs:"must be active, draft, or archived"`
-	Metadata    map[string]any `json:"metadata"`
-	SEO         map[string]any `json:"seo"`
+	Name           *string        `json:"name" validate:"omitempty,min=1,max=200" errormgs:"must be between 1 and 200 characters"`
+	Description    *string        `json:"description"`
+	Images         []string       `json:"images"`
+	CategoryID     *string        `json:"category_id"`
+	Tags           []string       `json:"tags"`
+	Status         *string        `json:"status" validate:"omitempty,oneof=active draft archived" errormgs:"must be active, draft, or archived"`
+	PriceInCents   *int           `json:"price_in_cents"`
+	CompareAtPrice *int           `json:"compare_at_price"`
+	SKU            *string        `json:"sku"`
+	Inventory      *int           `json:"inventory"`
+	TrackInventory *bool          `json:"track_inventory"`
+	Metadata       map[string]any `json:"metadata"`
+	SEO            map[string]any `json:"seo"`
 }
 
 func (r *UpdateProductRequest) Validate(validate *validator.Validate) error {
 	return utils.ValidateFunc[UpdateProductRequest](*r, validate)
-}
-
-type CreateVariantRequest struct {
-	Name           string         `json:"name" validate:"required" errormgs:"is required"`
-	SKU            string         `json:"sku"`
-	PriceInCents   int            `json:"price_in_cents" validate:"required,min=0" errormgs:"must be a non-negative number"`
-	CompareAtPrice int            `json:"compare_at_price"`
-	CostInCents    int            `json:"cost_in_cents"`
-	Inventory      int            `json:"inventory"`
-	TrackInventory bool           `json:"track_inventory"`
-	Weight         float64        `json:"weight"`
-	Options        map[string]any `json:"options"`
-	IsDefault      bool           `json:"is_default"`
-}
-
-func (r *CreateVariantRequest) Validate(validate *validator.Validate) error {
-	return utils.ValidateFunc[CreateVariantRequest](*r, validate)
-}
-
-type UpdateVariantRequest struct {
-	Name           *string        `json:"name"`
-	SKU            *string        `json:"sku"`
-	PriceInCents   *int           `json:"price_in_cents"`
-	CompareAtPrice *int           `json:"compare_at_price"`
-	CostInCents    *int           `json:"cost_in_cents"`
-	Inventory      *int           `json:"inventory"`
-	TrackInventory *bool          `json:"track_inventory"`
-	Weight         *float64       `json:"weight"`
-	Options        map[string]any `json:"options"`
-	IsDefault      *bool          `json:"is_default"`
 }
 
 type CreateCategoryRequest struct {

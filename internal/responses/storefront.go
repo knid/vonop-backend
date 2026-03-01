@@ -7,28 +7,20 @@ import (
 )
 
 type StorefrontProductResponse struct {
-	ID            uuid.UUID           `json:"id"`
-	Name          string              `json:"name"`
-	Slug          string              `json:"slug"`
-	Description   string              `json:"description"`
-	Images        []string            `json:"images"`
-	Category      string              `json:"category,omitempty"`
-	Tags          []string            `json:"tags"`
-	Variants      []StorefrontVariant `json:"variants"`
-	MinPrice      int                 `json:"min_price_cents"`
-	MaxPrice      int                 `json:"max_price_cents"`
-	AverageRating float64             `json:"average_rating"`
-	ReviewCount   int                 `json:"review_count"`
-}
-
-type StorefrontVariant struct {
-	ID             uuid.UUID      `json:"id"`
-	Name           string         `json:"name"`
-	PriceInCents   int            `json:"price_in_cents"`
-	CompareAtPrice int            `json:"compare_at_price,omitempty"`
-	Inventory      int            `json:"inventory"`
-	InStock        bool           `json:"in_stock"`
-	Options        map[string]any `json:"options"`
+	ID             uuid.UUID `json:"id"`
+	Name           string    `json:"name"`
+	Slug           string    `json:"slug"`
+	Description    string    `json:"description"`
+	Images         []string  `json:"images"`
+	Category       string    `json:"category,omitempty"`
+	Tags           []string  `json:"tags"`
+	PriceInCents   int       `json:"price_in_cents"`
+	CompareAtPrice int       `json:"compare_at_price,omitempty"`
+	MinPrice       int       `json:"min_price_cents"`
+	MaxPrice       int       `json:"max_price_cents"`
+	InStock        bool      `json:"in_stock"`
+	AverageRating  float64   `json:"average_rating"`
+	ReviewCount    int       `json:"review_count"`
 }
 
 type StorefrontCategoryResponse struct {
@@ -54,8 +46,6 @@ type StorefrontCartItem struct {
 	ProductID    uuid.UUID `json:"product_id"`
 	ProductName  string    `json:"product_name"`
 	ProductImage string    `json:"product_image"`
-	VariantID    uuid.UUID `json:"variant_id,omitempty"`
-	VariantName  string    `json:"variant_name"`
 	Quantity     int       `json:"quantity"`
 	PriceCents   int       `json:"price_cents"`
 	TotalCents   int       `json:"total_cents"`
@@ -102,7 +92,6 @@ type OrderTrackingResponse struct {
 
 type OrderTrackingItemResponse struct {
 	ProductName  string `json:"product_name"`
-	VariantName  string `json:"variant_name,omitempty"`
 	Quantity     int    `json:"quantity"`
 	PriceInCents int    `json:"price_in_cents"`
 	TotalCents   int    `json:"total_cents"`

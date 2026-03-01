@@ -157,10 +157,6 @@ func (c *Controller) executeStoreOperation(store *models.Store, action string, d
 		return "", c.updateProductFromChat(store, data)
 	case "delete_product":
 		return "", c.deleteProductFromChat(store, data)
-	case "create_variant":
-		return "", c.createVariantFromChat(store, data)
-	case "create_variant_with_options":
-		return "", c.createVariantWithOptionsFromChat(store, data)
 	case "bulk_create_products":
 		return "", c.bulkCreateProductsFromChat(store, data)
 	case "create_category":
@@ -228,16 +224,47 @@ func (c *Controller) createProductFromChat(store *models.Store, data map[string]
 		}
 	}
 
+	// Extract price fields
+	priceInCents := 0
+	if p, ok := data["price_in_cents"].(float64); ok {
+		priceInCents = int(p)
+	} else if p, ok := data["price"].(float64); ok {
+		priceInCents = int(p)
+	}
+	// Backward compat: if price was in a "variants" array, use first variant's price
+	if priceInCents == 0 {
+		if variantsRaw, ok := data["variants"].([]any); ok && len(variantsRaw) > 0 {
+			if vData, ok := variantsRaw[0].(map[string]any); ok {
+				if p, ok := vData["price_in_cents"].(float64); ok {
+					priceInCents = int(p)
+				}
+			}
+		}
+	}
+	compareAtPrice := 0
+	if cp, ok := data["compare_at_price"].(float64); ok {
+		compareAtPrice = int(cp)
+	}
+	sku, _ := data["sku"].(string)
+	inventory := 0
+	if inv, ok := data["inventory"].(float64); ok {
+		inventory = int(inv)
+	}
+
 	product := &models.Product{
-		StoreID:     store.ID,
-		Name:        name,
-		Slug:        slug,
-		Description: description,
-		Images:      images,
-		Tags:        tags,
-		Status:      status,
-		Metadata:    map[string]any{},
-		SEO:         map[string]any{},
+		StoreID:        store.ID,
+		Name:           name,
+		Slug:           slug,
+		Description:    description,
+		Images:         images,
+		Tags:           tags,
+		Status:         status,
+		PriceInCents:   priceInCents,
+		CompareAtPrice: compareAtPrice,
+		SKU:            sku,
+		Inventory:      inventory,
+		Metadata:       map[string]any{},
+		SEO:            map[string]any{},
 	}
 
 	// Look up category by slug if category_slug is provided
@@ -253,59 +280,8 @@ func (c *Controller) createProductFromChat(store *models.Store, data map[string]
 		}
 	}
 
-	product, err := c.DB.CreateProduct(product)
-	if err != nil {
-		return err
-	}
-
-	// Create variants if provided (multi-variant products)
-	if variantsRaw, ok := data["variants"].([]any); ok && len(variantsRaw) > 0 {
-		for i, vRaw := range variantsRaw {
-			vData, ok := vRaw.(map[string]any)
-			if !ok {
-				continue
-			}
-			vName, _ := vData["name"].(string)
-			vSku, _ := vData["sku"].(string)
-			vPrice := 0
-			if p, ok := vData["price_in_cents"].(float64); ok {
-				vPrice = int(p)
-			}
-			vInventory := 100
-			if inv, ok := vData["inventory"].(float64); ok {
-				vInventory = int(inv)
-			}
-			vCompareAt := 0
-			if cp, ok := vData["compare_at_price"].(float64); ok {
-				vCompareAt = int(cp)
-			}
-			vOptions := map[string]any{}
-			if opts, ok := vData["options"].(map[string]any); ok {
-				vOptions = opts
-			}
-			c.DB.CreateVariant(&models.ProductVariant{
-				ProductID:      product.ID,
-				Name:           vName,
-				SKU:            vSku,
-				PriceInCents:   vPrice,
-				CompareAtPrice: vCompareAt,
-				Inventory:      vInventory,
-				IsDefault:      i == 0,
-				Options:        vOptions,
-			})
-		}
-	} else if price, ok := data["price"].(float64); ok {
-		// Create default variant if price provided (single-variant product)
-		c.DB.CreateVariant(&models.ProductVariant{
-			ProductID:    product.ID,
-			Name:         "Default",
-			PriceInCents: int(price),
-			IsDefault:    true,
-			Options:      map[string]any{},
-		})
-	}
-
-	return nil
+	_, err := c.DB.CreateProduct(product)
+	return err
 }
 
 func (c *Controller) findProductByAnyIdentifier(store *models.Store, data map[string]any) (*models.Product, error) {
@@ -359,6 +335,18 @@ func (c *Controller) updateProductFromChat(store *models.Store, data map[string]
 	if status, ok := data["status"].(string); ok {
 		product.Status = status
 	}
+	if p, ok := data["price_in_cents"].(float64); ok {
+		product.PriceInCents = int(p)
+	}
+	if cp, ok := data["compare_at_price"].(float64); ok {
+		product.CompareAtPrice = int(cp)
+	}
+	if s, ok := data["sku"].(string); ok {
+		product.SKU = s
+	}
+	if inv, ok := data["inventory"].(float64); ok {
+		product.Inventory = int(inv)
+	}
 	product.UpdatedAt = time.Now()
 	_, err = c.DB.UpdateProduct(product)
 	return err
@@ -372,93 +360,6 @@ func (c *Controller) deleteProductFromChat(store *models.Store, data map[string]
 	product.Status = "archived"
 	product.UpdatedAt = time.Now()
 	_, err = c.DB.UpdateProduct(product)
-	return err
-}
-
-func (c *Controller) createVariantFromChat(store *models.Store, data map[string]any) error {
-	productSlug, _ := data["product_slug"].(string)
-	productID, _ := data["product_id"].(string)
-
-	var pid uuid.UUID
-	if productID != "" {
-		pid, _ = uuid.Parse(productID)
-	} else if productSlug != "" {
-		product, err := c.DB.GetProductBySlug(store.ID.String(), productSlug)
-		if err != nil {
-			return fmt.Errorf("product not found by slug %q: %w", productSlug, err)
-		}
-		pid = product.ID
-	} else {
-		return fmt.Errorf("product_id or product_slug required for variant creation")
-	}
-
-	name, _ := data["name"].(string)
-	sku, _ := data["sku"].(string)
-	price, _ := data["price_in_cents"].(float64)
-	inventory, _ := data["inventory"].(float64)
-	isDefault, _ := data["is_default"].(bool)
-
-	variant := &models.ProductVariant{
-		ProductID:    pid,
-		Name:         name,
-		SKU:          sku,
-		PriceInCents: int(price),
-		Inventory:    int(inventory),
-		IsDefault:    isDefault,
-		Options:      map[string]any{},
-	}
-
-	_, err := c.DB.CreateVariant(variant)
-	return err
-}
-
-func (c *Controller) createVariantWithOptionsFromChat(store *models.Store, data map[string]any) error {
-	productID, _ := data["product_id"].(string)
-	productSlug, _ := data["product_slug"].(string)
-
-	if productID == "" && productSlug != "" {
-		product, err := c.DB.GetProductBySlug(store.ID.String(), productSlug)
-		if err != nil {
-			return fmt.Errorf("product not found by slug %q: %w", productSlug, err)
-		}
-		productID = product.ID.String()
-	}
-	if productID == "" {
-		return fmt.Errorf("create_variant_with_options requires product_id or product_slug")
-	}
-
-	pid, err := uuid.Parse(productID)
-	if err != nil {
-		return fmt.Errorf("invalid product_id %q: %w", productID, err)
-	}
-
-	name, _ := data["name"].(string)
-	if name == "" {
-		name = "Default"
-	}
-	sku, _ := data["sku"].(string)
-	priceInCents := chatIntFromAny(data["price_in_cents"])
-	inventory := chatIntFromAny(data["inventory"])
-	isDefault, _ := data["is_default"].(bool)
-
-	var options map[string]any
-	if opts, ok := data["options"].(map[string]any); ok {
-		options = opts
-	} else {
-		options = map[string]any{}
-	}
-
-	variant := &models.ProductVariant{
-		ProductID:    pid,
-		Name:         name,
-		SKU:          sku,
-		PriceInCents: priceInCents,
-		Inventory:    inventory,
-		IsDefault:    isDefault,
-		Options:      options,
-	}
-
-	_, err = c.DB.CreateVariant(variant)
 	return err
 }
 
@@ -657,16 +558,21 @@ func (c *Controller) CreateProduct(store *models.Store, req requests.CreateProdu
 	}
 
 	product := &models.Product{
-		StoreID:     store.ID,
-		Name:        req.Name,
-		Slug:        slug,
-		Description: req.Description,
-		Images:      req.Images,
-		CategoryID:  categoryID,
-		Tags:        req.Tags,
-		Status:      "active",
-		Metadata:    req.Metadata,
-		SEO:         req.SEO,
+		StoreID:        store.ID,
+		Name:           req.Name,
+		Slug:           slug,
+		Description:    req.Description,
+		Images:         req.Images,
+		CategoryID:     categoryID,
+		Tags:           req.Tags,
+		Status:         "active",
+		PriceInCents:   req.PriceInCents,
+		CompareAtPrice: req.CompareAtPrice,
+		SKU:            req.SKU,
+		Inventory:      req.Inventory,
+		TrackInventory: req.TrackInventory,
+		Metadata:       req.Metadata,
+		SEO:            req.SEO,
 	}
 	if req.Status != "" {
 		product.Status = req.Status
@@ -721,6 +627,21 @@ func (c *Controller) UpdateProduct(productID string, store *models.Store, req re
 		cid, _ := uuid.Parse(*req.CategoryID)
 		product.CategoryID = cid
 	}
+	if req.PriceInCents != nil {
+		product.PriceInCents = *req.PriceInCents
+	}
+	if req.CompareAtPrice != nil {
+		product.CompareAtPrice = *req.CompareAtPrice
+	}
+	if req.SKU != nil {
+		product.SKU = *req.SKU
+	}
+	if req.Inventory != nil {
+		product.Inventory = *req.Inventory
+	}
+	if req.TrackInventory != nil {
+		product.TrackInventory = *req.TrackInventory
+	}
 
 	product.UpdatedAt = time.Now()
 	return c.DB.UpdateProduct(product)
@@ -743,100 +664,6 @@ func (c *Controller) GetProducts(storeID string) ([]models.Product, error) {
 
 func (c *Controller) GetProductByID(id string) (*models.Product, error) {
 	return c.DB.GetProductByID(id)
-}
-
-// Variants
-
-func (c *Controller) CreateVariant(productID string, store *models.Store, req requests.CreateVariantRequest) (*models.ProductVariant, error) {
-	validate := validator.New()
-	if err := req.Validate(validate); err != nil {
-		return nil, err
-	}
-
-	product, err := c.DB.GetProductByID(productID)
-	if err != nil || product.StoreID != store.ID {
-		return nil, fmt.Errorf("product not found")
-	}
-
-	variant := &models.ProductVariant{
-		ProductID:      product.ID,
-		Name:           req.Name,
-		SKU:            req.SKU,
-		PriceInCents:   req.PriceInCents,
-		CompareAtPrice: req.CompareAtPrice,
-		CostInCents:    req.CostInCents,
-		Inventory:      req.Inventory,
-		TrackInventory: req.TrackInventory,
-		Weight:         req.Weight,
-		Options:        req.Options,
-		IsDefault:      req.IsDefault,
-	}
-	if variant.Options == nil {
-		variant.Options = map[string]any{}
-	}
-
-	return c.DB.CreateVariant(variant)
-}
-
-func (c *Controller) GetVariants(productID string) ([]models.ProductVariant, error) {
-	return c.DB.GetVariantsByProductID(productID)
-}
-
-func (c *Controller) UpdateVariant(variantID string, store *models.Store, req requests.UpdateVariantRequest) (*models.ProductVariant, error) {
-	variant, err := c.DB.GetVariantByID(variantID)
-	if err != nil {
-		return nil, fmt.Errorf("variant not found")
-	}
-	product, err := c.DB.GetProductByID(variant.ProductID.String())
-	if err != nil || product.StoreID != store.ID {
-		return nil, fmt.Errorf("unauthorized")
-	}
-
-	if req.Name != nil {
-		variant.Name = *req.Name
-	}
-	if req.SKU != nil {
-		variant.SKU = *req.SKU
-	}
-	if req.PriceInCents != nil {
-		variant.PriceInCents = *req.PriceInCents
-	}
-	if req.CompareAtPrice != nil {
-		variant.CompareAtPrice = *req.CompareAtPrice
-	}
-	if req.CostInCents != nil {
-		variant.CostInCents = *req.CostInCents
-	}
-	if req.Inventory != nil {
-		variant.Inventory = *req.Inventory
-	}
-	if req.TrackInventory != nil {
-		variant.TrackInventory = *req.TrackInventory
-	}
-	if req.Weight != nil {
-		variant.Weight = *req.Weight
-	}
-	if req.Options != nil {
-		variant.Options = req.Options
-	}
-	if req.IsDefault != nil {
-		variant.IsDefault = *req.IsDefault
-	}
-
-	variant.UpdatedAt = time.Now()
-	return c.DB.UpdateVariant(variant)
-}
-
-func (c *Controller) DeleteVariant(variantID string, store *models.Store) error {
-	variant, err := c.DB.GetVariantByID(variantID)
-	if err != nil {
-		return fmt.Errorf("variant not found")
-	}
-	product, err := c.DB.GetProductByID(variant.ProductID.String())
-	if err != nil || product.StoreID != store.ID {
-		return fmt.Errorf("unauthorized")
-	}
-	return c.DB.DeleteVariant(variant)
 }
 
 // Categories
