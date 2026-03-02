@@ -1,6 +1,7 @@
 package models
 
 import (
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -19,4 +20,14 @@ type APIKey struct {
 	ExpiresAt time.Time `bun:",nullzero"`         // zero = never expires
 	CreatedAt time.Time `bun:"created_at,nullzero,notnull,default:current_timestamp"`
 	DeletedAt time.Time `bun:",soft_delete,nullzero"`
+}
+
+// HasScope returns true if the API key has the given scope.
+func (k *APIKey) HasScope(scope string) bool {
+	for _, s := range strings.Split(k.Scopes, ",") {
+		if strings.TrimSpace(s) == scope {
+			return true
+		}
+	}
+	return false
 }

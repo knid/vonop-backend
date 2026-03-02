@@ -514,8 +514,11 @@ func (c *Controller) queryNeon(integration *models.AppIntegration, query *models
 		return nil, err
 	}
 
-	// Open a connection
+	// Open a connection with pool limits to prevent connection exhaustion
 	db := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(connStr)))
+	db.SetMaxOpenConns(2)
+	db.SetMaxIdleConns(1)
+	db.SetConnMaxLifetime(5 * time.Minute)
 	defer db.Close()
 
 	// Set read-only and timeout
@@ -580,18 +583,151 @@ func (c *Controller) queryNeon(integration *models.AppIntegration, query *models
 	return results, nil
 }
 
-// buildSQLFromTableQuery converts a Supabase-style table/select/filters query to SQL.
-func buildSQLFromTableQuery(query *models.DashboardQuery) string {
-	selectClause := "*"
-	if query.Select != "" {
-		selectClause = query.Select
+// isValidSQLIdentifier checks if a string is a valid simple SQL identifier
+// (letters, digits, underscores; must not start with a digit).
+func isValidSQLIdentifier(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i, ch := range s {
+		if ch == '_' || (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') {
+			continue
+		}
+		if i > 0 && ch >= '0' && ch <= '9' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+// sanitizeOrderClause validates and quotes an ORDER BY clause.
+// Only allows identifier [ASC|DESC] [NULLS FIRST|LAST] parts, comma-separated.
+func sanitizeOrderClause(order string) (string, error) {
+	parts := strings.Split(order, ",")
+	var sanitized []string
+	for _, part := range parts {
+		tokens := strings.Fields(strings.TrimSpace(part))
+		if len(tokens) == 0 {
+			continue
+		}
+		col := tokens[0]
+		var quotedCol string
+		if dotIdx := strings.Index(col, "."); dotIdx != -1 {
+			tbl := col[:dotIdx]
+			c := col[dotIdx+1:]
+			if !isValidSQLIdentifier(tbl) || !isValidSQLIdentifier(c) {
+				return "", fmt.Errorf("invalid ORDER BY identifier: %s", col)
+			}
+			quotedCol = quoteIdentifier(tbl) + "." + quoteIdentifier(c)
+		} else {
+			if !isValidSQLIdentifier(col) {
+				return "", fmt.Errorf("invalid ORDER BY identifier: %s", col)
+			}
+			quotedCol = quoteIdentifier(col)
+		}
+		result := quotedCol
+		idx := 1
+		if idx < len(tokens) {
+			dir := strings.ToUpper(tokens[idx])
+			switch dir {
+			case "ASC", "DESC":
+				result += " " + dir
+				idx++
+			case "NULLS":
+				// handled below
+			default:
+				return "", fmt.Errorf("invalid ORDER BY modifier: %s", tokens[idx])
+			}
+		}
+		if idx < len(tokens) && strings.ToUpper(tokens[idx]) == "NULLS" {
+			idx++
+			if idx < len(tokens) {
+				nullDir := strings.ToUpper(tokens[idx])
+				if nullDir != "FIRST" && nullDir != "LAST" {
+					return "", fmt.Errorf("invalid NULLS modifier: %s", tokens[idx])
+				}
+				result += " NULLS " + nullDir
+				idx++
+			}
+		}
+		sanitized = append(sanitized, result)
+	}
+	if len(sanitized) == 0 {
+		return "", fmt.Errorf("empty ORDER BY clause")
+	}
+	return strings.Join(sanitized, ", "), nil
+}
+
+// sanitizeSelectClause validates a SELECT column list for table-based queries.
+// Allows *, column names, and table.column patterns. Rejects subqueries and expressions.
+func sanitizeSelectClause(sel string) (string, error) {
+	if sel == "" || sel == "*" {
+		return "*", nil
+	}
+	items := splitSelectItems(sel)
+	var result []string
+	for _, item := range items {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		if item == "*" {
+			result = append(result, "*")
+			continue
+		}
+		if dotIdx := strings.Index(item, "."); dotIdx != -1 {
+			tbl := strings.TrimSpace(item[:dotIdx])
+			col := strings.TrimSpace(item[dotIdx+1:])
+			if !isValidSQLIdentifier(tbl) {
+				return "", fmt.Errorf("invalid select identifier: %s", tbl)
+			}
+			if col == "*" {
+				result = append(result, quoteIdentifier(tbl)+".*")
+			} else if isValidSQLIdentifier(col) {
+				result = append(result, quoteIdentifier(tbl)+"."+quoteIdentifier(col))
+			} else {
+				return "", fmt.Errorf("invalid select identifier: %s", col)
+			}
+			continue
+		}
+		if isValidSQLIdentifier(item) {
+			result = append(result, quoteIdentifier(item))
+			continue
+		}
+		return "", fmt.Errorf("invalid select expression: %s", item)
+	}
+	if len(result) == 0 {
+		return "*", nil
+	}
+	return strings.Join(result, ", "), nil
+}
+
+// buildSQLFromTableQuery converts a Supabase-style table/select/filters query to a
+// parameterized SQL statement. Returns the SQL string, query arguments, and any error.
+func buildSQLFromTableQuery(query *models.DashboardQuery) (string, []any, error) {
+	if !isValidSQLIdentifier(query.Table) {
+		return "", nil, fmt.Errorf("invalid table name: %s", query.Table)
+	}
+	quotedTable := quoteIdentifier(query.Table)
+
+	selectClause, err := sanitizeSelectClause(query.Select)
+	if err != nil {
+		return "", nil, err
 	}
 
-	sql := fmt.Sprintf("SELECT %s FROM %s", selectClause, query.Table)
+	var args []any
+	paramIdx := 1
+	sqlStr := fmt.Sprintf("SELECT %s FROM %s", selectClause, quotedTable)
 
 	if len(query.Filters) > 0 {
 		var conditions []string
 		for _, f := range query.Filters {
+			if !isValidSQLIdentifier(f.Column) {
+				return "", nil, fmt.Errorf("invalid filter column: %s", f.Column)
+			}
+			quotedCol := quoteIdentifier(f.Column)
+
 			op := "="
 			switch f.Operator {
 			case "eq":
@@ -611,31 +747,52 @@ func buildSQLFromTableQuery(query *models.DashboardQuery) string {
 			case "ilike":
 				op = "ILIKE"
 			case "is":
-				op = "IS"
+				upperVal := strings.ToUpper(strings.TrimSpace(f.Value))
+				if upperVal == "NULL" {
+					conditions = append(conditions, fmt.Sprintf("%s IS NULL", quotedCol))
+				} else if upperVal == "NOT NULL" {
+					conditions = append(conditions, fmt.Sprintf("%s IS NOT NULL", quotedCol))
+				}
+				continue
 			}
-			conditions = append(conditions, fmt.Sprintf("%s %s '%s'", f.Column, op, f.Value))
+
+			conditions = append(conditions, fmt.Sprintf("%s %s $%d", quotedCol, op, paramIdx))
+			args = append(args, f.Value)
+			paramIdx++
 		}
-		sql += " WHERE " + strings.Join(conditions, " AND ")
+		if len(conditions) > 0 {
+			sqlStr += " WHERE " + strings.Join(conditions, " AND ")
+		}
 	}
 
 	if query.Order != "" {
-		sql += " ORDER BY " + query.Order
+		sanitizedOrder, err := sanitizeOrderClause(query.Order)
+		if err != nil {
+			return "", nil, err
+		}
+		sqlStr += " ORDER BY " + sanitizedOrder
 	}
 
 	limit := query.Limit
 	if limit <= 0 || limit > maxQueryRows {
 		limit = maxQueryRows
 	}
-	sql += fmt.Sprintf(" LIMIT %d", limit)
+	sqlStr += fmt.Sprintf(" LIMIT %d", limit)
 
-	return sql
+	return sqlStr, args, nil
 }
 
 // queryPlatform executes a read-only SQL query against the platform's own Postgres database.
 func (c *Controller) queryPlatform(query *models.DashboardQuery) (any, error) {
+	var queryArgs []any
+
 	// Auto-build SQL from table-based query if no SQL provided
 	if query.SQL == "" && query.Table != "" {
-		query.SQL = buildSQLFromTableQuery(query)
+		var err error
+		query.SQL, queryArgs, err = buildSQLFromTableQuery(query)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if query.SQL == "" {
 		return nil, fmt.Errorf("sql query is required for platform provider")
@@ -643,11 +800,19 @@ func (c *Controller) queryPlatform(query *models.DashboardQuery) (any, error) {
 
 	// For count transform, wrap the query
 	if query.Transform == "count" && query.Table != "" {
-		query.SQL = fmt.Sprintf("SELECT COUNT(*) AS value FROM %s", query.Table)
+		if !isValidSQLIdentifier(query.Table) {
+			return nil, fmt.Errorf("invalid table name: %s", query.Table)
+		}
+		quotedTable := quoteIdentifier(query.Table)
+		query.SQL = fmt.Sprintf("SELECT COUNT(*) AS value FROM %s", quotedTable)
+		queryArgs = nil
 		if len(query.Filters) > 0 {
-			// Re-build with just filters
-			base := buildSQLFromTableQuery(&models.DashboardQuery{Table: query.Table, Select: "*", Filters: query.Filters})
+			base, baseArgs, err := buildSQLFromTableQuery(&models.DashboardQuery{Table: query.Table, Select: "*", Filters: query.Filters})
+			if err != nil {
+				return nil, err
+			}
 			query.SQL = fmt.Sprintf("SELECT COUNT(*) AS value FROM (%s) sub", base)
+			queryArgs = baseArgs
 		}
 	}
 
@@ -670,7 +835,7 @@ func (c *Controller) queryPlatform(query *models.DashboardQuery) (any, error) {
 		slog.Warn("failed to set statement_timeout", "error", err)
 	}
 
-	rows, err := tx.Query(query.SQL)
+	rows, err := tx.Query(query.SQL, queryArgs...)
 	if err != nil {
 		return nil, fmt.Errorf("query failed: %w", err)
 	}
@@ -935,6 +1100,9 @@ func (c *Controller) updateCellNeon(integration *models.AppIntegration, table, c
 	}
 
 	db := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(connStr)))
+	db.SetMaxOpenConns(2)
+	db.SetMaxIdleConns(1)
+	db.SetConnMaxLifetime(5 * time.Minute)
 	defer db.Close()
 
 	tx, err := db.Begin()

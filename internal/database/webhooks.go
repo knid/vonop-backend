@@ -2,6 +2,7 @@ package database
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/knid/wemob/internal/models"
@@ -48,6 +49,14 @@ func (db *Database) DeleteWebhookEndpoint(endpoint *models.WebhookEndpoint) erro
 	return err
 }
 
+// escapeLikePattern escapes LIKE metacharacters (%, _) in a string for safe use in LIKE queries.
+func escapeLikePattern(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, `%`, `\%`)
+	s = strings.ReplaceAll(s, `_`, `\_`)
+	return s
+}
+
 // GetWebhookEndpointsForEvent returns all active endpoints for a user that listen for a given event.
 func (db *Database) GetWebhookEndpointsForEvent(userID, event string) ([]models.WebhookEndpoint, error) {
 	var endpoints []models.WebhookEndpoint
@@ -55,7 +64,7 @@ func (db *Database) GetWebhookEndpointsForEvent(userID, event string) ([]models.
 		Model(&endpoints).
 		Where("user_id = ?", userID).
 		Where("active = true").
-		Where("events LIKE ?", "%"+event+"%").
+		Where("events LIKE ?", "%"+escapeLikePattern(event)+"%").
 		Scan(context.Background())
 	return endpoints, err
 }

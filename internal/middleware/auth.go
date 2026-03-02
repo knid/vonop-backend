@@ -13,11 +13,19 @@ import (
 type contextKey string
 
 const userContextKey contextKey = "user"
+const apiKeyContextKey contextKey = "apiKey"
 
 // UserFromContext retrieves the authenticated user from the request context.
 func UserFromContext(ctx context.Context) *models.User {
 	user, _ := ctx.Value(userContextKey).(*models.User)
 	return user
+}
+
+// APIKeyFromContext retrieves the API key from the request context, if present.
+// Returns nil for session-based (non-API-key) authentication.
+func APIKeyFromContext(ctx context.Context) *models.APIKey {
+	key, _ := ctx.Value(apiKeyContextKey).(*models.APIKey)
+	return key
 }
 
 // RequireAuth is middleware that extracts the bearer token, validates it,
@@ -29,12 +37,13 @@ func RequireAuth(controller *controllers.Controller) func(http.Handler) http.Han
 			authHeader := r.Header.Get("Authorization")
 
 			var user *models.User
+			var apiKey *models.APIKey
 			var err error
 
 			// Check for API key authentication
 			if strings.HasPrefix(authHeader, "Bearer wemob_") {
 				rawKey := strings.TrimPrefix(authHeader, "Bearer ")
-				user, _, err = controller.AuthenticateAPIKey(rawKey)
+				user, apiKey, err = controller.AuthenticateAPIKey(rawKey)
 			} else {
 				user, err = controller.GetUserFromReq(r)
 			}
@@ -45,6 +54,9 @@ func RequireAuth(controller *controllers.Controller) func(http.Handler) http.Han
 			}
 
 			ctx := context.WithValue(r.Context(), userContextKey, user)
+			if apiKey != nil {
+				ctx = context.WithValue(ctx, apiKeyContextKey, apiKey)
+			}
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
@@ -71,6 +83,33 @@ func RequireSubscription(statuses ...string) func(http.Handler) http.Handler {
 				return
 			}
 
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// RequireScope checks that if the request was authenticated with an API key,
+// the key has one of the required scopes. Session-based auth (no API key) passes through.
+// Must be used after RequireAuth.
+func RequireScope(scopes ...string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			apiKey := APIKeyFromContext(r.Context())
+			if apiKey != nil {
+				// API key auth — check that the key has at least one required scope
+				hasScope := false
+				for _, scope := range scopes {
+					if apiKey.HasScope(scope) {
+						hasScope = true
+						break
+					}
+				}
+				if !hasScope {
+					utils.JSONCodedErrorResponse(w, "INSUFFICIENT_SCOPE", "API key does not have the required scope", http.StatusForbidden, nil)
+					return
+				}
+			}
+			// Session-based auth — no scope check needed
 			next.ServeHTTP(w, r)
 		})
 	}
