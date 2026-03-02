@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -73,12 +74,18 @@ func (rl *RateLimiter) RateLimit(limit int, window time.Duration, keyFunc func(r
 }
 
 // IPKey returns the client IP as a rate-limit key.
+// Extracts the first (leftmost/client) IP from X-Forwarded-For to prevent spoofing.
 func IPKey(r *http.Request) string {
 	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		return "ip:" + xff
+		// X-Forwarded-For can contain multiple IPs: "client, proxy1, proxy2"
+		// The leftmost IP is the original client. Only use that.
+		if idx := strings.Index(xff, ","); idx != -1 {
+			xff = xff[:idx]
+		}
+		return "ip:" + strings.TrimSpace(xff)
 	}
 	if xri := r.Header.Get("X-Real-IP"); xri != "" {
-		return "ip:" + xri
+		return "ip:" + strings.TrimSpace(xri)
 	}
 	return "ip:" + r.RemoteAddr
 }
@@ -107,9 +114,12 @@ func StorefrontIPKey(r *http.Request) string {
 	storeID := chi.URLParam(r, "storeId")
 	ip := r.RemoteAddr
 	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		ip = xff
+		if idx := strings.Index(xff, ","); idx != -1 {
+			xff = xff[:idx]
+		}
+		ip = strings.TrimSpace(xff)
 	} else if xri := r.Header.Get("X-Real-IP"); xri != "" {
-		ip = xri
+		ip = strings.TrimSpace(xri)
 	}
 	return "sf:" + storeID + ":" + ip
 }

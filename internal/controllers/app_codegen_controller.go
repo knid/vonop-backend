@@ -873,6 +873,28 @@ func neonConnStrWithEndpoint(connStr string) string {
 
 
 
+// validateSeedSQL ensures LLM-generated seed SQL only contains INSERT statements.
+// Blocks DROP, DELETE, UPDATE, ALTER, CREATE, TRUNCATE, and other dangerous statements.
+func validateSeedSQL(sqlStr string) error {
+	// Split by semicolons to get individual statements
+	statements := strings.Split(sqlStr, ";")
+	for _, stmt := range statements {
+		trimmed := strings.TrimSpace(stmt)
+		if trimmed == "" {
+			continue
+		}
+		upper := strings.ToUpper(trimmed)
+		// Each statement must start with INSERT (or a comment)
+		if strings.HasPrefix(upper, "--") || strings.HasPrefix(upper, "/*") {
+			continue
+		}
+		if !strings.HasPrefix(upper, "INSERT") {
+			return fmt.Errorf("only INSERT statements are allowed in seed SQL, found: %.40s", trimmed)
+		}
+	}
+	return nil
+}
+
 // toCamelCase converts snake_case to camelCase.
 func toCamelCase(s string) string {
 	parts := strings.Split(s, "_")
@@ -1023,6 +1045,12 @@ Rules:
 	seedSQL = strings.TrimSpace(seedSQL)
 
 	if seedSQL != "" {
+		// Validate that the seed SQL only contains INSERT statements
+		if err := validateSeedSQL(seedSQL); err != nil {
+			slog.Warn("LLM generated invalid seed SQL", "error", err, "project_id", project.ID)
+			return "", fmt.Errorf("invalid seed SQL: %w", err)
+		}
+
 		neonDB, err := sql.Open("postgres", neonConnStrWithEndpoint(connStr))
 		if err != nil {
 			return "", fmt.Errorf("connect to Neon for seeding: %w", err)
