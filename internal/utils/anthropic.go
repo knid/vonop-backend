@@ -130,17 +130,31 @@ func convertToAnthropicRequest(req ChatRequest, provider *LLMProvider) Anthropic
 	model := req.Model
 	model = strings.TrimPrefix(model, "anthropic/")
 
-	// Extract system messages → top-level system field
+	// Extract only leading contiguous system messages → top-level system field.
+	// Mid-conversation system messages (e.g. nudges injected by StreamWithTools)
+	// are converted to user-role so they don't destabilize the system block array
+	// and break Anthropic's prefix-based prompt caching across tool rounds.
 	var systemBlocks []AnthropicContentBlock
 	var nonSystemMessages []Message
+	seenNonSystem := false
 	for _, m := range req.Messages {
-		if m.Role == "system" {
+		if m.Role == "system" && !seenNonSystem {
 			systemBlocks = append(systemBlocks, AnthropicContentBlock{
 				Type: "text",
 				Text: m.Content,
 			})
 		} else {
-			nonSystemMessages = append(nonSystemMessages, m)
+			seenNonSystem = true
+			if m.Role == "system" {
+				// Mid-conversation system message → convert to user role
+				// enforceAlternation will merge with adjacent user messages
+				nonSystemMessages = append(nonSystemMessages, Message{
+					Role:    "user",
+					Content: "[System] " + m.Content,
+				})
+			} else {
+				nonSystemMessages = append(nonSystemMessages, m)
+			}
 		}
 	}
 
@@ -153,9 +167,10 @@ func convertToAnthropicRequest(req ChatRequest, provider *LLMProvider) Anthropic
 	}
 
 	// Apply automatic prompt caching to the last few substantial system blocks.
-	// Anthropic supports up to 4 cache breakpoints total; reserve 1 for tools,
-	// so mark at most 3 system blocks (scanning backwards to prioritize stable ones).
-	maxSystemCache := 3
+	// Anthropic supports up to 4 cache breakpoints total; reserve 1 for tools
+	// and 1 for the last user message (conversation prefix caching).
+	// Only 2 real system blocks exist (buildSystemPrompt + buildProjectContext).
+	maxSystemCache := 2
 	cached := 0
 	for i := len(systemBlocks) - 1; i >= 0 && cached < maxSystemCache; i-- {
 		if len(systemBlocks[i].Text) > 500 {
@@ -166,6 +181,20 @@ func convertToAnthropicRequest(req ChatRequest, provider *LLMProvider) Anthropic
 
 	// Convert messages
 	anthropicMessages := convertMessagesToAnthropic(nonSystemMessages)
+
+	// Mark last user message cacheable for conversation prefix caching.
+	// This lets Anthropic cache system blocks + all messages up to the last user turn,
+	// so each tool round only pays for the new assistant+tool_result tokens.
+	for i := len(anthropicMessages) - 1; i >= 0; i-- {
+		if anthropicMessages[i].Role == "user" {
+			blocks := toContentBlocks(anthropicMessages[i].Content)
+			if len(blocks) > 0 {
+				blocks[len(blocks)-1].CacheControl = &AnthropicCacheControl{Type: "ephemeral"}
+				anthropicMessages[i].Content = blocks
+			}
+			break
+		}
+	}
 
 	// Convert tools
 	var anthropicTools []AnthropicTool
