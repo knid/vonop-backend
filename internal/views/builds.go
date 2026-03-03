@@ -32,6 +32,10 @@ func (v *HttpViews) GetProjectBuilds(w http.ResponseWriter, r *http.Request) {
 	}
 
 	projectInformationRes, err := v.Controller.GetProject(user, projectID)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 	project, err := v.Controller.GetProjectModelById(projectInformationRes.ID.String())
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
@@ -133,6 +137,10 @@ func (v *HttpViews) CreateProjectBuild(w http.ResponseWriter, r *http.Request) {
 	}
 
 	projectInformationRes, err := v.Controller.GetProject(user, projectID)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 	project, err := v.Controller.GetProjectModelById(projectInformationRes.ID.String())
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)

@@ -29,6 +29,7 @@ func (v *HttpViews) GetUserNotification(w http.ResponseWriter, r *http.Request) 
 	userNotificationRes, err := v.Controller.GetUserNotification(user, userNotificationId)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusForbidden)
+		return
 	}
 
 	utils.JSONResponse(w, userNotificationRes, http.StatusOK)

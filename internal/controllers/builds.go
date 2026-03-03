@@ -52,7 +52,7 @@ func (c *Controller) GetBuild(user *models.User, id string) (*responses.BuildInf
 	}
 
 	if project.UserID.String() != user.ID.String() {
-		return nil, errors.New("you do not have access this resources")
+		return nil, errors.New("you do not have access to this resource")
 	}
 
 	buildInformationResponse := responses.BuildInformationResponse{
@@ -79,8 +79,6 @@ func (c *Controller) CreateBuild(user *models.User, buildCreateReq requests.Buil
 	if err != nil {
 		return nil, err
 	}
-	fmt.Printf("Project: %+v", project)
-
 	pendingTasks, err := c.DB.GetPendingAppBuildTasks(project)
 	if err != nil {
 		return nil, err
@@ -117,8 +115,6 @@ func (c *Controller) CreateBuild(user *models.User, buildCreateReq requests.Buil
 	}
 
 	if project.BuildForAndroid {
-		fmt.Println("Creating android build task")
-
 		appBuildTask, err := c.DB.CreateAppBuildTask(*createdBuild, "Android", "Queued", project.UseAutoDeployForAndroid)
 		if err != nil {
 			return nil, err
@@ -144,11 +140,12 @@ func (c *Controller) CreateBuild(user *models.User, buildCreateReq requests.Buil
 			return nil, err
 		}
 		task := asynq.NewTask(tasks.TypeBuildAndroid, taskPayload)
-		c.TaskService.Enqueue(task, asynq.MaxRetry(2), asynq.Timeout(time.Minute*10))
+		if _, err := c.TaskService.Enqueue(task, asynq.MaxRetry(2), asynq.Timeout(time.Minute*10)); err != nil {
+			return nil, fmt.Errorf("failed to enqueue Android build task: %w", err)
+		}
 	}
 
 	if project.BuildForIOS {
-		fmt.Println("Creating ios build task")
 		appBuildTask, err := c.DB.CreateAppBuildTask(*createdBuild, "IOS", "Queued", project.UseAutoDeployForIOS)
 		if err != nil {
 			return nil, err
@@ -173,7 +170,9 @@ func (c *Controller) CreateBuild(user *models.User, buildCreateReq requests.Buil
 			return nil, err
 		}
 		task := asynq.NewTask(tasks.TypeBuildUnsignedIpa, taskPayload)
-		c.TaskService.Enqueue(task, asynq.MaxRetry(2), asynq.Timeout(time.Minute*10))
+		if _, err := c.TaskService.Enqueue(task, asynq.MaxRetry(2), asynq.Timeout(time.Minute*10)); err != nil {
+			return nil, fmt.Errorf("failed to enqueue iOS build task: %w", err)
+		}
 	}
 
 	return &responses.BuildCreateResponse{

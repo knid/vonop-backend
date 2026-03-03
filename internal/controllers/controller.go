@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/hibiken/asynq"
 	"github.com/knid/wemob/internal/database"
@@ -33,7 +34,7 @@ type Controller struct {
 	VercelService          *vercel.Service
 	PreviewService         *preview.Service
 	NeonService            *neon.Service
-	MCPService             *mcpclient.Service
+	MCPService             atomic.Pointer[mcpclient.Service]
 	PostHog                posthog.Client // nil = disabled
 	RunningJobs            sync.Map       // map[string]context.CancelFunc for in-flight background jobs
 	PendingClarifications  sync.Map       // map[string]chan ClarificationResult for jobs awaiting user input
@@ -46,7 +47,7 @@ func NewController(db *database.Database, concurrentBuildLimiter chan struct{},
 	userApiKeysStorage *storage.S3Storage, secretManager secret.SecretManager,
 	vercelService *vercel.Service, previewService *preview.Service,
 	neonService *neon.Service,
-	mcpService *mcpclient.Service, posthogClient posthog.Client) *Controller {
+	posthogClient posthog.Client) *Controller {
 
 	return &Controller{
 		DB:                     db,
@@ -61,7 +62,6 @@ func NewController(db *database.Database, concurrentBuildLimiter chan struct{},
 		VercelService:          vercelService,
 		PreviewService:         previewService,
 		NeonService:            neonService,
-		MCPService:             mcpService,
 		PostHog:                posthogClient,
 	}
 }

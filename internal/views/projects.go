@@ -174,5 +174,5 @@ func (v *HttpViews) DeleteProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	utils.JSONResponse(w, deletedProjectRes, http.StatusNoContent)
+	utils.JSONResponse(w, deletedProjectRes, http.StatusOK)
 }

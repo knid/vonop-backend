@@ -44,7 +44,7 @@ func (c *Controller) GetNotification(user *models.User, id string) (*models.Noti
 	}
 
 	if notification.Project.User.ID.String() != user.ID.String() {
-		return nil, errors.New("you do not have access this resources")
+		return nil, errors.New("you do not have access to this resource")
 	}
 
 	return notification, nil
@@ -62,7 +62,7 @@ func (c *Controller) SendNotification(user *models.User, notificationCreateReq r
 		return nil, err
 	}
 	if project.UserID.String() != user.ID.String() {
-		return nil, errors.New("you do not have access this resources")
+		return nil, errors.New("you do not have access to this resource")
 	}
 
 	notification := models.Notification{

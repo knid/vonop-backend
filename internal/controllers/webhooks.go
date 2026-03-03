@@ -9,7 +9,9 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -156,7 +158,47 @@ func (c *Controller) FireWebhookEvent(userID string, event string, payload any) 
 	}
 }
 
+// isPrivateIP returns true if the IP is in a private/reserved range.
+func isPrivateIP(ip net.IP) bool {
+	privateRanges := []string{
+		"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16",
+		"127.0.0.0/8", "169.254.0.0/16", "::1/128", "fc00::/7",
+	}
+	for _, cidr := range privateRanges {
+		_, network, _ := net.ParseCIDR(cidr)
+		if network.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
+
 func deliverWebhook(ep models.WebhookEndpoint, body []byte) {
+	// Validate target URL to prevent SSRF
+	parsed, err := url.Parse(ep.URL)
+	if err != nil {
+		slog.Error("webhook delivery invalid URL", "url", ep.URL, "error", err)
+		return
+	}
+	if parsed.Scheme != "https" {
+		slog.Error("webhook delivery rejected non-HTTPS URL", "url", ep.URL)
+		return
+	}
+	host := parsed.Hostname()
+	if host == "localhost" || host == "" {
+		slog.Error("webhook delivery rejected localhost", "url", ep.URL)
+		return
+	}
+	ips, err := net.LookupIP(host)
+	if err == nil {
+		for _, ip := range ips {
+			if isPrivateIP(ip) {
+				slog.Error("webhook delivery rejected private IP", "url", ep.URL, "ip", ip.String())
+				return
+			}
+		}
+	}
+
 	// Compute HMAC signature
 	mac := hmac.New(sha256.New, []byte(ep.Secret))
 	mac.Write(body)

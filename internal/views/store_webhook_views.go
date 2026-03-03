@@ -37,8 +37,9 @@ func (v *HttpViews) HandleStoreStripeWebhook(w http.ResponseWriter, r *http.Requ
 	}
 	defer r.Body.Close()
 
-	// Verify Stripe webhook signature if the store has a webhook_secret configured
+	// Verify Stripe webhook signature — reject if no webhook_secret is configured
 	integrations, _ := v.Controller.DB.GetAppIntegrationsByProjectID(store.AppProjectID.String())
+	signatureVerified := false
 	for _, integ := range integrations {
 		if integ.Provider == "stripe" && integ.Status == "connected" {
 			var creds map[string]any
@@ -50,11 +51,17 @@ func (v *HttpViews) HandleStoreStripeWebhook(w http.ResponseWriter, r *http.Requ
 						utils.JSONErrorResponse(w, "invalid signature", http.StatusBadRequest)
 						return
 					}
+					signatureVerified = true
 					slog.Info("Stripe webhook signature verified", "storeId", storeID)
 				}
 			}
 			break
 		}
+	}
+	if !signatureVerified {
+		slog.Warn("Stripe webhook rejected: no webhook_secret configured", "storeId", storeID)
+		utils.JSONErrorResponse(w, "webhook signature verification not configured", http.StatusForbidden)
+		return
 	}
 
 	var payload struct {

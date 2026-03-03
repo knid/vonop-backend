@@ -8,20 +8,11 @@ import (
 
 func (db *Database) GetAppUsageEvents(project *models.Project) ([]models.AppUsageEvent, error) {
 	var appUsageEvents []models.AppUsageEvent
-
-	sessions, err := db.GetSessionsByProject(project)
-	if err != nil {
-		return nil, err
-	}
-
-	var events []models.AppUsageEvent
-	for _, session := range sessions {
-		err := db.DB.NewSelect().Model(&events).Where("session_id = ?", session.ID.String()).Scan(context.Background())
-		if err == nil {
-			appUsageEvents = append(appUsageEvents, events...)
-		}
-	}
-
+	err := db.DB.NewSelect().
+		Model(&appUsageEvents).
+		Join("JOIN sessions AS s ON s.id = app_usage_event.session_id").
+		Where("s.project_id = ?", project.ID.String()).
+		Scan(context.Background())
 	return appUsageEvents, err
 }
 
@@ -59,31 +50,12 @@ func (db *Database) CreateDevice(device *models.Device) (*models.Device, error) 
 
 func (db *Database) GetDevicesByProject(project *models.Project) ([]models.Device, error) {
 	var devices []models.Device
-
-	sessions, err := db.GetSessionsByProject(project)
-	if err != nil {
-		return nil, err
-	}
-
-	for _, session := range sessions {
-		device, err := db.GetDeviceById(session.DeviceID.String())
-		if err != nil {
-			continue
-		}
-
-		flag := false
-
-		for _, d := range devices {
-			if d.ID.String() == device.ID.String() {
-				flag = true
-			}
-		}
-
-		if !flag {
-			devices = append(devices, device)
-		}
-	}
-
+	err := db.DB.NewSelect().
+		Model(&devices).
+		Distinct().
+		Join("JOIN sessions AS s ON s.device_id = device.id").
+		Where("s.project_id = ?", project.ID.String()).
+		Scan(context.Background())
 	return devices, err
 }
 

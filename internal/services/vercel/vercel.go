@@ -11,12 +11,15 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"time"
 )
 
 // ansiRegex strips ANSI escape sequences (colors, cursor movement, etc.)
 var ansiRegex = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x1b]*\x1b\\`)
 
 const vercelAPIBase = "https://api.vercel.com"
+
+var vercelHTTPClient = &http.Client{Timeout: 30 * time.Second}
 
 type Service struct {
 	Token  string
@@ -117,7 +120,7 @@ func (s *Service) doRequest(method, path string, body any) ([]byte, error) {
 		req.Header.Set("Content-Type", "application/json")
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := vercelHTTPClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("do request: %w", err)
 	}
@@ -165,7 +168,7 @@ func (s *Service) UploadFile(content []byte) error {
 	h.Write(content)
 	req.Header.Set("x-vercel-digest", hex.EncodeToString(h.Sum(nil)))
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := vercelHTTPClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("upload file: %w", err)
 	}
@@ -306,7 +309,7 @@ func (s *Service) GetDeploymentBuildLog(deploymentID string) (string, error) {
 	req.Header.Set("Authorization", "Bearer "+s.Token)
 	req.Header.Set("Accept", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := vercelHTTPClient.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("do request: %w", err)
 	}

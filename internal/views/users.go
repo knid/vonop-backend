@@ -93,11 +93,6 @@ func (v *HttpViews) UserLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
-		return
-	}
-
 	go func() {
 		if u, lookupErr := v.Controller.DB.GetUserByEmail(userLoginReq.Email); lookupErr == nil {
 			v.Controller.TrackUserEvent(u, "user_logged_in", posthog.NewProperties().

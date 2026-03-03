@@ -271,6 +271,24 @@ func createSchema(db *bun.DB) error {
 		}
 	}
 
+	// Performance indexes
+	perfIndexes := []string{
+		`CREATE INDEX IF NOT EXISTS idx_users_customer_id ON users(customer_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_sessions_project_id ON sessions(project_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status)`,
+		`CREATE INDEX IF NOT EXISTS idx_app_usage_events_session_id ON app_usage_events(session_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_products_store_id ON products(store_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_orders_store_id ON orders(store_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_carts_store_id_session_id ON carts(store_id, session_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_app_snapshots_app_project_id ON app_snapshots(app_project_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_notifications_project_id ON notifications(project_id)`,
+	}
+	for _, stmt := range perfIndexes {
+		if _, err := db.ExecContext(context.Background(), stmt); err != nil {
+			slog.Warn("create index failed", "statement", stmt, "error", err)
+		}
+	}
+
 	return nil
 }
 
@@ -335,7 +353,10 @@ func main() {
 	sqldb.SetConnMaxIdleTime(5 * time.Minute)
 	bundb := bun.NewDB(sqldb, pgdialect.New())
 
-	bundb.Exec("CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\";")
+	if _, err := bundb.Exec("CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\";"); err != nil {
+		slog.Error("Failed to create uuid-ossp extension", "error", err)
+		os.Exit(1)
+	}
 
 	bundb.AddQueryHook(bundebug.NewQueryHook(
 		bundebug.WithVerbose(os.Getenv("BUNDEBUG") == "2"),
@@ -347,7 +368,10 @@ func main() {
 		SlowDuration: 200 * time.Millisecond, // Omit to log all operations as debug
 	}))
 
-	createSchema(bundb)
+	if err := createSchema(bundb); err != nil {
+		slog.Error("Failed to create schema", "error", err)
+		os.Exit(1)
+	}
 
 	db := database.NewDatabase(bundb)
 	go utils.CheckSessionStatusJob(db)
@@ -402,6 +426,17 @@ func main() {
 		}
 	}
 
+	assetsStorage, err := storage.NewS3Storage(sm.GetSecret("AWS_REGION"), sm.GetSecret("AWS_S3_ASSETS_BUCKET_NAME"), sm.GetSecret("AWS_ACCESS_KEY_ID"), sm.GetSecret("AWS_SECRET_ACCESS_KEY"))
+	if err != nil {
+		slog.Error("Failed to initialize assets S3 storage", "error", err)
+		os.Exit(1)
+	}
+	userApiKeysStorage, err := storage.NewS3Storage(sm.GetSecret("AWS_REGION"), sm.GetSecret("AWS_S3_USER_API_KEYS_BUCKET_NAME"), sm.GetSecret("AWS_ACCESS_KEY_ID"), sm.GetSecret("AWS_SECRET_ACCESS_KEY"))
+	if err != nil {
+		slog.Error("Failed to initialize user API keys S3 storage", "error", err)
+		os.Exit(1)
+	}
+
 	controller := controllers.NewController(
 		db,
 		make(chan struct{}, constants.MAX_CONCURRENT_BUILDS),
@@ -414,13 +449,12 @@ func main() {
 			Password:  sm.GetSecret("REDIS_PASSWORD"),
 			TLSConfig: &tls.Config{},
 		}),
-		storage.NewS3Storage(sm.GetSecret("AWS_REGION"), sm.GetSecret("AWS_S3_ASSETS_BUCKET_NAME"), sm.GetSecret("AWS_ACCESS_KEY_ID"), sm.GetSecret("AWS_SECRET_ACCESS_KEY")),
-		storage.NewS3Storage(sm.GetSecret("AWS_REGION"), sm.GetSecret("AWS_S3_USER_API_KEYS_BUCKET_NAME"), sm.GetSecret("AWS_ACCESS_KEY_ID"), sm.GetSecret("AWS_SECRET_ACCESS_KEY")),
+		assetsStorage,
+		userApiKeysStorage,
 		sm,
 		vercelService,
 		previewService,
 		neonService,
-		nil, // MCP service initialized async below
 		posthogClient,
 	)
 
@@ -434,7 +468,7 @@ func main() {
 				slog.Warn("MCP service initialization had errors", "error", err)
 			}
 			if svc != nil && svc.HasTools() {
-				controller.MCPService = svc
+				controller.MCPService.Store(svc)
 				slog.Info("MCP service enabled", "tool_count", len(svc.Tools()))
 			}
 		}()
@@ -486,7 +520,7 @@ func main() {
 	// Access-Control-Allow-Origin headers (otherwise browsers report a
 	// CORS error instead of showing the real 429).
 	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   []string{"https://*", "http://*", "http://127.0.0.1:3000"},
+		AllowedOrigins:   []string{"https://app.wemob.io", "https://wemob.io", "https://www.wemob.io", "http://localhost:3000", "http://127.0.0.1:3000"},
 		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token", "Location"},
 		ExposedHeaders:   []string{"Link"},
@@ -522,8 +556,8 @@ func main() {
 			)
 
 			tokenString, err := utils.ExtractTokenFromHeader(r)
-			if err == nil {
-				httplog.SetAttrs(ctx, slog.String("user.token", tokenString[0:12]+"..."))
+			if err == nil && len(tokenString) >= 12 {
+				// Token prefix intentionally omitted from logs for security
 				userInformationRes, err := httpViews.Controller.GetUser(tokenString)
 				if err == nil {
 					httplog.SetAttrs(ctx, slog.String("user.id", userInformationRes.ID.String()))
@@ -744,6 +778,8 @@ func main() {
 				})
 			})
 			r.Route("/admin", func(r chi.Router) {
+				r.Use(appMiddleware.RequireAuth(controller))
+				r.Use(appMiddleware.RequireAdmin())
 				r.Get("/dashboard", httpViews.GetAdminDashboard)
 			})
 
@@ -1003,8 +1039,8 @@ func main() {
 			}
 
 			tokenString, err := utils.ExtractTokenFromHeader(r)
-			if err == nil {
-				httplog.SetAttrs(ctx, slog.String("user.token", tokenString[0:12]+"..."))
+			if err == nil && len(tokenString) >= 12 {
+				// Token prefix intentionally omitted from logs for security
 				userInformationRes, err := httpViews.Controller.GetUser(tokenString)
 				if err == nil {
 					httplog.SetAttrs(ctx, slog.String("user.id", userInformationRes.ID.String()))
@@ -1017,7 +1053,7 @@ func main() {
 	})
 
 	proxyRoute.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   []string{"https://*", "http://*", "http://127.0.0.1:3000"},
+		AllowedOrigins:   []string{"https://app.wemob.io", "https://wemob.io", "https://www.wemob.io", "http://localhost:3000", "http://127.0.0.1:3000"},
 		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token", "Location"},
 		ExposedHeaders:   []string{"Link"},

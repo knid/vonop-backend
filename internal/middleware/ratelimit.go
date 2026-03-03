@@ -43,7 +43,7 @@ func (rl *RateLimiter) RateLimit(limit int, window time.Duration, keyFunc func(r
 			count, err := rl.client.Incr(ctx, key).Result()
 			if err != nil {
 				slog.Error("rate limiter redis error", "error", err)
-				next.ServeHTTP(w, r)
+				utils.JSONErrorResponse(w, "service temporarily unavailable", http.StatusServiceUnavailable)
 				return
 			}
 

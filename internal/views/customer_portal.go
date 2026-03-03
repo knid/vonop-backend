@@ -1,7 +1,7 @@
 package views
 
 import (
-	"log"
+	"log/slog"
 	"net/http"
 
 	"github.com/knid/wemob/internal/utils"
@@ -31,13 +31,13 @@ func (v *HttpViews) StripeCustomerPortal(w http.ResponseWriter, r *http.Request)
 	}
 
 	params := stripe.BillingPortalSessionParams{
-		Configuration: stripe.String("bpc_1SOc18K7z6hzuvzBFv67UHIC"),
+		Configuration: stripe.String(v.Controller.SecretManager.GetSecret("STRIPE_BILLING_PORTAL_CONFIG_ID")),
 		Customer:      stripe.String(user.CustomerID),
 	}
 
 	s, err := session.New(&params)
 	if err != nil {
-		log.Printf("session.New: %v", err) // Log the detailed error
+		slog.Error("failed to create billing portal session", "error", err)
 		http.Error(w, "Failed to create checkout session. Please try again.", http.StatusInternalServerError)
 		return
 	}

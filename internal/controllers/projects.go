@@ -49,7 +49,7 @@ func (c *Controller) GetProject(user *models.User, project_id string) (*response
 	}
 
 	if project.UserID.String() != user.ID.String() {
-		return nil, errors.New("you do not have access this resources")
+		return nil, errors.New("you do not have access to this resource")
 	}
 
 	lastBuild, err := c.DB.GetLastProjectBuild(project)
@@ -246,7 +246,7 @@ func (c *Controller) UpdateProject(r *http.Request, user *models.User, projectCr
 	}
 
 	if project.UserID.String() != user.ID.String() {
-		return nil, errors.New("you do not have access this resources")
+		return nil, errors.New("you do not have access to this resource")
 	}
 
 	lastBuild, err := c.DB.GetLastProjectBuild(project)
@@ -287,15 +287,6 @@ func (c *Controller) UpdateProject(r *http.Request, user *models.User, projectCr
 			c.DB.DeleteNavBarItems(navBarItems)
 		}
 	}
-
-	/* jsInjectionData, err := c.DB.GetJSInjectionDataByProject(projectId)
-	if err != nil {
-		return nil, err
-	} */
-	/* if jsInjectionData.Base64Data != projectCreateReq.JSInjectionData {
-		jsInjectionData.Base64Data = projectCreateReq.JSInjectionData
-		c.DB.UpdateJSInjectionData(jsInjectionData)
-	} */
 
 	if lastBuild.Title == projectCreateReq.Title && lastBuild.RemoveWemobBranding == projectCreateReq.RemoveWemobBranding &&
 		lastBuild.SplashScreenColor == projectCreateReq.SplashScreenColor && lastBuild.Description == projectCreateReq.Description &&
@@ -364,7 +355,7 @@ func (c *Controller) DeleteProject(user *models.User, projectId string) (*respon
 	}
 
 	if project.UserID.String() != user.ID.String() {
-		return nil, errors.New("you do not have access this resources")
+		return nil, errors.New("you do not have access to this resource")
 	}
 
 	err = c.DB.DeleteProject(project)

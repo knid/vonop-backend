@@ -38,7 +38,7 @@ func (c *Controller) GetAppStoreCredentialById(user *models.User, id string) (*r
 	}
 
 	if cred.UserID.String() != user.ID.String() {
-		return nil, errors.New("you do not have access this resources")
+		return nil, errors.New("you do not have access to this resource")
 	}
 
 	return &responses.AppStoreCredentialsResponse{
@@ -88,7 +88,7 @@ func (c *Controller) UpdateAppStoreCredential(user *models.User, credID string, 
 	}
 
 	if cred.UserID.String() != user.ID.String() {
-		return nil, errors.New("you do not have access this resources")
+		return nil, errors.New("you do not have access to this resource")
 	}
 
 	p8KeyPath := cred.P8KeyPath
@@ -137,7 +137,7 @@ func (c *Controller) DeleteAppStoreCredential(user *models.User, credID string) 
 	}
 
 	if cred.UserID.String() != user.ID.String() {
-		return errors.New("you do not have access this resources")
+		return errors.New("you do not have access to this resource")
 	}
 
 	return c.DB.DeleteAppStoreCredentials(cred)
@@ -170,7 +170,7 @@ func (c *Controller) GetGooglePlayCredentialById(user *models.User, id string) (
 	}
 
 	if cred.UserID.String() != user.ID.String() {
-		return nil, errors.New("you do not have access this resources")
+		return nil, errors.New("you do not have access to this resource")
 	}
 
 	return &responses.GooglePlayCredentialsResponse{
@@ -197,7 +197,7 @@ func (c *Controller) UpdateGooglePlayCredential(user *models.User, credID string
 	}
 
 	if cred.UserID.String() != user.ID.String() {
-		return nil, errors.New("you do not have access this resources")
+		return nil, errors.New("you do not have access to this resource")
 	}
 
 	serviceAccountPath := cred.ServiceAccountPath
@@ -222,7 +222,7 @@ func (c *Controller) DeleteGooglePlayCredential(user *models.User, credID string
 	}
 
 	if cred.UserID.String() != user.ID.String() {
-		return errors.New("you do not have access this resources")
+		return errors.New("you do not have access to this resource")
 	}
 
 	return c.DB.DeleteGooglePlayCredentials(cred)

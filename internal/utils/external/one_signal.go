@@ -8,9 +8,12 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/knid/wemob/internal/models"
 )
+
+var onesignalHTTPClient = &http.Client{Timeout: 10 * time.Second}
 
 func CreateOneSignalApplication(project models.Project, orgId, orgApiKey, fcmB64 string) (string, error) {
 	url := "https://api.onesignal.com/apps"
@@ -27,7 +30,10 @@ func CreateOneSignalApplication(project models.Project, orgId, orgApiKey, fcmB64
 	req.Header.Add("Content-Type", "application/json")
 	req.Header.Add("Authorization", "Basic "+orgApiKey)
 
-	res, _ := http.DefaultClient.Do(req)
+	res, err := onesignalHTTPClient.Do(req)
+	if err != nil {
+		return "", err
+	}
 
 	defer res.Body.Close()
 	body, err := io.ReadAll(res.Body)
@@ -61,7 +67,7 @@ func CreateOneSignalAppToken(project models.Project, orgApiKey string) (string, 
 	req.Header.Add("Content-Type", "application/json")
 	req.Header.Add("Authorization", "Basic "+orgApiKey)
 
-	res, err := http.DefaultClient.Do(req)
+	res, err := onesignalHTTPClient.Do(req)
 	if err != nil {
 		return "", err
 	}
@@ -92,14 +98,12 @@ func UploadAPNSP8KeyToOneSignal(project models.Project, apnsP8Key string, apnsKe
 	}
 	marshalled, _ := json.Marshal(payloadStr)
 
-	fmt.Println("payload: ", payloadStr)
-
 	req, _ := http.NewRequest("PUT", url, bytes.NewReader(marshalled))
 
 	req.Header.Add("Content-Type", "application/json")
 	req.Header.Add("Authorization", "Basic "+orgApiKey)
 
-	res, err := http.DefaultClient.Do(req)
+	res, err := onesignalHTTPClient.Do(req)
 	if err != nil {
 		return err
 	}
@@ -158,7 +162,7 @@ func SendOneSignalNotification(notification *models.Notification, project *model
 	req.Header.Add("Content-Type", "application/json")
 	req.Header.Add("Authorization", "Basic "+project.OneSignalAppToken)
 
-	res, err := http.DefaultClient.Do(req)
+	res, err := onesignalHTTPClient.Do(req)
 	if err != nil {
 		return err
 	}

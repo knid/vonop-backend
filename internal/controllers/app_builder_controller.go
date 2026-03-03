@@ -2517,15 +2517,16 @@ func (c *Controller) injectTemplateFileForTool(project *models.AppProject, tp st
 // to the MCP service, while passing everything else to the local executor.
 func (c *Controller) compositeToolExecutor(local utils.ToolExecutor) utils.ToolExecutor {
 	return func(name string, arguments string) (string, error) {
-		if c.MCPService != nil && c.MCPService.IsMCPTool(name) {
-			return c.MCPService.ToolExecutor()(name, arguments)
+		mcp := c.MCPService.Load()
+		if mcp != nil && mcp.IsMCPTool(name) {
+			return mcp.ToolExecutor()(name, arguments)
 		}
 		result, err := local(name, arguments)
 		if err != nil {
 			return result, err
 		}
-		if strings.HasPrefix(result, "Unknown tool:") && c.MCPService != nil {
-			if mcpResult, mcpErr := c.MCPService.ToolExecutor()(name, arguments); mcpErr == nil && !strings.HasPrefix(mcpResult, "Unknown MCP tool:") {
+		if strings.HasPrefix(result, "Unknown tool:") && mcp != nil {
+			if mcpResult, mcpErr := mcp.ToolExecutor()(name, arguments); mcpErr == nil && !strings.HasPrefix(mcpResult, "Unknown MCP tool:") {
 				return mcpResult, nil
 			}
 		}
@@ -2535,8 +2536,9 @@ func (c *Controller) compositeToolExecutor(local utils.ToolExecutor) utils.ToolE
 
 // mcpTools returns MCP tools if the service is available, or nil.
 func (c *Controller) mcpTools() []utils.Tool {
-	if c.MCPService != nil && c.MCPService.HasTools() {
-		return c.MCPService.Tools()
+	mcp := c.MCPService.Load()
+	if mcp != nil && mcp.HasTools() {
+		return mcp.Tools()
 	}
 	return nil
 }

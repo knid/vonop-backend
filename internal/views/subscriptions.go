@@ -208,6 +208,7 @@ func (v *HttpViews) EndTrialNowAndChargeForUser(w http.ResponseWriter, r *http.R
 
 	if resp["status"] != "paid" {
 		utils.JSONResponse(w, resp, http.StatusPaymentRequired)
+		return
 	}
 
 	utils.JSONResponse(w, resp, http.StatusOK)

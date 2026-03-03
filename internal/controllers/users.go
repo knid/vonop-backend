@@ -122,7 +122,7 @@ func (c *Controller) RegisterUser(userRegisterReq requests.UserRegisterRequest) 
 		Name:     userRegisterReq.Name,
 		Email:    userRegisterReq.Email,
 		Provider: "Wemob",
-		Type:     userRegisterReq.Type,
+		Type:     "user",
 		Company:  userRegisterReq.Company,
 		Password: hashedPassword,
 	}
@@ -143,11 +143,11 @@ func (c *Controller) RegisterUser(userRegisterReq requests.UserRegisterRequest) 
 	}
 
 	customer, err := customer.New(&params)
-	createdUser.CustomerID = customer.ID
-	c.DB.UpdateUser(createdUser)
 	if err != nil {
 		return nil, err
 	}
+	createdUser.CustomerID = customer.ID
+	c.DB.UpdateUser(createdUser)
 
 	go c.SlackService.Client.PostMessage(
 		constants.SLACK_CHANNEL_ID_NEW_USER,
@@ -257,18 +257,12 @@ func (c *Controller) GoogleLogin(oauthUser goth.User) (*responses.UserLoginRespo
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			pass, _ := utils.RandomHex(32)
-			/* 			userRegisterReq := requests.UserRegisterRequest{
-			   				Name:          oauthUser.Name,
-			   				Email:         oauthUser.Email,
-			   				Password:      pass,
-			   				PasswordCheck: pass,
-			   			}
-			   			c.RegisterUser(userRegisterReq) */
+			hashedPass, _ := utils.HashPassword(pass)
 			newUser := models.User{
 				Name:     oauthUser.Name,
 				Email:    oauthUser.Email,
 				Photo:    oauthUser.AvatarURL,
-				Password: utils.GetSHA256Hash(pass),
+				Password: hashedPass,
 				Provider: "Google",
 				Verified: true,
 			}

@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"log/slog"
 	"net/http"
 	"time"
@@ -48,7 +47,7 @@ func (c *Controller) HandleWebhook(w http.ResponseWriter, req *http.Request) {
 	case "customer.subscription.created":
 		var sub stripe.Subscription
 		if err := json.Unmarshal(event.Data.Raw, &sub); err == nil {
-			log.Printf("Subscription created for customer %s. Status: %s", sub.Customer.ID, sub.Status)
+			slog.Info("subscription created", "customer_id", sub.Customer.ID, "status", sub.Status)
 
 			user, err := c.DB.GetUserByStripeCustomerID(sub.Customer.ID)
 			if err != nil {
@@ -83,7 +82,9 @@ func (c *Controller) HandleWebhook(w http.ResponseWriter, req *http.Request) {
 			if !user.SetupFinished {
 				user.SetupFinished = true
 				go c.CRMService.SendEvent(user, constants.BREVO_EVENT_USER_SETUP_FINISHED, map[string]any{})
-				c.DB.UpdateUser(user)
+				if _, err := c.DB.UpdateUser(user); err != nil {
+					slog.Error("failed to persist setup_finished flag", "user_id", user.ID, "error", err)
+				}
 			}
 
 			if _, err := c.DB.UpdateUser(user); err != nil {
@@ -100,7 +101,7 @@ func (c *Controller) HandleWebhook(w http.ResponseWriter, req *http.Request) {
 	case "customer.subscription.updated":
 		var sub stripe.Subscription
 		if err := json.Unmarshal(event.Data.Raw, &sub); err == nil {
-			log.Printf("Subscription updated for customer %s. Status: %s", sub.Customer.ID, sub.Status)
+			slog.Info("subscription updated", "customer_id", sub.Customer.ID, "status", sub.Status)
 
 			user, err := c.DB.GetUserByStripeCustomerID(sub.Customer.ID)
 			if err != nil {
@@ -123,7 +124,9 @@ func (c *Controller) HandleWebhook(w http.ResponseWriter, req *http.Request) {
 					if user.TrialUsed {
 						go c.CRMService.SendEvent(user, constants.BREVO_EVENT_TRIAL_ENDED, map[string]any{})
 					}
-					c.DB.UpdateUser(user)
+					if _, err := c.DB.UpdateUser(user); err != nil {
+						slog.Error("failed to persist setup_finished flag", "user_id", user.ID, "error", err)
+					}
 				}
 			case "past_due":
 				user.SubscriptionStatus = "past_due"
@@ -162,7 +165,7 @@ func (c *Controller) HandleWebhook(w http.ResponseWriter, req *http.Request) {
 	case "invoice.payment_succeeded":
 		var invoice stripe.Invoice
 		if err := json.Unmarshal(event.Data.Raw, &invoice); err == nil {
-			log.Printf("Invoice payment succeeded for customer %s", invoice.Customer.ID)
+			slog.Info("invoice payment succeeded", "customer_id", invoice.Customer.ID)
 
 			user, err := c.DB.GetUserByStripeCustomerID(invoice.Customer.ID)
 			if err != nil {
@@ -173,7 +176,9 @@ func (c *Controller) HandleWebhook(w http.ResponseWriter, req *http.Request) {
 			if !user.SetupFinished {
 				user.SetupFinished = true
 				go c.CRMService.SendEvent(user, constants.BREVO_EVENT_USER_SETUP_FINISHED, map[string]any{})
-				c.DB.UpdateUser(user)
+				if _, err := c.DB.UpdateUser(user); err != nil {
+					slog.Error("failed to persist setup_finished flag", "user_id", user.ID, "error", err)
+				}
 			}
 
 			go c.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_UPDATED, map[string]any{
@@ -195,7 +200,7 @@ func (c *Controller) HandleWebhook(w http.ResponseWriter, req *http.Request) {
 	case "invoice.payment_failed":
 		var invoice stripe.Invoice
 		if err := json.Unmarshal(event.Data.Raw, &invoice); err == nil {
-			log.Printf("Invoice payment failed for customer %s", invoice.Customer.ID)
+			slog.Info("invoice payment failed", "customer_id", invoice.Customer.ID)
 
 			user, err := c.DB.GetUserByStripeCustomerID(invoice.Customer.ID)
 			if err != nil {
@@ -223,7 +228,7 @@ func (c *Controller) HandleWebhook(w http.ResponseWriter, req *http.Request) {
 	case "invoice.payment_action_required":
 		var invoice stripe.Invoice
 		if err := json.Unmarshal(event.Data.Raw, &invoice); err == nil {
-			log.Printf("Invoice payment failed for customer %s", invoice.Customer.ID)
+			slog.Info("invoice payment action required", "customer_id", invoice.Customer.ID)
 
 			user, err := c.DB.GetUserByStripeCustomerID(invoice.Customer.ID)
 			if err != nil {
@@ -243,7 +248,7 @@ func (c *Controller) HandleWebhook(w http.ResponseWriter, req *http.Request) {
 	case "customer.subscription.deleted":
 		var sub stripe.Subscription
 		if err := json.Unmarshal(event.Data.Raw, &sub); err == nil {
-			log.Printf("Subscription canceled for customer %s", sub.Customer.ID)
+			slog.Info("subscription canceled", "customer_id", sub.Customer.ID)
 
 			user, err := c.DB.GetUserByStripeCustomerID(sub.Customer.ID)
 			if err != nil {

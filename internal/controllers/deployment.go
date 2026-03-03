@@ -105,7 +105,7 @@ func (c *Controller) CreateDeploymentTask(user *models.User, deploymentReq reque
 	}
 
 	if project.UserID.String() != user.ID.String() {
-		return nil, errors.New("you do not have access this resources")
+		return nil, errors.New("you do not have access to this resource")
 	}
 
 	build, err := c.DB.GetProjectBuildById(deploymentReq.BuildID)
@@ -298,7 +298,7 @@ func (c *Controller) UpdateDeploymentTask(user *models.User, deploymentID string
 	}
 
 	if project.UserID.String() != user.ID.String() {
-		return nil, errors.New("you do not have access this resources")
+		return nil, errors.New("you do not have access to this resource")
 	}
 
 	build, err := c.DB.GetProjectBuildById(deploymentReq.BuildID)
@@ -312,7 +312,7 @@ func (c *Controller) UpdateDeploymentTask(user *models.User, deploymentID string
 	}
 
 	if deployment.UserID.String() != user.ID.String() {
-		return nil, errors.New("you do not have access this resources")
+		return nil, errors.New("you do not have access to this resource")
 	}
 
 	var titleChanged bool
@@ -478,7 +478,7 @@ func (c *Controller) SignUnsignedIPATask(user *models.User, signReq requests.Sig
 	}
 
 	if project.UserID.String() != user.ID.String() {
-		return nil, errors.New("you do not have access this resources")
+		return nil, errors.New("you do not have access to this resource")
 	}
 
 	build, err := c.DB.GetProjectBuildById(signReq.BuildID)
