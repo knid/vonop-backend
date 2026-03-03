@@ -1387,6 +1387,28 @@ func (c *Controller) runDeterministicAutoFixes(
 					Action: "modify", Path: fixedPath, Type: dbFile.FileType,
 				})
 				*filesChanged++
+			} else {
+				// New file created by auto-fix (e.g. components/layout-client.tsx)
+				_, fileType := guessFileType(fixedPath)
+				newFile := models.AppGeneratedFile{
+					AppProjectID: project.ID,
+					Platform:     "nextjs",
+					FilePath:     fixedPath,
+					Content:      fileMap[fixedPath],
+					FileType:     fileType,
+					IsGenerated:  true,
+				}
+				if created, createErr := c.DB.CreateAppGeneratedFile(&newFile); createErr == nil {
+					sendEvent("file_complete", responses.FileCompleteEvent{
+						Action: "create", FilePath: fixedPath,
+						FileID: created.ID, FileType: fileType,
+						Content: fileMap[fixedPath],
+					})
+					*appliedOps = append(*appliedOps, appBuilderOperation{
+						Action: "create", Path: fixedPath, Type: fileType,
+					})
+					*filesChanged++
+				}
 			}
 		}
 	}
@@ -2779,7 +2801,32 @@ func (c *Controller) streamSingleShotGeneration(
 	)
 	parser.Flush()
 
-	// 6. Sync all files to preview
+	// 6. Run deterministic auto-fixes before syncing (e.g. remove "use client" from
+	// files that export metadata — Next.js will 500 otherwise).
+	preFixSnapshot := make(map[string]string, len(fileMap))
+	for k, v := range fileMap {
+		preFixSnapshot[k] = v
+	}
+	autoFixMetadataInClientComponent(fileMap)
+	autoFixMissingUseClient(fileMap)
+	autoFixRootLayoutTags(fileMap)
+	// Persist any auto-fixed or newly created content back to the DB
+	for path, content := range fileMap {
+		prev, existed := preFixSnapshot[path]
+		if !existed {
+			// New file created by auto-fix (e.g. components/layout-client.tsx)
+			_, fileType := guessFileType(path)
+			c.saveGeneratedFile(project, path, content, fileType, fileMap, sendEvent, &ops)
+		} else if content != prev {
+			// Existing file was modified by auto-fix
+			if dbFile, err := c.DB.GetAppGeneratedFileByPath(project.ID.String(), "nextjs", path); err == nil && dbFile != nil {
+				dbFile.Content = content
+				c.DB.UpdateAppGeneratedFile(dbFile)
+			}
+		}
+	}
+
+	// 7. Sync all files to preview
 	if c.PreviewService != nil {
 		c.SyncPreviewAll(project)
 	}
@@ -3002,6 +3049,29 @@ func (c *Controller) streamEcommerceGeneration(
 		utils.StreamTextConfig{MaxTokens: 65536},
 	)
 	parser.Flush()
+
+	// Run deterministic auto-fixes before syncing (e.g. remove "use client" from
+	// files that export metadata — Next.js will 500 otherwise).
+	preFixSnapshot := make(map[string]string, len(fileMap))
+	for k, v := range fileMap {
+		preFixSnapshot[k] = v
+	}
+	autoFixMetadataInClientComponent(fileMap)
+	autoFixMissingUseClient(fileMap)
+	autoFixRootLayoutTags(fileMap)
+	// Persist any auto-fixed or newly created content back to the DB
+	for path, content := range fileMap {
+		prev, existed := preFixSnapshot[path]
+		if !existed {
+			_, fileType := guessFileType(path)
+			c.saveGeneratedFile(project, path, content, fileType, fileMap, sendEvent, &ops)
+		} else if content != prev {
+			if dbFile, err := c.DB.GetAppGeneratedFileByPath(project.ID.String(), "nextjs", path); err == nil && dbFile != nil {
+				dbFile.Content = content
+				c.DB.UpdateAppGeneratedFile(dbFile)
+			}
+		}
+	}
 
 	// Sync all files to preview
 	if c.PreviewService != nil {
