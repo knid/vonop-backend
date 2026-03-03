@@ -23,11 +23,14 @@ type S3Storage struct {
 	PresignClient *s3.PresignClient
 }
 
-func NewS3Storage(region, bucket, accessKey, secretKey string) *S3Storage {
-	cfg, _ := config.LoadDefaultConfig(context.TODO(),
+func NewS3Storage(region, bucket, accessKey, secretKey string) (*S3Storage, error) {
+	cfg, err := config.LoadDefaultConfig(context.TODO(),
 		config.WithRegion(region),
 		config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(accessKey, secretKey, "")),
 	)
+	if err != nil {
+		return nil, err
+	}
 	client := s3.NewFromConfig(cfg)
 	presignClient := s3.NewPresignClient(client)
 
@@ -36,7 +39,7 @@ func NewS3Storage(region, bucket, accessKey, secretKey string) *S3Storage {
 		Bucket:        bucket,
 		Client:        client,
 		PresignClient: presignClient,
-	}
+	}, nil
 }
 
 func (s *S3Storage) DownloadFile(ctx context.Context, s3URL string, destinationPath string) error {
@@ -168,5 +171,5 @@ func (s S3Storage) PresignPostObject(ctx context.Context, objectKey string, life
 	if err != nil {
 		log.Printf("Couldn't get a presigned post request to put %v:%v. Here's why: %v\n", s.Bucket, objectKey, err)
 	}
-	return request, nil
+	return request, err
 }

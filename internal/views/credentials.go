@@ -49,6 +49,7 @@ func (v *HttpViews) CreateAppStoreCredential(w http.ResponseWriter, r *http.Requ
 
 	validate := validator.New(validator.WithRequiredStructEnabled())
 	if err := utils.ValidateFunc[requests.AppStoreCredentialsCreateRequest](req, validate); err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -112,6 +113,7 @@ func (v *HttpViews) UpdateAppStoreCredential(w http.ResponseWriter, r *http.Requ
 
 	validate := validator.New(validator.WithRequiredStructEnabled())
 	if err := utils.ValidateFunc[requests.AppStoreCredentialsCreateRequest](req, validate); err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -186,6 +188,7 @@ func (v *HttpViews) CreateGooglePlayCredential(w http.ResponseWriter, r *http.Re
 
 	validate := validator.New(validator.WithRequiredStructEnabled())
 	if err := utils.ValidateFunc[requests.GooglePlayCredentialsCreateRequest](req, validate); err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -249,6 +252,7 @@ func (v *HttpViews) UpdateGooglePlayCredential(w http.ResponseWriter, r *http.Re
 
 	validate := validator.New(validator.WithRequiredStructEnabled())
 	if err := utils.ValidateFunc[requests.GooglePlayCredentialsCreateRequest](req, validate); err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 

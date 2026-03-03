@@ -89,33 +89,36 @@ func (v *HttpViews) AutoGenerateScreenshots(w http.ResponseWriter, r *http.Reque
 		} `json:"screenshots"`
 	}{}
 
+	var mu sync.Mutex
 	var homePageScreenshotId string
 	for _, screenshotUrl := range screenshots.URLs {
 		go func() {
 			defer waitGroup.Done()
 			screenshot, err := external.GetScreenshotOfURL(screenshotUrl, v.Controller.SecretManager.GetSecret("SITESHOT_API_KEY"))
 			if err != nil {
-				slog.Error("Error getting screenshot for %s: %v", screenshotUrl, err)
+				slog.Error("screenshot fetch error", "url", screenshotUrl, "error", err)
 				return
 			}
 			mockupBytes, err := utils.ComposeMockup(screenshot)
 			if err != nil {
-				slog.Error("Error composing mockup for %s: %v", screenshotUrl, err)
+				slog.Error("mockup compose error", "url", screenshotUrl, "error", err)
 				return
 			}
 
 			id := uuid.New().String()
 			err = v.Controller.AssetsStorage.UploadFileByte(context.TODO(), "screenshots/"+id+".png", mockupBytes)
 			if err != nil {
-				slog.Error("Error uploading screenshot for %s: %v", screenshotUrl, err)
+				slog.Error("screenshot upload error", "url", screenshotUrl, "error", err)
 				return
 			}
 
 			req, err := v.Controller.AssetsStorage.GetObject(context.TODO(), "screenshots/"+id+".png", 60*60*24*7)
 			if err != nil {
-				slog.Error("Error getting presigned URL for %s: %v", screenshotUrl, err)
+				slog.Error("presigned URL error", "url", screenshotUrl, "error", err)
 				return
 			}
+
+			mu.Lock()
 			screenshotLinks.Screenshots = append(screenshotLinks.Screenshots,
 				struct {
 					ID  string `json:"id"`
@@ -128,6 +131,7 @@ func (v *HttpViews) AutoGenerateScreenshots(w http.ResponseWriter, r *http.Reque
 			if screenshotUrl == autoGenerateScreenshotsReq.URL {
 				homePageScreenshotId = id
 			}
+			mu.Unlock()
 		}()
 	}
 

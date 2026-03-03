@@ -23,11 +23,14 @@ func (v *HttpViews) CheckStatus(w http.ResponseWriter, r *http.Request) {
 			utils.JSONErrorResponse(w, "project not found", http.StatusBadRequest)
 			return
 		}
+		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
 
 	user, err := v.Controller.GetUserModelById(project.UserID.String())
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
 	}
 
 	var status string

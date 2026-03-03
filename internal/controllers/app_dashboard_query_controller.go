@@ -902,14 +902,40 @@ func validateReadOnlySQL(sqlQuery string) error {
 		}
 	}
 
+	// Block dangerous Postgres functions that can escape read-only transactions
+	dangerousFuncs := []string{
+		"PG_READ_FILE", "PG_READ_BINARY_FILE", "PG_WRITE_FILE",
+		"DBLINK", "DBLINK_EXEC", "DBLINK_CONNECT",
+		"LO_IMPORT", "LO_EXPORT", "LO_GET", "LO_PUT",
+		"COPY", "PG_SLEEP",
+	}
+	for _, fn := range dangerousFuncs {
+		if containsKeyword(cleaned, fn) {
+			return fmt.Errorf("forbidden SQL function: %s", fn)
+		}
+	}
+
 	return nil
 }
 
-// removeStringLiterals strips single-quoted string literals from SQL for keyword checking.
+// removeStringLiterals strips single-quoted and dollar-quoted string literals from SQL for keyword checking.
 func removeStringLiterals(sql string) string {
 	var result strings.Builder
 	inString := false
 	for i := 0; i < len(sql); i++ {
+		// Handle dollar-quoted strings: $tag$...$tag$
+		if sql[i] == '$' && !inString {
+			// Find the end of the opening tag
+			end := strings.Index(sql[i+1:], "$")
+			if end >= 0 {
+				tag := sql[i : i+end+2] // e.g. "$tag$" or "$$"
+				closeIdx := strings.Index(sql[i+len(tag):], tag)
+				if closeIdx >= 0 {
+					i += len(tag) + closeIdx + len(tag) - 1
+					continue
+				}
+			}
+		}
 		if sql[i] == '\'' {
 			inString = !inString
 			continue

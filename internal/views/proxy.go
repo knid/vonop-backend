@@ -3,10 +3,9 @@ package views
 import (
 	"bytes"
 	"compress/gzip"
-	"crypto/tls"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -16,6 +15,7 @@ import (
 	"time"
 
 	"github.com/knid/wemob/internal/constants"
+	"github.com/knid/wemob/internal/utils"
 )
 
 var customTransport = &http.Transport{
@@ -30,7 +30,6 @@ var customTransport = &http.Transport{
 	IdleConnTimeout:       90 * time.Second,
 	TLSHandshakeTimeout:   10 * time.Second,
 	ExpectContinueTimeout: 1 * time.Second,
-	TLSClientConfig:       &tls.Config{InsecureSkipVerify: true},
 }
 
 // InitProxyTransport configures the upstream proxy once at startup.
@@ -50,23 +49,16 @@ func InitProxyTransport(host, auth string) {
 }
 
 func (v *HttpViews) ProxyHandler(w http.ResponseWriter, r *http.Request) {
-	// tokenString, err := utils.ExtractTokenFromHeader(r)
-	// if err != nil {
-	// slog.Error("Failed to extract token", "error", err, "from", "PROXY")
-	// http.Error(w, "Unauthorized: Failed to extract token", http.StatusUnauthorized)
-	// return
-	// }
+	tokenString, err := utils.ExtractTokenFromHeader(r)
+	if err != nil {
+		http.Error(w, "Unauthorized: Failed to extract token", http.StatusUnauthorized)
+		return
+	}
 
-	// userInformationRes, err := v.Controller.GetUser(tokenString)
-	// if err != nil {
-	// slog.Error("Failed to get user information", "error", err, "user.token", tokenString[0:12]+"...", "from", "PROXY")
-	// http.Error(w, "Unauthorized: Failed to get user information", http.StatusUnauthorized)
-	// return
-	// }
-
-	/* slog.Info(fmt.Sprintf("Proxy start request received for: %s", r.URL.Path),
-	"user.token", tokenString[0:12]+"...", "user.id", userInformationRes.ID.String(),
-	"user.email", userInformationRes.Email, "from", "PROXY") */
+	if _, err := v.Controller.GetUser(tokenString); err != nil {
+		http.Error(w, "Unauthorized: Failed to get user information", http.StatusUnauthorized)
+		return
+	}
 
 	queryParam := r.URL.Query().Get("url")
 	if queryParam != "" {
@@ -152,7 +144,7 @@ func (v *HttpViews) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	proxy.ModifyResponse = func(resp *http.Response) error {
-		log.Printf("🔙 [RESPONSE] Got status %d from upstream. Type: %s", resp.StatusCode, resp.Header.Get("Content-Type"))
+		slog.Debug("proxy upstream response", "status", resp.StatusCode, "content_type", resp.Header.Get("Content-Type"))
 
 		resp.Header.Del("X-Frame-Options")
 		resp.Header.Del("Content-Security-Policy")

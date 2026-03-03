@@ -391,7 +391,10 @@ func GetJSONFromLLM(ctx context.Context, model, system, message string, provider
 		return "", fmt.Errorf("error building request: %w", err)
 	}
 
-	req, _ := http.NewRequestWithContext(ctx, "POST", provider.Endpoint(), bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, "POST", provider.Endpoint(), bytes.NewReader(body))
+	if err != nil {
+		return "", fmt.Errorf("error creating LLM request: %w", err)
+	}
 	setLLMHeaders(req, provider)
 
 	start := time.Now()
@@ -453,7 +456,10 @@ func GetTextFromLLM(ctx context.Context, model, system, message string, provider
 		return "", fmt.Errorf("error building request: %w", err)
 	}
 
-	req, _ := http.NewRequestWithContext(ctx, "POST", provider.Endpoint(), bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, "POST", provider.Endpoint(), bytes.NewReader(body))
+	if err != nil {
+		return "", fmt.Errorf("error creating LLM request: %w", err)
+	}
 	setLLMHeaders(req, provider)
 
 	start := time.Now()
@@ -552,7 +558,10 @@ func StreamTextFromLLMWithMessages(ctx context.Context, model string, messages [
 		return "", fmt.Errorf("error building request: %w", err)
 	}
 
-	req, _ := http.NewRequestWithContext(ctx, "POST", provider.Endpoint(), bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, "POST", provider.Endpoint(), bytes.NewReader(body))
+	if err != nil {
+		return "", fmt.Errorf("error creating LLM request: %w", err)
+	}
 	setLLMHeaders(req, provider)
 
 	start := time.Now()
@@ -678,7 +687,10 @@ func GetJSONFromLLMWithMessages(ctx context.Context, model string, messages []Me
 		return "", fmt.Errorf("error building request: %w", err)
 	}
 
-	req, _ := http.NewRequestWithContext(ctx, "POST", provider.Endpoint(), bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, "POST", provider.Endpoint(), bytes.NewReader(body))
+	if err != nil {
+		return "", fmt.Errorf("error creating LLM request: %w", err)
+	}
 	setLLMHeaders(req, provider)
 
 	start := time.Now()
@@ -743,7 +755,10 @@ func StreamJSONFromLLMWithMessages(ctx context.Context, model string, messages [
 		return "", fmt.Errorf("error building request: %w", err)
 	}
 
-	req, _ := http.NewRequestWithContext(ctx, "POST", provider.Endpoint(), bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, "POST", provider.Endpoint(), bytes.NewReader(body))
+	if err != nil {
+		return "", fmt.Errorf("error creating LLM request: %w", err)
+	}
 	setLLMHeaders(req, provider)
 
 	start := time.Now()
@@ -897,7 +912,10 @@ func GetJSONFromLLMWithVision(ctx context.Context, model, system, userText, base
 		return "", fmt.Errorf("error building request: %w", err)
 	}
 
-	req, _ := http.NewRequestWithContext(ctx, "POST", provider.Endpoint(), bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, "POST", provider.Endpoint(), bytes.NewReader(body))
+	if err != nil {
+		return "", fmt.Errorf("error creating LLM request: %w", err)
+	}
 	setLLMHeaders(req, provider)
 
 	start := time.Now()
@@ -1047,7 +1065,10 @@ func StreamWithTools(
 			return "", fmt.Errorf("error building request: %w", err)
 		}
 
-		req, _ := http.NewRequestWithContext(ctx, "POST", provider.Endpoint(), bytes.NewReader(body))
+		req, err := http.NewRequestWithContext(ctx, "POST", provider.Endpoint(), bytes.NewReader(body))
+		if err != nil {
+			return "", fmt.Errorf("error creating LLM request: %w", err)
+		}
 		setLLMHeaders(req, provider)
 
 		roundStart := time.Now()

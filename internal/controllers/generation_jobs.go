@@ -68,11 +68,15 @@ func (c *Controller) CancelJob(jobID string, userID uuid.UUID) error {
 
 	// Clean up pending clarification channel if present
 	if ch, ok := c.PendingClarifications.LoadAndDelete(jobID); ok {
-		close(ch.(chan ClarificationResult))
+		if typedCh, ok := ch.(chan ClarificationResult); ok {
+			close(typedCh)
+		}
 	}
 
 	if cancelFn, ok := c.RunningJobs.LoadAndDelete(jobID); ok {
-		cancelFn.(context.CancelFunc)()
+		if fn, ok := cancelFn.(context.CancelFunc); ok {
+			fn()
+		}
 	}
 
 	return c.DB.UpdateGenerationJobStatus(jobID, "cancelled", "cancelled by user")
@@ -101,7 +105,10 @@ func (c *Controller) SubmitClarification(jobID string, result ClarificationResul
 	if !ok {
 		return fmt.Errorf("no pending clarification for this job")
 	}
-	ch := val.(chan ClarificationResult)
+	ch, ok := val.(chan ClarificationResult)
+	if !ok {
+		return fmt.Errorf("invalid clarification channel type")
+	}
 	// Non-blocking send — channel is buffered with size 1
 	select {
 	case ch <- result:

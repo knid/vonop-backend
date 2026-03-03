@@ -2,6 +2,7 @@ package utils
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"reflect"
 )
@@ -13,7 +14,9 @@ func JSONResponse(w http.ResponseWriter, data interface{}, statusCode int) {
 	if v.Kind() == reflect.Slice && v.IsNil() {
 		data = reflect.MakeSlice(v.Type(), 0, 0).Interface()
 	}
-	json.NewEncoder(w).Encode(data)
+	if err := json.NewEncoder(w).Encode(data); err != nil {
+		slog.Error("failed to encode JSON response", "error", err)
+	}
 }
 
 func JSONErrorResponse(w http.ResponseWriter, message string, code int) {

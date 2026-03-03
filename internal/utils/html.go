@@ -1,7 +1,6 @@
 package utils
 
 import (
-	"crypto/tls"
 	"fmt"
 	"io"
 	"net"
@@ -26,7 +25,6 @@ var customTransport = &http.Transport{
 	IdleConnTimeout:       90 * time.Second,
 	TLSHandshakeTimeout:   10 * time.Second,
 	ExpectContinueTimeout: 1 * time.Second,
-	TLSClientConfig:       &tls.Config{InsecureSkipVerify: true},
 }
 
 // fetchHTML downloads the HTML of the given page via GET.

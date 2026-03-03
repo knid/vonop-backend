@@ -1,7 +1,6 @@
 package views
 
 import (
-	"fmt"
 	"net/http"
 	"net/url"
 
@@ -37,7 +36,6 @@ func (v *HttpViews) LogAppEvent(w http.ResponseWriter, r *http.Request) {
 
 	response, err := v.Controller.LogAppEvent(r, logAppEventReq)
 	if err != nil {
-		fmt.Println("ERR IN LOG")
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -119,13 +117,13 @@ func (v *HttpViews) GetUniqueDevices(w http.ResponseWriter, r *http.Request) {
 
 	timeStartStr, err = url.QueryUnescape(timeStartStr)
 	if err != nil {
-		utils.JSONErrorResponse(w, "unsported time_start value", http.StatusBadRequest)
+		utils.JSONErrorResponse(w, "unsupported time_start value", http.StatusBadRequest)
 		return
 	}
 
 	timeEndStr, err = url.QueryUnescape(timeEndStr)
 	if err != nil {
-		utils.JSONErrorResponse(w, "unsported time_end value", http.StatusBadRequest)
+		utils.JSONErrorResponse(w, "unsupported time_end value", http.StatusBadRequest)
 		return
 	}
 
@@ -229,13 +227,13 @@ func (v *HttpViews) GetSessions(w http.ResponseWriter, r *http.Request) {
 
 	timeStartStr, err = url.QueryUnescape(timeStartStr)
 	if err != nil {
-		utils.JSONErrorResponse(w, "unsported time_start value", http.StatusBadRequest)
+		utils.JSONErrorResponse(w, "unsupported time_start value", http.StatusBadRequest)
 		return
 	}
 
 	timeEndStr, err = url.QueryUnescape(timeEndStr)
 	if err != nil {
-		utils.JSONErrorResponse(w, "unsported time_end value", http.StatusBadRequest)
+		utils.JSONErrorResponse(w, "unsupported time_end value", http.StatusBadRequest)
 		return
 	}
 
@@ -300,13 +298,13 @@ func (v *HttpViews) GetProjectEvents(w http.ResponseWriter, r *http.Request) {
 
 	timeStartStr, err = url.QueryUnescape(timeStartStr)
 	if err != nil {
-		utils.JSONErrorResponse(w, "unsported time_start value", http.StatusBadRequest)
+		utils.JSONErrorResponse(w, "unsupported time_start value", http.StatusBadRequest)
 		return
 	}
 
 	timeEndStr, err = url.QueryUnescape(timeEndStr)
 	if err != nil {
-		utils.JSONErrorResponse(w, "unsported time_end value", http.StatusBadRequest)
+		utils.JSONErrorResponse(w, "unsupported time_end value", http.StatusBadRequest)
 		return
 	}
 

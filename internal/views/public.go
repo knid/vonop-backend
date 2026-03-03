@@ -23,11 +23,14 @@ func (v *HttpViews) GetNavBarItems(w http.ResponseWriter, r *http.Request) {
 			utils.JSONErrorResponse(w, "project not found", http.StatusBadRequest)
 			return
 		}
+		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
 
 	user, err := v.Controller.GetUserModelById(project.UserID.String())
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
 	}
 
 	if !(user.SubscriptionStatus == "active" || user.SubscriptionStatus == "trial") {
@@ -59,11 +62,14 @@ func (v *HttpViews) GetNavBarItemsBackground(w http.ResponseWriter, r *http.Requ
 			utils.JSONErrorResponse(w, "project not found", http.StatusBadRequest)
 			return
 		}
+		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
 
 	user, err := v.Controller.GetUserModelById(project.UserID.String())
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
 	}
 
 	if !(user.SubscriptionStatus == "active" || user.SubscriptionStatus == "trial") {
@@ -95,16 +101,19 @@ func (v *HttpViews) GetJSInjectionData(w http.ResponseWriter, r *http.Request) {
 			utils.JSONErrorResponse(w, "project not found", http.StatusBadRequest)
 			return
 		}
+		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
 
 	user, err := v.Controller.GetUserModelById(project.UserID.String())
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
 	}
 
 	if !(user.SubscriptionStatus == "active" || user.SubscriptionStatus == "trial") {
 		utils.JSONErrorResponse(w, "this projects is not active", http.StatusBadRequest)
-
+		return
 	}
 
 	jsInjectionData, err := v.Controller.DB.GetJSInjectionDataByProject(projectId)

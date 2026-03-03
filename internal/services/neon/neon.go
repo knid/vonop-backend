@@ -7,9 +7,12 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"time"
 )
 
 const neonAPIBase = "https://console.neon.tech/api/v2"
+
+var neonHTTPClient = &http.Client{Timeout: 10 * time.Second}
 
 type Service struct {
 	APIKey string
@@ -98,7 +101,7 @@ func (s *Service) doRequest(method, path string, body any) ([]byte, error) {
 	}
 	req.Header.Set("Accept", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := neonHTTPClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("do request: %w", err)
 	}

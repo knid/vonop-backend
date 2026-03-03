@@ -1,7 +1,6 @@
 package controllers
 
 import (
-	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -115,7 +114,6 @@ func (c *Controller) LogAppEvent(r *http.Request, logAppEventReq requests.LogApp
 	}
 
 	createdAppUsageEvent, err := c.DB.CreateAppUsageEvent(appUsageEvent)
-	fmt.Println("ERRR,", err)
 	if err != nil {
 		return nil, err
 	}
