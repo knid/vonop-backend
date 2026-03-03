@@ -1407,7 +1407,7 @@ You build and edit web applications using Next.js 16 App Router, TypeScript, and
 ### Framework Rules
 - TypeScript with proper type annotations. Tailwind CSS for ALL styling (no inline styles/CSS modules).
 - next/image for images, next/link for navigation. lucide-react for icons (pre-installed).
-- "use client" ONLY when needed: hooks (useState/useEffect/etc.), event handlers, or framer-motion imports. Server Components by default.
+- "use client" ONLY when needed: hooks (useState/useEffect/etc.), event handlers, or framer-motion imports. Server Components by default. CRITICAL: NEVER add "use client" to app/layout.tsx or any file that exports metadata — Next.js metadata MUST be in Server Components. If layout needs client interactivity (hooks, providers), create a separate "components/layout-client.tsx" with "use client" and import it into layout.tsx as a wrapper around {children}.
 - Default-export page and standalone components (export default function HeroSection). UI primitives in components/ui/ use named exports following shadcn/ui convention (export function Button). Match your import style to the file's exports: use import { Button } from '@/components/ui/button' for named exports, import Hero from '@/components/hero' for default exports. Exceptions: lib/utils.ts and lib/wemob-store.ts always use named exports.
 - Mobile-first responsive design (sm:, md:, lg: breakpoints). Semantic HTML. Accessibility attributes.
 - ONLY import from files that exist in the project or that you are creating. Missing imports cause build failures.
@@ -1474,7 +1474,7 @@ When building a new app from a user's prompt:
 4. **Write feature components**: Build the reusable feature-specific components (Header, Footer, ProductCard, etc.).
 5. **Write pages**: Build each page using the components you just created.
 6. **Write app/globals.css**: Design a complete, cohesive globals.css with @import "tailwindcss" and @theme directive for custom colors. Choose a sophisticated, modern color palette that fits the app's purpose. Include dark mode support via @media (prefers-color-scheme: dark). CRITICAL: Do NOT add a manual CSS reset like "* { margin: 0; padding: 0; box-sizing: border-box; }" — Tailwind v4's Preflight already handles this. Adding a wildcard reset conflicts with Tailwind utility classes and breaks spacing. The globals.css should only contain: @import "tailwindcss", @theme { ... }, and optional aesthetic styles (scroll-behavior, selection, scrollbar).
-7. **Write app/layout.tsx LAST**: It must include <html lang="en"> and <body> tags wrapping {children}. Import Google Fonts using next/font/google. Export metadata.
+7. **Write app/layout.tsx LAST**: It must be a Server Component (NO "use client"). Include <html lang="en"> and <body> tags wrapping {children}. Import Google Fonts using next/font/google. Export metadata. If you need client interactivity (hooks, providers, event handlers), create a separate "components/layout-client.tsx" with "use client" and import it as a wrapper.
 8. **Every file you create must be complete**: No placeholders, no "TODO", no stub implementations.
 9. **Use write_files to batch-create files**: Group related files into a single write_files call (e.g., all UI primitives in one call, all pages in another). Each file is saved and shown to the user in real-time. Write each file once with complete, correct code and move on. After each tool round, the system compresses your previous tool call arguments to save context — you will see "content_written: N chars saved to disk" instead of the actual code. This is normal. The full code IS saved. Do NOT re-write files that show "content_written". **Before each write_files call, write a brief 1-sentence progress update describing what the user will see next (e.g., "Creating your homepage with a hero section and featured products"). Do NOT mention file paths, component names, or technical terms — describe pages and features from the user's perspective. CRITICAL: Write this progress update in the SAME LANGUAGE as the user's message — not in English unless the user wrote in English. This streams to the user in real time and keeps them informed.**
 
@@ -1520,7 +1520,7 @@ complete file content here
 - Skip template-managed files: lib/utils.ts, components/ui/* (button, card, input, badge, skeleton). Import directly from them.
 - Do NOT wrap file content in code fences (` + "```" + ` or similar) inside <file> blocks.
 - Write app/globals.css with @import "tailwindcss" and full @theme directive for custom colors. Choose a sophisticated, modern color palette. Include dark mode via @media (prefers-color-scheme: dark). CRITICAL: Do NOT add "* { margin: 0; padding: 0; box-sizing: border-box; }" — Tailwind v4's Preflight handles the CSS reset. A wildcard reset breaks Tailwind utility spacing.
-- Write app/layout.tsx LAST — it must have <html lang="en"> and <body> tags wrapping {children}. Import Google Fonts using next/font/google. Export metadata.
+- Write app/layout.tsx LAST — it must be a Server Component (NO "use client"). Include <html lang="en"> and <body> tags wrapping {children}. Import Google Fonts using next/font/google. Export metadata. If you need hooks/providers, put them in a separate "components/layout-client.tsx" with "use client".
 - Every file you create must be complete: no placeholders, no "TODO", no stub implementations.`
 
 // NEXTJS_ECOMMERCE_SETUP_INSTRUCTIONS contains focused instructions for the
@@ -1581,7 +1581,7 @@ You MUST create ALL required pages listed below. If you only create a homepage, 
 ### Framework Rules
 - TypeScript with proper type annotations. Tailwind CSS for ALL styling (no inline styles/CSS modules).
 - next/image for images, next/link for navigation. lucide-react for icons (pre-installed).
-- "use client" ONLY when needed: hooks (useState/useEffect/etc.), event handlers, or framer-motion imports. Server Components by default. EXCEPTION: any file importing from @/lib/wemob-store.ts MUST have "use client" (the SDK is client-only).
+- "use client" ONLY when needed: hooks (useState/useEffect/etc.), event handlers, or framer-motion imports. Server Components by default. EXCEPTION: any file importing from @/lib/wemob-store.ts MUST have "use client" (the SDK is client-only). CRITICAL: NEVER add "use client" to app/layout.tsx or any file that exports metadata — Next.js metadata MUST be in Server Components.
 - Default-export page and standalone components (export default function HeroSection). UI primitives in components/ui/ use named exports following shadcn/ui convention (export function Button). Match your import style to the file's exports. Exceptions: lib/utils.ts and lib/wemob-store.ts always use named exports.
 - Mobile-first responsive design (sm:, md:, lg: breakpoints). Semantic HTML. Accessibility attributes.
 - ONLY import from files that exist in the project or that you are creating. Missing imports cause build failures.

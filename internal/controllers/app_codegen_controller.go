@@ -1396,7 +1396,9 @@ func runDeterministicChecks(files map[string]string) []validationError {
 		}
 
 		// Check 2: React hooks without "use client"
-		if hookPattern.MatchString(content) {
+		// Skip if file exports metadata — metadata requires Server Components, and the
+		// auto-fix will extract client logic into a separate wrapper.
+		if hookPattern.MatchString(content) && !metadataExportPattern.MatchString(content) {
 			hasUseClient := strings.Contains(content, `"use client"`) || strings.Contains(content, `'use client'`)
 			if !hasUseClient {
 				errors = append(errors, validationError{
@@ -2079,6 +2081,13 @@ func autoFixMissingUseClient(files map[string]string) (int, []string) {
 			continue
 		}
 
+		// Never add "use client" to files that export metadata — metadata requires
+		// Server Components. If the file also uses hooks, it needs restructuring
+		// (extract client logic into a wrapper), not a "use client" directive.
+		if metadataExportPattern.MatchString(content) {
+			continue
+		}
+
 		needsUseClient := false
 		// React hooks
 		if hookPattern.MatchString(content) {
@@ -2143,6 +2152,11 @@ func autoFixTSFilesWithJSX(files map[string]string) (int, []string) {
 // autoFixMetadataInClientComponent removes "use client" from files that export metadata.
 // In Next.js App Router, metadata must be exported from Server Components — having
 // "use client" alongside metadata export causes a build error.
+//
+// For app/layout.tsx specifically, if the file also uses React hooks (useState, useEffect,
+// etc.), simply removing "use client" would break the hooks. In that case, we extract the
+// client body into a separate "components/layout-client.tsx" wrapper and make the root
+// layout a thin Server Component that imports it.
 func autoFixMetadataInClientComponent(files map[string]string) (int, []string) {
 	var changedPaths []string
 
@@ -2164,23 +2178,19 @@ func autoFixMetadataInClientComponent(files map[string]string) (int, []string) {
 			continue
 		}
 
+		// Special handling for root layout: if it also uses hooks, extract a client wrapper
+		if filePath == "app/layout.tsx" && hookPattern.MatchString(content) {
+			serverLayout, clientWrapper := splitLayoutIntoServerAndClient(content)
+			if serverLayout != "" && clientWrapper != "" {
+				files[filePath] = serverLayout
+				files["components/layout-client.tsx"] = clientWrapper
+				changedPaths = append(changedPaths, filePath, "components/layout-client.tsx")
+				continue
+			}
+		}
+
 		// Remove the "use client" directive — metadata must be in Server Components
-		updated := strings.Replace(content, "\"use client\"\n\n", "", 1)
-		if updated == content {
-			updated = strings.Replace(content, "\"use client\"\n", "", 1)
-		}
-		if updated == content {
-			updated = strings.Replace(content, "'use client'\n\n", "", 1)
-		}
-		if updated == content {
-			updated = strings.Replace(content, "'use client'\n", "", 1)
-		}
-		if updated == content {
-			updated = strings.Replace(content, "\"use client\"", "", 1)
-		}
-		if updated == content {
-			updated = strings.Replace(content, "'use client'", "", 1)
-		}
+		updated := removeUseClientDirective(content)
 
 		if updated != content {
 			files[filePath] = updated
@@ -2189,6 +2199,236 @@ func autoFixMetadataInClientComponent(files map[string]string) (int, []string) {
 	}
 
 	return len(changedPaths), changedPaths
+}
+
+// removeUseClientDirective strips the "use client" directive from file content.
+func removeUseClientDirective(content string) string {
+	for _, pattern := range []string{
+		"\"use client\"\n\n",
+		"\"use client\"\n",
+		"'use client'\n\n",
+		"'use client'\n",
+		"\"use client\"",
+		"'use client'",
+	} {
+		if replaced := strings.Replace(content, pattern, "", 1); replaced != content {
+			return replaced
+		}
+	}
+	return content
+}
+
+// splitLayoutIntoServerAndClient splits a root layout.tsx that incorrectly has both
+// "use client" and metadata export into two files:
+//  1. A Server Component layout (with metadata, fonts, <html>/<body>) that imports LayoutClient
+//  2. A Client Component wrapper (with hooks, providers, event handlers)
+//
+// This is a best-effort extraction — it preserves the metadata block and font setup in the
+// server layout while moving everything else into the client wrapper.
+func splitLayoutIntoServerAndClient(content string) (serverLayout string, clientWrapper string) {
+	// Remove the "use client" directive for analysis
+	cleaned := removeUseClientDirective(content)
+
+	// Extract metadata block
+	metaStart := strings.Index(cleaned, "export const metadata")
+	if metaStart == -1 {
+		return "", ""
+	}
+	// Find the closing of the metadata object — match braces
+	metaEnd := findClosingBrace(cleaned, metaStart)
+	if metaEnd == -1 {
+		return "", ""
+	}
+	// Include trailing semicolon and newline
+	if metaEnd < len(cleaned) && cleaned[metaEnd] == ';' {
+		metaEnd++
+	}
+	metadataBlock := cleaned[metaStart:metaEnd]
+
+	// Extract import lines (fonts, types, CSS)
+	var serverImports []string
+	var clientImports []string
+	lines := strings.Split(cleaned, "\n")
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(trimmed, "import") {
+			continue
+		}
+		// Font and type imports stay in server layout
+		if strings.Contains(trimmed, "next/font") ||
+			strings.Contains(trimmed, "type { Metadata") ||
+			strings.Contains(trimmed, "type {Metadata") ||
+			strings.Contains(trimmed, "globals.css") {
+			serverImports = append(serverImports, line)
+		} else {
+			// Everything else (components, providers) goes to client
+			clientImports = append(clientImports, line)
+		}
+	}
+
+	// Extract font constructors (const fontName = FontName({...}))
+	var fontConstructors []string
+	fontConstRegex := regexp.MustCompile(`(?m)^const\s+\w+\s*=\s*\w+\s*\([^)]*\)\s*;?\s*$`)
+	for _, match := range fontConstRegex.FindAllString(cleaned, -1) {
+		// Only include if it looks like a font constructor (references a capitalized function)
+		if regexp.MustCompile(`=\s*[A-Z]`).MatchString(match) {
+			fontConstructors = append(fontConstructors, match)
+		}
+	}
+
+	// Extract the body className from the original layout
+	bodyClassRegex := regexp.MustCompile(`<body[^>]*className=\{?` + "`" + `([^` + "`" + `]*)` + "`" + `\}?`)
+	bodyClass := "antialiased"
+	if m := bodyClassRegex.FindStringSubmatch(cleaned); len(m) > 1 {
+		bodyClass = m[1]
+	} else {
+		// Try simpler className="..." pattern
+		simpleClassRegex := regexp.MustCompile(`<body[^>]*className="([^"]*)"`)
+		if m := simpleClassRegex.FindStringSubmatch(cleaned); len(m) > 1 {
+			bodyClass = m[1]
+		}
+	}
+
+	// Build server layout
+	var sb strings.Builder
+	for _, imp := range serverImports {
+		sb.WriteString(imp + "\n")
+	}
+	sb.WriteString(`import { LayoutClient } from "@/components/layout-client";` + "\n")
+	sb.WriteString(`import "./globals.css";` + "\n\n")
+	for _, fc := range fontConstructors {
+		sb.WriteString(fc + "\n")
+	}
+	sb.WriteString("\n" + metadataBlock + "\n\n")
+
+	// Build body class expression — check if it has template literal interpolation
+	if strings.Contains(bodyClass, "${") {
+		sb.WriteString(fmt.Sprintf("export default function RootLayout({ children }: { children: React.ReactNode }) {\n  return (\n    <html lang=\"en\" suppressHydrationWarning>\n      <body className={`%s`}>\n        <LayoutClient>{children}</LayoutClient>\n      </body>\n    </html>\n  );\n}\n", bodyClass))
+	} else {
+		sb.WriteString(fmt.Sprintf("export default function RootLayout({ children }: { children: React.ReactNode }) {\n  return (\n    <html lang=\"en\" suppressHydrationWarning>\n      <body className=\"%s\">\n        <LayoutClient>{children}</LayoutClient>\n      </body>\n    </html>\n  );\n}\n", bodyClass))
+	}
+	serverLayout = sb.String()
+
+	// Build client wrapper — extract the return body from the original component
+	var cb strings.Builder
+	cb.WriteString("\"use client\"\n\n")
+	for _, imp := range clientImports {
+		cb.WriteString(imp + "\n")
+	}
+	cb.WriteString("\n")
+
+	// Extract hook declarations and state from the original function body
+	funcBodyRegex := regexp.MustCompile(`(?s)export\s+default\s+function\s+\w+\s*\([^)]*\)\s*\{(.+)\}`)
+	funcMatch := funcBodyRegex.FindStringSubmatch(cleaned)
+
+	if len(funcMatch) > 1 {
+		body := strings.TrimSpace(funcMatch[1])
+		// Find the return statement
+		returnIdx := strings.LastIndex(body, "return")
+		if returnIdx == -1 {
+			returnIdx = strings.LastIndex(body, "return")
+		}
+
+		preReturn := ""
+		returnBlock := body
+		if returnIdx > 0 {
+			preReturn = strings.TrimSpace(body[:returnIdx])
+			returnBlock = strings.TrimSpace(body[returnIdx:])
+		}
+
+		// Strip <html> and <body> wrappers from the return — just keep inner content
+		innerContent := extractInnerJSXContent(returnBlock)
+
+		cb.WriteString("export function LayoutClient({ children }: { children: React.ReactNode }) {\n")
+		if preReturn != "" {
+			cb.WriteString("  " + strings.ReplaceAll(preReturn, "\n", "\n  ") + "\n\n")
+		}
+		if innerContent != "" {
+			cb.WriteString("  return (\n    " + strings.TrimSpace(innerContent) + "\n  );\n")
+		} else {
+			cb.WriteString("  return <>{children}</>;\n")
+		}
+		cb.WriteString("}\n")
+	} else {
+		// Fallback: simple pass-through wrapper
+		cb.WriteString("export function LayoutClient({ children }: { children: React.ReactNode }) {\n  return <>{children}</>;\n}\n")
+	}
+	clientWrapper = cb.String()
+
+	return serverLayout, clientWrapper
+}
+
+// extractInnerJSXContent strips <html> and <body> tags from a return block,
+// returning only the inner content that should go into the client wrapper.
+func extractInnerJSXContent(returnBlock string) string {
+	// Remove "return (" and trailing ");" or ")"
+	inner := returnBlock
+	if idx := strings.Index(inner, "return"); idx >= 0 {
+		inner = inner[idx+6:]
+	}
+	inner = strings.TrimSpace(inner)
+	if strings.HasPrefix(inner, "(") {
+		inner = inner[1:]
+	}
+	inner = strings.TrimSpace(inner)
+	if strings.HasSuffix(inner, ");") {
+		inner = inner[:len(inner)-2]
+	} else if strings.HasSuffix(inner, ")") {
+		inner = inner[:len(inner)-1]
+	}
+	inner = strings.TrimSpace(inner)
+
+	// Strip <html ...> ... </html>
+	htmlOpenRegex := regexp.MustCompile(`(?s)^<html[^>]*>\s*`)
+	if htmlOpenRegex.MatchString(inner) {
+		inner = htmlOpenRegex.ReplaceAllString(inner, "")
+		if idx := strings.LastIndex(inner, "</html>"); idx >= 0 {
+			inner = strings.TrimSpace(inner[:idx])
+		}
+	}
+
+	// Strip <body ...> ... </body>
+	bodyOpenRegex := regexp.MustCompile(`(?s)^<body[^>]*>\s*`)
+	if bodyOpenRegex.MatchString(inner) {
+		inner = bodyOpenRegex.ReplaceAllString(inner, "")
+		if idx := strings.LastIndex(inner, "</body>"); idx >= 0 {
+			inner = strings.TrimSpace(inner[:idx])
+		}
+	}
+
+	return strings.TrimSpace(inner)
+}
+
+// findClosingBrace finds the position after the closing brace that matches the first
+// opening brace found at or after startPos.
+func findClosingBrace(s string, startPos int) int {
+	depth := 0
+	inString := false
+	var stringChar byte
+	for i := startPos; i < len(s); i++ {
+		ch := s[i]
+		if inString {
+			if ch == stringChar && (i == 0 || s[i-1] != '\\') {
+				inString = false
+			}
+			continue
+		}
+		if ch == '"' || ch == '\'' || ch == '`' {
+			inString = true
+			stringChar = ch
+			continue
+		}
+		if ch == '{' {
+			depth++
+		} else if ch == '}' {
+			depth--
+			if depth == 0 {
+				return i + 1
+			}
+		}
+	}
+	return -1
 }
 
 // autoFixRootLayoutTags wraps the root layout's returned JSX with <html> and <body>
