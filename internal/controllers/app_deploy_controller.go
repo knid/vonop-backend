@@ -429,6 +429,12 @@ func (c *Controller) SyncPreviewAll(project *models.AppProject, deletePaths ...s
 		fileMap[f.FilePath] = f.Content
 	}
 
+	// Always use latest next.config.mjs template (ensures config fixes
+	// like unoptimized images propagate to existing apps on every sync)
+	if latest := getTemplateContent("next.config.mjs", nil, nil, project.ProjectType, nil); latest != "" {
+		fileMap["next.config.mjs"] = latest
+	}
+
 	envVars := c.CollectAllEnvVars(project)
 
 	// Sync env vars FIRST — this may restart the machine, which wipes the
