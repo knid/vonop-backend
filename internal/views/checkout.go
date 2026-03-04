@@ -21,6 +21,31 @@ func (v *HttpViews) StripeCheckout(w http.ResponseWriter, r *http.Request) {
 	slog.Info("checkout: user authenticated", "user_id", user.ID.String())
 
 	priceID := r.URL.Query().Get("price")
+	if priceID == "" {
+		utils.JSONErrorResponse(w, "price parameter is required", http.StatusBadRequest)
+		return
+	}
+
+	// Validate that the price ID belongs to a known subscription plan
+	subs, err := v.Controller.DB.GetSubscriptionByPriceID(priceID)
+	if err != nil || subs == nil {
+		// Also check annual price IDs
+		allSubs, subsErr := v.Controller.DB.GetSubscriptions()
+		validPrice := false
+		if subsErr == nil && allSubs != nil {
+			for _, s := range *allSubs {
+				if s.AnnualPriceID == priceID {
+					validPrice = true
+					break
+				}
+			}
+		}
+		if !validPrice {
+			utils.JSONErrorResponse(w, "invalid price", http.StatusBadRequest)
+			return
+		}
+	}
+
 	mode := string(stripe.CheckoutSessionModeSubscription)
 
 	successURL := "https://dashboard.wemob.io/success?session_id={CHECKOUT_SESSION_ID}"

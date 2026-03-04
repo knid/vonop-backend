@@ -3,12 +3,16 @@ package controllers
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 
 	"github.com/go-playground/validator/v10"
+	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/services/integrations"
+	"github.com/stripe/stripe-go/v82"
+	stripeClient "github.com/stripe/stripe-go/v82/client"
 )
 
 var integrationProviders = []responses.IntegrationProviderInfo{
@@ -30,14 +34,14 @@ var integrationProviders = []responses.IntegrationProviderInfo{
 		Provider:       "stripe",
 		Name:           "Stripe",
 		Description:    "Accept payments and sell products on your website.",
-		RequiredFields: []string{"publishable_key"},
+		RequiredFields: []string{"publishable_key", "secret_key"},
 		Website:        "https://stripe.com",
 	},
 	{
 		Provider:       "iyzico",
 		Name:           "Iyzico",
 		Description:    "Accept payments in Turkey and surrounding regions.",
-		RequiredFields: []string{"api_key"},
+		RequiredFields: []string{"api_key", "secret_key"},
 		Website:        "https://www.iyzico.com",
 	},
 	{
@@ -82,10 +86,26 @@ func (c *Controller) ConnectAppIntegration(project *models.AppProject, req reque
 		return nil, err
 	}
 
+	// Test credentials with a live API call
+	if err := integrations.TestConnection(req.Provider, req.Credentials); err != nil {
+		return nil, fmt.Errorf("credential test failed: %w", err)
+	}
+
 	// Check if integration already exists
 	existing, err := c.DB.GetAppIntegrationByProvider(project.ID.String(), req.Provider)
 	if err == nil && existing.ID.String() != "" {
 		return nil, fmt.Errorf("integration %s already connected", req.Provider)
+	}
+
+	// Auto-register Stripe webhook if not already provided
+	if req.Provider == "stripe" {
+		if _, hasSecret := req.Credentials["webhook_secret"]; !hasSecret {
+			if webhookSecret, err := c.registerStripeWebhook(req.Credentials); err != nil {
+				slog.Warn("Failed to auto-register Stripe webhook", "error", err, "project_id", project.ID)
+			} else {
+				req.Credentials["webhook_secret"] = webhookSecret
+			}
+		}
 	}
 
 	// Build env vars
@@ -106,6 +126,35 @@ func (c *Controller) ConnectAppIntegration(project *models.AppProject, req reque
 	}
 
 	return c.DB.CreateAppIntegration(integration)
+}
+
+// registerStripeWebhook creates a webhook endpoint in the user's Stripe account
+// and returns the signing secret for signature verification.
+func (c *Controller) registerStripeWebhook(creds map[string]any) (string, error) {
+	secretKey, _ := creds["secret_key"].(string)
+	if secretKey == "" {
+		return "", fmt.Errorf("stripe secret key not configured")
+	}
+
+	sc := &stripeClient.API{}
+	sc.Init(secretKey, nil)
+
+	webhookURL := constants.WEMOB_API_BASE_URL + "/v2/storefront/webhooks/stripe"
+
+	params := &stripe.WebhookEndpointParams{
+		URL: stripe.String(webhookURL),
+		EnabledEvents: stripe.StringSlice([]string{
+			"checkout.session.completed",
+			"checkout.session.expired",
+		}),
+	}
+
+	endpoint, err := sc.WebhookEndpoints.New(params)
+	if err != nil {
+		return "", fmt.Errorf("failed to create Stripe webhook: %w", err)
+	}
+
+	return endpoint.Secret, nil
 }
 
 func (c *Controller) UpdateAppIntegration(integrationID string, project *models.AppProject, req requests.UpdateIntegrationRequest) (*models.AppIntegration, error) {

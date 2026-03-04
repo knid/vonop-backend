@@ -82,9 +82,6 @@ func (c *Controller) HandleWebhook(w http.ResponseWriter, req *http.Request) {
 			if !user.SetupFinished {
 				user.SetupFinished = true
 				go c.CRMService.SendEvent(user, constants.BREVO_EVENT_USER_SETUP_FINISHED, map[string]any{})
-				if _, err := c.DB.UpdateUser(user); err != nil {
-					slog.Error("failed to persist setup_finished flag", "user_id", user.ID, "error", err)
-				}
 			}
 
 			if _, err := c.DB.UpdateUser(user); err != nil {

@@ -477,13 +477,16 @@ func (c *Controller) verifyStripePayment(paymentID string, order *models.Order, 
 		return fmt.Errorf("payment not completed (status: %s)", session.PaymentStatus)
 	}
 
-	// Verify the session belongs to this order
-	if session.Metadata != nil {
-		if sessionOrderID, ok := session.Metadata["order_id"]; ok {
-			if sessionOrderID != order.ID.String() {
-				return fmt.Errorf("payment session does not match order")
-			}
-		}
+	// Verify the session belongs to this order — always require order_id in metadata
+	if session.Metadata == nil {
+		return fmt.Errorf("payment session missing metadata")
+	}
+	sessionOrderID, ok := session.Metadata["order_id"]
+	if !ok || sessionOrderID == "" {
+		return fmt.Errorf("payment session missing order_id in metadata")
+	}
+	if sessionOrderID != order.ID.String() {
+		return fmt.Errorf("payment session does not match order")
 	}
 
 	return nil
@@ -656,7 +659,8 @@ func (c *Controller) initiateStripePayment(store *models.Store, order *models.Or
 		baseURL = fmt.Sprintf("https://%s.%s", project.Slug, constants.WEMOB_APP_BASE_DOMAIN)
 	}
 
-	successURL := baseURL + "/checkout/success?order_id=" + order.ID.String()
+	// Use {CHECKOUT_SESSION_ID} placeholder — Stripe replaces it with the actual session ID on redirect
+	successURL := baseURL + "/checkout/success?order_id=" + order.ID.String() + "&session_id={CHECKOUT_SESSION_ID}"
 	cancelURL := baseURL + "/checkout/cancel?order_id=" + order.ID.String()
 
 	params := &stripe.CheckoutSessionParams{
@@ -757,6 +761,9 @@ func (c *Controller) initiateIyzicoPayment(store *models.Store, order *models.Or
 	token, _ := result["token"].(string)
 
 	// Store token in order metadata for callback verification
+	if order.Metadata == nil {
+		order.Metadata = make(map[string]any)
+	}
 	order.Metadata["iyzico_token"] = token
 	order.Metadata["iyzico_callback_url"] = callbackURL
 	order.UpdatedAt = time.Now()
@@ -823,7 +830,7 @@ func (c *Controller) StorefrontHandleIyzicoCallback(storeID string, orderID stri
 		c.DB.UpdateOrder(order)
 
 		slog.Warn("Iyzico payment verification failed", "error", err, "order_id", orderID)
-		return baseURL + "/checkout/failure?order_id=" + orderID, nil
+		return baseURL + "/checkout/cancel?order_id=" + orderID, nil
 	}
 
 	// Payment succeeded
@@ -903,8 +910,8 @@ func (c *Controller) StorefrontHandleStripeWebhook(body []byte) error {
 			return nil // don't override paid status
 		}
 
-		order.PaymentStatus = "failed"
-		order.Status = "cancelled"
+		order.PaymentStatus = "expired"
+		order.Status = "pending"
 		order.UpdatedAt = time.Now()
 		c.DB.UpdateOrder(order)
 
