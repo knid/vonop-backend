@@ -1567,8 +1567,8 @@ You are in the SETUP PHASE of building an e-commerce store. Your ONLY job is to 
 1. FIRST, before calling any tools, write a brief introduction (2-3 sentences, in the user's language) explaining what you're about to create: the store name, what kind of products it will have, and the overall vibe/theme. This text streams to the user in real time — they need to see your plan before anything else happens.
 2. Call setup_ecommerce with a fitting store name derived from the user's request.
 3. Call manage_store ONCE with ALL operations batched into a single call — categories, products (use bulk_create_products), and discount codes together. This is critical for speed. Do NOT make separate manage_store calls for categories, then products, then discounts — put them all in one call.
-   - 4-6 categories that logically organize the store's products.
-   - 8-12 products spread across categories (use bulk_create_products), each with a compelling name, description, realistic price_in_cents, 2-3 product images from picsum.photos, and inventory.
+   - 3-4 categories that logically organize the store's products.
+   - 3-5 products spread across categories (use bulk_create_products), each with a compelling name, detailed description (2-3 sentences about features and benefits), realistic price_in_cents, and inventory. Do NOT include images — product images will be AI-generated automatically after setup.
    - 1-2 discount codes (e.g., "WELCOME10" for 10% off).
 4. After populating the store, respond with a brief summary of what was created.
 
@@ -1628,7 +1628,7 @@ You MUST create ALL required pages listed below. If you only create a homepage, 
   next@^16.0.0, react@^19.0.0, react-dom@^19.0.0, typescript@^5.4.0, tailwindcss@^4.0.0
   Pre-installed: lucide-react, clsx, tailwind-merge, class-variance-authority, framer-motion, zustand, axios, date-fns, zod, react-hook-form, @hookform/resolvers, recharts, sonner, next-themes, @tanstack/react-query, @tanstack/react-table, react-day-picker, react-resizable-panels, cmdk, input-otp, vaul, swr, embla-carousel-react, react-markdown, @radix-ui/* primitives.
 - **Do NOT write, edit, or create package.json** — it is auto-managed. Dependencies are detected from your imports automatically.
-- Use placeholder images from picsum.photos with descriptive alt text for any images.
+- Products already have AI-generated images in their images array from the store SDK. For non-product images (hero banners, category headers), use picsum.photos placeholders with descriptive alt text.
 
 ### Language
 - ALWAYS respond in the same language as the user's message. If the user writes in Turkish, respond in Turkish. If in Spanish, respond in Spanish. This applies to ALL text output: explanations, progress updates, summaries, and descriptions. Only code (variable names, comments in code) stays in English.
