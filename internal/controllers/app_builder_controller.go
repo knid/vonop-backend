@@ -49,6 +49,7 @@ type builderToolCallbacks struct {
 // StreamBuildApp is the unified entry point for both initial app generation and chat editing.
 // When isInitialGeneration=true, it creates a new app from a prompt.
 // When isInitialGeneration=false, it processes a chat edit on an existing app.
+// jobID is used to coordinate clarification questions; pass "" to skip clarification.
 func (c *Controller) StreamBuildApp(
 	ctx context.Context,
 	project *models.AppProject,
@@ -57,6 +58,7 @@ func (c *Controller) StreamBuildApp(
 	images []string,
 	reasoningEffort string,
 	isInitialGeneration bool,
+	jobID string,
 	events chan<- responses.SSEEvent,
 ) {
 	var closeEvents sync.Once
@@ -398,6 +400,20 @@ func (c *Controller) StreamBuildApp(
 		preSnapshotID = preSnapshot.ID.String()
 		if err := c.DB.DeleteOldAutoSnapshots(project.ID.String(), 20); err != nil {
 			slog.Warn("failed to delete old auto snapshots", "error", err, "project_id", project.ID)
+		}
+	}
+
+	// --- Clarification questions (initial generation only) ---
+	if isInitialGeneration && jobID != "" {
+		questions, err := c.GenerateClarificationQuestions(ctx, message, project.ProjectType)
+		if err == nil && len(questions.Questions) >= 2 {
+			result, answered := c.waitForClarification(ctx, jobID, questions, sendEvent)
+			if answered {
+				sendEvent("clarification_received", map[string]any{
+					"message": "Answers received, starting generation...",
+				})
+			}
+			message = buildEnrichedPrompt(message, result)
 		}
 	}
 
@@ -3161,4 +3177,66 @@ func (c *Controller) GetAppConversation(projectID string) (*models.AppConversati
 // ClearAppConversation deletes the conversation for a project so the user can start fresh.
 func (c *Controller) ClearAppConversation(projectID string) error {
 	return c.DB.DeleteAppConversation(projectID)
+}
+
+// waitForClarification sends clarification questions to the client and blocks
+// until the user answers, skips, or a 5-minute timeout elapses.
+// Returns the result and whether the user actually answered (vs skip/timeout).
+func (c *Controller) waitForClarification(
+	ctx context.Context,
+	jobID string,
+	questions *ClarificationResponse,
+	sendEvent func(string, any) bool,
+) (ClarificationResult, bool) {
+	ch := make(chan ClarificationResult, 1)
+	c.PendingClarifications.Store(jobID, ch)
+
+	// Update job status to awaiting_input
+	if err := c.DB.UpdateGenerationJobStatus(jobID, "awaiting_input", "waiting for clarification answers"); err != nil {
+		slog.Warn("failed to update job status to awaiting_input", "error", err, "job_id", jobID)
+	}
+
+	// Send clarification_needed event to client
+	sendEvent("clarification_needed", map[string]any{
+		"questions": questions.Questions,
+	})
+
+	// Block until answer, timeout, or cancellation
+	timer := time.NewTimer(5 * time.Minute)
+	defer timer.Stop()
+
+	select {
+	case result, ok := <-ch:
+		c.PendingClarifications.Delete(jobID)
+		if !ok || result.Skip {
+			// Channel closed (cancel) or user skipped
+			c.DB.UpdateGenerationJobStatus(jobID, "running", "")
+			return ClarificationResult{Skip: true}, false
+		}
+		c.DB.UpdateGenerationJobStatus(jobID, "running", "")
+		return result, true
+	case <-timer.C:
+		c.PendingClarifications.Delete(jobID)
+		slog.Info("clarification timed out, proceeding with original prompt", "job_id", jobID)
+		c.DB.UpdateGenerationJobStatus(jobID, "running", "")
+		return ClarificationResult{Skip: true}, false
+	case <-ctx.Done():
+		c.PendingClarifications.Delete(jobID)
+		return ClarificationResult{Skip: true}, false
+	}
+}
+
+// buildEnrichedPrompt appends user clarification answers to the original prompt.
+func buildEnrichedPrompt(original string, result ClarificationResult) string {
+	if result.Skip || len(result.Answers) == 0 {
+		return original
+	}
+
+	var sb strings.Builder
+	sb.WriteString(original)
+	sb.WriteString("\n\n--- User clarifications ---\n")
+	for _, a := range result.Answers {
+		sb.WriteString(fmt.Sprintf("Q (%s): %s\n", a.ID, a.Answer))
+	}
+	return sb.String()
 }

@@ -1147,6 +1147,37 @@ func (c *Controller) PlanAppFileStructure(ctx context.Context, prompt string, pr
 	return &structure, nil
 }
 
+// GenerateClarificationQuestions asks a fast LLM to produce 2-5 clarifying
+// questions based on the user's app prompt so the builder can gather context
+// before generating code.
+func (c *Controller) GenerateClarificationQuestions(ctx context.Context, prompt string, projectType string) (*ClarificationResponse, error) {
+	provider := c.llmProvider()
+	model := provider.FastModel()
+
+	userMsg := fmt.Sprintf("Project type: %s\n\nUser prompt:\n%s", projectType, prompt)
+	resultJSON, err := utils.GetJSONFromLLM(ctx, model, constants.APP_CLARIFICATION_PROMPT, userMsg, provider)
+	if err != nil {
+		slog.Warn("failed to generate clarification questions", "error", err)
+		return nil, err
+	}
+
+	var resp ClarificationResponse
+	if err := json.Unmarshal([]byte(resultJSON), &resp); err != nil {
+		cleaned := utils.ExtractJSON(resultJSON)
+		if err2 := json.Unmarshal([]byte(cleaned), &resp); err2 != nil {
+			slog.Warn("failed to parse clarification questions", "error", err2)
+			return nil, err2
+		}
+	}
+
+	// Cap at 5 questions
+	if len(resp.Questions) > 5 {
+		resp.Questions = resp.Questions[:5]
+	}
+
+	return &resp, nil
+}
+
 // PlanAppFileStructureFromScreenshot uses vision LLM to plan files from a screenshot.
 func (c *Controller) PlanAppFileStructureFromScreenshot(ctx context.Context, imageBase64 string) (*appFileStructure, error) {
 	provider := c.llmProvider()
