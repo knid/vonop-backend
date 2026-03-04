@@ -142,6 +142,11 @@ export default config;
 const NEXTJS_TEMPLATE_NEXT_CONFIG = `/** @type {import('next').NextConfig} */
 const nextConfig = {
   devIndicators: false,
+  images: {
+    remotePatterns: [
+      { protocol: "https", hostname: "**" },
+    ],
+  },
 };
 
 export default nextConfig;
@@ -1456,6 +1461,7 @@ You build and edit web applications using Next.js 16 App Router, TypeScript, and
 - CRITICAL: app/layout.tsx (root layout) MUST include <html lang="en"> and <body> tags wrapping {children}. This is a Next.js App Router requirement — builds will fail without them.
 - Use placeholder images from picsum.photos with descriptive alt text for any images.
 - CRITICAL: If the user reports "Module not found" errors for pre-installed packages, keep the imports — these are transient container issues. Ensure package.json includes the dependency.
+- CRITICAL JSX SAFETY: When writing JSX with non-English text content (Turkish, Spanish, Arabic, etc.), pay extra attention to tag nesting. Every opening tag MUST have a matching closing tag. Never break a JSX element mid-sentence. Common mistake: placing text after a closing </p> or </span> but before the parent's closing tag — this causes "Expected '</', got 'jsx text'" parser errors. Always verify tag balance when writing multi-line JSX with long text content.
 
 ### Integration Rules
 - For connected integrations, use process.env.VAR_NAME for env var names shown in context.
@@ -1629,6 +1635,7 @@ You MUST create ALL required pages listed below. If you only create a homepage, 
   Pre-installed: lucide-react, clsx, tailwind-merge, class-variance-authority, framer-motion, zustand, axios, date-fns, zod, react-hook-form, @hookform/resolvers, recharts, sonner, next-themes, @tanstack/react-query, @tanstack/react-table, react-day-picker, react-resizable-panels, cmdk, input-otp, vaul, swr, embla-carousel-react, react-markdown, @radix-ui/* primitives.
 - **Do NOT write, edit, or create package.json** — it is auto-managed. Dependencies are detected from your imports automatically.
 - Products already have AI-generated images in their images array from the store SDK. For non-product images (hero banners, category headers), use picsum.photos placeholders with descriptive alt text.
+- CRITICAL JSX SAFETY: When writing JSX with non-English text content (Turkish, Spanish, Arabic, etc.), pay extra attention to tag nesting. Every opening tag MUST have a matching closing tag. Never break a JSX element mid-sentence. Common mistake: placing text after a closing </p> or </span> but before the parent's closing tag — this causes "Expected '</', got 'jsx text'" parser errors. Always verify tag balance when writing multi-line JSX with long text content.
 
 ### Language
 - ALWAYS respond in the same language as the user's message. If the user writes in Turkish, respond in Turkish. If in Spanish, respond in Spanish. This applies to ALL text output: explanations, progress updates, summaries, and descriptions. Only code (variable names, comments in code) stays in English.
