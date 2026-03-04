@@ -7,6 +7,7 @@ var NEXTJS_TEMPLATE_FILE_PATHS = []string{
 	"postcss.config.mjs",
 	"next.config.mjs",
 	"app/globals.css",
+	".gitignore",
 }
 
 // NEXTJS_DB_TEMPLATE_FILE_PATHS are template-managed files injected only after successful Neon provisioning.
@@ -141,26 +142,58 @@ export default config;
 const NEXTJS_TEMPLATE_NEXT_CONFIG = `/** @type {import('next').NextConfig} */
 const nextConfig = {
   devIndicators: false,
-  images: {
-    remotePatterns: [
-      {
-        protocol: "https",
-        hostname: "**",
-      },
-    ],
-  },
 };
 
 export default nextConfig;
 `
 
+const NEXTJS_TEMPLATE_GITIGNORE = `# dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# next.js
+.next/
+out/
+
+# production
+build/
+
+# misc
+.DS_Store
+*.pem
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# env files
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+`
+
 // NEXTJS_TEMPLATE_DB_TS is the database connection file using Neon serverless + Drizzle ORM.
-// The %s placeholder is replaced with the actual Neon connection string at codegen time.
+// Uses DATABASE_URL env var only — no hardcoded connection strings.
 const NEXTJS_TEMPLATE_DB_TS = `import { neon } from '@neondatabase/serverless';
 import { drizzle } from 'drizzle-orm/neon-http';
 import * as schema from './schema';
 
-const sql = neon(process.env.DATABASE_URL || '%s');
+if (!process.env.DATABASE_URL) {
+  throw new Error('DATABASE_URL environment variable is not set');
+}
+
+const sql = neon(process.env.DATABASE_URL);
 export const db = drizzle(sql, { schema });
 `
 
@@ -1445,7 +1478,8 @@ const NEXTJS_BUILDER_DATABASE_RULES = `
 
 ### Database Rules
 - Use ` + "`" + `import { db } from '@/lib/db'` + "`" + ` and ` + "`" + `import { ... } from '@/lib/schema'` + "`" + ` for all data access. Use Drizzle queries in server components and API routes. Do NOT use hardcoded mock data — all data should come from the database. Import Drizzle operators from 'drizzle-orm': ` + "`" + `import { eq, and, desc, sql } from 'drizzle-orm'` + "`" + `.
-- lib/db.ts and lib/schema.ts are template-managed — do NOT recreate them. Import directly.`
+- lib/db.ts and lib/schema.ts are template-managed — do NOT recreate them. Import directly.
+- IMPORTANT: Drizzle ORM uses camelCase property names in JavaScript even when the SQL column is snake_case. Always use camelCase (e.g., row.userId, row.createdAt, row.passwordHash).`
 
 // NEXTJS_BUILDER_TOOL_INSTRUCTIONS contains the tools section, build/edit workflows,
 // and response format used by the tool-calling path (chat editing and legacy initial gen).
@@ -1744,9 +1778,14 @@ const NEXTJS_BUILDER_AUTH_RULES = `
 ### Auth Rules
 - Server-side: ` + "`" + `import { register, login, logout, getSession, getCurrentUser, requireAuth, getApiSession } from '@/lib/wemob-auth'` + "`" + `. Use requireAuth() in server components for protected pages. Use getApiSession() in API routes.
 - Client-side: ` + "`" + `import { AuthProvider, useAuth } from '@/lib/wemob-auth-client'` + "`" + `. Wrap root layout with <AuthProvider>. useAuth() returns { user, isLoading, isAuthenticated, login, register, logout, refreshSession }.
+- Session shape: ` + "`" + `Session { user: AuthUser, expires: Date }` + "`" + `. AuthUser has: id, email, name, avatarUrl, role, emailVerified.
+- Access the current user via ` + "`" + `session.user.id` + "`" + `, ` + "`" + `session.user.email` + "`" + `, ` + "`" + `session.user.name` + "`" + `, etc. NEVER use ` + "`" + `session.userId` + "`" + ` or ` + "`" + `session.username` + "`" + ` — those fields do not exist.
+- In API routes, use ` + "`" + `getApiSession()` + "`" + ` which returns ` + "`" + `Session | null` + "`" + `. Check ` + "`" + `session?.user.id` + "`" + ` for the logged-in user ID.
+- Client ` + "`" + `useAuth()` + "`" + ` returns ` + "`" + `{ user: AuthUser | null, isLoading, isAuthenticated, login, register, logout, refreshSession }` + "`" + `.
+- The auth API route at app/api/auth/[...action]/route.ts is TEMPLATE-MANAGED — do NOT create, modify, or overwrite it. It handles POST (register, login, logout) and GET (session) automatically.
 - NEVER create custom auth utilities. Use the injected auth libraries.
 - lib/wemob-auth.ts is SERVER-ONLY. NEVER import it in "use client" files. Use lib/wemob-auth-client.tsx for client components.
-- Create an API route at app/api/auth/[...action]/route.ts that dispatches to register/login/logout/getSession from lib/wemob-auth.`
+- Users table columns: id (uuid PK), email, password_hash, name, avatar_url, role, email_verified, created_at, updated_at. Drizzle camelCase equivalents: passwordHash, avatarUrl, emailVerified, createdAt, updatedAt.`
 
 const NEXTJS_STRUCTURE_PROMPT = `You are an expert Next.js developer, application architect, and UI/UX designer who creates modern, visually stunning web applications.
 
@@ -1778,7 +1817,7 @@ Given the user's description of a web application they want to build, generate a
 16. Design "data_models" — an array of database tables the app needs for its data. Each table has a "name" and "columns" array. Each column has "name", "type" (text, integer, boolean, timestamp, uuid, jsonb), "primary_key" (bool), "nullable" (bool), optional "default", and optional "references" (e.g. "categories.id"). Every table MUST have an "id" column with type "uuid" and primary_key true. Add "created_at" and "updated_at" timestamp columns. Design the schema based on what the app actually needs — blogs need posts/comments, task apps need tasks/projects, etc. A database will be provisioned automatically from these models.
 17. Plan app/api/ routes for CRUD operations using Drizzle ORM. Each API route should handle GET/POST/PUT/DELETE for its resource.
 18. Do NOT use hardcoded mock data. All data must come from the database via Drizzle queries. Show graceful empty states when no data exists yet.
-19. If the application needs user authentication (login, register, user accounts, protected pages, admin panels, dashboards, or user-specific data), set "needs_auth": true. Auth infrastructure (lib/wemob-auth.ts and lib/wemob-auth-client.tsx) will be auto-injected. Plan login/register pages and an API route at app/api/auth/[...action]/route.ts to dispatch auth actions. Do NOT plan custom auth utilities — they are template-managed.
+19. If the application needs user authentication (login, register, user accounts, protected pages, admin panels, dashboards, or user-specific data), set "needs_auth": true. Auth infrastructure (lib/wemob-auth.ts, lib/wemob-auth-client.tsx, and app/api/auth/[...action]/route.ts) will be auto-injected as templates. Do NOT include app/api/auth/[...action]/route.ts in the file plan — it is auto-injected. Plan login/register pages only. You MAY design a "users" table with app-specific columns (e.g., bestScore, bio) — auth-required columns (email, password_hash, etc.) will be auto-merged in. Do NOT plan custom auth utilities — they are template-managed.
 
 ### Output format (strict JSON, no explanation, no markdown)
 {
@@ -1861,7 +1900,7 @@ Given the user's description of a mobile app they want to build, generate a stru
 16. Generate mobile-first CSS — use Tailwind's default breakpoint as the base (mobile), never require larger breakpoints for core functionality.
 17. Include PWA-ready manifest hints in the layout description.
 18. If the application requires external API keys or secrets (payment gateways, databases, third-party APIs, etc.), list them in "required_env_vars". Each entry: "key" (env var name, e.g. "STRIPE_SK"), "description" (what it's for), "is_public" (true if NEXT_PUBLIC_ prefixed for client-side), "provider" (optional, matching integration: "stripe", "iyzico", "supabase", etc.). Do NOT include NEXT_PUBLIC_STORE_ID or NEXT_PUBLIC_WEMOB_API_URL (auto-injected).
-19. If the application needs user authentication (login, register, user accounts, protected pages, admin panels, dashboards, or user-specific data), set "needs_auth": true. Auth infrastructure (lib/wemob-auth.ts and lib/wemob-auth-client.tsx) will be auto-injected. Plan login/register pages and an API route at app/api/auth/[...action]/route.ts to dispatch auth actions. Do NOT plan custom auth utilities — they are template-managed.
+19. If the application needs user authentication (login, register, user accounts, protected pages, admin panels, dashboards, or user-specific data), set "needs_auth": true. Auth infrastructure (lib/wemob-auth.ts, lib/wemob-auth-client.tsx, and app/api/auth/[...action]/route.ts) will be auto-injected as templates. Do NOT include app/api/auth/[...action]/route.ts in the file plan — it is auto-injected. Plan login/register pages only. You MAY design a "users" table with app-specific columns — auth-required columns will be auto-merged in. Do NOT plan custom auth utilities — they are template-managed.
 
 ### Output format (strict JSON, no explanation, no markdown)
 {

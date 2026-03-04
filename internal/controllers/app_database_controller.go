@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/knid/wemob/internal/responses"
 
@@ -191,6 +192,7 @@ func (c *Controller) GetDatabaseSchema(projectID string) (*responses.DatabaseSch
 }
 
 // getNeonDatabaseSchema queries a Neon database's information_schema to get all tables.
+// Includes retry logic to handle Neon cold starts (compute auto-suspends after inactivity).
 func (c *Controller) getNeonDatabaseSchema(projectID string) (*responses.DatabaseSchemaResponse, error) {
 	db, err := c.openNeonDB(projectID)
 	if err != nil {
@@ -198,12 +200,24 @@ func (c *Controller) getNeonDatabaseSchema(projectID string) (*responses.Databas
 	}
 	defer db.Close()
 
-	// Query all user tables
-	tableRows, err := db.Query(`
-		SELECT table_name FROM information_schema.tables
-		WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
-		ORDER BY table_name
-	`)
+	// Query all user tables — retry up to 3 times for Neon cold starts
+	var tableRows *sql.Rows
+	const maxRetries = 3
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		tableRows, err = db.Query(`
+			SELECT table_name FROM information_schema.tables
+			WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
+			ORDER BY table_name
+		`)
+		if err == nil {
+			break
+		}
+		if attempt < maxRetries {
+			slog.Warn("getNeonDatabaseSchema: query failed, retrying for cold start",
+				"attempt", attempt, "error", err, "project_id", projectID)
+			time.Sleep(2 * time.Second)
+		}
+	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to query tables: %w", err)
 	}

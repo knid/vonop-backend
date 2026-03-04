@@ -4,6 +4,7 @@ package constants
 var NEXTJS_AUTH_TEMPLATE_FILE_PATHS = []string{
 	"lib/wemob-auth.ts",
 	"lib/wemob-auth-client.tsx",
+	"app/api/auth/[...action]/route.ts",
 }
 
 // AUTH_DEFAULT_DATA_MODELS defines the standard users table for auth-enabled projects.
@@ -374,5 +375,86 @@ export function useAuth(): AuthContextType {
     throw new Error("useAuth must be used within an AuthProvider");
   }
   return context;
+}
+`
+
+// NEXTJS_TEMPLATE_AUTH_ROUTE is the catch-all API route for auth actions.
+// Template-managed so the LLM doesn't generate a broken version.
+const NEXTJS_TEMPLATE_AUTH_ROUTE = `import { NextRequest, NextResponse } from "next/server";
+import { register, login, logout, getSession } from "@/lib/wemob-auth";
+
+export async function POST(
+  req: NextRequest,
+  { params }: { params: Promise<{ action: string[] }> }
+) {
+  const { action } = await params;
+  const actionName = action[0];
+
+  try {
+    switch (actionName) {
+      case "register": {
+        const { email, password, name } = await req.json();
+        if (!email || !password) {
+          return NextResponse.json(
+            { success: false, error: "Email and password are required" },
+            { status: 400 }
+          );
+        }
+        const result = await register(email, password, name);
+        return NextResponse.json(result, {
+          status: result.success ? 200 : 400,
+        });
+      }
+      case "login": {
+        const { email, password } = await req.json();
+        if (!email || !password) {
+          return NextResponse.json(
+            { success: false, error: "Email and password are required" },
+            { status: 400 }
+          );
+        }
+        const result = await login(email, password);
+        return NextResponse.json(result, {
+          status: result.success ? 200 : 401,
+        });
+      }
+      case "logout": {
+        await logout();
+        return NextResponse.json({ success: true });
+      }
+      default:
+        return NextResponse.json(
+          { success: false, error: "Unknown action" },
+          { status: 404 }
+        );
+    }
+  } catch (error) {
+    console.error("Auth API error:", error);
+    return NextResponse.json(
+      { success: false, error: "Internal server error" },
+      { status: 500 }
+    );
+  }
+}
+
+export async function GET(
+  _req: NextRequest,
+  { params }: { params: Promise<{ action: string[] }> }
+) {
+  const { action } = await params;
+  const actionName = action[0];
+
+  if (actionName === "session") {
+    const session = await getSession();
+    if (!session) {
+      return NextResponse.json({ user: null }, { status: 200 });
+    }
+    return NextResponse.json({ user: session.user }, { status: 200 });
+  }
+
+  return NextResponse.json(
+    { success: false, error: "Unknown action" },
+    { status: 404 }
+  );
 }
 `

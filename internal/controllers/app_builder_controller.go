@@ -203,7 +203,7 @@ func (c *Controller) StreamBuildApp(
 			if tp == "app/globals.css" {
 				continue
 			}
-			content := getTemplateContent(tp, nil, nil, project.ProjectType, nil, "")
+			content := getTemplateContent(tp, nil, nil, project.ProjectType, nil)
 			if content == "" {
 				continue
 			}
@@ -2335,13 +2335,17 @@ func (c *Controller) buildBuilderToolExecutor(ctx context.Context, project *mode
 			if args.NeedsAuth {
 				var authModels []DataModel
 				if err := json.Unmarshal([]byte(constants.AUTH_DEFAULT_DATA_MODELS), &authModels); err == nil {
-					existing := make(map[string]bool)
-					for _, m := range dataModels {
-						existing[m.Name] = true
-					}
-					for _, dm := range authModels {
-						if !existing[dm.Name] {
-							dataModels = append([]DataModel{dm}, dataModels...)
+					for _, authModel := range authModels {
+						found := false
+						for i, m := range dataModels {
+							if m.Name == authModel.Name {
+								dataModels[i] = mergeDataModelColumns(authModel, m)
+								found = true
+								break
+							}
+						}
+						if !found {
+							dataModels = append([]DataModel{authModel}, dataModels...)
 						}
 					}
 				}
@@ -2379,7 +2383,7 @@ func (c *Controller) buildBuilderToolExecutor(ctx context.Context, project *mode
 				return true
 			})
 
-			if connStr == "" || neonProjectID == "" {
+			if connStr == "" || neonProjectID == "" || neonErr != nil {
 				errMsg := "unknown error"
 				if neonErr != nil {
 					errMsg = neonErr.Error()
@@ -2392,7 +2396,7 @@ func (c *Controller) buildBuilderToolExecutor(ctx context.Context, project *mode
 			}
 
 			// Inject DB template files
-			dbContent := fmt.Sprintf(constants.NEXTJS_TEMPLATE_DB_TS, connStr)
+			dbContent := constants.NEXTJS_TEMPLATE_DB_TS
 			c.injectTemplateFileForTool(project, "lib/db.ts", dbContent, fileMap, cbs)
 
 			schemaContent := buildDrizzleSchema(dataModels)
@@ -2586,13 +2590,17 @@ func (c *Controller) runPreGenerationSetup(
 				if needsAuth {
 					var authModels []DataModel
 					if err := json.Unmarshal([]byte(constants.AUTH_DEFAULT_DATA_MODELS), &authModels); err == nil {
-						existing := make(map[string]bool)
-						for _, m := range dataModels {
-							existing[m.Name] = true
-						}
-						for _, dm := range authModels {
-							if !existing[dm.Name] {
-								dataModels = append([]DataModel{dm}, dataModels...)
+						for _, authModel := range authModels {
+							found := false
+							for i, m := range dataModels {
+								if m.Name == authModel.Name {
+									dataModels[i] = mergeDataModelColumns(authModel, m)
+									found = true
+									break
+								}
+							}
+							if !found {
+								dataModels = append([]DataModel{authModel}, dataModels...)
 							}
 						}
 					}
@@ -2615,13 +2623,13 @@ func (c *Controller) runPreGenerationSetup(
 				}
 
 				connStr, neonProjectID, neonErr := c.provisionNeonDatabase(ctx, project, dataModels, sendEvent)
-				if connStr != "" && neonProjectID != "" {
+				if connStr != "" && neonProjectID != "" && neonErr == nil {
 					if err := c.storeNeonIntegration(project, connStr, neonProjectID); err != nil {
 						slog.Error("pre-gen: failed to store neon integration", "error", err, "project_id", project.ID)
 					}
 
 					// Inject DB template files
-					dbContent := fmt.Sprintf(constants.NEXTJS_TEMPLATE_DB_TS, connStr)
+					dbContent := constants.NEXTJS_TEMPLATE_DB_TS
 					c.injectTemplateFile(project, "lib/db.ts", dbContent, fileMap, sendEvent)
 
 					schemaContent := buildDrizzleSchema(dataModels)
