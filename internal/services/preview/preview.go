@@ -43,7 +43,7 @@ func NewService(flyService *fly.Service, db *database.Database, previewDomain st
 }
 
 type PreviewStatus struct {
-	Status     string `json:"status"`      // "starting", "syncing", "ready", "error", "stopped"
+	Status     string `json:"status"`      // "starting", "syncing", "installing", "compiling", "ready", "error", "stopped"
 	PreviewURL string `json:"preview_url"`
 	Error      string `json:"error,omitempty"`
 }
@@ -124,6 +124,14 @@ func (s *Service) CreatePreview(projectID string, files map[string]string, envVa
 						}
 						return
 					}
+					// Trigger Next.js compilation before marking as ready
+					existing.Status = "compiling"
+					if err := s.DB.UpdatePreviewMachine(existing); err != nil {
+						slog.Error("failed to update machine status to compiling", "project_id", projectID, "error", err)
+					}
+					if err := s.triggerCompilation(existing.MachineID, previewURL); err != nil {
+						slog.Warn("compilation trigger failed, marking ready anyway", "project_id", projectID, "error", err)
+					}
 					existing.Status = "ready"
 					existing.LastAccessAt = time.Now()
 					if err := s.DB.UpdatePreviewMachine(existing); err != nil {
@@ -197,6 +205,14 @@ func (s *Service) CreatePreview(projectID string, files map[string]string, envVa
 						return
 					}
 
+					// Trigger Next.js compilation before marking as ready
+					existing.Status = "compiling"
+					if err := s.DB.UpdatePreviewMachine(existing); err != nil {
+						slog.Error("failed to update machine status to compiling", "project_id", projectID, "error", err)
+					}
+					if err := s.triggerCompilation(existing.MachineID, previewURL); err != nil {
+						slog.Warn("compilation trigger failed, marking ready anyway", "project_id", projectID, "error", err)
+					}
 					existing.Status = "ready"
 					existing.LastAccessAt = time.Now()
 					if err := s.DB.UpdatePreviewMachine(existing); err != nil {
@@ -359,6 +375,14 @@ func (s *Service) createNewMachine(projectID string, files map[string]string, en
 			return
 		}
 
+		// Trigger Next.js compilation before marking as ready
+		record.Status = "compiling"
+		if err := s.DB.UpdatePreviewMachine(record); err != nil {
+			slog.Error("failed to update machine status to compiling", "project_id", projectID, "error", err)
+		}
+		if err := s.triggerCompilation(machine.ID, previewURL); err != nil {
+			slog.Warn("compilation trigger failed, marking ready anyway", "project_id", projectID, "error", err)
+		}
 		record.Status = "ready"
 		record.LastAccessAt = time.Now()
 		if err := s.DB.UpdatePreviewMachine(record); err != nil {
@@ -514,7 +538,7 @@ func (s *Service) GetStatus(projectID string) (*PreviewStatus, error) {
 	}
 
 	// Verify actual state with Fly API
-	if record.Status == "ready" || record.Status == "starting" || record.Status == "syncing" || record.Status == "installing" || record.Status == "error" {
+	if record.Status == "ready" || record.Status == "starting" || record.Status == "syncing" || record.Status == "installing" || record.Status == "compiling" || record.Status == "error" {
 		machine, err := s.Fly.GetMachine(record.MachineID)
 		if err == nil {
 			switch machine.State {
@@ -529,7 +553,7 @@ func (s *Service) GetStatus(projectID string) (*PreviewStatus, error) {
 					if err := s.DB.UpdatePreviewMachine(record); err != nil {
 						slog.Error("failed to update machine status", "project_id", projectID, "error", err)
 					}
-				} else if (record.Status == "syncing" || record.Status == "installing") && time.Since(record.UpdatedAt) > 3*time.Minute {
+				} else if (record.Status == "syncing" || record.Status == "installing" || record.Status == "compiling") && time.Since(record.UpdatedAt) > 3*time.Minute {
 					slog.Info("promoting stuck status to ready", "project_id", projectID, "old_status", record.Status, "stuck_since", record.UpdatedAt)
 					record.Status = "ready"
 					if err := s.DB.UpdatePreviewMachine(record); err != nil {
@@ -645,6 +669,28 @@ func (s *Service) DestroyStoppedMachines(stoppedThreshold time.Duration) {
 	if len(machines) > 0 {
 		slog.Info("stopped machine destroy complete", "destroyed", len(machines))
 	}
+}
+
+// triggerCompilation makes a GET request to the preview URL to trigger Next.js compilation
+// and waits for it to complete. This prevents the user from seeing "Compiling..." in the iframe.
+func (s *Service) triggerCompilation(machineID string, previewURL string) error {
+	client := &http.Client{Timeout: 120 * time.Second}
+
+	// Use the direct Fly URL with instance header to bypass the router
+	req, err := http.NewRequest("GET", s.machineBaseURL(), nil)
+	if err != nil {
+		return fmt.Errorf("creating compilation request: %w", err)
+	}
+	req.Header.Set("Fly-Force-Instance-Id", machineID)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("compilation request failed: %w", err)
+	}
+	defer resp.Body.Close()
+	io.ReadAll(resp.Body) // drain body
+
+	return nil
 }
 
 // machineBaseURL returns the direct Fly URL for a machine, bypassing the router.
