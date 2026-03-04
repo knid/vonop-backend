@@ -2988,6 +2988,18 @@ func (c *Controller) streamEcommerceGeneration(
 		return "", ops, ctx.Err()
 	}
 
+	// === Phase 1.5: Generate AI product images ===
+	store, storeErr := c.DB.GetStoreByAppProjectID(project.ID.String())
+	if storeErr == nil && store != nil {
+		sendEvent("tool_start", map[string]any{"tool": "generate_product_images"})
+		c.GenerateProductImages(ctx, store)
+	}
+
+	// Check context cancellation between phases
+	if ctx.Err() != nil {
+		return "", ops, ctx.Err()
+	}
+
 	// === Phase 2: File generation (single-shot, no tools) ===
 	slog.Info("ecommerce-gen: starting Phase 2 (file generation)",
 		"model", model, "project_id", project.ID)

@@ -4,8 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
+	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-playground/validator/v10"
@@ -13,6 +16,7 @@ import (
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/requests"
+	"github.com/knid/wemob/internal/services/fal"
 	"github.com/knid/wemob/internal/utils"
 )
 
@@ -524,6 +528,120 @@ func (c *Controller) updateDiscountFromChat(data map[string]any) error {
 	discount.UpdatedAt = time.Now()
 	_, err = c.DB.UpdateDiscount(discount)
 	return err
+}
+
+// GenerateProductImages generates AI product images for all products in a store
+// that don't already have images. Best-effort: logs failures but never returns an error.
+func (c *Controller) GenerateProductImages(ctx context.Context, store *models.Store) {
+	apiKey := c.SecretManager.GetSecret("FAL_API_KEY")
+	if apiKey == "" {
+		slog.Info("ecommerce-gen: FAL_API_KEY not set, skipping product image generation")
+		return
+	}
+
+	model := c.SecretManager.GetSecret("FAL_IMAGE_MODEL")
+	if model == "" {
+		model = "fal-ai/flux/schnell"
+	}
+
+	products, err := c.DB.GetProductsByStoreID(store.ID.String())
+	if err != nil {
+		slog.Warn("ecommerce-gen: failed to fetch products for image generation", "error", err)
+		return
+	}
+
+	// Filter to products without images
+	var needImages []models.Product
+	for _, p := range products {
+		if len(p.Images) == 0 {
+			needImages = append(needImages, p)
+		}
+	}
+	if len(needImages) == 0 {
+		return
+	}
+
+	slog.Info("ecommerce-gen: generating product images",
+		"store_id", store.ID, "count", len(needImages), "model", model)
+
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 5) // max 5 concurrent
+
+	for i := range needImages {
+		wg.Add(1)
+		go func(product models.Product) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			prompt := buildProductImagePrompt(product.Name, product.Description)
+
+			cdnURL, err := fal.GenerateImage(ctx, apiKey, model, prompt)
+			if err != nil {
+				slog.Warn("ecommerce-gen: fal image generation failed",
+					"product_id", product.ID, "error", err)
+				return
+			}
+
+			imgData, err := downloadImage(ctx, cdnURL)
+			if err != nil {
+				slog.Warn("ecommerce-gen: failed to download generated image",
+					"product_id", product.ID, "error", err)
+				return
+			}
+
+			s3Key := fmt.Sprintf("stores/%s/products/%s/cover.jpg", store.ID, product.ID)
+			if err := c.AssetsStorage.UploadFileByteWithContentType(ctx, s3Key, imgData, "image/jpeg"); err != nil {
+				slog.Warn("ecommerce-gen: failed to upload product image to S3",
+					"product_id", product.ID, "error", err)
+				return
+			}
+
+			presigned, err := c.AssetsStorage.GetObject(ctx, s3Key, 60*60*24*365)
+			if err != nil {
+				slog.Warn("ecommerce-gen: failed to get presigned URL",
+					"product_id", product.ID, "error", err)
+				return
+			}
+
+			product.Images = []string{presigned.URL}
+			product.UpdatedAt = time.Now()
+			if _, err := c.DB.UpdateProduct(&product); err != nil {
+				slog.Warn("ecommerce-gen: failed to update product images",
+					"product_id", product.ID, "error", err)
+			}
+		}(needImages[i])
+	}
+
+	wg.Wait()
+	slog.Info("ecommerce-gen: product image generation complete", "store_id", store.ID)
+}
+
+func buildProductImagePrompt(name, description string) string {
+	prompt := fmt.Sprintf("Professional product photo of %s.", name)
+	if description != "" {
+		prompt += " " + description + "."
+	}
+	prompt += " Clean white background, studio lighting, e-commerce photography."
+	return prompt
+}
+
+var imageDownloadClient = &http.Client{Timeout: 30 * time.Second}
+
+func downloadImage(ctx context.Context, url string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := imageDownloadClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("download image: status %d", resp.StatusCode)
+	}
+	return io.ReadAll(resp.Body)
 }
 
 func (c *Controller) updateStoreFromChat(store *models.Store, data map[string]any) error {
