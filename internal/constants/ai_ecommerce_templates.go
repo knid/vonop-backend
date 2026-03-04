@@ -1803,11 +1803,12 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { CheckCircle, Package, Loader2 } from "lucide-react";
 import { motion } from "framer-motion";
-import { getOrder, formatPrice } from "@/lib/wemob-store";
+import { getOrder, confirmCheckout, formatPrice } from "@/lib/wemob-store";
 
 export default function CheckoutSuccessPage() {
   const searchParams = useSearchParams();
   const orderId = searchParams.get("order_id");
+  const sessionId = searchParams.get("session_id");
 
   const [order, setOrder] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
@@ -1819,16 +1820,26 @@ export default function CheckoutSuccessPage() {
       setError("No order ID provided.");
       return;
     }
-    getOrder(orderId)
-      .then((data) => {
+
+    const loadOrder = async () => {
+      try {
+        // If redirected from Stripe, confirm the payment server-side first
+        if (sessionId) {
+          await confirmCheckout(orderId, sessionId).catch(() => {
+            // Webhook may have already confirmed — ignore errors
+          });
+        }
+        const data = await getOrder(orderId);
         setOrder(data);
-        setLoading(false);
-      })
-      .catch(() => {
+      } catch {
         setError("Order not found.");
+      } finally {
         setLoading(false);
-      });
-  }, [orderId]);
+      }
+    };
+
+    loadOrder();
+  }, [orderId, sessionId]);
 
   if (loading) {
     return (

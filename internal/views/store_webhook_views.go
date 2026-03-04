@@ -162,8 +162,9 @@ func (v *HttpViews) HandleStoreIyzicoWebhook(w http.ResponseWriter, r *http.Requ
 	}
 	defer r.Body.Close()
 
-	// Verify Iyzico webhook signature if the store has a webhook_secret configured
+	// Verify Iyzico webhook signature — reject if no webhook_secret is configured
 	integrations, _ := v.Controller.DB.GetAppIntegrationsByProjectID(store.AppProjectID.String())
+	signatureVerified := false
 	for _, integ := range integrations {
 		if integ.Provider == "iyzico" && integ.Status == "connected" {
 			var creds map[string]any
@@ -183,13 +184,17 @@ func (v *HttpViews) HandleStoreIyzicoWebhook(w http.ResponseWriter, r *http.Requ
 						utils.JSONErrorResponse(w, "invalid signature", http.StatusBadRequest)
 						return
 					}
+					signatureVerified = true
 					slog.Info("Iyzico webhook signature verified", "storeId", storeID)
-				} else {
-					slog.Warn("Iyzico webhook received without webhook_secret configured — skipping signature verification", "storeId", storeID)
 				}
 			}
 			break
 		}
+	}
+	if !signatureVerified {
+		slog.Warn("Iyzico webhook rejected: no webhook_secret configured", "storeId", storeID)
+		utils.JSONErrorResponse(w, "webhook signature verification not configured", http.StatusForbidden)
+		return
 	}
 
 	var payload struct {
@@ -219,6 +224,8 @@ func (v *HttpViews) HandleStoreIyzicoWebhook(w http.ResponseWriter, r *http.Requ
 		if err == nil && order != nil {
 			if order.StoreID != store.ID {
 				slog.Warn("Iyzico webhook order does not belong to store", "orderId", order.ID.String(), "orderStoreId", order.StoreID, "webhookStoreId", store.ID)
+			} else if order.PaymentStatus == "paid" {
+				slog.Info("Iyzico webhook: order already paid, skipping", "orderId", order.ID.String(), "storeId", storeID)
 			} else {
 				switch payload.Status {
 				case "SUCCESS":

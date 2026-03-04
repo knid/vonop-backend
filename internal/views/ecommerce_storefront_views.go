@@ -1,7 +1,9 @@
 package views
 
 import (
+	"encoding/json"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -11,6 +13,7 @@ import (
 	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/utils"
 	"github.com/posthog/posthog-go"
+	"github.com/stripe/stripe-go/v82/webhook"
 )
 
 // storefrontGuard checks that the store exists and is active. Returns false if rejected.
@@ -550,6 +553,60 @@ func (v *HttpViews) StorefrontStripeWebhook(w http.ResponseWriter, r *http.Reque
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		utils.JSONErrorResponse(w, "failed to read request body", http.StatusBadRequest)
+		return
+	}
+
+	// Parse event to extract store_id from metadata for signature verification
+	var rawEvent struct {
+		Type string `json:"type"`
+		Data struct {
+			Object struct {
+				Metadata map[string]string `json:"metadata"`
+			} `json:"object"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &rawEvent); err != nil {
+		utils.JSONErrorResponse(w, "invalid payload", http.StatusBadRequest)
+		return
+	}
+
+	storeID := rawEvent.Data.Object.Metadata["store_id"]
+	if storeID == "" {
+		slog.Warn("Stripe v2 webhook: no store_id in metadata")
+		w.WriteHeader(http.StatusOK) // acknowledge but ignore
+		return
+	}
+
+	store, err := v.Controller.DB.GetStoreByID(storeID)
+	if err != nil || store == nil {
+		slog.Warn("Stripe v2 webhook: store not found", "store_id", storeID)
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	// Verify Stripe signature using the store's webhook secret
+	integrations, _ := v.Controller.DB.GetAppIntegrationsByProjectID(store.AppProjectID.String())
+	signatureVerified := false
+	for _, integ := range integrations {
+		if integ.Provider == "stripe" && integ.Status == "connected" {
+			var creds map[string]any
+			if err := json.Unmarshal(integ.Credentials, &creds); err == nil {
+				if webhookSecret, ok := creds["webhook_secret"].(string); ok && webhookSecret != "" {
+					sigHeader := r.Header.Get("Stripe-Signature")
+					if _, err := webhook.ConstructEvent(body, sigHeader, webhookSecret); err != nil {
+						slog.Error("Stripe v2 webhook signature verification failed", "error", err, "store_id", storeID)
+						utils.JSONErrorResponse(w, "invalid signature", http.StatusBadRequest)
+						return
+					}
+					signatureVerified = true
+				}
+			}
+			break
+		}
+	}
+	if !signatureVerified {
+		slog.Warn("Stripe v2 webhook rejected: no webhook_secret configured", "store_id", storeID)
+		utils.JSONErrorResponse(w, "webhook signature verification not configured", http.StatusForbidden)
 		return
 	}
 

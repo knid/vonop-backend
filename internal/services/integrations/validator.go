@@ -1,9 +1,15 @@
 package integrations
 
 import (
+	"bytes"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/rand"
 	"net/http"
 	"strings"
 	"time"
@@ -146,7 +152,7 @@ func testStripe(creds map[string]any) error {
 	return nil
 }
 
-// testIyzico calls the Iyzico test endpoint to verify API credentials.
+// testIyzico calls the Iyzico test endpoint to verify API credentials using IYZWSv2 auth.
 func testIyzico(creds map[string]any) error {
 	apiKey := creds["api_key"].(string)
 	secretKey := creds["secret_key"].(string)
@@ -154,12 +160,43 @@ func testIyzico(creds map[string]any) error {
 		return fmt.Errorf("iyzico: api_key and secret_key are required")
 	}
 
-	req, err := http.NewRequest("GET", "https://api.iyzipay.com/payment/test", nil)
+	// Determine base URL (sandbox vs production)
+	baseURL := "https://api.iyzipay.com"
+	if bu, ok := creds["base_url"].(string); ok && bu != "" {
+		baseURL = strings.TrimRight(bu, "/")
+	} else if sandbox, ok := creds["sandbox"].(bool); ok && sandbox {
+		baseURL = "https://sandbox-api.iyzipay.com"
+	}
+
+	uri := "/payment/test"
+	body := []byte("{\"locale\":\"en\"}")
+
+	// IYZWSv2 signing (matches production iyzicoRequest)
+	rnd := make([]byte, 8)
+	const chars = "abcdefghijklmnopqrstuvwxyz0123456789"
+	for i := range rnd {
+		rnd[i] = chars[rand.Intn(len(chars))]
+	}
+	randomStr := string(rnd)
+
+	bodyHash := sha256.Sum256(body)
+	hashStr := hex.EncodeToString(bodyHash[:])
+
+	signInput := randomStr + uri + hashStr
+	mac := hmac.New(sha256.New, []byte(secretKey))
+	mac.Write([]byte(signInput))
+	signature := base64.StdEncoding.EncodeToString(mac.Sum(nil))
+
+	authValue := base64.StdEncoding.EncodeToString(
+		[]byte(apiKey + ":" + randomStr + ":" + signature))
+
+	req, err := http.NewRequest("POST", baseURL+uri, bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("iyzico: failed to create request: %w", err)
 	}
-	req.Header.Set("Authorization", "IYZWS "+apiKey)
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "IYZWSv2 "+authValue)
+	req.Header.Set("x-iyzi-rnd", randomStr)
 
 	resp, err := testHTTPClient.Do(req)
 	if err != nil {
@@ -170,6 +207,16 @@ func testIyzico(creds map[string]any) error {
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
 		return fmt.Errorf("iyzico: invalid credentials (status %d)", resp.StatusCode)
 	}
+
+	respBody, _ := io.ReadAll(resp.Body)
+	var result map[string]any
+	if err := json.Unmarshal(respBody, &result); err == nil {
+		if status, _ := result["status"].(string); status != "success" {
+			errMsg, _ := result["errorMessage"].(string)
+			return fmt.Errorf("iyzico: credential test failed: %s", errMsg)
+		}
+	}
+
 	return nil
 }
 
