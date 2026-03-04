@@ -590,8 +590,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 
 // getTemplateContent returns the hardcoded content for a template file.
 // dataModels is used to generate the dynamic lib/schema.ts file.
-// neonConnStr is embedded into lib/db.ts as a fallback when DATABASE_URL env var is not set.
-func getTemplateContent(path string, colorScheme, darkColorScheme map[string]any, projectType string, dataModels []DataModel, neonConnStr string) string {
+func getTemplateContent(path string, colorScheme, darkColorScheme map[string]any, projectType string, dataModels []DataModel) string {
 	switch path {
 	case "package.json":
 		return constants.NEXTJS_TEMPLATE_PACKAGE_JSON
@@ -603,8 +602,10 @@ func getTemplateContent(path string, colorScheme, darkColorScheme map[string]any
 		return constants.NEXTJS_TEMPLATE_NEXT_CONFIG
 	case "app/globals.css":
 		return buildGlobalsCSSTheme(colorScheme, darkColorScheme, projectType == "mobile_app")
+	case ".gitignore":
+		return constants.NEXTJS_TEMPLATE_GITIGNORE
 	case "lib/db.ts":
-		return fmt.Sprintf(constants.NEXTJS_TEMPLATE_DB_TS, neonConnStr)
+		return constants.NEXTJS_TEMPLATE_DB_TS
 	case "lib/schema.ts":
 		return buildDrizzleSchema(dataModels)
 	}
@@ -700,8 +701,30 @@ func getAuthTemplateContent(path string) string {
 		return constants.NEXTJS_TEMPLATE_WEMOB_AUTH
 	case "lib/wemob-auth-client.tsx":
 		return constants.NEXTJS_TEMPLATE_WEMOB_AUTH_CLIENT
+	case "app/api/auth/[...action]/route.ts":
+		return constants.NEXTJS_TEMPLATE_AUTH_ROUTE
 	}
 	return ""
+}
+
+// mergeDataModelColumns keeps all auth columns and appends non-conflicting LLM columns.
+// This ensures auth-required columns (email, password_hash, etc.) always exist while
+// preserving any app-specific columns the LLM designed (e.g., bestScore, avatarUrl).
+func mergeDataModelColumns(auth, llm DataModel) DataModel {
+	merged := DataModel{Name: auth.Name, Columns: make([]DataColumn, len(auth.Columns))}
+	copy(merged.Columns, auth.Columns)
+
+	authCols := make(map[string]bool)
+	for _, col := range auth.Columns {
+		authCols[col.Name] = true
+	}
+
+	for _, col := range llm.Columns {
+		if !authCols[col.Name] {
+			merged.Columns = append(merged.Columns, col)
+		}
+	}
+	return merged
 }
 
 // --- Neon / DataModel helpers ---
@@ -1706,6 +1729,44 @@ func runDeterministicChecks(files map[string]string) []validationError {
 				Error: fmt.Sprintf("Root layout is missing %s tags. Next.js App Router requires app/layout.tsx to include <html> and <body> tags wrapping {children}.", strings.Join(missing, " and ")),
 				Type:  "missing_root_layout_tags",
 			})
+		}
+	}
+
+	// --- Auth-specific checks (only when wemob-auth.ts exists) ---
+	if _, hasAuth := files["lib/wemob-auth.ts"]; hasAuth {
+		// Check A1: session.userId / session.username → should be session.user.id
+		sessionDirectAccessRegex := regexp.MustCompile(`session\.(userId|username|email|name|role)\b`)
+		for fp, fc := range files {
+			if isTemplateFile(fp) || isConfigFile(fp) {
+				continue
+			}
+			if !strings.HasSuffix(fp, ".tsx") && !strings.HasSuffix(fp, ".ts") {
+				continue
+			}
+			if matches := sessionDirectAccessRegex.FindAllString(fc, -1); len(matches) > 0 {
+				errors = append(errors, validationError{
+					File:  fp,
+					Error: fmt.Sprintf("Incorrect session access: '%s'. Session properties are nested under session.user — use session.user.id, session.user.email, etc.", matches[0]),
+					Type:  "auth_session_access",
+				})
+			}
+		}
+
+		// Check A2: wemob-auth-client imported in API route files (should use server-side wemob-auth)
+		for fp, fc := range files {
+			if isTemplateFile(fp) || isConfigFile(fp) {
+				continue
+			}
+			if !strings.HasPrefix(fp, "app/api/") {
+				continue
+			}
+			if strings.Contains(fc, "wemob-auth-client") {
+				errors = append(errors, validationError{
+					File:  fp,
+					Error: "API route imports from wemob-auth-client (client-only module). API routes must use server-side '@/lib/wemob-auth' instead (getApiSession, register, login, logout).",
+					Type:  "auth_client_in_api",
+				})
+			}
 		}
 	}
 
