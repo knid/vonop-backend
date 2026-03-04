@@ -12,8 +12,8 @@ const PREVIEW_DOMAIN = process.env.PREVIEW_DOMAIN || "";
 const APP_DIR = "/app";
 const SETUP_MARKER = "/tmp/.setup-complete";
 
-// Load pre-installed deps from Docker image template for install-skip logic
-const PREINSTALLED_DEPS = (() => {
+// Track installed deps — starts with Docker template, updated after each bun install
+let installedDeps = (() => {
   try {
     const tpl = JSON.parse(fs.readFileSync("/srv/package-template.json", "utf8"));
     return new Set([
@@ -176,6 +176,7 @@ function bunInstall() {
       console.log("bun install completed");
       bunInstallFailed = false;
       bunInstallError = "";
+      updateInstalledDeps();
 
       if (bunInstallQueued) {
         bunInstallQueued = false;
@@ -258,16 +259,16 @@ function writeFiles(files) {
   return { packageChanged, packageContent };
 }
 
-// Check if synced package.json has deps not already pre-installed in the Docker image.
+// Check if synced package.json has deps not already installed (template + previous installs).
 // Returns true only if there are NEW packages that require `bun install`.
 function hasNewDeps(packageJsonContent) {
-  if (!PREINSTALLED_DEPS.size) return true; // no template loaded, install to be safe
+  if (!installedDeps.size) return true; // no template loaded, install to be safe
   try {
     const pkg = JSON.parse(packageJsonContent);
     const allDeps = { ...pkg.dependencies, ...pkg.devDependencies };
     for (const name of Object.keys(allDeps)) {
-      if (!PREINSTALLED_DEPS.has(name)) {
-        console.log(`new dependency not in template: ${name}`);
+      if (!installedDeps.has(name)) {
+        console.log(`new dependency not yet installed: ${name}`);
         return true;
       }
     }
@@ -275,6 +276,20 @@ function hasNewDeps(packageJsonContent) {
   } catch {
     return true; // can't parse, install to be safe
   }
+}
+
+// After a successful bun install, update installedDeps from the current package.json
+function updateInstalledDeps() {
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(APP_DIR, "package.json"), "utf8"));
+    const allDeps = [
+      ...Object.keys(pkg.dependencies || {}),
+      ...Object.keys(pkg.devDependencies || {}),
+    ];
+    for (const name of allDeps) {
+      installedDeps.add(name);
+    }
+  } catch {}
 }
 
 function deleteFiles(paths) {
