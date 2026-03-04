@@ -3198,7 +3198,9 @@ func (c *Controller) waitForClarification(
 
 	// Send clarification_needed event to client
 	sendEvent("clarification_needed", map[string]any{
-		"questions": questions.Questions,
+		"questions":       questions.Questions,
+		"job_id":          jobID,
+		"timeout_seconds": 300,
 	})
 
 	// Block until answer, timeout, or cancellation
