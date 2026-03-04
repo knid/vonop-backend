@@ -68,7 +68,7 @@ func (v *HttpViews) ChatApp(w http.ResponseWriter, r *http.Request) {
 	v.handleStreamOrAsync(w, r, user, StreamConfig{
 		JobType: "app_chat",
 		StreamFunc: func(ctx context.Context, events chan<- responses.SSEEvent, jobID string) {
-			v.Controller.StreamBuildApp(ctx, project, user, req.Message, req.Images, req.ReasoningEffort, false, events)
+			v.Controller.StreamBuildApp(ctx, project, user, req.Message, req.Images, req.ReasoningEffort, false, "", events)
 		},
 	})
 }

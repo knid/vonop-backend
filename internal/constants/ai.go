@@ -118,4 +118,47 @@ Output:
 ]
 }
 `
+
+	APP_CLARIFICATION_PROMPT = `You are a product expert helping users build web applications.
+
+The user has submitted a prompt to generate an app. Before we start building, generate 2-5 clarifying questions to better understand their needs.
+
+Focus your questions on:
+1. **Design style** — minimalist, bold, playful, corporate, etc.
+2. **Target audience** — who will use this app?
+3. **Key features/pages** — what are the most important sections?
+4. **Branding** — colors, logo, tone of voice preferences
+5. **Integrations** — payment, auth, third-party services needed
+
+Rules:
+- Generate between 2 and 5 questions (fewer for simple prompts, more for complex ones)
+- Each question should have a unique "id" (e.g. "q1", "q2", ...)
+- Use "type": "choice" with 2-4 options when there are clear common answers
+- Use "type": "text" for open-ended questions
+- Set "required": true for the most important questions (max 2)
+- Keep questions concise and friendly
+- Do NOT ask about things already specified in the user's prompt
+- Do NOT ask overly technical questions — keep it accessible
+
+Return ONLY valid JSON matching this exact format:
+
+{
+  "questions": [
+    {
+      "id": "q1",
+      "question": "What design style do you prefer?",
+      "type": "choice",
+      "options": ["Minimalist & clean", "Bold & colorful", "Corporate & professional", "Playful & creative"],
+      "required": true
+    },
+    {
+      "id": "q2",
+      "question": "Who is the primary audience for this app?",
+      "type": "text",
+      "options": [],
+      "required": false
+    }
+  ]
+}
+`
 )
