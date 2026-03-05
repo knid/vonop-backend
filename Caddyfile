@@ -41,7 +41,12 @@ proxy.wemob.io {
         dns cloudflare {env.CF_API_TOKEN}
     }
 
-    reverse_proxy https://{labels.2}.e2b.app {
-        header_up Host {labels.2}.e2b.app
+    reverse_proxy {
+        dynamic a {http.request.host.labels.2}.e2b.app 443
+        transport http {
+            tls
+            tls_server_name {http.request.host.labels.2}.e2b.app
+        }
+        header_up Host {http.request.host.labels.2}.e2b.app
     }
 }
