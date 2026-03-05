@@ -1727,7 +1727,7 @@ var appBuilderTools = []utils.Tool{
 		Type: "function",
 		Function: utils.ToolFunction{
 			Name:        "edit_file",
-			Description: "Apply a targeted edit to an existing file by replacing a specific string with new content. You MUST read_file first to see the exact content to replace. The old_string must match exactly (including whitespace and indentation). For replacing the entire file, use write_file instead.",
+			Description: "Apply a single small edit to an existing file by replacing a specific string. ONLY use for tiny, surgical changes (one import, one value). You MUST read_file first. The old_string must match exactly. NEVER call edit_file more than once on the same file — use write_file to rewrite it instead. If old_string is not found, use write_file to rewrite the whole file.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -2126,10 +2126,10 @@ func (c *Controller) buildBuilderToolExecutor(ctx context.Context, project *mode
 
 			count := strings.Count(content, args.OldString)
 			if count == 0 {
-				return fmt.Sprintf("Error: old_string not found in %s. Use read_file to see current content.", args.FilePath), nil
+				return fmt.Sprintf("Error: old_string not found in %s. Do NOT retry edit_file — use write_file to rewrite the entire file instead.", args.FilePath), nil
 			}
 			if count > 1 {
-				return fmt.Sprintf("Error: old_string found %d times in %s. Provide a larger unique string.", count, args.FilePath), nil
+				return fmt.Sprintf("Error: old_string found %d times in %s. Use write_file to rewrite the entire file instead.", count, args.FilePath), nil
 			}
 
 			newContent := strings.Replace(content, args.OldString, args.NewString, 1)

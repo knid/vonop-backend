@@ -1495,7 +1495,7 @@ You have tools to read, write, edit, and delete project files:
 - list_files: See all files in the project with sizes.
 - search_files: Search for text across all files.
 - write_file: Create a new file or replace an entire file's content.
-- edit_file: Apply a targeted string replacement in a file (old_string → new_string). More efficient than write_file for small changes.
+- edit_file: Apply a single tiny string replacement in a file (old_string → new_string). Only for small one-line changes. For anything bigger, use write_file to rewrite the whole file.
 - delete_file: Remove a file from the project.
 - setup_ecommerce: Create an e-commerce store backend when the app needs product/cart/checkout features.
 - manage_store: Add products, categories, and discounts to an existing store.
@@ -1520,8 +1520,10 @@ When building a new app from a user's prompt:
 When the user asks for changes to an existing app:
 1. Use list_files to understand the current project structure.
 2. Use read_file to see the current implementation of files you need to modify.
-3. Use edit_file for targeted changes (adding imports, modifying functions, updating styles).
-4. Use write_file when creating new files or doing extensive rewrites.
+3. Choose the right tool:
+   - **edit_file**: Only for very small, surgical changes (adding one import, changing a single value, renaming a variable). The old_string must be short and unique.
+   - **write_file**: Use this for ANYTHING beyond a tiny tweak — rearranging layout, changing multiple sections, restructuring a component, or modifying more than a few lines. Just rewrite the entire file. This is faster and more reliable than multiple edit_file calls.
+4. **NEVER chain multiple edit_file calls on the same file.** If you need more than one edit_file on a file, use write_file instead to rewrite it in one shot.
 5. After making changes, consider whether imports or types in other files might break. Fix them too.
 6. Verify your changes maintain visual consistency and don't break navigation.
 
@@ -1533,6 +1535,7 @@ When the user asks for changes to an existing app:
 ### Tool-Specific Rules
 - Use read_file tool to check actual exports before importing from sibling files. Do NOT guess export names.
 - ALWAYS use read_file on a file before using edit_file on it. The old_string parameter must match the file's current content exactly.
+- **If edit_file fails (old_string not found), do NOT retry edit_file. Use write_file to rewrite the entire file instead.**
 - Parallel tool calls: Call multiple read_file or search_files tools in parallel when possible.`
 
 // NEXTJS_BUILDER_SINGLESHOT_INSTRUCTIONS contains the output format rules for
