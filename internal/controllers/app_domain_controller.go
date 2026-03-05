@@ -55,7 +55,7 @@ func (c *Controller) AddAppDomain(project *models.AppProject, user *models.User,
 		return nil, errors.New("domain is already in use")
 	}
 
-	dnsRecord := "cname.vercel-dns.com"
+	dnsRecord := "cname.wemob.app"
 
 	domain := models.AppDomain{
 		AppProjectID: project.ID,
