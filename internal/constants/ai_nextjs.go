@@ -1788,7 +1788,7 @@ const NEXTJS_BUILDER_AUTH_RULES = `
 - Client-side: ` + "`" + `import { AuthProvider, useAuth } from '@/lib/wemob-auth-client'` + "`" + `. Wrap root layout with <AuthProvider>. useAuth() returns { user, isLoading, isAuthenticated, login, register, logout, refreshSession }.
 - Session shape: ` + "`" + `Session { user: AuthUser, expires: Date }` + "`" + `. AuthUser has: id, email, name, avatarUrl, role, emailVerified.
 - Access the current user via ` + "`" + `session.user.id` + "`" + `, ` + "`" + `session.user.email` + "`" + `, ` + "`" + `session.user.name` + "`" + `, etc. NEVER use ` + "`" + `session.userId` + "`" + ` or ` + "`" + `session.username` + "`" + ` — those fields do not exist.
-- In API routes, use ` + "`" + `getApiSession()` + "`" + ` which returns ` + "`" + `Session | null` + "`" + `. Check ` + "`" + `session?.user.id` + "`" + ` for the logged-in user ID.
+- In API routes: ` + "`" + `const session = await getApiSession()` + "`" + ` — takes NO arguments (reads cookies internally via Next.js headers). Returns ` + "`" + `Session | null` + "`" + `. NEVER pass request/req to getApiSession. Check ` + "`" + `session?.user.id` + "`" + ` for the logged-in user ID.
 - Client ` + "`" + `useAuth()` + "`" + ` returns ` + "`" + `{ user: AuthUser | null, isLoading, isAuthenticated, login, register, logout, refreshSession }` + "`" + `.
 - The auth API route at app/api/auth/[...action]/route.ts is TEMPLATE-MANAGED — do NOT create, modify, or overwrite it. It handles POST (register, login, logout) and GET (session) automatically.
 - NEVER create custom auth utilities. Use the injected auth libraries.
