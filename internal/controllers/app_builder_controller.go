@@ -23,6 +23,14 @@ import (
 // ansiRegex strips ANSI escape sequences that some LLM providers emit in streamed text.
 var ansiRegex = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
 
+// isErrorReport detects whether a user message is a structured error report
+// (auto-sent by the frontend when a runtime/build error occurs). These messages
+// follow a Markdown pattern with ## Error Type, ## Error Message, ## Code Frame.
+func isErrorReport(msg string) bool {
+	return (strings.Contains(msg, "## Error Type") || strings.Contains(msg, "## Error Message")) &&
+		(strings.Contains(msg, "## Code Frame") || strings.Contains(msg, "at ") || strings.Contains(msg, "Module not found"))
+}
+
 // normalizeContent trims and collapses whitespace for content comparison.
 func normalizeContent(s string) string {
 	return strings.TrimSpace(strings.Join(strings.Fields(s), " "))
@@ -305,34 +313,37 @@ func (c *Controller) StreamBuildApp(
 	}
 
 	// --- Build LLM messages ---
-	llmMessages := []utils.Message{
-		{Role: "system", Content: buildSystemPrompt(project)},
-	}
-
-	// System Block 2: Project context
-	projectContext := c.buildProjectContext(project, fileMap, isInitialGeneration)
-	llmMessages = append(llmMessages, utils.Message{Role: "system", Content: projectContext})
+	var llmMessages []utils.Message
 
 	// Add conversation history
 	if isInitialGeneration {
-		// For initial generation, just add the user prompt
+		llmMessages = []utils.Message{
+			{Role: "system", Content: buildSystemPrompt(project)},
+			{Role: "system", Content: c.buildProjectContext(project, fileMap, isInitialGeneration)},
+		}
 		llmMessages = append(llmMessages, utils.Message{Role: "user", Content: message})
 		if len(imageURLs) > 0 {
-			// Append image context
 			lastIdx := len(llmMessages) - 1
 			llmMessages[lastIdx].Content += fmt.Sprintf("\n\n[User attached %d image(s) for visual reference — recreate the design shown]", len(imageURLs))
 		}
 	} else {
-		// For chat: inject preview build errors if available
+		// Chat path: select relevant files, then build context
+		selectedFiles := c.selectContextFiles(ctx, provider, fileMap, message, messages)
+		projectContext := c.buildProjectContextForChat(project, fileMap, selectedFiles)
+
+		// Inject preview build errors if available
 		if c.PreviewService != nil {
 			if logs, err := c.PreviewService.GetLogs(project.ID.String()); err == nil && logs != "" {
 				if buildErrors := parseNextJSErrors(logs); len(buildErrors) > 0 {
-					projectContext += fmt.Sprintf("\n\n⚠ Preview build errors detected:\n%s\n\nFix these errors if the user's request touches affected files, or if they ask about build issues.",
+					projectContext += fmt.Sprintf("\n\n⚠ Preview build errors detected:\n%s",
 						strings.Join(buildErrors, "\n"))
-					// Re-set the system block with updated context
-					llmMessages[1] = utils.Message{Role: "system", Content: projectContext}
 				}
 			}
+		}
+
+		llmMessages = []utils.Message{
+			{Role: "system", Content: buildChatSystemPrompt(project)},
+			{Role: "system", Content: projectContext},
 		}
 
 		// Add context + conversation history with summarization
@@ -343,8 +354,6 @@ func (c *Controller) StreamBuildApp(
 
 		if len(messages) > summarizeThreshold {
 			oldMessages := messages[:len(messages)-keepRecent]
-			// Re-summarize when no summary exists or when old messages have grown
-			// significantly since last summary (every 10 new messages beyond threshold)
 			needsSummary := conv.Summary == "" || (len(oldMessages) > summarizeThreshold && len(oldMessages)%10 < 2)
 			if needsSummary && len(oldMessages) > 0 {
 				conv.Summary = c.summarizeConversation(ctx, oldMessages, provider, conv.Summary)
@@ -518,15 +527,33 @@ func (c *Controller) StreamBuildApp(
 		responseText = singleShotText
 		toolAppliedOps = singleShotOps
 	} else {
-		// === Tool-calling path: chat edits ===
+		// === File-block path: chat edits ===
+		// Single LLM call — no tool loop. The LLM outputs <file> blocks inline
+		// with text, parsed and saved incrementally by FileStreamParser.
 
-		toolCallbacks := &builderToolCallbacks{
-			sendEvent:    sendEvent,
-			appliedOps:   &toolAppliedOps,
-			pendingFiles: make(map[string]string),
+		var responseBuilder strings.Builder
+		var deletedPaths []string
+		parser := &utils.FileStreamParser{
+			OnFile: func(path, content string) {
+				content = utils.StripCodeFences(content)
+				_, fileType := guessFileType(path)
+				if fileType == "tsx" || fileType == "ts" {
+					content, _ = stripForbiddenImports(content, path)
+				}
+				c.saveGeneratedFile(project, path, content, fileType, fileMap, sendEvent, &toolAppliedOps)
+			},
+			OnDelete: func(path string) {
+				c.deleteGeneratedFile(project, path, fileMap, sendEvent, &toolAppliedOps)
+				deletedPaths = append(deletedPaths, path)
+			},
+			OnText: func(text string) {
+				responseBuilder.WriteString(text)
+				cleaned := ansiRegex.ReplaceAllString(text, "")
+				if cleaned != "" {
+					sendEvent("chat_text", responses.ChatTextEvent{Chunk: cleaned})
+				}
+			},
 		}
-		// Ensure any pending files are flushed to preview even on error/cancellation
-		defer c.flushPendingPreview(project, toolCallbacks)
 
 		// Reasoning config
 		reasoning := c.reasoningConfig()
@@ -536,187 +563,15 @@ func (c *Controller) StreamBuildApp(
 			reasoning = nil
 		}
 
-		// Build tools list
-		localExecutor := c.buildBuilderToolExecutor(ctx, project, user, fileMap, toolCallbacks)
-		executor := c.compositeToolExecutor(localExecutor)
-		tools := append([]utils.Tool{}, appBuilderTools...)
-		tools = append(tools, c.mcpTools()...)
-		if wsTool := provider.WebSearchTool(); wsTool != nil {
-			tools = append(tools, *wsTool)
-		}
-
-		// Tool call config — trim file content from history to prevent token bloat.
-		trimArgs := func(toolName, args string) string {
-			switch toolName {
-			case "write_file", "write_files":
-				var single struct {
-					FilePath string `json:"file_path"`
-					Content  string `json:"content"`
-				}
-				if err := json.Unmarshal([]byte(args), &single); err == nil && single.FilePath != "" {
-					return fmt.Sprintf(`{"file_path":%q,"content_written":"%d chars saved to disk"}`, single.FilePath, len(single.Content))
-				}
-				var batch struct {
-					Files []struct {
-						FilePath string `json:"file_path"`
-						Content  string `json:"content"`
-					} `json:"files"`
-				}
-				if err := json.Unmarshal([]byte(args), &batch); err == nil && len(batch.Files) > 0 {
-					summaries := make([]string, len(batch.Files))
-					for i, f := range batch.Files {
-						summaries[i] = fmt.Sprintf(`{"file_path":%q,"content_written":"%d chars saved to disk"}`, f.FilePath, len(f.Content))
-					}
-					return fmt.Sprintf(`{"files":[%s]}`, strings.Join(summaries, ","))
-				}
-				if len(args) > 200 {
-					return fmt.Sprintf(`{"error":"malformed write_files arguments truncated","original_length":%d}`, len(args))
-				}
-				return args
-			case "edit_file":
-				var edit struct {
-					FilePath  string `json:"file_path"`
-					OldString string `json:"old_string"`
-					NewString string `json:"new_string"`
-				}
-				if err := json.Unmarshal([]byte(args), &edit); err == nil {
-					return fmt.Sprintf(`{"file_path":%q,"edit_applied":"replaced %d chars with %d chars"}`,
-						edit.FilePath, len(edit.OldString), len(edit.NewString))
-				}
-				return args
-			default:
-				return args
-			}
-		}
-		trimResults := func(toolName, result string) string {
-			switch toolName {
-			case "read_file":
-				lines := strings.Count(result, "\n") + 1
-				if len(result) > 500 {
-					return fmt.Sprintf("[file read: %d chars, %d lines]", len(result), lines)
-				}
-				return result
-			default:
-				return result
-			}
-		}
-
-		writtenFiles := make(map[string]bool)
-		toolConfig := utils.ToolCallConfig{
-			MaxRounds:    25,
-			NudgeAfter:   10,
-			StripAfter:   18,
-			MaxTokens:    16384,
-			NudgeMessage: "You have made many tool calls. Focus on completing the user's request. Do not re-write files that are already written — the 'content_written' summaries confirm they were saved successfully.",
-			TrimArgs:     trimArgs,
-			TrimResults:  trimResults,
-			InterceptToolCall: func(toolName, toolArgs string) (string, bool) {
-				switch toolName {
-				case "write_file":
-					var args struct {
-						FilePath string `json:"file_path"`
-					}
-					if err := json.Unmarshal([]byte(toolArgs), &args); err != nil || args.FilePath == "" {
-						return "", false
-					}
-					if writtenFiles[args.FilePath] {
-						return fmt.Sprintf("ALREADY WRITTEN: %s was already written in this session with complete code. Do NOT re-write unless the user specifically requests changes. Continue with other work.", args.FilePath), true
-					}
-					writtenFiles[args.FilePath] = true
-				case "write_files":
-					var batch struct {
-						Files []struct {
-							FilePath string `json:"file_path"`
-							Content  string `json:"content"`
-						} `json:"files"`
-					}
-					if err := json.Unmarshal([]byte(toolArgs), &batch); err == nil && len(batch.Files) > 0 {
-						type batchFile struct {
-							FilePath string `json:"file_path"`
-							Content  string `json:"content"`
-						}
-						var newFiles []batchFile
-						var skippedPaths []string
-
-						for _, f := range batch.Files {
-							if writtenFiles[f.FilePath] {
-								skippedPaths = append(skippedPaths, f.FilePath)
-								continue
-							}
-							newFiles = append(newFiles, batchFile{FilePath: f.FilePath, Content: f.Content})
-							writtenFiles[f.FilePath] = true
-						}
-
-						if len(skippedPaths) > 0 {
-							if len(newFiles) == 0 {
-								return fmt.Sprintf("ALREADY WRITTEN: [%s] were already written in this session with complete code. Do NOT re-write unless the user specifically requests changes. Continue with other work.", strings.Join(skippedPaths, ", ")), true
-							}
-							modifiedBatch, _ := json.Marshal(map[string]any{"files": newFiles})
-							slog.Info("Stripped already-written files from write_files batch (chat)",
-								"skipped", skippedPaths, "remaining", len(newFiles))
-							return string(modifiedBatch), false
-						}
-					}
-				}
-				return "", false
-			},
-			AfterToolRound: func(allIntercepted bool) string {
-				c.flushPendingPreview(project, toolCallbacks)
-				if allIntercepted {
-					return ""
-				}
-				if len(toolAppliedOps) == 0 {
-					return ""
-				}
-				var written []string
-				for _, op := range toolAppliedOps {
-					if op.Action == "create" || op.Action == "modify" {
-						written = append(written, op.Path)
-					}
-				}
-				if len(written) == 0 {
-					return ""
-				}
-				return fmt.Sprintf("[SYSTEM: %d files written to disk. The 'content_written' summaries in tool args above confirm successful writes — do NOT re-write these files unless the user asks for changes to them.]\nWritten: %s",
-					len(written), strings.Join(written, ", "))
-			},
-			OnToolCallStart: func(toolName string) {
-				sendEvent("tool_start", map[string]any{"tool": toolName})
-			},
-		}
-
-		slog.Info("Calling LLM for build",
+		slog.Info("Calling LLM for chat (file-block path)",
 			"model", model,
 			"project_id", project.ID,
-			"is_generation", isInitialGeneration,
 			"message_count", len(llmMessages),
-			"tool_count", len(tools),
 		)
 
-		// --- Call LLM with tools ---
-		var err error
-		responseText, err = utils.StreamWithTools(
-			ctx,
-			model,
-			llmMessages,
-			tools,
-			provider,
-			nil, // no forced JSON format
-			reasoning,
-			executor,
-			func(toolName, args string) {
-				accToolCalls = append(accToolCalls, models.AppChatToolCall{Tool: toolName, Arguments: args})
-				sendEvent("tool_call", responses.ToolCallEvent{
-					Tool:      toolName,
-					Arguments: args,
-				})
-			},
-			func(chunk string) {
-				chunk = ansiRegex.ReplaceAllString(chunk, "")
-				if chunk != "" {
-					sendEvent("chat_text", responses.ChatTextEvent{Chunk: chunk})
-				}
-			},
+		_, chatErr := utils.StreamTextFromLLMWithMessages(
+			ctx, model, llmMessages, provider,
+			func(chunk string) { parser.Feed(chunk) },
 			func(chunk string) {
 				if thinkingStart.IsZero() {
 					thinkingStart = time.Now()
@@ -724,14 +579,20 @@ func (c *Controller) StreamBuildApp(
 				thinkingBuf.WriteString(chunk)
 				sendEvent("chat_thinking", responses.ChatThinkingEvent{Chunk: chunk})
 			},
-			toolConfig,
+			utils.StreamTextConfig{
+				MaxTokens: 16384,
+				Reasoning: reasoning,
+			},
 		)
-		if err != nil {
-			slog.Error("LLM build call failed", "error", err, "project_id", project.ID)
+		parser.Flush()
+		responseText = responseBuilder.String()
 
-			// Auto-rollback: if files were partially written and we have a pre-snapshot, restore it
+		if chatErr != nil {
+			slog.Error("LLM chat call failed", "error", chatErr, "project_id", project.ID)
+
+			// Auto-rollback on failure
 			if preSnapshotID != "" && len(toolAppliedOps) > 0 {
-				slog.Info("Auto-rollback: restoring pre-snapshot after failed generation",
+				slog.Info("Auto-rollback: restoring pre-snapshot after failed chat",
 					"project_id", project.ID,
 					"snapshot_id", preSnapshotID,
 					"partial_ops", len(toolAppliedOps),
@@ -1040,6 +901,33 @@ func (c *Controller) saveGeneratedFile(
 	})
 }
 
+// deleteGeneratedFile removes a file from the project DB and fileMap, emitting events.
+func (c *Controller) deleteGeneratedFile(
+	project *models.AppProject,
+	path string,
+	fileMap map[string]string,
+	sendEvent func(string, any) bool,
+	ops *[]appBuilderOperation,
+) {
+	existingFile, err := c.DB.GetAppGeneratedFileByPath(project.ID.String(), "nextjs", path)
+	if err != nil || existingFile == nil {
+		slog.Warn("deleteGeneratedFile: file not found", "path", path)
+		return
+	}
+	if err := c.DB.DeleteAppGeneratedFile(existingFile); err != nil {
+		slog.Error("deleteGeneratedFile: failed to delete", "path", path, "error", err)
+		return
+	}
+	delete(fileMap, path)
+	sendEvent("file_complete", responses.FileCompleteEvent{
+		Action: "delete", FilePath: path,
+		FileID: existingFile.ID, FileType: existingFile.FileType,
+	})
+	*ops = append(*ops, appBuilderOperation{
+		Action: "delete", Path: path, Type: existingFile.FileType,
+	})
+}
+
 // --- Helper: build modular system prompt ---
 
 // buildSystemPrompt assembles the system prompt for the tool-calling path,
@@ -1050,6 +938,25 @@ func buildSystemPrompt(project *models.AppProject) string {
 		prompt = constants.NEXTJS_ECOMMERCE_COMMON_RULES + constants.NEXTJS_BUILDER_TOOL_INSTRUCTIONS
 	} else {
 		prompt = constants.NEXTJS_BUILDER_SYSTEM_PROMPT + constants.NEXTJS_BUILDER_DATABASE_RULES
+	}
+
+	if settings := project.Settings; settings != nil {
+		if needsAuth, ok := settings["needs_auth"].(bool); ok && needsAuth {
+			prompt += constants.NEXTJS_BUILDER_AUTH_RULES
+		}
+	}
+
+	return prompt
+}
+
+// buildChatSystemPrompt assembles the system prompt for the simplified file-block
+// chat path. Uses CHAT_INSTRUCTIONS instead of TOOL_INSTRUCTIONS — no tool loop.
+func buildChatSystemPrompt(project *models.AppProject) string {
+	var prompt string
+	if project.ProjectType == "ecommerce" {
+		prompt = constants.NEXTJS_ECOMMERCE_COMMON_RULES + constants.NEXTJS_BUILDER_CHAT_INSTRUCTIONS
+	} else {
+		prompt = constants.NEXTJS_BUILDER_CHAT_SYSTEM_PROMPT + constants.NEXTJS_BUILDER_DATABASE_RULES
 	}
 
 	if settings := project.Settings; settings != nil {
@@ -1119,6 +1026,156 @@ func extractFileSummary(content string) string {
 }
 
 // --- Helper: build project context (system block 2) ---
+
+// selectContextFiles uses a fast LLM call to pick the most relevant files for
+// the user's current message. Returns a set of file paths to inline. On error
+// or when there are few files, returns all paths (safe fallback).
+func (c *Controller) selectContextFiles(ctx context.Context, provider *utils.LLMProvider, fileMap map[string]string, userMessage string, recentMessages []models.AppConversationMessage) map[string]bool {
+	const maxAutoInline = 15 // if project has ≤ this many files, inline all
+
+	if len(fileMap) <= maxAutoInline {
+		all := make(map[string]bool, len(fileMap))
+		for p := range fileMap {
+			all[p] = true
+		}
+		return all
+	}
+
+	// Build file list with sizes
+	paths := make([]string, 0, len(fileMap))
+	for p := range fileMap {
+		paths = append(paths, p)
+	}
+	sort.Strings(paths)
+
+	var fileList strings.Builder
+	for _, p := range paths {
+		fileList.WriteString(fmt.Sprintf("- %s (%d chars)\n", p, len(fileMap[p])))
+	}
+
+	// Include last 3 assistant messages for context
+	var recentContext string
+	start := len(recentMessages) - 6
+	if start < 0 {
+		start = 0
+	}
+	for _, msg := range recentMessages[start:] {
+		if msg.Role == "assistant" && len(msg.Content) > 0 {
+			summary := msg.Content
+			if len(summary) > 200 {
+				summary = summary[:200] + "..."
+			}
+			recentContext += fmt.Sprintf("Assistant: %s\n", summary)
+		}
+	}
+
+	prompt := fmt.Sprintf(`You are a software engineer reviewing a project's files to determine which ones are relevant to the user's current request.
+
+Available files:
+%s
+%sUser's message:
+%s
+
+Select the files that are most relevant to this task. You can select up to 10 files. Always include:
+- Files directly mentioned in the message or error traces
+- Files that import/depend on mentioned files
+- Layout/page files if UI changes are requested
+- The main layout and page files (app/layout.tsx, app/page.tsx) when in doubt
+
+Respond with ONLY a list of file paths, one per line. No explanation, no markdown, no numbering.`, fileList.String(), recentContext, userMessage)
+
+	fastModel := provider.FastModel()
+	result, err := utils.GetTextFromLLM(ctx, fastModel, "", prompt, provider)
+	if err != nil {
+		slog.Warn("selectContextFiles: LLM call failed, falling back to all files", "error", err)
+		all := make(map[string]bool, len(fileMap))
+		for p := range fileMap {
+			all[p] = true
+		}
+		return all
+	}
+
+	selected := make(map[string]bool)
+	for _, line := range strings.Split(result, "\n") {
+		line = strings.TrimSpace(line)
+		line = strings.TrimPrefix(line, "- ")
+		line = strings.TrimPrefix(line, "* ")
+		if _, exists := fileMap[line]; exists {
+			selected[line] = true
+		}
+	}
+
+	// Fallback: if selection is empty or too small, inline all
+	if len(selected) < 2 {
+		slog.Warn("selectContextFiles: too few files selected, falling back to all", "selected", len(selected))
+		all := make(map[string]bool, len(fileMap))
+		for p := range fileMap {
+			all[p] = true
+		}
+		return all
+	}
+
+	slog.Info("selectContextFiles: selected files for context",
+		"total", len(fileMap), "selected", len(selected))
+	return selected
+}
+
+// buildProjectContextForChat builds project context with selected file contents
+// inlined and remaining files listed as paths only.
+func (c *Controller) buildProjectContextForChat(project *models.AppProject, fileMap map[string]string, selectedFiles map[string]bool) string {
+	var sb strings.Builder
+
+	sb.WriteString(fmt.Sprintf("App: %s (slug: %s)\n", project.Name, project.Slug))
+	sb.WriteString(fmt.Sprintf("Project type: %s\n", project.ProjectType))
+
+	// Theme
+	var theme map[string]any
+	if len(project.Theme) > 0 && project.Theme[0] == '{' {
+		if err := json.Unmarshal(project.Theme, &theme); err != nil {
+			slog.Warn("failed to unmarshal project theme", "error", err, "project_id", project.ID)
+		}
+	} else if len(project.Theme) > 0 {
+		var raw string
+		if json.Unmarshal(project.Theme, &raw) == nil && len(raw) > 0 && raw[0] == '{' {
+			if err := json.Unmarshal([]byte(raw), &theme); err != nil {
+				slog.Warn("failed to unmarshal double-encoded project theme", "error", err, "project_id", project.ID)
+			}
+		}
+	}
+	if len(theme) > 0 {
+		sb.WriteString(fmt.Sprintf("Theme: %v\n", theme))
+	}
+
+	if len(fileMap) > 0 {
+		paths := make([]string, 0, len(fileMap))
+		for p := range fileMap {
+			paths = append(paths, p)
+		}
+		sort.Strings(paths)
+
+		// List all files as paths (so LLM knows project structure)
+		sb.WriteString("\nAll project files:\n")
+		for _, fp := range paths {
+			sb.WriteString(fmt.Sprintf("- %s (%d chars)\n", fp, len(fileMap[fp])))
+		}
+
+		// Inline selected files
+		sb.WriteString("\nFile contents (relevant to current task):\n")
+		for _, fp := range paths {
+			if !selectedFiles[fp] {
+				continue
+			}
+			content := fileMap[fp]
+			if strings.Contains(content, fallbackSentinel) || strings.Contains(content, "Generation failed") {
+				sb.WriteString(fmt.Sprintf("\n--- %s [BROKEN — needs regeneration] ---\n", fp))
+			} else {
+				sb.WriteString(fmt.Sprintf("\n--- %s ---\n%s\n", fp, content))
+			}
+		}
+	}
+
+	return sb.String()
+}
 
 func (c *Controller) buildProjectContext(project *models.AppProject, fileMap map[string]string, isInitialGeneration bool) string {
 	var sb strings.Builder

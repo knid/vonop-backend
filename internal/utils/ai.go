@@ -532,7 +532,8 @@ type StreamChunk struct {
 
 // StreamTextConfig provides optional configuration for StreamTextFromLLMWithMessages.
 type StreamTextConfig struct {
-	MaxTokens int // 0 means default (16384)
+	MaxTokens int              // 0 means default (16384)
+	Reasoning *ReasoningConfig // nil means use provider default
 }
 
 // StreamTextFromLLMWithMessages streams LLM response tokens for a pre-built message array.
@@ -547,12 +548,18 @@ func StreamTextFromLLMWithMessages(ctx context.Context, model string, messages [
 		maxTokens = opts[0].MaxTokens
 	}
 
+	var reasoning *ReasoningConfig
+	if len(opts) > 0 && opts[0].Reasoning != nil {
+		reasoning = opts[0].Reasoning
+	}
+
 	body, err := buildLLMRequestBody(ChatRequest{
 		Model:         model,
 		Stream:        true,
 		StreamOptions: &StreamOptionsConfig{IncludeUsage: true},
 		MaxTokens:     maxTokens,
 		Messages:      messages,
+		Reasoning:     reasoning,
 	}, provider)
 	if err != nil {
 		return "", fmt.Errorf("error building request: %w", err)
