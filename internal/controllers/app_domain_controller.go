@@ -27,7 +27,7 @@ func (c *Controller) GetAppDomains(projectID string) ([]responses.AppDomainRespo
 			ID:        d.ID,
 			Domain:    d.Domain,
 			Status:    d.Status,
-			DNSRecord: d.DNSRecord,
+			DNSRecord: constants.WEMOB_CNAME_TARGET,
 			CreatedAt: d.CreatedAt,
 		}
 	}
@@ -55,13 +55,10 @@ func (c *Controller) AddAppDomain(project *models.AppProject, user *models.User,
 		return nil, errors.New("domain is already in use")
 	}
 
-	dnsRecord := "cname.wemob.app"
-
 	domain := models.AppDomain{
 		AppProjectID: project.ID,
 		Domain:       domainName,
 		Status:       "pending",
-		DNSRecord:    dnsRecord,
 	}
 
 	created, err := c.DB.CreateAppDomain(&domain)
@@ -85,7 +82,7 @@ func (c *Controller) AddAppDomain(project *models.AppProject, user *models.User,
 		ID:        created.ID,
 		Domain:    created.Domain,
 		Status:    created.Status,
-		DNSRecord: created.DNSRecord,
+		DNSRecord: constants.WEMOB_CNAME_TARGET,
 		CreatedAt: created.CreatedAt,
 	}, nil
 }
@@ -138,7 +135,7 @@ func (c *Controller) VerifyAppDomain(domainID string, project *models.AppProject
 			ID:        domain.ID,
 			Domain:    domain.Domain,
 			Status:    domain.Status,
-			DNSRecord: domain.DNSRecord,
+			DNSRecord: constants.WEMOB_CNAME_TARGET,
 			CreatedAt: domain.CreatedAt,
 		}, nil
 	}
@@ -167,7 +164,7 @@ func (c *Controller) VerifyAppDomain(domainID string, project *models.AppProject
 		ID:        domain.ID,
 		Domain:    domain.Domain,
 		Status:    domain.Status,
-		DNSRecord: domain.DNSRecord,
+		DNSRecord: constants.WEMOB_CNAME_TARGET,
 		CreatedAt: domain.CreatedAt,
 	}, nil
 }
