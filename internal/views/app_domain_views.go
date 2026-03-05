@@ -68,6 +68,31 @@ func (v *HttpViews) AddAppDomain(w http.ResponseWriter, r *http.Request) {
 	utils.JSONResponse(w, result, http.StatusCreated)
 }
 
+// POST /v2/apps/{appId}/domains/{did}/verify
+func (v *HttpViews) VerifyAppDomain(w http.ResponseWriter, r *http.Request) {
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	appID := chi.URLParam(r, "appId")
+	domainID := chi.URLParam(r, "did")
+	project, err := v.Controller.GetAppProject(appID, user)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	result, err := v.Controller.VerifyAppDomain(domainID, project)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	utils.JSONResponse(w, result, http.StatusOK)
+}
+
 // DELETE /v2/apps/{appId}/domains/{did}
 func (v *HttpViews) RemoveAppDomain(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)

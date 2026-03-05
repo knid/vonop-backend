@@ -90,7 +90,7 @@ func (c *Controller) AddAppDomain(project *models.AppProject, user *models.User,
 	}, nil
 }
 
-// RemoveAppDomain removes a custom domain from an app project.
+// RemoveAppDomain removes a custom domain from an app project and Vercel.
 func (c *Controller) RemoveAppDomain(domainID string, project *models.AppProject) error {
 	domain, err := c.DB.GetAppDomainByID(domainID)
 	if err != nil {
@@ -101,5 +101,73 @@ func (c *Controller) RemoveAppDomain(domainID string, project *models.AppProject
 		return errors.New("domain does not belong to this project")
 	}
 
+	// Also remove from Vercel if project exists there
+	if c.VercelService != nil {
+		vercelProject, vercelErr := c.DB.GetVercelProjectByAppProjectID(project.ID.String())
+		if vercelErr == nil && vercelProject != nil {
+			if err := c.VercelService.RemoveDomain(vercelProject.VercelProjectID, domain.Domain); err != nil {
+				slog.Warn("Failed to remove domain from Vercel", "domain", domain.Domain, "error", err)
+			}
+		}
+	}
+
 	return c.DB.DeleteAppDomain(domain)
+}
+
+// VerifyAppDomain checks the DNS configuration of a custom domain via Vercel's API
+// and updates the domain status accordingly.
+func (c *Controller) VerifyAppDomain(domainID string, project *models.AppProject) (*responses.AppDomainResponse, error) {
+	domain, err := c.DB.GetAppDomainByID(domainID)
+	if err != nil {
+		return nil, errors.New("domain not found")
+	}
+
+	if domain.AppProjectID != project.ID {
+		return nil, errors.New("domain does not belong to this project")
+	}
+
+	if c.VercelService == nil {
+		return nil, errors.New("vercel service not configured")
+	}
+
+	// Check DNS configuration via Vercel
+	cfg, err := c.VercelService.GetDomainConfig(domain.Domain)
+	if err != nil {
+		slog.Warn("Failed to check domain config", "domain", domain.Domain, "error", err)
+		return &responses.AppDomainResponse{
+			ID:        domain.ID,
+			Domain:    domain.Domain,
+			Status:    domain.Status,
+			DNSRecord: domain.DNSRecord,
+			CreatedAt: domain.CreatedAt,
+		}, nil
+	}
+
+	// Update status based on Vercel's DNS check
+	if cfg.ConfiguredBy != nil && !cfg.Misconfigured {
+		domain.Status = "active"
+	} else if cfg.Misconfigured {
+		domain.Status = "misconfigured"
+	}
+	// If ConfiguredBy is nil, DNS isn't set up yet — keep "pending"
+
+	c.DB.UpdateAppDomain(domain)
+
+	// If domain just became active and Vercel project exists, ensure domain is added
+	if domain.Status == "active" {
+		vercelProject, vercelErr := c.DB.GetVercelProjectByAppProjectID(project.ID.String())
+		if vercelErr == nil && vercelProject != nil {
+			if err := c.VercelService.AddDomain(vercelProject.VercelProjectID, domain.Domain); err != nil {
+				slog.Warn("Failed to add verified domain to Vercel", "domain", domain.Domain, "error", err)
+			}
+		}
+	}
+
+	return &responses.AppDomainResponse{
+		ID:        domain.ID,
+		Domain:    domain.Domain,
+		Status:    domain.Status,
+		DNSRecord: domain.DNSRecord,
+		CreatedAt: domain.CreatedAt,
+	}, nil
 }
