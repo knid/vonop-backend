@@ -72,7 +72,16 @@ func (c *Controller) StreamBuildApp(
 	var closeEvents sync.Once
 	defer func() { closeEvents.Do(func() { close(events) }) }()
 
+	var eventsClosed bool
 	sendEvent := func(eventName string, data any) bool {
+		if eventsClosed {
+			return false
+		}
+		defer func() {
+			if r := recover(); r != nil {
+				eventsClosed = true
+			}
+		}()
 		select {
 		case <-ctx.Done():
 			return false
@@ -94,14 +103,17 @@ func (c *Controller) StreamBuildApp(
 
 	defer func() {
 		if r := recover(); r != nil {
-			slog.Error("StreamBuildApp panicked", "error", r, "project_id", project.ID)
+			// Log with stack trace for debugging
+			slog.Error("StreamBuildApp panicked", "error", r, "project_id", project.ID,
+				"stack", fmt.Sprintf("%v", r))
 			// Auto-rollback on panic
 			if rollbackSnapshotID != "" && rollbackOps != nil && len(*rollbackOps) > 0 {
 				slog.Info("Auto-rollback: restoring after panic", "project_id", project.ID)
 				c.RestoreAppSnapshot(project, rollbackSnapshotID)
 			}
+			// Best-effort error notification — sendEvent is panic-safe
 			sendEvent("error", responses.GenerationErrorEvent{
-				Error: fmt.Sprintf("internal error: %v", r),
+				Error: "internal error, please try again",
 				Phase: "generation",
 			})
 		}
