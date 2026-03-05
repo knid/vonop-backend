@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"regexp"
+	"runtime/debug"
 	"sort"
 	"strings"
 	"sync"
@@ -103,9 +104,8 @@ func (c *Controller) StreamBuildApp(
 
 	defer func() {
 		if r := recover(); r != nil {
-			// Log with stack trace for debugging
 			slog.Error("StreamBuildApp panicked", "error", r, "project_id", project.ID,
-				"stack", fmt.Sprintf("%v", r))
+				"stack", string(debug.Stack()))
 			// Auto-rollback on panic
 			if rollbackSnapshotID != "" && rollbackOps != nil && len(*rollbackOps) > 0 {
 				slog.Info("Auto-rollback: restoring after panic", "project_id", project.ID)
@@ -598,6 +598,16 @@ func (c *Controller) StreamBuildApp(
 		)
 		parser.Flush()
 		responseText = responseBuilder.String()
+
+		// If the LLM only output file blocks with no surrounding text,
+		// generate a minimal summary so the message isn't empty on reload.
+		if strings.TrimSpace(responseText) == "" && len(toolAppliedOps) > 0 {
+			var changedPaths []string
+			for _, op := range toolAppliedOps {
+				changedPaths = append(changedPaths, op.Path)
+			}
+			responseText = fmt.Sprintf("Updated %d file(s): %s", len(changedPaths), strings.Join(changedPaths, ", "))
+		}
 
 		if chatErr != nil {
 			slog.Error("LLM chat call failed", "error", chatErr, "project_id", project.ID)
