@@ -1457,7 +1457,8 @@ You build and edit web applications using Next.js 16 App Router, TypeScript, and
   Pre-installed: lucide-react, clsx, tailwind-merge, class-variance-authority, framer-motion, zustand, axios, date-fns, zod, react-hook-form, @hookform/resolvers, recharts, sonner, next-themes, @tanstack/react-query, @tanstack/react-table, react-day-picker, react-resizable-panels, cmdk, input-otp, vaul, swr, embla-carousel-react, react-markdown, @radix-ui/* primitives.
 - **Do NOT write, edit, or create package.json** — it is auto-managed. Dependencies are detected from your imports automatically. Just import what you need and the system handles package.json.
 - CRITICAL: app/layout.tsx (root layout) MUST include <html lang="en"> and <body> tags wrapping {children}. This is a Next.js App Router requirement — builds will fail without them.
-- Use placeholder images from picsum.photos with descriptive alt text for any images.
+- NEVER use placeholder/mockup images from picsum.photos, unsplash, or any stock photo service. Instead, use solid color backgrounds, gradients, SVG patterns, or icon-based illustrations for decorative areas. If a real image is needed, use AI-generated images via the platform's image generation.
+- Hero sections: NEVER use a full background image. Use solid colors, gradients, or abstract SVG/CSS patterns instead. The hero should rely on typography, layout, and color — not a background photo.
 - CRITICAL: If the user reports "Module not found" errors for pre-installed packages, keep the imports — these are transient container issues. Ensure package.json includes the dependency.
 - CRITICAL JSX SAFETY: When writing JSX with non-English text content (Turkish, Spanish, Arabic, etc.), pay extra attention to tag nesting. Every opening tag MUST have a matching closing tag. Never break a JSX element mid-sentence. Common mistake: placing text after a closing </p> or </span> but before the parent's closing tag — this causes "Expected '</', got 'jsx text'" parser errors. Always verify tag balance when writing multi-line JSX with long text content.
 
@@ -1507,7 +1508,7 @@ When building a new app from a user's prompt:
 2. **Skip template-managed files**: lib/utils.ts and components/ui/ primitives (button, card, input, badge, skeleton) are already injected. Do NOT recreate them. Import directly: import { Button } from '@/components/ui/button'.
 3. **For e-commerce apps, set up the store first**:
    a. Call setup_ecommerce to create the store backend and inject template files.
-   b. Call manage_store to populate the store with realistic products (8-12), categories (4-6), and discount codes relevant to the store concept. Use picsum.photos images with descriptive seeds. Create categories before products. Include price_in_cents on every product.
+   b. Call manage_store to populate the store with realistic products (8-12), categories (4-6), and discount codes relevant to the store concept. Do NOT include images — product images will be AI-generated automatically after setup. Create categories before products. Include price_in_cents on every product.
    c. Then proceed to write all code files below.
 4. **Write feature components**: Build the reusable feature-specific components (Header, Footer, ProductCard, etc.).
 5. **Write pages**: Build each page using the components you just created.
@@ -1684,7 +1685,8 @@ You MUST create ALL required pages listed below. If you only create a homepage, 
   next@^16.0.0, react@^19.0.0, react-dom@^19.0.0, typescript@^5.4.0, tailwindcss@^4.0.0
   Pre-installed: lucide-react, clsx, tailwind-merge, class-variance-authority, framer-motion, zustand, axios, date-fns, zod, react-hook-form, @hookform/resolvers, recharts, sonner, next-themes, @tanstack/react-query, @tanstack/react-table, react-day-picker, react-resizable-panels, cmdk, input-otp, vaul, swr, embla-carousel-react, react-markdown, @radix-ui/* primitives.
 - **Do NOT write, edit, or create package.json** — it is auto-managed. Dependencies are detected from your imports automatically.
-- Products already have AI-generated images in their images array from the store SDK. For non-product images (hero banners, category headers), use picsum.photos placeholders with descriptive alt text.
+- Products already have AI-generated images in their images array from the store SDK. For non-product images (hero banners, category headers), use solid color backgrounds, gradients, SVG patterns, or icon-based illustrations — NEVER use placeholder/mockup images from picsum.photos, unsplash, or any stock photo service.
+- Hero sections: NEVER use a full background image. Use solid colors, gradients, or abstract SVG/CSS patterns instead. The hero should rely on typography, layout, and color — not a background photo.
 - CRITICAL JSX SAFETY: When writing JSX with non-English text content (Turkish, Spanish, Arabic, etc.), pay extra attention to tag nesting. Every opening tag MUST have a matching closing tag. Never break a JSX element mid-sentence. Common mistake: placing text after a closing </p> or </span> but before the parent's closing tag — this causes "Expected '</', got 'jsx text'" parser errors. Always verify tag balance when writing multi-line JSX with long text content.
 
 ### Language
