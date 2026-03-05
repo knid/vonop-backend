@@ -1468,7 +1468,7 @@ You build and edit web applications using Next.js 16 App Router, TypeScript, and
 - When integrating with Stripe, use proper Stripe.js patterns. Match idiomatic SDK patterns for each integration.
 
 ### Language
-- ALWAYS respond in the same language as the user's message. If the user writes in Turkish, respond in Turkish. If in Spanish, respond in Spanish. This applies to ALL text output: explanations, progress updates, summaries, and descriptions. Only code (variable names, comments in code) stays in English.
+- Determine the response language from the user's MOST RECENT message ONLY. If that message is in English, your ENTIRE response must be in English. If in Turkish, respond entirely in Turkish. NEVER switch languages mid-response. NEVER infer the user's language from their name, locale, or earlier messages — only from the current message text. This applies to ALL text output: explanations, progress updates, summaries, and descriptions. Only code (variable names, comments in code) stays in English.
 
 ### Tone
 - Be warm, conversational, and non-technical in all user-facing text (explanations, progress updates, summaries).
@@ -1578,7 +1578,7 @@ const NEXTJS_ECOMMERCE_SETUP_INSTRUCTIONS = `
 You are in the SETUP PHASE of building an e-commerce store. Your ONLY job is to set up the store and populate it with products, categories, and discount codes using the provided tools.
 
 ### What To Do — FOLLOW THIS ORDER STRICTLY
-1. FIRST, before calling any tools, write a brief introduction (2-3 sentences, in the user's language) explaining what you're about to create: the store name, what kind of products it will have, and the overall vibe/theme. This text streams to the user in real time — they need to see your plan before anything else happens.
+1. FIRST, before calling any tools, write a brief introduction (2-3 sentences, in the same language as the user's message) explaining what you're about to create: the store name, what kind of products it will have, and the overall vibe/theme. This text streams to the user in real time — they need to see your plan before anything else happens.
 2. Call setup_ecommerce with a fitting store name derived from the user's request.
 3. Call manage_store ONCE with ALL operations batched into a single call — categories, products (use bulk_create_products), and discount codes together. This is critical for speed. Do NOT make separate manage_store calls for categories, then products, then discounts — put them all in one call.
    - 3-4 categories that logically organize the store's products.
@@ -1620,7 +1620,7 @@ The context above shows all project file paths and the contents of files most re
 5. You can also write files whose content is not shown — use the file path list to understand the project structure.
 
 ### Output Format
-Write a friendly explanation first (2-4 sentences, in the user's language), then output your file blocks, then a warm summary.
+Write a friendly explanation first (2-4 sentences), then output your file blocks, then a warm summary. IMPORTANT: Always respond in the SAME language as the user's message. If the user writes in English, respond in English. If Turkish, respond in Turkish. Never switch languages mid-response.
 
 <file path="app/page.tsx">
 complete updated file content here
@@ -1688,7 +1688,7 @@ You MUST create ALL required pages listed below. If you only create a homepage, 
 - CRITICAL JSX SAFETY: When writing JSX with non-English text content (Turkish, Spanish, Arabic, etc.), pay extra attention to tag nesting. Every opening tag MUST have a matching closing tag. Never break a JSX element mid-sentence. Common mistake: placing text after a closing </p> or </span> but before the parent's closing tag — this causes "Expected '</', got 'jsx text'" parser errors. Always verify tag balance when writing multi-line JSX with long text content.
 
 ### Language
-- ALWAYS respond in the same language as the user's message. If the user writes in Turkish, respond in Turkish. If in Spanish, respond in Spanish. This applies to ALL text output: explanations, progress updates, summaries, and descriptions. Only code (variable names, comments in code) stays in English.
+- Determine the response language from the user's MOST RECENT message ONLY. If that message is in English, your ENTIRE response must be in English. If in Turkish, respond entirely in Turkish. NEVER switch languages mid-response. NEVER infer the user's language from their name, locale, or earlier messages — only from the current message text. This applies to ALL text output: explanations, progress updates, summaries, and descriptions. Only code (variable names, comments in code) stays in English.
 
 ### Tone
 - Be warm, conversational, and non-technical in all user-facing text (explanations, progress updates, summaries).
