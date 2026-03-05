@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/go-playground/validator/v10"
+	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/requests"
@@ -26,7 +27,7 @@ func (c *Controller) SetAppEnvVar(project *models.AppProject, req requests.SetEn
 
 	// Check if key already exists — upsert
 	existing, err := c.DB.GetAppEnvVarByKey(project.ID.String(), req.Key)
-	if err == nil && existing.ID.String() != "00000000-0000-0000-0000-000000000000" {
+	if err == nil && existing.ID != uuid.Nil {
 		existing.Value = req.Value
 		existing.IsPublic = req.IsPublic
 		existing.UpdatedAt = time.Now()

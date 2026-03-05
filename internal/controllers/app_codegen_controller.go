@@ -99,20 +99,23 @@ type validationError struct {
 // --- Regex for env var detection ---
 var processEnvRegex = regexp.MustCompile(`process\.env\.([A-Z_][A-Z0-9_]+)`)
 
+// alwaysExcludedEnvVars are env vars that are always provided by the system
+// and should never appear in "missing" detection.
+var alwaysExcludedEnvVars = map[string]bool{
+	"NODE_ENV":                  true,
+	"NEXT_PUBLIC_STORE_ID":      true,
+	"NEXT_PUBLIC_WEMOB_API_URL": true,
+}
+
 // detectEnvVarsFromCode scans all generated file contents for process.env.* references
-// and returns a sorted list of unique env var keys, excluding auto-injected ones.
+// and returns a sorted list of unique env var keys, excluding system-injected ones.
+// Integration-provided vars (DATABASE_URL, AUTH_SECRET, etc.) are NOT excluded here
+// so they show as missing when the integration is disconnected.
 func detectEnvVarsFromCode(files map[string]string) []string {
-	excluded := map[string]bool{
-		"NODE_ENV":                  true,
-		"NEXT_PUBLIC_STORE_ID":      true,
-		"NEXT_PUBLIC_WEMOB_API_URL": true,
-		"DATABASE_URL":              true,
-		"AUTH_SECRET":               true,
-	}
 	seen := map[string]bool{}
 	for _, content := range files {
 		for _, m := range processEnvRegex.FindAllStringSubmatch(content, -1) {
-			if !excluded[m[1]] {
+			if !alwaysExcludedEnvVars[m[1]] {
 				seen[m[1]] = true
 			}
 		}
@@ -889,7 +892,12 @@ func neonConnStrWithEndpoint(connStr string) string {
 	}
 	endpointID := parts[0]
 	q := u.Query()
-	q.Set("options", "endpoint="+endpointID)
+	// Merge with existing options if present, don't overwrite
+	if existing := q.Get("options"); existing != "" {
+		q.Set("options", existing+" endpoint="+endpointID)
+	} else {
+		q.Set("options", "endpoint="+endpointID)
+	}
 	u.RawQuery = q.Encode()
 	return u.String()
 }
@@ -994,8 +1002,22 @@ func (c *Controller) provisionNeonDatabase(ctx context.Context, project *models.
 	return connStr, neonProjectID, nil
 }
 
-// storeNeonIntegration saves the Neon connection as an AppIntegration.
+// storeNeonIntegration saves the Neon connection as an AppIntegration (upsert).
 func (c *Controller) storeNeonIntegration(project *models.AppProject, connStr, neonProjectID string) error {
+	// Check if a Neon integration already exists — update it instead of creating a duplicate
+	existing, err := c.DB.GetAppIntegrationByProvider(project.ID.String(), "neon")
+	if err == nil && existing.ID.String() != "00000000-0000-0000-0000-000000000000" {
+		existing.Config = map[string]any{
+			"project_id": neonProjectID,
+		}
+		existing.Status = "connected"
+		existing.EnvVars = map[string]string{
+			"DATABASE_URL": connStr,
+		}
+		_, err := c.DB.UpdateAppIntegration(existing)
+		return err
+	}
+
 	integration := &models.AppIntegration{
 		AppProjectID: project.ID,
 		Provider:     "neon",
@@ -1008,7 +1030,7 @@ func (c *Controller) storeNeonIntegration(project *models.AppProject, connStr, n
 		},
 	}
 
-	_, err := c.DB.CreateAppIntegration(integration)
+	_, err = c.DB.CreateAppIntegration(integration)
 	return err
 }
 
