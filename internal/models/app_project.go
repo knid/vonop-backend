@@ -28,6 +28,7 @@ type AppProject struct {
 	Theme           []byte         `bun:",type:jsonb,default:'{}'"` // stores AppTheme as JSON
 	DataModels      []byte         `bun:",type:jsonb,default:'[]'"` // stores data model definitions
 	Settings        map[string]any `bun:",type:jsonb,default:'{}'"`
+	ScreenshotS3Key string         `bun:",nullzero"`
 	Status          string         `bun:",notnull,default:'draft'"` // draft, generating, ready, deployed
 	CreatedAt       time.Time      `bun:"created_at,nullzero,notnull,default:current_timestamp"`
 	UpdatedAt       time.Time      `bun:"updated_at,nullzero,notnull,default:current_timestamp"`

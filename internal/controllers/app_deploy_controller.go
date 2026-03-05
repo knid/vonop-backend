@@ -12,6 +12,7 @@ import (
 	"github.com/knid/wemob/internal/services/preview"
 	"github.com/knid/wemob/internal/tasks"
 	"github.com/knid/wemob/internal/utils"
+	"github.com/knid/wemob/internal/utils/external"
 
 	"github.com/hibiken/asynq"
 )
@@ -528,4 +529,38 @@ func injectAnalyticsScript(fileMap map[string]string, projectID string) {
 	}
 
 	slog.Warn("analytics script injection: no suitable layout found", "project_id", projectID)
+}
+
+// CaptureAppScreenshot takes a desktop screenshot of the preview URL and uploads it to S3.
+// Intended to be called in a goroutine (fire-and-forget).
+func (c *Controller) CaptureAppScreenshot(project *models.AppProject, previewURL string) {
+	apiKey := c.SecretManager.GetSecret("SITESHOT_API_KEY")
+	if apiKey == "" {
+		slog.Warn("CaptureAppScreenshot: SITESHOT_API_KEY not configured")
+		return
+	}
+
+	imgData, err := external.GetDesktopScreenshotOfURL(previewURL, apiKey)
+	if err != nil {
+		slog.Warn("CaptureAppScreenshot: failed to capture screenshot", "error", err, "project_id", project.ID)
+		return
+	}
+
+	if len(imgData) == 0 {
+		slog.Warn("CaptureAppScreenshot: empty screenshot data", "project_id", project.ID)
+		return
+	}
+
+	s3Key := fmt.Sprintf("app-screenshots/%s.png", project.ID.String())
+	if err := c.AssetsStorage.UploadFileByteWithContentType(context.Background(), s3Key, imgData, "image/png"); err != nil {
+		slog.Warn("CaptureAppScreenshot: failed to upload to S3", "error", err, "project_id", project.ID)
+		return
+	}
+
+	project.ScreenshotS3Key = s3Key
+	if _, err := c.DB.UpdateAppProject(project); err != nil {
+		slog.Warn("CaptureAppScreenshot: failed to update project", "error", err, "project_id", project.ID)
+	}
+
+	slog.Info("CaptureAppScreenshot: screenshot captured", "project_id", project.ID, "s3_key", s3Key)
 }

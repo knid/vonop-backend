@@ -271,6 +271,11 @@ func (v *HttpViews) GetAppPreviewStatus(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Capture screenshot when preview becomes ready and no screenshot exists yet
+	if status.Status == "ready" && project.ScreenshotS3Key == "" && status.PreviewURL != "" {
+		go v.Controller.CaptureAppScreenshot(project, status.PreviewURL)
+	}
+
 	utils.JSONResponse(w, status, http.StatusOK)
 }
 
