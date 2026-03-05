@@ -16,7 +16,9 @@ services:
       - ./.env
 
   caddy:
-    image: caddy:latest
+    build:
+      context: ./caddy
+      dockerfile: Dockerfile
     container_name: caddy_proxy
     restart: always
     ports:
@@ -26,6 +28,8 @@ services:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
+    environment:
+      - CF_API_TOKEN=${CF_API_TOKEN}
     depends_on:
       api:
         condition: service_healthy

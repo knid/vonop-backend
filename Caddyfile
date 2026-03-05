@@ -35,3 +35,13 @@ proxy.wemob.io {
         format console
     }
 }
+
+*.wemob.app {
+    tls {
+        dns cloudflare {env.CF_API_TOKEN}
+    }
+
+    reverse_proxy https://{labels.2}.e2b.app {
+        header_up Host {labels.2}.e2b.app
+    }
+}
