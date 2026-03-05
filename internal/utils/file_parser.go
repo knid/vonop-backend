@@ -8,6 +8,9 @@ import (
 // fileTagRegex matches <file path="..."> opening tags.
 var fileTagRegex = regexp.MustCompile(`<file\s+path="([^"]+)"\s*>`)
 
+// deleteTagRegex matches <delete path="..."/> self-closing tags.
+var deleteTagRegex = regexp.MustCompile(`<delete\s+path="([^"]+)"\s*/>`)
+
 // FileStreamParser parses `<file path="...">content</file>` blocks from a
 // text stream incrementally. Non-file text is emitted via OnText; completed
 // file blocks are emitted via OnFile.
@@ -19,6 +22,8 @@ type FileStreamParser struct {
 
 	// OnFile is called when a complete </file> closing tag is found.
 	OnFile func(path, content string)
+	// OnDelete is called when a <delete path="..."/> tag is found.
+	OnDelete func(path string)
 	// OnText is called for text outside of file blocks.
 	OnText func(text string)
 }
@@ -57,6 +62,23 @@ func (p *FileStreamParser) Feed(chunk string) {
 			p.buffer = p.buffer[closeIdx+len("</file>"):]
 			// Continue loop to process remaining buffer
 		} else {
+			// Check for <delete path="..."/> tags first
+			if delLoc := deleteTagRegex.FindStringIndex(p.buffer); delLoc != nil {
+				// Emit text before the delete tag
+				if delLoc[0] > 0 {
+					before := p.buffer[:delLoc[0]]
+					if p.OnText != nil && before != "" {
+						p.OnText(before)
+					}
+				}
+				match := deleteTagRegex.FindStringSubmatch(p.buffer[delLoc[0]:delLoc[1]])
+				if len(match) >= 2 && p.OnDelete != nil {
+					p.OnDelete(match[1])
+				}
+				p.buffer = p.buffer[delLoc[1]:]
+				continue
+			}
+
 			// Look for opening <file path="..."> tag
 			loc := fileTagRegex.FindStringIndex(p.buffer)
 			if loc == nil {
