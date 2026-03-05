@@ -13,7 +13,6 @@ import (
 	emailServices "github.com/knid/wemob/internal/services/email"
 	"github.com/knid/wemob/internal/services/mcpclient"
 	"github.com/knid/wemob/internal/services/neon"
-	"github.com/knid/wemob/internal/services/preview"
 	"github.com/knid/wemob/internal/services/secret"
 	"github.com/knid/wemob/internal/services/storage"
 	"github.com/knid/wemob/internal/utils"
@@ -32,7 +31,6 @@ type Controller struct {
 	UserApiKeysStorage     *storage.S3Storage
 	ConcurrentBuildLimiter chan struct{}
 	VercelService          *vercel.Service
-	PreviewService         *preview.Service
 	NeonService            *neon.Service
 	MCPService             atomic.Pointer[mcpclient.Service]
 	PostHog                posthog.Client // nil = disabled
@@ -45,7 +43,7 @@ func NewController(db *database.Database, concurrentBuildLimiter chan struct{},
 	slackService *services.SlackService, emailService emailServices.EmailService,
 	crmService crmServices.CRMService, taskService *asynq.Client, assetsStorage *storage.S3Storage,
 	userApiKeysStorage *storage.S3Storage, secretManager secret.SecretManager,
-	vercelService *vercel.Service, previewService *preview.Service,
+	vercelService *vercel.Service,
 	neonService *neon.Service,
 	posthogClient posthog.Client) *Controller {
 
@@ -60,7 +58,6 @@ func NewController(db *database.Database, concurrentBuildLimiter chan struct{},
 		UserApiKeysStorage:     userApiKeysStorage,
 		SecretManager:          secretManager,
 		VercelService:          vercelService,
-		PreviewService:         previewService,
 		NeonService:            neonService,
 		PostHog:                posthogClient,
 	}

@@ -9,7 +9,6 @@ import (
 
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/models"
-	"github.com/knid/wemob/internal/services/preview"
 	"github.com/knid/wemob/internal/tasks"
 	"github.com/knid/wemob/internal/utils"
 	"github.com/knid/wemob/internal/utils/external"
@@ -358,16 +357,11 @@ func (c *Controller) ValidateAppFiles(projectID string) (*AppValidationResult, e
 	return &result, nil
 }
 
-// StartPreview creates a Docker-based preview for the project
-func (c *Controller) StartPreview(project *models.AppProject) (*preview.PreviewStatus, error) {
-	if c.PreviewService == nil {
-		return nil, fmt.Errorf("preview service not configured")
-	}
-
-	// Read all files from DB
+// GetPreviewBundle returns all project files and env vars for client-side WebContainer preview.
+func (c *Controller) GetPreviewBundle(project *models.AppProject) (map[string]interface{}, error) {
 	dbFiles, err := c.DB.GetAppGeneratedFilesByProjectID(project.ID.String(), "nextjs")
 	if err != nil || len(dbFiles) == 0 {
-		return nil, fmt.Errorf("no generated files found for preview")
+		return nil, fmt.Errorf("no generated files found")
 	}
 
 	fileMap := make(map[string]string)
@@ -375,116 +369,12 @@ func (c *Controller) StartPreview(project *models.AppProject) (*preview.PreviewS
 		fileMap[f.FilePath] = f.Content
 	}
 
-	// Collect all env vars (integrations + custom + auto-injected store vars)
 	envVars := c.CollectAllEnvVars(project)
 
-	// Inject .env.local so Next.js can inline NEXT_PUBLIC_* vars at build/dev time
-	if dotEnv := BuildDotEnvLocal(envVars); dotEnv != "" {
-		fileMap[".env.local"] = dotEnv
-	}
-
-	// Patch lib/wemob-store.ts with hardcoded env values so the SDK works even
-	// when NEXT_PUBLIC_* vars are not inlined at compile time (e.g. preview containers).
-	if sdkContent, ok := fileMap["lib/wemob-store.ts"]; ok {
-		if storeID := envVars["NEXT_PUBLIC_STORE_ID"]; storeID != "" {
-			sdkContent = strings.Replace(sdkContent,
-				`process.env.NEXT_PUBLIC_STORE_ID || ""`,
-				fmt.Sprintf(`process.env.NEXT_PUBLIC_STORE_ID || "%s"`, storeID), 1)
-		}
-		if apiURL := envVars["NEXT_PUBLIC_WEMOB_API_URL"]; apiURL != "" {
-			sdkContent = strings.Replace(sdkContent,
-				`process.env.NEXT_PUBLIC_WEMOB_API_URL || ""`,
-				fmt.Sprintf(`process.env.NEXT_PUBLIC_WEMOB_API_URL || "%s"`, apiURL), 1)
-		}
-		fileMap["lib/wemob-store.ts"] = sdkContent
-	}
-
-	status, err := c.PreviewService.CreatePreview(project.ID.String(), fileMap, envVars)
-	if err != nil {
-		slog.Error("Failed to start preview", "error", err, "project_id", project.ID)
-		return nil, fmt.Errorf("failed to start preview")
-	}
-
-	return status, nil
-}
-
-// SyncPreviewAll updates both files and environment variables in a running preview container.
-// deletePaths lists files to remove from the preview machine.
-func (c *Controller) SyncPreviewAll(project *models.AppProject, deletePaths ...string) {
-	if c.PreviewService == nil {
-		slog.Warn("SyncPreviewAll: preview service is nil, skipping", "project_id", project.ID)
-		return
-	}
-
-	slog.Info("SyncPreviewAll: starting", "project_id", project.ID)
-
-	// Sync files from DB
-	dbFiles, err := c.DB.GetAppGeneratedFilesByProjectID(project.ID.String(), "nextjs")
-	if err != nil || len(dbFiles) == 0 {
-		slog.Warn("SyncPreviewAll: no files to sync", "error", err, "project_id", project.ID)
-		return
-	}
-
-	fileMap := make(map[string]string)
-	for _, f := range dbFiles {
-		fileMap[f.FilePath] = f.Content
-	}
-
-	// Always use latest next.config.mjs template (ensures config fixes
-	// like unoptimized images propagate to existing apps on every sync)
-	if latest := getTemplateContent("next.config.mjs", nil, nil, project.ProjectType, nil); latest != "" {
-		fileMap["next.config.mjs"] = latest
-	}
-
-	envVars := c.CollectAllEnvVars(project)
-
-	// Sync env vars FIRST — this may restart the machine, which wipes the
-	// ephemeral filesystem. Files must be synced AFTER any potential restart.
-	if len(envVars) > 0 {
-		if err := c.PreviewService.UpdateEnvVars(project.ID.String(), envVars); err != nil {
-			slog.Warn("SyncPreviewAll: failed to sync env vars", "error", err, "project_id", project.ID)
-		}
-	}
-
-	if err := c.PreviewService.UpdateFiles(project.ID.String(), fileMap, deletePaths); err != nil {
-		slog.Warn("SyncPreviewAll: failed to sync files", "error", err, "project_id", project.ID)
-	} else {
-		slog.Info("SyncPreviewAll: completed successfully", "project_id", project.ID, "files", len(fileMap), "deletes", len(deletePaths))
-	}
-}
-
-// StopPreview stops and removes a preview container
-func (c *Controller) StopPreview(projectID string) error {
-	if c.PreviewService == nil {
-		return fmt.Errorf("preview service not configured")
-	}
-	return c.PreviewService.DeletePreview(projectID)
-}
-
-// GetPreviewLogs returns container logs for the preview
-func (c *Controller) GetPreviewLogs(projectID string) (string, error) {
-	if c.PreviewService == nil {
-		return "", fmt.Errorf("preview service not configured")
-	}
-	return c.PreviewService.GetLogs(projectID)
-}
-
-// GetPreviewLogsWithErrors returns container logs and parsed Next.js errors
-func (c *Controller) GetPreviewLogsWithErrors(projectID string) (string, []string, error) {
-	logs, err := c.GetPreviewLogs(projectID)
-	if err != nil {
-		return "", nil, err
-	}
-	errors := parseNextJSErrors(logs)
-	return logs, errors, nil
-}
-
-// GetPreviewStatus returns the current preview status
-func (c *Controller) GetPreviewStatus(projectID string) (*preview.PreviewStatus, error) {
-	if c.PreviewService == nil {
-		return nil, fmt.Errorf("preview service not configured")
-	}
-	return c.PreviewService.GetStatus(projectID)
+	return map[string]interface{}{
+		"files":    fileMap,
+		"env_vars": envVars,
+	}, nil
 }
 
 // injectAnalyticsScript adds the web analytics tracking script into the root
