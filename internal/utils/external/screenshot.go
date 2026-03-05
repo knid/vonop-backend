@@ -9,6 +9,24 @@ import (
 
 var screenshotHTTPClient = &http.Client{Timeout: 30 * time.Second}
 
+func GetDesktopScreenshotOfURL(url string, apiKey string) ([]byte, error) {
+	resp, err := screenshotHTTPClient.Get(
+		fmt.Sprintf(
+			"https://api.site-shot.com/?url=%s&userkey=%s&width=1280&height=800&zoom=100&format=png&no_cookie_popup=1&no_ads=1&country=us", url, apiKey))
+	if err != nil {
+		return nil, err
+	}
+
+	defer resp.Body.Close()
+
+	imageData, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	return imageData, nil
+}
+
 func GetScreenshotOfURL(url string, apiKey string) ([]byte, error) {
 	resp, err := screenshotHTTPClient.Get(
 		fmt.Sprintf(

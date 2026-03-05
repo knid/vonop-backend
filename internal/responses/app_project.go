@@ -15,8 +15,9 @@ type AppProjectResponse struct {
 	Theme       map[string]any `json:"theme"`
 	Settings    map[string]any `json:"settings"`
 	Status      string         `json:"status"`
-	HasStore    bool           `json:"has_store"`
-	CreatedAt   time.Time      `json:"created_at"`
+	HasStore      bool           `json:"has_store"`
+	ScreenshotURL string         `json:"screenshot_url,omitempty"`
+	CreatedAt     time.Time      `json:"created_at"`
 	UpdatedAt   time.Time      `json:"updated_at"`
 }
 

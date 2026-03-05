@@ -157,18 +157,26 @@ func (v *HttpViews) GetApps(w http.ResponseWriter, r *http.Request) {
 			go v.Controller.UpdateAppProjectStatus(&p, "ready")
 		}
 
+		var screenshotURL string
+		if p.ScreenshotS3Key != "" {
+			if presigned, err := v.Controller.AssetsStorage.GetObject(r.Context(), p.ScreenshotS3Key, 3600); err == nil {
+				screenshotURL = presigned.URL
+			}
+		}
+
 		resp = append(resp, responses.AppProjectResponse{
-			ID:          p.ID,
-			Name:        p.Name,
-			Slug:        p.Slug,
-			Prompt:      p.Prompt,
-			ProjectType: p.ProjectType,
-			Theme:       theme,
-			Settings:    p.Settings,
-			Status:      status,
-			HasStore:    hasStore,
-			CreatedAt:   p.CreatedAt,
-			UpdatedAt:   p.UpdatedAt,
+			ID:            p.ID,
+			Name:          p.Name,
+			Slug:          p.Slug,
+			Prompt:        p.Prompt,
+			ProjectType:   p.ProjectType,
+			Theme:         theme,
+			Settings:      p.Settings,
+			Status:        status,
+			HasStore:      hasStore,
+			ScreenshotURL: screenshotURL,
+			CreatedAt:     p.CreatedAt,
+			UpdatedAt:     p.UpdatedAt,
 		})
 	}
 
@@ -230,19 +238,27 @@ func (v *HttpViews) GetApp(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
+	var screenshotURL string
+	if project.ScreenshotS3Key != "" {
+		if presigned, err := v.Controller.AssetsStorage.GetObject(r.Context(), project.ScreenshotS3Key, 3600); err == nil {
+			screenshotURL = presigned.URL
+		}
+	}
+
 	utils.JSONResponse(w, responses.AppProjectDetailResponse{
 		AppProjectResponse: responses.AppProjectResponse{
-			ID:          project.ID,
-			Name:        project.Name,
-			Slug:        project.Slug,
-			Prompt:      project.Prompt,
-			ProjectType: project.ProjectType,
-			Theme:       theme,
-			Settings:    project.Settings,
-			Status:      project.Status,
-			HasStore:    hasStore,
-			CreatedAt:   project.CreatedAt,
-			UpdatedAt:   project.UpdatedAt,
+			ID:            project.ID,
+			Name:          project.Name,
+			Slug:          project.Slug,
+			Prompt:        project.Prompt,
+			ProjectType:   project.ProjectType,
+			Theme:         theme,
+			Settings:      project.Settings,
+			Status:        project.Status,
+			HasStore:      hasStore,
+			ScreenshotURL: screenshotURL,
+			CreatedAt:     project.CreatedAt,
+			UpdatedAt:     project.UpdatedAt,
 		},
 		Files: fileResp,
 	}, http.StatusOK)
