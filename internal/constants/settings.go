@@ -8,4 +8,7 @@ const (
 
 	// WEMOB_APP_BASE_DOMAIN is the base domain for deployed V2 apps (e.g. {slug}.wemob.app)
 	WEMOB_APP_BASE_DOMAIN = "wemob.app"
+
+	// WEMOB_CNAME_TARGET is the CNAME value users point their custom domains to
+	WEMOB_CNAME_TARGET = "cname.wemob.app"
 )
