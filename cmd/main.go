@@ -209,6 +209,11 @@ func createSchema(db *bun.DB) error {
 			ORDER BY product_id, is_default DESC, created_at ASC
 		) pv
 		WHERE products.id = pv.product_id AND products.price_in_cents = 0`,
+		// Fix screenshot_s3_key and sandbox_id: empty string instead of NULL
+		`UPDATE app_projects SET screenshot_s3_key = '' WHERE screenshot_s3_key IS NULL`,
+		`UPDATE app_projects SET sandbox_id = '' WHERE sandbox_id IS NULL`,
+		`ALTER TABLE app_projects ALTER COLUMN screenshot_s3_key SET DEFAULT ''`,
+		`ALTER TABLE app_projects ALTER COLUMN sandbox_id SET DEFAULT ''`,
 	}
 
 	// Deduplicate before creating unique indexes (keep the latest row per group)
