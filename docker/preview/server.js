@@ -135,7 +135,8 @@ function stopNextJs() {
 let bunInstallRunning = false;
 let bunInstallQueued = false;
 
-function bunInstall() {
+// newPkgs: array of package names to add incrementally, or null for full install
+function bunInstall(newPkgs) {
   // If startup setup hasn't finished, flag for later (avoid concurrent installs)
   if (!fs.existsSync(SETUP_MARKER)) {
     fs.writeFileSync("/tmp/.needs-bun-install", "", "utf8");
@@ -151,42 +152,65 @@ function bunInstall() {
 
   bunInstallRunning = true;
 
-  // Stop Next.js first to free memory and avoid compiling with missing deps
-  stopNextJs().then(() => {
-    // Remove stale lockfile so bun resolves against existing node_modules
-    // instead of doing a full re-resolve when the lockfile doesn't match
-    try { fs.unlinkSync(path.join(APP_DIR, "bun.lock")); } catch {}
-    try { fs.unlinkSync(path.join(APP_DIR, "bun.lockb")); } catch {}
-    console.log("starting bun install...");
-    execFile("bun", ["install"], { cwd: APP_DIR, timeout: 120_000 }, (err) => {
+  // For incremental adds (1-5 new deps), use `bun add` without stopping Next.js
+  // This is ~5-10x faster than full `bun install` since it doesn't re-resolve all deps
+  const isIncremental = Array.isArray(newPkgs) && newPkgs.length > 0 && newPkgs.length <= 5;
+
+  const doInstall = () => {
+    let cmd, args;
+    if (isIncremental) {
+      cmd = "bun";
+      args = ["add", ...newPkgs];
+      console.log(`starting bun add ${newPkgs.join(" ")}...`);
+    } else {
+      // Full install — remove stale lockfile so bun resolves against existing node_modules
+      try { fs.unlinkSync(path.join(APP_DIR, "bun.lock")); } catch {}
+      try { fs.unlinkSync(path.join(APP_DIR, "bun.lockb")); } catch {}
+      cmd = "bun";
+      args = ["install"];
+      console.log("starting bun install...");
+    }
+
+    execFile(cmd, args, { cwd: APP_DIR, timeout: 120_000 }, (err) => {
       bunInstallRunning = false;
       if (err) {
-        console.error("bun install failed:", err.message);
+        console.error(`bun ${args[0]} failed:`, err.message);
+        if (isIncremental) {
+          // Incremental failed — fall back to full install
+          console.log("incremental add failed, falling back to full install");
+          bunInstall(null);
+          return;
+        }
         bunInstallFailed = true;
         bunInstallError = err.message;
-        // DON'T start Next.js on failure — it will just crash without deps
-        // Still process queued installs (a retry may fix it)
         if (bunInstallQueued) {
           bunInstallQueued = false;
-          bunInstall();
+          bunInstall(null);
         }
         return;
       }
 
-      console.log("bun install completed");
+      console.log(`bun ${args[0]} completed`);
       bunInstallFailed = false;
       bunInstallError = "";
       updateInstalledDeps();
 
       if (bunInstallQueued) {
         bunInstallQueued = false;
-        bunInstall(); // nextProcess is already null, stopNextJs will resolve immediately
-      } else {
-        // Only restart Next.js when no more queued installs AND install succeeded
+        bunInstall(null);
+      } else if (!nextProcess) {
         startNextJs();
       }
     });
-  });
+  };
+
+  if (isIncremental) {
+    // Don't stop Next.js for incremental adds — just add the dep in the background
+    doInstall();
+  } else {
+    // Full install — stop Next.js first to free memory
+    stopNextJs().then(doInstall);
+  }
 }
 
 // ─── HTTP helpers ───────────────────────────────────────────────────────────
@@ -260,21 +284,22 @@ function writeFiles(files) {
 }
 
 // Check if synced package.json has deps not already installed (template + previous installs).
-// Returns true only if there are NEW packages that require `bun install`.
-function hasNewDeps(packageJsonContent) {
-  if (!installedDeps.size) return true; // no template loaded, install to be safe
+// Returns the list of new package names, or empty array if all are installed.
+function getNewDeps(packageJsonContent) {
+  if (!installedDeps.size) return null; // no template loaded, full install needed
   try {
     const pkg = JSON.parse(packageJsonContent);
     const allDeps = { ...pkg.dependencies, ...pkg.devDependencies };
+    const newDeps = [];
     for (const name of Object.keys(allDeps)) {
       if (!installedDeps.has(name)) {
         console.log(`new dependency not yet installed: ${name}`);
-        return true;
+        newDeps.push(name);
       }
     }
-    return false;
+    return newDeps;
   } catch {
-    return true; // can't parse, install to be safe
+    return null; // can't parse, full install needed
   }
 }
 
@@ -372,7 +397,7 @@ const server = http.createServer(async (req, res) => {
     nextCrashLimitReached = false;
     restartTimestamps = [];
 
-    bunInstall();
+    bunInstall(null);
 
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ status: "retrying" }));
@@ -417,18 +442,28 @@ const server = http.createServer(async (req, res) => {
       if (bunInstallFailed) {
         // Previous install failed — retry regardless
         console.log("previous bun install failed, re-running on sync");
-        bunInstall();
-        installing = true;
-      } else if (packageChanged && hasNewDeps(packageContent)) {
-        // package.json has deps not in the pre-installed template — must install
-        bunInstall();
+        bunInstall(null);
         installing = true;
       } else if (packageChanged) {
+        const newDeps = getNewDeps(packageContent);
+        if (newDeps === null) {
+          // Can't determine — full install
+          bunInstall(null);
+          installing = true;
+        } else if (newDeps.length > 0) {
+          // Incremental add for new deps only
+          bunInstall(newDeps);
+          installing = true;
+        }
+      }
+
+      if (!installing && packageChanged) {
         // package.json changed but all deps already pre-installed — skip install
         console.log("all dependencies already pre-installed, skipping bun install");
-        if (!firstSyncDone) startNextJs();
-      } else if (!firstSyncDone) {
-        // First sync with no package.json change — just start Next.js
+      }
+      // Start Next.js on first sync if it's not already running
+      // (incremental `bun add` doesn't stop Next.js, so it may already be null)
+      if (!firstSyncDone && !nextProcess && !bunInstallRunning) {
         startNextJs();
       }
       firstSyncDone = true;
@@ -507,7 +542,7 @@ console.log("waiting for first file sync before starting Next.js...");
 if (fs.existsSync("/tmp/.needs-bun-install")) {
   try { fs.unlinkSync("/tmp/.needs-bun-install"); } catch {}
   console.log("running deferred bun install...");
-  bunInstall();
+  bunInstall(null);
   firstSyncDone = true;
 }
 
