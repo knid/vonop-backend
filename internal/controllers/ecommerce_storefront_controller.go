@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"bytes"
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
@@ -45,6 +46,7 @@ func (c *Controller) StorefrontGetProducts(storeID string) ([]models.Product, er
 	var active []models.Product
 	for _, p := range products {
 		if p.Status == "active" {
+			c.resolveProductImageURLs(&p)
 			active = append(active, p)
 		}
 	}
@@ -59,7 +61,65 @@ func (c *Controller) StorefrontGetProduct(storeID string, slug string) (*models.
 	if product.Status != "active" {
 		return nil, fmt.Errorf("product not found")
 	}
+	c.resolveProductImageURLs(product)
 	return product, nil
+}
+
+// resolveProductImageURLs converts S3 key paths stored in product.Images into
+// fresh presigned URLs. Entries that are already full URLs (legacy data) are
+// kept as-is but refreshed if they look like expired presigned URLs.
+func (c *Controller) resolveProductImageURLs(p *models.Product) {
+	if len(p.Images) == 0 || c.AssetsStorage == nil {
+		return
+	}
+	resolved := make([]string, 0, len(p.Images))
+	for _, img := range p.Images {
+		// Detect S3 key (no scheme) vs full URL
+		if !strings.HasPrefix(img, "http") {
+			// S3 key — generate fresh presigned URL (1 hour)
+			presigned, err := c.AssetsStorage.GetObject(context.Background(), img, 60*60)
+			if err != nil {
+				slog.Warn("resolveProductImageURLs: failed to presign", "key", img, "error", err)
+				resolved = append(resolved, img) // keep raw key as fallback
+			} else {
+				resolved = append(resolved, presigned.URL)
+			}
+		} else if strings.Contains(img, "X-Amz-") {
+			// Legacy presigned URL — extract key and re-sign
+			key := extractS3KeyFromPresignedURL(img)
+			if key != "" {
+				presigned, err := c.AssetsStorage.GetObject(context.Background(), key, 60*60)
+				if err != nil {
+					slog.Warn("resolveProductImageURLs: failed to re-presign legacy URL", "key", key, "error", err)
+					resolved = append(resolved, img)
+				} else {
+					resolved = append(resolved, presigned.URL)
+				}
+			} else {
+				resolved = append(resolved, img)
+			}
+		} else {
+			// Plain URL (e.g. external image) — keep as-is
+			resolved = append(resolved, img)
+		}
+	}
+	p.Images = resolved
+}
+
+// extractS3KeyFromPresignedURL extracts the object key from a presigned S3 URL.
+// e.g. https://bucket.s3.region.amazonaws.com/stores/abc/products/def/cover.jpg?X-Amz-...
+// returns "stores/abc/products/def/cover.jpg"
+func extractS3KeyFromPresignedURL(rawURL string) string {
+	// Find the path between hostname and query string
+	idx := strings.Index(rawURL, ".amazonaws.com/")
+	if idx == -1 {
+		return ""
+	}
+	path := rawURL[idx+len(".amazonaws.com/"):]
+	if qIdx := strings.Index(path, "?"); qIdx != -1 {
+		path = path[:qIdx]
+	}
+	return path
 }
 
 func (c *Controller) StorefrontGetCategories(storeID string) ([]models.ProductCategory, error) {

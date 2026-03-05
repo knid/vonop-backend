@@ -597,14 +597,8 @@ func (c *Controller) GenerateProductImages(ctx context.Context, store *models.St
 				return
 			}
 
-			presigned, err := c.AssetsStorage.GetObject(ctx, s3Key, 60*60*24*365)
-			if err != nil {
-				slog.Warn("ecommerce-gen: failed to get presigned URL",
-					"product_id", product.ID, "error", err)
-				return
-			}
-
-			product.Images = []string{presigned.URL}
+			// Store the S3 key — presigned URLs are generated on-demand when serving
+			product.Images = []string{s3Key}
 			product.UpdatedAt = time.Now()
 			if _, err := c.DB.UpdateProduct(&product); err != nil {
 				slog.Warn("ecommerce-gen: failed to update product images",
