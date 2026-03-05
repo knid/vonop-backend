@@ -26,9 +26,7 @@ import (
 	crmServices "github.com/knid/wemob/internal/services/crm"
 	emailServices "github.com/knid/wemob/internal/services/email"
 	"github.com/knid/wemob/internal/services/mcpclient"
-	flyService "github.com/knid/wemob/internal/services/fly"
 	"github.com/knid/wemob/internal/services/neon"
-	"github.com/knid/wemob/internal/services/preview"
 	"github.com/knid/wemob/internal/services/secret"
 	"github.com/knid/wemob/internal/services/storage"
 	"github.com/knid/wemob/internal/services/vercel"
@@ -122,8 +120,6 @@ func createSchema(db *bun.DB) error {
 		(*models.WebAnalyticsEvent)(nil),
 		// Notification tasks
 		(*models.AppNotificationTask)(nil),
-		// Preview machines (Fly Machines)
-		(*models.AppPreviewMachine)(nil),
 	}
 
 	for _, model := range models {
@@ -193,8 +189,6 @@ func createSchema(db *bun.DB) error {
 		`ALTER TABLE app_dashboards ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
 		`ALTER TABLE app_dashboard_panels ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
 		`ALTER TABLE app_notification_tasks ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
-		// Preview machine env hash for skip-restart optimization
-		`ALTER TABLE app_preview_machines ADD COLUMN IF NOT EXISTS last_env_hash text DEFAULT ''`,
 		// Flatten price onto products (remove variant dependency)
 		`ALTER TABLE products ADD COLUMN IF NOT EXISTS price_in_cents integer NOT NULL DEFAULT 0`,
 		`ALTER TABLE products ADD COLUMN IF NOT EXISTS compare_at_price integer DEFAULT 0`,
@@ -378,33 +372,6 @@ func main() {
 	go utils.CheckUsageAlertsJob(db, crmServices.NewBrevoCRMService(sm.GetSecret("BREVO_API_KEY")))
 	vercelService := vercel.NewService(sm.GetSecret("VERCEL_API_TOKEN"), sm.GetSecret("VERCEL_TEAM_ID"))
 
-	// Preview service (optional — only enabled when Fly secrets are set)
-	var previewService *preview.Service
-	if flyToken := sm.GetSecret("FLY_API_TOKEN"); flyToken != "" {
-		flySvc := flyService.NewService(
-			flyToken,
-			sm.GetSecret("FLY_PREVIEW_APP_NAME"),
-			sm.GetSecret("FLY_PREVIEW_REGION"),
-			sm.GetSecret("FLY_PREVIEW_IMAGE"),
-		)
-		previewDomain := sm.GetSecret("FLY_PREVIEW_DOMAIN")
-		if previewDomain == "" {
-			previewDomain = "preview.wemob.app"
-		}
-		previewService = preview.NewService(flySvc, db, previewDomain)
-		slog.Info("Preview service enabled (Fly Machines)", "app", sm.GetSecret("FLY_PREVIEW_APP_NAME"), "domain", previewDomain)
-
-		// Background idle cleanup: stop machines idle >1h, destroy stopped >6h
-		go func() {
-			ticker := time.NewTicker(5 * time.Minute)
-			defer ticker.Stop()
-			for range ticker.C {
-				previewService.StopIdleMachines(1 * time.Hour)
-				previewService.DestroyStoppedMachines(6 * time.Hour)
-			}
-		}()
-	}
-
 	// Neon service (optional — only enabled when API key is set)
 	var neonService *neon.Service
 	if neonKey := sm.GetSecret("NEON_API_KEY"); neonKey != "" {
@@ -453,7 +420,6 @@ func main() {
 		userApiKeysStorage,
 		sm,
 		vercelService,
-		previewService,
 		neonService,
 		posthogClient,
 	)
@@ -520,7 +486,7 @@ func main() {
 	// Access-Control-Allow-Origin headers (otherwise browsers report a
 	// CORS error instead of showing the real 429).
 	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   []string{"https://app.wemob.io", "https://dashboard.wemob.io", "https://*.preview.wemob.app", "https://wemob.io", "https://www.wemob.io", "http://localhost:3000", "http://127.0.0.1:3000"},
+		AllowedOrigins:   []string{"https://app.wemob.io", "https://dashboard.wemob.io", "https://wemob.io", "https://www.wemob.io", "http://localhost:3000", "http://127.0.0.1:3000"},
 		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token", "Location"},
 		ExposedHeaders:   []string{"Link"},
@@ -854,11 +820,8 @@ func main() {
 						})
 					})
 
-					// Preview (Docker-based live preview)
-					r.Post("/preview", httpViews.StartAppPreview)
-					r.Get("/preview/status", httpViews.GetAppPreviewStatus)
-					r.Get("/preview/logs", httpViews.GetAppPreviewLogs)
-					r.Delete("/preview", httpViews.StopAppPreview)
+					// Preview bundle (WebContainer-based, client-side)
+					r.Get("/preview-bundle", httpViews.GetPreviewBundle)
 
 					// Deploy
 					r.Route("/deploy", func(r chi.Router) {
@@ -1054,7 +1017,7 @@ func main() {
 	})
 
 	proxyRoute.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   []string{"https://app.wemob.io", "https://dashboard.wemob.io", "https://*.preview.wemob.app", "https://wemob.io", "https://www.wemob.io", "http://localhost:3000", "http://127.0.0.1:3000"},
+		AllowedOrigins:   []string{"https://app.wemob.io", "https://dashboard.wemob.io", "https://wemob.io", "https://www.wemob.io", "http://localhost:3000", "http://127.0.0.1:3000"},
 		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token", "Location"},
 		ExposedHeaders:   []string{"Link"},

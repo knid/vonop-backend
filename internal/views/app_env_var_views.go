@@ -1,7 +1,6 @@
 package views
 
 import (
-	"log/slog"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -29,12 +28,6 @@ func (v *HttpViews) syncEnvVarsToPreview(project *models.AppProject) {
 		})
 	}
 
-	// Push to running preview container
-	if v.Controller.PreviewService != nil {
-		if err := v.Controller.PreviewService.UpdateEnvVars(project.ID.String(), envVars); err != nil {
-			slog.Debug("env var preview sync skipped (preview may not be running)", "error", err)
-		}
-	}
 }
 
 // GET /v2/apps/{appId}/env-vars/missing

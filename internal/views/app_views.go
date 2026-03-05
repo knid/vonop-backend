@@ -449,9 +449,6 @@ func (v *HttpViews) UpdateAppFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Sync changes to preview container in background
-	go v.Controller.SyncPreviewAll(project)
-
 	v.Controller.TrackUserEvent(user, "app_file_updated", posthog.NewProperties().
 		Set("app_id", project.ID.String()).
 		Set("file_path", file.FilePath))
@@ -483,17 +480,9 @@ func (v *HttpViews) DeleteAppFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get file path before deleting for preview sync
-	deletedFile, _ := v.Controller.DB.GetAppGeneratedFileByID(fid)
-
 	if err := v.Controller.DeleteAppFile(project, fid); err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
 		return
-	}
-
-	// Sync deletion to preview container in background
-	if deletedFile != nil {
-		go v.Controller.SyncPreviewAll(project, deletedFile.FilePath)
 	}
 
 	v.Controller.TrackUserEvent(user, "app_file_deleted", posthog.NewProperties().

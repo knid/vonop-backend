@@ -343,16 +343,6 @@ func (c *Controller) StreamBuildApp(
 		selectedFiles := c.selectContextFiles(ctx, provider, fileMap, message, messages)
 		projectContext := c.buildProjectContextForChat(project, fileMap, selectedFiles)
 
-		// Inject preview build errors if available
-		if c.PreviewService != nil {
-			if logs, err := c.PreviewService.GetLogs(project.ID.String()); err == nil && logs != "" {
-				if buildErrors := parseNextJSErrors(logs); len(buildErrors) > 0 {
-					projectContext += fmt.Sprintf("\n\n⚠ Preview build errors detected:\n%s",
-						strings.Join(buildErrors, "\n"))
-				}
-			}
-		}
-
 		llmMessages = []utils.Message{
 			{Role: "system", Content: buildChatSystemPrompt(project)},
 			{Role: "system", Content: projectContext},
@@ -675,22 +665,6 @@ func (c *Controller) StreamBuildApp(
 			}
 		}
 
-		// Sync to preview container (synchronous — validation depends on this)
-		var deletedPaths []string
-		if c.PreviewService != nil {
-			for _, op := range appliedOps {
-				if op.Action == "delete" {
-					deletedPaths = append(deletedPaths, op.Path)
-				}
-			}
-			c.SyncPreviewAll(project, deletedPaths...)
-		}
-
-		// Build validation: check logs, fix errors
-		// Create a tool executor for validation fix passes (used by both paths)
-		validationExecutor := c.buildBuilderToolExecutor(ctx, project, user, fileMap, nil)
-		c.validateWithPreviewLogs(ctx, project, fileMap, provider,
-			validationExecutor, sendEvent, &appliedOps, &filesChanged, deletedPaths)
 	}
 
 	// --- Detect missing env vars ---
@@ -784,29 +758,6 @@ func (c *Controller) fixModel(provider *utils.LLMProvider) string {
 		return m
 	}
 	return provider.FastModel()
-}
-
-// --- Helper: flush pending files to preview container ---
-
-func (c *Controller) flushPendingPreview(project *models.AppProject, cbs *builderToolCallbacks) {
-	if c.PreviewService == nil || cbs == nil {
-		return
-	}
-
-	cbs.mu.Lock()
-	pending := cbs.pendingFiles
-	deletes := cbs.pendingDeletes
-	cbs.pendingFiles = make(map[string]string)
-	cbs.pendingDeletes = nil
-	cbs.mu.Unlock()
-
-	if len(pending) > 0 || len(deletes) > 0 {
-		go func() {
-			if err := c.PreviewService.UpdateFiles(project.ID.String(), pending, deletes); err != nil {
-				slog.Warn("incremental preview sync failed", "error", err, "project_id", project.ID)
-			}
-		}()
-	}
 }
 
 // --- Helper: inject a template file into DB and fileMap ---
@@ -1506,183 +1457,6 @@ func (c *Controller) runDeterministicAutoFixes(
 				}
 			}
 		}
-	}
-}
-
-// --- Build validation loop ---
-
-// nextjsErrorPatterns matches common Next.js build/dev error patterns.
-var nextjsErrorPatterns = []*regexp.Regexp{
-	regexp.MustCompile(`(?i)Module not found:.*`),
-	regexp.MustCompile(`(?i)Type error:.*`),
-	regexp.MustCompile(`(?i)SyntaxError:.*`),
-	regexp.MustCompile(`(?i)ReferenceError:.*`),
-	regexp.MustCompile(`(?i)Error:\s+.+`),
-	regexp.MustCompile(`\./[^\s]+:\d+:\d+.*`),
-}
-
-// parseNextJSErrors extracts unique error lines from Next.js dev server logs.
-func parseNextJSErrors(logs string) []string {
-	seen := make(map[string]bool)
-	var errors []string
-
-	for _, line := range strings.Split(logs, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		for _, pat := range nextjsErrorPatterns {
-			if match := pat.FindString(line); match != "" {
-				if !seen[match] {
-					seen[match] = true
-					errors = append(errors, match)
-				}
-				break
-			}
-		}
-		if len(errors) >= 10 {
-			break
-		}
-	}
-	return errors
-}
-
-// validateWithPreviewLogs syncs files to the preview container, waits for Next.js
-// to recompile, checks dev server logs for errors, and if found, calls the LLM
-// for a focused fix pass. Repeats up to 3 times.
-func (c *Controller) validateWithPreviewLogs(
-	ctx context.Context,
-	project *models.AppProject,
-	fileMap map[string]string,
-	provider *utils.LLMProvider,
-	executor utils.ToolExecutor,
-	sendEvent func(string, any) bool,
-	appliedOps *[]appBuilderOperation,
-	filesChanged *int,
-	deletedPaths []string,
-) {
-	if c.PreviewService == nil {
-		return
-	}
-
-	const maxValidationRounds = 3
-	const pollInterval = 2 * time.Second
-	const maxPollWait = 20 * time.Second
-
-	for round := 0; round < maxValidationRounds; round++ {
-		if ctx.Err() != nil {
-			return
-		}
-
-		// 1. Sync all files to preview (include deletes so removed files are cleaned up)
-		c.SyncPreviewAll(project, deletedPaths...)
-
-		// 2. Poll logs until compilation markers appear (or timeout)
-		var errors []string
-		pollDeadline := time.Now().Add(maxPollWait)
-		foundMarker := false
-		for time.Now().Before(pollDeadline) {
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(pollInterval):
-			}
-
-			logs, err := c.PreviewService.GetLogs(project.ID.String())
-			if err != nil || logs == "" {
-				continue
-			}
-
-			// Check for compilation success markers
-			if strings.Contains(logs, "Compiled") || strings.Contains(logs, "compiled client and server") {
-				foundMarker = true
-			}
-
-			// Check for error markers
-			if strings.Contains(logs, "Error:") || strings.Contains(logs, "error TS") || strings.Contains(logs, "Module not found") {
-				foundMarker = true
-			}
-
-			if foundMarker {
-				// One more poll to let logs settle
-				select {
-				case <-ctx.Done():
-					return
-				case <-time.After(pollInterval):
-				}
-				logs, _ = c.PreviewService.GetLogs(project.ID.String())
-				if logs != "" {
-					errors = parseNextJSErrors(logs)
-				}
-				break
-			}
-		}
-
-		// If no marker found by deadline, parse whatever logs are available
-		if !foundMarker {
-			logs, err := c.PreviewService.GetLogs(project.ID.String())
-			if err != nil || logs == "" {
-				return
-			}
-			errors = parseNextJSErrors(logs)
-		}
-
-		// 3. No errors — done
-		if len(errors) == 0 {
-			return // no errors — done
-		}
-
-		slog.Info("Build validation found errors",
-			"project_id", project.ID,
-			"round", round+1,
-			"error_count", len(errors),
-		)
-
-		// 5. Fire validation SSE event
-		sendEvent("validation", responses.ValidationEvent{
-			Iteration: round + 1,
-			Errors:    errors,
-			Fixing:    true,
-		})
-
-		// 6. Build fix messages
-		fixMessages := []utils.Message{
-			{Role: "system", Content: buildSystemPrompt(project)},
-			{Role: "system", Content: c.buildProjectContext(project, fileMap, false)},
-			{Role: "user", Content: fmt.Sprintf(
-				"The preview build has these errors. Fix them:\n\n%s\n\nUse read_file to check the current content of broken files, then fix with edit_file or write_file.",
-				strings.Join(errors, "\n"),
-			)},
-		}
-
-		// 7. Call LLM with limited rounds
-		fixConfig := utils.ToolCallConfig{
-			MaxRounds:  5,
-			NudgeAfter: 4,
-			StripAfter: 5,
-			MaxTokens:  16384,
-		}
-
-		fixModel := c.fixModel(provider)
-		_, fixErr := utils.StreamWithTools(ctx, fixModel, fixMessages, appBuilderTools, provider,
-			nil, nil, executor,
-			func(toolName, args string) { /* silent tool calls */ },
-			func(chunk string) { sendEvent("chat_text", responses.ChatTextEvent{Chunk: chunk}) },
-			func(chunk string) { /* ignore thinking */ },
-			fixConfig,
-		)
-		if fixErr != nil {
-			slog.Error("validation fix pass failed", "error", fixErr, "project_id", project.ID, "round", round+1)
-			sendEvent("validation", responses.ValidationEvent{
-				Iteration: round + 1,
-				Errors:    errors,
-				Fixing:    false,
-			})
-			break
-		}
-
-		// Run deterministic auto-fixes again after LLM fixes
-		c.runDeterministicAutoFixes(project, fileMap, sendEvent, appliedOps, filesChanged)
 	}
 }
 
@@ -2931,11 +2705,6 @@ func (c *Controller) streamSingleShotGeneration(
 		}
 	}
 
-	// 7. Sync all files to preview
-	if c.PreviewService != nil {
-		c.SyncPreviewAll(project)
-	}
-
 	return responseBuilder.String(), ops, err
 }
 
@@ -3071,9 +2840,6 @@ func (c *Controller) streamEcommerceGeneration(
 		setupConfig,
 	)
 
-	// Flush any pending preview files from Phase 1
-	c.flushPendingPreview(project, setupCallbacks)
-
 	if setupErr != nil {
 		return "", ops, fmt.Errorf("ecommerce setup phase failed: %w", setupErr)
 	}
@@ -3188,11 +2954,6 @@ func (c *Controller) streamEcommerceGeneration(
 				c.DB.UpdateAppGeneratedFile(dbFile)
 			}
 		}
-	}
-
-	// Sync all files to preview
-	if c.PreviewService != nil {
-		c.SyncPreviewAll(project)
 	}
 
 	return responseBuilder.String(), ops, err

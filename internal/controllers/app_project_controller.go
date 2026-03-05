@@ -253,11 +253,6 @@ func (c *Controller) RestoreAppSnapshot(project *models.AppProject, snapshotID s
 		return nil, err
 	}
 
-	// Sync preview after restore (B1)
-	if c.PreviewService != nil {
-		c.SyncPreviewAll(updated)
-	}
-
 	return updated, nil
 }
 
