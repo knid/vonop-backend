@@ -50,6 +50,14 @@ func (db *Database) DeleteAppProject(p *models.AppProject) error {
 	return err
 }
 
+func (db *Database) UpdateAppProjectSandboxID(projectID string, sandboxID string) error {
+	_, err := db.DB.NewUpdate().Model((*models.AppProject)(nil)).
+		Set("sandbox_id = ?", sandboxID).
+		Where("id = ?", projectID).
+		Exec(context.Background())
+	return err
+}
+
 func (db *Database) CountAppProjectsByUserID(userID string) (int, error) {
 	count, err := db.DB.NewSelect().Model((*models.AppProject)(nil)).Where("user_id = ?", userID).Count(context.Background())
 	return count, err
