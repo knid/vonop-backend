@@ -2520,6 +2520,31 @@ func (c *Controller) runPreGenerationSetup(
 	// --- Auth setup ---
 	if settings := project.Settings; settings != nil {
 		if needsAuth, ok := settings["needs_auth"].(bool); ok && needsAuth {
+			// Auth templates import from ./db, so lib/db.ts must exist.
+			// If no data_models were planned (e.g. e-commerce uses wemob-store SDK),
+			// provision a database with just the users table.
+			if _, hasDB := fileMap["lib/db.ts"]; !hasDB && c.NeonService != nil {
+				var authModels []DataModel
+				if err := json.Unmarshal([]byte(constants.AUTH_DEFAULT_DATA_MODELS), &authModels); err == nil {
+					sendEvent("neon_provision", map[string]any{"phase": "start"})
+					connStr, neonProjectID, neonErr := c.provisionNeonDatabase(ctx, project, authModels, sendEvent)
+					if connStr != "" && neonProjectID != "" && neonErr == nil {
+						if err := c.storeNeonIntegration(project, connStr, neonProjectID); err != nil {
+							slog.Error("pre-gen auth: failed to store neon integration", "error", err, "project_id", project.ID)
+						}
+						c.injectTemplateFile(project, "lib/db.ts", constants.NEXTJS_TEMPLATE_DB_TS, fileMap, sendEvent)
+						schemaContent := buildDrizzleSchema(authModels)
+						c.injectTemplateFile(project, "lib/schema.ts", schemaContent, fileMap, sendEvent)
+						if _, seedErr := c.seedNeonDatabase(ctx, project, authModels, sendEvent); seedErr != nil {
+							slog.Warn("pre-gen auth: database seeding failed", "error", seedErr, "project_id", project.ID)
+						}
+					} else {
+						slog.Error("pre-gen auth: database provisioning failed", "error", neonErr, "project_id", project.ID)
+					}
+					sendEvent("neon_provision", map[string]any{"phase": "ready"})
+				}
+			}
+
 			// Check if auth templates are already injected
 			if _, exists := fileMap["lib/wemob-auth.ts"]; !exists {
 				authSecret, err := utils.RandomHex(32)
