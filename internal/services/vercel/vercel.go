@@ -386,6 +386,33 @@ func min(a, b int) int {
 	return b
 }
 
+// DomainConfig represents the verification status of a domain on Vercel
+type DomainConfig struct {
+	ConfiguredBy *string `json:"configuredBy"` // nil = not configured, "CNAME"/"A"/"http"
+	Misconfigured bool   `json:"misconfigured"`
+}
+
+// DomainVerification holds the full domain status from Vercel's project domains endpoint
+type DomainVerification struct {
+	Name       string `json:"name"`
+	Verified   bool   `json:"verified"`
+	Configured bool   // derived from DomainConfig
+}
+
+// GetDomainConfig checks whether a domain's DNS is correctly configured on Vercel.
+func (s *Service) GetDomainConfig(domain string) (*DomainConfig, error) {
+	body, err := s.doRequest("GET", fmt.Sprintf("/v6/domains/%s/config", domain), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var cfg DomainConfig
+	if err := json.Unmarshal(body, &cfg); err != nil {
+		return nil, fmt.Errorf("unmarshal domain config: %w", err)
+	}
+	return &cfg, nil
+}
+
 // DeleteProject deletes a Vercel project
 func (s *Service) DeleteProject(projectID string) error {
 	_, err := s.doRequest("DELETE", fmt.Sprintf("/v10/projects/%s", projectID), nil)

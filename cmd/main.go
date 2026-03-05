@@ -885,6 +885,7 @@ func main() {
 					r.Route("/domains", func(r chi.Router) {
 						r.Get("/", httpViews.GetAppDomains)
 						r.Post("/", httpViews.AddAppDomain)
+						r.Post("/{did}/verify", httpViews.VerifyAppDomain)
 						r.Delete("/{did}", httpViews.RemoveAppDomain)
 					})
 
