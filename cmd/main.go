@@ -823,6 +823,10 @@ func main() {
 					// Preview bundle (WebContainer-based, client-side)
 					r.Get("/preview-bundle", httpViews.GetPreviewBundle)
 
+					// Sandbox ID persistence for E2B preview
+					r.Get("/sandbox", httpViews.GetAppSandbox)
+					r.Put("/sandbox", httpViews.SetAppSandbox)
+
 					// Deploy
 					r.Route("/deploy", func(r chi.Router) {
 						r.Post("/validate", httpViews.ValidateAppFiles)
