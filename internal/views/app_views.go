@@ -227,6 +227,9 @@ func (v *HttpViews) GetApp(w http.ResponseWriter, r *http.Request) {
 	files, _ := v.Controller.GetAppGeneratedFiles(project.ID.String(), "nextjs")
 	var fileResp []responses.AppFileResponse
 	for _, f := range files {
+		if f.FilePath == ".env.local" {
+			continue
+		}
 		fileResp = append(fileResp, responses.AppFileResponse{
 			ID:        f.ID,
 			Platform:  f.Platform,
@@ -349,6 +352,9 @@ func (v *HttpViews) GetAppFiles(w http.ResponseWriter, r *http.Request) {
 
 	var resp []responses.AppFileResponse
 	for _, f := range files {
+		if f.FilePath == ".env.local" {
+			continue
+		}
 		resp = append(resp, responses.AppFileResponse{
 			ID:        f.ID,
 			Platform:  f.Platform,
@@ -800,6 +806,9 @@ func (v *HttpViews) DisconnectAppIntegration(w http.ResponseWriter, r *http.Requ
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+
+	// Sync env vars to preview so removed integration vars are cleared
+	go v.syncEnvVarsToPreview(project)
 
 	v.Controller.TrackUserEvent(user, "integration_disconnected", posthog.NewProperties().
 		Set("app_id", project.ID.String()))
