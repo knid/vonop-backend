@@ -1029,6 +1029,11 @@ func (c *Controller) selectContextFiles(ctx context.Context, provider *utils.LLM
 		return all
 	}
 
+	// Force-include files explicitly mentioned in error messages or user text.
+	// This ensures build errors like "./project/app/products/page.tsx (167:11)"
+	// always get the actual file content in the LLM context.
+	forcedFiles := extractFilePathsFromMessage(userMessage, fileMap)
+
 	// Build file list with sizes
 	paths := make([]string, 0, len(fileMap))
 	for p := range fileMap {
@@ -1103,9 +1108,41 @@ Respond with ONLY a list of file paths, one per line. No explanation, no markdow
 		return all
 	}
 
+	// Always include files extracted from error messages / user text
+	for _, fp := range forcedFiles {
+		if !selected[fp] {
+			selected[fp] = true
+			slog.Info("selectContextFiles: force-included file from message", "path", fp)
+		}
+	}
+
 	slog.Info("selectContextFiles: selected files for context",
 		"total", len(fileMap), "selected", len(selected))
 	return selected
+}
+
+// extractFilePathsFromMessage scans a user message for file paths that exist in
+// the project. Handles patterns like "./project/app/page.tsx (167:11)" from Next.js
+// build errors, bare paths like "app/page.tsx", and common error trace formats.
+var filePathInMessageRe = regexp.MustCompile(`(?:\.?/project/)?([a-zA-Z0-9_\-./]+\.(?:tsx?|jsx?|css|json|mjs))`)
+
+func extractFilePathsFromMessage(message string, fileMap map[string]string) []string {
+	matches := filePathInMessageRe.FindAllStringSubmatch(message, -1)
+	seen := make(map[string]bool)
+	var paths []string
+	for _, m := range matches {
+		if len(m) < 2 {
+			continue
+		}
+		candidate := m[1]
+		// Strip leading "./" if present
+		candidate = strings.TrimPrefix(candidate, "./")
+		if _, exists := fileMap[candidate]; exists && !seen[candidate] {
+			seen[candidate] = true
+			paths = append(paths, candidate)
+		}
+	}
+	return paths
 }
 
 // buildProjectContextForChat builds project context with selected file contents
@@ -1440,6 +1477,11 @@ func (c *Controller) runDeterministicAutoFixes(
 		changedPaths = append(changedPaths, fixedPath)
 		autoFixed++
 	}
+
+	// Auto-fix className string concatenation → template literals
+	autoFixedConcat, changedPathsConcat := autoFixClassNameConcat(fileMap)
+	autoFixed += autoFixedConcat
+	changedPaths = append(changedPaths, changedPathsConcat...)
 
 	if autoFixed > 0 {
 		slog.Info("Deterministic auto-fix applied", "project_id", project.ID, "files_fixed", autoFixed)
