@@ -13,17 +13,18 @@ import (
 // milestoneEvents are event types worth persisting to the database.
 // High-frequency events like chunk/thinking are skipped.
 var milestoneEvents = map[string]bool{
-	"file_complete":           true,
-	"chat_complete":           true,
-	"generation_complete":     true,
-	"file_generation_start":   true,
-	"project_created":         true,
-	"error":                   true,
-	"done":                    true,
-	"store_chat_complete":     true,
-	"app_generation_started":  true,
-	"clarification_needed":    true,
-	"clarification_received":  true,
+	"file_complete":          true,
+	"chat_complete":          true,
+	"file_generation_start":  true,
+	"project_created":        true,
+	"error":                  true,
+	"done":                   true,
+	"store_chat_complete":    true,
+	"app_generation_started": true,
+	"clarification_needed":   true,
+	"clarification_received": true,
+	"rollback":               true,
+	"deps_ready":             true,
 }
 
 const maxConcurrentJobsPerUser = 3

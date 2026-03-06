@@ -459,7 +459,8 @@ func (c *Controller) StreamBuildApp(
 					sendEvent("rollback", map[string]any{
 						"snapshot_id": preSnapshotID,
 						"reason":      "generation_failed",
-						"rolled_back": len(ecomOps),
+						"rolled_back":     len(ecomOps),
+					"resync_required": true,
 					})
 				}
 			}
@@ -504,7 +505,8 @@ func (c *Controller) StreamBuildApp(
 					sendEvent("rollback", map[string]any{
 						"snapshot_id": preSnapshotID,
 						"reason":      "generation_failed",
-						"rolled_back": len(singleShotOps),
+						"rolled_back":     len(singleShotOps),
+					"resync_required": true,
 					})
 				}
 			}
@@ -536,6 +538,7 @@ func (c *Controller) StreamBuildApp(
 		var responseBuilder strings.Builder
 		var deletedPaths []string
 		parser := &utils.FileStreamParser{
+			DiscardIncomplete: true,
 			OnFile: func(path, content string) {
 				content = utils.StripCodeFences(content)
 				_, fileType := guessFileType(path)
@@ -615,7 +618,8 @@ func (c *Controller) StreamBuildApp(
 					sendEvent("rollback", map[string]any{
 						"snapshot_id": preSnapshotID,
 						"reason":      "generation_failed",
-						"rolled_back": len(toolAppliedOps),
+						"rolled_back":     len(toolAppliedOps),
+					"resync_required": true,
 					})
 				}
 			}
@@ -652,19 +656,29 @@ func (c *Controller) StreamBuildApp(
 		c.runDeterministicAutoFixes(project, fileMap, sendEvent, &appliedOps, &filesChanged)
 
 		// Augment package.json with discovered dependencies
+		pkgChanged := false
 		if pkgContent, ok := fileMap["package.json"]; ok {
 			augmented := augmentPackageJSON(pkgContent, fileMap)
 			if augmented != pkgContent {
+				pkgChanged = true
 				dbFile, err := c.DB.GetAppGeneratedFileByPath(project.ID.String(), "nextjs", "package.json")
 				if err == nil && dbFile != nil {
 					dbFile.Content = augmented
 					c.DB.UpdateAppGeneratedFile(dbFile)
 					fileMap["package.json"] = augmented
 					slog.Info("Augmented package.json with discovered deps", "project_id", project.ID)
+					sendEvent("file_complete", responses.FileCompleteEvent{
+						Action: "modify", FilePath: "package.json",
+						FileID: dbFile.ID, FileType: "json", Content: augmented,
+					})
 				}
 			}
 		}
 
+		// Signal that dependencies are finalized
+		sendEvent("deps_ready", map[string]any{
+			"package_json_changed": pkgChanged,
+		})
 	}
 
 	// --- Detect missing env vars ---
@@ -796,6 +810,7 @@ func (c *Controller) injectTemplateFile(project *models.AppProject, tp string, c
 		FilePath: tp,
 		FileID:   createdFile.ID,
 		FileType: fileType,
+		Content:  content,
 	})
 }
 
@@ -1372,6 +1387,11 @@ func (c *Controller) runDeterministicAutoFixes(
 				if _, err := c.DB.UpdateAppGeneratedFile(oldFile); err != nil {
 					slog.Error("failed to rename file in DB", "error", err, "old", oldPath, "new", newPath)
 				} else {
+					// Emit delete for old path so sandbox removes the stale .ts file
+					sendEvent("file_complete", responses.FileCompleteEvent{
+						Action: "delete", FilePath: oldPath,
+						FileID: oldFile.ID, FileType: "ts",
+					})
 					sendEvent("file_complete", responses.FileCompleteEvent{
 						Action: "modify", FilePath: newPath, FileID: oldFile.ID,
 						FileType: fileType, Content: fileMap[newPath],
