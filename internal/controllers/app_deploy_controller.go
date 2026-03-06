@@ -9,7 +9,6 @@ import (
 
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/models"
-	"github.com/knid/wemob/internal/static"
 	"github.com/knid/wemob/internal/tasks"
 	"github.com/knid/wemob/internal/utils"
 	"github.com/knid/wemob/internal/utils/external"
@@ -368,11 +367,6 @@ func (c *Controller) GetPreviewBundle(project *models.AppProject) (map[string]in
 	fileMap := make(map[string]string)
 	for _, f := range dbFiles {
 		fileMap[f.FilePath] = f.Content
-	}
-
-	// Inject package-lock.json for faster npm install in WebContainer
-	if _, ok := fileMap["package-lock.json"]; !ok {
-		fileMap["package-lock.json"] = static.NextJSTemplatePackageLock
 	}
 
 	envVars := c.CollectAllEnvVars(project)

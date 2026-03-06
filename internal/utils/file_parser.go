@@ -20,6 +20,10 @@ type FileStreamParser struct {
 	currentPath string
 	fileContent strings.Builder
 
+	// DiscardIncomplete, when true, causes Flush() to discard any file
+	// block that was still open when the stream ended (e.g. LLM timeout).
+	DiscardIncomplete bool
+
 	// OnFile is called when a complete </file> closing tag is found.
 	OnFile func(path, content string)
 	// OnDelete is called when a <delete path="..."/> tag is found.
@@ -147,17 +151,24 @@ func (p *FileStreamParser) Feed(chunk string) {
 // Flush emits any remaining buffered content when the stream ends.
 func (p *FileStreamParser) Flush() {
 	if p.inFileBlock {
-		// Stream ended mid-file — emit what we have
-		p.fileContent.WriteString(p.buffer)
-		if p.OnFile != nil {
-			content := p.fileContent.String()
-			content = strings.TrimPrefix(content, "\n")
-			content = strings.TrimSuffix(content, "\n")
-			p.OnFile(p.currentPath, content)
+		if p.DiscardIncomplete {
+			// Stream ended mid-file — discard incomplete content
+			p.fileContent.Reset()
+			p.inFileBlock = false
+			p.currentPath = ""
+		} else {
+			// Legacy: emit partial file
+			p.fileContent.WriteString(p.buffer)
+			if p.OnFile != nil {
+				content := p.fileContent.String()
+				content = strings.TrimPrefix(content, "\n")
+				content = strings.TrimSuffix(content, "\n")
+				p.OnFile(p.currentPath, content)
+			}
+			p.fileContent.Reset()
+			p.inFileBlock = false
+			p.currentPath = ""
 		}
-		p.fileContent.Reset()
-		p.inFileBlock = false
-		p.currentPath = ""
 	} else if p.buffer != "" {
 		if p.OnText != nil {
 			p.OnText(p.buffer)
