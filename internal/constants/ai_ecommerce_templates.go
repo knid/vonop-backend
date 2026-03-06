@@ -48,7 +48,7 @@ export function ProductCard({ product, onQuickAdd }: ProductCardProps) {
 
   return (
     <Link href={"/products/" + product.slug} className="group block">
-      <div className="overflow-hidden rounded-2xl shadow-sm shadow-black/5 transition-shadow duration-300 hover:shadow-md">
+      <div className="overflow-hidden rounded-2xl shadow-sm shadow-black/5 transition-all duration-300 hover:shadow-lg hover:-translate-y-1">
         <div className="relative aspect-[3/4] overflow-hidden bg-muted">
           {image ? (
             <>
@@ -82,7 +82,7 @@ export function ProductCard({ product, onQuickAdd }: ProductCardProps) {
             </div>
           )}
           {onSale && !outOfStock && (
-            <div className="absolute left-2.5 top-2.5 rounded-full bg-foreground px-2.5 py-1 text-[11px] font-medium uppercase tracking-[0.15em] text-background backdrop-blur-sm">
+            <div className="absolute left-2.5 top-2.5 rounded-full bg-rose-500 px-2.5 py-1 text-[11px] font-medium uppercase tracking-[0.15em] text-white">
               Sale
             </div>
           )}
@@ -90,7 +90,7 @@ export function ProductCard({ product, onQuickAdd }: ProductCardProps) {
             <button
               onClick={handleQuickAdd}
               disabled={isAdding}
-              className={"absolute bottom-3 right-3 flex h-10 w-10 items-center justify-center rounded-full shadow-lg transition-all opacity-0 group-hover:opacity-100 disabled:opacity-50 " +
+              className={"absolute bottom-3 right-3 flex h-10 w-10 items-center justify-center rounded-full shadow-lg transition-all duration-200 opacity-0 translate-y-2 group-hover:opacity-100 group-hover:translate-y-0 disabled:opacity-50 " +
                 (addedToCart ? "bg-foreground text-background" : "bg-foreground text-background hover:opacity-90")}
               aria-label={"Add " + product.name + " to cart"}
             >
@@ -266,13 +266,16 @@ export function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
                   <span className="font-semibold">Total</span>
                   <span className="text-xl font-semibold tracking-tight">{formatPrice(cart.total_cents)}</span>
                 </div>
+                <p className="mb-3 text-center text-[11px] text-muted-foreground">
+                  Taxes and shipping calculated at checkout
+                </p>
                 <div className="flex flex-col gap-3">
                   <Link
                     href="/checkout"
                     onClick={onClose}
-                    className="flex w-full items-center justify-center rounded-full bg-foreground px-4 py-3 text-sm font-semibold text-background transition-opacity hover:opacity-90"
+                    className="flex w-full items-center justify-center gap-2 rounded-full bg-foreground px-4 py-3 text-sm font-semibold text-background transition-opacity hover:opacity-90"
                   >
-                    Checkout
+                    Secure Checkout
                   </Link>
                   <Link
                     href="/cart"
@@ -317,16 +320,16 @@ export function PriceDisplay({ product, size = "md", className = "" }: PriceDisp
 
   return (
     <div className={"flex flex-wrap items-center gap-2 " + className}>
-      <span className={sizeClasses[size] + " font-semibold " + (onSale ? "text-foreground" : "text-foreground")}>
+      <span className={sizeClasses[size] + " font-semibold " + (onSale ? "text-rose-600 dark:text-rose-400" : "text-foreground")}>
         {formatPrice(product.price_in_cents)}
       </span>
       {onSale && (
         <>
-          <span className={"text-muted-foreground/60 line-through decoration-muted-foreground/30 " + (size === "lg" ? "text-base" : "text-xs")}>
+          <span className={"text-muted-foreground/50 line-through decoration-muted-foreground/30 " + (size === "lg" ? "text-base" : "text-xs")}>
             {formatPrice(product.compare_at_price)}
           </span>
-          <span className="text-[11px] font-medium uppercase tracking-[0.15em] text-muted-foreground/60">
-            {pct + "% off"}
+          <span className="rounded-full bg-rose-100 px-2 py-0.5 text-[11px] font-semibold text-rose-600 dark:bg-rose-500/10 dark:text-rose-400">
+            {"-" + pct + "%"}
           </span>
         </>
       )}
@@ -464,18 +467,21 @@ export function ProductGallery({ images, productName }: ProductGalleryProps) {
           <>
             <button
               onClick={handlePrev}
-              className="absolute left-3 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-background/90 shadow-sm opacity-0 backdrop-blur-sm transition-opacity group-hover:opacity-100"
+              className="absolute left-3 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-background/90 shadow-sm opacity-0 backdrop-blur-sm transition-all group-hover:opacity-100 hover:bg-background"
               aria-label="Previous image"
             >
               <ChevronLeft className="h-4 w-4" />
             </button>
             <button
               onClick={handleNext}
-              className="absolute right-3 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-background/90 shadow-sm opacity-0 backdrop-blur-sm transition-opacity group-hover:opacity-100"
+              className="absolute right-3 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-background/90 shadow-sm opacity-0 backdrop-blur-sm transition-all group-hover:opacity-100 hover:bg-background"
               aria-label="Next image"
             >
               <ChevronRight className="h-4 w-4" />
             </button>
+            <div className="absolute bottom-3 left-3 rounded-full bg-background/80 px-2.5 py-1 text-[11px] font-medium tabular-nums text-foreground/80 backdrop-blur-sm opacity-0 transition-opacity group-hover:opacity-100">
+              {(selectedIndex + 1) + " / " + images.length}
+            </div>
           </>
         )}
       </div>
@@ -517,7 +523,7 @@ const ECOMMERCE_TEMPLATE_CHECKOUT_FORM = `"use client";
 
 import React from "react";
 import { useRouter } from "next/navigation";
-import { Loader2, AlertTriangle, Check } from "lucide-react";
+import { Loader2, AlertTriangle, Check, Mail, MapPin, CreditCard, ShieldCheck } from "lucide-react";
 import { useCart, useStoreConfig, renderPaymentForm, formatPrice, type CheckoutParams, type ShippingAddress } from "@/lib/wemob-store";
 import { OrderSummary } from "@/components/ecommerce/order-summary";
 
@@ -605,11 +611,28 @@ export function CheckoutForm() {
     );
   }
 
-  const inputClass = "w-full rounded-xl border border-border/50 bg-transparent px-4 py-2.5 text-sm outline-none transition-colors focus:border-foreground";
+  const inputClass = "w-full rounded-xl border border-border/50 bg-transparent px-4 py-3 text-sm outline-none transition-all focus:border-foreground focus:ring-1 focus:ring-foreground/20";
 
   return (
     <div className="grid gap-8 lg:grid-cols-[1fr_400px]">
       <form onSubmit={handleSubmit} className="space-y-6">
+        {/* Express Checkout */}
+        <div className="rounded-2xl border border-border/40 p-5">
+          <p className="mb-3 text-center text-xs font-medium uppercase tracking-[0.15em] text-muted-foreground">Express Checkout</p>
+          <div className="flex gap-3">
+            <button type="button" className="flex h-12 flex-1 items-center justify-center rounded-xl bg-black text-white text-sm font-medium transition-opacity hover:opacity-90 dark:bg-white dark:text-black">
+              Apple Pay
+            </button>
+            <button type="button" className="flex h-12 flex-1 items-center justify-center rounded-xl bg-[#ffc439] text-[#003087] text-sm font-semibold transition-opacity hover:opacity-90">
+              PayPal
+            </button>
+          </div>
+          <div className="relative my-5">
+            <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-border/40" /></div>
+            <div className="relative flex justify-center"><span className="bg-background px-3 text-xs text-muted-foreground">or continue with</span></div>
+          </div>
+        </div>
+
         {/* Step indicator */}
         <div className="flex items-center justify-center gap-0">
           {["Information", "Shipping", "Payment"].map((step, i) => (
@@ -629,7 +652,10 @@ export function CheckoutForm() {
         </div>
 
         <div className="rounded-2xl bg-muted/20 p-7">
-          <h2 className="mb-5 text-xs font-medium uppercase tracking-wider text-muted-foreground">Contact Information</h2>
+          <div className="mb-5 flex items-center gap-2">
+            <Mail className="h-4 w-4 text-muted-foreground" />
+            <h2 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Contact Information</h2>
+          </div>
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="sm:col-span-2">
               <label htmlFor="email" className="mb-1.5 block text-xs uppercase tracking-wider text-muted-foreground">Email</label>
@@ -643,7 +669,10 @@ export function CheckoutForm() {
         </div>
 
         <div className="rounded-2xl bg-muted/20 p-7">
-          <h2 className="mb-5 text-xs font-medium uppercase tracking-wider text-muted-foreground">Shipping Address</h2>
+          <div className="mb-5 flex items-center gap-2">
+            <MapPin className="h-4 w-4 text-muted-foreground" />
+            <h2 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Shipping Address</h2>
+          </div>
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="sm:col-span-2">
               <label htmlFor="line1" className="mb-1.5 block text-xs uppercase tracking-wider text-muted-foreground">Address Line 1</label>
@@ -674,7 +703,10 @@ export function CheckoutForm() {
 
         {providers.length > 0 ? (
           <div className="rounded-2xl bg-muted/20 p-7">
-            <h2 className="mb-5 text-xs font-medium uppercase tracking-wider text-muted-foreground">Payment Method</h2>
+            <div className="mb-5 flex items-center gap-2">
+              <CreditCard className="h-4 w-4 text-muted-foreground" />
+              <h2 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Payment Method</h2>
+            </div>
             <div className="space-y-3">
               {providers.map((p) => (
                 <label key={p} className={"flex cursor-pointer items-center gap-3 rounded-xl border p-4 transition-colors " + (selectedProvider === p ? "border-foreground bg-foreground/5" : "border-border/40 hover:bg-muted/30")}>
@@ -707,6 +739,11 @@ export function CheckoutForm() {
         </button>
 
         <div ref={paymentFormRef} />
+
+        <div className="flex items-center justify-center gap-1.5 text-xs text-muted-foreground/60">
+          <ShieldCheck className="h-3.5 w-3.5" />
+          <span>Your information is encrypted and secure</span>
+        </div>
       </form>
 
       <div className="lg:sticky lg:top-4 lg:self-start">
@@ -913,9 +950,13 @@ export function EmptyState({ icon, title, description, action }: EmptyStateProps
       className="flex flex-col items-center justify-center py-20 text-center"
     >
       {icon && (
-        <div className="mb-5 flex h-20 w-20 items-center justify-center rounded-full bg-muted/50 text-muted-foreground/40">
+        <motion.div
+          animate={{ scale: [1, 1.04, 1] }}
+          transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
+          className="mb-5 flex h-20 w-20 items-center justify-center rounded-full bg-muted/50 text-muted-foreground/40"
+        >
           {icon}
-        </div>
+        </motion.div>
       )}
       <h3 className="mb-1.5 text-lg font-semibold tracking-tight text-foreground">{title}</h3>
       {description && <p className="mb-5 max-w-sm text-sm text-muted-foreground">{description}</p>}
@@ -996,20 +1037,40 @@ export function ReviewList({ productSlug }: ReviewListProps) {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
+      <div className="flex flex-col gap-6 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex-1">
           <h3 className="text-xl font-semibold tracking-tight">Customer Reviews</h3>
           {reviewCount > 0 && (
-            <div className="mt-1.5 flex items-center gap-2">
-              <StarRating rating={Math.round(averageRating)} size="md" />
-              <span className="text-sm text-muted-foreground">
-                {averageRating.toFixed(1)} out of 5 ({reviewCount} review{reviewCount !== 1 ? "s" : ""})
-              </span>
+            <div className="mt-3 flex flex-col gap-4 sm:flex-row sm:items-center sm:gap-8">
+              <div className="flex items-center gap-3">
+                <span className="text-4xl font-bold tracking-tight text-foreground">{averageRating.toFixed(1)}</span>
+                <div>
+                  <StarRating rating={Math.round(averageRating)} size="md" />
+                  <p className="mt-0.5 text-xs text-muted-foreground">{reviewCount} review{reviewCount !== 1 ? "s" : ""}</p>
+                </div>
+              </div>
+              {/* Rating Distribution */}
+              <div className="flex-1 space-y-1.5">
+                {[5, 4, 3, 2, 1].map((star) => {
+                  const count = reviews.filter((r) => r.rating === star).length;
+                  const pct = reviewCount > 0 ? (count / reviewCount) * 100 : 0;
+                  return (
+                    <div key={star} className="flex items-center gap-2 text-xs">
+                      <span className="w-3 text-right text-muted-foreground">{star}</span>
+                      <Star className="h-3 w-3 fill-foreground text-foreground" />
+                      <div className="h-2 flex-1 overflow-hidden rounded-full bg-muted/50">
+                        <div className="h-full rounded-full bg-foreground transition-all duration-500" style={{ width: pct + "%" }} />
+                      </div>
+                      <span className="w-8 text-right text-muted-foreground">{count}</span>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           )}
         </div>
         {!showForm && !submitted && (
-          <button onClick={() => setShowForm(true)} className="rounded-full border border-foreground px-5 py-2 text-sm font-medium text-foreground transition-colors hover:bg-foreground hover:text-background">
+          <button onClick={() => setShowForm(true)} className="flex-shrink-0 rounded-full border border-foreground px-5 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-foreground hover:text-background">
             Write a Review
           </button>
         )}
@@ -1075,20 +1136,27 @@ export function ReviewList({ productSlug }: ReviewListProps) {
               transition={{ delay: idx * 0.05 }}
               className="rounded-xl bg-muted/20 p-5"
             >
-              <div className="mb-2 flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <StarRating rating={review.rating} />
-                  {review.is_verified && (
-                    <span className="rounded-full bg-foreground/10 px-2 py-0.5 text-[11px] font-medium uppercase tracking-wider text-foreground/70">Verified</span>
-                  )}
+              <div className="mb-3 flex items-start justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-muted text-sm font-semibold text-muted-foreground">
+                    {review.customer_name.charAt(0).toUpperCase()}
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium text-foreground">{review.customer_name}</span>
+                      {review.is_verified && (
+                        <span className="rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-medium text-green-700 dark:bg-green-500/10 dark:text-green-400">Verified</span>
+                      )}
+                    </div>
+                    <StarRating rating={review.rating} />
+                  </div>
                 </div>
                 <span className="text-xs text-muted-foreground">
                   {new Date(review.created_at).toLocaleDateString()}
                 </span>
               </div>
               {review.title && <h4 className="mb-1 font-medium">{review.title}</h4>}
-              {review.body && <p className="text-sm text-muted-foreground">{review.body}</p>}
-              <p className="mt-2 text-xs text-muted-foreground">by {review.customer_name}</p>
+              {review.body && <p className="text-sm leading-relaxed text-muted-foreground">{review.body}</p>}
             </motion.div>
           ))}
         </div>
@@ -1140,8 +1208,8 @@ export function WishlistButton({ productId, size = "md", className = "" }: Wishl
       whileTap={{ scale: 0.85 }}
       animate={active ? { scale: [1, 1.15, 1] } : {}}
       transition={{ duration: 0.3 }}
-      className={"flex items-center justify-center rounded-full shadow-sm transition-all bg-background/80 backdrop-blur-sm " +
-        (active ? "text-red-500" : "text-muted-foreground hover:text-red-500") +
+      className={"flex items-center justify-center rounded-full transition-all bg-background/80 backdrop-blur-sm " +
+        (active ? "text-red-500 shadow-md shadow-red-500/20" : "shadow-sm text-muted-foreground hover:text-red-500") +
         " " + btnSize + " " + className}
       aria-label={active ? "Remove from wishlist" : "Add to wishlist"}
     >
@@ -1156,7 +1224,7 @@ const ECOMMERCE_TEMPLATE_SITE_HEADER = `"use client";
 import React, { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ShoppingBag, Search, Menu, X, ChevronDown } from "lucide-react";
+import { ShoppingBag, Search, Menu, X, ChevronDown, User } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useCart, useCategories, useStoreConfig } from "@/lib/wemob-store";
 import { CartDrawer } from "@/components/ecommerce/cart-drawer";
@@ -1172,7 +1240,11 @@ export function SiteHeader() {
   const [scrolled, setScrolled] = useState(false);
   const [shopOpen, setShopOpen] = useState(false);
   const [mobileShopOpen, setMobileShopOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [announcementVisible, setAnnouncementVisible] = useState(true);
   const shopTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const handleScroll = () => setScrolled(window.scrollY > 10);
@@ -1183,7 +1255,12 @@ export function SiteHeader() {
   useEffect(() => {
     setMobileMenuOpen(false);
     setMobileShopOpen(false);
+    setSearchOpen(false);
   }, [pathname]);
+
+  useEffect(() => {
+    if (searchOpen && searchInputRef.current) searchInputRef.current.focus();
+  }, [searchOpen]);
 
   const navLinks = [
     { label: "Home", href: "/" },
@@ -1215,15 +1292,43 @@ export function SiteHeader() {
 
   return (
     <>
+      {/* Announcement Bar */}
+      <AnimatePresence>
+        {announcementVisible && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="relative z-50 overflow-hidden bg-foreground text-background"
+          >
+            <div className="flex items-center justify-center px-4 py-2 text-center text-xs font-medium tracking-wide sm:text-sm">
+              <span>Free shipping on orders over $50</span>
+              <span className="mx-2 hidden text-background/40 sm:inline">|</span>
+              <Link href="/products" className="hidden underline underline-offset-2 transition-opacity hover:opacity-80 sm:inline">
+                Shop Now
+              </Link>
+              <button
+                onClick={() => setAnnouncementVisible(false)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full p-0.5 transition-opacity hover:opacity-70"
+                aria-label="Dismiss announcement"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <header
         className={
           "sticky top-0 z-50 w-full transition-all duration-300 " +
           (scrolled
-            ? "bg-background/80 backdrop-blur-md border-b border-border/30 shadow-sm"
-            : "bg-background")
+            ? "bg-background/80 backdrop-blur-xl border-b border-border/30 shadow-sm"
+            : "bg-background border-b border-transparent")
         }
       >
-        <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
+        <div className={"mx-auto flex max-w-7xl items-center justify-between px-4 transition-all duration-300 sm:px-6 lg:px-8 " + (scrolled ? "h-14" : "h-16")}>
           <Link href="/" className="text-xl font-bold tracking-tight text-foreground">
             {storeConfig?.name}
           </Link>
@@ -1315,13 +1420,59 @@ export function SiteHeader() {
             ))}
           </nav>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1">
+            {/* Inline Search */}
+            <div className="relative hidden md:block">
+              <AnimatePresence>
+                {searchOpen && (
+                  <motion.div
+                    initial={{ width: 0, opacity: 0 }}
+                    animate={{ width: 220, opacity: 1 }}
+                    exit={{ width: 0, opacity: 0 }}
+                    transition={{ duration: 0.2 }}
+                    className="absolute right-0 top-1/2 -translate-y-1/2 overflow-hidden"
+                  >
+                    <form action="/products" method="get" className="flex items-center">
+                      <input
+                        ref={searchInputRef}
+                        name="q"
+                        type="text"
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        placeholder="Search..."
+                        className="h-9 w-full rounded-full border border-border/60 bg-muted/30 pl-4 pr-9 text-sm text-foreground placeholder:text-muted-foreground focus:border-foreground focus:outline-none"
+                      />
+                      <button type="button" onClick={() => { setSearchOpen(false); setSearchQuery(""); }} className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 text-muted-foreground hover:text-foreground">
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </form>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+              {!searchOpen && (
+                <button
+                  onClick={() => setSearchOpen(true)}
+                  className="flex h-10 w-10 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground"
+                  aria-label="Search products"
+                >
+                  <Search className="h-5 w-5" />
+                </button>
+              )}
+            </div>
             <Link
               href="/products?q="
-              className="flex h-10 w-10 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground"
+              className="flex h-10 w-10 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground md:hidden"
               aria-label="Search products"
             >
               <Search className="h-5 w-5" />
+            </Link>
+
+            <Link
+              href="/account"
+              className="hidden h-10 w-10 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground sm:flex"
+              aria-label="Account"
+            >
+              <User className="h-5 w-5" />
             </Link>
 
             <button
@@ -1330,11 +1481,19 @@ export function SiteHeader() {
               aria-label="Open cart"
             >
               <ShoppingBag className="h-5 w-5" />
-              {itemCount > 0 && (
-                <span className="absolute -right-0.5 -top-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-foreground text-[10px] font-semibold text-background">
-                  {itemCount > 99 ? "99+" : itemCount}
-                </span>
-              )}
+              <AnimatePresence>
+                {itemCount > 0 && (
+                  <motion.span
+                    key={itemCount}
+                    initial={{ scale: 0 }}
+                    animate={{ scale: 1 }}
+                    exit={{ scale: 0 }}
+                    className="absolute -right-0.5 -top-0.5 flex h-4.5 w-4.5 items-center justify-center rounded-full bg-foreground text-[10px] font-semibold text-background"
+                  >
+                    {itemCount > 99 ? "99+" : itemCount}
+                  </motion.span>
+                )}
+              </AnimatePresence>
             </button>
 
             <button
@@ -1434,6 +1593,7 @@ export function SiteHeader() {
 const ECOMMERCE_TEMPLATE_SITE_FOOTER = `"use client";
 
 import Link from "next/link";
+import { ArrowUp } from "lucide-react";
 import { useCategories, useStoreConfig } from "@/lib/wemob-store";
 
 export function SiteFooter() {
@@ -1593,9 +1753,31 @@ export function SiteFooter() {
         </div>
 
         <div className="mt-16 border-t border-border/40 pt-8">
-          <p className="text-center text-xs text-muted-foreground/60">
-            &copy; {new Date().getFullYear()} {storeConfig?.name}. All rights reserved.
-          </p>
+          <div className="flex flex-col items-center gap-6 sm:flex-row sm:justify-between">
+            <p className="text-xs text-muted-foreground/60">
+              &copy; {new Date().getFullYear()} {storeConfig?.name}. All rights reserved.
+            </p>
+
+            {/* Payment method icons */}
+            <div className="flex items-center gap-3">
+              <span className="mr-1 text-[10px] uppercase tracking-wider text-muted-foreground/40">We accept</span>
+              <svg className="h-6 w-auto text-muted-foreground/50" viewBox="0 0 48 32" fill="none"><rect width="48" height="32" rx="4" fill="currentColor" opacity="0.1"/><path d="M19.5 20.5l2-9h3l-2 9h-3zm13-9l-3 6.2-.4-2-1-5.4s-.1-.8-1.2-.8h-4.7l-.1.3s1.4.3 3 1.3l2.3 8.4h3.1l4.7-8h-2.7zm-19 0l-3 9h-3.2l-1.8-7.2c-.1-.4-.2-.6-.5-.7-.6-.3-1.5-.6-2.3-.8l.1-.3h4.8c.6 0 1.2.4 1.3 1.2l1.2 6.2 2.9-7.4h3.5zm26.2 6.2c0-2.5-3.4-2.6-3.4-3.7 0-.3.3-.7 1.1-.8.4 0 1.5-.1 2.7.5l.5-2.2c-.7-.2-1.5-.5-2.6-.5-2.7 0-4.7 1.5-4.7 3.6 0 1.6 1.4 2.4 2.4 3 1.1.5 1.4.8 1.4 1.3 0 .7-.8 1-1.6 1-.7 0-1.9-.3-2.5-.5l-.5 2.2c.6.3 1.6.5 2.7.5 2.9 0 4.8-1.4 4.8-3.7l-.3.3z" fill="currentColor" opacity="0.5"/></svg>
+              <svg className="h-6 w-auto text-muted-foreground/50" viewBox="0 0 48 32" fill="none"><rect width="48" height="32" rx="4" fill="currentColor" opacity="0.1"/><circle cx="19" cy="16" r="8" fill="currentColor" opacity="0.2"/><circle cx="29" cy="16" r="8" fill="currentColor" opacity="0.3"/></svg>
+              <svg className="h-6 w-auto text-muted-foreground/50" viewBox="0 0 48 32" fill="none"><rect width="48" height="32" rx="4" fill="currentColor" opacity="0.1"/><text x="24" y="20" textAnchor="middle" fontSize="10" fontWeight="bold" fill="currentColor" opacity="0.4">AMEX</text></svg>
+              <svg className="h-6 w-auto text-muted-foreground/50" viewBox="0 0 48 32" fill="none"><rect width="48" height="32" rx="4" fill="currentColor" opacity="0.1"/><text x="24" y="19" textAnchor="middle" fontSize="8" fontWeight="600" fontStyle="italic" fill="currentColor" opacity="0.4">PayPal</text></svg>
+            </div>
+          </div>
+
+          {/* Back to top */}
+          <div className="mt-6 flex justify-center">
+            <button
+              onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
+              className="flex items-center gap-1.5 text-xs text-muted-foreground/50 transition-colors hover:text-muted-foreground"
+            >
+              <ArrowUp className="h-3.5 w-3.5" />
+              Back to top
+            </button>
+          </div>
         </div>
       </div>
     </footer>
@@ -1644,14 +1826,18 @@ export function NewsletterSection() {
   };
 
   return (
-    <section className="py-20 sm:py-28">
-      <div className="mx-auto max-w-2xl px-4 text-center sm:px-6 lg:px-8">
+    <section className="relative overflow-hidden py-20 sm:py-28">
+      <div className="absolute inset-0 bg-gradient-to-b from-muted/40 via-muted/20 to-transparent" />
+      <div className="relative mx-auto max-w-2xl px-4 text-center sm:px-6 lg:px-8">
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true }}
           transition={{ duration: 0.5 }}
         >
+          <p className="mb-4 text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
+            Join 10,000+ happy customers
+          </p>
           <h2 className="text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
             Stay in the Loop
           </h2>
@@ -1720,11 +1906,12 @@ const ECOMMERCE_TEMPLATE_CART_PAGE = `"use client";
 
 import React, { useState } from "react";
 import Link from "next/link";
-import { ShoppingBag, ArrowLeft, Check } from "lucide-react";
+import { ShoppingBag, ArrowLeft, Check, Lock, Truck } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import { useCart, formatPrice } from "@/lib/wemob-store";
+import { useCart, useProducts, formatPrice } from "@/lib/wemob-store";
 import { CartItemRow } from "@/components/ecommerce/cart-item-row";
 import { OrderSummary } from "@/components/ecommerce/order-summary";
+import { ProductCard } from "@/components/ecommerce/product-card";
 import { EmptyState } from "@/components/ecommerce/empty-state";
 
 // Free shipping threshold in cents — change to match your store
@@ -1732,10 +1919,14 @@ const FREE_SHIPPING_THRESHOLD = 5000;
 
 export default function CartPage() {
   const { cart, isLoading, itemCount, applyDiscount, removeDiscountCode } = useCart();
+  const { products: allProducts } = useProducts();
 
   const [discountCode, setDiscountCode] = useState("");
   const [discountLoading, setDiscountLoading] = useState(false);
   const [discountError, setDiscountError] = useState("");
+
+  const cartProductIds = cart?.items.map((i) => i.product_id) ?? [];
+  const suggestions = allProducts?.filter((p) => !cartProductIds.includes(p.id) && p.in_stock !== false).slice(0, 4) ?? [];
 
   const handleApplyDiscount = async () => {
     if (!discountCode.trim()) return;
@@ -1875,16 +2066,35 @@ export default function CartPage() {
           )}
         </div>
 
-        <div className="mt-8 lg:mt-0">
+        <div className="mt-8 lg:mt-0 lg:sticky lg:top-24 lg:self-start">
           <OrderSummary cart={cart} />
           <Link
             href="/checkout"
-            className="mt-4 flex h-14 w-full items-center justify-center rounded-full bg-foreground text-sm font-semibold text-background transition-opacity hover:opacity-90"
+            className="mt-4 flex h-14 w-full items-center justify-center gap-2 rounded-full bg-foreground text-sm font-semibold text-background transition-opacity hover:opacity-90"
           >
-            Proceed to Checkout
+            <Lock className="h-4 w-4" />
+            Secure Checkout
           </Link>
+          <div className="mt-3 flex items-center justify-center gap-4 text-xs text-muted-foreground">
+            <div className="flex items-center gap-1">
+              <Truck className="h-3.5 w-3.5" />
+              <span>Free shipping over $50</span>
+            </div>
+          </div>
         </div>
       </div>
+
+      {/* You Might Also Like */}
+      {suggestions.length > 0 && (
+        <div className="mt-16 border-t border-border/40 pt-12">
+          <h2 className="text-xl font-semibold tracking-tight text-foreground">You Might Also Like</h2>
+          <div className="mt-6 grid grid-cols-2 gap-6 sm:gap-8 lg:grid-cols-4">
+            {suggestions.map((p) => (
+              <ProductCard key={p.id} product={p} />
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1894,29 +2104,45 @@ const ECOMMERCE_TEMPLATE_CHECKOUT_PAGE = `"use client";
 
 import React from "react";
 import Link from "next/link";
-import { ArrowLeft, Check } from "lucide-react";
+import { ArrowLeft, Check, Lock, Shield } from "lucide-react";
 import { motion } from "framer-motion";
 import { CheckoutForm } from "@/components/ecommerce/checkout-form";
 
 export default function CheckoutPage() {
+  var steps = ["Cart", "Information", "Payment"];
+
   return (
     <div className="mx-auto max-w-4xl px-4 py-12 sm:px-6 sm:py-16 lg:px-8">
-      {/* Step progress */}
-      <div className="mb-10 flex items-center justify-center gap-0">
-        {["Cart", "Information", "Payment"].map((step, i) => (
-          <React.Fragment key={step}>
-            {i > 0 && <div className={"mx-2 h-px w-8 sm:mx-3 sm:w-12 " + (i <= 1 ? "bg-foreground" : "bg-border/40")} />}
-            <div className="flex items-center gap-1.5">
-              <div className={"flex h-7 w-7 items-center justify-center rounded-full text-xs font-medium " +
-                (i < 1 ? "bg-foreground/10 text-foreground" : i === 1 ? "bg-foreground text-background" : "border border-border/40 text-muted-foreground/60")}>
-                {i < 1 ? <Check className="h-3.5 w-3.5" /> : i + 1}
-              </div>
-              <span className={"hidden text-sm sm:block " + (i === 1 ? "font-medium text-foreground" : "text-muted-foreground/60")}>
-                {step}
-              </span>
-            </div>
-          </React.Fragment>
-        ))}
+      {/* Security trust bar */}
+      <div className="mb-8 flex items-center justify-center gap-2 rounded-xl bg-muted/20 px-4 py-3 text-center text-xs text-muted-foreground">
+        <Lock className="h-3.5 w-3.5 flex-shrink-0" />
+        <span>Secure Checkout \u2014 Your information is encrypted and protected</span>
+      </div>
+
+      {/* Step progress with connecting lines and checkmarks */}
+      <div className="mb-10">
+        <div className="flex items-center justify-center">
+          {steps.map(function(step, i) {
+            var isCompleted = i < 1;
+            var isCurrent = i === 1;
+            return (
+              <React.Fragment key={step}>
+                {i > 0 && (
+                  <div className={"mx-1 h-0.5 w-10 rounded-full sm:mx-2 sm:w-16 " + (isCompleted ? "bg-foreground" : "bg-border/40")} />
+                )}
+                <div className="flex items-center gap-2">
+                  <div className={"flex h-8 w-8 items-center justify-center rounded-full text-xs font-semibold transition-colors " +
+                    (isCompleted ? "bg-foreground text-background" : isCurrent ? "bg-foreground text-background ring-4 ring-foreground/10" : "border-2 border-border/40 text-muted-foreground/50")}>
+                    {isCompleted ? <Check className="h-4 w-4" /> : i + 1}
+                  </div>
+                  <span className={"hidden text-sm sm:block " + (isCurrent ? "font-semibold text-foreground" : isCompleted ? "font-medium text-foreground" : "text-muted-foreground/50")}>
+                    {step}
+                  </span>
+                </div>
+              </React.Fragment>
+            );
+          })}
+        </div>
       </div>
 
       <nav className="mb-6">
@@ -1936,6 +2162,18 @@ export default function CheckoutPage() {
 
       <div className="mt-8">
         <CheckoutForm />
+      </div>
+
+      {/* Bottom trust indicators */}
+      <div className="mt-8 flex flex-wrap items-center justify-center gap-6 text-xs text-muted-foreground/50">
+        <div className="flex items-center gap-1.5">
+          <Shield className="h-3.5 w-3.5" />
+          <span>SSL Encrypted</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <Lock className="h-3.5 w-3.5" />
+          <span>Secure Payment</span>
+        </div>
       </div>
     </div>
   );
@@ -2066,12 +2304,40 @@ export default function CheckoutSuccessPage() {
         </div>
       </div>
 
-      <Link
-        href="/products"
-        className="mt-8 inline-flex h-11 items-center rounded-full bg-foreground px-6 text-sm font-medium text-background transition-opacity hover:opacity-90"
-      >
-        Continue Shopping
-      </Link>
+      {/* What Happens Next */}
+      <div className="mt-10 rounded-xl bg-muted/20 p-6 text-left">
+        <h3 className="mb-4 text-sm font-medium uppercase tracking-[0.15em] text-muted-foreground">What Happens Next</h3>
+        <div className="space-y-4">
+          {[
+            { step: "1", title: "Order Confirmed", desc: "We have received your order and are preparing it." },
+            { step: "2", title: "Processing", desc: "Your items are being packed with care." },
+            { step: "3", title: "Shipped", desc: "You will receive a tracking number via email." },
+            { step: "4", title: "Delivered", desc: "Your order arrives at your doorstep." },
+          ].map((item, i) => (
+            <div key={item.step} className="flex items-start gap-3">
+              <div className={"flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-xs font-semibold " + (i === 0 ? "bg-green-100 text-green-700 dark:bg-green-500/10 dark:text-green-400" : "bg-muted text-muted-foreground")}>
+                {i === 0 ? <CheckCircle className="h-4 w-4" /> : item.step}
+              </div>
+              <div>
+                <p className={"text-sm font-medium " + (i === 0 ? "text-foreground" : "text-muted-foreground")}>{item.title}</p>
+                <p className="text-xs text-muted-foreground/70">{item.desc}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="mt-8 flex flex-col items-center gap-3">
+        <Link
+          href="/products"
+          className="inline-flex h-11 items-center rounded-full bg-foreground px-6 text-sm font-medium text-background transition-opacity hover:opacity-90"
+        >
+          Continue Shopping
+        </Link>
+        <Link href="/contact" className="text-sm text-muted-foreground underline underline-offset-4 transition-colors hover:text-foreground">
+          Need help with your order?
+        </Link>
+      </div>
     </div>
   );
 }
@@ -2079,41 +2345,101 @@ export default function CheckoutSuccessPage() {
 
 const ECOMMERCE_TEMPLATE_CHECKOUT_CANCEL_PAGE = `"use client";
 
+import React, { useState } from "react";
 import Link from "next/link";
-import { XCircle } from "lucide-react";
-import { motion } from "framer-motion";
+import { XCircle, ChevronDown, MessageCircle } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
 
 export default function CheckoutCancelPage() {
+  var faqs = [
+    { q: "Why was my payment cancelled?", a: "Payments can be cancelled if you close the payment window, if there are insufficient funds, or if your bank declined the transaction. No charges have been made to your account." },
+    { q: "Was I charged?", a: "No. If a payment is cancelled, no charges are applied. If you see a pending charge, it will be automatically reversed within 3\u20135 business days." },
+    { q: "Can I use a different payment method?", a: "Yes. When you try again, you can select a different payment method at checkout." },
+    { q: "Is my cart still saved?", a: "Yes. Your cart items are saved and will be available when you return to checkout." },
+  ];
+
+  var [openFaq, setOpenFaq] = useState<number | null>(null);
+
   return (
-    <div className="flex min-h-[50vh] flex-col items-center justify-center px-4 py-16 text-center">
-      <motion.div
-        initial={{ scale: 0 }}
-        animate={{ scale: 1 }}
-        transition={{ type: "spring", stiffness: 200, damping: 15 }}
-        className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-muted/50"
-      >
-        <XCircle className="h-8 w-8 text-muted-foreground" />
-      </motion.div>
-
-      <h1 className="mt-6 text-2xl font-semibold tracking-tight text-foreground">
-        Payment Cancelled
-      </h1>
-      <p className="mx-auto mt-2 max-w-md text-muted-foreground">
-        Your payment was not completed. You can try again or continue shopping.
-      </p>
-
-      <div className="mt-8 flex flex-col gap-3 sm:flex-row">
-        <Link
-          href="/checkout"
-          className="inline-flex h-11 items-center justify-center rounded-full bg-foreground px-6 text-sm font-medium text-background transition-opacity hover:opacity-90"
+    <div className="mx-auto max-w-lg px-4 py-16 sm:px-6 sm:py-20">
+      <div className="text-center">
+        <motion.div
+          initial={{ scale: 0 }}
+          animate={{ scale: 1 }}
+          transition={{ type: "spring", stiffness: 200, damping: 15 }}
+          className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-muted/50"
         >
-          Try Again
-        </Link>
+          <XCircle className="h-8 w-8 text-muted-foreground" />
+        </motion.div>
+
+        <h1 className="mt-6 text-2xl font-semibold tracking-tight text-foreground">
+          Payment Cancelled
+        </h1>
+        <p className="mx-auto mt-2 max-w-md text-muted-foreground">
+          Your payment was not completed. Your cart is still saved and no charges were made.
+        </p>
+
+        <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:justify-center">
+          <Link
+            href="/checkout"
+            className="inline-flex h-11 items-center justify-center rounded-full bg-foreground px-6 text-sm font-medium text-background transition-opacity hover:opacity-90"
+          >
+            Try Again
+          </Link>
+          <Link
+            href="/products"
+            className="inline-flex h-11 items-center justify-center rounded-full border border-border/60 px-6 text-sm font-medium text-foreground transition-colors hover:bg-muted"
+          >
+            Continue Shopping
+          </Link>
+        </div>
+      </div>
+
+      {/* FAQ Section */}
+      <div className="mt-12 border-t border-border/40 pt-10">
+        <h2 className="mb-5 text-center text-sm font-medium uppercase tracking-[0.15em] text-muted-foreground">
+          Common Questions
+        </h2>
+        <div className="space-y-2">
+          {faqs.map(function(faq, i) {
+            return (
+              <div key={i} className="rounded-xl border border-border/40 bg-muted/10">
+                <button
+                  onClick={function() { setOpenFaq(openFaq === i ? null : i); }}
+                  className="flex w-full items-center justify-between px-5 py-4 text-left text-sm font-medium text-foreground"
+                >
+                  {faq.q}
+                  <ChevronDown className={"h-4 w-4 flex-shrink-0 text-muted-foreground transition-transform duration-200 " + (openFaq === i ? "rotate-180" : "")} />
+                </button>
+                <AnimatePresence>
+                  {openFaq === i && (
+                    <motion.div
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: "auto", opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      transition={{ duration: 0.2 }}
+                      className="overflow-hidden"
+                    >
+                      <p className="px-5 pb-4 text-sm leading-relaxed text-muted-foreground">
+                        {faq.a}
+                      </p>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Support link */}
+      <div className="mt-8 text-center">
         <Link
-          href="/products"
-          className="inline-flex h-11 items-center justify-center rounded-full border border-border/60 px-6 text-sm font-medium text-foreground transition-colors hover:bg-muted"
+          href="/contact"
+          className="inline-flex items-center gap-1.5 text-sm text-muted-foreground underline underline-offset-4 transition-colors hover:text-foreground"
         >
-          Continue Shopping
+          <MessageCircle className="h-3.5 w-3.5" />
+          Contact Support
         </Link>
       </div>
     </div>
@@ -2126,7 +2452,7 @@ const ECOMMERCE_TEMPLATE_PRODUCTS_PAGE = `"use client";
 import React, { useState, useMemo } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { Search, SlidersHorizontal, ChevronDown, LayoutGrid, List, X, ShoppingBag } from "lucide-react";
+import { Search, SlidersHorizontal, ChevronDown, ChevronRight, LayoutGrid, List, X, ShoppingBag } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useProducts, useCategories, formatPrice } from "@/lib/wemob-store";
 import { ProductCard } from "@/components/ecommerce/product-card";
@@ -2158,6 +2484,11 @@ export default function ProductsPage() {
   const [priceMax, setPriceMax] = useState("");
   const [onSaleOnly, setOnSaleOnly] = useState(false);
   const [inStockOnly, setInStockOnly] = useState(false);
+  const [openSections, setOpenSections] = useState<Record<string, boolean>>({ categories: true, price: true, filters: true });
+
+  const toggleSection = (key: string) => {
+    setOpenSections((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
 
   const sortLabels: Record<SortOption, string> = {
     featured: "Featured",
@@ -2236,36 +2567,52 @@ export default function ProductsPage() {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search products..."
-          className="h-10 w-full rounded-lg border border-border bg-background pl-10 pr-4 text-sm text-foreground placeholder:text-muted-foreground focus:border-foreground focus:outline-none"
+          className="h-10 w-full rounded-lg border border-border bg-background pl-10 pr-9 text-sm text-foreground placeholder:text-muted-foreground focus:border-foreground focus:outline-none"
         />
+        {search && (
+          <button onClick={() => setSearch("")} className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded-full p-0.5 text-muted-foreground hover:text-foreground" aria-label="Clear search">
+            <X className="h-3.5 w-3.5" />
+          </button>
+        )}
       </div>
 
       {categories && categories.length > 0 && (
         <div>
-          <h3 className="text-sm font-semibold text-foreground">Categories</h3>
-          <div className="mt-3 space-y-0.5">
+          <button onClick={() => toggleSection("categories")} className="flex w-full items-center justify-between text-sm font-semibold text-foreground">
+            Categories
+            <ChevronRight className={"h-4 w-4 text-muted-foreground transition-transform duration-200 " + (openSections.categories ? "rotate-90" : "")} />
+          </button>
+          <div className={"mt-3 space-y-0.5 " + (openSections.categories ? "" : "hidden")}>
             <button
               onClick={() => setSelectedCategory(null)}
-              className={"block w-full rounded-lg px-3 py-2 text-left text-sm transition-colors " + (selectedCategory === null ? "bg-muted font-medium text-foreground" : "text-muted-foreground hover:text-foreground")}
+              className={"flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm transition-colors " + (selectedCategory === null ? "bg-muted font-medium text-foreground" : "text-muted-foreground hover:text-foreground")}
             >
-              All Categories
+              <span>All Categories</span>
+              <span className="text-xs text-muted-foreground/50">{(products ?? []).length}</span>
             </button>
-            {categories.map((cat) => (
-              <button
-                key={cat.id}
-                onClick={() => setSelectedCategory(selectedCategory === cat.slug ? null : cat.slug)}
-                className={"block w-full rounded-lg px-3 py-2 text-left text-sm transition-colors " + (selectedCategory === cat.slug ? "bg-muted font-medium text-foreground" : "text-muted-foreground hover:text-foreground")}
-              >
-                {cat.name}
-              </button>
-            ))}
+            {categories.map((cat) => {
+              var catCount = (products ?? []).filter((p) => p.category === cat.name).length;
+              return (
+                <button
+                  key={cat.id}
+                  onClick={() => setSelectedCategory(selectedCategory === cat.slug ? null : cat.slug)}
+                  className={"flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm transition-colors " + (selectedCategory === cat.slug ? "bg-muted font-medium text-foreground" : "text-muted-foreground hover:text-foreground")}
+                >
+                  <span>{cat.name}</span>
+                  <span className="text-xs text-muted-foreground/50">{catCount}</span>
+                </button>
+              );
+            })}
           </div>
         </div>
       )}
 
       <div>
-        <h3 className="text-sm font-semibold text-foreground">Price Range</h3>
-        <div className="mt-3 flex items-center gap-2">
+        <button onClick={() => toggleSection("price")} className="flex w-full items-center justify-between text-sm font-semibold text-foreground">
+          Price Range
+          <ChevronRight className={"h-4 w-4 text-muted-foreground transition-transform duration-200 " + (openSections.price ? "rotate-90" : "")} />
+        </button>
+        <div className={"mt-3 flex items-center gap-2 " + (openSections.price ? "" : "hidden")}
           <input
             type="number"
             value={priceMin}
@@ -2287,8 +2634,11 @@ export default function ProductsPage() {
       </div>
 
       <div>
-        <h3 className="text-sm font-semibold text-foreground">Filters</h3>
-        <div className="mt-3 space-y-3">
+        <button onClick={() => toggleSection("filters")} className="flex w-full items-center justify-between text-sm font-semibold text-foreground">
+          Filters
+          <ChevronRight className={"h-4 w-4 text-muted-foreground transition-transform duration-200 " + (openSections.filters ? "rotate-90" : "")} />
+        </button>
+        <div className={"mt-3 space-y-3 " + (openSections.filters ? "" : "hidden")}
           <label className="flex cursor-pointer items-center gap-3">
             <input
               type="checkbox"
@@ -2403,6 +2753,44 @@ export default function ProductsPage() {
           </button>
         </div>
       </div>
+
+      {/* Active Filter Chips */}
+      {activeFilterCount > 0 && (
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          {selectedCategory && (
+            <button
+              onClick={() => setSelectedCategory(null)}
+              className="inline-flex items-center gap-1 rounded-full bg-foreground/10 px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-foreground/20"
+            >
+              {categories?.find((c) => c.slug === selectedCategory)?.name || selectedCategory}
+              <X className="h-3 w-3" />
+            </button>
+          )}
+          {priceMin && (
+            <button onClick={() => setPriceMin("")} className="inline-flex items-center gap-1 rounded-full bg-foreground/10 px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-foreground/20">
+              {"Min: $" + priceMin} <X className="h-3 w-3" />
+            </button>
+          )}
+          {priceMax && (
+            <button onClick={() => setPriceMax("")} className="inline-flex items-center gap-1 rounded-full bg-foreground/10 px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-foreground/20">
+              {"Max: $" + priceMax} <X className="h-3 w-3" />
+            </button>
+          )}
+          {onSaleOnly && (
+            <button onClick={() => setOnSaleOnly(false)} className="inline-flex items-center gap-1 rounded-full bg-rose-100 px-3 py-1.5 text-xs font-medium text-rose-700 transition-colors hover:bg-rose-200 dark:bg-rose-500/10 dark:text-rose-400">
+              On Sale <X className="h-3 w-3" />
+            </button>
+          )}
+          {inStockOnly && (
+            <button onClick={() => setInStockOnly(false)} className="inline-flex items-center gap-1 rounded-full bg-foreground/10 px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-foreground/20">
+              In Stock <X className="h-3 w-3" />
+            </button>
+          )}
+          <button onClick={clearFilters} className="text-xs text-muted-foreground underline underline-offset-4 transition-colors hover:text-foreground">
+            Clear all
+          </button>
+        </div>
+      )}
 
       {/* Main: Sidebar + Products */}
       <div className="flex gap-8">
@@ -2557,24 +2945,29 @@ const ECOMMERCE_TEMPLATE_PRODUCT_DETAIL_PAGE = `"use client";
 import React, { useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
-import { Minus, Plus, ShoppingCart, Truck, RotateCcw, Shield, Check } from "lucide-react";
+import { Minus, Plus, ShoppingCart, Truck, RotateCcw, Shield, Check, Share2, Copy } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import { useProduct, useCart, formatPrice } from "@/lib/wemob-store";
+import { useProduct, useProducts, useCart, formatPrice } from "@/lib/wemob-store";
 import { ProductGallery } from "@/components/ecommerce/product-gallery";
 import { PriceDisplay } from "@/components/ecommerce/price-display";
 import { ReviewList } from "@/components/ecommerce/review-list";
 import { WishlistButton } from "@/components/ecommerce/wishlist-button";
+import { ProductCard } from "@/components/ecommerce/product-card";
 import { Skeleton } from "@/components/ui/skeleton";
 
 export default function ProductDetailPage() {
   const params = useParams();
   const slug = params?.slug as string;
   const { product, isLoading } = useProduct(slug);
+  const { products: allProducts } = useProducts();
   const { addItem } = useCart();
   const [quantity, setQuantity] = useState(1);
   const [isAdding, setIsAdding] = useState(false);
   const [addedToCart, setAddedToCart] = useState(false);
   const [activeTab, setActiveTab] = useState<"description" | "shipping">("description");
+  const [linkCopied, setLinkCopied] = useState(false);
+
+  const relatedProducts = allProducts?.filter((p) => p.id !== product?.id && p.category === product?.category).slice(0, 4) ?? [];
 
   const handleAddToCart = async () => {
     if (!product || product.in_stock === false) return;
@@ -2646,7 +3039,7 @@ export default function ProductDetailPage() {
       <div className="grid gap-8 lg:grid-cols-2 lg:gap-12">
         <ProductGallery images={product.images || []} productName={product.name} />
 
-        <div>
+        <div className="lg:sticky lg:top-24 lg:self-start">
           {product.category && (
             <p className="mb-2 text-[11px] font-medium uppercase tracking-[0.15em] text-muted-foreground/60">
               {product.category}
@@ -2750,20 +3143,56 @@ export default function ProductDetailPage() {
           </div>
 
           {/* Trust Badges */}
-          <div className="mt-8 rounded-xl bg-muted/30 p-5">
-            <div className="grid grid-cols-3 gap-4">
-              <div className="flex flex-col items-center gap-1.5 text-center">
+          <div className="mt-8 space-y-4">
+            <div className="grid grid-cols-3 gap-3">
+              <div className="flex flex-col items-center gap-2 rounded-xl border border-border/40 p-3 text-center">
                 <Truck className="h-5 w-5 text-muted-foreground" />
-                <span className="text-xs text-muted-foreground">Free Shipping</span>
+                <div>
+                  <p className="text-xs font-medium text-foreground">Free Shipping</p>
+                  <p className="text-[10px] text-muted-foreground">Orders over $50</p>
+                </div>
               </div>
-              <div className="flex flex-col items-center gap-1.5 text-center">
+              <div className="flex flex-col items-center gap-2 rounded-xl border border-border/40 p-3 text-center">
                 <RotateCcw className="h-5 w-5 text-muted-foreground" />
-                <span className="text-xs text-muted-foreground">Easy Returns</span>
+                <div>
+                  <p className="text-xs font-medium text-foreground">Easy Returns</p>
+                  <p className="text-[10px] text-muted-foreground">30-day policy</p>
+                </div>
               </div>
-              <div className="flex flex-col items-center gap-1.5 text-center">
+              <div className="flex flex-col items-center gap-2 rounded-xl border border-border/40 p-3 text-center">
                 <Shield className="h-5 w-5 text-muted-foreground" />
-                <span className="text-xs text-muted-foreground">Secure Payment</span>
+                <div>
+                  <p className="text-xs font-medium text-foreground">Secure</p>
+                  <p className="text-[10px] text-muted-foreground">SSL encrypted</p>
+                </div>
               </div>
+            </div>
+
+            {/* Guaranteed Safe Checkout */}
+            <div className="rounded-xl border border-border/40 p-4">
+              <p className="mb-2.5 text-center text-[11px] font-medium uppercase tracking-[0.15em] text-muted-foreground/60">Guaranteed Safe Checkout</p>
+              <div className="flex items-center justify-center gap-2.5">
+                <svg className="h-7 w-auto text-muted-foreground/40" viewBox="0 0 48 32" fill="none"><rect width="48" height="32" rx="4" fill="currentColor" opacity="0.15"/><path d="M19.5 20.5l2-9h3l-2 9h-3zm13-9l-3 6.2-.4-2-1-5.4s-.1-.8-1.2-.8h-4.7l-.1.3s1.4.3 3 1.3l2.3 8.4h3.1l4.7-8h-2.7zm-19 0l-3 9h-3.2l-1.8-7.2c-.1-.4-.2-.6-.5-.7-.6-.3-1.5-.6-2.3-.8l.1-.3h4.8c.6 0 1.2.4 1.3 1.2l1.2 6.2 2.9-7.4h3.5zm26.2 6.2c0-2.5-3.4-2.6-3.4-3.7 0-.3.3-.7 1.1-.8.4 0 1.5-.1 2.7.5l.5-2.2c-.7-.2-1.5-.5-2.6-.5-2.7 0-4.7 1.5-4.7 3.6 0 1.6 1.4 2.4 2.4 3 1.1.5 1.4.8 1.4 1.3 0 .7-.8 1-1.6 1-.7 0-1.9-.3-2.5-.5l-.5 2.2c.6.3 1.6.5 2.7.5 2.9 0 4.8-1.4 4.8-3.7l-.3.3z" fill="currentColor" opacity="0.5"/></svg>
+                <svg className="h-7 w-auto text-muted-foreground/40" viewBox="0 0 48 32" fill="none"><rect width="48" height="32" rx="4" fill="currentColor" opacity="0.15"/><circle cx="19" cy="16" r="8" fill="currentColor" opacity="0.2"/><circle cx="29" cy="16" r="8" fill="currentColor" opacity="0.3"/></svg>
+                <svg className="h-7 w-auto text-muted-foreground/40" viewBox="0 0 48 32" fill="none"><rect width="48" height="32" rx="4" fill="currentColor" opacity="0.15"/><text x="24" y="20" textAnchor="middle" fontSize="10" fontWeight="bold" fill="currentColor" opacity="0.4">AMEX</text></svg>
+                <svg className="h-7 w-auto text-muted-foreground/40" viewBox="0 0 48 32" fill="none"><rect width="48" height="32" rx="4" fill="currentColor" opacity="0.15"/><text x="24" y="19" textAnchor="middle" fontSize="8" fontWeight="600" fontStyle="italic" fill="currentColor" opacity="0.4">PayPal</text></svg>
+              </div>
+            </div>
+
+            {/* Share */}
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-muted-foreground">Share:</span>
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(window.location.href);
+                  setLinkCopied(true);
+                  setTimeout(() => setLinkCopied(false), 2000);
+                }}
+                className="flex h-8 items-center gap-1.5 rounded-full border border-border/40 px-3 text-xs text-muted-foreground transition-colors hover:text-foreground"
+              >
+                {linkCopied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                {linkCopied ? "Copied!" : "Copy Link"}
+              </button>
             </div>
           </div>
         </div>
@@ -2773,6 +3202,18 @@ export default function ProductDetailPage() {
       <div className="mt-20">
         <ReviewList productSlug={product.slug} />
       </div>
+
+      {/* Related Products */}
+      {relatedProducts.length > 0 && (
+        <div className="mt-20">
+          <h2 className="text-2xl font-semibold tracking-tight text-foreground">You May Also Like</h2>
+          <div className="mt-8 grid grid-cols-2 gap-6 sm:gap-8 lg:grid-cols-4">
+            {relatedProducts.map((p) => (
+              <ProductCard key={p.id} product={p} />
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -2780,11 +3221,11 @@ export default function ProductDetailPage() {
 
 const ECOMMERCE_TEMPLATE_CATEGORY_PAGE = `"use client";
 
-import React from "react";
+import React, { useState, useMemo } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
-import { ShoppingBag } from "lucide-react";
-import { motion } from "framer-motion";
+import { ShoppingBag, ChevronDown } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
 import { useProducts, useCategories } from "@/lib/wemob-store";
 import { ProductCard } from "@/components/ecommerce/product-card";
 import { EmptyState } from "@/components/ecommerce/empty-state";
@@ -2799,17 +3240,40 @@ const itemVariants = {
   show: { opacity: 1, y: 0 },
 };
 
+type CatSort = "featured" | "price-asc" | "price-desc" | "name";
+
 export default function CategoryPage() {
   const params = useParams();
   const slug = params?.slug as string;
   const { products, isLoading: productsLoading } = useProducts();
   const { categories, isLoading: categoriesLoading } = useCategories();
+  const [sort, setSort] = useState<CatSort>("featured");
+  const [showSort, setShowSort] = useState(false);
+
+  const sortLabels: Record<CatSort, string> = {
+    featured: "Featured",
+    "price-asc": "Price: Low to High",
+    "price-desc": "Price: High to Low",
+    name: "Name A\u2013Z",
+  };
 
   const isLoading = productsLoading || categoriesLoading;
   const category = categories?.find((c) => c.slug === slug);
-  const filtered = products?.filter(
+  const categoryProducts = products?.filter(
     (p) => p.category === category?.name
   ) ?? [];
+
+  const filtered = useMemo(() => {
+    var result = [...categoryProducts];
+    switch (sort) {
+      case "price-asc": return result.sort((a, b) => a.price_in_cents - b.price_in_cents);
+      case "price-desc": return result.sort((a, b) => b.price_in_cents - a.price_in_cents);
+      case "name": return result.sort((a, b) => a.name.localeCompare(b.name));
+      default: return result;
+    }
+  }, [categoryProducts, sort]);
+
+  const siblingCategories = categories?.filter((c) => c.slug !== slug).slice(0, 6) ?? [];
 
   if (isLoading) {
     return (
@@ -2842,17 +3306,71 @@ export default function CategoryPage() {
         <span className="font-medium text-foreground">{categoryName}</span>
       </nav>
 
-      <div className="mb-10">
+      <div className="mb-10 rounded-2xl bg-gradient-to-br from-muted/50 to-muted/20 p-8 sm:p-10">
         <h1 className="text-4xl font-semibold tracking-tight text-foreground sm:text-5xl">
           {categoryName}
         </h1>
         {category?.description && (
-          <p className="mt-3 text-muted-foreground">{category.description}</p>
+          <p className="mt-3 max-w-2xl text-muted-foreground">{category.description}</p>
         )}
-        <p className="mt-1 text-sm text-muted-foreground">
+        <p className="mt-2 text-sm text-muted-foreground">
           {filtered.length} {filtered.length === 1 ? "product" : "products"}
         </p>
       </div>
+
+      {/* Browse other categories */}
+      {siblingCategories.length > 0 && (
+        <div className="mb-8 flex flex-wrap gap-2">
+          {siblingCategories.map((c) => (
+            <Link
+              key={c.id}
+              href={"/categories/" + c.slug}
+              className="rounded-full border border-border/60 px-4 py-1.5 text-sm text-muted-foreground transition-colors hover:border-foreground hover:text-foreground"
+            >
+              {c.name}
+            </Link>
+          ))}
+        </div>
+      )}
+
+      {/* Sort dropdown */}
+      {filtered.length > 1 && (
+        <div className="mb-6 flex justify-end">
+          <div className="relative">
+            <button
+              onClick={() => setShowSort(!showSort)}
+              className="inline-flex h-10 items-center gap-2 rounded-lg border border-border bg-background px-4 text-sm font-medium text-foreground transition-colors hover:bg-muted"
+            >
+              {sortLabels[sort]}
+              <ChevronDown className={"h-3.5 w-3.5 transition-transform " + (showSort ? "rotate-180" : "")} />
+            </button>
+            <AnimatePresence>
+              {showSort && (
+                <>
+                  <div className="fixed inset-0 z-10" onClick={() => setShowSort(false)} />
+                  <motion.div
+                    initial={{ opacity: 0, y: 4 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: 4 }}
+                    transition={{ duration: 0.15 }}
+                    className="absolute right-0 top-full z-20 mt-1 w-48 rounded-xl border border-border/40 bg-background py-1 shadow-lg"
+                  >
+                    {(Object.entries(sortLabels) as [CatSort, string][]).map(([key, label]) => (
+                      <button
+                        key={key}
+                        onClick={() => { setSort(key); setShowSort(false); }}
+                        className={"w-full px-4 py-2 text-left text-sm transition-colors hover:bg-muted " + (sort === key ? "font-medium text-foreground" : "text-muted-foreground")}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </motion.div>
+                </>
+              )}
+            </AnimatePresence>
+          </div>
+        </div>
+      )}
 
       {filtered.length === 0 ? (
         <EmptyState
@@ -2956,6 +3474,11 @@ export default function ShippingPolicyPage() {
             <p className="text-sm leading-relaxed text-muted-foreground">{section.content}</p>
           </motion.section>
         ))}
+
+        <div className="mt-4 rounded-2xl border border-border/40 p-6 text-center">
+          <p className="text-sm text-muted-foreground">Have questions about our shipping policy?</p>
+          <a href="/contact" className="mt-2 inline-flex items-center text-sm font-medium text-foreground underline underline-offset-4 transition-colors hover:text-foreground/80">Contact Us</a>
+        </div>
       </div>
     </div>
   );
@@ -3021,6 +3544,11 @@ export default function ReturnsPolicyPage() {
             )}
           </motion.section>
         ))}
+
+        <div className="mt-4 rounded-2xl border border-border/40 p-6 text-center">
+          <p className="text-sm text-muted-foreground">Need to start a return?</p>
+          <a href="/contact" className="mt-2 inline-flex items-center text-sm font-medium text-foreground underline underline-offset-4 transition-colors hover:text-foreground/80">Contact Our Support Team</a>
+        </div>
       </div>
     </div>
   );
