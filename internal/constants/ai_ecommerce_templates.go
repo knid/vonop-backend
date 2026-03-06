@@ -1592,6 +1592,7 @@ export function SiteHeader() {
 
 const ECOMMERCE_TEMPLATE_SITE_FOOTER = `"use client";
 
+import React, { useState } from "react";
 import Link from "next/link";
 import { ArrowUp } from "lucide-react";
 import { useCategories, useStoreConfig } from "@/lib/wemob-store";
@@ -1599,6 +1600,8 @@ import { useCategories, useStoreConfig } from "@/lib/wemob-store";
 export function SiteFooter() {
   const { categories } = useCategories();
   const { config: storeConfig } = useStoreConfig();
+  const [email, setEmail] = useState("");
+  const [subscribed, setSubscribed] = useState(false);
 
   const allCategories = categories ?? [];
   const shopLinks = [
@@ -1668,6 +1671,32 @@ export function SiteFooter() {
                   <path d="M9.101 23.691v-7.98H6.627v-3.667h2.474v-1.58c0-4.085 1.848-5.978 5.858-5.978.401 0 1.09.044 1.613.115v3.146c-.427-.044-.72-.065-.95-.065-1.35 0-1.872.513-1.872 1.846v2.516h3.332l-.468 3.667h-2.864v8.245C19.396 23.238 24 18.179 24 12.044c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.628 3.874 10.35 9.101 11.647z" />
                 </svg>
               </a>
+            </div>
+
+            {/* Newsletter */}
+            <div className="mt-8">
+              <h3 className="text-[11px] font-medium uppercase tracking-[0.2em] text-muted-foreground/50">Newsletter</h3>
+              <p className="mt-3 text-xs text-muted-foreground">Get the latest updates, exclusive offers, and new arrivals delivered to your inbox.</p>
+              {subscribed ? (
+                <p className="mt-3 text-xs font-medium text-green-600 dark:text-green-400">Thank you for subscribing!</p>
+              ) : (
+                <form onSubmit={(e) => { e.preventDefault(); if (email.trim()) setSubscribed(true); }} className="mt-3 flex gap-2">
+                  <input
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="your@email.com"
+                    required
+                    className="h-9 flex-1 rounded-full border border-border/60 bg-background px-4 text-xs text-foreground placeholder:text-muted-foreground focus:border-foreground focus:outline-none"
+                  />
+                  <button
+                    type="submit"
+                    className="h-9 rounded-full bg-foreground px-4 text-xs font-medium text-background transition-opacity hover:opacity-90"
+                  >
+                    Subscribe
+                  </button>
+                </form>
+              )}
             </div>
           </div>
 
@@ -1768,8 +1797,12 @@ export function SiteFooter() {
             </div>
           </div>
 
+          <p className="mt-6 text-center text-[11px] text-muted-foreground/40">
+            Secure shopping guaranteed. All transactions are encrypted and your data is protected.
+          </p>
+
           {/* Back to top */}
-          <div className="mt-6 flex justify-center">
+          <div className="mt-4 flex justify-center">
             <button
               onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
               className="flex items-center gap-1.5 text-xs text-muted-foreground/50 transition-colors hover:text-muted-foreground"
@@ -1924,6 +1957,7 @@ export default function CartPage() {
   const [discountCode, setDiscountCode] = useState("");
   const [discountLoading, setDiscountLoading] = useState(false);
   const [discountError, setDiscountError] = useState("");
+  const [discountSuccess, setDiscountSuccess] = useState(false);
 
   const cartProductIds = cart?.items.map((i) => i.product_id) ?? [];
   const suggestions = allProducts?.filter((p) => !cartProductIds.includes(p.id) && p.in_stock !== false).slice(0, 4) ?? [];
@@ -1932,8 +1966,11 @@ export default function CartPage() {
     if (!discountCode.trim()) return;
     setDiscountLoading(true);
     setDiscountError("");
+    setDiscountSuccess(false);
     try {
       await applyDiscount(discountCode.trim());
+      setDiscountSuccess(true);
+      setTimeout(() => setDiscountSuccess(false), 2000);
     } catch {
       setDiscountError("Invalid or expired discount code.");
     } finally {
@@ -2044,10 +2081,12 @@ export default function CartPage() {
             </div>
             <button
               onClick={handleApplyDiscount}
-              disabled={discountLoading || !discountCode.trim()}
-              className="h-11 rounded-full bg-muted px-5 text-sm font-medium text-foreground transition-colors hover:bg-muted/80 disabled:opacity-50"
+              disabled={discountLoading || !discountCode.trim() || discountSuccess}
+              className={"h-11 rounded-full px-5 text-sm font-medium transition-colors disabled:opacity-50 " + (discountSuccess ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" : "bg-muted text-foreground hover:bg-muted/80")}
             >
-              {discountLoading ? "Applying..." : "Apply"}
+              {discountSuccess ? (
+                <span className="flex items-center gap-1"><Check className="h-3.5 w-3.5" /> Applied</span>
+              ) : discountLoading ? "Applying..." : "Apply"}
             </button>
           </div>
 
@@ -2075,11 +2114,16 @@ export default function CartPage() {
             <Lock className="h-4 w-4" />
             Secure Checkout
           </Link>
-          <div className="mt-3 flex items-center justify-center gap-4 text-xs text-muted-foreground">
-            <div className="flex items-center gap-1">
-              <Truck className="h-3.5 w-3.5" />
-              <span>Free shipping over $50</span>
+          <div className="mt-4 rounded-xl border border-border/40 p-4 text-center">
+            <div className="flex items-center justify-center gap-4 text-xs text-muted-foreground">
+              <div className="flex items-center gap-1">
+                <Truck className="h-3.5 w-3.5" />
+                <span>Free shipping over $50</span>
+              </div>
             </div>
+            <p className="mt-2 text-[11px] text-muted-foreground/50">
+              {"Estimated delivery: " + new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric" }) + " \u2013 " + new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+            </p>
           </div>
         </div>
       </div>
@@ -3407,6 +3451,7 @@ import { useStoreConfig } from "@/lib/wemob-store";
 export default function ShippingPolicyPage() {
   const { config } = useStoreConfig();
   const storeName = config?.name || "Our Store";
+  var toSlug = function(s: string) { return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, ""); };
 
   const sections = [
     { icon: Clock, title: "Processing Time", content: "All orders placed with " + storeName + " are processed within 1\u20133 business days. Orders placed on weekends or holidays will be processed on the next business day. You will receive a confirmation email with tracking information once your order has shipped." },
@@ -3424,9 +3469,17 @@ export default function ShippingPolicyPage() {
         </span>
       </div>
 
+      <nav className="mt-8 flex flex-wrap gap-2" aria-label="Quick links">
+        <a href="#shipping-rates-delivery-times" className="rounded-full border border-border/40 px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted/30 hover:text-foreground">Shipping Rates</a>
+        {sections.map((s) => (
+          <a key={s.title} href={"#" + toSlug(s.title)} className="rounded-full border border-border/40 px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted/30 hover:text-foreground">{s.title}</a>
+        ))}
+      </nav>
+
       <div className="mt-10 space-y-6">
         {/* Shipping rates table */}
         <motion.div
+          id="shipping-rates-delivery-times"
           initial={{ opacity: 0, y: 20 }}
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true }}
@@ -3459,6 +3512,7 @@ export default function ShippingPolicyPage() {
         {sections.map((section, idx) => (
           <motion.section
             key={section.title}
+            id={toSlug(section.title)}
             initial={{ opacity: 0, y: 20 }}
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true }}
@@ -3494,6 +3548,7 @@ import { useStoreConfig } from "@/lib/wemob-store";
 export default function ReturnsPolicyPage() {
   const { config } = useStoreConfig();
   const storeName = config?.name || "Our Store";
+  var toSlug = function(s: string) { return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, ""); };
 
   const sections = [
     { icon: RotateCcw, title: "Our Return Promise", content: "At " + storeName + ", we want you to be completely satisfied with your purchase. If for any reason you are not happy with your order, we offer a hassle-free return and exchange policy within 30 days of delivery." },
@@ -3513,10 +3568,17 @@ export default function ReturnsPolicyPage() {
         </span>
       </div>
 
+      <nav className="mt-8 flex flex-wrap gap-2" aria-label="Quick links">
+        {sections.map((s) => (
+          <a key={s.title} href={"#" + toSlug(s.title)} className="rounded-full border border-border/40 px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted/30 hover:text-foreground">{s.title}</a>
+        ))}
+      </nav>
+
       <div className="mt-10 space-y-6">
         {sections.map((section, idx) => (
           <motion.section
             key={section.title}
+            id={toSlug(section.title)}
             initial={{ opacity: 0, y: 20 }}
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true }}
@@ -3564,6 +3626,7 @@ import { useStoreConfig } from "@/lib/wemob-store";
 export default function PrivacyPolicyPage() {
   const { config } = useStoreConfig();
   const storeName = config?.name || "Our Store";
+  var toSlug = function(s: string) { return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, ""); };
 
   const sections = [
     { icon: Shield, title: "Introduction", content: storeName + " (\u201Cwe\u201D, \u201Cour\u201D, or \u201Cus\u201D) is committed to protecting your privacy. This Privacy Policy explains how we collect, use, disclose, and safeguard your information when you visit our website and make purchases from our store." },
@@ -3585,10 +3648,17 @@ export default function PrivacyPolicyPage() {
         </span>
       </div>
 
+      <nav className="mt-8 flex flex-wrap gap-2" aria-label="Quick links">
+        {sections.map((s) => (
+          <a key={s.title} href={"#" + toSlug(s.title)} className="rounded-full border border-border/40 px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted/30 hover:text-foreground">{s.title}</a>
+        ))}
+      </nav>
+
       <div className="mt-10 space-y-6">
         {sections.map((section, idx) => (
           <motion.section
             key={section.title + idx}
+            id={toSlug(section.title)}
             initial={{ opacity: 0, y: 20 }}
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true }}
@@ -3614,6 +3684,11 @@ export default function PrivacyPolicyPage() {
             )}
           </motion.section>
         ))}
+
+        <div className="mt-4 rounded-2xl border border-border/40 p-6 text-center">
+          <p className="text-sm text-muted-foreground">Have questions about your privacy or data?</p>
+          <a href="/contact" className="mt-2 inline-flex items-center text-sm font-medium text-foreground underline underline-offset-4 transition-colors hover:text-foreground/80">Contact Us</a>
+        </div>
       </div>
     </div>
   );
@@ -3629,6 +3704,7 @@ import { useStoreConfig } from "@/lib/wemob-store";
 export default function TermsOfServicePage() {
   const { config } = useStoreConfig();
   const storeName = config?.name || "Our Store";
+  var toSlug = function(s: string) { return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, ""); };
 
   const sections = [
     { icon: FileText, title: "Acceptance of Terms", content: "By accessing and using the " + storeName + " website, you agree to be bound by these Terms of Service and all applicable laws and regulations. If you do not agree with any of these terms, you are prohibited from using this site." },
@@ -3650,10 +3726,17 @@ export default function TermsOfServicePage() {
         </span>
       </div>
 
+      <nav className="mt-8 flex flex-wrap gap-2" aria-label="Quick links">
+        {sections.map((s) => (
+          <a key={s.title} href={"#" + toSlug(s.title)} className="rounded-full border border-border/40 px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted/30 hover:text-foreground">{s.title}</a>
+        ))}
+      </nav>
+
       <div className="mt-10 space-y-6">
         {sections.map((section, idx) => (
           <motion.section
             key={section.title}
+            id={toSlug(section.title)}
             initial={{ opacity: 0, y: 20 }}
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true }}
@@ -3669,6 +3752,11 @@ export default function TermsOfServicePage() {
             <p className="text-sm leading-relaxed text-muted-foreground">{section.content}</p>
           </motion.section>
         ))}
+
+        <div className="mt-4 rounded-2xl border border-border/40 p-6 text-center">
+          <p className="text-sm text-muted-foreground">Have questions about our terms of service?</p>
+          <a href="/contact" className="mt-2 inline-flex items-center text-sm font-medium text-foreground underline underline-offset-4 transition-colors hover:text-foreground/80">Contact Us</a>
+        </div>
       </div>
     </div>
   );
