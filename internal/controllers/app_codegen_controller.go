@@ -167,6 +167,54 @@ func (c *Controller) computeMissingEnvVars(project *models.AppProject, llmVars [
 	return missing
 }
 
+// nonVariableFonts maps Google Fonts that are NOT variable-width and require
+// an explicit weight parameter in next/font/google. The value is the list of
+// available weights. If a font is not in this map, we assume it's a variable
+// font and omit the weight parameter (Next.js handles it automatically).
+var nonVariableFonts = map[string][]string{
+	"Bebas Neue":         {"400"},
+	"Racing Sans One":    {"400"},
+	"Bungee":             {"400"},
+	"Bungee Shade":       {"400"},
+	"Creepster":          {"400"},
+	"Nosifer":            {"400"},
+	"Faster One":         {"400"},
+	"Monoton":            {"400"},
+	"Press Start 2P":     {"400"},
+	"Rubik Mono One":     {"400"},
+	"Vast Shadow":        {"400"},
+	"Fredericka the Great": {"400"},
+	"Lobster":            {"400"},
+	"Pacifico":           {"400"},
+	"Righteous":          {"400"},
+	"Permanent Marker":   {"400"},
+	"Alfa Slab One":      {"400"},
+	"Abril Fatface":      {"400"},
+	"Playfair Display SC": {"400", "700", "900"},
+	"Merriweather":       {"300", "400", "700", "900"},
+	"Lora":               {"400", "500", "600", "700"},
+	"Roboto Condensed":   {"300", "400", "700"},
+	"Oswald":             {"200", "300", "400", "500", "600", "700"},
+}
+
+// fontWeightParam returns the weight option string for a font constructor.
+// For non-variable fonts it returns ', weight: "400"' (or the appropriate weight).
+// For variable fonts it returns an empty string.
+func fontWeightParam(fontName string) string {
+	if weights, ok := nonVariableFonts[fontName]; ok {
+		// Use "400" if available, otherwise the first weight
+		w := weights[0]
+		for _, ww := range weights {
+			if ww == "400" {
+				w = "400"
+				break
+			}
+		}
+		return fmt.Sprintf(`, weight: "%s"`, w)
+	}
+	return ""
+}
+
 // --- Regex patterns for deterministic checks ---
 var hookPattern = regexp.MustCompile(`\b(useState|useEffect|useRef|useCallback|useMemo|useReducer|useContext)\s*[\(<]`)
 var getApiSessionArgsRegex = regexp.MustCompile(`getApiSession\s*\([^)]+\)`)
@@ -329,27 +377,65 @@ func getColor(scheme map[string]any, key, fallback string) string {
 
 // buildGlobalsCSSTheme generates the globals.css content with Tailwind v4 @theme colors,
 // body base styles, dark mode overrides, and mobile utilities when isMobile is true.
+// Includes semantic tokens (foreground, muted, border, input, ring) derived from
+// the color scheme so that shadcn-style utility classes work (bg-foreground,
+// text-muted-foreground, border-border, etc.).
 func buildGlobalsCSSTheme(colorScheme, darkColorScheme map[string]any, isMobile bool) string {
 	var sb strings.Builder
 
+	fg := getColor(colorScheme, "text", "#111827")
+	bg := getColor(colorScheme, "background", "#FFFFFF")
+	surface := getColor(colorScheme, "surface", "#F3F4F6")
+	primary := getColor(colorScheme, "primary", "#3B82F6")
+	secondary := getColor(colorScheme, "secondary", "#6366F1")
+	accent := getColor(colorScheme, "accent", "#F59E0B")
+
 	// --- @import + @theme ---
+	// Defines both the raw palette tokens AND the shadcn-style semantic tokens
+	// (foreground, muted, border, card, destructive, *-foreground) that the
+	// UI component templates (button, card, input, badge) and e-commerce
+	// templates rely on.
 	sb.WriteString(fmt.Sprintf(`@import "tailwindcss";
 
 @theme {
   --color-primary: %s;
+  --color-primary-foreground: %s;
   --color-secondary: %s;
+  --color-secondary-foreground: %s;
   --color-accent: %s;
+  --color-accent-foreground: %s;
   --color-background: %s;
   --color-surface: %s;
   --color-text: %s;
+  --color-foreground: %s;
+  --color-card: %s;
+  --color-card-foreground: %s;
+  --color-muted: %s;
+  --color-muted-foreground: color-mix(in srgb, %s 60%%, %s);
+  --color-border: color-mix(in srgb, %s 15%%, %s);
+  --color-input: color-mix(in srgb, %s 15%%, %s);
+  --color-ring: %s;
+  --color-destructive: #DC2626;
+  --color-destructive-foreground: #FFFFFF;
 }
 `,
-		getColor(colorScheme, "primary", "#3B82F6"),
-		getColor(colorScheme, "secondary", "#6366F1"),
-		getColor(colorScheme, "accent", "#F59E0B"),
-		getColor(colorScheme, "background", "#FFFFFF"),
-		getColor(colorScheme, "surface", "#F3F4F6"),
-		getColor(colorScheme, "text", "#111827"),
+		primary,
+		bg,
+		secondary,
+		bg,
+		accent,
+		fg,
+		bg,
+		surface,
+		fg,
+		fg,
+		bg,
+		fg,
+		surface,
+		fg, bg,
+		fg, bg,
+		fg, bg,
+		primary,
 	))
 
 	// --- @layer base: html + body ---
@@ -387,24 +473,52 @@ func buildGlobalsCSSTheme(colorScheme, darkColorScheme map[string]any, isMobile 
 
 	// --- Dark mode: override theme colors via prefers-color-scheme ---
 	if len(darkColorScheme) > 0 {
+		darkFg := getColor(darkColorScheme, "text", "#F9FAFB")
+		darkBg := getColor(darkColorScheme, "background", "#111827")
+		darkSurface := getColor(darkColorScheme, "surface", "#1F2937")
+		darkPrimary := getColor(darkColorScheme, "primary", primary)
+		darkSecondary := getColor(darkColorScheme, "secondary", secondary)
+		darkAccent := getColor(darkColorScheme, "accent", accent)
 		sb.WriteString(fmt.Sprintf(`
 @media (prefers-color-scheme: dark) {
   :root {
     --color-primary: %s;
+    --color-primary-foreground: %s;
     --color-secondary: %s;
+    --color-secondary-foreground: %s;
     --color-accent: %s;
+    --color-accent-foreground: %s;
     --color-background: %s;
     --color-surface: %s;
     --color-text: %s;
+    --color-foreground: %s;
+    --color-card: %s;
+    --color-card-foreground: %s;
+    --color-muted: %s;
+    --color-muted-foreground: color-mix(in srgb, %s 60%%, %s);
+    --color-border: color-mix(in srgb, %s 15%%, %s);
+    --color-input: color-mix(in srgb, %s 15%%, %s);
+    --color-destructive: #EF4444;
+    --color-destructive-foreground: #FFFFFF;
   }
 }
 `,
-			getColor(darkColorScheme, "primary", getColor(colorScheme, "primary", "#3B82F6")),
-			getColor(darkColorScheme, "secondary", getColor(colorScheme, "secondary", "#6366F1")),
-			getColor(darkColorScheme, "accent", getColor(colorScheme, "accent", "#F59E0B")),
-			getColor(darkColorScheme, "background", getColor(colorScheme, "background", "#111827")),
-			getColor(darkColorScheme, "surface", getColor(colorScheme, "surface", "#1F2937")),
-			getColor(darkColorScheme, "text", getColor(colorScheme, "text", "#F9FAFB")),
+			darkPrimary,
+			darkBg,
+			darkSecondary,
+			darkBg,
+			darkAccent,
+			darkFg,
+			darkBg,
+			darkSurface,
+			darkFg,
+			darkFg,
+			darkBg,
+			darkFg,
+			darkSurface,
+			darkFg, darkBg,
+			darkFg, darkBg,
+			darkFg, darkBg,
 		))
 	}
 
@@ -549,14 +663,17 @@ func buildEcommerceLayout(storeName string, typography map[string]any) string {
 	var fontConstructors string
 	var bodyClassName string
 
+	headingWeight := fontWeightParam(headingFont)
+	bodyWeight := fontWeightParam(bodyFont)
+
 	if sameFont {
 		fontImports = fmt.Sprintf(`import { %s } from "next/font/google";`, headingImport)
-		fontConstructors = fmt.Sprintf(`const %s = %s({ subsets: ["latin"], display: "swap" });`, headingVar, headingImport)
+		fontConstructors = fmt.Sprintf(`const %s = %s({ subsets: ["latin"], display: "swap"%s });`, headingVar, headingImport, headingWeight)
 		bodyClassName = fmt.Sprintf("${%s.className}", headingVar)
 	} else {
 		fontImports = fmt.Sprintf(`import { %s, %s } from "next/font/google";`, headingImport, bodyImport)
-		fontConstructors = fmt.Sprintf(`const %s = %s({ subsets: ["latin"], display: "swap", variable: "--font-heading" });
-const %s = %s({ subsets: ["latin"], display: "swap" });`, headingVar, headingImport, bodyVar, bodyImport)
+		fontConstructors = fmt.Sprintf(`const %s = %s({ subsets: ["latin"], display: "swap", variable: "--font-heading"%s });
+const %s = %s({ subsets: ["latin"], display: "swap"%s });`, headingVar, headingImport, headingWeight, bodyVar, bodyImport, bodyWeight)
 		bodyClassName = fmt.Sprintf("${%s.variable} ${%s.className}", headingVar, bodyVar)
 	}
 
@@ -2173,6 +2290,67 @@ func autoFixImportMismatches(files map[string]string) (int, []string) {
 
 			newImport := fmt.Sprintf("import { %s } from '@/%s'", actualExport, importPath)
 			updated = strings.Replace(updated, fullMatch, newImport, 1)
+			changed = true
+		}
+
+		if changed {
+			files[filePath] = updated
+			changedPaths = append(changedPaths, filePath)
+		}
+	}
+
+	return len(changedPaths), changedPaths
+}
+
+// autoFixFontWeights scans layout files for non-variable Google Fonts that are
+// missing the required weight parameter and injects it. This fixes the common
+// "Missing weight for X. Available weights: 400" Next.js build error.
+func autoFixFontWeights(files map[string]string) (int, []string) {
+	var changedPaths []string
+
+	// Pattern: FontName({ subsets: [...], ... }) — match font constructors to check for weight
+	fontCallRegex := regexp.MustCompile(`(\w+)\s*\(\s*\{([^}]*)\}\s*\)`)
+
+	for filePath, content := range files {
+		if !strings.Contains(content, `next/font/google`) {
+			continue
+		}
+
+		updated := content
+		changed := false
+
+		matches := fontCallRegex.FindAllStringSubmatchIndex(updated, -1)
+		// Process matches in reverse order to preserve indices
+		for i := len(matches) - 1; i >= 0; i-- {
+			m := matches[i]
+			funcName := updated[m[2]:m[3]]    // e.g. "Bebas_Neue"
+			argsBlock := updated[m[4]:m[5]]    // e.g. `subsets: ["latin"], display: "swap"`
+
+			// Convert import name back to font name (Bebas_Neue -> Bebas Neue)
+			fontName := strings.ReplaceAll(funcName, "_", " ")
+
+			weights, isNonVariable := nonVariableFonts[fontName]
+			if !isNonVariable {
+				continue
+			}
+
+			// Already has weight specified
+			if strings.Contains(argsBlock, "weight") {
+				continue
+			}
+
+			// Pick the best weight (prefer 400)
+			w := weights[0]
+			for _, ww := range weights {
+				if ww == "400" {
+					w = "400"
+					break
+				}
+			}
+
+			// Insert weight before the closing of the args block
+			newArgs := strings.TrimRight(argsBlock, " \t\n") + fmt.Sprintf(`, weight: "%s"`, w)
+			updated = updated[:m[4]] + newArgs + updated[m[5]:]
 			changed = true
 		}
 
