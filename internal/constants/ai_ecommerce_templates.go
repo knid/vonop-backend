@@ -2656,7 +2656,7 @@ export default function ProductsPage() {
           Price Range
           <ChevronRight className={"h-4 w-4 text-muted-foreground transition-transform duration-200 " + (openSections.price ? "rotate-90" : "")} />
         </button>
-        <div className={"mt-3 flex items-center gap-2 " + (openSections.price ? "" : "hidden")}
+        <div className={"mt-3 flex items-center gap-2 " + (openSections.price ? "" : "hidden")}>
           <input
             type="number"
             value={priceMin}
@@ -2682,7 +2682,7 @@ export default function ProductsPage() {
           Filters
           <ChevronRight className={"h-4 w-4 text-muted-foreground transition-transform duration-200 " + (openSections.filters ? "rotate-90" : "")} />
         </button>
-        <div className={"mt-3 space-y-3 " + (openSections.filters ? "" : "hidden")}
+        <div className={"mt-3 space-y-3 " + (openSections.filters ? "" : "hidden")}>
           <label className="flex cursor-pointer items-center gap-3">
             <input
               type="checkbox"
