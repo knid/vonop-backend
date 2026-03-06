@@ -828,9 +828,16 @@ func (c *Controller) saveGeneratedFile(
 	sendEvent func(string, any) bool,
 	ops *[]appBuilderOperation,
 ) {
-	// Guard: never let the LLM overwrite template-managed files
+	// Guard: never let the LLM overwrite template-managed files.
+	// Still emit file_complete with the DB content so the sandbox stays in sync.
 	if isProtectedTemplateFile(path) {
 		slog.Warn("saveGeneratedFile: skipping protected template file", "path", path)
+		if existingFile, err := c.DB.GetAppGeneratedFileByPath(project.ID.String(), "nextjs", path); err == nil && existingFile != nil {
+			sendEvent("file_complete", responses.FileCompleteEvent{
+				Action: "modify", FilePath: path,
+				FileID: existingFile.ID, FileType: fileType, Content: existingFile.Content,
+			})
+		}
 		return
 	}
 
