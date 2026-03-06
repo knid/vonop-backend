@@ -1488,7 +1488,7 @@ export function SiteHeader() {
                     initial={{ scale: 0 }}
                     animate={{ scale: 1 }}
                     exit={{ scale: 0 }}
-                    className="absolute -right-0.5 -top-0.5 flex h-4.5 w-4.5 items-center justify-center rounded-full bg-foreground text-[10px] font-semibold text-background"
+                    className="absolute -right-0.5 -top-0.5 flex h-[18px] w-[18px] items-center justify-center rounded-full bg-foreground text-[10px] font-semibold text-background"
                   >
                     {itemCount > 99 ? "99+" : itemCount}
                   </motion.span>
@@ -2090,10 +2090,10 @@ export default function CartPage() {
             </button>
           </div>
 
-          {cart.discountCode && (
+          {cart.discount_code && (
             <div className="mt-3 flex items-center gap-2 text-sm">
               <span className="rounded-full bg-green-100 px-3 py-0.5 font-medium text-green-700 dark:bg-green-900/30 dark:text-green-400">
-                {cart.discountCode}
+                {cart.discount_code}
               </span>
               <button
                 onClick={() => removeDiscountCode()}
@@ -2149,7 +2149,6 @@ const ECOMMERCE_TEMPLATE_CHECKOUT_PAGE = `"use client";
 import React from "react";
 import Link from "next/link";
 import { ArrowLeft, Check, Lock, Shield } from "lucide-react";
-import { motion } from "framer-motion";
 import { CheckoutForm } from "@/components/ecommerce/checkout-form";
 
 export default function CheckoutPage() {
@@ -2989,9 +2988,9 @@ const ECOMMERCE_TEMPLATE_PRODUCT_DETAIL_PAGE = `"use client";
 import React, { useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
-import { Minus, Plus, ShoppingCart, Truck, RotateCcw, Shield, Check, Share2, Copy } from "lucide-react";
+import { Minus, Plus, ShoppingCart, Truck, RotateCcw, Shield, Check, Copy } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import { useProduct, useProducts, useCart, formatPrice } from "@/lib/wemob-store";
+import { useProduct, useProducts, useCart } from "@/lib/wemob-store";
 import { ProductGallery } from "@/components/ecommerce/product-gallery";
 import { PriceDisplay } from "@/components/ecommerce/price-display";
 import { ReviewList } from "@/components/ecommerce/review-list";
