@@ -1421,8 +1421,13 @@ func (c *Controller) runDeterministicAutoFixes(
 	// Auto-fix metadata in client component
 	autoFixedMeta, changedPathsMeta := autoFixMetadataInClientComponent(fileMap)
 
+	// Auto-fix font weight for non-variable Google Fonts
+	autoFixedFonts, changedPathsFonts := autoFixFontWeights(fileMap)
+
 	// Auto-fix import/export mismatches
 	autoFixed, changedPaths := autoFixImportMismatches(fileMap)
+	autoFixed += autoFixedFonts
+	changedPaths = append(changedPaths, changedPathsFonts...)
 	// Auto-fix missing "use client" directives
 	autoFixed2, changedPaths2 := autoFixMissingUseClient(fileMap)
 	autoFixed += autoFixed2
@@ -2647,17 +2652,26 @@ func (c *Controller) streamSingleShotGeneration(
 		return "", nil, fmt.Errorf("pre-generation setup failed: %w", setupErr)
 	}
 
-	// Inject parameterized e-commerce templates (layout + globals.css)
-	if project.ProjectType == "ecommerce" {
+	// Inject parameterized templates (layout + globals.css)
+	{
 		var theme models.AppTheme
 		if len(project.Theme) > 0 {
 			json.Unmarshal(project.Theme, &theme)
 		}
-		if layoutContent := buildEcommerceLayout(project.Name, theme.Typography); layoutContent != "" {
-			c.injectTemplateFile(project, "app/layout.tsx", layoutContent, fileMap, sendEvent)
-		}
-		if cssContent := buildEcommerceGlobalsCSSTheme(theme.ColorScheme, theme.DarkColorScheme); cssContent != "" {
-			c.injectTemplateFile(project, "app/globals.css", cssContent, fileMap, sendEvent)
+		if project.ProjectType == "ecommerce" {
+			if layoutContent := buildEcommerceLayout(project.Name, theme.Typography); layoutContent != "" {
+				c.injectTemplateFile(project, "app/layout.tsx", layoutContent, fileMap, sendEvent)
+			}
+			if cssContent := buildEcommerceGlobalsCSSTheme(theme.ColorScheme, theme.DarkColorScheme); cssContent != "" {
+				c.injectTemplateFile(project, "app/globals.css", cssContent, fileMap, sendEvent)
+			}
+		} else {
+			// For non-e-commerce apps, inject globals.css with semantic tokens so
+			// the UI component templates (button, card, input, badge) work correctly.
+			isMobile := project.ProjectType == "mobile_app"
+			if cssContent := buildGlobalsCSSTheme(theme.ColorScheme, theme.DarkColorScheme, isMobile); cssContent != "" {
+				c.injectTemplateFile(project, "app/globals.css", cssContent, fileMap, sendEvent)
+			}
 		}
 	}
 
