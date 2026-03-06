@@ -545,7 +545,7 @@ func (c *Controller) StreamBuildApp(
 				if fileType == "tsx" || fileType == "ts" {
 					content, _ = stripForbiddenImports(content, path)
 				}
-				c.saveGeneratedFile(project, path, content, fileType, fileMap, sendEvent, &toolAppliedOps)
+				c.saveGeneratedFile(project, path, content, fileType, fileMap, sendEvent, &toolAppliedOps, true)
 			},
 			OnDelete: func(path string) {
 				c.deleteGeneratedFile(project, path, fileMap, sendEvent, &toolAppliedOps)
@@ -827,10 +827,13 @@ func (c *Controller) saveGeneratedFile(
 	fileMap map[string]string,
 	sendEvent func(string, any) bool,
 	ops *[]appBuilderOperation,
+	allowProtected ...bool,
 ) {
-	// Guard: never let the LLM overwrite template-managed files.
+	// Guard: never let the LLM overwrite template-managed files during initial generation.
+	// Chat edits pass allowProtected=true so the AI can fix errors in template files.
 	// Still emit file_complete with the DB content so the sandbox stays in sync.
-	if isProtectedTemplateFile(path) {
+	canOverride := len(allowProtected) > 0 && allowProtected[0]
+	if !canOverride && isProtectedTemplateFile(path) {
 		slog.Warn("saveGeneratedFile: skipping protected template file", "path", path)
 		if existingFile, err := c.DB.GetAppGeneratedFileByPath(project.ID.String(), "nextjs", path); err == nil && existingFile != nil {
 			sendEvent("file_complete", responses.FileCompleteEvent{
