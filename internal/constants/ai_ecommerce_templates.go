@@ -1211,9 +1211,9 @@ export function SiteHeader() {
           </Link>
 
           <nav className="hidden items-center gap-1 md:flex">
-            {navLinks.map((link) => (
+            {navLinks.map((link, i) => (
               <Link
-                key={link.href}
+                key={link.href + "-" + i}
                 href={link.href}
                 className={"relative px-3 py-2 text-sm font-medium transition-colors " +
                   (isActive(link.href) ? "text-foreground" : "text-muted-foreground hover:text-foreground")}
@@ -1276,7 +1276,7 @@ export function SiteHeader() {
             <div className="flex h-full flex-col items-center justify-center gap-2 px-4">
               {navLinks.map((link, i) => (
                 <motion.div
-                  key={link.href}
+                  key={link.href + "-" + i}
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: i * 0.05 }}
@@ -1366,8 +1366,8 @@ export function SiteFooter() {
               Shop
             </h3>
             <ul className="mt-4 space-y-2.5">
-              {shopLinks.map((link) => (
-                <li key={link.href}>
+              {shopLinks.map((link, i) => (
+                <li key={link.href + "-" + i}>
                   <Link
                     href={link.href}
                     className="text-sm text-muted-foreground transition-colors hover:text-foreground"
