@@ -139,6 +139,9 @@ func convertToAnthropicRequest(req ChatRequest, provider *LLMProvider) Anthropic
 	seenNonSystem := false
 	for _, m := range req.Messages {
 		if m.Role == "system" && !seenNonSystem {
+			if strings.TrimSpace(m.Content) == "" {
+				continue // skip empty system blocks — Anthropic rejects empty text
+			}
 			systemBlocks = append(systemBlocks, AnthropicContentBlock{
 				Type: "text",
 				Text: m.Content,
