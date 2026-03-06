@@ -852,7 +852,12 @@ func (c *Controller) saveGeneratedFile(
 	var fileID uuid.UUID
 	if err == nil && existingFile != nil {
 		if normalizeContent(content) == normalizeContent(existingFile.Content) {
-			// No changes — skip
+			// Content unchanged in DB — still emit file_complete so the sandbox
+			// gets re-synced (a previous write may have failed silently).
+			sendEvent("file_complete", responses.FileCompleteEvent{
+				Action: "modify", FilePath: path,
+				FileID: existingFile.ID, FileType: fileType, Content: content,
+			})
 			return
 		}
 		existingFile.Content = content
