@@ -2780,6 +2780,51 @@ func autoFixRootLayoutTags(files map[string]string) (bool, string) {
 	return false, ""
 }
 
+// autoFixClassNameConcat replaces JSX className attributes that use string concatenation
+// with template literals. This fixes a common LLM mistake where the concatenation expression
+// produces malformed JSX that fails to parse (e.g. unclosed braces, misplaced parens).
+//
+// Pattern: className={"base " + (condition ? "a" : "b")}
+// Fixed:   className={`base ${condition ? "a" : "b"}`}
+var classNameConcatRegex = regexp.MustCompile(
+	`className=\{("(?:[^"\\]|\\.)*")\s*\+\s*\(([^)]+)\)\}`,
+)
+
+func autoFixClassNameConcat(files map[string]string) (int, []string) {
+	var changedPaths []string
+	fixed := 0
+
+	for filePath, content := range files {
+		if !strings.HasSuffix(filePath, ".tsx") && !strings.HasSuffix(filePath, ".jsx") {
+			continue
+		}
+		if isTemplateFile(filePath) || isConfigFile(filePath) {
+			continue
+		}
+
+		updated := classNameConcatRegex.ReplaceAllStringFunc(content, func(match string) string {
+			parts := classNameConcatRegex.FindStringSubmatch(match)
+			if len(parts) < 3 {
+				return match
+			}
+			// parts[1] = "base string" (quoted), parts[2] = condition ? "a" : "b"
+			base := parts[1]
+			// Remove surrounding quotes from the base string
+			base = strings.Trim(base, `"`)
+			expr := parts[2]
+			return fmt.Sprintf("className={`%s${%s}`}", base, expr)
+		})
+
+		if updated != content {
+			files[filePath] = updated
+			changedPaths = append(changedPaths, filePath)
+			fixed++
+		}
+	}
+
+	return fixed, changedPaths
+}
+
 // isPascalCase returns true if the string starts with an uppercase letter (component naming convention).
 func isPascalCase(s string) bool {
 	if len(s) == 0 {

@@ -1639,10 +1639,12 @@ complete updated file content here
 
 ### Fixing Errors
 When the user reports a runtime error, build error, or TypeError:
-- **Diagnose first**: Read the error message, stack trace, and code frame carefully.
+- **Diagnose first**: Read the error message, stack trace, and code frame carefully. Match the error location to the actual code in the file contents above.
 - **Fix only what's broken**: Output only the file(s) that need changes, with the minimal fix applied.
 - **Do NOT change UI/design**: Error fixes must be scoped to the bug. Do not alter layouts, colors, or unrelated code.
-- **Be efficient**: Identify the root cause, fix it, done. Most errors are a wrong prop name, missing import, or type mismatch.`
+- **Be efficient**: Identify the root cause, fix it, done. Most errors are a wrong prop name, missing import, or type mismatch.
+- **CRITICAL**: You MUST look at the actual file content shown in the context above before outputting a fix. NEVER guess what the file contains — if the file content is not shown above, say so and ask the user to provide it. Outputting a "fix" based on assumptions will likely produce incorrect code.
+- **Common JSX pitfalls to avoid**: Do NOT use string concatenation in className (e.g. "base " + expr). Use template literals (className={...}) or the cn() utility from @/lib/utils instead.`
 
 // NEXTJS_BUILDER_CHAT_SYSTEM_PROMPT is the composed prompt for the file-block
 // chat path. It combines COMMON_RULES + CHAT_INSTRUCTIONS.
