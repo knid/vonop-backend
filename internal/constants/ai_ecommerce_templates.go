@@ -1153,10 +1153,10 @@ export function WishlistButton({ productId, size = "md", className = "" }: Wishl
 
 const ECOMMERCE_TEMPLATE_SITE_HEADER = `"use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ShoppingBag, Search, Menu, X } from "lucide-react";
+import { ShoppingBag, Search, Menu, X, ChevronDown } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useCart, useCategories, useStoreConfig } from "@/lib/wemob-store";
 import { CartDrawer } from "@/components/ecommerce/cart-drawer";
@@ -1170,6 +1170,9 @@ export function SiteHeader() {
   const [cartOpen, setCartOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
+  const [shopOpen, setShopOpen] = useState(false);
+  const [mobileShopOpen, setMobileShopOpen] = useState(false);
+  const shopTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     const handleScroll = () => setScrolled(window.scrollY > 10);
@@ -1179,21 +1182,36 @@ export function SiteHeader() {
 
   useEffect(() => {
     setMobileMenuOpen(false);
+    setMobileShopOpen(false);
   }, [pathname]);
 
   const navLinks = [
     { label: "Home", href: "/" },
-    { label: "Products", href: "/products" },
-    ...(categories ?? []).map((cat) => ({
-      label: cat.name,
-      href: "/categories/" + cat.slug,
-    })),
     { label: "About", href: "/about" },
     { label: "Contact", href: "/contact" },
   ];
 
+  const shopLinks = [
+    { label: "All Products", href: "/products" },
+    ...(categories ?? []).map((cat) => ({
+      label: cat.name,
+      href: "/categories/" + cat.slug,
+    })),
+  ];
+
   const isActive = (href: string) =>
     href === "/" ? pathname === "/" : pathname.startsWith(href);
+
+  const isShopActive = pathname.startsWith("/products") || pathname.startsWith("/categories");
+
+  const handleShopEnter = () => {
+    if (shopTimeoutRef.current) clearTimeout(shopTimeoutRef.current);
+    setShopOpen(true);
+  };
+
+  const handleShopLeave = () => {
+    shopTimeoutRef.current = setTimeout(() => setShopOpen(false), 150);
+  };
 
   return (
     <>
@@ -1211,9 +1229,76 @@ export function SiteHeader() {
           </Link>
 
           <nav className="hidden items-center gap-1 md:flex">
-            {navLinks.map((link, i) => (
+            <Link
+              href="/"
+              className={"relative px-3 py-2 text-sm font-medium transition-colors " +
+                (pathname === "/" ? "text-foreground" : "text-muted-foreground hover:text-foreground")}
+            >
+              Home
+              {pathname === "/" && (
+                <motion.div
+                  layoutId="nav-underline"
+                  className="absolute -bottom-px left-0 right-0 h-0.5 bg-foreground"
+                  transition={{ type: "spring", bounce: 0.2, duration: 0.5 }}
+                />
+              )}
+            </Link>
+
+            {/* Shop dropdown */}
+            <div
+              className="relative"
+              onMouseEnter={handleShopEnter}
+              onMouseLeave={handleShopLeave}
+            >
               <Link
-                key={link.href + "-" + i}
+                href="/products"
+                className={"relative inline-flex items-center gap-1 px-3 py-2 text-sm font-medium transition-colors " +
+                  (isShopActive ? "text-foreground" : "text-muted-foreground hover:text-foreground")}
+              >
+                Shop
+                <ChevronDown className={"h-3.5 w-3.5 transition-transform " + (shopOpen ? "rotate-180" : "")} />
+                {isShopActive && (
+                  <motion.div
+                    layoutId="nav-underline"
+                    className="absolute -bottom-px left-0 right-0 h-0.5 bg-foreground"
+                    transition={{ type: "spring", bounce: 0.2, duration: 0.5 }}
+                  />
+                )}
+              </Link>
+
+              <AnimatePresence>
+                {shopOpen && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 4 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: 4 }}
+                    transition={{ duration: 0.15 }}
+                    className="absolute left-0 top-full pt-2"
+                  >
+                    <div className="w-52 overflow-hidden rounded-xl border border-border/40 bg-background shadow-lg">
+                      <div className="py-1.5">
+                        {shopLinks.map((link, i) => (
+                          <Link
+                            key={link.href + "-" + i}
+                            href={link.href}
+                            className={"block px-4 py-2 text-sm transition-colors " +
+                              (isActive(link.href)
+                                ? "bg-muted text-foreground font-medium"
+                                : "text-muted-foreground hover:bg-muted/50 hover:text-foreground")}
+                          >
+                            {link.label}
+                          </Link>
+                        ))}
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+
+            {navLinks.slice(1).map((link) => (
+              <Link
+                key={link.href}
                 href={link.href}
                 className={"relative px-3 py-2 text-sm font-medium transition-colors " +
                   (isActive(link.href) ? "text-foreground" : "text-muted-foreground hover:text-foreground")}
@@ -1274,12 +1359,57 @@ export function SiteHeader() {
             className="fixed inset-0 z-40 bg-background md:hidden"
           >
             <div className="flex h-full flex-col items-center justify-center gap-2 px-4">
-              {navLinks.map((link, i) => (
+              <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0 }}>
+                <Link
+                  href="/"
+                  className={"block px-4 py-3 text-center text-2xl font-semibold tracking-tight transition-colors " +
+                    (pathname === "/" ? "text-foreground" : "text-muted-foreground hover:text-foreground")}
+                >
+                  Home
+                </Link>
+              </motion.div>
+
+              <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }}>
+                <button
+                  onClick={() => setMobileShopOpen(!mobileShopOpen)}
+                  className={"flex items-center gap-2 px-4 py-3 text-2xl font-semibold tracking-tight transition-colors " +
+                    (isShopActive ? "text-foreground" : "text-muted-foreground hover:text-foreground")}
+                >
+                  Shop
+                  <ChevronDown className={"h-5 w-5 transition-transform " + (mobileShopOpen ? "rotate-180" : "")} />
+                </button>
+                <AnimatePresence>
+                  {mobileShopOpen && (
+                    <motion.div
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: "auto", opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      transition={{ duration: 0.2 }}
+                      className="overflow-hidden"
+                    >
+                      <div className="flex flex-col items-center gap-1 pb-2">
+                        {shopLinks.map((link, i) => (
+                          <Link
+                            key={link.href + "-" + i}
+                            href={link.href}
+                            className={"block px-4 py-1.5 text-center text-lg transition-colors " +
+                              (isActive(link.href) ? "text-foreground font-medium" : "text-muted-foreground hover:text-foreground")}
+                          >
+                            {link.label}
+                          </Link>
+                        ))}
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </motion.div>
+
+              {navLinks.slice(1).map((link, i) => (
                 <motion.div
-                  key={link.href + "-" + i}
+                  key={link.href}
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: i * 0.05 }}
+                  transition={{ delay: (i + 2) * 0.05 }}
                 >
                   <Link
                     href={link.href}
@@ -1310,9 +1440,10 @@ export function SiteFooter() {
   const { categories } = useCategories();
   const { config: storeConfig } = useStoreConfig();
 
+  const allCategories = categories ?? [];
   const shopLinks = [
-    { label: "Products", href: "/products" },
-    ...(categories ?? []).map((cat) => ({
+    { label: "All Products", href: "/products" },
+    ...allCategories.slice(0, 6).map((cat) => ({
       label: cat.name,
       href: "/categories/" + cat.slug,
     })),
@@ -1348,16 +1479,35 @@ export function SiteFooter() {
             </p>
             {/* Social icons */}
             <div className="mt-6 flex gap-3">
-              {["I", "X", "F"].map((letter) => (
-                <a
-                  key={letter}
-                  href="#"
-                  className="flex h-9 w-9 items-center justify-center rounded-full border border-border/40 text-muted-foreground transition-colors hover:border-foreground hover:text-foreground"
-                  aria-label={letter === "I" ? "Instagram" : letter === "X" ? "Twitter" : "Facebook"}
-                >
-                  <span className="text-xs font-medium">{letter}</span>
-                </a>
-              ))}
+              <a
+                href="#"
+                className="flex h-9 w-9 items-center justify-center rounded-full border border-border/40 text-muted-foreground transition-colors hover:border-foreground hover:text-foreground"
+                aria-label="Instagram"
+              >
+                <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="2" y="2" width="20" height="20" rx="5" />
+                  <circle cx="12" cy="12" r="5" />
+                  <circle cx="17.5" cy="6.5" r="1.5" fill="currentColor" stroke="none" />
+                </svg>
+              </a>
+              <a
+                href="#"
+                className="flex h-9 w-9 items-center justify-center rounded-full border border-border/40 text-muted-foreground transition-colors hover:border-foreground hover:text-foreground"
+                aria-label="Twitter"
+              >
+                <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
+                </svg>
+              </a>
+              <a
+                href="#"
+                className="flex h-9 w-9 items-center justify-center rounded-full border border-border/40 text-muted-foreground transition-colors hover:border-foreground hover:text-foreground"
+                aria-label="Facebook"
+              >
+                <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M9.101 23.691v-7.98H6.627v-3.667h2.474v-1.58c0-4.085 1.848-5.978 5.858-5.978.401 0 1.09.044 1.613.115v3.146c-.427-.044-.72-.065-.95-.065-1.35 0-1.872.513-1.872 1.846v2.516h3.332l-.468 3.667h-2.864v8.245C19.396 23.238 24 18.179 24 12.044c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.628 3.874 10.35 9.101 11.647z" />
+                </svg>
+              </a>
             </div>
           </div>
 
@@ -1376,6 +1526,16 @@ export function SiteFooter() {
                   </Link>
                 </li>
               ))}
+              {allCategories.length > 6 && (
+                <li>
+                  <Link
+                    href="/products"
+                    className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
+                  >
+                    {"View All \u2192"}
+                  </Link>
+                </li>
+              )}
             </ul>
           </div>
 
@@ -1723,20 +1883,6 @@ export default function CartPage() {
           >
             Proceed to Checkout
           </Link>
-        </div>
-      </div>
-
-      {/* You might also like */}
-      <div className="mt-20">
-        <h2 className="text-xl font-semibold tracking-tight text-foreground">You might also like</h2>
-        <div className="mt-6 grid grid-cols-2 gap-6 sm:gap-8 lg:grid-cols-4">
-          {[1, 2, 3, 4].map((i) => (
-            <div key={i} className="space-y-3">
-              <div className="aspect-[3/4] animate-pulse rounded-2xl bg-muted" />
-              <div className="h-3 w-2/3 animate-pulse rounded bg-muted" />
-              <div className="h-3 w-1/3 animate-pulse rounded bg-muted" />
-            </div>
-          ))}
         </div>
       </div>
     </div>
