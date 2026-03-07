@@ -240,6 +240,41 @@ type Message struct {
 	ToolCalls        []ToolCall `json:"tool_calls,omitempty"`
 	ToolCallID       string     `json:"tool_call_id,omitempty"`
 	Name             string     `json:"name,omitempty"`
+	Images           []string   `json:"-"` // base64 data URIs; excluded from default serialization
+}
+
+// MarshalJSON customises JSON output for Message: when Images is non-empty and
+// role is "user", content is emitted as a multimodal array (OpenRouter format)
+// instead of a plain string.
+func (m Message) MarshalJSON() ([]byte, error) {
+	type Alias Message // avoid infinite recursion
+	if m.Role == "user" && len(m.Images) > 0 {
+		parts := []MultiContentPart{{Type: "text", Text: m.Content}}
+		for _, img := range m.Images {
+			parts = append(parts, MultiContentPart{
+				Type:     "image_url",
+				ImageURL: &ImageURLContent{URL: img},
+			})
+		}
+		// Marshal with content as multimodal array
+		type multiMsg struct {
+			Role             string             `json:"role"`
+			Content          []MultiContentPart `json:"content"`
+			ReasoningContent string             `json:"reasoning_content,omitempty"`
+			ToolCalls        []ToolCall         `json:"tool_calls,omitempty"`
+			ToolCallID       string             `json:"tool_call_id,omitempty"`
+			Name             string             `json:"name,omitempty"`
+		}
+		return json.Marshal(multiMsg{
+			Role:             m.Role,
+			Content:          parts,
+			ReasoningContent: m.ReasoningContent,
+			ToolCalls:        m.ToolCalls,
+			ToolCallID:       m.ToolCallID,
+			Name:             m.Name,
+		})
+	}
+	return json.Marshal(Alias(m))
 }
 
 // Response structure for parsing the LLM output

@@ -333,11 +333,15 @@ func (c *Controller) StreamBuildApp(
 			{Role: "system", Content: buildSystemPrompt(project)},
 			{Role: "system", Content: c.buildProjectContext(project, fileMap, isInitialGeneration)},
 		}
-		llmMessages = append(llmMessages, utils.Message{Role: "user", Content: message})
+		userMsg := utils.Message{Role: "user", Content: message}
 		if len(imageURLs) > 0 {
-			lastIdx := len(llmMessages) - 1
-			llmMessages[lastIdx].Content += fmt.Sprintf("\n\n[User attached %d image(s) for visual reference — recreate the design shown]", len(imageURLs))
+			if provider.SupportsVision() {
+				userMsg.Images = imageURLs
+			} else {
+				userMsg.Content += fmt.Sprintf("\n\n[User attached %d image(s) for visual reference — recreate the design shown]", len(imageURLs))
+			}
 		}
+		llmMessages = append(llmMessages, userMsg)
 	} else {
 		// Chat path: select relevant files, then build context
 		selectedFiles := c.selectContextFiles(ctx, provider, fileMap, message, messages)
@@ -378,21 +382,9 @@ func (c *Controller) StreamBuildApp(
 					Content: "I understand the earlier context. Let me continue from where we left off.",
 				})
 			}
-			for _, msg := range messages[len(messages)-keepRecent:] {
-				content := msg.Content
-				if msg.Role == "user" && len(msg.ImageURLs) > 0 {
-					content += fmt.Sprintf("\n\n[User attached %d image(s)]", len(msg.ImageURLs))
-				}
-				llmMessages = append(llmMessages, utils.Message{Role: msg.Role, Content: content})
-			}
+			llmMessages = append(llmMessages, chatMessagesToLLM(messages[len(messages)-keepRecent:], provider)...)
 		} else {
-			for _, msg := range messages {
-				content := msg.Content
-				if msg.Role == "user" && len(msg.ImageURLs) > 0 {
-					content += fmt.Sprintf("\n\n[User attached %d image(s)]", len(msg.ImageURLs))
-				}
-				llmMessages = append(llmMessages, utils.Message{Role: msg.Role, Content: content})
-			}
+			llmMessages = append(llmMessages, chatMessagesToLLM(messages, provider)...)
 		}
 	}
 
@@ -1162,6 +1154,38 @@ func extractFilePathsFromMessage(message string, fileMap map[string]string) []st
 
 // buildProjectContextForChat builds project context with selected file contents
 // inlined and remaining files listed as paths only.
+// chatMessagesToLLM converts stored conversation messages to LLM messages,
+// attaching actual image data only to the last user message (token optimization).
+// Older user messages with images get a text placeholder instead.
+func chatMessagesToLLM(msgs []models.AppConversationMessage, provider *utils.LLMProvider) []utils.Message {
+	supportsVision := provider.SupportsVision()
+
+	// Find the index of the last user message that has images
+	lastImgIdx := -1
+	if supportsVision {
+		for i := len(msgs) - 1; i >= 0; i-- {
+			if msgs[i].Role == "user" && len(msgs[i].ImageURLs) > 0 {
+				lastImgIdx = i
+				break
+			}
+		}
+	}
+
+	out := make([]utils.Message, 0, len(msgs))
+	for i, msg := range msgs {
+		m := utils.Message{Role: msg.Role, Content: msg.Content}
+		if msg.Role == "user" && len(msg.ImageURLs) > 0 {
+			if i == lastImgIdx {
+				m.Images = msg.ImageURLs
+			} else {
+				m.Content += fmt.Sprintf("\n\n[User previously attached %d image(s)]", len(msg.ImageURLs))
+			}
+		}
+		out = append(out, m)
+	}
+	return out
+}
+
 func (c *Controller) buildProjectContextForChat(project *models.AppProject, fileMap map[string]string, selectedFiles map[string]bool) string {
 	var sb strings.Builder
 
@@ -2753,11 +2777,15 @@ func (c *Controller) streamSingleShotGeneration(
 		{Role: "system", Content: c.buildProjectContext(project, fileMap, true)},
 	}
 
-	userContent := message
+	userMsg := utils.Message{Role: "user", Content: message}
 	if len(imageURLs) > 0 {
-		userContent += fmt.Sprintf("\n\n[User attached %d image(s) for visual reference — recreate the design shown]", len(imageURLs))
+		if provider.SupportsVision() {
+			userMsg.Images = imageURLs
+		} else {
+			userMsg.Content += fmt.Sprintf("\n\n[User attached %d image(s) for visual reference — recreate the design shown]", len(imageURLs))
+		}
 	}
-	llmMessages = append(llmMessages, utils.Message{Role: "user", Content: userContent})
+	llmMessages = append(llmMessages, userMsg)
 
 	// 4. Set up streaming file parser
 	var responseBuilder strings.Builder
@@ -3006,11 +3034,15 @@ func (c *Controller) streamEcommerceGeneration(
 		{Role: "system", Content: c.buildProjectContext(project, fileMap, true)},
 	}
 
-	userContent := message
+	userMsg := utils.Message{Role: "user", Content: message}
 	if len(imageURLs) > 0 {
-		userContent += fmt.Sprintf("\n\n[User attached %d image(s) for visual reference — recreate the design shown]", len(imageURLs))
+		if provider.SupportsVision() {
+			userMsg.Images = imageURLs
+		} else {
+			userMsg.Content += fmt.Sprintf("\n\n[User attached %d image(s) for visual reference — recreate the design shown]", len(imageURLs))
+		}
 	}
-	llmMessages = append(llmMessages, utils.Message{Role: "user", Content: userContent})
+	llmMessages = append(llmMessages, userMsg)
 
 	// Set up streaming file parser
 	var responseBuilder strings.Builder
