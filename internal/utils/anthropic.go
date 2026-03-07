@@ -343,10 +343,29 @@ func convertMessagesToAnthropic(messages []Message) []AnthropicMessage {
 			})
 
 		case "user":
-			result = append(result, AnthropicMessage{
-				Role:    "user",
-				Content: m.Content,
-			})
+			if len(m.Images) > 0 {
+				blocks := []AnthropicContentBlock{{Type: "text", Text: m.Content}}
+				for _, img := range m.Images {
+					mediaType, data := parseDataURI(img)
+					blocks = append(blocks, AnthropicContentBlock{
+						Type: "image",
+						Source: &AnthropicImageSource{
+							Type:      "base64",
+							MediaType: mediaType,
+							Data:      data,
+						},
+					})
+				}
+				result = append(result, AnthropicMessage{
+					Role:    "user",
+					Content: blocks,
+				})
+			} else {
+				result = append(result, AnthropicMessage{
+					Role:    "user",
+					Content: m.Content,
+				})
+			}
 
 		default:
 			// Skip unknown roles
@@ -401,6 +420,20 @@ func toContentBlocks(content any) []AnthropicContentBlock {
 	default:
 		return []AnthropicContentBlock{{Type: "text", Text: fmt.Sprintf("%v", v)}}
 	}
+}
+
+// parseDataURI splits a "data:<mediaType>;base64,<data>" URI into its media
+// type and raw base64 payload. Falls back to "image/png" if the format is
+// unexpected.
+func parseDataURI(dataURI string) (mediaType, data string) {
+	// Expected format: data:image/png;base64,iVBOR...
+	if after, ok := strings.CutPrefix(dataURI, "data:"); ok {
+		if semi := strings.Index(after, ";base64,"); semi >= 0 {
+			return after[:semi], after[semi+8:]
+		}
+	}
+	// Fallback: treat the whole string as raw base64
+	return "image/png", dataURI
 }
 
 // --- Vision Translation ---
