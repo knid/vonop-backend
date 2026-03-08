@@ -876,3 +876,31 @@ func (v *HttpViews) GetV2IntegrationProviders(w http.ResponseWriter, r *http.Req
 	providers := v.Controller.GetIntegrationProviders()
 	utils.JSONResponse(w, providers, http.StatusOK)
 }
+
+// POST /v2/apps/{appId}/capture-screenshot
+func (v *HttpViews) CaptureAppScreenshot(w http.ResponseWriter, r *http.Request) {
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	appID := chi.URLParam(r, "appId")
+	project, err := v.Controller.GetAppProject(appID, user)
+	if err != nil {
+		utils.JSONErrorResponse(w, "App not found", http.StatusNotFound)
+		return
+	}
+
+	var body struct {
+		URL string `json:"url"`
+	}
+	if err := utils.ParseJSONBody(r, &body); err != nil || body.URL == "" {
+		utils.JSONErrorResponse(w, "url required", http.StatusBadRequest)
+		return
+	}
+
+	go v.Controller.CaptureAppScreenshot(project, body.URL)
+
+	utils.JSONResponse(w, map[string]bool{"ok": true}, http.StatusAccepted)
+}
