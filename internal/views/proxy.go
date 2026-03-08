@@ -49,19 +49,19 @@ func InitProxyTransport(host, auth string) {
 }
 
 func (v *HttpViews) ProxyHandler(w http.ResponseWriter, r *http.Request) {
-	tokenString, err := utils.ExtractTokenFromHeader(r)
-	if err != nil {
-		http.Error(w, "Unauthorized: Failed to extract token", http.StatusUnauthorized)
-		return
-	}
-
-	if _, err := v.Controller.GetUser(tokenString); err != nil {
-		http.Error(w, "Unauthorized: Failed to get user information", http.StatusUnauthorized)
-		return
-	}
-
 	queryParam := r.URL.Query().Get("url")
 	if queryParam != "" {
+		// Auth required only when establishing a new session
+		tokenString, err := utils.ExtractTokenFromHeader(r)
+		if err != nil {
+			http.Error(w, "Unauthorized: Failed to extract token", http.StatusUnauthorized)
+			return
+		}
+		if _, err := v.Controller.GetUser(tokenString); err != nil {
+			http.Error(w, "Unauthorized: Failed to get user information", http.StatusUnauthorized)
+			return
+		}
+
 		targetURL, err := url.Parse(queryParam)
 		if err != nil || targetURL.Scheme == "" || targetURL.Host == "" {
 			http.Error(w, "Invalid 'url'", http.StatusBadRequest)
