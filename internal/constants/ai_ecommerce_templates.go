@@ -1460,7 +1460,7 @@ export function SiteHeader() {
               )}
             </div>
             <Link
-              href="/products?q="
+              href="/products"
               className="flex h-10 w-10 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground md:hidden"
               aria-label="Search products"
             >
@@ -2492,9 +2492,10 @@ export default function CheckoutCancelPage() {
 
 const ECOMMERCE_TEMPLATE_PRODUCTS_PAGE = `"use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import Image from "next/image";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { Search, SlidersHorizontal, ChevronDown, ChevronRight, LayoutGrid, List, X, ShoppingBag } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useProducts, useCategories, formatPrice } from "@/lib/wemob-store";
@@ -2515,9 +2516,11 @@ const itemVariants = {
 };
 
 export default function ProductsPage() {
-  const { products, isLoading } = useProducts();
+  const searchParams = useSearchParams();
+  const urlQuery = searchParams.get("q") || "";
+  const { products, isLoading } = useProducts(urlQuery ? { q: urlQuery } : undefined);
   const { categories } = useCategories();
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useState(urlQuery);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [sort, setSort] = useState<SortOption>("featured");
   const [showSort, setShowSort] = useState(false);
@@ -2528,6 +2531,10 @@ export default function ProductsPage() {
   const [onSaleOnly, setOnSaleOnly] = useState(false);
   const [inStockOnly, setInStockOnly] = useState(false);
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({ categories: true, price: true, filters: true });
+
+  useEffect(() => {
+    setSearch(urlQuery);
+  }, [urlQuery]);
 
   const toggleSection = (key: string) => {
     setOpenSections((prev) => ({ ...prev, [key]: !prev[key] }));
