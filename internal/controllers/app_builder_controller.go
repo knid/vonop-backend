@@ -960,6 +960,10 @@ func buildChatSystemPrompt(project *models.AppProject) string {
 		}
 	}
 
+	if project.ProjectType == "mobile_app" {
+		prompt += constants.NEXTJS_BUILDER_MOBILE_RULES
+	}
+
 	return prompt
 }
 
@@ -977,6 +981,10 @@ func buildSingleShotSystemPrompt(project *models.AppProject) string {
 		if needsAuth, ok := settings["needs_auth"].(bool); ok && needsAuth {
 			prompt += constants.NEXTJS_BUILDER_AUTH_RULES
 		}
+	}
+
+	if project.ProjectType == "mobile_app" {
+		prompt += constants.NEXTJS_BUILDER_MOBILE_RULES
 	}
 
 	return prompt
@@ -1521,6 +1529,11 @@ func (c *Controller) runDeterministicAutoFixes(
 	autoFixedConcat, changedPathsConcat := autoFixClassNameConcat(fileMap)
 	autoFixed += autoFixedConcat
 	changedPaths = append(changedPaths, changedPathsConcat...)
+
+	// Auto-fix unterminated JSX string expressions {"text → {"text"}
+	autoFixedJSXStr, changedPathsJSXStr := autoFixUnterminatedJSXStrings(fileMap)
+	autoFixed += autoFixedJSXStr
+	changedPaths = append(changedPaths, changedPathsJSXStr...)
 
 	if autoFixed > 0 {
 		slog.Info("Deterministic auto-fix applied", "project_id", project.ID, "files_fixed", autoFixed)
@@ -2833,6 +2846,7 @@ func (c *Controller) streamSingleShotGeneration(
 	autoFixMetadataInClientComponent(fileMap)
 	autoFixMissingUseClient(fileMap)
 	autoFixRootLayoutTags(fileMap)
+	autoFixUnterminatedJSXStrings(fileMap)
 	// Persist any auto-fixed or newly created content back to the DB
 	for path, content := range fileMap {
 		prev, existed := preFixSnapshot[path]
@@ -3090,6 +3104,7 @@ func (c *Controller) streamEcommerceGeneration(
 	autoFixMetadataInClientComponent(fileMap)
 	autoFixMissingUseClient(fileMap)
 	autoFixRootLayoutTags(fileMap)
+	autoFixUnterminatedJSXStrings(fileMap)
 	// Persist any auto-fixed or newly created content back to the DB
 	for path, content := range fileMap {
 		prev, existed := preFixSnapshot[path]
