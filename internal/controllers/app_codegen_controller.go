@@ -2825,6 +2825,38 @@ func autoFixClassNameConcat(files map[string]string) (int, []string) {
 	return fixed, changedPaths
 }
 
+// autoFixUnterminatedJSXStrings fixes unterminated JSX string expressions where the
+// LLM opens {"text but forgets the closing "}. The parser then interprets the / in
+// the next closing tag (e.g. </h2>) as a regexp literal, causing a build error.
+//
+// Pattern:  {"some text\n           </h2>
+// Fixed:    {"some text"}\n           </h2>
+var unterminatedJSXStringRegex = regexp.MustCompile(`(?m)\{"([^"\n]*)$`)
+
+func autoFixUnterminatedJSXStrings(files map[string]string) (int, []string) {
+	var changedPaths []string
+	fixed := 0
+
+	for filePath, content := range files {
+		if !strings.HasSuffix(filePath, ".tsx") && !strings.HasSuffix(filePath, ".jsx") {
+			continue
+		}
+		if isTemplateFile(filePath) || isConfigFile(filePath) {
+			continue
+		}
+
+		updated := unterminatedJSXStringRegex.ReplaceAllString(content, `{"$1"}`)
+		if updated != content {
+			files[filePath] = updated
+			changedPaths = append(changedPaths, filePath)
+			fixed++
+			slog.Warn("Auto-fixed unterminated JSX string expression", "path", filePath)
+		}
+	}
+
+	return fixed, changedPaths
+}
+
 // isPascalCase returns true if the string starts with an uppercase letter (component naming convention).
 func isPascalCase(s string) bool {
 	if len(s) == 0 {
