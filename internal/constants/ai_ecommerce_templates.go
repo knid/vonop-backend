@@ -2225,7 +2225,7 @@ export default function CheckoutPage() {
 
 const ECOMMERCE_TEMPLATE_CHECKOUT_SUCCESS_PAGE = `"use client";
 
-import React, { useEffect, useState } from "react";
+import React, { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { CheckCircle, Package, Loader2 } from "lucide-react";
@@ -2233,6 +2233,21 @@ import { motion } from "framer-motion";
 import { getOrder, confirmCheckout, formatPrice } from "@/lib/wemob-store";
 
 export default function CheckoutSuccessPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex min-h-[50vh] flex-col items-center justify-center px-4">
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+          <p className="mt-4 text-muted-foreground">Loading order details...</p>
+        </div>
+      }
+    >
+      <CheckoutSuccessContent />
+    </Suspense>
+  );
+}
+
+function CheckoutSuccessContent() {
   const searchParams = useSearchParams();
   const orderId = searchParams.get("order_id");
   const sessionId = searchParams.get("session_id");
@@ -2492,7 +2507,7 @@ export default function CheckoutCancelPage() {
 
 const ECOMMERCE_TEMPLATE_PRODUCTS_PAGE = `"use client";
 
-import React, { useState, useMemo, useEffect } from "react";
+import React, { Suspense, useState, useMemo, useEffect } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
@@ -2516,6 +2531,24 @@ const itemVariants = {
 };
 
 export default function ProductsPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="mx-auto max-w-7xl px-4 py-10">
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+            {Array.from({ length: 8 }).map((_, i) => (
+              <Skeleton key={i} className="aspect-square w-full rounded-xl" />
+            ))}
+          </div>
+        </div>
+      }
+    >
+      <ProductsPageContent />
+    </Suspense>
+  );
+}
+
+function ProductsPageContent() {
   const searchParams = useSearchParams();
   const urlQuery = searchParams.get("q") || "";
   const { products, isLoading } = useProducts(urlQuery ? { q: urlQuery } : undefined);
@@ -3077,7 +3110,7 @@ export default function ProductDetailPage() {
         {product.category && (
           <>
             <span>/</span>
-            <Link href={"/categories/" + product.category.toLowerCase().replace(/\s+/g, "-")} className="transition-colors hover:text-foreground">
+            <Link href={"/categories/" + (product.category_slug || product.category.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/-+$/, ""))} className="transition-colors hover:text-foreground">
               {product.category}
             </Link>
           </>

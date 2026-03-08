@@ -46,7 +46,7 @@ func (c *Controller) StorefrontGetProducts(storeID string) ([]models.Product, er
 	var active []models.Product
 	for _, p := range products {
 		if p.Status == "active" {
-			c.resolveProductImageURLs(&p)
+			c.ResolveProductImageURLs(&p)
 			active = append(active, p)
 		}
 	}
@@ -61,14 +61,14 @@ func (c *Controller) StorefrontGetProduct(storeID string, slug string) (*models.
 	if product.Status != "active" {
 		return nil, fmt.Errorf("product not found")
 	}
-	c.resolveProductImageURLs(product)
+	c.ResolveProductImageURLs(product)
 	return product, nil
 }
 
-// resolveProductImageURLs converts S3 key paths stored in product.Images into
+// ResolveProductImageURLs converts S3 key paths stored in product.Images into
 // fresh presigned URLs. Entries that are already full URLs (legacy data) are
 // kept as-is but refreshed if they look like expired presigned URLs.
-func (c *Controller) resolveProductImageURLs(p *models.Product) {
+func (c *Controller) ResolveProductImageURLs(p *models.Product) {
 	if len(p.Images) == 0 || c.AssetsStorage == nil {
 		return
 	}
@@ -79,7 +79,7 @@ func (c *Controller) resolveProductImageURLs(p *models.Product) {
 			// S3 key — generate fresh presigned URL (1 hour)
 			presigned, err := c.AssetsStorage.GetObject(context.Background(), img, 60*60)
 			if err != nil {
-				slog.Warn("resolveProductImageURLs: failed to presign", "key", img, "error", err)
+				slog.Warn("ResolveProductImageURLs: failed to presign", "key", img, "error", err)
 				resolved = append(resolved, img) // keep raw key as fallback
 			} else {
 				resolved = append(resolved, presigned.URL)
@@ -90,7 +90,7 @@ func (c *Controller) resolveProductImageURLs(p *models.Product) {
 			if key != "" {
 				presigned, err := c.AssetsStorage.GetObject(context.Background(), key, 60*60)
 				if err != nil {
-					slog.Warn("resolveProductImageURLs: failed to re-presign legacy URL", "key", key, "error", err)
+					slog.Warn("ResolveProductImageURLs: failed to re-presign legacy URL", "key", key, "error", err)
 					resolved = append(resolved, img)
 				} else {
 					resolved = append(resolved, presigned.URL)

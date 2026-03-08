@@ -13,6 +13,7 @@ type StorefrontProductResponse struct {
 	Description    string    `json:"description"`
 	Images         []string  `json:"images"`
 	Category       string    `json:"category,omitempty"`
+	CategorySlug   string    `json:"category_slug,omitempty"`
 	Tags           []string  `json:"tags"`
 	PriceInCents   int       `json:"price_in_cents"`
 	CompareAtPrice int       `json:"compare_at_price,omitempty"`

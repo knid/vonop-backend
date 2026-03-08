@@ -236,6 +236,7 @@ export interface StorefrontProduct {
   description: string;
   images: string[];
   category: string;
+  category_slug: string;
   tags: string[];
   price_in_cents: number;
   compare_at_price: number;
@@ -1769,7 +1770,7 @@ Types: StoreConfig, StorefrontProduct, StorefrontCategory, StorefrontCart, Store
 ### SDK Usage Rules
 - useProducts() accepts ONLY { category?: string; q?: string }. There is NO limit parameter — use .slice() to limit results.
 - useStoreConfig() returns { config: StoreConfig | null; isLoading; error }. You MUST destructure: const { config } = useStoreConfig(). Then access config?.name, config?.currency, etc.
-- StorefrontProduct has: id, name, slug, description, images, category (name string), tags, price_in_cents, compare_at_price, min_price_cents, max_price_cents, in_stock, average_rating, review_count. There is NO category_slug field — use category (the name).
+- StorefrontProduct has: id, name, slug, description, images, category (name string), category_slug (URL-safe slug), tags, price_in_cents, compare_at_price, min_price_cents, max_price_cents, in_stock, average_rating, review_count. When linking to a category page, use category_slug (e.g. href={"/categories/" + product.category_slug}).
 - StorefrontCategory has: id, name, slug, image, description. There is NO product_count field.
 - OrderTrackingItem has: product_name (NOT name), quantity, price_in_cents, total_cents (NOT price). OrderTracking has: total_cents (NOT total), order_number (NOT orderNumber).
 - EmptyState accepts icon?: ReactNode and action?: ReactNode. Pass JSX elements, NOT component references or plain objects. Correct: icon={<Search className="h-12 w-12" />} action={<Link href="/products">Browse</Link>}. Wrong: icon={Search} action={{ label: "Browse", href: "/products" }}.
@@ -1852,6 +1853,7 @@ Pages auto-injected as templates (do NOT recreate):
 - Use skeleton rows for cart items
 - All hooks return { isLoading } — check it and render skeletons, not empty content
 - Use Suspense boundaries where appropriate
+- CRITICAL: Any component that calls useSearchParams() MUST be wrapped in a <Suspense> boundary. Export a default wrapper component that renders <Suspense fallback={...}><ActualContent /></Suspense>, and put useSearchParams() inside ActualContent. Without this, Next.js static generation will fail with "useSearchParams() should be wrapped in a suspense boundary".
 
 ### Responsive Design
 - Product grid columns: 1 col (mobile) → 2 col (sm) → 3 col (md) → 4 col (lg)
