@@ -131,6 +131,7 @@ Focus your questions on:
 5. **Integrations** — payment, auth, third-party services needed
 
 Rules:
+- CRITICAL: Always write questions and options in the SAME LANGUAGE as the user's prompt. If the user writes in Turkish, respond in Turkish. If in Spanish, respond in Spanish. Match their language exactly.
 - Generate between 2 and 5 questions (fewer for simple prompts, more for complex ones)
 - Each question should have a unique "id" (e.g. "q1", "q2", ...)
 - Use "type": "choice" with 2-4 options when there are clear common answers
