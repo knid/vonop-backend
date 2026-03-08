@@ -842,6 +842,8 @@ func main() {
 						r.Get("/history", httpViews.GetDeployHistory)
 					})
 
+					r.Post("/capture-screenshot", httpViews.CaptureAppScreenshot)
+
 					// Snapshots
 					r.Route("/snapshots", func(r chi.Router) {
 						r.Get("/", httpViews.GetAppSnapshots)

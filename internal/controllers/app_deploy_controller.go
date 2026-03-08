@@ -266,6 +266,7 @@ func (c *Controller) GetLatestDeploymentStatus(projectID string) (*models.AppDep
 			if _, err := c.DB.UpdateAppDeployment(deployment); err != nil {
 				slog.Error("Failed to update deployment status", "error", err)
 			}
+
 		}
 	}
 
