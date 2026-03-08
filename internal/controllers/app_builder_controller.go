@@ -2790,10 +2790,18 @@ func (c *Controller) streamSingleShotGeneration(
 	}
 	sendEvent("project_created", projectCreatedPayload)
 
-	// 3. Build messages with single-shot system prompt
+	// 3. Generate AI logo (runs in parallel with nothing — just do it inline, fast)
+	logoURL := c.generateAppLogo(ctx, project, sendEvent)
+
+	// 4. Build messages with single-shot system prompt
+	projectContext := c.buildProjectContext(project, fileMap, true)
+	if logoURL != "" {
+		projectContext += fmt.Sprintf("\n\nApp Logo URL (use this as the site logo/favicon in the header and metadata):\n%s", logoURL)
+	}
+
 	llmMessages := []utils.Message{
 		{Role: "system", Content: buildSingleShotSystemPrompt(project)},
-		{Role: "system", Content: c.buildProjectContext(project, fileMap, true)},
+		{Role: "system", Content: projectContext},
 	}
 
 	userMsg := utils.Message{Role: "user", Content: message}
@@ -2806,7 +2814,7 @@ func (c *Controller) streamSingleShotGeneration(
 	}
 	llmMessages = append(llmMessages, userMsg)
 
-	// 4. Set up streaming file parser
+	// 5. Set up streaming file parser
 	var responseBuilder strings.Builder
 	parser := &utils.FileStreamParser{
 		OnFile: func(path, content string) {
@@ -2826,7 +2834,7 @@ func (c *Controller) streamSingleShotGeneration(
 		},
 	}
 
-	// 5. Single LLM call — no tools, no rounds
+	// 6. Single LLM call — no tools, no rounds
 	slog.Info("Starting single-shot generation",
 		"model", model,
 		"project_id", project.ID,
@@ -2843,7 +2851,7 @@ func (c *Controller) streamSingleShotGeneration(
 	)
 	parser.Flush()
 
-	// 6. Run deterministic auto-fixes before syncing (e.g. remove "use client" from
+	// 7. Run deterministic auto-fixes before syncing (e.g. remove "use client" from
 	// files that export metadata — Next.js will 500 otherwise).
 	preFixSnapshot := make(map[string]string, len(fileMap))
 	for k, v := range fileMap {
@@ -2874,6 +2882,54 @@ func (c *Controller) streamSingleShotGeneration(
 
 // aiImagePlaceholderRegex matches __AI_IMAGE("prompt text")__ markers in generated code.
 var aiImagePlaceholderRegex = regexp.MustCompile(`__AI_IMAGE\("([^"]+)"\)__`)
+
+// generateAppLogo generates an AI logo for the app via fal.ai, uploads it to S3,
+// and returns a presigned URL. Returns "" on any failure (best-effort).
+func (c *Controller) generateAppLogo(ctx context.Context, project *models.AppProject, sendEvent func(string, any) bool) string {
+	apiKey := c.SecretManager.GetSecret("FAL_API_KEY")
+	if apiKey == "" {
+		return ""
+	}
+
+	falModel := c.SecretManager.GetSecret("FAL_IMAGE_MODEL")
+	if falModel == "" {
+		falModel = "fal-ai/flux/schnell"
+	}
+
+	sendEvent("tool_start", map[string]any{"tool": "generate_logo"})
+
+	prompt := fmt.Sprintf(
+		"Minimal, modern app logo icon for '%s'. Clean geometric design, flat style, single iconic symbol, no text, no letters, solid background, suitable for favicon and app header. Professional, tech-company quality.",
+		project.Name,
+	)
+
+	cdnURL, err := fal.GenerateImage(ctx, apiKey, falModel, prompt)
+	if err != nil {
+		slog.Warn("generateAppLogo: fal generation failed", "error", err, "project_id", project.ID)
+		return ""
+	}
+
+	imgData, err := downloadImage(ctx, cdnURL)
+	if err != nil {
+		slog.Warn("generateAppLogo: failed to download image", "error", err, "project_id", project.ID)
+		return ""
+	}
+
+	s3Key := fmt.Sprintf("apps/%s/logo.png", project.ID)
+	if err := c.AssetsStorage.UploadFileByteWithContentType(ctx, s3Key, imgData, "image/png"); err != nil {
+		slog.Warn("generateAppLogo: failed to upload to S3", "error", err, "project_id", project.ID)
+		return ""
+	}
+
+	presigned, err := c.AssetsStorage.GetObject(ctx, s3Key, 7*24*3600)
+	if err != nil {
+		slog.Warn("generateAppLogo: failed to presign", "error", err, "project_id", project.ID)
+		return ""
+	}
+
+	slog.Info("generateAppLogo: logo generated", "project_id", project.ID, "s3_key", s3Key)
+	return presigned.URL
+}
 
 // generateAndReplaceAIImages scans all files in fileMap for __AI_IMAGE("...")__
 // placeholders, generates up to maxImages real images via fal.ai, uploads them
@@ -3196,10 +3252,18 @@ func (c *Controller) streamEcommerceGeneration(
 		}
 	}
 
+	// Generate AI logo for the store
+	logoURL := c.generateAppLogo(ctx, project, sendEvent)
+
 	// Rebuild messages with fresh context (now includes store data from Phase 1)
+	projectContext := c.buildProjectContext(project, fileMap, true)
+	if logoURL != "" {
+		projectContext += fmt.Sprintf("\n\nApp Logo URL (use this as the site logo/favicon in the header and metadata):\n%s", logoURL)
+	}
+
 	llmMessages := []utils.Message{
 		{Role: "system", Content: buildSingleShotSystemPrompt(project)},
-		{Role: "system", Content: c.buildProjectContext(project, fileMap, true)},
+		{Role: "system", Content: projectContext},
 	}
 
 	userMsg := utils.Message{Role: "user", Content: message}
