@@ -48,9 +48,11 @@ func (v *HttpViews) StorefrontGetProducts(w http.ResponseWriter, r *http.Request
 	// Load categories for name lookup and optional category filtering
 	categories, _ := v.Controller.StorefrontGetCategories(storeID)
 	categoryNameMap := make(map[uuid.UUID]string)
+	categorySlugByID := make(map[uuid.UUID]string)
 	categorySlugMap := make(map[string]uuid.UUID)
 	for _, c := range categories {
 		categoryNameMap[c.ID] = c.Name
+		categorySlugByID[c.ID] = c.Slug
 		categorySlugMap[c.Slug] = c.ID
 	}
 
@@ -89,7 +91,8 @@ func (v *HttpViews) StorefrontGetProducts(w http.ResponseWriter, r *http.Request
 		resp = append(resp, responses.StorefrontProductResponse{
 			ID: p.ID, Name: p.Name, Slug: p.Slug,
 			Description: p.Description, Images: p.Images,
-			Category: categoryNameMap[p.CategoryID],
+			Category:     categoryNameMap[p.CategoryID],
+			CategorySlug: categorySlugByID[p.CategoryID],
 			Tags:           p.Tags,
 			PriceInCents:   p.PriceInCents,
 			CompareAtPrice: p.CompareAtPrice,
@@ -122,12 +125,14 @@ func (v *HttpViews) StorefrontGetProduct(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Resolve category name
+	// Resolve category name + slug
 	categoryName := ""
+	categorySlug := ""
 	if product.CategoryID != uuid.Nil {
 		cat, catErr := v.Controller.StorefrontGetCategoryByID(product.CategoryID.String())
 		if catErr == nil {
 			categoryName = cat.Name
+			categorySlug = cat.Slug
 		}
 	}
 
@@ -139,6 +144,7 @@ func (v *HttpViews) StorefrontGetProduct(w http.ResponseWriter, r *http.Request)
 		ID: product.ID, Name: product.Name, Slug: product.Slug,
 		Description: product.Description, Images: product.Images,
 		Category:       categoryName,
+		CategorySlug:   categorySlug,
 		Tags:           product.Tags,
 		PriceInCents:   product.PriceInCents,
 		CompareAtPrice: product.CompareAtPrice,
@@ -224,6 +230,7 @@ func (v *HttpViews) buildCartResponse(storeID, sessionID string) (*responses.Sto
 		productImage := ""
 		if item.Product != nil {
 			productName = item.Product.Name
+			v.Controller.ResolveProductImageURLs(item.Product)
 			if len(item.Product.Images) > 0 {
 				productImage = item.Product.Images[0]
 			}

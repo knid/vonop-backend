@@ -200,7 +200,7 @@ func (c *Controller) createProductFromChat(store *models.Store, data map[string]
 	name, _ := data["name"].(string)
 	slug, _ := data["slug"].(string)
 	if slug == "" {
-		slug = strings.ToLower(strings.ReplaceAll(name, " ", "-"))
+		slug = utils.Slugify(name)
 	}
 	// Fix 17: Ensure slug uniqueness like the direct API does
 	slug = slug + "-" + uuid.New().String()[:8]
@@ -459,7 +459,7 @@ func chatIntFromAny(v any) int {
 
 func (c *Controller) createCategoryFromChat(store *models.Store, data map[string]any) error {
 	name, _ := data["name"].(string)
-	slug := strings.ToLower(strings.ReplaceAll(name, " ", "-"))
+	slug := utils.Slugify(name)
 	if s, ok := data["slug"].(string); ok {
 		slug = s
 	}
@@ -661,8 +661,7 @@ func (c *Controller) CreateProduct(store *models.Store, req requests.CreateProdu
 		return nil, err
 	}
 
-	slug := strings.ToLower(strings.ReplaceAll(req.Name, " ", "-"))
-	slug = slug + "-" + uuid.New().String()[:8]
+	slug := utils.Slugify(req.Name) + "-" + uuid.New().String()[:8]
 
 	var categoryID uuid.UUID
 	if req.CategoryID != "" {
@@ -786,7 +785,7 @@ func (c *Controller) CreateCategory(store *models.Store, req requests.CreateCate
 		return nil, err
 	}
 
-	slug := strings.ToLower(strings.ReplaceAll(req.Name, " ", "-"))
+	slug := utils.Slugify(req.Name)
 
 	var parentID uuid.UUID
 	if req.ParentID != "" {
@@ -821,7 +820,7 @@ func (c *Controller) UpdateCategory(categoryID string, store *models.Store, req 
 
 	if req.Name != nil {
 		cat.Name = *req.Name
-		cat.Slug = strings.ToLower(strings.ReplaceAll(*req.Name, " ", "-"))
+		cat.Slug = utils.Slugify(*req.Name)
 	}
 	if req.Image != nil {
 		cat.Image = *req.Image
