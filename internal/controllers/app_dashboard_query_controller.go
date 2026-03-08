@@ -496,12 +496,16 @@ func (c *Controller) querySupabase(integration *models.AppIntegration, query *mo
 
 // queryNeon executes a read-only SQL query against a Neon Postgres database.
 func (c *Controller) queryNeon(integration *models.AppIntegration, query *models.DashboardQuery) (any, error) {
+	// Try Credentials.connection_string first, then fall back to EnvVars.DATABASE_URL
+	// (the database editor and codegen store the DSN in EnvVars, not Credentials).
+	var connStr string
 	var creds map[string]any
-	if err := json.Unmarshal(integration.Credentials, &creds); err != nil {
-		return nil, fmt.Errorf("invalid integration credentials")
+	if err := json.Unmarshal(integration.Credentials, &creds); err == nil {
+		connStr, _ = creds["connection_string"].(string)
 	}
-
-	connStr, _ := creds["connection_string"].(string)
+	if connStr == "" {
+		connStr = integration.EnvVars["DATABASE_URL"]
+	}
 	if connStr == "" {
 		return nil, fmt.Errorf("missing neon connection string")
 	}
@@ -1115,12 +1119,14 @@ func (c *Controller) updateCellSupabase(integration *models.AppIntegration, tabl
 
 // updateCellNeon updates a cell via a parameterized UPDATE on a Neon Postgres database.
 func (c *Controller) updateCellNeon(integration *models.AppIntegration, table, column string, value any, primaryKey map[string]any) error {
+	var connStr string
 	var creds map[string]any
-	if err := json.Unmarshal(integration.Credentials, &creds); err != nil {
-		return fmt.Errorf("invalid integration credentials")
+	if err := json.Unmarshal(integration.Credentials, &creds); err == nil {
+		connStr, _ = creds["connection_string"].(string)
 	}
-
-	connStr, _ := creds["connection_string"].(string)
+	if connStr == "" {
+		connStr = integration.EnvVars["DATABASE_URL"]
+	}
 	if connStr == "" {
 		return fmt.Errorf("missing neon connection string")
 	}
