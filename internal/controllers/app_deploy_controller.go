@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/models"
@@ -425,6 +426,9 @@ func injectAnalyticsScript(fileMap map[string]string, projectID string) {
 // CaptureAppScreenshot takes a desktop screenshot of the preview URL and uploads it to S3.
 // Intended to be called in a goroutine (fire-and-forget).
 func (c *Controller) CaptureAppScreenshot(project *models.AppProject, previewURL string) {
+	// Wait for the preview to fully render before capturing
+	time.Sleep(10 * time.Second)
+
 	apiKey := c.SecretManager.GetSecret("SITESHOT_API_KEY")
 	if apiKey == "" {
 		slog.Warn("CaptureAppScreenshot: SITESHOT_API_KEY not configured")
