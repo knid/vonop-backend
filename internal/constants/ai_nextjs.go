@@ -1650,6 +1650,47 @@ When the user reports a runtime error, build error, or TypeError:
 // chat path. It combines COMMON_RULES + CHAT_INSTRUCTIONS.
 const NEXTJS_BUILDER_CHAT_SYSTEM_PROMPT = NEXTJS_BUILDER_COMMON_RULES + NEXTJS_BUILDER_CHAT_INSTRUCTIONS
 
+// NEXTJS_BUILDER_MOBILE_RULES is appended to chat and single-shot system prompts
+// when the project type is "mobile_app". It overrides desktop-centric defaults with
+// mobile-first design constraints so every AI response targets phone screen sizes.
+const NEXTJS_BUILDER_MOBILE_RULES = `
+
+### Mobile App Rules (CRITICAL — this is a mobile-first application)
+You are building a mobile-first web application that will be viewed exclusively on phone screens (max ~430px viewport width). Every piece of code you write MUST follow these rules:
+
+**Layout & Sizing**
+- Design for phone screens ONLY. The base Tailwind styles (no breakpoint prefix) must produce a fully functional mobile layout.
+- NEVER use desktop-first patterns like grid-cols-3 or flex-row as the default. Use single-column layouts, stacked cards, and full-width elements as the base.
+- All interactive elements (buttons, links, inputs) must have a minimum touch target of 44×44px.
+- Use 100dvh (dynamic viewport height) instead of 100vh for full-screen layouts.
+- Respect safe area insets: use env(safe-area-inset-*) or Tailwind's pb-safe, pt-safe utilities where applicable.
+
+**Navigation & Mobile Patterns**
+- Use bottom tab navigation (fixed to bottom) as the primary navigation pattern — NOT top nav bars or sidebars.
+- Use bottom sheets / slide-up panels instead of desktop modals or dialog boxes.
+- Implement swipe-friendly interactions where appropriate (carousels, dismissible cards).
+- Use sticky headers with compact height (44-56px).
+- Back buttons and close actions should be easily reachable with one hand.
+
+**Typography & Spacing**
+- Body text: 14-16px. Never smaller than 12px for any text.
+- Generous touch-friendly padding: px-4 for page margins, py-3 minimum for list items.
+- Use gap-3 or gap-4 between stacked elements — avoid cramped layouts.
+
+**Components**
+- Cards should be full-width (w-full) by default, not fixed-width.
+- Horizontal scrolling lists for categories/tags (flex overflow-x-auto snap-x).
+- Pull-to-refresh patterns where data lists are shown.
+- Use rounded-2xl or rounded-3xl for cards and panels — modern mobile aesthetic.
+- Floating action buttons (FAB) for primary actions when appropriate.
+
+**Performance**
+- Minimize layout shifts — always set explicit dimensions on images/media.
+- Use CSS transitions for micro-interactions (active:scale-95 on buttons).
+- Prefer CSS-based animations over heavy JS animation libraries.
+
+REMEMBER: This app will ONLY be viewed on phones. There is no desktop layout. Do not add responsive breakpoints for larger screens (sm:, md:, lg:, xl:). Design everything for the ~375-430px viewport range.`
+
 // NEXTJS_ECOMMERCE_COMMON_RULES is a self-contained system prompt for e-commerce projects.
 // It does NOT use NEXTJS_BUILDER_COMMON_RULES — all needed framework rules are included here
 // so the LLM never sees drizzle/database instructions that conflict with the store SDK.
