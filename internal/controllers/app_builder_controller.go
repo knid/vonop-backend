@@ -1200,11 +1200,27 @@ func chatMessagesToLLM(msgs []models.AppConversationMessage, provider *utils.LLM
 	return out
 }
 
+func (c *Controller) getProjectLogoURL(project *models.AppProject) string {
+	if project.LogoS3Key == "" {
+		return ""
+	}
+	presigned, err := c.AssetsStorage.GetObject(context.Background(), project.LogoS3Key, 7*24*3600)
+	if err != nil {
+		return ""
+	}
+	return presigned.URL
+}
+
 func (c *Controller) buildProjectContextForChat(project *models.AppProject, fileMap map[string]string, selectedFiles map[string]bool) string {
 	var sb strings.Builder
 
 	sb.WriteString(fmt.Sprintf("App: %s (slug: %s)\n", project.Name, project.Slug))
 	sb.WriteString(fmt.Sprintf("Project type: %s\n", project.ProjectType))
+
+	// Include logo URL if available
+	if logoURL := c.getProjectLogoURL(project); logoURL != "" {
+		sb.WriteString(fmt.Sprintf("\nApp Logo URL (use this as the site logo in the header/navbar via next/image and as the favicon in metadata — do not use text for the brand name, always use this logo image):\n%s\n", logoURL))
+	}
 
 	// Theme
 	var theme map[string]any
@@ -2919,6 +2935,12 @@ func (c *Controller) generateAppLogo(ctx context.Context, project *models.AppPro
 	if err := c.AssetsStorage.UploadFileByteWithContentType(ctx, s3Key, imgData, "image/png"); err != nil {
 		slog.Warn("generateAppLogo: failed to upload to S3", "error", err, "project_id", project.ID)
 		return ""
+	}
+
+	// Persist logo S3 key on the project for future use (chat context, re-generation)
+	project.LogoS3Key = s3Key
+	if _, err := c.DB.DB.NewUpdate().Model(project).Column("logo_s3_key").WherePK().Exec(ctx); err != nil {
+		slog.Warn("generateAppLogo: failed to save logo_s3_key", "error", err, "project_id", project.ID)
 	}
 
 	presigned, err := c.AssetsStorage.GetObject(ctx, s3Key, 7*24*3600)

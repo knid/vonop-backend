@@ -214,6 +214,8 @@ func createSchema(db *bun.DB) error {
 		`UPDATE app_projects SET sandbox_id = '' WHERE sandbox_id IS NULL`,
 		`ALTER TABLE app_projects ALTER COLUMN screenshot_s3_key SET DEFAULT ''`,
 		`ALTER TABLE app_projects ALTER COLUMN sandbox_id SET DEFAULT ''`,
+		// Logo S3 key for AI-generated app logos
+		`ALTER TABLE app_projects ADD COLUMN IF NOT EXISTS logo_s3_key text NOT NULL DEFAULT ''`,
 	}
 
 	// Deduplicate before creating unique indexes (keep the latest row per group)
