@@ -466,10 +466,11 @@ func getColor(scheme map[string]any, key, fallback string) string {
 }
 
 // buildGlobalsCSSTheme generates the globals.css content with Tailwind v4 @theme colors,
-// body base styles, dark mode overrides, and mobile utilities when isMobile is true.
+// body base styles, and mobile utilities when isMobile is true.
 // Includes semantic tokens (foreground, muted, border, input, ring) derived from
 // the color scheme so that shadcn-style utility classes work (bg-foreground,
 // text-muted-foreground, border-border, etc.).
+// Light theme only — no dark mode overrides.
 func buildGlobalsCSSTheme(colorScheme, darkColorScheme map[string]any, isMobile bool) string {
 	var sb strings.Builder
 
@@ -560,57 +561,6 @@ func buildGlobalsCSSTheme(colorScheme, darkColorScheme map[string]any, isMobile 
 	}
 
 	sb.WriteString("}\n")
-
-	// --- Dark mode: override theme colors via prefers-color-scheme ---
-	if len(darkColorScheme) > 0 {
-		darkFg := getColor(darkColorScheme, "text", "#F9FAFB")
-		darkBg := getColor(darkColorScheme, "background", "#111827")
-		darkSurface := getColor(darkColorScheme, "surface", "#1F2937")
-		darkPrimary := getColor(darkColorScheme, "primary", primary)
-		darkSecondary := getColor(darkColorScheme, "secondary", secondary)
-		darkAccent := getColor(darkColorScheme, "accent", accent)
-		sb.WriteString(fmt.Sprintf(`
-@media (prefers-color-scheme: dark) {
-  :root {
-    --color-primary: %s;
-    --color-primary-foreground: %s;
-    --color-secondary: %s;
-    --color-secondary-foreground: %s;
-    --color-accent: %s;
-    --color-accent-foreground: %s;
-    --color-background: %s;
-    --color-surface: %s;
-    --color-text: %s;
-    --color-foreground: %s;
-    --color-card: %s;
-    --color-card-foreground: %s;
-    --color-muted: %s;
-    --color-muted-foreground: color-mix(in srgb, %s 60%%, %s);
-    --color-border: color-mix(in srgb, %s 15%%, %s);
-    --color-input: color-mix(in srgb, %s 15%%, %s);
-    --color-destructive: #EF4444;
-    --color-destructive-foreground: #FFFFFF;
-  }
-}
-`,
-			darkPrimary,
-			darkBg,
-			darkSecondary,
-			darkBg,
-			darkAccent,
-			darkFg,
-			darkBg,
-			darkSurface,
-			darkFg,
-			darkFg,
-			darkBg,
-			darkFg,
-			darkSurface,
-			darkFg, darkBg,
-			darkFg, darkBg,
-			darkFg, darkBg,
-		))
-	}
 
 	return sb.String()
 }
@@ -882,6 +832,8 @@ func getEcommerceTemplateContent(path string) string {
 		return constants.ECOMMERCE_TEMPLATE_PRIVACY_POLICY
 	case "app/policies/terms/page.tsx":
 		return constants.ECOMMERCE_TEMPLATE_TERMS_POLICY
+	default:
+		slog.Warn("getEcommerceTemplateContent: no content for template path", "path", path)
 	}
 	return ""
 }
@@ -1278,7 +1230,7 @@ Rules:
 6. For JSONB columns, use valid JSON strings.
 7. Return ONLY valid SQL INSERT statements, no explanations.
 8. Use single-line INSERT statements (one per row).
-9. Do NOT include CREATE TABLE or DROP statements.`, schemaDesc.String(), project.Prompt)
+9. Do NOT include CREATE TABLE or DROP statements.`, schemaDesc.String(), utils.SanitizePromptContent(project.Prompt))
 
 	sendEvent("neon_provision", map[string]any{"phase": "seeding_data"})
 

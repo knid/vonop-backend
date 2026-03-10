@@ -51,6 +51,14 @@ func isValidJSON(s string) bool {
 	return json.Valid([]byte(s))
 }
 
+// truncateBody truncates a string to maxLen characters for safe logging.
+func truncateBody(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "...(truncated)"
+}
+
 // --- Rate limit error ---
 
 // ErrRateLimited is returned when the LLM API responds with HTTP 429.
@@ -90,7 +98,7 @@ func parseRateLimitError(resp *http.Response, body []byte) *ErrRateLimited {
 	return &ErrRateLimited{
 		RetryAfter: retryAfter,
 		StatusCode: resp.StatusCode,
-		Body:       string(body),
+		Body:       truncateBody(string(body), 2000),
 	}
 }
 
@@ -143,9 +151,21 @@ func (t *TokenTracker) Record(model string, usage UsageInfo, latencyMs int64, is
 func (t *TokenTracker) RecordWithContent(model string, usage UsageInfo, latencyMs int64, isStreaming bool, inputMessages []Message, outputText string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	// Snapshot messages so caller mutations don't affect stored data
+	// Deep-snapshot messages so caller mutations don't affect stored data.
+	// copy() is shallow — slices like ToolCalls and Images are shared with the
+	// original. We deep-copy those fields to fully decouple the snapshot.
 	msgs := make([]Message, len(inputMessages))
-	copy(msgs, inputMessages)
+	for i, m := range inputMessages {
+		msgs[i] = m
+		if len(m.ToolCalls) > 0 {
+			msgs[i].ToolCalls = make([]ToolCall, len(m.ToolCalls))
+			copy(msgs[i].ToolCalls, m.ToolCalls)
+		}
+		if len(m.Images) > 0 {
+			msgs[i].Images = make([]string, len(m.Images))
+			copy(msgs[i].Images, m.Images)
+		}
+	}
 	t.entries = append(t.entries, TokenEntry{
 		Model:                    model,
 		PromptTokens:             usage.PromptTokens,
@@ -693,7 +713,7 @@ func StreamTextFromLLMWithMessages(ctx context.Context, model string, messages [
 	var fullText strings.Builder
 	var lastUsage UsageInfo
 	scanner := bufio.NewScanner(resp.Body)
-	scanner.Buffer(make([]byte, 0, 64*1024), 512*1024)
+	scanner.Buffer(make([]byte, 0, 64*1024), 2*1024*1024)
 
 	for scanner.Scan() {
 		if ctx.Err() != nil {
@@ -890,7 +910,7 @@ func StreamJSONFromLLMWithMessages(ctx context.Context, model string, messages [
 	var lastFinishReason string
 	var lastUsage UsageInfo
 	scanner := bufio.NewScanner(resp.Body)
-	scanner.Buffer(make([]byte, 0, 64*1024), 512*1024)
+	scanner.Buffer(make([]byte, 0, 64*1024), 2*1024*1024)
 
 	for scanner.Scan() {
 		if ctx.Err() != nil {
@@ -1013,6 +1033,15 @@ func GetJSONFromLLMWithVision(ctx context.Context, model, system, userText, base
 	respBody, _ := io.ReadAll(resp.Body)
 	latencyMs := time.Since(start).Milliseconds()
 	slog.Info("LLM Vision Response received", "FROM", "LLM_UTILS_VISION")
+
+	if resp.StatusCode != http.StatusOK {
+		slog.Error("LLM vision returned non-200", "status", resp.StatusCode,
+			"body", truncateBody(string(respBody), 2000))
+		if rlErr := parseRateLimitError(resp, respBody); rlErr != nil {
+			return "", rlErr
+		}
+		return "", fmt.Errorf("error generating content. try again please")
+	}
 
 	parsed, err := parseLLMResponseBody(respBody, provider)
 	if err != nil {
@@ -1182,7 +1211,7 @@ func StreamWithTools(
 			// Handle 429 rate limit with retry + backoff
 			if rlErr := parseRateLimitError(resp, respBody); rlErr != nil && rateLimitRetries < 5 {
 				rateLimitRetries++
-				wait := rlErr.RetryAfter * time.Duration(rateLimitRetries)
+				wait := rlErr.RetryAfter + time.Duration(rateLimitRetries)*5*time.Second
 				if wait > 120*time.Second {
 					wait = 120 * time.Second
 				}
@@ -1249,7 +1278,7 @@ func StreamWithTools(
 				// Retry on overloaded/rate-limit errors from SSE stream
 				if rlErr, ok := IsRateLimited(parseErr); ok && rateLimitRetries < 5 {
 					rateLimitRetries++
-					wait := rlErr.RetryAfter * time.Duration(rateLimitRetries)
+					wait := rlErr.RetryAfter + time.Duration(rateLimitRetries)*5*time.Second
 					if wait > 120*time.Second {
 						wait = 120 * time.Second
 					}
@@ -1283,7 +1312,7 @@ func StreamWithTools(
 		} else {
 			// OpenAI-compatible SSE format
 			scanner := bufio.NewScanner(resp.Body)
-			scanner.Buffer(make([]byte, 0, 64*1024), 512*1024)
+			scanner.Buffer(make([]byte, 0, 64*1024), 2*1024*1024)
 
 			for scanner.Scan() {
 				if ctx.Err() != nil {

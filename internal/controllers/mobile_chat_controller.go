@@ -102,7 +102,7 @@ func (c *Controller) StreamMobileInjectionChat(
 	}
 
 	injectionsContext := buildInjectionsContext(injections)
-	contextBlock := fmt.Sprintf(constants.MOBILE_INJECTION_CONTEXT_TEMPLATE, project.URL, injectionsContext)
+	contextBlock := fmt.Sprintf(constants.MOBILE_INJECTION_CONTEXT_TEMPLATE, utils.SanitizePromptContent(project.URL), injectionsContext)
 
 	var llmMessages []utils.Message
 	llmMessages = append(llmMessages,
@@ -297,13 +297,13 @@ func buildInjectionsContext(injections []models.MobileInjection) string {
 			sb.WriteString(fmt.Sprintf("   Description: %s\n", inj.Description))
 		}
 		if inj.CSS != "" {
-			sb.WriteString(fmt.Sprintf("   CSS: ```%s```\n", inj.CSS))
+			sb.WriteString(fmt.Sprintf("   CSS: ```\n%s\n```\n", strings.ReplaceAll(inj.CSS, "```", "'''")))
 		}
 		if inj.JS != "" {
-			sb.WriteString(fmt.Sprintf("   JS: ```%s```\n", inj.JS))
+			sb.WriteString(fmt.Sprintf("   JS: ```\n%s\n```\n", strings.ReplaceAll(inj.JS, "```", "'''")))
 		}
 		if inj.HTML != "" {
-			sb.WriteString(fmt.Sprintf("   HTML: ```%s```\n", inj.HTML))
+			sb.WriteString(fmt.Sprintf("   HTML: ```\n%s\n```\n", strings.ReplaceAll(inj.HTML, "```", "'''")))
 		}
 	}
 	return sb.String()

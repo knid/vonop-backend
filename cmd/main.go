@@ -1069,8 +1069,22 @@ func main() {
 	proxyRoute.HandleFunc("/*", httpViews.ProxyHandler)
 
 	// Create explicit http.Server instances for graceful shutdown
-	mainServer := &http.Server{Addr: ":8001", Handler: r}
-	proxyServer := &http.Server{Addr: ":9001", Handler: proxyRoute}
+	mainServer := &http.Server{
+		Addr:           ":8001",
+		Handler:        r,
+		MaxHeaderBytes: 1 << 20, // 1 MB
+		ReadTimeout:    60 * time.Second,
+		WriteTimeout:   30 * time.Minute, // long for SSE streaming
+		IdleTimeout:    120 * time.Second,
+	}
+	proxyServer := &http.Server{
+		Addr:           ":9001",
+		Handler:        proxyRoute,
+		MaxHeaderBytes: 1 << 20,
+		ReadTimeout:    30 * time.Second,
+		WriteTimeout:   60 * time.Second,
+		IdleTimeout:    60 * time.Second,
+	}
 
 	go func() {
 		slog.Info("Proxy server listening on :9001")

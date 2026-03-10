@@ -224,9 +224,9 @@ func (c *Controller) CreateDashboard(ctx context.Context, project *models.AppPro
 
 	// Generate panels with LLM
 	panelMsg := fmt.Sprintf("Database provider: %s\nApp name: %s\nApp description: %s\n\nDatabase schema:\n%s",
-		dbProvider, project.Name, project.Prompt, string(schema))
+		dbProvider, utils.SanitizePromptContent(project.Name), utils.SanitizePromptContent(project.Prompt), string(schema))
 	if prompt != "" {
-		panelMsg += fmt.Sprintf("\n\nUser request: %s", prompt)
+		panelMsg += fmt.Sprintf("\n\nUser request: %s", utils.SanitizePromptContent(prompt))
 	}
 
 	panelResult, err := utils.GetJSONFromLLM(ctx, model, constants.DASHBOARD_GENERATION_PROMPT, panelMsg, provider)

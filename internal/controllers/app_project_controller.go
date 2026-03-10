@@ -228,6 +228,9 @@ func (c *Controller) RestoreAppSnapshot(project *models.AppProject, snapshotID s
 			// Recreate from snapshot (B4: check errors, log failures)
 			var failedFiles []string
 			for _, sf := range snapshotFiles {
+				if sf.FilePath == "" {
+					continue // skip entries with empty paths
+				}
 				file := &models.AppGeneratedFile{
 					AppProjectID: project.ID,
 					Platform:     "nextjs",
@@ -241,10 +244,13 @@ func (c *Controller) RestoreAppSnapshot(project *models.AppProject, snapshotID s
 					failedFiles = append(failedFiles, sf.FilePath)
 				}
 			}
-			if len(failedFiles) > 0 {
-				slog.Warn("Some files failed to restore", "project_id", project.ID, "failed_count", len(failedFiles))
+			slog.Info("Restored files from snapshot", "project_id", project.ID, "snapshot_id", snapshotID,
+				"file_count", len(snapshotFiles), "failed_count", len(failedFiles))
+			// If more than half the files failed, the snapshot is effectively
+			// corrupted — return an error so the caller knows.
+			if len(failedFiles) > 0 && len(failedFiles) > len(snapshotFiles)/2 {
+				return nil, fmt.Errorf("snapshot restore failed: %d of %d files could not be recreated", len(failedFiles), len(snapshotFiles))
 			}
-			slog.Info("Restored files from snapshot", "project_id", project.ID, "snapshot_id", snapshotID, "file_count", len(snapshotFiles), "failed_count", len(failedFiles))
 		}
 	}
 
