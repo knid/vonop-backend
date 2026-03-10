@@ -52,6 +52,56 @@ var appScopedTables = map[string]appScopedTable{
 	"web_analytics_events": {DisplayName: "Analytics Events", Scope: scopeByProjectID},
 }
 
+// inferFieldHint returns a semantic hint for the frontend editor based on column name and type.
+func inferFieldHint(columnName, columnType string) string {
+	name := strings.ToLower(columnName)
+
+	// Image fields
+	imageKeywords := []string{"image", "photo", "avatar", "logo", "cover", "thumbnail", "banner", "icon", "picture", "img"}
+	for _, kw := range imageKeywords {
+		if strings.Contains(name, kw) {
+			return "image"
+		}
+	}
+
+	// Rich text fields (only when type is text-like)
+	typeLower := strings.ToLower(columnType)
+	isTextType := typeLower == "text" || typeLower == "character varying" || typeLower == "varchar"
+	richTextKeywords := []string{"content", "description", "body", "bio", "summary", "about", "notes", "details"}
+	for _, kw := range richTextKeywords {
+		if strings.Contains(name, kw) && isTextType {
+			return "rich_text"
+		}
+	}
+
+	// Email
+	if strings.Contains(name, "email") {
+		return "email"
+	}
+
+	// URL
+	urlKeywords := []string{"url", "website", "link", "href"}
+	for _, kw := range urlKeywords {
+		if strings.Contains(name, kw) {
+			return "url"
+		}
+	}
+
+	// Color
+	if strings.Contains(name, "color") || strings.Contains(name, "colour") {
+		return "color"
+	}
+
+	return ""
+}
+
+// applyFieldHints sets FieldHint on each column in the slice.
+func applyFieldHints(columns []responses.DatabaseSchemaColumn) {
+	for i := range columns {
+		columns[i].FieldHint = inferFieldHint(columns[i].Name, columns[i].Type)
+	}
+}
+
 // IsSystemTable returns true if the given table is NOT in the app-scoped allowlist.
 func IsSystemTable(name string) bool {
 	_, allowed := appScopedTables[name]
@@ -184,6 +234,7 @@ func (c *Controller) GetDatabaseSchema(projectID string) (*responses.DatabaseSch
 	var tables []responses.DatabaseSchemaTable
 	for _, t := range allTables {
 		if _, ok := appScopedTables[t.Name]; ok {
+			applyFieldHints(t.Columns)
 			tables = append(tables, t)
 		}
 	}
@@ -264,6 +315,7 @@ func (c *Controller) getNeonDatabaseSchema(projectID string) (*responses.Databas
 		}
 		colRows.Close()
 
+		applyFieldHints(columns)
 		tables = append(tables, responses.DatabaseSchemaTable{
 			Name:    tableName,
 			Columns: columns,
@@ -386,6 +438,7 @@ func (c *Controller) GetTableRows(projectID, tableName string, page, pageSize in
 			IsPrimaryKey: col.IsPrimaryKey,
 		})
 	}
+	applyFieldHints(columns)
 
 	return &responses.TableRowsResponse{
 		Rows:       results,
@@ -734,6 +787,7 @@ func (c *Controller) getNeonTableRows(projectID, tableName string, page, pageSiz
 		}
 		columns = append(columns, col)
 	}
+	applyFieldHints(columns)
 
 	return &responses.TableRowsResponse{
 		Rows:       results,
@@ -843,6 +897,123 @@ func (c *Controller) updateNeonTableCell(projectID, tableName, column string, va
 	sqlStr := fmt.Sprintf("UPDATE %s SET %s = $1 WHERE %s",
 		quoteIdentifier(tableName),
 		quoteIdentifier(column),
+		strings.Join(pkParts, " AND "),
+	)
+
+	result, err := neonDB.Exec(sqlStr, args...)
+	if err != nil {
+		return fmt.Errorf("update failed: %w", err)
+	}
+	rowsAffected, _ := result.RowsAffected()
+	if rowsAffected == 0 {
+		return fmt.Errorf("no rows updated — row may not exist")
+	}
+	return nil
+}
+
+// UpdateTableRow updates all columns in a row at once (bulk update).
+func (c *Controller) UpdateTableRow(projectID, tableName string, data map[string]any, primaryKey map[string]any) error {
+	if c.isNeonBacked(projectID) {
+		return c.updateNeonTableRow(projectID, tableName, data, primaryKey)
+	}
+
+	if !c.isEcommerceProject(projectID) {
+		return fmt.Errorf("no database available for this project")
+	}
+
+	if _, ok := appScopedTables[tableName]; !ok {
+		return fmt.Errorf("access denied: table %q is not available", tableName)
+	}
+
+	if len(data) == 0 {
+		return fmt.Errorf("no data provided")
+	}
+
+	storeID := c.resolveStoreID(projectID)
+	scopeWhere, scopeArgs := scopeWhereClause(tableName, projectID, storeID)
+
+	// Build SET clause
+	var setParts []string
+	var args []any
+	args = append(args, scopeArgs...)
+	paramIdx := len(scopeArgs) + 1
+
+	for col, val := range data {
+		setParts = append(setParts, fmt.Sprintf("%s = $%d", quoteIdentifier(col), paramIdx))
+		args = append(args, val)
+		paramIdx++
+	}
+
+	// Build PK WHERE conditions
+	var pkParts []string
+	for col, val := range primaryKey {
+		pkParts = append(pkParts, fmt.Sprintf("%s = $%d", quoteIdentifier(col), paramIdx))
+		args = append(args, val)
+		paramIdx++
+	}
+
+	scopeCond := strings.TrimPrefix(scopeWhere, "WHERE ")
+
+	sqlStr := fmt.Sprintf("UPDATE %s SET %s WHERE %s AND %s",
+		quoteIdentifier(tableName),
+		strings.Join(setParts, ", "),
+		scopeCond,
+		strings.Join(pkParts, " AND "),
+	)
+
+	db := c.DB.DB.DB
+
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec("SET statement_timeout = '5s'"); err != nil {
+		slog.Warn("failed to set statement_timeout", "error", err)
+	}
+
+	result, err := tx.Exec(sqlStr, args...)
+	if err != nil {
+		return fmt.Errorf("update failed: %w", err)
+	}
+
+	rowsAffected, _ := result.RowsAffected()
+	if rowsAffected == 0 {
+		return fmt.Errorf("no rows updated — row may not exist or does not belong to this app")
+	}
+
+	return tx.Commit()
+}
+
+// updateNeonTableRow updates all columns in a row in a Neon database.
+func (c *Controller) updateNeonTableRow(projectID, tableName string, data map[string]any, primaryKey map[string]any) error {
+	neonDB, err := c.openNeonDB(projectID)
+	if err != nil {
+		return err
+	}
+	defer neonDB.Close()
+
+	var setParts []string
+	var args []any
+	paramIdx := 1
+
+	for col, val := range data {
+		setParts = append(setParts, fmt.Sprintf("%s = $%d", quoteIdentifier(col), paramIdx))
+		args = append(args, val)
+		paramIdx++
+	}
+
+	var pkParts []string
+	for k, v := range primaryKey {
+		pkParts = append(pkParts, fmt.Sprintf("%s = $%d", quoteIdentifier(k), paramIdx))
+		args = append(args, v)
+		paramIdx++
+	}
+
+	sqlStr := fmt.Sprintf("UPDATE %s SET %s WHERE %s",
+		quoteIdentifier(tableName),
+		strings.Join(setParts, ", "),
 		strings.Join(pkParts, " AND "),
 	)
 

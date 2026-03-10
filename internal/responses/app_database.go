@@ -5,6 +5,16 @@ type DatabaseSchemaColumn struct {
 	Type         string `json:"type"`
 	Nullable     bool   `json:"nullable"`
 	IsPrimaryKey bool   `json:"is_primary_key"`
+	FieldHint    string `json:"field_hint,omitempty"`
+}
+
+type DatabaseUploadURLResponse struct {
+	UploadURL string `json:"upload_url"`
+	PublicURL string `json:"public_url"`
+}
+
+type BulkUpdateRowResponse struct {
+	Success bool `json:"success"`
 }
 
 type DatabaseSchemaTable struct {
