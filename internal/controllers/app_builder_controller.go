@@ -525,8 +525,11 @@ func (c *Controller) StreamBuildApp(
 		toolAppliedOps = singleShotOps
 	} else {
 		// === File-block path: chat edits ===
-		// Single LLM call — no tool loop. The LLM outputs <file> blocks inline
-		// with text, parsed and saved incrementally by FileStreamParser.
+		// Two phases:
+		//   Phase 1 (fast model): Tool-calling with Haiku to detect URLs, preview
+		//     websites, and gather context the code-gen model needs.
+		//   Phase 2 (main model): Single-shot StreamTextFromLLMWithMessages that
+		//     outputs <file> blocks, parsed by FileStreamParser.
 
 		var responseBuilder strings.Builder
 		var deletedPaths []string
@@ -561,10 +564,30 @@ func (c *Controller) StreamBuildApp(
 			reasoning = nil
 		}
 
+		// --- Phase 1: fast model tool-calling (Haiku) ---
+		// Runs a cheap model with tools to detect URLs and gather extra context
+		// before the main code-gen call. If no tools are called the phase is a
+		// near-instant no-op.
+		toolContext := c.runChatToolPhase(ctx, project, provider, message, sendEvent)
+		if toolContext != "" {
+			// Inject tool-gathered context as a system message before the user message
+			insertIdx := len(llmMessages) - 1 // before last user message
+			if insertIdx < 0 {
+				insertIdx = 0
+			}
+			contextMsg := utils.Message{
+				Role:    "system",
+				Content: toolContext,
+			}
+			llmMessages = append(llmMessages[:insertIdx], append([]utils.Message{contextMsg}, llmMessages[insertIdx:]...)...)
+		}
+
+		// --- Phase 2: main model single-shot code generation ---
 		slog.Info("Calling LLM for chat (file-block path)",
 			"model", model,
 			"project_id", project.ID,
 			"message_count", len(llmMessages),
+			"has_tool_context", toolContext != "",
 		)
 
 		_, chatErr := utils.StreamTextFromLLMWithMessages(
@@ -927,6 +950,290 @@ func (c *Controller) deleteGeneratedFile(
 	*ops = append(*ops, appBuilderOperation{
 		Action: "delete", Path: path, Type: existingFile.FileType,
 	})
+}
+
+// --- Helper: fast-model tool-calling phase ---
+
+// runChatToolPhase runs a quick tool-calling pass with the fast model (Haiku)
+// to detect URLs and store-management requests before the main code-gen model.
+// Returns additional context to inject into the code-gen messages, or "" if
+// no tools were called.
+func (c *Controller) runChatToolPhase(
+	ctx context.Context,
+	project *models.AppProject,
+	provider *utils.LLMProvider,
+	userMessage string,
+	sendEvent func(string, any) bool,
+) string {
+	fastModel := provider.FastModel()
+
+	// Build tools list — always include preview_website, add manage_store for e-commerce.
+	tools := []utils.Tool{chatPreviewWebsiteTool}
+	isEcommerce := project.ProjectType == "ecommerce"
+	if isEcommerce {
+		tools = append(tools, chatManageStoreTool)
+	}
+
+	systemPrompt := `You are a pre-processing assistant. Analyze the user's message and decide if any tools should be called.
+- If the user provides a URL or asks to convert/clone/replicate a website, call preview_website with the URL.`
+	if isEcommerce {
+		systemPrompt += `
+- If the user asks to add/create/update/delete products, categories, or discounts, call manage_store with the appropriate operations.
+  - Products need: name (required), price (in cents, e.g. 2999 for $29.99), description, images (URLs), category (slug), tags, status (active/draft/archived), sku, inventory.
+  - Categories need: name (required), description, image (URL).
+  - Discounts need: code (required), type (percentage/fixed), value (percentage 0-100 or cents), min_order_cents, max_uses, starts_at/ends_at (RFC3339).
+  - For updates, include id or slug or name to identify the item, plus the fields to change.
+  - For deletes, include id or slug or name.
+  - Use bulk_create_products for multiple products at once (pass "products" array in data).
+  - Use list_products or list_categories to see current store data.`
+	}
+	systemPrompt += `
+- If the user's message is a normal chat request (code changes, questions, fixes), respond with just: NO_TOOLS_NEEDED
+- Be brief. Only call tools when clearly needed.`
+
+	messages := []utils.Message{
+		{Role: "system", Content: systemPrompt},
+		{Role: "user", Content: userMessage},
+	}
+
+	var collectedContext strings.Builder
+
+	executor := func(name string, arguments string) (string, error) {
+		switch name {
+		case "preview_website":
+			return c.executeChatPreviewWebsite(arguments, project, sendEvent, &collectedContext)
+		case "manage_store":
+			return c.executeChatManageStore(arguments, project, sendEvent, &collectedContext)
+		default:
+			return fmt.Sprintf("Unknown tool: %s", name), nil
+		}
+	}
+
+	result, err := utils.StreamWithTools(
+		ctx, fastModel, messages,
+		tools, provider,
+		nil, nil, // no response format, no reasoning
+		executor,
+		nil, // onToolCall — handled in executors
+		nil, // onChunk — discard fast model text output
+		nil, // onReasoning — not needed
+		utils.ToolCallConfig{
+			MaxRounds: 3,
+			MaxTokens: 1024,
+			OnToolCallStart: func(toolName string) {
+				sendEvent("tool_start", map[string]string{"tool": toolName})
+			},
+		},
+	)
+
+	if err != nil {
+		slog.Warn("Chat tool phase failed, continuing without tool context", "error", err)
+		return ""
+	}
+
+	if collectedContext.Len() == 0 {
+		slog.Info("Chat tool phase: no tools called", "result_preview", truncate(result, 80))
+		return ""
+	}
+
+	return collectedContext.String()
+}
+
+// executeChatPreviewWebsite handles the preview_website tool call in the chat tool phase.
+func (c *Controller) executeChatPreviewWebsite(
+	arguments string,
+	project *models.AppProject,
+	sendEvent func(string, any) bool,
+	collectedContext *strings.Builder,
+) (string, error) {
+	var args struct {
+		URL string `json:"url"`
+	}
+	if err := json.Unmarshal([]byte(arguments), &args); err != nil {
+		return "Error: invalid arguments", nil
+	}
+	targetURL := strings.TrimSpace(args.URL)
+	if targetURL == "" {
+		return "Error: url is required", nil
+	}
+	if !strings.HasPrefix(targetURL, "http://") && !strings.HasPrefix(targetURL, "https://") {
+		targetURL = "https://" + targetURL
+	}
+	proxyURL := fmt.Sprintf("https://proxy.wemob.io/?url=%s", targetURL)
+
+	sendEvent("website_preview", responses.WebsitePreviewEvent{
+		URL:      targetURL,
+		ProxyURL: proxyURL,
+	})
+	sendEvent("tool_call", responses.ToolCallEvent{
+		Tool:      "preview_website",
+		Arguments: arguments,
+	})
+
+	// Fetch HTML to extract structure for the code-gen model
+	html, fetchErr := utils.FetchHTML(
+		targetURL,
+		c.SecretManager.GetSecret("PROXY_HOST"),
+		c.SecretManager.GetSecret("PROXY_AUTH"),
+	)
+
+	var siteInfo string
+	if fetchErr != nil {
+		slog.Warn("Failed to fetch HTML for preview_website", "url", targetURL, "error", fetchErr)
+		siteInfo = fmt.Sprintf("Website URL: %s\n(Could not fetch page content — generate based on the URL and common patterns for this type of site.)", targetURL)
+	} else {
+		title := extractHTMLTitle(html)
+		description := extractHTMLMeta(html, "description")
+		navURLs := utils.ExtractAllURLs(html, targetURL)
+		if len(navURLs) > 20 {
+			navURLs = navURLs[:20]
+		}
+		var sb strings.Builder
+		sb.WriteString(fmt.Sprintf("Website URL: %s\n", targetURL))
+		if title != "" {
+			sb.WriteString(fmt.Sprintf("Title: %s\n", title))
+		}
+		if description != "" {
+			sb.WriteString(fmt.Sprintf("Description: %s\n", description))
+		}
+		if len(navURLs) > 0 {
+			sb.WriteString(fmt.Sprintf("Navigation links (%d): %s\n", len(navURLs), strings.Join(navURLs, ", ")))
+		}
+		siteInfo = sb.String()
+	}
+
+	collectedContext.WriteString(fmt.Sprintf("\n[Website Analysis]\n%s\nThe website is now visible in the user's preview panel. Generate or modify the app to match this website's design and content.\n", siteInfo))
+	slog.Info("preview_website tool called via fast model", "url", targetURL, "project_id", project.ID)
+	return "Website preview loaded.", nil
+}
+
+// executeChatManageStore handles the manage_store tool call in the chat tool phase.
+func (c *Controller) executeChatManageStore(
+	arguments string,
+	project *models.AppProject,
+	sendEvent func(string, any) bool,
+	collectedContext *strings.Builder,
+) (string, error) {
+	var args struct {
+		Operations []struct {
+			Action string         `json:"action"`
+			Data   map[string]any `json:"data"`
+		} `json:"operations"`
+	}
+	if err := json.Unmarshal([]byte(arguments), &args); err != nil {
+		return fmt.Sprintf("Failed to parse arguments: %s", err.Error()), nil
+	}
+
+	store, err := c.DB.GetStoreByAppProjectID(project.ID.String())
+	if err != nil || store == nil {
+		return "Error: No store found for this project. The project must be set up as an e-commerce app first.", nil
+	}
+
+	sendEvent("tool_call", responses.ToolCallEvent{
+		Tool:      "manage_store",
+		Arguments: arguments,
+	})
+
+	var results []string
+	var errCount int
+	for _, op := range args.Operations {
+		opData, opErr := c.executeStoreOperation(store, op.Action, op.Data)
+		if opErr != nil {
+			results = append(results, fmt.Sprintf("FAILED %s: %s", op.Action, opErr.Error()))
+			errCount++
+		} else {
+			name, _ := op.Data["name"].(string)
+			code, _ := op.Data["code"].(string)
+			label := name
+			if label == "" {
+				label = code
+			}
+			if opData != "" {
+				results = append(results, fmt.Sprintf("OK %s: %s\n%s", op.Action, label, opData))
+			} else {
+				results = append(results, fmt.Sprintf("OK %s: %s", op.Action, label))
+			}
+		}
+	}
+
+	summary := fmt.Sprintf("Executed %d operations (%d succeeded, %d failed):\n%s",
+		len(args.Operations), len(args.Operations)-errCount, errCount, strings.Join(results, "\n"))
+
+	collectedContext.WriteString(fmt.Sprintf("\n[Store Update]\n%s\n", summary))
+	slog.Info("manage_store tool called via fast model",
+		"project_id", project.ID,
+		"operations", len(args.Operations),
+		"succeeded", len(args.Operations)-errCount,
+		"failed", errCount,
+	)
+	return summary, nil
+}
+
+// extractHTMLTitle extracts the <title> content from HTML.
+func extractHTMLTitle(htmlContent string) string {
+	lower := strings.ToLower(htmlContent)
+	start := strings.Index(lower, "<title")
+	if start < 0 {
+		return ""
+	}
+	// Skip past the opening tag
+	closeTag := strings.Index(lower[start:], ">")
+	if closeTag < 0 {
+		return ""
+	}
+	contentStart := start + closeTag + 1
+	end := strings.Index(lower[contentStart:], "</title>")
+	if end < 0 {
+		return ""
+	}
+	return strings.TrimSpace(htmlContent[contentStart : contentStart+end])
+}
+
+// extractHTMLMeta extracts a <meta name="..." content="..."> value from HTML.
+func extractHTMLMeta(htmlContent string, name string) string {
+	lower := strings.ToLower(htmlContent)
+	search := fmt.Sprintf(`name="%s"`, name)
+	idx := strings.Index(lower, search)
+	if idx < 0 {
+		search = fmt.Sprintf(`name='%s'`, name)
+		idx = strings.Index(lower, search)
+	}
+	if idx < 0 {
+		return ""
+	}
+	// Find the enclosing <meta ...> tag
+	tagStart := strings.LastIndex(lower[:idx], "<meta")
+	if tagStart < 0 {
+		return ""
+	}
+	tagEnd := strings.Index(lower[tagStart:], ">")
+	if tagEnd < 0 {
+		return ""
+	}
+	tag := htmlContent[tagStart : tagStart+tagEnd+1]
+	// Extract content="..."
+	contentIdx := strings.Index(strings.ToLower(tag), `content="`)
+	if contentIdx < 0 {
+		contentIdx = strings.Index(strings.ToLower(tag), `content='`)
+	}
+	if contentIdx < 0 {
+		return ""
+	}
+	quote := tag[contentIdx+8] // " or '
+	valStart := contentIdx + 9
+	valEnd := strings.Index(tag[valStart:], string(quote))
+	if valEnd < 0 {
+		return ""
+	}
+	return tag[valStart : valStart+valEnd]
+}
+
+// truncate returns the first n characters of s, or s if shorter.
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "..."
 }
 
 // --- Helper: build modular system prompt ---
@@ -1852,6 +2159,61 @@ var appBuilderTools = []utils.Tool{
 				},
 				"required": []string{"tables"},
 			},
+		},
+	},
+}
+
+// chatManageStoreTool lets the fast model manage products, categories, and
+// discounts in the user's e-commerce store during the chat tool phase.
+var chatManageStoreTool = utils.Tool{
+	Type: "function",
+	Function: utils.ToolFunction{
+		Name:        "manage_store",
+		Description: "Create, update, delete, or list products, categories, and discounts in the e-commerce store. Use when the user asks to manage their store inventory.",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"operations": map[string]any{
+					"type":        "array",
+					"description": "Array of store operations to execute in order",
+					"items": map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"action": map[string]any{
+								"type":        "string",
+								"enum":        []string{"create_product", "update_product", "delete_product", "bulk_create_products", "create_category", "update_category", "delete_category", "create_discount", "update_discount", "delete_discount", "update_store_settings", "list_products", "list_categories"},
+								"description": "The operation to perform",
+							},
+							"data": map[string]any{
+								"type":        "object",
+								"description": "Operation payload. Products: name, price_in_cents, description, images, category (slug), tags, status, sku, inventory. Categories: name, description, image. Discounts: code, type (percentage/fixed), value, min_order_cents, max_uses, starts_at, ends_at. For updates/deletes: include id or slug or name to identify the item.",
+							},
+						},
+						"required": []string{"action", "data"},
+					},
+				},
+			},
+			"required": []string{"operations"},
+		},
+	},
+}
+
+// chatPreviewWebsiteTool lets the LLM load a website URL in the preview panel
+// so the user sees it while the LLM generates or modifies the app.
+var chatPreviewWebsiteTool = utils.Tool{
+	Type: "function",
+	Function: utils.ToolFunction{
+		Name:        "preview_website",
+		Description: "Load a website URL in the mobile preview panel so the user can see it. Use this when the user provides a URL or asks to convert/clone a website into a mobile app. After calling this tool, generate the app code based on the website.",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"url": map[string]any{
+					"type":        "string",
+					"description": "The website URL to preview (e.g. https://example.com). Add https:// if the user didn't include it.",
+				},
+			},
+			"required": []string{"url"},
 		},
 	},
 }

@@ -1649,7 +1649,17 @@ When the user reports a runtime error, build error, or TypeError:
 - **Do NOT change UI/design**: Error fixes must be scoped to the bug. Do not alter layouts, colors, or unrelated code.
 - **Be efficient**: Identify the root cause, fix it, done. Most errors are a wrong prop name, missing import, or type mismatch.
 - **CRITICAL**: You MUST look at the actual file content shown in the context above before outputting a fix. NEVER guess what the file contains — if the file content is not shown above, say so and ask the user to provide it. Outputting a "fix" based on assumptions will likely produce incorrect code.
-- **Common JSX pitfalls to avoid**: Do NOT use string concatenation in className (e.g. "base " + expr). Use template literals (className={...}) or the cn() utility from @/lib/utils instead.`
+- **Common JSX pitfalls to avoid**: Do NOT use string concatenation in className (e.g. "base " + expr). Use template literals (className={...}) or the cn() utility from @/lib/utils instead.
+
+### Website Conversion
+When the context includes a [Website Analysis] section, the user wants to convert that website into a mobile app. Use the provided URL, title, description, and navigation links to:
+1. Recreate the website's design, color scheme, and layout as a mobile-first app.
+2. Map the website's navigation links to mobile app screens/pages.
+3. Keep the same branding, content tone, and visual identity.
+4. The website is already visible in the user's preview panel for reference.
+
+### Store Updates
+When the context includes a [Store Update] section, products/categories/discounts were just created or modified in the store. If the update requires code changes (e.g. new category pages, updated product displays), output the necessary file changes. If the store update is purely data (e.g. adding products), just confirm what was done — no code changes needed unless the user asks for them.`
 
 // NEXTJS_BUILDER_CHAT_SYSTEM_PROMPT is the composed prompt for the file-block
 // chat path. It combines COMMON_RULES + CHAT_INSTRUCTIONS.
