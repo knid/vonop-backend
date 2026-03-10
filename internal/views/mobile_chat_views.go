@@ -2,7 +2,9 @@ package views
 
 import (
 	"context"
+	"fmt"
 	"net/http"
+	"net/url"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/knid/wemob/internal/requests"
@@ -218,6 +220,9 @@ func (v *HttpViews) ClearMobileConversation(w http.ResponseWriter, r *http.Reque
 }
 
 // POST /v2/mobile/classify-intent
+// Classifies the user's mobile studio prompt. If url_wrapper, auto-creates the
+// project and returns project_id + proxy_url so the frontend goes straight to
+// preview + injection chat.
 func (v *HttpViews) ClassifyMobileIntent(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
@@ -242,9 +247,29 @@ func (v *HttpViews) ClassifyMobileIntent(w http.ResponseWriter, r *http.Request)
 
 	intent, extractedURL := v.Controller.ClassifyMobileIntent(r.Context(), body.Prompt)
 
+	if intent == "url_wrapper" && extractedURL != "" {
+		// Auto-create the project so the frontend can go straight to preview
+		project, err := v.Controller.QuickCreateMobileProject(user, extractedURL)
+		if err != nil {
+			utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		proxyURL := fmt.Sprintf("https://proxy.wemob.io/?url=%s&project_id=%s",
+			url.QueryEscape(extractedURL), project.ID.String())
+
+		utils.JSONResponse(w, map[string]any{
+			"intent":     "url_wrapper",
+			"url":        extractedURL,
+			"project_id": project.ID.String(),
+			"proxy_url":  proxyURL,
+		}, http.StatusOK)
+		return
+	}
+
 	utils.JSONResponse(w, map[string]any{
 		"intent": intent,
-		"url":    extractedURL,
+		"url":    "",
 	}, http.StatusOK)
 }
 
