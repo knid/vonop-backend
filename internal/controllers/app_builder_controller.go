@@ -33,9 +33,13 @@ func isErrorReport(msg string) bool {
 		(strings.Contains(msg, "## Code Frame") || strings.Contains(msg, "at ") || strings.Contains(msg, "Module not found"))
 }
 
-// normalizeContent trims and collapses whitespace for content comparison.
+// normalizeContent trims whitespace and normalizes line endings for content
+// comparison. We preserve internal formatting (indentation, multi-line strings)
+// to avoid false "unchanged" results when only whitespace differs.
 func normalizeContent(s string) string {
-	return strings.TrimSpace(strings.Join(strings.Fields(s), " "))
+	s = strings.TrimSpace(s)
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	return s
 }
 
 // appBuilderOperation tracks a file mutation applied during a build session.
@@ -52,8 +56,50 @@ type builderToolCallbacks struct {
 	appliedOps     *[]appBuilderOperation
 	mu             sync.Mutex
 	fileMu         sync.RWMutex           // guards fileMap reads/writes
+	fileMap        map[string]string       // the shared file map — all access must go through fileMu
 	pendingFiles   map[string]string       // files changed since last preview sync
 	pendingDeletes []string               // files deleted since last preview sync
+}
+
+// setFile safely writes a key-value pair to the shared fileMap.
+func (b *builderToolCallbacks) setFile(path, content string) {
+	b.fileMu.Lock()
+	b.fileMap[path] = content
+	b.fileMu.Unlock()
+}
+
+// deleteFile safely removes a path from the shared fileMap.
+func (b *builderToolCallbacks) deleteFile(path string) {
+	b.fileMu.Lock()
+	delete(b.fileMap, path)
+	b.fileMu.Unlock()
+}
+
+// getFile safely reads a file from the shared fileMap.
+func (b *builderToolCallbacks) getFile(path string) (string, bool) {
+	b.fileMu.RLock()
+	content, ok := b.fileMap[path]
+	b.fileMu.RUnlock()
+	return content, ok
+}
+
+// fileCount returns the number of files in the shared fileMap.
+func (b *builderToolCallbacks) fileCount() int {
+	b.fileMu.RLock()
+	n := len(b.fileMap)
+	b.fileMu.RUnlock()
+	return n
+}
+
+// snapshotFileMap returns a shallow copy of fileMap for read-only use.
+func (b *builderToolCallbacks) snapshotFileMap() map[string]string {
+	b.fileMu.RLock()
+	m := make(map[string]string, len(b.fileMap))
+	for k, v := range b.fileMap {
+		m[k] = v
+	}
+	b.fileMu.RUnlock()
+	return m
 }
 
 // StreamBuildApp is the unified entry point for both initial app generation and chat editing.
@@ -74,14 +120,20 @@ func (c *Controller) StreamBuildApp(
 	var closeEvents sync.Once
 	defer func() { closeEvents.Do(func() { close(events) }) }()
 
-	var eventsClosed bool
+	var eventsClosed sync.Mutex
+	eventsOpen := true
 	sendEvent := func(eventName string, data any) bool {
-		if eventsClosed {
+		eventsClosed.Lock()
+		if !eventsOpen {
+			eventsClosed.Unlock()
 			return false
 		}
+		eventsClosed.Unlock()
 		defer func() {
 			if r := recover(); r != nil {
-				eventsClosed = true
+				eventsClosed.Lock()
+				eventsOpen = false
+				eventsClosed.Unlock()
 			}
 		}()
 		select {
@@ -157,12 +209,13 @@ func (c *Controller) StreamBuildApp(
 	if isInitialGeneration {
 		actionLabel = "generate_app"
 	}
+	var generationSucceeded bool // set to true only when generation completes without error
 
 	defer func() {
 		closeEvents.Do(func() { close(events) })
 		c.RecordTokenUsage(user.ID, actionLabel, model, provider.Name, project.ID.String(), project.ProjectType, tracker)
 		prompt, completion, total, callCount := tracker.Totals()
-		if total > 0 {
+		if total > 0 && generationSucceeded {
 			credits := models.TokensToCredits(prompt, completion)
 			if err := c.DeductAICreditsUnchecked(user, credits, actionLabel, project.ID.String()); err != nil {
 				slog.Warn("failed to deduct AI credits", "error", err,
@@ -218,7 +271,11 @@ func (c *Controller) StreamBuildApp(
 
 	if isInitialGeneration {
 		// Clean slate: delete existing files
-		c.DB.DeleteAppGeneratedFilesByProjectPlatform(project.ID.String(), "nextjs")
+		if err := c.DB.DeleteAppGeneratedFilesByProjectPlatform(project.ID.String(), "nextjs"); err != nil {
+			slog.Error("failed to delete existing files before generation", "error", err, "project_id", project.ID)
+			sendError("database", "failed to clean up existing files")
+			return
+		}
 
 		// Inject template files (package.json, tsconfig, postcss, next.config)
 		for _, tp := range constants.NEXTJS_TEMPLATE_FILE_PATHS {
@@ -394,9 +451,16 @@ func (c *Controller) StreamBuildApp(
 	}
 
 	// --- Create auto-snapshot before changes ---
+	// For chat edits, we require a snapshot so we can rollback on failure.
+	// For initial generation there's nothing to rollback to, so a failure is OK.
 	preSnapshot, snapErr := c.CreateAppSnapshot(project, "Auto-save before changes", "auto")
-	if snapErr != nil {
-		slog.Warn("failed to create pre-change snapshot, rollback will not be available",
+	if snapErr != nil && !isInitialGeneration {
+		slog.Error("failed to create pre-change snapshot, aborting chat edit",
+			"error", snapErr, "project_id", project.ID)
+		sendError("snapshot", "failed to create safety snapshot. please try again")
+		return
+	} else if snapErr != nil {
+		slog.Warn("failed to create pre-change snapshot for initial gen, rollback will not be available",
 			"error", snapErr, "project_id", project.ID)
 	}
 	var preSnapshotID string
@@ -420,6 +484,10 @@ func (c *Controller) StreamBuildApp(
 		}
 	}
 
+	if ctx.Err() != nil {
+		return
+	}
+
 	// --- Clarification questions (only when fast model decides it's needed) ---
 	if isInitialGeneration && jobID != "" {
 		questions, err := c.GenerateClarificationQuestions(ctx, message, project.ProjectType)
@@ -432,6 +500,10 @@ func (c *Controller) StreamBuildApp(
 			}
 			message = buildEnrichedPrompt(message, result)
 		}
+	}
+
+	if ctx.Err() != nil {
+		return
 	}
 
 	// --- Generation: branch between single-shot (initial) and tool-calling (chat) ---
@@ -698,7 +770,9 @@ func (c *Controller) StreamBuildApp(
 				dbFile, err := c.DB.GetAppGeneratedFileByPath(project.ID.String(), "nextjs", "package.json")
 				if err == nil && dbFile != nil {
 					dbFile.Content = augmented
-					c.DB.UpdateAppGeneratedFile(dbFile)
+					if _, updateErr := c.DB.UpdateAppGeneratedFile(dbFile); updateErr != nil {
+						slog.Error("failed to persist augmented package.json", "error", updateErr, "project_id", project.ID)
+					}
 					fileMap["package.json"] = augmented
 					slog.Info("Augmented package.json with discovered deps", "project_id", project.ID)
 					sendEvent("file_complete", responses.FileCompleteEvent{
@@ -776,6 +850,9 @@ func (c *Controller) StreamBuildApp(
 			project = updated
 		}
 	}
+
+	// --- Generation completed successfully ---
+	generationSucceeded = true
 
 	// --- Send done event ---
 	if isInitialGeneration {
@@ -863,6 +940,14 @@ func (c *Controller) saveGeneratedFile(
 	ops *[]appBuilderOperation,
 	allowProtected ...bool,
 ) {
+	// Sanitize file path to prevent directory traversal from LLM output.
+	cleanPath, valid := utils.SanitizeFilePath(path)
+	if !valid {
+		slog.Warn("saveGeneratedFile: rejecting suspicious file path", "path", path)
+		return
+	}
+	path = cleanPath
+
 	// Guard: never let the LLM overwrite template-managed files during initial generation.
 	// Chat edits pass allowProtected=true so the AI can fix errors in template files.
 	// Still emit file_complete with the DB content so the sandbox stays in sync.
@@ -946,6 +1031,13 @@ func (c *Controller) deleteGeneratedFile(
 	sendEvent func(string, any) bool,
 	ops *[]appBuilderOperation,
 ) {
+	cleanPath, valid := utils.SanitizeFilePath(path)
+	if !valid {
+		slog.Warn("deleteGeneratedFile: rejecting suspicious file path", "path", path)
+		return
+	}
+	path = cleanPath
+
 	existingFile, err := c.DB.GetAppGeneratedFileByPath(project.ID.String(), "nextjs", path)
 	if err != nil || existingFile == nil {
 		slog.Warn("deleteGeneratedFile: file not found", "path", path)
@@ -1736,7 +1828,7 @@ func (c *Controller) buildProjectContext(project *models.AppProject, fileMap map
 		sb.WriteString("\nUse read_file to view any file's content before modifying it.")
 	} else if isInitialGeneration {
 		sb.WriteString("\nNo files yet — you are building this app from scratch.\n")
-		sb.WriteString("User prompt: " + project.Prompt + "\n")
+		sb.WriteString("User prompt: " + utils.SanitizePromptContent(project.Prompt) + "\n")
 	}
 
 	// Inject file plan from structure phase if available (for initial gen regardless of fileMap state,
@@ -1970,7 +2062,10 @@ func (c *Controller) runDeterministicAutoFixes(
 			if err == nil && dbFile != nil {
 				dbFile.Content = fileMap[fixedPath]
 				dbFile.UpdatedAt = time.Now()
-				c.DB.UpdateAppGeneratedFile(dbFile)
+				if _, updateErr := c.DB.UpdateAppGeneratedFile(dbFile); updateErr != nil {
+					slog.Error("runDeterministicAutoFixes: failed to persist auto-fix", "path", fixedPath, "error", updateErr)
+					continue
+				}
 				sendEvent("file_complete", responses.FileCompleteEvent{
 					Action: "modify", FilePath: fixedPath,
 					FileID: dbFile.ID, FileType: dbFile.FileType,
@@ -3355,7 +3450,9 @@ func (c *Controller) streamSingleShotGeneration(
 			// Existing file was modified by auto-fix
 			if dbFile, err := c.DB.GetAppGeneratedFileByPath(project.ID.String(), "nextjs", path); err == nil && dbFile != nil {
 				dbFile.Content = content
-				c.DB.UpdateAppGeneratedFile(dbFile)
+				if _, updateErr := c.DB.UpdateAppGeneratedFile(dbFile); updateErr != nil {
+					slog.Error("failed to persist auto-fixed file", "path", path, "error", updateErr)
+				}
 			}
 		}
 	}
@@ -3546,7 +3643,10 @@ func (c *Controller) generateAndReplaceAIImages(
 			// Persist to DB
 			if dbFile, err := c.DB.GetAppGeneratedFileByPath(project.ID.String(), "nextjs", path); err == nil && dbFile != nil {
 				dbFile.Content = updated
-				c.DB.UpdateAppGeneratedFile(dbFile)
+				if _, updateErr := c.DB.UpdateAppGeneratedFile(dbFile); updateErr != nil {
+					slog.Error("failed to persist AI image replacement", "path", path, "error", updateErr)
+					continue
+				}
 				sendEvent("file_complete", responses.FileCompleteEvent{
 					Action:   "modify",
 					FilePath: path,
@@ -3827,7 +3927,9 @@ func (c *Controller) streamEcommerceGeneration(
 		} else if content != prev {
 			if dbFile, err := c.DB.GetAppGeneratedFileByPath(project.ID.String(), "nextjs", path); err == nil && dbFile != nil {
 				dbFile.Content = content
-				c.DB.UpdateAppGeneratedFile(dbFile)
+				if _, updateErr := c.DB.UpdateAppGeneratedFile(dbFile); updateErr != nil {
+					slog.Error("failed to persist auto-fixed file (ecom)", "path", path, "error", updateErr)
+				}
 			}
 		}
 	}

@@ -586,7 +586,7 @@ func parseAnthropicSSEStream(
 	blocks := make(map[int]*blockInfo)
 
 	scanner := bufio.NewScanner(body)
-	scanner.Buffer(make([]byte, 0, 64*1024), 512*1024)
+	scanner.Buffer(make([]byte, 0, 64*1024), 2*1024*1024)
 
 	var currentEvent string
 
@@ -707,6 +707,12 @@ func parseAnthropicSSEStream(
 				}
 			}
 			return nil, fmt.Errorf("anthropic stream error: %s", data)
+
+		default:
+			// Unknown event type — log and skip so API evolution doesn't cause silent data loss.
+			if currentEvent != "" {
+				slog.Debug("Anthropic SSE: unknown event type, skipping", "event", currentEvent)
+			}
 		}
 
 		currentEvent = "" // reset after processing
@@ -727,12 +733,23 @@ func parseAnthropicSSEStream(
 	for _, idx := range indices {
 		b := blocks[idx]
 		if b.blockType == "tool_use" || b.blockType == "server_tool_use" {
+			args := b.input.String()
+			// Validate tool call arguments are valid JSON; if the stream was
+			// truncated mid-tool, the partial JSON would cause downstream errors.
+			if args != "" && !json.Valid([]byte(args)) {
+				slog.Warn("Anthropic SSE: discarding tool call with invalid JSON arguments",
+					"tool", b.name, "args_length", len(args))
+				continue
+			}
+			if args == "" {
+				args = "{}"
+			}
 			toolCalls = append(toolCalls, ToolCall{
 				ID:   b.id,
 				Type: "function",
 				Function: &FunctionCall{
 					Name:      b.name,
-					Arguments: b.input.String(),
+					Arguments: args,
 				},
 			})
 		}

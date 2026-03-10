@@ -91,6 +91,8 @@ func (v *HttpViews) AutoGenerateScreenshots(w http.ResponseWriter, r *http.Reque
 
 	var mu sync.Mutex
 	var homePageScreenshotId string
+	uploadCtx, uploadCancel := context.WithCancel(r.Context())
+	defer uploadCancel()
 	for _, screenshotUrl := range screenshots.URLs {
 		go func() {
 			defer waitGroup.Done()
@@ -106,13 +108,13 @@ func (v *HttpViews) AutoGenerateScreenshots(w http.ResponseWriter, r *http.Reque
 			}
 
 			id := uuid.New().String()
-			err = v.Controller.AssetsStorage.UploadFileByte(context.TODO(), "screenshots/"+id+".png", mockupBytes)
+			err = v.Controller.AssetsStorage.UploadFileByte(uploadCtx, "screenshots/"+id+".png", mockupBytes)
 			if err != nil {
 				slog.Error("screenshot upload error", "url", screenshotUrl, "error", err)
 				return
 			}
 
-			req, err := v.Controller.AssetsStorage.GetObject(context.TODO(), "screenshots/"+id+".png", 60*60*24*7)
+			req, err := v.Controller.AssetsStorage.GetObject(uploadCtx, "screenshots/"+id+".png", 60*60*24*7)
 			if err != nil {
 				slog.Error("presigned URL error", "url", screenshotUrl, "error", err)
 				return
@@ -138,7 +140,7 @@ func (v *HttpViews) AutoGenerateScreenshots(w http.ResponseWriter, r *http.Reque
 	waitGroup.Wait()
 
 	// Reorder to have homepage screenshot first
-	if homePageScreenshotId != "" {
+	if homePageScreenshotId != "" && len(screenshotLinks.Screenshots) > 1 {
 		for i, screenshot := range screenshotLinks.Screenshots {
 			if screenshot.ID == homePageScreenshotId {
 				// Move to front

@@ -51,7 +51,11 @@ func (c *Controller) DeployToVercel(project *models.AppProject, user *models.Use
 			VercelProjectID: vp.ID,
 			Framework:       "nextjs",
 		}
-		vercelProject, _ = c.DB.CreateVercelProject(vercelProject)
+		vercelProject, err = c.DB.CreateVercelProject(vercelProject)
+		if err != nil {
+			slog.Error("Failed to persist Vercel project to DB", "error", err)
+			return nil, fmt.Errorf("failed to save Vercel project")
+		}
 	}
 
 	// Collect all env vars (integrations + custom + auto-injected store vars)
