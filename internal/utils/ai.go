@@ -17,6 +17,40 @@ import (
 	"time"
 )
 
+// toolExecTimeout is the maximum time a single tool execution may take.
+const toolExecTimeout = 2 * time.Minute
+
+// normalizeToolCacheKey produces a canonical cache key for tool dedup.
+// It normalizes JSON arguments so semantically identical calls (different key order) match.
+func normalizeToolCacheKey(name, args string) string {
+	var obj any
+	if json.Unmarshal([]byte(args), &obj) == nil {
+		if canonical, err := json.Marshal(obj); err == nil {
+			return name + ":" + string(canonical)
+		}
+	}
+	return name + ":" + args
+}
+
+// sanitizeToolError strips internal details from tool execution errors
+// so they don't leak into LLM context or user-visible responses.
+func sanitizeToolError(toolName string, err error) string {
+	msg := err.Error()
+	// Strip common internal prefixes/patterns
+	for _, sensitive := range []string{"sql:", "pq:", "s3:", "dial tcp", "connect:", "tls:", "x509:"} {
+		if strings.Contains(strings.ToLower(msg), sensitive) {
+			slog.Error("Tool execution error (sanitized)", "tool", toolName, "error", msg)
+			return fmt.Sprintf("Error executing tool %s: internal error, please try again", toolName)
+		}
+	}
+	return fmt.Sprintf("Error executing tool %s: %s", toolName, msg)
+}
+
+// isValidJSON returns true if s is valid JSON.
+func isValidJSON(s string) bool {
+	return json.Valid([]byte(s))
+}
+
 // --- Rate limit error ---
 
 // ErrRateLimited is returned when the LLM API responds with HTTP 429.
@@ -1058,6 +1092,7 @@ func StreamWithTools(
 	consecutiveToolRounds := 0
 	nudged := false
 	rateLimitRetries := 0
+	transientRetries := 0
 	prevToolResultRange := [2]int{0, 0} // [start, end) of previous round's tool result messages
 
 	for round := 0; round < maxRounds; round++ {
@@ -1124,6 +1159,19 @@ func StreamWithTools(
 		roundStart := time.Now()
 		resp, err := llmHTTPClient.Do(req)
 		if err != nil {
+			// Retry transient connection errors (network blips, DNS, TLS) up to 3 times
+			if transientRetries < 3 {
+				transientRetries++
+				wait := time.Duration(transientRetries) * 5 * time.Second
+				slog.Warn("LLM connection error, retrying", "error", err, "attempt", transientRetries, "round", round)
+				select {
+				case <-time.After(wait):
+				case <-ctx.Done():
+					return "", ctx.Err()
+				}
+				round-- // retry same round
+				continue
+			}
 			slog.Error("Error making streaming request to LLM:", "error", err, "round", round)
 			return "", fmt.Errorf("error generating content. try again please")
 		}
@@ -1147,13 +1195,27 @@ func StreamWithTools(
 				round-- // retry same round
 				continue
 			}
+			// Retry transient server errors (500, 502, 503) up to 3 times
+			if resp.StatusCode >= 500 && resp.StatusCode != 529 && transientRetries < 3 {
+				transientRetries++
+				wait := time.Duration(transientRetries) * 5 * time.Second
+				slog.Warn("LLM server error, retrying", "status", resp.StatusCode, "attempt", transientRetries, "round", round)
+				select {
+				case <-time.After(wait):
+				case <-ctx.Done():
+					return "", ctx.Err()
+				}
+				round-- // retry same round
+				continue
+			}
 			slog.Error("LLM streaming returned non-200", "status", resp.StatusCode, "body", string(respBody), "round", round)
 			if rlErr := parseRateLimitError(resp, respBody); rlErr != nil {
 				return "", rlErr
 			}
 			return "", fmt.Errorf("error generating content. try again please")
 		}
-		rateLimitRetries = 0 // reset after successful request
+		rateLimitRetries = 0   // reset after successful request
+		transientRetries = 0
 
 		var fullText strings.Builder
 		var fullReasoning strings.Builder // accumulate reasoning_content for cache continuity
@@ -1389,7 +1451,7 @@ func StreamWithTools(
 				toolCalls = append(toolCalls, *toolCallsMap[idx])
 			}
 
-			// Append assistant message with tool calls
+			// Append assistant message with tool calls — save the index for later trimming
 			assistantMsg := Message{
 				Role:      "assistant",
 				Content:   fullText.String(),
@@ -1398,6 +1460,7 @@ func StreamWithTools(
 			if provider.UsesThinkingFormat() && fullReasoning.Len() > 0 {
 				assistantMsg.ReasoningContent = fullReasoning.String()
 			}
+			assistantMsgIdx := len(currentMessages)
 			currentMessages = append(currentMessages, assistantMsg)
 
 			// Execute each tool (with dedup) and append results
@@ -1423,6 +1486,9 @@ func StreamWithTools(
 					if skip {
 						result = interceptResult
 						interceptCount++
+						// Cache intercepted results so they can be deduped in later rounds
+						cacheKey := normalizeToolCacheKey(toolName, toolArgs)
+						toolCallHistory[cacheKey] = result
 						slog.Info("Tool call intercepted", "tool", toolName, "round", round)
 						goto toolResultDone
 					}
@@ -1437,23 +1503,52 @@ func StreamWithTools(
 				}
 
 				{
-					cacheKey := toolName + ":" + toolArgs
+					cacheKey := normalizeToolCacheKey(toolName, toolArgs)
 					if cached, ok := toolCallHistory[cacheKey]; ok {
 						// Return cached result instead of re-executing
 						result = cached
 						dedupCount++
 						slog.Info("Tool call deduped (cached)", "tool", toolName, "round", round)
 					} else {
+						// Validate JSON arguments before execution to avoid wasting a tool round
+						if toolArgs != "" && toolArgs != "{}" && !isValidJSON(toolArgs) {
+							slog.Warn("Tool call has invalid JSON arguments", "tool", toolName, "round", round, "args_len", len(toolArgs))
+							result = fmt.Sprintf("Error: invalid JSON arguments for tool %s. Please provide valid JSON.", toolName)
+							toolCallHistory[cacheKey] = result
+							goto toolResultDone
+						}
+
 						slog.Info("Executing tool call", "tool", toolName, "round", round)
 
 						if onToolCall != nil {
 							onToolCall(toolName, toolArgs)
 						}
 
-						var err error
-						result, err = executor(toolName, toolArgs)
-						if err != nil {
-							result = fmt.Sprintf("Error executing tool %s: %v", toolName, err)
+						// Execute with per-tool timeout to prevent a single slow tool from blocking the loop
+						toolCtx, toolCancel := context.WithTimeout(ctx, toolExecTimeout)
+						type toolResult struct {
+							result string
+							err    error
+						}
+						ch := make(chan toolResult, 1)
+						go func() {
+							r, e := executor(toolName, toolArgs)
+							ch <- toolResult{r, e}
+						}()
+						select {
+						case tr := <-ch:
+							toolCancel()
+							result = tr.result
+							if tr.err != nil {
+								result = sanitizeToolError(toolName, tr.err)
+							}
+						case <-toolCtx.Done():
+							toolCancel()
+							if ctx.Err() != nil {
+								return "", ctx.Err()
+							}
+							slog.Warn("Tool execution timed out", "tool", toolName, "round", round)
+							result = fmt.Sprintf("Error: tool %s timed out after %s", toolName, toolExecTimeout)
 						}
 						toolCallHistory[cacheKey] = result
 					}
@@ -1496,19 +1591,18 @@ func StreamWithTools(
 				}
 			}
 
-			// Trim assistant content, tool call arguments, and tool results to reduce history tokens
-			if len(opts) > 0 && opts[0].TrimArgs != nil {
-				assistantMsgIdx := len(currentMessages) - 1 - len(toolCalls)
-				if assistantMsgIdx >= 0 {
-					// Clear extended reasoning to save tokens, but keep the assistant's
-					// short text content so the LLM retains context about what it just did.
-					currentMessages[assistantMsgIdx].ReasoningContent = ""
-					// Trim tool call arguments (e.g. strip file content from write_file)
-					for i := range currentMessages[assistantMsgIdx].ToolCalls {
-						tc := &currentMessages[assistantMsgIdx].ToolCalls[i]
-						if tc.Function != nil {
-							tc.Function.Arguments = opts[0].TrimArgs(tc.Function.Name, tc.Function.Arguments)
-						}
+			// Trim assistant content, tool call arguments, and tool results to reduce history tokens.
+			// Uses saved assistantMsgIdx instead of computing from end, which could be wrong
+			// if system messages were appended between the assistant msg and tool results.
+			if len(opts) > 0 && opts[0].TrimArgs != nil && assistantMsgIdx < len(currentMessages) {
+				// Clear extended reasoning to save tokens, but keep the assistant's
+				// short text content so the LLM retains context about what it just did.
+				currentMessages[assistantMsgIdx].ReasoningContent = ""
+				// Trim tool call arguments (e.g. strip file content from write_file)
+				for i := range currentMessages[assistantMsgIdx].ToolCalls {
+					tc := &currentMessages[assistantMsgIdx].ToolCalls[i]
+					if tc.Function != nil {
+						tc.Function.Arguments = opts[0].TrimArgs(tc.Function.Name, tc.Function.Arguments)
 					}
 				}
 			}
@@ -1543,8 +1637,23 @@ func StreamWithTools(
 
 		// Chunks were already streamed in real-time via onChunk above.
 		// No tool calls — return final response
+		if lastFinishReason == "length" && round < maxRounds-1 {
+			// Response was truncated — request continuation by appending the partial
+			// response as assistant message and asking the LLM to continue.
+			slog.Warn("LLM response truncated (finish_reason=length), requesting continuation", "response_length", fullText.Len(), "round", round)
+			currentMessages = append(currentMessages, Message{
+				Role:    "assistant",
+				Content: fullText.String(),
+			})
+			currentMessages = append(currentMessages, Message{
+				Role:    "user",
+				Content: "Your response was cut off. Continue EXACTLY where you left off. Do not repeat any content.",
+			})
+			continue
+		}
+
 		if lastFinishReason == "length" {
-			slog.Warn("LLM response truncated (finish_reason=length)", "response_length", fullText.Len(), "round", round)
+			slog.Warn("LLM response truncated (finish_reason=length), no rounds left", "response_length", fullText.Len(), "round", round)
 		}
 
 		return fullText.String(), nil
