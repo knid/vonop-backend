@@ -3,6 +3,7 @@ package views
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/url"
 
@@ -258,12 +259,31 @@ func (v *HttpViews) ClassifyMobileIntent(w http.ResponseWriter, r *http.Request)
 		proxyURL := fmt.Sprintf("https://proxy.wemob.io/?url=%s&project_id=%s",
 			url.QueryEscape(extractedURL), project.ID.String())
 
-		utils.JSONResponse(w, map[string]any{
+		// Fetch site metadata (title, description, favicon) — best effort
+		var siteMeta *utils.SiteMetadata
+		htmlContent, fetchErr := utils.FetchHTML(
+			extractedURL,
+			v.Controller.SecretManager.GetSecret("PROXY_HOST"),
+			v.Controller.SecretManager.GetSecret("PROXY_AUTH"),
+		)
+		if fetchErr == nil && htmlContent != "" {
+			meta := utils.ExtractSiteMetadata(htmlContent, extractedURL)
+			siteMeta = &meta
+		} else if fetchErr != nil {
+			slog.Warn("Failed to fetch site metadata", "url", extractedURL, "error", fetchErr)
+		}
+
+		resp := map[string]any{
 			"intent":     "url_wrapper",
 			"url":        extractedURL,
 			"project_id": project.ID.String(),
 			"proxy_url":  proxyURL,
-		}, http.StatusOK)
+		}
+		if siteMeta != nil {
+			resp["site_meta"] = siteMeta
+		}
+
+		utils.JSONResponse(w, resp, http.StatusOK)
 		return
 	}
 

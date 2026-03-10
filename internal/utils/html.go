@@ -67,6 +67,91 @@ func FetchHTML(targetURL, proxyHost, proxyAuth string) (string, error) {
 	return string(body), nil
 }
 
+// SiteMetadata holds basic information extracted from a web page's HTML.
+type SiteMetadata struct {
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	Favicon     string `json:"favicon"`
+}
+
+// ExtractSiteMetadata parses HTML and returns the page title, meta description,
+// and favicon URL. The baseURL is used to resolve relative favicon paths.
+func ExtractSiteMetadata(htmlContent string, baseURL string) SiteMetadata {
+	meta := SiteMetadata{}
+	base, _ := url.Parse(baseURL)
+	tokenizer := html.NewTokenizer(strings.NewReader(htmlContent))
+	inTitle := false
+
+	for {
+		tt := tokenizer.Next()
+		if tt == html.ErrorToken {
+			break
+		}
+		token := tokenizer.Token()
+
+		switch tt {
+		case html.StartTagToken, html.SelfClosingTagToken:
+			switch token.DataAtom.String() {
+			case "title":
+				inTitle = true
+			case "meta":
+				var name, property, content string
+				for _, a := range token.Attr {
+					switch strings.ToLower(a.Key) {
+					case "name":
+						name = strings.ToLower(a.Val)
+					case "property":
+						property = strings.ToLower(a.Val)
+					case "content":
+						content = a.Val
+					}
+				}
+				if (name == "description" || property == "og:description") && content != "" && meta.Description == "" {
+					meta.Description = content
+				}
+				if property == "og:title" && content != "" && meta.Title == "" {
+					meta.Title = content
+				}
+			case "link":
+				var rel, href string
+				for _, a := range token.Attr {
+					switch strings.ToLower(a.Key) {
+					case "rel":
+						rel = strings.ToLower(a.Val)
+					case "href":
+						href = a.Val
+					}
+				}
+				if (strings.Contains(rel, "icon")) && href != "" && meta.Favicon == "" {
+					if parsed, err := url.Parse(href); err == nil && base != nil {
+						meta.Favicon = base.ResolveReference(parsed).String()
+					}
+				}
+			}
+		case html.TextToken:
+			if inTitle && meta.Title == "" {
+				meta.Title = strings.TrimSpace(token.Data)
+			}
+		case html.EndTagToken:
+			if token.DataAtom.String() == "title" {
+				inTitle = false
+			}
+			// Stop parsing after </head> for performance
+			if token.DataAtom.String() == "head" {
+				goto done
+			}
+		}
+	}
+done:
+
+	// Truncate long descriptions
+	if len(meta.Description) > 200 {
+		meta.Description = meta.Description[:200] + "..."
+	}
+
+	return meta
+}
+
 // extractAllURLs parses HTML and collects all unique normalized hrefs.
 func ExtractAllURLs(htmlContent string, baseURL string) []string {
 	tokenizer := html.NewTokenizer(strings.NewReader(htmlContent))
