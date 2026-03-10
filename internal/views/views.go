@@ -15,7 +15,7 @@ type HttpViews struct {
 // requireActiveSubscription checks that the user has an active or trial subscription.
 // Returns true if the request should be blocked (response already written).
 func requireActiveSubscription(w http.ResponseWriter, user *models.User) bool {
-	if user.SubscriptionStatus == "active" || user.SubscriptionStatus == "trial" {
+	if user.SubscriptionStatus == "active" || user.SubscriptionStatus == "trial" || user.SubscriptionStatus == "free" {
 		return false
 	}
 	utils.JSONCodedErrorResponse(w, "SUBSCRIPTION_REQUIRED", "active subscription required", http.StatusForbidden, nil)

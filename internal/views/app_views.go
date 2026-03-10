@@ -626,6 +626,13 @@ func (v *HttpViews) ExportApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Check code access permission
+	limits, limitsErr := v.Controller.DB.GetStandartUserLimitsByUser(user)
+	if limitsErr != nil || !limits.CanAccessCode {
+		utils.JSONCodedErrorResponse(w, "FEATURE_NOT_AVAILABLE", "code access requires Starter or Professional plan", http.StatusForbidden, nil)
+		return
+	}
+
 	appID := chi.URLParam(r, "appId")
 	platform := chi.URLParam(r, "platform")
 	project, err := v.Controller.GetAppProject(appID, user)

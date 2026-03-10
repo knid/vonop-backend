@@ -1,6 +1,7 @@
 package views
 
 import (
+	"fmt"
 	"net/http"
 	"time"
 
@@ -21,6 +22,19 @@ func (v *HttpViews) DeployAppWeb(w http.ResponseWriter, r *http.Request) {
 	if requireActiveSubscription(w, user) {
 		return
 	}
+
+	// Check deployed web app limit
+	limits, limitsErr := v.Controller.DB.GetStandartUserLimitsByUser(user)
+	if limitsErr == nil && limits.MaxDeployedWebApps > 0 {
+		count, _ := v.Controller.DB.CountDeployedWebAppsByUserID(user.ID.String())
+		if count >= limits.MaxDeployedWebApps {
+			utils.JSONCodedErrorResponse(w, "DEPLOY_LIMIT_REACHED",
+				fmt.Sprintf("you have reached the maximum of %d deployed web apps for your plan", limits.MaxDeployedWebApps),
+				http.StatusForbidden, nil)
+			return
+		}
+	}
+
 	appID := chi.URLParam(r, "appId")
 	project, err := v.Controller.GetAppProject(appID, user)
 	if err != nil {
@@ -73,6 +87,14 @@ func (v *HttpViews) DeployAppAndroid(w http.ResponseWriter, r *http.Request) {
 	if requireActiveSubscription(w, user) {
 		return
 	}
+
+	// Check mobile build permission
+	limits, limitsErr := v.Controller.DB.GetStandartUserLimitsByUser(user)
+	if limitsErr != nil || !limits.CanBuildMobile {
+		utils.JSONCodedErrorResponse(w, "FEATURE_NOT_AVAILABLE", "mobile builds require Professional plan", http.StatusForbidden, nil)
+		return
+	}
+
 	appID := chi.URLParam(r, "appId")
 	project, err := v.Controller.GetAppProject(appID, user)
 	if err != nil {
@@ -114,6 +136,14 @@ func (v *HttpViews) DeployAppIOS(w http.ResponseWriter, r *http.Request) {
 	if requireActiveSubscription(w, user) {
 		return
 	}
+
+	// Check mobile build permission
+	iosLimits, iosLimitsErr := v.Controller.DB.GetStandartUserLimitsByUser(user)
+	if iosLimitsErr != nil || !iosLimits.CanBuildMobile {
+		utils.JSONCodedErrorResponse(w, "FEATURE_NOT_AVAILABLE", "mobile builds require Professional plan", http.StatusForbidden, nil)
+		return
+	}
+
 	appID := chi.URLParam(r, "appId")
 	project, err := v.Controller.GetAppProject(appID, user)
 	if err != nil {

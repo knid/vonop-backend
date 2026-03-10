@@ -3,6 +3,7 @@ package controllers
 import (
 	"database/sql"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -149,6 +150,8 @@ func (c *Controller) RegisterUser(userRegisterReq requests.UserRegisterRequest) 
 	createdUser.CustomerID = customer.ID
 	c.DB.UpdateUser(createdUser)
 
+	c.assignFreePlan(createdUser)
+
 	go c.SlackService.Client.PostMessage(
 		constants.SLACK_CHANNEL_ID_NEW_USER,
 		slack.MsgOptionText("New registered user (Wemob): "+user.Email, false),
@@ -159,22 +162,22 @@ func (c *Controller) RegisterUser(userRegisterReq requests.UserRegisterRequest) 
 	})
 
 	return &responses.UserInformationResponse{
-		ID:                 user.ID,
-		Name:               user.Name,
-		Email:              user.Email,
-		Photo:              user.Photo,
-		Verified:           user.Verified,
-		Provider:           user.Provider,
-		Type:               user.Type,
-		Company:            user.Company,
-		CompanyLogo:        user.CompanyLogo,
-		SubscriptionID:     user.SubscriptionID.String(),
-		SubscriptionStatus: user.SubscriptionStatus,
-		SubscribedAt:       user.SubscriptionStartAt,
-		TrialStartedAt:     user.TrialStartAt,
-		SetupFinished:      user.SetupFinished,
-		TrialUsed:          user.TrialUsed,
-		CreatedAt:          user.CreatedAt,
+		ID:                 createdUser.ID,
+		Name:               createdUser.Name,
+		Email:              createdUser.Email,
+		Photo:              createdUser.Photo,
+		Verified:           createdUser.Verified,
+		Provider:           createdUser.Provider,
+		Type:               createdUser.Type,
+		Company:            createdUser.Company,
+		CompanyLogo:        createdUser.CompanyLogo,
+		SubscriptionID:     createdUser.SubscriptionID.String(),
+		SubscriptionStatus: createdUser.SubscriptionStatus,
+		SubscribedAt:       createdUser.SubscriptionStartAt,
+		TrialStartedAt:     createdUser.TrialStartAt,
+		SetupFinished:      createdUser.SetupFinished,
+		TrialUsed:          createdUser.TrialUsed,
+		CreatedAt:          createdUser.CreatedAt,
 	}, nil
 }
 
@@ -286,6 +289,8 @@ func (c *Controller) GoogleLogin(oauthUser goth.User) (*responses.UserLoginRespo
 			user.CustomerID = customer.ID
 			c.DB.UpdateUser(user)
 
+			c.assignFreePlan(user)
+
 			go c.SlackService.Client.PostMessage(
 				constants.SLACK_CHANNEL_ID_NEW_USER,
 				slack.MsgOptionText("New registered user (Google): "+user.Email, false))
@@ -320,6 +325,23 @@ func (c *Controller) GoogleLogin(oauthUser goth.User) (*responses.UserLoginRespo
 		Token:     createdToken.String,
 		ExpiredAt: createdToken.ExpiredAt,
 	}, nil
+}
+
+func (c *Controller) assignFreePlan(user *models.User) {
+	freePlan, err := c.DB.GetSubscriptionByName("Free")
+	if err != nil {
+		slog.Warn("assignFreePlan: free plan not found", "error", err)
+		return
+	}
+	user.SubscriptionID = freePlan.ID
+	user.SubscriptionStatus = "free"
+	if _, err := c.DB.UpdateUser(user); err != nil {
+		slog.Warn("assignFreePlan: failed to update user", "error", err)
+		return
+	}
+	if err := c.AddAICredits(user, 50, "free_plan_grant", "registration"); err != nil {
+		slog.Warn("assignFreePlan: failed to grant credits", "error", err)
+	}
 }
 
 func (c *Controller) GetUserFromReq(r *http.Request) (*models.User, error) {

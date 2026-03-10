@@ -219,6 +219,13 @@ func createSchema(db *bun.DB) error {
 		`ALTER TABLE app_projects ALTER COLUMN sandbox_id SET DEFAULT ''`,
 		// Logo S3 key for AI-generated app logos
 		`ALTER TABLE app_projects ADD COLUMN IF NOT EXISTS logo_s3_key text NOT NULL DEFAULT ''`,
+		// Subscription & limits system v2
+		`ALTER TABLE standart_user_limits ADD COLUMN IF NOT EXISTS max_deployed_web_apps int NOT NULL DEFAULT 0`,
+		`ALTER TABLE standart_user_limits ADD COLUMN IF NOT EXISTS credit_rollover_months int NOT NULL DEFAULT 0`,
+		`ALTER TABLE standart_user_limits ADD COLUMN IF NOT EXISTS can_access_code boolean NOT NULL DEFAULT false`,
+		`ALTER TABLE standart_user_limits ADD COLUMN IF NOT EXISTS can_buy_domain boolean NOT NULL DEFAULT false`,
+		`ALTER TABLE standart_user_limits ADD COLUMN IF NOT EXISTS can_use_email_service boolean NOT NULL DEFAULT false`,
+		`ALTER TABLE standart_user_limits ADD COLUMN IF NOT EXISTS can_build_mobile boolean NOT NULL DEFAULT false`,
 	}
 
 	// Deduplicate before creating unique indexes (keep the latest row per group)
@@ -294,6 +301,195 @@ func createSchema(db *bun.DB) error {
 	}
 
 	return nil
+}
+
+func seedPlans(db *database.Database, sm secret.SecretManager) {
+	type planDef struct {
+		Name         string
+		Description  string
+		MonthlyPrice int
+		PriceID      string
+		AnnualPrice  int
+		AnnualPriceID string
+		Limits       models.StandartUserLimits
+	}
+
+	plans := []planDef{
+		{
+			Name:         "Free",
+			Description:  "Free plan with limited features",
+			MonthlyPrice: 0,
+			PriceID:      "free_plan",
+			Limits: models.StandartUserLimits{
+				MaximumProjectCount:  1,
+				MonthlyAICredits:     0,
+				MonthlyAppCount:      5,
+				MonthlyDeployCount:   3,
+				MaxDeployedWebApps:   1,
+				CreditRolloverMonths: 0,
+				CanBuildToAndroid:    false,
+				CanBuildToIOS:        false,
+				CanBuildMobile:       false,
+				CanUseAnalytics:      false,
+				CanAccessCode:        false,
+				CanBuyDomain:         false,
+				CanUseEmailService:   false,
+				CanUseEcommerce:      false,
+				CanDeployToVercel:    true,
+				CanRemoveBrandLogo:   false,
+			},
+		},
+		{
+			Name:          "Starter",
+			Description:   "Starter plan for growing projects",
+			MonthlyPrice:  2000,
+			PriceID:       sm.GetSecret("STRIPE_STARTER_PRICE_ID"),
+			AnnualPrice:   19200,
+			AnnualPriceID: sm.GetSecret("STRIPE_STARTER_ANNUAL_PRICE_ID"),
+			Limits: models.StandartUserLimits{
+				MaximumProjectCount:  10,
+				MonthlyAICredits:     100,
+				MonthlyAppCount:      20,
+				MonthlyDeployCount:   10,
+				MaxDeployedWebApps:   3,
+				CreditRolloverMonths: 1,
+				CanBuildToAndroid:    false,
+				CanBuildToIOS:        false,
+				CanBuildMobile:       false,
+				CanUseAnalytics:      true,
+				CanAccessCode:        true,
+				CanBuyDomain:         true,
+				CanUseEmailService:   false,
+				CanUseEcommerce:      true,
+				CanDeployToVercel:    true,
+				CanRemoveBrandLogo:   true,
+			},
+		},
+		{
+			Name:          "Professional",
+			Description:   "Professional plan for power users",
+			MonthlyPrice:  4000,
+			PriceID:       sm.GetSecret("STRIPE_PROFESSIONAL_PRICE_ID"),
+			AnnualPrice:   38400,
+			AnnualPriceID: sm.GetSecret("STRIPE_PROFESSIONAL_ANNUAL_PRICE_ID"),
+			Limits: models.StandartUserLimits{
+				MaximumProjectCount:  50,
+				MonthlyAICredits:     200,
+				MonthlyAppCount:      100,
+				MonthlyDeployCount:   50,
+				MaxDeployedWebApps:   10,
+				CreditRolloverMonths: 1,
+				CanBuildToAndroid:    true,
+				CanBuildToIOS:        true,
+				CanBuildMobile:       true,
+				CanUseAnalytics:      true,
+				CanAccessCode:        true,
+				CanBuyDomain:         true,
+				CanUseEmailService:   true,
+				CanUseEcommerce:      true,
+				CanDeployToVercel:    true,
+				CanRemoveBrandLogo:   true,
+			},
+		},
+	}
+
+	for _, p := range plans {
+		existing, err := db.GetSubscriptionByName(p.Name)
+		if err != nil {
+			// Plan doesn't exist — create limits then subscription
+			limits := p.Limits
+			createdLimits, err := db.CreateStandartUserLimits(&limits)
+			if err != nil {
+				slog.Error("failed to create limits for plan", "plan", p.Name, "error", err)
+				continue
+			}
+			sub := &models.StandartUserSubscription{
+				Name:          p.Name,
+				Description:   p.Description,
+				LimitsID:      createdLimits.ID,
+				MonthlyPrice:  p.MonthlyPrice,
+				PriceID:       p.PriceID,
+				AnnualPrice:   p.AnnualPrice,
+				AnnualPriceID: p.AnnualPriceID,
+			}
+			if _, err := db.CreateSubscription(sub); err != nil {
+				slog.Error("failed to create subscription plan", "plan", p.Name, "error", err)
+			} else {
+				slog.Info("created subscription plan", "plan", p.Name)
+			}
+			continue
+		}
+
+		// Plan exists — update limits
+		limits, err := db.GetStandartUserLimitsById(existing.LimitsID.String())
+		if err != nil {
+			slog.Error("failed to get limits for plan", "plan", p.Name, "error", err)
+			continue
+		}
+
+		limits.MaximumProjectCount = p.Limits.MaximumProjectCount
+		limits.MonthlyAICredits = p.Limits.MonthlyAICredits
+		limits.MonthlyAppCount = p.Limits.MonthlyAppCount
+		limits.MonthlyDeployCount = p.Limits.MonthlyDeployCount
+		limits.MaxDeployedWebApps = p.Limits.MaxDeployedWebApps
+		limits.CreditRolloverMonths = p.Limits.CreditRolloverMonths
+		limits.CanBuildToAndroid = p.Limits.CanBuildToAndroid
+		limits.CanBuildToIOS = p.Limits.CanBuildToIOS
+		limits.CanBuildMobile = p.Limits.CanBuildMobile
+		limits.CanUseAnalytics = p.Limits.CanUseAnalytics
+		limits.CanAccessCode = p.Limits.CanAccessCode
+		limits.CanBuyDomain = p.Limits.CanBuyDomain
+		limits.CanUseEmailService = p.Limits.CanUseEmailService
+		limits.CanUseEcommerce = p.Limits.CanUseEcommerce
+		limits.CanDeployToVercel = p.Limits.CanDeployToVercel
+		limits.CanRemoveBrandLogo = p.Limits.CanRemoveBrandLogo
+
+		if _, err := db.UpdateStandartUserLimits(limits); err != nil {
+			slog.Error("failed to update limits for plan", "plan", p.Name, "error", err)
+		}
+
+		// Update subscription price IDs if changed
+		existing.PriceID = p.PriceID
+		existing.AnnualPriceID = p.AnnualPriceID
+		existing.MonthlyPrice = p.MonthlyPrice
+		existing.AnnualPrice = p.AnnualPrice
+		existing.Description = p.Description
+		if _, err := db.UpdateSubscription(existing); err != nil {
+			slog.Error("failed to update subscription plan", "plan", p.Name, "error", err)
+		}
+
+		slog.Info("updated subscription plan", "plan", p.Name)
+	}
+}
+
+func migrateInactiveUsersToFree(bundb *bun.DB) {
+	// Assign free plan to inactive users
+	res, err := bundb.ExecContext(context.Background(), `
+		UPDATE users SET subscription_status = 'free', subscription_id = (
+			SELECT id FROM standart_user_subscriptions WHERE name = 'Free' LIMIT 1
+		) WHERE subscription_status = 'inactive'
+		AND (subscription_id IS NULL OR subscription_id = '00000000-0000-0000-0000-000000000000')
+		AND deleted_at IS NULL
+	`)
+	if err != nil {
+		slog.Warn("migrate inactive users to free failed", "error", err)
+	} else if n, _ := res.RowsAffected(); n > 0 {
+		slog.Info("migrated inactive users to free plan", "count", n)
+	}
+
+	// Grant 50 credits to migrated free users who don't have a balance
+	res, err = bundb.ExecContext(context.Background(), `
+		INSERT INTO ai_credits_balances (id, user_id, balance, period_start, period_end, created_at, updated_at)
+		SELECT uuid_generate_v4(), id, 50, NOW(), NOW() + INTERVAL '100 years', NOW(), NOW()
+		FROM users
+		WHERE subscription_status = 'free'
+		AND id NOT IN (SELECT user_id FROM ai_credits_balances)
+	`)
+	if err != nil {
+		slog.Warn("grant free credits to migrated users failed", "error", err)
+	} else if n, _ := res.RowsAffected(); n > 0 {
+		slog.Info("granted free credits to migrated users", "count", n)
+	}
 }
 
 func main() {
@@ -378,6 +574,10 @@ func main() {
 	}
 
 	db := database.NewDatabase(bundb)
+
+	seedPlans(db, sm)
+	migrateInactiveUsersToFree(bundb)
+
 	go utils.CheckSessionStatusJob(db)
 	go utils.CheckUsageAlertsJob(db, crmServices.NewBrevoCRMService(sm.GetSecret("BREVO_API_KEY")))
 	vercelService := vercel.NewService(sm.GetSecret("VERCEL_API_TOKEN"), sm.GetSecret("VERCEL_TEAM_ID"))
@@ -788,7 +988,7 @@ func main() {
 
 			r.Route("/apps", func(r chi.Router) {
 				r.Use(appMiddleware.RequireAuth(controller))
-				r.Use(appMiddleware.RequireSubscription("active", "trial"))
+				r.Use(appMiddleware.RequireSubscription("active", "trial", "free"))
 
 				// Generation endpoints (AI rate limited)
 				r.With(rateLimiter.RateLimit(20, time.Minute, appMiddleware.AIUserKey)).Post("/generate/from-image", httpViews.GenerateAppFromImage)
@@ -968,14 +1168,14 @@ func main() {
 			})
 
 			// Mobile intent classification
-			r.With(appMiddleware.RequireAuth(controller), appMiddleware.RequireSubscription("active", "trial"),
+			r.With(appMiddleware.RequireAuth(controller), appMiddleware.RequireSubscription("active", "trial", "free"),
 				rateLimiter.RateLimit(30, time.Minute, appMiddleware.AIUserKey)).
 				Post("/mobile/classify-intent", httpViews.ClassifyMobileIntent)
 
 			// Mobile injection chat (URL-wrapper projects)
 			r.Route("/mobile/{projectId}", func(r chi.Router) {
 				r.Use(appMiddleware.RequireAuth(controller))
-				r.Use(appMiddleware.RequireSubscription("active", "trial"))
+				r.Use(appMiddleware.RequireSubscription("active", "trial", "free"))
 
 				r.With(rateLimiter.RateLimit(20, time.Minute, appMiddleware.AIUserKey)).Post("/chat", httpViews.MobileChatStream)
 				r.Get("/injections", httpViews.ListMobileInjections)
