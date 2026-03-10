@@ -67,11 +67,6 @@ func (v *HttpViews) StripeCheckout(w http.ResponseWriter, r *http.Request) {
 		AllowPromotionCodes: stripe.Bool(true),
 	}
 
-	if !user.TrialUsed {
-		params.SubscriptionData = &stripe.CheckoutSessionSubscriptionDataParams{
-			TrialPeriodDays: stripe.Int64(14),
-		}
-	}
 	// Create the actual Stripe Checkout Session!
 	s, err := session.New(params)
 	if err != nil {

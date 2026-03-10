@@ -79,3 +79,36 @@ func (db *Database) GetSubscriptionByPriceID(priceID string) (*models.StandartUs
 
 	return &subs, err
 }
+
+func (db *Database) GetSubscriptionByName(name string) (*models.StandartUserSubscription, error) {
+	var subs models.StandartUserSubscription
+	err := db.DB.NewSelect().Model(&subs).Where("name = ?", name).Scan(context.Background())
+	return &subs, err
+}
+
+func (db *Database) CreateStandartUserLimits(limits *models.StandartUserLimits) (*models.StandartUserLimits, error) {
+	_, err := db.DB.NewInsert().Model(limits).Exec(context.Background())
+	return limits, err
+}
+
+func (db *Database) UpdateStandartUserLimits(limits *models.StandartUserLimits) (*models.StandartUserLimits, error) {
+	_, err := db.DB.NewUpdate().Model(limits).Where("id = ?", limits.ID).Exec(context.Background())
+	return limits, err
+}
+
+func (db *Database) CreateSubscription(sub *models.StandartUserSubscription) (*models.StandartUserSubscription, error) {
+	_, err := db.DB.NewInsert().Model(sub).Exec(context.Background())
+	return sub, err
+}
+
+func (db *Database) CountDeployedWebAppsByUserID(userID string) (int, error) {
+	var count int
+	err := db.DB.NewSelect().
+		TableExpr("app_deployments").
+		ColumnExpr("COUNT(DISTINCT app_project_id)").
+		Where("user_id = ?", userID).
+		Where("platform = 'web'").
+		Where("status = 'deployed'").
+		Scan(context.Background(), &count)
+	return count, err
+}

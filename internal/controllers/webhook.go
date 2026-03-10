@@ -252,8 +252,15 @@ func (c *Controller) HandleWebhook(w http.ResponseWriter, req *http.Request) {
 				break
 			}
 
-			user.SubscriptionStatus = "canceled"
-			user.SubscriptionID = uuid.Nil // Remove subscription association
+			// Downgrade to free plan instead of fully canceling
+			freePlan, freeErr := c.DB.GetSubscriptionByName("Free")
+			if freeErr == nil {
+				user.SubscriptionID = freePlan.ID
+				user.SubscriptionStatus = "free"
+			} else {
+				user.SubscriptionStatus = "canceled"
+				user.SubscriptionID = uuid.Nil
+			}
 
 			go c.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_CANCELLED, map[string]any{})
 

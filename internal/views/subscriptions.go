@@ -43,6 +43,16 @@ func (v *HttpViews) GetLimits(w http.ResponseWriter, r *http.Request) {
 		CanUseAnalytics:         limits.CanUseAnalytics,
 		CanRemoveBrandLogo:      limits.CanRemoveBrandLogo,
 		CanSeeActiveUsers:       limits.CanSeeActiveUsers,
+		MaxDeployedWebApps:      limits.MaxDeployedWebApps,
+		CreditRolloverMonths:    limits.CreditRolloverMonths,
+		CanAccessCode:           limits.CanAccessCode,
+		CanBuyDomain:            limits.CanBuyDomain,
+		CanUseEmailService:      limits.CanUseEmailService,
+		CanBuildMobile:          limits.CanBuildMobile,
+		MonthlyAICredits:        limits.MonthlyAICredits,
+		MonthlyAppCount:         limits.MonthlyAppCount,
+		MonthlyDeployCount:      limits.MonthlyDeployCount,
+		CanUseEcommerce:         limits.CanUseEcommerce,
 	}
 
 	utils.JSONResponse(w, limitsResponse, http.StatusOK)

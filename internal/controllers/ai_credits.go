@@ -51,12 +51,44 @@ func (c *Controller) GetOrCreateCreditsBalance(user *models.User) (*models.AICre
 		periodEnd := now.AddDate(0, 1, 0)
 
 		monthlyCredits := 0
+		rolloverMonths := 0
 		limits, limitsErr := c.DB.GetStandartUserLimitsByUser(user)
-		if limitsErr == nil && limits.MonthlyAICredits > 0 {
+		if limitsErr == nil {
 			monthlyCredits = limits.MonthlyAICredits
+			rolloverMonths = limits.CreditRolloverMonths
 		}
 
-		newBal, didReset, resetErr := c.DB.AtomicResetPeriod(balance.ID.String(), monthlyCredits, periodStart, periodEnd)
+		// Free plan (monthlyCredits == 0): skip reset entirely, just extend the period
+		// This preserves one-time credits for free plan users
+		if monthlyCredits == 0 {
+			periodEnd = now.AddDate(100, 0, 0) // extend far into the future
+			_, didReset, resetErr := c.DB.AtomicResetPeriod(balance.ID.String(), balance.Balance, periodStart, periodEnd)
+			if resetErr != nil {
+				return nil, resetErr
+			}
+			if didReset {
+				balance.PeriodStart = periodStart
+				balance.PeriodEnd = periodEnd
+			} else {
+				balance, err = c.DB.GetAICreditsBalance(user.ID.String())
+				if err != nil {
+					return nil, err
+				}
+			}
+			return balance, nil
+		}
+
+		// Calculate new balance with rollover
+		newBalance := monthlyCredits
+		if rolloverMonths > 0 {
+			cap := monthlyCredits * (rolloverMonths + 1)
+			newBalance = balance.Balance + monthlyCredits
+			if newBalance > cap {
+				newBalance = cap
+			}
+		}
+
+		newBal, didReset, resetErr := c.DB.AtomicResetPeriod(balance.ID.String(), newBalance, periodStart, periodEnd)
 		if resetErr != nil {
 			return nil, resetErr
 		}

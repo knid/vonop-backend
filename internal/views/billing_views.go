@@ -22,6 +22,26 @@ func (v *HttpViews) GetBillingPlans(w http.ResponseWriter, r *http.Request) {
 			annualSavings = (sub.MonthlyPrice * 12) - sub.AnnualPrice
 		}
 
+		var planLimits responses.PlanLimitsResponse
+		limits, limitsErr := v.Controller.DB.GetStandartUserLimitsById(sub.LimitsID.String())
+		if limitsErr == nil {
+			planLimits = responses.PlanLimitsResponse{
+				MaxDeployedWebApps:   limits.MaxDeployedWebApps,
+				MonthlyAICredits:     limits.MonthlyAICredits,
+				CreditRolloverMonths: limits.CreditRolloverMonths,
+				CanBuildMobile:       limits.CanBuildMobile,
+				CanUseAnalytics:      limits.CanUseAnalytics,
+				CanAccessCode:        limits.CanAccessCode,
+				CanBuyDomain:         limits.CanBuyDomain,
+				CanUseEmailService:   limits.CanUseEmailService,
+				CanUseEcommerce:      limits.CanUseEcommerce,
+				MaximumProjectCount:  limits.MaximumProjectCount,
+				MonthlyAppCount:      limits.MonthlyAppCount,
+				MonthlyDeployCount:   limits.MonthlyDeployCount,
+				CanRemoveBrandLogo:   limits.CanRemoveBrandLogo,
+			}
+		}
+
 		plans = append(plans, responses.PlanResponse{
 			ID:            sub.ID.String(),
 			Name:          sub.Name,
@@ -31,6 +51,7 @@ func (v *HttpViews) GetBillingPlans(w http.ResponseWriter, r *http.Request) {
 			PriceID:       sub.PriceID,
 			AnnualPriceID: sub.AnnualPriceID,
 			AnnualSavings: annualSavings,
+			Limits:        planLimits,
 		})
 	}
 

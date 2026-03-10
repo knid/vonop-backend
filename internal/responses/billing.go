@@ -1,14 +1,31 @@
 package responses
 
+type PlanLimitsResponse struct {
+	MaxDeployedWebApps   int  `json:"max_deployed_web_apps"`
+	MonthlyAICredits     int  `json:"monthly_ai_credits"`
+	CreditRolloverMonths int  `json:"credit_rollover_months"`
+	CanBuildMobile       bool `json:"can_build_mobile"`
+	CanUseAnalytics      bool `json:"can_use_analytics"`
+	CanAccessCode        bool `json:"can_access_code"`
+	CanBuyDomain         bool `json:"can_buy_domain"`
+	CanUseEmailService   bool `json:"can_use_email_service"`
+	CanUseEcommerce      bool `json:"can_use_ecommerce"`
+	MaximumProjectCount  int  `json:"maximum_project_count"`
+	MonthlyAppCount      int  `json:"monthly_app_count"`
+	MonthlyDeployCount   int  `json:"monthly_deploy_count"`
+	CanRemoveBrandLogo   bool `json:"can_remove_brand_logo"`
+}
+
 type PlanResponse struct {
-	ID            string `json:"id"`
-	Name          string `json:"name"`
-	Description   string `json:"description"`
-	MonthlyPrice  int    `json:"monthly_price"`
-	AnnualPrice   int    `json:"annual_price"`
-	PriceID       string `json:"price_id"`
-	AnnualPriceID string `json:"annual_price_id,omitempty"`
-	AnnualSavings int    `json:"annual_savings"`
+	ID            string             `json:"id"`
+	Name          string             `json:"name"`
+	Description   string             `json:"description"`
+	MonthlyPrice  int                `json:"monthly_price"`
+	AnnualPrice   int                `json:"annual_price"`
+	PriceID       string             `json:"price_id"`
+	AnnualPriceID string             `json:"annual_price_id,omitempty"`
+	AnnualSavings int                `json:"annual_savings"`
+	Limits        PlanLimitsResponse `json:"limits"`
 }
 
 type AICreditsBalanceResponse struct {
