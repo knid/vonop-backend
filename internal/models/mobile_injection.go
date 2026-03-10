@@ -16,7 +16,7 @@ type MobileInjection struct {
 	JS          string    `bun:",nullzero,type:text"`
 	HTML        string    `bun:",nullzero,type:text"`
 	IsEnabled   bool      `bun:",notnull,default:true"`
-	SortOrder   int       `bun:"\"order\",notnull,default:0"`
+	SortOrder   int       `bun:"sort_order,notnull,default:0"`
 	CreatedAt   time.Time `bun:",nullzero,notnull,default:current_timestamp"`
 	UpdatedAt   time.Time `bun:",nullzero,notnull,default:current_timestamp"`
 }
