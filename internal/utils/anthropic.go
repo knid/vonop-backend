@@ -76,7 +76,7 @@ type AnthropicRequest struct {
 	MaxTokens int                     `json:"max_tokens"`
 	System    []AnthropicContentBlock `json:"system,omitempty"`
 	Messages  []AnthropicMessage      `json:"messages"`
-	Tools     []AnthropicTool         `json:"tools,omitempty"`
+	Tools     []any                   `json:"tools,omitempty"`
 	Stream    bool                    `json:"stream,omitempty"`
 	Thinking  *AnthropicThinkingConfig `json:"thinking,omitempty"`
 }
@@ -199,8 +199,8 @@ func convertToAnthropicRequest(req ChatRequest, provider *LLMProvider) Anthropic
 		}
 	}
 
-	// Convert tools
-	var anthropicTools []AnthropicTool
+	// Convert tools — supports both function tools and server-side tools
+	var anthropicTools []any
 	for _, t := range req.Tools {
 		if t.Type == "function" {
 			anthropicTools = append(anthropicTools, AnthropicTool{
@@ -208,11 +208,24 @@ func convertToAnthropicRequest(req ChatRequest, provider *LLMProvider) Anthropic
 				Description: t.Function.Description,
 				InputSchema: t.Function.Parameters,
 			})
+		} else if t.ServerTool != nil {
+			st := map[string]any{
+				"type": t.ServerTool.Type,
+				"name": t.ServerTool.Name,
+			}
+			if t.ServerTool.MaxUses > 0 {
+				st["max_uses"] = t.ServerTool.MaxUses
+			}
+			anthropicTools = append(anthropicTools, st)
 		}
 	}
-	// Mark last tool cacheable so Anthropic caches the entire tools block
-	if len(anthropicTools) > 0 {
-		anthropicTools[len(anthropicTools)-1].CacheControl = &AnthropicCacheControl{Type: "ephemeral"}
+	// Mark last function tool cacheable (skip server tools for caching)
+	for i := len(anthropicTools) - 1; i >= 0; i-- {
+		if at, ok := anthropicTools[i].(AnthropicTool); ok {
+			at.CacheControl = &AnthropicCacheControl{Type: "ephemeral"}
+			anthropicTools[i] = at
+			break
+		}
 	}
 
 	// Determine max_tokens
@@ -620,7 +633,7 @@ func parseAnthropicSSEStream(
 					id:        block.ContentBlock.ID,
 					name:      block.ContentBlock.Name,
 				}
-				if block.ContentBlock.Type == "tool_use" && block.ContentBlock.Name != "" && onToolStart != nil {
+				if (block.ContentBlock.Type == "tool_use" || block.ContentBlock.Type == "server_tool_use") && block.ContentBlock.Name != "" && onToolStart != nil {
 					onToolStart(block.ContentBlock.Name)
 				}
 			}

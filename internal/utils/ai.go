@@ -172,8 +172,16 @@ type ResponseFormat struct {
 // --- Tool calling types ---
 
 type Tool struct {
-	Type     string       `json:"type"` // "function"
-	Function ToolFunction `json:"function"`
+	Type       string       `json:"type"`                   // "function", "builtin_function", "server_tool"
+	Function   ToolFunction `json:"function,omitempty"`
+	ServerTool *ServerTool  `json:"-"` // Anthropic server-side tools; not serialized to OpenAI format
+}
+
+// ServerTool represents an Anthropic server-side tool (e.g. web_search).
+type ServerTool struct {
+	Type    string `json:"type"`              // e.g. "web_search_20250305"
+	Name    string `json:"name"`              // e.g. "web_search"
+	MaxUses int    `json:"max_uses,omitempty"`
 }
 
 type ToolFunction struct {
