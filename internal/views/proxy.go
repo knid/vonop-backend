@@ -52,11 +52,17 @@ func InitProxyTransport(host, auth string) {
 func (v *HttpViews) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 	queryParam := r.URL.Query().Get("url")
 	if queryParam != "" {
-		// Auth required only when establishing a new session
+		// Auth required only when establishing a new session.
+		// Accept token from Authorization header OR query param (for iframe src
+		// which cannot send custom headers).
 		tokenString, err := utils.ExtractTokenFromHeader(r)
 		if err != nil {
-			http.Error(w, "Unauthorized: Failed to extract token", http.StatusUnauthorized)
-			return
+			// Fallback: check query param (used when loaded as iframe src)
+			tokenString = r.URL.Query().Get("token")
+			if tokenString == "" {
+				http.Error(w, "Unauthorized: Failed to extract token", http.StatusUnauthorized)
+				return
+			}
 		}
 		if _, err := v.Controller.GetUser(tokenString); err != nil {
 			http.Error(w, "Unauthorized: Failed to get user information", http.StatusUnauthorized)
