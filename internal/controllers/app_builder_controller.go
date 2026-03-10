@@ -3003,7 +3003,7 @@ func (c *Controller) buildBuilderToolExecutor(ctx context.Context, project *mode
 				return true
 			})
 			if seedErr != nil {
-				slog.Warn("database seeding failed, tables will be empty", "error", seedErr, "project_id", project.ID)
+				slog.Error("database seeding failed, tables will be empty", "error", seedErr, "project_id", project.ID)
 			}
 			_ = seedResult
 
@@ -3203,7 +3203,7 @@ func (c *Controller) runPreGenerationSetup(
 
 					// Seed database
 					if _, seedErr := c.seedNeonDatabase(ctx, project, dataModels, sendEvent); seedErr != nil {
-						slog.Warn("pre-gen: database seeding failed", "error", seedErr, "project_id", project.ID)
+						slog.Error("pre-gen: database seeding failed", "error", seedErr, "project_id", project.ID)
 					}
 				} else {
 					slog.Error("pre-gen: database provisioning failed", "error", neonErr, "project_id", project.ID)
@@ -3233,7 +3233,7 @@ func (c *Controller) runPreGenerationSetup(
 						schemaContent := buildDrizzleSchema(authModels)
 						c.injectTemplateFile(project, "lib/schema.ts", schemaContent, fileMap, sendEvent)
 						if _, seedErr := c.seedNeonDatabase(ctx, project, authModels, sendEvent); seedErr != nil {
-							slog.Warn("pre-gen auth: database seeding failed", "error", seedErr, "project_id", project.ID)
+							slog.Error("pre-gen auth: database seeding failed", "error", seedErr, "project_id", project.ID)
 						}
 					} else {
 						slog.Error("pre-gen auth: database provisioning failed", "error", neonErr, "project_id", project.ID)
