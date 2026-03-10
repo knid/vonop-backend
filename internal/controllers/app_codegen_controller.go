@@ -326,6 +326,38 @@ Examples:
 	return "from_scratch", ""
 }
 
+// GenerateURLWrapperWelcome uses the fast model to produce a short, natural
+// welcome message for a URL-wrapper mobile conversion. It receives the site
+// metadata and the user's original prompt so it can respond conversationally.
+func (c *Controller) GenerateURLWrapperWelcome(ctx context.Context, siteURL string, meta utils.SiteMetadata, userPrompt string) string {
+	provider := c.llmProvider()
+	model := "anthropic/claude-haiku-4-5-20251001"
+	if provider.IsAnthropic() {
+		model = "claude-haiku-4-5-20251001"
+	}
+
+	system := `You are a friendly mobile app builder assistant. The user wants to convert a website into a mobile app.
+You will receive the website URL, its title, description, and the user's original message.
+
+Write a SHORT, friendly welcome message (3-5 sentences max) in the SAME LANGUAGE as the user's message. Include:
+1. Acknowledge the website by name/title naturally
+2. Confirm it's ready as a mobile app preview
+3. Suggest 2-3 specific customization ideas based on what you know about the site (e.g., if it's an e-commerce site, suggest adding a bottom tab bar for categories; if it's a dashboard, suggest making the sidebar a hamburger menu)
+
+Do NOT use markdown headers or bold. Keep it conversational and concise. Do NOT use bullet points with dashes — use natural flowing text.`
+
+	userMsg := fmt.Sprintf("URL: %s\nTitle: %s\nDescription: %s\nUser message: %s",
+		siteURL, meta.Title, meta.Description, userPrompt)
+
+	result, err := utils.GetTextFromLLM(ctx, model, system, userMsg, provider)
+	if err != nil {
+		slog.Warn("Failed to generate URL wrapper welcome", "error", err)
+		return ""
+	}
+
+	return strings.TrimSpace(result)
+}
+
 func (c *Controller) classifyProjectType(ctx context.Context, prompt string) string {
 	provider := c.llmProvider()
 	// Use a fast/cheap model for classification
