@@ -407,10 +407,10 @@ func (c *Controller) StreamBuildApp(
 		}
 	}
 
-	// --- Clarification questions (initial generation only) ---
+	// --- Clarification questions (only when fast model decides it's needed) ---
 	if isInitialGeneration && jobID != "" {
 		questions, err := c.GenerateClarificationQuestions(ctx, message, project.ProjectType)
-		if err == nil && len(questions.Questions) >= 2 {
+		if err == nil && questions.ShouldClarify && len(questions.Questions) >= 2 {
 			result, answered := c.waitForClarification(ctx, jobID, questions, sendEvent)
 			if answered {
 				sendEvent("clarification_received", map[string]any{

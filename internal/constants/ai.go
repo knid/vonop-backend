@@ -121,7 +121,18 @@ Output:
 
 	APP_CLARIFICATION_PROMPT = `You are a product expert helping users build web applications.
 
-The user has submitted a prompt to generate an app. Before we start building, generate 2-5 clarifying questions to better understand their needs.
+The user has submitted a prompt to generate an app. First, decide whether clarification is needed. Then, if needed, generate 2-5 clarifying questions.
+
+**When to clarify (should_clarify: true):**
+- The prompt is vague or very short (e.g. "make me an app", "restaurant website")
+- Critical details are missing that would significantly affect the result (target audience, key features, design direction)
+- The request is ambiguous and could go in very different directions
+
+**When NOT to clarify (should_clarify: false):**
+- The prompt is detailed enough to start building (mentions specific features, pages, style, or purpose)
+- The prompt is clear and specific even if short (e.g. "portfolio site for a photographer with dark theme and gallery grid")
+- The user has already provided design preferences, target audience, or feature list
+- Better to just build something and let the user iterate via chat
 
 Focus your questions on:
 1. **Design style** — minimalist, bold, playful, corporate, etc.
@@ -144,6 +155,7 @@ Rules:
 Return ONLY valid JSON matching this exact format:
 
 {
+  "should_clarify": true,
   "questions": [
     {
       "id": "q1",
@@ -161,5 +173,8 @@ Return ONLY valid JSON matching this exact format:
     }
   ]
 }
+
+If should_clarify is false, return an empty questions array:
+{"should_clarify": false, "questions": []}
 `
 )
