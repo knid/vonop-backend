@@ -56,3 +56,8 @@ type SeedProgressEvent struct {
 	Summary string `json:"summary,omitempty"`
 }
 
+type WebsitePreviewEvent struct {
+	URL      string `json:"url"`
+	ProxyURL string `json:"proxy_url"`
+}
+
