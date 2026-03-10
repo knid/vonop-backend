@@ -15,7 +15,7 @@ func (db *Database) GetMobileInjectionsByProject(projectId string) ([]models.Mob
 	var injections []models.MobileInjection
 	err := db.DB.NewSelect().Model(&injections).
 		Where("project_id = ?", projectId).
-		Order("\"order\" ASC", "created_at ASC").
+		Order("sort_order ASC", "created_at ASC").
 		Scan(context.Background())
 	if err != nil {
 		return nil, err
@@ -56,7 +56,7 @@ func (db *Database) GetEnabledMobileInjections(projectId string) ([]models.Mobil
 	var injections []models.MobileInjection
 	err := db.DB.NewSelect().Model(&injections).
 		Where("project_id = ? AND is_enabled = true", projectId).
-		Order("\"order\" ASC", "created_at ASC").
+		Order("sort_order ASC", "created_at ASC").
 		Scan(context.Background())
 	if err != nil {
 		return nil, err
