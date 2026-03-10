@@ -268,6 +268,63 @@ func isProtectedTemplateFile(path string) bool {
 }
 
 // looksLikeEcommerce returns true if the prompt strongly suggests an e-commerce app.
+// ClassifyMobileIntent determines whether a mobile studio prompt is requesting
+// to wrap an existing URL (url_wrapper) or create a new app from scratch (from_scratch).
+// Returns (intent, extractedURL).
+func (c *Controller) ClassifyMobileIntent(ctx context.Context, prompt string) (string, string) {
+	provider := c.llmProvider()
+	model := "anthropic/claude-haiku-4-5-20251001"
+	if provider.IsAnthropic() {
+		model = "claude-haiku-4-5-20251001"
+	}
+
+	system := `You classify mobile app requests. The user is in a mobile app builder.
+Determine if they want to:
+1. "url_wrapper" — Convert/wrap an existing website URL into a mobile app. They mention a specific website URL or domain name.
+2. "from_scratch" — Build a new mobile app from scratch. They describe features/functionality without referencing an existing website.
+
+Reply in this exact format (two lines):
+intent: <url_wrapper or from_scratch>
+url: <the full URL if url_wrapper, otherwise empty>
+
+If the user mentions a domain without protocol, add https://. If intent is from_scratch, url should be empty.
+
+Examples:
+- "dashboard.wemob.io sitesini mobile cevir" → intent: url_wrapper\nurl: https://dashboard.wemob.io
+- "convert example.com to mobile app" → intent: url_wrapper\nurl: https://example.com
+- "https://mysite.com/shop mobile uygulamaya dönüştür" → intent: url_wrapper\nurl: https://mysite.com/shop
+- "build me a fitness tracking app" → intent: from_scratch\nurl:
+- "make a todo list mobile app" → intent: from_scratch\nurl: `
+
+	result, err := utils.GetTextFromLLM(ctx, model, system, prompt, provider)
+	if err != nil {
+		slog.Warn("Mobile intent classification failed", "error", err)
+		return "from_scratch", ""
+	}
+
+	lines := strings.Split(strings.TrimSpace(result), "\n")
+	intent := "from_scratch"
+	extractedURL := ""
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "intent:") {
+			intent = strings.TrimSpace(strings.TrimPrefix(line, "intent:"))
+		} else if strings.HasPrefix(line, "url:") {
+			extractedURL = strings.TrimSpace(strings.TrimPrefix(line, "url:"))
+		}
+	}
+
+	if intent == "url_wrapper" && extractedURL != "" {
+		// Ensure URL has protocol
+		if !strings.HasPrefix(extractedURL, "http://") && !strings.HasPrefix(extractedURL, "https://") {
+			extractedURL = "https://" + extractedURL
+		}
+		return "url_wrapper", extractedURL
+	}
+
+	return "from_scratch", ""
+}
+
 func (c *Controller) classifyProjectType(ctx context.Context, prompt string) string {
 	provider := c.llmProvider()
 	// Use a fast/cheap model for classification
