@@ -508,7 +508,7 @@ func parseAnthropicResponse(body []byte) (ChatResponse, error) {
 			content += block.Text
 		case "thinking":
 			reasoning += block.Thinking
-		case "tool_use":
+		case "tool_use", "server_tool_use":
 			toolCalls = append(toolCalls, ToolCall{
 				ID:   block.ID,
 				Type: "function",
@@ -726,7 +726,7 @@ func parseAnthropicSSEStream(
 
 	for _, idx := range indices {
 		b := blocks[idx]
-		if b.blockType == "tool_use" {
+		if b.blockType == "tool_use" || b.blockType == "server_tool_use" {
 			toolCalls = append(toolCalls, ToolCall{
 				ID:   b.id,
 				Type: "function",
