@@ -30,3 +30,21 @@ type DeleteRowRequest struct {
 func (r *DeleteRowRequest) Validate(validate *validator.Validate) error {
 	return utils.ValidateFunc[DeleteRowRequest](*r, validate)
 }
+
+type BulkUpdateRowRequest struct {
+	Data       map[string]any `json:"data" validate:"required" errormgs:"data is required"`
+	PrimaryKey map[string]any `json:"primary_key" validate:"required" errormgs:"primary key is required"`
+}
+
+func (r *BulkUpdateRowRequest) Validate(validate *validator.Validate) error {
+	return utils.ValidateFunc[BulkUpdateRowRequest](*r, validate)
+}
+
+type DatabaseUploadURLRequest struct {
+	Filename    string `json:"filename" validate:"required" errormgs:"filename is required"`
+	ContentType string `json:"content_type" validate:"required" errormgs:"content_type is required"`
+}
+
+func (r *DatabaseUploadURLRequest) Validate(validate *validator.Validate) error {
+	return utils.ValidateFunc[DatabaseUploadURLRequest](*r, validate)
+}

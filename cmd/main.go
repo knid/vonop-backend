@@ -1100,10 +1100,12 @@ func main() {
 					// Database Manager
 					r.Route("/database", func(r chi.Router) {
 						r.Get("/schema", httpViews.GetDatabaseSchema)
+						r.Post("/upload-url", httpViews.GetDatabaseUploadURL)
 						r.Route("/tables/{table}", func(r chi.Router) {
 							r.Get("/rows", httpViews.GetDatabaseTableRows)
 							r.Post("/rows", httpViews.InsertDatabaseRow)
 							r.Patch("/rows", httpViews.UpdateDatabaseRow)
+							r.Put("/rows", httpViews.BulkUpdateDatabaseRow)
 							r.Delete("/rows", httpViews.DeleteDatabaseRow)
 						})
 					})
