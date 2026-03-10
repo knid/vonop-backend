@@ -1205,12 +1205,22 @@ func (c *Controller) seedNeonDatabase(ctx context.Context, project *models.AppPr
 	// Build schema description for the LLM
 	var schemaDesc strings.Builder
 	for _, m := range dataModels {
-		schemaDesc.WriteString(fmt.Sprintf("Table: %s\nColumns: ", m.Name))
-		for i, col := range m.Columns {
-			if i > 0 {
-				schemaDesc.WriteString(", ")
+		schemaDesc.WriteString(fmt.Sprintf("Table: %s\n", m.Name))
+		for _, col := range m.Columns {
+			schemaDesc.WriteString(fmt.Sprintf("  - %s %s", col.Name, col.Type))
+			if col.PrimaryKey {
+				schemaDesc.WriteString(" PRIMARY KEY")
 			}
-			schemaDesc.WriteString(fmt.Sprintf("%s (%s)", col.Name, col.Type))
+			if !col.Nullable && !col.PrimaryKey {
+				schemaDesc.WriteString(" NOT NULL")
+			}
+			if col.Default != "" {
+				schemaDesc.WriteString(fmt.Sprintf(" DEFAULT %s", col.Default))
+			}
+			if col.References != "" {
+				schemaDesc.WriteString(fmt.Sprintf(" REFERENCES %s", col.References))
+			}
+			schemaDesc.WriteString("\n")
 		}
 		schemaDesc.WriteString("\n")
 	}
@@ -1222,20 +1232,21 @@ func (c *Controller) seedNeonDatabase(ctx context.Context, project *models.AppPr
 The app description: %s
 
 Rules:
-1. Generate 5-15 rows of realistic data for each table.
+1. Generate 8-20 rows of realistic data for each table.
 2. Use gen_random_uuid() for UUID primary keys.
-3. Respect foreign key relationships — insert parent rows before child rows.
+3. CRITICAL: Insert tables in dependency order — parent tables with referenced primary keys MUST be inserted BEFORE child tables that reference them via foreign keys.
 4. Use NOW() for timestamp columns.
 5. Make the data contextually relevant to the app description.
 6. For JSONB columns, use valid JSON strings.
 7. Return ONLY valid SQL INSERT statements, no explanations.
 8. Use single-line INSERT statements (one per row).
-9. Do NOT include CREATE TABLE or DROP statements.`, schemaDesc.String(), utils.SanitizePromptContent(project.Prompt))
+9. Do NOT include CREATE TABLE or DROP statements.
+10. Do NOT wrap the output in markdown code fences. Return raw SQL only.`, schemaDesc.String(), utils.SanitizePromptContent(project.Prompt))
 
 	sendEvent("neon_provision", map[string]any{"phase": "seeding_data"})
 
 	provider := c.llmProvider()
-	model := provider.DefaultModel()
+	model := provider.FastModel()
 
 	seedSQL, err := utils.GetTextFromLLM(ctx, model, "You are a SQL expert. Generate realistic seed data. Return ONLY valid SQL.", seedPrompt, provider)
 	if err != nil {
@@ -1249,28 +1260,30 @@ Rules:
 	seedSQL = strings.TrimSuffix(seedSQL, "```")
 	seedSQL = strings.TrimSpace(seedSQL)
 
-	if seedSQL != "" {
-		// Validate that the seed SQL only contains INSERT statements
-		if err := validateSeedSQL(seedSQL); err != nil {
-			slog.Warn("LLM generated invalid seed SQL", "error", err, "project_id", project.ID)
-			return "", fmt.Errorf("invalid seed SQL: %w", err)
-		}
-
-		neonDB, err := sql.Open("postgres", neonConnStrWithEndpoint(connStr))
-		if err != nil {
-			return "", fmt.Errorf("connect to Neon for seeding: %w", err)
-		}
-		defer neonDB.Close()
-
-		execCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-		defer cancel()
-
-		if _, err := neonDB.ExecContext(execCtx, seedSQL); err != nil {
-			slog.Warn("Failed to seed Neon database", "error", err, "project_id", project.ID)
-			return "", fmt.Errorf("execute seed SQL: %w", err)
-		}
-		slog.Info("Neon database seeded", "project_id", project.ID)
+	if seedSQL == "" {
+		return "", fmt.Errorf("LLM returned empty seed SQL")
 	}
+
+	// Validate that the seed SQL only contains INSERT statements
+	if err := validateSeedSQL(seedSQL); err != nil {
+		slog.Warn("LLM generated invalid seed SQL", "error", err, "project_id", project.ID)
+		return "", fmt.Errorf("invalid seed SQL: %w", err)
+	}
+
+	neonDB, err := sql.Open("postgres", neonConnStrWithEndpoint(connStr))
+	if err != nil {
+		return "", fmt.Errorf("connect to Neon for seeding: %w", err)
+	}
+	defer neonDB.Close()
+
+	execCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	if _, err := neonDB.ExecContext(execCtx, seedSQL); err != nil {
+		slog.Warn("Failed to seed Neon database", "error", err, "project_id", project.ID)
+		return "", fmt.Errorf("execute seed SQL: %w", err)
+	}
+	slog.Info("Neon database seeded", "project_id", project.ID)
 
 	return "Seeded database with sample data.", nil
 }
