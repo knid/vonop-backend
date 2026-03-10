@@ -214,6 +214,11 @@ func (c *Controller) CreateProject(user *models.User, projectCreateReq requests.
 // from an AI-detected URL. Skips icon/build — those are configured later when
 // the user wants to build the APK.
 func (c *Controller) QuickCreateMobileProject(user *models.User, websiteURL string) (*models.Project, error) {
+	// Return existing project if user already wrapped this URL
+	if existing, err := c.DB.GetProjectByUserAndURL(user.ID.String(), websiteURL); err == nil && existing.ID.String() != "" {
+		return existing, nil
+	}
+
 	limits, err := c.DB.GetStandartUserLimitsByUser(user)
 	if err != nil {
 		return nil, err

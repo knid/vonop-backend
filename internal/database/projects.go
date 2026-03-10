@@ -20,6 +20,12 @@ func (db *Database) GetProjectById(id string) (*models.Project, error) {
 	return &project, err
 }
 
+func (db *Database) GetProjectByUserAndURL(userID string, url string) (*models.Project, error) {
+	var project models.Project
+	err := db.DB.NewSelect().Model(&project).Where("user_id = ? AND url = ?", userID, url).Limit(1).Scan(context.Background())
+	return &project, err
+}
+
 func (db *Database) CreateProject(project *models.Project) (*models.Project, error) {
 	_, err := db.DB.NewInsert().Model(project).Exec(context.Background())
 
