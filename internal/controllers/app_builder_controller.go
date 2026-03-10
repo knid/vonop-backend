@@ -973,9 +973,13 @@ func (c *Controller) runChatToolPhase(
 	if isEcommerce {
 		tools = append(tools, chatManageStoreTool)
 	}
+	if ws := provider.WebSearchTool(); ws != nil {
+		tools = append(tools, *ws)
+	}
 
 	systemPrompt := `You are a pre-processing assistant. Analyze the user's message and decide if any tools should be called.
-- If the user provides a URL or asks to convert/clone/replicate a website, call preview_website with the URL.`
+- If the user provides a URL or asks to convert/clone/replicate a website, call preview_website with the URL.
+- If the user asks about current technologies, APIs, documentation, pricing, latest versions, or anything that benefits from up-to-date web information, use web_search to find accurate information.`
 	if isEcommerce {
 		systemPrompt += `
 - If the user asks to add/create/update/delete products, categories, or discounts, call manage_store with the appropriate operations.
@@ -1032,8 +1036,13 @@ func (c *Controller) runChatToolPhase(
 	}
 
 	if collectedContext.Len() == 0 {
-		slog.Info("Chat tool phase: no tools called", "result_preview", truncate(result, 80))
-		return ""
+		trimmed := strings.TrimSpace(result)
+		if trimmed == "" || trimmed == "NO_TOOLS_NEEDED" {
+			slog.Info("Chat tool phase: no tools called", "result_preview", truncate(result, 80))
+			return ""
+		}
+		// Server-side tool (e.g. web_search) produced a useful response
+		return "Web search context:\n" + trimmed
 	}
 
 	return collectedContext.String()

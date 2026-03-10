@@ -47,6 +47,16 @@ func (p *LLMProvider) UsesThinkingFormat() bool {
 
 // WebSearchTool returns the builtin web search tool for providers that support it, or nil.
 func (p *LLMProvider) WebSearchTool() *Tool {
+	if p.IsAnthropic() {
+		return &Tool{
+			Type: "server_tool",
+			ServerTool: &ServerTool{
+				Type:    "web_search_20250305",
+				Name:    "web_search",
+				MaxUses: 5,
+			},
+		}
+	}
 	if p.IsMoonshot() {
 		return &Tool{
 			Type:     "builtin_function",
@@ -97,7 +107,7 @@ func setLLMHeaders(req *http.Request, provider *LLMProvider) {
 	if provider.IsAnthropic() {
 		req.Header.Set("x-api-key", provider.APIKey)
 		req.Header.Set("anthropic-version", "2023-06-01")
-		req.Header.Set("anthropic-beta", "interleaved-thinking-2025-05-14")
+		req.Header.Set("anthropic-beta", "interleaved-thinking-2025-05-14,web-search-2025-03-05")
 		return
 	}
 	req.Header.Set("Authorization", "Bearer "+provider.APIKey)
