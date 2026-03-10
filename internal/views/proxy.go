@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/knid/wemob/internal/constants"
+	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/utils"
 )
 
@@ -87,9 +88,19 @@ func (v *HttpViews) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 			Expires:  time.Now().Add(24 * time.Hour),
 		})
 
-		/* slog.Info(fmt.Sprintf("New session for: %s", targetURL.String()),
-		"user.token", tokenString[0:12]+"...", "user.id", userInformationRes.ID.String(),
-		"user.email", userInformationRes.Email, "from", "PROXY") */
+		// Store project_id cookie if provided (for server-side injection loading)
+		if projectID := r.URL.Query().Get("project_id"); projectID != "" {
+			http.SetCookie(w, &http.Cookie{
+				Name:     "wemob_project_id",
+				Value:    projectID,
+				Path:     "/",
+				HttpOnly: true,
+				Secure:   secureMode,
+				SameSite: sameSiteMode,
+				Expires:  time.Now().Add(24 * time.Hour),
+			})
+		}
+
 		http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
 		return
 	}
@@ -119,10 +130,16 @@ func (v *HttpViews) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Load injections for this project (if any)
+	var injections []models.MobileInjection
+	if projectCookie, err := r.Cookie("wemob_project_id"); err == nil && projectCookie.Value != "" {
+		if loaded, err := v.Controller.DB.GetEnabledMobileInjections(projectCookie.Value); err == nil {
+			injections = loaded
+		}
+	}
+
 	proxy := httputil.NewSingleHostReverseProxy(targetURL)
 	proxy.Transport = customTransport
-
-	// proxy.ErrorLog = log.New(os.Stderr, "🔥 [PROXY-INTERNAL] ", log.LstdFlags)
 
 	originalDirector := proxy.Director
 	proxy.Director = func(req *http.Request) {
@@ -172,19 +189,9 @@ func (v *HttpViews) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 
 		contentType := strings.ToLower(resp.Header.Get("Content-Type"))
 		if strings.Contains(contentType, "text/html") {
-			/* slog.Info("Starting HTML rewrite...",
-			"user.token", tokenString[0:12]+"...", "user.id", userInformationRes.ID.String(),
-			"user.email", userInformationRes.Email, "from", "PROXY") */
-
-			err := rewriteHTML(resp, targetURL)
+			err := rewriteHTML(resp, targetURL, injections)
 			if err != nil {
-				/* slog.Error(fmt.Sprintf("Failed to rewrite HTML: %v", err),
-				"user.token", tokenString[0:12]+"...", "user.id", userInformationRes.ID.String(),
-				"user.email", userInformationRes.Email, "from", "PROXY") */
-			} else {
-				/* slog.Info("HTML rewrite success",
-				"user.token", tokenString[0:12]+"...", "user.id", userInformationRes.ID.String(),
-				"user.email", userInformationRes.Email, "from", "PROXY") */
+				slog.Error("Failed to rewrite HTML", "error", err)
 			}
 		}
 		return nil
@@ -201,7 +208,7 @@ func (v *HttpViews) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 	proxy.ServeHTTP(w, r)
 }
 
-func rewriteHTML(resp *http.Response, targetURL *url.URL) error {
+func rewriteHTML(resp *http.Response, targetURL *url.URL, injections []models.MobileInjection) error {
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return err
@@ -317,10 +324,74 @@ func rewriteHTML(resp *http.Response, targetURL *url.URL) error {
 	</style>
 	`
 
+	// Build server-side injection snippets from DB
+	var injectionHTML string
+	for _, inj := range injections {
+		if inj.CSS != "" {
+			injectionHTML += fmt.Sprintf("\n<style data-wemob-injection=\"%s\">%s</style>", inj.Name, inj.CSS)
+		}
+		if inj.JS != "" {
+			injectionHTML += fmt.Sprintf("\n<script data-wemob-injection=\"%s\">%s</script>", inj.Name, inj.JS)
+		}
+		if inj.HTML != "" {
+			injectionHTML += fmt.Sprintf("\n<div data-wemob-injection=\"%s\">%s</div>", inj.Name, inj.HTML)
+		}
+	}
+
+	// postMessage bridge for live injection preview from parent dashboard.
+	// These are user-authored injections for their own apps (trusted content),
+	// using DOM APIs for structured creation rather than raw string insertion.
+	postMessageBridge := `
+	<script>
+		(function() {
+			window.addEventListener('message', function(e) {
+				if (!e.data || e.data.type !== 'wemob-injection') return;
+				var msg = e.data;
+
+				if (msg.action === 'apply') {
+					// Remove old elements with same injection name
+					document.querySelectorAll('[data-wemob-injection="' + msg.name + '"]').forEach(function(el) {
+						el.remove();
+					});
+					// Inject CSS
+					if (msg.css) {
+						var style = document.createElement('style');
+						style.setAttribute('data-wemob-injection', msg.name);
+						style.textContent = msg.css;
+						document.head.appendChild(style);
+					}
+					// Inject JS
+					if (msg.js) {
+						var script = document.createElement('script');
+						script.setAttribute('data-wemob-injection', msg.name);
+						script.textContent = msg.js;
+						document.body.appendChild(script);
+					}
+					// Inject HTML via DOM creation (user-owned content for their own apps)
+					if (msg.html) {
+						var container = document.createElement('div');
+						container.setAttribute('data-wemob-injection', msg.name);
+						var template = document.createElement('template');
+						template.innerHTML = msg.html;
+						container.appendChild(template.content);
+						document.body.appendChild(container);
+					}
+				} else if (msg.action === 'remove') {
+					document.querySelectorAll('[data-wemob-injection="' + msg.name + '"]').forEach(function(el) {
+						el.remove();
+					});
+				}
+			});
+		})();
+	</script>
+	`
+
+	allInjected := proxyScript + proxyStyle + injectionHTML + postMessageBridge
+
 	if strings.Contains(htmlContent, "</head>") {
-		htmlContent = strings.Replace(htmlContent, "</head>", proxyScript+proxyStyle+"</head>", 1)
+		htmlContent = strings.Replace(htmlContent, "</head>", allInjected+"</head>", 1)
 	} else {
-		htmlContent = proxyScript + proxyStyle + htmlContent
+		htmlContent = allInjected + htmlContent
 	}
 
 	buf := bytes.NewBufferString(htmlContent)

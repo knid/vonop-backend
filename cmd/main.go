@@ -120,6 +120,9 @@ func createSchema(db *bun.DB) error {
 		(*models.WebAnalyticsEvent)(nil),
 		// Notification tasks
 		(*models.AppNotificationTask)(nil),
+		// Mobile injection chat
+		(*models.MobileInjection)(nil),
+		(*models.MobileConversation)(nil),
 	}
 
 	for _, model := range models {
@@ -772,6 +775,12 @@ func main() {
 			})
 
 			r.Get("/integrations/providers", httpViews.GetV2IntegrationProviders)
+
+			// Public mobile injections (no auth, rate-limited)
+			r.Route("/mobile/{projectId}", func(r chi.Router) {
+				r.Use(rateLimiter.RateLimit(120, time.Minute, appMiddleware.IPKey))
+				r.Get("/injections", httpViews.GetPublicMobileInjections)
+			})
 		})
 		// V2 App Builder routes
 		r.Route("/v2", func(r chi.Router) {
@@ -956,6 +965,18 @@ func main() {
 						r.Get("/analytics", httpViews.GetStoreAnalytics)
 					})
 				})
+			})
+
+			// Mobile injection chat (URL-wrapper projects)
+			r.Route("/mobile/{projectId}", func(r chi.Router) {
+				r.Use(appMiddleware.RequireAuth(controller))
+				r.Use(appMiddleware.RequireSubscription("active", "trial"))
+
+				r.With(rateLimiter.RateLimit(20, time.Minute, appMiddleware.AIUserKey)).Post("/chat", httpViews.MobileChatStream)
+				r.Get("/injections", httpViews.ListMobileInjections)
+				r.Put("/injections/{id}", httpViews.UpdateMobileInjection)
+				r.Delete("/injections/{id}", httpViews.DeleteMobileInjection)
+				r.Delete("/conversation", httpViews.ClearMobileConversation)
 			})
 
 			// Public storefront (no auth, per-store-per-IP rate limiting)
