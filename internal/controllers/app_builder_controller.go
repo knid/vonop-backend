@@ -407,6 +407,19 @@ func (c *Controller) StreamBuildApp(
 		}
 	}
 
+	// --- Pre-generation web search phase ---
+	// For initial generation, run a web search pass to gather context about
+	// referenced websites, technologies, or anything needing up-to-date info
+	// BEFORE clarification questions so that results inform the entire flow.
+	var preGenToolContext string
+	if isInitialGeneration {
+		preGenToolContext = c.runPreGenWebSearch(ctx, provider, message, sendEvent)
+		if preGenToolContext != "" {
+			slog.Info("Initial generation: web search returned context",
+				"project_id", project.ID, "context_length", len(preGenToolContext))
+		}
+	}
+
 	// --- Clarification questions (only when fast model decides it's needed) ---
 	if isInitialGeneration && jobID != "" {
 		questions, err := c.GenerateClarificationQuestions(ctx, message, project.ProjectType)
@@ -434,7 +447,7 @@ func (c *Controller) StreamBuildApp(
 	if isInitialGeneration && project.ProjectType == "ecommerce" {
 		// === E-commerce two-phase path: setup tools → single-shot file gen ===
 		ecomText, ecomOps, ecomErr := c.streamEcommerceGeneration(
-			ctx, project, user, model, provider, fileMap, sendEvent, message, imageURLs,
+			ctx, project, user, model, provider, fileMap, sendEvent, message, imageURLs, preGenToolContext,
 		)
 		if ecomErr != nil {
 			slog.Error("E-commerce generation failed", "error", ecomErr, "project_id", project.ID)
@@ -480,7 +493,7 @@ func (c *Controller) StreamBuildApp(
 	} else if isInitialGeneration {
 		// === Single-shot path: one LLM call, no tool loop (non-ecommerce) ===
 		singleShotText, singleShotOps, singleShotErr := c.streamSingleShotGeneration(
-			ctx, project, user, model, provider, fileMap, sendEvent, message, imageURLs,
+			ctx, project, user, model, provider, fileMap, sendEvent, message, imageURLs, preGenToolContext,
 		)
 		if singleShotErr != nil {
 			slog.Error("Single-shot generation failed", "error", singleShotErr, "project_id", project.ID)
@@ -1046,6 +1059,83 @@ func (c *Controller) runChatToolPhase(
 	}
 
 	return collectedContext.String()
+}
+
+// runPreGenWebSearch runs a web-search-only tool phase before initial generation.
+// Unlike runChatToolPhase (which also offers preview_website and manage_store),
+// this only exposes web_search so the fast model can research referenced websites,
+// technologies, APIs, or any topic that benefits from up-to-date information.
+// Returns the search results as context text, or "" if web search is unavailable
+// or not needed.
+func (c *Controller) runPreGenWebSearch(
+	ctx context.Context,
+	provider *utils.LLMProvider,
+	userMessage string,
+	sendEvent func(string, any) bool,
+) string {
+	ws := provider.WebSearchTool()
+	if ws == nil {
+		return ""
+	}
+
+	fastModel := provider.FastModel()
+	tools := []utils.Tool{*ws}
+
+	systemPrompt := `You are a research assistant. Analyze the user's prompt and decide if web search would help gather context for building their website/app.
+
+Search when the user:
+- References an existing website or domain name (e.g. "shiftdelete.net", "airbnb clone") — search to understand what that site is, its design, features, and content
+- Mentions specific technologies, APIs, or services that may need current documentation
+- Asks for something that benefits from up-to-date information (pricing, trends, latest versions)
+- Wants to clone, replicate, or be inspired by a real website or product
+
+Do NOT search when:
+- The user describes a generic app/website from scratch without referencing real sites
+- The prompt is self-contained and doesn't need external context
+
+When searching for a website, make multiple searches to gather comprehensive info:
+1. Search for the website itself to understand what it is
+2. Search for its key features, design style, or content structure
+
+Be thorough — the results will be used to generate an accurate replica/revision.
+If no search is needed, respond with just: NO_SEARCH_NEEDED`
+
+	messages := []utils.Message{
+		{Role: "system", Content: systemPrompt},
+		{Role: "user", Content: userMessage},
+	}
+
+	result, err := utils.StreamWithTools(
+		ctx, fastModel, messages,
+		tools, provider,
+		nil, nil, // no response format, no reasoning
+		func(name string, arguments string) (string, error) {
+			// Only web_search is available — handled server-side by the provider
+			return "", fmt.Errorf("unexpected client tool call: %s", name)
+		},
+		nil, // onToolCall
+		nil, // onChunk — discard fast model text
+		nil, // onReasoning
+		utils.ToolCallConfig{
+			MaxRounds: 5,
+			MaxTokens: 2048,
+			OnToolCallStart: func(toolName string) {
+				sendEvent("tool_start", map[string]string{"tool": toolName})
+			},
+		},
+	)
+
+	if err != nil {
+		slog.Warn("Pre-gen web search phase failed, continuing without context", "error", err)
+		return ""
+	}
+
+	trimmed := strings.TrimSpace(result)
+	if trimmed == "" || trimmed == "NO_SEARCH_NEEDED" {
+		return ""
+	}
+
+	return "Web search context:\n" + trimmed
 }
 
 // executeChatPreviewWebsite handles the preview_website tool call in the chat tool phase.
@@ -3102,6 +3192,7 @@ func (c *Controller) streamSingleShotGeneration(
 	sendEvent func(string, any) bool,
 	message string,
 	imageURLs []string,
+	toolContext string,
 ) (responseText string, ops []appBuilderOperation, err error) {
 	// 1. Structure planning — must run BEFORE pre-gen setup so that data_models
 	// and needs_auth are available for Neon provisioning and auth template injection.
@@ -3189,6 +3280,11 @@ func (c *Controller) streamSingleShotGeneration(
 	llmMessages := []utils.Message{
 		{Role: "system", Content: buildSingleShotSystemPrompt(project)},
 		{Role: "system", Content: projectContext},
+	}
+
+	// Inject tool-gathered context (website analysis, web search results) if available
+	if toolContext != "" {
+		llmMessages = append(llmMessages, utils.Message{Role: "system", Content: toolContext})
 	}
 
 	userMsg := utils.Message{Role: "user", Content: message}
@@ -3483,6 +3579,7 @@ func (c *Controller) streamEcommerceGeneration(
 	sendEvent func(string, any) bool,
 	message string,
 	imageURLs []string,
+	toolContext string,
 ) (responseText string, ops []appBuilderOperation, err error) {
 	// 1. Structure planning (same as single-shot)
 	structure, planErr := c.PlanAppFileStructure(ctx, message, project.ProjectType)
@@ -3657,6 +3754,11 @@ func (c *Controller) streamEcommerceGeneration(
 	llmMessages := []utils.Message{
 		{Role: "system", Content: buildSingleShotSystemPrompt(project)},
 		{Role: "system", Content: projectContext},
+	}
+
+	// Inject tool-gathered context (website analysis, web search results) if available
+	if toolContext != "" {
+		llmMessages = append(llmMessages, utils.Message{Role: "system", Content: toolContext})
 	}
 
 	userMsg := utils.Message{Role: "user", Content: message}
