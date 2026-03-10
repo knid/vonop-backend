@@ -143,7 +143,7 @@ func (v *HttpViews) UpdateMobileInjection(w http.ResponseWriter, r *http.Request
 		injection.IsEnabled = *body.IsEnabled
 	}
 	if body.Order != nil {
-		injection.Order = *body.Order
+		injection.SortOrder = *body.Order
 	}
 
 	updated, err := v.Controller.DB.UpdateMobileInjection(injection)
