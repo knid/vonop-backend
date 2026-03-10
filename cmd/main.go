@@ -967,6 +967,11 @@ func main() {
 				})
 			})
 
+			// Mobile intent classification
+			r.With(appMiddleware.RequireAuth(controller), appMiddleware.RequireSubscription("active", "trial"),
+				rateLimiter.RateLimit(30, time.Minute, appMiddleware.AIUserKey)).
+				Post("/mobile/classify-intent", httpViews.ClassifyMobileIntent)
+
 			// Mobile injection chat (URL-wrapper projects)
 			r.Route("/mobile/{projectId}", func(r chi.Router) {
 				r.Use(appMiddleware.RequireAuth(controller))

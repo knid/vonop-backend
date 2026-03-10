@@ -217,6 +217,37 @@ func (v *HttpViews) ClearMobileConversation(w http.ResponseWriter, r *http.Reque
 	utils.JSONResponse(w, map[string]any{"success": true}, http.StatusOK)
 }
 
+// POST /v2/mobile/classify-intent
+func (v *HttpViews) ClassifyMobileIntent(w http.ResponseWriter, r *http.Request) {
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+	if requireActiveSubscription(w, user) {
+		return
+	}
+
+	var body struct {
+		Prompt string `json:"prompt"`
+	}
+	if err := utils.ParseJSONBody(r, &body); err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if body.Prompt == "" {
+		utils.JSONErrorResponse(w, "prompt is required", http.StatusBadRequest)
+		return
+	}
+
+	intent, extractedURL := v.Controller.ClassifyMobileIntent(r.Context(), body.Prompt)
+
+	utils.JSONResponse(w, map[string]any{
+		"intent": intent,
+		"url":    extractedURL,
+	}, http.StatusOK)
+}
+
 // GET /v1/mobile/{projectId}/injections (public, no auth)
 func (v *HttpViews) GetPublicMobileInjections(w http.ResponseWriter, r *http.Request) {
 	projectID := chi.URLParam(r, "projectId")
