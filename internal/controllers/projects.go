@@ -210,6 +210,57 @@ func (c *Controller) CreateProject(user *models.User, projectCreateReq requests.
 	}, nil
 }
 
+// QuickCreateMobileProject creates a Project record for URL-wrapper mobile apps
+// from an AI-detected URL. Skips icon/build — those are configured later when
+// the user wants to build the APK.
+func (c *Controller) QuickCreateMobileProject(user *models.User, websiteURL string) (*models.Project, error) {
+	limits, err := c.DB.GetStandartUserLimitsByUser(user)
+	if err != nil {
+		return nil, err
+	}
+
+	projects, err := c.DB.GetProjects(user)
+	if err != nil {
+		return nil, err
+	}
+	if len(projects) >= limits.MaximumProjectCount {
+		return nil, errors.New("you have reached your project limit")
+	}
+
+	pkName, err := utils.RandomHex(5)
+	if err != nil {
+		return nil, err
+	}
+	pkName = "com.wemob.app" + pkName[0:5]
+
+	project := models.Project{
+		UserID:      user.ID,
+		URL:         websiteURL,
+		PackageName: pkName,
+	}
+
+	onesignalAppID, err := external.CreateOneSignalApplication(project, c.SecretManager.GetSecret("ONESIGNAL_ORG_ID"), c.SecretManager.GetSecret("ONESIGNAL_ORG_API_KEY"), c.SecretManager.GetSecret("FCM_V1_SERVICE_ACCOUNT_JSON_B64"))
+	if err != nil {
+		return nil, err
+	}
+	project.OneSignalAppID = onesignalAppID
+
+	time.Sleep(2 * time.Second)
+
+	onesignalAppToken, err := external.CreateOneSignalAppToken(project, c.SecretManager.GetSecret("ONESIGNAL_ORG_API_KEY"))
+	if err != nil {
+		return nil, err
+	}
+	project.OneSignalAppToken = onesignalAppToken
+
+	created, err := c.DB.CreateProject(&project)
+	if err != nil {
+		return nil, err
+	}
+
+	return created, nil
+}
+
 func (c *Controller) UpdateProject(r *http.Request, user *models.User, projectCreateReq requests.ProjectCreateRequest) (*responses.ProjectInformationResponse, error) {
 	validate := validator.New(validator.WithRequiredStructEnabled())
 	if err := utils.ValidateFunc[requests.ProjectCreateRequest](projectCreateReq, validate); err != nil {
