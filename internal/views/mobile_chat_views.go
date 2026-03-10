@@ -273,17 +273,20 @@ func (v *HttpViews) ClassifyMobileIntent(w http.ResponseWriter, r *http.Request)
 			slog.Warn("Failed to fetch site metadata", "url", extractedURL, "error", fetchErr)
 		}
 
-		resp := map[string]any{
-			"intent":     "url_wrapper",
-			"url":        extractedURL,
-			"project_id": project.ID.String(),
-			"proxy_url":  proxyURL,
-		}
+		// Generate a conversational welcome message using the fast model
+		// The LLM matches the user's language automatically
+		welcomeMsg := ""
 		if siteMeta != nil {
-			resp["site_meta"] = siteMeta
+			welcomeMsg = v.Controller.GenerateURLWrapperWelcome(r.Context(), extractedURL, *siteMeta, body.Prompt)
 		}
 
-		utils.JSONResponse(w, resp, http.StatusOK)
+		utils.JSONResponse(w, map[string]any{
+			"intent":          "url_wrapper",
+			"url":             extractedURL,
+			"project_id":      project.ID.String(),
+			"proxy_url":       proxyURL,
+			"welcome_message": welcomeMsg,
+		}, http.StatusOK)
 		return
 	}
 
