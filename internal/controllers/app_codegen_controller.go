@@ -32,7 +32,8 @@ type ClarificationQuestion struct {
 
 // ClarificationResponse is the LLM output containing generated questions.
 type ClarificationResponse struct {
-	Questions []ClarificationQuestion `json:"questions"`
+	ShouldClarify bool                    `json:"should_clarify"`
+	Questions     []ClarificationQuestion `json:"questions"`
 }
 
 // ClarificationAnswer is a single user answer to a clarification question.
