@@ -322,6 +322,45 @@ func (v *HttpViews) ClarifyJob(w http.ResponseWriter, r *http.Request) {
 	utils.JSONResponse(w, responses.SuccessResponse{Success: true}, http.StatusOK)
 }
 
+// POST /v2/apps/jobs/{jobId}/reply
+func (v *HttpViews) ReplyJob(w http.ResponseWriter, r *http.Request) {
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	jobID := chi.URLParam(r, "jobId")
+	if jobID == "" {
+		utils.JSONErrorResponse(w, "job id is required", http.StatusBadRequest)
+		return
+	}
+
+	// Verify ownership and status
+	job, err := v.Controller.GetJob(jobID, user.ID)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	if job.Status != "awaiting_input" {
+		utils.JSONErrorResponse(w, "job is not awaiting input", http.StatusBadRequest)
+		return
+	}
+
+	var req requests.ReplyJobRequest
+	if err := utils.ParseJSONBody(r, &req); err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if err := v.Controller.SubmitReply(jobID, controllers.ConversationReply{Message: req.Message}); err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	utils.JSONResponse(w, responses.SuccessResponse{Success: true}, http.StatusOK)
+}
+
 // DELETE /v1/jobs/{jobId}
 func (v *HttpViews) CancelJob(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)

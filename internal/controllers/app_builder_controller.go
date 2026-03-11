@@ -488,18 +488,26 @@ func (c *Controller) StreamBuildApp(
 		return
 	}
 
-	// --- Clarification questions (only when fast model decides it's needed) ---
+	// --- Conversational pre-build phase (replaces old clarification questions) ---
 	if isInitialGeneration && jobID != "" {
-		questions, err := c.GenerateClarificationQuestions(ctx, message, project.ProjectType)
-		if err == nil && questions.ShouldClarify && len(questions.Questions) >= 2 {
-			result, answered := c.waitForClarification(ctx, jobID, questions, sendEvent)
-			if answered {
-				sendEvent("clarification_received", map[string]any{
-					"message": "Answers received, starting generation...",
-				})
-			}
-			message = buildEnrichedPrompt(message, result)
+		// Phase A: Stream a summary of web search results to the user
+		if preGenToolContext != "" {
+			c.streamWebSearchSummary(ctx, provider, preGenToolContext, message, sendEvent)
 		}
+
+		if ctx.Err() != nil {
+			return
+		}
+
+		// Phase B: Natural conversation loop (if prompt is vague)
+		message = c.runConversationLoop(ctx, jobID, provider, message, preGenToolContext, project.ProjectType, sendEvent)
+
+		if ctx.Err() != nil {
+			return
+		}
+
+		// Phase C: Stream build plan to the user
+		c.streamBuildPlan(ctx, provider, message, preGenToolContext, project.ProjectType, sendEvent)
 	}
 
 	if ctx.Err() != nil {
@@ -3997,7 +4005,256 @@ func (c *Controller) ClearAppConversation(projectID string) error {
 	return c.DB.DeleteAppConversation(projectID)
 }
 
-// waitForClarification sends clarification questions to the client and blocks
+// streamWebSearchSummary streams a natural language summary of web search findings to the user.
+func (c *Controller) streamWebSearchSummary(
+	ctx context.Context,
+	provider *utils.LLMProvider,
+	webContext string,
+	userMessage string,
+	sendEvent func(string, any) bool,
+) {
+	fastModel := provider.FastModel()
+	messages := []utils.Message{
+		{Role: "system", Content: constants.CONVERSATION_WEB_SUMMARY_PROMPT},
+		{Role: "user", Content: fmt.Sprintf("User's request:\n%s\n\nSearch results:\n%s", userMessage, webContext)},
+	}
+
+	_, err := utils.StreamTextFromLLMWithMessages(
+		ctx, fastModel, messages, provider,
+		func(chunk string) {
+			sendEvent("conversation_chunk", map[string]any{"chunk": chunk})
+		},
+		nil, // no reasoning
+		utils.StreamTextConfig{MaxTokens: 512},
+	)
+	if err != nil {
+		slog.Warn("failed to stream web search summary", "error", err)
+		return
+	}
+	sendEvent("conversation_done", map[string]any{"type": "web_summary"})
+}
+
+// runConversationLoop checks if the prompt needs clarification and runs a natural
+// multi-turn conversation (max 3 turns) to gather requirements. Returns the
+// enriched prompt with conversation transcript appended.
+func (c *Controller) runConversationLoop(
+	ctx context.Context,
+	jobID string,
+	provider *utils.LLMProvider,
+	message string,
+	webContext string,
+	projectType string,
+	sendEvent func(string, any) bool,
+) string {
+	fastModel := provider.FastModel()
+
+	// Step 1: Quick decision — does this prompt need conversation?
+	decisionMsg := fmt.Sprintf("Project type: %s\n\nUser prompt:\n%s", projectType, message)
+	if webContext != "" {
+		decisionMsg += "\n\nWeb context available: yes (the user referenced a website and we already have search results)"
+	}
+	decisionJSON, err := utils.GetJSONFromLLM(ctx, fastModel, constants.CONVERSATION_DECISION_PROMPT, decisionMsg, provider)
+	if err != nil {
+		slog.Warn("conversation decision failed, skipping", "error", err)
+		return message
+	}
+
+	var decision struct {
+		NeedsConversation bool `json:"needs_conversation"`
+	}
+	if err := json.Unmarshal([]byte(decisionJSON), &decision); err != nil {
+		cleaned := utils.ExtractJSON(decisionJSON)
+		if err2 := json.Unmarshal([]byte(cleaned), &decision); err2 != nil {
+			slog.Warn("failed to parse conversation decision", "error", err2)
+			return message
+		}
+	}
+
+	// Step 2: If no conversation needed, return original prompt
+	if !decision.NeedsConversation {
+		return message
+	}
+
+	// Step 3: Conversation loop (max 3 turns)
+	conversationHistory := []conversationTurn{
+		{Role: "user", Content: message},
+	}
+
+	for turn := 0; turn < 3; turn++ {
+		if ctx.Err() != nil {
+			break
+		}
+
+		// Build messages for the LLM
+		llmMessages := []utils.Message{
+			{Role: "system", Content: constants.CONVERSATION_CHAT_PROMPT},
+		}
+
+		// Add context about the project
+		contextPrefix := fmt.Sprintf("Project type: %s\n", projectType)
+		if webContext != "" {
+			contextPrefix += "Web search context is available and will be used during generation.\n"
+		}
+		contextPrefix += "\nConversation so far:\n"
+
+		for _, t := range conversationHistory {
+			contextPrefix += fmt.Sprintf("[%s]: %s\n", t.Role, t.Content)
+		}
+
+		llmMessages = append(llmMessages, utils.Message{
+			Role:    "user",
+			Content: contextPrefix + "\nAsk your next question(s) to clarify what to build.",
+		})
+
+		// Stream the AI's question to the user
+		var aiMessage strings.Builder
+		_, err := utils.StreamTextFromLLMWithMessages(
+			ctx, fastModel, llmMessages, provider,
+			func(chunk string) {
+				aiMessage.WriteString(chunk)
+				sendEvent("conversation_chunk", map[string]any{"chunk": chunk})
+			},
+			nil,
+			utils.StreamTextConfig{MaxTokens: 512},
+		)
+		if err != nil {
+			slog.Warn("conversation turn failed", "error", err, "turn", turn)
+			break
+		}
+
+		sendEvent("conversation_done", map[string]any{"type": "conversation"})
+		conversationHistory = append(conversationHistory, conversationTurn{Role: "assistant", Content: aiMessage.String()})
+
+		// Wait for user reply
+		ch := make(chan ClarificationResult, 1)
+		c.PendingClarifications.Store(jobID, ch)
+
+		if err := c.DB.UpdateGenerationJobStatus(jobID, "awaiting_input", "waiting for user reply"); err != nil {
+			slog.Warn("failed to update job status to awaiting_input", "error", err, "job_id", jobID)
+		}
+
+		sendEvent("awaiting_reply", map[string]any{
+			"job_id":          jobID,
+			"timeout_seconds": 120,
+		})
+
+		timer := time.NewTimer(2 * time.Minute)
+		var userReply string
+		gotReply := false
+
+		select {
+		case result, ok := <-ch:
+			timer.Stop()
+			c.PendingClarifications.Delete(jobID)
+			if ok && !result.Skip && len(result.Answers) > 0 {
+				userReply = result.Answers[0].Answer
+				gotReply = true
+			}
+		case <-timer.C:
+			c.PendingClarifications.Delete(jobID)
+			slog.Info("conversation reply timed out, proceeding with what we have", "job_id", jobID, "turn", turn)
+		case <-ctx.Done():
+			timer.Stop()
+			c.PendingClarifications.Delete(jobID)
+			return message
+		}
+
+		c.DB.UpdateGenerationJobStatus(jobID, "running", "")
+
+		if !gotReply {
+			break
+		}
+
+		conversationHistory = append(conversationHistory, conversationTurn{Role: "user", Content: userReply})
+
+		// Check if we have enough info to proceed (after at least 1 exchange)
+		if turn >= 0 {
+			readyCheck := fmt.Sprintf("Based on this conversation, do we have enough context to build? Conversation:\n")
+			for _, t := range conversationHistory {
+				readyCheck += fmt.Sprintf("[%s]: %s\n", t.Role, t.Content)
+			}
+			readyJSON, err := utils.GetJSONFromLLM(ctx, fastModel, `Decide if there is enough information to start building based on the conversation. Return ONLY: {"ready": true} or {"ready": false}`, readyCheck, provider)
+			if err == nil {
+				var ready struct {
+					Ready bool `json:"ready"`
+				}
+				if json.Unmarshal([]byte(readyJSON), &ready) == nil && ready.Ready {
+					break
+				}
+				cleaned := utils.ExtractJSON(readyJSON)
+				if json.Unmarshal([]byte(cleaned), &ready) == nil && ready.Ready {
+					break
+				}
+			}
+		}
+	}
+
+	// Step 4: Build enriched prompt with conversation transcript
+	return buildConversationEnrichedPrompt(message, conversationHistory)
+}
+
+// conversationTurn represents a single turn in a pre-build conversation.
+type conversationTurn struct {
+	Role    string
+	Content string
+}
+
+// buildConversationEnrichedPrompt appends a conversation transcript to the original prompt.
+func buildConversationEnrichedPrompt(original string, history []conversationTurn) string {
+	if len(history) <= 1 {
+		return original
+	}
+
+	var sb strings.Builder
+	sb.WriteString(original)
+	sb.WriteString("\n\n--- Pre-build conversation ---\n")
+	for _, t := range history[1:] { // skip the first entry which is the original prompt
+		if t.Role == "assistant" {
+			sb.WriteString(fmt.Sprintf("AI: %s\n", t.Content))
+		} else {
+			sb.WriteString(fmt.Sprintf("User: %s\n", t.Content))
+		}
+	}
+	return sb.String()
+}
+
+// streamBuildPlan streams a brief "here's what I'll create" message to the user.
+func (c *Controller) streamBuildPlan(
+	ctx context.Context,
+	provider *utils.LLMProvider,
+	enrichedMessage string,
+	webContext string,
+	projectType string,
+	sendEvent func(string, any) bool,
+) {
+	fastModel := provider.FastModel()
+
+	userContent := fmt.Sprintf("Project type: %s\n\nUser request (with any conversation context):\n%s", projectType, enrichedMessage)
+	if webContext != "" {
+		userContent += "\n\nWeb search context:\n" + webContext
+	}
+
+	messages := []utils.Message{
+		{Role: "system", Content: constants.CONVERSATION_BUILD_PLAN_PROMPT},
+		{Role: "user", Content: userContent},
+	}
+
+	_, err := utils.StreamTextFromLLMWithMessages(
+		ctx, fastModel, messages, provider,
+		func(chunk string) {
+			sendEvent("conversation_chunk", map[string]any{"chunk": chunk})
+		},
+		nil,
+		utils.StreamTextConfig{MaxTokens: 512},
+	)
+	if err != nil {
+		slog.Warn("failed to stream build plan", "error", err)
+		return
+	}
+	sendEvent("conversation_done", map[string]any{"type": "build_plan"})
+}
+
+// Deprecated: waitForClarification sends clarification questions to the client and blocks
 // until the user answers, skips, or a 5-minute timeout elapses.
 // Returns the result and whether the user actually answered (vs skip/timeout).
 func (c *Controller) waitForClarification(

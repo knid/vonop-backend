@@ -23,6 +23,8 @@ var milestoneEvents = map[string]bool{
 	"app_generation_started": true,
 	"clarification_needed":   true,
 	"clarification_received": true,
+	"conversation_done":      true,
+	"awaiting_reply":         true,
 	"rollback":               true,
 	"deps_ready":             true,
 }
@@ -116,6 +118,29 @@ func (c *Controller) SubmitClarification(jobID string, result ClarificationResul
 		return nil
 	default:
 		return fmt.Errorf("clarification already submitted")
+	}
+}
+
+// SubmitReply sends a natural language reply to a job awaiting user input.
+// Reuses the same PendingClarifications channel infrastructure.
+func (c *Controller) SubmitReply(jobID string, reply ConversationReply) error {
+	val, ok := c.PendingClarifications.Load(jobID)
+	if !ok {
+		return fmt.Errorf("no pending reply expected for this job")
+	}
+	ch, ok := val.(chan ClarificationResult)
+	if !ok {
+		return fmt.Errorf("invalid reply channel type")
+	}
+	// Package the reply as a ClarificationResult so the blocking side can read it
+	result := ClarificationResult{
+		Answers: []ClarificationAnswer{{ID: "reply", Answer: reply.Message}},
+	}
+	select {
+	case ch <- result:
+		return nil
+	default:
+		return fmt.Errorf("reply already submitted")
 	}
 }
 
