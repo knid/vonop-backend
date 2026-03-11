@@ -190,7 +190,7 @@ Rules:
 - Keep it short: 2-3 sentences max
 - No markdown headers, no bullet points, no code
 - Sound enthusiastic but professional
-- Do NOT ask any questions — just summarize what you found. Questions will be asked separately afterward if needed.`
+- ABSOLUTELY DO NOT ask any questions. No question marks. No "what do you think?", no "would you like?", no clarifying questions. ONLY state facts about what you found. Questions will be handled in a separate phase — if you include questions here, the user will see them but have no way to answer, causing a broken experience.`
 
 	CONVERSATION_DECISION_PROMPT = `You are a product expert. Decide whether the user's app-building prompt needs a short conversation to clarify requirements before building.
 
@@ -198,12 +198,15 @@ Say YES (needs_conversation: true) when:
 - The prompt is vague or very short (e.g. "make me an app", "restaurant website", "something cool")
 - Critical details are missing that would significantly affect the result
 - The request is ambiguous and could go in very different directions
+- The user references a real website to revise/clone/replicate — even with web context available, you should ask about scope (full rebuild vs partial revision), priority areas, design preferences, and theme direction
 
 Say NO (needs_conversation: false) when:
 - The prompt is detailed enough to start building (mentions specific features, pages, style, or purpose)
 - The prompt is clear and specific even if short (e.g. "portfolio site for a photographer with dark theme and gallery grid")
 - The user has already provided design preferences, target audience, or feature list
 - Better to just build something and let the user iterate via chat
+
+Note: Having web search context does NOT mean conversation is unnecessary. Web context tells us about the reference site, but we still may need to ask the user about their specific vision and requirements.
 
 Return ONLY valid JSON: {"needs_conversation": true} or {"needs_conversation": false}`
 
