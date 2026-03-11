@@ -478,14 +478,17 @@ func (c *Controller) StreamBuildApp(
 	// For initial generation, run a web search pass to gather context about
 	// referenced websites, technologies, or anything needing up-to-date info
 	// BEFORE clarification questions so that results inform the entire flow.
-	var preGenToolContext string
+	var preGenCtx preGenContext
 	if isInitialGeneration {
-		preGenToolContext = c.runPreGenWebSearch(ctx, provider, message, sendEvent)
-		if preGenToolContext != "" {
+		preGenCtx = c.runPreGenWebSearch(ctx, provider, message, sendEvent)
+		if preGenCtx.HasContent() {
 			slog.Info("Initial generation: web search returned context",
-				"project_id", project.ID, "context_length", len(preGenToolContext))
+				"project_id", project.ID, "context_length", len(preGenCtx.Text),
+				"screenshots", len(preGenCtx.Screenshots))
 		}
 	}
+	// preGenToolContext is the text portion, used by downstream functions that take string
+	preGenToolContext := preGenCtx.Text
 
 	if ctx.Err() != nil {
 		return
@@ -495,8 +498,8 @@ func (c *Controller) StreamBuildApp(
 	if isInitialGeneration && jobID != "" {
 		// Phase A: Stream a summary of web search results to the user
 		var webSummaryText string
-		if preGenToolContext != "" {
-			webSummaryText = c.streamWebSearchSummary(ctx, provider, preGenToolContext, message, sendEvent)
+		if preGenCtx.HasContent() {
+			webSummaryText = c.streamWebSearchSummary(ctx, provider, preGenCtx, message, sendEvent)
 		}
 
 		if ctx.Err() != nil {
@@ -530,8 +533,12 @@ func (c *Controller) StreamBuildApp(
 
 	if isInitialGeneration && project.ProjectType == "ecommerce" {
 		// === E-commerce two-phase path: setup tools → single-shot file gen ===
+		ecomImages := imageURLs
+		if len(preGenCtx.Screenshots) > 0 {
+			ecomImages = append(append([]string{}, imageURLs...), preGenCtx.Screenshots...)
+		}
 		ecomText, ecomOps, ecomErr := c.streamEcommerceGeneration(
-			ctx, project, user, model, provider, fileMap, sendEvent, message, imageURLs, preGenToolContext,
+			ctx, project, user, model, provider, fileMap, sendEvent, message, ecomImages, preGenToolContext,
 		)
 		if ecomErr != nil {
 			slog.Error("E-commerce generation failed", "error", ecomErr, "project_id", project.ID)
@@ -576,8 +583,13 @@ func (c *Controller) StreamBuildApp(
 		toolAppliedOps = ecomOps
 	} else if isInitialGeneration {
 		// === Single-shot path: one LLM call, no tool loop (non-ecommerce) ===
+		// Merge pre-gen screenshots with user-provided images for vision
+		genImages := imageURLs
+		if len(preGenCtx.Screenshots) > 0 {
+			genImages = append(append([]string{}, imageURLs...), preGenCtx.Screenshots...)
+		}
 		singleShotText, singleShotOps, singleShotErr := c.streamSingleShotGeneration(
-			ctx, project, user, model, provider, fileMap, sendEvent, message, imageURLs, preGenToolContext,
+			ctx, project, user, model, provider, fileMap, sendEvent, message, genImages, preGenToolContext,
 		)
 		if singleShotErr != nil {
 			slog.Error("Single-shot generation failed", "error", singleShotErr, "project_id", project.ID)
@@ -1224,17 +1236,27 @@ func (c *Controller) runChatToolPhase(
 	return collectedContext.String()
 }
 
+// preGenContext holds the results of the pre-generation web search + screenshot phase.
+type preGenContext struct {
+	Text       string   // Text context (web search results, screenshot metadata)
+	Screenshots []string // Base64 data URIs of captured screenshots (for vision)
+}
+
+func (p preGenContext) HasContent() bool {
+	return p.Text != "" || len(p.Screenshots) > 0
+}
+
 // runPreGenWebSearch runs a web-search + screenshot tool phase before initial generation.
 // Unlike runChatToolPhase (which also offers preview_website and manage_store),
 // this only exposes web_search and take_screenshot so the fast model can research
 // referenced websites visually and textually.
-// Returns the search results as context text, or "" if no tools were needed.
+// Returns text context + screenshot images for downstream vision-capable models.
 func (c *Controller) runPreGenWebSearch(
 	ctx context.Context,
 	provider *utils.LLMProvider,
 	userMessage string,
 	sendEvent func(string, any) bool,
-) string {
+) preGenContext {
 	fastModel := provider.FastModel()
 	tools := []utils.Tool{chatTakeScreenshotTool}
 	if ws := provider.WebSearchTool(); ws != nil {
@@ -1244,7 +1266,7 @@ func (c *Controller) runPreGenWebSearch(
 	// If no web search and no screenshot API key, skip entirely
 	screenshotAvailable := c.SecretManager.GetSecret("SITESHOT_API_KEY") != ""
 	if len(tools) == 1 && !screenshotAvailable {
-		return ""
+		return preGenContext{}
 	}
 
 	systemPrompt := `You are a research assistant. Analyze the user's prompt and decide if web search or screenshots would help gather context for building their website/app.
@@ -1274,11 +1296,13 @@ If no search or screenshot is needed, respond with just: NO_SEARCH_NEEDED`
 	}
 
 	var collectedContext strings.Builder
+	var screenshots []string
 
 	executor := func(name string, arguments string) (string, error) {
 		switch name {
 		case "take_screenshot":
-			return c.executeChatTakeScreenshot(arguments, &collectedContext)
+			result, err := c.executePreGenScreenshot(arguments, &collectedContext, &screenshots)
+			return result, err
 		default:
 			return "", fmt.Errorf("unexpected client tool call: %s", name)
 		}
@@ -1304,25 +1328,72 @@ If no search or screenshot is needed, respond with just: NO_SEARCH_NEEDED`
 	if err != nil {
 		slog.Warn("Pre-gen web search phase failed, continuing without context", "error", err)
 		if collectedContext.Len() > 0 {
-			return collectedContext.String()
+			return preGenContext{Text: collectedContext.String(), Screenshots: screenshots}
 		}
-		return ""
+		return preGenContext{}
 	}
 
 	// Combine collected context (from take_screenshot) with web search text
 	trimmed := strings.TrimSpace(result)
 	if collectedContext.Len() == 0 {
 		if trimmed == "" || trimmed == "NO_SEARCH_NEEDED" {
-			return ""
+			return preGenContext{}
 		}
-		return "Web search context:\n" + trimmed
+		return preGenContext{Text: "Web search context:\n" + trimmed, Screenshots: screenshots}
 	}
 
 	// We have screenshot context — append web search text if any
 	if trimmed != "" && trimmed != "NO_SEARCH_NEEDED" {
 		collectedContext.WriteString("\nWeb search context:\n" + trimmed)
 	}
-	return collectedContext.String()
+	return preGenContext{Text: collectedContext.String(), Screenshots: screenshots}
+}
+
+// executePreGenScreenshot captures a screenshot and stores the base64 data URI
+// both in collectedContext (text) and screenshots slice (for vision).
+func (c *Controller) executePreGenScreenshot(
+	arguments string,
+	collectedContext *strings.Builder,
+	screenshots *[]string,
+) (string, error) {
+	var args struct {
+		URL string `json:"url"`
+	}
+	if err := json.Unmarshal([]byte(arguments), &args); err != nil {
+		return fmt.Sprintf("Error: invalid arguments: %s", err.Error()), nil
+	}
+
+	targetURL := strings.TrimSpace(args.URL)
+	if targetURL == "" {
+		return "Error: url is required", nil
+	}
+	if !strings.HasPrefix(targetURL, "http://") && !strings.HasPrefix(targetURL, "https://") {
+		targetURL = "https://" + targetURL
+	}
+
+	apiKey := c.SecretManager.GetSecret("SITESHOT_API_KEY")
+	if apiKey == "" {
+		return "Error: screenshot service not configured", nil
+	}
+
+	imgData, err := external.GetDesktopScreenshotOfURL(targetURL, apiKey)
+	if err != nil {
+		return fmt.Sprintf("Screenshot capture failed: %s", err.Error()), nil
+	}
+	if len(imgData) == 0 {
+		return "Screenshot capture returned empty image", nil
+	}
+
+	b64 := base64.StdEncoding.EncodeToString(imgData)
+	dataURI := "data:image/png;base64," + b64
+
+	// Store base64 data URI for vision-capable models
+	*screenshots = append(*screenshots, dataURI)
+
+	// Store text metadata (without the huge base64 blob) for text-only context
+	collectedContext.WriteString(fmt.Sprintf("\n[Screenshot Captured]\nURL: %s\nA desktop screenshot (1280x800) has been captured and will be provided as an image to the code generation model for accurate color/layout matching.\n", targetURL))
+	slog.Info("take_screenshot tool called", "url", targetURL, "size_bytes", len(imgData))
+	return "Screenshot captured successfully. The image will be provided to the code generation model.", nil
 }
 
 // executeChatPreviewWebsite handles the preview_website tool call in the chat tool phase.
@@ -4890,17 +4961,22 @@ func (c *Controller) ClearAppConversation(projectID string) error {
 }
 
 // streamWebSearchSummary streams a natural language summary of web search findings to the user.
+// Includes screenshots as vision content so the model can accurately describe colors/layout.
 func (c *Controller) streamWebSearchSummary(
 	ctx context.Context,
 	provider *utils.LLMProvider,
-	webContext string,
+	pgCtx preGenContext,
 	userMessage string,
 	sendEvent func(string, any) bool,
 ) string {
 	fastModel := provider.FastModel()
+	userContent := fmt.Sprintf("User's request:\n%s\n\nSearch results:\n%s", userMessage, pgCtx.Text)
+	if len(pgCtx.Screenshots) > 0 {
+		userContent += "\n\nA screenshot of the referenced website is attached. Use it to accurately describe the site's color scheme, layout, and visual style. Do NOT guess colors — describe exactly what you see in the screenshot."
+	}
 	messages := []utils.Message{
 		{Role: "system", Content: constants.CONVERSATION_WEB_SUMMARY_PROMPT},
-		{Role: "user", Content: fmt.Sprintf("User's request:\n%s\n\nSearch results:\n%s", userMessage, webContext)},
+		{Role: "user", Content: userContent, Images: pgCtx.Screenshots},
 	}
 
 	fullText, err := utils.StreamTextFromLLMWithMessages(
