@@ -1588,16 +1588,10 @@ func (c *Controller) generateAndStoreSeedImages(
 		}
 
 		s3Key := fmt.Sprintf("apps/%s/images/seed-%s-%d.jpg", project.ID, task.table, i+1)
-		if err := c.AssetsStorage.UploadFileByteWithContentType(ctx, s3Key, imgData, "image/jpeg"); err != nil {
+		publicURL, err := c.AssetsStorage.UploadFileBytePublic(ctx, s3Key, imgData, "image/jpeg")
+		if err != nil {
 			slog.Warn("generateAndStoreSeedImages: S3 upload failed",
 				"table", task.table, "error", err)
-			continue
-		}
-
-		presigned, err := c.AssetsStorage.GetObject(ctx, s3Key, 7*24*3600)
-		if err != nil {
-			slog.Warn("generateAndStoreSeedImages: presign failed",
-				"s3_key", s3Key, "error", err)
 			continue
 		}
 
@@ -1606,7 +1600,7 @@ func (c *Controller) generateAndStoreSeedImages(
 			"UPDATE %s SET %s = $1 WHERE id = $2",
 			task.table, task.column,
 		)
-		if _, err := neonDB.ExecContext(ctx, updateQuery, presigned.URL, task.rowID); err != nil {
+		if _, err := neonDB.ExecContext(ctx, updateQuery, publicURL, task.rowID); err != nil {
 			slog.Warn("generateAndStoreSeedImages: update failed",
 				"table", task.table, "row_id", task.rowID, "error", err)
 			continue

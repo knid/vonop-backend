@@ -3,6 +3,7 @@ package storage
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"log"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 )
 
 type S3Storage struct {
@@ -159,6 +161,23 @@ func (s *S3Storage) UploadFileByteWithContentType(ctx context.Context, s3URL str
 		ContentType: aws.String(contentType),
 	})
 	return err
+}
+
+// UploadFileBytePublic uploads data with public-read ACL and returns the permanent direct URL.
+func (s *S3Storage) UploadFileBytePublic(ctx context.Context, key string, data []byte, contentType string) (string, error) {
+	acl := types.ObjectCannedACLPublicRead
+	_, err := s.Client.PutObject(ctx, &s3.PutObjectInput{
+		Bucket:      &s.Bucket,
+		Key:         &key,
+		Body:        bytes.NewReader(data),
+		ContentType: aws.String(contentType),
+		ACL:         acl,
+	})
+	if err != nil {
+		return "", err
+	}
+	publicURL := fmt.Sprintf("https://%s.s3.%s.amazonaws.com/%s", s.Bucket, s.Region, key)
+	return publicURL, nil
 }
 
 func (s S3Storage) PresignPostObject(ctx context.Context, objectKey string, lifetimeSecs int64) (*s3.PresignedPostRequest, error) {
