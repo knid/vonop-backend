@@ -4019,7 +4019,7 @@ func (c *Controller) streamWebSearchSummary(
 		{Role: "user", Content: fmt.Sprintf("User's request:\n%s\n\nSearch results:\n%s", userMessage, webContext)},
 	}
 
-	_, err := utils.StreamTextFromLLMWithMessages(
+	fullText, err := utils.StreamTextFromLLMWithMessages(
 		ctx, fastModel, messages, provider,
 		func(chunk string) {
 			sendEvent("conversation_chunk", map[string]any{"chunk": chunk})
@@ -4031,7 +4031,7 @@ func (c *Controller) streamWebSearchSummary(
 		slog.Warn("failed to stream web search summary", "error", err)
 		return
 	}
-	sendEvent("conversation_done", map[string]any{"type": "web_summary"})
+	sendEvent("conversation_done", map[string]any{"type": "web_summary", "text": fullText})
 }
 
 // runConversationLoop checks if the prompt needs clarification and runs a natural
@@ -4122,8 +4122,9 @@ func (c *Controller) runConversationLoop(
 			break
 		}
 
-		sendEvent("conversation_done", map[string]any{"type": "conversation"})
-		conversationHistory = append(conversationHistory, conversationTurn{Role: "assistant", Content: aiMessage.String()})
+		aiText := aiMessage.String()
+		sendEvent("conversation_done", map[string]any{"type": "conversation", "text": aiText})
+		conversationHistory = append(conversationHistory, conversationTurn{Role: "assistant", Content: aiText})
 
 		// Wait for user reply
 		ch := make(chan ClarificationResult, 1)
@@ -4239,7 +4240,7 @@ func (c *Controller) streamBuildPlan(
 		{Role: "user", Content: userContent},
 	}
 
-	_, err := utils.StreamTextFromLLMWithMessages(
+	fullText, err := utils.StreamTextFromLLMWithMessages(
 		ctx, fastModel, messages, provider,
 		func(chunk string) {
 			sendEvent("conversation_chunk", map[string]any{"chunk": chunk})
@@ -4251,7 +4252,7 @@ func (c *Controller) streamBuildPlan(
 		slog.Warn("failed to stream build plan", "error", err)
 		return
 	}
-	sendEvent("conversation_done", map[string]any{"type": "build_plan"})
+	sendEvent("conversation_done", map[string]any{"type": "build_plan", "text": fullText})
 }
 
 // Deprecated: waitForClarification sends clarification questions to the client and blocks
