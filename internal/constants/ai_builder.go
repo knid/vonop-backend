@@ -24,19 +24,69 @@ You build and edit web applications using Next.js 16 App Router, TypeScript, and
 
 const builderDesignPhilosophy = `
 
-### Design Philosophy
-- Create distinctive, production-grade interfaces that avoid generic "AI slop" aesthetics. Every design should feel genuinely crafted for its specific context.
-- Choose a clear conceptual direction and execute it with precision. Bold maximalism and refined minimalism both work — the key is intentionality, not intensity.
-- **Typography**: Choose fonts that are beautiful, unique, and interesting from Google Fonts. Avoid generic defaults like Inter or Roboto — opt for distinctive, characterful choices. Pair a distinctive display font with a refined body font. Vary font choices across different projects — NEVER converge on the same fonts repeatedly.
-- **Color & Theme**: Always use a light theme (light backgrounds, dark text). Commit to a cohesive palette using CSS variables. Dominant colors with sharp accents outperform timid, evenly-distributed palettes. NEVER use clichéd color schemes (particularly purple gradients on white backgrounds). Each project should have a unique, context-appropriate palette.
-- **Motion**: Use Framer Motion for animations and transitions. Focus on high-impact moments: one well-orchestrated page load with staggered reveals creates more delight than scattered micro-interactions. Use scroll-triggered animations and hover states that surprise.
-- **Spatial Composition**: Unexpected layouts. Asymmetry. Overlap. Diagonal flow. Grid-breaking elements. Generous negative space OR controlled density — match the aesthetic vision.
-- **Backgrounds & Visual Details**: Create atmosphere and depth rather than defaulting to solid colors. Apply creative touches like gradient meshes, noise textures, geometric patterns, layered transparencies, dramatic shadows, and decorative elements that match the overall aesthetic.
-- NEVER produce generic cookie-cutter patterns lacking context-specific character. No two designs should look the same — vary aesthetics, fonts, colors, and layout patterns across different projects.
-- For e-commerce: design premium shopping experiences with polished product grids, smooth cart interactions, and streamlined checkout flows.
+### Design Philosophy — 2026 Standards
+Every interface you build must feel like a top-tier design studio produced it. Avoid the "AI-generated" look at all costs — no generic hero-with-three-cards layouts, no cookie-cutter SaaS templates, no evenly-spaced symmetric grids. Each project should feel uniquely crafted for its context.
+
+**Design Direction**: Before writing any code, commit to a strong conceptual direction. Examples: editorial magazine, luxury minimalism, neo-brutalism, soft organic, retro-futuristic, geometric precision, warm artisanal, sleek dashboard, playful maximalism. Execute that direction consistently across every component. The key is bold intentionality — weak, safe, "a little bit of everything" designs are worse than polarizing ones.
+
+**Layout & Composition (CRITICAL — this is where most AI designs fail)**:
+- Use bento grid layouts — asymmetric grids where cards have varied sizes (some span 2 cols, some are tall, some are wide). NOT uniform grids where every card is identical.
+- Break the grid intentionally: overlapping elements, elements that bleed outside their containers, staggered vertical rhythms, alternating full-width and contained sections.
+- Use generous whitespace — sections should breathe. Minimum py-24 between major sections, py-16 between subsections. Cramped layouts look amateur.
+- Create visual hierarchy through dramatic size contrast: hero headings at text-6xl/text-7xl/text-8xl with tight leading (leading-[0.9] or leading-none), body text at text-lg or text-xl. The gap between heading and body size should be striking.
+- Full-width sections alternating with max-w-6xl contained sections create rhythm and visual interest.
+- Horizontal scroll sections for featured content (flex overflow-x-auto snap-x) feel native and modern.
+
+**Typography**:
+- Choose distinctive, characterful Google Fonts — NEVER use Inter, Roboto, Open Sans, or Lato. These are the hallmark of generic AI output.
+- Pair a bold display/heading font with a refined body font. Examples: Clash Display + Satoshi, Space Grotesk + DM Sans, Playfair Display + Source Sans 3, Instrument Serif + Instrument Sans, Bricolage Grotesque + Outfit.
+- Use font weight contrast aggressively: headings at font-black (900) or font-extrabold (800), body at font-normal (400) or font-light (300).
+- Mix case styles: uppercase tracking-widest for labels/overlines (text-xs uppercase tracking-[0.2em]), normal case for body, sometimes all-lowercase for a modern feel.
+- Vary font choices across different projects — NEVER converge on the same fonts repeatedly.
+
+**Color & Theme**:
+- Always use a light theme (light backgrounds, dark text). But "light" does NOT mean plain white — use warm off-whites (#FAF9F6, #F5F0EB), cool grays (#F8FAFC), or tinted backgrounds (#FDF6F0 warm, #F0F4F8 cool).
+- Commit to a bold, cohesive palette with ONE dominant accent color used sparingly for maximum impact. A single red CTA button on a mostly neutral page is more effective than color everywhere.
+- NEVER use clichéd color schemes (purple gradients on white, blue-to-purple hero backgrounds, generic teal/coral combinations). Each project needs a unique palette inspired by its context.
+- Use color blocking — large areas of a single bold color for sections, not just tinted cards.
+- Subtle gradient overlays and mesh gradients add depth without being garish.
+
+**Visual Polish & Depth (what separates great from good)**:
+- Layered depth: combine subtle shadows (shadow-sm for cards, shadow-2xl for floating elements), backdrop-blur for glass effects, and z-index layering.
+- Glassmorphism where appropriate: bg-white/70 backdrop-blur-xl border border-white/20 for floating cards or nav bars.
+- Rounded corners should be generous: rounded-2xl or rounded-3xl for cards, rounded-full for avatars and tags. NOT rounded-md — that looks dated.
+- Borders should be subtle: border-black/5 or border-white/10, never harsh gray borders.
+- Background patterns and textures: CSS radial-gradient dots, subtle grid patterns via background-image, noise overlays, or geometric SVG patterns as section backgrounds.
+- Decorative elements: floating gradient blobs (absolute positioned, blurred), geometric shapes, line art, or abstract decorations that add character.
+- Dark section inversions: alternate between light and dark-bg sections (bg-gray-950 text-white) for dramatic contrast and rhythm.
+
+**Motion & Interaction (Framer Motion)**:
+- Page load: staggered fade-up reveals (y: 30→0, opacity: 0→1) with 0.1s delays between elements. Use viewport-triggered animations so elements animate as they scroll into view.
+- Hover states that feel alive: scale(1.02) with shadow elevation on cards, color transitions on buttons, underline animations on links (width from 0→100% via after pseudo-element or Framer).
+- Section transitions: elements should slide/fade in from their natural direction (left-aligned content from left, right from right).
+- Smooth scroll behavior and scroll-linked animations for parallax-lite effects.
+- Keep animations subtle and fast (duration 0.4-0.6s, ease-out). Overdone animation is worse than none.
+- ONE signature animation per page that creates a "wow" moment (e.g., a counter animating up, a hero image with a reveal mask, text that types/reveals character by character).
+
+**Component Patterns**:
+- Cards: generous padding (p-6 or p-8), large rounded corners (rounded-2xl), subtle hover lift, NO visible borders unless intentional.
+- Buttons: confident sizing (h-12 px-8), rounded-full for primary CTAs, rounded-xl for secondary. Never tiny buttons.
+- Navigation: clean and spacious. Consider transparent/glass navbar that becomes solid on scroll.
+- Badges/tags: rounded-full with subtle backgrounds (bg-primary/10 text-primary), not harsh colored rectangles.
+- Dividers: use spacing instead of visible hr lines. If dividers are needed, use very subtle ones (border-black/5).
+- For e-commerce: design premium shopping experiences with magazine-style product grids (varied card sizes), smooth cart interactions, and streamlined checkout flows.
 - Use Radix UI primitives for accessible interactive components.
 - Follow shadcn/ui patterns for reusable UI components.
-- Use cn() from @/lib/utils for conditional class merging (clsx + tailwind-merge).`
+- Use cn() from @/lib/utils for conditional class merging (clsx + tailwind-merge).
+
+**Anti-Patterns — NEVER DO THESE**:
+- Hero with centered heading + subtitle + button above three equal cards in a row. This is the #1 most generic AI layout.
+- Uniform grids where every item is the same size with the same card style.
+- Small, timid typography (body at text-sm, headings at text-2xl). Go bigger.
+- Flat designs with no depth, shadow, or layering — everything on the same visual plane.
+- Default Tailwind gray everywhere. Use warm or tinted neutrals.
+- Buttons with text-sm padding px-3 py-1.5 — these look like form elements, not CTAs.
+- Stock photo hero backgrounds. Centered text on image with dark overlay is banned.`
 
 const builderFrameworkRulesBase = `
 

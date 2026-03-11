@@ -4,15 +4,16 @@ package constants
 // These are unexported and used to eliminate duplication across the 4 exported constants.
 
 const structureDesignPhilosophy = `
-### Design Philosophy
-- Create distinctive, production-grade interfaces that avoid generic "AI slop" aesthetics. Every app should feel genuinely designed for its specific context and purpose.
-- Choose a clear conceptual direction (brutally minimal, maximalist, retro-futuristic, organic, luxury, editorial, geometric, soft/pastel, industrial, etc.) and execute it with precision. The key is intentionality.
-- **Typography**: Choose distinctive, characterful Google Fonts — NEVER default to generic choices like Inter or Roboto. Pair a memorable display font with a refined body font. Vary fonts across different projects.
-- **Color & Theme**: Always use a light theme (light backgrounds, dark text). Dominant colors with sharp accents outperform timid, evenly-distributed palettes. NEVER use clichéd schemes (particularly purple gradients). Each project needs a unique palette.
-- **Motion**: Smooth animations and micro-interactions. Focus on high-impact moments: staggered page-load reveals, scroll-triggered animations, hover states that surprise.
-- **Spatial Composition**: Unexpected layouts, asymmetry, overlap, grid-breaking elements. Generous whitespace OR controlled density — match the vision.
-- **Visual Details**: Gradient meshes, noise textures, geometric patterns, layered transparencies, dramatic shadows, and decorative elements that create atmosphere and depth.
-- No two designs should look the same — vary aesthetics, fonts, colors, and layout patterns.
+### Design Philosophy — 2026 Standards
+- Create distinctive, production-grade interfaces that feel like a top design studio built them. Avoid the "AI-generated" look: no generic hero-with-three-cards layouts, no cookie-cutter templates, no uniform symmetric grids.
+- Commit to a strong conceptual direction (editorial magazine, luxury minimalism, neo-brutalism, soft organic, retro-futuristic, geometric precision, warm artisanal, playful maximalism) and execute it consistently across every component.
+- **Layout**: Use bento/asymmetric grids with varied card sizes, generous whitespace (py-24+ between sections), dramatic size contrast in typography (hero text-7xl+, body text-lg+), full-width/contained section alternation for visual rhythm.
+- **Typography**: Choose distinctive, characterful Google Fonts — NEVER use Inter, Roboto, Open Sans, or Lato. Pair a bold display font with a refined body font (e.g., Space Grotesk + DM Sans, Playfair Display + Source Sans 3, Bricolage Grotesque + Outfit). Use aggressive weight contrast (headings font-black, body font-normal).
+- **Color & Theme**: Always light theme but NOT plain white — use warm off-whites, cool grays, or tinted backgrounds. One dominant accent color used sparingly for maximum impact. NEVER use clichéd purple gradients or generic teal/coral combos. Each project needs a unique, context-inspired palette.
+- **Visual Depth**: Layered shadows, glassmorphism (backdrop-blur-xl), generous rounded corners (rounded-2xl/3xl), subtle borders (border-black/5), decorative gradient blobs, geometric patterns, and dark section inversions for contrast.
+- **Motion**: Framer Motion with staggered fade-up reveals on scroll, hover scale+shadow on cards, one signature "wow" animation per page. Keep animations subtle and fast (0.4-0.6s).
+- **Anti-patterns to AVOID**: centered hero + subtitle + button above three equal cards (the #1 generic AI layout), uniform grids, small timid typography, flat designs with no depth, default Tailwind gray everywhere.
+- No two designs should look the same — vary aesthetics, fonts, colors, and layout patterns across projects.
 `
 
 const structureCommonRules = `1. Generate an app name and URL-safe slug from the user's prompt.
