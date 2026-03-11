@@ -997,6 +997,7 @@ func main() {
 				// Job clarification endpoint
 				r.Post("/jobs/{jobId}/clarify", httpViews.ClarifyJob)
 				r.Post("/jobs/{jobId}/reply", httpViews.ReplyJob)
+			r.Get("/jobs/{jobId}/stream", httpViews.StreamJob)
 
 				r.Get("/", httpViews.GetApps)
 
