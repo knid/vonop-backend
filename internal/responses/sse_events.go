@@ -61,3 +61,19 @@ type WebsitePreviewEvent struct {
 	ProxyURL string `json:"proxy_url"`
 }
 
+// ProgressEvent is a generic progress indicator for long-running operations.
+// The frontend can display this as a progress bar or status message.
+type ProgressEvent struct {
+	Phase   string `json:"phase"`             // e.g. "generating_files", "provisioning_db", "generating_images", "auto_fix"
+	Message string `json:"message"`           // human-readable status message
+	Current int    `json:"current,omitempty"` // current step (0 if indeterminate)
+	Total   int    `json:"total,omitempty"`   // total steps (0 if indeterminate)
+}
+
+// AutoFixEvent notifies the frontend that deterministic auto-fixes were applied.
+type AutoFixEvent struct {
+	FilesFixed int      `json:"files_fixed"`
+	FixTypes   []string `json:"fix_types"` // e.g. ["ts_to_tsx", "use_client", "import_mismatch"]
+	Paths      []string `json:"paths"`     // paths of fixed files
+}
+
