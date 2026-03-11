@@ -8,8 +8,9 @@ import (
 	"strings"
 )
 
-// maxRequestBodySize is the maximum allowed request body size (10 MB).
-const maxRequestBodySize = 10 * 1024 * 1024
+// maxRequestBodySize is the maximum allowed request body size (25 MB).
+// Needs to be large enough for base64-encoded image attachments in chat/generation requests.
+const maxRequestBodySize = 25 * 1024 * 1024
 
 func ParseJSONBody(r *http.Request, dst interface{}) error {
 	ct := r.Header.Get("Content-Type")
