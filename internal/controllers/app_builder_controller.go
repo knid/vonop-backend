@@ -1620,9 +1620,11 @@ func (c *Controller) executeChatExecuteSQL(
 	if !isSelect && !isInsert && !isUpdate {
 		return "Error: only SELECT, INSERT, and UPDATE queries are allowed. DELETE is not permitted — use UPDATE to set a status flag instead.", nil
 	}
-	// Reject destructive keywords
+	// Reject destructive keywords (word-boundary match to avoid false positives
+	// like CREATED_AT matching CREATE, or DELETED matching DELETE)
 	for _, kw := range []string{"DELETE", "DROP", "ALTER", "CREATE", "TRUNCATE", "GRANT", "REVOKE"} {
-		if strings.Contains(upper, kw) {
+		pattern := `\b` + kw + `\b`
+		if matched, _ := regexp.MatchString(pattern, upper); matched {
 			return fmt.Sprintf("Error: query contains disallowed keyword: %s. Use UPDATE with a status/flag column instead of DELETE.", kw), nil
 		}
 	}
