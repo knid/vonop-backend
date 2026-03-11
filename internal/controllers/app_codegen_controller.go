@@ -304,6 +304,16 @@ func isProtectedTemplateFile(path string) bool {
 // to wrap an existing URL (url_wrapper) or create a new app from scratch (from_scratch).
 // Returns (intent, extractedURL).
 func (c *Controller) ClassifyMobileIntent(ctx context.Context, prompt string) (string, string) {
+	// Short-circuit: if the prompt is just a URL (possibly with surrounding whitespace),
+	// skip LLM classification entirely and return url_wrapper directly.
+	trimmed := strings.TrimSpace(prompt)
+	if strings.HasPrefix(trimmed, "http://") || strings.HasPrefix(trimmed, "https://") {
+		// Check it looks like a single URL (no spaces indicating additional text)
+		if !strings.Contains(trimmed, " ") {
+			return "url_wrapper", trimmed
+		}
+	}
+
 	provider := c.llmProvider()
 	model := "anthropic/claude-haiku-4-5-20251001"
 	if provider.IsAnthropic() {
