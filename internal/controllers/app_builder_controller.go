@@ -1140,14 +1140,31 @@ func (c *Controller) runChatToolPhase(
 - If the user references a website and you want to see what it looks like visually, call take_screenshot with the URL.
 - If the user asks for a specific UI component (dialog, tabs, accordion, toast, dropdown, etc.) that may not be in the project yet, call search_components to find and inject it.`
 	if hasDB {
+		// Include database schema so the LLM knows exact table/column names and types
+		dataModels, _ := parseDataModels(project.DataModels)
+		if len(dataModels) > 0 {
+			systemPrompt += "\n\n### Database Schema\n"
+			for _, dm := range dataModels {
+				systemPrompt += fmt.Sprintf("Table: %s\n  Columns: ", dm.Name)
+				for i, col := range dm.Columns {
+					if i > 0 {
+						systemPrompt += ", "
+					}
+					systemPrompt += fmt.Sprintf("%s (%s)", col.Name, col.Type)
+				}
+				systemPrompt += "\n"
+			}
+			systemPrompt += "All tables have an auto-generated UUID 'id' column — do NOT provide id in INSERT statements.\n"
+		}
 		systemPrompt += `
 - If the user says the database is empty, has no data, asks for demo/sample/test data, or complains about missing content, call seed_database to populate it with realistic data.
 - If you need to check whether the database has data, call execute_sql with a SELECT/COUNT query (e.g. SELECT COUNT(*) FROM table_name).
-- If the user asks to add, insert, or create specific data rows, call execute_sql with an INSERT query.
+- If the user asks to add, insert, or create specific data rows, call execute_sql with an INSERT query. You can insert multiple rows in a single INSERT using VALUES (...), (...), (...) syntax.
 - If the user asks to update, modify, or change existing data, call execute_sql with an UPDATE query.
 - DELETE is NOT allowed. If the user wants to remove data, use UPDATE to set a status flag (e.g. UPDATE articles SET is_active = false WHERE ...).
 - If the user asks to generate/create images for database records (e.g. "add images to articles", "generate cover images"), use this workflow: first call execute_sql to SELECT the rows that need images, then for each row call generate_image with a descriptive prompt, then call execute_sql with an UPDATE to set the image URL on that row. Chain these tool calls sequentially.
-- If the user asks to add/remove/rename database columns or create new tables, call run_migrations with the ALTER TABLE / CREATE TABLE SQL and the complete updated data model.`
+- If the user asks to add/remove/rename database columns or create new tables, call run_migrations with the ALTER TABLE / CREATE TABLE SQL and the complete updated data model.
+- For timestamps, use NOW(). For UUIDs, use gen_random_uuid(). Do NOT manually provide id values.`
 	}
 	if isEcommerce {
 		systemPrompt += `
@@ -1640,6 +1657,45 @@ func (c *Controller) executeChatExecuteSQL(
 
 	// For write queries (INSERT/UPDATE), execute and return affected rows
 	if isInsert || isUpdate {
+		// If INSERT has RETURNING, use QueryContext to capture returned rows
+		if isInsert && strings.Contains(upper, "RETURNING") {
+			rows, err := neonDB.QueryContext(queryCtx, query)
+			if err != nil {
+				return fmt.Sprintf("Query error: %s", err.Error()), nil
+			}
+			defer rows.Close()
+			cols, _ := rows.Columns()
+			var resultBuf strings.Builder
+			resultBuf.WriteString(strings.Join(cols, " | "))
+			resultBuf.WriteString("\n")
+			rowCount := 0
+			for rows.Next() && rowCount < 50 {
+				values := make([]any, len(cols))
+				valuePtrs := make([]any, len(cols))
+				for i := range values {
+					valuePtrs[i] = &values[i]
+				}
+				if err := rows.Scan(valuePtrs...); err != nil {
+					continue
+				}
+				var rowVals []string
+				for _, v := range values {
+					if v == nil {
+						rowVals = append(rowVals, "NULL")
+					} else {
+						rowVals = append(rowVals, fmt.Sprintf("%v", v))
+					}
+				}
+				resultBuf.WriteString(strings.Join(rowVals, " | "))
+				resultBuf.WriteString("\n")
+				rowCount++
+			}
+			summary := fmt.Sprintf("OK — %d row(s) inserted:\n%s", rowCount, resultBuf.String())
+			collectedContext.WriteString(fmt.Sprintf("\n[Database Write Result]\nQuery: %s\n%s\n", query, summary))
+			slog.Info("execute_sql insert+returning via fast model", "project_id", project.ID, "rows", rowCount)
+			return summary, nil
+		}
+
 		result, err := neonDB.ExecContext(queryCtx, query)
 		if err != nil {
 			return fmt.Sprintf("Query error: %s", err.Error()), nil
@@ -3277,13 +3333,13 @@ var chatExecuteSQLTool = utils.Tool{
 	Type: "function",
 	Function: utils.ToolFunction{
 		Name:        "execute_sql",
-		Description: "Run a SQL query on the app's database. Supports SELECT (inspect data), INSERT (add rows), and UPDATE (modify rows). DELETE is NOT allowed — use UPDATE to set a status/flag instead. Examples: 'SELECT COUNT(*) FROM articles', 'INSERT INTO articles (title, content) VALUES (...)', 'UPDATE articles SET is_featured = true WHERE id = ...'.",
+		Description: "Run a SQL query on the app's PostgreSQL database. Supports SELECT, INSERT, UPDATE. DELETE is NOT allowed. Use gen_random_uuid() for UUIDs, NOW() for timestamps. Do NOT provide 'id' values — they are auto-generated. You can insert multiple rows: INSERT INTO t (col) VALUES (...), (...), (...). Use RETURNING to get inserted row data back.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"query": map[string]any{
 					"type":        "string",
-					"description": "A SQL query to execute. Allowed: SELECT, INSERT, UPDATE, WITH (CTE). Not allowed: DELETE, DROP, ALTER, CREATE, TRUNCATE.",
+					"description": "A single SQL statement. Allowed: SELECT, INSERT, UPDATE, WITH. Not allowed: DELETE, DROP, ALTER, CREATE, TRUNCATE. Use the exact table and column names from the database schema.",
 				},
 			},
 			"required": []string{"query"},
