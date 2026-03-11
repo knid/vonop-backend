@@ -765,11 +765,6 @@ func (c *Controller) StreamBuildApp(
 	if filesChanged > 0 {
 		c.runDeterministicAutoFixes(project, fileMap, sendEvent, &appliedOps, &filesChanged)
 
-		// Generate AI images for __AI_IMAGE("...")__ placeholders (non-ecommerce only, max 5)
-		if project.ProjectType != "ecommerce" {
-			c.generateAndReplaceAIImages(ctx, project, fileMap, sendEvent, &appliedOps, 5)
-		}
-
 		// Augment package.json with discovered dependencies
 		pkgChanged := false
 		if pkgContent, ok := fileMap["package.json"]; ok {
@@ -3516,10 +3511,6 @@ func (c *Controller) streamSingleShotGeneration(
 	return responseBuilder.String(), ops, err
 }
 
-// aiImagePlaceholderRegex matches __AI_IMAGE("prompt text")__ markers in generated code.
-// The trailing __ is optional because LLMs sometimes omit it.
-var aiImagePlaceholderRegex = regexp.MustCompile(`__AI_IMAGE\("([^"]+)"\)(?:__)?`)
-
 // generateAppLogo generates an AI logo for the app via fal.ai, uploads it to S3,
 // and returns a presigned URL. Returns "" on any failure (best-effort).
 func (c *Controller) generateAppLogo(ctx context.Context, project *models.AppProject, sendEvent func(string, any) bool) string {
@@ -3572,154 +3563,6 @@ func (c *Controller) generateAppLogo(ctx context.Context, project *models.AppPro
 
 	slog.Info("generateAppLogo: logo generated", "project_id", project.ID, "s3_key", s3Key)
 	return presigned.URL
-}
-
-// generateAndReplaceAIImages scans all files in fileMap for __AI_IMAGE("...")__
-// placeholders, generates up to maxImages real images via fal.ai, uploads them
-// to S3, and replaces the markers with permanent URLs. Best-effort: failures
-// are logged but don't block generation.
-func (c *Controller) generateAndReplaceAIImages(
-	ctx context.Context,
-	project *models.AppProject,
-	fileMap map[string]string,
-	sendEvent func(string, any) bool,
-	ops *[]appBuilderOperation,
-	maxImages int,
-) {
-	apiKey := c.SecretManager.GetSecret("FAL_API_KEY")
-	if apiKey == "" {
-		slog.Debug("generateAndReplaceAIImages: FAL_API_KEY not set, skipping")
-		return
-	}
-
-	falModel := c.SecretManager.GetSecret("FAL_IMAGE_MODEL")
-	if falModel == "" {
-		falModel = "fal-ai/flux/schnell"
-	}
-
-	// Collect unique prompts across all files (deduplicate identical markers)
-	type imageRef struct {
-		prompt string
-		marker string // full __AI_IMAGE("...")__ string
-	}
-	seen := make(map[string]bool)
-	var refs []imageRef
-
-	for _, content := range fileMap {
-		matches := aiImagePlaceholderRegex.FindAllStringSubmatch(content, -1)
-		for _, m := range matches {
-			marker := m[0]
-			prompt := m[1]
-			if !seen[marker] {
-				seen[marker] = true
-				refs = append(refs, imageRef{prompt: prompt, marker: marker})
-			}
-			if len(refs) >= maxImages {
-				break
-			}
-		}
-		if len(refs) >= maxImages {
-			break
-		}
-	}
-
-	if len(refs) == 0 {
-		return
-	}
-
-	slog.Info("generateAndReplaceAIImages: found placeholders",
-		"count", len(refs), "project_id", project.ID)
-	sendEvent("tool_start", map[string]any{"tool": "generate_ai_images", "count": len(refs)})
-
-	// Generate images concurrently (max 3 at a time)
-	type imageResult struct {
-		marker string
-		url    string
-	}
-	results := make([]imageResult, len(refs))
-	var wg sync.WaitGroup
-	sem := make(chan struct{}, 3)
-
-	for i, ref := range refs {
-		wg.Add(1)
-		go func(idx int, r imageRef) {
-			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
-
-			cdnURL, err := fal.GenerateImage(ctx, apiKey, falModel, r.prompt)
-			if err != nil {
-				slog.Warn("generateAndReplaceAIImages: fal generation failed",
-					"prompt", r.prompt, "error", err)
-				return
-			}
-
-			imgData, err := downloadImage(ctx, cdnURL)
-			if err != nil {
-				slog.Warn("generateAndReplaceAIImages: failed to download image",
-					"prompt", r.prompt, "error", err)
-				return
-			}
-
-			s3Key := fmt.Sprintf("apps/%s/images/ai-%d.jpg", project.ID, idx+1)
-			if err := c.AssetsStorage.UploadFileByteWithContentType(ctx, s3Key, imgData, "image/jpeg"); err != nil {
-				slog.Warn("generateAndReplaceAIImages: failed to upload to S3",
-					"prompt", r.prompt, "error", err)
-				return
-			}
-
-			// Get a long-lived presigned URL (7 days)
-			presigned, err := c.AssetsStorage.GetObject(ctx, s3Key, 7*24*3600)
-			if err != nil {
-				slog.Warn("generateAndReplaceAIImages: failed to presign",
-					"s3_key", s3Key, "error", err)
-				return
-			}
-
-			results[idx] = imageResult{marker: r.marker, url: presigned.URL}
-		}(i, ref)
-	}
-
-	wg.Wait()
-
-	// Replace markers with actual URLs in all affected files
-	replaced := 0
-	for path, content := range fileMap {
-		if !aiImagePlaceholderRegex.MatchString(content) {
-			continue
-		}
-		updated := content
-		for _, res := range results {
-			if res.url == "" {
-				continue
-			}
-			updated = strings.ReplaceAll(updated, res.marker, res.url)
-		}
-		if updated != content {
-			fileMap[path] = updated
-			// Persist to DB
-			if dbFile, err := c.DB.GetAppGeneratedFileByPath(project.ID.String(), "nextjs", path); err == nil && dbFile != nil {
-				dbFile.Content = updated
-				if _, updateErr := c.DB.UpdateAppGeneratedFile(dbFile); updateErr != nil {
-					slog.Error("failed to persist AI image replacement", "path", path, "error", updateErr)
-					continue
-				}
-				sendEvent("file_complete", responses.FileCompleteEvent{
-					Action:   "modify",
-					FilePath: path,
-					FileID:   dbFile.ID,
-					FileType: dbFile.FileType,
-					Content:  updated,
-				})
-				replaced++
-			}
-		}
-	}
-
-	slog.Info("generateAndReplaceAIImages: complete",
-		"project_id", project.ID,
-		"generated", len(refs),
-		"replaced", replaced)
 }
 
 // streamEcommerceGeneration performs initial e-commerce app generation in two phases:
