@@ -1136,7 +1136,7 @@ func (c *Controller) runChatToolPhase(
 - If the user asks about current technologies, APIs, documentation, pricing, latest versions, or anything that benefits from up-to-date web information, use web_search to find accurate information.
 - If the user asks to set, add, or remove environment variables / API keys / secrets, call manage_env_vars.
 - If the user asks to install or add a specific npm package/library, call install_package.
-- If the user asks for a custom image, visual asset, hero background, or illustration, call generate_image to create it. The code-gen model can then use the returned URL.
+- If the user asks for a custom image, visual asset, hero background, or illustration, call generate_image to create it. The code-gen model can then use the returned URL in code.
 - If the user references a website and you want to see what it looks like visually, call take_screenshot with the URL.
 - If the user asks for a specific UI component (dialog, tabs, accordion, toast, dropdown, etc.) that may not be in the project yet, call search_components to find and inject it.`
 	if hasDB {
@@ -1146,6 +1146,7 @@ func (c *Controller) runChatToolPhase(
 - If the user asks to add, insert, or create specific data rows, call execute_sql with an INSERT query.
 - If the user asks to update, modify, or change existing data, call execute_sql with an UPDATE query.
 - DELETE is NOT allowed. If the user wants to remove data, use UPDATE to set a status flag (e.g. UPDATE articles SET is_active = false WHERE ...).
+- If the user asks to generate/create images for database records (e.g. "add images to articles", "generate cover images"), use this workflow: first call execute_sql to SELECT the rows that need images, then for each row call generate_image with a descriptive prompt, then call execute_sql with an UPDATE to set the image URL on that row. Chain these tool calls sequentially.
 - If the user asks to add/remove/rename database columns or create new tables, call run_migrations with the ALTER TABLE / CREATE TABLE SQL and the complete updated data model.`
 	}
 	if isEcommerce {
@@ -1233,9 +1234,9 @@ func (c *Controller) runChatToolPhase(
 		}(),
 		nil, // onReasoning — not needed
 		utils.ToolCallConfig{
-			MaxRounds:  5,
+			MaxRounds:  30,
 			MaxTokens:  1024,
-			StripAfter: 4, // Strip tools at round 4 so model is forced to respond before MaxRounds
+			StripAfter: 28, // Strip tools near the end so model is forced to respond
 			OnToolCallStart: func(toolName string) {
 				sendEvent("tool_start", map[string]string{"tool": toolName})
 			},
