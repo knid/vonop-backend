@@ -3244,6 +3244,58 @@ func autoFixUnterminatedJSXStrings(files map[string]string) (int, []string) {
 	return fixed, changedPaths
 }
 
+// autoFixMissingForceDynamic adds `export const dynamic = "force-dynamic"` to page.tsx files
+// that import from @/lib/db but don't already have a dynamic route segment config.
+// Without this, Next.js statically renders DB-backed pages at build time, serving stale data.
+func autoFixMissingForceDynamic(files map[string]string) (int, []string) {
+	var changedPaths []string
+	fixed := 0
+
+	for filePath, content := range files {
+		// Only apply to page files
+		if !strings.HasSuffix(filePath, "/page.tsx") && !strings.HasSuffix(filePath, "/page.ts") && filePath != "page.tsx" {
+			continue
+		}
+		// Must import from @/lib/db
+		if !strings.Contains(content, `@/lib/db`) {
+			continue
+		}
+		// Skip if already has dynamic export
+		if strings.Contains(content, `export const dynamic`) {
+			continue
+		}
+		// Skip "use client" files — they don't do server-side data fetching
+		if strings.Contains(content, `"use client"`) || strings.Contains(content, `'use client'`) {
+			continue
+		}
+
+		// Insert after the last import line
+		lines := strings.Split(content, "\n")
+		lastImportIdx := -1
+		for i, line := range lines {
+			trimmed := strings.TrimSpace(line)
+			if strings.HasPrefix(trimmed, "import ") || strings.HasPrefix(trimmed, "import{") {
+				lastImportIdx = i
+			}
+		}
+		if lastImportIdx == -1 {
+			continue
+		}
+
+		// Insert the dynamic export after the last import
+		newLines := make([]string, 0, len(lines)+2)
+		newLines = append(newLines, lines[:lastImportIdx+1]...)
+		newLines = append(newLines, "", `export const dynamic = "force-dynamic";`)
+		newLines = append(newLines, lines[lastImportIdx+1:]...)
+		files[filePath] = strings.Join(newLines, "\n")
+		changedPaths = append(changedPaths, filePath)
+		fixed++
+		slog.Info("Auto-fixed missing force-dynamic export", "path", filePath)
+	}
+
+	return fixed, changedPaths
+}
+
 // isPascalCase returns true if the string starts with an uppercase letter (component naming convention).
 func isPascalCase(s string) bool {
 	if len(s) == 0 {
