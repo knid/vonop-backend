@@ -10,8 +10,6 @@ import (
 	"regexp"
 	"sort"
 	"strings"
-	"sync"
-	"sync/atomic"
 	"time"
 	"unicode"
 
@@ -1550,79 +1548,63 @@ func (c *Controller) generateAndStoreSeedImages(
 	slog.Info("generateAndStoreSeedImages: generating images",
 		"count", len(tasks), "project_id", project.ID)
 
-	// Generate images concurrently (max 3 at a time)
-	type imageResult struct {
-		idx    int
-		s3URL  string
-	}
-	results := make([]imageResult, 0, len(tasks))
-	var mu sync.Mutex
-	var wg sync.WaitGroup
-	sem := make(chan struct{}, 3)
-
-	var completedImages int32
+	// Generate images sequentially to avoid fal.ai rate limits
 	totalImages := len(tasks)
+	updated := 0
 
 	for i, task := range tasks {
-		wg.Add(1)
-		go func(idx int, t imageTask) {
-			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
+		sendEvent("progress", responses.ProgressEvent{
+			Phase:   "generating_images",
+			Message: fmt.Sprintf("Generating image %d of %d", i+1, totalImages),
+			Current: i + 1,
+			Total:   totalImages,
+		})
 
-			cdnURL, err := fal.GenerateImage(ctx, apiKey, falModel, t.prompt)
-			if err != nil {
-				slog.Warn("generateAndStoreSeedImages: fal generation failed",
-					"table", t.table, "error", err)
-				return
+		// Retry up to 3 times with backoff
+		var cdnURL string
+		var genErr error
+		for attempt := 0; attempt < 3; attempt++ {
+			cdnURL, genErr = fal.GenerateImage(ctx, apiKey, falModel, task.prompt)
+			if genErr == nil {
+				break
 			}
+			slog.Warn("generateAndStoreSeedImages: fal generation failed, retrying",
+				"table", task.table, "attempt", attempt+1, "error", genErr)
+			time.Sleep(time.Duration(attempt+1) * 2 * time.Second)
+		}
+		if genErr != nil {
+			slog.Warn("generateAndStoreSeedImages: fal generation failed after retries",
+				"table", task.table, "error", genErr)
+			continue
+		}
 
-			imgData, err := downloadImage(ctx, cdnURL)
-			if err != nil {
-				slog.Warn("generateAndStoreSeedImages: download failed",
-					"table", t.table, "error", err)
-				return
-			}
+		imgData, err := downloadImage(ctx, cdnURL)
+		if err != nil {
+			slog.Warn("generateAndStoreSeedImages: download failed",
+				"table", task.table, "error", err)
+			continue
+		}
 
-			s3Key := fmt.Sprintf("apps/%s/images/seed-%s-%d.jpg", project.ID, t.table, idx+1)
-			if err := c.AssetsStorage.UploadFileByteWithContentType(ctx, s3Key, imgData, "image/jpeg"); err != nil {
-				slog.Warn("generateAndStoreSeedImages: S3 upload failed",
-					"table", t.table, "error", err)
-				return
-			}
+		s3Key := fmt.Sprintf("apps/%s/images/seed-%s-%d.jpg", project.ID, task.table, i+1)
+		if err := c.AssetsStorage.UploadFileByteWithContentType(ctx, s3Key, imgData, "image/jpeg"); err != nil {
+			slog.Warn("generateAndStoreSeedImages: S3 upload failed",
+				"table", task.table, "error", err)
+			continue
+		}
 
-			presigned, err := c.AssetsStorage.GetObject(ctx, s3Key, 7*24*3600)
-			if err != nil {
-				slog.Warn("generateAndStoreSeedImages: presign failed",
-					"s3_key", s3Key, "error", err)
-				return
-			}
+		presigned, err := c.AssetsStorage.GetObject(ctx, s3Key, 7*24*3600)
+		if err != nil {
+			slog.Warn("generateAndStoreSeedImages: presign failed",
+				"s3_key", s3Key, "error", err)
+			continue
+		}
 
-			mu.Lock()
-			results = append(results, imageResult{idx: idx, s3URL: presigned.URL})
-			done := int(atomic.AddInt32(&completedImages, 1))
-			mu.Unlock()
-
-			sendEvent("progress", responses.ProgressEvent{
-				Phase:   "generating_images",
-				Message: fmt.Sprintf("Generated image %d of %d", done, totalImages),
-				Current: done,
-				Total:   totalImages,
-			})
-		}(i, task)
-	}
-
-	wg.Wait()
-
-	// Update database rows with image URLs
-	updated := 0
-	for _, res := range results {
-		task := tasks[res.idx]
+		// Update the database row immediately
 		updateQuery := fmt.Sprintf(
 			"UPDATE %s SET %s = $1 WHERE id = $2",
 			task.table, task.column,
 		)
-		if _, err := neonDB.ExecContext(ctx, updateQuery, res.s3URL, task.rowID); err != nil {
+		if _, err := neonDB.ExecContext(ctx, updateQuery, presigned.URL, task.rowID); err != nil {
 			slog.Warn("generateAndStoreSeedImages: update failed",
 				"table", task.table, "row_id", task.rowID, "error", err)
 			continue
@@ -1632,7 +1614,7 @@ func (c *Controller) generateAndStoreSeedImages(
 
 	slog.Info("generateAndStoreSeedImages: complete",
 		"project_id", project.ID,
-		"generated", len(results),
+		"total", totalImages,
 		"updated", updated)
 }
 
