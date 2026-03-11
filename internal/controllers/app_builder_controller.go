@@ -1218,58 +1218,71 @@ func (c *Controller) runChatToolPhase(
 	return collectedContext.String()
 }
 
-// runPreGenWebSearch runs a web-search-only tool phase before initial generation.
+// runPreGenWebSearch runs a web-search + screenshot tool phase before initial generation.
 // Unlike runChatToolPhase (which also offers preview_website and manage_store),
-// this only exposes web_search so the fast model can research referenced websites,
-// technologies, APIs, or any topic that benefits from up-to-date information.
-// Returns the search results as context text, or "" if web search is unavailable
-// or not needed.
+// this only exposes web_search and take_screenshot so the fast model can research
+// referenced websites visually and textually.
+// Returns the search results as context text, or "" if no tools were needed.
 func (c *Controller) runPreGenWebSearch(
 	ctx context.Context,
 	provider *utils.LLMProvider,
 	userMessage string,
 	sendEvent func(string, any) bool,
 ) string {
-	ws := provider.WebSearchTool()
-	if ws == nil {
+	fastModel := provider.FastModel()
+	tools := []utils.Tool{chatTakeScreenshotTool}
+	if ws := provider.WebSearchTool(); ws != nil {
+		tools = append(tools, *ws)
+	}
+
+	// If no web search and no screenshot API key, skip entirely
+	screenshotAvailable := c.SecretManager.GetSecret("SITESHOT_API_KEY") != ""
+	if len(tools) == 1 && !screenshotAvailable {
 		return ""
 	}
 
-	fastModel := provider.FastModel()
-	tools := []utils.Tool{*ws}
+	systemPrompt := `You are a research assistant. Analyze the user's prompt and decide if web search or screenshots would help gather context for building their website/app.
 
-	systemPrompt := `You are a research assistant. Analyze the user's prompt and decide if web search would help gather context for building their website/app.
-
-Search when the user:
-- References an existing website or domain name (e.g. "shiftdelete.net", "airbnb clone") — search to understand what that site is, its design, features, and content
+Search and/or take screenshots when the user:
+- References an existing website or domain name (e.g. "shiftdelete.net", "airbnb clone") — search to understand what that site is, AND take a screenshot to see its actual visual design (colors, layout, typography)
 - Mentions specific technologies, APIs, or services that may need current documentation
 - Asks for something that benefits from up-to-date information (pricing, trends, latest versions)
 - Wants to clone, replicate, or be inspired by a real website or product
 
-Do NOT search when:
+IMPORTANT: When a user references a real website, ALWAYS call take_screenshot with the website URL. Web search results alone cannot reliably tell you the exact colors, layout, or visual style of a website. The screenshot is essential for accurate color matching and design replication.
+
+Do NOT search/screenshot when:
 - The user describes a generic app/website from scratch without referencing real sites
 - The prompt is self-contained and doesn't need external context
 
-When searching for a website, make multiple searches to gather comprehensive info:
-1. Search for the website itself to understand what it is
-2. Search for its key features, design style, or content structure
+When researching a website, do both:
+1. Use web_search to understand what the site is, its features, and content
+2. Use take_screenshot to capture the actual visual design (colors, layout, typography)
 
 Be thorough — the results will be used to generate an accurate replica/revision.
-If no search is needed, respond with just: NO_SEARCH_NEEDED`
+If no search or screenshot is needed, respond with just: NO_SEARCH_NEEDED`
 
 	messages := []utils.Message{
 		{Role: "system", Content: systemPrompt},
 		{Role: "user", Content: userMessage},
 	}
 
+	var collectedContext strings.Builder
+
+	executor := func(name string, arguments string) (string, error) {
+		switch name {
+		case "take_screenshot":
+			return c.executeChatTakeScreenshot(arguments, &collectedContext)
+		default:
+			return "", fmt.Errorf("unexpected client tool call: %s", name)
+		}
+	}
+
 	result, err := utils.StreamWithTools(
 		ctx, fastModel, messages,
 		tools, provider,
 		nil, nil, // no response format, no reasoning
-		func(name string, arguments string) (string, error) {
-			// Only web_search is available — handled server-side by the provider
-			return "", fmt.Errorf("unexpected client tool call: %s", name)
-		},
+		executor,
 		nil, // onToolCall
 		nil, // onChunk — discard fast model text
 		nil, // onReasoning
@@ -1284,15 +1297,26 @@ If no search is needed, respond with just: NO_SEARCH_NEEDED`
 
 	if err != nil {
 		slog.Warn("Pre-gen web search phase failed, continuing without context", "error", err)
+		if collectedContext.Len() > 0 {
+			return collectedContext.String()
+		}
 		return ""
 	}
 
+	// Combine collected context (from take_screenshot) with web search text
 	trimmed := strings.TrimSpace(result)
-	if trimmed == "" || trimmed == "NO_SEARCH_NEEDED" {
-		return ""
+	if collectedContext.Len() == 0 {
+		if trimmed == "" || trimmed == "NO_SEARCH_NEEDED" {
+			return ""
+		}
+		return "Web search context:\n" + trimmed
 	}
 
-	return "Web search context:\n" + trimmed
+	// We have screenshot context — append web search text if any
+	if trimmed != "" && trimmed != "NO_SEARCH_NEEDED" {
+		collectedContext.WriteString("\nWeb search context:\n" + trimmed)
+	}
+	return collectedContext.String()
 }
 
 // executeChatPreviewWebsite handles the preview_website tool call in the chat tool phase.
