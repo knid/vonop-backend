@@ -798,6 +798,8 @@ func getTemplateContent(path string, colorScheme, darkColorScheme map[string]any
 		return buildGlobalsCSSTheme(colorScheme, darkColorScheme, projectType == "mobile_app")
 	case ".gitignore":
 		return constants.NEXTJS_TEMPLATE_GITIGNORE
+	case "app/not-found.tsx":
+		return constants.NEXTJS_TEMPLATE_NOT_FOUND
 	case "lib/db.ts":
 		return constants.NEXTJS_TEMPLATE_DB_TS
 	case "lib/schema.ts":

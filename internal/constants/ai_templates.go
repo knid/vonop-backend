@@ -10,6 +10,7 @@ var NEXTJS_TEMPLATE_FILE_PATHS = []string{
 	"postcss.config.mjs",
 	"next.config.mjs",
 	"app/globals.css",
+	"app/not-found.tsx",
 	".gitignore",
 }
 
@@ -193,6 +194,65 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+`
+
+// NEXTJS_TEMPLATE_NOT_FOUND is the custom 404 page. It shows the missing path and a
+// "Create with AI" button that posts a message to the parent Wemob studio to trigger
+// page creation via chat.
+const NEXTJS_TEMPLATE_NOT_FOUND = `"use client"
+
+import { useEffect, useState } from "react"
+import Link from "next/link"
+import { usePathname } from "next/navigation"
+
+export default function NotFound() {
+  const pathname = usePathname()
+  const [isEmbedded, setIsEmbedded] = useState(false)
+
+  useEffect(() => {
+    setIsEmbedded(window.self !== window.top)
+  }, [])
+
+  const handleCreateWithAI = () => {
+    window.parent.postMessage(
+      { type: "wemob-create-page", path: pathname },
+      "*"
+    )
+  }
+
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-background">
+      <div className="text-center space-y-6 px-4">
+        <div className="space-y-2">
+          <h1 className="text-7xl font-bold text-foreground/10">404</h1>
+          <p className="text-lg text-muted-foreground">This page could not be found.</p>
+          {pathname && (
+            <p className="text-sm text-muted-foreground/60 font-mono">{pathname}</p>
+          )}
+        </div>
+        <div className="flex flex-col items-center gap-3">
+          {isEmbedded && (
+            <button
+              onClick={handleCreateWithAI}
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors"
+            >
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M8 2L9.5 6.5L14 8L9.5 9.5L8 14L6.5 9.5L2 8L6.5 6.5L8 2Z" fill="currentColor" />
+              </svg>
+              Create with AI
+            </button>
+          )}
+          <Link
+            href="/"
+            className="text-sm text-muted-foreground hover:text-foreground transition-colors underline underline-offset-4"
+          >
+            Back to home
+          </Link>
+        </div>
+      </div>
+    </div>
+  )
+}
 `
 
 // NEXTJS_TEMPLATE_DB_TS is the database connection file using Neon serverless + Drizzle ORM.
