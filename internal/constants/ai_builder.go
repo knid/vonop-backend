@@ -52,6 +52,7 @@ const builderFrameworkRulesBase = `
 - cn() from @/lib/utils for conditional classes (clsx + tailwind-merge). lib/utils.ts is template-managed — do NOT recreate it.
 - lib/utils.ts and components/ui/ primitives (button, card, input, badge, skeleton) are template-managed. Do NOT recreate or modify them. Import directly: import { Button } from '@/components/ui/button'.
 - Custom Tailwind theme colors: primary, secondary, accent, background, surface, text. Use as classes (bg-primary, text-accent).
+- app/not-found.tsx is template-managed — do NOT recreate or modify it. It provides a custom 404 page with "Create with AI" integration.
 - **LOCKED versions** (do NOT modify or rewrite package.json — it is template-managed and read-only):
   next@^16.0.0, react@^19.0.0, react-dom@^19.0.0, typescript@^5.4.0, tailwindcss@^4.0.0
   Pre-installed: lucide-react, clsx, tailwind-merge, class-variance-authority, framer-motion, zustand, axios, date-fns, zod, react-hook-form, @hookform/resolvers, recharts, sonner, next-themes, @tanstack/react-query, @tanstack/react-table, react-day-picker, react-resizable-panels, cmdk, input-otp, vaul, swr, embla-carousel-react, react-markdown, @radix-ui/* primitives.
