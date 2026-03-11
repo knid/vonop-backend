@@ -1747,6 +1747,8 @@ func (c *Controller) executeChatExecuteSQL(
 		for _, v := range values {
 			if v == nil {
 				rowVals = append(rowVals, "NULL")
+			} else if b, ok := v.([]byte); ok {
+				rowVals = append(rowVals, string(b))
 			} else {
 				rowVals = append(rowVals, fmt.Sprintf("%v", v))
 			}
