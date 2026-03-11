@@ -189,7 +189,8 @@ Rules:
 - Mention the most relevant findings (design style, key features, content structure)
 - Keep it short: 2-3 sentences max
 - No markdown headers, no bullet points, no code
-- Sound enthusiastic but professional`
+- Sound enthusiastic but professional
+- Do NOT ask any questions — just summarize what you found. Questions will be asked separately afterward if needed.`
 
 	CONVERSATION_DECISION_PROMPT = `You are a product expert. Decide whether the user's app-building prompt needs a short conversation to clarify requirements before building.
 

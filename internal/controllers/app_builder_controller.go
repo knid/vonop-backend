@@ -491,8 +491,9 @@ func (c *Controller) StreamBuildApp(
 	// --- Conversational pre-build phase (replaces old clarification questions) ---
 	if isInitialGeneration && jobID != "" {
 		// Phase A: Stream a summary of web search results to the user
+		var webSummaryText string
 		if preGenToolContext != "" {
-			c.streamWebSearchSummary(ctx, provider, preGenToolContext, message, sendEvent)
+			webSummaryText = c.streamWebSearchSummary(ctx, provider, preGenToolContext, message, sendEvent)
 		}
 
 		if ctx.Err() != nil {
@@ -500,7 +501,7 @@ func (c *Controller) StreamBuildApp(
 		}
 
 		// Phase B: Natural conversation loop (if prompt is vague)
-		message = c.runConversationLoop(ctx, jobID, provider, message, preGenToolContext, project.ProjectType, sendEvent)
+		message = c.runConversationLoop(ctx, jobID, provider, message, preGenToolContext, webSummaryText, project.ProjectType, sendEvent)
 
 		if ctx.Err() != nil {
 			return
@@ -4017,7 +4018,7 @@ func (c *Controller) streamWebSearchSummary(
 	webContext string,
 	userMessage string,
 	sendEvent func(string, any) bool,
-) {
+) string {
 	fastModel := provider.FastModel()
 	messages := []utils.Message{
 		{Role: "system", Content: constants.CONVERSATION_WEB_SUMMARY_PROMPT},
@@ -4034,9 +4035,10 @@ func (c *Controller) streamWebSearchSummary(
 	)
 	if err != nil {
 		slog.Warn("failed to stream web search summary", "error", err)
-		return
+		return ""
 	}
 	sendEvent("conversation_done", map[string]any{"type": "web_summary", "text": fullText})
+	return fullText
 }
 
 // runConversationLoop checks if the prompt needs clarification and runs a natural
@@ -4048,6 +4050,7 @@ func (c *Controller) runConversationLoop(
 	provider *utils.LLMProvider,
 	message string,
 	webContext string,
+	webSummaryText string,
 	projectType string,
 	sendEvent func(string, any) bool,
 ) string {
@@ -4083,6 +4086,10 @@ func (c *Controller) runConversationLoop(
 	// Step 3: Conversation loop (max 3 turns)
 	conversationHistory := []conversationTurn{
 		{Role: "user", Content: message},
+	}
+	// If we already streamed a web summary, include it so the LLM doesn't repeat itself
+	if webSummaryText != "" {
+		conversationHistory = append(conversationHistory, conversationTurn{Role: "assistant", Content: webSummaryText})
 	}
 
 	for turn := 0; turn < 3; turn++ {
