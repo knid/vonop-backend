@@ -10,10 +10,12 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/models"
+	"github.com/knid/wemob/internal/services/fal"
 	"github.com/knid/wemob/internal/utils"
 
 	_ "github.com/lib/pq"
@@ -1256,7 +1258,8 @@ Rules:
 7. Return ONLY valid SQL INSERT statements, no explanations.
 8. Use single-line INSERT statements (one per row).
 9. Do NOT include CREATE TABLE or DROP statements.
-10. Do NOT wrap the output in markdown code fences. Return raw SQL only.`, schemaDesc.String(), utils.SanitizePromptContent(project.Prompt))
+10. Do NOT wrap the output in markdown code fences. Return raw SQL only.
+11. CRITICAL: For image/photo columns (cover_image, image_url, avatar_url, thumbnail, photo, banner, logo, icon, etc.), set them to NULL. Images will be generated separately by the platform. Do NOT use placeholder URLs or fake image paths.`, schemaDesc.String(), utils.SanitizePromptContent(project.Prompt))
 
 	sendEvent("neon_provision", map[string]any{"phase": "seeding_data"})
 
@@ -1301,6 +1304,230 @@ Rules:
 	slog.Info("Neon database seeded", "project_id", project.ID)
 
 	return "Seeded database with sample data.", nil
+}
+
+// imageColumnNames are column names that typically hold image URLs.
+var imageColumnNames = map[string]bool{
+	"cover_image": true, "image": true, "image_url": true,
+	"avatar_url": true, "thumbnail": true, "thumbnail_url": true,
+	"photo": true, "photo_url": true, "banner": true, "banner_url": true,
+	"logo": true, "logo_url": true, "icon": true, "icon_url": true,
+}
+
+// generateAndStoreSeedImages scans the data models for image columns, queries
+// the seeded database for rows with NULL image values, generates AI images
+// via fal.ai, uploads them to S3, and UPDATEs the rows with presigned URLs.
+// Best-effort: failures are logged but don't block generation.
+func (c *Controller) generateAndStoreSeedImages(
+	ctx context.Context,
+	project *models.AppProject,
+	dataModels []DataModel,
+	sendEvent func(string, any) bool,
+	maxImages int,
+) {
+	apiKey := c.SecretManager.GetSecret("FAL_API_KEY")
+	if apiKey == "" {
+		slog.Debug("generateAndStoreSeedImages: FAL_API_KEY not set, skipping")
+		return
+	}
+
+	falModel := c.SecretManager.GetSecret("FAL_IMAGE_MODEL")
+	if falModel == "" {
+		falModel = "fal-ai/flux/schnell"
+	}
+
+	// Find tables with image columns
+	type imageCol struct {
+		table  string
+		column string
+	}
+	var imageCols []imageCol
+	for _, m := range dataModels {
+		for _, col := range m.Columns {
+			if imageColumnNames[col.Name] && col.Type == "text" {
+				imageCols = append(imageCols, imageCol{table: m.Name, column: col.Name})
+			}
+		}
+	}
+
+	if len(imageCols) == 0 {
+		return
+	}
+
+	connStr := c.neonConnString(project.ID.String())
+	if connStr == "" {
+		return
+	}
+
+	neonDB, err := sql.Open("postgres", neonConnStrWithEndpoint(connStr))
+	if err != nil {
+		slog.Warn("generateAndStoreSeedImages: failed to connect", "error", err)
+		return
+	}
+	defer neonDB.Close()
+
+	sendEvent("tool_start", map[string]any{"tool": "generate_seed_images"})
+
+	// Collect rows that need images
+	type imageTask struct {
+		table    string
+		column   string
+		rowID    string
+		prompt   string
+	}
+	var tasks []imageTask
+
+	// Get a descriptive name for the row to build a prompt
+	for _, ic := range imageCols {
+		// Find the "name" or "title" column for building image prompts
+		var titleCol string
+		for _, m := range dataModels {
+			if m.Name == ic.table {
+				for _, col := range m.Columns {
+					if col.Name == "title" || col.Name == "name" || col.Name == "product_name" {
+						titleCol = col.Name
+						break
+					}
+				}
+				break
+			}
+		}
+
+		// Query for rows with NULL image column, up to maxImages
+		query := fmt.Sprintf(
+			"SELECT id%s FROM %s WHERE %s IS NULL LIMIT %d",
+			func() string {
+				if titleCol != "" {
+					return ", " + titleCol
+				}
+				return ""
+			}(),
+			ic.table, ic.column, maxImages-len(tasks),
+		)
+
+		rows, err := neonDB.QueryContext(ctx, query)
+		if err != nil {
+			slog.Warn("generateAndStoreSeedImages: query failed", "table", ic.table, "error", err)
+			continue
+		}
+
+		for rows.Next() {
+			var rowID string
+			var title sql.NullString
+
+			if titleCol != "" {
+				if err := rows.Scan(&rowID, &title); err != nil {
+					continue
+				}
+			} else {
+				if err := rows.Scan(&rowID); err != nil {
+					continue
+				}
+			}
+
+			prompt := fmt.Sprintf("Professional, high-quality photo for %s", ic.table)
+			if title.Valid && title.String != "" {
+				prompt = fmt.Sprintf("Professional, high-quality photo related to: %s. Clean composition, editorial quality, suitable for a modern web application.", title.String)
+			}
+
+			tasks = append(tasks, imageTask{
+				table:  ic.table,
+				column: ic.column,
+				rowID:  rowID,
+				prompt: prompt,
+			})
+
+			if len(tasks) >= maxImages {
+				break
+			}
+		}
+		rows.Close()
+
+		if len(tasks) >= maxImages {
+			break
+		}
+	}
+
+	if len(tasks) == 0 {
+		return
+	}
+
+	slog.Info("generateAndStoreSeedImages: generating images",
+		"count", len(tasks), "project_id", project.ID)
+
+	// Generate images concurrently (max 3 at a time)
+	type imageResult struct {
+		idx    int
+		s3URL  string
+	}
+	results := make([]imageResult, 0, len(tasks))
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 3)
+
+	for i, task := range tasks {
+		wg.Add(1)
+		go func(idx int, t imageTask) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			cdnURL, err := fal.GenerateImage(ctx, apiKey, falModel, t.prompt)
+			if err != nil {
+				slog.Warn("generateAndStoreSeedImages: fal generation failed",
+					"table", t.table, "error", err)
+				return
+			}
+
+			imgData, err := downloadImage(ctx, cdnURL)
+			if err != nil {
+				slog.Warn("generateAndStoreSeedImages: download failed",
+					"table", t.table, "error", err)
+				return
+			}
+
+			s3Key := fmt.Sprintf("apps/%s/images/seed-%s-%d.jpg", project.ID, t.table, idx+1)
+			if err := c.AssetsStorage.UploadFileByteWithContentType(ctx, s3Key, imgData, "image/jpeg"); err != nil {
+				slog.Warn("generateAndStoreSeedImages: S3 upload failed",
+					"table", t.table, "error", err)
+				return
+			}
+
+			presigned, err := c.AssetsStorage.GetObject(ctx, s3Key, 7*24*3600)
+			if err != nil {
+				slog.Warn("generateAndStoreSeedImages: presign failed",
+					"s3_key", s3Key, "error", err)
+				return
+			}
+
+			mu.Lock()
+			results = append(results, imageResult{idx: idx, s3URL: presigned.URL})
+			mu.Unlock()
+		}(i, task)
+	}
+
+	wg.Wait()
+
+	// Update database rows with image URLs
+	updated := 0
+	for _, res := range results {
+		task := tasks[res.idx]
+		updateQuery := fmt.Sprintf(
+			"UPDATE %s SET %s = $1 WHERE id = $2",
+			task.table, task.column,
+		)
+		if _, err := neonDB.ExecContext(ctx, updateQuery, res.s3URL, task.rowID); err != nil {
+			slog.Warn("generateAndStoreSeedImages: update failed",
+				"table", task.table, "row_id", task.rowID, "error", err)
+			continue
+		}
+		updated++
+	}
+
+	slog.Info("generateAndStoreSeedImages: complete",
+		"project_id", project.ID,
+		"generated", len(results),
+		"updated", updated)
 }
 
 // getNeonIntegration returns the Neon integration for a project, if any.

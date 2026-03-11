@@ -972,6 +972,12 @@ func (c *Controller) saveGeneratedFile(
 		return
 	}
 
+	// Guard: block seed routes — the platform handles seeding, not user-facing API routes.
+	if strings.HasPrefix(path, "app/api/seed") || strings.HasPrefix(path, "app/api/migrate") {
+		slog.Warn("saveGeneratedFile: blocking seed/migrate route", "path", path)
+		return
+	}
+
 	// Guard: e-commerce projects must not have API routes (except auth) or drizzle files.
 	// All store data comes from the SDK, not custom API routes.
 	if project.ProjectType == "ecommerce" {
@@ -3013,6 +3019,14 @@ func (c *Controller) buildBuilderToolExecutor(ctx context.Context, project *mode
 			})
 			if seedErr != nil {
 				slog.Error("database seeding failed, tables will be empty", "error", seedErr, "project_id", project.ID)
+			} else if project.ProjectType != "ecommerce" {
+				// Generate AI images for seed data image columns and store in S3/DB
+				c.generateAndStoreSeedImages(ctx, project, dataModels, func(eventName string, data any) bool {
+					if cbs != nil {
+						return cbs.sendEvent(eventName, data)
+					}
+					return true
+				}, 10)
 			}
 			_ = seedResult
 
@@ -3029,7 +3043,7 @@ func (c *Controller) buildBuilderToolExecutor(ctx context.Context, project *mode
 			if seedErr == nil {
 				result.WriteString("\nREALISTIC DEMO DATA HAS BEEN INSERTED into all tables. The database is NOT empty — it contains sample rows. Do NOT create seed buttons, seed routes, or tell the user to load demo data. The app should display this data directly from the database.\n")
 			} else {
-				result.WriteString("\nWARNING: Demo data seeding failed. Generate code that shows graceful empty states and include an app/api/seed/route.ts that auto-seeds on first request.\n")
+				result.WriteString("\nWARNING: Demo data seeding failed. Generate code that shows graceful empty states when no data exists. Do NOT create seed routes or seed buttons — the platform will handle data seeding separately.\n")
 			}
 			result.WriteString("lib/db.ts and lib/schema.ts have been generated.\n")
 			result.WriteString("Use: import { db } from '@/lib/db' and import { tableName } from '@/lib/schema'\n")
@@ -3218,6 +3232,9 @@ func (c *Controller) runPreGenerationSetup(
 					// Seed database
 					if _, seedErr := c.seedNeonDatabase(ctx, project, dataModels, sendEvent); seedErr != nil {
 						slog.Error("pre-gen: database seeding failed", "error", seedErr, "project_id", project.ID)
+					} else if project.ProjectType != "ecommerce" {
+						// Generate AI images for seed data image columns and store in S3/DB
+						c.generateAndStoreSeedImages(ctx, project, dataModels, sendEvent, 10)
 					}
 				} else {
 					slog.Error("pre-gen: database provisioning failed", "error", neonErr, "project_id", project.ID)
@@ -3233,21 +3250,46 @@ func (c *Controller) runPreGenerationSetup(
 		if needsAuth, ok := settings["needs_auth"].(bool); ok && needsAuth {
 			// Auth templates import from ./db, so lib/db.ts must exist.
 			// If no data_models were planned (e.g. e-commerce uses wemob-store SDK),
-			// provision a database with just the users table.
+			// provision a database. Use all project data models if available, otherwise just auth models.
 			if _, hasDB := fileMap["lib/db.ts"]; !hasDB && c.NeonService != nil {
 				var authModels []DataModel
 				if err := json.Unmarshal([]byte(constants.AUTH_DEFAULT_DATA_MODELS), &authModels); err == nil {
+					// If project has data models, use them merged with auth models (not just auth)
+					modelsToProvision := authModels
+					if len(project.DataModels) > 0 {
+						var projectModels []DataModel
+						if err := json.Unmarshal(project.DataModels, &projectModels); err == nil && len(projectModels) > 0 {
+							// Merge auth columns into project models
+							for _, authModel := range authModels {
+								found := false
+								for i, m := range projectModels {
+									if m.Name == authModel.Name {
+										projectModels[i] = mergeDataModelColumns(authModel, m)
+										found = true
+										break
+									}
+								}
+								if !found {
+									projectModels = append([]DataModel{authModel}, projectModels...)
+								}
+							}
+							modelsToProvision = projectModels
+						}
+					}
+
 					sendEvent("neon_provision", map[string]any{"phase": "start"})
-					connStr, neonProjectID, neonErr := c.provisionNeonDatabase(ctx, project, authModels, sendEvent)
+					connStr, neonProjectID, neonErr := c.provisionNeonDatabase(ctx, project, modelsToProvision, sendEvent)
 					if connStr != "" && neonProjectID != "" && neonErr == nil {
 						if err := c.storeNeonIntegration(project, connStr, neonProjectID); err != nil {
 							slog.Error("pre-gen auth: failed to store neon integration", "error", err, "project_id", project.ID)
 						}
 						c.injectTemplateFile(project, "lib/db.ts", constants.NEXTJS_TEMPLATE_DB_TS, fileMap, sendEvent)
-						schemaContent := buildDrizzleSchema(authModels)
+						schemaContent := buildDrizzleSchema(modelsToProvision)
 						c.injectTemplateFile(project, "lib/schema.ts", schemaContent, fileMap, sendEvent)
-						if _, seedErr := c.seedNeonDatabase(ctx, project, authModels, sendEvent); seedErr != nil {
+						if _, seedErr := c.seedNeonDatabase(ctx, project, modelsToProvision, sendEvent); seedErr != nil {
 							slog.Error("pre-gen auth: database seeding failed", "error", seedErr, "project_id", project.ID)
+						} else if project.ProjectType != "ecommerce" {
+							c.generateAndStoreSeedImages(ctx, project, modelsToProvision, sendEvent, 10)
 						}
 					} else {
 						slog.Error("pre-gen auth: database provisioning failed", "error", neonErr, "project_id", project.ID)
@@ -3475,7 +3517,8 @@ func (c *Controller) streamSingleShotGeneration(
 }
 
 // aiImagePlaceholderRegex matches __AI_IMAGE("prompt text")__ markers in generated code.
-var aiImagePlaceholderRegex = regexp.MustCompile(`__AI_IMAGE\("([^"]+)"\)__`)
+// The trailing __ is optional because LLMs sometimes omit it.
+var aiImagePlaceholderRegex = regexp.MustCompile(`__AI_IMAGE\("([^"]+)"\)(?:__)?`)
 
 // generateAppLogo generates an AI logo for the app via fal.ai, uploads it to S3,
 // and returns a presigned URL. Returns "" on any failure (best-effort).
