@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -1099,6 +1100,11 @@ func (c *Controller) runChatToolPhase(
 	if isEcommerce {
 		tools = append(tools, chatManageStoreTool)
 	}
+	// Add database tools if the project has a provisioned database
+	hasDB := c.neonConnString(project.ID.String()) != ""
+	if hasDB {
+		tools = append(tools, chatSeedDatabaseTool, chatExecuteSQLTool)
+	}
 	if ws := provider.WebSearchTool(); ws != nil {
 		tools = append(tools, *ws)
 	}
@@ -1106,6 +1112,11 @@ func (c *Controller) runChatToolPhase(
 	systemPrompt := `You are a pre-processing assistant. Analyze the user's message and decide if any tools should be called.
 - If the user provides a URL or asks to convert/clone/replicate a website, call preview_website with the URL.
 - If the user asks about current technologies, APIs, documentation, pricing, latest versions, or anything that benefits from up-to-date web information, use web_search to find accurate information.`
+	if hasDB {
+		systemPrompt += `
+- If the user says the database is empty, has no data, asks for demo/sample/test data, or complains about missing content, call seed_database to populate it with realistic data.
+- If you need to check whether the database has data before seeding, call execute_sql with a COUNT query first (e.g. SELECT COUNT(*) FROM table_name).`
+	}
 	if isEcommerce {
 		systemPrompt += `
 - If the user asks to add/create/update/delete products, categories, or discounts, call manage_store with the appropriate operations.
@@ -1134,6 +1145,10 @@ func (c *Controller) runChatToolPhase(
 			return c.executeChatPreviewWebsite(arguments, project, sendEvent, &collectedContext)
 		case "manage_store":
 			return c.executeChatManageStore(arguments, project, sendEvent, &collectedContext)
+		case "seed_database":
+			return c.executeChatSeedDatabase(ctx, project, sendEvent, &collectedContext)
+		case "execute_sql":
+			return c.executeChatExecuteSQL(ctx, arguments, project, &collectedContext)
 		default:
 			return fmt.Sprintf("Unknown tool: %s", name), nil
 		}
@@ -1378,6 +1393,141 @@ func (c *Controller) executeChatManageStore(
 		"succeeded", len(args.Operations)-errCount,
 		"failed", errCount,
 	)
+	return summary, nil
+}
+
+// executeChatSeedDatabase handles the seed_database tool call in the chat tool phase.
+func (c *Controller) executeChatSeedDatabase(
+	ctx context.Context,
+	project *models.AppProject,
+	sendEvent func(string, any) bool,
+	collectedContext *strings.Builder,
+) (string, error) {
+	var dataModels []DataModel
+	if len(project.DataModels) > 0 {
+		if err := json.Unmarshal(project.DataModels, &dataModels); err != nil {
+			return fmt.Sprintf("Error: failed to parse data models: %s", err.Error()), nil
+		}
+	}
+	if len(dataModels) == 0 {
+		return "Error: No database schema found. The database must be set up first.", nil
+	}
+
+	sendEvent("tool_call", responses.ToolCallEvent{
+		Tool:      "seed_database",
+		Arguments: "{}",
+	})
+
+	_, seedErr := c.seedNeonDatabase(ctx, project, dataModels, sendEvent)
+	if seedErr != nil {
+		slog.Error("seed_database tool failed", "error", seedErr, "project_id", project.ID)
+		return fmt.Sprintf("Database seeding failed: %s", seedErr.Error()), nil
+	}
+
+	// Generate AI images for seed data image columns
+	if project.ProjectType != "ecommerce" {
+		c.generateAndStoreSeedImages(ctx, project, dataModels, sendEvent, 10)
+	}
+
+	collectedContext.WriteString("\n[Database Seeded]\nThe database has been populated with realistic demo data and AI-generated images. The app should now display this data when querying the database. Do NOT create seed scripts, seed buttons, or seed API routes — the data is already in the database.\n")
+	slog.Info("seed_database tool called via fast model", "project_id", project.ID)
+	return "Database seeded successfully with realistic demo data.", nil
+}
+
+// executeChatExecuteSQL handles the execute_sql tool call in the chat tool phase.
+func (c *Controller) executeChatExecuteSQL(
+	ctx context.Context,
+	arguments string,
+	project *models.AppProject,
+	collectedContext *strings.Builder,
+) (string, error) {
+	var args struct {
+		Query string `json:"query"`
+	}
+	if err := json.Unmarshal([]byte(arguments), &args); err != nil {
+		return fmt.Sprintf("Error: invalid arguments: %s", err.Error()), nil
+	}
+
+	query := strings.TrimSpace(args.Query)
+	if query == "" {
+		return "Error: query is required", nil
+	}
+
+	// Validate read-only — reject anything that isn't a SELECT
+	upper := strings.ToUpper(query)
+	if !strings.HasPrefix(upper, "SELECT") && !strings.HasPrefix(upper, "WITH") {
+		return "Error: only SELECT queries are allowed.", nil
+	}
+	// Extra safety: reject write keywords anywhere in the query
+	for _, kw := range []string{"INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "CREATE", "TRUNCATE", "GRANT", "REVOKE"} {
+		if strings.Contains(upper, kw) {
+			return fmt.Sprintf("Error: query contains disallowed keyword: %s", kw), nil
+		}
+	}
+
+	neonDB, err := c.openNeonDB(project.ID.String())
+	if err != nil {
+		return fmt.Sprintf("Error: failed to connect to database: %s", err.Error()), nil
+	}
+	defer neonDB.Close()
+
+	// Use read-only transaction with timeout
+	queryCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	tx, err := neonDB.BeginTx(queryCtx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return fmt.Sprintf("Error: failed to begin read-only transaction: %s", err.Error()), nil
+	}
+	defer tx.Rollback()
+
+	rows, err := tx.QueryContext(queryCtx, query)
+	if err != nil {
+		return fmt.Sprintf("Query error: %s", err.Error()), nil
+	}
+	defer rows.Close()
+
+	cols, err := rows.Columns()
+	if err != nil {
+		return fmt.Sprintf("Error reading columns: %s", err.Error()), nil
+	}
+
+	var result strings.Builder
+	result.WriteString(strings.Join(cols, " | "))
+	result.WriteString("\n")
+
+	rowCount := 0
+	for rows.Next() && rowCount < 50 {
+		values := make([]any, len(cols))
+		valuePtrs := make([]any, len(cols))
+		for i := range values {
+			valuePtrs[i] = &values[i]
+		}
+		if err := rows.Scan(valuePtrs...); err != nil {
+			continue
+		}
+		var rowVals []string
+		for _, v := range values {
+			if v == nil {
+				rowVals = append(rowVals, "NULL")
+			} else {
+				rowVals = append(rowVals, fmt.Sprintf("%v", v))
+			}
+		}
+		result.WriteString(strings.Join(rowVals, " | "))
+		result.WriteString("\n")
+		rowCount++
+	}
+
+	var summary string
+	if rowCount == 0 {
+		summary = fmt.Sprintf("Query returned 0 rows. Columns: %s", strings.Join(cols, ", "))
+	} else {
+		summary = fmt.Sprintf("%d row(s):\n%s", rowCount, result.String())
+	}
+
+	collectedContext.WriteString(fmt.Sprintf("\n[Database Query Result]\nQuery: %s\n%s\n", query, summary))
+	slog.Info("execute_sql tool called via fast model", "project_id", project.ID, "rows", rowCount)
 	return summary, nil
 }
 
@@ -2463,6 +2613,40 @@ var chatPreviewWebsiteTool = utils.Tool{
 				},
 			},
 			"required": []string{"url"},
+		},
+	},
+}
+
+// chatSeedDatabaseTool lets the fast model seed or reseed the app's Neon database
+// with realistic demo data when the user reports missing data.
+var chatSeedDatabaseTool = utils.Tool{
+	Type: "function",
+	Function: utils.ToolFunction{
+		Name:        "seed_database",
+		Description: "Seed the app's database with realistic demo data. Call this when the user says the database is empty, has no data, or asks for demo/sample/test data to be added.",
+		Parameters: map[string]any{
+			"type":       "object",
+			"properties": map[string]any{},
+		},
+	},
+}
+
+// chatExecuteSQLTool lets the fast model run read-only queries on the app's Neon
+// database to inspect data state before deciding what action to take.
+var chatExecuteSQLTool = utils.Tool{
+	Type: "function",
+	Function: utils.ToolFunction{
+		Name:        "execute_sql",
+		Description: "Run a read-only SQL SELECT query on the app's database to inspect its contents. Use this to check if tables have data, verify data state, or answer user questions about the database. Only SELECT queries are allowed.",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"query": map[string]any{
+					"type":        "string",
+					"description": "A SQL SELECT query to execute (e.g. 'SELECT COUNT(*) FROM articles'). Only SELECT statements allowed.",
+				},
+			},
+			"required": []string{"query"},
 		},
 	},
 }
