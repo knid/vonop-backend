@@ -3025,6 +3025,11 @@ func (c *Controller) buildBuilderToolExecutor(ctx context.Context, project *mode
 			for _, dm := range dataModels {
 				result.WriteString(fmt.Sprintf("  - %s (%d columns)\n", dm.Name, len(dm.Columns)))
 			}
+			if seedErr == nil {
+				result.WriteString("\nREALISTIC DEMO DATA HAS BEEN INSERTED into all tables. The database is NOT empty — it contains sample rows. Do NOT create seed buttons, seed routes, or tell the user to load demo data. The app should display this data directly from the database.\n")
+			} else {
+				result.WriteString("\nWARNING: Demo data seeding failed. Generate code that shows graceful empty states and include an app/api/seed/route.ts that auto-seeds on first request.\n")
+			}
 			result.WriteString("lib/db.ts and lib/schema.ts have been generated.\n")
 			result.WriteString("Use: import { db } from '@/lib/db' and import { tableName } from '@/lib/schema'\n")
 			result.WriteString("Use Drizzle ORM for queries: db.select().from(tableName)\n")
