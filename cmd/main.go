@@ -394,9 +394,10 @@ func seedPlans(db *database.Database, sm secret.SecretManager) {
 	}
 
 	for _, p := range plans {
-		existing, err := db.GetSubscriptionByName(p.Name)
+		// First check including soft-deleted rows to prevent unique constraint violations
+		existing, err := db.GetSubscriptionByNameIncludeDeleted(p.Name)
 		if err != nil {
-			// Plan doesn't exist — create limits then subscription
+			// Plan truly doesn't exist — create limits then subscription
 			limits := p.Limits
 			createdLimits, err := db.CreateStandartUserLimits(&limits)
 			if err != nil {
@@ -414,10 +415,16 @@ func seedPlans(db *database.Database, sm secret.SecretManager) {
 			}
 			if _, err := db.CreateSubscription(sub); err != nil {
 				slog.Error("failed to create subscription plan", "plan", p.Name, "error", err)
-			} else {
-				slog.Info("created subscription plan", "plan", p.Name)
+				continue
 			}
+			slog.Info("created subscription plan", "plan", p.Name)
 			continue
+		}
+
+		// If plan was soft-deleted, restore it
+		if !existing.DeletedAt.IsZero() {
+			existing.DeletedAt = time.Time{}
+			slog.Info("restoring soft-deleted subscription plan", "plan", p.Name)
 		}
 
 		// Plan exists — update limits

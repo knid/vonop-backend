@@ -911,8 +911,13 @@ var sqlTypeMap = map[string]string{
 }
 
 // buildCreateTableSQL generates CREATE TABLE statements from DataModels.
+// All tables are created first, then all foreign key constraints are added,
+// so that tables can reference each other regardless of order.
 func buildCreateTableSQL(models []DataModel) string {
 	var sb strings.Builder
+	var fks strings.Builder
+
+	// First pass: create all tables
 	for _, m := range models {
 		sb.WriteString(fmt.Sprintf("CREATE TABLE IF NOT EXISTS %q (\n", m.Name))
 		for i, col := range m.Columns {
@@ -940,17 +945,20 @@ func buildCreateTableSQL(models []DataModel) string {
 		}
 		sb.WriteString(");\n\n")
 
-		// Add foreign key constraints after table creation
+		// Collect foreign key constraints for second pass
 		for _, col := range m.Columns {
 			if col.References != "" {
 				parts := strings.SplitN(col.References, ".", 2)
 				if len(parts) == 2 {
-					sb.WriteString(fmt.Sprintf("ALTER TABLE %q ADD CONSTRAINT fk_%s_%s FOREIGN KEY (%q) REFERENCES %q(%q) ON DELETE CASCADE;\n",
+					fks.WriteString(fmt.Sprintf("DO $$ BEGIN ALTER TABLE %q ADD CONSTRAINT fk_%s_%s FOREIGN KEY (%q) REFERENCES %q(%q) ON DELETE CASCADE; EXCEPTION WHEN duplicate_object THEN NULL; END $$;\n",
 						m.Name, m.Name, col.Name, col.Name, parts[0], parts[1]))
 				}
 			}
 		}
 	}
+
+	// Second pass: add all foreign key constraints after all tables exist
+	sb.WriteString(fks.String())
 	return sb.String()
 }
 
