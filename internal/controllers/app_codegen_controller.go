@@ -13,6 +13,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode"
 
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/models"
@@ -63,6 +64,27 @@ type ClarificationResult struct {
 type DataModel struct {
 	Name    string       `json:"name"`
 	Columns []DataColumn `json:"columns"`
+}
+
+// parseDataModels unmarshals project.DataModels handling both normal JSON arrays
+// and double-encoded strings (where the JSONB column contains `"[{...}]"` instead of `[{...}]`).
+func parseDataModels(raw []byte) ([]DataModel, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	var models []DataModel
+	if err := json.Unmarshal(raw, &models); err == nil {
+		return models, nil
+	}
+	// Might be double-encoded: a JSON string containing the array
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil && len(s) > 0 {
+		if err2 := json.Unmarshal([]byte(s), &models); err2 == nil {
+			return models, nil
+		}
+		return nil, fmt.Errorf("double-encoded data models could not be parsed: %s", s[:min(len(s), 80)])
+	}
+	return nil, fmt.Errorf("cannot parse data models: %s", string(raw[:min(len(raw), 80)]))
 }
 
 // DataColumn represents a column in a DataModel table.
@@ -1105,6 +1127,59 @@ func validateSeedSQL(sqlStr string) error {
 	return nil
 }
 
+// fixUnescapedSQLQuotes walks through SQL string literals and doubles any
+// single quotes that the LLM forgot to escape. It reconstructs the SQL by
+// parsing character-by-character, toggling an "inside string" flag on each
+// unescaped single quote boundary.
+func fixUnescapedSQLQuotes(sql string) string {
+	// Strategy: iterate through each SQL string literal (delimited by ')
+	// and for text inside literals, detect likely unescaped quotes.
+	// A quote is "unescaped" if it appears mid-word (letter'letter pattern).
+	var buf strings.Builder
+	buf.Grow(len(sql) + 100)
+
+	inString := false
+	runes := []rune(sql)
+	for i := 0; i < len(runes); i++ {
+		ch := runes[i]
+
+		if !inString {
+			buf.WriteRune(ch)
+			if ch == '\'' {
+				inString = true
+			}
+			continue
+		}
+
+		// Inside a string literal
+		if ch == '\'' {
+			// Already escaped: ''
+			if i+1 < len(runes) && runes[i+1] == '\'' {
+				buf.WriteRune('\'')
+				buf.WriteRune('\'')
+				i++ // skip next quote
+				continue
+			}
+			// Check if this quote is a mid-word apostrophe (letter'letter)
+			// e.g., Türkiye'nin — the quote between two letters is unescaped
+			if i > 0 && i+1 < len(runes) && unicode.IsLetter(runes[i-1]) && unicode.IsLetter(runes[i+1]) {
+				// This is an unescaped apostrophe inside a word — double it
+				buf.WriteRune('\'')
+				buf.WriteRune('\'')
+				continue
+			}
+			// End of string literal
+			buf.WriteRune('\'')
+			inString = false
+			continue
+		}
+
+		buf.WriteRune(ch)
+	}
+
+	return buf.String()
+}
+
 // toCamelCase converts snake_case to camelCase.
 func toCamelCase(s string) string {
 	parts := strings.Split(s, "_")
@@ -1267,7 +1342,8 @@ Rules:
 8. Use single-line INSERT statements (one per row).
 9. Do NOT include CREATE TABLE or DROP statements.
 10. Do NOT wrap the output in markdown code fences. Return raw SQL only.
-11. CRITICAL: For image/photo columns (cover_image, image_url, avatar_url, thumbnail, photo, banner, logo, icon, etc.), set them to NULL. Images will be generated separately by the platform. Do NOT use placeholder URLs or fake image paths.`, schemaDesc.String(), utils.SanitizePromptContent(project.Prompt))
+11. CRITICAL: For image/photo columns (cover_image, image_url, avatar_url, thumbnail, photo, banner, logo, icon, etc.), set them to NULL. Images will be generated separately by the platform. Do NOT use placeholder URLs or fake image paths.
+12. CRITICAL: Escape all single quotes inside string values by doubling them (e.g., 'Türkiye''nin' not 'Türkiye'nin'). This is standard PostgreSQL escaping and prevents syntax errors.`, schemaDesc.String(), utils.SanitizePromptContent(project.Prompt))
 
 	sendEvent("neon_provision", map[string]any{"phase": "seeding_data"})
 
@@ -1289,6 +1365,11 @@ Rules:
 	if seedSQL == "" {
 		return "", fmt.Errorf("LLM returned empty seed SQL")
 	}
+
+	// Fix unescaped single quotes inside SQL string literals.
+	// LLMs often forget to double-escape quotes in non-English text
+	// (e.g., Turkish: Türkiye'nin → should be Türkiye''nin).
+	seedSQL = fixUnescapedSQLQuotes(seedSQL)
 
 	// Validate that the seed SQL only contains INSERT statements
 	if err := validateSeedSQL(seedSQL); err != nil {

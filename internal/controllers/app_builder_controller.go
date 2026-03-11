@@ -3,6 +3,7 @@ package controllers
 import (
 	"context"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -20,6 +21,7 @@ import (
 	"github.com/knid/wemob/internal/services/fal"
 	"github.com/knid/wemob/internal/services/integrations"
 	"github.com/knid/wemob/internal/utils"
+	"github.com/knid/wemob/internal/utils/external"
 	"github.com/posthog/posthog-go"
 )
 
@@ -670,7 +672,7 @@ func (c *Controller) StreamBuildApp(
 		// Runs a cheap model with tools to detect URLs and gather extra context
 		// before the main code-gen call. If no tools are called the phase is a
 		// near-instant no-op.
-		toolContext := c.runChatToolPhase(ctx, project, provider, message, sendEvent)
+		toolContext := c.runChatToolPhase(ctx, project, provider, message, fileMap, sendEvent)
 		if toolContext != "" {
 			// Inject tool-gathered context as a system message before the user message
 			insertIdx := len(llmMessages) - 1 // before last user message
@@ -1090,12 +1092,20 @@ func (c *Controller) runChatToolPhase(
 	project *models.AppProject,
 	provider *utils.LLMProvider,
 	userMessage string,
+	fileMap map[string]string,
 	sendEvent func(string, any) bool,
 ) string {
 	fastModel := provider.FastModel()
 
-	// Build tools list — always include preview_website, add manage_store for e-commerce.
-	tools := []utils.Tool{chatPreviewWebsiteTool}
+	// Build tools list — always include these general tools.
+	tools := []utils.Tool{
+		chatPreviewWebsiteTool,
+		chatManageEnvVarsTool,
+		chatInstallPackageTool,
+		chatGenerateImageTool,
+		chatTakeScreenshotTool,
+		chatSearchComponentsTool,
+	}
 	isEcommerce := project.ProjectType == "ecommerce"
 	if isEcommerce {
 		tools = append(tools, chatManageStoreTool)
@@ -1103,19 +1113,25 @@ func (c *Controller) runChatToolPhase(
 	// Add database tools if the project has a provisioned database
 	hasDB := c.neonConnString(project.ID.String()) != ""
 	if hasDB {
-		tools = append(tools, chatSeedDatabaseTool, chatExecuteSQLTool)
+		tools = append(tools, chatSeedDatabaseTool, chatExecuteSQLTool, chatRunMigrationsTool)
 	}
 	if ws := provider.WebSearchTool(); ws != nil {
 		tools = append(tools, *ws)
 	}
 
-	systemPrompt := `You are a pre-processing assistant. Analyze the user's message and decide if any tools should be called.
-- If the user provides a URL or asks to convert/clone/replicate a website, call preview_website with the URL.
-- If the user asks about current technologies, APIs, documentation, pricing, latest versions, or anything that benefits from up-to-date web information, use web_search to find accurate information.`
+	systemPrompt := `You are a pre-processing assistant. Analyze the user's message and decide if any tools should be called BEFORE the main code-generation model runs.
+- If the user provides a URL or asks to convert/clone/replicate a website, call preview_website (and optionally take_screenshot to capture a visual reference).
+- If the user asks about current technologies, APIs, documentation, pricing, latest versions, or anything that benefits from up-to-date web information, use web_search to find accurate information.
+- If the user asks to set, add, or remove environment variables / API keys / secrets, call manage_env_vars.
+- If the user asks to install or add a specific npm package/library, call install_package.
+- If the user asks for a custom image, visual asset, hero background, or illustration, call generate_image to create it. The code-gen model can then use the returned URL.
+- If the user references a website and you want to see what it looks like visually, call take_screenshot with the URL.
+- If the user asks for a specific UI component (dialog, tabs, accordion, toast, dropdown, etc.) that may not be in the project yet, call search_components to find and inject it.`
 	if hasDB {
 		systemPrompt += `
 - If the user says the database is empty, has no data, asks for demo/sample/test data, or complains about missing content, call seed_database to populate it with realistic data.
-- If you need to check whether the database has data before seeding, call execute_sql with a COUNT query first (e.g. SELECT COUNT(*) FROM table_name).`
+- If you need to check whether the database has data before seeding, call execute_sql with a COUNT query first (e.g. SELECT COUNT(*) FROM table_name).
+- If the user asks to add/remove/rename database columns or create new tables, call run_migrations with the ALTER TABLE / CREATE TABLE SQL and the complete updated data model.`
 	}
 	if isEcommerce {
 		systemPrompt += `
@@ -1129,7 +1145,8 @@ func (c *Controller) runChatToolPhase(
   - Use list_products or list_categories to see current store data.`
 	}
 	systemPrompt += `
-- If the user's message is a normal chat request (code changes, questions, fixes), respond with just: NO_TOOLS_NEEDED
+- If the user's message is a normal chat request (code changes, questions, fixes) that doesn't need any of the above tools, respond with just: NO_TOOLS_NEEDED
+- You can call multiple tools if needed (e.g. generate_image + install_package).
 - Be brief. Only call tools when clearly needed.`
 
 	messages := []utils.Message{
@@ -1149,6 +1166,18 @@ func (c *Controller) runChatToolPhase(
 			return c.executeChatSeedDatabase(ctx, project, sendEvent, &collectedContext)
 		case "execute_sql":
 			return c.executeChatExecuteSQL(ctx, arguments, project, &collectedContext)
+		case "run_migrations":
+			return c.executeChatRunMigrations(ctx, arguments, project, fileMap, sendEvent, &collectedContext)
+		case "manage_env_vars":
+			return c.executeChatManageEnvVars(arguments, project, fileMap, sendEvent, &collectedContext)
+		case "install_package":
+			return c.executeChatInstallPackage(arguments, project, fileMap, sendEvent, &collectedContext)
+		case "generate_image":
+			return c.executeChatGenerateImage(ctx, arguments, project, sendEvent, &collectedContext)
+		case "take_screenshot":
+			return c.executeChatTakeScreenshot(arguments, &collectedContext)
+		case "search_components":
+			return c.executeChatSearchComponents(arguments, project, fileMap, sendEvent, &collectedContext)
 		default:
 			return fmt.Sprintf("Unknown tool: %s", name), nil
 		}
@@ -1163,7 +1192,7 @@ func (c *Controller) runChatToolPhase(
 		nil, // onChunk — discard fast model text output
 		nil, // onReasoning — not needed
 		utils.ToolCallConfig{
-			MaxRounds: 3,
+			MaxRounds: 5,
 			MaxTokens: 1024,
 			OnToolCallStart: func(toolName string) {
 				sendEvent("tool_start", map[string]string{"tool": toolName})
@@ -1403,11 +1432,9 @@ func (c *Controller) executeChatSeedDatabase(
 	sendEvent func(string, any) bool,
 	collectedContext *strings.Builder,
 ) (string, error) {
-	var dataModels []DataModel
-	if len(project.DataModels) > 0 {
-		if err := json.Unmarshal(project.DataModels, &dataModels); err != nil {
-			return fmt.Sprintf("Error: failed to parse data models: %s", err.Error()), nil
-		}
+	dataModels, err := parseDataModels(project.DataModels)
+	if err != nil {
+		return fmt.Sprintf("Error: failed to parse data models: %s", err.Error()), nil
 	}
 	if len(dataModels) == 0 {
 		return "Error: No database schema found. The database must be set up first.", nil
@@ -1421,6 +1448,7 @@ func (c *Controller) executeChatSeedDatabase(
 	_, seedErr := c.seedNeonDatabase(ctx, project, dataModels, sendEvent)
 	if seedErr != nil {
 		slog.Error("seed_database tool failed", "error", seedErr, "project_id", project.ID)
+		collectedContext.WriteString(fmt.Sprintf("\n[Database Seed Failed]\nSeeding failed with error: %s\nDo NOT create seed scripts, seed API routes, seed buttons, or migration routes as a workaround. Simply inform the user that seeding failed and suggest they try again.\n", seedErr.Error()))
 		return fmt.Sprintf("Database seeding failed: %s", seedErr.Error()), nil
 	}
 
@@ -1529,6 +1557,469 @@ func (c *Controller) executeChatExecuteSQL(
 	collectedContext.WriteString(fmt.Sprintf("\n[Database Query Result]\nQuery: %s\n%s\n", query, summary))
 	slog.Info("execute_sql tool called via fast model", "project_id", project.ID, "rows", rowCount)
 	return summary, nil
+}
+
+// executeChatRunMigrations handles schema changes on the app's Neon database.
+func (c *Controller) executeChatRunMigrations(
+	ctx context.Context,
+	arguments string,
+	project *models.AppProject,
+	fileMap map[string]string,
+	sendEvent func(string, any) bool,
+	collectedContext *strings.Builder,
+) (string, error) {
+	var args struct {
+		SQL           string      `json:"sql"`
+		UpdatedModels []DataModel `json:"updated_models"`
+	}
+	if err := json.Unmarshal([]byte(arguments), &args); err != nil {
+		return fmt.Sprintf("Error: invalid arguments: %s", err.Error()), nil
+	}
+	if strings.TrimSpace(args.SQL) == "" {
+		return "Error: sql is required", nil
+	}
+	if len(args.UpdatedModels) == 0 {
+		return "Error: updated_models is required", nil
+	}
+
+	// Validate SQL — only allow DDL statements
+	upper := strings.ToUpper(strings.TrimSpace(args.SQL))
+	for _, kw := range []string{"INSERT", "UPDATE", "DELETE", "SELECT", "TRUNCATE", "GRANT", "REVOKE"} {
+		if strings.HasPrefix(upper, kw) {
+			return fmt.Sprintf("Error: only DDL statements (ALTER TABLE, CREATE TABLE) are allowed, not %s", kw), nil
+		}
+	}
+
+	sendEvent("tool_call", responses.ToolCallEvent{Tool: "run_migrations", Arguments: arguments})
+
+	neonDB, err := c.openNeonDB(project.ID.String())
+	if err != nil {
+		return fmt.Sprintf("Error: failed to connect to database: %s", err.Error()), nil
+	}
+	defer neonDB.Close()
+
+	queryCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	if _, err := neonDB.ExecContext(queryCtx, args.SQL); err != nil {
+		return fmt.Sprintf("Migration failed: %s", err.Error()), nil
+	}
+
+	// Update stored data models
+	dmJSON, err := json.Marshal(args.UpdatedModels)
+	if err != nil {
+		return fmt.Sprintf("Migration applied but failed to update models: %s", err.Error()), nil
+	}
+	project.DataModels = dmJSON
+	if _, err := c.DB.UpdateAppProject(project); err != nil {
+		slog.Error("failed to save updated data models", "error", err, "project_id", project.ID)
+	}
+
+	// Regenerate lib/schema.ts
+	schemaContent := buildDrizzleSchema(args.UpdatedModels)
+	c.injectTemplateFile(project, "lib/schema.ts", schemaContent, fileMap, sendEvent)
+
+	collectedContext.WriteString("\n[Database Migrated]\nSchema changes applied successfully. lib/schema.ts has been regenerated. Update any code that uses the affected tables.\n")
+	slog.Info("run_migrations tool called", "project_id", project.ID)
+	return "Migration applied successfully. Schema updated.", nil
+}
+
+// executeChatManageEnvVars handles adding, updating, and deleting environment variables.
+func (c *Controller) executeChatManageEnvVars(
+	arguments string,
+	project *models.AppProject,
+	fileMap map[string]string,
+	sendEvent func(string, any) bool,
+	collectedContext *strings.Builder,
+) (string, error) {
+	var args struct {
+		Operations []struct {
+			Action   string `json:"action"`
+			Key      string `json:"key"`
+			Value    string `json:"value"`
+			IsPublic bool   `json:"is_public"`
+		} `json:"operations"`
+	}
+	if err := json.Unmarshal([]byte(arguments), &args); err != nil {
+		return fmt.Sprintf("Error: invalid arguments: %s", err.Error()), nil
+	}
+
+	sendEvent("tool_call", responses.ToolCallEvent{Tool: "manage_env_vars", Arguments: arguments})
+
+	var results []string
+	for _, op := range args.Operations {
+		switch op.Action {
+		case "set":
+			existing, err := c.DB.GetAppEnvVarByKey(project.ID.String(), op.Key)
+			if err == nil && existing.ID != uuid.Nil {
+				existing.Value = op.Value
+				existing.IsPublic = op.IsPublic
+				existing.UpdatedAt = time.Now()
+				if _, err := c.DB.UpdateAppEnvVar(existing); err != nil {
+					results = append(results, fmt.Sprintf("FAILED set %s: %s", op.Key, err.Error()))
+					continue
+				}
+			} else {
+				envVar := &models.AppEnvVar{
+					AppProjectID: project.ID,
+					Key:          op.Key,
+					Value:        op.Value,
+					IsPublic:     op.IsPublic,
+				}
+				if _, err := c.DB.CreateAppEnvVar(envVar); err != nil {
+					results = append(results, fmt.Sprintf("FAILED set %s: %s", op.Key, err.Error()))
+					continue
+				}
+			}
+			results = append(results, fmt.Sprintf("OK set %s", op.Key))
+
+		case "delete":
+			existing, err := c.DB.GetAppEnvVarByKey(project.ID.String(), op.Key)
+			if err != nil || existing.ID == uuid.Nil {
+				results = append(results, fmt.Sprintf("SKIPPED delete %s: not found", op.Key))
+				continue
+			}
+			if err := c.DB.DeleteAppEnvVar(existing); err != nil {
+				results = append(results, fmt.Sprintf("FAILED delete %s: %s", op.Key, err.Error()))
+				continue
+			}
+			results = append(results, fmt.Sprintf("OK delete %s", op.Key))
+		}
+	}
+
+	// Regenerate .env.local
+	envVars := c.CollectAllEnvVars(project)
+	if dotEnv := BuildDotEnvLocal(envVars); dotEnv != "" {
+		c.injectTemplateFile(project, ".env.local", dotEnv, fileMap, sendEvent)
+	}
+
+	summary := strings.Join(results, "\n")
+	collectedContext.WriteString(fmt.Sprintf("\n[Environment Variables Updated]\n%s\n.env.local has been regenerated.\n", summary))
+	slog.Info("manage_env_vars tool called", "project_id", project.ID, "operations", len(args.Operations))
+	return summary, nil
+}
+
+// executeChatInstallPackage adds npm packages to package.json.
+func (c *Controller) executeChatInstallPackage(
+	arguments string,
+	project *models.AppProject,
+	fileMap map[string]string,
+	sendEvent func(string, any) bool,
+	collectedContext *strings.Builder,
+) (string, error) {
+	var args struct {
+		Packages []string `json:"packages"`
+	}
+	if err := json.Unmarshal([]byte(arguments), &args); err != nil {
+		return fmt.Sprintf("Error: invalid arguments: %s", err.Error()), nil
+	}
+	if len(args.Packages) == 0 {
+		return "Error: packages list is empty", nil
+	}
+
+	sendEvent("tool_call", responses.ToolCallEvent{Tool: "install_package", Arguments: arguments})
+
+	pkgContent, ok := fileMap["package.json"]
+	if !ok {
+		return "Error: package.json not found in project", nil
+	}
+
+	var pkgJSON map[string]any
+	if err := json.Unmarshal([]byte(pkgContent), &pkgJSON); err != nil {
+		return fmt.Sprintf("Error: failed to parse package.json: %s", err.Error()), nil
+	}
+
+	deps, ok := pkgJSON["dependencies"].(map[string]any)
+	if !ok {
+		deps = make(map[string]any)
+		pkgJSON["dependencies"] = deps
+	}
+
+	var added []string
+	var skipped []string
+	for _, pkg := range args.Packages {
+		pkg = strings.TrimSpace(pkg)
+		if pkg == "" {
+			continue
+		}
+		if _, exists := deps[pkg]; exists {
+			skipped = append(skipped, pkg)
+			continue
+		}
+		version := packageVersionLookup(pkg)
+		deps[pkg] = version
+		added = append(added, fmt.Sprintf("%s@%s", pkg, version))
+	}
+
+	if len(added) == 0 {
+		return fmt.Sprintf("All packages already installed: %s", strings.Join(skipped, ", ")), nil
+	}
+
+	updatedJSON, err := json.MarshalIndent(pkgJSON, "", "  ")
+	if err != nil {
+		return fmt.Sprintf("Error: failed to serialize package.json: %s", err.Error()), nil
+	}
+
+	dbFile, err := c.DB.GetAppGeneratedFileByPath(project.ID.String(), "nextjs", "package.json")
+	if err == nil && dbFile != nil {
+		dbFile.Content = string(updatedJSON)
+		if _, err := c.DB.UpdateAppGeneratedFile(dbFile); err != nil {
+			slog.Error("failed to update package.json", "error", err, "project_id", project.ID)
+		}
+		fileMap["package.json"] = string(updatedJSON)
+		sendEvent("file_complete", responses.FileCompleteEvent{
+			Action: "modify", FilePath: "package.json",
+			FileID: dbFile.ID, FileType: "json", Content: string(updatedJSON),
+		})
+	}
+
+	sendEvent("deps_ready", map[string]any{"package_json_changed": true})
+
+	summary := fmt.Sprintf("Installed: %s", strings.Join(added, ", "))
+	if len(skipped) > 0 {
+		summary += fmt.Sprintf("\nAlready installed: %s", strings.Join(skipped, ", "))
+	}
+	collectedContext.WriteString(fmt.Sprintf("\n[Packages Installed]\n%s\n", summary))
+	slog.Info("install_package tool called", "project_id", project.ID, "added", len(added))
+	return summary, nil
+}
+
+// packageVersionLookup returns a version string for common npm packages.
+func packageVersionLookup(pkg string) string {
+	versions := map[string]string{
+		"zustand": "^4.5.0", "axios": "^1.7.0", "date-fns": "^3.6.0",
+		"zod": "^3.23.0", "react-hook-form": "^7.51.0", "@hookform/resolvers": "^3.3.0",
+		"recharts": "^2.12.0", "react-icons": "^5.0.0", "swiper": "^11.0.0",
+		"@tanstack/react-query": "^5.0.0", "@tanstack/react-table": "^8.0.0",
+		"sonner": "^1.0.0", "next-themes": "^0.3.0", "vaul": "^0.9.0",
+		"cmdk": "^0.2.0", "swr": "^2.2.0", "stripe": "^14.0.0",
+		"@stripe/stripe-js": "^2.0.0", "@stripe/react-stripe-js": "^2.0.0",
+		"resend": "^3.0.0", "react-markdown": "^9.0.0", "sharp": "^0.33.0",
+		"drizzle-orm": "^0.39.0", "@neondatabase/serverless": "^0.10.0",
+		"jose": "^5.9.0", "bcryptjs": "^2.4.3", "uuid": "^9.0.0",
+		"lodash": "^4.17.0", "framer-motion": "^11.0.0",
+		"class-variance-authority": "^0.7.0", "tailwind-merge": "^2.2.0",
+	}
+	if strings.HasPrefix(pkg, "@radix-ui/react-") {
+		return "^1.1.0"
+	}
+	if v, ok := versions[pkg]; ok {
+		return v
+	}
+	return "latest"
+}
+
+// executeChatGenerateImage generates an AI image via fal.ai and uploads to S3.
+func (c *Controller) executeChatGenerateImage(
+	ctx context.Context,
+	arguments string,
+	project *models.AppProject,
+	sendEvent func(string, any) bool,
+	collectedContext *strings.Builder,
+) (string, error) {
+	var args struct {
+		Prompt   string `json:"prompt"`
+		Filename string `json:"filename"`
+	}
+	if err := json.Unmarshal([]byte(arguments), &args); err != nil {
+		return fmt.Sprintf("Error: invalid arguments: %s", err.Error()), nil
+	}
+
+	apiKey := c.SecretManager.GetSecret("FAL_API_KEY")
+	if apiKey == "" {
+		return "Error: image generation service not configured (FAL_API_KEY missing)", nil
+	}
+
+	falModel := c.SecretManager.GetSecret("FAL_IMAGE_MODEL")
+	if falModel == "" {
+		falModel = "fal-ai/flux/schnell"
+	}
+
+	sendEvent("tool_call", responses.ToolCallEvent{Tool: "generate_image", Arguments: arguments})
+	sendEvent("progress", responses.ProgressEvent{
+		Phase:   "generating_image",
+		Message: "Generating image...",
+	})
+
+	cdnURL, err := fal.GenerateImage(ctx, apiKey, falModel, args.Prompt)
+	if err != nil {
+		return fmt.Sprintf("Image generation failed: %s", err.Error()), nil
+	}
+
+	imgData, err := downloadImage(ctx, cdnURL)
+	if err != nil {
+		collectedContext.WriteString(fmt.Sprintf("\n[Generated Image]\nImage URL (temporary CDN): %s\nUse this URL in code via next/image.\n", cdnURL))
+		return fmt.Sprintf("Image generated (CDN URL): %s", cdnURL), nil
+	}
+
+	filename := strings.TrimSpace(args.Filename)
+	if filename == "" {
+		filename = "generated-image.jpg"
+	}
+	s3Key := fmt.Sprintf("apps/%s/images/%s", project.ID, filename)
+	if err := c.AssetsStorage.UploadFileByteWithContentType(ctx, s3Key, imgData, "image/jpeg"); err != nil {
+		collectedContext.WriteString(fmt.Sprintf("\n[Generated Image]\nImage URL (temporary CDN): %s\n", cdnURL))
+		return fmt.Sprintf("Image generated but S3 upload failed. CDN URL: %s", cdnURL), nil
+	}
+
+	presigned, err := c.AssetsStorage.GetObject(ctx, s3Key, 7*24*3600)
+	if err != nil {
+		collectedContext.WriteString(fmt.Sprintf("\n[Generated Image]\nImage URL (temporary CDN): %s\n", cdnURL))
+		return fmt.Sprintf("Image uploaded but presign failed. CDN URL: %s", cdnURL), nil
+	}
+
+	imageURL := presigned.URL
+	collectedContext.WriteString(fmt.Sprintf("\n[Generated Image]\nImage URL: %s\nUse this URL in code via next/image or as a background. The image shows: %s\n", imageURL, args.Prompt))
+	slog.Info("generate_image tool called", "project_id", project.ID, "s3_key", s3Key)
+	return fmt.Sprintf("Image generated and uploaded: %s", imageURL), nil
+}
+
+// executeChatTakeScreenshot captures a screenshot of a URL for visual context.
+func (c *Controller) executeChatTakeScreenshot(
+	arguments string,
+	collectedContext *strings.Builder,
+) (string, error) {
+	var args struct {
+		URL string `json:"url"`
+	}
+	if err := json.Unmarshal([]byte(arguments), &args); err != nil {
+		return fmt.Sprintf("Error: invalid arguments: %s", err.Error()), nil
+	}
+
+	targetURL := strings.TrimSpace(args.URL)
+	if targetURL == "" {
+		return "Error: url is required", nil
+	}
+	if !strings.HasPrefix(targetURL, "http://") && !strings.HasPrefix(targetURL, "https://") {
+		targetURL = "https://" + targetURL
+	}
+
+	apiKey := c.SecretManager.GetSecret("SITESHOT_API_KEY")
+	if apiKey == "" {
+		return "Error: screenshot service not configured (SITESHOT_API_KEY missing)", nil
+	}
+
+	imgData, err := external.GetDesktopScreenshotOfURL(targetURL, apiKey)
+	if err != nil {
+		return fmt.Sprintf("Screenshot capture failed: %s", err.Error()), nil
+	}
+	if len(imgData) == 0 {
+		return "Screenshot capture returned empty image", nil
+	}
+
+	b64 := base64.StdEncoding.EncodeToString(imgData)
+	collectedContext.WriteString(fmt.Sprintf("\n[Screenshot Captured]\nURL: %s\nScreenshot captured (1280x800 desktop). The code-gen model can use this as visual reference.\n![screenshot](data:image/png;base64,%s)\n", targetURL, b64))
+	slog.Info("take_screenshot tool called", "url", targetURL, "size_bytes", len(imgData))
+	return "Screenshot captured successfully.", nil
+}
+
+// executeChatSearchComponents finds and injects pre-built UI components.
+func (c *Controller) executeChatSearchComponents(
+	arguments string,
+	project *models.AppProject,
+	fileMap map[string]string,
+	sendEvent func(string, any) bool,
+	collectedContext *strings.Builder,
+) (string, error) {
+	var args struct {
+		Query string `json:"query"`
+	}
+	if err := json.Unmarshal([]byte(arguments), &args); err != nil {
+		return fmt.Sprintf("Error: invalid arguments: %s", err.Error()), nil
+	}
+
+	query := strings.ToLower(strings.TrimSpace(args.Query))
+	if query == "" {
+		return "Error: query is required", nil
+	}
+
+	sendEvent("tool_call", responses.ToolCallEvent{Tool: "search_components", Arguments: arguments})
+
+	type componentInfo struct {
+		Name     string
+		Path     string
+		Keywords []string
+		HasTemplate bool
+	}
+	components := []componentInfo{
+		// Pre-built templates (already have hardcoded content)
+		{Name: "Button", Path: "components/ui/button.tsx", Keywords: []string{"button", "btn"}, HasTemplate: true},
+		{Name: "Card", Path: "components/ui/card.tsx", Keywords: []string{"card", "panel"}, HasTemplate: true},
+		{Name: "Input", Path: "components/ui/input.tsx", Keywords: []string{"input", "text field"}, HasTemplate: true},
+		{Name: "Badge", Path: "components/ui/badge.tsx", Keywords: []string{"badge", "tag", "chip"}, HasTemplate: true},
+		{Name: "Skeleton", Path: "components/ui/skeleton.tsx", Keywords: []string{"skeleton", "loading"}, HasTemplate: true},
+		// Generatable by code-gen model (no template, but known shadcn/ui components)
+		{Name: "Dialog", Path: "components/ui/dialog.tsx", Keywords: []string{"dialog", "modal", "popup"}},
+		{Name: "Sheet", Path: "components/ui/sheet.tsx", Keywords: []string{"sheet", "drawer", "side panel"}},
+		{Name: "Tabs", Path: "components/ui/tabs.tsx", Keywords: []string{"tabs", "tab"}},
+		{Name: "Accordion", Path: "components/ui/accordion.tsx", Keywords: []string{"accordion", "collapse", "faq"}},
+		{Name: "Alert Dialog", Path: "components/ui/alert-dialog.tsx", Keywords: []string{"alert", "confirm"}},
+		{Name: "Dropdown Menu", Path: "components/ui/dropdown-menu.tsx", Keywords: []string{"dropdown", "menu"}},
+		{Name: "Select", Path: "components/ui/select.tsx", Keywords: []string{"select", "picker", "combobox"}},
+		{Name: "Toast", Path: "components/ui/toast.tsx", Keywords: []string{"toast", "notification", "snackbar"}},
+		{Name: "Tooltip", Path: "components/ui/tooltip.tsx", Keywords: []string{"tooltip", "hint"}},
+		{Name: "Popover", Path: "components/ui/popover.tsx", Keywords: []string{"popover", "floating"}},
+		{Name: "Checkbox", Path: "components/ui/checkbox.tsx", Keywords: []string{"checkbox", "check"}},
+		{Name: "Radio Group", Path: "components/ui/radio-group.tsx", Keywords: []string{"radio"}},
+		{Name: "Switch", Path: "components/ui/switch.tsx", Keywords: []string{"switch", "toggle"}},
+		{Name: "Slider", Path: "components/ui/slider.tsx", Keywords: []string{"slider", "range"}},
+		{Name: "Progress", Path: "components/ui/progress.tsx", Keywords: []string{"progress", "loading bar"}},
+		{Name: "Separator", Path: "components/ui/separator.tsx", Keywords: []string{"separator", "divider"}},
+		{Name: "Avatar", Path: "components/ui/avatar.tsx", Keywords: []string{"avatar", "profile picture"}},
+		{Name: "Table", Path: "components/ui/table.tsx", Keywords: []string{"table", "data table", "grid"}},
+		{Name: "Textarea", Path: "components/ui/textarea.tsx", Keywords: []string{"textarea", "multiline"}},
+		{Name: "Label", Path: "components/ui/label.tsx", Keywords: []string{"label", "form label"}},
+		{Name: "Calendar", Path: "components/ui/calendar.tsx", Keywords: []string{"calendar", "date picker", "date"}},
+		{Name: "Carousel", Path: "components/ui/carousel.tsx", Keywords: []string{"carousel", "slideshow", "gallery"}},
+		{Name: "Navigation Menu", Path: "components/ui/navigation-menu.tsx", Keywords: []string{"navigation", "nav menu"}},
+		{Name: "Scroll Area", Path: "components/ui/scroll-area.tsx", Keywords: []string{"scroll", "overflow"}},
+	}
+
+	var matched []componentInfo
+	for _, comp := range components {
+		for _, kw := range comp.Keywords {
+			if strings.Contains(query, kw) || strings.Contains(kw, query) {
+				matched = append(matched, comp)
+				break
+			}
+		}
+	}
+
+	if len(matched) == 0 {
+		return fmt.Sprintf("No components found matching '%s'. The code-gen model can create custom components.", query), nil
+	}
+
+	var injected, alreadyInstalled, toGenerate []string
+	for _, comp := range matched {
+		if _, exists := fileMap[comp.Path]; exists {
+			alreadyInstalled = append(alreadyInstalled, comp.Name)
+			continue
+		}
+		if comp.HasTemplate {
+			content := getUITemplateContent(comp.Path)
+			if content != "" {
+				c.injectTemplateFile(project, comp.Path, content, fileMap, sendEvent)
+				injected = append(injected, comp.Name)
+				continue
+			}
+		}
+		toGenerate = append(toGenerate, comp.Name)
+	}
+
+	var result strings.Builder
+	if len(injected) > 0 {
+		result.WriteString(fmt.Sprintf("Injected: %s\n", strings.Join(injected, ", ")))
+	}
+	if len(alreadyInstalled) > 0 {
+		result.WriteString(fmt.Sprintf("Already in project: %s\n", strings.Join(alreadyInstalled, ", ")))
+	}
+	if len(toGenerate) > 0 {
+		result.WriteString(fmt.Sprintf("Needs code-gen model to create: %s (using @radix-ui primitives + shadcn/ui patterns)\n", strings.Join(toGenerate, ", ")))
+	}
+
+	collectedContext.WriteString(fmt.Sprintf("\n[Component Search: %s]\n%s\n", query, result.String()))
+	slog.Info("search_components tool called", "project_id", project.ID, "query", query, "matched", len(matched))
+	return result.String(), nil
 }
 
 // extractHTMLTitle extracts the <title> content from HTML.
@@ -2027,8 +2518,7 @@ func (c *Controller) buildProjectContext(project *models.AppProject, fileMap map
 
 	// Database schema context
 	if len(project.DataModels) > 0 {
-		var dataModels []DataModel
-		json.Unmarshal(project.DataModels, &dataModels)
+		dataModels, _ := parseDataModels(project.DataModels)
 		if len(dataModels) > 0 {
 			sb.WriteString("\nDatabase schema (Drizzle ORM via lib/schema.ts):\n")
 			for _, dm := range dataModels {
@@ -2644,6 +3134,172 @@ var chatExecuteSQLTool = utils.Tool{
 				"query": map[string]any{
 					"type":        "string",
 					"description": "A SQL SELECT query to execute (e.g. 'SELECT COUNT(*) FROM articles'). Only SELECT statements allowed.",
+				},
+			},
+			"required": []string{"query"},
+		},
+	},
+}
+
+// chatRunMigrationsTool lets the fast model alter existing database tables.
+var chatRunMigrationsTool = utils.Tool{
+	Type: "function",
+	Function: utils.ToolFunction{
+		Name:        "run_migrations",
+		Description: "Alter existing database tables — add columns, remove columns, rename columns, or create new tables. Call this when the user wants to change the database schema (e.g. 'add a rating field to articles', 'create a comments table'). This also regenerates lib/schema.ts to match.",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"sql": map[string]any{
+					"type":        "string",
+					"description": "SQL DDL statements to execute. Use ALTER TABLE to add/drop/rename columns, CREATE TABLE for new tables. Example: ALTER TABLE \"articles\" ADD COLUMN \"rating\" INTEGER DEFAULT 0;",
+				},
+				"updated_models": map[string]any{
+					"type":        "array",
+					"description": "The full updated data model definitions (all tables, not just changed ones). Same format as setup_database tables.",
+					"items": map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"name": map[string]any{"type": "string"},
+							"columns": map[string]any{
+								"type": "array",
+								"items": map[string]any{
+									"type": "object",
+									"properties": map[string]any{
+										"name":        map[string]any{"type": "string"},
+										"type":        map[string]any{"type": "string", "description": "text, integer, boolean, timestamp, uuid, jsonb"},
+										"primary_key": map[string]any{"type": "boolean"},
+										"nullable":    map[string]any{"type": "boolean"},
+										"default":     map[string]any{"type": "string"},
+										"references":  map[string]any{"type": "string"},
+									},
+									"required": []string{"name", "type"},
+								},
+							},
+						},
+						"required": []string{"name", "columns"},
+					},
+				},
+			},
+			"required": []string{"sql", "updated_models"},
+		},
+	},
+}
+
+// chatManageEnvVarsTool lets the fast model add, update, or delete environment variables.
+var chatManageEnvVarsTool = utils.Tool{
+	Type: "function",
+	Function: utils.ToolFunction{
+		Name:        "manage_env_vars",
+		Description: "Add, update, or delete environment variables for the app. Call this when the user wants to set API keys, secrets, or configuration values. After changes, .env.local is automatically regenerated.",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"operations": map[string]any{
+					"type": "array",
+					"items": map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"action": map[string]any{
+								"type": "string",
+								"enum": []string{"set", "delete"},
+							},
+							"key": map[string]any{
+								"type":        "string",
+								"description": "Environment variable name (e.g. STRIPE_SECRET_KEY, NEXT_PUBLIC_API_URL)",
+							},
+							"value": map[string]any{
+								"type":        "string",
+								"description": "Value to set (required for 'set' action)",
+							},
+							"is_public": map[string]any{
+								"type":        "boolean",
+								"description": "If true, prefixed with NEXT_PUBLIC_ and accessible in browser. Default false.",
+							},
+						},
+						"required": []string{"action", "key"},
+					},
+				},
+			},
+			"required": []string{"operations"},
+		},
+	},
+}
+
+// chatInstallPackageTool lets the fast model add npm packages to package.json.
+var chatInstallPackageTool = utils.Tool{
+	Type: "function",
+	Function: utils.ToolFunction{
+		Name:        "install_package",
+		Description: "Add npm packages to the project's package.json. Call this when the user asks to install a library or when you detect a needed dependency. Packages are added to the dependencies section.",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"packages": map[string]any{
+					"type":        "array",
+					"description": "List of package names to install (e.g. ['zustand', '@tanstack/react-query', 'stripe'])",
+					"items":       map[string]any{"type": "string"},
+				},
+			},
+			"required": []string{"packages"},
+		},
+	},
+}
+
+// chatGenerateImageTool lets the fast model generate AI images via fal.ai.
+var chatGenerateImageTool = utils.Tool{
+	Type: "function",
+	Function: utils.ToolFunction{
+		Name:        "generate_image",
+		Description: "Generate an AI image from a text prompt. The image is uploaded to S3 and a URL is returned. Use this when the user asks for a custom image, hero visual, logo concept, background, or any visual asset for their app.",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"prompt": map[string]any{
+					"type":        "string",
+					"description": "Detailed description of the image to generate. Be specific about style, colors, composition, and subject matter.",
+				},
+				"filename": map[string]any{
+					"type":        "string",
+					"description": "Filename for the image (e.g. 'hero-bg.jpg', 'logo.jpg'). Used in the S3 path.",
+				},
+			},
+			"required": []string{"prompt", "filename"},
+		},
+	},
+}
+
+// chatTakeScreenshotTool lets the fast model capture a screenshot of a URL.
+var chatTakeScreenshotTool = utils.Tool{
+	Type: "function",
+	Function: utils.ToolFunction{
+		Name:        "take_screenshot",
+		Description: "Capture a desktop screenshot of a URL. Use this when the user provides a reference website URL and you need to see what it looks like, or to capture the current deployed app for visual comparison. Returns a base64 image that can be used for vision analysis.",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"url": map[string]any{
+					"type":        "string",
+					"description": "The URL to screenshot (e.g. 'https://example.com'). Add https:// if not included.",
+				},
+			},
+			"required": []string{"url"},
+		},
+	},
+}
+
+// chatSearchComponentsTool lets the fast model search for available UI components.
+var chatSearchComponentsTool = utils.Tool{
+	Type: "function",
+	Function: utils.ToolFunction{
+		Name:        "search_components",
+		Description: "Search for available pre-built UI components that can be injected into the project. Use this when the user asks for a specific component (dialog, accordion, tabs, etc.) or when you need a shadcn/ui component that isn't already in the project.",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"query": map[string]any{
+					"type":        "string",
+					"description": "Search term for the component (e.g. 'dialog', 'tabs', 'accordion', 'dropdown menu', 'toast')",
 				},
 			},
 			"required": []string{"query"},
@@ -3381,9 +4037,9 @@ func (c *Controller) runPreGenerationSetup(
 ) error {
 	// --- Database setup ---
 	if len(project.DataModels) > 0 && c.NeonService != nil {
-		var dataModels []DataModel
-		if err := json.Unmarshal(project.DataModels, &dataModels); err != nil {
-			slog.Warn("pre-gen: failed to unmarshal data models", "error", err, "project_id", project.ID)
+		dataModels, parseErr := parseDataModels(project.DataModels)
+		if parseErr != nil {
+			slog.Warn("pre-gen: failed to unmarshal data models", "error", parseErr, "project_id", project.ID)
 		}
 
 		if len(dataModels) > 0 {
@@ -3493,8 +4149,8 @@ func (c *Controller) runPreGenerationSetup(
 					// If project has data models, use them merged with auth models (not just auth)
 					modelsToProvision := authModels
 					if len(project.DataModels) > 0 {
-						var projectModels []DataModel
-						if err := json.Unmarshal(project.DataModels, &projectModels); err == nil && len(projectModels) > 0 {
+						projectModels, _ := parseDataModels(project.DataModels)
+						if len(projectModels) > 0 {
 							// Merge auth columns into project models
 							for _, authModel := range authModels {
 								found := false
