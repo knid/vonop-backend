@@ -1136,7 +1136,7 @@ func (c *Controller) runChatToolPhase(
 - If the user asks about current technologies, APIs, documentation, pricing, latest versions, or anything that benefits from up-to-date web information, use web_search to find accurate information.
 - If the user asks to set, add, or remove environment variables / API keys / secrets, call manage_env_vars.
 - If the user asks to install or add a specific npm package/library, call install_package.
-- If the user asks for a custom image, visual asset, hero background, or illustration, call generate_image to create it. The code-gen model can then use the returned URL in code.
+- If the user asks for a custom image, visual asset, hero background, or illustration, call generate_image to create it. If the app has a database with a relevant image column (e.g. cover_image, thumbnail), generate the image and UPDATE the database row with the URL. If there is no database or no suitable column, generate the image and pass the URL to the code-gen model to use directly in code.
 - If the user references a website and you want to see what it looks like visually, call take_screenshot with the URL.
 - If the user asks for a specific UI component (dialog, tabs, accordion, toast, dropdown, etc.) that may not be in the project yet, call search_components to find and inject it.`
 	if hasDB {
