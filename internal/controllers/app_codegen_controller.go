@@ -11,10 +11,12 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/models"
+	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/services/fal"
 	"github.com/knid/wemob/internal/utils"
 
@@ -1151,6 +1153,12 @@ func (c *Controller) provisionNeonDatabase(ctx context.Context, project *models.
 		// Retry ping up to 5 times with increasing delay.
 		var pingErr error
 		for attempt := 1; attempt <= 5; attempt++ {
+			sendEvent("progress", responses.ProgressEvent{
+				Phase:   "provisioning_db",
+				Message: fmt.Sprintf("Connecting to database (attempt %d/5)...", attempt),
+				Current: attempt,
+				Total:   5,
+			})
 			pingCtx, pingCancel := context.WithTimeout(ctx, 10*time.Second)
 			pingErr = neonDB.PingContext(pingCtx)
 			pingCancel()
@@ -1367,6 +1375,10 @@ func (c *Controller) generateAndStoreSeedImages(
 	defer neonDB.Close()
 
 	sendEvent("tool_start", map[string]any{"tool": "generate_seed_images"})
+	sendEvent("progress", responses.ProgressEvent{
+		Phase:   "generating_images",
+		Message: "Preparing seed images for your database...",
+	})
 
 	// Collect rows that need images
 	type imageTask struct {
@@ -1465,6 +1477,9 @@ func (c *Controller) generateAndStoreSeedImages(
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, 3)
 
+	var completedImages int32
+	totalImages := len(tasks)
+
 	for i, task := range tasks {
 		wg.Add(1)
 		go func(idx int, t imageTask) {
@@ -1502,7 +1517,15 @@ func (c *Controller) generateAndStoreSeedImages(
 
 			mu.Lock()
 			results = append(results, imageResult{idx: idx, s3URL: presigned.URL})
+			done := int(atomic.AddInt32(&completedImages, 1))
 			mu.Unlock()
+
+			sendEvent("progress", responses.ProgressEvent{
+				Phase:   "generating_images",
+				Message: fmt.Sprintf("Generated image %d of %d", done, totalImages),
+				Current: done,
+				Total:   totalImages,
+			})
 		}(i, task)
 	}
 

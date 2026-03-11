@@ -627,6 +627,7 @@ func (c *Controller) StreamBuildApp(
 
 		var responseBuilder strings.Builder
 		var deletedPaths []string
+		chatFileCounter := 0
 		parser := &utils.FileStreamParser{
 			DiscardIncomplete: true,
 			OnFile: func(path, content string) {
@@ -636,6 +637,12 @@ func (c *Controller) StreamBuildApp(
 					content, _ = stripForbiddenImports(content, path)
 				}
 				c.saveGeneratedFile(project, path, content, fileType, fileMap, sendEvent, &toolAppliedOps, true)
+				chatFileCounter++
+				sendEvent("progress", responses.ProgressEvent{
+					Phase:   "generating_files",
+					Message: fmt.Sprintf("Updated %s (%d files)", path, chatFileCounter),
+					Current: chatFileCounter,
+				})
 			},
 			OnDelete: func(path string) {
 				c.deleteGeneratedFile(project, path, fileMap, sendEvent, &toolAppliedOps)
@@ -763,6 +770,10 @@ func (c *Controller) StreamBuildApp(
 	appliedOps = append(appliedOps, toolAppliedOps...)
 
 	if filesChanged > 0 {
+		sendEvent("progress", responses.ProgressEvent{
+			Phase:   "auto_fix",
+			Message: "Running quality checks...",
+		})
 		c.runDeterministicAutoFixes(project, fileMap, sendEvent, &appliedOps, &filesChanged)
 
 		// Augment package.json with discovered dependencies
@@ -2066,6 +2077,33 @@ func (c *Controller) runDeterministicAutoFixes(
 	changedPaths = append(changedPaths, changedPathsJSXStr...)
 
 	if autoFixed > 0 {
+		// Collect fix types for the announcement
+		var fixTypes []string
+		if tsxRenamed > 0 {
+			fixTypes = append(fixTypes, "ts_to_tsx")
+		}
+		if autoFixedMeta > 0 {
+			fixTypes = append(fixTypes, "metadata_client_component")
+		}
+		if autoFixedFonts > 0 {
+			fixTypes = append(fixTypes, "font_weights")
+		}
+		if autoFixed2 > 0 {
+			fixTypes = append(fixTypes, "use_client")
+		}
+		if autoFixedConcat > 0 {
+			fixTypes = append(fixTypes, "classname_concat")
+		}
+		if autoFixedJSXStr > 0 {
+			fixTypes = append(fixTypes, "jsx_strings")
+		}
+
+		// Announce auto-fixes to the frontend
+		sendEvent("progress", responses.ProgressEvent{
+			Phase:   "auto_fix",
+			Message: fmt.Sprintf("Polishing %d file(s)...", autoFixed+tsxRenamed),
+		})
+
 		slog.Info("Deterministic auto-fix applied", "project_id", project.ID, "files_fixed", autoFixed)
 		for _, fixedPath := range changedPaths {
 			dbFile, err := c.DB.GetAppGeneratedFileByPath(project.ID.String(), "nextjs", fixedPath)
@@ -2109,6 +2147,13 @@ func (c *Controller) runDeterministicAutoFixes(
 				}
 			}
 		}
+
+		// Emit auto-fix summary event
+		sendEvent("auto_fix", responses.AutoFixEvent{
+			FilesFixed: autoFixed + tsxRenamed,
+			FixTypes:   fixTypes,
+			Paths:      changedPaths,
+		})
 	}
 }
 
@@ -3170,6 +3215,10 @@ func (c *Controller) runPreGenerationSetup(
 
 			if !alreadyProvisioned {
 				sendEvent("neon_provision", map[string]any{"phase": "start"})
+				sendEvent("progress", responses.ProgressEvent{
+					Phase:   "provisioning_db",
+					Message: "Setting up your database...",
+				})
 
 				// Merge auth models if needed
 				needsAuth := false
@@ -3225,6 +3274,10 @@ func (c *Controller) runPreGenerationSetup(
 					c.injectTemplateFile(project, "lib/schema.ts", schemaContent, fileMap, sendEvent)
 
 					// Seed database
+					sendEvent("progress", responses.ProgressEvent{
+						Phase:   "provisioning_db",
+						Message: "Populating database with sample data...",
+					})
 					if _, seedErr := c.seedNeonDatabase(ctx, project, dataModels, sendEvent); seedErr != nil {
 						slog.Error("pre-gen: database seeding failed", "error", seedErr, "project_id", project.ID)
 					} else if project.ProjectType != "ecommerce" {
@@ -3235,6 +3288,10 @@ func (c *Controller) runPreGenerationSetup(
 					slog.Error("pre-gen: database provisioning failed", "error", neonErr, "project_id", project.ID)
 				}
 
+				sendEvent("progress", responses.ProgressEvent{
+					Phase:   "provisioning_db",
+					Message: "Database ready!",
+				})
 				sendEvent("neon_provision", map[string]any{"phase": "ready"})
 			}
 		}
@@ -3273,6 +3330,10 @@ func (c *Controller) runPreGenerationSetup(
 					}
 
 					sendEvent("neon_provision", map[string]any{"phase": "start"})
+					sendEvent("progress", responses.ProgressEvent{
+						Phase:   "provisioning_db",
+						Message: "Setting up authentication database...",
+					})
 					connStr, neonProjectID, neonErr := c.provisionNeonDatabase(ctx, project, modelsToProvision, sendEvent)
 					if connStr != "" && neonProjectID != "" && neonErr == nil {
 						if err := c.storeNeonIntegration(project, connStr, neonProjectID); err != nil {
@@ -3281,6 +3342,10 @@ func (c *Controller) runPreGenerationSetup(
 						c.injectTemplateFile(project, "lib/db.ts", constants.NEXTJS_TEMPLATE_DB_TS, fileMap, sendEvent)
 						schemaContent := buildDrizzleSchema(modelsToProvision)
 						c.injectTemplateFile(project, "lib/schema.ts", schemaContent, fileMap, sendEvent)
+						sendEvent("progress", responses.ProgressEvent{
+							Phase:   "provisioning_db",
+							Message: "Populating database with sample data...",
+						})
 						if _, seedErr := c.seedNeonDatabase(ctx, project, modelsToProvision, sendEvent); seedErr != nil {
 							slog.Error("pre-gen auth: database seeding failed", "error", seedErr, "project_id", project.ID)
 						} else if project.ProjectType != "ecommerce" {
@@ -3289,6 +3354,10 @@ func (c *Controller) runPreGenerationSetup(
 					} else {
 						slog.Error("pre-gen auth: database provisioning failed", "error", neonErr, "project_id", project.ID)
 					}
+					sendEvent("progress", responses.ProgressEvent{
+						Phase:   "provisioning_db",
+						Message: "Database ready!",
+					})
 					sendEvent("neon_provision", map[string]any{"phase": "ready"})
 				}
 			}
@@ -3444,6 +3513,19 @@ func (c *Controller) streamSingleShotGeneration(
 	llmMessages = append(llmMessages, userMsg)
 
 	// 5. Set up streaming file parser
+	plannedTotal := 0
+	if structure != nil {
+		plannedTotal = len(structure.Files)
+	}
+	fileCounter := 0
+
+	sendEvent("progress", responses.ProgressEvent{
+		Phase:   "generating_files",
+		Message: "Starting code generation...",
+		Current: 0,
+		Total:   plannedTotal,
+	})
+
 	var responseBuilder strings.Builder
 	parser := &utils.FileStreamParser{
 		OnFile: func(path, content string) {
@@ -3453,6 +3535,13 @@ func (c *Controller) streamSingleShotGeneration(
 				content, _ = stripForbiddenImports(content, path)
 			}
 			c.saveGeneratedFile(project, path, content, fileType, fileMap, sendEvent, &ops)
+			fileCounter++
+			sendEvent("progress", responses.ProgressEvent{
+				Phase:   "generating_files",
+				Message: fmt.Sprintf("Generated %s (%d/%d)", path, fileCounter, plannedTotal),
+				Current: fileCounter,
+				Total:   plannedTotal,
+			})
 		},
 		OnText: func(text string) {
 			responseBuilder.WriteString(text)
@@ -3525,6 +3614,10 @@ func (c *Controller) generateAppLogo(ctx context.Context, project *models.AppPro
 	}
 
 	sendEvent("tool_start", map[string]any{"tool": "generate_logo"})
+	sendEvent("progress", responses.ProgressEvent{
+		Phase:   "generating_logo",
+		Message: "Designing your app logo...",
+	})
 
 	prompt := fmt.Sprintf(
 		"Minimal, modern app logo icon for '%s'. Clean geometric design, flat style, single iconic symbol, no text, no letters, solid background, suitable for favicon and app header. Professional, tech-company quality.",
@@ -3560,6 +3653,11 @@ func (c *Controller) generateAppLogo(ctx context.Context, project *models.AppPro
 		slog.Warn("generateAppLogo: failed to presign", "error", err, "project_id", project.ID)
 		return ""
 	}
+
+	sendEvent("progress", responses.ProgressEvent{
+		Phase:   "generating_logo",
+		Message: "Logo ready!",
+	})
 
 	slog.Info("generateAppLogo: logo generated", "project_id", project.ID, "s3_key", s3Key)
 	return presigned.URL
@@ -3711,6 +3809,10 @@ func (c *Controller) streamEcommerceGeneration(
 	store, storeErr := c.DB.GetStoreByAppProjectID(project.ID.String())
 	if storeErr == nil && store != nil {
 		sendEvent("tool_start", map[string]any{"tool": "generate_product_images"})
+		sendEvent("progress", responses.ProgressEvent{
+			Phase:   "generating_images",
+			Message: "Generating product images...",
+		})
 		c.GenerateProductImages(ctx, store)
 	}
 
@@ -3772,6 +3874,19 @@ func (c *Controller) streamEcommerceGeneration(
 	llmMessages = append(llmMessages, userMsg)
 
 	// Set up streaming file parser
+	ecomPlannedTotal := 0
+	if structure != nil {
+		ecomPlannedTotal = len(structure.Files)
+	}
+	ecomFileCounter := 0
+
+	sendEvent("progress", responses.ProgressEvent{
+		Phase:   "generating_files",
+		Message: "Starting code generation...",
+		Current: 0,
+		Total:   ecomPlannedTotal,
+	})
+
 	var responseBuilder strings.Builder
 	parser := &utils.FileStreamParser{
 		OnFile: func(path, content string) {
@@ -3781,6 +3896,13 @@ func (c *Controller) streamEcommerceGeneration(
 				content, _ = stripForbiddenImports(content, path)
 			}
 			c.saveGeneratedFile(project, path, content, fileType, fileMap, sendEvent, &ops)
+			ecomFileCounter++
+			sendEvent("progress", responses.ProgressEvent{
+				Phase:   "generating_files",
+				Message: fmt.Sprintf("Generated %s (%d/%d)", path, ecomFileCounter, ecomPlannedTotal),
+				Current: ecomFileCounter,
+				Total:   ecomPlannedTotal,
+			})
 		},
 		OnText: func(text string) {
 			responseBuilder.WriteString(text)
