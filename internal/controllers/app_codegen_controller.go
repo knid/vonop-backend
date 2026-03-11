@@ -963,6 +963,8 @@ func buildCreateTableSQL(models []DataModel) string {
 			}
 			if col.Default != "" && !col.PrimaryKey {
 				sb.WriteString(fmt.Sprintf(" DEFAULT %s", col.Default))
+			} else if !col.PrimaryKey && (col.Name == "created_at" || col.Name == "updated_at") {
+				sb.WriteString(" DEFAULT now()")
 			}
 			if i < len(m.Columns)-1 {
 				sb.WriteString(",")
