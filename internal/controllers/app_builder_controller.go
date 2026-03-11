@@ -1154,7 +1154,9 @@ func (c *Controller) runChatToolPhase(
 				}
 				systemPrompt += "\n"
 			}
-			systemPrompt += "All tables have an auto-generated UUID 'id' column — do NOT provide id in INSERT statements.\n"
+			systemPrompt += "All tables have an auto-generated UUID 'id' column and auto-generated created_at/updated_at timestamps — do NOT provide id, created_at, or updated_at in INSERT statements.\n"
+		} else {
+			systemPrompt += "\n\n### Database Schema\nSchema metadata is unavailable. Before writing data, first discover the schema by running: SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE', then for each table: SELECT column_name, data_type, is_nullable, column_default FROM information_schema.columns WHERE table_name = '<table>' ORDER BY ordinal_position. All tables have auto-generated UUID 'id' and timestamp created_at/updated_at columns — do NOT provide them in INSERT statements.\n"
 		}
 		systemPrompt += `
 - If the user says the database is empty, has no data, asks for demo/sample/test data, or complains about missing content, call seed_database to populate it with realistic data.
@@ -1252,7 +1254,7 @@ func (c *Controller) runChatToolPhase(
 		nil, // onReasoning — not needed
 		utils.ToolCallConfig{
 			MaxRounds:  30,
-			MaxTokens:  1024,
+			MaxTokens:  4096,
 			StripAfter: 28, // Strip tools near the end so model is forced to respond
 			OnToolCallStart: func(toolName string) {
 				sendEvent("tool_start", map[string]string{"tool": toolName})
@@ -1682,6 +1684,8 @@ func (c *Controller) executeChatExecuteSQL(
 				for _, v := range values {
 					if v == nil {
 						rowVals = append(rowVals, "NULL")
+					} else if b, ok := v.([]byte); ok {
+						rowVals = append(rowVals, string(b))
 					} else {
 						rowVals = append(rowVals, fmt.Sprintf("%v", v))
 					}
