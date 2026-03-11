@@ -156,6 +156,9 @@ func createSchema(db *bun.DB) error {
 		`ALTER TABLE app_conversations ADD COLUMN IF NOT EXISTS summary text DEFAULT ''`,
 		// Data models for per-app Neon database provisioning
 		`ALTER TABLE app_projects ADD COLUMN IF NOT EXISTS data_models jsonb DEFAULT '[]'`,
+		// Allow NULL price_id so empty Stripe secrets don't conflict on unique constraint
+		`ALTER TABLE standart_user_subscriptions ALTER COLUMN price_id DROP NOT NULL`,
+		`UPDATE standart_user_subscriptions SET price_id = NULL WHERE price_id = ''`,
 		// soft_delete column for all tables that use bun:",soft_delete,nullzero"
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
 		`ALTER TABLE user_notifications ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,

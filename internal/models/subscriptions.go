@@ -13,7 +13,7 @@ type StandartUserSubscription struct {
 	LimitsID      uuid.UUID           `bun:",notnull,type:uuid"`
 	Limits        *StandartUserLimits `bun:"rel:belongs-to,join:limits_id=id"`
 	MonthlyPrice  int                 `bun:",notnull"`
-	PriceID       string              `bun:",unique,notnull"`
+	PriceID       string              `bun:",unique,nullzero"`
 	AnnualPrice   int                 `bun:",nullzero,default:0"`
 	AnnualPriceID string              `bun:",nullzero"`
 	CreatedAt     time.Time           `bun:"created_at,nullzero,notnull,default:current_timestamp"`
