@@ -1142,7 +1142,10 @@ func (c *Controller) runChatToolPhase(
 	if hasDB {
 		systemPrompt += `
 - If the user says the database is empty, has no data, asks for demo/sample/test data, or complains about missing content, call seed_database to populate it with realistic data.
-- If you need to check whether the database has data before seeding, call execute_sql with a COUNT query first (e.g. SELECT COUNT(*) FROM table_name).
+- If you need to check whether the database has data, call execute_sql with a SELECT/COUNT query (e.g. SELECT COUNT(*) FROM table_name).
+- If the user asks to add, insert, or create specific data rows, call execute_sql with an INSERT query.
+- If the user asks to update, modify, or change existing data, call execute_sql with an UPDATE query.
+- DELETE is NOT allowed. If the user wants to remove data, use UPDATE to set a status flag (e.g. UPDATE articles SET is_active = false WHERE ...).
 - If the user asks to add/remove/rename database columns or create new tables, call run_migrations with the ALTER TABLE / CREATE TABLE SQL and the complete updated data model.`
 	}
 	if isEcommerce {
@@ -1608,15 +1611,18 @@ func (c *Controller) executeChatExecuteSQL(
 		return "Error: query is required", nil
 	}
 
-	// Validate read-only — reject anything that isn't a SELECT
+	// Validate allowed statements: SELECT, INSERT, UPDATE, WITH (CTE)
 	upper := strings.ToUpper(query)
-	if !strings.HasPrefix(upper, "SELECT") && !strings.HasPrefix(upper, "WITH") {
-		return "Error: only SELECT queries are allowed.", nil
+	isSelect := strings.HasPrefix(upper, "SELECT") || strings.HasPrefix(upper, "WITH")
+	isInsert := strings.HasPrefix(upper, "INSERT")
+	isUpdate := strings.HasPrefix(upper, "UPDATE")
+	if !isSelect && !isInsert && !isUpdate {
+		return "Error: only SELECT, INSERT, and UPDATE queries are allowed. DELETE is not permitted — use UPDATE to set a status flag instead.", nil
 	}
-	// Extra safety: reject write keywords anywhere in the query
-	for _, kw := range []string{"INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "CREATE", "TRUNCATE", "GRANT", "REVOKE"} {
+	// Reject destructive keywords
+	for _, kw := range []string{"DELETE", "DROP", "ALTER", "CREATE", "TRUNCATE", "GRANT", "REVOKE"} {
 		if strings.Contains(upper, kw) {
-			return fmt.Sprintf("Error: query contains disallowed keyword: %s", kw), nil
+			return fmt.Sprintf("Error: query contains disallowed keyword: %s. Use UPDATE with a status/flag column instead of DELETE.", kw), nil
 		}
 	}
 
@@ -1626,10 +1632,23 @@ func (c *Controller) executeChatExecuteSQL(
 	}
 	defer neonDB.Close()
 
-	// Use read-only transaction with timeout
 	queryCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
+	// For write queries (INSERT/UPDATE), execute and return affected rows
+	if isInsert || isUpdate {
+		result, err := neonDB.ExecContext(queryCtx, query)
+		if err != nil {
+			return fmt.Sprintf("Query error: %s", err.Error()), nil
+		}
+		affected, _ := result.RowsAffected()
+		summary := fmt.Sprintf("OK — %d row(s) affected.", affected)
+		collectedContext.WriteString(fmt.Sprintf("\n[Database Write Result]\nQuery: %s\n%s\n", query, summary))
+		slog.Info("execute_sql write via fast model", "project_id", project.ID, "affected", affected)
+		return summary, nil
+	}
+
+	// For SELECT queries, use read-only transaction
 	tx, err := neonDB.BeginTx(queryCtx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return fmt.Sprintf("Error: failed to begin read-only transaction: %s", err.Error()), nil
@@ -3248,19 +3267,20 @@ var chatSeedDatabaseTool = utils.Tool{
 	},
 }
 
-// chatExecuteSQLTool lets the fast model run read-only queries on the app's Neon
-// database to inspect data state before deciding what action to take.
+// chatExecuteSQLTool lets the fast model run SELECT, INSERT, and UPDATE queries
+// on the app's Neon database. DELETE is not allowed — use UPDATE with a soft-delete
+// flag or status column instead.
 var chatExecuteSQLTool = utils.Tool{
 	Type: "function",
 	Function: utils.ToolFunction{
 		Name:        "execute_sql",
-		Description: "Run a read-only SQL SELECT query on the app's database to inspect its contents. Use this to check if tables have data, verify data state, or answer user questions about the database. Only SELECT queries are allowed.",
+		Description: "Run a SQL query on the app's database. Supports SELECT (inspect data), INSERT (add rows), and UPDATE (modify rows). DELETE is NOT allowed — use UPDATE to set a status/flag instead. Examples: 'SELECT COUNT(*) FROM articles', 'INSERT INTO articles (title, content) VALUES (...)', 'UPDATE articles SET is_featured = true WHERE id = ...'.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"query": map[string]any{
 					"type":        "string",
-					"description": "A SQL SELECT query to execute (e.g. 'SELECT COUNT(*) FROM articles'). Only SELECT statements allowed.",
+					"description": "A SQL query to execute. Allowed: SELECT, INSERT, UPDATE, WITH (CTE). Not allowed: DELETE, DROP, ALTER, CREATE, TRUNCATE.",
 				},
 			},
 			"required": []string{"query"},
