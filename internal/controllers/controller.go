@@ -36,6 +36,7 @@ type Controller struct {
 	PostHog                posthog.Client // nil = disabled
 	RunningJobs            sync.Map       // map[string]context.CancelFunc for in-flight background jobs
 	PendingClarifications  sync.Map       // map[string]chan ClarificationResult for jobs awaiting user input
+	JobEventBuses          sync.Map       // map[string]*EventBus for live SSE fan-out to multiple clients
 	identifiedUsers        sync.Map       // tracks users already identified to PostHog this process
 }
 

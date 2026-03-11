@@ -39,6 +39,11 @@ func (v *HttpViews) handleStreamOrAsync(w http.ResponseWriter, r *http.Request, 
 	v.Controller.RunningJobs.Store(job.ID.String(), cancel)
 
 	events := make(chan responses.SSEEvent, 100)
+
+	// Create an event bus for this job so reconnected clients can subscribe
+	bus := controllers.NewEventBus()
+	v.Controller.JobEventBuses.Store(job.ID.String(), bus)
+
 	go cfg.StreamFunc(ctx, events, job.ID.String())
 
 	if r.URL.Query().Get("background") == "true" {
@@ -82,6 +87,9 @@ func (v *HttpViews) handleStreamOrAsync(w http.ResponseWriter, r *http.Request, 
 				goto done
 			}
 			lastEvent = &event
+
+			// Fan out to any reconnected SSE subscribers
+			bus.Publish(event)
 
 			// Always persist milestone events to DB
 			if controllers.IsMilestoneEvent(event.Event) {
@@ -138,6 +146,10 @@ done:
 	// otherwise FinalizeJob sees ctx.Err() != nil and marks the job as "cancelled".
 	v.Controller.FinalizeJob(job.ID.String(), ctx, lastEvent)
 	cancel()
+
+	// Close the event bus so reconnected subscribers know the job is done
+	bus.Close()
+	v.Controller.JobEventBuses.Delete(job.ID.String())
 }
 
 // drainEventsToJob reads all events from the channel, persists milestone events,
@@ -157,6 +169,13 @@ func (v *HttpViews) drainEventsToJob(ctx context.Context, cancel context.CancelF
 				goto finalize
 			}
 			lastEvent = &event
+
+			// Fan out to any reconnected SSE subscribers
+			if busVal, ok := v.Controller.JobEventBuses.Load(job.ID.String()); ok {
+				if b, ok := busVal.(*controllers.EventBus); ok {
+					b.Publish(event)
+				}
+			}
 
 			if controllers.IsMilestoneEvent(event.Event) {
 				jobEvent := models.JobEvent{
@@ -188,6 +207,13 @@ finalize:
 	}
 
 	v.Controller.FinalizeJob(job.ID.String(), ctx, lastEvent)
+
+	// Close the event bus so reconnected subscribers know the job is done
+	if busVal, ok := v.Controller.JobEventBuses.LoadAndDelete(job.ID.String()); ok {
+		if b, ok := busVal.(*controllers.EventBus); ok {
+			b.Close()
+		}
+	}
 }
 
 // GET /v1/jobs/{jobId}
@@ -359,6 +385,96 @@ func (v *HttpViews) ReplyJob(w http.ResponseWriter, r *http.Request) {
 	}
 
 	utils.JSONResponse(w, responses.SuccessResponse{Success: true}, http.StatusOK)
+}
+
+// GET /v2/apps/jobs/{jobId}/stream — reconnect to a running job's SSE event stream
+func (v *HttpViews) StreamJob(w http.ResponseWriter, r *http.Request) {
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	jobID := chi.URLParam(r, "jobId")
+	if jobID == "" {
+		utils.JSONErrorResponse(w, "job id is required", http.StatusBadRequest)
+		return
+	}
+
+	// Verify ownership
+	job, err := v.Controller.GetJob(jobID, user.ID)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	if job.Status != "running" && job.Status != "awaiting_input" {
+		utils.JSONErrorResponse(w, "job is not running", http.StatusBadRequest)
+		return
+	}
+
+	// Find the event bus for this job
+	busVal, ok := v.Controller.JobEventBuses.Load(jobID)
+	if !ok {
+		utils.JSONErrorResponse(w, "no active stream for this job", http.StatusNotFound)
+		return
+	}
+	bus, ok := busVal.(*controllers.EventBus)
+	if !ok {
+		utils.JSONErrorResponse(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		utils.JSONErrorResponse(w, "streaming not supported", http.StatusInternalServerError)
+		return
+	}
+
+	utils.SetSSEHeaders(w)
+
+	// First, replay persisted milestone events so the client catches up
+	var milestoneEvents []json.RawMessage
+	if json.Unmarshal(job.Events, &milestoneEvents) == nil {
+		for _, raw := range milestoneEvents {
+			var evt struct {
+				Event string `json:"event"`
+				Data  any    `json:"data"`
+			}
+			if json.Unmarshal(raw, &evt) == nil {
+				utils.WriteSSEEvent(w, flusher, evt.Event, evt.Data)
+			}
+		}
+	}
+
+	// Subscribe to live events
+	subID, ch := bus.Subscribe()
+	defer bus.Unsubscribe(subID)
+
+	keepalive := time.NewTicker(15 * time.Second)
+	defer keepalive.Stop()
+
+	for {
+		select {
+		case event, ok := <-ch:
+			if !ok {
+				// Bus closed — job finished
+				return
+			}
+			if err := utils.WriteSSEEvent(w, flusher, event.Event, event.Data); err != nil {
+				// Client disconnected
+				return
+			}
+
+		case <-keepalive.C:
+			if _, err := fmt.Fprintf(w, ":keepalive\n\n"); err != nil {
+				return
+			}
+			flusher.Flush()
+
+		case <-r.Context().Done():
+			return
+		}
+	}
 }
 
 // DELETE /v1/jobs/{jobId}
