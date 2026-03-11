@@ -122,6 +122,14 @@ type UpdateEnvVarRequest struct {
 	IsPublic *bool   `json:"is_public"`
 }
 
+type ReplyJobRequest struct {
+	Message string `json:"message" validate:"required,min=1" errormgs:"message is required"`
+}
+
+func (r *ReplyJobRequest) Validate(validate *validator.Validate) error {
+	return utils.ValidateFunc[ReplyJobRequest](*r, validate)
+}
+
 type ClarifyJobAnswer struct {
 	ID     string `json:"id" validate:"required" errormgs:"is required"`
 	Answer string `json:"answer" validate:"required" errormgs:"is required"`

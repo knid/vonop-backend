@@ -19,7 +19,14 @@ import (
 	_ "github.com/lib/pq"
 )
 
-// --- Clarification types ---
+// --- Conversation types ---
+
+// ConversationReply is a natural language reply from the user during the pre-build conversation.
+type ConversationReply struct {
+	Message string `json:"message"`
+}
+
+// --- Clarification types (deprecated — use ConversationReply instead) ---
 
 // ClarificationQuestion is a single question the LLM generates to gather context.
 type ClarificationQuestion struct {
