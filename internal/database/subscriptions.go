@@ -86,6 +86,13 @@ func (db *Database) GetSubscriptionByName(name string) (*models.StandartUserSubs
 	return &subs, err
 }
 
+// GetSubscriptionByNameIncludeDeleted finds a subscription by name, including soft-deleted rows.
+func (db *Database) GetSubscriptionByNameIncludeDeleted(name string) (*models.StandartUserSubscription, error) {
+	var subs models.StandartUserSubscription
+	err := db.DB.NewSelect().Model(&subs).WhereAllWithDeleted().Where("name = ?", name).Scan(context.Background())
+	return &subs, err
+}
+
 func (db *Database) CreateStandartUserLimits(limits *models.StandartUserLimits) (*models.StandartUserLimits, error) {
 	_, err := db.DB.NewInsert().Model(limits).Exec(context.Background())
 	return limits, err
