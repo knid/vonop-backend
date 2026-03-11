@@ -1159,7 +1159,7 @@ func (c *Controller) runChatToolPhase(
 	systemPrompt += `
 - If the user's message is a normal chat request (code changes, questions, fixes) that doesn't need any of the above tools, respond with just: NO_TOOLS_NEEDED
 - You can call multiple tools if needed (e.g. generate_image + install_package).
-- Be brief. Only call tools when clearly needed.`
+- IMPORTANT: Before calling any tool, ALWAYS write a brief message (1-2 sentences, in the same language as the user's message) explaining what you're about to do. For example: "Let me check what's currently in the database...", "I'll generate a custom image for this...", "Looking at the website to understand the design...". This text is streamed to the user in real time so they know what's happening. Never call a tool without explaining first.`
 
 	messages := []utils.Message{
 		{Role: "system", Content: systemPrompt},
@@ -1201,7 +1201,33 @@ func (c *Controller) runChatToolPhase(
 		nil, nil, // no response format, no reasoning
 		executor,
 		nil, // onToolCall — handled in executors
-		nil, // onChunk — discard fast model text output
+		func() func(string) {
+			// Buffer initial chunks to suppress "NO_TOOLS_NEEDED" responses.
+			// Once we see a real sentence we flush the buffer and stream directly.
+			var buf strings.Builder
+			flushed := false
+			return func(chunk string) {
+				cleaned := ansiRegex.ReplaceAllString(chunk, "")
+				if cleaned == "" {
+					return
+				}
+				if flushed {
+					sendEvent("chat_text", responses.ChatTextEvent{Chunk: cleaned})
+					return
+				}
+				buf.WriteString(cleaned)
+				s := buf.String()
+				if strings.Contains(s, "NO_TOOLS_NEEDED") {
+					// Discard — no tools will be called
+					return
+				}
+				// Flush once we have enough text to know it's a real message
+				if len(s) > 20 {
+					flushed = true
+					sendEvent("chat_text", responses.ChatTextEvent{Chunk: s})
+				}
+			}
+		}(),
 		nil, // onReasoning — not needed
 		utils.ToolCallConfig{
 			MaxRounds:  5,
