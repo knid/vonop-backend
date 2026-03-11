@@ -1192,8 +1192,9 @@ func (c *Controller) runChatToolPhase(
 		nil, // onChunk — discard fast model text output
 		nil, // onReasoning — not needed
 		utils.ToolCallConfig{
-			MaxRounds: 5,
-			MaxTokens: 1024,
+			MaxRounds:  5,
+			MaxTokens:  1024,
+			StripAfter: 4, // Strip tools at round 4 so model is forced to respond before MaxRounds
 			OnToolCallStart: func(toolName string) {
 				sendEvent("tool_start", map[string]string{"tool": toolName})
 			},
@@ -1201,7 +1202,12 @@ func (c *Controller) runChatToolPhase(
 	)
 
 	if err != nil {
-		slog.Warn("Chat tool phase failed, continuing without tool context", "error", err)
+		slog.Warn("Chat tool phase hit limit, preserving any collected context", "error", err, "context_len", collectedContext.Len())
+		// Don't discard collected context from successful tool calls (e.g. seed_database)
+		// just because the model kept calling tools past MaxRounds.
+		if collectedContext.Len() > 0 {
+			return collectedContext.String()
+		}
 		return ""
 	}
 
