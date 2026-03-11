@@ -5,10 +5,11 @@ import "net/http"
 // LLMProvider holds the base URL and API key for a specific LLM provider.
 // All supported providers expose an OpenAI-compatible /chat/completions endpoint.
 type LLMProvider struct {
-	Name             string // "openrouter", "anthropic", "google", "moonshot", "zai"
-	BaseURL          string
-	APIKey           string
-	DefaultReasoning *ReasoningConfig // applied when no explicit Reasoning/Thinking is set
+	Name              string // "openrouter", "anthropic", "google", "moonshot", "zai"
+	BaseURL           string
+	APIKey            string
+	DefaultReasoning  *ReasoningConfig // applied when no explicit Reasoning/Thinking is set
+	FastModelOverride string           // if set, overrides the default FastModel()
 }
 
 // Endpoint returns the full chat completions URL for this provider.
@@ -86,6 +87,9 @@ func (p *LLMProvider) DefaultModel() string {
 // FastModel returns a cheaper/faster model for non-creative tasks like fix passes
 // and conversation summarization. Falls back to DefaultModel if no fast option exists.
 func (p *LLMProvider) FastModel() string {
+	if p.FastModelOverride != "" {
+		return p.FastModelOverride
+	}
 	switch p.Name {
 	case "anthropic":
 		return "claude-haiku-4-5-20251001"
