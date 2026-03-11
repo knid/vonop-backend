@@ -226,5 +226,7 @@ Rules:
 - Be enthusiastic and confident — the user should feel excited about what's coming
 - Keep it natural and conversational — no markdown, no bullet points, no headers
 - Don't ask questions — this is a statement of what you'll build
-- Be specific enough that the user knows what to expect`
+- Be specific enough that the user knows what to expect
+- NEVER mention "demo data buttons", "seed data", "load data", or any technical setup steps. The app will come fully loaded with realistic sample content — the user doesn't need to do anything.
+- NEVER tell the user to click buttons or take actions to populate data. Everything will be ready out of the box.`
 )
