@@ -2925,6 +2925,11 @@ func (c *Controller) runDeterministicAutoFixes(
 	autoFixed += autoFixedJSXStr
 	changedPaths = append(changedPaths, changedPathsJSXStr...)
 
+	// Auto-fix missing force-dynamic on DB-backed pages
+	autoFixedDynamic, changedPathsDynamic := autoFixMissingForceDynamic(fileMap)
+	autoFixed += autoFixedDynamic
+	changedPaths = append(changedPaths, changedPathsDynamic...)
+
 	if autoFixed > 0 {
 		// Collect fix types for the announcement
 		var fixTypes []string
@@ -4629,6 +4634,7 @@ func (c *Controller) streamSingleShotGeneration(
 	autoFixMissingUseClient(fileMap)
 	autoFixRootLayoutTags(fileMap)
 	autoFixUnterminatedJSXStrings(fileMap)
+	autoFixMissingForceDynamic(fileMap)
 	// Persist any auto-fixed or newly created content back to the DB
 	for path, content := range fileMap {
 		prev, existed := preFixSnapshot[path]
@@ -4990,6 +4996,7 @@ func (c *Controller) streamEcommerceGeneration(
 	autoFixMissingUseClient(fileMap)
 	autoFixRootLayoutTags(fileMap)
 	autoFixUnterminatedJSXStrings(fileMap)
+	autoFixMissingForceDynamic(fileMap)
 	// Persist any auto-fixed or newly created content back to the DB
 	for path, content := range fileMap {
 		prev, existed := preFixSnapshot[path]

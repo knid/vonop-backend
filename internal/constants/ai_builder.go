@@ -317,6 +317,7 @@ const NEXTJS_BUILDER_DATABASE_RULES = `
 
 ### Database Rules
 - Use ` + "`" + `import { db } from '@/lib/db'` + "`" + ` and ` + "`" + `import { ... } from '@/lib/schema'` + "`" + ` for all data access. Use Drizzle queries in server components and API routes. Do NOT use hardcoded mock data — all data should come from the database via Drizzle queries. Import Drizzle operators from 'drizzle-orm': ` + "`" + `import { eq, and, desc, sql } from 'drizzle-orm'` + "`" + `.
+- CRITICAL: Every page.tsx file that imports from '@/lib/db' MUST export ` + "`" + `export const dynamic = "force-dynamic"` + "`" + ` at the top level (after imports). This prevents Next.js from statically caching the page at build time, ensuring database queries always return fresh data on each request.
 - The database is pre-seeded with realistic demo data including AI-generated images by the platform. Do NOT create seed routes (app/api/seed/*), seed buttons, or "load demo data" UI. Do NOT show empty states for the initial build — the data is already there. Just query it normally. Image columns (cover_image, avatar_url, etc.) are populated with real hosted image URLs.
 - lib/db.ts and lib/schema.ts are template-managed — do NOT recreate them. Import directly.
 - IMPORTANT: Drizzle ORM uses camelCase property names in JavaScript even when the SQL column is snake_case. Always use camelCase (e.g., row.userId, row.createdAt, row.passwordHash).`
