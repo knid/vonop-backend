@@ -2066,18 +2066,11 @@ func (c *Controller) executeChatGenerateImage(
 		filename = "generated-image.jpg"
 	}
 	s3Key := fmt.Sprintf("apps/%s/images/%s", project.ID, filename)
-	if err := c.AssetsStorage.UploadFileByteWithContentType(ctx, s3Key, imgData, "image/jpeg"); err != nil {
+	imageURL, err := c.AssetsStorage.UploadFileBytePublic(ctx, s3Key, imgData, "image/jpeg")
+	if err != nil {
 		collectedContext.WriteString(fmt.Sprintf("\n[Generated Image]\nImage URL (temporary CDN): %s\n", cdnURL))
 		return fmt.Sprintf("Image generated but S3 upload failed. CDN URL: %s", cdnURL), nil
 	}
-
-	presigned, err := c.AssetsStorage.GetObject(ctx, s3Key, 7*24*3600)
-	if err != nil {
-		collectedContext.WriteString(fmt.Sprintf("\n[Generated Image]\nImage URL (temporary CDN): %s\n", cdnURL))
-		return fmt.Sprintf("Image uploaded but presign failed. CDN URL: %s", cdnURL), nil
-	}
-
-	imageURL := presigned.URL
 	collectedContext.WriteString(fmt.Sprintf("\n[Generated Image]\nImage URL: %s\nUse this URL in code via next/image or as a background. The image shows: %s\n", imageURL, args.Prompt))
 	slog.Info("generate_image tool called", "project_id", project.ID, "s3_key", s3Key)
 	return fmt.Sprintf("Image generated and uploaded: %s", imageURL), nil
