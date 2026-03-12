@@ -197,11 +197,14 @@ func (v *HttpViews) HandleStoreIyzicoWebhook(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	// Iyzico webhook payload uses paymentConversationId (maps to our order ID set as conversationId)
 	var payload struct {
 		Status                string `json:"status"`
 		PaymentID             string `json:"paymentId"`
 		PaymentConversationID string `json:"paymentConversationId"`
-		MerchantOrderID       string `json:"merchantOrderId"`
+		IyziReferenceCode     string `json:"iyziReferenceCode"`
+		IyziEventType         string `json:"iyziEventType"`
+		IyziPaymentID         string `json:"iyziPaymentId"`
 		Token                 string `json:"token"`
 	}
 
@@ -211,14 +214,19 @@ func (v *HttpViews) HandleStoreIyzicoWebhook(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	slog.Info("Store Iyzico webhook received", "status", payload.Status, "storeId", storeID, "merchantOrderId", payload.MerchantOrderID)
+	slog.Info("Store Iyzico webhook received",
+		"status", payload.Status, "storeId", storeID,
+		"paymentConversationId", payload.PaymentConversationID,
+		"eventType", payload.IyziEventType,
+		"paymentId", payload.PaymentID)
 
-	if payload.MerchantOrderID != "" {
-		// The merchantOrderId typically maps to the order number
-		order, err := v.Controller.DB.GetOrderByOrderNumber(payload.MerchantOrderID)
+	// paymentConversationId maps to order.ID (set as conversationId during checkout)
+	orderLookupID := payload.PaymentConversationID
+	if orderLookupID != "" {
+		order, err := v.Controller.DB.GetOrderByID(orderLookupID)
 		if err != nil {
-			// Try as order ID
-			order, err = v.Controller.DB.GetOrderByID(payload.MerchantOrderID)
+			// Fallback: try as order number
+			order, err = v.Controller.DB.GetOrderByOrderNumber(orderLookupID)
 		}
 
 		if err == nil && order != nil {
@@ -227,23 +235,36 @@ func (v *HttpViews) HandleStoreIyzicoWebhook(w http.ResponseWriter, r *http.Requ
 			} else if order.PaymentStatus == "paid" {
 				slog.Info("Iyzico webhook: order already paid, skipping", "orderId", order.ID.String(), "storeId", storeID)
 			} else {
+				paymentID := payload.PaymentID
+				if paymentID == "" {
+					paymentID = payload.IyziPaymentID
+				}
+
 				switch payload.Status {
 				case "SUCCESS":
 					order.PaymentStatus = "paid"
 					order.Status = "confirmed"
 					order.PaymentProvider = "iyzico"
-					order.PaymentID = payload.PaymentID
+					order.PaymentID = paymentID
 					order.UpdatedAt = time.Now()
 					v.Controller.DB.UpdateOrder(order)
-					slog.Info("Store order payment confirmed via Iyzico", "orderId", order.ID.String(), "storeId", storeID)
+
+					// Finalize order post-payment (inventory, cart, email)
+					orderItems, _ := v.Controller.DB.GetOrderItemsByOrderID(order.ID.String())
+					sessionID, _ := order.Metadata["session_id"].(string)
+					v.Controller.FinalizeOrderPostPayment(store, order, orderItems, sessionID)
+
+					slog.Info("Store order payment confirmed via Iyzico webhook", "orderId", order.ID.String(), "storeId", storeID)
 
 				case "FAILURE":
 					order.PaymentStatus = "failed"
 					order.UpdatedAt = time.Now()
 					v.Controller.DB.UpdateOrder(order)
-					slog.Info("Store order payment failed via Iyzico", "orderId", order.ID.String(), "storeId", storeID)
+					slog.Info("Store order payment failed via Iyzico webhook", "orderId", order.ID.String(), "storeId", storeID)
 				}
 			}
+		} else {
+			slog.Warn("Iyzico webhook: order not found", "lookupId", orderLookupID, "storeId", storeID)
 		}
 	}
 
