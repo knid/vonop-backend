@@ -1065,6 +1065,7 @@ func main() {
 						r.Get("/history", httpViews.GetDeployHistory)
 					})
 
+					r.Post("/convert-to-mobile", httpViews.ConvertToMobile)
 					r.Post("/capture-screenshot", httpViews.CaptureAppScreenshot)
 
 					// Snapshots
