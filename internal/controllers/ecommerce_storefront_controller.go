@@ -269,7 +269,7 @@ func (c *Controller) StorefrontApplyDiscount(storeID string, sessionID string, c
 	return discount, nil
 }
 
-func (c *Controller) StorefrontCheckout(storeID string, sessionID string, customerEmail string, customerName string, shippingAddress map[string]any, billingAddress map[string]any, paymentProvider string) (*models.Order, string, string, error) {
+func (c *Controller) StorefrontCheckout(storeID string, sessionID string, customerEmail string, customerName string, shippingAddress map[string]any, billingAddress map[string]any, paymentProvider string, clientIP string) (*models.Order, string, string, error) {
 	cart, items, err := c.StorefrontGetCart(storeID, sessionID)
 	if err != nil {
 		return nil, "", "", err
@@ -298,19 +298,17 @@ func (c *Controller) StorefrontCheckout(storeID string, sessionID string, custom
 	}
 
 	discountCents := 0
-	var discount *models.Discount
 	if cart.DiscountID != uuid.Nil {
 		d, err := c.DB.GetDiscountByID(cart.DiscountID.String())
 		if err == nil && d.IsActive {
-			discount = d
 			// Fix 12: Enforce MinOrderCents
-			if discount.MinOrderCents > 0 && subtotal < discount.MinOrderCents {
+			if d.MinOrderCents > 0 && subtotal < d.MinOrderCents {
 				discountCents = 0
 			} else {
-				if discount.Type == "percentage" {
-					discountCents = subtotal * discount.Value / 100
+				if d.Type == "percentage" {
+					discountCents = subtotal * d.Value / 100
 				} else {
-					discountCents = discount.Value
+					discountCents = d.Value
 				}
 				if discountCents > subtotal {
 					discountCents = subtotal
@@ -363,7 +361,10 @@ func (c *Controller) StorefrontCheckout(storeID string, sessionID string, custom
 			PaymentStatus:   "pending",
 			PaymentProvider: paymentProvider,
 			DiscountID:      cart.DiscountID,
-			Metadata:        map[string]any{},
+			Metadata: map[string]any{
+				"session_id": sessionID,
+				"client_ip":  clientIP,
+			},
 		}
 
 		order, err = c.DB.CreateOrder(order)
@@ -399,15 +400,49 @@ func (c *Controller) StorefrontCheckout(storeID string, sessionID string, custom
 	}
 	c.DB.BulkCreateOrderItems(orderItems)
 
-	// Fix 5: Increment discount UsedCount
-	if discount != nil {
-		discount.UsedCount++
-		discount.UpdatedAt = time.Now()
-		c.DB.UpdateDiscount(discount)
+	// Initiate payment if a payment provider is specified and connected
+	paymentURL, clientSecret, err := c.StorefrontInitiatePayment(storeID, order, orderItems)
+	if err != nil {
+		slog.Warn("Payment initiation failed, order created without payment", "error", err, "order_id", order.ID)
+		// Order still exists with pending payment — frontend can retry or use manual payment
+	}
+
+	// For providers without online payment (e.g. COD), finalize immediately
+	if paymentProvider == "" || paymentProvider == "cod" {
+		c.FinalizeOrderPostPayment(store, order, orderItems, sessionID)
+	}
+
+	return order, paymentURL, clientSecret, nil
+}
+
+// FinalizeOrderPostPayment handles inventory decrement, cart clearing, discount usage,
+// and notification email. Called only AFTER payment is confirmed (or for COD orders).
+// Idempotent — uses order.Metadata["finalized"] to prevent double execution
+// (e.g. if both callback redirect and webhook fire for the same order).
+func (c *Controller) FinalizeOrderPostPayment(store *models.Store, order *models.Order, orderItems []models.OrderItem, sessionID string) {
+	// Idempotency: skip if already finalized
+	if finalized, _ := order.Metadata["finalized"].(bool); finalized {
+		return
+	}
+	if order.Metadata == nil {
+		order.Metadata = make(map[string]any)
+	}
+	order.Metadata["finalized"] = true
+	order.UpdatedAt = time.Now()
+	c.DB.UpdateOrder(order)
+
+	// Increment discount UsedCount
+	if order.DiscountID != uuid.Nil {
+		discount, err := c.DB.GetDiscountByID(order.DiscountID.String())
+		if err == nil && discount != nil {
+			discount.UsedCount++
+			discount.UpdatedAt = time.Now()
+			c.DB.UpdateDiscount(discount)
+		}
 	}
 
 	// Decrement inventory
-	for _, item := range items {
+	for _, item := range orderItems {
 		product, err := c.DB.GetProductByID(item.ProductID.String())
 		if err == nil && product.TrackInventory {
 			product.Inventory -= item.Quantity
@@ -419,22 +454,21 @@ func (c *Controller) StorefrontCheckout(storeID string, sessionID string, custom
 		}
 	}
 
-	// Fix 6: Clear cart after checkout
-	for i := range items {
-		c.DB.DeleteCartItem(&items[i])
+	// Clear cart
+	if sessionID != "" {
+		cart, err := c.DB.GetCartBySessionID(store.ID.String(), sessionID)
+		if err == nil && cart != nil {
+			cartItems, _ := c.DB.GetCartItemsByCartID(cart.ID.String())
+			for i := range cartItems {
+				c.DB.DeleteCartItem(&cartItems[i])
+			}
+			cart.DiscountID = uuid.Nil
+			cart.UpdatedAt = time.Now()
+			c.DB.UpdateCart(cart)
+		}
 	}
-	cart.DiscountID = uuid.Nil
-	cart.UpdatedAt = time.Now()
-	c.DB.UpdateCart(cart)
 
-	// Initiate payment if a payment provider is specified and connected
-	paymentURL, clientSecret, err := c.StorefrontInitiatePayment(storeID, order, orderItems)
-	if err != nil {
-		slog.Warn("Payment initiation failed, order created without payment", "error", err, "order_id", order.ID)
-		// Order still exists with pending payment — frontend can retry or use manual payment
-	}
-
-	// Fix 20: Send order notification email
+	// Send order notification email to store owner
 	if store.NotifyEmail != "" {
 		go func() {
 			_, emailErr := c.EmailService.SendEmail(&models.User{Email: store.NotifyEmail},
@@ -445,12 +479,10 @@ func (c *Controller) StorefrontCheckout(storeID string, sessionID string, custom
 					"ITEMS_COUNT":   len(orderItems),
 				})
 			if emailErr != nil {
-				slog.Warn("Failed to send order notification email", "error", emailErr, "store_id", storeID)
+				slog.Warn("Failed to send order notification email", "error", emailErr, "store_id", store.ID)
 			}
 		}()
 	}
-
-	return order, paymentURL, clientSecret, nil
 }
 
 // Fix 1: StorefrontConfirmPayment verifies payment server-side before marking as paid.
@@ -515,7 +547,20 @@ func (c *Controller) StorefrontConfirmPayment(storeID string, orderID string, pa
 	order.Status = "confirmed"
 	order.UpdatedAt = time.Now()
 
-	return c.DB.UpdateOrder(order)
+	updatedOrder, err := c.DB.UpdateOrder(order)
+	if err != nil {
+		return nil, err
+	}
+
+	// Finalize order: decrement inventory, clear cart, send email
+	orderItems, _ := c.DB.GetOrderItemsByOrderID(order.ID.String())
+	sessionIDMeta, _ := order.Metadata["session_id"].(string)
+	store, storeErr := c.DB.GetStoreByID(storeID)
+	if storeErr == nil {
+		c.FinalizeOrderPostPayment(store, updatedOrder, orderItems, sessionIDMeta)
+	}
+
+	return updatedOrder, nil
 }
 
 // verifyStripePayment checks a Stripe checkout session is actually paid.
@@ -757,7 +802,8 @@ func (c *Controller) initiateIyzicoPayment(store *models.Store, order *models.Or
 	callbackURL := fmt.Sprintf("%s/v2/storefront/%s/checkout/iyzico-callback?order_id=%s",
 		constants.WEMOB_API_BASE_URL, store.ID.String(), order.ID.String())
 
-	// Build basket items for Iyzico
+	// Build basket items for Iyzico — each item must have individual price,
+	// and the sum of all item prices must equal the "price" field.
 	var basketItems []map[string]any
 	for _, item := range orderItems {
 		basketItems = append(basketItems, map[string]any{
@@ -767,6 +813,60 @@ func (c *Controller) initiateIyzicoPayment(store *models.Store, order *models.Or
 			"itemType":  "PHYSICAL",
 			"price":     fmt.Sprintf("%.2f", float64(item.TotalCents)/100),
 		})
+	}
+
+	// Split customer name into first/last name (Iyzico requires both)
+	nameParts := strings.SplitN(strings.TrimSpace(order.CustomerName), " ", 2)
+	firstName := nameParts[0]
+	surname := firstName // fallback if no surname
+	if len(nameParts) > 1 {
+		surname = nameParts[1]
+	}
+
+	// Extract client IP from order metadata
+	clientIP := "127.0.0.1"
+	if ip, ok := order.Metadata["client_ip"].(string); ok && ip != "" {
+		clientIP = ip
+	}
+
+	// Extract address fields from order's shipping/billing address
+	shippingLine1, _ := order.ShippingAddress["line1"].(string)
+	shippingLine2, _ := order.ShippingAddress["line2"].(string)
+	shippingCity, _ := order.ShippingAddress["city"].(string)
+	shippingCountry, _ := order.ShippingAddress["country"].(string)
+	shippingPostalCode, _ := order.ShippingAddress["postal_code"].(string)
+
+	shippingAddr := shippingLine1
+	if shippingLine2 != "" {
+		shippingAddr += " " + shippingLine2
+	}
+	if shippingAddr == "" {
+		shippingAddr = "Not provided"
+	}
+	if shippingCity == "" {
+		shippingCity = "Not provided"
+	}
+	if shippingCountry == "" {
+		shippingCountry = "Turkey"
+	}
+
+	billingLine1, _ := order.BillingAddress["line1"].(string)
+	billingLine2, _ := order.BillingAddress["line2"].(string)
+	billingCity, _ := order.BillingAddress["city"].(string)
+	billingCountry, _ := order.BillingAddress["country"].(string)
+
+	billingAddr := billingLine1
+	if billingLine2 != "" {
+		billingAddr += " " + billingLine2
+	}
+	if billingAddr == "" {
+		billingAddr = shippingAddr
+	}
+	if billingCity == "" {
+		billingCity = shippingCity
+	}
+	if billingCountry == "" {
+		billingCountry = shippingCountry
 	}
 
 	iyzicoPayload := map[string]any{
@@ -781,11 +881,28 @@ func (c *Controller) initiateIyzicoPayment(store *models.Store, order *models.Or
 		"enabledInstallments": []int{1, 2, 3, 6, 9},
 		"buyer": map[string]any{
 			"id":                  order.CustomerEmail,
-			"name":                order.CustomerName,
+			"name":                firstName,
+			"surname":             surname,
+			"identityNumber":      "11111111111", // required by Iyzico, placeholder for non-Turkish buyers
 			"email":               order.CustomerEmail,
-			"registrationAddress": "N/A",
-			"city":                "N/A",
-			"country":             "N/A",
+			"ip":                  clientIP,
+			"registrationAddress": shippingAddr,
+			"city":                shippingCity,
+			"country":             shippingCountry,
+			"zipCode":             shippingPostalCode,
+		},
+		"shippingAddress": map[string]any{
+			"contactName": order.CustomerName,
+			"address":     shippingAddr,
+			"city":        shippingCity,
+			"country":     shippingCountry,
+			"zipCode":     shippingPostalCode,
+		},
+		"billingAddress": map[string]any{
+			"contactName": order.CustomerName,
+			"address":     billingAddr,
+			"city":        billingCity,
+			"country":     billingCountry,
 		},
 		"basketItems": basketItems,
 	}
@@ -900,6 +1017,11 @@ func (c *Controller) StorefrontHandleIyzicoCallback(storeID string, orderID stri
 	order.UpdatedAt = time.Now()
 	c.DB.UpdateOrder(order)
 
+	// Finalize order: decrement inventory, clear cart, send email
+	orderItems, _ := c.DB.GetOrderItemsByOrderID(orderID)
+	sessionID, _ := order.Metadata["session_id"].(string)
+	c.FinalizeOrderPostPayment(store, order, orderItems, sessionID)
+
 	slog.Info("Iyzico payment confirmed", "order_id", orderID, "store_id", storeID)
 	return baseURL + "/checkout/success?order_id=" + orderID, nil
 }
@@ -947,6 +1069,14 @@ func (c *Controller) StorefrontHandleStripeWebhook(body []byte) error {
 		order.Status = "confirmed"
 		order.UpdatedAt = time.Now()
 		c.DB.UpdateOrder(order)
+
+		// Finalize order: decrement inventory, clear cart, send email
+		orderItems, _ := c.DB.GetOrderItemsByOrderID(orderID)
+		sessionIDMeta, _ := order.Metadata["session_id"].(string)
+		store, storeErr := c.DB.GetStoreByID(order.StoreID.String())
+		if storeErr == nil {
+			c.FinalizeOrderPostPayment(store, order, orderItems, sessionIDMeta)
+		}
 
 		slog.Info("Stripe webhook: order confirmed", "order_id", orderID)
 

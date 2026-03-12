@@ -471,7 +471,19 @@ func (v *HttpViews) StorefrontCheckout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	order, paymentURL, clientSecret, err := v.Controller.StorefrontCheckout(storeID, req.SessionID, req.CustomerEmail, req.CustomerName, req.ShippingAddress, req.BillingAddress, req.PaymentProvider)
+	// Extract client IP for payment provider (Iyzico requires buyer IP)
+	clientIP := r.RemoteAddr
+	if fwd := r.Header.Get("X-Forwarded-For"); fwd != "" {
+		clientIP = strings.SplitN(fwd, ",", 2)[0]
+	}
+	// Strip port if present
+	if idx := strings.LastIndex(clientIP, ":"); idx != -1 {
+		if hostPart := clientIP[:idx]; strings.Contains(hostPart, ".") || !strings.Contains(hostPart, ":") {
+			clientIP = hostPart
+		}
+	}
+
+	order, paymentURL, clientSecret, err := v.Controller.StorefrontCheckout(storeID, req.SessionID, req.CustomerEmail, req.CustomerName, req.ShippingAddress, req.BillingAddress, req.PaymentProvider, clientIP)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
 		return
