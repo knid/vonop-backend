@@ -56,6 +56,60 @@ func (c *Controller) CreateAppProject(ctx context.Context, user *models.User, re
 	return project, nil
 }
 
+func (c *Controller) CloneAppProjectAsMobile(user *models.User, sourceProjectID string) (*models.AppProject, error) {
+	source, err := c.DB.GetAppProjectByID(sourceProjectID)
+	if err != nil {
+		return nil, fmt.Errorf("source project not found")
+	}
+	if source.UserID != user.ID {
+		return nil, fmt.Errorf("unauthorized")
+	}
+
+	slug := generateAppSlug(source.Name)
+
+	clone := &models.AppProject{
+		UserID:      user.ID,
+		Name:        source.Name,
+		Slug:        slug,
+		Prompt:      source.Prompt,
+		ProjectType: "mobile_app",
+		AST:         source.AST,
+		Theme:       source.Theme,
+		DataModels:  source.DataModels,
+		Settings:    source.Settings,
+		Status:      "ready",
+	}
+
+	clone, err = c.DB.CreateAppProject(clone)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create mobile project")
+	}
+
+	// Copy all generated files from source to clone
+	files, err := c.DB.GetAppGeneratedFilesByProjectID(source.ID.String(), "nextjs")
+	if err != nil {
+		slog.Warn("Failed to fetch source files for cloning", "error", err)
+	} else if len(files) > 0 {
+		var clonedFiles []models.AppGeneratedFile
+		for _, f := range files {
+			clonedFiles = append(clonedFiles, models.AppGeneratedFile{
+				AppProjectID: clone.ID,
+				Platform:     f.Platform,
+				FilePath:     f.FilePath,
+				Content:      f.Content,
+				FileType:     f.FileType,
+				IsGenerated:  f.IsGenerated,
+			})
+		}
+		if err := c.DB.BulkCreateAppGeneratedFiles(clonedFiles); err != nil {
+			slog.Error("Failed to bulk copy files to mobile clone", "error", err)
+			return nil, fmt.Errorf("failed to copy files to mobile project")
+		}
+	}
+
+	return clone, nil
+}
+
 func (c *Controller) GetAppProjectsByUserFiltered(user *models.User, types []string) ([]models.AppProject, error) {
 	if len(types) == 0 {
 		return c.DB.GetAppProjectsByUserID(user.ID.String())

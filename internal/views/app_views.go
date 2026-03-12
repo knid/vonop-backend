@@ -812,6 +812,44 @@ func (v *HttpViews) DisconnectAppIntegration(w http.ResponseWriter, r *http.Requ
 	utils.JSONResponse(w, responses.SuccessResponse{Success: true}, http.StatusOK)
 }
 
+// POST /v2/apps/{appId}/convert-to-mobile
+func (v *HttpViews) ConvertToMobile(w http.ResponseWriter, r *http.Request) {
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	appID := chi.URLParam(r, "appId")
+	clone, err := v.Controller.CloneAppProjectAsMobile(user, appID)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if err.Error() == "unauthorized" {
+			status = http.StatusForbidden
+		} else if err.Error() == "source project not found" {
+			status = http.StatusNotFound
+		}
+		utils.JSONErrorResponse(w, err.Error(), status)
+		return
+	}
+
+	var theme map[string]any
+	json.Unmarshal(clone.Theme, &theme)
+
+	utils.JSONResponse(w, responses.AppProjectResponse{
+		ID:          clone.ID,
+		Name:        clone.Name,
+		Slug:        clone.Slug,
+		Prompt:      clone.Prompt,
+		ProjectType: clone.ProjectType,
+		Theme:       theme,
+		Settings:    clone.Settings,
+		Status:      clone.Status,
+		CreatedAt:   clone.CreatedAt,
+		UpdatedAt:   clone.UpdatedAt,
+	}, http.StatusCreated)
+}
+
 // GET /v2/apps/{appId}/conversation
 func (v *HttpViews) GetAppConversation(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
