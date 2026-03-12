@@ -513,6 +513,13 @@ func (c *Controller) StreamBuildApp(
 			return
 		}
 
+		// If runConversationLoop returned empty, the user asked a general question
+		// (not a build request). Stop generation — the question was already answered.
+		if message == "" {
+			sendEvent("done", map[string]any{"success": true, "files_changed": 0})
+			return
+		}
+
 		// Phase C: Stream build plan to the user
 		c.streamBuildPlan(ctx, provider, message, preGenToolContext, project.ProjectType, sendEvent)
 	}
@@ -5150,6 +5157,7 @@ func (c *Controller) runConversationLoop(
 	}
 
 	var decision struct {
+		IsQuestion        bool `json:"is_question"`
 		NeedsConversation bool `json:"needs_conversation"`
 	}
 	if err := json.Unmarshal([]byte(decisionJSON), &decision); err != nil {
@@ -5160,7 +5168,15 @@ func (c *Controller) runConversationLoop(
 		}
 	}
 
-	// Step 2: If no conversation needed, return original prompt
+	// Step 2a: If the user asked a general question (not a build request),
+	// answer it and signal the caller to stop generation.
+	if decision.IsQuestion {
+		slog.Info("conversation decision: general question detected, answering instead of building", "message", message)
+		c.answerGeneralQuestion(ctx, provider, message, sendEvent)
+		return "" // empty string signals caller to abort generation
+	}
+
+	// Step 2b: If no conversation needed, return original prompt
 	if !decision.NeedsConversation {
 		return message
 	}
@@ -5291,6 +5307,50 @@ func (c *Controller) runConversationLoop(
 
 	// Step 4: Build enriched prompt with conversation transcript
 	return buildConversationEnrichedPrompt(message, conversationHistory)
+}
+
+// answerGeneralQuestion streams a helpful answer when the user asks a general
+// question (e.g. "what can you do?") instead of requesting a build.
+func (c *Controller) answerGeneralQuestion(
+	ctx context.Context,
+	provider *utils.LLMProvider,
+	message string,
+	sendEvent func(string, any) bool,
+) {
+	fastModel := provider.FastModel()
+	systemPrompt := `You are Wemob AI, a friendly web application builder assistant. The user asked a general question instead of requesting an app to be built.
+
+Answer their question helpfully and concisely. Mention your key capabilities:
+- Building full-stack Next.js web applications from a text description or screenshot
+- E-commerce stores with product management, cart, and checkout
+- Portfolio sites, blogs, dashboards, landing pages, and more
+- Real-time preview and iterative editing via chat
+- Database integration, authentication, custom domains, SEO
+
+Rules:
+- CRITICAL: Write in the SAME LANGUAGE as the user's message. Match their language exactly.
+- Be warm, conversational, and enthusiastic
+- Keep it to 3-5 sentences max
+- End by encouraging them to describe what they'd like to build
+- No markdown headers, no bullet points — just natural text`
+
+	messages := []utils.Message{
+		{Role: "system", Content: systemPrompt},
+		{Role: "user", Content: message},
+	}
+
+	_, err := utils.StreamTextFromLLMWithMessages(
+		ctx, fastModel, messages, provider,
+		func(chunk string) {
+			sendEvent("conversation_chunk", map[string]any{"chunk": chunk})
+		},
+		nil, // no reasoning
+		utils.StreamTextConfig{MaxTokens: 512},
+	)
+	if err != nil {
+		slog.Warn("failed to answer general question", "error", err)
+	}
+	sendEvent("conversation_done", map[string]any{"type": "general_answer"})
 }
 
 // conversationTurn represents a single turn in a pre-build conversation.
