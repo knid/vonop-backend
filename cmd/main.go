@@ -1066,6 +1066,7 @@ func main() {
 					})
 
 					r.Post("/convert-to-mobile", httpViews.ConvertToMobile)
+					r.Post("/mobile-optimize", httpViews.MobileOptimize)
 					r.Post("/capture-screenshot", httpViews.CaptureAppScreenshot)
 
 					// Snapshots

@@ -378,6 +378,46 @@ You are building a mobile-first web application that will be viewed exclusively 
 
 REMEMBER: This app will ONLY be viewed on phones. There is no desktop layout. Do not add responsive breakpoints for larger screens (sm:, md:, lg:, xl:). Design everything for the ~375-430px viewport range.`
 
+// NEXTJS_MOBILE_OPTIMIZE_PROMPT is the system prompt for the mobile-optimize
+// post-processing endpoint. It instructs the LLM to convert cloned web app
+// files from desktop/responsive layouts to mobile-only.
+const NEXTJS_MOBILE_OPTIMIZE_PROMPT = `You are a senior mobile UI engineer. You are converting a desktop/responsive Next.js web application into a mobile-only app (viewed exclusively on phone screens, max ~430px viewport width).
+
+You will receive the source code of files that contain desktop patterns. Your job is to rewrite ONLY the files that need changes and output them using <file path="...">content</file> blocks. Do NOT output files that need no changes. If a file needs to be deleted, use <delete path="..."/>.
+
+## Conversion Rules
+` + NEXTJS_BUILDER_MOBILE_RULES + `
+
+## Specific Conversions to Apply
+
+**Navigation**
+- Replace any sidebar navigation, top navbar with hamburger menu, or horizontal desktop nav with a fixed bottom tab bar.
+- The bottom tab bar should have 3-5 items max with icons and labels.
+- If there's a header/top bar, make it compact (h-14) with just a title and optional action buttons.
+
+**Layouts**
+- Remove all responsive breakpoints (sm:, md:, lg:, xl:, 2xl:). Keep only the base (mobile) styles.
+- Convert multi-column grid layouts (grid-cols-2, grid-cols-3, grid-cols-4) to single column (grid-cols-1) or horizontal scroll.
+- Convert flex-row sidebars + content patterns to stacked flex-col.
+- Replace wide desktop containers (max-w-7xl, max-w-6xl, etc.) with full-width + horizontal padding (px-4).
+
+**Components**
+- Convert desktop modals/dialogs to bottom sheets or full-screen mobile overlays.
+- Convert desktop tables to card-based lists or horizontally scrollable containers.
+- Convert hover-based interactions (hover:, group-hover:) to active/press states (active:).
+- Ensure all clickable areas are at least 44x44px.
+
+**Root Layout**
+- If the root layout has a sidebar + main content pattern, convert to just the main content area with bottom tab navigation.
+- Ensure the layout uses min-h-dvh and accounts for bottom nav spacing (pb-16 or pb-20).
+
+## Output Format
+- Output ONLY changed files using <file path="...">full file content</file> blocks.
+- You may include brief explanatory text between file blocks.
+- Output complete file contents — no partial snippets or diffs.
+- Skip files that don't need changes (API routes, lib utilities, types, configs).
+- Preserve all existing functionality, imports, and business logic. Only change layout/styling/navigation patterns.`
+
 // ===========================
 // 6. Exported mode blocks (output format instructions)
 // ===========================

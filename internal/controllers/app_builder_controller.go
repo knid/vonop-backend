@@ -5395,3 +5395,240 @@ func buildEnrichedPrompt(original string, result ClarificationResult) string {
 	}
 	return sb.String()
 }
+
+// selectMobileOptimizeFiles filters project files to those likely containing
+// UI/layout code that needs mobile conversion. API routes, lib utilities,
+// type definitions, and config files are excluded.
+func selectMobileOptimizeFiles(files []models.AppGeneratedFile) []models.AppGeneratedFile {
+	var selected []models.AppGeneratedFile
+	for _, f := range files {
+		path := f.FilePath
+
+		// Exclude non-UI files
+		if strings.HasPrefix(path, "app/api/") ||
+			strings.HasPrefix(path, "lib/db") ||
+			strings.HasPrefix(path, "lib/schema") ||
+			strings.HasPrefix(path, "types/") ||
+			strings.HasSuffix(path, ".config.ts") ||
+			strings.HasSuffix(path, ".config.mjs") ||
+			strings.HasSuffix(path, ".config.js") ||
+			strings.HasSuffix(path, ".json") ||
+			strings.HasSuffix(path, ".css") ||
+			path == "middleware.ts" ||
+			path == "tailwind.config.ts" ||
+			path == "next.config.mjs" ||
+			path == "postcss.config.mjs" ||
+			path == "tsconfig.json" {
+			continue
+		}
+
+		// Include pages, layouts, and components
+		isUI := strings.HasSuffix(path, "/page.tsx") ||
+			strings.HasSuffix(path, "/layout.tsx") ||
+			strings.Contains(path, "components/")
+
+		// Include files with desktop patterns
+		hasDesktop := strings.Contains(f.Content, "sm:") ||
+			strings.Contains(f.Content, "md:") ||
+			strings.Contains(f.Content, "lg:") ||
+			strings.Contains(f.Content, "xl:") ||
+			strings.Contains(f.Content, "<nav") ||
+			strings.Contains(f.Content, "sidebar") ||
+			strings.Contains(f.Content, "Sidebar") ||
+			strings.Contains(f.Content, "grid-cols-")
+
+		if isUI || hasDesktop {
+			selected = append(selected, f)
+		}
+	}
+	return selected
+}
+
+// StreamMobileOptimize reads the project's cloned web files, sends them to the
+// LLM with mobile conversion instructions, and streams back modified files.
+// It follows the same SSE pattern as StreamBuildApp (file-block streaming).
+func (c *Controller) StreamMobileOptimize(
+	ctx context.Context,
+	project *models.AppProject,
+	user *models.User,
+	events chan<- responses.SSEEvent,
+) {
+	defer close(events)
+
+	sendEvent := func(eventName string, data any) bool {
+		select {
+		case <-ctx.Done():
+			return false
+		case events <- responses.SSEEvent{Event: eventName, Data: data}:
+			return true
+		}
+	}
+	sendError := func(phase, msg string) {
+		events <- responses.SSEEvent{
+			Event: "error",
+			Data:  responses.GenerationErrorEvent{Error: msg, Phase: phase},
+		}
+	}
+
+	// 1. Set status to optimizing
+	project.Status = "optimizing"
+	if _, err := c.DB.UpdateAppProject(project); err != nil {
+		slog.Error("failed to set project status to optimizing", "error", err, "project_id", project.ID)
+	}
+
+	resetStatus := func() {
+		project.Status = "ready"
+		if _, err := c.DB.UpdateAppProject(project); err != nil {
+			slog.Error("failed to reset project status", "error", err, "project_id", project.ID)
+		}
+	}
+
+	// 2. Load all files
+	allFiles, err := c.DB.GetAppGeneratedFilesByProjectID(project.ID.String(), "nextjs")
+	if err != nil || len(allFiles) == 0 {
+		slog.Error("mobile optimize: failed to load files", "error", err, "project_id", project.ID)
+		resetStatus()
+		sendError("load", "failed to load project files")
+		return
+	}
+
+	// 3. Create auto-snapshot before changes
+	preSnapshot, snapErr := c.CreateAppSnapshot(project, "Auto-save before mobile optimization", "auto")
+	if snapErr != nil {
+		slog.Error("mobile optimize: failed to create snapshot", "error", snapErr, "project_id", project.ID)
+		resetStatus()
+		sendError("snapshot", "failed to create safety snapshot. please try again")
+		return
+	}
+	preSnapshotID := preSnapshot.ID.String()
+	c.DB.DeleteOldAutoSnapshots(project.ID.String(), 20)
+
+	// 4. Filter to UI files
+	uiFiles := selectMobileOptimizeFiles(allFiles)
+	if len(uiFiles) == 0 {
+		slog.Info("mobile optimize: no UI files to optimize", "project_id", project.ID)
+		resetStatus()
+		sendEvent("done", map[string]any{"success": true, "files_changed": 0})
+		return
+	}
+
+	// 5. Build file map and LLM messages
+	fileMap := make(map[string]string, len(allFiles))
+	for _, f := range allFiles {
+		fileMap[f.FilePath] = f.Content
+	}
+
+	// Build file listing for system prompt (all files for context)
+	var fileListing strings.Builder
+	fileListing.WriteString("\n\n## Project Files\n")
+	for _, f := range allFiles {
+		fileListing.WriteString(fmt.Sprintf("- %s (%s)\n", f.FilePath, f.FileType))
+	}
+
+	// Build user message with selected file contents
+	var userContent strings.Builder
+	userContent.WriteString("Convert the following files to mobile-only layout. Only output files that need changes.\n\n")
+	for _, f := range uiFiles {
+		userContent.WriteString(fmt.Sprintf("<file path=\"%s\">\n%s\n</file>\n\n", f.FilePath, f.Content))
+	}
+
+	provider := c.llmProvider()
+	model := c.SecretManager.GetSecret("WEBSITE_BUILDER_LLM_MODEL")
+	if model == "" {
+		model = provider.DefaultModel()
+	}
+
+	llmMessages := []utils.Message{
+		{Role: "system", Content: constants.NEXTJS_MOBILE_OPTIMIZE_PROMPT + fileListing.String()},
+		{Role: "user", Content: userContent.String()},
+	}
+
+	// 6. Stream LLM response with FileStreamParser
+	var ops []appBuilderOperation
+	fileCounter := 0
+	var responseBuilder strings.Builder
+
+	parser := &utils.FileStreamParser{
+		DiscardIncomplete: true,
+		OnFile: func(path, content string) {
+			content = utils.StripCodeFences(content)
+			_, fileType := guessFileType(path)
+			if fileType == "tsx" || fileType == "ts" {
+				content, _ = stripForbiddenImports(content, path)
+			}
+			c.saveGeneratedFile(project, path, content, fileType, fileMap, sendEvent, &ops, true)
+			fileCounter++
+			sendEvent("progress", responses.ProgressEvent{
+				Phase:   "optimizing",
+				Message: fmt.Sprintf("Optimized %s (%d files)", path, fileCounter),
+				Current: fileCounter,
+			})
+		},
+		OnDelete: func(path string) {
+			c.deleteGeneratedFile(project, path, fileMap, sendEvent, &ops)
+		},
+		OnText: func(text string) {
+			responseBuilder.WriteString(text)
+			cleaned := ansiRegex.ReplaceAllString(text, "")
+			if cleaned != "" {
+				sendEvent("chat_text", responses.ChatTextEvent{Chunk: cleaned})
+			}
+		},
+	}
+
+	slog.Info("Starting mobile optimization LLM call",
+		"model", model,
+		"project_id", project.ID,
+		"ui_files", len(uiFiles),
+		"total_files", len(allFiles),
+	)
+
+	_, llmErr := utils.StreamTextFromLLMWithMessages(
+		ctx, model, llmMessages, provider,
+		func(chunk string) { parser.Feed(chunk) },
+		func(chunk string) {
+			sendEvent("chat_thinking", responses.ChatThinkingEvent{Chunk: chunk})
+		},
+		utils.StreamTextConfig{MaxTokens: 16384},
+	)
+	parser.Flush()
+
+	if llmErr != nil {
+		slog.Error("mobile optimize LLM call failed", "error", llmErr, "project_id", project.ID)
+
+		// Auto-rollback on failure
+		if len(ops) > 0 {
+			slog.Info("mobile optimize: rolling back after failure",
+				"project_id", project.ID,
+				"snapshot_id", preSnapshotID,
+				"partial_ops", len(ops),
+			)
+			if _, rollbackErr := c.RestoreAppSnapshot(project, preSnapshotID); rollbackErr != nil {
+				slog.Error("mobile optimize: rollback failed", "error", rollbackErr, "project_id", project.ID)
+			} else {
+				sendEvent("rollback", map[string]any{
+					"snapshot_id":     preSnapshotID,
+					"reason":          "optimization_failed",
+					"rolled_back":     len(ops),
+					"resync_required": true,
+				})
+			}
+		}
+
+		resetStatus()
+		sendError("ai", "mobile optimization failed. your files have been restored")
+		return
+	}
+
+	// 7. Set status back to ready and send done
+	resetStatus()
+
+	// 8. Deduct credits
+	c.DeductAICreditsUnchecked(user, 1, "mobile_optimize", project.ID.String())
+
+	sendEvent("done", map[string]any{
+		"success":       true,
+		"files_changed": len(ops),
+		"snapshot_id":   preSnapshotID,
+	})
+}
