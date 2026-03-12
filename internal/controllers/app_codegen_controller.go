@@ -591,7 +591,10 @@ func buildGlobalsCSSTheme(colorScheme, darkColorScheme map[string]any, isMobile 
 `)
 	}
 
-	sb.WriteString("}\n")
+	sb.WriteString("}\n\n")
+
+	// Hide Next.js dev error overlay indicator in preview (must be outside @layer to win specificity)
+	sb.WriteString("nextjs-portal { display: none !important; }\n")
 
 	return sb.String()
 }
