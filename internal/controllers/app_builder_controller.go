@@ -480,7 +480,7 @@ func (c *Controller) StreamBuildApp(
 	// BEFORE clarification questions so that results inform the entire flow.
 	var preGenCtx preGenContext
 	if isInitialGeneration {
-		preGenCtx = c.runPreGenWebSearch(ctx, provider, message, sendEvent)
+		preGenCtx = c.runPreGenWebSearch(ctx, provider, message, imageURLs, sendEvent)
 		if preGenCtx.HasContent() {
 			slog.Info("Initial generation: web search returned context",
 				"project_id", project.ID, "context_length", len(preGenCtx.Text),
@@ -507,7 +507,7 @@ func (c *Controller) StreamBuildApp(
 		}
 
 		// Phase B: Natural conversation loop (if prompt is vague)
-		message = c.runConversationLoop(ctx, jobID, provider, message, preGenToolContext, webSummaryText, project.ProjectType, sendEvent)
+		message = c.runConversationLoop(ctx, jobID, provider, message, imageURLs, preGenToolContext, webSummaryText, project.ProjectType, sendEvent)
 
 		if ctx.Err() != nil {
 			return
@@ -684,7 +684,7 @@ func (c *Controller) StreamBuildApp(
 		// Runs a cheap model with tools to detect URLs and gather extra context
 		// before the main code-gen call. If no tools are called the phase is a
 		// near-instant no-op.
-		toolContext := c.runChatToolPhase(ctx, project, provider, message, fileMap, sendEvent)
+		toolContext := c.runChatToolPhase(ctx, project, provider, message, imageURLs, fileMap, sendEvent)
 		if toolContext != "" {
 			// Inject tool-gathered context as a system message before the user message
 			insertIdx := len(llmMessages) - 1 // before last user message
@@ -1104,6 +1104,7 @@ func (c *Controller) runChatToolPhase(
 	project *models.AppProject,
 	provider *utils.LLMProvider,
 	userMessage string,
+	imageURLs []string,
 	fileMap map[string]string,
 	sendEvent func(string, any) bool,
 ) string {
@@ -1184,9 +1185,14 @@ func (c *Controller) runChatToolPhase(
 - You can call multiple tools if needed (e.g. generate_image + install_package).
 - IMPORTANT: Before calling any tool, ALWAYS write a brief message (1-2 sentences, in the same language as the user's message) explaining what you're about to do. For example: "Let me check what's currently in the database...", "I'll generate a custom image for this...", "Looking at the website to understand the design...". This text is streamed to the user in real time so they know what's happening. Never call a tool without explaining first.`
 
+	userMsg := utils.Message{Role: "user", Content: userMessage}
+	if len(imageURLs) > 0 && provider.SupportsVision() {
+		userMsg.Images = imageURLs
+	}
+
 	messages := []utils.Message{
 		{Role: "system", Content: systemPrompt},
-		{Role: "user", Content: userMessage},
+		userMsg,
 	}
 
 	var collectedContext strings.Builder
@@ -1304,6 +1310,7 @@ func (c *Controller) runPreGenWebSearch(
 	ctx context.Context,
 	provider *utils.LLMProvider,
 	userMessage string,
+	imageURLs []string,
 	sendEvent func(string, any) bool,
 ) preGenContext {
 	fastModel := provider.FastModel()
@@ -1339,9 +1346,15 @@ When researching a website, do both:
 Be thorough — the results will be used to generate an accurate replica/revision.
 If no search or screenshot is needed, respond with just: NO_SEARCH_NEEDED`
 
+	userMsg := utils.Message{Role: "user", Content: userMessage}
+	if len(imageURLs) > 0 && provider.SupportsVision() {
+		userMsg.Images = imageURLs
+		userMsg.Content += "\n\n[User attached image(s) — if the image shows a website or UI design, take a screenshot is NOT needed since you already have the visual reference.]"
+	}
+
 	messages := []utils.Message{
 		{Role: "system", Content: systemPrompt},
-		{Role: "user", Content: userMessage},
+		userMsg,
 	}
 
 	var collectedContext strings.Builder
@@ -5114,6 +5127,7 @@ func (c *Controller) runConversationLoop(
 	jobID string,
 	provider *utils.LLMProvider,
 	message string,
+	imageURLs []string,
 	webContext string,
 	webSummaryText string,
 	projectType string,
@@ -5123,6 +5137,9 @@ func (c *Controller) runConversationLoop(
 
 	// Step 1: Quick decision — does this prompt need conversation?
 	decisionMsg := fmt.Sprintf("Project type: %s\n\nUser prompt:\n%s", projectType, message)
+	if len(imageURLs) > 0 {
+		decisionMsg += fmt.Sprintf("\n\nUser attached %d image(s) as visual reference for the design.", len(imageURLs))
+	}
 	if webContext != "" {
 		decisionMsg += "\n\nWeb context available: yes (the user referenced a website and we already have search results)"
 	}
@@ -5178,10 +5195,15 @@ func (c *Controller) runConversationLoop(
 			contextPrefix += fmt.Sprintf("[%s]: %s\n", t.Role, t.Content)
 		}
 
-		llmMessages = append(llmMessages, utils.Message{
+		userMsg := utils.Message{
 			Role:    "user",
 			Content: contextPrefix + "\nAsk your next question(s) to clarify what to build.",
-		})
+		}
+		// Attach images on the first turn so the fast model can see user-provided screenshots
+		if turn == 0 && len(imageURLs) > 0 && provider.SupportsVision() {
+			userMsg.Images = imageURLs
+		}
+		llmMessages = append(llmMessages, userMsg)
 
 		// Stream the AI's question to the user
 		var aiMessage strings.Builder
