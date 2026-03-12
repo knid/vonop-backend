@@ -5172,7 +5172,7 @@ func (c *Controller) runConversationLoop(
 	// answer it and signal the caller to stop generation.
 	if decision.IsQuestion {
 		slog.Info("conversation decision: general question detected, answering instead of building", "message", message)
-		c.answerGeneralQuestion(ctx, provider, message, sendEvent)
+		c.answerGeneralQuestion(ctx, provider, message, imageURLs, sendEvent)
 		return "" // empty string signals caller to abort generation
 	}
 
@@ -5315,6 +5315,7 @@ func (c *Controller) answerGeneralQuestion(
 	ctx context.Context,
 	provider *utils.LLMProvider,
 	message string,
+	imageURLs []string,
 	sendEvent func(string, any) bool,
 ) {
 	fastModel := provider.FastModel()
@@ -5334,9 +5335,14 @@ Rules:
 - End by encouraging them to describe what they'd like to build
 - No markdown headers, no bullet points — just natural text`
 
+	userMsg := utils.Message{Role: "user", Content: message}
+	if len(imageURLs) > 0 && provider.SupportsVision() {
+		userMsg.Images = imageURLs
+	}
+
 	messages := []utils.Message{
 		{Role: "system", Content: systemPrompt},
-		{Role: "user", Content: message},
+		userMsg,
 	}
 
 	_, err := utils.StreamTextFromLLMWithMessages(
