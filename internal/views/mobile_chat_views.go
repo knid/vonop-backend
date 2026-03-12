@@ -236,23 +236,37 @@ func (v *HttpViews) ClassifyMobileIntent(w http.ResponseWriter, r *http.Request)
 
 	var body struct {
 		Prompt string `json:"prompt"`
+		URL    string `json:"url"` // When provided, skip classification and treat as url_wrapper directly
 	}
 	if err := utils.ParseJSONBody(r, &body); err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	if body.Prompt == "" {
-		utils.JSONErrorResponse(w, "prompt is required", http.StatusBadRequest)
+	if body.Prompt == "" && body.URL == "" {
+		utils.JSONErrorResponse(w, "prompt or url is required", http.StatusBadRequest)
 		return
 	}
 
-	intent, extractedURL := v.Controller.ClassifyMobileIntent(r.Context(), body.Prompt)
+	var intent string
+	var extractedURL string
+
+	if body.URL != "" {
+		// Direct URL conversion (e.g. "Convert to Mobile App" button) — skip LLM classification
+		intent = "url_wrapper"
+		extractedURL = body.URL
+	} else {
+		intent, extractedURL = v.Controller.ClassifyMobileIntent(r.Context(), body.Prompt)
+	}
 
 	if intent == "url_wrapper" && extractedURL != "" {
 		// Auto-create the project so the frontend can go straight to preview
 		project, err := v.Controller.QuickCreateMobileProject(user, extractedURL)
 		if err != nil {
-			utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+			status := http.StatusInternalServerError
+			if err.Error() == "you have reached your project limit" {
+				status = http.StatusBadRequest
+			}
+			utils.JSONErrorResponse(w, err.Error(), status)
 			return
 		}
 
