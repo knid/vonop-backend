@@ -3,6 +3,7 @@ package views
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -848,6 +849,44 @@ func (v *HttpViews) ConvertToMobile(w http.ResponseWriter, r *http.Request) {
 		CreatedAt:   clone.CreatedAt,
 		UpdatedAt:   clone.UpdatedAt,
 	}, http.StatusCreated)
+}
+
+// POST /v2/apps/{appId}/mobile-optimize
+func (v *HttpViews) MobileOptimize(w http.ResponseWriter, r *http.Request) {
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+	if requireActiveSubscription(w, user) {
+		return
+	}
+	if v.checkMinimumCredits(w, user) {
+		return
+	}
+
+	appID := chi.URLParam(r, "appId")
+	project, err := v.Controller.GetAppProject(appID, user)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	if project.ProjectType != "mobile_app" {
+		utils.JSONErrorResponse(w, "mobile optimization is only available for mobile app projects", http.StatusBadRequest)
+		return
+	}
+	if project.Status != "ready" {
+		utils.JSONErrorResponse(w, "project is not ready for optimization", http.StatusConflict)
+		return
+	}
+
+	v.handleStreamOrAsync(w, r, user, StreamConfig{
+		JobType: "mobile_optimize",
+		StreamFunc: func(ctx context.Context, events chan<- responses.SSEEvent, jobID string) {
+			v.Controller.StreamMobileOptimize(ctx, project, user, events)
+		},
+	})
 }
 
 // GET /v2/apps/{appId}/conversation
