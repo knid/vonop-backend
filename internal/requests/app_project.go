@@ -60,7 +60,7 @@ type DeployWebRequest struct {
 type DeployMobileBuildRequest struct {
 	PackageName       string `json:"package_name" validate:"required,min=3" errormgs:"must be at least 3 characters"`
 	AppName           string `json:"app_name" validate:"required,min=2" errormgs:"must be at least 2 characters"`
-	Icon              string `json:"icon"`
+	Icon              string `json:"icon" validate:"required" errormgs:"app icon is required"`
 	SplashScreenColor string `json:"splash_screen_color"`
 }
 
