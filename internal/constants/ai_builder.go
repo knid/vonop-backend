@@ -378,6 +378,49 @@ You are building a mobile-first web application that will be viewed exclusively 
 
 REMEMBER: This app will ONLY be viewed on phones. There is no desktop layout. Do not add responsive breakpoints for larger screens (sm:, md:, lg:, xl:). Design everything for the ~375-430px viewport range.`
 
+// BuildBridgeSDKRules returns LLM instructions for using the WemobBridge SDK.
+// It is injected into the system prompt only when bridge is enabled, and lists
+// exactly which methods the user has allowed.
+func BuildBridgeSDKRules(methods []string) string {
+	if len(methods) == 0 {
+		return ""
+	}
+
+	rules := `
+
+### WemobBridge Native SDK (IMPORTANT)
+This mobile app has the WemobBridge SDK enabled. The SDK script is automatically injected by the native app shell — do NOT add a <script> tag for it.
+
+The global ` + "`window.WemobBridge`" + ` object is available in client components. All methods return Promises and resolve to null when not running inside the native app (safe to call during development).
+
+**Available methods (ONLY use these — the user has enabled them):**
+`
+	methodDocs := map[string]string{
+		"getDeviceInfo":       "- `await WemobBridge.getDeviceInfo()` — returns `{ platform, model, osVersion, appVersion }`",
+		"share":               "- `await WemobBridge.share(text, url)` — opens the native share sheet",
+		"haptic":              "- `await WemobBridge.haptic(type)` — triggers haptic feedback (\"light\", \"medium\", or \"heavy\")",
+		"openExternal":        "- `await WemobBridge.openExternal(url)` — opens a URL in the system browser",
+		"getConnectionStatus": "- `await WemobBridge.getConnectionStatus()` — returns online/offline status",
+		"storage.get":         "- `await WemobBridge.storage.get(key)` — reads a value from persistent native storage",
+		"storage.set":         "- `await WemobBridge.storage.set(key, value)` — writes a value to persistent native storage",
+		"storage.remove":      "- `await WemobBridge.storage.remove(key)` — deletes a key from persistent native storage",
+	}
+
+	for _, m := range methods {
+		if doc, ok := methodDocs[m]; ok {
+			rules += doc + "\n"
+		}
+	}
+
+	rules += `
+**Usage rules:**
+- Always check ` + "`WemobBridge.isNative()`" + ` before showing native-only UI (e.g. a "Share" button).
+- Use these methods to enhance the user experience — for example, haptic feedback on important actions, native share for content sharing, device info for analytics.
+- Do NOT add a script tag for wemob-bridge.js — it is auto-injected by the native shell.
+`
+	return rules
+}
+
 // NEXTJS_MOBILE_OPTIMIZE_PROMPT is the system prompt for the mobile-optimize
 // post-processing endpoint. It instructs the LLM to convert cloned web app
 // files from desktop/responsive layouts to mobile-only.

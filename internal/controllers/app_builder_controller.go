@@ -269,6 +269,15 @@ func (c *Controller) StreamBuildApp(
 	}()
 	defer close(keepaliveDone)
 
+	// --- Load mobile app config (for bridge SDK injection) ---
+	var mobileConfig *models.MobileAppConfig
+	if project.ProjectType == "mobile_app" {
+		cfg, err := c.DB.GetMobileAppConfig(project.ID.String())
+		if err == nil {
+			mobileConfig = cfg
+		}
+	}
+
 	// --- Build fileMap ---
 	fileMap := make(map[string]string)
 
@@ -391,7 +400,7 @@ func (c *Controller) StreamBuildApp(
 	// Add conversation history
 	if isInitialGeneration {
 		llmMessages = []utils.Message{
-			{Role: "system", Content: buildSystemPrompt(project)},
+			{Role: "system", Content: buildSystemPrompt(project, mobileConfig)},
 			{Role: "system", Content: c.buildProjectContext(project, fileMap, isInitialGeneration)},
 		}
 		userMsg := utils.Message{Role: "user", Content: message}
@@ -409,7 +418,7 @@ func (c *Controller) StreamBuildApp(
 		projectContext := c.buildProjectContextForChat(project, fileMap, selectedFiles)
 
 		llmMessages = []utils.Message{
-			{Role: "system", Content: buildChatSystemPrompt(project)},
+			{Role: "system", Content: buildChatSystemPrompt(project, mobileConfig)},
 			{Role: "system", Content: projectContext},
 		}
 
@@ -545,7 +554,7 @@ func (c *Controller) StreamBuildApp(
 			ecomImages = append(append([]string{}, imageURLs...), preGenCtx.Screenshots...)
 		}
 		ecomText, ecomOps, ecomErr := c.streamEcommerceGeneration(
-			ctx, project, user, model, provider, fileMap, sendEvent, message, ecomImages, preGenToolContext,
+			ctx, project, user, model, provider, fileMap, sendEvent, message, ecomImages, preGenToolContext, mobileConfig,
 		)
 		if ecomErr != nil {
 			slog.Error("E-commerce generation failed", "error", ecomErr, "project_id", project.ID)
@@ -596,7 +605,7 @@ func (c *Controller) StreamBuildApp(
 			genImages = append(append([]string{}, imageURLs...), preGenCtx.Screenshots...)
 		}
 		singleShotText, singleShotOps, singleShotErr := c.streamSingleShotGeneration(
-			ctx, project, user, model, provider, fileMap, sendEvent, message, genImages, preGenToolContext,
+			ctx, project, user, model, provider, fileMap, sendEvent, message, genImages, preGenToolContext, mobileConfig,
 		)
 		if singleShotErr != nil {
 			slog.Error("Single-shot generation failed", "error", singleShotErr, "project_id", project.ID)
@@ -2317,7 +2326,7 @@ func truncate(s string, n int) string {
 
 // buildSystemPrompt assembles the system prompt for the tool-calling path,
 // only including e-commerce and auth rules when the project actually uses those features.
-func buildSystemPrompt(project *models.AppProject) string {
+func buildSystemPrompt(project *models.AppProject, mobileConfig *models.MobileAppConfig) string {
 	var prompt string
 	if project.ProjectType == "ecommerce" {
 		prompt = constants.NEXTJS_ECOMMERCE_COMMON_RULES + constants.NEXTJS_BUILDER_TOOL_INSTRUCTIONS
@@ -2331,12 +2340,19 @@ func buildSystemPrompt(project *models.AppProject) string {
 		}
 	}
 
+	if project.ProjectType == "mobile_app" {
+		prompt += constants.NEXTJS_BUILDER_MOBILE_RULES
+		if mobileConfig != nil && mobileConfig.BridgeEnabled && len(mobileConfig.BridgeMethods) > 0 {
+			prompt += constants.BuildBridgeSDKRules(mobileConfig.BridgeMethods)
+		}
+	}
+
 	return prompt
 }
 
 // buildChatSystemPrompt assembles the system prompt for the simplified file-block
 // chat path. Uses CHAT_INSTRUCTIONS instead of TOOL_INSTRUCTIONS — no tool loop.
-func buildChatSystemPrompt(project *models.AppProject) string {
+func buildChatSystemPrompt(project *models.AppProject, mobileConfig *models.MobileAppConfig) string {
 	var prompt string
 	if project.ProjectType == "ecommerce" {
 		prompt = constants.NEXTJS_ECOMMERCE_COMMON_RULES + constants.NEXTJS_BUILDER_CHAT_INSTRUCTIONS
@@ -2352,6 +2368,9 @@ func buildChatSystemPrompt(project *models.AppProject) string {
 
 	if project.ProjectType == "mobile_app" {
 		prompt += constants.NEXTJS_BUILDER_MOBILE_RULES
+		if mobileConfig != nil && mobileConfig.BridgeEnabled && len(mobileConfig.BridgeMethods) > 0 {
+			prompt += constants.BuildBridgeSDKRules(mobileConfig.BridgeMethods)
+		}
 	}
 
 	return prompt
@@ -2359,7 +2378,7 @@ func buildChatSystemPrompt(project *models.AppProject) string {
 
 // buildSingleShotSystemPrompt assembles the system prompt for single-shot initial
 // generation using <file> block output format instead of tool calls.
-func buildSingleShotSystemPrompt(project *models.AppProject) string {
+func buildSingleShotSystemPrompt(project *models.AppProject, mobileConfig *models.MobileAppConfig) string {
 	var prompt string
 	if project.ProjectType == "ecommerce" {
 		prompt = constants.NEXTJS_ECOMMERCE_COMMON_RULES + constants.NEXTJS_BUILDER_SINGLESHOT_INSTRUCTIONS
@@ -2375,6 +2394,9 @@ func buildSingleShotSystemPrompt(project *models.AppProject) string {
 
 	if project.ProjectType == "mobile_app" {
 		prompt += constants.NEXTJS_BUILDER_MOBILE_RULES
+		if mobileConfig != nil && mobileConfig.BridgeEnabled && len(mobileConfig.BridgeMethods) > 0 {
+			prompt += constants.BuildBridgeSDKRules(mobileConfig.BridgeMethods)
+		}
 	}
 
 	return prompt
@@ -4492,6 +4514,7 @@ func (c *Controller) streamSingleShotGeneration(
 	message string,
 	imageURLs []string,
 	toolContext string,
+	mobileConfig *models.MobileAppConfig,
 ) (responseText string, ops []appBuilderOperation, err error) {
 	// 1. Structure planning — must run BEFORE pre-gen setup so that data_models
 	// and needs_auth are available for Neon provisioning and auth template injection.
@@ -4577,7 +4600,7 @@ func (c *Controller) streamSingleShotGeneration(
 	}
 
 	llmMessages := []utils.Message{
-		{Role: "system", Content: buildSingleShotSystemPrompt(project)},
+		{Role: "system", Content: buildSingleShotSystemPrompt(project, mobileConfig)},
 		{Role: "system", Content: projectContext},
 	}
 
@@ -4763,6 +4786,7 @@ func (c *Controller) streamEcommerceGeneration(
 	message string,
 	imageURLs []string,
 	toolContext string,
+	mobileConfig *models.MobileAppConfig,
 ) (responseText string, ops []appBuilderOperation, err error) {
 	// 1. Structure planning (same as single-shot)
 	structure, planErr := c.PlanAppFileStructure(ctx, message, project.ProjectType)
@@ -4939,7 +4963,7 @@ func (c *Controller) streamEcommerceGeneration(
 	}
 
 	llmMessages := []utils.Message{
-		{Role: "system", Content: buildSingleShotSystemPrompt(project)},
+		{Role: "system", Content: buildSingleShotSystemPrompt(project, mobileConfig)},
 		{Role: "system", Content: projectContext},
 	}
 
