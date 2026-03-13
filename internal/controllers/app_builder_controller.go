@@ -2637,7 +2637,11 @@ func (c *Controller) buildProjectContextForChat(project *models.AppProject, file
 			sb.WriteString(fmt.Sprintf("- %s (%d chars)\n", fp, len(fileMap[fp])))
 		}
 
-		// Inline selected files
+		// Inline selected files with a character budget to avoid exceeding context limits.
+		// ~4 chars ≈ 1 token; 150k chars ≈ 37.5k tokens, leaving room for system prompt,
+		// conversation history, and tool context within a 200k token window.
+		const maxFileChars = 150_000
+		usedChars := 0
 		sb.WriteString("\nFile contents (relevant to current task):\n")
 		for _, fp := range paths {
 			if !selectedFiles[fp] {
@@ -2646,8 +2650,18 @@ func (c *Controller) buildProjectContextForChat(project *models.AppProject, file
 			content := fileMap[fp]
 			if strings.Contains(content, fallbackSentinel) || strings.Contains(content, "Generation failed") {
 				sb.WriteString(fmt.Sprintf("\n--- %s [BROKEN — needs regeneration] ---\n", fp))
+			} else if usedChars+len(content) > maxFileChars {
+				// Truncate to stay within budget
+				remaining := maxFileChars - usedChars
+				if remaining > 500 {
+					sb.WriteString(fmt.Sprintf("\n--- %s [TRUNCATED — %d/%d chars] ---\n%s\n", fp, remaining, len(content), content[:remaining]))
+					usedChars += remaining
+				} else {
+					sb.WriteString(fmt.Sprintf("\n--- %s [OMITTED — %d chars, budget exhausted] ---\n", fp, len(content)))
+				}
 			} else {
 				sb.WriteString(fmt.Sprintf("\n--- %s ---\n%s\n", fp, content))
+				usedChars += len(content)
 			}
 		}
 	}
