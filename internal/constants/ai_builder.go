@@ -404,6 +404,13 @@ The global ` + "`window.WemobBridge`" + ` object is available in client componen
 		"storage.get":         "- `await WemobBridge.storage.get(key)` — reads a value from persistent native storage",
 		"storage.set":         "- `await WemobBridge.storage.set(key, value)` — writes a value to persistent native storage",
 		"storage.remove":      "- `await WemobBridge.storage.remove(key)` — deletes a key from persistent native storage",
+		"camera.takePhoto":    "- `await WemobBridge.camera.takePhoto({ quality? })` — opens camera, returns `{ data (base64), mimeType, name }` or `{ error: 'cancelled' }`",
+		"camera.pickImage":    "- `await WemobBridge.camera.pickImage({ quality?, multiple? })` — picks image(s) from gallery, returns `{ data, mimeType, name }` (single) or `{ images: [...] }` (multiple)",
+		"camera.pickVideo":    "- `await WemobBridge.camera.pickVideo()` — picks a video from gallery, returns `{ data (base64), mimeType, name }`",
+		"contacts.getAll":     "- `await WemobBridge.contacts.getAll()` — returns `{ contacts: [{ id, name, phones: [{ label, number }], emails: [{ label, address }] }] }`",
+		"contacts.pick":       "- `await WemobBridge.contacts.pick()` — opens native contact picker, returns `{ contact: { id, name, phones, emails } }`",
+		"calendar.addEvent":   "- `await WemobBridge.calendar.addEvent({ title, startDate, endDate?, location?, notes? })` — opens calendar to add event (dates in ISO 8601)",
+		"files.pick":          "- `await WemobBridge.files.pick({ multiple?, type? })` — picks file(s), type can be \"image\", \"video\", \"audio\", or comma-separated extensions. Returns `{ name, size, extension, data (base64) }`",
 	}
 
 	for _, m := range methods {
