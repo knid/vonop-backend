@@ -41,7 +41,7 @@ func (v *HttpViews) UpdateBuildTaskStatus(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	task, err := v.Controller.DB.GetAppBuildTaskById(reportBuildReq.TaskID)
+	task, err := v.Controller.DB.GetAppBuildTaskWithRelations(reportBuildReq.TaskID)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
 		return
@@ -93,7 +93,7 @@ func (v *HttpViews) UpdateDeploymentStatus(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	deployment, err := v.Controller.DB.GetDeploymentByID(reportDeploymentReq.DeploymentID)
+	deployment, err := v.Controller.DB.GetDeploymentWithRelations(reportDeploymentReq.DeploymentID)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
 		return

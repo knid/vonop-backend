@@ -24,6 +24,18 @@ func (db *Database) GetDeploymentByID(deploymentID string) (*models.Deployment, 
 	return &deployment, nil
 }
 
+func (db *Database) GetDeploymentWithRelations(deploymentID string) (*models.Deployment, error) {
+	var deployment models.Deployment
+	err := db.DB.NewSelect().Model(&deployment).
+		Relation("User").
+		Where("deployment.id = ?", deploymentID).
+		Scan(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	return &deployment, nil
+}
+
 func (db *Database) CreateDeployment(deployment *models.Deployment) (*models.Deployment, error) {
 	_, err := db.DB.NewInsert().Model(deployment).Exec(context.Background())
 	if err != nil {
