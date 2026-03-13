@@ -71,7 +71,7 @@ func (c *Controller) GetBuild(user *models.User, id string) (*responses.BuildInf
 
 func (c *Controller) CreateBuild(user *models.User, buildCreateReq requests.BuildCreateRequest) (*responses.BuildCreateResponse, error) {
 	validate := validator.New(validator.WithRequiredStructEnabled())
-	if err := validate.Struct(buildCreateReq); err != nil {
+	if err := buildCreateReq.Validate(validate); err != nil {
 		return nil, err
 	}
 
