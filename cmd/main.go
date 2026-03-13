@@ -122,6 +122,8 @@ func createSchema(db *bun.DB) error {
 		// Mobile injection chat
 		(*models.MobileInjection)(nil),
 		(*models.MobileConversation)(nil),
+		// Mobile app config (feature flags, plugin toggles, bridge settings)
+		(*models.MobileAppConfig)(nil),
 	}
 
 	for _, model := range models {
@@ -988,6 +990,7 @@ func main() {
 			r.Route("/mobile/{projectId}", func(r chi.Router) {
 				r.Use(rateLimiter.RateLimit(120, time.Minute, appMiddleware.IPKey))
 				r.Get("/injections", httpViews.GetPublicMobileInjections)
+				r.Get("/config", httpViews.GetPublicMobileConfig)
 			})
 		})
 		// V2 App Builder routes
@@ -1196,6 +1199,8 @@ func main() {
 				r.Put("/injections/{id}", httpViews.UpdateMobileInjection)
 				r.Delete("/injections/{id}", httpViews.DeleteMobileInjection)
 				r.Delete("/conversation", httpViews.ClearMobileConversation)
+				r.Get("/config", httpViews.GetMobileAppConfig)
+				r.Put("/config", httpViews.UpdateMobileAppConfig)
 			})
 
 			// Public storefront (no auth, per-store-per-IP rate limiting)
@@ -1240,6 +1245,7 @@ func main() {
 		})
 
 		r.Get("/health", httpViews.Health)
+		r.Get("/sdk/wemob-bridge.js", httpViews.ServeBridgeSDK)
 	})
 
 	// Proxy
