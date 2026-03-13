@@ -1166,7 +1166,7 @@ func (c *Controller) runChatToolPhase(
 - If the user asks about current technologies, APIs, documentation, pricing, latest versions, or anything that benefits from up-to-date web information, use web_search to find accurate information.
 - If the user asks to set, add, or remove environment variables / API keys / secrets, call manage_env_vars.
 - If the user asks to install or add a specific npm package/library, call install_package.
-- If the user asks for a custom image, visual asset, hero background, or illustration, call generate_image to create it. If the app has a database with a relevant image column (e.g. cover_image, thumbnail), generate the image and UPDATE the database row with the URL. If there is no database or no suitable column, generate the image and pass the URL to the code-gen model to use directly in code.
+- If the user EXPLICITLY asks to create/generate a custom image, visual asset, hero background, or illustration (e.g. "generate a logo", "create an image for..."), call generate_image. Do NOT call generate_image just because the user attached reference screenshots — those are design references, not image generation requests. If the app has a database with a relevant image column (e.g. cover_image, thumbnail), generate the image and UPDATE the database row with the URL. If there is no database or no suitable column, generate the image and pass the URL to the code-gen model to use directly in code.
 - If the user references a website and you want to see what it looks like visually, call take_screenshot with the URL.
 - If the user asks for a specific UI component (dialog, tabs, accordion, toast, dropdown, etc.) that may not be in the project yet, call search_components to find and inject it.`
 	if hasDB {
@@ -1212,6 +1212,7 @@ func (c *Controller) runChatToolPhase(
 	systemPrompt += `
 - If the user's message is a normal chat request (code changes, questions, fixes) that doesn't need any of the above tools, respond with just: NO_TOOLS_NEEDED
 - You can call multiple tools if needed (e.g. generate_image + install_package).
+- IMPORTANT: If the user has attached images/screenshots, these are VISUAL REFERENCES showing how they want the app to look. Do NOT call generate_image or take_screenshot because of attached images. These reference images will be passed directly to the code-generation model. Only call generate_image if the user EXPLICITLY asks to create/generate new images (e.g. "generate a logo", "create an illustration").
 - IMPORTANT: Before calling any tool, ALWAYS write a brief message (1-2 sentences, in the same language as the user's message) explaining what you're about to do. For example: "Let me check what's currently in the database...", "I'll generate a custom image for this...", "Looking at the website to understand the design...". This text is streamed to the user in real time so they know what's happening. Never call a tool without explaining first.`
 
 	userMsg := utils.Message{Role: "user", Content: userMessage}
