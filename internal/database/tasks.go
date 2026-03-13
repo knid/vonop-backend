@@ -49,6 +49,19 @@ func (db *Database) GetAppBuildTaskById(id string) (*models.AppBuildTask, error)
 	return &appBuildTask, err
 }
 
+func (db *Database) GetAppBuildTaskWithRelations(id string) (*models.AppBuildTask, error) {
+	var appBuildTask models.AppBuildTask
+	err := db.DB.NewSelect().Model(&appBuildTask).
+		Relation("Build").
+		Relation("Build.Project").
+		Relation("Project").
+		Relation("Project.User").
+		Where("app_build_task.id = ?", id).
+		Scan(context.Background())
+
+	return &appBuildTask, err
+}
+
 func (db *Database) GetAppBuildTaskByProject(project *models.Project) ([]models.AppBuildTask, error) {
 	var appBuildTasks []models.AppBuildTask
 	err := db.DB.NewSelect().Model(&appBuildTasks).Where("project_id = ?", project.ID).Scan(context.Background())
