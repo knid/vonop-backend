@@ -820,6 +820,12 @@ func (v *HttpViews) ConvertToMobile(w http.ResponseWriter, r *http.Request) {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
 		return
 	}
+	if requireActiveSubscription(w, user) {
+		return
+	}
+	if v.checkMinimumCredits(w, user) {
+		return
+	}
 
 	appID := chi.URLParam(r, "appId")
 	clone, err := v.Controller.CloneAppProjectAsMobile(user, appID)
@@ -837,18 +843,31 @@ func (v *HttpViews) ConvertToMobile(w http.ResponseWriter, r *http.Request) {
 	var theme map[string]any
 	json.Unmarshal(clone.Theme, &theme)
 
-	utils.JSONResponse(w, responses.AppProjectResponse{
-		ID:          clone.ID,
-		Name:        clone.Name,
-		Slug:        clone.Slug,
-		Prompt:      clone.Prompt,
-		ProjectType: clone.ProjectType,
-		Theme:       theme,
-		Settings:    clone.Settings,
-		Status:      clone.Status,
-		CreatedAt:   clone.CreatedAt,
-		UpdatedAt:   clone.UpdatedAt,
-	}, http.StatusCreated)
+	v.handleStreamOrAsync(w, r, user, StreamConfig{
+		JobType: "convert_to_mobile",
+		StreamFunc: func(ctx context.Context, events chan<- responses.SSEEvent, jobID string) {
+			// Send project info first so frontend can navigate
+			events <- responses.SSEEvent{
+				Event: "project_created",
+				Data: responses.AppProjectResponse{
+					ID:          clone.ID,
+					Name:        clone.Name,
+					Slug:        clone.Slug,
+					Prompt:      clone.Prompt,
+					ProjectType: clone.ProjectType,
+					Theme:       theme,
+					Settings:    clone.Settings,
+					Status:      clone.Status,
+					CreatedAt:   clone.CreatedAt,
+					UpdatedAt:   clone.UpdatedAt,
+				},
+			}
+			// Trigger the chat flow — LLM sees all project files and responds naturally
+			v.Controller.StreamBuildApp(ctx, clone, user,
+				"I just converted this web app to a mobile app. Review the project and let me know what you think — and whether you'd recommend any mobile optimizations.",
+				nil, "", false, jobID, events)
+		},
+	})
 }
 
 // POST /v2/apps/{appId}/mobile-optimize
