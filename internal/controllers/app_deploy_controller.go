@@ -138,79 +138,136 @@ func (c *Controller) DeployToVercel(project *models.AppProject, user *models.Use
 	return deployment, nil
 }
 
-// BuildFlutter enqueues a Flutter build task
-func (c *Controller) BuildFlutter(project *models.AppProject, user *models.User, platform string, packageName string, appName string) (*models.FlutterBuild, error) {
-	// Create build record
-	build := &models.FlutterBuild{
-		AppProjectID: project.ID,
-		Platform:     platform,
-		Status:       "pending",
-		Version:      1,
-		Config: map[string]any{
-			"package_name": packageName,
-			"app_name":     appName,
-		},
+// BuildAppMobile creates a native mobile build for an AI-generated app by wrapping
+// its Vercel deployment URL using the old URL-wrapper build system.
+func (c *Controller) BuildAppMobile(appProject *models.AppProject, user *models.User, platform string, packageName string, appName string, icon string, splashColor string) (*models.Build, *models.AppBuildTask, error) {
+	// Get the Vercel deployment URL — the app must be deployed to web first
+	deployment, err := c.DB.GetLatestAppDeployment(appProject.ID.String(), "web")
+	if err != nil || deployment.DeployedURL == "" {
+		return nil, nil, fmt.Errorf("app must be deployed to web first")
 	}
 
-	latestBuilds, _ := c.DB.GetFlutterBuildsByProjectID(project.ID.String())
-	for _, b := range latestBuilds {
-		if b.Platform == platform && b.Version >= build.Version {
-			build.Version = b.Version + 1
+	wrappedURL := deployment.DeployedURL
+
+	// Find or create an old-style Project for this URL
+	project, err := c.DB.GetProjectByUserAndURL(user.ID.String(), wrappedURL)
+	if err != nil {
+		// Create new project linked to this AI app's URL
+		project = &models.Project{
+			UserID:          user.ID,
+			URL:             wrappedURL,
+			PackageName:     packageName,
+			IconPath:        icon,
+			OneSignalAppID:  "wemob-app-" + appProject.ID.String(),
+			OneSignalAppToken: "wemob-app-token-" + appProject.ID.String(),
+			BuildForAndroid: platform == "android",
+			BuildForIOS:     platform == "ios",
+		}
+		project, err = c.DB.CreateProject(project)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to create build project: %w", err)
+		}
+	} else {
+		// Update platform flags and metadata on existing project
+		if platform == "android" {
+			project.BuildForAndroid = true
+		} else {
+			project.BuildForIOS = true
+		}
+		project.PackageName = packageName
+		if icon != "" {
+			project.IconPath = icon
+		}
+		c.DB.UpdateProject(project)
+	}
+
+	// Check for pending builds
+	pendingTasks, err := c.DB.GetPendingAppBuildTasks(project)
+	if err == nil && len(pendingTasks) > 0 {
+		return nil, nil, fmt.Errorf("a build is already in progress, please wait")
+	}
+
+	// Get last build number
+	var lastBuildNumber int
+	lastBuild, err := c.DB.GetLastProjectBuild(project)
+	if err == nil {
+		lastBuildNumber = lastBuild.BuildNumber
+	}
+
+	// Create build record
+	build := &models.Build{
+		ProjectID:         project.ID,
+		Active:            false,
+		Title:             appName,
+		Icon:              icon,
+		SplashScreenColor: splashColor,
+		NavBarStyle:       "default",
+		BuildNumber:       lastBuildNumber + 1,
+		VersionString:     utils.CreateVersionString(lastBuildNumber + 1),
+	}
+
+	build, err = c.DB.CreateProjectBuild(build)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create build record")
+	}
+
+	// Create task and enqueue
+	var appBuildTask *models.AppBuildTask
+
+	if platform == "android" {
+		appBuildTask, err = c.DB.CreateAppBuildTask(*build, "Android", "Queued", false)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to create build task: %w", err)
+		}
+
+		payload, _ := json.Marshal(&tasks.AndroidBuildPayload{
+			ProjectID:         project.ID.String(),
+			Version:           build.BuildNumber,
+			BuildID:           build.ID.String(),
+			TaskID:            appBuildTask.ID.String(),
+			Title:             appName,
+			URL:               wrappedURL,
+			IconURL:           icon,
+			SplashScreenColor: splashColor,
+			PackageName:       packageName,
+			Secret:            appBuildTask.ID.String(),
+		})
+		task := asynq.NewTask(tasks.TypeBuildAndroid, payload)
+		if _, err := c.TaskService.Enqueue(task, asynq.MaxRetry(2), asynq.Timeout(time.Minute*10)); err != nil {
+			return nil, nil, fmt.Errorf("failed to enqueue Android build task: %w", err)
+		}
+	} else {
+		appBuildTask, err = c.DB.CreateAppBuildTask(*build, "IOS", "Queued", false)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to create build task: %w", err)
+		}
+
+		payload, _ := json.Marshal(&tasks.BuildUnsignedIpaPayload{
+			ProjectID:         project.ID.String(),
+			Version:           build.BuildNumber,
+			BuildID:           build.ID.String(),
+			TaskID:            appBuildTask.ID.String(),
+			Title:             appName,
+			URL:               wrappedURL,
+			IconURL:           icon,
+			SplashScreenColor: splashColor,
+			PackageName:       packageName,
+			Secret:            appBuildTask.ID.String(),
+		})
+		task := asynq.NewTask(tasks.TypeBuildUnsignedIpa, payload)
+		if _, err := c.TaskService.Enqueue(task, asynq.MaxRetry(2), asynq.Timeout(time.Minute*10)); err != nil {
+			return nil, nil, fmt.Errorf("failed to enqueue iOS build task: %w", err)
 		}
 	}
 
-	build, err := c.DB.CreateFlutterBuild(build)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create build record")
-	}
+	slog.Info("BuildAppMobile: build enqueued",
+		"app_project_id", appProject.ID,
+		"platform", platform,
+		"build_id", build.ID,
+		"url", wrappedURL,
+	)
 
-	// Determine task type
-	taskType := tasks.TypeBuildFlutterAndroid
-	if platform == "ios" {
-		taskType = tasks.TypeBuildFlutterIOS
-	}
-
-	// Enqueue build task
-	payload, _ := json.Marshal(tasks.FlutterBuildPayload{
-		AppProjectID: project.ID.String(),
-		Platform:     platform,
-		BuildID:      build.ID.String(),
-		PackageName:  packageName,
-		AppName:      appName,
-		Version:      build.Version,
-		Secret:       c.SecretManager.GetSecret("WORKER_SECRET"),
-	})
-
-	task := asynq.NewTask(taskType, payload)
-	info, err := c.TaskService.Enqueue(task)
-	if err != nil {
-		build.Status = "failed"
-		build.BuildLog = "Failed to enqueue build task: " + err.Error()
-		c.DB.UpdateFlutterBuild(build)
-		return build, fmt.Errorf("failed to enqueue build task")
-	}
-
-	build.TaskID = info.ID
-	build.Status = "building"
-	c.DB.UpdateFlutterBuild(build)
-
-	// Create deployment record
-	provider := "flutter_android"
-	if platform == "ios" {
-		provider = "flutter_ios"
-	}
-
-	c.DB.CreateAppDeployment(&models.AppDeployment{
-		AppProjectID: project.ID,
-		UserID:       user.ID,
-		Platform:     platform,
-		Provider:     provider,
-		Status:       "building",
-		Version:      build.Version,
-		ASTSnapshot:  project.AST,
-	})
-
-	return build, nil
+	return build, appBuildTask, nil
 }
 
 // GetAppDeployments returns all deployments for a project

@@ -121,6 +121,11 @@ func (v *HttpViews) CreateProjectBuild(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !limits.CanBuildMobile {
+		utils.JSONCodedErrorResponse(w, "FEATURE_NOT_AVAILABLE", "mobile builds require Professional plan", http.StatusForbidden, nil)
+		return
+	}
+
 	if count >= limits.MontlyBuildCount {
 		utils.JSONErrorResponse(w, "you have reached your monthly build limit", http.StatusForbidden)
 		go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_QUOTA_REACHED, map[string]any{

@@ -94,7 +94,6 @@ func createSchema(db *bun.DB) error {
 		(*models.AppGeneratedFile)(nil),
 		(*models.AppSnapshot)(nil),
 		(*models.VercelProject)(nil),
-		(*models.FlutterBuild)(nil),
 		(*models.AppDomain)(nil),
 		// Custom environment variables
 		(*models.AppEnvVar)(nil),
@@ -151,7 +150,6 @@ func createSchema(db *bun.DB) error {
 		`ALTER TABLE standart_user_limits ADD COLUMN IF NOT EXISTS monthly_deploy_count int NOT NULL DEFAULT 0`,
 		`ALTER TABLE standart_user_limits ADD COLUMN IF NOT EXISTS can_use_ecommerce boolean NOT NULL DEFAULT false`,
 		`ALTER TABLE standart_user_limits ADD COLUMN IF NOT EXISTS can_deploy_to_vercel boolean NOT NULL DEFAULT false`,
-		`ALTER TABLE standart_user_limits ADD COLUMN IF NOT EXISTS can_build_flutter boolean NOT NULL DEFAULT false`,
 		// Conversation summary for older message summarization
 		`ALTER TABLE app_conversations ADD COLUMN IF NOT EXISTS summary text DEFAULT ''`,
 		// Data models for per-app Neon database provisioning

@@ -3,22 +3,20 @@ package views
 import (
 	"crypto/subtle"
 	"net/http"
-	"strings"
 
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/utils"
 )
 
-// verifyWorkerSecret checks the Authorization header against the WORKER_REPORT_SECRET.
-func (v *HttpViews) verifyWorkerSecret(w http.ResponseWriter, r *http.Request) bool {
+// verifyWorkerSecret checks the Authorization header or body secret against the WORKER_REPORT_SECRET.
+func (v *HttpViews) verifyWorkerSecret(w http.ResponseWriter, secret string) bool {
 	expected := v.Controller.SecretManager.GetSecret("WORKER_REPORT_SECRET")
 	if expected == "" {
 		utils.JSONErrorResponse(w, "server misconfigured", http.StatusInternalServerError)
 		return false
 	}
-	token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
-	if subtle.ConstantTimeCompare([]byte(token), []byte(expected)) != 1 {
+	if subtle.ConstantTimeCompare([]byte(secret), []byte(expected)) != 1 {
 		utils.JSONErrorResponse(w, "unauthorized", http.StatusUnauthorized)
 		return false
 	}
@@ -26,14 +24,14 @@ func (v *HttpViews) verifyWorkerSecret(w http.ResponseWriter, r *http.Request) b
 }
 
 func (v *HttpViews) UpdateBuildTaskStatus(w http.ResponseWriter, r *http.Request) {
-	if !v.verifyWorkerSecret(w, r) {
-		return
-	}
-
 	var reportBuildReq requests.ReportBuildRequest
 	err := utils.ParseJSONBody(r, &reportBuildReq)
 	if err != nil {
 		utils.JSONErrorResponse(w, "Invalid request payload", http.StatusBadRequest)
+		return
+	}
+
+	if !v.verifyWorkerSecret(w, reportBuildReq.Secret) {
 		return
 	}
 
@@ -78,14 +76,14 @@ func (v *HttpViews) UpdateBuildTaskStatus(w http.ResponseWriter, r *http.Request
 }
 
 func (v *HttpViews) UpdateDeploymentStatus(w http.ResponseWriter, r *http.Request) {
-	if !v.verifyWorkerSecret(w, r) {
-		return
-	}
-
 	var reportDeploymentReq requests.ReportDeploymentRequest
 	err := utils.ParseJSONBody(r, &reportDeploymentReq)
 	if err != nil {
 		utils.JSONErrorResponse(w, "Invalid request payload", http.StatusBadRequest)
+		return
+	}
+
+	if !v.verifyWorkerSecret(w, reportDeploymentReq.Secret) {
 		return
 	}
 
@@ -135,14 +133,14 @@ func (v *HttpViews) UpdateDeploymentStatus(w http.ResponseWriter, r *http.Reques
 }
 
 func (v *HttpViews) UpdateSignIPATaskStatus(w http.ResponseWriter, r *http.Request) {
-	if !v.verifyWorkerSecret(w, r) {
-		return
-	}
-
 	var reportSignReq requests.ReportSignIPARequest
 	err := utils.ParseJSONBody(r, &reportSignReq)
 	if err != nil {
 		utils.JSONErrorResponse(w, "Invalid request payload", http.StatusBadRequest)
+		return
+	}
+
+	if !v.verifyWorkerSecret(w, reportSignReq.Secret) {
 		return
 	}
 

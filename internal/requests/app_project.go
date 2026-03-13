@@ -57,13 +57,15 @@ type DeployWebRequest struct {
 	Target string `json:"target" validate:"omitempty,oneof=production preview" errormgs:"must be 'production' or 'preview'"`
 }
 
-type DeployFlutterRequest struct {
-	PackageName string `json:"package_name" validate:"required,min=3" errormgs:"must be at least 3 characters"`
-	AppName     string `json:"app_name" validate:"required,min=2" errormgs:"must be at least 2 characters"`
+type DeployMobileBuildRequest struct {
+	PackageName       string `json:"package_name" validate:"required,min=3" errormgs:"must be at least 3 characters"`
+	AppName           string `json:"app_name" validate:"required,min=2" errormgs:"must be at least 2 characters"`
+	Icon              string `json:"icon"`
+	SplashScreenColor string `json:"splash_screen_color"`
 }
 
-func (r *DeployFlutterRequest) Validate(validate *validator.Validate) error {
-	return utils.ValidateFunc[DeployFlutterRequest](*r, validate)
+func (r *DeployMobileBuildRequest) Validate(validate *validator.Validate) error {
+	return utils.ValidateFunc[DeployMobileBuildRequest](*r, validate)
 }
 
 type CreateAppSnapshotRequest struct {

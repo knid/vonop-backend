@@ -24,7 +24,6 @@ type StandartUserLimits struct {
 	MonthlyDeployCount int  `bun:",notnull,default:0"`
 	CanUseEcommerce    bool `bun:",notnull,default:false"`
 	CanDeployToVercel  bool `bun:",notnull,default:false"`
-	CanBuildFlutter    bool `bun:",notnull,default:false"`
 	MaxDeployedWebApps   int  `bun:",notnull,default:0"`
 	CreditRolloverMonths int  `bun:",notnull,default:0"`
 	CanAccessCode        bool `bun:",notnull,default:false"`
