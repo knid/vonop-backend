@@ -843,6 +843,7 @@ func main() {
 				r.Get("/auth/{provider}", httpViews.OAuthBegin)
 			})
 			r.Get("/tasks", httpViews.GetAllTasks)
+			r.Post("/tasks/{taskId}/cancel", httpViews.CancelBuildTask)
 			r.Route("/projects", func(r chi.Router) {
 				r.Get("/", httpViews.GetProjects)
 				r.Post("/", httpViews.CreateProject)
