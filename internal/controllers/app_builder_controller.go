@@ -2342,9 +2342,8 @@ func buildSystemPrompt(project *models.AppProject, mobileConfig *models.MobileAp
 
 	if project.ProjectType == "mobile_app" {
 		prompt += constants.NEXTJS_BUILDER_MOBILE_RULES
-		if mobileConfig != nil && mobileConfig.BridgeEnabled && len(mobileConfig.BridgeMethods) > 0 {
-			prompt += constants.BuildBridgeSDKRules(mobileConfig.BridgeMethods)
-		}
+		prompt += constants.NEXTJS_BUILDER_MOBILE_CONFIG_TOOL_RULES
+		prompt += constants.BuildBridgeSDKRules(constants.ALL_BRIDGE_METHODS)
 	}
 
 	return prompt
@@ -2368,9 +2367,8 @@ func buildChatSystemPrompt(project *models.AppProject, mobileConfig *models.Mobi
 
 	if project.ProjectType == "mobile_app" {
 		prompt += constants.NEXTJS_BUILDER_MOBILE_RULES
-		if mobileConfig != nil && mobileConfig.BridgeEnabled && len(mobileConfig.BridgeMethods) > 0 {
-			prompt += constants.BuildBridgeSDKRules(mobileConfig.BridgeMethods)
-		}
+		prompt += constants.NEXTJS_BUILDER_MOBILE_CONFIG_TOOL_RULES
+		prompt += constants.BuildBridgeSDKRules(constants.ALL_BRIDGE_METHODS)
 	}
 
 	return prompt
@@ -2394,9 +2392,8 @@ func buildSingleShotSystemPrompt(project *models.AppProject, mobileConfig *model
 
 	if project.ProjectType == "mobile_app" {
 		prompt += constants.NEXTJS_BUILDER_MOBILE_RULES
-		if mobileConfig != nil && mobileConfig.BridgeEnabled && len(mobileConfig.BridgeMethods) > 0 {
-			prompt += constants.BuildBridgeSDKRules(mobileConfig.BridgeMethods)
-		}
+		prompt += constants.NEXTJS_BUILDER_MOBILE_CONFIG_TOOL_RULES
+		prompt += constants.BuildBridgeSDKRules(constants.ALL_BRIDGE_METHODS)
 	}
 
 	return prompt
@@ -3315,6 +3312,29 @@ var appBuilderTools = []utils.Tool{
 			},
 		},
 	},
+	{
+		Type: "function",
+		Function: utils.ToolFunction{
+			Name:        "configure_mobile_app",
+			Description: "Enable native bridge methods and set device permissions for the mobile app. You MUST call this BEFORE writing any code that uses WemobBridge methods.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"bridge_methods": map[string]any{
+						"type":        "array",
+						"items":       map[string]any{"type": "string"},
+						"description": "Bridge methods to enable. Valid: getDeviceInfo, share, haptic, openExternal, getConnectionStatus, storage.get, storage.set, storage.remove, camera.takePhoto, camera.pickImage, camera.pickVideo, contacts.getAll, contacts.pick, calendar.addEvent, files.pick",
+					},
+					"permissions": map[string]any{
+						"type":        "array",
+						"items":       map[string]any{"type": "string"},
+						"description": "Device permissions to request. Valid: camera, location, contacts, storage, microphone, photos, notifications, calendar, biometrics. 'notifications' is always included automatically.",
+					},
+				},
+				"required": []string{"bridge_methods", "permissions"},
+			},
+		},
+	},
 }
 
 // chatManageStoreTool lets the fast model manage products, categories, and
@@ -4201,6 +4221,83 @@ func (c *Controller) buildBuilderToolExecutor(ctx context.Context, project *mode
 				result.WriteString("- users table with id, email, password_hash, name, role, etc.\n")
 			}
 			return result.String(), nil
+
+		case "configure_mobile_app":
+			var args struct {
+				BridgeMethods []string `json:"bridge_methods"`
+				Permissions   []string `json:"permissions"`
+			}
+			if err := json.Unmarshal([]byte(arguments), &args); err != nil {
+				return fmt.Sprintf("Error: invalid arguments: %s", err.Error()), nil
+			}
+
+			// Validate bridge methods
+			validMethods := map[string]bool{
+				"getDeviceInfo": true, "share": true, "haptic": true,
+				"openExternal": true, "getConnectionStatus": true,
+				"storage.get": true, "storage.set": true, "storage.remove": true,
+				"camera.takePhoto": true, "camera.pickImage": true, "camera.pickVideo": true,
+				"contacts.getAll": true, "contacts.pick": true,
+				"calendar.addEvent": true, "files.pick": true,
+			}
+			var filteredMethods []string
+			for _, m := range args.BridgeMethods {
+				if validMethods[m] {
+					filteredMethods = append(filteredMethods, m)
+				}
+			}
+
+			// Auto-derive permissions from bridge methods
+			methodToPermission := map[string]string{
+				"camera.takePhoto": "camera", "camera.pickImage": "camera", "camera.pickVideo": "camera",
+				"contacts.getAll": "contacts", "contacts.pick": "contacts",
+				"calendar.addEvent": "calendar",
+				"files.pick":        "storage",
+			}
+			permSet := map[string]bool{"notifications": true} // always include notifications
+			for _, p := range args.Permissions {
+				permSet[p] = true
+			}
+			for _, m := range filteredMethods {
+				if p, ok := methodToPermission[m]; ok {
+					permSet[p] = true
+				}
+			}
+			var permissions []string
+			for p := range permSet {
+				permissions = append(permissions, p)
+			}
+
+			// Get or create config
+			mobileConfig, configErr := c.DB.GetMobileAppConfig(project.ID.String())
+			if configErr != nil {
+				mobileConfig = &models.MobileAppConfig{
+					ProjectID:            project.ID,
+					PushEnabled:          true,
+					BridgeEnabled:        true,
+					AnalyticsEnabled:     true,
+					PullToRefreshEnabled: true,
+					ExternalBrowserLinks: true,
+				}
+			}
+			mobileConfig.BridgeEnabled = true
+			mobileConfig.PushEnabled = true
+			mobileConfig.BridgeMethods = filteredMethods
+			mobileConfig.Permissions = permissions
+
+			if _, upsertErr := c.DB.UpsertMobileAppConfig(mobileConfig); upsertErr != nil {
+				return fmt.Sprintf("Error: failed to save config: %s", upsertErr.Error()), nil
+			}
+
+			// Notify dashboard in real time
+			if cbs != nil {
+				cbs.sendEvent("mobile_config_updated", map[string]any{
+					"bridge_methods": filteredMethods,
+					"permissions":    permissions,
+				})
+			}
+
+			return fmt.Sprintf("Mobile app configured. Bridge methods: %v. Permissions: %v.", filteredMethods, permissions), nil
 
 		default:
 			return fmt.Sprintf("Unknown tool: %s", name), nil
