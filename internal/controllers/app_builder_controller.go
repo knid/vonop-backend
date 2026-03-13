@@ -700,8 +700,8 @@ func (c *Controller) StreamBuildApp(
 		// Runs a cheap model with tools to detect URLs and gather extra context
 		// before the main code-gen call. If no tools are called the phase is a
 		// near-instant no-op.
-		toolContext := c.runChatToolPhase(ctx, project, provider, message, imageURLs, fileMap, sendEvent)
-		if toolContext != "" {
+		toolResult := c.runChatToolPhase(ctx, project, provider, message, imageURLs, fileMap, sendEvent)
+		if toolResult.Context != "" {
 			// Inject tool-gathered context as a system message before the user message
 			insertIdx := len(llmMessages) - 1 // before last user message
 			if insertIdx < 0 {
@@ -709,9 +709,16 @@ func (c *Controller) StreamBuildApp(
 			}
 			contextMsg := utils.Message{
 				Role:    "system",
-				Content: toolContext,
+				Content: toolResult.Context,
 			}
 			llmMessages = append(llmMessages[:insertIdx], append([]utils.Message{contextMsg}, llmMessages[insertIdx:]...)...)
+		}
+		// Attach screenshots as vision images on the last user message
+		if len(toolResult.Screenshots) > 0 && provider.SupportsVision() {
+			lastIdx := len(llmMessages) - 1
+			if lastIdx >= 0 && llmMessages[lastIdx].Role == "user" {
+				llmMessages[lastIdx].Images = append(llmMessages[lastIdx].Images, toolResult.Screenshots...)
+			}
 		}
 
 		// --- Phase 2: main model single-shot code generation ---
@@ -719,7 +726,7 @@ func (c *Controller) StreamBuildApp(
 			"model", model,
 			"project_id", project.ID,
 			"message_count", len(llmMessages),
-			"has_tool_context", toolContext != "",
+			"has_tool_context", toolResult.Context != "",
 		)
 
 		_, chatErr := utils.StreamTextFromLLMWithMessages(
@@ -1115,6 +1122,12 @@ func (c *Controller) deleteGeneratedFile(
 // to detect URLs and store-management requests before the main code-gen model.
 // Returns additional context to inject into the code-gen messages, or "" if
 // no tools were called.
+// chatToolPhaseResult holds the output of the chat tool phase.
+type chatToolPhaseResult struct {
+	Context     string   // Text context gathered by tools
+	Screenshots []string // Base64 data URIs of screenshots captured (for vision)
+}
+
 func (c *Controller) runChatToolPhase(
 	ctx context.Context,
 	project *models.AppProject,
@@ -1123,7 +1136,7 @@ func (c *Controller) runChatToolPhase(
 	imageURLs []string,
 	fileMap map[string]string,
 	sendEvent func(string, any) bool,
-) string {
+) chatToolPhaseResult {
 	fastModel := provider.FastModel()
 
 	// Build tools list — always include these general tools.
@@ -1212,6 +1225,7 @@ func (c *Controller) runChatToolPhase(
 	}
 
 	var collectedContext strings.Builder
+	var screenshots []string
 
 	executor := func(name string, arguments string) (string, error) {
 		switch name {
@@ -1232,7 +1246,7 @@ func (c *Controller) runChatToolPhase(
 		case "generate_image":
 			return c.executeChatGenerateImage(ctx, arguments, project, sendEvent, &collectedContext)
 		case "take_screenshot":
-			return c.executeChatTakeScreenshot(arguments, &collectedContext)
+			return c.executeChatTakeScreenshot(arguments, &collectedContext, &screenshots)
 		case "search_components":
 			return c.executeChatSearchComponents(arguments, project, fileMap, sendEvent, &collectedContext)
 		default:
@@ -1284,27 +1298,31 @@ func (c *Controller) runChatToolPhase(
 		},
 	)
 
+	mkResult := func(ctx string) chatToolPhaseResult {
+		return chatToolPhaseResult{Context: ctx, Screenshots: screenshots}
+	}
+
 	if err != nil {
 		slog.Warn("Chat tool phase hit limit, preserving any collected context", "error", err, "context_len", collectedContext.Len())
 		// Don't discard collected context from successful tool calls (e.g. seed_database)
 		// just because the model kept calling tools past MaxRounds.
 		if collectedContext.Len() > 0 {
-			return collectedContext.String()
+			return mkResult(collectedContext.String())
 		}
-		return ""
+		return mkResult("")
 	}
 
 	if collectedContext.Len() == 0 {
 		trimmed := strings.TrimSpace(result)
 		if trimmed == "" || trimmed == "NO_TOOLS_NEEDED" {
 			slog.Info("Chat tool phase: no tools called", "result_preview", truncate(result, 80))
-			return ""
+			return mkResult("")
 		}
 		// Server-side tool (e.g. web_search) produced a useful response
-		return "Web search context:\n" + trimmed
+		return mkResult("Web search context:\n" + trimmed)
 	}
 
-	return collectedContext.String()
+	return mkResult(collectedContext.String())
 }
 
 // preGenContext holds the results of the pre-generation web search + screenshot phase.
@@ -2108,9 +2126,13 @@ func (c *Controller) executeChatGenerateImage(
 }
 
 // executeChatTakeScreenshot captures a screenshot of a URL for visual context.
+// The base64 data URI is stored in the screenshots slice for proper vision
+// handling, NOT embedded as text in collectedContext (which would blow past
+// the token limit).
 func (c *Controller) executeChatTakeScreenshot(
 	arguments string,
 	collectedContext *strings.Builder,
+	screenshots *[]string,
 ) (string, error) {
 	var args struct {
 		URL string `json:"url"`
@@ -2141,9 +2163,11 @@ func (c *Controller) executeChatTakeScreenshot(
 	}
 
 	b64 := base64.StdEncoding.EncodeToString(imgData)
-	collectedContext.WriteString(fmt.Sprintf("\n[Screenshot Captured]\nURL: %s\nScreenshot captured (1280x800 desktop). The code-gen model can use this as visual reference.\n![screenshot](data:image/png;base64,%s)\n", targetURL, b64))
+	*screenshots = append(*screenshots, "data:image/png;base64,"+b64)
+
+	collectedContext.WriteString(fmt.Sprintf("\n[Screenshot Captured]\nURL: %s\nA desktop screenshot (1280x800) has been captured and will be provided as an image to the code generation model for accurate visual reference.\n", targetURL))
 	slog.Info("take_screenshot tool called", "url", targetURL, "size_bytes", len(imgData))
-	return "Screenshot captured successfully.", nil
+	return "Screenshot captured successfully. The image will be provided to the code generation model.", nil
 }
 
 // executeChatSearchComponents finds and injects pre-built UI components.
