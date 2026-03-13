@@ -378,9 +378,38 @@ You are building a mobile-first web application that will be viewed exclusively 
 
 REMEMBER: This app will ONLY be viewed on phones. There is no desktop layout. Do not add responsive breakpoints for larger screens (sm:, md:, lg:, xl:). Design everything for the ~375-430px viewport range.`
 
+// ALL_BRIDGE_METHODS lists every available bridge method for system prompt injection.
+var ALL_BRIDGE_METHODS = []string{
+	"getDeviceInfo", "share", "haptic", "openExternal", "getConnectionStatus",
+	"storage.get", "storage.set", "storage.remove",
+	"camera.takePhoto", "camera.pickImage", "camera.pickVideo",
+	"contacts.getAll", "contacts.pick",
+	"calendar.addEvent",
+	"files.pick",
+}
+
+// NEXTJS_BUILDER_MOBILE_CONFIG_TOOL_RULES instructs the LLM to call
+// configure_mobile_app before using any bridge methods.
+const NEXTJS_BUILDER_MOBILE_CONFIG_TOOL_RULES = `
+
+### Mobile App Configuration Tool
+When your generated code uses WemobBridge methods, you MUST call the configure_mobile_app tool BEFORE writing any code that references WemobBridge. This tool enables the native bridge methods and sets the required device permissions.
+
+**Bridge method → required permission mapping:**
+- camera.takePhoto, camera.pickImage, camera.pickVideo → "camera" permission
+- contacts.getAll, contacts.pick → "contacts" permission
+- calendar.addEvent → "calendar" permission
+- files.pick → "storage" permission
+- getDeviceInfo, share, haptic, openExternal, getConnectionStatus, storage.* → no extra permissions needed
+
+Example: If the app uses camera and contacts, call:
+configure_mobile_app(bridge_methods=["camera.takePhoto","contacts.getAll","getDeviceInfo","share"], permissions=["camera","contacts"])
+
+The "notifications" permission is always included automatically — do not add it.
+`
+
 // BuildBridgeSDKRules returns LLM instructions for using the WemobBridge SDK.
-// It is injected into the system prompt only when bridge is enabled, and lists
-// exactly which methods the user has allowed.
+// Lists the API signatures for all provided methods.
 func BuildBridgeSDKRules(methods []string) string {
 	if len(methods) == 0 {
 		return ""

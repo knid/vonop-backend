@@ -417,13 +417,10 @@ func (v *HttpViews) UpdateMobileAppConfig(w http.ResponseWriter, r *http.Request
 			AnalyticsEnabled:     true,
 			PullToRefreshEnabled: true,
 			ExternalBrowserLinks: true,
-			BridgeEnabled:        false,
+			BridgeEnabled:        true,
 		}
 	}
 
-	if body.PushEnabled != nil {
-		config.PushEnabled = *body.PushEnabled
-	}
 	if body.AnalyticsEnabled != nil {
 		config.AnalyticsEnabled = *body.AnalyticsEnabled
 	}
@@ -432,9 +429,6 @@ func (v *HttpViews) UpdateMobileAppConfig(w http.ResponseWriter, r *http.Request
 	}
 	if body.ExternalBrowserLinks != nil {
 		config.ExternalBrowserLinks = *body.ExternalBrowserLinks
-	}
-	if body.BridgeEnabled != nil {
-		config.BridgeEnabled = *body.BridgeEnabled
 	}
 	if body.BridgeMethods != nil {
 		config.BridgeMethods = *body.BridgeMethods
@@ -468,6 +462,22 @@ func (v *HttpViews) UpdateMobileAppConfig(w http.ResponseWriter, r *http.Request
 	}
 	if body.UpdateCheckEnabled != nil {
 		config.UpdateCheckEnabled = *body.UpdateCheckEnabled
+	}
+
+	// Bridge and push are always on — ignore any request to disable them
+	config.BridgeEnabled = true
+	config.PushEnabled = true
+
+	// Ensure notifications permission is always present
+	hasNotifications := false
+	for _, p := range config.Permissions {
+		if p == "notifications" {
+			hasNotifications = true
+			break
+		}
+	}
+	if !hasNotifications {
+		config.Permissions = append(config.Permissions, "notifications")
 	}
 
 	updated, err := v.Controller.DB.UpsertMobileAppConfig(config)
@@ -504,7 +514,7 @@ func defaultMobileConfigResponse(oneSignalAppID string) map[string]any {
 		AnalyticsEnabled:     true,
 		PullToRefreshEnabled: true,
 		ExternalBrowserLinks: true,
-		BridgeEnabled:        false,
+		BridgeEnabled:        true,
 		DarkModeEnabled:      true,
 		RatingSessions:       5,
 		CachingStrategy:      "network-first",
@@ -519,7 +529,18 @@ func buildMobileConfigResponse(config *models.MobileAppConfig, oneSignalAppID st
 
 	permissions := config.Permissions
 	if permissions == nil {
-		permissions = []string{}
+		permissions = []string{"notifications"}
+	} else {
+		hasNotif := false
+		for _, p := range permissions {
+			if p == "notifications" {
+				hasNotif = true
+				break
+			}
+		}
+		if !hasNotif {
+			permissions = append(permissions, "notifications")
+		}
 	}
 
 	return map[string]any{

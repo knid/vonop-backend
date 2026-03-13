@@ -22,7 +22,7 @@ type MobileAppConfig struct {
 	ExternalBrowserLinks bool `bun:",notnull,default:true" json:"external_browser_links"`
 
 	// Bridge
-	BridgeEnabled bool     `bun:",notnull,default:false" json:"bridge_enabled"`
+	BridgeEnabled bool     `bun:",notnull,default:true" json:"bridge_enabled"`
 	BridgeMethods []string `bun:",array,type:text[]" json:"bridge_methods"`
 
 	// Permissions (build-time — injected into manifests)
