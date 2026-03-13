@@ -134,11 +134,12 @@ func (v *HttpViews) deployAppMobile(w http.ResponseWriter, r *http.Request, plat
 		Set("project_type", project.ProjectType))
 
 	utils.JSONResponse(w, map[string]any{
-		"build_id": build.ID,
-		"task_id":  task.ID,
-		"platform": platform,
-		"status":   task.StatusText,
-		"version":  build.BuildNumber,
+		"build_id":   build.ID,
+		"task_id":    task.ID,
+		"project_id": build.ProjectID,
+		"platform":   platform,
+		"status":     task.StatusText,
+		"version":    build.BuildNumber,
 	}, http.StatusCreated)
 }
 
