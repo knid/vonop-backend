@@ -8,6 +8,7 @@ import (
 	"net/url"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/responses"
@@ -312,6 +313,7 @@ func (v *HttpViews) ClassifyMobileIntent(w http.ResponseWriter, r *http.Request)
 }
 
 // GET /v2/mobile/{projectId}/config (authenticated)
+// projectId can be either a Project ID (URL-wrapper) or an AppProject ID (converted app)
 func (v *HttpViews) GetMobileAppConfig(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
@@ -320,12 +322,23 @@ func (v *HttpViews) GetMobileAppConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	projectID := chi.URLParam(r, "projectId")
+
+	// Try Project (URL-wrapper) first, then fall back to AppProject (converted app)
+	var ownerID uuid.UUID
+	var oneSignalAppID string
 	project, err := v.Controller.GetProjectModelById(projectID)
 	if err != nil {
-		utils.JSONErrorResponse(w, "project not found", http.StatusNotFound)
-		return
+		appProject, appErr := v.Controller.DB.GetAppProjectByID(projectID)
+		if appErr != nil {
+			utils.JSONErrorResponse(w, "project not found", http.StatusNotFound)
+			return
+		}
+		ownerID = appProject.UserID
+	} else {
+		ownerID = project.UserID
+		oneSignalAppID = project.OneSignalAppID
 	}
-	if project.UserID != user.ID {
+	if ownerID != user.ID {
 		utils.JSONErrorResponse(w, "unauthorized", http.StatusForbidden)
 		return
 	}
@@ -333,14 +346,15 @@ func (v *HttpViews) GetMobileAppConfig(w http.ResponseWriter, r *http.Request) {
 	config, err := v.Controller.DB.GetMobileAppConfig(projectID)
 	if err != nil {
 		// Return defaults if no config exists
-		utils.JSONResponse(w, defaultMobileConfigResponse(project.OneSignalAppID), http.StatusOK)
+		utils.JSONResponse(w, defaultMobileConfigResponse(oneSignalAppID), http.StatusOK)
 		return
 	}
 
-	utils.JSONResponse(w, buildMobileConfigResponse(config, project.OneSignalAppID), http.StatusOK)
+	utils.JSONResponse(w, buildMobileConfigResponse(config, oneSignalAppID), http.StatusOK)
 }
 
 // PUT /v2/mobile/{projectId}/config (authenticated)
+// projectId can be either a Project ID (URL-wrapper) or an AppProject ID (converted app)
 func (v *HttpViews) UpdateMobileAppConfig(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
@@ -349,12 +363,23 @@ func (v *HttpViews) UpdateMobileAppConfig(w http.ResponseWriter, r *http.Request
 	}
 
 	projectID := chi.URLParam(r, "projectId")
+
+	// Try Project (URL-wrapper) first, then fall back to AppProject (converted app)
+	var ownerID uuid.UUID
+	var oneSignalAppID string
 	project, err := v.Controller.GetProjectModelById(projectID)
 	if err != nil {
-		utils.JSONErrorResponse(w, "project not found", http.StatusNotFound)
-		return
+		appProject, appErr := v.Controller.DB.GetAppProjectByID(projectID)
+		if appErr != nil {
+			utils.JSONErrorResponse(w, "project not found", http.StatusNotFound)
+			return
+		}
+		ownerID = appProject.UserID
+	} else {
+		ownerID = project.UserID
+		oneSignalAppID = project.OneSignalAppID
 	}
-	if project.UserID != user.ID {
+	if ownerID != user.ID {
 		utils.JSONErrorResponse(w, "unauthorized", http.StatusForbidden)
 		return
 	}
@@ -385,8 +410,9 @@ func (v *HttpViews) UpdateMobileAppConfig(w http.ResponseWriter, r *http.Request
 	// Get existing config or create defaults
 	config, err := v.Controller.DB.GetMobileAppConfig(projectID)
 	if err != nil {
+		parsedID, _ := uuid.Parse(projectID)
 		config = &models.MobileAppConfig{
-			ProjectID:            project.ID,
+			ProjectID:            parsedID,
 			PushEnabled:          true,
 			AnalyticsEnabled:     true,
 			PullToRefreshEnabled: true,
@@ -450,7 +476,7 @@ func (v *HttpViews) UpdateMobileAppConfig(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	utils.JSONResponse(w, buildMobileConfigResponse(updated, project.OneSignalAppID), http.StatusOK)
+	utils.JSONResponse(w, buildMobileConfigResponse(updated, oneSignalAppID), http.StatusOK)
 }
 
 // GET /v1/mobile/{projectId}/config (public, no auth)
