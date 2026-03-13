@@ -229,6 +229,17 @@ func createSchema(db *bun.DB) error {
 		`ALTER TABLE standart_user_limits ADD COLUMN IF NOT EXISTS can_buy_domain boolean NOT NULL DEFAULT false`,
 		`ALTER TABLE standart_user_limits ADD COLUMN IF NOT EXISTS can_use_email_service boolean NOT NULL DEFAULT false`,
 		`ALTER TABLE standart_user_limits ADD COLUMN IF NOT EXISTS can_build_mobile boolean NOT NULL DEFAULT false`,
+		// Mobile app config: new capability fields
+		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS permissions text[] DEFAULT '{}'`,
+		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS url_scheme text DEFAULT ''`,
+		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS universal_link_domain text DEFAULT ''`,
+		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS offline_enabled boolean NOT NULL DEFAULT false`,
+		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS caching_strategy text DEFAULT 'network-first'`,
+		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS biometric_enabled boolean NOT NULL DEFAULT false`,
+		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS dark_mode_enabled boolean NOT NULL DEFAULT true`,
+		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS rating_enabled boolean NOT NULL DEFAULT false`,
+		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS rating_sessions int NOT NULL DEFAULT 5`,
+		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS update_check_enabled boolean NOT NULL DEFAULT false`,
 	}
 
 	// Deduplicate before creating unique indexes (keep the latest row per group)

@@ -25,6 +25,30 @@ type MobileAppConfig struct {
 	BridgeEnabled bool     `bun:",notnull,default:false" json:"bridge_enabled"`
 	BridgeMethods []string `bun:",array,type:text[]" json:"bridge_methods"`
 
+	// Permissions (build-time — injected into manifests)
+	Permissions []string `bun:",array,type:text[]" json:"permissions"`
+
+	// Deep linking (build-time)
+	URLScheme           string `bun:",nullzero" json:"url_scheme"`
+	UniversalLinkDomain string `bun:",nullzero" json:"universal_link_domain"`
+
+	// Offline (runtime)
+	OfflineEnabled  bool   `bun:",notnull,default:false" json:"offline_enabled"`
+	CachingStrategy string `bun:",nullzero,default:'network-first'" json:"caching_strategy"`
+
+	// Biometric (runtime)
+	BiometricEnabled bool `bun:",notnull,default:false" json:"biometric_enabled"`
+
+	// Dark mode (runtime)
+	DarkModeEnabled bool `bun:",notnull,default:true" json:"dark_mode_enabled"`
+
+	// Rating (runtime)
+	RatingEnabled  bool `bun:",notnull,default:false" json:"rating_enabled"`
+	RatingSessions int  `bun:",notnull,default:5" json:"rating_sessions"`
+
+	// Updates (runtime)
+	UpdateCheckEnabled bool `bun:",notnull,default:false" json:"update_check_enabled"`
+
 	CreatedAt time.Time `bun:",nullzero,notnull,default:current_timestamp" json:"created_at"`
 	UpdatedAt time.Time `bun:",nullzero,notnull,default:current_timestamp" json:"updated_at"`
 }

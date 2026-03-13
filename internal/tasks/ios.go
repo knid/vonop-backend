@@ -20,6 +20,9 @@ type BuildUnsignedIpaPayload struct {
 	PackageName         string
 	RemoveWemobBranding bool
 	Secret              string
+	Permissions         []string
+	URLScheme           string
+	UniversalLinkDomain string
 }
 
 type IOSSignPayload struct {

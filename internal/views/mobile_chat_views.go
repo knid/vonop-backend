@@ -366,6 +366,16 @@ func (v *HttpViews) UpdateMobileAppConfig(w http.ResponseWriter, r *http.Request
 		ExternalBrowserLinks *bool     `json:"external_browser_links"`
 		BridgeEnabled        *bool     `json:"bridge_enabled"`
 		BridgeMethods        *[]string `json:"bridge_methods"`
+		Permissions          *[]string `json:"permissions"`
+		URLScheme            *string   `json:"url_scheme"`
+		UniversalLinkDomain  *string   `json:"universal_link_domain"`
+		OfflineEnabled       *bool     `json:"offline_enabled"`
+		CachingStrategy      *string   `json:"caching_strategy"`
+		BiometricEnabled     *bool     `json:"biometric_enabled"`
+		DarkModeEnabled      *bool     `json:"dark_mode_enabled"`
+		RatingEnabled        *bool     `json:"rating_enabled"`
+		RatingSessions       *int      `json:"rating_sessions"`
+		UpdateCheckEnabled   *bool     `json:"update_check_enabled"`
 	}
 	if err := utils.ParseJSONBody(r, &body); err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
@@ -403,6 +413,36 @@ func (v *HttpViews) UpdateMobileAppConfig(w http.ResponseWriter, r *http.Request
 	if body.BridgeMethods != nil {
 		config.BridgeMethods = *body.BridgeMethods
 	}
+	if body.Permissions != nil {
+		config.Permissions = *body.Permissions
+	}
+	if body.URLScheme != nil {
+		config.URLScheme = *body.URLScheme
+	}
+	if body.UniversalLinkDomain != nil {
+		config.UniversalLinkDomain = *body.UniversalLinkDomain
+	}
+	if body.OfflineEnabled != nil {
+		config.OfflineEnabled = *body.OfflineEnabled
+	}
+	if body.CachingStrategy != nil {
+		config.CachingStrategy = *body.CachingStrategy
+	}
+	if body.BiometricEnabled != nil {
+		config.BiometricEnabled = *body.BiometricEnabled
+	}
+	if body.DarkModeEnabled != nil {
+		config.DarkModeEnabled = *body.DarkModeEnabled
+	}
+	if body.RatingEnabled != nil {
+		config.RatingEnabled = *body.RatingEnabled
+	}
+	if body.RatingSessions != nil {
+		config.RatingSessions = *body.RatingSessions
+	}
+	if body.UpdateCheckEnabled != nil {
+		config.UpdateCheckEnabled = *body.UpdateCheckEnabled
+	}
 
 	updated, err := v.Controller.DB.UpsertMobileAppConfig(config)
 	if err != nil {
@@ -439,6 +479,9 @@ func defaultMobileConfigResponse(oneSignalAppID string) map[string]any {
 		PullToRefreshEnabled: true,
 		ExternalBrowserLinks: true,
 		BridgeEnabled:        false,
+		DarkModeEnabled:      true,
+		RatingSessions:       5,
+		CachingStrategy:      "network-first",
 	}, oneSignalAppID)
 }
 
@@ -446,6 +489,11 @@ func buildMobileConfigResponse(config *models.MobileAppConfig, oneSignalAppID st
 	bridgeMethods := config.BridgeMethods
 	if bridgeMethods == nil {
 		bridgeMethods = []string{}
+	}
+
+	permissions := config.Permissions
+	if permissions == nil {
+		permissions = []string{}
 	}
 
 	return map[string]any{
@@ -464,6 +512,13 @@ func buildMobileConfigResponse(config *models.MobileAppConfig, oneSignalAppID st
 			"enabled": config.BridgeEnabled,
 			"methods": bridgeMethods,
 		},
+		"biometric":    map[string]any{"enabled": config.BiometricEnabled},
+		"dark_mode":    map[string]any{"enabled": config.DarkModeEnabled},
+		"rating":       map[string]any{"enabled": config.RatingEnabled, "sessions": config.RatingSessions},
+		"update_check": map[string]any{"enabled": config.UpdateCheckEnabled},
+		"offline":      map[string]any{"enabled": config.OfflineEnabled, "caching_strategy": config.CachingStrategy},
+		"permissions":  permissions,
+		"deep_linking": map[string]any{"url_scheme": config.URLScheme, "universal_link_domain": config.UniversalLinkDomain},
 	}
 }
 
