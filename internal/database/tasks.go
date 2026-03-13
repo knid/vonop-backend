@@ -61,6 +61,18 @@ func (db *Database) UpdateAppBuildTask(buildTask *models.AppBuildTask) error {
 	return err
 }
 
+func (db *Database) CancelAppBuildTask(taskID string) error {
+	_, err := db.DB.NewUpdate().
+		TableExpr("app_build_tasks").
+		Set("finished = ?", true).
+		Set("status_text = ?", "Cancelled").
+		Set("updated_at = current_timestamp").
+		Where("id = ?", taskID).
+		Where("finished = false").
+		Exec(context.Background())
+	return err
+}
+
 func (db *Database) GetIOSSignTaskById(id string) (*models.SignIPATask, error) {
 	var signTask models.SignIPATask
 	err := db.DB.NewSelect().Model(&signTask).Where("id = ?", id).Scan(context.Background())
