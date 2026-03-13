@@ -573,7 +573,7 @@ func main() {
 		pgdriver.WithReadTimeout(30*time.Second),
 		pgdriver.WithWriteTimeout(10*time.Second),
 	))
-	sqldb.SetMaxOpenConns(20)
+	sqldb.SetMaxOpenConns(10)
 	sqldb.SetMaxIdleConns(5)
 	sqldb.SetConnMaxLifetime(10 * time.Minute)
 	sqldb.SetConnMaxIdleTime(1 * time.Minute)
