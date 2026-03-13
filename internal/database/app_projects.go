@@ -24,8 +24,14 @@ func (db *Database) GetAppProjectsByUserIDAndTypes(userID string, types []string
 }
 
 func (db *Database) GetAppProjectByID(id string) (*models.AppProject, error) {
+	if cached, ok := getProjectFromCache(id); ok {
+		return cached, nil
+	}
 	var project models.AppProject
 	err := db.DB.NewSelect().Model(&project).Where("id = ?", id).Scan(context.Background())
+	if err == nil {
+		setProjectInCache(id, &project)
+	}
 	return &project, err
 }
 
@@ -42,11 +48,17 @@ func (db *Database) CreateAppProject(p *models.AppProject) (*models.AppProject, 
 
 func (db *Database) UpdateAppProject(p *models.AppProject) (*models.AppProject, error) {
 	_, err := db.DB.NewUpdate().Model(p).Where("id = ?", p.ID).Exec(context.Background())
+	if err == nil {
+		db.InvalidateProjectCache(p.ID.String())
+	}
 	return p, err
 }
 
 func (db *Database) DeleteAppProject(p *models.AppProject) error {
 	_, err := db.DB.NewDelete().Model(p).Where("id = ?", p.ID).Exec(context.Background())
+	if err == nil {
+		db.InvalidateProjectCache(p.ID.String())
+	}
 	return err
 }
 
@@ -55,6 +67,9 @@ func (db *Database) UpdateAppProjectSandboxID(projectID string, sandboxID string
 		Set("sandbox_id = ?", sandboxID).
 		Where("id = ?", projectID).
 		Exec(context.Background())
+	if err == nil {
+		db.InvalidateProjectCache(projectID)
+	}
 	return err
 }
 
