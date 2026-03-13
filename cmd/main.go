@@ -569,9 +569,9 @@ func main() {
 
 	sqldb := sql.OpenDB(pgdriver.NewConnector(
 		pgdriver.WithDSN(dsn),
-		pgdriver.WithDialTimeout(5*time.Second),
-		pgdriver.WithReadTimeout(30*time.Second),
-		pgdriver.WithWriteTimeout(10*time.Second),
+		pgdriver.WithDialTimeout(3*time.Second),
+		pgdriver.WithReadTimeout(10*time.Second),
+		pgdriver.WithWriteTimeout(5*time.Second),
 	))
 	sqldb.SetMaxOpenConns(10)
 	sqldb.SetMaxIdleConns(5)
@@ -1030,6 +1030,7 @@ func main() {
 
 				r.Route("/{appId}", func(r chi.Router) {
 					r.Get("/", httpViews.GetApp)
+					r.Get("/init", httpViews.GetAppInit)
 					r.Put("/", httpViews.UpdateApp)
 					r.Delete("/", httpViews.DeleteApp)
 

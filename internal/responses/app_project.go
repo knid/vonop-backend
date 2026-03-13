@@ -116,6 +116,24 @@ type EnvVarResponse struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+type MissingEnvVarResponse struct {
+	Key         string `json:"key"`
+	Description string `json:"description"`
+	IsPublic    bool   `json:"is_public"`
+	Provider    string `json:"provider,omitempty"`
+}
+
+type AppInitResponse struct {
+	Project        AppProjectDetailResponse  `json:"project"`
+	Conversation   *AppConversationResponse  `json:"conversation"`
+	Domains        []AppDomainResponse       `json:"domains"`
+	EnvVars        []EnvVarResponse          `json:"env_vars"`
+	MissingEnvVars []MissingEnvVarResponse   `json:"missing_env_vars"`
+	Integrations   []AppIntegrationResp      `json:"integrations"`
+	Deployment     *AppDeploymentResponse    `json:"deployment"`
+	SandboxID      string                    `json:"sandbox_id"`
+}
+
 type IntegrationProviderInfo struct {
 	Provider       string   `json:"provider"`
 	Name           string   `json:"name"`

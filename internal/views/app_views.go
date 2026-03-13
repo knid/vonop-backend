@@ -8,9 +8,11 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-playground/validator/v10"
+	"github.com/knid/wemob/internal/controllers"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/responses"
@@ -1006,4 +1008,256 @@ func (v *HttpViews) CaptureAppScreenshot(w http.ResponseWriter, r *http.Request)
 	go v.Controller.CaptureAppScreenshot(project, body.URL)
 
 	utils.JSONResponse(w, map[string]bool{"ok": true}, http.StatusAccepted)
+}
+
+// GET /v2/apps/{appId}/init — consolidated endpoint returning all data the frontend needs.
+func (v *HttpViews) GetAppInit(w http.ResponseWriter, r *http.Request) {
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	appID := chi.URLParam(r, "appId")
+	project, err := v.Controller.GetAppProject(appID, user)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	// Auto-heal: if status is "generating" but no active generation job exists, update to "ready"
+	if project.Status == "generating" {
+		activeJobs, _ := v.Controller.GetActiveJobs(user.ID)
+		hasActiveGenJob := false
+		for _, j := range activeJobs {
+			if j.Type == "generate_app" || j.Type == "generate_ecommerce_app" {
+				hasActiveGenJob = true
+				break
+			}
+		}
+		if !hasActiveGenJob {
+			project.Status = "ready"
+			v.Controller.UpdateAppProjectStatus(project, "ready")
+		}
+	}
+
+	var (
+		wg sync.WaitGroup
+
+		conv           *models.AppConversation
+		files          []models.AppGeneratedFile
+		domains        []responses.AppDomainResponse
+		envVars        []models.AppEnvVar
+		missingEnvVars []controllers.RequiredEnvVar
+		integrations   []models.AppIntegration
+		deployment     *models.AppDeployment
+		hasStore       bool
+		screenshotURL  string
+	)
+
+	wg.Add(8)
+
+	go func() {
+		defer wg.Done()
+		conv, _ = v.Controller.GetAppConversation(project.ID.String())
+	}()
+
+	go func() {
+		defer wg.Done()
+		files, _ = v.Controller.GetAppGeneratedFiles(project.ID.String(), "nextjs")
+	}()
+
+	go func() {
+		defer wg.Done()
+		domains, _ = v.Controller.GetAppDomains(project.ID.String())
+	}()
+
+	go func() {
+		defer wg.Done()
+		envVars, _ = v.Controller.GetAppEnvVars(project.ID.String())
+	}()
+
+	go func() {
+		defer wg.Done()
+		missingEnvVars, _ = v.Controller.GetMissingEnvVars(project)
+	}()
+
+	go func() {
+		defer wg.Done()
+		integrations, _ = v.Controller.GetAppIntegrations(project.ID.String())
+	}()
+
+	go func() {
+		defer wg.Done()
+		deployment, _ = v.Controller.GetLatestDeploymentStatus(project.ID.String())
+	}()
+
+	go func() {
+		defer wg.Done()
+		store, storeErr := v.Controller.GetStore(project.ID.String())
+		if storeErr == nil && store != nil {
+			hasStore = true
+		}
+	}()
+
+	// Screenshot presigned URL (cheap, no goroutine needed)
+	if project.ScreenshotS3Key != "" {
+		if presigned, err := v.Controller.AssetsStorage.GetObject(r.Context(), project.ScreenshotS3Key, 3600); err == nil {
+			screenshotURL = presigned.URL
+		}
+	}
+
+	wg.Wait()
+
+	// Build project detail response
+	var theme map[string]any
+	json.Unmarshal(project.Theme, &theme)
+
+	var fileResp []responses.AppFileResponse
+	for _, f := range files {
+		if f.FilePath == ".env.local" {
+			continue
+		}
+		fileResp = append(fileResp, responses.AppFileResponse{
+			ID:        f.ID,
+			Platform:  f.Platform,
+			FilePath:  f.FilePath,
+			Content:   f.Content,
+			FileType:  f.FileType,
+			CreatedAt: f.CreatedAt,
+			UpdatedAt: f.UpdatedAt,
+		})
+	}
+
+	projectResp := responses.AppProjectDetailResponse{
+		AppProjectResponse: responses.AppProjectResponse{
+			ID:            project.ID,
+			Name:          project.Name,
+			Slug:          project.Slug,
+			Prompt:        project.Prompt,
+			ProjectType:   project.ProjectType,
+			Theme:         theme,
+			Settings:      project.Settings,
+			Status:        project.Status,
+			HasStore:      hasStore,
+			ScreenshotURL: screenshotURL,
+			CreatedAt:     project.CreatedAt,
+			UpdatedAt:     project.UpdatedAt,
+		},
+		Files: fileResp,
+	}
+
+	// Build conversation response
+	var convResp *responses.AppConversationResponse
+	if conv != nil {
+		var messages []models.AppConversationMessage
+		json.Unmarshal(conv.Messages, &messages)
+
+		msgResp := make([]responses.AppConversationMessageResp, 0, len(messages))
+		for _, m := range messages {
+			var fileOps []responses.AppChatFileOpResp
+			for _, op := range m.FileOperations {
+				fileOps = append(fileOps, responses.AppChatFileOpResp{
+					Action:   op.Action,
+					FilePath: op.FilePath,
+					FileType: op.FileType,
+				})
+			}
+			var toolCalls []responses.AppChatToolCallResp
+			for _, tc := range m.ToolCalls {
+				toolCalls = append(toolCalls, responses.AppChatToolCallResp{
+					Tool:      tc.Tool,
+					Arguments: tc.Arguments,
+				})
+			}
+			msgResp = append(msgResp, responses.AppConversationMessageResp{
+				ID:                 m.ID,
+				Role:               m.Role,
+				Content:            m.Content,
+				Timestamp:          m.Timestamp,
+				FileOperations:     fileOps,
+				ImageURLs:          m.ImageURLs,
+				SnapshotID:         m.SnapshotID,
+				Suggestions:        m.Suggestions,
+				ThinkingText:       m.ThinkingText,
+				ThinkingDurationMs: m.ThinkingDurationMs,
+				ToolCalls:          toolCalls,
+			})
+		}
+		convResp = &responses.AppConversationResponse{
+			ID:        conv.ID,
+			Messages:  msgResp,
+			CreatedAt: conv.CreatedAt,
+			UpdatedAt: conv.UpdatedAt,
+		}
+	}
+
+	// Build domains response (already the right type)
+	if domains == nil {
+		domains = []responses.AppDomainResponse{}
+	}
+
+	// Build env vars response
+	envVarResp := make([]responses.EnvVarResponse, 0, len(envVars))
+	for _, ev := range envVars {
+		envVarResp = append(envVarResp, responses.EnvVarResponse{
+			ID:        ev.ID,
+			Key:       ev.Key,
+			Value:     ev.Value,
+			IsPublic:  ev.IsPublic,
+			CreatedAt: ev.CreatedAt,
+			UpdatedAt: ev.UpdatedAt,
+		})
+	}
+
+	// Build missing env vars response
+	missingResp := make([]responses.MissingEnvVarResponse, 0, len(missingEnvVars))
+	for _, mv := range missingEnvVars {
+		missingResp = append(missingResp, responses.MissingEnvVarResponse{
+			Key:         mv.Key,
+			Description: mv.Description,
+			IsPublic:    mv.IsPublic,
+			Provider:    mv.Provider,
+		})
+	}
+
+	// Build integrations response
+	integrationResp := make([]responses.AppIntegrationResp, 0, len(integrations))
+	for _, i := range integrations {
+		integrationResp = append(integrationResp, responses.AppIntegrationResp{
+			ID:        i.ID,
+			Provider:  i.Provider,
+			Config:    i.Config,
+			Status:    i.Status,
+			CreatedAt: i.CreatedAt,
+		})
+	}
+
+	// Build deployment response
+	var deployResp *responses.AppDeploymentResponse
+	if deployment != nil {
+		deployResp = &responses.AppDeploymentResponse{
+			ID:           deployment.ID,
+			AppProjectID: deployment.AppProjectID,
+			Platform:     deployment.Platform,
+			Provider:     deployment.Provider,
+			Status:       deployment.Status,
+			DeployedURL:  deployment.DeployedURL,
+			Version:      deployment.Version,
+			ErrorMessage: deployment.ErrorMessage,
+			CreatedAt:    deployment.CreatedAt,
+			UpdatedAt:    deployment.UpdatedAt,
+		}
+	}
+
+	utils.JSONResponse(w, responses.AppInitResponse{
+		Project:        projectResp,
+		Conversation:   convResp,
+		Domains:        domains,
+		EnvVars:        envVarResp,
+		MissingEnvVars: missingResp,
+		Integrations:   integrationResp,
+		Deployment:     deployResp,
+		SandboxID:      project.SandboxID,
+	}, http.StatusOK)
 }
