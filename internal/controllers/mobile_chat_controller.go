@@ -124,11 +124,21 @@ func (c *Controller) StreamMobileInjectionChat(
 		oldMessages := messages[:len(messages)-keepRecent]
 		needsSummary := conv.Summary == "" || (len(oldMessages) > summarizeThreshold && len(oldMessages)%10 < 2)
 		if needsSummary && len(oldMessages) > 0 {
-			conv.Summary = c.summarizeMobileConversation(ctx, oldMessages, provider, conv.Summary)
-			if msgJSON, err := json.Marshal(messages); err == nil {
-				conv.Messages = msgJSON
-				c.DB.UpdateMobileConversation(conv)
-			}
+			// Run summarization asynchronously to avoid blocking the chat stream
+			oldMsgsCopy := make([]MobileChatMessage, len(oldMessages))
+			copy(oldMsgsCopy, oldMessages)
+			existingSummary := conv.Summary
+			projectID := project.ID.String()
+			go func() {
+				summary := c.summarizeMobileConversation(context.Background(), oldMsgsCopy, provider, existingSummary)
+				if summary != "" {
+					convObj, err := c.DB.GetMobileConversationByProject(projectID)
+					if err == nil {
+						convObj.Summary = summary
+						c.DB.UpdateMobileConversation(convObj)
+					}
+				}
+			}()
 		}
 		if conv.Summary != "" {
 			llmMessages = append(llmMessages, utils.Message{

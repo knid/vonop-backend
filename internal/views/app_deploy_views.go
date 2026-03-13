@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/go-playground/validator/v10"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/utils"
@@ -79,6 +80,15 @@ func (v *HttpViews) DeployAppWeb(w http.ResponseWriter, r *http.Request) {
 
 // POST /v2/apps/{appId}/deploy/android
 func (v *HttpViews) DeployAppAndroid(w http.ResponseWriter, r *http.Request) {
+	v.deployAppMobile(w, r, "android")
+}
+
+// POST /v2/apps/{appId}/deploy/ios
+func (v *HttpViews) DeployAppIOS(w http.ResponseWriter, r *http.Request) {
+	v.deployAppMobile(w, r, "ios")
+}
+
+func (v *HttpViews) deployAppMobile(w http.ResponseWriter, r *http.Request, platform string) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
@@ -88,7 +98,6 @@ func (v *HttpViews) DeployAppAndroid(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check mobile build permission
 	limits, limitsErr := v.Controller.DB.GetStandartUserLimitsByUser(user)
 	if limitsErr != nil || !limits.CanBuildMobile {
 		utils.JSONCodedErrorResponse(w, "FEATURE_NOT_AVAILABLE", "mobile builds require Professional plan", http.StatusForbidden, nil)
@@ -102,76 +111,34 @@ func (v *HttpViews) DeployAppAndroid(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req requests.DeployFlutterRequest
+	var req requests.DeployMobileBuildRequest
 	if err := utils.ParseJSONBody(r, &req); err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	build, err := v.Controller.BuildFlutter(project, user, "android", req.PackageName, req.AppName)
-	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	v.Controller.TrackUserEvent(user, "app_deployed_android", posthog.NewProperties().
-		Set("app_id", project.ID.String()).
-		Set("project_type", project.ProjectType))
-
-	utils.JSONResponse(w, map[string]any{
-		"build_id": build.ID,
-		"platform": build.Platform,
-		"status":   build.Status,
-		"version":  build.Version,
-	}, http.StatusCreated)
-}
-
-// POST /v2/apps/{appId}/deploy/ios
-func (v *HttpViews) DeployAppIOS(w http.ResponseWriter, r *http.Request) {
-	user, err := v.Controller.GetUserFromReq(r)
-	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
-		return
-	}
-	if requireActiveSubscription(w, user) {
-		return
-	}
-
-	// Check mobile build permission
-	iosLimits, iosLimitsErr := v.Controller.DB.GetStandartUserLimitsByUser(user)
-	if iosLimitsErr != nil || !iosLimits.CanBuildMobile {
-		utils.JSONCodedErrorResponse(w, "FEATURE_NOT_AVAILABLE", "mobile builds require Professional plan", http.StatusForbidden, nil)
-		return
-	}
-
-	appID := chi.URLParam(r, "appId")
-	project, err := v.Controller.GetAppProject(appID, user)
-	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
-		return
-	}
-
-	var req requests.DeployFlutterRequest
-	if err := utils.ParseJSONBody(r, &req); err != nil {
+	validate := validator.New(validator.WithRequiredStructEnabled())
+	if err := req.Validate(validate); err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	build, err := v.Controller.BuildFlutter(project, user, "ios", req.PackageName, req.AppName)
+	build, task, err := v.Controller.BuildAppMobile(project, user, platform, req.PackageName, req.AppName, req.Icon, req.SplashScreenColor)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	v.Controller.TrackUserEvent(user, "app_deployed_ios", posthog.NewProperties().
+	v.Controller.TrackUserEvent(user, "app_deployed_"+platform, posthog.NewProperties().
 		Set("app_id", project.ID.String()).
 		Set("project_type", project.ProjectType))
 
 	utils.JSONResponse(w, map[string]any{
 		"build_id": build.ID,
-		"platform": build.Platform,
-		"status":   build.Status,
-		"version":  build.Version,
+		"task_id":  task.ID,
+		"platform": platform,
+		"status":   task.StatusText,
+		"version":  build.BuildNumber,
 	}, http.StatusCreated)
 }
 

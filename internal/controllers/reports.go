@@ -1,7 +1,7 @@
 package controllers
 
 import (
-	"fmt"
+	"log/slog"
 
 	"github.com/knid/wemob/internal/requests"
 )
@@ -12,7 +12,7 @@ func (c *Controller) UpdateBuildTaskStatus(reportBuildReq requests.ReportBuildRe
 		return err
 	}
 
-	fmt.Printf("Updating build task %s status to %s\n", buildTask.ID.String(), reportBuildReq.Status)
+	slog.Info("updating build task status", "task_id", buildTask.ID.String(), "status", reportBuildReq.Status)
 
 	buildTask.StatusText = reportBuildReq.Status
 	if reportBuildReq.Status == "success" || reportBuildReq.Status == "completed" ||

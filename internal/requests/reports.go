@@ -25,5 +25,6 @@ type ReportCertRequest struct {
 type ReportSignIPARequest struct {
 	Status        string `json:"status"`
 	StatusMessage string `json:"status_message"`
+	Secret        string `json:"secret"`
 	TaskID        string `json:"task_id"`
 }
