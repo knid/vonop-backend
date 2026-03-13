@@ -567,11 +567,16 @@ func main() {
 		dbUser, dbPass, dbHost, dbPort, dbName, dbSSL,
 	)
 
-	sqldb := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn)))
+	sqldb := sql.OpenDB(pgdriver.NewConnector(
+		pgdriver.WithDSN(dsn),
+		pgdriver.WithDialTimeout(5*time.Second),
+		pgdriver.WithReadTimeout(30*time.Second),
+		pgdriver.WithWriteTimeout(10*time.Second),
+	))
 	sqldb.SetMaxOpenConns(20)
-	sqldb.SetMaxIdleConns(10)
-	sqldb.SetConnMaxLifetime(30 * time.Minute)
-	sqldb.SetConnMaxIdleTime(5 * time.Minute)
+	sqldb.SetMaxIdleConns(5)
+	sqldb.SetConnMaxLifetime(10 * time.Minute)
+	sqldb.SetConnMaxIdleTime(1 * time.Minute)
 	bundb := bun.NewDB(sqldb, pgdialect.New())
 
 	if _, err := bundb.Exec("CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\";"); err != nil {
