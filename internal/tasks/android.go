@@ -19,6 +19,9 @@ type AndroidBuildPayload struct {
 	PackageName         string
 	RemoveWemobBranding bool
 	Secret              string
+	Permissions         []string
+	URLScheme           string
+	UniversalLinkDomain string
 }
 
 type AndroidDeployPayload struct {

@@ -214,6 +214,9 @@ func (c *Controller) BuildAppMobile(appProject *models.AppProject, user *models.
 	// Create task and enqueue
 	var appBuildTask *models.AppBuildTask
 
+	// Fetch mobile app config for permissions and deep linking
+	mobileConfig, _ := c.DB.GetMobileAppConfig(project.ID.String())
+
 	if platform == "android" {
 		appBuildTask, err = c.DB.CreateAppBuildTask(*build, "Android", "Queued", false)
 		if err != nil {
@@ -231,6 +234,24 @@ func (c *Controller) BuildAppMobile(appProject *models.AppProject, user *models.
 			SplashScreenColor: splashColor,
 			PackageName:       packageName,
 			Secret:            appBuildTask.ID.String(),
+			Permissions: func() []string {
+				if mobileConfig != nil {
+					return mobileConfig.Permissions
+				}
+				return nil
+			}(),
+			URLScheme: func() string {
+				if mobileConfig != nil {
+					return mobileConfig.URLScheme
+				}
+				return ""
+			}(),
+			UniversalLinkDomain: func() string {
+				if mobileConfig != nil {
+					return mobileConfig.UniversalLinkDomain
+				}
+				return ""
+			}(),
 		})
 		task := asynq.NewTask(tasks.TypeBuildAndroid, payload)
 		if _, err := c.TaskService.Enqueue(task, asynq.MaxRetry(2), asynq.Timeout(time.Minute*10)); err != nil {
@@ -253,6 +274,24 @@ func (c *Controller) BuildAppMobile(appProject *models.AppProject, user *models.
 			SplashScreenColor: splashColor,
 			PackageName:       packageName,
 			Secret:            appBuildTask.ID.String(),
+			Permissions: func() []string {
+				if mobileConfig != nil {
+					return mobileConfig.Permissions
+				}
+				return nil
+			}(),
+			URLScheme: func() string {
+				if mobileConfig != nil {
+					return mobileConfig.URLScheme
+				}
+				return ""
+			}(),
+			UniversalLinkDomain: func() string {
+				if mobileConfig != nil {
+					return mobileConfig.UniversalLinkDomain
+				}
+				return ""
+			}(),
 		})
 		task := asynq.NewTask(tasks.TypeBuildUnsignedIpa, payload)
 		if _, err := c.TaskService.Enqueue(task, asynq.MaxRetry(2), asynq.Timeout(time.Minute*10)); err != nil {

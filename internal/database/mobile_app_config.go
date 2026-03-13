@@ -26,6 +26,16 @@ func (db *Database) UpsertMobileAppConfig(config *models.MobileAppConfig) (*mode
 		Set("external_browser_links = EXCLUDED.external_browser_links").
 		Set("bridge_enabled = EXCLUDED.bridge_enabled").
 		Set("bridge_methods = EXCLUDED.bridge_methods").
+		Set("permissions = EXCLUDED.permissions").
+		Set("url_scheme = EXCLUDED.url_scheme").
+		Set("universal_link_domain = EXCLUDED.universal_link_domain").
+		Set("offline_enabled = EXCLUDED.offline_enabled").
+		Set("caching_strategy = EXCLUDED.caching_strategy").
+		Set("biometric_enabled = EXCLUDED.biometric_enabled").
+		Set("dark_mode_enabled = EXCLUDED.dark_mode_enabled").
+		Set("rating_enabled = EXCLUDED.rating_enabled").
+		Set("rating_sessions = EXCLUDED.rating_sessions").
+		Set("update_check_enabled = EXCLUDED.update_check_enabled").
 		Set("updated_at = now()").
 		Returning("*").
 		Exec(context.Background())
