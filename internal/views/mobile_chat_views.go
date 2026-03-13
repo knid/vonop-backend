@@ -8,6 +8,7 @@ import (
 	"net/url"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/utils"
@@ -308,6 +309,162 @@ func (v *HttpViews) ClassifyMobileIntent(w http.ResponseWriter, r *http.Request)
 		"intent": intent,
 		"url":    "",
 	}, http.StatusOK)
+}
+
+// GET /v2/mobile/{projectId}/config (authenticated)
+func (v *HttpViews) GetMobileAppConfig(w http.ResponseWriter, r *http.Request) {
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	projectID := chi.URLParam(r, "projectId")
+	project, err := v.Controller.GetProjectModelById(projectID)
+	if err != nil {
+		utils.JSONErrorResponse(w, "project not found", http.StatusNotFound)
+		return
+	}
+	if project.UserID != user.ID {
+		utils.JSONErrorResponse(w, "unauthorized", http.StatusForbidden)
+		return
+	}
+
+	config, err := v.Controller.DB.GetMobileAppConfig(projectID)
+	if err != nil {
+		// Return defaults if no config exists
+		utils.JSONResponse(w, defaultMobileConfigResponse(project.OneSignalAppID), http.StatusOK)
+		return
+	}
+
+	utils.JSONResponse(w, buildMobileConfigResponse(config, project.OneSignalAppID), http.StatusOK)
+}
+
+// PUT /v2/mobile/{projectId}/config (authenticated)
+func (v *HttpViews) UpdateMobileAppConfig(w http.ResponseWriter, r *http.Request) {
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	projectID := chi.URLParam(r, "projectId")
+	project, err := v.Controller.GetProjectModelById(projectID)
+	if err != nil {
+		utils.JSONErrorResponse(w, "project not found", http.StatusNotFound)
+		return
+	}
+	if project.UserID != user.ID {
+		utils.JSONErrorResponse(w, "unauthorized", http.StatusForbidden)
+		return
+	}
+
+	var body struct {
+		PushEnabled          *bool     `json:"push_enabled"`
+		AnalyticsEnabled     *bool     `json:"analytics_enabled"`
+		PullToRefreshEnabled *bool     `json:"pull_to_refresh_enabled"`
+		ExternalBrowserLinks *bool     `json:"external_browser_links"`
+		BridgeEnabled        *bool     `json:"bridge_enabled"`
+		BridgeMethods        *[]string `json:"bridge_methods"`
+	}
+	if err := utils.ParseJSONBody(r, &body); err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// Get existing config or create defaults
+	config, err := v.Controller.DB.GetMobileAppConfig(projectID)
+	if err != nil {
+		config = &models.MobileAppConfig{
+			ProjectID:            project.ID,
+			PushEnabled:          true,
+			AnalyticsEnabled:     true,
+			PullToRefreshEnabled: true,
+			ExternalBrowserLinks: true,
+			BridgeEnabled:        false,
+		}
+	}
+
+	if body.PushEnabled != nil {
+		config.PushEnabled = *body.PushEnabled
+	}
+	if body.AnalyticsEnabled != nil {
+		config.AnalyticsEnabled = *body.AnalyticsEnabled
+	}
+	if body.PullToRefreshEnabled != nil {
+		config.PullToRefreshEnabled = *body.PullToRefreshEnabled
+	}
+	if body.ExternalBrowserLinks != nil {
+		config.ExternalBrowserLinks = *body.ExternalBrowserLinks
+	}
+	if body.BridgeEnabled != nil {
+		config.BridgeEnabled = *body.BridgeEnabled
+	}
+	if body.BridgeMethods != nil {
+		config.BridgeMethods = *body.BridgeMethods
+	}
+
+	updated, err := v.Controller.DB.UpsertMobileAppConfig(config)
+	if err != nil {
+		utils.JSONErrorResponse(w, "failed to update config", http.StatusInternalServerError)
+		return
+	}
+
+	utils.JSONResponse(w, buildMobileConfigResponse(updated, project.OneSignalAppID), http.StatusOK)
+}
+
+// GET /v1/mobile/{projectId}/config (public, no auth)
+func (v *HttpViews) GetPublicMobileConfig(w http.ResponseWriter, r *http.Request) {
+	projectID := chi.URLParam(r, "projectId")
+
+	project, err := v.Controller.GetProjectModelById(projectID)
+	if err != nil {
+		utils.JSONErrorResponse(w, "project not found", http.StatusNotFound)
+		return
+	}
+
+	config, err := v.Controller.DB.GetMobileAppConfig(projectID)
+	if err != nil {
+		utils.JSONResponse(w, defaultMobileConfigResponse(project.OneSignalAppID), http.StatusOK)
+		return
+	}
+
+	utils.JSONResponse(w, buildMobileConfigResponse(config, project.OneSignalAppID), http.StatusOK)
+}
+
+func defaultMobileConfigResponse(oneSignalAppID string) map[string]any {
+	return buildMobileConfigResponse(&models.MobileAppConfig{
+		PushEnabled:          true,
+		AnalyticsEnabled:     true,
+		PullToRefreshEnabled: true,
+		ExternalBrowserLinks: true,
+		BridgeEnabled:        false,
+	}, oneSignalAppID)
+}
+
+func buildMobileConfigResponse(config *models.MobileAppConfig, oneSignalAppID string) map[string]any {
+	bridgeMethods := config.BridgeMethods
+	if bridgeMethods == nil {
+		bridgeMethods = []string{}
+	}
+
+	return map[string]any{
+		"push": map[string]any{
+			"enabled":  config.PushEnabled,
+			"provider": "onesignal",
+			"app_id":   oneSignalAppID,
+		},
+		"analytics": map[string]any{
+			"enabled":  config.AnalyticsEnabled,
+			"endpoint": "https://api.wemob.io",
+		},
+		"pull_to_refresh":       config.PullToRefreshEnabled,
+		"external_browser_links": config.ExternalBrowserLinks,
+		"bridge": map[string]any{
+			"enabled": config.BridgeEnabled,
+			"methods": bridgeMethods,
+		},
+	}
 }
 
 // GET /v1/mobile/{projectId}/injections (public, no auth)
