@@ -598,9 +598,9 @@ func main() {
 		pgdriver.WithWriteTimeout(10*time.Second),
 	))
 	sqldb.SetMaxOpenConns(25)
-	sqldb.SetMaxIdleConns(10)
-	sqldb.SetConnMaxLifetime(30 * time.Minute)
-	sqldb.SetConnMaxIdleTime(5 * time.Minute)
+	sqldb.SetMaxIdleConns(5)
+	sqldb.SetConnMaxLifetime(5 * time.Minute)
+	sqldb.SetConnMaxIdleTime(30 * time.Second)
 	bundb := bun.NewDB(sqldb, pgdialect.New())
 
 	if _, err := bundb.Exec("CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\";"); err != nil {
