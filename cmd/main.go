@@ -307,6 +307,27 @@ func createSchema(db *bun.DB) error {
 		`CREATE INDEX IF NOT EXISTS idx_carts_store_id_session_id ON carts(store_id, session_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_app_snapshots_app_project_id ON app_snapshots(app_project_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_notifications_project_id ON notifications(project_id)`,
+		// Foreign key indexes for tables frequently queried by user_id or project_id
+		`CREATE INDEX IF NOT EXISTS idx_app_projects_user_id ON app_projects(user_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_app_projects_organization_id ON app_projects(organization_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_builds_project_id ON builds(project_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_tokens_user_id ON tokens(user_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_projects_user_id ON projects(user_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_releases_project_id ON releases(project_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_app_conversations_app_project_id ON app_conversations(app_project_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_app_deployments_app_project_id ON app_deployments(app_project_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_app_domains_app_project_id ON app_domains(app_project_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_app_env_vars_app_project_id ON app_env_vars(app_project_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_app_integrations_app_project_id ON app_integrations(app_project_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_stores_app_project_id ON stores(app_project_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_app_dashboards_app_project_id ON app_dashboards(app_project_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_deployments_project_id ON deployments(project_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_ai_credits_balances_user_id ON ai_credits_balances(user_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_ai_credit_transactions_user_id ON ai_credit_transactions(user_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_organization_members_user_id ON organization_members(user_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_organization_members_organization_id ON organization_members(organization_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_vercel_projects_app_project_id ON vercel_projects(app_project_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_webhook_endpoints_user_id ON webhook_endpoints(user_id)`,
 	}
 	for _, stmt := range perfIndexes {
 		if _, err := db.ExecContext(context.Background(), stmt); err != nil {
@@ -573,8 +594,8 @@ func main() {
 		pgdriver.WithReadTimeout(30*time.Second),
 		pgdriver.WithWriteTimeout(15*time.Second),
 	))
-	sqldb.SetMaxOpenConns(10)
-	sqldb.SetMaxIdleConns(5)
+	sqldb.SetMaxOpenConns(25)
+	sqldb.SetMaxIdleConns(10)
 	sqldb.SetConnMaxLifetime(10 * time.Minute)
 	sqldb.SetConnMaxIdleTime(1 * time.Minute)
 	bundb := bun.NewDB(sqldb, pgdialect.New())
