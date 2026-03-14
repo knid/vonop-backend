@@ -593,6 +593,7 @@ func main() {
 		pgdriver.WithDialTimeout(10*time.Second),
 		pgdriver.WithReadTimeout(30*time.Second),
 		pgdriver.WithWriteTimeout(15*time.Second),
+		pgdriver.WithTLSConfig(&tls.Config{InsecureSkipVerify: true}),
 	))
 	sqldb.SetMaxOpenConns(25)
 	sqldb.SetMaxIdleConns(10)
