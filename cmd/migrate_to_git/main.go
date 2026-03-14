@@ -82,6 +82,7 @@ func main() {
 		var files []LegacyFile
 		err := db.NewSelect().
 			TableExpr("app_generated_files").
+			Column("app_project_id", "file_path", "content", "file_type").
 			Where("app_project_id = ?", pid).
 			Order("file_path ASC").
 			Scan(context.Background(), &files)
