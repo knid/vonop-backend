@@ -1860,7 +1860,7 @@ func (c *Controller) executeChatRunMigrations(
 	}
 
 	// Update stored data models
-	dmJSON, err := json.Marshal(args.UpdatedModels)
+	dmJSON, err := marshalDataModels(args.UpdatedModels)
 	if err != nil {
 		return fmt.Sprintf("Migration applied but failed to update models: %s", err.Error()), nil
 	}
@@ -4028,7 +4028,7 @@ func (c *Controller) buildBuilderToolExecutor(ctx context.Context, project *mode
 			}
 
 			// Store data models in project
-			dmJSON, err := json.Marshal(dataModels)
+			dmJSON, err := marshalDataModels(dataModels)
 			if err != nil {
 				return fmt.Sprintf("Error: failed to marshal data models: %s", err.Error()), nil
 			}
