@@ -569,9 +569,9 @@ func main() {
 
 	sqldb := sql.OpenDB(pgdriver.NewConnector(
 		pgdriver.WithDSN(dsn),
-		pgdriver.WithDialTimeout(3*time.Second),
-		pgdriver.WithReadTimeout(10*time.Second),
-		pgdriver.WithWriteTimeout(5*time.Second),
+		pgdriver.WithDialTimeout(10*time.Second),
+		pgdriver.WithReadTimeout(30*time.Second),
+		pgdriver.WithWriteTimeout(15*time.Second),
 	))
 	sqldb.SetMaxOpenConns(10)
 	sqldb.SetMaxIdleConns(5)
