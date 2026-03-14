@@ -15,7 +15,10 @@ FROM alpine:3.20
 
 WORKDIR /app
 
-RUN apk add --no-cache ca-certificates tzdata curl
+RUN apk add --no-cache ca-certificates tzdata curl git && \
+    git config --global user.email "system@wemob.io" && \
+    git config --global user.name "wemob" && \
+    git config --global init.defaultBranch main
 
 RUN addgroup -S appuser \
     && adduser -S -G appuser -H -s /sbin/nologin appuser
