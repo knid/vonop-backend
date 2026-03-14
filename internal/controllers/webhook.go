@@ -54,17 +54,8 @@ func (c *Controller) HandleWebhook(w http.ResponseWriter, req *http.Request) {
 				break
 			}
 
-			if !user.TrialUsed {
-				user.SubscriptionStatus = "trial"
-				user.TrialStartAt = time.Now()
-				go c.CRMService.SendEvent(user, constants.BREVO_EVENT_TRIAL_STARTED, map[string]any{
-					"subscription_status": user.SubscriptionStatus,
-					"subscription_id":     user.SubscriptionID.String(),
-				})
-			} else {
-				user.SubscriptionStatus = "active"
-				user.SubscriptionStartAt = time.Now()
-			}
+			user.SubscriptionStatus = "active"
+			user.SubscriptionStartAt = time.Now()
 
 			go c.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_UPDATED, map[string]any{
 				"subscription_status": user.SubscriptionStatus,
@@ -118,9 +109,6 @@ func (c *Controller) HandleWebhook(w http.ResponseWriter, req *http.Request) {
 				if !user.SetupFinished {
 					user.SetupFinished = true
 					go c.CRMService.SendEvent(user, constants.BREVO_EVENT_USER_SETUP_FINISHED, map[string]any{})
-					if user.TrialUsed {
-						go c.CRMService.SendEvent(user, constants.BREVO_EVENT_TRIAL_ENDED, map[string]any{})
-					}
 					if _, err := c.DB.UpdateUser(user); err != nil {
 						slog.Error("failed to persist setup_finished flag", "user_id", user.ID, "error", err)
 					}
