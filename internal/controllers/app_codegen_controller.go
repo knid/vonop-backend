@@ -102,6 +102,25 @@ func marshalDataModels(models []DataModel) ([]byte, error) {
 	return data, nil
 }
 
+// validateThemeJSON ensures theme data is a valid JSON object under 50KB.
+func validateThemeJSON(data []byte) error {
+	if len(data) == 0 {
+		return nil
+	}
+	if len(data) > 50*1024 {
+		return fmt.Errorf("theme too large: %d bytes (max 50KB)", len(data))
+	}
+	// Must be a JSON object, not a string or array
+	if data[0] != '{' {
+		return fmt.Errorf("theme must be a JSON object, got %q", data[:min(len(data), 20)])
+	}
+	var obj map[string]any
+	if err := json.Unmarshal(data, &obj); err != nil {
+		return fmt.Errorf("theme is not valid JSON: %w", err)
+	}
+	return nil
+}
+
 // DataColumn represents a column in a DataModel table.
 type DataColumn struct {
 	Name       string `json:"name"`

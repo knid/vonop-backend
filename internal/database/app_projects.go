@@ -2,6 +2,7 @@ package database
 
 import (
 	"context"
+	"log/slog"
 
 	"github.com/knid/wemob/internal/models"
 	"github.com/uptrace/bun"
@@ -51,6 +52,15 @@ func (db *Database) CreateAppProject(p *models.AppProject) (*models.AppProject, 
 }
 
 func (db *Database) UpdateAppProject(p *models.AppProject) (*models.AppProject, error) {
+	// Guard against bloated JSONB columns
+	if len(p.Theme) > 50*1024 {
+		p.Theme = []byte("{}")
+		slog.Warn("UpdateAppProject: theme too large, reset to empty", "project_id", p.ID, "size", len(p.Theme))
+	}
+	if len(p.DataModels) > 1<<20 {
+		p.DataModels = []byte("[]")
+		slog.Warn("UpdateAppProject: data_models too large, reset to empty", "project_id", p.ID, "size", len(p.DataModels))
+	}
 	_, err := db.DB.NewUpdate().Model(p).Where("id = ?", p.ID).Exec(context.Background())
 	if err == nil {
 		db.InvalidateProjectCache(p.ID.String())
