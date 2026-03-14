@@ -2,6 +2,7 @@ package database
 
 import (
 	"context"
+	"time"
 
 	"github.com/knid/wemob/internal/models"
 )
@@ -47,6 +48,18 @@ func (db *Database) CreateToken(token *models.Token) (*models.Token, error) {
 	_, err := db.DB.NewInsert().Model(token).Exec(context.Background())
 
 	return token, err
+}
+
+func (db *Database) DeleteExpiredTokens() (int64, error) {
+	res, err := db.DB.NewDelete().Model((*models.Token)(nil)).
+		Where("expired_at < ?", time.Now()).
+		ForceDelete().
+		Exec(context.Background())
+	if err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	return n, nil
 }
 
 func (db *Database) GetUserByStripeCustomerID(customerID string) (*models.User, error) {

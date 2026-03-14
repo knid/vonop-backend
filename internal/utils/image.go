@@ -2,13 +2,24 @@ package utils
 
 import (
 	"bytes"
+	"encoding/base64"
 	"fmt"
 	"image"
 	"image/color"
 	"image/draw"
 	"image/png"
 	"os"
+	"strings"
 )
+
+// DecodeBase64Image extracts raw image bytes from a data URI (e.g. "data:image/png;base64,...").
+func DecodeBase64Image(dataURI string) ([]byte, error) {
+	parts := strings.SplitN(dataURI, ",", 2)
+	if len(parts) != 2 {
+		return nil, fmt.Errorf("invalid data URI")
+	}
+	return base64.StdEncoding.DecodeString(parts[1])
+}
 
 func ComposeMockup(screenshot []byte) ([]byte, error) {
 	mockupFile, err := os.Open("storage/mockup.png")

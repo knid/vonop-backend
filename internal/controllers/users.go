@@ -1,8 +1,10 @@
 package controllers
 
 import (
+	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -70,7 +72,24 @@ func (c *Controller) UpdateUser(user *models.User, userUpdateReq requests.UserUp
 	if user.Provider == "Wemob" {
 		user.Email = userUpdateReq.Email
 	}
-	user.Photo = userUpdateReq.Photo
+	// Upload base64 photos to S3 instead of storing in DB
+	photo := userUpdateReq.Photo
+	if strings.HasPrefix(photo, "data:image/") {
+		imgData, err := utils.DecodeBase64Image(photo)
+		if err != nil {
+			return nil, errors.New("invalid photo format")
+		}
+		if len(imgData) > 2*1024*1024 {
+			return nil, errors.New("photo must be under 2MB")
+		}
+		s3Key := fmt.Sprintf("profile_photos/%s.png", user.ID.String())
+		publicURL, err := c.AssetsStorage.UploadFileBytePublic(context.Background(), s3Key, imgData, "image/png")
+		if err != nil {
+			return nil, errors.New("failed to upload photo")
+		}
+		photo = publicURL
+	}
+	user.Photo = photo
 
 	if user.Email != userUpdateReq.Email {
 		user.Verified = false
