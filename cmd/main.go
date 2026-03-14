@@ -124,6 +124,8 @@ func createSchema(db *bun.DB) error {
 		(*models.MobileConversation)(nil),
 		// Mobile app config (feature flags, plugin toggles, bridge settings)
 		(*models.MobileAppConfig)(nil),
+		// Preview codes for Try With Wemob
+		(*models.PreviewCode)(nil),
 	}
 
 	for _, model := range models {
@@ -1042,6 +1044,11 @@ func main() {
 
 			r.Post("/support/ticket", httpViews.CreateTicket)
 
+			r.Route("/preview-codes", func(r chi.Router) {
+				r.Post("/", httpViews.GeneratePreviewCode)
+				r.Post("/{code}/redeem", httpViews.RedeemPreviewCode)
+			})
+
 			r.Route("/jobs", func(r chi.Router) {
 				r.Get("/active", httpViews.GetActiveJobs)
 				r.Get("/{jobId}", httpViews.GetJob)
@@ -1377,6 +1384,19 @@ func main() {
 		WriteTimeout:   60 * time.Second,
 		IdleTimeout:    60 * time.Second,
 	}
+
+	// Periodically clean up expired preview codes
+	go func() {
+		ticker := time.NewTicker(1 * time.Hour)
+		defer ticker.Stop()
+		for range ticker.C {
+			if n, err := controller.DB.CleanupExpiredPreviewCodes(); err != nil {
+				slog.Error("preview code cleanup failed", "error", err)
+			} else if n > 0 {
+				slog.Info("cleaned up expired preview codes", "count", n)
+			}
+		}
+	}()
 
 	go func() {
 		slog.Info("Proxy server listening on :9001")
