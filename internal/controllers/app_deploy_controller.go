@@ -147,7 +147,7 @@ func (c *Controller) DeployToVercel(project *models.AppProject, user *models.Use
 
 // BuildAppMobile creates a native mobile build for an AI-generated app by wrapping
 // its Vercel deployment URL using the old URL-wrapper build system.
-func (c *Controller) BuildAppMobile(appProject *models.AppProject, user *models.User, platform string, packageName string, appName string, icon string, splashColor string) (*models.Build, *models.AppBuildTask, error) {
+func (c *Controller) BuildAppMobile(appProject *models.AppProject, user *models.User, platform string, appName string, icon string, splashColor string) (*models.Build, *models.AppBuildTask, error) {
 	// Get the Vercel deployment URL — the app must be deployed to web first
 	deployment, err := c.DB.GetLatestAppDeployment(appProject.ID.String(), "web")
 	if err != nil || deployment.DeployedURL == "" {
@@ -159,11 +159,18 @@ func (c *Controller) BuildAppMobile(appProject *models.AppProject, user *models.
 	// Find or create an old-style Project for this URL
 	project, err := c.DB.GetProjectByUserAndURL(user.ID.String(), wrappedURL)
 	if err != nil {
+		// Auto-generate package name
+		pkHex, hexErr := utils.RandomHex(5)
+		if hexErr != nil {
+			return nil, nil, fmt.Errorf("failed to generate package name: %w", hexErr)
+		}
+		pkName := "com.wemob.app" + pkHex[0:5]
+
 		// Create new project linked to this AI app's URL
 		project = &models.Project{
 			UserID:          user.ID,
 			URL:             wrappedURL,
-			PackageName:     packageName,
+			PackageName:     pkName,
 			IconPath:        icon,
 			OneSignalAppID:  "wemob-app-" + appProject.ID.String(),
 			OneSignalAppToken: "wemob-app-token-" + appProject.ID.String(),
@@ -181,7 +188,7 @@ func (c *Controller) BuildAppMobile(appProject *models.AppProject, user *models.
 		} else {
 			project.BuildForIOS = true
 		}
-		project.PackageName = packageName
+		// Keep existing package name
 		if icon != "" {
 			project.IconPath = icon
 		}
@@ -239,7 +246,7 @@ func (c *Controller) BuildAppMobile(appProject *models.AppProject, user *models.
 			URL:               wrappedURL,
 			IconURL:           icon,
 			SplashScreenColor: splashColor,
-			PackageName:       packageName,
+			PackageName:       project.PackageName,
 			Secret:            appBuildTask.ID.String(),
 			Permissions: func() []string {
 				if mobileConfig != nil {
@@ -279,7 +286,7 @@ func (c *Controller) BuildAppMobile(appProject *models.AppProject, user *models.
 			URL:               wrappedURL,
 			IconURL:           icon,
 			SplashScreenColor: splashColor,
-			PackageName:       packageName,
+			PackageName:       project.PackageName,
 			Secret:            appBuildTask.ID.String(),
 			Permissions: func() []string {
 				if mobileConfig != nil {

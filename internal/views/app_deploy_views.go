@@ -123,7 +123,7 @@ func (v *HttpViews) deployAppMobile(w http.ResponseWriter, r *http.Request, plat
 		return
 	}
 
-	build, task, err := v.Controller.BuildAppMobile(project, user, platform, req.PackageName, req.AppName, req.Icon, req.SplashScreenColor)
+	build, task, err := v.Controller.BuildAppMobile(project, user, platform, req.AppName, req.Icon, req.SplashScreenColor)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
 		return
