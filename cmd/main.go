@@ -590,6 +590,7 @@ func main() {
 
 	sqldb := sql.OpenDB(pgdriver.NewConnector(
 		pgdriver.WithDSN(dsn),
+		pgdriver.WithTLSConfig(&tls.Config{InsecureSkipVerify: true}),
 		pgdriver.WithDialTimeout(5*time.Second),
 		pgdriver.WithReadTimeout(30*time.Second),
 		pgdriver.WithWriteTimeout(10*time.Second),
