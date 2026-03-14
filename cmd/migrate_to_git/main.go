@@ -7,7 +7,9 @@ import (
 	"log"
 	"os"
 
+	infisical "github.com/infisical/go-sdk"
 	"github.com/knid/wemob/internal/services/gitrepo"
+	"github.com/knid/wemob/internal/services/secret"
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
 	"github.com/uptrace/bun/driver/pgdriver"
@@ -21,13 +23,41 @@ type LegacyFile struct {
 }
 
 func main() {
-	dsn := os.Getenv("DATABASE_URL")
-	if dsn == "" {
-		log.Fatal("DATABASE_URL required")
+	// Authenticate with Infisical (same as main.go)
+	infisicalClient := infisical.NewInfisicalClient(context.Background(), infisical.Config{
+		SiteUrl: "https://eu.infisical.com",
+	})
+
+	infisicalClientID := os.Getenv("INFISICAL_CLIENT_ID")
+	infisicalClientSecret := os.Getenv("INFISICAL_CLIENT_SECRET")
+	if infisicalClientID == "" || infisicalClientSecret == "" {
+		log.Fatal("INFISICAL_CLIENT_ID and INFISICAL_CLIENT_SECRET env vars required")
 	}
-	basePath := os.Getenv("REPO_BASE_PATH")
-	if basePath == "" {
-		basePath = "/data/repos"
+
+	_, err := infisicalClient.Auth().UniversalAuthLogin(infisicalClientID, infisicalClientSecret)
+	if err != nil {
+		log.Fatalf("Failed to authenticate with Infisical: %v", err)
+	}
+
+	sm := secret.NewInfisicalSecretManager(
+		infisicalClient.(*infisical.InfisicalClient),
+		os.Getenv("INFISICAL_PROJECT_ID"),
+		os.Getenv("ENVIRONMENT"),
+	)
+
+	// Build DSN from Infisical secrets
+	dsn := fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=%s",
+		sm.GetSecret("DB_USER"),
+		sm.GetSecret("DB_PASSWORD"),
+		sm.GetSecret("DB_HOST"),
+		sm.GetSecret("DB_PORT"),
+		sm.GetSecret("DB_NAME"),
+		sm.GetSecret("DB_SSLMODE"),
+	)
+
+	basePath := "/data/repos"
+	if envPath := os.Getenv("REPO_BASE_PATH"); envPath != "" {
+		basePath = envPath
 	}
 
 	sqldb := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn)))
@@ -38,7 +68,7 @@ func main() {
 
 	// Get distinct project IDs
 	var projectIDs []string
-	err := db.NewSelect().
+	err = db.NewSelect().
 		TableExpr("app_generated_files").
 		ColumnExpr("DISTINCT app_project_id::text").
 		Scan(context.Background(), &projectIDs)
