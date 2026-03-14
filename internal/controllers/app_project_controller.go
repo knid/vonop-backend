@@ -264,7 +264,7 @@ func (c *Controller) RestoreAppSnapshot(project *models.AppProject, commitHash s
 	}
 
 	// Restore theme from repo
-	if themeData, readErr := repo.ReadTheme(); readErr == nil && len(themeData) > 0 {
+	if themeData, readErr := repo.ReadTheme(); readErr == nil && len(themeData) > 0 && validateThemeJSON(themeData) == nil {
 		project.Theme = themeData
 		project.UpdatedAt = time.Now()
 		updated, updateErr := c.DB.UpdateAppProject(project)
