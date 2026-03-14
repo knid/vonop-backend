@@ -22,7 +22,9 @@ RUN apk add --no-cache ca-certificates tzdata curl git && \
     git config --global init.defaultBranch main
 
 RUN addgroup -S appuser \
-    && adduser -S -G appuser -H -s /sbin/nologin appuser
+    && adduser -S -G appuser -H -s /sbin/nologin appuser \
+    && mkdir -p /data/repos \
+    && chown appuser:appuser /data/repos
 
 COPY --from=builder --chown=appuser:appuser /app/bin /app/bin
 COPY --from=builder --chown=appuser:appuser /app/migrate_to_git /app/migrate_to_git
