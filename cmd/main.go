@@ -584,13 +584,15 @@ func main() {
 	dbSSL := sm.GetSecret("DB_SSLMODE")
 
 	dsn := fmt.Sprintf(
-		"postgres://%s:%s@%s:%s/%s?sslmode=%s&dial_timeout=10&read_timeout=30&write_timeout=15",
+		"postgres://%s:%s@%s:%s/%s?sslmode=%s",
 		dbUser, dbPass, dbHost, dbPort, dbName, dbSSL,
 	)
 
 	sqldb := sql.OpenDB(pgdriver.NewConnector(
 		pgdriver.WithDSN(dsn),
-		pgdriver.WithTLSConfig(&tls.Config{InsecureSkipVerify: true}),
+		pgdriver.WithDialTimeout(5*time.Second),
+		pgdriver.WithReadTimeout(30*time.Second),
+		pgdriver.WithWriteTimeout(10*time.Second),
 	))
 	sqldb.SetMaxOpenConns(25)
 	sqldb.SetMaxIdleConns(10)
