@@ -596,8 +596,8 @@ func main() {
 	))
 	sqldb.SetMaxOpenConns(25)
 	sqldb.SetMaxIdleConns(10)
-	sqldb.SetConnMaxLifetime(10 * time.Minute)
-	sqldb.SetConnMaxIdleTime(1 * time.Minute)
+	sqldb.SetConnMaxLifetime(30 * time.Minute)
+	sqldb.SetConnMaxIdleTime(5 * time.Minute)
 	bundb := bun.NewDB(sqldb, pgdialect.New())
 
 	if _, err := bundb.Exec("CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\";"); err != nil {
