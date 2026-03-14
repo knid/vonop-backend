@@ -27,9 +27,13 @@ func (c *Controller) DeployToVercel(project *models.AppProject, user *models.Use
 		target = "production"
 	}
 
-	// Read files directly from DB — no AST codegen
-	dbFiles, err := c.DB.GetAppGeneratedFilesByProjectID(project.ID.String(), "nextjs")
-	if err != nil || len(dbFiles) == 0 {
+	// Read files from git repo
+	repo, err := c.GitRepoService.Open(project.ID.String())
+	if err != nil {
+		return nil, fmt.Errorf("no generated files found for deployment")
+	}
+	repoFiles, err := repo.ReadAllFiles()
+	if err != nil || len(repoFiles) == 0 {
 		return nil, fmt.Errorf("no generated files found for deployment")
 	}
 
@@ -71,11 +75,8 @@ func (c *Controller) DeployToVercel(project *models.AppProject, user *models.Use
 	// Ensure deployment protection is disabled (idempotent)
 	c.VercelService.DisableDeploymentProtection(vercelProject.VercelProjectID)
 
-	// Build file map from DB files
-	fileMap := make(map[string]string)
-	for _, f := range dbFiles {
-		fileMap[f.FilePath] = f.Content
-	}
+	// Build file map from repo files
+	fileMap := repoFiles
 
 	// Inject .env.local so Next.js can inline NEXT_PUBLIC_* vars at build time
 	if dotEnv := BuildDotEnvLocal(envVars); dotEnv != "" {
@@ -113,7 +114,13 @@ func (c *Controller) DeployToVercel(project *models.AppProject, user *models.Use
 		},
 		DeployedURL: deployedURL,
 		Version:     1,
-		ASTSnapshot: project.AST,
+	}
+
+	// Record commit hash from the repo
+	if commitHash, headErr := repo.Head(); headErr == nil {
+		deployment.CommitHash = commitHash
+		// Tag the deployment
+		repo.Tag(fmt.Sprintf("deploy-%d", time.Now().Unix()))
 	}
 
 	// Get latest version
@@ -388,15 +395,13 @@ type AppValidationResult struct {
 
 // ValidateAppFiles runs deterministic checks + optional LLM validation on project files.
 func (c *Controller) ValidateAppFiles(projectID string) (*AppValidationResult, error) {
-	files, err := c.DB.GetAppGeneratedFilesByProjectID(projectID, "nextjs")
-	if err != nil || len(files) == 0 {
+	repo, err := c.GitRepoService.Open(projectID)
+	if err != nil {
 		return nil, fmt.Errorf("no files found to validate")
 	}
-
-	// Build file map for deterministic checks
-	fileMap := make(map[string]string)
-	for _, f := range files {
-		fileMap[f.FilePath] = f.Content
+	fileMap, err := repo.ReadAllFiles()
+	if err != nil || len(fileMap) == 0 {
+		return nil, fmt.Errorf("no files found to validate")
 	}
 
 	// Run deterministic checks first
@@ -422,8 +427,8 @@ func (c *Controller) ValidateAppFiles(projectID string) (*AppValidationResult, e
 
 	var fileContext strings.Builder
 	fileContext.WriteString("Project files:\n")
-	for _, f := range files {
-		fileContext.WriteString(fmt.Sprintf("\n--- %s (%s) ---\n%s\n", f.FilePath, f.FileType, f.Content))
+	for path, content := range fileMap {
+		fileContext.WriteString(fmt.Sprintf("\n--- %s (%s) ---\n%s\n", path, InferFileType(path), content))
 	}
 
 	responseJSON, err := utils.GetJSONFromLLM(context.Background(), model, constants.NEXTJS_VALIDATE_PROMPT, fileContext.String(), provider)
@@ -461,14 +466,13 @@ func (c *Controller) ValidateAppFiles(projectID string) (*AppValidationResult, e
 
 // GetPreviewBundle returns all project files and env vars for client-side WebContainer preview.
 func (c *Controller) GetPreviewBundle(project *models.AppProject) (map[string]interface{}, error) {
-	dbFiles, err := c.DB.GetAppGeneratedFilesByProjectID(project.ID.String(), "nextjs")
-	if err != nil || len(dbFiles) == 0 {
+	repo, err := c.GitRepoService.Open(project.ID.String())
+	if err != nil {
 		return nil, fmt.Errorf("no generated files found")
 	}
-
-	fileMap := make(map[string]string)
-	for _, f := range dbFiles {
-		fileMap[f.FilePath] = f.Content
+	fileMap, err := repo.ReadAllFiles()
+	if err != nil || len(fileMap) == 0 {
+		return nil, fmt.Errorf("no generated files found")
 	}
 
 	envVars := c.CollectAllEnvVars(project)

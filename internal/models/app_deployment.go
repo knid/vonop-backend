@@ -18,7 +18,7 @@ type AppDeployment struct {
 	ProviderData map[string]any `bun:",type:jsonb,default:'{}'"`
 	DeployedURL  string         `bun:",nullzero"`
 	Version      int            `bun:",notnull,default:1"`
-	ASTSnapshot  []byte         `bun:",type:jsonb,default:'[]'"` // snapshot of AST at deploy time
+	CommitHash   string         `bun:",nullzero"` // git commit hash at deploy time
 	ErrorMessage string         `bun:",nullzero,type:text"`
 	CreatedAt    time.Time      `bun:"created_at,nullzero,notnull,default:current_timestamp"`
 	UpdatedAt    time.Time      `bun:"updated_at,nullzero,notnull,default:current_timestamp"`

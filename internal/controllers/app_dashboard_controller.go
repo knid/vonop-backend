@@ -24,15 +24,19 @@ var schemaRelevantPatterns = []string{
 
 // ExtractSchemaFromGeneratedFiles reads generated code files and uses LLM to extract table definitions.
 func (c *Controller) ExtractSchemaFromGeneratedFiles(ctx context.Context, projectID string) (json.RawMessage, error) {
-	files, err := c.DB.GetAppGeneratedFilesByProjectID(projectID, "nextjs")
+	repo, err := c.GitRepoService.Open(projectID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load project files: %w", err)
+	}
+	fileMap, err := repo.ReadAllFiles()
 	if err != nil {
 		return nil, fmt.Errorf("failed to load project files: %w", err)
 	}
 
 	// Filter for schema-relevant files
 	var relevantFiles []string
-	for _, f := range files {
-		lowerPath := strings.ToLower(f.FilePath)
+	for path, content := range fileMap {
+		lowerPath := strings.ToLower(path)
 		isRelevant := false
 		for _, pattern := range schemaRelevantPatterns {
 			if strings.Contains(lowerPath, pattern) {
@@ -44,8 +48,8 @@ func (c *Controller) ExtractSchemaFromGeneratedFiles(ctx context.Context, projec
 		if strings.HasPrefix(lowerPath, "lib/") {
 			isRelevant = true
 		}
-		if isRelevant && f.Content != "" {
-			relevantFiles = append(relevantFiles, fmt.Sprintf("--- %s ---\n%s", f.FilePath, f.Content))
+		if isRelevant && content != "" {
+			relevantFiles = append(relevantFiles, fmt.Sprintf("--- %s ---\n%s", path, content))
 		}
 	}
 

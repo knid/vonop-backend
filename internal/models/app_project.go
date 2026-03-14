@@ -24,7 +24,7 @@ type AppProject struct {
 	Slug            string         `bun:",notnull,unique"`
 	Prompt          string         `bun:",notnull,type:text"`
 	ProjectType     string         `bun:",notnull,default:'app'"` // "app" or "ecommerce"
-	AST             []byte         `bun:",type:jsonb,default:'[]'"`
+	// AST field removed — files now stored in git repos
 	Theme           []byte         `bun:",type:jsonb,default:'{}'"` // stores AppTheme as JSON
 	DataModels      []byte         `bun:",type:jsonb,default:'[]'"` // stores data model definitions
 	Settings        map[string]any `bun:",type:jsonb,default:'{}'"`

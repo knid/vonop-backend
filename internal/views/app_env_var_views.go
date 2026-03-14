@@ -16,16 +16,11 @@ import (
 func (v *HttpViews) syncEnvVarsToPreview(project *models.AppProject) {
 	envVars := v.Controller.CollectAllEnvVars(project)
 
-	// Update .env.local file in DB
+	// Update .env.local file in git repo
 	if dotEnv := controllers.BuildDotEnvLocal(envVars); dotEnv != "" {
-		v.Controller.DB.UpsertAppGeneratedFile(&models.AppGeneratedFile{
-			AppProjectID: project.ID,
-			Platform:     "nextjs",
-			FilePath:     ".env.local",
-			Content:      dotEnv,
-			FileType:     "env",
-			IsGenerated:  false,
-		})
+		if repo, err := v.Controller.GitRepoService.OpenOrInit(project.ID.String()); err == nil {
+			repo.WriteFile(".env.local", []byte(dotEnv))
+		}
 	}
 
 }

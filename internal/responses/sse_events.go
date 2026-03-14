@@ -1,7 +1,5 @@
 package responses
 
-import "github.com/google/uuid"
-
 type SSEEvent struct {
 	Event string `json:"event"`
 	Data  any    `json:"data"`
@@ -22,11 +20,10 @@ type FileOperationEvent struct {
 }
 
 type FileCompleteEvent struct {
-	Action   string    `json:"action"`
-	FilePath string    `json:"file_path"`
-	FileID   uuid.UUID `json:"file_id"`
-	FileType string    `json:"file_type"`
-	Content  string    `json:"content,omitempty"` // cleaned final content (replaces accumulated chunks)
+	Action   string `json:"action"`
+	FilePath string `json:"file_path"`
+	FileType string `json:"file_type"`
+	Content  string `json:"content,omitempty"` // cleaned final content (replaces accumulated chunks)
 }
 
 type ChatThinkingEvent struct {

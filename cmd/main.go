@@ -92,8 +92,7 @@ func createSchema(db *bun.DB) error {
 		(*models.AppDeployment)(nil),
 		(*models.AppIntegration)(nil),
 		(*models.AppConversation)(nil),
-		(*models.AppGeneratedFile)(nil),
-		(*models.AppSnapshot)(nil),
+		// AppGeneratedFile and AppSnapshot removed — files now in git repos
 		(*models.VercelProject)(nil),
 		(*models.AppDomain)(nil),
 		// Custom environment variables
