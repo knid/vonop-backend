@@ -149,6 +149,10 @@ func (c *Controller) CreateProject(user *models.User, projectCreateReq requests.
 	}
 	project.OneSignalAppToken = onesignal_app_api_key
 
+	if projectCreateReq.AppIcon != "" {
+		project.IconPath = projectCreateReq.AppIcon
+	}
+
 	createdProject, err := c.DB.CreateProject(&project)
 	if err != nil {
 		return nil, err
@@ -365,6 +369,9 @@ func (c *Controller) UpdateProject(r *http.Request, user *models.User, projectCr
 
 	project.BuildForAndroid = projectCreateReq.BuildForAndroid
 	project.BuildForIOS = projectCreateReq.BuildForIOS
+	if projectCreateReq.AppIcon != "" {
+		project.IconPath = projectCreateReq.AppIcon
+	}
 
 	updatedProject, err := c.DB.UpdateProject(project)
 	if err != nil {
