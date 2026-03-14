@@ -762,6 +762,9 @@ func main() {
 		slog.Info("Cleaned up stale awaiting_input jobs", "count", staleCount)
 	}
 
+	// Backfill v1 Projects for deployed mobile_app AppProjects that don't have one yet
+	go controller.BackfillV1ProjectsForMobileApps()
+
 	workDir, _ := os.Getwd()
 	staticDir := http.Dir(filepath.Join(workDir, "storage/public"))
 

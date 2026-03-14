@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/tasks"
@@ -142,6 +143,14 @@ func (c *Controller) DeployToVercel(project *models.AppProject, user *models.Use
 	// Update project status
 	c.UpdateAppProjectStatus(project, "deployed")
 
+	// For mobile_app projects, ensure a v1 Project exists so the app appears
+	// in the v1 listing (analytics, notifications, builds).
+	if project.ProjectType == "mobile_app" {
+		if err := c.ensureV1ProjectForMobileApp(project, user, deployedURL); err != nil {
+			slog.Error("Failed to create v1 Project for mobile app", "error", err, "app_project_id", project.ID)
+		}
+	}
+
 	return deployment, nil
 }
 
@@ -192,6 +201,14 @@ func (c *Controller) BuildAppMobile(appProject *models.AppProject, user *models.
 		if icon != "" {
 			project.IconPath = icon
 		}
+
+		// Replace fake OneSignal IDs with real ones if needed
+		if strings.HasPrefix(project.OneSignalAppID, "wemob-app-") {
+			if err := c.replaceWithRealOneSignal(project); err != nil {
+				slog.Warn("Failed to replace fake OneSignal IDs, continuing with existing", "error", err, "project_id", project.ID)
+			}
+		}
+
 		c.DB.UpdateProject(project)
 	}
 
@@ -579,4 +596,162 @@ func (c *Controller) CaptureAppScreenshot(project *models.AppProject, previewURL
 	}
 
 	slog.Info("CaptureAppScreenshot: screenshot captured", "project_id", project.ID, "s3_key", s3Key)
+}
+
+// ensureV1ProjectForMobileApp creates a v1 Project (with real OneSignal IDs)
+// and an initial Build record for the given mobile_app AppProject, unless one
+// already exists for the same user+URL.
+func (c *Controller) ensureV1ProjectForMobileApp(appProject *models.AppProject, user *models.User, deployedURL string) error {
+	// Check if v1 Project already exists for this URL
+	if existing, err := c.DB.GetProjectByUserAndURL(user.ID.String(), deployedURL); err == nil && existing.ID.String() != "" {
+		return nil // already exists
+	}
+
+	pkHex, err := utils.RandomHex(5)
+	if err != nil {
+		return fmt.Errorf("failed to generate package name: %w", err)
+	}
+	pkName := "com.wemob.app" + pkHex[0:5]
+
+	project := models.Project{
+		UserID:      user.ID,
+		URL:         deployedURL,
+		PackageName: pkName,
+		IconPath:    appProject.LogoS3Key,
+	}
+
+	// Create real OneSignal application
+	onesignalAppID, err := external.CreateOneSignalApplication(project,
+		c.SecretManager.GetSecret("ONESIGNAL_ORG_ID"),
+		c.SecretManager.GetSecret("ONESIGNAL_ORG_API_KEY"),
+		c.SecretManager.GetSecret("FCM_V1_SERVICE_ACCOUNT_JSON_B64"))
+	if err != nil {
+		return fmt.Errorf("OneSignal app creation failed: %w", err)
+	}
+	project.OneSignalAppID = onesignalAppID
+
+	time.Sleep(2 * time.Second)
+
+	onesignalAppToken, err := external.CreateOneSignalAppToken(project, c.SecretManager.GetSecret("ONESIGNAL_ORG_API_KEY"))
+	if err != nil {
+		return fmt.Errorf("OneSignal token creation failed: %w", err)
+	}
+	project.OneSignalAppToken = onesignalAppToken
+
+	created, err := c.DB.CreateProject(&project)
+	if err != nil {
+		return fmt.Errorf("failed to create v1 project: %w", err)
+	}
+
+	// Create initial Build record so GetProject (v1 listing) can find a lastBuild
+	build := &models.Build{
+		ProjectID:     created.ID,
+		Active:        false,
+		Title:         appProject.Name,
+		Icon:          appProject.LogoS3Key,
+		NavBarStyle:   "default",
+		BuildNumber:   1,
+		VersionString: utils.CreateVersionString(1),
+	}
+	if _, err := c.DB.CreateProjectBuild(build); err != nil {
+		return fmt.Errorf("failed to create initial build: %w", err)
+	}
+
+	slog.Info("Created v1 Project for mobile app",
+		"app_project_id", appProject.ID,
+		"project_id", created.ID,
+		"url", deployedURL,
+	)
+
+	return nil
+}
+
+// BackfillV1ProjectsForMobileApps finds mobile_app AppProjects that have been
+// deployed to web but don't have a corresponding v1 Project, and creates one
+// for each. Intended to be called once at startup in a goroutine.
+func (c *Controller) BackfillV1ProjectsForMobileApps() {
+	// Find mobile_app AppProjects with a web deployment but no v1 Project for that URL.
+	// We join app_deployments to get the deployed URL and left-join projects to check absence.
+	type backfillRow struct {
+		AppProjectID string `bun:"app_project_id"`
+		UserID       string `bun:"user_id"`
+		DeployedURL  string `bun:"deployed_url"`
+		Name         string `bun:"name"`
+		LogoS3Key    string `bun:"logo_s3_key"`
+	}
+
+	var rows []backfillRow
+	err := c.DB.DB.NewRaw(`
+		SELECT DISTINCT ON (ap.id)
+			ap.id AS app_project_id,
+			ap.user_id,
+			ad.deployed_url,
+			ap.name,
+			ap.logo_s3_key
+		FROM app_projects ap
+		JOIN app_deployments ad ON ad.app_project_id = ap.id AND ad.platform = 'web' AND ad.deployed_url != ''
+		LEFT JOIN projects p ON p.user_id = ap.user_id AND p.url = ad.deployed_url AND p.deleted_at IS NULL
+		WHERE ap.project_type = 'mobile_app'
+			AND ap.deleted_at IS NULL
+			AND ad.deleted_at IS NULL
+			AND p.id IS NULL
+		ORDER BY ap.id, ad.created_at DESC
+	`).Scan(context.Background(), &rows)
+	if err != nil {
+		slog.Error("BackfillV1ProjectsForMobileApps: query failed", "error", err)
+		return
+	}
+
+	if len(rows) == 0 {
+		slog.Info("BackfillV1ProjectsForMobileApps: no mobile apps need backfill")
+		return
+	}
+
+	slog.Info("BackfillV1ProjectsForMobileApps: starting", "count", len(rows))
+
+	for _, row := range rows {
+		appProject := &models.AppProject{
+			Name:      row.Name,
+			LogoS3Key: row.LogoS3Key,
+		}
+		appProject.ID = uuid.MustParse(row.AppProjectID)
+
+		user := &models.User{}
+		user.ID = uuid.MustParse(row.UserID)
+
+		if err := c.ensureV1ProjectForMobileApp(appProject, user, row.DeployedURL); err != nil {
+			slog.Error("BackfillV1ProjectsForMobileApps: failed for app",
+				"app_project_id", row.AppProjectID,
+				"error", err,
+			)
+			continue
+		}
+	}
+
+	slog.Info("BackfillV1ProjectsForMobileApps: done", "processed", len(rows))
+}
+
+// replaceWithRealOneSignal replaces fake placeholder OneSignal IDs on a v1
+// Project with real ones from the OneSignal API. Mutates the project in place
+// (caller is responsible for persisting via UpdateProject).
+func (c *Controller) replaceWithRealOneSignal(project *models.Project) error {
+	onesignalAppID, err := external.CreateOneSignalApplication(*project,
+		c.SecretManager.GetSecret("ONESIGNAL_ORG_ID"),
+		c.SecretManager.GetSecret("ONESIGNAL_ORG_API_KEY"),
+		c.SecretManager.GetSecret("FCM_V1_SERVICE_ACCOUNT_JSON_B64"))
+	if err != nil {
+		return fmt.Errorf("OneSignal app creation failed: %w", err)
+	}
+	project.OneSignalAppID = onesignalAppID
+
+	time.Sleep(2 * time.Second)
+
+	onesignalAppToken, err := external.CreateOneSignalAppToken(*project, c.SecretManager.GetSecret("ONESIGNAL_ORG_API_KEY"))
+	if err != nil {
+		return fmt.Errorf("OneSignal token creation failed: %w", err)
+	}
+	project.OneSignalAppToken = onesignalAppToken
+
+	slog.Info("Replaced fake OneSignal IDs with real ones", "project_id", project.ID)
+	return nil
 }
