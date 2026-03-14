@@ -26,6 +26,7 @@ import (
 	crmServices "github.com/knid/wemob/internal/services/crm"
 	emailServices "github.com/knid/wemob/internal/services/email"
 	"github.com/knid/wemob/internal/services/mcpclient"
+	"github.com/knid/wemob/internal/services/gitrepo"
 	"github.com/knid/wemob/internal/services/neon"
 	"github.com/knid/wemob/internal/services/secret"
 	"github.com/knid/wemob/internal/services/storage"
@@ -640,6 +641,14 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Git repo service for project file storage
+	repoBasePath := "/data/repos"
+	if envPath := os.Getenv("REPO_BASE_PATH"); envPath != "" {
+		repoBasePath = envPath
+	}
+	gitRepoService := gitrepo.NewService(repoBasePath)
+	slog.Info("Git repo service initialized", "base_path", repoBasePath)
+
 	controller := controllers.NewController(
 		db,
 		make(chan struct{}, constants.MAX_CONCURRENT_BUILDS),
@@ -658,6 +667,7 @@ func main() {
 		vercelService,
 		neonService,
 		posthogClient,
+		gitRepoService,
 	)
 
 	// MCP service (optional — connect in background so it doesn't block server startup)

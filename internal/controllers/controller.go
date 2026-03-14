@@ -12,6 +12,7 @@ import (
 	crmServices "github.com/knid/wemob/internal/services/crm"
 	emailServices "github.com/knid/wemob/internal/services/email"
 	"github.com/knid/wemob/internal/services/mcpclient"
+	"github.com/knid/wemob/internal/services/gitrepo"
 	"github.com/knid/wemob/internal/services/neon"
 	"github.com/knid/wemob/internal/services/secret"
 	"github.com/knid/wemob/internal/services/storage"
@@ -32,6 +33,7 @@ type Controller struct {
 	ConcurrentBuildLimiter chan struct{}
 	VercelService          *vercel.Service
 	NeonService            *neon.Service
+	GitRepoService         *gitrepo.Service
 	MCPService             atomic.Pointer[mcpclient.Service]
 	PostHog                posthog.Client // nil = disabled
 	RunningJobs            sync.Map       // map[string]context.CancelFunc for in-flight background jobs
@@ -46,7 +48,8 @@ func NewController(db *database.Database, concurrentBuildLimiter chan struct{},
 	userApiKeysStorage *storage.S3Storage, secretManager secret.SecretManager,
 	vercelService *vercel.Service,
 	neonService *neon.Service,
-	posthogClient posthog.Client) *Controller {
+	posthogClient posthog.Client,
+	gitRepoService *gitrepo.Service) *Controller {
 
 	return &Controller{
 		DB:                     db,
@@ -60,6 +63,7 @@ func NewController(db *database.Database, concurrentBuildLimiter chan struct{},
 		SecretManager:          secretManager,
 		VercelService:          vercelService,
 		NeonService:            neonService,
+		GitRepoService:         gitRepoService,
 		PostHog:                posthogClient,
 	}
 }
