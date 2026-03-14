@@ -588,6 +588,8 @@ func main() {
 		dbUser, dbPass, dbHost, dbPort, dbName, dbSSL,
 	)
 
+	slog.Info("DB connection config", "host", dbHost, "port", dbPort, "db", dbName, "sslmode", dbSSL)
+
 	sqldb := sql.OpenDB(pgdriver.NewConnector(
 		pgdriver.WithDSN(dsn),
 		pgdriver.WithTLSConfig(&tls.Config{InsecureSkipVerify: true}),
