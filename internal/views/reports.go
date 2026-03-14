@@ -2,12 +2,23 @@ package views
 
 import (
 	"crypto/subtle"
+	"log/slog"
 	"net/http"
 
 	"github.com/knid/wemob/internal/constants"
+	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/utils"
 )
+
+// sendCRMEvent sends a CRM event in a goroutine and logs errors.
+func (v *HttpViews) sendCRMEvent(user *models.User, event string, payload map[string]any) {
+	go func() {
+		if err := v.Controller.CRMService.SendEvent(user, event, payload); err != nil {
+			slog.Error("failed to send CRM event", "event", event, "error", err)
+		}
+	}()
+}
 
 // verifyWorkerSecret checks the Authorization header or body secret against the WORKER_REPORT_SECRET.
 func (v *HttpViews) verifyWorkerSecret(w http.ResponseWriter, secret string) bool {
@@ -57,19 +68,19 @@ func (v *HttpViews) UpdateBuildTaskStatus(w http.ResponseWriter, r *http.Request
 	}
 
 	if reportBuildReq.Status == "Building" && task.Platform == "ios" {
-		go v.Controller.CRMService.SendEvent(task.Project.User, constants.BREVO_EVENT_BUILD_STARTED_IOS, payload)
+		v.sendCRMEvent(task.Project.User, constants.BREVO_EVENT_BUILD_STARTED_IOS, payload)
 	} else if reportBuildReq.Status == "Building" && task.Platform == "android" {
-		go v.Controller.CRMService.SendEvent(task.Project.User, constants.BREVO_EVENT_BUILD_STARTED_ANDROID, payload)
+		v.sendCRMEvent(task.Project.User, constants.BREVO_EVENT_BUILD_STARTED_ANDROID, payload)
 	} else if reportBuildReq.Status == "Builded" && task.Platform == "ios" {
-		go v.Controller.CRMService.SendEvent(task.Project.User, constants.BREVO_EVENT_BUILD_FINISHED_IOS, payload)
+		v.sendCRMEvent(task.Project.User, constants.BREVO_EVENT_BUILD_FINISHED_IOS, payload)
 	} else if reportBuildReq.Status == "Builded" && task.Platform == "android" {
-		go v.Controller.CRMService.SendEvent(task.Project.User, constants.BREVO_EVENT_BUILD_FINISHED_ANDROID, payload)
+		v.sendCRMEvent(task.Project.User, constants.BREVO_EVENT_BUILD_FINISHED_ANDROID, payload)
 	} else if reportBuildReq.Status == "error" && task.Platform == "ios" {
 		payload["error_message"] = reportBuildReq.Message
-		go v.Controller.CRMService.SendEvent(task.Project.User, constants.BREVO_EVENT_BUILD_ERROR_IOS, payload)
+		v.sendCRMEvent(task.Project.User, constants.BREVO_EVENT_BUILD_ERROR_IOS, payload)
 	} else if reportBuildReq.Status == "error" && task.Platform == "android" {
 		payload["error_message"] = reportBuildReq.Message
-		go v.Controller.CRMService.SendEvent(task.Project.User, constants.BREVO_EVENT_BUILD_ERROR_ANDROID, payload)
+		v.sendCRMEvent(task.Project.User, constants.BREVO_EVENT_BUILD_ERROR_ANDROID, payload)
 	}
 
 	utils.JSONResponse(w, map[string]string{"status": "success"}, http.StatusOK)
@@ -110,22 +121,22 @@ func (v *HttpViews) UpdateDeploymentStatus(w http.ResponseWriter, r *http.Reques
 	case "ios":
 		switch reportDeploymentReq.Status {
 		case "Deploying":
-			go v.Controller.CRMService.SendEvent(deployment.User, constants.BREVO_EVENT_USER_APPLE_DEPLOYMENT_STARTED, payload)
+			v.sendCRMEvent(deployment.User, constants.BREVO_EVENT_USER_APPLE_DEPLOYMENT_STARTED, payload)
 		case "Deployed":
-			go v.Controller.CRMService.SendEvent(deployment.User, constants.BREVO_EVENT_USER_APPLE_DEPLOYMENT_FINISHED, payload)
+			v.sendCRMEvent(deployment.User, constants.BREVO_EVENT_USER_APPLE_DEPLOYMENT_FINISHED, payload)
 		case "error":
 			payload["error_message"] = reportDeploymentReq.Message
-			go v.Controller.CRMService.SendEvent(deployment.User, constants.BREVO_EVENT_USER_APPLE_DEPLOYMENT_FAILED, payload)
+			v.sendCRMEvent(deployment.User, constants.BREVO_EVENT_USER_APPLE_DEPLOYMENT_FAILED, payload)
 		}
 	case "android":
 		switch reportDeploymentReq.Status {
 		case "Deploying":
-			go v.Controller.CRMService.SendEvent(deployment.User, constants.BREVO_EVENT_USER_ANDROID_DEPLOYMENT_STARTED, payload)
+			v.sendCRMEvent(deployment.User, constants.BREVO_EVENT_USER_ANDROID_DEPLOYMENT_STARTED, payload)
 		case "Deployed":
-			go v.Controller.CRMService.SendEvent(deployment.User, constants.BREVO_EVENT_USER_ANDROID_DEPLOYMENT_FINISHED, payload)
+			v.sendCRMEvent(deployment.User, constants.BREVO_EVENT_USER_ANDROID_DEPLOYMENT_FINISHED, payload)
 		case "error":
 			payload["error_message"] = reportDeploymentReq.Message
-			go v.Controller.CRMService.SendEvent(deployment.User, constants.BREVO_EVENT_USER_ANDROID_DEPLOYMENT_FAILED, payload)
+			v.sendCRMEvent(deployment.User, constants.BREVO_EVENT_USER_ANDROID_DEPLOYMENT_FAILED, payload)
 		}
 	}
 

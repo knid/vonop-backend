@@ -5,6 +5,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"regexp"
 	"slices"
 	"time"
 
@@ -19,6 +21,13 @@ import (
 	"github.com/knid/wemob/internal/utils/external"
 	"github.com/slack-go/slack"
 )
+
+var localeRegexp = regexp.MustCompile(`^[a-z]{2}([_-][A-Za-z]{2,4})?$`)
+
+// isValidLocale checks that a locale string matches common BCP 47 / POSIX formats (e.g. en-US, tr_TR, pt).
+func isValidLocale(locale string) bool {
+	return localeRegexp.MatchString(locale)
+}
 
 func (c *Controller) GetDeployments(user *models.User) ([]responses.DeploymentResponse, error) {
 	deployments, err := c.DB.GetDeployments(user)
@@ -111,6 +120,10 @@ func (c *Controller) CreateDeploymentTask(user *models.User, deploymentReq reque
 	build, err := c.DB.GetProjectBuildById(deploymentReq.BuildID)
 	if err != nil {
 		return nil, err
+	}
+
+	if deploymentReq.Locale != "" && !isValidLocale(deploymentReq.Locale) {
+		return nil, errors.New("invalid locale format, expected format like en-US or en_US")
 	}
 
 	appStoreCredId, err := uuid.Parse(deploymentReq.AppStoreCredentialsID)
@@ -373,17 +386,19 @@ func (c *Controller) UpdateDeploymentTask(user *models.User, deploymentID string
 		}
 	}
 
-	var taskPayload []byte
-	var task *asynq.Task
-	var taskType string
+	hasIOS := slices.Contains(deployment.Platforms, "ios")
+	hasAndroid := slices.Contains(deployment.Platforms, "android")
 
-	if slices.Contains(deployment.Platforms, "ios") {
+	if !hasIOS && !hasAndroid {
+		return nil, errors.New("unsupported platform")
+	}
+
+	if hasIOS {
 		cred, err := c.DB.GetAppStoreCredentialById(appStoreCredId.String())
 		if err != nil {
 			return nil, err
 		}
 
-		// Create and enqueue task to deploy iOS build
 		iosDeployPayload := tasks.IOSDeployPayload{
 			BuildID:            deploymentReq.BuildID,
 			PackageName:        project.PackageName,
@@ -403,13 +418,17 @@ func (c *Controller) UpdateDeploymentTask(user *models.User, deploymentID string
 			DeploymentID:       deployment.ID.String(),
 		}
 
-		taskType = tasks.TypeDeployIOS
-		taskPayload, err = json.Marshal(iosDeployPayload)
+		taskPayload, err := json.Marshal(iosDeployPayload)
 		if err != nil {
 			return nil, err
 		}
+		task := asynq.NewTask(tasks.TypeDeployIOS, taskPayload)
+		if _, err := c.TaskService.Enqueue(task, asynq.MaxRetry(2), asynq.Timeout(time.Minute*3)); err != nil {
+			return nil, fmt.Errorf("failed to enqueue iOS deploy task: %w", err)
+		}
+	}
 
-	} else if slices.Contains(deploymentReq.Platforms, "android") {
+	if hasAndroid {
 		cred, err := c.DB.GetGooglePlayCredentialById(googlePlayCredId.String())
 		if err != nil {
 			return nil, err
@@ -432,19 +451,14 @@ func (c *Controller) UpdateDeploymentTask(user *models.User, deploymentID string
 			DeploymentID:       deployment.ID.String(),
 		}
 
-		taskType = tasks.TypeDeployAndroid //
-		taskPayload, err = json.Marshal(androidDeployPayload)
+		taskPayload, err := json.Marshal(androidDeployPayload)
 		if err != nil {
 			return nil, err
 		}
-	} else {
-		return nil, errors.New("unsupported platform")
-	}
-
-	task = asynq.NewTask(taskType, taskPayload)
-	_, err = c.TaskService.Enqueue(task, asynq.MaxRetry(2), asynq.Timeout(time.Minute*3))
-	if err != nil {
-		return nil, err
+		task := asynq.NewTask(tasks.TypeDeployAndroid, taskPayload)
+		if _, err := c.TaskService.Enqueue(task, asynq.MaxRetry(2), asynq.Timeout(time.Minute*3)); err != nil {
+			return nil, fmt.Errorf("failed to enqueue Android deploy task: %w", err)
+		}
 	}
 
 	return &responses.DeploymentResponse{
