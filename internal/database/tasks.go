@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/knid/wemob/internal/models"
+	"github.com/uptrace/bun"
 )
 
 func (db *Database) CreateAppBuildTask(build models.Build, platform, status string, autoDeploy bool) (*models.AppBuildTask, error) {
@@ -14,20 +15,14 @@ func (db *Database) CreateAppBuildTask(build models.Build, platform, status stri
 }
 
 func (db *Database) GetAppBuildTasksByUser(user *models.User) ([]models.AppBuildTask, error) {
-	projects, err := db.GetProjects(user)
+	var appBuildTasks []models.AppBuildTask
+	err := db.DB.NewSelect().Model(&appBuildTasks).
+		Join("JOIN projects ON projects.id = app_build_task.project_id").
+		Where("projects.user_id = ?", user.ID.String()).
+		Scan(context.Background())
 	if err != nil {
 		return nil, err
 	}
-
-	var appBuildTasks []models.AppBuildTask
-	for _, project := range projects {
-		appBuildTask, err := db.GetAppBuildTaskByProject(&project)
-		if err != nil {
-			return nil, err
-		}
-		appBuildTasks = append(appBuildTasks, appBuildTask...)
-	}
-
 	return appBuildTasks, nil
 }
 
@@ -35,7 +30,7 @@ func (db *Database) GetPendingAppBuildTasks(project *models.Project) ([]models.A
 	var appBuildTasks []models.AppBuildTask
 	err := db.DB.NewSelect().Model(&appBuildTasks).
 		Where("project_id = ?", project.ID.String()).
-		Where("platform = ?", "Android").
+		Where("platform IN (?)", bun.In([]string{"Android", "IOS"})).
 		Where("finished = false").
 		Scan(context.Background())
 

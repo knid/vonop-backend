@@ -8,7 +8,12 @@ import (
 
 func (db *Database) GetDeployments(user *models.User) ([]models.Deployment, error) {
 	var deployments []models.Deployment
-	err := db.DB.NewSelect().Model(&deployments).Where("user_id = ?", user.ID).Scan(context.Background(), &deployments)
+	err := db.DB.NewSelect().Model(&deployments).
+		Relation("Build").
+		Relation("AppStoreCredentials").
+		Relation("GooglePlayCredentials").
+		Where("deployment.user_id = ?", user.ID).
+		Scan(context.Background())
 	if err != nil {
 		return nil, err
 	}

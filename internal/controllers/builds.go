@@ -114,11 +114,18 @@ func (c *Controller) CreateBuild(user *models.User, buildCreateReq requests.Buil
 		return nil, err
 	}
 
+	// Fetch mobile app config for permissions and deep linking
+	mobileConfig, _ := c.DB.GetMobileAppConfig(project.ID.String())
+
+	// Track created tasks for rollback on failure
+	var createdTaskIDs []string
+
 	if project.BuildForAndroid {
 		appBuildTask, err := c.DB.CreateAppBuildTask(*createdBuild, "Android", "Queued", project.UseAutoDeployForAndroid)
 		if err != nil {
 			return nil, err
 		}
+		createdTaskIDs = append(createdTaskIDs, appBuildTask.ID.String())
 
 		androidBuildPayload := &tasks.AndroidBuildPayload{
 			ProjectID:           project.ID.String(),
@@ -134,13 +141,33 @@ func (c *Controller) CreateBuild(user *models.User, buildCreateReq requests.Buil
 			PackageName:         project.PackageName,
 			RemoveWemobBranding: createdBuild.RemoveWemobBranding,
 			Secret:              appBuildTask.ID.String(),
+			Permissions: func() []string {
+				if mobileConfig != nil {
+					return mobileConfig.Permissions
+				}
+				return nil
+			}(),
+			URLScheme: func() string {
+				if mobileConfig != nil {
+					return mobileConfig.URLScheme
+				}
+				return ""
+			}(),
+			UniversalLinkDomain: func() string {
+				if mobileConfig != nil {
+					return mobileConfig.UniversalLinkDomain
+				}
+				return ""
+			}(),
 		}
 		taskPayload, err := json.Marshal(androidBuildPayload)
 		if err != nil {
+			c.cancelCreatedTasks(createdTaskIDs)
 			return nil, err
 		}
 		task := asynq.NewTask(tasks.TypeBuildAndroid, taskPayload)
 		if _, err := c.TaskService.Enqueue(task, asynq.MaxRetry(2), asynq.Timeout(time.Minute*10)); err != nil {
+			c.cancelCreatedTasks(createdTaskIDs)
 			return nil, fmt.Errorf("failed to enqueue Android build task: %w", err)
 		}
 	}
@@ -148,8 +175,10 @@ func (c *Controller) CreateBuild(user *models.User, buildCreateReq requests.Buil
 	if project.BuildForIOS {
 		appBuildTask, err := c.DB.CreateAppBuildTask(*createdBuild, "IOS", "Queued", project.UseAutoDeployForIOS)
 		if err != nil {
+			c.cancelCreatedTasks(createdTaskIDs)
 			return nil, err
 		}
+		createdTaskIDs = append(createdTaskIDs, appBuildTask.ID.String())
 
 		iosBuildPayload := &tasks.BuildUnsignedIpaPayload{
 			ProjectID:           project.ID.String(),
@@ -164,13 +193,33 @@ func (c *Controller) CreateBuild(user *models.User, buildCreateReq requests.Buil
 			PackageName:         project.PackageName,
 			RemoveWemobBranding: createdBuild.RemoveWemobBranding,
 			Secret:              appBuildTask.ID.String(),
+			Permissions: func() []string {
+				if mobileConfig != nil {
+					return mobileConfig.Permissions
+				}
+				return nil
+			}(),
+			URLScheme: func() string {
+				if mobileConfig != nil {
+					return mobileConfig.URLScheme
+				}
+				return ""
+			}(),
+			UniversalLinkDomain: func() string {
+				if mobileConfig != nil {
+					return mobileConfig.UniversalLinkDomain
+				}
+				return ""
+			}(),
 		}
 		taskPayload, err := json.Marshal(iosBuildPayload)
 		if err != nil {
+			c.cancelCreatedTasks(createdTaskIDs)
 			return nil, err
 		}
 		task := asynq.NewTask(tasks.TypeBuildUnsignedIpa, taskPayload)
 		if _, err := c.TaskService.Enqueue(task, asynq.MaxRetry(2), asynq.Timeout(time.Minute*10)); err != nil {
+			c.cancelCreatedTasks(createdTaskIDs)
 			return nil, fmt.Errorf("failed to enqueue iOS build task: %w", err)
 		}
 	}
@@ -178,4 +227,11 @@ func (c *Controller) CreateBuild(user *models.User, buildCreateReq requests.Buil
 	return &responses.BuildCreateResponse{
 		SuccessResponse: responses.SuccessResponse{Success: true},
 	}, nil
+}
+
+// cancelCreatedTasks cancels build tasks that were created before a failure occurred.
+func (c *Controller) cancelCreatedTasks(taskIDs []string) {
+	for _, id := range taskIDs {
+		_ = c.DB.CancelAppBuildTask(id)
+	}
 }
