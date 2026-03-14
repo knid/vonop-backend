@@ -228,8 +228,18 @@ func (c *Controller) BuildAppMobile(appProject *models.AppProject, user *models.
 	// Create task and enqueue
 	var appBuildTask *models.AppBuildTask
 
-	// Fetch mobile app config for permissions and deep linking
+	// Fetch mobile app config — try v1 Project ID first, then AppProject ID
 	mobileConfig, _ := c.DB.GetMobileAppConfig(project.ID.String())
+	if mobileConfig == nil {
+		mobileConfig, _ = c.DB.GetMobileAppConfig(appProject.ID.String())
+	}
+
+	// Sync config to v1 Project ID so the Flutter app can fetch it at runtime
+	if mobileConfig != nil && mobileConfig.ProjectID != project.ID {
+		configCopy := *mobileConfig
+		configCopy.ProjectID = project.ID
+		c.DB.UpsertMobileAppConfig(&configCopy)
+	}
 
 	if platform == "android" {
 		appBuildTask, err = c.DB.CreateAppBuildTask(*build, "Android", "Queued", false)
