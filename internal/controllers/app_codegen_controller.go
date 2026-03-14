@@ -85,6 +85,23 @@ func parseDataModels(raw []byte) ([]DataModel, error) {
 	return nil, fmt.Errorf("cannot parse data models: %s", string(raw[:min(len(raw), 80)]))
 }
 
+// marshalDataModels validates and marshals data models to JSON.
+// Returns nil if models is empty, ensuring only valid []DataModel is stored.
+func marshalDataModels(models []DataModel) ([]byte, error) {
+	if len(models) == 0 {
+		return nil, nil
+	}
+	data, err := json.Marshal(models)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal data models: %w", err)
+	}
+	// Sanity check: must be under 1MB
+	if len(data) > 1<<20 {
+		return nil, fmt.Errorf("data models too large: %d bytes (max 1MB)", len(data))
+	}
+	return data, nil
+}
+
 // DataColumn represents a column in a DataModel table.
 type DataColumn struct {
 	Name       string `json:"name"`
@@ -1747,8 +1764,11 @@ func (c *Controller) ApplyStructureToProject(project *models.AppProject, structu
 
 	// Save data models
 	if len(structure.DataModels) > 0 {
-		dmJSON, _ := json.Marshal(structure.DataModels)
-		project.DataModels = dmJSON
+		if dmJSON, err := marshalDataModels(structure.DataModels); err != nil {
+			slog.Warn("invalid data models from structure plan, skipping", "error", err)
+		} else {
+			project.DataModels = dmJSON
+		}
 	}
 
 	// Save needs_auth
