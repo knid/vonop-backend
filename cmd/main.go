@@ -267,36 +267,55 @@ func createSchema(db *bun.DB) error {
 		`CREATE INDEX IF NOT EXISTS idx_tokens_string_active ON tokens (string) WHERE deleted_at IS NULL`,
 	}
 	alterStatements = append(alterStatements, indexStatements...)
-	for _, stmt := range alterStatements {
-		if _, err := db.ExecContext(context.Background(), stmt); err != nil {
-			slog.Error("alter table failed", "statement", stmt, "error", err)
+	// Check if migrations have already been applied by testing for a column from the latest batch.
+	// This avoids running ALTER TABLE statements on every startup, which take AccessExclusiveLock
+	// and block all reads on the affected tables.
+	var migrationsDone bool
+	row := db.QueryRowContext(context.Background(),
+		"SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='app_projects' AND column_name='logo_s3_key')")
+	if err := row.Scan(&migrationsDone); err != nil {
+		migrationsDone = false
+	}
+
+	if !migrationsDone {
+		slog.Info("Running schema migrations (first time or new columns needed)")
+		db.ExecContext(context.Background(), "SET lock_timeout = '3s'")
+		for _, stmt := range alterStatements {
+			if _, err := db.ExecContext(context.Background(), stmt); err != nil {
+				slog.Warn("alter table skipped", "statement", stmt, "error", err)
+			}
+		}
+		db.ExecContext(context.Background(), "SET lock_timeout = '0'")
+	} else {
+		slog.Info("Schema migrations already applied, skipping")
+	}
+
+	if !migrationsDone {
+		// Drop legacy website builder tables (replaced by app_* tables in V2)
+		dropStatements := []string{
+			`DROP TABLE IF EXISTS website_form_submissions`,
+			`DROP TABLE IF EXISTS website_forms`,
+			`DROP TABLE IF EXISTS website_assets`,
+			`DROP TABLE IF EXISTS website_components`,
+			`DROP TABLE IF EXISTS website_conversations`,
+			`DROP TABLE IF EXISTS website_domains`,
+			`DROP TABLE IF EXISTS website_files`,
+			`DROP TABLE IF EXISTS website_integrations`,
+			`DROP TABLE IF EXISTS website_pages`,
+			`DROP TABLE IF EXISTS website_seos`,
+			`DROP TABLE IF EXISTS website_snapshots`,
+			`DROP TABLE IF EXISTS website_templates`,
+			`DROP TABLE IF EXISTS websites`,
+			`DROP TABLE IF EXISTS ai_generation_logs`,
+		}
+		for _, stmt := range dropStatements {
+			if _, err := db.ExecContext(context.Background(), stmt); err != nil {
+				slog.Warn("drop legacy table failed", "statement", stmt, "error", err)
+			}
 		}
 	}
 
-	// Drop legacy website builder tables (replaced by app_* tables in V2)
-	dropStatements := []string{
-		`DROP TABLE IF EXISTS website_form_submissions`,
-		`DROP TABLE IF EXISTS website_forms`,
-		`DROP TABLE IF EXISTS website_assets`,
-		`DROP TABLE IF EXISTS website_components`,
-		`DROP TABLE IF EXISTS website_conversations`,
-		`DROP TABLE IF EXISTS website_domains`,
-		`DROP TABLE IF EXISTS website_files`,
-		`DROP TABLE IF EXISTS website_integrations`,
-		`DROP TABLE IF EXISTS website_pages`,
-		`DROP TABLE IF EXISTS website_seos`,
-		`DROP TABLE IF EXISTS website_snapshots`,
-		`DROP TABLE IF EXISTS website_templates`,
-		`DROP TABLE IF EXISTS websites`,
-		`DROP TABLE IF EXISTS ai_generation_logs`,
-	}
-	for _, stmt := range dropStatements {
-		if _, err := db.ExecContext(context.Background(), stmt); err != nil {
-			slog.Warn("drop legacy table failed", "statement", stmt, "error", err)
-		}
-	}
-
-	// Performance indexes
+	// Performance indexes (CREATE INDEX IF NOT EXISTS is cheap — no exclusive lock)
 	perfIndexes := []string{
 		`CREATE INDEX IF NOT EXISTS idx_users_customer_id ON users(customer_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_sessions_project_id ON sessions(project_id)`,
@@ -598,9 +617,9 @@ func main() {
 		pgdriver.WithWriteTimeout(10*time.Second),
 	))
 	sqldb.SetMaxOpenConns(25)
-	sqldb.SetMaxIdleConns(5)
-	sqldb.SetConnMaxLifetime(5 * time.Minute)
-	sqldb.SetConnMaxIdleTime(30 * time.Second)
+	sqldb.SetMaxIdleConns(10)
+	sqldb.SetConnMaxLifetime(10 * time.Minute)
+	sqldb.SetConnMaxIdleTime(2 * time.Minute)
 	bundb := bun.NewDB(sqldb, pgdialect.New())
 
 	if _, err := bundb.Exec("CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\";"); err != nil {
