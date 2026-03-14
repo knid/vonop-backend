@@ -19,7 +19,7 @@ WORKDIR /app
 RUN apk add --no-cache ca-certificates tzdata curl git
 
 RUN addgroup -S appuser \
-    && adduser -S -G appuser -H -s /sbin/nologin appuser \
+    && adduser -S -G appuser -h /home/appuser -s /sbin/nologin appuser \
     && mkdir -p /data/repos \
     && chown appuser:appuser /data/repos
 
