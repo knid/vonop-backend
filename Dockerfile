@@ -10,6 +10,7 @@ RUN go mod download
 COPY . .
 
 RUN go build -trimpath -ldflags="-s -w" -o bin cmd/main.go
+RUN go build -trimpath -ldflags="-s -w" -o migrate_to_git cmd/migrate_to_git/main.go
 
 FROM alpine:3.20
 
@@ -24,6 +25,7 @@ RUN addgroup -S appuser \
     && adduser -S -G appuser -H -s /sbin/nologin appuser
 
 COPY --from=builder --chown=appuser:appuser /app/bin /app/bin
+COPY --from=builder --chown=appuser:appuser /app/migrate_to_git /app/migrate_to_git
 COPY --from=builder --chown=appuser:appuser /app/storage /app/storage
 
 USER appuser
