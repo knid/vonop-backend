@@ -898,6 +898,7 @@ func main() {
 
 				r.Get("/auth/{provider}/callback", httpViews.OAuthCallback)
 				r.Get("/auth/{provider}", httpViews.OAuthBegin)
+				r.Post("/auth/google/mobile", httpViews.GoogleMobileLogin)
 			})
 			r.Get("/tasks", httpViews.GetAllTasks)
 			r.Post("/tasks/{taskId}/cancel", httpViews.CancelBuildTask)
