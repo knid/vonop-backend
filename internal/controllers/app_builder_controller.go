@@ -19,6 +19,7 @@ import (
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/services/fal"
+	"github.com/knid/wemob/internal/services/gitrepo"
 	"github.com/knid/wemob/internal/services/integrations"
 	"github.com/knid/wemob/internal/utils"
 	"github.com/knid/wemob/internal/utils/external"
@@ -162,10 +163,12 @@ func (c *Controller) StreamBuildApp(
 		if r := recover(); r != nil {
 			slog.Error("StreamBuildApp panicked", "error", r, "project_id", project.ID,
 				"stack", string(debug.Stack()))
-			// Auto-rollback on panic
+			// Auto-rollback on panic via git revert
 			if rollbackSnapshotID != "" && rollbackOps != nil && len(*rollbackOps) > 0 {
 				slog.Info("Auto-rollback: restoring after panic", "project_id", project.ID)
-				c.RestoreAppSnapshot(project, rollbackSnapshotID)
+				if panicRepo, panicErr := c.GitRepoService.Open(project.ID.String()); panicErr == nil {
+					panicRepo.RevertAndCommit(rollbackSnapshotID, "auto: rollback after panic")
+				}
 			}
 			// Best-effort error notification — sendEvent is panic-safe
 			sendEvent("error", responses.GenerationErrorEvent{
@@ -278,17 +281,18 @@ func (c *Controller) StreamBuildApp(
 		}
 	}
 
+	// --- Open git repo ---
+	repo, err := c.GitRepoService.OpenOrInit(project.ID.String())
+	if err != nil {
+		slog.Error("failed to open git repo", "error", err, "project_id", project.ID)
+		sendError("repo", "failed to open project repository")
+		return
+	}
+
 	// --- Build fileMap ---
 	fileMap := make(map[string]string)
 
 	if isInitialGeneration {
-		// Clean slate: delete existing files
-		if err := c.DB.DeleteAppGeneratedFilesByProjectPlatform(project.ID.String(), "nextjs"); err != nil {
-			slog.Error("failed to delete existing files before generation", "error", err, "project_id", project.ID)
-			sendError("database", "failed to clean up existing files")
-			return
-		}
-
 		// Inject template files (package.json, tsconfig, postcss, next.config)
 		for _, tp := range constants.NEXTJS_TEMPLATE_FILE_PATHS {
 			// For globals.css, don't inject a pre-built theme — let the LLM write it
@@ -299,14 +303,14 @@ func (c *Controller) StreamBuildApp(
 			if content == "" {
 				continue
 			}
-			c.injectTemplateFile(project, tp, content, fileMap, sendEvent)
+			c.injectTemplateFile(repo, tp, content, fileMap, sendEvent)
 		}
 
 		// Inject UI component templates (lib/utils, components/ui/*)
 		for _, tp := range constants.NEXTJS_UI_TEMPLATE_FILE_PATHS {
 			content := getUITemplateContent(tp)
 			if content != "" {
-				c.injectTemplateFile(project, tp, content, fileMap, sendEvent)
+				c.injectTemplateFile(repo, tp, content, fileMap, sendEvent)
 			}
 		}
 
@@ -315,7 +319,7 @@ func (c *Controller) StreamBuildApp(
 			for _, tp := range constants.NEXTJS_ECOMMERCE_TEMPLATE_FILE_PATHS {
 				content := getEcommerceTemplateContent(tp)
 				if content != "" {
-					c.injectTemplateFile(project, tp, content, fileMap, sendEvent)
+					c.injectTemplateFile(repo, tp, content, fileMap, sendEvent)
 				}
 			}
 		}
@@ -323,20 +327,20 @@ func (c *Controller) StreamBuildApp(
 		// Generate .env.local so env vars are available
 		envVars := c.CollectAllEnvVars(project)
 		if dotEnv := BuildDotEnvLocal(envVars); dotEnv != "" {
-			c.injectTemplateFile(project, ".env.local", dotEnv, fileMap, sendEvent)
+			c.injectTemplateFile(repo, ".env.local", dotEnv, fileMap, sendEvent)
 		}
 
 		// project_created event is sent by streamSingleShotGeneration
 		// (with planned_files when structure planning succeeds)
 	} else {
-		// Load existing files for chat editing
-		files, err := c.DB.GetAppGeneratedFilesByProjectID(project.ID.String(), "nextjs")
+		// Load existing files from git repo for chat editing
+		repoFiles, err := repo.ReadAllFiles()
 		if err != nil {
-			sendError("database", "failed to load project files")
+			sendError("repo", "failed to load project files")
 			return
 		}
-		for _, f := range files {
-			fileMap[f.FilePath] = f.Content
+		for k, v := range repoFiles {
+			fileMap[k] = v
 		}
 	}
 
@@ -462,10 +466,10 @@ func (c *Controller) StreamBuildApp(
 		return
 	}
 
-	// --- Create auto-snapshot before changes ---
-	// For chat edits, we require a snapshot so we can rollback on failure.
+	// --- Create auto-snapshot (git commit) before changes ---
+	// For chat edits, we require a commit so we can rollback on failure.
 	// For initial generation there's nothing to rollback to, so a failure is OK.
-	preSnapshot, snapErr := c.CreateAppSnapshot(project, "Auto-save before changes", "auto")
+	preCommitHash, snapErr := c.CreateAppSnapshot(project, "Auto-save before changes", "auto")
 	if snapErr != nil && !isInitialGeneration {
 		slog.Error("failed to create pre-change snapshot, aborting chat edit",
 			"error", snapErr, "project_id", project.ID)
@@ -475,13 +479,7 @@ func (c *Controller) StreamBuildApp(
 		slog.Warn("failed to create pre-change snapshot for initial gen, rollback will not be available",
 			"error", snapErr, "project_id", project.ID)
 	}
-	var preSnapshotID string
-	if preSnapshot != nil {
-		preSnapshotID = preSnapshot.ID.String()
-		if err := c.DB.DeleteOldAutoSnapshots(project.ID.String(), 20); err != nil {
-			slog.Warn("failed to delete old auto snapshots", "error", err, "project_id", project.ID)
-		}
-	}
+	preSnapshotID := preCommitHash
 
 	// --- Pre-generation web search phase ---
 	// For initial generation, run a web search pass to gather context about
@@ -554,7 +552,7 @@ func (c *Controller) StreamBuildApp(
 			ecomImages = append(append([]string{}, imageURLs...), preGenCtx.Screenshots...)
 		}
 		ecomText, ecomOps, ecomErr := c.streamEcommerceGeneration(
-			ctx, project, user, model, provider, fileMap, sendEvent, message, ecomImages, preGenToolContext, mobileConfig,
+			ctx, project, user, model, provider, repo, fileMap, sendEvent, message, ecomImages, preGenToolContext, mobileConfig,
 		)
 		if ecomErr != nil {
 			slog.Error("E-commerce generation failed", "error", ecomErr, "project_id", project.ID)
@@ -566,7 +564,7 @@ func (c *Controller) StreamBuildApp(
 					"snapshot_id", preSnapshotID,
 					"partial_ops", len(ecomOps),
 				)
-				if _, rollbackErr := c.RestoreAppSnapshot(project, preSnapshotID); rollbackErr != nil {
+				if _, rollbackErr := repo.RevertAndCommit(preSnapshotID, "auto: rollback after failure"); rollbackErr != nil {
 					slog.Error("Auto-rollback failed", "error", rollbackErr, "project_id", project.ID)
 				} else {
 					sendEvent("rollback", map[string]any{
@@ -605,7 +603,7 @@ func (c *Controller) StreamBuildApp(
 			genImages = append(append([]string{}, imageURLs...), preGenCtx.Screenshots...)
 		}
 		singleShotText, singleShotOps, singleShotErr := c.streamSingleShotGeneration(
-			ctx, project, user, model, provider, fileMap, sendEvent, message, genImages, preGenToolContext, mobileConfig,
+			ctx, project, user, model, provider, repo, fileMap, sendEvent, message, genImages, preGenToolContext, mobileConfig,
 		)
 		if singleShotErr != nil {
 			slog.Error("Single-shot generation failed", "error", singleShotErr, "project_id", project.ID)
@@ -617,7 +615,7 @@ func (c *Controller) StreamBuildApp(
 					"snapshot_id", preSnapshotID,
 					"partial_ops", len(singleShotOps),
 				)
-				if _, rollbackErr := c.RestoreAppSnapshot(project, preSnapshotID); rollbackErr != nil {
+				if _, rollbackErr := repo.RevertAndCommit(preSnapshotID, "auto: rollback after failure"); rollbackErr != nil {
 					slog.Error("Auto-rollback failed", "error", rollbackErr, "project_id", project.ID)
 				} else {
 					sendEvent("rollback", map[string]any{
@@ -667,7 +665,7 @@ func (c *Controller) StreamBuildApp(
 				if fileType == "tsx" || fileType == "ts" {
 					content, _ = stripForbiddenImports(content, path)
 				}
-				c.saveGeneratedFile(project, path, content, fileType, fileMap, sendEvent, &toolAppliedOps, true)
+				c.saveGeneratedFile(project, repo, path, content, fileType, fileMap, sendEvent, &toolAppliedOps, true)
 				chatFileCounter++
 				sendEvent("progress", responses.ProgressEvent{
 					Phase:   "generating_files",
@@ -676,7 +674,7 @@ func (c *Controller) StreamBuildApp(
 				})
 			},
 			OnDelete: func(path string) {
-				c.deleteGeneratedFile(project, path, fileMap, sendEvent, &toolAppliedOps)
+				c.deleteGeneratedFile(project, repo, path, fileMap, sendEvent, &toolAppliedOps)
 				deletedPaths = append(deletedPaths, path)
 			},
 			OnText: func(text string) {
@@ -700,7 +698,7 @@ func (c *Controller) StreamBuildApp(
 		// Runs a cheap model with tools to detect URLs and gather extra context
 		// before the main code-gen call. If no tools are called the phase is a
 		// near-instant no-op.
-		toolResult := c.runChatToolPhase(ctx, project, provider, message, imageURLs, fileMap, sendEvent)
+		toolResult := c.runChatToolPhase(ctx, project, provider, repo, message, imageURLs, fileMap, sendEvent)
 		if toolResult.Context != "" {
 			// Inject tool-gathered context as a system message before the user message
 			insertIdx := len(llmMessages) - 1 // before last user message
@@ -767,7 +765,7 @@ func (c *Controller) StreamBuildApp(
 					"snapshot_id", preSnapshotID,
 					"partial_ops", len(toolAppliedOps),
 				)
-				if _, rollbackErr := c.RestoreAppSnapshot(project, preSnapshotID); rollbackErr != nil {
+				if _, rollbackErr := repo.RevertAndCommit(preSnapshotID, "auto: rollback after failure"); rollbackErr != nil {
 					slog.Error("Auto-rollback failed", "error", rollbackErr, "project_id", project.ID)
 				} else {
 					sendEvent("rollback", map[string]any{
@@ -812,7 +810,7 @@ func (c *Controller) StreamBuildApp(
 			Phase:   "auto_fix",
 			Message: "Running quality checks...",
 		})
-		c.runDeterministicAutoFixes(project, fileMap, sendEvent, &appliedOps, &filesChanged)
+		c.runDeterministicAutoFixes(project, repo, fileMap, sendEvent, &appliedOps, &filesChanged)
 
 		// Augment package.json with discovered dependencies
 		pkgChanged := false
@@ -820,17 +818,14 @@ func (c *Controller) StreamBuildApp(
 			augmented := augmentPackageJSON(pkgContent, fileMap)
 			if augmented != pkgContent {
 				pkgChanged = true
-				dbFile, err := c.DB.GetAppGeneratedFileByPath(project.ID.String(), "nextjs", "package.json")
-				if err == nil && dbFile != nil {
-					dbFile.Content = augmented
-					if _, updateErr := c.DB.UpdateAppGeneratedFile(dbFile); updateErr != nil {
-						slog.Error("failed to persist augmented package.json", "error", updateErr, "project_id", project.ID)
-					}
+				if writeErr := repo.WriteFile("package.json", []byte(augmented)); writeErr != nil {
+					slog.Error("failed to persist augmented package.json", "error", writeErr, "project_id", project.ID)
+				} else {
 					fileMap["package.json"] = augmented
 					slog.Info("Augmented package.json with discovered deps", "project_id", project.ID)
 					sendEvent("file_complete", responses.FileCompleteEvent{
 						Action: "modify", FilePath: "package.json",
-						FileID: dbFile.ID, FileType: "json", Content: augmented,
+						FileType: "json", Content: augmented,
 					})
 				}
 			}
@@ -907,6 +902,26 @@ func (c *Controller) StreamBuildApp(
 	// --- Generation completed successfully ---
 	generationSucceeded = true
 
+	// --- Commit changes to git ---
+	if filesChanged > 0 {
+		// Write theme to repo before commit
+		if err := repo.WriteTheme(project.Theme); err != nil {
+			slog.Warn("failed to write theme to repo", "error", err, "project_id", project.ID)
+		}
+		commitMsg := "init: initial generation"
+		if !isInitialGeneration {
+			commitMsg = fmt.Sprintf("chat: %s", message)
+			if len(commitMsg) > 100 {
+				commitMsg = commitMsg[:100]
+			}
+		}
+		if hash, commitErr := repo.Commit(commitMsg); commitErr != nil {
+			slog.Error("failed to commit generation changes", "error", commitErr, "project_id", project.ID)
+		} else {
+			slog.Info("Committed generation changes", "project_id", project.ID, "hash", hash[:8], "files_changed", filesChanged)
+		}
+	}
+
 	// --- Send done event ---
 	if isInitialGeneration {
 		sendEvent("done", map[string]any{
@@ -938,9 +953,9 @@ func (c *Controller) fixModel(provider *utils.LLMProvider) string {
 	return provider.FastModel()
 }
 
-// --- Helper: inject a template file into DB and fileMap ---
+// --- Helper: inject a template file into git repo and fileMap ---
 
-func (c *Controller) injectTemplateFile(project *models.AppProject, tp string, content string, fileMap map[string]string, sendEvent func(string, any) bool) {
+func (c *Controller) injectTemplateFile(repo *gitrepo.Repo, tp string, content string, fileMap map[string]string, sendEvent func(string, any) bool) {
 	fileType := "json"
 	switch {
 	case strings.HasSuffix(tp, ".ts"):
@@ -955,16 +970,7 @@ func (c *Controller) injectTemplateFile(project *models.AppProject, tp string, c
 		fileType = "env"
 	}
 
-	file := models.AppGeneratedFile{
-		AppProjectID: project.ID,
-		Platform:     "nextjs",
-		FilePath:     tp,
-		Content:      content,
-		FileType:     fileType,
-		IsGenerated:  false, // template-managed
-	}
-	createdFile, err := c.DB.UpsertAppGeneratedFile(&file)
-	if err != nil {
+	if err := repo.WriteFile(tp, []byte(content)); err != nil {
 		slog.Error("failed to save template file", "error", err, "path", tp)
 		return
 	}
@@ -972,7 +978,6 @@ func (c *Controller) injectTemplateFile(project *models.AppProject, tp string, c
 	sendEvent("file_complete", responses.FileCompleteEvent{
 		Action:   "create",
 		FilePath: tp,
-		FileID:   createdFile.ID,
 		FileType: fileType,
 		Content:  content,
 	})
@@ -980,11 +985,12 @@ func (c *Controller) injectTemplateFile(project *models.AppProject, tp string, c
 
 // --- Helper: save a generated file to DB, fileMap, and SSE ---
 
-// saveGeneratedFile persists a generated file to the database, updates fileMap,
+// saveGeneratedFile persists a generated file to the git repo, updates fileMap,
 // emits a file_complete SSE event, and tracks the operation. Used by both the
 // single-shot parser and the tool executor.
 func (c *Controller) saveGeneratedFile(
 	project *models.AppProject,
+	repo *gitrepo.Repo,
 	path string,
 	content string,
 	fileType string,
@@ -1003,14 +1009,14 @@ func (c *Controller) saveGeneratedFile(
 
 	// Guard: never let the LLM overwrite template-managed files during initial generation.
 	// Chat edits pass allowProtected=true so the AI can fix errors in template files.
-	// Still emit file_complete with the DB content so the sandbox stays in sync.
+	// Still emit file_complete with the repo content so the sandbox stays in sync.
 	canOverride := len(allowProtected) > 0 && allowProtected[0]
 	if !canOverride && isProtectedTemplateFile(path) {
 		slog.Warn("saveGeneratedFile: skipping protected template file", "path", path)
-		if existingFile, err := c.DB.GetAppGeneratedFileByPath(project.ID.String(), "nextjs", path); err == nil && existingFile != nil {
+		if existingContent, readErr := repo.ReadFile(path); readErr == nil {
 			sendEvent("file_complete", responses.FileCompleteEvent{
 				Action: "modify", FilePath: path,
-				FileID: existingFile.ID, FileType: fileType, Content: existingFile.Content,
+				FileType: fileType, Content: string(existingContent),
 			})
 		}
 		return
@@ -1035,56 +1041,42 @@ func (c *Controller) saveGeneratedFile(
 		}
 	}
 
-	existingFile, err := c.DB.GetAppGeneratedFileByPath(project.ID.String(), "nextjs", path)
 	action := "create"
-	var fileID uuid.UUID
-	if err == nil && existingFile != nil {
-		if normalizeContent(content) == normalizeContent(existingFile.Content) {
-			// Content unchanged in DB — still emit file_complete so the sandbox
-			// gets re-synced (a previous write may have failed silently).
-			sendEvent("file_complete", responses.FileCompleteEvent{
-				Action: "modify", FilePath: path,
-				FileID: existingFile.ID, FileType: fileType, Content: content,
-			})
-			return
-		}
-		existingFile.Content = content
-		existingFile.UpdatedAt = time.Now()
-		if _, err := c.DB.UpdateAppGeneratedFile(existingFile); err != nil {
-			slog.Error("saveGeneratedFile: failed to update", "path", path, "error", err)
-			return
+	if repo.FileExists(path) {
+		// Check if content is unchanged
+		if existingContent, readErr := repo.ReadFile(path); readErr == nil {
+			if normalizeContent(content) == normalizeContent(string(existingContent)) {
+				// Content unchanged — still emit file_complete so the sandbox
+				// gets re-synced (a previous write may have failed silently).
+				sendEvent("file_complete", responses.FileCompleteEvent{
+					Action: "modify", FilePath: path,
+					FileType: fileType, Content: content,
+				})
+				return
+			}
 		}
 		action = "modify"
-		fileID = existingFile.ID
-	} else {
-		newFile := models.AppGeneratedFile{
-			AppProjectID: project.ID,
-			Platform:     "nextjs",
-			FilePath:     path,
-			Content:      content,
-			FileType:     fileType,
-			IsGenerated:  true,
-		}
-		createdFile, err := c.DB.CreateAppGeneratedFile(&newFile)
-		if err != nil {
-			slog.Error("saveGeneratedFile: failed to create", "path", path, "error", err)
-			return
-		}
-		fileID = createdFile.ID
 	}
+
+	if err := repo.WriteFile(path, []byte(content)); err != nil {
+		slog.Error("saveGeneratedFile: failed to write", "path", path, "error", err)
+		return
+	}
+
 	fileMap[path] = content
 	sendEvent("file_complete", responses.FileCompleteEvent{
 		Action: action, FilePath: path,
-		FileID: fileID, FileType: fileType, Content: content,
+		FileType: fileType, Content: content,
 	})
 	*ops = append(*ops, appBuilderOperation{
 		Action: action, Path: path, Type: fileType,
 	})
 }
 
-// deleteGeneratedFile removes a file from the project DB and fileMap, emitting events.
+// deleteGeneratedFile removes a file from the git repo and fileMap, emitting events.
 func (c *Controller) deleteGeneratedFile(
 	project *models.AppProject,
+	repo *gitrepo.Repo,
 	path string,
 	fileMap map[string]string,
 	sendEvent func(string, any) bool,
@@ -1097,22 +1089,23 @@ func (c *Controller) deleteGeneratedFile(
 	}
 	path = cleanPath
 
-	existingFile, err := c.DB.GetAppGeneratedFileByPath(project.ID.String(), "nextjs", path)
-	if err != nil || existingFile == nil {
+	if !repo.FileExists(path) {
 		slog.Warn("deleteGeneratedFile: file not found", "path", path)
 		return
 	}
-	if err := c.DB.DeleteAppGeneratedFile(existingFile); err != nil {
+
+	_, fileType := guessFileType(path)
+	if err := repo.DeleteFile(path); err != nil {
 		slog.Error("deleteGeneratedFile: failed to delete", "path", path, "error", err)
 		return
 	}
 	delete(fileMap, path)
 	sendEvent("file_complete", responses.FileCompleteEvent{
 		Action: "delete", FilePath: path,
-		FileID: existingFile.ID, FileType: existingFile.FileType,
+		FileType: fileType,
 	})
 	*ops = append(*ops, appBuilderOperation{
-		Action: "delete", Path: path, Type: existingFile.FileType,
+		Action: "delete", Path: path, Type: fileType,
 	})
 }
 
@@ -1132,6 +1125,7 @@ func (c *Controller) runChatToolPhase(
 	ctx context.Context,
 	project *models.AppProject,
 	provider *utils.LLMProvider,
+	repo *gitrepo.Repo,
 	userMessage string,
 	imageURLs []string,
 	fileMap map[string]string,
@@ -1239,17 +1233,17 @@ func (c *Controller) runChatToolPhase(
 		case "execute_sql":
 			return c.executeChatExecuteSQL(ctx, arguments, project, &collectedContext)
 		case "run_migrations":
-			return c.executeChatRunMigrations(ctx, arguments, project, fileMap, sendEvent, &collectedContext)
+			return c.executeChatRunMigrations(ctx, arguments, project, repo, fileMap, sendEvent, &collectedContext)
 		case "manage_env_vars":
-			return c.executeChatManageEnvVars(arguments, project, fileMap, sendEvent, &collectedContext)
+			return c.executeChatManageEnvVars(arguments, project, repo, fileMap, sendEvent, &collectedContext)
 		case "install_package":
-			return c.executeChatInstallPackage(arguments, project, fileMap, sendEvent, &collectedContext)
+			return c.executeChatInstallPackage(arguments, project, repo, fileMap, sendEvent, &collectedContext)
 		case "generate_image":
 			return c.executeChatGenerateImage(ctx, arguments, project, sendEvent, &collectedContext)
 		case "take_screenshot":
 			return c.executeChatTakeScreenshot(arguments, &collectedContext, &screenshots)
 		case "search_components":
-			return c.executeChatSearchComponents(arguments, project, fileMap, sendEvent, &collectedContext)
+			return c.executeChatSearchComponents(arguments, project, repo, fileMap, sendEvent, &collectedContext)
 		default:
 			return fmt.Sprintf("Unknown tool: %s", name), nil
 		}
@@ -1823,6 +1817,7 @@ func (c *Controller) executeChatRunMigrations(
 	ctx context.Context,
 	arguments string,
 	project *models.AppProject,
+	repo *gitrepo.Repo,
 	fileMap map[string]string,
 	sendEvent func(string, any) bool,
 	collectedContext *strings.Builder,
@@ -1876,7 +1871,7 @@ func (c *Controller) executeChatRunMigrations(
 
 	// Regenerate lib/schema.ts
 	schemaContent := buildDrizzleSchema(args.UpdatedModels)
-	c.injectTemplateFile(project, "lib/schema.ts", schemaContent, fileMap, sendEvent)
+	c.injectTemplateFile(repo, "lib/schema.ts", schemaContent, fileMap, sendEvent)
 
 	collectedContext.WriteString("\n[Database Migrated]\nSchema changes applied successfully. lib/schema.ts has been regenerated. Update any code that uses the affected tables.\n")
 	slog.Info("run_migrations tool called", "project_id", project.ID)
@@ -1887,6 +1882,7 @@ func (c *Controller) executeChatRunMigrations(
 func (c *Controller) executeChatManageEnvVars(
 	arguments string,
 	project *models.AppProject,
+	repo *gitrepo.Repo,
 	fileMap map[string]string,
 	sendEvent func(string, any) bool,
 	collectedContext *strings.Builder,
@@ -1949,7 +1945,7 @@ func (c *Controller) executeChatManageEnvVars(
 	// Regenerate .env.local
 	envVars := c.CollectAllEnvVars(project)
 	if dotEnv := BuildDotEnvLocal(envVars); dotEnv != "" {
-		c.injectTemplateFile(project, ".env.local", dotEnv, fileMap, sendEvent)
+		c.injectTemplateFile(repo, ".env.local", dotEnv, fileMap, sendEvent)
 	}
 
 	summary := strings.Join(results, "\n")
@@ -1962,6 +1958,7 @@ func (c *Controller) executeChatManageEnvVars(
 func (c *Controller) executeChatInstallPackage(
 	arguments string,
 	project *models.AppProject,
+	repo *gitrepo.Repo,
 	fileMap map[string]string,
 	sendEvent func(string, any) bool,
 	collectedContext *strings.Builder,
@@ -2019,16 +2016,13 @@ func (c *Controller) executeChatInstallPackage(
 		return fmt.Sprintf("Error: failed to serialize package.json: %s", err.Error()), nil
 	}
 
-	dbFile, err := c.DB.GetAppGeneratedFileByPath(project.ID.String(), "nextjs", "package.json")
-	if err == nil && dbFile != nil {
-		dbFile.Content = string(updatedJSON)
-		if _, err := c.DB.UpdateAppGeneratedFile(dbFile); err != nil {
-			slog.Error("failed to update package.json", "error", err, "project_id", project.ID)
-		}
+	if writeErr := repo.WriteFile("package.json", updatedJSON); writeErr != nil {
+		slog.Error("failed to update package.json", "error", writeErr, "project_id", project.ID)
+	} else {
 		fileMap["package.json"] = string(updatedJSON)
 		sendEvent("file_complete", responses.FileCompleteEvent{
 			Action: "modify", FilePath: "package.json",
-			FileID: dbFile.ID, FileType: "json", Content: string(updatedJSON),
+			FileType: "json", Content: string(updatedJSON),
 		})
 	}
 
@@ -2175,6 +2169,7 @@ func (c *Controller) executeChatTakeScreenshot(
 func (c *Controller) executeChatSearchComponents(
 	arguments string,
 	project *models.AppProject,
+	repo *gitrepo.Repo,
 	fileMap map[string]string,
 	sendEvent func(string, any) bool,
 	collectedContext *strings.Builder,
@@ -2256,7 +2251,7 @@ func (c *Controller) executeChatSearchComponents(
 		if comp.HasTemplate {
 			content := getUITemplateContent(comp.Path)
 			if content != "" {
-				c.injectTemplateFile(project, comp.Path, content, fileMap, sendEvent)
+				c.injectTemplateFile(repo, comp.Path, content, fileMap, sendEvent)
 				injected = append(injected, comp.Name)
 				continue
 			}
@@ -2911,6 +2906,7 @@ func (c *Controller) buildProjectContext(project *models.AppProject, fileMap map
 
 func (c *Controller) runDeterministicAutoFixes(
 	project *models.AppProject,
+	repo *gitrepo.Repo,
 	fileMap map[string]string,
 	sendEvent func(string, any) bool,
 	appliedOps *[]appBuilderOperation,
@@ -2925,41 +2921,20 @@ func (c *Controller) runDeterministicAutoFixes(
 			newPath := tsxChangedPaths[i+1]
 			_, fileType := guessFileType(newPath)
 
-			// Preserve file ID by updating in-place instead of delete+create
-			if oldFile, err := c.DB.GetAppGeneratedFileByPath(project.ID.String(), "nextjs", oldPath); err == nil {
-				oldFile.FilePath = newPath
-				oldFile.FileType = fileType
-				oldFile.Content = fileMap[newPath]
-				oldFile.UpdatedAt = time.Now()
-				if _, err := c.DB.UpdateAppGeneratedFile(oldFile); err != nil {
-					slog.Error("failed to rename file in DB", "error", err, "old", oldPath, "new", newPath)
-				} else {
-					// Emit delete for old path so sandbox removes the stale .ts file
-					sendEvent("file_complete", responses.FileCompleteEvent{
-						Action: "delete", FilePath: oldPath,
-						FileID: oldFile.ID, FileType: "ts",
-					})
-					sendEvent("file_complete", responses.FileCompleteEvent{
-						Action: "modify", FilePath: newPath, FileID: oldFile.ID,
-						FileType: fileType, Content: fileMap[newPath],
-					})
-				}
+			// Delete old .ts file and write new .tsx file in repo
+			repo.DeleteFile(oldPath)
+			if writeErr := repo.WriteFile(newPath, []byte(fileMap[newPath])); writeErr != nil {
+				slog.Error("failed to write renamed file", "error", writeErr, "old", oldPath, "new", newPath)
 			} else {
-				// Fallback: old file not found, create new
-				newFile := models.AppGeneratedFile{
-					AppProjectID: project.ID,
-					Platform:     "nextjs",
-					FilePath:     newPath,
-					Content:      fileMap[newPath],
-					FileType:     fileType,
-					IsGenerated:  true,
-				}
-				if created, err := c.DB.CreateAppGeneratedFile(&newFile); err == nil {
-					sendEvent("file_complete", responses.FileCompleteEvent{
-						Action: "create", FilePath: newPath, FileID: created.ID,
-						FileType: fileType, Content: fileMap[newPath],
-					})
-				}
+				// Emit delete for old path so sandbox removes the stale .ts file
+				sendEvent("file_complete", responses.FileCompleteEvent{
+					Action: "delete", FilePath: oldPath,
+					FileType: "ts",
+				})
+				sendEvent("file_complete", responses.FileCompleteEvent{
+					Action: "create", FilePath: newPath,
+					FileType: fileType, Content: fileMap[newPath],
+				})
 			}
 			*filesChanged++
 		}
@@ -3033,46 +3008,24 @@ func (c *Controller) runDeterministicAutoFixes(
 
 		slog.Info("Deterministic auto-fix applied", "project_id", project.ID, "files_fixed", autoFixed)
 		for _, fixedPath := range changedPaths {
-			dbFile, err := c.DB.GetAppGeneratedFileByPath(project.ID.String(), "nextjs", fixedPath)
-			if err == nil && dbFile != nil {
-				dbFile.Content = fileMap[fixedPath]
-				dbFile.UpdatedAt = time.Now()
-				if _, updateErr := c.DB.UpdateAppGeneratedFile(dbFile); updateErr != nil {
-					slog.Error("runDeterministicAutoFixes: failed to persist auto-fix", "path", fixedPath, "error", updateErr)
-					continue
-				}
-				sendEvent("file_complete", responses.FileCompleteEvent{
-					Action: "modify", FilePath: fixedPath,
-					FileID: dbFile.ID, FileType: dbFile.FileType,
-					Content: fileMap[fixedPath],
-				})
-				*appliedOps = append(*appliedOps, appBuilderOperation{
-					Action: "modify", Path: fixedPath, Type: dbFile.FileType,
-				})
-				*filesChanged++
-			} else {
-				// New file created by auto-fix (e.g. components/layout-client.tsx)
-				_, fileType := guessFileType(fixedPath)
-				newFile := models.AppGeneratedFile{
-					AppProjectID: project.ID,
-					Platform:     "nextjs",
-					FilePath:     fixedPath,
-					Content:      fileMap[fixedPath],
-					FileType:     fileType,
-					IsGenerated:  true,
-				}
-				if created, createErr := c.DB.CreateAppGeneratedFile(&newFile); createErr == nil {
-					sendEvent("file_complete", responses.FileCompleteEvent{
-						Action: "create", FilePath: fixedPath,
-						FileID: created.ID, FileType: fileType,
-						Content: fileMap[fixedPath],
-					})
-					*appliedOps = append(*appliedOps, appBuilderOperation{
-						Action: "create", Path: fixedPath, Type: fileType,
-					})
-					*filesChanged++
-				}
+			_, fileType := guessFileType(fixedPath)
+			action := "modify"
+			if !repo.FileExists(fixedPath) {
+				action = "create"
 			}
+			if writeErr := repo.WriteFile(fixedPath, []byte(fileMap[fixedPath])); writeErr != nil {
+				slog.Error("runDeterministicAutoFixes: failed to persist auto-fix", "path", fixedPath, "error", writeErr)
+				continue
+			}
+			sendEvent("file_complete", responses.FileCompleteEvent{
+				Action: action, FilePath: fixedPath,
+				FileType: fileType,
+				Content: fileMap[fixedPath],
+			})
+			*appliedOps = append(*appliedOps, appBuilderOperation{
+				Action: action, Path: fixedPath, Type: fileType,
+			})
+			*filesChanged++
 		}
 
 		// Emit auto-fix summary event
@@ -3621,7 +3574,7 @@ var chatSearchComponentsTool = utils.Tool{
 // --- Tool executor ---
 
 // buildBuilderToolExecutor returns a ToolExecutor for the unified builder.
-func (c *Controller) buildBuilderToolExecutor(ctx context.Context, project *models.AppProject, user *models.User, fileMap map[string]string, cbs *builderToolCallbacks) utils.ToolExecutor {
+func (c *Controller) buildBuilderToolExecutor(ctx context.Context, project *models.AppProject, user *models.User, repo *gitrepo.Repo, fileMap map[string]string, cbs *builderToolCallbacks) utils.ToolExecutor {
 	return func(name string, arguments string) (string, error) {
 		// Early exit if context is cancelled — prevents partial writes after timeout
 		if ctx.Err() != nil {
@@ -3703,35 +3656,17 @@ func (c *Controller) buildBuilderToolExecutor(ctx context.Context, project *mode
 				content, _ = stripForbiddenImports(content, args.FilePath)
 			}
 
-			existingFile, err := c.DB.GetAppGeneratedFileByPath(project.ID.String(), "nextjs", args.FilePath)
 			action := "create"
-			var fileID uuid.UUID
-			if err == nil && existingFile != nil {
-				if normalizeContent(content) == normalizeContent(existingFile.Content) {
-					return fmt.Sprintf("File %s is already up to date (no changes needed).", args.FilePath), nil
-				}
-				existingFile.Content = content
-				existingFile.UpdatedAt = time.Now()
-				_, err = c.DB.UpdateAppGeneratedFile(existingFile)
-				if err != nil {
-					return fmt.Sprintf("Error: failed to update file: %s", err.Error()), nil
+			if repo.FileExists(args.FilePath) {
+				if existingContent, readErr := repo.ReadFile(args.FilePath); readErr == nil {
+					if normalizeContent(content) == normalizeContent(string(existingContent)) {
+						return fmt.Sprintf("File %s is already up to date (no changes needed).", args.FilePath), nil
+					}
 				}
 				action = "modify"
-				fileID = existingFile.ID
-			} else {
-				newFile := models.AppGeneratedFile{
-					AppProjectID: project.ID,
-					Platform:     "nextjs",
-					FilePath:     args.FilePath,
-					Content:      content,
-					FileType:     fileType,
-					IsGenerated:  true,
-				}
-				createdFile, err := c.DB.CreateAppGeneratedFile(&newFile)
-				if err != nil {
-					return fmt.Sprintf("Error: failed to create file: %s", err.Error()), nil
-				}
-				fileID = createdFile.ID
+			}
+			if writeErr := repo.WriteFile(args.FilePath, []byte(content)); writeErr != nil {
+				return fmt.Sprintf("Error: failed to write file: %s", writeErr.Error()), nil
 			}
 			if cbs != nil {
 				cbs.mu.Lock()
@@ -3740,7 +3675,7 @@ func (c *Controller) buildBuilderToolExecutor(ctx context.Context, project *mode
 				cbs.fileMu.Unlock()
 				cbs.sendEvent("file_complete", responses.FileCompleteEvent{
 					Action: action, FilePath: args.FilePath,
-					FileID: fileID, FileType: fileType, Content: content,
+					FileType: fileType, Content: content,
 				})
 				*cbs.appliedOps = append(*cbs.appliedOps, appBuilderOperation{
 					Action: action, Path: args.FilePath, Type: fileType,
@@ -3802,38 +3737,19 @@ func (c *Controller) buildBuilderToolExecutor(ctx context.Context, project *mode
 					content, _ = stripForbiddenImports(content, f.FilePath)
 				}
 
-				existingFile, err := c.DB.GetAppGeneratedFileByPath(project.ID.String(), "nextjs", f.FilePath)
 				action := "create"
-				var fileID uuid.UUID
-				if err == nil && existingFile != nil {
-					if normalizeContent(content) == normalizeContent(existingFile.Content) {
-						results = append(results, fmt.Sprintf("OK %s (no changes)", f.FilePath))
-						continue
-					}
-					existingFile.Content = content
-					existingFile.UpdatedAt = time.Now()
-					_, err = c.DB.UpdateAppGeneratedFile(existingFile)
-					if err != nil {
-						results = append(results, fmt.Sprintf("ERROR %s: %s", f.FilePath, err.Error()))
-						continue
+				if repo.FileExists(f.FilePath) {
+					if existingContent, readErr := repo.ReadFile(f.FilePath); readErr == nil {
+						if normalizeContent(content) == normalizeContent(string(existingContent)) {
+							results = append(results, fmt.Sprintf("OK %s (no changes)", f.FilePath))
+							continue
+						}
 					}
 					action = "modify"
-					fileID = existingFile.ID
-				} else {
-					newFile := models.AppGeneratedFile{
-						AppProjectID: project.ID,
-						Platform:     "nextjs",
-						FilePath:     f.FilePath,
-						Content:      content,
-						FileType:     fileType,
-						IsGenerated:  true,
-					}
-					createdFile, err := c.DB.CreateAppGeneratedFile(&newFile)
-					if err != nil {
-						results = append(results, fmt.Sprintf("ERROR %s: %s", f.FilePath, err.Error()))
-						continue
-					}
-					fileID = createdFile.ID
+				}
+				if writeErr := repo.WriteFile(f.FilePath, []byte(content)); writeErr != nil {
+					results = append(results, fmt.Sprintf("ERROR %s: %s", f.FilePath, writeErr.Error()))
+					continue
 				}
 				if cbs != nil {
 					cbs.mu.Lock()
@@ -3842,7 +3758,7 @@ func (c *Controller) buildBuilderToolExecutor(ctx context.Context, project *mode
 					cbs.fileMu.Unlock()
 					cbs.sendEvent("file_complete", responses.FileCompleteEvent{
 						Action: action, FilePath: f.FilePath,
-						FileID: fileID, FileType: fileType, Content: content,
+						FileType: fileType, Content: content,
 					})
 					*cbs.appliedOps = append(*cbs.appliedOps, appBuilderOperation{
 						Action: action, Path: f.FilePath, Type: fileType,
@@ -3894,15 +3810,8 @@ func (c *Controller) buildBuilderToolExecutor(ctx context.Context, project *mode
 				newContent, _ = stripForbiddenImports(newContent, args.FilePath)
 			}
 
-			existingFile, err := c.DB.GetAppGeneratedFileByPath(project.ID.String(), "nextjs", args.FilePath)
-			if err != nil {
-				return fmt.Sprintf("Error: failed to load file: %s", err.Error()), nil
-			}
-			existingFile.Content = newContent
-			existingFile.UpdatedAt = time.Now()
-			_, err = c.DB.UpdateAppGeneratedFile(existingFile)
-			if err != nil {
-				return fmt.Sprintf("Error: failed to save: %s", err.Error()), nil
+			if writeErr := repo.WriteFile(args.FilePath, []byte(newContent)); writeErr != nil {
+				return fmt.Sprintf("Error: failed to save: %s", writeErr.Error()), nil
 			}
 			if cbs != nil {
 				cbs.mu.Lock()
@@ -3911,11 +3820,11 @@ func (c *Controller) buildBuilderToolExecutor(ctx context.Context, project *mode
 				cbs.fileMu.Unlock()
 				cbs.sendEvent("file_complete", responses.FileCompleteEvent{
 					Action: "modify", FilePath: args.FilePath,
-					FileID: existingFile.ID, FileType: existingFile.FileType,
+					FileType: fileType,
 					Content: newContent,
 				})
 				*cbs.appliedOps = append(*cbs.appliedOps, appBuilderOperation{
-					Action: "modify", Path: args.FilePath, Type: existingFile.FileType,
+					Action: "modify", Path: args.FilePath, Type: fileType,
 				})
 				cbs.pendingFiles[args.FilePath] = newContent
 				cbs.mu.Unlock()
@@ -3935,12 +3844,11 @@ func (c *Controller) buildBuilderToolExecutor(ctx context.Context, project *mode
 			if isProtectedTemplateFile(args.FilePath) {
 				return fmt.Sprintf("Error: %s is template-managed and cannot be deleted.", args.FilePath), nil
 			}
-			existingFile, err := c.DB.GetAppGeneratedFileByPath(project.ID.String(), "nextjs", args.FilePath)
-			if err != nil {
+			if !repo.FileExists(args.FilePath) {
 				return fmt.Sprintf("Error: file '%s' not found", args.FilePath), nil
 			}
-			if err := c.DB.DeleteAppGeneratedFile(existingFile); err != nil {
-				return fmt.Sprintf("Error: failed to delete file '%s': %s", args.FilePath, err.Error()), nil
+			if delErr := repo.DeleteFile(args.FilePath); delErr != nil {
+				return fmt.Sprintf("Error: failed to delete file '%s': %s", args.FilePath, delErr.Error()), nil
 			}
 
 			if cbs != nil {
@@ -3983,16 +3891,8 @@ func (c *Controller) buildBuilderToolExecutor(ctx context.Context, project *mode
 					if content == "" {
 						continue
 					}
-					file := &models.AppGeneratedFile{
-						AppProjectID: project.ID,
-						Platform:     "nextjs",
-						FilePath:     tp,
-						Content:      content,
-						FileType:     "ts",
-						IsGenerated:  false,
-					}
-					if _, err := c.DB.UpsertAppGeneratedFile(file); err != nil {
-						slog.Error("failed to upsert ecommerce template", "path", tp, "error", err)
+					if writeErr := repo.WriteFile(tp, []byte(content)); writeErr != nil {
+						slog.Error("failed to write ecommerce template", "path", tp, "error", writeErr)
 					}
 					fileMap[tp] = content
 				}
@@ -4003,7 +3903,7 @@ func (c *Controller) buildBuilderToolExecutor(ctx context.Context, project *mode
 				injectEcommerceTemplates()
 				envVars := c.CollectAllEnvVars(project)
 				if dotEnv := BuildDotEnvLocal(envVars); dotEnv != "" {
-					c.injectTemplateFileForTool(project, ".env.local", dotEnv, fileMap, cbs)
+					c.injectTemplateFileForTool(repo, ".env.local", dotEnv, fileMap, cbs)
 				}
 				return fmt.Sprintf("E-commerce store already exists.\nStore ID: %s\nStore name: %s\nStorefront API: %s/v2/storefront/%s\nUse NEXT_PUBLIC_STORE_ID and NEXT_PUBLIC_WEMOB_API_URL env vars.\nlib/wemob-store.ts is available — import from \"@/lib/wemob-store\".\nNEXT STEP: Call manage_store to add products.",
 					existingStore.ID.String(), existingStore.StoreName, constants.WEMOB_API_BASE_URL, existingStore.ID.String()), nil
@@ -4030,7 +3930,7 @@ func (c *Controller) buildBuilderToolExecutor(ctx context.Context, project *mode
 			injectEcommerceTemplates()
 			envVars := c.CollectAllEnvVars(project)
 			if dotEnv := BuildDotEnvLocal(envVars); dotEnv != "" {
-				c.injectTemplateFileForTool(project, ".env.local", dotEnv, fileMap, cbs)
+				c.injectTemplateFileForTool(repo, ".env.local", dotEnv, fileMap, cbs)
 			}
 			return fmt.Sprintf("E-commerce store created!\nStore ID: %s\nStore name: %s\nStorefront API: %s/v2/storefront/%s\nEnv vars: NEXT_PUBLIC_STORE_ID=\"%s\", NEXT_PUBLIC_WEMOB_API_URL=\"%s\"\nlib/wemob-store.ts is available.\nNEXT STEP: Call manage_store to add products.",
 				store.ID.String(), store.StoreName, constants.WEMOB_API_BASE_URL, store.ID.String(), store.ID.String(), constants.WEMOB_API_BASE_URL), nil
@@ -4169,10 +4069,10 @@ func (c *Controller) buildBuilderToolExecutor(ctx context.Context, project *mode
 
 			// Inject DB template files
 			dbContent := constants.NEXTJS_TEMPLATE_DB_TS
-			c.injectTemplateFileForTool(project, "lib/db.ts", dbContent, fileMap, cbs)
+			c.injectTemplateFileForTool(repo, "lib/db.ts", dbContent, fileMap, cbs)
 
 			schemaContent := buildDrizzleSchema(dataModels)
-			c.injectTemplateFileForTool(project, "lib/schema.ts", schemaContent, fileMap, cbs)
+			c.injectTemplateFileForTool(repo, "lib/schema.ts", schemaContent, fileMap, cbs)
 
 			// Inject auth template files if needed
 			if args.NeedsAuth {
@@ -4190,7 +4090,7 @@ func (c *Controller) buildBuilderToolExecutor(ctx context.Context, project *mode
 				for _, tp := range constants.NEXTJS_AUTH_TEMPLATE_FILE_PATHS {
 					content := getAuthTemplateContent(tp)
 					if content != "" {
-						c.injectTemplateFileForTool(project, tp, content, fileMap, cbs)
+						c.injectTemplateFileForTool(repo, tp, content, fileMap, cbs)
 					}
 				}
 			}
@@ -4198,7 +4098,7 @@ func (c *Controller) buildBuilderToolExecutor(ctx context.Context, project *mode
 			// Update .env.local with new vars
 			envVars := c.CollectAllEnvVars(project)
 			if dotEnv := BuildDotEnvLocal(envVars); dotEnv != "" {
-				c.injectTemplateFileForTool(project, ".env.local", dotEnv, fileMap, cbs)
+				c.injectTemplateFileForTool(repo, ".env.local", dotEnv, fileMap, cbs)
 			}
 
 			// Seed the database
@@ -4331,7 +4231,7 @@ func (c *Controller) buildBuilderToolExecutor(ctx context.Context, project *mode
 }
 
 // injectTemplateFileForTool is like injectTemplateFile but uses builderToolCallbacks.
-func (c *Controller) injectTemplateFileForTool(project *models.AppProject, tp string, content string, fileMap map[string]string, cbs *builderToolCallbacks) {
+func (c *Controller) injectTemplateFileForTool(repo *gitrepo.Repo, tp string, content string, fileMap map[string]string, cbs *builderToolCallbacks) {
 	fileType := "ts"
 	switch {
 	case strings.HasSuffix(tp, ".tsx"):
@@ -4346,17 +4246,8 @@ func (c *Controller) injectTemplateFileForTool(project *models.AppProject, tp st
 		fileType = "env"
 	}
 
-	file := &models.AppGeneratedFile{
-		AppProjectID: project.ID,
-		Platform:     "nextjs",
-		FilePath:     tp,
-		Content:      content,
-		FileType:     fileType,
-		IsGenerated:  false,
-	}
-	createdFile, err := c.DB.UpsertAppGeneratedFile(file)
-	if err != nil {
-		slog.Error("failed to save template file via tool", "path", tp, "error", err)
+	if writeErr := repo.WriteFile(tp, []byte(content)); writeErr != nil {
+		slog.Error("failed to save template file via tool", "path", tp, "error", writeErr)
 		return
 	}
 	if cbs != nil {
@@ -4366,7 +4257,7 @@ func (c *Controller) injectTemplateFileForTool(project *models.AppProject, tp st
 		cbs.fileMu.Unlock()
 		cbs.sendEvent("file_complete", responses.FileCompleteEvent{
 			Action: "create", FilePath: tp,
-			FileID: createdFile.ID, FileType: fileType,
+			FileType: fileType,
 			Content: content,
 		})
 		*cbs.appliedOps = append(*cbs.appliedOps, appBuilderOperation{
@@ -4417,6 +4308,7 @@ func (c *Controller) runPreGenerationSetup(
 	ctx context.Context,
 	project *models.AppProject,
 	user *models.User,
+	repo *gitrepo.Repo,
 	fileMap map[string]string,
 	sendEvent func(string, any) bool,
 	provider *utils.LLMProvider,
@@ -4496,10 +4388,10 @@ func (c *Controller) runPreGenerationSetup(
 
 					// Inject DB template files
 					dbContent := constants.NEXTJS_TEMPLATE_DB_TS
-					c.injectTemplateFile(project, "lib/db.ts", dbContent, fileMap, sendEvent)
+					c.injectTemplateFile(repo, "lib/db.ts", dbContent, fileMap, sendEvent)
 
 					schemaContent := buildDrizzleSchema(dataModels)
-					c.injectTemplateFile(project, "lib/schema.ts", schemaContent, fileMap, sendEvent)
+					c.injectTemplateFile(repo, "lib/schema.ts", schemaContent, fileMap, sendEvent)
 
 					// Seed database
 					sendEvent("progress", responses.ProgressEvent{
@@ -4567,9 +4459,9 @@ func (c *Controller) runPreGenerationSetup(
 						if err := c.storeNeonIntegration(project, connStr, neonProjectID); err != nil {
 							slog.Error("pre-gen auth: failed to store neon integration", "error", err, "project_id", project.ID)
 						}
-						c.injectTemplateFile(project, "lib/db.ts", constants.NEXTJS_TEMPLATE_DB_TS, fileMap, sendEvent)
+						c.injectTemplateFile(repo, "lib/db.ts", constants.NEXTJS_TEMPLATE_DB_TS, fileMap, sendEvent)
 						schemaContent := buildDrizzleSchema(modelsToProvision)
-						c.injectTemplateFile(project, "lib/schema.ts", schemaContent, fileMap, sendEvent)
+						c.injectTemplateFile(repo, "lib/schema.ts", schemaContent, fileMap, sendEvent)
 						sendEvent("progress", responses.ProgressEvent{
 							Phase:   "provisioning_db",
 							Message: "Populating database with sample data...",
@@ -4606,7 +4498,7 @@ func (c *Controller) runPreGenerationSetup(
 				for _, tp := range constants.NEXTJS_AUTH_TEMPLATE_FILE_PATHS {
 					content := getAuthTemplateContent(tp)
 					if content != "" {
-						c.injectTemplateFile(project, tp, content, fileMap, sendEvent)
+						c.injectTemplateFile(repo, tp, content, fileMap, sendEvent)
 					}
 				}
 			}
@@ -4614,7 +4506,7 @@ func (c *Controller) runPreGenerationSetup(
 			// Update .env.local with auth vars
 			envVars := c.CollectAllEnvVars(project)
 			if dotEnv := BuildDotEnvLocal(envVars); dotEnv != "" {
-				c.injectTemplateFile(project, ".env.local", dotEnv, fileMap, sendEvent)
+				c.injectTemplateFile(repo, ".env.local", dotEnv, fileMap, sendEvent)
 			}
 		}
 	}
@@ -4631,6 +4523,7 @@ func (c *Controller) streamSingleShotGeneration(
 	user *models.User,
 	model string,
 	provider *utils.LLMProvider,
+	repo *gitrepo.Repo,
 	fileMap map[string]string,
 	sendEvent func(string, any) bool,
 	message string,
@@ -4670,7 +4563,7 @@ func (c *Controller) streamSingleShotGeneration(
 	// 2. Run pre-generation setup (e-commerce store, Neon database, auth templates).
 	// Now that structure planning has set data_models and needs_auth on the project,
 	// this step can properly provision the database and inject auth files.
-	if setupErr := c.runPreGenerationSetup(ctx, project, user, fileMap, sendEvent, provider, model, message); setupErr != nil {
+	if setupErr := c.runPreGenerationSetup(ctx, project, user, repo, fileMap, sendEvent, provider, model, message); setupErr != nil {
 		return "", nil, fmt.Errorf("pre-generation setup failed: %w", setupErr)
 	}
 
@@ -4682,17 +4575,17 @@ func (c *Controller) streamSingleShotGeneration(
 		}
 		if project.ProjectType == "ecommerce" {
 			if layoutContent := buildEcommerceLayout(project.Name, theme.Typography); layoutContent != "" {
-				c.injectTemplateFile(project, "app/layout.tsx", layoutContent, fileMap, sendEvent)
+				c.injectTemplateFile(repo, "app/layout.tsx", layoutContent, fileMap, sendEvent)
 			}
 			if cssContent := buildEcommerceGlobalsCSSTheme(theme.ColorScheme, theme.DarkColorScheme); cssContent != "" {
-				c.injectTemplateFile(project, "app/globals.css", cssContent, fileMap, sendEvent)
+				c.injectTemplateFile(repo, "app/globals.css", cssContent, fileMap, sendEvent)
 			}
 		} else {
 			// For non-e-commerce apps, inject globals.css with semantic tokens so
 			// the UI component templates (button, card, input, badge) work correctly.
 			isMobile := project.ProjectType == "mobile_app"
 			if cssContent := buildGlobalsCSSTheme(theme.ColorScheme, theme.DarkColorScheme, isMobile); cssContent != "" {
-				c.injectTemplateFile(project, "app/globals.css", cssContent, fileMap, sendEvent)
+				c.injectTemplateFile(repo, "app/globals.css", cssContent, fileMap, sendEvent)
 			}
 		}
 	}
@@ -4763,7 +4656,7 @@ func (c *Controller) streamSingleShotGeneration(
 			if fileType == "tsx" || fileType == "ts" {
 				content, _ = stripForbiddenImports(content, path)
 			}
-			c.saveGeneratedFile(project, path, content, fileType, fileMap, sendEvent, &ops)
+			c.saveGeneratedFile(project, repo, path, content, fileType, fileMap, sendEvent, &ops)
 			fileCounter++
 			sendEvent("progress", responses.ProgressEvent{
 				Phase:   "generating_files",
@@ -4809,20 +4702,16 @@ func (c *Controller) streamSingleShotGeneration(
 	autoFixRootLayoutTags(fileMap)
 	autoFixUnterminatedJSXStrings(fileMap)
 	autoFixMissingForceDynamic(fileMap)
-	// Persist any auto-fixed or newly created content back to the DB
+	// Persist any auto-fixed or newly created content back to the repo
 	for path, content := range fileMap {
 		prev, existed := preFixSnapshot[path]
 		if !existed {
 			// New file created by auto-fix (e.g. components/layout-client.tsx)
 			_, fileType := guessFileType(path)
-			c.saveGeneratedFile(project, path, content, fileType, fileMap, sendEvent, &ops)
+			c.saveGeneratedFile(project, repo, path, content, fileType, fileMap, sendEvent, &ops)
 		} else if content != prev {
-			// Existing file was modified by auto-fix
-			if dbFile, err := c.DB.GetAppGeneratedFileByPath(project.ID.String(), "nextjs", path); err == nil && dbFile != nil {
-				dbFile.Content = content
-				if _, updateErr := c.DB.UpdateAppGeneratedFile(dbFile); updateErr != nil {
-					slog.Error("failed to persist auto-fixed file", "path", path, "error", updateErr)
-				}
+			if writeErr := repo.WriteFile(path, []byte(content)); writeErr != nil {
+				slog.Error("failed to persist auto-fixed file", "path", path, "error", writeErr)
 			}
 		}
 	}
@@ -4903,6 +4792,7 @@ func (c *Controller) streamEcommerceGeneration(
 	user *models.User,
 	model string,
 	provider *utils.LLMProvider,
+	repo *gitrepo.Repo,
 	fileMap map[string]string,
 	sendEvent func(string, any) bool,
 	message string,
@@ -4966,7 +4856,7 @@ func (c *Controller) streamEcommerceGeneration(
 		pendingFiles: make(map[string]string),
 	}
 
-	setupExecutor := c.buildBuilderToolExecutor(ctx, project, user, fileMap, setupCallbacks)
+	setupExecutor := c.buildBuilderToolExecutor(ctx, project, user, repo, fileMap, setupCallbacks)
 	executor := c.compositeToolExecutor(setupExecutor)
 
 	setupMessages := []utils.Message{
@@ -5057,7 +4947,7 @@ func (c *Controller) streamEcommerceGeneration(
 		"model", model, "project_id", project.ID)
 
 	// Run pre-generation setup (injects e-commerce templates, auth files, etc.)
-	if setupErr := c.runPreGenerationSetup(ctx, project, user, fileMap, sendEvent, provider, model, message); setupErr != nil {
+	if setupErr := c.runPreGenerationSetup(ctx, project, user, repo, fileMap, sendEvent, provider, model, message); setupErr != nil {
 		return "", ops, fmt.Errorf("pre-generation setup failed: %w", setupErr)
 	}
 
@@ -5068,10 +4958,10 @@ func (c *Controller) streamEcommerceGeneration(
 			json.Unmarshal(project.Theme, &theme)
 		}
 		if layoutContent := buildEcommerceLayout(project.Name, theme.Typography); layoutContent != "" {
-			c.injectTemplateFile(project, "app/layout.tsx", layoutContent, fileMap, sendEvent)
+			c.injectTemplateFile(repo, "app/layout.tsx", layoutContent, fileMap, sendEvent)
 		}
 		if cssContent := buildEcommerceGlobalsCSSTheme(theme.ColorScheme, theme.DarkColorScheme); cssContent != "" {
-			c.injectTemplateFile(project, "app/globals.css", cssContent, fileMap, sendEvent)
+			c.injectTemplateFile(repo, "app/globals.css", cssContent, fileMap, sendEvent)
 		}
 	}
 
@@ -5126,7 +5016,7 @@ func (c *Controller) streamEcommerceGeneration(
 			if fileType == "tsx" || fileType == "ts" {
 				content, _ = stripForbiddenImports(content, path)
 			}
-			c.saveGeneratedFile(project, path, content, fileType, fileMap, sendEvent, &ops)
+			c.saveGeneratedFile(project, repo, path, content, fileType, fileMap, sendEvent, &ops)
 			ecomFileCounter++
 			sendEvent("progress", responses.ProgressEvent{
 				Phase:   "generating_files",
@@ -5177,13 +5067,10 @@ func (c *Controller) streamEcommerceGeneration(
 		prev, existed := preFixSnapshot[path]
 		if !existed {
 			_, fileType := guessFileType(path)
-			c.saveGeneratedFile(project, path, content, fileType, fileMap, sendEvent, &ops)
+			c.saveGeneratedFile(project, repo, path, content, fileType, fileMap, sendEvent, &ops)
 		} else if content != prev {
-			if dbFile, err := c.DB.GetAppGeneratedFileByPath(project.ID.String(), "nextjs", path); err == nil && dbFile != nil {
-				dbFile.Content = content
-				if _, updateErr := c.DB.UpdateAppGeneratedFile(dbFile); updateErr != nil {
-					slog.Error("failed to persist auto-fixed file (ecom)", "path", path, "error", updateErr)
-				}
+			if writeErr := repo.WriteFile(path, []byte(content)); writeErr != nil {
+				slog.Error("failed to persist auto-fixed file (ecom)", "path", path, "error", writeErr)
 			}
 		}
 	}
@@ -5644,14 +5531,18 @@ func buildEnrichedPrompt(original string, result ClarificationResult) string {
 	return sb.String()
 }
 
-// selectMobileOptimizeFiles filters project files to those likely containing
+// mobileOptimizeFile is a lightweight struct for files selected for mobile optimization.
+type mobileOptimizeFile struct {
+	Path    string
+	Content string
+}
+
+// selectMobileOptimizeFilesFromMap filters project files to those likely containing
 // UI/layout code that needs mobile conversion. API routes, lib utilities,
 // type definitions, and config files are excluded.
-func selectMobileOptimizeFiles(files []models.AppGeneratedFile) []models.AppGeneratedFile {
-	var selected []models.AppGeneratedFile
-	for _, f := range files {
-		path := f.FilePath
-
+func selectMobileOptimizeFilesFromMap(fileMap map[string]string) []mobileOptimizeFile {
+	var selected []mobileOptimizeFile
+	for path, content := range fileMap {
 		// Exclude non-UI files
 		if strings.HasPrefix(path, "app/api/") ||
 			strings.HasPrefix(path, "lib/db") ||
@@ -5676,17 +5567,17 @@ func selectMobileOptimizeFiles(files []models.AppGeneratedFile) []models.AppGene
 			strings.Contains(path, "components/")
 
 		// Include files with desktop patterns
-		hasDesktop := strings.Contains(f.Content, "sm:") ||
-			strings.Contains(f.Content, "md:") ||
-			strings.Contains(f.Content, "lg:") ||
-			strings.Contains(f.Content, "xl:") ||
-			strings.Contains(f.Content, "<nav") ||
-			strings.Contains(f.Content, "sidebar") ||
-			strings.Contains(f.Content, "Sidebar") ||
-			strings.Contains(f.Content, "grid-cols-")
+		hasDesktop := strings.Contains(content, "sm:") ||
+			strings.Contains(content, "md:") ||
+			strings.Contains(content, "lg:") ||
+			strings.Contains(content, "xl:") ||
+			strings.Contains(content, "<nav") ||
+			strings.Contains(content, "sidebar") ||
+			strings.Contains(content, "Sidebar") ||
+			strings.Contains(content, "grid-cols-")
 
 		if isUI || hasDesktop {
-			selected = append(selected, f)
+			selected = append(selected, mobileOptimizeFile{Path: path, Content: content})
 		}
 	}
 	return selected
@@ -5731,9 +5622,16 @@ func (c *Controller) StreamMobileOptimize(
 		}
 	}
 
-	// 2. Load all files
-	allFiles, err := c.DB.GetAppGeneratedFilesByProjectID(project.ID.String(), "nextjs")
-	if err != nil || len(allFiles) == 0 {
+	// 2. Open repo and load all files
+	repo, err := c.GitRepoService.Open(project.ID.String())
+	if err != nil {
+		slog.Error("mobile optimize: failed to open repo", "error", err, "project_id", project.ID)
+		resetStatus()
+		sendError("load", "failed to load project files")
+		return
+	}
+	fileMap, err := repo.ReadAllFiles()
+	if err != nil || len(fileMap) == 0 {
 		slog.Error("mobile optimize: failed to load files", "error", err, "project_id", project.ID)
 		resetStatus()
 		sendError("load", "failed to load project files")
@@ -5741,18 +5639,17 @@ func (c *Controller) StreamMobileOptimize(
 	}
 
 	// 3. Create auto-snapshot before changes
-	preSnapshot, snapErr := c.CreateAppSnapshot(project, "Auto-save before mobile optimization", "auto")
+	preCommitHash, snapErr := c.CreateAppSnapshot(project, "Auto-save before mobile optimization", "auto")
 	if snapErr != nil {
 		slog.Error("mobile optimize: failed to create snapshot", "error", snapErr, "project_id", project.ID)
 		resetStatus()
 		sendError("snapshot", "failed to create safety snapshot. please try again")
 		return
 	}
-	preSnapshotID := preSnapshot.ID.String()
-	c.DB.DeleteOldAutoSnapshots(project.ID.String(), 20)
+	preSnapshotID := preCommitHash
 
 	// 4. Filter to UI files
-	uiFiles := selectMobileOptimizeFiles(allFiles)
+	uiFiles := selectMobileOptimizeFilesFromMap(fileMap)
 	if len(uiFiles) == 0 {
 		slog.Info("mobile optimize: no UI files to optimize", "project_id", project.ID)
 		resetStatus()
@@ -5760,24 +5657,18 @@ func (c *Controller) StreamMobileOptimize(
 		return
 	}
 
-	// 5. Build file map and LLM messages
-	fileMap := make(map[string]string, len(allFiles))
-	for _, f := range allFiles {
-		fileMap[f.FilePath] = f.Content
-	}
-
-	// Build file listing for system prompt (all files for context)
+	// 5. Build file listing for system prompt (all files for context)
 	var fileListing strings.Builder
 	fileListing.WriteString("\n\n## Project Files\n")
-	for _, f := range allFiles {
-		fileListing.WriteString(fmt.Sprintf("- %s (%s)\n", f.FilePath, f.FileType))
+	for path := range fileMap {
+		fileListing.WriteString(fmt.Sprintf("- %s (%s)\n", path, InferFileType(path)))
 	}
 
 	// Build user message with selected file contents
 	var userContent strings.Builder
 	userContent.WriteString("Convert the following files to mobile-only layout. Only output files that need changes.\n\n")
-	for _, f := range uiFiles {
-		userContent.WriteString(fmt.Sprintf("<file path=\"%s\">\n%s\n</file>\n\n", f.FilePath, f.Content))
+	for _, uf := range uiFiles {
+		userContent.WriteString(fmt.Sprintf("<file path=\"%s\">\n%s\n</file>\n\n", uf.Path, uf.Content))
 	}
 
 	provider := c.llmProvider()
@@ -5804,7 +5695,7 @@ func (c *Controller) StreamMobileOptimize(
 			if fileType == "tsx" || fileType == "ts" {
 				content, _ = stripForbiddenImports(content, path)
 			}
-			c.saveGeneratedFile(project, path, content, fileType, fileMap, sendEvent, &ops, true)
+			c.saveGeneratedFile(project, repo, path, content, fileType, fileMap, sendEvent, &ops, true)
 			fileCounter++
 			sendEvent("progress", responses.ProgressEvent{
 				Phase:   "optimizing",
@@ -5813,7 +5704,7 @@ func (c *Controller) StreamMobileOptimize(
 			})
 		},
 		OnDelete: func(path string) {
-			c.deleteGeneratedFile(project, path, fileMap, sendEvent, &ops)
+			c.deleteGeneratedFile(project, repo, path, fileMap, sendEvent, &ops)
 		},
 		OnText: func(text string) {
 			responseBuilder.WriteString(text)
@@ -5828,7 +5719,7 @@ func (c *Controller) StreamMobileOptimize(
 		"model", model,
 		"project_id", project.ID,
 		"ui_files", len(uiFiles),
-		"total_files", len(allFiles),
+		"total_files", len(fileMap),
 	)
 
 	_, llmErr := utils.StreamTextFromLLMWithMessages(
@@ -5851,7 +5742,7 @@ func (c *Controller) StreamMobileOptimize(
 				"snapshot_id", preSnapshotID,
 				"partial_ops", len(ops),
 			)
-			if _, rollbackErr := c.RestoreAppSnapshot(project, preSnapshotID); rollbackErr != nil {
+			if _, rollbackErr := repo.RevertAndCommit(preSnapshotID, "auto: rollback after mobile optimization failure"); rollbackErr != nil {
 				slog.Error("mobile optimize: rollback failed", "error", rollbackErr, "project_id", project.ID)
 			} else {
 				sendEvent("rollback", map[string]any{

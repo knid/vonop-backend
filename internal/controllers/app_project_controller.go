@@ -2,9 +2,9 @@ package controllers
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -13,6 +13,7 @@ import (
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/requests"
+	"github.com/knid/wemob/internal/responses"
 )
 
 func (c *Controller) CreateAppProject(ctx context.Context, user *models.User, req requests.GenerateAppRequest) (*models.AppProject, error) {
@@ -40,7 +41,6 @@ func (c *Controller) CreateAppProject(ctx context.Context, user *models.User, re
 		Slug:        slug,
 		Prompt:      req.Prompt,
 		ProjectType: projectType,
-		AST:         []byte("[]"),
 		Theme:       []byte("{}"),
 		DataModels:  []byte("[]"),
 		Settings:    map[string]any{},
@@ -51,6 +51,11 @@ func (c *Controller) CreateAppProject(ctx context.Context, user *models.User, re
 	if err != nil {
 		slog.Error("Failed to create app project", "error", err)
 		return nil, fmt.Errorf("failed to create project")
+	}
+
+	// Initialize git repo for this project
+	if _, initErr := c.GitRepoService.Init(project.ID.String()); initErr != nil {
+		slog.Error("Failed to initialize git repo for project", "error", initErr, "project_id", project.ID)
 	}
 
 	return project, nil
@@ -73,7 +78,6 @@ func (c *Controller) CloneAppProjectAsMobile(user *models.User, sourceProjectID 
 		Slug:        slug,
 		Prompt:      source.Prompt,
 		ProjectType: "mobile_app",
-		AST:         source.AST,
 		Theme:       source.Theme,
 		DataModels:  source.DataModels,
 		Settings:    source.Settings,
@@ -85,26 +89,11 @@ func (c *Controller) CloneAppProjectAsMobile(user *models.User, sourceProjectID 
 		return nil, fmt.Errorf("failed to create mobile project")
 	}
 
-	// Copy all generated files from source to clone
-	files, err := c.DB.GetAppGeneratedFilesByProjectID(source.ID.String(), "nextjs")
-	if err != nil {
-		slog.Warn("Failed to fetch source files for cloning", "error", err)
-	} else if len(files) > 0 {
-		var clonedFiles []models.AppGeneratedFile
-		for _, f := range files {
-			clonedFiles = append(clonedFiles, models.AppGeneratedFile{
-				AppProjectID: clone.ID,
-				Platform:     f.Platform,
-				FilePath:     f.FilePath,
-				Content:      f.Content,
-				FileType:     f.FileType,
-				IsGenerated:  f.IsGenerated,
-			})
-		}
-		if err := c.DB.BulkCreateAppGeneratedFiles(clonedFiles); err != nil {
-			slog.Error("Failed to bulk copy files to mobile clone", "error", err)
-			return nil, fmt.Errorf("failed to copy files to mobile project")
-		}
+	// Clone git repo from source to new project
+	if _, cloneErr := c.GitRepoService.Clone(source.ID.String(), clone.ID.String()); cloneErr != nil {
+		slog.Error("Failed to clone git repo for mobile project", "error", cloneErr,
+			"source_id", source.ID, "clone_id", clone.ID)
+		return nil, fmt.Errorf("failed to copy files to mobile project")
 	}
 
 	return clone, nil
@@ -205,6 +194,11 @@ func (c *Controller) DeleteAppProject(id string, user *models.User) error {
 		}
 	}
 
+	// Clean up git repo (best-effort)
+	if err := c.GitRepoService.Delete(project.ID.String()); err != nil {
+		slog.Warn("Failed to delete git repo during app deletion", "error", err, "project_id", project.ID)
+	}
+
 	return c.DB.DeleteAppProject(project)
 }
 
@@ -214,173 +208,174 @@ func (c *Controller) UpdateAppProjectStatus(project *models.AppProject, status s
 	return c.DB.UpdateAppProject(project)
 }
 
-// Snapshots
+// Snapshots — backed by git commit history
 
-func (c *Controller) GetAppSnapshots(projectID string) ([]models.AppSnapshot, error) {
-	return c.DB.GetAppSnapshotsByProjectID(projectID)
-}
-
-func (c *Controller) CreateAppSnapshot(project *models.AppProject, description string, source string) (*models.AppSnapshot, error) {
-	// Capture current generated files
-	files, err := c.DB.GetAppGeneratedFilesByProjectID(project.ID.String(), "nextjs")
+func (c *Controller) GetAppSnapshots(projectID string) ([]responses.CommitHistoryEntry, error) {
+	repo, err := c.GitRepoService.Open(projectID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch files for snapshot: %w", err)
+		return nil, fmt.Errorf("failed to open repo: %w", err)
 	}
-	var snapshotFiles []models.SnapshotFile
-	for _, f := range files {
-		snapshotFiles = append(snapshotFiles, models.SnapshotFile{
-			FilePath: f.FilePath,
-			Content:  f.Content,
-			FileType: f.FileType,
+
+	commits, err := repo.Log(50)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read commit history: %w", err)
+	}
+
+	entries := make([]responses.CommitHistoryEntry, 0, len(commits))
+	for _, ci := range commits {
+		entries = append(entries, responses.CommitHistoryEntry{
+			Hash:        ci.Hash,
+			Description: ci.Message,
+			CreatedAt:   ci.Timestamp,
 		})
 	}
-	filesJSON, err := json.Marshal(snapshotFiles)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal snapshot files: %w", err)
-	}
-
-	snapshot := &models.AppSnapshot{
-		AppProjectID: project.ID,
-		AST:          project.AST,
-		Theme:        project.Theme,
-		Files:        filesJSON,
-		Description:  description,
-		Source:       source,
-	}
-	return c.DB.CreateAppSnapshot(snapshot)
+	return entries, nil
 }
 
-func (c *Controller) RestoreAppSnapshot(project *models.AppProject, snapshotID string) (*models.AppProject, error) {
-	snapshot, err := c.DB.GetAppSnapshotByID(snapshotID)
+func (c *Controller) CreateAppSnapshot(project *models.AppProject, description string, source string) (string, error) {
+	repo, err := c.GitRepoService.OpenOrInit(project.ID.String())
 	if err != nil {
-		return nil, fmt.Errorf("snapshot not found")
-	}
-	if snapshot.AppProjectID != project.ID {
-		return nil, fmt.Errorf("snapshot does not belong to this project")
+		return "", fmt.Errorf("failed to open repo: %w", err)
 	}
 
-	// Create snapshot of current state before restoring (B5: abort if auto-save fails)
-	_, err = c.CreateAppSnapshot(project, "Auto-save before restore", "auto")
+	// Write theme to repo so it's captured in the commit
+	if err := repo.WriteTheme(project.Theme); err != nil {
+		slog.Warn("CreateAppSnapshot: failed to write theme", "error", err, "project_id", project.ID)
+	}
+
+	commitMsg := fmt.Sprintf("%s: %s", source, description)
+	hash, err := repo.Commit(commitMsg)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create auto-save before restore: %w", err)
+		return "", fmt.Errorf("failed to create snapshot commit: %w", err)
 	}
-	// Clean up old auto-snapshots (B7: keep only latest 20)
-	c.DB.DeleteOldAutoSnapshots(project.ID.String(), 20)
+	return hash, nil
+}
 
-	project.AST = snapshot.AST
-	project.Theme = snapshot.Theme
-	project.UpdatedAt = time.Now()
+func (c *Controller) RestoreAppSnapshot(project *models.AppProject, commitHash string) (*models.AppProject, error) {
+	repo, err := c.GitRepoService.Open(project.ID.String())
+	if err != nil {
+		return nil, fmt.Errorf("failed to open repo: %w", err)
+	}
 
-	// Restore files if the snapshot captured them
-	if len(snapshot.Files) > 2 { // more than just "[]"
-		var snapshotFiles []models.SnapshotFile
-		if err := json.Unmarshal(snapshot.Files, &snapshotFiles); err == nil && len(snapshotFiles) > 0 {
-			// Delete current generated files in a single query (B2)
-			if err := c.DB.DeleteAppGeneratedFilesByProjectPlatform(project.ID.String(), "nextjs"); err != nil {
-				return nil, fmt.Errorf("failed to delete current files during restore: %w", err)
-			}
-			// Recreate from snapshot (B4: check errors, log failures)
-			var failedFiles []string
-			for _, sf := range snapshotFiles {
-				if sf.FilePath == "" {
-					continue // skip entries with empty paths
-				}
-				file := &models.AppGeneratedFile{
-					AppProjectID: project.ID,
-					Platform:     "nextjs",
-					FilePath:     sf.FilePath,
-					Content:      sf.Content,
-					FileType:     sf.FileType,
-					IsGenerated:  true,
-				}
-				if _, err := c.DB.CreateAppGeneratedFile(file); err != nil {
-					slog.Error("Failed to restore file from snapshot", "file_path", sf.FilePath, "error", err)
-					failedFiles = append(failedFiles, sf.FilePath)
-				}
-			}
-			slog.Info("Restored files from snapshot", "project_id", project.ID, "snapshot_id", snapshotID,
-				"file_count", len(snapshotFiles), "failed_count", len(failedFiles))
-			// If more than half the files failed, the snapshot is effectively
-			// corrupted — return an error so the caller knows.
-			if len(failedFiles) > 0 && len(failedFiles) > len(snapshotFiles)/2 {
-				return nil, fmt.Errorf("snapshot restore failed: %d of %d files could not be recreated", len(failedFiles), len(snapshotFiles))
-			}
+	// Revert to the target commit and commit the result atomically
+	_, err = repo.RevertAndCommit(commitHash, "undo: reverted to previous version")
+	if err != nil {
+		return nil, fmt.Errorf("failed to restore snapshot: %w", err)
+	}
+
+	// Restore theme from repo
+	if themeData, readErr := repo.ReadTheme(); readErr == nil && len(themeData) > 0 {
+		project.Theme = themeData
+		project.UpdatedAt = time.Now()
+		updated, updateErr := c.DB.UpdateAppProject(project)
+		if updateErr != nil {
+			slog.Error("RestoreAppSnapshot: failed to update project theme", "error", updateErr, "project_id", project.ID)
+			return project, nil
 		}
+		return updated, nil
 	}
 
-	updated, err := c.DB.UpdateAppProject(project)
-	if err != nil {
-		return nil, err
-	}
-
-	return updated, nil
-}
-
-func (c *Controller) DeleteAppSnapshot(project *models.AppProject, snapshotID string) error {
-	snapshot, err := c.DB.GetAppSnapshotByID(snapshotID)
-	if err != nil {
-		return fmt.Errorf("snapshot not found")
-	}
-	if snapshot.AppProjectID != project.ID {
-		return fmt.Errorf("snapshot does not belong to this project")
-	}
-	return c.DB.DeleteAppSnapshot(snapshotID)
+	return project, nil
 }
 
 // Generated Files
 
-func (c *Controller) GetAppGeneratedFiles(projectID string, platform string) ([]models.AppGeneratedFile, error) {
-	return c.DB.GetAppGeneratedFilesByProjectID(projectID, platform)
+func (c *Controller) GetAppGeneratedFiles(projectID string) (map[string]string, error) {
+	repo, err := c.GitRepoService.Open(projectID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open repo: %w", err)
+	}
+	return repo.ReadAllFiles()
 }
 
 // File CRUD
 
-func (c *Controller) CreateAppFile(project *models.AppProject, filePath string, content string, fileType string) (*models.AppGeneratedFile, error) {
-	// Check if file already exists at this path
-	if _, err := c.DB.GetAppGeneratedFileByPath(project.ID.String(), "nextjs", filePath); err == nil {
-		return nil, fmt.Errorf("a file already exists at this path")
+func (c *Controller) CreateAppFile(project *models.AppProject, filePath string, content string, fileType string) error {
+	repo, err := c.GitRepoService.OpenOrInit(project.ID.String())
+	if err != nil {
+		return fmt.Errorf("failed to open repo: %w", err)
 	}
 
-	file := &models.AppGeneratedFile{
-		AppProjectID: project.ID,
-		Platform:     "nextjs",
-		FilePath:     filePath,
-		Content:      content,
-		FileType:     fileType,
-		IsGenerated:  false,
+	if repo.FileExists(filePath) {
+		return fmt.Errorf("a file already exists at this path")
 	}
-	return c.DB.CreateAppGeneratedFile(file)
+
+	if err := repo.WriteFile(filePath, []byte(content)); err != nil {
+		return fmt.Errorf("failed to write file: %w", err)
+	}
+
+	if _, err := repo.Commit(fmt.Sprintf("manual: create %s", filePath)); err != nil {
+		return fmt.Errorf("failed to commit: %w", err)
+	}
+
+	return nil
 }
 
-func (c *Controller) UpdateAppFile(project *models.AppProject, fileID string, content string) (*models.AppGeneratedFile, error) {
-	file, err := c.DB.GetAppGeneratedFileByID(fileID)
+func (c *Controller) UpdateAppFile(project *models.AppProject, filePath string, content string) error {
+	repo, err := c.GitRepoService.Open(project.ID.String())
 	if err != nil {
-		return nil, fmt.Errorf("file not found")
-	}
-	if file.AppProjectID != project.ID {
-		return nil, fmt.Errorf("file does not belong to this project")
+		return fmt.Errorf("failed to open repo: %w", err)
 	}
 
-	file.Content = content
-	file.UpdatedAt = time.Now()
-	return c.DB.UpdateAppGeneratedFile(file)
-}
-
-func (c *Controller) DeleteAppFile(project *models.AppProject, fileID string) error {
-	file, err := c.DB.GetAppGeneratedFileByID(fileID)
-	if err != nil {
+	if !repo.FileExists(filePath) {
 		return fmt.Errorf("file not found")
 	}
-	if file.AppProjectID != project.ID {
-		return fmt.Errorf("file does not belong to this project")
+
+	if err := repo.WriteFile(filePath, []byte(content)); err != nil {
+		return fmt.Errorf("failed to write file: %w", err)
 	}
-	return c.DB.DeleteAppGeneratedFile(file)
+
+	if _, err := repo.Commit(fmt.Sprintf("manual: update %s", filePath)); err != nil {
+		return fmt.Errorf("failed to commit: %w", err)
+	}
+
+	return nil
+}
+
+func (c *Controller) DeleteAppFile(project *models.AppProject, filePath string) error {
+	repo, err := c.GitRepoService.Open(project.ID.String())
+	if err != nil {
+		return fmt.Errorf("failed to open repo: %w", err)
+	}
+
+	if !repo.FileExists(filePath) {
+		return fmt.Errorf("file not found")
+	}
+
+	if err := repo.DeleteFile(filePath); err != nil {
+		return fmt.Errorf("failed to delete file: %w", err)
+	}
+
+	if _, err := repo.Commit(fmt.Sprintf("manual: delete %s", filePath)); err != nil {
+		return fmt.Errorf("failed to commit: %w", err)
+	}
+
+	return nil
 }
 
 // Export
 
-func (c *Controller) ExportAppAsZIP(projectID string, platform string) ([]models.AppGeneratedFile, error) {
-	return c.DB.GetAppGeneratedFilesByProjectID(projectID, platform)
+func (c *Controller) ExportAppAsZIP(projectID string) (map[string]string, error) {
+	repo, err := c.GitRepoService.Open(projectID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open repo: %w", err)
+	}
+	return repo.ReadAllFiles()
+}
+
+// InferFileType extracts a file type identifier from the file extension.
+func InferFileType(path string) string {
+	ext := filepath.Ext(path)
+	if ext == "" {
+		return "text"
+	}
+	ext = strings.TrimPrefix(ext, ".")
+	switch ext {
+	case "tsx", "ts", "jsx", "js", "css", "json", "mjs", "yaml", "yml", "dart", "html", "md", "svg":
+		return ext
+	default:
+		return "text"
+	}
 }
 
 func generateAppSlug(prompt string) string {

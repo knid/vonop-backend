@@ -135,10 +135,9 @@ func (c *Controller) GetMissingEnvVars(project *models.AppProject) ([]RequiredEn
 		json.Unmarshal(b, &required)
 	}
 
-	files, _ := c.DB.GetAppGeneratedFilesByProjectID(project.ID.String(), "nextjs")
 	fileMap := make(map[string]string)
-	for _, f := range files {
-		fileMap[f.FilePath] = f.Content
+	if repo, repoErr := c.GitRepoService.Open(project.ID.String()); repoErr == nil {
+		fileMap, _ = repo.ReadAllFiles()
 	}
 	codeKeys := detectEnvVarsFromCode(fileMap)
 	return c.computeMissingEnvVars(project, required, codeKeys), nil

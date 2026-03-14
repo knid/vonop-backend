@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-playground/validator/v10"
@@ -227,20 +228,16 @@ func (v *HttpViews) GetApp(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get files for the response
-	files, _ := v.Controller.GetAppGeneratedFiles(project.ID.String(), "nextjs")
+	fileMap, _ := v.Controller.GetAppGeneratedFiles(project.ID.String())
 	var fileResp []responses.AppFileResponse
-	for _, f := range files {
-		if f.FilePath == ".env.local" {
+	for path, content := range fileMap {
+		if path == ".env.local" {
 			continue
 		}
 		fileResp = append(fileResp, responses.AppFileResponse{
-			ID:        f.ID,
-			Platform:  f.Platform,
-			FilePath:  f.FilePath,
-			Content:   f.Content,
-			FileType:  f.FileType,
-			CreatedAt: f.CreatedAt,
-			UpdatedAt: f.UpdatedAt,
+			FilePath: path,
+			Content:  content,
+			FileType: controllers.InferFileType(path),
 		})
 	}
 
@@ -347,25 +344,22 @@ func (v *HttpViews) GetAppFiles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	files, err := v.Controller.GetAppGeneratedFiles(project.ID.String(), platform)
+	fileMap, err := v.Controller.GetAppGeneratedFiles(project.ID.String())
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	_ = platform // platform param kept for API compatibility
 
 	var resp []responses.AppFileResponse
-	for _, f := range files {
-		if f.FilePath == ".env.local" {
+	for path, content := range fileMap {
+		if path == ".env.local" {
 			continue
 		}
 		resp = append(resp, responses.AppFileResponse{
-			ID:        f.ID,
-			Platform:  f.Platform,
-			FilePath:  f.FilePath,
-			Content:   f.Content,
-			FileType:  f.FileType,
-			CreatedAt: f.CreatedAt,
-			UpdatedAt: f.UpdatedAt,
+			FilePath: path,
+			Content:  content,
+			FileType: controllers.InferFileType(path),
 		})
 	}
 
@@ -398,8 +392,7 @@ func (v *HttpViews) CreateAppFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	file, err := v.Controller.CreateAppFile(project, req.FilePath, req.Content, req.FileType)
-	if err != nil {
+	if err := v.Controller.CreateAppFile(project, req.FilePath, req.Content, req.FileType); err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -409,17 +402,14 @@ func (v *HttpViews) CreateAppFile(w http.ResponseWriter, r *http.Request) {
 		Set("file_path", req.FilePath))
 
 	utils.JSONResponse(w, responses.AppFileResponse{
-		ID:        file.ID,
-		Platform:  file.Platform,
-		FilePath:  file.FilePath,
-		Content:   file.Content,
-		FileType:  file.FileType,
-		CreatedAt: file.CreatedAt,
-		UpdatedAt: file.UpdatedAt,
+		FilePath: req.FilePath,
+		Content:  req.Content,
+		FileType: req.FileType,
 	}, http.StatusCreated)
 }
 
 // PUT /v2/apps/{appId}/files/{fid} — Update a file's content
+// {fid} is now treated as a URL-encoded file path for backwards compatibility.
 func (v *HttpViews) UpdateAppFile(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
@@ -446,28 +436,25 @@ func (v *HttpViews) UpdateAppFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	file, err := v.Controller.UpdateAppFile(project, fid, req.Content)
-	if err != nil {
+	// fid is the file path
+	if err := v.Controller.UpdateAppFile(project, fid, req.Content); err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
 	v.Controller.TrackUserEvent(user, "app_file_updated", posthog.NewProperties().
 		Set("app_id", project.ID.String()).
-		Set("file_path", file.FilePath))
+		Set("file_path", fid))
 
 	utils.JSONResponse(w, responses.AppFileResponse{
-		ID:        file.ID,
-		Platform:  file.Platform,
-		FilePath:  file.FilePath,
-		Content:   file.Content,
-		FileType:  file.FileType,
-		CreatedAt: file.CreatedAt,
-		UpdatedAt: file.UpdatedAt,
+		FilePath: fid,
+		Content:  req.Content,
+		FileType: controllers.InferFileType(fid),
 	}, http.StatusOK)
 }
 
 // DELETE /v2/apps/{appId}/files/{fid} — Delete a file
+// {fid} is now treated as a URL-encoded file path.
 func (v *HttpViews) DeleteAppFile(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
@@ -476,7 +463,7 @@ func (v *HttpViews) DeleteAppFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	appID := chi.URLParam(r, "appId")
-	fid := chi.URLParam(r, "fid")
+	fid := chi.URLParam(r, "fid") // file path
 	project, err := v.Controller.GetAppProject(appID, user)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
@@ -511,19 +498,18 @@ func (v *HttpViews) GetAppSnapshots(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	snapshots, err := v.Controller.GetAppSnapshots(project.ID.String())
+	entries, err := v.Controller.GetAppSnapshots(project.ID.String())
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	resp := make([]responses.AppSnapshotResponse, 0, len(snapshots))
-	for _, s := range snapshots {
+	resp := make([]responses.AppSnapshotResponse, 0, len(entries))
+	for _, e := range entries {
 		resp = append(resp, responses.AppSnapshotResponse{
-			ID:          s.ID,
-			Description: s.Description,
-			Source:      s.Source,
-			CreatedAt:   s.CreatedAt,
+			Hash:        e.Hash,
+			Description: e.Description,
+			CreatedAt:   e.CreatedAt,
 		})
 	}
 
@@ -551,7 +537,7 @@ func (v *HttpViews) CreateAppSnapshot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	snapshot, err := v.Controller.CreateAppSnapshot(project, req.Description, "manual")
+	hash, err := v.Controller.CreateAppSnapshot(project, req.Description, "manual")
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -561,10 +547,9 @@ func (v *HttpViews) CreateAppSnapshot(w http.ResponseWriter, r *http.Request) {
 		Set("app_id", project.ID.String()))
 
 	utils.JSONResponse(w, responses.AppSnapshotResponse{
-		ID:          snapshot.ID,
-		Description: snapshot.Description,
-		Source:      snapshot.Source,
-		CreatedAt:   snapshot.CreatedAt,
+		Hash:        hash,
+		Description: req.Description,
+		CreatedAt:   time.Now(),
 	}, http.StatusCreated)
 }
 
@@ -597,28 +582,9 @@ func (v *HttpViews) RestoreAppSnapshot(w http.ResponseWriter, r *http.Request) {
 	utils.JSONResponse(w, responses.SuccessResponse{Success: true}, http.StatusOK)
 }
 
-// DELETE /v2/apps/{appId}/snapshots/{sid}
+// DELETE /v2/apps/{appId}/snapshots/{sid} — no longer supported (git commits are immutable)
 func (v *HttpViews) DeleteAppSnapshot(w http.ResponseWriter, r *http.Request) {
-	user, err := v.Controller.GetUserFromReq(r)
-	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
-		return
-	}
-
-	appID := chi.URLParam(r, "appId")
-	sid := chi.URLParam(r, "sid")
-	project, err := v.Controller.GetAppProject(appID, user)
-	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
-		return
-	}
-
-	if err := v.Controller.DeleteAppSnapshot(project, sid); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	utils.JSONResponse(w, responses.SuccessResponse{Success: true}, http.StatusOK)
+	utils.JSONErrorResponse(w, "snapshot deletion is not supported with git-based storage", http.StatusGone)
 }
 
 // GET /v2/apps/{appId}/export/{platform}
@@ -644,20 +610,21 @@ func (v *HttpViews) ExportApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	files, err := v.Controller.ExportAppAsZIP(project.ID.String(), platform)
-	if err != nil || len(files) == 0 {
+	fileMap, err := v.Controller.ExportAppAsZIP(project.ID.String())
+	if err != nil || len(fileMap) == 0 {
 		utils.JSONErrorResponse(w, "no files to export", http.StatusNotFound)
 		return
 	}
+	_ = platform // kept for API compatibility
 
 	var buf bytes.Buffer
 	zw := zip.NewWriter(&buf)
-	for _, f := range files {
-		fw, err := zw.Create(f.FilePath)
+	for path, content := range fileMap {
+		fw, err := zw.Create(path)
 		if err != nil {
 			continue
 		}
-		fw.Write([]byte(f.Content))
+		fw.Write([]byte(content))
 	}
 	zw.Close()
 
@@ -1045,7 +1012,7 @@ func (v *HttpViews) GetAppInit(w http.ResponseWriter, r *http.Request) {
 		wg sync.WaitGroup
 
 		conv           *models.AppConversation
-		files          []models.AppGeneratedFile
+		fileMap        map[string]string
 		domains        []responses.AppDomainResponse
 		envVars        []models.AppEnvVar
 		missingEnvVars []controllers.RequiredEnvVar
@@ -1064,7 +1031,7 @@ func (v *HttpViews) GetAppInit(w http.ResponseWriter, r *http.Request) {
 
 	go func() {
 		defer wg.Done()
-		files, _ = v.Controller.GetAppGeneratedFiles(project.ID.String(), "nextjs")
+		fileMap, _ = v.Controller.GetAppGeneratedFiles(project.ID.String())
 	}()
 
 	go func() {
@@ -1114,18 +1081,14 @@ func (v *HttpViews) GetAppInit(w http.ResponseWriter, r *http.Request) {
 	json.Unmarshal(project.Theme, &theme)
 
 	var fileResp []responses.AppFileResponse
-	for _, f := range files {
-		if f.FilePath == ".env.local" {
+	for path, content := range fileMap {
+		if path == ".env.local" {
 			continue
 		}
 		fileResp = append(fileResp, responses.AppFileResponse{
-			ID:        f.ID,
-			Platform:  f.Platform,
-			FilePath:  f.FilePath,
-			Content:   f.Content,
-			FileType:  f.FileType,
-			CreatedAt: f.CreatedAt,
-			UpdatedAt: f.UpdatedAt,
+			FilePath: path,
+			Content:  content,
+			FileType: controllers.InferFileType(path),
 		})
 	}
 

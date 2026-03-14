@@ -6,6 +6,13 @@ import (
 	"github.com/google/uuid"
 )
 
+// CommitHistoryEntry represents a git commit in the project's version history.
+type CommitHistoryEntry struct {
+	Hash        string    `json:"hash"`
+	Description string    `json:"description"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
 type AppProjectResponse struct {
 	ID          uuid.UUID      `json:"id"`
 	Name        string         `json:"name"`
@@ -23,20 +30,15 @@ type AppProjectResponse struct {
 
 type AppProjectDetailResponse struct {
 	AppProjectResponse
-	AST          []map[string]any     `json:"ast,omitempty"`
 	DataModels   []map[string]any     `json:"data_models,omitempty"`
 	Files        []AppFileResponse    `json:"files,omitempty"`
 	Integrations []AppIntegrationResp `json:"integrations,omitempty"`
 }
 
 type AppFileResponse struct {
-	ID        uuid.UUID `json:"id"`
-	Platform  string    `json:"platform"`
-	FilePath  string    `json:"file_path"`
-	Content   string    `json:"content"`
-	FileType  string    `json:"file_type"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	FilePath string `json:"file_path"`
+	Content  string `json:"content"`
+	FileType string `json:"file_type"`
 }
 
 type AppIntegrationResp struct {
@@ -61,9 +63,8 @@ type AppDeploymentResponse struct {
 }
 
 type AppSnapshotResponse struct {
-	ID          uuid.UUID `json:"id"`
+	Hash        string    `json:"hash"`
 	Description string    `json:"description"`
-	Source      string    `json:"source"`
 	CreatedAt   time.Time `json:"created_at"`
 }
 
