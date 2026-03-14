@@ -369,9 +369,10 @@ func (c *Controller) StreamBuildApp(
 		messages = []models.AppConversationMessage{}
 	}
 
-	// Convert base64 images to data URIs
-	var imageURLs []string
-	for _, img := range images {
+	// Convert base64 images to data URIs for LLM, upload to S3 for storage
+	var imageURLs []string    // data URIs for LLM
+	var storedImageURLs []string // S3 URLs for conversation storage
+	for i, img := range images {
 		if img == "" {
 			continue
 		}
@@ -379,15 +380,25 @@ func (c *Controller) StreamBuildApp(
 			img = "data:image/png;base64," + img
 		}
 		imageURLs = append(imageURLs, img)
+		// Upload to S3 so we don't store multi-MB base64 in the conversation
+		if imgData, err := utils.DecodeBase64Image(img); err == nil && len(imgData) < 5*1024*1024 {
+			s3Key := fmt.Sprintf("apps/%s/chat-images/%s-%d.png", project.ID, uuid.New().String()[:8], i)
+			if publicURL, err := c.AssetsStorage.UploadFileBytePublic(ctx, s3Key, imgData, "image/png"); err == nil {
+				storedImageURLs = append(storedImageURLs, publicURL)
+				continue
+			}
+		}
+		// Fallback: store a placeholder instead of the full base64
+		storedImageURLs = append(storedImageURLs, "[image]")
 	}
 
-	// Append user message
+	// Append user message (store S3 URLs, not base64)
 	messages = append(messages, models.AppConversationMessage{
 		ID:        uuid.New().String(),
 		Role:      "user",
 		Content:   message,
 		Timestamp: time.Now().Unix(),
-		ImageURLs: imageURLs,
+		ImageURLs: storedImageURLs,
 	})
 	if msgJSON, err := json.Marshal(messages); err != nil {
 		slog.Error("failed to marshal messages after user message", "error", err, "conv_id", conv.ID)

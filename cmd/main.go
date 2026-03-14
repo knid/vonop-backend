@@ -1417,6 +1417,13 @@ func main() {
 		slog.Info("Servers shut down gracefully")
 	}()
 
+	// Cleanup expired tokens on startup
+	if n, err := db.DeleteExpiredTokens(); err != nil {
+		slog.Warn("failed to clean expired tokens", "error", err)
+	} else if n > 0 {
+		slog.Info("Cleaned expired tokens", "count", n)
+	}
+
 	// Main server (blocks until Shutdown is called)
 	slog.Info("Main server listening on :8001")
 	if err := mainServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
