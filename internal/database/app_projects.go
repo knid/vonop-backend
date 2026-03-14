@@ -9,13 +9,17 @@ import (
 
 func (db *Database) GetAppProjectsByUserID(userID string) ([]models.AppProject, error) {
 	var projects []models.AppProject
-	err := db.DB.NewSelect().Model(&projects).Where("user_id = ?", userID).Order("created_at DESC").Scan(context.Background())
+	err := db.DB.NewSelect().Model(&projects).
+		ExcludeColumn("data_models", "prompt").
+		Where("user_id = ?", userID).Order("created_at DESC").Scan(context.Background())
 	return projects, err
 }
 
 func (db *Database) GetAppProjectsByUserIDAndTypes(userID string, types []string) ([]models.AppProject, error) {
 	var projects []models.AppProject
-	q := db.DB.NewSelect().Model(&projects).Where("user_id = ?", userID)
+	q := db.DB.NewSelect().Model(&projects).
+		ExcludeColumn("data_models", "prompt").
+		Where("user_id = ?", userID)
 	if len(types) > 0 {
 		q = q.Where("project_type IN (?)", bun.In(types))
 	}
