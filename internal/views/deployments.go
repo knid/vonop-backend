@@ -15,7 +15,7 @@ func (v *HttpViews) GetDeployments(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !(user.SubscriptionStatus == "active" || user.SubscriptionStatus == "trial") {
+	if !(user.SubscriptionStatus == "active") {
 		utils.JSONErrorResponse(w, "you do not have access to this resource", http.StatusForbidden)
 		return
 	}
@@ -36,7 +36,7 @@ func (v *HttpViews) GetDeployment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !(user.SubscriptionStatus == "active" || user.SubscriptionStatus == "trial") {
+	if !(user.SubscriptionStatus == "active") {
 		utils.JSONErrorResponse(w, "you do not have access to this resource", http.StatusForbidden)
 		return
 	}
@@ -62,7 +62,7 @@ func (v *HttpViews) CreateDeployment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !(user.SubscriptionStatus == "active" || user.SubscriptionStatus == "trial") {
+	if !(user.SubscriptionStatus == "active") {
 		utils.JSONErrorResponse(w, "you do not have access to this resource", http.StatusForbidden)
 		return
 	}
@@ -89,7 +89,7 @@ func (v *HttpViews) UpdateDeployment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !(user.SubscriptionStatus == "active" || user.SubscriptionStatus == "trial") {
+	if !(user.SubscriptionStatus == "active") {
 		utils.JSONErrorResponse(w, "you do not have access to this resource", http.StatusForbidden)
 		return
 	}
@@ -122,7 +122,7 @@ func (v *HttpViews) SignUnsignedIPA(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !(user.SubscriptionStatus == "active" || user.SubscriptionStatus == "trial") {
+	if !(user.SubscriptionStatus == "active") {
 		utils.JSONErrorResponse(w, "you do not have access to this resource", http.StatusForbidden)
 		return
 	}
@@ -149,7 +149,7 @@ func (v *HttpViews) CheckSignIPATaskStatus(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	if !(user.SubscriptionStatus == "active" || user.SubscriptionStatus == "trial") {
+	if !(user.SubscriptionStatus == "active") {
 		utils.JSONErrorResponse(w, "you do not have access to this resource", http.StatusForbidden)
 		return
 	}

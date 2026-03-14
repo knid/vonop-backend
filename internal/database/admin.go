@@ -45,14 +45,14 @@ func (db *Database) GetAdminStats() (*AdminStats, error) {
 	}
 	stats.ActiveUsers = active
 
-	trial, err := db.DB.NewSelect().TableExpr("users").Where("deleted_at IS NULL").Where("subscription_status = 'trial'").Count(ctx)
+	free, err := db.DB.NewSelect().TableExpr("users").Where("deleted_at IS NULL").Where("subscription_status = 'free'").Count(ctx)
 	if err != nil {
 		return nil, err
 	}
-	stats.TrialUsers = trial
+	stats.TrialUsers = free // repurposed: counts free-tier users
 
 	stats.PaidUsers = active
-	stats.InactiveUsers = total - active - trial
+	stats.InactiveUsers = total - active - free
 
 	projects, err := db.DB.NewSelect().TableExpr("projects").Where("deleted_at IS NULL").Count(ctx)
 	if err != nil {
@@ -93,7 +93,7 @@ func (db *Database) GetRevenueStats() (*RevenueStats, error) {
 	}
 	stats.TotalSubscriptions = total
 
-	active, err := db.DB.NewSelect().TableExpr("users").Where("deleted_at IS NULL").Where("subscription_status IN ('active', 'trial')").Count(ctx)
+	active, err := db.DB.NewSelect().TableExpr("users").Where("deleted_at IS NULL").Where("subscription_status = 'active'").Count(ctx)
 	if err != nil {
 		return nil, err
 	}

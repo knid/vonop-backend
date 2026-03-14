@@ -358,9 +358,6 @@ func (c *Controller) assignFreePlan(user *models.User) {
 		slog.Warn("assignFreePlan: failed to update user", "error", err)
 		return
 	}
-	if err := c.AddAICredits(user, 50, "free_plan_grant", "registration"); err != nil {
-		slog.Warn("assignFreePlan: failed to grant credits", "error", err)
-	}
 }
 
 func (c *Controller) GetUserFromReq(r *http.Request) (*models.User, error) {
