@@ -16,10 +16,7 @@ FROM alpine:3.20
 
 WORKDIR /app
 
-RUN apk add --no-cache ca-certificates tzdata curl git && \
-    git config --global user.email "system@wemob.io" && \
-    git config --global user.name "wemob" && \
-    git config --global init.defaultBranch main
+RUN apk add --no-cache ca-certificates tzdata curl git
 
 RUN addgroup -S appuser \
     && adduser -S -G appuser -H -s /sbin/nologin appuser \
@@ -31,5 +28,9 @@ COPY --from=builder --chown=appuser:appuser /app/migrate_to_git /app/migrate_to_
 COPY --from=builder --chown=appuser:appuser /app/storage /app/storage
 
 USER appuser
+
+RUN git config --global user.email "system@wemob.io" && \
+    git config --global user.name "wemob" && \
+    git config --global init.defaultBranch main
 
 ENTRYPOINT ["/app/bin"]
