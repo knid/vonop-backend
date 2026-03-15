@@ -294,3 +294,34 @@ func (r *Repo) WriteTheme(themeJSON []byte) error {
 func (r *Repo) ReadTheme() ([]byte, error) {
 	return r.ReadFile(filepath.Join(metaDir, "theme.json"))
 }
+
+// CurrentBranch returns the name of the current checked-out branch.
+func (r *Repo) CurrentBranch() (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), readTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", "rev-parse", "--abbrev-ref", "HEAD")
+	cmd.Dir = r.Path
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("gitrepo: current branch: %w", err)
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// PushToURL pushes the current branch to a remote URL. The URL is not persisted
+// as a named remote — this prevents tokens from being stored in .git/config.
+// Acquires the per-project lock to prevent concurrent pushes.
+func (r *Repo) PushToURL(url, branch string) error {
+	unlock := r.service.lock(r.ProjectID)
+	defer unlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", "push", url, branch)
+	cmd.Dir = r.Path
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("gitrepo: push: %s: %s", err, out)
+	}
+	return nil
+}
