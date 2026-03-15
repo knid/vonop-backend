@@ -662,6 +662,12 @@ func main() {
 	go utils.CheckUsageAlertsJob(db, crmServices.NewBrevoCRMService(sm.GetSecret("BREVO_API_KEY")))
 	vercelService := vercel.NewService(sm.GetSecret("VERCEL_API_TOKEN"), sm.GetSecret("VERCEL_TEAM_ID"))
 
+	// GitHub OAuth secrets (required for GitHub export feature)
+	// GITHUB_CLIENT_ID — OAuth App client ID
+	// GITHUB_CLIENT_SECRET — OAuth App client secret
+	// GITHUB_REDIRECT_URI — OAuth callback URL (e.g. https://api.wemob.io/v2/auth/github/callback)
+	// GITHUB_TOKEN_ENCRYPTION_KEY — 64-char hex string for AES-256-GCM token encryption
+
 	// Neon service (optional — only enabled when API key is set)
 	var neonService *neon.Service
 	if neonKey := sm.GetSecret("NEON_API_KEY"); neonKey != "" {
@@ -1153,6 +1159,14 @@ func main() {
 						r.Get("/history", httpViews.GetDeployHistory)
 					})
 
+					// GitHub export
+					r.Route("/github", func(r chi.Router) {
+						r.Get("/", httpViews.GetGitHubExport)
+						r.Post("/export", httpViews.ExportToGitHub)
+						r.Post("/push", httpViews.PushToGitHub)
+						r.Delete("/", httpViews.RemoveGitHubExport)
+					})
+
 					// Mobile builds
 					r.Route("/build", func(r chi.Router) {
 						r.Post("/android", httpViews.BuildAppAndroid)
@@ -1335,6 +1349,12 @@ func main() {
 
 			// Public integration providers
 			r.Get("/integrations/providers", httpViews.GetV2IntegrationProviders)
+
+			// GitHub OAuth
+			r.Get("/auth/github", httpViews.GitHubAuthRedirect)
+			r.Get("/auth/github/callback", httpViews.GitHubAuthCallback)
+			r.Delete("/auth/github", httpViews.DisconnectGitHub)
+			r.Get("/auth/github/status", httpViews.GetGitHubConnectionStatus)
 		})
 
 		r.Get("/health", httpViews.Health)
