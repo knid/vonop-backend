@@ -126,6 +126,8 @@ func createSchema(db *bun.DB) error {
 		(*models.MobileAppConfig)(nil),
 		// Preview codes for Try With Wemob
 		(*models.PreviewCode)(nil),
+		// GitHub export tracking
+		(*models.AppGitHubExport)(nil),
 	}
 
 	for _, model := range models {
@@ -242,6 +244,11 @@ func createSchema(db *bun.DB) error {
 		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS rating_enabled boolean NOT NULL DEFAULT false`,
 		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS rating_sessions int NOT NULL DEFAULT 5`,
 		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS update_check_enabled boolean NOT NULL DEFAULT false`,
+		// GitHub integration fields on users
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS github_access_token text`,
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS github_username text`,
+		// GitHub export limit on limits
+		`ALTER TABLE standart_user_limits ADD COLUMN IF NOT EXISTS can_export_to_github boolean NOT NULL DEFAULT false`,
 	}
 
 	// Deduplicate before creating unique indexes (keep the latest row per group)
@@ -267,6 +274,8 @@ func createSchema(db *bun.DB) error {
 		`CREATE INDEX IF NOT EXISTS idx_web_analytics_project_session ON web_analytics_events (project_id, session_id)`,
 		// Token lookup index — covers the soft-delete filter used by GetTokenByToken
 		`CREATE INDEX IF NOT EXISTS idx_tokens_string_active ON tokens (string) WHERE deleted_at IS NULL`,
+		// GitHub export lookup index
+		`CREATE INDEX IF NOT EXISTS idx_app_github_exports_app_project_id ON app_github_exports(app_project_id)`,
 	}
 	alterStatements = append(alterStatements, indexStatements...)
 	// Check if migrations have already been applied by testing for a column from the latest batch.
