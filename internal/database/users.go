@@ -72,3 +72,12 @@ func (db *Database) GetUserByStripeCustomerID(customerID string) (*models.User, 
 
 	return &user, err
 }
+
+func (db *Database) UpdateUserGitHubFields(user *models.User) error {
+	user.UpdatedAt = time.Now()
+	_, err := db.DB.NewUpdate().Model(user).
+		Column("github_access_token", "github_username", "updated_at").
+		Where("id = ?", user.ID).
+		Exec(context.Background())
+	return err
+}
