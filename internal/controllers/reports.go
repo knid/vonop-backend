@@ -16,7 +16,7 @@ func (c *Controller) UpdateBuildTaskStatus(reportBuildReq requests.ReportBuildRe
 
 	buildTask.StatusText = reportBuildReq.Status
 	if reportBuildReq.Status == "success" || reportBuildReq.Status == "completed" ||
-		reportBuildReq.Status == "done" || reportBuildReq.Status == "builded" || reportBuildReq.Status == "Builded" {
+		reportBuildReq.Status == "done" || reportBuildReq.Status == "built" || reportBuildReq.Status == "Built" {
 		buildTask.Finished = true
 	}
 

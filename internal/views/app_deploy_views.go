@@ -78,17 +78,17 @@ func (v *HttpViews) DeployAppWeb(w http.ResponseWriter, r *http.Request) {
 	}, http.StatusCreated)
 }
 
-// POST /v2/apps/{appId}/deploy/android
-func (v *HttpViews) DeployAppAndroid(w http.ResponseWriter, r *http.Request) {
-	v.deployAppMobile(w, r, "android")
+// POST /v2/apps/{appId}/build/android
+func (v *HttpViews) BuildAppAndroid(w http.ResponseWriter, r *http.Request) {
+	v.buildAppMobile(w, r, "android")
 }
 
-// POST /v2/apps/{appId}/deploy/ios
-func (v *HttpViews) DeployAppIOS(w http.ResponseWriter, r *http.Request) {
-	v.deployAppMobile(w, r, "ios")
+// POST /v2/apps/{appId}/build/ios
+func (v *HttpViews) BuildAppIOS(w http.ResponseWriter, r *http.Request) {
+	v.buildAppMobile(w, r, "ios")
 }
 
-func (v *HttpViews) deployAppMobile(w http.ResponseWriter, r *http.Request, platform string) {
+func (v *HttpViews) buildAppMobile(w http.ResponseWriter, r *http.Request, platform string) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
@@ -111,7 +111,7 @@ func (v *HttpViews) deployAppMobile(w http.ResponseWriter, r *http.Request, plat
 		return
 	}
 
-	var req requests.DeployMobileBuildRequest
+	var req requests.MobileBuildRequest
 	if err := utils.ParseJSONBody(r, &req); err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
 		return

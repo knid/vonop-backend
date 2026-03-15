@@ -71,9 +71,9 @@ func (v *HttpViews) UpdateBuildTaskStatus(w http.ResponseWriter, r *http.Request
 		v.sendCRMEvent(task.Project.User, constants.BREVO_EVENT_BUILD_STARTED_IOS, payload)
 	} else if reportBuildReq.Status == "Building" && task.Platform == "android" {
 		v.sendCRMEvent(task.Project.User, constants.BREVO_EVENT_BUILD_STARTED_ANDROID, payload)
-	} else if reportBuildReq.Status == "Builded" && task.Platform == "ios" {
+	} else if reportBuildReq.Status == "Built" && task.Platform == "ios" {
 		v.sendCRMEvent(task.Project.User, constants.BREVO_EVENT_BUILD_FINISHED_IOS, payload)
-	} else if reportBuildReq.Status == "Builded" && task.Platform == "android" {
+	} else if reportBuildReq.Status == "Built" && task.Platform == "android" {
 		v.sendCRMEvent(task.Project.User, constants.BREVO_EVENT_BUILD_FINISHED_ANDROID, payload)
 	} else if reportBuildReq.Status == "error" && task.Platform == "ios" {
 		payload["error_message"] = reportBuildReq.Message

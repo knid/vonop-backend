@@ -1140,10 +1140,14 @@ func main() {
 					r.Route("/deploy", func(r chi.Router) {
 						r.Post("/validate", httpViews.ValidateAppFiles)
 						r.Post("/web", httpViews.DeployAppWeb)
-						r.Post("/android", httpViews.DeployAppAndroid)
-						r.Post("/ios", httpViews.DeployAppIOS)
 						r.Get("/status", httpViews.GetDeployStatus)
 						r.Get("/history", httpViews.GetDeployHistory)
+					})
+
+					// Mobile builds
+					r.Route("/build", func(r chi.Router) {
+						r.Post("/android", httpViews.BuildAppAndroid)
+						r.Post("/ios", httpViews.BuildAppIOS)
 					})
 
 					r.Post("/convert-to-mobile", httpViews.ConvertToMobile)

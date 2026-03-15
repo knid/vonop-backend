@@ -57,14 +57,14 @@ type DeployWebRequest struct {
 	Target string `json:"target" validate:"omitempty,oneof=production preview" errormgs:"must be 'production' or 'preview'"`
 }
 
-type DeployMobileBuildRequest struct {
+type MobileBuildRequest struct {
 	AppName           string `json:"app_name" validate:"required,min=2" errormgs:"must be at least 2 characters"`
 	Icon              string `json:"icon" validate:"required" errormgs:"app icon is required"`
 	SplashScreenColor string `json:"splash_screen_color"`
 }
 
-func (r *DeployMobileBuildRequest) Validate(validate *validator.Validate) error {
-	return utils.ValidateFunc[DeployMobileBuildRequest](*r, validate)
+func (r *MobileBuildRequest) Validate(validate *validator.Validate) error {
+	return utils.ValidateFunc[MobileBuildRequest](*r, validate)
 }
 
 type CreateAppSnapshotRequest struct {
