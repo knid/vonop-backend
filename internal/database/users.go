@@ -76,7 +76,7 @@ func (db *Database) GetUserByStripeCustomerID(customerID string) (*models.User, 
 func (db *Database) UpdateUserGitHubFields(user *models.User) error {
 	user.UpdatedAt = time.Now()
 	_, err := db.DB.NewUpdate().Model(user).
-		Column("github_access_token", "github_username", "updated_at").
+		Column("git_hub_access_token", "git_hub_username", "updated_at").
 		Where("id = ?", user.ID).
 		Exec(context.Background())
 	return err

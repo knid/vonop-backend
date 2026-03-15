@@ -245,8 +245,8 @@ func createSchema(db *bun.DB) error {
 		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS rating_sessions int NOT NULL DEFAULT 5`,
 		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS update_check_enabled boolean NOT NULL DEFAULT false`,
 		// GitHub integration fields on users
-		`ALTER TABLE users ADD COLUMN IF NOT EXISTS github_access_token text`,
-		`ALTER TABLE users ADD COLUMN IF NOT EXISTS github_username text`,
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS git_hub_access_token text`,
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS git_hub_username text`,
 		// GitHub export limit on limits
 		`ALTER TABLE standart_user_limits ADD COLUMN IF NOT EXISTS can_export_to_github boolean NOT NULL DEFAULT false`,
 	}
