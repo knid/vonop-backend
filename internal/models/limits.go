@@ -28,7 +28,7 @@ type StandartUserLimits struct {
 	CreditRolloverMonths int  `bun:",notnull,default:0"`
 	CanAccessCode        bool `bun:",notnull,default:false"`
 	CanBuyDomain         bool `bun:",notnull,default:false"`
-	CanExportToGitHub    bool `bun:",notnull,default:false"`
+	CanExportToGitHub    bool `bun:"can_export_to_github,notnull,default:false"`
 	CanUseEmailService   bool `bun:",notnull,default:false"`
 	CanBuildMobile       bool `bun:",notnull,default:false"`
 	CreatedAt               time.Time `bun:"created_at,nullzero,notnull,default:current_timestamp"`
