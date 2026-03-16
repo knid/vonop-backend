@@ -354,6 +354,7 @@ func createSchema(db *bun.DB) error {
 		`CREATE INDEX IF NOT EXISTS idx_deployments_project_id ON deployments(project_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_ai_credits_balances_user_id ON ai_credits_balances(user_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_ai_credit_transactions_user_id ON ai_credit_transactions(user_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_ai_credit_transactions_user_created ON ai_credit_transactions(user_id, created_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_organization_members_user_id ON organization_members(user_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_organization_members_organization_id ON organization_members(organization_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_vercel_projects_app_project_id ON vercel_projects(app_project_id)`,
@@ -569,19 +570,6 @@ func migrateInactiveUsersToFree(bundb *bun.DB) {
 		slog.Info("migrated inactive users to free plan", "count", n)
 	}
 
-	// Grant 50 credits to migrated free users who don't have a balance
-	res, err = bundb.ExecContext(context.Background(), `
-		INSERT INTO ai_credits_balances (id, user_id, balance, period_start, period_end, created_at, updated_at)
-		SELECT uuid_generate_v4(), id, 50, NOW(), NOW() + INTERVAL '100 years', NOW(), NOW()
-		FROM users
-		WHERE subscription_status = 'free'
-		AND id NOT IN (SELECT user_id FROM ai_credits_balances)
-	`)
-	if err != nil {
-		slog.Warn("grant free credits to migrated users failed", "error", err)
-	} else if n, _ := res.RowsAffected(); n > 0 {
-		slog.Info("granted free credits to migrated users", "count", n)
-	}
 }
 
 func main() {

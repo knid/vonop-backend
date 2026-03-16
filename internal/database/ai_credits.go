@@ -19,8 +19,12 @@ func (db *Database) GetAICreditsBalance(userID string) (*models.AICreditsBalance
 }
 
 func (db *Database) CreateAICreditsBalance(balance *models.AICreditsBalance) (*models.AICreditsBalance, error) {
-	_, err := db.DB.NewInsert().Model(balance).Exec(context.Background())
-	return balance, err
+	_, err := db.DB.NewInsert().Model(balance).On("CONFLICT (user_id) DO NOTHING").Exec(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	// Re-read to get the actual row (whether we inserted or it already existed)
+	return db.GetAICreditsBalance(balance.UserID.String())
 }
 
 func (db *Database) UpdateAICreditsBalance(balance *models.AICreditsBalance) (*models.AICreditsBalance, error) {

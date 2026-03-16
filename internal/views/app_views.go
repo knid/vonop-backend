@@ -792,9 +792,6 @@ func (v *HttpViews) ConvertToMobile(w http.ResponseWriter, r *http.Request) {
 	if requireActiveSubscription(w, user) {
 		return
 	}
-	if v.checkMinimumCredits(w, user) {
-		return
-	}
 
 	appID := chi.URLParam(r, "appId")
 	clone, err := v.Controller.CloneAppProjectAsMobile(user, appID)

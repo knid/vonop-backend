@@ -49,17 +49,15 @@ func checkUsageAlerts(db *database.Database, crmService crmServices.CRMService) 
 
 		usagePercent := float64(limits.MonthlyAICredits-balance.Balance) / float64(limits.MonthlyAICredits) * 100
 
-		if usagePercent >= 80 && usagePercent < 90 {
+		if usagePercent >= 90 || balance.Balance <= 0 {
+			go crmService.SendEvent(&user, constants.BREVO_EVENT_AI_CREDITS_DEPLETED, map[string]any{
+				"credits_total": limits.MonthlyAICredits,
+			})
+		} else if usagePercent >= 80 {
 			go crmService.SendEvent(&user, constants.BREVO_EVENT_AI_CREDITS_LOW, map[string]any{
 				"credits_remaining": balance.Balance,
 				"credits_total":     limits.MonthlyAICredits,
 				"usage_percent":     int(usagePercent),
-			})
-		}
-
-		if balance.Balance <= 0 {
-			go crmService.SendEvent(&user, constants.BREVO_EVENT_AI_CREDITS_DEPLETED, map[string]any{
-				"credits_total": limits.MonthlyAICredits,
 			})
 		}
 	}
