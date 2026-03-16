@@ -20,8 +20,7 @@ func (v *HttpViews) GetProjectNotifications(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	if !(user.SubscriptionStatus == "active") {
-		utils.JSONErrorResponse(w, "you do not have access to this resource", http.StatusForbidden)
+	if requireActiveSubscription(w, user) {
 		return
 	}
 
@@ -54,8 +53,7 @@ func (v *HttpViews) SendProjectNotification(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	if !(user.SubscriptionStatus == "active") {
-		utils.JSONErrorResponse(w, "you do not have access to this resource", http.StatusForbidden)
+	if requireActiveSubscription(w, user) {
 		go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_NEED, map[string]any{
 			"action": "send_notification",
 		})

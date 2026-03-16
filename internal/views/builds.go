@@ -20,8 +20,7 @@ func (v *HttpViews) GetProjectBuilds(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !(user.SubscriptionStatus == "active") {
-		utils.JSONCodedErrorResponse(w, "SUBSCRIPTION_REQUIRED", "active subscription required", http.StatusForbidden, nil)
+	if requireActiveSubscription(w, user) {
 		return
 	}
 
@@ -60,8 +59,7 @@ func (v *HttpViews) CreateProjectBuild(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !(user.SubscriptionStatus == "active") {
-		utils.JSONErrorResponse(w, "you do not have access to this resource", http.StatusForbidden)
+	if requireActiveSubscription(w, user) {
 		go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_NEED, map[string]any{})
 		return
 	}
@@ -185,8 +183,7 @@ func (v *HttpViews) GetProjectBuild(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !(user.SubscriptionStatus == "active") {
-		utils.JSONErrorResponse(w, "you do not have access to this resource", http.StatusForbidden)
+	if requireActiveSubscription(w, user) {
 		return
 	}
 

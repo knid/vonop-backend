@@ -33,8 +33,7 @@ func (v *HttpViews) GetNavBarItems(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !(user.SubscriptionStatus == "active") {
-		utils.JSONErrorResponse(w, "this projects is not active", http.StatusBadRequest)
+	if requireActiveSubscription(w, user) {
 		return
 	}
 
@@ -72,8 +71,7 @@ func (v *HttpViews) GetNavBarItemsBackground(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	if !(user.SubscriptionStatus == "active") {
-		utils.JSONErrorResponse(w, "this projects is not active", http.StatusBadRequest)
+	if requireActiveSubscription(w, user) {
 		return
 	}
 
@@ -111,8 +109,7 @@ func (v *HttpViews) GetJSInjectionData(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !(user.SubscriptionStatus == "active") {
-		utils.JSONErrorResponse(w, "this projects is not active", http.StatusBadRequest)
+	if requireActiveSubscription(w, user) {
 		return
 	}
 

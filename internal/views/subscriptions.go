@@ -48,6 +48,7 @@ func (v *HttpViews) GetLimits(w http.ResponseWriter, r *http.Request) {
 		MonthlyAppCount:         limits.MonthlyAppCount,
 		MonthlyDeployCount:      limits.MonthlyDeployCount,
 		CanUseEcommerce:         limits.CanUseEcommerce,
+		CanExportToGitHub:       limits.CanExportToGitHub,
 	}
 
 	utils.JSONResponse(w, limitsResponse, http.StatusOK)
@@ -74,33 +75,7 @@ func (v *HttpViews) GetSubscription(w http.ResponseWriter, r *http.Request) {
 }
 
 func (v *HttpViews) UpdateSubscription(w http.ResponseWriter, r *http.Request) {
-	user, err := v.Controller.GetUserFromReq(r)
-	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
-		return
-	}
-
-	subscriptionId := r.URL.Query().Get("subscription_id")
-	if subscriptionId == "" {
-		utils.JSONErrorResponse(w, "subscription_id is required", http.StatusBadRequest)
-		return
-	}
-
-	err = v.Controller.UpdateSubscription(user, subscriptionId)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			utils.JSONErrorResponse(w, "subscription not found", http.StatusNotFound)
-			return
-		}
-		utils.JSONErrorResponse(w, "failed to update subscription", http.StatusInternalServerError)
-		return
-	}
-
-	go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_UPDATED, map[string]any{
-		"subscription_id": subscriptionId,
-	})
-
-	utils.JSONResponse(w, map[string]string{"message": "Subscription updated successfully"}, http.StatusOK)
+	utils.JSONCodedErrorResponse(w, "FORBIDDEN", "subscription changes must go through Stripe checkout", http.StatusForbidden, nil)
 }
 
 func (v *HttpViews) CancelSubscription(w http.ResponseWriter, r *http.Request) {

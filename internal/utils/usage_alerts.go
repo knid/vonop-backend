@@ -9,6 +9,7 @@ import (
 	"github.com/knid/wemob/internal/database"
 	"github.com/knid/wemob/internal/models"
 	crmServices "github.com/knid/wemob/internal/services/crm"
+	"github.com/uptrace/bun"
 )
 
 // CheckUsageAlertsJob runs every hour and sends CRM events for usage approaching limits
@@ -27,7 +28,7 @@ func checkUsageAlerts(db *database.Database, crmService crmServices.CRMService) 
 	err := db.DB.NewSelect().
 		Model(&users).
 		Where("deleted_at IS NULL").
-		Where("subscription_status = ?", "active").
+		Where("subscription_status IN (?)", bun.In([]string{"active", "free", "trial"})).
 		Scan(context.Background())
 	if err != nil {
 		slog.Error("usage alerts: failed to fetch users", "error", err)

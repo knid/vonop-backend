@@ -51,8 +51,7 @@ func (v *HttpViews) GetAllDevices(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !(user.SubscriptionStatus == "active") {
-		utils.JSONErrorResponse(w, "you do not have access to this resource", http.StatusForbidden)
+	if requireActiveSubscription(w, user) {
 		return
 	}
 
@@ -89,8 +88,7 @@ func (v *HttpViews) GetUniqueDevices(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !(user.SubscriptionStatus == "active") {
-		utils.JSONErrorResponse(w, "you do not have access to this resource", http.StatusForbidden)
+	if requireActiveSubscription(w, user) {
 		return
 	}
 
@@ -161,8 +159,7 @@ func (v *HttpViews) GetActiveDevices(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !(user.SubscriptionStatus == "active") {
-		utils.JSONErrorResponse(w, "you do not have access to this resource", http.StatusForbidden)
+	if requireActiveSubscription(w, user) {
 		return
 	}
 
@@ -199,8 +196,7 @@ func (v *HttpViews) GetSessions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !(user.SubscriptionStatus == "active") {
-		utils.JSONErrorResponse(w, "you do not have access to this resource", http.StatusForbidden)
+	if requireActiveSubscription(w, user) {
 		return
 	}
 
@@ -270,8 +266,7 @@ func (v *HttpViews) GetProjectEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !(user.SubscriptionStatus == "active") {
-		utils.JSONErrorResponse(w, "you do not have access to this resource", http.StatusForbidden)
+	if requireActiveSubscription(w, user) {
 		return
 	}
 

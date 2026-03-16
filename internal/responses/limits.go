@@ -23,4 +23,5 @@ type LimitsResponse struct {
 	MonthlyAppCount         int       `json:"monthly_app_count"`
 	MonthlyDeployCount      int       `json:"monthly_deploy_count"`
 	CanUseEcommerce         bool      `json:"can_use_ecommerce"`
+	CanExportToGitHub       bool      `json:"can_export_to_github"`
 }
