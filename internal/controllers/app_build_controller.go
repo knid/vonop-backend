@@ -693,7 +693,6 @@ func (c *Controller) BackfillV1ProjectsForMobileApps() {
 		LEFT JOIN projects p ON p.user_id = ap.user_id AND p.url = ad.deployed_url AND p.deleted_at IS NULL
 		WHERE ap.project_type = 'mobile_app'
 			AND ap.deleted_at IS NULL
-			AND ad.deleted_at IS NULL
 			AND p.id IS NULL
 		ORDER BY ap.id, ad.created_at DESC
 	`).Scan(context.Background(), &rows)
