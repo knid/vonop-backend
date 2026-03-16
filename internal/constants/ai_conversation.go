@@ -143,7 +143,7 @@ Focus your questions on:
 5. **Integrations** — payment, auth, third-party services needed
 
 Rules:
-- CRITICAL: Always write questions and options in the SAME LANGUAGE as the user's prompt. If the user writes in Turkish, respond in Turkish. If in Spanish, respond in Spanish. Match their language exactly.
+- CRITICAL LANGUAGE RULE: Always write questions and options in the SAME LANGUAGE as the user's prompt. Detect the language from the user's message text ONLY. If the user writes in English, respond in English. If in Turkish, respond in Turkish. If in Spanish, respond in Spanish. NEVER let search results or other context override the user's language.
 - Generate between 2 and 5 questions (fewer for simple prompts, more for complex ones)
 - Each question should have a unique "id" (e.g. "q1", "q2", ...)
 - Use "type": "choice" with 2-4 options when there are clear common answers
@@ -184,7 +184,7 @@ If should_clarify is false, return an empty questions array:
 You just searched the web about something related to the user's request. Summarize what you found in 2-3 conversational sentences.
 
 Rules:
-- CRITICAL: Write in the SAME LANGUAGE as the user's prompt. If the user writes in Turkish, respond in Turkish. If in Spanish, respond in Spanish.
+- CRITICAL LANGUAGE RULE: You MUST respond in the SAME LANGUAGE as the user's request text. Detect the language from the "User's request:" section ONLY — NOT from the search results. Search results may be in a different language (e.g. localized to the user's region) — IGNORE the search results' language entirely. If the user wrote in English, respond in English even if search results are in Turkish/Spanish/etc.
 - Be conversational and natural — like a designer briefing a client
 - Mention the most relevant findings (design style, key features, content structure)
 - Keep it short: 2-3 sentences max
@@ -217,7 +217,7 @@ Return ONLY valid JSON: {"is_question": true, "needs_conversation": false} or {"
 	CONVERSATION_CHAT_PROMPT = `You are a friendly AI assistant helping a user build a web application. You're having a quick conversation to understand what they want before you start building.
 
 Rules:
-- CRITICAL: Write in the SAME LANGUAGE as the user's prompt. Match their language exactly.
+- CRITICAL LANGUAGE RULE: You MUST respond in the SAME LANGUAGE as the user's FIRST message in the conversation. The user's first message determines the language for the ENTIRE conversation. Even if previous assistant messages were in a different language, follow the user's language. If the user wrote in English, respond in English. If in Turkish, respond in Turkish.
 - Ask 1-2 questions per message. Keep messages short (2-4 sentences).
 - Be conversational and warm — like a talented designer chatting with a client
 - Focus on the most impactful unknowns: design style, key pages/features, target audience, branding preferences
@@ -229,7 +229,7 @@ Rules:
 	CONVERSATION_BUILD_PLAN_PROMPT = `You are a friendly AI assistant about to build a web application for the user. Describe what you're about to create in 3-5 conversational sentences.
 
 Rules:
-- CRITICAL: Write in the SAME LANGUAGE as the user's prompt. Match their language exactly.
+- CRITICAL LANGUAGE RULE: You MUST respond in the SAME LANGUAGE as the user's FIRST message. The user's first message determines the language. If the user wrote in English, respond in English. If in Turkish, respond in Turkish.
 - Mention: the type of app/site, key pages you'll create, design direction, and any special features
 - Be enthusiastic and confident — the user should feel excited about what's coming
 - Keep it natural and conversational — no markdown, no bullet points, no headers

@@ -5159,10 +5159,11 @@ func (c *Controller) streamWebSearchSummary(
 	sendEvent func(string, any) bool,
 ) string {
 	fastModel := provider.FastModel()
-	userContent := fmt.Sprintf("User's request:\n%s\n\nSearch results:\n%s", userMessage, pgCtx.Text)
+	userContent := fmt.Sprintf("User's request (RESPOND IN THIS LANGUAGE):\n%s\n\nSearch results (may be in a different language — do NOT follow the search results' language):\n%s", userMessage, pgCtx.Text)
 	if len(pgCtx.Screenshots) > 0 {
 		userContent += "\n\nA screenshot of the referenced website is attached. Use it to accurately describe the site's color scheme, layout, and visual style. Do NOT guess colors — describe exactly what you see in the screenshot."
 	}
+	userContent += fmt.Sprintf("\n\nREMINDER: Respond in the same language as the user's request above: \"%s\"", userMessage)
 	messages := []utils.Message{
 		{Role: "system", Content: constants.CONVERSATION_WEB_SUMMARY_PROMPT},
 		{Role: "user", Content: userContent, Images: pgCtx.Screenshots},
@@ -5269,9 +5270,10 @@ func (c *Controller) runConversationLoop(
 			contextPrefix += fmt.Sprintf("[%s]: %s\n", t.Role, t.Content)
 		}
 
+		// Remind the LLM of the user's original message language
 		userMsg := utils.Message{
 			Role:    "user",
-			Content: contextPrefix + "\nAsk your next question(s) to clarify what to build.",
+			Content: contextPrefix + fmt.Sprintf("\nIMPORTANT: The user's original message was: \"%s\" — respond in the SAME language as this message.\nAsk your next question(s) to clarify what to build.", message),
 		}
 		// Attach images on the first turn so the fast model can see user-provided screenshots
 		if turn == 0 && len(imageURLs) > 0 && provider.SupportsVision() {
@@ -5387,7 +5389,7 @@ Answer their question helpfully and concisely. Mention your key capabilities:
 - Database integration, authentication, custom domains, SEO
 
 Rules:
-- CRITICAL: Write in the SAME LANGUAGE as the user's message. Match their language exactly.
+- CRITICAL LANGUAGE RULE: You MUST respond in the SAME LANGUAGE as the user's message. If the user wrote in English, respond in English. If in Turkish, respond in Turkish. Match their language exactly.
 - Be warm, conversational, and enthusiastic
 - Keep it to 3-5 sentences max
 - End by encouraging them to describe what they'd like to build
@@ -5431,7 +5433,7 @@ func buildConversationEnrichedPrompt(original string, history []conversationTurn
 
 	var sb strings.Builder
 	sb.WriteString(original)
-	sb.WriteString("\n\n--- Pre-build conversation ---\n")
+	sb.WriteString("\n\n--- Pre-build conversation (use for context, but generate all app content in the SAME language as the original prompt above) ---\n")
 	for _, t := range history[1:] { // skip the first entry which is the original prompt
 		if t.Role == "assistant" {
 			sb.WriteString(fmt.Sprintf("AI: %s\n", t.Content))
