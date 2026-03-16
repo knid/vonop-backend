@@ -11,6 +11,7 @@ var NEXTJS_TEMPLATE_FILE_PATHS = []string{
 	"next.config.mjs",
 	"app/globals.css",
 	"app/not-found.tsx",
+	"app/error.tsx",
 	".gitignore",
 }
 
@@ -249,6 +250,42 @@ export default function NotFound() {
             Back to home
           </Link>
         </div>
+      </div>
+    </div>
+  )
+}
+`
+
+// NEXTJS_TEMPLATE_ERROR is the error boundary page. It catches runtime errors and
+// shows a user-friendly error screen with a retry button.
+const NEXTJS_TEMPLATE_ERROR = `"use client"
+
+import { useEffect } from "react"
+
+export default function Error({
+  error,
+  reset,
+}: {
+  error: Error & { digest?: string }
+  reset: () => void
+}) {
+  useEffect(() => {
+    console.error(error)
+  }, [error])
+
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-background">
+      <div className="text-center space-y-6 px-4">
+        <div className="space-y-2">
+          <h1 className="text-7xl font-bold text-foreground/10">Error</h1>
+          <p className="text-lg text-muted-foreground">Something went wrong.</p>
+        </div>
+        <button
+          onClick={() => reset()}
+          className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors"
+        >
+          Try again
+        </button>
       </div>
     </div>
   )

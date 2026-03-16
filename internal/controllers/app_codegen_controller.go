@@ -842,6 +842,8 @@ func getTemplateContent(path string, colorScheme, darkColorScheme map[string]any
 		return constants.NEXTJS_TEMPLATE_GITIGNORE
 	case "app/not-found.tsx":
 		return constants.NEXTJS_TEMPLATE_NOT_FOUND
+	case "app/error.tsx":
+		return constants.NEXTJS_TEMPLATE_ERROR
 	case "lib/db.ts":
 		return constants.NEXTJS_TEMPLATE_DB_TS
 	case "lib/schema.ts":
