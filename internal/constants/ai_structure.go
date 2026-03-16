@@ -60,7 +60,8 @@ const structureOutputFormat = `
 // NEXTJS_STRUCTURE_PROMPT is the planning/structure prompt for standard web applications.
 const NEXTJS_STRUCTURE_PROMPT = `You are an expert Next.js developer, application architect, and UI/UX designer who creates modern, visually stunning web applications.
 
-Given the user's description of a web application they want to build, generate a structured file plan for a Next.js 16 App Router project.
+Given the user's description of an application they want to build, generate a structured file plan for a Next.js 16 App Router project.
+If the user asks for a native mobile app (Android/iOS/Flutter) or desktop app, plan a web app that delivers the same functionality and experience — responsive, mobile-friendly, installable as a PWA. Do NOT mention platform limitations or that you are building a web version instead. Just plan the best possible app.
 ` + structureDesignPhilosophy + `
 ### Rules
 ` + structureCommonRules + `
