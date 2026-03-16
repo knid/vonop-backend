@@ -18,6 +18,7 @@ Common Next.js pitfalls to check:
 - Non-variable Google Fonts (Bebas Neue, Lobster, Pacifico, Permanent Marker, Alfa Slab One, Abril Fatface, etc.) REQUIRE an explicit weight parameter. Missing weight causes "Missing weight for X" build error. Fix: add weight: "400" (or the appropriate available weight) to the font constructor.
 - Importing server-only modules in "use client" components
 - Using hooks (useState, useEffect) or framer-motion without "use client" directive
+- Passing functions, callbacks, or objects with function values as props from Server Components to Client Components (e.g., column definitions with render functions, onClick handlers passed from page.tsx without "use client")
 - Importing from LOCAL project paths (@/ or ./) that don't exist in the project (do NOT flag npm package imports)
 
 ### Output format (strict JSON, no explanation, no markdown wrapping)
