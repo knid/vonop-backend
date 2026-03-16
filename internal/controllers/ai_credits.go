@@ -80,7 +80,13 @@ func (c *Controller) GetOrCreateCreditsBalance(user *models.User) (*models.AICre
 
 		// Calculate new balance with rollover
 		newBalance := monthlyCredits
-		if rolloverMonths > 0 {
+		if balance.Balance < 0 {
+			// Overdraft always carries forward regardless of rollover setting
+			newBalance = monthlyCredits + balance.Balance
+			if newBalance < 0 {
+				newBalance = 0
+			}
+		} else if rolloverMonths > 0 {
 			cap := monthlyCredits * (rolloverMonths + 1)
 			newBalance = balance.Balance + monthlyCredits
 			if newBalance > cap {
@@ -99,12 +105,14 @@ func (c *Controller) GetOrCreateCreditsBalance(user *models.User) (*models.AICre
 			balance.PeriodEnd = periodEnd
 
 			// Log the monthly grant (only the winner of the race creates this)
-			c.DB.CreateAICreditTransaction(&models.AICreditTransaction{
+			if _, err := c.DB.CreateAICreditTransaction(&models.AICreditTransaction{
 				UserID:    user.ID,
 				Amount:    monthlyCredits,
 				Action:    "monthly_grant",
 				Reference: balance.ID.String(),
-			})
+			}); err != nil {
+				slog.Error("failed to log monthly_grant transaction", "error", err, "user_id", user.ID)
+			}
 		} else {
 			// Another request already reset the period — re-read the current balance
 			balance, err = c.DB.GetAICreditsBalance(user.ID.String())

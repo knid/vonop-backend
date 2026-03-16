@@ -5676,6 +5676,10 @@ func (c *Controller) StreamMobileOptimize(
 		return
 	}
 
+	// Token tracking for billing
+	tracker := utils.NewTokenTracker()
+	ctx = utils.WithTokenTracker(ctx, tracker)
+
 	// 5. Build file listing for system prompt (all files for context)
 	var fileListing strings.Builder
 	fileListing.WriteString("\n\n## Project Files\n")
@@ -5781,8 +5785,14 @@ func (c *Controller) StreamMobileOptimize(
 	// 7. Set status back to ready and send done
 	resetStatus()
 
-	// 8. Deduct credits
-	c.DeductAICreditsUnchecked(user, 1, "mobile_optimize", project.ID.String())
+	// 8. Deduct credits based on actual token usage
+	prompt, completion, total, _ := tracker.Totals()
+	if total > 0 {
+		credits := models.TokensToCredits(prompt, completion)
+		if err := c.DeductAICreditsUnchecked(user, credits, "mobile_optimize", project.ID.String()); err != nil {
+			slog.Warn("failed to deduct AI credits", "error", err, "user_id", user.ID, "credits", credits)
+		}
+	}
 
 	sendEvent("done", map[string]any{
 		"success":       true,
