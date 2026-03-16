@@ -23,7 +23,7 @@ func (v *HttpViews) GetLimits(w http.ResponseWriter, r *http.Request) {
 			utils.JSONErrorResponse(w, "not found", http.StatusNotFound)
 			return
 		}
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorResponse(w, "failed to retrieve limits", http.StatusInternalServerError)
 		return
 	}
 
@@ -62,12 +62,11 @@ func (v *HttpViews) GetSubscription(w http.ResponseWriter, r *http.Request) {
 
 	response, err := v.Controller.GetSubscription(user)
 	if err != nil {
-
 		if errors.Is(err, sql.ErrNoRows) {
 			utils.JSONErrorResponse(w, "not found", http.StatusNotFound)
 			return
 		}
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.JSONErrorResponse(w, "failed to retrieve subscription", http.StatusInternalServerError)
 		return
 	}
 
@@ -89,7 +88,11 @@ func (v *HttpViews) UpdateSubscription(w http.ResponseWriter, r *http.Request) {
 
 	err = v.Controller.UpdateSubscription(user, subscriptionId)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		if errors.Is(err, sql.ErrNoRows) {
+			utils.JSONErrorResponse(w, "subscription not found", http.StatusNotFound)
+			return
+		}
+		utils.JSONErrorResponse(w, "failed to update subscription", http.StatusInternalServerError)
 		return
 	}
 
@@ -109,7 +112,7 @@ func (v *HttpViews) CancelSubscription(w http.ResponseWriter, r *http.Request) {
 
 	err = v.Controller.CancelSubscription(user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.JSONErrorResponse(w, "failed to cancel subscription", http.StatusInternalServerError)
 		return
 	}
 

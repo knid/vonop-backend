@@ -45,7 +45,7 @@ const (
 	BREVO_EVENT_SUBSCRIPTION_NEED                = "subscription_need"
 	BREVO_EVENT_BLOCKED_DUE_TO_PLAN              = "blocked_due_to_plan"
 	BREVO_EVENT_PAYMENT_METHOD_ATTACHED          = "payment_method_attached"
-	BREVO_EVENT_PAYMENT_METHOD_DETTACHED         = "payment_method_detached"
+	BREVO_EVENT_PAYMENT_METHOD_DETACHED          = "payment_method_detached"
 	BREVO_EVENT_PAYMENT_FAILED                   = "payment_failed"
 	BREVO_EVENT_PAYMENT_USER_ACTION_REQUIRED     = "payment_user_action_required"
 	BREVO_EVENT_UNHANDLED_EVENT                  = "unhandled_event"
