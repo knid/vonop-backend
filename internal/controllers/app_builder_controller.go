@@ -1167,6 +1167,9 @@ func (c *Controller) runChatToolPhase(
 	}
 
 	systemPrompt := `You are a pre-processing assistant. Analyze the user's message and decide if any tools should be called BEFORE the main code-generation model runs.
+
+CRITICAL LANGUAGE RULE: ALL content you generate (product names, descriptions, category names, seed data, image prompts, text output) MUST be in the SAME LANGUAGE as the user's message. If the user writes in English, all content must be in English. If in Turkish, all content must be in Turkish.
+
 - If the user provides a URL or asks to convert/clone/replicate a website, call preview_website (and optionally take_screenshot to capture a visual reference).
 - If the user asks about current technologies, APIs, documentation, pricing, latest versions, or anything that benefits from up-to-date web information, use web_search to find accurate information.
 - If the user asks to set, add, or remove environment variables / API keys / secrets, call manage_env_vars.
@@ -3332,7 +3335,7 @@ var chatManageStoreTool = utils.Tool{
 	Type: "function",
 	Function: utils.ToolFunction{
 		Name:        "manage_store",
-		Description: "Create, update, delete, or list products, categories, and discounts in the e-commerce store. Use when the user asks to manage their store inventory.",
+		Description: "Create, update, delete, or list products, categories, and discounts in the e-commerce store. Use when the user asks to manage their store inventory. IMPORTANT: Product names, descriptions, and category names MUST be in the same language as the user's message.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -3387,7 +3390,7 @@ var chatSeedDatabaseTool = utils.Tool{
 	Type: "function",
 	Function: utils.ToolFunction{
 		Name:        "seed_database",
-		Description: "Seed the app's database with realistic demo data. Call this when the user says the database is empty, has no data, or asks for demo/sample/test data to be added.",
+		Description: "Seed the app's database with realistic demo data in the user's language. Call this when the user says the database is empty, has no data, or asks for demo/sample/test data to be added.",
 		Parameters: map[string]any{
 			"type":       "object",
 			"properties": map[string]any{},
@@ -3402,7 +3405,7 @@ var chatExecuteSQLTool = utils.Tool{
 	Type: "function",
 	Function: utils.ToolFunction{
 		Name:        "execute_sql",
-		Description: "Run a SQL query on the app's PostgreSQL database. Supports SELECT, INSERT, UPDATE. DELETE is NOT allowed. Use gen_random_uuid() for UUIDs, NOW() for timestamps. Do NOT provide 'id' values — they are auto-generated. You can insert multiple rows: INSERT INTO t (col) VALUES (...), (...), (...). Use RETURNING to get inserted row data back.",
+		Description: "Run a SQL query on the app's PostgreSQL database. Supports SELECT, INSERT, UPDATE. DELETE is NOT allowed. Use gen_random_uuid() for UUIDs, NOW() for timestamps. Do NOT provide 'id' values — they are auto-generated. You can insert multiple rows: INSERT INTO t (col) VALUES (...), (...), (...). Use RETURNING to get inserted row data back. IMPORTANT: All text content in INSERT/UPDATE statements must be in the same language as the user's message.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
