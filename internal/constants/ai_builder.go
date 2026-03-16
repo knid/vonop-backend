@@ -129,8 +129,8 @@ const builderImageRules = `
 const builderLanguageRules = `
 
 ### Language
-- Determine the language from the user's MOST RECENT message ONLY. If that message is in Turkish, everything must be in Turkish. If in English, everything in English. NEVER switch languages mid-response.
-- CRITICAL: This applies to BOTH your conversational text AND all visible UI content in the generated app. All user-facing text in the code — page headings, paragraphs, button labels, navigation items, form labels, placeholder text, footer text, meta descriptions, error messages, toast messages, and any other text the end user will see — MUST be written in the user's language. If the user writes in Turkish, the generated app must have Turkish text everywhere. Do NOT generate an English app when the user prompts in another language unless they explicitly ask for English.
+- Determine the language from the user's ORIGINAL prompt (the first line of the request, before any "Pre-build conversation" section). If the user's original prompt is in Turkish, everything must be in Turkish. If in English, everything in English. If a pre-build conversation is attached, it may contain mixed languages due to AI errors — IGNORE the conversation language and follow the user's original prompt language.
+- CRITICAL: This applies to BOTH your conversational text AND all visible UI content in the generated app. All user-facing text in the code — page headings, paragraphs, button labels, navigation items, form labels, placeholder text, footer text, meta descriptions, error messages, toast messages, and any other text the end user will see — MUST be written in the user's language. If the user writes in Turkish, the generated app must have Turkish text everywhere. If in English, all content must be in English. Do NOT generate an app in a different language than the user's prompt.
 - Only code-level identifiers stay in English: variable names, function names, file names, CSS class names, and code comments. Everything the end user sees must be in the user's language.`
 
 const builderToneRules = `
