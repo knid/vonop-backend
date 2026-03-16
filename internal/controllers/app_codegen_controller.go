@@ -1566,7 +1566,7 @@ func (c *Controller) generateAndStoreSeedImages(
 
 			prompt := fmt.Sprintf("Professional, high-quality photo for %s", ic.table)
 			if title.Valid && title.String != "" {
-				prompt = fmt.Sprintf("Professional, high-quality photo related to: %s. Clean composition, editorial quality, suitable for a modern web application.", title.String)
+				prompt = fmt.Sprintf("%s — professional, high-quality photo, clean composition, editorial quality, suitable for a modern web application.", title.String)
 			}
 
 			tasks = append(tasks, imageTask{
