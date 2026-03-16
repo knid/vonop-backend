@@ -1389,7 +1389,8 @@ Rules:
 9. Do NOT include CREATE TABLE or DROP statements.
 10. Do NOT wrap the output in markdown code fences. Return raw SQL only.
 11. CRITICAL: For image/photo columns (cover_image, image_url, avatar_url, thumbnail, photo, banner, logo, icon, etc.), set them to NULL. Images will be generated separately by the platform. Do NOT use placeholder URLs or fake image paths.
-12. CRITICAL: Escape all single quotes inside string values by doubling them (e.g., 'Türkiye''nin' not 'Türkiye'nin'). This is standard PostgreSQL escaping and prevents syntax errors.`, schemaDesc.String(), utils.SanitizePromptContent(project.Prompt))
+12. CRITICAL: Escape all single quotes inside string values by doubling them (e.g., 'Türkiye''nin' not 'Türkiye'nin'). This is standard PostgreSQL escaping and prevents syntax errors.
+13. CRITICAL: All text content (names, titles, descriptions, labels, etc.) MUST be in the SAME LANGUAGE as the app description above. If the app description is in English, all seed data text must be in English. If in Turkish, all seed data text must be in Turkish. Match the user's language exactly.`, schemaDesc.String(), utils.SanitizePromptContent(project.Prompt))
 
 	sendEvent("neon_provision", map[string]any{"phase": "seeding_data"})
 
