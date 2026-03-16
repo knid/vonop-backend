@@ -148,9 +148,7 @@ func createSchema(db *bun.DB) error {
 		// Annual billing fields on subscriptions
 		`ALTER TABLE standart_user_subscriptions ADD COLUMN IF NOT EXISTS annual_price int DEFAULT 0`,
 		`ALTER TABLE standart_user_subscriptions ADD COLUMN IF NOT EXISTS annual_price_id text DEFAULT ''`,
-		// Snapshot file capture
-		`ALTER TABLE app_snapshots ADD COLUMN IF NOT EXISTS files jsonb DEFAULT '[]'`,
-		`ALTER TABLE app_snapshots ADD COLUMN IF NOT EXISTS message_id text DEFAULT ''`,
+		// app_snapshots removed — snapshots now use git repos
 		// V2 app builder fields on limits
 		`ALTER TABLE standart_user_limits ADD COLUMN IF NOT EXISTS monthly_app_count int NOT NULL DEFAULT 0`,
 		`ALTER TABLE standart_user_limits ADD COLUMN IF NOT EXISTS monthly_deploy_count int NOT NULL DEFAULT 0`,
@@ -253,8 +251,7 @@ func createSchema(db *bun.DB) error {
 
 	// Deduplicate before creating unique indexes (keep the latest row per group)
 	dedupeStatements := []string{
-		`DELETE FROM app_generated_files a USING app_generated_files b
-		 WHERE a.id < b.id AND a.app_project_id = b.app_project_id AND a.platform = b.platform AND a.file_path = b.file_path`,
+		// app_generated_files removed — files now in git repos
 		`DELETE FROM app_conversations a USING app_conversations b
 		 WHERE a.id < b.id AND a.app_project_id = b.app_project_id`,
 	}
@@ -266,7 +263,7 @@ func createSchema(db *bun.DB) error {
 
 	// Create unique indexes needed for upsert operations
 	indexStatements := []string{
-		`CREATE UNIQUE INDEX IF NOT EXISTS idx_app_generated_files_project_platform_path ON app_generated_files (app_project_id, platform, file_path)`,
+		// app_generated_files index removed — files now in git repos
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_app_conversations_project ON app_conversations (app_project_id)`,
 		// Web analytics indexes
 		`CREATE INDEX IF NOT EXISTS idx_web_analytics_project_created ON web_analytics_events (project_id, created_at DESC)`,
@@ -335,7 +332,7 @@ func createSchema(db *bun.DB) error {
 		`CREATE INDEX IF NOT EXISTS idx_products_store_id ON products(store_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_orders_store_id ON orders(store_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_carts_store_id_session_id ON carts(store_id, session_id)`,
-		`CREATE INDEX IF NOT EXISTS idx_app_snapshots_app_project_id ON app_snapshots(app_project_id)`,
+		// app_snapshots index removed — snapshots now use git repos
 		`CREATE INDEX IF NOT EXISTS idx_notifications_project_id ON notifications(project_id)`,
 		// Foreign key indexes for tables frequently queried by user_id or project_id
 		`CREATE INDEX IF NOT EXISTS idx_app_projects_user_id ON app_projects(user_id)`,
