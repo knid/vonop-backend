@@ -33,8 +33,7 @@ func (v *HttpViews) CreateAppStoreCredential(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	if !(user.SubscriptionStatus == "active") {
-		utils.JSONErrorResponse(w, "you do not have access to this resource", http.StatusForbidden)
+	if requireActiveSubscription(w, user) {
 		go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_NEED, map[string]any{
 			"action": "create_app_store_credential",
 		})
@@ -91,8 +90,7 @@ func (v *HttpViews) UpdateAppStoreCredential(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	if !(user.SubscriptionStatus == "active") {
-		utils.JSONErrorResponse(w, "you do not have access to this resource", http.StatusForbidden)
+	if requireActiveSubscription(w, user) {
 		go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_NEED, map[string]any{
 			"action": "create_google_play_credential",
 		})
@@ -172,8 +170,7 @@ func (v *HttpViews) CreateGooglePlayCredential(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	if !(user.SubscriptionStatus == "active") {
-		utils.JSONErrorResponse(w, "you do not have access to this resource", http.StatusForbidden)
+	if requireActiveSubscription(w, user) {
 		go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_NEED, map[string]any{
 			"action": "create_google_play_credential",
 		})
@@ -230,8 +227,7 @@ func (v *HttpViews) UpdateGooglePlayCredential(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	if !(user.SubscriptionStatus == "active") {
-		utils.JSONErrorResponse(w, "you do not have access to this resource", http.StatusForbidden)
+	if requireActiveSubscription(w, user) {
 		go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_NEED, map[string]any{
 			"action": "create_google_play_credential",
 		})

@@ -19,7 +19,10 @@ func (v *HttpViews) GetBillingPlans(w http.ResponseWriter, r *http.Request) {
 	for _, sub := range *subs {
 		annualSavings := 0
 		if sub.AnnualPrice > 0 && sub.MonthlyPrice > 0 {
-			annualSavings = (sub.MonthlyPrice * 12) - sub.AnnualPrice
+			savings := (sub.MonthlyPrice * 12) - sub.AnnualPrice
+			if savings > 0 {
+				annualSavings = savings
+			}
 		}
 
 		var planLimits responses.PlanLimitsResponse
@@ -39,6 +42,7 @@ func (v *HttpViews) GetBillingPlans(w http.ResponseWriter, r *http.Request) {
 				MonthlyAppCount:      limits.MonthlyAppCount,
 				MonthlyDeployCount:   limits.MonthlyDeployCount,
 				CanRemoveBrandLogo:   limits.CanRemoveBrandLogo,
+				CanExportToGitHub:    limits.CanExportToGitHub,
 			}
 		}
 

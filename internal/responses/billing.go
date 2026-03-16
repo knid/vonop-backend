@@ -14,6 +14,7 @@ type PlanLimitsResponse struct {
 	MonthlyAppCount      int  `json:"monthly_app_count"`
 	MonthlyDeployCount   int  `json:"monthly_deploy_count"`
 	CanRemoveBrandLogo   bool `json:"can_remove_brand_logo"`
+	CanExportToGitHub    bool `json:"can_export_to_github"`
 }
 
 type PlanResponse struct {

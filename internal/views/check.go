@@ -34,9 +34,10 @@ func (v *HttpViews) CheckStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var status string
-	if user.SubscriptionStatus == "active" {
+	switch user.SubscriptionStatus {
+	case "active", "free", "trial":
 		status = "active"
-	} else {
+	default:
 		status = "unactive"
 	}
 
