@@ -1199,7 +1199,7 @@ func (c *Controller) runChatToolPhase(
 - If the user asks to add, insert, or create specific data rows, call execute_sql with an INSERT query. You can insert multiple rows in a single INSERT using VALUES (...), (...), (...) syntax.
 - If the user asks to update, modify, or change existing data, call execute_sql with an UPDATE query.
 - DELETE is NOT allowed. If the user wants to remove data, use UPDATE to set a status flag (e.g. UPDATE articles SET is_active = false WHERE ...).
-- If the user asks to generate/create images for database records (e.g. "add images to articles", "generate cover images"), use this workflow: first call execute_sql to SELECT the rows that need images, then for each row call generate_image with a descriptive prompt, then call execute_sql with an UPDATE to set the image URL on that row. Chain these tool calls sequentially.
+- If the user asks to generate/create images for database records (e.g. "add images to articles", "generate cover images"), use this workflow: first call execute_sql to SELECT the rows that need images, then for each row call generate_image with a descriptive prompt in the user's language, then call execute_sql with an UPDATE to set the image URL on that row. Chain these tool calls sequentially.
 - If the user asks to add/remove/rename database columns or create new tables, call run_migrations with the ALTER TABLE / CREATE TABLE SQL and the complete updated data model.
 - For timestamps, use NOW(). For UUIDs, use gen_random_uuid(). Do NOT manually provide id values.`
 	}
@@ -3526,7 +3526,7 @@ var chatGenerateImageTool = utils.Tool{
 	Type: "function",
 	Function: utils.ToolFunction{
 		Name:        "generate_image",
-		Description: "Generate an AI image from a text prompt. The image is uploaded to S3 and a URL is returned. Use this when the user asks for a custom image, hero visual, logo concept, background, or any visual asset for their app.",
+		Description: "Generate an AI image from a text prompt. The image is uploaded to S3 and a URL is returned. Use this when the user asks for a custom image, hero visual, logo concept, background, or any visual asset for their app. IMPORTANT: Write the image prompt in the SAME LANGUAGE as the user's message. If the user writes in Turkish, describe the image in Turkish. If in English, use English.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{

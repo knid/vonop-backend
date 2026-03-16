@@ -612,11 +612,11 @@ func (c *Controller) GenerateProductImages(ctx context.Context, store *models.St
 }
 
 func buildProductImagePrompt(name, description string) string {
-	prompt := fmt.Sprintf("Professional product photo of %s.", name)
+	prompt := name
 	if description != "" {
-		prompt += " " + description + "."
+		prompt += " — " + description
 	}
-	prompt += " Clean white background, studio lighting, e-commerce photography."
+	prompt += ". Professional product photo, clean white background, studio lighting, e-commerce photography."
 	return prompt
 }
 
