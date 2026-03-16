@@ -210,6 +210,8 @@ Rules:
    - Clear and specific even if short (e.g. "portfolio site for a photographer with dark theme and gallery grid")
    - User has already provided design preferences, target audience, or feature list
 
+IMPORTANT: If the user mentions a specific platform (Android, iOS, Flutter, React Native, desktop, etc.), treat it as a normal build request — classify based on detail level only. Do NOT treat platform mentions as questions or blockers.
+
 Note: Having web search context does NOT mean conversation is unnecessary.
 
 Return ONLY valid JSON: {"is_question": true, "needs_conversation": false} or {"is_question": false, "needs_conversation": true} or {"is_question": false, "needs_conversation": false}`
