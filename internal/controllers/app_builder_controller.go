@@ -5384,10 +5384,10 @@ func (c *Controller) answerGeneralQuestion(
 	sendEvent func(string, any) bool,
 ) {
 	fastModel := provider.FastModel()
-	systemPrompt := `You are Wemob AI, a friendly web application builder assistant. The user asked a general question instead of requesting an app to be built.
+	systemPrompt := `You are Wemob AI, a friendly app builder assistant. The user asked a general question instead of requesting an app to be built.
 
 Answer their question helpfully and concisely. Mention your key capabilities:
-- Building full-stack Next.js web applications from a text description or screenshot
+- Building full-stack applications from a text description or screenshot
 - E-commerce stores with product management, cart, and checkout
 - Portfolio sites, blogs, dashboards, landing pages, and more
 - Real-time preview and iterative editing via chat
@@ -5398,7 +5398,8 @@ Rules:
 - Be warm, conversational, and enthusiastic
 - Keep it to 3-5 sentences max
 - End by encouraging them to describe what they'd like to build
-- No markdown headers, no bullet points — just natural text`
+- No markdown headers, no bullet points — just natural text
+- NEVER mention specific technical frameworks like Next.js, React, or TypeScript to the user`
 
 	userMsg := utils.Message{Role: "user", Content: message}
 	if len(imageURLs) > 0 && provider.SupportsVision() {
