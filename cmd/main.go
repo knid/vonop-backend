@@ -128,6 +128,8 @@ func createSchema(db *bun.DB) error {
 		(*models.PreviewCode)(nil),
 		// GitHub export tracking
 		(*models.AppGitHubExport)(nil),
+		// Stripe webhook deduplication
+		(*models.WebhookEvent)(nil),
 	}
 
 	for _, model := range models {

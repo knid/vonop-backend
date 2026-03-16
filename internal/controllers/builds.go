@@ -75,6 +75,17 @@ func (c *Controller) CreateBuild(user *models.User, buildCreateReq requests.Buil
 		return nil, err
 	}
 
+	// Enforce brand logo removal permission at controller level
+	if buildCreateReq.RemoveWemobBranding {
+		limits, limitsErr := c.DB.GetStandartUserLimitsByUser(user)
+		if limitsErr != nil {
+			return nil, fmt.Errorf("failed to verify subscription limits: %w", limitsErr)
+		}
+		if !limits.CanRemoveBrandLogo {
+			return nil, errors.New("your subscription does not allow removing Wemob branding")
+		}
+	}
+
 	project, err := c.DB.GetProjectById(buildCreateReq.ProjectID.String())
 	if err != nil {
 		return nil, err

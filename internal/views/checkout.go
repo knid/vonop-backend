@@ -26,30 +26,32 @@ func (v *HttpViews) StripeCheckout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate that the price ID belongs to a known subscription plan
-	subs, err := v.Controller.DB.GetSubscriptionByPriceID(priceID)
-	if err != nil || subs == nil {
-		// Also check annual price IDs
-		allSubs, subsErr := v.Controller.DB.GetSubscriptions()
-		validPrice := false
-		if subsErr == nil && allSubs != nil {
-			for _, s := range *allSubs {
-				if s.AnnualPriceID == priceID {
-					validPrice = true
-					break
-				}
-			}
+	// Validate price ID against known subscription plans
+	allSubs, err := v.Controller.DB.GetSubscriptions()
+	if err != nil {
+		utils.JSONErrorResponse(w, "failed to validate price", http.StatusInternalServerError)
+		return
+	}
+	validPrice := false
+	for _, s := range *allSubs {
+		if s.PriceID == priceID || s.AnnualPriceID == priceID {
+			validPrice = true
+			break
 		}
-		if !validPrice {
-			utils.JSONErrorResponse(w, "invalid price", http.StatusBadRequest)
-			return
-		}
+	}
+	if !validPrice {
+		utils.JSONErrorResponse(w, "invalid price ID", http.StatusBadRequest)
+		return
 	}
 
 	mode := string(stripe.CheckoutSessionModeSubscription)
 
-	successURL := "https://dashboard.wemob.io/success?session_id={CHECKOUT_SESSION_ID}"
-	cancelURL := "https://dashboard.wemob.io/subscription"
+	dashboardURL := v.Controller.SecretManager.GetSecret("FRONTEND_URL")
+	if dashboardURL == "" {
+		dashboardURL = "https://dashboard.wemob.io"
+	}
+	successURL := dashboardURL + "/success?session_id={CHECKOUT_SESSION_ID}"
+	cancelURL := dashboardURL + "/subscription"
 
 	lineItems := []*stripe.CheckoutSessionLineItemParams{
 		{

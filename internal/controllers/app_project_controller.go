@@ -22,6 +22,19 @@ func (c *Controller) CreateAppProject(ctx context.Context, user *models.User, re
 		return nil, err
 	}
 
+	// Enforce app project limit
+	limits, err := c.DB.GetStandartUserLimitsByUser(user)
+	if err != nil {
+		slog.Warn("CreateAppProject: failed to get user limits", "error", err, "user_id", user.ID)
+	} else if limits.MonthlyAppCount > 0 {
+		appCount, countErr := c.DB.CountAppProjectsByUserID(user.ID.String())
+		if countErr != nil {
+			slog.Warn("CreateAppProject: failed to count projects", "error", countErr, "user_id", user.ID)
+		} else if appCount >= limits.MonthlyAppCount {
+			return nil, fmt.Errorf("you have reached your app project limit (%d)", limits.MonthlyAppCount)
+		}
+	}
+
 	projectType := req.ProjectType
 	if projectType == "" || projectType == "app" {
 		classified := c.classifyProjectType(ctx, req.Prompt)
@@ -47,7 +60,7 @@ func (c *Controller) CreateAppProject(ctx context.Context, user *models.User, re
 		Status:      "generating",
 	}
 
-	project, err := c.DB.CreateAppProject(project)
+	project, err = c.DB.CreateAppProject(project)
 	if err != nil {
 		slog.Error("Failed to create app project", "error", err)
 		return nil, fmt.Errorf("failed to create project")

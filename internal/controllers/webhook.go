@@ -29,19 +29,37 @@ func (c *Controller) HandleWebhook(w http.ResponseWriter, req *http.Request) {
 	event := stripe.Event{}
 
 	if err := json.Unmarshal(payload, &event); err != nil {
-		slog.Error(fmt.Sprintf("⚠️  Webhook error while parsing basic request. %v\n", err))
+		slog.Error(fmt.Sprintf("Webhook error while parsing basic request. %v\n", err))
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
 
 	endpointSecret := c.SecretManager.GetSecret("STRIPE_WEBHOOK_SECRET")
+	if endpointSecret == "" {
+		slog.Error("STRIPE_WEBHOOK_SECRET is not configured")
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
 	signatureHeader := req.Header.Get("Stripe-Signature")
 	event, err = webhook.ConstructEvent(payload, signatureHeader, endpointSecret)
 	if err != nil {
-		slog.Error(fmt.Sprintf("⚠️  Webhook signature verification failed. %v\n", err))
+		slog.Error(fmt.Sprintf("Webhook signature verification failed. %v\n", err))
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
+
+	// Deduplication: skip events we have already processed
+	processed, err := c.DB.IsWebhookEventProcessed(event.ID)
+	if err != nil {
+		slog.Error("failed to check webhook event dedup", "error", err, "event_id", event.ID)
+	}
+	if processed {
+		slog.Info("webhook event already processed, skipping", "event_id", event.ID)
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
 	switch event.Type {
 
 	case "customer.subscription.created":
@@ -51,6 +69,7 @@ func (c *Controller) HandleWebhook(w http.ResponseWriter, req *http.Request) {
 
 			user, err := c.DB.GetUserByStripeCustomerID(sub.Customer.ID)
 			if err != nil {
+				slog.Warn("webhook: user not found for stripe customer", "customer_id", sub.Customer.ID, "event_type", event.Type, "error", err)
 				break
 			}
 
@@ -64,10 +83,14 @@ func (c *Controller) HandleWebhook(w http.ResponseWriter, req *http.Request) {
 
 			subs, err := c.DB.GetSubscriptionByPriceID(sub.Items.Data[0].Price.ID)
 			if err != nil {
+				slog.Error("failed to get subscription by price ID", "error", err, "price_id", sub.Items.Data[0].Price.ID, "customer_id", sub.Customer.ID)
 				break
 			}
 			user.SubscriptionID = subs.ID
 
+			if user.TrialUsed {
+				slog.Warn("user attempting to re-use trial", "user_id", user.ID)
+			}
 			user.TrialUsed = true
 
 			if !user.SetupFinished {
@@ -76,6 +99,7 @@ func (c *Controller) HandleWebhook(w http.ResponseWriter, req *http.Request) {
 			}
 
 			if _, err := c.DB.UpdateUser(user); err != nil {
+				slog.Error("failed to update user after subscription created", "error", err, "customer_id", sub.Customer.ID, "user_id", user.ID)
 				break
 			}
 
@@ -93,11 +117,13 @@ func (c *Controller) HandleWebhook(w http.ResponseWriter, req *http.Request) {
 
 			user, err := c.DB.GetUserByStripeCustomerID(sub.Customer.ID)
 			if err != nil {
+				slog.Warn("webhook: user not found for stripe customer", "customer_id", sub.Customer.ID, "event_type", event.Type, "error", err)
 				break
 			}
 
 			subs, err := c.DB.GetSubscriptionByPriceID(sub.Items.Data[0].Price.ID)
 			if err != nil {
+				slog.Error("failed to get subscription by price ID", "error", err, "price_id", sub.Items.Data[0].Price.ID, "customer_id", sub.Customer.ID)
 				break
 			}
 			user.SubscriptionID = subs.ID
@@ -137,6 +163,7 @@ func (c *Controller) HandleWebhook(w http.ResponseWriter, req *http.Request) {
 			})
 
 			if _, err := c.DB.UpdateUser(user); err != nil {
+				slog.Error("failed to update user after subscription change", "error", err, "customer_id", sub.Customer.ID, "user_id", user.ID)
 				break
 			}
 
@@ -154,6 +181,7 @@ func (c *Controller) HandleWebhook(w http.ResponseWriter, req *http.Request) {
 
 			user, err := c.DB.GetUserByStripeCustomerID(invoice.Customer.ID)
 			if err != nil {
+				slog.Warn("webhook: user not found for stripe customer", "customer_id", invoice.Customer.ID, "event_type", event.Type, "error", err)
 				break
 			}
 
@@ -172,6 +200,7 @@ func (c *Controller) HandleWebhook(w http.ResponseWriter, req *http.Request) {
 			})
 
 			if _, err := c.DB.UpdateUser(user); err != nil {
+				slog.Error("failed to update user after payment succeeded", "error", err, "customer_id", invoice.Customer.ID, "user_id", user.ID)
 				break
 			}
 
@@ -189,6 +218,7 @@ func (c *Controller) HandleWebhook(w http.ResponseWriter, req *http.Request) {
 
 			user, err := c.DB.GetUserByStripeCustomerID(invoice.Customer.ID)
 			if err != nil {
+				slog.Warn("webhook: user not found for stripe customer", "customer_id", invoice.Customer.ID, "event_type", event.Type, "error", err)
 				break
 			}
 
@@ -201,6 +231,7 @@ func (c *Controller) HandleWebhook(w http.ResponseWriter, req *http.Request) {
 			})
 
 			if _, err := c.DB.UpdateUser(user); err != nil {
+				slog.Error("failed to update user after payment failed", "error", err, "customer_id", invoice.Customer.ID, "user_id", user.ID)
 				break
 			}
 			c.TrackUserEvent(user, "payment_failed", posthog.NewProperties().
@@ -217,6 +248,7 @@ func (c *Controller) HandleWebhook(w http.ResponseWriter, req *http.Request) {
 
 			user, err := c.DB.GetUserByStripeCustomerID(invoice.Customer.ID)
 			if err != nil {
+				slog.Warn("webhook: user not found for stripe customer", "customer_id", invoice.Customer.ID, "event_type", event.Type, "error", err)
 				break
 			}
 
@@ -237,22 +269,17 @@ func (c *Controller) HandleWebhook(w http.ResponseWriter, req *http.Request) {
 
 			user, err := c.DB.GetUserByStripeCustomerID(sub.Customer.ID)
 			if err != nil {
+				slog.Warn("webhook: user not found for stripe customer", "customer_id", sub.Customer.ID, "event_type", event.Type, "error", err)
 				break
 			}
 
-			// Downgrade to free plan instead of fully canceling
-			freePlan, freeErr := c.DB.GetSubscriptionByName("Free")
-			if freeErr == nil {
-				user.SubscriptionID = freePlan.ID
-				user.SubscriptionStatus = "free"
-			} else {
-				user.SubscriptionStatus = "canceled"
-				user.SubscriptionID = uuid.Nil
-			}
+			user.SubscriptionStatus = "canceled"
+			user.SubscriptionID = uuid.Nil
 
 			go c.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_CANCELLED, map[string]any{})
 
 			if _, err := c.DB.UpdateUser(user); err != nil {
+				slog.Error("failed to update user after subscription deleted", "error", err, "customer_id", sub.Customer.ID, "user_id", user.ID)
 				break
 			}
 
@@ -266,7 +293,7 @@ func (c *Controller) HandleWebhook(w http.ResponseWriter, req *http.Request) {
 		if err := json.Unmarshal(event.Data.Raw, &pm); err == nil {
 			user, err := c.DB.GetUserByStripeCustomerID(pm.Customer.ID)
 			if err != nil {
-				slog.Error(fmt.Sprintf("Error finding user by customer ID: %v\n", err))
+				slog.Warn("webhook: user not found for stripe customer", "customer_id", pm.Customer.ID, "event_type", event.Type, "error", err)
 				break
 			}
 
@@ -280,11 +307,11 @@ func (c *Controller) HandleWebhook(w http.ResponseWriter, req *http.Request) {
 		if err := json.Unmarshal(event.Data.Raw, &pm); err == nil {
 			user, err := c.DB.GetUserByStripeCustomerID(pm.Customer.ID)
 			if err != nil {
-				slog.Error(fmt.Sprintf("Error finding user by customer ID: %v\n", err))
+				slog.Warn("webhook: user not found for stripe customer", "customer_id", pm.Customer.ID, "event_type", event.Type, "error", err)
 				break
 			}
 
-			go c.CRMService.SendEvent(user, constants.BREVO_EVENT_PAYMENT_METHOD_DETTACHED, map[string]any{})
+			go c.CRMService.SendEvent(user, constants.BREVO_EVENT_PAYMENT_METHOD_DETACHED, map[string]any{})
 
 			c.TrackUserEvent(user, "payment_method_detached", posthog.NewProperties().
 				Set("payment_method_type", string(pm.Type)))
@@ -315,6 +342,11 @@ func (c *Controller) HandleWebhook(w http.ResponseWriter, req *http.Request) {
 			"from":       "stripe-webhook",
 			"event_type": event.Type,
 		})
+	}
+
+	// Mark event as processed for deduplication
+	if err := c.DB.MarkWebhookEventProcessed(event.ID, string(event.Type)); err != nil {
+		slog.Error("failed to mark webhook event as processed", "error", err, "event_id", event.ID)
 	}
 
 	w.WriteHeader(http.StatusOK)

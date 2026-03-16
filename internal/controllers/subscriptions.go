@@ -68,5 +68,7 @@ func (c *Controller) CancelSubscription(user *models.User) error {
 		return err
 	}
 
-	return nil
+	user.SubscriptionStatus = "canceled"
+	_, err = c.DB.UpdateUser(user)
+	return err
 }

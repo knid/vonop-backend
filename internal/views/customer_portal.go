@@ -10,13 +10,15 @@ import (
 )
 
 func (v *HttpViews) StripeCustomerPortal(w http.ResponseWriter, r *http.Request) {
-	/* 	tokenString, err := utils.ExtractTokenFromHeader(r)
-	   	if err != nil {
-	   		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
-	   		return
-	   	} */
-
-	tokenString := r.PostFormValue("token")
+	// Prefer Authorization header, fall back to form POST for legacy clients
+	tokenString, _ := utils.ExtractTokenFromHeader(r)
+	if tokenString == "" {
+		tokenString = r.PostFormValue("token")
+	}
+	if tokenString == "" {
+		utils.JSONErrorResponse(w, "authentication required", http.StatusUnauthorized)
+		return
+	}
 
 	userInformationRes, err := v.Controller.GetUser(tokenString)
 	if err != nil {

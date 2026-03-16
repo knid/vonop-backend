@@ -157,6 +157,19 @@ func (c *Controller) DeployToVercel(project *models.AppProject, user *models.Use
 // BuildAppMobile creates a native mobile build for an AI-generated app by wrapping
 // its Vercel deployment URL using the old URL-wrapper build system.
 func (c *Controller) BuildAppMobile(appProject *models.AppProject, user *models.User, platform string, appName string, icon string, splashColor string) (*models.Build, *models.AppBuildTask, error) {
+	// Enforce platform-specific build permissions
+	limits, err := c.DB.GetStandartUserLimitsByUser(user)
+	if err != nil {
+		slog.Warn("BuildAppMobile: failed to get user limits", "error", err, "user_id", user.ID)
+	} else {
+		if platform == "android" && !limits.CanBuildToAndroid {
+			return nil, nil, fmt.Errorf("your subscription does not allow Android builds")
+		}
+		if platform == "ios" && !limits.CanBuildToIOS {
+			return nil, nil, fmt.Errorf("your subscription does not allow iOS builds")
+		}
+	}
+
 	// Get the Vercel deployment URL — the app must be deployed to web first
 	deployment, err := c.DB.GetLatestAppDeployment(appProject.ID.String(), "web")
 	if err != nil || deployment.DeployedURL == "" {
