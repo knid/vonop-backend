@@ -1368,26 +1368,28 @@ func (c *Controller) runPreGenWebSearch(
 		return preGenContext{}
 	}
 
-	systemPrompt := `You are a research assistant. Analyze the user's prompt and decide if web search or screenshots would help gather context for building their website/app.
+	systemPrompt := `You are a research assistant that decides whether web search or screenshots are needed before building a website/app. You are NOT a builder — do NOT generate any code, HTML, CSS, or application content.
 
-Search and/or take screenshots when the user:
-- References an existing website or domain name (e.g. "shiftdelete.net", "airbnb clone") — search to understand what that site is, AND take a screenshot to see its actual visual design (colors, layout, typography)
-- Mentions specific technologies, APIs, or services that may need current documentation
+Your ONLY job: decide if tools are needed, call them if yes, or respond NO_SEARCH_NEEDED if no.
+
+Call web_search and/or take_screenshot ONLY when the user:
+- References a SPECIFIC existing website or domain name (e.g. "shiftdelete.net", "airbnb clone")
+- Mentions specific technologies, APIs, or services that need current documentation
 - Asks for something that benefits from up-to-date information (pricing, trends, latest versions)
-- Wants to clone, replicate, or be inspired by a real website or product
+- Wants to clone, replicate, or be inspired by a SPECIFIC real website or product
 
-IMPORTANT: When a user references a real website, ALWAYS call take_screenshot with the website URL. Web search results alone cannot reliably tell you the exact colors, layout, or visual style of a website. The screenshot is essential for accurate color matching and design replication.
+IMPORTANT: When a user references a real website, ALWAYS call take_screenshot with the website URL. Web search results alone cannot reliably tell you the exact colors, layout, or visual style of a website.
 
-Do NOT search/screenshot when:
-- The user describes a generic app/website from scratch without referencing real sites
-- The prompt is self-contained and doesn't need external context
+Respond with ONLY "NO_SEARCH_NEEDED" (nothing else) when:
+- The user describes a generic app/website type (e.g. "dashboard", "blog", "portfolio", "landing page")
+- The prompt is self-contained and doesn't reference any real website, brand, or domain
+- The user just describes features they want without referencing external sites
 
-When researching a website, do both:
-1. Use web_search to understand what the site is, its features, and content
-2. Use take_screenshot to capture the actual visual design (colors, layout, typography)
-
-Be thorough — the results will be used to generate an accurate replica/revision.
-If no search or screenshot is needed, respond with just: NO_SEARCH_NEEDED`
+CRITICAL RULES:
+- NEVER generate code, HTML, CSS, JavaScript, or any application content
+- NEVER start building the requested app — that is handled by a different system
+- Your response must be either tool calls OR the exact text "NO_SEARCH_NEEDED"
+- Keep any text response under 50 words`
 
 	userMsg := utils.Message{Role: "user", Content: userMessage}
 	if len(imageURLs) > 0 && provider.SupportsVision() {
@@ -1422,8 +1424,8 @@ If no search or screenshot is needed, respond with just: NO_SEARCH_NEEDED`
 		nil, // onChunk — discard fast model text
 		nil, // onReasoning
 		utils.ToolCallConfig{
-			MaxRounds: 5,
-			MaxTokens: 2048,
+			MaxRounds: 3,
+			MaxTokens: 512,
 			OnToolCallStart: func(toolName string) {
 				sendEvent("tool_start", map[string]string{"tool": toolName})
 			},
