@@ -95,10 +95,10 @@ func (v *HttpViews) UserLogin(w http.ResponseWriter, r *http.Request) {
 
 	go func() {
 		if u, lookupErr := v.Controller.DB.GetUserByEmail(userLoginReq.Email); lookupErr == nil {
+			v.Controller.EnsureIdentified(u)
 			v.Controller.TrackUserEvent(u, "user_logged_in", posthog.NewProperties().
 				Set("provider", u.Provider).
 				Set("subscription_status", u.SubscriptionStatus))
-			v.Controller.IdentifyUser(u)
 		}
 	}()
 
@@ -119,10 +119,10 @@ func (v *HttpViews) UserRegister(w http.ResponseWriter, r *http.Request) {
 
 	go func() {
 		if u, lookupErr := v.Controller.DB.GetUserById(userInformationRes.ID.String()); lookupErr == nil {
+			v.Controller.EnsureIdentified(u)
 			v.Controller.TrackUserEvent(u, "user_registered", posthog.NewProperties().
 				Set("provider", u.Provider).
 				Set("email", u.Email))
-			v.Controller.IdentifyUser(u)
 		}
 	}()
 

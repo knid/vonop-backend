@@ -818,7 +818,7 @@ func main() {
 		// slog.LevelInfo  - log responses (excl. OPTIONS)
 		// slog.LevelWarn  - log 4xx and 5xx responses only (except for 429)
 		// slog.LevelError - log 5xx responses only
-		Level: slog.LevelWarn,
+		Level: slog.LevelInfo,
 
 		Schema:        httplog.SchemaOTEL,
 		RecoverPanics: true,
@@ -829,7 +829,7 @@ func main() {
 	r.Use(func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			ctx := r.Context()
-			httplog.SetAttrs(ctx, slog.String("from", "HTTPLOG"))
+			httplog.SetAttrs(ctx, slog.String("from", "httplog"))
 
 			httplog.SetAttrs(ctx,
 				slog.String("client.ip", r.RemoteAddr),
@@ -1374,7 +1374,7 @@ func main() {
 	proxyRoute.Use(func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			ctx := r.Context()
-			httplog.SetAttrs(ctx, slog.String("from", "PROXYLOG"))
+			httplog.SetAttrs(ctx, slog.String("from", "proxylog"))
 			httplog.SetAttrs(ctx, slog.String("proxy.path", r.URL.Path))
 
 			urlCookie, err := r.Cookie(constants.SessionCookieName)

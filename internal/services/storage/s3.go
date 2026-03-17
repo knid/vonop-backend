@@ -5,7 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"os"
 	"time"
 
@@ -51,12 +51,14 @@ func (s *S3Storage) DownloadFile(ctx context.Context, s3URL string, destinationP
 	})
 
 	if err != nil {
+		slog.Error("failed to download file from S3", "from", "s3", "operation", "DownloadFile", "bucket", s.Bucket, "key", s3URL, "error", err)
 		return err
 	}
 	defer resp.Body.Close()
 
 	outFile, err := os.Create(destinationPath)
 	if err != nil {
+		slog.Error("failed to create destination file", "from", "s3", "operation", "DownloadFile", "bucket", s.Bucket, "key", s3URL, "error", err)
 		return err
 	}
 	defer outFile.Close()
@@ -64,6 +66,7 @@ func (s *S3Storage) DownloadFile(ctx context.Context, s3URL string, destinationP
 	// Write the S3 object data to the file
 	_, err = io.Copy(outFile, resp.Body)
 	if err != nil {
+		slog.Error("failed to write S3 object to file", "from", "s3", "operation", "DownloadFile", "bucket", s.Bucket, "key", s3URL, "error", err)
 		return err
 	}
 	return nil
@@ -72,6 +75,7 @@ func (s *S3Storage) DownloadFile(ctx context.Context, s3URL string, destinationP
 func (s *S3Storage) UploadFile(ctx context.Context, s3URL string, sourcePath string) error {
 	file, err := os.Open(sourcePath)
 	if err != nil {
+		slog.Error("failed to open source file for upload", "from", "s3", "operation", "UploadFile", "bucket", s.Bucket, "key", s3URL, "error", err)
 		return err
 	}
 	defer file.Close()
@@ -82,6 +86,7 @@ func (s *S3Storage) UploadFile(ctx context.Context, s3URL string, sourcePath str
 		Body:   file,
 	})
 	if err != nil {
+		slog.Error("failed to upload file to S3", "from", "s3", "operation", "UploadFile", "bucket", s.Bucket, "key", s3URL, "error", err)
 		return err
 	}
 	return nil
@@ -93,11 +98,17 @@ func (s *S3Storage) ReadObjectBytes(ctx context.Context, key string) ([]byte, er
 		Key:    &key,
 	})
 	if err != nil {
+		slog.Error("failed to get object from S3", "from", "s3", "operation", "ReadObjectBytes", "bucket", s.Bucket, "key", key, "error", err)
 		return nil, err
 	}
 	defer resp.Body.Close()
 
-	return io.ReadAll(resp.Body)
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		slog.Error("failed to read object body", "from", "s3", "operation", "ReadObjectBytes", "bucket", s.Bucket, "key", key, "error", err)
+		return nil, err
+	}
+	return data, nil
 }
 
 func (s *S3Storage) UploadFileByte(ctx context.Context, s3URL string, data []byte) error {
@@ -107,6 +118,7 @@ func (s *S3Storage) UploadFileByte(ctx context.Context, s3URL string, data []byt
 		Body:   bytes.NewReader(data),
 	})
 	if err != nil {
+		slog.Error("failed to upload bytes to S3", "from", "s3", "operation", "UploadFileByte", "bucket", s.Bucket, "key", s3URL, "error", err)
 		return err
 	}
 	return nil
@@ -127,8 +139,7 @@ func (s S3Storage) GetObject(
 		opts.Expires = time.Duration(lifetimeSecs * int64(time.Second))
 	})
 	if err != nil {
-		log.Printf("Couldn't get a presigned request to get %v:%v. Here's why: %v\n",
-			s.Bucket, objectKey, err)
+		slog.Error("failed to create presigned GET request", "from", "s3", "bucket", s.Bucket, "key", objectKey, "error", err)
 	}
 	return request, err
 }
@@ -148,8 +159,7 @@ func (s S3Storage) PutObject(
 		opts.Expires = time.Duration(lifetimeSecs * int64(time.Second))
 	})
 	if err != nil {
-		log.Printf("Couldn't get a presigned request to put %v:%v. Here's why: %v\n",
-			s.Bucket, objectKey, err)
+		slog.Error("failed to create presigned PUT request", "from", "s3", "bucket", s.Bucket, "key", objectKey, "error", err)
 	}
 	return request, err
 }
@@ -160,7 +170,7 @@ func (s S3Storage) DeleteObject(ctx context.Context, objectKey string) (*v4.Pres
 		Key:    aws.String(objectKey),
 	})
 	if err != nil {
-		log.Printf("Couldn't get a presigned request to delete object %v. Here's why: %v\n", objectKey, err)
+		slog.Error("failed to create presigned DELETE request", "from", "s3", "bucket", s.Bucket, "key", objectKey, "error", err)
 	}
 	return request, err
 }
@@ -172,6 +182,9 @@ func (s *S3Storage) UploadFileByteWithContentType(ctx context.Context, s3URL str
 		Body:        bytes.NewReader(data),
 		ContentType: aws.String(contentType),
 	})
+	if err != nil {
+		slog.Error("failed to upload bytes with content type to S3", "from", "s3", "operation", "UploadFileByteWithContentType", "bucket", s.Bucket, "key", s3URL, "error", err)
+	}
 	return err
 }
 
@@ -186,6 +199,7 @@ func (s *S3Storage) UploadFileBytePublic(ctx context.Context, key string, data [
 		ACL:         acl,
 	})
 	if err != nil {
+		slog.Error("failed to upload public file to S3", "from", "s3", "operation", "UploadFileBytePublic", "bucket", s.Bucket, "key", key, "error", err)
 		return "", err
 	}
 	publicURL := fmt.Sprintf("https://%s.s3.%s.amazonaws.com/%s", s.Bucket, s.Region, key)
@@ -206,7 +220,7 @@ func (s S3Storage) PresignPostObject(ctx context.Context, objectKey string, life
 		options.Expires = time.Duration(lifetimeSecs) * time.Second
 	})
 	if err != nil {
-		log.Printf("Couldn't get a presigned post request to put %v:%v. Here's why: %v\n", s.Bucket, objectKey, err)
+		slog.Error("failed to create presigned POST request", "from", "s3", "bucket", s.Bucket, "key", objectKey, "error", err)
 	}
 	return request, err
 }

@@ -58,7 +58,7 @@ func (v *HttpViews) NavBarAutoFillWithAI(w http.ResponseWriter, r *http.Request)
 
 	html, err := utils.FetchHTML(navBarAutoFillWithAIReq.URL, v.Controller.SecretManager.GetSecret("PROXY_HOST"), v.Controller.SecretManager.GetSecret("PROXY_AUTH"))
 	if err != nil {
-		slog.Error("❌ Error fetching page", "error", err, "from", "AUTOFILL")
+		slog.Error("error fetching page", "error", err, "from", "autofill")
 		utils.JSONErrorResponse(w, "Error fetching website. Try again please.", http.StatusBadRequest)
 		return
 	}
@@ -74,6 +74,7 @@ func (v *HttpViews) NavBarAutoFillWithAI(w http.ResponseWriter, r *http.Request)
 
 	// Token tracking for post-hoc billing
 	tracker := utils.NewTokenTracker()
+	tracker.UserID = user.ID.String()
 	ctx := utils.WithTokenTracker(r.Context(), tracker)
 
 	outputJson, err := utils.GetJSONFromLLM(ctx, v.Controller.SecretManager.GetSecret("DEFAULT_LLM_MODEL"), constants.NAVBAR_ITEM_GENERATOR_PROMPT, string(data), v.Controller.LLMProvider())
@@ -81,6 +82,10 @@ func (v *HttpViews) NavBarAutoFillWithAI(w http.ResponseWriter, r *http.Request)
 		utils.JSONErrorResponse(w, "Error generating items. Try again please.", http.StatusBadRequest)
 		return
 	}
+
+	v.Controller.RecordTokenUsage(user, "navbar_autofill",
+		v.Controller.SecretManager.GetSecret("DEFAULT_LLM_MODEL"),
+		v.Controller.LLMProvider().Name, "", "standard", tracker)
 
 	// Post-hoc token-based billing
 	prompt, completion, total, _ := tracker.Totals()

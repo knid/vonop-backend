@@ -42,13 +42,10 @@ func (c *Controller) TrackStorefrontEvent(storeID string, event string, props po
 		return
 	}
 
-	// Resolve store owner email for attribution
+	// Resolve store owner for attribution (skip user lookup — store_owner_id is sufficient)
 	store, err := c.DB.GetStoreByID(storeID)
 	if err == nil && store != nil {
 		props.Set("store_owner_id", store.UserID.String())
-		if user, uErr := c.DB.GetUserById(store.UserID.String()); uErr == nil && user != nil {
-			props.Set("$email", user.Email)
-		}
 	}
 
 	c.PostHog.Enqueue(posthog.Capture{

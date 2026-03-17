@@ -43,6 +43,7 @@ func (v *HttpViews) GenerateAppFromImage(w http.ResponseWriter, r *http.Request)
 
 	// Token tracking for post-hoc billing
 	tracker := utils.NewTokenTracker()
+	tracker.UserID = user.ID.String()
 	ctx := utils.WithTokenTracker(r.Context(), tracker)
 
 	structure, err := v.Controller.PlanAppFileStructureFromScreenshot(ctx, req.ImageBase64)
@@ -92,6 +93,10 @@ func (v *HttpViews) GenerateAppFromImage(w http.ResponseWriter, r *http.Request)
 			UpdatedAt:   project.UpdatedAt,
 		},
 	}, http.StatusCreated)
+
+	v.Controller.RecordTokenUsage(user, "generate_from_image",
+		v.Controller.SecretManager.GetSecret("DEFAULT_LLM_MODEL"),
+		v.Controller.LLMProvider().Name, project.ID.String(), "standard", tracker)
 
 	// Post-hoc token-based billing
 	prompt, completion, total, _ := tracker.Totals()

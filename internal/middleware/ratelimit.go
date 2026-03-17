@@ -67,6 +67,14 @@ func (rl *RateLimiter) RateLimit(limit int, window time.Duration, keyFunc func(r
 			}
 
 			if int(count) > limit {
+				slog.Warn("request rate limited",
+					"key", key,
+					"count", count,
+					"limit", limit,
+					"from", "ratelimit",
+					"path", r.URL.Path,
+					"method", r.Method,
+				)
 				retryAfter := int(ttl.Seconds())
 				if retryAfter <= 0 {
 					retryAfter = int(window.Seconds())

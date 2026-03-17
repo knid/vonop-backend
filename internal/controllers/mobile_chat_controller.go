@@ -177,6 +177,8 @@ func (c *Controller) StreamMobileInjectionChat(
 
 	// 4. Stream LLM response with InjectionParser
 	tracker := utils.NewTokenTracker()
+	tracker.UserID = user.ID.String()
+	tracker.ProjectID = project.ID.String()
 	ctx = utils.WithTokenTracker(ctx, tracker)
 
 	parser := &utils.InjectionStreamParser{}
@@ -270,7 +272,10 @@ func (c *Controller) StreamMobileInjectionChat(
 		}
 	}
 
-	// 6. Deduct AI credits based on actual token usage
+	// 6. Record token usage and deduct AI credits
+	c.RecordTokenUsage(user, "mobile_injection_chat",
+		model, provider.Name, project.ID.String(), "standard", tracker)
+
 	prompt, completion, total, _ := tracker.Totals()
 	if total > 0 {
 		credits := models.TokensToCredits(prompt, completion)

@@ -8,6 +8,7 @@ import (
 	"image/color"
 	"image/draw"
 	"image/png"
+	"log/slog"
 	"os"
 	"strings"
 )
@@ -30,14 +31,14 @@ func ComposeMockup(screenshot []byte) ([]byte, error) {
 
 	mockupImg, err := png.Decode(mockupFile)
 	if err != nil {
-		fmt.Printf("Error decoding mockup image: %v\n", err)
+		slog.Error("error decoding mockup image", "error", err, "from", "image")
 		return nil, err
 	}
 
 	// Decode screenshot
 	screenshotImg, err := png.Decode(bytes.NewReader(screenshot))
 	if err != nil {
-		fmt.Printf("Error decoding screenshot image: %v\n", err)
+		slog.Error("error decoding screenshot image", "error", err, "from", "image")
 		return nil, err
 	}
 
