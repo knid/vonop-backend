@@ -77,6 +77,12 @@ func (c *Controller) StreamMobileInjectionChat(
 		imageURLs = append(imageURLs, img)
 	}
 
+	// Enforce max message limit to prevent unbounded growth
+	const maxMessages = 200
+	if len(messages) >= maxMessages {
+		messages = messages[len(messages)-maxMessages+1:]
+	}
+
 	// Append user message
 	messages = append(messages, MobileChatMessage{
 		ID:        uuid.New().String(),
@@ -101,7 +107,7 @@ func (c *Controller) StreamMobileInjectionChat(
 		model = provider.DefaultModel()
 	}
 
-	injectionsContext := buildInjectionsContext(injections)
+	injectionsContext := utils.SanitizePromptContent(buildInjectionsContext(injections))
 	contextBlock := fmt.Sprintf(constants.MOBILE_INJECTION_CONTEXT_TEMPLATE, utils.SanitizePromptContent(project.URL), injectionsContext)
 
 	var llmMessages []utils.Message
@@ -127,6 +133,14 @@ func (c *Controller) StreamMobileInjectionChat(
 			// Run summarization asynchronously to avoid blocking the chat stream
 			oldMsgsCopy := make([]MobileChatMessage, len(oldMessages))
 			copy(oldMsgsCopy, oldMessages)
+			// Deep copy ImageURLs slices to avoid sharing with the main goroutine
+			for i, msg := range oldMsgsCopy {
+				if len(msg.ImageURLs) > 0 {
+					urls := make([]string, len(msg.ImageURLs))
+					copy(urls, msg.ImageURLs)
+					oldMsgsCopy[i].ImageURLs = urls
+				}
+			}
 			existingSummary := conv.Summary
 			projectID := project.ID.String()
 			go func() {
@@ -135,7 +149,9 @@ func (c *Controller) StreamMobileInjectionChat(
 					convObj, err := c.DB.GetMobileConversationByProject(projectID)
 					if err == nil {
 						convObj.Summary = summary
-						c.DB.UpdateMobileConversation(convObj)
+						if _, err := c.DB.UpdateMobileConversation(convObj); err != nil {
+							slog.Error("failed to update mobile conversation summary", "error", err, "project_id", projectID)
+						}
 					}
 				}
 			}()
@@ -176,23 +192,22 @@ func (c *Controller) StreamMobileInjectionChat(
 	}
 
 	parser.OnInjection = func(name, action, css, js, html string) {
-		// Save/update injection in DB
-		injection, err := c.saveOrUpdateMobileInjection(project.ID, name, css, js, html)
-		if err != nil {
-			slog.Error("failed to save injection", "error", err, "name", name)
-			return
-		}
-
+		// Send the event immediately so streaming is not blocked by the DB save
 		events <- responses.SSEEvent{
 			Event: "injection_applied",
 			Data: map[string]any{
-				"id":   injection.ID,
 				"name": name,
 				"css":  css,
 				"js":   js,
 				"html": html,
 			},
 		}
+		// Persist the injection to DB asynchronously
+		go func() {
+			if _, err := c.saveOrUpdateMobileInjection(project.ID, name, css, js, html); err != nil {
+				slog.Error("failed to save injection", "error", err, "name", name)
+			}
+		}()
 	}
 
 	parser.OnDeleteInjection = func(name string) {
@@ -259,8 +274,10 @@ func (c *Controller) StreamMobileInjectionChat(
 	prompt, completion, total, _ := tracker.Totals()
 	if total > 0 {
 		credits := models.TokensToCredits(prompt, completion)
-		if err := c.DeductAICreditsUnchecked(user, credits, "mobile_injection_chat", project.ID.String()); err != nil {
-			slog.Warn("failed to deduct AI credits", "error", err, "user_id", user.ID, "credits", credits)
+		if credits > 0 {
+			if err := c.DeductAICreditsUnchecked(user, credits, "mobile_injection_chat", project.ID.String()); err != nil {
+				slog.Warn("failed to deduct AI credits", "error", err, "user_id", user.ID, "credits", credits)
+			}
 		}
 	}
 
@@ -275,7 +292,9 @@ func (c *Controller) ClearMobileConversation(projectId string) error {
 }
 
 func (c *Controller) saveOrUpdateMobileInjection(projectID uuid.UUID, name, css, js, html string) (*models.MobileInjection, error) {
-	// Check if injection with this name already exists
+	// Check if injection with this name already exists.
+	// Safe to modify inj in place: this is single-threaded and the loop
+	// returns immediately after the first match, so no concurrent access.
 	existing, err := c.DB.GetMobileInjectionsByProject(projectID.String())
 	if err == nil {
 		for _, inj := range existing {
@@ -329,6 +348,10 @@ func buildInjectionsContext(injections []models.MobileInjection) string {
 }
 
 func mobileChatMessagesToLLM(msgs []MobileChatMessage, provider *utils.LLMProvider) []utils.Message {
+	if len(msgs) == 0 {
+		return nil
+	}
+
 	supportsVision := provider.SupportsVision()
 
 	lastImgIdx := -1
@@ -375,7 +398,10 @@ func (c *Controller) summarizeMobileConversation(ctx context.Context, messages [
 	system := "You are a conversation summarizer. Produce a concise summary of a mobile app customization conversation."
 	prompt := fmt.Sprintf("Summarize this conversation concisely, focusing on what injections were created/modified/deleted and what the user's goals are:\n\n%s", sb.String())
 
-	result, err := utils.GetTextFromLLM(ctx, model, system, prompt, provider)
+	summarizeCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	result, err := utils.GetTextFromLLM(summarizeCtx, model, system, prompt, provider)
 	if err != nil {
 		slog.Error("failed to summarize mobile conversation", "error", err)
 		return existingSummary

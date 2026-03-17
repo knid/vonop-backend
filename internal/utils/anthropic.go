@@ -621,13 +621,13 @@ func parseAnthropicSSEStream(
 		case "content_block_start":
 			var block struct {
 				Index        int `json:"index"`
-				ContentBlock struct {
+				ContentBlock *struct {
 					Type string `json:"type"`
 					ID   string `json:"id,omitempty"`
 					Name string `json:"name,omitempty"`
 				} `json:"content_block"`
 			}
-			if err := json.Unmarshal([]byte(data), &block); err == nil {
+			if err := json.Unmarshal([]byte(data), &block); err == nil && block.ContentBlock != nil && block.ContentBlock.Type != "" {
 				blocks[block.Index] = &blockInfo{
 					blockType: block.ContentBlock.Type,
 					id:        block.ContentBlock.ID,
@@ -719,6 +719,7 @@ func parseAnthropicSSEStream(
 	}
 
 	if err := scanner.Err(); err != nil {
+		slog.Error("SSE scanner error in Anthropic stream parser", "error", err)
 		return nil, err
 	}
 

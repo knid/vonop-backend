@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -31,7 +32,7 @@ func (v *HttpViews) MobileChatStream(w http.ResponseWriter, r *http.Request) {
 
 	projectID := chi.URLParam(r, "projectId")
 	project, err := v.Controller.GetProjectModelById(projectID)
-	if err != nil {
+	if err != nil || project == nil {
 		utils.JSONErrorResponse(w, "project not found", http.StatusNotFound)
 		return
 	}
@@ -43,6 +44,11 @@ func (v *HttpViews) MobileChatStream(w http.ResponseWriter, r *http.Request) {
 	var req requests.AppChatRequest
 	if err := utils.ParseJSONBody(r, &req); err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if strings.TrimSpace(req.Message) == "" && len(req.Images) == 0 {
+		utils.JSONErrorResponse(w, "message is required", http.StatusBadRequest)
 		return
 	}
 
@@ -123,6 +129,21 @@ func (v *HttpViews) UpdateMobileInjection(w http.ResponseWriter, r *http.Request
 	}
 	if err := utils.ParseJSONBody(r, &body); err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// Validate injection content size (max 50KB per field)
+	const maxContentLen = 50 * 1024
+	if body.CSS != nil && len(*body.CSS) > maxContentLen {
+		utils.JSONErrorResponse(w, "CSS content exceeds maximum allowed size (50KB)", http.StatusBadRequest)
+		return
+	}
+	if body.JS != nil && len(*body.JS) > maxContentLen {
+		utils.JSONErrorResponse(w, "JS content exceeds maximum allowed size (50KB)", http.StatusBadRequest)
+		return
+	}
+	if body.HTML != nil && len(*body.HTML) > maxContentLen {
+		utils.JSONErrorResponse(w, "HTML content exceeds maximum allowed size (50KB)", http.StatusBadRequest)
 		return
 	}
 
@@ -572,6 +593,16 @@ func buildMobileConfigResponse(config *models.MobileAppConfig, oneSignalAppID st
 // GET /v1/mobile/{projectId}/injections (public, no auth)
 func (v *HttpViews) GetPublicMobileInjections(w http.ResponseWriter, r *http.Request) {
 	projectID := chi.URLParam(r, "projectId")
+
+	// Validate the project exists before returning its injections
+	if _, err := uuid.Parse(projectID); err != nil {
+		utils.JSONErrorResponse(w, "invalid project ID", http.StatusBadRequest)
+		return
+	}
+	if _, err := v.Controller.GetProjectModelById(projectID); err != nil {
+		utils.JSONErrorResponse(w, "project not found", http.StatusNotFound)
+		return
+	}
 
 	injections, err := v.Controller.DB.GetEnabledMobileInjections(projectID)
 	if err != nil {

@@ -70,6 +70,9 @@ func (p *LLMProvider) WebSearchTool() *Tool {
 // DefaultModel returns the default model name for this provider.
 // Used as fallback when WEBSITE_BUILDER_LLM_MODEL secret is empty.
 func (p *LLMProvider) DefaultModel() string {
+	if p == nil {
+		return "anthropic/claude-sonnet-4"
+	}
 	switch p.Name {
 	case "anthropic":
 		return "claude-sonnet-4"
@@ -107,6 +110,9 @@ func (p *LLMProvider) SupportsVision() bool {
 
 // setLLMHeaders applies auth and provider-specific headers to an HTTP request.
 func setLLMHeaders(req *http.Request, provider *LLMProvider) {
+	if provider == nil {
+		return
+	}
 	req.Header.Set("Content-Type", "application/json")
 	if provider.IsAnthropic() {
 		req.Header.Set("x-api-key", provider.APIKey)

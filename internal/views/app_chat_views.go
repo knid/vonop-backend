@@ -41,6 +41,10 @@ func (v *HttpViews) ChatApp(w http.ResponseWriter, r *http.Request) {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
 		return
 	}
+	if user == nil {
+		utils.JSONErrorResponse(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
 	if requireActiveSubscription(w, user) {
 		return
 	}
@@ -54,10 +58,18 @@ func (v *HttpViews) ChatApp(w http.ResponseWriter, r *http.Request) {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
 		return
 	}
+	if project == nil {
+		utils.JSONErrorResponse(w, "project not found", http.StatusNotFound)
+		return
+	}
 
 	var req requests.AppChatRequest
 	if err := utils.ParseJSONBody(r, &req); err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if r.Context().Err() != nil {
 		return
 	}
 
