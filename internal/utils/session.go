@@ -19,27 +19,13 @@ func CheckSessionStatusJob(DB *database.Database) {
 		}
 		func() {
 			defer running.Store(false)
-			sessions, err := DB.GetActiveSessions()
+			n, err := DB.TimeoutStaleSessions(30 * time.Second)
 			if err != nil {
+				slog.Error("CheckSessionStatusJob: failed to timeout sessions", "error", err)
 				return
 			}
-			for _, session := range sessions {
-				lastEvent, err := DB.GetLastEventBySession(&session)
-				if err == nil {
-					if time.Since(lastEvent.CreatedAt).Seconds() > 30 {
-						session.Duration = session.Duration + 30
-						session.UpdatedAt = time.Now()
-						session.Status = "inactive"
-						DB.UpdateSession(&session)
-					}
-				} else {
-					if session.CreatedAt.Add(30 * time.Second).Before(time.Now()) {
-						session.Duration = session.Duration + 30
-						session.UpdatedAt = time.Now()
-						session.Status = "inactive"
-						DB.UpdateSession(&session)
-					}
-				}
+			if n > 0 {
+				slog.Info("CheckSessionStatusJob: timed out stale sessions", "count", n)
 			}
 		}()
 	}

@@ -331,7 +331,11 @@ func createSchema(db *bun.DB) error {
 		`CREATE INDEX IF NOT EXISTS idx_users_customer_id ON users(customer_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_sessions_project_id ON sessions(project_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status)`,
+		`CREATE INDEX IF NOT EXISTS idx_sessions_project_status ON sessions(project_id, status) WHERE deleted_at IS NULL`,
+		`CREATE INDEX IF NOT EXISTS idx_sessions_project_created ON sessions(project_id, created_at DESC) WHERE deleted_at IS NULL`,
+		`CREATE INDEX IF NOT EXISTS idx_sessions_status_active ON sessions(status) WHERE status = 'active' AND deleted_at IS NULL`,
 		`CREATE INDEX IF NOT EXISTS idx_app_usage_events_session_id ON app_usage_events(session_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_app_usage_events_session_created ON app_usage_events(session_id, created_at DESC) WHERE deleted_at IS NULL`,
 		`CREATE INDEX IF NOT EXISTS idx_products_store_id ON products(store_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_orders_store_id ON orders(store_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_carts_store_id_session_id ON carts(store_id, session_id)`,
@@ -935,10 +939,10 @@ func main() {
 					r.Route("/analytics", func(r chi.Router) {
 						r.Route("/events", func(r chi.Router) {
 							r.Get("/", httpViews.GetProjectEvents)
-							r.Post("/", httpViews.LogAppEvent)
+							r.With(rateLimiter.RateLimit(120, time.Minute, appMiddleware.IPKey)).Post("/", httpViews.LogAppEvent)
 						})
 						r.Route("/session", func(r chi.Router) {
-							r.Post("/", httpViews.CreateSession)
+							r.With(rateLimiter.RateLimit(30, time.Minute, appMiddleware.IPKey)).Post("/", httpViews.CreateSession)
 						})
 						r.Get("/devices", httpViews.GetAllDevices)
 						r.Get("/active-users", httpViews.GetActiveDevices)
