@@ -1,7 +1,7 @@
 package requests
 
 type PurchaseCreditsRequest struct {
-	PackSize int `json:"pack_size" validate:"required,oneof=100 200" errormgs:"pack_size must be 100 or 200"`
+	PackageID string `json:"package_id" validate:"required" errormgs:"package_id is required"`
 }
 
 type CheckoutRequest struct {
