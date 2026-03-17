@@ -7,7 +7,6 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/requests"
-	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/utils"
 )
 
@@ -64,49 +63,6 @@ func (v *HttpViews) CreateProjectBuild(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var builds []responses.BuildInformationResponse
-	projects, err := v.Controller.GetProjects(user)
-	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	for _, p := range projects {
-		project, err := v.Controller.GetProject(user, p.ID.String())
-		if err != nil {
-			continue
-		}
-
-		p, err := v.Controller.GetProjectModelById(project.ID.String())
-		if err != nil {
-			continue
-		}
-
-		b, err := v.Controller.GetBuilds(p)
-		if err != nil {
-			continue
-		}
-
-		builds = append(builds, b...)
-	}
-
-	subsStart := user.SubscriptionStartAt
-	now := time.Now()
-
-	renewStart := time.Date(now.Year(), now.Month(), subsStart.Day(), 0, 0, 0, 0, now.Location())
-
-	if now.Before(renewStart) {
-		renewStart = renewStart.AddDate(0, -1, 0)
-	}
-
-	renewEnd := renewStart.AddDate(0, 1, 0)
-
-	count := 0
-	for _, b := range builds {
-		if b.CreatedAt.After(renewStart) && b.CreatedAt.Before(renewEnd) {
-			count++
-		}
-	}
-
 	subsInfo, err := v.Controller.GetSubscription(user)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
@@ -121,6 +77,19 @@ func (v *HttpViews) CreateProjectBuild(w http.ResponseWriter, r *http.Request) {
 
 	if !limits.CanBuildMobile {
 		utils.JSONCodedErrorResponse(w, "FEATURE_NOT_AVAILABLE", "mobile builds require Professional plan", http.StatusForbidden, nil)
+		return
+	}
+
+	subsStart := user.SubscriptionStartAt
+	now := time.Now()
+	renewStart := time.Date(now.Year(), now.Month(), subsStart.Day(), 0, 0, 0, 0, now.Location())
+	if now.Before(renewStart) {
+		renewStart = renewStart.AddDate(0, -1, 0)
+	}
+
+	count, err := v.Controller.DB.CountUserBuildsSince(user.ID.String(), renewStart)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -149,8 +118,6 @@ func (v *HttpViews) CreateProjectBuild(w http.ResponseWriter, r *http.Request) {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-
-	v.Controller.GetBuilds(project)
 
 	var buildCreateReq requests.BuildCreateRequest
 	if err := utils.ParseJSONBody(r, &buildCreateReq); err != nil {
