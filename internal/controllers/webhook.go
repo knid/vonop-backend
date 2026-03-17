@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -402,6 +403,47 @@ func (c *Controller) processWebhookEvent(event stripe.Event) error {
 
 		c.TrackUserEvent(user, "payment_method_detached", posthog.NewProperties().
 			Set("payment_method_type", string(pm.Type)))
+
+	case "checkout.session.completed":
+		var cs stripe.CheckoutSession
+		if err := json.Unmarshal(event.Data.Raw, &cs); err != nil {
+			slog.Error("webhook: failed to unmarshal checkout session", "error", err, "event_id", event.ID)
+			return nil
+		}
+
+		// Only handle credit purchase sessions (identified by metadata)
+		if cs.Metadata["type"] != "credit_purchase" {
+			break
+		}
+
+		userID := cs.Metadata["user_id"]
+		packSizeStr := cs.Metadata["pack_size"]
+		if userID == "" || packSizeStr == "" {
+			slog.Error("webhook: credit purchase missing metadata", "event_id", event.ID, "metadata", cs.Metadata)
+			return nil
+		}
+
+		packSize, err := strconv.Atoi(packSizeStr)
+		if err != nil || (packSize != 100 && packSize != 500) {
+			slog.Error("webhook: invalid pack_size in metadata", "pack_size", packSizeStr, "event_id", event.ID)
+			return nil
+		}
+
+		user, err := c.DB.GetUserById(userID)
+		if err != nil {
+			return fmt.Errorf("user %s not found for credit purchase: %w", userID, err)
+		}
+
+		if err := c.AddAICredits(user, packSize, "purchase", cs.ID); err != nil {
+			return fmt.Errorf("failed to add %d credits for user %s: %w", packSize, userID, err)
+		}
+
+		slog.Info("credits purchased", "user_id", userID, "pack_size", packSize, "session_id", cs.ID)
+
+		c.TrackUserEvent(user, "credits_purchased", posthog.NewProperties().
+			Set("pack_size", packSize).
+			Set("session_id", cs.ID).
+			Set("amount_total", cs.AmountTotal))
 
 	default:
 		slog.Warn("unhandled webhook event type", "event_type", event.Type, "event_id", event.ID)

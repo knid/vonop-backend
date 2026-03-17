@@ -1,6 +1,7 @@
 package views
 
 import (
+	"fmt"
 	"log/slog"
 	"net/http"
 
@@ -10,8 +11,31 @@ import (
 	"github.com/stripe/stripe-go/v82/checkout/session"
 )
 
+// creditPackPriceID returns the Stripe Price ID for a given credit pack size,
+// or empty string if the pack is not configured.
+func (v *HttpViews) creditPackPriceID(packSize int) string {
+	switch packSize {
+	case 100:
+		return v.Controller.SecretManager.GetSecret("STRIPE_CREDITS_100_PRICE_ID")
+	case 500:
+		return v.Controller.SecretManager.GetSecret("STRIPE_CREDITS_500_PRICE_ID")
+	default:
+		return ""
+	}
+}
+
+// creditPackSize returns the credit amount for a Stripe Price ID, or 0 if unknown.
+func (v *HttpViews) creditPackSize(priceID string) int {
+	if priceID == v.Controller.SecretManager.GetSecret("STRIPE_CREDITS_100_PRICE_ID") {
+		return 100
+	}
+	if priceID == v.Controller.SecretManager.GetSecret("STRIPE_CREDITS_500_PRICE_ID") {
+		return 500
+	}
+	return 0
+}
+
 func (v *HttpViews) StripeCheckout(w http.ResponseWriter, r *http.Request) {
-	// TODO: Check user location, if user in GB return error with like this text: "We can't provide service for United Kingdom currently. Please try again later.". You can make it more professional.
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
@@ -55,7 +79,7 @@ func (v *HttpViews) StripeCheckout(w http.ResponseWriter, r *http.Request) {
 
 	lineItems := []*stripe.CheckoutSessionLineItemParams{
 		{
-			Price:    &priceID, // The Price ID from your Stripe dashboard
+			Price:    &priceID,
 			Quantity: stripe.Int64(1),
 		},
 	}
@@ -69,11 +93,10 @@ func (v *HttpViews) StripeCheckout(w http.ResponseWriter, r *http.Request) {
 		AllowPromotionCodes: stripe.Bool(true),
 	}
 
-	// Create the actual Stripe Checkout Session!
 	s, err := session.New(params)
 	if err != nil {
 		slog.Error("stripe checkout session creation failed", "error", err)
-		http.Error(w, "Failed to create checkout session. Please try again.", http.StatusInternalServerError)
+		utils.JSONErrorResponse(w, "Failed to create checkout session. Please try again.", http.StatusInternalServerError)
 		return
 	}
 
@@ -82,6 +105,70 @@ func (v *HttpViews) StripeCheckout(w http.ResponseWriter, r *http.Request) {
 		Set("trial_eligible", !user.TrialUsed))
 
 	utils.JSONResponse(w, map[string]string{"url": s.URL}, http.StatusCreated)
-	// Redirect the user's browser to Stripe's hosted checkout page!
-	// http.Redirect(w, r, s.URL, http.StatusSeeOther)
+}
+
+// PurchaseCredits creates a one-time Stripe Checkout Session for buying AI credit packs.
+func (v *HttpViews) PurchaseCredits(w http.ResponseWriter, r *http.Request) {
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	if requireActiveSubscription(w, user) {
+		return
+	}
+
+	var req struct {
+		PackSize int `json:"pack_size"`
+	}
+	if err := utils.ParseJSONBody(r, &req); err != nil {
+		utils.JSONErrorResponse(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	priceID := v.creditPackPriceID(req.PackSize)
+	if priceID == "" {
+		utils.JSONErrorResponse(w, "pack_size must be 100 or 500", http.StatusBadRequest)
+		return
+	}
+
+	dashboardURL := v.Controller.SecretManager.GetSecret("FRONTEND_URL")
+	if dashboardURL == "" {
+		dashboardURL = "https://dashboard.wemob.io"
+	}
+	successURL := dashboardURL + "/billing?credits=purchased"
+	cancelURL := dashboardURL + "/billing"
+
+	mode := string(stripe.CheckoutSessionModePayment)
+	params := &stripe.CheckoutSessionParams{
+		Customer: stripe.String(user.CustomerID),
+		LineItems: []*stripe.CheckoutSessionLineItemParams{
+			{
+				Price:    stripe.String(priceID),
+				Quantity: stripe.Int64(1),
+			},
+		},
+		Mode:       &mode,
+		SuccessURL: &successURL,
+		CancelURL:  &cancelURL,
+		Metadata: map[string]string{
+			"type":      "credit_purchase",
+			"user_id":   user.ID.String(),
+			"pack_size": fmt.Sprintf("%d", req.PackSize),
+		},
+	}
+
+	s, err := session.New(params)
+	if err != nil {
+		slog.Error("stripe credit purchase checkout failed", "error", err)
+		utils.JSONErrorResponse(w, "Failed to create checkout session. Please try again.", http.StatusInternalServerError)
+		return
+	}
+
+	v.Controller.TrackUserEvent(user, "credit_purchase_started", posthog.NewProperties().
+		Set("pack_size", req.PackSize).
+		Set("price_id", priceID))
+
+	utils.JSONResponse(w, map[string]string{"url": s.URL}, http.StatusCreated)
 }
