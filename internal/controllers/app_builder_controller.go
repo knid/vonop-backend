@@ -1263,6 +1263,14 @@ CRITICAL LANGUAGE RULE: ALL content you generate (product names, descriptions, c
 		}
 	}
 
+	// Track whether a tool was called so we only stream Phase 1 text
+	// when it precedes a tool invocation (e.g. "Let me check the database...").
+	// If no tools are called, all Phase 1 text is discarded — Phase 2 will
+	// generate its own response, preventing duplicate greetings.
+	var toolCalled bool
+	var phase1TextBuf strings.Builder
+	var phase1TextFlushed bool
+
 	result, err := utils.StreamWithTools(
 		ctx, fastModel, messages,
 		tools, provider,
@@ -1270,28 +1278,24 @@ CRITICAL LANGUAGE RULE: ALL content you generate (product names, descriptions, c
 		executor,
 		nil, // onToolCall — handled in executors
 		func() func(string) {
-			// Buffer initial chunks to suppress "NO_TOOLS_NEEDED" responses.
-			// Once we see a real sentence we flush the buffer and stream directly.
-			var buf strings.Builder
-			flushed := false
 			return func(chunk string) {
 				cleaned := ansiRegex.ReplaceAllString(chunk, "")
 				if cleaned == "" {
 					return
 				}
-				if flushed {
+				// Already flushed — stream directly
+				if phase1TextFlushed {
 					sendEvent("chat_text", responses.ChatTextEvent{Chunk: cleaned})
 					return
 				}
-				buf.WriteString(cleaned)
-				s := buf.String()
+				phase1TextBuf.WriteString(cleaned)
+				s := phase1TextBuf.String()
 				if strings.Contains(s, "NO_TOOLS_NEEDED") {
-					// Discard — no tools will be called
 					return
 				}
-				// Flush once we have enough text to know it's a real message
-				if len(s) > 20 {
-					flushed = true
+				// Only flush buffered text once a tool has been called
+				if toolCalled && len(s) > 0 {
+					phase1TextFlushed = true
 					sendEvent("chat_text", responses.ChatTextEvent{Chunk: s})
 				}
 			}
@@ -1302,6 +1306,15 @@ CRITICAL LANGUAGE RULE: ALL content you generate (product names, descriptions, c
 			MaxTokens:  4096,
 			StripAfter: 28, // Strip tools near the end so model is forced to respond
 			OnToolCallStart: func(toolName string) {
+				toolCalled = true
+				// Flush any buffered text that preceded this tool call
+				if !phase1TextFlushed && phase1TextBuf.Len() > 0 {
+					s := phase1TextBuf.String()
+					if !strings.Contains(s, "NO_TOOLS_NEEDED") {
+						phase1TextFlushed = true
+						sendEvent("chat_text", responses.ChatTextEvent{Chunk: s})
+					}
+				}
 				sendEvent("tool_start", map[string]string{"tool": toolName})
 			},
 		},
