@@ -17,22 +17,11 @@ func (v *HttpViews) creditPackPriceID(packSize int) string {
 	switch packSize {
 	case 100:
 		return v.Controller.SecretManager.GetSecret("STRIPE_CREDITS_100_PRICE_ID")
-	case 500:
-		return v.Controller.SecretManager.GetSecret("STRIPE_CREDITS_500_PRICE_ID")
+	case 200:
+		return v.Controller.SecretManager.GetSecret("STRIPE_CREDITS_200_PRICE_ID")
 	default:
 		return ""
 	}
-}
-
-// creditPackSize returns the credit amount for a Stripe Price ID, or 0 if unknown.
-func (v *HttpViews) creditPackSize(priceID string) int {
-	if priceID == v.Controller.SecretManager.GetSecret("STRIPE_CREDITS_100_PRICE_ID") {
-		return 100
-	}
-	if priceID == v.Controller.SecretManager.GetSecret("STRIPE_CREDITS_500_PRICE_ID") {
-		return 500
-	}
-	return 0
 }
 
 func (v *HttpViews) StripeCheckout(w http.ResponseWriter, r *http.Request) {
@@ -129,7 +118,7 @@ func (v *HttpViews) PurchaseCredits(w http.ResponseWriter, r *http.Request) {
 
 	priceID := v.creditPackPriceID(req.PackSize)
 	if priceID == "" {
-		utils.JSONErrorResponse(w, "pack_size must be 100 or 500", http.StatusBadRequest)
+		utils.JSONErrorResponse(w, "pack_size must be 100 or 200", http.StatusBadRequest)
 		return
 	}
 
