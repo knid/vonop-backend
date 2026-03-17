@@ -1,6 +1,12 @@
 package utils
 
-import "net/http"
+import (
+	"log/slog"
+	"net/http"
+)
+
+// anthropicBetaFeatures lists the Anthropic beta features to enable.
+var anthropicBetaFeatures = "interleaved-thinking-2025-05-14,web-search-2025-03-05"
 
 // LLMProvider holds the base URL and API key for a specific LLM provider.
 // All supported providers expose an OpenAI-compatible /chat/completions endpoint.
@@ -91,6 +97,7 @@ func (p *LLMProvider) DefaultModel() string {
 // and conversation summarization. Falls back to DefaultModel if no fast option exists.
 func (p *LLMProvider) FastModel() string {
 	if p.FastModelOverride != "" {
+		slog.Debug("using fast model override", "model", p.FastModelOverride, "provider", p.Name)
 		return p.FastModelOverride
 	}
 	switch p.Name {
@@ -117,7 +124,7 @@ func setLLMHeaders(req *http.Request, provider *LLMProvider) {
 	if provider.IsAnthropic() {
 		req.Header.Set("x-api-key", provider.APIKey)
 		req.Header.Set("anthropic-version", "2023-06-01")
-		req.Header.Set("anthropic-beta", "interleaved-thinking-2025-05-14,web-search-2025-03-05")
+		req.Header.Set("anthropic-beta", anthropicBetaFeatures)
 		return
 	}
 	req.Header.Set("Authorization", "Bearer "+provider.APIKey)

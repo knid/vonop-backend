@@ -114,6 +114,12 @@ func (s *S3Storage) UploadFileByte(ctx context.Context, s3URL string, data []byt
 
 func (s S3Storage) GetObject(
 	ctx context.Context, objectKey string, lifetimeSecs int64) (*v4.PresignedHTTPRequest, error) {
+	if lifetimeSecs <= 0 {
+		lifetimeSecs = 3600 // default 1 hour
+	}
+	if lifetimeSecs > 604800 { // 7 days max
+		lifetimeSecs = 604800
+	}
 	request, err := s.PresignClient.PresignGetObject(ctx, &s3.GetObjectInput{
 		Bucket: aws.String(s.Bucket),
 		Key:    aws.String(objectKey),
@@ -129,6 +135,12 @@ func (s S3Storage) GetObject(
 
 func (s S3Storage) PutObject(
 	ctx context.Context, objectKey string, lifetimeSecs int64) (*v4.PresignedHTTPRequest, error) {
+	if lifetimeSecs <= 0 {
+		lifetimeSecs = 3600 // default 1 hour
+	}
+	if lifetimeSecs > 604800 { // 7 days max
+		lifetimeSecs = 604800
+	}
 	request, err := s.PresignClient.PresignPutObject(ctx, &s3.PutObjectInput{
 		Bucket: aws.String(s.Bucket),
 		Key:    aws.String(objectKey),
@@ -181,6 +193,12 @@ func (s *S3Storage) UploadFileBytePublic(ctx context.Context, key string, data [
 }
 
 func (s S3Storage) PresignPostObject(ctx context.Context, objectKey string, lifetimeSecs int64) (*s3.PresignedPostRequest, error) {
+	if lifetimeSecs <= 0 {
+		lifetimeSecs = 3600 // default 1 hour
+	}
+	if lifetimeSecs > 604800 { // 7 days max
+		lifetimeSecs = 604800
+	}
 	request, err := s.PresignClient.PresignPostObject(ctx, &s3.PutObjectInput{
 		Bucket: aws.String(s.Bucket),
 		Key:    aws.String(objectKey),

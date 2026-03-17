@@ -15,6 +15,9 @@ func SanitizePromptContent(s string) string {
 	}
 	// Strip triple backticks that could escape code blocks in the prompt.
 	s = strings.ReplaceAll(s, "```", "'''")
+	// Escape nested user_data tags to prevent tag nesting attacks.
+	s = strings.ReplaceAll(s, "<user_data>", "&lt;user_data&gt;")
+	s = strings.ReplaceAll(s, "</user_data>", "&lt;/user_data&gt;")
 	return "<user_data>" + s + "</user_data>"
 }
 

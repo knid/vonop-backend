@@ -14,6 +14,16 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+// rateLimitScript atomically increments the counter and sets the expiry
+// on the first increment, preventing a TOCTOU race between INCR and EXPIRE.
+var rateLimitScript = redis.NewScript(`
+local count = redis.call("INCR", KEYS[1])
+if count == 1 then
+    redis.call("EXPIRE", KEYS[1], ARGV[1])
+end
+return count
+`)
+
 // RateLimiter provides Redis-backed rate limiting.
 type RateLimiter struct {
 	client *redis.Client
@@ -40,21 +50,21 @@ func (rl *RateLimiter) RateLimit(limit int, window time.Duration, keyFunc func(r
 			key := fmt.Sprintf("rl:%s", keyFunc(r))
 			ctx := context.Background()
 
-			count, err := rl.client.Incr(ctx, key).Result()
+			result, err := rateLimitScript.Run(ctx, rl.client, []string{key}, int(window.Seconds())).Result()
 			if err != nil {
 				slog.Error("rate limiter redis error", "error", err)
 				utils.JSONErrorResponse(w, "service temporarily unavailable", http.StatusServiceUnavailable)
 				return
 			}
-
-			if count == 1 {
-				rl.client.Expire(ctx, key, window)
-			}
+			count, _ := result.(int64)
 
 			ttl, _ := rl.client.TTL(ctx, key).Result()
 
 			w.Header().Set("X-RateLimit-Limit", strconv.Itoa(limit))
 			w.Header().Set("X-RateLimit-Remaining", strconv.Itoa(max(0, limit-int(count))))
+			if ttl > 0 {
+				w.Header().Set("X-RateLimit-Reset", fmt.Sprintf("%d", time.Now().Add(ttl).Unix()))
+			}
 
 			if int(count) > limit {
 				retryAfter := int(ttl.Seconds())

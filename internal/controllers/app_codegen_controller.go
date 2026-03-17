@@ -1696,18 +1696,17 @@ func (c *Controller) generateAndStoreSeedImages(
 
 // getNeonIntegration returns the Neon integration for a project, if any.
 // Only returns integrations with status "connected".
-func (c *Controller) getNeonIntegration(projectID string) *models.AppIntegration {
+func (c *Controller) getNeonIntegration(projectID string) (*models.AppIntegration, error) {
 	integrations, err := c.DB.GetAppIntegrationsByProjectID(projectID)
 	if err != nil {
-		slog.Error("getNeonIntegration: failed to query integrations", "project_id", projectID, "error", err)
-		return nil
+		return nil, fmt.Errorf("failed to get neon integration: %w", err)
 	}
 	for i, integ := range integrations {
 		if integ.Provider == "neon" && integ.Status == "connected" {
-			return &integrations[i]
+			return &integrations[i], nil
 		}
 	}
-	return nil
+	return nil, nil
 }
 
 // PlanAppFileStructure calls the LLM to generate a file structure plan from a prompt (non-streaming).

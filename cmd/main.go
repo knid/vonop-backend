@@ -1411,20 +1411,22 @@ func main() {
 
 	// Create explicit http.Server instances for graceful shutdown
 	mainServer := &http.Server{
-		Addr:           ":8001",
-		Handler:        r,
-		MaxHeaderBytes: 1 << 20, // 1 MB
-		ReadTimeout:    60 * time.Second,
-		WriteTimeout:   30 * time.Minute, // long for SSE streaming
-		IdleTimeout:    120 * time.Second,
+		Addr:              ":8001",
+		Handler:           r,
+		MaxHeaderBytes:    1 << 20, // 1 MB
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       60 * time.Second,
+		WriteTimeout:      30 * time.Minute, // long for SSE streaming
+		IdleTimeout:       120 * time.Second,
 	}
 	proxyServer := &http.Server{
-		Addr:           ":9001",
-		Handler:        proxyRoute,
-		MaxHeaderBytes: 1 << 20,
-		ReadTimeout:    30 * time.Second,
-		WriteTimeout:   60 * time.Second,
-		IdleTimeout:    60 * time.Second,
+		Addr:              ":9001",
+		Handler:           proxyRoute,
+		MaxHeaderBytes:    1 << 20,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      60 * time.Second,
+		IdleTimeout:       60 * time.Second,
 	}
 
 	// Periodically clean up expired preview codes
@@ -1476,6 +1478,20 @@ func main() {
 		}
 		if err := mainServer.Shutdown(ctx); err != nil {
 			slog.Error("Main server shutdown error", "error", err)
+		}
+
+		// Close database connection pool
+		slog.Info("closing database connection pool")
+		if err := bundb.Close(); err != nil {
+			slog.Error("error closing database", "error", err)
+		}
+
+		// Close Redis connection
+		if redisClient != nil {
+			slog.Info("closing redis connection")
+			if err := redisClient.Close(); err != nil {
+				slog.Error("error closing redis", "error", err)
+			}
 		}
 
 		slog.Info("Servers shut down gracefully")

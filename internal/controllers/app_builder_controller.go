@@ -691,7 +691,9 @@ func (c *Controller) StreamBuildApp(
 				if fileType == "tsx" || fileType == "ts" {
 					content, _ = stripForbiddenImports(content, path)
 				}
-				c.saveGeneratedFile(project, repo, path, content, fileType, fileMap, sendEvent, &toolAppliedOps, true)
+				if err := c.saveGeneratedFile(project, repo, path, content, fileType, fileMap, sendEvent, &toolAppliedOps, true); err != nil {
+					slog.Error("chat file save failed", "path", path, "error", err)
+				}
 				chatFileCounter++
 				sendEvent("progress", responses.ProgressEvent{
 					Phase:   "generating_files",
@@ -700,7 +702,9 @@ func (c *Controller) StreamBuildApp(
 				})
 			},
 			OnDelete: func(path string) {
-				c.deleteGeneratedFile(project, repo, path, fileMap, sendEvent, &toolAppliedOps)
+				if err := c.deleteGeneratedFile(project, repo, path, fileMap, sendEvent, &toolAppliedOps); err != nil {
+					slog.Error("chat file delete failed", "path", path, "error", err)
+				}
 				deletedPaths = append(deletedPaths, path)
 			},
 			OnText: func(text string) {
@@ -1037,12 +1041,12 @@ func (c *Controller) saveGeneratedFile(
 	sendEvent func(string, any) bool,
 	ops *[]appBuilderOperation,
 	allowProtected ...bool,
-) {
+) error {
 	// Sanitize file path to prevent directory traversal from LLM output.
 	cleanPath, valid := utils.SanitizeFilePath(path)
 	if !valid {
 		slog.Warn("saveGeneratedFile: rejecting suspicious file path", "path", path)
-		return
+		return nil
 	}
 	path = cleanPath
 
@@ -1058,13 +1062,13 @@ func (c *Controller) saveGeneratedFile(
 				FileType: fileType, Content: string(existingContent),
 			})
 		}
-		return
+		return nil
 	}
 
 	// Guard: block seed routes — the platform handles seeding, not user-facing API routes.
 	if strings.HasPrefix(path, "app/api/seed") || strings.HasPrefix(path, "app/api/migrate") {
 		slog.Warn("saveGeneratedFile: blocking seed/migrate route", "path", path)
-		return
+		return nil
 	}
 
 	// Guard: e-commerce projects must not have API routes (except auth) or drizzle files.
@@ -1072,11 +1076,11 @@ func (c *Controller) saveGeneratedFile(
 	if project.ProjectType == "ecommerce" {
 		if strings.HasPrefix(path, "app/api/") && !strings.HasPrefix(path, "app/api/auth/") {
 			slog.Warn("saveGeneratedFile: blocking API route in e-commerce project", "path", path)
-			return
+			return nil
 		}
 		if path == "lib/db.ts" || path == "lib/schema.ts" {
 			slog.Warn("saveGeneratedFile: blocking drizzle file in e-commerce project", "path", path)
-			return
+			return nil
 		}
 	}
 
@@ -1091,7 +1095,7 @@ func (c *Controller) saveGeneratedFile(
 					Action: "modify", FilePath: path,
 					FileType: fileType, Content: content,
 				})
-				return
+				return nil
 			}
 		}
 		action = "modify"
@@ -1099,7 +1103,7 @@ func (c *Controller) saveGeneratedFile(
 
 	if err := repo.WriteFile(path, []byte(content)); err != nil {
 		slog.Error("saveGeneratedFile: failed to write", "path", path, "error", err)
-		return
+		return fmt.Errorf("saveGeneratedFile: write %s: %w", path, err)
 	}
 
 	fileMap[path] = content
@@ -1110,6 +1114,7 @@ func (c *Controller) saveGeneratedFile(
 	*ops = append(*ops, appBuilderOperation{
 		Action: action, Path: path, Type: fileType,
 	})
+	return nil
 }
 
 // deleteGeneratedFile removes a file from the git repo and fileMap, emitting events.
@@ -1120,23 +1125,23 @@ func (c *Controller) deleteGeneratedFile(
 	fileMap map[string]string,
 	sendEvent func(string, any) bool,
 	ops *[]appBuilderOperation,
-) {
+) error {
 	cleanPath, valid := utils.SanitizeFilePath(path)
 	if !valid {
 		slog.Warn("deleteGeneratedFile: rejecting suspicious file path", "path", path)
-		return
+		return nil
 	}
 	path = cleanPath
 
 	if !repo.FileExists(path) {
 		slog.Warn("deleteGeneratedFile: file not found", "path", path)
-		return
+		return nil
 	}
 
 	_, fileType := guessFileType(path)
 	if err := repo.DeleteFile(path); err != nil {
 		slog.Error("deleteGeneratedFile: failed to delete", "path", path, "error", err)
-		return
+		return fmt.Errorf("deleteGeneratedFile: delete %s: %w", path, err)
 	}
 	delete(fileMap, path)
 	sendEvent("file_complete", responses.FileCompleteEvent{
@@ -1146,6 +1151,7 @@ func (c *Controller) deleteGeneratedFile(
 	*ops = append(*ops, appBuilderOperation{
 		Action: "delete", Path: path, Type: fileType,
 	})
+	return nil
 }
 
 // --- Helper: fast-model tool-calling phase ---
@@ -1207,7 +1213,10 @@ CRITICAL LANGUAGE RULE: ALL content you generate (product names, descriptions, c
 - If the user asks for a specific UI component (dialog, tabs, accordion, toast, dropdown, etc.) that may not be in the project yet, call search_components to find and inject it.`
 	if hasDB {
 		// Include database schema so the LLM knows exact table/column names and types
-		dataModels, _ := parseDataModels(project.DataModels)
+		dataModels, err := parseDataModels(project.DataModels)
+		if err != nil {
+			slog.Warn("failed to parse data models, using empty", "error", err)
+		}
 		if len(dataModels) > 0 {
 			systemPrompt += "\n\n### Database Schema\n"
 			for _, dm := range dataModels {
@@ -4736,7 +4745,9 @@ func (c *Controller) streamSingleShotGeneration(
 			if fileType == "tsx" || fileType == "ts" {
 				content, _ = stripForbiddenImports(content, path)
 			}
-			c.saveGeneratedFile(project, repo, path, content, fileType, fileMap, sendEvent, &ops)
+			if err := c.saveGeneratedFile(project, repo, path, content, fileType, fileMap, sendEvent, &ops); err != nil {
+				slog.Error("file save failed during generation", "path", path, "error", err)
+			}
 			fileCounter++
 			sendEvent("progress", responses.ProgressEvent{
 				Phase:   "generating_files",
@@ -4788,7 +4799,9 @@ func (c *Controller) streamSingleShotGeneration(
 		if !existed {
 			// New file created by auto-fix (e.g. components/layout-client.tsx)
 			_, fileType := guessFileType(path)
-			c.saveGeneratedFile(project, repo, path, content, fileType, fileMap, sendEvent, &ops)
+			if saveErr := c.saveGeneratedFile(project, repo, path, content, fileType, fileMap, sendEvent, &ops); saveErr != nil {
+				slog.Error("failed to save auto-fixed file", "path", path, "error", saveErr)
+			}
 		} else if content != prev {
 			if writeErr := repo.WriteFile(path, []byte(content)); writeErr != nil {
 				slog.Error("failed to persist auto-fixed file", "path", path, "error", writeErr)
@@ -5096,7 +5109,9 @@ func (c *Controller) streamEcommerceGeneration(
 			if fileType == "tsx" || fileType == "ts" {
 				content, _ = stripForbiddenImports(content, path)
 			}
-			c.saveGeneratedFile(project, repo, path, content, fileType, fileMap, sendEvent, &ops)
+			if err := c.saveGeneratedFile(project, repo, path, content, fileType, fileMap, sendEvent, &ops); err != nil {
+				slog.Error("ecom file save failed during generation", "path", path, "error", err)
+			}
 			ecomFileCounter++
 			sendEvent("progress", responses.ProgressEvent{
 				Phase:   "generating_files",
@@ -5147,7 +5162,9 @@ func (c *Controller) streamEcommerceGeneration(
 		prev, existed := preFixSnapshot[path]
 		if !existed {
 			_, fileType := guessFileType(path)
-			c.saveGeneratedFile(project, repo, path, content, fileType, fileMap, sendEvent, &ops)
+			if saveErr := c.saveGeneratedFile(project, repo, path, content, fileType, fileMap, sendEvent, &ops); saveErr != nil {
+				slog.Error("failed to save auto-fixed ecom file", "path", path, "error", saveErr)
+			}
 		} else if content != prev {
 			if writeErr := repo.WriteFile(path, []byte(content)); writeErr != nil {
 				slog.Error("failed to persist auto-fixed file (ecom)", "path", path, "error", writeErr)
@@ -5782,7 +5799,9 @@ func (c *Controller) StreamMobileOptimize(
 			if fileType == "tsx" || fileType == "ts" {
 				content, _ = stripForbiddenImports(content, path)
 			}
-			c.saveGeneratedFile(project, repo, path, content, fileType, fileMap, sendEvent, &ops, true)
+			if err := c.saveGeneratedFile(project, repo, path, content, fileType, fileMap, sendEvent, &ops, true); err != nil {
+				slog.Error("optimization file save failed", "path", path, "error", err)
+			}
 			fileCounter++
 			sendEvent("progress", responses.ProgressEvent{
 				Phase:   "optimizing",
@@ -5791,7 +5810,9 @@ func (c *Controller) StreamMobileOptimize(
 			})
 		},
 		OnDelete: func(path string) {
-			c.deleteGeneratedFile(project, repo, path, fileMap, sendEvent, &ops)
+			if err := c.deleteGeneratedFile(project, repo, path, fileMap, sendEvent, &ops); err != nil {
+				slog.Error("optimization file delete failed", "path", path, "error", err)
+			}
 		},
 		OnText: func(text string) {
 			responseBuilder.WriteString(text)

@@ -25,6 +25,8 @@ func WriteSSEEvent(w http.ResponseWriter, flusher http.Flusher, eventName string
 		return err
 	}
 
-	flusher.Flush()
+	if flusher != nil {
+		flusher.Flush()
+	}
 	return nil
 }
