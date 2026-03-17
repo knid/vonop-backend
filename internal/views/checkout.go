@@ -11,17 +11,34 @@ import (
 	"github.com/stripe/stripe-go/v82/checkout/session"
 )
 
-// creditPackPriceID returns the Stripe Price ID for a given credit pack size,
-// or empty string if the pack is not configured.
-func (v *HttpViews) creditPackPriceID(packSize int) string {
-	switch packSize {
-	case 100:
-		return v.Controller.SecretManager.GetSecret("STRIPE_CREDITS_100_PRICE_ID")
-	case 200:
-		return v.Controller.SecretManager.GetSecret("STRIPE_CREDITS_200_PRICE_ID")
-	default:
-		return ""
+// creditPacks defines the available credit packages.
+// Each maps a package ID to its Stripe secret key, display name, credit amount, and price in dollars.
+type creditPack struct {
+	ID       string
+	Secret   string
+	Name     string
+	Credits  int
+	Price    int // USD dollars
+	Popular  bool
+}
+
+var creditPacks = []creditPack{
+	{ID: "credits_100", Secret: "STRIPE_CREDITS_100_PRICE_ID", Name: "100 AI Credits", Credits: 100, Price: 15},
+	{ID: "credits_200", Secret: "STRIPE_CREDITS_200_PRICE_ID", Name: "200 AI Credits", Credits: 200, Price: 30, Popular: true},
+}
+
+// creditPackByID returns the pack definition and its Stripe price ID, or nil if not found.
+func (v *HttpViews) creditPackByID(packageID string) (*creditPack, string) {
+	for _, p := range creditPacks {
+		if p.ID == packageID {
+			priceID := v.Controller.SecretManager.GetSecret(p.Secret)
+			if priceID == "" {
+				return nil, ""
+			}
+			return &p, priceID
+		}
 	}
+	return nil, ""
 }
 
 func (v *HttpViews) StripeCheckout(w http.ResponseWriter, r *http.Request) {
@@ -96,6 +113,34 @@ func (v *HttpViews) StripeCheckout(w http.ResponseWriter, r *http.Request) {
 	utils.JSONResponse(w, map[string]string{"url": s.URL}, http.StatusCreated)
 }
 
+// GetCreditPackages returns the available credit packs for purchase.
+func (v *HttpViews) GetCreditPackages(w http.ResponseWriter, r *http.Request) {
+	type packageResponse struct {
+		ID             string `json:"id"`
+		Name           string `json:"name"`
+		Credits        int    `json:"credits"`
+		Price          int    `json:"price"`
+		Popular        bool   `json:"popular,omitempty"`
+		SavingsPercent int    `json:"savings_percent,omitempty"`
+	}
+
+	var packages []packageResponse
+	for _, p := range creditPacks {
+		// Only include packs that have a configured Stripe price
+		if v.Controller.SecretManager.GetSecret(p.Secret) != "" {
+			packages = append(packages, packageResponse{
+				ID:      p.ID,
+				Name:    p.Name,
+				Credits: p.Credits,
+				Price:   p.Price,
+				Popular: p.Popular,
+			})
+		}
+	}
+
+	utils.JSONResponse(w, packages, http.StatusOK)
+}
+
 // PurchaseCredits creates a one-time Stripe Checkout Session for buying AI credit packs.
 func (v *HttpViews) PurchaseCredits(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
@@ -109,16 +154,16 @@ func (v *HttpViews) PurchaseCredits(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		PackSize int `json:"pack_size"`
+		PackageID string `json:"package_id"`
 	}
 	if err := utils.ParseJSONBody(r, &req); err != nil {
 		utils.JSONErrorResponse(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
 
-	priceID := v.creditPackPriceID(req.PackSize)
-	if priceID == "" {
-		utils.JSONErrorResponse(w, "pack_size must be 100 or 200", http.StatusBadRequest)
+	pack, priceID := v.creditPackByID(req.PackageID)
+	if pack == nil {
+		utils.JSONErrorResponse(w, "invalid package_id", http.StatusBadRequest)
 		return
 	}
 
@@ -126,8 +171,8 @@ func (v *HttpViews) PurchaseCredits(w http.ResponseWriter, r *http.Request) {
 	if dashboardURL == "" {
 		dashboardURL = "https://dashboard.wemob.io"
 	}
-	successURL := dashboardURL + "/billing?credits=purchased"
-	cancelURL := dashboardURL + "/billing"
+	successURL := dashboardURL + "/subscription?credits=purchased"
+	cancelURL := dashboardURL + "/subscription"
 
 	mode := string(stripe.CheckoutSessionModePayment)
 	params := &stripe.CheckoutSessionParams{
@@ -144,7 +189,7 @@ func (v *HttpViews) PurchaseCredits(w http.ResponseWriter, r *http.Request) {
 		Metadata: map[string]string{
 			"type":      "credit_purchase",
 			"user_id":   user.ID.String(),
-			"pack_size": fmt.Sprintf("%d", req.PackSize),
+			"pack_size": fmt.Sprintf("%d", pack.Credits),
 		},
 	}
 
@@ -156,7 +201,8 @@ func (v *HttpViews) PurchaseCredits(w http.ResponseWriter, r *http.Request) {
 	}
 
 	v.Controller.TrackUserEvent(user, "credit_purchase_started", posthog.NewProperties().
-		Set("pack_size", req.PackSize).
+		Set("package_id", req.PackageID).
+		Set("pack_size", pack.Credits).
 		Set("price_id", priceID))
 
 	utils.JSONResponse(w, map[string]string{"url": s.URL}, http.StatusCreated)
