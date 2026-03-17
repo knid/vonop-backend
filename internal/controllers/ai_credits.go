@@ -34,14 +34,28 @@ func (c *Controller) GetOrCreateCreditsBalance(user *models.User) (*models.AICre
 		}
 
 		// Grant monthly credits from plan
+		initialGrant := 0
 		limits, limitsErr := c.DB.GetStandartUserLimitsByUser(user)
 		if limitsErr == nil && limits.MonthlyAICredits > 0 {
 			balance.Balance = limits.MonthlyAICredits
+			initialGrant = limits.MonthlyAICredits
 		}
 
 		balance, err = c.DB.CreateAICreditsBalance(balance)
 		if err != nil {
 			return nil, err
+		}
+
+		// Audit the initial credit grant (only if we created the balance recently)
+		if initialGrant > 0 && time.Since(balance.CreatedAt) < time.Second {
+			if _, txErr := c.DB.CreateAICreditTransaction(&models.AICreditTransaction{
+				UserID:    user.ID,
+				Amount:    initialGrant,
+				Action:    "initial_grant",
+				Reference: balance.ID.String(),
+			}); txErr != nil {
+				slog.Error("failed to log initial credit grant", "error", txErr, "user_id", user.ID)
+			}
 		}
 	}
 

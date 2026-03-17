@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"errors"
+	"log/slog"
 	"strings"
 
 	"github.com/knid/wemob/internal/models"
@@ -111,9 +112,13 @@ func (c *Controller) ApplyReferralCode(user *models.User, codeStr string) error 
 	// Grant credits to both parties
 	referrer, err := c.DB.GetUserById(code.UserID.String())
 	if err == nil {
-		c.AddAICredits(referrer, models.ReferralRewardCredits, "referral_reward", user.ID.String())
+		if err := c.AddAICredits(referrer, models.ReferralRewardCredits, "referral_reward", user.ID.String()); err != nil {
+			slog.Error("failed to grant referral reward credits", "error", err, "referrer_id", referrer.ID, "referred_id", user.ID)
+		}
 	}
-	c.AddAICredits(user, models.ReferralRewardCredits, "referral_bonus", code.UserID.String())
+	if err := c.AddAICredits(user, models.ReferralRewardCredits, "referral_bonus", code.UserID.String()); err != nil {
+		slog.Error("failed to grant referral bonus credits", "error", err, "user_id", user.ID, "referrer_code_owner", code.UserID)
+	}
 
 	return nil
 }
