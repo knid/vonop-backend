@@ -39,6 +39,7 @@ func checkUsageAlerts(db *database.Database, crmService crmServices.CRMService) 
 		// AI credits alerts
 		balance, err := db.GetAICreditsBalance(user.ID.String())
 		if err != nil {
+			slog.Warn("usage alerts: failed to fetch AI credits balance", "error", err, "user_id", user.ID.String())
 			continue
 		}
 
@@ -49,6 +50,7 @@ func checkUsageAlerts(db *database.Database, crmService crmServices.CRMService) 
 
 		usagePercent := float64(limits.MonthlyAICredits-balance.Balance) / float64(limits.MonthlyAICredits) * 100
 
+		// CRM events are fire-and-forget; errors are handled internally by the CRM service.
 		if usagePercent >= 90 || balance.Balance <= 0 {
 			go crmService.SendEvent(&user, constants.BREVO_EVENT_AI_CREDITS_DEPLETED, map[string]any{
 				"credits_total": limits.MonthlyAICredits,

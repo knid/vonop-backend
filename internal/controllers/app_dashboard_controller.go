@@ -201,9 +201,11 @@ func (c *Controller) CreateDashboard(ctx context.Context, project *models.AppPro
 	// Token tracking
 	tracker := utils.NewTokenTracker()
 	tracker.TrackContent = true
+	tracker.UserID = user.ID.String()
+	tracker.ProjectID = project.ID.String()
 	ctx = utils.WithTokenTracker(ctx, tracker)
 	defer func() {
-		c.RecordTokenUsage(user.ID, "dashboard_create", model, provider.Name, project.ID.String(), project.ProjectType, tracker)
+		c.RecordTokenUsage(user, "dashboard_create", model, provider.Name, project.ID.String(), project.ProjectType, tracker)
 		prompt, completion, total, _ := tracker.Totals()
 		if total > 0 {
 			credits := models.TokensToCredits(prompt, completion)
@@ -499,9 +501,11 @@ func (c *Controller) StreamDashboardChat(ctx context.Context, dashboard *models.
 	// Token tracking
 	tracker := utils.NewTokenTracker()
 	tracker.TrackContent = true
+	tracker.UserID = user.ID.String()
+	tracker.ProjectID = dashboard.AppProjectID.String()
 	ctx = utils.WithTokenTracker(ctx, tracker)
 	defer func() {
-		c.RecordTokenUsage(user.ID, "dashboard_chat", model, provider.Name, dashboard.AppProjectID.String(), "dashboard", tracker)
+		c.RecordTokenUsage(user, "dashboard_chat", model, provider.Name, dashboard.AppProjectID.String(), "dashboard", tracker)
 		prompt, completion, total, _ := tracker.Totals()
 		if total > 0 {
 			credits := models.TokensToCredits(prompt, completion)
@@ -732,9 +736,11 @@ func (c *Controller) RefreshDashboardSchema(ctx context.Context, projectID strin
 
 	tracker := utils.NewTokenTracker()
 	tracker.TrackContent = true
+	tracker.UserID = user.ID.String()
+	tracker.ProjectID = projectID
 	ctx = utils.WithTokenTracker(ctx, tracker)
 	defer func() {
-		c.RecordTokenUsage(user.ID, "dashboard_schema_refresh", model, provider.Name, projectID, "dashboard", tracker)
+		c.RecordTokenUsage(user, "dashboard_schema_refresh", model, provider.Name, projectID, "dashboard", tracker)
 		prompt, completion, total, _ := tracker.Totals()
 		if total > 0 {
 			credits := models.TokensToCredits(prompt, completion)

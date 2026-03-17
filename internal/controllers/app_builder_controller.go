@@ -219,6 +219,8 @@ func (c *Controller) StreamBuildApp(
 	genStart := time.Now()
 	tracker := utils.NewTokenTracker()
 	tracker.TrackContent = true
+	tracker.UserID = user.ID.String()
+	tracker.ProjectID = project.ID.String()
 	ctx = utils.WithTokenTracker(ctx, tracker)
 
 	actionLabel := "app_chat"
@@ -229,7 +231,7 @@ func (c *Controller) StreamBuildApp(
 
 	defer func() {
 		closeEvents.Do(func() { close(events) })
-		c.RecordTokenUsage(user.ID, actionLabel, model, provider.Name, project.ID.String(), project.ProjectType, tracker)
+		c.RecordTokenUsage(user, actionLabel, model, provider.Name, project.ID.String(), project.ProjectType, tracker)
 		prompt, completion, total, callCount := tracker.Totals()
 		if total > 0 && generationSucceeded {
 			credits := models.TokensToCredits(prompt, completion)
@@ -260,6 +262,17 @@ func (c *Controller) StreamBuildApp(
 				Set("credits_used", credits).
 				Set("model", model).
 				Set("has_images", len(images) > 0).
+				Set("is_generation", isInitialGeneration))
+		}
+		if total > 0 && !generationSucceeded {
+			c.TrackUserEvent(user, actionLabel+"_failed", posthog.NewProperties().
+				Set("app_id", project.ID.String()).
+				Set("duration_seconds", time.Since(genStart).Seconds()).
+				Set("total_tokens", total).
+				Set("prompt_tokens", prompt).
+				Set("completion_tokens", completion).
+				Set("llm_call_count", callCount).
+				Set("model", model).
 				Set("is_generation", isInitialGeneration))
 		}
 	}()
@@ -5759,6 +5772,8 @@ func (c *Controller) StreamMobileOptimize(
 
 	// Token tracking for billing
 	tracker := utils.NewTokenTracker()
+	tracker.UserID = user.ID.String()
+	tracker.ProjectID = project.ID.String()
 	ctx = utils.WithTokenTracker(ctx, tracker)
 
 	// 5. Build file listing for system prompt (all files for context)
@@ -5870,7 +5885,10 @@ func (c *Controller) StreamMobileOptimize(
 	// 7. Set status back to ready and send done
 	resetStatus()
 
-	// 8. Deduct credits based on actual token usage
+	// 8. Record token usage and deduct credits
+	c.RecordTokenUsage(user, "mobile_optimize",
+		model, provider.Name, project.ID.String(), "standard", tracker)
+
 	prompt, completion, total, _ := tracker.Totals()
 	if total > 0 {
 		credits := models.TokensToCredits(prompt, completion)

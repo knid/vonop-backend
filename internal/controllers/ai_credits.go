@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -234,14 +235,20 @@ func textToOutputChoices(text string) []map[string]interface{} {
 // RecordTokenUsage persists LLM token usage to the DB and sends PostHog
 // $ai_generation (per LLM call) + $ai_trace (grouping) events for the
 // built-in LLM Analytics dashboard.
-func (c *Controller) RecordTokenUsage(userID uuid.UUID, action, model, provider, reference, appType string, tracker *utils.TokenTracker) {
+func (c *Controller) RecordTokenUsage(user *models.User, action, model, provider, reference, appType string, tracker *utils.TokenTracker) {
 	prompt, completion, total, callCount := tracker.Totals()
 	if total == 0 {
 		return
 	}
 
+	// Normalize model name: strip provider prefix (e.g. "anthropic/claude-sonnet-4-6" → "claude-sonnet-4-6")
+	// so PostHog doesn't fragment cost data across what is logically the same model.
+	if idx := strings.LastIndex(model, "/"); idx >= 0 {
+		model = model[idx+1:]
+	}
+
 	if err := c.DB.CreateLLMTokenUsage(&models.LLMTokenUsage{
-		UserID:           userID,
+		UserID:           user.ID,
 		Action:           action,
 		Model:            model,
 		PromptTokens:     prompt,
@@ -250,7 +257,7 @@ func (c *Controller) RecordTokenUsage(userID uuid.UUID, action, model, provider,
 		CallCount:        callCount,
 		Reference:        reference,
 	}); err != nil {
-		slog.Error("failed to record LLM token usage", "error", err, "user_id", userID, "action", action)
+		slog.Error("failed to record LLM token usage", "error", err, "user_id", user.ID, "action", action)
 	}
 
 	creditsSpent := models.TokensToCredits(prompt, completion)
@@ -258,14 +265,13 @@ func (c *Controller) RecordTokenUsage(userID uuid.UUID, action, model, provider,
 	if c.PostHog != nil {
 		traceID := uuid.New().String()
 
-		// Resolve email for PostHog user attribution
-		var email string
-		if user, err := c.DB.GetUserById(userID.String()); err == nil && user != nil {
-			email = user.Email
-		}
-
 		// Per-call $ai_generation events
 		for _, entry := range tracker.Entries() {
+			// Normalize per-entry model name too (tracker records raw model from each call).
+			entryModel := entry.Model
+			if idx := strings.LastIndex(entryModel, "/"); idx >= 0 {
+				entryModel = entryModel[idx+1:]
+			}
 			// PostHog $ai_input_tokens should be non-cache input tokens only;
 			// cache tokens go into their own properties for correct pricing.
 			inputTokens := entry.PromptTokens - entry.CacheCreationInputTokens - entry.CacheReadInputTokens
@@ -274,7 +280,7 @@ func (c *Controller) RecordTokenUsage(userID uuid.UUID, action, model, provider,
 			}
 			props := posthog.NewProperties().
 				Set("$ai_provider", provider).
-				Set("$ai_model", entry.Model).
+				Set("$ai_model", entryModel).
 				Set("$ai_input_tokens", inputTokens).
 				Set("$ai_output_tokens", entry.CompletionTokens).
 				Set("$ai_trace_id", traceID).
@@ -290,8 +296,8 @@ func (c *Controller) RecordTokenUsage(userID uuid.UUID, action, model, provider,
 			if entry.CacheReadInputTokens > 0 {
 				props.Set("$ai_cache_read_input_tokens", entry.CacheReadInputTokens)
 			}
-			if email != "" {
-				props.Set("$email", email)
+			if user.Email != "" {
+				props.Set("$email", user.Email)
 			}
 			if entry.InputMessages != nil {
 				props.Set("$ai_input", messagesToPostHogInput(entry.InputMessages))
@@ -300,10 +306,16 @@ func (c *Controller) RecordTokenUsage(userID uuid.UUID, action, model, provider,
 				props.Set("$ai_output_choices", textToOutputChoices(entry.OutputText))
 			}
 			c.PostHog.Enqueue(posthog.Capture{
-				DistinctId: userID.String(),
+				DistinctId: user.ID.String(),
 				Event:      "$ai_generation",
 				Properties: props,
 			})
+		}
+
+		// Compute total latency across all LLM calls for the trace event.
+		var totalLatencyMs int64
+		for _, e := range tracker.Entries() {
+			totalLatencyMs += e.LatencyMs
 		}
 
 		// Grouping $ai_trace event
@@ -311,12 +323,15 @@ func (c *Controller) RecordTokenUsage(userID uuid.UUID, action, model, provider,
 			Set("$ai_trace_id", traceID).
 			Set("$ai_trace_name", action).
 			Set("$ai_session_id", reference).
+			Set("$ai_model", model).
+			Set("$ai_provider", provider).
+			Set("$ai_latency", float64(totalLatencyMs)/1000.0).
 			Set("$ai_input_tokens", prompt).
 			Set("$ai_output_tokens", completion).
 			Set("app_type", appType).
 			Set("credits_spent", creditsSpent)
-		if email != "" {
-			traceProps.Set("$email", email)
+		if user.Email != "" {
+			traceProps.Set("$email", user.Email)
 		}
 		if tracker.TraceInput != "" {
 			traceProps.Set("$ai_input_state", tracker.TraceInput)
@@ -325,9 +340,39 @@ func (c *Controller) RecordTokenUsage(userID uuid.UUID, action, model, provider,
 			traceProps.Set("$ai_output_state", tracker.TraceOutput)
 		}
 		c.PostHog.Enqueue(posthog.Capture{
-			DistinctId: userID.String(),
+			DistinctId: user.ID.String(),
 			Event:      "$ai_trace",
 			Properties: traceProps,
 		})
 	}
+}
+
+// RecordLLMError sends a PostHog $ai_generation event for a failed LLM call.
+func (c *Controller) RecordLLMError(user *models.User, action, model, provider, reference, appType string, latencyMs int64, errMsg string) {
+	if c.PostHog == nil || user == nil {
+		return
+	}
+
+	// Normalize model name: strip provider prefix (e.g. "anthropic/claude-sonnet-4-6" → "claude-sonnet-4-6")
+	// so PostHog doesn't fragment cost data across what is logically the same model.
+	if idx := strings.LastIndex(model, "/"); idx >= 0 {
+		model = model[idx+1:]
+	}
+
+	props := posthog.NewProperties().
+		Set("$ai_provider", provider).
+		Set("$ai_model", model).
+		Set("$ai_is_error", true).
+		Set("$ai_latency", float64(latencyMs)/1000.0).
+		Set("$ai_session_id", reference).
+		Set("$ai_error_message", errMsg).
+		Set("app_type", appType)
+	if user.Email != "" {
+		props.Set("$email", user.Email)
+	}
+	c.PostHog.Enqueue(posthog.Capture{
+		DistinctId: user.ID.String(),
+		Event:      "$ai_generation",
+		Properties: props,
+	})
 }

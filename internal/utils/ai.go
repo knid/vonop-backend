@@ -131,10 +131,21 @@ type TokenTracker struct {
 	TrackContent bool   // opt-in: when true, StreamWithTools records message content per round
 	TraceInput   string // user's original message (for $ai_trace)
 	TraceOutput  string // final assistant response (for $ai_trace)
+	UserID       string // for slog attribution
+	ProjectID    string // for slog attribution
 }
 
 func NewTokenTracker() *TokenTracker {
 	return &TokenTracker{}
+}
+
+// trackerAttrs returns slog attributes for user_id and project_id from the
+// TokenTracker stored in ctx. If no tracker is present, empty strings are used.
+func trackerAttrs(ctx context.Context) []any {
+	if t := TokenTrackerFromContext(ctx); t != nil {
+		return []any{"user_id", t.UserID, "project_id", t.ProjectID}
+	}
+	return []any{"user_id", "", "project_id", ""}
 }
 
 // Record adds a usage entry to the tracker.
@@ -503,7 +514,7 @@ func GetJSONFromLLM(ctx context.Context, model, system, message string, provider
 	start := time.Now()
 	resp, err := llmHTTPClient.Do(req)
 	if err != nil {
-		slog.Error("Error making request to LLM:", "error", err, "FROM", "LLM_UTILS", "resp", resp, "body", body)
+		slog.Error("Error making request to LLM:", "error", err, "from", "llm_utils", "model", model)
 		return "", fmt.Errorf("error generating items. try again please")
 	}
 	defer resp.Body.Close()
@@ -520,21 +531,21 @@ func GetJSONFromLLM(ctx context.Context, model, system, message string, provider
 
 	respBody, _ := io.ReadAll(resp.Body)
 	latencyMs := time.Since(start).Milliseconds()
-	slog.Info("LLM Response received", "FROM", "LLM_UTILS")
+	slog.Info("LLM Response received", "from", "llm_utils")
 
 	parsed, err := parseLLMResponseBody(respBody, provider)
 	if err != nil {
-		slog.Error("error creating items.", "error", err, "FROM", "LLM_UTILS", "resp", resp, "body", body)
+		slog.Error("error creating items.", "error", err, "from", "llm_utils", "model", model)
 		return "", fmt.Errorf("error creating items. try again please")
 	}
 
 	if len(parsed.Choices) == 0 {
-		slog.Error("no choices returned from LLM", "FROM", "LLM_UTILS", "resp", resp, "body", body)
+		slog.Error("no choices returned from LLM", "from", "llm_utils", "model", model)
 		return "", fmt.Errorf("no choices returned from LLM")
 	}
 
 	if parsed.Usage.TotalTokens > 0 {
-		slog.Info("LLM usage", "FROM", "LLM_UTILS", "prompt_tokens", parsed.Usage.PromptTokens, "completion_tokens", parsed.Usage.CompletionTokens, "total_tokens", parsed.Usage.TotalTokens)
+		slog.Info("LLM usage", append([]any{"from", "llm_utils", "model", model, "prompt_tokens", parsed.Usage.PromptTokens, "completion_tokens", parsed.Usage.CompletionTokens, "total_tokens", parsed.Usage.TotalTokens, "latency_ms", latencyMs}, trackerAttrs(ctx)...)...)
 		if tracker := TokenTrackerFromContext(ctx); tracker != nil {
 			tracker.Record(model, parsed.Usage, latencyMs, false)
 		}
@@ -568,7 +579,7 @@ func GetTextFromLLM(ctx context.Context, model, system, message string, provider
 	start := time.Now()
 	resp, err := llmHTTPClient.Do(req)
 	if err != nil {
-		slog.Error("Error making request to LLM:", "error", err, "FROM", "LLM_UTILS")
+		slog.Error("Error making request to LLM:", "error", err, "from", "llm_utils")
 		return "", fmt.Errorf("error generating content. try again please")
 	}
 	defer resp.Body.Close()
@@ -585,21 +596,21 @@ func GetTextFromLLM(ctx context.Context, model, system, message string, provider
 
 	respBody, _ := io.ReadAll(resp.Body)
 	latencyMs := time.Since(start).Milliseconds()
-	slog.Info("LLM Response received", "FROM", "LLM_UTILS_TEXT")
+	slog.Info("LLM Response received", "from", "llm_utils_text")
 
 	parsed, err := parseLLMResponseBody(respBody, provider)
 	if err != nil {
-		slog.Error("error parsing LLM response", "error", err, "FROM", "LLM_UTILS_TEXT")
+		slog.Error("error parsing LLM response", "error", err, "from", "llm_utils_text")
 		return "", fmt.Errorf("error generating content. try again please")
 	}
 
 	if len(parsed.Choices) == 0 {
-		slog.Error("no choices returned from LLM", "FROM", "LLM_UTILS_TEXT")
+		slog.Error("no choices returned from LLM", "from", "llm_utils_text")
 		return "", fmt.Errorf("no choices returned from LLM")
 	}
 
 	if parsed.Usage.TotalTokens > 0 {
-		slog.Info("LLM usage", "FROM", "LLM_UTILS_TEXT", "prompt_tokens", parsed.Usage.PromptTokens, "completion_tokens", parsed.Usage.CompletionTokens, "total_tokens", parsed.Usage.TotalTokens)
+		slog.Info("LLM usage", append([]any{"from", "llm_utils_text", "model", model, "prompt_tokens", parsed.Usage.PromptTokens, "completion_tokens", parsed.Usage.CompletionTokens, "total_tokens", parsed.Usage.TotalTokens, "latency_ms", latencyMs}, trackerAttrs(ctx)...)...)
 		if tracker := TokenTrackerFromContext(ctx); tracker != nil {
 			tracker.Record(model, parsed.Usage, latencyMs, false)
 		}
@@ -704,12 +715,13 @@ func StreamTextFromLLMWithMessages(ctx context.Context, model string, messages [
 			return "", fmt.Errorf("error reading streaming response. try again please")
 		}
 		if result.Usage.TotalTokens > 0 {
-			slog.Info("LLM usage", "FROM", "LLM_STREAM_TEXT_MSGS", "prompt_tokens", result.Usage.PromptTokens, "completion_tokens", result.Usage.CompletionTokens, "total_tokens", result.Usage.TotalTokens)
+			latencyMs := time.Since(start).Milliseconds()
+			slog.Info("LLM usage", append([]any{"from", "llm_stream_text", "model", model, "prompt_tokens", result.Usage.PromptTokens, "completion_tokens", result.Usage.CompletionTokens, "total_tokens", result.Usage.TotalTokens, "latency_ms", latencyMs}, trackerAttrs(ctx)...)...)
 			if tracker := TokenTrackerFromContext(ctx); tracker != nil {
 				if tracker.TrackContent {
-					tracker.RecordWithContent(model, result.Usage, time.Since(start).Milliseconds(), true, messages, result.Text)
+					tracker.RecordWithContent(model, result.Usage, latencyMs, true, messages, result.Text)
 				} else {
-					tracker.Record(model, result.Usage, time.Since(start).Milliseconds(), true)
+					tracker.Record(model, result.Usage, latencyMs, true)
 				}
 			}
 		}
@@ -769,16 +781,17 @@ func StreamTextFromLLMWithMessages(ctx context.Context, model string, messages [
 	}
 
 	if fullText.Len() >= maxResponseBufferSize {
-		slog.Warn("LLM streaming response exceeded max buffer size", "max_bytes", maxResponseBufferSize, "FROM", "LLM_STREAM_TEXT_MSGS")
+		slog.Warn("LLM streaming response exceeded max buffer size", "max_bytes", maxResponseBufferSize, "from", "llm_stream_text")
 	}
 
 	if lastUsage.TotalTokens > 0 {
-		slog.Info("LLM usage", "FROM", "LLM_STREAM_TEXT_MSGS", "prompt_tokens", lastUsage.PromptTokens, "completion_tokens", lastUsage.CompletionTokens, "total_tokens", lastUsage.TotalTokens)
+		latencyMs := time.Since(start).Milliseconds()
+		slog.Info("LLM usage", append([]any{"from", "llm_stream_text", "model", model, "prompt_tokens", lastUsage.PromptTokens, "completion_tokens", lastUsage.CompletionTokens, "total_tokens", lastUsage.TotalTokens, "latency_ms", latencyMs}, trackerAttrs(ctx)...)...)
 		if tracker := TokenTrackerFromContext(ctx); tracker != nil {
 			if tracker.TrackContent {
-				tracker.RecordWithContent(model, lastUsage, time.Since(start).Milliseconds(), true, messages, fullText.String())
+				tracker.RecordWithContent(model, lastUsage, latencyMs, true, messages, fullText.String())
 			} else {
-				tracker.Record(model, lastUsage, time.Since(start).Milliseconds(), true)
+				tracker.Record(model, lastUsage, latencyMs, true)
 			}
 		}
 	}
@@ -812,7 +825,7 @@ func GetJSONFromLLMWithMessages(ctx context.Context, model string, messages []Me
 	start := time.Now()
 	resp, err := llmHTTPClient.Do(req)
 	if err != nil {
-		slog.Error("Error making request to LLM:", "error", err, "FROM", "LLM_UTILS_CHAT")
+		slog.Error("Error making request to LLM:", "error", err, "from", "llm_utils_chat")
 		return "", fmt.Errorf("error generating content. try again please")
 	}
 	defer resp.Body.Close()
@@ -829,21 +842,21 @@ func GetJSONFromLLMWithMessages(ctx context.Context, model string, messages []Me
 
 	respBody, _ := io.ReadAll(resp.Body)
 	latencyMs := time.Since(start).Milliseconds()
-	slog.Info("LLM Chat Response received", "FROM", "LLM_UTILS_CHAT")
+	slog.Info("LLM Chat Response received", "from", "llm_utils_chat")
 
 	parsed, err := parseLLMResponseBody(respBody, provider)
 	if err != nil {
-		slog.Error("error parsing LLM response", "error", err, "FROM", "LLM_UTILS_CHAT")
+		slog.Error("error parsing LLM response", "error", err, "from", "llm_utils_chat")
 		return "", fmt.Errorf("error generating content. try again please")
 	}
 
 	if len(parsed.Choices) == 0 {
-		slog.Error("no choices returned from LLM", "FROM", "LLM_UTILS_CHAT")
+		slog.Error("no choices returned from LLM", "from", "llm_utils_chat")
 		return "", fmt.Errorf("no choices returned from LLM")
 	}
 
 	if parsed.Usage.TotalTokens > 0 {
-		slog.Info("LLM usage", "FROM", "LLM_UTILS_CHAT", "prompt_tokens", parsed.Usage.PromptTokens, "completion_tokens", parsed.Usage.CompletionTokens, "total_tokens", parsed.Usage.TotalTokens)
+		slog.Info("LLM usage", append([]any{"from", "llm_utils_chat", "model", model, "prompt_tokens", parsed.Usage.PromptTokens, "completion_tokens", parsed.Usage.CompletionTokens, "total_tokens", parsed.Usage.TotalTokens, "latency_ms", latencyMs}, trackerAttrs(ctx)...)...)
 		if tracker := TokenTrackerFromContext(ctx); tracker != nil {
 			tracker.Record(model, parsed.Usage, latencyMs, false)
 		}
@@ -910,9 +923,10 @@ func StreamJSONFromLLMWithMessages(ctx context.Context, model string, messages [
 			slog.Warn("LLM chat response truncated (finish_reason=length)")
 		}
 		if result.Usage.TotalTokens > 0 {
-			slog.Info("LLM usage", "FROM", "LLM_STREAM_CHAT", "prompt_tokens", result.Usage.PromptTokens, "completion_tokens", result.Usage.CompletionTokens, "total_tokens", result.Usage.TotalTokens)
+			latencyMs := time.Since(start).Milliseconds()
+			slog.Info("LLM usage", append([]any{"from", "llm_stream_chat", "model", model, "prompt_tokens", result.Usage.PromptTokens, "completion_tokens", result.Usage.CompletionTokens, "total_tokens", result.Usage.TotalTokens, "latency_ms", latencyMs}, trackerAttrs(ctx)...)...)
 			if tracker := TokenTrackerFromContext(ctx); tracker != nil {
-				tracker.Record(model, result.Usage, time.Since(start).Milliseconds(), true)
+				tracker.Record(model, result.Usage, latencyMs, true)
 			}
 		}
 		return result.Text, nil
@@ -986,9 +1000,10 @@ func StreamJSONFromLLMWithMessages(ctx context.Context, model string, messages [
 	}
 
 	if lastUsage.TotalTokens > 0 {
-		slog.Info("LLM usage", "FROM", "LLM_STREAM_CHAT", "prompt_tokens", lastUsage.PromptTokens, "completion_tokens", lastUsage.CompletionTokens, "total_tokens", lastUsage.TotalTokens)
+		latencyMs := time.Since(start).Milliseconds()
+		slog.Info("LLM usage", append([]any{"from", "llm_stream_chat", "model", model, "prompt_tokens", lastUsage.PromptTokens, "completion_tokens", lastUsage.CompletionTokens, "total_tokens", lastUsage.TotalTokens, "latency_ms", latencyMs}, trackerAttrs(ctx)...)...)
 		if tracker := TokenTrackerFromContext(ctx); tracker != nil {
-			tracker.Record(model, lastUsage, time.Since(start).Milliseconds(), true)
+			tracker.Record(model, lastUsage, latencyMs, true)
 		}
 	}
 
@@ -1046,7 +1061,7 @@ func GetJSONFromLLMWithVision(ctx context.Context, model, system, userText, base
 
 	respBody, _ := io.ReadAll(resp.Body)
 	latencyMs := time.Since(start).Milliseconds()
-	slog.Info("LLM Vision Response received", "FROM", "LLM_UTILS_VISION")
+	slog.Info("LLM Vision Response received", "from", "llm_utils_vision")
 
 	if resp.StatusCode != http.StatusOK {
 		slog.Error("LLM vision returned non-200", "status", resp.StatusCode,
@@ -1068,7 +1083,7 @@ func GetJSONFromLLMWithVision(ctx context.Context, model, system, userText, base
 	}
 
 	if parsed.Usage.TotalTokens > 0 {
-		slog.Info("LLM usage", "FROM", "LLM_UTILS_VISION", "prompt_tokens", parsed.Usage.PromptTokens, "completion_tokens", parsed.Usage.CompletionTokens, "total_tokens", parsed.Usage.TotalTokens)
+		slog.Info("LLM usage", append([]any{"from", "llm_utils_vision", "model", model, "prompt_tokens", parsed.Usage.PromptTokens, "completion_tokens", parsed.Usage.CompletionTokens, "total_tokens", parsed.Usage.TotalTokens, "latency_ms", latencyMs}, trackerAttrs(ctx)...)...)
 		if tracker := TokenTrackerFromContext(ctx); tracker != nil {
 			tracker.Record(model, parsed.Usage, latencyMs, false)
 		}
@@ -1469,14 +1484,14 @@ func StreamWithTools(
 		// Record usage from this round
 		roundLatency := time.Since(roundStart).Milliseconds()
 		if roundUsage.TotalTokens > 0 {
-			slog.Info("LLM usage", "FROM", "LLM_STREAM_TOOLS", "round", round,
+			slog.Info("LLM usage", append([]any{"from", "llm_stream_tools", "model", model, "round", round,
 				"prompt_tokens", roundUsage.PromptTokens,
 				"completion_tokens", roundUsage.CompletionTokens,
 				"total_tokens", roundUsage.TotalTokens,
 				"latency_ms", roundLatency,
 				"tool_calls", len(toolCallsMap),
 				"history_msgs", len(currentMessages),
-			)
+			}, trackerAttrs(ctx)...)...)
 			if tracker := TokenTrackerFromContext(ctx); tracker != nil {
 				// Only record full message content for the first 10 rounds to cap memory usage.
 				// After that, record usage stats only.

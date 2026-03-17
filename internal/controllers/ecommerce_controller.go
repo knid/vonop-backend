@@ -98,9 +98,11 @@ func (c *Controller) StreamChatStoreManagement(ctx context.Context, store *model
 	// Token usage tracking
 	tracker := utils.NewTokenTracker()
 	tracker.TrackContent = true
+	tracker.UserID = user.ID.String()
+	tracker.ProjectID = store.AppProjectID.String()
 	ctx = utils.WithTokenTracker(ctx, tracker)
 	defer func() {
-		c.RecordTokenUsage(user.ID, "store_chat", model, provider.Name, store.ID.String(), "ecommerce", tracker)
+		c.RecordTokenUsage(user, "store_chat", model, provider.Name, store.ID.String(), "ecommerce", tracker)
 		prompt, completion, total, _ := tracker.Totals()
 		if total > 0 {
 			credits := models.TokensToCredits(prompt, completion)

@@ -57,16 +57,18 @@ func (qh QueryHook) AfterQuery(ctx context.Context, event *bun.QueryEvent) {
 	fields := []any{
 		slog.String(OperationFieldName, event.Operation()),
 		slog.Int64(OperationTimeFieldName, queryDuration.Milliseconds()),
-		slog.String("from", "BUNDB"),
+		slog.String("from", "bundb"),
 	}
 
-	// Log errors, but skip sql.ErrNoRows (normal "not found" result)
+	// Log errors, but skip "not found" results which are routine query outcomes.
+	// Bun wraps sql.ErrNoRows and multi-row queries may produce different "no rows"
+	// error text, so we check both errors.Is and the error message string.
 	if event.Err != nil {
-		if errors.Is(event.Err, sql.ErrNoRows) {
+		if errors.Is(event.Err, sql.ErrNoRows) || isNotFoundError(event.Err.Error()) {
 			return
 		}
-		fields = append(fields, slog.String("ERROR", event.Err.Error()))
 		errMsg := event.Err.Error()
+		fields = append(fields, slog.String("error", errMsg))
 		if isConstraintViolation(errMsg) {
 			qh.logger.Warn(maskedQuery, fields...)
 		} else {
@@ -122,6 +124,15 @@ func isConstraintViolation(errMsg string) bool {
 	return false
 }
 
+// isNotFoundError checks if an error message indicates a routine "not found"
+// result. Bun wraps sql.ErrNoRows in ways that errors.Is may not catch, and
+// multi-row queries that return zero rows produce distinct error text. These
+// are normal application behavior, not infrastructure failures.
+func isNotFoundError(errMsg string) bool {
+	lower := strings.ToLower(errMsg)
+	return strings.Contains(lower, "no rows") || strings.Contains(lower, "no result")
+}
+
 // Command Log Writer
 type CommandLogWriter struct {
 	Level slog.Level
@@ -129,7 +140,7 @@ type CommandLogWriter struct {
 }
 
 func (lw *CommandLogWriter) Write(p []byte) (n int, err error) {
-	logger := slog.Default().With("from", "BUILD CMDS")
+	logger := slog.Default().With("from", "build_cmds")
 	msg := string(bytes.TrimSpace(p))
 	args := []any{}
 	for k, v := range lw.Meta {
