@@ -9,15 +9,15 @@ import (
 	"github.com/knid/wemob/internal/utils"
 )
 
+// POST /v1/projects/{projectId}/analytics/session — public endpoint (called from mobile apps).
 func (v *HttpViews) CreateSession(w http.ResponseWriter, r *http.Request) {
-	var createSessionReq requests.CreateSessionRequest
-	err := utils.ParseJSONBody(r, &createSessionReq)
-	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+	var req requests.CreateSessionRequest
+	if err := utils.ParseJSONBody(r, &req); err != nil {
+		utils.JSONErrorResponse(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
 
-	response, err := v.Controller.CreateSession(r, createSessionReq)
+	response, err := v.Controller.CreateSession(r, req)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
 		return
@@ -26,25 +26,24 @@ func (v *HttpViews) CreateSession(w http.ResponseWriter, r *http.Request) {
 	utils.JSONResponse(w, response, http.StatusOK)
 }
 
+// POST /v1/projects/{projectId}/analytics/events — public endpoint (called from mobile apps).
 func (v *HttpViews) LogAppEvent(w http.ResponseWriter, r *http.Request) {
-	var logAppEventReq requests.LogAppEventRequest
-	err := utils.ParseJSONBody(r, &logAppEventReq)
-	if err != nil {
+	var req requests.LogAppEventRequest
+	if err := utils.ParseJSONBody(r, &req); err != nil {
+		utils.JSONErrorResponse(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if err := v.Controller.LogAppEvent(r, req); err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	response, err := v.Controller.LogAppEvent(r, logAppEventReq)
-	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	utils.JSONResponse(w, response, http.StatusOK)
+	w.WriteHeader(http.StatusNoContent)
 }
 
+// GET /v1/projects/{projectId}/analytics/devices — authenticated.
 func (v *HttpViews) GetAllDevices(w http.ResponseWriter, r *http.Request) {
-
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
@@ -66,15 +65,10 @@ func (v *HttpViews) GetAllDevices(w http.ResponseWriter, r *http.Request) {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	project, err := v.Controller.GetProjectModelById(projectInformationRes.ID.String())
-	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
-		return
-	}
 
-	devices, err := v.Controller.GetDevicesByProjectId(project.ID.String())
+	devices, err := v.Controller.GetDevicesByProjectId(projectInformationRes.ID.String())
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -103,13 +97,7 @@ func (v *HttpViews) GetUniqueDevices(w http.ResponseWriter, r *http.Request) {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	project, err := v.Controller.GetProjectModelById(projectInformationRes.ID.String())
-	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
-		return
-	}
 
-	// extract timeStart and timeEnd from query parameters
 	timeStartStr := r.URL.Query().Get("time_start")
 	timeEndStr := r.URL.Query().Get("time_end")
 
@@ -142,14 +130,13 @@ func (v *HttpViews) GetUniqueDevices(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	devices, err := v.Controller.GetUniqueDevices(project.ID.String(), timeStart, timeEnd)
+	devices, err := v.Controller.GetUniqueDevices(projectInformationRes.ID.String(), timeStart, timeEnd)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	utils.JSONResponse(w, devices, http.StatusOK)
-
 }
 
 func (v *HttpViews) GetActiveDevices(w http.ResponseWriter, r *http.Request) {
@@ -174,15 +161,10 @@ func (v *HttpViews) GetActiveDevices(w http.ResponseWriter, r *http.Request) {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	project, err := v.Controller.GetProjectModelById(projectInformationRes.ID.String())
-	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
-		return
-	}
 
-	devices, err := v.Controller.GetActiveDevices(project.ID.String())
+	devices, err := v.Controller.GetActiveDevices(projectInformationRes.ID.String())
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -211,13 +193,7 @@ func (v *HttpViews) GetSessions(w http.ResponseWriter, r *http.Request) {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	project, err := v.Controller.GetProjectModelById(projectInformationRes.ID.String())
-	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
-		return
-	}
 
-	// extract timeStart and timeEnd from query parameters
 	timeStartStr := r.URL.Query().Get("time_start")
 	timeEndStr := r.URL.Query().Get("time_end")
 
@@ -250,9 +226,9 @@ func (v *HttpViews) GetSessions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sessions, err := v.Controller.GetSessionsByProject(project, timeStart, timeEnd)
+	sessions, err := v.Controller.GetSessionsByProject(projectInformationRes.ID.String(), timeStart, timeEnd)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -281,13 +257,7 @@ func (v *HttpViews) GetProjectEvents(w http.ResponseWriter, r *http.Request) {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	project, err := v.Controller.GetProjectModelById(projectInformationRes.ID.String())
-	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
-		return
-	}
 
-	// extract timeStart and timeEnd from query parameters
 	timeStartStr := r.URL.Query().Get("time_start")
 	timeEndStr := r.URL.Query().Get("time_end")
 
@@ -320,12 +290,11 @@ func (v *HttpViews) GetProjectEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	projectEvents, err := v.Controller.GetProjectEvents(project, timeStart, timeEnd)
+	projectEvents, err := v.Controller.GetProjectEvents(projectInformationRes.ID.String(), timeStart, timeEnd)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	utils.JSONResponse(w, projectEvents, http.StatusOK)
-
 }
