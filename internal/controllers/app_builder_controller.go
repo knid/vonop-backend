@@ -3262,7 +3262,7 @@ var appBuilderTools = []utils.Tool{
 								},
 								"data": map[string]any{
 									"type":        "object",
-									"description": "Operation data varies by action.",
+									"description": "Operation data. For bulk_create_products: MUST contain a \"products\" array, e.g. {\"products\": [{\"name\": \"...\", \"price_in_cents\": 999, \"description\": \"...\", \"category_name\": \"...\", \"inventory\": 50}]}. For create_category: {\"name\": \"...\", \"description\": \"...\"}. For create_discount: {\"code\": \"...\", \"type\": \"percentage\", \"value\": 10}.",
 								},
 							},
 							"required": []string{"action", "data"},

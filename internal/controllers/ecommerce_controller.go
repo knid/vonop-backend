@@ -370,7 +370,7 @@ func (c *Controller) deleteProductFromChat(store *models.Store, data map[string]
 func (c *Controller) bulkCreateProductsFromChat(store *models.Store, data map[string]any) error {
 	productsRaw, ok := data["products"].([]any)
 	if !ok || len(productsRaw) == 0 {
-		return fmt.Errorf("bulk_create_products requires a non-empty products array")
+		return fmt.Errorf("bulk_create_products requires data.products to be a non-empty array. Correct format: {\"products\": [{\"name\": \"...\", \"price_in_cents\": 999, ...}]}. Do NOT put products directly in data — nest them under the \"products\" key")
 	}
 
 	var errs []string

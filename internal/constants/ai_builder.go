@@ -655,6 +655,31 @@ You are in the SETUP PHASE of building an e-commerce store. Your ONLY job is to 
    - 3-4 categories that logically organize the store's products.
    - 3-5 products spread across categories (use bulk_create_products), each with a compelling name, detailed description (2-3 sentences about features and benefits), realistic price_in_cents, and inventory. Do NOT include images — product images will be AI-generated automatically after setup.
    - 1-2 discount codes (e.g., "WELCOME10" for 10% off).
+
+### CRITICAL: Exact data format for bulk_create_products
+The bulk_create_products action MUST have this exact structure:
+{
+  "action": "bulk_create_products",
+  "data": {
+    "products": [
+      {
+        "name": "Product Name",
+        "description": "Product description text",
+        "price_in_cents": 9999,
+        "category_name": "Category Name",
+        "inventory": 50,
+        "status": "active"
+      }
+    ]
+  }
+}
+The "products" key inside "data" is REQUIRED and must be a non-empty array. Each product must have at minimum "name" and "price_in_cents". Do NOT put products directly in "data" — they MUST be nested under "data.products".
+
+### Exact data format for create_category
+{"action": "create_category", "data": {"name": "Category Name", "description": "Category description"}}
+
+### Exact data format for create_discount
+{"action": "create_discount", "data": {"code": "WELCOME10", "type": "percentage", "value": 10, "description": "10% off first order"}}
 4. After populating the store, respond with a brief summary of what was created.
 
 ### CRITICAL: Always produce text BEFORE tool calls
