@@ -2,6 +2,7 @@ package vercel
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha1"
 	"encoding/hex"
 	"encoding/json"
@@ -12,6 +13,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/knid/wemob/internal/utils"
 )
 
 // ansiRegex strips ANSI escape sequences (colors, cursor movement, etc.)
@@ -120,7 +123,8 @@ func (s *Service) doRequest(method, path string, body any) ([]byte, error) {
 		req.Header.Set("Content-Type", "application/json")
 	}
 
-	resp, err := vercelHTTPClient.Do(req)
+	ctx := context.Background()
+	resp, err := utils.RetryableHTTPDo(ctx, vercelHTTPClient, req, 2)
 	if err != nil {
 		return nil, fmt.Errorf("do request: %w", err)
 	}
@@ -132,7 +136,11 @@ func (s *Service) doRequest(method, path string, body any) ([]byte, error) {
 	}
 
 	if resp.StatusCode >= 400 {
-		slog.Error("Vercel API error", "status", resp.StatusCode, "path", path, "body", string(respBody))
+		bodyStr := string(respBody)
+		if len(bodyStr) > 500 {
+			bodyStr = bodyStr[:500] + "...(truncated)"
+		}
+		slog.Error("Vercel API error", "status", resp.StatusCode, "path", path, "body", bodyStr)
 		return nil, fmt.Errorf("vercel API error: status %d", resp.StatusCode)
 	}
 

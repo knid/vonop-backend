@@ -11,6 +11,10 @@ import (
 	"time"
 )
 
+// minCacheableBlockSize is the minimum character count for a system block
+// to be eligible for Anthropic prompt caching.
+const minCacheableBlockSize = 500
+
 // --- Anthropic Request Types ---
 
 // AnthropicCacheControl marks a block as cacheable (5-min sliding TTL).
@@ -176,7 +180,7 @@ func convertToAnthropicRequest(req ChatRequest, provider *LLMProvider) Anthropic
 	maxSystemCache := 2
 	cached := 0
 	for i := len(systemBlocks) - 1; i >= 0 && cached < maxSystemCache; i-- {
-		if len(systemBlocks[i].Text) > 500 {
+		if len(systemBlocks[i].Text) > minCacheableBlockSize {
 			systemBlocks[i].CacheControl = &AnthropicCacheControl{Type: "ephemeral"}
 			cached++
 		}
@@ -288,10 +292,14 @@ func mapThinkingConfig(req ChatRequest, model string) *AnthropicThinkingConfig {
 // convertMessagesToAnthropic converts internal messages to Anthropic format,
 // enforcing strict user/assistant alternation.
 func convertMessagesToAnthropic(messages []Message) []AnthropicMessage {
+	// Clone messages to avoid mutating caller's slice
+	msgs := make([]Message, len(messages))
+	copy(msgs, messages)
+
 	var result []AnthropicMessage
 
-	for i := 0; i < len(messages); i++ {
-		m := messages[i]
+	for i := 0; i < len(msgs); i++ {
+		m := msgs[i]
 
 		switch m.Role {
 		case "assistant":
@@ -342,11 +350,11 @@ func convertMessagesToAnthropic(messages []Message) []AnthropicMessage {
 		case "tool":
 			// Group consecutive tool messages into a single user message with tool_result blocks
 			var toolBlocks []AnthropicContentBlock
-			for ; i < len(messages) && messages[i].Role == "tool"; i++ {
+			for ; i < len(msgs) && msgs[i].Role == "tool"; i++ {
 				toolBlocks = append(toolBlocks, AnthropicContentBlock{
 					Type:      "tool_result",
-					ToolUseID: messages[i].ToolCallID,
-					Content:   messages[i].Content,
+					ToolUseID: msgs[i].ToolCallID,
+					Content:   msgs[i].Content,
 				})
 			}
 			i-- // back up since the for loop will increment

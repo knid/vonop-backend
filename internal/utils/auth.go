@@ -1,7 +1,7 @@
 package utils
 
 import (
-	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 )
@@ -9,15 +9,18 @@ import (
 func ExtractTokenFromHeader(r *http.Request) (string, error) {
 	authHeader := r.Header.Get("Authorization")
 	if authHeader == "" {
-		return "", errors.New("authorization header is missing")
+		return "", fmt.Errorf("authorization header is missing")
 	}
 
 	splittedAuthHeader := strings.Split(authHeader, "Bearer ")
 	if len(splittedAuthHeader) != 2 {
-		return "", errors.New("invalid authorization header format")
+		return "", fmt.Errorf("invalid authorization header format")
 	}
 
-	tokenString := splittedAuthHeader[1]
+	token := strings.TrimSpace(splittedAuthHeader[1])
+	if token == "" {
+		return "", fmt.Errorf("empty bearer token")
+	}
 
-	return tokenString, nil
+	return token, nil
 }

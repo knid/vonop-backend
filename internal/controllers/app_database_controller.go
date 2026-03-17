@@ -113,7 +113,11 @@ func IsSystemTable(name string) bool {
 
 // isNeonBacked returns true if the project has a Neon integration.
 func (c *Controller) isNeonBacked(projectID string) bool {
-	neon := c.getNeonIntegration(projectID)
+	neon, err := c.getNeonIntegration(projectID)
+	if err != nil {
+		slog.Error("isNeonBacked: failed to check neon integration", "project_id", projectID, "error", err)
+		return false
+	}
 	if neon != nil {
 		slog.Info("isNeonBacked: found Neon integration", "project_id", projectID, "integration_id", neon.ID)
 		return true
@@ -133,7 +137,11 @@ func (c *Controller) isEcommerceProject(projectID string) bool {
 
 // neonConnString returns the DATABASE_URL from the Neon integration, or "".
 func (c *Controller) neonConnString(projectID string) string {
-	integ := c.getNeonIntegration(projectID)
+	integ, err := c.getNeonIntegration(projectID)
+	if err != nil {
+		slog.Error("neonConnString: failed to get neon integration", "project_id", projectID, "error", err)
+		return ""
+	}
 	if integ == nil {
 		return ""
 	}

@@ -2,12 +2,15 @@ package neon
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"time"
+
+	"github.com/knid/wemob/internal/utils"
 )
 
 const neonAPIBase = "https://console.neon.tech/api/v2"
@@ -101,7 +104,8 @@ func (s *Service) doRequest(method, path string, body any) ([]byte, error) {
 	}
 	req.Header.Set("Accept", "application/json")
 
-	resp, err := neonHTTPClient.Do(req)
+	ctx := context.Background()
+	resp, err := utils.RetryableHTTPDo(ctx, neonHTTPClient, req, 2)
 	if err != nil {
 		return nil, fmt.Errorf("do request: %w", err)
 	}
@@ -113,7 +117,11 @@ func (s *Service) doRequest(method, path string, body any) ([]byte, error) {
 	}
 
 	if resp.StatusCode >= 400 {
-		slog.Error("Neon API error", "status", resp.StatusCode, "path", path, "body", string(respBody))
+		bodyStr := string(respBody)
+		if len(bodyStr) > 500 {
+			bodyStr = bodyStr[:500] + "...(truncated)"
+		}
+		slog.Error("Neon API error", "status", resp.StatusCode, "path", path, "body", bodyStr)
 		return nil, fmt.Errorf("neon API error: status %d", resp.StatusCode)
 	}
 

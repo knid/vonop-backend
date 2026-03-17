@@ -1,9 +1,12 @@
 package utils
 
 import (
+	"log/slog"
 	"regexp"
 	"strings"
 )
+
+const maxFileContentSize = 10 * 1024 * 1024 // 10MB
 
 // fileTagRegex matches <file path="..."> opening tags.
 var fileTagRegex = regexp.MustCompile(`<file\s+path="([^"]+)"\s*>`)
@@ -53,6 +56,19 @@ func (p *FileStreamParser) Feed(chunk string) {
 					safe := p.buffer[:len(p.buffer)-7]
 					p.fileContent.WriteString(safe)
 					p.buffer = p.buffer[len(p.buffer)-7:]
+				}
+				// Check if accumulated content exceeds the size limit.
+				if p.fileContent.Len() > maxFileContentSize {
+					slog.Warn("file content exceeded max size, discarding",
+						"path", p.currentPath,
+						"size", p.fileContent.Len(),
+						"max", maxFileContentSize,
+					)
+					p.fileContent.Reset()
+					p.inFileBlock = false
+					p.currentPath = ""
+					p.buffer = ""
+					return
 				}
 				return
 			}

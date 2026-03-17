@@ -1136,6 +1136,7 @@ func StreamWithTools(
 	// blocks via select until completion before the next one starts).
 	toolCallHistory := make(map[string]string) // "tool:args" → result (dedup cache)
 	consecutiveToolRounds := 0
+	consecutiveEmptyResponses := 0
 	nudged := false
 	rateLimitRetries := 0
 	transientRetries := 0
@@ -1232,6 +1233,11 @@ func StreamWithTools(
 				if wait > 120*time.Second {
 					wait = 120 * time.Second
 				}
+				if deadline, ok := ctx.Deadline(); ok {
+					if time.Until(deadline) < wait {
+						return "", fmt.Errorf("context deadline too short for rate-limit backoff (%s remaining, need %s)", time.Until(deadline), wait)
+					}
+				}
 				slog.Warn("LLM rate limited, retrying", "retry_after", wait, "attempt", rateLimitRetries, "round", round)
 				select {
 				case <-time.After(wait):
@@ -1298,6 +1304,11 @@ func StreamWithTools(
 					wait := rlErr.RetryAfter + time.Duration(rateLimitRetries)*5*time.Second
 					if wait > 120*time.Second {
 						wait = 120 * time.Second
+					}
+					if deadline, ok := ctx.Deadline(); ok {
+						if time.Until(deadline) < wait {
+							return "", fmt.Errorf("context deadline too short for rate-limit backoff (%s remaining, need %s)", time.Until(deadline), wait)
+						}
 					}
 					slog.Warn("LLM rate limited (SSE), retrying", "retry_after", wait, "attempt", rateLimitRetries, "round", round)
 					select {
@@ -1487,6 +1498,10 @@ func StreamWithTools(
 				if fullText.Len() > 0 {
 					return fullText.String(), nil
 				}
+				consecutiveEmptyResponses++
+				if consecutiveEmptyResponses >= 3 {
+					return "", fmt.Errorf("LLM returned empty content %d consecutive times", consecutiveEmptyResponses)
+				}
 				// No text content either — retry one more round with an explicit instruction
 				currentMessages = append(currentMessages, Message{
 					Role:    "system",
@@ -1590,6 +1605,12 @@ func StreamWithTools(
 						}
 						ch := make(chan toolResult, 1)
 						go func() {
+							defer func() {
+								if r := recover(); r != nil {
+									slog.Error("tool callback panicked", "tool", toolName, "panic", r)
+									ch <- toolResult{"", fmt.Errorf("tool %s panicked: %v", toolName, r)}
+								}
+							}()
 							r, e := executor(toolName, toolArgs)
 							ch <- toolResult{r, e}
 						}()
@@ -1603,9 +1624,10 @@ func StreamWithTools(
 						case <-toolCtx.Done():
 							toolCancel()
 							if ctx.Err() != nil {
+								slog.Error("tool execution aborted: parent context cancelled", "tool", toolName, "round", round, "error", ctx.Err())
 								return "", ctx.Err()
 							}
-							slog.Warn("Tool execution timed out", "tool", toolName, "round", round)
+							slog.Warn("tool execution timed out", "tool", toolName, "round", round, "timeout", toolExecTimeout)
 							result = fmt.Sprintf("Error: tool %s timed out after %s", toolName, toolExecTimeout)
 						}
 						toolCallHistory[cacheKey] = result
@@ -1615,6 +1637,7 @@ func StreamWithTools(
 
 				// Ensure tool result is non-empty; LLM providers reject empty tool results.
 				if result == "" {
+					slog.Warn("tool returned empty result", "tool", toolName, "round", round)
 					result = "(no output)"
 				}
 				currentMessages = append(currentMessages, Message{
@@ -1695,11 +1718,16 @@ func StreamWithTools(
 			continue
 		} else {
 			consecutiveToolRounds = 0
+			consecutiveEmptyResponses = 0
 		}
 
 		// Chunks were already streamed in real-time via onChunk above.
 		// No tool calls — return final response
 		if lastFinishReason == "length" && round < maxRounds-1 {
+			if fullText.Len() > maxResponseBufferSize {
+				slog.Warn("response exceeded max size during continuation, returning partial", "size", fullText.Len())
+				return fullText.String(), nil
+			}
 			// Response was truncated — request continuation by appending the partial
 			// response as assistant message and asking the LLM to continue.
 			slog.Warn("LLM response truncated (finish_reason=length), requesting continuation", "response_length", fullText.Len(), "round", round)

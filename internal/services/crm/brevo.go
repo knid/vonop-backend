@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -68,7 +69,22 @@ func (s *BrevoCRMService) SendEvent(user *models.User, event string, attributes 
 
 	ctx := context.WithValue(context.Background(), brevo.ContextAPIKey, brevo.APIKey{Key: s.apiKey})
 
-	resp, err := s.client.EventsApi.CreateEvent(ctx, eventPayload)
+	var resp *http.Response
+	var err error
+	maxRetries := 2
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		if attempt > 0 {
+			time.Sleep(time.Duration(attempt) * time.Second)
+			slog.Warn("Retrying brevo create event", "attempt", attempt+1)
+		}
+		resp, err = s.client.EventsApi.CreateEvent(ctx, eventPayload)
+		if err == nil && (resp == nil || resp.StatusCode < 500) {
+			break
+		}
+		if attempt == maxRetries {
+			break
+		}
+	}
 	if err != nil {
 		var apiErr brevo.GenericSwaggerError
 		if errors.As(err, &apiErr) && len(apiErr.Body()) > 0 {

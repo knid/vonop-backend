@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -49,7 +50,23 @@ func (s *BrevoEmailService) SendEmail(user *models.User, templateID int, params 
 
 	ctx := context.WithValue(context.Background(), brevo.ContextAPIKey, brevo.APIKey{Key: s.apiKey})
 
-	result, resp, err := s.client.TransactionalEmailsApi.SendTransacEmail(ctx, send)
+	var result brevo.CreateSmtpEmail
+	var resp *http.Response
+	var err error
+	maxRetries := 2
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		if attempt > 0 {
+			time.Sleep(time.Duration(attempt) * time.Second)
+			slog.Warn("Retrying brevo email send", "attempt", attempt+1)
+		}
+		result, resp, err = s.client.TransactionalEmailsApi.SendTransacEmail(ctx, send)
+		if err == nil && (resp == nil || resp.StatusCode < 500) {
+			break
+		}
+		if attempt == maxRetries {
+			break
+		}
+	}
 	if err != nil {
 		var apiErr brevo.GenericSwaggerError
 		if errors.As(err, &apiErr) && len(apiErr.Body()) > 0 {
@@ -70,5 +87,5 @@ func (s *BrevoEmailService) SendEmail(user *models.User, templateID int, params 
 		return result.MessageIds[0], nil
 	}
 
-	return "", nil
+	return "", fmt.Errorf("email send returned no message ID")
 }

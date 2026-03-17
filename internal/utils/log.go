@@ -5,12 +5,12 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"log/slog"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/uptrace/bun"
-
-	"log/slog"
 )
 
 // Field names
@@ -66,7 +66,12 @@ func (qh QueryHook) AfterQuery(ctx context.Context, event *bun.QueryEvent) {
 			return
 		}
 		fields = append(fields, slog.String("ERROR", event.Err.Error()))
-		qh.logger.Error(maskedQuery, fields...)
+		errMsg := event.Err.Error()
+		if isConstraintViolation(errMsg) {
+			qh.logger.Warn(maskedQuery, fields...)
+		} else {
+			qh.logger.Error(maskedQuery, fields...)
+		}
 		return
 	}
 
@@ -77,16 +82,44 @@ func (qh QueryHook) AfterQuery(ctx context.Context, event *bun.QueryEvent) {
 	}
 }
 
-func MaskSensitive(sql string) string {
-	patterns := []*regexp.Regexp{
-		regexp.MustCompile(`(?i)'[a-f0-9]{64}'`), // SHA256/token/hex 64
-	}
+var sensitivePatterns = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)'[a-f0-9]{64}'`),                                              // SHA256/token/hex 64
+	regexp.MustCompile(`eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+`),           // JWT tokens
+	regexp.MustCompile(`Bearer\s+[A-Za-z0-9._\-/+=]+`),                                    // Bearer tokens in strings
+	regexp.MustCompile(`[a-f0-9]{32,}`),                                                    // Generic long hex strings
+	regexp.MustCompile(`[A-Za-z0-9+/]{40,}={0,2}`),                                        // Base64-encoded API keys
+}
 
+func MaskSensitive(sql string) string {
 	masked := sql
-	for _, re := range patterns {
-		masked = re.ReplaceAllString(masked, "'********'")
+	for _, re := range sensitivePatterns {
+		masked = re.ReplaceAllString(masked, "********")
 	}
 	return masked
+}
+
+// isConstraintViolation checks if a database error is a Postgres constraint
+// violation, which is typically a client/logic error rather than an infrastructure
+// failure. These are logged at Warn level instead of Error.
+func isConstraintViolation(errMsg string) bool {
+	lower := strings.ToLower(errMsg)
+	constraintPatterns := []string{
+		"unique_violation",
+		"foreign_key_violation",
+		"check_violation",
+		"duplicate key value violates unique constraint",
+		"violates foreign key constraint",
+		"violates check constraint",
+		"23505", // unique_violation SQLSTATE
+		"23503", // foreign_key_violation SQLSTATE
+		"23514", // check_violation SQLSTATE
+	}
+	for _, p := range constraintPatterns {
+		if strings.Contains(lower, p) {
+			return true
+		}
+	}
+	return false
 }
 
 // Command Log Writer
