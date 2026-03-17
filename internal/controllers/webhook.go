@@ -424,7 +424,7 @@ func (c *Controller) processWebhookEvent(event stripe.Event) error {
 		}
 
 		packSize, err := strconv.Atoi(packSizeStr)
-		if err != nil || (packSize != 100 && packSize != 500) {
+		if err != nil || (packSize != 100 && packSize != 200) {
 			slog.Error("webhook: invalid pack_size in metadata", "pack_size", packSizeStr, "event_id", event.ID)
 			return nil
 		}
