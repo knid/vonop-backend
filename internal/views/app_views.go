@@ -707,6 +707,9 @@ func (v *HttpViews) ConnectAppIntegration(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	// Sync env vars to preview so new integration vars are available immediately
+	go v.syncEnvVarsToPreview(project)
+
 	v.Controller.TrackUserEvent(user, "integration_connected", posthog.NewProperties().
 		Set("app_id", project.ID.String()).
 		Set("provider", integ.Provider))
@@ -747,6 +750,9 @@ func (v *HttpViews) UpdateAppIntegration(w http.ResponseWriter, r *http.Request)
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+
+	// Sync env vars to preview so updated integration credentials take effect
+	go v.syncEnvVarsToPreview(project)
 
 	utils.JSONResponse(w, responses.AppIntegrationResp{
 		ID:        integ.ID,

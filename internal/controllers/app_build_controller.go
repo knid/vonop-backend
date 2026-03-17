@@ -66,11 +66,9 @@ func (c *Controller) DeployToVercel(project *models.AppProject, user *models.Use
 	// Collect all env vars (integrations + custom + auto-injected store vars)
 	envVars := c.CollectAllEnvVars(project)
 
-	// Set env vars on Vercel project
-	if len(envVars) > 0 {
-		if err := c.VercelService.SetEnvVars(vercelProject.VercelProjectID, envVars); err != nil {
-			slog.Warn("Failed to set some env vars", "error", err)
-		}
+	// Sync env vars on Vercel project (sets desired, removes stale)
+	if err := c.VercelService.SyncEnvVars(vercelProject.VercelProjectID, envVars); err != nil {
+		slog.Warn("Failed to sync some env vars", "error", err)
 	}
 
 	// Ensure deployment protection is disabled (idempotent)

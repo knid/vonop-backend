@@ -110,18 +110,43 @@ func (r *AppFileUpdateRequest) Validate(validate *validator.Validate) error {
 }
 
 type SetEnvVarRequest struct {
-	Key      string `json:"key" validate:"required,min=1,max=100" errormgs:"must be between 1 and 100 characters"`
-	Value    string `json:"value" validate:"required" errormgs:"is required"`
+	Key      string `json:"key" validate:"required,min=1,max=100,env_var_key" errormgs:"must be a valid env var name (uppercase letters, digits, underscores)"`
+	Value    string `json:"value" validate:"required,max=10000" errormgs:"is required and must be at most 10000 characters"`
 	IsPublic bool   `json:"is_public"`
 }
 
 func (r *SetEnvVarRequest) Validate(validate *validator.Validate) error {
+	validate.RegisterValidation("env_var_key", validateEnvVarKey)
 	return utils.ValidateFunc[SetEnvVarRequest](*r, validate)
 }
 
+// validateEnvVarKey checks that the key matches [A-Z_][A-Z0-9_]* pattern.
+func validateEnvVarKey(fl validator.FieldLevel) bool {
+	key := fl.Field().String()
+	if len(key) == 0 {
+		return false
+	}
+	for i, c := range key {
+		if i == 0 {
+			if !((c >= 'A' && c <= 'Z') || c == '_') {
+				return false
+			}
+		} else {
+			if !((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_') {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 type UpdateEnvVarRequest struct {
-	Value    *string `json:"value"`
+	Value    *string `json:"value" validate:"omitempty,max=10000" errormgs:"must be at most 10000 characters"`
 	IsPublic *bool   `json:"is_public"`
+}
+
+func (r *UpdateEnvVarRequest) Validate(validate *validator.Validate) error {
+	return utils.ValidateFunc[UpdateEnvVarRequest](*r, validate)
 }
 
 type ReplyJobRequest struct {
