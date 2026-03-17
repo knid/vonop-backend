@@ -744,7 +744,9 @@ func (c *Controller) RefreshDashboardSchema(ctx context.Context, projectID strin
 		prompt, completion, total, _ := tracker.Totals()
 		if total > 0 {
 			credits := models.TokensToCredits(prompt, completion)
-			c.DeductAICreditsUnchecked(user, credits, "dashboard_schema_refresh", projectID)
+			if err := c.DeductAICreditsUnchecked(user, credits, "dashboard_schema_refresh", projectID); err != nil {
+				slog.Warn("failed to deduct AI credits for schema refresh", "error", err, "user_id", user.ID, "credits", credits)
+			}
 		}
 	}()
 

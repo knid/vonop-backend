@@ -48,18 +48,21 @@ func checkUsageAlerts(db *database.Database, crmService crmServices.CRMService) 
 			continue
 		}
 
-		usagePercent := float64(limits.MonthlyAICredits-balance.Balance) / float64(limits.MonthlyAICredits) * 100
+		// Calculate remaining credits as a percentage of monthly grant.
+		// Uses remaining balance (not consumed), which correctly handles rollover/purchased credits.
+		remainingPercent := float64(balance.Balance) / float64(limits.MonthlyAICredits) * 100
 
 		// CRM events are fire-and-forget; errors are handled internally by the CRM service.
-		if usagePercent >= 90 || balance.Balance <= 0 {
+		if balance.Balance <= 0 || remainingPercent <= 10 {
 			go crmService.SendEvent(&user, constants.BREVO_EVENT_AI_CREDITS_DEPLETED, map[string]any{
-				"credits_total": limits.MonthlyAICredits,
+				"credits_total":     limits.MonthlyAICredits,
+				"credits_remaining": balance.Balance,
 			})
-		} else if usagePercent >= 80 {
+		} else if remainingPercent <= 20 {
 			go crmService.SendEvent(&user, constants.BREVO_EVENT_AI_CREDITS_LOW, map[string]any{
 				"credits_remaining": balance.Balance,
 				"credits_total":     limits.MonthlyAICredits,
-				"usage_percent":     int(usagePercent),
+				"usage_percent":     int(100 - remainingPercent),
 			})
 		}
 	}

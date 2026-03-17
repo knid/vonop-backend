@@ -167,7 +167,9 @@ func (c *Controller) RegisterUser(userRegisterReq requests.UserRegisterRequest) 
 		return nil, err
 	}
 	createdUser.CustomerID = customer.ID
-	c.DB.UpdateUser(createdUser)
+	if _, err := c.DB.UpdateUser(createdUser); err != nil {
+		slog.Error("failed to link Stripe customer to user", "error", err, "user_id", createdUser.ID, "customer_id", customer.ID)
+	}
 
 	c.assignFreePlan(createdUser)
 
@@ -306,7 +308,9 @@ func (c *Controller) GoogleLogin(oauthUser goth.User) (*responses.UserLoginRespo
 				return nil, err
 			}
 			user.CustomerID = customer.ID
-			c.DB.UpdateUser(user)
+			if _, err := c.DB.UpdateUser(user); err != nil {
+				slog.Error("failed to link Stripe customer to user", "error", err, "user_id", user.ID, "customer_id", customer.ID)
+			}
 
 			c.assignFreePlan(user)
 

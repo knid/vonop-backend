@@ -75,7 +75,9 @@ func (db *Database) GetStandartUserLimitsById(id string) (*models.StandartUserLi
 
 func (db *Database) GetSubscriptionByPriceID(priceID string) (*models.StandartUserSubscription, error) {
 	var subs models.StandartUserSubscription
-	err := db.DB.NewSelect().Model(&subs).Where("price_id = ?", priceID).Scan(context.Background())
+	err := db.DB.NewSelect().Model(&subs).
+		Where("price_id = ? OR annual_price_id = ?", priceID, priceID).
+		Scan(context.Background())
 
 	return &subs, err
 }
