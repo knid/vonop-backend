@@ -166,7 +166,8 @@ type validationError struct {
 
 
 // --- Regex for env var detection ---
-var processEnvRegex = regexp.MustCompile(`process\.env\.([A-Z_][A-Z0-9_]+)`)
+// Matches both dot notation (process.env.FOO) and bracket notation (process.env["FOO"] / process.env['FOO'])
+var processEnvRegex = regexp.MustCompile(`process\.env\.([A-Z_][A-Z0-9_]*)|process\.env\[["']([A-Z_][A-Z0-9_]*)["']\]`)
 
 // alwaysExcludedEnvVars are env vars that are always provided by the system
 // and should never appear in "missing" detection.
@@ -184,8 +185,13 @@ func detectEnvVarsFromCode(files map[string]string) []string {
 	seen := map[string]bool{}
 	for _, content := range files {
 		for _, m := range processEnvRegex.FindAllStringSubmatch(content, -1) {
-			if !alwaysExcludedEnvVars[m[1]] {
-				seen[m[1]] = true
+			// m[1] is dot notation capture, m[2] is bracket notation capture
+			key := m[1]
+			if key == "" {
+				key = m[2]
+			}
+			if key != "" && !alwaysExcludedEnvVars[key] {
+				seen[key] = true
 			}
 		}
 	}
@@ -228,7 +234,9 @@ func (c *Controller) computeMissingEnvVars(project *models.AppProject, llmVars [
 
 	var missing []RequiredEnvVar
 	for _, v := range required {
-		if existing[v.Key] == "" {
+		// Check both the raw key and the NEXT_PUBLIC_ prefixed form,
+		// since CollectAllEnvVars auto-prefixes public custom vars.
+		if existing[v.Key] == "" && existing["NEXT_PUBLIC_"+v.Key] == "" {
 			missing = append(missing, v)
 		}
 	}

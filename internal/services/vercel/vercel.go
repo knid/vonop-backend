@@ -10,6 +10,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
 	"time"
@@ -248,7 +249,8 @@ func (s *Service) SetEnvVars(projectID string, envVars map[string]string) error 
 		if err != nil {
 			slog.Warn("Failed to set env var, may already exist, trying update", "key", key, "error", err)
 			// Try PATCH if POST fails (env var may already exist)
-			_, err = s.doRequest("PATCH", fmt.Sprintf("/v10/projects/%s/env/%s", projectID, key), map[string]any{
+			// URL-encode the key to handle any special characters safely
+			_, err = s.doRequest("PATCH", fmt.Sprintf("/v10/projects/%s/env/%s", projectID, url.PathEscape(key)), map[string]any{
 				"value":  value,
 				"type":   "encrypted",
 				"target": []string{"production", "preview", "development"},
@@ -259,6 +261,53 @@ func (s *Service) SetEnvVars(projectID string, envVars map[string]string) error 
 		}
 	}
 	return nil
+}
+
+// RemoveEnvVar deletes a single environment variable from a Vercel project.
+func (s *Service) RemoveEnvVar(projectID string, key string) error {
+	_, err := s.doRequest("DELETE", fmt.Sprintf("/v10/projects/%s/env/%s", projectID, url.PathEscape(key)), nil)
+	return err
+}
+
+// SyncEnvVars sets the given env vars and removes any Vercel env vars not in the desired set.
+func (s *Service) SyncEnvVars(projectID string, desired map[string]string) error {
+	// Fetch current env vars from Vercel
+	current, err := s.ListEnvVars(projectID)
+	if err != nil {
+		slog.Warn("Failed to list existing Vercel env vars, falling back to set-only", "error", err)
+		return s.SetEnvVars(projectID, desired)
+	}
+
+	// Set/update all desired vars
+	if err := s.SetEnvVars(projectID, desired); err != nil {
+		return err
+	}
+
+	// Remove vars that exist on Vercel but are no longer desired
+	for _, ev := range current {
+		if _, ok := desired[ev.Key]; !ok {
+			if err := s.RemoveEnvVar(projectID, ev.Key); err != nil {
+				slog.Warn("Failed to remove stale env var from Vercel", "key", ev.Key, "error", err)
+			}
+		}
+	}
+	return nil
+}
+
+// ListEnvVars returns all environment variables currently set on a Vercel project.
+func (s *Service) ListEnvVars(projectID string) ([]EnvVar, error) {
+	body, err := s.doRequest("GET", fmt.Sprintf("/v10/projects/%s/env", projectID), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var resp struct {
+		Envs []EnvVar `json:"envs"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return nil, fmt.Errorf("unmarshal env vars response: %w", err)
+	}
+	return resp.Envs, nil
 }
 
 // AddDomain adds a custom domain to a project

@@ -1,6 +1,7 @@
 package views
 
 import (
+	"log/slog"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -11,18 +12,29 @@ import (
 	"github.com/knid/wemob/internal/utils"
 )
 
-// syncEnvVarsToPreview pushes the latest env vars to the running preview container
-// and regenerates .env.local in the DB so future preview restarts also pick them up.
+// syncEnvVarsToPreview regenerates .env.local in the git repo so future
+// preview restarts pick up the latest env vars.
 func (v *HttpViews) syncEnvVarsToPreview(project *models.AppProject) {
 	envVars := v.Controller.CollectAllEnvVars(project)
 
-	// Update .env.local file in git repo
-	if dotEnv := controllers.BuildDotEnvLocal(envVars); dotEnv != "" {
-		if repo, err := v.Controller.GitRepoService.OpenOrInit(project.ID.String()); err == nil {
-			repo.WriteFile(".env.local", []byte(dotEnv))
-		}
+	repo, err := v.Controller.GitRepoService.OpenOrInit(project.ID.String())
+	if err != nil {
+		slog.Warn("syncEnvVarsToPreview: failed to open repo", "error", err, "project_id", project.ID)
+		return
 	}
 
+	dotEnv := controllers.BuildDotEnvLocal(envVars)
+	if dotEnv != "" {
+		if err := repo.WriteFile(".env.local", []byte(dotEnv)); err != nil {
+			slog.Warn("syncEnvVarsToPreview: failed to write .env.local", "error", err, "project_id", project.ID)
+		}
+	} else {
+		// All env vars removed — delete the stale .env.local file
+		if err := repo.DeleteFile(".env.local"); err != nil {
+			// Not an error if the file doesn't exist
+			slog.Debug("syncEnvVarsToPreview: .env.local not found to delete", "project_id", project.ID)
+		}
+	}
 }
 
 // GET /v2/apps/{appId}/env-vars/missing

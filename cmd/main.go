@@ -352,6 +352,7 @@ func createSchema(db *bun.DB) error {
 		`CREATE INDEX IF NOT EXISTS idx_app_deployments_app_project_id ON app_deployments(app_project_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_app_domains_app_project_id ON app_domains(app_project_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_app_env_vars_app_project_id ON app_env_vars(app_project_id)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_app_env_vars_project_key ON app_env_vars(app_project_id, key) WHERE deleted_at IS NULL`,
 		`CREATE INDEX IF NOT EXISTS idx_app_integrations_app_project_id ON app_integrations(app_project_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_stores_app_project_id ON stores(app_project_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_app_dashboards_app_project_id ON app_dashboards(app_project_id)`,
