@@ -14,6 +14,12 @@ var deleteTagRegex = regexp.MustCompile(`<delete\s+path="([^"]+)"\s*/>`)
 // FileStreamParser parses `<file path="...">content</file>` blocks from a
 // text stream incrementally. Non-file text is emitted via OnText; completed
 // file blocks are emitted via OnFile.
+//
+// NOTE (B70): If the actual file content contains a literal "</file>" string
+// (e.g. inside a code comment or string), the parser will incorrectly treat it
+// as the closing tag and split the file. This is a known limitation of the
+// tag-based protocol. A full fix would require an escaping mechanism or a
+// different framing format (e.g. length-prefixed).
 type FileStreamParser struct {
 	buffer      string
 	inFileBlock bool
@@ -100,6 +106,13 @@ func (p *FileStreamParser) Feed(chunk string) {
 					isPartialFileTag := strings.HasPrefix(tail, "<f") ||
 						strings.HasPrefix(tail, "<F") ||
 						tail == "<"
+					// B68: If the tail looks like a partial file tag but is
+					// longer than any valid <file path="..."> or
+					// <delete path="..."/> opening could be, it is not a
+					// partial tag — flush it to avoid stalling the parser.
+					if isPartialFileTag && len(tail) > 100 {
+						isPartialFileTag = false
+					}
 					if !isPartialFileTag {
 						// Not a file tag — emit everything
 						if p.OnText != nil {

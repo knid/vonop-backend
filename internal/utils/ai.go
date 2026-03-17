@@ -20,6 +20,11 @@ import (
 // toolExecTimeout is the maximum time a single tool execution may take.
 const toolExecTimeout = 2 * time.Minute
 
+// maxResponseBufferSize is the maximum bytes accumulated in a response text
+// buffer before further content is dropped. This prevents unbounded memory
+// growth from pathologically large LLM responses.
+const maxResponseBufferSize = 2 * 1024 * 1024 // 2 MB
+
 // normalizeToolCacheKey produces a canonical cache key for tool dedup.
 // It normalizes JSON arguments so semantically identical calls (different key order) match.
 func normalizeToolCacheKey(name, args string) string {
@@ -34,16 +39,17 @@ func normalizeToolCacheKey(name, args string) string {
 
 // sanitizeToolError strips internal details from tool execution errors
 // so they don't leak into LLM context or user-visible responses.
+// The returned string is used as the tool result so the LLM knows the call failed.
 func sanitizeToolError(toolName string, err error) string {
 	msg := err.Error()
 	// Strip common internal prefixes/patterns
 	for _, sensitive := range []string{"sql:", "pq:", "s3:", "dial tcp", "connect:", "tls:", "x509:"} {
 		if strings.Contains(strings.ToLower(msg), sensitive) {
 			slog.Error("Tool execution error (sanitized)", "tool", toolName, "error", msg)
-			return fmt.Sprintf("Error executing tool %s: internal error, please try again", toolName)
+			return fmt.Sprintf("Tool execution failed for %s: internal error, please try again", toolName)
 		}
 	}
-	return fmt.Sprintf("Error executing tool %s: %s", toolName, msg)
+	return fmt.Sprintf("Tool execution failed for %s: %v", toolName, err)
 }
 
 // isValidJSON returns true if s is valid JSON.
@@ -745,7 +751,9 @@ func StreamTextFromLLMWithMessages(ctx context.Context, model string, messages [
 			}
 			if chunk.Choices[0].Delta.Content != "" {
 				content := chunk.Choices[0].Delta.Content
-				fullText.WriteString(content)
+				if fullText.Len() < maxResponseBufferSize {
+					fullText.WriteString(content)
+				}
 				if onChunk != nil {
 					onChunk(content)
 				}
@@ -758,6 +766,10 @@ func StreamTextFromLLMWithMessages(ctx context.Context, model string, messages [
 			return fullText.String(), ctx.Err()
 		}
 		return "", fmt.Errorf("error reading streaming response. try again please")
+	}
+
+	if fullText.Len() >= maxResponseBufferSize {
+		slog.Warn("LLM streaming response exceeded max buffer size", "max_bytes", maxResponseBufferSize, "FROM", "LLM_STREAM_TEXT_MSGS")
 	}
 
 	if lastUsage.TotalTokens > 0 {
@@ -947,7 +959,9 @@ func StreamJSONFromLLMWithMessages(ctx context.Context, model string, messages [
 			}
 			if chunk.Choices[0].Delta.Content != "" {
 				content := chunk.Choices[0].Delta.Content
-				fullText.WriteString(content)
+				if fullText.Len() < maxResponseBufferSize {
+					fullText.WriteString(content)
+				}
 				if onChunk != nil {
 					onChunk(content)
 				}
@@ -1117,6 +1131,9 @@ func StreamWithTools(
 	}
 	currentMessages := make([]Message, len(messages))
 	copy(currentMessages, messages)
+	// toolCallHistory caches tool results for deduplication across rounds.
+	// No mutex is needed because tools execute sequentially (each tool call
+	// blocks via select until completion before the next one starts).
 	toolCallHistory := make(map[string]string) // "tool:args" → result (dedup cache)
 	consecutiveToolRounds := 0
 	nudged := false
@@ -1176,12 +1193,12 @@ func StreamWithTools(
 			ResponseFormat: responseFormat,
 		}, provider)
 		if err != nil {
-			return "", fmt.Errorf("error building request: %w", err)
+			return "", fmt.Errorf("round %d: error building request: %w", round, err)
 		}
 
 		req, err := http.NewRequestWithContext(ctx, "POST", provider.Endpoint(), bytes.NewReader(body))
 		if err != nil {
-			return "", fmt.Errorf("error creating LLM request: %w", err)
+			return "", fmt.Errorf("round %d: error creating LLM request: %w", round, err)
 		}
 		setLLMHeaders(req, provider)
 
@@ -1202,7 +1219,7 @@ func StreamWithTools(
 				continue
 			}
 			slog.Error("Error making streaming request to LLM:", "error", err, "round", round)
-			return "", fmt.Errorf("error generating content. try again please")
+			return "", fmt.Errorf("round %d: error generating content: %w", round, err)
 		}
 
 		if resp.StatusCode != http.StatusOK {
@@ -1241,7 +1258,7 @@ func StreamWithTools(
 			if rlErr := parseRateLimitError(resp, respBody); rlErr != nil {
 				return "", rlErr
 			}
-			return "", fmt.Errorf("error generating content. try again please")
+			return "", fmt.Errorf("round %d: LLM returned status %d", round, resp.StatusCode)
 		}
 		rateLimitRetries = 0   // reset after successful request
 		transientRetries = 0
@@ -1295,18 +1312,25 @@ func StreamWithTools(
 				if rlErr, ok := IsRateLimited(parseErr); ok {
 					return "", rlErr
 				}
-				return "", fmt.Errorf("error reading streaming response. try again please")
+				return "", fmt.Errorf("round %d: error reading streaming response: %w", round, parseErr)
 			}
 
-			fullText.WriteString(result.Text)
+			if len(result.Text) > maxResponseBufferSize {
+				slog.Warn("Anthropic SSE result text exceeded max buffer size, truncating", "max_bytes", maxResponseBufferSize, "actual_bytes", len(result.Text), "round", round)
+				fullText.WriteString(result.Text[:maxResponseBufferSize])
+			} else {
+				fullText.WriteString(result.Text)
+			}
 			fullReasoning.WriteString(result.Reasoning)
 			lastFinishReason = result.FinishReason
 			roundUsage = result.Usage
-			for i, tc := range result.ToolCalls {
-				toolCallsMap[i] = &ToolCall{
-					ID:       tc.ID,
-					Type:     tc.Type,
-					Function: tc.Function,
+			if result.ToolCalls != nil {
+				for i, tc := range result.ToolCalls {
+					toolCallsMap[i] = &ToolCall{
+						ID:       tc.ID,
+						Type:     tc.Type,
+						Function: tc.Function,
+					}
 				}
 			}
 		} else {
@@ -1350,7 +1374,12 @@ func StreamWithTools(
 					// Buffer content — only flush to onChunk after confirming this isn't
 					// an intermediate tool-calling round (which contains reasoning, not code)
 					if choice.Delta.Content != "" {
-						fullText.WriteString(choice.Delta.Content)
+						if fullText.Len() < maxResponseBufferSize {
+							fullText.WriteString(choice.Delta.Content)
+						} else if fullText.Len()-len(choice.Delta.Content) < maxResponseBufferSize {
+							// Log once when we first exceed the limit
+							slog.Warn("LLM response buffer exceeded max size, no longer accumulating", "max_bytes", maxResponseBufferSize, "round", round)
+						}
 						roundChunks = append(roundChunks, choice.Delta.Content)
 						// Stream in real-time for UX; if this round is a tool-call
 						// round, frontend replaces streaming text on chat_complete
@@ -1422,7 +1451,7 @@ func StreamWithTools(
 					return fullText.String(), ctx.Err()
 				}
 				slog.Error("scanner error during LLM streaming with tools", "error", scanErr, "round", round)
-				return "", fmt.Errorf("error reading streaming response. try again please")
+				return "", fmt.Errorf("round %d: error reading streaming response: %w", round, scanErr)
 			}
 		}
 
@@ -1584,6 +1613,10 @@ func StreamWithTools(
 				}
 			toolResultDone:
 
+				// Ensure tool result is non-empty; LLM providers reject empty tool results.
+				if result == "" {
+					result = "(no output)"
+				}
 				currentMessages = append(currentMessages, Message{
 					Role:       "tool",
 					Content:    result,

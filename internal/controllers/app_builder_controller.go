@@ -96,6 +96,9 @@ func (b *builderToolCallbacks) fileCount() int {
 }
 
 // snapshotFileMap returns a shallow copy of fileMap for read-only use.
+// NOTE: This is intentionally a shallow copy (string values are immutable in Go)
+// which is sufficient for rollback safety — callers get an isolated key set
+// while the string values themselves cannot be mutated in place.
 func (b *builderToolCallbacks) snapshotFileMap() map[string]string {
 	b.fileMu.RLock()
 	m := make(map[string]string, len(b.fileMap))
@@ -128,23 +131,20 @@ func (c *Controller) StreamBuildApp(
 	eventsOpen := true
 	sendEvent := func(eventName string, data any) bool {
 		eventsClosed.Lock()
+		defer eventsClosed.Unlock()
 		if !eventsOpen {
-			eventsClosed.Unlock()
 			return false
 		}
-		eventsClosed.Unlock()
-		defer func() {
-			if r := recover(); r != nil {
-				eventsClosed.Lock()
-				eventsOpen = false
-				eventsClosed.Unlock()
-			}
-		}()
-		select {
-		case <-ctx.Done():
+		if ctx.Err() != nil {
 			return false
+		}
+		select {
 		case events <- responses.SSEEvent{Event: eventName, Data: data}:
 			return true
+		default:
+			// Channel full or closed; mark as closed to prevent future sends.
+			eventsOpen = false
+			return false
 		}
 	}
 
@@ -259,11 +259,16 @@ func (c *Controller) StreamBuildApp(
 	go func() {
 		ticker := time.NewTicker(15 * time.Second)
 		defer ticker.Stop()
+		maxLifetime := time.NewTimer(30 * time.Minute)
+		defer maxLifetime.Stop()
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case <-keepaliveDone:
+				return
+			case <-maxLifetime.C:
+				slog.Warn("keepalive goroutine reached max lifetime, exiting")
 				return
 			case <-ticker.C:
 				sendEvent("keepalive", map[string]any{"ts": time.Now().Unix()})
@@ -911,6 +916,8 @@ func (c *Controller) StreamBuildApp(
 	}
 
 	// --- Generation completed successfully ---
+	// Set the flag before commit so credits are deducted for successful generation
+	// even if the git commit has issues. If commit fails, revert the flag.
 	generationSucceeded = true
 
 	// --- Commit changes to git ---
@@ -928,8 +935,19 @@ func (c *Controller) StreamBuildApp(
 		}
 		if hash, commitErr := repo.Commit(commitMsg); commitErr != nil {
 			slog.Error("failed to commit generation changes", "error", commitErr, "project_id", project.ID)
+			// Commit failed — revert flag so credits are not deducted for a broken state
+			generationSucceeded = false
 		} else {
 			slog.Info("Committed generation changes", "project_id", project.ID, "hash", hash[:8], "files_changed", filesChanged)
+		}
+	}
+
+	// --- Invalidate conversation summary after successful generation ---
+	// The codebase has changed, so the old summary may reference stale state.
+	if generationSucceeded && conv.Summary != "" {
+		conv.Summary = ""
+		if _, err := c.DB.UpdateAppConversation(conv); err != nil {
+			slog.Error("failed to clear conversation summary after generation", "error", err, "conv_id", conv.ID)
 		}
 	}
 
@@ -1270,6 +1288,7 @@ CRITICAL LANGUAGE RULE: ALL content you generate (product names, descriptions, c
 	var toolCalled bool
 	var phase1TextBuf strings.Builder
 	var phase1TextFlushed bool
+	var phase1Mu sync.Mutex // protects toolCalled, phase1TextBuf, phase1TextFlushed
 
 	result, err := utils.StreamWithTools(
 		ctx, fastModel, messages,
@@ -1283,6 +1302,8 @@ CRITICAL LANGUAGE RULE: ALL content you generate (product names, descriptions, c
 				if cleaned == "" {
 					return
 				}
+				phase1Mu.Lock()
+				defer phase1Mu.Unlock()
 				// Already flushed — stream directly
 				if phase1TextFlushed {
 					sendEvent("chat_text", responses.ChatTextEvent{Chunk: cleaned})
@@ -1306,6 +1327,7 @@ CRITICAL LANGUAGE RULE: ALL content you generate (product names, descriptions, c
 			MaxTokens:  4096,
 			StripAfter: 28, // Strip tools near the end so model is forced to respond
 			OnToolCallStart: func(toolName string) {
+				phase1Mu.Lock()
 				toolCalled = true
 				// Flush any buffered text that preceded this tool call
 				if !phase1TextFlushed && phase1TextBuf.Len() > 0 {
@@ -1315,6 +1337,7 @@ CRITICAL LANGUAGE RULE: ALL content you generate (product names, descriptions, c
 						sendEvent("chat_text", responses.ChatTextEvent{Chunk: s})
 					}
 				}
+				phase1Mu.Unlock()
 				sendEvent("tool_start", map[string]string{"tool": toolName})
 			},
 		},
@@ -3608,6 +3631,17 @@ func (c *Controller) buildBuilderToolExecutor(ctx context.Context, project *mode
 		// Early exit if context is cancelled — prevents partial writes after timeout
 		if ctx.Err() != nil {
 			return "", ctx.Err()
+		}
+
+		// Validate tool name
+		if name == "" {
+			return "Error: tool name is empty", nil
+		}
+
+		// Normalize empty/nil arguments to empty JSON object for tools that expect structured input.
+		// read_file, list_files, etc. parse arguments with json.Unmarshal which would fail on "".
+		if arguments == "" || arguments == "null" {
+			arguments = "{}"
 		}
 
 		switch name {
