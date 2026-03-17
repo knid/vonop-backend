@@ -1025,6 +1025,7 @@ func main() {
 				r.Route("/credits", func(r chi.Router) {
 					r.Get("/", httpViews.GetAICreditsBalance)
 					r.Get("/transactions", httpViews.GetAICreditTransactions)
+					r.Post("/purchase", httpViews.PurchaseCredits)
 				})
 				r.Get("/token-usage", httpViews.GetTokenUsage)
 			})
