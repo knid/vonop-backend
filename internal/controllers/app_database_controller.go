@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -34,22 +35,24 @@ const (
 // appScopedTable defines a table the database manager is allowed to expose,
 // along with how it is scoped to a particular app project.
 type appScopedTable struct {
-	DisplayName string    // friendly name shown in the UI
-	Scope       scopeKind // how rows are scoped to the app
+	DisplayName   string    // friendly name shown in the UI
+	Scope         scopeKind // how rows are scoped to the app
+	ReadOnly      bool      // if true, INSERT and DELETE are forbidden
+	HasSoftDelete bool      // if true, add "deleted_at IS NULL" filter to queries
 }
 
 // appScopedTables is the allowlist of tables users can browse/edit.
 var appScopedTables = map[string]appScopedTable{
 	// Direct store-scoped tables
-	"stores":              {DisplayName: "Stores", Scope: scopeByAppProjectID},
-	"products":            {DisplayName: "Products", Scope: scopeByStoreID},
-	"product_categories":  {DisplayName: "Categories", Scope: scopeByStoreID},
-	"discounts":           {DisplayName: "Discounts", Scope: scopeByStoreID},
+	"stores":              {DisplayName: "Stores", Scope: scopeByAppProjectID, HasSoftDelete: true},
+	"products":            {DisplayName: "Products", Scope: scopeByStoreID, HasSoftDelete: true},
+	"product_categories":  {DisplayName: "Categories", Scope: scopeByStoreID, HasSoftDelete: true},
+	"discounts":           {DisplayName: "Discounts", Scope: scopeByStoreID, HasSoftDelete: true},
 	"carts":               {DisplayName: "Carts", Scope: scopeByStoreID},
 	"cart_items":          {DisplayName: "Cart Items", Scope: scopeByStoreViaCart},
 	"orders":              {DisplayName: "Orders", Scope: scopeByStoreID},
 	"order_items":         {DisplayName: "Order Items", Scope: scopeByStoreViaOrder},
-	"web_analytics_events": {DisplayName: "Analytics Events", Scope: scopeByProjectID},
+	"web_analytics_events": {DisplayName: "Analytics Events", Scope: scopeByProjectID, ReadOnly: true},
 }
 
 // inferFieldHint returns a semantic hint for the frontend editor based on column name and type.
@@ -143,37 +146,86 @@ func (c *Controller) openNeonDB(projectID string) (*sql.DB, error) {
 	if connStr == "" {
 		return nil, fmt.Errorf("no Neon connection string found")
 	}
-	return sql.Open("postgres", neonConnStrWithEndpoint(connStr))
+	db, err := sql.Open("postgres", neonConnStrWithEndpoint(connStr))
+	if err != nil {
+		return nil, err
+	}
+	db.SetConnMaxLifetime(30 * time.Second)
+	db.SetMaxOpenConns(3)
+	db.SetMaxIdleConns(1)
+	return db, nil
+}
+
+// softDeleteFilter returns an additional SQL fragment to exclude soft-deleted rows,
+// or "" if the table does not use soft deletes.
+func softDeleteFilter(tableName string) string {
+	info, ok := appScopedTables[tableName]
+	if !ok || !info.HasSoftDelete {
+		return ""
+	}
+	return fmt.Sprintf(" AND %s.%s IS NULL", quoteIdentifier(tableName), quoteIdentifier("deleted_at"))
+}
+
+// neonQueryTimeout is the default timeout for Neon database queries.
+const neonQueryTimeout = 15 * time.Second
+
+// validateNeonTable checks that the given table exists in the Neon database.
+func validateNeonTable(ctx context.Context, db *sql.DB, tableName string) error {
+	var exists bool
+	err := db.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM information_schema.tables
+			WHERE table_schema = 'public' AND table_name = $1
+		)
+	`, tableName).Scan(&exists)
+	if err != nil {
+		return fmt.Errorf("failed to check table: %w", err)
+	}
+	if !exists {
+		return fmt.Errorf("table %q not found", tableName)
+	}
+	return nil
+}
+
+// validatePrimaryKey checks that the primary key map is non-empty.
+func validatePrimaryKey(pk map[string]any) error {
+	if len(pk) == 0 {
+		return fmt.Errorf("primary key must contain at least one column")
+	}
+	return nil
 }
 
 // scopeWhereClause returns a WHERE clause and args that limit rows to the given project.
 // storeID may be empty if the app has no store — in that case store-scoped tables return no rows.
+// Automatically appends a soft-delete filter for tables that use soft deletes.
 func scopeWhereClause(tableName, projectID, storeID string) (string, []any) {
 	info, ok := appScopedTables[tableName]
 	if !ok {
 		return "WHERE 1=0", nil // should never happen
 	}
 
+	sdFilter := softDeleteFilter(tableName)
+
 	switch info.Scope {
 	case scopeByAppProjectID:
-		return fmt.Sprintf("WHERE %s.%s = $1", quoteIdentifier(tableName), quoteIdentifier("app_project_id")), []any{projectID}
+		return fmt.Sprintf("WHERE %s.%s = $1%s", quoteIdentifier(tableName), quoteIdentifier("app_project_id"), sdFilter), []any{projectID}
 
 	case scopeByProjectID:
-		return fmt.Sprintf("WHERE %s.%s = $1", quoteIdentifier(tableName), quoteIdentifier("project_id")), []any{projectID}
+		return fmt.Sprintf("WHERE %s.%s = $1%s", quoteIdentifier(tableName), quoteIdentifier("project_id"), sdFilter), []any{projectID}
 
 	case scopeByStoreID:
 		if storeID == "" {
 			return "WHERE 1=0", nil
 		}
-		return fmt.Sprintf("WHERE %s.%s = $1", quoteIdentifier(tableName), quoteIdentifier("store_id")), []any{storeID}
+		return fmt.Sprintf("WHERE %s.%s = $1%s", quoteIdentifier(tableName), quoteIdentifier("store_id"), sdFilter), []any{storeID}
 
 	case scopeByStoreViaProduct:
 		if storeID == "" {
 			return "WHERE 1=0", nil
 		}
 		return fmt.Sprintf(
-			`WHERE %s."product_id" IN (SELECT "id" FROM "products" WHERE "store_id" = $1)`,
-			quoteIdentifier(tableName),
+			`WHERE %s."product_id" IN (SELECT "id" FROM "products" WHERE "store_id" = $1)%s`,
+			quoteIdentifier(tableName), sdFilter,
 		), []any{storeID}
 
 	case scopeByStoreViaCart:
@@ -181,8 +233,8 @@ func scopeWhereClause(tableName, projectID, storeID string) (string, []any) {
 			return "WHERE 1=0", nil
 		}
 		return fmt.Sprintf(
-			`WHERE %s."cart_id" IN (SELECT "id" FROM "carts" WHERE "store_id" = $1)`,
-			quoteIdentifier(tableName),
+			`WHERE %s."cart_id" IN (SELECT "id" FROM "carts" WHERE "store_id" = $1)%s`,
+			quoteIdentifier(tableName), sdFilter,
 		), []any{storeID}
 
 	case scopeByStoreViaOrder:
@@ -190,8 +242,8 @@ func scopeWhereClause(tableName, projectID, storeID string) (string, []any) {
 			return "WHERE 1=0", nil
 		}
 		return fmt.Sprintf(
-			`WHERE %s."order_id" IN (SELECT "id" FROM "orders" WHERE "store_id" = $1)`,
-			quoteIdentifier(tableName),
+			`WHERE %s."order_id" IN (SELECT "id" FROM "orders" WHERE "store_id" = $1)%s`,
+			quoteIdentifier(tableName), sdFilter,
 		), []any{storeID}
 	}
 
@@ -282,11 +334,14 @@ func (c *Controller) getNeonDatabaseSchema(projectID string) (*responses.Databas
 		}
 		tableNames = append(tableNames, name)
 	}
+	if err := tableRows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating table rows: %w", err)
+	}
 
 	var tables []responses.DatabaseSchemaTable
 	for _, tableName := range tableNames {
 		colRows, err := db.Query(`
-			SELECT
+			SELECT DISTINCT ON (c.column_name)
 				c.column_name,
 				c.data_type,
 				c.is_nullable = 'YES' AS nullable,
@@ -297,7 +352,7 @@ func (c *Controller) getNeonDatabaseSchema(projectID string) (*responses.Databas
 			LEFT JOIN information_schema.table_constraints tc
 				ON kcu.constraint_name = tc.constraint_name AND tc.constraint_type = 'PRIMARY KEY'
 			WHERE c.table_schema = 'public' AND c.table_name = $1
-			ORDER BY c.ordinal_position
+			ORDER BY c.column_name, is_pk DESC, c.ordinal_position
 		`, tableName)
 		if err != nil {
 			slog.Warn("Failed to query columns for Neon table", "table", tableName, "error", err)
@@ -460,6 +515,11 @@ func (c *Controller) InsertTableRow(projectID, tableName string, data map[string
 		return nil, fmt.Errorf("no database available for this project")
 	}
 
+	info, ok := appScopedTables[tableName]
+	if ok && info.ReadOnly {
+		return nil, fmt.Errorf("table %q is read-only", tableName)
+	}
+
 	_, err := c.validateAppTable(tableName)
 	if err != nil {
 		return nil, err
@@ -470,7 +530,6 @@ func (c *Controller) InsertTableRow(projectID, tableName string, data map[string
 	}
 
 	// Auto-inject the scoping foreign key so users can't insert into another app
-	info := appScopedTables[tableName]
 	switch info.Scope {
 	case scopeByAppProjectID:
 		data["app_project_id"] = projectID
@@ -528,7 +587,18 @@ func (c *Controller) InsertTableRow(projectID, tableName string, data map[string
 	)
 
 	db := c.DB.DB.DB
-	rows, err := db.Query(sqlStr, args...)
+
+	tx, err := db.Begin()
+	if err != nil {
+		return nil, fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec("SET statement_timeout = '5s'"); err != nil {
+		slog.Warn("failed to set statement_timeout", "error", err)
+	}
+
+	rows, err := tx.Query(sqlStr, args...)
 	if err != nil {
 		return nil, fmt.Errorf("insert failed: %w", err)
 	}
@@ -541,6 +611,10 @@ func (c *Controller) InsertTableRow(projectID, tableName string, data map[string
 
 	if len(results) == 0 {
 		return nil, fmt.Errorf("insert returned no rows")
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit failed: %w", err)
 	}
 
 	return results[0], nil
@@ -557,8 +631,12 @@ func (c *Controller) DeleteTableRow(projectID, tableName string, primaryKey map[
 		return fmt.Errorf("no database available for this project")
 	}
 
-	if _, ok := appScopedTables[tableName]; !ok {
+	info, ok := appScopedTables[tableName]
+	if !ok {
 		return fmt.Errorf("access denied: table %q is not available", tableName)
+	}
+	if info.ReadOnly {
+		return fmt.Errorf("table %q is read-only", tableName)
 	}
 
 	schema, err := c.ExtractSchemaFromPlatformDB()
@@ -645,9 +723,12 @@ func (c *Controller) UpdateTableCell(projectID, tableName, column string, value 
 	storeID := c.resolveStoreID(projectID)
 	scopeWhere, scopeArgs := scopeWhereClause(tableName, projectID, storeID)
 
-	// Build: UPDATE table SET col = $N WHERE <scope> AND <pk conditions>
-	args := []any{value}
+	// Build: UPDATE table SET col = $N WHERE <scope $1> AND <pk conditions>
+	// Scope args come first so $1 in scopeWhere matches correctly.
+	var args []any
 	args = append(args, scopeArgs...)
+	setParamIdx := len(args) + 1
+	args = append(args, value)
 	paramIdx := len(args) + 1
 
 	var pkParts []string
@@ -657,12 +738,12 @@ func (c *Controller) UpdateTableCell(projectID, tableName, column string, value 
 		paramIdx++
 	}
 
-	// scopeWhere = "WHERE <cond>", replace leading WHERE with AND for combining
 	scopeCond := strings.TrimPrefix(scopeWhere, "WHERE ")
 
-	sqlStr := fmt.Sprintf("UPDATE %s SET %s = $1 WHERE %s AND %s",
+	sqlStr := fmt.Sprintf("UPDATE %s SET %s = $%d WHERE %s AND %s",
 		quoteIdentifier(tableName),
 		quoteIdentifier(column),
+		setParamIdx,
 		scopeCond,
 		strings.Join(pkParts, " AND "),
 	)
@@ -721,17 +802,36 @@ func (c *Controller) getNeonTableRows(projectID, tableName string, page, pageSiz
 	}
 	defer neonDB.Close()
 
+	ctx, cancel := context.WithTimeout(context.Background(), neonQueryTimeout)
+	defer cancel()
+
+	if err := validateNeonTable(ctx, neonDB, tableName); err != nil {
+		return nil, err
+	}
+
 	quotedTable := quoteIdentifier(tableName)
 
 	// Count total rows
 	var totalCount int
-	if err := neonDB.QueryRow(fmt.Sprintf("SELECT COUNT(*) FROM %s", quotedTable)).Scan(&totalCount); err != nil {
+	if err := neonDB.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+quotedTable).Scan(&totalCount); err != nil {
 		return nil, fmt.Errorf("count query failed: %w", err)
 	}
 
 	// Build SELECT query
-	selectSQL := fmt.Sprintf("SELECT * FROM %s", quotedTable)
+	selectSQL := "SELECT * FROM " + quotedTable
+
+	// Validate sort column exists before using it
 	if sortCol != "" {
+		var colExists bool
+		err := neonDB.QueryRowContext(ctx, `
+			SELECT EXISTS (
+				SELECT 1 FROM information_schema.columns
+				WHERE table_schema = 'public' AND table_name = $1 AND column_name = $2
+			)
+		`, tableName, sortCol).Scan(&colExists)
+		if err != nil || !colExists {
+			return nil, fmt.Errorf("sort column %q not found in table %q", sortCol, tableName)
+		}
 		dir := "ASC"
 		if strings.ToUpper(sortDir) == "DESC" {
 			dir = "DESC"
@@ -746,9 +846,9 @@ func (c *Controller) getNeonTableRows(projectID, tableName string, page, pageSiz
 		pageSize = 50
 	}
 	offset := (page - 1) * pageSize
-	selectSQL += fmt.Sprintf(" LIMIT $1 OFFSET $2")
+	selectSQL += " LIMIT $1 OFFSET $2"
 
-	rows, err := neonDB.Query(selectSQL, pageSize, offset)
+	rows, err := neonDB.QueryContext(ctx, selectSQL, pageSize, offset)
 	if err != nil {
 		return nil, fmt.Errorf("query failed: %w", err)
 	}
@@ -759,9 +859,9 @@ func (c *Controller) getNeonTableRows(projectID, tableName string, page, pageSiz
 		return nil, err
 	}
 
-	// Get column info from information_schema
-	colRows, err := neonDB.Query(`
-		SELECT
+	// Get column info from information_schema (DISTINCT ON to avoid duplicates from multi-constraint columns)
+	colRows, err := neonDB.QueryContext(ctx, `
+		SELECT DISTINCT ON (c.column_name)
 			c.column_name,
 			c.data_type,
 			c.is_nullable = 'YES' AS nullable,
@@ -772,7 +872,7 @@ func (c *Controller) getNeonTableRows(projectID, tableName string, page, pageSiz
 		LEFT JOIN information_schema.table_constraints tc
 			ON kcu.constraint_name = tc.constraint_name AND tc.constraint_type = 'PRIMARY KEY'
 		WHERE c.table_schema = 'public' AND c.table_name = $1
-		ORDER BY c.ordinal_position
+		ORDER BY c.column_name, is_pk DESC, c.ordinal_position
 	`, tableName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get column info: %w", err)
@@ -786,6 +886,9 @@ func (c *Controller) getNeonTableRows(projectID, tableName string, page, pageSiz
 			return nil, fmt.Errorf("failed to scan column info: %w", err)
 		}
 		columns = append(columns, col)
+	}
+	if err := colRows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating column rows: %w", err)
 	}
 	applyFieldHints(columns)
 
@@ -810,6 +913,13 @@ func (c *Controller) insertNeonTableRow(projectID, tableName string, data map[st
 	}
 	defer neonDB.Close()
 
+	ctx, cancel := context.WithTimeout(context.Background(), neonQueryTimeout)
+	defer cancel()
+
+	if err := validateNeonTable(ctx, neonDB, tableName); err != nil {
+		return nil, err
+	}
+
 	var cols []string
 	var placeholders []string
 	var args []any
@@ -827,7 +937,7 @@ func (c *Controller) insertNeonTableRow(projectID, tableName string, data map[st
 		strings.Join(placeholders, ", "),
 	)
 
-	rows, err := neonDB.Query(sqlStr, args...)
+	rows, err := neonDB.QueryContext(ctx, sqlStr, args...)
 	if err != nil {
 		return nil, fmt.Errorf("insert failed: %w", err)
 	}
@@ -845,11 +955,18 @@ func (c *Controller) insertNeonTableRow(projectID, tableName string, data map[st
 
 // deleteNeonTableRow deletes a row from a Neon database table.
 func (c *Controller) deleteNeonTableRow(projectID, tableName string, primaryKey map[string]any) error {
+	if err := validatePrimaryKey(primaryKey); err != nil {
+		return err
+	}
+
 	neonDB, err := c.openNeonDB(projectID)
 	if err != nil {
 		return err
 	}
 	defer neonDB.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), neonQueryTimeout)
+	defer cancel()
 
 	var pkParts []string
 	var args []any
@@ -865,7 +982,7 @@ func (c *Controller) deleteNeonTableRow(projectID, tableName string, primaryKey 
 		strings.Join(pkParts, " AND "),
 	)
 
-	result, err := neonDB.Exec(sqlStr, args...)
+	result, err := neonDB.ExecContext(ctx, sqlStr, args...)
 	if err != nil {
 		return fmt.Errorf("delete failed: %w", err)
 	}
@@ -878,11 +995,18 @@ func (c *Controller) deleteNeonTableRow(projectID, tableName string, primaryKey 
 
 // updateNeonTableCell updates a single cell in a Neon database table.
 func (c *Controller) updateNeonTableCell(projectID, tableName, column string, value any, primaryKey map[string]any) error {
+	if err := validatePrimaryKey(primaryKey); err != nil {
+		return err
+	}
+
 	neonDB, err := c.openNeonDB(projectID)
 	if err != nil {
 		return err
 	}
 	defer neonDB.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), neonQueryTimeout)
+	defer cancel()
 
 	args := []any{value}
 	paramIdx := 2
@@ -900,7 +1024,7 @@ func (c *Controller) updateNeonTableCell(projectID, tableName, column string, va
 		strings.Join(pkParts, " AND "),
 	)
 
-	result, err := neonDB.Exec(sqlStr, args...)
+	result, err := neonDB.ExecContext(ctx, sqlStr, args...)
 	if err != nil {
 		return fmt.Errorf("update failed: %w", err)
 	}
@@ -932,6 +1056,13 @@ func (c *Controller) UpdateTableRow(projectID, tableName string, data map[string
 	storeID := c.resolveStoreID(projectID)
 	scopeWhere, scopeArgs := scopeWhereClause(tableName, projectID, storeID)
 
+	// Auto-update updated_at for tables that have it
+	if appScopedTables[tableName].HasSoftDelete {
+		if _, hasUpdatedAt := data["updated_at"]; !hasUpdatedAt {
+			data["updated_at"] = "now()"
+		}
+	}
+
 	// Build SET clause
 	var setParts []string
 	var args []any
@@ -939,6 +1070,11 @@ func (c *Controller) UpdateTableRow(projectID, tableName string, data map[string
 	paramIdx := len(scopeArgs) + 1
 
 	for col, val := range data {
+		// Handle raw SQL expressions like now()
+		if s, ok := val.(string); ok && s == "now()" {
+			setParts = append(setParts, fmt.Sprintf("%s = now()", quoteIdentifier(col)))
+			continue
+		}
 		setParts = append(setParts, fmt.Sprintf("%s = $%d", quoteIdentifier(col), paramIdx))
 		args = append(args, val)
 		paramIdx++
@@ -988,11 +1124,18 @@ func (c *Controller) UpdateTableRow(projectID, tableName string, data map[string
 
 // updateNeonTableRow updates all columns in a row in a Neon database.
 func (c *Controller) updateNeonTableRow(projectID, tableName string, data map[string]any, primaryKey map[string]any) error {
+	if err := validatePrimaryKey(primaryKey); err != nil {
+		return err
+	}
+
 	neonDB, err := c.openNeonDB(projectID)
 	if err != nil {
 		return err
 	}
 	defer neonDB.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), neonQueryTimeout)
+	defer cancel()
 
 	var setParts []string
 	var args []any
@@ -1017,7 +1160,7 @@ func (c *Controller) updateNeonTableRow(projectID, tableName string, data map[st
 		strings.Join(pkParts, " AND "),
 	)
 
-	result, err := neonDB.Exec(sqlStr, args...)
+	result, err := neonDB.ExecContext(ctx, sqlStr, args...)
 	if err != nil {
 		return fmt.Errorf("update failed: %w", err)
 	}
@@ -1029,17 +1172,19 @@ func (c *Controller) updateNeonTableRow(projectID, tableName string, data map[st
 }
 
 // scanRowsToMaps converts sql.Rows into a slice of maps.
+// Always returns a non-nil slice (empty, not null) for JSON serialization.
 func scanRowsToMaps(rows interface {
 	Columns() ([]string, error)
 	Next() bool
 	Scan(dest ...any) error
+	Err() error
 }) ([]map[string]any, error) {
 	columns, err := rows.Columns()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get columns: %w", err)
 	}
 
-	var results []map[string]any
+	results := make([]map[string]any, 0)
 	for rows.Next() {
 		values := make([]any, len(columns))
 		valuePtrs := make([]any, len(columns))
@@ -1061,6 +1206,10 @@ func scanRowsToMaps(rows interface {
 			}
 		}
 		results = append(results, row)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating rows: %w", err)
 	}
 
 	return results, nil

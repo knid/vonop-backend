@@ -29,6 +29,16 @@ import (
 // ansiRegex strips ANSI escape sequences that some LLM providers emit in streamed text.
 var ansiRegex = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
 
+// Pre-compiled regexes for SQL keyword detection in executeChatExecuteSQL.
+var sqlBlockedKeywordRegexes = func() map[string]*regexp.Regexp {
+	keywords := []string{"DELETE", "DROP", "ALTER", "CREATE", "TRUNCATE", "GRANT", "REVOKE"}
+	m := make(map[string]*regexp.Regexp, len(keywords))
+	for _, kw := range keywords {
+		m[kw] = regexp.MustCompile(`\b` + kw + `\b`)
+	}
+	return m
+}()
+
 // isErrorReport detects whether a user message is a structured error report
 // (auto-sent by the frontend when a runtime/build error occurs). These messages
 // follow a Markdown pattern with ## Error Type, ## Error Message, ## Code Frame.
@@ -1735,9 +1745,8 @@ func (c *Controller) executeChatExecuteSQL(
 	}
 	// Reject destructive keywords (word-boundary match to avoid false positives
 	// like CREATED_AT matching CREATE, or DELETED matching DELETE)
-	for _, kw := range []string{"DELETE", "DROP", "ALTER", "CREATE", "TRUNCATE", "GRANT", "REVOKE"} {
-		pattern := `\b` + kw + `\b`
-		if matched, _ := regexp.MatchString(pattern, upper); matched {
+	for kw, re := range sqlBlockedKeywordRegexes {
+		if re.MatchString(upper) {
 			return fmt.Sprintf("Error: query contains disallowed keyword: %s. Use UPDATE with a status/flag column instead of DELETE.", kw), nil
 		}
 	}
@@ -1888,11 +1897,19 @@ func (c *Controller) executeChatRunMigrations(
 		return "Error: updated_models is required", nil
 	}
 
-	// Validate SQL — only allow DDL statements
-	upper := strings.ToUpper(strings.TrimSpace(args.SQL))
-	for _, kw := range []string{"INSERT", "UPDATE", "DELETE", "SELECT", "TRUNCATE", "GRANT", "REVOKE"} {
-		if strings.HasPrefix(upper, kw) {
-			return fmt.Sprintf("Error: only DDL statements (ALTER TABLE, CREATE TABLE) are allowed, not %s", kw), nil
+	// Validate SQL — only allow DDL statements (ALTER, CREATE) per statement
+	for _, stmt := range strings.Split(args.SQL, ";") {
+		trimmed := strings.TrimSpace(stmt)
+		if trimmed == "" {
+			continue
+		}
+		stripped := stripLeadingSQLComments(trimmed)
+		if stripped == "" {
+			continue
+		}
+		upperStmt := strings.ToUpper(stripped)
+		if !strings.HasPrefix(upperStmt, "ALTER") && !strings.HasPrefix(upperStmt, "CREATE") && !strings.HasPrefix(upperStmt, "DO") {
+			return fmt.Sprintf("Error: only DDL statements (ALTER TABLE, CREATE TABLE) are allowed, found: %.60s", trimmed), nil
 		}
 	}
 

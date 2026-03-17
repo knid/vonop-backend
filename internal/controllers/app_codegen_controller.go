@@ -13,6 +13,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/responses"
@@ -980,6 +981,11 @@ var sqlTypeMap = map[string]string{
 	"uuid":      "UUID",
 	"jsonb":     "JSONB",
 	"serial":    "SERIAL",
+	"float":     "DOUBLE PRECISION",
+	"decimal":   "NUMERIC",
+	"numeric":   "NUMERIC",
+	"real":      "REAL",
+	"bigint":    "BIGINT",
 }
 
 // buildCreateTableSQL generates CREATE TABLE statements from DataModels.
@@ -991,13 +997,13 @@ func buildCreateTableSQL(models []DataModel) string {
 
 	// First pass: create all tables
 	for _, m := range models {
-		sb.WriteString(fmt.Sprintf("CREATE TABLE IF NOT EXISTS %q (\n", m.Name))
+		sb.WriteString(fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s (\n", quoteIdentifier(m.Name)))
 		for i, col := range m.Columns {
 			pgType := sqlTypeMap[col.Type]
 			if pgType == "" {
 				pgType = "TEXT"
 			}
-			sb.WriteString(fmt.Sprintf("  %q %s", col.Name, pgType))
+			sb.WriteString(fmt.Sprintf("  %s %s", quoteIdentifier(col.Name), pgType))
 			if col.PrimaryKey {
 				sb.WriteString(" PRIMARY KEY")
 				if col.Type == "uuid" {
@@ -1024,8 +1030,8 @@ func buildCreateTableSQL(models []DataModel) string {
 			if col.References != "" {
 				parts := strings.SplitN(col.References, ".", 2)
 				if len(parts) == 2 {
-					fks.WriteString(fmt.Sprintf("DO $$ BEGIN ALTER TABLE %q ADD CONSTRAINT fk_%s_%s FOREIGN KEY (%q) REFERENCES %q(%q) ON DELETE CASCADE; EXCEPTION WHEN duplicate_object THEN NULL; END $$;\n",
-						m.Name, m.Name, col.Name, col.Name, parts[0], parts[1]))
+					fks.WriteString(fmt.Sprintf("DO $$ BEGIN ALTER TABLE %s ADD CONSTRAINT fk_%s_%s FOREIGN KEY (%s) REFERENCES %s(%s) ON DELETE CASCADE; EXCEPTION WHEN duplicate_object THEN NULL; END $$;\n",
+						quoteIdentifier(m.Name), m.Name, col.Name, quoteIdentifier(col.Name), quoteIdentifier(parts[0]), quoteIdentifier(parts[1])))
 				}
 			}
 		}
@@ -1156,23 +1162,46 @@ func neonConnStrWithEndpoint(connStr string) string {
 // validateSeedSQL ensures LLM-generated seed SQL only contains INSERT statements.
 // Blocks DROP, DELETE, UPDATE, ALTER, CREATE, TRUNCATE, and other dangerous statements.
 func validateSeedSQL(sqlStr string) error {
-	// Split by semicolons to get individual statements
 	statements := strings.Split(sqlStr, ";")
 	for _, stmt := range statements {
 		trimmed := strings.TrimSpace(stmt)
 		if trimmed == "" {
 			continue
 		}
-		upper := strings.ToUpper(trimmed)
-		// Each statement must start with INSERT (or a comment)
-		if strings.HasPrefix(upper, "--") || strings.HasPrefix(upper, "/*") {
-			continue
+		// Strip leading comments before checking the statement type,
+		// preventing bypass via "/* */ DROP TABLE ..."
+		stripped := stripLeadingSQLComments(trimmed)
+		if stripped == "" {
+			continue // pure comment
 		}
+		upper := strings.ToUpper(stripped)
 		if !strings.HasPrefix(upper, "INSERT") {
-			return fmt.Errorf("only INSERT statements are allowed in seed SQL, found: %.40s", trimmed)
+			return fmt.Errorf("only INSERT statements are allowed in seed SQL, found: %.40s", stripped)
 		}
 	}
 	return nil
+}
+
+// stripLeadingSQLComments removes leading SQL comments (-- and /* */) from a statement.
+func stripLeadingSQLComments(s string) string {
+	for {
+		s = strings.TrimSpace(s)
+		if strings.HasPrefix(s, "--") {
+			if idx := strings.Index(s, "\n"); idx != -1 {
+				s = s[idx+1:]
+			} else {
+				return ""
+			}
+		} else if strings.HasPrefix(s, "/*") {
+			if idx := strings.Index(s, "*/"); idx != -1 {
+				s = s[idx+2:]
+			} else {
+				return ""
+			}
+		} else {
+			return s
+		}
+	}
 }
 
 // fixUnescapedSQLQuotes walks through SQL string literals and doubles any
@@ -1209,8 +1238,10 @@ func fixUnescapedSQLQuotes(sql string) string {
 				continue
 			}
 			// Check if this quote is a mid-word apostrophe (letter'letter)
-			// e.g., Türkiye'nin — the quote between two letters is unescaped
-			if i > 0 && i+1 < len(runes) && unicode.IsLetter(runes[i-1]) && unicode.IsLetter(runes[i+1]) {
+			// e.g., Türkiye'nin — the quote between two letters is unescaped.
+			// But only if the previous char is not itself a quote (avoids corrupting
+			// adjacent string boundaries like 'test','data').
+			if i > 0 && i+1 < len(runes) && unicode.IsLetter(runes[i-1]) && unicode.IsLetter(runes[i+1]) && (i < 2 || runes[i-2] != '\'') {
 				// This is an unescaped apostrophe inside a word — double it
 				buf.WriteRune('\'')
 				buf.WriteRune('\'')
@@ -1314,7 +1345,7 @@ func (c *Controller) provisionNeonDatabase(ctx context.Context, project *models.
 func (c *Controller) storeNeonIntegration(project *models.AppProject, connStr, neonProjectID string) error {
 	// Check if a Neon integration already exists — update it instead of creating a duplicate
 	existing, err := c.DB.GetAppIntegrationByProvider(project.ID.String(), "neon")
-	if err == nil && existing.ID.String() != "00000000-0000-0000-0000-000000000000" {
+	if err == nil && existing.ID != uuid.Nil {
 		existing.Config = map[string]any{
 			"project_id": neonProjectID,
 		}
@@ -1322,6 +1353,7 @@ func (c *Controller) storeNeonIntegration(project *models.AppProject, connStr, n
 		existing.EnvVars = map[string]string{
 			"DATABASE_URL": connStr,
 		}
+		existing.UpdatedAt = time.Now()
 		_, err := c.DB.UpdateAppIntegration(existing)
 		return err
 	}
@@ -1537,14 +1569,15 @@ func (c *Controller) generateAndStoreSeedImages(
 
 		// Query for rows with NULL image column, up to maxImages
 		query := fmt.Sprintf(
-			"SELECT id%s FROM %s WHERE %s IS NULL LIMIT %d",
+			"SELECT %s%s FROM %s WHERE %s IS NULL LIMIT %d",
+			quoteIdentifier("id"),
 			func() string {
 				if titleCol != "" {
-					return ", " + titleCol
+					return ", " + quoteIdentifier(titleCol)
 				}
 				return ""
 			}(),
-			ic.table, ic.column, maxImages-len(tasks),
+			quoteIdentifier(ic.table), quoteIdentifier(ic.column), maxImages-len(tasks),
 		)
 
 		rows, err := neonDB.QueryContext(ctx, query)
@@ -1644,8 +1677,8 @@ func (c *Controller) generateAndStoreSeedImages(
 
 		// Update the database row immediately
 		updateQuery := fmt.Sprintf(
-			"UPDATE %s SET %s = $1 WHERE id = $2",
-			task.table, task.column,
+			"UPDATE %s SET %s = $1 WHERE %s = $2",
+			quoteIdentifier(task.table), quoteIdentifier(task.column), quoteIdentifier("id"),
 		)
 		if _, err := neonDB.ExecContext(ctx, updateQuery, publicURL, task.rowID); err != nil {
 			slog.Warn("generateAndStoreSeedImages: update failed",
@@ -1662,16 +1695,15 @@ func (c *Controller) generateAndStoreSeedImages(
 }
 
 // getNeonIntegration returns the Neon integration for a project, if any.
+// Only returns integrations with status "connected".
 func (c *Controller) getNeonIntegration(projectID string) *models.AppIntegration {
 	integrations, err := c.DB.GetAppIntegrationsByProjectID(projectID)
 	if err != nil {
 		slog.Error("getNeonIntegration: failed to query integrations", "project_id", projectID, "error", err)
 		return nil
 	}
-	slog.Info("getNeonIntegration: queried integrations", "project_id", projectID, "count", len(integrations))
 	for i, integ := range integrations {
-		slog.Info("getNeonIntegration: checking integration", "provider", integ.Provider, "id", integ.ID, "status", integ.Status)
-		if integ.Provider == "neon" {
+		if integ.Provider == "neon" && integ.Status == "connected" {
 			return &integrations[i]
 		}
 	}

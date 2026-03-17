@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -15,6 +16,15 @@ import (
 	"github.com/knid/wemob/internal/utils"
 	"github.com/posthog/posthog-go"
 )
+
+// platformSchemaCache caches the result of ExtractSchemaFromPlatformDB with a short TTL.
+var platformSchemaCache struct {
+	sync.Mutex
+	data      json.RawMessage
+	expiresAt time.Time
+}
+
+const platformSchemaCacheTTL = 60 * time.Second
 
 // schemaRelevantPatterns are file path patterns that likely contain database schema info.
 var schemaRelevantPatterns = []string{
@@ -82,7 +92,16 @@ func (c *Controller) ExtractSchemaFromGeneratedFiles(ctx context.Context, projec
 
 // ExtractSchemaFromPlatformDB introspects the platform's own PostgreSQL database
 // and returns table/column definitions from information_schema.
+// Results are cached for 60 seconds to avoid repeated heavy information_schema queries.
 func (c *Controller) ExtractSchemaFromPlatformDB() (json.RawMessage, error) {
+	platformSchemaCache.Lock()
+	if platformSchemaCache.data != nil && time.Now().Before(platformSchemaCache.expiresAt) {
+		cached := platformSchemaCache.data
+		platformSchemaCache.Unlock()
+		return cached, nil
+	}
+	platformSchemaCache.Unlock()
+
 	db := c.DB.DB.DB
 
 	rows, err := db.Query(`
@@ -144,6 +163,11 @@ func (c *Controller) ExtractSchemaFromPlatformDB() (json.RawMessage, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal schema: %w", err)
 	}
+
+	platformSchemaCache.Lock()
+	platformSchemaCache.data = schema
+	platformSchemaCache.expiresAt = time.Now().Add(platformSchemaCacheTTL)
+	platformSchemaCache.Unlock()
 
 	return schema, nil
 }
