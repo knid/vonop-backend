@@ -319,7 +319,8 @@ func (v *HttpViews) GetDatabaseUploadURL(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Build the public URL (same bucket, GET request)
+	// Build the public URL (same bucket, GET request).
+	// NOTE: This assumes the S3 bucket has public-read ACLs. Without them the URL returns 403.
 	publicURL := presignedRequest.URL
 	// Strip query params to get the base S3 URL for the object
 	if idx := strings.Index(publicURL, "?"); idx != -1 {
