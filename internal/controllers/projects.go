@@ -3,6 +3,7 @@ package controllers
 import (
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"reflect"
 	"time"
@@ -19,8 +20,6 @@ import (
 )
 
 func (c *Controller) GetProjects(user *models.User) ([]responses.ProjectInformationResponse, error) {
-	// for loop for each project id
-
 	projects, err := c.DB.GetProjects(user)
 	if err != nil {
 		return nil, err
@@ -30,7 +29,9 @@ func (c *Controller) GetProjects(user *models.User) ([]responses.ProjectInformat
 	for _, v := range projects {
 		project, err := c.GetProject(user, v.ID.String())
 		if err != nil {
-			return nil, err
+			// Skip projects without builds (e.g. created via QuickCreateMobileProject)
+			slog.Warn("skipping project in list", "project_id", v.ID, "error", err)
+			continue
 		}
 		projectList = append(projectList, *project)
 	}
@@ -52,20 +53,21 @@ func (c *Controller) GetProject(user *models.User, project_id string) (*response
 		return nil, errors.New("you do not have access to this resource")
 	}
 
-	lastBuild, err := c.DB.GetLastProjectBuild(project)
-	if err != nil {
-		return nil, err
-	}
-
-	return &responses.ProjectInformationResponse{
+	resp := &responses.ProjectInformationResponse{
 		ID:          project.ID,
-		Title:       lastBuild.Title,
-		Description: lastBuild.Description,
 		URL:         project.URL,
 		PackageName: project.PackageName,
 		Icon:        project.IconPath,
 		CreatedAt:   project.CreatedAt,
-	}, nil
+	}
+
+	lastBuild, err := c.DB.GetLastProjectBuild(project)
+	if err == nil {
+		resp.Title = lastBuild.Title
+		resp.Description = lastBuild.Description
+	}
+
+	return resp, nil
 }
 
 func (c *Controller) CreateProject(user *models.User, projectCreateReq requests.ProjectCreateRequest) (*responses.ProjectCreateResponse, error) {
