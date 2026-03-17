@@ -50,6 +50,11 @@ func (v *HttpViews) GetDeployment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if deployment.UserID.String() != user.ID.String() {
+		utils.JSONErrorResponse(w, "you do not have access to this resource", http.StatusForbidden)
+		return
+	}
+
 	utils.JSONResponse(w, deployment, http.StatusOK)
 }
 
@@ -157,6 +162,16 @@ func (v *HttpViews) CheckSignIPATaskStatus(w http.ResponseWriter, r *http.Reques
 	signTask, err := v.Controller.DB.GetIOSSignTaskById(signTaskID)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	project, err := v.Controller.DB.GetProjectById(signTask.ProjectID.String())
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if project.UserID.String() != user.ID.String() {
+		utils.JSONErrorResponse(w, "you do not have access to this resource", http.StatusForbidden)
 		return
 	}
 

@@ -15,8 +15,10 @@ func (c *Controller) UpdateBuildTaskStatus(reportBuildReq requests.ReportBuildRe
 	slog.Info("updating build task status", "task_id", buildTask.ID.String(), "status", reportBuildReq.Status)
 
 	buildTask.StatusText = reportBuildReq.Status
-	if reportBuildReq.Status == "success" || reportBuildReq.Status == "completed" ||
-		reportBuildReq.Status == "done" || reportBuildReq.Status == "built" || reportBuildReq.Status == "Built" {
+	switch reportBuildReq.Status {
+	case "success", "completed", "done", "built", "Built", "Builded":
+		buildTask.Finished = true
+	case "error", "failed", "cancelled":
 		buildTask.Finished = true
 	}
 
@@ -30,6 +32,9 @@ func (c *Controller) UpdateDeploymentStatus(reportDeplomentReq requests.ReportDe
 	}
 
 	deployment.Status = reportDeplomentReq.Status
+	if reportDeplomentReq.Message != "" {
+		deployment.StatusMessage = reportDeplomentReq.Message
+	}
 
 	_, err = c.DB.UpdateDeployment(deployment)
 	return err

@@ -17,13 +17,12 @@ import (
 )
 
 func (c *Controller) GetBuilds(project *models.Project) ([]responses.BuildInformationResponse, error) {
-	var projectInformationResponses []responses.BuildInformationResponse
-
 	builds, err := c.DB.GetProjectBuilds(project)
 	if err != nil {
 		return nil, err
 	}
 
+	projectInformationResponses := make([]responses.BuildInformationResponse, 0, len(builds))
 	for _, build := range builds {
 		buildInformationResponse := responses.BuildInformationResponse{
 			ID:                  build.ID,
@@ -101,7 +100,10 @@ func (c *Controller) CreateBuild(user *models.User, buildCreateReq requests.Buil
 
 	var lastBuildNumber int
 	lastBuild, err := c.DB.GetLastProjectBuild(project)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+	if err != nil {
+		if !errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("failed to get last build: %w", err)
+		}
 		lastBuildNumber = 0
 	} else {
 		lastBuildNumber = lastBuild.BuildNumber
@@ -177,7 +179,7 @@ func (c *Controller) CreateBuild(user *models.User, buildCreateReq requests.Buil
 			return nil, err
 		}
 		task := asynq.NewTask(tasks.TypeBuildAndroid, taskPayload)
-		if _, err := c.TaskService.Enqueue(task, asynq.MaxRetry(2), asynq.Timeout(time.Minute*10)); err != nil {
+		if _, err := c.TaskService.Enqueue(task, asynq.MaxRetry(2), asynq.Timeout(time.Minute*30)); err != nil {
 			c.cancelCreatedTasks(createdTaskIDs)
 			return nil, fmt.Errorf("failed to enqueue Android build task: %w", err)
 		}
@@ -229,7 +231,7 @@ func (c *Controller) CreateBuild(user *models.User, buildCreateReq requests.Buil
 			return nil, err
 		}
 		task := asynq.NewTask(tasks.TypeBuildUnsignedIpa, taskPayload)
-		if _, err := c.TaskService.Enqueue(task, asynq.MaxRetry(2), asynq.Timeout(time.Minute*10)); err != nil {
+		if _, err := c.TaskService.Enqueue(task, asynq.MaxRetry(2), asynq.Timeout(time.Minute*30)); err != nil {
 			c.cancelCreatedTasks(createdTaskIDs)
 			return nil, fmt.Errorf("failed to enqueue iOS build task: %w", err)
 		}

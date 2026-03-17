@@ -22,7 +22,7 @@ import (
 	"github.com/slack-go/slack"
 )
 
-var localeRegexp = regexp.MustCompile(`^[a-z]{2}([_-][A-Za-z]{2,4})?$`)
+var localeRegexp = regexp.MustCompile(`^[a-zA-Z]{2}(-[a-zA-Z]{2,4})?$`)
 
 // isValidLocale checks that a locale string matches common BCP 47 / POSIX formats (e.g. en-US, tr_TR, pt).
 func isValidLocale(locale string) bool {
@@ -96,14 +96,12 @@ func (c *Controller) CreateDeploymentTask(user *models.User, deploymentReq reque
 	}
 
 	for _, d := range deployments {
-		if d.ProjectID.String() == deploymentReq.ProjectID && d.Method == "wemob" {
-			return nil, errors.New("deployment for this project and platform already exists")
+		if d.ProjectID.String() != deploymentReq.ProjectID {
+			continue
 		}
-		if d.ProjectID.String() == deploymentReq.ProjectID && d.Method == "user" {
-			for _, p := range d.Platforms {
-				if slices.Contains(deploymentReq.Platforms, p) {
-					return nil, errors.New("deployment for this project and platform already exists")
-				}
+		for _, p := range d.Platforms {
+			if slices.Contains(deploymentReq.Platforms, p) {
+				return nil, fmt.Errorf("deployment for this project on %s already exists", p)
 			}
 		}
 	}
@@ -166,18 +164,20 @@ func (c *Controller) CreateDeploymentTask(user *models.User, deploymentReq reque
 		return nil, err
 	}
 
-	var taskPayload []byte
-	var task *asynq.Task
-	var taskType string
-
 	if deploymentReq.Method == "user" {
-		if slices.Contains(deploymentReq.Platforms, "ios") {
+		hasIOS := slices.Contains(deploymentReq.Platforms, "ios")
+		hasAndroid := slices.Contains(deploymentReq.Platforms, "android")
+
+		if !hasIOS && !hasAndroid {
+			return nil, errors.New("unsupported platform")
+		}
+
+		if hasIOS {
 			cred, err := c.DB.GetAppStoreCredentialById(appStoreCredId.String())
 			if err != nil {
 				return nil, err
 			}
 
-			// Create and enqueue task to deploy iOS build
 			iosDeployPayload := tasks.IOSDeployPayload{
 				BuildID:            deploymentReq.BuildID,
 				PackageName:        project.PackageName,
@@ -199,25 +199,14 @@ func (c *Controller) CreateDeploymentTask(user *models.User, deploymentReq reque
 				DeploymentID:       deployment.ID.String(),
 			}
 
-			taskType = tasks.TypeDeployIOS
-			taskPayload, err = json.Marshal(iosDeployPayload)
+			taskPayload, err := json.Marshal(iosDeployPayload)
 			if err != nil {
 				return nil, err
 			}
-
-			/*
-				// Get APNS P8 Key content from s3
-				apnsP8KeyBytes, err := c.UserApiKeysStorage.ReadObjectBytes(context.TODO(), cred.APNSP8KeyPath)
-				if err != nil {
-					return nil, err
-				}
-				apnsP8Key := base64.StdEncoding.EncodeToString(apnsP8KeyBytes)
-
-				 // Upload APNS P8 Key to OneSignal
-				err = external.UploadAPNSP8KeyToOneSignal(*project, apnsP8Key, cred.APNSP8KeyID, cred.TeamID, project.PackageName, c.SecretManager.GetSecret("ONESIGNAL_ORG_ID"), c.SecretManager.GetSecret("ONESIGNAL_ORG_API_KEY"))
-				if err != nil {
-					return nil, err
-				} */
+			task := asynq.NewTask(tasks.TypeDeployIOS, taskPayload)
+			if _, err := c.TaskService.Enqueue(task, asynq.MaxRetry(0), asynq.Timeout(time.Minute*10)); err != nil {
+				return nil, fmt.Errorf("failed to enqueue iOS deploy task: %w", err)
+			}
 
 			go c.CRMService.SendEvent(user, constants.BREVO_EVENT_USER_APPLE_DEPLOYMENT_STARTED, map[string]interface{}{
 				"project_id":       project.ID.String(),
@@ -226,7 +215,8 @@ func (c *Controller) CreateDeploymentTask(user *models.User, deploymentReq reque
 				"deployment_title": deploymentReq.Title,
 			})
 		}
-		if slices.Contains(deploymentReq.Platforms, "android") {
+
+		if hasAndroid {
 			cred, err := c.DB.GetGooglePlayCredentialById(googlePlayCredId.String())
 			if err != nil {
 				return nil, err
@@ -250,11 +240,15 @@ func (c *Controller) CreateDeploymentTask(user *models.User, deploymentReq reque
 				DeploymentID:       deployment.ID.String(),
 			}
 
-			taskType = tasks.TypeDeployAndroid //
-			taskPayload, err = json.Marshal(androidDeployPayload)
+			taskPayload, err := json.Marshal(androidDeployPayload)
 			if err != nil {
 				return nil, err
 			}
+			task := asynq.NewTask(tasks.TypeDeployAndroid, taskPayload)
+			if _, err := c.TaskService.Enqueue(task, asynq.MaxRetry(0), asynq.Timeout(time.Minute*10)); err != nil {
+				return nil, fmt.Errorf("failed to enqueue Android deploy task: %w", err)
+			}
+
 			go c.CRMService.SendEvent(user, constants.BREVO_EVENT_USER_ANDROID_DEPLOYMENT_STARTED, map[string]interface{}{
 				"project_id":       project.ID.String(),
 				"deployment_id":    deployment.ID.String(),
@@ -262,20 +256,11 @@ func (c *Controller) CreateDeploymentTask(user *models.User, deploymentReq reque
 				"deployment_title": deploymentReq.Title,
 			})
 		}
-		if !slices.Contains(deploymentReq.Platforms, "ios") && !slices.Contains(deploymentReq.Platforms, "android") {
-			return nil, errors.New("unsupported platform")
-		}
-
-		task = asynq.NewTask(taskType, taskPayload)
-		_, err = c.TaskService.Enqueue(task, asynq.MaxRetry(2), asynq.Timeout(time.Minute*3))
-		if err != nil {
-			return nil, err
-		}
 
 	} else if deploymentReq.Method == "wemob" {
 		go c.SlackService.Client.PostMessage(
 			constants.SLACK_CHANNEL_ID_NEW_ANDROID_DEPLOY_REQUEST,
-			slack.MsgOptionText("New android deploy request: ("+project.URL+") "+deployment.ID.String(), false),
+			slack.MsgOptionText("New deploy request: ("+project.URL+") "+deployment.ID.String()+" platforms: "+fmt.Sprintf("%v", deploymentReq.Platforms), false),
 		)
 	}
 
@@ -361,6 +346,12 @@ func (c *Controller) UpdateDeploymentTask(user *models.User, deploymentID string
 	deployment.Description = deploymentReq.Description
 	deployment.IconPath = deploymentReq.IconID
 	deployment.ScreenshotPaths = deploymentReq.ScreenshotPaths
+	if deploymentReq.BuildID != "" {
+		deployment.BuildID = uuid.MustParse(deploymentReq.BuildID)
+	}
+	if deploymentReq.Locale != "" {
+		deployment.Locale = deploymentReq.Locale
+	}
 
 	deployment.Status = "Queued"
 
@@ -402,6 +393,7 @@ func (c *Controller) UpdateDeploymentTask(user *models.User, deploymentID string
 		iosDeployPayload := tasks.IOSDeployPayload{
 			BuildID:            deploymentReq.BuildID,
 			PackageName:        project.PackageName,
+			TeamID:             cred.TeamID,
 			KeyID:              cred.KeyID,
 			IssuerID:           cred.IssuerID,
 			P8KeyPath:          cred.P8KeyPath,
@@ -409,6 +401,7 @@ func (c *Controller) UpdateDeploymentTask(user *models.User, deploymentID string
 			Description:        deploymentReq.Description,
 			Screenshots:        deploymentReq.ScreenshotPaths,
 			Icon:               build.Icon,
+			Locale:             deployment.Locale,
 			NewApp:             false,
 			ChangedStoreInfo:   changedStoreInfo,
 			ChangedBuild:       buildChanged,
@@ -423,7 +416,7 @@ func (c *Controller) UpdateDeploymentTask(user *models.User, deploymentID string
 			return nil, err
 		}
 		task := asynq.NewTask(tasks.TypeDeployIOS, taskPayload)
-		if _, err := c.TaskService.Enqueue(task, asynq.MaxRetry(2), asynq.Timeout(time.Minute*3)); err != nil {
+		if _, err := c.TaskService.Enqueue(task, asynq.MaxRetry(0), asynq.Timeout(time.Minute*10)); err != nil {
 			return nil, fmt.Errorf("failed to enqueue iOS deploy task: %w", err)
 		}
 	}
@@ -442,6 +435,7 @@ func (c *Controller) UpdateDeploymentTask(user *models.User, deploymentID string
 			IconPath:           deploymentReq.IconID,
 			Screenshots:        deploymentReq.ScreenshotPaths,
 			Version:            build.BuildNumber,
+			Locale:             deployment.Locale,
 			ChangedStoreInfo:   changedStoreInfo,
 			ChangedBuild:       buildChanged,
 			TitleChanged:       titleChanged,
@@ -456,7 +450,7 @@ func (c *Controller) UpdateDeploymentTask(user *models.User, deploymentID string
 			return nil, err
 		}
 		task := asynq.NewTask(tasks.TypeDeployAndroid, taskPayload)
-		if _, err := c.TaskService.Enqueue(task, asynq.MaxRetry(2), asynq.Timeout(time.Minute*3)); err != nil {
+		if _, err := c.TaskService.Enqueue(task, asynq.MaxRetry(0), asynq.Timeout(time.Minute*10)); err != nil {
 			return nil, fmt.Errorf("failed to enqueue Android deploy task: %w", err)
 		}
 	}
