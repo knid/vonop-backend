@@ -3,9 +3,7 @@ package views
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"net/http"
-	"net/url"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -270,65 +268,17 @@ func (v *HttpViews) ClassifyMobileIntent(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	var intent string
-	var extractedURL string
-
+	// URL-wrapper (iframe) flow is disabled — always treat as from_scratch.
+	// When a URL is provided, include it in the prompt so the normal generation
+	// flow picks it up via web search + screenshot instead of loading an iframe.
+	prompt := body.Prompt
 	if body.URL != "" {
-		// Direct URL conversion (e.g. "Convert to Mobile App" button) — skip LLM classification
-		intent = "url_wrapper"
-		extractedURL = body.URL
-	} else {
-		intent, extractedURL = v.Controller.ClassifyMobileIntent(r.Context(), body.Prompt)
-	}
-
-	if intent == "url_wrapper" && extractedURL != "" {
-		// Auto-create the project so the frontend can go straight to preview
-		project, err := v.Controller.QuickCreateMobileProject(user, extractedURL)
-		if err != nil {
-			status := http.StatusInternalServerError
-			if err.Error() == "you have reached your project limit" {
-				status = http.StatusBadRequest
-			}
-			utils.JSONErrorResponse(w, err.Error(), status)
-			return
-		}
-
-		proxyURL := fmt.Sprintf("https://proxy.wemob.io/?url=%s&project_id=%s",
-			url.QueryEscape(extractedURL), project.ID.String())
-
-		// Fetch site metadata (title, description, favicon) — best effort
-		var siteMeta *utils.SiteMetadata
-		htmlContent, fetchErr := utils.FetchHTML(
-			extractedURL,
-			v.Controller.SecretManager.GetSecret("PROXY_HOST"),
-			v.Controller.SecretManager.GetSecret("PROXY_AUTH"),
-		)
-		if fetchErr == nil && htmlContent != "" {
-			meta := utils.ExtractSiteMetadata(htmlContent, extractedURL)
-			siteMeta = &meta
-		} else if fetchErr != nil {
-			slog.Warn("Failed to fetch site metadata", "url", extractedURL, "error", fetchErr)
-		}
-
-		// Generate a conversational welcome message using the fast model
-		// The LLM matches the user's language automatically
-		welcomeMsg := ""
-		if siteMeta != nil {
-			welcomeMsg = v.Controller.GenerateURLWrapperWelcome(r.Context(), extractedURL, *siteMeta, body.Prompt)
-		}
-
-		utils.JSONResponse(w, map[string]any{
-			"intent":          "url_wrapper",
-			"url":             extractedURL,
-			"project_id":      project.ID.String(),
-			"proxy_url":       proxyURL,
-			"welcome_message": welcomeMsg,
-		}, http.StatusOK)
-		return
+		prompt = fmt.Sprintf("Create a mobile app inspired by this website: %s", body.URL)
 	}
 
 	utils.JSONResponse(w, map[string]any{
-		"intent": intent,
+		"intent": "from_scratch",
+		"prompt": prompt,
 		"url":    "",
 	}, http.StatusOK)
 }
