@@ -895,6 +895,11 @@ func (c *Controller) StreamBuildApp(
 		missingVars = c.computeMissingEnvVars(project, storedRequired, codeKeys)
 	}
 
+	// --- Auto-detect mobile bridge usage after chat edits ---
+	if filesChanged > 0 {
+		c.autoDetectMobileBridgeConfig(project, fileMap, sendEvent)
+	}
+
 	// --- Save assistant message to conversation ---
 	assistantContent := strings.TrimSpace(responseText)
 
@@ -1209,6 +1214,10 @@ func (c *Controller) runChatToolPhase(
 	if hasDB {
 		tools = append(tools, chatSeedDatabaseTool, chatExecuteSQLTool, chatRunMigrationsTool)
 	}
+	// Add mobile config tool if this is a mobile app project
+	if project.ProjectType == "mobile_app" {
+		tools = append(tools, chatConfigureMobileAppTool)
+	}
 	if ws := provider.WebSearchTool(); ws != nil {
 		tools = append(tools, *ws)
 	}
@@ -1267,6 +1276,10 @@ CRITICAL LANGUAGE RULE: ALL content you generate (product names, descriptions, c
   - Use bulk_create_products for multiple products at once (pass "products" array in data).
   - Use list_products or list_categories to see current store data.`
 	}
+	if project.ProjectType == "mobile_app" {
+		systemPrompt += `
+- If the user explicitly asks to enable or change mobile features (camera, contacts, haptic feedback, sharing, etc.), call configure_mobile_app with the needed bridge_methods and permissions.`
+	}
 	systemPrompt += `
 - If the user's message is a normal chat request (code changes, questions, fixes) that doesn't need any of the above tools, respond with just: NO_TOOLS_NEEDED
 - You can call multiple tools if needed (e.g. generate_image + install_package).
@@ -1308,6 +1321,8 @@ CRITICAL LANGUAGE RULE: ALL content you generate (product names, descriptions, c
 			return c.executeChatTakeScreenshot(arguments, &collectedContext, &screenshots)
 		case "search_components":
 			return c.executeChatSearchComponents(arguments, project, repo, fileMap, sendEvent, &collectedContext)
+		case "configure_mobile_app":
+			return c.executeChatConfigureMobileApp(arguments, project, sendEvent, &collectedContext)
 		default:
 			return fmt.Sprintf("Unknown tool: %s", name), nil
 		}
@@ -2267,6 +2282,90 @@ func (c *Controller) executeChatTakeScreenshot(
 	return "Screenshot captured successfully. The image will be provided to the code generation model.", nil
 }
 
+// executeChatConfigureMobileApp handles the configure_mobile_app tool during
+// the chat Phase 1 (fast model tool phase). Validates bridge methods, derives
+// permissions, and persists the config to the database.
+func (c *Controller) executeChatConfigureMobileApp(
+	arguments string,
+	project *models.AppProject,
+	sendEvent func(string, any) bool,
+	collectedContext *strings.Builder,
+) (string, error) {
+	var args struct {
+		BridgeMethods []string `json:"bridge_methods"`
+		Permissions   []string `json:"permissions"`
+	}
+	if err := json.Unmarshal([]byte(arguments), &args); err != nil {
+		return fmt.Sprintf("Error: invalid arguments: %s", err.Error()), nil
+	}
+
+	sendEvent("tool_call", responses.ToolCallEvent{Tool: "configure_mobile_app", Arguments: arguments})
+
+	validMethods := map[string]bool{
+		"getDeviceInfo": true, "share": true, "haptic": true,
+		"openExternal": true, "getConnectionStatus": true,
+		"storage.get": true, "storage.set": true, "storage.remove": true,
+		"camera.takePhoto": true, "camera.pickImage": true, "camera.pickVideo": true,
+		"contacts.getAll": true, "contacts.pick": true,
+		"calendar.addEvent": true, "files.pick": true,
+	}
+	var filteredMethods []string
+	for _, m := range args.BridgeMethods {
+		if validMethods[m] {
+			filteredMethods = append(filteredMethods, m)
+		}
+	}
+
+	methodToPermission := map[string]string{
+		"camera.takePhoto": "camera", "camera.pickImage": "camera", "camera.pickVideo": "camera",
+		"contacts.getAll": "contacts", "contacts.pick": "contacts",
+		"calendar.addEvent": "calendar",
+		"files.pick":        "storage",
+	}
+	permSet := map[string]bool{"notifications": true}
+	for _, p := range args.Permissions {
+		permSet[p] = true
+	}
+	for _, m := range filteredMethods {
+		if p, ok := methodToPermission[m]; ok {
+			permSet[p] = true
+		}
+	}
+	var permissions []string
+	for p := range permSet {
+		permissions = append(permissions, p)
+	}
+
+	mobileConfig, configErr := c.DB.GetMobileAppConfig(project.ID.String())
+	if configErr != nil {
+		mobileConfig = &models.MobileAppConfig{
+			ProjectID:            project.ID,
+			PushEnabled:          true,
+			BridgeEnabled:        true,
+			AnalyticsEnabled:     true,
+			PullToRefreshEnabled: true,
+			ExternalBrowserLinks: true,
+		}
+	}
+	mobileConfig.BridgeEnabled = true
+	mobileConfig.PushEnabled = true
+	mobileConfig.BridgeMethods = filteredMethods
+	mobileConfig.Permissions = permissions
+
+	if _, upsertErr := c.DB.UpsertMobileAppConfig(mobileConfig); upsertErr != nil {
+		return fmt.Sprintf("Error: failed to save config: %s", upsertErr.Error()), nil
+	}
+
+	sendEvent("mobile_config_updated", map[string]any{
+		"bridge_methods": filteredMethods,
+		"permissions":    permissions,
+	})
+
+	result := fmt.Sprintf("Mobile app configured. Bridge methods: %v. Permissions: %v.", filteredMethods, permissions)
+	collectedContext.WriteString("\n[Mobile config updated: bridge_methods=" + strings.Join(filteredMethods, ",") + " permissions=" + strings.Join(permissions, ",") + "]\n")
+	return result, nil
+}
+
 // executeChatSearchComponents finds and injects pre-built UI components.
 func (c *Controller) executeChatSearchComponents(
 	arguments string,
@@ -2473,6 +2572,9 @@ func buildSystemPrompt(project *models.AppProject, mobileConfig *models.MobileAp
 
 // buildChatSystemPrompt assembles the system prompt for the simplified file-block
 // chat path. Uses CHAT_INSTRUCTIONS instead of TOOL_INSTRUCTIONS — no tool loop.
+// NOTE: Does NOT include MOBILE_CONFIG_TOOL_RULES because the chat Phase 2 path
+// uses StreamTextFromLLMWithMessages (no tools). Bridge config is handled by
+// Phase 1 (fast model tool phase) and auto-detection after generation.
 func buildChatSystemPrompt(project *models.AppProject, mobileConfig *models.MobileAppConfig) string {
 	var prompt string
 	if project.ProjectType == "ecommerce" {
@@ -2489,7 +2591,6 @@ func buildChatSystemPrompt(project *models.AppProject, mobileConfig *models.Mobi
 
 	if project.ProjectType == "mobile_app" {
 		prompt += constants.NEXTJS_BUILDER_MOBILE_RULES
-		prompt += constants.NEXTJS_BUILDER_MOBILE_CONFIG_TOOL_RULES
 		prompt += constants.BuildBridgeSDKRules(constants.ALL_BRIDGE_METHODS)
 	}
 
@@ -2498,6 +2599,9 @@ func buildChatSystemPrompt(project *models.AppProject, mobileConfig *models.Mobi
 
 // buildSingleShotSystemPrompt assembles the system prompt for single-shot initial
 // generation using <file> block output format instead of tool calls.
+// NOTE: Does NOT include MOBILE_CONFIG_TOOL_RULES because single-shot uses
+// StreamTextFromLLMWithMessages (no tools). Bridge config is auto-detected
+// from the generated files after generation completes.
 func buildSingleShotSystemPrompt(project *models.AppProject, mobileConfig *models.MobileAppConfig) string {
 	var prompt string
 	if project.ProjectType == "ecommerce" {
@@ -2514,7 +2618,6 @@ func buildSingleShotSystemPrompt(project *models.AppProject, mobileConfig *model
 
 	if project.ProjectType == "mobile_app" {
 		prompt += constants.NEXTJS_BUILDER_MOBILE_RULES
-		prompt += constants.NEXTJS_BUILDER_MOBILE_CONFIG_TOOL_RULES
 		prompt += constants.BuildBridgeSDKRules(constants.ALL_BRIDGE_METHODS)
 	}
 
@@ -3673,6 +3776,32 @@ var chatSearchComponentsTool = utils.Tool{
 	},
 }
 
+// chatConfigureMobileAppTool lets the fast model configure mobile bridge methods
+// and permissions during the chat tool phase.
+var chatConfigureMobileAppTool = utils.Tool{
+	Type: "function",
+	Function: utils.ToolFunction{
+		Name:        "configure_mobile_app",
+		Description: "Enable native bridge methods and set device permissions for the mobile app. Call this when the user explicitly asks to enable or change mobile-specific features like camera, contacts, or haptic feedback.",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"bridge_methods": map[string]any{
+					"type":        "array",
+					"items":       map[string]any{"type": "string"},
+					"description": "Bridge methods to enable. Valid: getDeviceInfo, share, haptic, openExternal, getConnectionStatus, storage.get, storage.set, storage.remove, camera.takePhoto, camera.pickImage, camera.pickVideo, contacts.getAll, contacts.pick, calendar.addEvent, files.pick",
+				},
+				"permissions": map[string]any{
+					"type":        "array",
+					"items":       map[string]any{"type": "string"},
+					"description": "Device permissions to request. Valid: camera, location, contacts, storage, microphone, photos, notifications, calendar, biometrics. 'notifications' is always included automatically.",
+				},
+			},
+			"required": []string{"bridge_methods", "permissions"},
+		},
+	},
+}
+
 // --- Tool executor ---
 
 // buildBuilderToolExecutor returns a ToolExecutor for the unified builder.
@@ -4383,6 +4512,106 @@ func (c *Controller) injectTemplateFileForTool(repo *gitrepo.Repo, tp string, co
 	}
 }
 
+// autoDetectMobileBridgeConfig scans generated files for WemobBridge method usage
+// and automatically configures the mobile app config (bridge_methods + permissions).
+// This replaces the configure_mobile_app tool call for paths that don't support tools
+// (single-shot generation and chat Phase 2 file-block streaming).
+func (c *Controller) autoDetectMobileBridgeConfig(project *models.AppProject, fileMap map[string]string, sendEvent func(string, any) bool) {
+	if project.ProjectType != "mobile_app" {
+		return
+	}
+
+	// Scan all files for WemobBridge method usage
+	methodPatterns := map[string]*regexp.Regexp{
+		"getDeviceInfo":       regexp.MustCompile(`WemobBridge\.getDeviceInfo`),
+		"share":               regexp.MustCompile(`WemobBridge\.share`),
+		"haptic":              regexp.MustCompile(`WemobBridge\.haptic`),
+		"openExternal":        regexp.MustCompile(`WemobBridge\.openExternal`),
+		"getConnectionStatus": regexp.MustCompile(`WemobBridge\.getConnectionStatus`),
+		"storage.get":         regexp.MustCompile(`WemobBridge\.storage\.get`),
+		"storage.set":         regexp.MustCompile(`WemobBridge\.storage\.set`),
+		"storage.remove":      regexp.MustCompile(`WemobBridge\.storage\.remove`),
+		"camera.takePhoto":    regexp.MustCompile(`WemobBridge\.camera\.takePhoto`),
+		"camera.pickImage":    regexp.MustCompile(`WemobBridge\.camera\.pickImage`),
+		"camera.pickVideo":    regexp.MustCompile(`WemobBridge\.camera\.pickVideo`),
+		"contacts.getAll":     regexp.MustCompile(`WemobBridge\.contacts\.getAll`),
+		"contacts.pick":       regexp.MustCompile(`WemobBridge\.contacts\.pick`),
+		"calendar.addEvent":   regexp.MustCompile(`WemobBridge\.calendar\.addEvent`),
+		"files.pick":          regexp.MustCompile(`WemobBridge\.files\.pick`),
+	}
+
+	detectedMethods := make(map[string]bool)
+	for _, content := range fileMap {
+		for method, pattern := range methodPatterns {
+			if pattern.MatchString(content) {
+				detectedMethods[method] = true
+			}
+		}
+	}
+
+	if len(detectedMethods) == 0 {
+		return
+	}
+
+	var filteredMethods []string
+	for m := range detectedMethods {
+		filteredMethods = append(filteredMethods, m)
+	}
+	sort.Strings(filteredMethods)
+
+	// Auto-derive permissions from detected bridge methods
+	methodToPermission := map[string]string{
+		"camera.takePhoto": "camera", "camera.pickImage": "camera", "camera.pickVideo": "camera",
+		"contacts.getAll": "contacts", "contacts.pick": "contacts",
+		"calendar.addEvent": "calendar",
+		"files.pick":        "storage",
+	}
+	permSet := map[string]bool{"notifications": true}
+	for _, m := range filteredMethods {
+		if p, ok := methodToPermission[m]; ok {
+			permSet[p] = true
+		}
+	}
+	var permissions []string
+	for p := range permSet {
+		permissions = append(permissions, p)
+	}
+	sort.Strings(permissions)
+
+	// Get or create config
+	mobileConfig, configErr := c.DB.GetMobileAppConfig(project.ID.String())
+	if configErr != nil {
+		mobileConfig = &models.MobileAppConfig{
+			ProjectID:            project.ID,
+			PushEnabled:          true,
+			BridgeEnabled:        true,
+			AnalyticsEnabled:     true,
+			PullToRefreshEnabled: true,
+			ExternalBrowserLinks: true,
+		}
+	}
+	mobileConfig.BridgeEnabled = true
+	mobileConfig.PushEnabled = true
+	mobileConfig.BridgeMethods = filteredMethods
+	mobileConfig.Permissions = permissions
+
+	if _, upsertErr := c.DB.UpsertMobileAppConfig(mobileConfig); upsertErr != nil {
+		slog.Error("auto-detect: failed to save mobile config", "error", upsertErr, "project_id", project.ID)
+		return
+	}
+
+	slog.Info("auto-detect: mobile bridge config updated",
+		"project_id", project.ID,
+		"bridge_methods", filteredMethods,
+		"permissions", permissions,
+	)
+
+	sendEvent("mobile_config_updated", map[string]any{
+		"bridge_methods": filteredMethods,
+		"permissions":    permissions,
+	})
+}
+
 // compositeToolExecutor wraps a local ToolExecutor and routes MCP-prefixed tool calls
 // to the MCP service, while passing everything else to the local executor.
 func (c *Controller) compositeToolExecutor(local utils.ToolExecutor) utils.ToolExecutor {
@@ -4832,6 +5061,9 @@ func (c *Controller) streamSingleShotGeneration(
 			}
 		}
 	}
+
+	// 8. Auto-detect WemobBridge usage and configure mobile app
+	c.autoDetectMobileBridgeConfig(project, fileMap, sendEvent)
 
 	return responseBuilder.String(), ops, err
 }
