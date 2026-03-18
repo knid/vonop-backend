@@ -82,7 +82,10 @@ Given the user's description of a mobile app they want to build, generate a stru
 ` + structureCommonRules + `
 - Required files: app/layout.tsx, app/page.tsx, app/globals.css
 - Plan 3-8 pages depending on complexity.
-- Do NOT include NEXT_PUBLIC_STORE_ID or NEXT_PUBLIC_WEMOB_API_URL in required_env_vars (auto-injected).
+- Do NOT include NEXT_PUBLIC_STORE_ID, NEXT_PUBLIC_WEMOB_API_URL, or DATABASE_URL in required_env_vars (auto-provisioned).
+- Design "data_models" — an array of database tables the app needs for its data. Each table has a "name" and "columns" array. Each column has "name", "type" (text, integer, boolean, timestamp, uuid, jsonb), "primary_key" (bool), "nullable" (bool), optional "default", and optional "references" (e.g. "categories.id"). Every table MUST have an "id" column with type "uuid" and primary_key true. Add "created_at" and "updated_at" timestamp columns with "default": "now()". Design the schema based on what the app actually needs — blogs need posts/comments, task apps need tasks/projects, etc. A database will be provisioned automatically from these models.
+- Plan app/api/ routes for CRUD operations using Drizzle ORM. Each API route should handle GET/POST/PUT/DELETE for its resource.
+- All dynamic data must come from the database via Drizzle queries. The database is pre-seeded with realistic demo data by the setup_database tool — do NOT create seed files, seed routes, seed buttons, or "load demo data" UI. Just query the database normally. The app MUST look fully populated on first load.
 - MOBILE-SPECIFIC: Include viewport meta tag configuration for mobile. Use touch-friendly sizing. Plan bottom tab navigation component. Use mobile-appropriate components (bottom sheets, slide-up modals, swipeable cards). All layouts must work within 430px max width. NO desktop-only layouts.
 - Generate mobile-first CSS — use Tailwind's default breakpoint as the base (mobile), never require larger breakpoints for core functionality.
 - Include PWA-ready manifest hints in the layout description.
