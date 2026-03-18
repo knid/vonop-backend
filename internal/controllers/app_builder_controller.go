@@ -1217,7 +1217,7 @@ func (c *Controller) runChatToolPhase(
 
 CRITICAL LANGUAGE RULE: ALL content you generate (product names, descriptions, category names, seed data, image prompts, text output) MUST be in the SAME LANGUAGE as the user's message. If the user writes in English, all content must be in English. If in Turkish, all content must be in Turkish.
 
-- If the user provides a URL or asks to convert/clone/replicate a website, call preview_website (and optionally take_screenshot to capture a visual reference).
+- If the user provides a URL or asks to convert/clone/replicate a website, call preview_website to analyze the website's structure and capture a screenshot. This does NOT load the website in an iframe — it extracts HTML metadata and takes a screenshot for the code generation model to use as reference.
 - If the user asks about current technologies, APIs, documentation, pricing, latest versions, or anything that benefits from up-to-date web information, use web_search to find accurate information.
 - If the user asks to set, add, or remove environment variables / API keys / secrets, call manage_env_vars.
 - If the user asks to install or add a specific npm package/library, call install_package.
@@ -1289,7 +1289,7 @@ CRITICAL LANGUAGE RULE: ALL content you generate (product names, descriptions, c
 	executor := func(name string, arguments string) (string, error) {
 		switch name {
 		case "preview_website":
-			return c.executeChatPreviewWebsite(arguments, project, sendEvent, &collectedContext)
+			return c.executeChatPreviewWebsite(arguments, project, sendEvent, &collectedContext, &screenshots)
 		case "manage_store":
 			return c.executeChatManageStore(arguments, project, sendEvent, &collectedContext)
 		case "seed_database":
@@ -1572,11 +1572,14 @@ func (c *Controller) executePreGenScreenshot(
 }
 
 // executeChatPreviewWebsite handles the preview_website tool call in the chat tool phase.
+// Instead of loading the URL in an iframe, it fetches the HTML structure and takes
+// a screenshot so the code-gen model can build a proper app based on the website.
 func (c *Controller) executeChatPreviewWebsite(
 	arguments string,
 	project *models.AppProject,
 	sendEvent func(string, any) bool,
 	collectedContext *strings.Builder,
+	screenshots *[]string,
 ) (string, error) {
 	var args struct {
 		URL string `json:"url"`
@@ -1591,12 +1594,7 @@ func (c *Controller) executeChatPreviewWebsite(
 	if !strings.HasPrefix(targetURL, "http://") && !strings.HasPrefix(targetURL, "https://") {
 		targetURL = "https://" + targetURL
 	}
-	proxyURL := fmt.Sprintf("https://proxy.wemob.io/?url=%s", targetURL)
 
-	sendEvent("website_preview", responses.WebsitePreviewEvent{
-		URL:      targetURL,
-		ProxyURL: proxyURL,
-	})
 	sendEvent("tool_call", responses.ToolCallEvent{
 		Tool:      "preview_website",
 		Arguments: arguments,
@@ -1634,9 +1632,22 @@ func (c *Controller) executeChatPreviewWebsite(
 		siteInfo = sb.String()
 	}
 
-	collectedContext.WriteString(fmt.Sprintf("\n[Website Analysis]\n%s\nThe website is now visible in the user's preview panel. Generate or modify the app to match this website's design and content.\n", siteInfo))
+	// Take a screenshot for visual reference instead of loading in iframe
+	apiKey := c.SecretManager.GetSecret("SITESHOT_API_KEY")
+	if apiKey != "" {
+		imgData, err := external.GetDesktopScreenshotOfURL(targetURL, apiKey)
+		if err != nil {
+			slog.Warn("Failed to take screenshot for preview_website", "url", targetURL, "error", err)
+		} else if len(imgData) > 0 {
+			b64 := base64.StdEncoding.EncodeToString(imgData)
+			*screenshots = append(*screenshots, "data:image/png;base64,"+b64)
+			siteInfo += "A desktop screenshot has been captured and will be provided as an image to the code generation model.\n"
+		}
+	}
+
+	collectedContext.WriteString(fmt.Sprintf("\n[Website Analysis]\n%s\nGenerate or modify the app to match this website's design and content.\n", siteInfo))
 	slog.Info("preview_website tool called via fast model", "url", targetURL, "project_id", project.ID)
-	return "Website preview loaded.", nil
+	return "Website analyzed and screenshot captured. The code generation model will use this to build the app.", nil
 }
 
 // executeChatManageStore handles the manage_store tool call in the chat tool phase.
@@ -3441,13 +3452,13 @@ var chatManageStoreTool = utils.Tool{
 	},
 }
 
-// chatPreviewWebsiteTool lets the LLM load a website URL in the preview panel
-// so the user sees it while the LLM generates or modifies the app.
+// chatPreviewWebsiteTool lets the LLM analyze a website's structure and capture
+// a screenshot for the code generation model to build the app from.
 var chatPreviewWebsiteTool = utils.Tool{
 	Type: "function",
 	Function: utils.ToolFunction{
 		Name:        "preview_website",
-		Description: "Load a website URL in the mobile preview panel so the user can see it. Use this when the user provides a URL or asks to convert/clone a website into a mobile app. After calling this tool, generate the app code based on the website.",
+		Description: "Analyze a website URL by fetching its HTML structure and taking a screenshot. Use this when the user provides a URL or asks to convert/clone a website into an app. The screenshot and site metadata will be provided to the code generation model as reference.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
