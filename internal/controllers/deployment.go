@@ -3,21 +3,18 @@ package controllers
 import (
 	"context"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
 	"slices"
-	"time"
 
 	"github.com/go-playground/validator/v10"
 	"github.com/google/uuid"
-	"github.com/hibiken/asynq"
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/responses"
-	"github.com/knid/wemob/internal/tasks"
+	"github.com/knid/wemob/internal/services/codemagic"
 	"github.com/knid/wemob/internal/utils/external"
 	"github.com/slack-go/slack"
 )
@@ -178,34 +175,26 @@ func (c *Controller) CreateDeploymentTask(user *models.User, deploymentReq reque
 				return nil, err
 			}
 
-			iosDeployPayload := tasks.IOSDeployPayload{
+			if _, err := c.CodemagicService.TriggerIOSDeploy(codemagic.IOSDeployParams{
 				BuildID:            deploymentReq.BuildID,
+				DeploymentID:       deployment.ID.String(),
 				PackageName:        project.PackageName,
 				TeamID:             cred.TeamID,
 				KeyID:              cred.KeyID,
 				IssuerID:           cred.IssuerID,
-				P8KeyPath:          cred.P8KeyPath,
+				P8KeyS3Path:        cred.P8KeyPath,
 				Title:              deploymentReq.Title,
 				Description:        deploymentReq.Description,
 				Screenshots:        deploymentReq.ScreenshotPaths,
 				Icon:               build.Icon,
 				Locale:             deploymentReq.Locale,
 				NewApp:             true,
-				ChangedStoreInfo:   true,
 				ChangedBuild:       true,
 				TitleChanged:       true,
-				DescriptionChanged: true,
+				DescChanged:        true,
 				ScreenshotsChanged: true,
-				DeploymentID:       deployment.ID.String(),
-			}
-
-			taskPayload, err := json.Marshal(iosDeployPayload)
-			if err != nil {
-				return nil, err
-			}
-			task := asynq.NewTask(tasks.TypeDeployIOS, taskPayload)
-			if _, err := c.TaskService.Enqueue(task, asynq.MaxRetry(0), asynq.Timeout(time.Minute*10)); err != nil {
-				return nil, fmt.Errorf("failed to enqueue iOS deploy task: %w", err)
+			}); err != nil {
+				return nil, fmt.Errorf("failed to trigger iOS deploy: %w", err)
 			}
 
 			go c.CRMService.SendEvent(user, constants.BREVO_EVENT_USER_APPLE_DEPLOYMENT_STARTED, map[string]interface{}{
@@ -221,32 +210,26 @@ func (c *Controller) CreateDeploymentTask(user *models.User, deploymentReq reque
 			if err != nil {
 				return nil, err
 			}
-			androidDeployPayload := tasks.AndroidDeployPayload{
-				ServiceAccountPath: cred.ServiceAccountPath,
-				BuildID:            deploymentReq.BuildID,
-				PackageName:        project.PackageName,
-				Title:              deploymentReq.Title,
-				Description:        deploymentReq.Description,
-				IconPath:           deploymentReq.IconID,
-				Screenshots:        deploymentReq.ScreenshotPaths,
-				Version:            build.BuildNumber,
-				Locale:             deploymentReq.Locale,
-				ChangedStoreInfo:   true,
-				ChangedBuild:       true,
-				TitleChanged:       true,
-				DescriptionChanged: true,
-				ScreenshotsChanged: true,
-				Secret:             deployment.ID.String(),
-				DeploymentID:       deployment.ID.String(),
-			}
 
-			taskPayload, err := json.Marshal(androidDeployPayload)
-			if err != nil {
-				return nil, err
-			}
-			task := asynq.NewTask(tasks.TypeDeployAndroid, taskPayload)
-			if _, err := c.TaskService.Enqueue(task, asynq.MaxRetry(0), asynq.Timeout(time.Minute*10)); err != nil {
-				return nil, fmt.Errorf("failed to enqueue Android deploy task: %w", err)
+			if _, err := c.CodemagicService.TriggerAndroidDeploy(codemagic.AndroidDeployParams{
+				BuildID:              deploymentReq.BuildID,
+				DeploymentID:         deployment.ID.String(),
+				PackageName:          project.PackageName,
+				Version:              build.BuildNumber,
+				Title:                deploymentReq.Title,
+				Description:          deploymentReq.Description,
+				Screenshots:          deploymentReq.ScreenshotPaths,
+				IconPath:             deploymentReq.IconID,
+				Locale:               deploymentReq.Locale,
+				ServiceAccountS3Path: cred.ServiceAccountPath,
+				NewApp:               true,
+				ChangedBuild:         true,
+				TitleChanged:         true,
+				DescChanged:          true,
+				ScreenshotsChanged:   true,
+				IconChanged:          true,
+			}); err != nil {
+				return nil, fmt.Errorf("failed to trigger Android deploy: %w", err)
 			}
 
 			go c.CRMService.SendEvent(user, constants.BREVO_EVENT_USER_ANDROID_DEPLOYMENT_STARTED, map[string]interface{}{
@@ -390,34 +373,26 @@ func (c *Controller) UpdateDeploymentTask(user *models.User, deploymentID string
 			return nil, err
 		}
 
-		iosDeployPayload := tasks.IOSDeployPayload{
+		if _, err := c.CodemagicService.TriggerIOSDeploy(codemagic.IOSDeployParams{
 			BuildID:            deploymentReq.BuildID,
+			DeploymentID:       deployment.ID.String(),
 			PackageName:        project.PackageName,
 			TeamID:             cred.TeamID,
 			KeyID:              cred.KeyID,
 			IssuerID:           cred.IssuerID,
-			P8KeyPath:          cred.P8KeyPath,
+			P8KeyS3Path:        cred.P8KeyPath,
 			Title:              deploymentReq.Title,
 			Description:        deploymentReq.Description,
 			Screenshots:        deploymentReq.ScreenshotPaths,
 			Icon:               build.Icon,
 			Locale:             deployment.Locale,
 			NewApp:             false,
-			ChangedStoreInfo:   changedStoreInfo,
 			ChangedBuild:       buildChanged,
 			TitleChanged:       titleChanged,
-			DescriptionChanged: descriptionChanged,
+			DescChanged:        descriptionChanged,
 			ScreenshotsChanged: screenshotsChanged,
-			DeploymentID:       deployment.ID.String(),
-		}
-
-		taskPayload, err := json.Marshal(iosDeployPayload)
-		if err != nil {
-			return nil, err
-		}
-		task := asynq.NewTask(tasks.TypeDeployIOS, taskPayload)
-		if _, err := c.TaskService.Enqueue(task, asynq.MaxRetry(0), asynq.Timeout(time.Minute*10)); err != nil {
-			return nil, fmt.Errorf("failed to enqueue iOS deploy task: %w", err)
+		}); err != nil {
+			return nil, fmt.Errorf("failed to trigger iOS deploy: %w", err)
 		}
 	}
 
@@ -426,32 +401,26 @@ func (c *Controller) UpdateDeploymentTask(user *models.User, deploymentID string
 		if err != nil {
 			return nil, err
 		}
-		androidDeployPayload := tasks.AndroidDeployPayload{
-			ServiceAccountPath: cred.ServiceAccountPath,
-			BuildID:            deploymentReq.BuildID,
-			PackageName:        project.PackageName,
-			Title:              deploymentReq.Title,
-			Description:        deploymentReq.Description,
-			IconPath:           deploymentReq.IconID,
-			Screenshots:        deploymentReq.ScreenshotPaths,
-			Version:            build.BuildNumber,
-			Locale:             deployment.Locale,
-			ChangedStoreInfo:   changedStoreInfo,
-			ChangedBuild:       buildChanged,
-			TitleChanged:       titleChanged,
-			DescriptionChanged: descriptionChanged,
-			ScreenshotsChanged: screenshotsChanged,
-			Secret:             deployment.ID.String(),
-			DeploymentID:       deployment.ID.String(),
-		}
 
-		taskPayload, err := json.Marshal(androidDeployPayload)
-		if err != nil {
-			return nil, err
-		}
-		task := asynq.NewTask(tasks.TypeDeployAndroid, taskPayload)
-		if _, err := c.TaskService.Enqueue(task, asynq.MaxRetry(0), asynq.Timeout(time.Minute*10)); err != nil {
-			return nil, fmt.Errorf("failed to enqueue Android deploy task: %w", err)
+		if _, err := c.CodemagicService.TriggerAndroidDeploy(codemagic.AndroidDeployParams{
+			BuildID:              deploymentReq.BuildID,
+			DeploymentID:         deployment.ID.String(),
+			PackageName:          project.PackageName,
+			Version:              build.BuildNumber,
+			Title:                deploymentReq.Title,
+			Description:          deploymentReq.Description,
+			Screenshots:          deploymentReq.ScreenshotPaths,
+			IconPath:             deploymentReq.IconID,
+			Locale:               deployment.Locale,
+			ServiceAccountS3Path: cred.ServiceAccountPath,
+			NewApp:               false,
+			ChangedBuild:         buildChanged,
+			TitleChanged:         titleChanged,
+			DescChanged:          descriptionChanged,
+			ScreenshotsChanged:   screenshotsChanged,
+			IconChanged:          changedStoreInfo,
+		}); err != nil {
+			return nil, fmt.Errorf("failed to trigger Android deploy: %w", err)
 		}
 	}
 
@@ -521,29 +490,17 @@ func (c *Controller) SignUnsignedIPATask(user *models.User, signReq requests.Sig
 		return nil, err
 	}
 
-	iosSignPayload := tasks.IOSSignPayload{
+	if _, err := c.CodemagicService.TriggerIOSSign(codemagic.IOSSignParams{
 		BuildID:     build.ID.String(),
-		PackageName: project.PackageName,
-		KeyID:       cred.KeyID,
-		TeamID:      cred.TeamID,
-		IssuerID:    cred.IssuerID,
-		P8KeyPath:   cred.P8KeyPath,
-		Secret:      iosSignTask.ID.String(),
 		TaskID:      iosSignTask.ID.String(),
-	}
-
-	signTaskType := tasks.TypeSignIOS
-	signTaskPayload, err := json.Marshal(iosSignPayload)
-	if err != nil {
-		return nil, err
-	}
-
-	signTask := asynq.NewTask(signTaskType, signTaskPayload)
-	_, err = c.TaskService.Enqueue(signTask, asynq.MaxRetry(1), asynq.Timeout(time.Minute*3))
-	if err != nil {
-		return nil, err
+		PackageName: project.PackageName,
+		TeamID:      cred.TeamID,
+		KeyID:       cred.KeyID,
+		IssuerID:    cred.IssuerID,
+		P8KeyS3Path: cred.P8KeyPath,
+	}); err != nil {
+		return nil, fmt.Errorf("failed to trigger iOS sign: %w", err)
 	}
 
 	return iosSignTask, nil
-
 }

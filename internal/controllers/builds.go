@@ -2,17 +2,14 @@ package controllers
 
 import (
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/go-playground/validator/v10"
-	"github.com/hibiken/asynq"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/responses"
-	"github.com/knid/wemob/internal/tasks"
+	"github.com/knid/wemob/internal/services/codemagic"
 	"github.com/knid/wemob/internal/utils"
 )
 
@@ -74,6 +71,10 @@ func (c *Controller) CreateBuild(user *models.User, buildCreateReq requests.Buil
 		return nil, err
 	}
 
+	if c.CodemagicService == nil {
+		return nil, errors.New("build service not configured")
+	}
+
 	// Enforce brand logo removal permission at controller level
 	if buildCreateReq.RemoveWemobBranding {
 		limits, limitsErr := c.DB.GetStandartUserLimitsByUser(user)
@@ -130,6 +131,11 @@ func (c *Controller) CreateBuild(user *models.User, buildCreateReq requests.Buil
 	// Fetch mobile app config for permissions and deep linking
 	mobileConfig, _ := c.DB.GetMobileAppConfig(project.ID.String())
 
+	// Helper to extract config values safely
+	permissions := getPermissions(mobileConfig)
+	urlScheme := getURLScheme(mobileConfig)
+	universalLink := getUniversalLink(mobileConfig)
+
 	// Track created tasks for rollback on failure
 	var createdTaskIDs []string
 
@@ -140,48 +146,24 @@ func (c *Controller) CreateBuild(user *models.User, buildCreateReq requests.Buil
 		}
 		createdTaskIDs = append(createdTaskIDs, appBuildTask.ID.String())
 
-		androidBuildPayload := &tasks.AndroidBuildPayload{
+		if _, err := c.CodemagicService.TriggerAndroidBuild(codemagic.AndroidBuildParams{
 			ProjectID:           project.ID.String(),
-			Version:             createdBuild.BuildNumber,
 			BuildID:             createdBuild.ID.String(),
 			TaskID:              appBuildTask.ID.String(),
+			Version:             createdBuild.BuildNumber,
 			Title:               createdBuild.Title,
 			URL:                 project.URL,
 			IconURL:             createdBuild.Icon,
-			SplashScreenColor:   createdBuild.SplashScreenColor,
-			NavBarStyle:         createdBuild.NavBarStyle,
+			SplashColor:         createdBuild.SplashScreenColor,
 			OneSignalAppID:      project.OneSignalAppID,
 			PackageName:         project.PackageName,
-			RemoveWemobBranding: createdBuild.RemoveWemobBranding,
-			Secret:              appBuildTask.ID.String(),
-			Permissions: func() []string {
-				if mobileConfig != nil {
-					return mobileConfig.Permissions
-				}
-				return nil
-			}(),
-			URLScheme: func() string {
-				if mobileConfig != nil {
-					return mobileConfig.URLScheme
-				}
-				return ""
-			}(),
-			UniversalLinkDomain: func() string {
-				if mobileConfig != nil {
-					return mobileConfig.UniversalLinkDomain
-				}
-				return ""
-			}(),
-		}
-		taskPayload, err := json.Marshal(androidBuildPayload)
-		if err != nil {
+			RemoveBranding:      createdBuild.RemoveWemobBranding,
+			Permissions:         permissions,
+			URLScheme:           urlScheme,
+			UniversalLinkDomain: universalLink,
+		}); err != nil {
 			c.cancelCreatedTasks(createdTaskIDs)
-			return nil, err
-		}
-		task := asynq.NewTask(tasks.TypeBuildAndroid, taskPayload)
-		if _, err := c.TaskService.Enqueue(task, asynq.MaxRetry(2), asynq.Timeout(time.Minute*30)); err != nil {
-			c.cancelCreatedTasks(createdTaskIDs)
-			return nil, fmt.Errorf("failed to enqueue Android build task: %w", err)
+			return nil, fmt.Errorf("failed to trigger Android build: %w", err)
 		}
 	}
 
@@ -193,47 +175,24 @@ func (c *Controller) CreateBuild(user *models.User, buildCreateReq requests.Buil
 		}
 		createdTaskIDs = append(createdTaskIDs, appBuildTask.ID.String())
 
-		iosBuildPayload := &tasks.BuildUnsignedIpaPayload{
+		if _, err := c.CodemagicService.TriggerIOSBuild(codemagic.IOSBuildParams{
 			ProjectID:           project.ID.String(),
-			Version:             createdBuild.BuildNumber,
 			BuildID:             createdBuild.ID.String(),
 			TaskID:              appBuildTask.ID.String(),
+			Version:             createdBuild.BuildNumber,
 			Title:               createdBuild.Title,
 			URL:                 project.URL,
 			IconURL:             createdBuild.Icon,
-			SplashScreenColor:   createdBuild.SplashScreenColor,
+			SplashColor:         createdBuild.SplashScreenColor,
 			OneSignalAppID:      project.OneSignalAppID,
 			PackageName:         project.PackageName,
-			RemoveWemobBranding: createdBuild.RemoveWemobBranding,
-			Secret:              appBuildTask.ID.String(),
-			Permissions: func() []string {
-				if mobileConfig != nil {
-					return mobileConfig.Permissions
-				}
-				return nil
-			}(),
-			URLScheme: func() string {
-				if mobileConfig != nil {
-					return mobileConfig.URLScheme
-				}
-				return ""
-			}(),
-			UniversalLinkDomain: func() string {
-				if mobileConfig != nil {
-					return mobileConfig.UniversalLinkDomain
-				}
-				return ""
-			}(),
-		}
-		taskPayload, err := json.Marshal(iosBuildPayload)
-		if err != nil {
+			RemoveBranding:      createdBuild.RemoveWemobBranding,
+			Permissions:         permissions,
+			URLScheme:           urlScheme,
+			UniversalLinkDomain: universalLink,
+		}); err != nil {
 			c.cancelCreatedTasks(createdTaskIDs)
-			return nil, err
-		}
-		task := asynq.NewTask(tasks.TypeBuildUnsignedIpa, taskPayload)
-		if _, err := c.TaskService.Enqueue(task, asynq.MaxRetry(2), asynq.Timeout(time.Minute*30)); err != nil {
-			c.cancelCreatedTasks(createdTaskIDs)
-			return nil, fmt.Errorf("failed to enqueue iOS build task: %w", err)
+			return nil, fmt.Errorf("failed to trigger iOS build: %w", err)
 		}
 	}
 
@@ -247,4 +206,27 @@ func (c *Controller) cancelCreatedTasks(taskIDs []string) {
 	for _, id := range taskIDs {
 		_ = c.DB.CancelAppBuildTask(id)
 	}
+}
+
+// Config extraction helpers to avoid repeated nil checks.
+
+func getPermissions(cfg *models.MobileAppConfig) []string {
+	if cfg != nil {
+		return cfg.Permissions
+	}
+	return nil
+}
+
+func getURLScheme(cfg *models.MobileAppConfig) string {
+	if cfg != nil {
+		return cfg.URLScheme
+	}
+	return ""
+}
+
+func getUniversalLink(cfg *models.MobileAppConfig) string {
+	if cfg != nil {
+		return cfg.UniversalLinkDomain
+	}
+	return ""
 }
