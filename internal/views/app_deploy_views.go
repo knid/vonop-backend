@@ -43,16 +43,8 @@ func (v *HttpViews) DeployAppWeb(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req requests.DeployWebRequest
-	utils.ParseJSONBody(r, &req)
-
-	target := "production"
-	if req.Target != "" {
-		target = req.Target
-	}
-
 	deployStart := time.Now()
-	deployment, err := v.Controller.DeployToVercel(project, user, target)
+	deployment, err := v.Controller.DeployToCoolify(project, user)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
 		return

@@ -18,14 +18,10 @@ import (
 	"github.com/hibiken/asynq"
 )
 
-// DeployToVercel deploys the app to Vercel using files from DB (code-first approach)
-func (c *Controller) DeployToVercel(project *models.AppProject, user *models.User, target string) (*models.AppDeployment, error) {
-	if c.VercelService == nil {
-		return nil, fmt.Errorf("vercel service not configured")
-	}
-
-	if target == "" {
-		target = "production"
+// DeployToCoolify deploys the app to Coolify using files pushed to Gitea.
+func (c *Controller) DeployToCoolify(project *models.AppProject, user *models.User) (*models.AppDeployment, error) {
+	if c.CoolifyService == nil {
+		return nil, fmt.Errorf("coolify service not configured")
 	}
 
 	// Read files from git repo
@@ -38,66 +34,84 @@ func (c *Controller) DeployToVercel(project *models.AppProject, user *models.Use
 		return nil, fmt.Errorf("no generated files found for deployment")
 	}
 
-	// Get or create Vercel project
-	vercelProject, err := c.DB.GetVercelProjectByAppProjectID(project.ID.String())
-	if err != nil {
-		// Create new Vercel project
-		vp, err := c.VercelService.CreateProject("wemob-" + project.Slug)
-		if err != nil {
-			slog.Error("Failed to create Vercel project", "error", err)
-			return nil, fmt.Errorf("failed to create Vercel project")
-		}
-
-		// Disable deployment protection so URLs are publicly accessible
-		c.VercelService.DisableDeploymentProtection(vp.ID)
-
-		vercelProject = &models.VercelProject{
-			AppProjectID:    project.ID,
-			VercelProjectID: vp.ID,
-			Framework:       "nextjs",
-		}
-		vercelProject, err = c.DB.CreateVercelProject(vercelProject)
-		if err != nil {
-			slog.Error("Failed to persist Vercel project to DB", "error", err)
-			return nil, fmt.Errorf("failed to save Vercel project")
-		}
-	}
-
 	// Collect all env vars (integrations + custom + auto-injected store vars)
 	envVars := c.CollectAllEnvVars(project)
 
-	// Sync env vars on Vercel project (sets desired, removes stale)
-	if err := c.VercelService.SyncEnvVars(vercelProject.VercelProjectID, envVars); err != nil {
-		slog.Warn("Failed to sync some env vars", "error", err)
-	}
-
-	// Ensure deployment protection is disabled (idempotent)
-	c.VercelService.DisableDeploymentProtection(vercelProject.VercelProjectID)
-
-	// Build file map from repo files
+	// Build file map and inject .env.local + analytics
 	fileMap := repoFiles
-
-	// Inject .env.local so Next.js can inline NEXT_PUBLIC_* vars at build time
 	if dotEnv := BuildDotEnvLocal(envVars); dotEnv != "" {
 		fileMap[".env.local"] = dotEnv
 	}
-
-	// Inject web analytics tracking script into the root layout
 	injectAnalyticsScript(fileMap, project.ID.String())
 
-	deployResp, err := c.VercelService.DeployFiles(vercelProject.VercelProjectID, fileMap, target)
+	// Write ALL modified/injected files back to the repo working tree.
+	// The Vercel flow uploaded fileMap directly; the Coolify flow needs
+	// everything committed to git so it reaches Gitea via push.
+	for path, content := range fileMap {
+		if repoFiles[path] != content {
+			repo.WriteFile(path, []byte(content))
+		}
+	}
+	repo.Commit("deploy: inject env and analytics")
+
+	// Get or create Coolify project
+	coolifyProject, err := c.DB.GetCoolifyProjectByAppProjectID(project.ID.String())
 	if err != nil {
-		slog.Error("Failed to deploy to Vercel", "error", err)
-		return nil, fmt.Errorf("deployment failed")
+		// First deploy — create Gitea repo and Coolify app
+		giteaRepoName := "wemob-" + project.Slug
+		giteaCloneURL, err := c.GiteaService.CreateRepo(giteaRepoName)
+		if err != nil {
+			slog.Error("Failed to create Gitea repo", "error", err)
+			return nil, fmt.Errorf("failed to create git repository")
+		}
+
+		// Push files to Gitea
+		if err := repo.PushToURL(giteaCloneURL, "main"); err != nil {
+			slog.Error("Failed to push to Gitea", "error", err)
+			return nil, fmt.Errorf("failed to push files")
+		}
+
+		// Create Coolify app pointing to the Gitea repo
+		subdomain := project.Slug + "." + constants.WEMOB_APP_BASE_DOMAIN
+		publicRepoURL := fmt.Sprintf("%s/%s/%s.git", c.GiteaService.BaseURL, c.GiteaService.Org, giteaRepoName)
+
+		appUUID, err := c.CoolifyService.CreateApp(giteaRepoName, publicRepoURL, subdomain)
+		if err != nil {
+			slog.Error("Failed to create Coolify app", "error", err)
+			return nil, fmt.Errorf("failed to create deployment")
+		}
+
+		coolifyProject = &models.CoolifyProject{
+			AppProjectID:   project.ID,
+			CoolifyAppUUID: appUUID,
+			GiteaRepoName:  giteaRepoName,
+			Framework:      "nextjs",
+		}
+		coolifyProject, err = c.DB.CreateCoolifyProject(coolifyProject)
+		if err != nil {
+			slog.Error("Failed to persist Coolify project to DB", "error", err)
+			return nil, fmt.Errorf("failed to save deployment project")
+		}
+	} else {
+		// Subsequent deploy — force push updated files and restart
+		giteaCloneURL := c.GiteaService.AuthenticatedCloneURL(coolifyProject.GiteaRepoName)
+		if err := repo.ForcePushToURL(giteaCloneURL, "main"); err != nil {
+			slog.Error("Failed to push to Gitea", "error", err)
+			return nil, fmt.Errorf("failed to push files")
+		}
+
+		if err := c.CoolifyService.RestartApp(coolifyProject.CoolifyAppUUID); err != nil {
+			slog.Error("Failed to restart Coolify app", "error", err)
+			return nil, fmt.Errorf("failed to trigger deployment")
+		}
 	}
 
-	// Auto-assign {slug}.wemob.app subdomain (best-effort)
+	// Sync env vars on Coolify app
+	if err := c.CoolifyService.SyncEnvVars(coolifyProject.CoolifyAppUUID, envVars); err != nil {
+		slog.Warn("Failed to sync env vars on Coolify", "error", err)
+	}
+
 	subdomain := project.Slug + "." + constants.WEMOB_APP_BASE_DOMAIN
-	if err := c.VercelService.AddDomain(vercelProject.VercelProjectID, subdomain); err != nil {
-		slog.Warn("Failed to assign wemob.app subdomain", "subdomain", subdomain, "error", err)
-	}
-
-	// Use branded URL as the deployed URL; raw Vercel URL stays in ProviderData as fallback
 	deployedURL := "https://" + subdomain
 
 	// Track deployment
@@ -105,20 +119,18 @@ func (c *Controller) DeployToVercel(project *models.AppProject, user *models.Use
 		AppProjectID: project.ID,
 		UserID:       user.ID,
 		Platform:     "web",
-		Provider:     "vercel",
+		Provider:     "coolify",
 		Status:       "building",
 		ProviderData: map[string]any{
-			"deployment_id": deployResp.ID,
-			"url":           deployResp.URL,
+			"coolify_app_uuid": coolifyProject.CoolifyAppUUID,
 		},
 		DeployedURL: deployedURL,
 		Version:     1,
 	}
 
-	// Record commit hash from the repo
+	// Record commit hash
 	if commitHash, headErr := repo.Head(); headErr == nil {
 		deployment.CommitHash = commitHash
-		// Tag the deployment
 		repo.Tag(fmt.Sprintf("deploy-%d", time.Now().Unix()))
 	}
 
@@ -133,16 +145,15 @@ func (c *Controller) DeployToVercel(project *models.AppProject, user *models.Use
 		slog.Error("Failed to save deployment record", "error", err)
 	}
 
-	// Update Vercel project record
-	vercelProject.ProductionURL = deployedURL
-	vercelProject.CustomDomain = subdomain
-	c.DB.UpdateVercelProject(vercelProject)
+	// Update Coolify project record
+	coolifyProject.ProductionURL = deployedURL
+	coolifyProject.CustomDomain = subdomain
+	c.DB.UpdateCoolifyProject(coolifyProject)
 
 	// Update project status
 	c.UpdateAppProjectStatus(project, "deployed")
 
-	// For mobile_app projects, ensure a v1 Project exists so the app appears
-	// in the v1 listing (analytics, notifications, builds).
+	// For mobile_app projects, ensure a v1 Project exists
 	if project.ProjectType == "mobile_app" {
 		if err := c.ensureV1ProjectForMobileApp(project, user, deployedURL); err != nil {
 			slog.Error("Failed to create v1 Project for mobile app", "error", err, "app_project_id", project.ID)
@@ -366,52 +377,45 @@ func (c *Controller) GetAppDeployments(projectID string) ([]models.AppDeployment
 	return c.DB.GetAppDeploymentsByProjectID(projectID)
 }
 
-// GetLatestDeploymentStatus returns the latest deployment status for a project.
-// If the status is still "building", it checks the Vercel API for the real status and updates the DB.
 func (c *Controller) GetLatestDeploymentStatus(projectID string) (*models.AppDeployment, error) {
 	deployment, err := c.DB.GetLatestAppDeployment(projectID, "web")
 	if err != nil {
 		return nil, err
 	}
 
-	// If still building, check Vercel for actual status
-	if (deployment.Status == "building" || deployment.Status == "pending") && c.VercelService != nil {
-		deploymentID, _ := deployment.ProviderData["deployment_id"].(string)
-		if deploymentID != "" {
-			vercelDep, err := c.VercelService.GetDeployment(deploymentID)
+	// Skip polling for old Vercel deployments — return existing status as-is
+	if deployment.Provider == "vercel" {
+		return deployment, nil
+	}
+
+	// If still building, check Coolify for actual status
+	if (deployment.Status == "building" || deployment.Status == "pending") && c.CoolifyService != nil {
+		appUUID, _ := deployment.ProviderData["coolify_app_uuid"].(string)
+		if appUUID != "" {
+			status, err := c.CoolifyService.GetAppStatus(appUUID)
 			if err != nil {
-				slog.Warn("Failed to check Vercel deployment status", "error", err, "deployment_id", deploymentID)
+				slog.Warn("Failed to check Coolify app status", "error", err, "app_uuid", appUUID)
 				return deployment, nil
 			}
 
-			// Map Vercel readyState to our status
-			// Vercel states: QUEUED, BUILDING, INITIALIZING, READY, ERROR, CANCELED
 			var newStatus string
 			var errorMessage string
-			switch vercelDep.State {
-			case "READY":
+			switch strings.ToLower(status) {
+			case "running":
 				newStatus = "deployed"
-			case "ERROR":
+			case "exited", "error", "degraded":
 				newStatus = "failed"
-				// Fetch actual build log from Vercel
-				buildLog, logErr := c.VercelService.GetDeploymentBuildLog(deploymentID)
+				logs, logErr := c.CoolifyService.GetAppLogs(appUUID, 200)
 				if logErr != nil {
-					slog.Warn("Failed to fetch build log", "error", logErr, "deployment_id", deploymentID)
-					errorMessage = "Build failed on Vercel"
-				} else if buildLog != "" {
-					errorMessage = buildLog
+					errorMessage = "Build failed"
 				} else {
-					errorMessage = "Build failed on Vercel"
+					errorMessage = logs
 				}
-			case "CANCELED":
-				newStatus = "failed"
-				errorMessage = "Build was canceled"
 			default:
-				// Still building (QUEUED, BUILDING, INITIALIZING)
+				// Still building/starting
 				return deployment, nil
 			}
 
-			// Update DB with real status
 			deployment.Status = newStatus
 			if errorMessage != "" {
 				deployment.ErrorMessage = errorMessage
@@ -419,7 +423,6 @@ func (c *Controller) GetLatestDeploymentStatus(projectID string) (*models.AppDep
 			if _, err := c.DB.UpdateAppDeployment(deployment); err != nil {
 				slog.Error("Failed to update deployment status", "error", err)
 			}
-
 		}
 	}
 
