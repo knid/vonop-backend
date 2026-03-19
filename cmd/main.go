@@ -30,7 +30,8 @@ import (
 	"github.com/knid/wemob/internal/services/neon"
 	"github.com/knid/wemob/internal/services/secret"
 	"github.com/knid/wemob/internal/services/storage"
-	"github.com/knid/wemob/internal/services/vercel"
+	"github.com/knid/wemob/internal/services/coolify"
+	"github.com/knid/wemob/internal/services/gitea"
 	"github.com/knid/wemob/internal/utils"
 	"github.com/knid/wemob/internal/views"
 	"github.com/markbates/goth"
@@ -93,7 +94,7 @@ func createSchema(db *bun.DB) error {
 		(*models.AppIntegration)(nil),
 		(*models.AppConversation)(nil),
 		// AppGeneratedFile and AppSnapshot removed — files now in git repos
-		(*models.VercelProject)(nil),
+		(*models.CoolifyProject)(nil),
 		(*models.AppDomain)(nil),
 		// Custom environment variables
 		(*models.AppEnvVar)(nil),
@@ -362,7 +363,7 @@ func createSchema(db *bun.DB) error {
 		`CREATE INDEX IF NOT EXISTS idx_ai_credit_transactions_user_created ON ai_credit_transactions(user_id, created_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_organization_members_user_id ON organization_members(user_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_organization_members_organization_id ON organization_members(organization_id)`,
-		`CREATE INDEX IF NOT EXISTS idx_vercel_projects_app_project_id ON vercel_projects(app_project_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_coolify_projects_app_project_id ON coolify_projects(app_project_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_webhook_endpoints_user_id ON webhook_endpoints(user_id)`,
 	}
 	for _, stmt := range perfIndexes {
@@ -673,7 +674,18 @@ func main() {
 
 	go utils.CheckSessionStatusJob(db)
 	go utils.CheckUsageAlertsJob(db, crmServices.NewBrevoCRMService(sm.GetSecret("BREVO_API_KEY")))
-	vercelService := vercel.NewService(sm.GetSecret("VERCEL_API_TOKEN"), sm.GetSecret("VERCEL_TEAM_ID"))
+	coolifyService := coolify.NewService(
+		sm.GetSecret("COOLIFY_API_URL"),
+		sm.GetSecret("COOLIFY_API_TOKEN"),
+		sm.GetSecret("COOLIFY_SERVER_UUID"),
+		sm.GetSecret("COOLIFY_PROJECT_UUID"),
+		sm.GetSecret("COOLIFY_ENVIRONMENT_NAME"),
+	)
+	giteaService := gitea.NewService(
+		sm.GetSecret("GITEA_URL"),
+		sm.GetSecret("GITEA_API_TOKEN"),
+		sm.GetSecret("GITEA_ORG"),
+	)
 
 	// GitHub OAuth secrets (required for GitHub export feature)
 	// GITHUB_CLIENT_ID — OAuth App client ID
@@ -736,7 +748,8 @@ func main() {
 		assetsStorage,
 		userApiKeysStorage,
 		sm,
-		vercelService,
+		coolifyService,
+		giteaService,
 		neonService,
 		posthogClient,
 		gitRepoService,
