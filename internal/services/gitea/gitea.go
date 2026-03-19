@@ -119,3 +119,15 @@ func (s *Service) AuthenticatedCloneURL(repoName string) string {
 	}
 	return fmt.Sprintf("%s%s:%s@%s/%s/%s.git", scheme, s.Username, s.Token, host, s.Org, repoName)
 }
+
+// SSHCloneURL returns the SSH clone URL for use with deploy keys.
+// Format: git@git.wemob.io:Wemob-Org/repo.git
+func (s *Service) SSHCloneURL(repoName string) string {
+	host := s.BaseURL
+	if len(host) > 8 && host[:8] == "https://" {
+		host = host[8:]
+	} else if len(host) > 7 && host[:7] == "http://" {
+		host = host[7:]
+	}
+	return fmt.Sprintf("git@%s:%s/%s.git", host, s.Org, repoName)
+}

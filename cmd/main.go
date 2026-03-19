@@ -689,6 +689,7 @@ func main() {
 		sm.GetSecret("COOLIFY_SERVER_UUID"),
 		sm.GetSecret("COOLIFY_PROJECT_UUID"),
 		sm.GetSecret("COOLIFY_ENVIRONMENT_NAME"),
+		sm.GetSecret("COOLIFY_PRIVATE_KEY_UUID"),
 	)
 	giteaService := gitea.NewService(
 		sm.GetSecret("GITEA_URL"),

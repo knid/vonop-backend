@@ -71,7 +71,12 @@ func (c *Controller) DeployToCoolify(project *models.AppProject, user *models.Us
 
 		// Create Coolify app pointing to the Gitea repo
 		subdomain := project.Slug + "." + constants.WEMOB_APP_BASE_DOMAIN
-		publicRepoURL := c.GiteaService.AuthenticatedCloneURL(giteaRepoName)
+		var repoURL string
+		if c.CoolifyService.PrivateKeyUUID != "" {
+			repoURL = c.GiteaService.SSHCloneURL(giteaRepoName)
+		} else {
+			repoURL = c.GiteaService.AuthenticatedCloneURL(giteaRepoName)
+		}
 
 		// Look up per-plan resource limits
 		memoryLimit := "256MB"
@@ -81,7 +86,7 @@ func (c *Controller) DeployToCoolify(project *models.AppProject, user *models.Us
 			cpuLimit = limits.DeployCPUs
 		}
 
-		appUUID, err := c.CoolifyService.CreateApp(giteaRepoName, publicRepoURL, subdomain, memoryLimit, cpuLimit)
+		appUUID, err := c.CoolifyService.CreateApp(giteaRepoName, repoURL, subdomain, memoryLimit, cpuLimit)
 		if err != nil {
 			slog.Error("Failed to create Coolify app", "error", err)
 			return nil, fmt.Errorf("failed to create deployment")
