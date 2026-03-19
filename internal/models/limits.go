@@ -24,8 +24,10 @@ type StandartUserLimits struct {
 	MonthlyDeployCount int  `bun:",notnull,default:0"`
 	CanUseEcommerce    bool `bun:",notnull,default:false"`
 	CanDeployWeb       bool `bun:"can_deploy_to_vercel,notnull,default:false"`
-	MaxDeployedWebApps   int  `bun:",notnull,default:0"`
-	CreditRolloverMonths int  `bun:",notnull,default:0"`
+	MaxDeployedWebApps   int    `bun:",notnull,default:0"`
+	DeployMemoryMB       int    `bun:",notnull,default:256"`
+	DeployCPUs           string `bun:",notnull,default:'0.25'"`
+	CreditRolloverMonths int    `bun:",notnull,default:0"`
 	CanAccessCode        bool `bun:",notnull,default:false"`
 	CanBuyDomain         bool `bun:",notnull,default:false"`
 	CanExportToGitHub    bool `bun:"can_export_to_github,notnull,default:false"`
