@@ -17,7 +17,8 @@ import (
 	"github.com/knid/wemob/internal/services/secret"
 	"github.com/knid/wemob/internal/services/storage"
 	"github.com/knid/wemob/internal/utils"
-	"github.com/knid/wemob/internal/services/vercel"
+	"github.com/knid/wemob/internal/services/coolify"
+	"github.com/knid/wemob/internal/services/gitea"
 	"github.com/posthog/posthog-go"
 )
 
@@ -31,7 +32,8 @@ type Controller struct {
 	AssetsStorage          *storage.S3Storage
 	UserApiKeysStorage     *storage.S3Storage
 	ConcurrentBuildLimiter chan struct{}
-	VercelService          *vercel.Service
+	CoolifyService         *coolify.Service
+	GiteaService           *gitea.Service
 	NeonService            *neon.Service
 	GitRepoService         *gitrepo.Service
 	MCPService             atomic.Pointer[mcpclient.Service]
@@ -46,7 +48,7 @@ func NewController(db *database.Database, concurrentBuildLimiter chan struct{},
 	slackService *services.SlackService, emailService emailServices.EmailService,
 	crmService crmServices.CRMService, taskService *asynq.Client, assetsStorage *storage.S3Storage,
 	userApiKeysStorage *storage.S3Storage, secretManager secret.SecretManager,
-	vercelService *vercel.Service,
+	coolifyService *coolify.Service, giteaService *gitea.Service,
 	neonService *neon.Service,
 	posthogClient posthog.Client,
 	gitRepoService *gitrepo.Service) *Controller {
@@ -61,7 +63,8 @@ func NewController(db *database.Database, concurrentBuildLimiter chan struct{},
 		AssetsStorage:          assetsStorage,
 		UserApiKeysStorage:     userApiKeysStorage,
 		SecretManager:          secretManager,
-		VercelService:          vercelService,
+		CoolifyService:         coolifyService,
+		GiteaService:           giteaService,
 		NeonService:            neonService,
 		GitRepoService:         gitRepoService,
 		PostHog:                posthogClient,
