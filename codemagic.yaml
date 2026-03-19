@@ -39,20 +39,9 @@ workflows:
       java: 17
       groups: [aws, api]
       vars:
-        CM_PROJECT_ID: ""
-        CM_BUILD_ID: ""
-        CM_TASK_ID: ""
+        # Only defaults here — all other vars passed via REST API at trigger time
         CM_VERSION: "1"
-        CM_TITLE: ""
-        CM_URL: ""
-        CM_ICON_URL: ""
-        CM_SPLASH_COLOR: ""
-        CM_ONESIGNAL_APP_ID: ""
-        CM_PACKAGE_NAME: ""
         CM_REMOVE_BRANDING: "false"
-        CM_PERMISSIONS: ""              # comma-separated: camera,location
-        CM_URL_SCHEME: ""
-        CM_UNIVERSAL_LINK_DOMAIN: ""
     triggering:
       events: []
     scripts:
@@ -176,20 +165,8 @@ workflows:
       xcode: latest
       groups: [aws, api]
       vars:
-        CM_PROJECT_ID: ""
-        CM_BUILD_ID: ""
-        CM_TASK_ID: ""
         CM_VERSION: "1"
-        CM_TITLE: ""
-        CM_URL: ""
-        CM_ICON_URL: ""
-        CM_SPLASH_COLOR: ""
-        CM_ONESIGNAL_APP_ID: ""
-        CM_PACKAGE_NAME: ""
         CM_REMOVE_BRANDING: "false"
-        CM_PERMISSIONS: ""
-        CM_URL_SCHEME: ""
-        CM_UNIVERSAL_LINK_DOMAIN: ""
     triggering:
       events: []
     scripts:
@@ -302,14 +279,7 @@ workflows:
     environment:
       xcode: latest
       groups: [aws, api]
-      vars:
-        CM_BUILD_ID: ""
-        CM_TASK_ID: ""
-        CM_PACKAGE_NAME: ""
-        CM_TEAM_ID: ""
-        CM_KEY_ID: ""            # App Store Connect API Key ID
-        CM_ISSUER_ID: ""         # App Store Connect Issuer ID
-        CM_P8_KEY_S3_PATH: ""   # S3 path to .p8 key
+      # All vars passed via REST API at trigger time
     triggering:
       events: []
     scripts:
@@ -426,16 +396,8 @@ workflows:
       java: 17
       groups: [aws, api]
       vars:
-        CM_BUILD_ID: ""
-        CM_DEPLOYMENT_ID: ""
-        CM_PACKAGE_NAME: ""
         CM_VERSION: "1"
-        CM_TITLE: ""
-        CM_DESCRIPTION: ""
-        CM_SCREENSHOTS: ""             # comma-separated S3 keys
-        CM_ICON_PATH: ""
         CM_LOCALE: "en-US"
-        CM_SERVICE_ACCOUNT_S3: ""      # S3 path to service account JSON
         CM_NEW_APP: "false"
         CM_CHANGED_BUILD: "false"
         CM_TITLE_CHANGED: "false"
@@ -552,17 +514,6 @@ workflows:
       xcode: latest
       groups: [aws, api]
       vars:
-        CM_BUILD_ID: ""
-        CM_DEPLOYMENT_ID: ""
-        CM_PACKAGE_NAME: ""
-        CM_TEAM_ID: ""
-        CM_KEY_ID: ""
-        CM_ISSUER_ID: ""
-        CM_P8_KEY_S3_PATH: ""
-        CM_TITLE: ""
-        CM_DESCRIPTION: ""
-        CM_SCREENSHOTS: ""
-        CM_ICON: ""
         CM_LOCALE: "en-US"
         CM_NEW_APP: "false"
         CM_CHANGED_BUILD: "false"
