@@ -411,7 +411,7 @@ func seedPlans(db *database.Database, sm secret.SecretManager) {
 				CanUseEmailService:      false,
 				CanUseEcommerce:         false,
 				CanExportToGitHub:       false,
-				CanDeployToVercel:       true,
+				CanDeployWeb:       true,
 				CanRemoveBrandLogo:      false,
 			},
 		},
@@ -442,7 +442,7 @@ func seedPlans(db *database.Database, sm secret.SecretManager) {
 				CanUseEmailService:      false,
 				CanUseEcommerce:         true,
 				CanExportToGitHub:       true,
-				CanDeployToVercel:       true,
+				CanDeployWeb:       true,
 				CanRemoveBrandLogo:      true,
 			},
 		},
@@ -473,7 +473,7 @@ func seedPlans(db *database.Database, sm secret.SecretManager) {
 				CanUseEmailService:      true,
 				CanUseEcommerce:         true,
 				CanExportToGitHub:       true,
-				CanDeployToVercel:       true,
+				CanDeployWeb:       true,
 				CanRemoveBrandLogo:      true,
 			},
 		},
@@ -534,7 +534,7 @@ func seedPlans(db *database.Database, sm secret.SecretManager) {
 		limits.CanBuyDomain = p.Limits.CanBuyDomain
 		limits.CanUseEmailService = p.Limits.CanUseEmailService
 		limits.CanUseEcommerce = p.Limits.CanUseEcommerce
-		limits.CanDeployToVercel = p.Limits.CanDeployToVercel
+		limits.CanDeployWeb = p.Limits.CanDeployWeb
 		limits.CanRemoveBrandLogo = p.Limits.CanRemoveBrandLogo
 		limits.MaximumCredentialCount = p.Limits.MaximumCredentialCount
 		limits.MontlyBuildCount = p.Limits.MontlyBuildCount
