@@ -696,6 +696,7 @@ func main() {
 		sm.GetSecret("GITEA_API_TOKEN"),
 		sm.GetSecret("GITEA_USERNAME"),
 		sm.GetSecret("GITEA_ORG"),
+		sm.GetSecret("GITEA_SSH_PORT"),
 	)
 
 	// GitHub OAuth secrets (required for GitHub export feature)
