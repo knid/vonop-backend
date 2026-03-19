@@ -325,3 +325,20 @@ func (r *Repo) PushToURL(url, branch string) error {
 	}
 	return nil
 }
+
+// ForcePushToURL is like PushToURL but uses --force to overwrite remote history.
+// Used for deployment pushes where the local repo is authoritative.
+func (r *Repo) ForcePushToURL(url, branch string) error {
+	unlock := r.service.lock(r.ProjectID)
+	defer unlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", "push", "--force", url, branch)
+	cmd.Dir = r.Path
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("gitrepo: force push: %s: %s", err, out)
+	}
+	return nil
+}
