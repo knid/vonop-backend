@@ -13,13 +13,14 @@ import (
 var httpClient = &http.Client{Timeout: 30 * time.Second}
 
 type Service struct {
-	BaseURL string // e.g. https://git.wemob.io
-	Token   string
-	Org     string // Gitea organization name
+	BaseURL  string // e.g. https://git.wemob.io
+	Token    string
+	Username string // Gitea username that owns the token
+	Org      string // Gitea organization name
 }
 
-func NewService(baseURL, token, org string) *Service {
-	return &Service{BaseURL: baseURL, Token: token, Org: org}
+func NewService(baseURL, token, username, org string) *Service {
+	return &Service{BaseURL: baseURL, Token: token, Username: username, Org: org}
 }
 
 type createRepoRequest struct {
@@ -116,5 +117,5 @@ func (s *Service) AuthenticatedCloneURL(repoName string) string {
 		scheme = "http://"
 		host = host[7:]
 	}
-	return fmt.Sprintf("%s%s@%s/%s/%s.git", scheme, s.Token, host, s.Org, repoName)
+	return fmt.Sprintf("%s%s:%s@%s/%s/%s.git", scheme, s.Username, s.Token, host, s.Org, repoName)
 }
