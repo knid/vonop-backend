@@ -11,11 +11,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/models"
-	"github.com/knid/wemob/internal/tasks"
+	"github.com/knid/wemob/internal/services/codemagic"
 	"github.com/knid/wemob/internal/utils"
 	"github.com/knid/wemob/internal/utils/external"
-
-	"github.com/hibiken/asynq"
 )
 
 // DeployToCoolify deploys the app to Coolify using files pushed to Gitea.
@@ -73,7 +71,7 @@ func (c *Controller) DeployToCoolify(project *models.AppProject, user *models.Us
 
 		// Create Coolify app pointing to the Gitea repo
 		subdomain := project.Slug + "." + constants.WEMOB_APP_BASE_DOMAIN
-		publicRepoURL := fmt.Sprintf("%s/%s/%s.git", c.GiteaService.BaseURL, c.GiteaService.Org, giteaRepoName)
+		publicRepoURL := c.GiteaService.AuthenticatedCloneURL(giteaRepoName)
 
 		// Look up per-plan resource limits
 		memoryLimit := "256MB"
@@ -288,45 +286,30 @@ func (c *Controller) BuildAppMobile(appProject *models.AppProject, user *models.
 		c.DB.UpsertMobileAppConfig(&configCopy)
 	}
 
+	buildParams := codemagic.AndroidBuildParams{
+		ProjectID:           project.ID.String(),
+		BuildID:             build.ID.String(),
+		TaskID:              "", // set below
+		Version:             build.BuildNumber,
+		Title:               appName,
+		URL:                 wrappedURL,
+		IconURL:             icon,
+		SplashColor:         splashColor,
+		PackageName:         project.PackageName,
+		Permissions:         getPermissions(mobileConfig),
+		URLScheme:           getURLScheme(mobileConfig),
+		UniversalLinkDomain: getUniversalLink(mobileConfig),
+	}
+
 	if platform == "android" {
 		appBuildTask, err = c.DB.CreateAppBuildTask(*build, "Android", "Queued", false)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to create build task: %w", err)
 		}
+		buildParams.TaskID = appBuildTask.ID.String()
 
-		payload, _ := json.Marshal(&tasks.AndroidBuildPayload{
-			ProjectID:         project.ID.String(),
-			Version:           build.BuildNumber,
-			BuildID:           build.ID.String(),
-			TaskID:            appBuildTask.ID.String(),
-			Title:             appName,
-			URL:               wrappedURL,
-			IconURL:           icon,
-			SplashScreenColor: splashColor,
-			PackageName:       project.PackageName,
-			Secret:            appBuildTask.ID.String(),
-			Permissions: func() []string {
-				if mobileConfig != nil {
-					return mobileConfig.Permissions
-				}
-				return nil
-			}(),
-			URLScheme: func() string {
-				if mobileConfig != nil {
-					return mobileConfig.URLScheme
-				}
-				return ""
-			}(),
-			UniversalLinkDomain: func() string {
-				if mobileConfig != nil {
-					return mobileConfig.UniversalLinkDomain
-				}
-				return ""
-			}(),
-		})
-		task := asynq.NewTask(tasks.TypeBuildAndroid, payload)
-		if _, err := c.TaskService.Enqueue(task, asynq.MaxRetry(2), asynq.Timeout(time.Minute*10)); err != nil {
-			return nil, nil, fmt.Errorf("failed to enqueue Android build task: %w", err)
+		if _, err := c.CodemagicService.TriggerAndroidBuild(buildParams); err != nil {
+			return nil, nil, fmt.Errorf("failed to trigger Android build: %w", err)
 		}
 	} else {
 		appBuildTask, err = c.DB.CreateAppBuildTask(*build, "IOS", "Queued", false)
@@ -334,39 +317,21 @@ func (c *Controller) BuildAppMobile(appProject *models.AppProject, user *models.
 			return nil, nil, fmt.Errorf("failed to create build task: %w", err)
 		}
 
-		payload, _ := json.Marshal(&tasks.BuildUnsignedIpaPayload{
-			ProjectID:         project.ID.String(),
-			Version:           build.BuildNumber,
-			BuildID:           build.ID.String(),
-			TaskID:            appBuildTask.ID.String(),
-			Title:             appName,
-			URL:               wrappedURL,
-			IconURL:           icon,
-			SplashScreenColor: splashColor,
-			PackageName:       project.PackageName,
-			Secret:            appBuildTask.ID.String(),
-			Permissions: func() []string {
-				if mobileConfig != nil {
-					return mobileConfig.Permissions
-				}
-				return nil
-			}(),
-			URLScheme: func() string {
-				if mobileConfig != nil {
-					return mobileConfig.URLScheme
-				}
-				return ""
-			}(),
-			UniversalLinkDomain: func() string {
-				if mobileConfig != nil {
-					return mobileConfig.UniversalLinkDomain
-				}
-				return ""
-			}(),
-		})
-		task := asynq.NewTask(tasks.TypeBuildUnsignedIpa, payload)
-		if _, err := c.TaskService.Enqueue(task, asynq.MaxRetry(2), asynq.Timeout(time.Minute*10)); err != nil {
-			return nil, nil, fmt.Errorf("failed to enqueue iOS build task: %w", err)
+		if _, err := c.CodemagicService.TriggerIOSBuild(codemagic.IOSBuildParams{
+			ProjectID:           buildParams.ProjectID,
+			BuildID:             buildParams.BuildID,
+			TaskID:              appBuildTask.ID.String(),
+			Version:             buildParams.Version,
+			Title:               buildParams.Title,
+			URL:                 buildParams.URL,
+			IconURL:             buildParams.IconURL,
+			SplashColor:         buildParams.SplashColor,
+			PackageName:         buildParams.PackageName,
+			Permissions:         buildParams.Permissions,
+			URLScheme:           buildParams.URLScheme,
+			UniversalLinkDomain: buildParams.UniversalLinkDomain,
+		}); err != nil {
+			return nil, nil, fmt.Errorf("failed to trigger iOS build: %w", err)
 		}
 	}
 
