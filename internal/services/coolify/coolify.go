@@ -19,15 +19,17 @@ type Service struct {
 	ServerUUID      string
 	ProjectUUID     string
 	EnvironmentName string
+	PrivateKeyUUID  string
 }
 
-func NewService(baseURL, token, serverUUID, projectUUID, environmentName string) *Service {
+func NewService(baseURL, token, serverUUID, projectUUID, environmentName, privateKeyUUID string) *Service {
 	return &Service{
 		BaseURL:         strings.TrimRight(baseURL, "/"),
 		Token:           token,
 		ServerUUID:      serverUUID,
 		ProjectUUID:     projectUUID,
 		EnvironmentName: environmentName,
+		PrivateKeyUUID:  privateKeyUUID,
 	}
 }
 
@@ -77,6 +79,7 @@ type createAppRequest struct {
 	ProjectUUID        string `json:"project_uuid"`
 	ServerUUID         string `json:"server_uuid"`
 	EnvironmentName    string `json:"environment_name"`
+	PrivateKeyUUID     string `json:"private_key_uuid,omitempty"`
 	GitRepository      string `json:"git_repository"`
 	GitBranch          string `json:"git_branch"`
 	BuildPack          string `json:"build_pack"`
@@ -103,10 +106,12 @@ type envVar struct {
 	Value string `json:"value"`
 }
 
-// CreateApp creates a new application from a public git repository.
+// CreateApp creates a new application from a git repository.
+// Uses private deploy key if configured, otherwise falls back to public.
 // Returns the Coolify application UUID.
 func (s *Service) CreateApp(name, giteaRepoURL, domain, memoryLimit, cpuLimit string) (string, error) {
-	body, err := s.doRequest("POST", "/applications/public", createAppRequest{
+	endpoint := "/applications/public"
+	req := createAppRequest{
 		ProjectUUID:        s.ProjectUUID,
 		ServerUUID:         s.ServerUUID,
 		EnvironmentName:    s.EnvironmentName,
@@ -121,7 +126,12 @@ func (s *Service) CreateApp(name, giteaRepoURL, domain, memoryLimit, cpuLimit st
 		Name:               name,
 		LimitsMemory:       memoryLimit,
 		LimitsCPUs:         cpuLimit,
-	})
+	}
+	if s.PrivateKeyUUID != "" {
+		endpoint = "/applications/private-deploy-key"
+		req.PrivateKeyUUID = s.PrivateKeyUUID
+	}
+	body, err := s.doRequest("POST", endpoint, req)
 	if err != nil {
 		return "", err
 	}
