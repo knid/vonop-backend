@@ -160,28 +160,24 @@ func (c *Controller) UpdateAppProject(id string, user *models.User, req requests
 		return nil, err
 	}
 
-	// If slug changed and a Vercel project exists, reassign the wemob.app subdomain
-	if oldSlug != req.Slug && c.VercelService != nil {
+	// If slug changed and a Coolify project exists, reassign the wemob.app subdomain
+	if oldSlug != req.Slug && c.CoolifyService != nil {
 		go func() {
-			vp, vpErr := c.DB.GetVercelProjectByAppProjectID(id)
-			if vpErr != nil || vp == nil {
+			cp, cpErr := c.DB.GetCoolifyProjectByAppProjectID(id)
+			if cpErr != nil || cp == nil {
 				return
 			}
 
-			oldDomain := oldSlug + "." + constants.WEMOB_APP_BASE_DOMAIN
 			newDomain := req.Slug + "." + constants.WEMOB_APP_BASE_DOMAIN
 
-			if err := c.VercelService.RemoveDomain(vp.VercelProjectID, oldDomain); err != nil {
-				slog.Warn("Failed to remove old wemob.app subdomain", "domain", oldDomain, "error", err)
-			}
-			if err := c.VercelService.AddDomain(vp.VercelProjectID, newDomain); err != nil {
-				slog.Warn("Failed to add new wemob.app subdomain", "domain", newDomain, "error", err)
+			if err := c.CoolifyService.UpdateDomains(cp.CoolifyAppUUID, []string{"https://" + newDomain}); err != nil {
+				slog.Warn("Failed to update wemob.app subdomain on Coolify", "error", err)
 				return
 			}
 
-			vp.CustomDomain = newDomain
-			vp.ProductionURL = "https://" + newDomain
-			c.DB.UpdateVercelProject(vp)
+			cp.CustomDomain = newDomain
+			cp.ProductionURL = "https://" + newDomain
+			c.DB.UpdateCoolifyProject(cp)
 		}()
 	}
 
@@ -213,6 +209,22 @@ func (c *Controller) DeleteAppProject(id string, user *models.User) error {
 	// Clean up git repo (best-effort)
 	if err := c.GitRepoService.Delete(project.ID.String()); err != nil {
 		slog.Warn("Failed to delete git repo during app deletion", "error", err, "project_id", project.ID)
+	}
+
+	// Clean up Coolify app and Gitea repo (best-effort)
+	coolifyProject, cpErr := c.DB.GetCoolifyProjectByAppProjectID(project.ID.String())
+	if cpErr == nil && coolifyProject != nil {
+		if c.CoolifyService != nil {
+			if err := c.CoolifyService.DeleteApp(coolifyProject.CoolifyAppUUID); err != nil {
+				slog.Warn("Failed to delete Coolify app during app deletion", "error", err, "app_uuid", coolifyProject.CoolifyAppUUID)
+			}
+		}
+		if c.GiteaService != nil {
+			if err := c.GiteaService.DeleteRepo(coolifyProject.GiteaRepoName); err != nil {
+				slog.Warn("Failed to delete Gitea repo during app deletion", "error", err, "repo", coolifyProject.GiteaRepoName)
+			}
+		}
+		c.DB.DeleteCoolifyProject(coolifyProject)
 	}
 
 	return c.DB.DeleteAppProject(project)
