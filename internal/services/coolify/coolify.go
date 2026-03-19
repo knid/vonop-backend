@@ -182,6 +182,37 @@ func (s *Service) GetAppLogs(appUUID string, lines int) (string, error) {
 	return resp.Logs, nil
 }
 
+// DeploymentStatus holds the status and logs of a Coolify deployment.
+type DeploymentStatus struct {
+	Status string
+	Logs   string
+}
+
+// GetLatestDeployment returns the status and logs of the most recent deployment
+// for an application. Works even after a failed build removes the app.
+func (s *Service) GetLatestDeployment(appUUID string) (*DeploymentStatus, error) {
+	body, err := s.doRequest("GET", fmt.Sprintf("/deployments/applications/%s?take=1", appUUID), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var deployments []struct {
+		Status string `json:"status"`
+		Logs   string `json:"logs"`
+	}
+	if err := json.Unmarshal(body, &deployments); err != nil {
+		return nil, fmt.Errorf("coolify: unmarshal deployments: %w", err)
+	}
+	if len(deployments) == 0 {
+		return nil, fmt.Errorf("coolify: no deployments found")
+	}
+
+	return &DeploymentStatus{
+		Status: deployments[0].Status,
+		Logs:   deployments[0].Logs,
+	}, nil
+}
+
 // SyncEnvVars sets environment variables on the application using bulk update.
 func (s *Service) SyncEnvVars(appUUID string, desired map[string]string) error {
 	var data []envVar

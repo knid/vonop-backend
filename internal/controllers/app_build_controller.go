@@ -382,10 +382,19 @@ func (c *Controller) GetLatestDeploymentStatus(projectID string) (*models.AppDep
 		if appUUID != "" {
 			status, err := c.CoolifyService.GetAppStatus(appUUID)
 			if err != nil {
-				// App not found — Coolify removed it after build failure
-				slog.Warn("Failed to check Coolify app status", "error", err, "app_uuid", appUUID)
-				deployment.Status = "failed"
-				deployment.ErrorMessage = "Build failed — application was removed by Coolify"
+				// App not found — check deployment logs (survives app removal)
+				slog.Warn("Failed to check Coolify app status, checking deployment logs", "error", err, "app_uuid", appUUID)
+				dep, depErr := c.CoolifyService.GetLatestDeployment(appUUID)
+				if depErr != nil || dep == nil {
+					deployment.Status = "failed"
+					deployment.ErrorMessage = "Build failed — application was removed by Coolify"
+				} else if dep.Status == "failed" || dep.Status == "error" {
+					deployment.Status = "failed"
+					deployment.ErrorMessage = dep.Logs
+				} else {
+					// Still in progress
+					return deployment, nil
+				}
 				if _, updateErr := c.DB.UpdateAppDeployment(deployment); updateErr != nil {
 					slog.Error("Failed to update deployment status", "error", updateErr)
 				}
@@ -399,11 +408,17 @@ func (c *Controller) GetLatestDeploymentStatus(projectID string) (*models.AppDep
 				newStatus = "deployed"
 			case "exited", "error", "degraded":
 				newStatus = "failed"
-				logs, logErr := c.CoolifyService.GetAppLogs(appUUID, 200)
-				if logErr != nil {
-					errorMessage = "Build failed"
+				// Try deployment logs first (more detailed), fall back to app logs
+				dep, depErr := c.CoolifyService.GetLatestDeployment(appUUID)
+				if depErr == nil && dep.Logs != "" {
+					errorMessage = dep.Logs
 				} else {
-					errorMessage = logs
+					logs, logErr := c.CoolifyService.GetAppLogs(appUUID, 200)
+					if logErr != nil {
+						errorMessage = "Build failed"
+					} else {
+						errorMessage = logs
+					}
 				}
 			default:
 				// Still building/starting
