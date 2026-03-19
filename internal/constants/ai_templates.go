@@ -294,16 +294,29 @@ export default function Error({
 
 // NEXTJS_TEMPLATE_DB_TS is the database connection file using Neon serverless + Drizzle ORM.
 // Uses DATABASE_URL env var only — no hardcoded connection strings.
+// Lazy initialization so the module can be imported at build time without DATABASE_URL.
 const NEXTJS_TEMPLATE_DB_TS = `import { neon } from '@neondatabase/serverless';
 import { drizzle } from 'drizzle-orm/neon-http';
 import * as schema from './schema';
 
-if (!process.env.DATABASE_URL) {
-  throw new Error('DATABASE_URL environment variable is not set');
+let _db: ReturnType<typeof drizzle> | null = null;
+
+function getDb() {
+  if (!_db) {
+    if (!process.env.DATABASE_URL) {
+      throw new Error('DATABASE_URL environment variable is not set');
+    }
+    const sql = neon(process.env.DATABASE_URL);
+    _db = drizzle(sql, { schema });
+  }
+  return _db;
 }
 
-const sql = neon(process.env.DATABASE_URL);
-export const db = drizzle(sql, { schema });
+export const db = new Proxy({} as ReturnType<typeof drizzle>, {
+  get(_, prop) {
+    return (getDb() as any)[prop];
+  },
+});
 `
 
 // NEXTJS_TEMPLATE_WEMOB_STORE is the typed storefront SDK with React context, hooks, and API client
