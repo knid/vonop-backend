@@ -35,27 +35,20 @@ func (c *Controller) DeployToCoolify(project *models.AppProject, user *models.Us
 	// Collect all env vars (integrations + custom + auto-injected store vars)
 	envVars := c.CollectAllEnvVars(project)
 
-	// Build file map and inject .env.local + analytics
+	// Inject analytics into file map and commit
 	fileMap := repoFiles
-	if dotEnv := BuildDotEnvLocal(envVars); dotEnv != "" {
-		fileMap[".env.local"] = dotEnv
-	}
 	injectAnalyticsScript(fileMap, project.ID.String())
-
-	// Write ALL modified/injected files back to the repo working tree.
-	// The Vercel flow uploaded fileMap directly; the Coolify flow needs
-	// everything committed to git so it reaches Gitea via push.
 	for path, content := range fileMap {
 		if repoFiles[path] != content {
 			repo.WriteFile(path, []byte(content))
 		}
 	}
-	repo.Commit("deploy: inject env and analytics")
+	repo.Commit("deploy: inject analytics")
 
 	// Get or create Coolify project
 	coolifyProject, err := c.DB.GetCoolifyProjectByAppProjectID(project.ID.String())
 	if err != nil {
-		// First deploy — create Gitea repo and Coolify app
+		// First deploy — create Gitea repo and Coolify app (no instant deploy)
 		giteaRepoName := "wemob-" + project.Slug
 		giteaCloneURL, err := c.GiteaService.CreateRepo(giteaRepoName)
 		if err != nil {
@@ -69,7 +62,7 @@ func (c *Controller) DeployToCoolify(project *models.AppProject, user *models.Us
 			return nil, fmt.Errorf("failed to push files")
 		}
 
-		// Create Coolify app pointing to the Gitea repo
+		// Create Coolify app pointing to the Gitea repo (InstantDeploy=false)
 		subdomain := project.Slug + "." + constants.WEMOB_APP_BASE_DOMAIN
 		var repoURL string
 		if c.CoolifyService.PrivateKeyUUID != "" {
@@ -103,23 +96,34 @@ func (c *Controller) DeployToCoolify(project *models.AppProject, user *models.Us
 			slog.Error("Failed to persist Coolify project to DB", "error", err)
 			return nil, fmt.Errorf("failed to save deployment project")
 		}
+
+		// Sync env vars BEFORE triggering the first build
+		if err := c.CoolifyService.SyncEnvVars(coolifyProject.CoolifyAppUUID, envVars); err != nil {
+			slog.Warn("Failed to sync env vars on Coolify", "error", err)
+		}
+
+		// Now trigger the build with env vars already in place
+		if err := c.CoolifyService.RestartApp(coolifyProject.CoolifyAppUUID); err != nil {
+			slog.Error("Failed to trigger first Coolify deploy", "error", err)
+			return nil, fmt.Errorf("failed to trigger deployment")
+		}
 	} else {
-		// Subsequent deploy — force push updated files and restart
+		// Subsequent deploy — sync env vars, push updated files, then restart
 		giteaCloneURL := c.GiteaService.AuthenticatedCloneURL(coolifyProject.GiteaRepoName)
 		if err := repo.ForcePushToURL(giteaCloneURL, "main"); err != nil {
 			slog.Error("Failed to push to Gitea", "error", err)
 			return nil, fmt.Errorf("failed to push files")
 		}
 
+		// Sync env vars before restarting
+		if err := c.CoolifyService.SyncEnvVars(coolifyProject.CoolifyAppUUID, envVars); err != nil {
+			slog.Warn("Failed to sync env vars on Coolify", "error", err)
+		}
+
 		if err := c.CoolifyService.RestartApp(coolifyProject.CoolifyAppUUID); err != nil {
 			slog.Error("Failed to restart Coolify app", "error", err)
 			return nil, fmt.Errorf("failed to trigger deployment")
 		}
-	}
-
-	// Sync env vars on Coolify app
-	if err := c.CoolifyService.SyncEnvVars(coolifyProject.CoolifyAppUUID, envVars); err != nil {
-		slog.Warn("Failed to sync env vars on Coolify", "error", err)
 	}
 
 	subdomain := project.Slug + "." + constants.WEMOB_APP_BASE_DOMAIN
