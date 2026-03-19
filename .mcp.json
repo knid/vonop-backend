@@ -5,10 +5,12 @@
       "command": "npx",
       "args": [
         "-y",
-        "@anthropic-ai/mcp-server-postgres",
-        "postgresql://localhost:5432/wemob"
+        "@modelcontextprotocol/server-postgres",
+        "postgresql://uj8nd2b6dk3:AVNS_OEd2MeBz1qBHIjwaC0T@dbaas-db-5544559-do-user-27489656-0.k.db.ondigitalocean.com:25060/wemob-main-db?sslmode=require"
       ],
-      "env": {}
+      "env": {
+        "NODE_TLS_REJECT_UNAUTHORIZED": "0"
+      }
     },
     "github": {
       "type": "stdio",
@@ -16,6 +18,30 @@
       "args": [
         "-y",
         "@modelcontextprotocol/server-github"
+      ],
+      "env": {}
+    },
+    "betterstack": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-remote",
+        "https://mcp.betterstack.com",
+        "--header",
+        "Authorization: Bearer MwsvTVAwwgZJ2yHApUP4rcQ7"
+      ],
+      "env": {}
+    },
+    "brevo": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-remote",
+        "https://mcp.brevo.com/v1/brevo/mcp",
+        "--header",
+        "Authorization: Bearer eyJhcGlfa2V5IjoieGtleXNpYi1kMDY0MTliZTdmNjRjM2ZmOTVkMGQ2ZDE5MTBlNzQzZjRiMzE3YzZlODQ1Y2Q4YjcyMzFmODU4ZTRlYTViNDhkLUlPNE5wMklHcmo2ajRYT2oifQ=="
       ],
       "env": {}
     }
