@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"strings"
 
 	"github.com/go-playground/validator/v10"
@@ -35,7 +36,7 @@ func (c *Controller) GetAppDomains(projectID string) ([]responses.AppDomainRespo
 }
 
 // AddAppDomain adds a custom domain to an app project.
-// If a Vercel project exists, the domain is also added there.
+// If a Coolify project exists, the domain is also registered there.
 func (c *Controller) AddAppDomain(project *models.AppProject, user *models.User, req requests.AddAppDomainRequest) (*responses.AppDomainResponse, error) {
 	validate := validator.New(validator.WithRequiredStructEnabled())
 	if err := utils.ValidateFunc[requests.AddAppDomainRequest](req, validate); err != nil {
@@ -66,12 +67,13 @@ func (c *Controller) AddAppDomain(project *models.AppProject, user *models.User,
 		return nil, fmt.Errorf("failed to add domain: %v", err)
 	}
 
-	// If there is a Vercel project, add the domain there too
-	vercelProject, vercelErr := c.DB.GetVercelProjectByAppProjectID(project.ID.String())
-	if vercelErr == nil && vercelProject != nil && c.VercelService != nil {
-		if err := c.VercelService.AddDomain(vercelProject.VercelProjectID, domainName); err != nil {
-			slog.Warn("Failed to add domain to Vercel", "domain", domainName, "error", err)
-			// Domain was still saved in our DB; Vercel addition is best-effort
+	// If there is a Coolify project, add the domain there too
+	coolifyProject, cpErr := c.DB.GetCoolifyProjectByAppProjectID(project.ID.String())
+	if cpErr == nil && coolifyProject != nil && c.CoolifyService != nil {
+		newDomain := "https://" + domainName
+		existingDomain := "https://" + coolifyProject.CustomDomain
+		if err := c.CoolifyService.UpdateDomains(coolifyProject.CoolifyAppUUID, []string{existingDomain, newDomain}); err != nil {
+			slog.Warn("Failed to add domain to Coolify", "domain", domainName, "error", err)
 		} else {
 			created.Status = "active"
 			c.DB.UpdateAppDomain(created)
@@ -87,7 +89,7 @@ func (c *Controller) AddAppDomain(project *models.AppProject, user *models.User,
 	}, nil
 }
 
-// RemoveAppDomain removes a custom domain from an app project and Vercel.
+// RemoveAppDomain removes a custom domain from an app project and Coolify.
 func (c *Controller) RemoveAppDomain(domainID string, project *models.AppProject) error {
 	domain, err := c.DB.GetAppDomainByID(domainID)
 	if err != nil {
@@ -98,12 +100,13 @@ func (c *Controller) RemoveAppDomain(domainID string, project *models.AppProject
 		return errors.New("domain does not belong to this project")
 	}
 
-	// Also remove from Vercel if project exists there
-	if c.VercelService != nil {
-		vercelProject, vercelErr := c.DB.GetVercelProjectByAppProjectID(project.ID.String())
-		if vercelErr == nil && vercelProject != nil {
-			if err := c.VercelService.RemoveDomain(vercelProject.VercelProjectID, domain.Domain); err != nil {
-				slog.Warn("Failed to remove domain from Vercel", "domain", domain.Domain, "error", err)
+	// Also remove from Coolify if project exists there
+	if c.CoolifyService != nil {
+		coolifyProject, cpErr := c.DB.GetCoolifyProjectByAppProjectID(project.ID.String())
+		if cpErr == nil && coolifyProject != nil {
+			defaultDomain := "https://" + coolifyProject.CustomDomain
+			if err := c.CoolifyService.UpdateDomains(coolifyProject.CoolifyAppUUID, []string{defaultDomain}); err != nil {
+				slog.Warn("Failed to remove domain from Coolify", "domain", domain.Domain, "error", err)
 			}
 		}
 	}
@@ -111,7 +114,7 @@ func (c *Controller) RemoveAppDomain(domainID string, project *models.AppProject
 	return c.DB.DeleteAppDomain(domain)
 }
 
-// VerifyAppDomain checks the DNS configuration of a custom domain via Vercel's API
+// VerifyAppDomain checks the DNS configuration of a custom domain via Go net lookups
 // and updates the domain status accordingly.
 func (c *Controller) VerifyAppDomain(domainID string, project *models.AppProject) (*responses.AppDomainResponse, error) {
 	domain, err := c.DB.GetAppDomainByID(domainID)
@@ -123,39 +126,28 @@ func (c *Controller) VerifyAppDomain(domainID string, project *models.AppProject
 		return nil, errors.New("domain does not belong to this project")
 	}
 
-	if c.VercelService == nil {
-		return nil, errors.New("vercel service not configured")
-	}
-
-	// Check DNS configuration via Vercel
-	cfg, err := c.VercelService.GetDomainConfig(domain.Domain)
-	if err != nil {
-		slog.Warn("Failed to check domain config", "domain", domain.Domain, "error", err)
-		return &responses.AppDomainResponse{
-			ID:        domain.ID,
-			Domain:    domain.Domain,
-			Status:    domain.Status,
-			DNSRecord: constants.WEMOB_CNAME_TARGET,
-			CreatedAt: domain.CreatedAt,
-		}, nil
-	}
-
-	// Update status based on Vercel's DNS check
-	if cfg.ConfiguredBy != nil && !cfg.Misconfigured {
+	// Check DNS via Go net package instead of Vercel API
+	cname, err := net.LookupCNAME(domain.Domain)
+	if err == nil && strings.Contains(cname, constants.WEMOB_CNAME_TARGET) {
 		domain.Status = "active"
-	} else if cfg.Misconfigured {
-		domain.Status = "misconfigured"
+	} else {
+		// Try A record lookup as fallback
+		ips, err := net.LookupHost(domain.Domain)
+		if err == nil && len(ips) > 0 {
+			domain.Status = "active"
+		}
 	}
-	// If ConfiguredBy is nil, DNS isn't set up yet — keep "pending"
 
 	c.DB.UpdateAppDomain(domain)
 
-	// If domain just became active and Vercel project exists, ensure domain is added
-	if domain.Status == "active" {
-		vercelProject, vercelErr := c.DB.GetVercelProjectByAppProjectID(project.ID.String())
-		if vercelErr == nil && vercelProject != nil {
-			if err := c.VercelService.AddDomain(vercelProject.VercelProjectID, domain.Domain); err != nil {
-				slog.Warn("Failed to add verified domain to Vercel", "domain", domain.Domain, "error", err)
+	// If domain just became active and Coolify project exists, add domain
+	if domain.Status == "active" && c.CoolifyService != nil {
+		coolifyProject, cpErr := c.DB.GetCoolifyProjectByAppProjectID(project.ID.String())
+		if cpErr == nil && coolifyProject != nil {
+			newDomain := "https://" + domain.Domain
+			existingDomain := "https://" + coolifyProject.CustomDomain
+			if err := c.CoolifyService.UpdateDomains(coolifyProject.CoolifyAppUUID, []string{existingDomain, newDomain}); err != nil {
+				slog.Warn("Failed to add verified domain to Coolify", "domain", domain.Domain, "error", err)
 			}
 		}
 	}
