@@ -2545,6 +2545,15 @@ func truncate(s string, n int) string {
 
 // --- Helper: build modular system prompt ---
 
+// projectHasDataModels returns true if the project has non-empty data_models.
+func projectHasDataModels(project *models.AppProject) bool {
+	if len(project.DataModels) == 0 {
+		return false
+	}
+	models, _ := parseDataModels(project.DataModels)
+	return len(models) > 0
+}
+
 // buildSystemPrompt assembles the system prompt for the tool-calling path,
 // only including e-commerce and auth rules when the project actually uses those features.
 func buildSystemPrompt(project *models.AppProject, mobileConfig *models.MobileAppConfig) string {
@@ -2552,7 +2561,10 @@ func buildSystemPrompt(project *models.AppProject, mobileConfig *models.MobileAp
 	if project.ProjectType == "ecommerce" {
 		prompt = constants.NEXTJS_ECOMMERCE_COMMON_RULES + constants.NEXTJS_BUILDER_TOOL_INSTRUCTIONS
 	} else {
-		prompt = constants.NEXTJS_BUILDER_SYSTEM_PROMPT + constants.NEXTJS_BUILDER_DATABASE_RULES
+		prompt = constants.NEXTJS_BUILDER_SYSTEM_PROMPT
+		if projectHasDataModels(project) {
+			prompt += constants.NEXTJS_BUILDER_DATABASE_RULES
+		}
 	}
 
 	if settings := project.Settings; settings != nil {
@@ -2580,7 +2592,10 @@ func buildChatSystemPrompt(project *models.AppProject, mobileConfig *models.Mobi
 	if project.ProjectType == "ecommerce" {
 		prompt = constants.NEXTJS_ECOMMERCE_COMMON_RULES + constants.NEXTJS_BUILDER_CHAT_INSTRUCTIONS
 	} else {
-		prompt = constants.NEXTJS_BUILDER_CHAT_SYSTEM_PROMPT + constants.NEXTJS_BUILDER_DATABASE_RULES
+		prompt = constants.NEXTJS_BUILDER_CHAT_SYSTEM_PROMPT
+		if projectHasDataModels(project) {
+			prompt += constants.NEXTJS_BUILDER_DATABASE_RULES
+		}
 	}
 
 	if settings := project.Settings; settings != nil {
@@ -2607,7 +2622,10 @@ func buildSingleShotSystemPrompt(project *models.AppProject, mobileConfig *model
 	if project.ProjectType == "ecommerce" {
 		prompt = constants.NEXTJS_ECOMMERCE_COMMON_RULES + constants.NEXTJS_BUILDER_SINGLESHOT_INSTRUCTIONS
 	} else {
-		prompt = constants.NEXTJS_BUILDER_COMMON_RULES + constants.NEXTJS_BUILDER_SINGLESHOT_INSTRUCTIONS + constants.NEXTJS_BUILDER_DATABASE_RULES
+		prompt = constants.NEXTJS_BUILDER_COMMON_RULES + constants.NEXTJS_BUILDER_SINGLESHOT_INSTRUCTIONS
+		if projectHasDataModels(project) {
+			prompt += constants.NEXTJS_BUILDER_DATABASE_RULES
+		}
 	}
 
 	if settings := project.Settings; settings != nil {
