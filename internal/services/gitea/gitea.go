@@ -125,8 +125,8 @@ func (s *Service) AuthenticatedCloneURL(repoName string) string {
 }
 
 // SSHCloneURL returns the SSH clone URL for use with deploy keys.
-// Uses ssh:// format to support non-standard ports.
-// Format: ssh://git@host:port/org/repo.git
+// Format: git@host:org/repo.git (standard SSH port)
+// or git@host:port/org/repo.git (custom SSH port, port before path)
 func (s *Service) SSHCloneURL(repoName string) string {
 	host := s.BaseURL
 	if len(host) > 8 && host[:8] == "https://" {
@@ -134,5 +134,8 @@ func (s *Service) SSHCloneURL(repoName string) string {
 	} else if len(host) > 7 && host[:7] == "http://" {
 		host = host[7:]
 	}
-	return fmt.Sprintf("ssh://git@%s:%s/%s/%s.git", host, s.SSHPort, s.Org, repoName)
+	if s.SSHPort != "" && s.SSHPort != "22" {
+		return fmt.Sprintf("git@%s:%s/%s/%s.git", host, s.SSHPort, s.Org, repoName)
+	}
+	return fmt.Sprintf("git@%s:%s/%s.git", host, s.Org, repoName)
 }
