@@ -693,6 +693,7 @@ func main() {
 	giteaService := gitea.NewService(
 		sm.GetSecret("GITEA_URL"),
 		sm.GetSecret("GITEA_API_TOKEN"),
+		sm.GetSecret("GITEA_USERNAME"),
 		sm.GetSecret("GITEA_ORG"),
 	)
 
