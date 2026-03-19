@@ -314,6 +314,9 @@ func (c *Controller) BuildAppMobile(appProject *models.AppProject, user *models.
 		buildParams.TaskID = appBuildTask.ID.String()
 
 		if _, err := c.CodemagicService.TriggerAndroidBuild(buildParams); err != nil {
+			appBuildTask.StatusText = "Failed"
+			appBuildTask.Finished = true
+			_ = c.DB.UpdateAppBuildTask(appBuildTask)
 			return nil, nil, fmt.Errorf("failed to trigger Android build: %w", err)
 		}
 	} else {
@@ -336,6 +339,9 @@ func (c *Controller) BuildAppMobile(appProject *models.AppProject, user *models.
 			URLScheme:           buildParams.URLScheme,
 			UniversalLinkDomain: buildParams.UniversalLinkDomain,
 		}); err != nil {
+			appBuildTask.StatusText = "Failed"
+			appBuildTask.Finished = true
+			_ = c.DB.UpdateAppBuildTask(appBuildTask)
 			return nil, nil, fmt.Errorf("failed to trigger iOS build: %w", err)
 		}
 	}
