@@ -17,10 +17,14 @@ type Service struct {
 	Token    string
 	Username string // Gitea username that owns the token
 	Org      string // Gitea organization name
+	SSHPort  string // SSH port for git clone (e.g. "22222")
 }
 
-func NewService(baseURL, token, username, org string) *Service {
-	return &Service{BaseURL: baseURL, Token: token, Username: username, Org: org}
+func NewService(baseURL, token, username, org, sshPort string) *Service {
+	if sshPort == "" {
+		sshPort = "22"
+	}
+	return &Service{BaseURL: baseURL, Token: token, Username: username, Org: org, SSHPort: sshPort}
 }
 
 type createRepoRequest struct {
@@ -121,7 +125,8 @@ func (s *Service) AuthenticatedCloneURL(repoName string) string {
 }
 
 // SSHCloneURL returns the SSH clone URL for use with deploy keys.
-// Format: git@git.wemob.io:Wemob-Org/repo.git
+// Uses ssh:// format to support non-standard ports.
+// Format: ssh://git@host:port/org/repo.git
 func (s *Service) SSHCloneURL(repoName string) string {
 	host := s.BaseURL
 	if len(host) > 8 && host[:8] == "https://" {
@@ -129,5 +134,5 @@ func (s *Service) SSHCloneURL(repoName string) string {
 	} else if len(host) > 7 && host[:7] == "http://" {
 		host = host[7:]
 	}
-	return fmt.Sprintf("git@%s:%s/%s.git", host, s.Org, repoName)
+	return fmt.Sprintf("ssh://git@%s:%s/%s/%s.git", host, s.SSHPort, s.Org, repoName)
 }
