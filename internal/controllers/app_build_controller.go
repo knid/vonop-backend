@@ -368,11 +368,27 @@ func (c *Controller) GetLatestDeploymentStatus(projectID string) (*models.AppDep
 
 	// If still building, check Coolify for actual status
 	if (deployment.Status == "building" || deployment.Status == "pending") && c.CoolifyService != nil {
+		// Timeout: if building for more than 15 minutes, mark as failed
+		if time.Since(deployment.CreatedAt) > 15*time.Minute {
+			deployment.Status = "failed"
+			deployment.ErrorMessage = "Build timed out after 15 minutes"
+			if _, err := c.DB.UpdateAppDeployment(deployment); err != nil {
+				slog.Error("Failed to update deployment status", "error", err)
+			}
+			return deployment, nil
+		}
+
 		appUUID, _ := deployment.ProviderData["coolify_app_uuid"].(string)
 		if appUUID != "" {
 			status, err := c.CoolifyService.GetAppStatus(appUUID)
 			if err != nil {
+				// App not found — Coolify removed it after build failure
 				slog.Warn("Failed to check Coolify app status", "error", err, "app_uuid", appUUID)
+				deployment.Status = "failed"
+				deployment.ErrorMessage = "Build failed — application was removed by Coolify"
+				if _, updateErr := c.DB.UpdateAppDeployment(deployment); updateErr != nil {
+					slog.Error("Failed to update deployment status", "error", updateErr)
+				}
 				return deployment, nil
 			}
 
