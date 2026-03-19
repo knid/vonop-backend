@@ -114,7 +114,29 @@ const builderFrameworkRulesBase = `
 - **Do NOT write, edit, or create package.json** — it is auto-managed. Dependencies are detected from your imports automatically. Just import what you need and the system handles package.json.
 - CRITICAL: app/layout.tsx (root layout) MUST include <html lang="..."> (set the lang attribute to match the user's language, e.g. "tr" for Turkish, "en" for English, "es" for Spanish) and <body> tags wrapping {children}. This is a Next.js App Router requirement — builds will fail without them.
 - CRITICAL: If the user reports "Module not found" errors for pre-installed packages, keep the imports — these are transient container issues. Ensure package.json includes the dependency.
-- CRITICAL JSX SAFETY: When writing JSX with non-English text content (Turkish, Spanish, Arabic, etc.), pay extra attention to tag nesting. Every opening tag MUST have a matching closing tag. Never break a JSX element mid-sentence.`
+- CRITICAL JSX SAFETY: When writing JSX with non-English text content (Turkish, Spanish, Arabic, etc.), pay extra attention to tag nesting. Every opening tag MUST have a matching closing tag. Never break a JSX element mid-sentence.
+- ALWAYS use the Image component from 'next/image' instead of raw <img> tags. Every Image must have width and height props (or fill with a sized parent). Use loading="lazy" for below-the-fold images.
+- CRITICAL: Any component that calls useSearchParams() MUST be wrapped in a <Suspense> boundary — Next.js requires this for static rendering.
+
+### Loading & Error States
+- Data-fetching pages MUST show loading indicators. Never show blank/empty content while data loads.
+- For pages with database queries: add a loading.tsx sibling file that shows skeleton placeholders matching the page layout.
+- For client components fetching data: check isLoading/loading state and render Skeleton components (from @/components/ui/skeleton), not empty space.
+- API routes: wrap database calls in try/catch, return meaningful JSON error responses with appropriate HTTP status codes.
+- Display user-friendly error messages via toast (sonner) for failed client-side operations.
+- Empty states: when a list/grid has no data, show a helpful message with an icon (from lucide-react) — never show a blank page.
+- Use Suspense boundaries around dynamic content that may take time to load.
+
+### SEO & Metadata
+- Every page.tsx MUST export metadata (or generateMetadata for dynamic pages) with meaningful title and description.
+- Root layout.tsx must have a complete metadata export with title, description, and viewport settings.
+- Use semantic HTML elements: <header>, <main>, <footer>, <nav>, <section>, <article> where appropriate.
+
+### Accessibility
+- All images must have descriptive alt text.
+- Form inputs must have associated <label> elements with htmlFor.
+- Interactive elements must be keyboard-navigable with visible focus indicators.
+- Use appropriate ARIA attributes for dynamic content (aria-live, aria-label, role).`
 
 // builderFrameworkRulesEcommerce adds the ecommerce-specific "use client" and
 // href="#" rules on top of the shared framework base.
@@ -532,7 +554,7 @@ When building a new app from a user's prompt:
    c. Then proceed to write all code files below.
 4. **Write feature components**: Build the reusable feature-specific components (Header, Footer, ProductCard, etc.).
 5. **Write pages**: Build each page using the components you just created.
-6. **Write app/globals.css**: Design a complete, cohesive globals.css with @import "tailwindcss" and @theme directive for custom colors. Choose a sophisticated, modern color palette that fits the app's purpose. Do NOT include dark mode or @media (prefers-color-scheme: dark) — always use a light theme only. CRITICAL: Do NOT add a manual CSS reset like "* { margin: 0; padding: 0; box-sizing: border-box; }" — Tailwind v4's Preflight already handles this. Adding a wildcard reset conflicts with Tailwind utility classes and breaks spacing. The globals.css should only contain: @import "tailwindcss", @theme { ... }, and optional aesthetic styles (scroll-behavior, selection, scrollbar). IMPORTANT: The @theme block MUST define these semantic color tokens (the pre-injected UI components depend on them): --color-background, --color-foreground, --color-primary, --color-primary-foreground, --color-secondary, --color-secondary-foreground, --color-accent, --color-accent-foreground, --color-muted, --color-muted-foreground, --color-card, --color-card-foreground, --color-border, --color-input, --color-ring, --color-destructive, --color-destructive-foreground. Without these, buttons, cards, inputs, and badges will be invisible.
+6. **Do NOT write app/globals.css** — it is pre-injected with the project's color scheme and all semantic tokens from the structure planning phase. Use the semantic color classes directly (bg-primary, text-muted-foreground, border-border, etc.).
 7. **Write app/layout.tsx LAST**: It must be a Server Component (NO "use client"). Include <html lang="en"> and <body> tags wrapping {children}. Import Google Fonts using next/font/google. Export metadata. If you need client interactivity (hooks, providers, event handlers), create a separate "components/layout-client.tsx" with "use client" and import it as a wrapper. IMPORTANT: Non-variable fonts (Bebas Neue, Lobster, Pacifico, Permanent Marker, etc.) require an explicit weight parameter — e.g. Bebas_Neue({ subsets: ["latin"], weight: "400" }). Omitting weight causes a build error.
 8. **Every file you create must be complete**: No placeholders, no "TODO", no stub implementations.
 9. **Use write_files to batch-create files**: Group related files into a single write_files call (e.g., all UI primitives in one call, all pages in another). Each file is saved and shown to the user in real-time. Write each file once with complete, correct code and move on. After each tool round, the system compresses your previous tool call arguments to save context — you will see "content_written: N chars saved to disk" instead of the actual code. This is normal. The full code IS saved. Do NOT re-write files that show "content_written". **Before each write_files call, write a brief 1-sentence progress update describing what the user will see next (e.g., "Creating your homepage with a hero section and featured products"). Do NOT mention file paths, component names, or technical terms — describe pages and features from the user's perspective. CRITICAL: Write this progress update in the SAME LANGUAGE as the user's message — not in English unless the user wrote in English. This streams to the user in real time and keeps them informed.**
@@ -586,9 +608,10 @@ complete file content here
 - Start with a friendly 2-3 sentence plan describing what you'll build from the user's perspective (in the user's language) — mention the pages and features they'll get, not file names or technical details. Then output all files, then a warm summary of what was built (in the user's language).
 - Output EVERY file needed for the complete application. Each file must be complete, production-ready code — no placeholders, no TODOs, no stub implementations.
 - **Before each <file> block, write a 1-sentence progress update describing what the user will see (e.g., "Now setting up your product browsing experience" or "Adding a beautiful contact page with a form").** Do NOT mention file paths, component names, or technical terms. CRITICAL: Write progress updates in the SAME LANGUAGE as the user's message — not in English unless the user wrote in English. These updates stream to the user in real time. Do NOT skip them — they are essential for user experience.
+- CRITICAL: NEVER include the literal string ` + "`</file>`" + ` inside file content — not in comments, strings, JSX text, or code. The system uses this exact tag as a file boundary marker. If you need to reference this string, use an escaped form like ` + "`<\\/file>`" + ` or ` + "`\"</\" + \"file>\"`" + `.
 - Skip template-managed files: lib/utils.ts, components/ui/* (button, card, input, badge, skeleton). Import directly from them.
 - Do NOT wrap file content in code fences (` + "```" + ` or similar) inside <file> blocks.
-- Write app/globals.css with @import "tailwindcss" and full @theme directive for custom colors. Choose a sophisticated, modern color palette. Do NOT include dark mode or @media (prefers-color-scheme: dark) — always use a light theme only. CRITICAL: Do NOT add "* { margin: 0; padding: 0; box-sizing: border-box; }" — Tailwind v4's Preflight handles the CSS reset. A wildcard reset breaks Tailwind utility spacing. The @theme MUST define: --color-background, --color-foreground, --color-primary, --color-primary-foreground, --color-secondary, --color-secondary-foreground, --color-accent, --color-accent-foreground, --color-muted, --color-muted-foreground, --color-card, --color-card-foreground, --color-border, --color-input, --color-ring, --color-destructive, --color-destructive-foreground.
+- Do NOT generate app/globals.css — it is pre-injected with the project's color scheme, all semantic tokens (primary, secondary, accent, background, foreground, muted, card, border, input, ring, destructive and their -foreground variants), and Tailwind v4 @theme directive. Use the semantic color classes directly (bg-primary, text-muted-foreground, border-border, etc.). If you need custom CSS beyond the theme (animations, special utilities), add them in a separate CSS file or use inline Tailwind classes.
 - Write app/layout.tsx LAST — it must be a Server Component (NO "use client"). Include <html lang="..."> (matching the user's language) and <body> tags wrapping {children}. Import Google Fonts using next/font/google. Export metadata. If you need hooks/providers, put them in a separate "components/layout-client.tsx" with "use client".
 - Every file you create must be complete: no placeholders, no "TODO", no stub implementations.`
 
@@ -621,6 +644,7 @@ complete updated file content here
 - ONLY output files that you are changing. Do NOT re-output unchanged files.
 - Skip template-managed files: lib/utils.ts, components/ui/* (button, card, input, badge, skeleton).
 - Do NOT wrap file content in code fences inside <file> blocks.
+- CRITICAL: NEVER include the literal string ` + "`</file>`" + ` inside file content — not in comments, strings, JSX text, or code. The system uses this exact tag as a file boundary marker.
 - Before changing a file, look at its full content in the project context above.
 
 ### Fixing Errors

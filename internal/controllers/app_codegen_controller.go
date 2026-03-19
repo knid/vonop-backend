@@ -336,11 +336,9 @@ const fallbackSentinel = "/* __WEMOB_FALLBACK__ */"
 // --- Template helpers ---
 
 // isProtectedTemplateFile returns true for template-managed files the LLM must not overwrite.
-// globals.css is excluded because it is LLM-generated, not template-injected.
+// globals.css is now template-injected with the project's color scheme and semantic tokens,
+// so it is protected during initial generation. Chat edits can still modify it via allowProtected.
 func isProtectedTemplateFile(path string) bool {
-	if path == "app/globals.css" {
-		return false
-	}
 	return isTemplateFile(path)
 }
 
@@ -1732,26 +1730,50 @@ func (c *Controller) PlanAppFileStructure(ctx context.Context, prompt string, pr
 		systemPrompt = constants.NEXTJS_MOBILE_STRUCTURE_PROMPT
 	}
 
-	structureJSON, err := utils.GetJSONFromLLM(ctx, model, systemPrompt, prompt, provider)
-	if err != nil {
-		slog.Error("failed to generate app structure", "error", err)
-		return nil, fmt.Errorf("failed to generate app structure. try again please")
-	}
-
-	var structure appFileStructure
-	if err := json.Unmarshal([]byte(structureJSON), &structure); err != nil {
-		cleaned := utils.ExtractJSON(structureJSON)
-		if err2 := json.Unmarshal([]byte(cleaned), &structure); err2 != nil {
-			slog.Error("failed to parse app structure", "error", err2, "json", structureJSON)
-			return nil, fmt.Errorf("failed to parse app structure. try again please")
+	// Try up to 2 times — structure planning is critical for app quality
+	var lastErr error
+	for attempt := 0; attempt < 2; attempt++ {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
 		}
+
+		attemptModel := model
+		if attempt > 0 {
+			// Retry with fast model as fallback — it's cheaper and may succeed
+			// where the main model hit rate limits
+			attemptModel = provider.FastModel()
+			slog.Info("Retrying structure planning with fast model",
+				"attempt", attempt+1, "model", attemptModel)
+		}
+
+		structureJSON, err := utils.GetJSONFromLLM(ctx, attemptModel, systemPrompt, prompt, provider)
+		if err != nil {
+			slog.Error("failed to generate app structure",
+				"error", err, "attempt", attempt+1, "model", attemptModel)
+			lastErr = err
+			continue
+		}
+
+		var structure appFileStructure
+		if err := json.Unmarshal([]byte(structureJSON), &structure); err != nil {
+			cleaned := utils.ExtractJSON(structureJSON)
+			if err2 := json.Unmarshal([]byte(cleaned), &structure); err2 != nil {
+				slog.Error("failed to parse app structure",
+					"error", err2, "attempt", attempt+1, "json_length", len(structureJSON))
+				lastErr = fmt.Errorf("failed to parse app structure: %w", err2)
+				continue
+			}
+		}
+
+		if len(structure.Files) == 0 {
+			lastErr = fmt.Errorf("structure planning returned no files")
+			continue
+		}
+
+		return &structure, nil
 	}
 
-	if len(structure.Files) == 0 {
-		return nil, fmt.Errorf("failed to generate app files. try again please")
-	}
-
-	return &structure, nil
+	return nil, fmt.Errorf("structure planning failed after retries: %w", lastErr)
 }
 
 // GenerateClarificationQuestions asks a fast LLM to produce 2-5 clarifying
