@@ -30,6 +30,7 @@ import (
 	"github.com/knid/wemob/internal/services/neon"
 	"github.com/knid/wemob/internal/services/secret"
 	"github.com/knid/wemob/internal/services/storage"
+	"github.com/knid/wemob/internal/services/codemagic"
 	"github.com/knid/wemob/internal/services/coolify"
 	"github.com/knid/wemob/internal/services/gitea"
 	"github.com/knid/wemob/internal/utils"
@@ -741,6 +742,13 @@ func main() {
 	gitRepoService := gitrepo.NewService(repoBasePath)
 	slog.Info("Git repo service initialized", "base_path", repoBasePath)
 
+	// Codemagic CI/CD for mobile builds (optional — nil if not configured)
+	var codemagicService *codemagic.Service
+	if cmToken := sm.GetSecret("CODEMAGIC_API_TOKEN"); cmToken != "" {
+		codemagicService = codemagic.NewService(cmToken, sm.GetSecret("CODEMAGIC_APP_ID"))
+		slog.Info("Codemagic service initialized")
+	}
+
 	controller := controllers.NewController(
 		db,
 		make(chan struct{}, constants.MAX_CONCURRENT_BUILDS),
@@ -761,6 +769,7 @@ func main() {
 		neonService,
 		posthogClient,
 		gitRepoService,
+		codemagicService,
 	)
 
 	// MCP service (optional — connect in background so it doesn't block server startup)

@@ -1,0 +1,682 @@
+# ===========================================================================
+# Wemob — Codemagic CI/CD
+# ===========================================================================
+# Replaces wemob-android-worker + wemob-ios-worker ($150/mo → ~$12/mo)
+#
+# 5 workflows, triggered via REST API from the Go backend:
+#   1. android-build   — Flutter build → AAB → S3
+#   2. ios-build       — Flutter build (unsigned) → IPA → S3
+#   3. ios-sign        — codesign IPA with user's Apple creds → S3
+#   4. android-deploy  — Fastlane supply → Google Play
+#   5. ios-deploy      — Fastlane deliver → App Store
+#
+# SETUP:
+#   1. Create repo "wemob-flutter-template" with template + this file
+#   2. In Codemagic dashboard, create env var groups:
+#      "aws"  → AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION,
+#               S3_ASSETS_BUCKET, S3_ANDROID_KEYS_BUCKET,
+#               S3_USER_API_KEYS_BUCKET, S3_CERTS_BUCKET
+#      "api"  → REPORT_API_URL, REPORT_API_SECRET
+#
+# TRIGGER (from backend):
+#   POST https://api.codemagic.io/builds
+#   x-auth-token: <CM_API_TOKEN>
+#   { "appId": "...", "workflowId": "android-build", "branch": "main",
+#     "environment": { "variables": { "CM_TITLE": "My App", ... } } }
+# ===========================================================================
+
+workflows:
+
+  # =========================================================================
+  # 1. ANDROID BUILD
+  # =========================================================================
+  android-build:
+    name: Android Build
+    instance_type: linux_x2
+    max_build_duration: 30
+    environment:
+      flutter: 3.29.2
+      java: 17
+      groups: [aws, api]
+      vars:
+        CM_PROJECT_ID: ""
+        CM_BUILD_ID: ""
+        CM_TASK_ID: ""
+        CM_VERSION: "1"
+        CM_TITLE: ""
+        CM_URL: ""
+        CM_ICON_URL: ""
+        CM_SPLASH_COLOR: ""
+        CM_ONESIGNAL_APP_ID: ""
+        CM_PACKAGE_NAME: ""
+        CM_REMOVE_BRANDING: "false"
+        CM_PERMISSIONS: ""              # comma-separated: camera,location
+        CM_URL_SCHEME: ""
+        CM_UNIVERSAL_LINK_DOMAIN: ""
+    triggering:
+      events: []
+    scripts:
+      - name: Report started
+        script: |
+          curl -sS -X POST "$REPORT_API_URL/v1/reports/build" \
+            -H "Content-Type: application/json" \
+            -d "{\"status\":\"Building\",\"message\":\"Android build started\",\"secret\":\"$REPORT_API_SECRET\",\"task_id\":\"$CM_TASK_ID\"}" || true
+
+      - name: Set app title + version
+        script: |
+          sed -i "s/__APP_TITLE__/$CM_TITLE/g" android/app/src/main/AndroidManifest.xml
+          sed -i "s/__CM_VERSION__/$CM_VERSION/g" pubspec.yaml
+
+      - name: Download icon
+        script: |
+          mkdir -p assets/icon
+          aws s3 cp "s3://$S3_ASSETS_BUCKET/icons/${CM_ICON_URL}.png" assets/icon/app_icon.png
+
+      - name: Keystore
+        script: |
+          if [ "$CM_VERSION" = "1" ]; then
+            PASS=$(openssl rand -base64 32 | tr -dc 'a-zA-Z0-9' | head -c 32)
+            SAFE=$(echo "$CM_TITLE" | tr -d ',"\\'\'';\n\r' | head -c 64)
+            [ -z "$SAFE" ] && SAFE="WemobApp"
+            PASS="$PASS" keytool -genkeypair -v \
+              -keystore android/app/upload-keystore.jks \
+              -storepass:env PASS -alias upload -keypass:env PASS \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -dname "CN=$SAFE, OU=Mobile, O=Wemob Ltd, L=London, S=London, C=GB"
+            printf "storePassword=%s\nkeyPassword=%s\nkeyAlias=upload\nstoreFile=upload-keystore.jks\n" "$PASS" "$PASS" > android/key.properties
+            aws s3 cp android/app/upload-keystore.jks "s3://$S3_ANDROID_KEYS_BUCKET/keystores/${CM_PROJECT_ID}.jks"
+            aws s3 cp android/key.properties "s3://$S3_ANDROID_KEYS_BUCKET/key_properties/${CM_PROJECT_ID}.properties"
+          else
+            aws s3 cp "s3://$S3_ANDROID_KEYS_BUCKET/keystores/${CM_PROJECT_ID}.jks" android/app/upload-keystore.jks
+            aws s3 cp "s3://$S3_ANDROID_KEYS_BUCKET/key_properties/${CM_PROJECT_ID}.properties" android/key.properties
+          fi
+
+      - name: Splash color
+        script: |
+          [ -z "$CM_SPLASH_COLOR" ] && exit 0
+          HEX="${CM_SPLASH_COLOR#\#}"
+          [ ${#HEX} -eq 3 ] && HEX="${HEX:0:1}${HEX:0:1}${HEX:1:1}${HEX:1:1}${HEX:2:1}${HEX:2:1}"
+          mkdir -p android/app/src/main/res/values
+          printf '<?xml version="1.0" encoding="utf-8"?>\n<resources>\n  <color name="splash_color">#%s</color>\n</resources>\n' "$HEX" \
+            > android/app/src/main/res/values/colors.xml
+          for f in android/app/src/main/res/drawable/launch_background.xml \
+                   android/app/src/main/res/drawable-v21/launch_background.xml; do
+            [ -f "$f" ] && sed -i -e 's|@android:color/white|@color/splash_color|g' \
+              -e 's|?android:colorBackground|@color/splash_color|g' "$f"
+          done
+          [ -f android/app/src/main/res/values/styles.xml ] && \
+            sed -i 's|@android:color/white|@color/splash_color|g' android/app/src/main/res/values/styles.xml
+
+      - name: Permissions
+        script: |
+          [ -z "$CM_PERMISSIONS" ] && exit 0
+          MANIFEST="android/app/src/main/AndroidManifest.xml"
+          BLOCK=""
+          IFS=',' read -ra P <<< "$CM_PERMISSIONS"
+          for p in "${P[@]}"; do
+            case "$p" in
+              camera)        BLOCK="$BLOCK    <uses-permission android:name=\"android.permission.CAMERA\"/>\n" ;;
+              location)      BLOCK="$BLOCK    <uses-permission android:name=\"android.permission.ACCESS_FINE_LOCATION\"/>\n" ;;
+              contacts)      BLOCK="$BLOCK    <uses-permission android:name=\"android.permission.READ_CONTACTS\"/>\n" ;;
+              storage)       BLOCK="$BLOCK    <uses-permission android:name=\"android.permission.READ_EXTERNAL_STORAGE\"/>\n" ;;
+              microphone)    BLOCK="$BLOCK    <uses-permission android:name=\"android.permission.RECORD_AUDIO\"/>\n" ;;
+              photos)        BLOCK="$BLOCK    <uses-permission android:name=\"android.permission.READ_MEDIA_IMAGES\"/>\n" ;;
+              notifications) BLOCK="$BLOCK    <uses-permission android:name=\"android.permission.POST_NOTIFICATIONS\"/>\n" ;;
+              bluetooth)     BLOCK="$BLOCK    <uses-permission android:name=\"android.permission.BLUETOOTH_CONNECT\"/>\n" ;;
+              calendar)      BLOCK="$BLOCK    <uses-permission android:name=\"android.permission.READ_CALENDAR\"/>\n" ;;
+              biometrics)    BLOCK="$BLOCK    <uses-permission android:name=\"android.permission.USE_BIOMETRIC\"/>\n" ;;
+            esac
+          done
+          [ -n "$BLOCK" ] && sed -i "s|<application|${BLOCK}    <application|" "$MANIFEST"
+
+      - name: Deep linking
+        script: |
+          MANIFEST="android/app/src/main/AndroidManifest.xml"
+          F=""
+          [ -n "$CM_URL_SCHEME" ] && F="$F\n            <intent-filter>\n                <action android:name=\"android.intent.action.VIEW\"\/>\n                <category android:name=\"android.intent.category.DEFAULT\"\/>\n                <category android:name=\"android.intent.category.BROWSABLE\"\/>\n                <data android:scheme=\"$CM_URL_SCHEME\"\/>\n            <\/intent-filter>"
+          [ -n "$CM_UNIVERSAL_LINK_DOMAIN" ] && F="$F\n            <intent-filter android:autoVerify=\"true\">\n                <action android:name=\"android.intent.action.VIEW\"\/>\n                <category android:name=\"android.intent.category.DEFAULT\"\/>\n                <category android:name=\"android.intent.category.BROWSABLE\"\/>\n                <data android:scheme=\"https\" android:host=\"$CM_UNIVERSAL_LINK_DOMAIN\"\/>\n            <\/intent-filter>"
+          [ -n "$F" ] && sed -i "s|</activity>|$F\n        </activity>|" "$MANIFEST"
+
+      - name: Flutter build
+        script: |
+          flutter pub get
+          flutter pub run flutter_launcher_icons:main
+          dart run change_app_package_name:main "$CM_PACKAGE_NAME" --android
+          flutter build appbundle --release \
+            --build-number="$CM_VERSION" \
+            --dart-define=APP_URL="$CM_URL" \
+            --dart-define=PROJECT_ID="$CM_PROJECT_ID" \
+            --dart-define=SPLASH_COLOR="$CM_SPLASH_COLOR" \
+            --dart-define=ONESIGNAL_APP_ID="$CM_ONESIGNAL_APP_ID" \
+            --dart-define=REMOVE_BRANDING="$CM_REMOVE_BRANDING"
+
+      - name: Upload AAB
+        script: |
+          aws s3 cp build/app/outputs/bundle/release/app-release.aab \
+            "s3://$S3_ASSETS_BUCKET/aabs/${CM_BUILD_ID}.aab"
+
+    publishing:
+      scripts:
+        - name: Report result
+          script: |
+            [ "$CM_BUILD_STEP_STATUS" = "success" ] && S="Built" && M="Android build completed" || S="error" && M="Android build failed"
+            curl -sS -X POST "$REPORT_API_URL/v1/reports/build" \
+              -H "Content-Type: application/json" \
+              -d "{\"status\":\"$S\",\"message\":\"$M\",\"secret\":\"$REPORT_API_SECRET\",\"task_id\":\"$CM_TASK_ID\"}" || true
+
+  # =========================================================================
+  # 2. IOS BUILD (unsigned)
+  # =========================================================================
+  ios-build:
+    name: iOS Build
+    instance_type: mac_mini_m2
+    max_build_duration: 45
+    environment:
+      flutter: 3.29.2
+      xcode: latest
+      groups: [aws, api]
+      vars:
+        CM_PROJECT_ID: ""
+        CM_BUILD_ID: ""
+        CM_TASK_ID: ""
+        CM_VERSION: "1"
+        CM_TITLE: ""
+        CM_URL: ""
+        CM_ICON_URL: ""
+        CM_SPLASH_COLOR: ""
+        CM_ONESIGNAL_APP_ID: ""
+        CM_PACKAGE_NAME: ""
+        CM_REMOVE_BRANDING: "false"
+        CM_PERMISSIONS: ""
+        CM_URL_SCHEME: ""
+        CM_UNIVERSAL_LINK_DOMAIN: ""
+    triggering:
+      events: []
+    scripts:
+      - name: Report started
+        script: |
+          curl -sS -X POST "$REPORT_API_URL/v1/reports/build" \
+            -H "Content-Type: application/json" \
+            -d "{\"status\":\"Building\",\"message\":\"iOS build started\",\"secret\":\"$REPORT_API_SECRET\",\"task_id\":\"$CM_TASK_ID\"}" || true
+
+      - name: Set app title + version
+        script: |
+          sed -i '' "s/__APP_TITLE__/$CM_TITLE/g" ios/Runner/Info.plist
+          sed -i '' "s/__CM_VERSION__/$CM_VERSION/g" pubspec.yaml
+
+      - name: Download icon
+        script: |
+          mkdir -p assets/icon
+          aws s3 cp "s3://$S3_ASSETS_BUCKET/icons/${CM_ICON_URL}.png" assets/icon/app_icon.png
+
+      - name: Splash color
+        script: |
+          [ -z "$CM_SPLASH_COLOR" ] && exit 0
+          HEX="${CM_SPLASH_COLOR#\#}"
+          [ ${#HEX} -eq 3 ] && HEX="${HEX:0:1}${HEX:0:1}${HEX:1:1}${HEX:1:1}${HEX:2:1}${HEX:2:1}"
+          R=$(python3 -c "print(f'{int(\"$HEX\"[0:2],16)/255:.6f}')")
+          G=$(python3 -c "print(f'{int(\"$HEX\"[2:4],16)/255:.6f}')")
+          B=$(python3 -c "print(f'{int(\"$HEX\"[4:6],16)/255:.6f}')")
+          SB="ios/Runner/Base.lproj/LaunchScreen.storyboard"
+          [ -f "$SB" ] && sed -i '' \
+            "s|red=\"1\" green=\"1\" blue=\"1\" alpha=\"1\" colorSpace=\"custom\" customColorSpace=\"sRGB\"|red=\"$R\" green=\"$G\" blue=\"$B\" alpha=\"1\" colorSpace=\"custom\" customColorSpace=\"sRGB\"|" "$SB"
+
+      - name: Permissions
+        script: |
+          [ -z "$CM_PERMISSIONS" ] && exit 0
+          PLIST="ios/Runner/Info.plist"
+          E=""
+          IFS=',' read -ra P <<< "$CM_PERMISSIONS"
+          for p in "${P[@]}"; do
+            case "$p" in
+              camera)     E="$E\t<key>NSCameraUsageDescription</key>\n\t<string>This app needs access to your camera</string>\n" ;;
+              location)   E="$E\t<key>NSLocationWhenInUseUsageDescription</key>\n\t<string>This app needs access to your location</string>\n" ;;
+              photos)     E="$E\t<key>NSPhotoLibraryUsageDescription</key>\n\t<string>This app needs access to your photo library</string>\n" ;;
+              microphone) E="$E\t<key>NSMicrophoneUsageDescription</key>\n\t<string>This app needs access to your microphone</string>\n" ;;
+              contacts)   E="$E\t<key>NSContactsUsageDescription</key>\n\t<string>This app needs access to your contacts</string>\n" ;;
+              calendar)   E="$E\t<key>NSCalendarsUsageDescription</key>\n\t<string>This app needs access to your calendar</string>\n" ;;
+              biometrics) E="$E\t<key>NSFaceIDUsageDescription</key>\n\t<string>This app uses Face ID for authentication</string>\n" ;;
+              bluetooth)  E="$E\t<key>NSBluetoothAlwaysUsageDescription</key>\n\t<string>This app needs Bluetooth access</string>\n" ;;
+            esac
+          done
+          [ -n "$E" ] && sed -i '' "s|</dict>|${E}</dict>|" "$PLIST"
+
+      - name: Deep linking
+        script: |
+          if [ -n "$CM_URL_SCHEME" ]; then
+            PLIST="ios/Runner/Info.plist"
+            ENTRY="\t<key>CFBundleURLTypes</key>\n\t<array>\n\t\t<dict>\n\t\t\t<key>CFBundleURLSchemes</key>\n\t\t\t<array>\n\t\t\t\t<string>${CM_URL_SCHEME}</string>\n\t\t\t</array>\n\t\t</dict>\n\t</array>\n"
+            sed -i '' "s|</dict>|${ENTRY}</dict>|" "$PLIST"
+          fi
+          if [ -n "$CM_UNIVERSAL_LINK_DOMAIN" ]; then
+            cat > ios/Runner/Runner.entitlements << ENTEOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>com.apple.developer.associated-domains</key>
+            <array><string>applinks:${CM_UNIVERSAL_LINK_DOMAIN}</string></array>
+          </dict>
+          </plist>
+          ENTEOF
+          fi
+
+      - name: Flutter build (unsigned)
+        script: |
+          flutter pub get
+          [ -f ios/Podfile ] && cd ios && pod install && cd ..
+          flutter pub run flutter_launcher_icons:main
+          dart run change_app_package_name:main "$CM_PACKAGE_NAME"
+          flutter build ios --no-codesign --release \
+            --build-number="$CM_VERSION" \
+            --dart-define=APP_URL="$CM_URL" \
+            --dart-define=PROJECT_ID="$CM_PROJECT_ID" \
+            --dart-define=SPLASH_COLOR="$CM_SPLASH_COLOR" \
+            --dart-define=ONESIGNAL_APP_ID="$CM_ONESIGNAL_APP_ID" \
+            --dart-define=REMOVE_BRANDING="$CM_REMOVE_BRANDING"
+
+      - name: Package + upload unsigned IPA
+        script: |
+          mkdir -p build/ios/iphoneos/Payload
+          cp -r build/ios/iphoneos/Runner.app build/ios/iphoneos/Payload/
+          cd build/ios/iphoneos && zip -r Payload.zip Payload && cd -
+          aws s3 cp build/ios/iphoneos/Payload.zip \
+            "s3://$S3_ASSETS_BUCKET/ipas/unsigned/${CM_BUILD_ID}.ipa"
+
+    publishing:
+      scripts:
+        - name: Report result
+          script: |
+            [ "$CM_BUILD_STEP_STATUS" = "success" ] && S="Built" && M="iOS build completed" || S="error" && M="iOS build failed"
+            curl -sS -X POST "$REPORT_API_URL/v1/reports/build" \
+              -H "Content-Type: application/json" \
+              -d "{\"status\":\"$S\",\"message\":\"$M\",\"secret\":\"$REPORT_API_SECRET\",\"task_id\":\"$CM_TASK_ID\"}" || true
+
+  # =========================================================================
+  # 3. IOS SIGN (no Fastlane — uses Codemagic CLI + codesign)
+  # =========================================================================
+  ios-sign:
+    name: iOS Sign
+    instance_type: mac_mini_m2
+    max_build_duration: 10
+    environment:
+      xcode: latest
+      groups: [aws, api]
+      vars:
+        CM_BUILD_ID: ""
+        CM_TASK_ID: ""
+        CM_PACKAGE_NAME: ""
+        CM_TEAM_ID: ""
+        CM_KEY_ID: ""            # App Store Connect API Key ID
+        CM_ISSUER_ID: ""         # App Store Connect Issuer ID
+        CM_P8_KEY_S3_PATH: ""   # S3 path to .p8 key
+    triggering:
+      events: []
+    scripts:
+      - name: Report started
+        script: |
+          curl -sS -X POST "$REPORT_API_URL/v1/reports/sign" \
+            -H "Content-Type: application/json" \
+            -d "{\"status\":\"signing\",\"status_message\":\"Signing started\",\"secret\":\"$REPORT_API_SECRET\",\"task_id\":\"$CM_TASK_ID\"}" || true
+
+      - name: Download unsigned IPA + P8 key
+        script: |
+          aws s3 cp "s3://$S3_ASSETS_BUCKET/ipas/unsigned/${CM_BUILD_ID}.ipa" /tmp/unsigned.ipa
+          aws s3 cp "s3://$S3_USER_API_KEYS_BUCKET/${CM_P8_KEY_S3_PATH}" /tmp/AuthKey.p8
+
+      - name: Fetch signing files from Apple
+        script: |
+          # Set API auth credentials
+          export APP_STORE_CONNECT_KEY_IDENTIFIER="$CM_KEY_ID"
+          export APP_STORE_CONNECT_ISSUER_ID="$CM_ISSUER_ID"
+          export APP_STORE_CONNECT_PRIVATE_KEY=$(cat /tmp/AuthKey.p8)
+
+          # Check if we have a stored cert private key for this team
+          CERT_KEY_S3="s3://$S3_CERTS_BUCKET/cert_keys/${CM_TEAM_ID}.pem"
+          if aws s3 cp "$CERT_KEY_S3" /tmp/cert_key.pem 2>/dev/null; then
+            echo "Using existing certificate key"
+          else
+            echo "Generating new certificate key"
+            openssl req -new -newkey rsa:2048 -nodes \
+              -keyout /tmp/cert_key.pem -out /tmp/csr.pem -subj "/"
+            aws s3 cp /tmp/cert_key.pem "$CERT_KEY_S3"
+          fi
+          export CERTIFICATE_PRIVATE_KEY=$(cat /tmp/cert_key.pem)
+
+          # Fetch cert + provisioning profile from Apple
+          app-store-connect fetch-signing-files "$CM_PACKAGE_NAME" \
+            --type IOS_APP_STORE \
+            --create \
+            --certificate-key @env:CERTIFICATE_PRIVATE_KEY \
+            --certificates-dir /tmp/certs \
+            --profiles-dir /tmp/profiles
+
+      - name: Sign IPA
+        script: |
+          # Create temporary keychain
+          KEYCHAIN="build.keychain"
+          KEYCHAIN_PASS="temporary"
+          security create-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN"
+          security default-keychain -s "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN"
+          security set-keychain-settings -t 3600 "$KEYCHAIN"
+
+          # Import certificate
+          CERT_FILE=$(find /tmp/certs -name "*.p12" | head -1)
+          security import "$CERT_FILE" -k "$KEYCHAIN" -P "" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASS" "$KEYCHAIN"
+
+          # Find signing identity
+          IDENTITY=$(security find-identity -v -p codesigning "$KEYCHAIN" | grep "$CM_TEAM_ID" | head -1 | sed 's/.*"\(.*\)"/\1/')
+          echo "Signing with: $IDENTITY"
+
+          # Find provisioning profile
+          PROFILE=$(find /tmp/profiles -name "*.mobileprovision" | head -1)
+
+          # Unzip IPA
+          mkdir -p /tmp/ipa_contents
+          unzip -o /tmp/unsigned.ipa -d /tmp/ipa_contents
+
+          APP_PATH=$(find /tmp/ipa_contents/Payload -name "*.app" -type d | head -1)
+
+          # Embed provisioning profile
+          cp "$PROFILE" "$APP_PATH/embedded.mobileprovision"
+
+          # Extract entitlements from profile
+          security cms -D -i "$PROFILE" > /tmp/profile_plist.xml
+          /usr/libexec/PlistBuddy -x -c "Print :Entitlements" /tmp/profile_plist.xml > /tmp/entitlements.plist
+
+          # Sign all frameworks first
+          find "$APP_PATH/Frameworks" -name "*.framework" -o -name "*.dylib" 2>/dev/null | while read fw; do
+            codesign --force --sign "$IDENTITY" --timestamp "$fw"
+          done
+
+          # Sign the app
+          codesign --force --sign "$IDENTITY" \
+            --entitlements /tmp/entitlements.plist \
+            --timestamp \
+            "$APP_PATH"
+
+          # Re-package as IPA
+          cd /tmp/ipa_contents
+          zip -r /tmp/signed.ipa Payload
+
+      - name: Upload signed IPA
+        script: |
+          aws s3 cp /tmp/signed.ipa \
+            "s3://$S3_ASSETS_BUCKET/ipas/signed/${CM_BUILD_ID}.ipa"
+
+    publishing:
+      scripts:
+        - name: Report result
+          script: |
+            [ "$CM_BUILD_STEP_STATUS" = "success" ] && S="success" && M="IPA signed successfully" || S="error" && M="iOS signing failed"
+            curl -sS -X POST "$REPORT_API_URL/v1/reports/sign" \
+              -H "Content-Type: application/json" \
+              -d "{\"status\":\"$S\",\"status_message\":\"$M\",\"secret\":\"$REPORT_API_SECRET\",\"task_id\":\"$CM_TASK_ID\"}" || true
+
+  # =========================================================================
+  # 4. ANDROID DEPLOY (Fastlane supply — binary + metadata)
+  # =========================================================================
+  android-deploy:
+    name: Android Deploy
+    instance_type: linux_x2
+    max_build_duration: 15
+    environment:
+      java: 17
+      groups: [aws, api]
+      vars:
+        CM_BUILD_ID: ""
+        CM_DEPLOYMENT_ID: ""
+        CM_PACKAGE_NAME: ""
+        CM_VERSION: "1"
+        CM_TITLE: ""
+        CM_DESCRIPTION: ""
+        CM_SCREENSHOTS: ""             # comma-separated S3 keys
+        CM_ICON_PATH: ""
+        CM_LOCALE: "en-US"
+        CM_SERVICE_ACCOUNT_S3: ""      # S3 path to service account JSON
+        CM_NEW_APP: "false"
+        CM_CHANGED_BUILD: "false"
+        CM_TITLE_CHANGED: "false"
+        CM_DESC_CHANGED: "false"
+        CM_SCREENSHOTS_CHANGED: "false"
+        CM_ICON_CHANGED: "false"
+    triggering:
+      events: []
+    scripts:
+      - name: Report started
+        script: |
+          curl -sS -X POST "$REPORT_API_URL/v1/reports/deploy" \
+            -H "Content-Type: application/json" \
+            -d "{\"status\":\"Deploying\",\"message\":\"Android deployment started\",\"secret\":\"$REPORT_API_SECRET\",\"deployment_id\":\"$CM_DEPLOYMENT_ID\",\"platform\":\"android\"}" || true
+
+      - name: Download AAB + credentials
+        script: |
+          aws s3 cp "s3://$S3_ASSETS_BUCKET/aabs/${CM_BUILD_ID}.aab" /tmp/release.aab
+          aws s3 cp "s3://$S3_USER_API_KEYS_BUCKET/${CM_SERVICE_ACCOUNT_S3}" /tmp/service_account.json
+
+      - name: Prepare metadata
+        script: |
+          META="fastlane/metadata/android/${CM_LOCALE}"
+          mkdir -p "$META/images/phoneScreenshots"
+
+          IS_NEW=$( [ "$CM_NEW_APP" = "true" ] && echo true || echo false )
+
+          if $IS_NEW || [ "$CM_TITLE_CHANGED" = "true" ]; then
+            echo -n "$CM_TITLE" > "$META/title.txt"
+          fi
+          if $IS_NEW || [ "$CM_DESC_CHANGED" = "true" ]; then
+            echo -n "$CM_DESCRIPTION" > "$META/short_description.txt"
+            echo -n "$CM_DESCRIPTION" > "$META/full_description.txt"
+          fi
+          if $IS_NEW || [ "$CM_ICON_CHANGED" = "true" ]; then
+            aws s3 cp "s3://$S3_ASSETS_BUCKET/icons/${CM_ICON_PATH}.png" "$META/images/icon.png"
+          fi
+          if $IS_NEW || [ "$CM_SCREENSHOTS_CHANGED" = "true" ]; then
+            if [ -n "$CM_SCREENSHOTS" ]; then
+              IDX=1
+              IFS=',' read -ra SS <<< "$CM_SCREENSHOTS"
+              for key in "${SS[@]}"; do
+                aws s3 cp "s3://$S3_ASSETS_BUCKET/screenshots/${key}.png" "$META/images/phoneScreenshots/phone_${IDX}.png"
+                IDX=$((IDX + 1))
+              done
+            fi
+          fi
+
+      - name: Create Fastfile + deploy
+        script: |
+          mkdir -p fastlane
+          cat > fastlane/Appfile << 'EOF'
+          json_key_file("/tmp/service_account.json")
+          EOF
+
+          # Build supply arguments
+          SUPPLY_ARGS="json_key: '/tmp/service_account.json'"
+          SUPPLY_ARGS="$SUPPLY_ARGS, package_name: '$CM_PACKAGE_NAME'"
+          SUPPLY_ARGS="$SUPPLY_ARGS, aab: '/tmp/release.aab'"
+          SUPPLY_ARGS="$SUPPLY_ARGS, track: 'production'"
+          SUPPLY_ARGS="$SUPPLY_ARGS, version_code: $CM_VERSION"
+
+          IS_NEW=$( [ "$CM_NEW_APP" = "true" ] && echo true || echo false )
+
+          SKIP_META="true"
+          if $IS_NEW || [ "$CM_TITLE_CHANGED" = "true" ] || [ "$CM_DESC_CHANGED" = "true" ]; then
+            SKIP_META="false"
+          fi
+
+          SKIP_IMAGES="true"
+          if $IS_NEW || [ "$CM_SCREENSHOTS_CHANGED" = "true" ] || [ "$CM_ICON_CHANGED" = "true" ]; then
+            SKIP_IMAGES="false"
+          fi
+
+          cat > fastlane/Fastfile << FASTEOF
+          default_platform(:android)
+          platform :android do
+            lane :deploy do
+              supply(
+                json_key: "/tmp/service_account.json",
+                package_name: "$CM_PACKAGE_NAME",
+                aab: "/tmp/release.aab",
+                track: "production",
+                version_code: $CM_VERSION,
+                skip_upload_metadata: $SKIP_META,
+                skip_upload_images: $SKIP_IMAGES,
+                skip_upload_screenshots: $SKIP_IMAGES,
+                metadata_path: "fastlane/metadata/android",
+              )
+            end
+          end
+          FASTEOF
+
+          gem install fastlane --no-document 2>/dev/null || true
+          fastlane android deploy
+
+    publishing:
+      scripts:
+        - name: Report result
+          script: |
+            [ "$CM_BUILD_STEP_STATUS" = "success" ] && S="Deployed" && M="Android deployed" || S="error" && M="Android deploy failed"
+            curl -sS -X POST "$REPORT_API_URL/v1/reports/deploy" \
+              -H "Content-Type: application/json" \
+              -d "{\"status\":\"$S\",\"message\":\"$M\",\"secret\":\"$REPORT_API_SECRET\",\"deployment_id\":\"$CM_DEPLOYMENT_ID\",\"platform\":\"android\"}" || true
+
+  # =========================================================================
+  # 5. IOS DEPLOY (Fastlane deliver — binary + metadata)
+  # =========================================================================
+  ios-deploy:
+    name: iOS Deploy
+    instance_type: mac_mini_m2
+    max_build_duration: 20
+    environment:
+      xcode: latest
+      groups: [aws, api]
+      vars:
+        CM_BUILD_ID: ""
+        CM_DEPLOYMENT_ID: ""
+        CM_PACKAGE_NAME: ""
+        CM_TEAM_ID: ""
+        CM_KEY_ID: ""
+        CM_ISSUER_ID: ""
+        CM_P8_KEY_S3_PATH: ""
+        CM_TITLE: ""
+        CM_DESCRIPTION: ""
+        CM_SCREENSHOTS: ""
+        CM_ICON: ""
+        CM_LOCALE: "en-US"
+        CM_NEW_APP: "false"
+        CM_CHANGED_BUILD: "false"
+        CM_TITLE_CHANGED: "false"
+        CM_DESC_CHANGED: "false"
+        CM_SCREENSHOTS_CHANGED: "false"
+    triggering:
+      events: []
+    scripts:
+      - name: Report started
+        script: |
+          curl -sS -X POST "$REPORT_API_URL/v1/reports/deploy" \
+            -H "Content-Type: application/json" \
+            -d "{\"status\":\"Deploying\",\"message\":\"iOS deployment started\",\"secret\":\"$REPORT_API_SECRET\",\"deployment_id\":\"$CM_DEPLOYMENT_ID\",\"platform\":\"ios\"}" || true
+
+      - name: Download IPA + P8 key
+        script: |
+          aws s3 cp "s3://$S3_ASSETS_BUCKET/ipas/signed/${CM_BUILD_ID}.ipa" /tmp/signed.ipa
+          aws s3 cp "s3://$S3_USER_API_KEYS_BUCKET/${CM_P8_KEY_S3_PATH}" /tmp/AuthKey.p8
+
+      - name: Prepare metadata
+        script: |
+          META="fastlane/metadata/${CM_LOCALE}"
+          SS_DIR="fastlane/screenshots/${CM_LOCALE}"
+          mkdir -p "$META" "$SS_DIR"
+
+          IS_NEW=$( [ "$CM_NEW_APP" = "true" ] && echo true || echo false )
+
+          if $IS_NEW || [ "$CM_TITLE_CHANGED" = "true" ]; then
+            echo -n "$CM_TITLE" > "$META/name.txt"
+          fi
+          if $IS_NEW || [ "$CM_DESC_CHANGED" = "true" ]; then
+            echo -n "$CM_DESCRIPTION" > "$META/description.txt"
+          fi
+          if $IS_NEW || [ "$CM_SCREENSHOTS_CHANGED" = "true" ]; then
+            if [ -n "$CM_SCREENSHOTS" ]; then
+              IDX=1
+              IFS=',' read -ra SS <<< "$CM_SCREENSHOTS"
+              for key in "${SS[@]}"; do
+                aws s3 cp "s3://$S3_ASSETS_BUCKET/screenshots/${key}.png" "$SS_DIR/iphone67_${IDX}.png"
+                IDX=$((IDX + 1))
+              done
+            fi
+          fi
+
+      - name: Create Fastfile + deploy
+        script: |
+          mkdir -p fastlane
+
+          IS_NEW=$( [ "$CM_NEW_APP" = "true" ] && echo true || echo false )
+          UPLOAD_BINARY="false"
+          if $IS_NEW || [ "$CM_CHANGED_BUILD" = "true" ]; then
+            UPLOAD_BINARY="true"
+          fi
+
+          SKIP_META="true"
+          if $IS_NEW || [ "$CM_TITLE_CHANGED" = "true" ] || [ "$CM_DESC_CHANGED" = "true" ]; then
+            SKIP_META="false"
+          fi
+
+          SKIP_SS="true"
+          if $IS_NEW || [ "$CM_SCREENSHOTS_CHANGED" = "true" ]; then
+            SKIP_SS="false"
+          fi
+
+          cat > fastlane/Fastfile << 'FASTEOF'
+          default_platform(:ios)
+          platform :ios do
+            lane :deploy do
+              api_key = app_store_connect_api_key(
+                key_id: ENV['CM_KEY_ID'],
+                issuer_id: ENV['CM_ISSUER_ID'],
+                key_filepath: "/tmp/AuthKey.p8",
+                duration: 1200,
+                in_house: false,
+              )
+          FASTEOF
+
+          if [ "$UPLOAD_BINARY" = "true" ]; then
+            cat >> fastlane/Fastfile << 'FASTEOF'
+              deliver(
+                api_key: api_key,
+                force: true,
+                ipa: "/tmp/signed.ipa",
+                skip_metadata: true,
+                skip_screenshots: true,
+                app_identifier: ENV['CM_PACKAGE_NAME'],
+                precheck_include_in_app_purchases: false,
+              )
+          FASTEOF
+          fi
+
+          cat >> fastlane/Fastfile << FASTEOF
+              deliver(
+                api_key: api_key,
+                force: true,
+                skip_binary_upload: true,
+                app_identifier: ENV['CM_PACKAGE_NAME'],
+                team_id: ENV['CM_TEAM_ID'],
+                precheck_include_in_app_purchases: false,
+                skip_metadata: $SKIP_META,
+                skip_screenshots: $SKIP_SS,
+              )
+            end
+          end
+          FASTEOF
+
+          fastlane ios deploy
+
+    publishing:
+      scripts:
+        - name: Report result
+          script: |
+            [ "$CM_BUILD_STEP_STATUS" = "success" ] && S="Deployed" && M="iOS deployed" || S="error" && M="iOS deploy failed"
+            curl -sS -X POST "$REPORT_API_URL/v1/reports/deploy" \
+              -H "Content-Type: application/json" \
+              -d "{\"status\":\"$S\",\"message\":\"$M\",\"secret\":\"$REPORT_API_SECRET\",\"deployment_id\":\"$CM_DEPLOYMENT_ID\",\"platform\":\"ios\"}" || true
