@@ -148,12 +148,18 @@ func (c *Controller) StreamBuildApp(
 		if ctx.Err() != nil {
 			return false
 		}
+		// Use a blocking send with a timeout instead of a non-blocking send.
+		// A non-blocking send permanently drops all future events (including
+		// chat_complete/done) if the channel buffer is momentarily full,
+		// leaving the frontend hanging indefinitely.
 		select {
 		case events <- responses.SSEEvent{Event: eventName, Data: data}:
 			return true
-		default:
-			// Channel full or closed; mark as closed to prevent future sends.
-			eventsOpen = false
+		case <-time.After(10 * time.Second):
+			slog.Warn("sendEvent timed out waiting for channel space, dropping event",
+				"event", eventName, "project_id", project.ID)
+			return false
+		case <-ctx.Done():
 			return false
 		}
 	}
@@ -476,6 +482,13 @@ func (c *Controller) StreamBuildApp(
 			needsSummary := conv.Summary == "" || (len(oldMessages) > summarizeThreshold && len(oldMessages)%10 < 2)
 			if needsSummary && len(oldMessages) > 0 {
 				conv.Summary = c.summarizeConversation(ctx, oldMessages, provider, conv.Summary)
+				// Prune heavy fields from old messages to prevent the conversation
+				// JSONB blob from growing unboundedly over many edits.
+				for i := range oldMessages {
+					messages[i].FileOperations = nil
+					messages[i].ThinkingText = ""
+					messages[i].ToolCalls = nil
+				}
 				if msgJSON, err := json.Marshal(messages); err != nil {
 					slog.Error("failed to marshal messages after summarization", "error", err, "conv_id", conv.ID)
 				} else {
@@ -763,6 +776,10 @@ func (c *Controller) StreamBuildApp(
 		}
 
 		// --- Phase 2: main model single-shot code generation ---
+		// Signal phase transition so the frontend can clear Phase 1 streaming text
+		// and avoid mixing explanatory text with code-gen output.
+		sendEvent("phase_change", map[string]string{"phase": "codegen"})
+
 		slog.Info("Calling LLM for chat (file-block path)",
 			"model", model,
 			"project_id", project.ID,

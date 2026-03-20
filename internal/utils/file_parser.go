@@ -19,10 +19,11 @@ var deleteTagRegex = regexp.MustCompile(`<delete\s+path="([^"]+)"\s*/>`)
 // file blocks are emitted via OnFile.
 //
 // NOTE (B70): If the actual file content contains a literal "</file>" string
-// (e.g. inside a code comment or string), the parser will incorrectly treat it
-// as the closing tag and split the file. This is a known limitation of the
-// tag-based protocol. A full fix would require an escaping mechanism or a
-// different framing format (e.g. length-prefixed).
+// (e.g. inside a code comment or string), the parser may incorrectly treat it
+// as the closing tag and split the file. Mitigation: the parser checks whether
+// "«/file»" appears inside a quoted string context (same line) and skips
+// false positives. The escaped form "<\/file>" is also unescaped on emit.
+// A full fix would require a different framing format (e.g. length-prefixed).
 type FileStreamParser struct {
 	buffer      string
 	inFileBlock bool
@@ -47,8 +48,8 @@ func (p *FileStreamParser) Feed(chunk string) {
 
 	for {
 		if p.inFileBlock {
-			// Look for closing </file> tag
-			closeIdx := strings.Index(p.buffer, "</file>")
+			// Look for closing </file> tag, skipping false positives inside string literals
+			closeIdx := p.findRealCloseTag()
 			if closeIdx == -1 {
 				// No closing tag yet — flush everything except last 7 chars
 				// ("</file" is 7 chars) to file content buffer as a safe boundary.
@@ -80,6 +81,8 @@ func (p *FileStreamParser) Feed(chunk string) {
 				// Trim leading/trailing newline that typically surrounds file content
 				content = strings.TrimPrefix(content, "\n")
 				content = strings.TrimSuffix(content, "\n")
+				// Unescape escaped close tags that the LLM may have used
+				content = strings.ReplaceAll(content, `<\/file>`, `</file>`)
 				p.OnFile(p.currentPath, content)
 			}
 			p.fileContent.Reset()
@@ -192,6 +195,7 @@ func (p *FileStreamParser) Flush() {
 				content := p.fileContent.String()
 				content = strings.TrimPrefix(content, "\n")
 				content = strings.TrimSuffix(content, "\n")
+				content = strings.ReplaceAll(content, `<\/file>`, `</file>`)
 				p.OnFile(p.currentPath, content)
 			}
 			p.fileContent.Reset()
@@ -204,4 +208,63 @@ func (p *FileStreamParser) Flush() {
 		}
 	}
 	p.buffer = ""
+}
+
+// findRealCloseTag returns the index of the real </file> closing tag in p.buffer,
+// skipping false positives that appear inside string literals. Returns -1 if no
+// real closing tag is found.
+//
+// Heuristic: a </file> that appears on the same line as an unclosed quote
+// character (", ', `) is likely inside a string literal and is skipped.
+func (p *FileStreamParser) findRealCloseTag() int {
+	searchFrom := 0
+	for {
+		idx := strings.Index(p.buffer[searchFrom:], "</file>")
+		if idx == -1 {
+			return -1
+		}
+		idx += searchFrom // absolute index
+
+		// Check if this </file> is inside a string literal by examining the
+		// content from the last newline to the tag position. If there's an
+		// odd number of quote characters, the tag is likely inside a string.
+		lineStart := strings.LastIndex(p.buffer[:idx], "\n")
+		if lineStart == -1 {
+			lineStart = 0
+		} else {
+			lineStart++ // skip the newline itself
+		}
+		linePrefix := p.buffer[lineStart:idx]
+
+		// Also skip the escaped form <\/file>
+		if idx > 0 && p.buffer[idx-1] == '\\' {
+			searchFrom = idx + len("</file>")
+			continue
+		}
+
+		// Count unescaped quotes — if any type has an odd count, we're inside a string
+		insideString := false
+		for _, q := range []byte{'"', '\'', '`'} {
+			count := 0
+			for i := 0; i < len(linePrefix); i++ {
+				if linePrefix[i] == q && (i == 0 || linePrefix[i-1] != '\\') {
+					count++
+				}
+			}
+			if count%2 != 0 {
+				insideString = true
+				break
+			}
+		}
+
+		if insideString {
+			// False positive — skip and keep looking
+			slog.Debug("FileStreamParser: skipping </file> inside string literal",
+				"path", p.currentPath, "line_prefix_len", len(linePrefix))
+			searchFrom = idx + len("</file>")
+			continue
+		}
+
+		return idx
+	}
 }
