@@ -37,16 +37,7 @@ func (v *HttpViews) GetMontlyUsage(w http.ResponseWriter, r *http.Request) {
 		notifications = append(notifications, projectNotifications...)
 	}
 
-	subsStart := user.SubscriptionStartAt
-	now := time.Now()
-
-	renewStart := time.Date(now.Year(), now.Month(), subsStart.Day(), 0, 0, 0, 0, now.Location())
-
-	if now.Before(renewStart) {
-		renewStart = renewStart.AddDate(0, -1, 0)
-	}
-
-	renewEnd := renewStart.AddDate(0, 1, 0)
+	renewStart, renewEnd := utils.BillingPeriod(user.SubscriptionStartAt, time.Now())
 
 	notificationCount := 0
 	for _, notification := range notifications {
@@ -62,9 +53,19 @@ func (v *HttpViews) GetMontlyUsage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Fetch plan limits to include in response
+	var notificationLimit, buildLimit int
+	limits, limitsErr := v.Controller.DB.GetStandartUserLimitsByUser(user)
+	if limitsErr == nil {
+		notificationLimit = limits.MontlyNotificationCount
+		buildLimit = limits.MontlyBuildCount
+	}
+
 	output := map[string]any{
 		"notifications_used":    notificationCount,
 		"app_builds_used":       appBuildTaskCount,
+		"notification_limit":    notificationLimit,
+		"app_builds_limit":      buildLimit,
 		"subscription_status":   user.SubscriptionStatus,
 		"subscription_plan_id":  user.SubscriptionID,
 		"subscription_start_at": user.SubscriptionStartAt,

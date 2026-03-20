@@ -130,17 +130,33 @@ func (v *HttpViews) GetCreditHistory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Compute running balance_after for each transaction (newest first).
+	// balance_after[i] = current_balance - sum(amounts of transactions newer than i)
+	currentBalance := 0
+	if bal, balErr := v.Controller.DB.GetAICreditsBalance(user.ID.String()); balErr == nil {
+		currentBalance = bal.Balance
+	}
+	// For pages after 1, subtract the sum of newer transactions not on this page
+	offset := (page - 1) * pageSize
+	if offset > 0 {
+		if newerSum, sumErr := v.Controller.DB.SumRecentTransactionAmounts(user.ID.String(), offset); sumErr == nil {
+			currentBalance -= newerSum
+		}
+	}
+
 	transactions := make([]responses.CreditTransactionResponse, 0, len(txs))
+	runningBalance := currentBalance
 	for _, tx := range txs {
 		transactions = append(transactions, responses.CreditTransactionResponse{
-			ID:          tx.ID.String(),
-			Type:        categorizeTxType(tx.Action, tx.Amount),
-			Action:      tx.Action,
-			Amount:      tx.Amount,
-			BalanceAfter: 0,
-			CreatedAt:   tx.CreatedAt.Format("2006-01-02T15:04:05Z"),
-			Description: describeTxAction(tx.Action),
+			ID:           tx.ID.String(),
+			Type:         categorizeTxType(tx.Action, tx.Amount),
+			Action:       tx.Action,
+			Amount:       tx.Amount,
+			BalanceAfter: runningBalance,
+			CreatedAt:    tx.CreatedAt.Format("2006-01-02T15:04:05Z"),
+			Description:  describeTxAction(tx.Action),
 		})
+		runningBalance -= tx.Amount
 	}
 
 	utils.JSONResponse(w, responses.CreditHistoryResponse{
@@ -156,7 +172,7 @@ func categorizeTxType(action string, amount int) string {
 	if strings.Contains(lower, "refund") {
 		return "refund"
 	}
-	if strings.Contains(lower, "grant") {
+	if strings.Contains(lower, "grant") || strings.Contains(lower, "allocation") || strings.Contains(lower, "bonus") {
 		return "allocation"
 	}
 	if strings.Contains(lower, "purchase") || strings.Contains(lower, "purchased") {
@@ -165,7 +181,10 @@ func categorizeTxType(action string, amount int) string {
 	if amount < 0 {
 		return "usage"
 	}
-	return "purchase"
+	if amount > 0 {
+		return "allocation"
+	}
+	return "usage"
 }
 
 func describeTxAction(action string) string {

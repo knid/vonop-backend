@@ -66,6 +66,17 @@ func (db *Database) GetAICreditTransactionsPaginated(userID string, page, pageSi
 	return txs, total, err
 }
 
+// SumRecentTransactionAmounts returns the sum of amounts for the N most recent
+// transactions (by created_at DESC). Used to compute running balance_after in paginated history.
+func (db *Database) SumRecentTransactionAmounts(userID string, limit int) (int, error) {
+	var sum int
+	err := db.DB.NewRaw(
+		"SELECT COALESCE(SUM(amount), 0) FROM (SELECT amount FROM ai_credit_transactions WHERE user_id = ? ORDER BY created_at DESC LIMIT ?) sub",
+		userID, limit,
+	).Scan(context.Background(), &sum)
+	return sum, err
+}
+
 // --- Atomic Credit Operations ---
 
 // AtomicDeductCreditsUnchecked atomically deducts credits, allowing negative balance down to floor.

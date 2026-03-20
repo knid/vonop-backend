@@ -24,13 +24,13 @@ func (c *Controller) GetOrCreateCreditsBalance(user *models.User) (*models.AICre
 			return nil, err
 		}
 
-		// Create a new balance for this billing period
-		now := time.Now()
+		// Create a new balance aligned with the subscription billing period
+		periodStart, periodEnd := utils.BillingPeriod(user.SubscriptionStartAt, time.Now())
 		balance = &models.AICreditsBalance{
 			UserID:      user.ID,
 			Balance:     0,
-			PeriodStart: now,
-			PeriodEnd:   now.AddDate(0, 1, 0),
+			PeriodStart: periodStart,
+			PeriodEnd:   periodEnd,
 		}
 
 		// Grant monthly credits from plan
@@ -61,9 +61,7 @@ func (c *Controller) GetOrCreateCreditsBalance(user *models.User) (*models.AICre
 
 	// Check if period has expired and reset atomically
 	if time.Now().After(balance.PeriodEnd) {
-		now := time.Now()
-		periodStart := now
-		periodEnd := now.AddDate(0, 1, 0)
+		periodStart, periodEnd := utils.BillingPeriod(user.SubscriptionStartAt, time.Now())
 
 		monthlyCredits := 0
 		rolloverMonths := 0
@@ -76,7 +74,7 @@ func (c *Controller) GetOrCreateCreditsBalance(user *models.User) (*models.AICre
 		// Free plan (monthlyCredits == 0): skip reset entirely, just extend the period
 		// This preserves one-time credits for free plan users
 		if monthlyCredits == 0 {
-			periodEnd = now.AddDate(100, 0, 0) // extend far into the future
+			periodEnd = time.Now().AddDate(100, 0, 0) // extend far into the future
 			_, didReset, resetErr := c.DB.AtomicResetPeriod(balance.ID.String(), balance.Balance, periodStart, periodEnd)
 			if resetErr != nil {
 				return nil, resetErr
