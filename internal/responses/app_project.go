@@ -139,6 +139,8 @@ type IntegrationProviderInfo struct {
 	Provider       string   `json:"provider"`
 	Name           string   `json:"name"`
 	Description    string   `json:"description"`
+	Category       string   `json:"category"`
 	RequiredFields []string `json:"required_fields"`
+	OptionalFields []string `json:"optional_fields,omitempty"`
 	Website        string   `json:"website"`
 }

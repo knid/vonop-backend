@@ -15,60 +15,22 @@ import (
 	stripeClient "github.com/stripe/stripe-go/v82/client"
 )
 
-var integrationProviders = []responses.IntegrationProviderInfo{
-	{
-		Provider:       "supabase",
-		Name:           "Supabase",
-		Description:    "Database, authentication, and storage. Use as your website's backend.",
-		RequiredFields: []string{"url", "anon_key"},
-		Website:        "https://supabase.com",
-	},
-	{
-		Provider:       "firebase",
-		Name:           "Firebase",
-		Description:    "Database, authentication, and storage by Google.",
-		RequiredFields: []string{"config"},
-		Website:        "https://firebase.google.com",
-	},
-	{
-		Provider:       "stripe",
-		Name:           "Stripe",
-		Description:    "Accept payments and sell products on your website.",
-		RequiredFields: []string{"publishable_key", "secret_key"},
-		Website:        "https://stripe.com",
-	},
-	{
-		Provider:       "iyzico",
-		Name:           "Iyzico",
-		Description:    "Accept payments in Turkey and surrounding regions.",
-		RequiredFields: []string{"api_key", "secret_key"},
-		Website:        "https://www.iyzico.com",
-	},
-	{
-		Provider:       "resend",
-		Name:           "Resend",
-		Description:    "Send transactional emails from your website.",
-		RequiredFields: []string{"api_key"},
-		Website:        "https://resend.com",
-	},
-	{
-		Provider:       "cloudinary",
-		Name:           "Cloudinary",
-		Description:    "Image and video optimization, upload, and transformation.",
-		RequiredFields: []string{"cloud_name", "upload_preset"},
-		Website:        "https://cloudinary.com",
-	},
-	{
-		Provider:       "google_sheets",
-		Name:           "Google Sheets",
-		Description:    "Use Google Sheets as a simple database for your website content.",
-		RequiredFields: []string{"api_key", "sheet_id"},
-		Website:        "https://sheets.google.com",
-	},
-}
-
+// GetIntegrationProviders returns the provider list derived from the single
+// source of truth in constants.IntegrationProviders.
 func (c *Controller) GetIntegrationProviders() []responses.IntegrationProviderInfo {
-	return integrationProviders
+	providers := make([]responses.IntegrationProviderInfo, 0, len(constants.IntegrationProviders))
+	for _, p := range constants.IntegrationProviders {
+		providers = append(providers, responses.IntegrationProviderInfo{
+			Provider:       p.Provider,
+			Name:           p.Name,
+			Description:    p.Description,
+			Category:       p.Category,
+			RequiredFields: p.RequiredFields,
+			OptionalFields: p.OptionalFields,
+			Website:        p.Website,
+		})
+	}
+	return providers
 }
 
 func (c *Controller) GetAppIntegrations(projectID string) ([]models.AppIntegration, error) {
@@ -81,8 +43,8 @@ func (c *Controller) ConnectAppIntegration(project *models.AppProject, req reque
 		return nil, err
 	}
 
-	// Validate credentials for the provider
-	if err := integrations.ValidateCredentials(req.Provider, req.Credentials); err != nil {
+	// Validate credentials with provider-specific rules (URL format, key prefixes, etc.)
+	if err := integrations.ValidateIntegrationConfig(req.Provider, req.Credentials); err != nil {
 		return nil, err
 	}
 
@@ -166,7 +128,8 @@ func (c *Controller) UpdateAppIntegration(integrationID string, project *models.
 		return nil, fmt.Errorf("unauthorized")
 	}
 
-	if err := integrations.ValidateCredentials(integ.Provider, req.Credentials); err != nil {
+	// Validate with provider-specific rules
+	if err := integrations.ValidateIntegrationConfig(integ.Provider, req.Credentials); err != nil {
 		return nil, err
 	}
 
