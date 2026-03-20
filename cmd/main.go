@@ -1066,6 +1066,7 @@ func main() {
 				r.Route("/credits", func(r chi.Router) {
 					r.Get("/", httpViews.GetAICreditsBalance)
 					r.Get("/transactions", httpViews.GetAICreditTransactions)
+					r.Get("/history", httpViews.GetCreditHistory)
 					r.Get("/packages", httpViews.GetCreditPackages)
 					r.Post("/purchase", httpViews.PurchaseCredits)
 				})

@@ -56,3 +56,20 @@ type TokenUsageResponse struct {
 	Entries []TokenUsageEntry `json:"entries"`
 	Summary TokenUsageSummary `json:"summary"`
 }
+
+type CreditTransactionResponse struct {
+	ID          string `json:"id"`
+	Type        string `json:"type"`
+	Action      string `json:"action"`
+	Amount      int    `json:"amount"`
+	BalanceAfter int   `json:"balance_after"`
+	CreatedAt   string `json:"created_at"`
+	Description string `json:"description,omitempty"`
+}
+
+type CreditHistoryResponse struct {
+	Transactions []CreditTransactionResponse `json:"transactions"`
+	Total        int                         `json:"total"`
+	Page         int                         `json:"page"`
+	PageSize     int                         `json:"page_size"`
+}
