@@ -92,6 +92,8 @@ func (c *Controller) ExtractSchemaFromGeneratedFiles(ctx context.Context, projec
 
 // ExtractSchemaFromPlatformDB introspects the platform's own PostgreSQL database
 // and returns table/column definitions from information_schema.
+// SECURITY: Only e-commerce tables from platformAllowedTables are returned.
+// Sensitive columns listed in platformSensitiveColumns are stripped.
 // Results are cached for 60 seconds to avoid repeated heavy information_schema queries.
 func (c *Controller) ExtractSchemaFromPlatformDB() (json.RawMessage, error) {
 	platformSchemaCache.Lock()
@@ -138,6 +140,14 @@ func (c *Controller) ExtractSchemaFromPlatformDB() (json.RawMessage, error) {
 	for rows.Next() {
 		var tableName, colName, dataType, isNullable, isPK string
 		if err := rows.Scan(&tableName, &colName, &dataType, &isNullable, &isPK); err != nil {
+			continue
+		}
+		// SECURITY: skip tables not in the e-commerce allowlist
+		if !platformAllowedTables[tableName] {
+			continue
+		}
+		// SECURITY: strip sensitive columns
+		if platformSensitiveColumns[colName] {
 			continue
 		}
 		t, ok := tableMap[tableName]
@@ -215,8 +225,10 @@ func (c *Controller) CreateDashboard(ctx context.Context, project *models.AppPro
 		}
 	}()
 
-	// Find database integration (optional — falls back to platform DB)
-	dbProvider := "platform"
+	// Find database integration.
+	// Only e-commerce projects may fall back to the platform DB (for built-in
+	// store tables). All other project types require an explicit DB integration.
+	dbProvider := ""
 	integrations, err := c.DB.GetAppIntegrationsByProjectID(project.ID.String())
 	if err == nil {
 		for _, integ := range integrations {
@@ -224,6 +236,14 @@ func (c *Controller) CreateDashboard(ctx context.Context, project *models.AppPro
 				dbProvider = integ.Provider
 				break
 			}
+		}
+	}
+	if dbProvider == "" {
+		if project.ProjectType == "ecommerce" {
+			dbProvider = "platform"
+		} else {
+			sendError("schema", "no database integration found. Add a Neon or Supabase integration first.")
+			return
 		}
 	}
 

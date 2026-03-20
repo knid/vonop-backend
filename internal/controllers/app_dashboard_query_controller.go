@@ -22,6 +22,30 @@ const (
 	maxConcurrentQueries = 5
 )
 
+// platformAllowedTables is the strict allowlist of tables that the "platform"
+// dashboard provider may read from. Only e-commerce tables are permitted;
+// every other table in the shared database is off-limits.
+var platformAllowedTables = map[string]bool{
+	"stores":             true,
+	"products":           true,
+	"product_categories": true,
+	"discounts":          true,
+	"carts":              true,
+	"cart_items":         true,
+	"orders":             true,
+	"order_items":        true,
+	"product_reviews":    true,
+	"wishlists":          true,
+}
+
+// platformSensitiveColumns are columns stripped from the schema even on allowed tables.
+var platformSensitiveColumns = map[string]bool{
+	"payment_config": true,
+	"payment_id":     true,
+	"metadata":       true,
+}
+
+
 var queryHTTPClient = &http.Client{Timeout: supabaseHTTPTimeout}
 
 // parseQueryFromRaw builds a DashboardQuery from a generic map, handling LLM type quirks.
@@ -322,7 +346,8 @@ func ResolveTableFromRef(refs []TableRef, alias string) string {
 }
 
 // QueryPanel executes the query for a single panel and returns the result.
-func (c *Controller) QueryPanel(dashboard *models.AppDashboard, panel *models.AppDashboardPanel, integration *models.AppIntegration) responses.PanelDataResponse {
+// storeID is required for "platform" provider queries to enforce row-level scoping.
+func (c *Controller) QueryPanel(dashboard *models.AppDashboard, panel *models.AppDashboardPanel, integration *models.AppIntegration, storeID string) responses.PanelDataResponse {
 	// Always parse via generic map to handle LLM type quirks (e.g. number vs string)
 	var raw map[string]any
 	if err := json.Unmarshal(panel.Query, &raw); err != nil || raw == nil {
@@ -350,7 +375,11 @@ func (c *Controller) QueryPanel(dashboard *models.AppDashboard, panel *models.Ap
 	case "neon":
 		data, err = c.queryNeon(integration, &query)
 	case "platform":
-		data, err = c.queryPlatform(&query)
+		if storeID == "" {
+			err = fmt.Errorf("platform queries require a store context")
+		} else {
+			data, err = c.queryPlatform(&query, storeID)
+		}
 	default:
 		err = fmt.Errorf("unsupported provider: %s", dashboard.Provider)
 	}
@@ -373,7 +402,8 @@ func (c *Controller) QueryPanel(dashboard *models.AppDashboard, panel *models.Ap
 }
 
 // QueryAllPanels queries all panels concurrently with bounded concurrency.
-func (c *Controller) QueryAllPanels(dashboard *models.AppDashboard, panels []models.AppDashboardPanel, integration *models.AppIntegration) []responses.PanelDataResponse {
+// storeID is required for "platform" provider queries to enforce row-level scoping.
+func (c *Controller) QueryAllPanels(dashboard *models.AppDashboard, panels []models.AppDashboardPanel, integration *models.AppIntegration, storeID string) []responses.PanelDataResponse {
 	results := make([]responses.PanelDataResponse, len(panels))
 	sem := make(chan struct{}, maxConcurrentQueries)
 	var wg sync.WaitGroup
@@ -384,7 +414,7 @@ func (c *Controller) QueryAllPanels(dashboard *models.AppDashboard, panels []mod
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			results[idx] = c.QueryPanel(dashboard, &p, integration)
+			results[idx] = c.QueryPanel(dashboard, &p, integration, storeID)
 		}(i, panel)
 	}
 
@@ -787,11 +817,21 @@ func buildSQLFromTableQuery(query *models.DashboardQuery) (string, []any, error)
 }
 
 // queryPlatform executes a read-only SQL query against the platform's own Postgres database.
-func (c *Controller) queryPlatform(query *models.DashboardQuery) (any, error) {
+// SECURITY: storeID is mandatory. Every query is wrapped in a CTE that restricts all
+// e-commerce tables to only rows belonging to this store, preventing cross-store leakage.
+func (c *Controller) queryPlatform(query *models.DashboardQuery, storeID string) (any, error) {
+	if storeID == "" {
+		return nil, fmt.Errorf("store ID is required for platform queries")
+	}
+
 	var queryArgs []any
 
 	// Auto-build SQL from table-based query if no SQL provided
 	if query.SQL == "" && query.Table != "" {
+		// SECURITY: validate table is in the e-commerce allowlist
+		if !platformAllowedTables[query.Table] {
+			return nil, fmt.Errorf("table %q is not accessible", query.Table)
+		}
 		var err error
 		query.SQL, queryArgs, err = buildSQLFromTableQuery(query)
 		if err != nil {
@@ -806,6 +846,9 @@ func (c *Controller) queryPlatform(query *models.DashboardQuery) (any, error) {
 	if query.Transform == "count" && query.Table != "" {
 		if !isValidSQLIdentifier(query.Table) {
 			return nil, fmt.Errorf("invalid table name: %s", query.Table)
+		}
+		if !platformAllowedTables[query.Table] {
+			return nil, fmt.Errorf("table %q is not accessible", query.Table)
 		}
 		quotedTable := quoteIdentifier(query.Table)
 		query.SQL = fmt.Sprintf("SELECT COUNT(*) AS value FROM %s", quotedTable)
@@ -824,6 +867,16 @@ func (c *Controller) queryPlatform(query *models.DashboardQuery) (any, error) {
 		return nil, err
 	}
 
+	// SECURITY: validate all table references in the SQL are in the allowlist
+	if err := validatePlatformSQLTables(query.SQL); err != nil {
+		return nil, err
+	}
+
+	// SECURITY: wrap the user query inside a CTE that scopes all e-commerce tables
+	// to the current store. This ensures cross-store data is never returned regardless
+	// of what SQL the LLM generated.
+	scopedSQL, scopedArgs := wrapWithStoreScope(query.SQL, queryArgs, storeID)
+
 	db := c.DB.DB.DB
 
 	tx, err := db.Begin()
@@ -839,7 +892,7 @@ func (c *Controller) queryPlatform(query *models.DashboardQuery) (any, error) {
 		slog.Warn("failed to set statement_timeout", "error", err)
 	}
 
-	rows, err := tx.Query(query.SQL, queryArgs...)
+	rows, err := tx.Query(scopedSQL, scopedArgs...)
 	if err != nil {
 		return nil, fmt.Errorf("query failed: %w", err)
 	}
@@ -884,6 +937,88 @@ func (c *Controller) queryPlatform(query *models.DashboardQuery) (any, error) {
 	}
 
 	return results, nil
+}
+
+// platformTablesWithStoreID lists tables that have a direct store_id column.
+// Tables like order_items and cart_items are scoped through their parent JOINs.
+var platformTablesWithStoreID = map[string]bool{
+	"stores":             true,
+	"products":           true,
+	"product_categories": true,
+	"discounts":          true,
+	"carts":              true,
+	"orders":             true,
+	"product_reviews":    true,
+	"wishlists":          true,
+}
+
+// platformTablesWithParentScope lists tables scoped through a FK to a store-scoped parent.
+var platformTablesWithParentScope = map[string]struct {
+	parentTable string
+	fkColumn    string
+	parentPK    string
+}{
+	"order_items": {parentTable: "orders", fkColumn: "order_id", parentPK: "id"},
+	"cart_items":  {parentTable: "carts", fkColumn: "cart_id", parentPK: "id"},
+}
+
+// wrapWithStoreScope wraps a SQL query in CTEs that restrict every e-commerce table
+// to only rows belonging to the given store. The original query references the CTE
+// names (same as table names) so it works transparently.
+func wrapWithStoreScope(originalSQL string, originalArgs []any, storeID string) (string, []any) {
+	// Find the next param index after existing args
+	nextParam := len(originalArgs) + 1
+
+	var ctes []string
+	paramCount := 0
+
+	// Tables with direct store_id
+	for table := range platformTablesWithStoreID {
+		if table == "stores" {
+			ctes = append(ctes, fmt.Sprintf("%s AS (SELECT * FROM %s WHERE id = $%d)",
+				quoteIdentifier(table), quoteIdentifier(table), nextParam+paramCount))
+		} else {
+			ctes = append(ctes, fmt.Sprintf("%s AS (SELECT * FROM %s WHERE store_id = $%d)",
+				quoteIdentifier(table), quoteIdentifier(table), nextParam+paramCount))
+		}
+		paramCount++
+	}
+
+	// Tables scoped through parent FK
+	for table, scope := range platformTablesWithParentScope {
+		ctes = append(ctes, fmt.Sprintf(
+			"%s AS (SELECT c.* FROM %s c INNER JOIN %s p ON c.%s = p.%s WHERE p.store_id = $%d)",
+			quoteIdentifier(table), quoteIdentifier(table),
+			quoteIdentifier(scope.parentTable),
+			quoteIdentifier(scope.fkColumn), quoteIdentifier(scope.parentPK),
+			nextParam+paramCount))
+		paramCount++
+	}
+
+	if len(ctes) == 0 {
+		return originalSQL, originalArgs
+	}
+
+	// Build args: original args + storeID repeated for each CTE
+	scopedArgs := make([]any, len(originalArgs), len(originalArgs)+paramCount)
+	copy(scopedArgs, originalArgs)
+	for i := 0; i < paramCount; i++ {
+		scopedArgs = append(scopedArgs, storeID)
+	}
+
+	return "WITH " + strings.Join(ctes, ", ") + " " + originalSQL, scopedArgs
+}
+
+// validatePlatformSQLTables checks that all table references in a SQL query
+// are in the e-commerce allowlist. Prevents querying users, tokens, etc.
+func validatePlatformSQLTables(sqlQuery string) error {
+	refs := ParseTableReferences(sqlQuery)
+	for _, ref := range refs {
+		if !platformAllowedTables[ref.Name] {
+			return fmt.Errorf("table %q is not accessible from dashboard", ref.Name)
+		}
+	}
+	return nil
 }
 
 // validateReadOnlySQL ensures a SQL query is safe (read-only).
@@ -1047,7 +1182,8 @@ func extractPrefixedPKs(primaryKey map[string]any, tableName string) map[string]
 
 // UpdateCell updates a single cell value in the database.
 // The caller (view handler) is responsible for resolving column aliases and table names.
-func (c *Controller) UpdateCell(dashboard *models.AppDashboard, integration *models.AppIntegration, table, column string, value any, primaryKey map[string]any) error {
+// storeID is required for "platform" provider to enforce ownership scoping.
+func (c *Controller) UpdateCell(dashboard *models.AppDashboard, integration *models.AppIntegration, table, column string, value any, primaryKey map[string]any, storeID string) error {
 	resolvedPK := primaryKey
 
 	// Extract real PK values from __pk__ prefixed entries if present
@@ -1066,7 +1202,14 @@ func (c *Controller) UpdateCell(dashboard *models.AppDashboard, integration *mod
 	case "neon":
 		return c.updateCellNeon(integration, table, column, value, resolvedPK)
 	case "platform":
-		return c.updateCellPlatform(table, column, value, resolvedPK)
+		// SECURITY: only e-commerce tables are writable
+		if !platformAllowedTables[table] {
+			return fmt.Errorf("table %q is not writable from dashboard", table)
+		}
+		if storeID == "" {
+			return fmt.Errorf("platform writes require a store context")
+		}
+		return c.updateCellPlatform(table, column, value, resolvedPK, storeID)
 	default:
 		return fmt.Errorf("unsupported provider: %s", dashboard.Provider)
 	}
@@ -1164,7 +1307,16 @@ func (c *Controller) updateCellNeon(integration *models.AppIntegration, table, c
 }
 
 // updateCellPlatform updates a cell on the platform's own Postgres database.
-func (c *Controller) updateCellPlatform(table, column string, value any, primaryKey map[string]any) error {
+// SECURITY: storeID is mandatory. The UPDATE includes a store ownership check
+// to prevent modifying rows belonging to other stores.
+func (c *Controller) updateCellPlatform(table, column string, value any, primaryKey map[string]any, storeID string) error {
+	if storeID == "" {
+		return fmt.Errorf("store ID is required for platform writes")
+	}
+	if !platformAllowedTables[table] {
+		return fmt.Errorf("table %q is not writable from dashboard", table)
+	}
+
 	db := c.DB.DB.DB
 
 	tx, err := db.Begin()
@@ -1177,7 +1329,8 @@ func (c *Controller) updateCellPlatform(table, column string, value any, primary
 		slog.Warn("failed to set statement_timeout", "error", err)
 	}
 
-	sqlStr, args := buildUpdateSQL(table, column, value, primaryKey)
+	// SECURITY: build UPDATE with store_id ownership check
+	sqlStr, args := buildScopedUpdateSQL(table, column, value, primaryKey, storeID)
 
 	result, err := tx.Exec(sqlStr, args...)
 	if err != nil {
@@ -1186,10 +1339,52 @@ func (c *Controller) updateCellPlatform(table, column string, value any, primary
 
 	rowsAffected, _ := result.RowsAffected()
 	if rowsAffected == 0 {
-		return fmt.Errorf("no rows updated — row may not exist")
+		return fmt.Errorf("no rows updated — row may not exist or does not belong to this store")
 	}
 
 	return tx.Commit()
+}
+
+// buildScopedUpdateSQL constructs a parameterized UPDATE with a store ownership guard.
+// For tables with direct store_id, adds AND store_id = $N.
+// For child tables (order_items, cart_items), adds a subquery check on the parent.
+func buildScopedUpdateSQL(table, column string, value any, primaryKey map[string]any, storeID string) (string, []any) {
+	args := []any{value}
+	paramIdx := 2
+
+	whereParts := []string{}
+	for k, v := range primaryKey {
+		whereParts = append(whereParts, fmt.Sprintf("%s = $%d", quoteIdentifier(k), paramIdx))
+		args = append(args, v)
+		paramIdx++
+	}
+
+	// Add store ownership constraint
+	if platformTablesWithStoreID[table] {
+		if table == "stores" {
+			whereParts = append(whereParts, fmt.Sprintf("id = $%d", paramIdx))
+		} else {
+			whereParts = append(whereParts, fmt.Sprintf("store_id = $%d", paramIdx))
+		}
+		args = append(args, storeID)
+	} else if scope, ok := platformTablesWithParentScope[table]; ok {
+		// For child tables, verify the parent row belongs to this store
+		whereParts = append(whereParts, fmt.Sprintf(
+			"%s IN (SELECT %s FROM %s WHERE store_id = $%d)",
+			quoteIdentifier(scope.fkColumn),
+			quoteIdentifier(scope.parentPK),
+			quoteIdentifier(scope.parentTable),
+			paramIdx))
+		args = append(args, storeID)
+	}
+
+	sqlStr := fmt.Sprintf("UPDATE %s SET %s = $1 WHERE %s",
+		quoteIdentifier(table),
+		quoteIdentifier(column),
+		strings.Join(whereParts, " AND "),
+	)
+
+	return sqlStr, args
 }
 
 // buildUpdateSQL constructs a parameterized UPDATE statement.
