@@ -413,10 +413,13 @@ func (c *Controller) GetLatestDeploymentStatus(projectID string) (*models.AppDep
 
 			var newStatus string
 			var errorMessage string
-			switch strings.ToLower(status) {
-			case "running":
+			lowerStatus := strings.ToLower(status)
+			switch {
+			case strings.HasPrefix(lowerStatus, "running"):
 				newStatus = "deployed"
-			case "exited", "error", "degraded":
+			case strings.HasPrefix(lowerStatus, "exited"),
+				strings.HasPrefix(lowerStatus, "error"),
+				strings.HasPrefix(lowerStatus, "degraded"):
 				newStatus = "failed"
 				// Try deployment logs first (more detailed), fall back to app logs
 				dep, depErr := c.CoolifyService.GetLatestDeployment(appUUID)
