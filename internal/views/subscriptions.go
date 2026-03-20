@@ -49,6 +49,10 @@ func (v *HttpViews) GetLimits(w http.ResponseWriter, r *http.Request) {
 		MonthlyDeployCount:      limits.MonthlyDeployCount,
 		CanUseEcommerce:         limits.CanUseEcommerce,
 		CanExportToGitHub:       limits.CanExportToGitHub,
+		DeployMemoryMB:          limits.DeployMemoryMB,
+		DeployCPUs:              limits.DeployCPUs,
+		DeployDBMaxCU:           limits.DeployDBMaxCU,
+		DeployDBStorageMB:       limits.DeployDBStorageMB,
 	}
 
 	utils.JSONResponse(w, limitsResponse, http.StatusOK)

@@ -45,6 +45,10 @@ func (v *HttpViews) GetBillingPlans(w http.ResponseWriter, r *http.Request) {
 				MonthlyDeployCount:   limits.MonthlyDeployCount,
 				CanRemoveBrandLogo:   limits.CanRemoveBrandLogo,
 				CanExportToGitHub:    limits.CanExportToGitHub,
+				DeployMemoryMB:       limits.DeployMemoryMB,
+				DeployCPUs:           limits.DeployCPUs,
+				DeployDBMaxCU:        limits.DeployDBMaxCU,
+				DeployDBStorageMB:    limits.DeployDBStorageMB,
 			}
 		}
 
