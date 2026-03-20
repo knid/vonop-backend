@@ -1663,6 +1663,15 @@ func StreamWithTools(
 				})
 			}
 
+			// Capture the range of tool result messages now, before any system
+			// messages are appended below. The tool results are the last
+			// len(toolCalls) messages in currentMessages.
+			toolResultEndIdx := len(currentMessages)
+			toolResultStartIdx := toolResultEndIdx - len(toolCalls)
+			if toolResultStartIdx < 0 {
+				toolResultStartIdx = 0
+			}
+
 			// If all tool calls were deduped or intercepted, accelerate toward nudge/strip.
 			// Use an additive bump (~20% of nudgeAfter, min 2) instead of jumping directly
 			// to threshold — a single wasted round shouldn't trigger premature nudging.
@@ -1709,12 +1718,10 @@ func StreamWithTools(
 
 			// Record the range of this round's tool result messages for deferred trimming.
 			// We defer trimming to the next round so the model sees full results once.
+			// Save the range using toolResultStartIdx captured before system messages
+			// were appended, since dedup/intercept messages shift indices.
 			if len(opts) > 0 && opts[0].TrimResults != nil {
-				start := len(currentMessages) - len(toolCalls)
-				if start < 0 {
-					start = 0
-				}
-				prevToolResultRange = [2]int{start, len(currentMessages)}
+				prevToolResultRange = [2]int{toolResultStartIdx, toolResultEndIdx}
 			}
 
 			// Inject post-round system message (e.g. progress summary).
