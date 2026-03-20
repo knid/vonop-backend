@@ -174,7 +174,59 @@ const builderIntegrationRules = `
 - For connected integrations, use process.env.VAR_NAME for env var names shown in context.
 - Env vars prefixed with NEXT_PUBLIC_ are available client-side. All others are server-side only.
 - Never hardcode credentials or secrets. Always use environment variables.
-- When integrating with Stripe, use proper Stripe.js patterns. Match idiomatic SDK patterns for each integration.`
+- Match idiomatic SDK patterns for each integration. Specific guidance per provider:
+
+#### Supabase
+- Install: @supabase/supabase-js
+- Create client: createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!)
+- Use for: auth (supabase.auth.signUp/signInWithPassword), database (supabase.from('table').select()), storage (supabase.storage.from('bucket').upload())
+- Create a shared lib/supabase.ts client file. For server components, use createServerClient from @supabase/ssr.
+
+#### Firebase
+- Install: firebase
+- Initialize: initializeApp({ apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY, authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN, projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID, ... })
+- Use for: auth (getAuth, signInWithEmailAndPassword), firestore (getFirestore, collection, getDocs), storage (getStorage, ref, uploadBytes)
+- Create a shared lib/firebase.ts config file.
+
+#### OpenRouter (AI)
+- OpenRouter is OpenAI-compatible. Use the openai npm package with a custom baseURL.
+- Server-side only: const openai = new OpenAI({ baseURL: "https://openrouter.ai/api/v1", apiKey: process.env.OPENROUTER_API_KEY })
+- Create API routes (app/api/chat/route.ts) that call OpenRouter server-side and stream responses to the client.
+- Use model names like "anthropic/claude-sonnet-4", "openai/gpt-4o", "google/gemini-2.0-flash-001", "meta-llama/llama-3.3-70b-instruct".
+- For chat UIs: create a useChat hook or use Vercel AI SDK (ai package) with openai provider pointed at OpenRouter.
+
+#### Fal.ai (AI Images)
+- Server-side only. Create an API route that calls Fal.ai.
+- Install: @fal-ai/client
+- Configure: fal.config({ credentials: process.env.FAL_KEY })
+- Use fal.subscribe("fal-ai/flux/dev", { input: { prompt: "..." } }) for image generation.
+- Return the image URL to the client.
+
+#### Resend (Email)
+- Server-side only: const resend = new Resend(process.env.RESEND_API_KEY)
+- Install: resend
+- Use: resend.emails.send({ from: 'onboarding@resend.dev', to: email, subject: '...', html: '...' })
+- Create API routes for sending emails. Never expose the API key client-side.
+
+#### Upstash Redis
+- Install: @upstash/redis
+- Create client: const redis = new Redis({ url: process.env.UPSTASH_REDIS_REST_URL!, token: process.env.UPSTASH_REDIS_REST_TOKEN! })
+- Use for: caching (redis.get/set), rate limiting, session storage, real-time counters.
+
+#### Cloudinary
+- Client-side uploads: use the upload widget with NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME and NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET (unsigned upload).
+- Install: next-cloudinary for Next.js integration (CldUploadWidget, CldImage components).
+
+#### Google Sheets
+- Server-side only: fetch data via Google Sheets API v4.
+- URL pattern: https://sheets.googleapis.com/v4/spreadsheets/${process.env.NEXT_PUBLIC_GOOGLE_SHEET_ID}/values/Sheet1?key=${process.env.GOOGLE_SHEETS_API_KEY}
+- Use as a simple read-only CMS. Create API routes or fetch in server components.
+
+#### Stripe
+- Install: stripe (server), @stripe/stripe-js + @stripe/react-stripe-js (client)
+- Server: const stripe = new Stripe(process.env.STRIPE_SK!)
+- Client: loadStripe(process.env.NEXT_PUBLIC_STRIPE_PK!)
+- Use Stripe Checkout for payments: create checkout session server-side, redirect client to session.url.`
 
 // ===========================
 // 2. Project-type data rules
