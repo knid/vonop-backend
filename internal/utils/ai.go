@@ -122,6 +122,8 @@ type TokenEntry struct {
 	IsStreaming              bool
 	InputMessages            []Message // optional: messages sent to LLM (only when TrackContent is set)
 	OutputText               string    // optional: LLM text completion (only when TrackContent is set)
+	SpanName                 string    // LLM function name (e.g. "get_json", "stream_text") for PostHog $ai_span_name
+	RecordedAt               time.Time // wall-clock time when this entry was recorded
 }
 
 // TokenTracker is a thread-safe accumulator that collects token usage across multiple LLM calls.
@@ -148,10 +150,15 @@ func trackerAttrs(ctx context.Context) []any {
 	return []any{"user_id", "", "project_id", ""}
 }
 
-// Record adds a usage entry to the tracker.
-func (t *TokenTracker) Record(model string, usage UsageInfo, latencyMs int64, isStreaming bool) {
+// Record adds a usage entry to the tracker. An optional spanName identifies
+// the LLM function (e.g. "get_json", "stream_text") for PostHog analytics.
+func (t *TokenTracker) Record(model string, usage UsageInfo, latencyMs int64, isStreaming bool, spanName ...string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	name := ""
+	if len(spanName) > 0 {
+		name = spanName[0]
+	}
 	t.entries = append(t.entries, TokenEntry{
 		Model:                    model,
 		PromptTokens:             usage.PromptTokens,
@@ -161,13 +168,20 @@ func (t *TokenTracker) Record(model string, usage UsageInfo, latencyMs int64, is
 		CacheReadInputTokens:     usage.CacheReadInputTokens,
 		LatencyMs:                latencyMs,
 		IsStreaming:              isStreaming,
+		SpanName:                 name,
+		RecordedAt:               time.Now(),
 	})
 }
 
 // RecordWithContent adds a usage entry including the messages and output text.
-func (t *TokenTracker) RecordWithContent(model string, usage UsageInfo, latencyMs int64, isStreaming bool, inputMessages []Message, outputText string) {
+// An optional spanName identifies the LLM function for PostHog analytics.
+func (t *TokenTracker) RecordWithContent(model string, usage UsageInfo, latencyMs int64, isStreaming bool, inputMessages []Message, outputText string, spanName ...string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	name := ""
+	if len(spanName) > 0 {
+		name = spanName[0]
+	}
 	// Deep-snapshot messages so caller mutations don't affect stored data.
 	// copy() is shallow — slices like ToolCalls and Images are shared with the
 	// original. We deep-copy those fields to fully decouple the snapshot.
@@ -194,6 +208,8 @@ func (t *TokenTracker) RecordWithContent(model string, usage UsageInfo, latencyM
 		IsStreaming:              isStreaming,
 		InputMessages:            msgs,
 		OutputText:               outputText,
+		SpanName:                 name,
+		RecordedAt:               time.Now(),
 	})
 }
 
@@ -547,7 +563,7 @@ func GetJSONFromLLM(ctx context.Context, model, system, message string, provider
 	if parsed.Usage.TotalTokens > 0 {
 		slog.Info("LLM usage", append([]any{"from", "llm_utils", "model", model, "prompt_tokens", parsed.Usage.PromptTokens, "completion_tokens", parsed.Usage.CompletionTokens, "total_tokens", parsed.Usage.TotalTokens, "latency_ms", latencyMs}, trackerAttrs(ctx)...)...)
 		if tracker := TokenTrackerFromContext(ctx); tracker != nil {
-			tracker.Record(model, parsed.Usage, latencyMs, false)
+			tracker.Record(model, parsed.Usage, latencyMs, false, "get_json")
 		}
 	}
 
@@ -612,7 +628,7 @@ func GetTextFromLLM(ctx context.Context, model, system, message string, provider
 	if parsed.Usage.TotalTokens > 0 {
 		slog.Info("LLM usage", append([]any{"from", "llm_utils_text", "model", model, "prompt_tokens", parsed.Usage.PromptTokens, "completion_tokens", parsed.Usage.CompletionTokens, "total_tokens", parsed.Usage.TotalTokens, "latency_ms", latencyMs}, trackerAttrs(ctx)...)...)
 		if tracker := TokenTrackerFromContext(ctx); tracker != nil {
-			tracker.Record(model, parsed.Usage, latencyMs, false)
+			tracker.Record(model, parsed.Usage, latencyMs, false, "get_text")
 		}
 	}
 
@@ -719,9 +735,9 @@ func StreamTextFromLLMWithMessages(ctx context.Context, model string, messages [
 			slog.Info("LLM usage", append([]any{"from", "llm_stream_text", "model", model, "prompt_tokens", result.Usage.PromptTokens, "completion_tokens", result.Usage.CompletionTokens, "total_tokens", result.Usage.TotalTokens, "latency_ms", latencyMs}, trackerAttrs(ctx)...)...)
 			if tracker := TokenTrackerFromContext(ctx); tracker != nil {
 				if tracker.TrackContent {
-					tracker.RecordWithContent(model, result.Usage, latencyMs, true, messages, result.Text)
+					tracker.RecordWithContent(model, result.Usage, latencyMs, true, messages, result.Text, "stream_text")
 				} else {
-					tracker.Record(model, result.Usage, latencyMs, true)
+					tracker.Record(model, result.Usage, latencyMs, true, "stream_text")
 				}
 			}
 		}
@@ -789,9 +805,9 @@ func StreamTextFromLLMWithMessages(ctx context.Context, model string, messages [
 		slog.Info("LLM usage", append([]any{"from", "llm_stream_text", "model", model, "prompt_tokens", lastUsage.PromptTokens, "completion_tokens", lastUsage.CompletionTokens, "total_tokens", lastUsage.TotalTokens, "latency_ms", latencyMs}, trackerAttrs(ctx)...)...)
 		if tracker := TokenTrackerFromContext(ctx); tracker != nil {
 			if tracker.TrackContent {
-				tracker.RecordWithContent(model, lastUsage, latencyMs, true, messages, fullText.String())
+				tracker.RecordWithContent(model, lastUsage, latencyMs, true, messages, fullText.String(), "stream_text")
 			} else {
-				tracker.Record(model, lastUsage, latencyMs, true)
+				tracker.Record(model, lastUsage, latencyMs, true, "stream_text")
 			}
 		}
 	}
@@ -858,7 +874,7 @@ func GetJSONFromLLMWithMessages(ctx context.Context, model string, messages []Me
 	if parsed.Usage.TotalTokens > 0 {
 		slog.Info("LLM usage", append([]any{"from", "llm_utils_chat", "model", model, "prompt_tokens", parsed.Usage.PromptTokens, "completion_tokens", parsed.Usage.CompletionTokens, "total_tokens", parsed.Usage.TotalTokens, "latency_ms", latencyMs}, trackerAttrs(ctx)...)...)
 		if tracker := TokenTrackerFromContext(ctx); tracker != nil {
-			tracker.Record(model, parsed.Usage, latencyMs, false)
+			tracker.Record(model, parsed.Usage, latencyMs, false, "get_json_chat")
 		}
 	}
 
@@ -926,7 +942,7 @@ func StreamJSONFromLLMWithMessages(ctx context.Context, model string, messages [
 			latencyMs := time.Since(start).Milliseconds()
 			slog.Info("LLM usage", append([]any{"from", "llm_stream_chat", "model", model, "prompt_tokens", result.Usage.PromptTokens, "completion_tokens", result.Usage.CompletionTokens, "total_tokens", result.Usage.TotalTokens, "latency_ms", latencyMs}, trackerAttrs(ctx)...)...)
 			if tracker := TokenTrackerFromContext(ctx); tracker != nil {
-				tracker.Record(model, result.Usage, latencyMs, true)
+				tracker.Record(model, result.Usage, latencyMs, true, "stream_json")
 			}
 		}
 		return result.Text, nil
@@ -1003,7 +1019,7 @@ func StreamJSONFromLLMWithMessages(ctx context.Context, model string, messages [
 		latencyMs := time.Since(start).Milliseconds()
 		slog.Info("LLM usage", append([]any{"from", "llm_stream_chat", "model", model, "prompt_tokens", lastUsage.PromptTokens, "completion_tokens", lastUsage.CompletionTokens, "total_tokens", lastUsage.TotalTokens, "latency_ms", latencyMs}, trackerAttrs(ctx)...)...)
 		if tracker := TokenTrackerFromContext(ctx); tracker != nil {
-			tracker.Record(model, lastUsage, latencyMs, true)
+			tracker.Record(model, lastUsage, latencyMs, true, "stream_json")
 		}
 	}
 
@@ -1085,7 +1101,7 @@ func GetJSONFromLLMWithVision(ctx context.Context, model, system, userText, base
 	if parsed.Usage.TotalTokens > 0 {
 		slog.Info("LLM usage", append([]any{"from", "llm_utils_vision", "model", model, "prompt_tokens", parsed.Usage.PromptTokens, "completion_tokens", parsed.Usage.CompletionTokens, "total_tokens", parsed.Usage.TotalTokens, "latency_ms", latencyMs}, trackerAttrs(ctx)...)...)
 		if tracker := TokenTrackerFromContext(ctx); tracker != nil {
-			tracker.Record(model, parsed.Usage, latencyMs, false)
+			tracker.Record(model, parsed.Usage, latencyMs, false, "get_json_vision")
 		}
 	}
 
@@ -1496,9 +1512,9 @@ func StreamWithTools(
 				// Only record full message content for the first 10 rounds to cap memory usage.
 				// After that, record usage stats only.
 				if tracker.TrackContent && round < 10 {
-					tracker.RecordWithContent(model, roundUsage, time.Since(roundStart).Milliseconds(), true, currentMessages, fullText.String())
+					tracker.RecordWithContent(model, roundUsage, time.Since(roundStart).Milliseconds(), true, currentMessages, fullText.String(), "stream_with_tools")
 				} else {
-					tracker.Record(model, roundUsage, time.Since(roundStart).Milliseconds(), true)
+					tracker.Record(model, roundUsage, time.Since(roundStart).Milliseconds(), true, "stream_with_tools")
 				}
 			}
 		}
