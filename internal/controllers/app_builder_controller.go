@@ -221,6 +221,12 @@ func (c *Controller) StreamBuildApp(
 		}
 	}
 
+	// --- User plan limits (used for DB provisioning) ---
+	var userLimits *models.StandartUserLimits
+	if fetchedLimits, limitsErr := c.DB.GetStandartUserLimitsByUser(user); limitsErr == nil {
+		userLimits = fetchedLimits
+	}
+
 	// --- Token tracking ---
 	genStart := time.Now()
 	tracker := utils.NewTokenTracker()
@@ -754,7 +760,7 @@ func (c *Controller) StreamBuildApp(
 		// Runs a cheap model with tools to detect URLs and gather extra context
 		// before the main code-gen call. If no tools are called the phase is a
 		// near-instant no-op.
-		toolResult := c.runChatToolPhase(ctx, project, provider, repo, message, imageURLs, fileMap, sendEvent)
+		toolResult := c.runChatToolPhase(ctx, project, provider, repo, message, imageURLs, fileMap, sendEvent, userLimits)
 		if toolResult.Context != "" {
 			// Inject tool-gathered context as a system message before the user message
 			insertIdx := len(llmMessages) - 1 // before last user message
@@ -1210,6 +1216,7 @@ func (c *Controller) runChatToolPhase(
 	imageURLs []string,
 	fileMap map[string]string,
 	sendEvent func(string, any) bool,
+	userLimits *models.StandartUserLimits,
 ) chatToolPhaseResult {
 	fastModel := provider.FastModel()
 
@@ -3841,6 +3848,12 @@ var chatConfigureMobileAppTool = utils.Tool{
 
 // buildBuilderToolExecutor returns a ToolExecutor for the unified builder.
 func (c *Controller) buildBuilderToolExecutor(ctx context.Context, project *models.AppProject, user *models.User, repo *gitrepo.Repo, fileMap map[string]string, cbs *builderToolCallbacks) utils.ToolExecutor {
+	// Look up user's plan limits for DB provisioning
+	var userLimits *models.StandartUserLimits
+	if fetchedLimits, limitsErr := c.DB.GetStandartUserLimitsByUser(user); limitsErr == nil {
+		userLimits = fetchedLimits
+	}
+
 	return func(name string, arguments string) (string, error) {
 		// Early exit if context is cancelled — prevents partial writes after timeout
 		if ctx.Err() != nil {
@@ -4325,7 +4338,7 @@ func (c *Controller) buildBuilderToolExecutor(ctx context.Context, project *mode
 				cbs.sendEvent("neon_provision", map[string]any{"phase": "start"})
 			}
 
-			connStr, neonProjectID, neonErr := c.provisionNeonDatabase(ctx, project, dataModels, func(eventName string, data any) bool {
+			connStr, neonProjectID, neonErr := c.provisionNeonDatabase(ctx, project, dataModels, userLimits, func(eventName string, data any) bool {
 				if cbs != nil {
 					return cbs.sendEvent(eventName, data)
 				}
@@ -4692,6 +4705,12 @@ func (c *Controller) runPreGenerationSetup(
 	model string,
 	userPrompt string,
 ) error {
+	// Look up user's plan limits for DB provisioning
+	var userLimits *models.StandartUserLimits
+	if fetchedLimits, limitsErr := c.DB.GetStandartUserLimitsByUser(user); limitsErr == nil {
+		userLimits = fetchedLimits
+	}
+
 	// --- Database setup ---
 	if len(project.DataModels) > 0 && c.NeonService != nil {
 		dataModels, parseErr := parseDataModels(project.DataModels)
@@ -4757,7 +4776,7 @@ func (c *Controller) runPreGenerationSetup(
 					}
 				}
 
-				connStr, neonProjectID, neonErr := c.provisionNeonDatabase(ctx, project, dataModels, sendEvent)
+				connStr, neonProjectID, neonErr := c.provisionNeonDatabase(ctx, project, dataModels, userLimits, sendEvent)
 				if connStr != "" && neonProjectID != "" && neonErr == nil {
 					if err := c.storeNeonIntegration(project, connStr, neonProjectID); err != nil {
 						slog.Error("pre-gen: failed to store neon integration", "error", err, "project_id", project.ID)
@@ -4831,7 +4850,7 @@ func (c *Controller) runPreGenerationSetup(
 						Phase:   "provisioning_db",
 						Message: "Setting up authentication database...",
 					})
-					connStr, neonProjectID, neonErr := c.provisionNeonDatabase(ctx, project, modelsToProvision, sendEvent)
+					connStr, neonProjectID, neonErr := c.provisionNeonDatabase(ctx, project, modelsToProvision, userLimits, sendEvent)
 					if connStr != "" && neonProjectID != "" && neonErr == nil {
 						if err := c.storeNeonIntegration(project, connStr, neonProjectID); err != nil {
 							slog.Error("pre-gen auth: failed to store neon integration", "error", err, "project_id", project.ID)

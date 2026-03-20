@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -18,6 +19,7 @@ import (
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/services/fal"
+	"github.com/knid/wemob/internal/services/neon"
 	"github.com/knid/wemob/internal/utils"
 
 	_ "github.com/lib/pq"
@@ -1277,7 +1279,8 @@ func toCamelCase(s string) string {
 }
 
 // provisionNeonDatabase creates a Neon project, runs the schema SQL, and returns the connection string and project ID.
-func (c *Controller) provisionNeonDatabase(ctx context.Context, project *models.AppProject, dataModels []DataModel, sendEvent func(string, any) bool) (string, string, error) {
+// If userLimits is non-nil, compute and storage limits are applied to the Neon project.
+func (c *Controller) provisionNeonDatabase(ctx context.Context, project *models.AppProject, dataModels []DataModel, userLimits *models.StandartUserLimits, sendEvent func(string, any) bool) (string, string, error) {
 	if c.NeonService == nil {
 		return "", "", fmt.Errorf("Neon service not configured")
 	}
@@ -1289,7 +1292,22 @@ func (c *Controller) provisionNeonDatabase(ctx context.Context, project *models.
 		projectName = projectName[:60]
 	}
 
-	neonProjectID, connStr, err := c.NeonService.CreateProject(projectName, "")
+	// Build DB limits from the user's plan
+	var dbLimits *neon.DBLimits
+	if userLimits != nil && (userLimits.DeployDBMaxCU != "" || userLimits.DeployDBStorageMB > 0) {
+		maxCU := 0.25
+		if userLimits.DeployDBMaxCU != "" {
+			if parsed, err := strconv.ParseFloat(userLimits.DeployDBMaxCU, 64); err == nil {
+				maxCU = parsed
+			}
+		}
+		dbLimits = &neon.DBLimits{
+			MaxCU:     maxCU,
+			StorageMB: userLimits.DeployDBStorageMB,
+		}
+	}
+
+	neonProjectID, connStr, err := c.NeonService.CreateProject(projectName, "", dbLimits)
 	if err != nil {
 		return "", "", fmt.Errorf("create Neon project: %w", err)
 	}
