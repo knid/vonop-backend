@@ -43,6 +43,8 @@ var platformSensitiveColumns = map[string]bool{
 	"payment_config": true,
 	"payment_id":     true,
 	"metadata":       true,
+	"app_project_id": true,
+	"user_id":        true,
 }
 
 
