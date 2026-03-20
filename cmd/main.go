@@ -404,6 +404,8 @@ func seedPlans(db *database.Database, sm secret.SecretManager) {
 				MaxDeployedWebApps:      1,
 				DeployMemoryMB:          256,
 				DeployCPUs:              "0.25",
+				DeployDBMaxCU:           "0.25",
+				DeployDBStorageMB:       512,
 				CreditRolloverMonths:    0,
 				CanBuildToAndroid:       false,
 				CanBuildToIOS:           false,
@@ -437,6 +439,8 @@ func seedPlans(db *database.Database, sm secret.SecretManager) {
 				MaxDeployedWebApps:      3,
 				DeployMemoryMB:          512,
 				DeployCPUs:              "0.5",
+				DeployDBMaxCU:           "0.5",
+				DeployDBStorageMB:       2048,
 				CreditRolloverMonths:    1,
 				CanBuildToAndroid:       false,
 				CanBuildToIOS:           false,
@@ -470,6 +474,8 @@ func seedPlans(db *database.Database, sm secret.SecretManager) {
 				MaxDeployedWebApps:      10,
 				DeployMemoryMB:          1024,
 				DeployCPUs:              "1",
+				DeployDBMaxCU:           "1",
+				DeployDBStorageMB:       10240,
 				CreditRolloverMonths:    1,
 				CanBuildToAndroid:       true,
 				CanBuildToIOS:           true,
@@ -535,6 +541,8 @@ func seedPlans(db *database.Database, sm secret.SecretManager) {
 		limits.MaxDeployedWebApps = p.Limits.MaxDeployedWebApps
 		limits.DeployMemoryMB = p.Limits.DeployMemoryMB
 		limits.DeployCPUs = p.Limits.DeployCPUs
+		limits.DeployDBMaxCU = p.Limits.DeployDBMaxCU
+		limits.DeployDBStorageMB = p.Limits.DeployDBStorageMB
 		limits.CreditRolloverMonths = p.Limits.CreditRolloverMonths
 		limits.CanBuildToAndroid = p.Limits.CanBuildToAndroid
 		limits.CanBuildToIOS = p.Limits.CanBuildToIOS

@@ -32,13 +32,23 @@ type CreateProjectRequest struct {
 }
 
 type CreateProjectSettings struct {
-	Name     string `json:"name"`
-	RegionID string `json:"region_id,omitempty"`
+	Name     string          `json:"name"`
+	RegionID string          `json:"region_id,omitempty"`
+	Settings *ProjectQuota   `json:"settings,omitempty"`
+}
+
+type ProjectQuota struct {
+	Quota *QuotaSettings `json:"quota,omitempty"`
+}
+
+type QuotaSettings struct {
+	LogicalSizeBytes int64 `json:"logical_size_bytes,omitempty"`
 }
 
 type CreateProjectResponse struct {
-	Project      ProjectInfo      `json:"project"`
+	Project        ProjectInfo    `json:"project"`
 	ConnectionURIs []ConnectionURI `json:"connection_uris"`
+	Endpoints      []EndpointInfo  `json:"endpoints"`
 }
 
 type ProjectInfo struct {
@@ -48,6 +58,25 @@ type ProjectInfo struct {
 
 type ConnectionURI struct {
 	ConnectionURI string `json:"connection_uri"`
+}
+
+type EndpointInfo struct {
+	ID        string `json:"id"`
+	BranchID  string `json:"branch_id"`
+}
+
+type UpdateEndpointRequest struct {
+	Endpoint EndpointSettings `json:"endpoint"`
+}
+
+type EndpointSettings struct {
+	Settings *EndpointComputeSettings `json:"settings,omitempty"`
+}
+
+type EndpointComputeSettings struct {
+	AutoscalingLimitMinCU float64 `json:"autoscaling_limit_min_cu"`
+	AutoscalingLimitMaxCU float64 `json:"autoscaling_limit_max_cu"`
+	SuspendTimeoutSeconds int     `json:"suspend_timeout_seconds,omitempty"`
 }
 
 type ExecuteSQLRequest struct {
@@ -128,17 +157,35 @@ func (s *Service) doRequest(method, path string, body any) ([]byte, error) {
 	return respBody, nil
 }
 
-// CreateProject creates a new Neon project and returns the project ID and connection string.
-func (s *Service) CreateProject(name, region string) (projectID, connectionString string, err error) {
+// DBLimits holds per-plan database resource constraints.
+type DBLimits struct {
+	MaxCU       float64 // max compute units (e.g. 0.25, 0.5, 1)
+	StorageMB   int     // max logical storage in MB
+}
+
+// CreateProject creates a new Neon project with optional resource limits.
+// It returns the project ID and connection string.
+func (s *Service) CreateProject(name, region string, limits *DBLimits) (projectID, connectionString string, err error) {
 	if region == "" {
 		region = "aws-us-east-2"
 	}
 
+	settings := CreateProjectSettings{
+		Name:     name,
+		RegionID: region,
+	}
+
+	// Apply storage quota if limits are provided
+	if limits != nil && limits.StorageMB > 0 {
+		settings.Settings = &ProjectQuota{
+			Quota: &QuotaSettings{
+				LogicalSizeBytes: int64(limits.StorageMB) * 1024 * 1024,
+			},
+		}
+	}
+
 	body, err := s.doRequest("POST", "/projects", CreateProjectRequest{
-		Project: CreateProjectSettings{
-			Name:     name,
-			RegionID: region,
-		},
+		Project: settings,
 	})
 	if err != nil {
 		return "", "", err
@@ -154,7 +201,36 @@ func (s *Service) CreateProject(name, region string) (projectID, connectionStrin
 		connStr = resp.ConnectionURIs[0].ConnectionURI
 	}
 
+	// Apply compute limits on the default endpoint
+	if limits != nil && limits.MaxCU > 0 && len(resp.Endpoints) > 0 {
+		endpointID := resp.Endpoints[0].ID
+		if err := s.UpdateEndpointLimits(resp.Project.ID, endpointID, limits.MaxCU); err != nil {
+			slog.Warn("Failed to set compute limits on Neon endpoint",
+				"error", err, "project_id", resp.Project.ID, "endpoint_id", endpointID, "max_cu", limits.MaxCU)
+		}
+	}
+
 	return resp.Project.ID, connStr, nil
+}
+
+// UpdateEndpointLimits sets autoscaling compute limits on a Neon endpoint.
+func (s *Service) UpdateEndpointLimits(projectID, endpointID string, maxCU float64) error {
+	minCU := 0.25
+	if maxCU < minCU {
+		maxCU = minCU
+	}
+
+	path := fmt.Sprintf("/projects/%s/endpoints/%s", projectID, endpointID)
+	_, err := s.doRequest("PATCH", path, UpdateEndpointRequest{
+		Endpoint: EndpointSettings{
+			Settings: &EndpointComputeSettings{
+				AutoscalingLimitMinCU: minCU,
+				AutoscalingLimitMaxCU: maxCU,
+				SuspendTimeoutSeconds: 300, // 5 min idle → suspend
+			},
+		},
+	})
+	return err
 }
 
 // GetBranchID returns the default branch ID for a project.
