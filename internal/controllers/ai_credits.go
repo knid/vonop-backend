@@ -284,16 +284,10 @@ func (c *Controller) RecordTokenUsage(user *models.User, action, model, provider
 			if idx := strings.LastIndex(entryModel, "/"); idx >= 0 {
 				entryModel = entryModel[idx+1:]
 			}
-			// PostHog $ai_input_tokens should be non-cache input tokens only;
-			// cache tokens go into their own properties for correct pricing.
-			inputTokens := entry.PromptTokens - entry.CacheCreationInputTokens - entry.CacheReadInputTokens
-			if inputTokens < 0 {
-				inputTokens = 0
-			}
 			props := posthog.NewProperties().
 				Set("$ai_provider", provider).
 				Set("$ai_model", entryModel).
-				Set("$ai_input_tokens", inputTokens).
+				Set("$ai_input_tokens", entry.PromptTokens).
 				Set("$ai_output_tokens", entry.CompletionTokens).
 				Set("$ai_trace_id", traceID).
 				Set("$ai_session_id", reference).
@@ -308,6 +302,9 @@ func (c *Controller) RecordTokenUsage(user *models.User, action, model, provider
 			if entry.CacheReadInputTokens > 0 {
 				props.Set("$ai_cache_read_input_tokens", entry.CacheReadInputTokens)
 			}
+			if entry.SpanName != "" {
+				props.Set("$ai_span_name", entry.SpanName)
+			}
 			if user.Email != "" {
 				props.Set("$email", user.Email)
 			}
@@ -317,11 +314,15 @@ func (c *Controller) RecordTokenUsage(user *models.User, action, model, provider
 			if entry.OutputText != "" {
 				props.Set("$ai_output_choices", textToOutputChoices(entry.OutputText))
 			}
-			c.PostHog.Enqueue(posthog.Capture{
+			capture := posthog.Capture{
 				DistinctId: user.ID.String(),
 				Event:      "$ai_generation",
 				Properties: props,
-			})
+			}
+			if !entry.RecordedAt.IsZero() {
+				capture.Timestamp = entry.RecordedAt
+			}
+			c.PostHog.Enqueue(capture)
 		}
 
 		// Compute total latency across all LLM calls for the trace event.
@@ -360,7 +361,8 @@ func (c *Controller) RecordTokenUsage(user *models.User, action, model, provider
 }
 
 // RecordLLMError sends a PostHog $ai_generation event for a failed LLM call.
-func (c *Controller) RecordLLMError(user *models.User, action, model, provider, reference, appType string, latencyMs int64, errMsg string) {
+// An optional traceID links the error to an existing trace.
+func (c *Controller) RecordLLMError(user *models.User, action, model, provider, reference, appType string, latencyMs int64, errMsg string, traceID ...string) {
 	if c.PostHog == nil || user == nil {
 		return
 	}
@@ -379,6 +381,9 @@ func (c *Controller) RecordLLMError(user *models.User, action, model, provider, 
 		Set("$ai_session_id", reference).
 		Set("$ai_error_message", errMsg).
 		Set("app_type", appType)
+	if len(traceID) > 0 && traceID[0] != "" {
+		props.Set("$ai_trace_id", traceID[0])
+	}
 	if user.Email != "" {
 		props.Set("$email", user.Email)
 	}
