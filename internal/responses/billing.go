@@ -1,20 +1,24 @@
 package responses
 
 type PlanLimitsResponse struct {
-	MaxDeployedWebApps   int  `json:"max_deployed_web_apps"`
-	MonthlyAICredits     int  `json:"monthly_ai_credits"`
-	CreditRolloverMonths int  `json:"credit_rollover_months"`
-	CanBuildMobile       bool `json:"can_build_mobile"`
-	CanUseAnalytics      bool `json:"can_use_analytics"`
-	CanAccessCode        bool `json:"can_access_code"`
-	CanBuyDomain         bool `json:"can_buy_domain"`
-	CanUseEmailService   bool `json:"can_use_email_service"`
-	CanUseEcommerce      bool `json:"can_use_ecommerce"`
-	MaximumProjectCount  int  `json:"maximum_project_count"`
-	MonthlyAppCount      int  `json:"monthly_app_count"`
-	MonthlyDeployCount   int  `json:"monthly_deploy_count"`
-	CanRemoveBrandLogo   bool `json:"can_remove_brand_logo"`
-	CanExportToGitHub    bool `json:"can_export_to_github"`
+	MaxDeployedWebApps   int    `json:"max_deployed_web_apps"`
+	MonthlyAICredits     int    `json:"monthly_ai_credits"`
+	CreditRolloverMonths int    `json:"credit_rollover_months"`
+	CanBuildMobile       bool   `json:"can_build_mobile"`
+	CanUseAnalytics      bool   `json:"can_use_analytics"`
+	CanAccessCode        bool   `json:"can_access_code"`
+	CanBuyDomain         bool   `json:"can_buy_domain"`
+	CanUseEmailService   bool   `json:"can_use_email_service"`
+	CanUseEcommerce      bool   `json:"can_use_ecommerce"`
+	MaximumProjectCount  int    `json:"maximum_project_count"`
+	MonthlyAppCount      int    `json:"monthly_app_count"`
+	MonthlyDeployCount   int    `json:"monthly_deploy_count"`
+	CanRemoveBrandLogo   bool   `json:"can_remove_brand_logo"`
+	CanExportToGitHub    bool   `json:"can_export_to_github"`
+	DeployMemoryMB       int    `json:"deploy_memory_mb"`
+	DeployCPUs           string `json:"deploy_cpus"`
+	DeployDBMaxCU        string `json:"deploy_db_max_cu"`
+	DeployDBStorageMB    int    `json:"deploy_db_storage_mb"`
 }
 
 type PlanResponse struct {

@@ -24,4 +24,8 @@ type LimitsResponse struct {
 	MonthlyDeployCount      int       `json:"monthly_deploy_count"`
 	CanUseEcommerce         bool      `json:"can_use_ecommerce"`
 	CanExportToGitHub       bool      `json:"can_export_to_github"`
+	DeployMemoryMB          int       `json:"deploy_memory_mb"`
+	DeployCPUs              string    `json:"deploy_cpus"`
+	DeployDBMaxCU           string    `json:"deploy_db_max_cu"`
+	DeployDBStorageMB       int       `json:"deploy_db_storage_mb"`
 }
