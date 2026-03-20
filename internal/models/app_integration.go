@@ -10,8 +10,8 @@ type AppIntegration struct {
 	ID           uuid.UUID         `bun:",pk,type:uuid,default:uuid_generate_v4()"`
 	AppProjectID uuid.UUID         `bun:",notnull,type:uuid"`
 	AppProject   *AppProject       `bun:"rel:belongs-to,join:app_project_id=id"`
-	Provider     string            `bun:",notnull"` // "supabase", "neon", "stripe", "iyzico", "fal", "upstash", "resend"
-	Credentials  []byte            `bun:",type:jsonb,default:'{}'"` // encrypted credentials
+	Provider     string            `bun:",notnull"`
+	Credentials  []byte            `bun:",type:jsonb,default:'{}'"` // stored credentials (JSON)
 	Config       map[string]any    `bun:",type:jsonb,default:'{}'"`
 	Status       string            `bun:",notnull,default:'connected'"` // connected, disconnected, error
 	EnvVars      map[string]string `bun:",type:jsonb,default:'{}'"` // env vars to inject into Vercel
