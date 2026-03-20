@@ -52,6 +52,20 @@ func (db *Database) GetAICreditTransactions(userID string, limit int) ([]models.
 	return txs, err
 }
 
+func (db *Database) GetAICreditTransactionsPaginated(userID string, page, pageSize int) ([]models.AICreditTransaction, int, error) {
+	var txs []models.AICreditTransaction
+	offset := (page - 1) * pageSize
+
+	total, err := db.DB.NewSelect().
+		Model(&txs).
+		Where("user_id = ?", userID).
+		OrderExpr("created_at DESC").
+		Limit(pageSize).
+		Offset(offset).
+		ScanAndCount(context.Background())
+	return txs, total, err
+}
+
 // --- Atomic Credit Operations ---
 
 // AtomicDeductCreditsUnchecked atomically deducts credits, allowing negative balance down to floor.

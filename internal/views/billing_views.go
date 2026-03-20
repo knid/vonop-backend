@@ -2,6 +2,8 @@ package views
 
 import (
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/knid/wemob/internal/responses"
@@ -96,6 +98,96 @@ func (v *HttpViews) GetAICreditTransactions(w http.ResponseWriter, r *http.Reque
 	}
 
 	utils.JSONResponse(w, txs, http.StatusOK)
+}
+
+func (v *HttpViews) GetCreditHistory(w http.ResponseWriter, r *http.Request) {
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	page := 1
+	pageSize := 20
+	if p := r.URL.Query().Get("page"); p != "" {
+		if v, err := strconv.Atoi(p); err == nil && v > 0 {
+			page = v
+		}
+	}
+	if ps := r.URL.Query().Get("page_size"); ps != "" {
+		if v, err := strconv.Atoi(ps); err == nil && v > 0 && v <= 100 {
+			pageSize = v
+		}
+	}
+
+	txs, total, err := v.Controller.DB.GetAICreditTransactionsPaginated(user.ID.String(), page, pageSize)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	transactions := make([]responses.CreditTransactionResponse, 0, len(txs))
+	for _, tx := range txs {
+		transactions = append(transactions, responses.CreditTransactionResponse{
+			ID:          tx.ID.String(),
+			Type:        categorizeTxType(tx.Action, tx.Amount),
+			Action:      tx.Action,
+			Amount:      tx.Amount,
+			BalanceAfter: 0,
+			CreatedAt:   tx.CreatedAt.Format("2006-01-02T15:04:05Z"),
+			Description: describeTxAction(tx.Action),
+		})
+	}
+
+	utils.JSONResponse(w, responses.CreditHistoryResponse{
+		Transactions: transactions,
+		Total:        total,
+		Page:         page,
+		PageSize:     pageSize,
+	}, http.StatusOK)
+}
+
+func categorizeTxType(action string, amount int) string {
+	lower := strings.ToLower(action)
+	if strings.Contains(lower, "refund") {
+		return "refund"
+	}
+	if strings.Contains(lower, "grant") {
+		return "allocation"
+	}
+	if strings.Contains(lower, "purchase") || strings.Contains(lower, "purchased") {
+		return "purchase"
+	}
+	if amount < 0 {
+		return "usage"
+	}
+	return "purchase"
+}
+
+func describeTxAction(action string) string {
+	descriptions := map[string]string{
+		"generate_app":        "App generation",
+		"generate":            "App generation",
+		"app_chat":            "Chat edit",
+		"chat":                "Chat edit",
+		"screenshot_to_code":  "Screenshot to code",
+		"element_edit":        "Element edit",
+		"purchase":            "Credit purchase",
+		"credits_purchased":   "Credit purchase",
+		"monthly_grant":       "Monthly credit allocation",
+		"initial_grant":       "Initial credit allocation",
+		"refund":              "Credit refund",
+	}
+	if desc, ok := descriptions[action]; ok {
+		return desc
+	}
+	words := strings.Split(action, "_")
+	for i, w := range words {
+		if len(w) > 0 {
+			words[i] = strings.ToUpper(w[:1]) + w[1:]
+		}
+	}
+	return strings.Join(words, " ")
 }
 
 func (v *HttpViews) GetTokenUsage(w http.ResponseWriter, r *http.Request) {
