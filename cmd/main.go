@@ -252,6 +252,11 @@ func createSchema(db *bun.DB) error {
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS git_hub_username text`,
 		// GitHub export limit on limits
 		`ALTER TABLE standart_user_limits ADD COLUMN IF NOT EXISTS can_export_to_github boolean NOT NULL DEFAULT false`,
+		// Deploy resource columns on limits
+		`ALTER TABLE standart_user_limits ADD COLUMN IF NOT EXISTS deploy_memory_mb int NOT NULL DEFAULT 256`,
+		`ALTER TABLE standart_user_limits ADD COLUMN IF NOT EXISTS deploy_cpus text NOT NULL DEFAULT '0.25'`,
+		`ALTER TABLE standart_user_limits ADD COLUMN IF NOT EXISTS deploy_db_max_cu text NOT NULL DEFAULT '0.25'`,
+		`ALTER TABLE standart_user_limits ADD COLUMN IF NOT EXISTS deploy_db_storage_mb int NOT NULL DEFAULT 512`,
 	}
 
 	// Deduplicate before creating unique indexes (keep the latest row per group)
