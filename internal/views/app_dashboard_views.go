@@ -297,7 +297,8 @@ func (v *HttpViews) GetDashboardData(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	results := v.Controller.QueryAllPanels(dashboard, panels, integration)
+	storeID := v.resolveStoreID(project)
+	results := v.Controller.QueryAllPanels(dashboard, panels, integration, storeID)
 	utils.JSONResponse(w, responses.DashboardDataResponse{Panels: results}, http.StatusOK)
 }
 
@@ -343,7 +344,8 @@ func (v *HttpViews) GetPanelData(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	result := v.Controller.QueryPanel(dashboard, panel, integration)
+	storeID := v.resolveStoreID(project)
+	result := v.Controller.QueryPanel(dashboard, panel, integration, storeID)
 	utils.JSONResponse(w, result, http.StatusOK)
 }
 
@@ -527,7 +529,8 @@ func (v *HttpViews) UpdatePanelCell(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := v.Controller.UpdateCell(dashboard, integration, resolvedTable, resolvedColumn, req.Value, req.PrimaryKey); err != nil {
+	storeID := v.resolveStoreID(project)
+	if err := v.Controller.UpdateCell(dashboard, integration, resolvedTable, resolvedColumn, req.Value, req.PrimaryKey, storeID); err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -547,6 +550,16 @@ func (v *HttpViews) getDBIntegration(project *models.AppProject, provider string
 		return nil, fmt.Errorf("database integration not found")
 	}
 	return integration, nil
+}
+
+// resolveStoreID looks up the e-commerce store for a project.
+// Returns the store ID string, or empty string if no store exists (non-ecommerce apps).
+func (v *HttpViews) resolveStoreID(project *models.AppProject) string {
+	store, err := v.Controller.DB.GetStoreByAppProjectID(project.ID.String())
+	if err != nil || store == nil {
+		return ""
+	}
+	return store.ID.String()
 }
 
 func buildDashboardViewResponse(d *models.AppDashboard, panels []models.AppDashboardPanel) responses.DashboardResponse {
