@@ -1153,6 +1153,9 @@ func main() {
 		r.Route("/v2", func(r chi.Router) {
 			r.Use(rateLimiter.RateLimit(600, time.Minute, appMiddleware.UserKey))
 
+			// Public asset endpoints (no auth required)
+			r.Get("/apps/{appId}/logo", httpViews.GetAppLogo)
+
 			r.Route("/apps", func(r chi.Router) {
 				r.Use(appMiddleware.RequireAuth(controller))
 				r.Use(appMiddleware.RequireSubscription("active", "trial", "free"))

@@ -112,6 +112,32 @@ func (v *HttpViews) GenerateAppFromImage(w http.ResponseWriter, r *http.Request)
 		Set("app_id", project.ID.String()))
 }
 
+// GET /v2/apps/{appId}/logo — public endpoint that redirects to a fresh pre-signed S3 URL.
+// No auth required — logos are public assets embedded in generated app code.
+func (v *HttpViews) GetAppLogo(w http.ResponseWriter, r *http.Request) {
+	appId := chi.URLParam(r, "appId")
+	if appId == "" {
+		http.NotFound(w, r)
+		return
+	}
+
+	project, err := v.Controller.DB.GetAppProjectByID(appId)
+	if err != nil || project == nil || project.LogoS3Key == "" {
+		http.NotFound(w, r)
+		return
+	}
+
+	presigned, err := v.Controller.AssetsStorage.GetObject(r.Context(), project.LogoS3Key, 3600)
+	if err != nil {
+		slog.Error("GetAppLogo: failed to presign", "error", err, "app_id", appId)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	http.Redirect(w, r, presigned.URL, http.StatusFound)
+}
+
 // GET /v2/apps/
 func (v *HttpViews) GetApps(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)

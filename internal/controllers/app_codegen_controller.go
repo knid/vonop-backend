@@ -831,6 +831,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 // getTemplateContent returns the hardcoded content for a template file.
 // dataModels is used to generate the dynamic lib/schema.ts file.
 func getTemplateContent(path string, colorScheme, darkColorScheme map[string]any, projectType string, dataModels []DataModel) string {
+	return getTemplateContentWithLang(path, colorScheme, darkColorScheme, projectType, dataModels, "en")
+}
+
+func getTemplateContentWithLang(path string, colorScheme, darkColorScheme map[string]any, projectType string, dataModels []DataModel, lang string) string {
 	switch path {
 	case "package.json":
 		return constants.NEXTJS_TEMPLATE_PACKAGE_JSON
@@ -845,9 +849,9 @@ func getTemplateContent(path string, colorScheme, darkColorScheme map[string]any
 	case ".gitignore":
 		return constants.NEXTJS_TEMPLATE_GITIGNORE
 	case "app/not-found.tsx":
-		return constants.NEXTJS_TEMPLATE_NOT_FOUND
+		return constants.GetNotFoundTemplate(lang)
 	case "app/error.tsx":
-		return constants.NEXTJS_TEMPLATE_ERROR
+		return constants.GetErrorTemplate(lang)
 	case "lib/db.ts":
 		return constants.NEXTJS_TEMPLATE_DB_TS
 	case "lib/schema.ts":
@@ -2418,6 +2422,32 @@ func runDeterministicChecks(files map[string]string) []validationError {
 				File:  "app/layout.tsx",
 				Error: fmt.Sprintf("Root layout is missing %s tags. Next.js App Router requires app/layout.tsx to include <html> and <body> tags wrapping {children}.", strings.Join(missing, " and ")),
 				Type:  "missing_root_layout_tags",
+			})
+		}
+	}
+
+	// --- Check 9: Root layout must import globals.css ---
+	if layoutContent, ok := files["app/layout.tsx"]; ok {
+		hasGlobalsCSSImport := strings.Contains(layoutContent, `import './globals.css'`) ||
+			strings.Contains(layoutContent, `import "./globals.css"`) ||
+			strings.Contains(layoutContent, `import '../globals.css'`) ||
+			strings.Contains(layoutContent, `import "../globals.css"`)
+		if !hasGlobalsCSSImport {
+			errors = append(errors, validationError{
+				File:  "app/layout.tsx",
+				Error: "Root layout is missing `import './globals.css'`. Without this import, all Tailwind styles and theme tokens are broken. Add `import './globals.css'` as the first import in app/layout.tsx.",
+				Type:  "missing_globals_css_import",
+			})
+		}
+	}
+
+	// --- Check 10: Duplicate auth files (wemob-auth.ts + wemob-auth.tsx) ---
+	if _, hasTS := files["lib/wemob-auth.ts"]; hasTS {
+		if _, hasTSX := files["lib/wemob-auth.tsx"]; hasTSX {
+			errors = append(errors, validationError{
+				File:  "lib/wemob-auth.tsx",
+				Error: "Duplicate auth file. Only lib/wemob-auth.ts should exist (server-only auth library). Remove lib/wemob-auth.tsx — it conflicts with the .ts file.",
+				Type:  "duplicate_auth_file",
 			})
 		}
 	}
