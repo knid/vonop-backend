@@ -296,7 +296,7 @@ func fontWeightParam(fontName string) string {
 
 // --- Regex patterns for deterministic checks ---
 var hookPattern = regexp.MustCompile(`\b(useState|useEffect|useRef|useCallback|useMemo|useReducer|useContext)\s*[\(<]`)
-var getApiSessionArgsRegex = regexp.MustCompile(`getApiSession\s*\([^)]+\)`)
+var getSessionArgsRegex = regexp.MustCompile(`getSession\s*\([^)]+\)`)
 var framerMotionImportPattern = regexp.MustCompile(`import\s+.*\s+from\s+['"]framer-motion['"]`)
 var fontVariableUsagePattern = regexp.MustCompile(`\.\s*variable\b`)
 var fontVariableOptionPattern = regexp.MustCompile(`variable\s*:\s*['"]--font-`)
@@ -2453,16 +2453,16 @@ func runDeterministicChecks(files map[string]string) []validationError {
 			if strings.Contains(fc, "wemob-auth-client") {
 				errors = append(errors, validationError{
 					File:  fp,
-					Error: "API route imports from wemob-auth-client (client-only module). API routes must use server-side '@/lib/wemob-auth' instead (getApiSession, register, login, logout).",
+					Error: "API route imports from wemob-auth-client (client-only module). API routes must use server-side '@/lib/wemob-auth' instead (getSession, register, login, logout).",
 					Type:  "auth_client_in_api",
 				})
 			}
-			// getApiSession() takes no arguments — LLM often passes request/req
-			if getApiSessionArgsRegex.MatchString(fc) {
+			// getSession() takes no arguments — LLM often passes request/req
+			if getSessionArgsRegex.MatchString(fc) {
 				errors = append(errors, validationError{
 					File:  fp,
-					Error: "getApiSession() takes no arguments (it reads cookies internally via Next.js headers). Remove the argument: use `await getApiSession()` instead of `getApiSession(request)` or `getApiSession(req)`.",
-					Type:  "auth_api_session_args",
+					Error: "getSession() takes no arguments (it reads cookies internally via Next.js headers). Remove the argument: use `await getSession()` instead of `getSession(request)` or `getSession(req)`.",
+					Type:  "auth_session_args",
 				})
 			}
 		}

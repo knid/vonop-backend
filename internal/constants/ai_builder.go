@@ -409,15 +409,22 @@ const NEXTJS_BUILDER_AUTH_RULES = `
 You MUST generate three auth files. They are NOT provided as templates — you write them.
 
 **File 1: lib/wemob-auth.ts (SERVER-ONLY)**
-Server-side auth library. Dependencies: jose (JWT, edge-compatible), bcryptjs (password hashing), drizzle-orm (DB queries).
+Server-side auth library. MUST start with ` + "`import 'server-only'`" + ` to enforce the boundary at build time.
+Dependencies: jose (JWT, edge-compatible), bcryptjs (password hashing), drizzle-orm (DB queries).
 - Import db from '@/lib/db', users table from '@/lib/schema', eq from 'drizzle-orm'.
 - Use jose SignJWT/jwtVerify for JWT sessions (HS256, 7-day expiry). Secret from process.env.AUTH_SECRET.
-- Store sessions as httpOnly, secure (in production), sameSite:"lax" cookies named "wemob_auth_session".
+- Cookie name: "wemob_auth_session". Options: httpOnly, secure (in production), sameSite:"lax", path:"/".
+- IMPORTANT: cookies() from 'next/headers' is async — you MUST await it: ` + "`const cookieStore = await cookies()`" + ` before calling .get()/.set()/.delete().
 - Hash passwords with bcrypt (cost 12).
 - Export types: AuthUser { id, email, name, avatarUrl, role, emailVerified }, Session { user: AuthUser, expires: Date }, AuthResult { success, error?, user? }.
-- Export functions: register(email, password, name?) → AuthResult, login(email, password) → AuthResult, logout() → void, getSession() → Session|null, getCurrentUser() → AuthUser|null, requireAuth(redirectTo?) → AuthUser (redirects if not logged in), getApiSession() → Session|null (alias for getSession, reads cookies via next/headers).
+- Export functions:
+  - register(email, password, name?) → AuthResult — hashes password, inserts user, creates JWT, calls (await cookies()).set() to store session cookie, returns { success: true, user }.
+  - login(email, password) → AuthResult — verifies credentials, creates JWT, calls (await cookies()).set() to store session cookie, returns { success: true, user }.
+  - logout() → void — calls (await cookies()).delete() to remove the session cookie.
+  - getSession() → Session|null — reads cookie via (await cookies()).get(), verifies JWT, returns session or null.
+  - getCurrentUser() → AuthUser|null — calls getSession(), returns session.user or null.
+  - requireAuth(redirectTo?) → AuthUser — calls getSession(), redirects via next/navigation redirect() if no session, returns user.
 - Use a sanitizeUser helper to strip passwordHash from DB rows before returning.
-- NEVER import this file in "use client" components. It is server-only.
 
 **File 2: lib/wemob-auth-client.tsx (CLIENT-ONLY, "use client")**
 Client-side React context for auth state. No server dependencies.
@@ -429,13 +436,13 @@ Client-side React context for auth state. No server dependencies.
 
 **File 3: app/api/auth/[...action]/route.ts**
 Catch-all API route. Imports register, login, logout, getSession from '@/lib/wemob-auth'.
-- POST handler: switch on action[0] → "register" (validate email+password, call register), "login" (call login), "logout" (call logout).
+- POST handler: switch on action[0] → "register" (validate email+password, call register), "login" (call login), "logout" (call logout). Each function handles cookies internally — just return NextResponse.json() with the result.
 - GET handler: action[0] === "session" → call getSession(), return { user: session.user } or { user: null }.
 - params is Promise<{ action: string[] }> — must be awaited.
 
 **Usage Rules:**
 - Access user properties via session.user.id, session.user.email, session.user.name, etc. NEVER use session.userId or session.username — those fields do not exist.
-- getApiSession() takes NO arguments (reads cookies internally). NEVER pass request/req to it.
+- getSession() takes NO arguments (reads cookies internally). NEVER pass request/req to it.
 - Wrap app with AuthProvider: import AuthProvider into the root layout (server component can render client components directly) OR create a separate client wrapper component. Either pattern is valid.
 - useAuth() returns { user, isLoading, isAuthenticated, login, register, logout, refreshSession }.
 - Users table columns: id (uuid PK), email, password_hash, name, avatar_url, role, email_verified, created_at, updated_at. Drizzle camelCase: passwordHash, avatarUrl, emailVerified, createdAt, updatedAt.

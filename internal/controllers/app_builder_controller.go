@@ -3136,7 +3136,7 @@ func (c *Controller) buildProjectContext(project *models.AppProject, fileMap map
 	if settings := project.Settings; settings != nil {
 		if needsAuth, ok := settings["needs_auth"].(bool); ok && needsAuth {
 			sb.WriteString("\nAuthentication: enabled\n")
-			sb.WriteString("- Server: import { register, login, logout, getSession, requireAuth, getApiSession } from '@/lib/wemob-auth'\n")
+			sb.WriteString("- Server: import { register, login, logout, getSession, requireAuth, getCurrentUser } from '@/lib/wemob-auth'\n")
 			sb.WriteString("- Client: import { AuthProvider, useAuth } from '@/lib/wemob-auth-client'\n")
 			sb.WriteString("- lib/wemob-auth.ts, lib/wemob-auth-client.tsx, and app/api/auth/[...action]/route.ts must exist.\n")
 		}
