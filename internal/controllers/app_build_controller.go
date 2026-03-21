@@ -398,7 +398,7 @@ func (c *Controller) GetLatestDeploymentStatus(projectID string) (*models.AppDep
 				switch {
 				case depStatus == "failed" || depStatus == "error":
 					deployment.Status = "failed"
-					deployment.ErrorMessage = dep.Logs
+					deployment.ErrorMessage = extractBuildError(dep.Logs)
 					if deployment.ErrorMessage == "" {
 						deployment.ErrorMessage = "Build failed — the application crashed before it could start. This is usually caused by a build error or insufficient memory."
 					}
@@ -447,13 +447,13 @@ func (c *Controller) GetLatestDeploymentStatus(projectID string) (*models.AppDep
 				strings.HasPrefix(lowerStatus, "degraded"):
 				newStatus = "failed"
 				if dep != nil && dep.Logs != "" {
-					errorMessage = dep.Logs
+					errorMessage = extractBuildError(dep.Logs)
 				} else {
 					logs, logErr := c.CoolifyService.GetAppLogs(appUUID, 200)
 					if logErr != nil {
 						errorMessage = "Build failed — the application crashed before it could start. This is usually caused by a build error or insufficient memory."
 					} else {
-						errorMessage = logs
+						errorMessage = extractBuildError(logs)
 					}
 				}
 			default:
@@ -472,6 +472,84 @@ func (c *Controller) GetLatestDeploymentStatus(projectID string) (*models.AppDep
 	}
 
 	return deployment, nil
+}
+
+// extractBuildError extracts the meaningful error from verbose Coolify/Docker
+// build logs. Returns the full logs if no specific error is found.
+func extractBuildError(logs string) string {
+	if logs == "" {
+		return ""
+	}
+
+	lines := strings.Split(logs, "\n")
+	var errorLines []string
+	capturing := false
+
+	for _, line := range lines {
+		// Strip timestamps (2026-Mar-21 13:40:16.396079 prefix)
+		cleaned := line
+		if len(cleaned) > 30 && cleaned[4] == '-' {
+			// Looks like a timestamp prefix — strip it
+			if idx := strings.Index(cleaned, "\n"); idx == -1 {
+				// Find the end of timestamp (after the fractional seconds)
+				for i := 0; i < len(cleaned); i++ {
+					if cleaned[i] == ' ' && i > 20 {
+						cleaned = strings.TrimSpace(cleaned[i:])
+						break
+					}
+				}
+			}
+		}
+		// Strip Docker step prefixes like "#13 16.25 "
+		if len(cleaned) > 0 && cleaned[0] == '#' {
+			if spaceIdx := strings.Index(cleaned, " "); spaceIdx > 0 && spaceIdx < 5 {
+				rest := cleaned[spaceIdx+1:]
+				// Skip the timestamp part (e.g., "16.25 ")
+				if dotIdx := strings.Index(rest, " "); dotIdx > 0 && dotIdx < 8 {
+					cleaned = strings.TrimSpace(rest[dotIdx+1:])
+				}
+			}
+		}
+
+		lower := strings.ToLower(cleaned)
+
+		// Start capturing on error markers
+		if strings.Contains(lower, "build error occurred") ||
+			strings.Contains(lower, "turbopack build failed") ||
+			strings.Contains(lower, "ecmascript file had an error") ||
+			strings.Contains(lower, "module not found") ||
+			strings.Contains(lower, "type error:") ||
+			strings.Contains(lower, "syntaxerror:") ||
+			strings.Contains(cleaned, "You're importing a module") {
+			capturing = true
+		}
+
+		if capturing && cleaned != "" && cleaned != "------" {
+			errorLines = append(errorLines, cleaned)
+			// Cap at 30 lines of error context
+			if len(errorLines) >= 30 {
+				break
+			}
+		}
+	}
+
+	if len(errorLines) > 0 {
+		return strings.Join(errorLines, "\n")
+	}
+
+	// Fallback: return last 20 non-empty lines
+	var tail []string
+	for i := len(lines) - 1; i >= 0 && len(tail) < 20; i-- {
+		trimmed := strings.TrimSpace(lines[i])
+		if trimmed != "" && trimmed != "------" {
+			tail = append([]string{trimmed}, tail...)
+		}
+	}
+	if len(tail) > 0 {
+		return strings.Join(tail, "\n")
+	}
+
+	return logs
 }
 
 type AppValidationError struct {

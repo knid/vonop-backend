@@ -196,6 +196,8 @@ type DeploymentStatus struct {
 
 // GetLatestDeployment returns the status and logs of the most recent deployment
 // for an application. Works even after a failed build removes the app.
+// If the list endpoint doesn't include logs, falls back to the individual
+// deployment detail endpoint.
 func (s *Service) GetLatestDeployment(appUUID string) (*DeploymentStatus, error) {
 	body, err := s.doRequest("GET", fmt.Sprintf("/deployments/applications/%s?take=1", appUUID), nil)
 	if err != nil {
@@ -203,6 +205,7 @@ func (s *Service) GetLatestDeployment(appUUID string) (*DeploymentStatus, error)
 	}
 
 	var deployments []struct {
+		UUID   string `json:"uuid"`
 		Status string `json:"status"`
 		Logs   string `json:"logs"`
 	}
@@ -213,10 +216,31 @@ func (s *Service) GetLatestDeployment(appUUID string) (*DeploymentStatus, error)
 		return nil, fmt.Errorf("coolify: no deployments found")
 	}
 
-	return &DeploymentStatus{
-		Status: deployments[0].Status,
-		Logs:   deployments[0].Logs,
-	}, nil
+	dep := deployments[0]
+	result := &DeploymentStatus{
+		Status: dep.Status,
+		Logs:   dep.Logs,
+	}
+
+	// If logs are empty and we have a deployment UUID, fetch individual deployment
+	// detail — Coolify's list endpoint often omits full build logs.
+	if result.Logs == "" && dep.UUID != "" {
+		detailBody, detailErr := s.doRequest("GET", fmt.Sprintf("/deployments/%s", dep.UUID), nil)
+		if detailErr == nil {
+			var detail struct {
+				Status string `json:"status"`
+				Logs   string `json:"logs"`
+			}
+			if json.Unmarshal(detailBody, &detail) == nil && detail.Logs != "" {
+				result.Logs = detail.Logs
+				if detail.Status != "" {
+					result.Status = detail.Status
+				}
+			}
+		}
+	}
+
+	return result, nil
 }
 
 // SyncEnvVars sets environment variables on the application using bulk update.
