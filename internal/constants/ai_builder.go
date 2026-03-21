@@ -177,45 +177,67 @@ const builderIntegrationRules = `
 - Match idiomatic SDK patterns for each integration. Specific guidance per provider:
 
 #### Supabase
-- Install: @supabase/supabase-js
-- Create client: createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!)
-- Use for: auth (supabase.auth.signUp/signInWithPassword), database (supabase.from('table').select()), storage (supabase.storage.from('bucket').upload())
-- Create a shared lib/supabase.ts client file. For server components, use createServerClient from @supabase/ssr.
+- Install: @supabase/supabase-js @supabase/ssr
+- Client (lib/supabase.ts): import { createClient } from '@supabase/supabase-js'; export const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!)
+- Server components/API routes: import { createServerClient } from '@supabase/ssr'; use with cookies() for auth-aware server-side queries.
+- Auth: const { data, error } = await supabase.auth.signUp({ email, password }); signInWithPassword({ email, password })
+- Database: const { data, error } = await supabase.from('table').select('*'); .insert({ col: val }).select().single(); .update({ col: val }).eq('id', id); .delete().eq('id', id)
+- Storage: await supabase.storage.from('bucket').upload('path/file.png', file, { cacheControl: '3600', upsert: false })
+- All operations return { data, error } — always check error.
 
 #### Firebase
 - Install: firebase
-- Initialize: initializeApp({ apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY, authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN, projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID, ... })
-- Use for: auth (getAuth, signInWithEmailAndPassword), firestore (getFirestore, collection, getDocs), storage (getStorage, ref, uploadBytes)
-- Create a shared lib/firebase.ts config file.
+- Config (lib/firebase.ts): import { initializeApp } from 'firebase/app'; const app = initializeApp({ apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY, authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN, projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID, storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET })
+- Auth: import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth'; const auth = getAuth(app)
+- Firestore: import { getFirestore, collection, getDocs, addDoc, doc, updateDoc, deleteDoc } from 'firebase/firestore'; const db = getFirestore(app)
+- Storage: import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage'; const storage = getStorage(app)
+- All imports use modular tree-shakeable paths (firebase/app, firebase/auth, firebase/firestore, firebase/storage).
 
 #### OpenRouter (AI)
+- Install: openai
 - OpenRouter is OpenAI-compatible. Use the openai npm package with a custom baseURL.
-- Server-side only: const openai = new OpenAI({ baseURL: "https://openrouter.ai/api/v1", apiKey: process.env.OPENROUTER_API_KEY })
+- Server-side only: import OpenAI from 'openai'; const openai = new OpenAI({ baseURL: "https://openrouter.ai/api/v1", apiKey: process.env.OPENROUTER_API_KEY })
+- Non-streaming: const completion = await openai.chat.completions.create({ model: "anthropic/claude-sonnet-4", messages: [{ role: 'user', content: '...' }] }); const reply = completion.choices[0].message.content
+- Streaming: const stream = await openai.chat.completions.create({ model: "...", messages: [...], stream: true }); for await (const chunk of stream) { const text = chunk.choices[0]?.delta?.content || ''; }
 - Create API routes (app/api/chat/route.ts) that call OpenRouter server-side and stream responses to the client.
-- Use model names like "anthropic/claude-sonnet-4", "openai/gpt-4o", "google/gemini-2.0-flash-001", "meta-llama/llama-3.3-70b-instruct".
-- For chat UIs: create a useChat hook or use Vercel AI SDK (ai package) with openai provider pointed at OpenRouter.
+- Model names: "anthropic/claude-sonnet-4", "openai/gpt-4o", "google/gemini-2.0-flash-001", "meta-llama/llama-3.3-70b-instruct".
+- For chat UIs: use Vercel AI SDK (ai package) with openai provider pointed at OpenRouter baseURL.
 
 #### Fal.ai (AI Images)
-- Server-side only. Create an API route that calls Fal.ai.
-- Install: @fal-ai/client
-- Configure: fal.config({ credentials: process.env.FAL_KEY })
-- Use fal.subscribe("fal-ai/flux/dev", { input: { prompt: "..." } }) for image generation.
-- Return the image URL to the client.
+- Install: @fal-ai/client @fal-ai/server-proxy
+- API route proxy (app/api/fal/proxy/route.ts): export { handler as GET, handler as POST } from "@fal-ai/server-proxy/nextjs";
+- Client config (call once at app level): import { fal } from "@fal-ai/client"; fal.config({ proxyUrl: "/api/fal/proxy" });
+- Generate images with fal.subscribe (handles queue polling automatically):
+  const result = await fal.subscribe("fal-ai/flux/dev", {
+    input: { prompt: "...", image_size: "landscape_4_3", num_images: 1 },
+  });
+  const imageUrl = result.images[0].url; // result shape: { images: [{ url, width, height, content_type }], seed, timings }
+- Available models: "fal-ai/flux/dev" (quality), "fal-ai/flux/schnell" (fast), "fal-ai/flux-pro/v1.1-ultra" (premium)
+- image_size options: "square_hd", "square", "landscape_4_3", "landscape_16_9", "portrait_4_3", "portrait_16_9"
+- Can call from client components (proxy handles auth) or server components/API routes (use credentials: process.env.FAL_KEY directly).
 
 #### Resend (Email)
-- Server-side only: const resend = new Resend(process.env.RESEND_API_KEY)
 - Install: resend
-- Use: resend.emails.send({ from: 'onboarding@resend.dev', to: email, subject: '...', html: '...' })
-- Create API routes for sending emails. Never expose the API key client-side.
+- Server-side only. Create API routes for sending emails. Never expose the API key client-side.
+- Setup: import { Resend } from 'resend'; const resend = new Resend(process.env.RESEND_API_KEY);
+- Send: const { data, error } = await resend.emails.send({ from: 'App Name <onboarding@resend.dev>', to: ['user@example.com'], subject: '...', html: '<strong>Hello</strong>' })
+- The "from" field format is "Display Name <email>". The "to" field is always an array of strings.
+- Can also use React components for email templates: react: EmailTemplate({ name: 'John' }) instead of html.
 
 #### Upstash Redis
 - Install: @upstash/redis
-- Create client: const redis = new Redis({ url: process.env.UPSTASH_REDIS_REST_URL!, token: process.env.UPSTASH_REDIS_REST_TOKEN! })
-- Use for: caching (redis.get/set), rate limiting, session storage, real-time counters.
+- Setup: import { Redis } from '@upstash/redis'; const redis = new Redis({ url: process.env.UPSTASH_REDIS_REST_URL!, token: process.env.UPSTASH_REDIS_REST_TOKEN! })
+- Or simpler: const redis = Redis.fromEnv() (reads UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN from env automatically)
+- Basic ops: await redis.set('key', value); const val = await redis.get('key'); await redis.del('key'); await redis.incr('counter')
+- Supports auto JSON serialization: redis.set('user', { name: 'Alice' }) and redis.get('user') returns the object directly.
+- Use for: caching, rate limiting (@upstash/ratelimit), session storage, counters.
 
 #### Cloudinary
-- Client-side uploads: use the upload widget with NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME and NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET (unsigned upload).
-- Install: next-cloudinary for Next.js integration (CldUploadWidget, CldImage components).
+- Install: next-cloudinary
+- Env vars: NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME, NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET (configure unsigned upload preset in Cloudinary dashboard)
+- Upload widget: import { CldUploadWidget } from 'next-cloudinary'; <CldUploadWidget uploadPreset="preset-name" onSuccess={(result) => { const url = result?.info?.secure_url; }}>{({ open }) => <button onClick={() => open()}>Upload</button>}</CldUploadWidget>
+- Display images: import { CldImage } from 'next-cloudinary'; <CldImage src="public_id" width={400} height={300} alt="..." />
+- CldImage auto-optimizes format/quality. Use crop="fill" for responsive sizing.
 
 #### Google Sheets
 - Server-side only: fetch data via Google Sheets API v4.
@@ -223,10 +245,13 @@ const builderIntegrationRules = `
 - Use as a simple read-only CMS. Create API routes or fetch in server components.
 
 #### Stripe
-- Install: stripe (server), @stripe/stripe-js + @stripe/react-stripe-js (client)
-- Server: const stripe = new Stripe(process.env.STRIPE_SK!)
-- Client: loadStripe(process.env.NEXT_PUBLIC_STRIPE_PK!)
-- Use Stripe Checkout for payments: create checkout session server-side, redirect client to session.url.`
+- Install: stripe (server), @stripe/stripe-js @stripe/react-stripe-js (client)
+- Server: import Stripe from 'stripe'; const stripe = new Stripe(process.env.STRIPE_SK!)
+- Client: import { loadStripe } from '@stripe/stripe-js'; const stripePromise = loadStripe(process.env.NEXT_PUBLIC_STRIPE_PK!)
+- Checkout flow: create session server-side → redirect client to session.url:
+  const session = await stripe.checkout.sessions.create({ mode: 'payment', line_items: [{ price_data: { currency: 'usd', product_data: { name: '...' }, unit_amount: 2999 }, quantity: 1 }], success_url: 'https://site.com/success?session_id={CHECKOUT_SESSION_ID}', cancel_url: 'https://site.com/cancel' })
+  // Redirect: window.location.href = session.url
+- For subscriptions: use mode: 'subscription' with a recurring price ID instead of price_data.`
 
 // ===========================
 // 2. Project-type data rules
