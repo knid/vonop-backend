@@ -4705,6 +4705,10 @@ func (c *Controller) mcpTools() []utils.Tool {
 
 // runPreGenerationSetup handles stateful operations (e-commerce, database, auth)
 // BEFORE the single-shot LLM call so the LLM doesn't need tools for setup.
+// DB provisioning and schema injection are synchronous (the LLM needs the schema).
+// DB seeding and image generation run in the background — the returned waitForSeed
+// function blocks until they complete. Callers should defer waitForSeed() after the
+// main LLM call so seeding overlaps with code generation.
 func (c *Controller) runPreGenerationSetup(
 	ctx context.Context,
 	project *models.AppProject,
@@ -4715,7 +4719,10 @@ func (c *Controller) runPreGenerationSetup(
 	provider *utils.LLMProvider,
 	model string,
 	userPrompt string,
-) error {
+) (waitForSeed func(), err error) {
+	var seedWG sync.WaitGroup
+	waitForSeed = func() { seedWG.Wait() }
+
 	// Look up user's plan limits for DB provisioning
 	var userLimits *models.StandartUserLimits
 	if fetchedLimits, limitsErr := c.DB.GetStandartUserLimitsByUser(user); limitsErr == nil {
@@ -4793,33 +4800,36 @@ func (c *Controller) runPreGenerationSetup(
 						slog.Error("pre-gen: failed to store neon integration", "error", err, "project_id", project.ID)
 					}
 
-					// Inject DB template files
+					// Inject DB template files (synchronous — LLM needs the schema)
 					dbContent := constants.NEXTJS_TEMPLATE_DB_TS
 					c.injectTemplateFile(repo, "lib/db.ts", dbContent, fileMap, sendEvent)
 
 					schemaContent := buildDrizzleSchema(dataModels)
 					c.injectTemplateFile(repo, "lib/schema.ts", schemaContent, fileMap, sendEvent)
 
-					// Seed database
-					sendEvent("progress", responses.ProgressEvent{
-						Phase:   "provisioning_db",
-						Message: "Populating database with sample data...",
-					})
-					if _, seedErr := c.seedNeonDatabase(ctx, project, dataModels, sendEvent); seedErr != nil {
-						slog.Error("pre-gen: database seeding failed", "error", seedErr, "project_id", project.ID)
-					} else if project.ProjectType != "ecommerce" {
-						// Generate AI images for seed data image columns and store in S3/DB
-						c.generateAndStoreSeedImages(ctx, project, dataModels, sendEvent, 10)
-					}
+					// Seed database + generate images in the background.
+					// The LLM doesn't need seed data to generate code — only the schema.
+					seedWG.Add(1)
+					go func() {
+						defer seedWG.Done()
+						sendEvent("progress", responses.ProgressEvent{
+							Phase:   "provisioning_db",
+							Message: "Populating database with sample data...",
+						})
+						if _, seedErr := c.seedNeonDatabase(ctx, project, dataModels, sendEvent); seedErr != nil {
+							slog.Error("pre-gen: database seeding failed", "error", seedErr, "project_id", project.ID)
+						} else if project.ProjectType != "ecommerce" {
+							c.generateAndStoreSeedImages(ctx, project, dataModels, sendEvent, 10)
+						}
+						sendEvent("progress", responses.ProgressEvent{
+							Phase:   "provisioning_db",
+							Message: "Database ready!",
+						})
+						sendEvent("neon_provision", map[string]any{"phase": "ready"})
+					}()
 				} else {
 					slog.Error("pre-gen: database provisioning failed", "error", neonErr, "project_id", project.ID)
 				}
-
-				sendEvent("progress", responses.ProgressEvent{
-					Phase:   "provisioning_db",
-					Message: "Database ready!",
-				})
-				sendEvent("neon_provision", map[string]any{"phase": "ready"})
 			}
 		}
 	}
@@ -4869,23 +4879,29 @@ func (c *Controller) runPreGenerationSetup(
 						c.injectTemplateFile(repo, "lib/db.ts", constants.NEXTJS_TEMPLATE_DB_TS, fileMap, sendEvent)
 						schemaContent := buildDrizzleSchema(modelsToProvision)
 						c.injectTemplateFile(repo, "lib/schema.ts", schemaContent, fileMap, sendEvent)
-						sendEvent("progress", responses.ProgressEvent{
-							Phase:   "provisioning_db",
-							Message: "Populating database with sample data...",
-						})
-						if _, seedErr := c.seedNeonDatabase(ctx, project, modelsToProvision, sendEvent); seedErr != nil {
-							slog.Error("pre-gen auth: database seeding failed", "error", seedErr, "project_id", project.ID)
-						} else if project.ProjectType != "ecommerce" {
-							c.generateAndStoreSeedImages(ctx, project, modelsToProvision, sendEvent, 10)
-						}
+
+						// Seed database + generate images in the background
+						seedWG.Add(1)
+						go func() {
+							defer seedWG.Done()
+							sendEvent("progress", responses.ProgressEvent{
+								Phase:   "provisioning_db",
+								Message: "Populating database with sample data...",
+							})
+							if _, seedErr := c.seedNeonDatabase(ctx, project, modelsToProvision, sendEvent); seedErr != nil {
+								slog.Error("pre-gen auth: database seeding failed", "error", seedErr, "project_id", project.ID)
+							} else if project.ProjectType != "ecommerce" {
+								c.generateAndStoreSeedImages(ctx, project, modelsToProvision, sendEvent, 10)
+							}
+							sendEvent("progress", responses.ProgressEvent{
+								Phase:   "provisioning_db",
+								Message: "Database ready!",
+							})
+							sendEvent("neon_provision", map[string]any{"phase": "ready"})
+						}()
 					} else {
 						slog.Error("pre-gen auth: database provisioning failed", "error", neonErr, "project_id", project.ID)
 					}
-					sendEvent("progress", responses.ProgressEvent{
-						Phase:   "provisioning_db",
-						Message: "Database ready!",
-					})
-					sendEvent("neon_provision", map[string]any{"phase": "ready"})
 				}
 			}
 
@@ -4919,7 +4935,7 @@ func (c *Controller) runPreGenerationSetup(
 		}
 	}
 
-	return nil
+	return waitForSeed, nil
 }
 
 // streamSingleShotGeneration performs initial app generation in a single LLM call.
@@ -4973,9 +4989,12 @@ func (c *Controller) streamSingleShotGeneration(
 	// 2. Run pre-generation setup (e-commerce store, Neon database, auth templates).
 	// Now that structure planning has set data_models and needs_auth on the project,
 	// this step can properly provision the database and inject auth files.
-	if setupErr := c.runPreGenerationSetup(ctx, project, user, repo, fileMap, sendEvent, provider, model, message); setupErr != nil {
+	waitForSeed, setupErr := c.runPreGenerationSetup(ctx, project, user, repo, fileMap, sendEvent, provider, model, message)
+	if setupErr != nil {
 		return "", nil, fmt.Errorf("pre-generation setup failed: %w", setupErr)
 	}
+	// DB seeding runs in the background — wait for it after the main LLM call
+	defer waitForSeed()
 
 	// Inject parameterized templates (layout + globals.css)
 	{
@@ -5240,8 +5259,11 @@ Follow the same design system, color scheme, and coding patterns as the existing
 	_, recoveryErr := utils.StreamTextFromLLMWithMessages(
 		ctx, fixModel, recoveryMessages, provider,
 		func(chunk string) { recoveryParser.Feed(chunk) },
-		nil, // no reasoning
-		utils.StreamTextConfig{MaxTokens: 32768},
+		nil, // discard thinking output
+		utils.StreamTextConfig{
+			MaxTokens: 32768,
+			Reasoning: &utils.ReasoningConfig{Effort: "low"},
+		},
 	)
 	recoveryParser.Flush()
 
@@ -5610,9 +5632,11 @@ func (c *Controller) streamEcommerceGeneration(
 		"model", model, "project_id", project.ID)
 
 	// Run pre-generation setup (injects e-commerce templates, auth files, etc.)
-	if setupErr := c.runPreGenerationSetup(ctx, project, user, repo, fileMap, sendEvent, provider, model, message); setupErr != nil {
+	waitForSeed, setupErr := c.runPreGenerationSetup(ctx, project, user, repo, fileMap, sendEvent, provider, model, message)
+	if setupErr != nil {
 		return "", ops, fmt.Errorf("pre-generation setup failed: %w", setupErr)
 	}
+	defer waitForSeed()
 
 	// Inject parameterized e-commerce templates (layout + globals.css)
 	if project.ProjectType == "ecommerce" {
