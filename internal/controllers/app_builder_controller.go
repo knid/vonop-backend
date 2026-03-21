@@ -333,13 +333,16 @@ func (c *Controller) StreamBuildApp(
 	fileMap := make(map[string]string)
 
 	if isInitialGeneration {
+		// Detect language from user prompt for localized templates
+		lang := constants.DetectLanguage(project.Prompt)
+
 		// Inject template files (package.json, tsconfig, postcss, next.config)
 		for _, tp := range constants.NEXTJS_TEMPLATE_FILE_PATHS {
 			// For globals.css, don't inject a pre-built theme — let the LLM write it
 			if tp == "app/globals.css" {
 				continue
 			}
-			content := getTemplateContent(tp, nil, nil, project.ProjectType, nil)
+			content := getTemplateContentWithLang(tp, nil, nil, project.ProjectType, nil, lang)
 			if content == "" {
 				continue
 			}
@@ -2883,11 +2886,9 @@ func (c *Controller) getProjectLogoURL(project *models.AppProject) string {
 	if project.LogoS3Key == "" {
 		return ""
 	}
-	presigned, err := c.AssetsStorage.GetObject(context.Background(), project.LogoS3Key, 7*24*3600)
-	if err != nil {
-		return ""
-	}
-	return presigned.URL
+	// Return a permanent URL that never expires. The /v2/apps/{id}/logo endpoint
+	// generates a fresh pre-signed S3 URL on each request and redirects to it.
+	return fmt.Sprintf("%s/v2/apps/%s/logo", constants.WEMOB_API_BASE_URL, project.ID)
 }
 
 func (c *Controller) buildProjectContextForChat(project *models.AppProject, fileMap map[string]string, selectedFiles map[string]bool) string {
@@ -5452,19 +5453,16 @@ func (c *Controller) generateAppLogo(ctx context.Context, project *models.AppPro
 		slog.Warn("generateAppLogo: failed to save logo_s3_key", "error", err, "project_id", project.ID)
 	}
 
-	presigned, err := c.AssetsStorage.GetObject(ctx, s3Key, 7*24*3600)
-	if err != nil {
-		slog.Warn("generateAppLogo: failed to presign", "error", err, "project_id", project.ID)
-		return ""
-	}
-
 	sendEvent("progress", responses.ProgressEvent{
 		Phase:   "generating_logo",
 		Message: "Logo ready!",
 	})
 
+	// Return permanent URL — the /v2/apps/{id}/logo endpoint generates fresh
+	// pre-signed URLs on each request, so the URL never expires in generated code.
+	permanentURL := fmt.Sprintf("%s/v2/apps/%s/logo", constants.WEMOB_API_BASE_URL, project.ID)
 	slog.Info("generateAppLogo: logo generated", "project_id", project.ID, "s3_key", s3Key)
-	return presigned.URL
+	return permanentURL
 }
 
 // streamEcommerceGeneration performs initial e-commerce app generation in two phases:
