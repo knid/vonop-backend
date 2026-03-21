@@ -220,11 +220,14 @@ func (s *Service) GetLatestDeployment(appUUID string) (*DeploymentStatus, error)
 }
 
 // SyncEnvVars sets environment variables on the application using bulk update.
-// All vars are marked as build-time so they're available during `next build`.
+// Only NEXT_PUBLIC_* vars are marked as build-time (needed during `next build`).
+// All other vars (secrets, API keys) are runtime-only to avoid baking them into
+// Docker image layers where they can be extracted.
 func (s *Service) SyncEnvVars(appUUID string, desired map[string]string) error {
 	var data []envVar
 	for k, v := range desired {
-		data = append(data, envVar{Key: k, Value: v, IsBuildTime: true})
+		isBuildTime := strings.HasPrefix(k, "NEXT_PUBLIC_")
+		data = append(data, envVar{Key: k, Value: v, IsBuildTime: isBuildTime})
 	}
 
 	_, err := s.doRequest("PATCH", fmt.Sprintf("/applications/%s/envs/bulk", appUUID), map[string]any{
