@@ -35,8 +35,11 @@ func (c *Controller) DeployToCoolify(project *models.AppProject, user *models.Us
 	// Collect all env vars (integrations + custom + auto-injected store vars)
 	envVars := c.CollectAllEnvVars(project)
 
-	// Inject analytics into file map and commit
-	fileMap := repoFiles
+	// Inject analytics into a copy of the file map so we can detect changes
+	fileMap := make(map[string]string, len(repoFiles))
+	for k, v := range repoFiles {
+		fileMap[k] = v
+	}
 	injectAnalyticsScript(fileMap, project.ID.String())
 	for path, content := range fileMap {
 		if repoFiles[path] != content {
