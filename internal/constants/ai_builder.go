@@ -205,8 +205,9 @@ const builderIntegrationRules = `
 
 #### Fal.ai (AI Images)
 - Install: @fal-ai/client @fal-ai/server-proxy
-- API route proxy (app/api/fal/proxy/route.ts): export { handler as GET, handler as POST } from "@fal-ai/server-proxy/nextjs";
-- Client config (call once at app level): import { fal } from "@fal-ai/client"; fal.config({ proxyUrl: "/api/fal/proxy" });
+- API route proxy (app/api/fal/proxy/route.ts): import { route } from "@fal-ai/server-proxy/nextjs"; export const { GET, POST, PUT } = route;
+- IMPORTANT: Use named import "import { fal } from '@fal-ai/client'" — NEVER use "import * as fal". The default export no longer exists.
+- Client config (call once at module level, not per-request): import { fal } from "@fal-ai/client"; fal.config({ proxyUrl: "/api/fal/proxy" });
 - Generate images with fal.subscribe (handles queue polling automatically):
   const result = await fal.subscribe("fal-ai/flux/dev", {
     input: { prompt: "...", image_size: "landscape_4_3", num_images: 1 },
