@@ -356,8 +356,17 @@ func (c *Controller) StreamBuildApp(
 
 		// Inject ecommerce templates if applicable
 		if project.ProjectType == "ecommerce" {
+			needsAuth := false
+			if settings := project.Settings; settings != nil {
+				needsAuth, _ = settings["needs_auth"].(bool)
+			}
 			for _, tp := range constants.NEXTJS_ECOMMERCE_TEMPLATE_FILE_PATHS {
-				content := getEcommerceTemplateContent(tp)
+				var content string
+				if tp == "components/ecommerce/providers.tsx" {
+					content = buildEcommerceProviders(needsAuth)
+				} else {
+					content = getEcommerceTemplateContent(tp)
+				}
 				if content != "" {
 					c.injectTemplateFile(repo, tp, content, fileMap, sendEvent)
 				}
@@ -3129,7 +3138,7 @@ func (c *Controller) buildProjectContext(project *models.AppProject, fileMap map
 			sb.WriteString("\nAuthentication: enabled\n")
 			sb.WriteString("- Server: import { register, login, logout, getSession, requireAuth, getApiSession } from '@/lib/wemob-auth'\n")
 			sb.WriteString("- Client: import { AuthProvider, useAuth } from '@/lib/wemob-auth-client'\n")
-			sb.WriteString("- Wrap layout with <AuthProvider>. Create app/api/auth/[...action]/route.ts.\n")
+			sb.WriteString("- lib/wemob-auth.ts, lib/wemob-auth-client.tsx, and app/api/auth/[...action]/route.ts must exist.\n")
 		}
 	}
 
@@ -4172,12 +4181,21 @@ func (c *Controller) buildBuilderToolExecutor(ctx context.Context, project *mode
 			}
 
 			// Inject e-commerce template files
+			needsAuth := false
+			if settings := project.Settings; settings != nil {
+				needsAuth, _ = settings["needs_auth"].(bool)
+			}
 			injectEcommerceTemplates := func() {
 				for _, tp := range constants.NEXTJS_ECOMMERCE_TEMPLATE_FILE_PATHS {
 					if _, exists := fileMap[tp]; exists {
 						continue
 					}
-					content := getEcommerceTemplateContent(tp)
+					var content string
+					if tp == "components/ecommerce/providers.tsx" {
+						content = buildEcommerceProviders(needsAuth)
+					} else {
+						content = getEcommerceTemplateContent(tp)
+					}
 					if content == "" {
 						continue
 					}
@@ -4364,7 +4382,7 @@ func (c *Controller) buildBuilderToolExecutor(ctx context.Context, project *mode
 			schemaContent := buildDrizzleSchema(dataModels)
 			c.injectTemplateFileForTool(repo, "lib/schema.ts", schemaContent, fileMap, cbs)
 
-			// Inject auth template files if needed
+			// Generate AUTH_SECRET env var if auth is needed
 			if args.NeedsAuth {
 				authSecret, err := utils.RandomHex(32)
 				if err == nil {
@@ -4375,13 +4393,6 @@ func (c *Controller) buildBuilderToolExecutor(ctx context.Context, project *mode
 						IsPublic:     false,
 					}
 					c.DB.CreateAppEnvVar(envVar)
-				}
-
-				for _, tp := range constants.NEXTJS_AUTH_TEMPLATE_FILE_PATHS {
-					content := getAuthTemplateContent(tp)
-					if content != "" {
-						c.injectTemplateFileForTool(repo, tp, content, fileMap, cbs)
-					}
 				}
 			}
 
@@ -4430,10 +4441,10 @@ func (c *Controller) buildBuilderToolExecutor(ctx context.Context, project *mode
 			result.WriteString("Use: import { db } from '@/lib/db' and import { tableName } from '@/lib/schema'\n")
 			result.WriteString("Use Drizzle ORM for queries: db.select().from(tableName)\n")
 			if args.NeedsAuth {
-				result.WriteString("\nAuth infrastructure provisioned:\n")
-				result.WriteString("- lib/wemob-auth.ts (server-side auth)\n")
-				result.WriteString("- lib/wemob-auth-client.tsx (client-side auth)\n")
+				result.WriteString("\nAuth enabled:\n")
+				result.WriteString("- AUTH_SECRET env var generated\n")
 				result.WriteString("- users table with id, email, password_hash, name, role, etc.\n")
+				result.WriteString("- You MUST generate: lib/wemob-auth.ts (server-side), lib/wemob-auth-client.tsx (client-side), app/api/auth/[...action]/route.ts\n")
 			}
 			return result.String(), nil
 
@@ -4878,8 +4889,16 @@ func (c *Controller) runPreGenerationSetup(
 				}
 			}
 
-			// Check if auth templates are already injected
-			if _, exists := fileMap["lib/wemob-auth.ts"]; !exists {
+			// Generate AUTH_SECRET env var if not already set
+			existingVars, _ := c.DB.GetAppEnvVarsByProjectID(project.ID.String())
+			hasAuthSecret := false
+			for _, ev := range existingVars {
+				if ev.Key == "AUTH_SECRET" {
+					hasAuthSecret = true
+					break
+				}
+			}
+			if !hasAuthSecret {
 				authSecret, err := utils.RandomHex(32)
 				if err == nil {
 					envVar := &models.AppEnvVar{
@@ -4889,13 +4908,6 @@ func (c *Controller) runPreGenerationSetup(
 						IsPublic:     false,
 					}
 					c.DB.CreateAppEnvVar(envVar)
-				}
-
-				for _, tp := range constants.NEXTJS_AUTH_TEMPLATE_FILE_PATHS {
-					content := getAuthTemplateContent(tp)
-					if content != "" {
-						c.injectTemplateFile(repo, tp, content, fileMap, sendEvent)
-					}
 				}
 			}
 

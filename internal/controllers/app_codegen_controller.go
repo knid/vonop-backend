@@ -523,11 +523,6 @@ func isTemplateFile(path string) bool {
 			return true
 		}
 	}
-	for _, tp := range constants.NEXTJS_AUTH_TEMPLATE_FILE_PATHS {
-		if path == tp {
-			return true
-		}
-	}
 	return false
 }
 
@@ -861,7 +856,30 @@ func getTemplateContent(path string, colorScheme, darkColorScheme map[string]any
 	return ""
 }
 
-// getEcommerceTemplateContent returns the hardcoded content for an e-commerce template file
+// buildEcommerceProviders returns the Providers component, conditionally including
+// AuthProvider wrapping when needsAuth is true.
+func buildEcommerceProviders(needsAuth bool) string {
+	if needsAuth {
+		return `"use client";
+
+import React from "react";
+import { CartProvider } from "@/lib/wemob-store";
+import { AuthProvider } from "@/lib/wemob-auth-client";
+
+export function Providers({ children }: { children: React.ReactNode }) {
+  return (
+    <AuthProvider>
+      <CartProvider>{children}</CartProvider>
+    </AuthProvider>
+  );
+}
+`
+	}
+	return constants.ECOMMERCE_TEMPLATE_PROVIDERS
+}
+
+// getEcommerceTemplateContent returns the hardcoded content for an e-commerce template file.
+// For components/ecommerce/providers.tsx, use buildEcommerceProviders() instead when auth context is available.
 func getEcommerceTemplateContent(path string) string {
 	switch path {
 	case "lib/wemob-store.ts":
@@ -941,19 +959,6 @@ func getUITemplateContent(path string) string {
 		return constants.NEXTJS_TEMPLATE_BADGE_TSX
 	case "components/ui/skeleton.tsx":
 		return constants.NEXTJS_TEMPLATE_SKELETON_TSX
-	}
-	return ""
-}
-
-// getAuthTemplateContent returns the hardcoded content for an auth template file
-func getAuthTemplateContent(path string) string {
-	switch path {
-	case "lib/wemob-auth.ts":
-		return constants.NEXTJS_TEMPLATE_WEMOB_AUTH
-	case "lib/wemob-auth-client.tsx":
-		return constants.NEXTJS_TEMPLATE_WEMOB_AUTH_CLIENT
-	case "app/api/auth/[...action]/route.ts":
-		return constants.NEXTJS_TEMPLATE_AUTH_ROUTE
 	}
 	return ""
 }
@@ -2140,7 +2145,9 @@ func runDeterministicChecks(files map[string]string) []validationError {
 		}
 
 		// Check 2d: @/lib/wemob-auth-client import without "use client"
-		if strings.Contains(content, `@/lib/wemob-auth-client`) {
+		// Skip layout files — server components can render client components (e.g. AuthProvider) directly.
+		isLayout := strings.HasSuffix(filePath, "/layout.tsx") || filePath == "layout.tsx"
+		if strings.Contains(content, `@/lib/wemob-auth-client`) && !isLayout {
 			hasUseClient := strings.Contains(content, `"use client"`) || strings.Contains(content, `'use client'`)
 			if !hasUseClient {
 				errors = append(errors, validationError{
@@ -2151,8 +2158,10 @@ func runDeterministicChecks(files map[string]string) []validationError {
 			}
 		}
 
-		// Check 2e: @/lib/wemob-auth (not -client) imported in "use client" file — server-only module
-		if strings.Contains(content, `@/lib/wemob-auth`) && !strings.Contains(content, `@/lib/wemob-auth-client`) {
+		// Check 2e: @/lib/wemob-auth (server-only) imported in "use client" file
+		// Use quote-terminated match to avoid false negatives from @/lib/wemob-auth-client substring
+		hasServerAuthImport := strings.Contains(content, `@/lib/wemob-auth'`) || strings.Contains(content, `@/lib/wemob-auth"`)
+		if hasServerAuthImport {
 			hasUseClient := strings.Contains(content, `"use client"`) || strings.Contains(content, `'use client'`)
 			if hasUseClient {
 				errors = append(errors, validationError{
@@ -2889,6 +2898,12 @@ func autoFixMissingUseClient(files map[string]string) (int, []string) {
 
 		hasUseClient := strings.Contains(content, `"use client"`) || strings.Contains(content, `'use client'`)
 		if hasUseClient {
+			continue
+		}
+
+		// Never add "use client" to layout files — they are server components that
+		// may legitimately import client components (e.g. AuthProvider).
+		if strings.HasSuffix(filePath, "/layout.tsx") || filePath == "layout.tsx" {
 			continue
 		}
 
