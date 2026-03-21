@@ -5425,7 +5425,7 @@ func (c *Controller) generateAppLogo(ctx context.Context, project *models.AppPro
 	})
 
 	prompt := fmt.Sprintf(
-		"Minimal, modern app logo icon for '%s'. Clean geometric design, flat style, single iconic symbol, no text, no letters, solid background, suitable for favicon and app header. Professional, tech-company quality.",
+		"Minimal, modern app logo icon for '%s'. Clean geometric design, flat style, single iconic symbol, no text, no letters, plain white background, suitable for favicon and app header. Professional, tech-company quality.",
 		project.Name,
 	)
 
@@ -5433,6 +5433,14 @@ func (c *Controller) generateAppLogo(ctx context.Context, project *models.AppPro
 	if err != nil {
 		slog.Warn("generateAppLogo: fal generation failed", "error", err, "project_id", project.ID)
 		return ""
+	}
+
+	// Remove background to get a transparent PNG
+	transparentURL, err := fal.RemoveBackground(ctx, apiKey, cdnURL)
+	if err != nil {
+		slog.Warn("generateAppLogo: background removal failed, using original", "error", err, "project_id", project.ID)
+	} else {
+		cdnURL = transparentURL
 	}
 
 	imgData, err := downloadImage(ctx, cdnURL)
