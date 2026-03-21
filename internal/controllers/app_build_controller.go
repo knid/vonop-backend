@@ -72,8 +72,8 @@ func (c *Controller) DeployToCoolify(project *models.AppProject, user *models.Us
 		}
 
 		// Look up per-plan resource limits
-		memoryLimit := "256MB"
-		cpuLimit := "0.25"
+		memoryLimit := "512MB"
+		cpuLimit := "0.5"
 		if limits, limitsErr := c.DB.GetStandartUserLimitsByUser(user); limitsErr == nil && limits.DeployMemoryMB > 0 {
 			memoryLimit = fmt.Sprintf("%dMB", limits.DeployMemoryMB)
 			cpuLimit = limits.DeployCPUs
@@ -390,21 +390,46 @@ func (c *Controller) GetLatestDeploymentStatus(projectID string) (*models.AppDep
 
 		appUUID, _ := deployment.ProviderData["coolify_app_uuid"].(string)
 		if appUUID != "" {
-			status, err := c.CoolifyService.GetAppStatus(appUUID)
-			if err != nil {
-				// App not found — check deployment logs (survives app removal)
-				slog.Warn("Failed to check Coolify app status, checking deployment logs", "error", err, "app_uuid", appUUID)
-				dep, depErr := c.CoolifyService.GetLatestDeployment(appUUID)
-				if depErr != nil || dep == nil {
-					deployment.Status = "failed"
-					deployment.ErrorMessage = "Build failed — application was removed by Coolify"
-				} else if dep.Status == "failed" || dep.Status == "error" {
+			// Check Coolify deployment/build status first — the app container
+			// status is stale right after a restart (shows old container state).
+			dep, depErr := c.CoolifyService.GetLatestDeployment(appUUID)
+			if depErr == nil && dep != nil {
+				depStatus := strings.ToLower(dep.Status)
+				switch {
+				case depStatus == "failed" || depStatus == "error":
 					deployment.Status = "failed"
 					deployment.ErrorMessage = dep.Logs
-				} else {
-					// Still in progress
+					if deployment.ErrorMessage == "" {
+						deployment.ErrorMessage = "Build failed — the application crashed before it could start. This is usually caused by a build error or insufficient memory."
+					}
+					if _, updateErr := c.DB.UpdateAppDeployment(deployment); updateErr != nil {
+						slog.Error("Failed to update deployment status", "error", updateErr)
+					}
+					return deployment, nil
+				case depStatus == "finished" || depStatus == "success":
+					// Build finished — now check if the app container is actually running
+				default:
+					// Build still in progress (queued, in_progress, etc.)
 					return deployment, nil
 				}
+			} else if depErr != nil {
+				slog.Warn("Failed to check Coolify deployment status", "error", depErr, "app_uuid", appUUID)
+				// If deployment was created recently, give it time before declaring failure
+				if time.Since(deployment.CreatedAt) < 60*time.Second {
+					return deployment, nil
+				}
+			}
+
+			// Build finished — check if app container is running
+			status, err := c.CoolifyService.GetAppStatus(appUUID)
+			if err != nil {
+				slog.Warn("Failed to check Coolify app status", "error", err, "app_uuid", appUUID)
+				// If deployment was created recently, don't fail yet
+				if time.Since(deployment.CreatedAt) < 2*time.Minute {
+					return deployment, nil
+				}
+				deployment.Status = "failed"
+				deployment.ErrorMessage = "Build failed — application was removed by Coolify"
 				if _, updateErr := c.DB.UpdateAppDeployment(deployment); updateErr != nil {
 					slog.Error("Failed to update deployment status", "error", updateErr)
 				}
@@ -421,14 +446,12 @@ func (c *Controller) GetLatestDeploymentStatus(projectID string) (*models.AppDep
 				strings.HasPrefix(lowerStatus, "error"),
 				strings.HasPrefix(lowerStatus, "degraded"):
 				newStatus = "failed"
-				// Try deployment logs first (more detailed), fall back to app logs
-				dep, depErr := c.CoolifyService.GetLatestDeployment(appUUID)
-				if depErr == nil && dep.Logs != "" {
+				if dep != nil && dep.Logs != "" {
 					errorMessage = dep.Logs
 				} else {
 					logs, logErr := c.CoolifyService.GetAppLogs(appUUID, 200)
 					if logErr != nil {
-						errorMessage = "Build failed"
+						errorMessage = "Build failed — the application crashed before it could start. This is usually caused by a build error or insufficient memory."
 					} else {
 						errorMessage = logs
 					}
