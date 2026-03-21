@@ -2907,10 +2907,21 @@ func autoFixMissingUseClient(files map[string]string) (int, []string) {
 			continue
 		}
 
-		// Never add "use client" to files that export metadata — metadata requires
-		// Server Components. If the file also uses hooks, it needs restructuring
-		// (extract client logic into a wrapper), not a "use client" directive.
+		// Files that export metadata are Server Components. If the file also uses
+		// hooks, remove the metadata export and add "use client" — a working page
+		// is more important than SEO metadata, and extracting a wrapper is fragile.
 		if metadataExportPattern.MatchString(content) {
+			needsClient := hookPattern.MatchString(content) ||
+				framerMotionImportPattern.MatchString(content) ||
+				strings.Contains(content, `@/lib/wemob-store`) ||
+				strings.Contains(content, `@/lib/wemob-auth-client`)
+			if !needsClient {
+				continue
+			}
+			// Remove metadata export so we can safely add "use client"
+			content = removeMetadataExport(content)
+			files[filePath] = "\"use client\"\n\n" + content
+			changedPaths = append(changedPaths, filePath)
 			continue
 		}
 
@@ -3041,6 +3052,50 @@ func removeUseClientDirective(content string) string {
 			return replaced
 		}
 	}
+	return content
+}
+
+// removeMetadataExport strips the "export const metadata = { ... }" block from file content.
+// Used when a page file has both metadata and hooks — we sacrifice metadata to make it a
+// valid Client Component, since hooks are required for the page to function.
+func removeMetadataExport(content string) string {
+	idx := strings.Index(content, "export const metadata")
+	if idx == -1 {
+		return content
+	}
+
+	// Find the end of the metadata block by matching braces
+	braceStart := strings.Index(content[idx:], "{")
+	if braceStart == -1 {
+		return content
+	}
+	braceStart += idx
+
+	depth := 0
+	end := braceStart
+	for i := braceStart; i < len(content); i++ {
+		switch content[i] {
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				end = i + 1
+				// Skip optional semicolon and trailing newlines
+				for end < len(content) && (content[end] == ';' || content[end] == '\n' || content[end] == '\r') {
+					end++
+				}
+				// Also remove the Metadata type import if present
+				result := content[:idx] + content[end:]
+				result = strings.Replace(result, "import type { Metadata } from \"next\"\n", "", 1)
+				result = strings.Replace(result, "import type { Metadata } from 'next'\n", "", 1)
+				result = strings.Replace(result, "import { Metadata } from \"next\"\n", "", 1)
+				result = strings.Replace(result, "import { Metadata } from 'next'\n", "", 1)
+				return result
+			}
+		}
+	}
+
 	return content
 }
 
