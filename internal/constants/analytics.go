@@ -26,7 +26,7 @@ const WEB_ANALYTICS_SCRIPT_BODY = `(function(){
     var d={project_id:PID,visitor_id:vid,session_id:sid,event_type:type,url:location.href,path:location.pathname,referrer:document.referrer,title:document.title,screen_size:screen.width+"x"+screen.height,language:navigator.language};
     Object.keys(utm).forEach(function(k){d[k]=utm[k]});
     if(extra)Object.keys(extra).forEach(function(k){d[k]=extra[k]});
-    try{navigator.sendBeacon(API,JSON.stringify(d))}catch(e){try{fetch(API,{method:"POST",body:JSON.stringify(d),keepalive:true})}catch(e2){}}
+    var b=JSON.stringify(d);try{navigator.sendBeacon(API,new Blob([b],{type:"application/json"}))}catch(e){try{fetch(API,{method:"POST",headers:{"Content-Type":"application/json"},body:b,keepalive:true})}catch(e2){}}
   }
   send("pageview");
   document.addEventListener("visibilitychange",function(){
