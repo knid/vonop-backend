@@ -398,8 +398,31 @@ func (c *Controller) GetLatestDeploymentStatus(projectID string) (*models.AppDep
 			dep, depErr := c.CoolifyService.GetLatestDeployment(appUUID)
 			if depErr == nil && dep != nil {
 				depStatus := strings.ToLower(dep.Status)
+
+				// Guard against stale deployment status: right after RestartApp,
+				// Coolify may not have created the new deployment record yet, so
+				// GetLatestDeployment returns the *previous* (possibly failed) one.
+				// If the Coolify deployment was created before our deployment was
+				// triggered, or if our deployment is very recent, ignore "failed".
+				isStale := false
+				if !dep.CreatedAt.IsZero() && dep.CreatedAt.Before(deployment.CreatedAt) {
+					isStale = true
+				}
+				recentGrace := time.Since(deployment.CreatedAt) < 90*time.Second
+
 				switch {
 				case depStatus == "failed" || depStatus == "error":
+					if isStale || recentGrace {
+						// Likely seeing the old deployment's status — keep polling
+						slog.Info("Ignoring stale Coolify deployment status",
+							"dep_status", depStatus,
+							"dep_created", dep.CreatedAt,
+							"our_created", deployment.CreatedAt,
+							"is_stale", isStale,
+							"recent_grace", recentGrace,
+						)
+						return deployment, nil
+					}
 					deployment.Status = "failed"
 					deployment.ErrorMessage = extractBuildError(dep.Logs)
 					if deployment.ErrorMessage == "" {
