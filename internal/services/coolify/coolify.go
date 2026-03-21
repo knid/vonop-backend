@@ -68,7 +68,12 @@ func (s *Service) doRequest(method, path string, body any) ([]byte, error) {
 		if len(bodyStr) > 500 {
 			bodyStr = bodyStr[:500]
 		}
-		slog.Error("Coolify API error", "status", resp.StatusCode, "path", path, "body", bodyStr)
+		// 4xx are expected in polling scenarios (e.g. app not running yet)
+		if resp.StatusCode < 500 {
+			slog.Warn("Coolify API client error", "status", resp.StatusCode, "path", path, "body", bodyStr)
+		} else {
+			slog.Error("Coolify API server error", "status", resp.StatusCode, "path", path, "body", bodyStr)
+		}
 		return nil, fmt.Errorf("coolify API error: status %d", resp.StatusCode)
 	}
 
