@@ -130,13 +130,17 @@ func (v *HttpViews) SetAppEnvVar(w http.ResponseWriter, r *http.Request) {
 
 	go v.syncEnvVarsToPreview(project)
 
+	allEnvVars := v.Controller.CollectAllEnvVars(project)
+	envLocalContent := controllers.BuildDotEnvLocal(allEnvVars)
+
 	utils.JSONResponse(w, responses.EnvVarResponse{
-		ID:        envVar.ID,
-		Key:       envVar.Key,
-		Value:     envVar.Value,
-		IsPublic:  envVar.IsPublic,
-		CreatedAt: envVar.CreatedAt,
-		UpdatedAt: envVar.UpdatedAt,
+		ID:              envVar.ID,
+		Key:             envVar.Key,
+		Value:           envVar.Value,
+		IsPublic:        envVar.IsPublic,
+		EnvLocalContent: envLocalContent,
+		CreatedAt:       envVar.CreatedAt,
+		UpdatedAt:       envVar.UpdatedAt,
 	}, http.StatusCreated)
 }
 
@@ -170,13 +174,17 @@ func (v *HttpViews) UpdateAppEnvVar(w http.ResponseWriter, r *http.Request) {
 
 	go v.syncEnvVarsToPreview(project)
 
+	allEnvVars := v.Controller.CollectAllEnvVars(project)
+	envLocalContent := controllers.BuildDotEnvLocal(allEnvVars)
+
 	utils.JSONResponse(w, responses.EnvVarResponse{
-		ID:        envVar.ID,
-		Key:       envVar.Key,
-		Value:     envVar.Value,
-		IsPublic:  envVar.IsPublic,
-		CreatedAt: envVar.CreatedAt,
-		UpdatedAt: envVar.UpdatedAt,
+		ID:              envVar.ID,
+		Key:             envVar.Key,
+		Value:           envVar.Value,
+		IsPublic:        envVar.IsPublic,
+		EnvLocalContent: envLocalContent,
+		CreatedAt:       envVar.CreatedAt,
+		UpdatedAt:       envVar.UpdatedAt,
 	}, http.StatusOK)
 }
 
@@ -203,5 +211,11 @@ func (v *HttpViews) DeleteAppEnvVar(w http.ResponseWriter, r *http.Request) {
 
 	go v.syncEnvVarsToPreview(project)
 
-	utils.JSONResponse(w, responses.SuccessResponse{Success: true}, http.StatusOK)
+	allEnvVars := v.Controller.CollectAllEnvVars(project)
+	envLocalContent := controllers.BuildDotEnvLocal(allEnvVars)
+
+	utils.JSONResponse(w, map[string]any{
+		"success":           true,
+		"env_local_content": envLocalContent,
+	}, http.StatusOK)
 }

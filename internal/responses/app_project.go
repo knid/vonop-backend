@@ -109,12 +109,13 @@ type AppDomainResponse struct {
 }
 
 type EnvVarResponse struct {
-	ID        uuid.UUID `json:"id"`
-	Key       string    `json:"key"`
-	Value     string    `json:"value"`
-	IsPublic  bool      `json:"is_public"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID              uuid.UUID `json:"id"`
+	Key             string    `json:"key"`
+	Value           string    `json:"value"`
+	IsPublic        bool      `json:"is_public"`
+	EnvLocalContent string    `json:"env_local_content,omitempty"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
 }
 
 type MissingEnvVarResponse struct {
