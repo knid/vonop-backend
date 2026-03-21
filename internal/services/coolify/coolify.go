@@ -190,8 +190,9 @@ func (s *Service) GetAppLogs(appUUID string, lines int) (string, error) {
 
 // DeploymentStatus holds the status and logs of a Coolify deployment.
 type DeploymentStatus struct {
-	Status string
-	Logs   string
+	Status    string
+	Logs      string
+	CreatedAt time.Time // when Coolify created this deployment record
 }
 
 // GetLatestDeployment returns the status and logs of the most recent deployment
@@ -205,9 +206,10 @@ func (s *Service) GetLatestDeployment(appUUID string) (*DeploymentStatus, error)
 	}
 
 	var deployments []struct {
-		UUID   string `json:"uuid"`
-		Status string `json:"status"`
-		Logs   string `json:"logs"`
+		UUID      string `json:"uuid"`
+		Status    string `json:"status"`
+		Logs      string `json:"logs"`
+		CreatedAt string `json:"created_at"`
 	}
 	if err := json.Unmarshal(body, &deployments); err != nil {
 		return nil, fmt.Errorf("coolify: unmarshal deployments: %w", err)
@@ -220,6 +222,13 @@ func (s *Service) GetLatestDeployment(appUUID string) (*DeploymentStatus, error)
 	result := &DeploymentStatus{
 		Status: dep.Status,
 		Logs:   dep.Logs,
+	}
+	if dep.CreatedAt != "" {
+		if t, err := time.Parse(time.RFC3339, dep.CreatedAt); err == nil {
+			result.CreatedAt = t
+		} else if t, err := time.Parse("2006-01-02T15:04:05.000000Z", dep.CreatedAt); err == nil {
+			result.CreatedAt = t
+		}
 	}
 
 	// If logs are empty and we have a deployment UUID, fetch individual deployment
