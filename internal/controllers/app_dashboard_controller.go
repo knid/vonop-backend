@@ -240,6 +240,12 @@ func (c *Controller) CreateDashboard(ctx context.Context, project *models.AppPro
 	}
 	if dbProvider == "" {
 		if project.ProjectType == "ecommerce" {
+			// Verify the store actually exists before committing to platform provider,
+			// otherwise all panel queries will fail with "store context required".
+			if _, storeErr := c.GetStore(project.ID.String()); storeErr != nil {
+				sendError("schema", "no store found for this project. Generate your ecommerce app first to create the store.")
+				return
+			}
 			dbProvider = "platform"
 		} else {
 			sendError("schema", "no database integration found. Add a Neon or Supabase integration first.")
