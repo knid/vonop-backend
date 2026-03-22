@@ -114,6 +114,12 @@ func (v *HttpViews) HandleStoreStripeWebhook(w http.ResponseWriter, r *http.Requ
 				order.PaymentID = payload.Data.Object.ID
 				order.UpdatedAt = time.Now()
 				v.Controller.DB.UpdateOrder(order)
+
+				// Finalize order post-payment (inventory, cart, email)
+				orderItems, _ := v.Controller.DB.GetOrderItemsByOrderID(order.ID.String())
+				sessionID, _ := order.Metadata["session_id"].(string)
+				v.Controller.FinalizeOrderPostPayment(store, order, orderItems, sessionID)
+
 				slog.Info("Store order payment confirmed via Stripe", "orderId", orderID, "storeId", storeID)
 			}
 		}
