@@ -1240,6 +1240,7 @@ func (c *Controller) runChatToolPhase(
 		chatGenerateImageTool,
 		chatTakeScreenshotTool,
 		chatSearchComponentsTool,
+		chatManageAssetsTool,
 	}
 	isEcommerce := project.ProjectType == "ecommerce"
 	if isEcommerce {
@@ -1268,7 +1269,8 @@ CRITICAL LANGUAGE RULE: ALL content you generate (product names, descriptions, c
 - If the user asks to install or add a specific npm package/library, call install_package.
 - If the user EXPLICITLY asks to create/generate a custom image, visual asset, hero background, or illustration (e.g. "generate a logo", "create an image for..."), call generate_image. Do NOT call generate_image just because the user attached reference screenshots — those are design references, not image generation requests. If the app has a database with a relevant image column (e.g. cover_image, thumbnail), generate the image and UPDATE the database row with the URL. If there is no database or no suitable column, generate the image and pass the URL to the code-gen model to use directly in code.
 - If the user references a website and you want to see what it looks like visually, call take_screenshot with the URL.
-- If the user asks for a specific UI component (dialog, tabs, accordion, toast, dropdown, etc.) that may not be in the project yet, call search_components to find and inject it.`
+- If the user asks for a specific UI component (dialog, tabs, accordion, toast, dropdown, etc.) that may not be in the project yet, call search_components to find and inject it.
+- If the user asks to list, delete, or rename their uploaded assets, call manage_assets. Use "list" to show current assets, "delete" with the asset id to remove one, "rename" with asset id and new name to rename. Do NOT use manage_assets for uploading — file uploads must be done by the user via the Assets button (paperclip icon) in the chat toolbar. If the user's request requires custom files (3D models, fonts, custom images, videos) that haven't been uploaded yet, tell them to upload first.`
 	if hasDB {
 		// Include database schema so the LLM knows exact table/column names and types
 		dataModels, err := parseDataModels(project.DataModels)
@@ -1359,6 +1361,8 @@ CRITICAL LANGUAGE RULE: ALL content you generate (product names, descriptions, c
 			return c.executeChatSearchComponents(arguments, project, repo, fileMap, sendEvent, &collectedContext)
 		case "configure_mobile_app":
 			return c.executeChatConfigureMobileApp(arguments, project, sendEvent, &collectedContext)
+		case "manage_assets":
+			return c.executeChatManageAssets(arguments, project, sendEvent, &collectedContext)
 		default:
 			return fmt.Sprintf("Unknown tool: %s", name), nil
 		}
@@ -2969,6 +2973,8 @@ func (c *Controller) buildProjectContextForChat(project *models.AppProject, file
 		for _, a := range chatAssets {
 			sb.WriteString(fmt.Sprintf("- %s (%s) → %s\n", a.FileName, a.ContentType, a.PublicURL))
 		}
+	} else {
+		sb.WriteString("\nNo user-uploaded assets. If the user's request requires custom files (3D models, fonts, images, videos, etc.), tell them to upload the files first using the Assets button (paperclip icon) in the chat toolbar. Do NOT use placeholder URLs or try to generate these files.\n")
 	}
 
 	return sb.String()
@@ -3172,6 +3178,8 @@ func (c *Controller) buildProjectContext(project *models.AppProject, fileMap map
 		for _, a := range assets {
 			sb.WriteString(fmt.Sprintf("- %s (%s) → %s\n", a.FileName, a.ContentType, a.PublicURL))
 		}
+	} else {
+		sb.WriteString("\nNo user-uploaded assets. If the user's request requires custom files (3D models, fonts, images, videos, etc.), tell them to upload the files first using the Assets button (paperclip icon) in the chat toolbar. Do NOT use placeholder URLs or try to generate these files.\n")
 	}
 
 	return sb.String()
@@ -3870,6 +3878,113 @@ var chatConfigureMobileAppTool = utils.Tool{
 			"required": []string{"bridge_methods", "permissions"},
 		},
 	},
+}
+
+// chatManageAssetsTool lets the fast model list, rename, or delete user-uploaded assets.
+var chatManageAssetsTool = utils.Tool{
+	Type: "function",
+	Function: utils.ToolFunction{
+		Name:        "manage_assets",
+		Description: "List, rename, or delete user-uploaded assets (3D models, fonts, images, videos, etc.). Use 'list' to show all assets. Use 'rename' or 'delete' with the asset id. Cannot upload files — the user must upload via the Assets button in the chat toolbar.",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"action": map[string]any{
+					"type":        "string",
+					"enum":        []string{"list", "rename", "delete"},
+					"description": "Action to perform on assets.",
+				},
+				"asset_id": map[string]any{
+					"type":        "string",
+					"description": "Asset ID (required for rename and delete).",
+				},
+				"new_name": map[string]any{
+					"type":        "string",
+					"description": "New file name (required for rename).",
+				},
+			},
+			"required": []string{"action"},
+		},
+	},
+}
+
+// executeChatManageAssets handles listing, renaming, and deleting user-uploaded assets.
+func (c *Controller) executeChatManageAssets(
+	arguments string,
+	project *models.AppProject,
+	sendEvent func(string, any) bool,
+	collectedContext *strings.Builder,
+) (string, error) {
+	var args struct {
+		Action  string `json:"action"`
+		AssetID string `json:"asset_id"`
+		NewName string `json:"new_name"`
+	}
+	if err := json.Unmarshal([]byte(arguments), &args); err != nil {
+		return fmt.Sprintf("Error: invalid arguments: %s", err.Error()), nil
+	}
+
+	sendEvent("tool_call", responses.ToolCallEvent{Tool: "manage_assets", Arguments: arguments})
+
+	switch args.Action {
+	case "list":
+		assets, err := c.DB.GetAppAssetsByProjectID(project.ID.String())
+		if err != nil {
+			return fmt.Sprintf("Error listing assets: %s", err.Error()), nil
+		}
+		if len(assets) == 0 {
+			return "No assets uploaded. The user can upload files using the Assets button (paperclip icon) in the chat toolbar.", nil
+		}
+		var lines []string
+		for _, a := range assets {
+			lines = append(lines, fmt.Sprintf("- id:%s name:%s type:%s url:%s", a.ID.String(), a.FileName, a.ContentType, a.PublicURL))
+		}
+		result := fmt.Sprintf("%d asset(s):\n%s", len(assets), strings.Join(lines, "\n"))
+		collectedContext.WriteString(fmt.Sprintf("\n[Assets Listed]\n%s\n", result))
+		return result, nil
+
+	case "rename":
+		if args.AssetID == "" || args.NewName == "" {
+			return "Error: asset_id and new_name are required for rename", nil
+		}
+		asset, err := c.DB.GetAppAssetByID(args.AssetID)
+		if err != nil {
+			return fmt.Sprintf("Error: asset not found: %s", args.AssetID), nil
+		}
+		if asset.AppProjectID.String() != project.ID.String() {
+			return "Error: asset does not belong to this project", nil
+		}
+		asset.FileName = args.NewName
+		asset.UpdatedAt = time.Now()
+		if _, err := c.DB.UpdateAppAsset(asset); err != nil {
+			return fmt.Sprintf("Error renaming asset: %s", err.Error()), nil
+		}
+		result := fmt.Sprintf("Renamed asset to: %s (url: %s)", args.NewName, asset.PublicURL)
+		collectedContext.WriteString(fmt.Sprintf("\n[Asset Renamed] %s\n", result))
+		return result, nil
+
+	case "delete":
+		if args.AssetID == "" {
+			return "Error: asset_id is required for delete", nil
+		}
+		asset, err := c.DB.GetAppAssetByID(args.AssetID)
+		if err != nil {
+			return fmt.Sprintf("Error: asset not found: %s", args.AssetID), nil
+		}
+		if asset.AppProjectID.String() != project.ID.String() {
+			return "Error: asset does not belong to this project", nil
+		}
+		_ = c.AssetsStorage.DeleteObjectDirect(context.Background(), asset.S3Key)
+		if err := c.DB.DeleteAppAsset(asset); err != nil {
+			return fmt.Sprintf("Error deleting asset: %s", err.Error()), nil
+		}
+		result := fmt.Sprintf("Deleted asset: %s", asset.FileName)
+		collectedContext.WriteString(fmt.Sprintf("\n[Asset Deleted] %s\n", result))
+		return result, nil
+
+	default:
+		return fmt.Sprintf("Error: unknown action '%s'. Use list, rename, or delete.", args.Action), nil
+	}
 }
 
 // --- Tool executor ---
