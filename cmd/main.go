@@ -99,6 +99,8 @@ func createSchema(db *bun.DB) error {
 		(*models.AppDomain)(nil),
 		// Custom environment variables
 		(*models.AppEnvVar)(nil),
+		// User-uploaded assets (3D models, fonts, media, etc.)
+		(*models.AppAsset)(nil),
 		// E-commerce models
 		(*models.Store)(nil),
 		(*models.Product)(nil),
@@ -1248,6 +1250,17 @@ func main() {
 						r.Post("/", httpViews.CreateAppSnapshot)
 						r.Post("/{sid}/restore", httpViews.RestoreAppSnapshot)
 						r.Delete("/{sid}", httpViews.DeleteAppSnapshot)
+					})
+
+					// User-uploaded assets
+					r.Route("/assets", func(r chi.Router) {
+						r.Get("/", httpViews.GetAppAssets)
+						r.Post("/upload-url", httpViews.RequestAssetUploadURL)
+						r.Route("/{assetId}", func(r chi.Router) {
+							r.Post("/confirm", httpViews.ConfirmAssetUpload)
+							r.Put("/", httpViews.RenameAppAsset)
+							r.Delete("/", httpViews.DeleteAppAsset)
+						})
 					})
 
 					// Export

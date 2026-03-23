@@ -2962,6 +2962,15 @@ func (c *Controller) buildProjectContextForChat(project *models.AppProject, file
 		}
 	}
 
+	// User-uploaded assets
+	chatAssets, _ := c.DB.GetAppAssetsByProjectID(project.ID.String())
+	if len(chatAssets) > 0 {
+		sb.WriteString("\nUser-uploaded assets (use these URLs directly in code):\n")
+		for _, a := range chatAssets {
+			sb.WriteString(fmt.Sprintf("- %s (%s) → %s\n", a.FileName, a.ContentType, a.PublicURL))
+		}
+	}
+
 	return sb.String()
 }
 
@@ -3153,6 +3162,15 @@ func (c *Controller) buildProjectContext(project *models.AppProject, fileMap map
 				key = "NEXT_PUBLIC_" + key
 			}
 			sb.WriteString(fmt.Sprintf("- %s\n", key))
+		}
+	}
+
+	// User-uploaded assets
+	assets, _ := c.DB.GetAppAssetsByProjectID(project.ID.String())
+	if len(assets) > 0 {
+		sb.WriteString("\nUser-uploaded assets (use these URLs directly in code):\n")
+		for _, a := range assets {
+			sb.WriteString(fmt.Sprintf("- %s (%s) → %s\n", a.FileName, a.ContentType, a.PublicURL))
 		}
 	}
 
