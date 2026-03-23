@@ -34,6 +34,10 @@ type FileStreamParser struct {
 	// block that was still open when the stream ended (e.g. LLM timeout).
 	DiscardIncomplete bool
 
+	// TruncatedPath records the path of the file that was being generated
+	// when the stream ended with DiscardIncomplete. Empty if no file was truncated.
+	TruncatedPath string
+
 	// OnFile is called when a complete </file> closing tag is found.
 	OnFile func(path, content string)
 	// OnDelete is called when a <delete path="..."/> tag is found.
@@ -185,6 +189,8 @@ func (p *FileStreamParser) Flush() {
 	if p.inFileBlock {
 		if p.DiscardIncomplete {
 			// Stream ended mid-file — discard incomplete content
+			slog.Warn("FileStreamParser: discarding incomplete file (stream truncated)", "path", p.currentPath, "partial_bytes", p.fileContent.Len())
+			p.TruncatedPath = p.currentPath
 			p.fileContent.Reset()
 			p.inFileBlock = false
 			p.currentPath = ""
