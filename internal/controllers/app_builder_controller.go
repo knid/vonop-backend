@@ -464,6 +464,7 @@ func (c *Controller) StreamBuildApp(
 
 	// --- Build LLM messages ---
 	var llmMessages []utils.Message
+	var selectedFiles map[string]bool // hoisted so Phase 1 can refresh project context
 
 	// Add conversation history
 	if isInitialGeneration {
@@ -482,7 +483,7 @@ func (c *Controller) StreamBuildApp(
 		llmMessages = append(llmMessages, userMsg)
 	} else {
 		// Chat path: select relevant files, then build context
-		selectedFiles := c.selectContextFiles(ctx, provider, fileMap, message, messages)
+		selectedFiles = c.selectContextFiles(ctx, provider, fileMap, message, messages)
 		projectContext := c.buildProjectContextForChat(project, fileMap, selectedFiles)
 
 		llmMessages = []utils.Message{
@@ -775,6 +776,13 @@ func (c *Controller) StreamBuildApp(
 		// near-instant no-op.
 		toolResult := c.runChatToolPhase(ctx, project, provider, repo, message, imageURLs, fileMap, sendEvent, userLimits)
 		if toolResult.Context != "" {
+			// Phase 1 tools may have modified files (e.g. run_migrations regenerates
+			// lib/schema.ts, manage_env_vars updates .env.local, install_package
+			// modifies package.json). Rebuild the project context so Phase 2 sees
+			// the latest file state instead of the stale pre-Phase-1 snapshot.
+			refreshedContext := c.buildProjectContextForChat(project, fileMap, selectedFiles)
+			llmMessages[1] = utils.Message{Role: "system", Content: refreshedContext}
+
 			// Inject tool-gathered context as a system message before the user message
 			insertIdx := len(llmMessages) - 1 // before last user message
 			if insertIdx < 0 {
