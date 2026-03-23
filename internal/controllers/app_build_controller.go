@@ -92,12 +92,25 @@ func (c *Controller) DeployToCoolify(project *models.AppProject, user *models.Us
 			AppProjectID:   project.ID,
 			CoolifyAppUUID: appUUID,
 			GiteaRepoName:  giteaRepoName,
+			CustomDomain:   subdomain,
 			Framework:      "nextjs",
 		}
 		coolifyProject, err = c.DB.CreateCoolifyProject(coolifyProject)
 		if err != nil {
 			slog.Error("Failed to persist Coolify project to DB", "error", err)
 			return nil, fmt.Errorf("failed to save deployment project")
+		}
+
+		// Sync any custom domains that were added before first deploy
+		existingDomains, domErr := c.DB.GetAppDomainsByProjectID(project.ID.String())
+		if domErr == nil && len(existingDomains) > 0 {
+			domains := []string{"https://" + subdomain}
+			for _, d := range existingDomains {
+				domains = append(domains, "https://"+d.Domain)
+			}
+			if err := c.CoolifyService.UpdateDomains(appUUID, domains); err != nil {
+				slog.Warn("Failed to sync existing custom domains to Coolify", "error", err)
+			}
 		}
 
 		// Sync env vars BEFORE triggering the first build
