@@ -45,11 +45,6 @@ func (db *Database) GetTokenByToken(tokenStr string) (*models.Token, error) {
 }
 
 func (db *Database) CreateToken(token *models.Token) (*models.Token, error) {
-	// Soft-delete old tokens for this user (keep only the new one)
-	db.DB.NewDelete().Model((*models.Token)(nil)).
-		Where("user_id = ?", token.UserID).
-		Exec(context.Background())
-
 	_, err := db.DB.NewInsert().Model(token).Exec(context.Background())
 	return token, err
 }
