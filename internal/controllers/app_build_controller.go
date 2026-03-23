@@ -136,6 +136,12 @@ func (c *Controller) DeployToCoolify(project *models.AppProject, user *models.Us
 			slog.Warn("Failed to sync env vars on Coolify", "error", err)
 		}
 
+		// Sync custom domains on every deploy to ensure Coolify stays in sync
+		domains := c.buildCoolifyDomainList(coolifyProject, project.ID.String(), "")
+		if err := c.CoolifyService.UpdateDomains(coolifyProject.CoolifyAppUUID, domains); err != nil {
+			slog.Warn("Failed to sync domains on Coolify redeploy", "error", err)
+		}
+
 		if err := c.CoolifyService.RestartApp(coolifyProject.CoolifyAppUUID); err != nil {
 			slog.Error("Failed to restart Coolify app", "error", err)
 			return nil, fmt.Errorf("failed to trigger deployment")
