@@ -124,6 +124,41 @@ type TokenEntry struct {
 	OutputText               string    // optional: LLM text completion (only when TrackContent is set)
 	SpanName                 string    // LLM function name (e.g. "get_json", "stream_text") for PostHog $ai_span_name
 	RecordedAt               time.Time // wall-clock time when this entry was recorded
+	CostUSD                  float64   // estimated cost in USD (computed from model pricing)
+}
+
+// modelCosts maps normalized model names to per-million-token pricing {input, output}.
+// Kept minimal — only models we actually use. Unknown models get zero cost.
+var modelCosts = map[string][2]float64{
+	"claude-sonnet-4-6":    {3.0, 15.0},
+	"claude-sonnet-4-5":    {3.0, 15.0},
+	"claude-haiku-4-5":     {0.8, 4.0},
+	"claude-opus-4-6":      {15.0, 75.0},
+	"claude-opus-4-5":      {15.0, 75.0},
+	"claude-sonnet-4-20250514": {3.0, 15.0},
+}
+
+// estimateCostUSD computes the estimated cost for a single LLM call.
+func estimateCostUSD(model string, inputTokens, outputTokens, cacheCreation, cacheRead int) float64 {
+	// Normalize: strip provider prefix
+	if idx := strings.LastIndex(model, "/"); idx >= 0 {
+		model = model[idx+1:]
+	}
+	prices, ok := modelCosts[model]
+	if !ok {
+		return 0
+	}
+	inputPrice, outputPrice := prices[0], prices[1]
+	// Cache pricing: creation = 1.25x input, read = 0.1x input, regular input = 1x
+	regularInput := inputTokens - cacheCreation - cacheRead
+	if regularInput < 0 {
+		regularInput = 0
+	}
+	cost := float64(regularInput)*inputPrice/1_000_000 +
+		float64(cacheCreation)*inputPrice*1.25/1_000_000 +
+		float64(cacheRead)*inputPrice*0.1/1_000_000 +
+		float64(outputTokens)*outputPrice/1_000_000
+	return cost
 }
 
 // TokenTracker is a thread-safe accumulator that collects token usage across multiple LLM calls.
@@ -170,6 +205,7 @@ func (t *TokenTracker) Record(model string, usage UsageInfo, latencyMs int64, is
 		IsStreaming:              isStreaming,
 		SpanName:                 name,
 		RecordedAt:               time.Now(),
+		CostUSD:                  estimateCostUSD(model, usage.PromptTokens, usage.CompletionTokens, usage.CacheCreationInputTokens, usage.CacheReadInputTokens),
 	})
 }
 
@@ -210,6 +246,7 @@ func (t *TokenTracker) RecordWithContent(model string, usage UsageInfo, latencyM
 		OutputText:               outputText,
 		SpanName:                 name,
 		RecordedAt:               time.Now(),
+		CostUSD:                  estimateCostUSD(model, usage.PromptTokens, usage.CompletionTokens, usage.CacheCreationInputTokens, usage.CacheReadInputTokens),
 	})
 }
 
@@ -563,7 +600,12 @@ func GetJSONFromLLM(ctx context.Context, model, system, message string, provider
 	if parsed.Usage.TotalTokens > 0 {
 		slog.Info("LLM usage", append([]any{"from", "llm_utils", "model", model, "prompt_tokens", parsed.Usage.PromptTokens, "completion_tokens", parsed.Usage.CompletionTokens, "total_tokens", parsed.Usage.TotalTokens, "latency_ms", latencyMs}, trackerAttrs(ctx)...)...)
 		if tracker := TokenTrackerFromContext(ctx); tracker != nil {
-			tracker.Record(model, parsed.Usage, latencyMs, false, "get_json")
+			if tracker.TrackContent {
+				msgs := []Message{{Role: "system", Content: system}, {Role: "user", Content: message}}
+				tracker.RecordWithContent(model, parsed.Usage, latencyMs, false, msgs, parsed.Choices[0].Message.Content, "get_json")
+			} else {
+				tracker.Record(model, parsed.Usage, latencyMs, false, "get_json")
+			}
 		}
 	}
 
@@ -628,7 +670,12 @@ func GetTextFromLLM(ctx context.Context, model, system, message string, provider
 	if parsed.Usage.TotalTokens > 0 {
 		slog.Info("LLM usage", append([]any{"from", "llm_utils_text", "model", model, "prompt_tokens", parsed.Usage.PromptTokens, "completion_tokens", parsed.Usage.CompletionTokens, "total_tokens", parsed.Usage.TotalTokens, "latency_ms", latencyMs}, trackerAttrs(ctx)...)...)
 		if tracker := TokenTrackerFromContext(ctx); tracker != nil {
-			tracker.Record(model, parsed.Usage, latencyMs, false, "get_text")
+			if tracker.TrackContent {
+				msgs := []Message{{Role: "system", Content: system}, {Role: "user", Content: message}}
+				tracker.RecordWithContent(model, parsed.Usage, latencyMs, false, msgs, parsed.Choices[0].Message.Content, "get_text")
+			} else {
+				tracker.Record(model, parsed.Usage, latencyMs, false, "get_text")
+			}
 		}
 	}
 
@@ -874,7 +921,11 @@ func GetJSONFromLLMWithMessages(ctx context.Context, model string, messages []Me
 	if parsed.Usage.TotalTokens > 0 {
 		slog.Info("LLM usage", append([]any{"from", "llm_utils_chat", "model", model, "prompt_tokens", parsed.Usage.PromptTokens, "completion_tokens", parsed.Usage.CompletionTokens, "total_tokens", parsed.Usage.TotalTokens, "latency_ms", latencyMs}, trackerAttrs(ctx)...)...)
 		if tracker := TokenTrackerFromContext(ctx); tracker != nil {
-			tracker.Record(model, parsed.Usage, latencyMs, false, "get_json_chat")
+			if tracker.TrackContent {
+				tracker.RecordWithContent(model, parsed.Usage, latencyMs, false, messages, parsed.Choices[0].Message.Content, "get_json_chat")
+			} else {
+				tracker.Record(model, parsed.Usage, latencyMs, false, "get_json_chat")
+			}
 		}
 	}
 
@@ -1101,7 +1152,12 @@ func GetJSONFromLLMWithVision(ctx context.Context, model, system, userText, base
 	if parsed.Usage.TotalTokens > 0 {
 		slog.Info("LLM usage", append([]any{"from", "llm_utils_vision", "model", model, "prompt_tokens", parsed.Usage.PromptTokens, "completion_tokens", parsed.Usage.CompletionTokens, "total_tokens", parsed.Usage.TotalTokens, "latency_ms", latencyMs}, trackerAttrs(ctx)...)...)
 		if tracker := TokenTrackerFromContext(ctx); tracker != nil {
-			tracker.Record(model, parsed.Usage, latencyMs, false, "get_json_vision")
+			if tracker.TrackContent {
+				msgs := []Message{{Role: "system", Content: system}, {Role: "user", Content: userText + " [image attached]"}}
+				tracker.RecordWithContent(model, parsed.Usage, latencyMs, false, msgs, parsed.Choices[0].Message.Content, "get_json_vision")
+			} else {
+				tracker.Record(model, parsed.Usage, latencyMs, false, "get_json_vision")
+			}
 		}
 	}
 
