@@ -1319,7 +1319,7 @@ CRITICAL LANGUAGE RULE: ALL content you generate (product names, descriptions, c
 - If the user explicitly asks to enable or change mobile features (camera, contacts, haptic feedback, sharing, etc.), call configure_mobile_app with the needed bridge_methods and permissions.`
 	}
 	systemPrompt += `
-- If the user's message is a normal chat request (code changes, questions, fixes) that doesn't need any of the above tools, respond with just: NO_TOOLS_NEEDED
+- If the user's message is a normal chat request (code changes, questions, fixes) that doesn't need any of the above tools, respond with ONLY the exact text: NO_TOOLS_NEEDED — nothing else. Do NOT write explanations, summaries, plans, or conversational responses. Your ONLY outputs should be tool calls OR the literal text "NO_TOOLS_NEEDED".
 - You can call multiple tools if needed (e.g. generate_image + install_package).
 - IMPORTANT: If the user has attached images/screenshots, these are VISUAL REFERENCES showing how they want the app to look. Do NOT call generate_image or take_screenshot because of attached images. These reference images will be passed directly to the code-generation model. Only call generate_image if the user EXPLICITLY asks to create/generate new images (e.g. "generate a logo", "create an illustration").
 - IMPORTANT: Before calling any tool, ALWAYS write a brief message (1-2 sentences, in the same language as the user's message) explaining what you're about to do. For example: "Let me check what's currently in the database...", "I'll generate a custom image for this...", "Looking at the website to understand the design...". This text is streamed to the user in real time so they know what's happening. Never call a tool without explaining first.`
@@ -1446,8 +1446,13 @@ CRITICAL LANGUAGE RULE: ALL content you generate (product names, descriptions, c
 
 	if collectedContext.Len() == 0 {
 		trimmed := strings.TrimSpace(result)
-		if trimmed == "" || trimmed == "NO_TOOLS_NEEDED" {
-			slog.Info("Chat tool phase: no tools called", "result_preview", truncate(result, 80))
+		if trimmed == "" || trimmed == "NO_TOOLS_NEEDED" || !toolCalled {
+			// Discard Phase 1 text when no tools were actually called.
+			// Without this guard, a chatty Haiku response (e.g. "I'll build
+			// your website!") leaks into Phase 2 as "Web search context" and
+			// can cause the main model to over-generate or rewrite the project.
+			slog.Info("Chat tool phase: no tools called, discarding phase 1 text",
+				"result_preview", truncate(result, 80), "tool_called", toolCalled)
 			return mkResult("")
 		}
 		// Server-side tool (e.g. web_search) produced a useful response

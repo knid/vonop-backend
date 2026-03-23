@@ -751,6 +751,7 @@ complete updated file content here
 </file>
 
 ### Rules
+- CRITICAL SCOPE RULE: Make ONLY the changes the user explicitly requested. Do NOT remove, add, or rearrange page sections or components that weren't mentioned. Do NOT redesign layouts, rewrite unrelated content, or restructure pages unless specifically asked. If the user asks to update the company name and contact info, update exactly those fields — don't rewrite the entire page or remove existing components. Preserve the current page structure, component composition, and design unless the user asks to change it.
 - ONLY output files that you are changing. Do NOT re-output unchanged files.
 - Skip template-managed files: lib/utils.ts, components/ui/* (button, card, input, badge, skeleton).
 - Do NOT wrap file content in code fences inside <file> blocks.
