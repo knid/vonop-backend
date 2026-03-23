@@ -173,6 +173,13 @@ func (c *Controller) RegisterUser(userRegisterReq requests.UserRegisterRequest) 
 
 	c.assignFreePlan(createdUser)
 
+	// Apply referral code if provided during registration
+	if userRegisterReq.ReferralCode != "" {
+		if err := c.ApplyReferralCode(createdUser, userRegisterReq.ReferralCode); err != nil {
+			slog.Warn("failed to apply referral code during registration", "error", err, "user_id", createdUser.ID, "code", userRegisterReq.ReferralCode)
+		}
+	}
+
 	go c.SlackService.Client.PostMessage(
 		constants.SLACK_CHANNEL_ID_NEW_USER,
 		slack.MsgOptionText("New registered user (Wemob): "+user.Email, false),

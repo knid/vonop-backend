@@ -25,6 +25,7 @@ type UserRegisterRequest struct {
 	Photo         string `json:"photo"`
 	Password      string `json:"password" validate:"required,min=8,max=64" errormgs:"must be between 8 and 64 characters long"`
 	PasswordCheck string `json:"password_check" validate:"required,min=8,max=64" errormgs:"must be between 8 and 64 characters long"`
+	ReferralCode  string `json:"referral_code"`
 }
 
 func (u *UserRegisterRequest) Validate(validate *validator.Validate) error {
