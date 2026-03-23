@@ -327,8 +327,19 @@ var metadataExportPattern = regexp.MustCompile(`(?m)^export\s+const\s+metadata\b
 // internalHrefRegex matches href="/path" or href='/path' (skips dynamic href={...})
 var internalHrefRegex = regexp.MustCompile(`href=["'](/[^"']*?)["']`)
 
-// reExportBraces matches barrel-export patterns: export { Foo }, export { Foo } from '...', export type { Foo }
-var reExportBraces = regexp.MustCompile(`(?m)^export\s+(?:type\s+)?\{([^}]+)\}`)
+// nonIdentifierChars matches characters that are not valid in SQL identifier names.
+var nonIdentifierChars = regexp.MustCompile(`[^a-zA-Z0-9_]`)
+
+// safeSQLDefaultPattern matches safe SQL DEFAULT values: numbers, booleans, NULL,
+// string literals with optional type cast, CURRENT_* keywords, and no-arg function calls.
+var safeSQLDefaultPattern = regexp.MustCompile(`(?i)^(?:` +
+	`-?\d+(?:\.\d+)?` + // numeric literals (including negative)
+	`|true|false` + // boolean
+	`|null` + // NULL
+	`|'[^']*'(?:::[a-zA-Z_]+(?:\[\])?)?` + // string literal with optional type cast
+	`|current_[a-z_]+` + // CURRENT_TIMESTAMP etc.
+	`|[a-z_][a-z0-9_]*\(\)` + // no-arg function calls like now(), gen_random_uuid()
+	`)$`)
 
 // fallbackSentinel is a machine-readable marker injected into fallback content.
 // Used instead of human-readable text to avoid false positives when LLM-generated
@@ -519,6 +530,11 @@ func isTemplateFile(path string) bool {
 		}
 	}
 	for _, tp := range constants.NEXTJS_ECOMMERCE_TEMPLATE_FILE_PATHS {
+		if path == tp {
+			return true
+		}
+	}
+	for _, tp := range constants.NEXTJS_UI_TEMPLATE_FILE_PATHS {
 		if path == tp {
 			return true
 		}
@@ -738,6 +754,9 @@ func buildEcommerceLayout(storeName string, typography map[string]any) string {
 	if storeName == "" {
 		storeName = "Store"
 	}
+	// Escape special characters that would break TypeScript string syntax
+	storeName = strings.ReplaceAll(storeName, `\`, `\\`)
+	storeName = strings.ReplaceAll(storeName, `"`, `\"`)
 
 	headingFont := "Inter"
 	bodyFont := "Inter"
@@ -757,6 +776,9 @@ func buildEcommerceLayout(storeName string, typography map[string]any) string {
 	}
 	toVarName := func(name string) string {
 		parts := strings.Fields(name)
+		if len(parts) == 0 {
+			return "font"
+		}
 		if len(parts) == 1 {
 			r := []rune(parts[0])
 			r[0] = []rune(strings.ToLower(string(r[0])))[0]
@@ -1030,7 +1052,7 @@ func buildCreateTableSQL(models []DataModel) string {
 			if !col.Nullable && !col.PrimaryKey {
 				sb.WriteString(" NOT NULL")
 			}
-			if col.Default != "" && !col.PrimaryKey {
+			if col.Default != "" && !col.PrimaryKey && safeSQLDefaultPattern.MatchString(strings.TrimSpace(col.Default)) {
 				sb.WriteString(fmt.Sprintf(" DEFAULT %s", col.Default))
 			} else if !col.PrimaryKey && (col.Name == "created_at" || col.Name == "updated_at") {
 				sb.WriteString(" DEFAULT now()")
@@ -1047,8 +1069,9 @@ func buildCreateTableSQL(models []DataModel) string {
 			if col.References != "" {
 				parts := strings.SplitN(col.References, ".", 2)
 				if len(parts) == 2 {
-					fks.WriteString(fmt.Sprintf("DO $$ BEGIN ALTER TABLE %s ADD CONSTRAINT fk_%s_%s FOREIGN KEY (%s) REFERENCES %s(%s) ON DELETE CASCADE; EXCEPTION WHEN duplicate_object THEN NULL; END $$;\n",
-						quoteIdentifier(m.Name), m.Name, col.Name, quoteIdentifier(col.Name), quoteIdentifier(parts[0]), quoteIdentifier(parts[1])))
+					constraintName := fmt.Sprintf("fk_%s_%s", nonIdentifierChars.ReplaceAllString(m.Name, ""), nonIdentifierChars.ReplaceAllString(col.Name, ""))
+					fks.WriteString(fmt.Sprintf("DO $$ BEGIN ALTER TABLE %s ADD CONSTRAINT %s FOREIGN KEY (%s) REFERENCES %s(%s) ON DELETE CASCADE; EXCEPTION WHEN duplicate_object THEN NULL; END $$;\n",
+						quoteIdentifier(m.Name), quoteIdentifier(constraintName), quoteIdentifier(col.Name), quoteIdentifier(parts[0]), quoteIdentifier(parts[1])))
 				}
 			}
 		}
@@ -1177,9 +1200,9 @@ func neonConnStrWithEndpoint(connStr string) string {
 
 
 // validateSeedSQL ensures LLM-generated seed SQL only contains INSERT statements.
-// Blocks DROP, DELETE, UPDATE, ALTER, CREATE, TRUNCATE, and other dangerous statements.
+// Blocks DROP, DELETE, UPDATE, ALTER, CREATE, TRUNCATE, RETURNING, and other dangerous statements.
 func validateSeedSQL(sqlStr string) error {
-	statements := strings.Split(sqlStr, ";")
+	statements := splitSQLStatements(sqlStr)
 	for _, stmt := range statements {
 		trimmed := strings.TrimSpace(stmt)
 		if trimmed == "" {
@@ -1195,8 +1218,79 @@ func validateSeedSQL(sqlStr string) error {
 		if !strings.HasPrefix(upper, "INSERT") {
 			return fmt.Errorf("only INSERT statements are allowed in seed SQL, found: %.40s", stripped)
 		}
+		// Block INSERT ... RETURNING which can call functions with side effects
+		upperNoStrings := strings.ToUpper(stripSQLStringLiterals(stripped))
+		if strings.Contains(upperNoStrings, "RETURNING") {
+			return fmt.Errorf("RETURNING clause not allowed in seed SQL")
+		}
 	}
 	return nil
+}
+
+// splitSQLStatements splits SQL on semicolons while respecting string literals,
+// so semicolons inside quoted values (e.g., 'a;b') are not treated as delimiters.
+func splitSQLStatements(sql string) []string {
+	var statements []string
+	var current strings.Builder
+	inString := false
+
+	for i := 0; i < len(sql); i++ {
+		ch := sql[i]
+		if inString {
+			current.WriteByte(ch)
+			if ch == '\'' {
+				// SQL-style escaped quote (''): stay in string
+				if i+1 < len(sql) && sql[i+1] == '\'' {
+					current.WriteByte(sql[i+1])
+					i++
+					continue
+				}
+				inString = false
+			}
+			continue
+		}
+		if ch == '\'' {
+			inString = true
+			current.WriteByte(ch)
+			continue
+		}
+		if ch == ';' {
+			statements = append(statements, current.String())
+			current.Reset()
+			continue
+		}
+		current.WriteByte(ch)
+	}
+	if s := current.String(); strings.TrimSpace(s) != "" {
+		statements = append(statements, s)
+	}
+	return statements
+}
+
+// stripSQLStringLiterals removes the content of single-quoted SQL string literals,
+// returning only the non-string portions of the SQL for keyword checking.
+func stripSQLStringLiterals(sql string) string {
+	var result strings.Builder
+	inString := false
+	for i := 0; i < len(sql); i++ {
+		ch := sql[i]
+		if inString {
+			if ch == '\'' {
+				if i+1 < len(sql) && sql[i+1] == '\'' {
+					i++ // skip escaped quote
+					continue
+				}
+				inString = false
+			}
+			continue
+		}
+		if ch == '\'' {
+			inString = true
+			continue
+		}
+		result.WriteByte(ch)
+	}
+	return result.String()
 }
 
 // stripLeadingSQLComments removes leading SQL comments (-- and /* */) from a statement.
@@ -3104,39 +3198,23 @@ func removeMetadataExport(content string) string {
 		return content
 	}
 
-	// Find the end of the metadata block by matching braces
-	braceStart := strings.Index(content[idx:], "{")
-	if braceStart == -1 {
+	// Find the end of the metadata block by matching braces (string-literal-aware)
+	end := findClosingBrace(content, idx)
+	if end == -1 {
 		return content
 	}
-	braceStart += idx
 
-	depth := 0
-	end := braceStart
-	for i := braceStart; i < len(content); i++ {
-		switch content[i] {
-		case '{':
-			depth++
-		case '}':
-			depth--
-			if depth == 0 {
-				end = i + 1
-				// Skip optional semicolon and trailing newlines
-				for end < len(content) && (content[end] == ';' || content[end] == '\n' || content[end] == '\r') {
-					end++
-				}
-				// Also remove the Metadata type import if present
-				result := content[:idx] + content[end:]
-				result = strings.Replace(result, "import type { Metadata } from \"next\"\n", "", 1)
-				result = strings.Replace(result, "import type { Metadata } from 'next'\n", "", 1)
-				result = strings.Replace(result, "import { Metadata } from \"next\"\n", "", 1)
-				result = strings.Replace(result, "import { Metadata } from 'next'\n", "", 1)
-				return result
-			}
-		}
+	// Skip optional semicolon and trailing newlines
+	for end < len(content) && (content[end] == ';' || content[end] == '\n' || content[end] == '\r') {
+		end++
 	}
-
-	return content
+	// Also remove the Metadata type import if present
+	result := content[:idx] + content[end:]
+	result = strings.Replace(result, "import type { Metadata } from \"next\"\n", "", 1)
+	result = strings.Replace(result, "import type { Metadata } from 'next'\n", "", 1)
+	result = strings.Replace(result, "import { Metadata } from \"next\"\n", "", 1)
+	result = strings.Replace(result, "import { Metadata } from 'next'\n", "", 1)
+	return result
 }
 
 // splitLayoutIntoServerAndClient splits a root layout.tsx that incorrectly has both
@@ -3247,9 +3325,6 @@ func splitLayoutIntoServerAndClient(content string) (serverLayout string, client
 		body := strings.TrimSpace(funcMatch[1])
 		// Find the return statement
 		returnIdx := strings.LastIndex(body, "return")
-		if returnIdx == -1 {
-			returnIdx = strings.LastIndex(body, "return")
-		}
 
 		preReturn := ""
 		returnBlock := body
