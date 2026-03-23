@@ -427,13 +427,16 @@ func (c *Controller) GetLatestDeploymentStatus(projectID string) (*models.AppDep
 				if !dep.CreatedAt.IsZero() && dep.CreatedAt.Before(deployment.CreatedAt) {
 					isStale = true
 				}
-				recentGrace := time.Since(deployment.CreatedAt) < 90*time.Second
+				// Grace period: builds can take several minutes. Don't declare
+				// failure until enough time has passed for a legitimate build.
+				recentGrace := time.Since(deployment.CreatedAt) < 5*time.Minute
 
 				switch {
 				case depStatus == "failed" || depStatus == "error":
 					if isStale || recentGrace {
-						// Likely seeing the old deployment's status — keep polling
-						slog.Info("Ignoring stale Coolify deployment status",
+						// Likely seeing the old deployment's status or build is
+						// still in progress — keep polling
+						slog.Info("Ignoring stale/early Coolify deployment status",
 							"dep_status", depStatus,
 							"dep_created", dep.CreatedAt,
 							"our_created", deployment.CreatedAt,
