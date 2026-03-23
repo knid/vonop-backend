@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"regexp"
@@ -692,7 +693,7 @@ func (c *Controller) StreamBuildApp(
 						"snapshot_id": preSnapshotID,
 						"reason":      "generation_failed",
 						"rolled_back":     len(singleShotOps),
-					"resync_required": true,
+						"resync_required": true,
 					})
 				}
 			}
@@ -816,7 +817,7 @@ func (c *Controller) StreamBuildApp(
 				sendEvent("chat_thinking", responses.ChatThinkingEvent{Chunk: chunk})
 			},
 			utils.StreamTextConfig{
-				MaxTokens: 16384,
+				MaxTokens: 65536,
 				Reasoning: reasoning,
 			},
 		)
@@ -833,7 +834,7 @@ func (c *Controller) StreamBuildApp(
 			responseText = fmt.Sprintf("Updated %d file(s): %s", len(changedPaths), strings.Join(changedPaths, ", "))
 		}
 
-		if chatErr != nil {
+		if chatErr != nil && !errors.Is(chatErr, utils.ErrResponseTruncated) {
 			slog.Error("LLM chat call failed", "error", chatErr, "project_id", project.ID)
 
 			// Auto-rollback on failure
@@ -850,7 +851,7 @@ func (c *Controller) StreamBuildApp(
 						"snapshot_id": preSnapshotID,
 						"reason":      "generation_failed",
 						"rolled_back":     len(toolAppliedOps),
-					"resync_required": true,
+						"resync_required": true,
 					})
 				}
 			}
@@ -871,6 +872,19 @@ func (c *Controller) StreamBuildApp(
 			}
 			sendError("ai", "failed to generate changes. try again please")
 			return
+		}
+		if errors.Is(chatErr, utils.ErrResponseTruncated) {
+			slog.Warn("Chat codegen truncated (output token limit reached)",
+				"project_id", project.ID,
+				"files_generated", len(toolAppliedOps),
+				"truncated_file", parser.TruncatedPath,
+			)
+			if parser.TruncatedPath != "" {
+				sendEvent("truncation_warning", map[string]any{
+					"truncated_file":  parser.TruncatedPath,
+					"files_completed": len(toolAppliedOps),
+				})
+			}
 		}
 	}
 
@@ -1446,7 +1460,7 @@ CRITICAL LANGUAGE RULE: ALL content you generate (product names, descriptions, c
 
 	if collectedContext.Len() == 0 {
 		trimmed := strings.TrimSpace(result)
-		if trimmed == "" || trimmed == "NO_TOOLS_NEEDED" || !toolCalled {
+		if trimmed == "" || strings.EqualFold(trimmed, "NO_TOOLS_NEEDED") || strings.Contains(strings.ToUpper(trimmed), "NO_TOOLS_NEEDED") || !toolCalled {
 			// Discard Phase 1 text when no tools were actually called.
 			// Without this guard, a chatty Haiku response (e.g. "I'll build
 			// your website!") leaks into Phase 2 as "Web search context" and
@@ -1809,6 +1823,21 @@ func (c *Controller) executeChatSeedDatabase(
 	return "Database seeded successfully with realistic demo data.", nil
 }
 
+// sanitizeDBError strips sensitive connection/auth details from database errors
+// while preserving useful semantic errors (syntax, missing column/table) that
+// help the LLM self-correct its queries.
+func sanitizeDBError(projectID string, err error) string {
+	msg := err.Error()
+	lower := strings.ToLower(msg)
+	for _, sensitive := range []string{"dial tcp", "connect:", "tls:", "x509:", "password", "authentication", "ssl"} {
+		if strings.Contains(lower, sensitive) {
+			slog.Error("execute_sql error (sanitized)", "project_id", projectID, "error", msg)
+			return "internal database connection error"
+		}
+	}
+	return msg
+}
+
 // executeChatExecuteSQL handles the execute_sql tool call in the chat tool phase.
 func (c *Controller) executeChatExecuteSQL(
 	ctx context.Context,
@@ -1843,10 +1872,15 @@ func (c *Controller) executeChatExecuteSQL(
 			return fmt.Sprintf("Error: query contains disallowed keyword: %s. Use UPDATE with a status/flag column instead of DELETE.", kw), nil
 		}
 	}
+	// Block multi-statement queries (semicolons) to prevent statement stacking attacks.
+	if strings.Contains(query, ";") {
+		return "Error: only single-statement queries are allowed. Remove semicolons and send one query at a time.", nil
+	}
 
 	neonDB, err := c.openNeonDB(project.ID.String())
 	if err != nil {
-		return fmt.Sprintf("Error: failed to connect to database: %s", err.Error()), nil
+		slog.Error("execute_sql: failed to connect to database", "error", err, "project_id", project.ID)
+		return "Error: failed to connect to database. Please try again.", nil
 	}
 	defer neonDB.Close()
 
@@ -1859,7 +1893,7 @@ func (c *Controller) executeChatExecuteSQL(
 		if isInsert && strings.Contains(upper, "RETURNING") {
 			rows, err := neonDB.QueryContext(queryCtx, query)
 			if err != nil {
-				return fmt.Sprintf("Query error: %s", err.Error()), nil
+				return fmt.Sprintf("Query error: %s", sanitizeDBError(project.ID.String(), err)), nil
 			}
 			defer rows.Close()
 			cols, _ := rows.Columns()
@@ -1898,7 +1932,7 @@ func (c *Controller) executeChatExecuteSQL(
 
 		result, err := neonDB.ExecContext(queryCtx, query)
 		if err != nil {
-			return fmt.Sprintf("Query error: %s", err.Error()), nil
+			return fmt.Sprintf("Query error: %s", sanitizeDBError(project.ID.String(), err)), nil
 		}
 		affected, _ := result.RowsAffected()
 		summary := fmt.Sprintf("OK — %d row(s) affected.", affected)
@@ -1916,7 +1950,7 @@ func (c *Controller) executeChatExecuteSQL(
 
 	rows, err := tx.QueryContext(queryCtx, query)
 	if err != nil {
-		return fmt.Sprintf("Query error: %s", err.Error()), nil
+		return fmt.Sprintf("Query error: %s", sanitizeDBError(project.ID.String(), err)), nil
 	}
 	defer rows.Close()
 

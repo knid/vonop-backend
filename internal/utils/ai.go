@@ -25,6 +25,12 @@ const toolExecTimeout = 2 * time.Minute
 // growth from pathologically large LLM responses.
 const maxResponseBufferSize = 2 * 1024 * 1024 // 2 MB
 
+// ErrResponseTruncated is returned when the LLM response was cut off due to
+// reaching the output token limit (finish_reason=length). The response text
+// is still delivered via the onChunk callback — callers should check for this
+// error to decide whether recovery (e.g. continuation) is needed.
+var ErrResponseTruncated = errors.New("LLM response truncated (output token limit reached)")
+
 // normalizeToolCacheKey produces a canonical cache key for tool dedup.
 // It normalizes JSON arguments so semantically identical calls (different key order) match.
 func normalizeToolCacheKey(name, args string) string {
@@ -136,6 +142,28 @@ var modelCosts = map[string][2]float64{
 	"claude-opus-4-6":      {15.0, 75.0},
 	"claude-opus-4-5":      {15.0, 75.0},
 	"claude-sonnet-4-20250514": {3.0, 15.0},
+}
+
+// EstimateInputOutputCostUSD returns separate input and output costs for a single LLM call.
+// Used for PostHog $ai_input_cost / $ai_output_cost standard properties.
+func EstimateInputOutputCostUSD(model string, inputTokens, outputTokens, cacheCreation, cacheRead int) (inputCost, outputCost float64) {
+	if idx := strings.LastIndex(model, "/"); idx >= 0 {
+		model = model[idx+1:]
+	}
+	prices, ok := modelCosts[model]
+	if !ok {
+		return 0, 0
+	}
+	inputPrice, outputPrice := prices[0], prices[1]
+	regularInput := inputTokens - cacheCreation - cacheRead
+	if regularInput < 0 {
+		regularInput = 0
+	}
+	inputCost = float64(regularInput)*inputPrice/1_000_000 +
+		float64(cacheCreation)*inputPrice*1.25/1_000_000 +
+		float64(cacheRead)*inputPrice*0.1/1_000_000
+	outputCost = float64(outputTokens) * outputPrice / 1_000_000
+	return
 }
 
 // estimateCostUSD computes the estimated cost for a single LLM call.
@@ -788,11 +816,16 @@ func StreamTextFromLLMWithMessages(ctx context.Context, model string, messages [
 				}
 			}
 		}
+		if result.FinishReason == "length" {
+			slog.Warn("LLM streaming response truncated (finish_reason=length)", "model", model, "response_length", len(result.Text))
+			return result.Text, ErrResponseTruncated
+		}
 		return result.Text, nil
 	}
 
 	var fullText strings.Builder
 	var lastUsage UsageInfo
+	var lastFinishReason string
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 0, 64*1024), 2*1024*1024)
 
@@ -833,6 +866,9 @@ func StreamTextFromLLMWithMessages(ctx context.Context, model string, messages [
 					onChunk(content)
 				}
 			}
+			if chunk.Choices[0].FinishReason != nil {
+				lastFinishReason = *chunk.Choices[0].FinishReason
+			}
 		}
 	}
 
@@ -857,6 +893,11 @@ func StreamTextFromLLMWithMessages(ctx context.Context, model string, messages [
 				tracker.Record(model, lastUsage, latencyMs, true, "stream_text")
 			}
 		}
+	}
+
+	if lastFinishReason == "length" {
+		slog.Warn("LLM streaming response truncated (finish_reason=length)", "model", model, "response_length", fullText.Len())
+		return fullText.String(), ErrResponseTruncated
 	}
 
 	return fullText.String(), nil

@@ -310,6 +310,17 @@ func (c *Controller) RecordTokenUsage(user *models.User, action, model, provider
 			}
 			if entry.CostUSD > 0 {
 				props.Set("$ai_total_cost_usd", entry.CostUSD)
+				// Standard PostHog LLM Analytics properties for built-in dashboard
+				inputCost, outputCost := utils.EstimateInputOutputCostUSD(
+					entryModel, entry.PromptTokens, entry.CompletionTokens,
+					entry.CacheCreationInputTokens, entry.CacheReadInputTokens,
+				)
+				if inputCost > 0 {
+					props.Set("$ai_input_cost", inputCost)
+				}
+				if outputCost > 0 {
+					props.Set("$ai_output_cost", outputCost)
+				}
 			}
 			if entry.InputMessages != nil {
 				props.Set("$ai_input", messagesToPostHogInput(entry.InputMessages))
