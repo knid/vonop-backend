@@ -526,9 +526,9 @@ func (c *Controller) StreamBuildApp(
 					Content: "I understand the earlier context. Let me continue from where we left off.",
 				})
 			}
-			llmMessages = append(llmMessages, chatMessagesToLLM(messages[len(messages)-keepRecent:], provider)...)
+			llmMessages = append(llmMessages, chatMessagesToLLM(messages[len(messages)-keepRecent:], provider, imageURLs)...)
 		} else {
-			llmMessages = append(llmMessages, chatMessagesToLLM(messages, provider)...)
+			llmMessages = append(llmMessages, chatMessagesToLLM(messages, provider, imageURLs)...)
 		}
 	}
 
@@ -2854,29 +2854,24 @@ func extractFilePathsFromMessage(message string, fileMap map[string]string) []st
 
 // buildProjectContextForChat builds project context with selected file contents
 // inlined and remaining files listed as paths only.
-// chatMessagesToLLM converts stored conversation messages to LLM messages,
-// attaching actual image data only to the last user message (token optimization).
+// chatMessagesToLLM converts stored conversation messages to LLM messages.
+// currentImageDataURIs contains base64 data URIs for the current (latest) user
+// message's images. Stored ImageURLs are S3 URLs and cannot be sent directly
+// to the LLM — only the current turn's data URIs are attached as vision content.
 // Older user messages with images get a text placeholder instead.
-func chatMessagesToLLM(msgs []models.AppConversationMessage, provider *utils.LLMProvider) []utils.Message {
+func chatMessagesToLLM(msgs []models.AppConversationMessage, provider *utils.LLMProvider, currentImageDataURIs []string) []utils.Message {
 	supportsVision := provider.SupportsVision()
 
-	// Find the index of the last user message that has images
-	lastImgIdx := -1
-	if supportsVision {
-		for i := len(msgs) - 1; i >= 0; i-- {
-			if msgs[i].Role == "user" && len(msgs[i].ImageURLs) > 0 {
-				lastImgIdx = i
-				break
-			}
-		}
-	}
+	// The last message is the current user message (just appended before this call).
+	// Only attach actual base64 data URIs on the last user message.
+	lastIdx := len(msgs) - 1
 
 	out := make([]utils.Message, 0, len(msgs))
 	for i, msg := range msgs {
 		m := utils.Message{Role: msg.Role, Content: msg.Content}
 		if msg.Role == "user" && len(msg.ImageURLs) > 0 {
-			if i == lastImgIdx {
-				m.Images = msg.ImageURLs
+			if i == lastIdx && supportsVision && len(currentImageDataURIs) > 0 {
+				m.Images = currentImageDataURIs
 			} else {
 				m.Content += fmt.Sprintf("\n\n[User previously attached %d image(s)]", len(msg.ImageURLs))
 			}
