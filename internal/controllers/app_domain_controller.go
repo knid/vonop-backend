@@ -70,9 +70,8 @@ func (c *Controller) AddAppDomain(project *models.AppProject, user *models.User,
 	// If there is a Coolify project, add the domain there too
 	coolifyProject, cpErr := c.DB.GetCoolifyProjectByAppProjectID(project.ID.String())
 	if cpErr == nil && coolifyProject != nil && c.CoolifyService != nil {
-		newDomain := "https://" + domainName
-		existingDomain := "https://" + coolifyProject.CustomDomain
-		if err := c.CoolifyService.UpdateDomains(coolifyProject.CoolifyAppUUID, []string{existingDomain, newDomain}); err != nil {
+		domains := c.buildCoolifyDomainList(coolifyProject, project.ID.String(), domainName)
+		if err := c.CoolifyService.UpdateDomains(coolifyProject.CoolifyAppUUID, domains); err != nil {
 			slog.Warn("Failed to add domain to Coolify", "domain", domainName, "error", err)
 		} else {
 			created.Status = "active"
@@ -104,8 +103,16 @@ func (c *Controller) RemoveAppDomain(domainID string, project *models.AppProject
 	if c.CoolifyService != nil {
 		coolifyProject, cpErr := c.DB.GetCoolifyProjectByAppProjectID(project.ID.String())
 		if cpErr == nil && coolifyProject != nil {
-			defaultDomain := "https://" + coolifyProject.CustomDomain
-			if err := c.CoolifyService.UpdateDomains(coolifyProject.CoolifyAppUUID, []string{defaultDomain}); err != nil {
+			domains := c.buildCoolifyDomainList(coolifyProject, project.ID.String(), "")
+			// Filter out the domain being removed
+			filtered := make([]string, 0, len(domains))
+			removeDomain := "https://" + domain.Domain
+			for _, d := range domains {
+				if d != removeDomain {
+					filtered = append(filtered, d)
+				}
+			}
+			if err := c.CoolifyService.UpdateDomains(coolifyProject.CoolifyAppUUID, filtered); err != nil {
 				slog.Warn("Failed to remove domain from Coolify", "domain", domain.Domain, "error", err)
 			}
 		}
@@ -140,13 +147,12 @@ func (c *Controller) VerifyAppDomain(domainID string, project *models.AppProject
 
 	c.DB.UpdateAppDomain(domain)
 
-	// If domain just became active and Coolify project exists, add domain
+	// If domain is active and Coolify project exists, sync all domains
 	if domain.Status == "active" && c.CoolifyService != nil {
 		coolifyProject, cpErr := c.DB.GetCoolifyProjectByAppProjectID(project.ID.String())
 		if cpErr == nil && coolifyProject != nil {
-			newDomain := "https://" + domain.Domain
-			existingDomain := "https://" + coolifyProject.CustomDomain
-			if err := c.CoolifyService.UpdateDomains(coolifyProject.CoolifyAppUUID, []string{existingDomain, newDomain}); err != nil {
+			domains := c.buildCoolifyDomainList(coolifyProject, project.ID.String(), "")
+			if err := c.CoolifyService.UpdateDomains(coolifyProject.CoolifyAppUUID, domains); err != nil {
 				slog.Warn("Failed to add verified domain to Coolify", "domain", domain.Domain, "error", err)
 			}
 		}
@@ -159,4 +165,36 @@ func (c *Controller) VerifyAppDomain(domainID string, project *models.AppProject
 		DNSRecord: constants.WEMOB_CNAME_TARGET,
 		CreatedAt: domain.CreatedAt,
 	}, nil
+}
+
+// buildCoolifyDomainList builds the complete list of domains for a Coolify app.
+// It always includes the default wemob.app subdomain, plus all active custom domains
+// from the database, plus an optional extra domain being added.
+func (c *Controller) buildCoolifyDomainList(coolifyProject *models.CoolifyProject, projectID string, extraDomain string) []string {
+	domains := []string{"https://" + coolifyProject.CustomDomain}
+
+	// Add all existing custom domains from DB
+	appDomains, err := c.DB.GetAppDomainsByProjectID(projectID)
+	if err == nil {
+		for _, d := range appDomains {
+			domains = append(domains, "https://"+d.Domain)
+		}
+	}
+
+	// Add the extra domain if provided and not already present
+	if extraDomain != "" {
+		extra := "https://" + extraDomain
+		found := false
+		for _, d := range domains {
+			if d == extra {
+				found = true
+				break
+			}
+		}
+		if !found {
+			domains = append(domains, extra)
+		}
+	}
+
+	return domains
 }
