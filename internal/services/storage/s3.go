@@ -175,6 +175,17 @@ func (s S3Storage) DeleteObject(ctx context.Context, objectKey string) (*v4.Pres
 	return request, err
 }
 
+func (s *S3Storage) DeleteObjectDirect(ctx context.Context, objectKey string) error {
+	_, err := s.Client.DeleteObject(ctx, &s3.DeleteObjectInput{
+		Bucket: aws.String(s.Bucket),
+		Key:    aws.String(objectKey),
+	})
+	if err != nil {
+		slog.Error("failed to delete object from S3", "from", "s3", "operation", "DeleteObjectDirect", "bucket", s.Bucket, "key", objectKey, "error", err)
+	}
+	return err
+}
+
 func (s *S3Storage) UploadFileByteWithContentType(ctx context.Context, s3URL string, data []byte, contentType string) error {
 	_, err := s.Client.PutObject(ctx, &s3.PutObjectInput{
 		Bucket:      &s.Bucket,
