@@ -1701,10 +1701,20 @@ func (c *Controller) generateAndStoreSeedImages(
 		}
 
 		s3Key := fmt.Sprintf("apps/%s/images/seed-%s-%d.jpg", project.ID, task.table, i+1)
-		publicURL, err := c.AssetsStorage.UploadFileBytePublic(ctx, s3Key, imgData, "image/jpeg")
-		if err != nil {
-			slog.Warn("generateAndStoreSeedImages: S3 upload failed",
-				"table", task.table, "error", err)
+		uploadCtx, uploadCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		var publicURL string
+		var uploadErr error
+		for attempt := 0; attempt < 3; attempt++ {
+			publicURL, uploadErr = c.AssetsStorage.UploadFileBytePublic(uploadCtx, s3Key, imgData, "image/jpeg")
+			if uploadErr == nil {
+				break
+			}
+			slog.Warn("generateAndStoreSeedImages: S3 upload failed, retrying",
+				"table", task.table, "attempt", attempt+1, "error", uploadErr)
+			time.Sleep(time.Duration(attempt+1) * time.Second)
+		}
+		uploadCancel()
+		if uploadErr != nil {
 			continue
 		}
 

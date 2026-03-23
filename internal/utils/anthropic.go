@@ -516,7 +516,7 @@ func parseAnthropicResponse(body []byte) (ChatResponse, error) {
 			content += block.Text
 		case "thinking":
 			reasoning += block.Thinking
-		case "tool_use", "server_tool_use":
+		case "tool_use":
 			toolCalls = append(toolCalls, ToolCall{
 				ID:   block.ID,
 				Type: "function",
@@ -525,6 +525,9 @@ func parseAnthropicResponse(body []byte) (ChatResponse, error) {
 					Arguments: string(block.Input),
 				},
 			})
+		case "server_tool_use":
+			// Server tools (e.g. web_search) are executed by Anthropic's servers
+			// within the same API call — do not return them as client tool calls.
 		}
 	}
 
@@ -741,7 +744,9 @@ func parseAnthropicSSEStream(
 
 	for _, idx := range indices {
 		b := blocks[idx]
-		if b.blockType == "tool_use" || b.blockType == "server_tool_use" {
+		// Only return client tool calls — server tools (e.g. web_search) are
+		// executed by Anthropic's servers within the same stream.
+		if b.blockType == "tool_use" {
 			args := b.input.String()
 			// Validate tool call arguments are valid JSON; if the stream was
 			// truncated mid-tool, the partial JSON would cause downstream errors.

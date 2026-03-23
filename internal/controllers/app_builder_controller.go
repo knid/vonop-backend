@@ -2267,8 +2267,23 @@ func (c *Controller) executeChatGenerateImage(
 		filename = "generated-image.jpg"
 	}
 	s3Key := fmt.Sprintf("apps/%s/images/%s", project.ID, filename)
-	imageURL, err := c.AssetsStorage.UploadFileBytePublic(ctx, s3Key, imgData, "image/jpeg")
-	if err != nil {
+	// Use a detached context for S3 upload so it doesn't fail when the parent
+	// tool-execution context is near its deadline (the image is already generated).
+	uploadCtx, uploadCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer uploadCancel()
+	var imageURL string
+	var uploadErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		imageURL, uploadErr = c.AssetsStorage.UploadFileBytePublic(uploadCtx, s3Key, imgData, "image/jpeg")
+		if uploadErr == nil {
+			break
+		}
+		slog.Warn("S3 upload failed for generated image, retrying",
+			"project_id", project.ID, "s3_key", s3Key,
+			"attempt", attempt+1, "error", uploadErr)
+		time.Sleep(time.Duration(attempt+1) * time.Second)
+	}
+	if uploadErr != nil {
 		collectedContext.WriteString(fmt.Sprintf("\n[Generated Image]\nImage URL (temporary CDN): %s\n", cdnURL))
 		return fmt.Sprintf("Image generated but S3 upload failed. CDN URL: %s", cdnURL), nil
 	}
