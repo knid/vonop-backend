@@ -42,11 +42,10 @@ func (c *Controller) GetOrCreateReferralCode(user *models.User) (*responses.Refe
 }
 
 func (c *Controller) GetReferralStats(user *models.User) (*responses.ReferralStatsResponse, error) {
-	code, err := c.DB.GetReferralCodeByUserID(user.ID.String())
+	// Auto-create referral code if user doesn't have one yet
+	codeResp, err := c.GetOrCreateReferralCode(user)
 	if err != nil {
-		return &responses.ReferralStatsResponse{
-			Referrals: []responses.ReferralResponse{},
-		}, nil
+		return nil, err
 	}
 
 	referrals, err := c.DB.GetReferralsByReferrerID(user.ID.String())
@@ -73,7 +72,7 @@ func (c *Controller) GetReferralStats(user *models.User) (*responses.ReferralSta
 	}
 
 	return &responses.ReferralStatsResponse{
-		Code:           code.Code,
+		Code:           codeResp.Code,
 		TotalReferrals: len(referrals),
 		TotalRewards:   totalRewards,
 		Referrals:      refs,
