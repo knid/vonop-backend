@@ -308,6 +308,9 @@ func (c *Controller) RecordTokenUsage(user *models.User, action, model, provider
 			if user.Email != "" {
 				props.Set("$email", user.Email)
 			}
+			if entry.CostUSD > 0 {
+				props.Set("$ai_total_cost_usd", entry.CostUSD)
+			}
 			if entry.InputMessages != nil {
 				props.Set("$ai_input", messagesToPostHogInput(entry.InputMessages))
 			}
@@ -325,10 +328,12 @@ func (c *Controller) RecordTokenUsage(user *models.User, action, model, provider
 			c.PostHog.Enqueue(capture)
 		}
 
-		// Compute total latency across all LLM calls for the trace event.
+		// Compute total latency and cost across all LLM calls for the trace event.
 		var totalLatencyMs int64
+		var totalCost float64
 		for _, e := range tracker.Entries() {
 			totalLatencyMs += e.LatencyMs
+			totalCost += e.CostUSD
 		}
 
 		// Grouping $ai_trace event
@@ -343,6 +348,9 @@ func (c *Controller) RecordTokenUsage(user *models.User, action, model, provider
 			Set("$ai_output_tokens", completion).
 			Set("app_type", appType).
 			Set("credits_spent", creditsSpent)
+		if totalCost > 0 {
+			traceProps.Set("$ai_total_cost_usd", totalCost)
+		}
 		if user.Email != "" {
 			traceProps.Set("$email", user.Email)
 		}
