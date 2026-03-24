@@ -113,6 +113,13 @@ CRITICAL LANGUAGE RULE: ALL content you generate (product names, descriptions, c
 			systemPrompt += "\n\n### Database Schema\nSchema metadata is unavailable. Before writing data, first discover the schema by running: SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE', then for each table: SELECT column_name, data_type, is_nullable, column_default FROM information_schema.columns WHERE table_name = '<table>' ORDER BY ordinal_position. All tables have auto-generated UUID 'id' and timestamp created_at/updated_at columns — do NOT provide them in INSERT statements.\n"
 		}
 		systemPrompt += `
+- DIAGNOSTIC FIRST: When the user reports a bug, error, or problem (e.g. "Unauthorized", "can't add data", "doesn't work", "error", "login failed", "not showing"), ALWAYS call execute_sql FIRST to diagnose before taking any other action:
+  - For auth/login errors: SELECT * FROM users WHERE email = '...' (check role, status, password_hash existence)
+  - For "can't add/save" errors: SELECT column_name, data_type FROM information_schema.columns WHERE table_name = '<relevant_table>' (verify schema)
+  - For missing data: SELECT COUNT(*) FROM <table> (check if tables are populated)
+  - For permission issues: Check the user's role column value
+  Report the diagnostic result, then decide: fix data with execute_sql UPDATE/INSERT, or respond NO_TOOLS_NEEDED so the code-generation model can fix the code.
+- NEVER call seed_database as a response to a bug/error report. seed_database is ONLY for when the user explicitly says the database is empty or asks for demo/sample/test data.
 - If the user says the database is empty, has no data, asks for demo/sample/test data, or complains about missing content, call seed_database to populate it with realistic data.
 - If you need to check whether the database has data, call execute_sql with a SELECT/COUNT query (e.g. SELECT COUNT(*) FROM table_name).
 - If the user asks to add, insert, or create specific data rows, call execute_sql with an INSERT query. You can insert multiple rows in a single INSERT using VALUES (...), (...), (...) syntax.
