@@ -278,7 +278,7 @@ func (c *Controller) StreamBuildApp(
 				Set("has_images", len(images) > 0).
 				Set("is_generation", isInitialGeneration))
 		}
-		if total > 0 && !generationSucceeded {
+		if !generationSucceeded {
 			failedProps := posthog.NewProperties().
 				Set("app_id", project.ID.String()).
 				Set("duration_seconds", time.Since(genStart).Seconds()).
@@ -834,6 +834,12 @@ func (c *Controller) StreamBuildApp(
 			utils.StreamTextConfig{
 				MaxTokens: 65536,
 				Reasoning: reasoning,
+				OnRetry: func(attempt int, reason string) {
+					sendEvent("progress", responses.ProgressEvent{
+						Phase:   "generating_files",
+						Message: fmt.Sprintf("Retrying (attempt %d)...", attempt+1),
+					})
+				},
 			},
 		)
 		parser.Flush()
@@ -5233,14 +5239,19 @@ func (c *Controller) streamSingleShotGeneration(
 	}
 	sendEvent("project_created", projectCreatedPayload)
 
-	// 3. Generate AI logo (runs in parallel with nothing — just do it inline, fast)
-	logoURL := c.generateAppLogo(ctx, project, sendEvent)
+	// 3. Generate AI logo in background (don't block code generation)
+	logoCh := make(chan string, 1)
+	go func() {
+		logoCh <- c.generateAppLogo(ctx, project, sendEvent)
+	}()
 
 	// 4. Build messages with single-shot system prompt
 	projectContext := c.buildProjectContext(project, fileMap, true)
-	if logoURL != "" {
-		projectContext += fmt.Sprintf("\n\nApp Logo URL (use this as the site logo/favicon in the header and metadata):\n%s", logoURL)
-	}
+
+	// Permanent logo URL is deterministic — inject it now so the LLM can use it.
+	// The actual image may still be generating, but the URL will work once it's ready.
+	permanentLogoURL := fmt.Sprintf("%s/v2/apps/%s/logo", constants.WEMOB_API_BASE_URL, project.ID)
+	projectContext += fmt.Sprintf("\n\nApp Logo URL (use this as the site logo/favicon in the header and metadata):\n%s", permanentLogoURL)
 
 	llmMessages := []utils.Message{
 		{Role: "system", Content: buildSingleShotSystemPrompt(project, mobileConfig)},
@@ -5318,7 +5329,15 @@ func (c *Controller) streamSingleShotGeneration(
 		func(chunk string) {
 			sendEvent("chat_thinking", responses.ChatThinkingEvent{Chunk: chunk})
 		},
-		utils.StreamTextConfig{MaxTokens: 65536},
+		utils.StreamTextConfig{
+			MaxTokens: 65536,
+			OnRetry: func(attempt int, reason string) {
+				sendEvent("progress", responses.ProgressEvent{
+					Phase:   "generating_files",
+					Message: fmt.Sprintf("Retrying code generation (attempt %d)...", attempt+1),
+				})
+			},
+		},
 	)
 	parser.Flush()
 
@@ -5355,6 +5374,9 @@ func (c *Controller) streamSingleShotGeneration(
 
 	// 10. Auto-detect WemobBridge usage and configure mobile app
 	c.autoDetectMobileBridgeConfig(project, fileMap, sendEvent)
+
+	// Wait for logo generation to finish (no-op if already done)
+	<-logoCh
 
 	return responseBuilder.String(), ops, err
 }
@@ -5959,7 +5981,15 @@ func (c *Controller) streamEcommerceGeneration(
 		func(chunk string) {
 			sendEvent("chat_thinking", responses.ChatThinkingEvent{Chunk: chunk})
 		},
-		utils.StreamTextConfig{MaxTokens: 65536},
+		utils.StreamTextConfig{
+			MaxTokens: 65536,
+			OnRetry: func(attempt int, reason string) {
+				sendEvent("progress", responses.ProgressEvent{
+					Phase:   "generating_files",
+					Message: fmt.Sprintf("Retrying code generation (attempt %d)...", attempt+1),
+				})
+			},
+		},
 	)
 	parser.Flush()
 

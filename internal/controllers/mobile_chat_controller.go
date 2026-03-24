@@ -237,6 +237,17 @@ func (c *Controller) StreamMobileInjectionChat(
 				Data:  responses.ChatThinkingEvent{Chunk: chunk},
 			}
 		},
+		utils.StreamTextConfig{
+			OnRetry: func(attempt int, reason string) {
+				events <- responses.SSEEvent{
+					Event: "progress",
+					Data: responses.ProgressEvent{
+						Phase:   "generating",
+						Message: fmt.Sprintf("Retrying (attempt %d)...", attempt+1),
+					},
+				}
+			},
+		},
 	)
 	parser.Flush()
 

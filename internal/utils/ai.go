@@ -71,7 +71,7 @@ func truncateBody(s string, maxLen int) string {
 	return s[:maxLen] + "...(truncated)"
 }
 
-// --- Rate limit error ---
+// --- LLM error types ---
 
 // ErrRateLimited is returned when the LLM API responds with HTTP 429.
 type ErrRateLimited struct {
@@ -91,6 +91,23 @@ func IsRateLimited(err error) (*ErrRateLimited, bool) {
 		return rl, true
 	}
 	return nil, false
+}
+
+// ErrPermanentLLM is returned when the LLM API returns an error that will not
+// succeed on retry (e.g. invalid_request_error, authentication_error).
+type ErrPermanentLLM struct {
+	ErrorType string
+	Message   string
+}
+
+func (e *ErrPermanentLLM) Error() string {
+	return fmt.Sprintf("permanent LLM error (%s): %s", e.ErrorType, e.Message)
+}
+
+// IsPermanentError checks if an error is a permanent (non-retryable) LLM error.
+func IsPermanentError(err error) bool {
+	var pe *ErrPermanentLLM
+	return errors.As(err, &pe)
 }
 
 // parseRateLimitError returns an ErrRateLimited for 429/529 responses, nil otherwise.
@@ -320,9 +337,14 @@ var llmHTTPClient = &http.Client{
 
 // llmStreamingClient is used for streaming LLM calls (StreamTextFromLLMWithMessages,
 // StreamWithTools) where responses can legitimately take 10+ minutes for large code
-// generation. No http.Client.Timeout is set — lifetime is governed by the request
-// context (typically 25 minutes from the generation job).
-var llmStreamingClient = &http.Client{}
+// generation. A generous ResponseHeaderTimeout prevents hanging indefinitely when
+// the server accepts the connection but never starts sending data. Once headers arrive,
+// the body read is governed by the request context (typically 25 minutes).
+var llmStreamingClient = &http.Client{
+	Transport: &http.Transport{
+		ResponseHeaderTimeout: 3 * time.Minute,
+	},
+}
 
 type ResponseFormat struct {
 	Type string `json:"type"`
@@ -746,6 +768,7 @@ type StreamChunk struct {
 type StreamTextConfig struct {
 	MaxTokens int              // 0 means default (16384)
 	Reasoning *ReasoningConfig // nil means use provider default
+	OnRetry   func(attempt int, reason string) // optional callback when a retry is about to happen
 }
 
 // StreamTextFromLLMWithMessages streams LLM response tokens for a pre-built message array.
@@ -764,6 +787,10 @@ func StreamTextFromLLMWithMessages(ctx context.Context, model string, messages [
 	if len(opts) > 0 && opts[0].Reasoning != nil {
 		reasoning = opts[0].Reasoning
 	}
+	var onRetry func(int, string)
+	if len(opts) > 0 && opts[0].OnRetry != nil {
+		onRetry = opts[0].OnRetry
+	}
 
 	// Retry state — mirrors StreamWithTools retry logic so that Phase 2 chat
 	// calls are as resilient as Phase 1 tool-calling calls.
@@ -772,6 +799,12 @@ func StreamTextFromLLMWithMessages(ctx context.Context, model string, messages [
 	rateLimitRetries := 0
 	transientRetries := 0
 	chunksDelivered := false // tracks whether any content was streamed to the caller
+
+	notifyRetry := func(attempt int, reason string) {
+		if onRetry != nil {
+			onRetry(attempt, reason)
+		}
+	}
 
 	for {
 		if ctx.Err() != nil {
@@ -805,6 +838,7 @@ func StreamTextFromLLMWithMessages(ctx context.Context, model string, messages [
 				wait := time.Duration(transientRetries) * 5 * time.Second
 				slog.Warn("LLM stream_text connection error, retrying",
 					"error", err, "attempt", transientRetries, "model", model)
+				notifyRetry(transientRetries, fmt.Sprintf("connection error: %v", err))
 				select {
 				case <-time.After(wait):
 				case <-ctx.Done():
@@ -813,7 +847,7 @@ func StreamTextFromLLMWithMessages(ctx context.Context, model string, messages [
 				continue
 			}
 			slog.Error("Error making streaming request to LLM:", "error", err)
-			return "", fmt.Errorf("error generating content. try again please")
+			return "", fmt.Errorf("connection error after %d retries: %w", transientRetries, err)
 		}
 
 		if resp.StatusCode != http.StatusOK {
@@ -830,6 +864,7 @@ func StreamTextFromLLMWithMessages(ctx context.Context, model string, messages [
 					}
 					slog.Warn("LLM stream_text rate limited, retrying",
 						"retry_after", wait, "attempt", rateLimitRetries, "model", model)
+					notifyRetry(rateLimitRetries, "rate limited")
 					select {
 					case <-time.After(wait):
 					case <-ctx.Done():
@@ -846,6 +881,7 @@ func StreamTextFromLLMWithMessages(ctx context.Context, model string, messages [
 				wait := time.Duration(transientRetries) * 5 * time.Second
 				slog.Warn("LLM stream_text server error, retrying",
 					"status", resp.StatusCode, "attempt", transientRetries, "model", model)
+				notifyRetry(transientRetries, fmt.Sprintf("server error %d", resp.StatusCode))
 				select {
 				case <-time.After(wait):
 				case <-ctx.Done():
@@ -855,7 +891,7 @@ func StreamTextFromLLMWithMessages(ctx context.Context, model string, messages [
 			}
 
 			slog.Error("LLM streaming returned non-200", "status", resp.StatusCode, "body", string(respBody))
-			return "", fmt.Errorf("error generating content. try again please")
+			return "", fmt.Errorf("LLM returned HTTP %d: %s", resp.StatusCode, truncateBody(string(respBody), 200))
 		}
 
 		// Wrap onChunk to track whether any content was delivered to the caller.
@@ -876,6 +912,12 @@ func StreamTextFromLLMWithMessages(ctx context.Context, model string, messages [
 				if ctx.Err() != nil {
 					return "", ctx.Err()
 				}
+				// Permanent errors — never retry (invalid request, auth, etc.)
+				if IsPermanentError(parseErr) {
+					slog.Error("LLM stream_text permanent error, not retrying",
+						"error", parseErr, "model", model)
+					return "", parseErr
+				}
 				// Retry rate limit errors from SSE stream (only if no chunks delivered)
 				if rlErr, ok := IsRateLimited(parseErr); ok {
 					if !chunksDelivered && rateLimitRetries < maxRateLimitRetries {
@@ -886,6 +928,7 @@ func StreamTextFromLLMWithMessages(ctx context.Context, model string, messages [
 						}
 						slog.Warn("LLM stream_text rate limited (SSE), retrying",
 							"retry_after", wait, "attempt", rateLimitRetries, "model", model)
+						notifyRetry(rateLimitRetries, "rate limited")
 						select {
 						case <-time.After(wait):
 						case <-ctx.Done():
@@ -901,6 +944,7 @@ func StreamTextFromLLMWithMessages(ctx context.Context, model string, messages [
 					wait := time.Duration(transientRetries) * 5 * time.Second
 					slog.Warn("LLM stream_text SSE error, retrying",
 						"error", parseErr, "attempt", transientRetries, "model", model)
+					notifyRetry(transientRetries, fmt.Sprintf("stream error: %v", parseErr))
 					select {
 					case <-time.After(wait):
 					case <-ctx.Done():
@@ -908,7 +952,7 @@ func StreamTextFromLLMWithMessages(ctx context.Context, model string, messages [
 					}
 					continue
 				}
-				return "", fmt.Errorf("error reading streaming response. try again please")
+				return "", fmt.Errorf("stream error after %d retries: %w", transientRetries, parseErr)
 			}
 			if result.Usage.TotalTokens > 0 {
 				latencyMs := time.Since(start).Milliseconds()
@@ -993,6 +1037,7 @@ func StreamTextFromLLMWithMessages(ctx context.Context, model string, messages [
 				wait := time.Duration(transientRetries) * 5 * time.Second
 				slog.Warn("LLM stream_text scanner error, retrying",
 					"error", scanErr, "attempt", transientRetries, "model", model)
+				notifyRetry(transientRetries, fmt.Sprintf("stream error: %v", scanErr))
 				select {
 				case <-time.After(wait):
 				case <-ctx.Done():
@@ -1000,7 +1045,7 @@ func StreamTextFromLLMWithMessages(ctx context.Context, model string, messages [
 				}
 				continue
 			}
-			return "", fmt.Errorf("error reading streaming response. try again please")
+			return "", fmt.Errorf("stream error after %d retries: %w", transientRetries, scanErr)
 		}
 
 		if fullText.Len() >= maxResponseBufferSize {
@@ -1550,6 +1595,11 @@ func StreamWithTools(
 			if parseErr != nil {
 				if ctx.Err() != nil {
 					return "", ctx.Err()
+				}
+				// Permanent errors — never retry
+				if IsPermanentError(parseErr) {
+					slog.Error("LLM permanent error in tool round", "error", parseErr, "round", round)
+					return "", parseErr
 				}
 				// Retry on overloaded/rate-limit errors from SSE stream
 				if rlErr, ok := IsRateLimited(parseErr); ok && rateLimitRetries < 5 {

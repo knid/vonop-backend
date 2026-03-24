@@ -701,7 +701,6 @@ func parseAnthropicSSEStream(
 
 		case "error":
 			slog.Error("Anthropic SSE error event", "data", data)
-			// Parse error type to return retryable errors
 			var errEvt struct {
 				Error struct {
 					Type    string `json:"type"`
@@ -709,11 +708,22 @@ func parseAnthropicSSEStream(
 				} `json:"error"`
 			}
 			if json.Unmarshal([]byte(data), &errEvt) == nil {
+				// Retryable: overloaded or rate limited
 				if errEvt.Error.Type == "overloaded_error" || errEvt.Error.Type == "rate_limit_error" {
 					return nil, &ErrRateLimited{
 						RetryAfter: 30 * time.Second,
 						StatusCode: 529,
 						Body:       data,
+					}
+				}
+				// Permanent: invalid request, auth errors, etc — do not retry
+				if errEvt.Error.Type == "invalid_request_error" ||
+					errEvt.Error.Type == "authentication_error" ||
+					errEvt.Error.Type == "permission_error" ||
+					errEvt.Error.Type == "not_found_error" {
+					return nil, &ErrPermanentLLM{
+						ErrorType: errEvt.Error.Type,
+						Message:   errEvt.Error.Message,
 					}
 				}
 			}
