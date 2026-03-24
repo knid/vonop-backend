@@ -992,6 +992,11 @@ func (c *Controller) StreamBuildApp(
 		}
 	}
 
+	// Extract and persist project memory asynchronously (design prefs, decisions, etc.)
+	if !isInitialGeneration && filesChanged > 0 {
+		go c.extractAndUpdateProjectMemory(context.Background(), project.ID.String(), provider, message, assistantContent, fileOps)
+	}
+
 	// --- Update project status for initial generation ---
 	if isInitialGeneration && filesChanged > 0 {
 		project.Status = "ready"

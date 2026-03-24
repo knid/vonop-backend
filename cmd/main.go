@@ -134,6 +134,8 @@ func createSchema(db *bun.DB) error {
 		(*models.AppGitHubExport)(nil),
 		// Stripe webhook deduplication
 		(*models.WebhookEvent)(nil),
+		// AI project memory (persists design prefs, decisions across sessions)
+		(*models.AppProjectMemory)(nil),
 	}
 
 	for _, model := range models {

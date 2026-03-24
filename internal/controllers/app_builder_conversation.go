@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/responses"
@@ -469,6 +470,168 @@ func buildEnrichedPrompt(original string, result ClarificationResult) string {
 		sb.WriteString(fmt.Sprintf("Q (%s): %s\n", a.ID, a.Answer))
 	}
 	return sb.String()
+}
+
+// --- Project memory extraction ---
+
+// projectMemoryData holds the structured memory extracted from a conversation turn.
+type projectMemoryData struct {
+	DesignPreferences  []string `json:"design_preferences"`
+	RejectedApproaches []string `json:"rejected_approaches"`
+	TechnicalDecisions []string `json:"technical_decisions"`
+	UserPreferences    []string `json:"user_preferences"`
+}
+
+// extractAndUpdateProjectMemory runs a fast LLM call to extract structured memory
+// from the latest user+assistant exchange, then merges it into the persisted
+// project memory. Runs asynchronously — callers should go this function.
+func (c *Controller) extractAndUpdateProjectMemory(
+	ctx context.Context,
+	projectID string,
+	provider *utils.LLMProvider,
+	userMessage string,
+	assistantResponse string,
+	fileOps []models.AppChatFileOp,
+) {
+	// Only extract if there's meaningful content
+	if len(userMessage) < 10 || len(assistantResponse) < 10 {
+		return
+	}
+
+	fastModel := provider.FastModel()
+
+	// Build a concise summary of what happened
+	var opsDesc string
+	if len(fileOps) > 0 {
+		var ops []string
+		for _, op := range fileOps {
+			ops = append(ops, fmt.Sprintf("%s %s", op.Action, op.FilePath))
+		}
+		opsDesc = fmt.Sprintf("\nFiles changed: %s", strings.Join(ops, ", "))
+	}
+
+	prompt := fmt.Sprintf(`Extract any lasting insights from this conversation turn that would help future AI sessions with this project.
+
+User said: %s
+
+Assistant responded: %s%s
+
+Return a JSON object with these arrays (each containing short, specific strings). Only include entries that are NEW learnings — not obvious facts. Return empty arrays if nothing notable:
+{
+  "design_preferences": ["user's stated design likes/dislikes, e.g. 'prefers dark theme', 'no hero background images'"],
+  "rejected_approaches": ["approaches tried and rejected, e.g. 'sidebar nav rejected, user wanted top nav'"],
+  "technical_decisions": ["tech choices made, e.g. 'using Stripe for payments', 'PostgreSQL with Drizzle ORM'"],
+  "user_preferences": ["communication/workflow prefs, e.g. 'prefers Turkish UI text', 'wants minimal explanations'"]
+}`, truncate(userMessage, 500), truncate(assistantResponse, 500), opsDesc)
+
+	resultJSON, err := utils.GetJSONFromLLM(ctx, fastModel, "", prompt, provider)
+	if err != nil {
+		slog.Debug("extractProjectMemory: LLM call failed", "error", err, "project_id", projectID)
+		return
+	}
+
+	var extracted projectMemoryData
+	if err := json.Unmarshal([]byte(resultJSON), &extracted); err != nil {
+		cleaned := utils.ExtractJSON(resultJSON)
+		if err2 := json.Unmarshal([]byte(cleaned), &extracted); err2 != nil {
+			return
+		}
+	}
+
+	// Check if there's anything to save
+	if len(extracted.DesignPreferences) == 0 && len(extracted.RejectedApproaches) == 0 &&
+		len(extracted.TechnicalDecisions) == 0 && len(extracted.UserPreferences) == 0 {
+		return
+	}
+
+	// Load existing memory and merge
+	mem, err := c.DB.GetOrCreateAppProjectMemory(uuid.Must(uuid.Parse(projectID)))
+	if err != nil {
+		slog.Warn("extractProjectMemory: failed to load memory", "error", err, "project_id", projectID)
+		return
+	}
+
+	mergeMemoryField(&mem.DesignPreferences, extracted.DesignPreferences, 20)
+	mergeMemoryField(&mem.RejectedApproaches, extracted.RejectedApproaches, 15)
+	mergeMemoryField(&mem.TechnicalDecisions, extracted.TechnicalDecisions, 20)
+	mergeMemoryField(&mem.UserPreferences, extracted.UserPreferences, 10)
+
+	if err := c.DB.UpdateAppProjectMemory(mem); err != nil {
+		slog.Warn("extractProjectMemory: failed to save memory", "error", err, "project_id", projectID)
+	} else {
+		slog.Info("extractProjectMemory: updated project memory", "project_id", projectID)
+	}
+}
+
+// mergeMemoryField appends new entries to a JSONB []string field, deduplicating
+// and capping at maxEntries (FIFO — oldest entries dropped).
+func mergeMemoryField(field *[]byte, newEntries []string, maxEntries int) {
+	if len(newEntries) == 0 {
+		return
+	}
+
+	var existing []string
+	if len(*field) > 0 {
+		json.Unmarshal(*field, &existing)
+	}
+
+	// Deduplicate by checking lowercase containment
+	seen := make(map[string]bool, len(existing))
+	for _, e := range existing {
+		seen[strings.ToLower(e)] = true
+	}
+	for _, entry := range newEntries {
+		entry = strings.TrimSpace(entry)
+		if entry == "" || seen[strings.ToLower(entry)] {
+			continue
+		}
+		existing = append(existing, entry)
+		seen[strings.ToLower(entry)] = true
+	}
+
+	// Cap at maxEntries — keep the most recent
+	if len(existing) > maxEntries {
+		existing = existing[len(existing)-maxEntries:]
+	}
+
+	if data, err := json.Marshal(existing); err == nil {
+		*field = data
+	}
+}
+
+// buildProjectMemoryContext returns a formatted string of the project's persisted
+// memory for injection into the system prompt. Returns "" if no memory exists.
+func (c *Controller) buildProjectMemoryContext(projectID string) string {
+	mem, err := c.DB.GetAppProjectMemory(projectID)
+	if err != nil {
+		return ""
+	}
+
+	var sections []string
+
+	appendSection := func(label string, data []byte) {
+		var items []string
+		if json.Unmarshal(data, &items) != nil || len(items) == 0 {
+			return
+		}
+		var sb strings.Builder
+		sb.WriteString(label + ":\n")
+		for _, item := range items {
+			sb.WriteString("- " + item + "\n")
+		}
+		sections = append(sections, sb.String())
+	}
+
+	appendSection("Design preferences (from past conversations)", mem.DesignPreferences)
+	appendSection("Approaches tried and rejected", mem.RejectedApproaches)
+	appendSection("Technical decisions made", mem.TechnicalDecisions)
+	appendSection("User preferences", mem.UserPreferences)
+
+	if len(sections) == 0 {
+		return ""
+	}
+
+	return "\n### Project Memory (from past sessions)\n" + strings.Join(sections, "\n")
 }
 
 // mobileOptimizeFile is a lightweight struct for files selected for mobile optimization.

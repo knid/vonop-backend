@@ -15,6 +15,194 @@ import (
 	"github.com/knid/wemob/internal/utils"
 )
 
+// --- Import graph for smarter context selection ---
+
+// tsImportRegex matches TypeScript/JavaScript import statements to extract the import path.
+// Handles: import X from '...', import { X } from '...', import '...', import('...')
+var tsImportRegex = regexp.MustCompile(`(?:import\s+(?:[\w{},\s*]+\s+from\s+)?|import\s*\()['"](@/[^'"]+|\.\.?/[^'"]+)['"]`)
+
+// importGraph maps each file to the set of project files it imports (forward edges)
+// and the set of project files that import it (reverse edges).
+type importGraph struct {
+	imports   map[string]map[string]bool // file → set of files it imports
+	importers map[string]map[string]bool // file → set of files that import it
+}
+
+// buildImportGraph parses all TS/TSX/JS files in fileMap and constructs a
+// bidirectional import graph. Runs in O(files × imports) with pure regex —
+// no LLM calls. Only tracks project-internal imports (@/ and relative paths).
+func buildImportGraph(fileMap map[string]string) *importGraph {
+	g := &importGraph{
+		imports:   make(map[string]map[string]bool, len(fileMap)),
+		importers: make(map[string]map[string]bool, len(fileMap)),
+	}
+
+	// Build a lookup from path variants to canonical file paths.
+	// e.g. "lib/utils" → "lib/utils.ts", "components/ui/button" → "components/ui/button.tsx"
+	pathLookup := make(map[string]string, len(fileMap)*3)
+	for p := range fileMap {
+		pathLookup[p] = p
+		// Strip extensions for bare import resolution
+		for _, ext := range []string{".tsx", ".ts", ".jsx", ".js"} {
+			if strings.HasSuffix(p, ext) {
+				pathLookup[strings.TrimSuffix(p, ext)] = p
+			}
+		}
+		// Handle index file imports: "components/ui" → "components/ui/index.tsx"
+		if strings.HasSuffix(p, "/index.tsx") || strings.HasSuffix(p, "/index.ts") {
+			dir := p[:strings.LastIndex(p, "/")]
+			pathLookup[dir] = p
+		}
+	}
+
+	for filePath, content := range fileMap {
+		if !strings.HasSuffix(filePath, ".ts") && !strings.HasSuffix(filePath, ".tsx") &&
+			!strings.HasSuffix(filePath, ".js") && !strings.HasSuffix(filePath, ".jsx") {
+			continue
+		}
+
+		matches := tsImportRegex.FindAllStringSubmatch(content, -1)
+		for _, match := range matches {
+			if len(match) < 2 {
+				continue
+			}
+			importPath := match[1]
+
+			// Resolve @/ alias
+			if strings.HasPrefix(importPath, "@/") {
+				importPath = strings.TrimPrefix(importPath, "@/")
+			} else if strings.HasPrefix(importPath, "./") || strings.HasPrefix(importPath, "../") {
+				// Resolve relative path from the importing file's directory
+				importPath = resolveRelativeImport(filePath, importPath)
+			} else {
+				continue // node_modules or other non-project import
+			}
+
+			// Look up canonical path
+			target, ok := pathLookup[importPath]
+			if !ok {
+				continue
+			}
+			if target == filePath {
+				continue // self-import
+			}
+
+			// Forward edge: filePath imports target
+			if g.imports[filePath] == nil {
+				g.imports[filePath] = make(map[string]bool)
+			}
+			g.imports[filePath][target] = true
+
+			// Reverse edge: target is imported by filePath
+			if g.importers[target] == nil {
+				g.importers[target] = make(map[string]bool)
+			}
+			g.importers[target][filePath] = true
+		}
+	}
+
+	return g
+}
+
+// expandWithDependencies takes a set of selected files and expands it with
+// 1-hop imports (files they depend on) and 1-hop importers (files that depend
+// on them). Caps expansion to prevent blowing up context.
+func (g *importGraph) expandWithDependencies(selected map[string]bool, maxTotal int) map[string]bool {
+	expanded := make(map[string]bool, len(selected)*2)
+	for p := range selected {
+		expanded[p] = true
+	}
+
+	// First pass: add direct imports of selected files (dependencies)
+	for p := range selected {
+		for dep := range g.imports[p] {
+			if len(expanded) >= maxTotal {
+				return expanded
+			}
+			expanded[dep] = true
+		}
+	}
+
+	// Second pass: add direct importers of selected files (callers/impact zone)
+	for p := range selected {
+		for imp := range g.importers[p] {
+			if len(expanded) >= maxTotal {
+				return expanded
+			}
+			expanded[imp] = true
+		}
+	}
+
+	return expanded
+}
+
+// resolveRelativeImport resolves a relative import path (./foo or ../foo)
+// relative to the directory of the importing file.
+func resolveRelativeImport(fromFile, relPath string) string {
+	// Get directory of the importing file
+	dir := fromFile
+	if idx := strings.LastIndex(dir, "/"); idx >= 0 {
+		dir = dir[:idx]
+	} else {
+		dir = ""
+	}
+
+	parts := strings.Split(relPath, "/")
+	dirParts := strings.Split(dir, "/")
+	if dir == "" {
+		dirParts = nil
+	}
+
+	for _, part := range parts {
+		switch part {
+		case ".":
+			// current dir, no change
+		case "..":
+			if len(dirParts) > 0 {
+				dirParts = dirParts[:len(dirParts)-1]
+			}
+		default:
+			dirParts = append(dirParts, part)
+		}
+	}
+
+	return strings.Join(dirParts, "/")
+}
+
+// detectInstalledUIComponents scans the fileMap for files under components/ui/
+// and extracts component names. Returns a sorted list like ["button", "card", "dialog"].
+func detectInstalledUIComponents(fileMap map[string]string) []string {
+	seen := make(map[string]bool)
+	for path, content := range fileMap {
+		if !strings.HasPrefix(path, "components/ui/") {
+			continue
+		}
+		// Extract component name from path: "components/ui/button.tsx" → "button"
+		name := strings.TrimPrefix(path, "components/ui/")
+		for _, ext := range []string{".tsx", ".ts", ".jsx", ".js"} {
+			name = strings.TrimSuffix(name, ext)
+		}
+		if name == "" || strings.Contains(name, "/") {
+			continue // skip nested dirs
+		}
+
+		// Extract exported component names for a richer description
+		exports := extractFileSummary(content)
+		if exports != "" {
+			seen[name+" ("+exports+")"] = true
+		} else {
+			seen[name] = true
+		}
+	}
+
+	components := make([]string, 0, len(seen))
+	for name := range seen {
+		components = append(components, name)
+	}
+	sort.Strings(components)
+	return components
+}
+
 // extractHTMLTitle extracts the <title> content from HTML.
 func extractHTMLTitle(htmlContent string) string {
 	lower := strings.ToLower(htmlContent)
@@ -324,8 +512,18 @@ Respond with ONLY a list of file paths, one per line. No explanation, no markdow
 		}
 	}
 
+	// Expand selection with 1-hop import dependencies and reverse importers.
+	// This catches files the LLM missed that are structurally connected to the
+	// selected files — e.g. a lib/config.ts imported by the selected component,
+	// or a page.tsx that imports the selected component (impact zone).
+	graph := buildImportGraph(fileMap)
+	beforeExpand := len(selected)
+	const maxExpandedFiles = 25
+	selected = graph.expandWithDependencies(selected, maxExpandedFiles)
+
 	slog.Info("selectContextFiles: selected files for context",
-		"total", len(fileMap), "selected", len(selected))
+		"total", len(fileMap), "llm_selected", beforeExpand,
+		"after_graph_expand", len(selected))
 	return selected
 }
 
@@ -402,6 +600,11 @@ func (c *Controller) buildProjectContextForChat(project *models.AppProject, file
 	sb.WriteString(fmt.Sprintf("App: %s (slug: %s)\n", project.Name, project.Slug))
 	sb.WriteString(fmt.Sprintf("Project type: %s\n", project.ProjectType))
 
+	// Inject persisted project memory (design preferences, decisions, etc.)
+	if memCtx := c.buildProjectMemoryContext(project.ID.String()); memCtx != "" {
+		sb.WriteString(memCtx)
+	}
+
 	// Include logo URL if available
 	if logoURL := c.getProjectLogoURL(project); logoURL != "" {
 		sb.WriteString(fmt.Sprintf("\nApp Logo URL (use this as the site logo in the header/navbar via next/image and as the favicon in metadata — do not use text for the brand name, always use this logo image):\n%s\n", logoURL))
@@ -423,6 +626,16 @@ func (c *Controller) buildProjectContextForChat(project *models.AppProject, file
 	}
 	if len(theme) > 0 {
 		sb.WriteString(fmt.Sprintf("Theme: %v\n", theme))
+	}
+
+	// List installed UI components so the LLM reuses them instead of building from scratch
+	if components := detectInstalledUIComponents(fileMap); len(components) > 0 {
+		sb.WriteString("\n### Installed UI Components (USE THESE — do not rebuild from scratch)\n")
+		sb.WriteString("Import from @/components/ui/<name>. Available:\n")
+		for _, comp := range components {
+			sb.WriteString(fmt.Sprintf("- %s\n", comp))
+		}
+		sb.WriteString("Always prefer these components over building custom equivalents.\n")
 	}
 
 	if len(fileMap) > 0 {
@@ -506,6 +719,18 @@ func (c *Controller) buildProjectContext(project *models.AppProject, fileMap map
 	}
 	if len(theme) > 0 {
 		sb.WriteString(fmt.Sprintf("Theme: %v\n", theme))
+	}
+
+	// List installed UI components so the LLM reuses them
+	if !isInitialGeneration {
+		if components := detectInstalledUIComponents(fileMap); len(components) > 0 {
+			sb.WriteString("\n### Installed UI Components (USE THESE — do not rebuild from scratch)\n")
+			sb.WriteString("Import from @/components/ui/<name>. Available:\n")
+			for _, comp := range components {
+				sb.WriteString(fmt.Sprintf("- %s\n", comp))
+			}
+			sb.WriteString("Always prefer these components over building custom equivalents.\n")
+		}
 	}
 
 	// File tree with structural summaries
