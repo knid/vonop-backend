@@ -48,6 +48,7 @@ func (c *Controller) runChatToolPhase(
 	fileMap map[string]string,
 	sendEvent func(string, any) bool,
 	userLimits *models.StandartUserLimits,
+	recentMessages []models.AppConversationMessage,
 ) chatToolPhaseResult {
 	fastModel := provider.FastModel()
 
@@ -150,13 +151,45 @@ CRITICAL LANGUAGE RULE: ALL content you generate (product names, descriptions, c
 - IMPORTANT: If the user has attached images/screenshots, these are VISUAL REFERENCES showing how they want the app to look. Do NOT call generate_image or take_screenshot because of attached images. These reference images will be passed directly to the code-generation model. Only call generate_image if the user EXPLICITLY asks to create/generate new images (e.g. "generate a logo", "create an illustration").
 - IMPORTANT: Before calling any tool, ALWAYS write a brief message (1-2 sentences, in the same language as the user's message) explaining what you're about to do. For example: "Let me check what's currently in the database...", "I'll generate a custom image for this...", "Looking at the website to understand the design...". This text is streamed to the user in real time so they know what's happening. Never call a tool without explaining first.`
 
+	// Build condensed conversation history so Phase 1 understands context.
+	// Without this, a message like "Unauthorized?" is meaningless to Haiku
+	// because it doesn't know what the user previously did or what the AI responded.
+	var convContext string
+	if len(recentMessages) > 1 { // >1 because last msg is the current one
+		var cb strings.Builder
+		cb.WriteString("\n\n### Recent Conversation (for context — do NOT respond to old messages)\n")
+		// Include last 5 messages before the current one (skip the last which is current)
+		start := len(recentMessages) - 6
+		if start < 0 {
+			start = 0
+		}
+		end := len(recentMessages) - 1 // exclude current message
+		for i := start; i < end; i++ {
+			msg := recentMessages[i]
+			role := msg.Role
+			content := msg.Content
+			// Truncate long assistant messages (code output) to keep context small
+			if role == "assistant" && len(content) > 300 {
+				content = content[:300] + "..."
+			}
+			cb.WriteString(fmt.Sprintf("[%s]: %s\n", role, content))
+			// Include tool calls from assistant messages so Phase 1 knows what was already tried
+			if role == "assistant" && len(msg.ToolCalls) > 0 {
+				for _, tc := range msg.ToolCalls {
+					cb.WriteString(fmt.Sprintf("  (tool used: %s)\n", tc.Tool))
+				}
+			}
+		}
+		convContext = cb.String()
+	}
+
 	userMsg := utils.Message{Role: "user", Content: userMessage}
 	if len(imageURLs) > 0 && provider.SupportsVision() {
 		userMsg.Images = imageURLs
 	}
 
 	messages := []utils.Message{
-		{Role: "system", Content: systemPrompt},
+		{Role: "system", Content: systemPrompt + convContext},
 		userMsg,
 	}
 

@@ -765,7 +765,7 @@ func (c *Controller) StreamBuildApp(
 		// Runs a cheap model with tools to detect URLs and gather extra context
 		// before the main code-gen call. If no tools are called the phase is a
 		// near-instant no-op.
-		toolResult := c.runChatToolPhase(ctx, project, provider, repo, message, imageURLs, fileMap, sendEvent, userLimits)
+		toolResult := c.runChatToolPhase(ctx, project, provider, repo, message, imageURLs, fileMap, sendEvent, userLimits, messages)
 		if toolResult.Context != "" {
 			// Phase 1 tools may have modified files (e.g. run_migrations regenerates
 			// lib/schema.ts, manage_env_vars updates .env.local, install_package
