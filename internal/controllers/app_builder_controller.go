@@ -241,6 +241,7 @@ func (c *Controller) StreamBuildApp(
 		actionLabel = "generate_app"
 	}
 	var generationSucceeded bool // set to true only when generation completes without error
+	var lastGenErr error         // captures the error from whichever path failed (chat/singleshot/ecommerce)
 
 	defer func() {
 		closeEvents.Do(func() { close(events) })
@@ -278,7 +279,7 @@ func (c *Controller) StreamBuildApp(
 				Set("is_generation", isInitialGeneration))
 		}
 		if total > 0 && !generationSucceeded {
-			c.TrackUserEvent(user, actionLabel+"_failed", posthog.NewProperties().
+			failedProps := posthog.NewProperties().
 				Set("app_id", project.ID.String()).
 				Set("duration_seconds", time.Since(genStart).Seconds()).
 				Set("total_tokens", total).
@@ -286,7 +287,11 @@ func (c *Controller) StreamBuildApp(
 				Set("completion_tokens", completion).
 				Set("llm_call_count", callCount).
 				Set("model", model).
-				Set("is_generation", isInitialGeneration))
+				Set("is_generation", isInitialGeneration)
+			if lastGenErr != nil {
+				failedProps.Set("error", lastGenErr.Error())
+			}
+			c.TrackUserEvent(user, actionLabel+"_failed", failedProps)
 		}
 	}()
 
@@ -627,6 +632,7 @@ func (c *Controller) StreamBuildApp(
 			ctx, project, user, model, provider, repo, fileMap, sendEvent, message, ecomImages, preGenToolContext, mobileConfig,
 		)
 		if ecomErr != nil {
+			lastGenErr = ecomErr
 			slog.Error("E-commerce generation failed", "error", ecomErr, "project_id", project.ID)
 
 			// Auto-rollback on failure
@@ -678,6 +684,7 @@ func (c *Controller) StreamBuildApp(
 			ctx, project, user, model, provider, repo, fileMap, sendEvent, message, genImages, preGenToolContext, mobileConfig,
 		)
 		if singleShotErr != nil {
+			lastGenErr = singleShotErr
 			slog.Error("Single-shot generation failed", "error", singleShotErr, "project_id", project.ID)
 
 			// Auto-rollback on failure
@@ -843,6 +850,7 @@ func (c *Controller) StreamBuildApp(
 		}
 
 		if chatErr != nil && !errors.Is(chatErr, utils.ErrResponseTruncated) {
+			lastGenErr = chatErr
 			slog.Error("LLM chat call failed", "error", chatErr, "project_id", project.ID)
 
 			// Auto-rollback on failure
@@ -5519,22 +5527,40 @@ func (c *Controller) runValidationFixPass(
 		}
 	}
 
-	// Include the content of errored files so the LLM can fix them
+	// Include the content of errored files so the LLM can fix them.
+	// Cap included files to prevent massive inputs that cause output truncation.
+	const maxIncludedFiles = 15
+	const maxIncludedChars = 60000
 	var fileContents strings.Builder
 	includedFiles := make(map[string]bool)
+	totalChars := 0
+
 	for file := range errorsByFile {
+		if len(includedFiles) >= maxIncludedFiles || totalChars >= maxIncludedChars {
+			break
+		}
 		if content, ok := fileMap[file]; ok && !includedFiles[file] {
 			includedFiles[file] = true
-			fileContents.WriteString(fmt.Sprintf("\n--- %s ---\n%s\n", file, content))
+			entry := fmt.Sprintf("\n--- %s ---\n%s\n", file, content)
+			fileContents.WriteString(entry)
+			totalChars += len(entry)
 		}
 		// Also include files referenced in import errors
 		for _, e := range errorsByFile[file] {
+			if len(includedFiles) >= maxIncludedFiles || totalChars >= maxIncludedChars {
+				break
+			}
 			if e.Type == "missing_import" || e.Type == "import_mismatch" || e.Type == "invalid_named_import" {
 				// Extract the target file path from the error message
 				for targetPath, targetContent := range fileMap {
+					if len(includedFiles) >= maxIncludedFiles || totalChars >= maxIncludedChars {
+						break
+					}
 					if strings.Contains(e.Error, targetPath) && !includedFiles[targetPath] {
 						includedFiles[targetPath] = true
-						fileContents.WriteString(fmt.Sprintf("\n--- %s ---\n%s\n", targetPath, targetContent))
+						entry := fmt.Sprintf("\n--- %s ---\n%s\n", targetPath, targetContent)
+						fileContents.WriteString(entry)
+						totalChars += len(entry)
 					}
 				}
 			}
@@ -5575,7 +5601,7 @@ Do NOT change design, layout, or functionality — ONLY fix the reported errors.
 		ctx, fixModel, fixMessages, provider,
 		func(chunk string) { fixParser.Feed(chunk) },
 		nil,
-		utils.StreamTextConfig{MaxTokens: 16384},
+		utils.StreamTextConfig{MaxTokens: 65536},
 	)
 	fixParser.Flush()
 

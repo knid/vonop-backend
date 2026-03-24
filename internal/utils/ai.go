@@ -758,149 +758,267 @@ func StreamTextFromLLMWithMessages(ctx context.Context, model string, messages [
 		reasoning = opts[0].Reasoning
 	}
 
-	body, err := buildLLMRequestBody(ChatRequest{
-		Model:         model,
-		Stream:        true,
-		StreamOptions: &StreamOptionsConfig{IncludeUsage: true},
-		MaxTokens:     maxTokens,
-		Messages:      messages,
-		Reasoning:     reasoning,
-	}, provider)
-	if err != nil {
-		return "", fmt.Errorf("error building request: %w", err)
-	}
+	// Retry state — mirrors StreamWithTools retry logic so that Phase 2 chat
+	// calls are as resilient as Phase 1 tool-calling calls.
+	const maxTransientRetries = 3
+	const maxRateLimitRetries = 5
+	rateLimitRetries := 0
+	transientRetries := 0
+	chunksDelivered := false // tracks whether any content was streamed to the caller
 
-	req, err := http.NewRequestWithContext(ctx, "POST", provider.Endpoint(), bytes.NewReader(body))
-	if err != nil {
-		return "", fmt.Errorf("error creating LLM request: %w", err)
-	}
-	setLLMHeaders(req, provider)
-
-	start := time.Now()
-	resp, err := llmHTTPClient.Do(req)
-	if err != nil {
-		slog.Error("Error making streaming request to LLM:", "error", err)
-		return "", fmt.Errorf("error generating content. try again please")
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		respBody, _ := io.ReadAll(resp.Body)
-		slog.Error("LLM streaming returned non-200", "status", resp.StatusCode, "body", string(respBody))
-		if rlErr := parseRateLimitError(resp, respBody); rlErr != nil {
-			return "", rlErr
+	for {
+		if ctx.Err() != nil {
+			return "", ctx.Err()
 		}
-		return "", fmt.Errorf("error generating content. try again please")
-	}
 
-	// Anthropic SSE format — use dedicated parser
-	if provider.IsAnthropic() {
-		result, err := parseAnthropicSSEStream(resp.Body, onChunk, onReasoning, nil)
+		body, err := buildLLMRequestBody(ChatRequest{
+			Model:         model,
+			Stream:        true,
+			StreamOptions: &StreamOptionsConfig{IncludeUsage: true},
+			MaxTokens:     maxTokens,
+			Messages:      messages,
+			Reasoning:     reasoning,
+		}, provider)
 		if err != nil {
-			if ctx.Err() != nil {
-				return "", ctx.Err()
+			return "", fmt.Errorf("error building request: %w", err)
+		}
+
+		req, err := http.NewRequestWithContext(ctx, "POST", provider.Endpoint(), bytes.NewReader(body))
+		if err != nil {
+			return "", fmt.Errorf("error creating LLM request: %w", err)
+		}
+		setLLMHeaders(req, provider)
+
+		start := time.Now()
+		resp, err := llmHTTPClient.Do(req)
+		if err != nil {
+			// Retry transient connection errors (timeout, DNS, TLS) if no chunks delivered
+			if !chunksDelivered && transientRetries < maxTransientRetries {
+				transientRetries++
+				wait := time.Duration(transientRetries) * 5 * time.Second
+				slog.Warn("LLM stream_text connection error, retrying",
+					"error", err, "attempt", transientRetries, "model", model)
+				select {
+				case <-time.After(wait):
+				case <-ctx.Done():
+					return "", ctx.Err()
+				}
+				continue
 			}
-			if rlErr, ok := IsRateLimited(err); ok {
+			slog.Error("Error making streaming request to LLM:", "error", err)
+			return "", fmt.Errorf("error generating content. try again please")
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			respBody, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+
+			// Retry rate-limited responses (429/529)
+			if rlErr := parseRateLimitError(resp, respBody); rlErr != nil {
+				if !chunksDelivered && rateLimitRetries < maxRateLimitRetries {
+					rateLimitRetries++
+					wait := rlErr.RetryAfter + time.Duration(rateLimitRetries)*5*time.Second
+					if wait > 120*time.Second {
+						wait = 120 * time.Second
+					}
+					slog.Warn("LLM stream_text rate limited, retrying",
+						"retry_after", wait, "attempt", rateLimitRetries, "model", model)
+					select {
+					case <-time.After(wait):
+					case <-ctx.Done():
+						return "", ctx.Err()
+					}
+					continue
+				}
 				return "", rlErr
+			}
+
+			// Retry transient server errors (500, 502, 503)
+			if resp.StatusCode >= 500 && resp.StatusCode != 529 && !chunksDelivered && transientRetries < maxTransientRetries {
+				transientRetries++
+				wait := time.Duration(transientRetries) * 5 * time.Second
+				slog.Warn("LLM stream_text server error, retrying",
+					"status", resp.StatusCode, "attempt", transientRetries, "model", model)
+				select {
+				case <-time.After(wait):
+				case <-ctx.Done():
+					return "", ctx.Err()
+				}
+				continue
+			}
+
+			slog.Error("LLM streaming returned non-200", "status", resp.StatusCode, "body", string(respBody))
+			return "", fmt.Errorf("error generating content. try again please")
+		}
+
+		// Wrap onChunk to track whether any content was delivered to the caller.
+		// Once chunks are delivered, retrying would corrupt the stream.
+		wrappedOnChunk := func(chunk string) {
+			chunksDelivered = true
+			if onChunk != nil {
+				onChunk(chunk)
+			}
+		}
+
+		// Anthropic SSE format — use dedicated parser
+		if provider.IsAnthropic() {
+			result, parseErr := parseAnthropicSSEStream(resp.Body, wrappedOnChunk, onReasoning, nil)
+			resp.Body.Close()
+
+			if parseErr != nil {
+				if ctx.Err() != nil {
+					return "", ctx.Err()
+				}
+				// Retry rate limit errors from SSE stream (only if no chunks delivered)
+				if rlErr, ok := IsRateLimited(parseErr); ok {
+					if !chunksDelivered && rateLimitRetries < maxRateLimitRetries {
+						rateLimitRetries++
+						wait := rlErr.RetryAfter + time.Duration(rateLimitRetries)*5*time.Second
+						if wait > 120*time.Second {
+							wait = 120 * time.Second
+						}
+						slog.Warn("LLM stream_text rate limited (SSE), retrying",
+							"retry_after", wait, "attempt", rateLimitRetries, "model", model)
+						select {
+						case <-time.After(wait):
+						case <-ctx.Done():
+							return "", ctx.Err()
+						}
+						continue
+					}
+					return "", rlErr
+				}
+				// Retry transient stream errors (only if no chunks delivered)
+				if !chunksDelivered && transientRetries < maxTransientRetries {
+					transientRetries++
+					wait := time.Duration(transientRetries) * 5 * time.Second
+					slog.Warn("LLM stream_text SSE error, retrying",
+						"error", parseErr, "attempt", transientRetries, "model", model)
+					select {
+					case <-time.After(wait):
+					case <-ctx.Done():
+						return "", ctx.Err()
+					}
+					continue
+				}
+				return "", fmt.Errorf("error reading streaming response. try again please")
+			}
+			if result.Usage.TotalTokens > 0 {
+				latencyMs := time.Since(start).Milliseconds()
+				slog.Info("LLM usage", append([]any{"from", "llm_stream_text", "model", model, "prompt_tokens", result.Usage.PromptTokens, "completion_tokens", result.Usage.CompletionTokens, "total_tokens", result.Usage.TotalTokens, "latency_ms", latencyMs}, trackerAttrs(ctx)...)...)
+				if tracker := TokenTrackerFromContext(ctx); tracker != nil {
+					if tracker.TrackContent {
+						tracker.RecordWithContent(model, result.Usage, latencyMs, true, messages, result.Text, "stream_text")
+					} else {
+						tracker.Record(model, result.Usage, latencyMs, true, "stream_text")
+					}
+				}
+			}
+			if result.FinishReason == "length" {
+				slog.Warn("LLM streaming response truncated (finish_reason=length)", "model", model, "response_length", len(result.Text))
+				return result.Text, ErrResponseTruncated
+			}
+			return result.Text, nil
+		}
+
+		// OpenRouter / OpenAI-compatible SSE format
+		var fullText strings.Builder
+		var lastUsage UsageInfo
+		var lastFinishReason string
+		scanner := bufio.NewScanner(resp.Body)
+		scanner.Buffer(make([]byte, 0, 64*1024), 2*1024*1024)
+
+		for scanner.Scan() {
+			if ctx.Err() != nil {
+				resp.Body.Close()
+				return fullText.String(), ctx.Err()
+			}
+
+			line := scanner.Text()
+			if !strings.HasPrefix(line, "data: ") {
+				continue
+			}
+
+			data := strings.TrimPrefix(line, "data: ")
+			if data == "[DONE]" {
+				break
+			}
+
+			var chunk StreamChunk
+			if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+				continue
+			}
+
+			if chunk.Usage != nil {
+				lastUsage = *chunk.Usage
+			}
+
+			if len(chunk.Choices) > 0 {
+				if r := chunk.Choices[0].Delta.GetReasoning(); r != "" && onReasoning != nil {
+					onReasoning(r)
+				}
+				if chunk.Choices[0].Delta.Content != "" {
+					content := chunk.Choices[0].Delta.Content
+					chunksDelivered = true
+					if fullText.Len() < maxResponseBufferSize {
+						fullText.WriteString(content)
+					}
+					if onChunk != nil {
+						onChunk(content)
+					}
+				}
+				if chunk.Choices[0].FinishReason != nil {
+					lastFinishReason = *chunk.Choices[0].FinishReason
+				}
+			}
+		}
+
+		scanErr := scanner.Err()
+		resp.Body.Close()
+
+		if scanErr != nil {
+			if ctx.Err() != nil {
+				return fullText.String(), ctx.Err()
+			}
+			// Retry transient stream errors (only if no chunks delivered)
+			if !chunksDelivered && transientRetries < maxTransientRetries {
+				transientRetries++
+				wait := time.Duration(transientRetries) * 5 * time.Second
+				slog.Warn("LLM stream_text scanner error, retrying",
+					"error", scanErr, "attempt", transientRetries, "model", model)
+				select {
+				case <-time.After(wait):
+				case <-ctx.Done():
+					return "", ctx.Err()
+				}
+				continue
 			}
 			return "", fmt.Errorf("error reading streaming response. try again please")
 		}
-		if result.Usage.TotalTokens > 0 {
+
+		if fullText.Len() >= maxResponseBufferSize {
+			slog.Warn("LLM streaming response exceeded max buffer size", "max_bytes", maxResponseBufferSize, "from", "llm_stream_text")
+		}
+
+		if lastUsage.TotalTokens > 0 {
 			latencyMs := time.Since(start).Milliseconds()
-			slog.Info("LLM usage", append([]any{"from", "llm_stream_text", "model", model, "prompt_tokens", result.Usage.PromptTokens, "completion_tokens", result.Usage.CompletionTokens, "total_tokens", result.Usage.TotalTokens, "latency_ms", latencyMs}, trackerAttrs(ctx)...)...)
+			slog.Info("LLM usage", append([]any{"from", "llm_stream_text", "model", model, "prompt_tokens", lastUsage.PromptTokens, "completion_tokens", lastUsage.CompletionTokens, "total_tokens", lastUsage.TotalTokens, "latency_ms", latencyMs}, trackerAttrs(ctx)...)...)
 			if tracker := TokenTrackerFromContext(ctx); tracker != nil {
 				if tracker.TrackContent {
-					tracker.RecordWithContent(model, result.Usage, latencyMs, true, messages, result.Text, "stream_text")
+					tracker.RecordWithContent(model, lastUsage, latencyMs, true, messages, fullText.String(), "stream_text")
 				} else {
-					tracker.Record(model, result.Usage, latencyMs, true, "stream_text")
+					tracker.Record(model, lastUsage, latencyMs, true, "stream_text")
 				}
 			}
 		}
-		if result.FinishReason == "length" {
-			slog.Warn("LLM streaming response truncated (finish_reason=length)", "model", model, "response_length", len(result.Text))
-			return result.Text, ErrResponseTruncated
+
+		if lastFinishReason == "length" {
+			slog.Warn("LLM streaming response truncated (finish_reason=length)", "model", model, "response_length", fullText.Len())
+			return fullText.String(), ErrResponseTruncated
 		}
-		return result.Text, nil
+
+		return fullText.String(), nil
 	}
-
-	var fullText strings.Builder
-	var lastUsage UsageInfo
-	var lastFinishReason string
-	scanner := bufio.NewScanner(resp.Body)
-	scanner.Buffer(make([]byte, 0, 64*1024), 2*1024*1024)
-
-	for scanner.Scan() {
-		if ctx.Err() != nil {
-			return fullText.String(), ctx.Err()
-		}
-
-		line := scanner.Text()
-		if !strings.HasPrefix(line, "data: ") {
-			continue
-		}
-
-		data := strings.TrimPrefix(line, "data: ")
-		if data == "[DONE]" {
-			break
-		}
-
-		var chunk StreamChunk
-		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
-			continue
-		}
-
-		if chunk.Usage != nil {
-			lastUsage = *chunk.Usage
-		}
-
-		if len(chunk.Choices) > 0 {
-			if r := chunk.Choices[0].Delta.GetReasoning(); r != "" && onReasoning != nil {
-				onReasoning(r)
-			}
-			if chunk.Choices[0].Delta.Content != "" {
-				content := chunk.Choices[0].Delta.Content
-				if fullText.Len() < maxResponseBufferSize {
-					fullText.WriteString(content)
-				}
-				if onChunk != nil {
-					onChunk(content)
-				}
-			}
-			if chunk.Choices[0].FinishReason != nil {
-				lastFinishReason = *chunk.Choices[0].FinishReason
-			}
-		}
-	}
-
-	if err := scanner.Err(); err != nil {
-		if ctx.Err() != nil {
-			return fullText.String(), ctx.Err()
-		}
-		return "", fmt.Errorf("error reading streaming response. try again please")
-	}
-
-	if fullText.Len() >= maxResponseBufferSize {
-		slog.Warn("LLM streaming response exceeded max buffer size", "max_bytes", maxResponseBufferSize, "from", "llm_stream_text")
-	}
-
-	if lastUsage.TotalTokens > 0 {
-		latencyMs := time.Since(start).Milliseconds()
-		slog.Info("LLM usage", append([]any{"from", "llm_stream_text", "model", model, "prompt_tokens", lastUsage.PromptTokens, "completion_tokens", lastUsage.CompletionTokens, "total_tokens", lastUsage.TotalTokens, "latency_ms", latencyMs}, trackerAttrs(ctx)...)...)
-		if tracker := TokenTrackerFromContext(ctx); tracker != nil {
-			if tracker.TrackContent {
-				tracker.RecordWithContent(model, lastUsage, latencyMs, true, messages, fullText.String(), "stream_text")
-			} else {
-				tracker.Record(model, lastUsage, latencyMs, true, "stream_text")
-			}
-		}
-	}
-
-	if lastFinishReason == "length" {
-		slog.Warn("LLM streaming response truncated (finish_reason=length)", "model", model, "response_length", fullText.Len())
-		return fullText.String(), ErrResponseTruncated
-	}
-
-	return fullText.String(), nil
 }
 
 // GetJSONFromLLMWithMessages sends a multi-turn conversation to the LLM and expects JSON output.
