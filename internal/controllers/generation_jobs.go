@@ -32,6 +32,7 @@ var milestoneEvents = map[string]bool{
 const maxConcurrentJobsPerUser = 3
 
 // CreateJob creates a new generation job, enforcing a per-user concurrency limit.
+// For generate_app jobs, only one may run at a time to prevent double-submission.
 func (c *Controller) CreateJob(userID uuid.UUID, jobType string) (*models.GenerationJob, error) {
 	running, err := c.DB.GetUserRunningJobs(userID.String())
 	if err != nil {
@@ -39,6 +40,16 @@ func (c *Controller) CreateJob(userID uuid.UUID, jobType string) (*models.Genera
 	}
 	if running >= maxConcurrentJobsPerUser {
 		return nil, fmt.Errorf("maximum %d concurrent jobs allowed", maxConcurrentJobsPerUser)
+	}
+	// Prevent duplicate initial generation: if the user already has a running
+	// generate_app job, reject the new one to avoid wasting resources.
+	if jobType == "generate_app" {
+		activeJobs, _ := c.DB.GetUserActiveJobs(userID.String())
+		for _, j := range activeJobs {
+			if j.Type == "generate_app" {
+				return nil, fmt.Errorf("a generation is already in progress")
+			}
+		}
 	}
 
 	job := &models.GenerationJob{

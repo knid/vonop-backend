@@ -295,7 +295,7 @@ func (c *Controller) RecordTokenUsage(user *models.User, action, model, provider
 				Set("$ai_is_error", false).
 				Set("$ai_stream", entry.IsStreaming).
 				Set("app_type", appType).
-				Set("credits_spent", models.TokensToCredits(entry.PromptTokens, entry.CompletionTokens))
+				Set("credits_estimated", models.TokensToCredits(entry.PromptTokens, entry.CompletionTokens))
 			if entry.CacheCreationInputTokens > 0 {
 				props.Set("$ai_cache_creation_input_tokens", entry.CacheCreationInputTokens)
 			}
@@ -358,7 +358,7 @@ func (c *Controller) RecordTokenUsage(user *models.User, action, model, provider
 			Set("$ai_input_tokens", prompt).
 			Set("$ai_output_tokens", completion).
 			Set("app_type", appType).
-			Set("credits_spent", creditsSpent)
+			Set("credits_estimated", creditsSpent)
 		if totalCost > 0 {
 			traceProps.Set("$ai_total_cost_usd", totalCost)
 		}
