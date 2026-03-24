@@ -312,10 +312,17 @@ func TokenTrackerFromContext(ctx context.Context) *TokenTracker {
 	return t
 }
 
-// llmHTTPClient is a shared HTTP client for all LLM calls with a 10-minute timeout.
+// llmHTTPClient is used for non-streaming LLM calls (GetJSONFromLLM, GetTextFromLLM, etc.)
+// with a hard 10-minute timeout.
 var llmHTTPClient = &http.Client{
 	Timeout: 10 * time.Minute,
 }
+
+// llmStreamingClient is used for streaming LLM calls (StreamTextFromLLMWithMessages,
+// StreamWithTools) where responses can legitimately take 10+ minutes for large code
+// generation. No http.Client.Timeout is set — lifetime is governed by the request
+// context (typically 25 minutes from the generation job).
+var llmStreamingClient = &http.Client{}
 
 type ResponseFormat struct {
 	Type string `json:"type"`
@@ -790,7 +797,7 @@ func StreamTextFromLLMWithMessages(ctx context.Context, model string, messages [
 		setLLMHeaders(req, provider)
 
 		start := time.Now()
-		resp, err := llmHTTPClient.Do(req)
+		resp, err := llmStreamingClient.Do(req)
 		if err != nil {
 			// Retry transient connection errors (timeout, DNS, TLS) if no chunks delivered
 			if !chunksDelivered && transientRetries < maxTransientRetries {
@@ -1117,7 +1124,7 @@ func StreamJSONFromLLMWithMessages(ctx context.Context, model string, messages [
 	setLLMHeaders(req, provider)
 
 	start := time.Now()
-	resp, err := llmHTTPClient.Do(req)
+	resp, err := llmStreamingClient.Do(req)
 	if err != nil {
 		slog.Error("Error making streaming request to LLM:", "error", err)
 		return "", fmt.Errorf("error generating content. try again please")
@@ -1450,7 +1457,7 @@ func StreamWithTools(
 		setLLMHeaders(req, provider)
 
 		roundStart := time.Now()
-		resp, err := llmHTTPClient.Do(req)
+		resp, err := llmStreamingClient.Do(req)
 		if err != nil {
 			// Retry transient connection errors (network blips, DNS, TLS) up to 3 times
 			if transientRetries < 3 {
