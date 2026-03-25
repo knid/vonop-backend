@@ -455,6 +455,16 @@ func (c *Controller) GetLatestDeploymentStatus(projectID string) (*models.AppDep
 					}
 					return deployment, nil
 				case depStatus == "finished" || depStatus == "success":
+					// If this is the previous deployment's "finished" status (not our
+					// current build), Coolify hasn't created the new record yet — keep polling.
+					if isStale {
+						slog.Info("Ignoring stale Coolify finished status — new build not tracked yet",
+							"dep_status", depStatus,
+							"dep_created", dep.CreatedAt,
+							"our_created", deployment.CreatedAt,
+						)
+						return deployment, nil
+					}
 					// Build finished — now check if the app container is actually running
 				default:
 					// Build still in progress (queued, in_progress, etc.)
@@ -493,6 +503,10 @@ func (c *Controller) GetLatestDeploymentStatus(projectID string) (*models.AppDep
 			case strings.HasPrefix(lowerStatus, "exited"),
 				strings.HasPrefix(lowerStatus, "error"),
 				strings.HasPrefix(lowerStatus, "degraded"):
+				// Container may still be starting after a build finishes — give it time
+				if time.Since(deployment.CreatedAt) < 2*time.Minute {
+					return deployment, nil
+				}
 				newStatus = "failed"
 				if dep != nil && dep.Logs != "" {
 					errorMessage = extractBuildError(dep.Logs)
