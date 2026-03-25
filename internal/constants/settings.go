@@ -11,4 +11,7 @@ const (
 
 	// WEMOB_CNAME_TARGET is the CNAME value users point their custom domains to
 	WEMOB_CNAME_TARGET = "cname.wemob.app"
+
+	// MAX_DOMAINS_PER_PROJECT is the maximum number of custom domains per project
+	MAX_DOMAINS_PER_PROJECT = 10
 )
