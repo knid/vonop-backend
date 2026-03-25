@@ -17,34 +17,6 @@ import (
 
 const maxAssetFileSize = 50 * 1024 * 1024 // 50MB
 
-var allowedAssetTypes = map[string]bool{
-	// Images
-	"image/jpeg":    true,
-	"image/png":     true,
-	"image/webp":    true,
-	"image/gif":     true,
-	"image/svg+xml": true,
-	"image/avif":    true,
-	// Video
-	"video/mp4":  true,
-	"video/webm": true,
-	// Audio
-	"audio/mpeg": true,
-	"audio/wav":  true,
-	"audio/ogg":  true,
-	// 3D models
-	"model/gltf-binary": true,
-	"model/gltf+json":   true,
-	// Fonts
-	"font/woff2": true,
-	"font/woff":  true,
-	"font/ttf":   true,
-	// Data
-	"application/json":         true,
-	"text/csv":                 true,
-	"application/pdf":          true,
-	"application/octet-stream": true,
-}
 
 // GET /v2/apps/{appId}/assets
 func (v *HttpViews) GetAppAssets(w http.ResponseWriter, r *http.Request) {
@@ -104,12 +76,6 @@ func (v *HttpViews) RequestAssetUploadURL(w http.ResponseWriter, r *http.Request
 	validate := validator.New()
 	if err := req.Validate(validate); err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	// Validate content type
-	if !allowedAssetTypes[req.ContentType] {
-		utils.JSONErrorResponse(w, "unsupported file type", http.StatusBadRequest)
 		return
 	}
 
