@@ -42,6 +42,13 @@ func (v *HttpViews) AddAppDomain(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// WEM-263: Check CanBuyDomain subscription limit
+	limits, limitsErr := v.Controller.DB.GetStandartUserLimitsByUser(user)
+	if limitsErr != nil || !limits.CanBuyDomain {
+		utils.JSONCodedErrorResponse(w, "SUBSCRIPTION_REQUIRED", "custom domains require a paid plan", http.StatusForbidden, nil)
+		return
+	}
+
 	appID := chi.URLParam(r, "appId")
 	project, err := v.Controller.GetAppProject(appID, user)
 	if err != nil {
@@ -89,6 +96,12 @@ func (v *HttpViews) VerifyAppDomain(w http.ResponseWriter, r *http.Request) {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+
+	// WEM-271: Track domain verification events
+	v.Controller.TrackUserEvent(user, "domain_verified", posthog.NewProperties().
+		Set("app_id", project.ID.String()).
+		Set("domain", result.Domain).
+		Set("status", result.Status))
 
 	utils.JSONResponse(w, result, http.StatusOK)
 }

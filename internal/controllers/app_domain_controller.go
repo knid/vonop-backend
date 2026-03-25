@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"regexp"
 	"strings"
 
 	"github.com/go-playground/validator/v10"
@@ -14,6 +15,9 @@ import (
 	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/utils"
 )
+
+// domainRegex validates domain format: labels separated by dots, TLD at least 2 chars.
+var domainRegex = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)*\.[a-zA-Z]{2,}$`)
 
 // GetAppDomains returns all domains for an app project.
 func (c *Controller) GetAppDomains(projectID string) ([]responses.AppDomainResponse, error) {
@@ -45,9 +49,20 @@ func (c *Controller) AddAppDomain(project *models.AppProject, user *models.User,
 
 	domainName := strings.ToLower(req.Domain)
 
+	// WEM-262: Secondary regex validation for domain format
+	if !domainRegex.MatchString(domainName) {
+		return nil, errors.New("invalid domain format")
+	}
+
 	// Block manual additions of *.wemob.app subdomains — these are managed automatically
 	if strings.HasSuffix(domainName, "."+constants.WEMOB_APP_BASE_DOMAIN) {
 		return nil, errors.New("wemob.app subdomains are managed automatically")
+	}
+
+	// WEM-264: Check per-project domain limit
+	existingDomains, err := c.DB.GetAppDomainsByProjectID(project.ID.String())
+	if err == nil && len(existingDomains) >= constants.MAX_DOMAINS_PER_PROJECT {
+		return nil, fmt.Errorf("maximum of %d custom domains per project reached", constants.MAX_DOMAINS_PER_PROJECT)
 	}
 
 	// Check domain is not already in use
@@ -64,6 +79,10 @@ func (c *Controller) AddAppDomain(project *models.AppProject, user *models.User,
 
 	created, err := c.DB.CreateAppDomain(&domain)
 	if err != nil {
+		// WEM-265: Handle unique constraint violation from DB index
+		if strings.Contains(err.Error(), "duplicate key") || strings.Contains(err.Error(), "unique constraint") {
+			return nil, errors.New("domain is already in use")
+		}
 		return nil, fmt.Errorf("failed to add domain: %v", err)
 	}
 
@@ -75,7 +94,11 @@ func (c *Controller) AddAppDomain(project *models.AppProject, user *models.User,
 			slog.Warn("Failed to add domain to Coolify", "domain", domainName, "error", err)
 		} else {
 			created.Status = "active"
-			c.DB.UpdateAppDomain(created)
+			// WEM-268: Check UpdateAppDomain error
+			if _, err := c.DB.UpdateAppDomain(created); err != nil {
+				slog.Error("Failed to update domain status after Coolify sync", "domain", domainName, "error", err)
+				created.Status = "pending"
+			}
 		}
 	}
 
@@ -118,6 +141,8 @@ func (c *Controller) RemoveAppDomain(domainID string, project *models.AppProject
 		}
 	}
 
+	// WEM-267: Bun's NewDelete().Model() with soft_delete tag automatically
+	// performs a soft delete (UPDATE deleted_at) — no hard delete occurs.
 	return c.DB.DeleteAppDomain(domain)
 }
 
@@ -133,19 +158,17 @@ func (c *Controller) VerifyAppDomain(domainID string, project *models.AppProject
 		return nil, errors.New("domain does not belong to this project")
 	}
 
-	// Check DNS via Go net package instead of Vercel API
+	// WEM-269: Use exact CNAME match (with trailing dot stripped) instead of substring
+	// WEM-266: Removed A-record fallback — only CNAME verification is accepted
 	cname, err := net.LookupCNAME(domain.Domain)
-	if err == nil && strings.Contains(cname, constants.WEMOB_CNAME_TARGET) {
+	if err == nil && strings.TrimSuffix(cname, ".") == constants.WEMOB_CNAME_TARGET {
 		domain.Status = "active"
-	} else {
-		// Try A record lookup as fallback
-		ips, err := net.LookupHost(domain.Domain)
-		if err == nil && len(ips) > 0 {
-			domain.Status = "active"
-		}
 	}
 
-	c.DB.UpdateAppDomain(domain)
+	// WEM-268: Check UpdateAppDomain error
+	if _, err := c.DB.UpdateAppDomain(domain); err != nil {
+		return nil, fmt.Errorf("failed to update domain status: %v", err)
+	}
 
 	// If domain is active and Coolify project exists, sync all domains
 	if domain.Status == "active" && c.CoolifyService != nil {
@@ -173,11 +196,13 @@ func (c *Controller) VerifyAppDomain(domainID string, project *models.AppProject
 func (c *Controller) buildCoolifyDomainList(coolifyProject *models.CoolifyProject, projectID string, extraDomain string) []string {
 	domains := []string{"https://" + coolifyProject.CustomDomain}
 
-	// Add all existing custom domains from DB
+	// WEM-270: Only include verified (active) custom domains
 	appDomains, err := c.DB.GetAppDomainsByProjectID(projectID)
 	if err == nil {
 		for _, d := range appDomains {
-			domains = append(domains, "https://"+d.Domain)
+			if d.Status == "active" {
+				domains = append(domains, "https://"+d.Domain)
+			}
 		}
 	}
 
