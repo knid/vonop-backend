@@ -78,12 +78,12 @@ export function ProductCard({ product, onQuickAdd }: ProductCardProps) {
           )}
           {outOfStock && (
             <div className="absolute left-2.5 top-2.5 rounded-full bg-background/90 px-2.5 py-1 text-[11px] font-medium uppercase tracking-[0.15em] text-muted-foreground backdrop-blur-sm">
-              Out of Stock
+              {{t.outOfStock}}
             </div>
           )}
           {onSale && !outOfStock && (
             <div className="absolute left-2.5 top-2.5 rounded-full bg-rose-500 px-2.5 py-1 text-[11px] font-medium uppercase tracking-[0.15em] text-white">
-              Sale
+              {{t.sale}}
             </div>
           )}
           {!outOfStock && (
@@ -197,9 +197,9 @@ export function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
           >
             <div className="flex items-center justify-between border-b border-border/40 px-5 py-4">
               <h2 className="text-sm font-medium uppercase tracking-[0.15em] text-foreground">
-                Cart ({itemCount})
+                {{t.cart}} ({itemCount})
               </h2>
-              <button onClick={onClose} className="rounded-full p-1.5 hover:bg-muted" aria-label="Close cart">
+              <button onClick={onClose} className="rounded-full p-1.5 hover:bg-muted" aria-label="{{t.closeCart}}">
                 <X className="h-4 w-4" />
               </button>
             </div>
@@ -214,8 +214,8 @@ export function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
               ) : !cart || cart.items.length === 0 ? (
                 <EmptyState
                   icon={<ShoppingBag className="h-10 w-10" />}
-                  title="Your cart is empty"
-                  description="Add some items to get started"
+                  title="{{t.emptyCartTitle}}"
+                  description="{{t.emptyCartDesc}}"
                 />
               ) : (
                 <div className="space-y-3">
@@ -233,7 +233,7 @@ export function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
                   {shippingRemaining > 0 ? (
                     <>
                       <p className="mb-1.5 text-xs text-muted-foreground">
-                        {formatPrice(shippingRemaining) + " away from free shipping"}
+                        {{{te.awayFromFreeShipping}}}
                       </p>
                       <div className="h-1.5 overflow-hidden rounded-full bg-muted">
                         <motion.div
@@ -247,7 +247,7 @@ export function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
                   ) : (
                     <div className="flex items-center gap-1.5 text-xs text-green-600 dark:text-green-400">
                       <Check className="h-3.5 w-3.5" />
-                      <span>You qualify for free shipping!</span>
+                      <span>{{t.qualifyFreeShipping}}</span>
                     </div>
                   )}
                 </div>
@@ -267,7 +267,7 @@ export function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
                   <span className="text-xl font-semibold tracking-tight">{formatPrice(cart.total_cents)}</span>
                 </div>
                 <p className="mb-3 text-center text-[11px] text-muted-foreground">
-                  Taxes and shipping calculated at checkout
+                  {{t.taxesShippingAtCheckout}}
                 </p>
                 <div className="flex flex-col gap-3">
                   <Link
@@ -275,14 +275,14 @@ export function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
                     onClick={onClose}
                     className="flex w-full items-center justify-center gap-2 rounded-full bg-foreground px-4 py-3 text-sm font-semibold text-background transition-opacity hover:opacity-90"
                   >
-                    Secure Checkout
+                    {{t.secureCheckout}}
                   </Link>
                   <Link
                     href="/cart"
                     onClick={onClose}
                     className="flex w-full items-center justify-center text-sm font-medium text-muted-foreground underline underline-offset-4 transition-colors hover:text-foreground"
                   >
-                    View Cart
+                    {{t.viewCart}}
                   </Link>
                 </div>
               </div>
@@ -335,7 +335,7 @@ export function PriceDisplay({ product, size = "md", className = "" }: PriceDisp
       )}
       {product.in_stock === false && (
         <span className="rounded-full bg-muted/80 px-2.5 py-0.5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-          Out of Stock
+          {{t.outOfStock}}
         </span>
       )}
     </div>
@@ -384,7 +384,7 @@ export function QuantitySelector({
         onClick={() => handleChange(Math.max(min, value - 1))}
         disabled={disabled || value <= min}
         className={"flex items-center justify-center rounded-l-xl transition-colors hover:bg-muted active:scale-95 disabled:opacity-40 " + btnSize}
-        aria-label="Decrease quantity"
+        aria-label="{{t.decreaseQuantity}}"
       >
         <Minus className={iconSize} />
       </button>
@@ -406,7 +406,7 @@ export function QuantitySelector({
         onClick={() => handleChange(Math.min(max, value + 1))}
         disabled={disabled || value >= max}
         className={"flex items-center justify-center rounded-r-xl transition-colors hover:bg-muted active:scale-95 disabled:opacity-40 " + btnSize}
-        aria-label="Increase quantity"
+        aria-label="{{t.increaseQuantity}}"
       >
         <Plus className={iconSize} />
       </button>
@@ -468,14 +468,14 @@ export function ProductGallery({ images, productName }: ProductGalleryProps) {
             <button
               onClick={handlePrev}
               className="absolute left-3 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-background/90 shadow-sm opacity-0 backdrop-blur-sm transition-all group-hover:opacity-100 hover:bg-background"
-              aria-label="Previous image"
+              aria-label="{{t.previousImage}}"
             >
               <ChevronLeft className="h-4 w-4" />
             </button>
             <button
               onClick={handleNext}
               className="absolute right-3 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-background/90 shadow-sm opacity-0 backdrop-blur-sm transition-all group-hover:opacity-100 hover:bg-background"
-              aria-label="Next image"
+              aria-label="{{t.nextImage}}"
             >
               <ChevronRight className="h-4 w-4" />
             </button>
@@ -589,7 +589,7 @@ export function CheckoutForm() {
         router.push("/checkout/success?order_id=" + result.order_id);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Checkout failed. Please try again.");
+      setError(err instanceof Error ? err.message : "{{t.checkoutFailed}}");
     } finally {
       setIsSubmitting(false);
     }
@@ -629,13 +629,13 @@ export function CheckoutForm() {
           </div>
           <div className="relative my-5">
             <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-border/40" /></div>
-            <div className="relative flex justify-center"><span className="bg-background px-3 text-xs text-muted-foreground">or continue with</span></div>
+            <div className="relative flex justify-center"><span className="bg-background px-3 text-xs text-muted-foreground">{{t.orContinueWith}}</span></div>
           </div>
         </div>
 
         {/* Step indicator */}
         <div className="flex items-center justify-center gap-0">
-          {["Information", "Shipping", "Payment"].map((step, i) => (
+          {["{{t.stepInformation}}", "{{t.stepShipping}}", "{{t.stepPayment}}"].map((step, i) => (
             <React.Fragment key={step}>
               {i > 0 && <div className={"mx-2 h-px w-8 sm:mx-3 sm:w-12 " + (i === 0 ? "bg-foreground" : "bg-border/40")} />}
               <div className="flex items-center gap-1.5">
@@ -654,15 +654,15 @@ export function CheckoutForm() {
         <div className="rounded-2xl bg-muted/20 p-7">
           <div className="mb-5 flex items-center gap-2">
             <Mail className="h-4 w-4 text-muted-foreground" />
-            <h2 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Contact Information</h2>
+            <h2 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">{{t.contactInformation}}</h2>
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="sm:col-span-2">
-              <label htmlFor="email" className="mb-1.5 block text-xs uppercase tracking-wider text-muted-foreground">Email</label>
+              <label htmlFor="email" className="mb-1.5 block text-xs uppercase tracking-wider text-muted-foreground">{{t.email}}</label>
               <input id="email" name="email" type="email" required value={form.email} onChange={handleChange} className={inputClass} />
             </div>
             <div className="sm:col-span-2">
-              <label htmlFor="name" className="mb-1.5 block text-xs uppercase tracking-wider text-muted-foreground">Full Name</label>
+              <label htmlFor="name" className="mb-1.5 block text-xs uppercase tracking-wider text-muted-foreground">{{t.fullName}}</label>
               <input id="name" name="name" type="text" required value={form.name} onChange={handleChange} className={inputClass} />
             </div>
           </div>
@@ -671,31 +671,31 @@ export function CheckoutForm() {
         <div className="rounded-2xl bg-muted/20 p-7">
           <div className="mb-5 flex items-center gap-2">
             <MapPin className="h-4 w-4 text-muted-foreground" />
-            <h2 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Shipping Address</h2>
+            <h2 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">{{t.shippingAddress}}</h2>
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="sm:col-span-2">
-              <label htmlFor="line1" className="mb-1.5 block text-xs uppercase tracking-wider text-muted-foreground">Address Line 1</label>
+              <label htmlFor="line1" className="mb-1.5 block text-xs uppercase tracking-wider text-muted-foreground">{{t.addressLine1}}</label>
               <input id="line1" name="line1" type="text" required value={form.line1} onChange={handleChange} className={inputClass} />
             </div>
             <div className="sm:col-span-2">
-              <label htmlFor="line2" className="mb-1.5 block text-xs uppercase tracking-wider text-muted-foreground">Address Line 2 (Optional)</label>
+              <label htmlFor="line2" className="mb-1.5 block text-xs uppercase tracking-wider text-muted-foreground">{{t.addressLine2Optional}}</label>
               <input id="line2" name="line2" type="text" value={form.line2} onChange={handleChange} className={inputClass} />
             </div>
             <div>
-              <label htmlFor="city" className="mb-1.5 block text-xs uppercase tracking-wider text-muted-foreground">City</label>
+              <label htmlFor="city" className="mb-1.5 block text-xs uppercase tracking-wider text-muted-foreground">{{t.city}}</label>
               <input id="city" name="city" type="text" required value={form.city} onChange={handleChange} className={inputClass} />
             </div>
             <div>
-              <label htmlFor="state" className="mb-1.5 block text-xs uppercase tracking-wider text-muted-foreground">State / Province</label>
+              <label htmlFor="state" className="mb-1.5 block text-xs uppercase tracking-wider text-muted-foreground">{{t.stateProvince}}</label>
               <input id="state" name="state" type="text" required value={form.state} onChange={handleChange} className={inputClass} />
             </div>
             <div>
-              <label htmlFor="postal_code" className="mb-1.5 block text-xs uppercase tracking-wider text-muted-foreground">Postal Code</label>
+              <label htmlFor="postal_code" className="mb-1.5 block text-xs uppercase tracking-wider text-muted-foreground">{{t.postalCode}}</label>
               <input id="postal_code" name="postal_code" type="text" required value={form.postal_code} onChange={handleChange} className={inputClass} />
             </div>
             <div>
-              <label htmlFor="country" className="mb-1.5 block text-xs uppercase tracking-wider text-muted-foreground">Country</label>
+              <label htmlFor="country" className="mb-1.5 block text-xs uppercase tracking-wider text-muted-foreground">{{t.country}}</label>
               <input id="country" name="country" type="text" required value={form.country} onChange={handleChange} className={inputClass} />
             </div>
           </div>
@@ -705,13 +705,13 @@ export function CheckoutForm() {
           <div className="rounded-2xl bg-muted/20 p-7">
             <div className="mb-5 flex items-center gap-2">
               <CreditCard className="h-4 w-4 text-muted-foreground" />
-              <h2 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Payment Method</h2>
+              <h2 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">{{t.paymentMethod}}</h2>
             </div>
             <div className="space-y-3">
               {providers.map((p) => (
                 <label key={p} className={"flex cursor-pointer items-center gap-3 rounded-xl border p-4 transition-colors " + (selectedProvider === p ? "border-foreground bg-foreground/5" : "border-border/40 hover:bg-muted/30")}>
                   <input type="radio" name="payment" value={p} checked={selectedProvider === p} onChange={() => setSelectedProvider(p)} className="h-4 w-4 accent-foreground" />
-                  <span className="text-sm font-medium capitalize">{p === "cod" ? "Cash on Delivery" : p}</span>
+                  <span className="text-sm font-medium capitalize">{p === "cod" ? "{{t.cashOnDelivery}}" : p}</span>
                 </label>
               ))}
             </div>
@@ -735,14 +735,14 @@ export function CheckoutForm() {
           className="flex w-full items-center justify-center gap-2 rounded-full bg-foreground px-6 py-3.5 text-sm font-semibold tracking-wide text-background transition-opacity hover:opacity-90 disabled:opacity-50"
         >
           {isSubmitting && <Loader2 className="h-4 w-4 animate-spin" />}
-          {isSubmitting ? "Processing..." : "Place Order" + (cart ? " · " + formatPrice(cart.total_cents) : "")}
+          {isSubmitting ? "{{t.processing}}" : "{{t.placeOrder}}" + (cart ? " · " + formatPrice(cart.total_cents) : "")}
         </button>
 
         <div ref={paymentFormRef} />
 
         <div className="flex items-center justify-center gap-1.5 text-xs text-muted-foreground/60">
           <ShieldCheck className="h-3.5 w-3.5" />
-          <span>Your information is encrypted and secure</span>
+          <span>{{t.infoEncryptedSecure}}</span>
         </div>
       </form>
 
@@ -781,7 +781,7 @@ export function CategoryNav({ selectedCategory, onSelect }: CategoryNavProps) {
   if (!categories || categories.length === 0) return null;
 
   const allItems = [
-    { id: "all", slug: undefined as string | undefined, name: "All" },
+    { id: "all", slug: undefined as string | undefined, name: "{{t.all}}" },
     ...categories.map((cat) => ({ id: cat.id, slug: cat.slug as string | undefined, name: cat.name })),
   ];
 
@@ -896,7 +896,7 @@ export function OrderSummary({ cart, className = "" }: OrderSummaryProps) {
   return (
     <div className={"rounded-2xl bg-muted/30 p-6 shadow-sm " + className}>
       <h3 className="mb-5 text-sm font-medium uppercase tracking-[0.15em] text-muted-foreground">
-        Order Summary
+        {{t.orderSummary}}
       </h3>
       <div className="space-y-3">
         <div className="flex items-center justify-between text-sm">
@@ -914,8 +914,8 @@ export function OrderSummary({ cart, className = "" }: OrderSummaryProps) {
           </div>
         )}
         <div className="flex items-center justify-between text-sm">
-          <span className="text-muted-foreground">Shipping</span>
-          <span className="text-muted-foreground">Calculated at checkout</span>
+          <span className="text-muted-foreground">{{t.shipping}}</span>
+          <span className="text-muted-foreground">{{t.calculatedAtCheckout}}</span>
         </div>
         <div className="border-t border-border/40 pt-4">
           <div className="flex items-center justify-between">
@@ -1039,7 +1039,7 @@ export function ReviewList({ productSlug }: ReviewListProps) {
     <div className="space-y-6">
       <div className="flex flex-col gap-6 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex-1">
-          <h3 className="text-xl font-semibold tracking-tight">Customer Reviews</h3>
+          <h3 className="text-xl font-semibold tracking-tight">{{t.customerReviews}}</h3>
           {reviewCount > 0 && (
             <div className="mt-3 flex flex-col gap-4 sm:flex-row sm:items-center sm:gap-8">
               <div className="flex items-center gap-3">
@@ -1071,48 +1071,48 @@ export function ReviewList({ productSlug }: ReviewListProps) {
         </div>
         {!showForm && !submitted && (
           <button onClick={() => setShowForm(true)} className="flex-shrink-0 rounded-full border border-foreground px-5 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-foreground hover:text-background">
-            Write a Review
+            {{t.writeReview}}
           </button>
         )}
       </div>
 
       {submitted && (
         <div className="rounded-xl bg-green-50 px-4 py-3 text-sm text-green-800 dark:bg-green-950/30 dark:text-green-200">
-          Thank you for your review! It has been submitted successfully.
+          {{t.reviewThanks}}
         </div>
       )}
 
       {showForm && (
         <form onSubmit={handleSubmit} className="space-y-4 rounded-xl bg-muted/20 p-5">
           <div>
-            <label className="mb-1.5 block text-xs font-medium uppercase tracking-wider text-muted-foreground">Rating</label>
+            <label className="mb-1.5 block text-xs font-medium uppercase tracking-wider text-muted-foreground">{{t.rating}}</label>
             <StarInput value={form.rating} onChange={(v) => setForm((f) => ({ ...f, rating: v }))} />
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
-              <label htmlFor="review-name" className="mb-1.5 block text-xs font-medium uppercase tracking-wider text-muted-foreground">Name</label>
+              <label htmlFor="review-name" className="mb-1.5 block text-xs font-medium uppercase tracking-wider text-muted-foreground">{{t.name}}</label>
               <input id="review-name" required value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} className="w-full border-b border-border/60 bg-transparent px-0 py-2 text-sm outline-none focus:border-foreground" />
             </div>
             <div>
-              <label htmlFor="review-email" className="mb-1.5 block text-xs font-medium uppercase tracking-wider text-muted-foreground">Email</label>
+              <label htmlFor="review-email" className="mb-1.5 block text-xs font-medium uppercase tracking-wider text-muted-foreground">{{t.email}}</label>
               <input id="review-email" type="email" required value={form.email} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))} className="w-full border-b border-border/60 bg-transparent px-0 py-2 text-sm outline-none focus:border-foreground" />
             </div>
           </div>
           <div>
-            <label htmlFor="review-title" className="mb-1.5 block text-xs font-medium uppercase tracking-wider text-muted-foreground">Title (optional)</label>
+            <label htmlFor="review-title" className="mb-1.5 block text-xs font-medium uppercase tracking-wider text-muted-foreground">{{t.titleOptional}}</label>
             <input id="review-title" value={form.title} onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))} className="w-full border-b border-border/60 bg-transparent px-0 py-2 text-sm outline-none focus:border-foreground" />
           </div>
           <div>
-            <label htmlFor="review-body" className="mb-1.5 block text-xs font-medium uppercase tracking-wider text-muted-foreground">Review</label>
+            <label htmlFor="review-body" className="mb-1.5 block text-xs font-medium uppercase tracking-wider text-muted-foreground">{{t.review}}</label>
             <textarea id="review-body" rows={3} value={form.body} onChange={(e) => setForm((f) => ({ ...f, body: e.target.value }))} className="w-full border-b border-border/60 bg-transparent px-0 py-2 text-sm outline-none focus:border-foreground" />
           </div>
           <div className="flex gap-3 pt-2">
             <button type="submit" disabled={submitting} className="flex items-center gap-2 rounded-full bg-foreground px-5 py-2 text-sm font-medium text-background disabled:opacity-50">
               {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
-              Submit Review
+              {{t.submitReview}}
             </button>
             <button type="button" onClick={() => setShowForm(false)} className="rounded-full px-5 py-2 text-sm font-medium text-muted-foreground hover:text-foreground">
-              Cancel
+              {{t.cancel}}
             </button>
           </div>
         </form>
@@ -1125,7 +1125,7 @@ export function ReviewList({ productSlug }: ReviewListProps) {
           ))}
         </div>
       ) : reviews.length === 0 && !submitted ? (
-        <p className="py-8 text-center text-sm text-muted-foreground">No reviews yet. Be the first to review this product!</p>
+        <p className="py-8 text-center text-sm text-muted-foreground">{{t.noReviewsYet}}</p>
       ) : (
         <div className="space-y-4">
           {reviews.map((review, idx) => (
@@ -1145,7 +1145,7 @@ export function ReviewList({ productSlug }: ReviewListProps) {
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-medium text-foreground">{review.customer_name}</span>
                       {review.is_verified && (
-                        <span className="rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-medium text-green-700 dark:bg-green-500/10 dark:text-green-400">Verified</span>
+                        <span className="rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-medium text-green-700 dark:bg-green-500/10 dark:text-green-400">{{t.verified}}</span>
                       )}
                     </div>
                     <StarRating rating={review.rating} />
@@ -1211,7 +1211,7 @@ export function WishlistButton({ productId, size = "md", className = "" }: Wishl
       className={"flex items-center justify-center rounded-full transition-all bg-background/80 backdrop-blur-sm " +
         (active ? "text-red-500 shadow-md shadow-red-500/20" : "shadow-sm text-muted-foreground hover:text-red-500") +
         " " + btnSize + " " + className}
-      aria-label={active ? "Remove from wishlist" : "Add to wishlist"}
+      aria-label={active ? "{{t.removeFromWishlist}}" : "{{t.addToWishlist}}"}
     >
       <Heart className={iconSize + (active ? " fill-current" : "")} />
     </motion.button>
@@ -1263,13 +1263,13 @@ export function SiteHeader() {
   }, [searchOpen]);
 
   const navLinks = [
-    { label: "Home", href: "/" },
-    { label: "About", href: "/about" },
-    { label: "Contact", href: "/contact" },
+    { label: "{{t.home}}", href: "/" },
+    { label: "{{t.about}}", href: "/about" },
+    { label: "{{t.contact}}", href: "/contact" },
   ];
 
   const shopLinks = [
-    { label: "All Products", href: "/products" },
+    { label: "{{t.allProducts}}", href: "/products" },
     ...(categories ?? []).map((cat) => ({
       label: cat.name,
       href: "/categories/" + cat.slug,
@@ -1303,15 +1303,15 @@ export function SiteHeader() {
             className="relative z-50 overflow-hidden bg-foreground text-background"
           >
             <div className="flex items-center justify-center px-4 py-2 text-center text-xs font-medium tracking-wide sm:text-sm">
-              <span>Free shipping on orders over $50</span>
+              <span>{{t.freeShippingAnnouncement}}</span>
               <span className="mx-2 hidden text-background/40 sm:inline">|</span>
               <Link href="/products" className="hidden underline underline-offset-2 transition-opacity hover:opacity-80 sm:inline">
-                Shop Now
+                {{t.shopNow}}
               </Link>
               <button
                 onClick={() => setAnnouncementVisible(false)}
                 className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full p-0.5 transition-opacity hover:opacity-70"
-                aria-label="Dismiss announcement"
+                aria-label="{{t.dismissAnnouncement}}"
               >
                 <X className="h-3.5 w-3.5" />
               </button>
@@ -1439,7 +1439,7 @@ export function SiteHeader() {
                         type="text"
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
-                        placeholder="Search..."
+                        placeholder="{{t.searchPlaceholder}}"
                         className="h-9 w-full rounded-full border border-border/60 bg-muted/30 pl-4 pr-9 text-sm text-foreground placeholder:text-muted-foreground focus:border-foreground focus:outline-none"
                       />
                       <button type="button" onClick={() => { setSearchOpen(false); setSearchQuery(""); }} className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 text-muted-foreground hover:text-foreground">
@@ -1453,7 +1453,7 @@ export function SiteHeader() {
                 <button
                   onClick={() => setSearchOpen(true)}
                   className="flex h-10 w-10 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground"
-                  aria-label="Search products"
+                  aria-label="{{t.searchProducts}}"
                 >
                   <Search className="h-5 w-5" />
                 </button>
@@ -1462,7 +1462,7 @@ export function SiteHeader() {
             <Link
               href="/products"
               className="flex h-10 w-10 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground md:hidden"
-              aria-label="Search products"
+              aria-label="{{t.searchProducts}}"
             >
               <Search className="h-5 w-5" />
             </Link>
@@ -1470,7 +1470,7 @@ export function SiteHeader() {
             <Link
               href="/account"
               className="hidden h-10 w-10 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground sm:flex"
-              aria-label="Account"
+              aria-label="{{t.account}}"
             >
               <User className="h-5 w-5" />
             </Link>
@@ -1478,7 +1478,7 @@ export function SiteHeader() {
             <button
               onClick={() => setCartOpen(true)}
               className="relative flex h-10 w-10 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground"
-              aria-label="Open cart"
+              aria-label="{{t.openCart}}"
             >
               <ShoppingBag className="h-5 w-5" />
               <AnimatePresence>
@@ -1499,7 +1499,7 @@ export function SiteHeader() {
             <button
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
               className="flex h-10 w-10 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground md:hidden"
-              aria-label={mobileMenuOpen ? "Close menu" : "Open menu"}
+              aria-label={mobileMenuOpen ? "{{t.closeMenu}}" : "{{t.openMenu}}"}
             >
               {mobileMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
             </button>
@@ -1605,7 +1605,7 @@ export function SiteFooter() {
 
   const allCategories = categories ?? [];
   const shopLinks = [
-    { label: "All Products", href: "/products" },
+    { label: "{{t.allProducts}}", href: "/products" },
     ...allCategories.slice(0, 6).map((cat) => ({
       label: cat.name,
       href: "/categories/" + cat.slug,
@@ -1613,19 +1613,19 @@ export function SiteFooter() {
   ];
 
   const companyLinks = [
-    { label: "About", href: "/about" },
-    { label: "Contact", href: "/contact" },
+    { label: "{{t.about}}", href: "/about" },
+    { label: "{{t.contact}}", href: "/contact" },
   ];
 
   const supportLinks = [
-    { label: "FAQ", href: "/faq" },
-    { label: "Shipping Policy", href: "/policies/shipping" },
-    { label: "Returns", href: "/policies/returns" },
+    { label: "{{t.faq}}", href: "/faq" },
+    { label: "{{t.shippingPolicy}}", href: "/policies/shipping" },
+    { label: "{{t.returns}}", href: "/policies/returns" },
   ];
 
   const legalLinks = [
-    { label: "Privacy Policy", href: "/policies/privacy" },
-    { label: "Terms of Service", href: "/policies/terms" },
+    { label: "{{t.privacyPolicy}}", href: "/policies/privacy" },
+    { label: "{{t.termsOfService}}", href: "/policies/terms" },
   ];
 
   return (
@@ -1637,7 +1637,7 @@ export function SiteFooter() {
               {storeConfig?.name}
             </Link>
             <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
-              Quality products curated for you. Shop with confidence and enjoy a
+              {{t.footerDescription}}
               seamless shopping experience.
             </p>
             {/* Social icons */}
@@ -1676,7 +1676,7 @@ export function SiteFooter() {
             {/* Newsletter */}
             <div className="mt-8">
               <h3 className="text-[11px] font-medium uppercase tracking-[0.2em] text-muted-foreground/50">Newsletter</h3>
-              <p className="mt-3 text-xs text-muted-foreground">Get the latest updates, exclusive offers, and new arrivals delivered to your inbox.</p>
+              <p className="mt-3 text-xs text-muted-foreground">{{t.newsletterDesc}}</p>
               {subscribed ? (
                 <p className="mt-3 text-xs font-medium text-green-600 dark:text-green-400">Thank you for subscribing!</p>
               ) : (
@@ -1693,7 +1693,7 @@ export function SiteFooter() {
                     type="submit"
                     className="h-9 rounded-full bg-foreground px-4 text-xs font-medium text-background transition-opacity hover:opacity-90"
                   >
-                    Subscribe
+                    {{t.subscribe}}
                   </button>
                 </form>
               )}
@@ -1702,7 +1702,7 @@ export function SiteFooter() {
 
           <div>
             <h3 className="text-[11px] font-medium uppercase tracking-[0.2em] text-muted-foreground/50">
-              Shop
+              {{t.shop}}
             </h3>
             <ul className="mt-4 space-y-2.5">
               {shopLinks.map((link, i) => (
@@ -1721,7 +1721,7 @@ export function SiteFooter() {
                     href="/products"
                     className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
                   >
-                    {"View All \u2192"}
+                    {"{{t.viewAll}}"}
                   </Link>
                 </li>
               )}
@@ -1730,7 +1730,7 @@ export function SiteFooter() {
 
           <div>
             <h3 className="text-[11px] font-medium uppercase tracking-[0.2em] text-muted-foreground/50">
-              Company
+              {{t.company}}
             </h3>
             <ul className="mt-4 space-y-2.5">
               {companyLinks.map((link) => (
@@ -1746,7 +1746,7 @@ export function SiteFooter() {
             </ul>
 
             <h3 className="mt-8 text-[11px] font-medium uppercase tracking-[0.2em] text-muted-foreground/50">
-              Support
+              {{t.support}}
             </h3>
             <ul className="mt-4 space-y-2.5">
               {supportLinks.map((link) => (
@@ -1764,7 +1764,7 @@ export function SiteFooter() {
 
           <div>
             <h3 className="text-[11px] font-medium uppercase tracking-[0.2em] text-muted-foreground/50">
-              Legal
+              {{t.legal}}
             </h3>
             <ul className="mt-4 space-y-2.5">
               {legalLinks.map((link) => (
@@ -1784,12 +1784,12 @@ export function SiteFooter() {
         <div className="mt-16 border-t border-border/40 pt-8">
           <div className="flex flex-col items-center gap-6 sm:flex-row sm:justify-between">
             <p className="text-xs text-muted-foreground/60">
-              &copy; {new Date().getFullYear()} {storeConfig?.name}. All rights reserved.
+              &copy; {new Date().getFullYear()} {storeConfig?.name}. {{t.allRightsReserved}}
             </p>
 
             {/* Payment method icons */}
             <div className="flex items-center gap-3">
-              <span className="mr-1 text-[10px] uppercase tracking-wider text-muted-foreground/40">We accept</span>
+              <span className="mr-1 text-[10px] uppercase tracking-wider text-muted-foreground/40">{{t.weAccept}}</span>
               <svg className="h-6 w-auto text-muted-foreground/50" viewBox="0 0 48 32" fill="none"><rect width="48" height="32" rx="4" fill="currentColor" opacity="0.1"/><path d="M19.5 20.5l2-9h3l-2 9h-3zm13-9l-3 6.2-.4-2-1-5.4s-.1-.8-1.2-.8h-4.7l-.1.3s1.4.3 3 1.3l2.3 8.4h3.1l4.7-8h-2.7zm-19 0l-3 9h-3.2l-1.8-7.2c-.1-.4-.2-.6-.5-.7-.6-.3-1.5-.6-2.3-.8l.1-.3h4.8c.6 0 1.2.4 1.3 1.2l1.2 6.2 2.9-7.4h3.5zm26.2 6.2c0-2.5-3.4-2.6-3.4-3.7 0-.3.3-.7 1.1-.8.4 0 1.5-.1 2.7.5l.5-2.2c-.7-.2-1.5-.5-2.6-.5-2.7 0-4.7 1.5-4.7 3.6 0 1.6 1.4 2.4 2.4 3 1.1.5 1.4.8 1.4 1.3 0 .7-.8 1-1.6 1-.7 0-1.9-.3-2.5-.5l-.5 2.2c.6.3 1.6.5 2.7.5 2.9 0 4.8-1.4 4.8-3.7l-.3.3z" fill="currentColor" opacity="0.5"/></svg>
               <svg className="h-6 w-auto text-muted-foreground/50" viewBox="0 0 48 32" fill="none"><rect width="48" height="32" rx="4" fill="currentColor" opacity="0.1"/><circle cx="19" cy="16" r="8" fill="currentColor" opacity="0.2"/><circle cx="29" cy="16" r="8" fill="currentColor" opacity="0.3"/></svg>
               <svg className="h-6 w-auto text-muted-foreground/50" viewBox="0 0 48 32" fill="none"><rect width="48" height="32" rx="4" fill="currentColor" opacity="0.1"/><text x="24" y="20" textAnchor="middle" fontSize="10" fontWeight="bold" fill="currentColor" opacity="0.4">AMEX</text></svg>
@@ -1798,7 +1798,7 @@ export function SiteFooter() {
           </div>
 
           <p className="mt-6 text-center text-[11px] text-muted-foreground/40">
-            Secure shopping guaranteed. All transactions are encrypted and your data is protected.
+            {{t.secureShoppingFooter}}
           </p>
 
           {/* Back to top */}
@@ -1808,7 +1808,7 @@ export function SiteFooter() {
               className="flex items-center gap-1.5 text-xs text-muted-foreground/50 transition-colors hover:text-muted-foreground"
             >
               <ArrowUp className="h-3.5 w-3.5" />
-              Back to top
+              {{t.backToTop}}
             </button>
           </div>
         </div>
@@ -1844,7 +1844,7 @@ export function NewsletterSection() {
 
     if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       setStatus("error");
-      setMessage("Please enter a valid email address.");
+      setMessage("{{t.invalidEmail}}");
       return;
     }
 
@@ -1853,7 +1853,7 @@ export function NewsletterSection() {
 
     setTimeout(() => {
       setStatus("success");
-      setMessage("Thank you for subscribing! Check your inbox for a confirmation.");
+      setMessage("{{t.subscribeSuccess}}");
       setEmail("");
     }, 1000);
   };
@@ -1869,13 +1869,13 @@ export function NewsletterSection() {
           transition={{ duration: 0.5 }}
         >
           <p className="mb-4 text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
-            Join 10,000+ happy customers
+            {{t.newsletterSubtitle}}
           </p>
           <h2 className="text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
-            Stay in the Loop
+            {{t.stayInTheLoop}}
           </h2>
           <p className="mt-3 text-muted-foreground">
-            Subscribe for exclusive deals, new arrivals, and style inspiration.
+            {{t.newsletterCTA}}
           </p>
 
           <form onSubmit={handleSubmit} className="mt-8">
@@ -1887,7 +1887,7 @@ export function NewsletterSection() {
                   setEmail(e.target.value);
                   if (status === "error") setStatus("idle");
                 }}
-                placeholder="Enter your email"
+                placeholder="{{t.enterYourEmail}}"
                 className="h-12 w-full rounded-full border border-border/60 bg-background px-5 text-sm text-foreground placeholder:text-muted-foreground focus:border-foreground focus:outline-none sm:max-w-xs"
                 disabled={status === "loading"}
               />
@@ -1896,7 +1896,7 @@ export function NewsletterSection() {
                 disabled={status === "loading"}
                 className="inline-flex h-12 items-center justify-center rounded-full bg-foreground px-7 text-sm font-medium text-background transition-opacity hover:opacity-90 disabled:opacity-50"
               >
-                {status === "loading" ? "Subscribing..." : "Subscribe"}
+                {status === "loading" ? "{{t.subscribing}}" : "{{t.subscribe}}"}
               </button>
             </div>
           </form>
@@ -1926,7 +1926,7 @@ export function NewsletterSection() {
           </AnimatePresence>
 
           <p className="mt-4 text-xs text-muted-foreground/60">
-            No spam, ever. Unsubscribe at any time.
+            {{t.noSpam}}
           </p>
         </motion.div>
       </div>
@@ -1972,7 +1972,7 @@ export default function CartPage() {
       setDiscountSuccess(true);
       setTimeout(() => setDiscountSuccess(false), 2000);
     } catch {
-      setDiscountError("Invalid or expired discount code.");
+      setDiscountError("{{t.invalidDiscountCode}}");
     } finally {
       setDiscountLoading(false);
     }
@@ -1984,7 +1984,7 @@ export default function CartPage() {
   if (isLoading) {
     return (
       <div className="mx-auto max-w-7xl px-4 py-12 sm:px-6 sm:py-16 lg:px-8">
-        <h1 className="text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">Shopping Cart</h1>
+        <h1 className="text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">{{t.shoppingCart}}</h1>
         <div className="mt-8 space-y-4">
           {[1, 2, 3].map((i) => (
             <div key={i} className="h-24 animate-pulse rounded-xl bg-muted" />
@@ -1997,13 +1997,13 @@ export default function CartPage() {
   if (!cart || itemCount === 0) {
     return (
       <div className="mx-auto max-w-7xl px-4 py-12 sm:px-6 sm:py-16 lg:px-8">
-        <h1 className="text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">Shopping Cart</h1>
+        <h1 className="text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">{{t.shoppingCart}}</h1>
         <div className="mt-12">
           <EmptyState
             icon={<ShoppingBag className="h-10 w-10" />}
-            title="Your cart is empty"
-            description="Looks like you haven't added anything to your cart yet."
-            action={<Link href="/products" className="inline-flex h-11 items-center rounded-full bg-foreground px-6 text-sm font-medium text-background transition-opacity hover:opacity-90">Continue Shopping</Link>}
+            title="{{t.emptyCartTitle}}"
+            description="{{t.emptyCartPageDesc}}"
+            action={<Link href="/products" className="inline-flex h-11 items-center rounded-full bg-foreground px-6 text-sm font-medium text-background transition-opacity hover:opacity-90">{{t.continueShopping}}</Link>}
           />
         </div>
       </div>
@@ -2014,14 +2014,14 @@ export default function CartPage() {
     <div className="mx-auto max-w-7xl px-4 py-12 sm:px-6 sm:py-16 lg:px-8">
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
-          Shopping Cart ({itemCount})
+          {{t.shoppingCart}} ({itemCount})
         </h1>
         <Link
           href="/products"
           className="inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
         >
           <ArrowLeft className="h-4 w-4" />
-          Continue Shopping
+          {{t.continueShopping}}
         </Link>
       </div>
 
@@ -2030,7 +2030,7 @@ export default function CartPage() {
         {shippingRemaining > 0 ? (
           <>
             <p className="mb-2 text-xs text-muted-foreground">
-              {formatPrice(shippingRemaining) + " away from free shipping"}
+              {{{te.awayFromFreeShipping}}}
             </p>
             <div className="h-1.5 overflow-hidden rounded-full bg-muted">
               <motion.div
@@ -2044,7 +2044,7 @@ export default function CartPage() {
         ) : (
           <div className="flex items-center gap-1.5 text-xs text-green-600 dark:text-green-400">
             <Check className="h-3.5 w-3.5" />
-            <span>You qualify for free shipping!</span>
+            <span>{{t.qualifyFreeShipping}}</span>
           </div>
         )}
       </div>
@@ -2062,7 +2062,7 @@ export default function CartPage() {
           <div className="mt-6 flex items-end gap-3">
             <div className="flex-1">
               <label htmlFor="discount" className="mb-1.5 block text-[11px] font-medium uppercase tracking-[0.15em] text-muted-foreground/60">
-                Discount Code
+                {{t.discountCode}}
               </label>
               <input
                 id="discount"
@@ -2072,7 +2072,7 @@ export default function CartPage() {
                   setDiscountCode(e.target.value);
                   setDiscountError("");
                 }}
-                placeholder="Enter code"
+                placeholder="{{t.enterCode}}"
                 className="h-11 w-full rounded-full border border-border/60 bg-background px-5 text-sm text-foreground placeholder:text-muted-foreground focus:border-foreground focus:outline-none"
               />
               {discountError && (
@@ -2085,8 +2085,8 @@ export default function CartPage() {
               className={"h-11 rounded-full px-5 text-sm font-medium transition-colors disabled:opacity-50 " + (discountSuccess ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" : "bg-muted text-foreground hover:bg-muted/80")}
             >
               {discountSuccess ? (
-                <span className="flex items-center gap-1"><Check className="h-3.5 w-3.5" /> Applied</span>
-              ) : discountLoading ? "Applying..." : "Apply"}
+                <span className="flex items-center gap-1"><Check className="h-3.5 w-3.5" /> {{t.applied}}</span>
+              ) : discountLoading ? "{{t.applying}}" : "{{t.apply}}"}
             </button>
           </div>
 
@@ -2112,13 +2112,13 @@ export default function CartPage() {
             className="mt-4 flex h-14 w-full items-center justify-center gap-2 rounded-full bg-foreground text-sm font-semibold text-background transition-opacity hover:opacity-90"
           >
             <Lock className="h-4 w-4" />
-            Secure Checkout
+            {{t.secureCheckout}}
           </Link>
           <div className="mt-4 rounded-xl border border-border/40 p-4 text-center">
             <div className="flex items-center justify-center gap-4 text-xs text-muted-foreground">
               <div className="flex items-center gap-1">
                 <Truck className="h-3.5 w-3.5" />
-                <span>Free shipping over $50</span>
+                <span>{{t.freeShippingOver50}}</span>
               </div>
             </div>
             <p className="mt-2 text-[11px] text-muted-foreground/50">
@@ -2128,10 +2128,10 @@ export default function CartPage() {
         </div>
       </div>
 
-      {/* You Might Also Like */}
+      {/* {{t.youMightAlsoLike}} */}
       {suggestions.length > 0 && (
         <div className="mt-16 border-t border-border/40 pt-12">
-          <h2 className="text-xl font-semibold tracking-tight text-foreground">You Might Also Like</h2>
+          <h2 className="text-xl font-semibold tracking-tight text-foreground">{{t.youMightAlsoLike}}</h2>
           <div className="mt-6 grid grid-cols-2 gap-6 sm:gap-8 lg:grid-cols-4">
             {suggestions.map((p) => (
               <ProductCard key={p.id} product={p} />
@@ -2152,14 +2152,14 @@ import { ArrowLeft, Check, Lock, Shield } from "lucide-react";
 import { CheckoutForm } from "@/components/ecommerce/checkout-form";
 
 export default function CheckoutPage() {
-  var steps = ["Cart", "Information", "Payment"];
+  var steps = ["{{t.stepCart}}", "{{t.stepInformation}}", "{{t.stepPayment}}"];
 
   return (
     <div className="mx-auto max-w-4xl px-4 py-12 sm:px-6 sm:py-16 lg:px-8">
       {/* Security trust bar */}
       <div className="mb-8 flex items-center justify-center gap-2 rounded-xl bg-muted/20 px-4 py-3 text-center text-xs text-muted-foreground">
         <Lock className="h-3.5 w-3.5 flex-shrink-0" />
-        <span>Secure Checkout \u2014 Your information is encrypted and protected</span>
+        <span>{{t.secureCheckoutBanner}}</span>
       </div>
 
       {/* Step progress with connecting lines and checkmarks */}
@@ -2194,13 +2194,13 @@ export default function CheckoutPage() {
           className="inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
         >
           <ArrowLeft className="h-4 w-4" />
-          Back to Cart
+          {{t.backToCart}}
         </Link>
       </nav>
 
-      <h1 className="text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">Checkout</h1>
+      <h1 className="text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">{{t.checkout}}</h1>
       <p className="mt-1 text-muted-foreground">
-        Complete your order by filling in the details below.
+        {{t.completeYourOrder}}
       </p>
 
       <div className="mt-8">
@@ -2211,11 +2211,11 @@ export default function CheckoutPage() {
       <div className="mt-8 flex flex-wrap items-center justify-center gap-6 text-xs text-muted-foreground/50">
         <div className="flex items-center gap-1.5">
           <Shield className="h-3.5 w-3.5" />
-          <span>SSL Encrypted</span>
+          <span>{{t.sslEncrypted}}</span>
         </div>
         <div className="flex items-center gap-1.5">
           <Lock className="h-3.5 w-3.5" />
-          <span>Secure Payment</span>
+          <span>{{t.securePayment}}</span>
         </div>
       </div>
     </div>
@@ -2238,7 +2238,7 @@ export default function CheckoutSuccessPage() {
       fallback={
         <div className="flex min-h-[50vh] flex-col items-center justify-center px-4">
           <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-          <p className="mt-4 text-muted-foreground">Loading order details...</p>
+          <p className="mt-4 text-muted-foreground">{{t.loadingOrderDetails}}</p>
         </div>
       }
     >
@@ -2259,7 +2259,7 @@ function CheckoutSuccessContent() {
   useEffect(() => {
     if (!orderId) {
       setLoading(false);
-      setError("No order ID provided.");
+      setError("{{t.noOrderId}}");
       return;
     }
 
@@ -2274,7 +2274,7 @@ function CheckoutSuccessContent() {
         const data = await getOrder(orderId);
         setOrder(data);
       } catch {
-        setError("Order not found.");
+        setError("{{t.orderNotFound}}");
       } finally {
         setLoading(false);
       }
@@ -2287,7 +2287,7 @@ function CheckoutSuccessContent() {
     return (
       <div className="flex min-h-[50vh] flex-col items-center justify-center px-4">
         <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-        <p className="mt-4 text-muted-foreground">Loading order details...</p>
+        <p className="mt-4 text-muted-foreground">{{t.loadingOrderDetails}}</p>
       </div>
     );
   }
@@ -2300,13 +2300,13 @@ function CheckoutSuccessContent() {
           {error || "Order not found"}
         </h1>
         <p className="mt-2 text-muted-foreground">
-          We couldn&apos;t find this order. It may have expired or the link is invalid.
+          {{t.orderNotFoundDesc}}
         </p>
         <Link
           href="/products"
           className="mt-6 inline-flex h-10 items-center rounded-full bg-foreground px-6 text-sm font-medium text-background transition-opacity hover:opacity-90"
         >
-          Continue Shopping
+          {{t.continueShopping}}
         </Link>
       </div>
     );
@@ -2324,16 +2324,16 @@ function CheckoutSuccessContent() {
       </motion.div>
 
       <h1 className="mt-6 text-3xl font-semibold tracking-tight text-foreground">
-        Order Confirmed!
+        {{t.orderConfirmed}}
       </h1>
       <p className="mt-2 text-muted-foreground">
-        Thank you for your purchase. Your order number is{" "}
+        {{t.thankYouPurchase}}{" "}
         <span className="font-semibold text-foreground">{order.order_number || orderId}</span>.
       </p>
 
       <div className="mt-8 rounded-xl bg-muted/30 p-6 text-left">
         <h2 className="text-sm font-medium uppercase tracking-[0.15em] text-muted-foreground">
-          Order Summary
+          {{t.orderSummary}}
         </h2>
         <ul className="mt-4 divide-y divide-border/40">
           {order.items?.map((item: any, idx: number) => (
@@ -2346,7 +2346,7 @@ function CheckoutSuccessContent() {
             >
               <div>
                 <p className="text-sm font-medium text-foreground">{item.product_name}</p>
-                <p className="text-xs text-muted-foreground">Qty: {item.quantity}</p>
+                <p className="text-xs text-muted-foreground">{{t.qty}}: {item.quantity}</p>
               </div>
               <p className="text-sm font-medium text-foreground">
                 {formatPrice(item.total_cents)}
@@ -2362,15 +2362,15 @@ function CheckoutSuccessContent() {
         </div>
       </div>
 
-      {/* What Happens Next */}
+      {/* {{t.whatHappensNext}} */}
       <div className="mt-10 rounded-xl bg-muted/20 p-6 text-left">
-        <h3 className="mb-4 text-sm font-medium uppercase tracking-[0.15em] text-muted-foreground">What Happens Next</h3>
+        <h3 className="mb-4 text-sm font-medium uppercase tracking-[0.15em] text-muted-foreground">{{t.whatHappensNext}}</h3>
         <div className="space-y-4">
           {[
-            { step: "1", title: "Order Confirmed", desc: "We have received your order and are preparing it." },
-            { step: "2", title: "Processing", desc: "Your items are being packed with care." },
-            { step: "3", title: "Shipped", desc: "You will receive a tracking number via email." },
-            { step: "4", title: "Delivered", desc: "Your order arrives at your doorstep." },
+            { step: "1", title: "{{t.stepOrderConfirmed}}", desc: "{{t.stepOrderConfirmedDesc}}" },
+            { step: "2", title: "{{t.stepProcessing}}", desc: "{{t.stepProcessingDesc}}" },
+            { step: "3", title: "{{t.stepShipped}}", desc: "{{t.stepShippedDesc}}" },
+            { step: "4", title: "{{t.stepDelivered}}", desc: "{{t.stepDeliveredDesc}}" },
           ].map((item, i) => (
             <div key={item.step} className="flex items-start gap-3">
               <div className={"flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-xs font-semibold " + (i === 0 ? "bg-green-100 text-green-700 dark:bg-green-500/10 dark:text-green-400" : "bg-muted text-muted-foreground")}>
@@ -2390,10 +2390,10 @@ function CheckoutSuccessContent() {
           href="/products"
           className="inline-flex h-11 items-center rounded-full bg-foreground px-6 text-sm font-medium text-background transition-opacity hover:opacity-90"
         >
-          Continue Shopping
+          {{t.continueShopping}}
         </Link>
         <Link href="/contact" className="text-sm text-muted-foreground underline underline-offset-4 transition-colors hover:text-foreground">
-          Need help with your order?
+          {{t.needHelpOrder}}
         </Link>
       </div>
     </div>
@@ -2411,9 +2411,9 @@ import { motion, AnimatePresence } from "framer-motion";
 export default function CheckoutCancelPage() {
   var faqs = [
     { q: "Why was my payment cancelled?", a: "Payments can be cancelled if you close the payment window, if there are insufficient funds, or if your bank declined the transaction. No charges have been made to your account." },
-    { q: "Was I charged?", a: "No. If a payment is cancelled, no charges are applied. If you see a pending charge, it will be automatically reversed within 3\u20135 business days." },
+    { q: "{{t.paymentChargedQuestion}}", a: "No. If a payment is cancelled, no charges are applied. If you see a pending charge, it will be automatically reversed within 3\u20135 business days." },
     { q: "Can I use a different payment method?", a: "Yes. When you try again, you can select a different payment method at checkout." },
-    { q: "Is my cart still saved?", a: "Yes. Your cart items are saved and will be available when you return to checkout." },
+    { q: "{{t.cartSavedQuestion}}", a: "{{t.cartSavedAnswer}}" },
   ];
 
   var [openFaq, setOpenFaq] = useState<number | null>(null);
@@ -2434,7 +2434,7 @@ export default function CheckoutCancelPage() {
           Payment Cancelled
         </h1>
         <p className="mx-auto mt-2 max-w-md text-muted-foreground">
-          Your payment was not completed. Your cart is still saved and no charges were made.
+          {{t.paymentCancelled}}
         </p>
 
         <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:justify-center">
@@ -2448,7 +2448,7 @@ export default function CheckoutCancelPage() {
             href="/products"
             className="inline-flex h-11 items-center justify-center rounded-full border border-border/60 px-6 text-sm font-medium text-foreground transition-colors hover:bg-muted"
           >
-            Continue Shopping
+            {{t.continueShopping}}
           </Link>
         </div>
       </div>
@@ -2456,7 +2456,7 @@ export default function CheckoutCancelPage() {
       {/* FAQ Section */}
       <div className="mt-12 border-t border-border/40 pt-10">
         <h2 className="mb-5 text-center text-sm font-medium uppercase tracking-[0.15em] text-muted-foreground">
-          Common Questions
+          {{t.commonQuestions}}
         </h2>
         <div className="space-y-2">
           {faqs.map(function(faq, i) {
@@ -2574,10 +2574,10 @@ function ProductsPageContent() {
   };
 
   const sortLabels: Record<SortOption, string> = {
-    featured: "Featured",
-    newest: "Newest",
-    "price-asc": "Price: Low to High",
-    "price-desc": "Price: High to Low",
+    featured: "{{t.sortByFeatured}}",
+    newest: "{{t.sortByNewest}}",
+    "price-asc": "{{t.sortByPriceLow}}",
+    "price-desc": "{{t.sortByPriceHigh}}",
     name: "Name A\u2013Z",
   };
 
@@ -2947,7 +2947,7 @@ function ProductsPageContent() {
                         )}
                         {onSale && (
                           <div className="absolute left-2 top-2 rounded-full bg-foreground px-2 py-0.5 text-[10px] font-medium text-background">
-                            Sale
+                            {{t.sale}}
                           </div>
                         )}
                       </div>
@@ -3147,12 +3147,12 @@ export default function ProductDetailPage() {
           <div className="mt-8 space-y-4">
             {!outOfStock && (
               <div className="flex items-center gap-3">
-                <span className="text-sm font-medium text-foreground">Quantity</span>
+                <span className="text-sm font-medium text-foreground">{{t.quantity}}</span>
                 <div className="flex items-center rounded-xl border border-border/60">
                   <button
                     onClick={() => setQuantity(Math.max(1, quantity - 1))}
                     className="flex h-10 w-10 items-center justify-center text-muted-foreground transition-colors hover:text-foreground active:scale-95"
-                    aria-label="Decrease quantity"
+                    aria-label="{{t.decreaseQuantity}}"
                   >
                     <Minus className="h-4 w-4" />
                   </button>
@@ -3162,7 +3162,7 @@ export default function ProductDetailPage() {
                   <button
                     onClick={() => setQuantity(quantity + 1)}
                     className="flex h-10 w-10 items-center justify-center text-muted-foreground transition-colors hover:text-foreground active:scale-95"
-                    aria-label="Increase quantity"
+                    aria-label="{{t.increaseQuantity}}"
                   >
                     <Plus className="h-4 w-4" />
                   </button>
@@ -3180,12 +3180,12 @@ export default function ProductDetailPage() {
                   <span key="oos">Out of Stock</span>
                 ) : addedToCart ? (
                   <motion.span key="added" initial={{ scale: 0 }} animate={{ scale: 1 }} className="flex items-center gap-2">
-                    <Check className="h-4 w-4" /> Added to Cart
+                    <Check className="h-4 w-4" /> {{t.addedToCart}}
                   </motion.span>
                 ) : (
                   <motion.span key="add" initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="flex items-center gap-2">
                     <ShoppingCart className="h-4 w-4" />
-                    {isAdding ? "Adding..." : "Add to Cart"}
+                    {isAdding ? "{{t.adding}}" : "{{t.addToCart}}"}
                   </motion.span>
                 )}
               </AnimatePresence>
@@ -3195,7 +3195,7 @@ export default function ProductDetailPage() {
           {/* Info Tabs */}
           <div className="mt-10 border-t border-border/40 pt-6">
             <div className="flex gap-6">
-              {[{ id: "description" as const, label: "Description" }, { id: "shipping" as const, label: "Shipping & Returns" }].map((tab) => (
+              {[{ id: "description" as const, label: "{{t.description}}" }, { id: "shipping" as const, label: "{{t.shippingAndReturns}}" }].map((tab) => (
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id)}
@@ -3219,7 +3219,7 @@ export default function ProductDetailPage() {
               ) : (
                 <div className="space-y-2">
                   <p>Free standard shipping on orders over $50. Express shipping available at checkout.</p>
-                  <p>Returns accepted within 30 days of delivery. Items must be unused and in original packaging.</p>
+                  <p>{{t.returnsPolicy30d}}</p>
                 </div>
               )}
             </div>
@@ -3231,14 +3231,14 @@ export default function ProductDetailPage() {
               <div className="flex flex-col items-center gap-2 rounded-xl border border-border/40 p-3 text-center">
                 <Truck className="h-5 w-5 text-muted-foreground" />
                 <div>
-                  <p className="text-xs font-medium text-foreground">Free Shipping</p>
-                  <p className="text-[10px] text-muted-foreground">Orders over $50</p>
+                  <p className="text-xs font-medium text-foreground">{{t.freeShipping}}</p>
+                  <p className="text-[10px] text-muted-foreground">{{t.ordersOver50}}</p>
                 </div>
               </div>
               <div className="flex flex-col items-center gap-2 rounded-xl border border-border/40 p-3 text-center">
                 <RotateCcw className="h-5 w-5 text-muted-foreground" />
                 <div>
-                  <p className="text-xs font-medium text-foreground">Easy Returns</p>
+                  <p className="text-xs font-medium text-foreground">{{t.easyReturns}}</p>
                   <p className="text-[10px] text-muted-foreground">30-day policy</p>
                 </div>
               </div>
@@ -3251,9 +3251,9 @@ export default function ProductDetailPage() {
               </div>
             </div>
 
-            {/* Guaranteed Safe Checkout */}
+            {/* {{t.guaranteedSafeCheckout}} */}
             <div className="rounded-xl border border-border/40 p-4">
-              <p className="mb-2.5 text-center text-[11px] font-medium uppercase tracking-[0.15em] text-muted-foreground/60">Guaranteed Safe Checkout</p>
+              <p className="mb-2.5 text-center text-[11px] font-medium uppercase tracking-[0.15em] text-muted-foreground/60">{{t.guaranteedSafeCheckout}}</p>
               <div className="flex items-center justify-center gap-2.5">
                 <svg className="h-7 w-auto text-muted-foreground/40" viewBox="0 0 48 32" fill="none"><rect width="48" height="32" rx="4" fill="currentColor" opacity="0.15"/><path d="M19.5 20.5l2-9h3l-2 9h-3zm13-9l-3 6.2-.4-2-1-5.4s-.1-.8-1.2-.8h-4.7l-.1.3s1.4.3 3 1.3l2.3 8.4h3.1l4.7-8h-2.7zm-19 0l-3 9h-3.2l-1.8-7.2c-.1-.4-.2-.6-.5-.7-.6-.3-1.5-.6-2.3-.8l.1-.3h4.8c.6 0 1.2.4 1.3 1.2l1.2 6.2 2.9-7.4h3.5zm26.2 6.2c0-2.5-3.4-2.6-3.4-3.7 0-.3.3-.7 1.1-.8.4 0 1.5-.1 2.7.5l.5-2.2c-.7-.2-1.5-.5-2.6-.5-2.7 0-4.7 1.5-4.7 3.6 0 1.6 1.4 2.4 2.4 3 1.1.5 1.4.8 1.4 1.3 0 .7-.8 1-1.6 1-.7 0-1.9-.3-2.5-.5l-.5 2.2c.6.3 1.6.5 2.7.5 2.9 0 4.8-1.4 4.8-3.7l-.3.3z" fill="currentColor" opacity="0.5"/></svg>
                 <svg className="h-7 w-auto text-muted-foreground/40" viewBox="0 0 48 32" fill="none"><rect width="48" height="32" rx="4" fill="currentColor" opacity="0.15"/><circle cx="19" cy="16" r="8" fill="currentColor" opacity="0.2"/><circle cx="29" cy="16" r="8" fill="currentColor" opacity="0.3"/></svg>
@@ -3289,7 +3289,7 @@ export default function ProductDetailPage() {
       {/* Related Products */}
       {relatedProducts.length > 0 && (
         <div className="mt-20">
-          <h2 className="text-2xl font-semibold tracking-tight text-foreground">You May Also Like</h2>
+          <h2 className="text-2xl font-semibold tracking-tight text-foreground">{{t.youMayAlsoLike}}</h2>
           <div className="mt-8 grid grid-cols-2 gap-6 sm:gap-8 lg:grid-cols-4">
             {relatedProducts.map((p) => (
               <ProductCard key={p.id} product={p} />
@@ -3334,9 +3334,9 @@ export default function CategoryPage() {
   const [showSort, setShowSort] = useState(false);
 
   const sortLabels: Record<CatSort, string> = {
-    featured: "Featured",
-    "price-asc": "Price: Low to High",
-    "price-desc": "Price: High to Low",
+    featured: "{{t.sortByFeatured}}",
+    "price-asc": "{{t.sortByPriceLow}}",
+    "price-desc": "{{t.sortByPriceHigh}}",
     name: "Name A\u2013Z",
   };
 
@@ -3493,15 +3493,15 @@ export default function ShippingPolicyPage() {
   var toSlug = function(s: string) { return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, ""); };
 
   const sections = [
-    { icon: Clock, title: "Processing Time", content: "All orders placed with " + storeName + " are processed within 1\u20133 business days. Orders placed on weekends or holidays will be processed on the next business day. You will receive a confirmation email with tracking information once your order has shipped." },
-    { icon: Globe, title: "International Shipping", content: "We currently ship to select international destinations. International shipping rates and delivery times vary by location and will be calculated at checkout. Please note that international orders may be subject to customs duties and taxes, which are the responsibility of the recipient." },
-    { icon: MapPin, title: "Order Tracking", content: "Once your order ships, you will receive an email with a tracking number. You can use this number to track your package on the carrier\u2019s website. If you have any questions about your shipment, please don\u2019t hesitate to contact our support team." },
-    { icon: Package, title: "Shipping Restrictions", content: "Some items may have shipping restrictions due to size, weight, or destination regulations. If an item cannot be shipped to your address, you will be notified during checkout. We are unable to ship to P.O. boxes for express and overnight orders." },
+    { icon: Clock, title: "{{t.processingTime}}", content: "All orders placed with " + storeName + " are processed within 1\u20133 business days. Orders placed on weekends or holidays will be processed on the next business day. You will receive a confirmation email with tracking information once your order has shipped." },
+    { icon: Globe, title: "{{t.internationalShipping}}", content: "We currently ship to select international destinations. International shipping rates and delivery times vary by location and will be calculated at checkout. Please note that international orders may be subject to customs duties and taxes, which are the responsibility of the recipient." },
+    { icon: MapPin, title: "{{t.orderTracking}}", content: "Once your order ships, you will receive an email with a tracking number. You can use this number to track your package on the carrier\u2019s website. If you have any questions about your shipment, please don\u2019t hesitate to contact our support team." },
+    { icon: Package, title: "{{t.shippingRestrictions}}", content: "Some items may have shipping restrictions due to size, weight, or destination regulations. If an item cannot be shipped to your address, you will be notified during checkout. We are unable to ship to P.O. boxes for express and overnight orders." },
   ];
 
   return (
     <div className="mx-auto max-w-3xl px-4 py-12 sm:px-6 sm:py-16 lg:px-8">
-      <h1 className="text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">Shipping Policy</h1>
+      <h1 className="text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">{{t.shippingPolicyTitle}}</h1>
       <div className="mt-3">
         <span className="inline-flex rounded-full bg-muted/30 px-3 py-1 text-xs text-muted-foreground">
           Last updated: {new Date().toLocaleDateString("en-US", { month: "long", year: "numeric" })}
@@ -3509,7 +3509,7 @@ export default function ShippingPolicyPage() {
       </div>
 
       <nav className="mt-8 flex flex-wrap gap-2" aria-label="Quick links">
-        <a href="#shipping-rates-delivery-times" className="rounded-full border border-border/40 px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted/30 hover:text-foreground">Shipping Rates</a>
+        <a href="#shipping-rates-delivery-times" className="rounded-full border border-border/40 px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted/30 hover:text-foreground">{{t.shippingRates}}</a>
         {sections.map((s) => (
           <a key={s.title} href={"#" + toSlug(s.title)} className="rounded-full border border-border/40 px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted/30 hover:text-foreground">{s.title}</a>
         ))}
@@ -3528,7 +3528,7 @@ export default function ShippingPolicyPage() {
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-muted/50">
               <Truck className="h-5 w-5 text-muted-foreground" />
             </div>
-            <h2 className="text-lg font-semibold tracking-tight text-foreground">Shipping Rates & Delivery Times</h2>
+            <h2 className="text-lg font-semibold tracking-tight text-foreground">{{t.shippingRatesAndDelivery}}</h2>
           </div>
           <div className="overflow-hidden rounded-xl border border-border/40">
             <table className="w-full text-left text-sm">
@@ -3540,9 +3540,9 @@ export default function ShippingPolicyPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-border/40 text-muted-foreground">
-                <tr><td className="px-4 py-3">Standard Shipping</td><td className="px-4 py-3">5\u20137 business days</td><td className="px-4 py-3">Free on orders over $50</td></tr>
-                <tr><td className="px-4 py-3">Express Shipping</td><td className="px-4 py-3">2\u20133 business days</td><td className="px-4 py-3">$9.99</td></tr>
-                <tr><td className="px-4 py-3">Overnight Shipping</td><td className="px-4 py-3">1 business day</td><td className="px-4 py-3">$19.99</td></tr>
+                <tr><td className="px-4 py-3">{{t.standardShipping}}</td><td className="px-4 py-3">{{t.standardShippingTime}}</td><td className="px-4 py-3">{{t.standardShippingCost}}</td></tr>
+                <tr><td className="px-4 py-3">{{t.expressShipping}}</td><td className="px-4 py-3">{{t.expressShippingTime}}</td><td className="px-4 py-3">{{t.expressShippingCost}}</td></tr>
+                <tr><td className="px-4 py-3">{{t.overnightShipping}}</td><td className="px-4 py-3">{{t.overnightShippingTime}}</td><td className="px-4 py-3">{{t.overnightShippingCost}}</td></tr>
               </tbody>
             </table>
           </div>
@@ -3592,9 +3592,9 @@ export default function ReturnsPolicyPage() {
   const sections = [
     { icon: RotateCcw, title: "Our Return Promise", content: "At " + storeName + ", we want you to be completely satisfied with your purchase. If for any reason you are not happy with your order, we offer a hassle-free return and exchange policy within 30 days of delivery." },
     { icon: CheckCircle, title: "Eligibility", items: ["Items must be returned within 30 days of delivery.", "Products must be in their original condition, unworn, unwashed, and with all tags attached.", "Items must be in their original packaging when possible.", "Sale items and gift cards are final sale and cannot be returned.", "Personalized or custom-made items are non-returnable."] },
-    { icon: Package, title: "How to Return", items: ["Contact our support team to initiate a return request.", "You will receive a return authorization and prepaid shipping label via email.", "Pack the item securely in its original packaging.", "Attach the shipping label and drop off the package at the designated carrier.", "Once we receive and inspect the item, your refund will be processed within 5\u20137 business days."], numbered: true },
+    { icon: Package, title: "How to Return", items: ["Contact our support team to initiate a return request.", "You will receive a return authorization and prepaid shipping label via email.", "Pack the item securely in its original packaging.", "Attach the shipping label and drop off the package at the designated carrier.", "Once we receive and inspect the item, your refund will be processed within {{t.standardShippingTime}}."], numbered: true },
     { icon: RotateCcw, title: "Exchanges", content: "If you would like to exchange an item for a different size or color, please follow the return process above and place a new order for the desired item. This ensures the fastest processing time." },
-    { icon: CreditCard, title: "Refunds", content: "Refunds will be issued to the original payment method. Please allow 5\u20137 business days for the refund to appear on your statement after we have received and processed your return. Shipping costs are non-refundable unless the return is due to a defective or incorrect item." },
+    { icon: CreditCard, title: "Refunds", content: "Refunds will be issued to the original payment method. Please allow {{t.standardShippingTime}} for the refund to appear on your statement after we have received and processed your return. Shipping costs are non-refundable unless the return is due to a defective or incorrect item." },
     { icon: AlertCircle, title: "Damaged or Defective Items", content: "If you received a damaged or defective item, please contact us within 48 hours of delivery with photos of the issue. We will arrange a replacement or full refund at no additional cost to you." },
   ];
 
@@ -3680,7 +3680,7 @@ export default function PrivacyPolicyPage() {
 
   return (
     <div className="mx-auto max-w-3xl px-4 py-12 sm:px-6 sm:py-16 lg:px-8">
-      <h1 className="text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">Privacy Policy</h1>
+      <h1 className="text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">{{t.privacyPolicyTitle}}</h1>
       <div className="mt-3">
         <span className="inline-flex rounded-full bg-muted/30 px-3 py-1 text-xs text-muted-foreground">
           Last updated: {new Date().toLocaleDateString("en-US", { month: "long", year: "numeric" })}
@@ -3758,7 +3758,7 @@ export default function TermsOfServicePage() {
 
   return (
     <div className="mx-auto max-w-3xl px-4 py-12 sm:px-6 sm:py-16 lg:px-8">
-      <h1 className="text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">Terms of Service</h1>
+      <h1 className="text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">{{t.termsPolicyTitle}}</h1>
       <div className="mt-3">
         <span className="inline-flex rounded-full bg-muted/30 px-3 py-1 text-xs text-muted-foreground">
           Last updated: {new Date().toLocaleDateString("en-US", { month: "long", year: "numeric" })}

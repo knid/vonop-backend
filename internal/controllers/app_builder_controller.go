@@ -358,7 +358,7 @@ func (c *Controller) StreamBuildApp(
 				if tp == "components/ecommerce/providers.tsx" {
 					content = buildEcommerceProviders(needsAuth)
 				} else {
-					content = getEcommerceTemplateContent(tp)
+					content = getEcommerceTemplateContent(tp, lang)
 				}
 				if content != "" {
 					c.injectTemplateFile(repo, tp, content, fileMap, sendEvent)
