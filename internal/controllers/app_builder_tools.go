@@ -2411,6 +2411,7 @@ func (c *Controller) buildBuilderToolExecutor(ctx context.Context, project *mode
 			if settings := project.Settings; settings != nil {
 				needsAuth, _ = settings["needs_auth"].(bool)
 			}
+			ecommLang := constants.DetectLanguage(project.Prompt)
 			injectEcommerceTemplates := func() {
 				for _, tp := range constants.NEXTJS_ECOMMERCE_TEMPLATE_FILE_PATHS {
 					if _, exists := fileMap[tp]; exists {
@@ -2420,7 +2421,7 @@ func (c *Controller) buildBuilderToolExecutor(ctx context.Context, project *mode
 					if tp == "components/ecommerce/providers.tsx" {
 						content = buildEcommerceProviders(needsAuth)
 					} else {
-						content = getEcommerceTemplateContent(tp)
+						content = getEcommerceTemplateContent(tp, ecommLang)
 					}
 					if content == "" {
 						continue

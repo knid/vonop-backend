@@ -906,68 +906,71 @@ export function Providers({ children }: { children: React.ReactNode }) {
 
 // getEcommerceTemplateContent returns the hardcoded content for an e-commerce template file.
 // For components/ecommerce/providers.tsx, use buildEcommerceProviders() instead when auth context is available.
-func getEcommerceTemplateContent(path string) string {
+// lang is used to localize {{t.key}} placeholders in the templates.
+func getEcommerceTemplateContent(path string, lang string) string {
+	var raw string
 	switch path {
 	case "lib/wemob-store.ts":
-		return constants.NEXTJS_TEMPLATE_WEMOB_STORE
+		return constants.NEXTJS_TEMPLATE_WEMOB_STORE // no user-facing strings
 	case "components/ecommerce/product-card.tsx":
-		return constants.ECOMMERCE_TEMPLATE_PRODUCT_CARD
+		raw = constants.ECOMMERCE_TEMPLATE_PRODUCT_CARD
 	case "components/ecommerce/cart-drawer.tsx":
-		return constants.ECOMMERCE_TEMPLATE_CART_DRAWER
+		raw = constants.ECOMMERCE_TEMPLATE_CART_DRAWER
 	case "components/ecommerce/price-display.tsx":
-		return constants.ECOMMERCE_TEMPLATE_PRICE_DISPLAY
+		raw = constants.ECOMMERCE_TEMPLATE_PRICE_DISPLAY
 	case "components/ecommerce/quantity-selector.tsx":
-		return constants.ECOMMERCE_TEMPLATE_QUANTITY_SELECTOR
+		raw = constants.ECOMMERCE_TEMPLATE_QUANTITY_SELECTOR
 	case "components/ecommerce/product-gallery.tsx":
-		return constants.ECOMMERCE_TEMPLATE_PRODUCT_GALLERY
+		raw = constants.ECOMMERCE_TEMPLATE_PRODUCT_GALLERY
 	case "components/ecommerce/checkout-form.tsx":
-		return constants.ECOMMERCE_TEMPLATE_CHECKOUT_FORM
+		raw = constants.ECOMMERCE_TEMPLATE_CHECKOUT_FORM
 	case "components/ecommerce/category-nav.tsx":
-		return constants.ECOMMERCE_TEMPLATE_CATEGORY_NAV
+		raw = constants.ECOMMERCE_TEMPLATE_CATEGORY_NAV
 	case "components/ecommerce/cart-item-row.tsx":
-		return constants.ECOMMERCE_TEMPLATE_CART_ITEM_ROW
+		raw = constants.ECOMMERCE_TEMPLATE_CART_ITEM_ROW
 	case "components/ecommerce/order-summary.tsx":
-		return constants.ECOMMERCE_TEMPLATE_ORDER_SUMMARY
+		raw = constants.ECOMMERCE_TEMPLATE_ORDER_SUMMARY
 	case "components/ecommerce/empty-state.tsx":
-		return constants.ECOMMERCE_TEMPLATE_EMPTY_STATE
+		return constants.ECOMMERCE_TEMPLATE_EMPTY_STATE // no hardcoded strings (takes props)
 	case "components/ecommerce/review-list.tsx":
-		return constants.ECOMMERCE_TEMPLATE_REVIEW_LIST
+		raw = constants.ECOMMERCE_TEMPLATE_REVIEW_LIST
 	case "components/ecommerce/wishlist-button.tsx":
-		return constants.ECOMMERCE_TEMPLATE_WISHLIST_BUTTON
+		raw = constants.ECOMMERCE_TEMPLATE_WISHLIST_BUTTON
 	case "components/ecommerce/site-header.tsx":
-		return constants.ECOMMERCE_TEMPLATE_SITE_HEADER
+		raw = constants.ECOMMERCE_TEMPLATE_SITE_HEADER
 	case "components/ecommerce/site-footer.tsx":
-		return constants.ECOMMERCE_TEMPLATE_SITE_FOOTER
+		raw = constants.ECOMMERCE_TEMPLATE_SITE_FOOTER
 	case "components/ecommerce/providers.tsx":
-		return constants.ECOMMERCE_TEMPLATE_PROVIDERS
+		return constants.ECOMMERCE_TEMPLATE_PROVIDERS // no user-facing strings
 	case "components/ecommerce/newsletter-section.tsx":
-		return constants.ECOMMERCE_TEMPLATE_NEWSLETTER
+		raw = constants.ECOMMERCE_TEMPLATE_NEWSLETTER
 	case "app/cart/page.tsx":
-		return constants.ECOMMERCE_TEMPLATE_CART_PAGE
+		raw = constants.ECOMMERCE_TEMPLATE_CART_PAGE
 	case "app/checkout/page.tsx":
-		return constants.ECOMMERCE_TEMPLATE_CHECKOUT_PAGE
+		raw = constants.ECOMMERCE_TEMPLATE_CHECKOUT_PAGE
 	case "app/checkout/success/page.tsx":
-		return constants.ECOMMERCE_TEMPLATE_CHECKOUT_SUCCESS_PAGE
+		raw = constants.ECOMMERCE_TEMPLATE_CHECKOUT_SUCCESS_PAGE
 	case "app/checkout/cancel/page.tsx":
-		return constants.ECOMMERCE_TEMPLATE_CHECKOUT_CANCEL_PAGE
+		raw = constants.ECOMMERCE_TEMPLATE_CHECKOUT_CANCEL_PAGE
 	case "app/products/page.tsx":
-		return constants.ECOMMERCE_TEMPLATE_PRODUCTS_PAGE
+		raw = constants.ECOMMERCE_TEMPLATE_PRODUCTS_PAGE
 	case "app/products/[slug]/page.tsx":
-		return constants.ECOMMERCE_TEMPLATE_PRODUCT_DETAIL_PAGE
+		raw = constants.ECOMMERCE_TEMPLATE_PRODUCT_DETAIL_PAGE
 	case "app/categories/[slug]/page.tsx":
-		return constants.ECOMMERCE_TEMPLATE_CATEGORY_PAGE
+		raw = constants.ECOMMERCE_TEMPLATE_CATEGORY_PAGE
 	case "app/policies/shipping/page.tsx":
-		return constants.ECOMMERCE_TEMPLATE_SHIPPING_POLICY
+		raw = constants.ECOMMERCE_TEMPLATE_SHIPPING_POLICY
 	case "app/policies/returns/page.tsx":
-		return constants.ECOMMERCE_TEMPLATE_RETURNS_POLICY
+		raw = constants.ECOMMERCE_TEMPLATE_RETURNS_POLICY
 	case "app/policies/privacy/page.tsx":
-		return constants.ECOMMERCE_TEMPLATE_PRIVACY_POLICY
+		raw = constants.ECOMMERCE_TEMPLATE_PRIVACY_POLICY
 	case "app/policies/terms/page.tsx":
-		return constants.ECOMMERCE_TEMPLATE_TERMS_POLICY
+		raw = constants.ECOMMERCE_TEMPLATE_TERMS_POLICY
 	default:
 		slog.Warn("getEcommerceTemplateContent: no content for template path", "path", path)
+		return ""
 	}
-	return ""
+	return constants.LocalizeEcommerceTemplate(raw, lang)
 }
 
 // getUITemplateContent returns the hardcoded content for a pre-built UI component template file.
