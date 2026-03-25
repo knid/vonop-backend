@@ -76,7 +76,7 @@ func (r *CreateAppSnapshotRequest) Validate(validate *validator.Validate) error 
 }
 
 type AddAppDomainRequest struct {
-	Domain string `json:"domain" validate:"required,min=4,max=253" errormgs:"must be a valid domain"`
+	Domain string `json:"domain" validate:"required,min=4,max=253,fqdn" errormgs:"must be a valid domain name"`
 }
 
 func (r *AddAppDomainRequest) Validate(validate *validator.Validate) error {
