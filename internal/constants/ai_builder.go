@@ -476,11 +476,31 @@ Catch-all API route. Imports register, login, logout, getSession from '@/lib/wem
 
 // NEXTJS_BUILDER_MOBILE_RULES is appended to chat and single-shot system prompts
 // when the project type is "mobile_app". It overrides desktop-centric defaults with
-// mobile-first design constraints so every AI response targets phone screen sizes.
+// mobile app design constraints so every AI response follows native app conventions.
 const NEXTJS_BUILDER_MOBILE_RULES = `
 
-### Mobile App Rules (CRITICAL — this is a mobile-first application)
-You are building a mobile-first web application that will be viewed exclusively on phone screens (max ~430px viewport width). Every piece of code you write MUST follow these rules:
+### Mobile App Rules (CRITICAL — this is a MOBILE APPLICATION, not a mobile website)
+You are building a mobile APPLICATION that will be viewed exclusively on phone screens (max ~430px viewport width). Every piece of code you write MUST follow native mobile app conventions.
+
+**App vs Website Mindset (CRITICAL — OVERRIDES web design rules above)**
+- You are building a MOBILE APP, not a mobile website. Think SCREENS, FLOWS, and INTERACTIONS — not pages, sections, and scrolling marketing content.
+- The home screen (app/page.tsx) must show the app's CORE CONTENT (feed, dashboard, list, map, activity stream) — NEVER a landing/marketing page with hero section + features grid + testimonials + CTA.
+- NEVER create: hero sections, feature grids, testimonial carousels, newsletter signups, marketing CTAs, "about us" marketing sections, website-style footers, or any website-style marketing content.
+- Users open this app to USE it, not to be marketed to. Every screen should serve a clear functional purpose.
+- Ignore any web design philosophy rules that conflict with these mobile app rules (hero text-7xl, bento grids, full-width marketing sections, etc.).
+
+**Onboarding**
+- Include a proper onboarding experience for first-time users (2-4 screens).
+- Onboarding screens: welcome/branding, key feature highlights with icons/illustrations, optional preference setup, "Get Started" button.
+- Use swipeable horizontal slides with dot indicators or a step-by-step flow.
+- Keep onboarding concise — users should reach the main app quickly.
+
+**Screen Architecture**
+- Each screen has a single focused purpose: list screen, detail screen, settings screen, profile screen, search screen, etc.
+- Home/Main screen: the core value of the app (feed, dashboard, list, map).
+- Detail screens: drill-down from list items with back navigation.
+- Settings/Profile: accessible from tab bar or header icon.
+- Empty states: friendly icons/illustrations with action prompts — never blank screens.
 
 **Layout & Sizing**
 - Design for phone screens ONLY. The base Tailwind styles (no breakpoint prefix) must produce a fully functional mobile layout.
@@ -489,31 +509,38 @@ You are building a mobile-first web application that will be viewed exclusively 
 - Use 100dvh (dynamic viewport height) instead of 100vh for full-screen layouts.
 - Respect safe area insets: use env(safe-area-inset-*) or Tailwind's pb-safe, pt-safe utilities where applicable.
 
-**Navigation & Mobile Patterns**
-- Use bottom tab navigation (fixed to bottom) as the primary navigation pattern — NOT top nav bars or sidebars.
-- Use bottom sheets / slide-up panels instead of desktop modals or dialog boxes.
-- Implement swipe-friendly interactions where appropriate (carousels, dismissible cards).
-- Use sticky headers with compact height (44-56px).
+**Navigation**
+- Bottom tab bar (3-5 tabs) is the PRIMARY navigation — always visible, fixed to bottom.
+- Header bar: compact (h-14), shows screen title + optional action icons (search, notifications, settings).
+- No sidebars, no hamburger menus, no website-style top navigation bars with links.
+- No footer — the bottom tab bar replaces it.
 - Back buttons and close actions should be easily reachable with one hand.
+
+**Mobile-Native Components**
+- Bottom sheets / slide-up panels for secondary actions and options — NOT dropdown menus or desktop modals.
+- Action sheets for destructive confirmations.
+- Pull-to-refresh for content lists.
+- Skeleton loading states (not spinners).
+- Floating Action Button (FAB) for primary creation actions when appropriate.
+- Swipeable cards for dismiss/archive actions.
+- Horizontal scrolling lists for categories/tags (flex overflow-x-auto snap-x).
+- Segmented controls or pill toggles for filtering — not dropdowns.
+- Toast notifications for feedback — not alert boxes.
+- Use rounded-2xl or rounded-3xl for cards and panels — modern mobile aesthetic.
 
 **Typography & Spacing**
 - Body text: 14-16px. Never smaller than 12px for any text.
-- Generous touch-friendly padding: px-4 for page margins, py-3 minimum for list items.
+- Screen titles: text-xl or text-2xl (NOT text-6xl/text-7xl web heroes).
+- Generous touch-friendly padding: px-4 for screen margins, py-3 minimum for list items.
 - Use gap-3 or gap-4 between stacked elements — avoid cramped layouts.
-
-**Components**
-- Cards should be full-width (w-full) by default, not fixed-width.
-- Horizontal scrolling lists for categories/tags (flex overflow-x-auto snap-x).
-- Pull-to-refresh patterns where data lists are shown.
-- Use rounded-2xl or rounded-3xl for cards and panels — modern mobile aesthetic.
-- Floating action buttons (FAB) for primary actions when appropriate.
+- Content must account for bottom tab bar spacing (pb-20 on main content area).
 
 **Performance**
 - Minimize layout shifts — always set explicit dimensions on images/media.
 - Use CSS transitions for micro-interactions (active:scale-95 on buttons).
 - Prefer CSS-based animations over heavy JS animation libraries.
 
-REMEMBER: This app will ONLY be viewed on phones. There is no desktop layout. Do not add responsive breakpoints for larger screens (sm:, md:, lg:, xl:). Design everything for the ~375-430px viewport range.`
+REMEMBER: This is a MOBILE APP, not a website. There is no desktop layout. Do not add responsive breakpoints for larger screens (sm:, md:, lg:, xl:). Design everything for the ~375-430px viewport range. Every flow and component must follow mobile app principles.`
 
 // ALL_BRIDGE_METHODS lists every available bridge method for system prompt injection.
 var ALL_BRIDGE_METHODS = []string{
@@ -606,10 +633,18 @@ You will receive the source code of files that contain desktop patterns. Your jo
 
 ## Specific Conversions to Apply
 
+**App Mindset (CRITICAL)**
+- You are converting this into a MOBILE APP, not a mobile-responsive website.
+- Convert any landing/marketing homepage (hero + features + testimonials + CTA) into a proper app home screen showing the core content (feed, dashboard, list, etc.).
+- Remove website-style marketing sections: hero sections, feature grids, testimonial carousels, newsletter signups, footer sections.
+- Add an onboarding component (2-4 swipeable screens with welcome, feature highlights, and "Get Started") if converting from a marketing-style site.
+- Every screen should serve a clear functional purpose — not market the product.
+
 **Navigation**
 - Replace any sidebar navigation, top navbar with hamburger menu, or horizontal desktop nav with a fixed bottom tab bar.
 - The bottom tab bar should have 3-5 items max with icons and labels.
 - If there's a header/top bar, make it compact (h-14) with just a title and optional action buttons.
+- Remove any website-style footer — the bottom tab bar replaces it.
 
 **Layouts**
 - Remove all responsive breakpoints (sm:, md:, lg:, xl:, 2xl:). Keep only the base (mobile) styles.
@@ -622,17 +657,19 @@ You will receive the source code of files that contain desktop patterns. Your jo
 - Convert desktop tables to card-based lists or horizontally scrollable containers.
 - Convert hover-based interactions (hover:, group-hover:) to active/press states (active:).
 - Ensure all clickable areas are at least 44x44px.
+- Convert dropdown menus to bottom sheets or action sheets.
 
 **Root Layout**
 - If the root layout has a sidebar + main content pattern, convert to just the main content area with bottom tab navigation.
 - Ensure the layout uses min-h-dvh and accounts for bottom nav spacing (pb-16 or pb-20).
+- Remove footer components from the layout.
 
 ## Output Format
 - Output ONLY changed files using <file path="...">full file content</file> blocks.
 - You may include brief explanatory text between file blocks.
 - Output complete file contents — no partial snippets or diffs.
 - Skip files that don't need changes (API routes, lib utilities, types, configs).
-- Preserve all existing functionality, imports, and business logic. Only change layout/styling/navigation patterns.`
+- Preserve all existing functionality, imports, and business logic. Only change layout/styling/navigation patterns to follow mobile app principles.`
 
 // ===========================
 // 6. Exported mode blocks (output format instructions)
@@ -769,10 +806,13 @@ When the user reports a runtime error, build error, or TypeError:
 
 ### Website Conversion
 When the context includes a [Website Analysis] section, the user wants to convert that website into a mobile app. Use the provided URL, title, description, and navigation links to:
-1. Recreate the website's design, color scheme, and layout as a mobile-first app.
-2. Map the website's navigation links to mobile app screens/pages.
-3. Keep the same branding, content tone, and visual identity.
-4. The website is already visible in the user's preview panel for reference.
+1. Create a proper MOBILE APP experience — NOT a mobile-responsive version of the website. Think screens, flows, and interactions.
+2. Map the website's navigation links to mobile app screens with bottom tab navigation (3-5 tabs).
+3. Keep the same branding, color scheme, and visual identity — but adapt the layout to native app conventions.
+4. Convert the website homepage into an app home screen showing core content (NOT a landing page with hero + features).
+5. Add an onboarding flow (2-4 screens) introducing the app's key features using the brand identity.
+6. Remove website-style patterns: hero sections, marketing CTAs, testimonial carousels, newsletter signups, footers.
+7. The website is already visible in the user's preview panel for reference.
 
 ### Store Updates
 When the context includes a [Store Update] section, products/categories/discounts were just created or modified in the store. If the update requires code changes (e.g. new category pages, updated product displays), output the necessary file changes. If the store update is purely data (e.g. adding products), just confirm what was done — no code changes needed unless the user asks for them.`
