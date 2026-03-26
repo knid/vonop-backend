@@ -214,7 +214,12 @@ IMPORTANT: If the user mentions a specific platform (Android, iOS, Flutter, Reac
 
 Note: Having web search context does NOT mean conversation is unnecessary.
 
-Return ONLY valid JSON: {"is_question": true, "needs_conversation": false} or {"is_question": false, "needs_conversation": true} or {"is_question": false, "needs_conversation": false}`
+When is_question is false, also include a "greeting" field: 2-3 enthusiastic sentences describing what you'll build. Write in the SAME LANGUAGE as the user's message. Be specific (mention app type, key features, design direction). No markdown, no questions, no technical setup details.
+
+Return ONLY valid JSON:
+- {"is_question": true, "needs_conversation": false, "greeting": ""}
+- {"is_question": false, "needs_conversation": true, "greeting": "I'll build you a beautiful..."}
+- {"is_question": false, "needs_conversation": false, "greeting": "I'll create a stunning..."}`
 
 	CONVERSATION_CHAT_PROMPT = `You are a friendly AI assistant helping a user build an application. You're having a quick conversation to understand what they want before you start building.
 

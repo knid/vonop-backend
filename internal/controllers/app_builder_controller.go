@@ -542,18 +542,26 @@ func (c *Controller) StreamBuildApp(
 	}
 	preSnapshotID := preCommitHash
 
-	// --- Pre-generation web search phase ---
-	// For initial generation, run a web search pass to gather context about
-	// referenced websites, technologies, or anything needing up-to-date info
-	// BEFORE clarification questions so that results inform the entire flow.
+	// --- Pre-generation: web search + classification in parallel ---
 	var preGenCtx preGenContext
+	var classification promptDecision
 	if isInitialGeneration {
-		preGenCtx = c.runPreGenWebSearch(ctx, provider, message, imageURLs, sendEvent)
-		if preGenCtx.HasContent() {
-			slog.Info("Initial generation: web search returned context",
-				"project_id", project.ID, "context_length", len(preGenCtx.Text),
-				"screenshots", len(preGenCtx.Screenshots))
-		}
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			preGenCtx = c.runPreGenWebSearch(ctx, provider, message, imageURLs, sendEvent)
+			if preGenCtx.HasContent() {
+				slog.Info("Initial generation: web search returned context",
+					"project_id", project.ID, "context_length", len(preGenCtx.Text),
+					"screenshots", len(preGenCtx.Screenshots))
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			classification = c.classifyPrompt(ctx, provider, message, imageURLs, "", project.ProjectType)
+		}()
+		wg.Wait()
 	}
 	// preGenToolContext is the text portion, used by downstream functions that take string
 	preGenToolContext := preGenCtx.Text
@@ -562,7 +570,7 @@ func (c *Controller) StreamBuildApp(
 		return
 	}
 
-	// --- Conversational pre-build phase (replaces old clarification questions) ---
+	// --- Conversational pre-build phase ---
 	if isInitialGeneration && jobID != "" {
 		// Phase A: Stream a summary of web search results to the user
 		var webSummaryText string
@@ -574,8 +582,14 @@ func (c *Controller) StreamBuildApp(
 			return
 		}
 
-		// Phase B: Natural conversation loop (if prompt is vague)
-		message = c.runConversationLoop(ctx, jobID, provider, message, imageURLs, preGenToolContext, webSummaryText, project.ProjectType, sendEvent)
+		// Phase B: Stream the greeting from classification (merged — no separate LLM call)
+		if greeting := strings.TrimSpace(classification.Greeting); greeting != "" && !classification.IsQuestion {
+			sendEvent("conversation_chunk", map[string]any{"chunk": greeting})
+			sendEvent("conversation_done", map[string]any{"type": "build_plan", "text": greeting})
+		}
+
+		// Phase C: Natural conversation loop (if prompt is vague or is a question)
+		message = c.runConversationLoop(ctx, jobID, provider, classification, message, imageURLs, preGenToolContext, webSummaryText, project.ProjectType, sendEvent)
 
 		if ctx.Err() != nil {
 			return
@@ -587,9 +601,6 @@ func (c *Controller) StreamBuildApp(
 			sendEvent("done", map[string]any{"success": true, "files_changed": 0})
 			return
 		}
-
-		// Phase C: Stream build plan to the user
-		c.streamBuildPlan(ctx, provider, message, preGenToolContext, project.ProjectType, sendEvent)
 	}
 
 	if ctx.Err() != nil {
