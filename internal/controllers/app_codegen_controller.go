@@ -327,6 +327,10 @@ var metadataExportPattern = regexp.MustCompile(`(?m)^export\s+const\s+metadata\b
 // internalHrefRegex matches href="/path" or href='/path' (skips dynamic href={...})
 var internalHrefRegex = regexp.MustCompile(`href=["'](/[^"']*?)["']`)
 
+// routeGroupRegex strips Next.js route group segments like (auth), (dashboard) from paths.
+// Route groups don't affect the URL — app/(auth)/login/page.tsx serves /login.
+var routeGroupRegex = regexp.MustCompile(`\([^)]+\)/`)
+
 // nonIdentifierChars matches characters that are not valid in SQL identifier names.
 var nonIdentifierChars = regexp.MustCompile(`[^a-zA-Z0-9_]`)
 
@@ -2438,6 +2442,13 @@ func runDeterministicChecks(files map[string]string) []validationError {
 			knownRoutes["/"] = true
 			continue
 		}
+		// Strip route group segments — (auth)/login → login
+		route = routeGroupRegex.ReplaceAllString(route, "")
+		route = strings.TrimSuffix(route, "/") // clean trailing slash if group was at end
+		if route == "" {
+			knownRoutes["/"] = true
+			continue
+		}
 		knownRoutes["/"+route] = true
 
 		// Check if it's a dynamic route (contains [param])
@@ -2560,7 +2571,21 @@ func runDeterministicChecks(files map[string]string) []validationError {
 	}
 
 	// --- Auth-specific checks (only when wemob-auth.ts exists) ---
-	if _, hasAuth := files["lib/wemob-auth.ts"]; hasAuth {
+	if authContent, hasAuth := files["lib/wemob-auth.ts"]; hasAuth {
+		// Check A0: Auth file must export required functions (not just types)
+		requiredAuthExports := []string{"getSession", "login", "register", "logout"}
+		for _, fn := range requiredAuthExports {
+			// Match "export async function getSession" or "export function getSession" or "export const getSession"
+			if !strings.Contains(authContent, "export") || !strings.Contains(authContent, fn) {
+				errors = append(errors, validationError{
+					File:  "lib/wemob-auth.ts",
+					Error: fmt.Sprintf("Auth library is missing required export '%s'. lib/wemob-auth.ts must export: getSession, login, register, logout (as async functions). Currently it may only have type exports.", fn),
+					Type:  "auth_missing_export",
+				})
+				break // one error is enough — all are likely missing
+			}
+		}
+
 		// Check A1: session.userId / session.username → should be session.user.id
 		sessionDirectAccessRegex := regexp.MustCompile(`session\.(userId|username|email|name|role)\b`)
 		for fp, fc := range files {
