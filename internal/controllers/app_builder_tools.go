@@ -234,7 +234,8 @@ CRITICAL LANGUAGE RULE: ALL content you generate (product names, descriptions, c
 	var toolCalled bool
 	var phase1TextBuf strings.Builder
 	var phase1TextFlushed bool
-	var phase1Mu sync.Mutex // protects toolCalled, phase1TextBuf, phase1TextFlushed
+	var phase1Suppressed bool                // once NO_TOOLS_NEEDED is detected, drop all further text
+	var phase1Mu sync.Mutex                  // protects all phase1* vars and toolCalled
 
 	result, err := utils.StreamWithTools(
 		ctx, fastModel, messages,
@@ -250,6 +251,9 @@ CRITICAL LANGUAGE RULE: ALL content you generate (product names, descriptions, c
 				}
 				phase1Mu.Lock()
 				defer phase1Mu.Unlock()
+				if phase1Suppressed {
+					return
+				}
 				// Already flushed — stream directly
 				if phase1TextFlushed {
 					sendEvent("chat_text", responses.ChatTextEvent{Chunk: cleaned})
@@ -258,6 +262,7 @@ CRITICAL LANGUAGE RULE: ALL content you generate (product names, descriptions, c
 				phase1TextBuf.WriteString(cleaned)
 				s := phase1TextBuf.String()
 				if strings.Contains(s, "NO_TOOLS_NEEDED") {
+					phase1Suppressed = true
 					return
 				}
 				// Only flush buffered text once a tool has been called
@@ -285,6 +290,20 @@ CRITICAL LANGUAGE RULE: ALL content you generate (product names, descriptions, c
 				}
 				phase1Mu.Unlock()
 				sendEvent("tool_start", map[string]string{"tool": toolName})
+			},
+			OnRoundStart: func(round int) {
+				if round == 0 {
+					return
+				}
+				phase1Mu.Lock()
+				defer phase1Mu.Unlock()
+				// Reset buffer state between rounds so that text in the new round
+				// gets re-buffered and checked for NO_TOOLS_NEEDED before streaming.
+				// Without this, phase1TextFlushed stays true from a previous tool round
+				// and all subsequent text (including NO_TOOLS_NEEDED and planning text)
+				// leaks to the user.
+				phase1TextFlushed = false
+				phase1TextBuf.Reset()
 			},
 		},
 	)
