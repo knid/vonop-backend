@@ -284,12 +284,15 @@ func (c *Controller) RecordTokenUsage(user *models.User, action, model, provider
 			if idx := strings.LastIndex(entryModel, "/"); idx >= 0 {
 				entryModel = entryModel[idx+1:]
 			}
+			spanID := uuid.New().String()
 			props := posthog.NewProperties().
 				Set("$ai_provider", provider).
 				Set("$ai_model", entryModel).
 				Set("$ai_input_tokens", entry.PromptTokens).
 				Set("$ai_output_tokens", entry.CompletionTokens).
 				Set("$ai_trace_id", traceID).
+				Set("$ai_span_id", spanID).
+				Set("$ai_parent_id", traceID).
 				Set("$ai_session_id", reference).
 				Set("$ai_latency", float64(entry.LatencyMs)/1000.0).
 				Set("$ai_is_error", false).
@@ -327,6 +330,12 @@ func (c *Controller) RecordTokenUsage(user *models.User, action, model, provider
 			}
 			if entry.OutputText != "" {
 				props.Set("$ai_output_choices", textToOutputChoices(entry.OutputText))
+				// Also send truncated $ai_output for HogQL queryability
+				outputPreview := entry.OutputText
+				if len(outputPreview) > 1000 {
+					outputPreview = outputPreview[:1000] + "..."
+				}
+				props.Set("$ai_output", outputPreview)
 			}
 			capture := posthog.Capture{
 				DistinctId: user.ID.String(),
@@ -339,13 +348,16 @@ func (c *Controller) RecordTokenUsage(user *models.User, action, model, provider
 			c.PostHog.Enqueue(capture)
 		}
 
-		// Compute total latency and cost across all LLM calls for the trace event.
-		var totalLatencyMs int64
+		// Compute wall-clock latency and total cost across all LLM calls for the trace event.
+		var totalComputeMs int64
 		var totalCost float64
 		for _, e := range tracker.Entries() {
-			totalLatencyMs += e.LatencyMs
+			totalComputeMs += e.LatencyMs
 			totalCost += e.CostUSD
 		}
+		// Use wall-clock elapsed time for $ai_latency (accurate when LLM calls run in parallel).
+		// Keep sum-of-calls as $ai_compute_time for cost analysis.
+		wallClockMs := time.Since(tracker.StartedAt).Milliseconds()
 
 		// Grouping $ai_trace event
 		traceProps := posthog.NewProperties().
@@ -354,7 +366,8 @@ func (c *Controller) RecordTokenUsage(user *models.User, action, model, provider
 			Set("$ai_session_id", reference).
 			Set("$ai_model", model).
 			Set("$ai_provider", provider).
-			Set("$ai_latency", float64(totalLatencyMs)/1000.0).
+			Set("$ai_latency", float64(wallClockMs)/1000.0).
+			Set("$ai_compute_time", float64(totalComputeMs)/1000.0).
 			Set("$ai_input_tokens", prompt).
 			Set("$ai_output_tokens", completion).
 			Set("app_type", appType).

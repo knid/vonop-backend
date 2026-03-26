@@ -480,7 +480,7 @@ func (c *Controller) streamSingleShotGeneration(
 
 	// 9. Validation fix pass — run deterministic checks and fix detected errors via LLM
 	if ctx.Err() == nil && len(ops) > 0 {
-		c.runValidationFixPass(ctx, project, provider, repo, fileMap, sendEvent, &ops, mobileConfig)
+		c.runValidationFixPass(ctx, project, user, provider, repo, fileMap, sendEvent, &ops, mobileConfig)
 	}
 
 	// 10. Auto-detect WemobBridge usage and configure mobile app

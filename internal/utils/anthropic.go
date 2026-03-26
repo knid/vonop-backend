@@ -176,13 +176,16 @@ func convertToAnthropicRequest(req ChatRequest, provider *LLMProvider) Anthropic
 	// Apply automatic prompt caching to the last few substantial system blocks.
 	// Anthropic supports up to 4 cache breakpoints total; reserve 1 for tools
 	// and 1 for the last user message (conversation prefix caching).
-	// Only 2 real system blocks exist (buildSystemPrompt + buildProjectContext).
-	maxSystemCache := 2
-	cached := 0
-	for i := len(systemBlocks) - 1; i >= 0 && cached < maxSystemCache; i-- {
-		if len(systemBlocks[i].Text) > minCacheableBlockSize {
-			systemBlocks[i].CacheControl = &AnthropicCacheControl{Type: "ephemeral"}
-			cached++
+	// Skip caching for one-shot calls (DisablePromptCache) where no follow-up
+	// call will read the cache — the 1.25x creation surcharge is wasted.
+	if !req.DisablePromptCache {
+		maxSystemCache := 2
+		cached := 0
+		for i := len(systemBlocks) - 1; i >= 0 && cached < maxSystemCache; i-- {
+			if len(systemBlocks[i].Text) > minCacheableBlockSize {
+				systemBlocks[i].CacheControl = &AnthropicCacheControl{Type: "ephemeral"}
+				cached++
+			}
 		}
 	}
 
@@ -192,14 +195,17 @@ func convertToAnthropicRequest(req ChatRequest, provider *LLMProvider) Anthropic
 	// Mark last user message cacheable for conversation prefix caching.
 	// This lets Anthropic cache system blocks + all messages up to the last user turn,
 	// so each tool round only pays for the new assistant+tool_result tokens.
-	for i := len(anthropicMessages) - 1; i >= 0; i-- {
-		if anthropicMessages[i].Role == "user" {
-			blocks := toContentBlocks(anthropicMessages[i].Content)
-			if len(blocks) > 0 {
-				blocks[len(blocks)-1].CacheControl = &AnthropicCacheControl{Type: "ephemeral"}
-				anthropicMessages[i].Content = blocks
+	// Skip for one-shot calls where no follow-up will read the cache.
+	if !req.DisablePromptCache {
+		for i := len(anthropicMessages) - 1; i >= 0; i-- {
+			if anthropicMessages[i].Role == "user" {
+				blocks := toContentBlocks(anthropicMessages[i].Content)
+				if len(blocks) > 0 {
+					blocks[len(blocks)-1].CacheControl = &AnthropicCacheControl{Type: "ephemeral"}
+					anthropicMessages[i].Content = blocks
+				}
+				break
 			}
-			break
 		}
 	}
 
@@ -224,11 +230,13 @@ func convertToAnthropicRequest(req ChatRequest, provider *LLMProvider) Anthropic
 		}
 	}
 	// Mark last function tool cacheable (skip server tools for caching)
-	for i := len(anthropicTools) - 1; i >= 0; i-- {
-		if at, ok := anthropicTools[i].(AnthropicTool); ok {
-			at.CacheControl = &AnthropicCacheControl{Type: "ephemeral"}
-			anthropicTools[i] = at
-			break
+	if !req.DisablePromptCache {
+		for i := len(anthropicTools) - 1; i >= 0; i-- {
+			if at, ok := anthropicTools[i].(AnthropicTool); ok {
+				at.CacheControl = &AnthropicCacheControl{Type: "ephemeral"}
+				anthropicTools[i] = at
+				break
+			}
 		}
 	}
 
