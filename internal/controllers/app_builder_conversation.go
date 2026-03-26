@@ -111,23 +111,26 @@ func (c *Controller) streamWebSearchSummary(
 	return fullText
 }
 
-// runConversationLoop checks if the prompt needs clarification and runs a natural
-// multi-turn conversation (max 3 turns) to gather requirements. Returns the
-// enriched prompt with conversation transcript appended.
-func (c *Controller) runConversationLoop(
+// promptDecision holds the result of classifying a user prompt.
+type promptDecision struct {
+	IsQuestion        bool   `json:"is_question"`
+	NeedsConversation bool   `json:"needs_conversation"`
+	Greeting          string `json:"greeting"`
+}
+
+// classifyPrompt runs a fast LLM call to classify whether the user's message is
+// a question, a vague build request, or a ready-to-build prompt. Also produces
+// a greeting message when it's a build request (merged to eliminate a separate LLM call).
+func (c *Controller) classifyPrompt(
 	ctx context.Context,
-	jobID string,
 	provider *utils.LLMProvider,
 	message string,
 	imageURLs []string,
 	webContext string,
-	webSummaryText string,
 	projectType string,
-	sendEvent func(string, any) bool,
-) string {
+) promptDecision {
 	fastModel := provider.FastModel()
 
-	// Step 1: Quick decision — does this prompt need conversation?
 	decisionMsg := fmt.Sprintf("Project type: %s\n\nUser prompt:\n%s", projectType, message)
 	if len(imageURLs) > 0 {
 		decisionMsg += fmt.Sprintf("\n\nUser attached %d image(s) as visual reference for the design.", len(imageURLs))
@@ -138,22 +141,36 @@ func (c *Controller) runConversationLoop(
 	decisionJSON, err := utils.GetJSONFromLLM(ctx, fastModel, constants.CONVERSATION_DECISION_PROMPT, decisionMsg, provider)
 	if err != nil {
 		slog.Warn("conversation decision failed, skipping", "error", err)
-		return message
+		return promptDecision{}
 	}
 
-	var decision struct {
-		IsQuestion        bool `json:"is_question"`
-		NeedsConversation bool `json:"needs_conversation"`
-	}
+	var decision promptDecision
 	if err := json.Unmarshal([]byte(decisionJSON), &decision); err != nil {
 		cleaned := utils.ExtractJSON(decisionJSON)
 		if err2 := json.Unmarshal([]byte(cleaned), &decision); err2 != nil {
 			slog.Warn("failed to parse conversation decision", "error", err2)
-			return message
+			return promptDecision{}
 		}
 	}
+	return decision
+}
 
-	// Step 2a: If the user asked a general question (not a build request),
+// runConversationLoop takes a pre-computed classification decision and runs the
+// appropriate flow: answer a question, run a multi-turn conversation, or return
+// the original prompt. Returns the enriched prompt with conversation transcript appended.
+func (c *Controller) runConversationLoop(
+	ctx context.Context,
+	jobID string,
+	provider *utils.LLMProvider,
+	decision promptDecision,
+	message string,
+	imageURLs []string,
+	webContext string,
+	webSummaryText string,
+	projectType string,
+	sendEvent func(string, any) bool,
+) string {
+	// Step 1: If the user asked a general question (not a build request),
 	// answer it and signal the caller to stop generation.
 	if decision.IsQuestion {
 		slog.Info("conversation decision: general question detected, answering instead of building", "message", message)
@@ -161,10 +178,12 @@ func (c *Controller) runConversationLoop(
 		return "" // empty string signals caller to abort generation
 	}
 
-	// Step 2b: If no conversation needed, return original prompt
+	// Step 2: If no conversation needed, return original prompt
 	if !decision.NeedsConversation {
 		return message
 	}
+
+	fastModel := provider.FastModel()
 
 	// Step 3: Conversation loop (max 3 turns)
 	conversationHistory := []conversationTurn{
@@ -372,40 +391,8 @@ func buildConversationEnrichedPrompt(original string, history []conversationTurn
 }
 
 
-func (c *Controller) streamBuildPlan(
-	ctx context.Context,
-	provider *utils.LLMProvider,
-	enrichedMessage string,
-	webContext string,
-	projectType string,
-	sendEvent func(string, any) bool,
-) {
-	fastModel := provider.FastModel()
-
-	userContent := fmt.Sprintf("Project type: %s\n\nUser request (with any conversation context):\n%s", projectType, enrichedMessage)
-	if webContext != "" {
-		userContent += "\n\nWeb search context:\n" + webContext
-	}
-
-	messages := []utils.Message{
-		{Role: "system", Content: constants.CONVERSATION_BUILD_PLAN_PROMPT},
-		{Role: "user", Content: userContent},
-	}
-
-	fullText, err := utils.StreamTextFromLLMWithMessages(
-		ctx, fastModel, messages, provider,
-		func(chunk string) {
-			sendEvent("conversation_chunk", map[string]any{"chunk": chunk})
-		},
-		nil,
-		utils.StreamTextConfig{MaxTokens: 512},
-	)
-	if err != nil {
-		slog.Warn("failed to stream build plan", "error", err)
-		return
-	}
-	sendEvent("conversation_done", map[string]any{"type": "build_plan", "text": fullText})
-}
+// streamBuildPlan is deprecated — greeting is now merged into classifyPrompt.
+// Kept as a no-op for any remaining callers during transition.
 
 // Deprecated: waitForClarification sends clarification questions to the client and blocks
 // until the user answers, skips, or a 5-minute timeout elapses.
