@@ -10,6 +10,7 @@ import (
 	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/services/gitrepo"
 	"github.com/knid/wemob/internal/utils"
+	"github.com/posthog/posthog-go"
 )
 
 func (c *Controller) runDeterministicAutoFixes(
@@ -281,6 +282,7 @@ Follow the same design system, color scheme, and coding patterns as the existing
 func (c *Controller) runValidationFixPass(
 	ctx context.Context,
 	project *models.AppProject,
+	user *models.User,
 	provider *utils.LLMProvider,
 	repo *gitrepo.Repo,
 	fileMap map[string]string,
@@ -298,6 +300,19 @@ func (c *Controller) runValidationFixPass(
 		"error_count", len(errors),
 	)
 
+	// Emit error categorization event for PostHog analysis
+	errorsByFile := make(map[string][]validationError)
+	errorCounts := make(map[string]int)
+	for _, e := range errors {
+		errorsByFile[e.File] = append(errorsByFile[e.File], e)
+		errorCounts[e.Type]++
+	}
+	c.TrackUserEvent(user, "codegen_validation_errors", posthog.NewProperties().
+		Set("app_id", project.ID.String()).
+		Set("error_count", len(errors)).
+		Set("error_types", errorCounts).
+		Set("files_affected", len(errorsByFile)))
+
 	sendEvent("progress", responses.ProgressEvent{
 		Phase:   "auto_fix",
 		Message: fmt.Sprintf("Fixing %d detected issue(s)...", len(errors)),
@@ -305,11 +320,6 @@ func (c *Controller) runValidationFixPass(
 
 	// Build error summary for the LLM
 	var errorSummary strings.Builder
-	// Group errors by file for clarity
-	errorsByFile := make(map[string][]validationError)
-	for _, e := range errors {
-		errorsByFile[e.File] = append(errorsByFile[e.File], e)
-	}
 	for file, fileErrors := range errorsByFile {
 		errorSummary.WriteString(fmt.Sprintf("\n### %s\n", file))
 		for _, e := range fileErrors {
@@ -408,5 +418,11 @@ Do NOT change design, layout, or functionality — ONLY fix the reported errors.
 			"original_errors", len(errors),
 			"remaining_errors", len(remainingErrors),
 		)
+
+		c.TrackUserEvent(user, "codegen_fix_pass_completed", posthog.NewProperties().
+			Set("app_id", project.ID.String()).
+			Set("errors_input", len(errors)).
+			Set("errors_remaining", len(remainingErrors)).
+			Set("files_affected", len(errorsByFile)))
 	}
 }
