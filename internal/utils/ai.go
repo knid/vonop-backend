@@ -1393,6 +1393,7 @@ type ToolCallConfig struct {
 	AfterToolRound    func(allIntercepted bool) string                       // Called after each tool round; allIntercepted=true when every call was intercepted; non-empty return is injected as a system message
 	FilterTools       func(tools []Tool) []Tool                              // Called each round to filter/modify tools; return nil to strip all tools
 	OnToolCallStart   func(toolName string)                                  // Called when a tool call name is first detected during SSE streaming (before args are complete)
+	OnRoundStart      func(round int)                                       // Called at the start of each round (useful for resetting per-round state like text buffers)
 }
 
 // An optional ToolCallConfig can be passed to override defaults.
@@ -1446,6 +1447,10 @@ func StreamWithTools(
 	prevToolResultRange := [2]int{0, 0} // [start, end) of previous round's tool result messages
 
 	for round := 0; round < maxRounds; round++ {
+		// Notify caller that a new round is starting (e.g. to reset per-round state).
+		if len(opts) > 0 && opts[0].OnRoundStart != nil {
+			opts[0].OnRoundStart(round)
+		}
 		// Trim the PREVIOUS round's tool results now (deferred from last iteration).
 		// This ensures the model sees full results for one round before they're compressed.
 		if len(opts) > 0 && opts[0].TrimResults != nil && prevToolResultRange[1] > prevToolResultRange[0] {
