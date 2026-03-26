@@ -1542,7 +1542,7 @@ func (c *Controller) seedNeonDatabase(ctx context.Context, project *models.AppPr
 The app description: %s
 
 Rules:
-1. Generate 8-20 rows of realistic data for each table.
+1. Generate 3-5 rows of realistic data for each table. Keep it concise — this is demo data for a preview environment.
 2. Use gen_random_uuid() for UUID primary keys.
 3. CRITICAL: Insert tables in dependency order — parent tables with referenced primary keys MUST be inserted BEFORE child tables that reference them via foreign keys.
 4. Use NOW() for timestamp columns.

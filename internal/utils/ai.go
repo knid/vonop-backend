@@ -210,15 +210,16 @@ func estimateCostUSD(model string, inputTokens, outputTokens, cacheCreation, cac
 type TokenTracker struct {
 	mu           sync.Mutex
 	entries      []TokenEntry
-	TrackContent bool   // opt-in: when true, StreamWithTools records message content per round
-	TraceInput   string // user's original message (for $ai_trace)
-	TraceOutput  string // final assistant response (for $ai_trace)
-	UserID       string // for slog attribution
-	ProjectID    string // for slog attribution
+	TrackContent bool      // opt-in: when true, StreamWithTools records message content per round
+	TraceInput   string    // user's original message (for $ai_trace)
+	TraceOutput  string    // final assistant response (for $ai_trace)
+	UserID       string    // for slog attribution
+	ProjectID    string    // for slog attribution
+	StartedAt    time.Time // wall-clock start of the generation (for accurate $ai_latency)
 }
 
 func NewTokenTracker() *TokenTracker {
-	return &TokenTracker{}
+	return &TokenTracker{StartedAt: time.Now()}
 }
 
 // trackerAttrs returns slog attributes for user_id and project_id from the
@@ -420,6 +421,7 @@ type ChatRequest struct {
 	ToolChoice          any                   `json:"tool_choice,omitempty"`
 	Reasoning           *ReasoningConfig      `json:"reasoning,omitempty"`
 	Thinking            *ThinkingConfig       `json:"thinking,omitempty"`
+	DisablePromptCache  bool                  `json:"-"` // skip Anthropic cache_control on system blocks (for one-shot calls with no follow-up)
 }
 
 type Message struct {
@@ -610,6 +612,7 @@ func GetJSONFromLLM(ctx context.Context, model, system, message string, provider
 			{Role: "system", Content: system},
 			{Role: "user", Content: message},
 		},
+		DisablePromptCache: true, // one-shot call — no follow-up will read the cache
 	}, provider)
 	if err != nil {
 		return "", fmt.Errorf("error building request: %w", err)
@@ -680,6 +683,7 @@ func GetTextFromLLM(ctx context.Context, model, system, message string, provider
 			{Role: "system", Content: system},
 			{Role: "user", Content: message},
 		},
+		DisablePromptCache: true, // one-shot call — no follow-up will read the cache
 	}, provider)
 	if err != nil {
 		return "", fmt.Errorf("error building request: %w", err)
@@ -1081,10 +1085,11 @@ func GetJSONFromLLMWithMessages(ctx context.Context, model string, messages []Me
 	}
 
 	body, err := buildLLMRequestBody(ChatRequest{
-		Model:          model,
-		Messages:       messages,
-		MaxTokens:      16384,
-		ResponseFormat: &ResponseFormat{Type: "json_object"},
+		Model:              model,
+		Messages:           messages,
+		MaxTokens:          16384,
+		ResponseFormat:     &ResponseFormat{Type: "json_object"},
+		DisablePromptCache: true, // one-shot call — no follow-up will read the cache
 	}, provider)
 	if err != nil {
 		return "", fmt.Errorf("error building request: %w", err)
