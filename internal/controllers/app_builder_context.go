@@ -377,6 +377,72 @@ var exportPattern = regexp.MustCompile(`(?m)^export\s+(?:default\s+)?(?:function
 
 // extractFileSummary produces a brief structural summary of a file's exports.
 
+// buildAvailableImportsSection creates a prominent section listing all exports
+// from lib/ files so the LLM knows exactly what can be imported.
+// Placed at the end of project context for recency bias.
+func buildAvailableImportsSection(fileMap map[string]string) string {
+	type libExport struct {
+		path    string
+		exports []string
+		note    string
+	}
+
+	var libs []libExport
+	for fp, content := range fileMap {
+		if !strings.HasPrefix(fp, "lib/") {
+			continue
+		}
+		if !strings.HasSuffix(fp, ".ts") && !strings.HasSuffix(fp, ".tsx") {
+			continue
+		}
+
+		// Extract named exports
+		var exports []string
+		matches := exportPattern.FindAllStringSubmatch(content, 30)
+		for _, m := range matches {
+			if len(m) > 1 {
+				exports = append(exports, m[1])
+			}
+		}
+		if len(exports) == 0 {
+			continue
+		}
+
+		sort.Strings(exports)
+
+		// Determine note
+		importPath := strings.TrimSuffix(strings.TrimSuffix(fp, ".tsx"), ".ts")
+		note := ""
+		if strings.Contains(fp, "wemob-auth.ts") {
+			note = "SERVER-ONLY — never import in 'use client' files"
+		} else if strings.Contains(fp, "wemob-auth-client") {
+			note = "CLIENT-ONLY — never import in API routes"
+		} else if strings.Contains(fp, "wemob-store") {
+			note = "E-commerce SDK"
+		}
+
+		libs = append(libs, libExport{path: "@/" + importPath, exports: exports, note: note})
+	}
+
+	if len(libs) == 0 {
+		return ""
+	}
+
+	sort.Slice(libs, func(i, j int) bool { return libs[i].path < libs[j].path })
+
+	var sb strings.Builder
+	sb.WriteString("\n### ⚠️ Available Imports — ONLY use these exports from lib/ files\n")
+	for _, lib := range libs {
+		sb.WriteString(fmt.Sprintf("- `%s`: %s", lib.path, strings.Join(lib.exports, ", ")))
+		if lib.note != "" {
+			sb.WriteString(fmt.Sprintf(" (%s)", lib.note))
+		}
+		sb.WriteString("\n")
+	}
+	sb.WriteString("Do NOT import functions or types not listed above from these modules.\n")
+	return sb.String()
+}
+
 func extractFileSummary(content string) string {
 	var names []string
 	hasDefault := false
@@ -691,6 +757,9 @@ func (c *Controller) buildProjectContextForChat(project *models.AppProject, file
 		sb.WriteString("\nNo user-uploaded assets. If the user's request requires custom files (3D models, fonts, images, videos, etc.), tell them to upload the files first using the Assets button (paperclip icon) in the chat toolbar. Do NOT use placeholder URLs or try to generate these files.\n")
 	}
 
+	// Available Imports section — placed at the end for recency bias
+	sb.WriteString(buildAvailableImportsSection(fileMap))
+
 	return sb.String()
 }
 
@@ -908,6 +977,9 @@ func (c *Controller) buildProjectContext(project *models.AppProject, fileMap map
 	} else {
 		sb.WriteString("\nNo user-uploaded assets. If the user's request requires custom files (3D models, fonts, images, videos, etc.), tell them to upload the files first using the Assets button (paperclip icon) in the chat toolbar. Do NOT use placeholder URLs or try to generate these files.\n")
 	}
+
+	// Available Imports section — placed at the end for recency bias
+	sb.WriteString(buildAvailableImportsSection(fileMap))
 
 	return sb.String()
 }
