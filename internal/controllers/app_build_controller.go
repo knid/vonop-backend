@@ -12,6 +12,7 @@ import (
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/services/codemagic"
+	"github.com/knid/wemob/internal/services/coolify"
 	"github.com/knid/wemob/internal/utils"
 	"github.com/knid/wemob/internal/utils/external"
 )
@@ -393,143 +394,15 @@ func (c *Controller) GetLatestDeploymentStatus(projectID string) (*models.AppDep
 		return nil, err
 	}
 
-	// Skip polling for old Vercel deployments — return existing status as-is
-	if deployment.Provider == "vercel" {
-		return deployment, nil
-	}
-
-	// If still building, check Coolify for actual status
-	if (deployment.Status == "building" || deployment.Status == "pending") && c.CoolifyService != nil {
-		// Timeout: if building for more than 15 minutes, mark as failed
-		if time.Since(deployment.CreatedAt) > 15*time.Minute {
-			deployment.Status = "failed"
-			deployment.ErrorMessage = "Build timed out after 15 minutes"
-			if _, err := c.DB.UpdateAppDeployment(deployment); err != nil {
-				slog.Error("Failed to update deployment status", "error", err)
-			}
-			return deployment, nil
-		}
-
-		appUUID, _ := deployment.ProviderData["coolify_app_uuid"].(string)
-		if appUUID != "" {
-			// Check Coolify deployment/build status first — the app container
-			// status is stale right after a restart (shows old container state).
-			dep, depErr := c.CoolifyService.GetLatestDeployment(appUUID)
-			if depErr == nil && dep != nil {
-				depStatus := strings.ToLower(dep.Status)
-
-				// Guard against stale deployment status: right after RestartApp,
-				// Coolify may not have created the new deployment record yet, so
-				// GetLatestDeployment returns the *previous* (possibly failed) one.
-				// If the Coolify deployment was created before our deployment was
-				// triggered, or if our deployment is very recent, ignore "failed".
-				isStale := false
-				if !dep.CreatedAt.IsZero() && dep.CreatedAt.Before(deployment.CreatedAt) {
-					isStale = true
-				}
-				// Grace period: builds can take several minutes. Don't declare
-				// failure until enough time has passed for a legitimate build.
-				recentGrace := time.Since(deployment.CreatedAt) < 5*time.Minute
-
-				switch {
-				case depStatus == "failed" || depStatus == "error":
-					if isStale || recentGrace {
-						// Likely seeing the old deployment's status or build is
-						// still in progress — keep polling
-						slog.Info("Ignoring stale/early Coolify deployment status",
-							"dep_status", depStatus,
-							"dep_created", dep.CreatedAt,
-							"our_created", deployment.CreatedAt,
-							"is_stale", isStale,
-							"recent_grace", recentGrace,
-						)
-						return deployment, nil
-					}
-					deployment.Status = "failed"
-					deployment.ErrorMessage = extractBuildError(dep.Logs)
-					if deployment.ErrorMessage == "" {
-						deployment.ErrorMessage = "Build failed — the application crashed before it could start. This is usually caused by a build error or insufficient memory."
-					}
-					if _, updateErr := c.DB.UpdateAppDeployment(deployment); updateErr != nil {
-						slog.Error("Failed to update deployment status", "error", updateErr)
-					}
-					return deployment, nil
-				case depStatus == "finished" || depStatus == "success":
-					// If this is the previous deployment's "finished" status (not our
-					// current build), Coolify hasn't created the new record yet — keep polling.
-					if isStale {
-						slog.Info("Ignoring stale Coolify finished status — new build not tracked yet",
-							"dep_status", depStatus,
-							"dep_created", dep.CreatedAt,
-							"our_created", deployment.CreatedAt,
-						)
-						return deployment, nil
-					}
-					// Build finished — now check if the app container is actually running
-				default:
-					// Build still in progress (queued, in_progress, etc.)
-					return deployment, nil
-				}
-			} else if depErr != nil {
-				slog.Warn("Failed to check Coolify deployment status", "error", depErr, "app_uuid", appUUID)
-				// If deployment was created recently, give it time before declaring failure
-				if time.Since(deployment.CreatedAt) < 60*time.Second {
-					return deployment, nil
-				}
-			}
-
-			// Build finished — check if app container is running
-			status, err := c.CoolifyService.GetAppStatus(appUUID)
-			if err != nil {
-				slog.Warn("Failed to check Coolify app status", "error", err, "app_uuid", appUUID)
-				// If deployment was created recently, don't fail yet
-				if time.Since(deployment.CreatedAt) < 2*time.Minute {
-					return deployment, nil
-				}
-				deployment.Status = "failed"
-				deployment.ErrorMessage = "Build failed — application was removed by Coolify"
-				if _, updateErr := c.DB.UpdateAppDeployment(deployment); updateErr != nil {
-					slog.Error("Failed to update deployment status", "error", updateErr)
-				}
-				return deployment, nil
-			}
-
-			var newStatus string
-			var errorMessage string
-			lowerStatus := strings.ToLower(status)
-			switch {
-			case strings.HasPrefix(lowerStatus, "running"):
-				newStatus = "deployed"
-			case strings.HasPrefix(lowerStatus, "exited"),
-				strings.HasPrefix(lowerStatus, "error"),
-				strings.HasPrefix(lowerStatus, "degraded"):
-				// Container may still be starting after a build finishes — give it time
-				if time.Since(deployment.CreatedAt) < 2*time.Minute {
-					return deployment, nil
-				}
-				newStatus = "failed"
-				if dep != nil && dep.Logs != "" {
-					errorMessage = extractBuildError(dep.Logs)
-				} else {
-					logs, logErr := c.CoolifyService.GetAppLogs(appUUID, 200)
-					if logErr != nil {
-						errorMessage = "Build failed — the application crashed before it could start. This is usually caused by a build error or insufficient memory."
-					} else {
-						errorMessage = extractBuildError(logs)
-					}
-				}
-			default:
-				// Still building/starting
-				return deployment, nil
-			}
-
-			deployment.Status = newStatus
-			if errorMessage != "" {
-				deployment.ErrorMessage = errorMessage
-			}
-			if _, err := c.DB.UpdateAppDeployment(deployment); err != nil {
-				slog.Error("Failed to update deployment status", "error", err)
-			}
+	// Status is updated by the Coolify webhook (HandleCoolifyWebhook).
+	// The only thing we do here is enforce a timeout safety net for builds
+	// that never receive a webhook callback (e.g. Coolify webhook misconfigured).
+	if (deployment.Status == "building" || deployment.Status == "pending") &&
+		time.Since(deployment.CreatedAt) > 15*time.Minute {
+		deployment.Status = "failed"
+		deployment.ErrorMessage = "Build timed out after 15 minutes"
+		if _, err := c.DB.UpdateAppDeployment(deployment); err != nil {
+			slog.Error("Failed to update deployment status", "error", err)
 		}
 	}
 
@@ -951,5 +824,78 @@ func (c *Controller) replaceWithRealOneSignal(project *models.Project) error {
 	project.OneSignalAppToken = onesignalAppToken
 
 	slog.Info("Replaced fake OneSignal IDs with real ones", "project_id", project.ID)
+	return nil
+}
+
+// HandleCoolifyWebhook processes a deployment status event from Coolify's
+// notification webhook. It looks up the Coolify app UUID, finds the
+// in-progress deployment, and updates its status in the DB.
+func (c *Controller) HandleCoolifyWebhook(event coolify.DeploymentEvent) error {
+	appUUID := event.AppUUID()
+	if appUUID == "" {
+		return fmt.Errorf("missing application UUID in webhook payload")
+	}
+
+	status := event.DeployStatus()
+	if status == "" {
+		return fmt.Errorf("missing deployment status in webhook payload")
+	}
+
+	// Find our CoolifyProject by Coolify's app UUID
+	coolifyProject, err := c.DB.GetCoolifyProjectByCoolifyAppUUID(appUUID)
+	if err != nil {
+		return fmt.Errorf("unknown coolify app %s: %w", appUUID, err)
+	}
+
+	// Find the active "building" deployment for this project
+	deployment, err := c.DB.GetBuildingAppDeployment(coolifyProject.AppProjectID.String())
+	if err != nil {
+		// No building deployment — might be a duplicate or late webhook, ignore
+		slog.Info("Coolify webhook: no building deployment found, ignoring",
+			"app_uuid", appUUID, "status", status)
+		return nil
+	}
+
+	switch {
+	case status == "finished" || status == "success":
+		// Build finished — but container might still be starting.
+		// Check if app is actually running before marking as deployed.
+		if c.CoolifyService != nil {
+			appStatus, appErr := c.CoolifyService.GetAppStatus(appUUID)
+			if appErr == nil && strings.HasPrefix(strings.ToLower(appStatus), "running") {
+				deployment.Status = "deployed"
+			} else {
+				// Build done but container not running yet — mark deployed optimistically.
+				// The container usually starts within seconds of "finished".
+				deployment.Status = "deployed"
+			}
+		} else {
+			deployment.Status = "deployed"
+		}
+
+	case status == "failed" || status == "error":
+		deployment.Status = "failed"
+		logs := event.DeployLogs()
+		deployment.ErrorMessage = extractBuildError(logs)
+		if deployment.ErrorMessage == "" {
+			deployment.ErrorMessage = "Build failed — the application could not be deployed."
+		}
+
+	default:
+		// in_progress, queued, etc. — update to reflect build is active
+		slog.Info("Coolify webhook: build in progress", "app_uuid", appUUID, "status", status)
+		return nil
+	}
+
+	if _, err := c.DB.UpdateAppDeployment(deployment); err != nil {
+		slog.Error("Failed to update deployment from webhook", "error", err, "deployment_id", deployment.ID)
+		return fmt.Errorf("failed to update deployment: %w", err)
+	}
+
+	slog.Info("Deployment status updated via webhook",
+		"deployment_id", deployment.ID,
+		"app_uuid", appUUID,
+		"new_status", deployment.Status)
+
 	return nil
 }
