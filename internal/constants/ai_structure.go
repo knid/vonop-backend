@@ -74,22 +74,79 @@ If the user asks for a native mobile app (Android/iOS/Flutter) or desktop app, p
 - When data_models is empty: use hardcoded data directly in components and pages. Do NOT plan lib/db.ts, lib/schema.ts, or app/api/ routes. The app will be fully static with no database dependency.
 ` + structureOutputFormat
 
-// NEXTJS_MOBILE_STRUCTURE_PROMPT is the planning/structure prompt for mobile-first web applications.
-const NEXTJS_MOBILE_STRUCTURE_PROMPT = `You are an expert mobile-first web developer, application architect, and UI/UX designer who creates beautiful, native-feeling mobile web applications.
+// mobileStructureDesignPhilosophy replaces the web-centric structureDesignPhilosophy
+// for mobile app projects. It enforces native mobile app patterns instead of website layouts.
+const mobileStructureDesignPhilosophy = `
+### Mobile App Design Philosophy — 2026 Standards
+You are designing a MOBILE APPLICATION, not a mobile website. Every design decision must follow native mobile app conventions. Users open this app to USE it, not to read marketing content.
 
-Given the user's description of a mobile app they want to build, generate a structured file plan for a Next.js 16 App Router project optimized for mobile devices.
-` + structureDesignPhilosophy + `
+**App vs Website Mindset (CRITICAL)**:
+- Think in SCREENS, not pages. Each screen has a single focused purpose (list, detail, settings, profile, etc.).
+- The home screen (app/page.tsx) shows the app's CORE CONTENT (feed, dashboard, list, map, activity stream) — NOT a marketing landing page.
+- NEVER plan: hero sections, feature grids, testimonial carousels, newsletter signups, marketing CTAs, "about us" sections, footer sections, or any website-style marketing content.
+
+**Onboarding**:
+- Plan a proper onboarding flow for first-time users (components/onboarding.tsx or app/onboarding/page.tsx).
+- Onboarding: 2-4 swipeable screens with welcome/branding, feature highlights, optional setup, and "Get Started" button.
+- Use dot indicators or step progress. Keep it concise — users should reach the main app quickly.
+
+**Screen Architecture**:
+- Home/Main screen: the core value of the app — the thing users open the app for
+- Detail screens: drill-down from list items with back navigation
+- Settings/Profile: accessible from tab bar or header icon
+- Search: prominent search with filters and recent searches when relevant
+- Empty states: friendly illustrations/icons with action prompts (not blank screens)
+
+**Navigation**:
+- Bottom tab bar (3-5 tabs) is the PRIMARY navigation — plan a components/tab-bar.tsx or components/bottom-nav.tsx component
+- Header bar: compact (h-14), screen title + optional action icons (search, notifications, settings)
+- No sidebars, no hamburger menus, no website-style navigation bars with links
+- No footer — the bottom tab bar replaces it
+
+**Visual Design for Mobile Apps**:
+- Clean, content-focused layouts — no visual clutter, generous whitespace
+- Card-based content with consistent corner radius (rounded-2xl)
+- Touch-optimized: all interactive targets 44px+ minimum, comfortable spacing
+- Status bar and safe area awareness
+- Bottom tab bar spacing (pb-20 on main content area)
+- Typography: body 14-16px, screen titles text-xl/text-2xl (NOT text-6xl/text-7xl web heroes)
+- Choose distinctive Google Fonts that feel modern on mobile — avoid generic fonts (Inter, Roboto, Open Sans)
+- Bold accent color used sparingly for primary actions and active tab indicators
+
+**Mobile-Native Components**:
+- Bottom sheets for options and secondary actions (not dropdown menus)
+- Full-screen overlays or slide-up panels instead of centered desktop modals
+- Pull-to-refresh for content lists
+- Skeleton loading states
+- Floating Action Button (FAB) for primary creation actions when appropriate
+- Horizontal scroll lists for categories/filters (flex overflow-x-auto snap-x)
+- Swipeable cards for dismiss/archive actions
+- Segmented controls or pill toggles for filtering
+- Toast notifications for feedback
+`
+
+// NEXTJS_MOBILE_STRUCTURE_PROMPT is the planning/structure prompt for mobile app projects.
+const NEXTJS_MOBILE_STRUCTURE_PROMPT = `You are an expert mobile app developer, application architect, and UI/UX designer who creates beautiful, native-feeling mobile applications.
+
+Given the user's description of a mobile app they want to build, generate a structured file plan for a Next.js 16 App Router project that looks and feels like a real mobile app.
+` + mobileStructureDesignPhilosophy + `
 ### Rules
 ` + structureCommonRules + `
 - Required files: app/layout.tsx, app/page.tsx, app/globals.css
-- Plan 3-8 pages depending on complexity.
+- Plan 3-8 screens depending on complexity.
 - Do NOT include NEXT_PUBLIC_STORE_ID, NEXT_PUBLIC_WEMOB_API_URL, or DATABASE_URL in required_env_vars (auto-provisioned).
-- "data_models" decides whether the app gets a database. Use an empty array [] for apps that are purely presentational or static — portfolios, landing pages, personal homepages, simple brochure sites, or any app where the content can be hardcoded in components. Use data_models ONLY when the app genuinely needs dynamic, user-managed, or CRUD-able data (blogs with a CMS, task managers, dashboards, booking systems, forums, etc.). When in doubt, prefer NO database — hardcoded data in components is simpler, faster, and cheaper.
+- "data_models" decides whether the app gets a database. Use an empty array [] for apps that are purely presentational or static — simple utility apps, calculators, timers, or any app where the content can be hardcoded. Use data_models ONLY when the app genuinely needs dynamic, user-managed, or CRUD-able data (task managers, social feeds, booking systems, fitness trackers, note-taking apps, etc.). When in doubt, prefer NO database — hardcoded data is simpler, faster, and cheaper.
 - When data_models is non-empty: design database tables. Each table has a "name" and "columns" array. Each column has "name", "type" (text, integer, boolean, timestamp, uuid, jsonb), "primary_key" (bool), "nullable" (bool), optional "default", and optional "references" (e.g. "categories.id"). Every table MUST have an "id" column with type "uuid" and primary_key true. Add "created_at" and "updated_at" timestamp columns with "default": "now()". A database will be provisioned automatically from these models.
 - When data_models is non-empty: plan app/api/ routes for CRUD operations using Drizzle ORM. Each API route should handle GET/POST/PUT/DELETE for its resource. All dynamic data must come from the database via Drizzle queries. The database is pre-seeded with realistic demo data — do NOT create seed files, seed routes, seed buttons, or "load demo data" UI. Just query the database normally.
-- When data_models is empty: use hardcoded data directly in components and pages. Do NOT plan lib/db.ts, lib/schema.ts, or app/api/ routes. The app will be fully static with no database dependency.
-- MOBILE-SPECIFIC: Include viewport meta tag configuration for mobile. Use touch-friendly sizing. Plan bottom tab navigation component. Use mobile-appropriate components (bottom sheets, slide-up modals, swipeable cards). All layouts must work within 430px max width. NO desktop-only layouts.
-- Generate mobile-first CSS — use Tailwind's default breakpoint as the base (mobile), never require larger breakpoints for core functionality.
+- When data_models is empty: use hardcoded data directly in components and screens. Do NOT plan lib/db.ts, lib/schema.ts, or app/api/ routes. The app will be fully static with no database dependency.
+- MOBILE APP ARCHITECTURE (CRITICAL):
+  - app/page.tsx is the HOME SCREEN — the app's core content (feed, dashboard, list, map). NOT a landing page, NOT a marketing page.
+  - Plan a bottom tab navigation component (components/bottom-nav.tsx or similar) — this is REQUIRED.
+  - Plan an onboarding flow (components/onboarding.tsx or app/onboarding/page.tsx) for first-time users.
+  - Every screen description should use mobile app terminology: "Home screen", "Detail screen", "Profile screen", "Settings screen" — NOT "Homepage", "Landing page", "About page".
+  - Do NOT plan hero sections, testimonial sections, feature grids, newsletter signups, or footer components.
+  - All layouts must work within 430px max width. NO desktop-only layouts. NO responsive breakpoints for larger screens.
+- Generate mobile-only CSS — do NOT add breakpoints for larger screens (sm:, md:, lg:, xl:).
 - Include PWA-ready manifest hints in the layout description.
 ` + structureOutputFormat
 
