@@ -20,9 +20,10 @@ type Service struct {
 	ProjectUUID     string
 	EnvironmentName string
 	PrivateKeyUUID  string
+	WebhookSecret   string // shared secret for verifying incoming webhooks
 }
 
-func NewService(baseURL, token, serverUUID, projectUUID, environmentName, privateKeyUUID string) *Service {
+func NewService(baseURL, token, serverUUID, projectUUID, environmentName, privateKeyUUID, webhookSecret string) *Service {
 	return &Service{
 		BaseURL:         strings.TrimRight(baseURL, "/"),
 		Token:           token,
@@ -30,6 +31,7 @@ func NewService(baseURL, token, serverUUID, projectUUID, environmentName, privat
 		ProjectUUID:     projectUUID,
 		EnvironmentName: environmentName,
 		PrivateKeyUUID:  privateKeyUUID,
+		WebhookSecret:   webhookSecret,
 	}
 }
 
@@ -283,4 +285,89 @@ func (s *Service) UpdateDomains(appUUID string, domains []string) error {
 func (s *Service) DeleteApp(appUUID string) error {
 	_, err := s.doRequest("DELETE", fmt.Sprintf("/applications/%s", appUUID), nil)
 	return err
+}
+
+// DeploymentEvent represents an incoming Coolify webhook payload for deployment events.
+type DeploymentEvent struct {
+	// Coolify sends different payload shapes depending on version.
+	// We accept the most common fields and fall back gracefully.
+	Status          string `json:"status"`
+	Type            string `json:"type"`
+	ApplicationUUID string `json:"application_uuid"`
+	DeploymentUUID  string `json:"deployment_uuid"`
+	Logs            string `json:"logs"`
+
+	// Nested format (some Coolify versions)
+	Application *struct {
+		UUID string `json:"uuid"`
+	} `json:"application"`
+	Deployment *struct {
+		UUID   string `json:"uuid"`
+		Status string `json:"status"`
+		Logs   string `json:"logs"`
+	} `json:"deployment"`
+}
+
+// AppUUID extracts the application UUID from whichever field is populated.
+func (e *DeploymentEvent) AppUUID() string {
+	if e.ApplicationUUID != "" {
+		return e.ApplicationUUID
+	}
+	if e.Application != nil && e.Application.UUID != "" {
+		return e.Application.UUID
+	}
+	return ""
+}
+
+// DeployStatus extracts the deployment status from whichever field is populated.
+func (e *DeploymentEvent) DeployStatus() string {
+	if e.Deployment != nil && e.Deployment.Status != "" {
+		return strings.ToLower(e.Deployment.Status)
+	}
+	return strings.ToLower(e.Status)
+}
+
+// DeployLogs extracts the deployment logs from whichever field is populated.
+func (e *DeploymentEvent) DeployLogs() string {
+	if e.Deployment != nil && e.Deployment.Logs != "" {
+		return e.Deployment.Logs
+	}
+	return e.Logs
+}
+
+// RegisterWebhook creates a custom webhook notification channel in Coolify
+// so deployment events are pushed to our API. Idempotent — skips if already exists.
+func (s *Service) RegisterWebhook(webhookURL string) error {
+	// Check if webhook already registered
+	body, err := s.doRequest("GET", "/notifications", nil)
+	if err != nil {
+		return fmt.Errorf("coolify: list notifications: %w", err)
+	}
+
+	var existing []struct {
+		Name string `json:"name"`
+	}
+	if json.Unmarshal(body, &existing) == nil {
+		for _, n := range existing {
+			if n.Name == "wemob-deploy-webhook" {
+				slog.Info("Coolify webhook already registered")
+				return nil
+			}
+		}
+	}
+
+	// Register new webhook
+	_, err = s.doRequest("POST", "/notifications", map[string]any{
+		"name":                            "wemob-deploy-webhook",
+		"type":                            "webhook",
+		"webhook_url":                     webhookURL,
+		"deployment_success_notification": true,
+		"deployment_failure_notification": true,
+	})
+	if err != nil {
+		return fmt.Errorf("coolify: register webhook: %w", err)
+	}
+
+	slog.Info("Coolify webhook registered", "url", webhookURL)
+	return nil
 }

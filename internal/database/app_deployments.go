@@ -29,6 +29,14 @@ func (db *Database) CreateAppDeployment(d *models.AppDeployment) (*models.AppDep
 	return d, err
 }
 
+func (db *Database) GetBuildingAppDeployment(projectID string) (*models.AppDeployment, error) {
+	var deployment models.AppDeployment
+	err := db.DB.NewSelect().Model(&deployment).
+		Where("app_project_id = ? AND platform = ? AND status IN (?)", projectID, "web", "building").
+		Order("created_at DESC").Limit(1).Scan(context.Background())
+	return &deployment, err
+}
+
 func (db *Database) UpdateAppDeployment(d *models.AppDeployment) (*models.AppDeployment, error) {
 	_, err := db.DB.NewUpdate().Model(d).Where("id = ?", d.ID).Exec(context.Background())
 	return d, err

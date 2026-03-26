@@ -22,6 +22,12 @@ func (db *Database) UpdateCoolifyProject(cp *models.CoolifyProject) (*models.Coo
 	return cp, err
 }
 
+func (db *Database) GetCoolifyProjectByCoolifyAppUUID(coolifyAppUUID string) (*models.CoolifyProject, error) {
+	var cp models.CoolifyProject
+	err := db.DB.NewSelect().Model(&cp).Where("coolify_app_uuid = ?", coolifyAppUUID).Scan(context.Background())
+	return &cp, err
+}
+
 func (db *Database) DeleteCoolifyProject(cp *models.CoolifyProject) error {
 	_, err := db.DB.NewDelete().Model(cp).Where("id = ?", cp.ID).Exec(context.Background())
 	return err

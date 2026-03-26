@@ -708,7 +708,15 @@ func main() {
 		sm.GetSecret("COOLIFY_PROJECT_UUID"),
 		sm.GetSecret("COOLIFY_ENVIRONMENT_NAME"),
 		sm.GetSecret("COOLIFY_PRIVATE_KEY_UUID"),
+		sm.GetSecret("COOLIFY_WEBHOOK_SECRET"),
 	)
+	// Register Coolify webhook for deployment status updates (non-blocking)
+	go func() {
+		webhookURL := constants.WEMOB_API_BASE_URL + "/webhooks/coolify?secret=" + coolifyService.WebhookSecret
+		if err := coolifyService.RegisterWebhook(webhookURL); err != nil {
+			slog.Warn("Failed to register Coolify webhook — falling back to polling", "error", err)
+		}
+	}()
 	giteaService := gitea.NewService(
 		sm.GetSecret("GITEA_URL"),
 		sm.GetSecret("GITEA_API_TOKEN"),
@@ -915,6 +923,8 @@ func main() {
 			// Store payment webhooks
 			r.Post("/store/stripe/{storeId}", httpViews.HandleStoreStripeWebhook)
 			r.Post("/store/iyzico/{storeId}", httpViews.HandleStoreIyzicoWebhook)
+			// Coolify deployment webhook
+			r.Post("/coolify", httpViews.HandleCoolifyWebhook)
 		})
 		r.Route("/v1", func(r chi.Router) {
 			r.Use(rateLimiter.RateLimit(600, time.Minute, appMiddleware.UserKey))
