@@ -613,9 +613,13 @@ The global ` + "`window.WemobBridge`" + ` object is available in client componen
 	}
 
 	rules += `
-**Usage rules:**
-- Always check ` + "`WemobBridge.isNative()`" + ` before showing native-only UI (e.g. a "Share" button).
-- Use these methods to enhance the user experience — for example, haptic feedback on important actions, native share for content sharing, device info for analytics.
+**Usage rules (MANDATORY — you MUST follow these):**
+- You MUST actively use WemobBridge methods wherever they improve the native experience. Do NOT fall back to web-only patterns when a bridge method exists:
+  - File/media selection: use ` + "`WemobBridge.files.pick()`" + ` or ` + "`WemobBridge.camera.pickVideo()`" + ` instead of ` + "`<input type=\"file\">`" + `
+  - Sharing content: add share buttons using ` + "`WemobBridge.share(text, url)`" + ` on any content worth sharing
+  - Haptic feedback: add ` + "`WemobBridge.haptic('light')`" + ` on tab switches, button taps, confirmations, and success states
+  - External URLs: use ` + "`WemobBridge.openExternal(url)`" + ` instead of ` + "`window.open()`" + ` or ` + "`<a target=\"_blank\">`" + `
+- Always check ` + "`WemobBridge.isNative()`" + ` before showing native-only UI. Provide web fallback (e.g. ` + "`<input type=\"file\">`" + `) when not native.
 - Do NOT add a script tag for wemob-bridge.js — it is auto-injected by the native shell.
 `
 	return rules
