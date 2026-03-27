@@ -111,5 +111,46 @@
         return call("files.pick", opts || {});
       },
     },
+
+    /** Bluetooth Low Energy */
+    bluetooth: {
+      /** Check if BLE is available and enabled. Returns { available, enabled } */
+      isAvailable: function () {
+        return call("bluetooth.isAvailable");
+      },
+      /** Scan for nearby BLE devices. opts: { duration? (seconds, default 5), serviceUuids?: string[] } Returns { devices: [{ id, name, rssi }] } */
+      scan: function (opts) {
+        return call("bluetooth.scan", opts || {});
+      },
+      /** Connect to a BLE device by ID. Returns { connected: true } or { error } */
+      connect: function (deviceId) {
+        return call("bluetooth.connect", { deviceId: deviceId });
+      },
+      /** Disconnect from a BLE device. Returns { disconnected: true } or { error } */
+      disconnect: function (deviceId) {
+        return call("bluetooth.disconnect", { deviceId: deviceId });
+      },
+      /** Discover services on a connected device. Returns { services: [{ uuid, characteristics: [{ uuid, properties }] }] } */
+      getServices: function (deviceId) {
+        return call("bluetooth.getServices", { deviceId: deviceId });
+      },
+      /** Read a characteristic value (base64). Returns { value } or { error } */
+      read: function (deviceId, serviceUuid, characteristicUuid) {
+        return call("bluetooth.read", {
+          deviceId: deviceId,
+          serviceUuid: serviceUuid,
+          characteristicUuid: characteristicUuid,
+        });
+      },
+      /** Write a value (base64) to a characteristic. Returns { success: true } or { error } */
+      write: function (deviceId, serviceUuid, characteristicUuid, value) {
+        return call("bluetooth.write", {
+          deviceId: deviceId,
+          serviceUuid: serviceUuid,
+          characteristicUuid: characteristicUuid,
+          value: value,
+        });
+      },
+    },
   };
 })();

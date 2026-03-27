@@ -111,7 +111,7 @@ workflows:
               microphone)    BLOCK="$BLOCK    <uses-permission android:name=\"android.permission.RECORD_AUDIO\"/>\n" ;;
               photos)        BLOCK="$BLOCK    <uses-permission android:name=\"android.permission.READ_MEDIA_IMAGES\"/>\n" ;;
               notifications) BLOCK="$BLOCK    <uses-permission android:name=\"android.permission.POST_NOTIFICATIONS\"/>\n" ;;
-              bluetooth)     BLOCK="$BLOCK    <uses-permission android:name=\"android.permission.BLUETOOTH_CONNECT\"/>\n" ;;
+              bluetooth)     BLOCK="$BLOCK    <uses-permission android:name=\"android.permission.BLUETOOTH_SCAN\" android:usesPermissionFlags=\"neverForLocation\"/>\n    <uses-permission android:name=\"android.permission.BLUETOOTH_CONNECT\"/>\n    <uses-permission android:name=\"android.permission.ACCESS_FINE_LOCATION\"/>\n" ;;
               calendar)      BLOCK="$BLOCK    <uses-permission android:name=\"android.permission.READ_CALENDAR\"/>\n" ;;
               biometrics)    BLOCK="$BLOCK    <uses-permission android:name=\"android.permission.USE_BIOMETRIC\"/>\n" ;;
             esac

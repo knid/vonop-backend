@@ -612,6 +612,8 @@ var ALL_BRIDGE_METHODS = []string{
 	"contacts.getAll", "contacts.pick",
 	"calendar.addEvent",
 	"files.pick",
+	"bluetooth.isAvailable", "bluetooth.scan", "bluetooth.connect",
+	"bluetooth.disconnect", "bluetooth.getServices", "bluetooth.read", "bluetooth.write",
 }
 
 // NEXTJS_BUILDER_MOBILE_CONFIG_TOOL_RULES instructs the LLM to call
@@ -626,10 +628,14 @@ When your generated code uses WemobBridge methods, you MUST call the configure_m
 - contacts.getAll, contacts.pick → "contacts" permission
 - calendar.addEvent → "calendar" permission
 - files.pick → "storage" permission
+- bluetooth.isAvailable, bluetooth.scan, bluetooth.connect, bluetooth.disconnect, bluetooth.getServices, bluetooth.read, bluetooth.write → "bluetooth" permission
 - getDeviceInfo, share, haptic, openExternal, getConnectionStatus, storage.* → no extra permissions needed
 
 Example: If the app uses camera and contacts, call:
 configure_mobile_app(bridge_methods=["camera.takePhoto","contacts.getAll","getDeviceInfo","share"], permissions=["camera","contacts"])
+
+Example: If the app uses Bluetooth Low Energy, call:
+configure_mobile_app(bridge_methods=["bluetooth.isAvailable","bluetooth.scan","bluetooth.connect","bluetooth.disconnect","bluetooth.getServices","bluetooth.read","bluetooth.write"], permissions=["bluetooth"])
 
 The "notifications" permission is always included automatically — do not add it.
 `
@@ -665,7 +671,14 @@ The global ` + "`window.WemobBridge`" + ` object is available in client componen
 		"contacts.getAll":     "- `await WemobBridge.contacts.getAll()` — returns `{ contacts: [{ id, name, phones: [{ label, number }], emails: [{ label, address }] }] }`",
 		"contacts.pick":       "- `await WemobBridge.contacts.pick()` — opens native contact picker, returns `{ contact: { id, name, phones, emails } }`",
 		"calendar.addEvent":   "- `await WemobBridge.calendar.addEvent({ title, startDate, endDate?, location?, notes? })` — opens calendar to add event (dates in ISO 8601)",
-		"files.pick":          "- `await WemobBridge.files.pick({ multiple?, type? })` — picks file(s), type can be \"image\", \"video\", \"audio\", or comma-separated extensions. Returns `{ name, size, extension, data (base64) }`",
+		"files.pick":              "- `await WemobBridge.files.pick({ multiple?, type? })` — picks file(s), type can be \"image\", \"video\", \"audio\", or comma-separated extensions. Returns `{ name, size, extension, data (base64) }`",
+		"bluetooth.isAvailable":   "- `await WemobBridge.bluetooth.isAvailable()` — returns `{ available: bool, enabled: bool }` — check if BLE hardware exists and if Bluetooth is turned on",
+		"bluetooth.scan":          "- `await WemobBridge.bluetooth.scan({ duration?, serviceUuids? })` — scans for nearby BLE devices for `duration` seconds (default 5). Optional `serviceUuids` array to filter. Returns `{ devices: [{ id, name, rssi }] }`",
+		"bluetooth.connect":       "- `await WemobBridge.bluetooth.connect(deviceId)` — connects to a BLE device by its ID (from scan results). Returns `{ connected: true }` or `{ error }`",
+		"bluetooth.disconnect":    "- `await WemobBridge.bluetooth.disconnect(deviceId)` — disconnects from a BLE device. Returns `{ disconnected: true }` or `{ error }`",
+		"bluetooth.getServices":   "- `await WemobBridge.bluetooth.getServices(deviceId)` — discovers GATT services on a connected device. Returns `{ services: [{ uuid, characteristics: [{ uuid, properties: ['read','write','notify',...] }] }] }`",
+		"bluetooth.read":          "- `await WemobBridge.bluetooth.read(deviceId, serviceUuid, characteristicUuid)` — reads a characteristic value. Returns `{ value }` (base64 encoded) or `{ error }`",
+		"bluetooth.write":         "- `await WemobBridge.bluetooth.write(deviceId, serviceUuid, characteristicUuid, value)` — writes a base64-encoded value to a characteristic. Returns `{ success: true }` or `{ error }`",
 	}
 
 	for _, m := range methods {
@@ -681,6 +694,7 @@ The global ` + "`window.WemobBridge`" + ` object is available in client componen
   - Sharing content: add share buttons using ` + "`WemobBridge.share(text, url)`" + ` on any content worth sharing
   - Haptic feedback: add ` + "`WemobBridge.haptic('light')`" + ` on tab switches, button taps, confirmations, and success states
   - External URLs: use ` + "`WemobBridge.openExternal(url)`" + ` instead of ` + "`window.open()`" + ` or ` + "`<a target=\"_blank\">`" + `
+  - Bluetooth/BLE: use ` + "`WemobBridge.bluetooth.scan()`" + `, ` + "`connect()`" + `, ` + "`read()`" + `, ` + "`write()`" + ` for BLE device interaction. Always check ` + "`isAvailable()`" + ` first and show a clear message if Bluetooth is off.
 - Always check ` + "`WemobBridge.isNative()`" + ` before showing native-only UI. Provide web fallback (e.g. ` + "`<input type=\"file\">`" + `) when not native.
 - Do NOT add a script tag for wemob-bridge.js — it is auto-injected by the native shell.
 `
