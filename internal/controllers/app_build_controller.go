@@ -60,8 +60,12 @@ func (c *Controller) DeployToCoolify(project *models.AppProject, user *models.Us
 			return nil, fmt.Errorf("failed to create git repository")
 		}
 
-		// Push files to Gitea
-		if err := repo.PushToURL(giteaCloneURL, "main"); err != nil {
+		// Push files to Gitea (use actual branch — old repos may be on "master")
+		branch, _ := repo.CurrentBranch()
+		if branch == "" {
+			branch = "main"
+		}
+		if err := repo.PushToURL(giteaCloneURL, branch); err != nil {
 			slog.Error("Failed to push to Gitea", "error", err)
 			return nil, fmt.Errorf("failed to push files")
 		}
@@ -127,7 +131,11 @@ func (c *Controller) DeployToCoolify(project *models.AppProject, user *models.Us
 	} else {
 		// Subsequent deploy — sync env vars, push updated files, then restart
 		giteaCloneURL := c.GiteaService.AuthenticatedCloneURL(coolifyProject.GiteaRepoName)
-		if err := repo.ForcePushToURL(giteaCloneURL, "main"); err != nil {
+		branch, _ := repo.CurrentBranch()
+		if branch == "" {
+			branch = "main"
+		}
+		if err := repo.ForcePushToURL(giteaCloneURL, branch); err != nil {
 			slog.Error("Failed to push to Gitea", "error", err)
 			return nil, fmt.Errorf("failed to push files")
 		}
