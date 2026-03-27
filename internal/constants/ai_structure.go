@@ -103,26 +103,41 @@ You are designing a MOBILE APPLICATION, not a mobile website. Every design decis
 - No sidebars, no hamburger menus, no website-style navigation bars with links
 - No footer — the bottom tab bar replaces it
 
-**Visual Design for Mobile Apps**:
+**Visual Design for Mobile Apps (CRITICAL — polished, not generic)**:
+Study how the best mobile apps look (Revolut, Linear, Notion, Airbnb, Arc). Apply these principles:
 - Clean, content-focused layouts — no visual clutter, generous whitespace
-- Card-based content with consistent corner radius (rounded-2xl)
+- Card-based content with consistent corner radius (rounded-2xl), subtle shadow-sm, on a tinted page background (NOT pure white — use warm off-whites like #FAFAF8 or cool grays like #F5F7FA)
+- Surface hierarchy: tinted page background → white card surfaces → accent interactive elements. Three clear visual layers.
 - Touch-optimized: all interactive targets 44px+ minimum, comfortable spacing
 - Status bar and safe area awareness
 - Bottom tab bar spacing (pb-20 on main content area)
-- Typography: body 14-16px, screen titles text-xl/text-2xl (NOT text-6xl/text-7xl web heroes)
-- Choose distinctive Google Fonts that feel modern on mobile — avoid generic fonts (Inter, Roboto, Open Sans)
-- Bold accent color used sparingly for primary actions and active tab indicators
+- Typography: choose distinctive Google Fonts (Plus Jakarta Sans, DM Sans, Outfit, Sora, Manrope — NEVER Inter, Roboto, Open Sans). Body 14-16px, screen titles text-xl/text-2xl font-bold.
+- ONE bold accent color that fits the app's context (finance → deep blue/emerald, health → warm green, social → vibrant but not neon). NEVER generic purple/lavender. Use accent sparingly for primary actions and active states only.
+- Buttons: SOLID fill with accent color, NO gradients, h-12, rounded-xl, font-semibold. NEVER pastel/washed-out gradients.
+- Forms: sentence case labels (text-sm font-medium text-gray-700), inputs with h-12 rounded-xl border-gray-200, focus ring in accent color. NEVER ALL-CAPS labels, NEVER asterisks for required fields.
+- Borders: subtle and purposeful (border-gray-100 or border-black/5). NEVER dashed borders on upload areas — use solid borders with tinted fill.
+- Depth: subtle shadows on cards, elevated bottom sheet with shadow-2xl, glass-effect header (bg-white/80 backdrop-blur-lg).
+
+**Mobile Anti-Patterns — NEVER produce these**:
+- Purple/lavender gradient buttons (the #1 AI-generated UI giveaway)
+- Dashed border upload zones or containers
+- ALL-CAPS form labels
+- Numbered circles connected by lines for step indicators (use progress bars or pill segments)
+- Flat UI with no depth/shadow — everything on the same visual plane
+- Browser-default form controls (unstyled select, checkbox, radio)
+- Tiny cramped buttons (h-8, px-3, text-xs)
+- Pure white (#FFFFFF) page backgrounds with no surface contrast
 
 **Mobile-Native Components**:
 - Bottom sheets for options and secondary actions (not dropdown menus)
 - Full-screen overlays or slide-up panels instead of centered desktop modals
 - Pull-to-refresh for content lists
-- Skeleton loading states
-- Floating Action Button (FAB) for primary creation actions when appropriate
+- Skeleton loading states (not spinners)
+- Floating Action Button (FAB) for primary creation actions when appropriate (56x56, rounded-2xl, shadow-lg)
 - Horizontal scroll lists for categories/filters (flex overflow-x-auto snap-x)
 - Swipeable cards for dismiss/archive actions
 - Segmented controls or pill toggles for filtering
-- Toast notifications for feedback
+- Toast notifications for feedback (not alert boxes)
 `
 
 // NEXTJS_MOBILE_STRUCTURE_PROMPT is the planning/structure prompt for mobile app projects.
