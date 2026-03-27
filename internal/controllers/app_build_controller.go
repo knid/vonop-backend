@@ -731,20 +731,6 @@ func (c *Controller) ensureV1ProjectForMobileApp(appProject *models.AppProject, 
 		return fmt.Errorf("failed to create v1 project: %w", err)
 	}
 
-	// Create initial Build record so GetProject (v1 listing) can find a lastBuild
-	build := &models.Build{
-		ProjectID:     created.ID,
-		Active:        false,
-		Title:         appProject.Name,
-		Icon:          appProject.LogoS3Key,
-		NavBarStyle:   "default",
-		BuildNumber:   1,
-		VersionString: utils.CreateVersionString(1),
-	}
-	if _, err := c.DB.CreateProjectBuild(build); err != nil {
-		return fmt.Errorf("failed to create initial build: %w", err)
-	}
-
 	slog.Info("Created v1 Project for mobile app",
 		"app_project_id", appProject.ID,
 		"project_id", created.ID,
