@@ -143,7 +143,18 @@ CRITICAL LANGUAGE RULE: ALL content you generate (product names, descriptions, c
 	}
 	if project.ProjectType == "mobile_app" {
 		systemPrompt += `
-- If the user explicitly asks to enable or change mobile features (camera, contacts, haptic feedback, sharing, etc.), call configure_mobile_app with the needed bridge_methods and permissions.`
+- This is a MOBILE APP — you MUST call configure_mobile_app with bridge methods that would enhance the user experience. Analyze the app's purpose and PROACTIVELY enable relevant bridge methods:
+  - Video/photo/file upload or media features → camera.takePhoto, camera.pickImage, camera.pickVideo, files.pick (permission: camera, storage)
+  - Social/sharing features or content the user might share → share (no extra permission)
+  - Interactive buttons, confirmations, tab switches → haptic (no extra permission)
+  - External links or URLs → openExternal (no extra permission)
+  - User data or preferences → storage.get, storage.set, storage.remove (no extra permission)
+  - Contact-related features → contacts.getAll, contacts.pick (permission: contacts)
+  - Calendar/scheduling features → calendar.addEvent (permission: calendar)
+  - Device/platform detection → getDeviceInfo (no extra permission)
+  - Network status checks → getConnectionStatus (no extra permission)
+  At minimum, ALWAYS enable: haptic, share, getDeviceInfo. Only skip configure_mobile_app if the user explicitly says they don't want native features.
+- If the user explicitly asks to enable or change specific mobile features, call configure_mobile_app with those methods.`
 	}
 	systemPrompt += `
 - If the user's message is a normal chat request (code changes, questions, fixes) that doesn't need any of the above tools, respond with ONLY the exact text: NO_TOOLS_NEEDED — nothing else. Do NOT write explanations, summaries, plans, or conversational responses. Your ONLY outputs should be tool calls OR the literal text "NO_TOOLS_NEEDED".
