@@ -645,7 +645,15 @@ func (c *Controller) CaptureAppScreenshot(project *models.AppProject, previewURL
 		return
 	}
 
-	imgData, err := external.GetDesktopScreenshotOfURL(previewURL, apiKey)
+	// Use mobile resolution if the project has a mobile app config
+	var imgData []byte
+	var err error
+	_, mobileErr := c.DB.GetMobileAppConfig(project.ID.String())
+	if mobileErr == nil {
+		imgData, err = external.GetScreenshotOfURL(previewURL, apiKey)
+	} else {
+		imgData, err = external.GetDesktopScreenshotOfURL(previewURL, apiKey)
+	}
 	if err != nil {
 		slog.Warn("CaptureAppScreenshot: failed to capture screenshot", "error", err, "project_id", project.ID)
 		return
