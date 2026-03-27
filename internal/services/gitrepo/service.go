@@ -41,7 +41,7 @@ func (s *Service) Init(projectID string) (*Repo, error) {
 		return nil, fmt.Errorf("gitrepo: mkdir: %w", err)
 	}
 
-	if err := s.git(repoPath, "init"); err != nil {
+	if err := s.git(repoPath, "init", "-b", "main"); err != nil {
 		return nil, fmt.Errorf("gitrepo: init: %w", err)
 	}
 
