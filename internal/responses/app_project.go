@@ -101,11 +101,14 @@ type AppChatFileOpResp struct {
 }
 
 type AppDomainResponse struct {
-	ID        uuid.UUID `json:"id"`
-	Domain    string    `json:"domain"`
-	Status    string    `json:"status"`
-	DNSRecord string    `json:"dns_record,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
+	ID            uuid.UUID `json:"id"`
+	Domain        string    `json:"domain"`
+	Status        string    `json:"status"`          // pending, active, misconfigured
+	DNSRecord     string    `json:"dns_record"`       // CNAME target (always set)
+	ARecordTarget string    `json:"a_record_target"`  // A record IP (resolved from CNAME target)
+	IsApex        bool      `json:"is_apex"`          // true if root domain (no CNAME possible)
+	StatusMessage string    `json:"status_message,omitempty"` // human-readable verification detail
+	CreatedAt     time.Time `json:"created_at"`
 }
 
 type EnvVarResponse struct {
