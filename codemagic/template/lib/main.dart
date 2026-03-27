@@ -11,6 +11,7 @@ import 'package:onesignal_flutter/onesignal_flutter.dart';
 
 import 'analytics_service.dart';
 import 'biometric_service.dart';
+import 'bluetooth_service.dart';
 import 'bridge_service.dart';
 import 'config_service.dart';
 import 'deep_link_service.dart';
@@ -44,6 +45,7 @@ class WemobApp extends StatefulWidget {
 class _WemobAppState extends State<WemobApp> with WidgetsBindingObserver {
   InAppWebViewController? _controller;
   BridgeService? _bridge;
+  BluetoothBridgeService? _bluetoothService;
   final String url = _appUrl;
   URLRequest? _initialUrlRequest;
   Brightness _platformBrightness = Brightness.light;
@@ -252,10 +254,17 @@ class _WemobAppState extends State<WemobApp> with WidgetsBindingObserver {
   }
 
   void _setupBridge(InAppWebViewController controller) {
+    // Initialize bluetooth service if any bluetooth methods are enabled
+    final methods = Set.from(_config.bridgeMethods);
+    if (methods.any((m) => m.toString().startsWith('bluetooth.'))) {
+      _bluetoothService = BluetoothBridgeService();
+    }
+
     _bridge = BridgeService(
       controller: controller,
-      allowedMethods: Set.from(_config.bridgeMethods),
+      allowedMethods: methods,
       projectId: analyticsProjectId,
+      bluetoothService: _bluetoothService,
     );
     _bridge!.register();
   }
@@ -304,6 +313,15 @@ class _WemobAppState extends State<WemobApp> with WidgetsBindingObserver {
             },
             files: {
               pick: function(opts) { return call("files.pick", opts || {}); }
+            },
+            bluetooth: {
+              isAvailable: function() { return call("bluetooth.isAvailable"); },
+              scan: function(opts) { return call("bluetooth.scan", opts || {}); },
+              connect: function(deviceId) { return call("bluetooth.connect", { deviceId: deviceId }); },
+              disconnect: function(deviceId) { return call("bluetooth.disconnect", { deviceId: deviceId }); },
+              getServices: function(deviceId) { return call("bluetooth.getServices", { deviceId: deviceId }); },
+              read: function(deviceId, serviceUuid, characteristicUuid) { return call("bluetooth.read", { deviceId: deviceId, serviceUuid: serviceUuid, characteristicUuid: characteristicUuid }); },
+              write: function(deviceId, serviceUuid, characteristicUuid, value) { return call("bluetooth.write", { deviceId: deviceId, serviceUuid: serviceUuid, characteristicUuid: characteristicUuid, value: value }); }
             }
           };
         })();
@@ -634,6 +652,7 @@ class _WemobAppState extends State<WemobApp> with WidgetsBindingObserver {
   void dispose() {
     _connectivitySubscription?.cancel();
     _deepLinkService?.dispose();
+    _bluetoothService?.dispose();
     WidgetsBinding.instance.removeObserver(this);
     _endSession();
     _analytics?.dispose();
