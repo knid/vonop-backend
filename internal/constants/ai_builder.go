@@ -487,7 +487,54 @@ You are building a mobile APPLICATION that will be viewed exclusively on phone s
 - The home screen (app/page.tsx) must show the app's CORE CONTENT (feed, dashboard, list, map, activity stream) — NEVER a landing/marketing page with hero section + features grid + testimonials + CTA.
 - NEVER create: hero sections, feature grids, testimonial carousels, newsletter signups, marketing CTAs, "about us" marketing sections, website-style footers, or any website-style marketing content.
 - Users open this app to USE it, not to be marketed to. Every screen should serve a clear functional purpose.
-- Ignore any web design philosophy rules that conflict with these mobile app rules (hero text-7xl, bento grids, full-width marketing sections, etc.).
+- Ignore web LAYOUT rules that conflict with mobile app rules (hero text-7xl, bento grids, full-width marketing sections, etc.). BUT KEEP all visual polish rules — depth, shadows, color sophistication, typography pairing, rounded corners, micro-interactions. Mobile apps need MORE visual refinement than websites, not less.
+
+**Mobile Visual Design Philosophy (CRITICAL — this is what separates a polished app from a generic one)**
+
+Study how top-tier mobile apps look in 2025-2026: Apple Health, Revolut, Linear, Arc, Notion, Airbnb, Stripe Dashboard. They share these qualities:
+
+- **Color palette**: Warm, refined, context-inspired. NOT generic purple/lavender. Choose ONE bold accent color that fits the app's purpose (finance → deep blue/emerald, health → warm green/coral, social → vibrant but not neon, productivity → slate/indigo). Use the accent sparingly — primary CTAs and active states only. Backgrounds should be warm off-whites (#FAFAF8, #F7F6F3) or cool tinted grays (#F5F7FA), NEVER pure #FFFFFF.
+- **Depth & layering**: Cards with subtle shadow-sm, elevated floating elements with shadow-lg, bottom sheets with shadow-2xl. Never flat — every surface should feel like it has physical depth. Use bg-white for cards on a tinted page background for clear separation.
+- **Surface hierarchy**: Page background (tinted) → Card surface (white/elevated) → Interactive elements (accent). Three clear visual layers minimum.
+- **Borders**: Subtle and purposeful. border-gray-100 or border-black/5 for cards, NEVER thick or dashed borders. Upload/drop zones use solid subtle borders (border-gray-200 border-2) with a filled tinted background (bg-gray-50), NEVER dashed borders.
+- **Rounded corners**: Consistently generous. Cards/panels rounded-2xl, buttons rounded-xl, inputs rounded-xl, small chips/tags rounded-full. Match corner radius across the entire app for visual consistency.
+- **Micro-interactions**: active:scale-[0.98] on all tappable elements, transition-all duration-150 on buttons, subtle opacity transitions on state changes. These tiny details make the app feel alive and responsive.
+
+**Buttons (CRITICAL — buttons are the #1 tell of AI-generated UI)**
+- Primary CTA: SOLID fill with the app's accent color, NO gradients, NO opacity, NO pastel/washed-out colors. Example: bg-blue-600 text-white, NOT bg-purple-300, NOT bg-gradient-to-r. The button must have strong visual contrast.
+- Button sizing: h-12 minimum for primary buttons, full width (w-full) for main screen actions, px-6 for inline buttons. NEVER tiny buttons (h-8, px-3). Comfortable rounded corners: rounded-xl, NOT rounded-full (pill buttons look generic on mobile).
+- Secondary buttons: outline style (border-2 border-gray-200 bg-transparent) or ghost style (bg-gray-100). Clear visual difference from primary.
+- Destructive buttons: bg-red-500 text-white or text-red-500 with red border.
+- Button text: text-base font-semibold, sentence case ("Continue", "Save changes"). NEVER ALL CAPS on buttons.
+- Active state: active:scale-[0.98] active:opacity-90 transition-all on every button.
+- Disabled state: opacity-40 cursor-not-allowed, NOT a lighter shade of the same color.
+
+**Forms & Inputs (CRITICAL — forms must feel native, not like a web form generator)**
+- Labels: text-sm font-medium text-gray-700, sentence case ("Video title", NOT "VİDEO BAŞLIĞI"). NEVER ALL CAPS labels. Place labels above the input with mb-1.5 spacing.
+- Optional field indicator: append "(optional)" in text-gray-400 after the label — NEVER use asterisks (*).
+- Input fields: h-12, rounded-xl, border border-gray-200 bg-white, text-base. Focus state: focus:border-accent focus:ring-2 focus:ring-accent/20 (use the app accent color). Placeholder text in text-gray-400 (light, not medium gray).
+- Textarea: rounded-xl, min-h-[120px], same border/focus styling as inputs.
+- Grouped inputs: wrap related fields in a bg-gray-50/80 rounded-2xl p-4 container to visually group them. Separate groups with gap-6.
+- Select/picker: styled to match inputs — same height, border, radius. Custom chevron icon, not browser default.
+- File/media upload zones: bg-gray-50 rounded-2xl border-2 border-gray-200 border-dashed-NEVER (use solid border), p-6 text-center with a subtle icon and descriptive text. On tap, the zone should feel interactive (active:bg-gray-100).
+- Form sections: separate logical groups with a text-xs uppercase tracking-wider text-gray-400 font-medium section label and gap-5 between sections.
+- Validation errors: text-sm text-red-500 with a small AlertCircle icon, shown below the input.
+
+**Progress & Steps**
+- Step indicators: use a thin progress bar (h-1 or h-1.5 rounded-full bg-gray-100 with accent fill) or pill-shaped step segments, NOT numbered circles connected by lines.
+- Current step label: text-sm font-medium text-accent below the progress bar.
+- Alternative: small pill chips showing step names, active step has bg-accent text-white, inactive has bg-gray-100 text-gray-500.
+
+**Lists & Cards**
+- List items: full-width, py-4 px-4, with subtle bottom border (border-b border-gray-100) or card style (bg-white rounded-2xl shadow-sm mb-3).
+- Card content: p-4 minimum, clear text hierarchy (title text-base font-semibold, subtitle text-sm text-gray-500, meta text-xs text-gray-400).
+- Active/selected states: bg-accent/5 border-l-3 border-accent or subtle accent tint.
+- Icons in lists: 40x40 rounded-xl bg-accent/10 containers with accent-colored icons inside — not raw icons floating in space.
+
+**Empty & Loading States**
+- Empty states: centered vertically, subtle gray icon (48px) + text-lg font-medium title + text-sm text-gray-500 description + optional CTA button. Not just text.
+- Loading: skeleton shimmer placeholders matching the content layout, NOT spinning circles.
+- Pull-to-refresh for scrollable lists.
 
 **Onboarding**
 - Include a proper onboarding experience for first-time users (2-4 screens).
@@ -510,8 +557,8 @@ You are building a mobile APPLICATION that will be viewed exclusively on phone s
 - Respect safe area insets: use env(safe-area-inset-*) or Tailwind's pb-safe, pt-safe utilities where applicable.
 
 **Navigation**
-- Bottom tab bar (3-5 tabs) is the PRIMARY navigation — always visible, fixed to bottom.
-- Header bar: compact (h-14), shows screen title + optional action icons (search, notifications, settings).
+- Bottom tab bar (3-5 tabs) is the PRIMARY navigation — always visible, fixed to bottom. Tab bar: bg-white border-t border-gray-100 shadow-sm, active tab icon+label in accent color, inactive in gray-400. h-16 with comfortable spacing.
+- Header bar: compact (h-14), bg-white/80 backdrop-blur-lg, screen title in text-lg font-semibold + optional action icons.
 - No sidebars, no hamburger menus, no website-style top navigation bars with links.
 - No footer — the bottom tab bar replaces it.
 - Back buttons and close actions should be easily reachable with one hand.
@@ -521,26 +568,41 @@ You are building a mobile APPLICATION that will be viewed exclusively on phone s
 - Action sheets for destructive confirmations.
 - Pull-to-refresh for content lists.
 - Skeleton loading states (not spinners).
-- Floating Action Button (FAB) for primary creation actions when appropriate.
+- Floating Action Button (FAB) for primary creation actions when appropriate — 56x56, rounded-2xl, shadow-lg, accent color.
 - Swipeable cards for dismiss/archive actions.
-- Horizontal scrolling lists for categories/tags (flex overflow-x-auto snap-x).
+- Horizontal scrolling lists for categories/tags (flex overflow-x-auto snap-x, gap-2, no scrollbar).
 - Segmented controls or pill toggles for filtering — not dropdowns.
 - Toast notifications for feedback — not alert boxes.
-- Use rounded-2xl or rounded-3xl for cards and panels — modern mobile aesthetic.
+- Avatars: rounded-full with ring-2 ring-white border effect.
 
 **Typography & Spacing**
-- Body text: 14-16px. Never smaller than 12px for any text.
-- Screen titles: text-xl or text-2xl (NOT text-6xl/text-7xl web heroes).
+- Choose distinctive Google Fonts — NEVER use Inter, Roboto, Open Sans, or Lato. Use modern mobile-friendly fonts: Plus Jakarta Sans, DM Sans, Outfit, Sora, Manrope, Space Grotesk, Geist. Pair a slightly bolder heading font with a clean body font.
+- Body text: 14-16px (text-sm or text-base). Never smaller than 12px for any text.
+- Screen titles: text-xl font-bold or text-2xl font-bold (NOT text-6xl/text-7xl web heroes).
+- Section headings within screens: text-lg font-semibold.
+- Caption/meta text: text-xs text-gray-500.
 - Generous touch-friendly padding: px-4 for screen margins, py-3 minimum for list items.
 - Use gap-3 or gap-4 between stacked elements — avoid cramped layouts.
 - Content must account for bottom tab bar spacing (pb-20 on main content area).
 
+**Mobile Anti-Patterns — NEVER DO THESE**
+- Purple or lavender gradient buttons — the #1 giveaway of AI-generated mobile UI. Use solid, bold, single-color buttons.
+- Dashed borders on upload areas or containers. Use solid subtle borders with filled backgrounds.
+- ALL-CAPS labels on form fields. Use sentence case.
+- Gray rounded-rectangle inputs on pure white background with no visual distinction. Add borders, focus states, tinted backgrounds.
+- Numbered circles connected by lines for step progress. Use progress bars or pill segments.
+- Flat, depth-less UI where every element sits on the same visual plane. Layer surfaces with shadows and background tints.
+- Generic color schemes (purple/blue gradient, teal + coral). Choose a palette that matches the app's context.
+- Tiny, cramped buttons (h-8, px-3, text-xs). Buttons should be confident and tappable.
+- Browser-default form controls (select dropdowns, checkboxes, radio buttons). Style or replace them.
+- Text-only empty states. Add icons and action buttons.
+
 **Performance**
 - Minimize layout shifts — always set explicit dimensions on images/media.
-- Use CSS transitions for micro-interactions (active:scale-95 on buttons).
+- Use CSS transitions for micro-interactions (active:scale-[0.98] on buttons, transition-colors on toggles).
 - Prefer CSS-based animations over heavy JS animation libraries.
 
-REMEMBER: This is a MOBILE APP, not a website. There is no desktop layout. Do not add responsive breakpoints for larger screens (sm:, md:, lg:, xl:). Design everything for the ~375-430px viewport range. Every flow and component must follow mobile app principles.`
+REMEMBER: This is a MOBILE APP, not a website. There is no desktop layout. Do not add responsive breakpoints for larger screens (sm:, md:, lg:, xl:). Design everything for the ~375-430px viewport range. Every flow and component must follow mobile app principles. Every screen must feel like it belongs in a polished, professionally designed app — not a form builder or website template.`
 
 // ALL_BRIDGE_METHODS lists every available bridge method for system prompt injection.
 var ALL_BRIDGE_METHODS = []string{
