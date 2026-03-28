@@ -42,12 +42,22 @@ func (c *Controller) DeployToCoolify(project *models.AppProject, user *models.Us
 		fileMap[k] = v
 	}
 	injectAnalyticsScript(fileMap, project.ID.String())
+
+	// Inject "Created by Wemob" badge for free/starter plans
+	showBadge := true
+	if limits, limitsErr := c.DB.GetStandartUserLimitsByUser(user); limitsErr == nil && limits.CanRemoveBrandLogo {
+		showBadge = false
+	}
+	if showBadge {
+		injectWemobBadge(fileMap)
+	}
+
 	for path, content := range fileMap {
 		if repoFiles[path] != content {
 			repo.WriteFile(path, []byte(content))
 		}
 	}
-	repo.Commit("deploy: inject analytics")
+	repo.Commit("deploy: inject analytics and branding")
 
 	// Get or create Coolify project
 	coolifyProject, err := c.DB.GetCoolifyProjectByAppProjectID(project.ID.String())
@@ -659,6 +669,31 @@ func injectAnalyticsScript(fileMap map[string]string, projectID string) {
 	}
 
 	slog.Warn("analytics script injection: no suitable layout found", "project_id", projectID)
+}
+
+// injectWemobBadge injects a "Created by Wemob" badge script into the root layout.
+// Uses the same pattern as injectAnalyticsScript — hardcoded constant, not user input.
+func injectWemobBadge(fileMap map[string]string) {
+	escapedBody := strings.ReplaceAll(constants.WEMOB_BADGE_SCRIPT, "`", "\\`")
+	jsxScript := `<script data-wemob-badge dangerouslySetInnerHTML={{ __html: ` + "`" + escapedBody + "`" + ` }} />`
+
+	layoutPaths := []string{
+		"app/layout.tsx",
+		"app/layout.jsx",
+		"src/app/layout.tsx",
+		"src/app/layout.jsx",
+	}
+
+	for _, path := range layoutPaths {
+		content, ok := fileMap[path]
+		if !ok {
+			continue
+		}
+		if idx := strings.Index(content, "</body>"); idx != -1 {
+			fileMap[path] = content[:idx] + jsxScript + "\n" + content[idx:]
+			return
+		}
+	}
 }
 
 // CaptureAppScreenshot takes a desktop screenshot of the preview URL and uploads it to S3.
