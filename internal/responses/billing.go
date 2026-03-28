@@ -10,6 +10,7 @@ type PlanLimitsResponse struct {
 	CanBuyDomain         bool   `json:"can_buy_domain"`
 	CanUseEmailService   bool   `json:"can_use_email_service"`
 	CanUseEcommerce      bool   `json:"can_use_ecommerce"`
+	CanDeployWeb         bool   `json:"can_deploy_web"`
 	MaximumProjectCount  int    `json:"maximum_project_count"`
 	MonthlyAppCount      int    `json:"monthly_app_count"`
 	MonthlyDeployCount   int    `json:"monthly_deploy_count"`

@@ -14,6 +14,7 @@ import (
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/responses"
+	"github.com/knid/wemob/internal/utils"
 )
 
 func (c *Controller) CreateAppProject(ctx context.Context, user *models.User, req requests.GenerateAppRequest) (*models.AppProject, error) {
@@ -27,11 +28,13 @@ func (c *Controller) CreateAppProject(ctx context.Context, user *models.User, re
 	if err != nil {
 		slog.Warn("CreateAppProject: failed to get user limits", "error", err, "user_id", user.ID)
 	} else if limits.MonthlyAppCount > 0 {
-		appCount, countErr := c.DB.CountAppProjectsByUserID(user.ID.String())
+		periodStart, _ := utils.BillingPeriod(user.SubscriptionStartAt, time.Now())
+		appCount, countErr := c.DB.CountAppProjectsByUserIDSince(user.ID.String(), periodStart)
 		if countErr != nil {
 			slog.Warn("CreateAppProject: failed to count projects", "error", countErr, "user_id", user.ID)
 		} else if appCount >= limits.MonthlyAppCount {
-			return nil, fmt.Errorf("you have reached your app project limit (%d)", limits.MonthlyAppCount)
+			go c.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_QUOTA_REACHED, map[string]any{"action": "create_app", "limit": limits.MonthlyAppCount})
+			return nil, fmt.Errorf("you have reached your monthly app project limit (%d)", limits.MonthlyAppCount)
 		}
 	}
 

@@ -3,6 +3,7 @@ package views
 import (
 	"net/http"
 
+	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/controllers"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/utils"
@@ -32,6 +33,7 @@ func (v *HttpViews) checkMinimumCredits(w http.ResponseWriter, user *models.User
 		return true
 	}
 	if balance.Balance < 1 {
+		go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_AI_CREDITS_DEPLETED, map[string]any{"balance": balance.Balance})
 		utils.JSONCodedErrorResponse(w, "AI_CREDITS_DEPLETED",
 			"insufficient AI credits: have 0, need at least 1",
 			http.StatusPaymentRequired, map[string]any{

@@ -48,6 +48,7 @@ func (v *HttpViews) GetLimits(w http.ResponseWriter, r *http.Request) {
 		MonthlyAppCount:         limits.MonthlyAppCount,
 		MonthlyDeployCount:      limits.MonthlyDeployCount,
 		CanUseEcommerce:         limits.CanUseEcommerce,
+		CanDeployWeb:            limits.CanDeployWeb,
 		CanExportToGitHub:       limits.CanExportToGitHub,
 		DeployMemoryMB:          limits.DeployMemoryMB,
 		DeployCPUs:              limits.DeployCPUs,

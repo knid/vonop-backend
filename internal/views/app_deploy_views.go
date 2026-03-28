@@ -7,6 +7,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-playground/validator/v10"
+	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/utils"
@@ -24,15 +25,36 @@ func (v *HttpViews) DeployAppWeb(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check deployed web app limit
+	// Check web deploy permission and limits
 	limits, limitsErr := v.Controller.DB.GetStandartUserLimitsByUser(user)
-	if limitsErr == nil && limits.MaxDeployedWebApps > 0 {
-		count, _ := v.Controller.DB.CountDeployedWebAppsByUserID(user.ID.String())
-		if count >= limits.MaxDeployedWebApps {
-			utils.JSONCodedErrorResponse(w, "DEPLOY_LIMIT_REACHED",
-				fmt.Sprintf("you have reached the maximum of %d deployed web apps for your plan", limits.MaxDeployedWebApps),
-				http.StatusForbidden, nil)
+	if limitsErr == nil {
+		if !limits.CanDeployWeb {
+			go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_NEED, map[string]any{"action": "deploy_web"})
+			utils.JSONCodedErrorResponse(w, "FEATURE_NOT_AVAILABLE", "web deployments are not available on your plan", http.StatusForbidden, nil)
 			return
+		}
+
+		if limits.MaxDeployedWebApps > 0 {
+			count, _ := v.Controller.DB.CountDeployedWebAppsByUserID(user.ID.String())
+			if count >= limits.MaxDeployedWebApps {
+				go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_QUOTA_REACHED, map[string]any{"action": "deploy_web", "limit": limits.MaxDeployedWebApps})
+				utils.JSONCodedErrorResponse(w, "DEPLOY_LIMIT_REACHED",
+					fmt.Sprintf("you have reached the maximum of %d deployed web apps for your plan", limits.MaxDeployedWebApps),
+					http.StatusForbidden, nil)
+				return
+			}
+		}
+
+		if limits.MonthlyDeployCount > 0 {
+			periodStart, _ := utils.BillingPeriod(user.SubscriptionStartAt, time.Now())
+			deployCount, _ := v.Controller.DB.CountWebDeploysSince(user.ID.String(), periodStart)
+			if deployCount >= limits.MonthlyDeployCount {
+				go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_QUOTA_REACHED, map[string]any{"action": "deploy_web_monthly", "limit": limits.MonthlyDeployCount})
+				utils.JSONCodedErrorResponse(w, "DEPLOY_LIMIT_REACHED",
+					fmt.Sprintf("you have reached your monthly deploy limit (%d)", limits.MonthlyDeployCount),
+					http.StatusForbidden, nil)
+				return
+			}
 		}
 	}
 
@@ -92,6 +114,7 @@ func (v *HttpViews) buildAppMobile(w http.ResponseWriter, r *http.Request, platf
 
 	limits, limitsErr := v.Controller.DB.GetStandartUserLimitsByUser(user)
 	if limitsErr != nil || !limits.CanBuildMobile {
+		go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_NEED, map[string]any{"action": "build_mobile", "platform": platform})
 		utils.JSONCodedErrorResponse(w, "FEATURE_NOT_AVAILABLE", "mobile builds require Professional plan", http.StatusForbidden, nil)
 		return
 	}
