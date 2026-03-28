@@ -11,6 +11,7 @@ import (
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/responses"
+	"github.com/knid/wemob/internal/services/remoteconfig"
 	"github.com/knid/wemob/internal/utils"
 )
 
@@ -130,8 +131,8 @@ func (v *HttpViews) UpdateMobileInjection(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Validate injection content size (max 50KB per field)
-	const maxContentLen = 50 * 1024
+	// Validate injection content size
+	maxContentLen := v.Controller.RemoteConfig.GetInt(remoteconfig.MaxMobileContentSizeKB, user.ID.String()) * 1024
 	if body.CSS != nil && len(*body.CSS) > maxContentLen {
 		utils.JSONErrorResponse(w, "CSS content exceeds maximum allowed size (50KB)", http.StatusBadRequest)
 		return

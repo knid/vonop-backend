@@ -13,11 +13,11 @@ import (
 
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/responses"
+	"github.com/knid/wemob/internal/services/remoteconfig"
 	"github.com/uptrace/bun/driver/pgdriver"
 )
 
 const (
-	maxQueryRows         = 1000
 	supabaseHTTPTimeout  = 10 * time.Second
 	maxConcurrentQueries = 5
 )
@@ -464,8 +464,8 @@ func (c *Controller) querySupabase(integration *models.AppIntegration, query *mo
 
 	// Limit
 	limit := query.Limit
-	if limit <= 0 || limit > maxQueryRows {
-		limit = maxQueryRows
+	if limit <= 0 || limit > c.RemoteConfig.GetInt(remoteconfig.MaxQueryRows, remoteconfig.Global) {
+		limit = c.RemoteConfig.GetInt(remoteconfig.MaxQueryRows, remoteconfig.Global)
 	}
 	params = append(params, fmt.Sprintf("limit=%d", limit))
 
@@ -585,7 +585,7 @@ func (c *Controller) queryNeon(integration *models.AppIntegration, query *models
 	var results []map[string]any
 	rowCount := 0
 	for rows.Next() {
-		if rowCount >= maxQueryRows {
+		if rowCount >= c.RemoteConfig.GetInt(remoteconfig.MaxQueryRows, remoteconfig.Global) {
 			break
 		}
 		values := make([]any, len(columns))
@@ -741,7 +741,7 @@ func sanitizeSelectClause(sel string) (string, error) {
 
 // buildSQLFromTableQuery converts a Supabase-style table/select/filters query to a
 // parameterized SQL statement. Returns the SQL string, query arguments, and any error.
-func buildSQLFromTableQuery(query *models.DashboardQuery) (string, []any, error) {
+func buildSQLFromTableQuery(query *models.DashboardQuery, maxRows int) (string, []any, error) {
 	if !isValidSQLIdentifier(query.Table) {
 		return "", nil, fmt.Errorf("invalid table name: %s", query.Table)
 	}
@@ -810,8 +810,8 @@ func buildSQLFromTableQuery(query *models.DashboardQuery) (string, []any, error)
 	}
 
 	limit := query.Limit
-	if limit <= 0 || limit > maxQueryRows {
-		limit = maxQueryRows
+	if limit <= 0 || limit > maxRows {
+		limit = maxRows
 	}
 	sqlStr += fmt.Sprintf(" LIMIT %d", limit)
 
@@ -835,7 +835,7 @@ func (c *Controller) queryPlatform(query *models.DashboardQuery, storeID string)
 			return nil, fmt.Errorf("table %q is not accessible", query.Table)
 		}
 		var err error
-		query.SQL, queryArgs, err = buildSQLFromTableQuery(query)
+		query.SQL, queryArgs, err = buildSQLFromTableQuery(query, c.RemoteConfig.GetInt(remoteconfig.MaxQueryRows, remoteconfig.Global))
 		if err != nil {
 			return nil, err
 		}
@@ -856,7 +856,7 @@ func (c *Controller) queryPlatform(query *models.DashboardQuery, storeID string)
 		query.SQL = fmt.Sprintf("SELECT COUNT(*) AS value FROM %s", quotedTable)
 		queryArgs = nil
 		if len(query.Filters) > 0 {
-			base, baseArgs, err := buildSQLFromTableQuery(&models.DashboardQuery{Table: query.Table, Select: "*", Filters: query.Filters})
+			base, baseArgs, err := buildSQLFromTableQuery(&models.DashboardQuery{Table: query.Table, Select: "*", Filters: query.Filters}, c.RemoteConfig.GetInt(remoteconfig.MaxQueryRows, remoteconfig.Global))
 			if err != nil {
 				return nil, err
 			}
@@ -908,7 +908,7 @@ func (c *Controller) queryPlatform(query *models.DashboardQuery, storeID string)
 	var results []map[string]any
 	rowCount := 0
 	for rows.Next() {
-		if rowCount >= maxQueryRows {
+		if rowCount >= c.RemoteConfig.GetInt(remoteconfig.MaxQueryRows, remoteconfig.Global) {
 			break
 		}
 		values := make([]any, len(columns))

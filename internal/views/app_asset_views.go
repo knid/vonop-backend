@@ -6,16 +6,17 @@ import (
 	"strings"
 	"time"
 
+	"fmt"
+
 	"github.com/go-chi/chi/v5"
 	"github.com/go-playground/validator/v10"
 	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/responses"
+	"github.com/knid/wemob/internal/services/remoteconfig"
 	"github.com/knid/wemob/internal/utils"
 )
-
-const maxAssetFileSize = 50 * 1024 * 1024 // 50MB
 
 
 // GET /v2/apps/{appId}/assets
@@ -80,8 +81,9 @@ func (v *HttpViews) RequestAssetUploadURL(w http.ResponseWriter, r *http.Request
 	}
 
 	// Validate file size
-	if req.FileSize > maxAssetFileSize {
-		utils.JSONErrorResponse(w, "file size exceeds 50MB limit", http.StatusBadRequest)
+	maxSizeMB := v.Controller.RemoteConfig.GetInt(remoteconfig.MaxAssetFileSizeMB, user.ID.String())
+	if req.FileSize > int64(maxSizeMB)*1024*1024 {
+		utils.JSONErrorResponse(w, fmt.Sprintf("file size exceeds %dMB limit", maxSizeMB), http.StatusBadRequest)
 		return
 	}
 
