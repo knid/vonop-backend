@@ -201,6 +201,52 @@ func (c *Controller) AddAICredits(user *models.User, amount int, action string, 
 	})
 }
 
+// GrantSubscriptionCredits grants the plan's monthly credits when a user first subscribes.
+// If a credits balance already exists (created before subscribing), it resets the period
+// to align with the new subscription and adds the plan's monthly credits.
+// Safe to call multiple times — uses the "subscription_grant" action as a dedup key.
+func (c *Controller) GrantSubscriptionCredits(user *models.User) {
+	limits, err := c.DB.GetStandartUserLimitsByUser(user)
+	if err != nil || limits.MonthlyAICredits <= 0 {
+		return
+	}
+
+	balance, err := c.GetOrCreateCreditsBalance(user)
+	if err != nil {
+		slog.Error("failed to get/create credits balance for subscription grant", "error", err, "user_id", user.ID)
+		return
+	}
+
+	// Check if we already granted subscription credits (dedup)
+	existing, _ := c.DB.GetAICreditTransactions(user.ID.String(), 50)
+	for _, tx := range existing {
+		if tx.Action == "subscription_grant" {
+			return // already granted
+		}
+	}
+
+	// Reset period to align with the new subscription start and grant credits
+	periodStart, periodEnd := utils.BillingPeriod(user.SubscriptionStartAt, time.Now())
+	balance.PeriodStart = periodStart
+	balance.PeriodEnd = periodEnd
+	balance.Balance += limits.MonthlyAICredits
+	if _, err := c.DB.UpdateAICreditsBalance(balance); err != nil {
+		slog.Error("failed to update credits balance for subscription grant", "error", err, "user_id", user.ID)
+		return
+	}
+
+	if _, err := c.DB.CreateAICreditTransaction(&models.AICreditTransaction{
+		UserID:    user.ID,
+		Amount:    limits.MonthlyAICredits,
+		Action:    "subscription_grant",
+		Reference: user.SubscriptionID.String(),
+	}); err != nil {
+		slog.Error("failed to log subscription credit grant", "error", err, "user_id", user.ID)
+	}
+
+	slog.Info("subscription credits granted", "user_id", user.ID, "credits", limits.MonthlyAICredits)
+}
+
 // messagesToPostHogInput converts []utils.Message to the format PostHog expects
 // for $ai_input: [{role, content: [{type: "text", text: "..."}]}].
 // Truncates to last 50 messages and 10K chars per message.
