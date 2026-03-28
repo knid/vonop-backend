@@ -7,6 +7,7 @@ import (
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/utils"
+	"github.com/posthog/posthog-go"
 )
 
 func (v *HttpViews) GetProjects(w http.ResponseWriter, r *http.Request) {
@@ -55,6 +56,8 @@ func (v *HttpViews) UpdateProject(w http.ResponseWriter, r *http.Request) {
 	go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_PROJECT_UPDATED, map[string]any{
 		"project_id": projectCreateRes.ID.String(),
 	})
+	go v.Controller.TrackUserEvent(user, "project_updated", posthog.NewProperties().
+		Set("project_id", projectCreateRes.ID.String()))
 
 	utils.JSONResponse(w, projectCreateRes, http.StatusOK)
 }
@@ -97,6 +100,7 @@ func (v *HttpViews) CreateProject(w http.ResponseWriter, r *http.Request) {
 			"action": "create_project",
 			"limit":  limits.MaximumProjectCount,
 		})
+		go v.Controller.TrackUserEvent(user, "quota_reached", posthog.NewProperties().Set("action", "create_project").Set("limit", limits.MaximumProjectCount))
 		return
 	}
 
@@ -115,6 +119,9 @@ func (v *HttpViews) CreateProject(w http.ResponseWriter, r *http.Request) {
 	go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_NEW_PROJECT, map[string]any{
 		"project_id": projectCreateRes.ProjectID.String(),
 	})
+	go v.Controller.TrackUserEvent(user, "project_created", posthog.NewProperties().
+		Set("project_id", projectCreateRes.ProjectID.String()).
+		Set("project_title", projectCreateReq.Title))
 
 	utils.JSONResponse(w, projectCreateRes, http.StatusCreated)
 }
@@ -169,6 +176,9 @@ func (v *HttpViews) DeleteProject(w http.ResponseWriter, r *http.Request) {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+
+	go v.Controller.TrackUserEvent(user, "project_deleted", posthog.NewProperties().
+		Set("project_id", projectID))
 
 	utils.JSONResponse(w, deletedProjectRes, http.StatusOK)
 }

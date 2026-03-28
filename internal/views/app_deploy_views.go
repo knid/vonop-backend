@@ -42,6 +42,7 @@ func (v *HttpViews) DeployAppWeb(w http.ResponseWriter, r *http.Request) {
 			alreadyDeployed, _ := v.Controller.DB.IsAppAlreadyDeployed(appID)
 			if !alreadyDeployed && count >= limits.MaxDeployedWebApps {
 				go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_QUOTA_REACHED, map[string]any{"action": "deploy_web", "limit": limits.MaxDeployedWebApps})
+				go v.Controller.TrackUserEvent(user, "quota_reached", posthog.NewProperties().Set("action", "deploy_web").Set("limit", limits.MaxDeployedWebApps))
 				utils.JSONCodedErrorResponse(w, "DEPLOY_LIMIT_REACHED",
 					fmt.Sprintf("you have reached the maximum of %d deployed web apps for your plan", limits.MaxDeployedWebApps),
 					http.StatusForbidden, nil)
@@ -54,6 +55,7 @@ func (v *HttpViews) DeployAppWeb(w http.ResponseWriter, r *http.Request) {
 			deployCount, _ := v.Controller.DB.CountWebDeploysSince(user.ID.String(), periodStart)
 			if deployCount >= limits.MonthlyDeployCount {
 				go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_QUOTA_REACHED, map[string]any{"action": "deploy_web_monthly", "limit": limits.MonthlyDeployCount})
+				go v.Controller.TrackUserEvent(user, "quota_reached", posthog.NewProperties().Set("action", "deploy_web_monthly").Set("limit", limits.MonthlyDeployCount))
 				utils.JSONCodedErrorResponse(w, "DEPLOY_LIMIT_REACHED",
 					fmt.Sprintf("you have reached your monthly deploy limit (%d)", limits.MonthlyDeployCount),
 					http.StatusForbidden, nil)
@@ -71,6 +73,10 @@ func (v *HttpViews) DeployAppWeb(w http.ResponseWriter, r *http.Request) {
 	deployStart := time.Now()
 	deployment, err := v.Controller.DeployToCoolify(project, user)
 	if err != nil {
+		go v.Controller.TrackUserEvent(user, "app_deploy_failed", posthog.NewProperties().
+			Set("app_id", project.ID.String()).
+			Set("platform", "web").
+			Set("error", err.Error()))
 		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
 		return
 	}

@@ -352,6 +352,7 @@ func (c *Controller) processWebhookEvent(event stripe.Event) error {
 
 		c.TrackUserEvent(user, "payment_action_required", posthog.NewProperties().
 			Set("invoice_url", invoice.HostedInvoiceURL))
+		c.IdentifyUser(user)
 
 	case "customer.subscription.deleted":
 		var sub stripe.Subscription
@@ -433,7 +434,7 @@ func (c *Controller) processWebhookEvent(event stripe.Event) error {
 		}
 
 		packSize, err := strconv.Atoi(packSizeStr)
-		if err != nil || (packSize != 100 && packSize != 200) {
+		if err != nil || packSize <= 0 {
 			slog.Error("webhook: invalid pack_size in metadata", "pack_size", packSizeStr, "event_id", event.ID)
 			return nil
 		}
@@ -453,6 +454,7 @@ func (c *Controller) processWebhookEvent(event stripe.Event) error {
 			Set("pack_size", packSize).
 			Set("session_id", cs.ID).
 			Set("amount_total", cs.AmountTotal))
+		c.IdentifyUser(user)
 
 	default:
 		slog.Warn("unhandled webhook event type", "event_type", event.Type, "event_id", event.ID)
