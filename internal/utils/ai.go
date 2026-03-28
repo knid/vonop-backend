@@ -672,6 +672,82 @@ func GetJSONFromLLM(ctx context.Context, model, system, message string, provider
 	return parsed.Choices[0].Message.Content, nil
 }
 
+// GetJSONFromLLMWithMaxTokens is like GetJSONFromLLM but allows specifying a
+// custom max_tokens limit. Use this when the expected JSON output is large
+// (e.g. file structure planning for complex apps).
+func GetJSONFromLLMWithMaxTokens(ctx context.Context, model, system, message string, provider *LLMProvider, maxTokens int) (string, error) {
+	if provider == nil || provider.APIKey == "" {
+		slog.Error("LLM provider is not configured")
+		return "", fmt.Errorf("missing LLM provider configuration")
+	}
+
+	body, err := buildLLMRequestBody(ChatRequest{
+		Model: model,
+		Messages: []Message{
+			{Role: "system", Content: system},
+			{Role: "user", Content: message},
+		},
+		MaxTokens:          maxTokens,
+		DisablePromptCache: true,
+	}, provider)
+	if err != nil {
+		return "", fmt.Errorf("error building request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", provider.Endpoint(), bytes.NewReader(body))
+	if err != nil {
+		return "", fmt.Errorf("error creating LLM request: %w", err)
+	}
+	setLLMHeaders(req, provider)
+
+	start := time.Now()
+	resp, err := llmHTTPClient.Do(req)
+	if err != nil {
+		slog.Error("Error making request to LLM:", "error", err, "from", "llm_utils", "model", model)
+		return "", fmt.Errorf("error generating items. try again please")
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		errBody, _ := io.ReadAll(resp.Body)
+		bodyStr := string(errBody)
+		if len(bodyStr) > 2000 {
+			bodyStr = bodyStr[:2000] + "...(truncated)"
+		}
+		slog.Error("LLM returned non-200", "status", resp.StatusCode, "body", bodyStr, "model", model, "provider", provider.Name)
+		return "", fmt.Errorf("LLM returned status %d", resp.StatusCode)
+	}
+
+	respBody, _ := io.ReadAll(resp.Body)
+	latencyMs := time.Since(start).Milliseconds()
+	slog.Info("LLM Response received", "from", "llm_utils")
+
+	parsed, err := parseLLMResponseBody(respBody, provider)
+	if err != nil {
+		slog.Error("error creating items.", "error", err, "from", "llm_utils", "model", model)
+		return "", fmt.Errorf("error creating items. try again please")
+	}
+
+	if len(parsed.Choices) == 0 {
+		slog.Error("no choices returned from LLM", "from", "llm_utils", "model", model)
+		return "", fmt.Errorf("no choices returned from LLM")
+	}
+
+	if parsed.Usage.TotalTokens > 0 {
+		slog.Info("LLM usage", append([]any{"from", "llm_utils", "model", model, "prompt_tokens", parsed.Usage.PromptTokens, "completion_tokens", parsed.Usage.CompletionTokens, "total_tokens", parsed.Usage.TotalTokens, "latency_ms", latencyMs}, trackerAttrs(ctx)...)...)
+		if tracker := TokenTrackerFromContext(ctx); tracker != nil {
+			if tracker.TrackContent {
+				msgs := []Message{{Role: "system", Content: system}, {Role: "user", Content: message}}
+				tracker.RecordWithContent(model, parsed.Usage, latencyMs, false, msgs, parsed.Choices[0].Message.Content, "get_json")
+			} else {
+				tracker.Record(model, parsed.Usage, latencyMs, false, "get_json")
+			}
+		}
+	}
+
+	return parsed.Choices[0].Message.Content, nil
+}
+
 func GetTextFromLLM(ctx context.Context, model, system, message string, provider *LLMProvider) (string, error) {
 	if provider == nil || provider.APIKey == "" {
 		return "", fmt.Errorf("missing LLM provider configuration")

@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -1884,7 +1885,7 @@ func (c *Controller) PlanAppFileStructure(ctx context.Context, prompt string, pr
 				"attempt", attempt+1, "model", attemptModel)
 		}
 
-		structureJSON, err := utils.GetJSONFromLLM(ctx, attemptModel, systemPrompt, prompt, provider)
+		structureJSON, err := utils.GetJSONFromLLMWithMaxTokens(ctx, attemptModel, systemPrompt, prompt, provider, 32768)
 		if err != nil {
 			slog.Error("failed to generate app structure",
 				"error", err, "attempt", attempt+1, "model", attemptModel)
@@ -1896,10 +1897,16 @@ func (c *Controller) PlanAppFileStructure(ctx context.Context, prompt string, pr
 		if err := json.Unmarshal([]byte(structureJSON), &structure); err != nil {
 			cleaned := utils.ExtractJSON(structureJSON)
 			if err2 := json.Unmarshal([]byte(cleaned), &structure); err2 != nil {
-				slog.Error("failed to parse app structure",
-					"error", err2, "attempt", attempt+1, "json_length", len(structureJSON))
-				lastErr = fmt.Errorf("failed to parse app structure: %w", err2)
-				continue
+				// Attempt to repair truncated JSON (e.g. LLM hit token limit mid-output)
+				repaired := repairTruncatedStructureJSON(cleaned)
+				if err3 := json.Unmarshal([]byte(repaired), &structure); err3 != nil {
+					slog.Error("failed to parse app structure",
+						"error", err3, "attempt", attempt+1, "json_length", len(structureJSON))
+					lastErr = fmt.Errorf("failed to parse app structure: %w", err3)
+					continue
+				}
+				slog.Info("repaired truncated structure JSON",
+					"attempt", attempt+1, "files", len(structure.Files))
 			}
 		}
 
@@ -1912,6 +1919,97 @@ func (c *Controller) PlanAppFileStructure(ctx context.Context, prompt string, pr
 	}
 
 	return nil, fmt.Errorf("structure planning failed after retries: %w", lastErr)
+}
+
+// repairTruncatedStructureJSON attempts to fix JSON that was truncated mid-output
+// (e.g. when the LLM hits the max_tokens limit). It closes open strings, arrays,
+// and objects so the JSON can be parsed — we get a partial but usable structure.
+func repairTruncatedStructureJSON(s string) string {
+	if len(s) == 0 {
+		return s
+	}
+
+	// Strip any trailing incomplete key-value pair (e.g. `"path": "app/some`)
+	// by finding the last complete JSON element
+	result := []byte(s)
+
+	// Remove trailing characters that are clearly mid-value
+	for len(result) > 0 {
+		last := result[len(result)-1]
+		if last == ',' || last == ' ' || last == '\n' || last == '\r' || last == '\t' {
+			result = result[:len(result)-1]
+		} else {
+			break
+		}
+	}
+
+	// If we're mid-string, close it
+	inString := false
+	escaped := false
+	for _, ch := range result {
+		if escaped {
+			escaped = false
+			continue
+		}
+		if ch == '\\' && inString {
+			escaped = true
+			continue
+		}
+		if ch == '"' {
+			inString = !inString
+		}
+	}
+	if inString {
+		result = append(result, '"')
+	}
+
+	// Count open brackets/braces and close them
+	openBraces := 0
+	openBrackets := 0
+	inStr := false
+	esc := false
+	for _, ch := range result {
+		if esc {
+			esc = false
+			continue
+		}
+		if ch == '\\' && inStr {
+			esc = true
+			continue
+		}
+		if ch == '"' {
+			inStr = !inStr
+			continue
+		}
+		if inStr {
+			continue
+		}
+		switch ch {
+		case '{':
+			openBraces++
+		case '}':
+			openBraces--
+		case '[':
+			openBrackets++
+		case ']':
+			openBrackets--
+		}
+	}
+
+	// Remove trailing comma before we close
+	trimmed := bytes.TrimRight(result, " \t\n\r,")
+	result = trimmed
+
+	for openBrackets > 0 {
+		result = append(result, ']')
+		openBrackets--
+	}
+	for openBraces > 0 {
+		result = append(result, '}')
+		openBraces--
+	}
+
+	return string(result)
 }
 
 // GenerateClarificationQuestions asks a fast LLM to produce 2-5 clarifying
