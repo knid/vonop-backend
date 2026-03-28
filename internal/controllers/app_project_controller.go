@@ -15,6 +15,7 @@ import (
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/utils"
+	"github.com/posthog/posthog-go"
 )
 
 func (c *Controller) CreateAppProject(ctx context.Context, user *models.User, req requests.GenerateAppRequest) (*models.AppProject, error) {
@@ -34,6 +35,7 @@ func (c *Controller) CreateAppProject(ctx context.Context, user *models.User, re
 			slog.Warn("CreateAppProject: failed to count projects", "error", countErr, "user_id", user.ID)
 		} else if appCount >= limits.MonthlyAppCount {
 			go c.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_QUOTA_REACHED, map[string]any{"action": "create_app", "limit": limits.MonthlyAppCount})
+			go c.TrackUserEvent(user, "quota_reached", posthog.NewProperties().Set("action", "create_app").Set("limit", limits.MonthlyAppCount))
 			return nil, fmt.Errorf("you have reached your monthly app project limit (%d)", limits.MonthlyAppCount)
 		}
 	}

@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/models"
+	"github.com/posthog/posthog-go"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/utils"
 )
@@ -112,6 +113,7 @@ func (v *HttpViews) SendProjectNotification(w http.ResponseWriter, r *http.Reque
 			"action": "send_notification",
 			"limit":  limits.MontlyNotificationCount,
 		})
+		go v.Controller.TrackUserEvent(user, "quota_reached", posthog.NewProperties().Set("action", "send_notification").Set("limit", limits.MontlyNotificationCount))
 		return
 	}
 

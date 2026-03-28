@@ -13,6 +13,7 @@ import (
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/utils"
+	"github.com/posthog/posthog-go"
 )
 
 // toGitHubExportResponse converts a model to a response struct.
@@ -161,6 +162,9 @@ func (v *HttpViews) ExportToGitHub(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	go v.Controller.TrackUserEvent(user, "github_exported", posthog.NewProperties().
+		Set("app_id", project.ID.String()).
+		Set("repo_name", req.RepoName))
 	utils.JSONResponse(w, toGitHubExportResponse(export), http.StatusCreated)
 }
 
@@ -204,6 +208,8 @@ func (v *HttpViews) PushToGitHub(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	go v.Controller.TrackUserEvent(user, "github_pushed", posthog.NewProperties().
+		Set("app_id", project.ID.String()))
 	utils.JSONResponse(w, toGitHubExportResponse(export), http.StatusOK)
 }
 

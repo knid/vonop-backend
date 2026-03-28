@@ -12,6 +12,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/knid/wemob/internal/utils"
+	"github.com/posthog/posthog-go"
 	"github.com/stripe/stripe-go/v82/webhook"
 )
 
@@ -120,6 +121,9 @@ func (v *HttpViews) HandleStoreStripeWebhook(w http.ResponseWriter, r *http.Requ
 				sessionID, _ := order.Metadata["session_id"].(string)
 				v.Controller.FinalizeOrderPostPayment(store, order, orderItems, sessionID)
 
+				v.Controller.TrackStorefrontEvent(storeID, "storefront_payment_confirmed", posthog.NewProperties().
+					Set("order_id", orderID).
+					Set("payment_provider", "stripe"))
 				slog.Info("Store order payment confirmed via Stripe", "orderId", orderID, "storeId", storeID)
 			}
 		}
@@ -137,6 +141,9 @@ func (v *HttpViews) HandleStoreStripeWebhook(w http.ResponseWriter, r *http.Requ
 				order.Status = "refunded"
 				order.UpdatedAt = time.Now()
 				v.Controller.DB.UpdateOrder(order)
+				v.Controller.TrackStorefrontEvent(storeID, "storefront_order_refunded", posthog.NewProperties().
+					Set("order_id", orderID).
+					Set("payment_provider", "stripe"))
 				slog.Info("Store order refunded via Stripe", "orderId", orderID, "storeId", storeID)
 			}
 		}

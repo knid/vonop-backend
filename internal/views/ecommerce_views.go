@@ -556,6 +556,10 @@ func (v *HttpViews) UpdateStoreOrderStatus(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	go v.Controller.TrackStorefrontEvent(store.ID.String(), "store_order_status_updated", posthog.NewProperties().
+		Set("order_id", orderID).
+		Set("new_status", req.Status))
+
 	utils.JSONResponse(w, responses.OrderResponse{
 		ID: order.ID, OrderNumber: order.OrderNumber,
 		Status: order.Status, UpdatedAt: order.UpdatedAt,

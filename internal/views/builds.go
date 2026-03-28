@@ -8,6 +8,7 @@ import (
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/utils"
+	"github.com/posthog/posthog-go"
 )
 
 func (v *HttpViews) GetProjectBuilds(w http.ResponseWriter, r *http.Request) {
@@ -99,6 +100,7 @@ func (v *HttpViews) CreateProjectBuild(w http.ResponseWriter, r *http.Request) {
 			"action": "create_build",
 			"limit":  limits.MontlyBuildCount,
 		})
+		go v.Controller.TrackUserEvent(user, "quota_reached", posthog.NewProperties().Set("action", "create_build").Set("limit", limits.MontlyBuildCount))
 		return
 	}
 

@@ -5,6 +5,7 @@ import (
 
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/utils"
+	"github.com/posthog/posthog-go"
 )
 
 func (v *HttpViews) GoogleMobileLogin(w http.ResponseWriter, r *http.Request) {
@@ -24,6 +25,15 @@ func (v *HttpViews) GoogleMobileLogin(w http.ResponseWriter, r *http.Request) {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
 		return
 	}
+
+	go func() {
+		if u, lookupErr := v.Controller.DB.GetUserByEmail(req.Email); lookupErr == nil {
+			v.Controller.EnsureIdentified(u)
+			v.Controller.TrackUserEvent(u, "user_oauth_logged_in", posthog.NewProperties().
+				Set("provider", "google_mobile").
+				Set("subscription_status", u.SubscriptionStatus))
+		}
+	}()
 
 	utils.JSONResponse(w, loginRes, http.StatusOK)
 }
