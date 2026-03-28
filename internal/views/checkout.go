@@ -5,14 +5,14 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/knid/wemob/internal/services/remoteconfig"
 	"github.com/knid/wemob/internal/utils"
 	"github.com/posthog/posthog-go"
 	"github.com/stripe/stripe-go/v82"
 	"github.com/stripe/stripe-go/v82/checkout/session"
 )
 
-// creditPacks defines the available credit packages.
-// Each maps a package ID to its Stripe secret key, display name, credit amount, and price in dollars.
+// creditPack defines a credit package with Stripe secret key, display name, credit amount, and price.
 type creditPack struct {
 	ID       string
 	Secret   string
@@ -22,14 +22,21 @@ type creditPack struct {
 	Popular  bool
 }
 
-var creditPacks = []creditPack{
-	{ID: "credits_100", Secret: "STRIPE_CREDITS_100_PRICE_ID", Name: "100 AI Credits", Credits: 100, Price: 15},
-	{ID: "credits_200", Secret: "STRIPE_CREDITS_200_PRICE_ID", Name: "200 AI Credits", Credits: 200, Price: 30, Popular: true},
+func (v *HttpViews) getCreditPacks(userID string) []creditPack {
+	rc := v.Controller.RemoteConfig
+	c100 := rc.GetInt(remoteconfig.CreditPack100Credits, userID)
+	p100 := rc.GetInt(remoteconfig.CreditPack100Price, userID)
+	c200 := rc.GetInt(remoteconfig.CreditPack200Credits, userID)
+	p200 := rc.GetInt(remoteconfig.CreditPack200Price, userID)
+	return []creditPack{
+		{ID: "credits_100", Secret: "STRIPE_CREDITS_100_PRICE_ID", Name: fmt.Sprintf("%d AI Credits", c100), Credits: c100, Price: p100},
+		{ID: "credits_200", Secret: "STRIPE_CREDITS_200_PRICE_ID", Name: fmt.Sprintf("%d AI Credits", c200), Credits: c200, Price: p200, Popular: true},
+	}
 }
 
 // creditPackByID returns the pack definition and its Stripe price ID, or nil if not found.
-func (v *HttpViews) creditPackByID(packageID string) (*creditPack, string) {
-	for _, p := range creditPacks {
+func (v *HttpViews) creditPackByID(packageID string, packs []creditPack) (*creditPack, string) {
+	for _, p := range packs {
 		if p.ID == packageID {
 			priceID := v.Controller.SecretManager.GetSecret(p.Secret)
 			if priceID == "" {
@@ -125,7 +132,7 @@ func (v *HttpViews) GetCreditPackages(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var packages []packageResponse
-	for _, p := range creditPacks {
+	for _, p := range v.getCreditPacks(remoteconfig.Global) {
 		// Only include packs that have a configured Stripe price
 		if v.Controller.SecretManager.GetSecret(p.Secret) != "" {
 			packages = append(packages, packageResponse{
@@ -161,7 +168,7 @@ func (v *HttpViews) PurchaseCredits(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	pack, priceID := v.creditPackByID(req.PackageID)
+	pack, priceID := v.creditPackByID(req.PackageID, v.getCreditPacks(user.ID.String()))
 	if pack == nil {
 		utils.JSONErrorResponse(w, "invalid package_id", http.StatusBadRequest)
 		return
