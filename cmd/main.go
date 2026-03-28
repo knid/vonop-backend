@@ -1238,6 +1238,7 @@ func main() {
 					r.Route("/deploy", func(r chi.Router) {
 						r.Post("/validate", httpViews.ValidateAppFiles)
 						r.Post("/web", httpViews.DeployAppWeb)
+						r.Delete("/web", httpViews.UndeployAppWeb)
 						r.Get("/status", httpViews.GetDeployStatus)
 						r.Get("/history", httpViews.GetDeployHistory)
 					})
