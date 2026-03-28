@@ -442,35 +442,46 @@ func (c *Controller) GetLatestDeploymentStatus(projectID string) (*models.AppDep
 		return nil, err
 	}
 
-	// Status is updated by the Coolify webhook (HandleCoolifyWebhook).
-	// If the build has been "building" for too long, check Coolify directly
-	// before falling back to a timeout failure — the webhook may have been
-	// lost even though the app deployed successfully.
+	// Webhooks are unreliable — actively check Coolify for the real status
+	// whenever the deployment is still in a non-terminal state.
 	if (deployment.Status == "building" || deployment.Status == "pending") &&
-		time.Since(deployment.CreatedAt) > 15*time.Minute {
+		c.CoolifyService != nil && time.Since(deployment.CreatedAt) > 30*time.Second {
 
-		resolved := false
-		if c.CoolifyService != nil {
-			coolifyProject, cpErr := c.DB.GetCoolifyProjectByAppProjectID(projectID)
-			if cpErr == nil && coolifyProject != nil {
-				appStatus, appErr := c.CoolifyService.GetAppStatus(coolifyProject.CoolifyAppUUID)
-				if appErr == nil && strings.HasPrefix(strings.ToLower(appStatus), "running") {
+		coolifyProject, cpErr := c.DB.GetCoolifyProjectByAppProjectID(projectID)
+		if cpErr == nil && coolifyProject != nil {
+			dep, depErr := c.CoolifyService.GetLatestDeployment(coolifyProject.CoolifyAppUUID)
+			if depErr == nil {
+				coolifyStatus := strings.ToLower(dep.Status)
+				switch {
+				case coolifyStatus == "finished" || coolifyStatus == "success":
 					deployment.Status = "deployed"
 					deployment.ErrorMessage = ""
-					resolved = true
-					slog.Info("Deployment recovered via Coolify status check",
-						"deployment_id", deployment.ID, "coolify_status", appStatus)
+					slog.Info("Deployment resolved via Coolify poll",
+						"deployment_id", deployment.ID, "coolify_status", coolifyStatus)
+				case coolifyStatus == "failed" || coolifyStatus == "error":
+					deployment.Status = "failed"
+					deployment.ErrorMessage = extractBuildError(dep.Logs)
+					if deployment.ErrorMessage == "" {
+						deployment.ErrorMessage = "Build failed — the application could not be deployed."
+					}
+					slog.Info("Deployment failed via Coolify poll",
+						"deployment_id", deployment.ID, "coolify_status", coolifyStatus)
 				}
 			}
 		}
 
-		if !resolved {
+		// Ultimate timeout fallback
+		if (deployment.Status == "building" || deployment.Status == "pending") &&
+			time.Since(deployment.CreatedAt) > 10*time.Minute {
 			deployment.Status = "failed"
-			deployment.ErrorMessage = "Build timed out after 15 minutes"
+			deployment.ErrorMessage = "Build timed out after 10 minutes"
 		}
 
-		if _, err := c.DB.UpdateAppDeployment(deployment); err != nil {
-			slog.Error("Failed to update deployment status", "error", err)
+		// Persist terminal status to DB
+		if deployment.Status == "deployed" || deployment.Status == "failed" {
+			if _, err := c.DB.UpdateAppDeployment(deployment); err != nil {
+				slog.Error("Failed to update deployment status", "error", err)
+			}
 		}
 	}
 
