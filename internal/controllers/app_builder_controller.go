@@ -18,6 +18,7 @@ import (
 	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/services/gitrepo"
 	"github.com/knid/wemob/internal/services/remoteconfig"
+	"github.com/knid/wemob/internal/templates"
 	"github.com/knid/wemob/internal/utils"
 	"github.com/posthog/posthog-go"
 )
@@ -328,7 +329,7 @@ func (c *Controller) StreamBuildApp(
 		lang := constants.DetectLanguage(project.Prompt)
 
 		// Inject template files (package.json, tsconfig, postcss, next.config)
-		for _, tp := range constants.NEXTJS_TEMPLATE_FILE_PATHS {
+		for _, tp := range templates.BaseFilePaths {
 			// For globals.css, don't inject a pre-built theme — let the LLM write it
 			if tp == "app/globals.css" {
 				continue
@@ -341,7 +342,7 @@ func (c *Controller) StreamBuildApp(
 		}
 
 		// Inject UI component templates (lib/utils, components/ui/*)
-		for _, tp := range constants.NEXTJS_UI_TEMPLATE_FILE_PATHS {
+		for _, tp := range templates.UIFilePaths {
 			content := getUITemplateContent(tp)
 			if content != "" {
 				c.injectTemplateFile(repo, tp, content, fileMap, sendEvent)
@@ -354,7 +355,7 @@ func (c *Controller) StreamBuildApp(
 			if settings := project.Settings; settings != nil {
 				needsAuth, _ = settings["needs_auth"].(bool)
 			}
-			for _, tp := range constants.NEXTJS_ECOMMERCE_TEMPLATE_FILE_PATHS {
+			for _, tp := range templates.EcommerceFilePaths {
 				var content string
 				if tp == "components/ecommerce/providers.tsx" {
 					content = buildEcommerceProviders(needsAuth)
