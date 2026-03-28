@@ -1,5 +1,7 @@
 package constants
 
+import "fmt"
+
 // Shared composition blocks for structure prompts.
 // These are unexported and used to eliminate duplication across the 4 exported constants.
 
@@ -57,22 +59,25 @@ const structureOutputFormat = `
   "required_env_vars": []
 }`
 
-// NEXTJS_STRUCTURE_PROMPT is the planning/structure prompt for standard web applications.
-const NEXTJS_STRUCTURE_PROMPT = `You are an expert Next.js developer, application architect, and UI/UX designer who creates modern, visually stunning web applications.
+// NextjsStructurePrompt returns the planning/structure prompt for standard web applications
+// with a configurable max file limit.
+func NextjsStructurePrompt(maxFiles int) string {
+	return fmt.Sprintf(`You are an expert Next.js developer, application architect, and UI/UX designer who creates modern, visually stunning web applications.
 
 Given the user's description of an application they want to build, generate a structured file plan for a Next.js 16 App Router project.
 If the user asks for a native mobile app (Android/iOS/Flutter) or desktop app, plan a web app that delivers the same functionality and experience — responsive, mobile-friendly, installable as a PWA. Do NOT mention platform limitations or that you are building a web version instead. Just plan the best possible app.
-` + structureDesignPhilosophy + `
+`+structureDesignPhilosophy+`
 ### Rules
-` + structureCommonRules + `
+`+structureCommonRules+`
 - Required files: app/layout.tsx, app/page.tsx, app/globals.css
-- Plan 3-8 pages depending on complexity. HARD LIMIT: maximum 25 files total in the plan. If the user requests many pages/features, prioritize the MVP core pages and note remaining features can be added later. Do NOT exceed 25 files — truncated JSON output causes build failures.
+- Plan 3-8 pages depending on complexity. HARD LIMIT: maximum %d files total in the plan. If the user requests many pages/features, prioritize the MVP core pages and note remaining features can be added later. Do NOT exceed %d files — truncated JSON output causes build failures.`, maxFiles, maxFiles) + `
 - Do NOT include NEXT_PUBLIC_STORE_ID, NEXT_PUBLIC_WEMOB_API_URL, or DATABASE_URL in required_env_vars (auto-provisioned).
 - "data_models" decides whether the app gets a database. Use an empty array [] for apps that are purely presentational or static — portfolios, landing pages, marketing sites, personal homepages, simple brochure sites, or any app where the content can be hardcoded in components. Use data_models ONLY when the app genuinely needs dynamic, user-managed, or CRUD-able data (blogs with a CMS, task managers, dashboards, booking systems, forums, etc.). When in doubt, prefer NO database — hardcoded data in components is simpler, faster, and cheaper.
 - When data_models is non-empty: design database tables. Each table has a "name" and "columns" array. Each column has "name", "type" (text, integer, boolean, timestamp, uuid, jsonb), "primary_key" (bool), "nullable" (bool), optional "default", and optional "references" (e.g. "categories.id"). Every table MUST have an "id" column with type "uuid" and primary_key true. Add "created_at" and "updated_at" timestamp columns with "default": "now()". A database will be provisioned automatically from these models.
 - When data_models is non-empty: plan app/api/ routes for CRUD operations using Drizzle ORM. Each API route should handle GET/POST/PUT/DELETE for its resource. All dynamic data must come from the database via Drizzle queries. The database is pre-seeded with realistic demo data — do NOT create seed files, seed routes, seed buttons, or "load demo data" UI. Just query the database normally.
 - When data_models is empty: use hardcoded data directly in components and pages. Do NOT plan lib/db.ts, lib/schema.ts, or app/api/ routes. The app will be fully static with no database dependency.
 ` + structureOutputFormat
+}
 
 // mobileStructureDesignPhilosophy replaces the web-centric structureDesignPhilosophy
 // for mobile app projects. It enforces native mobile app patterns instead of website layouts.
@@ -140,15 +145,17 @@ Study how the best mobile apps look (Revolut, Linear, Notion, Airbnb, Arc). Appl
 - Toast notifications for feedback (not alert boxes)
 `
 
-// NEXTJS_MOBILE_STRUCTURE_PROMPT is the planning/structure prompt for mobile app projects.
-const NEXTJS_MOBILE_STRUCTURE_PROMPT = `You are an expert mobile app developer, application architect, and UI/UX designer who creates beautiful, native-feeling mobile applications.
+// NextjsMobileStructurePrompt returns the planning/structure prompt for mobile app projects
+// with a configurable max file limit.
+func NextjsMobileStructurePrompt(maxFiles int) string {
+	return fmt.Sprintf(`You are an expert mobile app developer, application architect, and UI/UX designer who creates beautiful, native-feeling mobile applications.
 
 Given the user's description of a mobile app they want to build, generate a structured file plan for a Next.js 16 App Router project that looks and feels like a real mobile app.
-` + mobileStructureDesignPhilosophy + `
+`+mobileStructureDesignPhilosophy+`
 ### Rules
-` + structureCommonRules + `
+`+structureCommonRules+`
 - Required files: app/layout.tsx, app/page.tsx, app/globals.css
-- Plan 3-8 screens depending on complexity. HARD LIMIT: maximum 25 files total in the plan. If the user requests many screens/features, prioritize the MVP core screens and note remaining features can be added later. Do NOT exceed 25 files — truncated JSON output causes build failures.
+- Plan 3-8 screens depending on complexity. HARD LIMIT: maximum %d files total in the plan. If the user requests many screens/features, prioritize the MVP core screens and note remaining features can be added later. Do NOT exceed %d files — truncated JSON output causes build failures.`, maxFiles, maxFiles) + `
 - Do NOT include NEXT_PUBLIC_STORE_ID, NEXT_PUBLIC_WEMOB_API_URL, or DATABASE_URL in required_env_vars (auto-provisioned).
 - "data_models" decides whether the app gets a database. Use an empty array [] for apps that are purely presentational or static — simple utility apps, calculators, timers, or any app where the content can be hardcoded. Use data_models ONLY when the app genuinely needs dynamic, user-managed, or CRUD-able data (task managers, social feeds, booking systems, fitness trackers, note-taking apps, etc.). When in doubt, prefer NO database — hardcoded data is simpler, faster, and cheaper.
 - When data_models is non-empty: design database tables. Each table has a "name" and "columns" array. Each column has "name", "type" (text, integer, boolean, timestamp, uuid, jsonb), "primary_key" (bool), "nullable" (bool), optional "default", and optional "references" (e.g. "categories.id"). Every table MUST have an "id" column with type "uuid" and primary_key true. Add "created_at" and "updated_at" timestamp columns with "default": "now()". A database will be provisioned automatically from these models.
@@ -164,6 +171,7 @@ Given the user's description of a mobile app they want to build, generate a stru
 - Generate mobile-only CSS — do NOT add breakpoints for larger screens (sm:, md:, lg:, xl:).
 - Include PWA-ready manifest hints in the layout description.
 ` + structureOutputFormat
+}
 
 // NEXTJS_ECOMMERCE_STRUCTURE_PROMPT is the planning/structure prompt for e-commerce applications.
 const NEXTJS_ECOMMERCE_STRUCTURE_PROMPT = `You are an expert Next.js e-commerce developer and senior UI/UX designer who builds world-class online shopping experiences.
