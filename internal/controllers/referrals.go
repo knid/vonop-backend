@@ -57,16 +57,20 @@ func (c *Controller) GetReferralStats(user *models.User) (*responses.ReferralSta
 	totalRewards := 0
 	for _, r := range referrals {
 		resp := responses.ReferralResponse{
-			ID:            r.ID,
-			RewardGranted: r.RewardGranted,
-			CreatedAt:     r.CreatedAt,
+			ID:                        r.ID,
+			RewardGranted:             r.RewardGranted,
+			SubscriptionRewardGranted: r.SubscriptionRewardGranted,
+			CreatedAt:                 r.CreatedAt,
 		}
 		if r.Referred != nil {
 			resp.ReferredEmail = r.Referred.Email
 			resp.ReferredName = r.Referred.Name
 		}
 		if r.RewardGranted {
-			totalRewards += models.ReferralRewardCredits
+			totalRewards += models.ReferralSignupCredits
+		}
+		if r.SubscriptionRewardGranted {
+			totalRewards += models.ReferralSubscriptionCredits
 		}
 		refs = append(refs, resp)
 	}
@@ -108,16 +112,51 @@ func (c *Controller) ApplyReferralCode(user *models.User, codeStr string) error 
 		return err
 	}
 
-	// Grant credits to both parties
+	// Grant signup credits (10) to both parties
 	referrer, err := c.DB.GetUserById(code.UserID.String())
 	if err == nil {
-		if err := c.AddAICredits(referrer, models.ReferralRewardCredits, "referral_reward", user.ID.String()); err != nil {
-			slog.Error("failed to grant referral reward credits", "error", err, "referrer_id", referrer.ID, "referred_id", user.ID)
+		if err := c.AddAICredits(referrer, models.ReferralSignupCredits, "referral_signup_reward", user.ID.String()); err != nil {
+			slog.Error("failed to grant referral signup reward credits", "error", err, "referrer_id", referrer.ID, "referred_id", user.ID)
 		}
 	}
-	if err := c.AddAICredits(user, models.ReferralRewardCredits, "referral_bonus", code.UserID.String()); err != nil {
-		slog.Error("failed to grant referral bonus credits", "error", err, "user_id", user.ID, "referrer_code_owner", code.UserID)
+	if err := c.AddAICredits(user, models.ReferralSignupCredits, "referral_signup_bonus", code.UserID.String()); err != nil {
+		slog.Error("failed to grant referral signup bonus credits", "error", err, "user_id", user.ID, "referrer_code_owner", code.UserID)
 	}
 
 	return nil
+}
+
+// GrantReferralSubscriptionReward grants 50 credits to both parties when
+// the referred user starts a subscription. Uses an atomic DB claim so
+// concurrent calls are safe — only the first caller grants credits.
+func (c *Controller) GrantReferralSubscriptionReward(user *models.User) {
+	referral, err := c.DB.GetReferralByReferredID(user.ID.String())
+	if err != nil {
+		// User was not referred — nothing to do
+		return
+	}
+
+	// Atomic claim: only proceeds if subscription_reward_granted was false
+	claimed, err := c.DB.ClaimSubscriptionReward(referral.ID.String())
+	if err != nil {
+		slog.Error("failed to claim referral subscription reward", "error", err, "referral_id", referral.ID)
+		return
+	}
+	if !claimed {
+		// Already granted by another request
+		return
+	}
+
+	// Grant subscription credits (50) to referrer
+	referrer, err := c.DB.GetUserById(referral.ReferrerID.String())
+	if err == nil {
+		if err := c.AddAICredits(referrer, models.ReferralSubscriptionCredits, "referral_subscription_reward", user.ID.String()); err != nil {
+			slog.Error("failed to grant referral subscription reward credits", "error", err, "referrer_id", referrer.ID, "referred_id", user.ID)
+		}
+	}
+
+	// Grant subscription credits (50) to referred user
+	if err := c.AddAICredits(user, models.ReferralSubscriptionCredits, "referral_subscription_bonus", referral.ReferrerID.String()); err != nil {
+		slog.Error("failed to grant referral subscription bonus credits", "error", err, "user_id", user.ID, "referrer_id", referral.ReferrerID)
+	}
 }
