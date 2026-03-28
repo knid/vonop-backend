@@ -19,6 +19,7 @@ import (
 	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/services/fal"
 	"github.com/knid/wemob/internal/services/gitrepo"
+	"github.com/knid/wemob/internal/services/remoteconfig"
 	"github.com/knid/wemob/internal/utils"
 	"github.com/knid/wemob/internal/utils/external"
 )
@@ -285,7 +286,7 @@ CRITICAL LANGUAGE RULE: ALL content you generate (product names, descriptions, c
 		}(),
 		nil, // onReasoning — not needed
 		utils.ToolCallConfig{
-			MaxRounds:  30,
+			MaxRounds:  c.RemoteConfig.GetInt(remoteconfig.AIBuilderToolMaxRounds, remoteconfig.Global),
 			MaxTokens:  4096,
 			StripAfter: 28, // Strip tools near the end so model is forced to respond
 			OnToolCallStart: func(toolName string) {
