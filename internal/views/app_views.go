@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -450,7 +451,7 @@ func (v *HttpViews) UpdateAppFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	appID := chi.URLParam(r, "appId")
-	fid := chi.URLParam(r, "fid")
+	fid, _ := url.PathUnescape(chi.URLParam(r, "fid"))
 	project, err := v.Controller.GetAppProject(appID, user)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
@@ -495,7 +496,7 @@ func (v *HttpViews) DeleteAppFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	appID := chi.URLParam(r, "appId")
-	fid := chi.URLParam(r, "fid") // file path
+	fid, _ := url.PathUnescape(chi.URLParam(r, "fid"))
 	project, err := v.Controller.GetAppProject(appID, user)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
