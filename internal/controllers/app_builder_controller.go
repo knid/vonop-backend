@@ -17,6 +17,7 @@ import (
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/services/gitrepo"
+	"github.com/knid/wemob/internal/services/remoteconfig"
 	"github.com/knid/wemob/internal/utils"
 	"github.com/posthog/posthog-go"
 )
@@ -483,8 +484,8 @@ func (c *Controller) StreamBuildApp(
 		// Add context + conversation history with summarization
 		llmMessages = append(llmMessages, utils.Message{Role: "user", Content: "I understand the current project state. What would you like me to do?"})
 
-		const keepRecent = 10
-		const summarizeThreshold = 15
+		keepRecent := c.RemoteConfig.GetInt(remoteconfig.AIChatKeepRecent, remoteconfig.Global)
+		summarizeThreshold := c.RemoteConfig.GetInt(remoteconfig.AIChatSummarizeThreshold, remoteconfig.Global)
 
 		if len(messages) > summarizeThreshold {
 			oldMessages := messages[:len(messages)-keepRecent]

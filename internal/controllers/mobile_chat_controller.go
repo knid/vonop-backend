@@ -12,6 +12,7 @@ import (
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/responses"
+	"github.com/knid/wemob/internal/services/remoteconfig"
 	"github.com/knid/wemob/internal/utils"
 )
 
@@ -78,7 +79,7 @@ func (c *Controller) StreamMobileInjectionChat(
 	}
 
 	// Enforce max message limit to prevent unbounded growth
-	const maxMessages = 200
+	maxMessages := c.RemoteConfig.GetInt(remoteconfig.AIMaxChatMessages, remoteconfig.Global)
 	if len(messages) >= maxMessages {
 		messages = messages[len(messages)-maxMessages+1:]
 	}
@@ -123,8 +124,8 @@ func (c *Controller) StreamMobileInjectionChat(
 	})
 
 	// Add conversation history with summarization
-	const keepRecent = 10
-	const summarizeThreshold = 15
+	keepRecent := c.RemoteConfig.GetInt(remoteconfig.AIChatKeepRecent, remoteconfig.Global)
+	summarizeThreshold := c.RemoteConfig.GetInt(remoteconfig.AIChatSummarizeThreshold, remoteconfig.Global)
 
 	if len(messages) > summarizeThreshold {
 		oldMessages := messages[:len(messages)-keepRecent]
