@@ -303,6 +303,11 @@ type DeploymentEvent struct {
 	DeploymentUUID  string `json:"deployment_uuid"`
 	Logs            string `json:"logs"`
 
+	// Coolify v4 format — uses "event" and "success" instead of "status"
+	Event   string `json:"event"`   // e.g. "deployment_success", "deployment_failure"
+	Success *bool  `json:"success"` // true/false
+	Message string `json:"message"` // e.g. "New version successfully deployed"
+
 	// Nested format (some Coolify versions)
 	Application *struct {
 		UUID string `json:"uuid"`
@@ -327,10 +332,29 @@ func (e *DeploymentEvent) AppUUID() string {
 
 // DeployStatus extracts the deployment status from whichever field is populated.
 func (e *DeploymentEvent) DeployStatus() string {
+	// Nested deployment status (older Coolify versions)
 	if e.Deployment != nil && e.Deployment.Status != "" {
 		return strings.ToLower(e.Deployment.Status)
 	}
-	return strings.ToLower(e.Status)
+	// Direct status field
+	if e.Status != "" {
+		return strings.ToLower(e.Status)
+	}
+	// Coolify v4: derive status from "event" field
+	switch strings.ToLower(e.Event) {
+	case "deployment_success":
+		return "finished"
+	case "deployment_failure":
+		return "failed"
+	}
+	// Coolify v4 fallback: use "success" boolean
+	if e.Success != nil {
+		if *e.Success {
+			return "finished"
+		}
+		return "failed"
+	}
+	return ""
 }
 
 // DeployLogs extracts the deployment logs from whichever field is populated.
@@ -338,7 +362,10 @@ func (e *DeploymentEvent) DeployLogs() string {
 	if e.Deployment != nil && e.Deployment.Logs != "" {
 		return e.Deployment.Logs
 	}
-	return e.Logs
+	if e.Logs != "" {
+		return e.Logs
+	}
+	return e.Message
 }
 
 // RegisterWebhook creates a custom webhook notification channel in Coolify
