@@ -164,13 +164,18 @@ func (c *Controller) AddAppDomain(project *models.AppProject, user *models.User,
 		return nil, fmt.Errorf("failed to add domain: %v", err)
 	}
 
-	// Register with Coolify (but keep status "pending" — DNS must be verified first)
+	// Register with Coolify and restart so the proxy picks up the new domain
 	coolifyProject, cpErr := c.DB.GetCoolifyProjectByAppProjectID(project.ID.String())
 	if cpErr == nil && coolifyProject != nil && c.CoolifyService != nil {
 		domains := c.buildCoolifyDomainList(coolifyProject, project.ID.String(), domainName)
 		if err := c.CoolifyService.UpdateDomains(coolifyProject.CoolifyAppUUID, domains); err != nil {
 			slog.Warn("Failed to add domain to Coolify", "domain", domainName, "error", err)
 		}
+		go func() {
+			if err := c.CoolifyService.RestartApp(coolifyProject.CoolifyAppUUID); err != nil {
+				slog.Warn("Failed to restart Coolify app after domain add", "domain", domainName, "error", err)
+			}
+		}()
 	}
 
 	// Run an initial DNS check — domain might already be configured
@@ -213,6 +218,11 @@ func (c *Controller) RemoveAppDomain(domainID string, project *models.AppProject
 			if err := c.CoolifyService.UpdateDomains(coolifyProject.CoolifyAppUUID, filtered); err != nil {
 				slog.Warn("Failed to remove domain from Coolify", "domain", domain.Domain, "error", err)
 			}
+			go func() {
+				if err := c.CoolifyService.RestartApp(coolifyProject.CoolifyAppUUID); err != nil {
+					slog.Warn("Failed to restart Coolify app after domain remove", "domain", domain.Domain, "error", err)
+				}
+			}()
 		}
 	}
 
@@ -242,7 +252,7 @@ func (c *Controller) VerifyAppDomain(domainID string, project *models.AppProject
 		return nil, fmt.Errorf("failed to update domain status: %v", err)
 	}
 
-	// If domain became active and Coolify project exists, sync all domains
+	// If domain became active and Coolify project exists, sync all domains and restart
 	if domain.Status == "active" && c.CoolifyService != nil {
 		coolifyProject, cpErr := c.DB.GetCoolifyProjectByAppProjectID(project.ID.String())
 		if cpErr == nil && coolifyProject != nil {
@@ -250,6 +260,11 @@ func (c *Controller) VerifyAppDomain(domainID string, project *models.AppProject
 			if err := c.CoolifyService.UpdateDomains(coolifyProject.CoolifyAppUUID, domains); err != nil {
 				slog.Warn("Failed to sync verified domain to Coolify", "domain", domain.Domain, "error", err)
 			}
+			go func() {
+				if err := c.CoolifyService.RestartApp(coolifyProject.CoolifyAppUUID); err != nil {
+					slog.Warn("Failed to restart Coolify app after domain verify", "domain", domain.Domain, "error", err)
+				}
+			}()
 		}
 	}
 
