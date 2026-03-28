@@ -63,3 +63,13 @@ func TokensToCredits(promptTokens, completionTokens int) int {
 	return (weighted + AICreditsTokensPerCredit - 1) / AICreditsTokensPerCredit
 }
 
+// TokensToCreditsWithConfig is like TokensToCredits but uses caller-provided
+// conversion parameters from remote config.
+func TokensToCreditsWithConfig(promptTokens, completionTokens, tokensPerCredit, outputMultiplier int) int {
+	weighted := promptTokens + (completionTokens * outputMultiplier)
+	if weighted <= 0 {
+		return 0
+	}
+	return (weighted + tokensPerCredit - 1) / tokensPerCredit
+}
+

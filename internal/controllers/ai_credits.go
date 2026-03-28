@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/models"
+	"github.com/knid/wemob/internal/services/remoteconfig"
 	"github.com/knid/wemob/internal/utils"
 	"github.com/posthog/posthog-go"
 	"github.com/uptrace/bun"
@@ -149,10 +150,11 @@ func (c *Controller) DeductAICreditsUnchecked(user *models.User, cost int, actio
 	var newBalance int
 	txErr := c.DB.RunInTx(func(tx bun.Tx) error {
 		var err error
-		newBalance, err = c.DB.AtomicDeductCreditsUnchecked(tx, balance.ID.String(), cost, models.AICreditsMinBalance)
+		minBalance := c.RemoteConfig.GetInt(remoteconfig.AICreditsMinBalance, user.ID.String())
+		newBalance, err = c.DB.AtomicDeductCreditsUnchecked(tx, balance.ID.String(), cost, minBalance)
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
-				return fmt.Errorf("AI credits overdraft limit reached (floor: %d)", models.AICreditsMinBalance)
+				return fmt.Errorf("AI credits overdraft limit reached (floor: %d)", minBalance)
 			}
 			return err
 		}
