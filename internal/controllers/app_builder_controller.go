@@ -1054,12 +1054,19 @@ func (c *Controller) StreamBuildApp(
 		}
 	}
 
+	// --- Determine whether the "Created by Wemob" badge should be shown in preview ---
+	var badgeScript string
+	if userLimits == nil || !userLimits.CanRemoveBrandLogo {
+		badgeScript = constants.WEMOB_BADGE_SCRIPT
+	}
+
 	// --- Send done event ---
 	if isInitialGeneration {
 		sendEvent("done", map[string]any{
 			"app_project_id":  project.ID.String(),
 			"files_generated": filesChanged,
 			"missing_env_vars": missingVars,
+			"badge_script":    badgeScript,
 		})
 	} else {
 		sendEvent("chat_complete", map[string]any{
@@ -1069,6 +1076,7 @@ func (c *Controller) StreamBuildApp(
 			"file_operations": fileOps,
 			"snapshot_id":     preSnapshotID,
 			"missing_env_vars": missingVars,
+			"badge_script":    badgeScript,
 		})
 	}
 }
