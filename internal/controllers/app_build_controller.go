@@ -449,23 +449,32 @@ func (c *Controller) GetLatestDeploymentStatus(projectID string) (*models.AppDep
 
 		coolifyProject, cpErr := c.DB.GetCoolifyProjectByAppProjectID(projectID)
 		if cpErr == nil && coolifyProject != nil {
+			// Primary: check the latest Coolify deployment status
 			dep, depErr := c.CoolifyService.GetLatestDeployment(coolifyProject.CoolifyAppUUID)
 			if depErr == nil {
 				coolifyStatus := strings.ToLower(dep.Status)
+				slog.Info("Coolify deployment poll", "deployment_id", deployment.ID, "coolify_status", coolifyStatus)
 				switch {
 				case coolifyStatus == "finished" || coolifyStatus == "success":
 					deployment.Status = "deployed"
 					deployment.ErrorMessage = ""
-					slog.Info("Deployment resolved via Coolify poll",
-						"deployment_id", deployment.ID, "coolify_status", coolifyStatus)
-				case coolifyStatus == "failed" || coolifyStatus == "error":
+				case coolifyStatus == "failed" || coolifyStatus == "error" || coolifyStatus == "cancelled":
 					deployment.Status = "failed"
 					deployment.ErrorMessage = extractBuildError(dep.Logs)
 					if deployment.ErrorMessage == "" {
 						deployment.ErrorMessage = "Build failed — the application could not be deployed."
 					}
-					slog.Info("Deployment failed via Coolify poll",
-						"deployment_id", deployment.ID, "coolify_status", coolifyStatus)
+				}
+			}
+
+			// Fallback: if deployment API didn't resolve, check if app is running
+			if deployment.Status == "building" || deployment.Status == "pending" {
+				appStatus, appErr := c.CoolifyService.GetAppStatus(coolifyProject.CoolifyAppUUID)
+				if appErr == nil && strings.HasPrefix(strings.ToLower(appStatus), "running") {
+					deployment.Status = "deployed"
+					deployment.ErrorMessage = ""
+					slog.Info("Deployment resolved via app running status",
+						"deployment_id", deployment.ID, "app_status", appStatus)
 				}
 			}
 		}
