@@ -21,6 +21,7 @@ import (
 	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/services/fal"
 	"github.com/knid/wemob/internal/services/neon"
+	"github.com/knid/wemob/internal/services/remoteconfig"
 	"github.com/knid/wemob/internal/utils"
 
 	_ "github.com/lib/pq"
@@ -1862,11 +1863,12 @@ func (c *Controller) PlanAppFileStructure(ctx context.Context, prompt string, pr
 		model = provider.DefaultModel()
 	}
 
-	systemPrompt := constants.NEXTJS_STRUCTURE_PROMPT
+	maxFiles := c.RemoteConfig.GetInt(remoteconfig.AIMaxStructureFiles, remoteconfig.Global)
+	systemPrompt := constants.NextjsStructurePrompt(maxFiles)
 	if projectType == "ecommerce" {
 		systemPrompt = constants.NEXTJS_ECOMMERCE_STRUCTURE_PROMPT
 	} else if projectType == "mobile_app" {
-		systemPrompt = constants.NEXTJS_MOBILE_STRUCTURE_PROMPT
+		systemPrompt = constants.NextjsMobileStructurePrompt(maxFiles)
 	}
 
 	// Try up to 2 times — structure planning is critical for app quality
