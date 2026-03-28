@@ -5,7 +5,7 @@ import (
 	"io/fs"
 )
 
-//go:embed nextjs
+//go:embed all:nextjs
 var nextjsFS embed.FS
 
 // GetTemplate reads a template file by its generated-project-relative path.
