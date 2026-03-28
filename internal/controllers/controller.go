@@ -20,6 +20,7 @@ import (
 	"github.com/knid/wemob/internal/services/codemagic"
 	"github.com/knid/wemob/internal/services/coolify"
 	"github.com/knid/wemob/internal/services/gitea"
+	"github.com/knid/wemob/internal/services/remoteconfig"
 	"github.com/posthog/posthog-go"
 )
 
@@ -40,6 +41,7 @@ type Controller struct {
 	GitRepoService         *gitrepo.Service
 	MCPService             atomic.Pointer[mcpclient.Service]
 	PostHog                posthog.Client // nil = disabled
+	RemoteConfig           *remoteconfig.Service
 	RunningJobs            sync.Map       // map[string]context.CancelFunc for in-flight background jobs
 	PendingClarifications  sync.Map       // map[string]chan ClarificationResult for jobs awaiting user input
 	JobEventBuses          sync.Map       // map[string]*EventBus for live SSE fan-out to multiple clients
@@ -54,7 +56,8 @@ func NewController(db *database.Database, concurrentBuildLimiter chan struct{},
 	neonService *neon.Service,
 	posthogClient posthog.Client,
 	gitRepoService *gitrepo.Service,
-	codemagicService *codemagic.Service) *Controller {
+	codemagicService *codemagic.Service,
+	remoteConfigService *remoteconfig.Service) *Controller {
 
 	return &Controller{
 		DB:                     db,
@@ -72,6 +75,7 @@ func NewController(db *database.Database, concurrentBuildLimiter chan struct{},
 		NeonService:            neonService,
 		GitRepoService:         gitRepoService,
 		PostHog:                posthogClient,
+		RemoteConfig:           remoteConfigService,
 	}
 }
 

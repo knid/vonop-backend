@@ -28,6 +28,7 @@ import (
 	"github.com/knid/wemob/internal/services/mcpclient"
 	"github.com/knid/wemob/internal/services/gitrepo"
 	"github.com/knid/wemob/internal/services/neon"
+	"github.com/knid/wemob/internal/services/remoteconfig"
 	"github.com/knid/wemob/internal/services/secret"
 	"github.com/knid/wemob/internal/services/storage"
 	"github.com/knid/wemob/internal/services/codemagic"
@@ -745,7 +746,8 @@ func main() {
 	var posthogClient posthog.Client
 	if phKey := sm.GetSecret("POSTHOG_API_KEY"); phKey != "" {
 		phClient, phErr := posthog.NewWithConfig(phKey, posthog.Config{
-			Endpoint: "https://eu.i.posthog.com",
+			Endpoint:       "https://eu.i.posthog.com",
+			PersonalApiKey: sm.GetSecret("POSTHOG_PERSONAL_API_KEY"),
 		})
 		if phErr != nil {
 			slog.Warn("PostHog initialization failed", "error", phErr)
@@ -754,6 +756,9 @@ func main() {
 			slog.Info("PostHog analytics enabled")
 		}
 	}
+
+	remoteConfigService := remoteconfig.New(posthogClient)
+	slog.Info("RemoteConfig service initialized")
 
 	assetsStorage, err := storage.NewS3Storage(sm.GetSecret("AWS_REGION"), sm.GetSecret("AWS_S3_ASSETS_BUCKET_NAME"), sm.GetSecret("AWS_ACCESS_KEY_ID"), sm.GetSecret("AWS_SECRET_ACCESS_KEY"))
 	if err != nil {
@@ -802,6 +807,7 @@ func main() {
 		posthogClient,
 		gitRepoService,
 		codemagicService,
+		remoteConfigService,
 	)
 
 	// MCP service (optional — connect in background so it doesn't block server startup)
