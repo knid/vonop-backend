@@ -2,6 +2,7 @@ package views
 
 import (
 	"encoding/json"
+	"io"
 	"log/slog"
 	"net/http"
 
@@ -21,8 +22,23 @@ func (v *HttpViews) HandleCoolifyWebhook(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// Read the raw body so we can log it for debugging Coolify v4 payload format
+	rawBody, err := io.ReadAll(r.Body)
+	if err != nil {
+		slog.Warn("Coolify webhook: failed to read body", "error", err)
+		utils.JSONErrorResponse(w, "invalid payload", http.StatusBadRequest)
+		return
+	}
+
+	// Log raw payload to diagnose Coolify v4 webhook format
+	rawStr := string(rawBody)
+	if len(rawStr) > 2000 {
+		rawStr = rawStr[:2000]
+	}
+	slog.Info("Coolify webhook raw payload", "body", rawStr)
+
 	var event coolify.DeploymentEvent
-	if err := json.NewDecoder(r.Body).Decode(&event); err != nil {
+	if err := json.Unmarshal(rawBody, &event); err != nil {
 		slog.Warn("Coolify webhook: invalid payload", "error", err)
 		utils.JSONErrorResponse(w, "invalid payload", http.StatusBadRequest)
 		return
