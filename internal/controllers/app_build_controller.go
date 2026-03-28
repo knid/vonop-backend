@@ -403,12 +403,32 @@ func (c *Controller) GetLatestDeploymentStatus(projectID string) (*models.AppDep
 	}
 
 	// Status is updated by the Coolify webhook (HandleCoolifyWebhook).
-	// The only thing we do here is enforce a timeout safety net for builds
-	// that never receive a webhook callback (e.g. Coolify webhook misconfigured).
+	// If the build has been "building" for too long, check Coolify directly
+	// before falling back to a timeout failure — the webhook may have been
+	// lost even though the app deployed successfully.
 	if (deployment.Status == "building" || deployment.Status == "pending") &&
 		time.Since(deployment.CreatedAt) > 15*time.Minute {
-		deployment.Status = "failed"
-		deployment.ErrorMessage = "Build timed out after 15 minutes"
+
+		resolved := false
+		if c.CoolifyService != nil {
+			coolifyProject, cpErr := c.DB.GetCoolifyProjectByAppProjectID(projectID)
+			if cpErr == nil && coolifyProject != nil {
+				appStatus, appErr := c.CoolifyService.GetAppStatus(coolifyProject.CoolifyAppUUID)
+				if appErr == nil && strings.HasPrefix(strings.ToLower(appStatus), "running") {
+					deployment.Status = "deployed"
+					deployment.ErrorMessage = ""
+					resolved = true
+					slog.Info("Deployment recovered via Coolify status check",
+						"deployment_id", deployment.ID, "coolify_status", appStatus)
+				}
+			}
+		}
+
+		if !resolved {
+			deployment.Status = "failed"
+			deployment.ErrorMessage = "Build timed out after 15 minutes"
+		}
+
 		if _, err := c.DB.UpdateAppDeployment(deployment); err != nil {
 			slog.Error("Failed to update deployment status", "error", err)
 		}
@@ -840,7 +860,19 @@ func (c *Controller) HandleCoolifyWebhook(event coolify.DeploymentEvent) error {
 
 	status := event.DeployStatus()
 	if status == "" {
-		return fmt.Errorf("missing deployment status in webhook payload")
+		// Coolify v4 may send webhooks without a status field.
+		// Fall back to querying the Coolify API for the latest deployment status.
+		if c.CoolifyService != nil {
+			dep, depErr := c.CoolifyService.GetLatestDeployment(appUUID)
+			if depErr == nil && dep.Status != "" {
+				status = strings.ToLower(dep.Status)
+				slog.Info("Coolify webhook: resolved status via API fallback",
+					"app_uuid", appUUID, "resolved_status", status)
+			}
+		}
+		if status == "" {
+			return fmt.Errorf("missing deployment status in webhook payload")
+		}
 	}
 
 	// Find our CoolifyProject by Coolify's app UUID
