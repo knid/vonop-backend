@@ -15,6 +15,7 @@ import (
 	"github.com/knid/wemob/internal/services/fal"
 	"github.com/knid/wemob/internal/services/gitrepo"
 	"github.com/knid/wemob/internal/services/remoteconfig"
+	"github.com/knid/wemob/internal/templates"
 	"github.com/knid/wemob/internal/utils"
 )
 
@@ -118,7 +119,7 @@ func (c *Controller) runPreGenerationSetup(
 					}
 
 					// Inject DB template files (synchronous — LLM needs the schema)
-					dbContent := constants.NEXTJS_TEMPLATE_DB_TS
+					dbContent := templates.GetTemplate("lib/db.ts")
 					c.injectTemplateFile(repo, "lib/db.ts", dbContent, fileMap, sendEvent)
 
 					schemaContent := buildDrizzleSchema(dataModels)
@@ -193,7 +194,7 @@ func (c *Controller) runPreGenerationSetup(
 						if err := c.storeNeonIntegration(project, connStr, neonProjectID); err != nil {
 							slog.Error("pre-gen auth: failed to store neon integration", "error", err, "project_id", project.ID)
 						}
-						c.injectTemplateFile(repo, "lib/db.ts", constants.NEXTJS_TEMPLATE_DB_TS, fileMap, sendEvent)
+						c.injectTemplateFile(repo, "lib/db.ts", templates.GetTemplate("lib/db.ts"), fileMap, sendEvent)
 						schemaContent := buildDrizzleSchema(modelsToProvision)
 						c.injectTemplateFile(repo, "lib/schema.ts", schemaContent, fileMap, sendEvent)
 
