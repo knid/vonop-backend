@@ -10,6 +10,7 @@ import (
 
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/responses"
+	"github.com/knid/wemob/internal/services/remoteconfig"
 )
 
 func (c *Controller) GetOrCreateReferralCode(user *models.User) (*responses.ReferralCodeResponse, error) {
@@ -67,10 +68,10 @@ func (c *Controller) GetReferralStats(user *models.User) (*responses.ReferralSta
 			resp.ReferredName = r.Referred.Name
 		}
 		if r.RewardGranted {
-			totalRewards += models.ReferralSignupCredits
+			totalRewards += c.RemoteConfig.GetInt(remoteconfig.ReferralSignupCredits, user.ID.String())
 		}
 		if r.SubscriptionRewardGranted {
-			totalRewards += models.ReferralSubscriptionCredits
+			totalRewards += c.RemoteConfig.GetInt(remoteconfig.ReferralSubscriptionCredits, user.ID.String())
 		}
 		refs = append(refs, resp)
 	}
@@ -112,14 +113,15 @@ func (c *Controller) ApplyReferralCode(user *models.User, codeStr string) error 
 		return err
 	}
 
-	// Grant signup credits (10) to both parties
+	// Grant signup credits to both parties
+	signupCredits := c.RemoteConfig.GetInt(remoteconfig.ReferralSignupCredits, user.ID.String())
 	referrer, err := c.DB.GetUserById(code.UserID.String())
 	if err == nil {
-		if err := c.AddAICredits(referrer, models.ReferralSignupCredits, "referral_signup_reward", user.ID.String()); err != nil {
+		if err := c.AddAICredits(referrer, signupCredits, "referral_signup_reward", user.ID.String()); err != nil {
 			slog.Error("failed to grant referral signup reward credits", "error", err, "referrer_id", referrer.ID, "referred_id", user.ID)
 		}
 	}
-	if err := c.AddAICredits(user, models.ReferralSignupCredits, "referral_signup_bonus", code.UserID.String()); err != nil {
+	if err := c.AddAICredits(user, signupCredits, "referral_signup_bonus", code.UserID.String()); err != nil {
 		slog.Error("failed to grant referral signup bonus credits", "error", err, "user_id", user.ID, "referrer_code_owner", code.UserID)
 	}
 
@@ -147,16 +149,17 @@ func (c *Controller) GrantReferralSubscriptionReward(user *models.User) {
 		return
 	}
 
-	// Grant subscription credits (50) to referrer
+	// Grant subscription credits to referrer
+	subCredits := c.RemoteConfig.GetInt(remoteconfig.ReferralSubscriptionCredits, user.ID.String())
 	referrer, err := c.DB.GetUserById(referral.ReferrerID.String())
 	if err == nil {
-		if err := c.AddAICredits(referrer, models.ReferralSubscriptionCredits, "referral_subscription_reward", user.ID.String()); err != nil {
+		if err := c.AddAICredits(referrer, subCredits, "referral_subscription_reward", user.ID.String()); err != nil {
 			slog.Error("failed to grant referral subscription reward credits", "error", err, "referrer_id", referrer.ID, "referred_id", user.ID)
 		}
 	}
 
-	// Grant subscription credits (50) to referred user
-	if err := c.AddAICredits(user, models.ReferralSubscriptionCredits, "referral_subscription_bonus", referral.ReferrerID.String()); err != nil {
+	// Grant subscription credits to referred user
+	if err := c.AddAICredits(user, subCredits, "referral_subscription_bonus", referral.ReferrerID.String()); err != nil {
 		slog.Error("failed to grant referral subscription bonus credits", "error", err, "user_id", user.ID, "referrer_id", referral.ReferrerID)
 	}
 }
