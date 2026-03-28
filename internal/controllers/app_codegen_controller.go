@@ -878,7 +878,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
 }
 `
 	}
-	return constants.ECOMMERCE_TEMPLATE_PROVIDERS
+	return templates.GetTemplate("components/ecommerce/providers.tsx")
 }
 
 // getEcommerceTemplateContent returns the hardcoded content for an e-commerce template file.
