@@ -151,9 +151,17 @@ func (s *Service) CreateApp(name, giteaRepoURL, domain, memoryLimit, cpuLimit st
 	return resp.UUID, nil
 }
 
-// RestartApp triggers a rebuild and redeploy of the application.
+// RestartApp restarts the application container without rebuilding.
 func (s *Service) RestartApp(appUUID string) error {
 	_, err := s.doRequest("GET", fmt.Sprintf("/applications/%s/restart", appUUID), nil)
+	return err
+}
+
+// DeployApp triggers a full rebuild and redeploy of the application.
+// Use this instead of RestartApp when configuration changes (domains, etc.)
+// need the proxy to be regenerated.
+func (s *Service) DeployApp(appUUID string) error {
+	_, err := s.doRequest("GET", fmt.Sprintf("/applications/%s/deploy", appUUID), nil)
 	return err
 }
 

@@ -164,16 +164,19 @@ func (c *Controller) AddAppDomain(project *models.AppProject, user *models.User,
 		return nil, fmt.Errorf("failed to add domain: %v", err)
 	}
 
-	// Register with Coolify and restart so the proxy picks up the new domain
+	// Register with Coolify and redeploy so the proxy picks up the new domain.
+	// A restart only restarts the container — a deploy regenerates proxy config.
+	var redeployTriggered bool
 	coolifyProject, cpErr := c.DB.GetCoolifyProjectByAppProjectID(project.ID.String())
 	if cpErr == nil && coolifyProject != nil && c.CoolifyService != nil {
 		domains := c.buildCoolifyDomainList(coolifyProject, project.ID.String(), domainName)
 		if err := c.CoolifyService.UpdateDomains(coolifyProject.CoolifyAppUUID, domains); err != nil {
 			slog.Warn("Failed to add domain to Coolify", "domain", domainName, "error", err)
 		}
+		redeployTriggered = true
 		go func() {
-			if err := c.CoolifyService.RestartApp(coolifyProject.CoolifyAppUUID); err != nil {
-				slog.Warn("Failed to restart Coolify app after domain add", "domain", domainName, "error", err)
+			if err := c.CoolifyService.DeployApp(coolifyProject.CoolifyAppUUID); err != nil {
+				slog.Warn("Failed to redeploy Coolify app after domain add", "domain", domainName, "error", err)
 			}
 		}()
 	}
@@ -188,7 +191,9 @@ func (c *Controller) AddAppDomain(project *models.AppProject, user *models.User,
 		}
 	}
 
-	return buildDomainResponse(created, msg), nil
+	resp := buildDomainResponse(created, msg)
+	resp.RedeployTriggered = redeployTriggered
+	return resp, nil
 }
 
 // RemoveAppDomain removes a custom domain from an app project and Coolify.
@@ -219,8 +224,8 @@ func (c *Controller) RemoveAppDomain(domainID string, project *models.AppProject
 				slog.Warn("Failed to remove domain from Coolify", "domain", domain.Domain, "error", err)
 			}
 			go func() {
-				if err := c.CoolifyService.RestartApp(coolifyProject.CoolifyAppUUID); err != nil {
-					slog.Warn("Failed to restart Coolify app after domain remove", "domain", domain.Domain, "error", err)
+				if err := c.CoolifyService.DeployApp(coolifyProject.CoolifyAppUUID); err != nil {
+					slog.Warn("Failed to redeploy Coolify app after domain remove", "domain", domain.Domain, "error", err)
 				}
 			}()
 		}
@@ -252,7 +257,8 @@ func (c *Controller) VerifyAppDomain(domainID string, project *models.AppProject
 		return nil, fmt.Errorf("failed to update domain status: %v", err)
 	}
 
-	// If domain became active and Coolify project exists, sync all domains and restart
+	// If domain became active and Coolify project exists, sync all domains and redeploy
+	var redeployTriggered bool
 	if domain.Status == "active" && c.CoolifyService != nil {
 		coolifyProject, cpErr := c.DB.GetCoolifyProjectByAppProjectID(project.ID.String())
 		if cpErr == nil && coolifyProject != nil {
@@ -260,15 +266,18 @@ func (c *Controller) VerifyAppDomain(domainID string, project *models.AppProject
 			if err := c.CoolifyService.UpdateDomains(coolifyProject.CoolifyAppUUID, domains); err != nil {
 				slog.Warn("Failed to sync verified domain to Coolify", "domain", domain.Domain, "error", err)
 			}
+			redeployTriggered = true
 			go func() {
-				if err := c.CoolifyService.RestartApp(coolifyProject.CoolifyAppUUID); err != nil {
-					slog.Warn("Failed to restart Coolify app after domain verify", "domain", domain.Domain, "error", err)
+				if err := c.CoolifyService.DeployApp(coolifyProject.CoolifyAppUUID); err != nil {
+					slog.Warn("Failed to redeploy Coolify app after domain verify", "domain", domain.Domain, "error", err)
 				}
 			}()
 		}
 	}
 
-	return buildDomainResponse(domain, msg), nil
+	resp := buildDomainResponse(domain, msg)
+	resp.RedeployTriggered = redeployTriggered
+	return resp, nil
 }
 
 // buildCoolifyDomainList builds the complete list of domains for a Coolify app.
