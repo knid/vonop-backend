@@ -14,6 +14,7 @@ import (
 	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/services/fal"
 	"github.com/knid/wemob/internal/services/gitrepo"
+	"github.com/knid/wemob/internal/services/remoteconfig"
 	"github.com/knid/wemob/internal/utils"
 )
 
@@ -643,7 +644,7 @@ func (c *Controller) streamEcommerceGeneration(
 	}
 
 	setupConfig := utils.ToolCallConfig{
-		MaxRounds:  8,
+		MaxRounds:  c.RemoteConfig.GetInt(remoteconfig.AIGenerationMaxRounds, remoteconfig.Global),
 		NudgeAfter: 5,
 		StripAfter: 6,
 		MaxTokens:  4096,

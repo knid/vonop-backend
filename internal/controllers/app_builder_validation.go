@@ -9,6 +9,7 @@ import (
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/services/gitrepo"
+	"github.com/knid/wemob/internal/services/remoteconfig"
 	"github.com/knid/wemob/internal/utils"
 	"github.com/posthog/posthog-go"
 )
@@ -329,8 +330,8 @@ func (c *Controller) runValidationFixPass(
 
 	// Include the content of errored files so the LLM can fix them.
 	// Cap included files to prevent massive inputs that cause output truncation.
-	const maxIncludedFiles = 15
-	const maxIncludedChars = 60000
+	maxIncludedFiles := c.RemoteConfig.GetInt(remoteconfig.AIValidationMaxFiles, remoteconfig.Global)
+	maxIncludedChars := c.RemoteConfig.GetInt(remoteconfig.AIValidationMaxChars, remoteconfig.Global)
 	var fileContents strings.Builder
 	includedFiles := make(map[string]bool)
 	totalChars := 0

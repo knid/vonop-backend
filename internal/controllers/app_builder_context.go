@@ -12,6 +12,7 @@ import (
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/services/integrations"
+	"github.com/knid/wemob/internal/services/remoteconfig"
 	"github.com/knid/wemob/internal/utils"
 )
 
@@ -481,7 +482,7 @@ func extractFileSummary(content string) string {
 // or when there are few files, returns all paths (safe fallback).
 
 func (c *Controller) selectContextFiles(ctx context.Context, provider *utils.LLMProvider, fileMap map[string]string, userMessage string, recentMessages []models.AppConversationMessage) map[string]bool {
-	const maxAutoInline = 15 // if project has ≤ this many files, inline all
+	maxAutoInline := c.RemoteConfig.GetInt(remoteconfig.AIBuilderMaxAutoInline, remoteconfig.Global)
 
 	if len(fileMap) <= maxAutoInline {
 		all := make(map[string]bool, len(fileMap))
@@ -584,7 +585,7 @@ Respond with ONLY a list of file paths, one per line. No explanation, no markdow
 	// or a page.tsx that imports the selected component (impact zone).
 	graph := buildImportGraph(fileMap)
 	beforeExpand := len(selected)
-	const maxExpandedFiles = 25
+	maxExpandedFiles := c.RemoteConfig.GetInt(remoteconfig.AIBuilderMaxExpandedFiles, remoteconfig.Global)
 	selected = graph.expandWithDependencies(selected, maxExpandedFiles)
 
 	slog.Info("selectContextFiles: selected files for context",
@@ -720,7 +721,7 @@ func (c *Controller) buildProjectContextForChat(project *models.AppProject, file
 		// Inline selected files with a character budget to avoid exceeding context limits.
 		// ~4 chars ≈ 1 token; 150k chars ≈ 37.5k tokens, leaving room for system prompt,
 		// conversation history, and tool context within a 200k token window.
-		const maxFileChars = 150_000
+		maxFileChars := c.RemoteConfig.GetInt(remoteconfig.AIBuilderMaxFileChars, remoteconfig.Global)
 		usedChars := 0
 		sb.WriteString("\nFile contents (relevant to current task):\n")
 		for _, fp := range paths {
