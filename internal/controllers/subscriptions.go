@@ -37,6 +37,7 @@ func (c *Controller) GetSubscription(user *models.User) (*responses.UserSubscrip
 		MonthlyAppCount:         limits.MonthlyAppCount,
 		MonthlyDeployCount:      limits.MonthlyDeployCount,
 		CanUseEcommerce:         limits.CanUseEcommerce,
+		CanDeployWeb:            limits.CanDeployWeb,
 		CanExportToGitHub:       limits.CanExportToGitHub,
 	}
 

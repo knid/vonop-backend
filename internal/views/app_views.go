@@ -13,6 +13,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-playground/validator/v10"
+	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/controllers"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/requests"
@@ -629,6 +630,7 @@ func (v *HttpViews) ExportApp(w http.ResponseWriter, r *http.Request) {
 	// Check code access permission
 	limits, limitsErr := v.Controller.DB.GetStandartUserLimitsByUser(user)
 	if limitsErr != nil || !limits.CanAccessCode {
+		go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_NEED, map[string]any{"action": "access_code"})
 		utils.JSONCodedErrorResponse(w, "FEATURE_NOT_AVAILABLE", "code access requires Starter or Professional plan", http.StatusForbidden, nil)
 		return
 	}
@@ -827,6 +829,13 @@ func (v *HttpViews) ConvertToMobile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if requireActiveSubscription(w, user) {
+		return
+	}
+
+	limits, limitsErr := v.Controller.DB.GetStandartUserLimitsByUser(user)
+	if limitsErr != nil || !limits.CanBuildMobile {
+		go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_NEED, map[string]any{"action": "convert_to_mobile"})
+		utils.JSONCodedErrorResponse(w, "FEATURE_NOT_AVAILABLE", "mobile conversion requires Professional plan", http.StatusForbidden, nil)
 		return
 	}
 

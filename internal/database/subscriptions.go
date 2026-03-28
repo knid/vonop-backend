@@ -2,6 +2,7 @@ package database
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/models"
@@ -108,6 +109,16 @@ func (db *Database) UpdateStandartUserLimits(limits *models.StandartUserLimits) 
 func (db *Database) CreateSubscription(sub *models.StandartUserSubscription) (*models.StandartUserSubscription, error) {
 	_, err := db.DB.NewInsert().Model(sub).Exec(context.Background())
 	return sub, err
+}
+
+func (db *Database) CountWebDeploysSince(userID string, since time.Time) (int, error) {
+	count, err := db.DB.NewSelect().
+		TableExpr("app_deployments").
+		Where("user_id = ?", userID).
+		Where("platform = 'web'").
+		Where("created_at >= ?", since).
+		Count(context.Background())
+	return count, err
 }
 
 func (db *Database) CountDeployedWebAppsByUserID(userID string) (int, error) {

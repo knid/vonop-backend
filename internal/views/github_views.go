@@ -8,6 +8,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-playground/validator/v10"
 	"github.com/google/uuid"
+	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/responses"
@@ -124,6 +125,7 @@ func (v *HttpViews) ExportToGitHub(w http.ResponseWriter, r *http.Request) {
 	// Check plan limit
 	limits, limitsErr := v.Controller.DB.GetStandartUserLimitsByUser(user)
 	if limitsErr == nil && !limits.CanExportToGitHub {
+		go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_NEED, map[string]any{"action": "export_to_github"})
 		utils.JSONCodedErrorResponse(w, "GITHUB_EXPORT_NOT_AVAILABLE",
 			"GitHub export is not available on your plan", http.StatusForbidden, nil)
 		return

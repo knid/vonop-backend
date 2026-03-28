@@ -40,6 +40,7 @@ func (v *HttpViews) GetBillingPlans(w http.ResponseWriter, r *http.Request) {
 				CanBuyDomain:         limits.CanBuyDomain,
 				CanUseEmailService:   limits.CanUseEmailService,
 				CanUseEcommerce:      limits.CanUseEcommerce,
+				CanDeployWeb:         limits.CanDeployWeb,
 				MaximumProjectCount:  limits.MaximumProjectCount,
 				MonthlyAppCount:      limits.MonthlyAppCount,
 				MonthlyDeployCount:   limits.MonthlyDeployCount,

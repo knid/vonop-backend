@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/utils"
@@ -45,6 +46,7 @@ func (v *HttpViews) AddAppDomain(w http.ResponseWriter, r *http.Request) {
 	// WEM-263: Check CanBuyDomain subscription limit
 	limits, limitsErr := v.Controller.DB.GetStandartUserLimitsByUser(user)
 	if limitsErr != nil || !limits.CanBuyDomain {
+		go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_NEED, map[string]any{"action": "buy_domain"})
 		utils.JSONCodedErrorResponse(w, "SUBSCRIPTION_REQUIRED", "custom domains require a paid plan", http.StatusForbidden, nil)
 		return
 	}

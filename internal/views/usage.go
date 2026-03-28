@@ -54,11 +54,27 @@ func (v *HttpViews) GetMontlyUsage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Fetch plan limits to include in response
-	var notificationLimit, buildLimit int
+	var notificationLimit, buildLimit, appLimit, deployLimit, aiCreditsLimit int
 	limits, limitsErr := v.Controller.DB.GetStandartUserLimitsByUser(user)
 	if limitsErr == nil {
 		notificationLimit = limits.MontlyNotificationCount
 		buildLimit = limits.MontlyBuildCount
+		appLimit = limits.MonthlyAppCount
+		deployLimit = limits.MonthlyDeployCount
+		aiCreditsLimit = limits.MonthlyAICredits
+	}
+
+	// App projects created this period
+	appProjectsUsed, _ := v.Controller.DB.CountAppProjectsByUserIDSince(user.ID.String(), renewStart)
+
+	// Web deploys this period
+	webDeploysUsed, _ := v.Controller.DB.CountWebDeploysSince(user.ID.String(), renewStart)
+
+	// AI credits balance
+	var aiCreditsBalance int
+	balance, balErr := v.Controller.GetOrCreateCreditsBalance(user)
+	if balErr == nil {
+		aiCreditsBalance = balance.Balance
 	}
 
 	output := map[string]any{
@@ -66,6 +82,12 @@ func (v *HttpViews) GetMontlyUsage(w http.ResponseWriter, r *http.Request) {
 		"app_builds_used":       appBuildTaskCount,
 		"notification_limit":    notificationLimit,
 		"app_builds_limit":      buildLimit,
+		"app_projects_used":     appProjectsUsed,
+		"app_projects_limit":    appLimit,
+		"web_deploys_used":      webDeploysUsed,
+		"web_deploys_limit":     deployLimit,
+		"ai_credits_balance":    aiCreditsBalance,
+		"ai_credits_limit":      aiCreditsLimit,
 		"subscription_status":   user.SubscriptionStatus,
 		"subscription_plan_id":  user.SubscriptionID,
 		"subscription_start_at": user.SubscriptionStartAt,
