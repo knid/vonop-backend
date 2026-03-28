@@ -41,3 +41,14 @@ func (db *Database) UpdateAppDeployment(d *models.AppDeployment) (*models.AppDep
 	_, err := db.DB.NewUpdate().Model(d).Where("id = ?", d.ID).Exec(context.Background())
 	return d, err
 }
+
+// IsAppAlreadyDeployed returns true if the given app project has any deployment with status "deployed".
+func (db *Database) IsAppAlreadyDeployed(appProjectID string) (bool, error) {
+	count, err := db.DB.NewSelect().
+		TableExpr("app_deployments").
+		Where("app_project_id = ?", appProjectID).
+		Where("platform = 'web'").
+		Where("status = 'deployed'").
+		Count(context.Background())
+	return count > 0, err
+}

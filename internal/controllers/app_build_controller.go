@@ -401,6 +401,36 @@ func (c *Controller) BuildAppMobile(appProject *models.AppProject, user *models.
 	return build, appBuildTask, nil
 }
 
+// UndeployApp stops the Coolify application and marks all deployments as undeployed.
+func (c *Controller) UndeployApp(projectID string) error {
+	// Stop the app on Coolify
+	if c.CoolifyService != nil {
+		coolifyProject, err := c.DB.GetCoolifyProjectByAppProjectID(projectID)
+		if err == nil && coolifyProject != nil {
+			if err := c.CoolifyService.StopApp(coolifyProject.CoolifyAppUUID); err != nil {
+				slog.Error("failed to stop Coolify app", "error", err, "project_id", projectID)
+				// Continue — still mark as undeployed in DB
+			}
+		}
+	}
+
+	// Mark all deployed deployments for this project as undeployed
+	deployments, err := c.DB.GetAppDeploymentsByProjectID(projectID)
+	if err != nil {
+		return fmt.Errorf("failed to get deployments: %w", err)
+	}
+	for _, d := range deployments {
+		if d.Status == "deployed" || d.Status == "building" {
+			d.Status = "undeployed"
+			d.UpdatedAt = time.Now()
+			if _, err := c.DB.UpdateAppDeployment(&d); err != nil {
+				slog.Error("failed to update deployment status", "error", err, "deployment_id", d.ID)
+			}
+		}
+	}
+	return nil
+}
+
 // GetAppDeployments returns all deployments for a project
 func (c *Controller) GetAppDeployments(projectID string) ([]models.AppDeployment, error) {
 	return c.DB.GetAppDeploymentsByProjectID(projectID)

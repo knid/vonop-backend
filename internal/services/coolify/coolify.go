@@ -281,6 +281,12 @@ func (s *Service) UpdateDomains(appUUID string, domains []string) error {
 	return err
 }
 
+// StopApp stops a running Coolify application without deleting it.
+func (s *Service) StopApp(appUUID string) error {
+	_, err := s.doRequest("GET", fmt.Sprintf("/applications/%s/stop", appUUID), nil)
+	return err
+}
+
 // DeleteApp deletes a Coolify application and its resources.
 func (s *Service) DeleteApp(appUUID string) error {
 	_, err := s.doRequest("DELETE", fmt.Sprintf("/applications/%s", appUUID), nil)

@@ -25,6 +25,8 @@ func (v *HttpViews) DeployAppWeb(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	appID := chi.URLParam(r, "appId")
+
 	// Check web deploy permission and limits
 	limits, limitsErr := v.Controller.DB.GetStandartUserLimitsByUser(user)
 	if limitsErr == nil {
@@ -36,7 +38,9 @@ func (v *HttpViews) DeployAppWeb(w http.ResponseWriter, r *http.Request) {
 
 		if limits.MaxDeployedWebApps > 0 {
 			count, _ := v.Controller.DB.CountDeployedWebAppsByUserID(user.ID.String())
-			if count >= limits.MaxDeployedWebApps {
+			// Allow re-deploys: if this app is already deployed, it doesn't count as a new slot
+			alreadyDeployed, _ := v.Controller.DB.IsAppAlreadyDeployed(appID)
+			if !alreadyDeployed && count >= limits.MaxDeployedWebApps {
 				go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_QUOTA_REACHED, map[string]any{"action": "deploy_web", "limit": limits.MaxDeployedWebApps})
 				utils.JSONCodedErrorResponse(w, "DEPLOY_LIMIT_REACHED",
 					fmt.Sprintf("you have reached the maximum of %d deployed web apps for your plan", limits.MaxDeployedWebApps),
@@ -58,7 +62,6 @@ func (v *HttpViews) DeployAppWeb(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	appID := chi.URLParam(r, "appId")
 	project, err := v.Controller.GetAppProject(appID, user)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
@@ -90,6 +93,32 @@ func (v *HttpViews) DeployAppWeb(w http.ResponseWriter, r *http.Request) {
 		CreatedAt:    deployment.CreatedAt,
 		UpdatedAt:    deployment.UpdatedAt,
 	}, http.StatusCreated)
+}
+
+// DELETE /v2/apps/{appId}/deploy/web
+func (v *HttpViews) UndeployAppWeb(w http.ResponseWriter, r *http.Request) {
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	appID := chi.URLParam(r, "appId")
+	project, err := v.Controller.GetAppProject(appID, user)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	if err := v.Controller.UndeployApp(project.ID.String()); err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	v.Controller.TrackUserEvent(user, "app_undeployed_web", posthog.NewProperties().
+		Set("app_id", project.ID.String()))
+
+	utils.JSONResponse(w, map[string]string{"status": "undeployed"}, http.StatusOK)
 }
 
 // POST /v2/apps/{appId}/build/android
