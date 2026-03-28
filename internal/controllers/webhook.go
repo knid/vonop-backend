@@ -156,6 +156,11 @@ func (c *Controller) processWebhookEvent(event stripe.Event) error {
 			return fmt.Errorf("failed to update user %s after subscription created: %w", user.ID, err)
 		}
 
+		// Grant referral subscription reward (50 credits to both parties) if user was referred
+		// Must be synchronous — if this runs as a goroutine the event is marked processed
+		// before credits are granted, and Stripe won't retry on failure.
+		c.GrantReferralSubscriptionReward(user)
+
 		c.TrackUserEvent(user, "subscription_created", posthog.NewProperties().
 			Set("status", user.SubscriptionStatus).
 			Set("stripe_status", string(sub.Status)).

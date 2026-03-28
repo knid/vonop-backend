@@ -61,3 +61,23 @@ func (db *Database) UpdateReferral(referral *models.Referral) (*models.Referral,
 		Exec(context.Background())
 	return referral, err
 }
+
+// ClaimSubscriptionReward atomically sets subscription_reward_granted = true
+// only if it is currently false. Returns true if the row was updated (i.e.
+// this caller won the race), false if already claimed.
+func (db *Database) ClaimSubscriptionReward(referralID string) (bool, error) {
+	res, err := db.DB.NewUpdate().
+		Model((*models.Referral)(nil)).
+		Set("subscription_reward_granted = TRUE").
+		Where("id = ?", referralID).
+		Where("subscription_reward_granted = FALSE").
+		Exec(context.Background())
+	if err != nil {
+		return false, err
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return rows > 0, nil
+}

@@ -12,11 +12,12 @@ type ReferralCodeResponse struct {
 }
 
 type ReferralResponse struct {
-	ID            uuid.UUID `json:"id"`
-	ReferredEmail string    `json:"referred_email"`
-	ReferredName  string    `json:"referred_name"`
-	RewardGranted bool      `json:"reward_granted"`
-	CreatedAt     time.Time `json:"created_at"`
+	ID                        uuid.UUID `json:"id"`
+	ReferredEmail             string    `json:"referred_email"`
+	ReferredName              string    `json:"referred_name"`
+	RewardGranted             bool      `json:"reward_granted"`
+	SubscriptionRewardGranted bool      `json:"subscription_reward_granted"`
+	CreatedAt                 time.Time `json:"created_at"`
 }
 
 type ReferralStatsResponse struct {
