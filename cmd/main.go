@@ -261,6 +261,9 @@ func createSchema(db *bun.DB) error {
 		`ALTER TABLE standart_user_limits ADD COLUMN IF NOT EXISTS deploy_cpus text NOT NULL DEFAULT '0.25'`,
 		`ALTER TABLE standart_user_limits ADD COLUMN IF NOT EXISTS deploy_db_max_cu text NOT NULL DEFAULT '0.25'`,
 		`ALTER TABLE standart_user_limits ADD COLUMN IF NOT EXISTS deploy_db_storage_mb int NOT NULL DEFAULT 512`,
+
+		// Referral two-tier rewards
+		`ALTER TABLE referrals ADD COLUMN IF NOT EXISTS subscription_reward_granted boolean NOT NULL DEFAULT false`,
 	}
 
 	// Deduplicate before creating unique indexes (keep the latest row per group)
@@ -294,7 +297,7 @@ func createSchema(db *bun.DB) error {
 	// and block all reads on the affected tables.
 	var migrationsDone bool
 	row := db.QueryRowContext(context.Background(),
-		"SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='app_projects' AND column_name='logo_s3_key')")
+		"SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='referrals' AND column_name='subscription_reward_granted')")
 	if err := row.Scan(&migrationsDone); err != nil {
 		migrationsDone = false
 	}
