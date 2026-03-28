@@ -16,6 +16,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/models"
+	"github.com/knid/wemob/internal/templates"
 	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/services/fal"
 	"github.com/knid/wemob/internal/services/gitrepo"
@@ -2444,7 +2445,7 @@ func (c *Controller) buildBuilderToolExecutor(ctx context.Context, project *mode
 			}
 			ecommLang := constants.DetectLanguage(project.Prompt)
 			injectEcommerceTemplates := func() {
-				for _, tp := range constants.NEXTJS_ECOMMERCE_TEMPLATE_FILE_PATHS {
+				for _, tp := range templates.EcommerceFilePaths {
 					if _, exists := fileMap[tp]; exists {
 						continue
 					}
@@ -2634,7 +2635,7 @@ func (c *Controller) buildBuilderToolExecutor(ctx context.Context, project *mode
 			}
 
 			// Inject DB template files
-			dbContent := constants.NEXTJS_TEMPLATE_DB_TS
+			dbContent := templates.GetTemplate("lib/db.ts")
 			c.injectTemplateFileForTool(repo, "lib/db.ts", dbContent, fileMap, cbs)
 
 			schemaContent := buildDrizzleSchema(dataModels)
