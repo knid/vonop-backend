@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/responses"
+	"github.com/knid/wemob/internal/services/remoteconfig"
 )
 
 // milestoneEvents are event types worth persisting to the database.
@@ -29,8 +30,6 @@ var milestoneEvents = map[string]bool{
 	"deps_ready":             true,
 }
 
-const maxConcurrentJobsPerUser = 3
-
 // CreateJob creates a new generation job, enforcing a per-user concurrency limit.
 // For generate_app jobs, only one may run at a time to prevent double-submission.
 func (c *Controller) CreateJob(userID uuid.UUID, jobType string) (*models.GenerationJob, error) {
@@ -38,8 +37,9 @@ func (c *Controller) CreateJob(userID uuid.UUID, jobType string) (*models.Genera
 	if err != nil {
 		return nil, fmt.Errorf("failed to check running jobs: %w", err)
 	}
-	if running >= maxConcurrentJobsPerUser {
-		return nil, fmt.Errorf("maximum %d concurrent jobs allowed", maxConcurrentJobsPerUser)
+	maxJobs := c.RemoteConfig.GetInt(remoteconfig.MaxConcurrentJobsPerUser, userID.String())
+	if running >= maxJobs {
+		return nil, fmt.Errorf("maximum %d concurrent jobs allowed", maxJobs)
 	}
 	// Prevent duplicate initial generation: if the user already has a running
 	// generate_app job, reject the new one to avoid wasting resources.
