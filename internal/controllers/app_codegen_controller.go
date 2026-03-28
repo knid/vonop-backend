@@ -22,6 +22,7 @@ import (
 	"github.com/knid/wemob/internal/services/fal"
 	"github.com/knid/wemob/internal/services/neon"
 	"github.com/knid/wemob/internal/services/remoteconfig"
+	"github.com/knid/wemob/internal/templates"
 	"github.com/knid/wemob/internal/utils"
 
 	_ "github.com/lib/pq"
@@ -525,27 +526,7 @@ func looksLikeEcommerce(prompt string) bool {
 
 // isTemplateFile checks if a file path is managed by hardcoded templates
 func isTemplateFile(path string) bool {
-	for _, tp := range constants.NEXTJS_TEMPLATE_FILE_PATHS {
-		if path == tp {
-			return true
-		}
-	}
-	for _, tp := range constants.NEXTJS_DB_TEMPLATE_FILE_PATHS {
-		if path == tp {
-			return true
-		}
-	}
-	for _, tp := range constants.NEXTJS_ECOMMERCE_TEMPLATE_FILE_PATHS {
-		if path == tp {
-			return true
-		}
-	}
-	for _, tp := range constants.NEXTJS_UI_TEMPLATE_FILE_PATHS {
-		if path == tp {
-			return true
-		}
-	}
-	return false
+	return templates.IsTemplateFile(path)
 }
 
 // getColor safely extracts a color hex value from a scheme map
@@ -863,29 +844,19 @@ func getTemplateContent(path string, colorScheme, darkColorScheme map[string]any
 }
 
 func getTemplateContentWithLang(path string, colorScheme, darkColorScheme map[string]any, projectType string, dataModels []DataModel, lang string) string {
+	// Dynamic templates that can't be static files
 	switch path {
-	case "package.json":
-		return constants.NEXTJS_TEMPLATE_PACKAGE_JSON
-	case "tsconfig.json":
-		return constants.NEXTJS_TEMPLATE_TSCONFIG
-	case "postcss.config.mjs":
-		return constants.NEXTJS_TEMPLATE_POSTCSS_CONFIG
-	case "next.config.mjs":
-		return constants.NEXTJS_TEMPLATE_NEXT_CONFIG
 	case "app/globals.css":
 		return buildGlobalsCSSTheme(colorScheme, darkColorScheme, projectType == "mobile_app")
-	case ".gitignore":
-		return constants.NEXTJS_TEMPLATE_GITIGNORE
 	case "app/not-found.tsx":
 		return constants.GetNotFoundTemplate(lang)
 	case "app/error.tsx":
 		return constants.GetErrorTemplate(lang)
-	case "lib/db.ts":
-		return constants.NEXTJS_TEMPLATE_DB_TS
 	case "lib/schema.ts":
 		return buildDrizzleSchema(dataModels)
 	}
-	return ""
+	// All other templates are static embedded files
+	return templates.GetTemplate(path)
 }
 
 // buildEcommerceProviders returns the Providers component, conditionally including
@@ -914,65 +885,12 @@ export function Providers({ children }: { children: React.ReactNode }) {
 // For components/ecommerce/providers.tsx, use buildEcommerceProviders() instead when auth context is available.
 // lang is used to localize {{t.key}} placeholders in the templates.
 func getEcommerceTemplateContent(path string, lang string) string {
-	var raw string
-	switch path {
-	case "lib/wemob-store.ts":
-		return constants.NEXTJS_TEMPLATE_WEMOB_STORE // no user-facing strings
-	case "components/ecommerce/product-card.tsx":
-		raw = constants.ECOMMERCE_TEMPLATE_PRODUCT_CARD
-	case "components/ecommerce/cart-drawer.tsx":
-		raw = constants.ECOMMERCE_TEMPLATE_CART_DRAWER
-	case "components/ecommerce/price-display.tsx":
-		raw = constants.ECOMMERCE_TEMPLATE_PRICE_DISPLAY
-	case "components/ecommerce/quantity-selector.tsx":
-		raw = constants.ECOMMERCE_TEMPLATE_QUANTITY_SELECTOR
-	case "components/ecommerce/product-gallery.tsx":
-		raw = constants.ECOMMERCE_TEMPLATE_PRODUCT_GALLERY
-	case "components/ecommerce/checkout-form.tsx":
-		raw = constants.ECOMMERCE_TEMPLATE_CHECKOUT_FORM
-	case "components/ecommerce/category-nav.tsx":
-		raw = constants.ECOMMERCE_TEMPLATE_CATEGORY_NAV
-	case "components/ecommerce/cart-item-row.tsx":
-		raw = constants.ECOMMERCE_TEMPLATE_CART_ITEM_ROW
-	case "components/ecommerce/order-summary.tsx":
-		raw = constants.ECOMMERCE_TEMPLATE_ORDER_SUMMARY
-	case "components/ecommerce/empty-state.tsx":
-		return constants.ECOMMERCE_TEMPLATE_EMPTY_STATE // no hardcoded strings (takes props)
-	case "components/ecommerce/review-list.tsx":
-		raw = constants.ECOMMERCE_TEMPLATE_REVIEW_LIST
-	case "components/ecommerce/wishlist-button.tsx":
-		raw = constants.ECOMMERCE_TEMPLATE_WISHLIST_BUTTON
-	case "components/ecommerce/site-header.tsx":
-		raw = constants.ECOMMERCE_TEMPLATE_SITE_HEADER
-	case "components/ecommerce/site-footer.tsx":
-		raw = constants.ECOMMERCE_TEMPLATE_SITE_FOOTER
-	case "components/ecommerce/providers.tsx":
-		return constants.ECOMMERCE_TEMPLATE_PROVIDERS // no user-facing strings
-	case "components/ecommerce/newsletter-section.tsx":
-		raw = constants.ECOMMERCE_TEMPLATE_NEWSLETTER
-	case "app/cart/page.tsx":
-		raw = constants.ECOMMERCE_TEMPLATE_CART_PAGE
-	case "app/checkout/page.tsx":
-		raw = constants.ECOMMERCE_TEMPLATE_CHECKOUT_PAGE
-	case "app/checkout/success/page.tsx":
-		raw = constants.ECOMMERCE_TEMPLATE_CHECKOUT_SUCCESS_PAGE
-	case "app/checkout/cancel/page.tsx":
-		raw = constants.ECOMMERCE_TEMPLATE_CHECKOUT_CANCEL_PAGE
-	case "app/products/page.tsx":
-		raw = constants.ECOMMERCE_TEMPLATE_PRODUCTS_PAGE
-	case "app/products/[slug]/page.tsx":
-		raw = constants.ECOMMERCE_TEMPLATE_PRODUCT_DETAIL_PAGE
-	case "app/categories/[slug]/page.tsx":
-		raw = constants.ECOMMERCE_TEMPLATE_CATEGORY_PAGE
-	case "app/policies/shipping/page.tsx":
-		raw = constants.ECOMMERCE_TEMPLATE_SHIPPING_POLICY
-	case "app/policies/returns/page.tsx":
-		raw = constants.ECOMMERCE_TEMPLATE_RETURNS_POLICY
-	case "app/policies/privacy/page.tsx":
-		raw = constants.ECOMMERCE_TEMPLATE_PRIVACY_POLICY
-	case "app/policies/terms/page.tsx":
-		raw = constants.ECOMMERCE_TEMPLATE_TERMS_POLICY
-	default:
+	// No i18n needed for these
+	if path == "lib/wemob-store.ts" || path == "components/ecommerce/empty-state.tsx" || path == "components/ecommerce/providers.tsx" {
+		return templates.GetTemplate(path)
+	}
+	raw := templates.GetTemplate(path)
+	if raw == "" {
 		slog.Warn("getEcommerceTemplateContent: no content for template path", "path", path)
 		return ""
 	}
@@ -981,21 +899,7 @@ func getEcommerceTemplateContent(path string, lang string) string {
 
 // getUITemplateContent returns the hardcoded content for a pre-built UI component template file.
 func getUITemplateContent(path string) string {
-	switch path {
-	case "lib/utils.ts":
-		return constants.NEXTJS_TEMPLATE_UTILS_TS
-	case "components/ui/button.tsx":
-		return constants.NEXTJS_TEMPLATE_BUTTON_TSX
-	case "components/ui/card.tsx":
-		return constants.NEXTJS_TEMPLATE_CARD_TSX
-	case "components/ui/input.tsx":
-		return constants.NEXTJS_TEMPLATE_INPUT_TSX
-	case "components/ui/badge.tsx":
-		return constants.NEXTJS_TEMPLATE_BADGE_TSX
-	case "components/ui/skeleton.tsx":
-		return constants.NEXTJS_TEMPLATE_SKELETON_TSX
-	}
-	return ""
+	return templates.GetTemplate(path)
 }
 
 // mergeDataModelColumns keeps all auth columns and appends non-conflicting LLM columns.
