@@ -66,7 +66,7 @@ If the user asks for a native mobile app (Android/iOS/Flutter) or desktop app, p
 ### Rules
 ` + structureCommonRules + `
 - Required files: app/layout.tsx, app/page.tsx, app/globals.css
-- Plan 3-8 pages depending on complexity.
+- Plan 3-8 pages depending on complexity. HARD LIMIT: maximum 25 files total in the plan. If the user requests many pages/features, prioritize the MVP core pages and note remaining features can be added later. Do NOT exceed 25 files — truncated JSON output causes build failures.
 - Do NOT include NEXT_PUBLIC_STORE_ID, NEXT_PUBLIC_WEMOB_API_URL, or DATABASE_URL in required_env_vars (auto-provisioned).
 - "data_models" decides whether the app gets a database. Use an empty array [] for apps that are purely presentational or static — portfolios, landing pages, marketing sites, personal homepages, simple brochure sites, or any app where the content can be hardcoded in components. Use data_models ONLY when the app genuinely needs dynamic, user-managed, or CRUD-able data (blogs with a CMS, task managers, dashboards, booking systems, forums, etc.). When in doubt, prefer NO database — hardcoded data in components is simpler, faster, and cheaper.
 - When data_models is non-empty: design database tables. Each table has a "name" and "columns" array. Each column has "name", "type" (text, integer, boolean, timestamp, uuid, jsonb), "primary_key" (bool), "nullable" (bool), optional "default", and optional "references" (e.g. "categories.id"). Every table MUST have an "id" column with type "uuid" and primary_key true. Add "created_at" and "updated_at" timestamp columns with "default": "now()". A database will be provisioned automatically from these models.
@@ -148,7 +148,7 @@ Given the user's description of a mobile app they want to build, generate a stru
 ### Rules
 ` + structureCommonRules + `
 - Required files: app/layout.tsx, app/page.tsx, app/globals.css
-- Plan 3-8 screens depending on complexity.
+- Plan 3-8 screens depending on complexity. HARD LIMIT: maximum 25 files total in the plan. If the user requests many screens/features, prioritize the MVP core screens and note remaining features can be added later. Do NOT exceed 25 files — truncated JSON output causes build failures.
 - Do NOT include NEXT_PUBLIC_STORE_ID, NEXT_PUBLIC_WEMOB_API_URL, or DATABASE_URL in required_env_vars (auto-provisioned).
 - "data_models" decides whether the app gets a database. Use an empty array [] for apps that are purely presentational or static — simple utility apps, calculators, timers, or any app where the content can be hardcoded. Use data_models ONLY when the app genuinely needs dynamic, user-managed, or CRUD-able data (task managers, social feeds, booking systems, fitness trackers, note-taking apps, etc.). When in doubt, prefer NO database — hardcoded data is simpler, faster, and cheaper.
 - When data_models is non-empty: design database tables. Each table has a "name" and "columns" array. Each column has "name", "type" (text, integer, boolean, timestamp, uuid, jsonb), "primary_key" (bool), "nullable" (bool), optional "default", and optional "references" (e.g. "categories.id"). Every table MUST have an "id" column with type "uuid" and primary_key true. Add "created_at" and "updated_at" timestamp columns with "default": "now()". A database will be provisioned automatically from these models.
