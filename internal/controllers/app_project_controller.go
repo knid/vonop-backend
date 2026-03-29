@@ -216,6 +216,11 @@ func (c *Controller) DeleteAppProject(id string, user *models.User) error {
 		slog.Warn("Failed to delete git repo during app deletion", "error", err, "project_id", project.ID)
 	}
 
+	// Mark deployments as undeployed and stop Coolify app (best-effort)
+	if err := c.UndeployApp(project.ID.String()); err != nil {
+		slog.Warn("Failed to undeploy app during deletion", "error", err, "project_id", project.ID)
+	}
+
 	// Clean up Coolify app and Gitea repo (best-effort)
 	coolifyProject, cpErr := c.DB.GetCoolifyProjectByAppProjectID(project.ID.String())
 	if cpErr == nil && coolifyProject != nil {
