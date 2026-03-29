@@ -233,7 +233,7 @@ func (c *Controller) StreamBuildApp(
 		closeEvents.Do(func() { close(events) })
 		c.RecordTokenUsage(user, actionLabel, model, provider.Name, project.ID.String(), project.ProjectType, tracker)
 		prompt, completion, total, callCount := tracker.Totals()
-		if total > 0 && generationSucceeded {
+		if total > 0 {
 			credits := models.TokensToCredits(prompt, completion)
 			if err := c.DeductAICreditsUnchecked(user, credits, actionLabel, project.ID.String()); err != nil {
 				slog.Warn("failed to deduct AI credits", "error", err,
@@ -243,6 +243,7 @@ func (c *Controller) StreamBuildApp(
 			slog.Info("=== BUILD SESSION SUMMARY ===",
 				"project_id", project.ID,
 				"is_generation", isInitialGeneration,
+				"succeeded", generationSucceeded,
 				"duration_s", fmt.Sprintf("%.1f", genDuration),
 				"llm_calls", callCount,
 				"prompt_tokens", prompt,
@@ -252,17 +253,19 @@ func (c *Controller) StreamBuildApp(
 				"model", model,
 				"provider", provider.Name,
 			)
-			c.TrackUserEvent(user, actionLabel+"_completed", posthog.NewProperties().
-				Set("app_id", project.ID.String()).
-				Set("duration_seconds", genDuration).
-				Set("total_tokens", total).
-				Set("prompt_tokens", prompt).
-				Set("completion_tokens", completion).
-				Set("llm_call_count", callCount).
-				Set("credits_used", credits).
-				Set("model", model).
-				Set("has_images", len(images) > 0).
-				Set("is_generation", isInitialGeneration))
+			if generationSucceeded {
+				c.TrackUserEvent(user, actionLabel+"_completed", posthog.NewProperties().
+					Set("app_id", project.ID.String()).
+					Set("duration_seconds", genDuration).
+					Set("total_tokens", total).
+					Set("prompt_tokens", prompt).
+					Set("completion_tokens", completion).
+					Set("llm_call_count", callCount).
+					Set("credits_used", credits).
+					Set("model", model).
+					Set("has_images", len(images) > 0).
+					Set("is_generation", isInitialGeneration))
+			}
 		}
 		if !generationSucceeded {
 			failedProps := posthog.NewProperties().
