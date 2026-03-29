@@ -43,9 +43,21 @@ func (v *HttpViews) DeployAppWeb(w http.ResponseWriter, r *http.Request) {
 			if !alreadyDeployed && count >= limits.MaxDeployedWebApps {
 				go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_QUOTA_REACHED, map[string]any{"action": "deploy_web", "limit": limits.MaxDeployedWebApps})
 				go v.Controller.TrackUserEvent(user, "quota_reached", posthog.NewProperties().Set("action", "deploy_web").Set("limit", limits.MaxDeployedWebApps))
+
+				// Include deployed app names so the user knows which to undeploy
+				var deployedNames []string
+				if apps, err := v.Controller.DB.GetDeployedWebAppsByUserID(user.ID.String()); err == nil {
+					for _, a := range apps {
+						deployedNames = append(deployedNames, a.Name)
+					}
+				}
+
 				utils.JSONCodedErrorResponse(w, "DEPLOY_LIMIT_REACHED",
 					fmt.Sprintf("you have reached the maximum of %d deployed web apps for your plan", limits.MaxDeployedWebApps),
-					http.StatusForbidden, nil)
+					http.StatusForbidden, map[string]any{
+						"deployed_apps": deployedNames,
+						"limit":         limits.MaxDeployedWebApps,
+					})
 				return
 			}
 		}
