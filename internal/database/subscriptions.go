@@ -132,3 +132,22 @@ func (db *Database) CountDeployedWebAppsByUserID(userID string) (int, error) {
 		Scan(context.Background(), &count)
 	return count, err
 }
+
+// DeployedWebAppInfo holds the name and ID of a deployed web app.
+type DeployedWebAppInfo struct {
+	AppProjectID string `bun:"app_project_id"`
+	Name         string `bun:"name"`
+}
+
+func (db *Database) GetDeployedWebAppsByUserID(userID string) ([]DeployedWebAppInfo, error) {
+	var apps []DeployedWebAppInfo
+	err := db.DB.NewSelect().
+		TableExpr("app_deployments AS d").
+		Join("JOIN app_projects AS p ON p.id = d.app_project_id").
+		ColumnExpr("DISTINCT d.app_project_id, p.name").
+		Where("d.user_id = ?", userID).
+		Where("d.platform = 'web'").
+		Where("d.status = 'deployed'").
+		Scan(context.Background(), &apps)
+	return apps, err
+}
