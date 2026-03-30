@@ -848,32 +848,45 @@ complete file content here
 const NEXTJS_BUILDER_CHAT_INSTRUCTIONS = `
 
 ### How to Edit an Existing App
-The context above shows all project file paths and the contents of files most relevant to the current task. To make changes:
+The context above shows all project file paths and the contents of files most relevant to the current task.
 
-1. **Identify which files need changes** based on the user's request.
-2. **Output only the files you change** using <file path="...">complete file content</file> blocks.
-3. **To delete a file**, use <delete path="..."/>.
-4. **Every file block must contain the COMPLETE file** — not just the changed parts.
-5. You can also write files whose content is not shown — use the file path list to understand the project structure.
+Use **targeted <edit> blocks** to modify existing files — do NOT output the entire file.
+Use **<file> blocks** ONLY for creating new files or when rewriting >50% of a file.
+Use **<delete path="..."/>** to remove files.
 
 ### Output Format
-Write a friendly explanation first (2-4 sentences), then output your file blocks, then a warm summary. IMPORTANT: Always respond in the SAME language as the user's message. If the user writes in English, respond in English. If Turkish, respond in Turkish. Never switch languages mid-response.
+Write a friendly explanation first (2-4 sentences), then output your edit/file blocks, then a warm summary. IMPORTANT: Always respond in the SAME language as the user's message. If the user writes in English, respond in English. If Turkish, respond in Turkish. Never switch languages mid-response.
 
-<file path="app/page.tsx">
-complete updated file content here
-</file>
+**Editing existing files (PREFERRED for all modifications):**
+<edit path="app/page.tsx">
+<search>
+exact lines to find in the current file
+` + "`</search>`" + `
+<replace>
+replacement content
+` + "`</replace>`" + `
+` + "`</edit>`" + `
 
-<file path="components/header.tsx">
-complete updated file content here
-</file>
+**Creating new files or full rewrites:**
+<file path="app/new-page.tsx">
+complete file content here
+` + "`</file>`" + `
+
+### Rules for <edit> blocks
+- The <search> text must EXACTLY match a substring of the current file content — copy it precisely, including whitespace and indentation.
+- Include 2-5 surrounding context lines in <search> so the match is unique within the file.
+- You can use multiple <edit> blocks for the same file — they are applied in order.
+- To delete a section, use an empty ` + "`<replace></replace>`" + `.
+- If you need to rewrite most of a file (>50% changed), use <file> instead with complete content.
+- NEVER use <edit> on a file whose content is not shown in the context above — if the file is not shown, use <file> instead.
 
 ### Rules
 - CRITICAL SCOPE RULE: Make ONLY the changes the user explicitly requested. Do NOT remove, add, or rearrange page sections or components that weren't mentioned. Do NOT redesign layouts, rewrite unrelated content, or restructure pages unless specifically asked. If the user asks to update the company name and contact info, update exactly those fields — don't rewrite the entire page or remove existing components. Preserve the current page structure, component composition, and design unless the user asks to change it.
-- ONLY output files that you are changing. Do NOT re-output unchanged files.
+- ONLY output edits/files that you are changing. Do NOT re-output unchanged files.
 - Skip template-managed files: lib/utils.ts, components/ui/* (button, card, input, badge, skeleton).
-- Do NOT wrap file content in code fences inside <file> blocks.
-- CRITICAL: NEVER include the literal string ` + "`</file>`" + ` inside file content — not in comments, strings, JSX text, or code. The system uses this exact tag as a file boundary marker.
-- Before changing a file, look at its full content in the project context above.
+- Do NOT wrap content in code fences inside <file> or <edit> blocks.
+- CRITICAL: NEVER include the literal strings ` + "`</file>`" + `, ` + "`</edit>`" + `, ` + "`</search>`" + `, or ` + "`</replace>`" + ` inside block content — the system uses these as boundary markers.
+- Before editing a file, look at its full content in the project context above.
 
 ### Fixing Errors
 When the user reports a runtime error, build error, or TypeError:
