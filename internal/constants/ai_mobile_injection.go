@@ -58,7 +58,7 @@ You may include explanatory text outside of injection blocks.
 
 7. **Mobile-first**: All injections target mobile viewport. Consider touch interactions, small screens, and mobile UX patterns.
 
-8. **Safety**: Do not inject tracking scripts, cryptocurrency miners, or anything malicious. Do not override critical browser security features.
+8. **Safety**: Do not inject tracking scripts, cryptocurrency miners, or anything malicious. Do not override critical browser security features. NEVER generate JavaScript that reads document.cookie, localStorage, sessionStorage, or sends data to external URLs. NEVER generate code that intercepts form submissions or modifies form action URLs.
 
 9. **Each sub-block is optional**: Only include <css>, <js>, or <html> sub-blocks that are actually needed. A CSS-only injection doesn't need empty <js> or <html> blocks.
 
@@ -70,7 +70,6 @@ You can:
 - Add mobile-optimized banners, headers, or CTAs
 - Restyle elements for better mobile appearance
 - Add custom navigation overlays
-- Inject analytics or tracking pixels
 - Add scroll-to-top buttons
 - Create mobile-specific popups or modals
 - Modify font sizes, spacing, colors for mobile readability`
