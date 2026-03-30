@@ -458,7 +458,7 @@ func (c *Controller) StreamBuildApp(
 
 	// --- Build LLM messages ---
 	var llmMessages []utils.Message
-	var selectedFiles map[string]bool // hoisted so Phase 1 can refresh project context
+	var selectedFiles contextFileSelection // hoisted so Phase 1 can refresh project context
 
 	// Add conversation history
 	if isInitialGeneration {
@@ -476,17 +476,22 @@ func (c *Controller) StreamBuildApp(
 		}
 		llmMessages = append(llmMessages, userMsg)
 	} else {
-		// Chat path: select relevant files, then build context
-		selectedFiles = c.selectContextFiles(ctx, provider, fileMap, message, messages)
-		projectContext := c.buildProjectContextForChat(project, fileMap, selectedFiles)
+		// Chat path: start file selection in background while we prepare conversation history.
+		// File selection and the tool phase (started later) are independent LLM calls
+		// that can overlap, saving ~2s of latency per chat message.
+		var fileSelWG sync.WaitGroup
+		fileSelWG.Add(1)
+		go func() {
+			defer fileSelWG.Done()
+			selectedFiles = c.selectContextFiles(ctx, provider, fileMap, message, messages)
+		}()
 
-		llmMessages = []utils.Message{
-			{Role: "system", Content: buildChatSystemPrompt(project, mobileConfig)},
-			{Role: "system", Content: projectContext},
-		}
+		// Prepare static system prompt (doesn't depend on file selection)
+		chatSystemPrompt := buildChatSystemPrompt(project, mobileConfig)
 
-		// Add context + conversation history with summarization
-		llmMessages = append(llmMessages, utils.Message{Role: "user", Content: "I understand the current project state. What would you like me to do?"})
+		// Build conversation history while file selection runs in the background
+		var chatHistory []utils.Message
+		chatHistory = append(chatHistory, utils.Message{Role: "user", Content: "I understand the current project state. What would you like me to do?"})
 
 		keepRecent := c.RemoteConfig.GetInt(remoteconfig.AIChatKeepRecent, remoteconfig.Global)
 		summarizeThreshold := c.RemoteConfig.GetInt(remoteconfig.AIChatSummarizeThreshold, remoteconfig.Global)
@@ -513,19 +518,29 @@ func (c *Controller) StreamBuildApp(
 				}
 			}
 			if conv.Summary != "" {
-				llmMessages = append(llmMessages, utils.Message{
+				chatHistory = append(chatHistory, utils.Message{
 					Role:    "user",
 					Content: fmt.Sprintf("[Earlier conversation summary]\n%s", conv.Summary),
 				})
-				llmMessages = append(llmMessages, utils.Message{
+				chatHistory = append(chatHistory, utils.Message{
 					Role:    "assistant",
 					Content: "I understand the earlier context. Let me continue from where we left off.",
 				})
 			}
-			llmMessages = append(llmMessages, chatMessagesToLLM(messages[len(messages)-keepRecent:], provider, imageURLs)...)
+			chatHistory = append(chatHistory, chatMessagesToLLM(messages[len(messages)-keepRecent:], provider, imageURLs)...)
 		} else {
-			llmMessages = append(llmMessages, chatMessagesToLLM(messages, provider, imageURLs)...)
+			chatHistory = append(chatHistory, chatMessagesToLLM(messages, provider, imageURLs)...)
 		}
+
+		// Wait for file selection to complete, then build project context
+		fileSelWG.Wait()
+		projectContext := c.buildProjectContextForChat(project, fileMap, selectedFiles)
+
+		llmMessages = []utils.Message{
+			{Role: "system", Content: chatSystemPrompt},
+			{Role: "system", Content: projectContext},
+		}
+		llmMessages = append(llmMessages, chatHistory...)
 	}
 
 	if ctx.Err() != nil {
@@ -759,6 +774,37 @@ func (c *Controller) StreamBuildApp(
 					slog.Error("chat file delete failed", "path", path, "error", err)
 				}
 				deletedPaths = append(deletedPaths, path)
+			},
+			OnEdit: func(path, search, replace string) {
+				original, ok := fileMap[path]
+				if !ok {
+					slog.Warn("edit target file not found in fileMap", "path", path)
+					return
+				}
+				result, applied := utils.ApplyEdit(original, search, replace)
+				if !applied {
+					preview := search
+					if len(preview) > 100 {
+						preview = preview[:100] + "..."
+					}
+					slog.Warn("applyEdit: search text not found",
+						"path", path, "search_preview", preview)
+					return
+				}
+				result = utils.StripCodeFences(result)
+				_, fileType := guessFileType(path)
+				if fileType == "tsx" || fileType == "ts" {
+					result, _ = stripForbiddenImports(result, path)
+				}
+				if err := c.saveGeneratedFile(project, repo, path, result, fileType, fileMap, sendEvent, &toolAppliedOps, true); err != nil {
+					slog.Error("edit file save failed", "path", path, "error", err)
+				}
+				chatFileCounter++
+				sendEvent("progress", responses.ProgressEvent{
+					Phase:   "generating_files",
+					Message: fmt.Sprintf("Updated %s (%d files)", path, chatFileCounter),
+					Current: chatFileCounter,
+				})
 			},
 			OnText: func(text string) {
 				responseBuilder.WriteString(text)
