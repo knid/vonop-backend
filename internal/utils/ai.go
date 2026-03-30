@@ -504,6 +504,10 @@ func buildVisionRequestBody(model, system, userText, base64Image string, provide
 		anthReq := convertVisionToAnthropic(model, system, userText, base64Image, provider)
 		return json.Marshal(anthReq)
 	}
+	// Ensure image has a proper data URI prefix with correct media type
+	mediaType, rawData := parseDataURI(base64Image)
+	imageURI := fmt.Sprintf("data:%s;base64,%s", mediaType, rawData)
+
 	reqBody := MultiChatRequest{
 		Model: model,
 		Messages: []MultiMessage{
@@ -515,7 +519,7 @@ func buildVisionRequestBody(model, system, userText, base64Image string, provide
 					{
 						Type: "image_url",
 						ImageURL: &ImageURLContent{
-							URL: "data:image/png;base64," + base64Image,
+							URL: imageURI,
 						},
 					},
 				},
