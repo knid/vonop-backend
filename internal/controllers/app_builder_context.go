@@ -729,24 +729,6 @@ func (c *Controller) buildProjectContextForChat(project *models.AppProject, file
 		sb.WriteString(fmt.Sprintf("\nApp Logo URL (use this as the site logo in the header/navbar via next/image and as the favicon in metadata — do not use text for the brand name, always use this logo image):\n%s\n", logoURL))
 	}
 
-	// Theme
-	var theme map[string]any
-	if len(project.Theme) > 0 && project.Theme[0] == '{' {
-		if err := json.Unmarshal(project.Theme, &theme); err != nil {
-			slog.Warn("failed to unmarshal project theme", "error", err, "project_id", project.ID)
-		}
-	} else if len(project.Theme) > 0 {
-		var raw string
-		if json.Unmarshal(project.Theme, &raw) == nil && len(raw) > 0 && raw[0] == '{' {
-			if err := json.Unmarshal([]byte(raw), &theme); err != nil {
-				slog.Warn("failed to unmarshal double-encoded project theme", "error", err, "project_id", project.ID)
-			}
-		}
-	}
-	if len(theme) > 0 {
-		sb.WriteString(fmt.Sprintf("Theme: %v\n", theme))
-	}
-
 	// List installed UI components so the LLM reuses them instead of building from scratch
 	if components := detectInstalledUIComponents(fileMap); len(components) > 0 {
 		sb.WriteString("\n### Installed UI Components (USE THESE — do not rebuild from scratch)\n")
@@ -837,26 +819,6 @@ func (c *Controller) buildProjectContext(project *models.AppProject, fileMap map
 
 	sb.WriteString(fmt.Sprintf("App: %s (slug: %s)\n", project.Name, project.Slug))
 	sb.WriteString(fmt.Sprintf("Project type: %s\n", project.ProjectType))
-
-	// Theme
-	var theme map[string]any
-	if len(project.Theme) > 0 && project.Theme[0] == '{' {
-		if err := json.Unmarshal(project.Theme, &theme); err != nil {
-			slog.Warn("failed to unmarshal project theme", "error", err, "project_id", project.ID)
-		}
-	} else if len(project.Theme) > 0 {
-		// Theme is not a JSON object (possibly a string or corrupted) — try to unwrap
-		var raw string
-		if json.Unmarshal(project.Theme, &raw) == nil && len(raw) > 0 && raw[0] == '{' {
-			// Double-encoded JSON string — unwrap and parse
-			if err := json.Unmarshal([]byte(raw), &theme); err != nil {
-				slog.Warn("failed to unmarshal double-encoded project theme", "error", err, "project_id", project.ID)
-			}
-		}
-	}
-	if len(theme) > 0 {
-		sb.WriteString(fmt.Sprintf("Theme: %v\n", theme))
-	}
 
 	// List installed UI components so the LLM reuses them
 	if !isInitialGeneration {
