@@ -185,7 +185,7 @@ CRITICAL LANGUAGE RULE: ALL content you generate (product names, descriptions, c
 			if role == "assistant" && len(content) > 300 {
 				content = content[:300] + "..."
 			}
-			cb.WriteString(fmt.Sprintf("[%s]: %s\n", role, content))
+			cb.WriteString(fmt.Sprintf("[%s]: %s\n", role, utils.SanitizePromptContent(content)))
 			// Include tool calls from assistant messages so Phase 1 knows what was already tried
 			if role == "assistant" && len(msg.ToolCalls) > 0 {
 				for _, tc := range msg.ToolCalls {
