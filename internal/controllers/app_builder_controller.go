@@ -520,7 +520,7 @@ func (c *Controller) StreamBuildApp(
 			if conv.Summary != "" {
 				chatHistory = append(chatHistory, utils.Message{
 					Role:    "user",
-					Content: fmt.Sprintf("[Earlier conversation summary]\n%s", conv.Summary),
+					Content: fmt.Sprintf("[Earlier conversation summary]\n%s", utils.SanitizePromptContent(conv.Summary)),
 				})
 				chatHistory = append(chatHistory, utils.Message{
 					Role:    "assistant",
