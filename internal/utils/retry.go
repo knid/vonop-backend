@@ -35,10 +35,13 @@ func RetryableHTTPDo(ctx context.Context, client *http.Client, req *http.Request
 			return resp, nil
 		}
 		slog.Warn("HTTP request returned server error, retrying", "attempt", attempt+1, "status", resp.StatusCode)
-		resp.Body.Close()
+		if attempt < maxRetries {
+			resp.Body.Close()
+		}
 	}
 	if err != nil {
 		return nil, err
 	}
+	// Final attempt was a 5xx — return with body still open so caller can read the error
 	return resp, nil
 }
