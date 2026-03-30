@@ -861,16 +861,16 @@ Write a friendly explanation first (2-4 sentences), then output your edit/file b
 <edit path="app/page.tsx">
 <search>
 exact lines to find in the current file
-` + "`</search>`" + `
+` + "</search>" + `
 <replace>
 replacement content
-` + "`</replace>`" + `
-` + "`</edit>`" + `
+` + "</replace>" + `
+` + "</edit>" + `
 
 **Creating new files or full rewrites:**
 <file path="app/new-page.tsx">
 complete file content here
-` + "`</file>`" + `
+` + "</file>" + `
 
 ### Rules for <edit> blocks
 - The <search> text must EXACTLY match a substring of the current file content — copy it precisely, including whitespace and indentation.
