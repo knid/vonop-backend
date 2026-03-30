@@ -472,7 +472,7 @@ func convertVisionToAnthropic(model, system, userText, base64Image string, provi
 	model = strings.TrimPrefix(model, "anthropic/")
 
 	// Parse media type from the base64 data URL prefix if present
-	mediaType := "image/png" // default
+	mediaType, imageData := parseDataURI(base64Image)
 
 	systemBlocks := []AnthropicContentBlock{
 		{
@@ -489,7 +489,7 @@ func convertVisionToAnthropic(model, system, userText, base64Image string, provi
 			Source: &AnthropicImageSource{
 				Type:      "base64",
 				MediaType: mediaType,
-				Data:      base64Image,
+				Data:      imageData,
 			},
 		},
 	}
