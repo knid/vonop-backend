@@ -639,6 +639,9 @@ func GetJSONFromLLM(ctx context.Context, model, system, message string, provider
 			bodyStr = bodyStr[:2000] + "...(truncated)"
 		}
 		slog.Error("LLM returned non-200", "status", resp.StatusCode, "body", bodyStr, "model", model, "provider", provider.Name)
+		if rlErr := parseRateLimitError(resp, errBody); rlErr != nil {
+			return "", rlErr
+		}
 		return "", fmt.Errorf("LLM returned status %d", resp.StatusCode)
 	}
 
@@ -715,6 +718,9 @@ func GetJSONFromLLMWithMaxTokens(ctx context.Context, model, system, message str
 			bodyStr = bodyStr[:2000] + "...(truncated)"
 		}
 		slog.Error("LLM returned non-200", "status", resp.StatusCode, "body", bodyStr, "model", model, "provider", provider.Name)
+		if rlErr := parseRateLimitError(resp, errBody); rlErr != nil {
+			return "", rlErr
+		}
 		return "", fmt.Errorf("LLM returned status %d", resp.StatusCode)
 	}
 
@@ -786,6 +792,9 @@ func GetTextFromLLM(ctx context.Context, model, system, message string, provider
 			bodyStr = bodyStr[:2000] + "...(truncated)"
 		}
 		slog.Error("LLM returned non-200", "status", resp.StatusCode, "body", bodyStr, "model", model, "provider", provider.Name)
+		if rlErr := parseRateLimitError(resp, errBody); rlErr != nil {
+			return "", rlErr
+		}
 		return "", fmt.Errorf("LLM returned status %d", resp.StatusCode)
 	}
 
@@ -1192,6 +1201,9 @@ func GetJSONFromLLMWithMessages(ctx context.Context, model string, messages []Me
 			bodyStr = bodyStr[:2000] + "...(truncated)"
 		}
 		slog.Error("LLM returned non-200", "status", resp.StatusCode, "body", bodyStr, "model", model, "provider", provider.Name)
+		if rlErr := parseRateLimitError(resp, errBody); rlErr != nil {
+			return "", rlErr
+		}
 		return "", fmt.Errorf("LLM returned status %d", resp.StatusCode)
 	}
 
