@@ -63,6 +63,12 @@ Provider-specific query format:
 
 IMPORTANT: Check the "Database provider" value in the user message. If it is "neon" or "platform", you MUST use the "sql" field in every query. Do NOT use table/select/filters format for neon or platform providers.
 
+SQL safety rules (for neon/platform SQL queries):
+- NEVER include SQL comments (-- or /* */) in generated queries
+- Only use standard SQL aggregation and scalar functions (COUNT, SUM, AVG, MIN, MAX, DATE, etc.)
+- NEVER use pg_catalog, information_schema, or system functions
+- Only generate SELECT queries
+
 Return a JSON object with this structure.
 
 Example for supabase provider:
