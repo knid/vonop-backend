@@ -103,17 +103,6 @@ func main() {
 			}
 		}
 
-		// Also migrate theme from app_projects
-		var theme []byte
-		err = db.NewSelect().
-			TableExpr("app_projects").
-			Column("theme").
-			Where("id = ?", pid).
-			Scan(context.Background(), &theme)
-		if err == nil && len(theme) > 2 {
-			repo.WriteTheme(theme)
-		}
-
 		if _, err := repo.Commit("init: migrated from database"); err != nil {
 			log.Printf("  [%d/%d] SKIP %s: commit failed: %v", i+1, len(projectIDs), pid, err)
 			continue

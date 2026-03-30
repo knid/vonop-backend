@@ -1087,10 +1087,6 @@ func (c *Controller) StreamBuildApp(
 
 	// --- Commit changes to git ---
 	if filesChanged > 0 {
-		// Write theme to repo before commit
-		if err := repo.WriteTheme(project.Theme); err != nil {
-			slog.Warn("failed to write theme to repo", "error", err, "project_id", project.ID)
-		}
 		commitMsg := "init: initial generation"
 		if !isInitialGeneration {
 			commitMsg = fmt.Sprintf("chat: %s", message)

@@ -285,16 +285,6 @@ func (r *Repo) Head() (string, error) {
 	return r.head()
 }
 
-// WriteTheme writes the theme JSON to _wemob/theme.json.
-func (r *Repo) WriteTheme(themeJSON []byte) error {
-	return r.WriteFile(filepath.Join(metaDir, "theme.json"), themeJSON)
-}
-
-// ReadTheme reads the theme JSON from _wemob/theme.json.
-func (r *Repo) ReadTheme() ([]byte, error) {
-	return r.ReadFile(filepath.Join(metaDir, "theme.json"))
-}
-
 // CurrentBranch returns the name of the current checked-out branch.
 func (r *Repo) CurrentBranch() (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), readTimeout)

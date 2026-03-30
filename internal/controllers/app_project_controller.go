@@ -276,11 +276,6 @@ func (c *Controller) CreateAppSnapshot(project *models.AppProject, description s
 		return "", fmt.Errorf("failed to open repo: %w", err)
 	}
 
-	// Write theme to repo so it's captured in the commit
-	if err := repo.WriteTheme(project.Theme); err != nil {
-		slog.Warn("CreateAppSnapshot: failed to write theme", "error", err, "project_id", project.ID)
-	}
-
 	commitMsg := fmt.Sprintf("%s: %s", source, description)
 	hash, err := repo.Commit(commitMsg)
 	if err != nil {
@@ -299,18 +294,6 @@ func (c *Controller) RestoreAppSnapshot(project *models.AppProject, commitHash s
 	_, err = repo.RevertAndCommit(commitHash, "undo: reverted to previous version")
 	if err != nil {
 		return nil, fmt.Errorf("failed to restore snapshot: %w", err)
-	}
-
-	// Restore theme from repo
-	if themeData, readErr := repo.ReadTheme(); readErr == nil && len(themeData) > 0 && validateThemeJSON(themeData) == nil {
-		project.Theme = themeData
-		project.UpdatedAt = time.Now()
-		updated, updateErr := c.DB.UpdateAppProject(project)
-		if updateErr != nil {
-			slog.Error("RestoreAppSnapshot: failed to update project theme", "error", updateErr, "project_id", project.ID)
-			return project, nil
-		}
-		return updated, nil
 	}
 
 	return project, nil
