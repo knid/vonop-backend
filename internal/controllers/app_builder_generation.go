@@ -291,9 +291,8 @@ func (c *Controller) streamSingleShotGeneration(
 		project.Slug = structure.Slug + "-" + uuid.New().String()[:8]
 	}
 	themeData := models.AppTheme{
-		ColorScheme:     structure.ColorScheme,
-		DarkColorScheme: structure.DarkColorScheme,
-		Typography:      structure.Typography,
+		ColorScheme: structure.ColorScheme,
+		Typography:  structure.Typography,
 	}
 	if themeJSON, err := json.Marshal(themeData); err == nil {
 		project.Theme = themeJSON
@@ -324,14 +323,14 @@ func (c *Controller) streamSingleShotGeneration(
 			if layoutContent := buildEcommerceLayout(project.Name, theme.Typography); layoutContent != "" {
 				c.injectTemplateFile(repo, "app/layout.tsx", layoutContent, fileMap, sendEvent)
 			}
-			if cssContent := buildEcommerceGlobalsCSSTheme(theme.ColorScheme, theme.DarkColorScheme); cssContent != "" {
+			if cssContent := buildEcommerceGlobalsCSSTheme(theme.ColorScheme); cssContent != "" {
 				c.injectTemplateFile(repo, "app/globals.css", cssContent, fileMap, sendEvent)
 			}
 		} else {
 			// For non-e-commerce apps, inject globals.css with semantic tokens so
 			// the UI component templates (button, card, input, badge) work correctly.
 			isMobile := project.ProjectType == "mobile_app"
-			if cssContent := buildGlobalsCSSTheme(theme.ColorScheme, theme.DarkColorScheme, isMobile); cssContent != "" {
+			if cssContent := buildGlobalsCSSTheme(theme.ColorScheme, isMobile); cssContent != "" {
 				c.injectTemplateFile(repo, "app/globals.css", cssContent, fileMap, sendEvent)
 			}
 		}
@@ -594,9 +593,8 @@ func (c *Controller) streamEcommerceGeneration(
 		project.Slug = structure.Slug + "-" + uuid.New().String()[:8]
 	}
 	themeData := models.AppTheme{
-		ColorScheme:     structure.ColorScheme,
-		DarkColorScheme: structure.DarkColorScheme,
-		Typography:      structure.Typography,
+		ColorScheme: structure.ColorScheme,
+		Typography:  structure.Typography,
 	}
 	if themeJSON, err := json.Marshal(themeData); err == nil {
 		project.Theme = themeJSON
@@ -723,7 +721,7 @@ func (c *Controller) streamEcommerceGeneration(
 		if layoutContent := buildEcommerceLayout(project.Name, theme.Typography); layoutContent != "" {
 			c.injectTemplateFile(repo, "app/layout.tsx", layoutContent, fileMap, sendEvent)
 		}
-		if cssContent := buildEcommerceGlobalsCSSTheme(theme.ColorScheme, theme.DarkColorScheme); cssContent != "" {
+		if cssContent := buildEcommerceGlobalsCSSTheme(theme.ColorScheme); cssContent != "" {
 			c.injectTemplateFile(repo, "app/globals.css", cssContent, fileMap, sendEvent)
 		}
 	}

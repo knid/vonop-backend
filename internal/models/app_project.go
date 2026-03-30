@@ -1,17 +1,15 @@
 package models
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/google/uuid"
 )
 
 type AppTheme struct {
-	ColorScheme     map[string]any `json:"color_scheme"`
-	DarkColorScheme map[string]any `json:"dark_color_scheme,omitempty"`
-	Typography      map[string]any `json:"typography,omitempty"`
-	Spacing         map[string]any `json:"spacing,omitempty"`
-	BorderRadius    map[string]any `json:"border_radius,omitempty"`
+	ColorScheme map[string]any `json:"color_scheme"`
+	Typography  map[string]any `json:"typography,omitempty"`
 }
 
 type AppProject struct {
@@ -25,7 +23,7 @@ type AppProject struct {
 	Prompt          string         `bun:",notnull,type:text"`
 	ProjectType     string         `bun:",notnull,default:'app'"` // "app" or "ecommerce"
 	// AST field removed — files now stored in git repos
-	Theme           []byte         `bun:",type:jsonb,default:'{}'"` // stores AppTheme as JSON
+	Theme           json.RawMessage `bun:",type:jsonb,default:'{}'"` // stores AppTheme as JSON
 	DataModels      []byte         `bun:",type:jsonb,default:'[]'"` // stores data model definitions
 	Settings        map[string]any `bun:",type:jsonb,default:'{}'"`
 	ScreenshotS3Key string         `bun:",notnull,default:''"`

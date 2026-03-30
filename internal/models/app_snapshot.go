@@ -1,6 +1,7 @@
 package models
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/google/uuid"
@@ -11,7 +12,7 @@ type AppSnapshot struct {
 	AppProjectID uuid.UUID   `bun:",notnull,type:uuid"`
 	AppProject   *AppProject `bun:"rel:belongs-to,join:app_project_id=id"`
 	AST          []byte      `bun:",type:jsonb,default:'[]'"`  // snapshot of AST
-	Theme        []byte      `bun:",type:jsonb,default:'{}'"` // snapshot of theme
+	Theme        json.RawMessage `bun:",type:jsonb,default:'{}'"` // snapshot of theme
 	Files        []byte      `bun:",type:jsonb,default:'[]'"` // snapshot of generated files
 	MessageID    string      `bun:",nullzero"`                // link to conversation message
 	Description  string      `bun:",notnull"`

@@ -68,9 +68,8 @@ func (v *HttpViews) GenerateAppFromImage(w http.ResponseWriter, r *http.Request)
 		project.Slug = structure.Slug
 	}
 	themeData := models.AppTheme{
-		ColorScheme:     structure.ColorScheme,
-		DarkColorScheme: structure.DarkColorScheme,
-		Typography:      structure.Typography,
+		ColorScheme: structure.ColorScheme,
+		Typography:  structure.Typography,
 	}
 	themeJSON, _ := json.Marshal(themeData)
 	project.Theme = themeJSON

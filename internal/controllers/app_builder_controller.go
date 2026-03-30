@@ -337,7 +337,7 @@ func (c *Controller) StreamBuildApp(
 			if tp == "app/globals.css" {
 				continue
 			}
-			content := getTemplateContentWithLang(tp, nil, nil, project.ProjectType, nil, lang)
+			content := getTemplateContentWithLang(tp, nil, project.ProjectType, nil, lang)
 			if content == "" {
 				continue
 			}

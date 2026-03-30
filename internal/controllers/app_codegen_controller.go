@@ -142,7 +142,6 @@ type appFileStructure struct {
 	Slug            string             `json:"slug"`
 	NeedsAuth       bool               `json:"needs_auth,omitempty"`
 	ColorScheme     map[string]any     `json:"colorScheme"`
-	DarkColorScheme map[string]any     `json:"darkColorScheme,omitempty"`
 	Typography      map[string]any     `json:"typography,omitempty"`
 	Files           []appFilePlanEntry `json:"files"`
 	DataModels      []DataModel        `json:"data_models,omitempty"`
@@ -545,7 +544,7 @@ func getColor(scheme map[string]any, key, fallback string) string {
 // the color scheme so that shadcn-style utility classes work (bg-foreground,
 // text-muted-foreground, border-border, etc.).
 // Light theme only — no dark mode overrides.
-func buildGlobalsCSSTheme(colorScheme, darkColorScheme map[string]any, isMobile bool) string {
+func buildGlobalsCSSTheme(colorScheme map[string]any, isMobile bool) string {
 	var sb strings.Builder
 
 	fg := getColor(colorScheme, "text", "#111827")
@@ -649,8 +648,8 @@ func buildGlobalsCSSTheme(colorScheme, darkColorScheme map[string]any, isMobile 
 
 // buildEcommerceGlobalsCSSTheme generates the globals.css content for e-commerce projects.
 // It extends the standard theme with e-commerce-specific utility classes and animations.
-func buildEcommerceGlobalsCSSTheme(colorScheme, darkColorScheme map[string]any) string {
-	base := buildGlobalsCSSTheme(colorScheme, darkColorScheme, false)
+func buildEcommerceGlobalsCSSTheme(colorScheme map[string]any) string {
+	base := buildGlobalsCSSTheme(colorScheme, false)
 
 	primary := getColor(colorScheme, "primary", "#3B82F6")
 
@@ -839,15 +838,15 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 
 // getTemplateContent returns the hardcoded content for a template file.
 // dataModels is used to generate the dynamic lib/schema.ts file.
-func getTemplateContent(path string, colorScheme, darkColorScheme map[string]any, projectType string, dataModels []DataModel) string {
-	return getTemplateContentWithLang(path, colorScheme, darkColorScheme, projectType, dataModels, "en")
+func getTemplateContent(path string, colorScheme map[string]any, projectType string, dataModels []DataModel) string {
+	return getTemplateContentWithLang(path, colorScheme, projectType, dataModels, "en")
 }
 
-func getTemplateContentWithLang(path string, colorScheme, darkColorScheme map[string]any, projectType string, dataModels []DataModel, lang string) string {
+func getTemplateContentWithLang(path string, colorScheme map[string]any, projectType string, dataModels []DataModel, lang string) string {
 	// Dynamic templates that can't be static files
 	switch path {
 	case "app/globals.css":
-		return buildGlobalsCSSTheme(colorScheme, darkColorScheme, projectType == "mobile_app")
+		return buildGlobalsCSSTheme(colorScheme, projectType == "mobile_app")
 	case "app/not-found.tsx":
 		return constants.GetNotFoundTemplate(lang)
 	case "app/error.tsx":
