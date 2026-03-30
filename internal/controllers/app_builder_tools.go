@@ -161,7 +161,8 @@ CRITICAL LANGUAGE RULE: ALL content you generate (product names, descriptions, c
 - If the user explicitly asks to enable or change specific mobile features, call configure_mobile_app with those methods.`
 	}
 	systemPrompt += `
-- If the user's message is a normal chat request (code changes, questions, fixes) that doesn't need any of the above tools, respond with ONLY the exact text: NO_TOOLS_NEEDED — nothing else. Do NOT write explanations, summaries, plans, or conversational responses. Your ONLY outputs should be tool calls OR the literal text "NO_TOOLS_NEEDED".
+- If the user's message is a normal chat request that REQUIRES CODE CHANGES (editing .tsx/.ts/.css files — e.g. "make the header bigger", "add a dark mode toggle", "fix the layout"), respond with ONLY the exact text: NO_TOOLS_NEEDED — nothing else. Do NOT write explanations, summaries, plans, or conversational responses. Your ONLY outputs should be tool calls OR the literal text "NO_TOOLS_NEEDED".
+- If the user's message is a simple greeting, casual chat, or question that does NOT require any code changes or tool calls (e.g. "hello", "selam", "what can you do?", "how does this work?", "thanks"), write a short friendly response in the user's language and end it with NO_CODE_NEEDED on its own line. Do NOT respond with NO_TOOLS_NEEDED for these — that would trigger an expensive code generation phase unnecessarily.
 - You can call multiple tools if needed (e.g. generate_image + install_package).
 - IMPORTANT: If the user has attached images/screenshots, these are VISUAL REFERENCES showing how they want the app to look. Do NOT call generate_image or take_screenshot because of attached images. These reference images will be passed directly to the code-generation model. Only call generate_image if the user EXPLICITLY asks to create/generate new images (e.g. "generate a logo", "create an illustration").
 - IMPORTANT: Before calling any tool, ALWAYS write a brief message (1-2 sentences, in the same language as the user's message) explaining what you're about to do. For example: "Let me check what's currently in the database...", "I'll generate a custom image for this...", "Looking at the website to understand the design...". This text is streamed to the user in real time so they know what's happening. Never call a tool without explaining first.
@@ -247,10 +248,14 @@ CRITICAL LANGUAGE RULE: ALL content you generate (product names, descriptions, c
 	// when it precedes a tool invocation (e.g. "Let me check the database...").
 	// If no tools are called, all Phase 1 text is discarded — Phase 2 will
 	// generate its own response, preventing duplicate greetings.
+	// Exception: NO_CODE_NEEDED responses are streamed directly since they ARE
+	// the final response (Phase 2 will be skipped).
 	var toolCalled bool
 	var phase1TextBuf strings.Builder
 	var phase1TextFlushed bool
 	var phase1Suppressed bool                // once NO_TOOLS_NEEDED is detected, drop all further text
+	var noCodeNeeded bool                    // true when NO_CODE_NEEDED is detected — stream text but skip Phase 2
+	var noCodeStreamedBuf strings.Builder    // accumulates text streamed for NO_CODE_NEEDED responses
 	var phase1Mu sync.Mutex                  // protects all phase1* vars and toolCalled
 
 	result, err := utils.StreamWithTools(
@@ -270,6 +275,13 @@ CRITICAL LANGUAGE RULE: ALL content you generate (product names, descriptions, c
 				if phase1Suppressed {
 					return
 				}
+				// Once NO_CODE_NEEDED is detected, keep streaming text
+				// (it's the final user-facing response) but track it.
+				if noCodeNeeded {
+					sendEvent("chat_text", responses.ChatTextEvent{Chunk: cleaned})
+					noCodeStreamedBuf.WriteString(cleaned)
+					return
+				}
 				// Already flushed — stream directly
 				if phase1TextFlushed {
 					sendEvent("chat_text", responses.ChatTextEvent{Chunk: cleaned})
@@ -279,6 +291,18 @@ CRITICAL LANGUAGE RULE: ALL content you generate (product names, descriptions, c
 				s := phase1TextBuf.String()
 				if strings.Contains(s, "NO_TOOLS_NEEDED") {
 					phase1Suppressed = true
+					return
+				}
+				// Detect NO_CODE_NEEDED: stream the buffered text (it's the
+				// greeting/answer) and switch to pass-through streaming mode.
+				if strings.Contains(s, "NO_CODE_NEEDED") {
+					noCodeNeeded = true
+					// Stream the buffered text minus the signal
+					textToStream := strings.TrimSpace(strings.ReplaceAll(s, "NO_CODE_NEEDED", ""))
+					if textToStream != "" {
+						sendEvent("chat_text", responses.ChatTextEvent{Chunk: textToStream})
+						noCodeStreamedBuf.WriteString(textToStream)
+					}
 					return
 				}
 				// Only flush buffered text once a tool has been called
@@ -299,7 +323,7 @@ CRITICAL LANGUAGE RULE: ALL content you generate (product names, descriptions, c
 				// Flush any buffered text that preceded this tool call
 				if !phase1TextFlushed && phase1TextBuf.Len() > 0 {
 					s := phase1TextBuf.String()
-					if !strings.Contains(s, "NO_TOOLS_NEEDED") {
+					if !strings.Contains(s, "NO_TOOLS_NEEDED") && !strings.Contains(s, "NO_CODE_NEEDED") {
 						phase1TextFlushed = true
 						sendEvent("chat_text", responses.ChatTextEvent{Chunk: s})
 					}
@@ -336,6 +360,22 @@ CRITICAL LANGUAGE RULE: ALL content you generate (product names, descriptions, c
 			return mkResult(collectedContext.String())
 		}
 		return mkResult("")
+	}
+
+	// Check if Phase 1 signalled NO_CODE_NEEDED (simple greeting/question,
+	// no code changes required). Skip Phase 2 entirely — the response text
+	// was already streamed to the user during Phase 1.
+	if noCodeNeeded || strings.Contains(strings.ToUpper(result), "NO_CODE_NEEDED") {
+		responseText := strings.TrimSpace(
+			strings.ReplaceAll(strings.ReplaceAll(result, "NO_CODE_NEEDED", ""), "no_code_needed", ""),
+		)
+		slog.Info("Chat tool phase: NO_CODE_NEEDED, skipping Phase 2",
+			"result_preview", truncate(responseText, 120),
+		)
+		return chatToolPhaseResult{
+			SkipPhase2:   true,
+			ResponseText: responseText,
+		}
 	}
 
 	if collectedContext.Len() == 0 {
