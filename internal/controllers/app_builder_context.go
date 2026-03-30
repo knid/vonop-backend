@@ -105,10 +105,17 @@ func buildImportGraph(fileMap map[string]string) *importGraph {
 	return g
 }
 
+// maxExpandFileSize is the maximum character size for a file added by graph
+// expansion. Files larger than this (e.g. SDK wrappers, i18n dictionaries)
+// are skipped during expansion — the LLM can still select them explicitly.
+const maxExpandFileSize = 15000 // ~3,750 tokens
+
 // expandWithDependencies takes a set of selected files and expands it with
 // 1-hop imports (files they depend on) and 1-hop importers (files that depend
 // on them). Caps expansion to prevent blowing up context.
-func (g *importGraph) expandWithDependencies(selected map[string]bool, maxTotal int) map[string]bool {
+// fileMap is used to skip oversized files during expansion (e.g. SDK wrappers).
+// Pass nil to disable size filtering (backward-compatible).
+func (g *importGraph) expandWithDependencies(selected map[string]bool, maxTotal int, fileMap map[string]string) map[string]bool {
 	expanded := make(map[string]bool, len(selected)*2)
 	for p := range selected {
 		expanded[p] = true
@@ -120,6 +127,11 @@ func (g *importGraph) expandWithDependencies(selected map[string]bool, maxTotal 
 			if len(expanded) >= maxTotal {
 				return expanded
 			}
+			// Skip oversized files during graph expansion — they bloat context
+			// without being directly relevant. The LLM can still select them.
+			if fileMap != nil && len(fileMap[dep]) > maxExpandFileSize {
+				continue
+			}
 			expanded[dep] = true
 		}
 	}
@@ -129,6 +141,9 @@ func (g *importGraph) expandWithDependencies(selected map[string]bool, maxTotal 
 		for imp := range g.importers[p] {
 			if len(expanded) >= maxTotal {
 				return expanded
+			}
+			if fileMap != nil && len(fileMap[imp]) > maxExpandFileSize {
+				continue
 			}
 			expanded[imp] = true
 		}
@@ -477,11 +492,35 @@ func extractFileSummary(content string) string {
 
 // --- Helper: build project context (system block 2) ---
 
-// selectContextFiles uses a fast LLM call to pick the most relevant files for
-// the user's current message. Returns a set of file paths to inline. On error
-// or when there are few files, returns all paths (safe fallback).
+// contextFileSelection holds the result of file selection, preserving which
+// files were directly chosen by the LLM (primary) vs added by graph expansion
+// (secondary). buildProjectContextForChat uses this to prioritize primary files
+// when the character budget is tight.
+type contextFileSelection struct {
+	// All returns the full set of selected files (primary + secondary).
+	primary   map[string]bool // LLM-selected + forced files
+	secondary map[string]bool // added by import graph expansion
+}
 
-func (c *Controller) selectContextFiles(ctx context.Context, provider *utils.LLMProvider, fileMap map[string]string, userMessage string, recentMessages []models.AppConversationMessage) map[string]bool {
+// All returns the combined set of primary and secondary files.
+func (s contextFileSelection) All() map[string]bool {
+	all := make(map[string]bool, len(s.primary)+len(s.secondary))
+	for p := range s.primary {
+		all[p] = true
+	}
+	for p := range s.secondary {
+		all[p] = true
+	}
+	return all
+}
+
+// selectContextFiles uses a fast LLM call to pick the most relevant files for
+// the user's current message. Returns a contextFileSelection that distinguishes
+// LLM-selected files (primary) from graph-expanded files (secondary) so the
+// context builder can prioritize primary files within the character budget.
+// On error or when there are few files, returns all paths as primary (safe fallback).
+
+func (c *Controller) selectContextFiles(ctx context.Context, provider *utils.LLMProvider, fileMap map[string]string, userMessage string, recentMessages []models.AppConversationMessage) contextFileSelection {
 	maxAutoInline := c.RemoteConfig.GetInt(remoteconfig.AIBuilderMaxAutoInline, remoteconfig.Global)
 
 	if len(fileMap) <= maxAutoInline {
@@ -489,7 +528,7 @@ func (c *Controller) selectContextFiles(ctx context.Context, provider *utils.LLM
 		for p := range fileMap {
 			all[p] = true
 		}
-		return all
+		return contextFileSelection{primary: all}
 	}
 
 	// Force-include files explicitly mentioned in error messages or user text.
@@ -548,7 +587,7 @@ Respond with ONLY a list of file paths, one per line. No explanation, no markdow
 		for p := range fileMap {
 			all[p] = true
 		}
-		return all
+		return contextFileSelection{primary: all}
 	}
 
 	selected := make(map[string]bool)
@@ -568,7 +607,7 @@ Respond with ONLY a list of file paths, one per line. No explanation, no markdow
 		for p := range fileMap {
 			all[p] = true
 		}
-		return all
+		return contextFileSelection{primary: all}
 	}
 
 	// Always include files extracted from error messages / user text
@@ -579,19 +618,32 @@ Respond with ONLY a list of file paths, one per line. No explanation, no markdow
 		}
 	}
 
+	// Snapshot primary selection before graph expansion
+	primary := make(map[string]bool, len(selected))
+	for p := range selected {
+		primary[p] = true
+	}
+
 	// Expand selection with 1-hop import dependencies and reverse importers.
 	// This catches files the LLM missed that are structurally connected to the
 	// selected files — e.g. a lib/config.ts imported by the selected component,
 	// or a page.tsx that imports the selected component (impact zone).
 	graph := buildImportGraph(fileMap)
-	beforeExpand := len(selected)
 	maxExpandedFiles := c.RemoteConfig.GetInt(remoteconfig.AIBuilderMaxExpandedFiles, remoteconfig.Global)
-	selected = graph.expandWithDependencies(selected, maxExpandedFiles)
+	expanded := graph.expandWithDependencies(selected, maxExpandedFiles, fileMap)
+
+	// Secondary files = expanded minus primary
+	secondary := make(map[string]bool)
+	for p := range expanded {
+		if !primary[p] {
+			secondary[p] = true
+		}
+	}
 
 	slog.Info("selectContextFiles: selected files for context",
-		"total", len(fileMap), "llm_selected", beforeExpand,
-		"after_graph_expand", len(selected))
-	return selected
+		"total", len(fileMap), "primary", len(primary),
+		"secondary", len(secondary))
+	return contextFileSelection{primary: primary, secondary: secondary}
 }
 
 // extractFilePathsFromMessage scans a user message for file paths that exist in
@@ -661,7 +713,7 @@ func (c *Controller) getProjectLogoURL(project *models.AppProject) string {
 }
 
 
-func (c *Controller) buildProjectContextForChat(project *models.AppProject, fileMap map[string]string, selectedFiles map[string]bool) string {
+func (c *Controller) buildProjectContextForChat(project *models.AppProject, fileMap map[string]string, selection contextFileSelection) string {
 	var sb strings.Builder
 
 	sb.WriteString(fmt.Sprintf("App: %s (slug: %s)\n", project.Name, project.Slug))
@@ -721,18 +773,18 @@ func (c *Controller) buildProjectContextForChat(project *models.AppProject, file
 		// Inline selected files with a character budget to avoid exceeding context limits.
 		// ~4 chars ≈ 1 token; 150k chars ≈ 37.5k tokens, leaving room for system prompt,
 		// conversation history, and tool context within a 200k token window.
+		// Primary files (LLM-selected) are inlined first; secondary files (graph-expanded)
+		// use the remaining budget. This prevents large dependency files from crowding out
+		// the files the LLM actually chose as relevant.
 		maxFileChars := c.RemoteConfig.GetInt(remoteconfig.AIBuilderMaxFileChars, remoteconfig.Global)
 		usedChars := 0
 		sb.WriteString("\nFile contents (relevant to current task):\n")
-		for _, fp := range paths {
-			if !selectedFiles[fp] {
-				continue
-			}
+
+		inlineFile := func(fp string) {
 			content := fileMap[fp]
 			if strings.Contains(content, fallbackSentinel) || strings.Contains(content, "Generation failed") {
 				sb.WriteString(fmt.Sprintf("\n--- %s [BROKEN — needs regeneration] ---\n", fp))
 			} else if usedChars+len(content) > maxFileChars {
-				// Truncate to stay within budget
 				remaining := maxFileChars - usedChars
 				if remaining > 500 {
 					sb.WriteString(fmt.Sprintf("\n--- %s [TRUNCATED — %d/%d chars] ---\n%s\n", fp, remaining, len(content), content[:remaining]))
@@ -744,6 +796,21 @@ func (c *Controller) buildProjectContextForChat(project *models.AppProject, file
 				sb.WriteString(fmt.Sprintf("\n--- %s ---\n%s\n", fp, content))
 				usedChars += len(content)
 			}
+		}
+
+		// Pass 1: inline primary files (LLM-selected) — these get budget priority
+		for _, fp := range paths {
+			if !selection.primary[fp] {
+				continue
+			}
+			inlineFile(fp)
+		}
+		// Pass 2: inline secondary files (graph-expanded) with remaining budget
+		for _, fp := range paths {
+			if !selection.secondary[fp] {
+				continue
+			}
+			inlineFile(fp)
 		}
 	}
 
