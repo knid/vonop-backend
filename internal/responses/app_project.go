@@ -19,7 +19,6 @@ type AppProjectResponse struct {
 	Slug        string         `json:"slug"`
 	Prompt      string         `json:"prompt"`
 	ProjectType string         `json:"project_type"`
-	Theme       map[string]any `json:"theme"`
 	Settings    map[string]any `json:"settings"`
 	Status      string         `json:"status"`
 	HasStore      bool           `json:"has_store"`

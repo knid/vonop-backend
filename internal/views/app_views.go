@@ -77,9 +77,6 @@ func (v *HttpViews) GenerateAppFromImage(w http.ResponseWriter, r *http.Request)
 	v.Controller.ApplyStructureToProject(project, structure)
 	v.Controller.DB.UpdateAppProject(project)
 
-	var theme map[string]any
-	json.Unmarshal(project.Theme, &theme)
-
 	utils.JSONResponse(w, responses.AppProjectDetailResponse{
 		AppProjectResponse: responses.AppProjectResponse{
 			ID:          project.ID,
@@ -87,7 +84,6 @@ func (v *HttpViews) GenerateAppFromImage(w http.ResponseWriter, r *http.Request)
 			Slug:        project.Slug,
 			Prompt:      project.Prompt,
 			ProjectType: project.ProjectType,
-			Theme:       theme,
 			Settings:    project.Settings,
 			Status:      project.Status,
 			CreatedAt:   project.CreatedAt,
@@ -177,9 +173,6 @@ func (v *HttpViews) GetApps(w http.ResponseWriter, r *http.Request) {
 
 	var resp []responses.AppProjectResponse
 	for _, p := range projects {
-		var theme map[string]any
-		json.Unmarshal(p.Theme, &theme)
-
 		hasStore := false
 		store, err := v.Controller.GetStore(p.ID.String())
 		if err == nil && store != nil {
@@ -206,7 +199,6 @@ func (v *HttpViews) GetApps(w http.ResponseWriter, r *http.Request) {
 			Slug:          p.Slug,
 			Prompt:        p.Prompt,
 			ProjectType:   p.ProjectType,
-			Theme:         theme,
 			Settings:      p.Settings,
 			Status:        status,
 			HasStore:      hasStore,
@@ -233,9 +225,6 @@ func (v *HttpViews) GetApp(w http.ResponseWriter, r *http.Request) {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
 		return
 	}
-
-	var theme map[string]any
-	json.Unmarshal(project.Theme, &theme)
 
 	hasStore := false
 	store, storeErr := v.Controller.GetStore(project.ID.String())
@@ -287,7 +276,6 @@ func (v *HttpViews) GetApp(w http.ResponseWriter, r *http.Request) {
 			Slug:          project.Slug,
 			Prompt:        project.Prompt,
 			ProjectType:   project.ProjectType,
-			Theme:         theme,
 			Settings:      project.Settings,
 			Status:        project.Status,
 			HasStore:      hasStore,
@@ -320,9 +308,6 @@ func (v *HttpViews) UpdateApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var theme map[string]any
-	json.Unmarshal(project.Theme, &theme)
-
 	v.Controller.TrackUserEvent(user, "app_updated", posthog.NewProperties().
 		Set("app_id", project.ID.String()))
 
@@ -332,7 +317,6 @@ func (v *HttpViews) UpdateApp(w http.ResponseWriter, r *http.Request) {
 		Slug:        project.Slug,
 		Prompt:      project.Prompt,
 		ProjectType: project.ProjectType,
-		Theme:       theme,
 		Settings:    project.Settings,
 		Status:      project.Status,
 		CreatedAt:   project.CreatedAt,
@@ -852,16 +836,12 @@ func (v *HttpViews) ConvertToMobile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var theme map[string]any
-	json.Unmarshal(clone.Theme, &theme)
-
 	utils.JSONResponse(w, responses.AppProjectResponse{
 		ID:          clone.ID,
 		Name:        clone.Name,
 		Slug:        clone.Slug,
 		Prompt:      clone.Prompt,
 		ProjectType: clone.ProjectType,
-		Theme:       theme,
 		Settings:    clone.Settings,
 		Status:      clone.Status,
 		CreatedAt:   clone.CreatedAt,
@@ -1107,9 +1087,6 @@ func (v *HttpViews) GetAppInit(w http.ResponseWriter, r *http.Request) {
 	wg.Wait()
 
 	// Build project detail response
-	var theme map[string]any
-	json.Unmarshal(project.Theme, &theme)
-
 	var fileResp []responses.AppFileResponse
 	for path, content := range fileMap {
 		if path == ".env.local" {
@@ -1129,7 +1106,6 @@ func (v *HttpViews) GetAppInit(w http.ResponseWriter, r *http.Request) {
 			Slug:          project.Slug,
 			Prompt:        project.Prompt,
 			ProjectType:   project.ProjectType,
-			Theme:         theme,
 			Settings:      project.Settings,
 			Status:        project.Status,
 			HasStore:      hasStore,
