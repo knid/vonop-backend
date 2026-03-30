@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -206,7 +207,7 @@ func (c *Controller) AddAICredits(user *models.User, amount int, action string, 
 // GrantSubscriptionCredits grants the plan's monthly credits when a user first subscribes.
 // If a credits balance already exists (created before subscribing), it resets the period
 // to align with the new subscription and adds the plan's monthly credits.
-// Safe to call multiple times — uses the "subscription_grant" action as a dedup key.
+// Safe to call multiple times — uses a transaction with FOR UPDATE to prevent double grants.
 func (c *Controller) GrantSubscriptionCredits(user *models.User) {
 	limits, err := c.DB.GetStandartUserLimitsByUser(user)
 	if err != nil || limits.MonthlyAICredits <= 0 {
@@ -219,31 +220,51 @@ func (c *Controller) GrantSubscriptionCredits(user *models.User) {
 		return
 	}
 
-	// Check if we already granted subscription credits (dedup)
-	existing, _ := c.DB.GetAICreditTransactions(user.ID.String(), 50)
-	for _, tx := range existing {
-		if tx.Action == "subscription_grant" {
-			return // already granted
+	err = c.DB.RunInTx(func(tx bun.Tx) error {
+		// Lock the balance row to serialize concurrent grant attempts
+		var locked models.AICreditsBalance
+		if err := tx.NewRaw(
+			"SELECT * FROM ai_credits_balances WHERE id = ? FOR UPDATE",
+			balance.ID,
+		).Scan(context.Background(), &locked); err != nil {
+			return fmt.Errorf("lock balance: %w", err)
 		}
-	}
 
-	// Reset period to align with the new subscription start and grant credits
-	periodStart, periodEnd := utils.BillingPeriod(user.SubscriptionStartAt, time.Now())
-	balance.PeriodStart = periodStart
-	balance.PeriodEnd = periodEnd
-	balance.Balance += limits.MonthlyAICredits
-	if _, err := c.DB.UpdateAICreditsBalance(balance); err != nil {
-		slog.Error("failed to update credits balance for subscription grant", "error", err, "user_id", user.ID)
+		// Check for existing subscription_grant inside the transaction
+		var count int
+		if err := tx.NewRaw(
+			"SELECT COUNT(*) FROM ai_credit_transactions WHERE user_id = ? AND action = 'subscription_grant'",
+			user.ID,
+		).Scan(context.Background(), &count); err != nil {
+			return fmt.Errorf("check existing grant: %w", err)
+		}
+		if count > 0 {
+			return nil // already granted
+		}
+
+		// Reset period to align with the new subscription start and grant credits
+		periodStart, periodEnd := utils.BillingPeriod(user.SubscriptionStartAt, time.Now())
+		if _, err := tx.NewRaw(
+			"UPDATE ai_credits_balances SET balance = balance + ?, period_start = ?, period_end = ?, updated_at = NOW() WHERE id = ?",
+			limits.MonthlyAICredits, periodStart, periodEnd, balance.ID,
+		).Exec(context.Background()); err != nil {
+			return fmt.Errorf("update balance: %w", err)
+		}
+
+		if _, err := c.DB.CreateAICreditTransactionTx(tx, &models.AICreditTransaction{
+			UserID:    user.ID,
+			Amount:    limits.MonthlyAICredits,
+			Action:    "subscription_grant",
+			Reference: user.SubscriptionID.String(),
+		}); err != nil {
+			return fmt.Errorf("log grant: %w", err)
+		}
+
+		return nil
+	})
+	if err != nil {
+		slog.Error("failed to grant subscription credits", "error", err, "user_id", user.ID)
 		return
-	}
-
-	if _, err := c.DB.CreateAICreditTransaction(&models.AICreditTransaction{
-		UserID:    user.ID,
-		Amount:    limits.MonthlyAICredits,
-		Action:    "subscription_grant",
-		Reference: user.SubscriptionID.String(),
-	}); err != nil {
-		slog.Error("failed to log subscription credit grant", "error", err, "user_id", user.ID)
 	}
 
 	slog.Info("subscription credits granted", "user_id", user.ID, "credits", limits.MonthlyAICredits)
