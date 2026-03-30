@@ -1059,11 +1059,31 @@ func validateReadOnlySQL(sqlQuery string) error {
 	return nil
 }
 
-// removeStringLiterals strips single-quoted and dollar-quoted string literals from SQL for keyword checking.
+// removeStringLiterals strips single-quoted, dollar-quoted string literals and SQL comments from SQL for keyword checking.
 func removeStringLiterals(sql string) string {
 	var result strings.Builder
 	inString := false
 	for i := 0; i < len(sql); i++ {
+		// Strip block comments: /* ... */
+		if !inString && i+1 < len(sql) && sql[i] == '/' && sql[i+1] == '*' {
+			end := strings.Index(sql[i+2:], "*/")
+			if end >= 0 {
+				i += 2 + end + 1 // skip past closing */
+				continue
+			}
+			// Unclosed block comment — strip the rest
+			break
+		}
+		// Strip line comments: -- ...
+		if !inString && i+1 < len(sql) && sql[i] == '-' && sql[i+1] == '-' {
+			nl := strings.IndexByte(sql[i:], '\n')
+			if nl >= 0 {
+				i += nl // loop will increment past the newline
+				continue
+			}
+			// No newline — comment runs to end
+			break
+		}
 		// Handle dollar-quoted strings: $tag$...$tag$
 		if sql[i] == '$' && !inString {
 			// Find the end of the opening tag
