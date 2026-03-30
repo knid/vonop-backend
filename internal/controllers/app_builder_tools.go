@@ -36,8 +36,10 @@ var sqlBlockedKeywordRegexes = func() map[string]*regexp.Regexp {
 }()
 
 type chatToolPhaseResult struct {
-	Context     string   // Text context gathered by tools
-	Screenshots []string // Base64 data URIs of screenshots captured (for vision)
+	Context      string   // Text context gathered by tools
+	Screenshots  []string // Base64 data URIs of screenshots captured (for vision)
+	SkipPhase2   bool     // true when Phase 1 fully handled the request (no code edits needed)
+	ResponseText string   // Phase 1's final text response (used as assistant message when SkipPhase2)
 }
 
 func (c *Controller) runChatToolPhase(
@@ -162,7 +164,8 @@ CRITICAL LANGUAGE RULE: ALL content you generate (product names, descriptions, c
 - If the user's message is a normal chat request (code changes, questions, fixes) that doesn't need any of the above tools, respond with ONLY the exact text: NO_TOOLS_NEEDED — nothing else. Do NOT write explanations, summaries, plans, or conversational responses. Your ONLY outputs should be tool calls OR the literal text "NO_TOOLS_NEEDED".
 - You can call multiple tools if needed (e.g. generate_image + install_package).
 - IMPORTANT: If the user has attached images/screenshots, these are VISUAL REFERENCES showing how they want the app to look. Do NOT call generate_image or take_screenshot because of attached images. These reference images will be passed directly to the code-generation model. Only call generate_image if the user EXPLICITLY asks to create/generate new images (e.g. "generate a logo", "create an illustration").
-- IMPORTANT: Before calling any tool, ALWAYS write a brief message (1-2 sentences, in the same language as the user's message) explaining what you're about to do. For example: "Let me check what's currently in the database...", "I'll generate a custom image for this...", "Looking at the website to understand the design...". This text is streamed to the user in real time so they know what's happening. Never call a tool without explaining first.`
+- IMPORTANT: Before calling any tool, ALWAYS write a brief message (1-2 sentences, in the same language as the user's message) explaining what you're about to do. For example: "Let me check what's currently in the database...", "I'll generate a custom image for this...", "Looking at the website to understand the design...". This text is streamed to the user in real time so they know what's happening. Never call a tool without explaining first.
+- IMPORTANT: After completing ALL tool calls, decide whether the user's request ALSO needs code file changes (editing .tsx/.ts/.css files). If the tools fully handled everything (e.g. product/price updates, database inserts, env var changes, image generation with no code to update) and NO code edits are needed, write a helpful summary response for the user in their language — do NOT include CODE_CHANGES_NEEDED. If the user's request ALSO requires code changes beyond what the tools did, end your final message with CODE_CHANGES_NEEDED on its own line.`
 
 	// Build condensed conversation history so Phase 1 understands context.
 	// Without this, a message like "Unauthorized?" is meaningless to Haiku
@@ -350,7 +353,36 @@ CRITICAL LANGUAGE RULE: ALL content you generate (product names, descriptions, c
 		return mkResult("Web search context:\n" + trimmed)
 	}
 
-	return mkResult(collectedContext.String())
+	// Tools were called and produced context. Check if the fast model
+	// determined that code changes are still needed after the tool calls.
+	codeChangesNeeded := strings.Contains(strings.ToUpper(result), "CODE_CHANGES_NEEDED")
+	if codeChangesNeeded {
+		// Strip the signal from the result text
+		cleaned := strings.TrimSpace(
+			strings.ReplaceAll(strings.ReplaceAll(result, "CODE_CHANGES_NEEDED", ""), "code_changes_needed", ""),
+		)
+		// Stream any remaining text that wasn't flushed yet
+		if cleaned != "" {
+			phase1Mu.Lock()
+			if !phase1TextFlushed {
+				sendEvent("chat_text", responses.ChatTextEvent{Chunk: cleaned})
+			}
+			phase1Mu.Unlock()
+		}
+		return mkResult(collectedContext.String())
+	}
+
+	// Phase 1 fully handled the request — skip Phase 2.
+	slog.Info("Chat tool phase: data-only operation, skipping Phase 2",
+		"result_preview", truncate(result, 120),
+		"context_len", collectedContext.Len(),
+	)
+	return chatToolPhaseResult{
+		Context:      collectedContext.String(),
+		Screenshots:  screenshots,
+		SkipPhase2:   true,
+		ResponseText: strings.TrimSpace(result),
+	}
 }
 
 // preGenContext holds the results of the pre-generation web search + screenshot phase.

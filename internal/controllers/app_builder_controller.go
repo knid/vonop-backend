@@ -828,130 +828,141 @@ func (c *Controller) StreamBuildApp(
 		// before the main code-gen call. If no tools are called the phase is a
 		// near-instant no-op.
 		toolResult := c.runChatToolPhase(ctx, project, provider, repo, message, imageURLs, fileMap, sendEvent, userLimits, messages)
-		if toolResult.Context != "" {
-			// Phase 1 tools may have modified files (e.g. run_migrations regenerates
-			// lib/schema.ts, manage_env_vars updates .env.local, install_package
-			// modifies package.json). Rebuild the project context so Phase 2 sees
-			// the latest file state instead of the stale pre-Phase-1 snapshot.
-			refreshedContext := c.buildProjectContextForChat(project, fileMap, selectedFiles)
-			llmMessages[1] = utils.Message{Role: "system", Content: refreshedContext}
 
-			// Inject tool-gathered context as a system message before the user message
-			insertIdx := len(llmMessages) - 1 // before last user message
-			if insertIdx < 0 {
-				insertIdx = 0
-			}
-			contextMsg := utils.Message{
-				Role:    "system",
-				Content: toolResult.Context,
-			}
-			llmMessages = append(llmMessages[:insertIdx], append([]utils.Message{contextMsg}, llmMessages[insertIdx:]...)...)
-		}
-		// Attach screenshots as vision images on the last user message
-		if len(toolResult.Screenshots) > 0 && provider.SupportsVision() {
-			lastIdx := len(llmMessages) - 1
-			if lastIdx >= 0 && llmMessages[lastIdx].Role == "user" {
-				llmMessages[lastIdx].Images = append(llmMessages[lastIdx].Images, toolResult.Screenshots...)
-			}
-		}
-
-		// --- Phase 2: main model single-shot code generation ---
-		// Signal phase transition so the frontend can clear Phase 1 streaming text
-		// and avoid mixing explanatory text with code-gen output.
-		sendEvent("phase_change", map[string]string{"phase": "codegen"})
-
-		slog.Info("Calling LLM for chat (file-block path)",
-			"model", model,
-			"project_id", project.ID,
-			"message_count", len(llmMessages),
-			"has_tool_context", toolResult.Context != "",
-		)
-
-		_, chatErr := utils.StreamTextFromLLMWithMessages(
-			ctx, model, llmMessages, provider,
-			func(chunk string) { parser.Feed(chunk) },
-			func(chunk string) {
-				if thinkingStart.IsZero() {
-					thinkingStart = time.Now()
-				}
-				thinkingBuf.WriteString(chunk)
-				sendEvent("chat_thinking", responses.ChatThinkingEvent{Chunk: chunk})
-			},
-			utils.StreamTextConfig{
-				MaxTokens: 65536,
-				Reasoning: reasoning,
-				OnRetry: func(attempt int, reason string) {
-					sendEvent("progress", responses.ProgressEvent{
-						Phase:   "generating_files",
-						Message: fmt.Sprintf("Retrying (attempt %d)...", attempt+1),
-					})
-				},
-			},
-		)
-		parser.Flush()
-		responseText = responseBuilder.String()
-
-		// If the LLM only output file blocks with no surrounding text,
-		// generate a minimal summary so the message isn't empty on reload.
-		if strings.TrimSpace(responseText) == "" && len(toolAppliedOps) > 0 {
-			var changedPaths []string
-			for _, op := range toolAppliedOps {
-				changedPaths = append(changedPaths, op.Path)
-			}
-			responseText = fmt.Sprintf("Updated %d file(s): %s", len(changedPaths), strings.Join(changedPaths, ", "))
-		}
-
-		if chatErr != nil && !errors.Is(chatErr, utils.ErrResponseTruncated) {
-			lastGenErr = chatErr
-			slog.Error("LLM chat call failed", "error", chatErr, "project_id", project.ID)
-
-			// Auto-rollback on failure
-			if preSnapshotID != "" && len(toolAppliedOps) > 0 {
-				slog.Info("Auto-rollback: restoring pre-snapshot after failed chat",
-					"project_id", project.ID,
-					"snapshot_id", preSnapshotID,
-					"partial_ops", len(toolAppliedOps),
-				)
-				if _, rollbackErr := repo.RevertAndCommit(preSnapshotID, "auto: rollback after failure"); rollbackErr != nil {
-					slog.Error("Auto-rollback failed", "error", rollbackErr, "project_id", project.ID)
-				} else {
-					sendEvent("rollback", map[string]any{
-						"snapshot_id": preSnapshotID,
-						"reason":      "generation_failed",
-						"rolled_back":     len(toolAppliedOps),
-						"resync_required": true,
-					})
-				}
-			}
-
-			messages = append(messages, models.AppConversationMessage{
-				ID:        uuid.New().String(),
-				Role:      "assistant",
-				Content:   "Sorry, I couldn't process your request. Please try again.",
-				Timestamp: time.Now().Unix(),
-			})
-			if msgJSON, err := json.Marshal(messages); err != nil {
-				slog.Error("failed to marshal messages after LLM error", "error", err, "conv_id", conv.ID)
-			} else {
-				conv.Messages = msgJSON
-				if _, err := c.DB.UpdateAppConversation(conv); err != nil {
-					slog.Error("failed to save conversation after LLM error", "error", err, "conv_id", conv.ID)
-				}
-			}
-			sendError("ai", "failed to generate changes. try again please")
-			return
-		}
-		if errors.Is(chatErr, utils.ErrResponseTruncated) {
-			slog.Warn("Chat codegen truncated (output token limit reached)",
+		if toolResult.SkipPhase2 {
+			// Phase 1 fully handled the request (data-only operation).
+			// Use Phase 1's streamed text as the final response.
+			slog.Info("Skipping Phase 2: data-only operation handled by Phase 1",
 				"project_id", project.ID,
-				"files_generated", len(toolAppliedOps),
-				"truncated_file", parser.TruncatedPath,
+				"response_len", len(toolResult.ResponseText),
 			)
-			if parser.TruncatedPath != "" {
-				sendEvent("truncation_warning", map[string]any{
-					"truncated_file":  parser.TruncatedPath,
-					"files_completed": len(toolAppliedOps),
+			responseText = toolResult.ResponseText
+		} else {
+			if toolResult.Context != "" {
+				// Phase 1 tools may have modified files (e.g. run_migrations regenerates
+				// lib/schema.ts, manage_env_vars updates .env.local, install_package
+				// modifies package.json). Rebuild the project context so Phase 2 sees
+				// the latest file state instead of the stale pre-Phase-1 snapshot.
+				refreshedContext := c.buildProjectContextForChat(project, fileMap, selectedFiles)
+				llmMessages[1] = utils.Message{Role: "system", Content: refreshedContext}
+
+				// Inject tool-gathered context as a system message before the user message
+				insertIdx := len(llmMessages) - 1 // before last user message
+				if insertIdx < 0 {
+					insertIdx = 0
+				}
+				contextMsg := utils.Message{
+					Role:    "system",
+					Content: toolResult.Context,
+				}
+				llmMessages = append(llmMessages[:insertIdx], append([]utils.Message{contextMsg}, llmMessages[insertIdx:]...)...)
+			}
+			// Attach screenshots as vision images on the last user message
+			if len(toolResult.Screenshots) > 0 && provider.SupportsVision() {
+				lastIdx := len(llmMessages) - 1
+				if lastIdx >= 0 && llmMessages[lastIdx].Role == "user" {
+					llmMessages[lastIdx].Images = append(llmMessages[lastIdx].Images, toolResult.Screenshots...)
+				}
+			}
+
+			// --- Phase 2: main model single-shot code generation ---
+			// Signal phase transition so the frontend can clear Phase 1 streaming text
+			// and avoid mixing explanatory text with code-gen output.
+			sendEvent("phase_change", map[string]string{"phase": "codegen"})
+
+			slog.Info("Calling LLM for chat (file-block path)",
+				"model", model,
+				"project_id", project.ID,
+				"message_count", len(llmMessages),
+				"has_tool_context", toolResult.Context != "",
+			)
+
+			_, chatErr := utils.StreamTextFromLLMWithMessages(
+				ctx, model, llmMessages, provider,
+				func(chunk string) { parser.Feed(chunk) },
+				func(chunk string) {
+					if thinkingStart.IsZero() {
+						thinkingStart = time.Now()
+					}
+					thinkingBuf.WriteString(chunk)
+					sendEvent("chat_thinking", responses.ChatThinkingEvent{Chunk: chunk})
+				},
+				utils.StreamTextConfig{
+					MaxTokens: 65536,
+					Reasoning: reasoning,
+					OnRetry: func(attempt int, reason string) {
+						sendEvent("progress", responses.ProgressEvent{
+							Phase:   "generating_files",
+							Message: fmt.Sprintf("Retrying (attempt %d)...", attempt+1),
+						})
+					},
+				},
+			)
+			parser.Flush()
+			responseText = responseBuilder.String()
+
+			// If the LLM only output file blocks with no surrounding text,
+			// generate a minimal summary so the message isn't empty on reload.
+			if strings.TrimSpace(responseText) == "" && len(toolAppliedOps) > 0 {
+				var changedPaths []string
+				for _, op := range toolAppliedOps {
+					changedPaths = append(changedPaths, op.Path)
+				}
+				responseText = fmt.Sprintf("Updated %d file(s): %s", len(changedPaths), strings.Join(changedPaths, ", "))
+			}
+
+			if chatErr != nil && !errors.Is(chatErr, utils.ErrResponseTruncated) {
+				lastGenErr = chatErr
+				slog.Error("LLM chat call failed", "error", chatErr, "project_id", project.ID)
+
+				// Auto-rollback on failure
+				if preSnapshotID != "" && len(toolAppliedOps) > 0 {
+					slog.Info("Auto-rollback: restoring pre-snapshot after failed chat",
+						"project_id", project.ID,
+						"snapshot_id", preSnapshotID,
+						"partial_ops", len(toolAppliedOps),
+					)
+					if _, rollbackErr := repo.RevertAndCommit(preSnapshotID, "auto: rollback after failure"); rollbackErr != nil {
+						slog.Error("Auto-rollback failed", "error", rollbackErr, "project_id", project.ID)
+					} else {
+						sendEvent("rollback", map[string]any{
+							"snapshot_id": preSnapshotID,
+							"reason":      "generation_failed",
+							"rolled_back":     len(toolAppliedOps),
+							"resync_required": true,
+						})
+					}
+				}
+
+				messages = append(messages, models.AppConversationMessage{
+					ID:        uuid.New().String(),
+					Role:      "assistant",
+					Content:   "Sorry, I couldn't process your request. Please try again.",
+					Timestamp: time.Now().Unix(),
 				})
+				if msgJSON, err := json.Marshal(messages); err != nil {
+					slog.Error("failed to marshal messages after LLM error", "error", err, "conv_id", conv.ID)
+				} else {
+					conv.Messages = msgJSON
+					if _, err := c.DB.UpdateAppConversation(conv); err != nil {
+						slog.Error("failed to save conversation after LLM error", "error", err, "conv_id", conv.ID)
+					}
+				}
+				sendError("ai", "failed to generate changes. try again please")
+				return
+			}
+			if errors.Is(chatErr, utils.ErrResponseTruncated) {
+				slog.Warn("Chat codegen truncated (output token limit reached)",
+					"project_id", project.ID,
+					"files_generated", len(toolAppliedOps),
+					"truncated_file", parser.TruncatedPath,
+				)
+				if parser.TruncatedPath != "" {
+					sendEvent("truncation_warning", map[string]any{
+						"truncated_file":  parser.TruncatedPath,
+						"files_completed": len(toolAppliedOps),
+					})
+				}
 			}
 		}
 	}
