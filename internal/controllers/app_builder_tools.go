@@ -912,7 +912,7 @@ func (c *Controller) executeChatRunMigrations(
 			continue
 		}
 		upperStmt := strings.ToUpper(stripped)
-		if !strings.HasPrefix(upperStmt, "ALTER") && !strings.HasPrefix(upperStmt, "CREATE") && !strings.HasPrefix(upperStmt, "DO") {
+		if !strings.HasPrefix(upperStmt, "ALTER") && !strings.HasPrefix(upperStmt, "CREATE") {
 			return fmt.Sprintf("Error: only DDL statements (ALTER TABLE, CREATE TABLE) are allowed, found: %.60s", trimmed), nil
 		}
 	}
