@@ -4,3 +4,4 @@ storage/private
 .env.dev
 .DS_Store
 docs/superpowers/
+.superpowers/
