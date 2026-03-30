@@ -14,6 +14,9 @@ var fileTagRegex = regexp.MustCompile(`<file\s+path="([^"]+)"\s*>`)
 // deleteTagRegex matches <delete path="..."/> self-closing tags.
 var deleteTagRegex = regexp.MustCompile(`<delete\s+path="([^"]+)"\s*/>`)
 
+// editTagRegex matches <edit path="..."> opening tags.
+var editTagRegex = regexp.MustCompile(`<edit\s+path="([^"]+)"\s*>`)
+
 // FileStreamParser parses `<file path="...">content</file>` blocks from a
 // text stream incrementally. Non-file text is emitted via OnText; completed
 // file blocks are emitted via OnFile.
@@ -30,6 +33,14 @@ type FileStreamParser struct {
 	currentPath string
 	fileContent strings.Builder
 
+	// Edit block state
+	inEditBlock    bool
+	editPath       string
+	inSearch       bool
+	inReplace      bool
+	searchContent  strings.Builder
+	replaceContent strings.Builder
+
 	// DiscardIncomplete, when true, causes Flush() to discard any file
 	// block that was still open when the stream ended (e.g. LLM timeout).
 	DiscardIncomplete bool
@@ -44,6 +55,9 @@ type FileStreamParser struct {
 	OnDelete func(path string)
 	// OnText is called for text outside of file blocks.
 	OnText func(text string)
+	// OnEdit is called when a complete </edit> closing tag is found.
+	// path is the file to edit, search is the text to find, replace is the replacement.
+	OnEdit func(path, search, replace string)
 }
 
 // Feed processes an incremental chunk of streamed text.
@@ -94,6 +108,9 @@ func (p *FileStreamParser) Feed(chunk string) {
 			p.currentPath = ""
 			p.buffer = p.buffer[closeIdx+len("</file>"):]
 			// Continue loop to process remaining buffer
+		} else if p.inEditBlock {
+			p.processEditBlock()
+			return
 		} else {
 			// Check for <delete path="..."/> tags first
 			if delLoc := deleteTagRegex.FindStringIndex(p.buffer); delLoc != nil {
@@ -112,6 +129,32 @@ func (p *FileStreamParser) Feed(chunk string) {
 				continue
 			}
 
+			// Check for <edit path="..."> tags
+			if editLoc := editTagRegex.FindStringIndex(p.buffer); editLoc != nil {
+				// Check if an <edit> tag comes before any <file> tag
+				fileLoc := fileTagRegex.FindStringIndex(p.buffer)
+				if fileLoc == nil || editLoc[0] < fileLoc[0] {
+					// Emit text before the edit tag
+					if editLoc[0] > 0 {
+						before := p.buffer[:editLoc[0]]
+						if p.OnText != nil && before != "" {
+							p.OnText(before)
+						}
+					}
+					match := editTagRegex.FindStringSubmatch(p.buffer[editLoc[0]:editLoc[1]])
+					if len(match) >= 2 {
+						p.editPath = match[1]
+						p.inEditBlock = true
+						p.searchContent.Reset()
+						p.replaceContent.Reset()
+						p.inSearch = false
+						p.inReplace = false
+						p.buffer = p.buffer[editLoc[1]:]
+						continue
+					}
+				}
+			}
+
 			// Look for opening <file path="..."> tag
 			loc := fileTagRegex.FindStringIndex(p.buffer)
 			if loc == nil {
@@ -128,6 +171,10 @@ func (p *FileStreamParser) Feed(chunk string) {
 					// indefinite buffering (e.g. "a < b" in explanatory text).
 					isPartialFileTag := strings.HasPrefix(tail, "<f") ||
 						strings.HasPrefix(tail, "<F") ||
+						strings.HasPrefix(tail, "<e") ||
+						strings.HasPrefix(tail, "<E") ||
+						strings.HasPrefix(tail, "<d") ||
+						strings.HasPrefix(tail, "<D") ||
 						tail == "<"
 					// B68: If the tail looks like a partial file tag but is
 					// longer than any valid <file path="..."> or
@@ -186,6 +233,16 @@ func (p *FileStreamParser) Feed(chunk string) {
 
 // Flush emits any remaining buffered content when the stream ends.
 func (p *FileStreamParser) Flush() {
+	if p.inEditBlock {
+		slog.Warn("FileStreamParser: discarding incomplete edit block (stream truncated)",
+			"path", p.editPath)
+		p.searchContent.Reset()
+		p.replaceContent.Reset()
+		p.inEditBlock = false
+		p.inSearch = false
+		p.inReplace = false
+		p.editPath = ""
+	}
 	if p.inFileBlock {
 		if p.DiscardIncomplete {
 			// Stream ended mid-file — discard incomplete content
@@ -272,5 +329,74 @@ func (p *FileStreamParser) findRealCloseTag() int {
 		}
 
 		return idx
+	}
+}
+
+// processEditBlock processes buffer content while inside an <edit> block.
+// Handles the <search>...</search> and <replace>...</replace> sub-blocks,
+// and emits OnEdit when </edit> is found.
+func (p *FileStreamParser) processEditBlock() {
+	for {
+		if p.inSearch {
+			closeIdx := strings.Index(p.buffer, "</search>")
+			if closeIdx == -1 {
+				if len(p.buffer) > 9 {
+					p.searchContent.WriteString(p.buffer[:len(p.buffer)-9])
+					p.buffer = p.buffer[len(p.buffer)-9:]
+				}
+				return
+			}
+			p.searchContent.WriteString(p.buffer[:closeIdx])
+			p.inSearch = false
+			p.buffer = p.buffer[closeIdx+len("</search>"):]
+			continue
+		}
+
+		if p.inReplace {
+			closeIdx := strings.Index(p.buffer, "</replace>")
+			if closeIdx == -1 {
+				if len(p.buffer) > 10 {
+					p.replaceContent.WriteString(p.buffer[:len(p.buffer)-10])
+					p.buffer = p.buffer[len(p.buffer)-10:]
+				}
+				return
+			}
+			p.replaceContent.WriteString(p.buffer[:closeIdx])
+			p.inReplace = false
+			p.buffer = p.buffer[closeIdx+len("</replace>"):]
+			continue
+		}
+
+		if idx := strings.Index(p.buffer, "</edit>"); idx != -1 {
+			if p.OnEdit != nil {
+				search := p.searchContent.String()
+				search = strings.TrimPrefix(search, "\n")
+				search = strings.TrimSuffix(search, "\n")
+				replace := p.replaceContent.String()
+				replace = strings.TrimPrefix(replace, "\n")
+				replace = strings.TrimSuffix(replace, "\n")
+				p.OnEdit(p.editPath, search, replace)
+			}
+			p.searchContent.Reset()
+			p.replaceContent.Reset()
+			p.inEditBlock = false
+			p.editPath = ""
+			p.buffer = p.buffer[idx+len("</edit>"):]
+			return
+		}
+
+		if idx := strings.Index(p.buffer, "<search>"); idx != -1 {
+			p.inSearch = true
+			p.buffer = p.buffer[idx+len("<search>"):]
+			continue
+		}
+
+		if idx := strings.Index(p.buffer, "<replace>"); idx != -1 {
+			p.inReplace = true
+			p.buffer = p.buffer[idx+len("<replace>"):]
+			continue
+		}
+
+		return
 	}
 }
