@@ -353,6 +353,76 @@ func (v *HttpViews) SetAppSandbox(w http.ResponseWriter, r *http.Request) {
 	utils.JSONResponse(w, map[string]string{"sandbox_id": body.SandboxID}, http.StatusOK)
 }
 
+// POST /v2/apps/{appId}/sandbox/start
+func (v *HttpViews) StartAppSandbox(w http.ResponseWriter, r *http.Request) {
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	appID := chi.URLParam(r, "appId")
+	project, err := v.Controller.GetAppProject(appID, user)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	token, err := utils.ExtractTokenFromHeader(r)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+	result, err := v.Controller.E2BService.StartSandbox(token, appID)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+
+	// Save sandbox ID if we got one
+	if result.SandboxID != "" {
+		_ = v.Controller.DB.UpdateAppProjectSandboxID(project.ID.String(), result.SandboxID)
+	}
+
+	if result.Status == "error" {
+		utils.JSONResponse(w, result, http.StatusBadGateway)
+		return
+	}
+
+	utils.JSONResponse(w, result, http.StatusOK)
+}
+
+// GET /v2/apps/{appId}/sandbox/status
+func (v *HttpViews) GetAppSandboxStatus(w http.ResponseWriter, r *http.Request) {
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	appID := chi.URLParam(r, "appId")
+	project, err := v.Controller.GetAppProject(appID, user)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	if project.SandboxID == "" {
+		utils.JSONResponse(w, map[string]string{
+			"status":      "stopped",
+			"preview_url": "",
+			"sandbox_id":  "",
+		}, http.StatusOK)
+		return
+	}
+
+	utils.JSONResponse(w, map[string]string{
+		"status":      "ready",
+		"preview_url": v.Controller.E2BService.PreviewURL(project.SandboxID),
+		"sandbox_id":  project.SandboxID,
+	}, http.StatusOK)
+}
+
 // POST /v2/apps/{appId}/deploy/validate
 func (v *HttpViews) ValidateAppFiles(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
