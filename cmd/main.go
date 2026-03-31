@@ -30,6 +30,7 @@ import (
 	"github.com/knid/wemob/internal/services/neon"
 	"github.com/knid/wemob/internal/services/remoteconfig"
 	"github.com/knid/wemob/internal/services/secret"
+	e2bService "github.com/knid/wemob/internal/services/e2b"
 	"github.com/knid/wemob/internal/services/storage"
 	"github.com/knid/wemob/internal/services/codemagic"
 	"github.com/knid/wemob/internal/services/coolify"
@@ -786,6 +787,11 @@ func main() {
 		slog.Info("Codemagic service initialized")
 	}
 
+	e2b := e2bService.NewService(
+		sm.GetSecret("DASHBOARD_URL"),
+		sm.GetSecret("E2B_PREVIEW_DOMAIN"),
+	)
+
 	controller := controllers.NewController(
 		db,
 		make(chan struct{}, constants.MAX_CONCURRENT_BUILDS),
@@ -808,6 +814,7 @@ func main() {
 		gitRepoService,
 		codemagicService,
 		remoteConfigService,
+		e2b,
 	)
 
 	// MCP service (optional — connect in background so it doesn't block server startup)

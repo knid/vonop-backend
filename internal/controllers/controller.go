@@ -21,6 +21,7 @@ import (
 	"github.com/knid/wemob/internal/services/coolify"
 	"github.com/knid/wemob/internal/services/gitea"
 	"github.com/knid/wemob/internal/services/remoteconfig"
+	e2bService "github.com/knid/wemob/internal/services/e2b"
 	"github.com/posthog/posthog-go"
 )
 
@@ -42,6 +43,7 @@ type Controller struct {
 	MCPService             atomic.Pointer[mcpclient.Service]
 	PostHog                posthog.Client // nil = disabled
 	RemoteConfig           *remoteconfig.Service
+	E2BService             *e2bService.Service
 	RunningJobs            sync.Map       // map[string]context.CancelFunc for in-flight background jobs
 	PendingClarifications  sync.Map       // map[string]chan ClarificationResult for jobs awaiting user input
 	JobEventBuses          sync.Map       // map[string]*EventBus for live SSE fan-out to multiple clients
@@ -57,7 +59,8 @@ func NewController(db *database.Database, concurrentBuildLimiter chan struct{},
 	posthogClient posthog.Client,
 	gitRepoService *gitrepo.Service,
 	codemagicService *codemagic.Service,
-	remoteConfigService *remoteconfig.Service) *Controller {
+	remoteConfigService *remoteconfig.Service,
+	e2b *e2bService.Service) *Controller {
 
 	return &Controller{
 		DB:                     db,
@@ -76,6 +79,7 @@ func NewController(db *database.Database, concurrentBuildLimiter chan struct{},
 		GitRepoService:         gitRepoService,
 		PostHog:                posthogClient,
 		RemoteConfig:           remoteConfigService,
+		E2BService:             e2b,
 	}
 }
 
