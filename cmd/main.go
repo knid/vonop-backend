@@ -1246,6 +1246,9 @@ func main() {
 					// Sandbox ID persistence for E2B preview
 					r.Get("/sandbox", httpViews.GetAppSandbox)
 					r.Put("/sandbox", httpViews.SetAppSandbox)
+					// Sandbox lifecycle for mobile preview
+					r.Post("/sandbox/start", httpViews.StartAppSandbox)
+					r.Get("/sandbox/status", httpViews.GetAppSandboxStatus)
 
 					// Deploy
 					r.Route("/deploy", func(r chi.Router) {
