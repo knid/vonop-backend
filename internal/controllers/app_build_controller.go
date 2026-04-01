@@ -762,7 +762,8 @@ func (c *Controller) CaptureAppScreenshot(project *models.AppProject, previewURL
 	var imgData []byte
 	var err error
 	_, mobileErr := c.DB.GetMobileAppConfig(project.ID.String())
-	if mobileErr == nil {
+	isMobile := mobileErr == nil
+	if isMobile {
 		imgData, err = external.GetScreenshotOfURL(previewURL, apiKey)
 	} else {
 		imgData, err = external.GetDesktopScreenshotOfURL(previewURL, apiKey)
@@ -775,6 +776,15 @@ func (c *Controller) CaptureAppScreenshot(project *models.AppProject, previewURL
 	if len(imgData) == 0 {
 		slog.Warn("CaptureAppScreenshot: empty screenshot data", "project_id", project.ID)
 		return
+	}
+
+	// Compose mobile screenshots into phone mockup frame
+	if isMobile {
+		imgData, err = utils.ComposeMockup(imgData)
+		if err != nil {
+			slog.Warn("CaptureAppScreenshot: failed to compose mockup", "error", err, "project_id", project.ID)
+			return
+		}
 	}
 
 	s3Key := fmt.Sprintf("app-screenshots/%s.png", project.ID.String())
