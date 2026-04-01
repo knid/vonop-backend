@@ -65,6 +65,8 @@ func (c *Controller) runChatToolPhase(
 		chatTakeScreenshotTool,
 		chatSearchComponentsTool,
 		chatManageAssetsTool,
+		chatReadFileTool,
+		chatListFilesTool,
 	}
 	isEcommerce := project.ProjectType == "ecommerce"
 	if isEcommerce {
@@ -246,6 +248,25 @@ CRITICAL LANGUAGE RULE: ALL content you generate (product names, descriptions, c
 			return c.executeChatConfigureMobileApp(arguments, project, sendEvent, &collectedContext)
 		case "manage_assets":
 			return c.executeChatManageAssets(arguments, project, sendEvent, &collectedContext)
+		case "read_file":
+			var args struct {
+				FilePath string `json:"file_path"`
+			}
+			if err := json.Unmarshal([]byte(arguments), &args); err != nil {
+				return fmt.Sprintf("Error: invalid arguments: %s", err.Error()), nil
+			}
+			content, ok := fileMap[args.FilePath]
+			if !ok {
+				return fmt.Sprintf("Error: file '%s' not found in project", args.FilePath), nil
+			}
+			return content, nil
+		case "list_files":
+			var lines []string
+			for path, content := range fileMap {
+				lines = append(lines, fmt.Sprintf("%s (%d chars)", path, len(content)))
+			}
+			sort.Strings(lines)
+			return strings.Join(lines, "\n"), nil
 		default:
 			return fmt.Sprintf("Unknown tool: %s", name), nil
 		}
@@ -2079,6 +2100,40 @@ var chatConfigureMobileAppTool = utils.Tool{
 				},
 			},
 			"required": []string{"bridge_methods", "permissions"},
+		},
+	},
+}
+
+// chatReadFileTool lets the fast model read project file contents during the chat
+// tool phase so users can ask to see their code without hallucinated responses.
+var chatReadFileTool = utils.Tool{
+	Type: "function",
+	Function: utils.ToolFunction{
+		Name:        "read_file",
+		Description: "Read the full content of a project file by its path. Use this when the user asks to see code, view a file, or show what changed. Call list_files first if you don't know the exact path.",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"file_path": map[string]any{
+					"type":        "string",
+					"description": "Relative file path, e.g. 'app/page.tsx' or 'components/header.tsx'",
+				},
+			},
+			"required": []string{"file_path"},
+		},
+	},
+}
+
+// chatListFilesTool lets the fast model list all project files during the chat
+// tool phase so it can answer questions about project structure.
+var chatListFilesTool = utils.Tool{
+	Type: "function",
+	Function: utils.ToolFunction{
+		Name:        "list_files",
+		Description: "List all files in the project with their types and sizes. Use this to understand the project structure or when the user asks what files exist.",
+		Parameters: map[string]any{
+			"type":       "object",
+			"properties": map[string]any{},
 		},
 	},
 }
