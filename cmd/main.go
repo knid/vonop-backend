@@ -1270,7 +1270,7 @@ func main() {
 						r.Get("/", httpViews.GetAppSnapshots)
 						r.Post("/", httpViews.CreateAppSnapshot)
 						r.Post("/{sid}/restore", httpViews.RestoreAppSnapshot)
-						r.Delete("/{sid}", httpViews.DeleteAppSnapshot)
+						r.Get("/{sid}/diff", httpViews.GetAppSnapshotDiff)
 					})
 
 					// User-uploaded assets

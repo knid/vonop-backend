@@ -246,7 +246,20 @@ func (c *Controller) UpdateAppProjectStatus(project *models.AppProject, status s
 	return c.DB.UpdateAppProject(project)
 }
 
-// Snapshots — backed by git commit history
+// Versions — backed by git commit history
+
+// parseCommitSource splits a commit message of the form "source: description"
+// into its source and description parts. Returns ("", fullMessage) if no prefix.
+func parseCommitSource(message string) (source, description string) {
+	if idx := strings.Index(message, ": "); idx > 0 && idx < 20 {
+		prefix := message[:idx]
+		switch prefix {
+		case "auto", "manual", "undo", "init", "deploy":
+			return prefix, message[idx+2:]
+		}
+	}
+	return "", message
+}
 
 func (c *Controller) GetAppSnapshots(projectID string) ([]responses.CommitHistoryEntry, error) {
 	repo, err := c.GitRepoService.Open(projectID)
@@ -261,9 +274,11 @@ func (c *Controller) GetAppSnapshots(projectID string) ([]responses.CommitHistor
 
 	entries := make([]responses.CommitHistoryEntry, 0, len(commits))
 	for _, ci := range commits {
+		source, description := parseCommitSource(ci.Message)
 		entries = append(entries, responses.CommitHistoryEntry{
 			Hash:        ci.Hash,
-			Description: ci.Message,
+			Description: description,
+			Source:      source,
 			CreatedAt:   ci.Timestamp,
 		})
 	}
@@ -314,6 +329,24 @@ func (c *Controller) RestoreAppSnapshot(project *models.AppProject, commitHash s
 	}
 
 	return project, nil
+}
+
+// GetAppSnapshotDiff returns the diff for a specific commit (what it changed).
+func (c *Controller) GetAppSnapshotDiff(projectID, commitHash string) (string, error) {
+	repo, err := c.GitRepoService.Open(projectID)
+	if err != nil {
+		return "", fmt.Errorf("failed to open repo: %w", err)
+	}
+
+	diff, err := repo.Diff(commitHash+"~1", commitHash)
+	if err != nil {
+		// If commitHash~1 doesn't exist (first commit), diff against empty tree
+		diff, err = repo.Diff("4b825dc642cb6eb9a060e54bf899d69f82cf17a8", commitHash)
+		if err != nil {
+			return "", fmt.Errorf("failed to get diff: %w", err)
+		}
+	}
+	return diff, nil
 }
 
 // Generated Files
