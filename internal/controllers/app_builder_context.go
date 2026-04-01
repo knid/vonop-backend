@@ -16,6 +16,16 @@ import (
 	"github.com/knid/wemob/internal/utils"
 )
 
+// isSecretFile returns true for files that contain secrets and must never be
+// inlined into LLM prompts (e.g. .env, .env.local, .env.production).
+func isSecretFile(path string) bool {
+	base := path
+	if i := strings.LastIndex(path, "/"); i >= 0 {
+		base = path[i+1:]
+	}
+	return strings.HasPrefix(base, ".env")
+}
+
 // --- Import graph for smarter context selection ---
 
 // tsImportRegex matches TypeScript/JavaScript import statements to extract the import path.
@@ -767,6 +777,9 @@ func (c *Controller) buildProjectContextForChat(project *models.AppProject, file
 		// List all files as paths (so LLM knows project structure)
 		sb.WriteString("\nAll project files:\n")
 		for _, fp := range paths {
+			if isSecretFile(fp) {
+				continue
+			}
 			sb.WriteString(fmt.Sprintf("- %s (%d chars)\n", fp, len(fileMap[fp])))
 		}
 
@@ -800,14 +813,14 @@ func (c *Controller) buildProjectContextForChat(project *models.AppProject, file
 
 		// Pass 1: inline primary files (LLM-selected) — these get budget priority
 		for _, fp := range paths {
-			if !selection.primary[fp] {
+			if !selection.primary[fp] || isSecretFile(fp) {
 				continue
 			}
 			inlineFile(fp)
 		}
 		// Pass 2: inline secondary files (graph-expanded) with remaining budget
 		for _, fp := range paths {
-			if !selection.secondary[fp] {
+			if !selection.secondary[fp] || isSecretFile(fp) {
 				continue
 			}
 			inlineFile(fp)
@@ -880,6 +893,9 @@ func (c *Controller) buildProjectContext(project *models.AppProject, fileMap map
 		sort.Strings(paths)
 		brokenCount := 0
 		for _, fp := range paths {
+			if isSecretFile(fp) {
+				continue
+			}
 			content := fileMap[fp]
 			if strings.Contains(content, fallbackSentinel) || strings.Contains(content, "Generation failed") {
 				sb.WriteString(fmt.Sprintf("- %s (%d chars) [BROKEN]\n", fp, len(content)))

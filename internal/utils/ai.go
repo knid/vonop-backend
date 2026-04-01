@@ -212,12 +212,38 @@ func estimateCostUSD(model string, inputTokens, outputTokens, cacheCreation, cac
 type TokenTracker struct {
 	mu           sync.Mutex
 	entries      []TokenEntry
+	toolsUsed    []string  // tool names called during this trace (for PostHog $ai_trace)
 	TrackContent bool      // opt-in: when true, StreamWithTools records message content per round
 	TraceInput   string    // user's original message (for $ai_trace)
 	TraceOutput  string    // final assistant response (for $ai_trace)
 	UserID       string    // for slog attribution
 	ProjectID    string    // for slog attribution
 	StartedAt    time.Time // wall-clock start of the generation (for accurate $ai_latency)
+}
+
+// RecordToolUsed appends a tool name to the list of tools called in this trace.
+func (t *TokenTracker) RecordToolUsed(toolName string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.toolsUsed = append(t.toolsUsed, toolName)
+}
+
+// ToolsUsed returns a deduplicated list of tool names called in this trace.
+func (t *TokenTracker) ToolsUsed() []string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if len(t.toolsUsed) == 0 {
+		return nil
+	}
+	seen := make(map[string]bool, len(t.toolsUsed))
+	deduped := make([]string, 0, len(t.toolsUsed))
+	for _, name := range t.toolsUsed {
+		if !seen[name] {
+			seen[name] = true
+			deduped = append(deduped, name)
+		}
+	}
+	return deduped
 }
 
 func NewTokenTracker() *TokenTracker {

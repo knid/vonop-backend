@@ -173,19 +173,23 @@ func convertToAnthropicRequest(req ChatRequest, provider *LLMProvider) Anthropic
 		})
 	}
 
-	// Apply automatic prompt caching to the last few substantial system blocks.
-	// Anthropic supports up to 4 cache breakpoints total; reserve 1 for tools
-	// and 1 for the last user message (conversation prefix caching).
+	// Apply automatic prompt caching to system blocks.
+	// Anthropic supports up to 4 cache breakpoints total; we use up to 2 for system
+	// blocks, reserving 1 for tools and 1 for the last user message.
+	// Strategy: always cache the FIRST system block (stable prompt shared across
+	// users/projects) and the LAST system block (dynamic project context). This
+	// ensures the static prompt prefix gets cache hits even when the dynamic
+	// context changes between calls.
 	// Skip caching for one-shot calls (DisablePromptCache) where no follow-up
 	// call will read the cache — the 1.25x creation surcharge is wasted.
-	if !req.DisablePromptCache {
-		maxSystemCache := 2
-		cached := 0
-		for i := len(systemBlocks) - 1; i >= 0 && cached < maxSystemCache; i-- {
-			if len(systemBlocks[i].Text) > minCacheableBlockSize {
-				systemBlocks[i].CacheControl = &AnthropicCacheControl{Type: "ephemeral"}
-				cached++
-			}
+	if !req.DisablePromptCache && len(systemBlocks) > 0 {
+		// Always cache the first system block (stable prefix — enables cross-user sharing)
+		if len(systemBlocks[0].Text) > minCacheableBlockSize {
+			systemBlocks[0].CacheControl = &AnthropicCacheControl{Type: "ephemeral"}
+		}
+		// Cache the last system block if different from the first (dynamic project context)
+		if last := len(systemBlocks) - 1; last > 0 && len(systemBlocks[last].Text) > minCacheableBlockSize {
+			systemBlocks[last].CacheControl = &AnthropicCacheControl{Type: "ephemeral"}
 		}
 	}
 

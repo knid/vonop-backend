@@ -620,6 +620,11 @@ Study how top-tier mobile apps look in 2025-2026: Apple Health, Revolut, Linear,
 - Use CSS transitions for micro-interactions (active:scale-[0.98] on buttons, transition-colors on toggles).
 - Prefer CSS-based animations over heavy JS animation libraries.
 
+**Security — Credential Handling (CRITICAL)**
+- NEVER store raw passwords, API keys, or auth secrets in WemobBridge.storage, localStorage, sessionStorage, cookies, or any client-side storage.
+- For biometric/Face ID login flows: after successful password login, generate and store an opaque session token (e.g. a random UUID or JWT) — NOT the user's email+password. On biometric re-auth, send the session token to a server-side endpoint that validates it and returns a fresh session. If the token is invalid or expired, prompt the user to log in with their password again.
+- Auth tokens stored client-side must be short-lived or revocable. Never store credentials that grant permanent access.
+
 REMEMBER: This is a MOBILE APP, not a website. There is no desktop layout. Do not add responsive breakpoints for larger screens (sm:, md:, lg:, xl:). Design everything for the ~375-430px viewport range. Every flow and component must follow mobile app principles. Every screen must feel like it belongs in a polished, professionally designed app — not a form builder or website template.`
 
 // ALL_BRIDGE_METHODS lists every available bridge method for system prompt injection.

@@ -453,6 +453,9 @@ func (c *Controller) RecordTokenUsage(user *models.User, action, model, provider
 		if tracker.TraceOutput != "" {
 			traceProps.Set("$ai_output_state", tracker.TraceOutput)
 		}
+		if tools := tracker.ToolsUsed(); len(tools) > 0 {
+			traceProps.Set("$ai_tools", tools)
+		}
 		c.PostHog.Enqueue(posthog.Capture{
 			DistinctId: user.ID.String(),
 			Event:      "$ai_trace",
