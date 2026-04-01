@@ -232,6 +232,39 @@ func (r *Repo) Log(limit int) ([]CommitInfo, error) {
 	return commits, nil
 }
 
+// Diff returns the unified diff between two commits (or a commit and HEAD).
+// If toHash is empty, it diffs against the current working tree.
+func (r *Repo) Diff(fromHash, toHash string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), readTimeout)
+	defer cancel()
+
+	args := []string{"diff", fromHash}
+	if toHash != "" {
+		args = append(args, toHash)
+	}
+	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd.Dir = r.Path
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("gitrepo: diff: %w", err)
+	}
+	return string(out), nil
+}
+
+// DiffLastCommit returns the diff of the most recent commit (what it changed).
+func (r *Repo) DiffLastCommit() (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), readTimeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "git", "diff", "HEAD~1", "HEAD")
+	cmd.Dir = r.Path
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("gitrepo: diff last commit: %w", err)
+	}
+	return string(out), nil
+}
+
 // ReadAllFilesAtCommit reads all files at a specific commit using git archive.
 func (r *Repo) ReadAllFilesAtCommit(commitHash string) (map[string]string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), commitTimeout)
