@@ -537,16 +537,7 @@ func (v *HttpViews) GetAppSnapshots(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp := make([]responses.AppSnapshotResponse, 0, len(entries))
-	for _, e := range entries {
-		resp = append(resp, responses.AppSnapshotResponse{
-			Hash:        e.Hash,
-			Description: e.Description,
-			CreatedAt:   e.CreatedAt,
-		})
-	}
-
-	utils.JSONResponse(w, resp, http.StatusOK)
+	utils.JSONResponse(w, entries, http.StatusOK)
 }
 
 // POST /v2/apps/{appId}/snapshots
@@ -579,9 +570,10 @@ func (v *HttpViews) CreateAppSnapshot(w http.ResponseWriter, r *http.Request) {
 	v.Controller.TrackUserEvent(user, "app_snapshot_created", posthog.NewProperties().
 		Set("app_id", project.ID.String()))
 
-	utils.JSONResponse(w, responses.AppSnapshotResponse{
+	utils.JSONResponse(w, responses.CommitHistoryEntry{
 		Hash:        hash,
 		Description: req.Description,
+		Source:      "manual",
 		CreatedAt:   time.Now(),
 	}, http.StatusCreated)
 }
@@ -615,9 +607,30 @@ func (v *HttpViews) RestoreAppSnapshot(w http.ResponseWriter, r *http.Request) {
 	utils.JSONResponse(w, responses.SuccessResponse{Success: true}, http.StatusOK)
 }
 
-// DELETE /v2/apps/{appId}/snapshots/{sid} — no longer supported (git commits are immutable)
-func (v *HttpViews) DeleteAppSnapshot(w http.ResponseWriter, r *http.Request) {
-	utils.JSONErrorResponse(w, "snapshot deletion is not supported with git-based storage", http.StatusGone)
+// GET /v2/apps/{appId}/snapshots/{sid}/diff
+func (v *HttpViews) GetAppSnapshotDiff(w http.ResponseWriter, r *http.Request) {
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	appID := chi.URLParam(r, "appId")
+	sid := chi.URLParam(r, "sid")
+	project, err := v.Controller.GetAppProject(appID, user)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	_ = project
+
+	diff, err := v.Controller.GetAppSnapshotDiff(appID, sid)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	utils.JSONResponse(w, map[string]string{"diff": diff}, http.StatusOK)
 }
 
 // GET /v2/apps/{appId}/export/{platform}

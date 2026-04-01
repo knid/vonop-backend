@@ -10,6 +10,7 @@ import (
 type CommitHistoryEntry struct {
 	Hash        string    `json:"hash"`
 	Description string    `json:"description"`
+	Source      string    `json:"source"` // "auto", "manual", "undo", "generation", or ""
 	CreatedAt   time.Time `json:"created_at"`
 }
 
@@ -60,12 +61,6 @@ type AppDeploymentResponse struct {
 	ErrorMessage string    `json:"error_message,omitempty"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
-}
-
-type AppSnapshotResponse struct {
-	Hash        string    `json:"hash"`
-	Description string    `json:"description"`
-	CreatedAt   time.Time `json:"created_at"`
 }
 
 type AppConversationResponse struct {
