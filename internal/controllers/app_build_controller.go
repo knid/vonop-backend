@@ -42,6 +42,7 @@ func (c *Controller) DeployToCoolify(project *models.AppProject, user *models.Us
 		fileMap[k] = v
 	}
 	injectAnalyticsScript(fileMap, project.ID.String())
+	injectThemeColorMeta(fileMap, project)
 
 	// Inject "Created by Wemob" badge for free/starter plans
 	showBadge := true
@@ -719,6 +720,46 @@ func injectAnalyticsScript(fileMap map[string]string, projectID string) {
 	}
 
 	slog.Warn("analytics script injection: no suitable layout found", "project_id", projectID)
+}
+
+// injectThemeColorMeta injects a <meta name="theme-color"> tag into the root layout
+// so mobile WebViews can read it and adapt the system UI overlay style.
+func injectThemeColorMeta(fileMap map[string]string, project *models.AppProject) {
+	var theme models.AppTheme
+	if len(project.Theme) > 0 {
+		json.Unmarshal(project.Theme, &theme)
+	}
+	if theme.ColorScheme == nil {
+		return
+	}
+	primary, ok := theme.ColorScheme["primary"].(string)
+	if !ok || primary == "" {
+		return
+	}
+
+	metaTag := fmt.Sprintf(`<meta name="theme-color" content="%s" />`, primary)
+
+	layoutPaths := []string{
+		"app/layout.tsx",
+		"app/layout.jsx",
+		"src/app/layout.tsx",
+		"src/app/layout.jsx",
+	}
+
+	for _, path := range layoutPaths {
+		content, ok := fileMap[path]
+		if !ok {
+			continue
+		}
+		// Skip if already has a theme-color meta
+		if strings.Contains(content, "theme-color") {
+			return
+		}
+		if idx := strings.Index(content, "</head>"); idx != -1 {
+			fileMap[path] = content[:idx] + metaTag + "\n" + content[idx:]
+			return
+		}
+	}
 }
 
 // injectWemobBadge injects a "Created by Wemob" badge script into the root layout.
