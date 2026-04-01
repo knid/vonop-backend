@@ -158,7 +158,8 @@ CRITICAL LANGUAGE RULE: ALL content you generate (product names, descriptions, c
   - Device/platform detection → getDeviceInfo (no extra permission)
   - Network status checks → getConnectionStatus (no extra permission)
   At minimum, ALWAYS enable: haptic, share, getDeviceInfo. Only skip configure_mobile_app if the user explicitly says they don't want native features.
-- If the user explicitly asks to enable or change specific mobile features, call configure_mobile_app with those methods.`
+- If the user explicitly asks to enable or change specific mobile features, call configure_mobile_app with those methods.
+- SECURITY: When enabling biometrics, NEVER instruct the code-gen model to store raw passwords in device storage. Biometric login must use opaque session tokens, not saved credentials.`
 	}
 	systemPrompt += `
 - If the user's message is a normal chat request that REQUIRES CODE CHANGES (editing .tsx/.ts/.css files — e.g. "make the header bigger", "add a dark mode toggle", "fix the layout"), respond with ONLY the exact text: NO_TOOLS_NEEDED — nothing else. Do NOT write explanations, summaries, plans, or conversational responses. Your ONLY outputs should be tool calls OR the literal text "NO_TOOLS_NEEDED".
@@ -213,7 +214,13 @@ CRITICAL LANGUAGE RULE: ALL content you generate (product names, descriptions, c
 	var collectedContext strings.Builder
 	var screenshots []string
 
+	// Track tool usage on the token tracker so PostHog $ai_trace includes tool names.
+	tracker := utils.TokenTrackerFromContext(ctx)
+
 	executor := func(name string, arguments string) (string, error) {
+		if tracker != nil {
+			tracker.RecordToolUsed(name)
+		}
 		switch name {
 		case "preview_website":
 			return c.executeChatPreviewWebsite(arguments, project, sendEvent, &collectedContext, &screenshots)
