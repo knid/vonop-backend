@@ -132,7 +132,7 @@ const builderFrameworkRulesBase = `
 
 ### SEO & Metadata
 - Every page.tsx MUST export metadata (or generateMetadata for dynamic pages) with meaningful title and description.
-- Root layout.tsx must have a complete metadata export with title, description, and viewport settings.
+- Root layout.tsx must have a complete metadata export with title, description, and viewport settings. Include a theme-color meta tag matching the app's background color (e.g. ` + "`" + `other: { 'theme-color': '#FAFAF8' }` + "`" + ` in the metadata export). Use the actual page background color, not the accent color.
 - Use semantic HTML elements: <header>, <main>, <footer>, <nav>, <section>, <article> where appropriate.
 
 ### Accessibility
@@ -572,6 +572,7 @@ Study how top-tier mobile apps look in 2025-2026: Apple Health, Revolut, Linear,
 - All interactive elements (buttons, links, inputs) must have a minimum touch target of 44×44px.
 - Use 100dvh (dynamic viewport height) instead of 100vh for full-screen layouts.
 - Respect safe area insets: use env(safe-area-inset-*) or Tailwind's pb-safe, pt-safe utilities where applicable.
+- In the root layout.tsx metadata export, include a theme-color meta tag matching the app's background color (e.g. ` + "`" + `other: { 'theme-color': '#FAFAF8' }` + "`" + `). This allows the native app shell to match the system status bar to the app's background.
 
 **Navigation**
 - Bottom tab bar (3-5 tabs) is the PRIMARY navigation — always visible, fixed to bottom. Tab bar: bg-white border-t border-gray-100 shadow-sm, active tab icon+label in accent color, inactive in gray-400. h-16 with comfortable spacing.
