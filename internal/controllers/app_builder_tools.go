@@ -67,6 +67,8 @@ func (c *Controller) runChatToolPhase(
 		chatManageAssetsTool,
 		chatReadFileTool,
 		chatListFilesTool,
+		chatDiffFilesTool,
+		chatGitLogTool,
 	}
 	isEcommerce := project.ProjectType == "ecommerce"
 	if isEcommerce {
@@ -266,6 +268,57 @@ CRITICAL LANGUAGE RULE: ALL content you generate (product names, descriptions, c
 				lines = append(lines, fmt.Sprintf("%s (%d chars)", path, len(content)))
 			}
 			sort.Strings(lines)
+			return strings.Join(lines, "\n"), nil
+		case "diff_files":
+			var args struct {
+				FromCommit string `json:"from_commit"`
+				ToCommit   string `json:"to_commit"`
+			}
+			if err := json.Unmarshal([]byte(arguments), &args); err != nil {
+				return fmt.Sprintf("Error: invalid arguments: %s", err.Error()), nil
+			}
+			if args.FromCommit == "" {
+				diff, err := repo.DiffLastCommit()
+				if err != nil {
+					return fmt.Sprintf("Error: %s", err.Error()), nil
+				}
+				if diff == "" {
+					return "No changes in the last commit.", nil
+				}
+				return diff, nil
+			}
+			diff, err := repo.Diff(args.FromCommit, args.ToCommit)
+			if err != nil {
+				return fmt.Sprintf("Error: %s", err.Error()), nil
+			}
+			if diff == "" {
+				return "No differences found between the specified commits.", nil
+			}
+			return diff, nil
+		case "git_log":
+			var args struct {
+				Limit int `json:"limit"`
+			}
+			if err := json.Unmarshal([]byte(arguments), &args); err != nil {
+				args.Limit = 10
+			}
+			if args.Limit <= 0 {
+				args.Limit = 10
+			}
+			if args.Limit > 50 {
+				args.Limit = 50
+			}
+			commits, err := repo.Log(args.Limit)
+			if err != nil {
+				return fmt.Sprintf("Error: %s", err.Error()), nil
+			}
+			if len(commits) == 0 {
+				return "No commits found.", nil
+			}
+			var lines []string
+			for _, c := range commits {
+				lines = append(lines, fmt.Sprintf("%s  %s  %s", c.Hash[:8], c.Timestamp.Format("2006-01-02 15:04"), c.Message))
+			}
 			return strings.Join(lines, "\n"), nil
 		default:
 			return fmt.Sprintf("Unknown tool: %s", name), nil
@@ -2134,6 +2187,47 @@ var chatListFilesTool = utils.Tool{
 		Parameters: map[string]any{
 			"type":       "object",
 			"properties": map[string]any{},
+		},
+	},
+}
+
+// chatDiffFilesTool lets the fast model show what changed between commits so
+// users can ask "what did you change?" and get real git diffs instead of guesses.
+var chatDiffFilesTool = utils.Tool{
+	Type: "function",
+	Function: utils.ToolFunction{
+		Name:        "diff_files",
+		Description: "Show what changed in the project's code. With no arguments, shows the diff from the last commit (most recent changes). Optionally provide a commit hash to diff from a specific point. Use git_log first to find commit hashes if needed.",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"from_commit": map[string]any{
+					"type":        "string",
+					"description": "Optional commit hash to diff from. If omitted, shows the last commit's changes.",
+				},
+				"to_commit": map[string]any{
+					"type":        "string",
+					"description": "Optional commit hash to diff to. If omitted, diffs to HEAD.",
+				},
+			},
+		},
+	},
+}
+
+// chatGitLogTool lets the fast model show recent commit history.
+var chatGitLogTool = utils.Tool{
+	Type: "function",
+	Function: utils.ToolFunction{
+		Name:        "git_log",
+		Description: "Show recent commit history for the project. Returns the last N commits with their hashes, messages, and timestamps.",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"limit": map[string]any{
+					"type":        "integer",
+					"description": "Number of commits to return (default 10, max 50).",
+				},
+			},
 		},
 	},
 }
