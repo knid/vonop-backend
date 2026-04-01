@@ -45,7 +45,7 @@ Go monolith (module `github.com/knid/wemob`) serving a REST API for the Wemob mo
 
 - **Auth**: Bearer token extracted from `Authorization` header via `utils.ExtractTokenFromHeader()`. No middleware-based auth — each view handler extracts and validates the token inline.
 - **Routing**: chi/v5 router. All API routes under `/v1/`. Webhook routes at `/webhooks/stripe`. Health check at `/health`.
-- **Two HTTP servers**: Main API on `:8001`, proxy server on `:9001` (for proxying web content). Caddy sits in front in production, routing `api.wemob.io` → `:8001` and `proxy.wemob.io` → `:9001`.
+- **HTTP server**: Main API on `:8001`. Caddy sits in front in production, routing `api.wemob.io` → `:8001`.
 - **Secrets**: All secrets fetched from Infisical at startup via `SecretManager`, not from env vars directly (env vars only hold Infisical credentials).
 - **Billing**: Stripe integration with webhooks, checkout, customer portal, subscriptions.
 - **Background tasks**: Asynq client enqueues build/deploy tasks to Redis workers (workers are external).

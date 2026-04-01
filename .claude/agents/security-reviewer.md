@@ -9,7 +9,6 @@ You are a Go security specialist reviewing the wemob-backend codebase. This is a
 - Secrets: Fetched from Infisical at startup, never from env vars
 - Billing: Stripe webhooks at `/webhooks/stripe`
 - Storage: AWS S3 (assets + user API keys)
-- Proxy server on port 9001 proxies web content
 - Background tasks via Asynq/Redis
 
 ## Review Checklist
@@ -38,11 +37,6 @@ You are a Go security specialist reviewing the wemob-backend codebase. This is a
 - Check for path traversal in S3 key construction (user-supplied filenames)
 - Ensure S3 presigned URLs have appropriate expiry
 - Check that user API key storage is properly scoped
-
-### Proxy Server (port 9001)
-- Check for SSRF vulnerabilities in proxy logic
-- Ensure proxy doesn't expose internal services
-- Validate/sanitize URLs before proxying
 
 ### Secrets & Sensitive Data
 - No secrets in code, logs, or error responses

@@ -125,9 +125,6 @@ func createSchema(db *bun.DB) error {
 		(*models.WebAnalyticsEvent)(nil),
 		// Notification tasks
 		(*models.AppNotificationTask)(nil),
-		// Mobile injection chat
-		(*models.MobileInjection)(nil),
-		(*models.MobileConversation)(nil),
 		// Mobile app config (feature flags, plugin toggles, bridge settings)
 		(*models.MobileAppConfig)(nil),
 		// Preview codes for Try With Wemob
@@ -839,12 +836,6 @@ func main() {
 
 	stripe.Key = sm.GetSecret("STRIPE_API_KEY")
 
-	// Configure upstream proxy transport once at startup (prevents per-request data race)
-	views.InitProxyTransport(
-		sm.GetSecret("PREVIEW_PROXY_HOST"),
-		sm.GetSecret("PREVIEW_PROXY_AUTH"),
-	)
-
 	// Redis client for rate limiting (reuses same Redis as Asynq)
 	redisClient := redis.NewClient(&redis.Options{
 		Addr:         sm.GetSecret("REDIS_ADDR"),
@@ -984,7 +975,6 @@ func main() {
 					})
 				})
 			})
-			r.HandleFunc("/proxy", httpViews.ProxyHandler)
 			r.Get("/check/{projectId}", httpViews.CheckStatus)
 			r.Route("/users", func(r chi.Router) {
 				r.Route("/me", func(r chi.Router) {
@@ -1173,10 +1163,8 @@ func main() {
 
 			r.Get("/integrations/providers", httpViews.GetV2IntegrationProviders)
 
-			// Public mobile injections (no auth, rate-limited)
 			r.Route("/mobile/{projectId}", func(r chi.Router) {
 				r.Use(rateLimiter.RateLimit(120, time.Minute, appMiddleware.IPKey))
-				r.Get("/injections", httpViews.GetPublicMobileInjections)
 				r.Get("/config", httpViews.GetPublicMobileConfig)
 			})
 		})
@@ -1407,16 +1395,10 @@ func main() {
 				rateLimiter.RateLimit(30, time.Minute, appMiddleware.AIUserKey)).
 				Post("/mobile/classify-intent", httpViews.ClassifyMobileIntent)
 
-			// Mobile injection chat (URL-wrapper projects)
 			r.Route("/mobile/{projectId}", func(r chi.Router) {
 				r.Use(appMiddleware.RequireAuth(controller))
 				r.Use(appMiddleware.RequireSubscription("active", "trial", "free"))
 
-				r.With(rateLimiter.RateLimit(20, time.Minute, appMiddleware.AIUserKey)).Post("/chat", httpViews.MobileChatStream)
-				r.Get("/injections", httpViews.ListMobileInjections)
-				r.Put("/injections/{id}", httpViews.UpdateMobileInjection)
-				r.Delete("/injections/{id}", httpViews.DeleteMobileInjection)
-				r.Delete("/conversation", httpViews.ClearMobileConversation)
 				r.Get("/config", httpViews.GetMobileAppConfig)
 				r.Put("/config", httpViews.UpdateMobileAppConfig)
 			})
@@ -1472,46 +1454,6 @@ func main() {
 		r.Get("/sdk/wemob-bridge.js", httpViews.ServeBridgeSDK)
 	})
 
-	// Proxy
-	proxyRoute := chi.NewRouter()
-	proxyRoute.Use(func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ctx := r.Context()
-			httplog.SetAttrs(ctx, slog.String("from", "proxylog"))
-			httplog.SetAttrs(ctx, slog.String("proxy.path", r.URL.Path))
-
-			urlCookie, err := r.Cookie(constants.SessionCookieName)
-			if err == nil {
-				httplog.SetAttrs(ctx, slog.String("proxy.url", urlCookie.Value))
-			}
-
-			tokenString, err := utils.ExtractTokenFromHeader(r)
-			if err == nil && len(tokenString) >= 12 {
-				// Token prefix intentionally omitted from logs for security
-				userInformationRes, err := httpViews.Controller.GetUser(tokenString)
-				if err == nil {
-					httplog.SetAttrs(ctx, slog.String("user.id", userInformationRes.ID.String()))
-					httplog.SetAttrs(ctx, slog.String("user.email", userInformationRes.Email))
-				}
-			}
-
-			next.ServeHTTP(w, r.WithContext(ctx))
-		})
-	})
-
-	proxyRoute.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   []string{"https://app.wemob.io", "https://dashboard.wemob.io", "https://wemob.io", "https://www.wemob.io", "http://localhost:3000", "http://127.0.0.1:3000", "https://*.wemob.app", "https://*.vercel.app"},
-		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token", "Location"},
-		ExposedHeaders:   []string{"Link"},
-		AllowCredentials: false,
-		MaxAge:           300,
-	}))
-	proxyRoute.Use(middleware.Logger)
-	proxyRoute.Use(middleware.Recoverer)
-	proxyRoute.Use(middleware.Timeout(60 * time.Second))
-	proxyRoute.HandleFunc("/*", httpViews.ProxyHandler)
-
 	// Create explicit http.Server instances for graceful shutdown
 	mainServer := &http.Server{
 		Addr:              ":8001",
@@ -1522,16 +1464,6 @@ func main() {
 		WriteTimeout:      30 * time.Minute, // long for SSE streaming
 		IdleTimeout:       120 * time.Second,
 	}
-	proxyServer := &http.Server{
-		Addr:              ":9001",
-		Handler:           proxyRoute,
-		MaxHeaderBytes:    1 << 20,
-		ReadHeaderTimeout: 10 * time.Second,
-		ReadTimeout:       30 * time.Second,
-		WriteTimeout:      60 * time.Second,
-		IdleTimeout:       60 * time.Second,
-	}
-
 	// Periodically clean up expired preview codes
 	go func() {
 		ticker := time.NewTicker(1 * time.Hour)
@@ -1542,13 +1474,6 @@ func main() {
 			} else if n > 0 {
 				slog.Info("cleaned up expired preview codes", "count", n)
 			}
-		}
-	}()
-
-	go func() {
-		slog.Info("Proxy server listening on :9001")
-		if err := proxyServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			slog.Error("Proxy server error", "error", err)
 		}
 	}()
 
@@ -1575,10 +1500,7 @@ func main() {
 			posthogClient.Close()
 		}
 
-		// Shutdown both servers
-		if err := proxyServer.Shutdown(ctx); err != nil {
-			slog.Error("Proxy server shutdown error", "error", err)
-		}
+		// Shutdown main server
 		if err := mainServer.Shutdown(ctx); err != nil {
 			slog.Error("Main server shutdown error", "error", err)
 		}
