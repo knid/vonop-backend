@@ -18,24 +18,6 @@ api.wemob.io {
     }
 }
 
-proxy.wemob.io {
-    encode zstd gzip
-
-    handle {
-
-        reverse_proxy api:9001 {
-            header_down -X-Frame-Options
-            header_down -Content-Security-Policy
-            header_down -Content-Security-Policy-Report-Only
-        }
-    }
-
-    log {
-        output file /var/log/caddy/proxy_access.log
-        format console
-    }
-}
-
 *.preview.wemob.app {
     tls {
         dns cloudflare {env.CF_API_TOKEN}
