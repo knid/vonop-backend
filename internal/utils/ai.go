@@ -1514,6 +1514,8 @@ type ToolCallConfig struct {
 	FilterTools       func(tools []Tool) []Tool                              // Called each round to filter/modify tools; return nil to strip all tools
 	OnToolCallStart   func(toolName string)                                  // Called when a tool call name is first detected during SSE streaming (before args are complete)
 	OnRoundStart      func(round int)                                       // Called at the start of each round (useful for resetting per-round state like text buffers)
+	MaxContinuations  int            // Max finish_reason=length continuation rounds (default 3). -1 = disable continuations entirely.
+	ShouldContinue    func() bool    // Called before each round/continuation. Return false to abort. nil = always continue.
 }
 
 // An optional ToolCallConfig can be passed to override defaults.
@@ -1539,6 +1541,7 @@ func StreamWithTools(
 	nudgeAfter := 3
 	stripAfter := 5
 	maxTokens := 16384
+	maxContinuations := 3
 	if len(opts) > 0 {
 		if opts[0].MaxRounds > 0 {
 			maxRounds = opts[0].MaxRounds
@@ -1551,6 +1554,9 @@ func StreamWithTools(
 		}
 		if opts[0].MaxTokens > 0 {
 			maxTokens = opts[0].MaxTokens
+		}
+		if opts[0].MaxContinuations != 0 {
+			maxContinuations = opts[0].MaxContinuations
 		}
 	}
 	currentMessages := make([]Message, len(messages))
@@ -1565,8 +1571,15 @@ func StreamWithTools(
 	rateLimitRetries := 0
 	transientRetries := 0
 	prevToolResultRange := [2]int{0, 0} // [start, end) of previous round's tool result messages
+	continuationCount := 0
+	var fullText strings.Builder // declared outside loop so ShouldContinue abort can return partial text
 
 	for round := 0; round < maxRounds; round++ {
+		// Check caller abort signal before starting any round
+		if len(opts) > 0 && opts[0].ShouldContinue != nil && !opts[0].ShouldContinue() {
+			slog.Info("Caller aborted StreamWithTools via ShouldContinue", "round", round)
+			return fullText.String(), nil
+		}
 		// Notify caller that a new round is starting (e.g. to reset per-round state).
 		if len(opts) > 0 && opts[0].OnRoundStart != nil {
 			opts[0].OnRoundStart(round)
@@ -1697,7 +1710,7 @@ func StreamWithTools(
 		rateLimitRetries = 0   // reset after successful request
 		transientRetries = 0
 
-		var fullText strings.Builder
+		fullText.Reset()
 		var fullReasoning strings.Builder // accumulate reasoning_content for cache continuity
 		var roundChunks []string          // buffer chunks per round to suppress intermediate reasoning
 		var lastFinishReason string
@@ -2164,13 +2177,26 @@ func StreamWithTools(
 		// Chunks were already streamed in real-time via onChunk above.
 		// No tool calls — return final response
 		if lastFinishReason == "length" && round < maxRounds-1 {
+			// Check caller abort signal before continuing
+			if len(opts) > 0 && opts[0].ShouldContinue != nil && !opts[0].ShouldContinue() {
+				slog.Info("Caller aborted continuation via ShouldContinue", "round", round, "response_length", fullText.Len())
+				return fullText.String(), nil
+			}
+			// Check continuation limit
+			if maxContinuations < 0 || continuationCount >= maxContinuations {
+				slog.Warn("LLM response truncated, continuation limit reached",
+					"continuations", continuationCount, "max", maxContinuations, "response_length", fullText.Len())
+				return fullText.String(), ErrResponseTruncated
+			}
 			if fullText.Len() > maxResponseBufferSize {
 				slog.Warn("response exceeded max size during continuation, returning partial", "size", fullText.Len())
 				return fullText.String(), nil
 			}
 			// Response was truncated — request continuation by appending the partial
 			// response as assistant message and asking the LLM to continue.
-			slog.Warn("LLM response truncated (finish_reason=length), requesting continuation", "response_length", fullText.Len(), "round", round)
+			continuationCount++
+			slog.Warn("LLM response truncated (finish_reason=length), requesting continuation",
+				"response_length", fullText.Len(), "round", round, "continuation", continuationCount, "max", maxContinuations)
 			currentMessages = append(currentMessages, Message{
 				Role:    "assistant",
 				Content: fullText.String(),

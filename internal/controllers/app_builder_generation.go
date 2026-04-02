@@ -645,11 +645,12 @@ func (c *Controller) streamEcommerceGeneration(
 	}
 
 	setupConfig := utils.ToolCallConfig{
-		MaxRounds:  c.RemoteConfig.GetInt(remoteconfig.AIGenerationMaxRounds, remoteconfig.Global),
-		NudgeAfter: 5,
-		StripAfter: 6,
-		MaxTokens:  4096,
-		NudgeMessage: "Finish populating the store and provide a brief summary.",
+		MaxRounds:        c.RemoteConfig.GetInt(remoteconfig.AIGenerationMaxRounds, remoteconfig.Global),
+		NudgeAfter:       5,
+		StripAfter:       6,
+		MaxTokens:        8192,
+		MaxContinuations: 1,
+		NudgeMessage:     "Finish populating the store and provide a brief summary.",
 		OnToolCallStart: func(toolName string) {
 			sendEvent("tool_start", map[string]any{"tool": toolName})
 		},
