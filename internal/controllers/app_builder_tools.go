@@ -395,8 +395,14 @@ CRITICAL LANGUAGE RULE: ALL content you generate (product names, descriptions, c
 		}(),
 		nil, // onReasoning — not needed
 		utils.ToolCallConfig{
-			MaxRounds:  c.RemoteConfig.GetInt(remoteconfig.AIBuilderToolMaxRounds, remoteconfig.Global),
-			MaxTokens:  4096,
+			MaxRounds:        c.RemoteConfig.GetInt(remoteconfig.AIBuilderToolMaxRounds, remoteconfig.Global),
+			MaxTokens:        8192,
+			MaxContinuations: -1, // Phase 1 should never continue — text is discarded on NO_TOOLS_NEEDED
+			ShouldContinue: func() bool {
+				phase1Mu.Lock()
+				defer phase1Mu.Unlock()
+				return !phase1Suppressed
+			},
 			StripAfter: 28, // Strip tools near the end so model is forced to respond
 			OnToolCallStart: func(toolName string) {
 				phase1Mu.Lock()
