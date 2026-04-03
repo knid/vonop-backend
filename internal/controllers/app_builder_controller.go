@@ -857,9 +857,11 @@ func (c *Controller) StreamBuildApp(
 					parser.Flush()
 				},
 				TrimResults: func(toolName, result string) string {
-					if toolName == "read_file" && len(result) > 300 {
-						preview := safeTruncate(result, 200)
-						return fmt.Sprintf("%s\n...[trimmed, %d chars total — call read_file again if needed]", preview, len(result))
+					// Keep read_file results mostly intact — the LLM needs exact content
+					// for <edit> search text. Only trim very large files.
+					if toolName == "read_file" && len(result) > 6000 {
+						preview := safeTruncate(result, 3000)
+						return fmt.Sprintf("%s\n...[trimmed, %d chars total]", preview, len(result))
 					}
 					if toolName == "list_files" && len(result) > 500 {
 						lines := strings.Split(result, "\n")
@@ -974,9 +976,22 @@ func (c *Controller) StreamBuildApp(
 					StripAfter:       3,
 					MaxTokens:        65536,
 					MaxContinuations: 1,
-					NudgeMessage:     "Apply the remaining edits now.",
+					NudgeMessage:     "Output your corrected <edit> blocks now. Use the file contents you just read.",
 					OnRoundStart: func(round int) {
 						parser.Flush()
+					},
+					InterceptToolCall: func(toolName, toolArgs string) (string, bool) {
+						if toolName == "read_file" {
+							var args struct {
+								FilePath string `json:"file_path"`
+							}
+							if json.Unmarshal([]byte(toolArgs), &args) == nil && args.FilePath != "" {
+								if content, ok := fileMap[args.FilePath]; ok {
+									return content, true
+								}
+							}
+						}
+						return "", false
 					},
 				},
 			)
