@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"regexp"
 	"runtime/debug"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -105,6 +104,18 @@ func (b *builderToolCallbacks) snapshotFileMap() map[string]string {
 	}
 	b.fileMu.RUnlock()
 	return m
+}
+
+// safeTruncate truncates s to at most maxBytes while preserving valid UTF-8.
+func safeTruncate(s string, maxBytes int) string {
+	if len(s) <= maxBytes {
+		return s
+	}
+	// Walk back from the byte boundary to find a valid rune start
+	for maxBytes > 0 && maxBytes < len(s) && s[maxBytes]&0xC0 == 0x80 {
+		maxBytes--
+	}
+	return s[:maxBytes]
 }
 
 // StreamBuildApp is the unified entry point for both initial app generation and chat editing.
@@ -812,6 +823,8 @@ func (c *Controller) StreamBuildApp(
 			"tool_count", len(tools),
 		)
 
+		lastReportedOpCount := 0
+
 		// Single unified StreamWithTools call
 		_, chatErr := utils.StreamWithTools(
 			ctx, model, llmMessages, tools, provider,
@@ -845,7 +858,7 @@ func (c *Controller) StreamBuildApp(
 				},
 				TrimResults: func(toolName, result string) string {
 					if toolName == "read_file" && len(result) > 300 {
-						preview := result[:200]
+						preview := safeTruncate(result, 200)
 						return fmt.Sprintf("%s\n...[trimmed, %d chars total — call read_file again if needed]", preview, len(result))
 					}
 					if toolName == "list_files" && len(result) > 500 {
@@ -855,7 +868,7 @@ func (c *Controller) StreamBuildApp(
 						}
 					}
 					if len(result) > 2000 {
-						return result[:500] + fmt.Sprintf("\n...[trimmed, %d chars total]", len(result))
+						return safeTruncate(result, 500) + fmt.Sprintf("\n...[trimmed, %d chars total]", len(result))
 					}
 					return result
 				},
@@ -865,7 +878,7 @@ func (c *Controller) StreamBuildApp(
 						if json.Unmarshal([]byte(args), &parsed) == nil {
 							for k, v := range parsed {
 								if s, ok := v.(string); ok && len(s) > 200 {
-									parsed[k] = s[:200] + "...[trimmed]"
+									parsed[k] = safeTruncate(s, 200) + "...[trimmed]"
 								}
 							}
 							if trimmed, err := json.Marshal(parsed); err == nil {
@@ -879,20 +892,28 @@ func (c *Controller) StreamBuildApp(
 					if allIntercepted {
 						return ""
 					}
-					if len(toolAppliedOps) == 0 {
+					if len(toolAppliedOps) == 0 || len(toolAppliedOps) == lastReportedOpCount {
 						return ""
 					}
+					// Only report files changed since last report
 					var paths []string
 					seen := make(map[string]bool)
-					for _, op := range toolAppliedOps {
+					for _, op := range toolAppliedOps[lastReportedOpCount:] {
 						if !seen[op.Path] {
 							paths = append(paths, fmt.Sprintf("%s %s", op.Action, op.Path))
 							seen[op.Path] = true
 						}
 					}
-					return fmt.Sprintf("Files changed so far: %s. Do NOT re-read or re-edit files you already changed — move on to the next file or output your final response.", strings.Join(paths, ", "))
+					lastReportedOpCount = len(toolAppliedOps)
+					if len(paths) == 0 {
+						return ""
+					}
+					return fmt.Sprintf("Files changed this round: %s. Do NOT re-read or re-edit files you already changed — move on to the next file or output your final response.", strings.Join(paths, ", "))
 				},
 				InterceptToolCall: func(toolName, toolArgs string) (string, bool) {
+					// Fast-path read_file from in-memory fileMap (always current).
+					// Safe: all fileMap writes (saveGeneratedFile) and reads (here) execute
+					// on the same goroutine — StreamWithTools processes tools sequentially.
 					if toolName == "read_file" {
 						var args struct {
 							FilePath string `json:"file_path"`
@@ -902,14 +923,6 @@ func (c *Controller) StreamBuildApp(
 								return content, true
 							}
 						}
-					}
-					if toolName == "list_files" {
-						var lines []string
-						for path, content := range fileMap {
-							lines = append(lines, fmt.Sprintf("%s (%d chars)", path, len(content)))
-						}
-						sort.Strings(lines)
-						return strings.Join(lines, "\n"), true
 					}
 					return "", false
 				},
