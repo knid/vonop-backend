@@ -1561,6 +1561,22 @@ func StreamWithTools(
 	}
 	currentMessages := make([]Message, len(messages))
 	copy(currentMessages, messages)
+
+	// appendToLastUserMsg appends text to the last message if it's a user message,
+	// or creates a new user message at the end. This keeps nudges AFTER tool results
+	// in conversation flow and preserves cache for earlier messages.
+	appendToLastUserMsg := func(text string) {
+		last := len(currentMessages) - 1
+		if last >= 0 && currentMessages[last].Role == "user" {
+			currentMessages[last].Content += "\n\n[System] " + text
+			return
+		}
+		// Append a new user message at the end — convertToAnthropicRequest
+		// will handle alternation. This keeps nudges AFTER tool results
+		// in conversation flow and preserves cache for earlier messages.
+		currentMessages = append(currentMessages, Message{Role: "user", Content: "[System] " + text})
+	}
+
 	// toolCallHistory caches tool results for deduplication across rounds.
 	// No mutex is needed because tools execute sequentially (each tool call
 	// blocks via select until completion before the next one starts).
@@ -1568,6 +1584,7 @@ func StreamWithTools(
 	consecutiveToolRounds := 0
 	consecutiveEmptyResponses := 0
 	nudged := false
+	stripped := false
 	rateLimitRetries := 0
 	transientRetries := 0
 	prevToolResultRange := [2]int{0, 0} // [start, end) of previous round's tool result messages
@@ -1602,10 +1619,10 @@ func StreamWithTools(
 			roundTools = opts[0].FilterTools(roundTools)
 		}
 		if consecutiveToolRounds >= stripAfter {
-			currentMessages = append(currentMessages, Message{
-				Role:    "system",
-				Content: "FINAL WARNING: You MUST generate your complete response NOW. All tools have been removed. Use the information you have already gathered.",
-			})
+			if !stripped {
+				appendToLastUserMsg("FINAL WARNING: You MUST generate your complete response NOW. All tools have been removed. Use the information you have already gathered.")
+				stripped = true
+			}
 			roundTools = nil
 			slog.Warn("Stripping tools to force final response", "round", round, "consecutive_tool_rounds", consecutiveToolRounds)
 		} else if consecutiveToolRounds >= nudgeAfter && !nudged {
@@ -1613,10 +1630,7 @@ func StreamWithTools(
 			if len(opts) > 0 && opts[0].NudgeMessage != "" {
 				nudgeContent = opts[0].NudgeMessage
 			}
-			currentMessages = append(currentMessages, Message{
-				Role:    "system",
-				Content: nudgeContent,
-			})
+			appendToLastUserMsg(nudgeContent)
 			nudged = true
 			slog.Warn("Injecting stop-researching nudge (tools still available)", "round", round, "consecutive_tool_rounds", consecutiveToolRounds)
 		}
@@ -1949,10 +1963,7 @@ func StreamWithTools(
 					return "", fmt.Errorf("LLM returned empty content %d consecutive times", consecutiveEmptyResponses)
 				}
 				// No text content either — retry one more round with an explicit instruction
-				currentMessages = append(currentMessages, Message{
-					Role:    "system",
-					Content: "Your previous response was empty. Please generate your final response as plain text now.",
-				})
+				appendToLastUserMsg("Your previous response was empty. Please generate your final response as plain text now.")
 				continue
 			}
 			consecutiveToolRounds++
@@ -2117,16 +2128,10 @@ func StreamWithTools(
 					consecutiveToolRounds = stripAfter
 				}
 				if interceptCount == len(toolCalls) {
-					currentMessages = append(currentMessages, Message{
-						Role:    "system",
-						Content: "All your tool calls in this round were served from memory. Move on to files that have NOT been created yet, or provide a summary to the user if all files are done.",
-					})
+					appendToLastUserMsg("All your tool calls in this round were served from memory. Move on to files that have NOT been created yet, or provide a summary to the user if all files are done.")
 					slog.Warn("All tool calls intercepted, accelerating nudge", "round", round, "intercept_count", interceptCount, "consecutive_tool_rounds", consecutiveToolRounds)
 				} else {
-					currentMessages = append(currentMessages, Message{
-						Role:    "system",
-						Content: "All your tool calls in this round returned cached results — you already have this information. Stop making redundant tool calls and produce your final response.",
-					})
+					appendToLastUserMsg("All your tool calls in this round returned cached results — you already have this information. Stop making redundant tool calls and produce your final response.")
 					slog.Warn("All tool calls deduped, accelerating nudge", "round", round, "dedup_count", dedupCount, "consecutive_tool_rounds", consecutiveToolRounds)
 				}
 			}
@@ -2160,10 +2165,7 @@ func StreamWithTools(
 			allIntercepted := interceptCount > 0 && interceptCount == len(toolCalls)
 			if roundTools != nil && len(opts) > 0 && opts[0].AfterToolRound != nil {
 				if msg := opts[0].AfterToolRound(allIntercepted); msg != "" {
-					currentMessages = append(currentMessages, Message{
-						Role:    "system",
-						Content: msg,
-					})
+					appendToLastUserMsg(msg)
 				}
 			}
 
