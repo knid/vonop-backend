@@ -23,6 +23,7 @@ type UserInformationResponse struct {
 	TrialUsed          bool      `json:"trial_used"`
 	SetupFinished      bool      `json:"setup_finished"`
 	CreatedAt          time.Time `json:"created_at"`
+	IsNewUser          bool      `json:"is_new_user"`
 }
 
 type UserLoginResponse struct {

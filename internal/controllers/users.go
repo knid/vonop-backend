@@ -42,6 +42,9 @@ func (c *Controller) GetUser(tokenStr string) (*responses.UserInformationRespons
 		return nil, err
 	}
 
+	// Determine if user has ever used credits (for welcome experience)
+	hasUsage, _ := c.DB.HasUsageTransactions(user.ID.String())
+
 	return &responses.UserInformationResponse{
 		ID:                 user.ID,
 		Name:               user.Name,
@@ -59,6 +62,7 @@ func (c *Controller) GetUser(tokenStr string) (*responses.UserInformationRespons
 		SetupFinished:      user.SetupFinished,
 		TrialUsed:          user.TrialUsed,
 		CreatedAt:          user.CreatedAt,
+		IsNewUser:          !hasUsage,
 	}, nil
 }
 
@@ -103,6 +107,8 @@ func (c *Controller) UpdateUser(user *models.User, userUpdateReq requests.UserUp
 		return nil, err
 	}
 
+	hasUsage, _ := c.DB.HasUsageTransactions(updatedUser.ID.String())
+
 	return &responses.UserInformationResponse{
 		ID:                 updatedUser.ID,
 		Name:               updatedUser.Name,
@@ -120,6 +126,7 @@ func (c *Controller) UpdateUser(user *models.User, userUpdateReq requests.UserUp
 		SetupFinished:      updatedUser.SetupFinished,
 		TrialUsed:          updatedUser.TrialUsed,
 		CreatedAt:          updatedUser.CreatedAt,
+		IsNewUser:          !hasUsage,
 	}, nil
 }
 
@@ -206,6 +213,7 @@ func (c *Controller) RegisterUser(userRegisterReq requests.UserRegisterRequest) 
 		SetupFinished:      createdUser.SetupFinished,
 		TrialUsed:          createdUser.TrialUsed,
 		CreatedAt:          createdUser.CreatedAt,
+		IsNewUser:          true,
 	}, nil
 }
 
