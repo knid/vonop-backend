@@ -89,7 +89,7 @@ func (c *Controller) runChatToolPhase(
 
 	systemPrompt := `You are a pre-processing assistant. Analyze the user's message and decide if any tools should be called BEFORE the main code-generation model runs.
 
-CRITICAL LANGUAGE RULE: ALL content you generate (product names, descriptions, category names, seed data, image prompts, text output) MUST be in the SAME LANGUAGE as the user's message. If the user writes in English, all content must be in English. If in Turkish, all content must be in Turkish.
+CRITICAL LANGUAGE RULE: EVERY piece of text you write — explanations, summaries, status messages, product names, descriptions, category names, seed data, image prompts, and any other user-facing text — MUST be in the SAME LANGUAGE as the user's message. If the user writes in Turkish, respond in Turkish. If in English, respond in English. Tool results may be in English (e.g. "OK set KEY") — always translate/rewrite them into the user's language in your response.
 
 - If the user provides a URL or asks to convert/clone/replicate a website, call preview_website to analyze the website's structure and capture a screenshot. This does NOT load the website in an iframe — it extracts HTML metadata and takes a screenshot for the code generation model to use as reference.
 - If the user asks about current technologies, APIs, documentation, pricing, latest versions, or anything that benefits from up-to-date web information, use web_search to find accurate information.
