@@ -16,11 +16,12 @@ func (v *HttpViews) SubmitKadinGirisimciler(w http.ResponseWriter, r *http.Reque
 	}
 
 	isimSoyisim := r.FormValue("isim_soyisim")
+	telefon := r.FormValue("telefon")
 	dogumTarihi := r.FormValue("dogum_tarihi")
 	kullanimAmaci := r.FormValue("kullanim_amaci")
 
-	if isimSoyisim == "" || dogumTarihi == "" || kullanimAmaci == "" {
-		utils.JSONErrorResponse(w, "isim_soyisim, dogum_tarihi, and kullanim_amaci are required", http.StatusBadRequest)
+	if isimSoyisim == "" || telefon == "" || dogumTarihi == "" || kullanimAmaci == "" {
+		utils.JSONErrorResponse(w, "isim_soyisim, telefon, dogum_tarihi, and kullanim_amaci are required", http.StatusBadRequest)
 		return
 	}
 
@@ -33,6 +34,7 @@ func (v *HttpViews) SubmitKadinGirisimciler(w http.ResponseWriter, r *http.Reque
 
 	sub := controllers.KadinGirisimcilerSubmission{
 		IsimSoyisim:   isimSoyisim,
+		Telefon:       telefon,
 		DogumTarihi:   dogumTarihi,
 		KullanimAmaci: kullanimAmaci,
 		File:          file,

@@ -12,6 +12,7 @@ import (
 
 type KadinGirisimcilerSubmission struct {
 	IsimSoyisim   string
+	Telefon       string
 	DogumTarihi   string
 	KullanimAmaci string
 	File          multipart.File
@@ -22,9 +23,10 @@ func (c *Controller) SubmitKadinGirisimciler(sub KadinGirisimcilerSubmission) er
 	msg := fmt.Sprintf(
 		"*Yeni Kadin Girisimciler Basvurusu*\n\n"+
 			"*Isim Soyisim:* %s\n"+
+			"*Telefon:* %s\n"+
 			"*Dogum Tarihi:* %s\n"+
 			"*Kullanim Amaci:* %s",
-		sub.IsimSoyisim, sub.DogumTarihi, sub.KullanimAmaci,
+		sub.IsimSoyisim, sub.Telefon, sub.DogumTarihi, sub.KullanimAmaci,
 	)
 
 	// Send the text message first
