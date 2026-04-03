@@ -1562,17 +1562,19 @@ func StreamWithTools(
 	currentMessages := make([]Message, len(messages))
 	copy(currentMessages, messages)
 
-	// appendToLastUserMsg appends text to the last user message in the slice,
-	// preserving message array structure for Anthropic prompt caching.
+	// appendToLastUserMsg appends text to the last message if it's a user message,
+	// or creates a new user message at the end. This keeps nudges AFTER tool results
+	// in conversation flow and preserves cache for earlier messages.
 	appendToLastUserMsg := func(text string) {
-		for i := len(currentMessages) - 1; i >= 0; i-- {
-			if currentMessages[i].Role == "user" {
-				currentMessages[i].Content += "\n\n[System] " + text
-				return
-			}
+		last := len(currentMessages) - 1
+		if last >= 0 && currentMessages[last].Role == "user" {
+			currentMessages[last].Content += "\n\n[System] " + text
+			return
 		}
-		// Fallback: no user message found, append as system (rare edge case)
-		currentMessages = append(currentMessages, Message{Role: "system", Content: text})
+		// Append a new user message at the end — convertToAnthropicRequest
+		// will handle alternation. This keeps nudges AFTER tool results
+		// in conversation flow and preserves cache for earlier messages.
+		currentMessages = append(currentMessages, Message{Role: "user", Content: "[System] " + text})
 	}
 
 	// toolCallHistory caches tool results for deduplication across rounds.
@@ -1582,6 +1584,7 @@ func StreamWithTools(
 	consecutiveToolRounds := 0
 	consecutiveEmptyResponses := 0
 	nudged := false
+	stripped := false
 	rateLimitRetries := 0
 	transientRetries := 0
 	prevToolResultRange := [2]int{0, 0} // [start, end) of previous round's tool result messages
@@ -1616,7 +1619,10 @@ func StreamWithTools(
 			roundTools = opts[0].FilterTools(roundTools)
 		}
 		if consecutiveToolRounds >= stripAfter {
-			appendToLastUserMsg("FINAL WARNING: You MUST generate your complete response NOW. All tools have been removed. Use the information you have already gathered.")
+			if !stripped {
+				appendToLastUserMsg("FINAL WARNING: You MUST generate your complete response NOW. All tools have been removed. Use the information you have already gathered.")
+				stripped = true
+			}
 			roundTools = nil
 			slog.Warn("Stripping tools to force final response", "round", round, "consecutive_tool_rounds", consecutiveToolRounds)
 		} else if consecutiveToolRounds >= nudgeAfter && !nudged {
