@@ -2114,11 +2114,12 @@ func StreamWithTools(
 				toolResultStartIdx = 0
 			}
 
-			// If all tool calls were deduped or intercepted, accelerate toward nudge/strip.
-			// Use an additive bump (~20% of nudgeAfter, min 2) instead of jumping directly
-			// to threshold — a single wasted round shouldn't trigger premature nudging.
-			wastedCount := dedupCount + interceptCount
-			if wastedCount > 0 && wastedCount == len(toolCalls) {
+			// Accelerate toward nudge/strip only when the LLM repeats calls it already
+			// made (deduped). Intercepted calls are NOT wasted — they serve fresh data
+			// from an in-memory source (e.g. fileMap) that the LLM needs for edits.
+			// Require at least one dedup to trigger; pure-intercept rounds provide new
+			// data and should proceed normally.
+			if dedupCount > 0 && dedupCount+interceptCount == len(toolCalls) {
 				bump := nudgeAfter / 5
 				if bump < 2 {
 					bump = 2
@@ -2127,13 +2128,8 @@ func StreamWithTools(
 				if consecutiveToolRounds > stripAfter {
 					consecutiveToolRounds = stripAfter
 				}
-				if interceptCount == len(toolCalls) {
-					appendToLastUserMsg("All your tool calls in this round were served from memory. Move on to files that have NOT been created yet, or provide a summary to the user if all files are done.")
-					slog.Warn("All tool calls intercepted, accelerating nudge", "round", round, "intercept_count", interceptCount, "consecutive_tool_rounds", consecutiveToolRounds)
-				} else {
-					appendToLastUserMsg("All your tool calls in this round returned cached results — you already have this information. Stop making redundant tool calls and produce your final response.")
-					slog.Warn("All tool calls deduped, accelerating nudge", "round", round, "dedup_count", dedupCount, "consecutive_tool_rounds", consecutiveToolRounds)
-				}
+				appendToLastUserMsg("All your tool calls in this round returned cached results — you already have this information. Stop making redundant tool calls and produce your final response.")
+				slog.Warn("All tool calls deduped, accelerating nudge", "round", round, "dedup_count", dedupCount, "intercept_count", interceptCount, "consecutive_tool_rounds", consecutiveToolRounds)
 			}
 
 			// Trim assistant content, tool call arguments, and tool results to reduce history tokens.
