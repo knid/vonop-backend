@@ -365,6 +365,174 @@ func buildChatSystemPrompt(project *models.AppProject, mobileConfig *models.Mobi
 	return prompt
 }
 
+// buildUnifiedChatSystemPrompt assembles the system prompt for the unified
+// single-call chat path that combines tool usage and code generation.
+func buildUnifiedChatSystemPrompt(project *models.AppProject, mobileConfig *models.MobileAppConfig) string {
+	var prompt string
+	if project.ProjectType == "ecommerce" {
+		prompt = constants.NEXTJS_ECOMMERCE_COMMON_RULES + constants.NEXTJS_BUILDER_UNIFIED_CHAT_INSTRUCTIONS
+	} else {
+		prompt = constants.NEXTJS_BUILDER_UNIFIED_CHAT_PROMPT
+		if projectHasDataModels(project) {
+			prompt += constants.NEXTJS_BUILDER_DATABASE_RULES
+		}
+	}
+
+	if settings := project.Settings; settings != nil {
+		if needsAuth, ok := settings["needs_auth"].(bool); ok && needsAuth {
+			prompt += constants.NEXTJS_BUILDER_AUTH_RULES
+		}
+	}
+
+	if project.ProjectType == "mobile_app" {
+		prompt += constants.NEXTJS_BUILDER_MOBILE_RULES
+		prompt += constants.BuildBridgeSDKRules(constants.ALL_BRIDGE_METHODS)
+	}
+
+	return prompt
+}
+
+// buildFileListContext builds the project context with file paths and sizes only
+// (no file contents). The model reads files on-demand via the read_file tool.
+func (c *Controller) buildFileListContext(project *models.AppProject, fileMap map[string]string) string {
+	var sb strings.Builder
+
+	sb.WriteString(fmt.Sprintf("App: %s (slug: %s)\n", project.Name, project.Slug))
+	sb.WriteString(fmt.Sprintf("Project type: %s\n", project.ProjectType))
+
+	// Inject persisted project memory
+	if memCtx := c.buildProjectMemoryContext(project.ID.String()); memCtx != "" {
+		sb.WriteString(memCtx)
+	}
+
+	// Logo URL
+	if logoURL := c.getProjectLogoURL(project); logoURL != "" {
+		sb.WriteString(fmt.Sprintf("\nApp Logo URL (use this as the site logo in the header/navbar via next/image and as the favicon in metadata — do not use text for the brand name, always use this logo image):\n%s\n", logoURL))
+	}
+
+	// Theme
+	var theme map[string]any
+	if len(project.Theme) > 0 && project.Theme[0] == '{' {
+		if err := json.Unmarshal(project.Theme, &theme); err != nil {
+			slog.Warn("failed to unmarshal project theme", "error", err, "project_id", project.ID)
+		}
+	} else if len(project.Theme) > 0 {
+		var raw string
+		if json.Unmarshal(project.Theme, &raw) == nil && len(raw) > 0 && raw[0] == '{' {
+			if err := json.Unmarshal([]byte(raw), &theme); err != nil {
+				slog.Warn("failed to unmarshal double-encoded project theme", "error", err, "project_id", project.ID)
+			}
+		}
+	}
+	if len(theme) > 0 {
+		sb.WriteString(fmt.Sprintf("Theme: %v\n", theme))
+	}
+
+	// Installed UI components
+	if components := detectInstalledUIComponents(fileMap); len(components) > 0 {
+		sb.WriteString("\n### Installed UI Components (USE THESE — do not rebuild from scratch)\n")
+		sb.WriteString("Import from @/components/ui/<name>. Available:\n")
+		for _, comp := range components {
+			sb.WriteString(fmt.Sprintf("- %s\n", comp))
+		}
+	}
+
+	// File list (paths + sizes only)
+	if len(fileMap) > 0 {
+		paths := make([]string, 0, len(fileMap))
+		for p := range fileMap {
+			paths = append(paths, p)
+		}
+		sort.Strings(paths)
+
+		sb.WriteString("\nAll project files (call read_file to see content):\n")
+		for _, fp := range paths {
+			if isSecretFile(fp) {
+				continue
+			}
+			sb.WriteString(fmt.Sprintf("- %s (%d chars)\n", fp, len(fileMap[fp])))
+		}
+	}
+
+	// User-uploaded assets
+	chatAssets, _ := c.DB.GetAppAssetsByProjectID(project.ID.String())
+	if len(chatAssets) > 0 {
+		sb.WriteString("\nUser-uploaded assets (use these URLs directly in code):\n")
+		for _, a := range chatAssets {
+			sb.WriteString(fmt.Sprintf("- %s (%s) → %s\n", a.FileName, a.ContentType, a.PublicURL))
+		}
+	} else {
+		sb.WriteString("\nNo user-uploaded assets. If the user's request requires custom files (3D models, fonts, images, videos, etc.), tell them to upload the files first using the Assets button (paperclip icon) in the chat toolbar.\n")
+	}
+
+	// Available imports
+	sb.WriteString(buildAvailableImportsSection(fileMap))
+
+	return sb.String()
+}
+
+// buildSimpleChatHistory builds conversation history for the unified chat path.
+// Keeps last keepRecent messages with full content, truncates older messages.
+// No LLM summarization — just simple truncation.
+func buildSimpleChatHistory(
+	conv *models.AppConversation,
+	messages []models.AppConversationMessage,
+	provider *utils.LLMProvider,
+	imageURLs []string,
+	keepRecent int,
+) []utils.Message {
+	var history []utils.Message
+
+	// Include existing summary if available (backwards compatible)
+	if conv.Summary != "" {
+		history = append(history, utils.Message{
+			Role:    "user",
+			Content: fmt.Sprintf("[Earlier conversation summary]\n%s", utils.SanitizePromptContent(conv.Summary)),
+		})
+		history = append(history, utils.Message{
+			Role:    "assistant",
+			Content: "I understand the earlier context. Let me continue from where we left off.",
+		})
+	}
+
+	if len(messages) <= keepRecent {
+		// All messages fit — include them all with full content
+		history = append(history, chatMessagesToLLM(messages, provider, imageURLs)...)
+		return history
+	}
+
+	// Truncate older messages, keep recent ones full
+	olderMessages := messages[:len(messages)-keepRecent]
+	recentMessages := messages[len(messages)-keepRecent:]
+
+	// Older messages: truncated content + file operations summary
+	for _, msg := range olderMessages {
+		content := msg.Content
+		if len(content) > 200 {
+			content = content[:200] + "..."
+		}
+		if len(msg.FileOperations) > 0 {
+			var ops []string
+			for _, op := range msg.FileOperations {
+				ops = append(ops, fmt.Sprintf("%s %s", op.Action, op.FilePath))
+			}
+			content += fmt.Sprintf("\n[Files: %s]", strings.Join(ops, ", "))
+		}
+		history = append(history, utils.Message{Role: msg.Role, Content: content})
+	}
+
+	// Recent messages: full content
+	history = append(history, chatMessagesToLLM(recentMessages, provider, imageURLs)...)
+
+	// Prune heavy fields from older messages in the DB to prevent blob growth
+	for i := range olderMessages {
+		messages[i].ThinkingText = ""
+		messages[i].ToolCalls = nil
+	}
+
+	return history
+}
+
 // buildSingleShotSystemPrompt assembles the system prompt for single-shot initial
 // generation using <file> block output format instead of tool calls.
 // NOTE: Does NOT include MOBILE_CONFIG_TOOL_RULES because single-shot uses
@@ -524,6 +692,10 @@ func (s contextFileSelection) All() map[string]bool {
 	return all
 }
 
+// Deprecated: selectContextFiles is no longer used by the unified chat path.
+// The model reads files on-demand via the read_file tool.
+// Kept temporarily for reference. Remove after verifying unified path works.
+//
 // selectContextFiles uses a fast LLM call to pick the most relevant files for
 // the user's current message. Returns a contextFileSelection that distinguishes
 // LLM-selected files (primary) from graph-expanded files (secondary) so the

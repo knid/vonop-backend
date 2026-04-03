@@ -1555,7 +1555,7 @@ func StreamWithTools(
 		if opts[0].MaxTokens > 0 {
 			maxTokens = opts[0].MaxTokens
 		}
-		if opts[0].MaxContinuations != 0 {
+		if opts[0].MaxContinuations != 0 { // 0 = use default; -1 = disable; positive = explicit limit
 			maxContinuations = opts[0].MaxContinuations
 		}
 	}

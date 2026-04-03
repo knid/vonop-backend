@@ -42,6 +42,8 @@ type chatToolPhaseResult struct {
 	ResponseText string   // Phase 1's final text response (used as assistant message when SkipPhase2)
 }
 
+// Deprecated: runChatToolPhase is no longer used by the unified chat path.
+// Kept temporarily for reference. Remove after verifying unified path works.
 func (c *Controller) runChatToolPhase(
 	ctx context.Context,
 	project *models.AppProject,
@@ -510,6 +512,154 @@ CRITICAL LANGUAGE RULE: EVERY piece of text you write — explanations, summarie
 		SkipPhase2:   true,
 		ResponseText: strings.TrimSpace(result),
 	}
+}
+
+// buildUnifiedChatTools returns the tools list and executor for the unified
+// single-call chat path. Same tools as Phase 1, but used in a single
+// StreamWithTools call that also handles code generation.
+func (c *Controller) buildUnifiedChatTools(
+	ctx context.Context,
+	project *models.AppProject,
+	provider *utils.LLMProvider,
+	repo *gitrepo.Repo,
+	fileMap map[string]string,
+	sendEvent func(string, any) bool,
+	userLimits *models.StandartUserLimits,
+) ([]utils.Tool, utils.ToolExecutor, *[]string) {
+	tools := []utils.Tool{
+		chatPreviewWebsiteTool,
+		chatManageEnvVarsTool,
+		chatInstallPackageTool,
+		chatGenerateImageTool,
+		chatTakeScreenshotTool,
+		chatSearchComponentsTool,
+		chatManageAssetsTool,
+		chatReadFileTool,
+		chatListFilesTool,
+		chatDiffFilesTool,
+		chatGitLogTool,
+	}
+	if project.ProjectType == "ecommerce" {
+		tools = append(tools, chatManageStoreTool)
+	}
+	if c.neonConnString(project.ID.String()) != "" {
+		tools = append(tools, chatSeedDatabaseTool, chatExecuteSQLTool, chatRunMigrationsTool)
+	}
+	if project.ProjectType == "mobile_app" {
+		tools = append(tools, chatConfigureMobileAppTool)
+	}
+	if ws := provider.WebSearchTool(); ws != nil {
+		tools = append(tools, *ws)
+	}
+
+	var collectedContext strings.Builder
+	var screenshots []string
+
+	executor := func(name string, arguments string) (string, error) {
+		if tracker := utils.TokenTrackerFromContext(ctx); tracker != nil {
+			tracker.RecordToolUsed(name)
+		}
+		switch name {
+		case "preview_website":
+			return c.executeChatPreviewWebsite(arguments, project, sendEvent, &collectedContext, &screenshots)
+		case "manage_store":
+			return c.executeChatManageStore(arguments, project, sendEvent, &collectedContext)
+		case "seed_database":
+			return c.executeChatSeedDatabase(ctx, project, sendEvent, &collectedContext)
+		case "execute_sql":
+			return c.executeChatExecuteSQL(ctx, arguments, project, &collectedContext)
+		case "run_migrations":
+			return c.executeChatRunMigrations(ctx, arguments, project, repo, fileMap, sendEvent, &collectedContext)
+		case "manage_env_vars":
+			return c.executeChatManageEnvVars(arguments, project, repo, fileMap, sendEvent, &collectedContext)
+		case "install_package":
+			return c.executeChatInstallPackage(arguments, project, repo, fileMap, sendEvent, &collectedContext)
+		case "generate_image":
+			return c.executeChatGenerateImage(ctx, arguments, project, sendEvent, &collectedContext)
+		case "take_screenshot":
+			return c.executeChatTakeScreenshot(arguments, &collectedContext, &screenshots)
+		case "search_components":
+			return c.executeChatSearchComponents(arguments, project, repo, fileMap, sendEvent, &collectedContext)
+		case "configure_mobile_app":
+			return c.executeChatConfigureMobileApp(arguments, project, sendEvent, &collectedContext)
+		case "read_file":
+			var args struct {
+				FilePath string `json:"file_path"`
+			}
+			if err := json.Unmarshal([]byte(arguments), &args); err != nil {
+				return fmt.Sprintf("Error: invalid arguments: %s", err.Error()), nil
+			}
+			content, ok := fileMap[args.FilePath]
+			if !ok {
+				return fmt.Sprintf("Error: file '%s' not found in project", args.FilePath), nil
+			}
+			return content, nil
+		case "list_files":
+			var lines []string
+			for path, content := range fileMap {
+				lines = append(lines, fmt.Sprintf("%s (%d chars)", path, len(content)))
+			}
+			sort.Strings(lines)
+			return strings.Join(lines, "\n"), nil
+		case "diff_files":
+			var args struct {
+				FromCommit string `json:"from_commit"`
+				ToCommit   string `json:"to_commit"`
+			}
+			if err := json.Unmarshal([]byte(arguments), &args); err != nil {
+				return "Invalid arguments", nil
+			}
+			if args.FromCommit == "" {
+				diff, err := repo.DiffLastCommit()
+				if err != nil {
+					return fmt.Sprintf("Error: %s", err.Error()), nil
+				}
+				if diff == "" {
+					return "No changes in the last commit.", nil
+				}
+				return diff, nil
+			}
+			diff, err := repo.Diff(args.FromCommit, args.ToCommit)
+			if err != nil {
+				return fmt.Sprintf("Error: %s", err.Error()), nil
+			}
+			if diff == "" {
+				return "No differences found.", nil
+			}
+			return diff, nil
+		case "git_log":
+			var args struct {
+				Limit int `json:"limit"`
+			}
+			if err := json.Unmarshal([]byte(arguments), &args); err != nil {
+				args.Limit = 10
+			}
+			if args.Limit <= 0 {
+				args.Limit = 10
+			}
+			if args.Limit > 50 {
+				args.Limit = 50
+			}
+			commits, err := repo.Log(args.Limit)
+			if err != nil {
+				return fmt.Sprintf("Error: %s", err.Error()), nil
+			}
+			if len(commits) == 0 {
+				return "No commits found.", nil
+			}
+			var lines []string
+			for _, cm := range commits {
+				lines = append(lines, fmt.Sprintf("%s  %s  %s", cm.Hash[:8], cm.Timestamp.Format("2006-01-02 15:04"), cm.Message))
+			}
+			return strings.Join(lines, "\n"), nil
+		case "manage_assets":
+			return c.executeChatManageAssets(arguments, project, sendEvent, &collectedContext)
+		default:
+			return fmt.Sprintf("Unknown tool: %s", name), nil
+		}
+	}
+
+	return tools, executor, &screenshots
 }
 
 // preGenContext holds the results of the pre-generation web search + screenshot phase.
@@ -1407,9 +1557,9 @@ func (c *Controller) executeChatTakeScreenshot(
 	b64 := base64.StdEncoding.EncodeToString(imgData)
 	*screenshots = append(*screenshots, "data:image/png;base64,"+b64)
 
-	collectedContext.WriteString(fmt.Sprintf("\n[Screenshot Captured]\nURL: %s\nA desktop screenshot (1280x800) has been captured and will be provided as an image to the code generation model for accurate visual reference.\n", targetURL))
+	collectedContext.WriteString(fmt.Sprintf("\n[Screenshot Captured]\nURL: %s\nA desktop screenshot (1280x800) has been captured.\n", targetURL))
 	slog.Info("take_screenshot tool called", "url", targetURL, "size_bytes", len(imgData))
-	return "Screenshot captured successfully. The image will be provided to the code generation model.", nil
+	return fmt.Sprintf("Screenshot captured successfully for %s. Use the website analysis text to understand the design — exact colors, layout, and structure are described in the analysis.", targetURL), nil
 }
 
 // executeChatConfigureMobileApp handles the configure_mobile_app tool during
