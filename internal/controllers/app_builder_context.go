@@ -964,10 +964,12 @@ func (c *Controller) buildProjectContext(project *models.AppProject, fileMap map
 
 	// Integration context
 	appIntegrations, _ := c.DB.GetAppIntegrationsByProjectID(project.ID.String())
+	connectedProviders := make(map[string]bool)
 	hasPaymentGateway := false
 	if len(appIntegrations) > 0 {
 		sb.WriteString("\nConnected integrations:\n")
 		for _, integ := range appIntegrations {
+			connectedProviders[integ.Provider] = true
 			config, err := integrations.GetProviderConfig(integ.Provider)
 			if err != nil {
 				sb.WriteString(fmt.Sprintf("- %s (status: %s)\n", integ.Provider, integ.Status))
@@ -985,6 +987,19 @@ func (c *Controller) buildProjectContext(project *models.AppProject, fileMap map
 				hasPaymentGateway = true
 			}
 		}
+	}
+
+	// Available (not-yet-connected) integrations — so the LLM knows to suggest
+	// "connect the X integration" instead of "add X_API_KEY as an env var".
+	var availableProviders []string
+	for _, p := range constants.IntegrationProviders {
+		if !connectedProviders[p.Provider] {
+			availableProviders = append(availableProviders, fmt.Sprintf("%s (%s)", p.Name, p.Provider))
+		}
+	}
+	if len(availableProviders) > 0 {
+		sb.WriteString("\nAvailable integrations (not connected yet): " + strings.Join(availableProviders, ", ") + "\n")
+		sb.WriteString("IMPORTANT: If the user needs an API key or credentials for any of these services, tell them to connect the integration from the Integrations panel instead of adding a manual environment variable.\n")
 	}
 
 	// E-commerce store context
