@@ -15,6 +15,10 @@ import (
 	"github.com/knid/wemob/internal/utils"
 )
 
+// Deprecated: summarizeConversation is no longer used by the unified chat path.
+// Conversation history uses simple truncation instead.
+// Kept temporarily for reference. Remove after verifying unified path works.
+//
 // summarizeConversation generates a concise summary of older conversation messages.
 // If the LLM call fails and existingSummary is non-empty, it is preserved instead of
 // generating a lossy fallback.

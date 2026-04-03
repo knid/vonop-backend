@@ -198,14 +198,7 @@ func (c *Controller) StreamBuildApp(
 		if model == "" {
 			model = provider.DefaultModel()
 		}
-		// Override to Opus if user requests high reasoning
-		if reasoningEffort == "high" || reasoningEffort == "xhigh" {
-			if provider.IsAnthropic() {
-				model = "claude-opus-4-6"
-			} else {
-				model = "anthropic/claude-opus-4-6"
-			}
-		}
+		// No Opus switching — always Sonnet, reasoning effort handled via ReasoningConfig
 	}
 
 	// --- User plan limits (used for DB provisioning) ---
@@ -458,8 +451,6 @@ func (c *Controller) StreamBuildApp(
 
 	// --- Build LLM messages ---
 	var llmMessages []utils.Message
-	var selectedFiles contextFileSelection // hoisted so Phase 1 can refresh project context
-
 	// Add conversation history
 	if isInitialGeneration {
 		llmMessages = []utils.Message{
@@ -476,69 +467,45 @@ func (c *Controller) StreamBuildApp(
 		}
 		llmMessages = append(llmMessages, userMsg)
 	} else {
-		// Chat path: start file selection in background while we prepare conversation history.
-		// File selection and the tool phase (started later) are independent LLM calls
-		// that can overlap, saving ~2s of latency per chat message.
-		var fileSelWG sync.WaitGroup
-		fileSelWG.Add(1)
-		go func() {
-			defer fileSelWG.Done()
-			selectedFiles = c.selectContextFiles(ctx, provider, fileMap, message, messages)
-		}()
+		// Chat path: unified single-call with tools.
+		// Build system prompt, file list context, conversation history, and tools,
+		// then make a single StreamWithTools call that can read files on-demand.
 
-		// Prepare static system prompt (doesn't depend on file selection)
-		chatSystemPrompt := buildChatSystemPrompt(project, mobileConfig)
+		// 1. Build unified system prompt
+		chatSystemPrompt := buildUnifiedChatSystemPrompt(project, mobileConfig)
 
-		// Build conversation history while file selection runs in the background
-		var chatHistory []utils.Message
-		chatHistory = append(chatHistory, utils.Message{Role: "user", Content: "I understand the current project state. What would you like me to do?"})
+		// 2. Build file list context (paths + sizes only; model reads on-demand)
+		fileListContext := c.buildFileListContext(project, fileMap)
 
-		keepRecent := c.RemoteConfig.GetInt(remoteconfig.AIChatKeepRecent, remoteconfig.Global)
-		summarizeThreshold := c.RemoteConfig.GetInt(remoteconfig.AIChatSummarizeThreshold, remoteconfig.Global)
-
-		if len(messages) > summarizeThreshold {
-			oldMessages := messages[:len(messages)-keepRecent]
-			needsSummary := conv.Summary == "" || (len(oldMessages) > summarizeThreshold && len(oldMessages)%10 < 2)
-			if needsSummary && len(oldMessages) > 0 {
-				conv.Summary = c.summarizeConversation(ctx, oldMessages, provider, conv.Summary)
-				// Prune heavy fields from old messages to prevent the conversation
-				// JSONB blob from growing unboundedly over many edits.
-				for i := range oldMessages {
-					messages[i].FileOperations = nil
-					messages[i].ThinkingText = ""
-					messages[i].ToolCalls = nil
-				}
-				if msgJSON, err := json.Marshal(messages); err != nil {
-					slog.Error("failed to marshal messages after summarization", "error", err, "conv_id", conv.ID)
-				} else {
-					conv.Messages = msgJSON
-					if _, err := c.DB.UpdateAppConversation(conv); err != nil {
-						slog.Error("failed to save conversation after summarization", "error", err, "conv_id", conv.ID)
+		// 3. Add DB schema to system prompt if project has database
+		if c.neonConnString(project.ID.String()) != "" {
+			dataModels, err := parseDataModels(project.DataModels)
+			if err != nil {
+				slog.Warn("failed to parse data models for chat system prompt", "error", err)
+			}
+			if len(dataModels) > 0 {
+				chatSystemPrompt += "\n\n### Database Schema\n"
+				for _, dm := range dataModels {
+					chatSystemPrompt += fmt.Sprintf("Table: %s\n  Columns: ", dm.Name)
+					for i, col := range dm.Columns {
+						if i > 0 {
+							chatSystemPrompt += ", "
+						}
+						chatSystemPrompt += fmt.Sprintf("%s (%s)", col.Name, col.Type)
 					}
+					chatSystemPrompt += "\n"
 				}
+				chatSystemPrompt += "All tables have an auto-generated UUID 'id' column and auto-generated created_at/updated_at timestamps — do NOT provide id, created_at, or updated_at in INSERT statements.\n"
 			}
-			if conv.Summary != "" {
-				chatHistory = append(chatHistory, utils.Message{
-					Role:    "user",
-					Content: fmt.Sprintf("[Earlier conversation summary]\n%s", utils.SanitizePromptContent(conv.Summary)),
-				})
-				chatHistory = append(chatHistory, utils.Message{
-					Role:    "assistant",
-					Content: "I understand the earlier context. Let me continue from where we left off.",
-				})
-			}
-			chatHistory = append(chatHistory, chatMessagesToLLM(messages[len(messages)-keepRecent:], provider, imageURLs)...)
-		} else {
-			chatHistory = append(chatHistory, chatMessagesToLLM(messages, provider, imageURLs)...)
 		}
 
-		// Wait for file selection to complete, then build project context
-		fileSelWG.Wait()
-		projectContext := c.buildProjectContextForChat(project, fileMap, selectedFiles)
+		// 4. Build conversation history
+		keepRecent := c.RemoteConfig.GetInt(remoteconfig.AIChatKeepRecent, remoteconfig.Global)
+		chatHistory := buildSimpleChatHistory(conv, messages, provider, imageURLs, keepRecent)
 
 		llmMessages = []utils.Message{
 			{Role: "system", Content: chatSystemPrompt},
-			{Role: "system", Content: projectContext},
+			{Role: "system", Content: fileListContext},
 		}
 		llmMessages = append(llmMessages, chatHistory...)
 	}
@@ -741,16 +708,22 @@ func (c *Controller) StreamBuildApp(
 		responseText = singleShotText
 		toolAppliedOps = singleShotOps
 	} else {
-		// === File-block path: chat edits ===
-		// Two phases:
-		//   Phase 1 (fast model): Tool-calling with Haiku to detect URLs, preview
-		//     websites, and gather context the code-gen model needs.
-		//   Phase 2 (main model): Single-shot StreamTextFromLLMWithMessages that
-		//     outputs <file> blocks, parsed by FileStreamParser.
+		// === Unified tool-calling path: chat edits ===
+		// Single StreamWithTools call that can read files, preview websites,
+		// manage env vars, etc. while also streaming <file>/<edit>/<delete> blocks.
 
 		var responseBuilder strings.Builder
 		var deletedPaths []string
 		chatFileCounter := 0
+
+		// Track failed edits for retry
+		type failedEditRecord struct {
+			Path    string
+			Search  string
+			Replace string
+		}
+		var failedEdits []failedEditRecord
+
 		parser := &utils.FileStreamParser{
 			DiscardIncomplete: true,
 			OnFile: func(path, content string) {
@@ -779,6 +752,7 @@ func (c *Controller) StreamBuildApp(
 				original, ok := fileMap[path]
 				if !ok {
 					slog.Warn("edit target file not found in fileMap", "path", path)
+					failedEdits = append(failedEdits, failedEditRecord{Path: path, Search: search, Replace: replace})
 					return
 				}
 				result, applied := utils.ApplyEdit(original, search, replace)
@@ -789,6 +763,7 @@ func (c *Controller) StreamBuildApp(
 					}
 					slog.Warn("applyEdit: search text not found",
 						"path", path, "search_preview", preview)
+					failedEdits = append(failedEdits, failedEditRecord{Path: path, Search: search, Replace: replace})
 					return
 				}
 				result = utils.StripCodeFences(result)
@@ -815,7 +790,7 @@ func (c *Controller) StreamBuildApp(
 			},
 		}
 
-		// Reasoning config
+		// Reasoning config — always Sonnet, no Opus switch
 		reasoning := c.reasoningConfig()
 		if reasoningEffort != "" && reasoningEffort != "none" {
 			reasoning = &utils.ReasoningConfig{Effort: reasoningEffort}
@@ -823,146 +798,173 @@ func (c *Controller) StreamBuildApp(
 			reasoning = nil
 		}
 
-		// --- Phase 1: fast model tool-calling (Haiku) ---
-		// Runs a cheap model with tools to detect URLs and gather extra context
-		// before the main code-gen call. If no tools are called the phase is a
-		// near-instant no-op.
-		toolResult := c.runChatToolPhase(ctx, project, provider, repo, message, imageURLs, fileMap, sendEvent, userLimits, messages)
+		// Build tools and executor
+		// NOTE: screenshots from preview_website/take_screenshot are captured but cannot
+		// be attached as vision content mid-conversation (ToolExecutor returns string only).
+		// The text analysis from these tools is still returned to the model via tool results.
+		tools, executor, _ := c.buildUnifiedChatTools(ctx, project, provider, repo, fileMap, sendEvent, userLimits)
 
-		if toolResult.SkipPhase2 {
-			// Phase 1 fully handled the request (data-only operation).
-			// Use Phase 1's streamed text as the final response.
-			slog.Info("Skipping Phase 2: data-only operation handled by Phase 1",
+		slog.Info("Calling LLM for chat (unified tool path)",
+			"model", model,
+			"project_id", project.ID,
+			"message_count", len(llmMessages),
+			"tool_count", len(tools),
+		)
+
+		// Single unified StreamWithTools call
+		_, chatErr := utils.StreamWithTools(
+			ctx, model, llmMessages, tools, provider,
+			nil, // no response format
+			reasoning,
+			executor,
+			func(toolName string, args string) {
+				sendEvent("tool_start", map[string]string{"tool": toolName})
+				accToolCalls = append(accToolCalls, models.AppChatToolCall{
+					Tool:      toolName,
+					Arguments: args,
+				})
+			},
+			func(chunk string) { parser.Feed(chunk) },
+			func(chunk string) {
+				if thinkingStart.IsZero() {
+					thinkingStart = time.Now()
+				}
+				thinkingBuf.WriteString(chunk)
+				sendEvent("chat_thinking", responses.ChatThinkingEvent{Chunk: chunk})
+			},
+			utils.ToolCallConfig{
+				MaxRounds:        10,
+				NudgeAfter:       5,
+				StripAfter:       7,
+				MaxTokens:        65536,
+				MaxContinuations: 3,
+				NudgeMessage:     "You have gathered enough context. Output your code changes now using <file> and <edit> blocks.",
+				OnRoundStart: func(round int) {
+					parser.Flush()
+				},
+			},
+		)
+		parser.Flush()
+		responseText = responseBuilder.String()
+
+		// Retry once if there were failed edits
+		if len(failedEdits) > 0 && chatErr == nil {
+			slog.Info("Retrying failed edits",
 				"project_id", project.ID,
-				"response_len", len(toolResult.ResponseText),
+				"failed_count", len(failedEdits),
 			)
-			responseText = toolResult.ResponseText
-		} else {
-			if toolResult.Context != "" {
-				// Phase 1 tools may have modified files (e.g. run_migrations regenerates
-				// lib/schema.ts, manage_env_vars updates .env.local, install_package
-				// modifies package.json). Rebuild the project context so Phase 2 sees
-				// the latest file state instead of the stale pre-Phase-1 snapshot.
-				refreshedContext := c.buildProjectContextForChat(project, fileMap, selectedFiles)
-				llmMessages[1] = utils.Message{Role: "system", Content: refreshedContext}
-
-				// Inject tool-gathered context as a system message before the user message
-				insertIdx := len(llmMessages) - 1 // before last user message
-				if insertIdx < 0 {
-					insertIdx = 0
+			var retryMsg strings.Builder
+			retryMsg.WriteString("Some edits failed to apply because the search text was not found in the current file. Please re-read the affected files and retry these edits:\n\n")
+			for _, fe := range failedEdits {
+				preview := fe.Search
+				if len(preview) > 200 {
+					preview = preview[:200] + "..."
 				}
-				contextMsg := utils.Message{
-					Role:    "system",
-					Content: toolResult.Context,
-				}
-				llmMessages = append(llmMessages[:insertIdx], append([]utils.Message{contextMsg}, llmMessages[insertIdx:]...)...)
-			}
-			// Attach screenshots as vision images on the last user message
-			if len(toolResult.Screenshots) > 0 && provider.SupportsVision() {
-				lastIdx := len(llmMessages) - 1
-				if lastIdx >= 0 && llmMessages[lastIdx].Role == "user" {
-					llmMessages[lastIdx].Images = append(llmMessages[lastIdx].Images, toolResult.Screenshots...)
-				}
+				retryMsg.WriteString(fmt.Sprintf("- File: %s\n  Search text (not found): %s\n", fe.Path, preview))
 			}
 
-			// --- Phase 2: main model single-shot code generation ---
-			// Signal phase transition so the frontend can clear Phase 1 streaming text
-			// and avoid mixing explanatory text with code-gen output.
-			sendEvent("phase_change", map[string]string{"phase": "codegen"})
-
-			slog.Info("Calling LLM for chat (file-block path)",
-				"model", model,
-				"project_id", project.ID,
-				"message_count", len(llmMessages),
-				"has_tool_context", toolResult.Context != "",
+			failedEdits = nil // reset for retry
+			retryMessages := make([]utils.Message, len(llmMessages))
+			copy(retryMessages, llmMessages)
+			retryMessages = append(retryMessages,
+				utils.Message{Role: "assistant", Content: responseText},
+				utils.Message{Role: "system", Content: retryMsg.String()},
 			)
 
-			_, chatErr := utils.StreamTextFromLLMWithMessages(
-				ctx, model, llmMessages, provider,
+			_, retryErr := utils.StreamWithTools(
+				ctx, model, retryMessages, tools, provider,
+				nil,
+				reasoning,
+				executor,
+				func(toolName string, args string) {
+					sendEvent("tool_start", map[string]string{"tool": toolName})
+				},
 				func(chunk string) { parser.Feed(chunk) },
 				func(chunk string) {
-					if thinkingStart.IsZero() {
-						thinkingStart = time.Now()
-					}
 					thinkingBuf.WriteString(chunk)
 					sendEvent("chat_thinking", responses.ChatThinkingEvent{Chunk: chunk})
 				},
-				utils.StreamTextConfig{
-					MaxTokens: 65536,
-					Reasoning: reasoning,
-					OnRetry: func(attempt int, reason string) {
-						sendEvent("progress", responses.ProgressEvent{
-							Phase:   "generating_files",
-							Message: fmt.Sprintf("Retrying (attempt %d)...", attempt+1),
-						})
+				utils.ToolCallConfig{
+					MaxRounds:        3,
+					NudgeAfter:       2,
+					StripAfter:       3,
+					MaxTokens:        65536,
+					MaxContinuations: 1,
+					NudgeMessage:     "Apply the remaining edits now.",
+					OnRoundStart: func(round int) {
+						parser.Flush()
 					},
 				},
 			)
 			parser.Flush()
+			if retryErr != nil && !errors.Is(retryErr, utils.ErrResponseTruncated) {
+				slog.Warn("Failed edit retry call failed", "error", retryErr, "project_id", project.ID)
+			}
+			// Capture retry output into responseText
 			responseText = responseBuilder.String()
+		}
 
-			// If the LLM only output file blocks with no surrounding text,
-			// generate a minimal summary so the message isn't empty on reload.
-			if strings.TrimSpace(responseText) == "" && len(toolAppliedOps) > 0 {
-				var changedPaths []string
-				for _, op := range toolAppliedOps {
-					changedPaths = append(changedPaths, op.Path)
-				}
-				responseText = fmt.Sprintf("Updated %d file(s): %s", len(changedPaths), strings.Join(changedPaths, ", "))
+		// If the LLM only output file blocks with no surrounding text,
+		// generate a minimal summary so the message isn't empty on reload.
+		if strings.TrimSpace(responseText) == "" && len(toolAppliedOps) > 0 {
+			var changedPaths []string
+			for _, op := range toolAppliedOps {
+				changedPaths = append(changedPaths, op.Path)
 			}
+			responseText = fmt.Sprintf("Updated %d file(s): %s", len(changedPaths), strings.Join(changedPaths, ", "))
+		}
 
-			if chatErr != nil && !errors.Is(chatErr, utils.ErrResponseTruncated) {
-				lastGenErr = chatErr
-				slog.Error("LLM chat call failed", "error", chatErr, "project_id", project.ID)
+		if chatErr != nil && !errors.Is(chatErr, utils.ErrResponseTruncated) {
+			lastGenErr = chatErr
+			slog.Error("LLM chat call failed", "error", chatErr, "project_id", project.ID)
 
-				// Auto-rollback on failure
-				if preSnapshotID != "" && len(toolAppliedOps) > 0 {
-					slog.Info("Auto-rollback: restoring pre-snapshot after failed chat",
-						"project_id", project.ID,
-						"snapshot_id", preSnapshotID,
-						"partial_ops", len(toolAppliedOps),
-					)
-					if _, rollbackErr := repo.RevertAndCommit(preSnapshotID, "auto: rollback after failure"); rollbackErr != nil {
-						slog.Error("Auto-rollback failed", "error", rollbackErr, "project_id", project.ID)
-					} else {
-						sendEvent("rollback", map[string]any{
-							"snapshot_id": preSnapshotID,
-							"reason":      "generation_failed",
-							"rolled_back":     len(toolAppliedOps),
-							"resync_required": true,
-						})
-					}
-				}
-
-				messages = append(messages, models.AppConversationMessage{
-					ID:        uuid.New().String(),
-					Role:      "assistant",
-					Content:   "Sorry, I couldn't process your request. Please try again.",
-					Timestamp: time.Now().Unix(),
-				})
-				if msgJSON, err := json.Marshal(messages); err != nil {
-					slog.Error("failed to marshal messages after LLM error", "error", err, "conv_id", conv.ID)
-				} else {
-					conv.Messages = msgJSON
-					if _, err := c.DB.UpdateAppConversation(conv); err != nil {
-						slog.Error("failed to save conversation after LLM error", "error", err, "conv_id", conv.ID)
-					}
-				}
-				sendError("ai", "failed to generate changes. try again please")
-				return
-			}
-			if errors.Is(chatErr, utils.ErrResponseTruncated) {
-				slog.Warn("Chat codegen truncated (output token limit reached)",
+			// Auto-rollback on failure
+			if preSnapshotID != "" && len(toolAppliedOps) > 0 {
+				slog.Info("Auto-rollback: restoring pre-snapshot after failed chat",
 					"project_id", project.ID,
-					"files_generated", len(toolAppliedOps),
-					"truncated_file", parser.TruncatedPath,
+					"snapshot_id", preSnapshotID,
+					"partial_ops", len(toolAppliedOps),
 				)
-				if parser.TruncatedPath != "" {
-					sendEvent("truncation_warning", map[string]any{
-						"truncated_file":  parser.TruncatedPath,
-						"files_completed": len(toolAppliedOps),
+				if _, rollbackErr := repo.RevertAndCommit(preSnapshotID, "auto: rollback after failure"); rollbackErr != nil {
+					slog.Error("Auto-rollback failed", "error", rollbackErr, "project_id", project.ID)
+				} else {
+					sendEvent("rollback", map[string]any{
+						"snapshot_id":     preSnapshotID,
+						"reason":          "generation_failed",
+						"rolled_back":     len(toolAppliedOps),
+						"resync_required": true,
 					})
 				}
+			}
+
+			messages = append(messages, models.AppConversationMessage{
+				ID:        uuid.New().String(),
+				Role:      "assistant",
+				Content:   "Sorry, I couldn't process your request. Please try again.",
+				Timestamp: time.Now().Unix(),
+			})
+			if msgJSON, err := json.Marshal(messages); err != nil {
+				slog.Error("failed to marshal messages after LLM error", "error", err, "conv_id", conv.ID)
+			} else {
+				conv.Messages = msgJSON
+				if _, err := c.DB.UpdateAppConversation(conv); err != nil {
+					slog.Error("failed to save conversation after LLM error", "error", err, "conv_id", conv.ID)
+				}
+			}
+			sendError("ai", "failed to generate changes. try again please")
+			return
+		}
+		if errors.Is(chatErr, utils.ErrResponseTruncated) {
+			slog.Warn("Chat codegen truncated (output token limit reached)",
+				"project_id", project.ID,
+				"files_generated", len(toolAppliedOps),
+				"truncated_file", parser.TruncatedPath,
+			)
+			if parser.TruncatedPath != "" {
+				sendEvent("truncation_warning", map[string]any{
+					"truncated_file":  parser.TruncatedPath,
+					"files_completed": len(toolAppliedOps),
+				})
 			}
 		}
 	}
@@ -1194,6 +1196,14 @@ func (c *Controller) saveGeneratedFile(
 	ops *[]appBuilderOperation,
 	allowProtected ...bool,
 ) error {
+	// Strip parser boundary tags that may have leaked into generated content.
+	// Only strip </search> and </replace> which are unique to our parser and
+	// extremely unlikely in legitimate code. Avoid stripping </file> and </edit>
+	// which could appear in XML/SVG/HTML content.
+	for _, tag := range []string{"</search>", "</replace>"} {
+		content = strings.ReplaceAll(content, tag, "")
+	}
+
 	// Sanitize file path to prevent directory traversal from LLM output.
 	cleanPath, valid := utils.SanitizeFilePath(path)
 	if !valid {
