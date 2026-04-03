@@ -1142,6 +1142,7 @@ func main() {
 			})
 
 			r.Post("/support/ticket", httpViews.CreateTicket)
+			r.Post("/campaigns/kadin-girisimciler", httpViews.SubmitKadinGirisimciler)
 
 			r.Route("/preview-codes", func(r chi.Router) {
 				r.Post("/", httpViews.GeneratePreviewCode)
