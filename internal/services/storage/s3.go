@@ -14,7 +14,6 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
-	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 )
 
 type S3Storage struct {
@@ -199,15 +198,15 @@ func (s *S3Storage) UploadFileByteWithContentType(ctx context.Context, s3URL str
 	return err
 }
 
-// UploadFileBytePublic uploads data with public-read ACL and returns the permanent direct URL.
+// UploadFileBytePublic uploads data and returns the permanent direct URL.
+// Public access is controlled by the bucket policy, not per-object ACLs
+// (S3 buckets with "BucketOwnerEnforced" object ownership disallow ACLs).
 func (s *S3Storage) UploadFileBytePublic(ctx context.Context, key string, data []byte, contentType string) (string, error) {
-	acl := types.ObjectCannedACLPublicRead
 	_, err := s.Client.PutObject(ctx, &s3.PutObjectInput{
 		Bucket:      &s.Bucket,
 		Key:         &key,
 		Body:        bytes.NewReader(data),
 		ContentType: aws.String(contentType),
-		ACL:         acl,
 	})
 	if err != nil {
 		slog.Error("failed to upload public file to S3", "from", "s3", "operation", "UploadFileBytePublic", "bucket", s.Bucket, "key", key, "error", err)
