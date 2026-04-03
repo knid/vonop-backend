@@ -131,6 +131,18 @@ func (db *Database) RunInTx(fn func(tx bun.Tx) error) error {
 	})
 }
 
+// HasUsageTransactions returns true if the user has any credit transactions
+// other than system grants (initial_grant, monthly_grant, subscription_grant).
+// Used to determine if the user has ever actively used their credits.
+func (db *Database) HasUsageTransactions(userID string) (bool, error) {
+	var count int
+	err := db.DB.NewRaw(
+		"SELECT COUNT(*) FROM ai_credit_transactions WHERE user_id = ? AND action NOT IN ('initial_grant', 'monthly_grant', 'subscription_grant')",
+		userID,
+	).Scan(context.Background(), &count)
+	return count > 0, err
+}
+
 // --- LLM Token Usage ---
 
 func (db *Database) CreateLLMTokenUsage(usage *models.LLMTokenUsage) error {
