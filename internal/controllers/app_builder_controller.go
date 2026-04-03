@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"regexp"
 	"runtime/debug"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -834,13 +835,83 @@ func (c *Controller) StreamBuildApp(
 			},
 			utils.ToolCallConfig{
 				MaxRounds:        10,
-				NudgeAfter:       5,
-				StripAfter:       7,
+				NudgeAfter:       3,
+				StripAfter:       5,
 				MaxTokens:        65536,
 				MaxContinuations: 3,
 				NudgeMessage:     "You have gathered enough context. Output your code changes now using <file> and <edit> blocks.",
 				OnRoundStart: func(round int) {
 					parser.Flush()
+				},
+				TrimResults: func(toolName, result string) string {
+					if toolName == "read_file" && len(result) > 300 {
+						preview := result[:200]
+						return fmt.Sprintf("%s\n...[trimmed, %d chars total — call read_file again if needed]", preview, len(result))
+					}
+					if toolName == "list_files" && len(result) > 500 {
+						lines := strings.Split(result, "\n")
+						if len(lines) > 10 {
+							return strings.Join(lines[:10], "\n") + fmt.Sprintf("\n...[%d more files]", len(lines)-10)
+						}
+					}
+					if len(result) > 2000 {
+						return result[:500] + fmt.Sprintf("\n...[trimmed, %d chars total]", len(result))
+					}
+					return result
+				},
+				TrimArgs: func(toolName, args string) string {
+					if len(args) > 1000 {
+						var parsed map[string]any
+						if json.Unmarshal([]byte(args), &parsed) == nil {
+							for k, v := range parsed {
+								if s, ok := v.(string); ok && len(s) > 200 {
+									parsed[k] = s[:200] + "...[trimmed]"
+								}
+							}
+							if trimmed, err := json.Marshal(parsed); err == nil {
+								return string(trimmed)
+							}
+						}
+					}
+					return args
+				},
+				AfterToolRound: func(allIntercepted bool) string {
+					if allIntercepted {
+						return ""
+					}
+					if len(toolAppliedOps) == 0 {
+						return ""
+					}
+					var paths []string
+					seen := make(map[string]bool)
+					for _, op := range toolAppliedOps {
+						if !seen[op.Path] {
+							paths = append(paths, fmt.Sprintf("%s %s", op.Action, op.Path))
+							seen[op.Path] = true
+						}
+					}
+					return fmt.Sprintf("Files changed so far: %s. Do NOT re-read or re-edit files you already changed — move on to the next file or output your final response.", strings.Join(paths, ", "))
+				},
+				InterceptToolCall: func(toolName, toolArgs string) (string, bool) {
+					if toolName == "read_file" {
+						var args struct {
+							FilePath string `json:"file_path"`
+						}
+						if json.Unmarshal([]byte(toolArgs), &args) == nil && args.FilePath != "" {
+							if content, ok := fileMap[args.FilePath]; ok {
+								return content, true
+							}
+						}
+					}
+					if toolName == "list_files" {
+						var lines []string
+						for path, content := range fileMap {
+							lines = append(lines, fmt.Sprintf("%s (%d chars)", path, len(content)))
+						}
+						sort.Strings(lines)
+						return strings.Join(lines, "\n"), true
+					}
+					return "", false
 				},
 			},
 		)
