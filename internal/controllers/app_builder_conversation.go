@@ -872,7 +872,7 @@ func (c *Controller) StreamMobileOptimize(
 
 	prompt, completion, total, _ := tracker.Totals()
 	if total > 0 {
-		credits := models.TokensToCredits(prompt, completion)
+		credits := c.TokensToCredits(prompt, completion)
 		if err := c.DeductAICreditsUnchecked(user, credits, "mobile_optimize", project.ID.String()); err != nil {
 			slog.Warn("failed to deduct AI credits", "error", err, "user_id", user.ID, "credits", credits)
 		}

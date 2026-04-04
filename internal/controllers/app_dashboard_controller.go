@@ -218,7 +218,7 @@ func (c *Controller) CreateDashboard(ctx context.Context, project *models.AppPro
 		c.RecordTokenUsage(user, "dashboard_create", model, provider.Name, project.ID.String(), project.ProjectType, tracker)
 		prompt, completion, total, _ := tracker.Totals()
 		if total > 0 {
-			credits := models.TokensToCredits(prompt, completion)
+			credits := c.TokensToCredits(prompt, completion)
 			if err := c.DeductAICreditsUnchecked(user, credits, "dashboard_create", project.ID.String()); err != nil {
 				slog.Warn("failed to deduct AI credits for dashboard", "error", err, "user_id", user.ID, "credits", credits)
 			}
@@ -534,7 +534,7 @@ func (c *Controller) StreamDashboardChat(ctx context.Context, dashboard *models.
 		c.RecordTokenUsage(user, "dashboard_chat", model, provider.Name, dashboard.AppProjectID.String(), "dashboard", tracker)
 		prompt, completion, total, _ := tracker.Totals()
 		if total > 0 {
-			credits := models.TokensToCredits(prompt, completion)
+			credits := c.TokensToCredits(prompt, completion)
 			if err := c.DeductAICreditsUnchecked(user, credits, "dashboard_chat", dashboard.AppProjectID.String()); err != nil {
 				slog.Warn("failed to deduct AI credits for dashboard chat", "error", err)
 			}
@@ -769,7 +769,7 @@ func (c *Controller) RefreshDashboardSchema(ctx context.Context, projectID strin
 		c.RecordTokenUsage(user, "dashboard_schema_refresh", model, provider.Name, projectID, "dashboard", tracker)
 		prompt, completion, total, _ := tracker.Totals()
 		if total > 0 {
-			credits := models.TokensToCredits(prompt, completion)
+			credits := c.TokensToCredits(prompt, completion)
 			if err := c.DeductAICreditsUnchecked(user, credits, "dashboard_schema_refresh", projectID); err != nil {
 				slog.Warn("failed to deduct AI credits for schema refresh", "error", err, "user_id", user.ID, "credits", credits)
 			}
