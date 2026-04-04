@@ -511,8 +511,14 @@ func (c *Controller) StreamBuildApp(
 			}
 		}
 
-		// 4. Build conversation history
+		// 4. Summarize old messages (bolt.diy-style) and build conversation history
 		keepRecent := c.RemoteConfig.GetInt(remoteconfig.AIChatKeepRecent, remoteconfig.Global)
+		if c.summarizeConversationIfNeeded(ctx, conv, messages, provider, keepRecent) {
+			// Persist the new summary
+			if _, err := c.DB.UpdateAppConversation(conv); err != nil {
+				slog.Warn("failed to persist conversation summary", "error", err, "conv_id", conv.ID)
+			}
+		}
 		chatHistory := buildSimpleChatHistory(conv, messages, provider, imageURLs, keepRecent)
 
 		llmMessages = []utils.Message{

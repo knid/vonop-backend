@@ -370,9 +370,9 @@ func buildChatSystemPrompt(project *models.AppProject, mobileConfig *models.Mobi
 func buildUnifiedChatSystemPrompt(project *models.AppProject, mobileConfig *models.MobileAppConfig) string {
 	var prompt string
 	if project.ProjectType == "ecommerce" {
-		prompt = constants.NEXTJS_ECOMMERCE_COMMON_RULES + constants.NEXTJS_BUILDER_UNIFIED_CHAT_INSTRUCTIONS
+		prompt = constants.NEXTJS_ECOMMERCE_CHAT_COMMON_RULES + constants.NEXTJS_BUILDER_UNIFIED_CHAT_INSTRUCTIONS
 	} else {
-		prompt = constants.NEXTJS_BUILDER_UNIFIED_CHAT_PROMPT
+		prompt = constants.NEXTJS_BUILDER_UNIFIED_CHAT_PROMPT_LITE
 		if projectHasDataModels(project) {
 			prompt += constants.NEXTJS_BUILDER_DATABASE_RULES
 		}
@@ -437,22 +437,10 @@ func (c *Controller) buildFileListContext(project *models.AppProject, fileMap ma
 		}
 	}
 
-	// File list (paths + sizes only)
-	if len(fileMap) > 0 {
-		paths := make([]string, 0, len(fileMap))
-		for p := range fileMap {
-			paths = append(paths, p)
-		}
-		sort.Strings(paths)
-
-		sb.WriteString("\nAll project files (call read_file to see content):\n")
-		for _, fp := range paths {
-			if isSecretFile(fp) {
-				continue
-			}
-			sb.WriteString(fmt.Sprintf("- %s (%d chars)\n", fp, len(fileMap[fp])))
-		}
-	}
+	// File list: no longer injected into the system prompt.
+	// The LLM calls list_files when it needs to discover project files,
+	// and read_file to read specific ones. This saves ~1,000 tokens per
+	// message for simple greetings/questions that don't need file context.
 
 	// User-uploaded assets
 	chatAssets, _ := c.DB.GetAppAssetsByProjectID(project.ID.String())
@@ -471,9 +459,85 @@ func (c *Controller) buildFileListContext(project *models.AppProject, fileMap ma
 	return sb.String()
 }
 
+// summarizeConversationIfNeeded checks whether the conversation has grown past
+// the keepRecent window and, if so, uses a fast LLM to compress older messages
+// into a concise summary stored on conv.Summary. This follows bolt.diy's
+// createSummary pattern: summarize once, cache between turns, re-summarize when
+// new messages accumulate beyond the window.
+//
+// Returns true if a new summary was generated (callers may want to persist conv).
+func (c *Controller) summarizeConversationIfNeeded(
+	ctx context.Context,
+	conv *models.AppConversation,
+	messages []models.AppConversationMessage,
+	provider *utils.LLMProvider,
+	keepRecent int,
+) bool {
+	olderCount := len(messages) - keepRecent
+	if olderCount <= 2 {
+		// Not enough old messages to warrant summarization
+		return false
+	}
+
+	// Skip if we already have a summary and only a few new messages accumulated
+	// since last summary. Re-summarize when 4+ new messages have entered the "old" zone.
+	if conv.Summary != "" && olderCount < keepRecent+4 {
+		return false
+	}
+
+	fastModel := provider.FastModel()
+	olderMessages := messages[:olderCount]
+
+	// Build a compact transcript of older messages
+	var transcript strings.Builder
+	for _, msg := range olderMessages {
+		content := msg.Content
+		if len(content) > 400 {
+			content = content[:400] + "..."
+		}
+		transcript.WriteString(fmt.Sprintf("[%s]: %s\n", msg.Role, content))
+		if len(msg.FileOperations) > 0 {
+			var ops []string
+			for _, op := range msg.FileOperations {
+				ops = append(ops, fmt.Sprintf("%s %s", op.Action, op.FilePath))
+			}
+			transcript.WriteString(fmt.Sprintf("  Files: %s\n", strings.Join(ops, ", ")))
+		}
+	}
+
+	// Include previous summary for continuity (like bolt.diy's sliding window)
+	userPrompt := transcript.String()
+	if conv.Summary != "" {
+		userPrompt = "Previous summary:\n" + conv.Summary + "\n\nNew messages to incorporate:\n" + userPrompt
+	}
+
+	systemPrompt := `Summarize this conversation between a user and an AI app builder assistant. Output a concise summary (150-250 words max) covering:
+1. What the user asked for and key decisions made
+2. What files were created or modified
+3. Any issues encountered and how they were resolved
+4. The current state of the project
+
+Be specific — include file names, feature names, and design choices. Do NOT include greetings or filler.`
+
+	summary, err := utils.GetTextFromLLM(ctx, fastModel, systemPrompt, userPrompt, provider)
+	if err != nil {
+		slog.Warn("conversation summarization failed, falling back to truncation",
+			"error", err, "conv_id", conv.ID, "older_count", olderCount)
+		return false
+	}
+
+	conv.Summary = strings.TrimSpace(summary)
+	slog.Info("conversation summarized",
+		"conv_id", conv.ID,
+		"older_messages", olderCount,
+		"summary_length", len(conv.Summary),
+	)
+	return true
+}
+
 // buildSimpleChatHistory builds conversation history for the unified chat path.
-// Keeps last keepRecent messages with full content, truncates older messages.
-// No LLM summarization — just simple truncation.
+// If a summary exists, it is injected as context and only recent messages are
+// sent with full content. Otherwise falls back to simple truncation.
 func buildSimpleChatHistory(
 	conv *models.AppConversation,
 	messages []models.AppConversationMessage,
@@ -483,7 +547,7 @@ func buildSimpleChatHistory(
 ) []utils.Message {
 	var history []utils.Message
 
-	// Include existing summary if available (backwards compatible)
+	// If we have a summary, use it and only include recent messages
 	if conv.Summary != "" {
 		history = append(history, utils.Message{
 			Role:    "user",
@@ -491,21 +555,28 @@ func buildSimpleChatHistory(
 		})
 		history = append(history, utils.Message{
 			Role:    "assistant",
-			Content: "I understand the earlier context. Let me continue from where we left off.",
+			Content: "Understood. I have the full context from our earlier conversation.",
 		})
+
+		// Only include recent messages — older ones are captured in the summary
+		if len(messages) > keepRecent {
+			recentMessages := messages[len(messages)-keepRecent:]
+			history = append(history, chatMessagesToLLM(recentMessages, provider, imageURLs)...)
+		} else {
+			history = append(history, chatMessagesToLLM(messages, provider, imageURLs)...)
+		}
+		return history
 	}
 
+	// No summary — include all messages (truncating older ones as before)
 	if len(messages) <= keepRecent {
-		// All messages fit — include them all with full content
 		history = append(history, chatMessagesToLLM(messages, provider, imageURLs)...)
 		return history
 	}
 
-	// Truncate older messages, keep recent ones full
 	olderMessages := messages[:len(messages)-keepRecent]
 	recentMessages := messages[len(messages)-keepRecent:]
 
-	// Older messages: truncated content + file operations summary
 	for _, msg := range olderMessages {
 		content := msg.Content
 		if len(content) > 200 {
@@ -521,10 +592,8 @@ func buildSimpleChatHistory(
 		history = append(history, utils.Message{Role: msg.Role, Content: content})
 	}
 
-	// Recent messages: full content
 	history = append(history, chatMessagesToLLM(recentMessages, provider, imageURLs)...)
 
-	// Prune heavy fields from older messages in the DB to prevent blob growth
 	for i := range olderMessages {
 		messages[i].ThinkingText = ""
 		messages[i].ToolCalls = nil
