@@ -16,7 +16,6 @@ type StandartUserLimits struct {
 	CanBuildToIOS           bool      `bun:",notnull"`
 	CanUseAnalytics         bool      `bun:",notnull"`
 	CanRemoveBrandLogo      bool      `bun:",notnull"`
-	CanSeeActiveUsers       bool      `bun:",notnull"`
 	// AI limits
 	MonthlyAICredits       int  `bun:",notnull,default:0"`
 	// App builder limits

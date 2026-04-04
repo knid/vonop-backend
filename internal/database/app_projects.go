@@ -3,7 +3,6 @@ package database
 import (
 	"context"
 	"log/slog"
-	"time"
 
 	"github.com/knid/wemob/internal/models"
 	"github.com/uptrace/bun"
@@ -107,11 +106,3 @@ func (db *Database) CountAppProjectsByUserIDAndType(userID string, projectType s
 	return q.Count(context.Background())
 }
 
-func (db *Database) CountAppProjectsByUserIDSince(userID string, since time.Time) (int, error) {
-	count, err := db.DB.NewSelect().Model((*models.AppProject)(nil)).
-		Where("user_id = ?", userID).
-		Where("created_at >= ?", since).
-		Where("status != ?", "generating").
-		Count(context.Background())
-	return count, err
-}

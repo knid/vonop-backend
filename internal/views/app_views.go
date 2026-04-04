@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -850,6 +851,19 @@ func (v *HttpViews) ConvertToMobile(w http.ResponseWriter, r *http.Request) {
 	if limitsErr != nil || !limits.CanBuildMobile {
 		go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_NEED, map[string]any{"action": "convert_to_mobile"})
 		utils.JSONCodedErrorResponse(w, "FEATURE_NOT_AVAILABLE", "mobile conversion requires Professional plan", http.StatusForbidden, nil)
+		return
+	}
+
+	if limits.MaxMobileApps > 0 {
+		mobileCount, _ := v.Controller.DB.CountAppProjectsByUserIDAndType(user.ID.String(), "mobile_app")
+		if mobileCount >= limits.MaxMobileApps {
+			utils.JSONCodedErrorResponse(w, "QUOTA_REACHED",
+				fmt.Sprintf("you have reached your mobile app limit (%d)", limits.MaxMobileApps),
+				http.StatusForbidden, nil)
+			return
+		}
+	} else if limits.MaxMobileApps == 0 {
+		utils.JSONCodedErrorResponse(w, "FEATURE_NOT_AVAILABLE", "mobile app creation is not available on your plan", http.StatusForbidden, nil)
 		return
 	}
 
