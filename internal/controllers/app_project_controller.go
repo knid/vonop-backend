@@ -51,24 +51,27 @@ func (c *Controller) CreateAppProject(ctx context.Context, user *models.User, re
 			countFilter = "" // counts all non-mobile
 		}
 
-		if maxApps > 0 {
-			appCount, countErr := c.DB.CountAppProjectsByUserIDAndType(user.ID.String(), countFilter)
-			if countErr != nil {
-				slog.Warn("CreateAppProject: failed to count projects", "error", countErr, "user_id", user.ID)
-			} else if appCount >= maxApps {
-				action := "create_app"
-				if isMobile {
-					action = "create_mobile_app"
-				}
-				go c.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_QUOTA_REACHED, map[string]any{"action": action, "limit": maxApps})
-				go c.TrackUserEvent(user, "quota_reached", posthog.NewProperties().Set("action", action).Set("limit", maxApps))
-				if isMobile {
-					return nil, fmt.Errorf("you have reached your mobile app limit (%d)", maxApps)
-				}
-				return nil, fmt.Errorf("you have reached your web app limit (%d)", maxApps)
+		if maxApps == 0 {
+			if isMobile {
+				return nil, fmt.Errorf("mobile app creation is not available on your plan")
 			}
-		} else if isMobile && maxApps == 0 {
-			return nil, fmt.Errorf("mobile app creation is not available on your plan")
+			return nil, fmt.Errorf("web app creation is not available on your plan")
+		}
+
+		appCount, countErr := c.DB.CountAppProjectsByUserIDAndType(user.ID.String(), countFilter)
+		if countErr != nil {
+			slog.Warn("CreateAppProject: failed to count projects", "error", countErr, "user_id", user.ID)
+		} else if appCount >= maxApps {
+			action := "create_app"
+			if isMobile {
+				action = "create_mobile_app"
+			}
+			go c.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_QUOTA_REACHED, map[string]any{"action": action, "limit": maxApps})
+			go c.TrackUserEvent(user, "quota_reached", posthog.NewProperties().Set("action", action).Set("limit", maxApps))
+			if isMobile {
+				return nil, fmt.Errorf("you have reached your mobile app limit (%d)", maxApps)
+			}
+			return nil, fmt.Errorf("you have reached your web app limit (%d)", maxApps)
 		}
 	}
 
