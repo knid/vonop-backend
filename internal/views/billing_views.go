@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/knid/wemob/internal/responses"
+	"github.com/knid/wemob/internal/services/remoteconfig"
 	"github.com/knid/wemob/internal/utils"
 )
 
@@ -30,22 +31,25 @@ func (v *HttpViews) GetBillingPlans(w http.ResponseWriter, r *http.Request) {
 		var planLimits responses.PlanLimitsResponse
 		limits, limitsErr := v.Controller.DB.GetStandartUserLimitsById(sub.LimitsID.String())
 		if limitsErr == nil {
+			rc := v.Controller.RemoteConfig
+			pn := strings.ToLower(sub.Name) // e.g. "starter", "professional"
+
 			planLimits = responses.PlanLimitsResponse{
-				MaxDeployedWebApps:   limits.MaxDeployedWebApps,
-				MonthlyAICredits:     limits.MonthlyAICredits,
-				CreditRolloverMonths: limits.CreditRolloverMonths,
-				CanBuildMobile:       limits.CanBuildMobile,
-				CanUseAnalytics:      limits.CanUseAnalytics,
-				CanAccessCode:        limits.CanAccessCode,
-				CanBuyDomain:         limits.CanBuyDomain,
-				CanUseEmailService:   limits.CanUseEmailService,
-				CanUseEcommerce:      limits.CanUseEcommerce,
+				MaxDeployedWebApps:   rc.GetInt(remoteconfig.PlanInt(pn, "max-deployed-web-apps", limits.MaxDeployedWebApps), remoteconfig.Global),
+				MonthlyAICredits:     rc.GetInt(remoteconfig.PlanInt(pn, "monthly-ai-credits", limits.MonthlyAICredits), remoteconfig.Global),
+				CreditRolloverMonths: rc.GetInt(remoteconfig.PlanInt(pn, "credit-rollover-months", limits.CreditRolloverMonths), remoteconfig.Global),
+				CanBuildMobile:       rc.GetBool(remoteconfig.PlanBool(pn, "can-build-mobile", limits.CanBuildMobile), remoteconfig.Global),
+				CanUseAnalytics:      rc.GetBool(remoteconfig.PlanBool(pn, "can-use-analytics", limits.CanUseAnalytics), remoteconfig.Global),
+				CanAccessCode:        rc.GetBool(remoteconfig.PlanBool(pn, "can-access-code", limits.CanAccessCode), remoteconfig.Global),
+				CanBuyDomain:         rc.GetBool(remoteconfig.PlanBool(pn, "can-buy-domain", limits.CanBuyDomain), remoteconfig.Global),
+				CanUseEmailService:   rc.GetBool(remoteconfig.PlanBool(pn, "can-use-email-service", limits.CanUseEmailService), remoteconfig.Global),
+				CanUseEcommerce:      rc.GetBool(remoteconfig.PlanBool(pn, "can-use-ecommerce", limits.CanUseEcommerce), remoteconfig.Global),
 				CanDeployWeb:         limits.CanDeployWeb,
 				MaximumProjectCount:  limits.MaximumProjectCount,
-				MonthlyAppCount:      limits.MonthlyAppCount,
-				MonthlyDeployCount:   limits.MonthlyDeployCount,
+				MonthlyAppCount:      rc.GetInt(remoteconfig.PlanInt(pn, "monthly-app-count", limits.MonthlyAppCount), remoteconfig.Global),
+				MonthlyDeployCount:   rc.GetInt(remoteconfig.PlanInt(pn, "monthly-deploy-count", limits.MonthlyDeployCount), remoteconfig.Global),
 				CanRemoveBrandLogo:   limits.CanRemoveBrandLogo,
-				CanExportToGitHub:    limits.CanExportToGitHub,
+				CanExportToGitHub:    rc.GetBool(remoteconfig.PlanBool(pn, "can-export-to-github", limits.CanExportToGitHub), remoteconfig.Global),
 				DeployMemoryMB:       limits.DeployMemoryMB,
 				DeployCPUs:           limits.DeployCPUs,
 				DeployDBMaxCU:        limits.DeployDBMaxCU,
