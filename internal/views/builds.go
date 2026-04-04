@@ -64,7 +64,7 @@ func (v *HttpViews) CreateProjectBuild(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	limits, err := v.Controller.GetUserLimits(user)
+	limits, planName, err := v.Controller.GetUserLimitsWithPlan(user)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
 		return
@@ -89,7 +89,15 @@ func (v *HttpViews) CreateProjectBuild(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if count >= limits.MontlyBuildCount {
-		utils.JSONErrorResponse(w, "you have reached your monthly build limit", http.StatusForbidden)
+		_, renewEnd := utils.BillingPeriod(user.SubscriptionStartAt, time.Now())
+		utils.JSONCodedErrorResponse(w, "BUILD_LIMIT_REACHED",
+			"you have reached your monthly build limit",
+			http.StatusForbidden, map[string]any{
+				"used":         count,
+				"limit":        limits.MontlyBuildCount,
+				"renewal_date": renewEnd.Format(time.RFC3339),
+				"plan_name":    planName,
+			})
 		go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_QUOTA_REACHED, map[string]any{
 			"action": "create_build",
 			"limit":  limits.MontlyBuildCount,

@@ -76,6 +76,34 @@ func (v *HttpViews) CreateProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	limits, planName, err := v.Controller.GetUserLimitsWithPlan(user)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	projects, err := v.Controller.GetProjects(user)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if len(projects) >= limits.MaximumProjectCount {
+		utils.JSONCodedErrorResponse(w, "PROJECT_LIMIT_REACHED",
+			"you have reached your project limit",
+			http.StatusForbidden, map[string]any{
+				"used":      len(projects),
+				"limit":     limits.MaximumProjectCount,
+				"plan_name": planName,
+			})
+		go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_QUOTA_REACHED, map[string]any{
+			"action": "create_project",
+			"limit":  limits.MaximumProjectCount,
+		})
+		go v.Controller.TrackUserEvent(user, "quota_reached", posthog.NewProperties().Set("action", "create_project").Set("limit", limits.MaximumProjectCount))
+		return
+	}
+
 	var projectCreateReq requests.ProjectCreateRequest
 	if err := utils.ParseJSONBody(r, &projectCreateReq); err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
