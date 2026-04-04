@@ -863,13 +863,8 @@ func (c *Controller) StreamBuildApp(
 					parser.Flush()
 				},
 				TrimResults: func(toolName, result string) string {
-					// Keep read_file results mostly intact — the LLM needs exact content
-					// for <edit> search text. Only trim very large files.
+					// Never trim read_file — the LLM needs exact content for <edit> search text.
 					if toolName == "read_file" {
-						if len(result) > 6000 {
-							preview := safeTruncate(result, 3000)
-							return fmt.Sprintf("%s\n...[trimmed, %d chars total]", preview, len(result))
-						}
 						return result
 					}
 					if toolName == "list_files" && len(result) > 500 {
