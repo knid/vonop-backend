@@ -21,6 +21,19 @@ var AICreditsTokensPerCredit = Key{Flag: "rc-ai-credits-tokens-per-credit", Fall
 var AICreditsOutputMultiplier = Key{Flag: "rc-ai-credits-output-multiplier", Fallback: 5}
 var AICreditsMinBalance = Key{Flag: "rc-ai-credits-min-balance", Fallback: -100}
 
+// --- Category 1b: Plan Display Overrides ---
+// These override the DB-stored plan limits for the billing/plans API.
+// Flag names: rc-plan-{planName}-{field} where planName is lowercased.
+// Helper constructors build Keys dynamically per plan name.
+
+func PlanInt(planName, field string, fallback int) Key {
+	return Key{Flag: "rc-plan-" + planName + "-" + field, Fallback: fallback}
+}
+
+func PlanBool(planName, field string, fallback bool) Key {
+	return Key{Flag: "rc-plan-" + planName + "-" + field, Fallback: fallback}
+}
+
 // --- Category 2: Platform Limits ---
 
 var MaxConcurrentBuilds = Key{Flag: "rc-max-concurrent-builds", Fallback: 1}
