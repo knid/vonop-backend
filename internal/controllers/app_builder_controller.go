@@ -820,7 +820,7 @@ func (c *Controller) StreamBuildApp(
 		// NOTE: screenshots from preview_website/take_screenshot are captured but cannot
 		// be attached as vision content mid-conversation (ToolExecutor returns string only).
 		// The text analysis from these tools is still returned to the model via tool results.
-		tools, executor, _ := c.buildUnifiedChatTools(ctx, project, provider, repo, fileMap, sendEvent, userLimits)
+		tools, executor, _ := c.buildUnifiedChatTools(ctx, project, user, provider, repo, fileMap, sendEvent, userLimits)
 
 		slog.Info("Calling LLM for chat (unified tool path)",
 			"model", model,

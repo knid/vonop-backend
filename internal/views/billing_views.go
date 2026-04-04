@@ -196,6 +196,7 @@ func describeTxAction(action string) string {
 		"chat":                "Chat edit",
 		"screenshot_to_code":  "Screenshot to code",
 		"element_edit":        "Element edit",
+		"generate_image":     "Image generation",
 		"purchase":            "Credit purchase",
 		"credits_purchased":   "Credit purchase",
 		"monthly_grant":       "Monthly credit allocation",

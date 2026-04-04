@@ -47,6 +47,7 @@ type chatToolPhaseResult struct {
 func (c *Controller) runChatToolPhase(
 	ctx context.Context,
 	project *models.AppProject,
+	user *models.User,
 	provider *utils.LLMProvider,
 	repo *gitrepo.Repo,
 	userMessage string,
@@ -243,7 +244,7 @@ CRITICAL LANGUAGE RULE: EVERY piece of text you write — explanations, summarie
 		case "install_package":
 			return c.executeChatInstallPackage(arguments, project, repo, fileMap, sendEvent, &collectedContext)
 		case "generate_image":
-			return c.executeChatGenerateImage(ctx, arguments, project, sendEvent, &collectedContext)
+			return c.executeChatGenerateImage(ctx, arguments, project, user, sendEvent, &collectedContext)
 		case "take_screenshot":
 			return c.executeChatTakeScreenshot(arguments, &collectedContext, &screenshots)
 		case "search_components":
@@ -520,6 +521,7 @@ CRITICAL LANGUAGE RULE: EVERY piece of text you write — explanations, summarie
 func (c *Controller) buildUnifiedChatTools(
 	ctx context.Context,
 	project *models.AppProject,
+	user *models.User,
 	provider *utils.LLMProvider,
 	repo *gitrepo.Repo,
 	fileMap map[string]string,
@@ -575,7 +577,7 @@ func (c *Controller) buildUnifiedChatTools(
 		case "install_package":
 			return c.executeChatInstallPackage(arguments, project, repo, fileMap, sendEvent, &collectedContext)
 		case "generate_image":
-			return c.executeChatGenerateImage(ctx, arguments, project, sendEvent, &collectedContext)
+			return c.executeChatGenerateImage(ctx, arguments, project, user, sendEvent, &collectedContext)
 		case "take_screenshot":
 			return c.executeChatTakeScreenshot(arguments, &collectedContext, &screenshots)
 		case "search_components":
@@ -1445,10 +1447,12 @@ func packageVersionLookup(pkg string) string {
 }
 
 // executeChatGenerateImage generates an AI image via fal.ai and uploads to S3.
+// Deducts 1 AI credit per successful generation.
 func (c *Controller) executeChatGenerateImage(
 	ctx context.Context,
 	arguments string,
 	project *models.AppProject,
+	user *models.User,
 	sendEvent func(string, any) bool,
 	collectedContext *strings.Builder,
 ) (string, error) {
@@ -1479,6 +1483,13 @@ func (c *Controller) executeChatGenerateImage(
 	cdnURL, err := fal.GenerateImage(ctx, apiKey, falModel, args.Prompt)
 	if err != nil {
 		return fmt.Sprintf("Image generation failed: %s", err.Error()), nil
+	}
+
+	// Deduct 1 credit for image generation
+	if user != nil {
+		if err := c.DeductAICreditsUnchecked(user, 1, "generate_image", project.ID.String()); err != nil {
+			slog.Warn("failed to deduct credit for image generation", "error", err, "user_id", user.ID, "project_id", project.ID)
+		}
 	}
 
 	imgData, err := downloadImage(ctx, cdnURL)
