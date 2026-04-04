@@ -62,18 +62,6 @@ func (v *HttpViews) DeployAppWeb(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		if limits.MonthlyDeployCount > 0 {
-			periodStart, _ := utils.BillingPeriod(user.SubscriptionStartAt, time.Now())
-			deployCount, _ := v.Controller.DB.CountWebDeploysSince(user.ID.String(), periodStart)
-			if deployCount >= limits.MonthlyDeployCount {
-				go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_QUOTA_REACHED, map[string]any{"action": "deploy_web_monthly", "limit": limits.MonthlyDeployCount})
-				go v.Controller.TrackUserEvent(user, "quota_reached", posthog.NewProperties().Set("action", "deploy_web_monthly").Set("limit", limits.MonthlyDeployCount))
-				utils.JSONCodedErrorResponse(w, "DEPLOY_LIMIT_REACHED",
-					fmt.Sprintf("you have reached your monthly deploy limit (%d)", limits.MonthlyDeployCount),
-					http.StatusForbidden, nil)
-				return
-			}
-		}
 	}
 
 	project, err := v.Controller.GetAppProject(appID, user)

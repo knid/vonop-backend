@@ -55,6 +55,9 @@ func (v *HttpViews) GetAppAnalyticsOverview(w http.ResponseWriter, r *http.Reque
 		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
 		return
 	}
+	if v.checkAnalyticsAccess(w, user) {
+		return
+	}
 
 	appID := chi.URLParam(r, "appId")
 	project, err := v.Controller.GetAppProject(appID, user)
@@ -78,6 +81,9 @@ func (v *HttpViews) GetAppAnalyticsPageviews(w http.ResponseWriter, r *http.Requ
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+	if v.checkAnalyticsAccess(w, user) {
 		return
 	}
 
@@ -105,6 +111,9 @@ func (v *HttpViews) GetAppAnalyticsPages(w http.ResponseWriter, r *http.Request)
 		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
 		return
 	}
+	if v.checkAnalyticsAccess(w, user) {
+		return
+	}
 
 	appID := chi.URLParam(r, "appId")
 	project, err := v.Controller.GetAppProject(appID, user)
@@ -128,6 +137,9 @@ func (v *HttpViews) GetAppAnalyticsReferrers(w http.ResponseWriter, r *http.Requ
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+	if v.checkAnalyticsAccess(w, user) {
 		return
 	}
 
@@ -155,6 +167,9 @@ func (v *HttpViews) GetAppAnalyticsDevices(w http.ResponseWriter, r *http.Reques
 		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
 		return
 	}
+	if v.checkAnalyticsAccess(w, user) {
+		return
+	}
 
 	appID := chi.URLParam(r, "appId")
 	project, err := v.Controller.GetAppProject(appID, user)
@@ -178,6 +193,9 @@ func (v *HttpViews) GetAppAnalyticsLocations(w http.ResponseWriter, r *http.Requ
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+	if v.checkAnalyticsAccess(w, user) {
 		return
 	}
 
@@ -205,6 +223,9 @@ func (v *HttpViews) GetAppAnalyticsEvents(w http.ResponseWriter, r *http.Request
 		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
 		return
 	}
+	if v.checkAnalyticsAccess(w, user) {
+		return
+	}
 
 	appID := chi.URLParam(r, "appId")
 	project, err := v.Controller.GetAppProject(appID, user)
@@ -228,6 +249,9 @@ func (v *HttpViews) GetAppAnalyticsRealtime(w http.ResponseWriter, r *http.Reque
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+	if v.checkAnalyticsAccess(w, user) {
 		return
 	}
 

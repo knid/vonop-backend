@@ -25,6 +25,19 @@ func requireActiveSubscription(w http.ResponseWriter, user *models.User) bool {
 	return true
 }
 
+// checkAnalyticsAccess verifies the user's plan includes analytics.
+// Returns true if blocked (response already written).
+func (v *HttpViews) checkAnalyticsAccess(w http.ResponseWriter, user *models.User) bool {
+	limits, err := v.Controller.GetUserLimits(user)
+	if err != nil || !limits.CanUseAnalytics {
+		utils.JSONCodedErrorResponse(w, "FEATURE_NOT_AVAILABLE",
+			"analytics is not available on your plan",
+			http.StatusForbidden, nil)
+		return true
+	}
+	return false
+}
+
 // checkMinimumCredits verifies the user has at least 1 AI credit.
 // Returns true if blocked (response already written).
 func (v *HttpViews) checkMinimumCredits(w http.ResponseWriter, user *models.User) bool {

@@ -4,7 +4,6 @@ import "github.com/google/uuid"
 
 type LimitsResponse struct {
 	ID                      uuid.UUID `json:"id"`
-	MaximumProjectCount     int       `json:"maximum_project_count"`
 	MaximumAccessIdCount    int       `json:"maximum_access_id_count"`
 	MontlyNotificationCount int       `json:"montly_notification_count"`
 	MontlyBuildCount        int       `json:"montly_build_count"`
@@ -12,7 +11,6 @@ type LimitsResponse struct {
 	CanBuildToIOS           bool      `json:"can_build_to_ios"`
 	CanUseAnalytics         bool      `json:"can_use_analytics"`
 	CanRemoveBrandLogo      bool      `json:"can_remove_brand_logo"`
-	CanSeeActiveUsers       bool      `json:"can_see_active_users"`
 	MaxDeployedWebApps      int       `json:"max_deployed_web_apps"`
 	CreditRolloverMonths    int       `json:"credit_rollover_months"`
 	CanAccessCode           bool      `json:"can_access_code"`
@@ -20,8 +18,8 @@ type LimitsResponse struct {
 	CanUseEmailService      bool      `json:"can_use_email_service"`
 	CanBuildMobile          bool      `json:"can_build_mobile"`
 	MonthlyAICredits        int       `json:"monthly_ai_credits"`
-	MonthlyAppCount         int       `json:"monthly_app_count"`
-	MonthlyDeployCount      int       `json:"monthly_deploy_count"`
+	MaxWebApps              int       `json:"max_web_apps"`
+	MaxMobileApps           int       `json:"max_mobile_apps"`
 	CanUseEcommerce         bool      `json:"can_use_ecommerce"`
 	CanDeployWeb            bool      `json:"can_deploy_web"`
 	CanExportToGitHub       bool      `json:"can_export_to_github"`

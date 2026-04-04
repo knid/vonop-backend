@@ -14,7 +14,6 @@ import (
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/responses"
-	"github.com/knid/wemob/internal/utils"
 	"github.com/posthog/posthog-go"
 )
 
@@ -24,22 +23,7 @@ func (c *Controller) CreateAppProject(ctx context.Context, user *models.User, re
 		return nil, err
 	}
 
-	// Enforce app project limit
-	limits, err := c.GetUserLimits(user)
-	if err != nil {
-		slog.Warn("CreateAppProject: failed to get user limits", "error", err, "user_id", user.ID)
-	} else if limits.MonthlyAppCount > 0 {
-		periodStart, _ := utils.BillingPeriod(user.SubscriptionStartAt, time.Now())
-		appCount, countErr := c.DB.CountAppProjectsByUserIDSince(user.ID.String(), periodStart)
-		if countErr != nil {
-			slog.Warn("CreateAppProject: failed to count projects", "error", countErr, "user_id", user.ID)
-		} else if appCount >= limits.MonthlyAppCount {
-			go c.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_QUOTA_REACHED, map[string]any{"action": "create_app", "limit": limits.MonthlyAppCount})
-			go c.TrackUserEvent(user, "quota_reached", posthog.NewProperties().Set("action", "create_app").Set("limit", limits.MonthlyAppCount))
-			return nil, fmt.Errorf("you have reached your monthly app project limit (%d)", limits.MonthlyAppCount)
-		}
-	}
-
+	// Determine project type first so we can enforce the right limit
 	projectType := req.ProjectType
 	if projectType == "" || projectType == "app" {
 		classified := c.classifyProjectType(ctx, req.Prompt)
@@ -49,6 +33,43 @@ func (c *Controller) CreateAppProject(ctx context.Context, user *models.User, re
 	}
 	if projectType == "" {
 		projectType = "app"
+	}
+
+	// Enforce app project limit by type
+	limits, err := c.GetUserLimits(user)
+	if err != nil {
+		slog.Warn("CreateAppProject: failed to get user limits", "error", err, "user_id", user.ID)
+	} else {
+		isMobile := projectType == "mobile_app"
+		var maxApps int
+		var countFilter string
+		if isMobile {
+			maxApps = limits.MaxMobileApps
+			countFilter = "mobile_app"
+		} else {
+			maxApps = limits.MaxWebApps
+			countFilter = "" // counts all non-mobile
+		}
+
+		if maxApps > 0 {
+			appCount, countErr := c.DB.CountAppProjectsByUserIDAndType(user.ID.String(), countFilter)
+			if countErr != nil {
+				slog.Warn("CreateAppProject: failed to count projects", "error", countErr, "user_id", user.ID)
+			} else if appCount >= maxApps {
+				action := "create_app"
+				if isMobile {
+					action = "create_mobile_app"
+				}
+				go c.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_QUOTA_REACHED, map[string]any{"action": action, "limit": maxApps})
+				go c.TrackUserEvent(user, "quota_reached", posthog.NewProperties().Set("action", action).Set("limit", maxApps))
+				if isMobile {
+					return nil, fmt.Errorf("you have reached your mobile app limit (%d)", maxApps)
+				}
+				return nil, fmt.Errorf("you have reached your web app limit (%d)", maxApps)
+			}
+		} else if isMobile && maxApps == 0 {
+			return nil, fmt.Errorf("mobile app creation is not available on your plan")
+		}
 	}
 
 	slug := generateAppSlug(req.Prompt)

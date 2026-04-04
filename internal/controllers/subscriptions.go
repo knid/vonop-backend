@@ -27,8 +27,10 @@ func (c *Controller) GetUserLimits(user *models.User) (*models.StandartUserLimit
 	limits.MaxDeployedWebApps = rc.GetInt(remoteconfig.PlanInt(pn, "max-deployed-web-apps", limits.MaxDeployedWebApps), remoteconfig.Global)
 	limits.MonthlyAICredits = rc.GetInt(remoteconfig.PlanInt(pn, "monthly-ai-credits", limits.MonthlyAICredits), remoteconfig.Global)
 	limits.CreditRolloverMonths = rc.GetInt(remoteconfig.PlanInt(pn, "credit-rollover-months", limits.CreditRolloverMonths), remoteconfig.Global)
-	limits.MonthlyAppCount = rc.GetInt(remoteconfig.PlanInt(pn, "monthly-app-count", limits.MonthlyAppCount), remoteconfig.Global)
-	limits.MonthlyDeployCount = rc.GetInt(remoteconfig.PlanInt(pn, "monthly-deploy-count", limits.MonthlyDeployCount), remoteconfig.Global)
+	limits.MaxWebApps = rc.GetInt(remoteconfig.PlanInt(pn, "max-web-apps", limits.MaxWebApps), remoteconfig.Global)
+	limits.MaxMobileApps = rc.GetInt(remoteconfig.PlanInt(pn, "max-mobile-apps", limits.MaxMobileApps), remoteconfig.Global)
+	limits.MontlyBuildCount = rc.GetInt(remoteconfig.PlanInt(pn, "montly-build-count", limits.MontlyBuildCount), remoteconfig.Global)
+	limits.MontlyNotificationCount = rc.GetInt(remoteconfig.PlanInt(pn, "montly-notification-count", limits.MontlyNotificationCount), remoteconfig.Global)
 	limits.CanBuildMobile = rc.GetBool(remoteconfig.PlanBool(pn, "can-build-mobile", limits.CanBuildMobile), remoteconfig.Global)
 	limits.CanUseAnalytics = rc.GetBool(remoteconfig.PlanBool(pn, "can-use-analytics", limits.CanUseAnalytics), remoteconfig.Global)
 	limits.CanAccessCode = rc.GetBool(remoteconfig.PlanBool(pn, "can-access-code", limits.CanAccessCode), remoteconfig.Global)
@@ -36,6 +38,8 @@ func (c *Controller) GetUserLimits(user *models.User) (*models.StandartUserLimit
 	limits.CanUseEmailService = rc.GetBool(remoteconfig.PlanBool(pn, "can-use-email-service", limits.CanUseEmailService), remoteconfig.Global)
 	limits.CanUseEcommerce = rc.GetBool(remoteconfig.PlanBool(pn, "can-use-ecommerce", limits.CanUseEcommerce), remoteconfig.Global)
 	limits.CanExportToGitHub = rc.GetBool(remoteconfig.PlanBool(pn, "can-export-to-github", limits.CanExportToGitHub), remoteconfig.Global)
+	limits.CanDeployWeb = rc.GetBool(remoteconfig.PlanBool(pn, "can-deploy-web", limits.CanDeployWeb), remoteconfig.Global)
+	limits.CanRemoveBrandLogo = rc.GetBool(remoteconfig.PlanBool(pn, "can-remove-brand-logo", limits.CanRemoveBrandLogo), remoteconfig.Global)
 
 	return limits, nil
 }
@@ -54,14 +58,13 @@ func (c *Controller) GetSubscription(user *models.User) (*responses.UserSubscrip
 
 	limitsResponse := responses.LimitsResponse{
 		ID:                      limits.ID,
-		MaximumProjectCount:     limits.MaximumProjectCount,
+		MaximumAccessIdCount:    limits.MaximumCredentialCount,
 		MontlyBuildCount:        limits.MontlyBuildCount,
 		MontlyNotificationCount: limits.MontlyNotificationCount,
 		CanBuildToAndroid:       limits.CanBuildToAndroid,
 		CanBuildToIOS:           limits.CanBuildToIOS,
 		CanUseAnalytics:         limits.CanUseAnalytics,
 		CanRemoveBrandLogo:      limits.CanRemoveBrandLogo,
-		CanSeeActiveUsers:       limits.CanSeeActiveUsers,
 		MaxDeployedWebApps:      limits.MaxDeployedWebApps,
 		CreditRolloverMonths:    limits.CreditRolloverMonths,
 		CanAccessCode:           limits.CanAccessCode,
@@ -69,8 +72,8 @@ func (c *Controller) GetSubscription(user *models.User) (*responses.UserSubscrip
 		CanUseEmailService:      limits.CanUseEmailService,
 		CanBuildMobile:          limits.CanBuildMobile,
 		MonthlyAICredits:        limits.MonthlyAICredits,
-		MonthlyAppCount:         limits.MonthlyAppCount,
-		MonthlyDeployCount:      limits.MonthlyDeployCount,
+		MaxWebApps:              limits.MaxWebApps,
+		MaxMobileApps:           limits.MaxMobileApps,
 		CanUseEcommerce:         limits.CanUseEcommerce,
 		CanDeployWeb:            limits.CanDeployWeb,
 		CanExportToGitHub:       limits.CanExportToGitHub,

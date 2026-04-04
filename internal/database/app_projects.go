@@ -93,6 +93,20 @@ func (db *Database) CountAppProjectsByUserID(userID string) (int, error) {
 	return count, err
 }
 
+// CountAppProjectsByUserIDAndType counts total app projects for a user.
+// If projectType is "mobile_app", counts only mobile. If empty, counts non-mobile (web/ecommerce).
+func (db *Database) CountAppProjectsByUserIDAndType(userID string, projectType string) (int, error) {
+	q := db.DB.NewSelect().Model((*models.AppProject)(nil)).
+		Where("user_id = ?", userID).
+		Where("status != ?", "generating")
+	if projectType == "mobile_app" {
+		q = q.Where("project_type = ?", "mobile_app")
+	} else {
+		q = q.Where("project_type != ?", "mobile_app")
+	}
+	return q.Count(context.Background())
+}
+
 func (db *Database) CountAppProjectsByUserIDSince(userID string, since time.Time) (int, error) {
 	count, err := db.DB.NewSelect().Model((*models.AppProject)(nil)).
 		Where("user_id = ?", userID).

@@ -20,8 +20,8 @@ type StandartUserLimits struct {
 	// AI limits
 	MonthlyAICredits       int  `bun:",notnull,default:0"`
 	// App builder limits
-	MonthlyAppCount    int  `bun:",notnull,default:0"`
-	MonthlyDeployCount int  `bun:",notnull,default:0"`
+	MaxWebApps         int  `bun:"monthly_app_count,notnull,default:0"`
+	MaxMobileApps      int  `bun:",notnull,default:0"`
 	CanUseEcommerce    bool `bun:",notnull,default:false"`
 	CanDeployWeb       bool `bun:"can_deploy_to_vercel,notnull,default:false"`
 	MaxDeployedWebApps   int    `bun:",notnull,default:0"`
@@ -35,7 +35,6 @@ type StandartUserLimits struct {
 	CanExportToGitHub    bool `bun:"can_export_to_github,notnull,default:false"`
 	CanUseEmailService   bool `bun:",notnull,default:false"`
 	CanBuildMobile       bool `bun:",notnull,default:false"`
-	CanBuildFlutter      bool `bun:",notnull,default:false"`
 	CreatedAt               time.Time `bun:"created_at,nullzero,notnull,default:current_timestamp"`
 	UpdatedAt               time.Time `bun:"updated_at,nullzero,notnull,default:current_timestamp"`
 	DeletedAt               time.Time `bun:",soft_delete,nullzero"`
