@@ -3181,6 +3181,11 @@ func autoFixTSFilesWithJSX(files map[string]string) (int, []string) {
 		if isTemplateFile(filePath) || isConfigFile(filePath) {
 			continue
 		}
+		// Skip server-only auth library — it contains TypeScript generics
+		// (e.g. Promise<AuthResult>) that false-positive as JSX.
+		if filePath == "lib/wemob-auth.ts" {
+			continue
+		}
 		// Check for JSX syntax: <Component, <div, etc.
 		if jsxTagPattern.MatchString(content) {
 			newPath := strings.TrimSuffix(filePath, ".ts") + ".tsx"

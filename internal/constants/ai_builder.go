@@ -442,63 +442,42 @@ const NEXTJS_BUILDER_DATABASE_RULES = `
 - CRITICAL: Every page.tsx file that imports from '@/lib/db' MUST export ` + "`" + `export const dynamic = "force-dynamic"` + "`" + ` at the top level (after imports). This prevents Next.js from statically caching the page at build time, ensuring database queries always return fresh data on each request.
 - The database is pre-seeded with realistic demo data including AI-generated images by the platform. Do NOT create seed routes (app/api/seed/*), seed buttons, or "load demo data" UI. Do NOT show empty states for the initial build — the data is already there. Just query it normally. Image columns (cover_image, avatar_url, etc.) are populated with real hosted image URLs.
 - lib/db.ts and lib/schema.ts are template-managed — do NOT recreate them. Import directly.
-- IMPORTANT: Drizzle ORM uses camelCase property names in JavaScript even when the SQL column is snake_case. Always use camelCase (e.g., row.userId, row.createdAt, row.passwordHash).`
+- IMPORTANT: Drizzle ORM uses camelCase property names in JavaScript even when the SQL column is snake_case. Always use camelCase (e.g., row.userId, row.createdAt, row.passwordHash).
+- UUID columns: if an API route needs a hardcoded userId (e.g. no auth), use a valid UUID like '00000000-0000-0000-0000-000000000000'. NEVER use plain strings like 'guest' — Postgres UUID columns reject non-UUID values.`
 
 // NEXTJS_BUILDER_AUTH_RULES is appended to the system prompt only when the project uses authentication.
 const NEXTJS_BUILDER_AUTH_RULES = `
 
 ### Auth Rules
 
-You MUST generate three auth files. They are NOT provided as templates — you write them.
+You generate three auth files (not templates — you write them):
 
-**File 1: lib/wemob-auth.ts (SERVER-ONLY)**
-Server-side auth library. MUST start with ` + "`import 'server-only'`" + ` to enforce the boundary at build time.
-Dependencies: jose (JWT, edge-compatible), bcryptjs (password hashing), drizzle-orm (DB queries).
-- Import db from '@/lib/db', users table from '@/lib/schema', eq from 'drizzle-orm'.
-- Use jose SignJWT/jwtVerify for JWT sessions (HS256, 7-day expiry). Secret from process.env.AUTH_SECRET.
-- Cookie name: "wemob_auth_session". Options: httpOnly, secure (in production), sameSite:"lax", path:"/".
-- IMPORTANT: cookies() from 'next/headers' is async — you MUST await it: ` + "`const cookieStore = await cookies()`" + ` before calling .get()/.set()/.delete().
-- Hash passwords with bcrypt (cost 12).
-- Export types: AuthUser { id, email, name, avatarUrl, role, emailVerified }, Session { user: AuthUser, expires: Date }, AuthResult { success, error?, user? }.
-- Export functions:
-  - register(email, password, name?) → AuthResult — hashes password, inserts user, creates JWT, calls (await cookies()).set() to store session cookie, returns { success: true, user }.
-  - login(email, password) → AuthResult — verifies credentials, creates JWT, calls (await cookies()).set() to store session cookie, returns { success: true, user }.
-  - logout() → void — calls (await cookies()).delete() to remove the session cookie.
-  - getSession() → Session|null — reads cookie via (await cookies()).get(), verifies JWT, returns session or null.
-  - getCurrentUser() → AuthUser|null — calls getSession(), returns session.user or null.
-  - requireAuth(redirectTo?) → AuthUser — calls getSession(), redirects via next/navigation redirect() if no session, returns user.
-- Use a sanitizeUser helper to strip passwordHash from DB rows before returning.
+**lib/wemob-auth.ts** — Server-only auth library (NO JSX, pure TypeScript).
+- First line: ` + "`import 'server-only'`" + `
+- Deps: jose (JWT HS256, 7-day expiry), bcryptjs (cost 12), drizzle-orm. Import db from '@/lib/db', users from '@/lib/schema'.
+- ` + "`const cookieStore = await cookies()`" + ` — cookies() is async in Next.js 16, always await it.
+- Cookie: "wemob_auth_session", httpOnly, secure (prod), sameSite:"lax", path:"/".
+- Types: AuthUser { id, email, name, avatarUrl, role, emailVerified }, Session { user: AuthUser, expires }, AuthResult { success, error?, user? }.
+- Exports: register(email, password, name?), login(email, password), logout(), getSession(), getCurrentUser(), requireAuth(redirectTo?). Strip passwordHash before returning user data.
+- getSession() takes NO arguments — reads cookies internally. NEVER pass request/req to it.
+- Session data is nested: session.user.id, session.user.email. NEVER use session.userId or session.email directly.
 
-**File 2: lib/wemob-auth-client.tsx (CLIENT-ONLY, "use client")**
-Client-side React context for auth state. No server dependencies.
-- Export AuthProvider component: manages user state via /api/auth/ fetch calls. On mount, fetches /api/auth/session.
-- Export useAuth() hook returning { user: AuthUser|null, isLoading, isAuthenticated, login(email,password), register(email,password,name?), logout(), refreshSession() }.
-- login/register: call POST /api/auth/login or /api/auth/register, then IMMEDIATELY call refreshSession() to fetch the updated session BEFORE returning. This is CRITICAL — the server sets the cookie during the POST, but the client user state won't update until refreshSession() completes. The login/register functions must await refreshSession() internally and only then return { success, error? }. Pattern: const res = await fetch('/api/auth/login', ...); const data = await res.json(); if (data.success) { await refreshSession(); } return data;
-- logout calls POST /api/auth/logout and clears user state.
-- NEVER import server-only modules (next/headers, @/lib/db, @/lib/wemob-auth) in this file.
+**lib/wemob-auth-client.tsx** — Client-only React context ("use client"). No server imports.
+- AuthProvider: manages user state, fetches /api/auth/session on mount.
+- useAuth() → { user, isLoading, isAuthenticated, login, register, logout, refreshSession }.
+- CRITICAL: login/register must ` + "`await refreshSession()`" + ` after a successful POST before returning. Without this the cookie is set but client state is stale, causing 401s. Pattern: ` + "`if (data.success) { await refreshSession(); } return data;`" + `
 
-**CRITICAL Auth Redirect Pattern (race condition prevention):**
-- Login/register pages: when checking if user is already logged in, ALWAYS check BOTH conditions: if (!isLoading && user). NEVER redirect while isLoading is true.
-- After successful login/register, use router.push('/') ONLY after the login/register function returns (which internally already called refreshSession). Do NOT rely on useEffect watching user state for redirect — this creates a race condition.
-- Protected pages: when checking if user is NOT logged in, ALWAYS check (!isLoading && !user) before redirecting to /login. Show a loading state while isLoading is true. Pattern: if (isLoading) return <LoadingSkeleton />; if (!user) redirect('/login');
-- NEVER redirect to /login inside useEffect based solely on user === null — user is null during initial load too.
+**app/api/auth/[...action]/route.ts** — Catch-all API route.
+- Imports register, login, logout, getSession from '@/lib/wemob-auth'. params is ` + "`Promise<{ action: string[] }>`" + ` — must be awaited.
+- POST: switch action[0] → "register"/"login"/"logout". GET: "session" → return { user } or { user: null }.
 
-**CRITICAL: UUID userId in API routes (no auth mode):**
-- When auth is removed or not enabled, API routes that reference a userId column with UUID type in the database MUST use a valid UUID constant (e.g., '00000000-0000-0000-0000-000000000000'), NEVER a plain string like 'guest' or 'anonymous'. Database UUID columns reject non-UUID strings.
+**Auth redirects (race condition prevention):**
+- ALWAYS guard redirects with isLoading: ` + "`if (isLoading) return <Loading />; if (!user) redirect('/login');`" + `
+- Login pages: redirect to home only via ` + "`if (!isLoading && user) router.push('/')`" + `. NEVER use useEffect watching user alone — user is null during initial load.
+- After login/register, router.push ONLY after the function returns (it already called refreshSession internally).
 
-**File 3: app/api/auth/[...action]/route.ts**
-Catch-all API route. Imports register, login, logout, getSession from '@/lib/wemob-auth'.
-- POST handler: switch on action[0] → "register" (validate email+password, call register), "login" (call login), "logout" (call logout). Each function handles cookies internally — just return NextResponse.json() with the result.
-- GET handler: action[0] === "session" → call getSession(), return { user: session.user } or { user: null }.
-- params is Promise<{ action: string[] }> — must be awaited.
-
-**Usage Rules:**
-- Access user properties via session.user.id, session.user.email, session.user.name, etc. NEVER use session.userId or session.username — those fields do not exist.
-- getSession() takes NO arguments (reads cookies internally). NEVER pass request/req to it.
-- Wrap app with AuthProvider: import AuthProvider into the root layout (server component can render client components directly) OR create a separate client wrapper component. Either pattern is valid.
-- useAuth() returns { user, isLoading, isAuthenticated, login, register, logout, refreshSession }.
-- Users table columns: id (uuid PK), email, password_hash, name, avatar_url, role, email_verified, created_at, updated_at. Drizzle camelCase: passwordHash, avatarUrl, emailVerified, createdAt, updatedAt.
-- lib/wemob-auth.ts is SERVER-ONLY. NEVER import it in "use client" files. Use lib/wemob-auth-client.tsx for client components.`
+**Removing auth:**
+- When the user asks to remove auth, you MUST: (1) delete lib/wemob-auth.ts, lib/wemob-auth-client.tsx, app/api/auth/[...action]/route.ts, login/register pages, (2) remove ALL imports of useAuth/AuthProvider/wemob-auth from every file in the project, (3) remove AuthProvider wrapper from layout, (4) replace any userId references in API routes with a valid UUID constant '00000000-0000-0000-0000-000000000000' (never 'guest' — UUID columns reject non-UUID strings). Search all files thoroughly — missed imports cause "Module not found" build errors.`
 
 // NEXTJS_BUILDER_MOBILE_RULES is appended to chat and single-shot system prompts
 // when the project type is "mobile_app". It overrides desktop-centric defaults with
