@@ -661,10 +661,15 @@ When your generated code uses WemobBridge methods, you MUST call the configure_m
 - calendar.addEvent → "calendar" permission
 - files.pick → "storage" permission
 - bluetooth.isAvailable, bluetooth.scan, bluetooth.connect, bluetooth.disconnect, bluetooth.getServices, bluetooth.read, bluetooth.write → "bluetooth" permission
+- getUserMedia({ video }) → "camera" permission (for live camera stream — no bridge method needed)
+- getUserMedia({ audio }) → "microphone" permission (for live mic stream — no bridge method needed)
 - getDeviceInfo, share, haptic, openExternal, getConnectionStatus, storage.* → no extra permissions needed
 
 Example: If the app uses camera and contacts, call:
 configure_mobile_app(bridge_methods=["camera.takePhoto","contacts.getAll","getDeviceInfo","share"], permissions=["camera","contacts"])
+
+Example: If the app uses live camera + microphone (e.g. pose detection, voice commands), call:
+configure_mobile_app(bridge_methods=["getDeviceInfo","haptic"], permissions=["camera","microphone"])
 
 Example: If the app uses Bluetooth Low Energy, call:
 configure_mobile_app(bridge_methods=["bluetooth.isAvailable","bluetooth.scan","bluetooth.connect","bluetooth.disconnect","bluetooth.getServices","bluetooth.read","bluetooth.write"], permissions=["bluetooth"])
@@ -728,6 +733,7 @@ The global ` + "`window.WemobBridge`" + ` object is available in client componen
   - External URLs: use ` + "`WemobBridge.openExternal(url)`" + ` instead of ` + "`window.open()`" + ` or ` + "`<a target=\"_blank\">`" + `
   - Bluetooth/BLE: use ` + "`WemobBridge.bluetooth.scan()`" + `, ` + "`connect()`" + `, ` + "`read()`" + `, ` + "`write()`" + ` for BLE device interaction. Always check ` + "`isAvailable()`" + ` first and show a clear message if Bluetooth is off.
 - **Live camera stream**: For features that need a real-time camera feed (video calls, AR, pose detection, QR/barcode scanning, camera mirrors, live filters), use the standard Web API ` + "`navigator.mediaDevices.getUserMedia({ video: true })`" + ` and render the MediaStream to a ` + "`<video>`" + ` element. This works both in browsers and inside the native app shell. Do NOT use WemobBridge.camera for live video — those methods are for single captures only. You can combine getUserMedia with libraries like MediaPipe, TensorFlow.js, or jsQR for real-time processing. Always request the "camera" permission via configure_mobile_app when using getUserMedia.
+- **Live microphone stream**: For features that need real-time audio input (voice recording, voice commands, audio processing, speech-to-text, sound analysis, walkie-talkie), use ` + "`navigator.mediaDevices.getUserMedia({ audio: true })`" + ` to get a live audio MediaStream. Combine with the Web Audio API (AudioContext, AnalyserNode) for real-time audio processing, or use libraries like Whisper.js / Vosk for client-side speech recognition. Do NOT rely on the browser's built-in SpeechRecognition API — it may not work inside the native app shell. Always request the "microphone" permission via configure_mobile_app when using getUserMedia with audio.
 - Always check ` + "`WemobBridge.isNative()`" + ` before showing native-only UI. Provide web fallback (e.g. ` + "`<input type=\"file\">`" + `) when not native.
 - Do NOT add a script tag for wemob-bridge.js — it is auto-injected by the native shell.
 `
