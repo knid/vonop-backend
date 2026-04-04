@@ -1485,9 +1485,9 @@ func (c *Controller) executeChatGenerateImage(
 		return fmt.Sprintf("Image generation failed: %s", err.Error()), nil
 	}
 
-	// Deduct 2 credits for image generation
+	// Deduct 1 credit for image generation
 	if user != nil {
-		if err := c.DeductAICreditsUnchecked(user, 2, "generate_image", project.ID.String()); err != nil {
+		if err := c.DeductAICreditsUnchecked(user, 1, "generate_image", project.ID.String()); err != nil {
 			slog.Warn("failed to deduct credit for image generation", "error", err, "user_id", user.ID, "project_id", project.ID)
 		}
 	}
