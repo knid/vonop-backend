@@ -140,6 +140,15 @@ func (c *Controller) GetOrCreateCreditsBalance(user *models.User) (*models.AICre
 	return balance, nil
 }
 
+// TokensToCredits converts token counts to credits using remote-config values
+// for tokens-per-credit and output multiplier. Falls back to hardcoded defaults
+// if remote config is unavailable.
+func (c *Controller) TokensToCredits(promptTokens, completionTokens int) int {
+	tpc := c.RemoteConfig.GetInt(remoteconfig.AICreditsTokensPerCredit, remoteconfig.Global)
+	om := c.RemoteConfig.GetInt(remoteconfig.AICreditsOutputMultiplier, remoteconfig.Global)
+	return models.TokensToCreditsWithConfig(promptTokens, completionTokens, tpc, om)
+}
+
 // DeductAICreditsUnchecked deducts credits without checking sufficiency (balance may go negative
 // down to AICreditsMinBalance). Used for post-hoc token-based billing where the pre-check already ran.
 func (c *Controller) DeductAICreditsUnchecked(user *models.User, cost int, action string, reference string) error {
@@ -341,7 +350,7 @@ func (c *Controller) RecordTokenUsage(user *models.User, action, model, provider
 		slog.Error("failed to record LLM token usage", "error", err, "user_id", user.ID, "action", action)
 	}
 
-	creditsSpent := models.TokensToCredits(prompt, completion)
+	creditsSpent := c.TokensToCredits(prompt, completion)
 
 	if c.PostHog != nil {
 		traceID := uuid.New().String()
@@ -367,7 +376,7 @@ func (c *Controller) RecordTokenUsage(user *models.User, action, model, provider
 				Set("$ai_is_error", false).
 				Set("$ai_stream", entry.IsStreaming).
 				Set("app_type", appType).
-				Set("credits_estimated", models.TokensToCredits(entry.PromptTokens, entry.CompletionTokens))
+				Set("credits_estimated", c.TokensToCredits(entry.PromptTokens, entry.CompletionTokens))
 			if entry.CacheCreationInputTokens > 0 {
 				props.Set("$ai_cache_creation_input_tokens", entry.CacheCreationInputTokens)
 			}
