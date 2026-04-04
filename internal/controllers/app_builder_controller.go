@@ -867,11 +867,15 @@ func (c *Controller) StreamBuildApp(
 					if toolName == "read_file" {
 						return result
 					}
-					if toolName == "list_files" && len(result) > 500 {
-						lines := strings.Split(result, "\n")
-						if len(lines) > 10 {
-							return strings.Join(lines[:10], "\n") + fmt.Sprintf("\n...[%d more files]", len(lines)-10)
-						}
+					// Never trim list_files — file lists are small (just names) and
+					// the LLM needs full project structure to decide which files to edit.
+					if toolName == "list_files" {
+						return result
+					}
+					// Keep search_files results intact — truncating causes the LLM
+					// to miss matches and produce incomplete edits.
+					if toolName == "search_files" {
+						return result
 					}
 					if len(result) > 2000 {
 						return safeTruncate(result, 500) + fmt.Sprintf("\n...[trimmed, %d chars total]", len(result))
@@ -879,6 +883,29 @@ func (c *Controller) StreamBuildApp(
 					return result
 				},
 				TrimArgs: func(toolName, args string) string {
+					// Never trim edit_file args — the LLM needs search/replace text
+					// to reason about failed edits on retry.
+					if toolName == "edit_file" {
+						return args
+					}
+					// For write_file/write_files, keep a larger preview so the LLM
+					// retains context about what it wrote.
+					if toolName == "write_file" || toolName == "write_files" {
+						if len(args) > 4000 {
+							var parsed map[string]any
+							if json.Unmarshal([]byte(args), &parsed) == nil {
+								for k, v := range parsed {
+									if s, ok := v.(string); ok && len(s) > 1000 {
+										parsed[k] = safeTruncate(s, 1000) + "...[trimmed]"
+									}
+								}
+								if trimmed, err := json.Marshal(parsed); err == nil {
+									return string(trimmed)
+								}
+							}
+						}
+						return args
+					}
 					if len(args) > 1000 {
 						var parsed map[string]any
 						if json.Unmarshal([]byte(args), &parsed) == nil {
