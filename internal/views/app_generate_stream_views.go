@@ -30,6 +30,16 @@ func (v *HttpViews) GenerateAppStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Check for active generation jobs BEFORE creating a new project to prevent
+	// orphan projects from spam-clicks (each click was creating a new DB record).
+	activeJobs, _ := v.Controller.GetActiveJobs(user.ID)
+	for _, j := range activeJobs {
+		if j.Type == "generate_app" {
+			utils.JSONErrorResponse(w, "a generation is already in progress", http.StatusTooManyRequests)
+			return
+		}
+	}
+
 	// Pre-step: create project synchronously
 	project, err := v.Controller.CreateAppProject(r.Context(), user, req)
 	if err != nil {
