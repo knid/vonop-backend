@@ -411,8 +411,8 @@ func seedPlans(db *database.Database, sm secret.SecretManager) {
 				MontlyBuildCount:        1,
 				MontlyNotificationCount: 3,
 				MonthlyAICredits:        50,
-				MonthlyAppCount:         1,
-				MonthlyDeployCount:      1,
+				MaxWebApps:              1,
+				MaxMobileApps:           0,
 				MaxDeployedWebApps:      1,
 				DeployMemoryMB:          256,
 				DeployCPUs:              "0.25",
@@ -421,9 +421,8 @@ func seedPlans(db *database.Database, sm secret.SecretManager) {
 				CreditRolloverMonths:    0,
 				CanBuildToAndroid:       true,
 				CanBuildToIOS:           true,
-				CanBuildMobile:          true,
+				CanBuildMobile:          false,
 				CanUseAnalytics:         false,
-				CanSeeActiveUsers:       false,
 				CanAccessCode:           false,
 				CanBuyDomain:            false,
 				CanUseEmailService:      false,
@@ -446,8 +445,8 @@ func seedPlans(db *database.Database, sm secret.SecretManager) {
 				MontlyBuildCount:        10,
 				MontlyNotificationCount: 50,
 				MonthlyAICredits:        100,
-				MonthlyAppCount:         20,
-				MonthlyDeployCount:      10,
+				MaxWebApps:              20,
+				MaxMobileApps:           0,
 				MaxDeployedWebApps:      3,
 				DeployMemoryMB:          512,
 				DeployCPUs:              "0.5",
@@ -458,13 +457,12 @@ func seedPlans(db *database.Database, sm secret.SecretManager) {
 				CanBuildToIOS:           true,
 				CanBuildMobile:          true,
 				CanUseAnalytics:         true,
-				CanSeeActiveUsers:       false,
 				CanAccessCode:           true,
 				CanBuyDomain:            true,
 				CanUseEmailService:      false,
 				CanUseEcommerce:         true,
 				CanExportToGitHub:       true,
-				CanDeployWeb:       true,
+				CanDeployWeb:            true,
 				CanRemoveBrandLogo:      true,
 			},
 		},
@@ -481,8 +479,8 @@ func seedPlans(db *database.Database, sm secret.SecretManager) {
 				MontlyBuildCount:        50,
 				MontlyNotificationCount: 200,
 				MonthlyAICredits:        200,
-				MonthlyAppCount:         100,
-				MonthlyDeployCount:      50,
+				MaxWebApps:              100,
+				MaxMobileApps:           5,
 				MaxDeployedWebApps:      10,
 				DeployMemoryMB:          1024,
 				DeployCPUs:              "1",
@@ -493,13 +491,12 @@ func seedPlans(db *database.Database, sm secret.SecretManager) {
 				CanBuildToIOS:           true,
 				CanBuildMobile:          true,
 				CanUseAnalytics:         true,
-				CanSeeActiveUsers:       true,
 				CanAccessCode:           true,
 				CanBuyDomain:            true,
 				CanUseEmailService:      true,
 				CanUseEcommerce:         true,
 				CanExportToGitHub:       true,
-				CanDeployWeb:       true,
+				CanDeployWeb:            true,
 				CanRemoveBrandLogo:      true,
 			},
 		},
@@ -548,8 +545,8 @@ func seedPlans(db *database.Database, sm secret.SecretManager) {
 
 		limits.MaximumProjectCount = p.Limits.MaximumProjectCount
 		limits.MonthlyAICredits = p.Limits.MonthlyAICredits
-		limits.MonthlyAppCount = p.Limits.MonthlyAppCount
-		limits.MonthlyDeployCount = p.Limits.MonthlyDeployCount
+		limits.MaxWebApps = p.Limits.MaxWebApps
+		limits.MaxMobileApps = p.Limits.MaxMobileApps
 		limits.MaxDeployedWebApps = p.Limits.MaxDeployedWebApps
 		limits.DeployMemoryMB = p.Limits.DeployMemoryMB
 		limits.DeployCPUs = p.Limits.DeployCPUs
@@ -569,7 +566,6 @@ func seedPlans(db *database.Database, sm secret.SecretManager) {
 		limits.MaximumCredentialCount = p.Limits.MaximumCredentialCount
 		limits.MontlyBuildCount = p.Limits.MontlyBuildCount
 		limits.MontlyNotificationCount = p.Limits.MontlyNotificationCount
-		limits.CanSeeActiveUsers = p.Limits.CanSeeActiveUsers
 		limits.CanExportToGitHub = p.Limits.CanExportToGitHub
 
 		if _, err := db.UpdateStandartUserLimits(limits); err != nil {

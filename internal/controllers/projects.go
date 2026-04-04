@@ -81,39 +81,6 @@ func (c *Controller) CreateProject(user *models.User, projectCreateReq requests.
 		return nil, err
 	}
 
-	projects, err := c.DB.GetProjects(user)
-	if err != nil {
-		return nil, err
-	}
-
-	projectsInPeriod := 0
-	subsStart := user.SubscriptionStartAt
-	now := time.Now()
-
-	renewStart := time.Date(now.Year(), now.Month(), subsStart.Day(), 0, 0, 0, 0, now.Location())
-
-	if now.Before(renewStart) {
-		renewStart = renewStart.AddDate(0, -1, 0)
-	}
-
-	renewEnd := renewStart.AddDate(0, 1, 0)
-
-	if user.Type == "agency" {
-		for _, project := range projects {
-			if project.CreatedAt.After(renewStart) && project.CreatedAt.Before(renewEnd) {
-				projectsInPeriod++
-			}
-		}
-
-		if projectsInPeriod >= limits.MaximumProjectCount {
-			return nil, errors.New("you have reached your project limit for this subscription period")
-		}
-	}
-
-	if len(projects) >= limits.MaximumProjectCount {
-		return nil, errors.New("you have reached your project limit")
-	}
-
 	if projectCreateReq.BuildForAndroid && !limits.CanBuildToAndroid {
 		return nil, errors.New("your subscription does not allow android builds")
 	}
@@ -223,19 +190,6 @@ func (c *Controller) QuickCreateMobileProject(user *models.User, websiteURL stri
 	// Return existing project if user already wrapped this URL
 	if existing, err := c.DB.GetProjectByUserAndURL(user.ID.String(), websiteURL); err == nil && existing.ID.String() != "" {
 		return existing, nil
-	}
-
-	limits, err := c.GetUserLimits(user)
-	if err != nil {
-		return nil, err
-	}
-
-	projects, err := c.DB.GetProjects(user)
-	if err != nil {
-		return nil, err
-	}
-	if len(projects) >= limits.MaximumProjectCount {
-		return nil, errors.New("you have reached your project limit")
 	}
 
 	pkName, err := utils.RandomHex(5)

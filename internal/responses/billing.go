@@ -11,9 +11,8 @@ type PlanLimitsResponse struct {
 	CanUseEmailService   bool   `json:"can_use_email_service"`
 	CanUseEcommerce      bool   `json:"can_use_ecommerce"`
 	CanDeployWeb         bool   `json:"can_deploy_web"`
-	MaximumProjectCount  int    `json:"maximum_project_count"`
-	MonthlyAppCount      int    `json:"monthly_app_count"`
-	MonthlyDeployCount   int    `json:"monthly_deploy_count"`
+	MaxWebApps           int    `json:"max_web_apps"`
+	MaxMobileApps        int    `json:"max_mobile_apps"`
 	CanRemoveBrandLogo   bool   `json:"can_remove_brand_logo"`
 	CanExportToGitHub    bool   `json:"can_export_to_github"`
 	DeployMemoryMB       int    `json:"deploy_memory_mb"`

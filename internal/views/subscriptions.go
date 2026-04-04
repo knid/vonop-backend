@@ -29,7 +29,6 @@ func (v *HttpViews) GetLimits(w http.ResponseWriter, r *http.Request) {
 
 	limitsResponse := responses.LimitsResponse{
 		ID:                      limits.ID,
-		MaximumProjectCount:     limits.MaximumProjectCount,
 		MaximumAccessIdCount:    limits.MaximumCredentialCount,
 		MontlyBuildCount:        limits.MontlyBuildCount,
 		MontlyNotificationCount: limits.MontlyNotificationCount,
@@ -37,7 +36,6 @@ func (v *HttpViews) GetLimits(w http.ResponseWriter, r *http.Request) {
 		CanBuildToIOS:           limits.CanBuildToIOS,
 		CanUseAnalytics:         limits.CanUseAnalytics,
 		CanRemoveBrandLogo:      limits.CanRemoveBrandLogo,
-		CanSeeActiveUsers:       limits.CanSeeActiveUsers,
 		MaxDeployedWebApps:      limits.MaxDeployedWebApps,
 		CreditRolloverMonths:    limits.CreditRolloverMonths,
 		CanAccessCode:           limits.CanAccessCode,
@@ -45,8 +43,8 @@ func (v *HttpViews) GetLimits(w http.ResponseWriter, r *http.Request) {
 		CanUseEmailService:      limits.CanUseEmailService,
 		CanBuildMobile:          limits.CanBuildMobile,
 		MonthlyAICredits:        limits.MonthlyAICredits,
-		MonthlyAppCount:         limits.MonthlyAppCount,
-		MonthlyDeployCount:      limits.MonthlyDeployCount,
+		MaxWebApps:              limits.MaxWebApps,
+		MaxMobileApps:           limits.MaxMobileApps,
 		CanUseEcommerce:         limits.CanUseEcommerce,
 		CanDeployWeb:            limits.CanDeployWeb,
 		CanExportToGitHub:       limits.CanExportToGitHub,
