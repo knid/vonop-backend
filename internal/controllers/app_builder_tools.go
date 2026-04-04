@@ -2512,7 +2512,7 @@ func (c *Controller) executeChatManageAssets(
 func (c *Controller) buildBuilderToolExecutor(ctx context.Context, project *models.AppProject, user *models.User, repo *gitrepo.Repo, fileMap map[string]string, cbs *builderToolCallbacks) utils.ToolExecutor {
 	// Look up user's plan limits for DB provisioning
 	var userLimits *models.StandartUserLimits
-	if fetchedLimits, limitsErr := c.DB.GetStandartUserLimitsByUser(user); limitsErr == nil {
+	if fetchedLimits, limitsErr := c.GetUserLimits(user); limitsErr == nil {
 		userLimits = fetchedLimits
 	}
 

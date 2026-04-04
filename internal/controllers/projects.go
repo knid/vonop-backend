@@ -76,7 +76,7 @@ func (c *Controller) CreateProject(user *models.User, projectCreateReq requests.
 		return nil, err
 	}
 
-	limits, err := c.DB.GetStandartUserLimitsByUser(user)
+	limits, err := c.GetUserLimits(user)
 	if err != nil {
 		return nil, err
 	}
@@ -225,7 +225,7 @@ func (c *Controller) QuickCreateMobileProject(user *models.User, websiteURL stri
 		return existing, nil
 	}
 
-	limits, err := c.DB.GetStandartUserLimitsByUser(user)
+	limits, err := c.GetUserLimits(user)
 	if err != nil {
 		return nil, err
 	}
@@ -280,7 +280,7 @@ func (c *Controller) UpdateProject(r *http.Request, user *models.User, projectCr
 		}
 	}
 
-	limits, err := c.DB.GetStandartUserLimitsByUser(user)
+	limits, err := c.GetUserLimits(user)
 	if err != nil {
 		return nil, err
 	}

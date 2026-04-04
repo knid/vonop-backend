@@ -124,7 +124,7 @@ func (v *HttpViews) ExportToGitHub(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Check plan limit
-	limits, limitsErr := v.Controller.DB.GetStandartUserLimitsByUser(user)
+	limits, limitsErr := v.Controller.GetUserLimits(user)
 	if limitsErr == nil && !limits.CanExportToGitHub {
 		go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_NEED, map[string]any{"action": "export_to_github"})
 		utils.JSONCodedErrorResponse(w, "GITHUB_EXPORT_NOT_AVAILABLE",

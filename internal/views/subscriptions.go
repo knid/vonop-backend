@@ -17,7 +17,7 @@ func (v *HttpViews) GetLimits(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	limits, err := v.Controller.DB.GetStandartUserLimitsByUser(user)
+	limits, err := v.Controller.GetUserLimits(user)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			utils.JSONErrorResponse(w, "not found", http.StatusNotFound)

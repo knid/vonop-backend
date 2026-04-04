@@ -45,7 +45,7 @@ func (c *Controller) DeployToCoolify(project *models.AppProject, user *models.Us
 
 	// Inject "Created by Wemob" badge for free/starter plans
 	showBadge := true
-	if limits, limitsErr := c.DB.GetStandartUserLimitsByUser(user); limitsErr == nil && limits.CanRemoveBrandLogo {
+	if limits, limitsErr := c.GetUserLimits(user); limitsErr == nil && limits.CanRemoveBrandLogo {
 		showBadge = false
 	}
 	if showBadge {
@@ -92,7 +92,7 @@ func (c *Controller) DeployToCoolify(project *models.AppProject, user *models.Us
 		// Look up per-plan resource limits
 		memoryLimit := "512MB"
 		cpuLimit := "0.5"
-		if limits, limitsErr := c.DB.GetStandartUserLimitsByUser(user); limitsErr == nil && limits.DeployMemoryMB > 0 {
+		if limits, limitsErr := c.GetUserLimits(user); limitsErr == nil && limits.DeployMemoryMB > 0 {
 			memoryLimit = fmt.Sprintf("%dMB", limits.DeployMemoryMB)
 			cpuLimit = limits.DeployCPUs
 		}
@@ -223,7 +223,7 @@ func (c *Controller) DeployToCoolify(project *models.AppProject, user *models.Us
 // its Vercel deployment URL using the old URL-wrapper build system.
 func (c *Controller) BuildAppMobile(appProject *models.AppProject, user *models.User, platform string, appName string, icon string, splashColor string) (*models.Build, *models.AppBuildTask, error) {
 	// Enforce platform-specific build permissions
-	limits, err := c.DB.GetStandartUserLimitsByUser(user)
+	limits, err := c.GetUserLimits(user)
 	if err != nil {
 		slog.Warn("BuildAppMobile: failed to get user limits", "error", err, "user_id", user.ID)
 	} else {

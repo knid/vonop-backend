@@ -95,13 +95,7 @@ func (v *HttpViews) SendProjectNotification(w http.ResponseWriter, r *http.Reque
 		}
 	}
 
-	subsInfo, err := v.Controller.GetSubscription(user)
-	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	limits, err := v.Controller.DB.GetStandartUserLimitsById(subsInfo.Limits.ID.String())
+	limits, err := v.Controller.GetUserLimits(user)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
 		return

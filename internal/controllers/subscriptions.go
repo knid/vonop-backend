@@ -1,9 +1,44 @@
 package controllers
 
 import (
+	"strings"
+
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/responses"
+	"github.com/knid/wemob/internal/services/remoteconfig"
 )
+
+// GetUserLimits returns the user's plan limits with PostHog remote config overrides.
+// DB values serve as fallback; PostHog flags (rc-plan-{name}-{field}) take precedence.
+func (c *Controller) GetUserLimits(user *models.User) (*models.StandartUserLimits, error) {
+	subs, err := c.DB.GetStandartUserSubscriptionByUser(user)
+	if err != nil {
+		return nil, err
+	}
+
+	limits, err := c.DB.GetStandartUserLimitsById(subs.LimitsID.String())
+	if err != nil {
+		return nil, err
+	}
+
+	rc := c.RemoteConfig
+	pn := strings.ToLower(subs.Name)
+
+	limits.MaxDeployedWebApps = rc.GetInt(remoteconfig.PlanInt(pn, "max-deployed-web-apps", limits.MaxDeployedWebApps), remoteconfig.Global)
+	limits.MonthlyAICredits = rc.GetInt(remoteconfig.PlanInt(pn, "monthly-ai-credits", limits.MonthlyAICredits), remoteconfig.Global)
+	limits.CreditRolloverMonths = rc.GetInt(remoteconfig.PlanInt(pn, "credit-rollover-months", limits.CreditRolloverMonths), remoteconfig.Global)
+	limits.MonthlyAppCount = rc.GetInt(remoteconfig.PlanInt(pn, "monthly-app-count", limits.MonthlyAppCount), remoteconfig.Global)
+	limits.MonthlyDeployCount = rc.GetInt(remoteconfig.PlanInt(pn, "monthly-deploy-count", limits.MonthlyDeployCount), remoteconfig.Global)
+	limits.CanBuildMobile = rc.GetBool(remoteconfig.PlanBool(pn, "can-build-mobile", limits.CanBuildMobile), remoteconfig.Global)
+	limits.CanUseAnalytics = rc.GetBool(remoteconfig.PlanBool(pn, "can-use-analytics", limits.CanUseAnalytics), remoteconfig.Global)
+	limits.CanAccessCode = rc.GetBool(remoteconfig.PlanBool(pn, "can-access-code", limits.CanAccessCode), remoteconfig.Global)
+	limits.CanBuyDomain = rc.GetBool(remoteconfig.PlanBool(pn, "can-buy-domain", limits.CanBuyDomain), remoteconfig.Global)
+	limits.CanUseEmailService = rc.GetBool(remoteconfig.PlanBool(pn, "can-use-email-service", limits.CanUseEmailService), remoteconfig.Global)
+	limits.CanUseEcommerce = rc.GetBool(remoteconfig.PlanBool(pn, "can-use-ecommerce", limits.CanUseEcommerce), remoteconfig.Global)
+	limits.CanExportToGitHub = rc.GetBool(remoteconfig.PlanBool(pn, "can-export-to-github", limits.CanExportToGitHub), remoteconfig.Global)
+
+	return limits, nil
+}
 
 func (c *Controller) GetSubscription(user *models.User) (*responses.UserSubscriptionInformationResponse, error) {
 	subs, err := c.DB.GetStandartUserSubscriptionByUser(user)
@@ -11,8 +46,8 @@ func (c *Controller) GetSubscription(user *models.User) (*responses.UserSubscrip
 		return nil, err
 	}
 
-	// get limits
-	limits, err := c.DB.GetStandartUserLimitsByUser(user)
+	// get limits (with remote config overrides)
+	limits, err := c.GetUserLimits(user)
 	if err != nil {
 		return nil, err
 	}

@@ -55,7 +55,7 @@ func (v *HttpViews) GetMontlyUsage(w http.ResponseWriter, r *http.Request) {
 
 	// Fetch plan limits to include in response
 	var notificationLimit, buildLimit, appLimit, deployLimit, aiCreditsLimit int
-	limits, limitsErr := v.Controller.DB.GetStandartUserLimitsByUser(user)
+	limits, limitsErr := v.Controller.GetUserLimits(user)
 	if limitsErr == nil {
 		notificationLimit = limits.MontlyNotificationCount
 		buildLimit = limits.MontlyBuildCount
