@@ -97,6 +97,7 @@ func (db *Database) CountAppProjectsByUserIDSince(userID string, since time.Time
 	count, err := db.DB.NewSelect().Model((*models.AppProject)(nil)).
 		Where("user_id = ?", userID).
 		Where("created_at >= ?", since).
+		Where("status != ?", "generating").
 		Count(context.Background())
 	return count, err
 }

@@ -2632,6 +2632,54 @@ func runDeterministicChecks(files map[string]string) []validationError {
 				})
 			}
 		}
+
+		// Check A3: wemob-auth.ts must import 'server-only' to enforce boundary
+		if !strings.Contains(authContent, `"server-only"`) && !strings.Contains(authContent, `'server-only'`) {
+			errors = append(errors, validationError{
+				File:  "lib/wemob-auth.ts",
+				Error: "Auth server library is missing `import 'server-only'` at the top. This import prevents accidental client-side usage and must be the first import.",
+				Type:  "auth_missing_server_only",
+			})
+		}
+
+		// Check A4: wemob-auth-client.tsx login/register must call refreshSession after API call
+		// This prevents the cookie race condition where login succeeds but client state doesn't update.
+		if clientAuth, hasClientAuth := files["lib/wemob-auth-client.tsx"]; hasClientAuth {
+			// Check that login function body contains refreshSession call
+			hasLoginFunc := strings.Contains(clientAuth, "login") && strings.Contains(clientAuth, "fetch")
+			hasRefreshInLogin := strings.Contains(clientAuth, "refreshSession")
+			if hasLoginFunc && !hasRefreshInLogin {
+				errors = append(errors, validationError{
+					File:  "lib/wemob-auth-client.tsx",
+					Error: "Auth client login/register functions must call refreshSession() after a successful API call. Without this, the cookie is set but client user state won't update, causing 401 errors on subsequent requests. Pattern: if (data.success) { await refreshSession(); }",
+					Type:  "auth_missing_refresh",
+				})
+			}
+		}
+
+		// Check A5: Login/register pages must not redirect while isLoading is true.
+		// The LLM often writes: useEffect(() => { if (user) router.push('/') }, [user])
+		// which fires during initial load when user is briefly set, causing redirect loops.
+		for fp, fc := range files {
+			isLoginPage := strings.Contains(fp, "login") || strings.Contains(fp, "register")
+			if !isLoginPage || !strings.HasSuffix(fp, ".tsx") {
+				continue
+			}
+			if isTemplateFile(fp) || isConfigFile(fp) {
+				continue
+			}
+			// Detect redirect based on user state without isLoading guard
+			hasUserRedirect := strings.Contains(fc, "router.push") || strings.Contains(fc, "router.replace") || strings.Contains(fc, "redirect(")
+			hasUseAuth := strings.Contains(fc, "useAuth")
+			hasLoadingCheck := strings.Contains(fc, "isLoading")
+			if hasUserRedirect && hasUseAuth && !hasLoadingCheck {
+				errors = append(errors, validationError{
+					File:  fp,
+					Error: "Login/register page redirects based on auth state but does not check isLoading. This causes a redirect loop: user is null during initial session fetch, page redirects to itself. Add an isLoading check: `if (!isLoading && user) router.push('/')`.",
+					Type:  "auth_redirect_race",
+				})
+			}
+		}
 	}
 
 	// --- E-Commerce specific checks (only when wemob-store.ts exists) ---

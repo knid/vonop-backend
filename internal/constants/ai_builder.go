@@ -473,9 +473,18 @@ Dependencies: jose (JWT, edge-compatible), bcryptjs (password hashing), drizzle-
 Client-side React context for auth state. No server dependencies.
 - Export AuthProvider component: manages user state via /api/auth/ fetch calls. On mount, fetches /api/auth/session.
 - Export useAuth() hook returning { user: AuthUser|null, isLoading, isAuthenticated, login(email,password), register(email,password,name?), logout(), refreshSession() }.
-- login/register call POST /api/auth/login or /api/auth/register, return { success, error? }.
+- login/register: call POST /api/auth/login or /api/auth/register, then IMMEDIATELY call refreshSession() to fetch the updated session BEFORE returning. This is CRITICAL — the server sets the cookie during the POST, but the client user state won't update until refreshSession() completes. The login/register functions must await refreshSession() internally and only then return { success, error? }. Pattern: const res = await fetch('/api/auth/login', ...); const data = await res.json(); if (data.success) { await refreshSession(); } return data;
 - logout calls POST /api/auth/logout and clears user state.
 - NEVER import server-only modules (next/headers, @/lib/db, @/lib/wemob-auth) in this file.
+
+**CRITICAL Auth Redirect Pattern (race condition prevention):**
+- Login/register pages: when checking if user is already logged in, ALWAYS check BOTH conditions: if (!isLoading && user). NEVER redirect while isLoading is true.
+- After successful login/register, use router.push('/') ONLY after the login/register function returns (which internally already called refreshSession). Do NOT rely on useEffect watching user state for redirect — this creates a race condition.
+- Protected pages: when checking if user is NOT logged in, ALWAYS check (!isLoading && !user) before redirecting to /login. Show a loading state while isLoading is true. Pattern: if (isLoading) return <LoadingSkeleton />; if (!user) redirect('/login');
+- NEVER redirect to /login inside useEffect based solely on user === null — user is null during initial load too.
+
+**CRITICAL: UUID userId in API routes (no auth mode):**
+- When auth is removed or not enabled, API routes that reference a userId column with UUID type in the database MUST use a valid UUID constant (e.g., '00000000-0000-0000-0000-000000000000'), NEVER a plain string like 'guest' or 'anonymous'. Database UUID columns reject non-UUID strings.
 
 **File 3: app/api/auth/[...action]/route.ts**
 Catch-all API route. Imports register, login, logout, getSession from '@/lib/wemob-auth'.
@@ -718,6 +727,7 @@ The global ` + "`window.WemobBridge`" + ` object is available in client componen
   - Haptic feedback: add ` + "`WemobBridge.haptic('light')`" + ` on tab switches, button taps, confirmations, and success states
   - External URLs: use ` + "`WemobBridge.openExternal(url)`" + ` instead of ` + "`window.open()`" + ` or ` + "`<a target=\"_blank\">`" + `
   - Bluetooth/BLE: use ` + "`WemobBridge.bluetooth.scan()`" + `, ` + "`connect()`" + `, ` + "`read()`" + `, ` + "`write()`" + ` for BLE device interaction. Always check ` + "`isAvailable()`" + ` first and show a clear message if Bluetooth is off.
+- **Live camera stream**: For features that need a real-time camera feed (video calls, AR, pose detection, QR/barcode scanning, camera mirrors, live filters), use the standard Web API ` + "`navigator.mediaDevices.getUserMedia({ video: true })`" + ` and render the MediaStream to a ` + "`<video>`" + ` element. This works both in browsers and inside the native app shell. Do NOT use WemobBridge.camera for live video — those methods are for single captures only. You can combine getUserMedia with libraries like MediaPipe, TensorFlow.js, or jsQR for real-time processing. Always request the "camera" permission via configure_mobile_app when using getUserMedia.
 - Always check ` + "`WemobBridge.isNative()`" + ` before showing native-only UI. Provide web fallback (e.g. ` + "`<input type=\"file\">`" + `) when not native.
 - Do NOT add a script tag for wemob-bridge.js — it is auto-injected by the native shell.
 `
