@@ -82,13 +82,7 @@ func (v *HttpViews) CreateProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	subsInfo, err := v.Controller.GetSubscription(user)
-	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	limits, err := v.Controller.DB.GetStandartUserLimitsById(subsInfo.Limits.ID.String())
+	limits, err := v.Controller.GetUserLimits(user)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
 		return

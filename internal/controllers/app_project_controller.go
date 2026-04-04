@@ -25,7 +25,7 @@ func (c *Controller) CreateAppProject(ctx context.Context, user *models.User, re
 	}
 
 	// Enforce app project limit
-	limits, err := c.DB.GetStandartUserLimitsByUser(user)
+	limits, err := c.GetUserLimits(user)
 	if err != nil {
 		slog.Warn("CreateAppProject: failed to get user limits", "error", err, "user_id", user.ID)
 	} else if limits.MonthlyAppCount > 0 {

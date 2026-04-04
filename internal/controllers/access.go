@@ -16,7 +16,7 @@ func (c *Controller) CreateAndroidStoreAccess(user *models.User, createAndroidSt
 		return nil, err
 	}
 
-	limits, err := c.DB.GetStandartUserLimitsByUser(user)
+	limits, err := c.GetUserLimits(user)
 	if err != nil {
 		return nil, err
 	}
@@ -90,7 +90,7 @@ func (c *Controller) CreateIOSStoreAccess(user *models.User, createIOSStoreAcces
 		return nil, err
 	}
 
-	limits, err := c.DB.GetStandartUserLimitsByUser(user)
+	limits, err := c.GetUserLimits(user)
 	if err != nil {
 		return nil, err
 	}

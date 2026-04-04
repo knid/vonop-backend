@@ -37,7 +37,7 @@ func (c *Controller) GetOrCreateCreditsBalance(user *models.User) (*models.AICre
 
 		// Grant monthly credits from plan
 		initialGrant := 0
-		limits, limitsErr := c.DB.GetStandartUserLimitsByUser(user)
+		limits, limitsErr := c.GetUserLimits(user)
 		if limitsErr == nil && limits.MonthlyAICredits > 0 {
 			balance.Balance = limits.MonthlyAICredits
 			initialGrant = limits.MonthlyAICredits
@@ -67,7 +67,7 @@ func (c *Controller) GetOrCreateCreditsBalance(user *models.User) (*models.AICre
 
 		monthlyCredits := 0
 		rolloverMonths := 0
-		limits, limitsErr := c.DB.GetStandartUserLimitsByUser(user)
+		limits, limitsErr := c.GetUserLimits(user)
 		if limitsErr == nil {
 			monthlyCredits = limits.MonthlyAICredits
 			rolloverMonths = limits.CreditRolloverMonths
@@ -218,7 +218,7 @@ func (c *Controller) AddAICredits(user *models.User, amount int, action string, 
 // to align with the new subscription and adds the plan's monthly credits.
 // Safe to call multiple times — uses a transaction with FOR UPDATE to prevent double grants.
 func (c *Controller) GrantSubscriptionCredits(user *models.User) {
-	limits, err := c.DB.GetStandartUserLimitsByUser(user)
+	limits, err := c.GetUserLimits(user)
 	if err != nil || limits.MonthlyAICredits <= 0 {
 		return
 	}

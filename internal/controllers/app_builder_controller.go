@@ -215,7 +215,7 @@ func (c *Controller) StreamBuildApp(
 
 	// --- User plan limits (used for DB provisioning) ---
 	var userLimits *models.StandartUserLimits
-	if fetchedLimits, limitsErr := c.DB.GetStandartUserLimitsByUser(user); limitsErr == nil {
+	if fetchedLimits, limitsErr := c.GetUserLimits(user); limitsErr == nil {
 		userLimits = fetchedLimits
 	}
 

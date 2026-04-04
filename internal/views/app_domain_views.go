@@ -44,7 +44,7 @@ func (v *HttpViews) AddAppDomain(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// WEM-263: Check CanBuyDomain subscription limit
-	limits, limitsErr := v.Controller.DB.GetStandartUserLimitsByUser(user)
+	limits, limitsErr := v.Controller.GetUserLimits(user)
 	if limitsErr != nil || !limits.CanBuyDomain {
 		go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_NEED, map[string]any{"action": "buy_domain"})
 		utils.JSONCodedErrorResponse(w, "SUBSCRIPTION_REQUIRED", "custom domains require a paid plan", http.StatusForbidden, nil)

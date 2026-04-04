@@ -77,7 +77,7 @@ func (c *Controller) CreateBuild(user *models.User, buildCreateReq requests.Buil
 
 	// Enforce brand logo removal permission at controller level
 	if buildCreateReq.RemoveWemobBranding {
-		limits, limitsErr := c.DB.GetStandartUserLimitsByUser(user)
+		limits, limitsErr := c.GetUserLimits(user)
 		if limitsErr != nil {
 			return nil, fmt.Errorf("failed to verify subscription limits: %w", limitsErr)
 		}

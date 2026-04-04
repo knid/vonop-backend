@@ -28,7 +28,7 @@ func (v *HttpViews) DeployAppWeb(w http.ResponseWriter, r *http.Request) {
 	appID := chi.URLParam(r, "appId")
 
 	// Check web deploy permission and limits
-	limits, limitsErr := v.Controller.DB.GetStandartUserLimitsByUser(user)
+	limits, limitsErr := v.Controller.GetUserLimits(user)
 	if limitsErr == nil {
 		if !limits.CanDeployWeb {
 			go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_NEED, map[string]any{"action": "deploy_web"})
@@ -159,7 +159,7 @@ func (v *HttpViews) buildAppMobile(w http.ResponseWriter, r *http.Request, platf
 		return
 	}
 
-	limits, limitsErr := v.Controller.DB.GetStandartUserLimitsByUser(user)
+	limits, limitsErr := v.Controller.GetUserLimits(user)
 	if limitsErr != nil || !limits.CanBuildMobile {
 		go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_NEED, map[string]any{"action": "build_mobile", "platform": platform})
 		utils.JSONCodedErrorResponse(w, "FEATURE_NOT_AVAILABLE", "mobile builds require Professional plan", http.StatusForbidden, nil)
