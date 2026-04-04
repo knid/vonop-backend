@@ -353,6 +353,24 @@ func (c *Controller) updateProductFromChat(store *models.Store, data map[string]
 	if inv, ok := data["inventory"].(float64); ok {
 		product.Inventory = int(inv)
 	}
+	if imgs, ok := data["images"].([]any); ok {
+		var images []string
+		for _, img := range imgs {
+			if s, ok := img.(string); ok {
+				images = append(images, s)
+			}
+		}
+		product.Images = images
+	}
+	if tags, ok := data["tags"].([]any); ok {
+		var t []string
+		for _, tag := range tags {
+			if s, ok := tag.(string); ok {
+				t = append(t, s)
+			}
+		}
+		product.Tags = t
+	}
 	product.UpdatedAt = time.Now()
 	_, err = c.DB.UpdateProduct(product)
 	return err
