@@ -693,19 +693,37 @@ func GetJSONFromLLM(ctx context.Context, model, system, message string, provider
 		return "", fmt.Errorf("no choices returned from LLM")
 	}
 
+	content := stripCodeFences(parsed.Choices[0].Message.Content)
+
 	if parsed.Usage.TotalTokens > 0 {
 		slog.Info("LLM usage", append([]any{"from", "llm_utils", "model", model, "prompt_tokens", parsed.Usage.PromptTokens, "completion_tokens", parsed.Usage.CompletionTokens, "total_tokens", parsed.Usage.TotalTokens, "latency_ms", latencyMs}, trackerAttrs(ctx)...)...)
 		if tracker := TokenTrackerFromContext(ctx); tracker != nil {
 			if tracker.TrackContent {
 				msgs := []Message{{Role: "system", Content: system}, {Role: "user", Content: message}}
-				tracker.RecordWithContent(model, parsed.Usage, latencyMs, false, msgs, parsed.Choices[0].Message.Content, "get_json")
+				tracker.RecordWithContent(model, parsed.Usage, latencyMs, false, msgs, content, "get_json")
 			} else {
 				tracker.Record(model, parsed.Usage, latencyMs, false, "get_json")
 			}
 		}
 	}
 
-	return parsed.Choices[0].Message.Content, nil
+	return content, nil
+}
+
+// stripCodeFences removes markdown code fences (```json ... ```) that LLMs
+// sometimes wrap around JSON output despite being told not to.
+func stripCodeFences(s string) string {
+	s = strings.TrimSpace(s)
+	if strings.HasPrefix(s, "```") {
+		if i := strings.Index(s, "\n"); i != -1 {
+			s = s[i+1:]
+		}
+		if strings.HasSuffix(s, "```") {
+			s = s[:len(s)-3]
+		}
+		s = strings.TrimSpace(s)
+	}
+	return s
 }
 
 // GetJSONFromLLMWithMaxTokens is like GetJSONFromLLM but allows specifying a
@@ -773,19 +791,21 @@ func GetJSONFromLLMWithMaxTokens(ctx context.Context, model, system, message str
 		return "", fmt.Errorf("no choices returned from LLM")
 	}
 
+	content := stripCodeFences(parsed.Choices[0].Message.Content)
+
 	if parsed.Usage.TotalTokens > 0 {
 		slog.Info("LLM usage", append([]any{"from", "llm_utils", "model", model, "prompt_tokens", parsed.Usage.PromptTokens, "completion_tokens", parsed.Usage.CompletionTokens, "total_tokens", parsed.Usage.TotalTokens, "latency_ms", latencyMs}, trackerAttrs(ctx)...)...)
 		if tracker := TokenTrackerFromContext(ctx); tracker != nil {
 			if tracker.TrackContent {
 				msgs := []Message{{Role: "system", Content: system}, {Role: "user", Content: message}}
-				tracker.RecordWithContent(model, parsed.Usage, latencyMs, false, msgs, parsed.Choices[0].Message.Content, "get_json")
+				tracker.RecordWithContent(model, parsed.Usage, latencyMs, false, msgs, content, "get_json")
 			} else {
 				tracker.Record(model, parsed.Usage, latencyMs, false, "get_json")
 			}
 		}
 	}
 
-	return parsed.Choices[0].Message.Content, nil
+	return content, nil
 }
 
 func GetTextFromLLM(ctx context.Context, model, system, message string, provider *LLMProvider) (string, error) {
@@ -1267,7 +1287,7 @@ func GetJSONFromLLMWithMessages(ctx context.Context, model string, messages []Me
 		}
 	}
 
-	return parsed.Choices[0].Message.Content, nil
+	return stripCodeFences(parsed.Choices[0].Message.Content), nil
 }
 
 // StreamJSONFromLLMWithMessages streams an LLM response from a multi-turn conversation.
@@ -1499,7 +1519,7 @@ func GetJSONFromLLMWithVision(ctx context.Context, model, system, userText, base
 		}
 	}
 
-	return parsed.Choices[0].Message.Content, nil
+	return stripCodeFences(parsed.Choices[0].Message.Content), nil
 }
 
 // ToolCallConfig holds optional configuration for StreamWithTools.
