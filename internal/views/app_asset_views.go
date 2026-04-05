@@ -1,9 +1,9 @@
 package views
 
 import (
+	"log/slog"
 	"net/http"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"fmt"
@@ -11,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-playground/validator/v10"
 	"github.com/google/uuid"
+	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/responses"
@@ -41,12 +42,18 @@ func (v *HttpViews) GetAppAssets(w http.ResponseWriter, r *http.Request) {
 
 	result := make([]responses.AssetResponse, len(assets))
 	for i, a := range assets {
+		url := a.PublicURL
+		if a.S3Key != "" && v.Controller.AssetsStorage != nil {
+			if presigned, err := v.Controller.AssetsStorage.GetObject(r.Context(), a.S3Key, 3600); err == nil {
+				url = presigned.URL
+			}
+		}
 		result[i] = responses.AssetResponse{
 			ID:          a.ID.String(),
 			FileName:    a.FileName,
 			ContentType: a.ContentType,
 			FileSize:    a.FileSize,
-			PublicURL:   a.PublicURL,
+			PublicURL:   url,
 			CreatedAt:   a.CreatedAt,
 		}
 	}
@@ -102,11 +109,8 @@ func (v *HttpViews) RequestAssetUploadURL(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Build public URL by stripping query params from presigned URL
-	publicURL := presignedRequest.URL
-	if idx := strings.Index(publicURL, "?"); idx != -1 {
-		publicURL = publicURL[:idx]
-	}
+	// Build public URL via the proxy endpoint (bucket is private, direct S3 URLs won't work)
+	publicURL := fmt.Sprintf("%s/v2/apps/%s/assets/%s/file", constants.WEMOB_API_BASE_URL, appID, id.String())
 
 	// Create DB record
 	asset := &models.AppAsset{
@@ -156,12 +160,19 @@ func (v *HttpViews) ConfirmAssetUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	url := asset.PublicURL
+	if asset.S3Key != "" && v.Controller.AssetsStorage != nil {
+		if presigned, err := v.Controller.AssetsStorage.GetObject(r.Context(), asset.S3Key, 3600); err == nil {
+			url = presigned.URL
+		}
+	}
+
 	utils.JSONResponse(w, responses.AssetResponse{
 		ID:          asset.ID.String(),
 		FileName:    asset.FileName,
 		ContentType: asset.ContentType,
 		FileSize:    asset.FileSize,
-		PublicURL:   asset.PublicURL,
+		PublicURL:   url,
 		CreatedAt:   asset.CreatedAt,
 	}, http.StatusOK)
 }
@@ -211,12 +222,19 @@ func (v *HttpViews) RenameAppAsset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	url := asset.PublicURL
+	if asset.S3Key != "" && v.Controller.AssetsStorage != nil {
+		if presigned, err := v.Controller.AssetsStorage.GetObject(r.Context(), asset.S3Key, 3600); err == nil {
+			url = presigned.URL
+		}
+	}
+
 	utils.JSONResponse(w, responses.AssetResponse{
 		ID:          asset.ID.String(),
 		FileName:    asset.FileName,
 		ContentType: asset.ContentType,
 		FileSize:    asset.FileSize,
-		PublicURL:   asset.PublicURL,
+		PublicURL:   url,
 		CreatedAt:   asset.CreatedAt,
 	}, http.StatusOK)
 }
@@ -260,4 +278,31 @@ func (v *HttpViews) DeleteAppAsset(w http.ResponseWriter, r *http.Request) {
 	}
 
 	utils.JSONResponse(w, map[string]bool{"success": true}, http.StatusOK)
+}
+
+// GET /v2/apps/{appId}/assets/{assetId}/file — public endpoint that redirects to a fresh presigned S3 URL.
+// No auth required — assets are embedded in generated app code.
+func (v *HttpViews) GetAssetFile(w http.ResponseWriter, r *http.Request) {
+	appID := chi.URLParam(r, "appId")
+	assetID := chi.URLParam(r, "assetId")
+	if appID == "" || assetID == "" {
+		http.NotFound(w, r)
+		return
+	}
+
+	asset, err := v.Controller.DB.GetAppAssetByID(assetID)
+	if err != nil || asset.AppProjectID.String() != appID || asset.S3Key == "" {
+		http.NotFound(w, r)
+		return
+	}
+
+	presigned, err := v.Controller.AssetsStorage.GetObject(r.Context(), asset.S3Key, 3600)
+	if err != nil {
+		slog.Error("GetAssetFile: failed to presign", "error", err, "asset_id", assetID)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Cache-Control", "public, max-age=3600")
+	http.Redirect(w, r, presigned.URL, http.StatusFound)
 }

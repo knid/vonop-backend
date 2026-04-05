@@ -1171,6 +1171,7 @@ func main() {
 
 			// Public asset endpoints (no auth required)
 			r.Get("/apps/{appId}/logo", httpViews.GetAppLogo)
+			r.Get("/apps/{appId}/assets/{assetId}/file", httpViews.GetAssetFile)
 
 			r.Route("/apps", func(r chi.Router) {
 				r.Use(appMiddleware.RequireAuth(controller))
