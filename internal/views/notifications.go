@@ -95,14 +95,22 @@ func (v *HttpViews) SendProjectNotification(w http.ResponseWriter, r *http.Reque
 		}
 	}
 
-	limits, err := v.Controller.GetUserLimits(user)
+	limits, planName, err := v.Controller.GetUserLimitsWithPlan(user)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
 	if count >= limits.MontlyNotificationCount {
-		utils.JSONErrorResponse(w, "You have reached your monthly notification limit", http.StatusForbidden)
+		_, renewEnd := utils.BillingPeriod(user.SubscriptionStartAt, time.Now())
+		utils.JSONCodedErrorResponse(w, "NOTIFICATION_LIMIT_REACHED",
+			"You have reached your monthly notification limit",
+			http.StatusForbidden, map[string]any{
+				"used":         count,
+				"limit":        limits.MontlyNotificationCount,
+				"renewal_date": renewEnd.Format(time.RFC3339),
+				"plan_name":    planName,
+			})
 		go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_QUOTA_REACHED, map[string]any{
 			"action": "send_notification",
 			"limit":  limits.MontlyNotificationCount,

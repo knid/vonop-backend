@@ -28,7 +28,7 @@ func (v *HttpViews) DeployAppWeb(w http.ResponseWriter, r *http.Request) {
 	appID := chi.URLParam(r, "appId")
 
 	// Check web deploy permission and limits
-	limits, limitsErr := v.Controller.GetUserLimits(user)
+	limits, planName, limitsErr := v.Controller.GetUserLimitsWithPlan(user)
 	if limitsErr == nil {
 		if !limits.CanDeployWeb {
 			go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_NEED, map[string]any{"action": "deploy_web"})
@@ -56,7 +56,9 @@ func (v *HttpViews) DeployAppWeb(w http.ResponseWriter, r *http.Request) {
 					fmt.Sprintf("you have reached the maximum of %d deployed web apps for your plan", limits.MaxDeployedWebApps),
 					http.StatusForbidden, map[string]any{
 						"deployed_apps": deployedNames,
+						"used":          count,
 						"limit":         limits.MaxDeployedWebApps,
+						"plan_name":     planName,
 					})
 				return
 			}

@@ -11,14 +11,20 @@ import (
 // GetUserLimits returns the user's plan limits with PostHog remote config overrides.
 // DB values serve as fallback; PostHog flags (rc-plan-{name}-{field}) take precedence.
 func (c *Controller) GetUserLimits(user *models.User) (*models.StandartUserLimits, error) {
+	limits, _, err := c.GetUserLimitsWithPlan(user)
+	return limits, err
+}
+
+// GetUserLimitsWithPlan is identical to GetUserLimits but also returns the subscription plan name.
+func (c *Controller) GetUserLimitsWithPlan(user *models.User) (*models.StandartUserLimits, string, error) {
 	subs, err := c.DB.GetStandartUserSubscriptionByUser(user)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
 	limits, err := c.DB.GetStandartUserLimitsById(subs.LimitsID.String())
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
 	rc := c.RemoteConfig
@@ -41,7 +47,7 @@ func (c *Controller) GetUserLimits(user *models.User) (*models.StandartUserLimit
 	limits.CanDeployWeb = rc.GetBool(remoteconfig.PlanBool(pn, "can-deploy-web", limits.CanDeployWeb), remoteconfig.Global)
 	limits.CanRemoveBrandLogo = rc.GetBool(remoteconfig.PlanBool(pn, "can-remove-brand-logo", limits.CanRemoveBrandLogo), remoteconfig.Global)
 
-	return limits, nil
+	return limits, subs.Name, nil
 }
 
 func (c *Controller) GetSubscription(user *models.User) (*responses.UserSubscriptionInformationResponse, error) {

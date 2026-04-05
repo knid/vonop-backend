@@ -2,6 +2,7 @@ package views
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/controllers"
@@ -49,11 +50,25 @@ func (v *HttpViews) checkMinimumCredits(w http.ResponseWriter, user *models.User
 	if balance.Balance < 1 {
 		go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_AI_CREDITS_DEPLETED, map[string]any{"balance": balance.Balance})
 		go v.Controller.TrackUserEvent(user, "ai_credits_depleted", posthog.NewProperties().Set("balance", balance.Balance))
+
+		planName := ""
+		monthlyLimit := 0
+		if limits, pn, limitsErr := v.Controller.GetUserLimitsWithPlan(user); limitsErr == nil {
+			monthlyLimit = limits.MonthlyAICredits
+			planName = pn
+		}
+		_, renewEnd := utils.BillingPeriod(user.SubscriptionStartAt, time.Now())
+
 		utils.JSONCodedErrorResponse(w, "AI_CREDITS_DEPLETED",
 			"insufficient AI credits: have 0, need at least 1",
 			http.StatusPaymentRequired, map[string]any{
 				"credits_required": 1,
 				"action":           "ai_generation",
+				"balance":          balance.Balance,
+				"used":             monthlyLimit - balance.Balance,
+				"limit":            monthlyLimit,
+				"renewal_date":     renewEnd.Format(time.RFC3339),
+				"plan_name":        planName,
 			})
 		return true
 	}
