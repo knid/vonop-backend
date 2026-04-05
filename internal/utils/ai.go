@@ -644,6 +644,7 @@ func GetJSONFromLLM(ctx context.Context, model, system, message string, provider
 			{Role: "system", Content: system},
 			{Role: "user", Content: message},
 		},
+		ResponseFormat:     &ResponseFormat{Type: "json_object"},
 		DisablePromptCache: true, // one-shot call — no follow-up will read the cache
 	}, provider)
 	if err != nil {
@@ -723,6 +724,7 @@ func GetJSONFromLLMWithMaxTokens(ctx context.Context, model, system, message str
 			{Role: "user", Content: message},
 		},
 		MaxTokens:          maxTokens,
+		ResponseFormat:     &ResponseFormat{Type: "json_object"},
 		DisablePromptCache: true,
 	}, provider)
 	if err != nil {
