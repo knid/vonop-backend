@@ -75,6 +75,7 @@ func (v *HttpViews) AutoGenerateScreenshots(w http.ResponseWriter, r *http.Reque
 
 	var screenshots Screenshots
 	if err := json.Unmarshal([]byte(outputJson), &screenshots); err != nil {
+		slog.Error("screenshot JSON unmarshal failed", "error", err, "raw_output", outputJson)
 		utils.JSONErrorResponse(w, "Could not generate screenshots. Try again please.", http.StatusBadRequest)
 		return
 	}
