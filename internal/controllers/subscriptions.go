@@ -11,37 +11,8 @@ import (
 // GetUserLimits returns the user's plan limits with PostHog remote config overrides.
 // DB values serve as fallback; PostHog flags (rc-plan-{name}-{field}) take precedence.
 func (c *Controller) GetUserLimits(user *models.User) (*models.StandartUserLimits, error) {
-	subs, err := c.DB.GetStandartUserSubscriptionByUser(user)
-	if err != nil {
-		return nil, err
-	}
-
-	limits, err := c.DB.GetStandartUserLimitsById(subs.LimitsID.String())
-	if err != nil {
-		return nil, err
-	}
-
-	rc := c.RemoteConfig
-	pn := strings.ToLower(subs.Name)
-
-	limits.MaxDeployedWebApps = rc.GetInt(remoteconfig.PlanInt(pn, "max-deployed-web-apps", limits.MaxDeployedWebApps), remoteconfig.Global)
-	limits.MonthlyAICredits = rc.GetInt(remoteconfig.PlanInt(pn, "monthly-ai-credits", limits.MonthlyAICredits), remoteconfig.Global)
-	limits.CreditRolloverMonths = rc.GetInt(remoteconfig.PlanInt(pn, "credit-rollover-months", limits.CreditRolloverMonths), remoteconfig.Global)
-	limits.MaxWebApps = rc.GetInt(remoteconfig.PlanInt(pn, "max-web-apps", limits.MaxWebApps), remoteconfig.Global)
-	limits.MaxMobileApps = rc.GetInt(remoteconfig.PlanInt(pn, "max-mobile-apps", limits.MaxMobileApps), remoteconfig.Global)
-	limits.MontlyBuildCount = rc.GetInt(remoteconfig.PlanInt(pn, "montly-build-count", limits.MontlyBuildCount), remoteconfig.Global)
-	limits.MontlyNotificationCount = rc.GetInt(remoteconfig.PlanInt(pn, "montly-notification-count", limits.MontlyNotificationCount), remoteconfig.Global)
-	limits.CanBuildMobile = rc.GetBool(remoteconfig.PlanBool(pn, "can-build-mobile", limits.CanBuildMobile), remoteconfig.Global)
-	limits.CanUseAnalytics = rc.GetBool(remoteconfig.PlanBool(pn, "can-use-analytics", limits.CanUseAnalytics), remoteconfig.Global)
-	limits.CanAccessCode = rc.GetBool(remoteconfig.PlanBool(pn, "can-access-code", limits.CanAccessCode), remoteconfig.Global)
-	limits.CanBuyDomain = rc.GetBool(remoteconfig.PlanBool(pn, "can-buy-domain", limits.CanBuyDomain), remoteconfig.Global)
-	limits.CanUseEmailService = rc.GetBool(remoteconfig.PlanBool(pn, "can-use-email-service", limits.CanUseEmailService), remoteconfig.Global)
-	limits.CanUseEcommerce = rc.GetBool(remoteconfig.PlanBool(pn, "can-use-ecommerce", limits.CanUseEcommerce), remoteconfig.Global)
-	limits.CanExportToGitHub = rc.GetBool(remoteconfig.PlanBool(pn, "can-export-to-github", limits.CanExportToGitHub), remoteconfig.Global)
-	limits.CanDeployWeb = rc.GetBool(remoteconfig.PlanBool(pn, "can-deploy-web", limits.CanDeployWeb), remoteconfig.Global)
-	limits.CanRemoveBrandLogo = rc.GetBool(remoteconfig.PlanBool(pn, "can-remove-brand-logo", limits.CanRemoveBrandLogo), remoteconfig.Global)
-
-	return limits, nil
+	limits, _, err := c.GetUserLimitsWithPlan(user)
+	return limits, err
 }
 
 // GetUserLimitsWithPlan is identical to GetUserLimits but also returns the subscription plan name.
