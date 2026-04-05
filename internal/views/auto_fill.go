@@ -77,15 +77,15 @@ func (v *HttpViews) NavBarAutoFillWithAI(w http.ResponseWriter, r *http.Request)
 	tracker.UserID = user.ID.String()
 	ctx := utils.WithTokenTracker(r.Context(), tracker)
 
-	outputJson, err := utils.GetJSONFromLLM(ctx, v.Controller.SecretManager.GetSecret("DEFAULT_LLM_MODEL"), constants.NAVBAR_ITEM_GENERATOR_PROMPT, string(data), v.Controller.LLMProvider())
+	outputJson, err := utils.GetJSONFromLLM(ctx, "claude-haiku-4-5", constants.NAVBAR_ITEM_GENERATOR_PROMPT, string(data), v.Controller.AnthropicProvider())
 	if err != nil {
 		utils.JSONErrorResponse(w, "Error generating items. Try again please.", http.StatusBadRequest)
 		return
 	}
 
 	v.Controller.RecordTokenUsage(user, "navbar_autofill",
-		v.Controller.SecretManager.GetSecret("DEFAULT_LLM_MODEL"),
-		v.Controller.LLMProvider().Name, "", "standard", tracker)
+		"claude-haiku-4-5",
+		"anthropic", "", "standard", tracker)
 
 	// Post-hoc token-based billing
 	prompt, completion, total, _ := tracker.Totals()

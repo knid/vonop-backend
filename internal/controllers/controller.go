@@ -112,6 +112,16 @@ func (c *Controller) LLMProvider() *utils.LLMProvider {
 	return c.llmProvider()
 }
 
+// AnthropicProvider returns an Anthropic-only LLM provider for lightweight
+// tasks (screenshots, autofill) that always use the native Anthropic API.
+func (c *Controller) AnthropicProvider() *utils.LLMProvider {
+	return &utils.LLMProvider{
+		Name:    "anthropic",
+		BaseURL: "https://api.anthropic.com/v1",
+		APIKey:  c.SecretManager.GetSecret("ANTHROPIC_API_KEY"),
+	}
+}
+
 // reasoningConfig returns the ReasoningConfig from the LLM_REASONING_EFFORT secret.
 // Set it in Infisical to control thinking mode: "none", "low", "medium", "high".
 // Leave empty/unset to let the model use its default behavior.
