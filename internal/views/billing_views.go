@@ -38,6 +38,7 @@ func (v *HttpViews) GetBillingPlans(w http.ResponseWriter, r *http.Request) {
 				MaxDeployedWebApps:   rc.GetInt(remoteconfig.PlanInt(pn, "max-deployed-web-apps", limits.MaxDeployedWebApps), remoteconfig.Global),
 				MonthlyAICredits:     rc.GetInt(remoteconfig.PlanInt(pn, "monthly-ai-credits", limits.MonthlyAICredits), remoteconfig.Global),
 				CreditRolloverMonths: rc.GetInt(remoteconfig.PlanInt(pn, "credit-rollover-months", limits.CreditRolloverMonths), remoteconfig.Global),
+				MontlyBuildCount:     limits.MontlyBuildCount,
 				CanBuildMobile:       rc.GetBool(remoteconfig.PlanBool(pn, "can-build-mobile", limits.CanBuildMobile), remoteconfig.Global),
 				CanUseAnalytics:      rc.GetBool(remoteconfig.PlanBool(pn, "can-use-analytics", limits.CanUseAnalytics), remoteconfig.Global),
 				CanAccessCode:        rc.GetBool(remoteconfig.PlanBool(pn, "can-access-code", limits.CanAccessCode), remoteconfig.Global),

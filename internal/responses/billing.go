@@ -4,6 +4,7 @@ type PlanLimitsResponse struct {
 	MaxDeployedWebApps   int    `json:"max_deployed_web_apps"`
 	MonthlyAICredits     int    `json:"monthly_ai_credits"`
 	CreditRolloverMonths int    `json:"credit_rollover_months"`
+	MontlyBuildCount     int    `json:"montly_build_count"`
 	CanBuildMobile       bool   `json:"can_build_mobile"`
 	CanUseAnalytics      bool   `json:"can_use_analytics"`
 	CanAccessCode        bool   `json:"can_access_code"`
