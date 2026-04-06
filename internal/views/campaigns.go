@@ -9,36 +9,41 @@ import (
 )
 
 func (v *HttpViews) SubmitKadinGirisimciler(w http.ResponseWriter, r *http.Request) {
-	// 10 MB max
-	if err := r.ParseMultipartForm(10 << 20); err != nil {
+	// 20 MB max (multiple file uploads)
+	if err := r.ParseMultipartForm(20 << 20); err != nil {
 		utils.JSONErrorResponse(w, "file too large or invalid form data", http.StatusBadRequest)
 		return
 	}
 
 	isimSoyisim := r.FormValue("isim_soyisim")
 	telefon := r.FormValue("telefon")
-	dogumTarihi := r.FormValue("dogum_tarihi")
-	kullanimAmaci := r.FormValue("kullanim_amaci")
+	ePosta := r.FormValue("e_posta")
+	vergiNo := r.FormValue("vergi_no")
+	ticaretSicilNo := r.FormValue("ticaret_sicil_no")
+	isTanimi := r.FormValue("is_tanimi")
 
-	if isimSoyisim == "" || telefon == "" || dogumTarihi == "" || kullanimAmaci == "" {
-		utils.JSONErrorResponse(w, "isim_soyisim, telefon, dogum_tarihi, and kullanim_amaci are required", http.StatusBadRequest)
+	if isimSoyisim == "" || telefon == "" || ePosta == "" || vergiNo == "" || ticaretSicilNo == "" || isTanimi == "" {
+		utils.JSONErrorResponse(w, "isim_soyisim, telefon, e_posta, vergi_no, ticaret_sicil_no, and is_tanimi are required", http.StatusBadRequest)
 		return
 	}
-
-	file, header, err := r.FormFile("vergi_levhasi")
-	if err != nil {
-		utils.JSONErrorResponse(w, "vergi_levhasi file is required", http.StatusBadRequest)
-		return
-	}
-	defer file.Close()
 
 	sub := controllers.KadinGirisimcilerSubmission{
-		IsimSoyisim:   isimSoyisim,
-		Telefon:       telefon,
-		DogumTarihi:   dogumTarihi,
-		KullanimAmaci: kullanimAmaci,
-		File:          file,
-		FileName:      header.Filename,
+		IsimSoyisim:    isimSoyisim,
+		Telefon:        telefon,
+		EPosta:         ePosta,
+		VergiNo:        vergiNo,
+		TicaretSicilNo: ticaretSicilNo,
+		IsTanimi:       isTanimi,
+	}
+
+	if file, header, err := r.FormFile("girisimci_belgesi"); err == nil {
+		defer file.Close()
+		sub.GirisimciBelgesi = &controllers.KadinGirisimcilerFile{File: file, FileName: header.Filename}
+	}
+
+	if file, header, err := r.FormFile("faaliyet_belgesi"); err == nil {
+		defer file.Close()
+		sub.FaaliyetBelgesi = &controllers.KadinGirisimcilerFile{File: file, FileName: header.Filename}
 	}
 
 	if err := v.Controller.SubmitKadinGirisimciler(sub); err != nil {
