@@ -22,8 +22,8 @@ func (v *HttpViews) SubmitKadinGirisimciler(w http.ResponseWriter, r *http.Reque
 	ticaretSicilNo := r.FormValue("ticaret_sicil_no")
 	isTanimi := r.FormValue("is_tanimi")
 
-	if isimSoyisim == "" || telefon == "" || ePosta == "" || vergiNo == "" || ticaretSicilNo == "" || isTanimi == "" {
-		utils.JSONErrorResponse(w, "isim_soyisim, telefon, e_posta, vergi_no, ticaret_sicil_no, and is_tanimi are required", http.StatusBadRequest)
+	if isimSoyisim == "" || telefon == "" || ePosta == "" || vergiNo == "" || isTanimi == "" {
+		utils.JSONErrorResponse(w, "isim_soyisim, telefon, e_posta, vergi_no, and is_tanimi are required", http.StatusBadRequest)
 		return
 	}
 
