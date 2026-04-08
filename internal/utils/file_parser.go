@@ -8,24 +8,28 @@ import (
 
 const maxFileContentSize = 10 * 1024 * 1024 // 10MB
 
-// fileTagRegex matches <file path="..."> opening tags.
-var fileTagRegex = regexp.MustCompile(`<file\s+path="([^"]+)"\s*>`)
+// fileTagRegex matches <wemob_file path="..."> opening tags.
+var fileTagRegex = regexp.MustCompile(`<wemob_file\s+path="([^"]+)"\s*>`)
 
-// deleteTagRegex matches <delete path="..."/> self-closing tags.
-var deleteTagRegex = regexp.MustCompile(`<delete\s+path="([^"]+)"\s*/>`)
+// deleteTagRegex matches <wemob_delete path="..."/> self-closing tags.
+var deleteTagRegex = regexp.MustCompile(`<wemob_delete\s+path="([^"]+)"\s*/>`)
 
-// editTagRegex matches <edit path="..."> opening tags.
-var editTagRegex = regexp.MustCompile(`<edit\s+path="([^"]+)"\s*>`)
+// editTagRegex matches <wemob_edit path="..."> opening tags.
+var editTagRegex = regexp.MustCompile(`<wemob_edit\s+path="([^"]+)"\s*>`)
 
-// FileStreamParser parses `<file path="...">content</file>` blocks from a
+// FileStreamParser parses `<wemob_file path="...">content</wemob_file>` blocks from a
 // text stream incrementally. Non-file text is emitted via OnText; completed
 // file blocks are emitted via OnFile.
 //
-// NOTE (B70): If the actual file content contains a literal "</file>" string
+// Tags use a "wemob_" prefix to avoid collisions with Anthropic's internal
+// tool-calling XML (e.g. <invoke>, <parameter>) and with HTML/JSX tags that
+// may appear in generated code.
+//
+// NOTE (B70): If the actual file content contains a literal "</wemob_file>" string
 // (e.g. inside a code comment or string), the parser may incorrectly treat it
 // as the closing tag and split the file. Mitigation: the parser checks whether
-// "«/file»" appears inside a quoted string context (same line) and skips
-// false positives. The escaped form "<\/file>" is also unescaped on emit.
+// the tag appears inside a quoted string context (same line) and skips
+// false positives. The escaped form "<\/wemob_file>" is also unescaped on emit.
 // A full fix would require a different framing format (e.g. length-prefixed).
 type FileStreamParser struct {
 	buffer      string
@@ -49,13 +53,13 @@ type FileStreamParser struct {
 	// when the stream ended with DiscardIncomplete. Empty if no file was truncated.
 	TruncatedPath string
 
-	// OnFile is called when a complete </file> closing tag is found.
+	// OnFile is called when a complete </wemob_file> closing tag is found.
 	OnFile func(path, content string)
-	// OnDelete is called when a <delete path="..."/> tag is found.
+	// OnDelete is called when a <wemob_delete path="..."/> tag is found.
 	OnDelete func(path string)
 	// OnText is called for text outside of file blocks.
 	OnText func(text string)
-	// OnEdit is called when a complete </edit> closing tag is found.
+	// OnEdit is called when a complete </wemob_edit> closing tag is found.
 	// path is the file to edit, search is the text to find, replace is the replacement.
 	OnEdit func(path, search, replace string)
 }
@@ -66,13 +70,13 @@ func (p *FileStreamParser) Feed(chunk string) {
 
 	for {
 		if p.inFileBlock {
-			// Look for closing </file> tag, skipping false positives inside string literals
+			// Look for closing </wemob_file> tag, skipping false positives inside string literals
 			closeIdx := p.findRealCloseTag()
 			if closeIdx == -1 {
-				// No closing tag yet — flush everything except last 7 chars
-				// ("</file" is 7 chars) to file content buffer as a safe boundary.
-				if len(p.buffer) > 7 {
-					safe := p.buffer[:len(p.buffer)-7]
+				// No closing tag yet — flush everything except last 13 chars
+				// ("</wemob_file" is 13 chars) to file content buffer as a safe boundary.
+				if len(p.buffer) > 13 {
+					safe := p.buffer[:len(p.buffer)-13]
 					p.fileContent.WriteString(safe)
 					p.buffer = p.buffer[len(p.buffer)-7:]
 				}
@@ -100,19 +104,19 @@ func (p *FileStreamParser) Feed(chunk string) {
 				content = strings.TrimPrefix(content, "\n")
 				content = strings.TrimSuffix(content, "\n")
 				// Unescape escaped close tags that the LLM may have used
-				content = strings.ReplaceAll(content, `<\/file>`, `</file>`)
+				content = strings.ReplaceAll(content, `<\/wemob_file>`, `</wemob_file>`)
 				p.OnFile(p.currentPath, content)
 			}
 			p.fileContent.Reset()
 			p.inFileBlock = false
 			p.currentPath = ""
-			p.buffer = p.buffer[closeIdx+len("</file>"):]
+			p.buffer = p.buffer[closeIdx+len("</wemob_file>"):]
 			// Continue loop to process remaining buffer
 		} else if p.inEditBlock {
 			p.processEditBlock()
 			return
 		} else {
-			// Check for <delete path="..."/> tags first
+			// Check for <wemob_delete path="..."/> tags first
 			if delLoc := deleteTagRegex.FindStringIndex(p.buffer); delLoc != nil {
 				// Emit text before the delete tag
 				if delLoc[0] > 0 {
@@ -129,9 +133,9 @@ func (p *FileStreamParser) Feed(chunk string) {
 				continue
 			}
 
-			// Check for <edit path="..."> tags
+			// Check for <wemob_edit path="..."> tags
 			if editLoc := editTagRegex.FindStringIndex(p.buffer); editLoc != nil {
-				// Check if an <edit> tag comes before any <file> tag
+				// Check if an <wemob_edit> tag comes before any <wemob_file> tag
 				fileLoc := fileTagRegex.FindStringIndex(p.buffer)
 				if fileLoc == nil || editLoc[0] < fileLoc[0] {
 					// Emit text before the edit tag
@@ -155,32 +159,29 @@ func (p *FileStreamParser) Feed(chunk string) {
 				}
 			}
 
-			// Look for opening <file path="..."> tag
+			// Look for opening <wemob_file path="..."> tag
 			loc := fileTagRegex.FindStringIndex(p.buffer)
 			if loc == nil {
 				// No opening tag found — emit safe text.
 				// Keep everything from the last '<' in the buffer since it could
-				// be the start of a partial <file ...> tag forming across chunks.
-				// The tag can be 50+ chars (e.g. <file path="components/ecommerce/checkout-form.tsx">),
+				// be the start of a partial <wemob_file ...> tag forming across chunks.
+				// The tag can be 60+ chars (e.g. <wemob_file path="components/ecommerce/checkout-form.tsx">),
 				// so a fixed buffer size is not safe.
 				lastLT := strings.LastIndex(p.buffer, "<")
 				if lastLT >= 0 {
 					tail := p.buffer[lastLT:]
 					// If the tail starts with "<" but is long enough that we can tell
-					// it's NOT going to be "<file ...", flush it as text to avoid
+					// it's NOT going to be "<wemob_...", flush it as text to avoid
 					// indefinite buffering (e.g. "a < b" in explanatory text).
-					isPartialFileTag := strings.HasPrefix(tail, "<f") ||
-						strings.HasPrefix(tail, "<F") ||
-						strings.HasPrefix(tail, "<e") ||
-						strings.HasPrefix(tail, "<E") ||
-						strings.HasPrefix(tail, "<d") ||
-						strings.HasPrefix(tail, "<D") ||
+					// Only buffer tails that could be the start of a wemob_ tag.
+					isPartialFileTag := strings.HasPrefix(tail, "<w") ||
+						strings.HasPrefix(tail, "<W") ||
 						tail == "<"
-					// B68: If the tail looks like a partial file tag but is
-					// longer than any valid <file path="..."> or
-					// <delete path="..."/> opening could be, it is not a
+					// B68: If the tail looks like a partial wemob_ tag but is
+					// longer than any valid <wemob_file path="..."> or
+					// <wemob_delete path="..."/> opening could be, it is not a
 					// partial tag — flush it to avoid stalling the parser.
-					if isPartialFileTag && len(tail) > 100 {
+					if isPartialFileTag && len(tail) > 120 {
 						isPartialFileTag = false
 					}
 					if !isPartialFileTag {
@@ -258,7 +259,7 @@ func (p *FileStreamParser) Flush() {
 				content := p.fileContent.String()
 				content = strings.TrimPrefix(content, "\n")
 				content = strings.TrimSuffix(content, "\n")
-				content = strings.ReplaceAll(content, `<\/file>`, `</file>`)
+				content = strings.ReplaceAll(content, `<\/wemob_file>`, `</wemob_file>`)
 				p.OnFile(p.currentPath, content)
 			}
 			p.fileContent.Reset()
@@ -273,22 +274,22 @@ func (p *FileStreamParser) Flush() {
 	p.buffer = ""
 }
 
-// findRealCloseTag returns the index of the real </file> closing tag in p.buffer,
+// findRealCloseTag returns the index of the real </wemob_file> closing tag in p.buffer,
 // skipping false positives that appear inside string literals. Returns -1 if no
 // real closing tag is found.
 //
-// Heuristic: a </file> that appears on the same line as an unclosed quote
+// Heuristic: a </wemob_file> that appears on the same line as an unclosed quote
 // character (", ', `) is likely inside a string literal and is skipped.
 func (p *FileStreamParser) findRealCloseTag() int {
 	searchFrom := 0
 	for {
-		idx := strings.Index(p.buffer[searchFrom:], "</file>")
+		idx := strings.Index(p.buffer[searchFrom:], "</wemob_file>")
 		if idx == -1 {
 			return -1
 		}
 		idx += searchFrom // absolute index
 
-		// Check if this </file> is inside a string literal by examining the
+		// Check if this </wemob_file> is inside a string literal by examining the
 		// content from the last newline to the tag position. If there's an
 		// odd number of quote characters, the tag is likely inside a string.
 		lineStart := strings.LastIndex(p.buffer[:idx], "\n")
@@ -299,9 +300,9 @@ func (p *FileStreamParser) findRealCloseTag() int {
 		}
 		linePrefix := p.buffer[lineStart:idx]
 
-		// Also skip the escaped form <\/file>
+		// Also skip the escaped form <\/wemob_file>
 		if idx > 0 && p.buffer[idx-1] == '\\' {
-			searchFrom = idx + len("</file>")
+			searchFrom = idx + len("</wemob_file>")
 			continue
 		}
 
@@ -322,9 +323,9 @@ func (p *FileStreamParser) findRealCloseTag() int {
 
 		if insideString {
 			// False positive — skip and keep looking
-			slog.Debug("FileStreamParser: skipping </file> inside string literal",
+			slog.Debug("FileStreamParser: skipping </wemob_file> inside string literal",
 				"path", p.currentPath, "line_prefix_len", len(linePrefix))
-			searchFrom = idx + len("</file>")
+			searchFrom = idx + len("</wemob_file>")
 			continue
 		}
 
@@ -332,42 +333,42 @@ func (p *FileStreamParser) findRealCloseTag() int {
 	}
 }
 
-// processEditBlock processes buffer content while inside an <edit> block.
-// Handles the <search>...</search> and <replace>...</replace> sub-blocks,
-// and emits OnEdit when </edit> is found.
+// processEditBlock processes buffer content while inside an <wemob_edit> block.
+// Handles the <wemob_search>...</wemob_search> and <wemob_replace>...</wemob_replace> sub-blocks,
+// and emits OnEdit when </wemob_edit> is found.
 func (p *FileStreamParser) processEditBlock() {
 	for {
 		if p.inSearch {
-			closeIdx := strings.Index(p.buffer, "</search>")
+			closeIdx := strings.Index(p.buffer, "</wemob_search>")
 			if closeIdx == -1 {
-				if len(p.buffer) > 9 {
-					p.searchContent.WriteString(p.buffer[:len(p.buffer)-9])
-					p.buffer = p.buffer[len(p.buffer)-9:]
+				if len(p.buffer) > 15 {
+					p.searchContent.WriteString(p.buffer[:len(p.buffer)-15])
+					p.buffer = p.buffer[len(p.buffer)-15:]
 				}
 				return
 			}
 			p.searchContent.WriteString(p.buffer[:closeIdx])
 			p.inSearch = false
-			p.buffer = p.buffer[closeIdx+len("</search>"):]
+			p.buffer = p.buffer[closeIdx+len("</wemob_search>"):]
 			continue
 		}
 
 		if p.inReplace {
-			closeIdx := strings.Index(p.buffer, "</replace>")
+			closeIdx := strings.Index(p.buffer, "</wemob_replace>")
 			if closeIdx == -1 {
-				if len(p.buffer) > 10 {
-					p.replaceContent.WriteString(p.buffer[:len(p.buffer)-10])
-					p.buffer = p.buffer[len(p.buffer)-10:]
+				if len(p.buffer) > 16 {
+					p.replaceContent.WriteString(p.buffer[:len(p.buffer)-16])
+					p.buffer = p.buffer[len(p.buffer)-16:]
 				}
 				return
 			}
 			p.replaceContent.WriteString(p.buffer[:closeIdx])
 			p.inReplace = false
-			p.buffer = p.buffer[closeIdx+len("</replace>"):]
+			p.buffer = p.buffer[closeIdx+len("</wemob_replace>"):]
 			continue
 		}
 
-		if idx := strings.Index(p.buffer, "</edit>"); idx != -1 {
+		if idx := strings.Index(p.buffer, "</wemob_edit>"); idx != -1 {
 			if p.OnEdit != nil {
 				search := p.searchContent.String()
 				search = strings.TrimPrefix(search, "\n")
@@ -381,19 +382,19 @@ func (p *FileStreamParser) processEditBlock() {
 			p.replaceContent.Reset()
 			p.inEditBlock = false
 			p.editPath = ""
-			p.buffer = p.buffer[idx+len("</edit>"):]
+			p.buffer = p.buffer[idx+len("</wemob_edit>"):]
 			return
 		}
 
-		if idx := strings.Index(p.buffer, "<search>"); idx != -1 {
+		if idx := strings.Index(p.buffer, "<wemob_search>"); idx != -1 {
 			p.inSearch = true
-			p.buffer = p.buffer[idx+len("<search>"):]
+			p.buffer = p.buffer[idx+len("<wemob_search>"):]
 			continue
 		}
 
-		if idx := strings.Index(p.buffer, "<replace>"); idx != -1 {
+		if idx := strings.Index(p.buffer, "<wemob_replace>"); idx != -1 {
 			p.inReplace = true
-			p.buffer = p.buffer[idx+len("<replace>"):]
+			p.buffer = p.buffer[idx+len("<wemob_replace>"):]
 			continue
 		}
 

@@ -26,6 +26,15 @@ import (
 // ansiRegex strips ANSI escape sequences that some LLM providers emit in streamed text.
 var ansiRegex = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
 
+// leakedXMLRegex matches stray Anthropic-internal XML tags (e.g. </invoke>, </parameter>)
+// that the model may emit when it confuses custom output format with its tool-calling syntax.
+var leakedXMLRegex = regexp.MustCompile(`</?(?:invoke|parameter|function_calls|antml:invoke|antml:parameter)\b[^>]*>`)
+
+// sanitizeLLMLeakedXML strips Anthropic-internal XML tags that leak into visible text.
+func sanitizeLLMLeakedXML(text string) string {
+	return leakedXMLRegex.ReplaceAllString(text, "")
+}
+
 // isErrorReport detects whether a user message is a structured error report
 // (auto-sent by the frontend when a runtime/build error occurs). These messages
 // follow a Markdown pattern with ## Error Type, ## Error Message, ## Code Frame.
@@ -757,7 +766,7 @@ The user's message is an auto-reported build or runtime error. Follow these rule
 	} else {
 		// === Unified tool-calling path: chat edits ===
 		// Single StreamWithTools call that can read files, preview websites,
-		// manage env vars, etc. while also streaming <file>/<edit>/<delete> blocks.
+		// manage env vars, etc. while also streaming <wemob_file>/<wemob_edit>/<wemob_delete> blocks.
 
 		var responseBuilder strings.Builder
 		var deletedPaths []string
@@ -831,6 +840,8 @@ The user's message is an auto-reported build or runtime error. Follow these rule
 			OnText: func(text string) {
 				responseBuilder.WriteString(text)
 				cleaned := ansiRegex.ReplaceAllString(text, "")
+				// Strip stray Anthropic-internal XML tags that may leak from the model
+				cleaned = sanitizeLLMLeakedXML(cleaned)
 				if cleaned != "" {
 					sendEvent("chat_text", responses.ChatTextEvent{Chunk: cleaned})
 				}
@@ -888,12 +899,12 @@ The user's message is an auto-reported build or runtime error. Follow these rule
 				MaxTokens:        65536,
 				MaxContinuations: 3,
 				ShouldContinue:   shouldContinueCredits,
-				NudgeMessage:     "You have gathered enough context. Output your code changes now using <file> and <edit> blocks.",
+				NudgeMessage:     "You have gathered enough context. Output your code changes now using <wemob_file> and <wemob_edit> blocks.",
 				OnRoundStart: func(round int) {
 					parser.Flush()
 				},
 				TrimResults: func(toolName, result string) string {
-					// Never trim read_file — the LLM needs exact content for <edit> search text.
+					// Never trim read_file — the LLM needs exact content for <wemob_edit> search text.
 					if toolName == "read_file" {
 						return result
 					}
@@ -1038,7 +1049,7 @@ The user's message is an auto-reported build or runtime error. Follow these rule
 					MaxTokens:        65536,
 					MaxContinuations: 1,
 					ShouldContinue:   shouldContinueCredits,
-					NudgeMessage:     "Output your corrected <edit> blocks now. Use the file contents you just read.",
+					NudgeMessage:     "Output your corrected <wemob_edit> blocks now. Use the file contents you just read.",
 					OnRoundStart: func(round int) {
 						parser.Flush()
 					},
@@ -1358,10 +1369,7 @@ func (c *Controller) saveGeneratedFile(
 	allowProtected ...bool,
 ) error {
 	// Strip parser boundary tags that may have leaked into generated content.
-	// Only strip </search> and </replace> which are unique to our parser and
-	// extremely unlikely in legitimate code. Avoid stripping </file> and </edit>
-	// which could appear in XML/SVG/HTML content.
-	for _, tag := range []string{"</search>", "</replace>"} {
+	for _, tag := range []string{"</wemob_search>", "</wemob_replace>", "</wemob_edit>", "</wemob_file>"} {
 		content = strings.ReplaceAll(content, tag, "")
 	}
 

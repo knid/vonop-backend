@@ -768,7 +768,7 @@ func (c *Controller) StreamMobileOptimize(
 	var userContent strings.Builder
 	userContent.WriteString("Convert the following files to mobile-only layout. Only output files that need changes.\n\n")
 	for _, uf := range uiFiles {
-		userContent.WriteString(fmt.Sprintf("<file path=\"%s\">\n%s\n</file>\n\n", uf.Path, uf.Content))
+		userContent.WriteString(fmt.Sprintf("<wemob_file path=\"%s\">\n%s\n</wemob_file>\n\n", uf.Path, uf.Content))
 	}
 
 	provider := c.llmProvider()
@@ -813,6 +813,7 @@ func (c *Controller) StreamMobileOptimize(
 		OnText: func(text string) {
 			responseBuilder.WriteString(text)
 			cleaned := ansiRegex.ReplaceAllString(text, "")
+			cleaned = sanitizeLLMLeakedXML(cleaned)
 			if cleaned != "" {
 				sendEvent("chat_text", responses.ChatTextEvent{Chunk: cleaned})
 			}

@@ -257,7 +257,7 @@ func (c *Controller) runPreGenerationSetup(
 }
 
 // streamSingleShotGeneration performs initial app generation in a single LLM call.
-// The LLM outputs all files using <file path="...">content</file> blocks which are
+// The LLM outputs all files using <wemob_file path="...">content</wemob_file> blocks which are
 // parsed incrementally and saved as they complete.
 func (c *Controller) streamSingleShotGeneration(
 	ctx context.Context,
@@ -440,6 +440,7 @@ func (c *Controller) streamSingleShotGeneration(
 		OnText: func(text string) {
 			responseBuilder.WriteString(text)
 			cleaned := ansiRegex.ReplaceAllString(text, "")
+			cleaned = sanitizeLLMLeakedXML(cleaned)
 			if cleaned != "" {
 				sendEvent("chat_text", responses.ChatTextEvent{Chunk: cleaned})
 			}
@@ -578,7 +579,7 @@ func (c *Controller) generateAppLogo(ctx context.Context, project *models.AppPro
 
 // streamEcommerceGeneration performs initial e-commerce app generation in two phases:
 //   Phase 1: Tool-calling with only setup_ecommerce + manage_store (populates the store).
-//   Phase 2: Single-shot file generation using <file> blocks (generates all code files).
+//   Phase 2: Single-shot file generation using <wemob_file> blocks (generates all code files).
 // This is faster and cheaper than running a single tool loop for everything.
 func (c *Controller) streamEcommerceGeneration(
 	ctx context.Context,
@@ -836,6 +837,7 @@ func (c *Controller) streamEcommerceGeneration(
 		OnText: func(text string) {
 			responseBuilder.WriteString(text)
 			cleaned := ansiRegex.ReplaceAllString(text, "")
+			cleaned = sanitizeLLMLeakedXML(cleaned)
 			if cleaned != "" {
 				sendEvent("chat_text", responses.ChatTextEvent{Chunk: cleaned})
 			}

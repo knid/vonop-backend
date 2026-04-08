@@ -767,7 +767,7 @@ The global ` + "`window.WemobBridge`" + ` object is available in client componen
 // files from desktop/responsive layouts to mobile-only.
 const NEXTJS_MOBILE_OPTIMIZE_PROMPT = `You are a senior mobile UI engineer. You are converting a desktop/responsive Next.js web application into a mobile-only app (viewed exclusively on phone screens, max ~430px viewport width).
 
-You will receive the source code of files that contain desktop patterns. Your job is to rewrite ONLY the files that need changes and output them using <file path="...">content</file> blocks. Do NOT output files that need no changes. If a file needs to be deleted, use <delete path="..."/>.
+You will receive the source code of files that contain desktop patterns. Your job is to rewrite ONLY the files that need changes and output them using <wemob_file path="...">content</wemob_file> blocks. Do NOT output files that need no changes. If a file needs to be deleted, use <wemob_delete path="..."/>.
 
 ## Conversion Rules
 ` + NEXTJS_BUILDER_MOBILE_RULES + `
@@ -806,7 +806,7 @@ You will receive the source code of files that contain desktop patterns. Your jo
 - Remove footer components from the layout.
 
 ## Output Format
-- Output ONLY changed files using <file path="...">full file content</file> blocks.
+- Output ONLY changed files using <wemob_file path="...">full file content</wemob_file> blocks.
 - You may include brief explanatory text between file blocks.
 - Output complete file contents — no partial snippets or diffs.
 - Skip files that don't need changes (API routes, lib utilities, types, configs).
@@ -878,75 +878,75 @@ When the user reports a runtime error, build error, or TypeError:
 
 // NEXTJS_BUILDER_SINGLESHOT_INSTRUCTIONS contains the output format rules for
 // single-shot initial generation (no tool calling). The LLM outputs all files
-// using <file path="...">content</file> blocks in a single response.
+// using <wemob_file path="...">content</wemob_file> blocks in a single response.
 const NEXTJS_BUILDER_SINGLESHOT_INSTRUCTIONS = `
 
 ### Output Format
 Output ALL files using this format:
 
-<file path="app/page.tsx">
+<wemob_file path="app/page.tsx">
 complete file content here
-</file>
+</wemob_file>
 
-<file path="components/header.tsx">
+<wemob_file path="components/header.tsx">
 complete file content here
-</file>
+</wemob_file>
 
 ### Output Rules
 - Start with a friendly 2-3 sentence plan describing what you'll build from the user's perspective (in the user's language) — mention the pages and features they'll get, not file names or technical details. Then output all files, then a warm summary of what was built (in the user's language).
 - Output EVERY file needed for the complete application. Each file must be complete, production-ready code — no placeholders, no TODOs, no stub implementations.
-- **Before each <file> block, write a 1-sentence progress update describing what the user will see (e.g., "Now setting up your product browsing experience" or "Adding a beautiful contact page with a form").** Do NOT mention file paths, component names, or technical terms. CRITICAL: Write progress updates in the SAME LANGUAGE as the user's message — not in English unless the user wrote in English. These updates stream to the user in real time. Do NOT skip them — they are essential for user experience.
-- CRITICAL: NEVER include the literal string ` + "`</file>`" + ` inside file content — not in comments, strings, JSX text, or code. The system uses this exact tag as a file boundary marker. If you need to reference this string, use an escaped form like ` + "`<\\/file>`" + ` or ` + "`\"</\" + \"file>\"`" + `.
+- **Before each <wemob_file> block, write a 1-sentence progress update describing what the user will see (e.g., "Now setting up your product browsing experience" or "Adding a beautiful contact page with a form").** Do NOT mention file paths, component names, or technical terms. CRITICAL: Write progress updates in the SAME LANGUAGE as the user's message — not in English unless the user wrote in English. These updates stream to the user in real time. Do NOT skip them — they are essential for user experience.
+- CRITICAL: NEVER include the literal string ` + "`</wemob_file>`" + ` inside file content — not in comments, strings, JSX text, or code. The system uses this exact tag as a file boundary marker. If you need to reference this string, use an escaped form like ` + "`<\\/wemob_file>`" + ` or ` + "`\"</\" + \"wemob_file>\"`" + `.
 - Skip template-managed files: lib/utils.ts, components/ui/* (button, card, input, badge, skeleton). Import directly from them.
-- Do NOT wrap file content in code fences (` + "```" + ` or similar) inside <file> blocks.
+- Do NOT wrap file content in code fences (` + "```" + ` or similar) inside <wemob_file> blocks.
 - Do NOT generate app/globals.css — it is pre-injected with the project's color scheme, all semantic tokens (primary, secondary, accent, background, foreground, muted, card, border, input, ring, destructive and their -foreground variants), and Tailwind v4 @theme directive. Use the semantic color classes directly (bg-primary, text-muted-foreground, border-border, etc.). If you need custom CSS beyond the theme (animations, special utilities), add them in a separate CSS file or use inline Tailwind classes.
 - Write app/layout.tsx LAST — it must be a Server Component (NO "use client"). The VERY FIRST import MUST be ` + "`import './globals.css'`" + ` — without this import, ALL Tailwind styles and theme tokens break completely. Then import Google Fonts using next/font/google. Include <html lang="..."> (matching the user's language) and <body> tags wrapping {children}. Export metadata. If you need hooks/providers, put them in a separate "components/layout-client.tsx" with "use client".
 - Every file you create must be complete: no placeholders, no "TODO", no stub implementations.`
 
 // NEXTJS_BUILDER_CHAT_INSTRUCTIONS contains the output format for the simplified
-// file-block chat path. The LLM outputs changed files using <file> blocks inline
+// file-block chat path. The LLM outputs changed files using <wemob_file> blocks inline
 // with text — no tool calling loop needed.
 const NEXTJS_BUILDER_CHAT_INSTRUCTIONS = `
 
 ### How to Edit an Existing App
 The context above shows all project file paths and the contents of files most relevant to the current task.
 
-Use **targeted <edit> blocks** to modify existing files — do NOT output the entire file.
-Use **<file> blocks** ONLY for creating new files or when rewriting >50% of a file.
-Use **<delete path="..."/>** to remove files.
+Use **targeted <wemob_edit> blocks** to modify existing files — do NOT output the entire file.
+Use **<wemob_file> blocks** ONLY for creating new files or when rewriting >50% of a file.
+Use **<wemob_delete path="..."/>** to remove files.
 
 ### Output Format
 Write a friendly explanation first (2-4 sentences), then output your edit/file blocks, then a warm summary. IMPORTANT: Always respond in the SAME language as the user's message. If the user writes in English, respond in English. If Turkish, respond in Turkish. Never switch languages mid-response.
 
 **Editing existing files (PREFERRED for all modifications):**
-<edit path="app/page.tsx">
-<search>
+<wemob_edit path="app/page.tsx">
+<wemob_search>
 exact lines to find in the current file
-` + "</search>" + `
-<replace>
+` + "</wemob_search>" + `
+<wemob_replace>
 replacement content
-` + "</replace>" + `
-` + "</edit>" + `
+` + "</wemob_replace>" + `
+` + "</wemob_edit>" + `
 
 **Creating new files or full rewrites:**
-<file path="app/new-page.tsx">
+<wemob_file path="app/new-page.tsx">
 complete file content here
-` + "</file>" + `
+` + "</wemob_file>" + `
 
-### Rules for <edit> blocks
-- The <search> text must EXACTLY match a substring of the current file content — copy it precisely, including whitespace and indentation.
-- Include 2-5 surrounding context lines in <search> so the match is unique within the file.
-- You can use multiple <edit> blocks for the same file — they are applied in order.
-- To delete a section, use an empty ` + "`<replace></replace>`" + `.
-- If you need to rewrite most of a file (>50% changed), use <file> instead with complete content.
-- NEVER use <edit> on a file whose content is not shown in the context above — if the file is not shown, use <file> instead.
+### Rules for <wemob_edit> blocks
+- The <wemob_search> text must EXACTLY match a substring of the current file content — copy it precisely, including whitespace and indentation.
+- Include 2-5 surrounding context lines in <wemob_search> so the match is unique within the file.
+- You can use multiple <wemob_edit> blocks for the same file — they are applied in order.
+- To delete a section, use an empty ` + "`<wemob_replace></wemob_replace>`" + `.
+- If you need to rewrite most of a file (>50% changed), use <wemob_file> instead with complete content.
+- NEVER use <wemob_edit> on a file whose content is not shown in the context above — if the file is not shown, use <wemob_file> instead.
 
 ### Rules
 - CRITICAL SCOPE RULE: Make ONLY the changes the user explicitly requested. Do NOT remove, add, or rearrange page sections or components that weren't mentioned. Do NOT redesign layouts, rewrite unrelated content, or restructure pages unless specifically asked. If the user asks to update the company name and contact info, update exactly those fields — don't rewrite the entire page or remove existing components. Preserve the current page structure, component composition, and design unless the user asks to change it.
 - ONLY output edits/files that you are changing. Do NOT re-output unchanged files.
 - Skip template-managed files: lib/utils.ts, components/ui/* (button, card, input, badge, skeleton).
-- Do NOT wrap content in code fences inside <file> or <edit> blocks.
-- CRITICAL: NEVER include the literal strings ` + "`</file>`" + `, ` + "`</edit>`" + `, ` + "`</search>`" + `, or ` + "`</replace>`" + ` inside block content — the system uses these as boundary markers.
+- Do NOT wrap content in code fences inside <wemob_file> or <wemob_edit> blocks.
+- CRITICAL: NEVER include the literal strings ` + "`</wemob_file>`" + `, ` + "`</wemob_edit>`" + `, ` + "`</wemob_search>`" + `, or ` + "`</wemob_replace>`" + ` inside block content — the system uses these as boundary markers.
 - Before editing a file, look at its full content in the project context above.
 
 ### Fixing Errors
@@ -1044,36 +1044,36 @@ const NEXTJS_BUILDER_UNIFIED_CHAT_INSTRUCTIONS = `
 ### How to Edit an Existing App
 Call list_files to see all project file paths and sizes. Call read_file to see a file's content before editing.
 
-Use **targeted <edit> blocks** to modify existing files — do NOT output the entire file.
-Use **<file> blocks** ONLY for creating new files or when rewriting >50% of a file.
-Use **<delete path="..."/>** to remove files.
+Use **targeted <wemob_edit> blocks** to modify existing files — do NOT output the entire file.
+Use **<wemob_file> blocks** ONLY for creating new files or when rewriting >50% of a file.
+Use **<wemob_delete path="..."/>** to remove files.
 
 ### Output Format
 Write a friendly explanation first (2-4 sentences), then output your edit/file blocks, then a warm summary. IMPORTANT: Always respond in the SAME language as the user's message.
 
 **Editing existing files (PREFERRED for all modifications):**
-<edit path="app/page.tsx">
-<search>
+<wemob_edit path="app/page.tsx">
+<wemob_search>
 exact lines to find in the current file
-` + "</search>" + `
-<replace>
+` + "</wemob_search>" + `
+<wemob_replace>
 replacement content
-` + "</replace>" + `
-` + "</edit>" + `
+` + "</wemob_replace>" + `
+` + "</wemob_edit>" + `
 
 **Creating new files or full rewrites:**
-<file path="app/new-page.tsx">
+<wemob_file path="app/new-page.tsx">
 complete file content here
-` + "</file>" + `
+` + "</wemob_file>" + `
 
-### Rules for <edit> blocks
-- The <search> text must EXACTLY match a substring of the current file content — copy it precisely, including whitespace and indentation.
-- Include 2-5 surrounding context lines in <search> so the match is unique within the file.
-- You can use multiple <edit> blocks for the same file — they are applied in order.
-- To delete a section, use an empty ` + "`<replace></replace>`" + `.
-- If you need to rewrite most of a file (>50% changed), use <file> instead with complete content.
-- If you haven't read the file yet, call read_file FIRST before using <edit>. Never guess file contents.
-- If an edit fails, you will receive an error message. Retry with corrected search text or use <file> for full rewrite.
+### Rules for <wemob_edit> blocks
+- The <wemob_search> text must EXACTLY match a substring of the current file content — copy it precisely, including whitespace and indentation.
+- Include 2-5 surrounding context lines in <wemob_search> so the match is unique within the file.
+- You can use multiple <wemob_edit> blocks for the same file — they are applied in order.
+- To delete a section, use an empty ` + "`<wemob_replace></wemob_replace>`" + `.
+- If you need to rewrite most of a file (>50% changed), use <wemob_file> instead with complete content.
+- If you haven't read the file yet, call read_file FIRST before using <wemob_edit>. Never guess file contents.
+- If an edit fails, you will receive an error message. Retry with corrected search text or use <wemob_file> for full rewrite.
 
 ### Tools
 You have tools available. Use them when needed:
@@ -1092,8 +1092,8 @@ Before calling any tool, write a brief message (1-2 sentences, in the user's lan
 - CRITICAL SCOPE RULE: Make ONLY the changes the user explicitly requested. Do NOT remove, add, or rearrange page sections or components that weren't mentioned. Preserve the current page structure unless the user asks to change it.
 - ONLY output edits/files that you are changing. Do NOT re-output unchanged files.
 - Skip template-managed files: lib/utils.ts, components/ui/* (button, card, input, badge, skeleton).
-- Do NOT wrap content in code fences inside <file> or <edit> blocks.
-- CRITICAL: NEVER include the literal strings ` + "`</file>`" + `, ` + "`</edit>`" + `, ` + "`</search>`" + `, or ` + "`</replace>`" + ` inside block content.
+- Do NOT wrap content in code fences inside <wemob_file> or <wemob_edit> blocks.
+- CRITICAL: NEVER include the literal strings ` + "`</wemob_file>`" + `, ` + "`</wemob_edit>`" + `, ` + "`</wemob_search>`" + `, or ` + "`</wemob_replace>`" + ` inside block content.
 
 ### Fixing Errors
 When the user reports a runtime error, build error, or TypeError:

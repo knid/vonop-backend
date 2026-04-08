@@ -603,7 +603,7 @@ func buildSimpleChatHistory(
 }
 
 // buildSingleShotSystemPrompt assembles the system prompt for single-shot initial
-// generation using <file> block output format instead of tool calls.
+// generation using <wemob_file> block output format instead of tool calls.
 // NOTE: Does NOT include MOBILE_CONFIG_TOOL_RULES because single-shot uses
 // StreamTextFromLLMWithMessages (no tools). Bridge config is auto-detected
 
