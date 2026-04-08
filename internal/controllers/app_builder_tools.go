@@ -138,7 +138,7 @@ CRITICAL LANGUAGE RULE: EVERY piece of text you write — explanations, summarie
 - If the user asks to update, modify, or change existing data, call execute_sql with an UPDATE query.
 - DELETE is NOT allowed. If the user wants to remove data, use UPDATE to set a status flag (e.g. UPDATE articles SET is_active = false WHERE ...).
 - If the user asks to generate/create images for database records (e.g. "add images to articles", "generate cover images"), use this workflow: first call execute_sql to SELECT the rows that need images, then for each row call generate_image with a descriptive prompt in the user's language, then call execute_sql with an UPDATE to set the image URL on that row. Chain these tool calls sequentially.
-- If the user asks to add/remove/rename database columns or create new tables, call run_migrations with the ALTER TABLE / CREATE TABLE SQL and the complete updated data model.
+- If the user asks to add/remove/rename database columns, create new tables, or remove entire tables/features (e.g. "remove the product system", "delete the comments table"), call run_migrations with the ALTER TABLE / CREATE TABLE / DROP TABLE SQL and the complete updated data model (excluding dropped tables). Use DROP TABLE IF EXISTS to safely remove tables. When dropping tables that have foreign key references, drop dependent tables first or use CASCADE.
 - For timestamps, use NOW(). For UUIDs, use gen_random_uuid(). Do NOT manually provide id values.`
 	}
 	if isEcommerce {
@@ -1224,7 +1224,7 @@ func (c *Controller) executeChatRunMigrations(
 		return "Error: updated_models is required", nil
 	}
 
-	// Validate SQL — only allow DDL statements (ALTER, CREATE) per statement
+	// Validate SQL — only allow DDL statements (ALTER, CREATE, DROP) per statement
 	for _, stmt := range strings.Split(args.SQL, ";") {
 		trimmed := strings.TrimSpace(stmt)
 		if trimmed == "" {
@@ -1235,8 +1235,8 @@ func (c *Controller) executeChatRunMigrations(
 			continue
 		}
 		upperStmt := strings.ToUpper(stripped)
-		if !strings.HasPrefix(upperStmt, "ALTER") && !strings.HasPrefix(upperStmt, "CREATE") {
-			return fmt.Sprintf("Error: only DDL statements (ALTER TABLE, CREATE TABLE) are allowed, found: %.60s", trimmed), nil
+		if !strings.HasPrefix(upperStmt, "ALTER") && !strings.HasPrefix(upperStmt, "CREATE") && !strings.HasPrefix(upperStmt, "DROP") {
+			return fmt.Sprintf("Error: only DDL statements (ALTER TABLE, CREATE TABLE, DROP TABLE) are allowed, found: %.60s", trimmed), nil
 		}
 	}
 
@@ -2149,13 +2149,13 @@ var chatRunMigrationsTool = utils.Tool{
 	Type: "function",
 	Function: utils.ToolFunction{
 		Name:        "run_migrations",
-		Description: "Alter existing database tables — add columns, remove columns, rename columns, or create new tables. Call this when the user wants to change the database schema (e.g. 'add a rating field to articles', 'create a comments table'). This also regenerates lib/schema.ts to match.",
+		Description: "Alter existing database tables — add columns, remove columns, rename columns, create new tables, or drop tables entirely. Call this when the user wants to change the database schema (e.g. 'add a rating field to articles', 'create a comments table', 'remove the products system'). This also regenerates lib/schema.ts to match.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"sql": map[string]any{
 					"type":        "string",
-					"description": "SQL DDL statements to execute. Use ALTER TABLE to add/drop/rename columns, CREATE TABLE for new tables. Example: ALTER TABLE \"articles\" ADD COLUMN \"rating\" INTEGER DEFAULT 0;",
+					"description": "SQL DDL statements to execute. Use ALTER TABLE to add/drop/rename columns, CREATE TABLE for new tables, DROP TABLE to remove tables. Examples: ALTER TABLE \"articles\" ADD COLUMN \"rating\" INTEGER DEFAULT 0; DROP TABLE IF EXISTS \"products\";",
 				},
 				"updated_models": map[string]any{
 					"type":        "array",
