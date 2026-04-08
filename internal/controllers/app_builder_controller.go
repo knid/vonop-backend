@@ -227,6 +227,20 @@ func (c *Controller) StreamBuildApp(
 	tracker.ProjectID = project.ID.String()
 	ctx = utils.WithTokenTracker(ctx, tracker)
 
+	// --- Credit budget checker (live mid-generation halt) ---
+	creditChecker := c.MakeCreditBudgetChecker(user, tracker)
+	creditExhausted := false
+	shouldContinueCredits := func() bool {
+		if creditChecker != nil && !creditChecker() {
+			creditExhausted = true
+			sendEvent("credits_exhausted", map[string]any{
+				"message": "AI credits exhausted. Generation stopped.",
+			})
+			return false
+		}
+		return true
+	}
+
 	actionLabel := "app_chat"
 	if isInitialGeneration {
 		actionLabel = "generate_app"
@@ -240,7 +254,7 @@ func (c *Controller) StreamBuildApp(
 		prompt, completion, total, callCount := tracker.Totals()
 		if total > 0 {
 			credits := c.TokensToCredits(prompt, completion)
-			if err := c.DeductAICreditsUnchecked(user, credits, actionLabel, project.ID.String()); err != nil {
+			if err := c.DeductAICreditsToFloor(user, credits, actionLabel, project.ID.String()); err != nil {
 				slog.Warn("failed to deduct AI credits", "error", err,
 					"user_id", user.ID, "credits", credits, "tokens", total)
 			}
@@ -249,6 +263,7 @@ func (c *Controller) StreamBuildApp(
 				"project_id", project.ID,
 				"is_generation", isInitialGeneration,
 				"succeeded", generationSucceeded,
+				"credit_exhausted", creditExhausted,
 				"duration_s", fmt.Sprintf("%.1f", genDuration),
 				"llm_calls", callCount,
 				"prompt_tokens", prompt,
@@ -858,6 +873,7 @@ func (c *Controller) StreamBuildApp(
 				StripAfter:       5,
 				MaxTokens:        65536,
 				MaxContinuations: 3,
+				ShouldContinue:   shouldContinueCredits,
 				NudgeMessage:     "You have gathered enough context. Output your code changes now using <file> and <edit> blocks.",
 				OnRoundStart: func(round int) {
 					parser.Flush()
@@ -1007,6 +1023,7 @@ func (c *Controller) StreamBuildApp(
 					StripAfter:       3,
 					MaxTokens:        65536,
 					MaxContinuations: 1,
+					ShouldContinue:   shouldContinueCredits,
 					NudgeMessage:     "Output your corrected <edit> blocks now. Use the file contents you just read.",
 					OnRoundStart: func(round int) {
 						parser.Flush()
