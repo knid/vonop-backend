@@ -144,3 +144,23 @@ func (db *Database) GetAIUsageStats() (*AIUsageStats, error) {
 
 	return stats, nil
 }
+
+func (db *Database) GetAppStats() (int, int, error) {
+	ctx := context.Background()
+	total, err := db.DB.NewSelect().TableExpr("app_projects").Where("deleted_at IS NULL").Count(ctx)
+	if err != nil {
+		return 0, 0, err
+	}
+	deployed, err := db.DB.NewSelect().TableExpr("app_projects").Where("deleted_at IS NULL").Where("status = 'deployed'").Count(ctx)
+	return total, deployed, err
+}
+
+func (db *Database) GetDeploymentStats() (int, error) {
+	ctx := context.Background()
+	return db.DB.NewSelect().TableExpr("app_deployments").Where("status = 'deployed'").Count(ctx)
+}
+
+func (db *Database) GetOpenTicketCount() (int, error) {
+	ctx := context.Background()
+	return db.DB.NewSelect().TableExpr("tickets").Where("deleted_at IS NULL").Where("status = 'open'").Count(ctx)
+}

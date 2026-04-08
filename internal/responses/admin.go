@@ -9,9 +9,13 @@ import (
 )
 
 type AdminDashboardResponse struct {
-	Users   *database.AdminStats   `json:"users"`
-	Revenue *database.RevenueStats `json:"revenue"`
-	AIUsage *database.AIUsageStats `json:"ai_usage"`
+	Users         *database.AdminStats   `json:"users"`
+	Revenue       *database.RevenueStats `json:"revenue"`
+	AIUsage       *database.AIUsageStats `json:"ai_usage"`
+	TotalApps     int                    `json:"total_apps"`
+	DeployedApps  int                    `json:"deployed_apps"`
+	ActiveDeploys int                    `json:"active_deploys"`
+	OpenTickets   int                    `json:"open_tickets"`
 }
 
 type PaginatedResponse struct {

@@ -1138,7 +1138,71 @@ func main() {
 			r.Route("/admin", func(r chi.Router) {
 				r.Use(appMiddleware.RequireAuth(controller))
 				r.Use(appMiddleware.RequireAdmin())
+
 				r.Get("/dashboard", httpViews.GetAdminDashboard)
+
+				r.Route("/users", func(r chi.Router) {
+					r.Get("/", httpViews.AdminListUsers)
+					r.Route("/{userId}", func(r chi.Router) {
+						r.Get("/", httpViews.AdminGetUser)
+						r.Put("/", httpViews.AdminUpdateUser)
+						r.Delete("/", httpViews.AdminDeleteUser)
+						r.Post("/impersonate", httpViews.AdminImpersonateUser)
+						r.Post("/reset-password", httpViews.AdminResetPassword)
+						r.Post("/credits", httpViews.AdminGrantCredits)
+						r.Post("/subscription", httpViews.AdminForceSubscription)
+					})
+				})
+
+				r.Route("/apps", func(r chi.Router) {
+					r.Get("/", httpViews.AdminListApps)
+					r.Route("/{appId}", func(r chi.Router) {
+						r.Get("/", httpViews.AdminGetApp)
+						r.Put("/", httpViews.AdminUpdateApp)
+						r.Delete("/", httpViews.AdminDeleteApp)
+					})
+				})
+
+				r.Route("/projects", func(r chi.Router) {
+					r.Get("/", httpViews.AdminListProjects)
+					r.Route("/{projectId}", func(r chi.Router) {
+						r.Get("/", httpViews.AdminGetProject)
+						r.Delete("/", httpViews.AdminDeleteProject)
+					})
+				})
+
+				r.Route("/subscriptions", func(r chi.Router) {
+					r.Get("/", httpViews.AdminListSubscriptions)
+					r.Put("/{subId}", httpViews.AdminUpdateSubscription)
+				})
+
+				r.Route("/credits", func(r chi.Router) {
+					r.Get("/transactions", httpViews.AdminListCreditTransactions)
+					r.Get("/balances", httpViews.AdminListCreditBalances)
+					r.Get("/usage", httpViews.AdminGetTokenUsage)
+				})
+
+				r.Route("/organizations", func(r chi.Router) {
+					r.Get("/", httpViews.AdminListOrganizations)
+					r.Get("/{orgId}", httpViews.AdminGetOrganization)
+				})
+
+				r.Route("/tickets", func(r chi.Router) {
+					r.Get("/", httpViews.AdminListTickets)
+					r.Route("/{ticketId}", func(r chi.Router) {
+						r.Get("/", httpViews.AdminGetTicket)
+						r.Put("/", httpViews.AdminUpdateTicket)
+					})
+				})
+
+				r.Route("/jobs", func(r chi.Router) {
+					r.Get("/", httpViews.AdminListJobs)
+					r.Get("/{jobId}", httpViews.AdminGetJob)
+				})
+
+				r.Get("/deployments", httpViews.AdminListDeployments)
+
+				r.Get("/analytics/overview", httpViews.AdminGetAnalyticsOverview)
 			})
 
 			r.Post("/support/ticket", httpViews.CreateTicket)

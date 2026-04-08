@@ -27,9 +27,17 @@ func (c *Controller) GetAdminDashboard(user *models.User) (*responses.AdminDashb
 		return nil, err
 	}
 
+	totalApps, deployedApps, _ := c.DB.GetAppStats()
+	activeDeploys, _ := c.DB.GetDeploymentStats()
+	openTickets, _ := c.DB.GetOpenTicketCount()
+
 	return &responses.AdminDashboardResponse{
-		Users:   userStats,
-		Revenue: revenueStats,
-		AIUsage: aiStats,
+		Users:         userStats,
+		Revenue:       revenueStats,
+		AIUsage:       aiStats,
+		TotalApps:     totalApps,
+		DeployedApps:  deployedApps,
+		ActiveDeploys: activeDeploys,
+		OpenTickets:   openTickets,
 	}, nil
 }
