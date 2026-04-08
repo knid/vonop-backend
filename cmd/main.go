@@ -135,6 +135,8 @@ func createSchema(db *bun.DB) error {
 		(*models.WebhookEvent)(nil),
 		// AI project memory (persists design prefs, decisions across sessions)
 		(*models.AppProjectMemory)(nil),
+		// Template marketplace
+		(*models.AppTemplate)(nil),
 	}
 
 	for _, model := range models {
@@ -263,6 +265,8 @@ func createSchema(db *bun.DB) error {
 
 		// Referral two-tier rewards
 		`ALTER TABLE referrals ADD COLUMN IF NOT EXISTS subscription_reward_granted boolean NOT NULL DEFAULT false`,
+		// Template marketplace: track which template a project was copied from
+		`ALTER TABLE app_projects ADD COLUMN IF NOT EXISTS template_id uuid`,
 	}
 
 	// Deduplicate before creating unique indexes (keep the latest row per group)

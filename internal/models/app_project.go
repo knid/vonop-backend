@@ -32,6 +32,7 @@ type AppProject struct {
 	LogoS3Key       string         `bun:",notnull,default:''"`
 	SandboxID       string         `bun:",notnull,default:''"`
 	Status          string         `bun:",notnull,default:'draft'"` // draft, generating, ready, deployed
+	TemplateID      *uuid.UUID     `bun:",type:uuid,nullzero"` // source template if created from a template
 	CreatedAt       time.Time      `bun:"created_at,nullzero,notnull,default:current_timestamp"`
 	UpdatedAt       time.Time      `bun:"updated_at,nullzero,notnull,default:current_timestamp"`
 	DeletedAt       time.Time      `bun:",soft_delete,nullzero"`
