@@ -524,7 +524,23 @@ func (c *Controller) StreamBuildApp(
 			}
 		}
 
-		// 4. Summarize old messages (bolt.diy-style) and build conversation history
+		// 4a. Inject targeted-fix instruction when the user message is a build/runtime error.
+		// This prevents the LLM from rewriting ALL files when only 1-2 need fixing,
+		// saving significant token cost on fix cycles.
+		if isErrorReport(message) {
+			chatSystemPrompt += `
+
+### Error Fix Mode (CRITICAL — targeted fixes only)
+The user's message is an auto-reported build or runtime error. Follow these rules:
+- Fix ONLY the files that have errors. Do NOT rewrite files that are working correctly.
+- Output ONLY the files you need to change — not the entire project.
+- Read the error message carefully to identify the exact file(s) and line(s) with issues.
+- Prefer minimal, surgical fixes over broad rewrites. Change the fewest lines possible.
+- If the error is in one file, output only that one file. Do NOT "improve" or refactor unrelated files.
+- Common fixes: add missing imports, fix type errors, replace unsupported APIs, add null checks.`
+		}
+
+		// 4b. Summarize old messages (bolt.diy-style) and build conversation history
 		keepRecent := c.RemoteConfig.GetInt(remoteconfig.AIChatKeepRecent, remoteconfig.Global)
 		if c.summarizeConversationIfNeeded(ctx, conv, messages, provider, keepRecent) {
 			// Persist the new summary

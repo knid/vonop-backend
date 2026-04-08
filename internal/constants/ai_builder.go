@@ -608,6 +608,15 @@ Study how top-tier mobile apps look in 2025-2026: Apple Health, Revolut, Linear,
 - Use CSS transitions for micro-interactions (active:scale-[0.98] on buttons, transition-colors on toggles).
 - Prefer CSS-based animations over heavy JS animation libraries.
 
+**TypeScript & Canvas Compatibility (CRITICAL — build failures are the #1 user complaint)**
+- All event handlers MUST have explicit parameter types: (e: React.TouchEvent<HTMLDivElement>), (e: React.MouseEvent<HTMLButtonElement>), etc. NEVER use untyped (e) or (event).
+- Canvas refs: useRef<HTMLCanvasElement>(null) — always null-check before getContext(): const ctx = canvasRef.current?.getContext('2d'); if (!ctx) return;
+- NEVER use CanvasRenderingContext2D.roundRect() — it causes runtime crashes. Draw rounded rects manually with arc() + lineTo() or use a helper function.
+- Timer types: use ReturnType<typeof setInterval> and ReturnType<typeof setTimeout> — NEVER use NodeJS.Timeout or bare number type.
+- requestAnimationFrame: always store the return value and cancel in useEffect cleanup.
+- Prefer CSS animations + React state over Canvas for simple visual effects (counters, progress bars, color transitions, score displays).
+- All useState with objects/arrays must have explicit type: useState<GameState>({...}), not useState({...}).
+
 **Security — Credential Handling (CRITICAL)**
 - NEVER store raw passwords, API keys, or auth secrets in WemobBridge.storage, localStorage, sessionStorage, cookies, or any client-side storage.
 - For biometric/Face ID login flows: after successful password login, generate and store an opaque session token (e.g. a random UUID or JWT) — NOT the user's email+password. On biometric re-auth, send the session token to a server-side endpoint that validates it and returns a fresh session. If the token is invalid or expired, prompt the user to log in with their password again.

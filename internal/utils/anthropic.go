@@ -165,12 +165,21 @@ func convertToAnthropicRequest(req ChatRequest, provider *LLMProvider) Anthropic
 		}
 	}
 
-	// Inject JSON instruction into system prompt when response_format is json_object
+	// Inject JSON instruction when response_format is json_object.
+	// Place it both in the system prompt AND at the end of the last user message
+	// for stronger enforcement — models pay most attention to the last user turn.
 	if req.ResponseFormat != nil && req.ResponseFormat.Type == "json_object" {
 		systemBlocks = append(systemBlocks, AnthropicContentBlock{
 			Type: "text",
-			Text: "You MUST respond with valid JSON only. No markdown fences, no explanation outside JSON.",
+			Text: "You MUST respond with valid JSON only. No markdown fences, no explanation outside JSON. Do NOT continue any conversation — output ONLY the JSON object.",
 		})
+		// Append reminder to the last user message for stronger signal
+		for i := len(nonSystemMessages) - 1; i >= 0; i-- {
+			if nonSystemMessages[i].Role == "user" {
+				nonSystemMessages[i].Content += "\n\n[IMPORTANT: Respond with valid JSON only. No conversation, no markdown.]"
+				break
+			}
+		}
 	}
 
 	// Apply automatic prompt caching to system blocks.

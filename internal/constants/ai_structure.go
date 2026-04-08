@@ -133,6 +133,14 @@ Study how the best mobile apps look (Revolut, Linear, Notion, Airbnb, Arc). Appl
 - Tiny cramped buttons (h-8, px-3, text-xs)
 - Pure white (#FFFFFF) page backgrounds with no surface contrast
 
+**Canvas & Browser API Compatibility (CRITICAL for game/interactive apps)**:
+- NEVER use CanvasRenderingContext2D.roundRect() — not supported in all environments. Use arc() + lineTo() or manual bezier curves for rounded rectangles.
+- NEVER use measureText().fontBoundingBoxAscent — use actualBoundingBoxAscent or font-size heuristics instead.
+- Always null-check canvas refs before calling getContext(): const ctx = canvasRef.current?.getContext('2d'); if (!ctx) return;
+- Use ReturnType<typeof setInterval> for timer types — do NOT use NodeJS.Timeout or number directly.
+- For requestAnimationFrame, always store the ID and cancel in cleanup: const id = requestAnimationFrame(fn); return () => cancelAnimationFrame(id);
+- Prefer CSS animations and React state over Canvas for simple visual effects (counters, progress, color changes).
+
 **Mobile-Native Components**:
 - Bottom sheets for options and secondary actions (not dropdown menus)
 - Full-screen overlays or slide-up panels instead of centered desktop modals

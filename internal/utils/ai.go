@@ -638,12 +638,17 @@ func GetJSONFromLLM(ctx context.Context, model, system, message string, provider
 		return "", fmt.Errorf("missing LLM provider configuration")
 	}
 
+	// Use prefill technique: inject partial assistant message "{" to force JSON mode.
+	// Anthropic models will continue from this prefix, ensuring JSON output.
+	msgs := []Message{
+		{Role: "system", Content: system},
+		{Role: "user", Content: message},
+		{Role: "assistant", Content: "{"},
+	}
+
 	body, err := buildLLMRequestBody(ChatRequest{
-		Model: model,
-		Messages: []Message{
-			{Role: "system", Content: system},
-			{Role: "user", Content: message},
-		},
+		Model:              model,
+		Messages:           msgs,
 		ResponseFormat:     &ResponseFormat{Type: "json_object"},
 		DisablePromptCache: true, // one-shot call — no follow-up will read the cache
 	}, provider)
@@ -693,14 +698,15 @@ func GetJSONFromLLM(ctx context.Context, model, system, message string, provider
 		return "", fmt.Errorf("no choices returned from LLM")
 	}
 
-	content := stripCodeFences(parsed.Choices[0].Message.Content)
+	// Prepend "{" to complete the prefilled JSON
+	content := "{" + stripCodeFences(parsed.Choices[0].Message.Content)
 
 	if parsed.Usage.TotalTokens > 0 {
 		slog.Info("LLM usage", append([]any{"from", "llm_utils", "model", model, "prompt_tokens", parsed.Usage.PromptTokens, "completion_tokens", parsed.Usage.CompletionTokens, "total_tokens", parsed.Usage.TotalTokens, "latency_ms", latencyMs}, trackerAttrs(ctx)...)...)
 		if tracker := TokenTrackerFromContext(ctx); tracker != nil {
 			if tracker.TrackContent {
-				msgs := []Message{{Role: "system", Content: system}, {Role: "user", Content: message}}
-				tracker.RecordWithContent(model, parsed.Usage, latencyMs, false, msgs, content, "get_json")
+				trackMsgs := []Message{{Role: "system", Content: system}, {Role: "user", Content: message}}
+				tracker.RecordWithContent(model, parsed.Usage, latencyMs, false, trackMsgs, content, "get_json")
 			} else {
 				tracker.Record(model, parsed.Usage, latencyMs, false, "get_json")
 			}
@@ -735,12 +741,16 @@ func GetJSONFromLLMWithMaxTokens(ctx context.Context, model, system, message str
 		return "", fmt.Errorf("missing LLM provider configuration")
 	}
 
+	// Use prefill technique: inject partial assistant message "{" to force JSON mode.
+	msgs := []Message{
+		{Role: "system", Content: system},
+		{Role: "user", Content: message},
+		{Role: "assistant", Content: "{"},
+	}
+
 	body, err := buildLLMRequestBody(ChatRequest{
-		Model: model,
-		Messages: []Message{
-			{Role: "system", Content: system},
-			{Role: "user", Content: message},
-		},
+		Model:              model,
+		Messages:           msgs,
 		MaxTokens:          maxTokens,
 		ResponseFormat:     &ResponseFormat{Type: "json_object"},
 		DisablePromptCache: true,
@@ -791,14 +801,15 @@ func GetJSONFromLLMWithMaxTokens(ctx context.Context, model, system, message str
 		return "", fmt.Errorf("no choices returned from LLM")
 	}
 
-	content := stripCodeFences(parsed.Choices[0].Message.Content)
+	// Prepend "{" to complete the prefilled JSON
+	content := "{" + stripCodeFences(parsed.Choices[0].Message.Content)
 
 	if parsed.Usage.TotalTokens > 0 {
 		slog.Info("LLM usage", append([]any{"from", "llm_utils", "model", model, "prompt_tokens", parsed.Usage.PromptTokens, "completion_tokens", parsed.Usage.CompletionTokens, "total_tokens", parsed.Usage.TotalTokens, "latency_ms", latencyMs}, trackerAttrs(ctx)...)...)
 		if tracker := TokenTrackerFromContext(ctx); tracker != nil {
 			if tracker.TrackContent {
-				msgs := []Message{{Role: "system", Content: system}, {Role: "user", Content: message}}
-				tracker.RecordWithContent(model, parsed.Usage, latencyMs, false, msgs, content, "get_json")
+				trackMsgs := []Message{{Role: "system", Content: system}, {Role: "user", Content: message}}
+				tracker.RecordWithContent(model, parsed.Usage, latencyMs, false, trackMsgs, content, "get_json")
 			} else {
 				tracker.Record(model, parsed.Usage, latencyMs, false, "get_json")
 			}
@@ -1963,7 +1974,21 @@ func StreamWithTools(
 				// Only record full message content for the first 10 rounds to cap memory usage.
 				// After that, record usage stats only.
 				if tracker.TrackContent && round < 10 {
-					tracker.RecordWithContent(model, roundUsage, time.Since(roundStart).Milliseconds(), true, currentMessages, fullText.String(), "stream_with_tools")
+					// When the round produced tool calls instead of text, record a
+					// summary of the tool calls so PostHog $ai_output_choices is not null.
+					outputForTracking := fullText.String()
+					if outputForTracking == "" && len(toolCallsMap) > 0 {
+						var toolSummary []string
+						for _, tc := range toolCallsMap {
+							name := ""
+							if tc.Function != nil {
+								name = tc.Function.Name
+							}
+							toolSummary = append(toolSummary, fmt.Sprintf("[tool_call: %s]", name))
+						}
+						outputForTracking = strings.Join(toolSummary, " ")
+					}
+					tracker.RecordWithContent(model, roundUsage, time.Since(roundStart).Milliseconds(), true, currentMessages, outputForTracking, "stream_with_tools")
 				} else {
 					tracker.Record(model, roundUsage, time.Since(roundStart).Milliseconds(), true, "stream_with_tools")
 				}

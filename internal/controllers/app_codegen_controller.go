@@ -638,6 +638,37 @@ func buildGlobalsCSSTheme(colorScheme, darkColorScheme map[string]any, isMobile 
 
 	sb.WriteString("}\n\n")
 
+	// Mobile-specific utility classes for snap scroll and hidden scrollbar.
+	// These are commonly needed by mobile apps (swipeable feeds, carousels,
+	// game reels) and their absence causes layout bugs.
+	if isMobile {
+		sb.WriteString(`/* Mobile snap scroll & scrollbar utilities */
+@layer utilities {
+  .snap-y-mandatory {
+    scroll-snap-type: y mandatory;
+    overflow-y: auto;
+  }
+  .snap-x-mandatory {
+    scroll-snap-type: x mandatory;
+    overflow-x: auto;
+  }
+  .snap-start {
+    scroll-snap-align: start;
+  }
+  .snap-center {
+    scroll-snap-align: center;
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}
+`)
+	}
+
 	// Hide Next.js dev error overlay indicator in preview (must be outside @layer to win specificity)
 	sb.WriteString(`nextjs-portal,
 [data-nextjs-dialog-overlay],
@@ -1793,7 +1824,14 @@ func (c *Controller) PlanAppFileStructure(ctx context.Context, prompt string, pr
 				"attempt", attempt+1, "model", attemptModel)
 		}
 
-		structureJSON, err := utils.GetJSONFromLLMWithMaxTokens(ctx, attemptModel, systemPrompt, prompt, provider, 32768)
+		// Wrap prompt with anti-conversation guard: when the prompt contains
+		// pre-build conversation history, the model sometimes continues chatting
+		// instead of producing JSON. This explicit instruction prevents that.
+		planPrompt := prompt
+		if strings.Contains(prompt, "Pre-build conversation") {
+			planPrompt = "CRITICAL: You are in STRUCTURED JSON OUTPUT mode. The conversation below is context only — do NOT continue the conversation. Output ONLY the JSON object as specified in the system prompt.\n\n" + prompt
+		}
+		structureJSON, err := utils.GetJSONFromLLMWithMaxTokens(ctx, attemptModel, systemPrompt, planPrompt, provider, 32768)
 		if err != nil {
 			slog.Error("failed to generate app structure",
 				"error", err, "attempt", attempt+1, "model", attemptModel)
