@@ -90,6 +90,34 @@ func (db *Database) AtomicDeductCreditsUnchecked(tx bun.IDB, balanceID string, c
 	return newBalance, err
 }
 
+// AtomicDeductCreditsToFloor atomically deducts credits, clamping at the floor
+// instead of failing. Returns (newBalance, actualDeducted, nil).
+// If balance is already at or below floor, returns (0, 0, nil).
+func (db *Database) AtomicDeductCreditsToFloor(tx bun.IDB, balanceID string, cost int, floor int) (newBalance int, deducted int, err error) {
+	var result struct {
+		NewBalance int `bun:"new_balance"`
+		Deducted   int `bun:"deducted"`
+	}
+	err = tx.NewRaw(
+		`WITH old AS (
+			SELECT id, balance FROM ai_credits_balances WHERE id = ? FOR UPDATE
+		)
+		UPDATE ai_credits_balances b
+		SET balance = GREATEST(?, old.balance - ?), updated_at = NOW()
+		FROM old
+		WHERE b.id = old.id AND old.balance > ?
+		RETURNING b.balance AS new_balance, (old.balance - b.balance) AS deducted`,
+		balanceID, floor, cost, floor,
+	).Scan(context.Background(), &result)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return 0, 0, nil
+		}
+		return 0, 0, err
+	}
+	return result.NewBalance, result.Deducted, nil
+}
+
 // AtomicAddCredits atomically adds credits. Returns the new balance.
 func (db *Database) AtomicAddCredits(tx bun.IDB, balanceID string, amount int) (int, error) {
 	var newBalance int
