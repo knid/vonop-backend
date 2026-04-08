@@ -1,6 +1,7 @@
 package responses
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/google/uuid"
@@ -112,6 +113,12 @@ type AdminJobResponse struct {
 	Error     string    `json:"error,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+}
+
+type AdminJobDetailResponse struct {
+	AdminJobResponse
+	Events json.RawMessage `json:"events"`
+	Result json.RawMessage `json:"result,omitempty"`
 }
 
 type AdminDeploymentResponse struct {
