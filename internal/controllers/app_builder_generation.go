@@ -352,6 +352,22 @@ func (c *Controller) streamSingleShotGeneration(
 	}
 	sendEvent("project_created", projectCreatedPayload)
 
+	// Budget gate — check if accumulated credits from planning + setup already
+	// exceed the user's budget before starting the expensive code generation call.
+	if tracker := utils.TokenTrackerFromContext(ctx); tracker != nil {
+		prompt, completion, _, _ := tracker.Totals()
+		spent := c.TokensToCredits(prompt, completion)
+		budget, budgetErr := c.CreditBudget(user)
+		if budgetErr == nil && spent >= budget {
+			slog.Warn("credit budget exhausted before single-shot generation",
+				"user_id", user.ID, "spent", spent, "budget", budget)
+			sendEvent("credits_exhausted", map[string]any{
+				"message": "AI credits exhausted. Generation stopped.",
+			})
+			return "", nil, fmt.Errorf("AI credits exhausted")
+		}
+	}
+
 	// 3. Generate AI logo in background (don't block code generation)
 	logoCh := make(chan string, 1)
 	go func() {
@@ -647,7 +663,18 @@ func (c *Controller) streamEcommerceGeneration(
 		StripAfter:       6,
 		MaxTokens:        8192,
 		MaxContinuations: 1,
-		NudgeMessage:     "Finish populating the store and provide a brief summary.",
+		ShouldContinue: func() bool {
+			if tracker := utils.TokenTrackerFromContext(ctx); tracker != nil {
+				prompt, completion, _, _ := tracker.Totals()
+				spent := c.TokensToCredits(prompt, completion)
+				budget, budgetErr := c.CreditBudget(user)
+				if budgetErr == nil && spent >= budget {
+					return false
+				}
+			}
+			return true
+		},
+		NudgeMessage: "Finish populating the store and provide a brief summary.",
 		OnToolCallStart: func(toolName string) {
 			sendEvent("tool_start", map[string]any{"tool": toolName})
 		},
@@ -699,6 +726,21 @@ func (c *Controller) streamEcommerceGeneration(
 	// Check context cancellation between phases
 	if ctx.Err() != nil {
 		return "", ops, ctx.Err()
+	}
+
+	// Budget gate — check before expensive Phase 2 code generation
+	if tracker := utils.TokenTrackerFromContext(ctx); tracker != nil {
+		prompt, completion, _, _ := tracker.Totals()
+		spent := c.TokensToCredits(prompt, completion)
+		budget, budgetErr := c.CreditBudget(user)
+		if budgetErr == nil && spent >= budget {
+			slog.Warn("credit budget exhausted before ecommerce Phase 2",
+				"user_id", user.ID, "spent", spent, "budget", budget)
+			sendEvent("credits_exhausted", map[string]any{
+				"message": "AI credits exhausted. Generation stopped.",
+			})
+			return "", ops, fmt.Errorf("AI credits exhausted")
+		}
 	}
 
 	// === Phase 2: File generation (single-shot, no tools) ===

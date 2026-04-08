@@ -403,8 +403,20 @@ CRITICAL LANGUAGE RULE: EVERY piece of text you write — explanations, summarie
 			MaxContinuations: -1, // Phase 1 should never continue — text is discarded on NO_TOOLS_NEEDED
 			ShouldContinue: func() bool {
 				phase1Mu.Lock()
-				defer phase1Mu.Unlock()
-				return !phase1Suppressed
+				if phase1Suppressed {
+					phase1Mu.Unlock()
+					return false
+				}
+				phase1Mu.Unlock()
+				if tracker := utils.TokenTrackerFromContext(ctx); tracker != nil {
+					prompt, completion, _, _ := tracker.Totals()
+					spent := c.TokensToCredits(prompt, completion)
+					budget, budgetErr := c.CreditBudget(user)
+					if budgetErr == nil && spent >= budget {
+						return false
+					}
+				}
+				return true
 			},
 			StripAfter: 28, // Strip tools near the end so model is forced to respond
 			OnToolCallStart: func(toolName string) {
