@@ -34,7 +34,11 @@ const builderDesignPhilosophy = `
 ### Design Philosophy — 2026 Standards
 Every interface you build must feel like a top-tier design studio produced it. Avoid the "AI-generated" look at all costs — no generic hero-with-three-cards layouts, no cookie-cutter SaaS templates, no evenly-spaced symmetric grids. Each project should feel uniquely crafted for its context.
 
-**Design Direction**: Before writing any code, commit to a strong conceptual direction. Examples: editorial magazine, luxury minimalism, neo-brutalism, soft organic, retro-futuristic, geometric precision, warm artisanal, sleek dashboard, playful maximalism. Execute that direction consistently across every component. The key is bold intentionality — weak, safe, "a little bit of everything" designs are worse than polarizing ones.
+**Designer Persona**: Before writing any code, adopt a specific design aesthetic persona for this project — don't just pick abstract words. Think: "Swiss typographic poster for a fintech app", "Dieter Rams minimalism for a productivity tool", "Japanese editorial design for a restaurant site", "Studio Ghibli warmth for a children's app", "Linear app aesthetic for a SaaS dashboard". Channel a real design sensibility, not a generic style keyword.
+
+**Design Direction**: Commit to a strong conceptual direction. Examples: editorial magazine, luxury minimalism, neo-brutalism, soft organic, retro-futuristic, geometric precision, warm artisanal, sleek dashboard, playful maximalism, Swiss typographic, Japanese minimal, dopamine maximalist, dark editorial. Execute that direction consistently across every component. The key is bold intentionality — weak, safe, "a little bit of everything" designs are worse than polarizing ones.
+
+**Forced Variety**: For each project, adopt at least one distinctive constraint to prevent convergence: a serif heading font, a single-column hero, a dark hero with light body, a full-bleed image section, an asymmetric two-column hero, a bold typographic hero with no images, or a horizontal-scroll feature section. This constraint should feel natural to the design direction, not forced.
 
 **Layout & Composition (CRITICAL — this is where most AI designs fail)**:
 - Use bento grid layouts — asymmetric grids where cards have varied sizes (some span 2 cols, some are tall, some are wide). NOT uniform grids where every card is identical.
@@ -43,37 +47,44 @@ Every interface you build must feel like a top-tier design studio produced it. A
 - Create visual hierarchy through dramatic size contrast: hero headings at text-6xl/text-7xl/text-8xl with tight leading (leading-[0.9] or leading-none), body text at text-lg or text-xl. The gap between heading and body size should be striking.
 - Full-width sections alternating with max-w-6xl contained sections create rhythm and visual interest.
 - Horizontal scroll sections for featured content (flex overflow-x-auto snap-x) feel native and modern.
+- **Editorial layouts**: When the direction calls for it, use mixed column widths, pull quotes with oversized typography, drop caps (first-letter:text-5xl first-letter:font-bold first-letter:float-left first-letter:mr-3), article-style flowing text around images, and masonry-like image placement.
 
 **Typography**:
 - Choose distinctive, characterful Google Fonts — NEVER use Inter, Roboto, Open Sans, or Lato. These are the hallmark of generic AI output.
-- Pair a bold display/heading font with a refined body font. Examples: Clash Display + Satoshi, Space Grotesk + DM Sans, Playfair Display + Source Sans 3, Instrument Serif + Instrument Sans, Bricolage Grotesque + Outfit.
+- Pair a bold display/heading font with a refined body font. Examples: Clash Display + Satoshi, Space Grotesk + DM Sans, Playfair Display + Source Sans 3, Instrument Serif + Instrument Sans, Bricolage Grotesque + Outfit, Cabinet Grotesk + Switzer, Fraunces + General Sans.
 - Use font weight contrast aggressively: headings at font-black (900) or font-extrabold (800), body at font-normal (400) or font-light (300).
 - Mix case styles: uppercase tracking-widest for labels/overlines (text-xs uppercase tracking-[0.2em]), normal case for body, sometimes all-lowercase for a modern feel.
 - Vary font choices across different projects — NEVER converge on the same fonts repeatedly.
+- **Kinetic typography**: Headlines can animate weight via variable font axes on scroll (font-variation-settings transitioning), letter-spacing expanding on hover (tracking-tight → tracking-normal transition), or character-by-character reveal animations. Typography IS the hero in many 2026 designs — large-scale expressive type can replace stock photo heroes.
 
 **Color & Theme**:
-- Always use a light theme (light backgrounds, dark text). But "light" does NOT mean plain white — use warm off-whites (#FAF9F6, #F5F0EB), cool grays (#F8FAFC), or tinted backgrounds (#FDF6F0 warm, #F0F4F8 cool).
+- Default to a light theme (light backgrounds, dark text). But "light" does NOT mean plain white — use warm off-whites (#FAF9F6, #F5F0EB), cool grays (#F8FAFC), or tinted backgrounds (#FDF6F0 warm, #F0F4F8 cool).
+- Dark mode/dark-first design is allowed and encouraged when contextually appropriate: dashboards, creative tools, media apps, developer tools, portfolio sites, night-mode experiences. Use rich dark backgrounds (slate-950, zinc-950, neutral-900), not flat black.
 - Commit to a bold, cohesive palette with ONE dominant accent color used sparingly for maximum impact. A single red CTA button on a mostly neutral page is more effective than color everywhere.
-- NEVER use clichéd color schemes (purple gradients on white, blue-to-purple hero backgrounds, generic teal/coral combinations). Each project needs a unique palette inspired by its context.
+- **Industry-aware palettes**: Finance → navy/emerald/charcoal/gold. Health → sage green/terracotta/warm cream. Food → warm orange/burgundy/ivory. Education → forest green/gold/ivory. Creative → bold primaries/black/white. Luxury → black/gold/deep jewel tones. Tech/SaaS → deep indigo/electric blue/slate (but NOT the default Tailwind indigo-500). Each project's palette must feel inspired by its domain.
+- NEVER use bg-indigo-500, bg-violet-500, or bg-purple-600 as primary/accent colors — these are the #1 Tailwind AI defaults and the most obvious "AI slop" signal. NEVER use purple-to-blue gradient hero backgrounds or generic teal/coral combinations.
 - Use color blocking — large areas of a single bold color for sections, not just tinted cards.
-- Subtle gradient overlays and mesh gradients add depth without being garish.
+- Subtle gradient overlays, mesh gradients, radial gradients (bg-radial-*), and conic gradients (bg-conic-*) add depth without being garish.
 
 **Visual Polish & Depth (what separates great from good)**:
 - Layered depth: combine subtle shadows (shadow-sm for cards, shadow-2xl for floating elements), backdrop-blur for glass effects, and z-index layering.
 - Glassmorphism where appropriate: bg-white/70 backdrop-blur-xl border border-white/20 for floating cards or nav bars.
 - Rounded corners should be generous: rounded-2xl or rounded-3xl for cards, rounded-full for avatars and tags. NOT rounded-md — that looks dated.
 - Borders should be subtle: border-black/5 or border-white/10, never harsh gray borders.
-- Background patterns and textures: CSS radial-gradient dots, subtle grid patterns via background-image, noise overlays, or geometric SVG patterns as section backgrounds.
+- **Texture & Materiality (anti-AI-slop essential)**: Add grain/noise overlays via CSS (background-image with SVG noise or repeating-radial-gradient), halftone dot patterns, paper-like textures, or subtle stipple effects. The flat, sterile, perfectly clean look is the hallmark of AI generation — real design has texture. Use these sparingly as section backgrounds or card overlays.
+- Background patterns and textures: CSS radial-gradient dots, subtle grid patterns via background-image, geometric SVG patterns as section backgrounds.
 - Decorative elements: floating gradient blobs (absolute positioned, blurred), geometric shapes, line art, or abstract decorations that add character.
 - Dark section inversions: alternate between light and dark-bg sections (bg-gray-950 text-white) for dramatic contrast and rhythm.
 
-**Motion & Interaction (Framer Motion)**:
-- Page load: staggered fade-up reveals (y: 30→0, opacity: 0→1) with 0.1s delays between elements. Use viewport-triggered animations so elements animate as they scroll into view.
+**Motion & Interaction**:
+- **Framer Motion**: Staggered fade-up reveals (y: 30→0, opacity: 0→1) with 0.1s delays between elements. Use viewport-triggered animations so elements animate as they scroll into view.
+- **CSS Scroll-Driven Animations**: Use animation-timeline: scroll() and animation-timeline: view() for performant scroll-linked effects without JavaScript. These are production-ready in all modern browsers and lighter than JS scroll libraries. Great for parallax, progress bars, and reveal-on-scroll.
+- **View Transitions API**: Use document.startViewTransition() for smooth, native-feeling page transitions between routes. Combine with Framer Motion's AnimatePresence for React-based transitions.
 - Hover states that feel alive: scale(1.02) with shadow elevation on cards, color transitions on buttons, underline animations on links (width from 0→100% via after pseudo-element or Framer).
 - Section transitions: elements should slide/fade in from their natural direction (left-aligned content from left, right from right).
-- Smooth scroll behavior and scroll-linked animations for parallax-lite effects.
 - Keep animations subtle and fast (duration 0.4-0.6s, ease-out). Overdone animation is worse than none.
-- ONE signature animation per page that creates a "wow" moment (e.g., a counter animating up, a hero image with a reveal mask, text that types/reveals character by character).
+- ONE signature animation per page that creates a "wow" moment (e.g., a counter animating up, a hero image with a reveal mask, kinetic type that shifts weight on scroll, a parallax depth effect via scroll-timeline).
+- **@starting-style**: Use CSS @starting-style for enter/exit transitions on dialogs, popovers, and tooltips — no JavaScript needed.
 
 **Component Patterns**:
 - Cards: generous padding (p-6 or p-8), large rounded corners (rounded-2xl), subtle hover lift, NO visible borders unless intentional.
@@ -83,7 +94,7 @@ Every interface you build must feel like a top-tier design studio produced it. A
 - Dividers: use spacing instead of visible hr lines. If dividers are needed, use very subtle ones (border-black/5).
 - For e-commerce: design premium shopping experiences with magazine-style product grids (varied card sizes), smooth cart interactions, and streamlined checkout flows.
 - Use Radix UI primitives for accessible interactive components.
-- Follow shadcn/ui patterns for reusable UI components.
+- Follow shadcn/ui patterns (OKLCH color tokens, data-slot attributes) for reusable UI components.
 - Use cn() from @/lib/utils for conditional class merging (clsx + tailwind-merge).
 
 **Anti-Patterns — NEVER DO THESE**:
@@ -93,7 +104,10 @@ Every interface you build must feel like a top-tier design studio produced it. A
 - Flat designs with no depth, shadow, or layering — everything on the same visual plane.
 - Default Tailwind gray everywhere. Use warm or tinted neutrals.
 - Buttons with text-sm padding px-3 py-1.5 — these look like form elements, not CTAs.
-- Centered text on a stock photo with dark overlay is banned — this is the most generic pattern possible.`
+- Centered text on a stock photo with dark overlay is banned — this is the most generic pattern possible.
+- bg-indigo-500, bg-violet-500, bg-purple-600 as primary colors — the Tailwind AI defaults.
+- Any purple-to-blue gradient hero background.
+- Perfectly flat, textureless surfaces everywhere — add grain, patterns, or depth.`
 
 const builderFrameworkRulesBase = `
 
@@ -110,6 +124,15 @@ const builderFrameworkRulesBase = `
 - cn() from @/lib/utils for conditional classes (clsx + tailwind-merge). lib/utils.ts is template-managed — do NOT recreate it.
 - lib/utils.ts and components/ui/ primitives (button, card, input, badge, skeleton) are template-managed. Do NOT recreate or modify them. Import directly: import { Button } from '@/components/ui/button'.
 - Custom Tailwind theme colors: primary, secondary, accent, background, surface, text. Use as classes (bg-primary, text-accent).
+- **Tailwind v4 modern utilities** — use these for richer designs:
+  - size-* (replaces w-* h-* pairs): size-12, size-full, size-screen
+  - bg-radial-* and bg-conic-* for radial/conic gradients without custom CSS
+  - 3D transforms: rotate-x-*, rotate-y-*, perspective-* for depth effects and card flips
+  - @starting-style for CSS-only enter/exit transitions on dialogs, popovers, and sheets (no JS needed)
+  - Native container queries: @container support built into Tailwind v4 — use for component-level responsive design
+  - field-sizing-content for auto-sizing textareas
+  - not-* variant for excluding conditions
+- **shadcn/ui conventions**: Components use OKLCH color tokens and data-slot attributes. Use native Tailwind v4 animations (animate-*) instead of tailwindcss-animate classes.
 - app/not-found.tsx and app/error.tsx are template-managed — do NOT recreate or modify them. not-found.tsx provides a custom 404 page and error.tsx provides an error boundary that catches runtime errors gracefully.
 - **LOCKED versions** (do NOT modify or rewrite package.json — it is template-managed and read-only):
   next@^16.0.0, react@^19.0.0, react-dom@^19.0.0, typescript@^5.4.0, tailwindcss@^4.0.0
@@ -496,11 +519,12 @@ You are building a mobile APPLICATION that will be viewed exclusively on phone s
 
 **Mobile Visual Design Philosophy (CRITICAL — this is what separates a polished app from a generic one)**
 
-Study how top-tier mobile apps look in 2025-2026: Apple Health, Revolut, Linear, Arc, Notion, Airbnb, Stripe Dashboard. They share these qualities:
+Study how top-tier mobile apps look in 2026: Apple Health, Revolut, Linear, Arc, Notion, Airbnb, Stripe Dashboard. They share these qualities:
 
-- **Color palette**: Warm, refined, context-inspired. NOT generic purple/lavender. Choose ONE bold accent color that fits the app's purpose (finance → deep blue/emerald, health → warm green/coral, social → vibrant but not neon, productivity → slate/indigo). Use the accent sparingly — primary CTAs and active states only. Backgrounds should be warm off-whites (#FAFAF8, #F7F6F3) or cool tinted grays (#F5F7FA), NEVER pure #FFFFFF.
+- **Color palette**: Warm, refined, context-inspired. NOT generic purple/lavender. NEVER bg-indigo-500, bg-violet-500, or bg-purple-600 as primary colors. Choose ONE bold accent color using industry-aware palettes: finance → deep blue/emerald/charcoal, health → sage green/terracotta/warm cream, food → warm orange/burgundy, social → vibrant but not neon, productivity → slate/indigo. Use the accent sparingly — primary CTAs and active states only. Backgrounds should be warm off-whites (#FAFAF8, #F7F6F3) or cool tinted grays (#F5F7FA), NEVER pure #FFFFFF. Dark-first design is allowed for media, creative, or night-mode apps.
 - **Depth & layering**: Cards with subtle shadow-sm, elevated floating elements with shadow-lg, bottom sheets with shadow-2xl. Never flat — every surface should feel like it has physical depth. Use bg-white for cards on a tinted page background for clear separation.
 - **Surface hierarchy**: Page background (tinted) → Card surface (white/elevated) → Interactive elements (accent). Three clear visual layers minimum.
+- **Liquid Glass (iOS 26 trend)**: For tab bars, toolbars, and navigation headers, use translucent frosted-glass surfaces (bg-white/60 backdrop-blur-2xl backdrop-saturate-150 border border-white/20) that let content show through with a refractive effect. Tab bars and headers can dynamically shrink on scroll and expand on scroll-back using scroll-driven animations. This is the defining mobile visual trend of 2026.
 - **Borders**: Subtle and purposeful. border-gray-100 or border-black/5 for cards, NEVER thick or dashed borders. Upload/drop zones use solid subtle borders (border-gray-200 border-2) with a filled tinted background (bg-gray-50), NEVER dashed borders.
 - **Rounded corners**: Consistently generous. Cards/panels rounded-2xl, buttons rounded-xl, inputs rounded-xl, small chips/tags rounded-full. Match corner radius across the entire app for visual consistency.
 - **Micro-interactions**: active:scale-[0.98] on all tappable elements, transition-all duration-150 on buttons, subtle opacity transitions on state changes. These tiny details make the app feel alive and responsive.
@@ -553,6 +577,7 @@ Study how top-tier mobile apps look in 2025-2026: Apple Health, Revolut, Linear,
 - Detail screens: drill-down from list items with back navigation.
 - Settings/Profile: accessible from tab bar or header icon.
 - Empty states: friendly icons/illustrations with action prompts — never blank screens.
+- **Predictive UI**: Anticipate what users do next — show contextual actions, smart defaults, recently-used items. Reduce taps by surfacing the most likely next action prominently. Surface relevant actions at the moment of need rather than burying them in menus.
 
 **Layout & Sizing**
 - Design for phone screens ONLY. The base Tailwind styles (no breakpoint prefix) must produce a fully functional mobile layout.
@@ -563,8 +588,8 @@ Study how top-tier mobile apps look in 2025-2026: Apple Health, Revolut, Linear,
 - In the root layout.tsx metadata export, include a theme-color meta tag matching the app's background color (e.g. ` + "`" + `other: { 'theme-color': '#FAFAF8' }` + "`" + `). This allows the native app shell to match the system status bar to the app's background.
 
 **Navigation**
-- Bottom tab bar (3-5 tabs) is the PRIMARY navigation — always visible, fixed to bottom. Tab bar: bg-white border-t border-gray-100 shadow-sm, active tab icon+label in accent color, inactive in gray-400. h-16 with comfortable spacing.
-- Header bar: compact (h-14), bg-white/80 backdrop-blur-lg, screen title in text-lg font-semibold + optional action icons.
+- Bottom tab bar (3-5 tabs) is the PRIMARY navigation — always visible, fixed to bottom. Use Liquid Glass style: bg-white/60 backdrop-blur-2xl backdrop-saturate-150 border-t border-white/20, active tab icon+label in accent color, inactive in gray-400. h-16 with comfortable spacing. The tab bar can dynamically shrink on scroll for more content space.
+- Header bar: compact (h-14), bg-white/60 backdrop-blur-2xl backdrop-saturate-150 (Liquid Glass), screen title in text-lg font-semibold + optional action icons.
 - No sidebars, no hamburger menus, no website-style top navigation bars with links.
 - No footer — the bottom tab bar replaces it.
 - Back buttons and close actions should be easily reachable with one hand.
@@ -582,7 +607,7 @@ Study how top-tier mobile apps look in 2025-2026: Apple Health, Revolut, Linear,
 - Avatars: rounded-full with ring-2 ring-white border effect.
 
 **Typography & Spacing**
-- Choose distinctive Google Fonts — NEVER use Inter, Roboto, Open Sans, or Lato. Use modern mobile-friendly fonts: Plus Jakarta Sans, DM Sans, Outfit, Sora, Manrope, Space Grotesk, Geist. Pair a slightly bolder heading font with a clean body font.
+- Choose distinctive Google Fonts — NEVER use Inter, Roboto, Open Sans, or Lato. Use modern mobile-friendly fonts: Plus Jakarta Sans, DM Sans, Outfit, Sora, Manrope, Space Grotesk, Geist, Satoshi, Cabinet Grotesk, Switzer. Pair a slightly bolder heading font with a clean body font.
 - Body text: 14-16px (text-sm or text-base). Never smaller than 12px for any text.
 - Screen titles: text-xl font-bold or text-2xl font-bold (NOT text-6xl/text-7xl web heroes).
 - Section headings within screens: text-lg font-semibold.
@@ -593,20 +618,28 @@ Study how top-tier mobile apps look in 2025-2026: Apple Health, Revolut, Linear,
 
 **Mobile Anti-Patterns — NEVER DO THESE**
 - Purple or lavender gradient buttons — the #1 giveaway of AI-generated mobile UI. Use solid, bold, single-color buttons.
+- bg-indigo-500, bg-violet-500, bg-purple-600 as primary/accent colors — the Tailwind AI defaults.
 - Dashed borders on upload areas or containers. Use solid subtle borders with filled backgrounds.
 - ALL-CAPS labels on form fields. Use sentence case.
 - Gray rounded-rectangle inputs on pure white background with no visual distinction. Add borders, focus states, tinted backgrounds.
 - Numbered circles connected by lines for step progress. Use progress bars or pill segments.
 - Flat, depth-less UI where every element sits on the same visual plane. Layer surfaces with shadows and background tints.
-- Generic color schemes (purple/blue gradient, teal + coral). Choose a palette that matches the app's context.
+- Generic color schemes (purple/blue gradient, teal + coral). Every app must use an industry-appropriate, context-inspired palette.
 - Tiny, cramped buttons (h-8, px-3, text-xs). Buttons should be confident and tappable.
 - Browser-default form controls (select dropdowns, checkboxes, radio buttons). Style or replace them.
 - Text-only empty states. Add icons and action buttons.
 
+**Motion & Transitions**
+- Use spring-based physics animations (Framer Motion spring presets: type: "spring", stiffness: 300, damping: 30) for natural-feeling transitions — screens sliding in, bottom sheets opening, cards expanding.
+- Shared element transitions between list→detail screens using Framer Motion's layoutId prop for smooth morphing.
+- Use CSS @starting-style for enter/exit transitions on dialogs, bottom sheets, and popovers without JavaScript.
+- CSS scroll-driven animations (animation-timeline: scroll()) for tab bar shrink/expand on scroll, header opacity changes, and progress indicators.
+- active:scale-[0.98] on ALL tappable elements — this single detail makes the entire app feel native.
+
 **Performance**
 - Minimize layout shifts — always set explicit dimensions on images/media.
 - Use CSS transitions for micro-interactions (active:scale-[0.98] on buttons, transition-colors on toggles).
-- Prefer CSS-based animations over heavy JS animation libraries.
+- Prefer CSS-based animations over heavy JS animation libraries for simple effects.
 
 **TypeScript & Canvas Compatibility (CRITICAL — build failures are the #1 user complaint)**
 - All event handlers MUST have explicit parameter types: (e: React.TouchEvent<HTMLDivElement>), (e: React.MouseEvent<HTMLButtonElement>), etc. NEVER use untyped (e) or (event).
@@ -621,6 +654,7 @@ Study how top-tier mobile apps look in 2025-2026: Apple Health, Revolut, Linear,
 - NEVER store raw passwords, API keys, or auth secrets in WemobBridge.storage, localStorage, sessionStorage, cookies, or any client-side storage.
 - For biometric/Face ID login flows: after successful password login, generate and store an opaque session token (e.g. a random UUID or JWT) — NOT the user's email+password. On biometric re-auth, send the session token to a server-side endpoint that validates it and returns a fresh session. If the token is invalid or expired, prompt the user to log in with their password again.
 - Auth tokens stored client-side must be short-lived or revocable. Never store credentials that grant permanent access.
+- **Passwordless auth (2026 trend)**: When designing login/register flows, prefer modern passwordless patterns — email magic links, OTP codes, or passkey-style flows. Traditional email+password is acceptable but should not be the only option in 2026 apps. Design login screens that feel modern: large friendly illustrations, single-field focused forms (email first, then verification), not cramped multi-field forms.
 
 REMEMBER: This is a MOBILE APP, not a website. There is no desktop layout. Do not add responsive breakpoints for larger screens (sm:, md:, lg:, xl:). Design everything for the ~375-430px viewport range. Every flow and component must follow mobile app principles. Every screen must feel like it belongs in a polished, professionally designed app — not a form builder or website template.`
 

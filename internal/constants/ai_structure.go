@@ -8,19 +8,20 @@ import "fmt"
 const structureDesignPhilosophy = `
 ### Design Philosophy — 2026 Standards
 - Create distinctive, production-grade interfaces that feel like a top design studio built them. Avoid the "AI-generated" look: no generic hero-with-three-cards layouts, no cookie-cutter templates, no uniform symmetric grids.
-- Commit to a strong conceptual direction (editorial magazine, luxury minimalism, neo-brutalism, soft organic, retro-futuristic, geometric precision, warm artisanal, playful maximalism) and execute it consistently across every component.
-- **Layout**: Use bento/asymmetric grids with varied card sizes, generous whitespace (py-24+ between sections), dramatic size contrast in typography (hero text-7xl+, body text-lg+), full-width/contained section alternation for visual rhythm.
-- **Typography**: Choose distinctive, characterful Google Fonts — NEVER use Inter, Roboto, Open Sans, or Lato. Pair a bold display font with a refined body font (e.g., Space Grotesk + DM Sans, Playfair Display + Source Sans 3, Bricolage Grotesque + Outfit). Use aggressive weight contrast (headings font-black, body font-normal).
-- **Color & Theme**: Always light theme but NOT plain white — use warm off-whites, cool grays, or tinted backgrounds. One dominant accent color used sparingly for maximum impact. NEVER use clichéd purple gradients or generic teal/coral combos. Each project needs a unique, context-inspired palette.
-- **Visual Depth**: Layered shadows, glassmorphism (backdrop-blur-xl), generous rounded corners (rounded-2xl/3xl), subtle borders (border-black/5), decorative gradient blobs, geometric patterns, and dark section inversions for contrast.
-- **Motion**: Framer Motion with staggered fade-up reveals on scroll, hover scale+shadow on cards, one signature "wow" animation per page. Keep animations subtle and fast (0.4-0.6s).
-- **Anti-patterns to AVOID**: centered hero + subtitle + button above three equal cards (the #1 generic AI layout), uniform grids, small timid typography, flat designs with no depth, default Tailwind gray everywhere.
-- No two designs should look the same — vary aesthetics, fonts, colors, and layout patterns across projects.
+- **Designer Persona**: Before planning, adopt a specific design aesthetic persona for this project — don't just pick abstract words. Think: "Swiss typographic poster for a fintech app", "Dieter Rams minimalism for a productivity tool", "Japanese editorial design for a restaurant", "Studio Ghibli warmth for a children's app". Channel a real design sensibility, not a generic style keyword.
+- Commit to a strong conceptual direction (editorial magazine, luxury minimalism, neo-brutalism, soft organic, retro-futuristic, geometric precision, warm artisanal, playful maximalism, Swiss typographic, Japanese minimal, dopamine maximalist, dark editorial) and execute it consistently across every component.
+- **Layout**: Use bento/asymmetric grids with varied card sizes, generous whitespace (py-24+ between sections), dramatic size contrast in typography (hero text-7xl+, body text-lg+), full-width/contained section alternation for visual rhythm. For editorial layouts: mixed column widths, pull quotes, oversized drop caps, article-style flowing text, masonry-like image placement.
+- **Typography**: Choose distinctive, characterful Google Fonts — NEVER use Inter, Roboto, Open Sans, or Lato. Pair a bold display font with a refined body font (e.g., Clash Display + Satoshi, Space Grotesk + DM Sans, Playfair Display + Source Sans 3, Instrument Serif + Instrument Sans, Bricolage Grotesque + Outfit, Cabinet Grotesk + Switzer). Use aggressive weight contrast (headings font-black, body font-normal). Consider kinetic typography — headlines that animate weight on scroll via variable font axes, letter-spacing that expands on hover, or character-by-character reveal animations.
+- **Color & Theme**: Default to light theme but NOT plain white — use warm off-whites, cool grays, or tinted backgrounds. Dark mode/dark-first is allowed when contextually appropriate (dashboards, creative tools, media apps, developer tools). One dominant accent color used sparingly for maximum impact. NEVER use bg-indigo-500, bg-violet-500, bg-purple-600 as primary colors (these are the #1 Tailwind AI defaults). NEVER use clichéd purple gradients or generic teal/coral combos. Use industry-aware palettes: finance → navy/emerald/charcoal, health → sage/terracotta/cream, food → warm orange/burgundy/ivory, education → forest green/gold/ivory, creative → bold primaries/black/white, luxury → black/gold/deep jewel tones. Each project needs a unique, context-inspired palette.
+- **Visual Depth**: Layered shadows, glassmorphism (backdrop-blur-xl), generous rounded corners (rounded-2xl/3xl), subtle borders (border-black/5), decorative gradient blobs (including radial gradients via bg-radial-* and conic gradients via bg-conic-*), geometric patterns, and dark section inversions for contrast. Add texture and materiality — CSS noise/grain overlays, halftone effects, paper textures, and subtle background patterns to combat the flat, sterile AI look.
+- **Motion**: Framer Motion with staggered fade-up reveals on scroll, hover scale+shadow on cards, one signature "wow" animation per page. Keep animations subtle and fast (0.4-0.6s). Use CSS scroll-driven animations (animation-timeline: scroll()) for performant scroll effects. Use View Transitions API for smooth page transitions. Consider kinetic type (variable font weight/width shifting on scroll).
+- **Anti-patterns to AVOID**: centered hero + subtitle + button above three equal cards (the #1 generic AI layout), uniform grids, small timid typography, flat designs with no depth, default Tailwind gray everywhere, bg-indigo-500/bg-violet-500 as primary colors, any purple-to-blue gradient hero.
+- **Forced Variety**: No two designs should look the same — vary aesthetics, fonts, colors, and layout patterns across projects. For each project, adopt at least one distinctive constraint: a serif heading font, a single-column hero, a dark hero section, a full-bleed image section, an asymmetric grid, or a bold typographic hero with no images.
 `
 
 const structureCommonRules = `1. Generate an app name and URL-safe slug from the user's prompt.
-2. Generate a sophisticated, harmonious color scheme with primary, secondary, accent, background, surface, and text colors (hex values). Avoid generic or flat colors — use refined, modern palettes unique to this project's context. IMPORTANT: The background color MUST be light (white or near-white). The text color MUST be dark. Do NOT generate dark backgrounds.
-3. Choose distinctive, characterful typography pairing (heading_font and body_font from Google Fonts). NEVER default to generic fonts like Inter, Roboto, or Arial. Use distinctive display fonts paired with refined body fonts. Vary font choices — do NOT reuse the same fonts across different projects. Prefer variable fonts that support multiple weights natively: Plus Jakarta Sans, DM Sans, Outfit, Sora, Manrope, Space Grotesk, Geist, Bricolage Grotesque, Instrument Sans, Playfair Display, Crimson Pro, Fraunces, Libre Baskerville, Archivo, General Sans. Avoid non-variable single-weight fonts (Bebas Neue, Lobster, Pacifico, Permanent Marker, Alfa Slab One, etc.) — they cause build errors when Next.js expects a weight range.
+2. Generate a sophisticated, harmonious color scheme with primary, secondary, accent, background, surface, and text colors (hex values). Use industry-aware palettes: finance → navy/emerald/charcoal, health → sage/terracotta/cream, food → warm orange/burgundy/ivory, education → forest green/gold/ivory, creative → bold primaries/black/white, luxury → black/gold/deep jewel tones. Avoid generic or flat colors. NEVER use bg-indigo-500, bg-violet-500, or bg-purple-600 as the primary color — these are the Tailwind defaults that make every AI app look the same. By default: background MUST be light (white or near-white), text MUST be dark. EXCEPTION: dark backgrounds are allowed when contextually appropriate (dashboards, creative tools, media apps, developer tools, night-mode apps) — in that case background should be a rich dark color (slate-950, zinc-950, neutral-900) and text should be light.
+3. Choose distinctive, characterful typography pairing (heading_font and body_font from Google Fonts). NEVER default to generic fonts like Inter, Roboto, or Arial. Use distinctive display fonts paired with refined body fonts. Vary font choices — do NOT reuse the same fonts across different projects. Prefer variable fonts that support multiple weights natively: Plus Jakarta Sans, DM Sans, Outfit, Sora, Manrope, Space Grotesk, Geist, Bricolage Grotesque, Instrument Sans, Playfair Display, Crimson Pro, Fraunces, Libre Baskerville, Archivo, General Sans, Instrument Serif, Cabinet Grotesk, Switzer. Avoid non-variable single-weight fonts (Bebas Neue, Lobster, Pacifico, Permanent Marker, Alfa Slab One, etc.) — they cause build errors when Next.js expects a weight range.
 4. Plan the files needed for the project. Each file has a path, type, and description.
 5. DO NOT include package.json, tsconfig.json, postcss.config.mjs, next.config.mjs, lib/db.ts, lib/schema.ts, lib/utils.ts, components/ui/button.tsx, components/ui/card.tsx, components/ui/input.tsx, components/ui/badge.tsx, or components/ui/skeleton.tsx — these are template-managed and injected automatically.
 6. Use Next.js App Router structure (app/ directory for pages).
@@ -101,6 +102,7 @@ You are designing a MOBILE APPLICATION, not a mobile website. Every design decis
 - Settings/Profile: accessible from tab bar or header icon
 - Search: prominent search with filters and recent searches when relevant
 - Empty states: friendly illustrations/icons with action prompts (not blank screens)
+- **Predictive UI**: Anticipate what users do next — show contextual actions, smart defaults, and recently-used items. Reduce taps by surfacing the most likely next action prominently.
 
 **Navigation**:
 - Bottom tab bar (3-5 tabs) is the PRIMARY navigation — plan a components/tab-bar.tsx or components/bottom-nav.tsx component
@@ -109,22 +111,24 @@ You are designing a MOBILE APPLICATION, not a mobile website. Every design decis
 - No footer — the bottom tab bar replaces it
 
 **Visual Design for Mobile Apps (CRITICAL — polished, not generic)**:
-Study how the best mobile apps look (Revolut, Linear, Notion, Airbnb, Arc). Apply these principles:
+Study how the best mobile apps look in 2026 (Revolut, Linear, Notion, Airbnb, Arc, Apple Health, Stripe Dashboard). Apply these principles:
 - Clean, content-focused layouts — no visual clutter, generous whitespace
 - Card-based content with consistent corner radius (rounded-2xl), subtle shadow-sm, on a tinted page background (NOT pure white — use warm off-whites like #FAFAF8 or cool grays like #F5F7FA)
 - Surface hierarchy: tinted page background → white card surfaces → accent interactive elements. Three clear visual layers.
+- **Liquid Glass (iOS 26 trend)**: For tab bars, toolbars, and headers, consider translucent glass-like surfaces (bg-white/60 backdrop-blur-2xl backdrop-saturate-150 border border-white/20) that let content show through with a frosted effect. Tab bars can dynamically shrink on scroll and expand on scroll-back.
 - Touch-optimized: all interactive targets 44px+ minimum, comfortable spacing
 - Status bar and safe area awareness
 - Bottom tab bar spacing (pb-20 on main content area)
-- Typography: choose distinctive Google Fonts (Plus Jakarta Sans, DM Sans, Outfit, Sora, Manrope — NEVER Inter, Roboto, Open Sans). Body 14-16px, screen titles text-xl/text-2xl font-bold.
-- ONE bold accent color that fits the app's context (finance → deep blue/emerald, health → warm green, social → vibrant but not neon). NEVER generic purple/lavender. Use accent sparingly for primary actions and active states only.
+- Typography: choose distinctive Google Fonts (Plus Jakarta Sans, DM Sans, Outfit, Sora, Manrope, Satoshi, Cabinet Grotesk — NEVER Inter, Roboto, Open Sans). Body 14-16px, screen titles text-xl/text-2xl font-bold.
+- ONE bold accent color that fits the app's context — use industry-aware palettes: finance → deep blue/emerald/charcoal, health → sage green/terracotta/cream, food → warm orange/burgundy, social → vibrant but not neon, productivity → slate/indigo. NEVER generic purple/lavender or bg-indigo-500. Use accent sparingly for primary actions and active states only.
 - Buttons: SOLID fill with accent color, NO gradients, h-12, rounded-xl, font-semibold. NEVER pastel/washed-out gradients.
 - Forms: sentence case labels (text-sm font-medium text-gray-700), inputs with h-12 rounded-xl border-gray-200, focus ring in accent color. NEVER ALL-CAPS labels, NEVER asterisks for required fields.
 - Borders: subtle and purposeful (border-gray-100 or border-black/5). NEVER dashed borders on upload areas — use solid borders with tinted fill.
 - Depth: subtle shadows on cards, elevated bottom sheet with shadow-2xl, glass-effect header (bg-white/80 backdrop-blur-lg).
+- **Motion**: Spring-based physics animations (framer-motion spring presets) for transitions, shared element transitions between list→detail screens, active:scale-[0.98] on all tappable elements. Prefer CSS @starting-style for enter/exit transitions on modals and sheets.
 
 **Mobile Anti-Patterns — NEVER produce these**:
-- Purple/lavender gradient buttons (the #1 AI-generated UI giveaway)
+- Purple/lavender gradient buttons or bg-indigo-500/bg-violet-500 primary colors (the #1 AI-generated UI giveaway)
 - Dashed border upload zones or containers
 - ALL-CAPS form labels
 - Numbered circles connected by lines for step indicators (use progress bars or pill segments)
@@ -132,6 +136,7 @@ Study how the best mobile apps look (Revolut, Linear, Notion, Airbnb, Arc). Appl
 - Browser-default form controls (unstyled select, checkbox, radio)
 - Tiny cramped buttons (h-8, px-3, text-xs)
 - Pure white (#FFFFFF) page backgrounds with no surface contrast
+- Generic color schemes — every app must have an industry-appropriate, context-inspired palette
 
 **Canvas & Browser API Compatibility (CRITICAL for game/interactive apps)**:
 - NEVER use CanvasRenderingContext2D.roundRect() — not supported in all environments. Use arc() + lineTo() or manual bezier curves for rounded rectangles.
