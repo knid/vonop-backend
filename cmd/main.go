@@ -1177,6 +1177,16 @@ func main() {
 			r.Get("/apps/{appId}/logo", httpViews.GetAppLogo)
 			r.Get("/apps/{appId}/assets/{assetId}/file", httpViews.GetAssetFile)
 
+			// Public template marketplace (no auth)
+			r.Route("/templates", func(r chi.Router) {
+				r.Get("/", httpViews.ListPublishedTemplates)
+				r.Get("/{slug}", httpViews.GetPublishedTemplate)
+			})
+
+			// Template copy (requires auth + subscription)
+			r.With(appMiddleware.RequireAuth(controller), appMiddleware.RequireSubscription("active", "trial", "free")).
+				Post("/templates/{slug}/copy", httpViews.CopyTemplate)
+
 			r.Route("/apps", func(r chi.Router) {
 				r.Use(appMiddleware.RequireAuth(controller))
 				r.Use(appMiddleware.RequireSubscription("active", "trial", "free"))
@@ -1441,6 +1451,21 @@ func main() {
 
 			// Fix 15: Stripe webhook for per-store accounts (outside storeId route)
 			r.Post("/storefront/webhooks/stripe", httpViews.StorefrontStripeWebhook)
+
+			// Admin template management
+			r.Route("/admin/templates", func(r chi.Router) {
+				r.Use(appMiddleware.RequireAuth(controller))
+				r.Use(appMiddleware.RequireAdmin())
+				r.Post("/", httpViews.CreateAdminTemplate)
+				r.Get("/", httpViews.ListAdminTemplates)
+				r.Route("/{id}", func(r chi.Router) {
+					r.Get("/", httpViews.GetAdminTemplate)
+					r.Put("/", httpViews.UpdateAdminTemplate)
+					r.Delete("/", httpViews.DeleteAdminTemplate)
+					r.Put("/publish", httpViews.PublishAdminTemplate)
+					r.Put("/sort", httpViews.SortAdminTemplate)
+				})
+			})
 
 			// Public integration providers
 			r.Get("/integrations/providers", httpViews.GetV2IntegrationProviders)
