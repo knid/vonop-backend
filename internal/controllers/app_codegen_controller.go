@@ -2074,9 +2074,9 @@ func augmentPackageJSON(baseTemplate string, files map[string]string) string {
 
 	// Scan all files for import statements
 	// Non-scoped packages: import ... from 'package-name' or 'package-name/subpath'
-	importRegex := regexp.MustCompile(`(?m)^import\s+.*\s+from\s+['"]([^'"@./][^'"]*?)(?:/[^'"]*)?['"]`)
+	importRegex := regexp.MustCompile(`(?m)^import\s+.*\s+from\s+['"]([^'"@./\n][^'"\n]*?)(?:/[^'"\n]*)?['"]`)
 	// Scoped packages: import ... from '@scope/package' or '@scope/package/subpath'
-	scopedImportRegex := regexp.MustCompile(`(?m)^import\s+.*\s+from\s+['"](@[^'"\/]+\/[^'"\/]+)`)
+	scopedImportRegex := regexp.MustCompile(`(?m)^import\s+.*\s+from\s+['"](@[^'"\n\/]+\/[^'"\n\/]+)`)
 
 	foundPackages := make(map[string]bool)
 	for _, content := range files {

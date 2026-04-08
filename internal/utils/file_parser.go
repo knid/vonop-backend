@@ -78,7 +78,7 @@ func (p *FileStreamParser) Feed(chunk string) {
 				if len(p.buffer) > 13 {
 					safe := p.buffer[:len(p.buffer)-13]
 					p.fileContent.WriteString(safe)
-					p.buffer = p.buffer[len(p.buffer)-7:]
+					p.buffer = p.buffer[len(p.buffer)-13:]
 				}
 				// Check if accumulated content exceeds the size limit.
 				if p.fileContent.Len() > maxFileContentSize {
