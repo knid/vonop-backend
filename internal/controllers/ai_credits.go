@@ -149,6 +149,42 @@ func (c *Controller) TokensToCredits(promptTokens, completionTokens int) int {
 	return models.TokensToCreditsWithConfig(promptTokens, completionTokens, tpc, om)
 }
 
+// CreditBudget returns the maximum credits the user can spend in a single session.
+// Budget = current balance - floor (floor is negative, so this is balance + |floor|).
+// For example: balance=1, floor=-20 → budget=21.
+func (c *Controller) CreditBudget(user *models.User) (int, error) {
+	balance, err := c.GetOrCreateCreditsBalance(user)
+	if err != nil {
+		return 0, err
+	}
+	floor := c.RemoteConfig.GetInt(remoteconfig.AICreditsMinBalance, user.ID.String())
+	budget := balance.Balance - floor
+	if budget < 0 {
+		budget = 0
+	}
+	return budget, nil
+}
+
+// MakeCreditBudgetChecker returns a ShouldContinue-compatible function for
+// StreamWithTools. It checks whether the accumulated credit cost in the tracker
+// has reached the user's budget. When exhausted, it logs a warning and returns false.
+func (c *Controller) MakeCreditBudgetChecker(user *models.User, tracker *utils.TokenTracker) func() bool {
+	budget, err := c.CreditBudget(user)
+	if err != nil {
+		return nil
+	}
+	return func() bool {
+		prompt, completion, _, _ := tracker.Totals()
+		spent := c.TokensToCredits(prompt, completion)
+		if spent >= budget {
+			slog.Warn("credit budget exhausted mid-generation",
+				"user_id", user.ID, "spent", spent, "budget", budget)
+			return false
+		}
+		return true
+	}
+}
+
 // DeductAICreditsUnchecked deducts credits without checking sufficiency (balance may go negative
 // down to AICreditsMinBalance). Used for post-hoc token-based billing where the pre-check already ran.
 func (c *Controller) DeductAICreditsUnchecked(user *models.User, cost int, action string, reference string) error {
@@ -184,6 +220,55 @@ func (c *Controller) DeductAICreditsUnchecked(user *models.User, cost int, actio
 			Set("cost", cost).
 			Set("remaining_balance", newBalance).
 			Set("reference", reference))
+	}
+
+	return txErr
+}
+
+// DeductAICreditsToFloor deducts credits, clamping at the overdraft floor instead
+// of failing. Always deducts something if balance is above floor. Used as the
+// primary deduction method for generation sessions where the cost may exceed budget.
+func (c *Controller) DeductAICreditsToFloor(user *models.User, cost int, action string, reference string) error {
+	if cost <= 0 {
+		return nil
+	}
+	balance, err := c.GetOrCreateCreditsBalance(user)
+	if err != nil {
+		return err
+	}
+
+	var newBalance, deducted int
+	txErr := c.DB.RunInTx(func(tx bun.Tx) error {
+		floor := c.RemoteConfig.GetInt(remoteconfig.AICreditsMinBalance, user.ID.String())
+		var err error
+		newBalance, deducted, err = c.DB.AtomicDeductCreditsToFloor(tx, balance.ID.String(), cost, floor)
+		if err != nil {
+			return err
+		}
+		if deducted == 0 {
+			return nil
+		}
+		_, err = c.DB.CreateAICreditTransactionTx(tx, &models.AICreditTransaction{
+			UserID:    user.ID,
+			Amount:    -deducted,
+			Action:    action,
+			Reference: reference,
+		})
+		return err
+	})
+
+	if txErr == nil && deducted > 0 {
+		c.TrackUserEvent(user, "ai_credits_deducted", posthog.NewProperties().
+			Set("action", action).
+			Set("cost", cost).
+			Set("deducted", deducted).
+			Set("remaining_balance", newBalance).
+			Set("reference", reference))
+		if deducted < cost {
+			slog.Warn("partial credit deduction (clamped at floor)",
+				"user_id", user.ID, "requested", cost, "deducted", deducted,
+				"remaining", newBalance)
+		}
 	}
 
 	return txErr
