@@ -2682,17 +2682,18 @@ func runDeterministicChecks(files map[string]string) []validationError {
 			})
 		}
 
-		// Check A4: wemob-auth-client.tsx login/register must call refreshSession after API call
-		// This prevents the cookie race condition where login succeeds but client state doesn't update.
+		// Check A4: wemob-auth-client.tsx login/register must set user state directly from API response.
+		// Do NOT call refreshSession() after login — the browser may not have processed the Set-Cookie
+		// header yet, causing the session endpoint to return null and triggering a redirect loop.
+		// Instead, the login API returns the user object and the client sets state directly.
 		if clientAuth, hasClientAuth := files["lib/wemob-auth-client.tsx"]; hasClientAuth {
-			// Check that login function body contains refreshSession call
 			hasLoginFunc := strings.Contains(clientAuth, "login") && strings.Contains(clientAuth, "fetch")
-			hasRefreshInLogin := strings.Contains(clientAuth, "refreshSession")
-			if hasLoginFunc && !hasRefreshInLogin {
+			setsUserDirectly := strings.Contains(clientAuth, "setUser(data.user)") || strings.Contains(clientAuth, "setUser(data?.user)")
+			if hasLoginFunc && !setsUserDirectly {
 				errors = append(errors, validationError{
 					File:  "lib/wemob-auth-client.tsx",
-					Error: "Auth client login/register functions must call refreshSession() after a successful API call. Without this, the cookie is set but client user state won't update, causing 401 errors on subsequent requests. Pattern: if (data.success) { await refreshSession(); }",
-					Type:  "auth_missing_refresh",
+					Error: "Auth client login/register functions must set user state directly from the API response: `if (data.success && data.user) { setUser(data.user); }`. Do NOT call refreshSession() after login — the browser may not have processed the Set-Cookie header yet, causing a redirect loop.",
+					Type:  "auth_missing_direct_setuser",
 				})
 			}
 		}

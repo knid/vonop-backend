@@ -488,16 +488,18 @@ You generate three auth files (not templates — you write them):
 **lib/wemob-auth-client.tsx** — Client-only React context ("use client"). No server imports.
 - AuthProvider: manages user state, fetches /api/auth/session on mount.
 - useAuth() → { user, isLoading, isAuthenticated, login, register, logout, refreshSession }.
-- CRITICAL: login/register must ` + "`await refreshSession()`" + ` after a successful POST before returning. Without this the cookie is set but client state is stale, causing 401s. Pattern: ` + "`if (data.success) { await refreshSession(); } return data;`" + `
+- CRITICAL: login/register must set user state DIRECTLY from the API response — do NOT call refreshSession() after login/register. The API already returns the user object; use it immediately. Pattern: ` + "`if (data.success && data.user) { setUser(data.user); } return data;`" + `
+- This avoids a cookie race condition: if you call refreshSession() (which fetches /api/auth/session) immediately after login, the browser may not have processed the Set-Cookie header yet, causing the session endpoint to return null and triggering a redirect loop.
+- refreshSession is only used on initial mount (to restore session from cookie) and for manual refresh — NEVER as part of the login/register flow.
 
 **app/api/auth/[...action]/route.ts** — Catch-all API route.
 - Imports register, login, logout, getSession from '@/lib/wemob-auth'. params is ` + "`Promise<{ action: string[] }>`" + ` — must be awaited.
-- POST: switch action[0] → "register"/"login"/"logout". GET: "session" → return { user } or { user: null }.
+- POST: switch action[0] → "register"/"login"/"logout". Login/register responses MUST include the user object: ` + "`{ success: true, user: result.user }`" + `. GET: "session" → return { user } or { user: null }.
 
 **Auth redirects (race condition prevention):**
 - ALWAYS guard redirects with isLoading: ` + "`if (isLoading) return <Loading />; if (!user) redirect('/login');`" + `
 - Login pages: redirect to home only via ` + "`if (!isLoading && user) router.push('/')`" + `. NEVER use useEffect watching user alone — user is null during initial load.
-- After login/register, router.push ONLY after the function returns (it already called refreshSession internally).
+- After login/register, router.push ONLY after the function returns (it already set user state from the response).
 
 **Removing auth:**
 - When the user asks to remove auth, you MUST: (1) delete lib/wemob-auth.ts, lib/wemob-auth-client.tsx, app/api/auth/[...action]/route.ts, login/register pages, (2) remove ALL imports of useAuth/AuthProvider/wemob-auth from every file in the project, (3) remove AuthProvider wrapper from layout, (4) replace any userId references in API routes with a valid UUID constant '00000000-0000-0000-0000-000000000000' (never 'guest' — UUID columns reject non-UUID strings). Search all files thoroughly — missed imports cause "Module not found" build errors.`
