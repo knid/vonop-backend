@@ -41,6 +41,18 @@ func (r *UpdateAppTemplateRequest) Validate(validate *validator.Validate) error 
 	return utils.ValidateFunc[UpdateAppTemplateRequest](*r, validate)
 }
 
+type CreateTemplateFromAppRequest struct {
+	Name         string   `json:"name" validate:"required,min=2,max=100" errormgs:"must be between 2 and 100 characters"`
+	Slug         string   `json:"slug" validate:"required,min=2,max=100" errormgs:"must be between 2 and 100 characters"`
+	Description  string   `json:"description" validate:"omitempty,max=2000" errormgs:"must be at most 2000 characters"`
+	Tags         []string `json:"tags"`
+	TemplateType string   `json:"template_type" validate:"omitempty,oneof=web mobile both" errormgs:"must be 'web', 'mobile', or 'both'"`
+}
+
+func (r *CreateTemplateFromAppRequest) Validate(validate *validator.Validate) error {
+	return utils.ValidateFunc[CreateTemplateFromAppRequest](*r, validate)
+}
+
 type PublishAppTemplateRequest struct {
 	Published bool `json:"published"`
 }

@@ -95,6 +95,31 @@ func (v *HttpViews) CreateAdminTemplate(w http.ResponseWriter, r *http.Request) 
 	utils.JSONResponse(w, resp, http.StatusCreated)
 }
 
+// POST /v2/admin/templates/from-app/{appId}
+func (v *HttpViews) CreateTemplateFromApp(w http.ResponseWriter, r *http.Request) {
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	appID := chi.URLParam(r, "appId")
+	var req requests.CreateTemplateFromAppRequest
+	if err := utils.ParseJSONBody(r, &req); err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	template, err := v.Controller.CreateTemplateFromApp(user, appID, req)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	resp := controllers.ToTemplateDetailResponse(template)
+	utils.JSONResponse(w, resp, http.StatusCreated)
+}
+
 // GET /v2/admin/templates
 func (v *HttpViews) ListAdminTemplates(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)

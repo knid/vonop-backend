@@ -283,6 +283,67 @@ func (c *Controller) CopyTemplate(user *models.User, slug string) (*models.AppPr
 	return project, nil
 }
 
+func (c *Controller) CreateTemplateFromApp(user *models.User, appID string, req requests.CreateTemplateFromAppRequest) (*models.AppTemplate, error) {
+	if user.Type != "admin" {
+		return nil, errors.New("admin access required")
+	}
+
+	validate := validator.New()
+	if err := req.Validate(validate); err != nil {
+		return nil, err
+	}
+
+	project, err := c.DB.GetAppProjectByID(appID)
+	if err != nil {
+		return nil, fmt.Errorf("app not found")
+	}
+
+	tags := req.Tags
+	if tags == nil {
+		tags = []string{}
+	}
+
+	templateType := req.TemplateType
+	if templateType == "" {
+		templateType = "web"
+	}
+
+	template := &models.AppTemplate{
+		Name:         req.Name,
+		Slug:         req.Slug,
+		Description:  req.Description,
+		Tags:         tags,
+		TemplateType: templateType,
+		ProjectType:  project.ProjectType,
+		Prompt:       project.Prompt,
+		Theme:        project.Theme,
+		DataModels:   project.DataModels,
+		Settings:     project.Settings,
+		Published:    false,
+		CreatedByID:  user.ID,
+	}
+
+	template, err = c.DB.CreateAppTemplate(template)
+	if err != nil {
+		slog.Error("Failed to create template from app", "error", err)
+		return nil, fmt.Errorf("failed to create template")
+	}
+
+	// Clone the app's git repo into the template
+	if _, cloneErr := c.GitRepoService.Clone(project.ID.String(), template.ID.String()); cloneErr != nil {
+		slog.Error("Failed to clone app repo for template", "error", cloneErr,
+			"app_id", project.ID, "template_id", template.ID)
+		return nil, fmt.Errorf("failed to copy app files to template")
+	}
+
+	template.SourceRepoID = template.ID.String()
+	if _, updateErr := c.DB.UpdateAppTemplate(template); updateErr != nil {
+		slog.Error("Failed to persist SourceRepoID on template", "error", updateErr, "template_id", template.ID)
+	}
+
+	return template, nil
+}
+
 // ToTemplateResponse converts an AppTemplate to a list response item.
 func ToTemplateResponse(t *models.AppTemplate) responses.AppTemplateResponse {
 	tags := t.Tags

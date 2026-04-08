@@ -1457,6 +1457,7 @@ func main() {
 				r.Use(appMiddleware.RequireAuth(controller))
 				r.Use(appMiddleware.RequireAdmin())
 				r.Post("/", httpViews.CreateAdminTemplate)
+				r.Post("/from-app/{appId}", httpViews.CreateTemplateFromApp)
 				r.Get("/", httpViews.ListAdminTemplates)
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", httpViews.GetAdminTemplate)
