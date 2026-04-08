@@ -42,3 +42,8 @@ func (db *Database) DeleteProject(project *models.Project) error {
 
 	return err
 }
+
+func (db *Database) CountProjectsByUserID(userID string) (int, error) {
+	count, err := db.DB.NewSelect().Model((*models.Project)(nil)).Where("user_id = ?", userID).Count(context.Background())
+	return count, err
+}

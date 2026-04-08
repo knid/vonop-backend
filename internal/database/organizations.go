@@ -144,3 +144,11 @@ func (db *Database) GetOrganizationMemberCount(orgID string) (int, error) {
 		Count(context.Background())
 	return count, err
 }
+
+func (db *Database) CountOrganizationsByUserID(userID string) (int, error) {
+	count, err := db.DB.NewSelect().
+		Model((*models.OrganizationMember)(nil)).
+		Where("user_id = ?", userID).
+		Count(context.Background())
+	return count, err
+}
