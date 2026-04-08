@@ -144,6 +144,14 @@ const builderFrameworkRulesBase = `
 - ALWAYS use the Image component from 'next/image' instead of raw <img> tags. Every Image must have width and height props (or fill with a sized parent). Use loading="lazy" for below-the-fold images.
 - CRITICAL: Any component that calls useSearchParams() MUST be wrapped in a <Suspense> boundary — Next.js requires this for static rendering.
 
+### Runtime Performance (CRITICAL)
+- UI interactions (button clicks, tab switches, modal opens, form inputs, toggles, accordions, sorting, filtering, theme switches) MUST be instant — handle them with client-side state (useState/useReducer) inside "use client" components. NEVER use Server Actions or router.push/router.replace for pure UI state changes.
+- NEVER use Server Actions for read operations or UI interactions. Server Actions are ONLY for data mutations that write to a database (creating, updating, deleting records). Toggling a sidebar, switching tabs, opening a modal, filtering a list, or sorting a table must ALL be client-side state.
+- Prefer client-side navigation with next/link (prefetches automatically) over programmatic router.push().
+- For interactive pages (dashboards, admin panels, forms with multiple steps), make the page.tsx a thin Server Component that fetches initial data and passes it as props to a "use client" component that handles ALL interactivity.
+- Use SWR or React Query for client-side data fetching with caching — avoid full page reloads to refresh data. Use mutate/invalidate for optimistic updates after mutations.
+- Minimize the number of separate API calls per page — colocate related data fetches into single API routes that return everything a page needs.
+
 ### Loading & Error States
 - Data-fetching pages MUST show loading indicators. Never show blank/empty content while data loads.
 - For pages with database queries: add a loading.tsx sibling file that shows skeleton placeholders matching the page layout.
