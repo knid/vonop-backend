@@ -307,13 +307,13 @@ var fontConstructorPattern = regexp.MustCompile(`(?:const|let|var)\s+\w+\s*=\s*\
 var namedImportRegex = regexp.MustCompile(`import\s+\{[^}]+\}\s+from\s+['"]@/([^'"]+)['"]`)
 var defaultImportRegex = regexp.MustCompile(`import\s+([A-Z]\w*)\s+from\s+['"]@/([^'"]+)['"]`)
 var exportDefaultPattern = regexp.MustCompile(`(?m)^export\s+default\s+`)
-var namedExportPattern = regexp.MustCompile(`(?m)^export\s+(function|const|class|type|interface|enum)\s+`)
-var namedExportIdentRegex = regexp.MustCompile(`(?m)^export\s+(?:function|const|class|type|interface|enum)\s+(\w+)`)
+var namedExportPattern = regexp.MustCompile(`(?m)^export\s+(?:async\s+)?(function|const|class|type|interface|enum)\s+`)
+var namedExportIdentRegex = regexp.MustCompile(`(?m)^export\s+(?:async\s+)?(?:function|const|class|type|interface|enum)\s+(\w+)`)
 var singleNamedImportRegex = regexp.MustCompile(`import\s+\{\s*(\w+)\s*\}\s+from\s+['"]@/([^'"]+)['"]`)
 
 // namedValueExportPattern matches only runtime named exports (excludes type/interface)
-var namedValueExportPattern = regexp.MustCompile(`(?m)^export\s+(function|const|class|enum)\s+`)
-var namedValueExportIdentRegex = regexp.MustCompile(`(?m)^export\s+(?:function|const|class|enum)\s+(\w+)`)
+var namedValueExportPattern = regexp.MustCompile(`(?m)^export\s+(?:async\s+)?(function|const|class|enum)\s+`)
+var namedValueExportIdentRegex = regexp.MustCompile(`(?m)^export\s+(?:async\s+)?(?:function|const|class|enum)\s+(\w+)`)
 
 // exportDefaultFuncNameRegex extracts function name from "export default function Foo"
 var exportDefaultFuncNameRegex = regexp.MustCompile(`(?m)^export\s+default\s+function\s+(\w+)`)
@@ -322,7 +322,9 @@ var exportDefaultFuncNameRegex = regexp.MustCompile(`(?m)^export\s+default\s+fun
 var multiNamedImportRegex = regexp.MustCompile(`import\s+\{\s*(\w+(?:\s*,\s*\w+)+)\s*\}\s+from\s+['"]@/([^'"]+)['"]`)
 
 // jsxTagPattern detects JSX syntax in .ts files that should be .tsx.
-var jsxTagPattern = regexp.MustCompile(`<[A-Za-z][A-Za-z0-9.]*(?:\s|>|/)`)
+// The (?:^|[^a-zA-Z0-9_]) prefix prevents false positives on TypeScript generics
+// like Promise<AuthResult> or Array<string> where < is preceded by a word character.
+var jsxTagPattern = regexp.MustCompile(`(?:^|[^a-zA-Z0-9_])<[A-Za-z][A-Za-z0-9.]*(?:\s|>|/)`)
 
 // metadataExportPattern matches "export const metadata" in layout/page files.
 var metadataExportPattern = regexp.MustCompile(`(?m)^export\s+const\s+metadata\b`)
@@ -3179,11 +3181,6 @@ func autoFixTSFilesWithJSX(files map[string]string) (int, []string) {
 			continue
 		}
 		if isTemplateFile(filePath) || isConfigFile(filePath) {
-			continue
-		}
-		// Skip server-only auth library — it contains TypeScript generics
-		// (e.g. Promise<AuthResult>) that false-positive as JSX.
-		if filePath == "lib/wemob-auth.ts" {
 			continue
 		}
 		// Check for JSX syntax: <Component, <div, etc.

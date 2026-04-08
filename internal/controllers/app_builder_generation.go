@@ -478,14 +478,11 @@ func (c *Controller) streamSingleShotGeneration(
 	// 8. Generate any missing planned files (token limit may have cut generation short)
 	if structure != nil && ctx.Err() == nil {
 		c.generateMissingPlannedFiles(ctx, structure, project, model, provider, repo, fileMap, sendEvent, &ops, mobileConfig, message)
+		// Run auto-fixes on newly generated files
+		c.runDeterministicAutoFixes(project, repo, fileMap, sendEvent, &ops, &filesChanged)
 	}
 
-	// 9. Validation fix pass — run deterministic checks and fix detected errors via LLM
-	if ctx.Err() == nil && len(ops) > 0 {
-		c.runValidationFixPass(ctx, project, user, provider, repo, fileMap, sendEvent, &ops, mobileConfig)
-	}
-
-	// 10. Auto-detect WemobBridge usage and configure mobile app
+	// 9. Auto-detect WemobBridge usage and configure mobile app
 	c.autoDetectMobileBridgeConfig(project, fileMap, sendEvent)
 
 	// Wait for logo generation to finish (no-op if already done)
