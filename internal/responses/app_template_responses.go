@@ -31,6 +31,7 @@ type AppTemplateDetailResponse struct {
 	PreviewImageKey string         `json:"preview_image_key"`
 	PreviewURL      string         `json:"preview_url"`
 	Theme           map[string]any `json:"theme"`
+	DataModels      []any          `json:"data_models"`
 	Settings        map[string]any `json:"settings"`
 	ProjectType     string         `json:"project_type"`
 	Prompt          string         `json:"prompt"`

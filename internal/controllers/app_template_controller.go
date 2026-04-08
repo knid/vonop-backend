@@ -72,7 +72,9 @@ func (c *Controller) CreateAppTemplate(user *models.User, req requests.CreateApp
 		slog.Error("Failed to initialize git repo for template", "error", initErr, "template_id", template.ID)
 	} else {
 		template.SourceRepoID = template.ID.String()
-		c.DB.UpdateAppTemplate(template)
+		if _, updateErr := c.DB.UpdateAppTemplate(template); updateErr != nil {
+			slog.Error("Failed to persist SourceRepoID on template", "error", updateErr, "template_id", template.ID)
+		}
 	}
 
 	return template, nil
@@ -313,6 +315,13 @@ func ToTemplateDetailResponse(t *models.AppTemplate) responses.AppTemplateDetail
 	if len(t.Theme) > 0 {
 		json.Unmarshal(t.Theme, &theme)
 	}
+	var dataModels []any
+	if len(t.DataModels) > 0 {
+		json.Unmarshal(t.DataModels, &dataModels)
+	}
+	if dataModels == nil {
+		dataModels = []any{}
+	}
 	settings := t.Settings
 	if settings == nil {
 		settings = map[string]any{}
@@ -327,6 +336,7 @@ func ToTemplateDetailResponse(t *models.AppTemplate) responses.AppTemplateDetail
 		PreviewImageKey: t.PreviewImageKey,
 		PreviewURL:      t.PreviewURL,
 		Theme:           theme,
+		DataModels:      dataModels,
 		Settings:        settings,
 		ProjectType:     t.ProjectType,
 		Prompt:          t.Prompt,

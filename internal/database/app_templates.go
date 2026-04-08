@@ -2,9 +2,10 @@ package database
 
 import (
 	"context"
+	"encoding/json"
+	"time"
 
 	"github.com/knid/wemob/internal/models"
-	"github.com/uptrace/bun"
 )
 
 func (db *Database) CreateAppTemplate(t *models.AppTemplate) (*models.AppTemplate, error) {
@@ -25,6 +26,7 @@ func (db *Database) GetAppTemplateBySlug(slug string) (*models.AppTemplate, erro
 }
 
 func (db *Database) UpdateAppTemplate(t *models.AppTemplate) (*models.AppTemplate, error) {
+	t.UpdatedAt = time.Now()
 	_, err := db.DB.NewUpdate().Model(t).Where("id = ?", t.ID).Exec(context.Background())
 	return t, err
 }
@@ -41,7 +43,8 @@ func (db *Database) ListPublishedTemplates(tag, templateType string) ([]models.A
 	q := db.DB.NewSelect().Model(&templates).
 		Where("published = ?", true)
 	if tag != "" {
-		q = q.Where("tags @> ?", bun.Safe("'[\""+tag+"\"]'"))
+		encoded, _ := json.Marshal([]string{tag})
+		q = q.Where("tags @> ?::jsonb", string(encoded))
 	}
 	if templateType != "" {
 		q = q.Where("template_type = ?", templateType)
