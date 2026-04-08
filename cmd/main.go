@@ -300,7 +300,7 @@ func createSchema(db *bun.DB) error {
 	// and block all reads on the affected tables.
 	var migrationsDone bool
 	row := db.QueryRowContext(context.Background(),
-		"SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='referrals' AND column_name='subscription_reward_granted')")
+		"SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='app_projects' AND column_name='template_id')")
 	if err := row.Scan(&migrationsDone); err != nil {
 		migrationsDone = false
 	}
