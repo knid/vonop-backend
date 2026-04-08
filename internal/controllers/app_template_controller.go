@@ -203,6 +203,84 @@ func (c *Controller) GetPublishedTemplate(slug string) (*models.AppTemplate, err
 	return template, nil
 }
 
+func (c *Controller) CopyTemplate(user *models.User, slug string) (*models.AppProject, error) {
+	template, err := c.DB.GetAppTemplateBySlug(slug)
+	if err != nil || !template.Published {
+		return nil, fmt.Errorf("template not found")
+	}
+
+	// Enforce app project limit (same logic as CreateAppProject)
+	isMobile := template.ProjectType == "mobile_app"
+	limits, limErr := c.GetUserLimits(user)
+	if limErr != nil {
+		slog.Warn("CopyTemplate: failed to get user limits", "error", limErr, "user_id", user.ID)
+	} else {
+		var maxApps int
+		var countFilter string
+		if isMobile {
+			maxApps = limits.MaxMobileApps
+			countFilter = "mobile_app"
+		} else {
+			maxApps = limits.MaxWebApps
+			countFilter = ""
+		}
+
+		if maxApps == 0 {
+			if isMobile {
+				return nil, fmt.Errorf("mobile app creation is not available on your plan")
+			}
+			return nil, fmt.Errorf("web app creation is not available on your plan")
+		}
+
+		appCount, countErr := c.DB.CountAppProjectsByUserIDAndType(user.ID.String(), countFilter)
+		if countErr != nil {
+			slog.Warn("CopyTemplate: failed to count projects", "error", countErr, "user_id", user.ID)
+		} else if appCount >= maxApps {
+			if isMobile {
+				return nil, fmt.Errorf("you have reached your mobile app limit (%d)", maxApps)
+			}
+			return nil, fmt.Errorf("you have reached your web app limit (%d)", maxApps)
+		}
+	}
+
+	projectSlug := generateAppSlug(template.Name)
+
+	project := &models.AppProject{
+		UserID:      user.ID,
+		Name:        template.Name,
+		Slug:        projectSlug,
+		Prompt:      template.Prompt,
+		ProjectType: template.ProjectType,
+		Theme:       template.Theme,
+		DataModels:  template.DataModels,
+		Settings:    template.Settings,
+		Status:      "ready",
+		TemplateID:  &template.ID,
+	}
+
+	project, err = c.DB.CreateAppProject(project)
+	if err != nil {
+		slog.Error("Failed to create project from template", "error", err)
+		return nil, fmt.Errorf("failed to create project")
+	}
+
+	// Clone template git repo into new project
+	if template.SourceRepoID != "" {
+		if _, cloneErr := c.GitRepoService.Clone(template.SourceRepoID, project.ID.String()); cloneErr != nil {
+			slog.Error("Failed to clone template git repo", "error", cloneErr,
+				"template_id", template.ID, "project_id", project.ID)
+			return nil, fmt.Errorf("failed to copy template files")
+		}
+	} else {
+		// Initialize empty repo if template has no source
+		if _, initErr := c.GitRepoService.Init(project.ID.String()); initErr != nil {
+			slog.Error("Failed to init git repo for template copy", "error", initErr, "project_id", project.ID)
+		}
+	}
+
+	return project, nil
+}
+
 // ToTemplateResponse converts an AppTemplate to a list response item.
 func ToTemplateResponse(t *models.AppTemplate) responses.AppTemplateResponse {
 	tags := t.Tags
