@@ -233,9 +233,7 @@ func (c *Controller) StreamBuildApp(
 	shouldContinueCredits := func() bool {
 		if creditChecker != nil && !creditChecker() {
 			creditExhausted = true
-			sendEvent("credits_exhausted", map[string]any{
-				"message": "AI credits exhausted. Generation stopped.",
-			})
+			sendError("credits", "AI credits exhausted. Generation stopped.")
 			return false
 		}
 		return true

@@ -361,8 +361,9 @@ func (c *Controller) streamSingleShotGeneration(
 		if budgetErr == nil && spent >= budget {
 			slog.Warn("credit budget exhausted before single-shot generation",
 				"user_id", user.ID, "spent", spent, "budget", budget)
-			sendEvent("credits_exhausted", map[string]any{
-				"message": "AI credits exhausted. Generation stopped.",
+			sendEvent("error", responses.GenerationErrorEvent{
+				Error: "AI credits exhausted. Generation stopped.",
+				Phase: "credits",
 			})
 			return "", nil, fmt.Errorf("AI credits exhausted")
 		}
@@ -736,8 +737,9 @@ func (c *Controller) streamEcommerceGeneration(
 		if budgetErr == nil && spent >= budget {
 			slog.Warn("credit budget exhausted before ecommerce Phase 2",
 				"user_id", user.ID, "spent", spent, "budget", budget)
-			sendEvent("credits_exhausted", map[string]any{
-				"message": "AI credits exhausted. Generation stopped.",
+			sendEvent("error", responses.GenerationErrorEvent{
+				Error: "AI credits exhausted. Generation stopped.",
+				Phase: "credits",
 			})
 			return "", ops, fmt.Errorf("AI credits exhausted")
 		}
