@@ -25,6 +25,11 @@ func (v *HttpViews) ListPublishedTemplates(w http.ResponseWriter, r *http.Reques
 	items := make([]any, len(templates))
 	for i := range templates {
 		resp := controllers.ToTemplateResponse(&templates[i])
+		if templates[i].PreviewImageKey != "" {
+			if presigned, err := v.Controller.AssetsStorage.GetObject(r.Context(), templates[i].PreviewImageKey, 3600); err == nil {
+				resp.PreviewImageKey = presigned.URL
+			}
+		}
 		items[i] = resp
 	}
 
@@ -42,6 +47,11 @@ func (v *HttpViews) GetPublishedTemplate(w http.ResponseWriter, r *http.Request)
 	}
 
 	resp := controllers.ToTemplateDetailResponse(template)
+	if template.PreviewImageKey != "" {
+		if presigned, err := v.Controller.AssetsStorage.GetObject(r.Context(), template.PreviewImageKey, 3600); err == nil {
+			resp.PreviewImageKey = presigned.URL
+		}
+	}
 	utils.JSONResponse(w, resp, http.StatusOK)
 }
 
