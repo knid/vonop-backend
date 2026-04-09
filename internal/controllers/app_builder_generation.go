@@ -533,7 +533,7 @@ func (c *Controller) generateAppLogo(ctx context.Context, project *models.AppPro
 		project.Name,
 	)
 
-	cdnURL, err := fal.GenerateImage(ctx, apiKey, falModel, prompt)
+	cdnURL, err := fal.GenerateImage(ctx, apiKey, falModel, prompt, "")
 	if err != nil {
 		slog.Warn("generateAppLogo: fal generation failed", "error", err, "project_id", project.ID)
 		return ""

@@ -25,10 +25,14 @@ type generateResponse struct {
 }
 
 // GenerateImage calls fal.ai to generate an image and returns the CDN URL.
-func GenerateImage(ctx context.Context, apiKey, model, prompt string) (string, error) {
+// If imageSize is empty, defaults to "square_hd".
+func GenerateImage(ctx context.Context, apiKey, model, prompt, imageSize string) (string, error) {
+	if imageSize == "" {
+		imageSize = "square_hd"
+	}
 	body, err := json.Marshal(generateRequest{
 		Prompt:    prompt,
-		ImageSize: "square_hd",
+		ImageSize: imageSize,
 		NumImages: 1,
 	})
 	if err != nil {

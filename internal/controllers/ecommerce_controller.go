@@ -596,7 +596,7 @@ func (c *Controller) GenerateProductImages(ctx context.Context, store *models.St
 
 			prompt := buildProductImagePrompt(product.Name, product.Description)
 
-			cdnURL, err := fal.GenerateImage(ctx, apiKey, model, prompt)
+			cdnURL, err := fal.GenerateImage(ctx, apiKey, model, prompt, "")
 			if err != nil {
 				slog.Warn("ecommerce-gen: fal image generation failed",
 					"product_id", product.ID, "error", err)

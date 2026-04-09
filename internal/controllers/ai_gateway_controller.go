@@ -77,6 +77,12 @@ func (c *Controller) AuthenticateGatewayKey(rawKey string) (*models.User, string
 		return nil, "", fmt.Errorf("invalid gateway key")
 	}
 
+	// Verify the project is still active (not deleted)
+	project, err := c.DB.GetAppProjectByID(gwKey.ProjectID.String())
+	if err != nil || project == nil {
+		return nil, "", fmt.Errorf("project not found")
+	}
+
 	return gwKey.User, gwKey.ProjectID.String(), nil
 }
 

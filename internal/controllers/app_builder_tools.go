@@ -1492,7 +1492,7 @@ func (c *Controller) executeChatGenerateImage(
 		Message: "Generating image...",
 	})
 
-	cdnURL, err := fal.GenerateImage(ctx, apiKey, falModel, args.Prompt)
+	cdnURL, err := fal.GenerateImage(ctx, apiKey, falModel, args.Prompt, "")
 	if err != nil {
 		return fmt.Sprintf("Image generation failed: %s", err.Error()), nil
 	}

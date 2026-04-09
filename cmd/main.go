@@ -1235,18 +1235,18 @@ func main() {
 				r.Get("/config", httpViews.GetPublicMobileConfig)
 			})
 		})
+		// AI Gateway — separate from /v2 to avoid inheriting UserKey rate limiter
+		r.Route("/v2/gateway", func(r chi.Router) {
+			r.Use(appMiddleware.RequireGatewayKey(controller))
+			r.Use(appMiddleware.GatewayRateLimit(rateLimiter, controller))
+			r.Post("/chat/completions", httpViews.GatewayChat)
+			r.Post("/images/generate", httpViews.GatewayImage)
+			r.Get("/models", httpViews.GatewayModels)
+		})
+
 		// V2 App Builder routes
 		r.Route("/v2", func(r chi.Router) {
 			r.Use(rateLimiter.RateLimit(600, time.Minute, appMiddleware.UserKey))
-
-			// AI Gateway (per-project key auth, dynamic per-tier rate limiting)
-			r.Route("/gateway", func(r chi.Router) {
-				r.Use(appMiddleware.RequireGatewayKey(controller))
-				r.Use(appMiddleware.GatewayRateLimit(rateLimiter, controller))
-				r.Post("/chat/completions", httpViews.GatewayChat)
-				r.Post("/images/generate", httpViews.GatewayImage)
-				r.Get("/models", httpViews.GatewayModels)
-			})
 
 			// Public asset endpoints (no auth required)
 			r.Get("/apps/{appId}/logo", httpViews.GetAppLogo)

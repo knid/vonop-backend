@@ -1719,7 +1719,7 @@ func (c *Controller) generateAndStoreSeedImages(
 		var cdnURL string
 		var genErr error
 		for attempt := 0; attempt < 3; attempt++ {
-			cdnURL, genErr = fal.GenerateImage(ctx, apiKey, falModel, task.prompt)
+			cdnURL, genErr = fal.GenerateImage(ctx, apiKey, falModel, task.prompt, "")
 			if genErr == nil {
 				break
 			}

@@ -23,6 +23,9 @@ import (
 	"github.com/knid/wemob/internal/utils"
 )
 
+// gatewayHTTPClient is reused across gateway proxy requests for connection pooling.
+var gatewayHTTPClient = &http.Client{}
+
 // GatewayModels handles GET /v2/gateway/models.
 // Returns the list of chat and image models available to the authenticated user.
 func (v *HttpViews) GatewayModels(w http.ResponseWriter, r *http.Request) {
@@ -148,8 +151,7 @@ func (v *HttpViews) GatewayChat(w http.ResponseWriter, r *http.Request) {
 	}
 	utils.SetLLMHeaders(upstreamReq, provider)
 
-	client := &http.Client{}
-	upstreamResp, err := client.Do(upstreamReq)
+	upstreamResp, err := gatewayHTTPClient.Do(upstreamReq)
 	if err != nil {
 		slog.Error("gateway chat: upstream request failed", "error", err, "model", req.Model)
 		middleware.GatewayError(w, "upstream provider request failed", "server_error", "upstream_error", http.StatusBadGateway)
@@ -292,13 +294,14 @@ func (v *HttpViews) GatewayImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Cap num_images
+	// Validate num_images
 	numImages := req.NumImages
 	if numImages <= 0 {
 		numImages = 1
 	}
 	if numImages > constants.GatewayMaxImagesPerRequest {
-		numImages = constants.GatewayMaxImagesPerRequest
+		middleware.GatewayError(w, fmt.Sprintf("num_images exceeds maximum of %d per request.", constants.GatewayMaxImagesPerRequest), "invalid_request_error", "invalid_request", http.StatusBadRequest)
+		return
 	}
 
 	// Calculate total cost
@@ -348,7 +351,7 @@ func (v *HttpViews) GatewayImage(w http.ResponseWriter, r *http.Request) {
 	generated := 0
 
 	for i := 0; i < numImages; i++ {
-		url, err := fal.GenerateImage(ctx, apiKey, req.Model, req.Prompt)
+		url, err := fal.GenerateImage(ctx, apiKey, req.Model, req.Prompt, req.ImageSize)
 		if err != nil {
 			slog.Error("gateway image: generation failed", "error", err, "model", req.Model, "image_index", i)
 			break
