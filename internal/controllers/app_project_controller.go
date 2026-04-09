@@ -100,6 +100,11 @@ func (c *Controller) CreateAppProject(ctx context.Context, user *models.User, re
 		slog.Error("Failed to initialize git repo for project", "error", initErr, "project_id", project.ID)
 	}
 
+	// Generate gateway API key for the AI gateway
+	if _, gwErr := c.CreateProjectGatewayKey(project); gwErr != nil {
+		slog.Error("Failed to create gateway key for project", "error", gwErr, "project_id", project.ID)
+	}
+
 	return project, nil
 }
 

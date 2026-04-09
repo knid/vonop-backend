@@ -124,6 +124,12 @@ func (c *Controller) CollectAllEnvVars(project *models.AppProject) map[string]st
 		}
 	}
 
+	// 4. Auto-inject AI gateway key (server-side only, never NEXT_PUBLIC_)
+	if gwKey, err := c.GetDecryptedGatewayKey(project.ID.String()); err == nil && gwKey != "" {
+		envVars["WEMOB_AI_KEY"] = gwKey
+		envVars["NEXT_PUBLIC_WEMOB_GATEWAY_URL"] = constants.WEMOB_API_BASE_URL
+	}
+
 	return envVars
 }
 

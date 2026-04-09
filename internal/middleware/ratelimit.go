@@ -141,3 +141,12 @@ func StorefrontIPKey(r *http.Request) string {
 	}
 	return "sf:" + storeID + ":" + ip
 }
+
+// GatewayProjectKey returns the gateway project ID as a rate-limit key.
+func GatewayProjectKey(r *http.Request) string {
+	projectID := GatewayProjectIDFromContext(r.Context())
+	if projectID != "" {
+		return "gw:" + projectID
+	}
+	return "gw:" + IPKey(r)
+}
