@@ -393,7 +393,7 @@ Examples:
 - "build me a fitness tracking app" → intent: from_scratch\nurl:
 - "make a todo list mobile app" → intent: from_scratch\nurl: `
 
-	result, err := utils.GetTextFromLLM(ctx, model, system, prompt, provider)
+	result, err := utils.GetTextFromLLM(ctx, model, system, prompt, provider, 256)
 	if err != nil {
 		slog.Warn("Mobile intent classification failed", "error", err)
 		return "from_scratch", ""
@@ -445,7 +445,7 @@ Do NOT use markdown headers or bold. Keep it conversational and concise. Do NOT 
 	userMsg := fmt.Sprintf("URL: %s\nTitle: %s\nDescription: %s\nUser message: %s",
 		siteURL, meta.Title, meta.Description, userPrompt)
 
-	result, err := utils.GetTextFromLLM(ctx, model, system, userMsg, provider)
+	result, err := utils.GetTextFromLLM(ctx, model, system, userMsg, provider, 512)
 	if err != nil {
 		slog.Warn("Failed to generate URL wrapper welcome", "error", err)
 		return ""
@@ -475,7 +475,7 @@ Examples:
 - "create a project management dashboard" → app
 - "boutique de vêtements en ligne" → ecommerce`
 
-	result, err := utils.GetTextFromLLM(ctx, model, system, prompt, provider)
+	result, err := utils.GetTextFromLLM(ctx, model, system, prompt, provider, 256)
 	if err != nil {
 		slog.Warn("LLM classification failed, falling back to keyword detection", "error", err)
 		if looksLikeEcommerce(prompt) {
@@ -1504,7 +1504,7 @@ Rules:
 	provider := c.llmProvider()
 	model := provider.FastModel()
 
-	seedSQL, err := utils.GetTextFromLLM(ctx, model, "You are a SQL expert. Generate realistic seed data. Return ONLY valid SQL.", seedPrompt, provider)
+	seedSQL, err := utils.GetTextFromLLM(ctx, model, "You are a SQL expert. Generate realistic seed data. Return ONLY valid SQL.", seedPrompt, provider, 8192)
 	if err != nil {
 		return "", fmt.Errorf("LLM seed generation: %w", err)
 	}

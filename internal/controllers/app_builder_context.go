@@ -519,7 +519,7 @@ func (c *Controller) summarizeConversationIfNeeded(
 
 Be specific — include file names, feature names, and design choices. Do NOT include greetings or filler.`
 
-	summary, err := utils.GetTextFromLLM(ctx, fastModel, systemPrompt, userPrompt, provider)
+	summary, err := utils.GetTextFromLLM(ctx, fastModel, systemPrompt, userPrompt, provider, 1024)
 	if err != nil {
 		slog.Warn("conversation summarization failed, falling back to truncation",
 			"error", err, "conv_id", conv.ID, "older_count", olderCount)
@@ -831,7 +831,7 @@ Select the files that are most relevant to this task. You can select up to 10 fi
 Respond with ONLY a list of file paths, one per line. No explanation, no markdown, no numbering.`, fileList.String(), recentContext, userMessage)
 
 	fastModel := provider.FastModel()
-	result, err := utils.GetTextFromLLM(ctx, fastModel, "", prompt, provider)
+	result, err := utils.GetTextFromLLM(ctx, fastModel, "", prompt, provider, 2048)
 	if err != nil {
 		slog.Warn("selectContextFiles: LLM call failed, falling back to all files", "error", err)
 		all := make(map[string]bool, len(fileMap))

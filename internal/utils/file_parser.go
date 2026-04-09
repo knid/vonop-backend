@@ -333,13 +333,35 @@ func (p *FileStreamParser) findRealCloseTag() int {
 	}
 }
 
+// normalizeEditTags rewrites Anthropic-style <parameter name="wemob_search">
+// tags to the canonical <wemob_search> form. Claude sometimes falls back to its
+// trained tool-calling XML format, producing <parameter name="wemob_search">
+// instead of <wemob_search>. This normalisation lets the parser handle both.
+func normalizeEditTags(s string) string {
+	s = strings.ReplaceAll(s, `<parameter name="wemob_search">`, "<wemob_search>")
+	s = strings.ReplaceAll(s, `<parameter name="wemob_replace">`, "<wemob_replace>")
+	// The closing </parameter> is ambiguous — only replace when we're inside
+	// an edit block (caller guarantees this). Map to the correct closing tag
+	// based on parse state by replacing all occurrences; the parser's
+	// inSearch/inReplace state ensures they're consumed in the right order.
+	// We replace with both closing tags concatenated... no, that's wrong.
+	// Instead, we handle </parameter> as an alias for the currently-open
+	// sub-block's closing tag directly in processEditBlock.
+	return s
+}
+
 // processEditBlock processes buffer content while inside an <wemob_edit> block.
 // Handles the <wemob_search>...</wemob_search> and <wemob_replace>...</wemob_replace> sub-blocks,
 // and emits OnEdit when </wemob_edit> is found.
 func (p *FileStreamParser) processEditBlock() {
+	// Normalize Anthropic-style <parameter name="wemob_*"> opening tags.
+	p.buffer = normalizeEditTags(p.buffer)
+
 	for {
 		if p.inSearch {
-			closeIdx := strings.Index(p.buffer, "</wemob_search>")
+			// Accept both </wemob_search> and </parameter> as closing tag.
+			closeTag, closeLen := p.findEditCloseTag("</wemob_search>", "</parameter>")
+			closeIdx := strings.Index(p.buffer, closeTag)
 			if closeIdx == -1 {
 				if len(p.buffer) > 15 {
 					p.searchContent.WriteString(p.buffer[:len(p.buffer)-15])
@@ -349,12 +371,14 @@ func (p *FileStreamParser) processEditBlock() {
 			}
 			p.searchContent.WriteString(p.buffer[:closeIdx])
 			p.inSearch = false
-			p.buffer = p.buffer[closeIdx+len("</wemob_search>"):]
+			p.buffer = p.buffer[closeIdx+closeLen:]
 			continue
 		}
 
 		if p.inReplace {
-			closeIdx := strings.Index(p.buffer, "</wemob_replace>")
+			// Accept both </wemob_replace> and </parameter> as closing tag.
+			closeTag, closeLen := p.findEditCloseTag("</wemob_replace>", "</parameter>")
+			closeIdx := strings.Index(p.buffer, closeTag)
 			if closeIdx == -1 {
 				if len(p.buffer) > 16 {
 					p.replaceContent.WriteString(p.buffer[:len(p.buffer)-16])
@@ -364,7 +388,7 @@ func (p *FileStreamParser) processEditBlock() {
 			}
 			p.replaceContent.WriteString(p.buffer[:closeIdx])
 			p.inReplace = false
-			p.buffer = p.buffer[closeIdx+len("</wemob_replace>"):]
+			p.buffer = p.buffer[closeIdx+closeLen:]
 			continue
 		}
 
@@ -400,4 +424,19 @@ func (p *FileStreamParser) processEditBlock() {
 
 		return
 	}
+}
+
+// findEditCloseTag returns whichever closing tag appears first in the buffer:
+// the canonical tag (e.g. </wemob_search>) or the Anthropic-style </parameter>.
+// Returns the matched tag string and its length.
+func (p *FileStreamParser) findEditCloseTag(canonical, alt string) (string, int) {
+	ci := strings.Index(p.buffer, canonical)
+	ai := strings.Index(p.buffer, alt)
+	if ci == -1 && ai == -1 {
+		return canonical, len(canonical) // neither found — caller will see -1
+	}
+	if ai == -1 || (ci != -1 && ci <= ai) {
+		return canonical, len(canonical)
+	}
+	return alt, len(alt)
 }

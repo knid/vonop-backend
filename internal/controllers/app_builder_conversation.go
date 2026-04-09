@@ -48,7 +48,7 @@ func (c *Controller) summarizeConversation(ctx context.Context, messages []model
 
 Be concise (3-6 sentences). Include specific file paths and component names.`
 
-	summary, err := utils.GetTextFromLLM(ctx, c.fixModel(provider), system, conversationText.String(), provider)
+	summary, err := utils.GetTextFromLLM(ctx, c.fixModel(provider), system, conversationText.String(), provider, 1024)
 	if err != nil {
 		slog.Warn("failed to summarize conversation", "error", err)
 		// Preserve existing summary if available instead of generating a lossy fallback

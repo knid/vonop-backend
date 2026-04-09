@@ -808,9 +808,18 @@ func GetJSONFromLLMWithMaxTokens(ctx context.Context, model, system, message str
 	return content, nil
 }
 
-func GetTextFromLLM(ctx context.Context, model, system, message string, provider *LLMProvider) (string, error) {
+func GetTextFromLLM(ctx context.Context, model, system, message string, provider *LLMProvider, maxTokens ...int) (string, error) {
 	if provider == nil || provider.APIKey == "" {
 		return "", fmt.Errorf("missing LLM provider configuration")
+	}
+
+	// Default to 4096 for one-shot text calls. Callers that need more (e.g.
+	// seed SQL generation) pass an explicit limit. The previous default of
+	// 16384 caused runaway generations when the model ignored short-output
+	// instructions (e.g. summarization prompts producing 16K tokens of garbage).
+	tokenLimit := 4096
+	if len(maxTokens) > 0 && maxTokens[0] > 0 {
+		tokenLimit = maxTokens[0]
 	}
 
 	body, err := buildLLMRequestBody(ChatRequest{
@@ -819,6 +828,7 @@ func GetTextFromLLM(ctx context.Context, model, system, message string, provider
 			{Role: "system", Content: system},
 			{Role: "user", Content: message},
 		},
+		MaxTokens:          tokenLimit,
 		DisablePromptCache: true, // one-shot call — no follow-up will read the cache
 	}, provider)
 	if err != nil {
@@ -867,19 +877,32 @@ func GetTextFromLLM(ctx context.Context, model, system, message string, provider
 		return "", fmt.Errorf("no choices returned from LLM")
 	}
 
+	content := parsed.Choices[0].Message.Content
+	finishReason := parsed.Choices[0].FinishReason
+
 	if parsed.Usage.TotalTokens > 0 {
-		slog.Info("LLM usage", append([]any{"from", "llm_utils_text", "model", model, "prompt_tokens", parsed.Usage.PromptTokens, "completion_tokens", parsed.Usage.CompletionTokens, "total_tokens", parsed.Usage.TotalTokens, "latency_ms", latencyMs}, trackerAttrs(ctx)...)...)
+		slog.Info("LLM usage", append([]any{"from", "llm_utils_text", "model", model, "prompt_tokens", parsed.Usage.PromptTokens, "completion_tokens", parsed.Usage.CompletionTokens, "total_tokens", parsed.Usage.TotalTokens, "latency_ms", latencyMs, "finish_reason", finishReason}, trackerAttrs(ctx)...)...)
 		if tracker := TokenTrackerFromContext(ctx); tracker != nil {
 			if tracker.TrackContent {
 				msgs := []Message{{Role: "system", Content: system}, {Role: "user", Content: message}}
-				tracker.RecordWithContent(model, parsed.Usage, latencyMs, false, msgs, parsed.Choices[0].Message.Content, "get_text")
+				tracker.RecordWithContent(model, parsed.Usage, latencyMs, false, msgs, content, "get_text")
 			} else {
 				tracker.Record(model, parsed.Usage, latencyMs, false, "get_text")
 			}
 		}
 	}
 
-	return parsed.Choices[0].Message.Content, nil
+	// Detect truncated responses — the model hit max_tokens before finishing.
+	// Return the content alongside the error so callers can decide whether to
+	// use the partial result or discard it.
+	if finishReason == "length" {
+		slog.Warn("GetTextFromLLM: response truncated (hit max_tokens)",
+			"model", model, "max_tokens", tokenLimit,
+			"output_tokens", parsed.Usage.CompletionTokens)
+		return content, ErrResponseTruncated
+	}
+
+	return content, nil
 }
 
 type StreamDelta struct {

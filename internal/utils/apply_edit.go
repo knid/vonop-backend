@@ -13,6 +13,13 @@ import (
 //  2. Whitespace-normalized match (collapses runs of spaces/tabs)
 //  3. Trimmed-lines match (trims leading/trailing whitespace per line)
 func ApplyEdit(original, search, replace string) (string, bool) {
+	// Guard: empty search is a no-op, not a valid edit.
+	// This can happen when the parser fails to extract search content
+	// (e.g. model used an unrecognised XML format).
+	if strings.TrimSpace(search) == "" {
+		return original, false
+	}
+
 	// Strategy 1: exact match
 	idx := strings.Index(original, search)
 	if idx != -1 {
