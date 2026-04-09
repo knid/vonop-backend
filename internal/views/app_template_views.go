@@ -72,7 +72,7 @@ func (v *HttpViews) CopyTemplate(w http.ResponseWriter, r *http.Request) {
 
 	slug := chi.URLParam(r, "slug")
 
-	project, err := v.Controller.CopyTemplate(user, slug)
+	project, err := v.Controller.CopyTemplate(r.Context(), user, slug)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
 		return

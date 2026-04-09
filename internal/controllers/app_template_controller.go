@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -205,7 +206,7 @@ func (c *Controller) GetPublishedTemplate(slug string) (*models.AppTemplate, err
 	return template, nil
 }
 
-func (c *Controller) CopyTemplate(user *models.User, slug string) (*models.AppProject, error) {
+func (c *Controller) CopyTemplate(ctx context.Context, user *models.User, slug string) (*models.AppProject, error) {
 	template, err := c.DB.GetAppTemplateBySlug(slug)
 	if err != nil || !template.Published {
 		return nil, fmt.Errorf("template not found")
@@ -213,10 +214,12 @@ func (c *Controller) CopyTemplate(user *models.User, slug string) (*models.AppPr
 
 	// Enforce app project limit (same logic as CreateAppProject)
 	isMobile := template.ProjectType == "mobile_app"
+	var userLimits *models.StandartUserLimits
 	limits, limErr := c.GetUserLimits(user)
 	if limErr != nil {
 		slog.Warn("CopyTemplate: failed to get user limits", "error", limErr, "user_id", user.ID)
 	} else {
+		userLimits = limits
 		var maxApps int
 		var countFilter string
 		if isMobile {
@@ -277,6 +280,22 @@ func (c *Controller) CopyTemplate(user *models.User, slug string) (*models.AppPr
 		// Initialize empty repo if template has no source
 		if _, initErr := c.GitRepoService.Init(project.ID.String()); initErr != nil {
 			slog.Error("Failed to init git repo for template copy", "error", initErr, "project_id", project.ID)
+		}
+	}
+
+	// Provision a new Neon database if the template has data models
+	if len(project.DataModels) > 0 && c.NeonService != nil {
+		dataModels, parseErr := parseDataModels(project.DataModels)
+		if parseErr == nil && len(dataModels) > 0 {
+			noopEvent := func(string, any) bool { return false }
+			connStr, neonProjectID, neonErr := c.provisionNeonDatabase(ctx, project, dataModels, userLimits, noopEvent)
+			if connStr != "" && neonProjectID != "" && neonErr == nil {
+				if err := c.storeNeonIntegration(project, connStr, neonProjectID); err != nil {
+					slog.Error("CopyTemplate: failed to store neon integration", "error", err, "project_id", project.ID)
+				}
+			} else if neonErr != nil {
+				slog.Error("CopyTemplate: database provisioning failed", "error", neonErr, "project_id", project.ID)
+			}
 		}
 	}
 
