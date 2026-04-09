@@ -41,7 +41,7 @@ func (v *HttpViews) AdminGetJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := chi.URLParam(r, "id")
+	id := chi.URLParam(r, "jobId")
 	result, err := v.Controller.AdminGetJob(id)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)

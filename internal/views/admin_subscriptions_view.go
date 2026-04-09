@@ -41,7 +41,7 @@ func (v *HttpViews) AdminUpdateSubscription(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	id := chi.URLParam(r, "id")
+	id := chi.URLParam(r, "subId")
 
 	var req requests.AdminUpdateSubscriptionPlanRequest
 	if err := utils.ParseJSONBody(r, &req); err != nil {

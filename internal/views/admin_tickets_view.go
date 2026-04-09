@@ -42,7 +42,7 @@ func (v *HttpViews) AdminGetTicket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := chi.URLParam(r, "id")
+	id := chi.URLParam(r, "ticketId")
 	result, err := v.Controller.AdminGetTicket(id)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
@@ -64,7 +64,7 @@ func (v *HttpViews) AdminUpdateTicket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := chi.URLParam(r, "id")
+	id := chi.URLParam(r, "ticketId")
 
 	var req requests.AdminUpdateTicketRequest
 	if err := utils.ParseJSONBody(r, &req); err != nil {

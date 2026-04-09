@@ -41,7 +41,7 @@ func (v *HttpViews) AdminGetOrganization(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	id := chi.URLParam(r, "id")
+	id := chi.URLParam(r, "orgId")
 	result, err := v.Controller.AdminGetOrganization(id)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)

@@ -41,7 +41,7 @@ func (v *HttpViews) AdminGetProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := chi.URLParam(r, "id")
+	id := chi.URLParam(r, "projectId")
 	result, err := v.Controller.AdminGetProject(id)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
@@ -63,7 +63,7 @@ func (v *HttpViews) AdminDeleteProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := chi.URLParam(r, "id")
+	id := chi.URLParam(r, "projectId")
 	if err := v.Controller.AdminDeleteProject(id); err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
 		return

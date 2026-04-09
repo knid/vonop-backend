@@ -61,7 +61,7 @@ func (v *HttpViews) AdminGetUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := chi.URLParam(r, "id")
+	id := chi.URLParam(r, "userId")
 	result, err := v.Controller.AdminGetUser(id)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
@@ -83,7 +83,7 @@ func (v *HttpViews) AdminUpdateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := chi.URLParam(r, "id")
+	id := chi.URLParam(r, "userId")
 
 	var req requests.AdminUpdateUserRequest
 	if err := utils.ParseJSONBody(r, &req); err != nil {
@@ -112,7 +112,7 @@ func (v *HttpViews) AdminDeleteUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := chi.URLParam(r, "id")
+	id := chi.URLParam(r, "userId")
 	if err := v.Controller.AdminDeleteUser(id); err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
 		return
@@ -133,7 +133,7 @@ func (v *HttpViews) AdminImpersonateUser(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	id := chi.URLParam(r, "id")
+	id := chi.URLParam(r, "userId")
 	result, err := v.Controller.AdminImpersonateUser(id)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
@@ -155,7 +155,7 @@ func (v *HttpViews) AdminResetPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := chi.URLParam(r, "id")
+	id := chi.URLParam(r, "userId")
 	result, err := v.Controller.AdminResetPassword(id)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
@@ -177,7 +177,7 @@ func (v *HttpViews) AdminGrantCredits(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := chi.URLParam(r, "id")
+	id := chi.URLParam(r, "userId")
 
 	var req requests.AdminGrantCreditsRequest
 	if err := utils.ParseJSONBody(r, &req); err != nil {
@@ -211,7 +211,7 @@ func (v *HttpViews) AdminForceSubscription(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	id := chi.URLParam(r, "id")
+	id := chi.URLParam(r, "userId")
 
 	var req requests.AdminForceSubscriptionRequest
 	if err := utils.ParseJSONBody(r, &req); err != nil {
