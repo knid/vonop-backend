@@ -137,6 +137,8 @@ func createSchema(db *bun.DB) error {
 		(*models.AppProjectMemory)(nil),
 		// Template marketplace
 		(*models.AppTemplate)(nil),
+		// AI gateway per-project keys
+		(*models.ProjectGatewayKey)(nil),
 	}
 
 	for _, model := range models {

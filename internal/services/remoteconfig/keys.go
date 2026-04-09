@@ -56,3 +56,22 @@ var AIValidationMaxFiles = Key{Flag: "rc-ai-validation-max-files", Fallback: 15}
 var AIValidationMaxChars = Key{Flag: "rc-ai-validation-max-chars", Fallback: 60000}
 var AIBuilderToolMaxRounds = Key{Flag: "rc-ai-builder-tool-max-rounds", Fallback: 30}
 var AIGenerationMaxRounds = Key{Flag: "rc-ai-generation-max-rounds", Fallback: 8}
+
+// --- Category 4: AI Gateway ---
+
+var GatewayModelsFree = Key{Flag: "rc-gateway-models-free", Fallback: "gpt-4.1-mini,claude-haiku-4-5"}
+var GatewayModelsStarter = Key{Flag: "rc-gateway-models-starter", Fallback: "gpt-4.1-mini,claude-haiku-4-5,fal-ai/flux-schnell"}
+var GatewayModelsPro = Key{Flag: "rc-gateway-models-pro", Fallback: "gpt-4.1-mini,gpt-4.1,claude-haiku-4-5,claude-sonnet-4,fal-ai/flux-schnell,fal-ai/flux-pro/v1.1"}
+var GatewayModelsBusiness = Key{Flag: "rc-gateway-models-business", Fallback: "gpt-4.1-mini,gpt-4.1,claude-haiku-4-5,claude-sonnet-4,claude-opus-4,gemini-2.5-pro,fal-ai/flux-schnell,fal-ai/flux-pro/v1.1"}
+
+var GatewayRPMFree = Key{Flag: "rc-gateway-rpm-free", Fallback: 10}
+var GatewayRPMStarter = Key{Flag: "rc-gateway-rpm-starter", Fallback: 30}
+var GatewayRPMPro = Key{Flag: "rc-gateway-rpm-pro", Fallback: 60}
+var GatewayRPMBusiness = Key{Flag: "rc-gateway-rpm-business", Fallback: 120}
+
+var GatewayImageCostFluxSchnell = Key{Flag: "rc-gateway-image-cost-flux-schnell", Fallback: 5}
+var GatewayImageCostFluxPro = Key{Flag: "rc-gateway-image-cost-flux-pro", Fallback: 15}
+var GatewayImageCostFluxUltra = Key{Flag: "rc-gateway-image-cost-flux-ultra", Fallback: 40}
+
+var GatewayChatTimeoutSeconds = Key{Flag: "rc-gateway-chat-timeout-seconds", Fallback: 30}
+var GatewayImageTimeoutSeconds = Key{Flag: "rc-gateway-image-timeout-seconds", Fallback: 120}
