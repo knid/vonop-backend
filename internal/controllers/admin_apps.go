@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -73,6 +74,35 @@ func (c *Controller) AdminGetApp(appID string) (*responses.AdminAppDetailRespons
 		userEmail = app.User.Email
 	}
 
+	orgName := ""
+	if app.Organization != nil {
+		orgName = app.Organization.Name
+	}
+
+	// Parse theme and data models from JSON bytes
+	var theme any
+	if len(app.Theme) > 0 {
+		json.Unmarshal(app.Theme, &theme)
+	}
+	var dataModels any
+	if len(app.DataModels) > 0 {
+		json.Unmarshal(app.DataModels, &dataModels)
+	}
+
+	// Get deployed URL from latest web deployment
+	deployedURL := ""
+	if dep, err := c.DB.GetLatestAppDeployment(appID, "web"); err == nil && dep.Status == "deployed" {
+		deployedURL = dep.DeployedURL
+	}
+
+	// Count files via git repo
+	fileCount := 0
+	if repo, err := c.GitRepoService.Open(appID); err == nil {
+		if files, err := repo.ListFiles(); err == nil {
+			fileCount = len(files)
+		}
+	}
+
 	return &responses.AdminAppDetailResponse{
 		AdminAppResponse: responses.AdminAppResponse{
 			ID:          app.ID,
@@ -85,11 +115,18 @@ func (c *Controller) AdminGetApp(appID string) (*responses.AdminAppDetailRespons
 			CreatedAt:   app.CreatedAt,
 			UpdatedAt:   app.UpdatedAt,
 		},
+		OrganizationID:  app.OrganizationID,
+		OrgName:         orgName,
 		Prompt:          app.Prompt,
+		Theme:           theme,
+		DataModels:      dataModels,
 		Settings:        app.Settings,
 		ScreenshotS3Key: app.ScreenshotS3Key,
+		LogoS3Key:       app.LogoS3Key,
 		SandboxID:       app.SandboxID,
 		TemplateID:      app.TemplateID,
+		DeployedURL:     deployedURL,
+		FileCount:       fileCount,
 	}, nil
 }
 

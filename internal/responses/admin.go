@@ -76,11 +76,18 @@ type AdminAppResponse struct {
 
 type AdminAppDetailResponse struct {
 	AdminAppResponse
+	OrganizationID  uuid.UUID      `json:"organization_id"`
+	OrgName         string         `json:"org_name"`
 	Prompt          string         `json:"prompt"`
+	Theme           any            `json:"theme"`
+	DataModels      any            `json:"data_models"`
 	Settings        map[string]any `json:"settings"`
 	ScreenshotS3Key string         `json:"screenshot_s3_key"`
+	LogoS3Key       string         `json:"logo_s3_key"`
 	SandboxID       string         `json:"sandbox_id"`
 	TemplateID      *uuid.UUID     `json:"template_id"`
+	DeployedURL     string         `json:"deployed_url"`
+	FileCount       int            `json:"file_count"`
 }
 
 type AdminProjectResponse struct {

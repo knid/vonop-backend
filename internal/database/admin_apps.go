@@ -70,6 +70,7 @@ func (db *Database) AdminGetAppByID(id string) (*models.AppProject, error) {
 	err := db.DB.NewSelect().
 		Model(&app).
 		Relation("User").
+		Relation("Organization").
 		Where("\"app_project\".\"id\" = ?", id).
 		Scan(context.Background())
 	return &app, err
