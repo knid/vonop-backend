@@ -1474,6 +1474,11 @@ func main() {
 
 						r.Get("/analytics", httpViews.GetStoreAnalytics)
 					})
+
+					// Gateway key management
+					r.Get("/gateway-key", httpViews.GetGatewayKeyInfo)
+					r.Post("/gateway-key/reveal", httpViews.RevealGatewayKey)
+					r.Post("/gateway-key/rotate", httpViews.RotateGatewayKey)
 				})
 			})
 

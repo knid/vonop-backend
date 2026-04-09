@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/middleware"
 	"github.com/knid/wemob/internal/models"
@@ -373,4 +374,70 @@ func (v *HttpViews) GatewayImage(w http.ResponseWriter, r *http.Request) {
 	utils.JSONResponse(w, map[string]any{
 		"images": images,
 	}, http.StatusOK)
+}
+
+// GetGatewayKeyInfo returns the gateway key prefix for a project (dashboard use).
+func (v *HttpViews) GetGatewayKeyInfo(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserFromContext(r.Context())
+	projectID := chi.URLParam(r, "appId")
+
+	project, err := v.Controller.GetAppProject(projectID, user)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	gwKey, err := v.Controller.DB.GetProjectGatewayKeyByProjectID(project.ID.String())
+	if err != nil {
+		utils.JSONErrorResponse(w, "No gateway key found for this project.", http.StatusNotFound)
+		return
+	}
+
+	utils.JSONResponse(w, map[string]string{
+		"key_prefix": gwKey.KeyPrefix,
+	}, http.StatusOK)
+}
+
+// RevealGatewayKey decrypts and returns the full gateway key.
+func (v *HttpViews) RevealGatewayKey(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserFromContext(r.Context())
+	projectID := chi.URLParam(r, "appId")
+
+	project, err := v.Controller.GetAppProject(projectID, user)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	rawKey, err := v.Controller.GetDecryptedGatewayKey(project.ID.String())
+	if err != nil {
+		utils.JSONErrorResponse(w, "Failed to decrypt gateway key.", http.StatusInternalServerError)
+		return
+	}
+
+	utils.JSONResponse(w, map[string]string{
+		"key": rawKey,
+	}, http.StatusOK)
+}
+
+// RotateGatewayKey rotates the gateway key for a project.
+func (v *HttpViews) RotateGatewayKey(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserFromContext(r.Context())
+	projectID := chi.URLParam(r, "appId")
+
+	project, err := v.Controller.GetAppProject(projectID, user)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	newKey, err := v.Controller.RotateProjectGatewayKey(project)
+	if err != nil {
+		utils.JSONErrorResponse(w, "Failed to rotate gateway key.", http.StatusInternalServerError)
+		return
+	}
+
+	utils.JSONResponse(w, map[string]string{
+		"key": newKey,
+	}, http.StatusCreated)
 }
