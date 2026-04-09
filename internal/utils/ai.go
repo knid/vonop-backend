@@ -1555,6 +1555,7 @@ type ToolCallConfig struct {
 	TrimResults       func(toolName, result string) string                   // Trim tool result messages in history to reduce token usage
 	InterceptToolCall func(toolName, toolArgs string) (result string, skip bool) // Intercept tool calls before execution; if skip=true, use result and skip executor
 	NudgeMessage      string                                                 // Custom nudge message (replaces default "stop researching" text)
+	StripMessage      string                                                 // Custom message when tools are stripped (replaces default "FINAL WARNING" text)
 	AfterToolRound    func(allIntercepted bool) string                       // Called after each tool round; allIntercepted=true when every call was intercepted; non-empty return is injected as a system message
 	FilterTools       func(tools []Tool) []Tool                              // Called each round to filter/modify tools; return nil to strip all tools
 	OnToolCallStart   func(toolName string)                                  // Called when a tool call name is first detected during SSE streaming (before args are complete)
@@ -1594,7 +1595,7 @@ func StreamWithTools(
 		if opts[0].NudgeAfter > 0 {
 			nudgeAfter = opts[0].NudgeAfter
 		}
-		if opts[0].StripAfter > 0 {
+		if opts[0].StripAfter != 0 { // 0 = use default; -1 = disable; positive = explicit limit
 			stripAfter = opts[0].StripAfter
 		}
 		if opts[0].MaxTokens > 0 {
@@ -1663,9 +1664,13 @@ func StreamWithTools(
 		if len(opts) > 0 && opts[0].FilterTools != nil {
 			roundTools = opts[0].FilterTools(roundTools)
 		}
-		if consecutiveToolRounds >= stripAfter {
+		if stripAfter >= 0 && consecutiveToolRounds >= stripAfter {
 			if !stripped {
-				appendToLastUserMsg("FINAL WARNING: You MUST generate your complete response NOW. All tools have been removed. Use the information you have already gathered.")
+				stripContent := "FINAL WARNING: You MUST generate your complete response NOW. All tools have been removed. Use the information you have already gathered."
+				if len(opts) > 0 && opts[0].StripMessage != "" {
+					stripContent = opts[0].StripMessage
+				}
+				appendToLastUserMsg(stripContent)
 				stripped = true
 			}
 			roundTools = nil

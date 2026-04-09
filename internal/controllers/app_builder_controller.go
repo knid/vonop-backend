@@ -894,12 +894,12 @@ The user's message is an auto-reported build or runtime error. Follow these rule
 			},
 			utils.ToolCallConfig{
 				MaxRounds:        10,
-				NudgeAfter:       3,
-				StripAfter:       5,
+				NudgeAfter:       5,
+				StripAfter:       -1, // disabled — let the model decide when it has enough context
 				MaxTokens:        65536,
 				MaxContinuations: 3,
 				ShouldContinue:   shouldContinueCredits,
-				NudgeMessage:     "You have gathered enough context. Output your code changes now using <wemob_file> and <wemob_edit> blocks.",
+				NudgeMessage: "When you have enough context, output your code changes using <wemob_file> and <wemob_edit> blocks. You can still call read_file if needed.",
 				OnRoundStart: func(round int) {
 					parser.Flush()
 				},
@@ -1049,7 +1049,9 @@ The user's message is an auto-reported build or runtime error. Follow these rule
 					MaxTokens:        65536,
 					MaxContinuations: 1,
 					ShouldContinue:   shouldContinueCredits,
-					NudgeMessage:     "Output your corrected <wemob_edit> blocks now. Use the file contents you just read.",
+					NudgeMessage: "Output your corrected <wemob_edit> blocks now. Use the file contents you just read.",
+					StripMessage: "Output your corrected code NOW using <wemob_edit> blocks. Do NOT describe — output the actual code.\n\n" +
+						"<wemob_edit path=\"file.tsx\">\n<wemob_search>\nexact lines\n</wemob_search>\n<wemob_replace>\ncorrected lines\n</wemob_replace>\n</wemob_edit>",
 					OnRoundStart: func(round int) {
 						parser.Flush()
 					},
