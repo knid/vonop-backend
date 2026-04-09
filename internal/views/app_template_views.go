@@ -1,11 +1,13 @@
 package views
 
 import (
+	"encoding/json"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/knid/wemob/internal/controllers"
 	"github.com/knid/wemob/internal/requests"
+	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/utils"
 )
 
@@ -76,7 +78,23 @@ func (v *HttpViews) CopyTemplate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	utils.JSONResponse(w, project, http.StatusCreated)
+	theme := map[string]any{}
+	if len(project.Theme) > 0 {
+		json.Unmarshal(project.Theme, &theme)
+	}
+
+	utils.JSONResponse(w, responses.AppProjectResponse{
+		ID:          project.ID,
+		Name:        project.Name,
+		Slug:        project.Slug,
+		Prompt:      project.Prompt,
+		ProjectType: project.ProjectType,
+		Theme:       theme,
+		Settings:    project.Settings,
+		Status:      project.Status,
+		CreatedAt:   project.CreatedAt,
+		UpdatedAt:   project.UpdatedAt,
+	}, http.StatusCreated)
 }
 
 // --- Admin endpoints ---
