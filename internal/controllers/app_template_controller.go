@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,6 +13,28 @@ import (
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/responses"
 )
+
+// unwrapBase64JSON repeatedly unwraps a value that may be a JSON string containing
+// base64-encoded data (possibly nested multiple levels). Returns the innermost
+// decoded bytes, or the original input if no unwrapping is needed.
+func unwrapBase64JSON(raw []byte) []byte {
+	data := raw
+	for i := 0; i < 10; i++ { // safety limit
+		// If it's a JSON string, unwrap it
+		var s string
+		if err := json.Unmarshal(data, &s); err != nil {
+			return data
+		}
+		// Try base64 decode
+		decoded, err := base64.StdEncoding.DecodeString(s)
+		if err != nil {
+			// Not base64 — it might be a plain JSON string
+			return []byte(s)
+		}
+		data = decoded
+	}
+	return data
+}
 
 func (c *Controller) CreateAppTemplate(user *models.User, req requests.CreateAppTemplateRequest) (*models.AppTemplate, error) {
 	if user.Type != "admin" {
@@ -285,7 +308,7 @@ func (c *Controller) CopyTemplate(ctx context.Context, user *models.User, slug s
 
 	// Provision a new Neon database if the template has data models
 	if len(project.DataModels) > 0 && c.NeonService != nil {
-		dataModels, parseErr := parseDataModels(project.DataModels)
+		dataModels, parseErr := parseDataModels(unwrapBase64JSON(project.DataModels))
 		if parseErr == nil && len(dataModels) > 0 {
 			noopEvent := func(string, any) bool { return false }
 			connStr, neonProjectID, neonErr := c.provisionNeonDatabase(ctx, project, dataModels, userLimits, noopEvent)
