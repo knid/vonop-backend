@@ -655,7 +655,7 @@ func GetJSONFromLLM(ctx context.Context, model, system, message string, provider
 	if err != nil {
 		return "", fmt.Errorf("error creating LLM request: %w", err)
 	}
-	setLLMHeaders(req, provider)
+	SetLLMHeaders(req, provider)
 
 	start := time.Now()
 	resp, err := llmHTTPClient.Do(req)
@@ -753,7 +753,7 @@ func GetJSONFromLLMWithMaxTokens(ctx context.Context, model, system, message str
 	if err != nil {
 		return "", fmt.Errorf("error creating LLM request: %w", err)
 	}
-	setLLMHeaders(req, provider)
+	SetLLMHeaders(req, provider)
 
 	start := time.Now()
 	resp, err := llmHTTPClient.Do(req)
@@ -839,7 +839,7 @@ func GetTextFromLLM(ctx context.Context, model, system, message string, provider
 	if err != nil {
 		return "", fmt.Errorf("error creating LLM request: %w", err)
 	}
-	setLLMHeaders(req, provider)
+	SetLLMHeaders(req, provider)
 
 	start := time.Now()
 	resp, err := llmHTTPClient.Do(req)
@@ -993,7 +993,7 @@ func StreamTextFromLLMWithMessages(ctx context.Context, model string, messages [
 		if err != nil {
 			return "", fmt.Errorf("error creating LLM request: %w", err)
 		}
-		setLLMHeaders(req, provider)
+		SetLLMHeaders(req, provider)
 
 		start := time.Now()
 		resp, err := llmStreamingClient.Do(req)
@@ -1261,7 +1261,7 @@ func GetJSONFromLLMWithMessages(ctx context.Context, model string, messages []Me
 	if err != nil {
 		return "", fmt.Errorf("error creating LLM request: %w", err)
 	}
-	setLLMHeaders(req, provider)
+	SetLLMHeaders(req, provider)
 
 	start := time.Now()
 	resp, err := llmHTTPClient.Do(req)
@@ -1336,7 +1336,7 @@ func StreamJSONFromLLMWithMessages(ctx context.Context, model string, messages [
 	if err != nil {
 		return "", fmt.Errorf("error creating LLM request: %w", err)
 	}
-	setLLMHeaders(req, provider)
+	SetLLMHeaders(req, provider)
 
 	start := time.Now()
 	resp, err := llmStreamingClient.Do(req)
@@ -1497,7 +1497,7 @@ func GetJSONFromLLMWithVision(ctx context.Context, model, system, userText, base
 	if err != nil {
 		return "", fmt.Errorf("error creating LLM request: %w", err)
 	}
-	setLLMHeaders(req, provider)
+	SetLLMHeaders(req, provider)
 
 	start := time.Now()
 	resp, err := llmHTTPClient.Do(req)
@@ -1706,7 +1706,7 @@ func StreamWithTools(
 		if err != nil {
 			return "", fmt.Errorf("round %d: error creating LLM request: %w", round, err)
 		}
-		setLLMHeaders(req, provider)
+		SetLLMHeaders(req, provider)
 
 		roundStart := time.Now()
 		resp, err := llmStreamingClient.Do(req)

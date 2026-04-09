@@ -115,8 +115,8 @@ func (p *LLMProvider) SupportsVision() bool {
 	return !p.IsZAI()
 }
 
-// setLLMHeaders applies auth and provider-specific headers to an HTTP request.
-func setLLMHeaders(req *http.Request, provider *LLMProvider) {
+// SetLLMHeaders applies auth and provider-specific headers to an HTTP request.
+func SetLLMHeaders(req *http.Request, provider *LLMProvider) {
 	if provider == nil {
 		return
 	}

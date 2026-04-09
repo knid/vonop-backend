@@ -2,6 +2,8 @@ package middleware
 
 import (
 	"context"
+	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -59,6 +61,50 @@ func RequireGatewayKey(controller *controllers.Controller) func(http.Handler) ht
 			ctx := context.WithValue(r.Context(), gatewayUserKey, user)
 			ctx = context.WithValue(ctx, gatewayProjectIDKey, projectID)
 			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
+}
+
+// GatewayRateLimit returns middleware that enforces per-tier RPM limits.
+func GatewayRateLimit(rl *RateLimiter, controller *controllers.Controller) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodOptions {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			user := GatewayUserFromContext(r.Context())
+			projectID := GatewayProjectIDFromContext(r.Context())
+			if user == nil || projectID == "" {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			limit := controller.GatewayRPMLimit(user)
+			key := fmt.Sprintf("rl:gw:%s", projectID)
+			ctx := context.Background()
+
+			result, err := rateLimitScript.Run(ctx, rl.client, []string{key}, 60).Result()
+			if err != nil {
+				slog.Error("gateway rate limiter redis error", "error", err)
+				next.ServeHTTP(w, r)
+				return
+			}
+			count, _ := result.(int64)
+
+			if int(count) > limit {
+				ttl, _ := rl.client.TTL(ctx, key).Result()
+				retryAfter := int(ttl.Seconds())
+				if retryAfter <= 0 {
+					retryAfter = 60
+				}
+				w.Header().Set("Retry-After", fmt.Sprintf("%d", retryAfter))
+				GatewayError(w, fmt.Sprintf("Rate limit exceeded. Retry after %d seconds.", retryAfter), "rate_limit_error", "rate_limit_exceeded", http.StatusTooManyRequests)
+				return
+			}
+
+			next.ServeHTTP(w, r)
 		})
 	}
 }
