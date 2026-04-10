@@ -1176,16 +1176,31 @@ The user's message is an auto-reported build or runtime error. Follow these rule
 			responseText = responseBuilder.String()
 		}
 
-		// Stop-short retry: the model announced a rewrite/fix in its final text
-		// response but emitted zero file blocks. This happens when Claude
-		// convinces itself the read_file result was truncated, narrates "I'll
-		// rewrite..." repeatedly, and then ends the turn without following
-		// through. Detect the pattern (intent keywords + zero file ops + no
-		// error) and retry once without tools, forcing it to emit blocks.
-		if chatErr == nil && len(toolAppliedOps) == 0 && looksLikeStopShort(responseText) {
+		// Stop-short retry: the model finished cleanly but zero file ops landed.
+		// Two failure modes trigger a retry:
+		//
+		//  1. Narration-only stop-short — the model announced a rewrite/fix in
+		//     its visible text ("I'll rewrite..."), then ended without emitting
+		//     blocks. Detected via looksLikeStopShort(responseText).
+		//
+		//  2. Parser-dropped blocks — the model DID emit <wemob_edit>/<wemob_file>
+		//     openings but the parser couldn't close them (e.g. </invoke>
+		//     terminator variant the parser doesn't recognise, or malformed
+		//     tag shape). Detected via parser.AttemptedEdits/AttemptedFiles > 0
+		//     while toolAppliedOps is empty. This is a stronger signal than
+		//     text matching — if the model tried to write and nothing landed,
+		//     something is wrong regardless of the narration.
+		attemptedWrites := parser.AttemptedEdits + parser.AttemptedFiles
+		dropped := attemptedWrites > 0
+		narrated := looksLikeStopShort(responseText)
+		if chatErr == nil && len(toolAppliedOps) == 0 && (narrated || dropped) {
 			slog.Warn("chat: detected stop-short response, retrying with forcing prompt",
 				"project_id", project.ID,
 				"response_length", len(responseText),
+				"attempted_edits", parser.AttemptedEdits,
+				"attempted_files", parser.AttemptedFiles,
+				"trigger_narrated", narrated,
+				"trigger_dropped", dropped,
 			)
 
 			// Reset the response buffer so the retry's output replaces the

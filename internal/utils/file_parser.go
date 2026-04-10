@@ -53,6 +53,14 @@ type FileStreamParser struct {
 	// when the stream ended with DiscardIncomplete. Empty if no file was truncated.
 	TruncatedPath string
 
+	// AttemptedEdits counts how many <wemob_edit> opening tags were observed
+	// across the parser's lifetime. Used by downstream retry logic to detect
+	// "model emitted edit blocks but nothing was applied" — a stronger signal
+	// than text-phrase matching against the visible narration.
+	AttemptedEdits int
+	// AttemptedFiles counts how many <wemob_file> opening tags were observed.
+	AttemptedFiles int
+
 	// OnFile is called when a complete </wemob_file> closing tag is found.
 	OnFile func(path, content string)
 	// OnDelete is called when a <wemob_delete path="..."/> tag is found.
@@ -149,6 +157,7 @@ func (p *FileStreamParser) Feed(chunk string) {
 					if len(match) >= 2 {
 						p.editPath = match[1]
 						p.inEditBlock = true
+						p.AttemptedEdits++
 						p.searchContent.Reset()
 						p.replaceContent.Reset()
 						p.inSearch = false
@@ -226,6 +235,7 @@ func (p *FileStreamParser) Feed(chunk string) {
 			}
 			p.currentPath = match[1]
 			p.inFileBlock = true
+			p.AttemptedFiles++
 			p.buffer = p.buffer[loc[1]:]
 			// Continue loop to look for closing tag
 		}
@@ -233,10 +243,42 @@ func (p *FileStreamParser) Feed(chunk string) {
 }
 
 // Flush emits any remaining buffered content when the stream ends.
+//
+// For edit blocks, Flush attempts best-effort recovery: if the block had
+// both <wemob_search> and <wemob_replace> sub-blocks parsed cleanly
+// (inSearch/inReplace are false, buffers are non-empty) but the outer
+// close tag never arrived, fire OnEdit anyway. This covers the failure
+// mode where the model terminates the block with a malformed close tag
+// the parser doesn't recognise (observed: </invoke>) and the stream
+// otherwise ends successfully with no more chunks coming.
+//
+// If the block is mid-stream (still inside a sub-block, or missing
+// either search or replace), it is discarded — the content is not
+// trustworthy.
 func (p *FileStreamParser) Flush() {
 	if p.inEditBlock {
-		slog.Warn("FileStreamParser: discarding incomplete edit block (stream truncated)",
-			"path", p.editPath)
+		canRecover := !p.inSearch && !p.inReplace &&
+			p.searchContent.Len() > 0 && p.replaceContent.Len() > 0 &&
+			p.OnEdit != nil
+		if canRecover {
+			slog.Warn("FileStreamParser: recovering edit block with missing close tag",
+				"path", p.editPath,
+				"buffer_tail", safeTail(p.buffer, 40))
+			search := p.searchContent.String()
+			search = strings.TrimPrefix(search, "\n")
+			search = strings.TrimSuffix(search, "\n")
+			replace := p.replaceContent.String()
+			replace = strings.TrimPrefix(replace, "\n")
+			replace = strings.TrimSuffix(replace, "\n")
+			p.OnEdit(p.editPath, search, replace)
+		} else {
+			slog.Warn("FileStreamParser: discarding incomplete edit block (stream truncated)",
+				"path", p.editPath,
+				"in_search", p.inSearch,
+				"in_replace", p.inReplace,
+				"search_len", p.searchContent.Len(),
+				"replace_len", p.replaceContent.Len())
+		}
 		p.searchContent.Reset()
 		p.replaceContent.Reset()
 		p.inEditBlock = false
@@ -392,7 +434,30 @@ func (p *FileStreamParser) processEditBlock() {
 			continue
 		}
 
-		if idx := strings.Index(p.buffer, "</wemob_edit>"); idx != -1 {
+		// Look for pending sub-block openings first. If an opening tag appears
+		// before the edit-block close tag in the buffer, we MUST process the
+		// sub-block first — otherwise firing the close tag would emit an edit
+		// with empty search/replace content. This matters when the whole edit
+		// block arrives in one chunk (common for small edits).
+		searchOpenIdx := strings.Index(p.buffer, "<wemob_search>")
+		replaceOpenIdx := strings.Index(p.buffer, "<wemob_replace>")
+		_, closeLen, closeIdx := p.findEditBlockCloseTag()
+
+		// Pick the earliest opening tag (if any) so we can compare against the
+		// close tag position.
+		earliestOpen := -1
+		if searchOpenIdx != -1 {
+			earliestOpen = searchOpenIdx
+		}
+		if replaceOpenIdx != -1 && (earliestOpen == -1 || replaceOpenIdx < earliestOpen) {
+			earliestOpen = replaceOpenIdx
+		}
+
+		// Accept </wemob_edit>, </invoke>, or </function_calls> as the edit
+		// block terminator, but only if no sub-block opening appears before it.
+		// Claude sometimes closes the block with its trained tool-calling XML
+		// terminator instead of the custom tag.
+		if closeIdx != -1 && (earliestOpen == -1 || closeIdx < earliestOpen) {
 			if p.OnEdit != nil {
 				search := p.searchContent.String()
 				search = strings.TrimPrefix(search, "\n")
@@ -406,19 +471,19 @@ func (p *FileStreamParser) processEditBlock() {
 			p.replaceContent.Reset()
 			p.inEditBlock = false
 			p.editPath = ""
-			p.buffer = p.buffer[idx+len("</wemob_edit>"):]
+			p.buffer = p.buffer[closeIdx+closeLen:]
 			return
 		}
 
-		if idx := strings.Index(p.buffer, "<wemob_search>"); idx != -1 {
+		if searchOpenIdx != -1 && (replaceOpenIdx == -1 || searchOpenIdx < replaceOpenIdx) {
 			p.inSearch = true
-			p.buffer = p.buffer[idx+len("<wemob_search>"):]
+			p.buffer = p.buffer[searchOpenIdx+len("<wemob_search>"):]
 			continue
 		}
 
-		if idx := strings.Index(p.buffer, "<wemob_replace>"); idx != -1 {
+		if replaceOpenIdx != -1 {
 			p.inReplace = true
-			p.buffer = p.buffer[idx+len("<wemob_replace>"):]
+			p.buffer = p.buffer[replaceOpenIdx+len("<wemob_replace>"):]
 			continue
 		}
 
@@ -439,4 +504,46 @@ func (p *FileStreamParser) findEditCloseTag(canonical, alt string) (string, int)
 		return canonical, len(canonical)
 	}
 	return alt, len(alt)
+}
+
+// safeTail returns the last n bytes of s, stepping back to a UTF-8 rune
+// boundary if needed. Used for diagnostic logging only.
+func safeTail(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	tail := s[len(s)-n:]
+	// Step forward to the next rune start to avoid mid-rune slicing.
+	for i := 0; i < len(tail) && i < 4; i++ {
+		if (tail[i] & 0xC0) != 0x80 {
+			return tail[i:]
+		}
+	}
+	return tail
+}
+
+// findEditBlockCloseTag locates the closing tag for an <wemob_edit> block,
+// accepting </wemob_edit>, </invoke>, or </function_calls> — in that order of
+// preference — whichever appears first in the buffer. The model occasionally
+// confuses the custom edit format with Anthropic's trained tool-calling XML
+// and terminates the block with </invoke> instead of </wemob_edit>. Returns
+// the matched tag, its length, and its index in the buffer (-1 if none).
+func (p *FileStreamParser) findEditBlockCloseTag() (string, int, int) {
+	candidates := []string{"</wemob_edit>", "</invoke>", "</function_calls>"}
+	bestIdx := -1
+	bestTag := ""
+	for _, tag := range candidates {
+		i := strings.Index(p.buffer, tag)
+		if i == -1 {
+			continue
+		}
+		if bestIdx == -1 || i < bestIdx {
+			bestIdx = i
+			bestTag = tag
+		}
+	}
+	if bestIdx == -1 {
+		return "", 0, -1
+	}
+	return bestTag, len(bestTag), bestIdx
 }
