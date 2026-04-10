@@ -198,6 +198,7 @@ func createSchema(db *bun.DB) error {
 		`ALTER TABLE app_projects ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
 		`ALTER TABLE app_integrations ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
 		`ALTER TABLE app_domains ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
+		`ALTER TABLE app_domains ADD COLUMN IF NOT EXISTS deployment_uuid text`,
 		`ALTER TABLE app_env_vars ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
 		`ALTER TABLE stores ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
 		`ALTER TABLE products ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,

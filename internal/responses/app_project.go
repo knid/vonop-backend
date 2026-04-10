@@ -98,12 +98,13 @@ type AppChatFileOpResp struct {
 type AppDomainResponse struct {
 	ID                uuid.UUID `json:"id"`
 	Domain            string    `json:"domain"`
-	Status            string    `json:"status"`                    // pending, active, misconfigured
-	DNSRecord         string    `json:"dns_record"`                // CNAME target (always set)
-	ARecordTarget     string    `json:"a_record_target"`           // A record IP (resolved from CNAME target)
-	IsApex            bool      `json:"is_apex"`                   // true if root domain (no CNAME possible)
-	StatusMessage     string    `json:"status_message,omitempty"`  // human-readable verification detail
-	RedeployTriggered bool      `json:"redeploy_triggered"`        // true if a redeploy was triggered for this change
+	Status            string    `json:"status"`                   // pending, deploying, active, misconfigured, failed
+	URL               string    `json:"url,omitempty"`            // full https URL — only set when status == "active" (deploy confirmed live)
+	DNSRecord         string    `json:"dns_record"`               // CNAME target (always set)
+	ARecordTarget     string    `json:"a_record_target"`          // A record IP (resolved from CNAME target)
+	IsApex            bool      `json:"is_apex"`                  // true if root domain (no CNAME possible)
+	StatusMessage     string    `json:"status_message,omitempty"` // human-readable verification detail
+	RedeployTriggered bool      `json:"redeploy_triggered"`       // true if a redeploy was triggered for this change
 	CreatedAt         time.Time `json:"created_at"`
 }
 

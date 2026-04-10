@@ -82,6 +82,9 @@ func verifyDomainDNS(domainName string) (status string, message string) {
 }
 
 // buildDomainResponse creates a response with computed fields (apex detection, A record target).
+// The URL field is intentionally only populated when the Coolify deploy is
+// confirmed complete (status == "active") so the frontend cannot expose a
+// live-looking URL to users while the app is still mid-deploy.
 func buildDomainResponse(d *models.AppDomain, statusMessage string) *responses.AppDomainResponse {
 	// Resolve our server's IP for A record instructions
 	aRecordTarget := ""
@@ -90,10 +93,16 @@ func buildDomainResponse(d *models.AppDomain, statusMessage string) *responses.A
 		aRecordTarget = addrs[0]
 	}
 
+	var liveURL string
+	if d.Status == "active" {
+		liveURL = "https://" + d.Domain
+	}
+
 	return &responses.AppDomainResponse{
 		ID:            d.ID,
 		Domain:        d.Domain,
 		Status:        d.Status,
+		URL:           liveURL,
 		DNSRecord:     constants.WEMOB_CNAME_TARGET,
 		ARecordTarget: aRecordTarget,
 		IsApex:        isApexDomain(d.Domain),
@@ -102,7 +111,10 @@ func buildDomainResponse(d *models.AppDomain, statusMessage string) *responses.A
 	}
 }
 
-// GetAppDomains returns all domains for an app project.
+// GetAppDomains returns all domains for an app project. Any domain that is
+// still in the "deploying" state has its Coolify deployment polled so it can
+// transition to "active" (build finished) or "failed" (build errored) without
+// waiting for the user to manually re-verify.
 func (c *Controller) GetAppDomains(projectID string) ([]responses.AppDomainResponse, error) {
 	domains, err := c.DB.GetAppDomainsByProjectID(projectID)
 	if err != nil {
@@ -110,10 +122,42 @@ func (c *Controller) GetAppDomains(projectID string) ([]responses.AppDomainRespo
 	}
 
 	result := make([]responses.AppDomainResponse, len(domains))
-	for i, d := range domains {
-		result[i] = *buildDomainResponse(&d, "")
+	for i := range domains {
+		d := &domains[i]
+		if d.Status == "deploying" && d.DeploymentUUID != "" && c.CoolifyService != nil {
+			c.refreshDeployingDomain(d)
+		}
+		result[i] = *buildDomainResponse(d, "")
 	}
 	return result, nil
+}
+
+// refreshDeployingDomain polls Coolify for the status of the deployment
+// associated with this domain and updates the domain's status in-place
+// (and in the DB) if the deploy reached a terminal state.
+func (c *Controller) refreshDeployingDomain(d *models.AppDomain) {
+	dep, err := c.CoolifyService.GetDeploymentByUUID(d.DeploymentUUID)
+	if err != nil {
+		slog.Warn("Failed to poll Coolify deployment for domain", "domain", d.Domain, "deployment_uuid", d.DeploymentUUID, "error", err)
+		return
+	}
+
+	coolifyStatus := strings.ToLower(dep.Status)
+	switch {
+	case coolifyStatus == "finished" || coolifyStatus == "success":
+		d.Status = "active"
+		d.DeploymentUUID = ""
+	case coolifyStatus == "failed" || coolifyStatus == "error" || coolifyStatus == "cancelled":
+		d.Status = "failed"
+		d.DeploymentUUID = ""
+	default:
+		// still in-progress (queued, running, ...) — leave as "deploying"
+		return
+	}
+
+	if _, err := c.DB.UpdateAppDomain(d); err != nil {
+		slog.Error("Failed to persist domain status after deploy poll", "domain", d.Domain, "error", err)
+	}
 }
 
 // AddAppDomain adds a custom domain to an app project.
@@ -164,8 +208,13 @@ func (c *Controller) AddAppDomain(project *models.AppProject, user *models.User,
 		return nil, fmt.Errorf("failed to add domain: %v", err)
 	}
 
+	// Run an initial DNS check — domain might already be configured
+	status, msg := verifyDomainDNS(domainName)
+
 	// Register with Coolify and redeploy so the proxy picks up the new domain.
 	// A restart only restarts the container — a deploy regenerates proxy config.
+	// The domain is marked "deploying" until the Coolify build completes so the
+	// frontend does not expose the URL to users before the app is actually live.
 	var redeployTriggered bool
 	coolifyProject, cpErr := c.DB.GetCoolifyProjectByAppProjectID(project.ID.String())
 	if cpErr == nil && coolifyProject != nil && c.CoolifyService != nil {
@@ -173,21 +222,21 @@ func (c *Controller) AddAppDomain(project *models.AppProject, user *models.User,
 		if err := c.CoolifyService.UpdateDomains(coolifyProject.CoolifyAppUUID, domains); err != nil {
 			slog.Warn("Failed to add domain to Coolify", "domain", domainName, "error", err)
 		}
-		redeployTriggered = true
-		go func() {
-			if err := c.CoolifyService.DeployApp(coolifyProject.CoolifyAppUUID); err != nil {
-				slog.Warn("Failed to redeploy Coolify app after domain add", "domain", domainName, "error", err)
+		deploymentUUID, deployErr := c.CoolifyService.DeployApp(coolifyProject.CoolifyAppUUID)
+		if deployErr != nil {
+			slog.Warn("Failed to redeploy Coolify app after domain add", "domain", domainName, "error", deployErr)
+		} else {
+			redeployTriggered = true
+			created.DeploymentUUID = deploymentUUID
+			// Only transition to "deploying" if DNS already resolves correctly —
+			// otherwise stay "pending" so the user still sees DNS guidance.
+			if status == "active" {
+				created.Status = "deploying"
+				msg = "DNS verified — waiting for Coolify to finish deploying."
 			}
-		}()
-	}
-
-	// Run an initial DNS check — domain might already be configured
-	status, msg := verifyDomainDNS(domainName)
-	if status == "active" {
-		created.Status = "active"
-		if _, err := c.DB.UpdateAppDomain(created); err != nil {
-			slog.Error("Failed to update domain status after DNS check", "domain", domainName, "error", err)
-			created.Status = "pending"
+			if _, err := c.DB.UpdateAppDomain(created); err != nil {
+				slog.Error("Failed to persist domain deploy state", "domain", domainName, "error", err)
+			}
 		}
 	}
 
@@ -223,11 +272,9 @@ func (c *Controller) RemoveAppDomain(domainID string, project *models.AppProject
 			if err := c.CoolifyService.UpdateDomains(coolifyProject.CoolifyAppUUID, filtered); err != nil {
 				slog.Warn("Failed to remove domain from Coolify", "domain", domain.Domain, "error", err)
 			}
-			go func() {
-				if err := c.CoolifyService.DeployApp(coolifyProject.CoolifyAppUUID); err != nil {
-					slog.Warn("Failed to redeploy Coolify app after domain remove", "domain", domain.Domain, "error", err)
-				}
-			}()
+			if _, err := c.CoolifyService.DeployApp(coolifyProject.CoolifyAppUUID); err != nil {
+				slog.Warn("Failed to redeploy Coolify app after domain remove", "domain", domain.Domain, "error", err)
+			}
 		}
 	}
 
@@ -249,30 +296,52 @@ func (c *Controller) VerifyAppDomain(domainID string, project *models.AppProject
 		return nil, errors.New("domain does not belong to this project")
 	}
 
+	// If the domain is already mid-deploy, don't re-trigger Coolify — just
+	// poll the existing deployment and report its current state back.
+	if domain.Status == "deploying" && domain.DeploymentUUID != "" && c.CoolifyService != nil {
+		c.refreshDeployingDomain(domain)
+		msg := "DNS verified — waiting for Coolify to finish deploying."
+		if domain.Status == "active" {
+			msg = "Deployment finished — your custom domain is live."
+		} else if domain.Status == "failed" {
+			msg = "Coolify build failed — try redeploying or contact support."
+		}
+		return buildDomainResponse(domain, msg), nil
+	}
+
 	status, msg := verifyDomainDNS(domain.Domain)
-	domain.Status = status
+	if status != "active" {
+		domain.Status = status
+	} else {
+		domain.Status = "active"
+	}
+
+	// If DNS is verified and Coolify project exists, sync all domains and
+	// kick off a redeploy. The domain stays in "deploying" state until the
+	// Coolify build finishes so the frontend doesn't expose the URL early.
+	var redeployTriggered bool
+	if status == "active" && c.CoolifyService != nil {
+		coolifyProject, cpErr := c.DB.GetCoolifyProjectByAppProjectID(project.ID.String())
+		if cpErr == nil && coolifyProject != nil {
+			// Pass domain.Domain as extraDomain so it's included even when its
+			// persisted status is still "pending" (first-time verification).
+			domains := c.buildCoolifyDomainList(coolifyProject, project.ID.String(), domain.Domain)
+			if err := c.CoolifyService.UpdateDomains(coolifyProject.CoolifyAppUUID, domains); err != nil {
+				slog.Warn("Failed to sync verified domain to Coolify", "domain", domain.Domain, "error", err)
+			} else if deploymentUUID, err := c.CoolifyService.DeployApp(coolifyProject.CoolifyAppUUID); err != nil {
+				slog.Warn("Failed to redeploy Coolify app after domain verify", "domain", domain.Domain, "error", err)
+			} else {
+				redeployTriggered = true
+				domain.Status = "deploying"
+				domain.DeploymentUUID = deploymentUUID
+				msg = "DNS verified — waiting for Coolify to finish deploying."
+			}
+		}
+	}
 
 	// WEM-268: Check UpdateAppDomain error
 	if _, err := c.DB.UpdateAppDomain(domain); err != nil {
 		return nil, fmt.Errorf("failed to update domain status: %v", err)
-	}
-
-	// If domain became active and Coolify project exists, sync all domains and redeploy
-	var redeployTriggered bool
-	if domain.Status == "active" && c.CoolifyService != nil {
-		coolifyProject, cpErr := c.DB.GetCoolifyProjectByAppProjectID(project.ID.String())
-		if cpErr == nil && coolifyProject != nil {
-			domains := c.buildCoolifyDomainList(coolifyProject, project.ID.String(), "")
-			if err := c.CoolifyService.UpdateDomains(coolifyProject.CoolifyAppUUID, domains); err != nil {
-				slog.Warn("Failed to sync verified domain to Coolify", "domain", domain.Domain, "error", err)
-			}
-			redeployTriggered = true
-			go func() {
-				if err := c.CoolifyService.DeployApp(coolifyProject.CoolifyAppUUID); err != nil {
-					slog.Warn("Failed to redeploy Coolify app after domain verify", "domain", domain.Domain, "error", err)
-				}
-			}()
-		}
 	}
 
 	resp := buildDomainResponse(domain, msg)
@@ -281,16 +350,19 @@ func (c *Controller) VerifyAppDomain(domainID string, project *models.AppProject
 }
 
 // buildCoolifyDomainList builds the complete list of domains for a Coolify app.
-// It always includes the default wemob.app subdomain, plus all active custom domains
-// from the database, plus an optional extra domain being added.
+// It always includes the default wemob.app subdomain, plus all verified custom
+// domains from the database (whether already live or mid-deploy), plus an
+// optional extra domain being added.
 func (c *Controller) buildCoolifyDomainList(coolifyProject *models.CoolifyProject, projectID string, extraDomain string) []string {
 	domains := []string{"https://" + coolifyProject.CustomDomain}
 
-	// WEM-270: Only include verified (active) custom domains
+	// WEM-270: Only include verified custom domains. A "deploying" domain is
+	// still verified — Coolify already knows about it, we just haven't observed
+	// the build finish yet, so we must keep it in the list.
 	appDomains, err := c.DB.GetAppDomainsByProjectID(projectID)
 	if err == nil {
 		for _, d := range appDomains {
-			if d.Status == "active" {
+			if d.Status == "active" || d.Status == "deploying" {
 				domains = append(domains, "https://"+d.Domain)
 			}
 		}

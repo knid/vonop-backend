@@ -157,12 +157,61 @@ func (s *Service) RestartApp(appUUID string) error {
 	return err
 }
 
-// DeployApp triggers a full rebuild and redeploy of the application.
+// DeployApp triggers a full rebuild and redeploy of the application and returns
+// the Coolify deployment UUID so callers can track the specific deploy's progress.
 // Use this instead of RestartApp when configuration changes (domains, etc.)
 // need the proxy to be regenerated.
-func (s *Service) DeployApp(appUUID string) error {
-	_, err := s.doRequest("GET", fmt.Sprintf("/applications/%s/deploy", appUUID), nil)
-	return err
+func (s *Service) DeployApp(appUUID string) (string, error) {
+	body, err := s.doRequest("GET", fmt.Sprintf("/deploy?uuid=%s", appUUID), nil)
+	if err != nil {
+		return "", err
+	}
+
+	var resp struct {
+		Deployments []struct {
+			ResourceUUID   string `json:"resource_uuid"`
+			DeploymentUUID string `json:"deployment_uuid"`
+			Message        string `json:"message"`
+		} `json:"deployments"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return "", fmt.Errorf("coolify: unmarshal deploy: %w", err)
+	}
+	if len(resp.Deployments) == 0 {
+		return "", fmt.Errorf("coolify: deploy response contained no deployments")
+	}
+	return resp.Deployments[0].DeploymentUUID, nil
+}
+
+// GetDeploymentByUUID returns the status of a specific deployment. Used to track
+// the progress of a deploy that was previously triggered via DeployApp.
+func (s *Service) GetDeploymentByUUID(deploymentUUID string) (*DeploymentStatus, error) {
+	body, err := s.doRequest("GET", fmt.Sprintf("/deployments/%s", deploymentUUID), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var detail struct {
+		Status    string `json:"status"`
+		Logs      string `json:"logs"`
+		CreatedAt string `json:"created_at"`
+	}
+	if err := json.Unmarshal(body, &detail); err != nil {
+		return nil, fmt.Errorf("coolify: unmarshal deployment: %w", err)
+	}
+
+	result := &DeploymentStatus{
+		Status: detail.Status,
+		Logs:   detail.Logs,
+	}
+	if detail.CreatedAt != "" {
+		if t, err := time.Parse(time.RFC3339, detail.CreatedAt); err == nil {
+			result.CreatedAt = t
+		} else if t, err := time.Parse("2006-01-02T15:04:05.000000Z", detail.CreatedAt); err == nil {
+			result.CreatedAt = t
+		}
+	}
+	return result, nil
 }
 
 // GetAppStatus returns the current status of an application.
