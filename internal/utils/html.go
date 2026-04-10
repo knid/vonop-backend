@@ -202,28 +202,38 @@ func ExtractAllURLs(htmlContent string, baseURL string) []string {
 	return results
 }
 
-// StripCodeFences removes markdown code fences (```lang ... ```) from LLM output.
-// Searches anywhere in the content, not just at the start, to handle preamble text.
+// StripCodeFences removes markdown code fences (```lang ... ```) that wrap
+// LLM-generated file content. Only strips when the content genuinely begins
+// with a fence — never searches for fences in the interior, because legitimate
+// file content may contain ``` literals (e.g. a markdown renderer that
+// detects code blocks via line.startsWith('```')). An earlier version used
+// strings.Index/LastIndex, which mangled any file containing a triple-backtick
+// literal by treating it as a fence and discarding everything before/after.
 func StripCodeFences(content string) string {
-	content = strings.TrimSpace(content)
-
-	idx := strings.Index(content, "```")
-	if idx < 0 {
+	trimmed := strings.TrimSpace(content)
+	if !strings.HasPrefix(trimmed, "```") {
+		// No opening fence at the start — content is already clean. Return
+		// the ORIGINAL (not the trimmed copy) so we don't silently strip
+		// leading/trailing whitespace that the caller may intentionally preserve.
 		return content
 	}
 
-	// Skip past the opening fence line (e.g. "```tsx\n")
-	inner := content[idx+3:]
+	// Strip the opening fence line. The opening line is "```" optionally
+	// followed by a language hint (e.g. "```tsx"), terminated by a newline.
+	inner := trimmed[3:]
 	if nlIdx := strings.Index(inner, "\n"); nlIdx >= 0 {
 		inner = inner[nlIdx+1:]
+	} else {
+		// Opening fence with no newline after it — treat the whole remainder
+		// as content and let any trailing-fence stripping below handle it.
 	}
 
-	// Find the last closing fence
-	if closingIdx := strings.LastIndex(inner, "\n```"); closingIdx >= 0 {
-		return strings.TrimSpace(inner[:closingIdx])
+	// Strip the closing fence if the (trimmed) content ends with ```.
+	inner = strings.TrimRight(inner, " \t\n\r")
+	if strings.HasSuffix(inner, "```") {
+		inner = strings.TrimRight(strings.TrimSuffix(inner, "```"), " \t\n\r")
 	}
-
-	return strings.TrimSpace(strings.TrimSuffix(inner, "```"))
+	return inner
 }
 
 // ExtractJSON finds the outermost JSON object or array in a string by matching braces/brackets.
