@@ -265,7 +265,7 @@ func (v *HttpViews) GetApp(w http.ResponseWriter, r *http.Request) {
 	fileMap, _ := v.Controller.GetAppGeneratedFiles(project.ID.String())
 	var fileResp []responses.AppFileResponse
 	for path, content := range fileMap {
-		if path == ".env.local" {
+		if controllers.IsHiddenEditorFile(path) {
 			continue
 		}
 		fileResp = append(fileResp, responses.AppFileResponse{
@@ -387,7 +387,7 @@ func (v *HttpViews) GetAppFiles(w http.ResponseWriter, r *http.Request) {
 
 	var resp []responses.AppFileResponse
 	for path, content := range fileMap {
-		if path == ".env.local" {
+		if controllers.IsHiddenEditorFile(path) {
 			continue
 		}
 		resp = append(resp, responses.AppFileResponse{
@@ -423,6 +423,10 @@ func (v *HttpViews) CreateAppFile(w http.ResponseWriter, r *http.Request) {
 	validate := validator.New()
 	if err := req.Validate(validate); err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if controllers.IsHiddenEditorFile(req.FilePath) {
+		utils.JSONErrorResponse(w, "this file is managed by the platform and cannot be edited", http.StatusForbidden)
 		return
 	}
 
@@ -469,6 +473,10 @@ func (v *HttpViews) UpdateAppFile(w http.ResponseWriter, r *http.Request) {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	if controllers.IsHiddenEditorFile(fid) {
+		utils.JSONErrorResponse(w, "this file is managed by the platform and cannot be edited", http.StatusForbidden)
+		return
+	}
 
 	// fid is the file path
 	if err := v.Controller.UpdateAppFile(project, fid, req.Content); err != nil {
@@ -501,6 +509,10 @@ func (v *HttpViews) DeleteAppFile(w http.ResponseWriter, r *http.Request) {
 	project, err := v.Controller.GetAppProject(appID, user)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	if controllers.IsHiddenEditorFile(fid) {
+		utils.JSONErrorResponse(w, "this file is managed by the platform and cannot be deleted", http.StatusForbidden)
 		return
 	}
 
@@ -1140,7 +1152,7 @@ func (v *HttpViews) GetAppInit(w http.ResponseWriter, r *http.Request) {
 
 	var fileResp []responses.AppFileResponse
 	for path, content := range fileMap {
-		if path == ".env.local" {
+		if controllers.IsHiddenEditorFile(path) {
 			continue
 		}
 		fileResp = append(fileResp, responses.AppFileResponse{

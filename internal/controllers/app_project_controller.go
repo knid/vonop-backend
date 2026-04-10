@@ -463,6 +463,18 @@ func (c *Controller) ExportAppAsZIP(projectID string) (map[string]string, error)
 	return repo.ReadAllFiles()
 }
 
+// IsHiddenEditorFile reports whether a file should be excluded from the
+// frontend code editor response. These files exist in the project repo because
+// wemob-backend or the build system needs them, but users must not see or
+// edit them (editing breaks deploys or leaks secrets).
+func IsHiddenEditorFile(path string) bool {
+	switch path {
+	case ".env.local", "Dockerfile":
+		return true
+	}
+	return false
+}
+
 // InferFileType extracts a file type identifier from the file extension.
 func InferFileType(path string) string {
 	ext := filepath.Ext(path)
