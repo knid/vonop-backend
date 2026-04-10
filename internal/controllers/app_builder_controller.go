@@ -780,6 +780,15 @@ The user's message is an auto-reported build or runtime error. Follow these rule
 		}
 		var failedEdits []failedEditRecord
 
+		// Track re-reads of unchanged files to break the read-loop failure mode
+		// where the model keeps calling read_file on the same file without ever
+		// emitting <wemob_edit> blocks. writeVersion bumps on every successful
+		// write/edit/delete; readAtVersion records the version at which each file
+		// was last served via InterceptToolCall below. All three callbacks run on
+		// the same goroutine as StreamWithTools, so no synchronization is needed.
+		writeVersion := 0
+		readAtVersion := map[string]int{}
+
 		parser := &utils.FileStreamParser{
 			DiscardIncomplete: true,
 			OnFile: func(path, content string) {
@@ -790,6 +799,8 @@ The user's message is an auto-reported build or runtime error. Follow these rule
 				}
 				if err := c.saveGeneratedFile(project, repo, path, content, fileType, fileMap, sendEvent, &toolAppliedOps, true); err != nil {
 					slog.Error("chat file save failed", "path", path, "error", err)
+				} else {
+					writeVersion++
 				}
 				chatFileCounter++
 				sendEvent("progress", responses.ProgressEvent{
@@ -801,6 +812,8 @@ The user's message is an auto-reported build or runtime error. Follow these rule
 			OnDelete: func(path string) {
 				if err := c.deleteGeneratedFile(project, repo, path, fileMap, sendEvent, &toolAppliedOps); err != nil {
 					slog.Error("chat file delete failed", "path", path, "error", err)
+				} else {
+					writeVersion++
 				}
 				deletedPaths = append(deletedPaths, path)
 			},
@@ -829,6 +842,8 @@ The user's message is an auto-reported build or runtime error. Follow these rule
 				}
 				if err := c.saveGeneratedFile(project, repo, path, result, fileType, fileMap, sendEvent, &toolAppliedOps, true); err != nil {
 					slog.Error("edit file save failed", "path", path, "error", err)
+				} else {
+					writeVersion++
 				}
 				chatFileCounter++
 				sendEvent("progress", responses.ProgressEvent{
@@ -895,11 +910,13 @@ The user's message is an auto-reported build or runtime error. Follow these rule
 			utils.ToolCallConfig{
 				MaxRounds:        10,
 				NudgeAfter:       5,
-				StripAfter:       -1, // disabled — let the model decide when it has enough context
+				StripAfter:       6, // backstop: force a final text response if reads don't converge
 				MaxTokens:        65536,
 				MaxContinuations: 3,
 				ShouldContinue:   shouldContinueCredits,
 				NudgeMessage: "When you have enough context, output your code changes using <wemob_file> and <wemob_edit> blocks. You can still call read_file if needed.",
+				StripMessage: "STOP reading files. Output your code changes NOW using <wemob_file> and <wemob_edit> blocks. No more tool calls.\n\n" +
+					"Format:\n<wemob_edit path=\"src/components/Foo.tsx\">\n<wemob_search>\nold lines\n</wemob_search>\n<wemob_replace>\nnew lines\n</wemob_replace>\n</wemob_edit>",
 				OnRoundStart: func(round int) {
 					parser.Flush()
 				},
@@ -988,17 +1005,36 @@ The user's message is an auto-reported build or runtime error. Follow these rule
 					// Fast-path read_file from in-memory fileMap (always current).
 					// Safe: all fileMap writes (saveGeneratedFile) and reads (here) execute
 					// on the same goroutine — StreamWithTools processes tools sequentially.
-					if toolName == "read_file" {
-						var args struct {
-							FilePath string `json:"file_path"`
-						}
-						if json.Unmarshal([]byte(toolArgs), &args) == nil && args.FilePath != "" {
-							if content, ok := fileMap[args.FilePath]; ok {
-								return content, true
-							}
-						}
+					if toolName != "read_file" {
+						return "", false
 					}
-					return "", false
+					var args struct {
+						FilePath string `json:"file_path"`
+					}
+					if err := json.Unmarshal([]byte(toolArgs), &args); err != nil || args.FilePath == "" {
+						return "", false
+					}
+					content, ok := fileMap[args.FilePath]
+					if !ok {
+						return "", false
+					}
+					// Re-read guard: if we already served this file since the last
+					// successful write and its contents have not changed, don't
+					// re-serve the bytes — that is how the model gets stuck in
+					// read-loops narrating "I see the problem, now I'll fix it"
+					// without ever emitting <wemob_edit> blocks. Return a corrective
+					// message instead; the model still has the content from the
+					// previous round in its context.
+					if prev, seen := readAtVersion[args.FilePath]; seen && prev == writeVersion {
+						slog.Warn("chat: blocking re-read of unchanged file",
+							"path", args.FilePath, "project_id", project.ID)
+						return fmt.Sprintf(
+							"[system] You already read %s in this session and its contents have not changed. STOP re-reading. Output your fix using <wemob_file> or <wemob_edit> blocks NOW.",
+							args.FilePath,
+						), true
+					}
+					readAtVersion[args.FilePath] = writeVersion
+					return content, true
 				},
 			},
 		)
