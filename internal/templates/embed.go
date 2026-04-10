@@ -46,6 +46,7 @@ var BaseFilePaths = []string{
 	"tsconfig.json",
 	"postcss.config.mjs",
 	"next.config.mjs",
+	"Dockerfile",
 	"app/globals.css",
 	"app/not-found.tsx",
 	"app/error.tsx",

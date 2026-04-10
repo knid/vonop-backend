@@ -125,7 +125,7 @@ func (s *Service) CreateApp(name, giteaRepoURL, domain, memoryLimit, cpuLimit st
 		EnvironmentName:    s.EnvironmentName,
 		GitRepository:      giteaRepoURL,
 		GitBranch:          "main",
-		BuildPack:          "nixpacks",
+		BuildPack:          "dockerfile",
 		PortsExposes:       "3000",
 		Domains:            "https://" + domain,
 		InstantDeploy:      false,
