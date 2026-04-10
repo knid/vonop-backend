@@ -780,14 +780,17 @@ The user's message is an auto-reported build or runtime error. Follow these rule
 		}
 		var failedEdits []failedEditRecord
 
-		// Track re-reads of unchanged files to break the read-loop failure mode
-		// where the model keeps calling read_file on the same file without ever
-		// emitting <wemob_edit> blocks. writeVersion bumps on every successful
-		// write/edit/delete; readAtVersion records the version at which each file
-		// was last served via InterceptToolCall below. All three callbacks run on
-		// the same goroutine as StreamWithTools, so no synchronization is needed.
-		writeVersion := 0
-		readAtVersion := map[string]int{}
+		// Track reads per file since its last successful write to break the
+		// read-loop failure mode where the model keeps calling read_file on the
+		// same file without ever emitting <wemob_edit> blocks. We allow up to
+		// maxReadsPerWriteCycle reads per file — enough for the model to re-read
+		// once during a verification flow — then return a corrective message
+		// instead of re-serving the bytes. A successful write to a path deletes
+		// its counter, so legitimate re-reads after edits still work.
+		// All callbacks run on the same goroutine as StreamWithTools, so no
+		// synchronization is needed.
+		const maxReadsPerWriteCycle = 2
+		readsSinceWrite := map[string]int{}
 
 		parser := &utils.FileStreamParser{
 			DiscardIncomplete: true,
@@ -800,7 +803,7 @@ The user's message is an auto-reported build or runtime error. Follow these rule
 				if err := c.saveGeneratedFile(project, repo, path, content, fileType, fileMap, sendEvent, &toolAppliedOps, true); err != nil {
 					slog.Error("chat file save failed", "path", path, "error", err)
 				} else {
-					writeVersion++
+					delete(readsSinceWrite, path)
 				}
 				chatFileCounter++
 				sendEvent("progress", responses.ProgressEvent{
@@ -813,7 +816,7 @@ The user's message is an auto-reported build or runtime error. Follow these rule
 				if err := c.deleteGeneratedFile(project, repo, path, fileMap, sendEvent, &toolAppliedOps); err != nil {
 					slog.Error("chat file delete failed", "path", path, "error", err)
 				} else {
-					writeVersion++
+					delete(readsSinceWrite, path)
 				}
 				deletedPaths = append(deletedPaths, path)
 			},
@@ -843,7 +846,7 @@ The user's message is an auto-reported build or runtime error. Follow these rule
 				if err := c.saveGeneratedFile(project, repo, path, result, fileType, fileMap, sendEvent, &toolAppliedOps, true); err != nil {
 					slog.Error("edit file save failed", "path", path, "error", err)
 				} else {
-					writeVersion++
+					delete(readsSinceWrite, path)
 				}
 				chatFileCounter++
 				sendEvent("progress", responses.ProgressEvent{
@@ -1018,22 +1021,23 @@ The user's message is an auto-reported build or runtime error. Follow these rule
 					if !ok {
 						return "", false
 					}
-					// Re-read guard: if we already served this file since the last
-					// successful write and its contents have not changed, don't
-					// re-serve the bytes — that is how the model gets stuck in
-					// read-loops narrating "I see the problem, now I'll fix it"
-					// without ever emitting <wemob_edit> blocks. Return a corrective
-					// message instead; the model still has the content from the
-					// previous round in its context.
-					if prev, seen := readAtVersion[args.FilePath]; seen && prev == writeVersion {
-						slog.Warn("chat: blocking re-read of unchanged file",
-							"path", args.FilePath, "project_id", project.ID)
+					// Re-read guard. Allow up to maxReadsPerWriteCycle reads of a
+					// given file per write-cycle; block further reads with a
+					// factual message. This catches the stuck read-loop pattern
+					// without blocking legitimate verification flows where the
+					// model reads, cross-checks, and re-reads once.
+					if readsSinceWrite[args.FilePath] >= maxReadsPerWriteCycle {
+						slog.Warn("chat: blocking repeated read of unchanged file",
+							"path", args.FilePath,
+							"reads", readsSinceWrite[args.FilePath],
+							"project_id", project.ID)
 						return fmt.Sprintf(
-							"[system] You already read %s in this session and its contents have not changed. STOP re-reading. Output your fix using <wemob_file> or <wemob_edit> blocks NOW.",
+							"[system] You already read %s %d times in this session and its contents have not changed since. The full content is in your context from those earlier reads — use what you already have. Do not call read_file for this path again unless a write/edit happens first.",
 							args.FilePath,
+							readsSinceWrite[args.FilePath],
 						), true
 					}
-					readAtVersion[args.FilePath] = writeVersion
+					readsSinceWrite[args.FilePath]++
 					return content, true
 				},
 			},
