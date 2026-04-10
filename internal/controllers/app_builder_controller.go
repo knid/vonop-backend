@@ -43,53 +43,14 @@ func isErrorReport(msg string) bool {
 		(strings.Contains(msg, "## Code Frame") || strings.Contains(msg, "at ") || strings.Contains(msg, "Module not found"))
 }
 
-// looksLikeStopShort returns true when an assistant response reads like a
-// promise to write code but no code was actually produced. We use this to
-// detect the failure mode where Claude narrates "I'll rewrite the file..."
-// and then ends the turn without emitting any <wemob_file>/<wemob_edit>
-// blocks (observed in PostHog traces d0ab6d11 and f14e9a85).
-//
-// Caller is responsible for verifying no files were actually written; this
-// function only checks the text side. We require a non-trivial response
-// length so short "done!" messages don't false-positive.
-func looksLikeStopShort(text string) bool {
-	if len(strings.TrimSpace(text)) < 60 {
-		return false
-	}
-	lower := strings.ToLower(text)
-	// Intent phrases the model uses right before it stop-shorts. Matched
-	// case-insensitively. Keep this list conservative — false positives here
-	// cause an extra LLM call, which is cheap, but we still want to avoid
-	// retrying on Q&A responses that legitimately have no code.
-	intents := []string{
-		"i'll rewrite",
-		"let me rewrite",
-		"i will rewrite",
-		"i'll fix",
-		"let me fix",
-		"i will fix",
-		"going to fix",
-		"i'll replace",
-		"let me replace",
-		"i'll create a new",
-		"let me create a new",
-		"rewrite the full file",
-		"rewrite the file",
-		"do a full rewrite",
-		"full rewrite",
-		"here's the fix",
-		"here is the fix",
-		"here's the corrected",
-		"here is the corrected",
-		"clean implementation",
-	}
-	for _, phrase := range intents {
-		if strings.Contains(lower, phrase) {
-			return true
-		}
-	}
-	return false
-}
+// stopShortSentinel is the exact string the model is instructed to reply with
+// during a stop-short retry when its previous response was a legitimate
+// non-code answer (Q&A, clarification, chit-chat). When the retry comes back
+// with only this sentinel, the caller preserves the original narration and
+// discards the retry output — this lets us trigger retries aggressively on
+// any "finished cleanly with zero file writes" case without corrupting
+// legitimate Q&A responses with surprise code edits.
+const stopShortSentinel = "NO_CODE_NEEDED"
 
 // normalizeContent trims whitespace and normalizes line endings for content
 // comparison. We preserve internal formatting (indentation, multi-line strings)
@@ -1177,30 +1138,25 @@ The user's message is an auto-reported build or runtime error. Follow these rule
 		}
 
 		// Stop-short retry: the model finished cleanly but zero file ops landed.
-		// Two failure modes trigger a retry:
+		// Trigger on the structural condition alone — any clean-completion turn
+		// with non-trivial text and no file writes gets one retry. The retry
+		// prompt tells the model to reply with stopShortSentinel if the previous
+		// response was legitimate Q&A (explaining code, chit-chat, clarifying
+		// requirements), which lets the model itself opt out of being "corrected"
+		// when no code was actually needed. This is strictly better than phrase
+		// matching: it's language-agnostic, has no maintenance burden, and
+		// handles failure modes the old detector missed (e.g. Turkish narrations
+		// in trace 93281a00 that the English phrase list didn't cover).
 		//
-		//  1. Narration-only stop-short — the model announced a rewrite/fix in
-		//     its visible text ("I'll rewrite..."), then ended without emitting
-		//     blocks. Detected via looksLikeStopShort(responseText).
-		//
-		//  2. Parser-dropped blocks — the model DID emit <wemob_edit>/<wemob_file>
-		//     openings but the parser couldn't close them (e.g. </invoke>
-		//     terminator variant the parser doesn't recognise, or malformed
-		//     tag shape). Detected via parser.AttemptedEdits/AttemptedFiles > 0
-		//     while toolAppliedOps is empty. This is a stronger signal than
-		//     text matching — if the model tried to write and nothing landed,
-		//     something is wrong regardless of the narration.
-		attemptedWrites := parser.AttemptedEdits + parser.AttemptedFiles
-		dropped := attemptedWrites > 0
-		narrated := looksLikeStopShort(responseText)
-		if chatErr == nil && len(toolAppliedOps) == 0 && (narrated || dropped) {
-			slog.Warn("chat: detected stop-short response, retrying with forcing prompt",
+		// The 60-char floor filters out short acknowledgements ("done!", "ok")
+		// so we don't burn an LLM call on trivially-short replies.
+		if chatErr == nil && len(toolAppliedOps) == 0 && len(strings.TrimSpace(responseText)) >= 60 {
+			slog.Warn("chat: zero file ops after clean completion, retrying with forcing prompt",
 				"project_id", project.ID,
 				"response_length", len(responseText),
 				"attempted_edits", parser.AttemptedEdits,
 				"attempted_files", parser.AttemptedFiles,
-				"trigger_narrated", narrated,
-				"trigger_dropped", dropped,
+				"tool_call_count", len(accToolCalls),
 			)
 
 			// Reset the response buffer so the retry's output replaces the
@@ -1212,12 +1168,13 @@ The user's message is an auto-reported build or runtime error. Follow these rule
 			copy(stopShortMessages, llmMessages)
 			stopShortMessages = append(stopShortMessages,
 				utils.Message{Role: "assistant", Content: priorNarration},
-				utils.Message{Role: "user", Content: "Your previous response announced a rewrite/fix but did not emit any <wemob_file> or <wemob_edit> blocks. Emit them NOW. Output ONLY the code blocks — no narration, no questions, no explanation. Use <wemob_file path=\"...\">full file content</wemob_file> for full rewrites, or <wemob_edit path=\"...\"><wemob_search>exact lines</wemob_search><wemob_replace>new lines</wemob_replace></wemob_edit> for targeted edits. If you already have enough context from the previous rounds (which you do — this is a retry), do NOT ask for more information. Just write the code."},
+				utils.Message{Role: "user", Content: fmt.Sprintf("Your previous response did not emit any <wemob_file> or <wemob_edit> blocks.\n\nIf your previous response was a legitimate answer that does NOT need code changes (explaining code, answering a question, chatting, or asking for clarification), reply with exactly `%s` and nothing else.\n\nOtherwise — if you promised a fix, rewrite, or new code — emit the blocks NOW. Output ONLY the code blocks, no narration, no questions, no explanation. Use <wemob_file path=\"...\">full file content</wemob_file> for full rewrites, or <wemob_edit path=\"...\"><wemob_search>exact lines</wemob_search><wemob_replace>new lines</wemob_replace></wemob_edit> for targeted edits. You already have enough context from the previous rounds — do not ask for more information.", stopShortSentinel)},
 			)
 
 			// Suppress chat_text streaming during the retry so the user sees
 			// one narration (the original, which already streamed) rather than
-			// two conflicting streams.
+			// two conflicting streams. The sentinel, if returned, is also
+			// suppressed from the user — we only consume it internally.
 			suppressChatText = true
 			_, stopShortErr := utils.StreamTextFromLLMWithMessages(
 				ctx, model, stopShortMessages, provider,
@@ -1238,22 +1195,36 @@ The user's message is an auto-reported build or runtime error. Follow these rule
 				slog.Warn("Stop-short retry failed", "error", stopShortErr, "project_id", project.ID)
 			}
 
-			if len(toolAppliedOps) > 0 {
+			retryText := responseBuilder.String()
+			retryTrimmed := strings.TrimSpace(retryText)
+			sentinelReturned := strings.Contains(retryTrimmed, stopShortSentinel) && len(retryTrimmed) < len(stopShortSentinel)+20
+
+			switch {
+			case sentinelReturned:
+				// Model confirmed the original response was a legitimate Q&A.
+				// Keep the original narration and discard the retry output.
+				slog.Info("Stop-short retry returned sentinel, preserving original response",
+					"project_id", project.ID)
+				responseText = priorNarration
+			case len(toolAppliedOps) > 0:
 				slog.Info("Stop-short retry succeeded, files written",
 					"project_id", project.ID, "files_changed", len(toolAppliedOps))
-			} else {
-				slog.Warn("Stop-short retry produced no file changes",
+				// Keep the original narration so the user still sees the model's
+				// explanation of what it did; append retry text only if it has
+				// meaningful content beyond code blocks.
+				if retryTrimmed == "" {
+					responseText = priorNarration
+				} else {
+					responseText = priorNarration + "\n\n" + retryText
+				}
+			default:
+				slog.Warn("Stop-short retry produced no file changes and no sentinel",
 					"project_id", project.ID)
-			}
-
-			// responseText now reflects the retry's output (or empty if the
-			// retry only emitted code blocks). Keep the original narration as
-			// a prefix so the user still sees what the model was trying to do.
-			retryText := responseBuilder.String()
-			if strings.TrimSpace(retryText) == "" {
-				responseText = priorNarration
-			} else {
-				responseText = priorNarration + "\n\n" + retryText
+				if retryTrimmed == "" {
+					responseText = priorNarration
+				} else {
+					responseText = priorNarration + "\n\n" + retryText
+				}
 			}
 		}
 
