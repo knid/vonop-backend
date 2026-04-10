@@ -43,6 +43,54 @@ func isErrorReport(msg string) bool {
 		(strings.Contains(msg, "## Code Frame") || strings.Contains(msg, "at ") || strings.Contains(msg, "Module not found"))
 }
 
+// looksLikeStopShort returns true when an assistant response reads like a
+// promise to write code but no code was actually produced. We use this to
+// detect the failure mode where Claude narrates "I'll rewrite the file..."
+// and then ends the turn without emitting any <wemob_file>/<wemob_edit>
+// blocks (observed in PostHog traces d0ab6d11 and f14e9a85).
+//
+// Caller is responsible for verifying no files were actually written; this
+// function only checks the text side. We require a non-trivial response
+// length so short "done!" messages don't false-positive.
+func looksLikeStopShort(text string) bool {
+	if len(strings.TrimSpace(text)) < 60 {
+		return false
+	}
+	lower := strings.ToLower(text)
+	// Intent phrases the model uses right before it stop-shorts. Matched
+	// case-insensitively. Keep this list conservative — false positives here
+	// cause an extra LLM call, which is cheap, but we still want to avoid
+	// retrying on Q&A responses that legitimately have no code.
+	intents := []string{
+		"i'll rewrite",
+		"let me rewrite",
+		"i will rewrite",
+		"i'll fix",
+		"let me fix",
+		"i will fix",
+		"going to fix",
+		"i'll replace",
+		"let me replace",
+		"i'll create a new",
+		"let me create a new",
+		"rewrite the full file",
+		"rewrite the file",
+		"do a full rewrite",
+		"full rewrite",
+		"here's the fix",
+		"here is the fix",
+		"here's the corrected",
+		"here is the corrected",
+		"clean implementation",
+	}
+	for _, phrase := range intents {
+		if strings.Contains(lower, phrase) {
+			return true
+		}
+	}
+	return false
+}
+
 // normalizeContent trims whitespace and normalizes line endings for content
 // comparison. We preserve internal formatting (indentation, multi-line strings)
 // to avoid false "unchanged" results when only whitespace differs.
@@ -792,6 +840,13 @@ The user's message is an auto-reported build or runtime error. Follow these rule
 		const maxReadsPerWriteCycle = 2
 		readsSinceWrite := map[string]int{}
 
+		// Suppress streaming chat_text events during the stop-short retry so
+		// the user sees at most one narration per turn. Toggled on just before
+		// the retry StreamText call and off immediately after. The parser's
+		// OnText still writes to responseBuilder unconditionally so the final
+		// responseText reflects whatever the retry produced.
+		suppressChatText := false
+
 		parser := &utils.FileStreamParser{
 			DiscardIncomplete: true,
 			OnFile: func(path, content string) {
@@ -857,6 +912,9 @@ The user's message is an auto-reported build or runtime error. Follow these rule
 			},
 			OnText: func(text string) {
 				responseBuilder.WriteString(text)
+				if suppressChatText {
+					return
+				}
 				cleaned := ansiRegex.ReplaceAllString(text, "")
 				// Strip stray Anthropic-internal XML tags that may leak from the model
 				cleaned = sanitizeLLMLeakedXML(cleaned)
@@ -1116,6 +1174,72 @@ The user's message is an auto-reported build or runtime error. Follow these rule
 			}
 			// Capture retry output into responseText
 			responseText = responseBuilder.String()
+		}
+
+		// Stop-short retry: the model announced a rewrite/fix in its final text
+		// response but emitted zero file blocks. This happens when Claude
+		// convinces itself the read_file result was truncated, narrates "I'll
+		// rewrite..." repeatedly, and then ends the turn without following
+		// through. Detect the pattern (intent keywords + zero file ops + no
+		// error) and retry once without tools, forcing it to emit blocks.
+		if chatErr == nil && len(toolAppliedOps) == 0 && looksLikeStopShort(responseText) {
+			slog.Warn("chat: detected stop-short response, retrying with forcing prompt",
+				"project_id", project.ID,
+				"response_length", len(responseText),
+			)
+
+			// Reset the response buffer so the retry's output replaces the
+			// stalled narration in the persisted assistant message.
+			priorNarration := responseText
+			responseBuilder.Reset()
+
+			stopShortMessages := make([]utils.Message, len(llmMessages))
+			copy(stopShortMessages, llmMessages)
+			stopShortMessages = append(stopShortMessages,
+				utils.Message{Role: "assistant", Content: priorNarration},
+				utils.Message{Role: "user", Content: "Your previous response announced a rewrite/fix but did not emit any <wemob_file> or <wemob_edit> blocks. Emit them NOW. Output ONLY the code blocks — no narration, no questions, no explanation. Use <wemob_file path=\"...\">full file content</wemob_file> for full rewrites, or <wemob_edit path=\"...\"><wemob_search>exact lines</wemob_search><wemob_replace>new lines</wemob_replace></wemob_edit> for targeted edits. If you already have enough context from the previous rounds (which you do — this is a retry), do NOT ask for more information. Just write the code."},
+			)
+
+			// Suppress chat_text streaming during the retry so the user sees
+			// one narration (the original, which already streamed) rather than
+			// two conflicting streams.
+			suppressChatText = true
+			_, stopShortErr := utils.StreamTextFromLLMWithMessages(
+				ctx, model, stopShortMessages, provider,
+				func(chunk string) { parser.Feed(chunk) },
+				func(chunk string) {
+					thinkingBuf.WriteString(chunk)
+					sendEvent("chat_thinking", responses.ChatThinkingEvent{Chunk: chunk})
+				},
+				utils.StreamTextConfig{
+					MaxTokens: 65536,
+					Reasoning: reasoning,
+				},
+			)
+			parser.Flush()
+			suppressChatText = false
+
+			if stopShortErr != nil && !errors.Is(stopShortErr, utils.ErrResponseTruncated) {
+				slog.Warn("Stop-short retry failed", "error", stopShortErr, "project_id", project.ID)
+			}
+
+			if len(toolAppliedOps) > 0 {
+				slog.Info("Stop-short retry succeeded, files written",
+					"project_id", project.ID, "files_changed", len(toolAppliedOps))
+			} else {
+				slog.Warn("Stop-short retry produced no file changes",
+					"project_id", project.ID)
+			}
+
+			// responseText now reflects the retry's output (or empty if the
+			// retry only emitted code blocks). Keep the original narration as
+			// a prefix so the user still sees what the model was trying to do.
+			retryText := responseBuilder.String()
+			if strings.TrimSpace(retryText) == "" {
+				responseText = priorNarration
+			} else {
+				responseText = priorNarration + "\n\n" + retryText
+			}
 		}
 
 		// If the LLM only output file blocks with no surrounding text,
