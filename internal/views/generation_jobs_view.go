@@ -76,8 +76,21 @@ func (v *HttpViews) handleStreamOrAsync(w http.ResponseWriter, r *http.Request, 
 	var lastEvent *responses.SSEEvent
 	var allMilestoneEvents []models.JobEvent
 
+	streamState := newStreamStateBuffer()
 	keepalive := time.NewTicker(15 * time.Second)
 	defer keepalive.Stop()
+	stateFlush := time.NewTicker(500 * time.Millisecond)
+	defer stateFlush.Stop()
+
+	flushStreamState := func() {
+		raw, ok := streamState.Snapshot()
+		if !ok {
+			return
+		}
+		if err := v.Controller.DB.UpdateGenerationJobStreamState(job.ID.String(), raw); err != nil {
+			slog.Debug("failed to flush stream state", "job_id", job.ID, "error", err)
+		}
+	}
 
 	for {
 		select {
@@ -90,6 +103,9 @@ func (v *HttpViews) handleStreamOrAsync(w http.ResponseWriter, r *http.Request, 
 
 			// Fan out to any reconnected SSE subscribers
 			bus.Publish(event)
+
+			// Update the partial stream buffer for refresh recovery.
+			streamState.Apply(event)
 
 			// Always persist milestone events to DB
 			if controllers.IsMilestoneEvent(event.Event) {
@@ -104,6 +120,9 @@ func (v *HttpViews) handleStreamOrAsync(w http.ResponseWriter, r *http.Request, 
 					slog.Error("failed to persist job event", "job_id", job.ID, "error", err)
 				}
 				eventIndex++
+				// Flush the partial buffer alongside every milestone so reconnects
+				// between milestones see the latest authoritative state.
+				flushStreamState()
 			}
 
 			// Write to SSE if client is still connected
@@ -113,6 +132,9 @@ func (v *HttpViews) handleStreamOrAsync(w http.ResponseWriter, r *http.Request, 
 					slog.Info("SSE client disconnected, continuing job in background", "job_id", job.ID)
 				}
 			}
+
+		case <-stateFlush.C:
+			flushStreamState()
 
 		case <-keepalive.C:
 			// Send SSE keepalive comment to prevent proxy/client timeout
@@ -142,6 +164,11 @@ done:
 		}
 	}
 
+	// Clear any lingering partial stream state — the terminal milestone is authoritative.
+	if err := v.Controller.DB.UpdateGenerationJobStreamState(job.ID.String(), json.RawMessage("{}")); err != nil {
+		slog.Debug("failed to clear stream state on finalize", "job_id", job.ID, "error", err)
+	}
+
 	// StreamFunc finished (channel closed) — finalize job before cancelling context,
 	// otherwise FinalizeJob sees ctx.Err() != nil and marks the job as "cancelled".
 	v.Controller.FinalizeJob(job.ID.String(), ctx, lastEvent)
@@ -161,6 +188,20 @@ func (v *HttpViews) drainEventsToJob(ctx context.Context, cancel context.CancelF
 	var lastEvent *responses.SSEEvent
 	var allMilestoneEvents []models.JobEvent
 
+	streamState := newStreamStateBuffer()
+	stateFlush := time.NewTicker(500 * time.Millisecond)
+	defer stateFlush.Stop()
+
+	flushStreamState := func() {
+		raw, ok := streamState.Snapshot()
+		if !ok {
+			return
+		}
+		if err := v.Controller.DB.UpdateGenerationJobStreamState(job.ID.String(), raw); err != nil {
+			slog.Debug("failed to flush stream state", "job_id", job.ID, "error", err)
+		}
+	}
+
 	for {
 		select {
 		case event, ok := <-events:
@@ -177,6 +218,8 @@ func (v *HttpViews) drainEventsToJob(ctx context.Context, cancel context.CancelF
 				}
 			}
 
+			streamState.Apply(event)
+
 			if controllers.IsMilestoneEvent(event.Event) {
 				jobEvent := models.JobEvent{
 					Index: eventIndex,
@@ -189,7 +232,11 @@ func (v *HttpViews) drainEventsToJob(ctx context.Context, cancel context.CancelF
 					slog.Error("failed to persist job event", "job_id", job.ID, "error", err)
 				}
 				eventIndex++
+				flushStreamState()
 			}
+
+		case <-stateFlush.C:
+			flushStreamState()
 
 		case <-ctx.Done():
 			// Context expired — stop draining and finalize
@@ -204,6 +251,10 @@ finalize:
 		if err := v.Controller.DB.SetGenerationJobEvents(job.ID.String(), allMilestoneEvents); err != nil {
 			slog.Error("failed to batch-write job events", "job_id", job.ID, "error", err)
 		}
+	}
+
+	if err := v.Controller.DB.UpdateGenerationJobStreamState(job.ID.String(), json.RawMessage("{}")); err != nil {
+		slog.Debug("failed to clear stream state on finalize", "job_id", job.ID, "error", err)
 	}
 
 	v.Controller.FinalizeJob(job.ID.String(), ctx, lastEvent)
@@ -252,14 +303,15 @@ func (v *HttpViews) GetJob(w http.ResponseWriter, r *http.Request) {
 	}
 
 	utils.JSONResponse(w, responses.JobResponse{
-		ID:        job.ID,
-		Type:      job.Type,
-		Status:    job.Status,
-		Events:    eventsToReturn,
-		Result:    job.Result,
-		Error:     job.Error,
-		CreatedAt: job.CreatedAt,
-		UpdatedAt: job.UpdatedAt,
+		ID:          job.ID,
+		Type:        job.Type,
+		Status:      job.Status,
+		Events:      eventsToReturn,
+		StreamState: job.StreamState,
+		Result:      job.Result,
+		Error:       job.Error,
+		CreatedAt:   job.CreatedAt,
+		UpdatedAt:   job.UpdatedAt,
 	}, http.StatusOK)
 }
 
@@ -280,14 +332,15 @@ func (v *HttpViews) GetActiveJobs(w http.ResponseWriter, r *http.Request) {
 	var resp []responses.JobResponse
 	for _, job := range jobs {
 		resp = append(resp, responses.JobResponse{
-			ID:        job.ID,
-			Type:      job.Type,
-			Status:    job.Status,
-			Events:    job.Events,
-			Result:    job.Result,
-			Error:     job.Error,
-			CreatedAt: job.CreatedAt,
-			UpdatedAt: job.UpdatedAt,
+			ID:          job.ID,
+			Type:        job.Type,
+			Status:      job.Status,
+			Events:      job.Events,
+			StreamState: job.StreamState,
+			Result:      job.Result,
+			Error:       job.Error,
+			CreatedAt:   job.CreatedAt,
+			UpdatedAt:   job.UpdatedAt,
 		})
 	}
 
@@ -432,7 +485,16 @@ func (v *HttpViews) StreamJob(w http.ResponseWriter, r *http.Request) {
 
 	utils.SetSSEHeaders(w)
 
-	// First, replay persisted milestone events so the client catches up
+	// Emit the last persisted partial stream buffer first so the client can rehydrate
+	// in-flight streaming text/thinking/tool calls before milestone replay takes over.
+	if len(job.StreamState) > 0 && string(job.StreamState) != "{}" && string(job.StreamState) != "null" {
+		var stateData any
+		if err := json.Unmarshal(job.StreamState, &stateData); err == nil {
+			utils.WriteSSEEvent(w, flusher, "stream_state", stateData)
+		}
+	}
+
+	// Then replay persisted milestone events so the client catches up.
 	var milestoneEvents []json.RawMessage
 	if json.Unmarshal(job.Events, &milestoneEvents) == nil {
 		for _, raw := range milestoneEvents {

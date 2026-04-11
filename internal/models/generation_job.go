@@ -15,6 +15,7 @@ type GenerationJob struct {
 	Type          string          `bun:",notnull" json:"type"`
 	Status        string          `bun:",notnull,default:'running'" json:"status"` // running, completed, failed, cancelled
 	Events        json.RawMessage `bun:",type:jsonb,default:'[]'" json:"events"`
+	StreamState   json.RawMessage `bun:"stream_state,type:jsonb,default:'{}'" json:"stream_state"`
 	Result        json.RawMessage `bun:",type:jsonb,nullzero" json:"result,omitempty"`
 	Error         string          `bun:",nullzero" json:"error,omitempty"`
 	CreatedAt     time.Time       `bun:",nullzero,notnull,default:current_timestamp" json:"created_at"`

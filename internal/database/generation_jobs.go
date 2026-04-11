@@ -54,6 +54,19 @@ func (db *Database) SetGenerationJobEvents(jobID string, events []models.JobEven
 	return err
 }
 
+// UpdateGenerationJobStreamState overwrites the partial stream_state buffer on a job.
+// Used for throttled flushes of streaming text/thinking/tool-calls during generation so
+// reconnecting clients can rehydrate the in-flight UI.
+func (db *Database) UpdateGenerationJobStreamState(jobID string, state json.RawMessage) error {
+	_, err := db.DB.NewUpdate().
+		Model((*models.GenerationJob)(nil)).
+		Set("stream_state = ?", string(state)).
+		Set("updated_at = ?", time.Now()).
+		Where("id = ?", jobID).
+		Exec(context.Background())
+	return err
+}
+
 func (db *Database) SetGenerationJobResult(jobID string, result json.RawMessage) error {
 	_, err := db.DB.NewUpdate().
 		Model((*models.GenerationJob)(nil)).

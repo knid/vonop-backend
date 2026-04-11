@@ -41,8 +41,13 @@ type UserForgotPasswordRequest struct {
 	Email string `json:"email" validate:"email,required"`
 }
 
+type UserResetPasswordRequest struct {
+	Token         string `json:"token" validate:"required"`
+	Password      string `json:"password" validate:"required,min=8,max=64" errormgs:"must be between 8 and 64 characters long"`
+	PasswordCheck string `json:"password_check" validate:"required,min=8,max=64" errormgs:"must be between 8 and 64 characters long"`
+}
+
 type UserVerifyEmailRequest struct {
-	Email string `json:"email" validate:"email,required"`
 	Token string `json:"token" validate:"required"`
 }
 

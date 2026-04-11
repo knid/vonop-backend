@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/markbates/goth/gothic"
@@ -40,6 +41,10 @@ func (v *HttpViews) OAuthCallback(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	url := fmt.Sprintf("https://dashboard.wemob.io/login/handleGoogle?token=%s", userLoginRes.Token)
+	frontendURL := strings.TrimRight(v.Controller.SecretManager.GetSecret("FRONTEND_URL"), "/")
+	if frontendURL == "" {
+		frontendURL = "https://dashboard.wemob.io"
+	}
+	url := fmt.Sprintf("%s/login/handleGoogle?token=%s", frontendURL, userLoginRes.Token)
 	http.Redirect(w, r, url, http.StatusTemporaryRedirect)
 }
