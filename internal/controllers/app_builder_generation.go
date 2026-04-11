@@ -680,6 +680,7 @@ func (c *Controller) streamEcommerceGeneration(
 		OnToolCallStart: func(toolName string) {
 			sendEvent("tool_start", map[string]any{"tool": toolName})
 		},
+		OnToolResult: makeToolResultEmitter(sendEvent),
 	}
 
 	_, setupErr := utils.StreamWithTools(

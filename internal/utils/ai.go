@@ -1559,6 +1559,7 @@ type ToolCallConfig struct {
 	AfterToolRound    func(allIntercepted bool) string                       // Called after each tool round; allIntercepted=true when every call was intercepted; non-empty return is injected as a system message
 	FilterTools       func(tools []Tool) []Tool                              // Called each round to filter/modify tools; return nil to strip all tools
 	OnToolCallStart   func(toolName string)                                  // Called when a tool call name is first detected during SSE streaming (before args are complete)
+	OnToolResult      func(toolName string, result string, isError bool)    // Called after each tool executes (success, failure, dedup, or intercept). Useful for emitting tool_result SSE events.
 	OnRoundStart      func(round int)                                       // Called at the start of each round (useful for resetting per-round state like text buffers)
 	MaxContinuations  int            // Max finish_reason=length continuation rounds (default 3). -1 = disable continuations entirely.
 	ShouldContinue    func() bool    // Called before each round/continuation. Return false to abort. nil = always continue.
@@ -2160,6 +2161,15 @@ func StreamWithTools(
 				if result == "" {
 					slog.Warn("tool returned empty result", "tool", toolName, "round", round)
 					result = "(no output)"
+				}
+				// Notify the caller so they can emit a tool_result SSE event.
+				// "Error: ..." prefix matches the convention used by executors for
+				// failure states and keeps the classifier simple on the frontend.
+				if len(opts) > 0 && opts[0].OnToolResult != nil {
+					isErr := strings.HasPrefix(result, "Error:") ||
+						strings.Contains(result, " timed out after ") ||
+						strings.Contains(result, " panicked: ")
+					opts[0].OnToolResult(toolName, result, isErr)
 				}
 				currentMessages = append(currentMessages, Message{
 					Role:       "tool",

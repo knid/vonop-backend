@@ -136,6 +136,43 @@ func safeTruncate(s string, maxBytes int) string {
 	return s[:maxBytes]
 }
 
+// firstLineSummary returns the first non-empty line of s, capped at 140 chars,
+// suitable for the collapsed one-line header of a tool result card.
+func firstLineSummary(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	if idx := strings.IndexByte(s, '\n'); idx >= 0 {
+		s = s[:idx]
+	}
+	s = strings.TrimSpace(s)
+	if len(s) > 140 {
+		s = safeTruncate(s, 137) + "…"
+	}
+	return s
+}
+
+// makeToolResultEmitter returns a reusable OnToolResult callback that emits a
+// tool_result SSE event after every tool execution. The emitter deliberately
+// sends both an `is_error` boolean and a `status` string so older clients that
+// only read one field still behave correctly.
+func makeToolResultEmitter(sendEvent func(string, any) bool) func(string, string, bool) {
+	return func(toolName, result string, isError bool) {
+		status := "ok"
+		if isError {
+			status = "error"
+		}
+		sendEvent("tool_result", responses.ToolResultEvent{
+			Tool:    toolName,
+			Status:  status,
+			Preview: safeTruncate(result, 600),
+			Summary: firstLineSummary(result),
+			IsError: isError,
+		})
+	}
+}
+
 // StreamBuildApp is the unified entry point for both initial app generation and chat editing.
 // When isInitialGeneration=true, it creates a new app from a prompt.
 // When isInitialGeneration=false, it processes a chat edit on an existing app.
@@ -936,6 +973,18 @@ The user's message is an auto-reported build or runtime error. Follow these rule
 				MaxTokens:        65536,
 				MaxContinuations: 3,
 				ShouldContinue:   shouldContinueCredits,
+				OnToolResult: func(toolName, result string, isErr bool) {
+					makeToolResultEmitter(sendEvent)(toolName, result, isErr)
+					// Live cost meter: after every tool execution, emit a
+					// running credits snapshot so the UI can show a growing
+					// cost indicator throughout a multi-round turn.
+					if promptT, completionT, totalT, _ := tracker.Totals(); totalT > 0 {
+						sendEvent("credits_update", responses.CreditsUpdateEvent{
+							CreditsUsed: c.TokensToCredits(promptT, completionT),
+							Tokens:      totalT,
+						})
+					}
+				},
 				NudgeMessage: "When you have enough context, output your code changes using <wemob_file> and <wemob_edit> blocks. You can still call read_file if needed.",
 				StripMessage: "STOP reading files. Output your code changes NOW using <wemob_file> and <wemob_edit> blocks. No more tool calls.\n\n" +
 					"Format:\n<wemob_edit path=\"src/components/Foo.tsx\">\n<wemob_search>\nold lines\n</wemob_search>\n<wemob_replace>\nnew lines\n</wemob_replace>\n</wemob_edit>",
@@ -1108,6 +1157,7 @@ The user's message is an auto-reported build or runtime error. Follow these rule
 					MaxTokens:        65536,
 					MaxContinuations: 1,
 					ShouldContinue:   shouldContinueCredits,
+					OnToolResult:     makeToolResultEmitter(sendEvent),
 					NudgeMessage: "Output your corrected <wemob_edit> blocks now. Use the file contents you just read.",
 					StripMessage: "Output your corrected code NOW using <wemob_edit> blocks. Do NOT describe — output the actual code.\n\n" +
 						"<wemob_edit path=\"file.tsx\">\n<wemob_search>\nexact lines\n</wemob_search>\n<wemob_replace>\ncorrected lines\n</wemob_replace>\n</wemob_edit>",
@@ -1442,12 +1492,23 @@ The user's message is an auto-reported build or runtime error. Follow these rule
 		}
 	}
 
+	// --- Compute credits used (pre-deduction, for display only) ---
+	// The final deduction runs in the deferred cleanup so we cannot include
+	// the *settled* figure in chat_complete. This snapshot is good enough for
+	// the user-facing "this turn used N credits" summary — the invariant the
+	// defer cares about (total tokens > 0) is also what we check here.
+	var chatCreditsUsed int
+	if promptT, completionT, totalT, _ := tracker.Totals(); totalT > 0 {
+		chatCreditsUsed = c.TokensToCredits(promptT, completionT)
+	}
+
 	// --- Send done event ---
 	if isInitialGeneration {
 		sendEvent("done", map[string]any{
 			"app_project_id":  project.ID.String(),
 			"files_generated": filesChanged,
 			"missing_env_vars": missingVars,
+			"credits_used":    chatCreditsUsed,
 		})
 	} else {
 		sendEvent("chat_complete", map[string]any{
@@ -1457,6 +1518,7 @@ The user's message is an auto-reported build or runtime error. Follow these rule
 			"file_operations": fileOps,
 			"snapshot_id":     preSnapshotID,
 			"missing_env_vars": missingVars,
+			"credits_used":    chatCreditsUsed,
 		})
 	}
 }

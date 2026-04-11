@@ -45,6 +45,27 @@ type ToolCallEvent struct {
 	Arguments string `json:"arguments"`
 }
 
+// ToolResultEvent is emitted after a tool executes so the frontend can render
+// the tool output inline. Fields are intentionally loose: every tool yields
+// a string result from its executor; the frontend uses `tool` to pick a
+// renderer and falls back to a monospace preview if no match exists.
+type ToolResultEvent struct {
+	Tool     string `json:"tool"`
+	Status   string `json:"status"`             // "ok" or "error"
+	Preview  string `json:"preview,omitempty"`  // Truncated human-readable result (≤ 600 chars)
+	Summary  string `json:"summary,omitempty"`  // One-line TL;DR suitable for a collapsed card
+	IsError  bool   `json:"is_error,omitempty"` // Legacy convenience flag — duplicates Status == "error"
+}
+
+// CreditsUpdateEvent is emitted periodically during a chat turn so the client
+// can render a live cost meter. CreditsUsed is a snapshot of the running
+// deduction and will match the final value in chat_complete.credits_used when
+// the turn finishes cleanly.
+type CreditsUpdateEvent struct {
+	CreditsUsed int `json:"credits_used"`
+	Tokens      int `json:"tokens,omitempty"`
+}
+
 type SeedProgressEvent struct {
 	Phase   string `json:"phase"`
 	Action  string `json:"action,omitempty"`

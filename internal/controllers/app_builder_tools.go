@@ -433,6 +433,7 @@ CRITICAL LANGUAGE RULE: EVERY piece of text you write — explanations, summarie
 				phase1Mu.Unlock()
 				sendEvent("tool_start", map[string]string{"tool": toolName})
 			},
+			OnToolResult: makeToolResultEmitter(sendEvent),
 			OnRoundStart: func(round int) {
 				if round == 0 {
 					return
@@ -767,6 +768,7 @@ CRITICAL RULES:
 			OnToolCallStart: func(toolName string) {
 				sendEvent("tool_start", map[string]string{"tool": toolName})
 			},
+			OnToolResult: makeToolResultEmitter(sendEvent),
 		},
 	)
 
