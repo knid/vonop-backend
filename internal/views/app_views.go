@@ -141,6 +141,58 @@ func (v *HttpViews) GetAppLogo(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, presigned.URL, http.StatusFound)
 }
 
+// POST /v2/apps
+// Creates a draft app project synchronously without starting generation.
+// The studio kicks off the initial generation through the normal chat
+// endpoint after navigation — this avoids the bespoke bootstrap UI that
+// used to live on /apps/new and keeps the chat experience consistent from
+// the first prompt onward.
+func (v *HttpViews) CreateApp(w http.ResponseWriter, r *http.Request) {
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+	if requireActiveSubscription(w, user) {
+		return
+	}
+	if v.checkMinimumCredits(w, user) {
+		return
+	}
+
+	var req requests.GenerateAppRequest
+	if err := utils.ParseJSONBody(r, &req); err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	project, err := v.Controller.CreateDraftAppProject(r.Context(), user, req)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	v.Controller.TrackUserEvent(user, "app_draft_created", posthog.NewProperties().
+		Set("project_type", project.ProjectType).
+		Set("app_id", project.ID.String()))
+
+	var theme map[string]any
+	json.Unmarshal(project.Theme, &theme)
+
+	utils.JSONResponse(w, responses.AppProjectResponse{
+		ID:          project.ID,
+		Name:        project.Name,
+		Slug:        project.Slug,
+		Prompt:      project.Prompt,
+		ProjectType: project.ProjectType,
+		Theme:       theme,
+		Settings:    project.Settings,
+		Status:      project.Status,
+		CreatedAt:   project.CreatedAt,
+		UpdatedAt:   project.UpdatedAt,
+	}, http.StatusCreated)
+}
+
 // GET /v2/apps/
 func (v *HttpViews) GetApps(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)

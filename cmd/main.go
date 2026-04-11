@@ -1297,6 +1297,7 @@ func main() {
 				r.Get("/jobs/{jobId}/stream", httpViews.StreamJob)
 
 				r.Get("/", httpViews.GetApps)
+				r.Post("/", httpViews.CreateApp)
 
 				r.Route("/{appId}", func(r chi.Router) {
 					r.Get("/", httpViews.GetApp)

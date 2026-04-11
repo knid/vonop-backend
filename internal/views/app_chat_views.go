@@ -73,15 +73,29 @@ func (v *HttpViews) ChatApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	v.Controller.TrackUserEvent(user, "app_chat_sent", posthog.NewProperties().
+	// Draft projects have never been generated — the first chat message is the
+	// initial generation. This lets the studio handle both the first prompt and
+	// subsequent edits through the same endpoint, so the UI can stay consistent
+	// all the way through instead of running a separate bootstrap flow.
+	isInitialGeneration := project.Status == "draft"
+
+	jobType := "app_chat"
+	eventName := "app_chat_sent"
+	if isInitialGeneration {
+		jobType = "generate_app"
+		eventName = "app_generation_started"
+	}
+
+	v.Controller.TrackUserEvent(user, eventName, posthog.NewProperties().
 		Set("app_id", project.ID.String()).
+		Set("project_type", project.ProjectType).
 		Set("has_images", len(req.Images) > 0))
 
 	v.handleStreamOrAsync(w, r, user, StreamConfig{
-		JobType: "app_chat",
+		JobType: jobType,
 		AppID:   project.ID,
 		StreamFunc: func(ctx context.Context, events chan<- responses.SSEEvent, jobID string) {
-			v.Controller.StreamBuildApp(ctx, project, user, req.Message, req.Images, req.ReasoningEffort, false, "", events)
+			v.Controller.StreamBuildApp(ctx, project, user, req.Message, req.Images, req.ReasoningEffort, isInitialGeneration, jobID, events)
 		},
 	})
 }

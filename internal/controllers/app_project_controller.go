@@ -17,6 +17,24 @@ import (
 	"github.com/posthog/posthog-go"
 )
 
+// CreateDraftAppProject creates a new app project in "draft" status — no
+// generation is kicked off. Used by the home composer flow, which creates the
+// project synchronously, navigates the user to the studio, and then lets the
+// studio kick off the initial generation through the normal chat endpoint.
+// This keeps the UI consistent from the very first prompt instead of forcing
+// the user through a bespoke bootstrap screen.
+func (c *Controller) CreateDraftAppProject(ctx context.Context, user *models.User, req requests.GenerateAppRequest) (*models.AppProject, error) {
+	project, err := c.CreateAppProject(ctx, user, req)
+	if err != nil {
+		return nil, err
+	}
+	project.Status = "draft"
+	if _, err := c.DB.UpdateAppProject(project); err != nil {
+		return nil, fmt.Errorf("failed to set draft status: %w", err)
+	}
+	return project, nil
+}
+
 func (c *Controller) CreateAppProject(ctx context.Context, user *models.User, req requests.GenerateAppRequest) (*models.AppProject, error) {
 	validate := validator.New()
 	if err := req.Validate(validate); err != nil {
