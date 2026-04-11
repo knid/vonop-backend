@@ -284,6 +284,13 @@ func (c *Controller) runConversationLoop(
 			return message
 		}
 
+		// Persist resolution of the awaiting_reply milestone so reconnects don't
+		// see a stale awaiting banner after the user has already replied / timed out.
+		sendEvent("clarification_received", map[string]any{
+			"job_id": jobID,
+			"turn":   turn,
+		})
+
 		c.DB.UpdateGenerationJobStatus(jobID, "running", "")
 
 		if !gotReply {
@@ -427,9 +434,16 @@ func (c *Controller) waitForClarification(
 	timer := time.NewTimer(5 * time.Minute)
 	defer timer.Stop()
 
+	// clearClarification emits the clarification_received milestone so reconnect
+	// replay doesn't resurface a stale awaiting_reply banner after resolution.
+	clearClarification := func() {
+		sendEvent("clarification_received", map[string]any{"job_id": jobID})
+	}
+
 	select {
 	case result, ok := <-ch:
 		c.PendingClarifications.Delete(jobID)
+		clearClarification()
 		if !ok || result.Skip {
 			// Channel closed (cancel) or user skipped
 			c.DB.UpdateGenerationJobStatus(jobID, "running", "")
@@ -439,6 +453,7 @@ func (c *Controller) waitForClarification(
 		return result, true
 	case <-timer.C:
 		c.PendingClarifications.Delete(jobID)
+		clearClarification()
 		slog.Info("clarification timed out, proceeding with original prompt", "job_id", jobID)
 		c.DB.UpdateGenerationJobStatus(jobID, "running", "")
 		return ClarificationResult{Skip: true}, false
