@@ -23,18 +23,18 @@ import (
 	appMiddleware "github.com/knid/wemob/internal/middleware"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/services"
+	"github.com/knid/wemob/internal/services/codemagic"
+	"github.com/knid/wemob/internal/services/coolify"
 	crmServices "github.com/knid/wemob/internal/services/crm"
+	e2bService "github.com/knid/wemob/internal/services/e2b"
 	emailServices "github.com/knid/wemob/internal/services/email"
-	"github.com/knid/wemob/internal/services/mcpclient"
+	"github.com/knid/wemob/internal/services/gitea"
 	"github.com/knid/wemob/internal/services/gitrepo"
+	"github.com/knid/wemob/internal/services/mcpclient"
 	"github.com/knid/wemob/internal/services/neon"
 	"github.com/knid/wemob/internal/services/remoteconfig"
 	"github.com/knid/wemob/internal/services/secret"
-	e2bService "github.com/knid/wemob/internal/services/e2b"
 	"github.com/knid/wemob/internal/services/storage"
-	"github.com/knid/wemob/internal/services/codemagic"
-	"github.com/knid/wemob/internal/services/coolify"
-	"github.com/knid/wemob/internal/services/gitea"
 	"github.com/knid/wemob/internal/utils"
 	"github.com/knid/wemob/internal/views"
 	"github.com/markbates/goth"
@@ -407,13 +407,13 @@ func createSchema(db *bun.DB) error {
 
 func seedPlans(db *database.Database, sm secret.SecretManager) {
 	type planDef struct {
-		Name         string
-		Description  string
-		MonthlyPrice int
-		PriceID      string
-		AnnualPrice  int
+		Name          string
+		Description   string
+		MonthlyPrice  int
+		PriceID       string
+		AnnualPrice   int
 		AnnualPriceID string
-		Limits       models.StandartUserLimits
+		Limits        models.StandartUserLimits
 	}
 
 	plans := []planDef{
@@ -749,8 +749,9 @@ func main() {
 	// Neon service (optional — only enabled when API key is set)
 	var neonService *neon.Service
 	if neonKey := sm.GetSecret("NEON_API_KEY"); neonKey != "" {
-		neonService = neon.NewService(neonKey)
-		slog.Info("Neon database service enabled")
+		neonOrgID := sm.GetSecret("NEON_ORG_ID")
+		neonService = neon.NewServiceWithOrg(neonKey, neonOrgID)
+		slog.Info("Neon database service enabled", "org_scoped", neonOrgID != "")
 	}
 
 	// PostHog client (optional — only enabled when API key is set)
@@ -904,8 +905,8 @@ func main() {
 		// slog.LevelError - log 5xx responses only
 		Level: slog.LevelInfo,
 
-		Schema:        httplog.SchemaOTEL,
-		RecoverPanics: true,
+		Schema:          httplog.SchemaOTEL,
+		RecoverPanics:   true,
 		LogRequestBody:  func(req *http.Request) bool { return false },
 		LogResponseBody: func(req *http.Request) bool { return false },
 	}))
@@ -1293,7 +1294,7 @@ func main() {
 				// Job clarification endpoint
 				r.Post("/jobs/{jobId}/clarify", httpViews.ClarifyJob)
 				r.Post("/jobs/{jobId}/reply", httpViews.ReplyJob)
-			r.Get("/jobs/{jobId}/stream", httpViews.StreamJob)
+				r.Get("/jobs/{jobId}/stream", httpViews.StreamJob)
 
 				r.Get("/", httpViews.GetApps)
 

@@ -19,10 +19,17 @@ var neonHTTPClient = &http.Client{Timeout: 10 * time.Second}
 
 type Service struct {
 	APIKey string
+	OrgID  string // optional — required for org-scoped Neon accounts
 }
 
 func NewService(apiKey string) *Service {
 	return &Service{APIKey: apiKey}
+}
+
+// NewServiceWithOrg creates a Neon service scoped to a specific organization.
+// Required when using an org-scoped API key (personal keys can pass orgID="").
+func NewServiceWithOrg(apiKey, orgID string) *Service {
+	return &Service{APIKey: apiKey, OrgID: orgID}
 }
 
 // --- Request / Response types ---
@@ -32,9 +39,10 @@ type CreateProjectRequest struct {
 }
 
 type CreateProjectSettings struct {
-	Name     string          `json:"name"`
-	RegionID string          `json:"region_id,omitempty"`
-	Settings *ProjectQuota   `json:"settings,omitempty"`
+	Name     string        `json:"name"`
+	RegionID string        `json:"region_id,omitempty"`
+	OrgID    string        `json:"org_id,omitempty"`
+	Settings *ProjectQuota `json:"settings,omitempty"`
 }
 
 type ProjectQuota struct {
@@ -46,7 +54,7 @@ type QuotaSettings struct {
 }
 
 type CreateProjectResponse struct {
-	Project        ProjectInfo    `json:"project"`
+	Project        ProjectInfo     `json:"project"`
 	ConnectionURIs []ConnectionURI `json:"connection_uris"`
 	Endpoints      []EndpointInfo  `json:"endpoints"`
 }
@@ -61,8 +69,8 @@ type ConnectionURI struct {
 }
 
 type EndpointInfo struct {
-	ID        string `json:"id"`
-	BranchID  string `json:"branch_id"`
+	ID       string `json:"id"`
+	BranchID string `json:"branch_id"`
 }
 
 type UpdateEndpointRequest struct {
@@ -159,8 +167,8 @@ func (s *Service) doRequest(method, path string, body any) ([]byte, error) {
 
 // DBLimits holds per-plan database resource constraints.
 type DBLimits struct {
-	MaxCU       float64 // max compute units (e.g. 0.25, 0.5, 1)
-	StorageMB   int     // max logical storage in MB
+	MaxCU     float64 // max compute units (e.g. 0.25, 0.5, 1)
+	StorageMB int     // max logical storage in MB
 }
 
 // CreateProject creates a new Neon project with optional resource limits.
@@ -173,6 +181,7 @@ func (s *Service) CreateProject(name, region string, limits *DBLimits) (projectI
 	settings := CreateProjectSettings{
 		Name:     name,
 		RegionID: region,
+		OrgID:    s.OrgID,
 	}
 
 	// Apply storage quota if limits are provided
