@@ -56,6 +56,7 @@ func (v *HttpViews) GenerateAppStream(w http.ResponseWriter, r *http.Request) {
 
 	v.handleStreamOrAsync(w, r, user, StreamConfig{
 		JobType: "generate_app",
+		AppID:   project.ID,
 		StreamFunc: func(ctx context.Context, events chan<- responses.SSEEvent, jobID string) {
 			v.Controller.StreamBuildApp(ctx, project, user, req.Prompt, req.Images, "", true, jobID, events)
 		},

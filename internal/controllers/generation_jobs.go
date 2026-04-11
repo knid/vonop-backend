@@ -32,7 +32,8 @@ var milestoneEvents = map[string]bool{
 
 // CreateJob creates a new generation job, enforcing a per-user concurrency limit.
 // For generate_app jobs, only one may run at a time to prevent double-submission.
-func (c *Controller) CreateJob(userID uuid.UUID, jobType string) (*models.GenerationJob, error) {
+// appID is optional — pass uuid.Nil for jobs that aren't scoped to an app.
+func (c *Controller) CreateJob(userID uuid.UUID, jobType string, appID uuid.UUID) (*models.GenerationJob, error) {
 	running, err := c.DB.GetUserRunningJobs(userID.String())
 	if err != nil {
 		return nil, fmt.Errorf("failed to check running jobs: %w", err)
@@ -54,6 +55,7 @@ func (c *Controller) CreateJob(userID uuid.UUID, jobType string) (*models.Genera
 
 	job := &models.GenerationJob{
 		UserID: userID,
+		AppID:  appID,
 		Type:   jobType,
 		Status: "running",
 		Events: json.RawMessage("[]"),
@@ -65,6 +67,13 @@ func (c *Controller) CreateJob(userID uuid.UUID, jobType string) (*models.Genera
 	}
 
 	return job, nil
+}
+
+// GetAppActiveJob returns the most recent running or awaiting_input job for the
+// given app, or nil if none exists. Used by the chat UI to reconnect the SSE
+// stream after a page refresh or browser restart.
+func (c *Controller) GetAppActiveJob(appID uuid.UUID) (*models.GenerationJob, error) {
+	return c.DB.GetAppActiveJob(appID.String())
 }
 
 // CancelJob cancels a running or awaiting_input job by calling its stored cancel function.

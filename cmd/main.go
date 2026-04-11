@@ -274,6 +274,10 @@ func createSchema(db *bun.DB) error {
 		`ALTER TABLE referrals ADD COLUMN IF NOT EXISTS subscription_reward_granted boolean NOT NULL DEFAULT false`,
 		// Template marketplace: track which template a project was copied from
 		`ALTER TABLE app_projects ADD COLUMN IF NOT EXISTS template_id uuid`,
+		// Link generation jobs to their app so clients can look up the active
+		// job on refresh via GET /v2/apps/{appId}/active-job (replaces the old
+		// localStorage-based job-id recovery).
+		`ALTER TABLE generation_jobs ADD COLUMN IF NOT EXISTS app_id uuid`,
 	}
 
 	// Deduplicate before creating unique indexes (keep the latest row per group)
@@ -300,6 +304,8 @@ func createSchema(db *bun.DB) error {
 		`CREATE INDEX IF NOT EXISTS idx_tokens_string_active ON tokens (string) WHERE deleted_at IS NULL`,
 		// GitHub export lookup index
 		`CREATE INDEX IF NOT EXISTS idx_app_github_exports_app_project_id ON app_github_exports(app_project_id)`,
+		// Active-job lookup per app — used by GET /v2/apps/{appId}/active-job.
+		`CREATE INDEX IF NOT EXISTS idx_generation_jobs_app_status ON generation_jobs (app_id, status) WHERE app_id IS NOT NULL`,
 	}
 	alterStatements = append(alterStatements, indexStatements...)
 	// Check if migrations have already been applied by testing for a column from the latest batch.
@@ -307,7 +313,7 @@ func createSchema(db *bun.DB) error {
 	// and block all reads on the affected tables.
 	var migrationsDone bool
 	row := db.QueryRowContext(context.Background(),
-		"SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='app_projects' AND column_name='template_id')")
+		"SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='generation_jobs' AND column_name='app_id')")
 	if err := row.Scan(&migrationsDone); err != nil {
 		migrationsDone = false
 	}
@@ -1307,6 +1313,11 @@ func main() {
 					r.With(rateLimiter.RateLimit(20, time.Minute, appMiddleware.AIUserKey)).Post("/chat", httpViews.ChatApp)
 					r.Get("/conversation", httpViews.GetAppConversation)
 					r.Delete("/conversation", httpViews.ClearAppConversation)
+
+					// Active job lookup — lets the chat UI reconnect to an
+					// in-flight SSE stream after a page refresh without holding
+					// the job id in localStorage.
+					r.Get("/active-job", httpViews.GetAppActiveJob)
 
 					// Integrations
 					r.Route("/integrations", func(r chi.Router) {

@@ -941,6 +941,7 @@ func (v *HttpViews) MobileOptimize(w http.ResponseWriter, r *http.Request) {
 
 	v.handleStreamOrAsync(w, r, user, StreamConfig{
 		JobType: "mobile_optimize",
+		AppID:   project.ID,
 		StreamFunc: func(ctx context.Context, events chan<- responses.SSEEvent, jobID string) {
 			v.Controller.StreamMobileOptimize(ctx, project, user, events)
 		},

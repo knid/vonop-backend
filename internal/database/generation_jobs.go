@@ -110,6 +110,25 @@ func (db *Database) GetUserActiveJobs(userID string) ([]models.GenerationJob, er
 	return jobs, err
 }
 
+// GetAppActiveJob returns the most recent running or awaiting_input job scoped
+// to a given app, or nil if none exists. Used by GET /v2/apps/{appId}/active-job
+// so clients can reconnect to an in-flight SSE stream after a refresh without
+// holding the job id in localStorage.
+func (db *Database) GetAppActiveJob(appID string) (*models.GenerationJob, error) {
+	var job models.GenerationJob
+	err := db.DB.NewSelect().
+		Model(&job).
+		Where("app_id = ?", appID).
+		Where("status IN (?)", bun.In([]string{"running", "awaiting_input"})).
+		OrderExpr("created_at DESC").
+		Limit(1).
+		Scan(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	return &job, nil
+}
+
 // FailStaleAwaitingInputJobs transitions awaiting_input jobs older than the given duration to failed.
 func (db *Database) FailStaleAwaitingInputJobs(maxAge time.Duration) (int, error) {
 	res, err := db.DB.NewUpdate().

@@ -50,6 +50,7 @@ func (v *HttpViews) CreateDashboard(w http.ResponseWriter, r *http.Request) {
 
 	v.handleStreamOrAsync(w, r, user, StreamConfig{
 		JobType: "dashboard_create",
+		AppID:   project.ID,
 		StreamFunc: func(ctx context.Context, events chan<- responses.SSEEvent, jobID string) {
 			v.Controller.CreateDashboard(ctx, project, user, req.Prompt, events)
 		},
@@ -364,7 +365,7 @@ func (v *HttpViews) ChatDashboard(w http.ResponseWriter, r *http.Request) {
 	}
 
 	appID := chi.URLParam(r, "appId")
-	_, err = v.Controller.GetAppProject(appID, user)
+	project, err := v.Controller.GetAppProject(appID, user)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
 		return
@@ -390,6 +391,7 @@ func (v *HttpViews) ChatDashboard(w http.ResponseWriter, r *http.Request) {
 
 	v.handleStreamOrAsync(w, r, user, StreamConfig{
 		JobType: "dashboard_chat",
+		AppID:   project.ID,
 		StreamFunc: func(ctx context.Context, events chan<- responses.SSEEvent, jobID string) {
 			v.Controller.StreamDashboardChat(ctx, dashboard, user, req.Message, events)
 		},

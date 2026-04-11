@@ -12,6 +12,7 @@ type GenerationJob struct {
 	bun.BaseModel `bun:"table:generation_jobs"`
 	ID            uuid.UUID       `bun:",pk,type:uuid,default:uuid_generate_v4()" json:"id"`
 	UserID        uuid.UUID       `bun:",notnull,type:uuid" json:"user_id"`
+	AppID         uuid.UUID       `bun:"app_id,type:uuid,nullzero" json:"app_id,omitempty"`
 	Type          string          `bun:",notnull" json:"type"`
 	Status        string          `bun:",notnull,default:'running'" json:"status"` // running, completed, failed, cancelled
 	Events        json.RawMessage `bun:",type:jsonb,default:'[]'" json:"events"`

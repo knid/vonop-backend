@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/controllers"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/requests"
@@ -18,8 +19,12 @@ import (
 )
 
 // StreamConfig holds the configuration for handleStreamOrAsync.
+// AppID scopes the job to an app so clients can resume it after a page refresh
+// via GET /v2/apps/{appId}/active-job. Pass uuid.Nil for jobs that aren't
+// app-scoped.
 type StreamConfig struct {
 	JobType    string
+	AppID      uuid.UUID
 	StreamFunc func(ctx context.Context, events chan<- responses.SSEEvent, jobID string)
 }
 
@@ -29,7 +34,7 @@ type StreamConfig struct {
 // GET /v1/jobs/{jobId}.
 func (v *HttpViews) handleStreamOrAsync(w http.ResponseWriter, r *http.Request, user *models.User, cfg StreamConfig) {
 	// Always create a background job
-	job, err := v.Controller.CreateJob(user.ID, cfg.JobType)
+	job, err := v.Controller.CreateJob(user.ID, cfg.JobType, cfg.AppID)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusTooManyRequests)
 		return
