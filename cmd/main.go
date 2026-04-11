@@ -63,6 +63,7 @@ func createSchema(db *bun.DB) error {
 		(*models.User)(nil),
 		(*models.UserNotifications)(nil),
 		(*models.Token)(nil),
+		(*models.UserActionToken)(nil),
 		(*models.StandartUserLimits)(nil),
 		(*models.StandartUserSubscription)(nil),
 		(*models.Invoice)(nil),
@@ -169,6 +170,9 @@ func createSchema(db *bun.DB) error {
 		`ALTER TABLE app_conversations ADD COLUMN IF NOT EXISTS summary text DEFAULT ''`,
 		// Data models for per-app Neon database provisioning
 		`ALTER TABLE app_projects ADD COLUMN IF NOT EXISTS data_models jsonb DEFAULT '[]'`,
+		// Partial streaming state (thinking text, chat text, tool calls, conversation buffer)
+		// for refresh recovery of in-flight generation jobs.
+		`ALTER TABLE generation_jobs ADD COLUMN IF NOT EXISTS stream_state jsonb DEFAULT '{}'::jsonb`,
 		// Allow NULL price_id so empty Stripe secrets don't conflict on unique constraint
 		`ALTER TABLE standart_user_subscriptions ALTER COLUMN price_id DROP NOT NULL`,
 		`UPDATE standart_user_subscriptions SET price_id = NULL WHERE price_id = ''`,
@@ -876,7 +880,7 @@ func main() {
 	// Access-Control-Allow-Origin headers (otherwise browsers report a
 	// CORS error instead of showing the real 429).
 	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   []string{"https://app.wemob.io", "https://dashboard.wemob.io", "https://wemob.io", "https://www.wemob.io", "http://localhost:3000", "http://127.0.0.1:3000", "https://*.wemob.app", "https://*.vercel.app", "https://device1.zebu-pain.ts.net"},
+		AllowedOrigins:   []string{"https://app.wemob.io", "https://dashboard.wemob.io", "https://wemob.io", "https://www.wemob.io", "http://localhost:3000", "http://127.0.0.1:3000", "https://*.wemob.app", "https://*.vercel.app", "https://device1.zebu-pain.ts.net", "https://mba.zebu-pain.ts.net"},
 		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token", "Location"},
 		ExposedHeaders:   []string{"Link"},
@@ -993,6 +997,15 @@ func main() {
 
 				r.Post("/login", httpViews.UserLogin)
 				r.Post("/register", httpViews.UserRegister)
+
+				// Self-service password reset (public, token-gated inside).
+				r.Post("/forgot-password", httpViews.UserForgotPassword)
+				r.Post("/reset-password", httpViews.UserResetPassword)
+
+				// Email verification. /send requires auth, /confirm is public
+				// because the email token is the authenticator.
+				r.With(appMiddleware.RequireAuth(controller)).Post("/verify-email/send", httpViews.UserSendVerifyEmail)
+				r.Post("/verify-email/confirm", httpViews.UserConfirmVerifyEmail)
 
 				r.Get("/auth/{provider}/callback", httpViews.OAuthCallback)
 				r.Get("/auth/{provider}", httpViews.OAuthBegin)
