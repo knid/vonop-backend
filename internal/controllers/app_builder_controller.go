@@ -1361,10 +1361,10 @@ The user's message is an auto-reported build or runtime error. Follow these rule
 	appliedOps = append(appliedOps, toolAppliedOps...)
 
 	if filesChanged > 0 {
-		sendEvent("progress", responses.ProgressEvent{
-			Phase:   "auto_fix",
-			Message: "Running quality checks...",
-		})
+		// runDeterministicAutoFixes emits its own "Polishing N file(s)..."
+		// progress event only when something actually gets rewritten, so we
+		// don't pre-announce — an empty pass shouldn't flash "auto_fix" in
+		// the timeline on every turn.
 		c.runDeterministicAutoFixes(project, repo, fileMap, sendEvent, &appliedOps, &filesChanged)
 
 		// Augment package.json with discovered dependencies
