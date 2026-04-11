@@ -594,6 +594,7 @@ func (c *Controller) streamEcommerceGeneration(
 	imageURLs []string,
 	toolContext string,
 	mobileConfig *models.MobileAppConfig,
+	accToolCalls *[]models.AppChatToolCall,
 ) (responseText string, ops []appBuilderOperation, err error) {
 	// 1. Structure planning (same as single-shot — fails hard if retries exhausted)
 	structure, planErr := c.PlanAppFileStructure(ctx, message, project.ProjectType)
@@ -693,6 +694,16 @@ func (c *Controller) streamEcommerceGeneration(
 				Tool:      toolName,
 				Arguments: args,
 			})
+			// Record the tool call on the caller's accumulator so it
+			// survives onto the persisted assistant message — same pattern
+			// the chat-edit path already uses. Without this, ecommerce
+			// setup tools vanished from history after app creation.
+			if accToolCalls != nil {
+				*accToolCalls = append(*accToolCalls, models.AppChatToolCall{
+					Tool:      toolName,
+					Arguments: args,
+				})
+			}
 		},
 		func(chunk string) {
 			chunk = ansiRegex.ReplaceAllString(chunk, "")

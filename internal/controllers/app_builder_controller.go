@@ -713,7 +713,7 @@ The user's message is an auto-reported build or runtime error. Follow these rule
 			ecomImages = append(append([]string{}, imageURLs...), preGenCtx.Screenshots...)
 		}
 		ecomText, ecomOps, ecomErr := c.streamEcommerceGeneration(
-			ctx, project, user, model, provider, repo, fileMap, sendEvent, message, ecomImages, preGenToolContext, mobileConfig,
+			ctx, project, user, model, provider, repo, fileMap, sendEvent, message, ecomImages, preGenToolContext, mobileConfig, &accToolCalls,
 		)
 		if ecomErr != nil {
 			lastGenErr = ecomErr
