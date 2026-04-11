@@ -42,12 +42,14 @@ func (c *Controller) CreateJob(userID uuid.UUID, jobType string, appID uuid.UUID
 	if running >= maxJobs {
 		return nil, fmt.Errorf("maximum %d concurrent jobs allowed", maxJobs)
 	}
-	// Prevent duplicate initial generation: if the user already has a running
-	// generate_app job, reject the new one to avoid wasting resources.
-	if jobType == "generate_app" {
+	// Prevent duplicate initial generation on the same app: if this app already
+	// has a running generate_app job, reject the new one to avoid wasting
+	// resources on a double-submission (e.g. double-clicked Create button).
+	// Different apps are allowed to generate in parallel.
+	if jobType == "generate_app" && appID != uuid.Nil {
 		activeJobs, _ := c.DB.GetUserActiveJobs(userID.String())
 		for _, j := range activeJobs {
-			if j.Type == "generate_app" {
+			if j.Type == "generate_app" && j.AppID == appID {
 				return nil, fmt.Errorf("a generation is already in progress")
 			}
 		}
