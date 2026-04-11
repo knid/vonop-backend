@@ -916,6 +916,14 @@ The user's message is an auto-reported build or runtime error. Follow these rule
 				cleaned := ansiRegex.ReplaceAllString(text, "")
 				// Strip stray Anthropic-internal XML tags that may leak from the model
 				cleaned = sanitizeLLMLeakedXML(cleaned)
+				// Defensive: the stop-short retry uses the literal string
+				// "NO_CODE_NEEDED" as a sentinel and is normally consumed
+				// internally via suppressChatText. If the model echoes it
+				// from any other path (training-data noise, system-prompt
+				// memory), strip it so the user never sees raw sentinel
+				// markers in their chat.
+				cleaned = strings.ReplaceAll(cleaned, "NO_CODE_NEEDED", "")
+				cleaned = strings.ReplaceAll(cleaned, "no_code_needed", "")
 				if cleaned != "" {
 					sendEvent("chat_text", responses.ChatTextEvent{Chunk: cleaned})
 				}
