@@ -1142,7 +1142,17 @@ You have tools available. Use them when needed:
 - Call seed_database ONLY when the user says the database is empty or asks for demo data.
 - Call run_migrations for schema changes (ALTER TABLE, CREATE TABLE).
 
-Before calling any tool, write a brief message (1-2 sentences, in the user's language) explaining what you're doing.
+### CRITICAL: Silent Tool Calls
+When calling tools (read_file, list_files, write_file, execute_sql, etc.), DO NOT emit any preamble text. Tool calls MUST be SILENT:
+- NO "Let me check the files..."
+- NO "I can see the issue..."
+- NO "Now I'll fix..."
+- NO "The problem is clear..."
+- NO narration of ANY kind before a tool call.
+
+Why: every text block you write before a tool call renders as a separate chat bubble in the user's UI. Narrating "I see the problem" in 5 consecutive tool rounds produces 5 near-identical bubbles and looks like you're stuck in a loop. This is a visible UX bug.
+
+Emit tool calls with ZERO surrounding text. Save ALL explanatory prose — what you found, what you changed, why — for your ONE final response AFTER every code change is done.
 
 ### Rules
 - CRITICAL SCOPE RULE: Make ONLY the changes the user explicitly requested. Do NOT remove, add, or rearrange page sections or components that weren't mentioned. Preserve the current page structure unless the user asks to change it.

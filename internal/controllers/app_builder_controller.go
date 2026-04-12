@@ -976,8 +976,8 @@ The user's message is an auto-reported build or runtime error. Follow these rule
 			},
 			utils.ToolCallConfig{
 				MaxRounds:        10,
-				NudgeAfter:       5,
-				StripAfter:       6, // backstop: force a final text response if reads don't converge
+				NudgeAfter:       2,
+				StripAfter:       3, // backstop: force a final text response if reads don't converge
 				MaxTokens:        65536,
 				MaxContinuations: 3,
 				ShouldContinue:   shouldContinueCredits,
@@ -993,8 +993,8 @@ The user's message is an auto-reported build or runtime error. Follow these rule
 						})
 					}
 				},
-				NudgeMessage: "When you have enough context, output your code changes using <wemob_file> and <wemob_edit> blocks. You can still call read_file if needed.",
-				StripMessage: "STOP reading files. Output your code changes NOW using <wemob_file> and <wemob_edit> blocks. No more tool calls.\n\n" +
+				NudgeMessage: "STOP. You have enough context. Output your <wemob_file>/<wemob_edit> blocks NOW with NO preamble — do NOT say \"I see the problem\", \"Let me fix\", or any narration. Just emit the blocks. Save ALL explanation for the FINAL response after every file change is done.",
+				StripMessage: "FINAL WARNING. Tools removed. Output corrected code NOW using <wemob_file>/<wemob_edit> blocks ONLY. Absolutely NO preamble text — users are seeing your \"I see the problem\" narration repeat across every tool round, which is a UX bug.\n\n" +
 					"Format:\n<wemob_edit path=\"src/components/Foo.tsx\">\n<wemob_search>\nold lines\n</wemob_search>\n<wemob_replace>\nnew lines\n</wemob_replace>\n</wemob_edit>",
 				OnRoundStart: func(round int) {
 					parser.Flush()
@@ -1121,70 +1121,70 @@ The user's message is an auto-reported build or runtime error. Follow these rule
 		parser.Flush()
 		responseText = responseBuilder.String()
 
-		// Retry once if there were failed edits
+		// Retry once if there were failed edits.
+		//
+		// This path runs a SINGLE LLM call with inline file contents instead
+		// of a fresh StreamWithTools session. The previous implementation
+		// re-entered tool-calling mode with a "please re-read the affected
+		// files" nudge, which produced a second wave of read_file rounds and
+		// their preamble narration — the same "I see the problem…" repetition
+		// the user reported. By feeding the current file content directly,
+		// we skip tool rounds entirely: one prompt in, one corrected edit
+		// block out, streams live.
 		if len(failedEdits) > 0 && chatErr == nil {
 			slog.Info("Retrying failed edits",
 				"project_id", project.ID,
 				"failed_count", len(failedEdits),
 			)
-			var retryMsg strings.Builder
-			retryMsg.WriteString("Some edits failed to apply because the search text was not found in the current file. Please re-read the affected files and retry these edits:\n\n")
+
+			// Deduplicate failed files — one file may have multiple failed
+			// edits but we only need to inline its content once.
+			failedByPath := make(map[string][]failedEditRecord)
+			var failedOrder []string
 			for _, fe := range failedEdits {
-				preview := fe.Search
-				if len(preview) > 200 {
-					preview = preview[:200] + "..."
+				if _, seen := failedByPath[fe.Path]; !seen {
+					failedOrder = append(failedOrder, fe.Path)
 				}
-				retryMsg.WriteString(fmt.Sprintf("- File: %s\n  Search text (not found): %s\n", fe.Path, preview))
+				failedByPath[fe.Path] = append(failedByPath[fe.Path], fe)
 			}
+
+			var retryMsg strings.Builder
+			retryMsg.WriteString("Your previous <wemob_edit> blocks failed because the <wemob_search> text did not match the current file. The CURRENT file contents are inlined below — use these exact bytes to produce corrected <wemob_edit> blocks. DO NOT call any tools. DO NOT narrate. Emit ONLY the corrected blocks.\n\n")
+			for _, path := range failedOrder {
+				currentContent, ok := fileMap[path]
+				if !ok {
+					continue
+				}
+				retryMsg.WriteString(fmt.Sprintf("=== CURRENT CONTENT: %s ===\n", path))
+				retryMsg.WriteString(currentContent)
+				retryMsg.WriteString("\n=== END ===\n\n")
+				for _, fe := range failedByPath[path] {
+					searchPreview := fe.Search
+					if len(searchPreview) > 400 {
+						searchPreview = searchPreview[:400] + "...(truncated)"
+					}
+					retryMsg.WriteString(fmt.Sprintf("Failed search text for %s (did NOT match above):\n%s\n\n", path, searchPreview))
+				}
+			}
+			retryMsg.WriteString("Now output ONLY the corrected <wemob_edit> blocks. No preamble. No tool calls. No narration.")
 
 			failedEdits = nil // reset for retry
 			retryMessages := make([]utils.Message, len(llmMessages))
 			copy(retryMessages, llmMessages)
 			retryMessages = append(retryMessages,
-				utils.Message{Role: "assistant", Content: responseText},
-				utils.Message{Role: "system", Content: retryMsg.String()},
+				utils.Message{Role: "user", Content: retryMsg.String()},
 			)
 
-			_, retryErr := utils.StreamWithTools(
-				ctx, model, retryMessages, tools, provider,
-				nil,
-				reasoning,
-				executor,
-				func(toolName string, args string) {
-					sendEvent("tool_start", map[string]string{"tool": toolName})
-				},
+			_, retryErr := utils.StreamTextFromLLMWithMessages(
+				ctx, model, retryMessages, provider,
 				func(chunk string) { parser.Feed(chunk) },
 				func(chunk string) {
 					thinkingBuf.WriteString(chunk)
 					sendEvent("chat_thinking", responses.ChatThinkingEvent{Chunk: chunk})
 				},
-				utils.ToolCallConfig{
-					MaxRounds:        3,
-					NudgeAfter:       2,
-					StripAfter:       3,
-					MaxTokens:        65536,
-					MaxContinuations: 1,
-					ShouldContinue:   shouldContinueCredits,
-					OnToolResult:     makeToolResultEmitter(sendEvent),
-					NudgeMessage: "Output your corrected <wemob_edit> blocks now. Use the file contents you just read.",
-					StripMessage: "Output your corrected code NOW using <wemob_edit> blocks. Do NOT describe — output the actual code.\n\n" +
-						"<wemob_edit path=\"file.tsx\">\n<wemob_search>\nexact lines\n</wemob_search>\n<wemob_replace>\ncorrected lines\n</wemob_replace>\n</wemob_edit>",
-					OnRoundStart: func(round int) {
-						parser.Flush()
-					},
-					InterceptToolCall: func(toolName, toolArgs string) (string, bool) {
-						if toolName == "read_file" {
-							var args struct {
-								FilePath string `json:"file_path"`
-							}
-							if json.Unmarshal([]byte(toolArgs), &args) == nil && args.FilePath != "" {
-								if content, ok := fileMap[args.FilePath]; ok {
-									return content, true
-								}
-							}
-						}
-						return "", false
-					},
+				utils.StreamTextConfig{
+					MaxTokens: 65536,
+					Reasoning: reasoning,
 				},
 			)
 			parser.Flush()
