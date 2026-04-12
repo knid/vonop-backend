@@ -141,6 +141,45 @@ func (v *HttpViews) GetAppLogo(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, presigned.URL, http.StatusFound)
 }
 
+// GET /v2/apps/{appId}/assets/* — public endpoint that redirects to a fresh
+// pre-signed S3 URL for any asset under the app's asset prefix. Used by
+// generated seed images, uploaded hero backgrounds, etc. The S3 bucket is
+// private, so direct object URLs 403 — the generated app code should point
+// at this proxy instead of the raw S3 URL.
+//
+// Auth: none. The asset path is restricted to the app's own prefix, so no
+// cross-app or cross-user access is possible.
+func (v *HttpViews) GetAppAsset(w http.ResponseWriter, r *http.Request) {
+	appId := chi.URLParam(r, "appId")
+	if appId == "" {
+		http.NotFound(w, r)
+		return
+	}
+	assetPath := chi.URLParam(r, "*")
+	if assetPath == "" || strings.Contains(assetPath, "..") {
+		http.NotFound(w, r)
+		return
+	}
+
+	// Confirm the app exists before hitting S3.
+	project, err := v.Controller.DB.GetAppProjectByID(appId)
+	if err != nil || project == nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	s3Key := fmt.Sprintf("apps/%s/%s", project.ID, assetPath)
+	presigned, err := v.Controller.AssetsStorage.GetObject(r.Context(), s3Key, 3600)
+	if err != nil {
+		slog.Error("GetAppAsset: failed to presign", "error", err, "app_id", appId, "path", assetPath)
+		http.NotFound(w, r)
+		return
+	}
+
+	w.Header().Set("Cache-Control", "public, max-age=3600")
+	http.Redirect(w, r, presigned.URL, http.StatusFound)
+}
+
 // POST /v2/apps
 // Creates a draft app project synchronously without starting generation.
 // The studio kicks off the initial generation through the normal chat

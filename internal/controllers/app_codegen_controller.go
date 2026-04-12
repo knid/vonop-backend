@@ -1740,12 +1740,12 @@ func (c *Controller) generateAndStoreSeedImages(
 			continue
 		}
 
-		s3Key := fmt.Sprintf("apps/%s/images/seed-%s-%d.jpg", project.ID, task.table, i+1)
+		assetPath := fmt.Sprintf("images/seed-%s-%d.jpg", task.table, i+1)
+		s3Key := fmt.Sprintf("apps/%s/%s", project.ID, assetPath)
 		uploadCtx, uploadCancel := context.WithTimeout(context.Background(), 30*time.Second)
-		var publicURL string
 		var uploadErr error
 		for attempt := 0; attempt < 3; attempt++ {
-			publicURL, uploadErr = c.AssetsStorage.UploadFileBytePublic(uploadCtx, s3Key, imgData, "image/jpeg")
+			uploadErr = c.AssetsStorage.UploadFileByteWithContentType(uploadCtx, s3Key, imgData, "image/jpeg")
 			if uploadErr == nil {
 				break
 			}
@@ -1758,12 +1758,18 @@ func (c *Controller) generateAndStoreSeedImages(
 			continue
 		}
 
+		// Point the app at the /v2/apps/{id}/file/* proxy instead of the raw
+		// S3 URL — the assets bucket is private, so direct URLs 403. The proxy
+		// generates a fresh presigned URL on each request and returns a 302
+		// redirect, so the stored value never expires.
+		proxyURL := fmt.Sprintf("%s/v2/apps/%s/file/%s", constants.WEMOB_API_BASE_URL, project.ID, assetPath)
+
 		// Update the database row immediately
 		updateQuery := fmt.Sprintf(
 			"UPDATE %s SET %s = $1 WHERE %s = $2",
 			quoteIdentifier(task.table), quoteIdentifier(task.column), quoteIdentifier("id"),
 		)
-		if _, err := neonDB.ExecContext(ctx, updateQuery, publicURL, task.rowID); err != nil {
+		if _, err := neonDB.ExecContext(ctx, updateQuery, proxyURL, task.rowID); err != nil {
 			slog.Warn("generateAndStoreSeedImages: update failed",
 				"table", task.table, "row_id", task.rowID, "error", err)
 			continue

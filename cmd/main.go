@@ -1272,6 +1272,10 @@ func main() {
 			// Public asset endpoints (no auth required)
 			r.Get("/apps/{appId}/logo", httpViews.GetAppLogo)
 			r.Get("/apps/{appId}/assets/{assetId}/file", httpViews.GetAssetFile)
+			// Generic app asset proxy — redirects to a fresh presigned S3
+			// URL for any object under apps/{appId}/*. Used by seed images
+			// and other auto-generated content referenced by the app.
+			r.Get("/apps/{appId}/file/*", httpViews.GetAppAsset)
 
 			// Public template marketplace (no auth)
 			r.Route("/templates", func(r chi.Router) {
