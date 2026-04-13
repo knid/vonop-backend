@@ -272,3 +272,100 @@ func (DeleteCategoryTool) Execute(ctx context.Context, rc *RunContext, input jso
 	}
 	return runStoreOp(ctx, rc, "delete_category", params)
 }
+
+// -----------------------------------------------------------------------------
+// Discounts
+// -----------------------------------------------------------------------------
+
+type ListDiscountsTool struct{}
+
+func (ListDiscountsTool) Name() string { return "list_discounts" }
+func (ListDiscountsTool) Description() string {
+	return "List all discount codes in the store. Returns a JSON array with id, code, type, value, starts_at, ends_at, is_active. Takes no parameters. Call this before update_discount or delete_discount."
+}
+func (ListDiscountsTool) Schema() map[string]any {
+	return map[string]any{
+		"type":       "object",
+		"properties": map[string]any{},
+	}
+}
+func (ListDiscountsTool) Execute(ctx context.Context, rc *RunContext, input json.RawMessage) (string, bool, error) {
+	return runStoreOp(ctx, rc, "list_discounts", map[string]any{})
+}
+
+type CreateDiscountTool struct{}
+
+func (CreateDiscountTool) Name() string { return "create_discount" }
+func (CreateDiscountTool) Description() string {
+	return "Create a discount code. `type` is \"percentage\" or \"fixed\". For percentage, `value` is a whole-number percent (20 == 20% off). For fixed, `value` is cents off. starts_at / ends_at are optional RFC3339 timestamps."
+}
+func (CreateDiscountTool) Schema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"code":            map[string]any{"type": "string"},
+			"type":            map[string]any{"type": "string", "enum": []string{"percentage", "fixed"}},
+			"value":           map[string]any{"type": "integer"},
+			"min_order_cents": map[string]any{"type": "integer"},
+			"max_uses":        map[string]any{"type": "integer"},
+			"starts_at":       map[string]any{"type": "string", "description": "RFC3339 timestamp"},
+			"ends_at":         map[string]any{"type": "string", "description": "RFC3339 timestamp"},
+		},
+		"required": []string{"code", "type", "value"},
+	}
+}
+func (CreateDiscountTool) Execute(ctx context.Context, rc *RunContext, input json.RawMessage) (string, bool, error) {
+	var params map[string]any
+	if err := json.Unmarshal(input, &params); err != nil {
+		return fmt.Sprintf("invalid input: %v", err), true, nil
+	}
+	return runStoreOp(ctx, rc, "create_discount", params)
+}
+
+type UpdateDiscountTool struct{}
+
+func (UpdateDiscountTool) Name() string { return "update_discount" }
+func (UpdateDiscountTool) Description() string {
+	return "Update a discount code. Requires the discount UUID in `id`. Call list_discounts first to look it up."
+}
+func (UpdateDiscountTool) Schema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"id":        map[string]any{"type": "string", "description": "discount UUID"},
+			"code":      map[string]any{"type": "string"},
+			"is_active": map[string]any{"type": "boolean"},
+		},
+		"required": []string{"id"},
+	}
+}
+func (UpdateDiscountTool) Execute(ctx context.Context, rc *RunContext, input json.RawMessage) (string, bool, error) {
+	var params map[string]any
+	if err := json.Unmarshal(input, &params); err != nil {
+		return fmt.Sprintf("invalid input: %v", err), true, nil
+	}
+	return runStoreOp(ctx, rc, "update_discount", params)
+}
+
+type DeleteDiscountTool struct{}
+
+func (DeleteDiscountTool) Name() string { return "delete_discount" }
+func (DeleteDiscountTool) Description() string {
+	return "Delete a discount code. Requires the discount UUID in `id`. Call list_discounts first to look it up."
+}
+func (DeleteDiscountTool) Schema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"id": map[string]any{"type": "string", "description": "discount UUID"},
+		},
+		"required": []string{"id"},
+	}
+}
+func (DeleteDiscountTool) Execute(ctx context.Context, rc *RunContext, input json.RawMessage) (string, bool, error) {
+	var params map[string]any
+	if err := json.Unmarshal(input, &params); err != nil {
+		return fmt.Sprintf("invalid input: %v", err), true, nil
+	}
+	return runStoreOp(ctx, rc, "delete_discount", params)
+}
