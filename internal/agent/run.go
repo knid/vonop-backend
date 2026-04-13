@@ -21,7 +21,7 @@ import (
 
 // Budget limits (package-level defaults; can be overridden later if needed).
 const (
-	defaultMaxTurns            = 25
+	defaultMaxTurns            = 50
 	defaultMaxToolCallsPerTurn = 20
 	defaultMaxTokensPerRun     = 500_000
 	defaultMaxWallclockMs      = 10 * 60 * 1000
@@ -171,6 +171,16 @@ func Run(
 		creditCheck = deps.CreditChecker(tracker)
 	}
 
+	// Resolve the tool-round budget from remote config so it can be tuned
+	// without a redeploy. Falls back to defaultMaxTurns when RC is unavailable
+	// or the flag returns a non-positive value.
+	maxTurns := defaultMaxTurns
+	if deps.RemoteConfig != nil {
+		if rcTurns := deps.RemoteConfig.GetInt(remoteconfig.AIBuilderToolMaxRounds, remoteconfig.Global); rcTurns > 0 {
+			maxTurns = rcTurns
+		}
+	}
+
 	rc := &RunContext{
 		RunID:   runID,
 		Project: project,
@@ -187,7 +197,7 @@ func Run(
 		PreCommit: preCommit,
 		Model:     model,
 		Provider:  provider.Name,
-		MaxTurns:  defaultMaxTurns,
+		MaxTurns:  maxTurns,
 		Tools:     registry.Names(),
 	})
 
@@ -315,7 +325,7 @@ func Run(
 		narrationSink,
 		nil, // onReasoning
 		utils.ToolCallConfig{
-			MaxRounds:  defaultMaxTurns,
+			MaxRounds:  maxTurns,
 			MaxTokens:  16384,
 			NudgeAfter: 50,
 			StripAfter: -1,
