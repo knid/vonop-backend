@@ -135,6 +135,23 @@ func BuildRegistryFor(project *models.AppProject, deps *RunDependencies) *Regist
 	if project != nil && project.ProjectType == "mobile_app" {
 		r.Register(ConfigureMobileBridgeTool{Deps: deps})
 	}
+	if project != nil && project.ProjectType == "ecommerce" {
+		r.Register(ListProductsTool{})
+		r.Register(CreateProductTool{})
+		r.Register(UpdateProductTool{})
+		r.Register(DeleteProductTool{})
+		r.Register(BulkCreateProductsTool{})
+		r.Register(ListCategoriesTool{})
+		r.Register(CreateCategoryTool{})
+		r.Register(UpdateCategoryTool{})
+		r.Register(DeleteCategoryTool{})
+		r.Register(ListDiscountsTool{})
+		r.Register(CreateDiscountTool{})
+		r.Register(UpdateDiscountTool{})
+		r.Register(DeleteDiscountTool{})
+		r.Register(GetStoreTool{})
+		r.Register(UpdateStoreSettingsTool{})
+	}
 	return r
 }
 
