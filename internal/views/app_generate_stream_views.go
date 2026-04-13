@@ -2,8 +2,10 @@ package views
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 
+	"github.com/knid/wemob/internal/agent"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/utils"
@@ -58,7 +60,12 @@ func (v *HttpViews) GenerateAppStream(w http.ResponseWriter, r *http.Request) {
 		JobType: "generate_app",
 		AppID:   project.ID,
 		StreamFunc: func(ctx context.Context, events chan<- responses.SSEEvent, jobID string) {
-			v.Controller.StreamBuildApp(ctx, project, user, req.Prompt, req.Images, "", true, jobID, events)
+			deps := v.Controller.AgentDeps(user)
+			emitter := newAgentSSEAdapter(events)
+			if err := agent.Run(ctx, deps, project, user, req.Prompt, req.Images, emitter); err != nil {
+				slog.Error("agent.Run failed (generate)", "error", err, "project_id", project.ID)
+			}
+			emitter.Close()
 		},
 	})
 }
