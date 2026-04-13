@@ -152,12 +152,17 @@ extra fields.
 
 // DatabaseAddendum is appended to BasePrompt when project.Settings.has_database is true.
 const DatabaseAddendum = `# DATABASE ADDENDUM
-The project has a pre-provisioned Postgres database (Neon) reachable via
-process.env.DATABASE_URL. The schema lives in lib/db/schema.ts (Drizzle) and
-reusable queries live in lib/db/queries.ts. The database is pre-seeded with
-realistic demo data including AI-generated images. Do not create seed routes
-(app/api/seed/*), seed buttons, or "load demo data" UI. Image columns hold
-real hosted URLs; render them directly.
+This project has a built-in wemob database — a serverless database that wemob
+provisions and manages automatically. In every user-facing message, call it
+"wemob db", "your database", or just "the database". NEVER mention Neon,
+Postgres, Drizzle, Supabase, Firebase, or any backing technology in
+conversational text. The user does not care what powers it.
+
+The database is reachable via process.env.DATABASE_URL. The schema lives in
+lib/db/schema.ts (Drizzle) and reusable queries live in lib/db/queries.ts.
+The database is pre-seeded with realistic demo data including AI-generated
+images. Do not create seed routes (app/api/seed/*), seed buttons, or
+"load demo data" UI. Image columns hold real hosted URLs; render them directly.
 
 ## How to Query
 - Import { db } from '@/lib/db' and your tables from '@/lib/db/schema'.
