@@ -1,0 +1,107 @@
+package agent
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+
+	"github.com/knid/wemob/internal/utils"
+)
+
+// ToolExecutor implements one agent-callable tool.
+//
+// Schema() must return a JSON-schema object acceptable to the Anthropic tools
+// API. Execute() receives the raw input bytes from the model, validates/parses
+// them, performs the operation, and returns a human-readable result string
+// plus an is_error flag. Returning err != nil is reserved for infrastructure
+// errors (DB down, etc.) — tool-usage errors (invalid path, not found) should
+// return isError=true with a descriptive result instead.
+type ToolExecutor interface {
+	Name() string
+	Description() string
+	Schema() map[string]any
+	Execute(ctx context.Context, rc *RunContext, input json.RawMessage) (result string, isError bool, err error)
+}
+
+// ServerToolRef is an Anthropic server-side tool (e.g. web_search) that the
+// provider executes internally. No local executor runs.
+type ServerToolRef struct {
+	Tool        *utils.Tool // the utils.Tool with ServerTool set
+	DisplayName string      // surfaced in RunStartEvent.Tools
+}
+
+// Registry holds the active tool set for one run.
+type Registry struct {
+	order       []string
+	tools       map[string]ToolExecutor
+	serverTools []ServerToolRef
+}
+
+func NewRegistry() *Registry {
+	return &Registry{tools: make(map[string]ToolExecutor)}
+}
+
+// Register adds an executor tool. Duplicate names are ignored.
+func (r *Registry) Register(t ToolExecutor) {
+	if _, exists := r.tools[t.Name()]; exists {
+		return
+	}
+	r.order = append(r.order, t.Name())
+	r.tools[t.Name()] = t
+}
+
+// AddServerTool registers an Anthropic server-side tool.
+func (r *Registry) AddServerTool(ref ServerToolRef) {
+	// Dedupe by display name against both executor and server tools.
+	for _, existing := range r.order {
+		if existing == ref.DisplayName {
+			return
+		}
+	}
+	r.serverTools = append(r.serverTools, ref)
+	r.order = append(r.order, ref.DisplayName)
+}
+
+// ServerTools returns the registered server-side tools.
+func (r *Registry) ServerTools() []ServerToolRef {
+	out := make([]ServerToolRef, len(r.serverTools))
+	copy(out, r.serverTools)
+	return out
+}
+
+// Names returns tool names in registration order (executor + server tools
+// mixed together). Used by RunStartEvent.Tools.
+func (r *Registry) Names() []string {
+	out := make([]string, len(r.order))
+	copy(out, r.order)
+	return out
+}
+
+// AnthropicSchemas returns schemas for executor tools only (server tools are
+// opaque to us — the provider handles them). Shape matches the native
+// Anthropic tools API: { name, description, input_schema }.
+func (r *Registry) AnthropicSchemas() []map[string]any {
+	out := make([]map[string]any, 0, len(r.tools))
+	for _, name := range r.order {
+		t, ok := r.tools[name]
+		if !ok {
+			continue // server tool — skip
+		}
+		out = append(out, map[string]any{
+			"name":         t.Name(),
+			"description":  t.Description(),
+			"input_schema": t.Schema(),
+		})
+	}
+	return out
+}
+
+// Execute dispatches to the named tool. Unknown names return isError=true
+// rather than error, so one bad tool call doesn't kill the run.
+func (r *Registry) Execute(ctx context.Context, rc *RunContext, name string, input json.RawMessage) (string, bool, error) {
+	t, ok := r.tools[name]
+	if !ok {
+		return fmt.Sprintf("unknown tool: %s", name), true, nil
+	}
+	return t.Execute(ctx, rc, input)
+}
