@@ -3,7 +3,6 @@ package views
 import (
 	"archive/zip"
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -23,97 +22,6 @@ import (
 	"github.com/knid/wemob/internal/utils"
 	"github.com/posthog/posthog-go"
 )
-
-// POST /v2/apps/generate/from-image
-func (v *HttpViews) GenerateAppFromImage(w http.ResponseWriter, r *http.Request) {
-	user, err := v.Controller.GetUserFromReq(r)
-	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
-		return
-	}
-	if requireActiveSubscription(w, user) {
-		return
-	}
-	if v.checkMinimumCredits(w, user) {
-		return
-	}
-
-	var req requests.ScreenshotToAppRequest
-	if err := utils.ParseJSONBody(r, &req); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	// Token tracking for post-hoc billing
-	tracker := utils.NewTokenTracker()
-	tracker.UserID = user.ID.String()
-	ctx := utils.WithTokenTracker(r.Context(), tracker)
-
-	structure, err := v.Controller.PlanAppFileStructureFromScreenshot(ctx, req.ImageBase64)
-	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	genReq := requests.GenerateAppRequest{Prompt: "Generated from screenshot"}
-	project, err := v.Controller.CreateAppProject(r.Context(), user, genReq)
-	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	if structure.Name != "" {
-		project.Name = structure.Name
-	}
-	if structure.Slug != "" {
-		project.Slug = structure.Slug
-	}
-	themeData := models.AppTheme{
-		ColorScheme:     structure.ColorScheme,
-		DarkColorScheme: structure.DarkColorScheme,
-		Typography:      structure.Typography,
-	}
-	themeJSON, _ := json.Marshal(themeData)
-	project.Theme = themeJSON
-	project.Status = "ready"
-	v.Controller.ApplyStructureToProject(project, structure)
-	v.Controller.DB.UpdateAppProject(project)
-
-	var theme map[string]any
-	json.Unmarshal(project.Theme, &theme)
-
-	utils.JSONResponse(w, responses.AppProjectDetailResponse{
-		AppProjectResponse: responses.AppProjectResponse{
-			ID:          project.ID,
-			Name:        project.Name,
-			Slug:        project.Slug,
-			Prompt:      project.Prompt,
-			ProjectType: project.ProjectType,
-			Theme:       theme,
-			Settings:    project.Settings,
-			Status:      project.Status,
-			CreatedAt:   project.CreatedAt,
-			UpdatedAt:   project.UpdatedAt,
-		},
-	}, http.StatusCreated)
-
-	v.Controller.RecordTokenUsage(user, "generate_from_image",
-		v.Controller.SecretManager.GetSecret("DEFAULT_LLM_MODEL"),
-		v.Controller.LLMProvider().Name, project.ID.String(), "standard", tracker)
-
-	// Post-hoc token-based billing
-	prompt, completion, total, _ := tracker.Totals()
-	if total > 0 {
-		credits := models.TokensToCredits(prompt, completion)
-		if err := v.Controller.DeductAICreditsUnchecked(user, credits, "generate_from_image", project.ID.String()); err != nil {
-			slog.Warn("failed to deduct AI credits from tokens", "error", err,
-				"user_id", user.ID, "credits", credits, "tokens", total)
-		}
-	}
-
-	v.Controller.TrackUserEvent(user, "app_generated_from_image", posthog.NewProperties().
-		Set("app_id", project.ID.String()))
-}
 
 // GET /v2/apps/{appId}/logo — public endpoint that redirects to a fresh pre-signed S3 URL.
 // No auth required — logos are public assets embedded in generated app code.
@@ -1000,111 +908,6 @@ func (v *HttpViews) ConvertToMobile(w http.ResponseWriter, r *http.Request) {
 	}, http.StatusOK)
 }
 
-// POST /v2/apps/{appId}/mobile-optimize
-func (v *HttpViews) MobileOptimize(w http.ResponseWriter, r *http.Request) {
-	user, err := v.Controller.GetUserFromReq(r)
-	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
-		return
-	}
-	if requireActiveSubscription(w, user) {
-		return
-	}
-	if v.checkMinimumCredits(w, user) {
-		return
-	}
-
-	appID := chi.URLParam(r, "appId")
-	project, err := v.Controller.GetAppProject(appID, user)
-	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
-		return
-	}
-
-	if project.ProjectType != "mobile_app" {
-		utils.JSONErrorResponse(w, "mobile optimization is only available for mobile app projects", http.StatusBadRequest)
-		return
-	}
-	if project.Status != "ready" {
-		utils.JSONErrorResponse(w, "project is not ready for optimization", http.StatusConflict)
-		return
-	}
-
-	v.handleStreamOrAsync(w, r, user, StreamConfig{
-		JobType: "mobile_optimize",
-		AppID:   project.ID,
-		StreamFunc: func(ctx context.Context, events chan<- responses.SSEEvent, jobID string) {
-			v.Controller.StreamMobileOptimize(ctx, project, user, events)
-		},
-	})
-}
-
-// GET /v2/apps/{appId}/conversation
-func (v *HttpViews) GetAppConversation(w http.ResponseWriter, r *http.Request) {
-	user, err := v.Controller.GetUserFromReq(r)
-	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
-		return
-	}
-
-	appID := chi.URLParam(r, "appId")
-	project, err := v.Controller.GetAppProject(appID, user)
-	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
-		return
-	}
-
-	conv, err := v.Controller.GetAppConversation(project.ID.String())
-	if err != nil {
-		utils.JSONResponse(w, responses.AppConversationResponse{
-			Messages: []responses.AppConversationMessageResp{},
-		}, http.StatusOK)
-		return
-	}
-
-	var messages []models.AppConversationMessage
-	json.Unmarshal(conv.Messages, &messages)
-
-	msgResp := make([]responses.AppConversationMessageResp, 0, len(messages))
-	for _, m := range messages {
-		var fileOps []responses.AppChatFileOpResp
-		for _, op := range m.FileOperations {
-			fileOps = append(fileOps, responses.AppChatFileOpResp{
-				Action:   op.Action,
-				FilePath: op.FilePath,
-				FileType: op.FileType,
-			})
-		}
-		var toolCalls []responses.AppChatToolCallResp
-		for _, tc := range m.ToolCalls {
-			toolCalls = append(toolCalls, responses.AppChatToolCallResp{
-				Tool:      tc.Tool,
-				Arguments: tc.Arguments,
-			})
-		}
-		msgResp = append(msgResp, responses.AppConversationMessageResp{
-			ID:                 m.ID,
-			Role:               m.Role,
-			Content:            m.Content,
-			Timestamp:          m.Timestamp,
-			FileOperations:     fileOps,
-			ImageURLs:          m.ImageURLs,
-			SnapshotID:         m.SnapshotID,
-			Suggestions:        m.Suggestions,
-			ThinkingText:       m.ThinkingText,
-			ThinkingDurationMs: m.ThinkingDurationMs,
-			ToolCalls:          toolCalls,
-		})
-	}
-
-	utils.JSONResponse(w, responses.AppConversationResponse{
-		ID:        conv.ID,
-		Messages:  msgResp,
-		CreatedAt: conv.CreatedAt,
-		UpdatedAt: conv.UpdatedAt,
-	}, http.StatusOK)
-}
-
 // GET /v2/integrations/providers
 func (v *HttpViews) GetV2IntegrationProviders(w http.ResponseWriter, r *http.Request) {
 	providers := v.Controller.GetIntegrationProviders()
@@ -1173,7 +976,6 @@ func (v *HttpViews) GetAppInit(w http.ResponseWriter, r *http.Request) {
 	var (
 		wg sync.WaitGroup
 
-		conv           *models.AppConversation
 		fileMap        map[string]string
 		domains        []responses.AppDomainResponse
 		envVars        []models.AppEnvVar
@@ -1184,12 +986,7 @@ func (v *HttpViews) GetAppInit(w http.ResponseWriter, r *http.Request) {
 		screenshotURL  string
 	)
 
-	wg.Add(8)
-
-	go func() {
-		defer wg.Done()
-		conv, _ = v.Controller.GetAppConversation(project.ID.String())
-	}()
+	wg.Add(7)
 
 	go func() {
 		defer wg.Done()
@@ -1272,50 +1069,8 @@ func (v *HttpViews) GetAppInit(w http.ResponseWriter, r *http.Request) {
 		Files: fileResp,
 	}
 
-	// Build conversation response
+	// Conversation is fetched via the new agent chat history endpoints.
 	var convResp *responses.AppConversationResponse
-	if conv != nil {
-		var messages []models.AppConversationMessage
-		json.Unmarshal(conv.Messages, &messages)
-
-		msgResp := make([]responses.AppConversationMessageResp, 0, len(messages))
-		for _, m := range messages {
-			var fileOps []responses.AppChatFileOpResp
-			for _, op := range m.FileOperations {
-				fileOps = append(fileOps, responses.AppChatFileOpResp{
-					Action:   op.Action,
-					FilePath: op.FilePath,
-					FileType: op.FileType,
-				})
-			}
-			var toolCalls []responses.AppChatToolCallResp
-			for _, tc := range m.ToolCalls {
-				toolCalls = append(toolCalls, responses.AppChatToolCallResp{
-					Tool:      tc.Tool,
-					Arguments: tc.Arguments,
-				})
-			}
-			msgResp = append(msgResp, responses.AppConversationMessageResp{
-				ID:                 m.ID,
-				Role:               m.Role,
-				Content:            m.Content,
-				Timestamp:          m.Timestamp,
-				FileOperations:     fileOps,
-				ImageURLs:          m.ImageURLs,
-				SnapshotID:         m.SnapshotID,
-				Suggestions:        m.Suggestions,
-				ThinkingText:       m.ThinkingText,
-				ThinkingDurationMs: m.ThinkingDurationMs,
-				ToolCalls:          toolCalls,
-			})
-		}
-		convResp = &responses.AppConversationResponse{
-			ID:        conv.ID,
-			Messages:  msgResp,
-			CreatedAt: conv.CreatedAt,
-			UpdatedAt: conv.UpdatedAt,
-		}
-	}
 
 	// Build domains response (already the right type)
 	if domains == nil {

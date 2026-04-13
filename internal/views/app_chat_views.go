@@ -13,29 +13,6 @@ import (
 	"github.com/posthog/posthog-go"
 )
 
-// DELETE /v2/apps/{appId}/conversation
-func (v *HttpViews) ClearAppConversation(w http.ResponseWriter, r *http.Request) {
-	user, err := v.Controller.GetUserFromReq(r)
-	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
-		return
-	}
-
-	appID := chi.URLParam(r, "appId")
-	_, err = v.Controller.GetAppProject(appID, user)
-	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
-		return
-	}
-
-	if err := v.Controller.ClearAppConversation(appID); err != nil {
-		utils.JSONErrorResponse(w, "failed to clear conversation", http.StatusInternalServerError)
-		return
-	}
-
-	utils.JSONResponse(w, map[string]any{"success": true}, http.StatusOK)
-}
-
 // POST /v2/apps/{appId}/chat
 func (v *HttpViews) ChatApp(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)

@@ -1305,7 +1305,6 @@ func main() {
 				r.Use(appMiddleware.RequireSubscription("active", "trial", "free"))
 
 				// Generation endpoints (AI rate limited)
-				r.With(rateLimiter.RateLimit(20, time.Minute, appMiddleware.AIUserKey)).Post("/generate/from-image", httpViews.GenerateAppFromImage)
 				r.With(rateLimiter.RateLimit(20, time.Minute, appMiddleware.AIUserKey)).Post("/generate/stream", httpViews.GenerateAppStream)
 
 				r.Get("/jobs/{jobId}/stream", httpViews.StreamJob)
@@ -1327,8 +1326,6 @@ func main() {
 
 					// Chat
 					r.With(rateLimiter.RateLimit(20, time.Minute, appMiddleware.AIUserKey)).Post("/chat", httpViews.ChatApp)
-					r.Get("/conversation", httpViews.GetAppConversation)
-					r.Delete("/conversation", httpViews.ClearAppConversation)
 
 					// Active job lookup — lets the chat UI reconnect to an
 					// in-flight SSE stream after a page refresh without holding
@@ -1390,7 +1387,6 @@ func main() {
 					})
 
 					r.Post("/convert-to-mobile", httpViews.ConvertToMobile)
-					r.Post("/mobile-optimize", httpViews.MobileOptimize)
 					r.Post("/capture-screenshot", httpViews.CaptureAppScreenshot)
 
 					// Snapshots
@@ -1522,11 +1518,6 @@ func main() {
 					r.Post("/gateway-key/rotate", httpViews.RotateGatewayKey)
 				})
 			})
-
-			// Mobile intent classification
-			r.With(appMiddleware.RequireAuth(controller), appMiddleware.RequireSubscription("active", "trial", "free"),
-				rateLimiter.RateLimit(30, time.Minute, appMiddleware.AIUserKey)).
-				Post("/mobile/classify-intent", httpViews.ClassifyMobileIntent)
 
 			r.Route("/mobile/{projectId}", func(r chi.Router) {
 				r.Use(appMiddleware.RequireAuth(controller))

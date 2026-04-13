@@ -37,12 +37,6 @@ type ClarificationQuestion struct {
 	Required bool     `json:"required"`
 }
 
-// ClarificationResponse is the LLM output containing generated questions.
-type ClarificationResponse struct {
-	ShouldClarify bool                    `json:"should_clarify"`
-	Questions     []ClarificationQuestion `json:"questions"`
-}
-
 // ClarificationAnswer is a single user answer to a clarification question.
 type ClarificationAnswer struct {
 	ID     string `json:"id"`
@@ -211,95 +205,6 @@ var routeGroupRegex = regexp.MustCompile(`\([^)]+\)/`)
 // code legitimately contains phrases like "Generation failed" in UI strings.
 const fallbackSentinel = "/* __WEMOB_FALLBACK__ */"
 
-// ClassifyMobileIntent determines whether a mobile studio prompt is requesting
-// to wrap an existing URL (url_wrapper) or create a new app from scratch (from_scratch).
-// Returns (intent, extractedURL).
-func (c *Controller) ClassifyMobileIntent(ctx context.Context, prompt string) (string, string) {
-	provider := c.llmProvider()
-	model := "anthropic/claude-haiku-4-5-20251001"
-	if provider.IsAnthropic() {
-		model = "claude-haiku-4-5-20251001"
-	}
-
-	system := `You classify mobile app requests. The user is in a mobile app builder.
-Determine if they want to:
-1. "url_wrapper" — Convert/wrap an existing website URL into a mobile app. They mention a specific website URL or domain name.
-2. "from_scratch" — Build a new mobile app from scratch. They describe features/functionality without referencing an existing website.
-
-Reply in this exact format (two lines):
-intent: <url_wrapper or from_scratch>
-url: <the full URL if url_wrapper, otherwise empty>
-
-If the user mentions a domain without protocol, add https://. If intent is from_scratch, url should be empty.
-
-Examples:
-- "dashboard.wemob.io sitesini mobile cevir" → intent: url_wrapper\nurl: https://dashboard.wemob.io
-- "convert example.com to mobile app" → intent: url_wrapper\nurl: https://example.com
-- "https://mysite.com/shop mobile uygulamaya dönüştür" → intent: url_wrapper\nurl: https://mysite.com/shop
-- "build me a fitness tracking app" → intent: from_scratch\nurl:
-- "make a todo list mobile app" → intent: from_scratch\nurl: `
-
-	result, err := utils.GetTextFromLLM(ctx, model, system, prompt, provider, 256)
-	if err != nil {
-		slog.Warn("Mobile intent classification failed", "error", err)
-		return "from_scratch", ""
-	}
-
-	lines := strings.Split(strings.TrimSpace(result), "\n")
-	intent := "from_scratch"
-	extractedURL := ""
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "intent:") {
-			intent = strings.TrimSpace(strings.TrimPrefix(line, "intent:"))
-		} else if strings.HasPrefix(line, "url:") {
-			extractedURL = strings.TrimSpace(strings.TrimPrefix(line, "url:"))
-		}
-	}
-
-	if intent == "url_wrapper" && extractedURL != "" {
-		// Ensure URL has protocol
-		if !strings.HasPrefix(extractedURL, "http://") && !strings.HasPrefix(extractedURL, "https://") {
-			extractedURL = "https://" + extractedURL
-		}
-		return "url_wrapper", extractedURL
-	}
-
-	return "from_scratch", ""
-}
-
-// GenerateURLWrapperWelcome uses the fast model to produce a short, natural
-// welcome message for a URL-wrapper mobile conversion. It receives the site
-// metadata and the user's original prompt so it can respond conversationally.
-func (c *Controller) GenerateURLWrapperWelcome(ctx context.Context, siteURL string, meta utils.SiteMetadata, userPrompt string) string {
-	provider := c.llmProvider()
-	model := "anthropic/claude-haiku-4-5-20251001"
-	if provider.IsAnthropic() {
-		model = "claude-haiku-4-5-20251001"
-	}
-
-	system := `You are a friendly mobile app builder assistant. The user wants to convert a website into a mobile app.
-You will receive the website URL, its title, description, and the user's original message.
-
-Write a SHORT, friendly welcome message (3-5 sentences max) in the SAME LANGUAGE as the user's message. Include:
-1. Acknowledge the website by name/title naturally
-2. Confirm it's ready as a mobile app preview
-3. Suggest 2-3 specific customization ideas based on what you know about the site (e.g., if it's an e-commerce site, suggest adding a bottom tab bar for categories; if it's a dashboard, suggest making the sidebar a hamburger menu)
-
-Do NOT use markdown headers or bold. Keep it conversational and concise. Do NOT use bullet points with dashes — use natural flowing text.`
-
-	userMsg := fmt.Sprintf("URL: %s\nTitle: %s\nDescription: %s\nUser message: %s",
-		siteURL, meta.Title, meta.Description, userPrompt)
-
-	result, err := utils.GetTextFromLLM(ctx, model, system, userMsg, provider, 512)
-	if err != nil {
-		slog.Warn("Failed to generate URL wrapper welcome", "error", err)
-		return ""
-	}
-
-	return strings.TrimSpace(result)
-}
-
 // PlanAppFileStructure calls the LLM to generate a file structure plan from a prompt (non-streaming).
 func (c *Controller) PlanAppFileStructure(ctx context.Context, prompt string, projectType string) (*appFileStructure, error) {
 	provider := c.llmProvider()
@@ -464,62 +369,6 @@ func repairTruncatedStructureJSON(s string) string {
 	}
 
 	return string(result)
-}
-
-// GenerateClarificationQuestions asks a fast LLM to produce 2-5 clarifying
-// questions based on the user's app prompt so the builder can gather context
-// before generating code.
-func (c *Controller) GenerateClarificationQuestions(ctx context.Context, prompt string, projectType string) (*ClarificationResponse, error) {
-	provider := c.llmProvider()
-	model := provider.FastModel()
-
-	userMsg := fmt.Sprintf("Project type: %s\n\nUser prompt:\n%s", projectType, prompt)
-	resultJSON, err := utils.GetJSONFromLLM(ctx, model, constants.APP_CLARIFICATION_PROMPT, userMsg, provider)
-	if err != nil {
-		slog.Warn("failed to generate clarification questions", "error", err)
-		return nil, err
-	}
-
-	var resp ClarificationResponse
-	if err := json.Unmarshal([]byte(resultJSON), &resp); err != nil {
-		cleaned := utils.ExtractJSON(resultJSON)
-		if err2 := json.Unmarshal([]byte(cleaned), &resp); err2 != nil {
-			slog.Warn("failed to parse clarification questions", "error", err2)
-			return nil, err2
-		}
-	}
-
-	// Cap at 5 questions
-	if len(resp.Questions) > 5 {
-		resp.Questions = resp.Questions[:5]
-	}
-
-	return &resp, nil
-}
-
-// PlanAppFileStructureFromScreenshot uses vision LLM to plan files from a screenshot.
-func (c *Controller) PlanAppFileStructureFromScreenshot(ctx context.Context, imageBase64 string) (*appFileStructure, error) {
-	provider := c.llmProvider()
-	model := c.SecretManager.GetSecret("WEBSITE_BUILDER_LLM_MODEL")
-	if model == "" {
-		model = provider.DefaultModel()
-	}
-
-	response, err := utils.GetJSONFromLLMWithVision(ctx, model, constants.NEXTJS_SCREENSHOT_TO_FILES_PROMPT, "Analyze this screenshot and generate the file structure plan.", imageBase64, provider)
-	if err != nil {
-		return nil, fmt.Errorf("failed to analyze screenshot")
-	}
-
-	var structure appFileStructure
-	if err := json.Unmarshal([]byte(response), &structure); err != nil {
-		cleaned := utils.ExtractJSON(response)
-		if err2 := json.Unmarshal([]byte(cleaned), &structure); err2 != nil {
-			slog.Error("failed to parse screenshot structure", "error", err2, "json", response)
-			return nil, fmt.Errorf("failed to parse generated structure")
-		}
-	}
-
-	return &structure, nil
 }
 
 // ApplyStructureToProject saves the structure plan output (file plan, data models,

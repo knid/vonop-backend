@@ -1,7 +1,6 @@
 package views
 
 import (
-	"fmt"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -9,48 +8,6 @@ import (
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/utils"
 )
-
-// POST /v2/mobile/classify-intent
-// Classifies the user's mobile studio prompt. If url_wrapper, auto-creates the
-// project and returns project_id + proxy_url so the frontend goes straight to
-// preview + injection chat.
-func (v *HttpViews) ClassifyMobileIntent(w http.ResponseWriter, r *http.Request) {
-	user, err := v.Controller.GetUserFromReq(r)
-	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
-		return
-	}
-	if requireActiveSubscription(w, user) {
-		return
-	}
-
-	var body struct {
-		Prompt string `json:"prompt"`
-		URL    string `json:"url"` // When provided, skip classification and treat as url_wrapper directly
-	}
-	if err := utils.ParseJSONBody(r, &body); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	if body.Prompt == "" && body.URL == "" {
-		utils.JSONErrorResponse(w, "prompt or url is required", http.StatusBadRequest)
-		return
-	}
-
-	// URL-wrapper (iframe) flow is disabled — always treat as from_scratch.
-	// When a URL is provided, include it in the prompt so the normal generation
-	// flow picks it up via web search + screenshot instead of loading an iframe.
-	prompt := body.Prompt
-	if body.URL != "" {
-		prompt = fmt.Sprintf("Create a mobile app inspired by this website: %s", body.URL)
-	}
-
-	utils.JSONResponse(w, map[string]any{
-		"intent": "from_scratch",
-		"prompt": prompt,
-		"url":    "",
-	}, http.StatusOK)
-}
 
 // GET /v2/mobile/{projectId}/config (authenticated)
 // projectId can be either a Project ID (URL-wrapper) or an AppProject ID (converted app)
