@@ -119,6 +119,9 @@ func Run(
 
 	// --- Step 8: persist the user message ---
 	imagesJSON := mustJSON(normaliseImages(images))
+	userParts, _ := json.Marshal([]models.ChatMessagePart{
+		{Type: "text", Text: message},
+	})
 	userMsgRow := &models.AppChatMessage{
 		AppProjectID: project.ID,
 		RunID:        &runID,
@@ -126,6 +129,7 @@ func Run(
 		Content:      message,
 		Images:       imagesJSON,
 		ToolCalls:    []byte("[]"),
+		Parts:        userParts,
 	}
 	if _, err := deps.DB.InsertChatMessage(userMsgRow); err != nil {
 		return New(CodeInternal, "setup", "failed to persist user message", err)
@@ -196,11 +200,18 @@ func Run(
 	}()
 
 	// --- Step 12: agent loop ---
+	//
+	// `parts` is the chronological record of this assistant turn — text and
+	// tool_call blocks in the order the model emitted them. narrationSink
+	// appends to the trailing text part (or pushes a new one if the previous
+	// part was a tool); executor pushes a tool_call part each time and
+	// updates its result/duration after the tool runs. At the end of the run
+	// we persist parts as the canonical record and derive the legacy
+	// content/tool_calls fields from it for backwards-compatible readers.
 	var (
 		turn           = 1
 		totalToolCalls = 0
-		narrationBuf   strings.Builder
-		toolCallLog    []models.ChatMessageToolCall
+		parts          []models.ChatMessagePart
 	)
 
 	// Budget check before entering the loop.
@@ -236,13 +247,17 @@ func Run(
 	executor := func(name string, argsJSON string) (string, error) {
 		toolStart := time.Now()
 		toolCallID := uuid.NewString()
-		// Capture the narration length BEFORE the tool runs so the persisted
-		// row records exactly where the tool falls in the assistant text.
-		// The dashboard's buildPersistedTimeline uses this offset to interleave
-		// tool/file cards back into the narration on refresh — without it,
-		// every tool collapses to the end and we lose the chronological order
-		// the user saw live.
-		narrationOffset := narrationBuf.Len()
+		// Push a placeholder tool_call part — the result/duration/is_error
+		// fields land in the same struct after registry.Execute returns.
+		// Capturing the index up front lets us mutate the same slot rather
+		// than searching by id at the end.
+		partIdx := len(parts)
+		parts = append(parts, models.ChatMessagePart{
+			Type:       "tool_call",
+			ToolCallID: toolCallID,
+			Name:       name,
+			Input:      json.RawMessage(argsJSON),
+		})
 		emitter.Emit(EventToolCallStart, ToolCallStartEvent{
 			RunID:        runID,
 			Turn:         turn,
@@ -265,15 +280,9 @@ func Run(
 			Summary:    firstLine(result, 140),
 			IsError:    isErr || execErr != nil,
 		})
-		toolCallLog = append(toolCallLog, models.ChatMessageToolCall{
-			ID:              toolCallID,
-			Name:            name,
-			Input:           json.RawMessage(argsJSON),
-			Result:          result,
-			IsError:         isErr || execErr != nil,
-			DurationMs:      durationMs,
-			NarrationOffset: narrationOffset,
-		})
+		parts[partIdx].Result = result
+		parts[partIdx].IsError = isErr || execErr != nil
+		parts[partIdx].DurationMs = durationMs
 		totalToolCalls++
 		if execErr != nil {
 			return result, execErr
@@ -285,7 +294,18 @@ func Run(
 		if chunk == "" {
 			return
 		}
-		narrationBuf.WriteString(chunk)
+		// Append to the trailing text part if there is one; otherwise push a
+		// new text part. This is the chronological mirror of what the model
+		// emitted: text → tool → text → tool → text → ... lands as alternating
+		// parts in the slice, which the dashboard renders top-to-bottom.
+		if n := len(parts); n > 0 && parts[n-1].Type == "text" {
+			parts[n-1].Text += chunk
+		} else {
+			parts = append(parts, models.ChatMessagePart{
+				Type: "text",
+				Text: chunk,
+			})
+		}
 		emitter.Emit(EventNarration, NarrationEvent{RunID: runID, Turn: turn, Delta: chunk})
 	}
 
@@ -353,8 +373,40 @@ func Run(
 
 	// --- Step 13: success shutdown (continued in C2.20) ---
 	return finaliseSuccess(ctx, deps, repo, run, emitter, fileMap,
-		narrationBuf.String(), toolCallLog, tracker, runStart,
+		parts, tracker, runStart,
 		totalToolCalls, turn, message, user, project)
+}
+
+// partsToContent flattens an ordered parts slice into the legacy plain-text
+// content string by concatenating every text part in order.
+func partsToContent(parts []models.ChatMessagePart) string {
+	var b strings.Builder
+	for _, p := range parts {
+		if p.Type == "text" {
+			b.WriteString(p.Text)
+		}
+	}
+	return b.String()
+}
+
+// partsToToolCalls projects the tool_call parts into the legacy
+// ChatMessageToolCall slice readers still expect (analytics, history rebuild).
+func partsToToolCalls(parts []models.ChatMessagePart) []models.ChatMessageToolCall {
+	out := make([]models.ChatMessageToolCall, 0, len(parts))
+	for _, p := range parts {
+		if p.Type != "tool_call" {
+			continue
+		}
+		out = append(out, models.ChatMessageToolCall{
+			ID:         p.ToolCallID,
+			Name:       p.Name,
+			Input:      p.Input,
+			Result:     p.Result,
+			IsError:    p.IsError,
+			DurationMs: p.DurationMs,
+		})
+	}
+	return out
 }
 
 // registryToUtilsTools maps the agent Registry to the []utils.Tool shape
@@ -450,8 +502,7 @@ func finaliseSuccess(
 	run *models.AppAgentRun,
 	emitter EventEmitter,
 	fileMap *SafeFileMap,
-	narration string,
-	toolCalls []models.ChatMessageToolCall,
+	parts []models.ChatMessagePart,
 	tracker *utils.TokenTracker,
 	runStart time.Time,
 	totalToolCalls int,
@@ -460,6 +511,11 @@ func finaliseSuccess(
 	user *models.User,
 	project *models.AppProject,
 ) error {
+	// Derive the legacy fields from the canonical parts slice. New code reads
+	// Parts directly; everything else (LLM history rebuild, analytics, the
+	// previous dashboard render path) still works off Content + ToolCalls.
+	narration := partsToContent(parts)
+	toolCalls := partsToToolCalls(parts)
 	// Capture isInitial up-front because we mutate project.Status below for
 	// successful first generations, and the action label / event tracking
 	// further down still need to know whether this run was the initial one.
@@ -495,6 +551,10 @@ func finaliseSuccess(
 
 	// 2. Persist the assistant chat message.
 	toolCallsJSON, _ := json.Marshal(toolCalls)
+	partsJSON, _ := json.Marshal(parts)
+	if len(partsJSON) == 0 {
+		partsJSON = []byte("[]")
+	}
 	assistantMsg := &models.AppChatMessage{
 		AppProjectID: project.ID,
 		RunID:        &run.ID,
@@ -502,6 +562,7 @@ func finaliseSuccess(
 		Content:      narration,
 		Images:       []byte("[]"),
 		ToolCalls:    toolCallsJSON,
+		Parts:        partsJSON,
 	}
 	if _, insErr := deps.DB.InsertChatMessage(assistantMsg); insErr != nil {
 		slog.Warn("failed to persist assistant chat message", "error", insErr, "run_id", run.ID)
@@ -675,13 +736,18 @@ func finaliseFailureV2(
 	})
 
 	// 4. Persist "sorry" assistant message so the chat UI isn't orphaned.
+	orphanText := "Sorry, that turn failed — your files are unchanged. Please try again."
+	orphanParts, _ := json.Marshal([]models.ChatMessagePart{
+		{Type: "text", Text: orphanText},
+	})
 	orphanMsg := &models.AppChatMessage{
 		AppProjectID: run.AppProjectID,
 		RunID:        &run.ID,
 		Role:         "assistant",
-		Content:      "Sorry, that turn failed — your files are unchanged. Please try again.",
+		Content:      orphanText,
 		Images:       []byte("[]"),
 		ToolCalls:    []byte("[]"),
+		Parts:        orphanParts,
 	}
 	if _, err := deps.DB.InsertChatMessage(orphanMsg); err != nil {
 		slog.Warn("failed to persist failure message", "error", err, "run_id", run.ID)

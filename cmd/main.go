@@ -281,6 +281,12 @@ func createSchema(db *bun.DB) error {
 		// job on refresh via GET /v2/apps/{appId}/active-job (replaces the old
 		// localStorage-based job-id recovery).
 		`ALTER TABLE generation_jobs ADD COLUMN IF NOT EXISTS app_id uuid`,
+		// Parts column: chronological ordered record of each assistant turn.
+		// Replaces the brittle narration_offset approach (byte offsets into
+		// the content string didn't survive the Go-bytes vs JS-UTF16 boundary).
+		// New writes set this; legacy rows keep their empty default and the
+		// dashboard falls back to the old content/tool_calls render path.
+		`ALTER TABLE app_chat_messages ADD COLUMN IF NOT EXISTS parts jsonb NOT NULL DEFAULT '[]'`,
 	}
 
 	// Deduplicate before creating unique indexes (keep the latest row per group)
