@@ -263,7 +263,7 @@ func Run(
 			Turn:         turn,
 			ToolCallID:   toolCallID,
 			ToolName:     name,
-			InputPreview: json.RawMessage(argsJSON),
+			InputPreview: stripToolInputForPreview(name, argsJSON),
 		})
 		result, isErr, execErr := registry.Execute(ctx, rc, name, json.RawMessage(argsJSON))
 		durationMs := int(time.Since(toolStart).Milliseconds())
@@ -441,6 +441,41 @@ func trackerDelta(t *utils.TokenTracker) TokenUsage {
 }
 
 // ---- helpers ----
+
+// stripToolInputForPreview drops bulky fields from the tool input JSON
+// before stamping it into ToolCallStartEvent.InputPreview. Without this,
+// every write_file/edit_file call shipped the full file body THREE times
+// over SSE: once in input_preview, once in file_written.content, and once
+// in the persisted milestone. The dashboard reads file_written.content for
+// optimistic file-tree updates, so input_preview is redundant — and the
+// largest single source of wasted SSE bandwidth in the chat protocol.
+//
+// For non-file tools the original args pass through unchanged.
+func stripToolInputForPreview(name string, argsJSON string) json.RawMessage {
+	switch name {
+	case "write_file", "edit_file", "delete_file":
+		var m map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(argsJSON), &m); err != nil {
+			return json.RawMessage("{}")
+		}
+		// Keep the path so the UI can show a meaningful "writing X" hint;
+		// drop content/old_string/new_string which can be hundreds of KB.
+		stripped := map[string]json.RawMessage{}
+		if p, ok := m["path"]; ok {
+			stripped["path"] = p
+		}
+		if d, ok := m["description"]; ok {
+			stripped["description"] = d
+		}
+		out, err := json.Marshal(stripped)
+		if err != nil {
+			return json.RawMessage("{}")
+		}
+		return out
+	default:
+		return json.RawMessage(argsJSON)
+	}
+}
 
 // runAction returns the PostHog action label for this run — matches the
 // labels already used in finaliseSuccess for credit deduction so the LLM
