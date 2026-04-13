@@ -157,3 +157,60 @@ func (DeleteFileTool) Execute(ctx context.Context, rc *RunContext, input json.Ra
 	rc.Emitter.Emit(EventFileDeleted, FileDeletedEvent{RunID: rc.RunID, Path: path})
 	return fmt.Sprintf("deleted %s", path), false, nil
 }
+
+// ---------- write_file ----------
+
+const maxWriteBytes = 200 * 1024 // 200 KB
+
+type WriteFileTool struct{}
+
+func (WriteFileTool) Name() string { return "write_file" }
+func (WriteFileTool) Description() string {
+	return "Create a new file or fully overwrite an existing file. Prefer edit_file for targeted changes to existing files."
+}
+func (WriteFileTool) Schema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"path":        map[string]any{"type": "string"},
+			"content":     map[string]any{"type": "string"},
+			"description": map[string]any{"type": "string"},
+		},
+		"required": []string{"path", "content"},
+	}
+}
+
+func (WriteFileTool) Execute(ctx context.Context, rc *RunContext, input json.RawMessage) (string, bool, error) {
+	var args struct {
+		Path        string `json:"path"`
+		Content     string `json:"content"`
+		Description string `json:"description"`
+	}
+	if err := json.Unmarshal(input, &args); err != nil {
+		return fmt.Sprintf("invalid input: %v", err), true, nil
+	}
+	path, err := sanitizePath(args.Path)
+	if err != nil {
+		return err.Error(), true, nil
+	}
+	if isProtected(path) {
+		return fmt.Sprintf("protected file, cannot overwrite: %s", path), true, nil
+	}
+	if len(args.Content) > maxWriteBytes {
+		return fmt.Sprintf("content too large: %d bytes (max %d)", len(args.Content), maxWriteBytes), true, nil
+	}
+
+	op := "update"
+	if _, exists := rc.FileMap.Get(path); !exists {
+		op = "create"
+	}
+	rc.FileMap.Set(path, args.Content)
+	rc.Emitter.Emit(EventFileWritten, FileWrittenEvent{
+		RunID:     rc.RunID,
+		Path:      path,
+		Operation: op,
+		Bytes:     len(args.Content),
+		Content:   args.Content,
+	})
+	return fmt.Sprintf("%sd %s (%d bytes)", op, path, len(args.Content)), false, nil
+}
