@@ -1262,7 +1262,7 @@ func (c *Controller) executeChatSearchComponents(
 			continue
 		}
 		if comp.HasTemplate {
-			content := getUITemplateContent(comp.Path)
+			content := templates.GetUIContent(comp.Path)
 			if content != "" {
 				c.injectTemplateFile(repo, comp.Path, content, fileMap, sendEvent)
 				injected = append(injected, comp.Name)
@@ -2119,7 +2119,7 @@ func (c *Controller) buildBuilderToolExecutor(ctx context.Context, project *mode
 				return "Error: file_path is required", nil
 			}
 			// Block writes to template-managed files
-			if isProtectedTemplateFile(args.FilePath) {
+			if templates.IsTemplateFile(args.FilePath) {
 				return fmt.Sprintf("Error: %s is template-managed and cannot be written directly. Dependencies are auto-detected from imports.", args.FilePath), nil
 			}
 
@@ -2200,7 +2200,7 @@ func (c *Controller) buildBuilderToolExecutor(ctx context.Context, project *mode
 					continue
 				}
 				// Block writes to template-managed files
-				if isProtectedTemplateFile(f.FilePath) {
+				if templates.IsTemplateFile(f.FilePath) {
 					results = append(results, fmt.Sprintf("SKIP %s: template-managed, dependencies are auto-detected from imports", f.FilePath))
 					continue
 				}
@@ -2258,7 +2258,7 @@ func (c *Controller) buildBuilderToolExecutor(ctx context.Context, project *mode
 				return "Error: file_path and old_string are required", nil
 			}
 			// Block edits to template-managed files
-			if isProtectedTemplateFile(args.FilePath) {
+			if templates.IsTemplateFile(args.FilePath) {
 				return fmt.Sprintf("Error: %s is template-managed and cannot be edited directly. Dependencies are auto-detected from imports.", args.FilePath), nil
 			}
 
@@ -2314,7 +2314,7 @@ func (c *Controller) buildBuilderToolExecutor(ctx context.Context, project *mode
 				return fmt.Sprintf("Error: invalid arguments: %s", err.Error()), nil
 			}
 			// Block deletion of template-managed files
-			if isProtectedTemplateFile(args.FilePath) {
+			if templates.IsTemplateFile(args.FilePath) {
 				return fmt.Sprintf("Error: %s is template-managed and cannot be deleted.", args.FilePath), nil
 			}
 			if !repo.FileExists(args.FilePath) {
@@ -2367,9 +2367,9 @@ func (c *Controller) buildBuilderToolExecutor(ctx context.Context, project *mode
 					}
 					var content string
 					if tp == "components/ecommerce/providers.tsx" {
-						content = buildEcommerceProviders(needsAuth)
+						content = templates.BuildEcommerceProviders(needsAuth)
 					} else {
-						content = getEcommerceTemplateContent(tp, ecommLang)
+						content = templates.GetEcommerceContent(tp, ecommLang)
 					}
 					if content == "" {
 						continue

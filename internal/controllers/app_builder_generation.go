@@ -322,17 +322,17 @@ func (c *Controller) streamSingleShotGeneration(
 			json.Unmarshal(project.Theme, &theme)
 		}
 		if project.ProjectType == "ecommerce" {
-			if layoutContent := buildEcommerceLayout(project.Name, theme.Typography); layoutContent != "" {
+			if layoutContent := templates.BuildEcommerceLayout(project.Name, theme.Typography); layoutContent != "" {
 				c.injectTemplateFile(repo, "app/layout.tsx", layoutContent, fileMap, sendEvent)
 			}
-			if cssContent := buildEcommerceGlobalsCSSTheme(theme.ColorScheme, theme.DarkColorScheme); cssContent != "" {
+			if cssContent := templates.BuildEcommerceGlobalsCSSTheme(theme.ColorScheme, theme.DarkColorScheme); cssContent != "" {
 				c.injectTemplateFile(repo, "app/globals.css", cssContent, fileMap, sendEvent)
 			}
 		} else {
 			// For non-e-commerce apps, inject globals.css with semantic tokens so
 			// the UI component templates (button, card, input, badge) work correctly.
 			isMobile := project.ProjectType == "mobile_app"
-			if cssContent := buildGlobalsCSSTheme(theme.ColorScheme, theme.DarkColorScheme, isMobile); cssContent != "" {
+			if cssContent := templates.BuildGlobalsCSSTheme(theme.ColorScheme, theme.DarkColorScheme, isMobile); cssContent != "" {
 				c.injectTemplateFile(repo, "app/globals.css", cssContent, fileMap, sendEvent)
 			}
 		}
@@ -480,7 +480,7 @@ func (c *Controller) streamSingleShotGeneration(
 
 	// Augment package.json with discovered dependencies
 	if pkgContent, ok := fileMap["package.json"]; ok {
-		augmented := augmentPackageJSON(pkgContent, fileMap)
+		augmented := templates.AugmentPackageJSON(pkgContent, fileMap)
 		if augmented != pkgContent {
 			if writeErr := repo.WriteFile("package.json", []byte(augmented)); writeErr != nil {
 				slog.Error("failed to persist augmented package.json", "error", writeErr, "project_id", project.ID)
@@ -776,10 +776,10 @@ func (c *Controller) streamEcommerceGeneration(
 		if len(project.Theme) > 0 {
 			json.Unmarshal(project.Theme, &theme)
 		}
-		if layoutContent := buildEcommerceLayout(project.Name, theme.Typography); layoutContent != "" {
+		if layoutContent := templates.BuildEcommerceLayout(project.Name, theme.Typography); layoutContent != "" {
 			c.injectTemplateFile(repo, "app/layout.tsx", layoutContent, fileMap, sendEvent)
 		}
-		if cssContent := buildEcommerceGlobalsCSSTheme(theme.ColorScheme, theme.DarkColorScheme); cssContent != "" {
+		if cssContent := templates.BuildEcommerceGlobalsCSSTheme(theme.ColorScheme, theme.DarkColorScheme); cssContent != "" {
 			c.injectTemplateFile(repo, "app/globals.css", cssContent, fileMap, sendEvent)
 		}
 	}
@@ -888,7 +888,7 @@ func (c *Controller) streamEcommerceGeneration(
 
 	// Augment package.json with discovered dependencies
 	if pkgContent, ok := fileMap["package.json"]; ok {
-		augmented := augmentPackageJSON(pkgContent, fileMap)
+		augmented := templates.AugmentPackageJSON(pkgContent, fileMap)
 		if augmented != pkgContent {
 			if writeErr := repo.WriteFile("package.json", []byte(augmented)); writeErr != nil {
 				slog.Error("failed to persist augmented package.json (ecom)", "error", writeErr, "project_id", project.ID)

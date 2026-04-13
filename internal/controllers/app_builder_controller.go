@@ -410,7 +410,7 @@ func (c *Controller) StreamBuildApp(
 			if tp == "app/globals.css" {
 				continue
 			}
-			content := getTemplateContentWithLang(tp, nil, nil, project.ProjectType, nil, lang)
+			content := templates.GetContentWithLang(tp, nil, nil, project.ProjectType, nil, lang)
 			if content == "" {
 				continue
 			}
@@ -419,7 +419,7 @@ func (c *Controller) StreamBuildApp(
 
 		// Inject UI component templates (lib/utils, components/ui/*)
 		for _, tp := range templates.UIFilePaths {
-			content := getUITemplateContent(tp)
+			content := templates.GetUIContent(tp)
 			if content != "" {
 				c.injectTemplateFile(repo, tp, content, fileMap, sendEvent)
 			}
@@ -434,9 +434,9 @@ func (c *Controller) StreamBuildApp(
 			for _, tp := range templates.EcommerceFilePaths {
 				var content string
 				if tp == "components/ecommerce/providers.tsx" {
-					content = buildEcommerceProviders(needsAuth)
+					content = templates.BuildEcommerceProviders(needsAuth)
 				} else {
-					content = getEcommerceTemplateContent(tp, lang)
+					content = templates.GetEcommerceContent(tp, lang)
 				}
 				if content != "" {
 					c.injectTemplateFile(repo, tp, content, fileMap, sendEvent)
@@ -1370,7 +1370,7 @@ The user's message is an auto-reported build or runtime error. Follow these rule
 		// Augment package.json with discovered dependencies
 		pkgChanged := false
 		if pkgContent, ok := fileMap["package.json"]; ok {
-			augmented := augmentPackageJSON(pkgContent, fileMap)
+			augmented := templates.AugmentPackageJSON(pkgContent, fileMap)
 			if augmented != pkgContent {
 				pkgChanged = true
 				if writeErr := repo.WriteFile("package.json", []byte(augmented)); writeErr != nil {
@@ -1607,7 +1607,7 @@ func (c *Controller) saveGeneratedFile(
 	// Chat edits pass allowProtected=true so the AI can fix errors in template files.
 	// Still emit file_complete with the repo content so the sandbox stays in sync.
 	canOverride := len(allowProtected) > 0 && allowProtected[0]
-	if !canOverride && isProtectedTemplateFile(path) {
+	if !canOverride && templates.IsTemplateFile(path) {
 		slog.Warn("saveGeneratedFile: skipping protected template file", "path", path)
 		if existingContent, readErr := repo.ReadFile(path); readErr == nil {
 			sendEvent("file_complete", responses.FileCompleteEvent{
