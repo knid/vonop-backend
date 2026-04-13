@@ -86,15 +86,20 @@ func (v *HttpViews) handleStreamOrAsync(w http.ResponseWriter, r *http.Request, 
 	stateFlush := time.NewTicker(500 * time.Millisecond)
 	defer stateFlush.Stop()
 
-	flushStreamState := func() {
-		raw, ok := streamState.Snapshot()
-		if !ok {
-			return
-		}
-		if err := v.Controller.DB.UpdateGenerationJobStreamState(job.ID.String(), raw); err != nil {
-			slog.Debug("failed to flush stream state", "job_id", job.ID, "error", err)
-		}
-	}
+	// Stream state is flushed to the DB asynchronously. A slow
+	// UpdateGenerationJobStreamState used to block the event loop here,
+	// which in turn stalled agentSSEAdapter.Emit's channel send past its 10s
+	// timeout and silently dropped events. The async flusher coalesces
+	// bursty updates and drains the tail in a single goroutine so the event
+	// loop never waits on the DB.
+	stateFlusher := newAsyncStateFlusher(
+		streamState.Snapshot,
+		func(raw json.RawMessage) {
+			if err := v.Controller.DB.UpdateGenerationJobStreamState(job.ID.String(), raw); err != nil {
+				slog.Debug("failed to flush stream state", "job_id", job.ID, "error", err)
+			}
+		},
+	)
 
 	for {
 		select {
@@ -126,7 +131,7 @@ func (v *HttpViews) handleStreamOrAsync(w http.ResponseWriter, r *http.Request, 
 				eventIndex++
 				// Flush the partial buffer alongside every milestone so reconnects
 				// between milestones see the latest authoritative state.
-				flushStreamState()
+				stateFlusher.Trigger()
 			}
 
 			// Write to SSE if client is still connected
@@ -138,7 +143,7 @@ func (v *HttpViews) handleStreamOrAsync(w http.ResponseWriter, r *http.Request, 
 			}
 
 		case <-stateFlush.C:
-			flushStreamState()
+			stateFlusher.Trigger()
 
 		case <-keepalive.C:
 			// Send SSE keepalive comment to prevent proxy/client timeout
@@ -158,6 +163,11 @@ func (v *HttpViews) handleStreamOrAsync(w http.ResponseWriter, r *http.Request, 
 		}
 	}
 done:
+
+	// Wait for any in-flight async flush to land before the authoritative
+	// clear below, otherwise a late background write could overwrite the
+	// cleared "{}" state and leak stale partial text on the next reconnect.
+	stateFlusher.Wait()
 
 	// Final consistency write: replace the events array with the complete in-memory
 	// copy. Individual AppendGenerationJobEvent calls may have failed under DB pressure,
@@ -196,15 +206,15 @@ func (v *HttpViews) drainEventsToJob(ctx context.Context, cancel context.CancelF
 	stateFlush := time.NewTicker(500 * time.Millisecond)
 	defer stateFlush.Stop()
 
-	flushStreamState := func() {
-		raw, ok := streamState.Snapshot()
-		if !ok {
-			return
-		}
-		if err := v.Controller.DB.UpdateGenerationJobStreamState(job.ID.String(), raw); err != nil {
-			slog.Debug("failed to flush stream state", "job_id", job.ID, "error", err)
-		}
-	}
+	// See handleStreamOrAsync for the async flusher rationale.
+	stateFlusher := newAsyncStateFlusher(
+		streamState.Snapshot,
+		func(raw json.RawMessage) {
+			if err := v.Controller.DB.UpdateGenerationJobStreamState(job.ID.String(), raw); err != nil {
+				slog.Debug("failed to flush stream state", "job_id", job.ID, "error", err)
+			}
+		},
+	)
 
 	for {
 		select {
@@ -236,11 +246,11 @@ func (v *HttpViews) drainEventsToJob(ctx context.Context, cancel context.CancelF
 					slog.Error("failed to persist job event", "job_id", job.ID, "error", err)
 				}
 				eventIndex++
-				flushStreamState()
+				stateFlusher.Trigger()
 			}
 
 		case <-stateFlush.C:
-			flushStreamState()
+			stateFlusher.Trigger()
 
 		case <-ctx.Done():
 			// Context expired — stop draining and finalize
@@ -249,6 +259,9 @@ func (v *HttpViews) drainEventsToJob(ctx context.Context, cancel context.CancelF
 		}
 	}
 finalize:
+
+	// Wait for any in-flight async flush to land before the authoritative clear.
+	stateFlusher.Wait()
 
 	// Final consistency write: replace with complete in-memory copy
 	if len(allMilestoneEvents) > 0 {
