@@ -953,3 +953,190 @@ func (c *Controller) DeleteDiscount(discountID string, store *models.Store) erro
 	}
 	return c.DB.DeleteDiscount(discount)
 }
+
+// ExecuteStoreOp is the single dispatcher invoked by every store-management
+// agent tool. It looks up (or lazy-creates) the project's store row, then
+// routes on `action` to the existing *FromChat helpers or direct DB calls.
+// Returns a JSON string for list/get actions and a short human-readable
+// message for mutations. Per-action errors surface as error returns; the
+// tool layer converts them into isError=true results the agent can retry.
+func (c *Controller) ExecuteStoreOp(
+	ctx context.Context,
+	project *models.AppProject,
+	user *models.User,
+	action string,
+	params map[string]any,
+) (string, error) {
+	if project == nil {
+		return "", fmt.Errorf("execute_store_op: project is required")
+	}
+
+	// Lazy store creation — first call for a project creates the row using
+	// the project name as a default store name. Subsequent calls find it.
+	store, err := c.DB.GetStoreByAppProjectID(project.ID.String())
+	if err != nil || store == nil || store.ID == uuid.Nil {
+		if user == nil {
+			return "", fmt.Errorf("execute_store_op: cannot lazy-create store without user")
+		}
+		created, createErr := c.CreateStore(project, user, project.Name)
+		if createErr != nil {
+			return "", fmt.Errorf("lazy-create store: %w", createErr)
+		}
+		store = created
+	}
+
+	switch action {
+	// -------- Products --------
+	case "list_products":
+		products, err := c.DB.GetProductsByStoreID(store.ID.String())
+		if err != nil {
+			return "", err
+		}
+		b, _ := json.Marshal(products)
+		return string(b), nil
+
+	case "create_product":
+		if err := c.createProductFromChat(store, params); err != nil {
+			return "", err
+		}
+		name, _ := params["name"].(string)
+		return fmt.Sprintf("created product %q", name), nil
+
+	case "update_product":
+		if err := c.updateProductFromChat(store, params); err != nil {
+			return "", err
+		}
+		return "product updated", nil
+
+	case "delete_product":
+		if err := c.deleteProductFromChat(store, params); err != nil {
+			return "", err
+		}
+		return "product archived", nil
+
+	case "bulk_create_products":
+		// Fail-fast preflight: if any item references a category_slug, that
+		// slug must exist in the store's categories before we start inserting.
+		productsRaw, ok := params["products"].([]any)
+		if !ok || len(productsRaw) == 0 {
+			return "", fmt.Errorf("bulk_create_products requires params.products to be a non-empty array")
+		}
+		cats, _ := c.DB.GetCategoriesByStoreID(store.ID.String())
+		knownSlugs := make(map[string]struct{}, len(cats))
+		for _, cat := range cats {
+			knownSlugs[cat.Slug] = struct{}{}
+		}
+		for i, raw := range productsRaw {
+			pData, ok := raw.(map[string]any)
+			if !ok {
+				return "", fmt.Errorf("bulk_create_products: item %d is not an object", i)
+			}
+			if slug, ok := pData["category_slug"].(string); ok && slug != "" {
+				if _, exists := knownSlugs[slug]; !exists {
+					return "", fmt.Errorf("bulk_create_products: category_slug %q does not exist; create it first with create_category", slug)
+				}
+			}
+		}
+		if err := c.bulkCreateProductsFromChat(store, params); err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("created %d products", len(productsRaw)), nil
+
+	// -------- Categories --------
+	case "list_categories":
+		cats, err := c.DB.GetCategoriesByStoreID(store.ID.String())
+		if err != nil {
+			return "", err
+		}
+		b, _ := json.Marshal(cats)
+		return string(b), nil
+
+	case "create_category":
+		if err := c.createCategoryFromChat(store, params); err != nil {
+			return "", err
+		}
+		name, _ := params["name"].(string)
+		return fmt.Sprintf("created category %q", name), nil
+
+	case "update_category":
+		if err := c.updateCategoryFromChat(params); err != nil {
+			return "", err
+		}
+		return "category updated", nil
+
+	case "delete_category":
+		if err := c.deleteCategoryFromChat(params); err != nil {
+			return "", err
+		}
+		return "category deleted", nil
+
+	// -------- Discounts --------
+	case "list_discounts":
+		discounts, err := c.DB.GetDiscountsByStoreID(store.ID.String())
+		if err != nil {
+			return "", err
+		}
+		b, _ := json.Marshal(discounts)
+		return string(b), nil
+
+	case "create_discount":
+		if err := c.createDiscountFromChat(store, params); err != nil {
+			return "", err
+		}
+		code, _ := params["code"].(string)
+		return fmt.Sprintf("created discount %q", code), nil
+
+	case "update_discount":
+		if err := c.updateDiscountFromChat(params); err != nil {
+			return "", err
+		}
+		return "discount updated", nil
+
+	case "delete_discount":
+		if err := c.deleteDiscountFromChat(params); err != nil {
+			return "", err
+		}
+		return "discount deleted", nil
+
+	// -------- Store meta --------
+	case "get_store":
+		b, _ := json.Marshal(store)
+		return string(b), nil
+
+	case "update_store_settings":
+		if err := c.updateStoreFromChat(store, params); err != nil {
+			return "", err
+		}
+		// updateStoreFromChat only handles currency / tax_rate / notify_email.
+		// Name / locale / shipping_config / payment_config are updated here
+		// so the tool surface matches the spec without modifying the legacy
+		// helper (which is still used by StreamChatStoreManagement).
+		dirty := false
+		if name, ok := params["name"].(string); ok && name != "" {
+			store.StoreName = name
+			dirty = true
+		}
+		if locale, ok := params["locale"].(string); ok && locale != "" {
+			store.Locale = locale
+			dirty = true
+		}
+		if shipping, ok := params["shipping_config"].(map[string]any); ok {
+			store.ShippingConfig = shipping
+			dirty = true
+		}
+		if payment, ok := params["payment_config"].(map[string]any); ok {
+			store.PaymentConfig = payment
+			dirty = true
+		}
+		if dirty {
+			store.UpdatedAt = time.Now()
+			if _, err := c.DB.UpdateStore(store); err != nil {
+				return "", err
+			}
+		}
+		return "store settings updated", nil
+
+	default:
+		return "", fmt.Errorf("execute_store_op: unknown action %q", action)
+	}
+}
