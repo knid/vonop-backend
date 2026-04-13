@@ -31,8 +31,11 @@ type ClarificationResult struct {
 }
 
 // milestoneEvents are event types worth persisting to the database.
-// High-frequency events like chunk/thinking are skipped.
+// High-frequency events like chunk/thinking/narration/tool_call_delta are
+// skipped; those are folded into the stream_state buffer instead so reconnect
+// can rehydrate them without blowing up the persisted event log.
 var milestoneEvents = map[string]bool{
+	// Legacy events still emitted by ecommerce/dashboard stream routes.
 	"file_complete":          true,
 	"chat_complete":          true,
 	"file_generation_start":  true,
@@ -47,6 +50,16 @@ var milestoneEvents = map[string]bool{
 	"awaiting_reply":         true,
 	"rollback":               true,
 	"deps_ready":             true,
+	// Agent runtime events (2026-04 rewrite). On reconnect these get
+	// replayed so the client's timeline rebuilds past tool calls + file
+	// writes. narration/tool_call_delta/keepalive stay out.
+	"run_start":        true,
+	"turn_start":       true,
+	"tool_call_start":  true,
+	"tool_call_result": true,
+	"file_written":     true,
+	"file_deleted":     true,
+	"turn_end":         true,
 }
 
 // CreateJob creates a new generation job, enforcing a per-user concurrency limit.
@@ -191,12 +204,15 @@ func IsMilestoneEvent(eventName string) bool {
 }
 
 // StripHeavyFields removes bulky fields (like file content) from event data
-// before persisting to the DB. The content is already saved in AppGeneratedFile.
+// before persisting to the DB. The content is already saved in the project
+// repo (file_written) or AppGeneratedFile (legacy file_complete).
 func StripHeavyFields(eventName string, data any) any {
-	if eventName != "file_complete" && eventName != "chat_complete" {
+	switch eventName {
+	case "file_complete", "chat_complete", "file_written":
+		// fall through
+	default:
 		return data
 	}
-	// Marshal to JSON, strip the "content" key, return as map
 	raw, err := json.Marshal(data)
 	if err != nil {
 		return data

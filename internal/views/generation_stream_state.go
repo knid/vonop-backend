@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"sync"
 
+	"github.com/knid/wemob/internal/agent"
 	"github.com/knid/wemob/internal/responses"
 )
 
@@ -218,6 +219,90 @@ func (b *streamStateBuffer) Apply(event responses.SSEEvent) bool {
 	case "clarification_received":
 		// User answered — stop replaying the last question on the next reconnect.
 		b.conversationText = ""
+		b.dirty = true
+		return true
+
+	// --- Agent runtime events (2026-04 rewrite) ---
+
+	case "narration":
+		// Agent narration streams into streamingText so reconnected clients
+		// see the partial assistant reply replayed before live events resume.
+		if d, ok := event.Data.(agent.NarrationEvent); ok && d.Delta != "" {
+			b.streamingText += d.Delta
+			b.dirty = true
+			return true
+		}
+		if m, ok := event.Data.(map[string]any); ok {
+			if delta, _ := m["delta"].(string); delta != "" {
+				b.streamingText += delta
+				b.dirty = true
+				return true
+			}
+		}
+
+	case "tool_call_start":
+		// Append a placeholder so an in-flight tool shows up on reconnect.
+		var tool, args string
+		if d, ok := event.Data.(agent.ToolCallStartEvent); ok {
+			tool = d.ToolName
+			if len(d.InputPreview) > 0 {
+				args = string(d.InputPreview)
+			}
+		} else if m, ok := event.Data.(map[string]any); ok {
+			tool, _ = m["tool_name"].(string)
+			if raw, ok := m["input_preview"]; ok && raw != nil {
+				if s, ok := raw.(string); ok {
+					args = s
+				} else if buf, err := json.Marshal(raw); err == nil {
+					args = string(buf)
+				}
+			}
+		}
+		if tool != "" {
+			if args != "" {
+				b.toolCalls = append(b.toolCalls, streamStateToolCall{Tool: tool, Arguments: args})
+			} else {
+				b.toolCalls = append(b.toolCalls, streamStateToolCall{Tool: tool, Pending: true})
+			}
+			b.dirty = true
+			return true
+		}
+
+	case "tool_call_result":
+		var tool, summary, status string
+		var isError bool
+		if d, ok := event.Data.(agent.ToolCallResultEvent); ok {
+			tool = d.ToolName
+			summary = d.Summary
+			status = d.Status
+			isError = d.IsError
+		} else if m, ok := event.Data.(map[string]any); ok {
+			tool, _ = m["tool_name"].(string)
+			summary, _ = m["summary"].(string)
+			status, _ = m["status"].(string)
+			isError, _ = m["is_error"].(bool)
+		}
+		if tool != "" {
+			if isError && status == "" {
+				status = "error"
+			}
+			b.attachToolResult(tool, summary, summary, status)
+			b.dirty = true
+			return true
+		}
+
+	case "turn_end":
+		// Mid-run turn boundary: no state change, but we accept the event
+		// so the dirty flag isn't falsely tripped for a no-op.
+		return false
+
+	// Agent error/rollback: terminal for the partial buffer, same as done.
+	case "agent_error", "agent_rollback":
+		b.streamingText = ""
+		b.thinkingText = ""
+		b.toolCalls = nil
+		b.progress = nil
+		b.phase = ""
 		b.dirty = true
 		return true
 	}
