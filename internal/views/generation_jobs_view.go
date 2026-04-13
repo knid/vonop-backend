@@ -355,7 +355,21 @@ func (v *HttpViews) GetActiveJobs(w http.ResponseWriter, r *http.Request) {
 	utils.JSONResponse(w, resp, http.StatusOK)
 }
 
-// GET /v2/apps/jobs/{jobId}/stream — reconnect to a running job's SSE event stream
+// GET /v2/apps/jobs/{jobId}/stream — reconnect to a job's SSE event stream.
+//
+// This endpoint serves three cases:
+//  1. Live: job is running/awaiting_input AND the in-process EventBus exists.
+//     Replay persisted state + milestones, then tail live events until the
+//     bus closes or the client disconnects.
+//  2. Terminal: job is completed/failed/cancelled. Replay persisted state +
+//     milestones from the DB (the bus is already gone), then close.
+//  3. Orphaned: job is marked running/awaiting_input but no bus is attached
+//     (process restart before the sweeper ran). Replay whatever state we
+//     have from the DB and close — the next /active-job poll will reflect
+//     the sweeper decision.
+//
+// Before this was multi-path, case 2 returned 404 ("no active stream for this
+// job") and the UI hung forever on refresh right after a generation finished.
 func (v *HttpViews) StreamJob(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
@@ -375,22 +389,6 @@ func (v *HttpViews) StreamJob(w http.ResponseWriter, r *http.Request) {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
 		return
 	}
-	if job.Status != "running" && job.Status != "awaiting_input" {
-		utils.JSONErrorResponse(w, "job is not running", http.StatusBadRequest)
-		return
-	}
-
-	// Find the event bus for this job
-	busVal, ok := v.Controller.JobEventBuses.Load(jobID)
-	if !ok {
-		utils.JSONErrorResponse(w, "no active stream for this job", http.StatusNotFound)
-		return
-	}
-	bus, ok := busVal.(*controllers.EventBus)
-	if !ok {
-		utils.JSONErrorResponse(w, "internal error", http.StatusInternalServerError)
-		return
-	}
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -400,30 +398,37 @@ func (v *HttpViews) StreamJob(w http.ResponseWriter, r *http.Request) {
 
 	utils.SetSSEHeaders(w)
 
-	// Emit the last persisted partial stream buffer first so the client can rehydrate
-	// in-flight streaming text/thinking/tool calls before milestone replay takes over.
-	if len(job.StreamState) > 0 && string(job.StreamState) != "{}" && string(job.StreamState) != "null" {
-		var stateData any
-		if err := json.Unmarshal(job.StreamState, &stateData); err == nil {
-			utils.WriteSSEEvent(w, flusher, "stream_state", stateData)
-		}
+	// Step 1: always replay the persisted stream buffer + milestone events.
+	// This is the only data source when the bus is gone, and the rehydration
+	// primer for live subscribers.
+	replayPersistedJobEvents(w, flusher, job)
+
+	// Step 2: decide whether a live subscription is possible.
+	isLive := job.Status == "running" || job.Status == "awaiting_input"
+	busVal, busOK := v.Controller.JobEventBuses.Load(jobID)
+
+	if !isLive {
+		// Terminal job — the replay is authoritative. Close now.
+		slog.Info("StreamJob: replayed terminal job and closed", "job_id", jobID, "status", job.Status)
+		return
 	}
 
-	// Then replay persisted milestone events so the client catches up.
-	var milestoneEvents []json.RawMessage
-	if json.Unmarshal(job.Events, &milestoneEvents) == nil {
-		for _, raw := range milestoneEvents {
-			var evt struct {
-				Event string `json:"event"`
-				Data  any    `json:"data"`
-			}
-			if json.Unmarshal(raw, &evt) == nil {
-				utils.WriteSSEEvent(w, flusher, evt.Event, evt.Data)
-			}
-		}
+	if !busOK {
+		// Running job with no bus: the process that owned the job is gone
+		// (or never existed — multi-instance deployments). Serve what we
+		// have; the next /active-job poll after the sweeper runs will
+		// reflect the eventual failure.
+		slog.Warn("StreamJob: running job has no event bus — replay only", "job_id", jobID)
+		return
 	}
 
-	// Subscribe to live events
+	bus, ok := busVal.(*controllers.EventBus)
+	if !ok {
+		slog.Error("StreamJob: JobEventBuses entry is not *EventBus", "job_id", jobID)
+		return
+	}
+
+	// Step 3: subscribe to live events and tail.
 	subID, ch := bus.Subscribe()
 	defer bus.Unsubscribe(subID)
 
@@ -450,6 +455,36 @@ func (v *HttpViews) StreamJob(w http.ResponseWriter, r *http.Request) {
 
 		case <-r.Context().Done():
 			return
+		}
+	}
+}
+
+// replayPersistedJobEvents writes the last persisted partial stream buffer
+// followed by each recorded milestone event into the SSE response. Used by
+// StreamJob both for live reconnects (as a primer before tailing the bus)
+// and for terminal reconnects (as the only data source).
+//
+// Errors from individual writes are intentionally swallowed — the caller has
+// no recovery path mid-stream, and partial replay is still more useful than
+// a 500 response.
+func replayPersistedJobEvents(w http.ResponseWriter, flusher http.Flusher, job *models.GenerationJob) {
+	if len(job.StreamState) > 0 && string(job.StreamState) != "{}" && string(job.StreamState) != "null" {
+		var stateData any
+		if err := json.Unmarshal(job.StreamState, &stateData); err == nil {
+			_ = utils.WriteSSEEvent(w, flusher, "stream_state", stateData)
+		}
+	}
+
+	var milestoneEvents []json.RawMessage
+	if json.Unmarshal(job.Events, &milestoneEvents) == nil {
+		for _, raw := range milestoneEvents {
+			var evt struct {
+				Event string `json:"event"`
+				Data  any    `json:"data"`
+			}
+			if json.Unmarshal(raw, &evt) == nil {
+				_ = utils.WriteSSEEvent(w, flusher, evt.Event, evt.Data)
+			}
 		}
 	}
 }
