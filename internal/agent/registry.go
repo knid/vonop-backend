@@ -139,6 +139,12 @@ func BuildRegistryFor(project *models.AppProject, deps *RunDependencies) *Regist
 	r.Register(ProvisionDatabaseTool{Deps: deps})
 	r.Register(ExecuteSQLTool{Deps: deps})
 
+	// AI gateway setup is registered unconditionally so the model can opt
+	// into AI on demand. The tool's idempotency check (Settings["has_ai"])
+	// rejects re-runs once it's wired. projectHasAI still gates the
+	// AIAddendum in context.go so the addendum only injects after setup.
+	r.Register(SetupAIGatewayTool{Deps: deps})
+
 	if project != nil && project.ProjectType == "mobile_app" {
 		r.Register(ConfigureMobileBridgeTool{Deps: deps})
 	}

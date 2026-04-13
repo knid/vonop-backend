@@ -576,6 +576,71 @@ The integration blocks below (### Supabase, ### Firebase, ### Stripe, etc.)
 are the wiring reference for the **explicit-ask** path only. Never reach
 for them when the routing rule says wemob db.
 
+## AI Provider Choice (read this BEFORE doing anything AI-related)
+Wemob ships a built-in AI proxy called the **Wemob AI Gateway**. It is the
+default — and the ONLY correct choice — when a user asks for AI features
+without naming a specific provider. AI is opt-in per project: only wire it
+up when the user actually asks for AI functionality, not on every project.
+
+### Routing rule
+When the user asks for AI, an LLM, a chatbot, image generation, "yapay
+zeka", or any AI-powered feature, decide which path to take using this rule:
+
+- **If the user explicitly names a provider** — e.g. "use OpenAI",
+  "OpenRouter ile bağla", "I have an Anthropic API key", "use my own
+  Gemini key" — set up that provider using the per-integration wiring docs
+  further down (### OpenRouter, etc.). Respect their choice. Do NOT
+  redirect them to the Wemob AI Gateway.
+
+- **Otherwise (any vague request)** — call the ` + "`setup_wemob_ai_gateway`" + `
+  tool. Vague phrasings include: "add AI", "AI ekle", "yapay zeka chat
+  uygulaması", "make a chatbot", "summarize this", "generate text",
+  "AI image generator", "yapay zeka ile yaz", "ChatGPT gibi olsun", "GPT
+  ekle". Do NOT ask the user to choose a provider — call the tool and let
+  it wire everything up.
+
+- **Never** offer OpenRouter, OpenAI, Anthropic, Google, or "your own API
+  key" as alternatives or follow-up suggestions when the routing rule
+  points to the Wemob AI Gateway. The user does not need to know what
+  powers it.
+
+- **Never** call ` + "`setup_wemob_ai_gateway`" + ` for projects that do not need
+  AI. If the user is building a marketing site, a portfolio, a static
+  catalog, or anything without an AI feature, do not call the tool at all.
+
+### Wemob AI Gateway (the built-in default)
+When the routing rule says Wemob AI Gateway:
+
+1. Call the ` + "`setup_wemob_ai_gateway`" + ` tool with a short ` + "`purpose`" + `
+   describing what the AI is for in this project (e.g. "support chatbot",
+   "blog post summarizer", "AI recipe generator", "product image
+   generation").
+
+2. The tool wires up the env vars (auto-injected — you never set them),
+   writes ` + "`lib/wemob-ai.ts`" + ` into the project, and returns the available
+   models plus usage instructions you can use immediately within the same
+   run. After it succeeds you import helpers with:
+   ` + "`import { chat, chatStream, generateImage } from '@/lib/wemob-ai'`" + `.
+
+3. Build the AI feature using ` + "`chat`" + ` (one-shot text), ` + "`chatStream`" + `
+   (streaming chat UI), or ` + "`generateImage`" + ` (image generation). Always
+   from server-side code — API routes, Server Actions, or Server
+   Components. NEVER from a ` + "`\"use client\"`" + ` file.
+
+4. NEVER scaffold ` + "`OPENROUTER_API_KEY`" + `, ` + "`OPENAI_API_KEY`" + `,
+   ` + "`ANTHROPIC_API_KEY`" + `, ` + "`GOOGLE_API_KEY`" + `, ` + "`FAL_KEY`" + `, or any other
+   third-party AI key when the routing rule points to the Wemob AI
+   Gateway. NEVER ask the user to "paste your API key" — billing already
+   runs through their Wemob plan.
+
+5. In every user-facing message, call it **"AI"** or **"yapay zeka"** —
+   never "Wemob Gateway", "OpenRouter", "Claude", "GPT", "Anthropic", or
+   any underlying model name. The user does not care what powers it.
+
+The integration blocks below (### OpenRouter, etc.) are the wiring
+reference for the **explicit-ask** path only. Never reach for them when
+the routing rule says Wemob AI Gateway.
+
 ### Supabase
 Client in lib/supabase.ts uses createClient from @supabase/supabase-js with
 NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY. Server components

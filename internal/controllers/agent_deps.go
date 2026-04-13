@@ -50,6 +50,7 @@ func (c *Controller) AgentDeps(user *models.User) *agent.RunDependencies {
 		ProvisionDatabase: func(ctx context.Context, project *models.AppProject, tables []models.DataModel) error {
 			return c.provisionDatabaseForAgent(ctx, project, user, tables)
 		},
+		EnableAI:                 c.enableProjectAIForAgent,
 		UpdateMobileBridgeMethod: c.updateMobileBridgeMethodForAgent,
 		RecordLLMUsage: func(tracker *utils.TokenTracker, action, model, provider, reference, appType string) {
 			c.RecordTokenUsage(user, action, model, provider, reference, appType, tracker)
@@ -122,6 +123,25 @@ func (c *Controller) generateImageForAgent(ctx context.Context, prompt string, w
 		return cdnURL, nil
 	}
 	return publicURL, nil
+}
+
+// enableProjectAIForAgent flips Settings["has_ai"] = true on the project so
+// the AIAddendum is appended on subsequent runs and the gateway env vars are
+// surfaced to subsequent generations. Idempotent at the tool layer — the
+// SetupAIGatewayTool checks the flag before invoking this callback.
+func (c *Controller) enableProjectAIForAgent(ctx context.Context, project *models.AppProject) error {
+	_ = ctx
+	if project == nil {
+		return fmt.Errorf("project is required")
+	}
+	if project.Settings == nil {
+		project.Settings = make(map[string]any)
+	}
+	project.Settings["has_ai"] = true
+	if _, err := c.DB.UpdateAppProject(project); err != nil {
+		return fmt.Errorf("persist has_ai on project: %w", err)
+	}
+	return nil
 }
 
 // updateMobileBridgeMethodForAgent toggles a bridge method on a project's

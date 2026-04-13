@@ -50,6 +50,12 @@ type DatabaseProvisioner func(ctx context.Context, project *models.AppProject, t
 // removes it.
 type MobileBridgeUpdater func(ctx context.Context, projectID, method string, enabled bool) error
 
+// AIEnabler marks a project as needing the Wemob AI Gateway and persists the
+// flag so the AIAddendum is appended to subsequent runs. Bound by the
+// controller layer to Controller.enableProjectAIForAgent. Idempotent — the
+// SetupAIGatewayTool checks the existing flag before invoking this callback.
+type AIEnabler func(ctx context.Context, project *models.AppProject) error
+
 // StoreOperator executes one store management operation for an ecommerce
 // project. Bound by the controller layer to Controller.ExecuteStoreOp. The
 // dispatcher inside the controller routes on `action` to the existing
@@ -103,6 +109,7 @@ type RunDependencies struct {
 	GenerateImage            ImageGenerator
 	NeonConnString           NeonConnResolver
 	ProvisionDatabase        DatabaseProvisioner
+	EnableAI                 AIEnabler
 	UpdateMobileBridgeMethod MobileBridgeUpdater
 	RecordLLMUsage           LLMUsageRecorder
 	RecordLLMError           LLMErrorRecorder

@@ -44,10 +44,26 @@ func buildAddendum(project *models.AppProject) string {
 	if projectHasDatabase(project) {
 		parts = append(parts, DatabaseAddendum)
 	}
+	if projectHasAI(project) {
+		parts = append(parts, AIAddendum)
+	}
 	if len(parts) == 0 {
 		return ""
 	}
 	return strings.Join(parts, "\n\n")
+}
+
+// projectHasAI returns true if the project has the Wemob AI Gateway wired up
+// (signaled by Settings["has_ai"]). The flag is flipped by the
+// SetupAIGatewayTool via the EnableAI callback.
+func projectHasAI(project *models.AppProject) bool {
+	if project == nil || project.Settings == nil {
+		return false
+	}
+	if v, ok := project.Settings["has_ai"].(bool); ok {
+		return v
+	}
+	return false
 }
 
 // buildFileTreeBlock produces a deterministic "FILE TREE" listing sorted
