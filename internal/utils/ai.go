@@ -196,8 +196,10 @@ func estimateCostUSD(model string, inputTokens, outputTokens, cacheCreation, cac
 		return 0
 	}
 	inputPrice, outputPrice := prices[0], prices[1]
-	// Cache pricing: creation = 1.25x input, read = 0.1x input, regular input = 1x
-	regularInput := inputTokens - cacheCreation - cacheRead
+	// Cache pricing: creation = 1.25x input, read = 0.1x input, regular input = 1x.
+	// inputTokens here is PromptTokens, which now = regular input + cache creation
+	// (cache reads are NOT included — see AnthropicUsage.ToUsageInfo).
+	regularInput := inputTokens - cacheCreation
 	if regularInput < 0 {
 		regularInput = 0
 	}
