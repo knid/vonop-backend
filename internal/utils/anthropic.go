@@ -182,19 +182,41 @@ func convertToAnthropicRequest(req ChatRequest, provider *LLMProvider) Anthropic
 		}
 	}
 
-	// Mark up to 4 system blocks with cache_control (Anthropic's max breakpoints).
-	// Blocks shorter than 500 chars don't earn a breakpoint — caching them wastes
-	// one of our four slots on content that fits in a single prompt-token chunk.
-	if !req.DisablePromptCache {
-		cacheBudget := 4
+	// Anthropic enforces a HARD limit of 4 cache_control breakpoints across
+	// the entire request (system blocks + messages + tools combined). We
+	// previously marked up to 4 system blocks AND the last user message AND
+	// the last tool, which could land at 6 markers and produce a 400
+	// "A maximum of 4 blocks with cache_control may be provided" error.
+	// Track a single global budget so the request always stays within the
+	// 4-marker limit. Priority order:
+	//   1. Last function tool   — caches the entire tool list
+	//   2. Last user message    — caches the conversation prefix
+	//   3. Up to 2 system blocks — caches the system prompt prefix
+	// This leaves 2 system slots free for multi-block system prompts to
+	// hit different cache prefixes across calls.
+	const maxCacheMarkers = 4
+	cacheBudget := maxCacheMarkers
+	if req.DisablePromptCache {
+		cacheBudget = 0
+	}
+
+	// Mark up to (budget - 2) system blocks. Blocks shorter than 500 chars
+	// don't earn a breakpoint — caching them wastes a slot on content that
+	// fits in a single prompt-token chunk.
+	if cacheBudget > 0 {
+		systemBudget := cacheBudget - 2
+		if systemBudget < 0 {
+			systemBudget = 0
+		}
 		for i := range systemBlocks {
-			if cacheBudget == 0 {
+			if systemBudget == 0 {
 				break
 			}
 			if len(systemBlocks[i].Text) < 500 {
 				continue
 			}
 			systemBlocks[i].CacheControl = &AnthropicCacheControl{Type: "ephemeral"}
+			systemBudget--
 			cacheBudget--
 		}
 	}
@@ -206,13 +228,14 @@ func convertToAnthropicRequest(req ChatRequest, provider *LLMProvider) Anthropic
 	// This lets Anthropic cache system blocks + all messages up to the last user turn,
 	// so each tool round only pays for the new assistant+tool_result tokens.
 	// Skip for one-shot calls where no follow-up will read the cache.
-	if !req.DisablePromptCache {
+	if cacheBudget > 0 {
 		for i := len(anthropicMessages) - 1; i >= 0; i-- {
 			if anthropicMessages[i].Role == "user" {
 				blocks := toContentBlocks(anthropicMessages[i].Content)
 				if len(blocks) > 0 {
 					blocks[len(blocks)-1].CacheControl = &AnthropicCacheControl{Type: "ephemeral"}
 					anthropicMessages[i].Content = blocks
+					cacheBudget--
 				}
 				break
 			}
@@ -240,11 +263,12 @@ func convertToAnthropicRequest(req ChatRequest, provider *LLMProvider) Anthropic
 		}
 	}
 	// Mark last function tool cacheable (skip server tools for caching)
-	if !req.DisablePromptCache {
+	if cacheBudget > 0 {
 		for i := len(anthropicTools) - 1; i >= 0; i-- {
 			if at, ok := anthropicTools[i].(AnthropicTool); ok {
 				at.CacheControl = &AnthropicCacheControl{Type: "ephemeral"}
 				anthropicTools[i] = at
+				cacheBudget--
 				break
 			}
 		}
