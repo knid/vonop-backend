@@ -176,6 +176,17 @@ func (v *HttpViews) handleStreamOrAsync(w http.ResponseWriter, r *http.Request, 
 	}
 done:
 
+	// Explicit terminal SSE frame so clients know unambiguously that the
+	// stream is over. Without this, the FE has to infer "done" from event
+	// names ("done"/"error"/"rollback"), which is fragile under reconnect
+	// races and unknown future event types. The frame uses seq=0 — it's
+	// out-of-band metadata, not a numbered event.
+	if !clientGone {
+		_ = utils.WriteSSEEvent(w, flusher, 0, "end", map[string]any{
+			"job_id": job.ID,
+		})
+	}
+
 	// Wait for any in-flight async flush to land before the authoritative
 	// clear below, otherwise a late background write could overwrite the
 	// cleared "{}" state and leak stale partial text on the next reconnect.
@@ -450,7 +461,12 @@ func (v *HttpViews) StreamJob(w http.ResponseWriter, r *http.Request) {
 	busVal, busOK := v.Controller.JobEventBuses.Load(jobID)
 
 	if !isLive {
-		// Terminal job — the replay is authoritative. Close now.
+		// Terminal job — the replay is authoritative. Send the explicit
+		// terminal frame so the client's stream listener exits cleanly,
+		// then close.
+		_ = utils.WriteSSEEvent(w, flusher, 0, "end", map[string]any{
+			"job_id": job.ID,
+		})
 		slog.Info("StreamJob: replayed terminal job and closed", "job_id", jobID, "status", job.Status, "since", since)
 		return
 	}
@@ -481,7 +497,12 @@ func (v *HttpViews) StreamJob(w http.ResponseWriter, r *http.Request) {
 		select {
 		case event, ok := <-ch:
 			if !ok {
-				// Bus closed — job finished
+				// Bus closed — job finished. Send the explicit terminal
+				// frame so the FE listener exits cleanly without inferring
+				// completion from event names.
+				_ = utils.WriteSSEEvent(w, flusher, 0, "end", map[string]any{
+					"job_id": job.ID,
+				})
 				return
 			}
 			// Dedupe against the replay window.
