@@ -236,6 +236,13 @@ func Run(
 	executor := func(name string, argsJSON string) (string, error) {
 		toolStart := time.Now()
 		toolCallID := uuid.NewString()
+		// Capture the narration length BEFORE the tool runs so the persisted
+		// row records exactly where the tool falls in the assistant text.
+		// The dashboard's buildPersistedTimeline uses this offset to interleave
+		// tool/file cards back into the narration on refresh — without it,
+		// every tool collapses to the end and we lose the chronological order
+		// the user saw live.
+		narrationOffset := narrationBuf.Len()
 		emitter.Emit(EventToolCallStart, ToolCallStartEvent{
 			RunID:        runID,
 			Turn:         turn,
@@ -259,12 +266,13 @@ func Run(
 			IsError:    isErr || execErr != nil,
 		})
 		toolCallLog = append(toolCallLog, models.ChatMessageToolCall{
-			ID:         toolCallID,
-			Name:       name,
-			Input:      json.RawMessage(argsJSON),
-			Result:     result,
-			IsError:    isErr || execErr != nil,
-			DurationMs: durationMs,
+			ID:              toolCallID,
+			Name:            name,
+			Input:           json.RawMessage(argsJSON),
+			Result:          result,
+			IsError:         isErr || execErr != nil,
+			DurationMs:      durationMs,
+			NarrationOffset: narrationOffset,
 		})
 		totalToolCalls++
 		if execErr != nil {

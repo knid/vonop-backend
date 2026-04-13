@@ -24,11 +24,18 @@ type AppChatMessage struct {
 
 // ChatMessageToolCall is the JSONB shape embedded in AppChatMessage.ToolCalls.
 // Stored as a snapshot of what the agent did — no foreign key to any tool table.
+//
+// NarrationOffset records the byte length of the assistant's accumulated
+// narration text at the moment the tool was invoked. The dashboard uses this
+// to interleave tool / file cards back into the right spot in the persisted
+// narration on refresh — without it, buildPersistedTimeline collapses every
+// tool to the end and the chronological order from the live stream is lost.
 type ChatMessageToolCall struct {
-	ID         string          `json:"id"`
-	Name       string          `json:"name"`
-	Input      json.RawMessage `json:"input"`
-	Result     string          `json:"result"`
-	IsError    bool            `json:"is_error"`
-	DurationMs int             `json:"duration_ms"`
+	ID              string          `json:"id"`
+	Name            string          `json:"name"`
+	Input           json.RawMessage `json:"input"`
+	Result          string          `json:"result"`
+	IsError         bool            `json:"is_error"`
+	DurationMs      int             `json:"duration_ms"`
+	NarrationOffset int             `json:"narration_offset"`
 }
