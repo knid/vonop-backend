@@ -12,14 +12,48 @@ import (
 
 const maxReadBytes = 200 * 1024 // 200 KB
 
-// protectedPaths cannot be written to or deleted by the agent.
+// protectedPaths cannot be written, edited, or deleted by the agent. Keys
+// MUST be lowercase — isProtected normalises the input before lookup.
 var protectedPaths = map[string]bool{
-	"package.json":      true,
-	"tsconfig.json":     true,
-	"next.config.ts":    true,
-	"next.config.js":    true,
-	"postcss.config.js": true,
-	".env.local":        true,
+	// Config files at project root
+	"package.json":        true,
+	"package-lock.json":   true,
+	"yarn.lock":           true,
+	"pnpm-lock.yaml":      true,
+	"bun.lockb":           true,
+	"tsconfig.json":       true,
+	"next.config.ts":      true,
+	"next.config.js":      true,
+	"next.config.mjs":     true,
+	"next.config.cjs":     true,
+	"tailwind.config.ts":  true,
+	"tailwind.config.js":  true,
+	"tailwind.config.mjs": true,
+	"postcss.config.ts":   true,
+	"postcss.config.js":   true,
+	"postcss.config.mjs":  true,
+	"drizzle.config.ts":   true,
+	"drizzle.config.js":   true,
+	"middleware.ts":       true,
+	"middleware.js":       true,
+	// Env files — all variants
+	".env":             true,
+	".env.local":       true,
+	".env.production":  true,
+	".env.development": true,
+	".env.example":     true,
+}
+
+// protectedPrefixes blocks any path under one of these directories.
+// All prefixes must end with "/" and be lowercase.
+var protectedPrefixes = []string{
+	".git/",
+	"node_modules/",
+	".next/",
+	".turbo/",
+	"dist/",
+	"build/",
+	".vercel/",
 }
 
 // sanitizePath wraps utils.SanitizeFilePath in the (string, error) shape the
@@ -33,10 +67,43 @@ func sanitizePath(raw string) (string, error) {
 }
 
 // isProtected returns true if the path refers to a file the agent must not
-// modify (protected config files at the project root).
+// modify (protected config files at the project root or anything under a
+// protected prefix).
 func isProtected(path string) bool {
-	base := filepath.Base(path)
-	return protectedPaths[path] || protectedPaths[base]
+	lower := strings.ToLower(path)
+	base := strings.ToLower(filepath.Base(lower))
+	if protectedPaths[lower] || protectedPaths[base] {
+		return true
+	}
+	// Protected path prefixes — block anything under .git/, node_modules/, .next/, dist/, build/
+	for _, pfx := range protectedPrefixes {
+		if strings.HasPrefix(lower, pfx) {
+			return true
+		}
+	}
+	return false
+}
+
+// isProtectedRead returns true if the path refers to a file the agent must
+// not read (secrets, git internals). Less strict than isProtected — the
+// agent can READ package.json et al., it just can't write them.
+func isProtectedRead(path string) bool {
+	lower := strings.ToLower(path)
+	base := strings.ToLower(filepath.Base(lower))
+	envNames := map[string]bool{
+		".env":             true,
+		".env.local":       true,
+		".env.production":  true,
+		".env.development": true,
+		".env.example":     true,
+	}
+	if envNames[base] {
+		return true
+	}
+	if strings.HasPrefix(lower, ".git/") {
+		return true
+	}
+	return false
 }
 
 // ---------- read_file ----------
@@ -68,6 +135,9 @@ func (ReadFileTool) Execute(ctx context.Context, rc *RunContext, input json.RawM
 	path, err := sanitizePath(args.Path)
 	if err != nil {
 		return err.Error(), true, nil
+	}
+	if isProtectedRead(path) {
+		return fmt.Sprintf("reading %s is not allowed (contains secrets or system files)", path), true, nil
 	}
 	content, ok := rc.FileMap.Get(path)
 	if !ok {

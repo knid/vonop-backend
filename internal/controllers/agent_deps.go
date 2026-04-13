@@ -118,13 +118,24 @@ func (c *Controller) generateImageForAgent(ctx context.Context, prompt string, w
 func (c *Controller) updateMobileBridgeMethodForAgent(ctx context.Context, projectID, method string, enabled bool) error {
 	cfg, err := c.DB.GetMobileAppConfig(projectID)
 	if err != nil || cfg == nil {
-		// No config row yet — create one with just this method set.
-		cfg = &models.MobileAppConfig{}
+		// No config row yet — create one with sensible defaults matching the
+		// bun:",default:true" column defaults so the upsert doesn't clobber
+		// features the user hasn't opted into toggling.
 		parsed, perr := uuid.Parse(projectID)
 		if perr != nil {
 			return perr
 		}
-		cfg.ProjectID = parsed
+		cfg = &models.MobileAppConfig{
+			ProjectID:            parsed,
+			PushEnabled:          true,
+			AnalyticsEnabled:     true,
+			PullToRefreshEnabled: true,
+			ExternalBrowserLinks: true,
+			BridgeEnabled:        true,
+			DarkModeEnabled:      true,
+			CachingStrategy:      "network-first",
+			RatingSessions:       5,
+		}
 	}
 	// Add or remove the method from the flat slice.
 	present := false

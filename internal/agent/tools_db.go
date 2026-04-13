@@ -5,11 +5,51 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
 	_ "github.com/lib/pq"
 )
+
+// destructiveSQLPatterns are regexes matching SQL statements that can
+// permanently destroy user data or elevate privileges. Even with
+// readonly=false, these are blocked at the tool layer; the underlying
+// Neon role should ALSO be provisioned without these privileges as
+// defense in depth.
+var destructiveSQLPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)\bdrop\s+(schema|database|role|user)\b`),
+	regexp.MustCompile(`(?i)\btruncate\b`),
+	regexp.MustCompile(`(?i)\bgrant\b`),
+	regexp.MustCompile(`(?i)\brevoke\b`),
+	regexp.MustCompile(`(?i)\bcreate\s+role\b`),
+	regexp.MustCompile(`(?i)\balter\s+role\b`),
+	regexp.MustCompile(`(?i)\balter\s+system\b`),
+}
+
+var (
+	deleteFromRe = regexp.MustCompile(`(?i)\bdelete\s+from\b`)
+	updateSetRe  = regexp.MustCompile(`(?i)\bupdate\s+\w+\s+set\b`)
+	whereRe      = regexp.MustCompile(`(?i)\bwhere\b`)
+)
+
+// isDestructiveSQL returns true if the query contains any operation from
+// the deny-list. The check is a coarse string/regex match — a determined
+// LLM could obfuscate (comments, unicode tricks) but the tool is also
+// backed by Postgres transaction semantics and an app-level DB role with
+// restricted privileges.
+func isDestructiveSQL(query string) bool {
+	for _, re := range destructiveSQLPatterns {
+		if re.MatchString(query) {
+			return true
+		}
+	}
+	// DELETE / UPDATE without WHERE is usually a mistake and always risky.
+	if (deleteFromRe.MatchString(query) || updateSetRe.MatchString(query)) && !whereRe.MatchString(query) {
+		return true
+	}
+	return false
+}
 
 type ExecuteSQLTool struct {
 	Deps *RunDependencies
@@ -40,6 +80,9 @@ func (e ExecuteSQLTool) Execute(ctx context.Context, rc *RunContext, input json.
 	}
 	if strings.TrimSpace(args.Query) == "" {
 		return "query is required", true, nil
+	}
+	if !args.ReadOnly && isDestructiveSQL(args.Query) {
+		return "query blocked: destructive or privilege-changing statements are not allowed (DROP SCHEMA/DATABASE, TRUNCATE, GRANT/REVOKE, ALTER SYSTEM, and DELETE/UPDATE without WHERE are blocked)", true, nil
 	}
 
 	if e.Deps == nil || e.Deps.NeonConnString == nil {
