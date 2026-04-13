@@ -11,6 +11,25 @@ import (
 	"github.com/knid/wemob/internal/services/remoteconfig"
 )
 
+// --- Conversation / clarification types ---
+
+// ConversationReply is a natural language reply from the user during the pre-build conversation.
+type ConversationReply struct {
+	Message string `json:"message"`
+}
+
+// ClarificationAnswer is a single user answer to a clarification question.
+type ClarificationAnswer struct {
+	ID     string `json:"id"`
+	Answer string `json:"answer"`
+}
+
+// ClarificationResult is sent through the pending channel from the clarify endpoint.
+type ClarificationResult struct {
+	Answers []ClarificationAnswer
+	Skip    bool
+}
+
 // milestoneEvents are event types worth persisting to the database.
 // High-frequency events like chunk/thinking are skipped.
 var milestoneEvents = map[string]bool{
