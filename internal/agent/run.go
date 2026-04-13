@@ -403,7 +403,6 @@ func convertHistory(history []models.AppChatMessage) []utils.Message {
 	return out
 }
 
-// finaliseSuccess is a stub — the real implementation lands in Task C2.20.
 func finaliseSuccess(
 	ctx context.Context,
 	deps *RunDependencies,
@@ -421,25 +420,129 @@ func finaliseSuccess(
 	user *models.User,
 	project *models.AppProject,
 ) error {
-	_ = ctx
-	_ = deps
-	_ = repo
-	_ = run
-	_ = emitter
-	_ = fileMap
-	_ = narration
-	_ = toolCalls
-	_ = tracker
-	_ = runStart
-	_ = totalToolCalls
-	_ = turns
-	_ = userMessage
+	// 1. Write fileMap to working tree and commit.
+	finalCommit, err := FinaliseRun(repo, fileMap, userMessage)
+	if err != nil {
+		return finaliseFailureV2(ctx, deps, repo, run, emitter, "commit",
+			CodeGitError, "failed to write and commit files", err,
+			run.PreCommit, tracker, runStart)
+	}
+
+	// 2. Persist the assistant chat message.
+	toolCallsJSON, _ := json.Marshal(toolCalls)
+	assistantMsg := &models.AppChatMessage{
+		AppProjectID: project.ID,
+		RunID:        &run.ID,
+		Role:         "assistant",
+		Content:      narration,
+		Images:       []byte("[]"),
+		ToolCalls:    toolCallsJSON,
+	}
+	if _, insErr := deps.DB.InsertChatMessage(assistantMsg); insErr != nil {
+		slog.Warn("failed to persist assistant chat message", "error", insErr, "run_id", run.ID)
+	}
+
+	// 3. Finalise the AppAgentRun row.
+	promptTok, completionTok, totalTok, _ := tracker.Totals()
+	durationMs := int(time.Since(runStart).Milliseconds())
+	credits := tokensToCredits(promptTok, completionTok)
+	costUSD := estimateCost(run.Model, promptTok, completionTok)
+
+	run.Status = models.AgentRunStatusCompleted
+	run.FinalCommit = finalCommit
+	run.Turns = turns
+	run.ToolCallCount = totalToolCalls
+	run.PromptTokens = promptTok
+	run.CompletionTokens = completionTok
+	run.CostUSD = costUSD
+	run.CreditsUsed = credits
+	run.DurationMs = durationMs
+	run.CompletedAt = time.Now()
+	if err := deps.DB.UpdateAgentRun(run); err != nil {
+		slog.Warn("failed to finalise agent run row", "error", err, "run_id", run.ID)
+	}
+
+	// 4. Deduct credits.
+	if deps.DeductCredits != nil && credits > 0 {
+		action := "app_chat"
+		if project.Status == "draft" {
+			action = "generate_app"
+		}
+		if err := deps.DeductCredits(ctx, credits, action, project.ID.String()); err != nil {
+			slog.Warn("failed to deduct credits", "error", err, "credits", credits)
+		}
+	}
+
+	// 5. Emit `done`.
+	emitter.Emit(EventDone, DoneEvent{
+		RunID:        run.ID,
+		FinalCommit:  finalCommit,
+		Turns:        turns,
+		ToolCalls:    totalToolCalls,
+		FilesChanged: countFileOps(toolCalls),
+		Tokens:       TokenUsage{Input: promptTok, Output: completionTok},
+		CreditsUsed:  credits,
+		DurationMs:   durationMs,
+	})
+
+	// 6. Track PostHog.
+	if deps.TrackUserEvent != nil {
+		action := "app_chat_completed"
+		if project.Status == "draft" {
+			action = "generate_app_completed"
+		}
+		deps.TrackUserEvent(action, map[string]any{
+			"app_id":            project.ID.String(),
+			"duration_seconds":  float64(durationMs) / 1000.0,
+			"total_tokens":      totalTok,
+			"prompt_tokens":     promptTok,
+			"completion_tokens": completionTok,
+			"credits_used":      credits,
+			"turns":             turns,
+			"tool_calls":        totalToolCalls,
+			"model":             run.Model,
+		})
+	}
+
+	// Unreference user (not logged to keep the event payload minimal).
 	_ = user
-	_ = project
+
 	return nil
 }
 
-// finaliseFailureV2 is a stub — the real implementation lands in Task C2.20.
+// countFileOps counts successful file-mutating tool calls.
+func countFileOps(calls []models.ChatMessageToolCall) int {
+	n := 0
+	for _, c := range calls {
+		if c.IsError {
+			continue
+		}
+		switch c.Name {
+		case "write_file", "edit_file", "delete_file":
+			n++
+		}
+	}
+	return n
+}
+
+// tokensToCredits mirrors the existing Controller.TokensToCredits formula.
+// 1 credit ~ 1000 input tokens OR 250 output tokens (Sonnet approximate).
+// This duplicates the formula rather than calling into controllers because
+// the agent package is below controllers in the dependency graph.
+func tokensToCredits(input, output int) int {
+	cr := input/1000 + output/250
+	if cr < 1 {
+		return 1
+	}
+	return cr
+}
+
+// estimateCost wraps utils.EstimateInputOutputCostUSD.
+func estimateCost(model string, input, output int) float64 {
+	in, out := utils.EstimateInputOutputCostUSD(model, input, output, 0, 0)
+	return in + out
+}
+
 func finaliseFailureV2(
 	ctx context.Context,
 	deps *RunDependencies,
@@ -454,13 +557,82 @@ func finaliseFailureV2(
 	tracker *utils.TokenTracker,
 	runStart time.Time,
 ) error {
+	// 1. Defensive git reset (usually a no-op — tools only touched fileMap).
+	filesReverted := 0
+	if preCommit != "" && repo != nil {
+		if err := RollbackTo(repo, preCommit); err != nil {
+			slog.Warn("rollback reset failed", "error", err, "run_id", run.ID)
+		} else {
+			filesReverted = 1
+		}
+	}
+
+	// 2. Emit rollback event.
+	emitter.Emit(EventRollback, RollbackEvent{
+		RunID:         run.ID,
+		PreCommit:     preCommit,
+		Reason:        string(code),
+		FilesReverted: filesReverted,
+	})
+
+	// 3. Emit error event.
+	emitter.Emit(EventError, ErrorEvent{
+		RunID:   run.ID,
+		Phase:   phase,
+		Message: message,
+		Code:    code,
+	})
+
+	// 4. Persist "sorry" assistant message so the chat UI isn't orphaned.
+	orphanMsg := &models.AppChatMessage{
+		AppProjectID: run.AppProjectID,
+		RunID:        &run.ID,
+		Role:         "assistant",
+		Content:      "Sorry, that turn failed — your files are unchanged. Please try again.",
+		Images:       []byte("[]"),
+		ToolCalls:    []byte("[]"),
+	}
+	if _, err := deps.DB.InsertChatMessage(orphanMsg); err != nil {
+		slog.Warn("failed to persist failure message", "error", err, "run_id", run.ID)
+	}
+
+	// 5. Finalise the run row (no credit deduction).
+	var promptTok, completionTok int
+	if tracker != nil {
+		promptTok, completionTok, _, _ = tracker.Totals()
+	}
+	run.Status = mapCodeToStatus(code)
+	run.Error = fmt.Sprintf("%s: %s", code, message)
+	run.PromptTokens = promptTok
+	run.CompletionTokens = completionTok
+	run.DurationMs = int(time.Since(runStart).Milliseconds())
+	run.CompletedAt = time.Now()
+	if err := deps.DB.UpdateAgentRun(run); err != nil {
+		slog.Warn("failed to finalise failed agent run row", "error", err, "run_id", run.ID)
+	}
+
+	// 6. Track PostHog.
+	if deps.TrackUserEvent != nil {
+		deps.TrackUserEvent("app_chat_failed", map[string]any{
+			"app_id":   run.AppProjectID.String(),
+			"code":     string(code),
+			"phase":    phase,
+			"duration": run.DurationMs,
+		})
+	}
+
 	_ = ctx
-	_ = deps
-	_ = repo
-	_ = run
-	_ = emitter
-	_ = preCommit
-	_ = tracker
-	_ = runStart
 	return New(code, phase, message, wrapped)
+}
+
+// mapCodeToStatus maps agent error codes to AppAgentRun status strings.
+func mapCodeToStatus(code ErrorCode) string {
+	switch code {
+	case CodeBudgetExceeded:
+		return models.AgentRunStatusBudgetExceeded
+	case CodeCreditsExhausted:
+		return models.AgentRunStatusCanceled
+	default:
+		return models.AgentRunStatusFailed
+	}
 }
