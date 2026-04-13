@@ -2,15 +2,13 @@ package neon
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
+	"math/rand"
 	"net/http"
 	"time"
-
-	"github.com/knid/wemob/internal/utils"
 )
 
 const neonAPIBase = "https://console.neon.tech/api/v2"
@@ -121,48 +119,98 @@ type RoleInfo struct {
 
 // --- HTTP helper ---
 
+// maxRetries is the maximum number of times doRequest retries on transient
+// failures (5xx, 423, 429). Total attempts = maxRetries + 1.
+const maxRetries = 4
+
 func (s *Service) doRequest(method, path string, body any) ([]byte, error) {
-	var reqBody io.Reader
+	var bodyBytes []byte
 	if body != nil {
 		b, err := json.Marshal(body)
 		if err != nil {
 			return nil, fmt.Errorf("marshal request: %w", err)
 		}
-		reqBody = bytes.NewReader(b)
+		bodyBytes = b
 	}
 
-	req, err := http.NewRequest(method, neonAPIBase+path, reqBody)
-	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
-	}
-	req.Header.Set("Authorization", "Bearer "+s.APIKey)
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	req.Header.Set("Accept", "application/json")
-
-	ctx := context.Background()
-	resp, err := utils.RetryableHTTPDo(ctx, neonHTTPClient, req, 2)
-	if err != nil {
-		return nil, fmt.Errorf("do request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("read response: %w", err)
-	}
-
-	if resp.StatusCode >= 400 {
-		bodyStr := string(respBody)
-		if len(bodyStr) > 500 {
-			bodyStr = bodyStr[:500] + "...(truncated)"
+	var lastStatus int
+	var lastBody string
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		if attempt > 0 {
+			// Exponential backoff with jitter: 1s, 2s, 4s, 8s + up to 500ms.
+			delay := time.Duration(1<<(attempt-1))*time.Second + time.Duration(rand.Intn(500))*time.Millisecond
+			slog.Warn("Neon API request retrying",
+				"attempt", attempt, "path", path, "method", method,
+				"prev_status", lastStatus, "delay", delay)
+			time.Sleep(delay)
 		}
-		slog.Error("Neon API error", "status", resp.StatusCode, "path", path, "body", bodyStr)
-		return nil, fmt.Errorf("neon API error: status %d", resp.StatusCode)
+
+		var reqBody io.Reader
+		if bodyBytes != nil {
+			reqBody = bytes.NewReader(bodyBytes)
+		}
+		req, err := http.NewRequest(method, neonAPIBase+path, reqBody)
+		if err != nil {
+			return nil, fmt.Errorf("create request: %w", err)
+		}
+		req.Header.Set("Authorization", "Bearer "+s.APIKey)
+		if bodyBytes != nil {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		req.Header.Set("Accept", "application/json")
+
+		resp, err := neonHTTPClient.Do(req)
+		if err != nil {
+			lastStatus = 0
+			lastBody = err.Error()
+			if attempt < maxRetries {
+				continue
+			}
+			return nil, fmt.Errorf("do request: %w", err)
+		}
+
+		respBody, readErr := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if readErr != nil {
+			lastStatus = resp.StatusCode
+			lastBody = readErr.Error()
+			if attempt < maxRetries {
+				continue
+			}
+			return nil, fmt.Errorf("read response: %w", readErr)
+		}
+
+		// Retry on transient errors:
+		//   423 — project has running conflicting operations (endpoint
+		//         starting, branch in flight)
+		//   429 — rate limited
+		//   5xx — Neon-side failure
+		if resp.StatusCode == 423 || resp.StatusCode == 429 || resp.StatusCode >= 500 {
+			lastStatus = resp.StatusCode
+			lastBody = string(respBody)
+			if attempt < maxRetries {
+				continue
+			}
+		}
+
+		if resp.StatusCode >= 400 {
+			bodyStr := string(respBody)
+			if len(bodyStr) > 500 {
+				bodyStr = bodyStr[:500] + "...(truncated)"
+			}
+			slog.Error("Neon API error", "status", resp.StatusCode, "path", path, "body", bodyStr)
+			return nil, fmt.Errorf("neon API error: status %d", resp.StatusCode)
+		}
+
+		return respBody, nil
 	}
 
-	return respBody, nil
+	if len(lastBody) > 500 {
+		lastBody = lastBody[:500] + "...(truncated)"
+	}
+	slog.Error("Neon API error after retries",
+		"status", lastStatus, "path", path, "attempts", maxRetries+1, "body", lastBody)
+	return nil, fmt.Errorf("neon API error after %d attempts: status %d", maxRetries+1, lastStatus)
 }
 
 // DBLimits holds per-plan database resource constraints.
