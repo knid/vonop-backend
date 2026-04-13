@@ -152,6 +152,11 @@ func Run(
 	tracker := utils.NewTokenTracker()
 	tracker.UserID = user.ID.String()
 	tracker.ProjectID = project.ID.String()
+	// Opt-in PostHog LLM Analytics: record per-call input/output content so
+	// the $ai_generation events carry full message context, and seed the
+	// trace input with the user's prompt for the grouping $ai_trace event.
+	tracker.TrackContent = true
+	tracker.TraceInput = message
 	ctx = utils.WithTokenTracker(ctx, tracker)
 
 	// Bind the credit checker to the run's token tracker.
@@ -184,7 +189,7 @@ func Run(
 	defer func() {
 		if r := recover(); r != nil {
 			slog.Error("agent.Run panicked", "error", r, "project_id", project.ID, "stack", string(debug.Stack()))
-			runErr = finaliseFailureV2(ctx, deps, repo, run, emitter, "agent_loop",
+			runErr = finaliseFailureV2(ctx, deps, repo, run, project, emitter, "agent_loop",
 				CodeInternal, fmt.Sprintf("panic: %v", r), nil, preCommit, tracker, runStart)
 		}
 	}()
@@ -199,7 +204,7 @@ func Run(
 
 	// Budget check before entering the loop.
 	if creditCheck != nil && !creditCheck() {
-		return finaliseFailureV2(ctx, deps, repo, run, emitter, "agent_loop",
+		return finaliseFailureV2(ctx, deps, repo, run, project, emitter, "agent_loop",
 			CodeCreditsExhausted, "AI credits exhausted before run started", nil,
 			preCommit, tracker, runStart)
 	}
@@ -307,24 +312,24 @@ func Run(
 		},
 	)
 	if llmErr != nil {
-		return finaliseFailureV2(ctx, deps, repo, run, emitter, "agent_loop",
+		return finaliseFailureV2(ctx, deps, repo, run, project, emitter, "agent_loop",
 			CodeProviderError, "LLM call failed", llmErr,
 			preCommit, tracker, runStart)
 	}
 
 	// Post-loop budget checks to classify why the loop ended.
 	if ctx.Err() != nil {
-		return finaliseFailureV2(ctx, deps, repo, run, emitter, "agent_loop",
+		return finaliseFailureV2(ctx, deps, repo, run, project, emitter, "agent_loop",
 			CodeBudgetExceeded, "run canceled or deadline exceeded", ctx.Err(),
 			preCommit, tracker, runStart)
 	}
 	if creditCheck != nil && !creditCheck() {
-		return finaliseFailureV2(ctx, deps, repo, run, emitter, "agent_loop",
+		return finaliseFailureV2(ctx, deps, repo, run, project, emitter, "agent_loop",
 			CodeCreditsExhausted, "AI credits exhausted mid-run", nil,
 			preCommit, tracker, runStart)
 	}
 	if _, _, total, _ := tracker.Totals(); total > defaultMaxTokensPerRun {
-		return finaliseFailureV2(ctx, deps, repo, run, emitter, "agent_loop",
+		return finaliseFailureV2(ctx, deps, repo, run, project, emitter, "agent_loop",
 			CodeBudgetExceeded,
 			fmt.Sprintf("token budget exceeded (%d > %d)", total, defaultMaxTokensPerRun), nil,
 			preCommit, tracker, runStart)
@@ -375,6 +380,16 @@ func trackerDelta(t *utils.TokenTracker) TokenUsage {
 }
 
 // ---- helpers ----
+
+// runAction returns the PostHog action label for this run — matches the
+// labels already used in finaliseSuccess for credit deduction so the LLM
+// Analytics dashboard groups generate-app and edit-app traces consistently.
+func runAction(project *models.AppProject) string {
+	if project != nil && project.Status == "draft" {
+		return "generate_app"
+	}
+	return "app_chat"
+}
 
 // resolveModel picks the LLM model for this run based on project state and secrets.
 func resolveModel(sm secret.SecretManager, project *models.AppProject) string {
@@ -439,7 +454,7 @@ func finaliseSuccess(
 	// 1. Write fileMap to working tree and commit.
 	finalCommit, err := FinaliseRun(repo, fileMap, userMessage)
 	if err != nil {
-		return finaliseFailureV2(ctx, deps, repo, run, emitter, "commit",
+		return finaliseFailureV2(ctx, deps, repo, run, project, emitter, "commit",
 			CodeGitError, "failed to write and commit files", err,
 			run.PreCommit, tracker, runStart)
 	}
@@ -520,6 +535,15 @@ func finaliseSuccess(
 		})
 	}
 
+	// 7. PostHog LLM Analytics: emit per-call $ai_generation events plus a
+	// grouping $ai_trace event for the built-in dashboard. The tracker has
+	// been collecting messages/usage throughout the run via TrackContent.
+	if deps.RecordLLMUsage != nil {
+		tracker.TraceOutput = narration
+		deps.RecordLLMUsage(tracker, runAction(project), run.Model, run.Provider,
+			project.ID.String(), project.ProjectType)
+	}
+
 	// Unreference user (not logged to keep the event payload minimal).
 	_ = user
 
@@ -564,6 +588,7 @@ func finaliseFailureV2(
 	deps *RunDependencies,
 	repo *gitrepo.Repo,
 	run *models.AppAgentRun,
+	project *models.AppProject,
 	emitter EventEmitter,
 	phase string,
 	code ErrorCode,
@@ -635,6 +660,33 @@ func finaliseFailureV2(
 			"phase":    phase,
 			"duration": run.DurationMs,
 		})
+	}
+
+	// 7. PostHog LLM Analytics: surface the failure on the LLM dashboard.
+	// We always send an $ai_generation error event so error-rate panels see
+	// the failure; if any LLM calls actually succeeded before the failure
+	// (partial work), we ALSO emit the per-call generations + trace via
+	// RecordLLMUsage so token spend isn't lost.
+	action := runAction(project)
+	projectID := run.AppProjectID.String()
+	projectType := ""
+	if project != nil {
+		projectType = project.ProjectType
+	}
+	if deps.RecordLLMUsage != nil && tracker != nil {
+		if _, _, total, _ := tracker.Totals(); total > 0 {
+			deps.RecordLLMUsage(tracker, action, run.Model, run.Provider,
+				projectID, projectType)
+		}
+	}
+	if deps.RecordLLMError != nil {
+		errMsg := fmt.Sprintf("%s: %s", code, message)
+		if wrapped != nil {
+			errMsg = fmt.Sprintf("%s (%s)", errMsg, wrapped.Error())
+		}
+		deps.RecordLLMError(action, run.Model, run.Provider,
+			projectID, projectType,
+			int64(run.DurationMs), errMsg)
 	}
 
 	_ = ctx

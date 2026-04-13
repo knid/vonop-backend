@@ -48,6 +48,12 @@ func (c *Controller) AgentDeps(user *models.User) *agent.RunDependencies {
 			return c.neonConnString(projectID), nil
 		},
 		UpdateMobileBridgeMethod: c.updateMobileBridgeMethodForAgent,
+		RecordLLMUsage: func(tracker *utils.TokenTracker, action, model, provider, reference, appType string) {
+			c.RecordTokenUsage(user, action, model, provider, reference, appType, tracker)
+		},
+		RecordLLMError: func(action, model, provider, reference, appType string, latencyMs int64, errMsg string) {
+			c.RecordLLMError(user, action, model, provider, reference, appType, latencyMs, errMsg)
+		},
 	}
 }
 

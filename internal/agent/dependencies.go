@@ -41,6 +41,25 @@ type NeonConnResolver func(projectID string) (string, error)
 // removes it.
 type MobileBridgeUpdater func(ctx context.Context, projectID, method string, enabled bool) error
 
+// LLMUsageRecorder is invoked at the end of a successful run (and at the end
+// of a partial-failure run that still made LLM calls) to record per-call
+// $ai_generation events plus a grouping $ai_trace event in PostHog LLM
+// Analytics. Bound by the controller layer to Controller.RecordTokenUsage.
+type LLMUsageRecorder func(
+	tracker *utils.TokenTracker,
+	action, model, provider, reference, appType string,
+)
+
+// LLMErrorRecorder is invoked when an agent run fails. Sends a final
+// $ai_generation event tagged with $ai_is_error=true so the LLM Analytics
+// dashboard surfaces the failure. Bound by the controller layer to
+// Controller.RecordLLMError.
+type LLMErrorRecorder func(
+	action, model, provider, reference, appType string,
+	latencyMs int64,
+	errMsg string,
+)
+
 // RunDependencies holds the external services the agent package needs.
 // Constructed from *controllers.Controller once per request via
 // Controller.AgentDeps(). The agent package never reaches into Controller
@@ -62,4 +81,6 @@ type RunDependencies struct {
 	GenerateImage            ImageGenerator
 	NeonConnString           NeonConnResolver
 	UpdateMobileBridgeMethod MobileBridgeUpdater
+	RecordLLMUsage           LLMUsageRecorder
+	RecordLLMError           LLMErrorRecorder
 }
