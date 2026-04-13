@@ -177,3 +177,98 @@ func (BulkCreateProductsTool) Execute(ctx context.Context, rc *RunContext, input
 	}
 	return runStoreOp(ctx, rc, "bulk_create_products", params)
 }
+
+// -----------------------------------------------------------------------------
+// Categories
+// -----------------------------------------------------------------------------
+
+type ListCategoriesTool struct{}
+
+func (ListCategoriesTool) Name() string { return "list_categories" }
+func (ListCategoriesTool) Description() string {
+	return "List all categories in the store. Returns a JSON array with id, slug, name, description, and image. Takes no parameters."
+}
+func (ListCategoriesTool) Schema() map[string]any {
+	return map[string]any{
+		"type":       "object",
+		"properties": map[string]any{},
+	}
+}
+func (ListCategoriesTool) Execute(ctx context.Context, rc *RunContext, input json.RawMessage) (string, bool, error) {
+	return runStoreOp(ctx, rc, "list_categories", map[string]any{})
+}
+
+type CreateCategoryTool struct{}
+
+func (CreateCategoryTool) Name() string { return "create_category" }
+func (CreateCategoryTool) Description() string {
+	return "Create one product category. The slug is auto-derived from the name if not supplied. The image is optional — call generate_image first to produce a URL."
+}
+func (CreateCategoryTool) Schema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"name":        map[string]any{"type": "string"},
+			"slug":        map[string]any{"type": "string"},
+			"description": map[string]any{"type": "string"},
+			"image":       map[string]any{"type": "string", "description": "image URL, typically from generate_image"},
+		},
+		"required": []string{"name"},
+	}
+}
+func (CreateCategoryTool) Execute(ctx context.Context, rc *RunContext, input json.RawMessage) (string, bool, error) {
+	var params map[string]any
+	if err := json.Unmarshal(input, &params); err != nil {
+		return fmt.Sprintf("invalid input: %v", err), true, nil
+	}
+	return runStoreOp(ctx, rc, "create_category", params)
+}
+
+type UpdateCategoryTool struct{}
+
+func (UpdateCategoryTool) Name() string { return "update_category" }
+func (UpdateCategoryTool) Description() string {
+	return "Update fields on an existing category. The underlying helper currently requires the category UUID in `id` — call list_categories first to look it up."
+}
+func (UpdateCategoryTool) Schema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"id":          map[string]any{"type": "string", "description": "category UUID"},
+			"name":        map[string]any{"type": "string"},
+			"description": map[string]any{"type": "string"},
+			"sort_order":  map[string]any{"type": "integer"},
+		},
+		"required": []string{"id"},
+	}
+}
+func (UpdateCategoryTool) Execute(ctx context.Context, rc *RunContext, input json.RawMessage) (string, bool, error) {
+	var params map[string]any
+	if err := json.Unmarshal(input, &params); err != nil {
+		return fmt.Sprintf("invalid input: %v", err), true, nil
+	}
+	return runStoreOp(ctx, rc, "update_category", params)
+}
+
+type DeleteCategoryTool struct{}
+
+func (DeleteCategoryTool) Name() string { return "delete_category" }
+func (DeleteCategoryTool) Description() string {
+	return "Delete a category. Requires the category UUID in `id`. Call list_categories first to look it up."
+}
+func (DeleteCategoryTool) Schema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"id": map[string]any{"type": "string", "description": "category UUID"},
+		},
+		"required": []string{"id"},
+	}
+}
+func (DeleteCategoryTool) Execute(ctx context.Context, rc *RunContext, input json.RawMessage) (string, bool, error) {
+	var params map[string]any
+	if err := json.Unmarshal(input, &params); err != nil {
+		return fmt.Sprintf("invalid input: %v", err), true, nil
+	}
+	return runStoreOp(ctx, rc, "delete_category", params)
+}
