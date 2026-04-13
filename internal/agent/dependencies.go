@@ -13,9 +13,10 @@ import (
 	"github.com/posthog/posthog-go"
 )
 
-// CreditChecker is a function that returns true while the user still has
-// credit budget for the current run. The orchestrator calls it between turns.
-type CreditChecker func() bool
+// CreditCheckerFactory is bound by the controller with the user, and called by
+// the agent once the TokenTracker exists. The returned func is used as the
+// per-round ShouldContinue budget check.
+type CreditCheckerFactory func(tracker *utils.TokenTracker) func() bool
 
 // CreditDeductor is called on successful run completion with the total credit
 // cost. Never called on failure (fixes a known bug in the old system).
@@ -55,7 +56,7 @@ type RunDependencies struct {
 	RemoteConfig  *remoteconfig.Service
 
 	// Callbacks bound per-run by the view/controller layer.
-	CreditChecker            CreditChecker
+	CreditChecker            CreditCheckerFactory
 	DeductCredits            CreditDeductor
 	TrackUserEvent           EventTracker
 	GenerateImage            ImageGenerator

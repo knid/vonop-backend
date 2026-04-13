@@ -60,6 +60,7 @@ func (v *HttpViews) GenerateAppStream(w http.ResponseWriter, r *http.Request) {
 		JobType: "generate_app",
 		AppID:   project.ID,
 		StreamFunc: func(ctx context.Context, events chan<- responses.SSEEvent, jobID string) {
+			defer close(events)
 			deps := v.Controller.AgentDeps(user)
 			emitter := newAgentSSEAdapter(events)
 			if err := agent.Run(ctx, deps, project, user, req.Prompt, req.Images, emitter); err != nil {

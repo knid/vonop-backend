@@ -74,6 +74,7 @@ func (v *HttpViews) ChatApp(w http.ResponseWriter, r *http.Request) {
 		JobType: jobType,
 		AppID:   project.ID,
 		StreamFunc: func(ctx context.Context, events chan<- responses.SSEEvent, jobID string) {
+			defer close(events)
 			deps := v.Controller.AgentDeps(user)
 			emitter := newAgentSSEAdapter(events)
 			if err := agent.Run(ctx, deps, project, user, req.Message, req.Images, emitter); err != nil {

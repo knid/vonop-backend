@@ -43,7 +43,7 @@ func Run(
 	message string,
 	images []string,
 	emitter EventEmitter,
-) error {
+) (runErr error) {
 	runStart := time.Now()
 
 	// Wall-clock deadline: wrap ctx with a max-lifetime timer.
@@ -102,7 +102,14 @@ func Run(
 		return New(CodeInternal, "setup", "failed to record run", err)
 	}
 
-	// --- Step 7: persist the user message ---
+	// --- Step 7: load conversation history (BEFORE inserting the current turn) ---
+	history, err := deps.DB.GetRecentChatMessages(project.ID, 30)
+	if err != nil {
+		slog.Warn("failed to load history, starting fresh", "error", err, "project_id", project.ID)
+		history = nil
+	}
+
+	// --- Step 8: persist the user message ---
 	imagesJSON := mustJSON(normaliseImages(images))
 	userMsgRow := &models.AppChatMessage{
 		AppProjectID: project.ID,
@@ -120,16 +127,18 @@ func Run(
 		slog.Warn("failed to update run user_message_id", "error", err, "run_id", runID)
 	}
 
-	// --- Step 8: load conversation history ---
-	history, err := deps.DB.GetRecentChatMessages(project.ID, 30)
-	if err != nil {
-		slog.Warn("failed to load history, starting fresh", "error", err, "project_id", project.ID)
-		history = nil
-	}
-
 	// --- Step 9: build system messages + registry + tracker ---
 	llmMessages := BuildSystemMessages(project, fileMap)
 	llmMessages = append(llmMessages, convertHistory(history)...)
+
+	// Append the current turn explicitly — we don't rely on history reload
+	// to round-trip images, and we want the turn to land even if history
+	// load failed.
+	userTurn := utils.Message{Role: "user", Content: message}
+	if len(images) > 0 {
+		userTurn.Images = images
+	}
+	llmMessages = append(llmMessages, userTurn)
 
 	registry := BuildRegistryFor(project, deps)
 
@@ -137,6 +146,12 @@ func Run(
 	tracker.UserID = user.ID.String()
 	tracker.ProjectID = project.ID.String()
 	ctx = utils.WithTokenTracker(ctx, tracker)
+
+	// Bind the credit checker to the run's token tracker.
+	var creditCheck func() bool
+	if deps.CreditChecker != nil {
+		creditCheck = deps.CreditChecker(tracker)
+	}
 
 	rc := &RunContext{
 		RunID:   runID,
@@ -162,7 +177,7 @@ func Run(
 	defer func() {
 		if r := recover(); r != nil {
 			slog.Error("agent.Run panicked", "error", r, "project_id", project.ID, "stack", string(debug.Stack()))
-			_ = finaliseFailureV2(ctx, deps, repo, run, emitter, "agent_loop",
+			runErr = finaliseFailureV2(ctx, deps, repo, run, emitter, "agent_loop",
 				CodeInternal, fmt.Sprintf("panic: %v", r), nil, preCommit, tracker, runStart)
 		}
 	}()
@@ -176,7 +191,7 @@ func Run(
 	)
 
 	// Budget check before entering the loop.
-	if deps.CreditChecker != nil && !deps.CreditChecker() {
+	if creditCheck != nil && !creditCheck() {
 		return finaliseFailureV2(ctx, deps, repo, run, emitter, "agent_loop",
 			CodeCreditsExhausted, "AI credits exhausted before run started", nil,
 			preCommit, tracker, runStart)
@@ -248,7 +263,7 @@ func Run(
 
 	toolSchemas := registryToUtilsTools(registry)
 
-	narrationText, llmErr := utils.StreamWithTools(
+	_, llmErr := utils.StreamWithTools(
 		ctx,
 		model,
 		llmMessages,
@@ -274,7 +289,7 @@ func Run(
 				if ctx.Err() != nil {
 					return false
 				}
-				if deps.CreditChecker != nil && !deps.CreditChecker() {
+				if creditCheck != nil && !creditCheck() {
 					return false
 				}
 				if _, _, total, _ := tracker.Totals(); total > defaultMaxTokensPerRun {
@@ -296,7 +311,7 @@ func Run(
 			CodeBudgetExceeded, "run canceled or deadline exceeded", ctx.Err(),
 			preCommit, tracker, runStart)
 	}
-	if deps.CreditChecker != nil && !deps.CreditChecker() {
+	if creditCheck != nil && !creditCheck() {
 		return finaliseFailureV2(ctx, deps, repo, run, emitter, "agent_loop",
 			CodeCreditsExhausted, "AI credits exhausted mid-run", nil,
 			preCommit, tracker, runStart)
@@ -314,12 +329,6 @@ func Run(
 		StopReason: "end_turn",
 		Tokens:     trackerDelta(tracker),
 	})
-
-	// If StreamWithTools returned visible narration text, merge it into the
-	// buffer (it's what we emit as the final assistant content).
-	if narrationText != "" {
-		narrationBuf.WriteString(narrationText)
-	}
 
 	// --- Step 13: success shutdown (continued in C2.20) ---
 	return finaliseSuccess(ctx, deps, repo, run, emitter, fileMap,

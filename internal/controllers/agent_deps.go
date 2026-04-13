@@ -10,6 +10,7 @@ import (
 	"github.com/knid/wemob/internal/agent"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/services/fal"
+	"github.com/knid/wemob/internal/utils"
 	"github.com/posthog/posthog-go"
 )
 
@@ -18,10 +19,6 @@ import (
 // This method is called once per HTTP chat/generate request from the view layer.
 func (c *Controller) AgentDeps(user *models.User) *agent.RunDependencies {
 	provider := c.llmProvider()
-	// Credit checker is used by agent.Run's ShouldContinue — tracker is
-	// bound by the agent package internally so we pass nil here and the
-	// checker walks the context-scoped tracker set up in agent.Run.
-	creditChecker := c.MakeCreditBudgetChecker(user, nil)
 
 	return &agent.RunDependencies{
 		DB:            c.DB,
@@ -33,7 +30,9 @@ func (c *Controller) AgentDeps(user *models.User) *agent.RunDependencies {
 		PostHog:       c.PostHog,
 		RemoteConfig:  c.RemoteConfig,
 
-		CreditChecker: creditChecker,
+		CreditChecker: func(tracker *utils.TokenTracker) func() bool {
+			return c.MakeCreditBudgetChecker(user, tracker)
+		},
 		DeductCredits: func(ctx context.Context, credits int, action, projectID string) error {
 			return c.DeductAICreditsToFloor(user, credits, action, projectID)
 		},
