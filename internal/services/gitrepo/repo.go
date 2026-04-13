@@ -375,3 +375,68 @@ func (r *Repo) ForcePushToURL(url, branch string) error {
 	}
 	return nil
 }
+
+// WriteFileMap atomically replaces the working tree with the provided map.
+// Files not in the map are deleted from disk. Called at the end of a
+// successful agent run before committing.
+func (r *Repo) WriteFileMap(fileMap map[string]string) error {
+	return r.WithLock(func() error {
+		existing, err := r.ListFiles()
+		if err != nil {
+			return fmt.Errorf("list files: %w", err)
+		}
+		existingSet := make(map[string]bool, len(existing))
+		for _, p := range existing {
+			existingSet[p] = true
+		}
+
+		for path, content := range fileMap {
+			if err := writeFileAtomic(filepath.Join(r.Path, path), []byte(content)); err != nil {
+				return fmt.Errorf("write %s: %w", path, err)
+			}
+			delete(existingSet, path)
+		}
+		for path := range existingSet {
+			full := filepath.Join(r.Path, path)
+			if err := os.Remove(full); err != nil && !os.IsNotExist(err) {
+				return fmt.Errorf("delete %s: %w", path, err)
+			}
+		}
+		return nil
+	})
+}
+
+// Reset performs a hard reset of the working tree to the given commit hash.
+// Used by the agent's failure path as a defensive clean-up.
+func (r *Repo) Reset(commitHash string) error {
+	return r.WithLock(func() error {
+		cmd := exec.Command("git", "-C", r.Path, "reset", "--hard", commitHash)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("git reset: %w: %s", err, string(out))
+		}
+		return nil
+	})
+}
+
+// writeFileAtomic writes data to path via tempfile + rename.
+func writeFileAtomic(path string, data []byte) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".tmp-")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		os.Remove(tmpName)
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpName)
+		return err
+	}
+	return os.Rename(tmpName, path)
+}
