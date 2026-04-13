@@ -2,7 +2,9 @@ package controllers
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -973,8 +975,12 @@ func (c *Controller) ExecuteStoreOp(
 
 	// Lazy store creation — first call for a project creates the row using
 	// the project name as a default store name. Subsequent calls find it.
+	// Only treat ErrNoRows (or a zero-uuid result) as "missing"; any other
+	// error is a real lookup failure and must propagate so the agent doesn't
+	// chase a unique-violation when CreateStore collides with an existing row.
 	store, err := c.DB.GetStoreByAppProjectID(project.ID.String())
-	if err != nil || store == nil || store.ID == uuid.Nil {
+	switch {
+	case errors.Is(err, sql.ErrNoRows), err == nil && store != nil && store.ID == uuid.Nil:
 		if user == nil {
 			return "", fmt.Errorf("execute_store_op: cannot lazy-create store without user")
 		}
@@ -983,6 +989,8 @@ func (c *Controller) ExecuteStoreOp(
 			return "", fmt.Errorf("lazy-create store: %w", createErr)
 		}
 		store = created
+	case err != nil:
+		return "", fmt.Errorf("get store: %w", err)
 	}
 
 	switch action {
@@ -1021,7 +1029,10 @@ func (c *Controller) ExecuteStoreOp(
 		if !ok || len(productsRaw) == 0 {
 			return "", fmt.Errorf("bulk_create_products requires params.products to be a non-empty array")
 		}
-		cats, _ := c.DB.GetCategoriesByStoreID(store.ID.String())
+		cats, err := c.DB.GetCategoriesByStoreID(store.ID.String())
+		if err != nil {
+			return "", fmt.Errorf("load categories for bulk preflight: %w", err)
+		}
 		knownSlugs := make(map[string]struct{}, len(cats))
 		for _, cat := range cats {
 			knownSlugs[cat.Slug] = struct{}{}
