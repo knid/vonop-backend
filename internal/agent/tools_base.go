@@ -284,3 +284,60 @@ func (EditFileTool) Execute(ctx context.Context, rc *RunContext, input json.RawM
 	})
 	return fmt.Sprintf("edited %s (1 replacement, %d bytes)", path, len(newContent)), false, nil
 }
+
+// ---------- generate_image ----------
+
+type GenerateImageTool struct {
+	Deps *RunDependencies
+}
+
+func (GenerateImageTool) Name() string { return "generate_image" }
+func (GenerateImageTool) Description() string {
+	return "Generate an image and return a public URL. Use for hero imagery, product photos, illustrations. Never use stock URLs (picsum, unsplash, etc.)."
+}
+func (GenerateImageTool) Schema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"prompt": map[string]any{"type": "string", "description": "Detailed visual description"},
+			"width":  map[string]any{"type": "integer", "minimum": 256, "maximum": 2048},
+			"height": map[string]any{"type": "integer", "minimum": 256, "maximum": 2048},
+			"style":  map[string]any{"type": "string", "enum": []string{"photo", "illustration", "icon"}},
+		},
+		"required": []string{"prompt"},
+	}
+}
+
+func (g GenerateImageTool) Execute(ctx context.Context, rc *RunContext, input json.RawMessage) (string, bool, error) {
+	var args struct {
+		Prompt string `json:"prompt"`
+		Width  int    `json:"width"`
+		Height int    `json:"height"`
+		Style  string `json:"style"`
+	}
+	if err := json.Unmarshal(input, &args); err != nil {
+		return fmt.Sprintf("invalid input: %v", err), true, nil
+	}
+	if strings.TrimSpace(args.Prompt) == "" {
+		return "prompt is required", true, nil
+	}
+	if args.Width == 0 {
+		args.Width = 1024
+	}
+	if args.Height == 0 {
+		args.Height = 1024
+	}
+	if g.Deps == nil || g.Deps.GenerateImage == nil {
+		return "image generation not available", true, nil
+	}
+	url, err := g.Deps.GenerateImage(ctx, args.Prompt, args.Width, args.Height, args.Style, rc.Project.ID.String())
+	if err != nil {
+		return fmt.Sprintf("image generation failed: %v", err), true, nil
+	}
+	resp, _ := json.Marshal(map[string]any{
+		"url":    url,
+		"width":  args.Width,
+		"height": args.Height,
+	})
+	return string(resp), false, nil
+}
