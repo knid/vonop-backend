@@ -72,11 +72,18 @@ func (v *HttpViews) handleStreamOrAsync(w http.ResponseWriter, r *http.Request, 
 
 	utils.SetSSEHeaders(w)
 
-	// Send job_id as first event so frontend can resume polling on page refresh
-	utils.WriteSSEEvent(w, flusher, "job_started", map[string]any{"job_id": job.ID})
+	// Send job_id as first event so frontend can resume polling on page refresh.
+	// seq=0 — this is a bootstrap frame outside the agent's per-event sequence.
+	utils.WriteSSEEvent(w, flusher, 0, "job_started", map[string]any{"job_id": job.ID})
 
 	clientGone := false
-	eventIndex := 0
+	// nextSeq is the per-job monotonic sequence number assigned to every
+	// event the main goroutine processes. It is the single source of truth
+	// for ordering — we stamp it into both the live SSEEvent and any
+	// persisted JobEvent so reconnect via Last-Event-ID can deduplicate
+	// against either source. The previous "eventIndex" was a per-milestone
+	// counter; nextSeq increments on every event, milestone or not.
+	var nextSeq int64
 	var lastEvent *responses.SSEEvent
 	var allMilestoneEvents []models.JobEvent
 
@@ -108,18 +115,18 @@ func (v *HttpViews) handleStreamOrAsync(w http.ResponseWriter, r *http.Request, 
 				// Channel closed — generation finished
 				goto done
 			}
+			nextSeq++
+			event.Seq = nextSeq
 			lastEvent = &event
 
-			// Fan out to any reconnected SSE subscribers
-			bus.Publish(event)
-
-			// Update the partial stream buffer for refresh recovery.
-			streamState.Apply(event)
-
-			// Always persist milestone events to DB
+			// Persist milestone events to the DB BEFORE publishing to the
+			// bus. This guarantees that a reconnected subscriber that reads
+			// the DB after subscribing sees no event in the bus that isn't
+			// also already in the DB — the dedupe-by-seq logic in StreamJob
+			// relies on this ordering invariant.
 			if controllers.IsMilestoneEvent(event.Event) {
 				jobEvent := models.JobEvent{
-					Index: eventIndex,
+					Seq:   nextSeq,
 					Event: event.Event,
 					Data:  controllers.StripHeavyFields(event.Event, event.Data),
 					Time:  time.Now().UnixMilli(),
@@ -128,15 +135,20 @@ func (v *HttpViews) handleStreamOrAsync(w http.ResponseWriter, r *http.Request, 
 				if err := v.Controller.DB.AppendGenerationJobEvent(job.ID.String(), jobEvent); err != nil {
 					slog.Error("failed to persist job event", "job_id", job.ID, "error", err)
 				}
-				eventIndex++
 				// Flush the partial buffer alongside every milestone so reconnects
 				// between milestones see the latest authoritative state.
 				stateFlusher.Trigger()
 			}
 
+			// Fan out to any reconnected SSE subscribers
+			bus.Publish(event)
+
+			// Update the partial stream buffer for refresh recovery.
+			streamState.Apply(event)
+
 			// Write to SSE if client is still connected
 			if !clientGone {
-				if err := utils.WriteSSEEvent(w, flusher, event.Event, event.Data); err != nil {
+				if err := utils.WriteSSEEvent(w, flusher, event.Seq, event.Event, event.Data); err != nil {
 					clientGone = true
 					slog.Info("SSE client disconnected, continuing job in background", "job_id", job.ID)
 				}
@@ -198,7 +210,8 @@ done:
 func (v *HttpViews) drainEventsToJob(ctx context.Context, cancel context.CancelFunc, job *models.GenerationJob, events <-chan responses.SSEEvent) {
 	defer cancel()
 
-	eventIndex := 0
+	// See handleStreamOrAsync for the rationale on the per-job seq counter.
+	var nextSeq int64
 	var lastEvent *responses.SSEEvent
 	var allMilestoneEvents []models.JobEvent
 
@@ -223,7 +236,24 @@ func (v *HttpViews) drainEventsToJob(ctx context.Context, cancel context.CancelF
 				// Channel closed — generation finished
 				goto finalize
 			}
+			nextSeq++
+			event.Seq = nextSeq
 			lastEvent = &event
+
+			// Persist BEFORE publish — see handleStreamOrAsync for rationale.
+			if controllers.IsMilestoneEvent(event.Event) {
+				jobEvent := models.JobEvent{
+					Seq:   nextSeq,
+					Event: event.Event,
+					Data:  controllers.StripHeavyFields(event.Event, event.Data),
+					Time:  time.Now().UnixMilli(),
+				}
+				allMilestoneEvents = append(allMilestoneEvents, jobEvent)
+				if err := v.Controller.DB.AppendGenerationJobEvent(job.ID.String(), jobEvent); err != nil {
+					slog.Error("failed to persist job event", "job_id", job.ID, "error", err)
+				}
+				stateFlusher.Trigger()
+			}
 
 			// Fan out to any reconnected SSE subscribers
 			if busVal, ok := v.Controller.JobEventBuses.Load(job.ID.String()); ok {
@@ -233,21 +263,6 @@ func (v *HttpViews) drainEventsToJob(ctx context.Context, cancel context.CancelF
 			}
 
 			streamState.Apply(event)
-
-			if controllers.IsMilestoneEvent(event.Event) {
-				jobEvent := models.JobEvent{
-					Index: eventIndex,
-					Event: event.Event,
-					Data:  controllers.StripHeavyFields(event.Event, event.Data),
-					Time:  time.Now().UnixMilli(),
-				}
-				allMilestoneEvents = append(allMilestoneEvents, jobEvent)
-				if err := v.Controller.DB.AppendGenerationJobEvent(job.ID.String(), jobEvent); err != nil {
-					slog.Error("failed to persist job event", "job_id", job.ID, "error", err)
-				}
-				eventIndex++
-				stateFlusher.Trigger()
-			}
 
 		case <-stateFlush.C:
 			stateFlusher.Trigger()
@@ -455,7 +470,7 @@ func (v *HttpViews) StreamJob(w http.ResponseWriter, r *http.Request) {
 				// Bus closed — job finished
 				return
 			}
-			if err := utils.WriteSSEEvent(w, flusher, event.Event, event.Data); err != nil {
+			if err := utils.WriteSSEEvent(w, flusher, event.Seq, event.Event, event.Data); err != nil {
 				// Client disconnected
 				return
 			}
@@ -484,7 +499,8 @@ func replayPersistedJobEvents(w http.ResponseWriter, flusher http.Flusher, job *
 	if len(job.StreamState) > 0 && string(job.StreamState) != "{}" && string(job.StreamState) != "null" {
 		var stateData any
 		if err := json.Unmarshal(job.StreamState, &stateData); err == nil {
-			_ = utils.WriteSSEEvent(w, flusher, "stream_state", stateData)
+			// stream_state is an out-of-band snapshot; no useful seq.
+			_ = utils.WriteSSEEvent(w, flusher, 0, "stream_state", stateData)
 		}
 	}
 
@@ -492,11 +508,12 @@ func replayPersistedJobEvents(w http.ResponseWriter, flusher http.Flusher, job *
 	if json.Unmarshal(job.Events, &milestoneEvents) == nil {
 		for _, raw := range milestoneEvents {
 			var evt struct {
+				Seq   int64  `json:"seq"`
 				Event string `json:"event"`
 				Data  any    `json:"data"`
 			}
 			if json.Unmarshal(raw, &evt) == nil {
-				_ = utils.WriteSSEEvent(w, flusher, evt.Event, evt.Data)
+				_ = utils.WriteSSEEvent(w, flusher, evt.Seq, evt.Event, evt.Data)
 			}
 		}
 	}

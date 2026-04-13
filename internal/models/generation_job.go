@@ -23,8 +23,16 @@ type GenerationJob struct {
 	UpdatedAt     time.Time       `bun:",nullzero,notnull,default:current_timestamp" json:"updated_at"`
 }
 
+// JobEvent is one persisted milestone event. Seq is the per-job monotonic
+// sequence number assigned by handleStreamOrAsync — it matches the seq sent
+// to live clients as the SSE `id:` line, which means reconnect via
+// `Last-Event-ID` can deduplicate against the persisted log without an
+// out-of-band index.
+//
+// Renamed from `Index` (per-milestone counter) to `Seq` (per-event counter)
+// in Phase 2; nothing in the dashboard reads the old field.
 type JobEvent struct {
-	Index int    `json:"index"`
+	Seq   int64  `json:"seq"`
 	Event string `json:"event"`
 	Data  any    `json:"data"`
 	Time  int64  `json:"time"`

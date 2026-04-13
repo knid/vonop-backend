@@ -1,6 +1,13 @@
 package responses
 
+// SSEEvent is the in-process envelope passed from the agent / view StreamFunc
+// to handleStreamOrAsync's main goroutine. The main goroutine is the single
+// owner of `Seq` — it stamps a monotonic per-job sequence number on every
+// event before persisting and publishing. The seq flows out to clients as
+// the SSE `id: <seq>` line so reconnect can resume idempotently via
+// `Last-Event-ID`.
 type SSEEvent struct {
+	Seq   int64  `json:"seq,omitempty"`
 	Event string `json:"event"`
 	Data  any    `json:"data"`
 }
