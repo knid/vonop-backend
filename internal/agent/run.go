@@ -221,23 +221,13 @@ func Run(
 			preCommit, tracker, runStart)
 	}
 
-	// Keepalive goroutine — emits every 15s until the run finishes.
-	keepaliveDone := make(chan struct{})
-	go func() {
-		tick := time.NewTicker(15 * time.Second)
-		defer tick.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-keepaliveDone:
-				return
-			case <-tick.C:
-				emitter.Emit(EventKeepalive, KeepaliveEvent{RunID: runID, TS: time.Now().Unix()})
-			}
-		}
-	}()
-	defer close(keepaliveDone)
+	// The dedicated keepalive goroutine that used to emit a typed
+	// `keepalive` event every 15s has been removed: the view layer's
+	// `:keepalive\n\n` SSE comment ticker covers transport-level idleness,
+	// and the dashboard's idle watchdog now resets on every wire byte
+	// (Phase 1's onActivity wiring), not just typed events. Emitting a
+	// typed keepalive added overhead and gave clients a no-op event to
+	// special-case.
 
 	emitter.Emit(EventTurnStart, TurnStartEvent{RunID: runID, Turn: turn})
 

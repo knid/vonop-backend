@@ -52,12 +52,9 @@ type ToolCallStartEvent struct {
 	InputPreview json.RawMessage `json:"input_preview,omitempty"`
 }
 
-type ToolCallDeltaEvent struct {
-	RunID      uuid.UUID `json:"run_id"`
-	ToolCallID string    `json:"tool_call_id"`
-	Field      string    `json:"field"`
-	Delta      string    `json:"delta"`
-}
+// (ToolCallDeltaEvent existed in an earlier draft of the agent rewrite for
+// streaming partial tool args. It was never emitted by any production code
+// path and the dashboard never consumed it — removed in Phase 2.)
 
 type ToolCallResultEvent struct {
 	RunID      uuid.UUID `json:"run_id"`
@@ -121,10 +118,11 @@ type DoneEvent struct {
 	DurationMs   int        `json:"duration_ms"`
 }
 
-type KeepaliveEvent struct {
-	RunID uuid.UUID `json:"run_id"`
-	TS    int64     `json:"ts"`
-}
+// (KeepaliveEvent was a typed 15s heartbeat from the agent. It duplicated
+// the view layer's `:keepalive\n\n` SSE comment and gave clients an event
+// they had to special-case as a no-op. Removed in Phase 2 — the SSE comment
+// ticker still keeps proxies alive, and the dashboard's idle watchdog now
+// resets on every wire byte instead of every typed keepalive.)
 
 // Event type constants — single source of truth for event names.
 const (
@@ -132,7 +130,6 @@ const (
 	EventTurnStart      = "turn_start"
 	EventNarration      = "narration"
 	EventToolCallStart  = "tool_call_start"
-	EventToolCallDelta  = "tool_call_delta"
 	EventToolCallResult = "tool_call_result"
 	EventFileWritten    = "file_written"
 	EventFileDeleted    = "file_deleted"
@@ -140,7 +137,6 @@ const (
 	EventRollback       = "rollback"
 	EventError          = "error"
 	EventDone           = "done"
-	EventKeepalive      = "keepalive"
 )
 
 // The SSE-backed emitter lives in internal/views/agent_bridge.go as
