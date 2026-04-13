@@ -49,7 +49,7 @@ func (v *HttpViews) GenerateAppStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Store creation is handled by runPreGenerationSetup inside StreamBuildApp
+	// Store creation is handled by agent.Run's pre-generation setup
 	// (with existence check), so no need to create it here.
 
 	v.Controller.TrackUserEvent(user, "app_generation_started", posthog.NewProperties().
