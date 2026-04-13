@@ -3,10 +3,13 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"log/slog"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/agent"
 	"github.com/knid/wemob/internal/models"
+	"github.com/knid/wemob/internal/services/fal"
 	"github.com/posthog/posthog-go"
 )
 
@@ -49,17 +52,65 @@ func (c *Controller) AgentDeps(user *models.User) *agent.RunDependencies {
 	}
 }
 
-// generateImageForAgent is a shim that calls the existing image generation
-// path used by the legacy chat tools. It will be replaced when Task C4.4
-// rescues the image client into its own controller method; for now it's a
-// thin wrapper that returns an error rather than invoking the legacy path,
-// which takes different arguments (including a collectedContext builder and
-// an SSE sendEvent callback) that don't fit the agent's ImageGenerator
-// signature.
+// generateImageForAgent calls Fal to generate an image from a prompt, downloads
+// the result, and uploads the bytes to the Assets S3 bucket under the given
+// project's images folder. If the S3 upload fails after retries (or the download
+// fails), it falls back to returning the temporary Fal CDN URL — it's not
+// ideal long-term but the image remains usable for the current session.
 //
-// Task C4.4 will replace this body with the real Fal + S3 upload.
+// Width, height, and style are accepted to satisfy the agent's ImageGenerator
+// interface but are not currently passed to the Fal wrapper; see the underlying
+// `fal.GenerateImage` for the parameters that actually flow through today.
 func (c *Controller) generateImageForAgent(ctx context.Context, prompt string, w, h int, style, projectID string) (string, error) {
-	return "", fmt.Errorf("generateImageForAgent: pending C4.4 rescue")
+	_ = w
+	_ = h
+	_ = style
+
+	apiKey := c.SecretManager.GetSecret("FAL_API_KEY")
+	if apiKey == "" {
+		return "", fmt.Errorf("FAL_API_KEY not configured")
+	}
+	falModel := c.SecretManager.GetSecret("FAL_IMAGE_MODEL")
+	if falModel == "" {
+		falModel = "fal-ai/flux/schnell"
+	}
+
+	cdnURL, err := fal.GenerateImage(ctx, apiKey, falModel, prompt, "")
+	if err != nil {
+		return "", fmt.Errorf("fal generate: %w", err)
+	}
+
+	imgData, err := downloadImage(ctx, cdnURL)
+	if err != nil {
+		// Fall back to the CDN URL. It's temporary but works for this session.
+		slog.Warn("failed to download generated image, returning CDN URL", "error", err, "project_id", projectID)
+		return cdnURL, nil
+	}
+
+	filename := fmt.Sprintf("generated-%d.jpg", time.Now().UnixNano())
+	s3Key := fmt.Sprintf("apps/%s/images/%s", projectID, filename)
+
+	// Detached context for the S3 upload so the image isn't lost if the
+	// caller's context is near its deadline.
+	uploadCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	var publicURL string
+	var uploadErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		publicURL, uploadErr = c.AssetsStorage.UploadFileBytePublic(uploadCtx, s3Key, imgData, "image/jpeg")
+		if uploadErr == nil {
+			break
+		}
+		slog.Warn("S3 upload failed for generated image, retrying",
+			"project_id", projectID, "s3_key", s3Key,
+			"attempt", attempt+1, "error", uploadErr)
+		time.Sleep(time.Duration(attempt+1) * time.Second)
+	}
+	if uploadErr != nil {
+		return cdnURL, nil
+	}
+	return publicURL, nil
 }
 
 // updateMobileBridgeMethodForAgent toggles a bridge method on a project's
