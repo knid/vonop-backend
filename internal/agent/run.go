@@ -479,12 +479,17 @@ func finaliseSuccess(
 	// itself all key off this — leaving it stuck on "draft" means a fresh
 	// page load after a successful generate never starts the preview and
 	// the studio thinks the app still needs initial templates injected.
+	//
+	// Use the targeted UpdateAppProjectStatus so we don't risk silently
+	// failing on unrelated JSONB columns like Theme/DataModels — a full
+	// UpdateAppProject re-serializes every field.
 	if isInitial && project != nil {
-		project.Status = "ready"
-		if _, updErr := deps.DB.UpdateAppProject(project); updErr != nil {
+		if updErr := deps.DB.UpdateAppProjectStatus(project.ID.String(), "ready"); updErr != nil {
 			// Don't fail the run — files committed successfully. Just log.
 			slog.Warn("failed to flip project status to ready",
 				"error", updErr, "project_id", project.ID)
+		} else {
+			project.Status = "ready"
 		}
 	}
 

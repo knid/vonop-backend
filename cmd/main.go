@@ -730,6 +730,18 @@ func main() {
 		slog.Info("marked orphaned agent runs as failed", "count", n)
 	}
 
+	if n, err := db.MarkOrphanedGenerationJobs(); err != nil {
+		slog.Warn("failed to mark orphaned generation jobs", "error", err)
+	} else if n > 0 {
+		slog.Info("marked orphaned generation jobs as failed", "count", n)
+	}
+
+	if n, err := db.BackfillProjectStatusReady(); err != nil {
+		slog.Warn("failed to backfill project status", "error", err)
+	} else if n > 0 {
+		slog.Info("backfilled draft projects with completed runs to ready", "count", n)
+	}
+
 	seedPlans(db, sm)
 	migrateInactiveUsersToFree(bundb)
 

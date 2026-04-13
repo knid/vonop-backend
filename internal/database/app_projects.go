@@ -87,6 +87,39 @@ func (db *Database) UpdateAppProjectSandboxID(projectID string, sandboxID string
 	return err
 }
 
+// UpdateAppProjectStatus performs a targeted single-column update on
+// app_projects.status. Used by agent.Run to flip "draft" → "ready" without
+// risking a constraint failure on unrelated JSONB columns the way a full
+// UpdateAppProject would.
+func (db *Database) UpdateAppProjectStatus(projectID string, status string) error {
+	_, err := db.DB.NewUpdate().Model((*models.AppProject)(nil)).
+		Set("status = ?", status).
+		Where("id = ?", projectID).
+		Exec(context.Background())
+	if err == nil {
+		db.InvalidateProjectCache(projectID)
+	}
+	return err
+}
+
+// BackfillProjectStatusReady is a one-shot startup helper that flips any
+// project with status="draft" to "ready" if it has at least one completed
+// agent run. Fixes legacy data left behind by the pre-2026-04 agent which
+// never updated project status after a successful first generation.
+func (db *Database) BackfillProjectStatusReady() (int, error) {
+	res, err := db.DB.NewUpdate().
+		Model((*models.AppProject)(nil)).
+		Set("status = ?", "ready").
+		Where("status = ?", "draft").
+		Where("id IN (SELECT app_project_id FROM app_agent_runs WHERE status = ?)", "completed").
+		Exec(context.Background())
+	if err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	return int(n), nil
+}
+
 func (db *Database) CountAppProjectsByUserID(userID string) (int, error) {
 	count, err := db.DB.NewSelect().Model((*models.AppProject)(nil)).Where("user_id = ?", userID).Count(context.Background())
 	return count, err

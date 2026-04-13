@@ -89,6 +89,26 @@ func (db *Database) UpdateGenerationJobStatus(jobID string, status string, error
 	return err
 }
 
+// MarkOrphanedGenerationJobs is called on server startup: any `running` or
+// `awaiting_input` generation jobs left over from a previous process are
+// marked `failed`. Without this, a stuck job blocks new generate_app and
+// chat-edit flows because CreateJob/GetActiveAgentRun see them as in-flight
+// and reject the new request with "a generation is already in progress".
+func (db *Database) MarkOrphanedGenerationJobs() (int, error) {
+	res, err := db.DB.NewUpdate().
+		Model((*models.GenerationJob)(nil)).
+		Set("status = ?", "failed").
+		Set("error = ?", "server restarted").
+		Set("updated_at = ?", time.Now()).
+		Where("status IN (?)", bun.In([]string{"running", "awaiting_input"})).
+		Exec(context.Background())
+	if err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	return int(n), nil
+}
+
 func (db *Database) GetUserRunningJobs(userID string) (int, error) {
 	count, err := db.DB.NewSelect().
 		Model((*models.GenerationJob)(nil)).
