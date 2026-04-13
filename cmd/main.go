@@ -97,6 +97,9 @@ func createSchema(db *bun.DB) error {
 		(*models.AppDeployment)(nil),
 		(*models.AppIntegration)(nil),
 		(*models.AppConversation)(nil),
+		// Agent rewrite: chat messages + agent run tracking
+		(*models.AppChatMessage)(nil),
+		(*models.AppAgentRun)(nil),
 		// AppGeneratedFile and AppSnapshot removed — files now in git repos
 		(*models.CoolifyProject)(nil),
 		(*models.AppDomain)(nil),
@@ -306,6 +309,10 @@ func createSchema(db *bun.DB) error {
 		`CREATE INDEX IF NOT EXISTS idx_app_github_exports_app_project_id ON app_github_exports(app_project_id)`,
 		// Active-job lookup per app — used by GET /v2/apps/{appId}/active-job.
 		`CREATE INDEX IF NOT EXISTS idx_generation_jobs_app_status ON generation_jobs (app_id, status) WHERE app_id IS NOT NULL`,
+		// Agent rewrite: chat messages + agent runs queried by project, runs also by status.
+		`CREATE INDEX IF NOT EXISTS idx_app_chat_messages_project_created ON app_chat_messages (app_project_id, created_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_app_agent_runs_project_created ON app_agent_runs (app_project_id, created_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_app_agent_runs_status ON app_agent_runs (status)`,
 	}
 	alterStatements = append(alterStatements, indexStatements...)
 	// Check if migrations have already been applied by testing for a column from the latest batch.
