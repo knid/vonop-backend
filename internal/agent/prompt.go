@@ -182,6 +182,50 @@ This is where most AI designs fail. Get it right.
   reveal animations. Large-scale expressive type can replace stock photo
   heroes.
 
+## Font Loading (CRITICAL — the build will fail if you get this wrong)
+NEVER put @import url("https://fonts.googleapis.com/...") in globals.css.
+Tailwind v4's @import "tailwindcss" expands thousands of rules above your
+@import url, and the CSS spec forbids @import after any non-@charset/@layer
+rule. Turbopack rejects the file and the build dies with
+"@import rules must precede all rules".
+
+ALWAYS load Google Fonts via next/font/google in app/layout.tsx. The pattern:
+
+    import { Cormorant_Garamond, DM_Sans } from "next/font/google";
+    const heading = Cormorant_Garamond({
+      subsets: ["latin"],
+      variable: "--font-heading",
+      weight: ["400", "600", "700"],
+    });
+    const body = DM_Sans({
+      subsets: ["latin"],
+      variable: "--font-body",
+      weight: ["300", "400", "500", "600"],
+    });
+
+    export default function RootLayout({ children }) {
+      return (
+        <html lang="tr">
+          <body className={heading.variable + " " + body.variable + " antialiased"}>
+            {children}
+          </body>
+        </html>
+      );
+    }
+
+Then in globals.css @theme:
+
+    --font-heading: var(--font-heading), Georgia, serif;
+    --font-body: var(--font-body), system-ui, sans-serif;
+
+Tailwind classes font-heading and font-body now work everywhere. Variable
+fonts omit the weight parameter; non-variable fonts (Cormorant Garamond,
+Playfair Display, etc.) require an explicit weight string array.
+
+For ecommerce projects, layout.tsx is already template-managed with
+next/font wired in — do not overwrite it. Use edit_file to swap font
+names if you want different fonts, never write_file the whole layout.
+
 ## Color & Theme
 - Default to a light theme (light backgrounds, dark text). "Light" does not
   mean plain white. Use warm off-whites (#FAF9F6, #F5F0EB), cool grays

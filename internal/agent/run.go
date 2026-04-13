@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"regexp"
 	"runtime/debug"
 	"strings"
 	"time"
@@ -548,6 +549,12 @@ func finaliseSuccess(
 	// further down still need to know whether this run was the initial one.
 	isInitial := project != nil && project.Status == "draft"
 
+	// 0. Mechanically repair known build-breaking patterns the LLM sometimes
+	//    emits (e.g. @import url("https://fonts.googleapis.com/...") placed after
+	//    @import "tailwindcss" in globals.css, which violates the CSS spec and
+	//    breaks Turbopack). Safer to strip invalid CSS than ship a broken build.
+	sanitizeFileMapForBuild(fileMap)
+
 	// 1. Write fileMap to working tree and commit.
 	finalCommit, err := FinaliseRun(repo, fileMap, userMessage)
 	if err != nil {
@@ -851,6 +858,39 @@ func isUniqueViolation(err error) bool {
 	}
 	// Fallback: string match for drivers that don't expose SQLSTATE.
 	return strings.Contains(err.Error(), "23505") || strings.Contains(err.Error(), "duplicate key")
+}
+
+// googleFontsImportPattern matches any CSS @import url("https://fonts.googleapis.com/...")
+// line the LLM sometimes adds to globals.css. In a Tailwind v4 project this
+// placement violates the CSS spec (imports must precede non-@layer rules,
+// and @import "tailwindcss" expands hundreds of rules above it), so
+// Turbopack fails the build. Fonts belong in next/font/google on layout.tsx.
+var googleFontsImportPattern = regexp.MustCompile(`(?m)^\s*@import\s+url\(['"]?https://fonts\.googleapis\.com/[^)]*\)\s*;?\s*$\n?`)
+
+// sanitizeFileMapForBuild rewrites known LLM mistakes in the in-memory file
+// map before it's committed to the repo. Currently strips invalid Google
+// Fonts @import statements from any .css file. The app may render without
+// the intended font after stripping, but a working app with fallback fonts
+// beats a broken build.
+func sanitizeFileMapForBuild(fileMap *SafeFileMap) {
+	if fileMap == nil {
+		return
+	}
+	for path, content := range fileMap.Snapshot() {
+		if !strings.HasSuffix(path, ".css") {
+			continue
+		}
+		if !strings.Contains(content, "fonts.googleapis.com") {
+			continue
+		}
+		cleaned := googleFontsImportPattern.ReplaceAllString(content, "")
+		if cleaned == content {
+			continue
+		}
+		fileMap.Set(path, cleaned)
+		slog.Warn("stripped invalid Google Fonts @import from CSS (use next/font/google instead)",
+			"path", path, "bytes_removed", len(content)-len(cleaned))
+	}
 }
 
 // mapCodeToStatus maps agent error codes to AppAgentRun status strings.
