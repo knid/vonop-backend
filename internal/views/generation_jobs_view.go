@@ -424,12 +424,26 @@ func (v *HttpViews) StreamJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Resume cursor for idempotent reconnect. Browsers' EventSource sends
+	// `Last-Event-ID` automatically on reconnect; the dashboard's custom
+	// fetch+ReadableStream parser does the same. Both also accept `?since=N`
+	// as a query-param fallback for clients that can't set headers.
+	since := parseLastEventID(r)
+
 	utils.SetSSEHeaders(w)
 
-	// Step 1: always replay the persisted stream buffer + milestone events.
-	// This is the only data source when the bus is gone, and the rehydration
-	// primer for live subscribers.
-	replayPersistedJobEvents(w, flusher, job)
+	// Step 1: always replay the persisted stream buffer + milestone events
+	// the client hasn't seen yet. `since` filters out anything <= the last
+	// event id the client confirms it already has, so reconnect doesn't
+	// duplicate tool cards or file events.
+	replayPersistedJobEvents(w, flusher, job, since)
+
+	// Compute the dedupe cursor for the live tail. Any live event the bus
+	// delivers with seq <= maxReplayedSeq is something we just replayed
+	// from the DB (race window between subscribe and DB read) and must
+	// not be written twice. Start at `since`; the replay updates it via
+	// the closure below if higher seq events were emitted.
+	maxReplayedSeq := computeMaxReplayedSeq(job, since)
 
 	// Step 2: decide whether a live subscription is possible.
 	isLive := job.Status == "running" || job.Status == "awaiting_input"
@@ -437,7 +451,7 @@ func (v *HttpViews) StreamJob(w http.ResponseWriter, r *http.Request) {
 
 	if !isLive {
 		// Terminal job — the replay is authoritative. Close now.
-		slog.Info("StreamJob: replayed terminal job and closed", "job_id", jobID, "status", job.Status)
+		slog.Info("StreamJob: replayed terminal job and closed", "job_id", jobID, "status", job.Status, "since", since)
 		return
 	}
 
@@ -470,6 +484,13 @@ func (v *HttpViews) StreamJob(w http.ResponseWriter, r *http.Request) {
 				// Bus closed — job finished
 				return
 			}
+			// Dedupe against the replay window.
+			if event.Seq > 0 && event.Seq <= maxReplayedSeq {
+				continue
+			}
+			if event.Seq > maxReplayedSeq {
+				maxReplayedSeq = event.Seq
+			}
 			if err := utils.WriteSSEEvent(w, flusher, event.Seq, event.Event, event.Data); err != nil {
 				// Client disconnected
 				return
@@ -487,19 +508,67 @@ func (v *HttpViews) StreamJob(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// parseLastEventID extracts the resume cursor from the request — header
+// `Last-Event-ID` (browser EventSource standard, also used by our custom
+// parser) with a `?since=N` query-param fallback. Returns 0 when not set
+// or unparseable; 0 means "send everything".
+func parseLastEventID(r *http.Request) int64 {
+	if h := r.Header.Get("Last-Event-ID"); h != "" {
+		if n, err := strconv.ParseInt(h, 10, 64); err == nil && n >= 0 {
+			return n
+		}
+	}
+	if q := r.URL.Query().Get("since"); q != "" {
+		if n, err := strconv.ParseInt(q, 10, 64); err == nil && n >= 0 {
+			return n
+		}
+	}
+	return 0
+}
+
+// computeMaxReplayedSeq scans the persisted milestone events and returns
+// the highest seq <= the replay threshold that was actually emitted by
+// replayPersistedJobEvents. The live tail dedupes against this value so a
+// race between DB snapshot read and bus subscribe doesn't show events twice.
+func computeMaxReplayedSeq(job *models.GenerationJob, since int64) int64 {
+	max := since
+	if len(job.Events) == 0 {
+		return max
+	}
+	var milestoneEvents []json.RawMessage
+	if json.Unmarshal(job.Events, &milestoneEvents) != nil {
+		return max
+	}
+	for _, raw := range milestoneEvents {
+		var evt struct {
+			Seq int64 `json:"seq"`
+		}
+		if json.Unmarshal(raw, &evt) == nil && evt.Seq > max {
+			max = evt.Seq
+		}
+	}
+	return max
+}
+
 // replayPersistedJobEvents writes the last persisted partial stream buffer
 // followed by each recorded milestone event into the SSE response. Used by
 // StreamJob both for live reconnects (as a primer before tailing the bus)
 // and for terminal reconnects (as the only data source).
 //
+// `since` is the client's last-seen seq (from the Last-Event-ID header or
+// ?since= query param). Milestone events with seq <= since are skipped so
+// reconnect doesn't redeliver tool cards or file events the client already
+// has. The stream_state snapshot is always sent — it carries no seq, and
+// the client uses it to rehydrate transient narration buffers regardless
+// of what milestones it has seen.
+//
 // Errors from individual writes are intentionally swallowed — the caller has
 // no recovery path mid-stream, and partial replay is still more useful than
 // a 500 response.
-func replayPersistedJobEvents(w http.ResponseWriter, flusher http.Flusher, job *models.GenerationJob) {
+func replayPersistedJobEvents(w http.ResponseWriter, flusher http.Flusher, job *models.GenerationJob, since int64) {
 	if len(job.StreamState) > 0 && string(job.StreamState) != "{}" && string(job.StreamState) != "null" {
 		var stateData any
 		if err := json.Unmarshal(job.StreamState, &stateData); err == nil {
-			// stream_state is an out-of-band snapshot; no useful seq.
 			_ = utils.WriteSSEEvent(w, flusher, 0, "stream_state", stateData)
 		}
 	}
@@ -512,9 +581,13 @@ func replayPersistedJobEvents(w http.ResponseWriter, flusher http.Flusher, job *
 				Event string `json:"event"`
 				Data  any    `json:"data"`
 			}
-			if json.Unmarshal(raw, &evt) == nil {
-				_ = utils.WriteSSEEvent(w, flusher, evt.Seq, evt.Event, evt.Data)
+			if json.Unmarshal(raw, &evt) != nil {
+				continue
 			}
+			if evt.Seq > 0 && evt.Seq <= since {
+				continue
+			}
+			_ = utils.WriteSSEEvent(w, flusher, evt.Seq, evt.Event, evt.Data)
 		}
 	}
 }
