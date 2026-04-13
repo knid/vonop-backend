@@ -297,7 +297,11 @@ func (b *streamStateBuffer) Apply(event responses.SSEEvent) bool {
 		return false
 
 	// Agent error/rollback: terminal for the partial buffer, same as done.
-	case "agent_error", "agent_rollback":
+	// NOTE: the agent emits "error" and "rollback" (see internal/agent/events.go).
+	// A previous version of this reducer checked "agent_error"/"agent_rollback"
+	// and silently never cleared the buffer on failure — reconnects then replayed
+	// ghost partial text forever. Keep these names aligned with the emitter.
+	case "error", "rollback":
 		b.streamingText = ""
 		b.thinkingText = ""
 		b.toolCalls = nil
