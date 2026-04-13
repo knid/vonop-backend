@@ -2,9 +2,11 @@ package views
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/knid/wemob/internal/agent"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/utils"
@@ -95,7 +97,12 @@ func (v *HttpViews) ChatApp(w http.ResponseWriter, r *http.Request) {
 		JobType: jobType,
 		AppID:   project.ID,
 		StreamFunc: func(ctx context.Context, events chan<- responses.SSEEvent, jobID string) {
-			v.Controller.StreamBuildApp(ctx, project, user, req.Message, req.Images, req.ReasoningEffort, isInitialGeneration, jobID, events)
+			deps := v.Controller.AgentDeps(user)
+			emitter := newAgentSSEAdapter(events)
+			if err := agent.Run(ctx, deps, project, user, req.Message, req.Images, emitter); err != nil {
+				slog.Error("agent.Run failed", "error", err, "project_id", project.ID)
+			}
+			emitter.Close()
 		},
 	})
 }
