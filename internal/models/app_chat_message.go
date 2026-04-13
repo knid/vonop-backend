@@ -11,15 +11,15 @@ import (
 // A "user" message is what the user typed (plus any images). An "assistant"
 // message is the final narration and tool call trace from one agent run.
 type AppChatMessage struct {
-	ID           uuid.UUID   `bun:",pk,type:uuid,default:uuid_generate_v4()"`
-	AppProjectID uuid.UUID   `bun:",notnull,type:uuid"`
-	AppProject   *AppProject `bun:"rel:belongs-to,join:app_project_id=id"`
-	RunID        *uuid.UUID  `bun:",type:uuid,nullzero"` // null for user messages not yet tied to a run
-	Role         string      `bun:",notnull"`            // "user" | "assistant"
-	Content      string      `bun:",type:text,notnull,default:''"`
-	Images       []byte      `bun:",type:jsonb,notnull,default:'[]'"` // [{url, alt?}]
-	ToolCalls    []byte      `bun:",type:jsonb,notnull,default:'[]'"` // []ChatMessageToolCall
-	CreatedAt    time.Time   `bun:"created_at,nullzero,notnull,default:current_timestamp"`
+	ID           uuid.UUID       `bun:",pk,type:uuid,default:uuid_generate_v4()" json:"id"`
+	AppProjectID uuid.UUID       `bun:",notnull,type:uuid" json:"app_project_id"`
+	AppProject   *AppProject     `bun:"rel:belongs-to,join:app_project_id=id" json:"-"`
+	RunID        *uuid.UUID      `bun:",type:uuid,nullzero" json:"run_id"`
+	Role         string          `bun:",notnull" json:"role"`
+	Content      string          `bun:",type:text,notnull,default:''" json:"content"`
+	Images       json.RawMessage `bun:",type:jsonb,notnull,default:'[]'" json:"images"`     // [{url, alt?}]
+	ToolCalls    json.RawMessage `bun:",type:jsonb,notnull,default:'[]'" json:"tool_calls"` // []ChatMessageToolCall
+	CreatedAt    time.Time       `bun:"created_at,nullzero,notnull,default:current_timestamp" json:"created_at"`
 }
 
 // ChatMessageToolCall is the JSONB shape embedded in AppChatMessage.ToolCalls.
