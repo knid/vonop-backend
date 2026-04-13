@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/utils"
 )
 
@@ -104,4 +105,49 @@ func (r *Registry) Execute(ctx context.Context, rc *RunContext, name string, inp
 		return fmt.Sprintf("unknown tool: %s", name), true, nil
 	}
 	return t.Execute(ctx, rc, input)
+}
+
+// BuildRegistryFor returns a registry populated with the base tools plus any
+// conditional tools appropriate for the project's state.
+//
+// Note: web_search is not a local executor — it's an Anthropic server-side
+// tool exposed via deps.LLMProvider.WebSearchTool(). If the provider is
+// not Anthropic (OpenRouter, Google, etc.) the server tool returns nil and
+// the agent runs without web search for that project.
+func BuildRegistryFor(project *models.AppProject, deps *RunDependencies) *Registry {
+	r := NewRegistry()
+	r.Register(ReadFileTool{})
+	r.Register(ListFilesTool{})
+	r.Register(WriteFileTool{})
+	r.Register(EditFileTool{})
+	r.Register(DeleteFileTool{})
+	r.Register(GenerateImageTool{Deps: deps})
+
+	if deps != nil && deps.LLMProvider != nil {
+		if ws := deps.LLMProvider.WebSearchTool(); ws != nil {
+			r.AddServerTool(ServerToolRef{Tool: ws, DisplayName: "web_search"})
+		}
+	}
+
+	if projectHasDatabase(project) {
+		r.Register(ExecuteSQLTool{Deps: deps})
+	}
+	if project != nil && project.ProjectType == "mobile_app" {
+		r.Register(ConfigureMobileBridgeTool{Deps: deps})
+	}
+	return r
+}
+
+// projectHasDatabase returns true if the project has a connected database
+// (signaled by a boolean in project.Settings). The actual connection lookup
+// still runs inside the execute_sql tool at call time — this predicate is
+// a cheap flag for deciding whether to register the tool at all.
+func projectHasDatabase(project *models.AppProject) bool {
+	if project == nil || project.Settings == nil {
+		return false
+	}
+	if v, ok := project.Settings["has_database"].(bool); ok {
+		return v
+	}
+	return false
 }
