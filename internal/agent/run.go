@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/services/gitrepo"
+	"github.com/knid/wemob/internal/services/remoteconfig"
 	"github.com/knid/wemob/internal/services/secret"
 	"github.com/knid/wemob/internal/utils"
 )
@@ -496,7 +497,7 @@ func finaliseSuccess(
 	// 3. Finalise the AppAgentRun row.
 	promptTok, completionTok, totalTok, _ := tracker.Totals()
 	durationMs := int(time.Since(runStart).Milliseconds())
-	credits := tokensToCredits(promptTok, completionTok)
+	credits := tokensToCredits(deps, promptTok, completionTok)
 	costUSD := estimateCost(run.Model, promptTok, completionTok)
 
 	run.Status = models.AgentRunStatusCompleted
@@ -592,16 +593,25 @@ func countFileOps(calls []models.ChatMessageToolCall) int {
 	return n
 }
 
-// tokensToCredits mirrors the existing Controller.TokensToCredits formula.
-// 1 credit ~ 1000 input tokens OR 250 output tokens (Sonnet approximate).
-// This duplicates the formula rather than calling into controllers because
-// the agent package is below controllers in the dependency graph.
-func tokensToCredits(input, output int) int {
-	cr := input/1000 + output/250
-	if cr < 1 {
-		return 1
+// tokensToCredits computes credit cost via models.TokensToCreditsWithConfig
+// using the same PostHog remote-config flags
+// (rc-ai-credits-tokens-per-credit, rc-ai-credits-output-multiplier) the
+// controller's TokensToCredits reads. Falls back to the per-key defaults if
+// PostHog is unreachable. Without this, the agent overcharged users vs. the
+// budget checker (which already went through remote config).
+func tokensToCredits(deps *RunDependencies, input, output int) int {
+	tpc, om := 0, 0
+	if deps != nil && deps.RemoteConfig != nil {
+		tpc = deps.RemoteConfig.GetInt(remoteconfig.AICreditsTokensPerCredit, remoteconfig.Global)
+		om = deps.RemoteConfig.GetInt(remoteconfig.AICreditsOutputMultiplier, remoteconfig.Global)
 	}
-	return cr
+	if tpc <= 0 {
+		tpc, _ = remoteconfig.AICreditsTokensPerCredit.Fallback.(int)
+	}
+	if om <= 0 {
+		om, _ = remoteconfig.AICreditsOutputMultiplier.Fallback.(int)
+	}
+	return models.TokensToCreditsWithConfig(input, output, tpc, om)
 }
 
 // estimateCost wraps utils.EstimateInputOutputCostUSD.
