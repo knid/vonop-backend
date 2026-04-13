@@ -760,6 +760,7 @@ func parseAnthropicSSEStream(
 						RetryAfter: 30 * time.Second,
 						StatusCode: 529,
 						Body:       data,
+						Overloaded: errEvt.Error.Type == "overloaded_error",
 					}
 				}
 				// Permanent: invalid request, auth errors, etc — do not retry

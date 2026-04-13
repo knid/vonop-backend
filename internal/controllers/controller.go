@@ -85,6 +85,11 @@ func NewController(db *database.Database, concurrentBuildLimiter chan struct{},
 
 // llmProvider resolves the active LLM provider from the LLM_PROVIDER secret.
 // Supported values: "openrouter" (default), "anthropic", "google", "moonshot", "zai".
+//
+// When the primary is "anthropic" and OPENROUTER_API_KEY is set, an OpenRouter
+// fallback is attached. On Anthropic overload (529 / overloaded_error) the call
+// retries once via OpenRouter, which automatically routes the same Claude model
+// through Bedrock or Vertex (independent capacity pools).
 func (c *Controller) llmProvider() *utils.LLMProvider {
 	raw := c.SecretManager.GetSecret("LLM_PROVIDER")
 	provider := strings.TrimSpace(strings.ToLower(raw))
@@ -94,7 +99,9 @@ func (c *Controller) llmProvider() *utils.LLMProvider {
 
 	switch provider {
 	case "anthropic":
-		return &utils.LLMProvider{Name: "anthropic", BaseURL: "https://api.anthropic.com/v1", APIKey: c.SecretManager.GetSecret("ANTHROPIC_API_KEY"), DefaultReasoning: c.reasoningConfig(), FastModelOverride: fastModel}
+		p := &utils.LLMProvider{Name: "anthropic", BaseURL: "https://api.anthropic.com/v1", APIKey: c.SecretManager.GetSecret("ANTHROPIC_API_KEY"), DefaultReasoning: c.reasoningConfig(), FastModelOverride: fastModel}
+		c.attachOverloadFallback(p, fastModel)
+		return p
 	case "google":
 		return &utils.LLMProvider{Name: "google", BaseURL: "https://generativelanguage.googleapis.com/v1beta/openai", APIKey: c.SecretManager.GetSecret("GOOGLE_API_KEY"), FastModelOverride: fastModel}
 	case "moonshot":
@@ -105,6 +112,30 @@ func (c *Controller) llmProvider() *utils.LLMProvider {
 		slog.Warn("Unknown or empty LLM_PROVIDER, falling back to openrouter", "raw", raw)
 		return &utils.LLMProvider{Name: "openrouter", BaseURL: "https://openrouter.ai/api/v1", APIKey: c.SecretManager.GetSecret("OPENROUTER_API_KEY"), FastModelOverride: fastModel}
 	}
+}
+
+// attachOverloadFallback wires an OpenRouter fallback onto an Anthropic-native
+// provider when OPENROUTER_API_KEY is configured. The fallback model is read
+// from LLM_FALLBACK_MODEL (default: anthropic/claude-sonnet-4.6).
+func (c *Controller) attachOverloadFallback(primary *utils.LLMProvider, fastModel string) {
+	openRouterKey := c.SecretManager.GetSecret("OPENROUTER_API_KEY")
+	if openRouterKey == "" {
+		slog.Info("LLM overload fallback disabled — OPENROUTER_API_KEY not set")
+		return
+	}
+	fallbackModel := strings.TrimSpace(c.SecretManager.GetSecret("LLM_FALLBACK_MODEL"))
+	if fallbackModel == "" {
+		fallbackModel = "anthropic/claude-sonnet-4.6"
+	}
+	primary.Fallback = &utils.LLMProvider{
+		Name:              "openrouter",
+		BaseURL:           "https://openrouter.ai/api/v1",
+		APIKey:            openRouterKey,
+		FastModelOverride: fastModel,
+	}
+	primary.FallbackModel = fallbackModel
+	slog.Info("LLM overload fallback attached",
+		"primary", primary.Name, "fallback_provider", "openrouter", "fallback_model", fallbackModel)
 }
 
 // LLMProvider is the exported version of llmProvider for use in views.

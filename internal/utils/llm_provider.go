@@ -16,6 +16,13 @@ type LLMProvider struct {
 	APIKey            string
 	DefaultReasoning  *ReasoningConfig // applied when no explicit Reasoning/Thinking is set
 	FastModelOverride string           // if set, overrides the default FastModel()
+
+	// Fallback is an optional secondary provider used when the primary returns
+	// an overloaded error (Anthropic 529 / overloaded_error). The fallback is
+	// attempted once per call before the request fails. After the swap, normal
+	// rate-limit retries continue against the fallback provider.
+	Fallback      *LLMProvider
+	FallbackModel string // model ID to use with Fallback (provider-specific format)
 }
 
 // Endpoint returns the full chat completions URL for this provider.

@@ -73,11 +73,15 @@ func truncateBody(s string, maxLen int) string {
 
 // --- LLM error types ---
 
-// ErrRateLimited is returned when the LLM API responds with HTTP 429.
+// ErrRateLimited is returned when the LLM API responds with HTTP 429 or 529.
 type ErrRateLimited struct {
 	RetryAfter time.Duration
 	StatusCode int
 	Body       string
+	// Overloaded is true for Anthropic-specific overload signals (HTTP 529 or
+	// SSE overloaded_error). Callers can use this to trigger a one-shot
+	// fallback to a secondary provider before normal retry/backoff.
+	Overloaded bool
 }
 
 func (e *ErrRateLimited) Error() string {
@@ -128,7 +132,46 @@ func parseRateLimitError(resp *http.Response, body []byte) *ErrRateLimited {
 		RetryAfter: retryAfter,
 		StatusCode: resp.StatusCode,
 		Body:       truncateBody(string(body), 2000),
+		Overloaded: resp.StatusCode == 529, // Anthropic uses 529 for overloaded
 	}
+}
+
+// tryFallbackProvider returns the fallback provider and model when an
+// overloaded error occurs and a fallback is configured. The second return
+// value is true when a swap should happen. Callers should pass `attempted` as
+// true after the first swap so the fallback is only used once per call.
+func tryFallbackProvider(provider *LLMProvider, model string, err error, attempted bool) (*LLMProvider, string, bool) {
+	if attempted || provider == nil || provider.Fallback == nil {
+		return provider, model, false
+	}
+	rlErr, ok := IsRateLimited(err)
+	if !ok || !rlErr.Overloaded {
+		return provider, model, false
+	}
+	fb := provider.Fallback
+	fbModel := provider.FallbackModel
+	if fbModel == "" {
+		fbModel = fb.DefaultModel()
+	}
+	slog.Warn("LLM overloaded, falling back to secondary provider",
+		"from_provider", provider.Name, "to_provider", fb.Name,
+		"from_model", model, "to_model", fbModel)
+	return fb, fbModel, true
+}
+
+// withFallback wraps a one-shot LLM call. If the call fails with an overloaded
+// error and the provider has a fallback configured, it is retried once with
+// the fallback provider and its FallbackModel.
+func withFallback[T any](provider *LLMProvider, model string, fn func(*LLMProvider, string) (T, error)) (T, error) {
+	result, err := fn(provider, model)
+	if err == nil {
+		return result, nil
+	}
+	newProvider, newModel, swapped := tryFallbackProvider(provider, model, err, false)
+	if !swapped {
+		return result, err
+	}
+	return fn(newProvider, newModel)
 }
 
 // --- Token usage tracking ---
@@ -635,6 +678,12 @@ func prepareChatRequest(req ChatRequest, provider *LLMProvider) ChatRequest {
 
 // GetJSONFromLLM sends a system+user message to the LLM and returns the raw response text.
 func GetJSONFromLLM(ctx context.Context, model, system, message string, provider *LLMProvider) (string, error) {
+	return withFallback(provider, model, func(p *LLMProvider, m string) (string, error) {
+		return getJSONFromLLMOnce(ctx, m, system, message, p)
+	})
+}
+
+func getJSONFromLLMOnce(ctx context.Context, model, system, message string, provider *LLMProvider) (string, error) {
 	if provider == nil || provider.APIKey == "" {
 		slog.Error("LLM provider is not configured")
 		return "", fmt.Errorf("missing LLM provider configuration")
@@ -732,6 +781,12 @@ func stripCodeFences(s string) string {
 // custom max_tokens limit. Use this when the expected JSON output is large
 // (e.g. file structure planning for complex apps).
 func GetJSONFromLLMWithMaxTokens(ctx context.Context, model, system, message string, provider *LLMProvider, maxTokens int) (string, error) {
+	return withFallback(provider, model, func(p *LLMProvider, m string) (string, error) {
+		return getJSONFromLLMWithMaxTokensOnce(ctx, m, system, message, p, maxTokens)
+	})
+}
+
+func getJSONFromLLMWithMaxTokensOnce(ctx context.Context, model, system, message string, provider *LLMProvider, maxTokens int) (string, error) {
 	if provider == nil || provider.APIKey == "" {
 		slog.Error("LLM provider is not configured")
 		return "", fmt.Errorf("missing LLM provider configuration")
@@ -811,6 +866,12 @@ func GetJSONFromLLMWithMaxTokens(ctx context.Context, model, system, message str
 }
 
 func GetTextFromLLM(ctx context.Context, model, system, message string, provider *LLMProvider, maxTokens ...int) (string, error) {
+	return withFallback(provider, model, func(p *LLMProvider, m string) (string, error) {
+		return getTextFromLLMOnce(ctx, m, system, message, p, maxTokens...)
+	})
+}
+
+func getTextFromLLMOnce(ctx context.Context, model, system, message string, provider *LLMProvider, maxTokens ...int) (string, error) {
 	if provider == nil || provider.APIKey == "" {
 		return "", fmt.Errorf("missing LLM provider configuration")
 	}
@@ -967,6 +1028,7 @@ func StreamTextFromLLMWithMessages(ctx context.Context, model string, messages [
 	rateLimitRetries := 0
 	transientRetries := 0
 	chunksDelivered := false // tracks whether any content was streamed to the caller
+	fallbackAttempted := false
 
 	notifyRetry := func(attempt int, reason string) {
 		if onRetry != nil {
@@ -1024,6 +1086,16 @@ func StreamTextFromLLMWithMessages(ctx context.Context, model string, messages [
 
 			// Retry rate-limited responses (429/529)
 			if rlErr := parseRateLimitError(resp, respBody); rlErr != nil {
+				// One-shot fallback to secondary provider on overload
+				if !chunksDelivered {
+					if newProvider, newModel, swapped := tryFallbackProvider(provider, model, rlErr, fallbackAttempted); swapped {
+						provider = newProvider
+						model = newModel
+						fallbackAttempted = true
+						notifyRetry(0, "overloaded — falling back to secondary provider")
+						continue
+					}
+				}
 				if !chunksDelivered && rateLimitRetries < maxRateLimitRetries {
 					rateLimitRetries++
 					wait := rlErr.RetryAfter + time.Duration(rateLimitRetries)*5*time.Second
@@ -1088,6 +1160,16 @@ func StreamTextFromLLMWithMessages(ctx context.Context, model string, messages [
 				}
 				// Retry rate limit errors from SSE stream (only if no chunks delivered)
 				if rlErr, ok := IsRateLimited(parseErr); ok {
+					// One-shot fallback to secondary provider on overload
+					if !chunksDelivered {
+						if newProvider, newModel, swapped := tryFallbackProvider(provider, model, rlErr, fallbackAttempted); swapped {
+							provider = newProvider
+							model = newModel
+							fallbackAttempted = true
+							notifyRetry(0, "overloaded — falling back to secondary provider")
+							continue
+						}
+					}
 					if !chunksDelivered && rateLimitRetries < maxRateLimitRetries {
 						rateLimitRetries++
 						wait := rlErr.RetryAfter + time.Duration(rateLimitRetries)*5*time.Second
@@ -1244,6 +1326,12 @@ func StreamTextFromLLMWithMessages(ctx context.Context, model string, messages [
 // GetJSONFromLLMWithMessages sends a multi-turn conversation to the LLM and expects JSON output.
 // Used for chat-based interactions where conversation history matters.
 func GetJSONFromLLMWithMessages(ctx context.Context, model string, messages []Message, provider *LLMProvider) (string, error) {
+	return withFallback(provider, model, func(p *LLMProvider, m string) (string, error) {
+		return getJSONFromLLMWithMessagesOnce(ctx, m, messages, p)
+	})
+}
+
+func getJSONFromLLMWithMessagesOnce(ctx context.Context, model string, messages []Message, provider *LLMProvider) (string, error) {
 	if provider == nil || provider.APIKey == "" {
 		return "", fmt.Errorf("missing LLM provider configuration")
 	}
@@ -1318,6 +1406,32 @@ func GetJSONFromLLMWithMessages(ctx context.Context, model string, messages []Me
 // StreamJSONFromLLMWithMessages streams an LLM response from a multi-turn conversation.
 // Sends chunks via onChunk and returns the cleaned JSON.
 func StreamJSONFromLLMWithMessages(ctx context.Context, model string, messages []Message, provider *LLMProvider, onChunk func(chunk string), onReasoning func(chunk string)) (string, error) {
+	// Buffer chunks until the first one is delivered so we can swap providers
+	// safely on overload. If the failure happens before any chunk, the fallback
+	// gets a clean slate; if chunks have already streamed, the fallback would
+	// produce duplicate output, so we let the error bubble up unchanged.
+	chunksDelivered := false
+	wrappedOnChunk := func(chunk string) {
+		chunksDelivered = true
+		if onChunk != nil {
+			onChunk(chunk)
+		}
+	}
+	result, err := streamJSONFromLLMWithMessagesOnce(ctx, model, messages, provider, wrappedOnChunk, onReasoning)
+	if err == nil {
+		return result, nil
+	}
+	if chunksDelivered {
+		return result, err
+	}
+	newProvider, newModel, swapped := tryFallbackProvider(provider, model, err, false)
+	if !swapped {
+		return result, err
+	}
+	return streamJSONFromLLMWithMessagesOnce(ctx, newModel, messages, newProvider, wrappedOnChunk, onReasoning)
+}
+
+func streamJSONFromLLMWithMessagesOnce(ctx context.Context, model string, messages []Message, provider *LLMProvider, onChunk func(chunk string), onReasoning func(chunk string)) (string, error) {
 	if provider == nil || provider.APIKey == "" {
 		return "", fmt.Errorf("missing LLM provider configuration")
 	}
@@ -1483,6 +1597,12 @@ type MultiChatRequest struct {
 
 // GetJSONFromLLMWithVision sends a multimodal request with an image to the LLM.
 func GetJSONFromLLMWithVision(ctx context.Context, model, system, userText, base64Image string, provider *LLMProvider) (string, error) {
+	return withFallback(provider, model, func(p *LLMProvider, m string) (string, error) {
+		return getJSONFromLLMWithVisionOnce(ctx, m, system, userText, base64Image, p)
+	})
+}
+
+func getJSONFromLLMWithVisionOnce(ctx context.Context, model, system, userText, base64Image string, provider *LLMProvider) (string, error) {
 	if provider == nil || provider.APIKey == "" {
 		return "", fmt.Errorf("missing LLM provider configuration")
 	}
@@ -1636,6 +1756,7 @@ func StreamWithTools(
 	stripped := false
 	rateLimitRetries := 0
 	transientRetries := 0
+	fallbackAttempted := false
 	prevToolResultRange := [2]int{0, 0} // [start, end) of previous round's tool result messages
 	continuationCount := 0
 	var fullText strings.Builder // declared outside loop so ShouldContinue abort can return partial text
@@ -1734,6 +1855,16 @@ func StreamWithTools(
 		if resp.StatusCode != http.StatusOK {
 			respBody, _ := io.ReadAll(resp.Body)
 			resp.Body.Close()
+			// One-shot fallback to secondary provider on overload (before backoff)
+			if rlErr := parseRateLimitError(resp, respBody); rlErr != nil {
+				if newProvider, newModel, swapped := tryFallbackProvider(provider, model, rlErr, fallbackAttempted); swapped {
+					provider = newProvider
+					model = newModel
+					fallbackAttempted = true
+					round-- // retry same round with fallback provider
+					continue
+				}
+			}
 			// Handle 429 rate limit with retry + backoff
 			if rlErr := parseRateLimitError(resp, respBody); rlErr != nil && rateLimitRetries < 5 {
 				rateLimitRetries++
@@ -1810,6 +1941,16 @@ func StreamWithTools(
 				if IsPermanentError(parseErr) {
 					slog.Error("LLM permanent error in tool round", "error", parseErr, "round", round)
 					return "", parseErr
+				}
+				// One-shot fallback to secondary provider on overload (before backoff)
+				if rlErr, ok := IsRateLimited(parseErr); ok {
+					if newProvider, newModel, swapped := tryFallbackProvider(provider, model, rlErr, fallbackAttempted); swapped {
+						provider = newProvider
+						model = newModel
+						fallbackAttempted = true
+						round-- // retry same round with fallback provider
+						continue
+					}
 				}
 				// Retry on overloaded/rate-limit errors from SSE stream
 				if rlErr, ok := IsRateLimited(parseErr); ok && rateLimitRetries < 5 {
