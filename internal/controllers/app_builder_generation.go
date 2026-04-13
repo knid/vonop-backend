@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/constants"
+	"github.com/knid/wemob/internal/database"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/services/fal"
@@ -122,7 +123,7 @@ func (c *Controller) runPreGenerationSetup(
 					dbContent := templates.GetTemplate("lib/db.ts")
 					c.injectTemplateFile(repo, "lib/db.ts", dbContent, fileMap, sendEvent)
 
-					schemaContent := buildDrizzleSchema(dataModels)
+					schemaContent := database.BuildDrizzleSchema(dataModels)
 					c.injectTemplateFile(repo, "lib/schema.ts", schemaContent, fileMap, sendEvent)
 
 					// Seed database + generate images in the background.
@@ -195,7 +196,7 @@ func (c *Controller) runPreGenerationSetup(
 							slog.Error("pre-gen auth: failed to store neon integration", "error", err, "project_id", project.ID)
 						}
 						c.injectTemplateFile(repo, "lib/db.ts", templates.GetTemplate("lib/db.ts"), fileMap, sendEvent)
-						schemaContent := buildDrizzleSchema(modelsToProvision)
+						schemaContent := database.BuildDrizzleSchema(modelsToProvision)
 						c.injectTemplateFile(repo, "lib/schema.ts", schemaContent, fileMap, sendEvent)
 
 						// Seed database + generate images in the background

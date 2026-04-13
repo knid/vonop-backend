@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/knid/wemob/internal/database"
 	"github.com/knid/wemob/internal/responses"
 
 	_ "github.com/lib/pq"
@@ -154,7 +155,7 @@ func (c *Controller) openNeonDB(projectID string) (*sql.DB, error) {
 	if connStr == "" {
 		return nil, fmt.Errorf("no Neon connection string found")
 	}
-	db, err := sql.Open("postgres", neonConnStrWithEndpoint(connStr))
+	db, err := sql.Open("postgres", database.NeonConnStrWithEndpoint(connStr))
 	if err != nil {
 		return nil, err
 	}

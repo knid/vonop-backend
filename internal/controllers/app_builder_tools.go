@@ -14,11 +14,12 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/constants"
+	"github.com/knid/wemob/internal/database"
 	"github.com/knid/wemob/internal/models"
-	"github.com/knid/wemob/internal/templates"
 	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/services/fal"
 	"github.com/knid/wemob/internal/services/gitrepo"
+	"github.com/knid/wemob/internal/templates"
 	"github.com/knid/wemob/internal/utils"
 	"github.com/knid/wemob/internal/utils/external"
 )
@@ -738,7 +739,7 @@ func (c *Controller) executeChatRunMigrations(
 		if trimmed == "" {
 			continue
 		}
-		stripped := stripLeadingSQLComments(trimmed)
+		stripped := database.StripLeadingSQLComments(trimmed)
 		if stripped == "" {
 			continue
 		}
@@ -774,7 +775,7 @@ func (c *Controller) executeChatRunMigrations(
 	}
 
 	// Regenerate lib/schema.ts
-	schemaContent := buildDrizzleSchema(args.UpdatedModels)
+	schemaContent := database.BuildDrizzleSchema(args.UpdatedModels)
 	c.injectTemplateFile(repo, "lib/schema.ts", schemaContent, fileMap, sendEvent)
 
 	collectedContext.WriteString("\n[Database Migrated]\nSchema changes applied successfully. lib/schema.ts has been regenerated. Update any code that uses the affected tables.\n")
@@ -2553,7 +2554,7 @@ func (c *Controller) buildBuilderToolExecutor(ctx context.Context, project *mode
 			dbContent := templates.GetTemplate("lib/db.ts")
 			c.injectTemplateFileForTool(repo, "lib/db.ts", dbContent, fileMap, cbs)
 
-			schemaContent := buildDrizzleSchema(dataModels)
+			schemaContent := database.BuildDrizzleSchema(dataModels)
 			c.injectTemplateFileForTool(repo, "lib/schema.ts", schemaContent, fileMap, cbs)
 
 			// Generate AUTH_SECRET env var if auth is needed
