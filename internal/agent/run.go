@@ -451,12 +451,32 @@ func finaliseSuccess(
 	user *models.User,
 	project *models.AppProject,
 ) error {
+	// Capture isInitial up-front because we mutate project.Status below for
+	// successful first generations, and the action label / event tracking
+	// further down still need to know whether this run was the initial one.
+	isInitial := project != nil && project.Status == "draft"
+
 	// 1. Write fileMap to working tree and commit.
 	finalCommit, err := FinaliseRun(repo, fileMap, userMessage)
 	if err != nil {
 		return finaliseFailureV2(ctx, deps, repo, run, project, emitter, "commit",
 			CodeGitError, "failed to write and commit files", err,
 			run.PreCommit, tracker, runStart)
+	}
+
+	// 1a. Flip the project status from "draft" to "ready" on the first
+	// successful generation. The dashboard's preview boot logic, the studio
+	// hasStreamedOnce gate, and the templates-vs-edit branch in agent.Run
+	// itself all key off this — leaving it stuck on "draft" means a fresh
+	// page load after a successful generate never starts the preview and
+	// the studio thinks the app still needs initial templates injected.
+	if isInitial && project != nil {
+		project.Status = "ready"
+		if _, updErr := deps.DB.UpdateAppProject(project); updErr != nil {
+			// Don't fail the run — files committed successfully. Just log.
+			slog.Warn("failed to flip project status to ready",
+				"error", updErr, "project_id", project.ID)
+		}
 	}
 
 	// 2. Persist the assistant chat message.
@@ -496,7 +516,7 @@ func finaliseSuccess(
 	// 4. Deduct credits.
 	if deps.DeductCredits != nil && credits > 0 {
 		action := "app_chat"
-		if project.Status == "draft" {
+		if isInitial {
 			action = "generate_app"
 		}
 		if err := deps.DeductCredits(ctx, credits, action, project.ID.String()); err != nil {
@@ -519,7 +539,7 @@ func finaliseSuccess(
 	// 6. Track PostHog.
 	if deps.TrackUserEvent != nil {
 		action := "app_chat_completed"
-		if project.Status == "draft" {
+		if isInitial {
 			action = "generate_app_completed"
 		}
 		deps.TrackUserEvent(action, map[string]any{
@@ -538,9 +558,16 @@ func finaliseSuccess(
 	// 7. PostHog LLM Analytics: emit per-call $ai_generation events plus a
 	// grouping $ai_trace event for the built-in dashboard. The tracker has
 	// been collecting messages/usage throughout the run via TrackContent.
+	// Note: runAction would now return "app_chat" because we already flipped
+	// project.Status above — use isInitial directly so the trace name still
+	// reflects that this run was the initial generation.
 	if deps.RecordLLMUsage != nil {
+		traceAction := "app_chat"
+		if isInitial {
+			traceAction = "generate_app"
+		}
 		tracker.TraceOutput = narration
-		deps.RecordLLMUsage(tracker, runAction(project), run.Model, run.Provider,
+		deps.RecordLLMUsage(tracker, traceAction, run.Model, run.Provider,
 			project.ID.String(), project.ProjectType)
 	}
 
