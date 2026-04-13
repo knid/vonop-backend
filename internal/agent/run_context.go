@@ -69,7 +69,7 @@ func (m *SafeFileMap) Snapshot() map[string]string {
 }
 
 // Match returns paths matching the glob. Uses `filepath.Match` semantics
-// plus a crude `**/` prefix strip for tail-glob patterns like `app/**/*.tsx`.
+// plus a `**/` doublestar rewrite that recurses into subdirectories.
 func (m *SafeFileMap) Match(glob string) []string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -82,19 +82,45 @@ func (m *SafeFileMap) Match(glob string) []string {
 	}
 	var out []string
 	for p := range m.files {
-		ok, err := filepath.Match(glob, p)
-		if err == nil && ok {
+		if matchGlob(glob, p) {
 			out = append(out, p)
-			continue
-		}
-		if strings.Contains(glob, "**/") {
-			tail := strings.SplitN(glob, "**/", 2)[1]
-			if ok2, _ := filepath.Match(tail, filepath.Base(p)); ok2 {
-				out = append(out, p)
-			}
 		}
 	}
 	return out
+}
+
+// matchGlob handles `filepath.Match` patterns plus a crude `**/` rewrite:
+// `components/**/*.tsx` matches `components/ui/Button.tsx` and
+// `components/a/b/c/Foo.tsx`, but NOT `app/page.tsx`.
+//
+// Rewrites: split on the FIRST `**/`, require the prefix to match as a
+// directory prefix of the path, then try the tail against every progressive
+// filepath.Base suffix of the remainder.
+func matchGlob(glob, p string) bool {
+	if !strings.Contains(glob, "**/") {
+		ok, err := filepath.Match(glob, p)
+		return err == nil && ok
+	}
+	parts := strings.SplitN(glob, "**/", 2)
+	prefix := parts[0]
+	tail := parts[1]
+	if prefix != "" && !strings.HasPrefix(p, prefix) {
+		return false
+	}
+	rest := strings.TrimPrefix(p, prefix)
+	// Match `tail` against every suffix of `rest` at directory boundaries.
+	// Simplest: walk rest from the start, checking each remaining suffix.
+	remaining := rest
+	for {
+		if ok, err := filepath.Match(tail, remaining); err == nil && ok {
+			return true
+		}
+		idx := strings.Index(remaining, "/")
+		if idx < 0 {
+			return false
+		}
+		remaining = remaining[idx+1:]
+	}
 }
 
 // RunContext is threaded through every tool executor and holds the ambient

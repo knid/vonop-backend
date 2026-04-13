@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"runtime/debug"
@@ -51,8 +52,10 @@ func Run(
 	defer cancelDeadline()
 
 	// --- Step 1: enforce single-run-per-project invariant ---
-	existing, _ := deps.DB.GetActiveAgentRun(project.ID)
-	if existing != nil {
+	// Advisory pre-check (fast path for the common case). The authoritative
+	// check is the partial unique index on app_agent_runs(app_project_id)
+	// WHERE status='running', caught below at InsertAgentRun.
+	if existing, existingErr := deps.DB.GetActiveAgentRun(project.ID); existingErr == nil && existing != nil {
 		return New(CodeRunInProgress, "setup", "another run is already in progress for this project", nil)
 	}
 
@@ -99,6 +102,10 @@ func Run(
 		Provider:     provider.Name,
 	}
 	if _, err := deps.DB.InsertAgentRun(run); err != nil {
+		// Check for the partial unique index violation (Postgres SQLSTATE 23505).
+		if isUniqueViolation(err) {
+			return New(CodeRunInProgress, "setup", "another run is already in progress for this project", err)
+		}
 		return New(CodeInternal, "setup", "failed to record run", err)
 	}
 
@@ -223,6 +230,13 @@ func Run(
 	executor := func(name string, argsJSON string) (string, error) {
 		toolStart := time.Now()
 		toolCallID := uuid.NewString()
+		emitter.Emit(EventToolCallStart, ToolCallStartEvent{
+			RunID:        runID,
+			Turn:         turn,
+			ToolCallID:   toolCallID,
+			ToolName:     name,
+			InputPreview: json.RawMessage(argsJSON),
+		})
 		result, isErr, execErr := registry.Execute(ctx, rc, name, json.RawMessage(argsJSON))
 		durationMs := int(time.Since(toolStart).Milliseconds())
 		status := "ok"
@@ -272,19 +286,12 @@ func Run(
 		nil, // responseFormat
 		nil, // reasoning
 		executor,
-		nil, // deprecated onToolCall, we use OnToolCallStart in opts
+		nil, // deprecated onToolCall; start events emitted from executor for correlatable IDs
 		narrationSink,
 		nil, // onReasoning
 		utils.ToolCallConfig{
 			MaxRounds: defaultMaxTurns,
 			MaxTokens: 16384,
-			OnToolCallStart: func(toolName string) {
-				emitter.Emit(EventToolCallStart, ToolCallStartEvent{
-					RunID:    runID,
-					Turn:     turn,
-					ToolName: toolName,
-				})
-			},
 			ShouldContinue: func() bool {
 				if ctx.Err() != nil {
 					return false
@@ -632,6 +639,23 @@ func finaliseFailureV2(
 
 	_ = ctx
 	return New(code, phase, message, wrapped)
+}
+
+// isUniqueViolation returns true if err is a Postgres unique-constraint
+// violation (SQLSTATE 23505), used to detect the partial unique index
+// conflict on concurrent run inserts.
+func isUniqueViolation(err error) bool {
+	if err == nil {
+		return false
+	}
+	// lib/pq surfaces *pq.Error with a Code field.
+	type pgError interface{ SQLState() string }
+	var pe pgError
+	if errors.As(err, &pe) {
+		return pe.SQLState() == "23505"
+	}
+	// Fallback: string match for drivers that don't expose SQLSTATE.
+	return strings.Contains(err.Error(), "23505") || strings.Contains(err.Error(), "duplicate key")
 }
 
 // mapCodeToStatus maps agent error codes to AppAgentRun status strings.

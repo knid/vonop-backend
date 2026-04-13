@@ -309,10 +309,6 @@ func createSchema(db *bun.DB) error {
 		`CREATE INDEX IF NOT EXISTS idx_app_github_exports_app_project_id ON app_github_exports(app_project_id)`,
 		// Active-job lookup per app — used by GET /v2/apps/{appId}/active-job.
 		`CREATE INDEX IF NOT EXISTS idx_generation_jobs_app_status ON generation_jobs (app_id, status) WHERE app_id IS NOT NULL`,
-		// Agent rewrite: chat messages + agent runs queried by project, runs also by status.
-		`CREATE INDEX IF NOT EXISTS idx_app_chat_messages_project_created ON app_chat_messages (app_project_id, created_at)`,
-		`CREATE INDEX IF NOT EXISTS idx_app_agent_runs_project_created ON app_agent_runs (app_project_id, created_at)`,
-		`CREATE INDEX IF NOT EXISTS idx_app_agent_runs_status ON app_agent_runs (status)`,
 	}
 	alterStatements = append(alterStatements, indexStatements...)
 	// Check if migrations have already been applied by testing for a column from the latest batch.
@@ -402,6 +398,16 @@ func createSchema(db *bun.DB) error {
 		`CREATE INDEX IF NOT EXISTS idx_organization_members_organization_id ON organization_members(organization_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_coolify_projects_app_project_id ON coolify_projects(app_project_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_webhook_endpoints_user_id ON webhook_endpoints(user_id)`,
+		// Agent rewrite: chat messages + agent runs queried by project, runs also by status.
+		// Kept in perfIndexes (not indexStatements) so already-migrated prod DBs pick
+		// them up on next restart — indexStatements is gated behind migrationsDone.
+		`CREATE INDEX IF NOT EXISTS idx_app_chat_messages_project_created ON app_chat_messages (app_project_id, created_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_app_agent_runs_project_created ON app_agent_runs (app_project_id, created_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_app_agent_runs_status ON app_agent_runs (status)`,
+		// Partial unique index enforces a single active run per project at the DB
+		// level, catching concurrent InsertAgentRun races the app-level pre-check
+		// can't cover.
+		`CREATE UNIQUE INDEX IF NOT EXISTS uniq_app_agent_runs_running ON app_agent_runs (app_project_id) WHERE status = 'running'`,
 	}
 	for _, stmt := range perfIndexes {
 		if _, err := db.ExecContext(context.Background(), stmt); err != nil {
