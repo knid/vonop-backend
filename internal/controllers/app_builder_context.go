@@ -303,8 +303,8 @@ func projectHasDataModels(project *models.AppProject) bool {
 	if len(project.DataModels) == 0 {
 		return false
 	}
-	models, _ := parseDataModels(project.DataModels)
-	return len(models) > 0
+	dms, _ := models.ParseDataModels(project.DataModels)
+	return len(dms) > 0
 }
 
 // buildSystemPrompt assembles the system prompt for the tool-calling path,
@@ -1188,7 +1188,7 @@ func (c *Controller) buildProjectContext(project *models.AppProject, fileMap map
 
 	// Database schema context
 	if len(project.DataModels) > 0 {
-		dataModels, _ := parseDataModels(project.DataModels)
+		dataModels, _ := models.ParseDataModels(project.DataModels)
 		if len(dataModels) > 0 {
 			sb.WriteString("\nDatabase schema (Drizzle ORM via lib/schema.ts):\n")
 			for _, dm := range dataModels {

@@ -559,7 +559,7 @@ func (c *Controller) StreamBuildApp(
 
 		// 3. Add DB schema to system prompt if project has database
 		if c.neonConnString(project.ID.String()) != "" {
-			dataModels, err := parseDataModels(project.DataModels)
+			dataModels, err := models.ParseDataModels(project.DataModels)
 			if err != nil {
 				slog.Warn("failed to parse data models for chat system prompt", "error", err)
 			}

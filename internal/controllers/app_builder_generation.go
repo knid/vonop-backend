@@ -49,7 +49,7 @@ func (c *Controller) runPreGenerationSetup(
 
 	// --- Database setup ---
 	if len(project.DataModels) > 0 && c.NeonService != nil {
-		dataModels, parseErr := parseDataModels(project.DataModels)
+		dataModels, parseErr := models.ParseDataModels(project.DataModels)
 		if parseErr != nil {
 			slog.Warn("pre-gen: failed to unmarshal data models", "error", parseErr, "project_id", project.ID)
 		}
@@ -78,19 +78,19 @@ func (c *Controller) runPreGenerationSetup(
 					needsAuth, _ = settings["needs_auth"].(bool)
 				}
 				if needsAuth {
-					var authModels []DataModel
+					var authModels []models.DataModel
 					if err := json.Unmarshal([]byte(constants.AUTH_DEFAULT_DATA_MODELS), &authModels); err == nil {
 						for _, authModel := range authModels {
 							found := false
 							for i, m := range dataModels {
 								if m.Name == authModel.Name {
-									dataModels[i] = mergeDataModelColumns(authModel, m)
+									dataModels[i] = models.MergeDataModelColumns(authModel, m)
 									found = true
 									break
 								}
 							}
 							if !found {
-								dataModels = append([]DataModel{authModel}, dataModels...)
+								dataModels = append([]models.DataModel{authModel}, dataModels...)
 							}
 						}
 					}
@@ -98,7 +98,7 @@ func (c *Controller) runPreGenerationSetup(
 
 				// Merge ecommerce models if needed
 				if project.ProjectType == "ecommerce" {
-					var defaultModels []DataModel
+					var defaultModels []models.DataModel
 					if err := json.Unmarshal([]byte(constants.ECOMMERCE_DEFAULT_DATA_MODELS), &defaultModels); err == nil {
 						existing := make(map[string]bool)
 						for _, m := range dataModels {
@@ -106,7 +106,7 @@ func (c *Controller) runPreGenerationSetup(
 						}
 						for _, dm := range defaultModels {
 							if !existing[dm.Name] {
-								dataModels = append([]DataModel{dm}, dataModels...)
+								dataModels = append([]models.DataModel{dm}, dataModels...)
 							}
 						}
 					}
@@ -159,25 +159,25 @@ func (c *Controller) runPreGenerationSetup(
 			// If no data_models were planned (e.g. e-commerce uses wemob-store SDK),
 			// provision a database. Use all project data models if available, otherwise just auth models.
 			if _, hasDB := fileMap["lib/db.ts"]; !hasDB && c.NeonService != nil {
-				var authModels []DataModel
+				var authModels []models.DataModel
 				if err := json.Unmarshal([]byte(constants.AUTH_DEFAULT_DATA_MODELS), &authModels); err == nil {
 					// If project has data models, use them merged with auth models (not just auth)
 					modelsToProvision := authModels
 					if len(project.DataModels) > 0 {
-						projectModels, _ := parseDataModels(project.DataModels)
+						projectModels, _ := models.ParseDataModels(project.DataModels)
 						if len(projectModels) > 0 {
 							// Merge auth columns into project models
 							for _, authModel := range authModels {
 								found := false
 								for i, m := range projectModels {
 									if m.Name == authModel.Name {
-										projectModels[i] = mergeDataModelColumns(authModel, m)
+										projectModels[i] = models.MergeDataModelColumns(authModel, m)
 										found = true
 										break
 									}
 								}
 								if !found {
-									projectModels = append([]DataModel{authModel}, projectModels...)
+									projectModels = append([]models.DataModel{authModel}, projectModels...)
 								}
 							}
 							modelsToProvision = projectModels

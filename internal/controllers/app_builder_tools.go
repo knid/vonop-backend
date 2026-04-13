@@ -501,7 +501,7 @@ func (c *Controller) executeChatSeedDatabase(
 	sendEvent func(string, any) bool,
 	collectedContext *strings.Builder,
 ) (string, error) {
-	dataModels, err := parseDataModels(project.DataModels)
+	dataModels, err := models.ParseDataModels(project.DataModels)
 	if err != nil {
 		return fmt.Sprintf("Error: failed to parse data models: %s", err.Error()), nil
 	}
@@ -719,8 +719,8 @@ func (c *Controller) executeChatRunMigrations(
 	collectedContext *strings.Builder,
 ) (string, error) {
 	var args struct {
-		SQL           string      `json:"sql"`
-		UpdatedModels []DataModel `json:"updated_models"`
+		SQL           string             `json:"sql"`
+		UpdatedModels []models.DataModel `json:"updated_models"`
 	}
 	if err := json.Unmarshal([]byte(arguments), &args); err != nil {
 		return fmt.Sprintf("Error: invalid arguments: %s", err.Error()), nil
@@ -764,7 +764,7 @@ func (c *Controller) executeChatRunMigrations(
 	}
 
 	// Update stored data models
-	dmJSON, err := marshalDataModels(args.UpdatedModels)
+	dmJSON, err := models.MarshalDataModels(args.UpdatedModels)
 	if err != nil {
 		return fmt.Sprintf("Migration applied but failed to update models: %s", err.Error()), nil
 	}
@@ -2460,8 +2460,8 @@ func (c *Controller) buildBuilderToolExecutor(ctx context.Context, project *mode
 
 		case "setup_database":
 			var args struct {
-				Tables    []DataModel `json:"tables"`
-				NeedsAuth bool        `json:"needs_auth"`
+				Tables    []models.DataModel `json:"tables"`
+				NeedsAuth bool               `json:"needs_auth"`
 			}
 			if err := json.Unmarshal([]byte(arguments), &args); err != nil {
 				return fmt.Sprintf("Error: invalid arguments: %s", err.Error()), nil
@@ -2471,7 +2471,7 @@ func (c *Controller) buildBuilderToolExecutor(ctx context.Context, project *mode
 
 			// Merge default ecommerce models if this is an ecommerce project
 			if project.ProjectType == "ecommerce" {
-				var defaultModels []DataModel
+				var defaultModels []models.DataModel
 				if err := json.Unmarshal([]byte(constants.ECOMMERCE_DEFAULT_DATA_MODELS), &defaultModels); err == nil {
 					existing := make(map[string]bool)
 					for _, m := range dataModels {
@@ -2479,7 +2479,7 @@ func (c *Controller) buildBuilderToolExecutor(ctx context.Context, project *mode
 					}
 					for _, dm := range defaultModels {
 						if !existing[dm.Name] {
-							dataModels = append([]DataModel{dm}, dataModels...)
+							dataModels = append([]models.DataModel{dm}, dataModels...)
 						}
 					}
 				}
@@ -2487,19 +2487,19 @@ func (c *Controller) buildBuilderToolExecutor(ctx context.Context, project *mode
 
 			// Merge auth models if needed
 			if args.NeedsAuth {
-				var authModels []DataModel
+				var authModels []models.DataModel
 				if err := json.Unmarshal([]byte(constants.AUTH_DEFAULT_DATA_MODELS), &authModels); err == nil {
 					for _, authModel := range authModels {
 						found := false
 						for i, m := range dataModels {
 							if m.Name == authModel.Name {
-								dataModels[i] = mergeDataModelColumns(authModel, m)
+								dataModels[i] = models.MergeDataModelColumns(authModel, m)
 								found = true
 								break
 							}
 						}
 						if !found {
-							dataModels = append([]DataModel{authModel}, dataModels...)
+							dataModels = append([]models.DataModel{authModel}, dataModels...)
 						}
 					}
 				}
@@ -2510,7 +2510,7 @@ func (c *Controller) buildBuilderToolExecutor(ctx context.Context, project *mode
 			}
 
 			// Store data models in project
-			dmJSON, err := marshalDataModels(dataModels)
+			dmJSON, err := models.MarshalDataModels(dataModels)
 			if err != nil {
 				return fmt.Sprintf("Error: failed to marshal data models: %s", err.Error()), nil
 			}

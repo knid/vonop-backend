@@ -308,7 +308,7 @@ func (c *Controller) CopyTemplate(ctx context.Context, user *models.User, slug s
 
 	// Provision a new Neon database if the template has data models
 	if len(project.DataModels) > 0 && c.NeonService != nil {
-		dataModels, parseErr := parseDataModels(unwrapBase64JSON(project.DataModels))
+		dataModels, parseErr := models.ParseDataModels(unwrapBase64JSON(project.DataModels))
 		if parseErr == nil && len(dataModels) > 0 {
 			noopEvent := func(string, any) bool { return false }
 			connStr, neonProjectID, neonErr := c.provisionNeonDatabase(ctx, project, dataModels, userLimits, noopEvent)

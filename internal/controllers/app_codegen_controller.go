@@ -64,79 +64,6 @@ type ClarificationResult struct {
 	Skip    bool
 }
 
-// DataModel represents a database table designed by the AI for the app.
-type DataModel struct {
-	Name    string       `json:"name"`
-	Columns []DataColumn `json:"columns"`
-}
-
-// parseDataModels unmarshals project.DataModels handling both normal JSON arrays
-// and double-encoded strings (where the JSONB column contains `"[{...}]"` instead of `[{...}]`).
-func parseDataModels(raw []byte) ([]DataModel, error) {
-	if len(raw) == 0 {
-		return nil, nil
-	}
-	var models []DataModel
-	if err := json.Unmarshal(raw, &models); err == nil {
-		return models, nil
-	}
-	// Might be double-encoded: a JSON string containing the array
-	var s string
-	if err := json.Unmarshal(raw, &s); err == nil && len(s) > 0 {
-		if err2 := json.Unmarshal([]byte(s), &models); err2 == nil {
-			return models, nil
-		}
-		return nil, fmt.Errorf("double-encoded data models could not be parsed: %s", s[:min(len(s), 80)])
-	}
-	return nil, fmt.Errorf("cannot parse data models: %s", string(raw[:min(len(raw), 80)]))
-}
-
-// marshalDataModels validates and marshals data models to JSON.
-// Returns nil if models is empty, ensuring only valid []DataModel is stored.
-func marshalDataModels(models []DataModel) ([]byte, error) {
-	if len(models) == 0 {
-		return nil, nil
-	}
-	data, err := json.Marshal(models)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal data models: %w", err)
-	}
-	// Sanity check: must be under 1MB
-	if len(data) > 1<<20 {
-		return nil, fmt.Errorf("data models too large: %d bytes (max 1MB)", len(data))
-	}
-	return data, nil
-}
-
-// validateThemeJSON ensures theme data is a valid JSON object under 50KB.
-func validateThemeJSON(data []byte) error {
-	if len(data) == 0 {
-		return nil
-	}
-	if len(data) > 50*1024 {
-		return fmt.Errorf("theme too large: %d bytes (max 50KB)", len(data))
-	}
-	// Must be a JSON object, not a string or array
-	if data[0] != '{' {
-		return fmt.Errorf("theme must be a JSON object, got %q", data[:min(len(data), 20)])
-	}
-	var obj map[string]any
-	if err := json.Unmarshal(data, &obj); err != nil {
-		return fmt.Errorf("theme is not valid JSON: %w", err)
-	}
-	return nil
-}
-
-// DataColumn represents a column in a DataModel table.
-type DataColumn struct {
-	Name       string `json:"name"`
-	Type       string `json:"type"`                  // text, integer, boolean, timestamp, uuid, jsonb
-	PrimaryKey bool   `json:"primary_key"`
-	Nullable   bool   `json:"nullable"`
-	Default    string `json:"default,omitempty"`
-	References string `json:"references,omitempty"`  // e.g. "categories.id"
-}
-
 type appFileStructure struct {
 	Name            string             `json:"name"`
 	Slug            string             `json:"slug"`
@@ -145,7 +72,7 @@ type appFileStructure struct {
 	DarkColorScheme map[string]any     `json:"darkColorScheme,omitempty"`
 	Typography      map[string]any     `json:"typography,omitempty"`
 	Files           []appFilePlanEntry `json:"files"`
-	DataModels      []DataModel        `json:"data_models,omitempty"`
+	DataModels      []models.DataModel `json:"data_models,omitempty"`
 	RequiredEnvVars []RequiredEnvVar   `json:"required_env_vars,omitempty"`
 }
 
@@ -872,11 +799,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 
 // getTemplateContent returns the hardcoded content for a template file.
 // dataModels is used to generate the dynamic lib/schema.ts file.
-func getTemplateContent(path string, colorScheme, darkColorScheme map[string]any, projectType string, dataModels []DataModel) string {
+func getTemplateContent(path string, colorScheme, darkColorScheme map[string]any, projectType string, dataModels []models.DataModel) string {
 	return getTemplateContentWithLang(path, colorScheme, darkColorScheme, projectType, dataModels, "en")
 }
 
-func getTemplateContentWithLang(path string, colorScheme, darkColorScheme map[string]any, projectType string, dataModels []DataModel, lang string) string {
+func getTemplateContentWithLang(path string, colorScheme, darkColorScheme map[string]any, projectType string, dataModels []models.DataModel, lang string) string {
 	// Dynamic templates that can't be static files
 	switch path {
 	case "app/globals.css":
@@ -935,26 +862,6 @@ func getUITemplateContent(path string) string {
 	return templates.GetTemplate(path)
 }
 
-// mergeDataModelColumns keeps all auth columns and appends non-conflicting LLM columns.
-// This ensures auth-required columns (email, password_hash, etc.) always exist while
-// preserving any app-specific columns the LLM designed (e.g., bestScore, avatarUrl).
-func mergeDataModelColumns(auth, llm DataModel) DataModel {
-	merged := DataModel{Name: auth.Name, Columns: make([]DataColumn, len(auth.Columns))}
-	copy(merged.Columns, auth.Columns)
-
-	authCols := make(map[string]bool)
-	for _, col := range auth.Columns {
-		authCols[col.Name] = true
-	}
-
-	for _, col := range llm.Columns {
-		if !authCols[col.Name] {
-			merged.Columns = append(merged.Columns, col)
-		}
-	}
-	return merged
-}
-
 // --- Neon / DataModel helpers ---
 
 // sqlTypeMap maps DataModel column types to PostgreSQL types.
@@ -976,12 +883,12 @@ var sqlTypeMap = map[string]string{
 // buildCreateTableSQL generates CREATE TABLE statements from DataModels.
 // All tables are created first, then all foreign key constraints are added,
 // so that tables can reference each other regardless of order.
-func buildCreateTableSQL(models []DataModel) string {
+func buildCreateTableSQL(dataModels []models.DataModel) string {
 	var sb strings.Builder
 	var fks strings.Builder
 
 	// First pass: create all tables
-	for _, m := range models {
+	for _, m := range dataModels {
 		sb.WriteString(fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s (\n", quoteIdentifier(m.Name)))
 		for i, col := range m.Columns {
 			pgType := sqlTypeMap[col.Type]
@@ -1040,7 +947,7 @@ var drizzleTypeMap = map[string]string{
 }
 
 // buildDrizzleSchema generates a lib/schema.ts file with Drizzle pgTable definitions.
-func buildDrizzleSchema(dataModels []DataModel) string {
+func buildDrizzleSchema(dataModels []models.DataModel) string {
 	// Scan all columns to determine which imports are needed
 	needsSql := false
 	for _, m := range dataModels {
@@ -1329,7 +1236,7 @@ func toCamelCase(s string) string {
 
 // provisionNeonDatabase creates a Neon project, runs the schema SQL, and returns the connection string and project ID.
 // If userLimits is non-nil, compute and storage limits are applied to the Neon project.
-func (c *Controller) provisionNeonDatabase(ctx context.Context, project *models.AppProject, dataModels []DataModel, userLimits *models.StandartUserLimits, sendEvent func(string, any) bool) (string, string, error) {
+func (c *Controller) provisionNeonDatabase(ctx context.Context, project *models.AppProject, dataModels []models.DataModel, userLimits *models.StandartUserLimits, sendEvent func(string, any) bool) (string, string, error) {
 	if c.NeonService == nil {
 		return "", "", fmt.Errorf("Neon service not configured")
 	}
@@ -1448,7 +1355,7 @@ func (c *Controller) storeNeonIntegration(project *models.AppProject, connStr, n
 }
 
 // seedNeonDatabase uses an LLM to generate seed SQL and executes it on the app's Neon database.
-func (c *Controller) seedNeonDatabase(ctx context.Context, project *models.AppProject, dataModels []DataModel, sendEvent func(string, any) bool) (string, error) {
+func (c *Controller) seedNeonDatabase(ctx context.Context, project *models.AppProject, dataModels []models.DataModel, sendEvent func(string, any) bool) (string, error) {
 	// Get connection string from the stored integration
 	connStr := c.neonConnString(project.ID.String())
 	if connStr == "" {
@@ -1564,7 +1471,7 @@ var imageColumnNames = map[string]bool{
 func (c *Controller) generateAndStoreSeedImages(
 	ctx context.Context,
 	project *models.AppProject,
-	dataModels []DataModel,
+	dataModels []models.DataModel,
 	sendEvent func(string, any) bool,
 	maxImages int,
 ) {
@@ -2035,7 +1942,7 @@ func (c *Controller) ApplyStructureToProject(project *models.AppProject, structu
 
 	// Save data models
 	if len(structure.DataModels) > 0 {
-		if dmJSON, err := marshalDataModels(structure.DataModels); err != nil {
+		if dmJSON, err := models.MarshalDataModels(structure.DataModels); err != nil {
 			slog.Warn("invalid data models from structure plan, skipping", "error", err)
 		} else {
 			project.DataModels = dmJSON
