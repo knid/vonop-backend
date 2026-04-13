@@ -214,3 +214,73 @@ func (WriteFileTool) Execute(ctx context.Context, rc *RunContext, input json.Raw
 	})
 	return fmt.Sprintf("%sd %s (%d bytes)", op, path, len(args.Content)), false, nil
 }
+
+// ---------- edit_file ----------
+
+type EditFileTool struct{}
+
+func (EditFileTool) Name() string { return "edit_file" }
+func (EditFileTool) Description() string {
+	return "Surgically replace exactly one occurrence of old_string with new_string in an existing file. Fails if old_string does not appear or appears more than once — in that case, add surrounding context to old_string and retry."
+}
+func (EditFileTool) Schema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"path":        map[string]any{"type": "string"},
+			"old_string":  map[string]any{"type": "string"},
+			"new_string":  map[string]any{"type": "string"},
+			"description": map[string]any{"type": "string"},
+		},
+		"required": []string{"path", "old_string", "new_string"},
+	}
+}
+
+func (EditFileTool) Execute(ctx context.Context, rc *RunContext, input json.RawMessage) (string, bool, error) {
+	var args struct {
+		Path        string `json:"path"`
+		OldString   string `json:"old_string"`
+		NewString   string `json:"new_string"`
+		Description string `json:"description"`
+	}
+	if err := json.Unmarshal(input, &args); err != nil {
+		return fmt.Sprintf("invalid input: %v", err), true, nil
+	}
+	path, err := sanitizePath(args.Path)
+	if err != nil {
+		return err.Error(), true, nil
+	}
+	if isProtected(path) {
+		return fmt.Sprintf("protected file, cannot edit: %s", path), true, nil
+	}
+	content, ok := rc.FileMap.Get(path)
+	if !ok {
+		return fmt.Sprintf("file not found: %s — use write_file to create it", path), true, nil
+	}
+	if args.OldString == "" {
+		return "old_string must not be empty", true, nil
+	}
+
+	count := strings.Count(content, args.OldString)
+	switch count {
+	case 0:
+		return fmt.Sprintf("old_string not found in %s — the file content may have drifted. call read_file to resync and retry", path), true, nil
+	case 1:
+		// ok
+	default:
+		return fmt.Sprintf("old_string appears %d times in %s — add more surrounding context to disambiguate", count, path), true, nil
+	}
+	newContent := strings.Replace(content, args.OldString, args.NewString, 1)
+	if len(newContent) > maxWriteBytes {
+		return fmt.Sprintf("resulting file too large: %d bytes (max %d)", len(newContent), maxWriteBytes), true, nil
+	}
+	rc.FileMap.Set(path, newContent)
+	rc.Emitter.Emit(EventFileWritten, FileWrittenEvent{
+		RunID:     rc.RunID,
+		Path:      path,
+		Operation: "update",
+		Bytes:     len(newContent),
+		Content:   newContent,
+	})
+	return fmt.Sprintf("edited %s (1 replacement, %d bytes)", path, len(newContent)), false, nil
+}
