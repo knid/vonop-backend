@@ -53,6 +53,17 @@ Products already have real images in their images array. Use next/image with
 product.images[0]. For hero, category header, and about imagery, call the
 generate_image tool. Never use picsum.photos, Unsplash, or any external stock
 URL, and never draw SVG illustrations of real-world objects.
+
+## Store Data Tools
+When the user asks to add, change, or remove products, categories, discounts,
+or store settings, use the store tools (create_product, bulk_create_products,
+list_products, update_product, delete_product, create_category, list_categories,
+update_category, delete_category, create_discount, list_discounts,
+update_discount, delete_discount, get_store, update_store_settings) rather than
+editing code or hardcoding data in TSX. The store SDK on the frontend will
+pick up the new data automatically — you do not need to change components to
+render newly-added products. Call list_* / get_store before any update or
+delete so you're working with real ids and slugs.
 `
 
 // MobileAddendum is appended to BasePrompt for project.ProjectType == "mobile_app".
