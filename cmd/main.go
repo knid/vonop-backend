@@ -1333,6 +1333,10 @@ func main() {
 					// Chat
 					r.With(rateLimiter.RateLimit(20, time.Minute, appMiddleware.AIUserKey)).Post("/chat", httpViews.ChatApp)
 
+					// Chat history (new AppChatMessage table)
+					r.Get("/messages", httpViews.GetAppMessages)
+					r.Delete("/messages", httpViews.ClearAppMessages)
+
 					// Active job lookup — lets the chat UI reconnect to an
 					// in-flight SSE stream after a page refresh without holding
 					// the job id in localStorage.
