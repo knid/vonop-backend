@@ -35,8 +35,10 @@ type ImageGenerator func(ctx context.Context, prompt string, w, h int, style, pr
 type NeonConnResolver func(projectID string) (string, error)
 
 // MobileBridgeUpdater enables/disables a native mobile bridge method on the
-// project's MobileAppConfig row.
-type MobileBridgeUpdater func(ctx context.Context, projectID, method string, enabled bool, config map[string]any) error
+// project's MobileAppConfig row. BridgeMethods is a flat []string of enabled
+// method names — enabled=true appends to the slice (idempotent), enabled=false
+// removes it.
+type MobileBridgeUpdater func(ctx context.Context, projectID, method string, enabled bool) error
 
 // RunDependencies holds the external services the agent package needs.
 // Constructed from *controllers.Controller once per request via
