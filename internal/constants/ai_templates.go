@@ -164,25 +164,3 @@ func DetectLanguage(prompt string) string {
 
 	return "en"
 }
-
-// ============================================================================
-// Auth Data Models
-// ============================================================================
-
-// AUTH_DEFAULT_DATA_MODELS defines the standard users table for auth-enabled projects.
-const AUTH_DEFAULT_DATA_MODELS = `[
-  {
-    "name": "users",
-    "columns": [
-      {"name": "id", "type": "uuid", "primary_key": true},
-      {"name": "email", "type": "text", "nullable": false},
-      {"name": "password_hash", "type": "text", "nullable": false},
-      {"name": "name", "type": "text", "nullable": true},
-      {"name": "avatar_url", "type": "text", "nullable": true},
-      {"name": "role", "type": "text", "nullable": false, "default": "'user'"},
-      {"name": "email_verified", "type": "boolean", "nullable": false, "default": "false"},
-      {"name": "created_at", "type": "timestamp", "nullable": false, "default": "now()"},
-      {"name": "updated_at", "type": "timestamp", "nullable": false, "default": "now()"}
-    ]
-  }
-]`
