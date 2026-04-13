@@ -369,3 +369,51 @@ func (DeleteDiscountTool) Execute(ctx context.Context, rc *RunContext, input jso
 	}
 	return runStoreOp(ctx, rc, "delete_discount", params)
 }
+
+// -----------------------------------------------------------------------------
+// Store meta
+// -----------------------------------------------------------------------------
+
+type GetStoreTool struct{}
+
+func (GetStoreTool) Name() string { return "get_store" }
+func (GetStoreTool) Description() string {
+	return "Return the store's current settings as JSON: name, currency, locale, tax_rate, shipping_config, payment_config, notify_email. Takes no parameters. Call this before update_store_settings so you know what values to preserve vs change."
+}
+func (GetStoreTool) Schema() map[string]any {
+	return map[string]any{
+		"type":       "object",
+		"properties": map[string]any{},
+	}
+}
+func (GetStoreTool) Execute(ctx context.Context, rc *RunContext, input json.RawMessage) (string, bool, error) {
+	return runStoreOp(ctx, rc, "get_store", map[string]any{})
+}
+
+type UpdateStoreSettingsTool struct{}
+
+func (UpdateStoreSettingsTool) Name() string { return "update_store_settings" }
+func (UpdateStoreSettingsTool) Description() string {
+	return "Update store settings. All fields are optional — supply only what you want to change. Currency is a 3-letter ISO code (e.g. \"USD\"). tax_rate is a fraction, not a percentage (0.08 == 8%). shipping_config and payment_config are free-form JSON objects; preserve existing keys by calling get_store first and merging client-side."
+}
+func (UpdateStoreSettingsTool) Schema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"name":            map[string]any{"type": "string"},
+			"currency":        map[string]any{"type": "string"},
+			"locale":          map[string]any{"type": "string"},
+			"tax_rate":        map[string]any{"type": "number"},
+			"shipping_config": map[string]any{"type": "object"},
+			"payment_config":  map[string]any{"type": "object"},
+			"notify_email":    map[string]any{"type": "string"},
+		},
+	}
+}
+func (UpdateStoreSettingsTool) Execute(ctx context.Context, rc *RunContext, input json.RawMessage) (string, bool, error) {
+	var params map[string]any
+	if err := json.Unmarshal(input, &params); err != nil {
+		return fmt.Sprintf("invalid input: %v", err), true, nil
+	}
+	return runStoreOp(ctx, rc, "update_store_settings", params)
+}
