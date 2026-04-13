@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/knid/wemob/internal/database"
+	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/services/gitrepo"
 	"github.com/knid/wemob/internal/services/neon"
 	"github.com/knid/wemob/internal/services/remoteconfig"
@@ -40,6 +41,19 @@ type NeonConnResolver func(projectID string) (string, error)
 // method names — enabled=true appends to the slice (idempotent), enabled=false
 // removes it.
 type MobileBridgeUpdater func(ctx context.Context, projectID, method string, enabled bool) error
+
+// StoreOperator executes one store management operation for an ecommerce
+// project. Bound by the controller layer to Controller.ExecuteStoreOp. The
+// dispatcher inside the controller routes on `action` to the existing
+// *FromChat helpers in ecommerce_controller.go and lazy-creates the Store
+// row on first call. Returns a JSON string for list/get actions, a short
+// success string for mutations, or a non-nil error on failure.
+type StoreOperator func(
+	ctx context.Context,
+	project *models.AppProject,
+	action string,
+	params map[string]any,
+) (result string, err error)
 
 // LLMUsageRecorder is invoked at the end of a successful run (and at the end
 // of a partial-failure run that still made LLM calls) to record per-call
@@ -83,4 +97,5 @@ type RunDependencies struct {
 	UpdateMobileBridgeMethod MobileBridgeUpdater
 	RecordLLMUsage           LLMUsageRecorder
 	RecordLLMError           LLMErrorRecorder
+	StoreOp                  StoreOperator
 }
