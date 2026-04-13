@@ -587,7 +587,9 @@ type AppValidationResult struct {
 	Errors []AppValidationError `json:"errors"`
 }
 
-// ValidateAppFiles runs deterministic checks + optional LLM validation on project files.
+// ValidateAppFiles runs LLM-based validation on project files.
+// Static deterministic checks were removed — the E2B sandbox catches build
+// errors at runtime, making a static pre-flight layer redundant.
 func (c *Controller) ValidateAppFiles(projectID string) (*AppValidationResult, error) {
 	repo, err := c.GitRepoService.Open(projectID)
 	if err != nil {
@@ -598,21 +600,9 @@ func (c *Controller) ValidateAppFiles(projectID string) (*AppValidationResult, e
 		return nil, fmt.Errorf("no files found to validate")
 	}
 
-	// Run deterministic checks first
-	detErrors := runDeterministicChecks(fileMap)
+	result := AppValidationResult{Valid: true}
 
-	var result AppValidationResult
-	if len(detErrors) > 0 {
-		result.Valid = false
-		for _, e := range detErrors {
-			result.Errors = append(result.Errors, AppValidationError{
-				File:  e.File,
-				Error: e.Error,
-			})
-		}
-	}
-
-	// Also run LLM-based validation for deeper checks
+	// Run LLM-based validation
 	provider := c.llmProvider()
 	model := c.SecretManager.GetSecret("WEBSITE_BUILDER_LLM_MODEL")
 	if model == "" {
@@ -628,10 +618,6 @@ func (c *Controller) ValidateAppFiles(projectID string) (*AppValidationResult, e
 	responseJSON, err := utils.GetJSONFromLLM(context.Background(), model, constants.NEXTJS_VALIDATE_PROMPT, fileContext.String(), provider)
 	if err != nil {
 		slog.Error("validation LLM call failed", "error", err)
-		// Still return deterministic results
-		if len(result.Errors) == 0 {
-			result.Valid = true
-		}
 		return &result, nil
 	}
 
@@ -640,19 +626,13 @@ func (c *Controller) ValidateAppFiles(projectID string) (*AppValidationResult, e
 		cleaned := utils.ExtractJSON(responseJSON)
 		if err2 := json.Unmarshal([]byte(cleaned), &llmResult); err2 != nil {
 			slog.Warn("failed to parse validation response", "error", err2)
-			if len(result.Errors) == 0 {
-				result.Valid = true
-			}
 			return &result, nil
 		}
 	}
 
-	// Merge LLM errors with deterministic errors
 	if !llmResult.Valid {
 		result.Valid = false
 		result.Errors = append(result.Errors, llmResult.Errors...)
-	} else if len(result.Errors) == 0 {
-		result.Valid = true
 	}
 
 	return &result, nil
