@@ -2,8 +2,6 @@ package agent
 
 import (
 	"encoding/json"
-	"sync"
-	"time"
 
 	"github.com/google/uuid"
 )
@@ -145,60 +143,9 @@ const (
 	EventKeepalive      = "keepalive"
 )
 
-// ---- SSE-backed emitter with ring buffer ----
-
-type sseEmitter struct {
-	runID   uuid.UUID
-	ch      chan<- Event
-	mu      sync.Mutex
-	closed  bool
-	ring    []Event
-	ringCap int
-}
-
-// NewSSEEmitter wraps a send-only channel into an EventEmitter. It also
-// maintains a bounded replay buffer (default 500 events) for reconnects.
-func NewSSEEmitter(runID uuid.UUID, ch chan<- Event, ringCap int) EventEmitter {
-	if ringCap <= 0 {
-		ringCap = 500
-	}
-	return &sseEmitter{runID: runID, ch: ch, ringCap: ringCap}
-}
-
-func (e *sseEmitter) Emit(eventType string, data any) bool {
-	e.mu.Lock()
-	if e.closed {
-		e.mu.Unlock()
-		return false
-	}
-	ev := Event{Type: eventType, Data: data}
-	if len(e.ring) >= e.ringCap {
-		e.ring = e.ring[1:]
-	}
-	e.ring = append(e.ring, ev)
-	e.mu.Unlock()
-
-	select {
-	case e.ch <- ev:
-		return true
-	case <-time.After(10 * time.Second):
-		return false
-	}
-}
-
-func (e *sseEmitter) Buffer() []Event {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	out := make([]Event, len(e.ring))
-	copy(out, e.ring)
-	return out
-}
-
-func (e *sseEmitter) Close() {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	if !e.closed {
-		e.closed = true
-		close(e.ch)
-	}
-}
+// The SSE-backed emitter lives in internal/views/agent_bridge.go as
+// agentSSEAdapter; that's the only production emitter. An earlier version of
+// this file exported an sseEmitter with its own 500-entry ring buffer and a
+// Close() that closed the underlying channel. It was never wired up —
+// handleStreamOrAsync owns the channel — and the double-close vector was a
+// loaded gun for any future refactor, so it has been removed.
