@@ -314,8 +314,10 @@ func Run(
 		narrationSink,
 		nil, // onReasoning
 		utils.ToolCallConfig{
-			MaxRounds: defaultMaxTurns,
-			MaxTokens: 16384,
+			MaxRounds:  defaultMaxTurns,
+			MaxTokens:  16384,
+			NudgeAfter: 50,
+			StripAfter: -1,
 			ShouldContinue: func() bool {
 				if ctx.Err() != nil {
 					return false
