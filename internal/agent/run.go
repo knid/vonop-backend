@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"runtime/debug"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -112,8 +113,7 @@ func Run(
 		ToolCalls:    []byte("[]"),
 	}
 	if _, err := deps.DB.InsertChatMessage(userMsgRow); err != nil {
-		return finaliseFailure(ctx, deps, repo, run, emitter, "setup",
-			CodeInternal, "failed to persist user message", err, preCommit)
+		return New(CodeInternal, "setup", "failed to persist user message", err)
 	}
 	run.UserMessageID = &userMsgRow.ID
 	if err := deps.DB.UpdateAgentRun(run); err != nil {
@@ -162,17 +162,200 @@ func Run(
 	defer func() {
 		if r := recover(); r != nil {
 			slog.Error("agent.Run panicked", "error", r, "project_id", project.ID, "stack", string(debug.Stack()))
-			_ = finaliseFailure(ctx, deps, repo, run, emitter, "agent_loop",
-				CodeInternal, fmt.Sprintf("panic: %v", r), nil, preCommit)
+			_ = finaliseFailureV2(ctx, deps, repo, run, emitter, "agent_loop",
+				CodeInternal, fmt.Sprintf("panic: %v", r), nil, preCommit, tracker, runStart)
 		}
 	}()
 
-	// Loop phase lands in Task C2.19. For now, a placeholder:
-	_ = llmMessages
-	_ = registry
-	_ = rc
-	_ = runStart
-	return fmt.Errorf("agent.Run loop not yet implemented")
+	// --- Step 12: agent loop ---
+	var (
+		turn           = 1
+		totalToolCalls = 0
+		narrationBuf   strings.Builder
+		toolCallLog    []models.ChatMessageToolCall
+	)
+
+	// Budget check before entering the loop.
+	if deps.CreditChecker != nil && !deps.CreditChecker() {
+		return finaliseFailureV2(ctx, deps, repo, run, emitter, "agent_loop",
+			CodeCreditsExhausted, "AI credits exhausted before run started", nil,
+			preCommit, tracker, runStart)
+	}
+
+	// Keepalive goroutine — emits every 15s until the run finishes.
+	keepaliveDone := make(chan struct{})
+	go func() {
+		tick := time.NewTicker(15 * time.Second)
+		defer tick.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-keepaliveDone:
+				return
+			case <-tick.C:
+				emitter.Emit(EventKeepalive, KeepaliveEvent{RunID: runID, TS: time.Now().Unix()})
+			}
+		}
+	}()
+	defer close(keepaliveDone)
+
+	emitter.Emit(EventTurnStart, TurnStartEvent{RunID: runID, Turn: turn})
+
+	// Tool executor adapter bridging the utils.ToolExecutor shape
+	// (name, args string) -> (result, error)
+	// into our Registry.Execute which also reports isError separately.
+	executor := func(name string, argsJSON string) (string, error) {
+		toolStart := time.Now()
+		toolCallID := uuid.NewString()
+		result, isErr, execErr := registry.Execute(ctx, rc, name, json.RawMessage(argsJSON))
+		durationMs := int(time.Since(toolStart).Milliseconds())
+		status := "ok"
+		if isErr || execErr != nil {
+			status = "error"
+		}
+		emitter.Emit(EventToolCallResult, ToolCallResultEvent{
+			RunID:      runID,
+			ToolCallID: toolCallID,
+			ToolName:   name,
+			Status:     status,
+			DurationMs: durationMs,
+			Summary:    firstLine(result, 140),
+			IsError:    isErr || execErr != nil,
+		})
+		toolCallLog = append(toolCallLog, models.ChatMessageToolCall{
+			ID:         toolCallID,
+			Name:       name,
+			Input:      json.RawMessage(argsJSON),
+			Result:     result,
+			IsError:    isErr || execErr != nil,
+			DurationMs: durationMs,
+		})
+		totalToolCalls++
+		if execErr != nil {
+			return result, execErr
+		}
+		return result, nil
+	}
+
+	narrationSink := func(chunk string) {
+		if chunk == "" {
+			return
+		}
+		narrationBuf.WriteString(chunk)
+		emitter.Emit(EventNarration, NarrationEvent{RunID: runID, Turn: turn, Delta: chunk})
+	}
+
+	toolSchemas := registryToUtilsTools(registry)
+
+	narrationText, llmErr := utils.StreamWithTools(
+		ctx,
+		model,
+		llmMessages,
+		toolSchemas,
+		provider,
+		nil, // responseFormat
+		nil, // reasoning
+		executor,
+		nil, // deprecated onToolCall, we use OnToolCallStart in opts
+		narrationSink,
+		nil, // onReasoning
+		utils.ToolCallConfig{
+			MaxRounds: defaultMaxTurns,
+			MaxTokens: 16384,
+			OnToolCallStart: func(toolName string) {
+				emitter.Emit(EventToolCallStart, ToolCallStartEvent{
+					RunID:    runID,
+					Turn:     turn,
+					ToolName: toolName,
+				})
+			},
+			ShouldContinue: func() bool {
+				if ctx.Err() != nil {
+					return false
+				}
+				if deps.CreditChecker != nil && !deps.CreditChecker() {
+					return false
+				}
+				if _, _, total, _ := tracker.Totals(); total > defaultMaxTokensPerRun {
+					return false
+				}
+				return true
+			},
+		},
+	)
+	if llmErr != nil {
+		return finaliseFailureV2(ctx, deps, repo, run, emitter, "agent_loop",
+			CodeProviderError, "LLM call failed", llmErr,
+			preCommit, tracker, runStart)
+	}
+
+	// Post-loop budget checks to classify why the loop ended.
+	if ctx.Err() != nil {
+		return finaliseFailureV2(ctx, deps, repo, run, emitter, "agent_loop",
+			CodeBudgetExceeded, "run canceled or deadline exceeded", ctx.Err(),
+			preCommit, tracker, runStart)
+	}
+	if deps.CreditChecker != nil && !deps.CreditChecker() {
+		return finaliseFailureV2(ctx, deps, repo, run, emitter, "agent_loop",
+			CodeCreditsExhausted, "AI credits exhausted mid-run", nil,
+			preCommit, tracker, runStart)
+	}
+	if _, _, total, _ := tracker.Totals(); total > defaultMaxTokensPerRun {
+		return finaliseFailureV2(ctx, deps, repo, run, emitter, "agent_loop",
+			CodeBudgetExceeded,
+			fmt.Sprintf("token budget exceeded (%d > %d)", total, defaultMaxTokensPerRun), nil,
+			preCommit, tracker, runStart)
+	}
+
+	emitter.Emit(EventTurnEnd, TurnEndEvent{
+		RunID:      runID,
+		Turn:       turn,
+		StopReason: "end_turn",
+		Tokens:     trackerDelta(tracker),
+	})
+
+	// If StreamWithTools returned visible narration text, merge it into the
+	// buffer (it's what we emit as the final assistant content).
+	if narrationText != "" {
+		narrationBuf.WriteString(narrationText)
+	}
+
+	// --- Step 13: success shutdown (continued in C2.20) ---
+	return finaliseSuccess(ctx, deps, repo, run, emitter, fileMap,
+		narrationBuf.String(), toolCallLog, tracker, runStart,
+		totalToolCalls, turn, message, user, project)
+}
+
+// registryToUtilsTools maps the agent Registry to the []utils.Tool shape
+// StreamWithTools expects. Executor tools become OpenAI-style function wrappers;
+// server tools (Anthropic-native, e.g. web_search) are passed through as-is.
+func registryToUtilsTools(r *Registry) []utils.Tool {
+	out := make([]utils.Tool, 0, len(r.tools)+len(r.serverTools))
+	for _, name := range r.order {
+		if t, ok := r.tools[name]; ok {
+			out = append(out, utils.Tool{
+				Type: "function",
+				Function: utils.ToolFunction{
+					Name:        t.Name(),
+					Description: t.Description(),
+					Parameters:  t.Schema(),
+				},
+			})
+		}
+	}
+	for _, st := range r.serverTools {
+		if st.Tool != nil {
+			out = append(out, *st.Tool)
+		}
+	}
+	return out
+}
+
+// trackerDelta returns the current token usage from the tracker as a TokenUsage.
+func trackerDelta(t *utils.TokenTracker) TokenUsage {
+	p, c, _, _ := t.Totals()
+	return TokenUsage{Input: p, Output: c}
 }
 
 // ---- helpers ----
@@ -220,8 +403,44 @@ func convertHistory(history []models.AppChatMessage) []utils.Message {
 	return out
 }
 
-// finaliseFailure is a stub — the real implementation lands in Task C2.20.
-func finaliseFailure(
+// finaliseSuccess is a stub — the real implementation lands in Task C2.20.
+func finaliseSuccess(
+	ctx context.Context,
+	deps *RunDependencies,
+	repo *gitrepo.Repo,
+	run *models.AppAgentRun,
+	emitter EventEmitter,
+	fileMap *SafeFileMap,
+	narration string,
+	toolCalls []models.ChatMessageToolCall,
+	tracker *utils.TokenTracker,
+	runStart time.Time,
+	totalToolCalls int,
+	turns int,
+	userMessage string,
+	user *models.User,
+	project *models.AppProject,
+) error {
+	_ = ctx
+	_ = deps
+	_ = repo
+	_ = run
+	_ = emitter
+	_ = fileMap
+	_ = narration
+	_ = toolCalls
+	_ = tracker
+	_ = runStart
+	_ = totalToolCalls
+	_ = turns
+	_ = userMessage
+	_ = user
+	_ = project
+	return nil
+}
+
+// finaliseFailureV2 is a stub — the real implementation lands in Task C2.20.
+func finaliseFailureV2(
 	ctx context.Context,
 	deps *RunDependencies,
 	repo *gitrepo.Repo,
@@ -229,16 +448,19 @@ func finaliseFailure(
 	emitter EventEmitter,
 	phase string,
 	code ErrorCode,
-	msg string,
-	err error,
+	message string,
+	wrapped error,
 	preCommit string,
+	tracker *utils.TokenTracker,
+	runStart time.Time,
 ) error {
 	_ = ctx
 	_ = deps
 	_ = repo
 	_ = run
 	_ = emitter
-	_ = phase
 	_ = preCommit
-	return New(code, phase, msg, err)
+	_ = tracker
+	_ = runStart
+	return New(code, phase, message, wrapped)
 }
