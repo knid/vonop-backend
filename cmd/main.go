@@ -1308,9 +1308,6 @@ func main() {
 				r.With(rateLimiter.RateLimit(20, time.Minute, appMiddleware.AIUserKey)).Post("/generate/from-image", httpViews.GenerateAppFromImage)
 				r.With(rateLimiter.RateLimit(20, time.Minute, appMiddleware.AIUserKey)).Post("/generate/stream", httpViews.GenerateAppStream)
 
-				// Job clarification endpoint
-				r.Post("/jobs/{jobId}/clarify", httpViews.ClarifyJob)
-				r.Post("/jobs/{jobId}/reply", httpViews.ReplyJob)
 				r.Get("/jobs/{jobId}/stream", httpViews.StreamJob)
 
 				r.Get("/", httpViews.GetApps)

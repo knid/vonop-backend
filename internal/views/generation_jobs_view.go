@@ -13,7 +13,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/controllers"
 	"github.com/knid/wemob/internal/models"
-	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/utils"
 )
@@ -354,95 +353,6 @@ func (v *HttpViews) GetActiveJobs(w http.ResponseWriter, r *http.Request) {
 	}
 
 	utils.JSONResponse(w, resp, http.StatusOK)
-}
-
-// POST /v2/apps/jobs/{jobId}/clarify
-func (v *HttpViews) ClarifyJob(w http.ResponseWriter, r *http.Request) {
-	user, err := v.Controller.GetUserFromReq(r)
-	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
-		return
-	}
-
-	jobID := chi.URLParam(r, "jobId")
-	if jobID == "" {
-		utils.JSONErrorResponse(w, "job id is required", http.StatusBadRequest)
-		return
-	}
-
-	// Verify ownership and status
-	job, err := v.Controller.GetJob(jobID, user.ID)
-	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
-		return
-	}
-	if job.Status != "awaiting_input" {
-		utils.JSONErrorResponse(w, "job is not awaiting input", http.StatusBadRequest)
-		return
-	}
-
-	var req requests.ClarifyJobRequest
-	if err := utils.ParseJSONBody(r, &req); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	// Convert request answers to controller type
-	answers := make([]controllers.ClarificationAnswer, len(req.Answers))
-	for i, a := range req.Answers {
-		answers[i] = controllers.ClarificationAnswer{ID: a.ID, Answer: a.Answer}
-	}
-
-	result := controllers.ClarificationResult{
-		Answers: answers,
-		Skip:    req.Skip,
-	}
-
-	if err := v.Controller.SubmitClarification(jobID, result); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	utils.JSONResponse(w, responses.SuccessResponse{Success: true}, http.StatusOK)
-}
-
-// POST /v2/apps/jobs/{jobId}/reply
-func (v *HttpViews) ReplyJob(w http.ResponseWriter, r *http.Request) {
-	user, err := v.Controller.GetUserFromReq(r)
-	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
-		return
-	}
-
-	jobID := chi.URLParam(r, "jobId")
-	if jobID == "" {
-		utils.JSONErrorResponse(w, "job id is required", http.StatusBadRequest)
-		return
-	}
-
-	// Verify ownership and status
-	job, err := v.Controller.GetJob(jobID, user.ID)
-	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
-		return
-	}
-	if job.Status != "awaiting_input" {
-		utils.JSONErrorResponse(w, "job is not awaiting input", http.StatusBadRequest)
-		return
-	}
-
-	var req requests.ReplyJobRequest
-	if err := utils.ParseJSONBody(r, &req); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	if err := v.Controller.SubmitReply(jobID, controllers.ConversationReply{Message: req.Message}); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	utils.JSONResponse(w, responses.SuccessResponse{Success: true}, http.StatusOK)
 }
 
 // GET /v2/apps/jobs/{jobId}/stream — reconnect to a running job's SSE event stream
