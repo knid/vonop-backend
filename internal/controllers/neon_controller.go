@@ -475,6 +475,82 @@ func (c *Controller) generateAndStoreSeedImages(
 		"updated", updated)
 }
 
+// provisionDatabaseForAgent is the agent-callable entry point for creating a
+// project's wemob db on demand. It is invoked from the ProvisionDatabaseTool
+// in internal/agent via the RunDependencies.ProvisionDatabase callback wired
+// in AgentDeps. The chain:
+//
+//  1. Reject if the project already has a Neon integration (defense in depth;
+//     the tool layer also checks).
+//  2. Resolve the user's plan limits so Neon compute/storage is sized.
+//  3. provisionNeonDatabase: create the Neon project + run CREATE TABLE.
+//  4. storeNeonIntegration: persist the connection string as an AppIntegration.
+//  5. Persist the supplied schema on project.DataModels so future runs and
+//     the dashboard see the same shape.
+//  6. Flip project.Settings["has_database"] = true so subsequent runs pick up
+//     the DatabaseAddendum from BuildSystemMessages.
+//  7. Best-effort seed images for any image columns (matches the template
+//     copy flow so users see a fully populated DB on the first run).
+//
+// Errors are returned verbatim; the tool surfaces them to the model.
+func (c *Controller) provisionDatabaseForAgent(ctx context.Context, project *models.AppProject, user *models.User, tables []models.DataModel) error {
+	if c.NeonService == nil {
+		return fmt.Errorf("wemob db is not configured on this environment")
+	}
+	if c.isNeonBacked(project.ID.String()) {
+		return fmt.Errorf("project already has a wemob db connected")
+	}
+	if len(tables) == 0 {
+		return fmt.Errorf("at least one table is required")
+	}
+
+	var userLimits *models.StandartUserLimits
+	if user != nil {
+		if limits, err := c.GetUserLimits(user); err == nil {
+			userLimits = limits
+		} else {
+			slog.Warn("provisionDatabaseForAgent: failed to load user limits", "error", err, "user_id", user.ID)
+		}
+	}
+
+	noopEvent := func(string, any) bool { return false }
+	connStr, neonProjectID, err := c.provisionNeonDatabase(ctx, project, tables, userLimits, noopEvent)
+	if err != nil {
+		return fmt.Errorf("provision wemob db: %w", err)
+	}
+
+	if err := c.storeNeonIntegration(project, connStr, neonProjectID); err != nil {
+		return fmt.Errorf("store wemob db integration: %w", err)
+	}
+
+	// Persist the schema on the project so future runs and the dashboard
+	// share a single source of truth for the table layout.
+	if dataModelsJSON, err := models.MarshalDataModels(tables); err == nil && dataModelsJSON != nil {
+		project.DataModels = dataModelsJSON
+	} else if err != nil {
+		slog.Warn("provisionDatabaseForAgent: failed to marshal data models", "error", err, "project_id", project.ID)
+	}
+
+	if project.Settings == nil {
+		project.Settings = make(map[string]any)
+	}
+	project.Settings["has_database"] = true
+
+	if _, err := c.DB.UpdateAppProject(project); err != nil {
+		return fmt.Errorf("persist wemob db on project: %w", err)
+	}
+
+	// Seed images best-effort, matching the template-copy flow. Failures are
+	// logged but not surfaced — the database is already usable without them.
+	go func() {
+		seedCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+		c.generateAndStoreSeedImages(seedCtx, project, tables, noopEvent, 12)
+	}()
+
+	return nil
+}
+
 // getNeonIntegration returns the Neon integration for a project, if any.
 // Only returns integrations with status "connected".
 func (c *Controller) getNeonIntegration(projectID string) (*models.AppIntegration, error) {

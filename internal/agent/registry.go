@@ -129,9 +129,16 @@ func BuildRegistryFor(project *models.AppProject, deps *RunDependencies) *Regist
 		}
 	}
 
-	if projectHasDatabase(project) {
-		r.Register(ExecuteSQLTool{Deps: deps})
-	}
+	// Database tools are registered unconditionally so the model has a
+	// stable tool list across the run. provision_database is the entry
+	// point when no DB exists yet; execute_sql is the ad-hoc query path
+	// once one does. Each tool's internal state check (NeonConnString
+	// lookup) decides whether a particular call is valid at execution
+	// time. projectHasDatabase still gates the DatabaseAddendum in
+	// context.go so the addendum only injects after a DB exists.
+	r.Register(ProvisionDatabaseTool{Deps: deps})
+	r.Register(ExecuteSQLTool{Deps: deps})
+
 	if project != nil && project.ProjectType == "mobile_app" {
 		r.Register(ConfigureMobileBridgeTool{Deps: deps})
 	}

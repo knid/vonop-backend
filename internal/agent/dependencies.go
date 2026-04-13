@@ -36,6 +36,14 @@ type ImageGenerator func(ctx context.Context, prompt string, w, h int, style, pr
 // connected Neon database, or "" if no database is connected.
 type NeonConnResolver func(projectID string) (string, error)
 
+// DatabaseProvisioner creates the project's wemob db (Neon under the hood)
+// with the given table schema, stores the connection as an AppIntegration,
+// flips project.Settings["has_database"] = true, and persists the project.
+// Bound by the controller layer to Controller.provisionDatabaseForAgent.
+// Idempotent at the tool layer — the ProvisionDatabaseTool checks for an
+// existing connection before invoking this callback.
+type DatabaseProvisioner func(ctx context.Context, project *models.AppProject, tables []models.DataModel) error
+
 // MobileBridgeUpdater enables/disables a native mobile bridge method on the
 // project's MobileAppConfig row. BridgeMethods is a flat []string of enabled
 // method names — enabled=true appends to the slice (idempotent), enabled=false
@@ -94,6 +102,7 @@ type RunDependencies struct {
 	TrackUserEvent           EventTracker
 	GenerateImage            ImageGenerator
 	NeonConnString           NeonConnResolver
+	ProvisionDatabase        DatabaseProvisioner
 	UpdateMobileBridgeMethod MobileBridgeUpdater
 	RecordLLMUsage           LLMUsageRecorder
 	RecordLLMError           LLMErrorRecorder

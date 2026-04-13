@@ -47,6 +47,9 @@ func (c *Controller) AgentDeps(user *models.User) *agent.RunDependencies {
 		NeonConnString: func(projectID string) (string, error) {
 			return c.neonConnString(projectID), nil
 		},
+		ProvisionDatabase: func(ctx context.Context, project *models.AppProject, tables []models.DataModel) error {
+			return c.provisionDatabaseForAgent(ctx, project, user, tables)
+		},
 		UpdateMobileBridgeMethod: c.updateMobileBridgeMethodForAgent,
 		RecordLLMUsage: func(tracker *utils.TokenTracker, action, model, provider, reference, appType string) {
 			c.RecordTokenUsage(user, action, model, provider, reference, appType, tracker)
