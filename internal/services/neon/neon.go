@@ -37,10 +37,12 @@ type CreateProjectRequest struct {
 }
 
 type CreateProjectSettings struct {
-	Name     string        `json:"name"`
-	RegionID string        `json:"region_id,omitempty"`
-	OrgID    string        `json:"org_id,omitempty"`
-	Settings *ProjectQuota `json:"settings,omitempty"`
+	Name                  string        `json:"name"`
+	RegionID              string        `json:"region_id,omitempty"`
+	OrgID                 string        `json:"org_id,omitempty"`
+	Settings              *ProjectQuota `json:"settings,omitempty"`
+	AutoscalingLimitMinCU float64       `json:"autoscaling_limit_min_cu,omitempty"`
+	AutoscalingLimitMaxCU float64       `json:"autoscaling_limit_max_cu,omitempty"`
 }
 
 type ProjectQuota struct {
@@ -181,11 +183,14 @@ func (s *Service) doRequest(method, path string, body any) ([]byte, error) {
 		}
 
 		// Retry on transient errors:
-		//   423 — project has running conflicting operations (endpoint
-		//         starting, branch in flight)
 		//   429 — rate limited
 		//   5xx — Neon-side failure
-		if resp.StatusCode == 423 || resp.StatusCode == 429 || resp.StatusCode >= 500 {
+		// 423 ("project has running conflicting operations") is NOT retried
+		// here on purpose: every 423 we've seen so far traced back to a
+		// sequential race in our own code (e.g. a follow-up PATCH firing
+		// before the endpoint finished initializing). Retrying papers over
+		// the bug; fix the call site to remove the race instead.
+		if resp.StatusCode == 429 || resp.StatusCode >= 500 {
 			lastStatus = resp.StatusCode
 			lastBody = string(respBody)
 			if attempt < maxRetries {
@@ -232,12 +237,27 @@ func (s *Service) CreateProject(name, region string, limits *DBLimits) (projectI
 		OrgID:    s.OrgID,
 	}
 
-	// Apply storage quota if limits are provided
-	if limits != nil && limits.StorageMB > 0 {
-		settings.Settings = &ProjectQuota{
-			Quota: &QuotaSettings{
-				LogicalSizeBytes: int64(limits.StorageMB) * 1024 * 1024,
-			},
+	if limits != nil {
+		// Apply storage quota
+		if limits.StorageMB > 0 {
+			settings.Settings = &ProjectQuota{
+				Quota: &QuotaSettings{
+					LogicalSizeBytes: int64(limits.StorageMB) * 1024 * 1024,
+				},
+			}
+		}
+		// Apply autoscaling limits inline so Neon configures the default
+		// endpoint atomically with project creation. A follow-up PATCH on
+		// /endpoints/{id} would race the endpoint's own initialization and
+		// return 423 ("project already has running conflicting operations").
+		if limits.MaxCU > 0 {
+			minCU := 0.25
+			maxCU := limits.MaxCU
+			if maxCU < minCU {
+				maxCU = minCU
+			}
+			settings.AutoscalingLimitMinCU = minCU
+			settings.AutoscalingLimitMaxCU = maxCU
 		}
 	}
 
@@ -256,15 +276,6 @@ func (s *Service) CreateProject(name, region string, limits *DBLimits) (projectI
 	connStr := ""
 	if len(resp.ConnectionURIs) > 0 {
 		connStr = resp.ConnectionURIs[0].ConnectionURI
-	}
-
-	// Apply compute limits on the default endpoint
-	if limits != nil && limits.MaxCU > 0 && len(resp.Endpoints) > 0 {
-		endpointID := resp.Endpoints[0].ID
-		if err := s.UpdateEndpointLimits(resp.Project.ID, endpointID, limits.MaxCU); err != nil {
-			slog.Warn("Failed to set compute limits on Neon endpoint",
-				"error", err, "project_id", resp.Project.ID, "endpoint_id", endpointID, "max_cu", limits.MaxCU)
-		}
 	}
 
 	return resp.Project.ID, connStr, nil
