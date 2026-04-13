@@ -40,15 +40,15 @@ import (
 // A "user" message is what the user typed (plus any images). An "assistant"
 // message is the final narration and tool call trace from one agent run.
 type AppChatMessage struct {
-	ID         uuid.UUID    `bun:",pk,type:uuid,default:uuid_generate_v4()"`
-	ProjectID  uuid.UUID    `bun:",notnull,type:uuid"`
-	Project    *AppProject  `bun:"rel:belongs-to,join:project_id=id"`
-	RunID      *uuid.UUID   `bun:",type:uuid,nullzero"` // null for user messages not yet tied to a run
-	Role       string       `bun:",notnull"`            // "user" | "assistant"
-	Content    string       `bun:",type:text,notnull,default:''"`
-	Images     []byte       `bun:",type:jsonb,notnull,default:'[]'"`     // [{url, alt?}]
-	ToolCalls  []byte       `bun:",type:jsonb,notnull,default:'[]'"`     // []ChatMessageToolCall
-	CreatedAt  time.Time    `bun:"created_at,nullzero,notnull,default:current_timestamp"`
+	ID           uuid.UUID   `bun:",pk,type:uuid,default:uuid_generate_v4()"`
+	AppProjectID uuid.UUID   `bun:",notnull,type:uuid"`
+	AppProject   *AppProject `bun:"rel:belongs-to,join:app_project_id=id"`
+	RunID        *uuid.UUID  `bun:",type:uuid,nullzero"` // null for user messages not yet tied to a run
+	Role         string      `bun:",notnull"`            // "user" | "assistant"
+	Content      string      `bun:",type:text,notnull,default:''"`
+	Images       []byte      `bun:",type:jsonb,notnull,default:'[]'"` // [{url, alt?}]
+	ToolCalls    []byte      `bun:",type:jsonb,notnull,default:'[]'"` // []ChatMessageToolCall
+	CreatedAt    time.Time   `bun:"created_at,nullzero,notnull,default:current_timestamp"`
 }
 
 // ChatMessageToolCall is the JSONB shape embedded in AppChatMessage.ToolCalls.
@@ -118,8 +118,8 @@ const (
 // agent. Referenced by the assistant AppChatMessage via RunID.
 type AppAgentRun struct {
 	ID               uuid.UUID   `bun:",pk,type:uuid,default:uuid_generate_v4()"`
-	ProjectID        uuid.UUID   `bun:",notnull,type:uuid"`
-	Project          *AppProject `bun:"rel:belongs-to,join:project_id=id"`
+	AppProjectID     uuid.UUID   `bun:",notnull,type:uuid"`
+	AppProject       *AppProject `bun:"rel:belongs-to,join:app_project_id=id"`
 	UserID           uuid.UUID   `bun:",notnull,type:uuid"`
 	User             *User       `bun:"rel:belongs-to,join:user_id=id"`
 	Status           string      `bun:",notnull"`
@@ -238,7 +238,7 @@ func (db *Database) GetRecentChatMessages(projectID uuid.UUID, limit int) ([]mod
 	var msgs []models.AppChatMessage
 	err := db.DB.NewSelect().
 		Model(&msgs).
-		Where("project_id = ?", projectID).
+		Where("app_project_id = ?", projectID).
 		Order("created_at DESC").
 		Limit(limit).
 		Scan(context.Background())
@@ -257,7 +257,7 @@ func (db *Database) GetRecentChatMessages(projectID uuid.UUID, limit int) ([]mod
 func (db *Database) ClearChatMessages(projectID uuid.UUID) error {
 	_, err := db.DB.NewDelete().
 		Model((*models.AppChatMessage)(nil)).
-		Where("project_id = ?", projectID).
+		Where("app_project_id = ?", projectID).
 		Exec(context.Background())
 	return err
 }
@@ -317,7 +317,7 @@ func (db *Database) GetActiveAgentRun(projectID uuid.UUID) (*models.AppAgentRun,
 	var r models.AppAgentRun
 	err := db.DB.NewSelect().
 		Model(&r).
-		Where("project_id = ?", projectID).
+		Where("app_project_id = ?", projectID).
 		Where("status = ?", models.AgentRunStatusRunning).
 		Order("created_at DESC").
 		Limit(1).
@@ -2611,13 +2611,13 @@ func Run(
 	provider := deps.LLMProvider
 	model := resolveModel(deps.SecretManager, project)
 	run := &models.AppAgentRun{
-		ID:        runID,
-		ProjectID: project.ID,
-		UserID:    user.ID,
-		Status:    models.AgentRunStatusRunning,
-		PreCommit: preCommit,
-		Model:     model,
-		Provider:  provider.Name,
+		ID:           runID,
+		AppProjectID: project.ID,
+		UserID:       user.ID,
+		Status:       models.AgentRunStatusRunning,
+		PreCommit:    preCommit,
+		Model:        model,
+		Provider:     provider.Name,
 	}
 	if _, err := deps.DB.InsertAgentRun(run); err != nil {
 		return New(CodeInternal, "setup", "failed to record run", err)
@@ -2626,12 +2626,12 @@ func Run(
 	// --- Step 7: persist the user message ---
 	imagesJSON := mustJSON(normaliseImages(images))
 	userMsgRow := &models.AppChatMessage{
-		ProjectID: project.ID,
-		RunID:     &runID,
-		Role:      "user",
-		Content:   message,
-		Images:    imagesJSON,
-		ToolCalls: []byte("[]"),
+		AppProjectID: project.ID,
+		RunID:        &runID,
+		Role:         "user",
+		Content:      message,
+		Images:       imagesJSON,
+		ToolCalls:    []byte("[]"),
 	}
 	if _, err := deps.DB.InsertChatMessage(userMsgRow); err != nil {
 		return finaliseFailure(ctx, deps, repo, run, emitter, "setup", CodeInternal, "failed to persist user message", err, preCommit)
@@ -3085,12 +3085,12 @@ func finaliseSuccess(
 	// 2. Persist the assistant chat message.
 	toolCallsJSON, _ := json.Marshal(toolCalls)
 	assistantMsg := &models.AppChatMessage{
-		ProjectID: project.ID,
-		RunID:     &run.ID,
-		Role:      "assistant",
-		Content:   narration,
-		Images:    []byte("[]"),
-		ToolCalls: toolCallsJSON,
+		AppProjectID: project.ID,
+		RunID:        &run.ID,
+		Role:         "assistant",
+		Content:      narration,
+		Images:       []byte("[]"),
+		ToolCalls:    toolCallsJSON,
 	}
 	if _, insErr := deps.DB.InsertChatMessage(assistantMsg); insErr != nil {
 		slog.Warn("failed to persist assistant chat message", "error", insErr, "run_id", run.ID)
@@ -3239,12 +3239,12 @@ func finaliseFailureV2(
 
 	// 4. Persist "sorry" assistant message so the chat UI isn't orphaned.
 	orphanMsg := &models.AppChatMessage{
-		ProjectID: run.ProjectID,
-		RunID:     &run.ID,
-		Role:      "assistant",
-		Content:   "Sorry, that turn failed — your files are unchanged. Please try again.",
-		Images:    []byte("[]"),
-		ToolCalls: []byte("[]"),
+		AppProjectID: run.AppProjectID,
+		RunID:        &run.ID,
+		Role:         "assistant",
+		Content:      "Sorry, that turn failed — your files are unchanged. Please try again.",
+		Images:       []byte("[]"),
+		ToolCalls:    []byte("[]"),
 	}
 	if _, err := deps.DB.InsertChatMessage(orphanMsg); err != nil {
 		slog.Warn("failed to persist failure message", "error", err, "run_id", run.ID)
@@ -3269,7 +3269,7 @@ func finaliseFailureV2(
 			action = "app_chat_failed"
 		}
 		deps.TrackUserEvent(action, map[string]any{
-			"app_id":   run.ProjectID.String(),
+			"app_id":   run.AppProjectID.String(),
 			"code":     string(code),
 			"phase":    phase,
 			"duration": run.DurationMs,
@@ -3725,7 +3725,7 @@ func (v *HttpViews) StreamRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	run, err := v.Controller.DB.GetAgentRun(runID)
-	if err != nil || run == nil || run.ProjectID != project.ID {
+	if err != nil || run == nil || run.AppProjectID != project.ID {
 		utils.JSONErrorResponse(w, "run not found", http.StatusNotFound)
 		return
 	}
@@ -4016,7 +4016,7 @@ func (v *HttpViews) GetRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	run, err := v.Controller.DB.GetAgentRun(runID)
-	if err != nil || run == nil || run.ProjectID != project.ID {
+	if err != nil || run == nil || run.AppProjectID != project.ID {
 		utils.JSONErrorResponse(w, "run not found", http.StatusNotFound)
 		return
 	}
