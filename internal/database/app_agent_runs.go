@@ -2,6 +2,8 @@ package database
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"time"
 
 	"github.com/google/uuid"
@@ -36,6 +38,9 @@ func (db *Database) GetActiveAgentRun(projectID uuid.UUID) (*models.AppAgentRun,
 		Limit(1).
 		Scan(context.Background())
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
 		return nil, err
 	}
 	return &r, nil
