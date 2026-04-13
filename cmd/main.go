@@ -718,6 +718,12 @@ func main() {
 
 	db := database.NewDatabase(bundb)
 
+	if n, err := db.MarkOrphanedRunsFailed(); err != nil {
+		slog.Warn("failed to mark orphaned agent runs", "error", err)
+	} else if n > 0 {
+		slog.Info("marked orphaned agent runs as failed", "count", n)
+	}
+
 	seedPlans(db, sm)
 	migrateInactiveUsersToFree(bundb)
 
