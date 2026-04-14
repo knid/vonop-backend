@@ -816,7 +816,13 @@ func (c *Controller) CaptureAppScreenshot(project *models.AppProject, previewURL
 func (c *Controller) ensureV1ProjectForMobileApp(appProject *models.AppProject, user *models.User, deployedURL string) error {
 	// Check if v1 Project already exists for this URL
 	if existing, err := c.DB.GetProjectByUserAndURL(user.ID.String(), deployedURL); err == nil && existing.ID.String() != "" {
-		return nil // already exists
+		// Ensure the mobile AppProject points at it — earlier deploys may
+		// have created the v1 Project without writing the id into settings.
+		if err := c.DB.SetAppProjectV1ProjectID(appProject.ID.String(), existing.ID.String()); err != nil {
+			slog.Warn("failed to persist v1_project_id to app settings", "error", err,
+				"app_project_id", appProject.ID, "v1_project_id", existing.ID)
+		}
+		return nil
 	}
 
 	pkHex, err := utils.RandomHex(5)
@@ -853,6 +859,11 @@ func (c *Controller) ensureV1ProjectForMobileApp(appProject *models.AppProject, 
 	created, err := c.DB.CreateProject(&project)
 	if err != nil {
 		return fmt.Errorf("failed to create v1 project: %w", err)
+	}
+
+	if err := c.DB.SetAppProjectV1ProjectID(appProject.ID.String(), created.ID.String()); err != nil {
+		slog.Warn("failed to persist v1_project_id to app settings", "error", err,
+			"app_project_id", appProject.ID, "v1_project_id", created.ID)
 	}
 
 	slog.Info("Created v1 Project for mobile app",

@@ -87,6 +87,22 @@ func (db *Database) UpdateAppProjectSandboxID(projectID string, sandboxID string
 	return err
 }
 
+// SetAppProjectV1ProjectID persists the legacy v1 Project ID into
+// app_projects.settings via jsonb_set so the dashboard's Native Builds tab
+// can resolve this mobile app to its Codemagic build pipeline entry.
+// Uses jsonb_set to avoid wiping other setting keys, and avoids a full
+// UpdateAppProject call that would require a hydrated struct.
+func (db *Database) SetAppProjectV1ProjectID(projectID string, v1ProjectID string) error {
+	_, err := db.DB.NewUpdate().Model((*models.AppProject)(nil)).
+		Set(`settings = jsonb_set(coalesce(settings, '{}'::jsonb), '{v1_project_id}', ?::jsonb, true)`, `"`+v1ProjectID+`"`).
+		Where("id = ?", projectID).
+		Exec(context.Background())
+	if err == nil {
+		db.InvalidateProjectCache(projectID)
+	}
+	return err
+}
+
 // UpdateAppProjectStatus performs a targeted single-column update on
 // app_projects.status. Used by agent.Run to flip "draft" → "ready" without
 // risking a constraint failure on unrelated JSONB columns the way a full
