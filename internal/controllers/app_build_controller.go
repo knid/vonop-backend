@@ -649,12 +649,41 @@ func (c *Controller) GetPreviewBundle(project *models.AppProject) (map[string]in
 		return nil, fmt.Errorf("no generated files found")
 	}
 
+	// Defensive: ensure the preview bundle always ships custom error pages so
+	// users never see Next.js's default dev error UI in the iframe. Only writes
+	// files that are missing — user-customized versions are preserved.
+	injectCustomErrorPages(fileMap, constants.DetectLanguage(project.Prompt))
+
 	envVars := c.CollectAllEnvVars(project)
 
 	return map[string]interface{}{
 		"files":    fileMap,
 		"env_vars": envVars,
 	}, nil
+}
+
+// injectCustomErrorPages writes app/error.tsx, app/not-found.tsx, and
+// app/global-error.tsx into the file map if they're missing. Supports both the
+// "app/" and "src/app/" directory layouts — whichever one the project uses is
+// detected from the existing layout file location.
+func injectCustomErrorPages(fileMap map[string]string, lang string) {
+	// Detect app-directory layout from existing layout file
+	prefix := "app/"
+	if _, ok := fileMap["src/app/layout.tsx"]; ok {
+		prefix = "src/app/"
+	} else if _, ok := fileMap["src/app/layout.jsx"]; ok {
+		prefix = "src/app/"
+	}
+
+	writeIfMissing := func(path, content string) {
+		if _, exists := fileMap[path]; !exists {
+			fileMap[path] = content
+		}
+	}
+
+	writeIfMissing(prefix+"error.tsx", constants.GetErrorTemplate(lang))
+	writeIfMissing(prefix+"not-found.tsx", constants.GetNotFoundTemplate(lang))
+	writeIfMissing(prefix+"global-error.tsx", constants.GetGlobalErrorTemplate(lang))
 }
 
 // injectAnalyticsScript adds the web analytics tracking script into the root

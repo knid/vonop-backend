@@ -130,6 +130,61 @@ export default function Error({
 `
 }
 
+// GetGlobalErrorTemplate returns the localized global-error boundary template.
+// global-error.tsx replaces the root layout when a runtime error bubbles past
+// error.tsx, so it must render its own <html> and <body>. Uses inline styles
+// because the root layout (and therefore global CSS) is not applied.
+func GetGlobalErrorTemplate(lang string) string {
+	s, ok := errorStrings[lang]
+	if !ok {
+		s = errorStrings["en"]
+	}
+	return `"use client"
+
+import { useEffect } from "react"
+
+export default function GlobalError({
+  error,
+  reset,
+}: {
+  error: Error & { digest?: string }
+  reset: () => void
+}) {
+  useEffect(() => {
+    console.error(error)
+  }, [error])
+
+  return (
+    <html>
+      <body style={{ margin: 0, fontFamily: "system-ui, -apple-system, sans-serif" }}>
+        <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#ffffff" }}>
+          <div style={{ textAlign: "center", padding: "2rem", maxWidth: "28rem" }}>
+            <h1 style={{ fontSize: "4.5rem", fontWeight: 700, margin: 0, color: "rgba(0,0,0,0.1)", lineHeight: 1 }}>Error</h1>
+            <p style={{ fontSize: "1.125rem", color: "rgba(0,0,0,0.6)", marginTop: "0.5rem", marginBottom: "1.5rem" }}>` + s[0] + `</p>
+            <button
+              onClick={() => reset()}
+              style={{
+                padding: "0.625rem 1.25rem",
+                borderRadius: "0.5rem",
+                border: "none",
+                background: "#111111",
+                color: "#ffffff",
+                fontSize: "0.875rem",
+                fontWeight: 500,
+                cursor: "pointer",
+              }}
+            >
+              ` + s[1] + `
+            </button>
+          </div>
+        </div>
+      </body>
+    </html>
+  )
+}
+`
+}
+
 // DetectLanguage infers the primary language from a user prompt by checking
 // for language-specific characters and common words. Returns an ISO 639-1 code.
 func DetectLanguage(prompt string) string {

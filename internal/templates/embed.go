@@ -50,6 +50,7 @@ var BaseFilePaths = []string{
 	"app/globals.css",
 	"app/not-found.tsx",
 	"app/error.tsx",
+	"app/global-error.tsx",
 	".gitignore",
 }
 
