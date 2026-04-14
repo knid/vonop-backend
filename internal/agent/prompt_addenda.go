@@ -287,23 +287,30 @@ message, call it "AI" or "yapay zeka" — never "Wemob Gateway", "OpenRouter",
 "Claude", "GPT", "Anthropic", or any underlying model name. The user does not
 care what powers it.
 
-The AI helper lives at lib/wemob-ai.ts and exposes three functions:
+The AI helper lives at lib/wemob-ai.ts and exports a preconfigured OpenAI
+client plus a thin image helper:
 
-    import { chat, chatStream, generateImage } from '@/lib/wemob-ai';
+    import { wemobAI, generateImage } from '@/lib/wemob-ai';
 
-- chat({ model, messages, temperature, maxTokens }) — one-shot text. Returns
-  a string. Use for summarization, classification, rewriting, single replies.
-- chatStream({ model, messages, ... }) — streaming text. Returns a
-  ReadableStream<Uint8Array>. Use for chat UIs that render tokens as they
-  arrive. Wrap the stream in a Response and return it from a route handler.
-- generateImage({ model, prompt, width, height }) — image generation. Returns
-  string[] of public URLs. Use for AI-generated imagery the user requests at
+- wemobAI() returns an OpenAI client pointed at the Wemob Gateway. Use it
+  exactly like the real OpenAI SDK — chat, streaming, tools, tool_choice,
+  response_format, seed, and vision all pass through to the upstream.
+- generateImage({ model, prompt, imageSize, numImages }) returns string[] of
+  public image URLs. Use it for AI-generated imagery the user requests at
   runtime (not for placeholder hero art — use the generate_image tool for that).
 
-Available chat models (no provider prefix): claude-sonnet-4 (default),
-claude-haiku-4-5, claude-opus-4, gpt-4.1, gpt-4.1-mini, gemini-2.5-pro.
+Available chat models (pass as the model field on
+wemobAI().chat.completions.create):
+anthropic/claude-sonnet-4 (default), anthropic/claude-haiku-4-5,
+anthropic/claude-opus-4, openai/gpt-4.1, openai/gpt-4.1-mini,
+google/gemini-2.5-pro.
+
 Available image models: fal-ai/flux-schnell (default), fal-ai/flux-pro/v1.1,
 fal-ai/flux-ultra.
+
+The openai npm package is already in package.json — do not add it again, and
+do not add @anthropic-ai/sdk, @google/generative-ai, or any other AI SDK. They
+are redundant with wemobAI().
 
 ## Server-Side Only
 WEMOB_AI_KEY and NEXT_PUBLIC_WEMOB_GATEWAY_URL are auto-injected — do not add
@@ -312,12 +319,21 @@ picker. NEVER import @/lib/wemob-ai from a "use client" file. The key must
 never reach the browser.
 
 ## Patterns
-- Streaming chat: app/api/chat/route.ts calls chatStream(...) and returns the
-  ReadableStream wrapped in a Response. Client component does
-  fetch('/api/chat', { method: 'POST', body: JSON.stringify({ messages }) })
-  and reads response.body with a TextDecoderStream, appending tokens to state.
-- One-shot generation: a Server Action (or route handler) calls chat(...) and
-  returns the string. Client awaits and renders.
+- One-shot generation: a Server Action or route handler calls
+    const res = await wemobAI().chat.completions.create({
+      model: 'anthropic/claude-sonnet-4',
+      messages,
+    });
+    return res.choices[0]?.message?.content ?? '';
+- Streaming chat: app/api/chat/route.ts opens
+    const stream = await wemobAI().chat.completions.create({
+      model: 'anthropic/claude-sonnet-4', messages, stream: true,
+    });
+  and streams ` + "`chunk.choices[0]?.delta?.content`" + ` to a Response built from
+  a ReadableStream. The client fetches '/api/chat' and appends tokens to state.
+- Tool calling / structured output: pass ` + "`tools`" + `, ` + "`tool_choice`" + `, or
+  ` + "`response_format`" + ` directly to chat.completions.create — the gateway
+  forwards them untouched.
 - Image generation: a Server Action calls generateImage({ prompt }) and
   returns the URL array. Render the first URL with next/image.
 

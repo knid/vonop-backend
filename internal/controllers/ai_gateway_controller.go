@@ -185,26 +185,14 @@ func (c *Controller) GetUserTierName(user *models.User) string {
 	return strings.ToLower(sub.Name)
 }
 
-// ResolveGatewayProvider returns an LLMProvider for the given model ID.
+// ResolveGatewayProvider returns the LLMProvider for gateway chat traffic.
+// All chat models flow through OpenRouter — one upstream, one OpenAI-
+// compatible contract. Model IDs must already be in OpenRouter's
+// provider/model format (e.g. "anthropic/claude-sonnet-4").
 func (c *Controller) ResolveGatewayProvider(modelID string) *utils.LLMProvider {
-	switch {
-	case strings.HasPrefix(modelID, "claude-"):
-		return &utils.LLMProvider{
-			Name:    "anthropic",
-			BaseURL: "https://api.anthropic.com/v1",
-			APIKey:  c.SecretManager.GetSecret("ANTHROPIC_API_KEY"),
-		}
-	case strings.HasPrefix(modelID, "gemini-"):
-		return &utils.LLMProvider{
-			Name:    "google",
-			BaseURL: "https://generativelanguage.googleapis.com/v1beta/openai",
-			APIKey:  c.SecretManager.GetSecret("GOOGLE_API_KEY"),
-		}
-	default:
-		return &utils.LLMProvider{
-			Name:    "openrouter",
-			BaseURL: "https://openrouter.ai/api/v1",
-			APIKey:  c.SecretManager.GetSecret("OPENROUTER_API_KEY"),
-		}
+	return &utils.LLMProvider{
+		Name:    "openrouter",
+		BaseURL: "https://openrouter.ai/api/v1",
+		APIKey:  c.SecretManager.GetSecret("OPENROUTER_API_KEY"),
 	}
 }

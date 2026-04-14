@@ -8,11 +8,13 @@ const GatewayMaxImagesPerRequest = 4
 
 // DefaultGatewayModels is the fallback model allowlist per subscription tier name.
 // Used when remote config is unavailable. Tier names are lowercased subscription names.
+// Chat model IDs are in OpenRouter's provider/model format because the gateway
+// proxies every chat request through OpenRouter (see ResolveGatewayProvider).
 var DefaultGatewayModels = map[string][]string{
-	"free":     {"gpt-4.1-mini", "claude-haiku-4-5"},
-	"starter":  {"gpt-4.1-mini", "claude-haiku-4-5", "fal-ai/flux-schnell"},
-	"pro":      {"gpt-4.1-mini", "gpt-4.1", "claude-haiku-4-5", "claude-sonnet-4", "fal-ai/flux-schnell", "fal-ai/flux-pro/v1.1"},
-	"business": {"gpt-4.1-mini", "gpt-4.1", "claude-haiku-4-5", "claude-sonnet-4", "claude-opus-4", "gemini-2.5-pro", "fal-ai/flux-schnell", "fal-ai/flux-pro/v1.1"},
+	"free":     {"openai/gpt-4.1-mini", "anthropic/claude-haiku-4-5"},
+	"starter":  {"openai/gpt-4.1-mini", "anthropic/claude-haiku-4-5", "fal-ai/flux-schnell"},
+	"pro":      {"openai/gpt-4.1-mini", "openai/gpt-4.1", "anthropic/claude-haiku-4-5", "anthropic/claude-sonnet-4", "fal-ai/flux-schnell", "fal-ai/flux-pro/v1.1"},
+	"business": {"openai/gpt-4.1-mini", "openai/gpt-4.1", "anthropic/claude-haiku-4-5", "anthropic/claude-sonnet-4", "anthropic/claude-opus-4", "google/gemini-2.5-pro", "fal-ai/flux-schnell", "fal-ai/flux-pro/v1.1"},
 }
 
 // DefaultGatewayRPM is the fallback requests-per-minute limit per tier.
@@ -44,14 +46,16 @@ type GatewayModelInfo struct {
 }
 
 var GatewayModelCatalog = []GatewayModelInfo{
-	// Chat models
-	{ID: "gpt-4.1-mini", Name: "GPT-4.1 Mini", Provider: "openai", Type: "chat", MaxContext: 1047576, CostPer1kInput: 1, CostPer1kOutput: 3, Capabilities: []string{"streaming", "vision"}},
-	{ID: "gpt-4.1", Name: "GPT-4.1", Provider: "openai", Type: "chat", MaxContext: 1047576, CostPer1kInput: 2, CostPer1kOutput: 8, Capabilities: []string{"streaming", "vision"}},
-	{ID: "claude-haiku-4-5", Name: "Claude Haiku 4.5", Provider: "anthropic", Type: "chat", MaxContext: 200000, CostPer1kInput: 1, CostPer1kOutput: 5, Capabilities: []string{"streaming", "vision"}},
-	{ID: "claude-sonnet-4", Name: "Claude Sonnet 4", Provider: "anthropic", Type: "chat", MaxContext: 200000, CostPer1kInput: 3, CostPer1kOutput: 15, Capabilities: []string{"streaming", "vision"}},
-	{ID: "claude-opus-4", Name: "Claude Opus 4", Provider: "anthropic", Type: "chat", MaxContext: 200000, CostPer1kInput: 15, CostPer1kOutput: 75, Capabilities: []string{"streaming", "vision"}},
-	{ID: "gemini-2.5-pro", Name: "Gemini 2.5 Pro", Provider: "google", Type: "chat", MaxContext: 1048576, CostPer1kInput: 1, CostPer1kOutput: 4, Capabilities: []string{"streaming", "vision"}},
-	// Image models
+	// Chat models — IDs are OpenRouter-format since the gateway proxies chat
+	// through OpenRouter. Provider is the underlying model author (shown in
+	// the /v2/gateway/models UI), not our upstream.
+	{ID: "openai/gpt-4.1-mini", Name: "GPT-4.1 Mini", Provider: "openai", Type: "chat", MaxContext: 1047576, CostPer1kInput: 1, CostPer1kOutput: 3, Capabilities: []string{"streaming", "vision"}},
+	{ID: "openai/gpt-4.1", Name: "GPT-4.1", Provider: "openai", Type: "chat", MaxContext: 1047576, CostPer1kInput: 2, CostPer1kOutput: 8, Capabilities: []string{"streaming", "vision"}},
+	{ID: "anthropic/claude-haiku-4-5", Name: "Claude Haiku 4.5", Provider: "anthropic", Type: "chat", MaxContext: 200000, CostPer1kInput: 1, CostPer1kOutput: 5, Capabilities: []string{"streaming", "vision"}},
+	{ID: "anthropic/claude-sonnet-4", Name: "Claude Sonnet 4", Provider: "anthropic", Type: "chat", MaxContext: 200000, CostPer1kInput: 3, CostPer1kOutput: 15, Capabilities: []string{"streaming", "vision"}},
+	{ID: "anthropic/claude-opus-4", Name: "Claude Opus 4", Provider: "anthropic", Type: "chat", MaxContext: 200000, CostPer1kInput: 15, CostPer1kOutput: 75, Capabilities: []string{"streaming", "vision"}},
+	{ID: "google/gemini-2.5-pro", Name: "Gemini 2.5 Pro", Provider: "google", Type: "chat", MaxContext: 1048576, CostPer1kInput: 1, CostPer1kOutput: 4, Capabilities: []string{"streaming", "vision"}},
+	// Image models — proxied directly to fal.ai, not through OpenRouter.
 	{ID: "fal-ai/flux-schnell", Name: "FLUX Schnell", Provider: "fal", Type: "image", CostCredits: 5, Capabilities: []string{"fast"}},
 	{ID: "fal-ai/flux-pro/v1.1", Name: "FLUX Pro v1.1", Provider: "fal", Type: "image", CostCredits: 15, Capabilities: []string{"hd"}},
 	{ID: "fal-ai/flux-ultra", Name: "FLUX Ultra", Provider: "fal", Type: "image", CostCredits: 40, Capabilities: []string{"hd", "ultra"}},

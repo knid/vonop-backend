@@ -26,6 +26,11 @@ import (
 // gatewayHTTPClient is reused across gateway proxy requests for connection pooling.
 var gatewayHTTPClient = &http.Client{}
 
+// gatewayChatMaxBodyBytes caps incoming chat request bodies. Matches the
+// ParseJSONBody limit used elsewhere in the project and is large enough for
+// base64 image attachments in vision requests.
+const gatewayChatMaxBodyBytes = 25 * 1024 * 1024
+
 // GatewayModels handles GET /v2/gateway/models.
 // Returns the list of chat and image models available to the authenticated user.
 func (v *HttpViews) GatewayModels(w http.ResponseWriter, r *http.Request) {
@@ -74,7 +79,9 @@ func (v *HttpViews) GatewayModels(w http.ResponseWriter, r *http.Request) {
 }
 
 // GatewayChat handles POST /v2/gateway/chat/completions.
-// Proxies an OpenAI-compatible chat request to the appropriate upstream provider.
+// Proxies an OpenAI-compatible chat request to OpenRouter, preserving every
+// field the caller sent (including tools, tool_choice, response_format, etc.)
+// so structured output and function calling actually work through the gateway.
 func (v *HttpViews) GatewayChat(w http.ResponseWriter, r *http.Request) {
 	user := middleware.GatewayUserFromContext(r.Context())
 	if user == nil {
@@ -84,9 +91,29 @@ func (v *HttpViews) GatewayChat(w http.ResponseWriter, r *http.Request) {
 	}
 	projectID := middleware.GatewayProjectIDFromContext(r.Context())
 
-	var req requests.GatewayChatRequest
-	if err := utils.ParseJSONBody(r, &req); err != nil {
-		slog.Warn("gateway chat: invalid request body",
+	// Decode into a map so unknown OpenAI fields (tools, tool_choice,
+	// response_format, seed, frequency_penalty, etc.) survive the proxy
+	// hop to the upstream. A typed struct would silently drop anything
+	// not declared on GatewayChatRequest.
+	if ct := r.Header.Get("Content-Type"); ct != "" && !strings.HasPrefix(ct, "application/json") {
+		middleware.GatewayError(w, "unsupported content type: "+ct, "invalid_request_error", "invalid_content_type", http.StatusBadRequest)
+		return
+	}
+	bodyBytes, err := io.ReadAll(io.LimitReader(r.Body, gatewayChatMaxBodyBytes))
+	if err != nil {
+		slog.Warn("gateway chat: failed to read body",
+			"error", err,
+			"content_type", r.Header.Get("Content-Type"),
+			"content_length", r.ContentLength,
+			"ua", r.UserAgent(),
+			"user_id", user.ID, "project_id", projectID)
+		middleware.GatewayError(w, "failed to read request body", "invalid_request_error", "invalid_body", http.StatusBadRequest)
+		return
+	}
+
+	var rawReq map[string]any
+	if err := json.Unmarshal(bodyBytes, &rawReq); err != nil {
+		slog.Warn("gateway chat: invalid json body",
 			"error", err,
 			"content_type", r.Header.Get("Content-Type"),
 			"content_length", r.ContentLength,
@@ -96,46 +123,57 @@ func (v *HttpViews) GatewayChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Model == "" {
+	model, _ := rawReq["model"].(string)
+	if model == "" {
 		slog.Warn("gateway chat: missing model",
 			"ua", r.UserAgent(), "user_id", user.ID, "project_id", projectID)
 		middleware.GatewayError(w, "model is required", "invalid_request_error", "missing_model", http.StatusBadRequest)
 		return
 	}
 
+	messages, _ := rawReq["messages"].([]any)
+	if len(messages) == 0 {
+		middleware.GatewayError(w, "messages is required and must be a non-empty array", "invalid_request_error", "missing_messages", http.StatusBadRequest)
+		return
+	}
+
+	stream, _ := rawReq["stream"].(bool)
+
 	// Validate model is in user's allowed list
 	allowed := v.Controller.GatewayAllowedModels(user)
 	modelAllowed := false
 	for _, m := range allowed {
-		if m == req.Model {
+		if m == model {
 			modelAllowed = true
 			break
 		}
 	}
 	if !modelAllowed {
 		slog.Warn("gateway chat: model not on plan",
-			"model", req.Model, "allowed", allowed,
+			"model", model, "allowed", allowed,
 			"user_id", user.ID, "project_id", projectID)
-		middleware.GatewayError(w, fmt.Sprintf("model %q is not available on your plan", req.Model), "invalid_request_error", "model_not_allowed", http.StatusForbidden)
+		middleware.GatewayError(w, fmt.Sprintf("model %q is not available on your plan", model), "invalid_request_error", "model_not_allowed", http.StatusForbidden)
 		return
 	}
 
 	// Reject image models on the chat endpoint
-	if strings.HasPrefix(req.Model, "fal-ai/") {
+	if strings.HasPrefix(model, "fal-ai/") {
 		slog.Warn("gateway chat: image model on chat endpoint",
-			"model", req.Model, "user_id", user.ID, "project_id", projectID)
+			"model", model, "user_id", user.ID, "project_id", projectID)
 		middleware.GatewayError(w, "image models must use the /v2/gateway/images/generate endpoint", "invalid_request_error", "wrong_endpoint", http.StatusBadRequest)
 		return
 	}
 
-	// Anthropic's Messages API (which powers claude-* via the OpenAI-compat
-	// layer) REQUIRES max_tokens — OpenAI's spec treats it as optional, so
-	// an OpenAI-shape client that omits it is valid against the contract
-	// but gets 400 from Anthropic. Inject a safe default here so the
-	// gateway keeps its "OpenAI-compatible, just works" promise. 4096 fits
+	// Anthropic's Messages API requires max_tokens. OpenRouter forwards
+	// chat requests to Anthropic without inventing a default, so an
+	// OpenAI-shape client that omits max_tokens against an anthropic/*
+	// model gets a 400 back through the gateway. Inject a safe default
+	// here to keep the "OpenAI-compatible, just works" promise. 4096 fits
 	// every Claude 4 family model without requiring beta headers.
-	if req.MaxTokens == 0 && strings.HasPrefix(req.Model, "claude-") {
-		req.MaxTokens = 4096
+	if strings.HasPrefix(model, "anthropic/claude-") {
+		if _, present := rawReq["max_tokens"]; !present {
+			rawReq["max_tokens"] = 4096
+		}
 	}
 
 	// Pre-check credit balance > overdraft floor
@@ -151,7 +189,7 @@ func (v *HttpViews) GatewayChat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Resolve upstream provider
-	provider := v.Controller.ResolveGatewayProvider(req.Model)
+	provider := v.Controller.ResolveGatewayProvider(model)
 
 	// Timeout from remote config
 	timeoutSec := v.Controller.RemoteConfig.GetInt(remoteconfig.GatewayChatTimeoutSeconds, remoteconfig.Global)
@@ -161,14 +199,15 @@ func (v *HttpViews) GatewayChat(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), time.Duration(timeoutSec)*time.Second)
 	defer cancel()
 
-	// Re-serialize the request body for upstream
-	bodyBytes, err := json.Marshal(req)
+	// Re-serialize the full map for upstream — preserves every field the
+	// caller sent, including ones we don't know about.
+	upstreamBody, err := json.Marshal(rawReq)
 	if err != nil {
 		middleware.GatewayError(w, "failed to serialize request", "server_error", "marshal_error", http.StatusInternalServerError)
 		return
 	}
 
-	upstreamReq, err := http.NewRequestWithContext(ctx, "POST", provider.Endpoint(), bytes.NewReader(bodyBytes))
+	upstreamReq, err := http.NewRequestWithContext(ctx, "POST", provider.Endpoint(), bytes.NewReader(upstreamBody))
 	if err != nil {
 		middleware.GatewayError(w, "failed to create upstream request", "server_error", "upstream_error", http.StatusInternalServerError)
 		return
@@ -177,7 +216,7 @@ func (v *HttpViews) GatewayChat(w http.ResponseWriter, r *http.Request) {
 
 	upstreamResp, err := gatewayHTTPClient.Do(upstreamReq)
 	if err != nil {
-		slog.Error("gateway chat: upstream request failed", "error", err, "model", req.Model)
+		slog.Error("gateway chat: upstream request failed", "error", err, "model", model)
 		middleware.GatewayError(w, "upstream provider request failed", "server_error", "upstream_error", http.StatusBadGateway)
 		return
 	}
@@ -198,7 +237,7 @@ func (v *HttpViews) GatewayChat(w http.ResponseWriter, r *http.Request) {
 		body, readErr := io.ReadAll(upstreamResp.Body)
 		if readErr != nil {
 			slog.Error("gateway chat: failed to read upstream error body", "error", readErr,
-				"status", upstreamResp.StatusCode, "model", req.Model, "provider", provider.Name)
+				"status", upstreamResp.StatusCode, "model", model, "provider", provider.Name)
 			middleware.GatewayError(w, "failed to read upstream response", "server_error", "upstream_error", http.StatusBadGateway)
 			return
 		}
@@ -208,7 +247,7 @@ func (v *HttpViews) GatewayChat(w http.ResponseWriter, r *http.Request) {
 		}
 		slog.Warn("gateway chat: upstream returned error",
 			"status", upstreamResp.StatusCode,
-			"model", req.Model,
+			"model", model,
 			"provider", provider.Name,
 			"user_id", user.ID, "project_id", projectID,
 			"upstream_body", snippet)
@@ -217,10 +256,10 @@ func (v *HttpViews) GatewayChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Stream {
-		v.handleStreamingChat(w, upstreamResp, user, req.Model, provider.Name, projectID)
+	if stream {
+		v.handleStreamingChat(w, upstreamResp, user, model, provider.Name, projectID)
 	} else {
-		v.handleNonStreamingChat(w, upstreamResp, user, req.Model, provider.Name, projectID)
+		v.handleNonStreamingChat(w, upstreamResp, user, model, provider.Name, projectID)
 	}
 }
 
