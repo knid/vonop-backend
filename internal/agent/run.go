@@ -142,6 +142,21 @@ func Run(
 
 	// --- Step 9: build system messages + registry + tracker ---
 	llmMessages := BuildSystemMessages(project, fileMap)
+
+	// Modal commands (/plan, /explain, /review) inject an extra system block
+	// that forbids file mutations on the current turn only. We append it to
+	// the leading contiguous system run — BEFORE convertHistory — so the
+	// native Anthropic adapter's leading-system extraction picks it up as a
+	// real system message instead of demoting it to a "[System] " user
+	// prefix. History replay does NOT re-inject this: see convertHistory for
+	// the rationale.
+	if addendum := SlashCommandSystemAddendum(message); addendum != "" {
+		llmMessages = append(llmMessages, utils.Message{
+			Role:    "system",
+			Content: addendum,
+		})
+	}
+
 	llmMessages = append(llmMessages, convertHistory(history)...)
 
 	// Append the current turn explicitly — we don't rely on history reload
@@ -153,15 +168,6 @@ func Run(
 	userTurn := utils.Message{Role: "user", Content: expandedMessage}
 	if len(images) > 0 {
 		userTurn.Images = images
-	}
-	// Modal commands (/plan, /explain, /review) inject an extra system block
-	// that forbids file mutations on the current turn only. History replay
-	// does NOT re-inject this — see convertHistory for the rationale.
-	if addendum := SlashCommandSystemAddendum(message); addendum != "" {
-		llmMessages = append(llmMessages, utils.Message{
-			Role:    "system",
-			Content: addendum,
-		})
 	}
 	llmMessages = append(llmMessages, userTurn)
 
