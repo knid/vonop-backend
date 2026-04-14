@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/agent"
+	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/services/fal"
 	"github.com/knid/wemob/internal/utils"
@@ -100,17 +101,17 @@ func (c *Controller) generateImageForAgent(ctx context.Context, prompt string, w
 	}
 
 	filename := fmt.Sprintf("generated-%d.jpg", time.Now().UnixNano())
-	s3Key := fmt.Sprintf("apps/%s/images/%s", projectID, filename)
+	assetPath := fmt.Sprintf("images/%s", filename)
+	s3Key := fmt.Sprintf("apps/%s/%s", projectID, assetPath)
 
 	// Detached context for the S3 upload so the image isn't lost if the
 	// caller's context is near its deadline.
 	uploadCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	var publicURL string
 	var uploadErr error
 	for attempt := 0; attempt < 3; attempt++ {
-		publicURL, uploadErr = c.AssetsStorage.UploadFileBytePublic(uploadCtx, s3Key, imgData, "image/jpeg")
+		uploadErr = c.AssetsStorage.UploadFileByteWithContentType(uploadCtx, s3Key, imgData, "image/jpeg")
 		if uploadErr == nil {
 			break
 		}
@@ -122,7 +123,10 @@ func (c *Controller) generateImageForAgent(ctx context.Context, prompt string, w
 	if uploadErr != nil {
 		return cdnURL, nil
 	}
-	return publicURL, nil
+	// The assets bucket is private — return the /v2/apps/{id}/file/* proxy URL
+	// which redirects to a fresh presigned S3 URL on each request, so the
+	// stored link never expires.
+	return fmt.Sprintf("%s/v2/apps/%s/file/%s", constants.WEMOB_API_BASE_URL, projectID, assetPath), nil
 }
 
 // enableProjectAIForAgent flips Settings["has_ai"] = true on the project so
