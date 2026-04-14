@@ -414,6 +414,8 @@ func GetContentWithLang(path string, colorScheme, darkColorScheme map[string]any
 		return constants.GetNotFoundTemplate(lang)
 	case "app/error.tsx":
 		return constants.GetErrorTemplate(lang)
+	case "app/global-error.tsx":
+		return constants.GetGlobalErrorTemplate(lang)
 	case "lib/schema.ts":
 		return database.BuildDrizzleSchema(dataModels)
 	}

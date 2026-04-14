@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -639,6 +640,30 @@ func migrateInactiveUsersToFree(bundb *bun.DB) {
 
 }
 
+// isSensitiveLogPath returns true if a request URL path is known to carry
+// secrets, credentials, or signed third-party payloads that must never land
+// in BetterStack. Used by httplog LogExtraAttrs to skip body capture on
+// auth and webhook routes even when the status is 4xx/5xx.
+func isSensitiveLogPath(path string) bool {
+	lower := strings.ToLower(path)
+	prefixes := []string{
+		"/webhooks/",      // Stripe, Iyzico, Coolify — all signed, all contain PII
+		"/v1/auth/",       // login / signup / password reset
+		"/v1/password/",   // password reset
+		"/v1/login",       // plain login
+		"/v1/signup",      // plain signup
+		"/v1/register",    // alt signup
+		"/v1/billing/",    // Stripe payloads pass through here
+		"/v2/gateway-key", // reveal / rotate — returns raw API key material
+	}
+	for _, p := range prefixes {
+		if strings.HasPrefix(lower, p) {
+			return true
+		}
+	}
+	return false
+}
+
 func main() {
 	infisicalClient := infisical.NewInfisicalClient(context.Background(), infisical.Config{
 		SiteUrl: "https://eu.infisical.com",
@@ -942,10 +967,29 @@ func main() {
 		// slog.LevelError - log 5xx responses only
 		Level: slog.LevelInfo,
 
-		Schema:          httplog.SchemaOTEL,
-		RecoverPanics:   true,
+		Schema:        httplog.SchemaOTEL,
+		RecoverPanics: true,
+		// Request bodies are logged ONLY on 4xx/5xx via LogExtraAttrs so we
+		// can diagnose rejections without capturing body content on every
+		// happy-path request (log volume + PII cost). LogBodyMaxLen keeps
+		// each capture bounded.
+		LogBodyMaxLen:   2048,
 		LogRequestBody:  func(req *http.Request) bool { return false },
 		LogResponseBody: func(req *http.Request) bool { return false },
+		LogExtraAttrs: func(req *http.Request, reqBody string, status int) []slog.Attr {
+			if status < 400 || reqBody == "" {
+				return nil
+			}
+			// Skip routes where the body is known to contain secrets or
+			// signed webhook payloads we must not copy into logs.
+			if isSensitiveLogPath(req.URL.Path) {
+				return nil
+			}
+			if len(reqBody) > 2048 {
+				reqBody = reqBody[:2048] + "...(truncated)"
+			}
+			return []slog.Attr{slog.String("request.body", reqBody)}
+		},
 	}))
 
 	r.Use(func(next http.Handler) http.Handler {

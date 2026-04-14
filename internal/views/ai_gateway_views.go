@@ -190,6 +190,33 @@ func (v *HttpViews) GatewayChat(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Upstream errors are never streamed — they're a single JSON body.
+	// Read it entirely, slog the body for diagnosis (this is what every
+	// previous "we got 500 from the user app" incident needed but
+	// couldn't see), then pass it through to the client verbatim.
+	if upstreamResp.StatusCode >= 400 {
+		body, readErr := io.ReadAll(upstreamResp.Body)
+		if readErr != nil {
+			slog.Error("gateway chat: failed to read upstream error body", "error", readErr,
+				"status", upstreamResp.StatusCode, "model", req.Model, "provider", provider.Name)
+			middleware.GatewayError(w, "failed to read upstream response", "server_error", "upstream_error", http.StatusBadGateway)
+			return
+		}
+		snippet := string(body)
+		if len(snippet) > 2048 {
+			snippet = snippet[:2048] + "...(truncated)"
+		}
+		slog.Warn("gateway chat: upstream returned error",
+			"status", upstreamResp.StatusCode,
+			"model", req.Model,
+			"provider", provider.Name,
+			"user_id", user.ID, "project_id", projectID,
+			"upstream_body", snippet)
+		w.WriteHeader(upstreamResp.StatusCode)
+		w.Write(body)
+		return
+	}
+
 	if req.Stream {
 		v.handleStreamingChat(w, upstreamResp, user, req.Model, provider.Name, projectID)
 	} else {
