@@ -495,3 +495,58 @@ func (v *HttpViews) RotateGatewayKey(w http.ResponseWriter, r *http.Request) {
 		"key": newKey,
 	}, http.StatusCreated)
 }
+
+// GetProjectAIUsage returns the recent LLM/AI usage entries and a 30-day
+// summary for a single project. Covers every call that flowed through the
+// Wemob AI Gateway on behalf of the generated app, so the dashboard can
+// show per-project AI spend (tokens, call count, model breakdown).
+// GET /v2/apps/{appId}/ai-usage
+func (v *HttpViews) GetProjectAIUsage(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserFromContext(r.Context())
+	projectID := chi.URLParam(r, "appId")
+
+	// Ownership check — GetAppProject returns an error if the project is
+	// not owned by this user.
+	project, err := v.Controller.GetAppProject(projectID, user)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	entries, err := v.Controller.DB.GetLLMTokenUsageByProject(project.ID.String(), 200)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	since := time.Now().AddDate(0, -1, 0)
+	promptTotal, completionTotal, totalTokens, totalCalls, err := v.Controller.DB.GetLLMTokenUsageSummaryByProject(project.ID.String(), since)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	responseEntries := make([]responses.TokenUsageEntry, 0, len(entries))
+	for _, e := range entries {
+		responseEntries = append(responseEntries, responses.TokenUsageEntry{
+			Action:           e.Action,
+			Model:            e.Model,
+			PromptTokens:     e.PromptTokens,
+			CompletionTokens: e.CompletionTokens,
+			TotalTokens:      e.TotalTokens,
+			CallCount:        e.CallCount,
+			Reference:        e.Reference,
+			CreatedAt:        e.CreatedAt.Format("2006-01-02T15:04:05Z"),
+		})
+	}
+
+	utils.JSONResponse(w, responses.TokenUsageResponse{
+		Entries: responseEntries,
+		Summary: responses.TokenUsageSummary{
+			TotalPromptTokens:     promptTotal,
+			TotalCompletionTokens: completionTotal,
+			TotalTokens:           totalTokens,
+			TotalCallCount:        totalCalls,
+		},
+	}, http.StatusOK)
+}

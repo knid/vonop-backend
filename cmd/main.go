@@ -969,12 +969,21 @@ func main() {
 
 		Schema:        httplog.SchemaOTEL,
 		RecoverPanics: true,
-		// Request bodies are logged ONLY on 4xx/5xx via LogExtraAttrs so we
-		// can diagnose rejections without capturing body content on every
-		// happy-path request (log volume + PII cost). LogBodyMaxLen keeps
-		// each capture bounded.
-		LogBodyMaxLen:   2048,
-		LogRequestBody:  func(req *http.Request) bool { return false },
+		// Body logging policy:
+		//   - Gateway chat/image routes: always log the request body. It's
+		//     the core diagnostic signal for "what did the user app send?"
+		//     and bodies are small, JSON, and don't carry secrets (the
+		//     gateway key is in the Authorization header, which we never
+		//     log). Response bodies stay off — chat completions can stream
+		//     tens of KB, and upstream errors are already slog.Warn'd at
+		//     the application layer with the full body.
+		//   - Everything else: bodies are captured only on 4xx/5xx via
+		//     LogExtraAttrs below, which lets the library tee the body
+		//     into a buffer and emit it as an attribute post-handler.
+		LogBodyMaxLen: 2048,
+		LogRequestBody: func(req *http.Request) bool {
+			return strings.HasPrefix(req.URL.Path, "/v2/gateway/")
+		},
 		LogResponseBody: func(req *http.Request) bool { return false },
 		LogExtraAttrs: func(req *http.Request, reqBody string, status int) []slog.Attr {
 			if status < 400 || reqBody == "" {
@@ -1588,6 +1597,11 @@ func main() {
 					r.Get("/gateway-key", httpViews.GetGatewayKeyInfo)
 					r.Post("/gateway-key/reveal", httpViews.RevealGatewayKey)
 					r.Post("/gateway-key/rotate", httpViews.RotateGatewayKey)
+
+					// AI usage for this generated app — tokens, call count,
+					// per-model breakdown for everything that flowed through
+					// the Wemob AI Gateway on behalf of the project.
+					r.Get("/ai-usage", httpViews.GetProjectAIUsage)
 				})
 			})
 

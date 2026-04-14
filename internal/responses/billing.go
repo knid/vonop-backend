@@ -55,6 +55,7 @@ type TokenUsageSummary struct {
 	TotalPromptTokens     int `json:"total_prompt_tokens"`
 	TotalCompletionTokens int `json:"total_completion_tokens"`
 	TotalTokens           int `json:"total_tokens"`
+	TotalCallCount        int `json:"total_call_count,omitempty"`
 }
 
 type TokenUsageResponse struct {
