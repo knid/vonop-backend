@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/knid/wemob/internal/database"
 	_ "github.com/lib/pq"
 )
 
@@ -92,7 +93,11 @@ func (e ExecuteSQLTool) Execute(ctx context.Context, rc *RunContext, input json.
 	if err != nil || connStr == "" {
 		return "this project does not have a database connected", true, nil
 	}
-	db, err := sql.Open("postgres", connStr)
+	// lib/pq doesn't send SNI, so Neon's router can't find the endpoint
+	// without the endpoint ID embedded in the connection string's options
+	// parameter. NeonConnStrWithEndpoint is the same helper every other
+	// neon caller in the project uses.
+	db, err := sql.Open("postgres", database.NeonConnStrWithEndpoint(connStr))
 	if err != nil {
 		return fmt.Sprintf("could not connect: %v", err), true, nil
 	}
