@@ -146,10 +146,22 @@ func Run(
 
 	// Append the current turn explicitly — we don't rely on history reload
 	// to round-trip images, and we want the turn to land even if history
-	// load failed.
-	userTurn := utils.Message{Role: "user", Content: message}
+	// load failed. Slash command expansion happens here so the LLM sees the
+	// full prompt body while the persisted DB row (above) keeps the literal
+	// text the user typed.
+	expandedMessage, _, _ := ExpandSlashCommand(message)
+	userTurn := utils.Message{Role: "user", Content: expandedMessage}
 	if len(images) > 0 {
 		userTurn.Images = images
+	}
+	// Modal commands (/plan, /explain, /review) inject an extra system block
+	// that forbids file mutations on the current turn only. History replay
+	// does NOT re-inject this — see convertHistory for the rationale.
+	if addendum := SlashCommandSystemAddendum(message); addendum != "" {
+		llmMessages = append(llmMessages, utils.Message{
+			Role:    "system",
+			Content: addendum,
+		})
 	}
 	llmMessages = append(llmMessages, userTurn)
 
