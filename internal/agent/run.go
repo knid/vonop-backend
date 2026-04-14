@@ -528,7 +528,16 @@ func normaliseImages(images []string) []map[string]string {
 func convertHistory(history []models.AppChatMessage) []utils.Message {
 	var out []utils.Message
 	for _, m := range history {
-		out = append(out, utils.Message{Role: m.Role, Content: m.Content})
+		content := m.Content
+		// Historical user messages are stored literally (e.g. "/plan a blog").
+		// Re-expand on every load so the LLM sees the same prompt body it saw
+		// on the original turn. We deliberately do NOT replay the SystemAddendum
+		// for historical turns — modal constraints like "do not write files"
+		// only apply to the turn they were typed on.
+		if m.Role == "user" {
+			content, _, _ = ExpandSlashCommand(content)
+		}
+		out = append(out, utils.Message{Role: m.Role, Content: content})
 	}
 	return out
 }
