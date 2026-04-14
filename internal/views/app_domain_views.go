@@ -74,6 +74,11 @@ func (v *HttpViews) AddAppDomain(w http.ResponseWriter, r *http.Request) {
 		Set("app_id", project.ID.String()).
 		Set("domain", req.Domain))
 
+	go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_DOMAIN_ADDED, map[string]any{
+		"app_id": project.ID.String(),
+		"domain": req.Domain,
+	})
+
 	utils.JSONResponse(w, result, http.StatusCreated)
 }
 
@@ -105,6 +110,12 @@ func (v *HttpViews) VerifyAppDomain(w http.ResponseWriter, r *http.Request) {
 		Set("domain", result.Domain).
 		Set("status", result.Status))
 
+	go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_DOMAIN_VERIFIED, map[string]any{
+		"app_id": project.ID.String(),
+		"domain": result.Domain,
+		"status": result.Status,
+	})
+
 	utils.JSONResponse(w, result, http.StatusOK)
 }
 
@@ -131,6 +142,10 @@ func (v *HttpViews) RemoveAppDomain(w http.ResponseWriter, r *http.Request) {
 
 	v.Controller.TrackUserEvent(user, "domain_removed", posthog.NewProperties().
 		Set("app_id", project.ID.String()))
+
+	go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_DOMAIN_REMOVED, map[string]any{
+		"app_id": project.ID.String(),
+	})
 
 	utils.JSONResponse(w, responses.SuccessResponse{Success: true}, http.StatusOK)
 }

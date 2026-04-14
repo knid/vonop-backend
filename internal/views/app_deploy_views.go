@@ -79,6 +79,11 @@ func (v *HttpViews) DeployAppWeb(w http.ResponseWriter, r *http.Request) {
 			Set("app_id", project.ID.String()).
 			Set("platform", "web").
 			Set("error", err.Error()))
+		go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_WEB_DEPLOYMENT_FAILED, map[string]any{
+			"app_id":        project.ID.String(),
+			"project_type":  project.ProjectType,
+			"error_message": err.Error(),
+		})
 		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -89,6 +94,13 @@ func (v *HttpViews) DeployAppWeb(w http.ResponseWriter, r *http.Request) {
 		Set("project_type", project.ProjectType).
 		Set("deploy_duration_seconds", deployDuration).
 		Set("deploy_version", deployment.Version))
+
+	go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_WEB_DEPLOYMENT_SUCCEEDED, map[string]any{
+		"app_id":       project.ID.String(),
+		"project_type": project.ProjectType,
+		"version":      deployment.Version,
+		"deployed_url": deployment.DeployedURL,
+	})
 
 	utils.JSONResponse(w, responses.AppDeploymentResponse{
 		ID:           deployment.ID,
@@ -125,6 +137,10 @@ func (v *HttpViews) UndeployAppWeb(w http.ResponseWriter, r *http.Request) {
 
 	v.Controller.TrackUserEvent(user, "app_undeployed_web", posthog.NewProperties().
 		Set("app_id", project.ID.String()))
+
+	go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_WEB_UNDEPLOYED, map[string]any{
+		"app_id": project.ID.String(),
+	})
 
 	utils.JSONResponse(w, map[string]string{"status": "undeployed"}, http.StatusOK)
 }

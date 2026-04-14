@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/responses"
@@ -129,6 +130,10 @@ func (v *HttpViews) ChatStoreManagement(w http.ResponseWriter, r *http.Request) 
 
 	v.Controller.TrackUserEvent(user, "store_chat_sent", posthog.NewProperties().
 		Set("store_id", store.ID.String()))
+
+	go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_STORE_CHAT_SENT, map[string]any{
+		"store_id": store.ID.String(),
+	})
 
 	v.handleStreamOrAsync(w, r, user, StreamConfig{
 		JobType: "store_chat",

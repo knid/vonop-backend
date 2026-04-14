@@ -165,6 +165,12 @@ func (v *HttpViews) ExportToGitHub(w http.ResponseWriter, r *http.Request) {
 	go v.Controller.TrackUserEvent(user, "github_exported", posthog.NewProperties().
 		Set("app_id", project.ID.String()).
 		Set("repo_name", req.RepoName))
+
+	go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_GITHUB_EXPORTED, map[string]any{
+		"app_id":    project.ID.String(),
+		"repo_name": req.RepoName,
+	})
+
 	utils.JSONResponse(w, toGitHubExportResponse(export), http.StatusCreated)
 }
 
@@ -210,6 +216,11 @@ func (v *HttpViews) PushToGitHub(w http.ResponseWriter, r *http.Request) {
 
 	go v.Controller.TrackUserEvent(user, "github_pushed", posthog.NewProperties().
 		Set("app_id", project.ID.String()))
+
+	go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_GITHUB_PUSHED, map[string]any{
+		"app_id": project.ID.String(),
+	})
+
 	utils.JSONResponse(w, toGitHubExportResponse(export), http.StatusOK)
 }
 

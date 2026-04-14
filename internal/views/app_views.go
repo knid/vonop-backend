@@ -123,6 +123,11 @@ func (v *HttpViews) CreateApp(w http.ResponseWriter, r *http.Request) {
 		Set("project_type", project.ProjectType).
 		Set("app_id", project.ID.String()))
 
+	go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_APP_DRAFT_CREATED, map[string]any{
+		"app_id":       project.ID.String(),
+		"project_type": project.ProjectType,
+	})
+
 	var theme map[string]any
 	json.Unmarshal(project.Theme, &theme)
 
@@ -582,6 +587,10 @@ func (v *HttpViews) CreateAppSnapshot(w http.ResponseWriter, r *http.Request) {
 	v.Controller.TrackUserEvent(user, "app_snapshot_created", posthog.NewProperties().
 		Set("app_id", project.ID.String()))
 
+	go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_SNAPSHOT_CREATED, map[string]any{
+		"app_id": project.ID.String(),
+	})
+
 	utils.JSONResponse(w, responses.CommitHistoryEntry{
 		Hash:        hash,
 		Description: req.Description,
@@ -615,6 +624,11 @@ func (v *HttpViews) RestoreAppSnapshot(w http.ResponseWriter, r *http.Request) {
 	v.Controller.TrackUserEvent(user, "app_snapshot_restored", posthog.NewProperties().
 		Set("app_id", project.ID.String()).
 		Set("snapshot_id", sid))
+
+	go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_SNAPSHOT_RESTORED, map[string]any{
+		"app_id":      project.ID.String(),
+		"snapshot_id": sid,
+	})
 
 	utils.JSONResponse(w, responses.SuccessResponse{Success: true}, http.StatusOK)
 }
@@ -690,6 +704,11 @@ func (v *HttpViews) ExportApp(w http.ResponseWriter, r *http.Request) {
 	v.Controller.TrackUserEvent(user, "app_exported", posthog.NewProperties().
 		Set("app_id", project.ID.String()).
 		Set("platform", platform))
+
+	go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_APP_EXPORTED_ZIP, map[string]any{
+		"app_id":   project.ID.String(),
+		"platform": platform,
+	})
 
 	w.Header().Set("Content-Type", "application/zip")
 	w.Header().Set("Content-Disposition", "attachment; filename="+project.Slug+"-"+platform+".zip")
@@ -768,6 +787,11 @@ func (v *HttpViews) ConnectAppIntegration(w http.ResponseWriter, r *http.Request
 		Set("app_id", project.ID.String()).
 		Set("provider", integ.Provider))
 
+	go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_INTEGRATION_CONNECTED, map[string]any{
+		"app_id":   project.ID.String(),
+		"provider": integ.Provider,
+	})
+
 	utils.JSONResponse(w, responses.AppIntegrationResp{
 		ID:        integ.ID,
 		Provider:  integ.Provider,
@@ -843,6 +867,10 @@ func (v *HttpViews) DisconnectAppIntegration(w http.ResponseWriter, r *http.Requ
 
 	v.Controller.TrackUserEvent(user, "integration_disconnected", posthog.NewProperties().
 		Set("app_id", project.ID.String()))
+
+	go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_INTEGRATION_DISCONNECTED, map[string]any{
+		"app_id": project.ID.String(),
+	})
 
 	utils.JSONResponse(w, responses.SuccessResponse{Success: true}, http.StatusOK)
 }

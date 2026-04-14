@@ -3,6 +3,7 @@ package views
 import (
 	"net/http"
 
+	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/utils"
 	"github.com/posthog/posthog-go"
@@ -61,6 +62,10 @@ func (v *HttpViews) ApplyReferralCode(w http.ResponseWriter, r *http.Request) {
 
 	v.Controller.TrackUserEvent(user, "referral_code_applied", posthog.NewProperties().
 		Set("code", req.Code))
+
+	go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_REFERRAL_CODE_APPLIED, map[string]any{
+		"code": req.Code,
+	})
 
 	utils.JSONResponse(w, map[string]string{"message": "referral code applied successfully"}, http.StatusOK)
 }

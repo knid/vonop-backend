@@ -147,9 +147,11 @@ func (c *Controller) processWebhookEvent(event stripe.Event) error {
 			go c.CRMService.SendEvent(user, constants.BREVO_EVENT_USER_SETUP_FINISHED, map[string]any{})
 		}
 
-		go c.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_UPDATED, map[string]any{
+		go c.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_CREATED, map[string]any{
 			"subscription_status": user.SubscriptionStatus,
 			"subscription_id":     user.SubscriptionID.String(),
+			"plan_name":           subs.Name,
+			"price_id":            sub.Items.Data[0].Price.ID,
 		})
 
 		if _, err := c.DB.UpdateUser(user); err != nil {
@@ -192,6 +194,16 @@ func (c *Controller) processWebhookEvent(event stripe.Event) error {
 		subs, err := c.DB.GetSubscriptionByPriceID(sub.Items.Data[0].Price.ID)
 		if err != nil {
 			return fmt.Errorf("plan not found for price ID %s: %w", sub.Items.Data[0].Price.ID, err)
+		}
+
+		// Capture plan change detection BEFORE mutating user.SubscriptionID
+		oldSubID := user.SubscriptionID
+		planChanged := oldSubID != uuid.Nil && oldSubID != subs.ID
+		var oldMonthlyPrice int
+		if planChanged {
+			if oldSub, err := c.DB.GetSubscriptionById(oldSubID.String()); err == nil {
+				oldMonthlyPrice = oldSub.MonthlyPrice
+			}
 		}
 
 		// Map Stripe status to our internal status
@@ -240,7 +252,22 @@ func (c *Controller) processWebhookEvent(event stripe.Event) error {
 		go c.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_UPDATED, map[string]any{
 			"subscription_status": user.SubscriptionStatus,
 			"subscription_id":     user.SubscriptionID.String(),
+			"plan_name":           subs.Name,
 		})
+
+		if planChanged && user.SubscriptionID != uuid.Nil {
+			changeEvent := constants.BREVO_EVENT_SUBSCRIPTION_UPGRADED
+			if subs.MonthlyPrice < oldMonthlyPrice {
+				changeEvent = constants.BREVO_EVENT_SUBSCRIPTION_DOWNGRADED
+			}
+			go c.CRMService.SendEvent(user, changeEvent, map[string]any{
+				"old_plan_id":       oldSubID.String(),
+				"new_plan_id":       subs.ID.String(),
+				"new_plan_name":     subs.Name,
+				"old_monthly_price": oldMonthlyPrice,
+				"new_monthly_price": subs.MonthlyPrice,
+			})
+		}
 
 		if _, err := c.DB.UpdateUser(user); err != nil {
 			return fmt.Errorf("failed to update user %s after subscription change: %w", user.ID, err)
@@ -289,6 +316,26 @@ func (c *Controller) processWebhookEvent(event stripe.Event) error {
 			"subscription_id":     user.SubscriptionID.String(),
 		})
 
+		go c.CRMService.SendEvent(user, constants.BREVO_EVENT_PAYMENT_SUCCEEDED, map[string]any{
+			"amount_paid":    invoice.AmountPaid,
+			"currency":       string(invoice.Currency),
+			"invoice_id":     invoice.ID,
+			"invoice_url":    invoice.HostedInvoiceURL,
+			"billing_reason": string(invoice.BillingReason),
+		})
+
+		// Fire subscription_renewed specifically on recurring cycle invoices.
+		// Stripe sets BillingReason = "subscription_cycle" on renewal, "subscription_create"
+		// on first charge (which is already covered by customer.subscription.created).
+		if invoice.BillingReason == stripe.InvoiceBillingReasonSubscriptionCycle {
+			go c.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_RENEWED, map[string]any{
+				"subscription_id": user.SubscriptionID.String(),
+				"amount_paid":     invoice.AmountPaid,
+				"currency":        string(invoice.Currency),
+				"invoice_id":      invoice.ID,
+			})
+		}
+
 		if _, err := c.DB.UpdateUser(user); err != nil {
 			return fmt.Errorf("failed to update user %s after payment succeeded: %w", user.ID, err)
 		}
@@ -296,7 +343,8 @@ func (c *Controller) processWebhookEvent(event stripe.Event) error {
 		c.TrackUserEvent(user, "payment_succeeded", posthog.NewProperties().
 			Set("amount_paid", invoice.AmountPaid).
 			Set("currency", string(invoice.Currency)).
-			Set("invoice_id", invoice.ID))
+			Set("invoice_id", invoice.ID).
+			Set("billing_reason", string(invoice.BillingReason)))
 		c.IdentifyUser(user)
 
 	case "invoice.payment_failed":
@@ -353,6 +401,32 @@ func (c *Controller) processWebhookEvent(event stripe.Event) error {
 		c.TrackUserEvent(user, "payment_action_required", posthog.NewProperties().
 			Set("invoice_url", invoice.HostedInvoiceURL))
 		c.IdentifyUser(user)
+
+	case "invoice.upcoming":
+		var invoice stripe.Invoice
+		if err := json.Unmarshal(event.Data.Raw, &invoice); err != nil {
+			slog.Error("webhook: failed to unmarshal invoice", "error", err, "event_id", event.ID)
+			return nil
+		}
+		if invoice.Customer == nil {
+			return nil
+		}
+		user, err := c.DB.GetUserByStripeCustomerID(invoice.Customer.ID)
+		if err != nil {
+			return fmt.Errorf("user not found for stripe customer %s: %w", invoice.Customer.ID, err)
+		}
+
+		go c.CRMService.SendEvent(user, constants.BREVO_EVENT_INVOICE_UPCOMING, map[string]any{
+			"amount_due":   invoice.AmountDue,
+			"currency":     string(invoice.Currency),
+			"period_start": invoice.PeriodStart,
+			"period_end":   invoice.PeriodEnd,
+			"invoice_url":  invoice.HostedInvoiceURL,
+		})
+
+		c.TrackUserEvent(user, "invoice_upcoming", posthog.NewProperties().
+			Set("amount_due", invoice.AmountDue).
+			Set("currency", string(invoice.Currency)))
 
 	case "customer.subscription.deleted":
 		var sub stripe.Subscription
@@ -449,6 +523,13 @@ func (c *Controller) processWebhookEvent(event stripe.Event) error {
 		}
 
 		slog.Info("credits purchased", "user_id", userID, "pack_size", packSize, "session_id", cs.ID)
+
+		go c.CRMService.SendEvent(user, constants.BREVO_EVENT_CREDITS_PURCHASED, map[string]any{
+			"pack_size":    packSize,
+			"session_id":   cs.ID,
+			"amount_total": cs.AmountTotal,
+			"currency":     string(cs.Currency),
+		})
 
 		c.TrackUserEvent(user, "credits_purchased", posthog.NewProperties().
 			Set("pack_size", packSize).

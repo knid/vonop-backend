@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/services/remoteconfig"
 	"github.com/knid/wemob/internal/utils"
@@ -192,6 +193,7 @@ func (c *Controller) DeductAICreditsUnchecked(user *models.User, cost int, actio
 	if err != nil {
 		return err
 	}
+	prevBalance := balance.Balance
 
 	var newBalance int
 	txErr := c.DB.RunInTx(func(tx bun.Tx) error {
@@ -220,6 +222,8 @@ func (c *Controller) DeductAICreditsUnchecked(user *models.User, cost int, actio
 			Set("cost", cost).
 			Set("remaining_balance", newBalance).
 			Set("reference", reference))
+
+		c.emitCreditThresholdEvents(user, prevBalance, newBalance, action, reference)
 	}
 
 	return txErr
@@ -236,6 +240,7 @@ func (c *Controller) DeductAICreditsToFloor(user *models.User, cost int, action 
 	if err != nil {
 		return err
 	}
+	prevBalance := balance.Balance
 
 	var newBalance, deducted int
 	txErr := c.DB.RunInTx(func(tx bun.Tx) error {
@@ -269,9 +274,64 @@ func (c *Controller) DeductAICreditsToFloor(user *models.User, cost int, action 
 				"user_id", user.ID, "requested", cost, "deducted", deducted,
 				"remaining", newBalance)
 		}
+
+		c.emitCreditThresholdEvents(user, prevBalance, newBalance, action, reference)
 	}
 
 	return txErr
+}
+
+// emitCreditThresholdEvents fires Brevo events when a deduction crosses a
+// percentage-of-monthly-grant threshold (50%, 25%, 10%, 0%) or triggers
+// overdraft. Each crossing fires exactly once per deduction — if a large
+// deduction skips over multiple thresholds, the lowest crossed threshold is
+// used. Designed to feed marketing workflows without spamming CRM on every
+// deduct, and to fire immediately instead of waiting for the hourly job.
+func (c *Controller) emitCreditThresholdEvents(user *models.User, prevBalance, newBalance int, action, reference string) {
+	// Overdraft transition (balance went from >= 0 to < 0)
+	if prevBalance >= 0 && newBalance < 0 {
+		go c.CRMService.SendEvent(user, constants.BREVO_EVENT_CREDITS_OVERDRAFT_STARTED, map[string]any{
+			"previous_balance": prevBalance,
+			"new_balance":      newBalance,
+			"action":           action,
+			"reference":        reference,
+		})
+	}
+
+	// Percentage thresholds — only meaningful when user has a monthly grant
+	limits, err := c.GetUserLimits(user)
+	if err != nil || limits == nil || limits.MonthlyAICredits <= 0 {
+		return
+	}
+	monthly := limits.MonthlyAICredits
+
+	// Thresholds in descending order so we report the lowest newly-crossed one.
+	type threshold struct {
+		percent int
+		event   string
+		level   string
+	}
+	thresholds := []threshold{
+		{0, constants.BREVO_EVENT_AI_CREDITS_DEPLETED, "depleted"},
+		{10, constants.BREVO_EVENT_CREDITS_THRESHOLD_CROSSED, "10pct"},
+		{25, constants.BREVO_EVENT_CREDITS_THRESHOLD_CROSSED, "25pct"},
+		{50, constants.BREVO_EVENT_CREDITS_THRESHOLD_CROSSED, "50pct"},
+	}
+
+	for _, t := range thresholds {
+		cutoff := (monthly * t.percent) / 100
+		if prevBalance > cutoff && newBalance <= cutoff {
+			go c.CRMService.SendEvent(user, t.event, map[string]any{
+				"level":             t.level,
+				"threshold_percent": t.percent,
+				"credits_remaining": newBalance,
+				"credits_total":     monthly,
+				"action":            action,
+				"reference":         reference,
+			})
+			return // only fire the lowest newly-crossed threshold
+		}
+	}
 }
 
 // AddAICredits adds credits to a user's balance (for purchases or grants).
@@ -362,6 +422,12 @@ func (c *Controller) GrantSubscriptionCredits(user *models.User) {
 	}
 
 	slog.Info("subscription credits granted", "user_id", user.ID, "credits", limits.MonthlyAICredits)
+
+	go c.CRMService.SendEvent(user, constants.BREVO_EVENT_CREDITS_GRANTED, map[string]any{
+		"credits":    limits.MonthlyAICredits,
+		"grant_type": "subscription",
+		"reference":  user.SubscriptionID.String(),
+	})
 }
 
 // messagesToPostHogInput converts []utils.Message to the format PostHog expects

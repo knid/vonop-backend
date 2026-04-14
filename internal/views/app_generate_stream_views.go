@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/knid/wemob/internal/agent"
+	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/utils"
@@ -55,6 +56,11 @@ func (v *HttpViews) GenerateAppStream(w http.ResponseWriter, r *http.Request) {
 	v.Controller.TrackUserEvent(user, "app_generation_started", posthog.NewProperties().
 		Set("project_type", req.ProjectType).
 		Set("app_id", project.ID.String()))
+
+	go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_APP_GENERATION_STARTED, map[string]any{
+		"app_id":       project.ID.String(),
+		"project_type": req.ProjectType,
+	})
 
 	v.handleStreamOrAsync(w, r, user, StreamConfig{
 		JobType: "generate_app",

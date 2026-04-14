@@ -373,6 +373,12 @@ func (c *Controller) CreateDashboard(ctx context.Context, project *models.AppPro
 		Set("provider", dbProvider).
 		Set("panel_count", len(createdPanels)))
 
+	go c.CRMService.SendEvent(user, constants.BREVO_EVENT_DASHBOARD_CREATED, map[string]any{
+		"app_id":      project.ID.String(),
+		"provider":    dbProvider,
+		"panel_count": len(createdPanels),
+	})
+
 	sendEvent("dashboard_complete", buildDashboardResponse(dashboard, createdPanels))
 }
 

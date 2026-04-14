@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/services/remoteconfig"
@@ -119,10 +120,22 @@ func (c *Controller) ApplyReferralCode(user *models.User, codeStr string) error 
 	if err == nil {
 		if err := c.AddAICredits(referrer, signupCredits, "referral_signup_reward", user.ID.String()); err != nil {
 			slog.Error("failed to grant referral signup reward credits", "error", err, "referrer_id", referrer.ID, "referred_id", user.ID)
+		} else {
+			go c.CRMService.SendEvent(referrer, constants.BREVO_EVENT_REFERRAL_SIGNUP_BONUS_RECEIVED, map[string]any{
+				"credits":     signupCredits,
+				"role":        "referrer",
+				"referred_id": user.ID.String(),
+			})
 		}
 	}
 	if err := c.AddAICredits(user, signupCredits, "referral_signup_bonus", code.UserID.String()); err != nil {
 		slog.Error("failed to grant referral signup bonus credits", "error", err, "user_id", user.ID, "referrer_code_owner", code.UserID)
+	} else {
+		go c.CRMService.SendEvent(user, constants.BREVO_EVENT_REFERRAL_SIGNUP_BONUS_RECEIVED, map[string]any{
+			"credits":     signupCredits,
+			"role":        "referred",
+			"referrer_id": code.UserID.String(),
+		})
 	}
 
 	return nil
@@ -155,11 +168,23 @@ func (c *Controller) GrantReferralSubscriptionReward(user *models.User) {
 	if err == nil {
 		if err := c.AddAICredits(referrer, subCredits, "referral_subscription_reward", user.ID.String()); err != nil {
 			slog.Error("failed to grant referral subscription reward credits", "error", err, "referrer_id", referrer.ID, "referred_id", user.ID)
+		} else {
+			go c.CRMService.SendEvent(referrer, constants.BREVO_EVENT_REFERRAL_SUBSCRIPTION_REWARD_RECEIVED, map[string]any{
+				"credits":     subCredits,
+				"role":        "referrer",
+				"referred_id": user.ID.String(),
+			})
 		}
 	}
 
 	// Grant subscription credits to referred user
 	if err := c.AddAICredits(user, subCredits, "referral_subscription_bonus", referral.ReferrerID.String()); err != nil {
 		slog.Error("failed to grant referral subscription bonus credits", "error", err, "user_id", user.ID, "referrer_id", referral.ReferrerID)
+	} else {
+		go c.CRMService.SendEvent(user, constants.BREVO_EVENT_REFERRAL_SUBSCRIPTION_REWARD_RECEIVED, map[string]any{
+			"credits":     subCredits,
+			"role":        "referred",
+			"referrer_id": referral.ReferrerID.String(),
+		})
 	}
 }
