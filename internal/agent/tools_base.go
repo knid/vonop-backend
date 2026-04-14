@@ -14,13 +14,18 @@ const maxReadBytes = 200 * 1024 // 200 KB
 
 // protectedPaths cannot be written, edited, or deleted by the agent. Keys
 // MUST be lowercase — isProtected normalises the input before lookup.
+//
+// package.json is intentionally NOT on this list: the agent owns its own
+// imports, so it must be able to add new dependencies when it introduces a
+// new third-party package. Lock files stay protected so the agent can't
+// invent fake hashes.
 var protectedPaths = map[string]bool{
-	// Config files at project root
-	"package.json":        true,
+	// Lock files — npm/yarn/pnpm/bun manage these, not the LLM
 	"package-lock.json":   true,
 	"yarn.lock":           true,
 	"pnpm-lock.yaml":      true,
 	"bun.lockb":           true,
+	// Config files at project root
 	"tsconfig.json":       true,
 	"next.config.ts":      true,
 	"next.config.js":      true,

@@ -120,6 +120,13 @@ func (p ProvisionDatabaseTool) Execute(ctx context.Context, rc *RunContext, inpu
 		})
 	}
 
+	// Add the packages lib/db.ts imports to package.json. The LLM never
+	// wrote these imports, so it won't add them itself.
+	addDependenciesToPackageJSON(rc, map[string]string{
+		"@neondatabase/serverless": "^0.10.0",
+		"drizzle-orm":              "^0.39.0",
+	})
+
 	tableNames := make([]string, 0, len(args.Tables))
 	for _, t := range args.Tables {
 		tableNames = append(tableNames, t.Name)
