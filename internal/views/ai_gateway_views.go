@@ -128,6 +128,16 @@ func (v *HttpViews) GatewayChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Anthropic's Messages API (which powers claude-* via the OpenAI-compat
+	// layer) REQUIRES max_tokens — OpenAI's spec treats it as optional, so
+	// an OpenAI-shape client that omits it is valid against the contract
+	// but gets 400 from Anthropic. Inject a safe default here so the
+	// gateway keeps its "OpenAI-compatible, just works" promise. 4096 fits
+	// every Claude 4 family model without requiring beta headers.
+	if req.MaxTokens == 0 && strings.HasPrefix(req.Model, "claude-") {
+		req.MaxTokens = 4096
+	}
+
 	// Pre-check credit balance > overdraft floor
 	balance, err := v.Controller.GetOrCreateCreditsBalance(user)
 	if err != nil {

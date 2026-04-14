@@ -35,6 +35,8 @@ export type WemobChatOptions = {
   maxTokens?: number;
 };
 
+const DEFAULT_MAX_TOKENS = 4096;
+
 type ChatCompletionResponse = {
   choices?: { message?: { content?: string } }[];
 };
@@ -55,7 +57,7 @@ export async function chat(opts: WemobChatOptions): Promise<string> {
       model: opts.model ?? 'claude-sonnet-4',
       messages: opts.messages,
       temperature: opts.temperature,
-      max_tokens: opts.maxTokens,
+      max_tokens: opts.maxTokens ?? DEFAULT_MAX_TOKENS,
     }),
   });
   if (!res.ok) {
@@ -80,7 +82,7 @@ export async function chatStream(
       model: opts.model ?? 'claude-sonnet-4',
       messages: opts.messages,
       temperature: opts.temperature,
-      max_tokens: opts.maxTokens,
+      max_tokens: opts.maxTokens ?? DEFAULT_MAX_TOKENS,
       stream: true,
     }),
   });
