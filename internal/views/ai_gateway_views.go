@@ -78,6 +78,7 @@ func (v *HttpViews) GatewayModels(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) GatewayChat(w http.ResponseWriter, r *http.Request) {
 	user := middleware.GatewayUserFromContext(r.Context())
 	if user == nil {
+		slog.Warn("gateway chat: unauthorized", "ua", r.UserAgent(), "ct", r.Header.Get("Content-Type"))
 		middleware.GatewayError(w, "unauthorized", "authentication_error", "invalid_api_key", http.StatusUnauthorized)
 		return
 	}
@@ -85,11 +86,19 @@ func (v *HttpViews) GatewayChat(w http.ResponseWriter, r *http.Request) {
 
 	var req requests.GatewayChatRequest
 	if err := utils.ParseJSONBody(r, &req); err != nil {
+		slog.Warn("gateway chat: invalid request body",
+			"error", err,
+			"content_type", r.Header.Get("Content-Type"),
+			"content_length", r.ContentLength,
+			"ua", r.UserAgent(),
+			"user_id", user.ID, "project_id", projectID)
 		middleware.GatewayError(w, "invalid request body: "+err.Error(), "invalid_request_error", "invalid_body", http.StatusBadRequest)
 		return
 	}
 
 	if req.Model == "" {
+		slog.Warn("gateway chat: missing model",
+			"ua", r.UserAgent(), "user_id", user.ID, "project_id", projectID)
 		middleware.GatewayError(w, "model is required", "invalid_request_error", "missing_model", http.StatusBadRequest)
 		return
 	}
@@ -104,12 +113,17 @@ func (v *HttpViews) GatewayChat(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if !modelAllowed {
+		slog.Warn("gateway chat: model not on plan",
+			"model", req.Model, "allowed", allowed,
+			"user_id", user.ID, "project_id", projectID)
 		middleware.GatewayError(w, fmt.Sprintf("model %q is not available on your plan", req.Model), "invalid_request_error", "model_not_allowed", http.StatusForbidden)
 		return
 	}
 
 	// Reject image models on the chat endpoint
 	if strings.HasPrefix(req.Model, "fal-ai/") {
+		slog.Warn("gateway chat: image model on chat endpoint",
+			"model", req.Model, "user_id", user.ID, "project_id", projectID)
 		middleware.GatewayError(w, "image models must use the /v2/gateway/images/generate endpoint", "invalid_request_error", "wrong_endpoint", http.StatusBadRequest)
 		return
 	}
