@@ -388,12 +388,48 @@ must be in the user's language.
 - If layout needs client interactivity (hooks, providers), create a separate
   components/layout-client.tsx with "use client" and import it into
   layout.tsx as a wrapper around {children}.
+
+## Client Boundary Rule (CRITICAL — the build will runtime-error if you get this wrong)
+ANY file that contains an inline event handler in JSX — onClick, onMouseEnter,
+onMouseLeave, onChange, onSubmit, onFocus, onBlur, onKeyDown, onKeyUp,
+onInput, onScroll, onDrag, onDrop, onTouchStart, onTouchMove, onTouchEnd,
+or any other on* prop — MUST start with "use client" on the very first line
+(before imports). No exceptions. This applies even to a one-line handler on a
+single <Link>, <button>, or <div>. The React rule is:
+
+    event handlers are functions → functions cannot cross the
+    server/client boundary → the file that WRITES the handler must be a
+    Client Component.
+
+Symptoms when you get this wrong:
+- "Event handlers cannot be passed to Client Component props."
+- "Functions cannot be passed directly to Client Components unless you
+  explicitly expose it by marking it with 'use server'."
+
+How to decide:
+1. Before you write a file, scan your planned JSX. Does ANY element have an
+   on* prop with an inline arrow function or a local function reference?
+2. If yes → the file MUST be "use client". Add the directive now, before you
+   forget.
+3. If the file also needs to be a Server Component (e.g. it exports metadata,
+   fetches data, or is a page.tsx that loads from the database), split it:
+   page.tsx stays a Server Component and imports a sibling
+   components/<name>-client.tsx that owns the handlers. NEVER try to keep
+   both in the same file.
+
+Examples of files that MUST be "use client":
+- A hero that has onMouseEnter / onMouseLeave for a hover effect.
+- A card grid where each card has an onClick to toggle a state.
+- A header with an onClick={() => setMenuOpen(!menuOpen)}.
+- A footer with a form that has onSubmit.
+- A Link with onMouseEnter={() => prefetch(...)} — still a handler, still
+  requires "use client".
+
 - NEVER pass functions, callbacks, or objects containing functions as props
-  from Server Components to Client Components. This causes a runtime error
-  ("Functions cannot be passed directly to Client Components"). Define event
-  handlers and render callbacks inside the Client Component itself, and pass
-  only serializable data (strings, numbers, booleans, plain objects, arrays)
-  as props. If a component needs a render callback (table column renderers),
+  from Server Components to Client Components. Define event handlers and
+  render callbacks inside the Client Component itself, and pass only
+  serializable data (strings, numbers, booleans, plain objects, arrays) as
+  props. If a component needs a render callback (table column renderers),
   that component must be a Client Component and define the render functions
   internally.
 
