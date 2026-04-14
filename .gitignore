@@ -5,3 +5,4 @@ storage/private
 .DS_Store
 docs/superpowers/
 .superpowers/
+.worktrees/
