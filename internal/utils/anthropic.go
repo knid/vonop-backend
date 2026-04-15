@@ -47,11 +47,30 @@ type AnthropicContentBlock struct {
 	CacheControl *AnthropicCacheControl `json:"cache_control,omitempty"`
 }
 
-// AnthropicImageSource holds base64 image data for the Anthropic API.
+// AnthropicImageSource describes an image attached to an Anthropic message.
+// Anthropic supports two source shapes: inline base64 and a remote URL. Fields
+// are `omitempty` so each shape only emits its own keys.
 type AnthropicImageSource struct {
-	Type      string `json:"type"`       // "base64"
-	MediaType string `json:"media_type"` // e.g. "image/png"
-	Data      string `json:"data"`       // raw base64 data
+	Type      string `json:"type"`                 // "base64" or "url"
+	MediaType string `json:"media_type,omitempty"` // base64 only (e.g. "image/png")
+	Data      string `json:"data,omitempty"`       // base64 only (raw base64 payload)
+	URL       string `json:"url,omitempty"`        // url only
+}
+
+// newAnthropicImageSource normalises a chat image reference into the right
+// Anthropic source shape. Chat attachments come in as either an https URL
+// (uploaded to S3 by the dashboard) or a data URI. Treating an https URL as
+// base64 makes Anthropic reject the request with "invalid base64 data".
+func newAnthropicImageSource(imageRef string) *AnthropicImageSource {
+	if strings.HasPrefix(imageRef, "http://") || strings.HasPrefix(imageRef, "https://") {
+		return &AnthropicImageSource{Type: "url", URL: imageRef}
+	}
+	mediaType, data := parseDataURI(imageRef)
+	return &AnthropicImageSource{
+		Type:      "base64",
+		MediaType: mediaType,
+		Data:      data,
+	}
 }
 
 // AnthropicMessage is an Anthropic API message with role and content blocks.
@@ -413,14 +432,9 @@ func convertMessagesToAnthropic(messages []Message) []AnthropicMessage {
 			if len(m.Images) > 0 {
 				blocks := []AnthropicContentBlock{{Type: "text", Text: m.Content}}
 				for _, img := range m.Images {
-					mediaType, data := parseDataURI(img)
 					blocks = append(blocks, AnthropicContentBlock{
-						Type: "image",
-						Source: &AnthropicImageSource{
-							Type:      "base64",
-							MediaType: mediaType,
-							Data:      data,
-						},
+						Type:   "image",
+						Source: newAnthropicImageSource(img),
 					})
 				}
 				result = append(result, AnthropicMessage{
