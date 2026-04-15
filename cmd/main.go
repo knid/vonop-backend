@@ -1194,6 +1194,7 @@ func main() {
 			})
 			r.Route("/billing", func(r chi.Router) {
 				r.Get("/plans", httpViews.GetBillingPlans)
+				r.Get("/gateway-models", httpViews.GetBillingGatewayModels)
 				r.Post("/checkout", httpViews.StripeCheckout)
 				r.Route("/subscription", func(r chi.Router) {
 					r.Post("/portal", httpViews.StripeCustomerPortal)

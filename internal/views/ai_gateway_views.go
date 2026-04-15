@@ -78,6 +78,57 @@ func (v *HttpViews) GatewayModels(w http.ResponseWriter, r *http.Request) {
 	}, http.StatusOK)
 }
 
+// GetBillingGatewayModels handles GET /v1/billing/gateway-models.
+// Returns the chat + image models the current user's subscription tier can
+// reach through the Wemob AI Gateway, plus the tier name. Called from the
+// dashboard's subscription page so users can see what their plan actually
+// allows — the information is otherwise only visible to generated apps via
+// GET /v2/gateway/models, which authenticates with a per-project gateway key
+// and is not reachable from the session-authed dashboard.
+func (v *HttpViews) GetBillingGatewayModels(w http.ResponseWriter, r *http.Request) {
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	allowed := v.Controller.GatewayAllowedModels(user)
+	allowedSet := make(map[string]bool, len(allowed))
+	for _, m := range allowed {
+		allowedSet[m] = true
+	}
+
+	var chat []constants.GatewayModelInfo
+	var image []constants.GatewayModelInfo
+	for _, m := range constants.GatewayModelCatalog {
+		if !allowedSet[m.ID] {
+			continue
+		}
+		info := m
+		if info.Type == "image" {
+			info.CostCredits = v.Controller.GatewayImageCreditCost(info.ID)
+		}
+		switch info.Type {
+		case "chat":
+			chat = append(chat, info)
+		case "image":
+			image = append(image, info)
+		}
+	}
+	if chat == nil {
+		chat = []constants.GatewayModelInfo{}
+	}
+	if image == nil {
+		image = []constants.GatewayModelInfo{}
+	}
+
+	utils.JSONResponse(w, responses.BillingGatewayModelsResponse{
+		Tier:  v.Controller.GetUserTierName(user),
+		Chat:  chat,
+		Image: image,
+	}, http.StatusOK)
+}
+
 // GatewayChat handles POST /v2/gateway/chat/completions.
 // Proxies an OpenAI-compatible chat request to OpenRouter, preserving every
 // field the caller sent (including tools, tool_choice, response_format, etc.)
