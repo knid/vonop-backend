@@ -277,11 +277,26 @@ extra fields.
   not flash before the session resolves.
 `
 
-// AIAddendum is appended to BasePrompt when project.Settings.has_ai is true.
-// It confirms the Wemob AI Gateway is already wired up so subsequent runs and
-// chat turns use the existing helper instead of calling setup_wemob_ai_gateway
-// again.
-const AIAddendum = `# AI ADDENDUM
+// buildAIAddendum is appended to BasePrompt when project.Settings.has_ai is
+// true. It confirms the Wemob AI Gateway is already wired up so subsequent
+// runs and chat turns use the existing helper instead of calling
+// setup_wemob_ai_gateway again.
+//
+// The chat model list is rendered dynamically from the user's allowed set so
+// the LLM never recommends a model the gateway would 403 at runtime. When no
+// deps callback is available (e.g. standalone tooling), the block falls back
+// to a conservative "the setup tool will list available models" line.
+func buildAIAddendum(deps *RunDependencies) string {
+	allowedChat := gatewayAllowedChatModels(deps)
+
+	modelBlock := "Available chat models will be listed when you call\nsetup_wemob_ai_gateway — use whatever that tool reports."
+	defaultModel := "anthropic/claude-haiku-4-5"
+	if len(allowedChat) > 0 {
+		modelBlock = "Available chat models on the user's current plan (pass as the\nmodel field on wemobAI().chat.completions.create — anything else\nwill 403 at runtime):\n" + renderGatewayChatModelsBlock(allowedChat)
+		defaultModel = defaultGatewayChatModel(allowedChat)
+	}
+
+	return `# AI ADDENDUM
 This project has the built-in Wemob AI Gateway wired up. In every user-facing
 message, call it "AI" or "yapay zeka" — never "Wemob Gateway", "OpenRouter",
 "Claude", "GPT", "Anthropic", or any underlying model name. The user does not
@@ -299,11 +314,7 @@ client plus a thin image helper:
   public image URLs. Use it for AI-generated imagery the user requests at
   runtime (not for placeholder hero art — use the generate_image tool for that).
 
-Available chat models (pass as the model field on
-wemobAI().chat.completions.create):
-anthropic/claude-sonnet-4 (default), anthropic/claude-haiku-4-5,
-anthropic/claude-opus-4, openai/gpt-4.1, openai/gpt-4.1-mini,
-google/gemini-2.5-pro.
+` + modelBlock + `
 
 Available image models: fal-ai/flux-schnell (default), fal-ai/flux-pro/v1.1,
 fal-ai/flux-ultra.
@@ -321,19 +332,21 @@ never reach the browser.
 ## Patterns
 - One-shot generation: a Server Action or route handler calls
     const res = await wemobAI().chat.completions.create({
-      model: 'anthropic/claude-sonnet-4',
+      model: '` + defaultModel + `',
       messages,
     });
     return res.choices[0]?.message?.content ?? '';
 - Streaming chat: app/api/chat/route.ts opens
     const stream = await wemobAI().chat.completions.create({
-      model: 'anthropic/claude-sonnet-4', messages, stream: true,
+      model: '` + defaultModel + `', messages, stream: true,
     });
   and streams ` + "`chunk.choices[0]?.delta?.content`" + ` to a Response built from
   a ReadableStream. The client fetches '/api/chat' and appends tokens to state.
 - Tool calling / structured output: pass ` + "`tools`" + `, ` + "`tool_choice`" + `, or
   ` + "`response_format`" + ` directly to chat.completions.create — the gateway
   forwards them untouched.
+- Vision: models tagged [vision] in the list above accept image_url content
+  parts exactly like the OpenAI SDK. Send images as data URLs or public URLs.
 - Image generation: a Server Action calls generateImage({ prompt }) and
   returns the URL array. Render the first URL with next/image.
 
@@ -345,6 +358,7 @@ never reach the browser.
 - Do NOT rewrite lib/wemob-ai.ts. It is template-managed; extend it only by
   adding new functions, never by replacing the existing exports.
 `
+}
 
 // DatabaseAddendum is appended to BasePrompt when project.Settings.has_database is true.
 const DatabaseAddendum = `# DATABASE ADDENDUM

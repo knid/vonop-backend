@@ -8,6 +8,74 @@ import (
 	"github.com/knid/wemob/internal/templates"
 )
 
+// setupAIResultTemplate is the success payload the tool returns. The chat
+// model list and the default model ID are injected at call time so the LLM
+// only ever sees models the user's tier can actually reach. Before this was
+// a static block including google/gemini-2.5-pro, which hit a 403 for every
+// non-business customer at runtime.
+const setupAIResultTemplate = `Wemob AI Gateway is ready for this project.
+
+What is now true:
+- lib/wemob-ai.ts has been written. It exports a preconfigured OpenAI
+  client plus a small image helper:
+    import { wemobAI, generateImage } from '@/lib/wemob-ai';
+- The ` + "`openai`" + ` npm package has been added to package.json. Do NOT
+  add it again. Do NOT add any other AI SDK (anthropic, google-ai, etc.).
+- Two env vars are auto-injected at build and runtime — do NOT add them
+  yourself, do NOT ask the user to paste an API key, do NOT create a
+  settings screen for choosing a model:
+    WEMOB_AI_KEY                  (server-side only, never expose)
+    NEXT_PUBLIC_WEMOB_GATEWAY_URL (OpenAI-compatible base URL)
+- Available chat models on the user's current plan (pass as the model field
+  on wemobAI().chat.completions.create — models not listed here will be
+  rejected by the gateway with HTTP 403):
+%s
+- Available image models (passed to generateImage):
+    fal-ai/flux-schnell    — fast (default)
+    fal-ai/flux-pro/v1.1   — HD
+    fal-ai/flux-ultra      — premium
+
+How to call it:
+- One-shot text (summarize, classify, rewrite):
+    const res = await wemobAI().chat.completions.create({
+      model: '%s',
+      messages: [{ role: 'user', content: '...' }],
+    });
+    const text = res.choices[0]?.message?.content ?? '';
+- Streaming chat UI — use the OpenAI SDK's native streaming:
+    const stream = await wemobAI().chat.completions.create({
+      model: '%s',
+      messages,
+      stream: true,
+    });
+    for await (const chunk of stream) { ... }
+  In an API route, return a streamed Response built from the async
+  iterator (the standard OpenAI + Next.js pattern).
+- Tool calling / structured output — pass ` + "`tools`" + `, ` + "`tool_choice`" + `, or
+  ` + "`response_format`" + ` directly to chat.completions.create. They are
+  forwarded to the upstream untouched.
+- Vision (image input) — models tagged [vision] above accept image_url
+  content parts exactly like the OpenAI SDK. Send images as data URLs or
+  public URLs; never as raw base64 without the data: prefix.
+- Image generation:
+    const urls = await generateImage({ prompt: '...' });
+    // render urls[0] with next/image
+
+Rules:
+1. ALWAYS call from server-side code only — API routes (app/api/**/route.ts),
+   Server Components, or Server Actions. NEVER import @/lib/wemob-ai from a
+   "use client" file. The key WEMOB_AI_KEY must never reach the browser.
+2. In every user-facing message, call this "AI" or "yapay zeka" — never
+   "Wemob Gateway", "OpenRouter", "Claude", "GPT", "Anthropic", or any
+   underlying model name. The user does not care what powers it.
+
+Next steps for this run:
+1. Build the AI feature the user asked for (chat UI, summarizer, image
+   generator, etc.) using the helper above.
+2. Always create the API route first, then wire the client to call it.
+3. Show a loading state while the request is in flight and a friendly
+   error toast if it fails.`
+
 // SetupAIGatewayTool is the agent-callable entry point for adding AI to a
 // project via the Wemob AI Gateway. It is registered unconditionally; the
 // tool internally rejects re-runs once Settings["has_ai"] is true so the model
@@ -66,6 +134,14 @@ func (s SetupAIGatewayTool) Execute(ctx context.Context, rc *RunContext, input j
 		}
 	}
 
+	// Resolve allowed chat models for this user's tier BEFORE enabling AI
+	// on the project, so we can refuse early on a tier that has no chat
+	// access without leaving the project in a half-wired state.
+	allowedChat := gatewayAllowedChatModels(s.Deps)
+	if len(allowedChat) == 0 {
+		return "no chat models are available on the user's current plan — the Wemob AI Gateway cannot be wired up until they upgrade", true, nil
+	}
+
 	if err := s.Deps.EnableAI(ctx, rc.Project); err != nil {
 		return fmt.Sprintf("enabling AI failed: %v", err), true, nil
 	}
@@ -91,69 +167,9 @@ func (s SetupAIGatewayTool) Execute(ctx context.Context, rc *RunContext, input j
 		"openai": "^4.104.0",
 	})
 
-	result := `Wemob AI Gateway is ready for this project.
-
-What is now true:
-- lib/wemob-ai.ts has been written. It exports a preconfigured OpenAI
-  client plus a small image helper:
-    import { wemobAI, generateImage } from '@/lib/wemob-ai';
-- The ` + "`openai`" + ` npm package has been added to package.json. Do NOT
-  add it again. Do NOT add any other AI SDK (anthropic, google-ai, etc.).
-- Two env vars are auto-injected at build and runtime — do NOT add them
-  yourself, do NOT ask the user to paste an API key, do NOT create a
-  settings screen for choosing a model:
-    WEMOB_AI_KEY                  (server-side only, never expose)
-    NEXT_PUBLIC_WEMOB_GATEWAY_URL (OpenAI-compatible base URL)
-- Available chat models (pass as the model field on
-  wemobAI().chat.completions.create):
-    anthropic/claude-sonnet-4    — best balance of quality and speed (default)
-    anthropic/claude-haiku-4-5   — fastest and cheapest, great for chat replies
-    anthropic/claude-opus-4      — highest reasoning quality, slow and expensive
-    openai/gpt-4.1               — OpenAI flagship
-    openai/gpt-4.1-mini          — OpenAI cheap and fast
-    google/gemini-2.5-pro        — huge context, multimodal
-- Available image models (passed to generateImage):
-    fal-ai/flux-schnell    — fast (default)
-    fal-ai/flux-pro/v1.1   — HD
-    fal-ai/flux-ultra      — premium
-
-How to call it:
-- One-shot text (summarize, classify, rewrite):
-    const res = await wemobAI().chat.completions.create({
-      model: 'anthropic/claude-sonnet-4',
-      messages: [{ role: 'user', content: '...' }],
-    });
-    const text = res.choices[0]?.message?.content ?? '';
-- Streaming chat UI — use the OpenAI SDK's native streaming:
-    const stream = await wemobAI().chat.completions.create({
-      model: 'anthropic/claude-sonnet-4',
-      messages,
-      stream: true,
-    });
-    for await (const chunk of stream) { ... }
-  In an API route, return a streamed Response built from the async
-  iterator (the standard OpenAI + Next.js pattern).
-- Tool calling / structured output — pass ` + "`tools`" + `, ` + "`tool_choice`" + `, or
-  ` + "`response_format`" + ` directly to chat.completions.create. They are
-  forwarded to the upstream untouched.
-- Image generation:
-    const urls = await generateImage({ prompt: '...' });
-    // render urls[0] with next/image
-
-Rules:
-1. ALWAYS call from server-side code only — API routes (app/api/**/route.ts),
-   Server Components, or Server Actions. NEVER import @/lib/wemob-ai from a
-   "use client" file. The key WEMOB_AI_KEY must never reach the browser.
-2. In every user-facing message, call this "AI" or "yapay zeka" — never
-   "Wemob Gateway", "OpenRouter", "Claude", "GPT", "Anthropic", or any
-   underlying model name. The user does not care what powers it.
-
-Next steps for this run:
-1. Build the AI feature the user asked for (chat UI, summarizer, image
-   generator, etc.) using the helper above.
-2. Always create the API route first, then wire the client to call it.
-3. Show a loading state while the request is in flight and a friendly
-   error toast if it fails.`
+	modelList := renderGatewayChatModelsBlock(allowedChat)
+	defaultModel := defaultGatewayChatModel(allowedChat)
+	result := fmt.Sprintf(setupAIResultTemplate, modelList, defaultModel, defaultModel)
 
 	return result, false, nil
 }

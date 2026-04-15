@@ -56,6 +56,14 @@ type MobileBridgeUpdater func(ctx context.Context, projectID, method string, ena
 // SetupAIGatewayTool checks the existing flag before invoking this callback.
 type AIEnabler func(ctx context.Context, project *models.AppProject) error
 
+// GatewayAllowedModelsFn returns the model IDs (chat + image, OpenRouter /
+// fal format) the current user's subscription tier can reach through the
+// Wemob AI Gateway. Bound per-run in AgentDeps so the agent package never has
+// to resolve tier / remote-config state itself. Used by SetupAIGatewayTool and
+// the AI addendum to keep the model list the LLM sees in sync with what the
+// gateway will actually accept at runtime.
+type GatewayAllowedModelsFn func() []string
+
 // StoreOperator executes one store management operation for an ecommerce
 // project. Bound by the controller layer to Controller.ExecuteStoreOp. The
 // dispatcher inside the controller routes on `action` to the existing
@@ -110,6 +118,7 @@ type RunDependencies struct {
 	NeonConnString           NeonConnResolver
 	ProvisionDatabase        DatabaseProvisioner
 	EnableAI                 AIEnabler
+	GatewayAllowedModels     GatewayAllowedModelsFn
 	UpdateMobileBridgeMethod MobileBridgeUpdater
 	RecordLLMUsage           LLMUsageRecorder
 	RecordLLMError           LLMErrorRecorder

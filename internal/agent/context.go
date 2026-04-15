@@ -17,9 +17,13 @@ import (
 //
 // anthropic.go marks up to 4 system blocks with cache_control, so each block
 // becomes its own cache breakpoint for prompt caching.
-func BuildSystemMessages(project *models.AppProject, fileMap *SafeFileMap) []utils.Message {
+//
+// deps is passed in so the AI addendum can render only the chat models the
+// current user's subscription tier can actually reach; passing nil degrades
+// to a conservative generic block.
+func BuildSystemMessages(project *models.AppProject, fileMap *SafeFileMap, deps *RunDependencies) []utils.Message {
 	base := BasePrompt
-	addendum := buildAddendum(project)
+	addendum := buildAddendum(project, deps)
 
 	msgs := []utils.Message{{Role: "system", Content: base}}
 	if addendum != "" {
@@ -30,7 +34,7 @@ func BuildSystemMessages(project *models.AppProject, fileMap *SafeFileMap) []uti
 }
 
 // buildAddendum composes project-specific prompt blocks.
-func buildAddendum(project *models.AppProject) string {
+func buildAddendum(project *models.AppProject, deps *RunDependencies) string {
 	var parts []string
 	switch project.ProjectType {
 	case "ecommerce":
@@ -45,7 +49,7 @@ func buildAddendum(project *models.AppProject) string {
 		parts = append(parts, DatabaseAddendum)
 	}
 	if projectHasAI(project) {
-		parts = append(parts, AIAddendum)
+		parts = append(parts, buildAIAddendum(deps))
 	}
 	if len(parts) == 0 {
 		return ""

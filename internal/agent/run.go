@@ -141,7 +141,7 @@ func Run(
 	}
 
 	// --- Step 9: build system messages + registry + tracker ---
-	llmMessages := BuildSystemMessages(project, fileMap)
+	llmMessages := BuildSystemMessages(project, fileMap, deps)
 
 	// Modal commands (/plan, /explain, /review) inject an extra system block
 	// that forbids file mutations on the current turn only. We append it to
