@@ -17,6 +17,9 @@ var ReferralSubscriptionCredits = Key{Flag: "rc-referral-subscription-credits", 
 // savings_percent on larger packs. Keep $0.10/credit as the baseline.
 var CreditPack100Credits = Key{Flag: "rc-credit-pack-100-credits", Fallback: 100}
 var CreditPack100Price = Key{Flag: "rc-credit-pack-100-price", Fallback: 10}
+// Entry pack — 25% savings over the base rate ($15 vs $20 nominal).
+var CreditPack200Credits = Key{Flag: "rc-credit-pack-200-credits", Fallback: 200}
+var CreditPack200Price = Key{Flag: "rc-credit-pack-200-price", Fallback: 15}
 // Mid pack — 30% savings over the base rate ($70 vs $100 nominal).
 var CreditPack1000Credits = Key{Flag: "rc-credit-pack-1000-credits", Fallback: 1000}
 var CreditPack1000Price = Key{Flag: "rc-credit-pack-1000-price", Fallback: 70}
