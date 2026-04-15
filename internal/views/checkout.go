@@ -29,6 +29,8 @@ func (v *HttpViews) getCreditPacks(userID string) []creditPack {
 	p100 := rc.GetInt(remoteconfig.CreditPack100Price, userID)
 	c200 := rc.GetInt(remoteconfig.CreditPack200Credits, userID)
 	p200 := rc.GetInt(remoteconfig.CreditPack200Price, userID)
+	c500 := rc.GetInt(remoteconfig.CreditPack500Credits, userID)
+	p500 := rc.GetInt(remoteconfig.CreditPack500Price, userID)
 	c1000 := rc.GetInt(remoteconfig.CreditPack1000Credits, userID)
 	p1000 := rc.GetInt(remoteconfig.CreditPack1000Price, userID)
 	c3000 := rc.GetInt(remoteconfig.CreditPack3000Credits, userID)
@@ -40,6 +42,7 @@ func (v *HttpViews) getCreditPacks(userID string) []creditPack {
 	return []creditPack{
 		{ID: "credits_100", Secret: "STRIPE_CREDITS_100_PRICE_ID", Name: fmt.Sprintf("%d AI Credits", c100), Credits: c100, Price: p100},
 		{ID: "credits_200", Secret: "STRIPE_CREDITS_200_PRICE_ID", Name: fmt.Sprintf("%d AI Credits", c200), Credits: c200, Price: p200},
+		{ID: "credits_500", Secret: "STRIPE_CREDITS_500_PRICE_ID", Name: fmt.Sprintf("%d AI Credits", c500), Credits: c500, Price: p500},
 		{ID: "credits_1000", Secret: "STRIPE_CREDITS_1000_PRICE_ID", Name: fmt.Sprintf("%d AI Credits", c1000), Credits: c1000, Price: p1000, Popular: true},
 		{ID: "credits_3000", Secret: "STRIPE_CREDITS_3000_PRICE_ID", Name: fmt.Sprintf("%d AI Credits", c3000), Credits: c3000, Price: p3000},
 	}
