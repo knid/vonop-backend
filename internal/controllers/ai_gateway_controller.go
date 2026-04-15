@@ -186,33 +186,45 @@ func (c *Controller) GetUserTierName(user *models.User) string {
 }
 
 // GatewayChatCreditsOwed returns the fractional credit amount a gateway
-// chat call should cost, computed from upstream USD prices in the model
-// catalog, a remote-config markup percent, and a remote-config reference
-// credit price. Returns 0 for unknown models or zero-token usage so
-// callers can safely no-op.
+// chat call should cost. Prefers the upstream-billed USD cost that
+// OpenRouter returns in usage.cost (when the request sent
+// usage.include=true), falling back to catalog-based math only when
+// that cost is missing or zero. Returns 0 for unknown models with
+// no cost AND no catalog data so callers can safely no-op.
 //
 // Formula:
 //
-//	upstreamUSD = (prompt*inPerM + completion*outPerM) / 1_000_000
+//	upstreamUSD =
+//	    usage.Cost                               (preferred — real billed cost)
+//	    or (prompt*inPerM + completion*outPerM) / 1_000_000  (catalog fallback)
 //	userCostUSD = upstreamUSD * (1 + markup%)
 //	owed        = userCostUSD / creditPriceUSD
 //
-// The caller is responsible for feeding owed into
-// DB.AtomicAccumulateGatewayPending so the fractional debt accrues
-// across calls and whole credits only get deducted when it crosses an
-// integer.
-func (c *Controller) GatewayChatCreditsOwed(modelID string, promptTokens, completionTokens int) float64 {
-	if promptTokens <= 0 && completionTokens <= 0 {
+// The caller feeds owed into DB.AtomicAccumulateGatewayPending so the
+// fractional debt accrues across calls and whole credits only get
+// deducted when it crosses an integer.
+func (c *Controller) GatewayChatCreditsOwed(modelID string, usage *utils.UsageInfo) float64 {
+	if usage == nil {
 		return 0
 	}
-	m := constants.GatewayChatModelByID(modelID)
-	if m == nil || (m.InputUSDPerM <= 0 && m.OutputUSDPerM <= 0) {
-		// Unknown model or missing price data — refuse to guess rather
-		// than deduct a wrong amount. The upstream call already ran;
-		// we'll fix the catalog and this user gets a free call.
-		return 0
+
+	upstreamUSD := usage.Cost
+	if upstreamUSD <= 0 {
+		// Fallback: catalog-based math. Kept as a safety net for calls
+		// where the upstream omitted cost (old OpenRouter responses,
+		// non-OpenRouter upstreams, etc.) and so new models without
+		// catalog entries still charge something reasonable during the
+		// window between "model allowlisted" and "catalog updated."
+		if usage.PromptTokens <= 0 && usage.CompletionTokens <= 0 {
+			return 0
+		}
+		m := constants.GatewayChatModelByID(modelID)
+		if m == nil || (m.InputUSDPerM <= 0 && m.OutputUSDPerM <= 0) {
+			return 0
+		}
+		upstreamUSD = (float64(usage.PromptTokens)*m.InputUSDPerM +
+			float64(usage.CompletionTokens)*m.OutputUSDPerM) / 1_000_000.0
 	}
-	upstreamUSD := (float64(promptTokens)*m.InputUSDPerM + float64(completionTokens)*m.OutputUSDPerM) / 1_000_000.0
 
 	markupPct := c.RemoteConfig.GetInt(remoteconfig.GatewayMarkupPercent, remoteconfig.Global)
 	markup := float64(markupPct) / 100.0

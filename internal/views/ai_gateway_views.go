@@ -227,6 +227,31 @@ func (v *HttpViews) GatewayChat(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Force OpenRouter to return the upstream-billed USD cost in the
+	// response usage block. This is what the accumulator in
+	// recordGatewayChatUsage prefers over catalog math — it already
+	// accounts for prompt-cache discounts, provider routing surcharges,
+	// and thinking-token pricing. If the caller sent their own
+	// "usage" object we preserve it and add include=true on top.
+	if existing, ok := rawReq["usage"].(map[string]any); ok {
+		existing["include"] = true
+	} else {
+		rawReq["usage"] = map[string]any{"include": true}
+	}
+
+	// Force streaming responses to emit a usage chunk at the end.
+	// OpenAI-compatible SDKs that stream without stream_options default
+	// to NOT emitting usage, which would silently give users free
+	// credits on every streamed call. Same merge-rather-than-clobber
+	// pattern as the usage block above.
+	if stream {
+		if existing, ok := rawReq["stream_options"].(map[string]any); ok {
+			existing["include_usage"] = true
+		} else {
+			rawReq["stream_options"] = map[string]any{"include_usage": true}
+		}
+	}
+
 	// Pre-check credit balance > overdraft floor
 	balance, err := v.Controller.GetOrCreateCreditsBalance(user)
 	if err != nil {
@@ -395,7 +420,7 @@ func (v *HttpViews) handleNonStreamingChat(w http.ResponseWriter, upstream *http
 // Controller.GatewayChatCreditsOwed and
 // DB.AtomicAccumulateGatewayPending for the math and race semantics.
 func (v *HttpViews) recordGatewayChatUsage(user *models.User, model, providerName, projectID string, usage *utils.UsageInfo) {
-	owed := v.Controller.GatewayChatCreditsOwed(model, usage.PromptTokens, usage.CompletionTokens)
+	owed := v.Controller.GatewayChatCreditsOwed(model, usage)
 	if owed > 0 {
 		if _, err := v.Controller.AccumulateGatewayChatCredits(user, owed, "gateway_chat", projectID); err != nil {
 			slog.Error("gateway chat: failed to accumulate credits",

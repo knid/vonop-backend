@@ -548,11 +548,19 @@ type Choice struct {
 }
 
 type UsageInfo struct {
-	PromptTokens             int `json:"prompt_tokens"`
-	CompletionTokens         int `json:"completion_tokens"`
-	TotalTokens              int `json:"total_tokens"`
-	CacheCreationInputTokens int `json:"cache_creation_input_tokens,omitempty"`
-	CacheReadInputTokens     int `json:"cache_read_input_tokens,omitempty"`
+	PromptTokens             int     `json:"prompt_tokens"`
+	CompletionTokens         int     `json:"completion_tokens"`
+	TotalTokens              int     `json:"total_tokens"`
+	CacheCreationInputTokens int     `json:"cache_creation_input_tokens,omitempty"`
+	CacheReadInputTokens     int     `json:"cache_read_input_tokens,omitempty"`
+	// Cost is the upstream-billed USD for this call. OpenRouter returns
+	// it in usage.cost when the request sets `usage.include = true`; it
+	// already accounts for prompt-cache discounts, provider routing
+	// surcharges, and thinking-token pricing — everything the hardcoded
+	// catalog can't see. Gateway chat reads this in preference to
+	// catalog math, falling back to per-M prices only if the upstream
+	// didn't return a cost.
+	Cost float64 `json:"cost,omitempty"`
 }
 
 type ChatResponse struct {
