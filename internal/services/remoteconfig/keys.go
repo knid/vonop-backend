@@ -13,10 +13,16 @@ type Key struct {
 
 var ReferralSignupCredits = Key{Flag: "rc-referral-signup-credits", Fallback: 10}
 var ReferralSubscriptionCredits = Key{Flag: "rc-referral-subscription-credits", Fallback: 50}
+// Base pack — cheapest per-credit rate; used as the reference for computing
+// savings_percent on larger packs. Keep $0.10/credit as the baseline.
 var CreditPack100Credits = Key{Flag: "rc-credit-pack-100-credits", Fallback: 100}
-var CreditPack100Price = Key{Flag: "rc-credit-pack-100-price", Fallback: 15}
-var CreditPack200Credits = Key{Flag: "rc-credit-pack-200-credits", Fallback: 200}
-var CreditPack200Price = Key{Flag: "rc-credit-pack-200-price", Fallback: 30}
+var CreditPack100Price = Key{Flag: "rc-credit-pack-100-price", Fallback: 10}
+// Mid pack — 30% savings over the base rate ($70 vs $100 nominal).
+var CreditPack1000Credits = Key{Flag: "rc-credit-pack-1000-credits", Fallback: 1000}
+var CreditPack1000Price = Key{Flag: "rc-credit-pack-1000-price", Fallback: 70}
+// Power pack — ~33% savings over the base rate ($200 vs $300 nominal).
+var CreditPack3000Credits = Key{Flag: "rc-credit-pack-3000-credits", Fallback: 3000}
+var CreditPack3000Price = Key{Flag: "rc-credit-pack-3000-price", Fallback: 200}
 var AICreditsTokensPerCredit = Key{Flag: "rc-ai-credits-tokens-per-credit", Fallback: 5000}
 var AICreditsOutputMultiplier = Key{Flag: "rc-ai-credits-output-multiplier", Fallback: 5}
 var AICreditsMinBalance = Key{Flag: "rc-ai-credits-min-balance", Fallback: -100}
