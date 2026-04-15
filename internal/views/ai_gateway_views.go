@@ -620,14 +620,19 @@ func (v *HttpViews) GetProjectAIUsage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	entries, err := v.Controller.DB.GetLLMTokenUsageByProject(project.ID.String(), 200)
+	// Filter to gateway traffic only ("gateway_chat", "gateway_image") so
+	// codegen calls (generate_app, chat_edit, etc.) don't leak into the
+	// per-app AI usage card — users care about what their deployed apps
+	// are consuming through the Wemob AI Gateway, not the LLM that built
+	// the app in the first place.
+	entries, err := v.Controller.DB.GetLLMTokenUsageByProject(project.ID.String(), "gateway_", 200)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	since := time.Now().AddDate(0, -1, 0)
-	promptTotal, completionTotal, totalTokens, totalCalls, err := v.Controller.DB.GetLLMTokenUsageSummaryByProject(project.ID.String(), since)
+	promptTotal, completionTotal, totalTokens, totalCalls, err := v.Controller.DB.GetLLMTokenUsageSummaryByProject(project.ID.String(), "gateway_", since)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
 		return

@@ -220,11 +220,18 @@ func (db *Database) GetLLMTokenUsageSummary(userID string, since time.Time) (pro
 // GetLLMTokenUsageByProject returns the most recent LLM token usage
 // entries for a given project (scoped by the Reference column which
 // the gateway and dashboard controllers populate with the project ID).
-func (db *Database) GetLLMTokenUsageByProject(projectID string, limit int) ([]models.LLMTokenUsage, error) {
+// If actionPrefix is non-empty, only entries whose action starts with it
+// are returned — pass "gateway_" to exclude codegen traffic from the
+// dashboard's per-app AI usage card.
+func (db *Database) GetLLMTokenUsageByProject(projectID, actionPrefix string, limit int) ([]models.LLMTokenUsage, error) {
 	var entries []models.LLMTokenUsage
-	err := db.DB.NewSelect().
+	q := db.DB.NewSelect().
 		Model(&entries).
-		Where("reference = ?", projectID).
+		Where("reference = ?", projectID)
+	if actionPrefix != "" {
+		q = q.Where("action LIKE ?", actionPrefix+"%")
+	}
+	err := q.
 		OrderExpr("created_at DESC").
 		Limit(limit).
 		Scan(context.Background())
@@ -233,22 +240,26 @@ func (db *Database) GetLLMTokenUsageByProject(projectID string, limit int) ([]mo
 
 // GetLLMTokenUsageSummaryByProject returns aggregate token totals for a
 // project since the given time. Mirrors GetLLMTokenUsageSummary but
-// scopes by project reference instead of user.
-func (db *Database) GetLLMTokenUsageSummaryByProject(projectID string, since time.Time) (prompt, completion, total, callCount int, err error) {
+// scopes by project reference instead of user. If actionPrefix is
+// non-empty, only entries whose action starts with it are aggregated.
+func (db *Database) GetLLMTokenUsageSummaryByProject(projectID, actionPrefix string, since time.Time) (prompt, completion, total, callCount int, err error) {
 	var result struct {
 		Prompt     int `bun:"prompt"`
 		Completion int `bun:"completion"`
 		Total      int `bun:"total"`
 		Calls      int `bun:"calls"`
 	}
-	err = db.DB.NewSelect().
+	q := db.DB.NewSelect().
 		TableExpr("llm_token_usages").
 		ColumnExpr("COALESCE(SUM(prompt_tokens), 0) AS prompt").
 		ColumnExpr("COALESCE(SUM(completion_tokens), 0) AS completion").
 		ColumnExpr("COALESCE(SUM(total_tokens), 0) AS total").
 		ColumnExpr("COALESCE(SUM(call_count), 0) AS calls").
 		Where("reference = ?", projectID).
-		Where("created_at >= ?", since).
-		Scan(context.Background(), &result)
+		Where("created_at >= ?", since)
+	if actionPrefix != "" {
+		q = q.Where("action LIKE ?", actionPrefix+"%")
+	}
+	err = q.Scan(context.Background(), &result)
 	return result.Prompt, result.Completion, result.Total, result.Calls, err
 }
