@@ -171,6 +171,17 @@ func (db *Database) HasUsageTransactions(userID string) (bool, error) {
 	return count > 0, err
 }
 
+// HasInitialGrant returns true if the user has already received their
+// one-time initial credit grant.
+func (db *Database) HasInitialGrant(userID string) (bool, error) {
+	var count int
+	err := db.DB.NewRaw(
+		"SELECT COUNT(*) FROM ai_credit_transactions WHERE user_id = ? AND action = 'initial_grant'",
+		userID,
+	).Scan(context.Background(), &count)
+	return count > 0, err
+}
+
 // --- LLM Token Usage ---
 
 func (db *Database) CreateLLMTokenUsage(usage *models.LLMTokenUsage) error {

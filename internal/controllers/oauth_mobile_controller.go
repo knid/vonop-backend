@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -39,9 +40,11 @@ func (c *Controller) GoogleMobileLogin(req requests.GoogleMobileLoginRequest) (*
 
 	email := tokenInfo.Email
 
+	isNewUser := false
 	user, err := c.DB.GetUserByEmail(email)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
+			isNewUser = true
 			pass, _ := utils.RandomHex(32)
 			hashedPass, _ := utils.HashPassword(pass)
 			newUser := models.User{
@@ -72,6 +75,10 @@ func (c *Controller) GoogleMobileLogin(req requests.GoogleMobileLoginRequest) (*
 			c.DB.UpdateUser(user)
 
 			c.assignFreePlan(user)
+
+			if err := c.GrantInitialFreeCreditsIfNeeded(user); err != nil {
+				slog.Error("failed to grant initial free credits on google mobile signup", "error", err, "user_id", user.ID)
+			}
 
 			go c.CRMService.SendEvent(user, constants.BREVO_EVENT_NEW_USER, map[string]any{
 				"provider": "google_mobile",
@@ -104,5 +111,6 @@ func (c *Controller) GoogleMobileLogin(req requests.GoogleMobileLoginRequest) (*
 	return &responses.UserLoginResponse{
 		Token:     createdToken.String,
 		ExpiredAt: createdToken.ExpiredAt,
+		IsNewUser: isNewUser,
 	}, nil
 }

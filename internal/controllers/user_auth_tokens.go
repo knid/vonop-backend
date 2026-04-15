@@ -209,6 +209,10 @@ func (c *Controller) ConsumeVerifyEmail(req requests.UserVerifyEmailRequest) (*m
 		slog.Warn("failed to mark verify token consumed", "error", err, "token_id", token.ID)
 	}
 
+	if err := c.GrantInitialFreeCreditsIfNeeded(user); err != nil {
+		slog.Error("failed to grant initial free credits on verify", "error", err, "user_id", user.ID)
+	}
+
 	go c.CRMService.SendEvent(user, constants.BREVO_EVENT_EMAIL_VERIFIED, map[string]any{})
 
 	return user, nil

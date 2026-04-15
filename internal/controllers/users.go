@@ -196,6 +196,12 @@ func (c *Controller) RegisterUser(userRegisterReq requests.UserRegisterRequest) 
 		"provider": "wemob",
 	})
 
+	go func() {
+		if err := c.SendVerifyEmail(createdUser); err != nil {
+			slog.Error("failed to send signup verification email", "error", err, "user_id", createdUser.ID)
+		}
+	}()
+
 	return &responses.UserInformationResponse{
 		ID:                 createdUser.ID,
 		Name:               createdUser.Name,
@@ -292,9 +298,11 @@ func (c *Controller) DeleteUser(tokenStr string) (*models.User, error) {
 }
 
 func (c *Controller) GoogleLogin(oauthUser goth.User) (*responses.UserLoginResponse, error) {
+	isNewUser := false
 	user, err := c.DB.GetUserByEmail(oauthUser.Email)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
+			isNewUser = true
 			pass, _ := utils.RandomHex(32)
 			hashedPass, _ := utils.HashPassword(pass)
 			newUser := models.User{
@@ -329,6 +337,10 @@ func (c *Controller) GoogleLogin(oauthUser goth.User) (*responses.UserLoginRespo
 
 			c.assignFreePlan(user)
 
+			if err := c.GrantInitialFreeCreditsIfNeeded(user); err != nil {
+				slog.Error("failed to grant initial free credits on google signup", "error", err, "user_id", user.ID)
+			}
+
 			go c.SlackService.Client.PostMessage(
 				constants.SLACK_CHANNEL_ID_NEW_USER,
 				slack.MsgOptionText("New registered user (Google): "+user.Email, false))
@@ -362,6 +374,7 @@ func (c *Controller) GoogleLogin(oauthUser goth.User) (*responses.UserLoginRespo
 	return &responses.UserLoginResponse{
 		Token:     createdToken.String,
 		ExpiredAt: createdToken.ExpiredAt,
+		IsNewUser: isNewUser,
 	}, nil
 }
 

@@ -29,6 +29,7 @@ type UserInformationResponse struct {
 type UserLoginResponse struct {
 	Token     string    `json:"token"`
 	ExpiredAt time.Time `json:"expired_at"`
+	IsNewUser bool      `json:"is_new_user,omitempty"`
 }
 
 type UserUpdateResponse struct {

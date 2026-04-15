@@ -46,5 +46,8 @@ func (v *HttpViews) OAuthCallback(w http.ResponseWriter, r *http.Request) {
 		frontendURL = "https://dashboard.wemob.io"
 	}
 	url := fmt.Sprintf("%s/login/handleGoogle?token=%s", frontendURL, userLoginRes.Token)
+	if userLoginRes.IsNewUser {
+		url += "&new=1"
+	}
 	http.Redirect(w, r, url, http.StatusTemporaryRedirect)
 }

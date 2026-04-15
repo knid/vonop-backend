@@ -36,12 +36,16 @@ func (c *Controller) GetOrCreateCreditsBalance(user *models.User) (*models.AICre
 			PeriodEnd:   periodEnd,
 		}
 
-		// Grant monthly credits from plan
+		// Grant monthly credits from plan only for verified users. Unverified
+		// email/password signups receive 0 credits until they click their
+		// verification link; see GrantInitialFreeCreditsIfNeeded.
 		initialGrant := 0
-		limits, limitsErr := c.GetUserLimits(user)
-		if limitsErr == nil && limits.MonthlyAICredits > 0 {
-			balance.Balance = limits.MonthlyAICredits
-			initialGrant = limits.MonthlyAICredits
+		if user.Verified {
+			limits, limitsErr := c.GetUserLimits(user)
+			if limitsErr == nil && limits.MonthlyAICredits > 0 {
+				balance.Balance = limits.MonthlyAICredits
+				initialGrant = limits.MonthlyAICredits
+			}
 		}
 
 		balance, err = c.DB.CreateAICreditsBalance(balance)
@@ -139,6 +143,49 @@ func (c *Controller) GetOrCreateCreditsBalance(user *models.User) (*models.AICre
 	}
 
 	return balance, nil
+}
+
+// GrantInitialFreeCreditsIfNeeded grants the plan's monthly credits to a
+// verified user who has never received them. Idempotent: subsequent calls
+// are no-ops once an initial_grant transaction exists. Called from the email
+// verification flow so unverified signups cannot collect free credits.
+func (c *Controller) GrantInitialFreeCreditsIfNeeded(user *models.User) error {
+	if !user.Verified {
+		return nil
+	}
+
+	balance, err := c.GetOrCreateCreditsBalance(user)
+	if err != nil {
+		return fmt.Errorf("failed to get credits balance: %w", err)
+	}
+
+	hasGrant, err := c.DB.HasInitialGrant(user.ID.String())
+	if err != nil {
+		return fmt.Errorf("failed to check initial grant: %w", err)
+	}
+	if hasGrant {
+		return nil
+	}
+
+	limits, err := c.GetUserLimits(user)
+	if err != nil || limits.MonthlyAICredits <= 0 {
+		return nil
+	}
+
+	return c.DB.RunInTx(func(tx bun.Tx) error {
+		if _, err := c.DB.AtomicAddCredits(tx, balance.ID.String(), limits.MonthlyAICredits); err != nil {
+			return fmt.Errorf("failed to add initial credits: %w", err)
+		}
+		if _, err := c.DB.CreateAICreditTransactionTx(tx, &models.AICreditTransaction{
+			UserID:    user.ID,
+			Amount:    limits.MonthlyAICredits,
+			Action:    "initial_grant",
+			Reference: balance.ID.String(),
+		}); err != nil {
+			return fmt.Errorf("failed to log initial grant: %w", err)
+		}
+		return nil
+	})
 }
 
 // TokensToCredits converts token counts to credits using remote-config values
