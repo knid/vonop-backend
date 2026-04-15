@@ -386,12 +386,20 @@ func (v *HttpViews) handleNonStreamingChat(w http.ResponseWriter, upstream *http
 	}
 }
 
-// recordGatewayChatUsage deducts credits and records token usage after a chat completion.
+// recordGatewayChatUsage charges credits and records token usage after a
+// chat completion. Pricing is cost-based (upstream USD → credits) with a
+// fractional accumulator, NOT token-based like the codegen path —
+// gateway traffic serves multiple models with 75× upstream price spreads
+// and short output-heavy calls, neither of which the flat
+// TokensToCredits formula handles correctly. See
+// Controller.GatewayChatCreditsOwed and
+// DB.AtomicAccumulateGatewayPending for the math and race semantics.
 func (v *HttpViews) recordGatewayChatUsage(user *models.User, model, providerName, projectID string, usage *utils.UsageInfo) {
-	credits := v.Controller.TokensToCredits(usage.PromptTokens, usage.CompletionTokens)
-	if credits > 0 {
-		if err := v.Controller.DeductAICreditsToFloor(user, credits, "gateway_chat", projectID); err != nil {
-			slog.Error("gateway chat: failed to deduct credits", "error", err, "user_id", user.ID, "credits", credits)
+	owed := v.Controller.GatewayChatCreditsOwed(model, usage.PromptTokens, usage.CompletionTokens)
+	if owed > 0 {
+		if _, err := v.Controller.AccumulateGatewayChatCredits(user, owed, "gateway_chat", projectID); err != nil {
+			slog.Error("gateway chat: failed to accumulate credits",
+				"error", err, "user_id", user.ID, "model", model, "owed", owed)
 		}
 	}
 

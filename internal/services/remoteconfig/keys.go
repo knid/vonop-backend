@@ -75,3 +75,13 @@ var GatewayImageCostFluxUltra = Key{Flag: "rc-gateway-image-cost-flux-ultra", Fa
 
 var GatewayChatTimeoutSeconds = Key{Flag: "rc-gateway-chat-timeout-seconds", Fallback: 30}
 var GatewayImageTimeoutSeconds = Key{Flag: "rc-gateway-image-timeout-seconds", Fallback: 120}
+
+// Gateway chat pricing — cost-based (computed from upstream OpenRouter USD
+// prices in the model catalog), not token-based. Markup is an integer
+// percent on top of the raw upstream cost (5 = 5%). Credit reference
+// price is in hundredths of a cent so the value fits GetInt — set to 20
+// for $0.20/credit (matches the Starter/Pro plan implied price). Raise
+// the reference price to capture more margin, lower it to subsidize
+// gateway users against heavier package discounts.
+var GatewayMarkupPercent = Key{Flag: "rc-gateway-markup-percent", Fallback: 5}
+var GatewayCreditPriceUSDCents = Key{Flag: "rc-gateway-credit-price-usd-cents", Fallback: 20}

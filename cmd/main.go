@@ -288,6 +288,11 @@ func createSchema(db *bun.DB) error {
 		// New writes set this; legacy rows keep their empty default and the
 		// dashboard falls back to the old content/tool_calls render path.
 		`ALTER TABLE app_chat_messages ADD COLUMN IF NOT EXISTS parts jsonb NOT NULL DEFAULT '[]'`,
+		// Fractional gateway credit debt — accumulator for sub-credit costs
+		// on Wemob AI Gateway chat traffic. Gateway calls price from upstream
+		// USD and almost never land on a whole credit, so the fractional
+		// remainder is tracked here until it crosses an integer.
+		`ALTER TABLE ai_credits_balances ADD COLUMN IF NOT EXISTS pending_gateway double precision NOT NULL DEFAULT 0`,
 	}
 
 	// Deduplicate before creating unique indexes (keep the latest row per group)

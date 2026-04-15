@@ -185,6 +185,78 @@ func (c *Controller) GetUserTierName(user *models.User) string {
 	return strings.ToLower(sub.Name)
 }
 
+// GatewayChatCreditsOwed returns the fractional credit amount a gateway
+// chat call should cost, computed from upstream USD prices in the model
+// catalog, a remote-config markup percent, and a remote-config reference
+// credit price. Returns 0 for unknown models or zero-token usage so
+// callers can safely no-op.
+//
+// Formula:
+//
+//	upstreamUSD = (prompt*inPerM + completion*outPerM) / 1_000_000
+//	userCostUSD = upstreamUSD * (1 + markup%)
+//	owed        = userCostUSD / creditPriceUSD
+//
+// The caller is responsible for feeding owed into
+// DB.AtomicAccumulateGatewayPending so the fractional debt accrues
+// across calls and whole credits only get deducted when it crosses an
+// integer.
+func (c *Controller) GatewayChatCreditsOwed(modelID string, promptTokens, completionTokens int) float64 {
+	if promptTokens <= 0 && completionTokens <= 0 {
+		return 0
+	}
+	m := constants.GatewayChatModelByID(modelID)
+	if m == nil || (m.InputUSDPerM <= 0 && m.OutputUSDPerM <= 0) {
+		// Unknown model or missing price data — refuse to guess rather
+		// than deduct a wrong amount. The upstream call already ran;
+		// we'll fix the catalog and this user gets a free call.
+		return 0
+	}
+	upstreamUSD := (float64(promptTokens)*m.InputUSDPerM + float64(completionTokens)*m.OutputUSDPerM) / 1_000_000.0
+
+	markupPct := c.RemoteConfig.GetInt(remoteconfig.GatewayMarkupPercent, remoteconfig.Global)
+	markup := float64(markupPct) / 100.0
+	if markup < 0 {
+		markup = 0
+	}
+	userCostUSD := upstreamUSD * (1.0 + markup)
+
+	priceCents := c.RemoteConfig.GetInt(remoteconfig.GatewayCreditPriceUSDCents, remoteconfig.Global)
+	if priceCents <= 0 {
+		priceCents = 20 // fallback to $0.20 if remote config returns 0
+	}
+	creditPriceUSD := float64(priceCents) / 100.0
+
+	return userCostUSD / creditPriceUSD
+}
+
+// AccumulateGatewayChatCredits feeds the fractional owed amount into the
+// database accumulator and, if the accumulator crossed an integer, emits
+// an ai_credit_transactions audit row for the whole credits that were
+// moved out of pending_gateway onto balance. Returns the number of whole
+// credits deducted (0 if the call only increased pending).
+func (c *Controller) AccumulateGatewayChatCredits(user *models.User, owed float64, action, reference string) (int, error) {
+	if owed <= 0 {
+		return 0, nil
+	}
+	rolled, err := c.DB.AtomicAccumulateGatewayPending(user.ID.String(), owed)
+	if err != nil {
+		return 0, fmt.Errorf("accumulate gateway pending: %w", err)
+	}
+	if rolled > 0 {
+		if _, terr := c.DB.CreateAICreditTransaction(&models.AICreditTransaction{
+			UserID:    user.ID,
+			Amount:    -rolled,
+			Action:    action,
+			Reference: reference,
+		}); terr != nil {
+			slog.Warn("accumulate gateway pending: failed to emit transaction row",
+				"error", terr, "user_id", user.ID, "rolled", rolled)
+		}
+	}
+	return rolled, nil
+}
+
 // ResolveGatewayProvider returns the LLMProvider for gateway chat traffic.
 // All chat models flow through OpenRouter — one upstream, one OpenAI-
 // compatible contract. Model IDs must already be in OpenRouter's

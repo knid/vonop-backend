@@ -128,6 +128,52 @@ func (db *Database) AtomicAddCredits(tx bun.IDB, balanceID string, amount int) (
 	return newBalance, err
 }
 
+// AtomicAccumulateGatewayPending atomically adds `owed` fractional credits
+// to pending_gateway, then (if the accumulator crosses an integer) moves
+// the whole part out of pending_gateway and subtracts it from balance in
+// the same statement. Returns the number of whole credits that rolled
+// over — the caller uses this to emit an ai_credit_transactions row
+// matching the existing DeductAICreditsToFloor audit trail. When the
+// accumulator doesn't cross an integer, rolled is 0 and balance is
+// untouched.
+//
+// Runs as one UPDATE with a CTE so concurrent gateway requests race
+// correctly — each one sees the latest pending_gateway under row lock.
+func (db *Database) AtomicAccumulateGatewayPending(userID string, owed float64) (rolled int, err error) {
+	var result struct {
+		Rolled int `bun:"rolled"`
+	}
+	err = db.DB.NewRaw(
+		`WITH locked AS (
+			SELECT id, pending_gateway FROM ai_credits_balances
+			WHERE user_id = ? FOR UPDATE
+		),
+		calc AS (
+			SELECT
+				id,
+				pending_gateway + ?::double precision AS new_pending,
+				FLOOR(pending_gateway + ?::double precision)::int AS rolled
+			FROM locked
+		)
+		UPDATE ai_credits_balances b
+		SET
+			balance = b.balance - calc.rolled,
+			pending_gateway = calc.new_pending - calc.rolled,
+			updated_at = NOW()
+		FROM calc
+		WHERE b.id = calc.id
+		RETURNING calc.rolled AS rolled`,
+		userID, owed, owed,
+	).Scan(context.Background(), &result)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return 0, nil
+		}
+		return 0, err
+	}
+	return result.Rolled, nil
+}
+
 // AtomicResetPeriod atomically resets the billing period if it has expired.
 // Returns (newBalance, true, nil) if the reset happened, or (0, false, nil) if
 // the period was already current (another request won the race).

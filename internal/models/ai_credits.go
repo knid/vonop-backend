@@ -7,15 +7,25 @@ import (
 )
 
 // AICreditsBalance tracks per-user AI credit balance within a billing period.
+//
+// PendingGateway holds fractional credit debt from Wemob AI Gateway chat
+// traffic. Gateway calls are priced from the upstream USD cost of the
+// specific model used, which almost never lands on a whole credit — the
+// fractional remainder accumulates here and, whenever it crosses an
+// integer, that many whole credits are deducted from Balance. This keeps
+// gateway reselling margin-accurate without forcing every tiny call to
+// round up to a full credit (the previous behavior, which over-taxed
+// cheap models like claude-haiku-4-5 by ~20×).
 type AICreditsBalance struct {
-	ID          uuid.UUID `bun:",pk,type:uuid,default:uuid_generate_v4()"`
-	UserID      uuid.UUID `bun:",notnull,type:uuid,unique"`
-	User        *User     `bun:"rel:belongs-to,join:user_id=id"`
-	Balance     int       `bun:",notnull,default:0"`
-	PeriodStart time.Time `bun:",notnull"`
-	PeriodEnd   time.Time `bun:",notnull"`
-	CreatedAt   time.Time `bun:"created_at,nullzero,notnull,default:current_timestamp"`
-	UpdatedAt   time.Time `bun:"updated_at,nullzero,notnull,default:current_timestamp"`
+	ID             uuid.UUID `bun:",pk,type:uuid,default:uuid_generate_v4()"`
+	UserID         uuid.UUID `bun:",notnull,type:uuid,unique"`
+	User           *User     `bun:"rel:belongs-to,join:user_id=id"`
+	Balance        int       `bun:",notnull,default:0"`
+	PendingGateway float64   `bun:",notnull,default:0"`
+	PeriodStart    time.Time `bun:",notnull"`
+	PeriodEnd      time.Time `bun:",notnull"`
+	CreatedAt      time.Time `bun:"created_at,nullzero,notnull,default:current_timestamp"`
+	UpdatedAt      time.Time `bun:"updated_at,nullzero,notnull,default:current_timestamp"`
 }
 
 // AICreditTransaction records individual credit additions or deductions.
