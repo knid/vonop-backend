@@ -17,18 +17,18 @@ var ReferralSubscriptionCredits = Key{Flag: "rc-referral-subscription-credits", 
 // savings_percent on larger packs. Keep $0.10/credit as the baseline.
 var CreditPack100Credits = Key{Flag: "rc-credit-pack-100-credits", Fallback: 100}
 var CreditPack100Price = Key{Flag: "rc-credit-pack-100-price", Fallback: 10}
-// Entry pack — 25% savings over the base rate ($15 vs $20 nominal).
+// Entry pack — 10% savings over the base rate ($18 vs $20 nominal).
 var CreditPack200Credits = Key{Flag: "rc-credit-pack-200-credits", Fallback: 200}
-var CreditPack200Price = Key{Flag: "rc-credit-pack-200-price", Fallback: 15}
-// Small-mid pack — 28% savings over the base rate ($36 vs $50 nominal).
+var CreditPack200Price = Key{Flag: "rc-credit-pack-200-price", Fallback: 18}
+// Small-mid pack — 30% savings over the base rate ($35 vs $50 nominal).
 var CreditPack500Credits = Key{Flag: "rc-credit-pack-500-credits", Fallback: 500}
-var CreditPack500Price = Key{Flag: "rc-credit-pack-500-price", Fallback: 36}
-// Mid pack — 30% savings over the base rate ($70 vs $100 nominal).
+var CreditPack500Price = Key{Flag: "rc-credit-pack-500-price", Fallback: 35}
+// Mid pack — 50% savings over the base rate ($50 vs $100 nominal).
 var CreditPack1000Credits = Key{Flag: "rc-credit-pack-1000-credits", Fallback: 1000}
-var CreditPack1000Price = Key{Flag: "rc-credit-pack-1000-price", Fallback: 70}
-// Power pack — ~33% savings over the base rate ($200 vs $300 nominal).
+var CreditPack1000Price = Key{Flag: "rc-credit-pack-1000-price", Fallback: 50}
+// Power pack — ~58% savings over the base rate ($125 vs $300 nominal).
 var CreditPack3000Credits = Key{Flag: "rc-credit-pack-3000-credits", Fallback: 3000}
-var CreditPack3000Price = Key{Flag: "rc-credit-pack-3000-price", Fallback: 200}
+var CreditPack3000Price = Key{Flag: "rc-credit-pack-3000-price", Fallback: 125}
 var AICreditsTokensPerCredit = Key{Flag: "rc-ai-credits-tokens-per-credit", Fallback: 5000}
 var AICreditsOutputMultiplier = Key{Flag: "rc-ai-credits-output-multiplier", Fallback: 5}
 var AICreditsMinBalance = Key{Flag: "rc-ai-credits-min-balance", Fallback: -100}
