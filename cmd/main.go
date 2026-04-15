@@ -1210,6 +1210,7 @@ func main() {
 				})
 				r.Route("/credits", func(r chi.Router) {
 					r.Get("/", httpViews.GetAICreditsBalance)
+					r.Get("/breakdown", httpViews.GetCreditBreakdown)
 					r.Get("/transactions", httpViews.GetAICreditTransactions)
 					r.Get("/history", httpViews.GetCreditHistory)
 					r.Get("/packages", httpViews.GetCreditPackages)

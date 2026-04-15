@@ -40,6 +40,21 @@ type AICreditsBalanceResponse struct {
 	PeriodEnd   string `json:"period_end"`
 }
 
+// CreditBreakdownResponse is the derived sub-vs-purchased split served by
+// GET /v1/billing/credits/breakdown. The backend stores a single undifferentiated
+// balance column; this response is the logical projection the UI wants so it
+// can render "X of Y sub credits used" next to "N extra credits remaining"
+// instead of the broken total-minus-balance formula.
+type CreditBreakdownResponse struct {
+	Balance             int    `json:"balance"`
+	SubBalance          int    `json:"sub_balance"`
+	SubLimit            int    `json:"sub_limit"`
+	SubUsedThisPeriod   int    `json:"sub_used_this_period"`
+	PurchasedBalance    int    `json:"purchased_balance"`
+	PeriodStart         string `json:"period_start"`
+	PeriodEnd           string `json:"period_end"`
+}
+
 type TokenUsageEntry struct {
 	Action           string `json:"action"`
 	Model            string `json:"model"`

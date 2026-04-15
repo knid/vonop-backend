@@ -93,6 +93,43 @@ func (v *HttpViews) GetAICreditsBalance(w http.ResponseWriter, r *http.Request) 
 	}, http.StatusOK)
 }
 
+// GetCreditBreakdown returns the derived subscription vs purchased credit
+// split. The backend stores a single balance column; this endpoint replays
+// the ledger with a "drain subscription first" policy so the UI can show
+// two separate buckets (and stop lying about "0 used" when the user has
+// topped up past their monthly limit).
+func (v *HttpViews) GetCreditBreakdown(w http.ResponseWriter, r *http.Request) {
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	// Run the period-reset path first so expired periods roll over before we
+	// derive the breakdown — otherwise the "used this period" counter would
+	// be computed against a stale period_start.
+	if _, err := v.Controller.GetOrCreateCreditsBalance(user); err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	bd, err := v.Controller.ComputeCreditBreakdown(user)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	utils.JSONResponse(w, responses.CreditBreakdownResponse{
+		Balance:           bd.Balance,
+		SubBalance:        bd.SubBalance,
+		SubLimit:          bd.SubLimit,
+		SubUsedThisPeriod: bd.SubUsedThisPeriod,
+		PurchasedBalance:  bd.PurchasedBalance,
+		PeriodStart:       bd.PeriodStart.Format("2006-01-02T15:04:05Z"),
+		PeriodEnd:         bd.PeriodEnd.Format("2006-01-02T15:04:05Z"),
+	}, http.StatusOK)
+}
+
 func (v *HttpViews) GetAICreditTransactions(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {

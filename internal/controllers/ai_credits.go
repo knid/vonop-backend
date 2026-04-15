@@ -18,6 +18,164 @@ import (
 	"github.com/uptrace/bun"
 )
 
+// CreditBreakdown is the derived subscription-vs-purchased split of a user's
+// credit pool, computed by replaying the ledger. The backend stores a single
+// undifferentiated Balance column — this struct is the logical projection the
+// UI (and the period reset) wants.
+//
+//   - SubBalance: subscription credits remaining this period (bounded by the
+//     rollover cap); drained first when the user consumes credits.
+//   - PurchasedBalance: top-up credits remaining; carry over across periods
+//     and drain only after SubBalance is exhausted.
+//   - SubUsedThisPeriod: how many credits have been charged against the
+//     subscription bucket since PeriodStart. Used for the "X of Y used"
+//     progress bar.
+//   - SubLimit: nominal monthly allowance from the user's plan.
+//   - Balance: ground truth from ai_credits_balances — SubBalance +
+//     PurchasedBalance is reconciled against this before returning.
+type CreditBreakdown struct {
+	Balance           int
+	SubBalance        int
+	PurchasedBalance  int
+	SubLimit          int
+	SubUsedThisPeriod int
+	PeriodStart       time.Time
+	PeriodEnd         time.Time
+}
+
+// classifyLedgerAction mirrors views.categorizeTxType so both the display
+// endpoint and the replay agree on how to bucket a transaction. Returns one
+// of "allocation", "purchase", "refund", "usage".
+func classifyLedgerAction(action string, amount int) string {
+	lower := strings.ToLower(action)
+	if strings.Contains(lower, "refund") {
+		return "refund"
+	}
+	if strings.Contains(lower, "grant") || strings.Contains(lower, "allocation") || strings.Contains(lower, "bonus") {
+		return "allocation"
+	}
+	if strings.Contains(lower, "purchase") || strings.Contains(lower, "purchased") {
+		return "purchase"
+	}
+	if amount < 0 {
+		return "usage"
+	}
+	if amount > 0 {
+		return "allocation"
+	}
+	return "usage"
+}
+
+// ComputeCreditBreakdown replays the entire ledger in chronological order to
+// derive the subscription/purchased split using a "drain subscription first"
+// policy, then reconciles the result against the ground-truth balance.
+//
+// Why replay instead of two separate DB columns: avoids a migration, keeps
+// the single-column debit path (AtomicDeductCreditsToFloor) unchanged, and
+// works retroactively on existing ledgers. The replay is O(ledger size) but
+// per-user ledgers stay small.
+//
+// Reconciliation handles both directions of drift:
+//   - Replay > balance: historical period resets (see GetOrCreateCreditsBalance)
+//     destroyed credits without logging a ledger row. Clamp purchased down
+//     first, then sub — prefer showing "lost" credits as lost purchased
+//     credits since that's the bucket the old reset bug actually hurt.
+//   - Replay < balance: unlogged adjustments (rare). Assume they were sub.
+func (c *Controller) ComputeCreditBreakdown(user *models.User) (*CreditBreakdown, error) {
+	balance, err := c.GetAICreditsBalanceNoReset(user)
+	if err != nil {
+		return nil, err
+	}
+	limits, err := c.GetUserLimits(user)
+	if err != nil {
+		return nil, err
+	}
+	txs, err := c.DB.GetAllAICreditTransactionsAsc(user.ID.String())
+	if err != nil {
+		return nil, err
+	}
+
+	var sub, purchased, subUsedInPeriod int
+	for _, tx := range txs {
+		inPeriod := !tx.CreatedAt.Before(balance.PeriodStart)
+		switch classifyLedgerAction(tx.Action, tx.Amount) {
+		case "allocation":
+			sub += tx.Amount
+		case "purchase":
+			purchased += tx.Amount
+		case "refund":
+			// Refunds go back to the purchased bucket: refunds are almost
+			// always for purchase flows, and the original sub credits may
+			// already have been reset away.
+			purchased += tx.Amount
+		case "usage":
+			need := -tx.Amount
+			if need <= 0 {
+				continue
+			}
+			drainedFromSub := need
+			if drainedFromSub > sub {
+				drainedFromSub = sub
+			}
+			sub -= drainedFromSub
+			purchased -= (need - drainedFromSub)
+			if inPeriod {
+				subUsedInPeriod += drainedFromSub
+			}
+		}
+	}
+	if sub < 0 {
+		sub = 0
+	}
+	if purchased < 0 {
+		purchased = 0
+	}
+
+	total := sub + purchased
+	if total > balance.Balance {
+		excess := total - balance.Balance
+		if purchased >= excess {
+			purchased -= excess
+		} else {
+			remaining := excess - purchased
+			purchased = 0
+			if sub >= remaining {
+				sub -= remaining
+			} else {
+				sub = 0
+			}
+		}
+	} else if total < balance.Balance {
+		sub += balance.Balance - total
+	}
+
+	return &CreditBreakdown{
+		Balance:           balance.Balance,
+		SubBalance:        sub,
+		PurchasedBalance:  purchased,
+		SubLimit:          limits.MonthlyAICredits,
+		SubUsedThisPeriod: subUsedInPeriod,
+		PeriodStart:       balance.PeriodStart,
+		PeriodEnd:         balance.PeriodEnd,
+	}, nil
+}
+
+// GetAICreditsBalanceNoReset fetches the current balance row without running
+// the period-reset branch. ComputeCreditBreakdown needs this because the
+// reset logic itself calls ComputeCreditBreakdown — going through
+// GetOrCreateCreditsBalance would recurse. New-user creation still goes
+// through the full path.
+func (c *Controller) GetAICreditsBalanceNoReset(user *models.User) (*models.AICreditsBalance, error) {
+	balance, err := c.DB.GetAICreditsBalance(user.ID.String())
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return c.GetOrCreateCreditsBalance(user)
+		}
+		return nil, err
+	}
+	return balance, nil
+}
+
 // GetOrCreateCreditsBalance returns the user's credit balance, creating one if needed.
 // Period resets use atomic SQL to prevent duplicate monthly_grant transactions.
 func (c *Controller) GetOrCreateCreditsBalance(user *models.User) (*models.AICreditsBalance, error) {
@@ -98,20 +256,47 @@ func (c *Controller) GetOrCreateCreditsBalance(user *models.User) (*models.AICre
 			return balance, nil
 		}
 
-		// Calculate new balance with rollover
-		newBalance := monthlyCredits
+		// Calculate new balance with rollover.
+		//
+		// Previous behavior (buggy): the rollover cap was applied to the total
+		// balance, silently destroying purchased top-up credits. For a Starter
+		// user on 200/mo with rollover=1, a 1000-credit top-up would be
+		// clamped to 400 at the next reset — losing 600 real credits the user
+		// paid for.
+		//
+		// Fix: split the pre-reset balance into sub + purchased via ledger
+		// replay, apply the cap ONLY to the sub portion, then add purchased
+		// back untouched. Purchased credits never roll over into the cap
+		// because they aren't part of the monthly allowance.
+		breakdown, bdErr := c.ComputeCreditBreakdown(user)
+		purchasedCarry := 0
+		subCarry := 0
+		if bdErr == nil && breakdown != nil {
+			purchasedCarry = breakdown.PurchasedBalance
+			subCarry = breakdown.SubBalance
+		}
+
+		var newBalance int
 		if balance.Balance < 0 {
-			// Overdraft always carries forward regardless of rollover setting
+			// Overdraft always carries forward regardless of rollover setting.
+			// Apply it to the sub bucket — purchased carry (if any from
+			// reconciliation) rides along.
 			newBalance = monthlyCredits + balance.Balance
 			if newBalance < 0 {
 				newBalance = 0
 			}
+			newBalance += purchasedCarry
 		} else if rolloverMonths > 0 {
-			cap := monthlyCredits * (rolloverMonths + 1)
-			newBalance = balance.Balance + monthlyCredits
-			if newBalance > cap {
-				newBalance = cap
+			subCap := monthlyCredits * (rolloverMonths + 1)
+			newSub := subCarry + monthlyCredits
+			if newSub > subCap {
+				newSub = subCap
 			}
+			newBalance = newSub + purchasedCarry
+		} else {
+			// No rollover: sub resets flat to this month's grant, purchased
+			// carries over untouched.
+			newBalance = monthlyCredits + purchasedCarry
 		}
 
 		newBal, didReset, resetErr := c.DB.AtomicResetPeriod(balance.ID.String(), newBalance, periodStart, periodEnd)

@@ -52,6 +52,22 @@ func (db *Database) GetAICreditTransactions(userID string, limit int) ([]models.
 	return txs, err
 }
 
+// GetAllAICreditTransactionsAsc returns every credit transaction for a user in
+// chronological (ascending) order. Used for ledger replay — notably by
+// ComputeCreditBreakdown, which derives the subscription-vs-purchased bucket
+// split by walking the ledger forward. No pagination: we need the full ledger
+// to reconcile against the ground-truth balance, and per-user ledgers stay
+// small (a year of heavy use is < a few thousand rows).
+func (db *Database) GetAllAICreditTransactionsAsc(userID string) ([]models.AICreditTransaction, error) {
+	var txs []models.AICreditTransaction
+	err := db.DB.NewSelect().
+		Model(&txs).
+		Where("user_id = ?", userID).
+		OrderExpr("created_at ASC").
+		Scan(context.Background())
+	return txs, err
+}
+
 func (db *Database) GetAICreditTransactionsPaginated(userID string, page, pageSize int) ([]models.AICreditTransaction, int, error) {
 	var txs []models.AICreditTransaction
 	offset := (page - 1) * pageSize
