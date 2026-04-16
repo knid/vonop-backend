@@ -53,9 +53,12 @@ const (
 	BREVO_EVENT_USER_ANDROID_DEPLOYMENT_FAILED   = "user_android_deployment_failed"
 
 	// Web deployment events — names match PostHog for cross-system analysis.
-	BREVO_EVENT_WEB_DEPLOYMENT_SUCCEEDED = "app_deployed_web"
-	BREVO_EVENT_WEB_DEPLOYMENT_FAILED    = "app_deploy_failed"
-	BREVO_EVENT_WEB_UNDEPLOYED           = "app_undeployed_web"
+	BREVO_EVENT_WEB_DEPLOYMENT_SUCCEEDED    = "app_deployed_web"
+	BREVO_EVENT_WEB_DEPLOYMENT_FAILED       = "app_deploy_failed"
+	BREVO_EVENT_WEB_UNDEPLOYED              = "app_undeployed_web"
+	BREVO_EVENT_MOBILE_DEPLOYMENT_SUCCEEDED = "app_deployed_mobile"
+	BREVO_EVENT_MOBILE_DEPLOYMENT_FAILED    = "app_deploy_mobile_failed"
+	BREVO_EVENT_MOBILE_UNDEPLOYED           = "app_undeployed_mobile"
 
 	// Domain events
 	BREVO_EVENT_DOMAIN_ADDED    = "domain_added"

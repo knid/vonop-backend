@@ -1,7 +1,9 @@
 package responses
 
 type PlanLimitsResponse struct {
-	MaxDeployedWebApps   int    `json:"max_deployed_web_apps"`
+	MaxDeployedWebApps    int    `json:"max_deployed_web_apps"`
+	MaxDeployedMobileApps int    `json:"max_deployed_mobile_apps"`
+	CanDeployMobile       bool   `json:"can_deploy_mobile"`
 	MonthlyAICredits     int    `json:"monthly_ai_credits"`
 	CreditRolloverMonths int    `json:"credit_rollover_months"`
 	MontlyBuildCount     int    `json:"montly_build_count"`

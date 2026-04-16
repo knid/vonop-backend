@@ -35,7 +35,9 @@ func (v *HttpViews) GetBillingPlans(w http.ResponseWriter, r *http.Request) {
 			pn := strings.ToLower(sub.Name) // e.g. "starter", "professional"
 
 			planLimits = responses.PlanLimitsResponse{
-				MaxDeployedWebApps:   rc.GetInt(remoteconfig.PlanInt(pn, "max-deployed-web-apps", limits.MaxDeployedWebApps), remoteconfig.Global),
+				MaxDeployedWebApps:    rc.GetInt(remoteconfig.PlanInt(pn, "max-deployed-web-apps", limits.MaxDeployedWebApps), remoteconfig.Global),
+				MaxDeployedMobileApps: rc.GetInt(remoteconfig.PlanInt(pn, "max-deployed-mobile-apps", limits.MaxDeployedMobileApps), remoteconfig.Global),
+				CanDeployMobile:       rc.GetBool(remoteconfig.PlanBool(pn, "can-deploy-mobile", limits.CanDeployMobile), remoteconfig.Global),
 				MonthlyAICredits:     rc.GetInt(remoteconfig.PlanInt(pn, "monthly-ai-credits", limits.MonthlyAICredits), remoteconfig.Global),
 				CreditRolloverMonths: rc.GetInt(remoteconfig.PlanInt(pn, "credit-rollover-months", limits.CreditRolloverMonths), remoteconfig.Global),
 				MontlyBuildCount:     limits.MontlyBuildCount,

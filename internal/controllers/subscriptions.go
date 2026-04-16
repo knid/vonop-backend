@@ -31,6 +31,8 @@ func (c *Controller) GetUserLimitsWithPlan(user *models.User) (*models.StandartU
 	pn := strings.ToLower(subs.Name)
 
 	limits.MaxDeployedWebApps = rc.GetInt(remoteconfig.PlanInt(pn, "max-deployed-web-apps", limits.MaxDeployedWebApps), remoteconfig.Global)
+	limits.MaxDeployedMobileApps = rc.GetInt(remoteconfig.PlanInt(pn, "max-deployed-mobile-apps", limits.MaxDeployedMobileApps), remoteconfig.Global)
+	limits.CanDeployMobile = rc.GetBool(remoteconfig.PlanBool(pn, "can-deploy-mobile", limits.CanDeployMobile), remoteconfig.Global)
 	limits.MonthlyAICredits = rc.GetInt(remoteconfig.PlanInt(pn, "monthly-ai-credits", limits.MonthlyAICredits), remoteconfig.Global)
 	limits.CreditRolloverMonths = rc.GetInt(remoteconfig.PlanInt(pn, "credit-rollover-months", limits.CreditRolloverMonths), remoteconfig.Global)
 	limits.MaxWebApps = rc.GetInt(remoteconfig.PlanInt(pn, "max-web-apps", limits.MaxWebApps), remoteconfig.Global)
@@ -72,6 +74,8 @@ func (c *Controller) GetSubscription(user *models.User) (*responses.UserSubscrip
 		CanUseAnalytics:         limits.CanUseAnalytics,
 		CanRemoveBrandLogo:      limits.CanRemoveBrandLogo,
 		MaxDeployedWebApps:      limits.MaxDeployedWebApps,
+		MaxDeployedMobileApps:   limits.MaxDeployedMobileApps,
+		CanDeployMobile:         limits.CanDeployMobile,
 		CreditRolloverMonths:    limits.CreditRolloverMonths,
 		CanAccessCode:           limits.CanAccessCode,
 		CanBuyDomain:            limits.CanBuyDomain,

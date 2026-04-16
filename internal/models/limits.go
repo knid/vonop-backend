@@ -23,8 +23,10 @@ type StandartUserLimits struct {
 	MaxMobileApps      int  `bun:",notnull,default:0"`
 	CanUseEcommerce    bool `bun:",notnull,default:false"`
 	CanDeployWeb       bool `bun:"can_deploy_to_vercel,notnull,default:false"`
-	MaxDeployedWebApps   int    `bun:",notnull,default:0"`
-	DeployMemoryMB       int    `bun:",notnull,default:256"`
+	MaxDeployedWebApps    int    `bun:",notnull,default:0"`
+	MaxDeployedMobileApps int    `bun:",notnull,default:0"`
+	CanDeployMobile       bool   `bun:",notnull,default:false"`
+	DeployMemoryMB        int    `bun:",notnull,default:256"`
 	DeployCPUs           string `bun:"deploy_cpus,notnull,default:'0.25'"`
 	DeployDBMaxCU        string `bun:"deploy_db_max_cu,notnull,default:'0.25'"`
 	DeployDBStorageMB    int    `bun:"deploy_db_storage_mb,notnull,default:512"`

@@ -246,6 +246,8 @@ func createSchema(db *bun.DB) error {
 		`ALTER TABLE app_projects ADD COLUMN IF NOT EXISTS logo_s3_key text NOT NULL DEFAULT ''`,
 		// Subscription & limits system v2
 		`ALTER TABLE standart_user_limits ADD COLUMN IF NOT EXISTS max_deployed_web_apps int NOT NULL DEFAULT 0`,
+		`ALTER TABLE standart_user_limits ADD COLUMN IF NOT EXISTS max_deployed_mobile_apps int NOT NULL DEFAULT 0`,
+		`ALTER TABLE standart_user_limits ADD COLUMN IF NOT EXISTS can_deploy_mobile boolean NOT NULL DEFAULT false`,
 		`ALTER TABLE standart_user_limits ADD COLUMN IF NOT EXISTS credit_rollover_months int NOT NULL DEFAULT 0`,
 		`ALTER TABLE standart_user_limits ADD COLUMN IF NOT EXISTS can_access_code boolean NOT NULL DEFAULT false`,
 		`ALTER TABLE standart_user_limits ADD COLUMN IF NOT EXISTS can_buy_domain boolean NOT NULL DEFAULT false`,
@@ -456,6 +458,8 @@ func seedPlans(db *database.Database, sm secret.SecretManager) {
 				MaxWebApps:              1,
 				MaxMobileApps:           0,
 				MaxDeployedWebApps:      1,
+				MaxDeployedMobileApps:   0,
+				CanDeployMobile:         false,
 				DeployMemoryMB:          256,
 				DeployCPUs:              "0.25",
 				DeployDBMaxCU:           "0.25",
@@ -490,6 +494,8 @@ func seedPlans(db *database.Database, sm secret.SecretManager) {
 				MaxWebApps:              20,
 				MaxMobileApps:           0,
 				MaxDeployedWebApps:      3,
+				MaxDeployedMobileApps:   1,
+				CanDeployMobile:         true,
 				DeployMemoryMB:          512,
 				DeployCPUs:              "0.5",
 				DeployDBMaxCU:           "0.5",
@@ -524,6 +530,8 @@ func seedPlans(db *database.Database, sm secret.SecretManager) {
 				MaxWebApps:              100,
 				MaxMobileApps:           5,
 				MaxDeployedWebApps:      10,
+				MaxDeployedMobileApps:   3,
+				CanDeployMobile:         true,
 				DeployMemoryMB:          1024,
 				DeployCPUs:              "1",
 				DeployDBMaxCU:           "1",
@@ -590,6 +598,8 @@ func seedPlans(db *database.Database, sm secret.SecretManager) {
 		limits.MaxWebApps = p.Limits.MaxWebApps
 		limits.MaxMobileApps = p.Limits.MaxMobileApps
 		limits.MaxDeployedWebApps = p.Limits.MaxDeployedWebApps
+		limits.MaxDeployedMobileApps = p.Limits.MaxDeployedMobileApps
+		limits.CanDeployMobile = p.Limits.CanDeployMobile
 		limits.DeployMemoryMB = p.Limits.DeployMemoryMB
 		limits.DeployCPUs = p.Limits.DeployCPUs
 		limits.DeployDBMaxCU = p.Limits.DeployDBMaxCU
@@ -1456,6 +1466,8 @@ func main() {
 						r.Post("/validate", httpViews.ValidateAppFiles)
 						r.Post("/web", httpViews.DeployAppWeb)
 						r.Delete("/web", httpViews.UndeployAppWeb)
+						r.Post("/mobile", httpViews.DeployAppMobile)
+						r.Delete("/mobile", httpViews.UndeployAppMobile)
 						r.Get("/status", httpViews.GetDeployStatus)
 						r.Get("/history", httpViews.GetDeployHistory)
 					})

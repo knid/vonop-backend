@@ -69,6 +69,8 @@ type AdminUpdateSubscriptionPlanRequest struct {
 	MaxWebApps              *int  `json:"max_web_apps"`
 	MaxMobileApps           *int  `json:"max_mobile_apps"`
 	MaxDeployedWebApps      *int  `json:"max_deployed_web_apps"`
+	MaxDeployedMobileApps   *int  `json:"max_deployed_mobile_apps"`
+	CanDeployMobile         *bool `json:"can_deploy_mobile"`
 	CanBuildToAndroid       *bool `json:"can_build_to_android"`
 	CanBuildToIOS           *bool `json:"can_build_to_ios"`
 	CanUseAnalytics         *bool `json:"can_use_analytics"`

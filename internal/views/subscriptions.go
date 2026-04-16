@@ -37,6 +37,8 @@ func (v *HttpViews) GetLimits(w http.ResponseWriter, r *http.Request) {
 		CanUseAnalytics:         limits.CanUseAnalytics,
 		CanRemoveBrandLogo:      limits.CanRemoveBrandLogo,
 		MaxDeployedWebApps:      limits.MaxDeployedWebApps,
+		MaxDeployedMobileApps:   limits.MaxDeployedMobileApps,
+		CanDeployMobile:         limits.CanDeployMobile,
 		CreditRolloverMonths:    limits.CreditRolloverMonths,
 		CanAccessCode:           limits.CanAccessCode,
 		CanBuyDomain:            limits.CanBuyDomain,

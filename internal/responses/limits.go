@@ -12,6 +12,8 @@ type LimitsResponse struct {
 	CanUseAnalytics         bool      `json:"can_use_analytics"`
 	CanRemoveBrandLogo      bool      `json:"can_remove_brand_logo"`
 	MaxDeployedWebApps      int       `json:"max_deployed_web_apps"`
+	MaxDeployedMobileApps   int       `json:"max_deployed_mobile_apps"`
+	CanDeployMobile         bool      `json:"can_deploy_mobile"`
 	CreditRolloverMonths    int       `json:"credit_rollover_months"`
 	CanAccessCode           bool      `json:"can_access_code"`
 	CanBuyDomain            bool      `json:"can_buy_domain"`

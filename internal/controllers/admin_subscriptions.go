@@ -86,6 +86,12 @@ func (c *Controller) AdminUpdateSubscription(subID string, req requests.AdminUpd
 	if req.MaxDeployedWebApps != nil {
 		limits.MaxDeployedWebApps = *req.MaxDeployedWebApps
 	}
+	if req.MaxDeployedMobileApps != nil {
+		limits.MaxDeployedMobileApps = *req.MaxDeployedMobileApps
+	}
+	if req.CanDeployMobile != nil {
+		limits.CanDeployMobile = *req.CanDeployMobile
+	}
 	if req.CanBuildToAndroid != nil {
 		limits.CanBuildToAndroid = *req.CanBuildToAndroid
 	}

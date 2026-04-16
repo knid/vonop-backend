@@ -140,3 +140,38 @@ func (db *Database) GetDeployedWebAppsByUserID(userID string) ([]DeployedWebAppI
 		Scan(context.Background(), &apps)
 	return apps, err
 }
+
+func (db *Database) CountDeployedMobileAppsByUserID(userID string) (int, error) {
+	var count int
+	err := db.DB.NewSelect().
+		TableExpr("app_deployments").
+		ColumnExpr("COUNT(DISTINCT app_project_id)").
+		Where("user_id = ?", userID).
+		Where("platform = 'mobile'").
+		Where("status = 'deployed'").
+		Scan(context.Background(), &count)
+	return count, err
+}
+
+func (db *Database) GetDeployedMobileAppsByUserID(userID string) ([]DeployedWebAppInfo, error) {
+	var apps []DeployedWebAppInfo
+	err := db.DB.NewSelect().
+		TableExpr("app_deployments AS d").
+		Join("JOIN app_projects AS p ON p.id = d.app_project_id").
+		ColumnExpr("DISTINCT d.app_project_id, p.name").
+		Where("d.user_id = ?", userID).
+		Where("d.platform = 'mobile'").
+		Where("d.status = 'deployed'").
+		Scan(context.Background(), &apps)
+	return apps, err
+}
+
+func (db *Database) IsAppAlreadyDeployedMobile(appProjectID string) (bool, error) {
+	count, err := db.DB.NewSelect().
+		TableExpr("app_deployments").
+		Where("app_project_id = ?", appProjectID).
+		Where("platform = 'mobile'").
+		Where("status = 'deployed'").
+		Count(context.Background())
+	return count > 0, err
+}

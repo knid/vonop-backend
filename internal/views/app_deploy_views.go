@@ -145,6 +145,134 @@ func (v *HttpViews) UndeployAppWeb(w http.ResponseWriter, r *http.Request) {
 	utils.JSONResponse(w, map[string]string{"status": "undeployed"}, http.StatusOK)
 }
 
+// POST /v2/apps/{appId}/deploy/mobile
+func (v *HttpViews) DeployAppMobile(w http.ResponseWriter, r *http.Request) {
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+	if requireActiveSubscription(w, user) {
+		return
+	}
+
+	appID := chi.URLParam(r, "appId")
+
+	// Check mobile deploy permission and limits
+	limits, planName, limitsErr := v.Controller.GetUserLimitsWithPlan(user)
+	if limitsErr == nil {
+		if !limits.CanDeployMobile {
+			go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_NEED, map[string]any{"action": "deploy_mobile"})
+			utils.JSONCodedErrorResponse(w, "FEATURE_NOT_AVAILABLE", "mobile deployments are not available on your plan", http.StatusForbidden, nil)
+			return
+		}
+
+		if limits.MaxDeployedMobileApps > 0 {
+			count, _ := v.Controller.DB.CountDeployedMobileAppsByUserID(user.ID.String())
+			alreadyDeployed, _ := v.Controller.DB.IsAppAlreadyDeployedMobile(appID)
+			if !alreadyDeployed && count >= limits.MaxDeployedMobileApps {
+				go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_QUOTA_REACHED, map[string]any{"action": "deploy_mobile", "limit": limits.MaxDeployedMobileApps})
+				go v.Controller.TrackUserEvent(user, "quota_reached", posthog.NewProperties().Set("action", "deploy_mobile").Set("limit", limits.MaxDeployedMobileApps))
+
+				var deployedNames []string
+				if apps, err := v.Controller.DB.GetDeployedMobileAppsByUserID(user.ID.String()); err == nil {
+					for _, a := range apps {
+						deployedNames = append(deployedNames, a.Name)
+					}
+				}
+
+				utils.JSONCodedErrorResponse(w, "DEPLOY_LIMIT_REACHED",
+					fmt.Sprintf("you have reached the maximum of %d deployed mobile apps for your plan", limits.MaxDeployedMobileApps),
+					http.StatusForbidden, map[string]any{
+						"deployed_apps": deployedNames,
+						"used":          count,
+						"limit":         limits.MaxDeployedMobileApps,
+						"plan_name":     planName,
+					})
+				return
+			}
+		}
+	}
+
+	project, err := v.Controller.GetAppProject(appID, user)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	deployStart := time.Now()
+	deployment, err := v.Controller.DeployToCoolify(project, user)
+	if err != nil {
+		go v.Controller.TrackUserEvent(user, "app_deploy_failed", posthog.NewProperties().
+			Set("app_id", project.ID.String()).
+			Set("platform", "mobile").
+			Set("error", err.Error()))
+		go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_MOBILE_DEPLOYMENT_FAILED, map[string]any{
+			"app_id":        project.ID.String(),
+			"project_type":  project.ProjectType,
+			"error_message": err.Error(),
+		})
+		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	deployDuration := time.Since(deployStart).Seconds()
+
+	v.Controller.TrackUserEvent(user, "app_deployed_mobile", posthog.NewProperties().
+		Set("app_id", project.ID.String()).
+		Set("project_type", project.ProjectType).
+		Set("deploy_duration_seconds", deployDuration).
+		Set("deploy_version", deployment.Version))
+
+	go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_MOBILE_DEPLOYMENT_SUCCEEDED, map[string]any{
+		"app_id":       project.ID.String(),
+		"project_type": project.ProjectType,
+		"version":      deployment.Version,
+		"deployed_url": deployment.DeployedURL,
+	})
+
+	utils.JSONResponse(w, responses.AppDeploymentResponse{
+		ID:           deployment.ID,
+		AppProjectID: deployment.AppProjectID,
+		Platform:     deployment.Platform,
+		Provider:     deployment.Provider,
+		Status:       deployment.Status,
+		DeployedURL:  deployment.DeployedURL,
+		Version:      deployment.Version,
+		CreatedAt:    deployment.CreatedAt,
+		UpdatedAt:    deployment.UpdatedAt,
+	}, http.StatusCreated)
+}
+
+// DELETE /v2/apps/{appId}/deploy/mobile
+func (v *HttpViews) UndeployAppMobile(w http.ResponseWriter, r *http.Request) {
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	appID := chi.URLParam(r, "appId")
+	project, err := v.Controller.GetAppProject(appID, user)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	if err := v.Controller.UndeployApp(project.ID.String()); err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	v.Controller.TrackUserEvent(user, "app_undeployed_mobile", posthog.NewProperties().
+		Set("app_id", project.ID.String()))
+
+	go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_MOBILE_UNDEPLOYED, map[string]any{
+		"app_id": project.ID.String(),
+	})
+
+	utils.JSONResponse(w, map[string]string{"status": "undeployed"}, http.StatusOK)
+}
+
 // POST /v2/apps/{appId}/build/android
 func (v *HttpViews) BuildAppAndroid(w http.ResponseWriter, r *http.Request) {
 	v.buildAppMobile(w, r, "android")
