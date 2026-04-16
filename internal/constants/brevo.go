@@ -7,28 +7,34 @@ const (
 	BREVO_VERIFACTION_EMAIL_TEMPLATE_ID    = 11
 	BREVO_ORDER_NOTIFICATION_TEMPLATE_ID   = 12
 
-	// User lifecycle events
-	BREVO_EVENT_NEW_USER            = "new_user"
-	BREVO_EVENT_NEW_LOGIN           = "new_login"
+	// User lifecycle events — names match PostHog for cross-system analysis.
+	BREVO_EVENT_NEW_USER            = "user_registered"
+	BREVO_EVENT_NEW_LOGIN           = "user_logged_in"
 	BREVO_EVENT_USER_DELETED        = "user_deleted"
 	BREVO_EVENT_USER_SETUP_FINISHED = "user_setup_finished"
 	BREVO_EVENT_EMAIL_VERIFIED      = "email_verified"
 	BREVO_EVENT_PASSWORD_RESET      = "password_reset"
 
 	// Support events
-	BREVO_EVENT_NEW_TICKET = "new_ticket"
+	BREVO_EVENT_NEW_TICKET = "support_ticket_created"
 
 	// Project events
-	BREVO_EVENT_NEW_PROJECT     = "new_project"
-	BREVO_EVENT_PROJECT_UPDATED = "update_project"
+	BREVO_EVENT_NEW_PROJECT     = "project_created"
+	BREVO_EVENT_PROJECT_UPDATED = "project_updated"
 	BREVO_EVENT_PROJECT_DELETED = "project_deleted"
-	BREVO_EVENT_APP_DRAFT_CREATED = "app_draft_created"
+	BREVO_EVENT_APP_DRAFT_CREATED      = "app_draft_created"
 	BREVO_EVENT_APP_GENERATION_STARTED = "app_generation_started"
-	BREVO_EVENT_APP_EXPORTED_ZIP       = "app_exported_zip"
-	BREVO_EVENT_SNAPSHOT_CREATED       = "snapshot_created"
-	BREVO_EVENT_SNAPSHOT_RESTORED      = "snapshot_restored"
+	BREVO_EVENT_APP_EXPORTED_ZIP       = "app_exported"
+	BREVO_EVENT_SNAPSHOT_CREATED       = "app_snapshot_created"
+	BREVO_EVENT_SNAPSHOT_RESTORED      = "app_snapshot_restored"
 	BREVO_EVENT_INTEGRATION_CONNECTED    = "integration_connected"
 	BREVO_EVENT_INTEGRATION_DISCONNECTED = "integration_disconnected"
+
+	// Chat / generation completion events (fired from agent)
+	BREVO_EVENT_APP_GENERATION_COMPLETED = "generate_app_completed"
+	BREVO_EVENT_APP_CHAT_SENT            = "app_chat_sent"
+	BREVO_EVENT_APP_CHAT_COMPLETED       = "app_chat_completed"
+	BREVO_EVENT_APP_CHAT_FAILED          = "app_chat_failed"
 
 	// Build events (reported by workers)
 	BREVO_EVENT_BUILD_STARTED_IOS    = "ios_build_started"
@@ -46,10 +52,10 @@ const (
 	BREVO_EVENT_USER_ANDROID_DEPLOYMENT_FINISHED = "user_android_deployment_finished"
 	BREVO_EVENT_USER_ANDROID_DEPLOYMENT_FAILED   = "user_android_deployment_failed"
 
-	// Web deployment events
-	BREVO_EVENT_WEB_DEPLOYMENT_SUCCEEDED = "web_deployment_succeeded"
-	BREVO_EVENT_WEB_DEPLOYMENT_FAILED    = "web_deployment_failed"
-	BREVO_EVENT_WEB_UNDEPLOYED           = "web_undeployed"
+	// Web deployment events — names match PostHog for cross-system analysis.
+	BREVO_EVENT_WEB_DEPLOYMENT_SUCCEEDED = "app_deployed_web"
+	BREVO_EVENT_WEB_DEPLOYMENT_FAILED    = "app_deploy_failed"
+	BREVO_EVENT_WEB_UNDEPLOYED           = "app_undeployed_web"
 
 	// Domain events
 	BREVO_EVENT_DOMAIN_ADDED    = "domain_added"

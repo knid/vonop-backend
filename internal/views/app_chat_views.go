@@ -7,6 +7,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/knid/wemob/internal/agent"
+	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/utils"
@@ -69,6 +70,15 @@ func (v *HttpViews) ChatApp(w http.ResponseWriter, r *http.Request) {
 		Set("app_id", project.ID.String()).
 		Set("project_type", project.ProjectType).
 		Set("has_images", len(req.Images) > 0))
+
+	brevoEvent := constants.BREVO_EVENT_APP_CHAT_SENT
+	if isInitialGeneration {
+		brevoEvent = constants.BREVO_EVENT_APP_GENERATION_STARTED
+	}
+	go v.Controller.CRMService.SendEvent(user, brevoEvent, map[string]any{
+		"app_id":       project.ID.String(),
+		"project_type": project.ProjectType,
+	})
 
 	v.handleStreamOrAsync(w, r, user, StreamConfig{
 		JobType: jobType,

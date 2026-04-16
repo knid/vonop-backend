@@ -293,7 +293,8 @@ func (c *Controller) DeleteUser(tokenStr string) (*models.User, error) {
 		return nil, err
 	}
 
-	go c.CRMService.SendEvent(deletedUser, constants.BREVO_EVENT_USER_DELETED, map[string]any{})
+	// CRM + PostHog events fired by the view layer (views/users.go).
+	// Admin deletion path (admin_users.go) fires its own event.
 	return deletedUser, nil
 }
 

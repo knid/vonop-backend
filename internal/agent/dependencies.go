@@ -27,6 +27,10 @@ type CreditDeductor func(ctx context.Context, credits int, action, projectID str
 // Controller.TrackUserEvent helper.
 type EventTracker func(event string, props map[string]any)
 
+// CRMEventSender posts a CRM event (Brevo). Used for lifecycle events that
+// drive marketing automations (generation completed, chat failed, etc.).
+type CRMEventSender func(event string, attrs map[string]any)
+
 // ImageGenerator generates an image and returns a stable public URL.
 // Implementations call the image service, upload bytes to AssetsStorage, and
 // return the S3 public URL.
@@ -114,6 +118,7 @@ type RunDependencies struct {
 	CreditChecker            CreditCheckerFactory
 	DeductCredits            CreditDeductor
 	TrackUserEvent           EventTracker
+	SendCRMEvent             CRMEventSender
 	GenerateImage            ImageGenerator
 	NeonConnString           NeonConnResolver
 	ProvisionDatabase        DatabaseProvisioner

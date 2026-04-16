@@ -701,6 +701,20 @@ func finaliseSuccess(
 		})
 	}
 
+	// 6b. Track CRM (Brevo) — mirrors PostHog event names.
+	if deps.SendCRMEvent != nil {
+		crmEvent := "app_chat_completed"
+		if isInitial {
+			crmEvent = "generate_app_completed"
+		}
+		deps.SendCRMEvent(crmEvent, map[string]any{
+			"app_id":       project.ID.String(),
+			"project_type": project.ProjectType,
+			"credits_used": credits,
+			"model":        run.Model,
+		})
+	}
+
 	// 7. PostHog LLM Analytics: emit per-call $ai_generation events plus a
 	// grouping $ai_trace event for the built-in dashboard. The tracker has
 	// been collecting messages/usage throughout the run via TrackContent.
@@ -846,6 +860,15 @@ func finaliseFailureV2(
 			"code":     string(code),
 			"phase":    phase,
 			"duration": run.DurationMs,
+		})
+	}
+
+	// 6b. Track CRM (Brevo).
+	if deps.SendCRMEvent != nil {
+		deps.SendCRMEvent("app_chat_failed", map[string]any{
+			"app_id": run.AppProjectID.String(),
+			"code":   string(code),
+			"phase":  phase,
 		})
 	}
 

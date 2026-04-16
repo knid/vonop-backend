@@ -3,6 +3,7 @@ package utils
 import (
 	"context"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/knid/wemob/internal/constants"
@@ -11,6 +12,42 @@ import (
 	crmServices "github.com/knid/wemob/internal/services/crm"
 	"github.com/uptrace/bun"
 )
+
+// alertRecord tracks the last alert sent to a user so the hourly job
+// doesn't re-send the same event every tick.
+type alertRecord struct {
+	level   string // "depleted" or "low"
+	sentAt  time.Time
+}
+
+var (
+	alertHistory   = make(map[string]alertRecord) // key: user ID
+	alertHistoryMu sync.Mutex
+)
+
+const alertCooldown = 24 * time.Hour
+
+// shouldAlert returns true if the user hasn't been alerted at this level
+// within the cooldown window, or if the level worsened.
+func shouldAlert(userID, level string) bool {
+	alertHistoryMu.Lock()
+	defer alertHistoryMu.Unlock()
+
+	prev, ok := alertHistory[userID]
+	if !ok || prev.level != level || time.Since(prev.sentAt) >= alertCooldown {
+		alertHistory[userID] = alertRecord{level: level, sentAt: time.Now()}
+		return true
+	}
+	return false
+}
+
+// clearAlert removes a user from the alert history when their balance
+// recovers, so they'll be alerted again if they deplete again later.
+func clearAlert(userID string) {
+	alertHistoryMu.Lock()
+	delete(alertHistory, userID)
+	alertHistoryMu.Unlock()
+}
 
 // CheckUsageAlertsJob runs every hour and sends CRM events for usage approaching limits
 // and AI credit depletion.
@@ -36,7 +73,6 @@ func checkUsageAlerts(db *database.Database, crmService crmServices.CRMService) 
 	}
 
 	for _, user := range users {
-		// AI credits alerts
 		balance, err := db.GetAICreditsBalance(user.ID.String())
 		if err != nil {
 			slog.Warn("usage alerts: failed to fetch AI credits balance", "error", err, "user_id", user.ID.String())
@@ -48,22 +84,26 @@ func checkUsageAlerts(db *database.Database, crmService crmServices.CRMService) 
 			continue
 		}
 
-		// Calculate remaining credits as a percentage of monthly grant.
-		// Uses remaining balance (not consumed), which correctly handles rollover/purchased credits.
 		remainingPercent := float64(balance.Balance) / float64(limits.MonthlyAICredits) * 100
 
-		// CRM events are fire-and-forget; errors are handled internally by the CRM service.
 		if balance.Balance <= 0 || remainingPercent <= 10 {
-			go crmService.SendEvent(&user, constants.BREVO_EVENT_AI_CREDITS_DEPLETED, map[string]any{
-				"credits_total":     limits.MonthlyAICredits,
-				"credits_remaining": balance.Balance,
-			})
+			if shouldAlert(user.ID.String(), "depleted") {
+				go crmService.SendEvent(&user, constants.BREVO_EVENT_AI_CREDITS_DEPLETED, map[string]any{
+					"credits_total":     limits.MonthlyAICredits,
+					"credits_remaining": balance.Balance,
+				})
+			}
 		} else if remainingPercent <= 20 {
-			go crmService.SendEvent(&user, constants.BREVO_EVENT_AI_CREDITS_LOW, map[string]any{
-				"credits_remaining": balance.Balance,
-				"credits_total":     limits.MonthlyAICredits,
-				"usage_percent":     int(100 - remainingPercent),
-			})
+			if shouldAlert(user.ID.String(), "low") {
+				go crmService.SendEvent(&user, constants.BREVO_EVENT_AI_CREDITS_LOW, map[string]any{
+					"credits_remaining": balance.Balance,
+					"credits_total":     limits.MonthlyAICredits,
+					"usage_percent":     int(100 - remainingPercent),
+				})
+			}
+		} else {
+			// Balance recovered — clear history so future depletion triggers a fresh alert.
+			clearAlert(user.ID.String())
 		}
 	}
 }
