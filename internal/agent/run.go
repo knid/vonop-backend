@@ -354,10 +354,10 @@ func Run(
 		nil, // onReasoning
 		utils.ToolCallConfig{
 			MaxRounds: maxTurns,
-			// Sonnet 4.6 supports 64K output; 32K keeps most responses one-shot
-			// without committing to the hard max, and halves the chance of
-			// landing in the max_tokens→continue loop that trips truncation.
-			MaxTokens:  32768,
+			// Sonnet 4.6's non-extended output cap. Running at the provider
+			// max keeps the continuation dance (finish_reason=length → send
+			// "continue") from firing in all but pathological runs.
+			MaxTokens:  64000,
 			NudgeAfter: 50,
 			StripAfter: -1,
 			ShouldContinue: func() bool {
