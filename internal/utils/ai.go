@@ -2153,9 +2153,7 @@ func StreamWithTools(
 				"history_msgs", len(currentMessages),
 			}, trackerAttrs(ctx)...)...)
 			if tracker := TokenTrackerFromContext(ctx); tracker != nil {
-				// Only record full message content for the first 10 rounds to cap memory usage.
-				// After that, record usage stats only.
-				if tracker.TrackContent && round < 10 {
+				if tracker.TrackContent {
 					// When the round produced tool calls instead of text, record a
 					// summary of the tool calls so PostHog $ai_output_choices is not null.
 					outputForTracking := fullText.String()
