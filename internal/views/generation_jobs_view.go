@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -626,6 +627,25 @@ func (v *HttpViews) CancelJob(w http.ResponseWriter, r *http.Request) {
 		utils.JSONErrorResponse(w, "job id is required", http.StatusBadRequest)
 		return
 	}
+
+	// Diagnostic: users report runs getting canceled without clicking Stop,
+	// and the frontend only calls this endpoint from the Stop button. Capture
+	// enough request context to tell which tab/device/automation hit it.
+	ip := r.RemoteAddr
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		ip = strings.TrimSpace(strings.SplitN(xff, ",", 2)[0])
+	} else if xri := r.Header.Get("X-Real-IP"); xri != "" {
+		ip = strings.TrimSpace(xri)
+	}
+	slog.Info("CancelJob received",
+		"job_id", jobID,
+		"user_id", user.ID,
+		"user_email", user.Email,
+		"ip", ip,
+		"user_agent", r.UserAgent(),
+		"referer", r.Header.Get("Referer"),
+		"origin", r.Header.Get("Origin"),
+	)
 
 	err = v.Controller.CancelJob(jobID, user.ID)
 	if err != nil {
