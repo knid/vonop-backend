@@ -504,3 +504,26 @@ func (c *Controller) SignUnsignedIPATask(user *models.User, signReq requests.Sig
 
 	return iosSignTask, nil
 }
+
+// GetLatestSignStatusForBuild returns the most recent sign task for a build,
+// scoped to the caller. Used by the build card UI to display "signed" /
+// "signing" / "not signed" across refreshes without relying on local state.
+func (c *Controller) GetLatestSignStatusForBuild(user *models.User, buildID string) (*models.SignIPATask, error) {
+	build, err := c.DB.GetProjectBuildById(buildID)
+	if err != nil {
+		return nil, err
+	}
+	project, err := c.DB.GetProjectById(build.ProjectID.String())
+	if err != nil {
+		return nil, err
+	}
+	if project.UserID.String() != user.ID.String() {
+		return nil, errors.New("you do not have access to this resource")
+	}
+
+	signTask, err := c.DB.GetLatestIOSSignTaskByBuild(buildID)
+	if err != nil {
+		return nil, err
+	}
+	return signTask, nil
+}

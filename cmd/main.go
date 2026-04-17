@@ -144,6 +144,8 @@ func createSchema(db *bun.DB) error {
 		(*models.AppTemplate)(nil),
 		// AI gateway per-project keys
 		(*models.ProjectGatewayKey)(nil),
+		// Persistent store listing per AppProject (replaces per-wizard form state)
+		(*models.AppStoreListing)(nil),
 	}
 
 	for _, model := range models {
@@ -193,6 +195,7 @@ func createSchema(db *bun.DB) error {
 		`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
 		`ALTER TABLE store_page_images ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
 		`ALTER TABLE app_build_tasks ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
+		`ALTER TABLE app_build_tasks ADD COLUMN IF NOT EXISTS error_message text`,
 		`ALTER TABLE app_release_tasks ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
 		`ALTER TABLE tickets ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
 		`ALTER TABLE google_play_credentials ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
@@ -1207,6 +1210,11 @@ func main() {
 				r.Post("/sign", httpViews.UpdateSignIPATaskStatus)
 				r.Post("/deploy", httpViews.UpdateDeploymentStatus)
 			})
+			// Flat, cross-project build lookups so the UI can address a
+			// build by its id without knowing the project it belongs to.
+			r.Route("/builds/{buildId}", func(r chi.Router) {
+				r.Get("/sign-status", httpViews.GetBuildSignStatus)
+			})
 			r.Route("/billing", func(r chi.Router) {
 				r.Get("/plans", httpViews.GetBillingPlans)
 				r.Get("/gateway-models", httpViews.GetBillingGatewayModels)
@@ -1482,8 +1490,21 @@ func main() {
 
 					// Mobile builds
 					r.Route("/build", func(r chi.Router) {
+						// Combined endpoint: accepts {platforms:[...]} and enqueues
+						// both Android and iOS in one call so the UI can ship a
+						// "check both" build dialog without sequential collisions
+						// with the pending-task guard.
+						r.Post("/", httpViews.BuildAppMobileMulti)
 						r.Post("/android", httpViews.BuildAppAndroid)
 						r.Post("/ios", httpViews.BuildAppIOS)
+					})
+
+					// Persistent store listing — replaces the per-wizard form
+					// state so icon/title/description/screenshots survive
+					// refresh, re-submission, and future multi-locale work.
+					r.Route("/store-listing", func(r chi.Router) {
+						r.Get("/", httpViews.GetAppStoreListing)
+						r.Put("/", httpViews.UpdateAppStoreListing)
 					})
 
 					r.Post("/convert-to-mobile", httpViews.ConvertToMobile)

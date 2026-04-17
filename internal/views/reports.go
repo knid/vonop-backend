@@ -67,9 +67,12 @@ func (v *HttpViews) UpdateBuildTaskStatus(w http.ResponseWriter, r *http.Request
 		"package_name": task.Build.Project.PackageName,
 	}
 
-	if reportBuildReq.Status == "Building" && task.Platform == "ios" {
+	// Fire the "build started" CRM event once per build. The yaml now emits
+	// a stage ladder (Preparing → Building → Uploading), so gate on the
+	// first stage only to avoid double-firing.
+	if reportBuildReq.Status == "Preparing" && task.Platform == "ios" {
 		v.sendCRMEvent(task.Project.User, constants.BREVO_EVENT_BUILD_STARTED_IOS, payload)
-	} else if reportBuildReq.Status == "Building" && task.Platform == "android" {
+	} else if reportBuildReq.Status == "Preparing" && task.Platform == "android" {
 		v.sendCRMEvent(task.Project.User, constants.BREVO_EVENT_BUILD_STARTED_ANDROID, payload)
 	} else if reportBuildReq.Status == "Built" && task.Platform == "ios" {
 		v.sendCRMEvent(task.Project.User, constants.BREVO_EVENT_BUILD_FINISHED_IOS, payload)

@@ -38,14 +38,15 @@ func (c *Controller) GetAllAppBuildTasks(user *models.User) ([]responses.BuildTa
 	var buildTaskInformationResponses []responses.BuildTaskInformationResponse
 	for _, task := range tasks {
 		buildTaskInformationResponse := responses.BuildTaskInformationResponse{
-			ID:         task.ID,
-			ProjectID:  task.ProjectID,
-			BuildID:    task.BuildID,
-			Finished:   task.Finished,
-			Platform:   task.Platform,
-			AutoDeploy: task.AutoDeploy,
-			Status:     task.StatusText,
-			CreatedAt:  task.CreatedAt,
+			ID:           task.ID,
+			ProjectID:    task.ProjectID,
+			BuildID:      task.BuildID,
+			Finished:     task.Finished,
+			Platform:     task.Platform,
+			AutoDeploy:   task.AutoDeploy,
+			Status:       task.StatusText,
+			ErrorMessage: task.ErrorMessage,
+			CreatedAt:    task.CreatedAt,
 		}
 		buildTaskInformationResponses = append(buildTaskInformationResponses, buildTaskInformationResponse)
 	}

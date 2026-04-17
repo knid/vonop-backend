@@ -221,16 +221,48 @@ func (c *Controller) DeployToCoolify(project *models.AppProject, user *models.Us
 
 // BuildAppMobile creates a native mobile build for an AI-generated app by wrapping
 // its Vercel deployment URL using the old URL-wrapper build system.
-func (c *Controller) BuildAppMobile(appProject *models.AppProject, user *models.User, platform string, appName string, icon string, splashColor string) (*models.Build, *models.AppBuildTask, error) {
-	// Enforce platform-specific build permissions
+//
+// Accepts one or more platforms so the UI can kick off Android + iOS in one
+// click without the second request colliding with the first's pending-task
+// guard. A single Build record is shared across platforms; each platform gets
+// its own AppBuildTask.
+//
+// Codemagic triggers run best-effort per platform: a trigger failure marks
+// that platform's task as Failed but does not abort the others. The error
+// return is non-nil only when the whole call can't proceed (limits, pending
+// build, missing web deploy, etc.). Callers should inspect task.StatusText
+// per returned task to see per-platform outcomes.
+func (c *Controller) BuildAppMobile(appProject *models.AppProject, user *models.User, platforms []string, appName string, icon string, splashColor string) (*models.Build, []*models.AppBuildTask, error) {
+	if len(platforms) == 0 {
+		return nil, nil, fmt.Errorf("at least one platform is required")
+	}
+
+	// Normalise + dedupe platform list so downstream code can rely on a clean
+	// ["android"]/["ios"]/["android","ios"] shape.
+	wantAndroid := false
+	wantIOS := false
+	for _, p := range platforms {
+		switch strings.ToLower(strings.TrimSpace(p)) {
+		case "android":
+			wantAndroid = true
+		case "ios":
+			wantIOS = true
+		default:
+			return nil, nil, fmt.Errorf("unsupported platform: %q", p)
+		}
+	}
+
+	// Enforce platform-specific build permissions up front. Reject the whole
+	// call if any requested platform is disallowed — "partial build" is a
+	// surprise we don't want to spring on paid users.
 	limits, err := c.GetUserLimits(user)
 	if err != nil {
 		slog.Warn("BuildAppMobile: failed to get user limits", "error", err, "user_id", user.ID)
 	} else {
-		if platform == "android" && !limits.CanBuildToAndroid {
+		if wantAndroid && !limits.CanBuildToAndroid {
 			return nil, nil, fmt.Errorf("your subscription does not allow Android builds")
 		}
-		if platform == "ios" && !limits.CanBuildToIOS {
+		if wantIOS && !limits.CanBuildToIOS {
 			return nil, nil, fmt.Errorf("your subscription does not allow iOS builds")
 		}
 	}
@@ -255,27 +287,29 @@ func (c *Controller) BuildAppMobile(appProject *models.AppProject, user *models.
 
 		// Create new project linked to this AI app's URL
 		project = &models.Project{
-			UserID:          user.ID,
-			URL:             wrappedURL,
-			PackageName:     pkName,
-			IconPath:        icon,
-			OneSignalAppID:  "wemob-app-" + appProject.ID.String(),
+			UserID:            user.ID,
+			URL:               wrappedURL,
+			PackageName:       pkName,
+			IconPath:          icon,
+			OneSignalAppID:    "wemob-app-" + appProject.ID.String(),
 			OneSignalAppToken: "wemob-app-token-" + appProject.ID.String(),
-			BuildForAndroid: platform == "android",
-			BuildForIOS:     platform == "ios",
+			BuildForAndroid:   wantAndroid,
+			BuildForIOS:       wantIOS,
 		}
 		project, err = c.DB.CreateProject(project)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to create build project: %w", err)
 		}
 	} else {
-		// Update platform flags and metadata on existing project
-		if platform == "android" {
+		// Update platform flags and metadata on existing project. Union the
+		// flags with the new request so a project that previously only built
+		// Android now also builds iOS without losing its Android flag.
+		if wantAndroid {
 			project.BuildForAndroid = true
-		} else {
+		}
+		if wantIOS {
 			project.BuildForIOS = true
 		}
-		// Keep existing package name
 		if icon != "" {
 			project.IconPath = icon
 		}
@@ -290,7 +324,7 @@ func (c *Controller) BuildAppMobile(appProject *models.AppProject, user *models.
 		c.DB.UpdateProject(project)
 	}
 
-	// Check for pending builds
+	// Check for pending builds (any platform)
 	pendingTasks, err := c.DB.GetPendingAppBuildTasks(project)
 	if err == nil && len(pendingTasks) > 0 {
 		return nil, nil, fmt.Errorf("a build is already in progress, please wait")
@@ -303,7 +337,7 @@ func (c *Controller) BuildAppMobile(appProject *models.AppProject, user *models.
 		lastBuildNumber = lastBuild.BuildNumber
 	}
 
-	// Create build record
+	// Create single build record shared across platforms
 	build := &models.Build{
 		ProjectID:         project.ID,
 		Active:            false,
@@ -320,9 +354,6 @@ func (c *Controller) BuildAppMobile(appProject *models.AppProject, user *models.
 		return nil, nil, fmt.Errorf("failed to create build record")
 	}
 
-	// Create task and enqueue
-	var appBuildTask *models.AppBuildTask
-
 	// Fetch mobile app config — try v1 Project ID first, then AppProject ID
 	mobileConfig, _ := c.DB.GetMobileAppConfig(project.ID.String())
 	if mobileConfig == nil {
@@ -336,10 +367,9 @@ func (c *Controller) BuildAppMobile(appProject *models.AppProject, user *models.
 		c.DB.UpsertMobileAppConfig(&configCopy)
 	}
 
-	buildParams := codemagic.AndroidBuildParams{
+	baseParams := codemagic.AndroidBuildParams{
 		ProjectID:           project.ID.String(),
 		BuildID:             build.ID.String(),
-		TaskID:              "", // set below
 		Version:             build.BuildNumber,
 		Title:               appName,
 		URL:                 wrappedURL,
@@ -351,54 +381,76 @@ func (c *Controller) BuildAppMobile(appProject *models.AppProject, user *models.
 		UniversalLinkDomain: getUniversalLink(mobileConfig),
 	}
 
-	if platform == "android" {
-		appBuildTask, err = c.DB.CreateAppBuildTask(*build, "Android", "Queued", false)
-		if err != nil {
-			return nil, nil, fmt.Errorf("failed to create build task: %w", err)
-		}
-		buildParams.TaskID = appBuildTask.ID.String()
+	// Stable platform order for deterministic response
+	ordered := make([]string, 0, 2)
+	if wantAndroid {
+		ordered = append(ordered, "android")
+	}
+	if wantIOS {
+		ordered = append(ordered, "ios")
+	}
 
-		if _, err := c.CodemagicService.TriggerAndroidBuild(buildParams); err != nil {
-			appBuildTask.StatusText = "Failed"
-			appBuildTask.Finished = true
-			_ = c.DB.UpdateAppBuildTask(appBuildTask)
-			return nil, nil, fmt.Errorf("failed to trigger Android build: %w", err)
+	tasks := make([]*models.AppBuildTask, 0, len(ordered))
+	triggerErrs := make([]string, 0)
+	for _, platform := range ordered {
+		label := "Android"
+		if platform == "ios" {
+			label = "IOS"
 		}
-	} else {
-		appBuildTask, err = c.DB.CreateAppBuildTask(*build, "IOS", "Queued", false)
+		task, err := c.DB.CreateAppBuildTask(*build, label, "Queued", false)
 		if err != nil {
-			return nil, nil, fmt.Errorf("failed to create build task: %w", err)
+			return build, tasks, fmt.Errorf("failed to create %s build task: %w", platform, err)
+		}
+		tasks = append(tasks, task)
+
+		p := baseParams
+		p.TaskID = task.ID.String()
+
+		var triggerErr error
+		if platform == "android" {
+			_, triggerErr = c.CodemagicService.TriggerAndroidBuild(p)
+		} else {
+			_, triggerErr = c.CodemagicService.TriggerIOSBuild(codemagic.IOSBuildParams{
+				ProjectID:           p.ProjectID,
+				BuildID:             p.BuildID,
+				TaskID:              p.TaskID,
+				Version:             p.Version,
+				Title:               p.Title,
+				URL:                 p.URL,
+				IconURL:             p.IconURL,
+				SplashColor:         p.SplashColor,
+				PackageName:         p.PackageName,
+				Permissions:         p.Permissions,
+				URLScheme:           p.URLScheme,
+				UniversalLinkDomain: p.UniversalLinkDomain,
+			})
 		}
 
-		if _, err := c.CodemagicService.TriggerIOSBuild(codemagic.IOSBuildParams{
-			ProjectID:           buildParams.ProjectID,
-			BuildID:             buildParams.BuildID,
-			TaskID:              appBuildTask.ID.String(),
-			Version:             buildParams.Version,
-			Title:               buildParams.Title,
-			URL:                 buildParams.URL,
-			IconURL:             buildParams.IconURL,
-			SplashColor:         buildParams.SplashColor,
-			PackageName:         buildParams.PackageName,
-			Permissions:         buildParams.Permissions,
-			URLScheme:           buildParams.URLScheme,
-			UniversalLinkDomain: buildParams.UniversalLinkDomain,
-		}); err != nil {
-			appBuildTask.StatusText = "Failed"
-			appBuildTask.Finished = true
-			_ = c.DB.UpdateAppBuildTask(appBuildTask)
-			return nil, nil, fmt.Errorf("failed to trigger iOS build: %w", err)
+		if triggerErr != nil {
+			// Mark this platform's task as failed, capture the error, and
+			// keep going — the other platform's trigger may still succeed.
+			task.StatusText = "Failed"
+			task.ErrorMessage = triggerErr.Error()
+			task.Finished = true
+			_ = c.DB.UpdateAppBuildTask(task)
+			triggerErrs = append(triggerErrs, fmt.Sprintf("%s: %v", platform, triggerErr))
 		}
 	}
 
 	slog.Info("BuildAppMobile: build enqueued",
 		"app_project_id", appProject.ID,
-		"platform", platform,
+		"platforms", ordered,
 		"build_id", build.ID,
 		"url", wrappedURL,
 	)
 
-	return build, appBuildTask, nil
+	// If every platform failed to trigger, surface an error so the view
+	// returns a 5xx. If only some failed, the caller can see per-task state.
+	if len(triggerErrs) == len(ordered) {
+		return build, tasks, fmt.Errorf("failed to trigger build(s): %s", strings.Join(triggerErrs, "; "))
+	}
+
+	return build, tasks, nil
 }
 
 // UndeployApp stops the Coolify application and marks all deployments as undeployed.
