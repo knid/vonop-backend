@@ -1,7 +1,10 @@
 bin/
 builds/
 storage/private
+.env
 .env.dev
+.mcp.json
+/main
 .DS_Store
 docs/superpowers/
 .superpowers/
