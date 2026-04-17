@@ -18,8 +18,14 @@ func (c *Controller) UpdateBuildTaskStatus(reportBuildReq requests.ReportBuildRe
 	switch reportBuildReq.Status {
 	case "success", "completed", "done", "built", "Built", "Builded":
 		buildTask.Finished = true
+		// Clear any prior error message on a successful terminal state so a
+		// re-run after a failure doesn't keep showing the stale failure.
+		buildTask.ErrorMessage = ""
 	case "error", "failed", "cancelled":
 		buildTask.Finished = true
+		if reportBuildReq.Message != "" {
+			buildTask.ErrorMessage = reportBuildReq.Message
+		}
 	}
 
 	return c.DB.UpdateAppBuildTask(buildTask)

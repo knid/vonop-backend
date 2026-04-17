@@ -3,6 +3,7 @@ package views
 import (
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -273,14 +274,101 @@ func (v *HttpViews) UndeployAppMobile(w http.ResponseWriter, r *http.Request) {
 	utils.JSONResponse(w, map[string]string{"status": "undeployed"}, http.StatusOK)
 }
 
-// POST /v2/apps/{appId}/build/android
+// POST /v2/apps/{appId}/build/android — single-platform, kept for back-compat
+// with existing clients. New UI should use BuildAppMobileMulti.
 func (v *HttpViews) BuildAppAndroid(w http.ResponseWriter, r *http.Request) {
 	v.buildAppMobile(w, r, "android")
 }
 
-// POST /v2/apps/{appId}/build/ios
+// POST /v2/apps/{appId}/build/ios — single-platform, kept for back-compat.
 func (v *HttpViews) BuildAppIOS(w http.ResponseWriter, r *http.Request) {
 	v.buildAppMobile(w, r, "ios")
+}
+
+// POST /v2/apps/{appId}/build — combined endpoint that enqueues Android
+// and/or iOS in a single call. Returns per-platform task status so partial
+// trigger failures are visible to the client.
+func (v *HttpViews) BuildAppMobileMulti(w http.ResponseWriter, r *http.Request) {
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+	if requireActiveSubscription(w, user) {
+		return
+	}
+
+	limits, limitsErr := v.Controller.GetUserLimits(user)
+	if limitsErr != nil || !limits.CanBuildMobile {
+		go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_NEED, map[string]any{"action": "build_mobile"})
+		utils.JSONCodedErrorResponse(w, "FEATURE_NOT_AVAILABLE", "mobile builds require Professional plan", http.StatusForbidden, nil)
+		return
+	}
+
+	appID := chi.URLParam(r, "appId")
+	project, err := v.Controller.GetAppProject(appID, user)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	var req requests.MultiPlatformMobileBuildRequest
+	if err := utils.ParseJSONBody(r, &req); err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	validate := validator.New(validator.WithRequiredStructEnabled())
+	if err := req.Validate(validate); err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	build, tasks, triggerErr := v.Controller.BuildAppMobile(project, user, req.Platforms, req.AppName, req.Icon, req.SplashScreenColor)
+
+	// Partial failures (one platform succeeded, another failed) return
+	// triggerErr=nil with per-task Failed status. Total failure returns a
+	// non-nil triggerErr AND the tasks that were persisted with Failed
+	// status — we still surface those to the client so the UI can show
+	// the per-platform error messages instead of a bare 500.
+	if triggerErr != nil && (build == nil || len(tasks) == 0) {
+		utils.JSONErrorResponse(w, triggerErr.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Per-platform task envelopes so the client can show per-platform
+	// status (including "Failed" for triggers that errored out).
+	taskResponses := make([]map[string]any, 0, len(tasks))
+	for _, t := range tasks {
+		taskResponses = append(taskResponses, map[string]any{
+			"task_id":       t.ID,
+			"platform":      strings.ToLower(t.Platform),
+			"status":        t.StatusText,
+			"finished":      t.Finished,
+			"error_message": t.ErrorMessage,
+		})
+	}
+
+	for _, platform := range req.Platforms {
+		v.Controller.TrackUserEvent(user, "app_deployed_"+platform, posthog.NewProperties().
+			Set("app_id", project.ID.String()).
+			Set("project_type", project.ProjectType))
+	}
+
+	// 207 Multi-Status when every platform's trigger failed but we still
+	// have tasks to show. 201 Created for the normal (including partial
+	// success) path. The client treats both as "inspect tasks".
+	statusCode := http.StatusCreated
+	allFailed := len(tasks) > 0 && triggerErr != nil
+	if allFailed {
+		statusCode = http.StatusMultiStatus
+	}
+
+	utils.JSONResponse(w, map[string]any{
+		"build_id":   build.ID,
+		"project_id": build.ProjectID,
+		"version":    build.BuildNumber,
+		"tasks":      taskResponses,
+	}, statusCode)
 }
 
 func (v *HttpViews) buildAppMobile(w http.ResponseWriter, r *http.Request, platform string) {
@@ -319,11 +407,16 @@ func (v *HttpViews) buildAppMobile(w http.ResponseWriter, r *http.Request, platf
 		return
 	}
 
-	build, task, err := v.Controller.BuildAppMobile(project, user, platform, req.AppName, req.Icon, req.SplashScreenColor)
+	build, tasks, err := v.Controller.BuildAppMobile(project, user, []string{platform}, req.AppName, req.Icon, req.SplashScreenColor)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	if len(tasks) == 0 {
+		utils.JSONErrorResponse(w, "no build task was created", http.StatusInternalServerError)
+		return
+	}
+	task := tasks[0]
 
 	v.Controller.TrackUserEvent(user, "app_deployed_"+platform, posthog.NewProperties().
 		Set("app_id", project.ID.String()).

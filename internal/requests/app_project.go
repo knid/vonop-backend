@@ -67,6 +67,20 @@ func (r *MobileBuildRequest) Validate(validate *validator.Validate) error {
 	return utils.ValidateFunc[MobileBuildRequest](*r, validate)
 }
 
+// MultiPlatformMobileBuildRequest is the body shape for the combined build
+// endpoint that enqueues Android and iOS in one call. Platforms must be a
+// non-empty subset of {"android","ios"}.
+type MultiPlatformMobileBuildRequest struct {
+	Platforms         []string `json:"platforms" validate:"required,min=1,dive,oneof=android ios" errormgs:"platforms must include android and/or ios"`
+	AppName           string   `json:"app_name" validate:"required,min=2" errormgs:"must be at least 2 characters"`
+	Icon              string   `json:"icon" validate:"required" errormgs:"app icon is required"`
+	SplashScreenColor string   `json:"splash_screen_color"`
+}
+
+func (r *MultiPlatformMobileBuildRequest) Validate(validate *validator.Validate) error {
+	return utils.ValidateFunc[MultiPlatformMobileBuildRequest](*r, validate)
+}
+
 type CreateAppSnapshotRequest struct {
 	Description string `json:"description" validate:"required,min=2,max=200" errormgs:"must be between 2 and 200 characters long"`
 }

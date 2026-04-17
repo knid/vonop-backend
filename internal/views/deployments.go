@@ -1,6 +1,8 @@
 package views
 
 import (
+	"database/sql"
+	"errors"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -179,5 +181,47 @@ func (v *HttpViews) CheckSignIPATaskStatus(w http.ResponseWriter, r *http.Reques
 		"status":   signTask.Status,
 		"message":  signTask.StatusMessage,
 		"finished": signTask.Finished,
+	}, http.StatusOK)
+}
+
+// GetBuildSignStatus returns the latest sign task for a given build so the
+// build card UI can reflect signing state after a page refresh. Responds
+// with 404 when no sign task has been run yet — the UI treats that as
+// "unsigned, show Sign button".
+func (v *HttpViews) GetBuildSignStatus(w http.ResponseWriter, r *http.Request) {
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+	if requireActiveSubscription(w, user) {
+		return
+	}
+
+	buildID := chi.URLParam(r, "buildId")
+	if buildID == "" {
+		utils.JSONErrorResponse(w, "build ID is required", http.StatusBadRequest)
+		return
+	}
+
+	signTask, err := v.Controller.GetLatestSignStatusForBuild(user, buildID)
+	if err != nil {
+		// sql.ErrNoRows is expected — surface as 404 so the client can
+		// distinguish "never signed" from a real server error.
+		if errors.Is(err, sql.ErrNoRows) {
+			utils.JSONErrorResponse(w, "no sign task for this build", http.StatusNotFound)
+			return
+		}
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	utils.JSONResponse(w, map[string]any{
+		"task_id":   signTask.ID.String(),
+		"status":    signTask.Status,
+		"message":   signTask.StatusMessage,
+		"finished":  signTask.Finished,
+		"build_id":  signTask.BuildID.String(),
+		"created_at": signTask.CreatedAt,
 	}, http.StatusOK)
 }
