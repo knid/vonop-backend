@@ -316,10 +316,13 @@ func Run(
 		return result, nil
 	}
 
+	repetition := newRepetitionDetector()
+
 	narrationSink := func(chunk string) {
 		if chunk == "" {
 			return
 		}
+		repetition.Feed(chunk)
 		// Append to the trailing text part if there is one; otherwise push a
 		// new text part. This is the chronological mirror of what the model
 		// emitted: text → tool → text → tool → text → ... lands as alternating
@@ -350,8 +353,11 @@ func Run(
 		narrationSink,
 		nil, // onReasoning
 		utils.ToolCallConfig{
-			MaxRounds:  maxTurns,
-			MaxTokens:  16384,
+			MaxRounds: maxTurns,
+			// Sonnet 4.6 supports 64K output; 32K keeps most responses one-shot
+			// without committing to the hard max, and halves the chance of
+			// landing in the max_tokens→continue loop that trips truncation.
+			MaxTokens:  32768,
 			NudgeAfter: 50,
 			StripAfter: -1,
 			ShouldContinue: func() bool {
@@ -364,22 +370,43 @@ func Run(
 				if _, _, total, _ := tracker.Totals(); total > defaultMaxTokensPerRun {
 					return false
 				}
+				if repetition.Tripped() {
+					return false
+				}
 				return true
 			},
 		},
 	)
+	// Narration-loop wins over any other classification: a tripped detector
+	// means we told StreamWithTools to bail via ShouldContinue, so any
+	// surfacing error is a consequence, not the cause.
+	if repetition.Tripped() {
+		slog.Warn("agent aborted: narration repetition loop",
+			"project_id", project.ID, "run_id", runID)
+		return finaliseFailureV2(ctx, deps, repo, run, project, emitter, "agent_loop",
+			CodeRepetitionLoop, "model got stuck repeating output", nil,
+			preCommit, tracker, runStart)
+	}
 	if llmErr != nil {
 		// A ctx-triggered stream abort surfaces here as llmErr — classify it
 		// by the ctx.Err kind so ops and the UI can tell the two failure modes
-		// apart: DeadlineExceeded = our 10-min wallclock fired, Canceled =
-		// external cancel (user hit Stop, process shutdown). Falls through to
-		// PROVIDER_ERROR only when the LLM itself failed with no ctx signal.
+		// apart: DeadlineExceeded = our 45-min wallclock fired, Canceled =
+		// external cancel (user hit Stop, process shutdown).
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			slog.Warn("agent LLM call aborted by context",
 				"project_id", project.ID, "ctx_err", ctxErr, "llm_err", llmErr)
 			code, msg := classifyCtxErr(ctxErr)
 			return finaliseFailureV2(ctx, deps, repo, run, project, emitter, "agent_loop",
 				code, msg, ctxErr,
+				preCommit, tracker, runStart)
+		}
+		// Truncation isn't a provider fault — it means the model exhausted
+		// its per-call token budget and the continuation loop failed too.
+		// Surface it distinctly so the UI can prompt the user to narrow
+		// the request rather than showing a generic "provider error".
+		if errors.Is(llmErr, utils.ErrResponseTruncated) {
+			return finaliseFailureV2(ctx, deps, repo, run, project, emitter, "agent_loop",
+				CodeTruncated, "model response exceeded token budget", llmErr,
 				preCommit, tracker, runStart)
 		}
 		return finaliseFailureV2(ctx, deps, repo, run, project, emitter, "agent_loop",
@@ -859,37 +886,57 @@ func finaliseFailureV2(
 		slog.Warn("failed to persist failure message", "error", err, "run_id", run.ID)
 	}
 
-	// 5. Finalise the run row (no credit deduction).
+	// 5. Finalise the run row. We bill for whatever tokens were actually
+	// consumed before the failure — Anthropic charges us regardless of
+	// whether the run completed, so a canceled or budget_exceeded run still
+	// represents real spend. Without this, a free user could burn unlimited
+	// cost by repeatedly starting runs that hit the token cap or clicking
+	// Stop mid-turn.
 	var promptTok, completionTok int
 	if tracker != nil {
 		promptTok, completionTok, _, _ = tracker.Totals()
 	}
+	credits := tokensToCredits(deps, promptTok, completionTok)
+	costUSD := estimateCost(run.Model, promptTok, completionTok)
 	run.Status = mapCodeToStatus(code)
 	run.Error = fmt.Sprintf("%s: %s", code, message)
 	run.PromptTokens = promptTok
 	run.CompletionTokens = completionTok
+	run.CostUSD = costUSD
+	run.CreditsUsed = credits
 	run.DurationMs = int(time.Since(runStart).Milliseconds())
 	run.CompletedAt = time.Now()
 	if err := deps.DB.UpdateAgentRun(run); err != nil {
 		slog.Warn("failed to finalise failed agent run row", "error", err, "run_id", run.ID)
 	}
 
+	// 5b. Deduct credits for consumed tokens. Uses the same action label as
+	// the success path so ai_credit_transactions rows group consistently.
+	if deps.DeductCredits != nil && credits > 0 {
+		deductAction := runAction(project)
+		if err := deps.DeductCredits(context.Background(), credits, deductAction, run.AppProjectID.String()); err != nil {
+			slog.Warn("failed to deduct credits for failed run", "error", err, "credits", credits, "run_id", run.ID)
+		}
+	}
+
 	// 6. Track PostHog.
 	if deps.TrackUserEvent != nil {
 		deps.TrackUserEvent("app_chat_failed", map[string]any{
-			"app_id":   run.AppProjectID.String(),
-			"code":     string(code),
-			"phase":    phase,
-			"duration": run.DurationMs,
+			"app_id":       run.AppProjectID.String(),
+			"code":         string(code),
+			"phase":        phase,
+			"duration":     run.DurationMs,
+			"credits_used": credits,
 		})
 	}
 
 	// 6b. Track CRM (Brevo).
 	if deps.SendCRMEvent != nil {
 		deps.SendCRMEvent("app_chat_failed", map[string]any{
-			"app_id": run.AppProjectID.String(),
-			"code":   string(code),
-			"phase":  phase,
+			"app_id":       run.AppProjectID.String(),
+			"code":         string(code),
+			"phase":        phase,
+			"credits_used": credits,
 		})
 	}
 
@@ -985,7 +1032,9 @@ func sanitizeFileMapForBuild(fileMap *SafeFileMap) {
 // mapCodeToStatus maps agent error codes to AppAgentRun status strings.
 func mapCodeToStatus(code ErrorCode) string {
 	switch code {
-	case CodeBudgetExceeded:
+	case CodeBudgetExceeded, CodeTruncated:
+		// Truncation is a model-side budget hit — same bucket as wallclock
+		// for UI purposes ("your request was too big, try a smaller one").
 		return models.AgentRunStatusBudgetExceeded
 	case CodeCanceled, CodeCreditsExhausted:
 		return models.AgentRunStatusCanceled

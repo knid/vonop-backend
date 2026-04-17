@@ -15,11 +15,21 @@ const (
 	// CodeCanceled = the run was canceled externally (user hit Stop, process
 	// shutdown). Separate from CodeBudgetExceeded so the UI can tell the user
 	// "you (or the server) canceled" vs "the run ran too long".
-	CodeCanceled      ErrorCode = "CANCELED"
-	CodeToolFailed    ErrorCode = "TOOL_FAILED"
-	CodeGitError      ErrorCode = "GIT_ERROR"
-	CodeRunInProgress ErrorCode = "RUN_IN_PROGRESS"
-	CodeInternal      ErrorCode = "INTERNAL"
+	CodeCanceled ErrorCode = "CANCELED"
+	// CodeTruncated = the model hit max_tokens repeatedly and couldn't finish
+	// its response. Distinct from CodeProviderError (provider-side failure)
+	// and CodeBudgetExceeded (wallclock/token cap) so the UI can tell the
+	// user "your request was too ambitious for one turn" vs "something broke".
+	CodeTruncated     ErrorCode = "TRUNCATED"
+	// CodeRepetitionLoop = narration stream repeated itself past the loop
+	// detection threshold. Treated like truncation from the user's
+	// perspective (runaway generation) but emitted separately so ops can
+	// tell a natural overflow from a stuck model.
+	CodeRepetitionLoop ErrorCode = "REPETITION_LOOP"
+	CodeToolFailed     ErrorCode = "TOOL_FAILED"
+	CodeGitError       ErrorCode = "GIT_ERROR"
+	CodeRunInProgress  ErrorCode = "RUN_IN_PROGRESS"
+	CodeInternal       ErrorCode = "INTERNAL"
 )
 
 // Error is a typed agent error that carries a phase label and an error code.
