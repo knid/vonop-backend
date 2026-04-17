@@ -9,11 +9,17 @@ const (
 	CodeCreditsExhausted ErrorCode = "CREDITS_EXHAUSTED"
 	CodeRateLimited      ErrorCode = "RATE_LIMITED"
 	CodeProviderError    ErrorCode = "PROVIDER_ERROR"
-	CodeBudgetExceeded   ErrorCode = "BUDGET_EXCEEDED"
-	CodeToolFailed       ErrorCode = "TOOL_FAILED"
-	CodeGitError         ErrorCode = "GIT_ERROR"
-	CodeRunInProgress    ErrorCode = "RUN_IN_PROGRESS"
-	CodeInternal         ErrorCode = "INTERNAL"
+	// CodeBudgetExceeded = a declared budget was hit (wallclock deadline or
+	// token cap). Distinct from CodeCanceled, which is an external cancel.
+	CodeBudgetExceeded ErrorCode = "BUDGET_EXCEEDED"
+	// CodeCanceled = the run was canceled externally (user hit Stop, process
+	// shutdown). Separate from CodeBudgetExceeded so the UI can tell the user
+	// "you (or the server) canceled" vs "the run ran too long".
+	CodeCanceled      ErrorCode = "CANCELED"
+	CodeToolFailed    ErrorCode = "TOOL_FAILED"
+	CodeGitError      ErrorCode = "GIT_ERROR"
+	CodeRunInProgress ErrorCode = "RUN_IN_PROGRESS"
+	CodeInternal      ErrorCode = "INTERNAL"
 )
 
 // Error is a typed agent error that carries a phase label and an error code.

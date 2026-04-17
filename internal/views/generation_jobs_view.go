@@ -40,7 +40,12 @@ func (v *HttpViews) handleStreamOrAsync(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Minute)
+	// Outer job ctx must exceed the agent's own wallclock cap
+	// (defaultMaxWallclockMs in internal/agent/run.go) so the agent's
+	// DeadlineExceeded fires first and produces a user-facing "time limit"
+	// message. If this shrinks below the agent cap, the outer cancel fires
+	// instead and the error looks like a silent server timeout.
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Minute)
 	v.Controller.RunningJobs.Store(job.ID.String(), cancel)
 
 	events := make(chan responses.SSEEvent, 100)

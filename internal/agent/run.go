@@ -24,7 +24,7 @@ const (
 	defaultMaxTurns            = 50
 	defaultMaxToolCallsPerTurn = 20
 	defaultMaxTokensPerRun     = 500_000
-	defaultMaxWallclockMs      = 10 * 60 * 1000
+	defaultMaxWallclockMs      = 45 * 60 * 1000
 )
 
 // Run is the single entry point for both initial generation and chat edit.
@@ -370,15 +370,16 @@ func Run(
 	)
 	if llmErr != nil {
 		// A ctx-triggered stream abort surfaces here as llmErr — classify it
-		// as BUDGET_EXCEEDED (deadline) or the caller's cancellation rather
-		// than PROVIDER_ERROR so ops dashboards don't blame the upstream LLM
-		// for our own wallclock cap. Log ctx.Err alongside llmErr so the two
-		// failure modes stay distinguishable in Better Stack.
+		// by the ctx.Err kind so ops and the UI can tell the two failure modes
+		// apart: DeadlineExceeded = our 10-min wallclock fired, Canceled =
+		// external cancel (user hit Stop, process shutdown). Falls through to
+		// PROVIDER_ERROR only when the LLM itself failed with no ctx signal.
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			slog.Warn("agent LLM call aborted by context",
 				"project_id", project.ID, "ctx_err", ctxErr, "llm_err", llmErr)
+			code, msg := classifyCtxErr(ctxErr)
 			return finaliseFailureV2(ctx, deps, repo, run, project, emitter, "agent_loop",
-				CodeBudgetExceeded, "run canceled or deadline exceeded", ctxErr,
+				code, msg, ctxErr,
 				preCommit, tracker, runStart)
 		}
 		return finaliseFailureV2(ctx, deps, repo, run, project, emitter, "agent_loop",
@@ -387,9 +388,10 @@ func Run(
 	}
 
 	// Post-loop budget checks to classify why the loop ended.
-	if ctx.Err() != nil {
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		code, msg := classifyCtxErr(ctxErr)
 		return finaliseFailureV2(ctx, deps, repo, run, project, emitter, "agent_loop",
-			CodeBudgetExceeded, "run canceled or deadline exceeded", ctx.Err(),
+			code, msg, ctxErr,
 			preCommit, tracker, runStart)
 	}
 	if creditCheck != nil && !creditCheck() {
@@ -985,9 +987,22 @@ func mapCodeToStatus(code ErrorCode) string {
 	switch code {
 	case CodeBudgetExceeded:
 		return models.AgentRunStatusBudgetExceeded
-	case CodeCreditsExhausted:
+	case CodeCanceled, CodeCreditsExhausted:
 		return models.AgentRunStatusCanceled
 	default:
 		return models.AgentRunStatusFailed
 	}
+}
+
+// classifyCtxErr maps a ctx.Err() to the right agent ErrorCode + user-facing
+// message. context.DeadlineExceeded means our own wallclock cap fired — that's
+// a BUDGET_EXCEEDED. context.Canceled means something external (Stop button,
+// process shutdown) called cancel() — that's a CANCELED. These used to share
+// a single "run canceled or deadline exceeded" message which left users unable
+// to tell "I hit the server's time limit" from "someone stopped me".
+func classifyCtxErr(err error) (ErrorCode, string) {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return CodeBudgetExceeded, fmt.Sprintf("run exceeded the %d-minute time limit — try a smaller change", defaultMaxWallclockMs/60000)
+	}
+	return CodeCanceled, "run was canceled"
 }
