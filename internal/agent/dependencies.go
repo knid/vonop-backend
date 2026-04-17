@@ -92,12 +92,15 @@ type LLMUsageRecorder func(
 
 // LLMErrorRecorder is invoked when an agent run fails. Sends a final
 // $ai_generation event tagged with $ai_is_error=true so the LLM Analytics
-// dashboard surfaces the failure. Bound by the controller layer to
-// Controller.RecordLLMError.
+// dashboard surfaces the failure. The tracker carries TraceID/RunID so the
+// error event links to the same PostHog trace as the run's $ai_generation
+// events and can be pivoted to the AppAgentRun row. Bound by the controller
+// layer to Controller.RecordLLMError.
 type LLMErrorRecorder func(
+	tracker *utils.TokenTracker,
 	action, model, provider, reference, appType string,
 	latencyMs int64,
-	errMsg string,
+	errCode, errMsg string,
 )
 
 // RunDependencies holds the external services the agent package needs.

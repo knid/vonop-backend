@@ -263,7 +263,20 @@ type TokenTracker struct {
 	TraceOutput  string    // final assistant response (for $ai_trace)
 	UserID       string    // for slog attribution
 	ProjectID    string    // for slog attribution
-	StartedAt    time.Time // wall-clock start of the generation (for accurate $ai_latency)
+	// TraceID, when non-empty, overrides the auto-generated trace id in
+	// RecordTokenUsage so callers (agent.Run) can bind the PostHog trace to
+	// an external identifier such as AppAgentRun.ID. Error events emitted
+	// separately via RecordLLMError also use this id to stay linked to the
+	// trace's $ai_generation events.
+	TraceID string
+	RunID   string // optional: written to events as a "run_id" property for cross-system correlation
+	// TraceErrorCode / TraceErrorMessage, when non-empty, mark the $ai_trace
+	// event as errored so PostHog's trace list surfaces the failure without
+	// relying on scanning child generations. Populated by agent.Run's failure
+	// path before RecordLLMUsage is invoked.
+	TraceErrorCode    string
+	TraceErrorMessage string
+	StartedAt         time.Time // wall-clock start of the generation (for accurate $ai_latency)
 }
 
 // RecordToolUsed appends a tool name to the list of tools called in this trace.

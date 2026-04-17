@@ -176,6 +176,13 @@ func Run(
 	tracker := utils.NewTokenTracker()
 	tracker.UserID = user.ID.String()
 	tracker.ProjectID = project.ID.String()
+	// Bind the PostHog trace id to AppAgentRun.ID so $ai_generation and
+	// $ai_trace events share an id operators can pivot from — both to the
+	// agent_runs row and to error events emitted from finaliseFailureV2,
+	// which previously generated a fresh uuid per call and left errors
+	// orphaned from their own run's generations.
+	tracker.TraceID = runID.String()
+	tracker.RunID = runID.String()
 	// Opt-in PostHog LLM Analytics: record per-call input/output content so
 	// the $ai_generation events carry full message context, and seed the
 	// trace input with the user's prompt for the grouping $ai_trace event.
@@ -362,6 +369,18 @@ func Run(
 		},
 	)
 	if llmErr != nil {
+		// A ctx-triggered stream abort surfaces here as llmErr — classify it
+		// as BUDGET_EXCEEDED (deadline) or the caller's cancellation rather
+		// than PROVIDER_ERROR so ops dashboards don't blame the upstream LLM
+		// for our own wallclock cap. Log ctx.Err alongside llmErr so the two
+		// failure modes stay distinguishable in Better Stack.
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			slog.Warn("agent LLM call aborted by context",
+				"project_id", project.ID, "ctx_err", ctxErr, "llm_err", llmErr)
+			return finaliseFailureV2(ctx, deps, repo, run, project, emitter, "agent_loop",
+				CodeBudgetExceeded, "run canceled or deadline exceeded", ctxErr,
+				preCommit, tracker, runStart)
+		}
 		return finaliseFailureV2(ctx, deps, repo, run, project, emitter, "agent_loop",
 			CodeProviderError, "LLM call failed", llmErr,
 			preCommit, tracker, runStart)
@@ -883,20 +902,28 @@ func finaliseFailureV2(
 	if project != nil {
 		projectType = project.ProjectType
 	}
+	// Flag the tracker so the $ai_trace event carries $ai_is_error even when
+	// no $ai_generation child captured the failure (e.g. deadline mid-stream
+	// before the first round completed).
+	errMsg := fmt.Sprintf("%s: %s", code, message)
+	if wrapped != nil {
+		errMsg = fmt.Sprintf("%s (%s)", errMsg, wrapped.Error())
+	}
+	if tracker != nil {
+		tracker.TraceErrorCode = string(code)
+		tracker.TraceErrorMessage = errMsg
+	}
+	// Always emit the grouping $ai_trace — even when tracker is empty — so
+	// every agent run shows up on the LLM Analytics dashboard. The recorder
+	// skips the per-call loop and the usage DB write when totals are zero.
 	if deps.RecordLLMUsage != nil && tracker != nil {
-		if _, _, total, _ := tracker.Totals(); total > 0 {
-			deps.RecordLLMUsage(tracker, action, run.Model, run.Provider,
-				projectID, projectType)
-		}
+		deps.RecordLLMUsage(tracker, action, run.Model, run.Provider,
+			projectID, projectType)
 	}
 	if deps.RecordLLMError != nil {
-		errMsg := fmt.Sprintf("%s: %s", code, message)
-		if wrapped != nil {
-			errMsg = fmt.Sprintf("%s (%s)", errMsg, wrapped.Error())
-		}
-		deps.RecordLLMError(action, run.Model, run.Provider,
+		deps.RecordLLMError(tracker, action, run.Model, run.Provider,
 			projectID, projectType,
-			int64(run.DurationMs), errMsg)
+			int64(run.DurationMs), string(code), errMsg)
 	}
 
 	_ = ctx

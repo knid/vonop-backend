@@ -708,11 +708,20 @@ func textToOutputChoices(text string) []map[string]interface{} {
 // RecordTokenUsage persists LLM token usage to the DB and sends PostHog
 // $ai_generation (per LLM call) + $ai_trace (grouping) events for the
 // built-in LLM Analytics dashboard.
+//
+// When tracker.TraceID is set, it is used as the $ai_trace_id so callers
+// (e.g. agent.Run) can bind the PostHog trace to an external identifier
+// like AppAgentRun.ID — this lets RecordLLMError emit error events on the
+// same trace, and lets operators pivot from a failed run row straight to
+// the PostHog trace view.
+//
+// When tracker totals are zero (e.g. a run that aborted before any LLM
+// round completed), the per-call $ai_generation loop is skipped but we
+// still emit a grouping $ai_trace so every agent run is represented in
+// PostHog. Error classification is layered on by the caller via
+// RecordLLMError using the same trace id.
 func (c *Controller) RecordTokenUsage(user *models.User, action, model, provider, reference, appType string, tracker *utils.TokenTracker) {
 	prompt, completion, total, callCount := tracker.Totals()
-	if total == 0 {
-		return
-	}
 
 	// Normalize model name: strip provider prefix (e.g. "anthropic/claude-sonnet-4-6" → "claude-sonnet-4-6")
 	// so PostHog doesn't fragment cost data across what is logically the same model.
@@ -720,23 +729,34 @@ func (c *Controller) RecordTokenUsage(user *models.User, action, model, provider
 		model = model[idx+1:]
 	}
 
-	if err := c.DB.CreateLLMTokenUsage(&models.LLMTokenUsage{
-		UserID:           user.ID,
-		Action:           action,
-		Model:            model,
-		PromptTokens:     prompt,
-		CompletionTokens: completion,
-		TotalTokens:      total,
-		CallCount:        callCount,
-		Reference:        reference,
-	}); err != nil {
-		slog.Error("failed to record LLM token usage", "error", err, "user_id", user.ID, "action", action)
+	// Only persist LLM token usage when real tokens flowed — zero-token runs
+	// (e.g. aborted before any round completed) are a trace-only concern and
+	// shouldn't pollute the usage table.
+	if total > 0 {
+		if err := c.DB.CreateLLMTokenUsage(&models.LLMTokenUsage{
+			UserID:           user.ID,
+			Action:           action,
+			Model:            model,
+			PromptTokens:     prompt,
+			CompletionTokens: completion,
+			TotalTokens:      total,
+			CallCount:        callCount,
+			Reference:        reference,
+		}); err != nil {
+			slog.Error("failed to record LLM token usage", "error", err, "user_id", user.ID, "action", action)
+		}
 	}
 
 	creditsSpent := c.TokensToCredits(prompt, completion)
 
 	if c.PostHog != nil {
-		traceID := uuid.New().String()
+		// Caller-supplied trace id takes precedence so error events emitted
+		// separately via RecordLLMError land on the same trace, and so the
+		// PostHog trace can be pivoted to/from AppAgentRun.ID.
+		traceID := tracker.TraceID
+		if traceID == "" {
+			traceID = uuid.New().String()
+		}
 
 		// Per-call $ai_generation events
 		for _, entry := range tracker.Entries() {
@@ -759,7 +779,11 @@ func (c *Controller) RecordTokenUsage(user *models.User, action, model, provider
 				Set("$ai_is_error", false).
 				Set("$ai_stream", entry.IsStreaming).
 				Set("app_type", appType).
+				Set("project_id", reference).
 				Set("credits_estimated", c.TokensToCredits(entry.PromptTokens, entry.CompletionTokens))
+			if tracker.RunID != "" {
+				props.Set("run_id", tracker.RunID)
+			}
 			if entry.CacheCreationInputTokens > 0 {
 				props.Set("$ai_cache_creation_input_tokens", entry.CacheCreationInputTokens)
 			}
@@ -832,7 +856,11 @@ func (c *Controller) RecordTokenUsage(user *models.User, action, model, provider
 			Set("$ai_input_tokens", prompt).
 			Set("$ai_output_tokens", completion).
 			Set("app_type", appType).
+			Set("project_id", reference).
 			Set("credits_estimated", creditsSpent)
+		if tracker.RunID != "" {
+			traceProps.Set("run_id", tracker.RunID)
+		}
 		if totalCost > 0 {
 			traceProps.Set("$ai_total_cost_usd", totalCost)
 		}
@@ -848,6 +876,13 @@ func (c *Controller) RecordTokenUsage(user *models.User, action, model, provider
 		if tools := tracker.ToolsUsed(); len(tools) > 0 {
 			traceProps.Set("$ai_tools", tools)
 		}
+		if tracker.TraceErrorCode != "" {
+			traceProps.Set("$ai_is_error", true)
+			traceProps.Set("$ai_error_code", tracker.TraceErrorCode)
+			if tracker.TraceErrorMessage != "" {
+				traceProps.Set("$ai_error_message", tracker.TraceErrorMessage)
+			}
+		}
 		c.PostHog.Enqueue(posthog.Capture{
 			DistinctId: user.ID.String(),
 			Event:      "$ai_trace",
@@ -856,9 +891,12 @@ func (c *Controller) RecordTokenUsage(user *models.User, action, model, provider
 	}
 }
 
-// RecordLLMError sends a PostHog $ai_generation event for a failed LLM call.
-// An optional traceID links the error to an existing trace.
-func (c *Controller) RecordLLMError(user *models.User, action, model, provider, reference, appType string, latencyMs int64, errMsg string, traceID ...string) {
+// RecordLLMError sends a PostHog $ai_generation event for a failed LLM call
+// and — when the tracker is non-nil — a matching $ai_trace grouping event so
+// failures always surface on the LLM Analytics dashboard even when no round
+// completed. The tracker's TraceID/RunID link this error to the run's other
+// events and to the AppAgentRun row.
+func (c *Controller) RecordLLMError(user *models.User, tracker *utils.TokenTracker, action, model, provider, reference, appType string, latencyMs int64, errCode, errMsg string) {
 	if c.PostHog == nil || user == nil {
 		return
 	}
@@ -869,6 +907,13 @@ func (c *Controller) RecordLLMError(user *models.User, action, model, provider, 
 		model = model[idx+1:]
 	}
 
+	traceID := ""
+	runID := ""
+	if tracker != nil {
+		traceID = tracker.TraceID
+		runID = tracker.RunID
+	}
+
 	props := posthog.NewProperties().
 		Set("$ai_provider", provider).
 		Set("$ai_model", model).
@@ -876,9 +921,21 @@ func (c *Controller) RecordLLMError(user *models.User, action, model, provider, 
 		Set("$ai_latency", float64(latencyMs)/1000.0).
 		Set("$ai_session_id", reference).
 		Set("$ai_error_message", errMsg).
-		Set("app_type", appType)
-	if len(traceID) > 0 && traceID[0] != "" {
-		props.Set("$ai_trace_id", traceID[0])
+		Set("$ai_span_name", "agent_error").
+		Set("app_type", appType).
+		Set("project_id", reference)
+	if errCode != "" {
+		props.Set("$ai_error_code", errCode)
+	}
+	if traceID != "" {
+		props.Set("$ai_trace_id", traceID)
+		// Synthesize a span id for the error event so it appears as a proper
+		// child in the trace timeline instead of collapsing onto the trace root.
+		props.Set("$ai_span_id", uuid.New().String())
+		props.Set("$ai_parent_id", traceID)
+	}
+	if runID != "" {
+		props.Set("run_id", runID)
 	}
 	if user.Email != "" {
 		props.Set("$email", user.Email)
