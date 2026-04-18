@@ -122,9 +122,9 @@ func SlashCommandSystemAddendum(text string) string {
 // Addendums shared by multiple read-only / planning commands. Kept as
 // constants so the exact wording stays in one place.
 const (
-	addendumReadOnly  = "CURRENT TURN IS READ-ONLY. You MUST NOT call write_file, edit_file, or delete_file on this turn. Respond with an explanation only."
-	addendumPlanOnly  = "CURRENT TURN IS PLANNING ONLY. You MUST NOT call write_file, edit_file, or delete_file on this turn. Respond with a plan only."
-	addendumAuditOnly = "CURRENT TURN IS READ-ONLY. You MUST NOT call write_file, edit_file, or delete_file on this turn. Respond with an audit report only."
+	addendumReadOnly  = "CURRENT TURN IS READ-ONLY. You MUST NOT call write_file, edit_file, multi_edit, or delete_file on this turn. Respond with an explanation only."
+	addendumPlanOnly  = "CURRENT TURN IS PLANNING ONLY. You MUST NOT call write_file, edit_file, multi_edit, or delete_file on this turn. Respond with a plan only."
+	addendumAuditOnly = "CURRENT TURN IS READ-ONLY. You MUST NOT call write_file, edit_file, multi_edit, or delete_file on this turn. Respond with an audit report only."
 )
 
 func init() {

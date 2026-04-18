@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/knid/wemob/internal/utils"
@@ -358,6 +360,218 @@ func (EditFileTool) Execute(ctx context.Context, rc *RunContext, input json.RawM
 		Content:   newContent,
 	})
 	return fmt.Sprintf("edited %s (1 replacement, %d bytes)", path, len(newContent)), false, nil
+}
+
+// ---------- grep ----------
+
+const (
+	grepMaxMatches  = 200
+	grepMaxBytes    = 64 * 1024
+	grepMaxLineLen  = 400
+)
+
+type GrepTool struct{}
+
+func (GrepTool) Name() string { return "grep" }
+func (GrepTool) Description() string {
+	return "Search file contents for a regex pattern across the project. Returns file:line:content for each match. Use this BEFORE read_file / edit_file when you need to find where a string or symbol lives — it is ~50× cheaper than guessing file paths and reading them one by one."
+}
+func (GrepTool) Schema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"pattern": map[string]any{
+				"type":        "string",
+				"description": "Regular expression (RE2 syntax). Use \\Q...\\E or escape special chars for literal search.",
+			},
+			"glob": map[string]any{
+				"type":        "string",
+				"description": "Optional glob to limit files scanned, e.g. 'app/**/*.tsx'. Empty = all files.",
+			},
+			"case_insensitive": map[string]any{
+				"type":        "boolean",
+				"description": "If true, match regardless of case.",
+			},
+		},
+		"required": []string{"pattern"},
+	}
+}
+
+func (GrepTool) Execute(ctx context.Context, rc *RunContext, input json.RawMessage) (string, bool, error) {
+	var args struct {
+		Pattern         string `json:"pattern"`
+		Glob            string `json:"glob"`
+		CaseInsensitive bool   `json:"case_insensitive"`
+	}
+	if err := json.Unmarshal(input, &args); err != nil {
+		return fmt.Sprintf("invalid input: %v", err), true, nil
+	}
+	if args.Pattern == "" {
+		return "pattern is required", true, nil
+	}
+
+	pattern := args.Pattern
+	if args.CaseInsensitive {
+		pattern = "(?i)" + pattern
+	}
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		return fmt.Sprintf("invalid regex: %v", err), true, nil
+	}
+
+	var paths []string
+	if args.Glob != "" {
+		paths = rc.FileMap.Match(args.Glob)
+	} else {
+		for p := range rc.FileMap.Snapshot() {
+			paths = append(paths, p)
+		}
+	}
+	sort.Strings(paths)
+
+	var (
+		sb        strings.Builder
+		matches   int
+		truncated bool
+		filesHit  int
+	)
+	for _, p := range paths {
+		if isProtectedRead(p) {
+			continue
+		}
+		content, ok := rc.FileMap.Get(p)
+		if !ok {
+			continue
+		}
+		fileHit := false
+		for i, line := range strings.Split(content, "\n") {
+			if !re.MatchString(line) {
+				continue
+			}
+			if matches >= grepMaxMatches || sb.Len() >= grepMaxBytes {
+				truncated = true
+				break
+			}
+			if len(line) > grepMaxLineLen {
+				line = line[:grepMaxLineLen] + "…"
+			}
+			fmt.Fprintf(&sb, "%s:%d:%s\n", p, i+1, line)
+			matches++
+			fileHit = true
+		}
+		if fileHit {
+			filesHit++
+		}
+		if truncated {
+			break
+		}
+	}
+
+	if matches == 0 {
+		return fmt.Sprintf("no matches for /%s/ in %d files", args.Pattern, len(paths)), false, nil
+	}
+	suffix := fmt.Sprintf("\n— %d match(es) across %d file(s)", matches, filesHit)
+	if truncated {
+		suffix += " (truncated — narrow the pattern or glob to see more)"
+	}
+	return sb.String() + suffix, false, nil
+}
+
+// ---------- multi_edit ----------
+
+const multiEditMaxEdits = 50
+
+type MultiEditTool struct{}
+
+func (MultiEditTool) Name() string { return "multi_edit" }
+func (MultiEditTool) Description() string {
+	return "Apply multiple surgical edits to a single file in one call. Each edit replaces one occurrence of old_string with new_string; edits run sequentially against the running content, so a later edit sees the result of earlier ones. Prefer this over multiple edit_file calls whenever you have ≥2 changes to the same file — same semantics, one round-trip."
+}
+func (MultiEditTool) Schema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"path": map[string]any{
+				"type":        "string",
+				"description": "The project-relative path to the file.",
+			},
+			"edits": map[string]any{
+				"type":        "array",
+				"description": "Ordered list of edits. Each is applied to the file in turn; a later edit sees the content produced by earlier edits.",
+				"items": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"old_string": map[string]any{"type": "string"},
+						"new_string": map[string]any{"type": "string"},
+					},
+					"required": []string{"old_string", "new_string"},
+				},
+			},
+			"description": map[string]any{"type": "string"},
+		},
+		"required": []string{"path", "edits"},
+	}
+}
+
+func (MultiEditTool) Execute(ctx context.Context, rc *RunContext, input json.RawMessage) (string, bool, error) {
+	var args struct {
+		Path  string `json:"path"`
+		Edits []struct {
+			OldString string `json:"old_string"`
+			NewString string `json:"new_string"`
+		} `json:"edits"`
+		Description string `json:"description"`
+	}
+	if err := json.Unmarshal(input, &args); err != nil {
+		return fmt.Sprintf("invalid input: %v", err), true, nil
+	}
+	path, err := sanitizePath(args.Path)
+	if err != nil {
+		return err.Error(), true, nil
+	}
+	if isProtected(path) {
+		return fmt.Sprintf("protected file, cannot edit: %s", path), true, nil
+	}
+	if len(args.Edits) == 0 {
+		return "edits must contain at least one entry", true, nil
+	}
+	if len(args.Edits) > multiEditMaxEdits {
+		return fmt.Sprintf("too many edits: %d (max %d) — split into multiple calls", len(args.Edits), multiEditMaxEdits), true, nil
+	}
+	content, ok := rc.FileMap.Get(path)
+	if !ok {
+		return fmt.Sprintf("file not found: %s — use write_file to create it", path), true, nil
+	}
+
+	working := content
+	for i, e := range args.Edits {
+		if e.OldString == "" {
+			return fmt.Sprintf("edit %d: old_string must not be empty", i+1), true, nil
+		}
+		count := strings.Count(working, e.OldString)
+		switch count {
+		case 0:
+			return fmt.Sprintf("edit %d: old_string not found — earlier edits may have mutated this region. call read_file to resync and retry", i+1), true, nil
+		case 1:
+			// ok
+		default:
+			return fmt.Sprintf("edit %d: old_string appears %d times — add more surrounding context to disambiguate", i+1, count), true, nil
+		}
+		working = strings.Replace(working, e.OldString, e.NewString, 1)
+	}
+	if len(working) > maxWriteBytes {
+		return fmt.Sprintf("resulting file too large: %d bytes (max %d)", len(working), maxWriteBytes), true, nil
+	}
+
+	rc.FileMap.Set(path, working)
+	rc.Emitter.Emit(EventFileWritten, FileWrittenEvent{
+		RunID:     rc.RunID,
+		Path:      path,
+		Operation: "update",
+		Bytes:     len(working),
+		Content:   working,
+	})
+	return fmt.Sprintf("edited %s (%d replacements, %d bytes)", path, len(args.Edits), len(working)), false, nil
 }
 
 // ---------- generate_image ----------

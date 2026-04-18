@@ -118,8 +118,10 @@ func BuildRegistryFor(project *models.AppProject, deps *RunDependencies) *Regist
 	r := NewRegistry()
 	r.Register(ReadFileTool{})
 	r.Register(ListFilesTool{})
+	r.Register(GrepTool{})
 	r.Register(WriteFileTool{})
 	r.Register(EditFileTool{})
+	r.Register(MultiEditTool{})
 	r.Register(DeleteFileTool{})
 	r.Register(GenerateImageTool{Deps: deps})
 

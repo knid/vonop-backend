@@ -97,12 +97,17 @@ If you find yourself about to type a JSX tag, an import statement, or a
 Tailwind class in narration, stop: that belongs in a tool argument.
 
 Tool preference:
-- edit_file for small, targeted changes to an existing file. Always prefer
-  this.
+- grep BEFORE read_file when you need to locate a symbol, string, or
+  pattern across the project. One grep call replaces N blind read_file
+  guesses and is ~50× cheaper per round-trip.
+- multi_edit when you have 2+ changes to the SAME file. Batches all edits
+  into one tool call instead of one LLM turn per edit — same semantics as
+  edit_file, but one round-trip.
+- edit_file for a single targeted change to an existing file.
 - write_file only when creating a new file or when a rewrite is genuinely
   simpler than a diff.
-- read_file BEFORE edit_file if you haven't seen the current content this
-  run.
+- read_file BEFORE edit_file / multi_edit if you haven't seen the current
+  content this run (and grep didn't already show you the lines).
 - list_files with a glob to discover structure. The system prompt already
   shows the full file tree.
 - delete_file when a file is no longer needed.

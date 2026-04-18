@@ -522,7 +522,7 @@ func trackerDelta(t *utils.TokenTracker) TokenUsage {
 // For non-file tools the original args pass through unchanged.
 func stripToolInputForPreview(name string, argsJSON string) json.RawMessage {
 	switch name {
-	case "write_file", "edit_file", "delete_file":
+	case "write_file", "edit_file", "multi_edit", "delete_file":
 		var m map[string]json.RawMessage
 		if err := json.Unmarshal([]byte(argsJSON), &m); err != nil {
 			return json.RawMessage("{}")
@@ -793,7 +793,7 @@ func countFileOps(calls []models.ChatMessageToolCall) int {
 			continue
 		}
 		switch c.Name {
-		case "write_file", "edit_file", "delete_file":
+		case "write_file", "edit_file", "multi_edit", "delete_file":
 			n++
 		}
 	}
