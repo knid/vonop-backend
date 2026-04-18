@@ -2,6 +2,8 @@ package utils
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"log/slog"
 	"sync"
 	"time"
@@ -75,6 +77,10 @@ func checkUsageAlerts(db *database.Database, crmService crmServices.CRMService) 
 	for _, user := range users {
 		balance, err := db.GetAICreditsBalance(user.ID.String())
 		if err != nil {
+			// Users without a balance row yet have nothing to alert on; skip quietly.
+			if errors.Is(err, sql.ErrNoRows) {
+				continue
+			}
 			slog.Warn("usage alerts: failed to fetch AI credits balance", "error", err, "user_id", user.ID.String())
 			continue
 		}

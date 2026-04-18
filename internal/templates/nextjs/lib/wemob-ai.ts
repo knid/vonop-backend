@@ -45,7 +45,7 @@ export type WemobChatModel =
   | 'google/gemini-2.5-pro';
 
 export type WemobImageModel =
-  | 'fal-ai/flux-schnell'
+  | 'fal-ai/flux/schnell'
   | 'fal-ai/flux-pro/v1.1'
   | 'fal-ai/flux-ultra';
 
@@ -80,7 +80,7 @@ export async function generateImage(
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model: opts.model ?? 'fal-ai/flux-schnell',
+      model: opts.model ?? 'fal-ai/flux/schnell',
       prompt: opts.prompt,
       image_size: opts.imageSize,
       num_images: opts.numImages,

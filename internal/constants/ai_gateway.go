@@ -12,9 +12,9 @@ const GatewayMaxImagesPerRequest = 4
 // proxies every chat request through OpenRouter (see ResolveGatewayProvider).
 var DefaultGatewayModels = map[string][]string{
 	"free":     {"openai/gpt-4.1-mini", "anthropic/claude-haiku-4-5"},
-	"starter":  {"openai/gpt-4.1-mini", "anthropic/claude-haiku-4-5", "fal-ai/flux-schnell"},
-	"pro":      {"openai/gpt-4.1-mini", "openai/gpt-4.1", "anthropic/claude-haiku-4-5", "anthropic/claude-sonnet-4", "fal-ai/flux-schnell", "fal-ai/flux-pro/v1.1"},
-	"business": {"openai/gpt-4.1-mini", "openai/gpt-4.1", "anthropic/claude-haiku-4-5", "anthropic/claude-sonnet-4", "anthropic/claude-opus-4", "google/gemini-2.5-pro", "fal-ai/flux-schnell", "fal-ai/flux-pro/v1.1"},
+	"starter":  {"openai/gpt-4.1-mini", "anthropic/claude-haiku-4-5", "fal-ai/flux/schnell"},
+	"pro":      {"openai/gpt-4.1-mini", "openai/gpt-4.1", "anthropic/claude-haiku-4-5", "anthropic/claude-sonnet-4", "fal-ai/flux/schnell", "fal-ai/flux-pro/v1.1"},
+	"business": {"openai/gpt-4.1-mini", "openai/gpt-4.1", "anthropic/claude-haiku-4-5", "anthropic/claude-sonnet-4", "anthropic/claude-opus-4", "google/gemini-2.5-pro", "fal-ai/flux/schnell", "fal-ai/flux-pro/v1.1"},
 }
 
 // DefaultGatewayRPM is the fallback requests-per-minute limit per tier.
@@ -27,7 +27,7 @@ var DefaultGatewayRPM = map[string]int{
 
 // DefaultGatewayImageCosts maps fal.ai model IDs to their credit cost per image.
 var DefaultGatewayImageCosts = map[string]int{
-	"fal-ai/flux-schnell":  5,
+	"fal-ai/flux/schnell":  5,
 	"fal-ai/flux-pro/v1.1": 15,
 	"fal-ai/flux-ultra":    40,
 }
@@ -71,7 +71,7 @@ var GatewayModelCatalog = []GatewayModelInfo{
 	{ID: "anthropic/claude-opus-4", Name: "Claude Opus 4", Provider: "anthropic", Type: "chat", MaxContext: 200000, InputUSDPerM: 15.00, OutputUSDPerM: 75.00, CostPer1kInput: 15, CostPer1kOutput: 75, Capabilities: []string{"streaming", "vision"}},
 	{ID: "google/gemini-2.5-pro", Name: "Gemini 2.5 Pro", Provider: "google", Type: "chat", MaxContext: 1048576, InputUSDPerM: 1.25, OutputUSDPerM: 5.00, CostPer1kInput: 1, CostPer1kOutput: 4, Capabilities: []string{"streaming", "vision"}},
 	// Image models — proxied directly to fal.ai, not through OpenRouter.
-	{ID: "fal-ai/flux-schnell", Name: "FLUX Schnell", Provider: "fal", Type: "image", CostCredits: 5, Capabilities: []string{"fast"}},
+	{ID: "fal-ai/flux/schnell", Name: "FLUX Schnell", Provider: "fal", Type: "image", CostCredits: 5, Capabilities: []string{"fast"}},
 	{ID: "fal-ai/flux-pro/v1.1", Name: "FLUX Pro v1.1", Provider: "fal", Type: "image", CostCredits: 15, Capabilities: []string{"hd"}},
 	{ID: "fal-ai/flux-ultra", Name: "FLUX Ultra", Provider: "fal", Type: "image", CostCredits: 40, Capabilities: []string{"hd", "ultra"}},
 }

@@ -316,7 +316,7 @@ client plus a thin image helper:
 
 ` + modelBlock + `
 
-Available image models: fal-ai/flux-schnell (default), fal-ai/flux-pro/v1.1,
+Available image models: fal-ai/flux/schnell (default), fal-ai/flux-pro/v1.1,
 fal-ai/flux-ultra.
 
 The openai npm package is already in package.json — do not add it again, and

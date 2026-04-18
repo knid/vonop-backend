@@ -150,7 +150,7 @@ func (c *Controller) GatewayRPMLimit(user *models.User) int {
 func (c *Controller) GatewayImageCreditCost(modelID string) int {
 	var rcKey remoteconfig.Key
 	switch modelID {
-	case "fal-ai/flux-schnell":
+	case "fal-ai/flux/schnell":
 		rcKey = remoteconfig.GatewayImageCostFluxSchnell
 	case "fal-ai/flux-pro/v1.1":
 		rcKey = remoteconfig.GatewayImageCostFluxPro

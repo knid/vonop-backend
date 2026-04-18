@@ -331,9 +331,11 @@ func createSchema(db *bun.DB) error {
 	// Check if migrations have already been applied by testing for a column from the latest batch.
 	// This avoids running ALTER TABLE statements on every startup, which take AccessExclusiveLock
 	// and block all reads on the affected tables.
+	// IMPORTANT: when adding a new ALTER TABLE above, update this canary to the newest column,
+	// otherwise the new ALTER will be silently skipped on servers that already have older columns.
 	var migrationsDone bool
 	row := db.QueryRowContext(context.Background(),
-		"SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='generation_jobs' AND column_name='app_id')")
+		"SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='app_build_tasks' AND column_name='error_message')")
 	if err := row.Scan(&migrationsDone); err != nil {
 		migrationsDone = false
 	}
