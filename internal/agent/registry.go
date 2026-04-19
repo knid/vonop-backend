@@ -124,6 +124,7 @@ func BuildRegistryFor(project *models.AppProject, deps *RunDependencies) *Regist
 	r.Register(MultiEditTool{})
 	r.Register(DeleteFileTool{})
 	r.Register(GenerateImageTool{Deps: deps})
+	r.Register(ReadAttachmentTool{Deps: deps})
 
 	if deps != nil && deps.LLMProvider != nil {
 		if ws := deps.LLMProvider.WebSearchTool(); ws != nil {
