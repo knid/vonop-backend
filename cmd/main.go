@@ -1208,23 +1208,47 @@ func main() {
 					r.Post("/navbar", httpViews.NavBarAutoFillWithAI)
 				})
 			})
+			// New route names (preferred from Phase 1 onward)
+			r.Route("/connections", func(r chi.Router) {
+				r.Route("/google-play", func(r chi.Router) {
+					r.Get("/", httpViews.ListGooglePlayConnections)
+					r.Post("/", httpViews.CreateGooglePlayConnection)
+					r.Route("/{connectionId}", func(r chi.Router) {
+						r.Get("/", httpViews.GetGooglePlayConnection)
+						r.Put("/", httpViews.UpdateGooglePlayConnection)
+						r.Delete("/", httpViews.DeleteGooglePlayConnection)
+					})
+				})
+				r.Route("/apple", func(r chi.Router) {
+					r.Get("/", httpViews.ListAppleConnections)
+					r.Post("/", httpViews.CreateAppleConnection)
+					r.Route("/{connectionId}", func(r chi.Router) {
+						r.Get("/", httpViews.GetAppleConnection)
+						r.Put("/", httpViews.UpdateAppleConnection)
+						r.Delete("/", httpViews.DeleteAppleConnection)
+					})
+				})
+			})
+
+			// Legacy aliases — kept for 2 releases so existing frontend keeps working.
+			// Remove after Phase 2 ships the updated dashboard.
 			r.Route("/credentials", func(r chi.Router) {
 				r.Route("/google", func(r chi.Router) {
-					r.Get("/", httpViews.ListGooglePlayCredentials)
-					r.Post("/", httpViews.CreateGooglePlayCredential)
+					r.Get("/", httpViews.ListGooglePlayConnections)
+					r.Post("/", httpViews.CreateGooglePlayConnection)
 					r.Route("/{credentialId}", func(r chi.Router) {
-						r.Get("/", httpViews.GetGooglePlayCredential)
-						r.Put("/", httpViews.UpdateGooglePlayCredential)
-						r.Delete("/", httpViews.DeleteGooglePlayCredential)
+						r.Get("/", httpViews.GetGooglePlayConnection)
+						r.Put("/", httpViews.UpdateGooglePlayConnection)
+						r.Delete("/", httpViews.DeleteGooglePlayConnection)
 					})
 				})
 				r.Route("/appstore", func(r chi.Router) {
-					r.Get("/", httpViews.ListAppStoreCredentials)
-					r.Post("/", httpViews.CreateAppStoreCredential)
+					r.Get("/", httpViews.ListAppleConnections)
+					r.Post("/", httpViews.CreateAppleConnection)
 					r.Route("/{credentialId}", func(r chi.Router) {
-						r.Get("/", httpViews.GetAppStoreCredential)
-						r.Put("/", httpViews.UpdateAppStoreCredential)
-						r.Delete("/", httpViews.DeleteAppStoreCredential)
+						r.Get("/", httpViews.GetAppleConnection)
+						r.Put("/", httpViews.UpdateAppleConnection)
+						r.Delete("/", httpViews.DeleteAppleConnection)
 					})
 				})
 			})

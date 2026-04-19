@@ -170,7 +170,7 @@ func (c *Controller) CreateDeploymentTask(user *models.User, deploymentReq reque
 		}
 
 		if hasIOS {
-			cred, err := c.DB.GetAppStoreCredentialById(appStoreCredId.String())
+			cred, err := c.DB.GetAppleConnectionById(appStoreCredId.String())
 			if err != nil {
 				return nil, err
 			}
@@ -206,7 +206,7 @@ func (c *Controller) CreateDeploymentTask(user *models.User, deploymentReq reque
 		}
 
 		if hasAndroid {
-			cred, err := c.DB.GetGooglePlayCredentialById(googlePlayCredId.String())
+			cred, err := c.DB.GetGooglePlayConnectionById(googlePlayCredId.String())
 			if err != nil {
 				return nil, err
 			}
@@ -368,7 +368,7 @@ func (c *Controller) UpdateDeploymentTask(user *models.User, deploymentID string
 	}
 
 	if hasIOS {
-		cred, err := c.DB.GetAppStoreCredentialById(appStoreCredId.String())
+		cred, err := c.DB.GetAppleConnectionById(appStoreCredId.String())
 		if err != nil {
 			return nil, err
 		}
@@ -397,7 +397,7 @@ func (c *Controller) UpdateDeploymentTask(user *models.User, deploymentID string
 	}
 
 	if hasAndroid {
-		cred, err := c.DB.GetGooglePlayCredentialById(googlePlayCredId.String())
+		cred, err := c.DB.GetGooglePlayConnectionById(googlePlayCredId.String())
 		if err != nil {
 			return nil, err
 		}
@@ -463,7 +463,7 @@ func (c *Controller) SignUnsignedIPATask(user *models.User, signReq requests.Sig
 		return nil, err
 	}
 
-	cred, err := c.DB.GetAppStoreCredentialById(signReq.CredentialsID)
+	cred, err := c.DB.GetAppleConnectionById(signReq.CredentialsID)
 	if err != nil {
 		return nil, err
 	}

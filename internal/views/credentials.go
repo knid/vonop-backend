@@ -10,14 +10,14 @@ import (
 	"github.com/knid/wemob/internal/utils"
 )
 
-func (v *HttpViews) ListAppStoreCredentials(w http.ResponseWriter, r *http.Request) {
+func (v *HttpViews) ListAppleConnections(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
 		return
 	}
 
-	creds, err := v.Controller.GetAppStoreCredentials(user)
+	creds, err := v.Controller.ListAppleConnections(user)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -26,7 +26,7 @@ func (v *HttpViews) ListAppStoreCredentials(w http.ResponseWriter, r *http.Reque
 	utils.JSONResponse(w, creds, http.StatusOK)
 }
 
-func (v *HttpViews) CreateAppStoreCredential(w http.ResponseWriter, r *http.Request) {
+func (v *HttpViews) CreateAppleConnection(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
@@ -40,19 +40,19 @@ func (v *HttpViews) CreateAppStoreCredential(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	var req requests.AppStoreCredentialsCreateRequest
+	var req requests.AppleConnectionCreateRequest
 	if err := utils.ParseJSONBody(r, &req); err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
 	validate := validator.New(validator.WithRequiredStructEnabled())
-	if err := utils.ValidateFunc[requests.AppStoreCredentialsCreateRequest](req, validate); err != nil {
+	if err := utils.ValidateFunc[requests.AppleConnectionCreateRequest](req, validate); err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	cred, err := v.Controller.CreateAppStoreCredential(user, req)
+	cred, err := v.Controller.CreateAppleConnection(user, req)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -61,20 +61,23 @@ func (v *HttpViews) CreateAppStoreCredential(w http.ResponseWriter, r *http.Requ
 	utils.JSONResponse(w, cred, http.StatusCreated)
 }
 
-func (v *HttpViews) GetAppStoreCredential(w http.ResponseWriter, r *http.Request) {
+func (v *HttpViews) GetAppleConnection(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
 		return
 	}
 
-	credID := chi.URLParam(r, "credentialId")
+	credID := chi.URLParam(r, "connectionId")
+	if credID == "" {
+		credID = chi.URLParam(r, "credentialId")
+	}
 	if credID == "" {
 		utils.JSONErrorResponse(w, "credential_id is required", http.StatusBadRequest)
 		return
 	}
 
-	cred, err := v.Controller.GetAppStoreCredentialById(user, credID)
+	cred, err := v.Controller.GetAppleConnectionById(user, credID)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -83,7 +86,7 @@ func (v *HttpViews) GetAppStoreCredential(w http.ResponseWriter, r *http.Request
 	utils.JSONResponse(w, cred, http.StatusOK)
 }
 
-func (v *HttpViews) UpdateAppStoreCredential(w http.ResponseWriter, r *http.Request) {
+func (v *HttpViews) UpdateAppleConnection(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
@@ -97,25 +100,28 @@ func (v *HttpViews) UpdateAppStoreCredential(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	credID := chi.URLParam(r, "credentialId")
+	credID := chi.URLParam(r, "connectionId")
+	if credID == "" {
+		credID = chi.URLParam(r, "credentialId")
+	}
 	if credID == "" {
 		utils.JSONErrorResponse(w, "credential_id is required", http.StatusBadRequest)
 		return
 	}
 
-	var req requests.AppStoreCredentialsCreateRequest
+	var req requests.AppleConnectionCreateRequest
 	if err := utils.ParseJSONBody(r, &req); err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
 	validate := validator.New(validator.WithRequiredStructEnabled())
-	if err := utils.ValidateFunc[requests.AppStoreCredentialsCreateRequest](req, validate); err != nil {
+	if err := utils.ValidateFunc[requests.AppleConnectionCreateRequest](req, validate); err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	cred, err := v.Controller.UpdateAppStoreCredential(user, credID, req)
+	cred, err := v.Controller.UpdateAppleConnection(user, credID, req)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -124,20 +130,23 @@ func (v *HttpViews) UpdateAppStoreCredential(w http.ResponseWriter, r *http.Requ
 	utils.JSONResponse(w, cred, http.StatusOK)
 }
 
-func (v *HttpViews) DeleteAppStoreCredential(w http.ResponseWriter, r *http.Request) {
+func (v *HttpViews) DeleteAppleConnection(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
 		return
 	}
 
-	credID := chi.URLParam(r, "credentialId")
+	credID := chi.URLParam(r, "connectionId")
+	if credID == "" {
+		credID = chi.URLParam(r, "credentialId")
+	}
 	if credID == "" {
 		utils.JSONErrorResponse(w, "credential_id is required", http.StatusBadRequest)
 		return
 	}
 
-	err = v.Controller.DeleteAppStoreCredential(user, credID)
+	err = v.Controller.DeleteAppleConnection(user, credID)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -146,14 +155,14 @@ func (v *HttpViews) DeleteAppStoreCredential(w http.ResponseWriter, r *http.Requ
 	utils.JSONResponse(w, "", http.StatusNoContent)
 }
 
-func (v *HttpViews) ListGooglePlayCredentials(w http.ResponseWriter, r *http.Request) {
+func (v *HttpViews) ListGooglePlayConnections(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
 		return
 	}
 
-	creds, err := v.Controller.GetGooglePlayCredentials(user)
+	creds, err := v.Controller.ListGooglePlayConnections(user)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -163,7 +172,7 @@ func (v *HttpViews) ListGooglePlayCredentials(w http.ResponseWriter, r *http.Req
 
 }
 
-func (v *HttpViews) CreateGooglePlayCredential(w http.ResponseWriter, r *http.Request) {
+func (v *HttpViews) CreateGooglePlayConnection(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
@@ -177,19 +186,19 @@ func (v *HttpViews) CreateGooglePlayCredential(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	var req requests.GooglePlayCredentialsCreateRequest
+	var req requests.GooglePlayConnectionCreateRequest
 	if err := utils.ParseJSONBody(r, &req); err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
 	validate := validator.New(validator.WithRequiredStructEnabled())
-	if err := utils.ValidateFunc[requests.GooglePlayCredentialsCreateRequest](req, validate); err != nil {
+	if err := utils.ValidateFunc[requests.GooglePlayConnectionCreateRequest](req, validate); err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	cred, err := v.Controller.CreateGooglePlayCredential(user, req)
+	cred, err := v.Controller.CreateGooglePlayConnection(user, req)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -198,20 +207,23 @@ func (v *HttpViews) CreateGooglePlayCredential(w http.ResponseWriter, r *http.Re
 	utils.JSONResponse(w, cred, http.StatusCreated)
 }
 
-func (v *HttpViews) GetGooglePlayCredential(w http.ResponseWriter, r *http.Request) {
+func (v *HttpViews) GetGooglePlayConnection(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
 		return
 	}
 
-	credID := chi.URLParam(r, "credentialId")
+	credID := chi.URLParam(r, "connectionId")
+	if credID == "" {
+		credID = chi.URLParam(r, "credentialId")
+	}
 	if credID == "" {
 		utils.JSONErrorResponse(w, "credential_id is required", http.StatusBadRequest)
 		return
 	}
 
-	cred, err := v.Controller.GetGooglePlayCredentialById(user, credID)
+	cred, err := v.Controller.GetGooglePlayConnectionById(user, credID)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -220,7 +232,7 @@ func (v *HttpViews) GetGooglePlayCredential(w http.ResponseWriter, r *http.Reque
 	utils.JSONResponse(w, cred, http.StatusOK)
 }
 
-func (v *HttpViews) UpdateGooglePlayCredential(w http.ResponseWriter, r *http.Request) {
+func (v *HttpViews) UpdateGooglePlayConnection(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
@@ -234,25 +246,28 @@ func (v *HttpViews) UpdateGooglePlayCredential(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	credID := chi.URLParam(r, "credentialId")
+	credID := chi.URLParam(r, "connectionId")
+	if credID == "" {
+		credID = chi.URLParam(r, "credentialId")
+	}
 	if credID == "" {
 		utils.JSONErrorResponse(w, "credential_id is required", http.StatusBadRequest)
 		return
 	}
 
-	var req requests.GooglePlayCredentialsCreateRequest
+	var req requests.GooglePlayConnectionCreateRequest
 	if err := utils.ParseJSONBody(r, &req); err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
 	validate := validator.New(validator.WithRequiredStructEnabled())
-	if err := utils.ValidateFunc[requests.GooglePlayCredentialsCreateRequest](req, validate); err != nil {
+	if err := utils.ValidateFunc[requests.GooglePlayConnectionCreateRequest](req, validate); err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	cred, err := v.Controller.UpdateGooglePlayCredential(user, credID, req)
+	cred, err := v.Controller.UpdateGooglePlayConnection(user, credID, req)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -261,20 +276,23 @@ func (v *HttpViews) UpdateGooglePlayCredential(w http.ResponseWriter, r *http.Re
 	utils.JSONResponse(w, cred, http.StatusOK)
 }
 
-func (v *HttpViews) DeleteGooglePlayCredential(w http.ResponseWriter, r *http.Request) {
+func (v *HttpViews) DeleteGooglePlayConnection(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
 		return
 	}
 
-	credID := chi.URLParam(r, "credentialId")
+	credID := chi.URLParam(r, "connectionId")
+	if credID == "" {
+		credID = chi.URLParam(r, "credentialId")
+	}
 	if credID == "" {
 		utils.JSONErrorResponse(w, "credential_id is required", http.StatusBadRequest)
 		return
 	}
 
-	err = v.Controller.DeleteGooglePlayCredential(user, credID)
+	err = v.Controller.DeleteGooglePlayConnection(user, credID)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
 		return

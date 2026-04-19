@@ -8,15 +8,15 @@ import (
 	"github.com/knid/wemob/internal/responses"
 )
 
-func (c *Controller) GetAppStoreCredentials(user *models.User) ([]responses.AppStoreCredentialsResponse, error) {
-	creds, err := c.DB.GetAppStoreCredentialsByUser(*user)
+func (c *Controller) ListAppleConnections(user *models.User) ([]responses.AppleConnectionResponse, error) {
+	creds, err := c.DB.GetAppleConnectionsByUser(*user)
 	if err != nil {
 		return nil, err
 	}
 
-	var credsResponse []responses.AppStoreCredentialsResponse
+	var credsResponse []responses.AppleConnectionResponse
 	for _, cred := range creds {
-		credsResponse = append(credsResponse, responses.AppStoreCredentialsResponse{
+		credsResponse = append(credsResponse, responses.AppleConnectionResponse{
 			ID:        cred.ID,
 			Name:      cred.Name,
 			KeyID:     cred.KeyID,
@@ -31,8 +31,8 @@ func (c *Controller) GetAppStoreCredentials(user *models.User) ([]responses.AppS
 	return credsResponse, nil
 }
 
-func (c *Controller) GetAppStoreCredentialById(user *models.User, id string) (*responses.AppStoreCredentialsResponse, error) {
-	cred, err := c.DB.GetAppStoreCredentialById(id)
+func (c *Controller) GetAppleConnectionById(user *models.User, id string) (*responses.AppleConnectionResponse, error) {
+	cred, err := c.DB.GetAppleConnectionById(id)
 	if err != nil {
 		return nil, err
 	}
@@ -41,7 +41,7 @@ func (c *Controller) GetAppStoreCredentialById(user *models.User, id string) (*r
 		return nil, errors.New("you do not have access to this resource")
 	}
 
-	return &responses.AppStoreCredentialsResponse{
+	return &responses.AppleConnectionResponse{
 		ID:        cred.ID,
 		Name:      cred.Name,
 		KeyID:     cred.KeyID,
@@ -54,23 +54,23 @@ func (c *Controller) GetAppStoreCredentialById(user *models.User, id string) (*r
 
 }
 
-func (c *Controller) CreateAppStoreCredential(user *models.User, credentialCreateReq requests.AppStoreCredentialsCreateRequest) (*responses.AppStoreCredentialsResponse, error) {
+func (c *Controller) CreateAppleConnection(user *models.User, req requests.AppleConnectionCreateRequest) (*responses.AppleConnectionResponse, error) {
 	credential := &models.AppleConnection{
 		UserID:        user.ID,
-		Name:          credentialCreateReq.Name,
-		TeamID:        credentialCreateReq.TeamID,
-		P8KeyPath:     "p8_keys/" + credentialCreateReq.P8Key + ".p8",
-		APNSP8KeyPath: "apns_keys/" + credentialCreateReq.APNSP8Key + ".p8",
-		APNSP8KeyID:   credentialCreateReq.APNSKeyID,
-		KeyID:         credentialCreateReq.KeyID,
-		IssuerID:      credentialCreateReq.IssuerID,
+		Name:          req.Name,
+		TeamID:        req.TeamID,
+		P8KeyPath:     "p8_keys/" + req.P8Key + ".p8",
+		APNSP8KeyPath: "apns_keys/" + req.APNSP8Key + ".p8",
+		APNSP8KeyID:   req.APNSKeyID,
+		KeyID:         req.KeyID,
+		IssuerID:      req.IssuerID,
 	}
-	cred, err := c.DB.CreateAppStoreCredentials(credential)
+	cred, err := c.DB.CreateAppleConnection(credential)
 	if err != nil {
 		return nil, err
 	}
 
-	return &responses.AppStoreCredentialsResponse{
+	return &responses.AppleConnectionResponse{
 		ID:        cred.ID,
 		Name:      cred.Name,
 		KeyID:     cred.KeyID,
@@ -81,8 +81,8 @@ func (c *Controller) CreateAppStoreCredential(user *models.User, credentialCreat
 	}, nil
 }
 
-func (c *Controller) UpdateAppStoreCredential(user *models.User, credID string, credentialCreateReq requests.AppStoreCredentialsCreateRequest) (*responses.AppStoreCredentialsResponse, error) {
-	cred, err := c.DB.GetAppStoreCredentialById(credID)
+func (c *Controller) UpdateAppleConnection(user *models.User, credID string, req requests.AppleConnectionCreateRequest) (*responses.AppleConnectionResponse, error) {
+	cred, err := c.DB.GetAppleConnectionById(credID)
 	if err != nil {
 		return nil, err
 	}
@@ -92,35 +92,35 @@ func (c *Controller) UpdateAppStoreCredential(user *models.User, credID string, 
 	}
 
 	p8KeyPath := cred.P8KeyPath
-	if credentialCreateReq.P8Key != "" {
+	if req.P8Key != "" {
 		// upload new p8 key to storage
-		p8KeyPath = credentialCreateReq.P8Key
+		p8KeyPath = req.P8Key
 	}
 
 	apnsP8KeyPath := cred.APNSP8KeyPath
-	if credentialCreateReq.APNSP8Key != "" {
+	if req.APNSP8Key != "" {
 		// upload new apns p8 key to storage
-		apnsP8KeyPath = credentialCreateReq.APNSP8Key
+		apnsP8KeyPath = req.APNSP8Key
 	}
 
 	credentials := &models.AppleConnection{
 		ID:            cred.ID,
 		UserID:        user.ID,
-		Name:          credentialCreateReq.Name,
+		Name:          req.Name,
 		P8KeyPath:     p8KeyPath,
 		APNSP8KeyPath: apnsP8KeyPath,
-		APNSP8KeyID:   credentialCreateReq.APNSKeyID,
-		KeyID:         credentialCreateReq.KeyID,
-		TeamID:        credentialCreateReq.TeamID,
-		IssuerID:      credentialCreateReq.IssuerID,
+		APNSP8KeyID:   req.APNSKeyID,
+		KeyID:         req.KeyID,
+		TeamID:        req.TeamID,
+		IssuerID:      req.IssuerID,
 	}
 
-	cred, err = c.DB.UpdateAppStoreCredentials(credentials)
+	cred, err = c.DB.UpdateAppleConnection(credentials)
 	if err != nil {
 		return nil, err
 	}
 
-	return &responses.AppStoreCredentialsResponse{
+	return &responses.AppleConnectionResponse{
 		ID:        cred.ID,
 		Name:      cred.Name,
 		KeyID:     cred.KeyID,
@@ -130,8 +130,8 @@ func (c *Controller) UpdateAppStoreCredential(user *models.User, credID string, 
 	}, nil
 }
 
-func (c *Controller) DeleteAppStoreCredential(user *models.User, credID string) error {
-	cred, err := c.DB.GetAppStoreCredentialById(credID)
+func (c *Controller) DeleteAppleConnection(user *models.User, credID string) error {
+	cred, err := c.DB.GetAppleConnectionById(credID)
 	if err != nil {
 		return err
 	}
@@ -140,19 +140,19 @@ func (c *Controller) DeleteAppStoreCredential(user *models.User, credID string) 
 		return errors.New("you do not have access to this resource")
 	}
 
-	return c.DB.DeleteAppStoreCredentials(cred)
+	return c.DB.DeleteAppleConnection(cred)
 }
 
-func (c *Controller) GetGooglePlayCredentials(user *models.User) ([]responses.GooglePlayCredentialsResponse, error) {
+func (c *Controller) ListGooglePlayConnections(user *models.User) ([]responses.GooglePlayConnectionResponse, error) {
 
-	creds, err := c.DB.GetGooglePlayCredentialsByUser(*user)
+	creds, err := c.DB.GetGooglePlayConnectionsByUser(*user)
 	if err != nil {
 		return nil, err
 	}
 
-	var credsResponse []responses.GooglePlayCredentialsResponse
+	var credsResponse []responses.GooglePlayConnectionResponse
 	for _, cred := range creds {
-		credsResponse = append(credsResponse, responses.GooglePlayCredentialsResponse{
+		credsResponse = append(credsResponse, responses.GooglePlayConnectionResponse{
 			ID:        cred.ID,
 			Name:      cred.Name,
 			CreatedAt: cred.CreatedAt,
@@ -163,8 +163,8 @@ func (c *Controller) GetGooglePlayCredentials(user *models.User) ([]responses.Go
 	return credsResponse, nil
 }
 
-func (c *Controller) GetGooglePlayCredentialById(user *models.User, id string) (*responses.GooglePlayCredentialsResponse, error) {
-	cred, err := c.DB.GetGooglePlayCredentialById(id)
+func (c *Controller) GetGooglePlayConnectionById(user *models.User, id string) (*responses.GooglePlayConnectionResponse, error) {
+	cred, err := c.DB.GetGooglePlayConnectionById(id)
 	if err != nil {
 		return nil, err
 	}
@@ -173,7 +173,7 @@ func (c *Controller) GetGooglePlayCredentialById(user *models.User, id string) (
 		return nil, errors.New("you do not have access to this resource")
 	}
 
-	return &responses.GooglePlayCredentialsResponse{
+	return &responses.GooglePlayConnectionResponse{
 		ID:        cred.ID,
 		Name:      cred.Name,
 		CreatedAt: cred.CreatedAt,
@@ -181,17 +181,17 @@ func (c *Controller) GetGooglePlayCredentialById(user *models.User, id string) (
 	}, nil
 }
 
-func (c *Controller) CreateGooglePlayCredential(user *models.User, credentialCreateReq requests.GooglePlayCredentialsCreateRequest) (*models.GooglePlayConnection, error) {
+func (c *Controller) CreateGooglePlayConnection(user *models.User, req requests.GooglePlayConnectionCreateRequest) (*models.GooglePlayConnection, error) {
 	credential := &models.GooglePlayConnection{
 		UserID:             user.ID,
-		Name:               credentialCreateReq.Name,
-		ServiceAccountPath: "service_accounts/" + credentialCreateReq.ServiceAccountKey + ".json",
+		Name:               req.Name,
+		ServiceAccountPath: "service_accounts/" + req.ServiceAccountKey + ".json",
 	}
-	return c.DB.CreateGooglePlayCredentials(credential)
+	return c.DB.CreateGooglePlayConnection(credential)
 }
 
-func (c *Controller) UpdateGooglePlayCredential(user *models.User, credID string, credentialCreateReq requests.GooglePlayCredentialsCreateRequest) (*models.GooglePlayConnection, error) {
-	cred, err := c.DB.GetGooglePlayCredentialById(credID)
+func (c *Controller) UpdateGooglePlayConnection(user *models.User, credID string, req requests.GooglePlayConnectionCreateRequest) (*models.GooglePlayConnection, error) {
+	cred, err := c.DB.GetGooglePlayConnectionById(credID)
 	if err != nil {
 		return nil, err
 	}
@@ -201,22 +201,22 @@ func (c *Controller) UpdateGooglePlayCredential(user *models.User, credID string
 	}
 
 	serviceAccountPath := cred.ServiceAccountPath
-	if credentialCreateReq.ServiceAccountKey != "" {
+	if req.ServiceAccountKey != "" {
 		// upload new service account key to storage
-		serviceAccountPath = credentialCreateReq.ServiceAccountKey
+		serviceAccountPath = req.ServiceAccountKey
 	}
 
 	credentials := &models.GooglePlayConnection{
 		ID:                 cred.ID,
 		UserID:             user.ID,
-		Name:               credentialCreateReq.Name,
+		Name:               req.Name,
 		ServiceAccountPath: serviceAccountPath,
 	}
-	return c.DB.UpdateGooglePlayCredentials(credentials)
+	return c.DB.UpdateGooglePlayConnection(credentials)
 }
 
-func (c *Controller) DeleteGooglePlayCredential(user *models.User, credID string) error {
-	cred, err := c.DB.GetGooglePlayCredentialById(credID)
+func (c *Controller) DeleteGooglePlayConnection(user *models.User, credID string) error {
+	cred, err := c.DB.GetGooglePlayConnectionById(credID)
 	if err != nil {
 		return err
 	}
@@ -225,5 +225,5 @@ func (c *Controller) DeleteGooglePlayCredential(user *models.User, credID string
 		return errors.New("you do not have access to this resource")
 	}
 
-	return c.DB.DeleteGooglePlayCredentials(cred)
+	return c.DB.DeleteGooglePlayConnection(cred)
 }
