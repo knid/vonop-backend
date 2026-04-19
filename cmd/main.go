@@ -1777,6 +1777,7 @@ func main() {
 
 					// Ship tab — Launchpad aggregate
 					r.Get("/launchpad", httpViews.GetLaunchpad)
+					r.Post("/listing/draft", httpViews.DraftListing)
 				})
 			})
 

@@ -1,0 +1,94 @@
+package controllers
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log/slog"
+	"strings"
+
+	"github.com/google/uuid"
+	"github.com/knid/wemob/internal/constants"
+	"github.com/knid/wemob/internal/models"
+	"github.com/knid/wemob/internal/requests"
+	"github.com/knid/wemob/internal/responses"
+	"github.com/knid/wemob/internal/utils"
+)
+
+// DraftListing generates a single drafted field (title / description /
+// release_notes) for an app's store listing. Uses the existing
+// GetJSONFromLLM helper with the same token-tracking + billing pattern
+// as NavBarAutoFillWithAI.
+func (c *Controller) DraftListing(ctx context.Context, user *models.User, appID uuid.UUID, req requests.DraftListingRequest) (*responses.ListingDraftResponse, error) {
+	if user == nil {
+		return nil, errors.New("user required")
+	}
+
+	kind := strings.TrimSpace(req.Kind)
+	target := strings.TrimSpace(req.Target)
+	if kind != "title" && kind != "description" && kind != "release_notes" {
+		return nil, fmt.Errorf("invalid kind %q", kind)
+	}
+	if target != "app_store" && target != "play_store" {
+		return nil, fmt.Errorf("invalid target %q", target)
+	}
+
+	// Load the app for name + description.
+	var project models.AppProject
+	if err := c.DB.DB.NewSelect().
+		Model(&project).
+		Where("id = ?", appID).
+		Scan(ctx); err != nil {
+		return nil, err
+	}
+	if project.UserID != user.ID {
+		return nil, errors.New("not authorized")
+	}
+
+	// Compose the user message as a compact JSON payload.
+	userPayload := map[string]string{
+		"app_name":        project.Name,
+		"app_description": strings.TrimSpace(project.Prompt),
+		"target":          target,
+		"kind":            kind,
+		"hint":            strings.TrimSpace(req.Hint),
+	}
+	userJSON, _ := json.Marshal(userPayload)
+
+	tracker := utils.NewTokenTracker()
+	tracker.UserID = user.ID.String()
+	ctx = utils.WithTokenTracker(ctx, tracker)
+
+	raw, err := utils.GetJSONFromLLM(
+		ctx,
+		"claude-haiku-4-5",
+		constants.LISTING_DRAFT_PROMPT,
+		string(userJSON),
+		c.AnthropicProvider(),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("listing draft LLM call failed: %w", err)
+	}
+
+	var out responses.ListingDraftResponse
+	if err := json.Unmarshal([]byte(raw), &out); err != nil {
+		return nil, fmt.Errorf("listing draft LLM returned invalid JSON: %w", err)
+	}
+	if out.Kind == "" {
+		out.Kind = kind
+	}
+
+	c.RecordTokenUsage(user, "listing_draft",
+		"claude-haiku-4-5",
+		"anthropic", "", "standard", tracker)
+	prompt, completion, total, _ := tracker.Totals()
+	if total > 0 {
+		credits := models.TokensToCredits(prompt, completion)
+		if err := c.DeductAICreditsUnchecked(user, credits, "listing_draft", ""); err != nil {
+			slog.Warn("listing_draft: deduct credits failed", "err", err)
+		}
+	}
+
+	return &out, nil
+}
