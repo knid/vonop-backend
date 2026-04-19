@@ -505,6 +505,50 @@ func (c *Controller) SignUnsignedIPATask(user *models.User, signReq requests.Sig
 	return iosSignTask, nil
 }
 
+// AutoSignIOSBuildIfPossible is called from the build-completed webhook.
+// If the completed build is iOS and the owner has at least one active
+// Apple connection, it enqueues a sign task using that connection.
+// Silent no-op otherwise — this is a convenience path, not a guarantee.
+//
+// Returns (true, nil) when a sign was enqueued.
+func (c *Controller) AutoSignIOSBuildIfPossible(ctx context.Context, task *models.AppBuildTask) (bool, error) {
+	if task.Platform != "ios" {
+		return false, nil
+	}
+	// Load the project to get the user.
+	project, err := c.DB.GetProjectById(task.ProjectID.String())
+	if err != nil {
+		return false, err
+	}
+	user, err := c.DB.GetUserById(project.UserID.String())
+	if err != nil {
+		return false, err
+	}
+	// Pick the user's most-recently-used Apple connection.
+	var conn models.AppleConnection
+	err = c.DB.DB.NewSelect().
+		Model(&conn).
+		Where("user_id = ?", user.ID).
+		Order("updated_at DESC").
+		Limit(1).
+		Scan(ctx)
+	if err != nil {
+		// No connection → graceful exit (user is on managed, or hasn't
+		// connected yet; the UI will show 'Built (unsigned)' and prompt
+		// them to connect).
+		return false, nil
+	}
+	signReq := requests.SignIPARequest{
+		ProjectID:     task.ProjectID.String(),
+		BuildID:       task.BuildID.String(),
+		CredentialsID: conn.ID.String(),
+	}
+	if _, err := c.SignUnsignedIPATask(user, signReq); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 // GetLatestSignStatusForBuild returns the most recent sign task for a build,
 // scoped to the caller. Used by the build card UI to display "signed" /
 // "signing" / "not signed" across refreshes without relying on local state.

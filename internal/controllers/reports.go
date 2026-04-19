@@ -3,6 +3,7 @@ package controllers
 import (
 	"context"
 	"log/slog"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/database"
@@ -37,7 +38,20 @@ func (c *Controller) UpdateBuildTaskStatus(reportBuildReq requests.ReportBuildRe
 		}
 	}
 
-	return c.DB.UpdateAppBuildTask(buildTask)
+	if err := c.DB.UpdateAppBuildTask(buildTask); err != nil {
+		return err
+	}
+
+	if strings.EqualFold(reportBuildReq.Status, "Built") {
+		signed, err := c.AutoSignIOSBuildIfPossible(context.Background(), buildTask)
+		if err != nil {
+			slog.Warn("auto-sign enqueue failed", "task_id", buildTask.ID, "err", err)
+		} else if signed {
+			slog.Info("auto-sign enqueued", "task_id", buildTask.ID)
+		}
+	}
+
+	return nil
 }
 
 func (c *Controller) UpdateDeploymentStatus(reportDeplomentReq requests.ReportDeploymentRequest) error {
