@@ -198,8 +198,8 @@ func createSchema(db *bun.DB) error {
 		`ALTER TABLE app_build_tasks ADD COLUMN IF NOT EXISTS error_message text`,
 		`ALTER TABLE app_release_tasks ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
 		`ALTER TABLE tickets ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
-		`ALTER TABLE google_play_credentials ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
-		`ALTER TABLE app_store_credentials ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
+		`ALTER TABLE google_play_connections ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
+		`ALTER TABLE apple_connections ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
 		`ALTER TABLE deployments ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
 		`ALTER TABLE sign_ipa_tasks ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
 		`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
@@ -333,6 +333,7 @@ func createSchema(db *bun.DB) error {
 	// and block all reads on the affected tables.
 	// IMPORTANT: when adding a new ALTER TABLE above, update this canary to the newest column,
 	// otherwise the new ALTER will be silently skipped on servers that already have older columns.
+	// Table renames go in renameStatements below, not here — they run unconditionally.
 	var migrationsDone bool
 	row := db.QueryRowContext(context.Background(),
 		"SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='app_build_tasks' AND column_name='error_message')")
@@ -378,6 +379,12 @@ func createSchema(db *bun.DB) error {
 		}
 	}
 
+	// renameStatements runs unconditionally on every startup (outside the
+	// canary-gated alterStatements). MUST be executed AFTER createSchema so
+	// the target tables already exist in either their old or new form —
+	// running this before createSchema would silently no-op on a fresh DB.
+	// Keep all rename migrations idempotent via IF EXISTS / DO-block guards.
+	//
 	// Ship UX Phase 1: rename credential tables and FK columns to connections.
 	// These run unconditionally (not gated by the canary) because the canary was
 	// already satisfied on existing DBs before these renames were added. The
