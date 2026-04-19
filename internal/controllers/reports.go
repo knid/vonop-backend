@@ -1,8 +1,11 @@
 package controllers
 
 import (
+	"context"
 	"log/slog"
 
+	"github.com/google/uuid"
+	"github.com/knid/wemob/internal/database"
 	"github.com/knid/wemob/internal/requests"
 )
 
@@ -25,6 +28,12 @@ func (c *Controller) UpdateBuildTaskStatus(reportBuildReq requests.ReportBuildRe
 		buildTask.Finished = true
 		if reportBuildReq.Message != "" {
 			buildTask.ErrorMessage = reportBuildReq.Message
+			annotationID, annotErr := database.MatchBuildAnnotation(context.Background(), c.DB.DB, reportBuildReq.Message)
+			if annotErr == nil && annotationID != uuid.Nil {
+				buildTask.AnnotationID = &annotationID
+			} else if annotErr != nil {
+				slog.Warn("annotation match failed", "task_id", buildTask.ID, "err", annotErr)
+			}
 		}
 	}
 

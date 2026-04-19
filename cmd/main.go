@@ -425,6 +425,19 @@ END $$`,
 		}
 	}
 
+	// buildAnnotationsMigrations runs unconditionally on every boot.
+	// ADD COLUMN IF NOT EXISTS and CREATE INDEX IF NOT EXISTS are both
+	// idempotent, so this is safe to re-run on every startup.
+	buildAnnotationsMigrations := []string{
+		`ALTER TABLE app_build_tasks ADD COLUMN IF NOT EXISTS annotation_id uuid`,
+		`CREATE INDEX IF NOT EXISTS idx_app_build_tasks_annotation_id ON app_build_tasks (annotation_id) WHERE annotation_id IS NOT NULL`,
+	}
+	for _, stmt := range buildAnnotationsMigrations {
+		if _, err := db.ExecContext(context.Background(), stmt); err != nil {
+			slog.Warn("build annotations migration skipped", "statement", stmt, "error", err)
+		}
+	}
+
 	// Performance indexes (CREATE INDEX IF NOT EXISTS is cheap — no exclusive lock)
 	perfIndexes := []string{
 		`CREATE INDEX IF NOT EXISTS idx_users_customer_id ON users(customer_id)`,

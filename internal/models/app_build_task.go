@@ -20,6 +20,11 @@ type AppBuildTask struct {
 	// workflow. Surfaced to the user on failed build rows so they can see why
 	// a build failed without chasing us in support.
 	ErrorMessage string    `bun:",nullzero,type:text"`
+	// AnnotationID is set by the build-completed webhook when the
+	// ErrorMessage matches a known pattern in build_annotations. Nil means
+	// either the build succeeded, or no pattern matched.
+	AnnotationID *uuid.UUID       `bun:",type:uuid,nullzero"`
+	Annotation   *BuildAnnotation `bun:"rel:belongs-to,join:annotation_id=id"`
 	ExecuteTime  time.Time `bun:",nullzero,notnull,default:current_timestamp"`
 	CreatedAt    time.Time `bun:"created_at,nullzero,notnull,default:current_timestamp"`
 	UpdatedAt    time.Time `bun:"updated_at,nullzero,notnull,default:current_timestamp"`
