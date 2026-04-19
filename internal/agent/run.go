@@ -12,12 +12,23 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/services/gitrepo"
 	"github.com/knid/wemob/internal/services/remoteconfig"
 	"github.com/knid/wemob/internal/services/secret"
 	"github.com/knid/wemob/internal/utils"
 )
+
+// TurnAttachments carries per-turn attachment context into the agent.
+// Current is the set the user explicitly attached to this user turn (used
+// for vision content blocks on the current message). Pool is the project-
+// wide capped list used to build the system manifest. Both come from the
+// view layer after resolving AttachmentIDs against the live AppAsset table.
+type TurnAttachments struct {
+	Current []models.AppAsset
+	Pool    []models.AppAsset
+}
 
 // Budget limits (package-level defaults; can be overridden later if needed).
 const (
@@ -44,7 +55,7 @@ func Run(
 	project *models.AppProject,
 	user *models.User,
 	message string,
-	images []string,
+	turnAttachments TurnAttachments,
 	emitter EventEmitter,
 ) (runErr error) {
 	runStart := time.Now()
@@ -119,7 +130,27 @@ func Run(
 	}
 
 	// --- Step 8: persist the user message ---
-	imagesJSON := mustJSON(normaliseImages(images))
+	attachmentSnapshot := make([]models.ChatMessageAttachment, 0, len(turnAttachments.Current))
+	currentImageURLs := make([]string, 0, len(turnAttachments.Current))
+	for _, a := range turnAttachments.Current {
+		isImage := constants.ClassifyAttachment(a.ContentType) == constants.AttachmentKindImage
+		attachmentSnapshot = append(attachmentSnapshot, models.ChatMessageAttachment{
+			AssetID:     a.ID,
+			FileName:    a.FileName,
+			ContentType: a.ContentType,
+			FileSize:    a.FileSize,
+			URL:         a.PublicURL,
+			IsImage:     isImage,
+		})
+		if isImage {
+			currentImageURLs = append(currentImageURLs, a.PublicURL)
+		}
+	}
+	attachmentsJSON := mustJSON(attachmentSnapshot)
+	// imagesJSON is the legacy column — keep populating it from current image
+	// URLs so old read paths (legacy mapApiMessages fallback on the dashboard)
+	// keep rendering after this ships.
+	imagesJSON := mustJSON(normaliseImages(currentImageURLs))
 	userParts, _ := json.Marshal([]models.ChatMessagePart{
 		{Type: "text", Text: message},
 	})
@@ -129,6 +160,7 @@ func Run(
 		Role:         "user",
 		Content:      message,
 		Images:       imagesJSON,
+		Attachments:  attachmentsJSON,
 		ToolCalls:    []byte("[]"),
 		Parts:        userParts,
 	}
@@ -166,8 +198,8 @@ func Run(
 	// text the user typed.
 	expandedMessage, _, _ := ExpandSlashCommand(message)
 	userTurn := utils.Message{Role: "user", Content: expandedMessage}
-	if len(images) > 0 {
-		userTurn.Images = images
+	if len(currentImageURLs) > 0 {
+		userTurn.Images = currentImageURLs
 	}
 	llmMessages = append(llmMessages, userTurn)
 
@@ -680,6 +712,7 @@ func finaliseSuccess(
 		Role:         "assistant",
 		Content:      narration,
 		Images:       []byte("[]"),
+		Attachments:  []byte("[]"),
 		ToolCalls:    toolCallsJSON,
 		Parts:        partsJSON,
 	}
@@ -879,6 +912,7 @@ func finaliseFailureV2(
 		Role:         "assistant",
 		Content:      orphanText,
 		Images:       []byte("[]"),
+		Attachments:  []byte("[]"),
 		ToolCalls:    []byte("[]"),
 		Parts:        orphanParts,
 	}
