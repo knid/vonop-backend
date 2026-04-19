@@ -196,6 +196,8 @@ func (c *Controller) CreateDeploymentTask(user *models.User, deploymentReq reque
 				TitleChanged:       true,
 				DescChanged:        true,
 				ScreenshotsChanged: true,
+				RolloutTrack:       deploymentReq.RolloutTrack,
+				ReleaseNotes:       deploymentReq.ReleaseNotes,
 			}); err != nil {
 				return nil, fmt.Errorf("failed to trigger iOS deploy: %w", err)
 			}
@@ -394,6 +396,8 @@ func (c *Controller) UpdateDeploymentTask(user *models.User, deploymentID string
 			TitleChanged:       titleChanged,
 			DescChanged:        descriptionChanged,
 			ScreenshotsChanged: screenshotsChanged,
+			RolloutTrack:       deploymentReq.RolloutTrack,
+			ReleaseNotes:       deploymentReq.ReleaseNotes,
 		}); err != nil {
 			return nil, fmt.Errorf("failed to trigger iOS deploy: %w", err)
 		}
