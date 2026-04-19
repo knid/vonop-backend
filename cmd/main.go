@@ -84,6 +84,7 @@ func createSchema(db *bun.DB) error {
 		(*models.AppleConnection)(nil),
 		(*models.Deployment)(nil),
 		(*models.SignIPATask)(nil),
+		(*models.DeploymentEvent)(nil),
 		(*models.AICreditsBalance)(nil),
 		(*models.AICreditTransaction)(nil),
 		(*models.Organization)(nil),
@@ -407,6 +408,18 @@ END $$`,
 	for _, stmt := range renameStatements {
 		if _, err := db.ExecContext(context.Background(), stmt); err != nil {
 			slog.Warn("rename migration skipped", "statement", stmt, "error", err)
+		}
+	}
+
+	// deploymentEventIndexes runs unconditionally on every boot (outside the
+	// canary-gated alterStatements). CREATE INDEX IF NOT EXISTS is idempotent
+	// and takes no exclusive lock on already-indexed tables.
+	deploymentEventIndexes := []string{
+		`CREATE INDEX IF NOT EXISTS idx_deployment_events_deployment_id_occurred_at ON deployment_events (deployment_id, occurred_at)`,
+	}
+	for _, stmt := range deploymentEventIndexes {
+		if _, err := db.ExecContext(context.Background(), stmt); err != nil {
+			slog.Warn("deployment event index skipped", "statement", stmt, "error", err)
 		}
 	}
 
