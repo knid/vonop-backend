@@ -438,6 +438,21 @@ END $$`,
 		}
 	}
 
+	// shipMarkersMigrations creates the schema_ship_markers table used to gate
+	// one-time backfills so they run exactly once per deploy cluster.
+	// CREATE TABLE IF NOT EXISTS is idempotent — safe to run on every boot.
+	shipMarkersMigrations := []string{
+		`CREATE TABLE IF NOT EXISTS schema_ship_markers (
+    name text PRIMARY KEY,
+    created_at timestamptz NOT NULL DEFAULT current_timestamp
+)`,
+	}
+	for _, stmt := range shipMarkersMigrations {
+		if _, err := db.ExecContext(context.Background(), stmt); err != nil {
+			slog.Warn("ship markers migration skipped", "statement", stmt, "error", err)
+		}
+	}
+
 	// Performance indexes (CREATE INDEX IF NOT EXISTS is cheap — no exclusive lock)
 	perfIndexes := []string{
 		`CREATE INDEX IF NOT EXISTS idx_users_customer_id ON users(customer_id)`,
@@ -855,6 +870,27 @@ func main() {
 
 	if err := database.SeedBuildAnnotations(context.Background(), bundb); err != nil {
 		slog.Error("seed build annotations failed", "err", err)
+	}
+
+	// Run the build_defaults backfill exactly once per deploy cluster.
+	// schema_ship_markers records the fact so restarts don't re-scan every
+	// app_project.
+	var markerExists bool
+	if err := bundb.NewSelect().
+		ColumnExpr("EXISTS (SELECT 1 FROM schema_ship_markers WHERE name = ?)", "build_defaults_backfill_v1").
+		Scan(context.Background(), &markerExists); err != nil {
+		slog.Error("check build_defaults marker failed", "err", err)
+	} else if !markerExists {
+		if err := database.BackfillBuildDefaults(context.Background(), bundb); err != nil {
+			slog.Error("backfill build_defaults failed", "err", err)
+		} else {
+			if _, err := bundb.NewRaw(
+				"INSERT INTO schema_ship_markers (name) VALUES (?)",
+				"build_defaults_backfill_v1",
+			).Exec(context.Background()); err != nil {
+				slog.Warn("mark build_defaults_backfill_v1 failed", "err", err)
+			}
+		}
 	}
 
 	seedPlans(db, sm)
