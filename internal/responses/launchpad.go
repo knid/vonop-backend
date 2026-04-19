@@ -23,12 +23,22 @@ type LaunchpadResponse struct {
 }
 
 type LaunchpadApp struct {
-	ID          string `json:"id"`           // AppProject ID (uuid string)
-	Name        string `json:"name"`
-	BundleID    string `json:"bundle_id"`    // e.g. "com.tasktracker.pro"
-	IconS3Key   string `json:"icon_s3_key"`  // build_defaults.icon_s3_key
-	VersionName string `json:"version_name"` // "1.0.3"
-	BuildNumber int    `json:"build_number"` // monotonic
+	ID            string                 `json:"id"`            // AppProject ID (uuid string)
+	Name          string                 `json:"name"`
+	BundleID      string                 `json:"bundle_id"`     // e.g. "com.tasktracker.pro"
+	IconS3Key     string                 `json:"icon_s3_key"`   // build_defaults.icon_s3_key
+	VersionName   string                 `json:"version_name"`  // "1.0.3"
+	BuildNumber   int                    `json:"build_number"`  // monotonic
+	V1ProjectID   string                 `json:"v1_project_id,omitempty"`
+	BuildDefaults LaunchpadBuildDefaults `json:"build_defaults"`
+}
+
+type LaunchpadBuildDefaults struct {
+	AppName             string `json:"app_name,omitempty"`
+	IconS3Key           string `json:"icon_s3_key,omitempty"`
+	SplashColor         string `json:"splash_color,omitempty"`
+	NavBarStyle         string `json:"navbar_style,omitempty"`
+	RemoveWemobBranding bool   `json:"remove_wemob_branding,omitempty"`
 }
 
 // LaunchpadHero is the computed one-sentence summary + single primary
@@ -66,9 +76,25 @@ type LaunchpadStoreTile struct {
 
 // Stubs for Phase 2b — declared for type stability.
 
+// LaunchpadListing summarises the store-listing readiness. Each tile
+// is one piece of metadata the stores need (icon, title, description,
+// screenshots, locale, category, privacy URL, release notes).
 type LaunchpadListing struct {
-	ReadyItems int `json:"ready_items"` // out of 8 tiles
-	TotalItems int `json:"total_items"`
+	ReadyItems int                    `json:"ready_items"` // tiles with status "ready"
+	TotalItems int                    `json:"total_items"` // always 8 in 2b
+	Tiles      []LaunchpadListingTile `json:"tiles"`
+}
+
+// LaunchpadListingTile is one of the 8 listing items. Status vocabulary:
+// "ready" (green check), "warn" (yellow, needed but not blocking),
+// "missing" (amber dashed, blocking), "empty" (grey, optional).
+type LaunchpadListingTile struct {
+	Key         string `json:"key"`          // "icon" | "title" | "description" | "screenshots"
+	                                          // | "locale" | "category" | "privacy_url" | "release_notes"
+	Label       string `json:"label"`        // "Icon", "Title", "Description", …
+	Status      string `json:"status"`       // "ready" | "warn" | "missing" | "empty"
+	Summary     string `json:"summary"`      // e.g. "TaskTracker Pro" | "14 chars" | "1 of 3 needed"
+	Remediation string `json:"remediation"`  // optional — "Generate with AI", empty if not applicable
 }
 
 type LaunchpadBuilds struct {
@@ -77,11 +103,21 @@ type LaunchpadBuilds struct {
 }
 
 type LaunchpadBuildSummary struct {
-	ID        string `json:"id"`
-	Platform  string `json:"platform"` // "android" | "ios"
-	Status    string `json:"status"`
-	Version   string `json:"version,omitempty"`
-	CreatedAt string `json:"created_at"`
+	ID             string `json:"id"`
+	BuildID        string `json:"build_id"`
+	Platform       string `json:"platform"`                   // "android" | "ios"
+	Status         string `json:"status"`
+	StatusText     string `json:"status_text,omitempty"`
+	Finished       bool   `json:"finished"`
+	Version        string `json:"version,omitempty"`
+	BuildNumber    int    `json:"build_number,omitempty"`
+	CreatedAt      string `json:"created_at"`
+	UpdatedAt      string `json:"updated_at,omitempty"`
+	ErrorMessage   string `json:"error_message,omitempty"`
+	AnnotationID   string `json:"annotation_id,omitempty"`
+	AnnotationName string `json:"annotation_name,omitempty"`
+	AnnotationMsg  string `json:"annotation_human_message,omitempty"`
+	AnnotationFix  string `json:"annotation_suggested_fix,omitempty"`
 }
 
 type LaunchpadIdentity struct {
