@@ -86,4 +86,6 @@ type IOSDeployParams struct {
 	TitleChanged       bool
 	DescChanged        bool
 	ScreenshotsChanged bool
+	RolloutTrack       string
+	ReleaseNotes       string
 }

@@ -207,6 +207,12 @@ func (s *Service) TriggerIOSDeploy(params IOSDeployParams) (string, error) {
 		"CM_DESC_CHANGED":         boolStr(params.DescChanged),
 		"CM_SCREENSHOTS_CHANGED":  boolStr(params.ScreenshotsChanged),
 	}
+	if params.RolloutTrack != "" {
+		vars["CM_ROLLOUT_TRACK"] = params.RolloutTrack
+	}
+	if params.ReleaseNotes != "" {
+		vars["CM_RELEASE_NOTES"] = params.ReleaseNotes
+	}
 	return s.TriggerBuild(WorkflowIOSDeploy, vars)
 }
 

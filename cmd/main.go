@@ -1236,6 +1236,7 @@ func main() {
 			})
 			r.Get("/tasks", httpViews.GetAllTasks)
 			r.Post("/tasks/{taskId}/cancel", httpViews.CancelBuildTask)
+			r.Get("/ship", httpViews.GetShipItems)
 			r.Route("/projects", func(r chi.Router) {
 				r.Get("/", httpViews.GetProjects)
 				r.Post("/", httpViews.CreateProject)
