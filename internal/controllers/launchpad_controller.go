@@ -76,6 +76,7 @@ func (c *Controller) GetLaunchpad(ctx context.Context, user *models.User, appID 
 	if v, ok := project.Settings["v1_project_id"].(string); ok {
 		v1ProjectID = v
 	}
+	resp.App.V1ProjectID = v1ProjectID
 
 	if v1ProjectID != "" {
 		var latestBuild models.Build

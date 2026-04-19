@@ -29,6 +29,7 @@ type LaunchpadApp struct {
 	IconS3Key     string                 `json:"icon_s3_key"`   // build_defaults.icon_s3_key
 	VersionName   string                 `json:"version_name"`  // "1.0.3"
 	BuildNumber   int                    `json:"build_number"`  // monotonic
+	V1ProjectID   string                 `json:"v1_project_id,omitempty"`
 	BuildDefaults LaunchpadBuildDefaults `json:"build_defaults"`
 }
 
