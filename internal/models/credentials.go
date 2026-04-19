@@ -4,9 +4,15 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/uptrace/bun"
 )
 
-type AppStoreCredentials struct {
+// AppleConnection is a user's App Store Connect API key and team metadata.
+// Used to submit iOS builds to the App Store under the user's own account.
+// Table name kept as "app_store_credentials" for now; Task 2 renames it.
+type AppleConnection struct {
+	bun.BaseModel `bun:"table:app_store_credentials,alias:ac"`
+
 	ID            uuid.UUID `bun:",pk,type:uuid,default:uuid_generate_v4()"`
 	UserID        uuid.UUID `bun:",notnull,type:uuid"`
 	User          Project   `bun:"rel:belongs-to,join:user_id=id"`
@@ -22,7 +28,12 @@ type AppStoreCredentials struct {
 	DeletedAt     time.Time `bun:",soft_delete,nullzero"`
 }
 
-type GooglePlayCredentials struct {
+// GooglePlayConnection is a user's Google Play Console service account key.
+// Used to submit Android builds to Play Store under the user's own account.
+// Table name kept as "google_play_credentials" for now; Task 2 renames it.
+type GooglePlayConnection struct {
+	bun.BaseModel `bun:"table:google_play_credentials,alias:gpc"`
+
 	ID                 uuid.UUID `bun:",pk,type:uuid,default:uuid_generate_v4()"`
 	UserID             uuid.UUID `bun:",notnull,type:uuid"`
 	User               Project   `bun:"rel:belongs-to,join:user_id=id"`

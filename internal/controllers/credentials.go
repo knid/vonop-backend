@@ -55,7 +55,7 @@ func (c *Controller) GetAppStoreCredentialById(user *models.User, id string) (*r
 }
 
 func (c *Controller) CreateAppStoreCredential(user *models.User, credentialCreateReq requests.AppStoreCredentialsCreateRequest) (*responses.AppStoreCredentialsResponse, error) {
-	credential := &models.AppStoreCredentials{
+	credential := &models.AppleConnection{
 		UserID:        user.ID,
 		Name:          credentialCreateReq.Name,
 		TeamID:        credentialCreateReq.TeamID,
@@ -103,7 +103,7 @@ func (c *Controller) UpdateAppStoreCredential(user *models.User, credID string, 
 		apnsP8KeyPath = credentialCreateReq.APNSP8Key
 	}
 
-	credentials := &models.AppStoreCredentials{
+	credentials := &models.AppleConnection{
 		ID:            cred.ID,
 		UserID:        user.ID,
 		Name:          credentialCreateReq.Name,
@@ -181,8 +181,8 @@ func (c *Controller) GetGooglePlayCredentialById(user *models.User, id string) (
 	}, nil
 }
 
-func (c *Controller) CreateGooglePlayCredential(user *models.User, credentialCreateReq requests.GooglePlayCredentialsCreateRequest) (*models.GooglePlayCredentials, error) {
-	credential := &models.GooglePlayCredentials{
+func (c *Controller) CreateGooglePlayCredential(user *models.User, credentialCreateReq requests.GooglePlayCredentialsCreateRequest) (*models.GooglePlayConnection, error) {
+	credential := &models.GooglePlayConnection{
 		UserID:             user.ID,
 		Name:               credentialCreateReq.Name,
 		ServiceAccountPath: "service_accounts/" + credentialCreateReq.ServiceAccountKey + ".json",
@@ -190,7 +190,7 @@ func (c *Controller) CreateGooglePlayCredential(user *models.User, credentialCre
 	return c.DB.CreateGooglePlayCredentials(credential)
 }
 
-func (c *Controller) UpdateGooglePlayCredential(user *models.User, credID string, credentialCreateReq requests.GooglePlayCredentialsCreateRequest) (*models.GooglePlayCredentials, error) {
+func (c *Controller) UpdateGooglePlayCredential(user *models.User, credID string, credentialCreateReq requests.GooglePlayCredentialsCreateRequest) (*models.GooglePlayConnection, error) {
 	cred, err := c.DB.GetGooglePlayCredentialById(credID)
 	if err != nil {
 		return nil, err
@@ -206,7 +206,7 @@ func (c *Controller) UpdateGooglePlayCredential(user *models.User, credID string
 		serviceAccountPath = credentialCreateReq.ServiceAccountKey
 	}
 
-	credentials := &models.GooglePlayCredentials{
+	credentials := &models.GooglePlayConnection{
 		ID:                 cred.ID,
 		UserID:             user.ID,
 		Name:               credentialCreateReq.Name,
