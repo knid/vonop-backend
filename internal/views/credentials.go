@@ -73,7 +73,7 @@ func (v *HttpViews) GetAppleConnection(w http.ResponseWriter, r *http.Request) {
 		credID = chi.URLParam(r, "credentialId")
 	}
 	if credID == "" {
-		utils.JSONErrorResponse(w, "credential_id is required", http.StatusBadRequest)
+		utils.JSONErrorResponse(w, "connection_id is required", http.StatusBadRequest)
 		return
 	}
 
@@ -105,7 +105,7 @@ func (v *HttpViews) UpdateAppleConnection(w http.ResponseWriter, r *http.Request
 		credID = chi.URLParam(r, "credentialId")
 	}
 	if credID == "" {
-		utils.JSONErrorResponse(w, "credential_id is required", http.StatusBadRequest)
+		utils.JSONErrorResponse(w, "connection_id is required", http.StatusBadRequest)
 		return
 	}
 
@@ -142,7 +142,7 @@ func (v *HttpViews) DeleteAppleConnection(w http.ResponseWriter, r *http.Request
 		credID = chi.URLParam(r, "credentialId")
 	}
 	if credID == "" {
-		utils.JSONErrorResponse(w, "credential_id is required", http.StatusBadRequest)
+		utils.JSONErrorResponse(w, "connection_id is required", http.StatusBadRequest)
 		return
 	}
 
@@ -219,7 +219,7 @@ func (v *HttpViews) GetGooglePlayConnection(w http.ResponseWriter, r *http.Reque
 		credID = chi.URLParam(r, "credentialId")
 	}
 	if credID == "" {
-		utils.JSONErrorResponse(w, "credential_id is required", http.StatusBadRequest)
+		utils.JSONErrorResponse(w, "connection_id is required", http.StatusBadRequest)
 		return
 	}
 
@@ -251,7 +251,7 @@ func (v *HttpViews) UpdateGooglePlayConnection(w http.ResponseWriter, r *http.Re
 		credID = chi.URLParam(r, "credentialId")
 	}
 	if credID == "" {
-		utils.JSONErrorResponse(w, "credential_id is required", http.StatusBadRequest)
+		utils.JSONErrorResponse(w, "connection_id is required", http.StatusBadRequest)
 		return
 	}
 
@@ -288,7 +288,7 @@ func (v *HttpViews) DeleteGooglePlayConnection(w http.ResponseWriter, r *http.Re
 		credID = chi.URLParam(r, "credentialId")
 	}
 	if credID == "" {
-		utils.JSONErrorResponse(w, "credential_id is required", http.StatusBadRequest)
+		utils.JSONErrorResponse(w, "connection_id is required", http.StatusBadRequest)
 		return
 	}
 
