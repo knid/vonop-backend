@@ -147,6 +147,8 @@ func createSchema(db *bun.DB) error {
 		(*models.ProjectGatewayKey)(nil),
 		// Persistent store listing per AppProject (replaces per-wizard form state)
 		(*models.AppStoreListing)(nil),
+		// Known build failure patterns for human-readable error surfacing
+		(*models.BuildAnnotation)(nil),
 	}
 
 	for _, model := range models {
@@ -836,6 +838,10 @@ func main() {
 		slog.Warn("failed to backfill project status", "error", err)
 	} else if n > 0 {
 		slog.Info("backfilled draft projects with completed runs to ready", "count", n)
+	}
+
+	if err := database.SeedBuildAnnotations(context.Background(), bundb); err != nil {
+		slog.Error("seed build annotations failed", "err", err)
 	}
 
 	seedPlans(db, sm)
