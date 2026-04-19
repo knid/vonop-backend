@@ -101,6 +101,9 @@ func (c *Controller) GetLaunchpad(ctx context.Context, user *models.User, appID 
 	// Listing — tile-by-tile store listing readiness.
 	resp.Listing = c.buildListing(ctx, project.ID)
 
+	// Builds — active (in-flight) + recent (last 5 finished) build tasks.
+	resp.Builds = c.buildBuilds(ctx, v1ProjectID)
+
 	// Hero — pure function of the populated response.
 	resp.HeroStatus = computeHero(resp)
 
@@ -412,6 +415,84 @@ func firstNonEmpty(a, b string) string {
 		return a
 	}
 	return b
+}
+
+// buildBuilds queries AppBuildTask for the given v1ProjectID and returns
+// a LaunchpadBuilds with two slices:
+//   - Active: all tasks where finished=false, ordered newest first.
+//   - Recent: last 5 tasks where finished=true, ordered newest first.
+//
+// Both slices are always initialised (never nil) so the JSON serialises
+// as [] rather than null.
+func (c *Controller) buildBuilds(ctx context.Context, v1ProjectID string) responses.LaunchpadBuilds {
+	builds := responses.LaunchpadBuilds{
+		Active: []responses.LaunchpadBuildSummary{},
+		Recent: []responses.LaunchpadBuildSummary{},
+	}
+	if v1ProjectID == "" {
+		return builds
+	}
+
+	var active []models.AppBuildTask
+	if err := c.DB.DB.NewSelect().
+		Model(&active).
+		Relation("Annotation").
+		Relation("Build").
+		Where("app_build_task.project_id = ?", v1ProjectID).
+		Where("app_build_task.finished = ?", false).
+		Order("app_build_task.created_at DESC").
+		Scan(ctx); err == nil {
+		for _, t := range active {
+			builds.Active = append(builds.Active, buildTaskToSummary(t))
+		}
+	}
+
+	var recent []models.AppBuildTask
+	if err := c.DB.DB.NewSelect().
+		Model(&recent).
+		Relation("Annotation").
+		Relation("Build").
+		Where("app_build_task.project_id = ?", v1ProjectID).
+		Where("app_build_task.finished = ?", true).
+		Order("app_build_task.created_at DESC").
+		Limit(5).
+		Scan(ctx); err == nil {
+		for _, t := range recent {
+			builds.Recent = append(builds.Recent, buildTaskToSummary(t))
+		}
+	}
+
+	return builds
+}
+
+// buildTaskToSummary converts an AppBuildTask (with its Annotation and Build
+// relations eagerly loaded) into a flat LaunchpadBuildSummary. Nil-checks on
+// the relations guard against tasks fetched without the relations pre-loaded.
+func buildTaskToSummary(t models.AppBuildTask) responses.LaunchpadBuildSummary {
+	s := responses.LaunchpadBuildSummary{
+		ID:         t.ID.String(),
+		BuildID:    t.BuildID.String(),
+		Platform:   t.Platform,
+		Status:     t.StatusText,
+		StatusText: t.StatusText,
+		Finished:   t.Finished,
+		CreatedAt:  t.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),
+		UpdatedAt:  t.UpdatedAt.UTC().Format("2006-01-02T15:04:05Z"),
+	}
+	if t.Build != nil {
+		s.Version = t.Build.VersionString
+		s.BuildNumber = t.Build.BuildNumber
+	}
+	if t.ErrorMessage != "" {
+		s.ErrorMessage = t.ErrorMessage
+	}
+	if t.AnnotationID != nil && t.Annotation != nil {
+		s.AnnotationID = t.AnnotationID.String()
+		s.AnnotationName = t.Annotation.Name
+		s.AnnotationMsg = t.Annotation.HumanMessage
+		s.AnnotationFix = t.Annotation.SuggestedFix
+	}
+	return s
 }
 
 // computeHero is a pure function: it takes the already-populated response
