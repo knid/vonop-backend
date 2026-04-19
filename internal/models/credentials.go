@@ -9,9 +9,8 @@ import (
 
 // AppleConnection is a user's App Store Connect API key and team metadata.
 // Used to submit iOS builds to the App Store under the user's own account.
-// Table name kept as "app_store_credentials" for now; Task 2 renames it.
 type AppleConnection struct {
-	bun.BaseModel `bun:"table:app_store_credentials,alias:ac"`
+	bun.BaseModel `bun:"table:apple_connections,alias:ac"`
 
 	ID            uuid.UUID `bun:",pk,type:uuid,default:uuid_generate_v4()"`
 	UserID        uuid.UUID `bun:",notnull,type:uuid"`
@@ -30,9 +29,8 @@ type AppleConnection struct {
 
 // GooglePlayConnection is a user's Google Play Console service account key.
 // Used to submit Android builds to Play Store under the user's own account.
-// Table name kept as "google_play_credentials" for now; Task 2 renames it.
 type GooglePlayConnection struct {
-	bun.BaseModel `bun:"table:google_play_credentials,alias:gpc"`
+	bun.BaseModel `bun:"table:google_play_connections,alias:gpc"`
 
 	ID                 uuid.UUID `bun:",pk,type:uuid,default:uuid_generate_v4()"`
 	UserID             uuid.UUID `bun:",notnull,type:uuid"`

@@ -46,8 +46,8 @@ func (c *Controller) GetDeployments(user *models.User) ([]responses.DeploymentRe
 			Status:                  deployment.Status,
 			ScreenshotIDs:           deployment.ScreenshotPaths,
 			Method:                  deployment.Method,
-			AppStoreCredentialsID:   deployment.AppStoreCredentialsID,
-			GooglePlayCredentialsID: deployment.GooglePlayCredentialsID,
+			AppleConnectionID:       deployment.AppleConnectionID,
+			GooglePlayConnectionID:  deployment.GooglePlayConnectionID,
 			CreatedAt:               deployment.CreatedAt,
 			UpdatedAt:               deployment.UpdatedAt,
 		})
@@ -74,8 +74,8 @@ func (c *Controller) GetDeploymentByID(deploymentID string) (*responses.Deployme
 		Status:                  deployment.Status,
 		ScreenshotIDs:           deployment.ScreenshotPaths,
 		Method:                  deployment.Method,
-		AppStoreCredentialsID:   deployment.AppStoreCredentialsID,
-		GooglePlayCredentialsID: deployment.GooglePlayCredentialsID,
+		AppleConnectionID:       deployment.AppleConnectionID,
+		GooglePlayConnectionID:  deployment.GooglePlayConnectionID,
 		CreatedAt:               deployment.CreatedAt,
 		UpdatedAt:               deployment.UpdatedAt,
 	}, nil
@@ -121,7 +121,7 @@ func (c *Controller) CreateDeploymentTask(user *models.User, deploymentReq reque
 		return nil, errors.New("invalid locale format, expected format like en-US or en_US")
 	}
 
-	appStoreCredId, err := uuid.Parse(deploymentReq.AppStoreCredentialsID)
+	appStoreCredId, err := uuid.Parse(deploymentReq.AppleConnectionID)
 	if err != nil {
 		if deploymentReq.Method == "wemob" {
 			appStoreCredId = uuid.Nil
@@ -131,7 +131,7 @@ func (c *Controller) CreateDeploymentTask(user *models.User, deploymentReq reque
 			}
 		}
 	}
-	googlePlayCredId, err := uuid.Parse(deploymentReq.GooglePlayCredentialsID)
+	googlePlayCredId, err := uuid.Parse(deploymentReq.GooglePlayConnectionID)
 	if err != nil {
 		if deploymentReq.Method == "wemob" {
 			googlePlayCredId = uuid.Nil
@@ -151,8 +151,8 @@ func (c *Controller) CreateDeploymentTask(user *models.User, deploymentReq reque
 		Title:                   deploymentReq.Title,
 		Description:             deploymentReq.Description,
 		Locale:                  deploymentReq.Locale,
-		AppStoreCredentialsID:   appStoreCredId,
-		GooglePlayCredentialsID: googlePlayCredId,
+		AppleConnectionID:       appStoreCredId,
+		GooglePlayConnectionID:  googlePlayCredId,
 		Status:                  "Queued",
 		Method:                  deploymentReq.Method,
 		ScreenshotPaths:         deploymentReq.ScreenshotPaths,
@@ -260,8 +260,8 @@ func (c *Controller) CreateDeploymentTask(user *models.User, deploymentReq reque
 		ScreenshotIDs:           deployment.ScreenshotPaths,
 		Method:                  deployment.Method,
 		Locale:                  deployment.Locale,
-		AppStoreCredentialsID:   deployment.AppStoreCredentialsID,
-		GooglePlayCredentialsID: deployment.GooglePlayCredentialsID,
+		AppleConnectionID:       deployment.AppleConnectionID,
+		GooglePlayConnectionID:  deployment.GooglePlayConnectionID,
 		CreatedAt:               deployment.CreatedAt,
 		UpdatedAt:               deployment.UpdatedAt,
 	}, nil
@@ -343,7 +343,7 @@ func (c *Controller) UpdateDeploymentTask(user *models.User, deploymentID string
 		return nil, err
 	}
 
-	appStoreCredId, err := uuid.Parse(deploymentReq.AppStoreCredentialsID)
+	appStoreCredId, err := uuid.Parse(deploymentReq.AppleConnectionID)
 	if err != nil {
 		if deploymentReq.Method == "wemob" {
 			appStoreCredId = uuid.Nil
@@ -351,7 +351,7 @@ func (c *Controller) UpdateDeploymentTask(user *models.User, deploymentID string
 			return nil, errors.New("invalid app store credentials id")
 		}
 	}
-	googlePlayCredId, err := uuid.Parse(deploymentReq.GooglePlayCredentialsID)
+	googlePlayCredId, err := uuid.Parse(deploymentReq.GooglePlayConnectionID)
 	if err != nil {
 		if deploymentReq.Method == "wemob" {
 			googlePlayCredId = uuid.Nil
@@ -436,8 +436,8 @@ func (c *Controller) UpdateDeploymentTask(user *models.User, deploymentID string
 		Status:                  updatedDeployment.Status,
 		ScreenshotIDs:           updatedDeployment.ScreenshotPaths,
 		Method:                  updatedDeployment.Method,
-		AppStoreCredentialsID:   updatedDeployment.AppStoreCredentialsID,
-		GooglePlayCredentialsID: updatedDeployment.GooglePlayCredentialsID,
+		AppleConnectionID:       updatedDeployment.AppleConnectionID,
+		GooglePlayConnectionID:  updatedDeployment.GooglePlayConnectionID,
 		CreatedAt:               updatedDeployment.CreatedAt,
 		UpdatedAt:               updatedDeployment.UpdatedAt,
 	}, nil

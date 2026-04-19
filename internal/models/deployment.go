@@ -23,10 +23,10 @@ type Deployment struct {
 	ScreenshotPaths         []string               `bun:",array,notnull"`
 	Method                  string                 `bun:",notnull"`
 	Locale                  string                 `bun:",notnull"`
-	AppStoreCredentialsID   uuid.UUID              `bun:",type:uuid"`
-	GooglePlayCredentialsID uuid.UUID              `bun:",type:uuid"`
-	AppleConnection         *AppleConnection       `bun:"rel:belongs-to,join:app_store_credentials_id=id"`
-	GooglePlayConnection    *GooglePlayConnection  `bun:"rel:belongs-to,join:google_play_credentials_id=id"`
+	AppleConnectionID       uuid.UUID              `bun:",type:uuid"`
+	GooglePlayConnectionID  uuid.UUID              `bun:",type:uuid"`
+	AppleConnection         *AppleConnection       `bun:"rel:belongs-to,join:apple_connection_id=id"`
+	GooglePlayConnection    *GooglePlayConnection  `bun:"rel:belongs-to,join:google_play_connection_id=id"`
 	CreatedAt               time.Time              `bun:"created_at,nullzero,notnull,default:current_timestamp"`
 	UpdatedAt               time.Time              `bun:"updated_at,nullzero,notnull,default:current_timestamp"`
 	DeletedAt               time.Time              `bun:",soft_delete,nullzero"`

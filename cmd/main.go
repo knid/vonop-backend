@@ -378,6 +378,31 @@ func createSchema(db *bun.DB) error {
 		}
 	}
 
+	// Ship UX Phase 1: rename credential tables and FK columns to connections.
+	// These run unconditionally (not gated by the canary) because the canary was
+	// already satisfied on existing DBs before these renames were added. The
+	// DO-block guards make every statement a no-op on second and subsequent runs.
+	renameStatements := []string{
+		`ALTER TABLE IF EXISTS app_store_credentials RENAME TO apple_connections`,
+		`ALTER TABLE IF EXISTS google_play_credentials RENAME TO google_play_connections`,
+		// Deployment FK columns — guard with DO block to stay idempotent
+		`DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='deployments' AND column_name='app_store_credentials_id') THEN
+    ALTER TABLE deployments RENAME COLUMN app_store_credentials_id TO apple_connection_id;
+  END IF;
+END $$`,
+		`DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='deployments' AND column_name='google_play_credentials_id') THEN
+    ALTER TABLE deployments RENAME COLUMN google_play_credentials_id TO google_play_connection_id;
+  END IF;
+END $$`,
+	}
+	for _, stmt := range renameStatements {
+		if _, err := db.ExecContext(context.Background(), stmt); err != nil {
+			slog.Warn("rename migration skipped", "statement", stmt, "error", err)
+		}
+	}
+
 	// Performance indexes (CREATE INDEX IF NOT EXISTS is cheap — no exclusive lock)
 	perfIndexes := []string{
 		`CREATE INDEX IF NOT EXISTS idx_users_customer_id ON users(customer_id)`,
