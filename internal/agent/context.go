@@ -14,6 +14,7 @@ import (
 //  1. BasePrompt           (stable across all projects of this type)
 //  2. Variant addendum     (stable across this project's runs, if applicable)
 //  3. File tree            (stable within this run, reused across turns)
+//  4. Project assets       (per-turn — asset uploads/deletes invalidate this block only)
 //
 // anthropic.go marks up to 4 system blocks with cache_control, so each block
 // becomes its own cache breakpoint for prompt caching.
@@ -21,7 +22,7 @@ import (
 // deps is passed in so the AI addendum can render only the chat models the
 // current user's subscription tier can actually reach; passing nil degrades
 // to a conservative generic block.
-func BuildSystemMessages(project *models.AppProject, fileMap *SafeFileMap, deps *RunDependencies) []utils.Message {
+func BuildSystemMessages(project *models.AppProject, fileMap *SafeFileMap, deps *RunDependencies, attachmentsPool []models.AppAsset) []utils.Message {
 	base := BasePrompt
 	addendum := buildAddendum(project, deps)
 
@@ -30,6 +31,9 @@ func BuildSystemMessages(project *models.AppProject, fileMap *SafeFileMap, deps 
 		msgs = append(msgs, utils.Message{Role: "system", Content: addendum})
 	}
 	msgs = append(msgs, utils.Message{Role: "system", Content: buildFileTreeBlock(fileMap)})
+	if manifest := AttachmentsAddendum(attachmentsPool); manifest != "" {
+		msgs = append(msgs, utils.Message{Role: "system", Content: manifest})
+	}
 	return msgs
 }
 
