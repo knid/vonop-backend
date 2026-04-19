@@ -410,6 +410,8 @@ END $$`,
 		// simultaneously.
 		`ALTER TABLE IF EXISTS apple_connections ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
 		`ALTER TABLE IF EXISTS google_play_connections ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
+		`ALTER TABLE IF EXISTS deployments ADD COLUMN IF NOT EXISTS release_notes text`,
+		`ALTER TABLE IF EXISTS deployments ADD COLUMN IF NOT EXISTS rollout_track text`,
 	}
 	for _, stmt := range renameStatements {
 		if _, err := db.ExecContext(context.Background(), stmt); err != nil {

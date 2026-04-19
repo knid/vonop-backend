@@ -27,6 +27,16 @@ type Deployment struct {
 	GooglePlayConnectionID  uuid.UUID              `bun:",type:uuid"`
 	AppleConnection         *AppleConnection       `bun:"rel:belongs-to,join:apple_connection_id=id"`
 	GooglePlayConnection    *GooglePlayConnection  `bun:"rel:belongs-to,join:google_play_connection_id=id"`
+	// ReleaseNotes is the "what's new in this version" copy captured at
+	// submission time. Populated by QuickShip; empty on Pilot-first
+	// submissions (first-time submissions send metadata via deliver/supply
+	// configured elsewhere).
+	ReleaseNotes string `bun:",nullzero,type:text"`
+	// RolloutTrack names the target track selected by the user.
+	// Vocabulary: "internal" | "closed" | "open" | "production" (Play Store)
+	// or "internal" | "closed" | "production" (App Store TestFlight).
+	// Empty on Pilot submissions (which always target Production).
+	RolloutTrack string `bun:",nullzero"`
 	CreatedAt               time.Time              `bun:"created_at,nullzero,notnull,default:current_timestamp"`
 	UpdatedAt               time.Time              `bun:"updated_at,nullzero,notnull,default:current_timestamp"`
 	DeletedAt               time.Time              `bun:",soft_delete,nullzero"`

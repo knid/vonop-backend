@@ -12,6 +12,14 @@ type CreateDeploymentRequest struct {
 	AppleConnectionID       string   `json:"app_store_credentials_id"`
 	ScreenshotPaths         []string `json:"screenshot_paths"`
 	Locale                  string   `json:"locale"`
+	// ReleaseNotes — optional "what's new in this version" copy captured
+	// at submission time (populated by QuickShip in the frontend).
+	ReleaseNotes string `json:"release_notes,omitempty"`
+	// RolloutTrack — optional track selection. Values:
+	//   Play Store: "internal" | "closed" | "open" | "production"
+	//   App Store:  "internal" | "closed" | "production" (TestFlight variants)
+	// Empty defaults to "production" behavior at submit time.
+	RolloutTrack string `json:"rollout_track,omitempty"`
 }
 
 type SignIPARequest struct {
