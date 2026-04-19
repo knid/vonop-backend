@@ -332,6 +332,8 @@ func (c *Controller) UpdateDeploymentTask(user *models.User, deploymentID string
 
 	deployment.Title = deploymentReq.Title
 	deployment.Description = deploymentReq.Description
+	deployment.RolloutTrack = deploymentReq.RolloutTrack
+	deployment.ReleaseNotes = deploymentReq.ReleaseNotes
 	deployment.IconPath = deploymentReq.IconID
 	deployment.ScreenshotPaths = deploymentReq.ScreenshotPaths
 	if deploymentReq.BuildID != "" {
