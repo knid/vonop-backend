@@ -7,7 +7,7 @@ import (
 	"github.com/uptrace/bun"
 )
 
-// SeedBuildAnnotations inserts the initial six known failure patterns.
+// SeedBuildAnnotations inserts the initial seven known failure patterns.
 // Idempotent — uses the unique Name column to avoid duplicate inserts on
 // re-runs. Existing rows are left untouched so operator-tuned entries
 // survive a redeploy.
@@ -58,6 +58,14 @@ func SeedBuildAnnotations(ctx context.Context, db *bun.DB) error {
 			LogRegex:      `(?i)(App Store metadata precheck failed|precheck failed)`,
 			HumanMessage:  "Apple's metadata precheck rejected the listing before upload.",
 			SuggestedFix:  "Common causes: URL in description, the word 'beta' or 'test' in the title, placeholder copy, or a privacy/support URL that returns a non-200. Fix the listing in the Launchpad and re-submit.",
+			RetryStrategy: "",
+			Enabled:       true,
+		},
+		{
+			Name:          "produce_first_submission_failed",
+			LogRegex:      `(?i)(fastlane produce|App Store Connect app record creation failed|bundle identifier .* is already taken|supply .* track: 'internal')`,
+			HumanMessage:  "Couldn't create the store record for this app.",
+			SuggestedFix:  "Check two things: (1) the bundle ID isn't already used by another developer, (2) your Apple Team ID / Play Console service account has permission to create apps. iOS: produce runs on first submission. Android: first submissions publish to the Internal track — promote to Production in Play Console when ready.",
 			RetryStrategy: "",
 			Enabled:       true,
 		},
