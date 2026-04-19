@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"regexp"
 	"slices"
+	"strings"
 
 	"github.com/go-playground/validator/v10"
 	"github.com/google/uuid"
@@ -538,6 +539,21 @@ func (c *Controller) AutoSignIOSBuildIfPossible(ctx context.Context, task *model
 		// them to connect).
 		return false, nil
 	}
+	// Idempotency guard: if a non-failed sign task already exists for this
+	// build (e.g., the Codemagic webhook fired twice), don't create a duplicate.
+	existing, existsErr := c.DB.GetLatestIOSSignTaskByBuild(task.BuildID.String())
+	if existsErr == nil && existing != nil && !existing.Finished {
+		// An active sign task is already in progress for this build.
+		return false, nil
+	}
+	if existsErr == nil && existing != nil && existing.Finished && !strings.EqualFold(existing.Status, "error") {
+		// A completed (non-error) sign task exists — no need to retry.
+		return false, nil
+	}
+	// If existsErr != nil, no existing task was found (sql.ErrNoRows) — proceed.
+	// If existing is a failed sign task (Finished=true, Status="error"), fall
+	// through to allow a fresh attempt.
+
 	signReq := requests.SignIPARequest{
 		ProjectID:     task.ProjectID.String(),
 		BuildID:       task.BuildID.String(),

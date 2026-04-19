@@ -201,8 +201,6 @@ func createSchema(db *bun.DB) error {
 		`ALTER TABLE app_build_tasks ADD COLUMN IF NOT EXISTS error_message text`,
 		`ALTER TABLE app_release_tasks ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
 		`ALTER TABLE tickets ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
-		`ALTER TABLE google_play_connections ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
-		`ALTER TABLE apple_connections ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
 		`ALTER TABLE deployments ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
 		`ALTER TABLE sign_ipa_tasks ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
 		`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
@@ -406,6 +404,12 @@ END $$`,
     ALTER TABLE deployments RENAME COLUMN google_play_credentials_id TO google_play_connection_id;
   END IF;
 END $$`,
+		// Ensure soft-delete columns exist on the renamed tables. Moved out
+		// of alterStatements so the canary can't skip them when a
+		// transitional DB had the old tables + error_message column
+		// simultaneously.
+		`ALTER TABLE IF EXISTS apple_connections ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
+		`ALTER TABLE IF EXISTS google_play_connections ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
 	}
 	for _, stmt := range renameStatements {
 		if _, err := db.ExecContext(context.Background(), stmt); err != nil {
