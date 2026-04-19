@@ -8,8 +8,8 @@ type CreateDeploymentRequest struct {
 	Title                   string   `json:"title"`
 	Description             string   `json:"description"`
 	Method                  string   `json:"method"`
-	GooglePlayCredentialsID string   `json:"google_play_credentials_id"`
-	AppStoreCredentialsID   string   `json:"app_store_credentials_id"`
+	GooglePlayConnectionID  string   `json:"google_play_credentials_id"`
+	AppleConnectionID       string   `json:"app_store_credentials_id"`
 	ScreenshotPaths         []string `json:"screenshot_paths"`
 	Locale                  string   `json:"locale"`
 }

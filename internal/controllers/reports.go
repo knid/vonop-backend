@@ -1,8 +1,12 @@
 package controllers
 
 import (
+	"context"
 	"log/slog"
+	"strings"
 
+	"github.com/google/uuid"
+	"github.com/knid/wemob/internal/database"
 	"github.com/knid/wemob/internal/requests"
 )
 
@@ -25,10 +29,29 @@ func (c *Controller) UpdateBuildTaskStatus(reportBuildReq requests.ReportBuildRe
 		buildTask.Finished = true
 		if reportBuildReq.Message != "" {
 			buildTask.ErrorMessage = reportBuildReq.Message
+			annotationID, annotErr := database.MatchBuildAnnotation(context.Background(), c.DB.DB, reportBuildReq.Message)
+			if annotErr == nil && annotationID != uuid.Nil {
+				buildTask.AnnotationID = &annotationID
+			} else if annotErr != nil {
+				slog.Warn("annotation match failed", "task_id", buildTask.ID, "err", annotErr)
+			}
 		}
 	}
 
-	return c.DB.UpdateAppBuildTask(buildTask)
+	if err := c.DB.UpdateAppBuildTask(buildTask); err != nil {
+		return err
+	}
+
+	if strings.EqualFold(reportBuildReq.Status, "Built") {
+		signed, err := c.AutoSignIOSBuildIfPossible(context.Background(), buildTask)
+		if err != nil {
+			slog.Warn("auto-sign enqueue failed", "task_id", buildTask.ID, "err", err)
+		} else if signed {
+			slog.Info("auto-sign enqueued", "task_id", buildTask.ID)
+		}
+	}
+
+	return nil
 }
 
 func (c *Controller) UpdateDeploymentStatus(reportDeplomentReq requests.ReportDeploymentRequest) error {

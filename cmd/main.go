@@ -80,10 +80,11 @@ func createSchema(db *bun.DB) error {
 		(*models.Ticket)(nil),
 		(*models.NavBarItems)(nil),
 		(*models.JSInjectData)(nil),
-		(*models.GooglePlayCredentials)(nil),
-		(*models.AppStoreCredentials)(nil),
+		(*models.GooglePlayConnection)(nil),
+		(*models.AppleConnection)(nil),
 		(*models.Deployment)(nil),
 		(*models.SignIPATask)(nil),
+		(*models.DeploymentEvent)(nil),
 		(*models.AICreditsBalance)(nil),
 		(*models.AICreditTransaction)(nil),
 		(*models.Organization)(nil),
@@ -146,6 +147,8 @@ func createSchema(db *bun.DB) error {
 		(*models.ProjectGatewayKey)(nil),
 		// Persistent store listing per AppProject (replaces per-wizard form state)
 		(*models.AppStoreListing)(nil),
+		// Known build failure patterns for human-readable error surfacing
+		(*models.BuildAnnotation)(nil),
 	}
 
 	for _, model := range models {
@@ -198,8 +201,6 @@ func createSchema(db *bun.DB) error {
 		`ALTER TABLE app_build_tasks ADD COLUMN IF NOT EXISTS error_message text`,
 		`ALTER TABLE app_release_tasks ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
 		`ALTER TABLE tickets ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
-		`ALTER TABLE google_play_credentials ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
-		`ALTER TABLE app_store_credentials ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
 		`ALTER TABLE deployments ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
 		`ALTER TABLE sign_ipa_tasks ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
 		`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
@@ -333,6 +334,7 @@ func createSchema(db *bun.DB) error {
 	// and block all reads on the affected tables.
 	// IMPORTANT: when adding a new ALTER TABLE above, update this canary to the newest column,
 	// otherwise the new ALTER will be silently skipped on servers that already have older columns.
+	// Table renames go in renameStatements below, not here — they run unconditionally.
 	var migrationsDone bool
 	row := db.QueryRowContext(context.Background(),
 		"SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='app_build_tasks' AND column_name='error_message')")
@@ -375,6 +377,83 @@ func createSchema(db *bun.DB) error {
 			if _, err := db.ExecContext(context.Background(), stmt); err != nil {
 				slog.Warn("drop legacy table failed", "statement", stmt, "error", err)
 			}
+		}
+	}
+
+	// renameStatements runs unconditionally on every startup (outside the
+	// canary-gated alterStatements). MUST be executed AFTER createSchema so
+	// the target tables already exist in either their old or new form —
+	// running this before createSchema would silently no-op on a fresh DB.
+	// Keep all rename migrations idempotent via IF EXISTS / DO-block guards.
+	//
+	// Ship UX Phase 1: rename credential tables and FK columns to connections.
+	// These run unconditionally (not gated by the canary) because the canary was
+	// already satisfied on existing DBs before these renames were added. The
+	// DO-block guards make every statement a no-op on second and subsequent runs.
+	renameStatements := []string{
+		`ALTER TABLE IF EXISTS app_store_credentials RENAME TO apple_connections`,
+		`ALTER TABLE IF EXISTS google_play_credentials RENAME TO google_play_connections`,
+		// Deployment FK columns — guard with DO block to stay idempotent
+		`DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='deployments' AND column_name='app_store_credentials_id') THEN
+    ALTER TABLE deployments RENAME COLUMN app_store_credentials_id TO apple_connection_id;
+  END IF;
+END $$`,
+		`DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='deployments' AND column_name='google_play_credentials_id') THEN
+    ALTER TABLE deployments RENAME COLUMN google_play_credentials_id TO google_play_connection_id;
+  END IF;
+END $$`,
+		// Ensure soft-delete columns exist on the renamed tables. Moved out
+		// of alterStatements so the canary can't skip them when a
+		// transitional DB had the old tables + error_message column
+		// simultaneously.
+		`ALTER TABLE IF EXISTS apple_connections ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
+		`ALTER TABLE IF EXISTS google_play_connections ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
+	}
+	for _, stmt := range renameStatements {
+		if _, err := db.ExecContext(context.Background(), stmt); err != nil {
+			slog.Warn("rename migration skipped", "statement", stmt, "error", err)
+		}
+	}
+
+	// deploymentEventIndexes runs unconditionally on every boot (outside the
+	// canary-gated alterStatements). CREATE INDEX IF NOT EXISTS is idempotent
+	// and takes no exclusive lock on already-indexed tables.
+	deploymentEventIndexes := []string{
+		`CREATE INDEX IF NOT EXISTS idx_deployment_events_deployment_id_occurred_at ON deployment_events (deployment_id, occurred_at)`,
+	}
+	for _, stmt := range deploymentEventIndexes {
+		if _, err := db.ExecContext(context.Background(), stmt); err != nil {
+			slog.Warn("deployment event index skipped", "statement", stmt, "error", err)
+		}
+	}
+
+	// buildAnnotationsMigrations runs unconditionally on every boot.
+	// ADD COLUMN IF NOT EXISTS and CREATE INDEX IF NOT EXISTS are both
+	// idempotent, so this is safe to re-run on every startup.
+	buildAnnotationsMigrations := []string{
+		`ALTER TABLE app_build_tasks ADD COLUMN IF NOT EXISTS annotation_id uuid`,
+		`CREATE INDEX IF NOT EXISTS idx_app_build_tasks_annotation_id ON app_build_tasks (annotation_id) WHERE annotation_id IS NOT NULL`,
+	}
+	for _, stmt := range buildAnnotationsMigrations {
+		if _, err := db.ExecContext(context.Background(), stmt); err != nil {
+			slog.Warn("build annotations migration skipped", "statement", stmt, "error", err)
+		}
+	}
+
+	// shipMarkersMigrations creates the schema_ship_markers table used to gate
+	// one-time backfills so they run exactly once per deploy cluster.
+	// CREATE TABLE IF NOT EXISTS is idempotent — safe to run on every boot.
+	shipMarkersMigrations := []string{
+		`CREATE TABLE IF NOT EXISTS schema_ship_markers (
+    name text PRIMARY KEY,
+    created_at timestamptz NOT NULL DEFAULT current_timestamp
+)`,
+	}
+	for _, stmt := range shipMarkersMigrations {
+		if _, err := db.ExecContext(context.Background(), stmt); err != nil {
+			slog.Warn("ship markers migration skipped", "statement", stmt, "error", err)
 		}
 	}
 
@@ -793,6 +872,31 @@ func main() {
 		slog.Info("backfilled draft projects with completed runs to ready", "count", n)
 	}
 
+	if err := database.SeedBuildAnnotations(context.Background(), bundb); err != nil {
+		slog.Error("seed build annotations failed", "err", err)
+	}
+
+	// Run the build_defaults backfill exactly once per deploy cluster.
+	// schema_ship_markers records the fact so restarts don't re-scan every
+	// app_project.
+	var markerExists bool
+	if err := bundb.NewSelect().
+		ColumnExpr("EXISTS (SELECT 1 FROM schema_ship_markers WHERE name = ?)", "build_defaults_backfill_v1").
+		Scan(context.Background(), &markerExists); err != nil {
+		slog.Error("check build_defaults marker failed", "err", err)
+	} else if !markerExists {
+		if err := database.BackfillBuildDefaults(context.Background(), bundb); err != nil {
+			slog.Error("backfill build_defaults failed", "err", err)
+		} else {
+			if _, err := bundb.NewRaw(
+				"INSERT INTO schema_ship_markers (name) VALUES (?)",
+				"build_defaults_backfill_v1",
+			).Exec(context.Background()); err != nil {
+				slog.Warn("mark build_defaults_backfill_v1 failed", "err", err)
+			}
+		}
+	}
+
 	seedPlans(db, sm)
 	migrateInactiveUsersToFree(bundb)
 
@@ -1176,23 +1280,47 @@ func main() {
 					r.Post("/navbar", httpViews.NavBarAutoFillWithAI)
 				})
 			})
+			// New route names (preferred from Phase 1 onward)
+			r.Route("/connections", func(r chi.Router) {
+				r.Route("/google-play", func(r chi.Router) {
+					r.Get("/", httpViews.ListGooglePlayConnections)
+					r.Post("/", httpViews.CreateGooglePlayConnection)
+					r.Route("/{connectionId}", func(r chi.Router) {
+						r.Get("/", httpViews.GetGooglePlayConnection)
+						r.Put("/", httpViews.UpdateGooglePlayConnection)
+						r.Delete("/", httpViews.DeleteGooglePlayConnection)
+					})
+				})
+				r.Route("/apple", func(r chi.Router) {
+					r.Get("/", httpViews.ListAppleConnections)
+					r.Post("/", httpViews.CreateAppleConnection)
+					r.Route("/{connectionId}", func(r chi.Router) {
+						r.Get("/", httpViews.GetAppleConnection)
+						r.Put("/", httpViews.UpdateAppleConnection)
+						r.Delete("/", httpViews.DeleteAppleConnection)
+					})
+				})
+			})
+
+			// Legacy aliases — kept for 2 releases so existing frontend keeps working.
+			// Remove after Phase 2 ships the updated dashboard.
 			r.Route("/credentials", func(r chi.Router) {
 				r.Route("/google", func(r chi.Router) {
-					r.Get("/", httpViews.ListGooglePlayCredentials)
-					r.Post("/", httpViews.CreateGooglePlayCredential)
+					r.Get("/", httpViews.ListGooglePlayConnections)
+					r.Post("/", httpViews.CreateGooglePlayConnection)
 					r.Route("/{credentialId}", func(r chi.Router) {
-						r.Get("/", httpViews.GetGooglePlayCredential)
-						r.Put("/", httpViews.UpdateGooglePlayCredential)
-						r.Delete("/", httpViews.DeleteGooglePlayCredential)
+						r.Get("/", httpViews.GetGooglePlayConnection)
+						r.Put("/", httpViews.UpdateGooglePlayConnection)
+						r.Delete("/", httpViews.DeleteGooglePlayConnection)
 					})
 				})
 				r.Route("/appstore", func(r chi.Router) {
-					r.Get("/", httpViews.ListAppStoreCredentials)
-					r.Post("/", httpViews.CreateAppStoreCredential)
+					r.Get("/", httpViews.ListAppleConnections)
+					r.Post("/", httpViews.CreateAppleConnection)
 					r.Route("/{credentialId}", func(r chi.Router) {
-						r.Get("/", httpViews.GetAppStoreCredential)
-						r.Put("/", httpViews.UpdateAppStoreCredential)
-						r.Delete("/", httpViews.DeleteAppStoreCredential)
+						r.Get("/", httpViews.GetAppleConnection)
+						r.Put("/", httpViews.UpdateAppleConnection)
+						r.Delete("/", httpViews.DeleteAppleConnection)
 					})
 				})
 			})

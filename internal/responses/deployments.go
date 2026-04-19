@@ -20,8 +20,8 @@ type DeploymentResponse struct {
 	ScreenshotIDs           []string  `json:"screenshot_ids"`
 	Method                  string    `json:"method"`
 	Locale                  string    `json:"locale"`
-	AppStoreCredentialsID   uuid.UUID `json:"app_store_credentials_id"`
-	GooglePlayCredentialsID uuid.UUID `json:"google_play_credentials_id"`
+	AppleConnectionID       uuid.UUID `json:"app_store_credentials_id"`
+	GooglePlayConnectionID  uuid.UUID `json:"google_play_credentials_id"`
 	CreatedAt               time.Time `json:"created_at"`
 	UpdatedAt               time.Time `json:"updated_at"`
 }

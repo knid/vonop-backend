@@ -6,7 +6,7 @@ import (
 	"github.com/google/uuid"
 )
 
-type AppStoreCredentialsResponse struct {
+type AppleConnectionResponse struct {
 	ID        uuid.UUID `json:"id"`
 	Name      string    `json:"name"`
 	KeyID     string    `json:"key_id"`
@@ -17,7 +17,7 @@ type AppStoreCredentialsResponse struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-type GooglePlayCredentialsResponse struct {
+type GooglePlayConnectionResponse struct {
 	ID        uuid.UUID `json:"id"`
 	Name      string    `json:"name"`
 	CreatedAt time.Time `json:"created_at"`

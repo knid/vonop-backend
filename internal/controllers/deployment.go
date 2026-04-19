@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"regexp"
 	"slices"
+	"strings"
 
 	"github.com/go-playground/validator/v10"
 	"github.com/google/uuid"
@@ -46,8 +47,8 @@ func (c *Controller) GetDeployments(user *models.User) ([]responses.DeploymentRe
 			Status:                  deployment.Status,
 			ScreenshotIDs:           deployment.ScreenshotPaths,
 			Method:                  deployment.Method,
-			AppStoreCredentialsID:   deployment.AppStoreCredentialsID,
-			GooglePlayCredentialsID: deployment.GooglePlayCredentialsID,
+			AppleConnectionID:       deployment.AppleConnectionID,
+			GooglePlayConnectionID:  deployment.GooglePlayConnectionID,
 			CreatedAt:               deployment.CreatedAt,
 			UpdatedAt:               deployment.UpdatedAt,
 		})
@@ -74,8 +75,8 @@ func (c *Controller) GetDeploymentByID(deploymentID string) (*responses.Deployme
 		Status:                  deployment.Status,
 		ScreenshotIDs:           deployment.ScreenshotPaths,
 		Method:                  deployment.Method,
-		AppStoreCredentialsID:   deployment.AppStoreCredentialsID,
-		GooglePlayCredentialsID: deployment.GooglePlayCredentialsID,
+		AppleConnectionID:       deployment.AppleConnectionID,
+		GooglePlayConnectionID:  deployment.GooglePlayConnectionID,
 		CreatedAt:               deployment.CreatedAt,
 		UpdatedAt:               deployment.UpdatedAt,
 	}, nil
@@ -121,7 +122,7 @@ func (c *Controller) CreateDeploymentTask(user *models.User, deploymentReq reque
 		return nil, errors.New("invalid locale format, expected format like en-US or en_US")
 	}
 
-	appStoreCredId, err := uuid.Parse(deploymentReq.AppStoreCredentialsID)
+	appStoreCredId, err := uuid.Parse(deploymentReq.AppleConnectionID)
 	if err != nil {
 		if deploymentReq.Method == "wemob" {
 			appStoreCredId = uuid.Nil
@@ -131,7 +132,7 @@ func (c *Controller) CreateDeploymentTask(user *models.User, deploymentReq reque
 			}
 		}
 	}
-	googlePlayCredId, err := uuid.Parse(deploymentReq.GooglePlayCredentialsID)
+	googlePlayCredId, err := uuid.Parse(deploymentReq.GooglePlayConnectionID)
 	if err != nil {
 		if deploymentReq.Method == "wemob" {
 			googlePlayCredId = uuid.Nil
@@ -151,8 +152,8 @@ func (c *Controller) CreateDeploymentTask(user *models.User, deploymentReq reque
 		Title:                   deploymentReq.Title,
 		Description:             deploymentReq.Description,
 		Locale:                  deploymentReq.Locale,
-		AppStoreCredentialsID:   appStoreCredId,
-		GooglePlayCredentialsID: googlePlayCredId,
+		AppleConnectionID:       appStoreCredId,
+		GooglePlayConnectionID:  googlePlayCredId,
 		Status:                  "Queued",
 		Method:                  deploymentReq.Method,
 		ScreenshotPaths:         deploymentReq.ScreenshotPaths,
@@ -170,7 +171,7 @@ func (c *Controller) CreateDeploymentTask(user *models.User, deploymentReq reque
 		}
 
 		if hasIOS {
-			cred, err := c.DB.GetAppStoreCredentialById(appStoreCredId.String())
+			cred, err := c.DB.GetAppleConnectionById(appStoreCredId.String())
 			if err != nil {
 				return nil, err
 			}
@@ -206,7 +207,7 @@ func (c *Controller) CreateDeploymentTask(user *models.User, deploymentReq reque
 		}
 
 		if hasAndroid {
-			cred, err := c.DB.GetGooglePlayCredentialById(googlePlayCredId.String())
+			cred, err := c.DB.GetGooglePlayConnectionById(googlePlayCredId.String())
 			if err != nil {
 				return nil, err
 			}
@@ -260,8 +261,8 @@ func (c *Controller) CreateDeploymentTask(user *models.User, deploymentReq reque
 		ScreenshotIDs:           deployment.ScreenshotPaths,
 		Method:                  deployment.Method,
 		Locale:                  deployment.Locale,
-		AppStoreCredentialsID:   deployment.AppStoreCredentialsID,
-		GooglePlayCredentialsID: deployment.GooglePlayCredentialsID,
+		AppleConnectionID:       deployment.AppleConnectionID,
+		GooglePlayConnectionID:  deployment.GooglePlayConnectionID,
 		CreatedAt:               deployment.CreatedAt,
 		UpdatedAt:               deployment.UpdatedAt,
 	}, nil
@@ -343,7 +344,7 @@ func (c *Controller) UpdateDeploymentTask(user *models.User, deploymentID string
 		return nil, err
 	}
 
-	appStoreCredId, err := uuid.Parse(deploymentReq.AppStoreCredentialsID)
+	appStoreCredId, err := uuid.Parse(deploymentReq.AppleConnectionID)
 	if err != nil {
 		if deploymentReq.Method == "wemob" {
 			appStoreCredId = uuid.Nil
@@ -351,7 +352,7 @@ func (c *Controller) UpdateDeploymentTask(user *models.User, deploymentID string
 			return nil, errors.New("invalid app store credentials id")
 		}
 	}
-	googlePlayCredId, err := uuid.Parse(deploymentReq.GooglePlayCredentialsID)
+	googlePlayCredId, err := uuid.Parse(deploymentReq.GooglePlayConnectionID)
 	if err != nil {
 		if deploymentReq.Method == "wemob" {
 			googlePlayCredId = uuid.Nil
@@ -368,7 +369,7 @@ func (c *Controller) UpdateDeploymentTask(user *models.User, deploymentID string
 	}
 
 	if hasIOS {
-		cred, err := c.DB.GetAppStoreCredentialById(appStoreCredId.String())
+		cred, err := c.DB.GetAppleConnectionById(appStoreCredId.String())
 		if err != nil {
 			return nil, err
 		}
@@ -397,7 +398,7 @@ func (c *Controller) UpdateDeploymentTask(user *models.User, deploymentID string
 	}
 
 	if hasAndroid {
-		cred, err := c.DB.GetGooglePlayCredentialById(googlePlayCredId.String())
+		cred, err := c.DB.GetGooglePlayConnectionById(googlePlayCredId.String())
 		if err != nil {
 			return nil, err
 		}
@@ -436,8 +437,8 @@ func (c *Controller) UpdateDeploymentTask(user *models.User, deploymentID string
 		Status:                  updatedDeployment.Status,
 		ScreenshotIDs:           updatedDeployment.ScreenshotPaths,
 		Method:                  updatedDeployment.Method,
-		AppStoreCredentialsID:   updatedDeployment.AppStoreCredentialsID,
-		GooglePlayCredentialsID: updatedDeployment.GooglePlayCredentialsID,
+		AppleConnectionID:       updatedDeployment.AppleConnectionID,
+		GooglePlayConnectionID:  updatedDeployment.GooglePlayConnectionID,
 		CreatedAt:               updatedDeployment.CreatedAt,
 		UpdatedAt:               updatedDeployment.UpdatedAt,
 	}, nil
@@ -463,7 +464,7 @@ func (c *Controller) SignUnsignedIPATask(user *models.User, signReq requests.Sig
 		return nil, err
 	}
 
-	cred, err := c.DB.GetAppStoreCredentialById(signReq.CredentialsID)
+	cred, err := c.DB.GetAppleConnectionById(signReq.CredentialsID)
 	if err != nil {
 		return nil, err
 	}
@@ -503,6 +504,65 @@ func (c *Controller) SignUnsignedIPATask(user *models.User, signReq requests.Sig
 	}
 
 	return iosSignTask, nil
+}
+
+// AutoSignIOSBuildIfPossible is called from the build-completed webhook.
+// If the completed build is iOS and the owner has at least one active
+// Apple connection, it enqueues a sign task using that connection.
+// Silent no-op otherwise — this is a convenience path, not a guarantee.
+//
+// Returns (true, nil) when a sign was enqueued.
+func (c *Controller) AutoSignIOSBuildIfPossible(ctx context.Context, task *models.AppBuildTask) (bool, error) {
+	if task.Platform != "ios" {
+		return false, nil
+	}
+	// Load the project to get the user.
+	project, err := c.DB.GetProjectById(task.ProjectID.String())
+	if err != nil {
+		return false, err
+	}
+	user, err := c.DB.GetUserById(project.UserID.String())
+	if err != nil {
+		return false, err
+	}
+	// Pick the user's most-recently-used Apple connection.
+	var conn models.AppleConnection
+	err = c.DB.DB.NewSelect().
+		Model(&conn).
+		Where("user_id = ?", user.ID).
+		Order("updated_at DESC").
+		Limit(1).
+		Scan(ctx)
+	if err != nil {
+		// No connection → graceful exit (user is on managed, or hasn't
+		// connected yet; the UI will show 'Built (unsigned)' and prompt
+		// them to connect).
+		return false, nil
+	}
+	// Idempotency guard: if a non-failed sign task already exists for this
+	// build (e.g., the Codemagic webhook fired twice), don't create a duplicate.
+	existing, existsErr := c.DB.GetLatestIOSSignTaskByBuild(task.BuildID.String())
+	if existsErr == nil && existing != nil && !existing.Finished {
+		// An active sign task is already in progress for this build.
+		return false, nil
+	}
+	if existsErr == nil && existing != nil && existing.Finished && !strings.EqualFold(existing.Status, "error") {
+		// A completed (non-error) sign task exists — no need to retry.
+		return false, nil
+	}
+	// If existsErr != nil, no existing task was found (sql.ErrNoRows) — proceed.
+	// If existing is a failed sign task (Finished=true, Status="error"), fall
+	// through to allow a fresh attempt.
+
+	signReq := requests.SignIPARequest{
+		ProjectID:     task.ProjectID.String(),
+		BuildID:       task.BuildID.String(),
+		CredentialsID: conn.ID.String(),
+	}
+	if _, err := c.SignUnsignedIPATask(user, signReq); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // GetLatestSignStatusForBuild returns the most recent sign task for a build,

@@ -1,6 +1,6 @@
 package requests
 
-type AppStoreCredentialsCreateRequest struct {
+type AppleConnectionCreateRequest struct {
 	Name      string `json:"name" validate:"required" errormgs:"is required"`
 	KeyID     string `json:"key_id" validate:"required" errormgs:"is required"`
 	TeamID    string `json:"team_id" validate:"required" errormgs:"is required"`
@@ -10,7 +10,7 @@ type AppStoreCredentialsCreateRequest struct {
 	APNSKeyID string `json:"apns_key_id" validate:"required" errormgs:"is required"`
 }
 
-type GooglePlayCredentialsCreateRequest struct {
+type GooglePlayConnectionCreateRequest struct {
 	Name              string `json:"name" validate:"required" errormgs:"is required"`
 	ServiceAccountKey string `json:"service_account_key" validate:"required" errormgs:"is required"`
 }

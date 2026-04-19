@@ -10,8 +10,8 @@ func (db *Database) GetDeployments(user *models.User) ([]models.Deployment, erro
 	var deployments []models.Deployment
 	err := db.DB.NewSelect().Model(&deployments).
 		Relation("Build").
-		Relation("AppStoreCredentials").
-		Relation("GooglePlayCredentials").
+		Relation("AppleConnection").
+		Relation("GooglePlayConnection").
 		Where("deployment.user_id = ?", user.ID).
 		Scan(context.Background())
 	if err != nil {
