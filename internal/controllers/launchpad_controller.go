@@ -1,0 +1,286 @@
+package controllers
+
+import (
+	"context"
+	"errors"
+	"strings"
+
+	"github.com/google/uuid"
+	"github.com/knid/wemob/internal/models"
+	"github.com/knid/wemob/internal/responses"
+)
+
+// GetLaunchpad assembles the single aggregate response for the Ship
+// tab's Launchpad surface. Callers supply the AppProject ID and the
+// authenticated user; the controller enforces ownership before building
+// the response.
+//
+// Returns (nil, error) when the app doesn't exist or the user doesn't
+// own it; callers translate that to 404 or 403.
+func (c *Controller) GetLaunchpad(ctx context.Context, user *models.User, appID uuid.UUID) (*responses.LaunchpadResponse, error) {
+	if user == nil {
+		return nil, errors.New("user required")
+	}
+	// Load the project (and verify ownership).
+	var project models.AppProject
+	if err := c.DB.DB.NewSelect().
+		Model(&project).
+		Where("id = ?", appID).
+		Scan(ctx); err != nil {
+		return nil, err
+	}
+	if project.UserID != user.ID {
+		// Organization-shared apps land here too; Phase 2a doesn't
+		// cover org membership checks — that's Phase 4/5.
+		return nil, errors.New("not authorized")
+	}
+
+	resp := &responses.LaunchpadResponse{
+		App: responses.LaunchpadApp{
+			ID:   project.ID.String(),
+			Name: project.Name,
+		},
+	}
+
+	// Load build_defaults and fill App identity fields.
+	if bd, ok := project.Settings["build_defaults"].(map[string]interface{}); ok {
+		if iconKey, _ := bd["icon_s3_key"].(string); iconKey != "" {
+			resp.App.IconS3Key = iconKey
+		}
+	}
+
+	// Bundle ID is derived from project.Slug (existing CM_PACKAGE_NAME
+	// convention). Phase 2b adds a proper override field.
+	if project.Slug != "" {
+		resp.App.BundleID = "com.wemob." + project.Slug
+	}
+
+	// V1 project id — used for all downstream lookups that go through
+	// the legacy Build/Deployment tables. Absent on apps that haven't
+	// been provisioned yet; in that case we bail on stores/version.
+	var v1ProjectID string
+	if v, ok := project.Settings["v1_project_id"].(string); ok {
+		v1ProjectID = v
+	}
+
+	if v1ProjectID != "" {
+		var latestBuild models.Build
+		if err := c.DB.DB.NewSelect().
+			Model(&latestBuild).
+			Where("project_id = ?", v1ProjectID).
+			Order("created_at DESC").
+			Limit(1).
+			Scan(ctx); err == nil {
+			resp.App.VersionName = latestBuild.VersionString
+			resp.App.BuildNumber = latestBuild.BuildNumber
+		}
+	}
+
+	// WebPreview — reuse the existing GetLatestDeploymentStatus helper
+	// which resolves the real Coolify status for non-terminal deployments.
+	resp.WebPreview = c.buildWebPreview(ctx, project)
+
+	// Stores — per-platform tile.
+	resp.Stores.PlayStore = c.buildStoreTile(ctx, user.ID, v1ProjectID, "android")
+	resp.Stores.AppStore = c.buildStoreTile(ctx, user.ID, v1ProjectID, "ios")
+
+	// Hero — pure function of the populated response.
+	resp.HeroStatus = computeHero(resp)
+
+	return resp, nil
+}
+
+// buildWebPreview delegates to the existing GetLatestDeploymentStatus helper
+// (which handles Coolify polling for non-terminal states) and normalises the
+// result into the LaunchpadWebPreview shape.
+func (c *Controller) buildWebPreview(ctx context.Context, project models.AppProject) responses.LaunchpadWebPreview {
+	// GetLatestDeploymentStatus takes a string project ID and queries
+	// AppDeployment (platform="web"). The ctx parameter isn't used by the
+	// existing helper, but we keep the signature consistent.
+	dep, err := c.GetLatestDeploymentStatus(project.ID.String())
+	if err != nil {
+		return responses.LaunchpadWebPreview{Status: "none"}
+	}
+
+	deployedAt := ""
+	if !dep.UpdatedAt.IsZero() {
+		deployedAt = dep.UpdatedAt.UTC().Format("2006-01-02T15:04:05Z")
+	}
+
+	return responses.LaunchpadWebPreview{
+		Status:     normalizeWebStatus(dep.Status),
+		URL:        dep.DeployedURL,
+		DeployedAt: deployedAt,
+	}
+}
+
+// normalizeWebStatus maps the raw AppDeployment status strings to the
+// LaunchpadWebPreview vocabulary.
+// Real values observed in app_deployments: "pending", "building", "deployed",
+// "failed", "undeployed".
+func normalizeWebStatus(s string) string {
+	switch strings.ToLower(s) {
+	case "deployed":
+		return "deployed"
+	case "building", "pending":
+		return "building"
+	case "failed":
+		return "failed"
+	case "undeployed", "":
+		return "none"
+	}
+	return "none"
+}
+
+// buildStoreTile queries the latest Deployment for the given platform and
+// the user's connection presence, then returns a LaunchpadStoreTile.
+func (c *Controller) buildStoreTile(ctx context.Context, userID uuid.UUID, v1ProjectID, platform string) responses.LaunchpadStoreTile {
+	tile := responses.LaunchpadStoreTile{
+		Status:       "not_configured",
+		MissingItems: []string{},
+	}
+	if v1ProjectID == "" {
+		return tile
+	}
+
+	// Is there a connection for this platform on the user?
+	hasConnection := false
+	switch platform {
+	case "ios":
+		var count int
+		_ = c.DB.DB.NewSelect().
+			Model((*models.AppleConnection)(nil)).
+			Where("user_id = ?", userID).
+			Where("deleted_at IS NULL").
+			ColumnExpr("count(*)").
+			Scan(ctx, &count)
+		hasConnection = count > 0
+	case "android":
+		var count int
+		_ = c.DB.DB.NewSelect().
+			Model((*models.GooglePlayConnection)(nil)).
+			Where("user_id = ?", userID).
+			Where("deleted_at IS NULL").
+			ColumnExpr("count(*)").
+			Scan(ctx, &count)
+		hasConnection = count > 0
+	}
+
+	// Latest deployment for this platform.
+	var latestDep models.Deployment
+	err := c.DB.DB.NewSelect().
+		Model(&latestDep).
+		Where("project_id = ?", v1ProjectID).
+		Where("? = ANY(platforms)", platform).
+		Where("deleted_at IS NULL").
+		Order("created_at DESC").
+		Limit(1).
+		Scan(ctx)
+
+	if err != nil {
+		// No deployment yet — compute readiness from connection presence.
+		if !hasConnection {
+			switch platform {
+			case "ios":
+				tile.MissingItems = append(tile.MissingItems, "Apple Developer account")
+			case "android":
+				tile.MissingItems = append(tile.MissingItems, "Google Play account")
+			}
+			tile.Status = "not_configured"
+			tile.PrimaryAction = "Start setup"
+		} else {
+			tile.Status = "ready_to_ship"
+			tile.PrimaryAction = "Start setup"
+			tile.MissingItems = []string{}
+		}
+		return tile
+	}
+
+	// Map deployment status to tile status.
+	// Real values written by the reports webhook: "Queued", "Deploying",
+	// "Deployed", "error". Case-insensitive matching handles any
+	// capitalisation variance from Codemagic.
+	switch strings.ToLower(latestDep.Status) {
+	case "deployed":
+		tile.Status = "live"
+		tile.PrimaryAction = "Submit update"
+	case "deploying":
+		tile.Status = "submitted"
+		tile.PrimaryAction = "View listing"
+	case "reviewing", "submitted":
+		tile.Status = "in_review"
+		tile.PrimaryAction = "View listing"
+	case "error", "rejected":
+		tile.Status = "rejected"
+		tile.PrimaryAction = "Fix"
+	case "queued", "building":
+		tile.Status = "submitted"
+		tile.PrimaryAction = "View listing"
+	default:
+		tile.Status = "submitted"
+		tile.PrimaryAction = "View listing"
+	}
+
+	// managed vs user track.
+	if strings.EqualFold(latestDep.Method, "wemob") {
+		tile.ConnectionKind = "managed"
+	} else {
+		tile.ConnectionKind = "user"
+	}
+
+	tile.MissingItems = []string{}
+	return tile
+}
+
+// computeHero is a pure function: it takes the already-populated response
+// and returns a one-sentence summary + primary CTA based on the priority
+// ladder (biggest blocker wins).
+func computeHero(r *responses.LaunchpadResponse) responses.LaunchpadHero {
+	if r.Stores.AppStore.Status == "rejected" {
+		return responses.LaunchpadHero{
+			Summary:     "App Store rejected the last submission.",
+			PrimaryCTA:  "Fix App Store rejection",
+			PrimaryHref: "#app-store",
+		}
+	}
+	if r.Stores.PlayStore.Status == "rejected" {
+		return responses.LaunchpadHero{
+			Summary:     "Play Store rejected the last submission.",
+			PrimaryCTA:  "Fix Play Store rejection",
+			PrimaryHref: "#play-store",
+		}
+	}
+	if r.Stores.PlayStore.Status == "live" && r.Stores.AppStore.Status == "not_configured" {
+		return responses.LaunchpadHero{
+			Summary:     "Live on Play Store — App Store not yet configured.",
+			PrimaryCTA:  "Start App Store setup",
+			PrimaryHref: "#app-store",
+		}
+	}
+	if r.Stores.AppStore.Status == "live" && r.Stores.PlayStore.Status == "not_configured" {
+		return responses.LaunchpadHero{
+			Summary:     "Live on App Store — Play Store not yet configured.",
+			PrimaryCTA:  "Start Play Store setup",
+			PrimaryHref: "#play-store",
+		}
+	}
+	if r.Stores.PlayStore.Status == "live" && r.Stores.AppStore.Status == "live" {
+		return responses.LaunchpadHero{
+			Summary:     "Live on both stores.",
+			PrimaryCTA:  "View listings",
+			PrimaryHref: "#stores",
+		}
+	}
+	if r.WebPreview.Status == "none" {
+		return responses.LaunchpadHero{
+			Summary:     "Deploy the web preview to unlock mobile builds.",
+			PrimaryCTA:  "Deploy web preview",
+			PrimaryHref: "#web",
+		}
+	}
+	return responses.LaunchpadHero{
+		Summary:     "Ready to ship. Pick a store below.",
+		PrimaryCTA:  "",
+		PrimaryHref: "",
+	}
+}

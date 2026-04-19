@@ -1772,6 +1772,9 @@ func main() {
 					// per-model breakdown for everything that flowed through
 					// the Wemob AI Gateway on behalf of the project.
 					r.Get("/ai-usage", httpViews.GetProjectAIUsage)
+
+					// Ship tab — Launchpad aggregate
+					r.Get("/launchpad", httpViews.GetLaunchpad)
 				})
 			})
 
