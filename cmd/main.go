@@ -1285,6 +1285,7 @@ func main() {
 				r.Route("/google-play", func(r chi.Router) {
 					r.Get("/", httpViews.ListGooglePlayConnections)
 					r.Post("/", httpViews.CreateGooglePlayConnection)
+					r.Post("/validate", httpViews.ValidateGooglePlayConnection)
 					r.Route("/{connectionId}", func(r chi.Router) {
 						r.Get("/", httpViews.GetGooglePlayConnection)
 						r.Put("/", httpViews.UpdateGooglePlayConnection)
@@ -1294,6 +1295,7 @@ func main() {
 				r.Route("/apple", func(r chi.Router) {
 					r.Get("/", httpViews.ListAppleConnections)
 					r.Post("/", httpViews.CreateAppleConnection)
+					r.Post("/validate", httpViews.ValidateAppleConnection)
 					r.Route("/{connectionId}", func(r chi.Router) {
 						r.Get("/", httpViews.GetAppleConnection)
 						r.Put("/", httpViews.UpdateAppleConnection)
