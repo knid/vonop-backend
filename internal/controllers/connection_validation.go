@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -229,11 +231,13 @@ func (c *Controller) ValidateGooglePlayConnection(ctx context.Context, req reque
 	}
 
 	// --- exchange for access token ---
-	tokenReq, _ := http.NewRequestWithContext(ctx, http.MethodPost, tokenURI, nil)
-	q := tokenReq.URL.Query()
-	q.Set("grant_type", "urn:ietf:params:oauth:grant-type:jwt-bearer")
-	q.Set("assertion", signedGrant)
-	tokenReq.URL.RawQuery = q.Encode()
+	formVals := url.Values{}
+	formVals.Set("grant_type", "urn:ietf:params:oauth:grant-type:jwt-bearer")
+	formVals.Set("assertion", signedGrant)
+	tokenReq, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenURI, strings.NewReader(formVals.Encode()))
+	if err != nil {
+		return responses.ValidationResult{Valid: false, Message: fmt.Sprintf("Couldn't build token request: %v", err)}
+	}
 	tokenReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
 	tokenResp, err := http.DefaultClient.Do(tokenReq)
