@@ -7,7 +7,7 @@ import (
 	"github.com/uptrace/bun"
 )
 
-// SeedBuildAnnotations inserts the initial five known failure patterns.
+// SeedBuildAnnotations inserts the initial six known failure patterns.
 // Idempotent — uses the unique Name column to avoid duplicate inserts on
 // re-runs. Existing rows are left untouched so operator-tuned entries
 // survive a redeploy.
@@ -50,6 +50,14 @@ func SeedBuildAnnotations(ctx context.Context, db *bun.DB) error {
 			LogRegex:      `(?i)(Provisioning profile .* doesn't include the .* entitlement|Missing entitlement|Capability .* is not enabled)`,
 			HumanMessage:  "The app uses a capability (push, associated domains, HealthKit) that isn't turned on in your App Store Connect App ID.",
 			SuggestedFix:  "Open https://developer.apple.com/account/resources/identifiers/list, find your bundle ID, and enable the capability flagged in the log. Then retry.",
+			RetryStrategy: "",
+			Enabled:       true,
+		},
+		{
+			Name:          "app_store_precheck_failed",
+			LogRegex:      `(?i)(App Store metadata precheck failed|precheck failed)`,
+			HumanMessage:  "Apple's metadata precheck rejected the listing before upload.",
+			SuggestedFix:  "Common causes: URL in description, the word 'beta' or 'test' in the title, placeholder copy, or a privacy/support URL that returns a non-200. Fix the listing in the Launchpad and re-submit.",
 			RetryStrategy: "",
 			Enabled:       true,
 		},
