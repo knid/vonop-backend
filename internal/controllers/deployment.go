@@ -157,6 +157,8 @@ func (c *Controller) CreateDeploymentTask(user *models.User, deploymentReq reque
 		Status:                  "Queued",
 		Method:                  deploymentReq.Method,
 		ScreenshotPaths:         deploymentReq.ScreenshotPaths,
+		ReleaseNotes:            deploymentReq.ReleaseNotes,
+		RolloutTrack:            deploymentReq.RolloutTrack,
 	})
 	if err != nil {
 		return nil, err
