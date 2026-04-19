@@ -104,10 +104,40 @@ func (c *Controller) GetLaunchpad(ctx context.Context, user *models.User, appID 
 	// Builds — active (in-flight) + recent (last 5 finished) build tasks.
 	resp.Builds = c.buildBuilds(ctx, v1ProjectID)
 
+	// Identity — bundle ID, version string, and permissions.
+	resp.Identity = c.buildIdentity(ctx, project.ID, resp.App)
+
 	// Hero — pure function of the populated response.
 	resp.HeroStatus = computeHero(resp)
 
 	return resp, nil
+}
+
+// buildIdentity constructs the LaunchpadIdentity from the already-computed
+// LaunchpadApp (for BundleID and version fields) and a MobileAppConfig DB
+// lookup (for the permissions list).
+func (c *Controller) buildIdentity(ctx context.Context, appProjectID uuid.UUID, app responses.LaunchpadApp) responses.LaunchpadIdentity {
+	id := responses.LaunchpadIdentity{
+		BundleID:    app.BundleID,
+		Permissions: []string{},
+	}
+	if app.VersionName != "" {
+		id.Version = fmt.Sprintf("%s (Build %d)", app.VersionName, app.BuildNumber)
+	} else {
+		id.Version = "not yet built"
+	}
+
+	var cfg models.MobileAppConfig
+	if err := c.DB.DB.NewSelect().
+		Model(&cfg).
+		Where("project_id = ?", appProjectID).
+		Scan(ctx); err == nil {
+		if cfg.Permissions != nil {
+			id.Permissions = cfg.Permissions
+		}
+	}
+
+	return id
 }
 
 // buildWebPreview delegates to the existing GetLatestDeploymentStatus helper
