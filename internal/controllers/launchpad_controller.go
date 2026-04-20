@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/knid/wemob/internal/database"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/responses"
 )
@@ -563,14 +564,29 @@ func (c *Controller) buildRecentDeployment(ctx context.Context, v1ProjectID stri
 	}
 
 	status, kind := classifyDeploymentStatus(d.Status)
-	return &responses.LaunchpadRecentDeployment{
+
+	// Compute ETA from submitted → store_live, 30-day lookback.
+	etaSec, _ := database.MedianElapsedSeconds(ctx, c.DB.DB,
+		models.DeploymentEventSubmitted,
+		models.DeploymentEventStoreLive,
+		30)
+
+	resp := &responses.LaunchpadRecentDeployment{
 		ID:          d.ID.String(),
 		Store:       store,
 		Status:      status,
 		StatusKind:  kind,
 		SubmittedAt: d.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),
 		Method:      d.Method,
+		ETASeconds:  etaSec,
 	}
+	// Only emit a non-zero ETA for submissions that are actually in flight
+	// (not store_live, not store_rejected, not failed) — otherwise the ETA
+	// is irrelevant.
+	if kind == "success" || kind == "danger" {
+		resp.ETASeconds = 0
+	}
+	return resp
 }
 
 // computeHero is a pure function: it takes the already-populated response

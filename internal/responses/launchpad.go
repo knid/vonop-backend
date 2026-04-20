@@ -33,6 +33,11 @@ type LaunchpadRecentDeployment struct {
 	StatusKind  string `json:"status_kind"`
 	SubmittedAt string `json:"submitted_at"`
 	Method      string `json:"method"`
+	// ETASeconds is the median elapsed time from submitted → store_live
+	// across the user's last 30 deployments (same store). Zero means
+	// we don't have enough data yet; frontend falls back to "a few days"
+	// for managed submissions.
+	ETASeconds int `json:"eta_seconds,omitempty"`
 }
 
 type LaunchpadApp struct {
