@@ -88,7 +88,11 @@ func (c *Controller) UpdateDeploymentStatus(reportDeplomentReq requests.ReportDe
 		_ = database.AppendDeploymentEvent(context.Background(), c.DB.DB, deployment.ID,
 			models.DeploymentEventFailed, models.DeploymentEventActorSystem, nil,
 			map[string]interface{}{"note": reportDeplomentReq.Message})
-	case "deploying", "queued":
+	case "deploying":
+		// "deploying" is when the Codemagic workflow has actually pushed
+		// the binary to the store — semantically an "uploaded_to_store"
+		// moment. "queued" (the prior state) is before any upload has
+		// occurred so we deliberately don't emit for it.
 		_ = database.AppendDeploymentEvent(context.Background(), c.DB.DB, deployment.ID,
 			models.DeploymentEventUploadedToStore, models.DeploymentEventActorSystem, nil,
 			map[string]interface{}{"note": reportDeplomentReq.Message})
