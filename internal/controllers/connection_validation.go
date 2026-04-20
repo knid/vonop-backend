@@ -2,21 +2,15 @@ package controllers
 
 import (
 	"context"
-	"crypto/ecdsa"
-	"crypto/x509"
 	"encoding/json"
-	"encoding/pem"
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"strings"
-	"time"
-
-	"github.com/golang-jwt/jwt/v5"
 
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/responses"
+	"github.com/knid/wemob/internal/services/storeauth"
 )
 
 // ValidateAppleConnection downloads the .p8 key from S3, signs a short-lived
@@ -51,28 +45,21 @@ func (c *Controller) ValidateAppleConnection(ctx context.Context, req requests.V
 		}
 	}
 
-	// --- parse the EC private key from PEM ---
-	privateKey, err := parseECPrivateKeyFromP8(p8Bytes)
-	if err != nil {
-		return responses.ValidationResult{
-			Valid:   false,
-			Message: "The .p8 file could not be parsed as an EC private key. Make sure you uploaded the correct file from App Store Connect.",
-		}
-	}
-
-	// --- sign a 10-minute App Store Connect JWT ---
-	now := time.Now()
-	token := jwt.NewWithClaims(jwt.SigningMethodES256, jwt.MapClaims{
-		"iss": req.IssuerID,
-		"iat": now.Unix(),
-		"exp": now.Add(10 * time.Minute).Unix(),
-		"aud": "appstoreconnect-v1",
+	// --- sign a 10-minute App Store Connect JWT via storeauth helper ---
+	signed, err := storeauth.AppleToken(storeauth.AppleConnectionInput{
+		KeyID:    req.KeyID,
+		IssuerID: req.IssuerID,
+		P8PEM:    p8Bytes,
 	})
-	token.Header["kid"] = req.KeyID
-	token.Header["typ"] = "JWT"
-
-	signed, err := token.SignedString(privateKey)
 	if err != nil {
+		// Preserve original user-visible messages: parse errors vs. sign errors.
+		msg := err.Error()
+		if strings.Contains(msg, "PEM block") || strings.Contains(msg, "PKCS8") || strings.Contains(msg, "EC private key") {
+			return responses.ValidationResult{
+				Valid:   false,
+				Message: "The .p8 file could not be parsed as an EC private key. Make sure you uploaded the correct file from App Store Connect.",
+			}
+		}
 		return responses.ValidationResult{
 			Valid:   false,
 			Message: "Failed to sign the App Store Connect JWT. Please contact support if this persists.",
@@ -171,105 +158,72 @@ func (c *Controller) ValidateGooglePlayConnection(ctx context.Context, req reque
 		}
 	}
 
-	// --- parse the service account JSON ---
-	var sa struct {
-		Type                    string `json:"type"`
-		ProjectID               string `json:"project_id"`
-		PrivateKeyID            string `json:"private_key_id"`
-		PrivateKey              string `json:"private_key"`
-		ClientEmail             string `json:"client_email"`
-		TokenURI                string `json:"token_uri"`
-	}
-	if err := json.Unmarshal(saBytes, &sa); err != nil {
+	// --- parse the service account JSON via storeauth helper ---
+	sa, err := storeauth.ParseServiceAccount(saBytes)
+	if err != nil {
+		msg := err.Error()
+		if strings.Contains(msg, "missing required fields") {
+			return responses.ValidationResult{
+				Valid:   false,
+				Message: "The uploaded file does not look like a Google service account key. Please download a Service Account JSON key from Google Cloud Console.",
+			}
+		}
 		return responses.ValidationResult{
 			Valid:   false,
 			Message: "The service account file could not be parsed as valid JSON. Make sure you downloaded the correct file from Google Cloud Console.",
 		}
 	}
-	if sa.Type != "service_account" || sa.ClientEmail == "" || sa.PrivateKey == "" {
-		return responses.ValidationResult{
-			Valid:   false,
-			Message: "The uploaded file does not look like a Google service account key. Please download a Service Account JSON key from Google Cloud Console.",
-		}
-	}
-	tokenURI := sa.TokenURI
-	if tokenURI == "" {
-		tokenURI = "https://oauth2.googleapis.com/token"
-	}
 
-	// --- sign a JWT for the service-account grant ---
-	block, _ := pem.Decode([]byte(sa.PrivateKey))
-	if block == nil {
-		return responses.ValidationResult{
-			Valid:   false,
-			Message: "Could not decode the private key PEM block from the service account file.",
-		}
-	}
-	rsaKey, err := x509.ParsePKCS8PrivateKey(block.Bytes)
+	// --- exchange for access token via storeauth helper ---
+	accessToken, err := storeauth.GoogleToken(ctx, sa)
 	if err != nil {
-		return responses.ValidationResult{
-			Valid:   false,
-			Message: "Could not parse the service account private key. The key may be malformed.",
-		}
-	}
-
-	now := time.Now()
-	grantToken := jwt.NewWithClaims(jwt.SigningMethodRS256, jwt.MapClaims{
-		"iss":   sa.ClientEmail,
-		"sub":   sa.ClientEmail,
-		"scope": "https://www.googleapis.com/auth/androidpublisher",
-		"aud":   tokenURI,
-		"iat":   now.Unix(),
-		"exp":   now.Add(time.Hour).Unix(),
-	})
-	signedGrant, err := grantToken.SignedString(rsaKey)
-	if err != nil {
-		return responses.ValidationResult{
-			Valid:   false,
-			Message: "Failed to sign the Google OAuth2 grant JWT.",
-		}
-	}
-
-	// --- exchange for access token ---
-	formVals := url.Values{}
-	formVals.Set("grant_type", "urn:ietf:params:oauth:grant-type:jwt-bearer")
-	formVals.Set("assertion", signedGrant)
-	tokenReq, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenURI, strings.NewReader(formVals.Encode()))
-	if err != nil {
-		return responses.ValidationResult{Valid: false, Message: fmt.Sprintf("Couldn't build token request: %v", err)}
-	}
-	tokenReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-
-	tokenResp, err := http.DefaultClient.Do(tokenReq)
-	if err != nil {
-		return responses.ValidationResult{
-			Valid:   false,
-			Message: "Could not reach the Google OAuth2 token endpoint. Check your network connectivity.",
-		}
-	}
-	defer tokenResp.Body.Close()
-	tokenBodyBytes, _ := io.ReadAll(io.LimitReader(tokenResp.Body, 4096))
-
-	if tokenResp.StatusCode != http.StatusOK {
-		var errResp struct {
-			Error            string `json:"error"`
-			ErrorDescription string `json:"error_description"`
-		}
-		_ = json.Unmarshal(tokenBodyBytes, &errResp)
-		msg := "Google rejected the service account credentials."
-		if errResp.ErrorDescription != "" {
-			msg += " Details: " + errResp.ErrorDescription
-		}
-		return responses.ValidationResult{Valid: false, Message: msg}
-	}
-
-	var tokenJSON struct {
-		AccessToken string `json:"access_token"`
-	}
-	if err := json.Unmarshal(tokenBodyBytes, &tokenJSON); err != nil || tokenJSON.AccessToken == "" {
-		return responses.ValidationResult{
-			Valid:   false,
-			Message: "Google returned a token response but it could not be parsed.",
+		msg := err.Error()
+		switch {
+		case strings.Contains(msg, "PEM block"):
+			return responses.ValidationResult{
+				Valid:   false,
+				Message: "Could not decode the private key PEM block from the service account file.",
+			}
+		case strings.Contains(msg, "parse service account private key"):
+			return responses.ValidationResult{
+				Valid:   false,
+				Message: "Could not parse the service account private key. The key may be malformed.",
+			}
+		case strings.Contains(msg, "sign grant jwt"):
+			return responses.ValidationResult{
+				Valid:   false,
+				Message: "Failed to sign the Google OAuth2 grant JWT.",
+			}
+		case strings.Contains(msg, "oauth2 token exchange"):
+			return responses.ValidationResult{
+				Valid:   false,
+				Message: "Could not reach the Google OAuth2 token endpoint. Check your network connectivity.",
+			}
+		case strings.Contains(msg, "google oauth2 status"):
+			// Try to surface the Google error_description if present in err body.
+			friendly := "Google rejected the service account credentials."
+			if idx := strings.Index(msg, ": "); idx > 0 {
+				body := msg[idx+2:]
+				var errResp struct {
+					Error            string `json:"error"`
+					ErrorDescription string `json:"error_description"`
+				}
+				_ = json.Unmarshal([]byte(body), &errResp)
+				if errResp.ErrorDescription != "" {
+					friendly += " Details: " + errResp.ErrorDescription
+				}
+			}
+			return responses.ValidationResult{Valid: false, Message: friendly}
+		case strings.Contains(msg, "parse oauth2 response"):
+			return responses.ValidationResult{
+				Valid:   false,
+				Message: "Google returned a token response but it could not be parsed.",
+			}
+		default:
+			return responses.ValidationResult{
+				Valid:   false,
+				Message: "Google rejected the service account credentials.",
+			}
 		}
 	}
 
@@ -280,7 +234,7 @@ func (c *Controller) ValidateGooglePlayConnection(ctx context.Context, req reque
 	pubReq, _ := http.NewRequestWithContext(ctx, http.MethodGet,
 		"https://androidpublisher.googleapis.com/androidpublisher/v3/applications/com.android.example/inappproducts",
 		nil)
-	pubReq.Header.Set("Authorization", "Bearer "+tokenJSON.AccessToken)
+	pubReq.Header.Set("Authorization", "Bearer "+accessToken)
 
 	pubResp, err := http.DefaultClient.Do(pubReq)
 	if err != nil {
@@ -310,22 +264,4 @@ func (c *Controller) ValidateGooglePlayConnection(ctx context.Context, req reque
 			Message: fmt.Sprintf("Google Play returned an unexpected status %d when validating the service account.", pubResp.StatusCode),
 		}
 	}
-}
-
-// parseECPrivateKeyFromP8 parses a PKCS#8 EC private key from a .p8 PEM file
-// as downloaded from App Store Connect.
-func parseECPrivateKeyFromP8(pemBytes []byte) (*ecdsa.PrivateKey, error) {
-	block, _ := pem.Decode(pemBytes)
-	if block == nil {
-		return nil, fmt.Errorf("no PEM block found in .p8 file")
-	}
-	key, err := x509.ParsePKCS8PrivateKey(block.Bytes)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse PKCS8 private key: %w", err)
-	}
-	ecKey, ok := key.(*ecdsa.PrivateKey)
-	if !ok {
-		return nil, fmt.Errorf("key is not an EC private key (got %T)", key)
-	}
-	return ecKey, nil
 }
