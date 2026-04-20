@@ -252,6 +252,10 @@ func (c *Controller) buildStoreTile(ctx context.Context, userID uuid.UUID, v1Pro
 		return tile
 	}
 
+	// We have a latest deployment — surface its id so the frontend can
+	// POST to /v1/deployments/:id/switch-to-managed from the store tile.
+	tile.LatestDeploymentID = latestDep.ID.String()
+
 	// Map deployment status to tile status.
 	// Real values written by the reports webhook: "Queued", "Deploying",
 	// "Deployed", "error". Case-insensitive matching handles any

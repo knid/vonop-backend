@@ -63,3 +63,14 @@ func HasEvent(ctx context.Context, db *bun.DB, deploymentID uuid.UUID, eventType
 	}
 	return count > 0, nil
 }
+
+// CountEventsOfType returns how many events of the given type exist
+// for a deployment. Used by the nudge runner to pick the next attempt
+// number.
+func CountEventsOfType(ctx context.Context, db *bun.DB, deploymentID uuid.UUID, eventType string) (int, error) {
+	return db.NewSelect().
+		Model((*models.DeploymentEvent)(nil)).
+		Where("deployment_id = ?", deploymentID).
+		Where("event_type = ?", eventType).
+		Count(ctx)
+}

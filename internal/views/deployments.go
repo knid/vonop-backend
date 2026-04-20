@@ -118,6 +118,36 @@ func (v *HttpViews) UpdateDeployment(w http.ResponseWriter, r *http.Request) {
 	utils.JSONResponse(w, deployment, http.StatusOK)
 }
 
+// SwitchDeploymentToManaged handles POST /v1/deployments/:id/switch-to-managed.
+// Flips a pending_connection deployment onto the Wemob-managed track.
+func (v *HttpViews) SwitchDeploymentToManaged(w http.ResponseWriter, r *http.Request) {
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	if requireActiveSubscription(w, user) {
+		return
+	}
+
+	deploymentID := chi.URLParam(r, "deploymentId")
+	if deploymentID == "" {
+		utils.JSONErrorResponse(w, "deployment id required", http.StatusBadRequest)
+		return
+	}
+	updated, err := v.Controller.SwitchToManaged(r.Context(), user, deploymentID)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	utils.JSONResponse(w, map[string]interface{}{
+		"id":     updated.ID.String(),
+		"status": updated.Status,
+		"method": updated.Method,
+	}, http.StatusOK)
+}
+
 func (v *HttpViews) SignUnsignedIPA(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
