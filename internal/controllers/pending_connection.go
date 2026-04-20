@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"slices"
@@ -11,6 +12,7 @@ import (
 	"github.com/knid/wemob/internal/database"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/services/codemagic"
+	"github.com/slack-go/slack"
 )
 
 // ResumePendingDeployments attaches the newly-added connection to any
@@ -183,4 +185,54 @@ func (c *Controller) resumeOne(ctx context.Context, user *models.User, d models.
 		models.DeploymentEventSubmitted, models.DeploymentEventActorSystem, nil,
 		map[string]interface{}{"resumed": true, "platform": platform})
 	return nil
+}
+
+// SwitchToManaged flips a pending_connection deployment onto the
+// Wemob-managed track. Used by the "Set up later?" nudge email's
+// escape link + the Launchpad store tile's secondary CTA. Clears the
+// user connection IDs (since the deployment is now managed by us),
+// sets Status = "Queued", posts a Slack notification (mirrors the
+// managed-deploy codepath in CreateDeploymentTask), and emits
+// submitted with metadata.switched_to_managed = true for timeline
+// attribution.
+//
+// Idempotent: calling on a non-pending deployment is a no-op.
+func (c *Controller) SwitchToManaged(ctx context.Context, user *models.User, deploymentID string) (*models.Deployment, error) {
+	deployment, err := c.DB.GetDeploymentByID(deploymentID)
+	if err != nil {
+		return nil, err
+	}
+	if deployment.UserID.String() != user.ID.String() {
+		return nil, errors.New("you do not have access to this resource")
+	}
+	if deployment.Status != "pending_connection" {
+		return deployment, nil // nothing to do
+	}
+
+	deployment.Method = "wemob"
+	deployment.AppleConnectionID = uuid.Nil
+	deployment.GooglePlayConnectionID = uuid.Nil
+	deployment.Status = "Queued"
+
+	updated, err := c.DB.UpdateDeployment(deployment)
+	if err != nil {
+		return nil, fmt.Errorf("update deployment: %w", err)
+	}
+
+	// Emit submitted with attribution metadata.
+	actorID := user.ID
+	_ = database.AppendDeploymentEvent(ctx, c.DB.DB, updated.ID,
+		models.DeploymentEventSubmitted, models.DeploymentEventActorUser, &actorID,
+		map[string]interface{}{"switched_to_managed": true})
+
+	// Mirror the Slack notification from CreateDeploymentTask's managed branch.
+	go c.SlackService.Client.PostMessage(
+		constants.SLACK_CHANNEL_ID_NEW_ANDROID_DEPLOY_REQUEST,
+		slack.MsgOptionText(
+			"Switched to managed: ("+deployment.ProjectID.String()+") "+
+				updated.ID.String()+" platforms: "+fmt.Sprintf("%v", updated.Platforms),
+			false,
+		),
+	)
+	return updated, nil
 }
