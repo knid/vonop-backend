@@ -2,8 +2,10 @@ package database
 
 import (
 	"context"
+	"time"
 
 	"github.com/knid/wemob/internal/models"
+	"github.com/uptrace/bun"
 )
 
 func (db *Database) GetDeployments(user *models.User) ([]models.Deployment, error) {
@@ -55,5 +57,25 @@ func (db *Database) UpdateDeployment(deployment *models.Deployment) (*models.Dep
 		return nil, err
 	}
 	return deployment, nil
+}
+
+// ListInFlightDeployments returns deployments the poller should check:
+// anything submitted, reviewing, uploaded, or deploying, submitted within
+// the past 30 days. Terminal states (deployed, rejected, failed) are
+// skipped so we don't keep hitting the stores for finished work.
+func (d *Database) ListInFlightDeployments(ctx context.Context) ([]models.Deployment, error) {
+	var deployments []models.Deployment
+	since := time.Now().Add(-30 * 24 * time.Hour)
+	if err := d.DB.NewSelect().
+		Model(&deployments).
+		Relation("Project").
+		Relation("AppleConnection").
+		Relation("GooglePlayConnection").
+		Where("deployment.created_at > ?", since).
+		Where("LOWER(deployment.status) IN (?)", bun.In([]string{"submitted", "queued", "reviewing", "uploaded_to_store", "deploying"})).
+		Scan(ctx); err != nil {
+		return nil, err
+	}
+	return deployments, nil
 }
 

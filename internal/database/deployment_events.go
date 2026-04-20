@@ -49,3 +49,17 @@ func ListDeploymentEvents(
 	}
 	return events, nil
 }
+
+// HasEvent reports whether a deployment already has at least one event
+// of the given type. Used by the store-API poller for idempotent writes.
+func HasEvent(ctx context.Context, db *bun.DB, deploymentID uuid.UUID, eventType string) (bool, error) {
+	count, err := db.NewSelect().
+		Model((*models.DeploymentEvent)(nil)).
+		Where("deployment_id = ?", deploymentID).
+		Where("event_type = ?", eventType).
+		Count(ctx)
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
