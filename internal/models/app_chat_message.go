@@ -23,7 +23,15 @@ type AppChatMessage struct {
 	RunID        *uuid.UUID      `bun:",type:uuid,nullzero" json:"run_id"`
 	Role         string          `bun:",notnull" json:"role"`
 	Content      string          `bun:",type:text,notnull,default:''" json:"content"`
-	Images       json.RawMessage `bun:",type:jsonb,notnull,default:'[]'" json:"images"`     // [{url, alt?}]
+	Images       json.RawMessage `bun:",type:jsonb,notnull,default:'[]'" json:"images"`       // [{url, alt?}]
+	// Attachments is the canonical record of what the user attached to a turn.
+	// Denormalized snapshot of AppAsset metadata so historical user bubbles
+	// render correctly even after the underlying asset is deleted. The live
+	// AppAsset table remains the source of truth for the LLM's per-turn manifest.
+	//
+	// Replaces Images for new writes. Images is kept for read-back compat with
+	// rows persisted before this column existed.
+	Attachments  json.RawMessage `bun:",type:jsonb,notnull,default:'[]'" json:"attachments"` // []ChatMessageAttachment
 	ToolCalls    json.RawMessage `bun:",type:jsonb,notnull,default:'[]'" json:"tool_calls"` // []ChatMessageToolCall — derived from Parts, kept for legacy readers
 	Parts        json.RawMessage `bun:",type:jsonb,notnull,default:'[]'" json:"parts"`      // []ChatMessagePart — chronological ordered record (canonical)
 	CreatedAt    time.Time       `bun:"created_at,nullzero,notnull,default:current_timestamp" json:"created_at"`
@@ -47,6 +55,18 @@ type ChatMessagePart struct {
 	Result     string          `json:"result,omitempty"`
 	IsError    bool            `json:"is_error,omitempty"`
 	DurationMs int             `json:"duration_ms,omitempty"`
+}
+
+// ChatMessageAttachment is one entry inside AppChatMessage.Attachments.
+// IsImage is precomputed at write time from ContentType so the dashboard's
+// rehydrate path can route render decisions without re-classifying.
+type ChatMessageAttachment struct {
+	AssetID     uuid.UUID `json:"asset_id"`
+	FileName    string    `json:"file_name"`
+	ContentType string    `json:"content_type"`
+	FileSize    int64     `json:"file_size"`
+	URL         string    `json:"url"` // proxy URL, stable across S3 key rotation
+	IsImage     bool      `json:"is_image"`
 }
 
 // ChatMessageToolCall is the JSONB shape embedded in AppChatMessage.ToolCalls.

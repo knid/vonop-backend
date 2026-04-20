@@ -2,6 +2,7 @@ package requests
 
 import (
 	"github.com/go-playground/validator/v10"
+	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/utils"
 )
 
@@ -26,9 +27,22 @@ func (r *UpdateAppProjectRequest) Validate(validate *validator.Validate) error {
 }
 
 type AppChatRequest struct {
-	Message         string   `json:"message" validate:"required,min=2" errormgs:"must be at least 2 characters long"`
-	Images          []string `json:"images,omitempty"`           // base64 encoded images
-	ReasoningEffort string   `json:"reasoning_effort,omitempty"` // "none", "medium", "high"
+	Message string `json:"message" validate:"required,min=2" errormgs:"must be at least 2 characters long"`
+
+	// AttachmentIDs are AppAsset UUIDs the user attached to this turn. The
+	// view resolves them, enforces per-turn caps, and passes the resulting
+	// AppAsset rows down to agent.Run.
+	AttachmentIDs []uuid.UUID `json:"attachment_ids,omitempty"`
+
+	// Images is the legacy field — was a list of proxy URLs (the comment
+	// "base64 encoded" was always wrong). Decoded into AttachmentIDs by
+	// extracting the asset UUID from the proxy URL pattern. Drops on the
+	// next release once frontend traffic stops using it.
+	//
+	// Deprecated: use AttachmentIDs.
+	Images []string `json:"images,omitempty"`
+
+	ReasoningEffort string `json:"reasoning_effort,omitempty"` // "none", "medium", "high"
 }
 
 func (r *AppChatRequest) Validate(validate *validator.Validate) error {

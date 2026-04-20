@@ -15,7 +15,6 @@ import (
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/responses"
-	"github.com/knid/wemob/internal/services/remoteconfig"
 	"github.com/knid/wemob/internal/utils"
 )
 
@@ -88,9 +87,12 @@ func (v *HttpViews) RequestAssetUploadURL(w http.ResponseWriter, r *http.Request
 	}
 
 	// Validate file size
-	maxSizeMB := v.Controller.RemoteConfig.GetInt(remoteconfig.MaxAssetFileSizeMB, user.ID.String())
-	if req.FileSize > int64(maxSizeMB)*1024*1024 {
-		utils.JSONErrorResponse(w, fmt.Sprintf("file size exceeds %dMB limit", maxSizeMB), http.StatusBadRequest)
+	kind := constants.ClassifyAttachment(req.ContentType)
+	maxBytes := constants.MaxAttachmentSize(kind)
+	if req.FileSize > maxBytes {
+		utils.JSONErrorResponse(w,
+			fmt.Sprintf("file size exceeds %d MB limit for this file type", constants.MaxAttachmentSizeMB(kind)),
+			http.StatusBadRequest)
 		return
 	}
 

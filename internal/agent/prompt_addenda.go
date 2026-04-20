@@ -1,5 +1,12 @@
 package agent
 
+import (
+	"fmt"
+	"strings"
+
+	"github.com/knid/wemob/internal/models"
+)
+
 // EcommerceAddendum is appended to BasePrompt for project.ProjectType == "ecommerce".
 const EcommerceAddendum = `# ECOMMERCE ADDENDUM
 You are building a fully functional e-commerce application, not a marketing
@@ -358,6 +365,52 @@ never reach the browser.
 - Do NOT rewrite lib/wemob-ai.ts. It is template-managed; extend it only by
   adding new functions, never by replacing the existing exports.
 `
+}
+
+// AttachmentsAddendum builds the system-prompt section that lists every
+// non-deleted asset in the project (capped at the controller layer). The
+// LLM uses this to know what files exist, embed URLs in generated app code,
+// and call read_attachment with stable IDs. Returns "" when the pool is
+// empty so the prompt doesn't carry a useless header.
+func AttachmentsAddendum(pool []models.AppAsset) string {
+	if len(pool) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("## Project Assets\n\n")
+	sb.WriteString("You have access to the following files uploaded to this project. ")
+	sb.WriteString("Reference them by URL in any code you generate. ")
+	sb.WriteString("To read the contents of a non-image file, call the `read_attachment` tool with its ID. ")
+	sb.WriteString("Image attachments sent on the current message are already visible to you — no tool call needed.\n\n")
+	sb.WriteString("| ID | Name | Type | Size | URL |\n")
+	sb.WriteString("|----|------|------|------|-----|\n")
+	for _, a := range pool {
+		sb.WriteString("| ")
+		sb.WriteString(a.ID.String())
+		sb.WriteString(" | ")
+		sb.WriteString(a.FileName)
+		sb.WriteString(" | ")
+		sb.WriteString(a.ContentType)
+		sb.WriteString(" | ")
+		sb.WriteString(humanReadableBytes(a.FileSize))
+		sb.WriteString(" | ")
+		sb.WriteString(a.PublicURL)
+		sb.WriteString(" |\n")
+	}
+	return sb.String()
+}
+
+// humanReadableBytes formats a byte count as KB / MB for display in the
+// manifest. Whole-number-only — exact precision isn't useful to the LLM.
+func humanReadableBytes(n int64) string {
+	switch {
+	case n >= 1024*1024:
+		return fmt.Sprintf("%d MB", n/(1024*1024))
+	case n >= 1024:
+		return fmt.Sprintf("%d KB", n/1024)
+	default:
+		return fmt.Sprintf("%d B", n)
+	}
 }
 
 // DatabaseAddendum is appended to BasePrompt when project.Settings.has_database is true.

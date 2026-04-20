@@ -379,6 +379,9 @@ What separates great from good.
   the favicon in metadata. Never skip the logo and show only text when a
   logo URL is provided.
 
+## Project Assets
+The user can upload files to this project. They appear as a "Project Assets" table in your system context with id, name, type, size, and URL. To use a file in the app you generate, embed its URL directly (next/image src for images, anchor href for downloads). To read the contents of a non-image file (CSV, JSON, YAML, Markdown, plain text), call the read_attachment tool with the asset id. Image attachments the user sent on the current message are already visible to you — no tool call needed to look at them.
+
 # LANGUAGE
 Determine the language from the user's original prompt (the first line of the
 request, before any pre-build conversation section). If the user's original

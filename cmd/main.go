@@ -296,6 +296,11 @@ func createSchema(db *bun.DB) error {
 		// New writes set this; legacy rows keep their empty default and the
 		// dashboard falls back to the old content/tool_calls render path.
 		`ALTER TABLE app_chat_messages ADD COLUMN IF NOT EXISTS parts jsonb NOT NULL DEFAULT '[]'`,
+		// Attachments column: denormalized snapshot of asset metadata
+		// per chat turn. Replaces the legacy images column, which only
+		// stored URLs and dropped filename/mime/size — see
+		// docs/superpowers/specs/2026-04-19-chat-attachments-design.md.
+		`ALTER TABLE app_chat_messages ADD COLUMN IF NOT EXISTS attachments jsonb NOT NULL DEFAULT '[]'`,
 		// Fractional gateway credit debt — accumulator for sub-credit costs
 		// on Wemob AI Gateway chat traffic. Gateway calls price from upstream
 		// USD and almost never land on a whole credit, so the fractional
