@@ -71,7 +71,12 @@ func (c PlayChecker) Check(ctx context.Context, d models.Deployment) error {
 		delURL := editURL + "/" + edit.Id
 		delReq, _ := http.NewRequestWithContext(context.Background(), http.MethodDelete, delURL, nil)
 		delReq.Header.Set("Authorization", "Bearer "+token)
-		_, _ = http.DefaultClient.Do(delReq)
+		delResp, err := http.DefaultClient.Do(delReq)
+		if err != nil {
+			return
+		}
+		_, _ = io.Copy(io.Discard, delResp.Body)
+		delResp.Body.Close()
 	}()
 
 	// Read the production track.

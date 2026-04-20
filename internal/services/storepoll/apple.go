@@ -23,9 +23,9 @@ type AppleChecker struct {
 // appStoreVersion, and maps its appStoreState to a deployment event.
 //
 // Mapping:
-//   IN_REVIEW                                    → store_review_started
-//   READY_FOR_SALE | PENDING_DEVELOPER_RELEASE  → store_live
-//   REJECTED | METADATA_REJECTED | DEVELOPER_REJECTED → store_rejected
+//   IN_REVIEW                                                        → store_review_started
+//   READY_FOR_SALE | PENDING_DEVELOPER_RELEASE | PROCESSING_FOR_APP_STORE → store_live
+//   REJECTED | METADATA_REJECTED | DEVELOPER_REJECTED                → store_rejected
 //
 // Other states (PREPARE_FOR_SUBMISSION, WAITING_FOR_REVIEW, …) are
 // informational and produce no event. Idempotent via HasEvent.
