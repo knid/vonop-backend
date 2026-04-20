@@ -1333,6 +1333,7 @@ func main() {
 				r.Get("/", httpViews.GetDeployments)
 				r.Get("/{deploymentId}", httpViews.GetDeployment)
 				r.Put("/{deploymentId}", httpViews.UpdateDeployment)
+				r.Get("/{deploymentId}/events", httpViews.GetDeploymentEvents)
 				r.Post("/", httpViews.CreateDeployment)
 				r.Route("/tools", func(r chi.Router) {
 					r.Post("/generate_screenshots", httpViews.AutoGenerateScreenshots)

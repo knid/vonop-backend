@@ -20,6 +20,19 @@ type LaunchpadResponse struct {
 	Listing  LaunchpadListing  `json:"listing"`
 	Builds   LaunchpadBuilds   `json:"builds"`
 	Identity LaunchpadIdentity `json:"identity"`
+
+	// Phase 5a — most-recent in-flight or recently-concluded submission
+	// (7-day window). Nil when nothing's in flight.
+	RecentDeployment *LaunchpadRecentDeployment `json:"recent_deployment,omitempty"`
+}
+
+type LaunchpadRecentDeployment struct {
+	ID          string `json:"id"`
+	Store       string `json:"store"`
+	Status      string `json:"status"`
+	StatusKind  string `json:"status_kind"`
+	SubmittedAt string `json:"submitted_at"`
+	Method      string `json:"method"`
 }
 
 type LaunchpadApp struct {

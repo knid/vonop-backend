@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"log/slog"
 	"regexp"
 	"slices"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"github.com/go-playground/validator/v10"
 	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/constants"
+	"github.com/knid/wemob/internal/database"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/responses"
@@ -162,6 +164,14 @@ func (c *Controller) CreateDeploymentTask(user *models.User, deploymentReq reque
 	})
 	if err != nil {
 		return nil, err
+	}
+
+	// Phase 5a: emit submitted event.
+	actorID := user.ID
+	if err := database.AppendDeploymentEvent(context.Background(), c.DB.DB, deployment.ID,
+		models.DeploymentEventSubmitted, models.DeploymentEventActorUser, &actorID,
+		map[string]interface{}{"method": deployment.Method}); err != nil {
+		slog.Warn("append deployment_events.submitted failed", "err", err)
 	}
 
 	if deploymentReq.Method == "user" {

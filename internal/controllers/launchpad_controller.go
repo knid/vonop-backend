@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/models"
@@ -104,6 +105,9 @@ func (c *Controller) GetLaunchpad(ctx context.Context, user *models.User, appID 
 
 	// Builds — active (in-flight) + recent (last 5 finished) build tasks.
 	resp.Builds = c.buildBuilds(ctx, v1ProjectID)
+
+	// RecentDeployment — most-recent submission in the last 7 days.
+	resp.RecentDeployment = c.buildRecentDeployment(ctx, v1ProjectID)
 
 	// Identity — bundle ID, version string, and permissions.
 	resp.Identity = c.buildIdentity(ctx, project.ID, resp.App)
@@ -524,6 +528,49 @@ func buildTaskToSummary(t models.AppBuildTask) responses.LaunchpadBuildSummary {
 		s.AnnotationFix = t.Annotation.SuggestedFix
 	}
 	return s
+}
+
+// buildRecentDeployment returns the most-recent deployment created in the last
+// 7 days for the given v1ProjectID, or nil when none exists.
+func (c *Controller) buildRecentDeployment(ctx context.Context, v1ProjectID string) *responses.LaunchpadRecentDeployment {
+	if v1ProjectID == "" {
+		return nil
+	}
+	cutoff := time.Now().Add(-7 * 24 * time.Hour)
+	var d models.Deployment
+	err := c.DB.DB.NewSelect().
+		Model(&d).
+		Where("project_id = ?", v1ProjectID).
+		Where("created_at > ?", cutoff).
+		Order("created_at DESC").
+		Limit(1).
+		Scan(ctx)
+	if err != nil {
+		return nil
+	}
+
+	store := ""
+	for _, p := range d.Platforms {
+		pl := strings.ToLower(p)
+		if pl == "ios" {
+			store = "app_store"
+			break
+		}
+		if pl == "android" {
+			store = "play_store"
+			break
+		}
+	}
+
+	status, kind := classifyDeploymentStatus(d.Status)
+	return &responses.LaunchpadRecentDeployment{
+		ID:          d.ID.String(),
+		Store:       store,
+		Status:      status,
+		StatusKind:  kind,
+		SubmittedAt: d.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),
+		Method:      d.Method,
+	}
 }
 
 // computeHero is a pure function: it takes the already-populated response
