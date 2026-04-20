@@ -82,14 +82,15 @@ type LaunchpadStoreTile struct {
 	// Status vocabulary: "not_configured" | "configuring" | "ready_to_ship"
 	// | "building" | "needs_review" | "submitted" | "in_review" | "live"
 	// | "update_available" | "rejected" | "failed"
-	Status         string   `json:"status"`
-	LiveVersion    string   `json:"live_version,omitempty"`    // "1.0.2"
-	LiveBuildNum   int      `json:"live_build_num,omitempty"`  // 11
-	InstallCount   int      `json:"install_count,omitempty"`   // only when live, Play Store
-	Rating         float64  `json:"rating,omitempty"`          // Play Store
-	MissingItems   []string `json:"missing_items,omitempty"`   // e.g. ["Screenshots (3 needed)", "Privacy URL"]
-	PrimaryAction  string   `json:"primary_action,omitempty"`  // "Submit update" | "Start setup" | "View listing"
-	ConnectionKind string   `json:"connection_kind,omitempty"` // "managed" | "user" | ""
+	Status             string   `json:"status"`
+	LiveVersion        string   `json:"live_version,omitempty"`    // "1.0.2"
+	LiveBuildNum       int      `json:"live_build_num,omitempty"`  // 11
+	InstallCount       int      `json:"install_count,omitempty"`   // only when live, Play Store
+	Rating             float64  `json:"rating,omitempty"`          // Play Store
+	MissingItems       []string `json:"missing_items,omitempty"`   // e.g. ["Screenshots (3 needed)", "Privacy URL"]
+	PrimaryAction      string   `json:"primary_action,omitempty"`  // "Submit update" | "Start setup" | "View listing"
+	ConnectionKind     string   `json:"connection_kind,omitempty"` // "managed" | "user" | ""
+	LatestDeploymentID string   `json:"latest_deployment_id,omitempty"`
 }
 
 // Stubs for Phase 2b — declared for type stability.
