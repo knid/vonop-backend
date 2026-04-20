@@ -272,6 +272,16 @@ func (c *Controller) buildStoreTile(ctx context.Context, userID uuid.UUID, v1Pro
 	case "queued", "building":
 		tile.Status = "submitted"
 		tile.PrimaryAction = "View listing"
+	case "pending_connection":
+		tile.Status = "needs_connection"
+		tile.PrimaryAction = "Add connection"
+		// Advertise missing pieces so the tile body surfaces specifics.
+		switch platform {
+		case "ios":
+			tile.MissingItems = []string{"App Store Connect API key"}
+		case "android":
+			tile.MissingItems = []string{"Google Play service account"}
+		}
 	default:
 		tile.Status = "submitted"
 		tile.PrimaryAction = "View listing"
@@ -284,7 +294,10 @@ func (c *Controller) buildStoreTile(ctx context.Context, userID uuid.UUID, v1Pro
 		tile.ConnectionKind = "user"
 	}
 
-	tile.MissingItems = []string{}
+	// Preserve MissingItems for needs_connection; clear for all other statuses.
+	if tile.Status != "needs_connection" {
+		tile.MissingItems = []string{}
+	}
 	return tile
 }
 
@@ -593,6 +606,20 @@ func (c *Controller) buildRecentDeployment(ctx context.Context, v1ProjectID stri
 // and returns a one-sentence summary + primary CTA based on the priority
 // ladder (biggest blocker wins).
 func computeHero(r *responses.LaunchpadResponse) responses.LaunchpadHero {
+	if r.Stores.AppStore.Status == "needs_connection" {
+		return responses.LaunchpadHero{
+			Summary:     "Waiting for your Apple connection — add it to ship.",
+			PrimaryCTA:  "Add App Store connection",
+			PrimaryHref: "#app-store",
+		}
+	}
+	if r.Stores.PlayStore.Status == "needs_connection" {
+		return responses.LaunchpadHero{
+			Summary:     "Waiting for your Google Play connection — add it to ship.",
+			PrimaryCTA:  "Add Play Store connection",
+			PrimaryHref: "#play-store",
+		}
+	}
 	if r.Stores.AppStore.Status == "rejected" {
 		return responses.LaunchpadHero{
 			Summary:     "App Store rejected the last submission.",

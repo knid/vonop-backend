@@ -20,6 +20,12 @@ type CreateDeploymentRequest struct {
 	//   App Store:  "internal" | "closed" | "production" (TestFlight variants)
 	// Empty defaults to "production" behavior at submit time.
 	RolloutTrack string `json:"rollout_track,omitempty"`
+	// DeferConnection — when true with method = "user", the deployment is
+	// created in status "pending_connection" instead of being submitted.
+	// Codemagic is not triggered; the user is telling us they'll set up
+	// their Apple / Google connection later. The deployment auto-resumes
+	// when the matching connection is added (see ResumePendingDeployments).
+	DeferConnection bool `json:"defer_connection,omitempty"`
 }
 
 type SignIPARequest struct {

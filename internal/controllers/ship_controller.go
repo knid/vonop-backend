@@ -191,6 +191,8 @@ func classifyDeploymentStatus(raw string) (string, string) {
 		return "Rejected", "danger"
 	case "error", "failed":
 		return "Failed", "danger"
+	case "pending_connection":
+		return "Waiting for connection", "warn"
 	}
 	return raw, "neutral"
 }

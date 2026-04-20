@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"context"
 	"errors"
 
 	"github.com/knid/wemob/internal/models"
@@ -69,6 +70,8 @@ func (c *Controller) CreateAppleConnection(user *models.User, req requests.Apple
 	if err != nil {
 		return nil, err
 	}
+
+	go c.ResumePendingDeployments(context.Background(), user, "ios", cred.ID)
 
 	return &responses.AppleConnectionResponse{
 		ID:        cred.ID,
@@ -187,7 +190,14 @@ func (c *Controller) CreateGooglePlayConnection(user *models.User, req requests.
 		Name:               req.Name,
 		ServiceAccountPath: "service_accounts/" + req.ServiceAccountKey + ".json",
 	}
-	return c.DB.CreateGooglePlayConnection(credential)
+	cred, err := c.DB.CreateGooglePlayConnection(credential)
+	if err != nil {
+		return nil, err
+	}
+
+	go c.ResumePendingDeployments(context.Background(), user, "android", cred.ID)
+
+	return cred, nil
 }
 
 func (c *Controller) UpdateGooglePlayConnection(user *models.User, credID string, req requests.GooglePlayConnectionCreateRequest) (*models.GooglePlayConnection, error) {
