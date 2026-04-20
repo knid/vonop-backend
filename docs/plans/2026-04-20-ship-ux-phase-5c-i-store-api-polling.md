@@ -277,7 +277,7 @@ strings for the same inputs."
 
 **Files:**
 - Modify: `internal/database/deployment_events.go`
-- Modify: `internal/database/deployments.go`
+- Modify: `internal/database/deployment.go`
 
 - [ ] **Step 1: Add `HasEvent`**
 
@@ -303,7 +303,7 @@ Imports needed: `"github.com/google/uuid"` (likely already imported in that file
 
 - [ ] **Step 2: Add `ListInFlightDeployments`**
 
-In `internal/database/deployments.go` (or wherever `GetDeploymentByID` lives), add:
+In `internal/database/deployment.go` (next to `GetDeploymentByID` / `UpdateDeployment`), add:
 
 ```go
 // ListInFlightDeployments returns deployments the poller should check:
@@ -327,7 +327,7 @@ func (d *Database) ListInFlightDeployments(ctx context.Context) ([]models.Deploy
 }
 ```
 
-If `deployments.go` doesn't exist yet as a dedicated file (most DB helpers are inlined or in `database.go`), locate the method next to the existing `GetDeploymentByID` / `UpdateDeployment` and mirror their style.
+Mirror the style of existing methods in the same file.
 
 - [ ] **Step 3: Verify + commit**
 
