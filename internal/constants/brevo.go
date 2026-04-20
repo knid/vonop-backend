@@ -51,6 +51,7 @@ const (
 	BREVO_EVENT_USER_ANDROID_DEPLOYMENT_STARTED  = "user_android_deployment_started"
 	BREVO_EVENT_USER_ANDROID_DEPLOYMENT_FINISHED = "user_android_deployment_finished"
 	BREVO_EVENT_USER_ANDROID_DEPLOYMENT_FAILED   = "user_android_deployment_failed"
+	BREVO_EVENT_PENDING_CONNECTION_NUDGE         = "pending_connection_nudge"
 
 	// Web deployment events — names match PostHog for cross-system analysis.
 	BREVO_EVENT_WEB_DEPLOYMENT_SUCCEEDED    = "app_deployed_web"

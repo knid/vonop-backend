@@ -19,6 +19,7 @@ const (
 	DeploymentEventStoreRejected      = "store_rejected"
 	DeploymentEventCanceled           = "canceled"
 	DeploymentEventFailed             = "failed"
+	DeploymentEventNudgeSent          = "nudge_sent" // pending_connection reminder email dispatched
 )
 
 // Actor type — who caused the event.
