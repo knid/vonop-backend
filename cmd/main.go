@@ -36,6 +36,7 @@ import (
 	"github.com/knid/wemob/internal/services/remoteconfig"
 	"github.com/knid/wemob/internal/services/secret"
 	"github.com/knid/wemob/internal/services/storage"
+	"github.com/knid/wemob/internal/services/storepoll"
 	"github.com/knid/wemob/internal/utils"
 	"github.com/knid/wemob/internal/views"
 	"github.com/markbates/goth"
@@ -1883,6 +1884,16 @@ func main() {
 		}
 	}()
 
+	// Phase 5c-i: poll App Store Connect + Google Play for state changes
+	// on in-flight deployments, writing store_* events.
+	pollerCtx, cancelPoller := context.WithCancel(context.Background())
+	poller := &storepoll.Poller{
+		DB:             controller.DB,
+		UserKeyStorage: controller.UserApiKeysStorage,
+		PollEvery:      10 * time.Minute,
+	}
+	go poller.Run(pollerCtx)
+
 	// Graceful shutdown on SIGINT/SIGTERM
 	go func() {
 		quit := make(chan os.Signal, 1)
@@ -1905,6 +1916,9 @@ func main() {
 		if posthogClient != nil {
 			posthogClient.Close()
 		}
+
+		// Stop the store-API poller.
+		cancelPoller()
 
 		// Shutdown main server
 		if err := mainServer.Shutdown(ctx); err != nil {
