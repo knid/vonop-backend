@@ -126,7 +126,7 @@ func (c *Controller) CreateDeploymentTask(user *models.User, deploymentReq reque
 
 	appStoreCredId, err := uuid.Parse(deploymentReq.AppleConnectionID)
 	if err != nil {
-		if deploymentReq.Method == "wemob" {
+		if deploymentReq.Method == "wemob" || deploymentReq.DeferConnection {
 			appStoreCredId = uuid.Nil
 		} else {
 			if slices.Contains(deploymentReq.Platforms, "ios") {
@@ -136,13 +136,18 @@ func (c *Controller) CreateDeploymentTask(user *models.User, deploymentReq reque
 	}
 	googlePlayCredId, err := uuid.Parse(deploymentReq.GooglePlayConnectionID)
 	if err != nil {
-		if deploymentReq.Method == "wemob" {
+		if deploymentReq.Method == "wemob" || deploymentReq.DeferConnection {
 			googlePlayCredId = uuid.Nil
 		} else {
 			if slices.Contains(deploymentReq.Platforms, "android") {
 				return nil, errors.New("invalid google play credentials id")
 			}
 		}
+	}
+
+	initialStatus := "Queued"
+	if deploymentReq.DeferConnection && deploymentReq.Method == "user" {
+		initialStatus = "pending_connection"
 	}
 
 	deployment, err := c.DB.CreateDeployment(&models.Deployment{
@@ -156,7 +161,7 @@ func (c *Controller) CreateDeploymentTask(user *models.User, deploymentReq reque
 		Locale:                  deploymentReq.Locale,
 		AppleConnectionID:       appStoreCredId,
 		GooglePlayConnectionID:  googlePlayCredId,
-		Status:                  "Queued",
+		Status:                  initialStatus,
 		Method:                  deploymentReq.Method,
 		ScreenshotPaths:         deploymentReq.ScreenshotPaths,
 		ReleaseNotes:            deploymentReq.ReleaseNotes,
@@ -168,13 +173,17 @@ func (c *Controller) CreateDeploymentTask(user *models.User, deploymentReq reque
 
 	// Phase 5a: emit submitted event.
 	actorID := user.ID
+	submittedMeta := map[string]interface{}{"method": deployment.Method}
+	if initialStatus == "pending_connection" {
+		submittedMeta["pending_connection"] = true
+	}
 	if err := database.AppendDeploymentEvent(context.Background(), c.DB.DB, deployment.ID,
 		models.DeploymentEventSubmitted, models.DeploymentEventActorUser, &actorID,
-		map[string]interface{}{"method": deployment.Method}); err != nil {
+		submittedMeta); err != nil {
 		slog.Warn("append deployment_events.submitted failed", "err", err)
 	}
 
-	if deploymentReq.Method == "user" {
+	if deploymentReq.Method == "user" && !deploymentReq.DeferConnection {
 		hasIOS := slices.Contains(deploymentReq.Platforms, "ios")
 		hasAndroid := slices.Contains(deploymentReq.Platforms, "android")
 
