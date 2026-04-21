@@ -487,7 +487,7 @@ func (c *Controller) ExportAppAsZIP(projectID string) (map[string]string, error)
 // edit them (editing breaks deploys or leaks secrets).
 func IsHiddenEditorFile(path string) bool {
 	switch path {
-	case ".env.local", "Dockerfile":
+	case ".env.local", "Dockerfile", "next.config.mjs":
 		return true
 	}
 	return false
