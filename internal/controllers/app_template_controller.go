@@ -271,7 +271,7 @@ func (c *Controller) CopyTemplate(ctx context.Context, user *models.User, slug s
 		}
 	}
 
-	projectSlug := generateAppSlug(template.Name)
+	projectSlug := makeSlug(template.Name)
 
 	project := &models.AppProject{
 		UserID:      user.ID,

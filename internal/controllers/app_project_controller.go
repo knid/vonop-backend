@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/go-playground/validator/v10"
-	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/requests"
@@ -93,11 +92,11 @@ func (c *Controller) CreateAppProject(ctx context.Context, user *models.User, re
 		}
 	}
 
-	slug := generateAppSlug(req.Prompt)
+	name, slug := c.generateAppNameAndSlug(ctx, req.Prompt)
 
 	project := &models.AppProject{
 		UserID:      user.ID,
-		Name:        req.Prompt[:min(50, len(req.Prompt))],
+		Name:        name,
 		Slug:        slug,
 		Prompt:      req.Prompt,
 		ProjectType: projectType,
@@ -135,7 +134,7 @@ func (c *Controller) CloneAppProjectAsMobile(user *models.User, sourceProjectID 
 		return nil, fmt.Errorf("unauthorized")
 	}
 
-	slug := generateAppSlug(source.Name)
+	slug := makeSlug(source.Name)
 
 	clone := &models.AppProject{
 		UserID:      user.ID,
@@ -496,23 +495,3 @@ func InferFileType(path string) string {
 	}
 }
 
-func generateAppSlug(prompt string) string {
-	slug := strings.ToLower(prompt)
-	slug = strings.Map(func(r rune) rune {
-		if r >= 'a' && r <= 'z' || r >= '0' && r <= '9' {
-			return r
-		}
-		if r == ' ' || r == '-' {
-			return '-'
-		}
-		return -1
-	}, slug)
-	// Trim and limit length
-	slug = strings.Trim(slug, "-")
-	if len(slug) > 50 {
-		slug = slug[:50]
-	}
-	// Add uniqueness
-	slug = slug + "-" + uuid.New().String()[:8]
-	return slug
-}
