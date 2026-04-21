@@ -185,11 +185,21 @@ func (ListFilesTool) Execute(ctx context.Context, rc *RunContext, input json.Raw
 		_ = json.Unmarshal(input, &args)
 	}
 	matches := rc.FileMap.Match(args.Glob)
-	if len(matches) == 0 {
+	// Drop platform-managed files (.env.local, Dockerfile, next.config.mjs) so
+	// the agent doesn't list or suggest editing them. They remain readable via
+	// read_file if the agent explicitly requests one.
+	var visible []string
+	for _, p := range matches {
+		if utils.IsHiddenEditorFile(p) {
+			continue
+		}
+		visible = append(visible, p)
+	}
+	if len(visible) == 0 {
 		return "no files match", false, nil
 	}
 	var sb strings.Builder
-	for _, p := range matches {
+	for _, p := range visible {
 		content, _ := rc.FileMap.Get(p)
 		fmt.Fprintf(&sb, "%s (%d bytes)\n", p, len(content))
 	}

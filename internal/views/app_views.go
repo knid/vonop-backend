@@ -269,7 +269,7 @@ func (v *HttpViews) GetApp(w http.ResponseWriter, r *http.Request) {
 	fileMap, _ := v.Controller.GetAppGeneratedFiles(project.ID.String())
 	var fileResp []responses.AppFileResponse
 	for path, content := range fileMap {
-		if controllers.IsHiddenEditorFile(path) {
+		if utils.IsHiddenEditorFile(path) {
 			continue
 		}
 		fileResp = append(fileResp, responses.AppFileResponse{
@@ -391,7 +391,7 @@ func (v *HttpViews) GetAppFiles(w http.ResponseWriter, r *http.Request) {
 
 	var resp []responses.AppFileResponse
 	for path, content := range fileMap {
-		if controllers.IsHiddenEditorFile(path) {
+		if utils.IsHiddenEditorFile(path) {
 			continue
 		}
 		resp = append(resp, responses.AppFileResponse{
@@ -429,7 +429,7 @@ func (v *HttpViews) CreateAppFile(w http.ResponseWriter, r *http.Request) {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	if controllers.IsHiddenEditorFile(req.FilePath) {
+	if utils.IsHiddenEditorFile(req.FilePath) {
 		utils.JSONErrorResponse(w, "this file is managed by the platform and cannot be edited", http.StatusForbidden)
 		return
 	}
@@ -477,7 +477,7 @@ func (v *HttpViews) UpdateAppFile(w http.ResponseWriter, r *http.Request) {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	if controllers.IsHiddenEditorFile(fid) {
+	if utils.IsHiddenEditorFile(fid) {
 		utils.JSONErrorResponse(w, "this file is managed by the platform and cannot be edited", http.StatusForbidden)
 		return
 	}
@@ -515,7 +515,7 @@ func (v *HttpViews) DeleteAppFile(w http.ResponseWriter, r *http.Request) {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
 		return
 	}
-	if controllers.IsHiddenEditorFile(fid) {
+	if utils.IsHiddenEditorFile(fid) {
 		utils.JSONErrorResponse(w, "this file is managed by the platform and cannot be deleted", http.StatusForbidden)
 		return
 	}
@@ -1069,7 +1069,7 @@ func (v *HttpViews) GetAppInit(w http.ResponseWriter, r *http.Request) {
 
 	var fileResp []responses.AppFileResponse
 	for path, content := range fileMap {
-		if controllers.IsHiddenEditorFile(path) {
+		if utils.IsHiddenEditorFile(path) {
 			continue
 		}
 		fileResp = append(fileResp, responses.AppFileResponse{
