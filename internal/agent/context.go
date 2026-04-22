@@ -11,7 +11,7 @@ import (
 
 // BuildSystemMessages returns the cached system messages for a run:
 //
-//  1. BasePrompt           (stable across all projects of this type)
+//  1. Base prompt          (BasePromptWeb or BasePromptMobile, stable across all projects of this type)
 //  2. Variant addendum     (stable across this project's runs, if applicable)
 //  3. File tree            (stable within this run, reused across turns)
 //  4. Project assets       (per-turn — asset uploads/deletes invalidate this block only)
@@ -23,7 +23,10 @@ import (
 // current user's subscription tier can actually reach; passing nil degrades
 // to a conservative generic block.
 func BuildSystemMessages(project *models.AppProject, fileMap *SafeFileMap, deps *RunDependencies, attachmentsPool []models.AppAsset) []utils.Message {
-	base := BasePrompt
+	base := BasePromptWeb
+	if project != nil && project.ProjectType == "mobile_app" {
+		base = BasePromptMobile
+	}
 	addendum := buildAddendum(project, deps)
 
 	msgs := []utils.Message{{Role: "system", Content: base}}
@@ -43,8 +46,6 @@ func buildAddendum(project *models.AppProject, deps *RunDependencies) string {
 	switch project.ProjectType {
 	case "ecommerce":
 		parts = append(parts, EcommerceAddendum)
-	case "mobile_app":
-		parts = append(parts, MobileAddendum)
 	}
 	if projectHasAuth(project) {
 		parts = append(parts, AuthAddendum)

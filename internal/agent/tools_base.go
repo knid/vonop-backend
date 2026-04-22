@@ -592,7 +592,7 @@ type GenerateImageTool struct {
 
 func (GenerateImageTool) Name() string { return "generate_image" }
 func (GenerateImageTool) Description() string {
-	return "Generate an image and return a public URL. Use for hero imagery, product photos, illustrations. Never use stock URLs (picsum, unsplash, etc.)."
+	return "Generate an image and return a public URL. Use for hero imagery, product photos, illustrations."
 }
 func (GenerateImageTool) Schema() map[string]any {
 	return map[string]any{

@@ -154,7 +154,7 @@ func (c *Controller) GatewayImageCreditCost(modelID string) int {
 		rcKey = remoteconfig.GatewayImageCostFluxSchnell
 	case "fal-ai/flux-pro/v1.1":
 		rcKey = remoteconfig.GatewayImageCostFluxPro
-	case "fal-ai/flux-ultra":
+	case "fal-ai/flux-pro/v1.1-ultra":
 		rcKey = remoteconfig.GatewayImageCostFluxUltra
 	default:
 		if cost, ok := constants.DefaultGatewayImageCosts[modelID]; ok {
@@ -272,7 +272,7 @@ func (c *Controller) AccumulateGatewayChatCredits(user *models.User, owed float6
 // ResolveGatewayProvider returns the LLMProvider for gateway chat traffic.
 // All chat models flow through OpenRouter — one upstream, one OpenAI-
 // compatible contract. Model IDs must already be in OpenRouter's
-// provider/model format (e.g. "anthropic/claude-sonnet-4").
+// provider/model format (e.g. "anthropic/claude-sonnet-4.6").
 func (c *Controller) ResolveGatewayProvider(modelID string) *utils.LLMProvider {
 	return &utils.LLMProvider{
 		Name:    "openrouter",

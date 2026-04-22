@@ -285,7 +285,11 @@ func (c *Controller) CreateDashboard(ctx context.Context, project *models.AppPro
 		panelMsg += fmt.Sprintf("\n\nUser request: %s", utils.SanitizePromptContent(prompt))
 	}
 
-	panelResult, err := utils.GetJSONFromLLM(ctx, model, constants.DASHBOARD_GENERATION_PROMPT, panelMsg, provider)
+	genPrompt := constants.DASHBOARD_GENERATION_PROMPT_SQL
+	if dbProvider == "supabase" {
+		genPrompt = constants.DASHBOARD_GENERATION_PROMPT_SUPABASE
+	}
+	panelResult, err := utils.GetJSONFromLLM(ctx, model, genPrompt, panelMsg, provider)
 	if err != nil {
 		slog.Error("panel generation failed", "error", err, "project_id", project.ID)
 		sendError("generation", "failed to generate dashboard panels")

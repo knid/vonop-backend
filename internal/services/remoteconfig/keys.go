@@ -72,8 +72,8 @@ var AIGenerationMaxRounds = Key{Flag: "rc-ai-generation-max-rounds", Fallback: 8
 
 var GatewayModelsFree = Key{Flag: "rc-gateway-models-free", Fallback: "gpt-4.1-mini,claude-haiku-4-5"}
 var GatewayModelsStarter = Key{Flag: "rc-gateway-models-starter", Fallback: "gpt-4.1-mini,claude-haiku-4-5,fal-ai/flux/schnell"}
-var GatewayModelsPro = Key{Flag: "rc-gateway-models-pro", Fallback: "gpt-4.1-mini,gpt-4.1,claude-haiku-4-5,claude-sonnet-4,fal-ai/flux/schnell,fal-ai/flux-pro/v1.1"}
-var GatewayModelsBusiness = Key{Flag: "rc-gateway-models-business", Fallback: "gpt-4.1-mini,gpt-4.1,claude-haiku-4-5,claude-sonnet-4,claude-opus-4,gemini-2.5-pro,fal-ai/flux/schnell,fal-ai/flux-pro/v1.1"}
+var GatewayModelsPro = Key{Flag: "rc-gateway-models-pro", Fallback: "gpt-4.1-mini,gpt-4.1,claude-haiku-4-5,claude-sonnet-4.6,fal-ai/flux/schnell,fal-ai/flux-pro/v1.1"}
+var GatewayModelsBusiness = Key{Flag: "rc-gateway-models-business", Fallback: "gpt-4.1-mini,gpt-4.1,claude-haiku-4-5,claude-sonnet-4.6,claude-opus-4.7,gemini-2.5-pro,fal-ai/flux/schnell,fal-ai/flux-pro/v1.1"}
 
 var GatewayRPMFree = Key{Flag: "rc-gateway-rpm-free", Fallback: 10}
 var GatewayRPMStarter = Key{Flag: "rc-gateway-rpm-starter", Fallback: 30}

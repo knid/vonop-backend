@@ -1,3 +1,7 @@
+// Supported model IDs are kept in sync with
+// internal/constants/ai_gateway.go:GatewayModelCatalog.
+// When adding or removing a gateway model, update both this file and
+// that catalog.
 import OpenAI from 'openai';
 
 let _client: OpenAI | null = null;
@@ -15,7 +19,7 @@ let _client: OpenAI | null = null;
  * Example:
  *   import { wemobAI } from '@/lib/wemob-ai';
  *   const res = await wemobAI().chat.completions.create({
- *     model: 'anthropic/claude-sonnet-4',
+ *     model: 'anthropic/claude-sonnet-4.6',
  *     messages: [{ role: 'user', content: 'hi' }],
  *   });
  */
@@ -37,9 +41,9 @@ export function wemobAI(): OpenAI {
  * wemobAI().chat.completions.create({ ... }).
  */
 export type WemobChatModel =
-  | 'anthropic/claude-sonnet-4'
+  | 'anthropic/claude-sonnet-4.6'
   | 'anthropic/claude-haiku-4-5'
-  | 'anthropic/claude-opus-4'
+  | 'anthropic/claude-opus-4.7'
   | 'openai/gpt-4.1'
   | 'openai/gpt-4.1-mini'
   | 'google/gemini-2.5-pro';
@@ -47,7 +51,7 @@ export type WemobChatModel =
 export type WemobImageModel =
   | 'fal-ai/flux/schnell'
   | 'fal-ai/flux-pro/v1.1'
-  | 'fal-ai/flux-ultra';
+  | 'fal-ai/flux-pro/v1.1-ultra';
 
 export type WemobImageOptions = {
   model?: WemobImageModel;

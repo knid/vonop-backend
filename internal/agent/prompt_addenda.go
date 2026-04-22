@@ -4,10 +4,11 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/models"
 )
 
-// EcommerceAddendum is appended to BasePrompt for project.ProjectType == "ecommerce".
+// EcommerceAddendum is appended to BasePromptWeb for project.ProjectType == "ecommerce".
 const EcommerceAddendum = `# ECOMMERCE ADDENDUM
 You are building a fully functional e-commerce application, not a marketing
 landing page. It has a browsable product catalog, product detail pages, a
@@ -73,184 +74,7 @@ render newly-added products. Call list_* / get_store before any update or
 delete so you're working with real ids and slugs.
 `
 
-// MobileAddendum is appended to BasePrompt for project.ProjectType == "mobile_app".
-const MobileAddendum = `# MOBILE APP ADDENDUM
-You are building a native-feeling mobile application, not a responsive
-website. It happens to be powered by Next.js and React inside a WebView at a
-fixed ~430px viewport, but everything about the way you think, plan, and
-build must be mobile-app thinking. Think in screens, flows, tabs, sheets,
-gestures, and one-handed interactions — not pages, sections, heroes,
-scroll-journeys, or marketing content.
-
-## Override The Base Prompt's Web Framing
-Whenever the base system prompt talks about "landing pages", "marketing
-sections", "editorial layouts", "scroll-linked parallax", "alternating
-full-bleed dark/light section rhythms", "horizontal-scroll feature
-sections", "py-24 spacing between sections", "max-w-6xl contained sections",
-"sm: md: lg: breakpoints", "full-width heroes with three cards", or any
-long-form scrolling narrative — those are WEB patterns. They do not apply
-here. Discard them for this project. This is an app, not a website.
-
-## Plan Screens Before Writing Code
-Before your first write_file, draft a mental screen map and briefly narrate
-it (one short paragraph) so the user can follow along:
-- The launch screen (app/page.tsx) — what the user sees when the app opens.
-- The top-level tabs — typically 3 to 5 (e.g. Home, Search, Library,
-  Profile). Each tab is a route under app/.
-- Detail / flow screens reachable from tabs (e.g. item detail, edit form,
-  settings subpage, checkout flow) — each its own route.
-Name routes by purpose, not by marketing concept. No app/about, no
-app/features, no app/pricing, no app/contact — those are website routes.
-
-## The Viewport Rule (CRITICAL — no full-app scroll)
-The device viewport is locked to the app shell. The root layout and
-<body> NEVER scroll. Only the content region between the top header and the
-bottom tab bar may scroll, and it scrolls independently as an inline region.
-Scrolling the whole document, or any layout wider than the viewport, is a
-bug that must be fixed before the run ends.
-
-### Root layout — app/layout.tsx
-The body locks to the viewport height with no overflow:
-
-    <html lang="...">
-      <body className="h-dvh overflow-hidden bg-background text-foreground antialiased">
-        {children}
-      </body>
-    </html>
-
-### Screen layout — every app/**/page.tsx
-Every screen is a fixed-height column with three vertical regions: a
-non-scrolling header, a scrollable content area, and a non-scrolling bottom
-bar (tab bar for top-level screens, action bar or nothing for flow screens):
-
-    export default function Screen() {
-      return (
-        <div className="flex h-dvh flex-col overflow-hidden bg-background">
-          <header className="h-14 shrink-0 pt-safe ...">
-            {/* fixed title, back button, icons — never grows or scrolls */}
-          </header>
-          <main className="flex-1 overflow-y-auto overscroll-contain px-4 pb-4">
-            {/* ALL scrollable content lives here, and only here */}
-          </main>
-          <TabBar className="h-16 shrink-0 pb-safe ..." />
-        </div>
-      );
-    }
-
-### Scroll rules
-- <main> is the ONLY vertical scroll container on a screen. It must always
-  have both overflow-y-auto AND overscroll-contain so rubber-banding cannot
-  bubble up and move the shell.
-- NEVER use min-h-screen, h-screen, min-h-[100vh], or min-h-[100dvh] on
-  sections inside a screen. Use h-dvh on the screen root and flex-1 on the
-  scrollable main. Those utilities make the page taller than the viewport
-  and re-introduce document scroll.
-- NEVER place multiple long, stacked "sections" inside a screen as if it
-  were a web page. If a screen needs more than what fits in the visible
-  area, the extra content scrolls inside <main> — not as a sequence of
-  py-24 blocks.
-- The <body>, <html>, and root layout div must never gain a vertical
-  scrollbar. If the layout overflows the viewport, that is a bug.
-
-### No horizontal overflow
-- No element may be wider than the viewport. No 1200px containers, no
-  max-w-6xl, no max-w-7xl, no fixed-px widths that exceed ~430px.
-- If you see a horizontal scrollbar on the screen root, it is a bug. Fix it
-  before finishing.
-
-### Inline scroll (allowed and encouraged)
-Inline scroll means a scroll region that lives INSIDE the content area and
-does not affect the shell:
-- Horizontal rails for story bubbles, category chips, featured carousels,
-  avatar rows — use "flex overflow-x-auto snap-x snap-mandatory gap-3"
-  inside a px-4 parent, with each child as a fixed-width snap target. The
-  rail scrolls left-right; the screen does not.
-- Vertical scroll inside a bottom sheet, inside a modal, or inside a card
-  component that has its own fixed height.
-Any inline scroll must be fully contained by its parent's width and height
-so it never pushes the layout.
-
-## Screen Anatomy (reference)
-Every screen you build fits this anatomy:
-1. Top header — h-14, shrink-0, pt-safe, frosted-glass
-   (bg-background/70 backdrop-blur-2xl border-b border-white/5). Screen
-   title in text-lg font-semibold. Optional back chevron (router.back) on
-   flow screens, optional right-side icons on tab screens.
-2. Scrollable main — flex-1 overflow-y-auto overscroll-contain, px-4 py-4,
-   holds the screen's actual content. Lists, cards, forms, feeds, grids.
-3. Bottom region — either the shared tab bar (top-level tab screens) or a
-   primary action bar (flow screens: Save / Continue / Pay), or nothing
-   (simple detail screens). h-16, shrink-0, pb-safe, frosted-glass.
-
-Flow screens (product detail, settings item, edit form, checkout step)
-replace the tab bar with either a primary action bar or no bottom region,
-and put a back chevron in the header.
-
-## Layout Constraints
-- Design only for phone screens at ~430px width. Never use sm:, md:, lg:,
-  xl: breakpoints. One layout, tuned for phones.
-- Single-column stacks, full-width cards, no sidebars, no multi-column
-  grids, no desktop containers.
-- Every interactive element has a minimum touch target of 44x44.
-- Use 100dvh (never 100vh). Respect env(safe-area-inset-*) via Tailwind
-  pt-safe and pb-safe on header and bottom bar.
-- Spacing is mobile-tight: gap-3 / gap-4 between cards, py-4 / py-6 between
-  groups inside a screen. Never py-16 or py-24.
-
-## Screens, Not Pages
-The launch screen (app/page.tsx) is a working app screen, not a marketing
-landing page. It shows immediately actionable content: a feed, a dashboard,
-a list, a map, a library, an activity view — whatever the app is about. It
-never contains a hero banner with a CTA, a feature grid explaining the
-product, testimonials, an FAQ section, a pricing table, a sitemap footer,
-or "Get Started" / "Learn More" buttons. If the user's prompt sounds like
-a landing page ("build a fitness app landing"), reinterpret it as the
-launch screen of the app itself.
-
-## Navigation
-- Bottom tab bar with 3 to 5 tabs is the primary navigation whenever the
-  app has multiple top-level sections. Implement it as a shared
-  components/tab-bar.tsx client component. Highlight the active tab using
-  usePathname() from next/navigation. Tapping a tab uses next/link, never
-  programmatic router.push.
-- Compact top header (h-14), frosted-glass treatment, screen title in
-  text-lg font-semibold.
-- No sidebars, no hamburger menus, no website footers, no breadcrumbs.
-- Back and close actions stay within thumb reach (top-left chevron, or
-  bottom-bar cancel).
-
-## Interactions and Anti-Patterns
-- No hover-only interactions. Use active: states (active:scale-[0.98],
-  active:opacity-90) on every tappable element.
-- Bottom sheets and action sheets (Radix Dialog positioned at bottom)
-  instead of desktop dropdowns, popovers, and modals.
-- Skeleton loaders instead of spinners.
-- No scroll-driven parallax, no sticky-section storytelling, no
-  scroll-linked animations, no alternating full-bleed dark/light sections.
-  Those are web patterns — discard them here.
-- No hero-with-three-cards, no editorial magazine layouts, no
-  marketing-style horizontal-scroll feature sections.
-- Never use purple, violet, or indigo as primary colors (the AI-default
-  tell). Pick an industry-aware palette and use one accent sparingly.
-- Buttons are solid fills with strong contrast, h-12 minimum, rounded-xl
-  or rounded-full, sentence case, never all caps. Primary flow buttons are
-  full-width at the bottom of the screen.
-- Avoid multi-step wizards, hover tooltips, dashed upload borders, and
-  cramped inputs.
-
-## Native Bridge
-Before writing any code that calls WemobBridge methods, call the
-configure_mobile_bridge tool to declare which native methods the app needs
-and which OS permissions to request. Enabled methods are exposed on the
-global window.wemobBridge object and all return promises. Categories:
-camera (takePhoto, pickImage, pickVideo), geolocation, push notifications,
-biometrics, contacts, calendar, files, bluetooth, and share/haptic/storage
-utilities. Always check isNative() before showing bridge-only UI, and
-provide a web fallback when not running inside the native shell. Do not
-add a script tag for the bridge: it is auto-injected.
-`
-
-// AuthAddendum is appended to BasePrompt when project.Settings.needs_auth is true.
+// AuthAddendum is appended to the base prompt when project.Settings.needs_auth is true.
 const AuthAddendum = `# AUTH ADDENDUM
 The project ships with a server-only session helper library at
 lib/auth/session.ts. Read lib/auth/types.ts before assuming anything about
@@ -284,7 +108,7 @@ extra fields.
   not flash before the session resolves.
 `
 
-// buildAIAddendum is appended to BasePrompt when project.Settings.has_ai is
+// buildAIAddendum is appended to the base prompt when project.Settings.has_ai is
 // true. It confirms the Wemob AI Gateway is already wired up so subsequent
 // runs and chat turns use the existing helper instead of calling
 // setup_wemob_ai_gateway again.
@@ -297,7 +121,7 @@ func buildAIAddendum(deps *RunDependencies) string {
 	allowedChat := gatewayAllowedChatModels(deps)
 
 	modelBlock := "Available chat models will be listed when you call\nsetup_wemob_ai_gateway — use whatever that tool reports."
-	defaultModel := "anthropic/claude-haiku-4-5"
+	defaultModel := constants.GatewayDefaultChatModel
 	if len(allowedChat) > 0 {
 		modelBlock = "Available chat models on the user's current plan (pass as the\nmodel field on wemobAI().chat.completions.create — anything else\nwill 403 at runtime):\n" + renderGatewayChatModelsBlock(allowedChat)
 		defaultModel = defaultGatewayChatModel(allowedChat)
@@ -324,7 +148,7 @@ client plus a thin image helper:
 ` + modelBlock + `
 
 Available image models: fal-ai/flux/schnell (default), fal-ai/flux-pro/v1.1,
-fal-ai/flux-ultra.
+fal-ai/flux-pro/v1.1-ultra.
 
 The openai npm package is already in package.json — do not add it again, and
 do not add @anthropic-ai/sdk, @google/generative-ai, or any other AI SDK. They
@@ -413,7 +237,7 @@ func humanReadableBytes(n int64) string {
 	}
 }
 
-// DatabaseAddendum is appended to BasePrompt when project.Settings.has_database is true.
+// DatabaseAddendum is appended to the base prompt when project.Settings.has_database is true.
 const DatabaseAddendum = `# DATABASE ADDENDUM
 This project has a built-in wemob database — a serverless database that wemob
 provisions and manages automatically. In every user-facing message, call it

@@ -3,10 +3,22 @@ package utils
 import (
 	"log/slog"
 	"net/http"
+	"strings"
+
+	"github.com/knid/wemob/internal/constants"
 )
 
 // anthropicBetaFeatures lists the Anthropic beta features to enable.
 var anthropicBetaFeatures = "interleaved-thinking-2025-05-14,web-search-2025-03-05"
+
+// bareModel strips a provider prefix like "anthropic/" from a model ID,
+// giving the bare name that Anthropic's native API expects.
+func bareModel(id string) string {
+	if i := strings.Index(id, "/"); i >= 0 {
+		return id[i+1:]
+	}
+	return id
+}
 
 // LLMProvider holds the base URL and API key for a specific LLM provider.
 // All supported providers expose an OpenAI-compatible /chat/completions endpoint.
@@ -84,11 +96,11 @@ func (p *LLMProvider) WebSearchTool() *Tool {
 // Used as fallback when WEBSITE_BUILDER_LLM_MODEL secret is empty.
 func (p *LLMProvider) DefaultModel() string {
 	if p == nil {
-		return "anthropic/claude-sonnet-4"
+		return constants.GatewayPreferredChatModel
 	}
 	switch p.Name {
 	case "anthropic":
-		return "claude-sonnet-4"
+		return bareModel(constants.GatewayPreferredChatModel)
 	case "moonshot":
 		return "kimi-k2.5"
 	case "google":
@@ -96,7 +108,7 @@ func (p *LLMProvider) DefaultModel() string {
 	case "zai":
 		return "glm-4.7"
 	default:
-		return "anthropic/claude-sonnet-4" // OpenRouter format
+		return constants.GatewayPreferredChatModel // OpenRouter format
 	}
 }
 
@@ -109,10 +121,12 @@ func (p *LLMProvider) FastModel() string {
 	}
 	switch p.Name {
 	case "anthropic":
+		// TODO keep synced with GatewayDefaultChatModel when Anthropic publishes a new haiku
 		return "claude-haiku-4-5-20251001"
 	case "google":
 		return "gemini-2.5-flash"
 	default:
+		// TODO keep synced with GatewayDefaultChatModel when Anthropic publishes a new haiku
 		return "anthropic/claude-haiku-4-5-20251001" // OpenRouter format
 	}
 }

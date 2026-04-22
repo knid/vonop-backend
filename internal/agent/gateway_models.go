@@ -36,15 +36,16 @@ func gatewayAllowedChatModels(deps *RunDependencies) []constants.GatewayModelInf
 }
 
 // defaultGatewayChatModel picks the sensible default from an allowed set:
-// claude-sonnet-4 (best balance) when present, then claude-haiku-4-5
-// (cheap fallback for lower tiers), otherwise whatever comes first.
+// constants.GatewayPreferredChatModel (best balance) when present, then
+// constants.GatewayDefaultChatModel (cheap fallback for lower tiers),
+// otherwise whatever comes first.
 func defaultGatewayChatModel(models []constants.GatewayModelInfo) string {
 	if len(models) == 0 {
 		return ""
 	}
 	prefs := []string{
-		"anthropic/claude-sonnet-4",
-		"anthropic/claude-haiku-4-5",
+		constants.GatewayPreferredChatModel,
+		constants.GatewayDefaultChatModel,
 	}
 	for _, pref := range prefs {
 		for _, m := range models {

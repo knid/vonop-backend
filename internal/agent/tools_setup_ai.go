@@ -31,9 +31,9 @@ What is now true:
   rejected by the gateway with HTTP 403):
 %s
 - Available image models (passed to generateImage):
-    fal-ai/flux/schnell    — fast (default)
-    fal-ai/flux-pro/v1.1   — HD
-    fal-ai/flux-ultra      — premium
+    fal-ai/flux/schnell         — fast (default)
+    fal-ai/flux-pro/v1.1        — HD
+    fal-ai/flux-pro/v1.1-ultra  — premium
 
 How to call it:
 - One-shot text (summarize, classify, rewrite):
