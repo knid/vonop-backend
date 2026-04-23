@@ -26,9 +26,11 @@ order_items, product_reviews, wishlists. After that first call, DATABASE_URL
 is injected, has_database flips to true, and you must NOT call
 provision_database again for this project.
 
-On an ecommerce project's first turn, call provision_database once to trigger
-the seed — do not pass a custom data_models argument; the canonical schema is
-loaded automatically. Treat subsequent runs as "database already seeded".
+On an ecommerce project's first turn, call provision_database once with NO
+tables argument (just an empty object {}) to trigger the seed. The canonical
+schema is loaded automatically; any tables argument is ignored. Treat
+subsequent runs as "database already seeded" and never call
+provision_database again.
 
 Prices are stored in cents (bigint). All rows use UUID primary keys. Stores,
 products, categories, and discounts use soft deletes (deleted_at IS NULL).
