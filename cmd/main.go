@@ -111,17 +111,6 @@ func createSchema(db *bun.DB) error {
 		(*models.AppEnvVar)(nil),
 		// User-uploaded assets (3D models, fonts, media, etc.)
 		(*models.AppAsset)(nil),
-		// E-commerce models
-		(*models.Store)(nil),
-		(*models.Product)(nil),
-		(*models.ProductCategory)(nil),
-		(*models.Discount)(nil),
-		(*models.Cart)(nil),
-		(*models.CartItem)(nil),
-		(*models.Order)(nil),
-		(*models.OrderItem)(nil),
-		(*models.ProductReview)(nil),
-		(*models.Wishlist)(nil),
 		// LLM token usage tracking
 		(*models.LLMTokenUsage)(nil),
 		// Background jobs
@@ -214,35 +203,9 @@ func createSchema(db *bun.DB) error {
 		`ALTER TABLE app_domains ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
 		`ALTER TABLE app_domains ADD COLUMN IF NOT EXISTS deployment_uuid text`,
 		`ALTER TABLE app_env_vars ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
-		`ALTER TABLE stores ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
-		`ALTER TABLE products ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
-		`ALTER TABLE product_categories ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
-		`ALTER TABLE discounts ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
-		`ALTER TABLE carts ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
-		`ALTER TABLE orders ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
 		`ALTER TABLE app_dashboards ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
 		`ALTER TABLE app_dashboard_panels ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
 		`ALTER TABLE app_notification_tasks ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
-		// Flatten price onto products (remove variant dependency)
-		`ALTER TABLE products ADD COLUMN IF NOT EXISTS price_in_cents integer NOT NULL DEFAULT 0`,
-		`ALTER TABLE products ADD COLUMN IF NOT EXISTS compare_at_price integer DEFAULT 0`,
-		`ALTER TABLE products ADD COLUMN IF NOT EXISTS sku text DEFAULT ''`,
-		`ALTER TABLE products ADD COLUMN IF NOT EXISTS inventory integer NOT NULL DEFAULT 0`,
-		`ALTER TABLE products ADD COLUMN IF NOT EXISTS track_inventory boolean NOT NULL DEFAULT false`,
-		// Migrate default variant prices into products
-		`UPDATE products SET
-			price_in_cents = COALESCE(pv.price_in_cents, 0),
-			compare_at_price = COALESCE(pv.compare_at_price, 0),
-			sku = COALESCE(pv.sku, ''),
-			inventory = COALESCE(pv.inventory, 0),
-			track_inventory = COALESCE(pv.track_inventory, false)
-		FROM (
-			SELECT DISTINCT ON (product_id) product_id, price_in_cents, compare_at_price, sku, inventory, track_inventory
-			FROM product_variants
-			WHERE deleted_at IS NULL
-			ORDER BY product_id, is_default DESC, created_at ASC
-		) pv
-		WHERE products.id = pv.product_id AND products.price_in_cents = 0`,
 		// Fix screenshot_s3_key and sandbox_id: empty string instead of NULL
 		`UPDATE app_projects SET screenshot_s3_key = '' WHERE screenshot_s3_key IS NULL`,
 		`UPDATE app_projects SET sandbox_id = '' WHERE sandbox_id IS NULL`,
@@ -476,9 +439,6 @@ END $$`,
 		`CREATE INDEX IF NOT EXISTS idx_sessions_status_active ON sessions(status) WHERE status = 'active' AND deleted_at IS NULL`,
 		`CREATE INDEX IF NOT EXISTS idx_app_usage_events_session_id ON app_usage_events(session_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_app_usage_events_session_created ON app_usage_events(session_id, created_at DESC) WHERE deleted_at IS NULL`,
-		`CREATE INDEX IF NOT EXISTS idx_products_store_id ON products(store_id)`,
-		`CREATE INDEX IF NOT EXISTS idx_orders_store_id ON orders(store_id)`,
-		`CREATE INDEX IF NOT EXISTS idx_carts_store_id_session_id ON carts(store_id, session_id)`,
 		// app_snapshots index removed — snapshots now use git repos
 		`CREATE INDEX IF NOT EXISTS idx_notifications_project_id ON notifications(project_id)`,
 		// Foreign key indexes for tables frequently queried by user_id or project_id
@@ -495,7 +455,6 @@ END $$`,
 		`CREATE INDEX IF NOT EXISTS idx_app_env_vars_app_project_id ON app_env_vars(app_project_id)`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_app_env_vars_project_key ON app_env_vars(app_project_id, key) WHERE deleted_at IS NULL`,
 		`CREATE INDEX IF NOT EXISTS idx_app_integrations_app_project_id ON app_integrations(app_project_id)`,
-		`CREATE INDEX IF NOT EXISTS idx_stores_app_project_id ON stores(app_project_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_app_dashboards_app_project_id ON app_dashboards(app_project_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_deployments_project_id ON deployments(project_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_ai_credits_balances_user_id ON ai_credits_balances(user_id)`,
