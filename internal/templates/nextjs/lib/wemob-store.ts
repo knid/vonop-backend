@@ -4,6 +4,33 @@
 // All exports are client-side only (hooks, context, and async fetch functions).
 
 import React from "react";
+import type {
+  StoreConfig,
+  StorefrontProduct,
+  StorefrontCategory,
+  StorefrontCart,
+  StorefrontCartItem,
+  OrderTracking,
+  OrderTrackingItem,
+  ProductReview,
+  ReviewsResult,
+  WishlistItem,
+} from "./wemob-store-types";
+
+// Re-export shared types so downstream code can continue to
+// `import { StorefrontProduct } from "@/lib/wemob-store"`.
+export type {
+  StoreConfig,
+  StorefrontProduct,
+  StorefrontCategory,
+  StorefrontCart,
+  StorefrontCartItem,
+  OrderTracking,
+  OrderTrackingItem,
+  ProductReview,
+  ReviewsResult,
+  WishlistItem,
+};
 
 // ---------------------------------------------------------------------------
 // Environment
@@ -13,63 +40,8 @@ const API_URL = process.env.NEXT_PUBLIC_WEMOB_API_URL || "";
 const STORE_ID = process.env.NEXT_PUBLIC_STORE_ID || "";
 
 // ---------------------------------------------------------------------------
-// Types
+// Types — client-only (write flows, kept here because no server code needs them)
 // ---------------------------------------------------------------------------
-
-export interface StoreConfig {
-  name: string;
-  currency: string;
-  locale: string;
-  tax_rate: number;
-  payment_providers: string[];
-  shipping_enabled: boolean;
-}
-
-export interface StorefrontProduct {
-  id: string;
-  name: string;
-  slug: string;
-  description: string;
-  images: string[];
-  category: string;
-  category_slug: string;
-  tags: string[];
-  price_in_cents: number;
-  compare_at_price: number;
-  min_price_cents: number;
-  max_price_cents: number;
-  in_stock: boolean;
-  average_rating: number;
-  review_count: number;
-}
-
-export interface StorefrontCategory {
-  id: string;
-  name: string;
-  slug: string;
-  image: string;
-  description: string;
-}
-
-export interface StorefrontCart {
-  id: string;
-  session_id: string;
-  items: StorefrontCartItem[];
-  subtotal_cents: number;
-  discount_code: string;
-  discount_cents: number;
-  total_cents: number;
-}
-
-export interface StorefrontCartItem {
-  id: string;
-  product_id: string;
-  product_name: string;
-  product_image: string;
-  quantity: number;
-  price_cents: number;
-  total_cents: number;
-}
 
 export interface StorefrontCheckout {
   order_id: string;
@@ -84,27 +56,6 @@ export interface CheckoutConfirm {
   order_id: string;
   order_number: string;
   status: string;
-}
-
-export interface OrderTracking {
-  order_id: string;
-  order_number: string;
-  status: string;
-  payment_status: string;
-  items: OrderTrackingItem[];
-  subtotal_cents: number;
-  discount_cents: number;
-  tax_cents: number;
-  total_cents: number;
-  currency: string;
-  created_at: string;
-}
-
-export interface OrderTrackingItem {
-  product_name: string;
-  quantity: number;
-  price_in_cents: number;
-  total_cents: number;
 }
 
 export interface ShippingAddress {
@@ -906,22 +857,6 @@ export function useStoreConfig(): {
 // Reviews
 // ---------------------------------------------------------------------------
 
-export interface ProductReview {
-  id: string;
-  customer_name: string;
-  rating: number;
-  title: string;
-  body: string;
-  is_verified: boolean;
-  created_at: string;
-}
-
-export interface ReviewsResult {
-  reviews: ProductReview[];
-  average_rating: number;
-  review_count: number;
-}
-
 /** Fetch reviews for a product by slug. */
 export async function getProductReviews(slug: string): Promise<ReviewsResult> {
   return apiFetch<ReviewsResult>("/products/" + slug + "/reviews");
@@ -978,12 +913,6 @@ export function useReviews(slug: string) {
 // ---------------------------------------------------------------------------
 // Wishlist
 // ---------------------------------------------------------------------------
-
-export interface WishlistItem {
-  id: string;
-  product_id: string;
-  created_at: string;
-}
 
 /** Fetch wishlist items for a session. */
 export async function getWishlist(sessionId: string): Promise<WishlistItem[]> {
