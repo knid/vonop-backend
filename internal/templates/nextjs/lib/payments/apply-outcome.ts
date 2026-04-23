@@ -34,6 +34,7 @@ export async function applyPaymentOutcome(input: PaymentOutcome): Promise<void> 
       paymentStatus: schema.orders.paymentStatus,
       discountId: schema.orders.discountId,
       discountCents: schema.orders.discountCents,
+      metadata: schema.orders.metadata,
     })
     .from(schema.orders)
     .where(eq(schema.orders.id, input.orderId));
@@ -76,5 +77,15 @@ export async function applyPaymentOutcome(input: PaymentOutcome): Promise<void> 
       .update(schema.discounts)
       .set({ usedCount: sql`${schema.discounts.usedCount} + 1` })
       .where(eq(schema.discounts.id, order.discountId));
+  }
+
+  if (input.status === "paid") {
+    // Cart deletion is deferred from checkout init to here so a cancelled
+    // payment leaves the cart intact. cartId was stashed on the order
+    // metadata by /api/checkout. Cascade drops cart_items via FK.
+    const cartId = (order.metadata as Record<string, unknown> | null)?.cartId;
+    if (typeof cartId === "string" && cartId) {
+      await db.delete(schema.carts).where(eq(schema.carts.id, cartId));
+    }
   }
 }

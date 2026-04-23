@@ -204,58 +204,12 @@ export function formatPrice(cents: number, currency?: string): string {
   }).format(cents / 100);
 }
 
-// ---------------------------------------------------------------------------
-// Cart Cache (localStorage, SSR-safe)
-// ---------------------------------------------------------------------------
-//
-// The only session state the storefront trusts is the server-owned, httpOnly
-// wemob_cart_session cookie. localStorage just mirrors the last-seen cart
-// shape so the drawer/badge renders instantly on next page load while we
-// revalidate in the background. A previous version of this file maintained
-// a second js-visible session cookie; that duplicated state drifted out of
-// sync with the httpOnly one and was removed.
-
-function isBrowser(): boolean {
-  return typeof window !== "undefined";
-}
-
-// Static key — no STORE_ID dependency. When a site collides with other
-// wemob-generated sites on the same origin (unlikely in production but
-// common in dev/preview), the path scoping of the httpOnly cookie plus the
-// server-side revalidation keep cart state separate; the cache is just a
-// visual warmup.
-const CART_CACHE_KEY = "wemob_cart";
-
-interface CartCache { cart: StorefrontCart; ts: number; }
-
-function saveCartCache(cart: StorefrontCart | null): void {
-  if (!isBrowser()) return;
-  try {
-    if (cart && cart.items && cart.items.length > 0) {
-      localStorage.setItem(CART_CACHE_KEY, JSON.stringify({ cart, ts: Date.now() }));
-    } else {
-      localStorage.removeItem(CART_CACHE_KEY);
-    }
-  } catch { /* localStorage unavailable */ }
-}
-
-function loadCartCache(): StorefrontCart | null {
-  if (!isBrowser()) return null;
-  try {
-    const raw = localStorage.getItem(CART_CACHE_KEY);
-    if (!raw) return null;
-    const cached: CartCache = JSON.parse(raw);
-    return cached.cart;
-  } catch {
-    try { localStorage.removeItem(CART_CACHE_KEY); } catch { /* ignore */ }
-    return null;
-  }
-}
-
-function clearCartCache(): void {
-  if (!isBrowser()) return;
-  try { localStorage.removeItem(CART_CACHE_KEY); } catch { /* ignore */ }
-}
+// No localStorage mirror of cart state: the httpOnly wemob_cart_session
+// cookie + the server's cart row is the single source of truth. An earlier
+// revision cached the cart to paint the badge instantly, but that cache
+// outlived the server row after a successful checkout and produced a badge
+// that disagreed with the cart page. The badge now waits for /api/cart;
+// itemCount>0 gates rendering so the blank period is invisible.
 
 // ---------------------------------------------------------------------------
 // Internal: recalculate cart totals from items
@@ -315,21 +269,12 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     let cancelled = false;
 
     async function init() {
-      // Hydrate from cache immediately so the badge/drawer doesn't flicker
-      // while revalidation is in flight.
-      const cached = loadCartCache();
-      if (cached) {
-        setCart(cached);
-        setIsLoading(false);
-      }
-
       try {
         const existing = await getCart();
-        if (!cancelled) { setCart(existing); saveCartCache(existing); }
+        if (!cancelled) setCart(existing);
       } catch {
-        // API unreachable: keep whatever the cache gave us; no fallback call
-        // to createCart is needed because carts are server-created lazily on
-        // the first add-item.
+        // API unreachable: leave cart as null. Carts are server-created
+        // lazily on the first add-item so nothing further is needed here.
       }
       if (!cancelled) setIsLoading(false);
     }
@@ -353,7 +298,6 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       try {
         const updated = await apiCall();
         setCart(updated);
-        saveCartCache(updated);
       } catch (err) {
         // Rollback on failure
         setCart(previous);
@@ -434,7 +378,6 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     async (code: string) => {
       const updated = await applyDiscountCode(code);
       setCart(updated);
-      saveCartCache(updated);
     },
     []
   );
@@ -443,17 +386,15 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     async () => {
       const updated = await removeDiscount();
       setCart(updated);
-      saveCartCache(updated);
     },
     []
   );
 
   const handleClearCart = React.useCallback(() => {
     // Server-owned sessions can't be revoked from the browser. Clearing the
-    // local state + cache is enough for UX; the next page load (or explicit
+    // local state is enough for UX; the next page load (or explicit
     // post-checkout redirect) will pick up whatever the server now returns.
     setCart(null);
-    clearCartCache();
   }, []);
 
   const value = React.useMemo<CartContextValue>(

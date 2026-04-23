@@ -156,6 +156,9 @@ export async function POST(req: NextRequest) {
       paymentStatus: "pending",
       paymentProvider: body.provider,
       discountId: cart.discountId,
+      // Stash cartId so applyPaymentOutcome can drop the cart after a
+      // successful async payment without needing cookie access in the webhook.
+      metadata: { cartId: cart.id },
     })
     .returning();
 
@@ -197,6 +200,9 @@ export async function POST(req: NextRequest) {
   // merchant's orders view surfaces it as ready to fulfil, but keep
   // payment_status=pending — cash hasn't been collected yet. used_count
   // for COD discounts ticks here because there's no webhook to do it.
+  // COD also clears the cart now (the order is committed to fulfilment);
+  // async providers defer cart deletion to applyPaymentOutcome so a user
+  // who cancels on the provider's page keeps their cart.
   if (result.kind === "placed") {
     await db
       .update(schema.orders)
@@ -209,13 +215,10 @@ export async function POST(req: NextRequest) {
         .set({ usedCount: sql`${schema.discounts.usedCount} + 1` })
         .where(eq(schema.discounts.id, order.discountId));
     }
-  }
 
-  // Clear the cart after session init. Stripe/Iyzico are about to redirect
-  // the customer away so the cart rarely matters; COD has placed the order;
-  // the success page reads the order directly, not the cart.
-  await db.delete(schema.cartItems).where(eq(schema.cartItems.cartId, cart.id));
-  await db.delete(schema.carts).where(eq(schema.carts.id, cart.id));
+    await db.delete(schema.cartItems).where(eq(schema.cartItems.cartId, cart.id));
+    await db.delete(schema.carts).where(eq(schema.carts.id, cart.id));
+  }
 
   return NextResponse.json({ orderId: order.id, ...result });
 }
