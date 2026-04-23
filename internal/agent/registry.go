@@ -153,7 +153,13 @@ func BuildRegistryFor(project *models.AppProject, deps *RunDependencies) *Regist
 	}
 	// Ecommerce projects use the same generic DB tools as every other app;
 	// their tenant Neon database is seeded from
-	// internal/starters/ecommerce_schema.sql at provisioning time.
+	// internal/starters/ecommerce_schema.sql at provisioning time. On top of
+	// that they get setup_store — a one-shot seed helper that does the
+	// config UPDATE + bulk category/product INSERTs in a single transaction,
+	// saving 2 roundtrips per generation vs. three execute_sql calls.
+	if project != nil && project.ProjectType == "ecommerce" {
+		r.Register(SetupStoreTool{Deps: deps})
+	}
 	return r
 }
 
