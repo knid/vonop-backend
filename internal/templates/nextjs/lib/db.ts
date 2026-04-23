@@ -1,22 +1,13 @@
-import { neon } from '@neondatabase/serverless';
-import { drizzle } from 'drizzle-orm/neon-http';
-import * as schema from './schema';
+import { drizzle } from "drizzle-orm/neon-http";
+import { neon } from "@neondatabase/serverless";
+import * as schema from "./schema";
 
-let _db: ReturnType<typeof drizzle> | null = null;
+const connectionString = process.env.DATABASE_URL;
 
-function getDb() {
-  if (!_db) {
-    if (!process.env.DATABASE_URL) {
-      throw new Error('DATABASE_URL environment variable is not set');
-    }
-    const sql = neon(process.env.DATABASE_URL);
-    _db = drizzle(sql, { schema });
-  }
-  return _db;
+if (!connectionString) {
+  throw new Error("DATABASE_URL is not set. Ecommerce apps require a Neon database.");
 }
 
-export const db = new Proxy({} as ReturnType<typeof drizzle>, {
-  get(_, prop) {
-    return (getDb() as any)[prop];
-  },
-});
+const client = neon(connectionString);
+export const db = drizzle(client, { schema });
+export { schema };

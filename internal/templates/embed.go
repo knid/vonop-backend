@@ -63,6 +63,8 @@ var DBFilePaths = []string{
 // EcommerceFilePaths are template-managed files injected only for e-commerce projects.
 var EcommerceFilePaths = []string{
 	"lib/wemob-store.ts",
+	"lib/wemob-store-types.ts",
+	"lib/wemob-store-server.ts",
 	"components/ecommerce/product-card.tsx",
 	"components/ecommerce/cart-drawer.tsx",
 	"components/ecommerce/price-display.tsx",
@@ -79,6 +81,10 @@ var EcommerceFilePaths = []string{
 	"components/ecommerce/site-footer.tsx",
 	"components/ecommerce/providers.tsx",
 	"components/ecommerce/newsletter-section.tsx",
+	"components/ecommerce/products-browser.tsx",
+	"components/ecommerce/product-detail-actions.tsx",
+	"components/ecommerce/category-products-grid.tsx",
+	"components/ecommerce/cart-view.tsx",
 	"app/cart/page.tsx",
 	"app/checkout/page.tsx",
 	"app/checkout/success/page.tsx",
