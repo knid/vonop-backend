@@ -12,6 +12,8 @@ import "server-only";
 // `/v2/storefront/*` API. They will be migrated to local route handlers in a
 // follow-up PR.
 
+import { cache } from "react";
+
 import { and, asc, desc, eq, ilike, inArray, isNull, sql } from "drizzle-orm";
 
 import { db } from "./db";
@@ -42,33 +44,34 @@ import type {
 } from "./wemob-store-types";
 
 // ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+// Escape Postgres LIKE/ILIKE wildcards (`%`, `_`, `\`) so user-supplied search
+// input is treated as literal text rather than silently broadening the match.
+function escapeLike(input: string): string {
+  return input.replace(/[\\%_]/g, (m) => `\\${m}`);
+}
+
+// ---------------------------------------------------------------------------
 // Store helper
 // ---------------------------------------------------------------------------
 
-// Each tenant DB holds exactly one `stores` row (not soft-deleted). We cache
-// it per request boundary via a module-local Promise to avoid hitting the DB
-// repeatedly within a single server render. Neon HTTP connections are
-// stateless, so this is safe across serverless invocations.
-let _storeCache: Promise<Store> | null = null;
-
-async function getStore(): Promise<Store> {
-  if (!_storeCache) {
-    _storeCache = db
-      .select()
-      .from(stores)
-      .where(isNull(stores.deletedAt))
-      .limit(1)
-      .then((rows) => {
-        if (rows.length === 0) {
-          // Invalidate cache on failure so the next call retries.
-          _storeCache = null;
-          throw new Error("Store row not found in tenant database");
-        }
-        return rows[0];
-      });
+// Each tenant DB holds exactly one `stores` row (not soft-deleted). React's
+// `cache()` scopes memoization to a single render pass, so repeated calls
+// within one request share a result without leaking across requests on a
+// persistent Node runtime.
+const getStore = cache(async (): Promise<Store> => {
+  const rows = await db
+    .select()
+    .from(stores)
+    .where(isNull(stores.deletedAt))
+    .limit(1);
+  if (rows.length === 0) {
+    throw new Error("Store row not found in tenant database");
   }
-  return _storeCache;
-}
+  return rows[0];
+});
 
 // ---------------------------------------------------------------------------
 // Store config
@@ -106,7 +109,7 @@ export async function getStoreConfig(): Promise<StoreConfig> {
     (store.shippingConfig as Record<string, unknown> | null) ?? {};
   let shippingEnabled = Object.keys(shippingConfig).length > 0;
   if (typeof shippingConfig.enabled === "boolean") {
-    shippingEnabled = shippingConfig.enabled as boolean;
+    shippingEnabled = shippingConfig.enabled;
   }
 
   return {
@@ -165,7 +168,7 @@ export async function getProducts(
   }
 
   if (params?.q) {
-    whereConditions.push(ilike(products.name, `%${params.q}%`));
+    whereConditions.push(ilike(products.name, `%${escapeLike(params.q)}%`));
   }
 
   let query = db
