@@ -1,0 +1,43 @@
+import "server-only";
+// lib/payments/index.ts — Payment provider dispatch + shared types.
+// This file is template-managed. Do not modify.
+//
+// Each provider adapter exposes the same `createSession` + `handleWebhook`
+// pair via `PaymentAdapter`. Callers pick the adapter with `getAdapter(provider)`
+// using the `payment_provider` column on the order (or the store's configured
+// default provider) and avoid branching on provider strings elsewhere.
+
+import type { Order, Store } from "@/lib/schema";
+
+import * as stripe from "./stripe";
+import * as iyzico from "./iyzico";
+import * as cod from "./cod";
+
+export type CheckoutResult =
+  | { kind: "redirect"; url: string }
+  | { kind: "client_confirm"; clientSecret: string }
+  | { kind: "placed" }; // COD / no-payment flows
+
+export type WebhookEvent = {
+  orderId: string;
+  paymentId: string;
+  status: "paid" | "failed" | "pending";
+  provider: string;
+};
+
+export type PaymentAdapter = {
+  createSession: (order: Order, store: Store) => Promise<CheckoutResult>;
+  handleWebhook: (rawBody: string, headers: Headers) => Promise<WebhookEvent>;
+};
+
+const adapters: Record<string, PaymentAdapter> = {
+  stripe,
+  iyzico,
+  cod,
+};
+
+export function getAdapter(provider: string): PaymentAdapter {
+  const adapter = adapters[provider];
+  if (!adapter) throw new Error(`Unsupported payment provider: ${provider}`);
+  return adapter;
+}

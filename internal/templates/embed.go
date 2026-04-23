@@ -96,6 +96,10 @@ var EcommerceFilePaths = []string{
 	"app/policies/returns/page.tsx",
 	"app/policies/privacy/page.tsx",
 	"app/policies/terms/page.tsx",
+	"lib/payments/index.ts",
+	"lib/payments/stripe.ts",
+	"lib/payments/iyzico.ts",
+	"lib/payments/cod.ts",
 }
 
 // UIFilePaths are pre-built UI component templates injected during initial generation.
