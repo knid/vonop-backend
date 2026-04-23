@@ -1164,9 +1164,6 @@ func main() {
 	r.Route("/", func(r chi.Router) {
 		r.Route("/webhooks", func(r chi.Router) {
 			r.Post("/stripe", httpViews.Controller.HandleWebhook)
-			// Store payment webhooks
-			r.Post("/store/stripe/{storeId}", httpViews.HandleStoreStripeWebhook)
-			r.Post("/store/iyzico/{storeId}", httpViews.HandleStoreIyzicoWebhook)
 			// Coolify deployment webhook
 			r.Post("/coolify", httpViews.HandleCoolifyWebhook)
 		})
@@ -1732,51 +1729,6 @@ func main() {
 						r.Get("/realtime", httpViews.GetAppAnalyticsRealtime)
 					})
 
-					// E-commerce store (only for ecommerce projects)
-					r.Route("/store", func(r chi.Router) {
-						r.Get("/", httpViews.GetAppStore)
-						r.Put("/settings", httpViews.UpdateAppStoreSettings)
-						r.With(rateLimiter.RateLimit(20, time.Minute, appMiddleware.AIUserKey)).Post("/chat", httpViews.ChatStoreManagement)
-
-						r.Route("/products", func(r chi.Router) {
-							r.Get("/", httpViews.GetStoreProducts)
-							r.Post("/", httpViews.CreateStoreProduct)
-							r.Route("/{productId}", func(r chi.Router) {
-								r.Get("/", httpViews.GetStoreProduct)
-								r.Put("/", httpViews.UpdateStoreProduct)
-								r.Delete("/", httpViews.DeleteStoreProduct)
-							})
-						})
-
-						r.Route("/categories", func(r chi.Router) {
-							r.Get("/", httpViews.GetStoreCategories)
-							r.Post("/", httpViews.CreateStoreCategory)
-							r.Route("/{categoryId}", func(r chi.Router) {
-								r.Put("/", httpViews.UpdateStoreCategory)
-								r.Delete("/", httpViews.DeleteStoreCategory)
-							})
-						})
-
-						r.Route("/discounts", func(r chi.Router) {
-							r.Get("/", httpViews.GetStoreDiscounts)
-							r.Post("/", httpViews.CreateStoreDiscount)
-							r.Route("/{discountId}", func(r chi.Router) {
-								r.Put("/", httpViews.UpdateStoreDiscount)
-								r.Delete("/", httpViews.DeleteStoreDiscount)
-							})
-						})
-
-						r.Route("/orders", func(r chi.Router) {
-							r.Get("/", httpViews.GetStoreOrders)
-							r.Route("/{orderId}", func(r chi.Router) {
-								r.Get("/", httpViews.GetStoreOrder)
-								r.Put("/", httpViews.UpdateStoreOrderStatus)
-							})
-						})
-
-						r.Get("/analytics", httpViews.GetStoreAnalytics)
-					})
-
 					// Gateway key management
 					r.Get("/gateway-key", httpViews.GetGatewayKeyInfo)
 					r.Post("/gateway-key/reveal", httpViews.RevealGatewayKey)
@@ -1800,43 +1752,6 @@ func main() {
 				r.Get("/config", httpViews.GetMobileAppConfig)
 				r.Put("/config", httpViews.UpdateMobileAppConfig)
 			})
-
-			// Public storefront (no auth, per-store-per-IP rate limiting)
-			r.Route("/storefront/{storeId}", func(r chi.Router) {
-				// Fix 3: Read endpoints — relaxed rate limit
-				r.Use(rateLimiter.RateLimit(120, time.Minute, appMiddleware.StorefrontIPKey))
-				r.Get("/config", httpViews.StorefrontGetStoreConfig)
-				r.Get("/products", httpViews.StorefrontGetProducts)
-				r.Get("/products/{slug}", httpViews.StorefrontGetProduct)
-				r.Get("/categories", httpViews.StorefrontGetCategories)
-				r.Get("/cart/{sessionId}", httpViews.StorefrontGetCart)
-				r.Get("/orders/{orderId}", httpViews.StorefrontGetOrder)
-
-				// Fix 3: Write endpoints — tighter rate limit
-				r.With(rateLimiter.RateLimit(40, time.Minute, appMiddleware.StorefrontIPKey)).Post("/cart", httpViews.StorefrontCreateCart)
-				r.With(rateLimiter.RateLimit(40, time.Minute, appMiddleware.StorefrontIPKey)).Post("/cart/{sessionId}/items", httpViews.StorefrontAddCartItem)
-				r.With(rateLimiter.RateLimit(40, time.Minute, appMiddleware.StorefrontIPKey)).Put("/cart/{sessionId}/items/{itemId}", httpViews.StorefrontUpdateCartItem)
-				r.With(rateLimiter.RateLimit(40, time.Minute, appMiddleware.StorefrontIPKey)).Delete("/cart/{sessionId}/items/{itemId}", httpViews.StorefrontDeleteCartItem)
-				r.With(rateLimiter.RateLimit(40, time.Minute, appMiddleware.StorefrontIPKey)).Post("/cart/{sessionId}/discount", httpViews.StorefrontApplyDiscount)
-				r.With(rateLimiter.RateLimit(40, time.Minute, appMiddleware.StorefrontIPKey)).Delete("/cart/{sessionId}/discount", httpViews.StorefrontRemoveDiscount)
-				r.With(rateLimiter.RateLimit(20, time.Minute, appMiddleware.StorefrontIPKey)).Post("/checkout", httpViews.StorefrontCheckout)
-				r.With(rateLimiter.RateLimit(20, time.Minute, appMiddleware.StorefrontIPKey)).Post("/checkout/confirm", httpViews.StorefrontConfirmCheckout)
-
-				// Fix 14: Iyzico payment callback
-				r.Post("/checkout/iyzico-callback", httpViews.StorefrontIyzicoCallback)
-
-				// Reviews
-				r.Get("/products/{slug}/reviews", httpViews.StorefrontGetReviews)
-				r.With(rateLimiter.RateLimit(10, time.Minute, appMiddleware.StorefrontIPKey)).Post("/products/{slug}/reviews", httpViews.StorefrontSubmitReview)
-
-				// Wishlist
-				r.Get("/wishlist/{sessionId}", httpViews.StorefrontGetWishlist)
-				r.With(rateLimiter.RateLimit(40, time.Minute, appMiddleware.StorefrontIPKey)).Post("/wishlist/{sessionId}", httpViews.StorefrontAddToWishlist)
-				r.With(rateLimiter.RateLimit(40, time.Minute, appMiddleware.StorefrontIPKey)).Delete("/wishlist/{sessionId}/{productId}", httpViews.StorefrontRemoveFromWishlist)
-			})
-
-			// Fix 15: Stripe webhook for per-store accounts (outside storeId route)
-			r.Post("/storefront/webhooks/stripe", httpViews.StorefrontStripeWebhook)
 
 			// Admin template management
 			r.Route("/admin/templates", func(r chi.Router) {
