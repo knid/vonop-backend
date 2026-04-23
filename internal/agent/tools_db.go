@@ -3,12 +3,15 @@ package agent
 import (
 	"context"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
+	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/database"
 	_ "github.com/lib/pq"
 )
@@ -19,34 +22,58 @@ import (
 // Neon role should ALSO be provisioned without these privileges as
 // defense in depth.
 var destructiveSQLPatterns = []*regexp.Regexp{
-	regexp.MustCompile(`(?i)\bdrop\s+(schema|database|role|user)\b`),
+	// DROP of high-blast-radius objects. ALTER TABLE / ALTER COLUMN is
+	// intentionally allowed — the LLM needs it for schema evolution.
+	regexp.MustCompile(`(?i)\bdrop\s+(schema|database|role|user|table|view|index|function|procedure|trigger|extension|materialized\s+view)\b`),
 	regexp.MustCompile(`(?i)\btruncate\b`),
 	regexp.MustCompile(`(?i)\bgrant\b`),
 	regexp.MustCompile(`(?i)\brevoke\b`),
 	regexp.MustCompile(`(?i)\bcreate\s+role\b`),
 	regexp.MustCompile(`(?i)\balter\s+role\b`),
 	regexp.MustCompile(`(?i)\balter\s+system\b`),
+	// Role switching — would let a query escape the restricted DB role the
+	// tenant connection is meant to run as.
+	regexp.MustCompile(`(?i)\bset\s+role\b`),
+	regexp.MustCompile(`(?i)\bset\s+session\s+authorization\b`),
+	regexp.MustCompile(`(?i)\breset\s+role\b`),
+	// COPY ... FROM/TO PROGRAM reaches the server's shell.
+	regexp.MustCompile(`(?is)\bcopy\b.*\b(from|to)\s+program\b`),
 }
 
 var (
-	deleteFromRe = regexp.MustCompile(`(?i)\bdelete\s+from\b`)
-	updateSetRe  = regexp.MustCompile(`(?i)\bupdate\s+\w+\s+set\b`)
-	whereRe      = regexp.MustCompile(`(?i)\bwhere\b`)
+	deleteFromRe   = regexp.MustCompile(`(?i)\bdelete\s+from\b`)
+	updateSetRe    = regexp.MustCompile(`(?i)\bupdate\s+\w+\s+set\b`)
+	whereRe        = regexp.MustCompile(`(?i)\bwhere\b`)
+	lineCommentRe  = regexp.MustCompile(`--[^\n]*`)
+	blockCommentRe = regexp.MustCompile(`(?s)/\*.*?\*/`)
+	returningRe    = regexp.MustCompile(`(?i)\breturning\b`)
 )
+
+// stripSQLComments removes -- line comments and /* ... */ block comments
+// so the destructive-pattern check can't be bypassed by wrapping keywords
+// in a comment (e.g. `/*drop*/ table foo`). Nested block comments — a
+// Postgres-only extension — aren't unwrapped, but are enough of a smell
+// that the DB role's privilege set is the real backstop.
+func stripSQLComments(query string) string {
+	q := lineCommentRe.ReplaceAllString(query, " ")
+	q = blockCommentRe.ReplaceAllString(q, " ")
+	return q
+}
 
 // isDestructiveSQL returns true if the query contains any operation from
 // the deny-list. The check is a coarse string/regex match — a determined
-// LLM could obfuscate (comments, unicode tricks) but the tool is also
-// backed by Postgres transaction semantics and an app-level DB role with
-// restricted privileges.
+// LLM could obfuscate (unicode tricks, creative whitespace) but the tool
+// is also backed by Postgres transaction semantics and an app-level DB
+// role with restricted privileges.
 func isDestructiveSQL(query string) bool {
+	cleaned := stripSQLComments(query)
 	for _, re := range destructiveSQLPatterns {
-		if re.MatchString(query) {
+		if re.MatchString(cleaned) {
 			return true
 		}
 	}
 	// DELETE / UPDATE without WHERE is usually a mistake and always risky.
-	if (deleteFromRe.MatchString(query) || updateSetRe.MatchString(query)) && !whereRe.MatchString(query) {
+	if (deleteFromRe.MatchString(cleaned) || updateSetRe.MatchString(cleaned)) && !whereRe.MatchString(cleaned) {
 		return true
 	}
 	return false
@@ -58,7 +85,7 @@ type ExecuteSQLTool struct {
 
 func (ExecuteSQLTool) Name() string { return "execute_sql" }
 func (ExecuteSQLTool) Description() string {
-	return "Run a SQL query against the project's database. Set readonly=true for SELECT queries; readonly=false for INSERT/UPDATE/DELETE/CREATE/ALTER/DROP. Timeout 10s, max 50 rows returned."
+	return "Run a SQL query against the project's database. Set readonly=true for SELECT queries; readonly=false for INSERT/UPDATE/DELETE/CREATE/ALTER. Timeout 10s, max 50 rows returned. On writes, append `RETURNING id, ...` to get the inserted/updated row values back — UUID columns come back as 36-char strings, not base64. Writes run inside a transaction that rolls back on error."
 }
 func (ExecuteSQLTool) Schema() map[string]any {
 	return map[string]any{
@@ -120,10 +147,43 @@ func (e ExecuteSQLTool) Execute(ctx context.Context, rc *RunContext, input json.
 		return formatRows(rows, 50)
 	}
 
-	// Write path — plain exec, no tx wrapping.
-	res, err := db.ExecContext(qCtx, args.Query)
+	// Write path. Wrap in a transaction so a multi-statement write that
+	// fails halfway doesn't leave orphan rows behind — the LLM sends bulk
+	// INSERT/UPDATE blocks routinely, and partial success was the hardest
+	// failure mode to unpick before this.
+	tx, err := db.BeginTx(qCtx, nil)
+	if err != nil {
+		return fmt.Sprintf("begin tx: %v", err), true, nil
+	}
+	// Rollback is a no-op after a successful Commit, so deferring it is safe.
+	defer tx.Rollback()
+
+	// If the query has a RETURNING clause, run it through QueryContext and
+	// surface the returned rows. This gives the LLM INSERTed IDs in the same
+	// round-trip rather than forcing a follow-up SELECT — cuts the worst
+	// turn-count offender in ecommerce seeding flows.
+	if returningRe.MatchString(stripSQLComments(args.Query)) {
+		rows, err := tx.QueryContext(qCtx, args.Query)
+		if err != nil {
+			return fmt.Sprintf("query error: %v", err), true, nil
+		}
+		out, isErr, fErr := formatRows(rows, 50)
+		rows.Close()
+		if fErr != nil || isErr {
+			return out, isErr, fErr
+		}
+		if err := tx.Commit(); err != nil {
+			return fmt.Sprintf("commit error: %v", err), true, nil
+		}
+		return out, false, nil
+	}
+
+	res, err := tx.ExecContext(qCtx, args.Query)
 	if err != nil {
 		return fmt.Sprintf("exec error: %v", err), true, nil
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Sprintf("commit error: %v", err), true, nil
 	}
 	affected, _ := res.RowsAffected()
 	return fmt.Sprintf("ok (%d rows affected)", affected), false, nil
@@ -153,7 +213,7 @@ func formatRows(rows *sql.Rows, maxRows int) (string, bool, error) {
 		}
 		row := make(map[string]any, len(cols))
 		for i, c := range cols {
-			row[c] = vals[i]
+			row[c] = convertSQLValue(vals[i])
 		}
 		out = append(out, row)
 		count++
@@ -165,4 +225,29 @@ func formatRows(rows *sql.Rows, maxRows int) (string, bool, error) {
 	}
 	b, _ := json.MarshalIndent(result, "", "  ")
 	return string(b), false, nil
+}
+
+// convertSQLValue normalises values scanned into `any` so JSON marshalling
+// doesn't silently corrupt them. The main offender is []byte: lib/pq hands
+// back uuid/bytea/text columns as raw bytes when the Scan target is `*any`,
+// and Go's encoding/json base64-encodes every []byte. That is how UUIDs ended
+// up as base64 in tool results and forced the LLM to rewrite queries around
+// the seemingly-garbage ids. Three cases, in order:
+//  1. exactly 16 bytes → interpret as binary UUID (lib/pq binary mode).
+//  2. valid UTF-8 → treat as text (lib/pq text mode gives uuid as "xxxxxxxx-..").
+//  3. otherwise → hex-encode so real bytea still round-trips deterministically.
+func convertSQLValue(v any) any {
+	b, ok := v.([]byte)
+	if !ok {
+		return v
+	}
+	if len(b) == 16 {
+		if u, err := uuid.FromBytes(b); err == nil {
+			return u.String()
+		}
+	}
+	if utf8.Valid(b) {
+		return string(b)
+	}
+	return hex.EncodeToString(b)
 }

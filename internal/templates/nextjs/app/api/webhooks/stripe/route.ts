@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { eq } from "drizzle-orm";
-import { db, schema } from "@/lib/db";
 import { getAdapter } from "@/lib/payments";
+import { applyPaymentOutcome } from "@/lib/payments/apply-outcome";
 
 // Stripe's webhook signature requires the raw body. Ensure Next.js doesn't
 // mutate it.
@@ -17,24 +16,17 @@ export async function POST(req: NextRequest) {
     event = await adapter.handleWebhook(rawBody, req.headers);
   } catch (err) {
     // Signature verification failed or malformed payload — return 400 so
-    // Stripe retries.
+    // Stripe retries. Returning 200 here would cause silent drops.
     return NextResponse.json({ error: (err as Error).message }, { status: 400 });
   }
 
   if (!event.orderId) return NextResponse.json({ ok: true });
 
-  const nextOrderStatus =
-    event.status === "paid" ? "processing" : event.status === "failed" ? "cancelled" : "pending";
-
-  await db
-    .update(schema.orders)
-    .set({
-      paymentStatus: event.status,
-      paymentId: event.paymentId,
-      status: nextOrderStatus,
-      updatedAt: new Date(),
-    })
-    .where(eq(schema.orders.id, event.orderId));
+  await applyPaymentOutcome({
+    orderId: event.orderId,
+    paymentId: event.paymentId,
+    status: event.status,
+  });
 
   return NextResponse.json({ ok: true });
 }

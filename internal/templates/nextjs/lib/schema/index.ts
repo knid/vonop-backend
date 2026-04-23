@@ -243,6 +243,24 @@ export const wishlists = pgTable(
   }),
 );
 
+// contact_messages
+export const contactMessages = pgTable(
+  "contact_messages",
+  {
+    id: uuid("id").primaryKey().default(sql`uuid_generate_v4()`),
+    name: text("name").notNull(),
+    email: text("email").notNull(),
+    subject: text("subject"),
+    body: text("body").notNull(),
+    status: text("status").notNull().default("new"),
+    ipAddress: text("ip_address"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    statusIdx: index("idx_contact_messages_status").on(t.status, t.createdAt.desc()),
+  }),
+);
+
 // Type aliases via $inferSelect
 export type Config = typeof config.$inferSelect;
 export type ProductCategory = typeof productCategories.$inferSelect;
@@ -254,3 +272,4 @@ export type Order = typeof orders.$inferSelect;
 export type OrderItem = typeof orderItems.$inferSelect;
 export type ProductReview = typeof productReviews.$inferSelect;
 export type Wishlist = typeof wishlists.$inferSelect;
+export type ContactMessage = typeof contactMessages.$inferSelect;

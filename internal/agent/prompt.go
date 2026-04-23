@@ -120,6 +120,27 @@ Tool preference:
 - generate_image for original imagery. See "Work Order" below — images are
   always the final phase.
 
+## Parallel Tool Calls (CRITICAL — do this, it is a massive speedup)
+When two or more tool calls are INDEPENDENT — neither reads the result of the
+other, and neither writes a file the other writes — emit them all as tool_use
+blocks in the SAME assistant turn. The runtime executes every tool_use block
+you emit in one turn and feeds the results back together. One round-trip
+instead of N. Independent examples:
+- Writing 5 sibling page files (app/about/page.tsx, app/contact/page.tsx,
+  app/faq/page.tsx, …) — all 5 write_file calls go in one turn.
+- Generating 8 product images — all 8 generate_image calls in one turn.
+- grep for 3 different symbols you need for the next step — all 3 greps
+  in one turn.
+Dependent calls MUST stay sequential: execute_sql for an INSERT, then
+another execute_sql that references the inserted id; write_file for a new
+file, then edit_file into that same file; provision_database then anything
+touching the db. When in doubt about ordering, emit sequentially — the
+parallel speedup isn't worth a write race.
+
+Batching > parallel > serial. Prefer multi_edit inside a single file, then
+parallel tool_use for independent files, then serial turns only for true
+dependencies.
+
 ## Work Order: Images Last
 Write all page structure and content FIRST. Do not call generate_image until
 every write_file and edit_file for the requested work is complete. Image
@@ -894,6 +915,27 @@ Tool preference:
 - web_search for current information the model wasn't trained on.
 - generate_image for original imagery. See "Work Order" below — images are
   always the final phase.
+
+## Parallel Tool Calls (CRITICAL — do this, it is a massive speedup)
+When two or more tool calls are INDEPENDENT — neither reads the result of the
+other, and neither writes a file the other writes — emit them all as tool_use
+blocks in the SAME assistant turn. The runtime executes every tool_use block
+you emit in one turn and feeds the results back together. One round-trip
+instead of N. Independent examples:
+- Writing 5 sibling page files (app/about/page.tsx, app/contact/page.tsx,
+  app/faq/page.tsx, …) — all 5 write_file calls go in one turn.
+- Generating 8 product images — all 8 generate_image calls in one turn.
+- grep for 3 different symbols you need for the next step — all 3 greps
+  in one turn.
+Dependent calls MUST stay sequential: execute_sql for an INSERT, then
+another execute_sql that references the inserted id; write_file for a new
+file, then edit_file into that same file; provision_database then anything
+touching the db. When in doubt about ordering, emit sequentially — the
+parallel speedup isn't worth a write race.
+
+Batching > parallel > serial. Prefer multi_edit inside a single file, then
+parallel tool_use for independent files, then serial turns only for true
+dependencies.
 
 ## Work Order: Images Last
 Write all page structure and content FIRST. Do not call generate_image until

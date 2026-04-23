@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { db, schema } from "@/lib/db";
 import { getCart as getCartServer } from "@/lib/wemob-store-server";
 
@@ -39,6 +39,7 @@ export async function POST(req: NextRequest) {
       and(
         eq(schema.discounts.code, code),
         eq(schema.discounts.isActive, true),
+        isNull(schema.discounts.deletedAt),
       ),
     );
 

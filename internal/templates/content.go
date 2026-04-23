@@ -296,10 +296,16 @@ func BuildEcommerceGlobalsCSSTheme(colorScheme, darkColorScheme map[string]any) 
 }
 
 // BuildEcommerceLayout generates the root layout.tsx for e-commerce projects.
-// It includes font imports, metadata, and wraps children with Providers, SiteHeader, SiteFooter, and Toaster.
-func BuildEcommerceLayout(storeName string, typography map[string]any) string {
+// It includes font imports, metadata, and wraps children with Providers,
+// SiteHeader, SiteFooter, and Toaster. `lang` is a BCP-47 / ISO 639-1 code
+// (typically from DetectLanguage) — it drives the <html lang="..."> attribute
+// so screen readers and browser hyphenation pick the right language.
+func BuildEcommerceLayout(storeName string, typography map[string]any, lang string) string {
 	if storeName == "" {
 		storeName = "Store"
+	}
+	if lang == "" {
+		lang = "en"
 	}
 	// Escape special characters that would break TypeScript string syntax
 	storeName = strings.ReplaceAll(storeName, `\`, `\\`)
@@ -365,7 +371,7 @@ const %s = %s({ subsets: ["latin"], display: "swap"%s });`, headingVar, headingI
 		bodyClassName = fmt.Sprintf("${%s.variable} ${%s.className}", headingVar, bodyVar)
 	}
 
-	return fmt.Sprintf(`import type { Metadata } from "next";
+	return fmt.Sprintf(`import type { Metadata, Viewport } from "next";
 %s
 import { Toaster } from "sonner";
 import { Providers } from "@/components/ecommerce/providers";
@@ -375,14 +381,22 @@ import "./globals.css";
 
 %s
 
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+};
+
 export const metadata: Metadata = {
-  title: "%s",
+  title: {
+    default: "%s",
+    template: "%%s | %s",
+  },
   description: "Welcome to %s — browse our collection and find what you love.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="%s" suppressHydrationWarning>
       <body className={`+"`"+`%s antialiased`+"`"+`}>
         <Providers>
           <SiteHeader />
@@ -394,7 +408,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     </html>
   );
 }
-`, fontImports, fontConstructors, storeName, storeName, bodyClassName)
+`, fontImports, fontConstructors, storeName, storeName, storeName, lang, bodyClassName)
 }
 
 // GetContent returns the hardcoded content for a template file.

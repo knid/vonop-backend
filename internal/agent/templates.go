@@ -16,13 +16,34 @@ func InjectTemplates(repo *gitrepo.Repo, project *models.AppProject) (int, error
 	lang := constants.DetectLanguage(project.Prompt)
 	written := 0
 
-	// Base templates (package.json, tsconfig, next.config, etc.) — skip
-	// app/globals.css so the LLM writes its own theme.
+	// Pull color scheme / typography off Settings for theme generation.
+	// Non-ecommerce projects still get these tokens via BaseFilePaths'
+	// globals.css below — the LLM reads @theme to inform its design.
+	var colorScheme, darkColorScheme map[string]any
+	var typography map[string]any
+	if project.Settings != nil {
+		if v, ok := project.Settings["color_scheme"].(map[string]any); ok {
+			colorScheme = v
+		}
+		if v, ok := project.Settings["dark_color_scheme"].(map[string]any); ok {
+			darkColorScheme = v
+		}
+		if v, ok := project.Settings["typography"].(map[string]any); ok {
+			typography = v
+		}
+	}
+
+	// Base templates (package.json, tsconfig, next.config, etc.). app/globals.css
+	// is skipped here for ecommerce and mobile_app because those paths get
+	// type-specific versions further down; non-ecommerce web projects still
+	// pick up the base globals.css via GetContentWithLang.
 	for _, p := range templates.BaseFilePaths {
-		if p == "app/globals.css" {
+		if p == "app/globals.css" && project.ProjectType == "ecommerce" {
+			// Ecommerce ships its own richer globals.css (utility classes,
+			// scrollbar, animations) via BuildEcommerceGlobalsCSSTheme below.
 			continue
 		}
-		content := templates.GetContentWithLang(p, nil, nil, project.ProjectType, nil, lang)
+		content := templates.GetContentWithLang(p, colorScheme, darkColorScheme, project.ProjectType, nil, lang)
 		if content == "" {
 			continue
 		}
@@ -54,9 +75,19 @@ func InjectTemplates(repo *gitrepo.Repo, project *models.AppProject) (int, error
 		}
 		for _, p := range templates.EcommerceFilePaths {
 			var content string
-			if p == "components/ecommerce/providers.tsx" {
+			switch p {
+			case "components/ecommerce/providers.tsx":
 				content = templates.BuildEcommerceProviders(needsAuth)
-			} else {
+			case "app/layout.tsx":
+				// Ship the root layout pre-wired with fonts, Providers,
+				// SiteHeader/SiteFooter and Toaster. `lang` comes from
+				// DetectLanguage so screen readers and browser hyphenation
+				// behave correctly from the first render — and the LLM
+				// knows (from the system prompt) not to overwrite this file.
+				content = templates.BuildEcommerceLayout(project.Name, typography, lang)
+			case "app/globals.css":
+				content = templates.BuildEcommerceGlobalsCSSTheme(colorScheme, darkColorScheme)
+			default:
 				content = templates.GetEcommerceContent(p, lang)
 			}
 			if content == "" {

@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, gte, isNull, sql } from "drizzle-orm";
 import { db, schema } from "@/lib/db";
+
+export const dynamic = "force-dynamic";
 
 type ReviewBody = {
   slug?: string;
@@ -11,25 +13,47 @@ type ReviewBody = {
   body?: string;
 };
 
+const MAX_BODY_LEN = 5000;
+const MAX_TITLE_LEN = 200;
+const MAX_NAME_LEN = 100;
+const REVIEWS_PER_EMAIL_PER_DAY = 5;
+
 // POST /api/reviews — submit a review for a product identified by slug.
 // Accepts the snake_case shape the existing client sends.
+//
+// Hardened version:
+//   - Reviews default to status="pending"; merchant moderates before publish.
+//   - is_verified is derived server-side from the customer's paid order
+//     history for this product; the client cannot forge it.
+//   - Per-email rate limit + one-review-per-email-per-product uniqueness
+//     keep the endpoint from being a spam / competitor-sabotage vector.
 export async function POST(req: NextRequest) {
   const body = (await req.json()) as ReviewBody;
 
-  const slug = body.slug;
-  const customerName = body.customer_name;
-  const customerEmail = body.customer_email;
+  const slug = body.slug?.trim();
+  const customerName = body.customer_name?.trim();
+  const customerEmail = body.customer_email?.trim().toLowerCase();
   const rating = body.rating;
 
   if (!slug || !customerName || !customerEmail || typeof rating !== "number") {
     return NextResponse.json({ error: "missing_fields" }, { status: 400 });
   }
-  if (rating < 1 || rating > 5) {
+  if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
     return NextResponse.json({ error: "invalid_rating" }, { status: 400 });
+  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customerEmail)) {
+    return NextResponse.json({ error: "invalid_email" }, { status: 400 });
+  }
+  if (
+    customerName.length > MAX_NAME_LEN ||
+    (body.title && body.title.length > MAX_TITLE_LEN) ||
+    (body.body && body.body.length > MAX_BODY_LEN)
+  ) {
+    return NextResponse.json({ error: "text_too_long" }, { status: 400 });
   }
 
   const [product] = await db
-    .select()
+    .select({ id: schema.products.id })
     .from(schema.products)
     .where(
       and(
@@ -41,6 +65,55 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "product_not_found" }, { status: 404 });
   }
 
+  // Uniqueness: one review per (email, product). A repeat submission is
+  // silently treated as an update — we return 409 and let the client
+  // surface an appropriate message rather than silently dropping the post.
+  const [existing] = await db
+    .select({ id: schema.productReviews.id })
+    .from(schema.productReviews)
+    .where(
+      and(
+        eq(schema.productReviews.productId, product.id),
+        eq(schema.productReviews.customerEmail, customerEmail),
+      ),
+    );
+  if (existing) {
+    return NextResponse.json({ error: "already_reviewed" }, { status: 409 });
+  }
+
+  // Rate limit: cap reviews-per-email across ALL products in the last day.
+  // Cheap enough to run inline via a count query; no extra infra required.
+  const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  const [{ count: recentCount }] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(schema.productReviews)
+    .where(
+      and(
+        eq(schema.productReviews.customerEmail, customerEmail),
+        gte(schema.productReviews.createdAt, oneDayAgo),
+      ),
+    );
+  if (Number(recentCount) >= REVIEWS_PER_EMAIL_PER_DAY) {
+    return NextResponse.json({ error: "rate_limited" }, { status: 429 });
+  }
+
+  // Verified purchase: does this email have a paid order containing this
+  // product? Only join order_items once through orders so we don't need
+  // additional indexes beyond what the seeded schema already provides.
+  const [verifiedRow] = await db
+    .select({ id: schema.orderItems.id })
+    .from(schema.orderItems)
+    .innerJoin(schema.orders, eq(schema.orderItems.orderId, schema.orders.id))
+    .where(
+      and(
+        eq(schema.orderItems.productId, product.id),
+        eq(schema.orders.customerEmail, customerEmail),
+        eq(schema.orders.paymentStatus, "paid"),
+      ),
+    )
+    .limit(1);
+  const isVerified = !!verifiedRow;
+
   const [inserted] = await db
     .insert(schema.productReviews)
     .values({
@@ -50,14 +123,20 @@ export async function POST(req: NextRequest) {
       rating,
       title: body.title,
       body: body.body,
-      // status defaults to 'approved' per SQL schema.
+      isVerified,
+      // Override the schema's "approved" default — merchant moderates first.
+      status: "pending",
     })
-    .returning({ id: schema.productReviews.id, status: schema.productReviews.status });
+    .returning({
+      id: schema.productReviews.id,
+      status: schema.productReviews.status,
+    });
 
   return NextResponse.json({
     id: inserted.id,
     status: inserted.status,
-    message: "Review submitted",
+    is_verified: isVerified,
+    message: "Review submitted — awaiting moderation.",
   });
 }
 
@@ -71,7 +150,7 @@ export async function GET(req: NextRequest) {
   if (!slug) return NextResponse.json(empty);
 
   const [product] = await db
-    .select()
+    .select({ id: schema.products.id })
     .from(schema.products)
     .where(
       and(

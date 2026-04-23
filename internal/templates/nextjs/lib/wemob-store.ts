@@ -33,19 +33,23 @@ export type {
 };
 
 // ---------------------------------------------------------------------------
-// Environment
-// ---------------------------------------------------------------------------
-
-const API_URL = process.env.NEXT_PUBLIC_WEMOB_API_URL || "";
-const STORE_ID = process.env.NEXT_PUBLIC_STORE_ID || "";
-
-// ---------------------------------------------------------------------------
 // API Fetch Helper
 // ---------------------------------------------------------------------------
+//
+// All reads target the local /api/* routes that back onto this tenant's Neon
+// database via wemob-store-server. The legacy /v2/storefront/:storeId/... path
+// was retired when the schema refactor moved store state into per-tenant DBs,
+// so the old NEXT_PUBLIC_WEMOB_API_URL / NEXT_PUBLIC_STORE_ID envs no longer
+// exist and the client SDK no longer reaches outside the app's own origin.
+//
+// The browser sends the httpOnly wemob_cart_session cookie automatically for
+// every request — there is no duplicate client-side session id to keep in
+// sync. credentials:"same-origin" is the default but kept explicit for
+// clarity when the SDK is read cold.
 
 async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
-  const url = API_URL + "/v2/storefront/" + STORE_ID + path;
-  const res = await fetch(url, {
+  const res = await fetch(path, {
+    credentials: "same-origin",
     headers: { "Content-Type": "application/json", ...options?.headers },
     ...options,
   });
@@ -62,7 +66,7 @@ async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
 
 /** Fetch the store configuration (name, currency, locale, tax, etc.). */
 export async function getStoreConfig(): Promise<StoreConfig> {
-  return apiFetch<StoreConfig>("/config");
+  return apiFetch<StoreConfig>("/api/config");
 }
 
 // ---------------------------------------------------------------------------
@@ -78,12 +82,12 @@ export async function getProducts(params?: {
   if (params?.category) query.set("category", params.category);
   if (params?.q) query.set("q", params.q);
   const qs = query.toString();
-  return apiFetch<StorefrontProduct[]>("/products" + (qs ? "?" + qs : ""));
+  return apiFetch<StorefrontProduct[]>("/api/products" + (qs ? "?" + qs : ""));
 }
 
 /** Fetch a single product by slug. */
 export async function getProduct(slug: string): Promise<StorefrontProduct> {
-  return apiFetch<StorefrontProduct>("/products/" + slug);
+  return apiFetch<StorefrontProduct>("/api/products/" + encodeURIComponent(slug));
 }
 
 // ---------------------------------------------------------------------------
@@ -92,18 +96,21 @@ export async function getProduct(slug: string): Promise<StorefrontProduct> {
 
 /** Fetch all categories. */
 export async function getCategories(): Promise<StorefrontCategory[]> {
-  return apiFetch<StorefrontCategory[]>("/categories");
+  return apiFetch<StorefrontCategory[]>("/api/categories");
 }
 
 // ---------------------------------------------------------------------------
 // Cart API
 //
-// Cart mutations now target local Next.js route handlers that talk directly
+// Cart mutations target local Next.js route handlers that talk directly
 // to the tenant's Neon DB. The browser automatically sends the httpOnly
-// `wemob_cart_session` cookie owned by those routes, so the legacy
-// `sessionId` parameter is ignored by the HTTP layer. We keep the argument
-// in the function signatures so existing `CartProvider` callers compile
-// unchanged.
+// wemob_cart_session cookie owned by those routes — that is the SINGLE
+// source of truth for which cart belongs to this browser. There is no
+// client-side session id, so none of the mutation helpers need one.
+// The _sessionId first argument on getCart/addCartItem/etc. is a legacy
+// no-op: kept to preserve source compatibility with older callers that
+// still pass `getSessionId()` in. New code should call these without
+// the first argument.
 // ---------------------------------------------------------------------------
 
 // Build an empty StorefrontCart so provider state stays well-shaped when
@@ -120,80 +127,72 @@ function emptyCart(): StorefrontCart {
   };
 }
 
-async function localCartFetch(path: string, options?: RequestInit): Promise<StorefrontCart> {
-  const res = await fetch(path, {
-    // Same-origin fetch: browser sends the wemob_cart_session cookie
-    // automatically. credentials:"same-origin" is the default but we're
-    // explicit for clarity.
-    credentials: "same-origin",
-    headers: { "Content-Type": "application/json", ...options?.headers },
-    ...options,
-  });
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error("API error " + res.status + ": " + body);
+async function cartFetch(path: string, options?: RequestInit): Promise<StorefrontCart> {
+  try {
+    const data = await apiFetch<StorefrontCart | null>(path, options);
+    return data ?? emptyCart();
+  } catch (err) {
+    throw err;
   }
-  const data = (await res.json()) as StorefrontCart | null;
-  return data ?? emptyCart();
 }
 
 /**
- * Legacy no-op: carts are now created server-side lazily on first add-item.
+ * Legacy no-op: carts are created server-side lazily on first add-item.
  * Returns an empty StorefrontCart so any caller that expects a Promise of
  * one still resolves cleanly.
  */
-export async function createCart(_sessionId: string): Promise<StorefrontCart> {
+export async function createCart(_sessionId?: string): Promise<StorefrontCart> {
   return emptyCart();
 }
 
-export async function getCart(_sessionId: string): Promise<StorefrontCart> {
-  return localCartFetch("/api/cart");
+export async function getCart(_sessionId?: string): Promise<StorefrontCart> {
+  return cartFetch("/api/cart");
 }
 
 export async function addCartItem(
-  _sessionId: string,
+  _sessionId: string | undefined,
   productId: string,
   quantity: number
 ): Promise<StorefrontCart> {
-  return localCartFetch("/api/cart", {
+  return cartFetch("/api/cart", {
     method: "POST",
     body: JSON.stringify({ productId, quantity }),
   });
 }
 
 export async function updateCartItem(
-  _sessionId: string,
+  _sessionId: string | undefined,
   itemId: string,
   quantity: number
 ): Promise<StorefrontCart> {
-  return localCartFetch("/api/cart/" + encodeURIComponent(itemId), {
+  return cartFetch("/api/cart/" + encodeURIComponent(itemId), {
     method: "PUT",
     body: JSON.stringify({ quantity }),
   });
 }
 
 export async function removeCartItem(
-  _sessionId: string,
+  _sessionId: string | undefined,
   itemId: string
 ): Promise<StorefrontCart> {
-  return localCartFetch("/api/cart/" + encodeURIComponent(itemId), {
+  return cartFetch("/api/cart/" + encodeURIComponent(itemId), {
     method: "DELETE",
   });
 }
 
 export async function applyDiscountCode(
-  _sessionId: string,
+  _sessionId: string | undefined,
   code: string
 ): Promise<StorefrontCart> {
-  return localCartFetch("/api/discount", {
+  return cartFetch("/api/discount", {
     method: "POST",
     body: JSON.stringify({ code }),
   });
 }
 
 /** Remove the currently applied discount code from the cart. */
-export async function removeDiscount(_sessionId: string): Promise<StorefrontCart> {
-  return localCartFetch("/api/discount", {
+export async function removeDiscount(_sessionId?: string): Promise<StorefrontCart> {
+  return cartFetch("/api/discount", {
     method: "DELETE",
   });
 }
@@ -234,81 +233,26 @@ export function formatPrice(cents: number, currency?: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Session Management (cookie + localStorage, SSR-safe)
+// Cart Cache (localStorage, SSR-safe)
 // ---------------------------------------------------------------------------
-
-const SESSION_COOKIE = "wemob_session";
-const SESSION_LS_KEY = "wemob_session_id";
-const SESSION_MAX_AGE = 30 * 24 * 60 * 60; // 30 days in seconds
+//
+// The only session state the storefront trusts is the server-owned, httpOnly
+// wemob_cart_session cookie. localStorage just mirrors the last-seen cart
+// shape so the drawer/badge renders instantly on next page load while we
+// revalidate in the background. A previous version of this file maintained
+// a second js-visible session cookie; that duplicated state drifted out of
+// sync with the httpOnly one and was removed.
 
 function isBrowser(): boolean {
   return typeof window !== "undefined";
 }
 
-function setCookie(name: string, value: string, maxAge: number): void {
-  if (!isBrowser()) return;
-  document.cookie =
-    name +
-    "=" +
-    encodeURIComponent(value) +
-    "; path=/; max-age=" +
-    maxAge +
-    "; SameSite=Lax";
-}
-
-function getCookie(name: string): string | null {
-  if (!isBrowser()) return null;
-  const match = document.cookie.match(
-    new RegExp("(?:^|; )" + name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "=([^;]*)")
-  );
-  return match ? decodeURIComponent(match[1]) : null;
-}
-
-function deleteCookie(name: string): void {
-  if (!isBrowser()) return;
-  document.cookie = name + "=; path=/; max-age=0; SameSite=Lax";
-}
-
-/** Get or create a persistent session ID, stored in both cookie and localStorage. */
-export function getSessionId(): string {
-  if (!isBrowser()) return "";
-
-  // Try cookie first, then localStorage
-  let id = getCookie(SESSION_COOKIE);
-  if (!id) {
-    id = localStorage.getItem(SESSION_LS_KEY);
-  }
-  if (!id) {
-    id = (typeof crypto !== "undefined" && crypto.randomUUID) ? crypto.randomUUID() : (Math.random().toString(36).slice(2) + Date.now().toString(36));
-  }
-
-  // Persist to both stores
-  setCookie(SESSION_COOKIE, id, SESSION_MAX_AGE);
-  try {
-    localStorage.setItem(SESSION_LS_KEY, id);
-  } catch {
-    // localStorage may be unavailable (private browsing, quota)
-  }
-
-  return id;
-}
-
-/** Clear all session data. */
-export function clearSession(): void {
-  if (!isBrowser()) return;
-  deleteCookie(SESSION_COOKIE);
-  try {
-    localStorage.removeItem(SESSION_LS_KEY);
-  } catch {
-    // ignore
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Cart Cache (localStorage, SSR-safe)
-// ---------------------------------------------------------------------------
-
-const CART_CACHE_KEY = "wemob_cart_" + STORE_ID;
+// Static key — no STORE_ID dependency. When a site collides with other
+// wemob-generated sites on the same origin (unlikely in production but
+// common in dev/preview), the path scoping of the httpOnly cookie plus the
+// server-side revalidation keep cart state separate; the cache is just a
+// visual warmup.
+const CART_CACHE_KEY = "wemob_cart";
 
 interface CartCache { cart: StorefrontCart; ts: number; }
 
@@ -329,11 +273,6 @@ function loadCartCache(): StorefrontCart | null {
     const raw = localStorage.getItem(CART_CACHE_KEY);
     if (!raw) return null;
     const cached: CartCache = JSON.parse(raw);
-    const sid = getCookie(SESSION_COOKIE) || localStorage.getItem(SESSION_LS_KEY);
-    if (cached.cart.session_id && sid && cached.cart.session_id !== sid) {
-      localStorage.removeItem(CART_CACHE_KEY);
-      return null;
-    }
     return cached.cart;
   } catch {
     try { localStorage.removeItem(CART_CACHE_KEY); } catch { /* ignore */ }
@@ -384,7 +323,6 @@ const CartContext = React.createContext<CartContextValue | null>(null);
 export function CartProvider({ children }: { children: React.ReactNode }) {
   const [cart, setCart] = React.useState<StorefrontCart | null>(null);
   const [isLoading, setIsLoading] = React.useState(true);
-  const sessionIdRef = React.useRef<string>("");
   const cartRef = React.useRef<StorefrontCart | null>(null);
 
   // Keep ref in sync with state
@@ -398,33 +336,28 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     return cart.items.reduce((sum, item) => sum + item.quantity, 0);
   }, [cart]);
 
-  // Initialize cart from session on mount
+  // Initialize cart on mount. No client-side session bootstrap — the httpOnly
+  // wemob_cart_session cookie is minted by the first /api/cart mutation and
+  // the browser carries it transparently after that.
   React.useEffect(() => {
     let cancelled = false;
 
     async function init() {
-      const sid = getSessionId();
-      if (!sid) { setIsLoading(false); return; }
-      sessionIdRef.current = sid;
-
-      // Hydrate from cache immediately
+      // Hydrate from cache immediately so the badge/drawer doesn't flicker
+      // while revalidation is in flight.
       const cached = loadCartCache();
       if (cached) {
         setCart(cached);
         setIsLoading(false);
       }
 
-      // Revalidate from API in background
       try {
-        const existing = await getCart(sid);
+        const existing = await getCart();
         if (!cancelled) { setCart(existing); saveCartCache(existing); }
       } catch {
-        if (!cached) {
-          try {
-            const fresh = await createCart(sid);
-            if (!cancelled) { setCart(fresh); saveCartCache(fresh); }
-          } catch { /* API unreachable, stay with cache or empty */ }
-        }
+        // API unreachable: keep whatever the cache gave us; no fallback call
+        // to createCart is needed because carts are server-created lazily on
+        // the first add-item.
       }
       if (!cancelled) setIsLoading(false);
     }
@@ -462,8 +395,6 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
 
   const handleAddItem = React.useCallback(
     async (productId: string, quantity?: number) => {
-      const sid = sessionIdRef.current || getSessionId();
-      sessionIdRef.current = sid;
       const qty = Math.max(1, quantity ?? 1);
 
       // Optimistic: add a placeholder item and recalculate totals
@@ -487,7 +418,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         : null;
 
       await withOptimistic(optimistic, () =>
-        addCartItem(sid, productId, qty)
+        addCartItem(undefined, productId, qty)
       );
     },
     [withOptimistic]
@@ -495,9 +426,8 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
 
   const handleUpdateItem = React.useCallback(
     async (itemId: string, quantity: number) => {
-      const sid = sessionIdRef.current;
       const current = cartRef.current;
-      if (!sid || !current) return;
+      if (!current) return;
 
       // Optimistic: update quantity in-place and recalculate totals
       const optimistic = recalcTotals({
@@ -510,7 +440,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       });
 
       await withOptimistic(optimistic, () =>
-        updateCartItem(sid, itemId, quantity)
+        updateCartItem(undefined, itemId, quantity)
       );
     },
     [withOptimistic]
@@ -518,9 +448,8 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
 
   const handleRemoveItem = React.useCallback(
     async (itemId: string) => {
-      const sid = sessionIdRef.current;
       const current = cartRef.current;
-      if (!sid || !current) return;
+      if (!current) return;
 
       // Optimistic: remove item and recalculate totals
       const optimistic = recalcTotals({
@@ -529,7 +458,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       });
 
       await withOptimistic(optimistic, () =>
-        removeCartItem(sid, itemId)
+        removeCartItem(undefined, itemId)
       );
     },
     [withOptimistic]
@@ -537,10 +466,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
 
   const handleApplyDiscount = React.useCallback(
     async (code: string) => {
-      const sid = sessionIdRef.current;
-      if (!sid) return;
-
-      const updated = await applyDiscountCode(sid, code);
+      const updated = await applyDiscountCode(undefined, code);
       setCart(updated);
       saveCartCache(updated);
     },
@@ -549,10 +475,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
 
   const handleRemoveDiscount = React.useCallback(
     async () => {
-      const sid = sessionIdRef.current;
-      if (!sid) return;
-
-      const updated = await removeDiscount(sid);
+      const updated = await removeDiscount();
       setCart(updated);
       saveCartCache(updated);
     },
@@ -560,9 +483,11 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   );
 
   const handleClearCart = React.useCallback(() => {
+    // Server-owned sessions can't be revoked from the browser. Clearing the
+    // local state + cache is enough for UX; the next page load (or explicit
+    // post-checkout redirect) will pick up whatever the server now returns.
     setCart(null);
     clearCartCache();
-    clearSession();
   }, []);
 
   const value = React.useMemo<CartContextValue>(
@@ -838,37 +763,29 @@ export function useReviews(slug: string) {
 // Wishlist
 // ---------------------------------------------------------------------------
 
+// Wishlist uses the same httpOnly cookie as the cart (wemob_cart_session) —
+// no _sessionId arg is actually consumed. The leading parameter stays only
+// for source compatibility with older callers that still forward a
+// session id through the SDK.
+
 /** Fetch wishlist items for the current session. */
-export async function getWishlist(_sessionId: string): Promise<WishlistItem[]> {
-  const res = await fetch("/api/wishlist", { credentials: "same-origin" });
-  if (!res.ok) {
-    throw new Error("API error " + res.status + ": " + (await res.text()));
-  }
-  return res.json();
+export async function getWishlist(_sessionId?: string): Promise<WishlistItem[]> {
+  return apiFetch<WishlistItem[]>("/api/wishlist");
 }
 
 /** Add a product to the wishlist. */
-export async function addToWishlist(_sessionId: string, productId: string): Promise<void> {
-  const res = await fetch("/api/wishlist", {
+export async function addToWishlist(_sessionId: string | undefined, productId: string): Promise<void> {
+  await apiFetch<{ ok: true }>("/api/wishlist", {
     method: "POST",
-    credentials: "same-origin",
-    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ productId }),
   });
-  if (!res.ok) {
-    throw new Error("API error " + res.status + ": " + (await res.text()));
-  }
 }
 
 /** Remove a product from the wishlist. */
-export async function removeFromWishlist(_sessionId: string, productId: string): Promise<void> {
-  const res = await fetch("/api/wishlist/" + encodeURIComponent(productId), {
+export async function removeFromWishlist(_sessionId: string | undefined, productId: string): Promise<void> {
+  await apiFetch<{ ok: true }>("/api/wishlist/" + encodeURIComponent(productId), {
     method: "DELETE",
-    credentials: "same-origin",
   });
-  if (!res.ok) {
-    throw new Error("API error " + res.status + ": " + (await res.text()));
-  }
 }
 
 /** Hook: manage wishlist state for the current session. */
@@ -877,10 +794,7 @@ export function useWishlist() {
   const [isLoading, setIsLoading] = React.useState(true);
 
   React.useEffect(() => {
-    const sid = getSessionId();
-    if (!sid) { setIsLoading(false); return; }
-
-    getWishlist(sid)
+    getWishlist()
       .then((data) => setItems(data || []))
       .catch(() => {})
       .finally(() => setIsLoading(false));
@@ -893,15 +807,12 @@ export function useWishlist() {
 
   const toggleWishlist = React.useCallback(
     async (productId: string) => {
-      const sid = getSessionId();
-      if (!sid) return;
-
       if (items.some((item) => item.product_id === productId)) {
-        await removeFromWishlist(sid, productId);
+        await removeFromWishlist(undefined, productId);
         setItems((prev) => prev.filter((item) => item.product_id !== productId));
       } else {
-        await addToWishlist(sid, productId);
-        const updated = await getWishlist(sid);
+        await addToWishlist(undefined, productId);
+        const updated = await getWishlist();
         setItems(updated || []);
       }
     },

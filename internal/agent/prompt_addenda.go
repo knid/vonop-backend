@@ -56,9 +56,19 @@ nullable columns or new tables when extending the schema.
 - product_categories: name, slug, parent_id, image, description, sort_order
 - discounts: code, type ('percentage'|'fixed'), value, min_order_cents, max_uses, used_count, applies_to (jsonb), starts_at, ends_at, is_active
 - orders: order_number, customer_email, customer_name, shipping_address (jsonb), billing_address (jsonb), subtotal_cents, discount_cents, tax_cents, shipping_cents, total_cents, currency, status, payment_status, payment_provider, payment_id, discount_id, metadata (jsonb)
+- contact_messages: name, email, subject, body, status ('new'|'read'|'archived'|'spam'), ip_address — inbound messages from the storefront's contact form, persisted by /api/contact.
 
 ## Template Files (Do Not Recreate, Do Not Rewrite)
 These paths are template-managed. Import from them; never overwrite them:
+
+Root shell:
+- app/layout.tsx                next/font wired, Providers + SiteHeader +
+                                SiteFooter + Toaster mounted, <html lang> set
+                                from the detected locale. Use edit_file only
+                                (e.g. to swap fonts), never write_file.
+- app/globals.css               Tailwind v4 @theme tokens + ecommerce utility
+                                classes (glow, glass, gradient-text, marquee).
+                                Edit for theme tweaks; never rewrite whole.
 
 Data layer:
 - lib/db.ts                     drizzle-neon-http client
@@ -66,6 +76,7 @@ Data layer:
 - lib/wemob-store.ts            client SDK (hooks + write helpers, "use client")
 - lib/wemob-store-server.ts     server-only drizzle reads (import "server-only")
 - lib/wemob-store-types.ts      shared type declarations
+
 
 Payments:
 - lib/payments/index.ts, lib/payments/stripe.ts, lib/payments/iyzico.ts,
@@ -78,6 +89,14 @@ API routes (local /api/* backed by drizzle):
 - app/api/reviews/route.ts
 - app/api/wishlist/route.ts, app/api/wishlist/[productId]/route.ts
 - app/api/webhooks/stripe/route.ts, app/api/webhooks/iyzico/route.ts
+- app/api/products/route.ts, app/api/products/[slug]/route.ts
+- app/api/categories/route.ts
+- app/api/config/route.ts
+- app/api/contact/route.ts          POST { name, email, subject?, message }
+                                    → persists into contact_messages. Wire
+                                    any contact form you write directly to
+                                    this endpoint — do NOT fake the submit
+                                    with setTimeout + toast.
 
 Pages:
 - app/cart/page.tsx, app/checkout/page.tsx,
@@ -107,6 +126,30 @@ Never hardcode product, category, or price arrays. Any list of objects with
 name, price, or image must come from the data layer. FAQ items, testimonials,
 team members, and navigation links may still be hardcoded.
 
+## Internationalisation (i18n)
+Storefront chrome is localised at template-copy time: the backend detects the
+user's language from the original prompt and resolves every ` + "`{{t.xxx}}`" + ` /
+` + "`{{te.xxx}}`" + ` placeholder in the shipped template files before the first
+agent turn. By the time you read a file like components/ecommerce/site-header.tsx,
+every placeholder is already gone — you see the resolved string in the active
+language (Turkish, English, Spanish, German, French, Portuguese, Arabic).
+
+Rules:
+- If you still see ` + "`{{t.xxx}}`" + ` or ` + "`{{te.xxx}}`" + ` inside a template-managed file,
+  STOP. It means the localiser didn't run, which is a bug. Do NOT "fix" it by
+  replacing the placeholder with a hand-written string — that locks the store
+  into one language and breaks every other locale the backend might target.
+  Report the missing resolution back to the user and continue with other work.
+- Currently resolved strings are fixed at generation time. If the user later
+  asks to change the storefront language, the ask has to flow through a
+  re-generation (or a follow-up prompt that edits the specific strings with
+  edit_file). You cannot swap the whole catalogue with one tool call.
+
+For LLM-authored pages (app/page.tsx, app/about/page.tsx, app/contact/page.tsx,
+app/faq/page.tsx), write directly in the store's language — the same language
+you'd use to answer the user. Hero copy, product descriptions, brand story,
+FAQs are prose, not chrome; they don't need any translation layer.
+
 ## Data Access
 Server components and route handlers read from '@/lib/wemob-store-server':
   getStoreConfig, getProducts, getProduct, getCategories, getCart,
@@ -135,6 +178,20 @@ settings, run INSERT / UPDATE statements against the live tables via
 execute_sql. The storefront picks up new rows automatically — no component
 edits needed. Generate product imagery with the generate_image tool first and
 embed the returned URLs in the images jsonb array.
+
+UUIDs come back as canonical 36-character strings (e.g. "bc34e90f-..."),
+not base64, not binary — safe to quote them directly in follow-up SQL. To
+capture IDs of rows you just inserted, append RETURNING to the statement:
+
+    INSERT INTO product_categories (name, slug) VALUES
+      ('Moisturising', 'moisturising'),
+      ('Natural', 'natural')
+    RETURNING id, slug;
+
+The tool result for a RETURNING write is the same shape as a SELECT (rows
+array with the returned columns), so you can feed the IDs straight into the
+next INSERT without a round-trip. Writes run inside a transaction — if any
+statement in a multi-statement write fails, the whole thing rolls back.
 
 After adding new tables or columns with execute_sql, update lib/schema/index.ts
 so the drizzle types match the live database.

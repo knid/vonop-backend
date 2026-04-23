@@ -168,11 +168,27 @@ export async function handleWebhook(
   const token = params.get("token");
   if (!token) throw new Error("iyzico webhook missing token");
 
+  // The retrieve() call is our authentication: it signs the request with
+  // our merchant API+secret keys, so Iyzico will only return a result for
+  // a session we actually initiated. Foreign or forged tokens either 404
+  // or come back with status != "success", which we reject below. This
+  // is why we don't need (and Iyzico doesn't send) a request-body
+  // signature header.
   const result = await promisify<IyzipayRetrieveResult>((cb) =>
     iyzipay.checkoutForm.retrieve({ locale: "en", token }, cb),
   );
 
+  if (result.status !== "success") {
+    throw new Error(
+      `iyzico webhook retrieve failed: ${result.errorMessage ?? "unknown error"}`,
+    );
+  }
+
   const orderId = result.conversationId ?? "";
+  if (!orderId) {
+    throw new Error("iyzico webhook missing conversationId");
+  }
+
   const paid = result.paymentStatus === "SUCCESS";
   return {
     orderId,

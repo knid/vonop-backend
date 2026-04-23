@@ -187,6 +187,11 @@ export default function GlobalError({
 
 // DetectLanguage infers the primary language from a user prompt by checking
 // for language-specific characters and common words. Returns an ISO 639-1 code.
+//
+// The earlier version relied purely on diacritics, which misfires badly on
+// short Turkish prompts — "el kremi satacagim" has zero Turkish-specific
+// characters and got classified as English, shipping a Turkish merchant an
+// English storefront. The word-level pass below catches the common case.
 func DetectLanguage(prompt string) string {
 	lower := strings.ToLower(prompt)
 
@@ -217,5 +222,49 @@ func DetectLanguage(prompt string) string {
 		return "pt"
 	}
 
+	// Word-level fallback: look for high-signal ASCII-only tokens.
+	if lang := detectByWords(lower); lang != "" {
+		return lang
+	}
+
 	return "en"
+}
+
+// detectByWords scans a lowercased prompt for common words that strongly
+// suggest a particular language. Only tokens that are rare in English and
+// common in the target language qualify — otherwise every store whose name
+// happens to contain "bir" or "en" gets misclassified. Returns "" when
+// nothing matches.
+func detectByWords(lower string) string {
+	// Tokenise on whitespace and common punctuation so suffix-heavy languages
+	// like Turkish match agglutinated forms ("satacagim", "istiyorum").
+	fields := strings.FieldsFunc(lower, func(r rune) bool {
+		return r == ' ' || r == '\t' || r == '\n' || r == ',' || r == '.' || r == '!' || r == '?' || r == ';' || r == ':' || r == '"' || r == '\''
+	})
+	words := make(map[string]bool, len(fields))
+	for _, f := range fields {
+		words[f] = true
+	}
+
+	turkish := []string{
+		// High-signal agglutinated verb forms — "-acagim"/"-ecegim" (I will),
+		// "-iyorum" (I am -ing), "-mak"/"-mek" infinitives. These never appear
+		// in English prose and catch short prompts without diacritics.
+		"istiyorum", "yapacagim", "yapmak", "satacagim", "satmak", "satiyorum",
+		"olacak", "olsun", "acmak", "acacagim", "kurmak", "kuracagim",
+		// Ultra-common function words — single matches aren't enough on
+		// their own, but combined with the verb forms above they're decisive.
+		"icin", "cok", "bir", "ile", "degil", "olan", "lazim", "var", "yok",
+		// Domain words frequent in store prompts.
+		"magaza", "urun", "satis", "kargo", "sepet", "siparis",
+	}
+	for _, w := range turkish {
+		if words[w] {
+			return "tr"
+		}
+	}
+
+	// Space for future additions (es/de/fr/pt without diacritics) — keep
+	// the pattern here rather than growing DetectLanguage.
+	return ""
 }

@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { eq } from "drizzle-orm";
-import { db, schema } from "@/lib/db";
 import { getAdapter } from "@/lib/payments";
+import { applyPaymentOutcome } from "@/lib/payments/apply-outcome";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,27 +13,26 @@ export async function POST(req: NextRequest) {
     const adapter = getAdapter("iyzico");
     event = await adapter.handleWebhook(rawBody, req.headers);
   } catch (err) {
+    // Iyzico's retrieve() call rejects foreign tokens because our merchant
+    // secret can only decrypt our own sessions — that is the real signature
+    // check. Surface verification failures as 400 so Iyzico can retry if
+    // they chose to.
     return NextResponse.json({ error: (err as Error).message }, { status: 400 });
   }
 
-  if (!event.orderId) return NextResponse.json({ ok: true });
-
-  const nextOrderStatus =
-    event.status === "paid" ? "processing" : event.status === "failed" ? "cancelled" : "pending";
-
-  await db
-    .update(schema.orders)
-    .set({
-      paymentStatus: event.status,
+  if (event.orderId) {
+    await applyPaymentOutcome({
+      orderId: event.orderId,
       paymentId: event.paymentId,
-      status: nextOrderStatus,
-      updatedAt: new Date(),
-    })
-    .where(eq(schema.orders.id, event.orderId));
+      status: event.status,
+    });
+  }
 
-  // Iyzico expects an HTML page redirecting the user to the success/cancel
-  // page. Emit a minimal HTML response with a meta-refresh. The siteUrl is
-  // derived from the request to avoid hardcoding.
+  // Iyzico posts the callback from the CUSTOMER'S browser (not server-to-
+  // server), so we redirect the customer to the right Wemob page. If an
+  // attacker posts here directly without going through a real payment,
+  // applyPaymentOutcome above will no-op because their orderId (if any)
+  // is either unknown or already terminal.
   const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "";
   const target =
     event.status === "paid"

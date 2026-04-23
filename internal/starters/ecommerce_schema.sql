@@ -195,6 +195,22 @@ CREATE TABLE wishlists (
     UNIQUE (session_id, product_id)
 );
 
+-- contact_messages (inbound messages from the store's contact form)
+-- The /api/contact route writes here; merchants read them from the admin.
+-- status is a free-form tag (`new`, `read`, `archived`, `spam`) rather than
+-- an enum so teams can extend it per workflow without a migration.
+CREATE TABLE contact_messages (
+    id           uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+    name         text NOT NULL,
+    email        text NOT NULL,
+    subject      text,
+    body         text NOT NULL,
+    status       text NOT NULL DEFAULT 'new',
+    ip_address   text,
+    created_at   timestamptz NOT NULL DEFAULT current_timestamp
+);
+CREATE INDEX idx_contact_messages_status ON contact_messages(status, created_at DESC);
+
 -- Seed the single config row. The AI UPDATEs (never INSERTs) this row on the
 -- first turn to set store_name, currency, locale, tax_rate, and the jsonb
 -- shipping/payment configs.

@@ -62,6 +62,8 @@ var DBFilePaths = []string{
 
 // EcommerceFilePaths are template-managed files injected only for e-commerce projects.
 var EcommerceFilePaths = []string{
+	"app/layout.tsx",
+	"app/globals.css",
 	"lib/db.ts",
 	"lib/schema/index.ts",
 	"lib/wemob-store.ts",
@@ -102,6 +104,7 @@ var EcommerceFilePaths = []string{
 	"lib/payments/stripe.ts",
 	"lib/payments/iyzico.ts",
 	"lib/payments/cod.ts",
+	"lib/payments/apply-outcome.ts",
 	"app/api/cart/route.ts",
 	"app/api/cart/[itemId]/route.ts",
 	"app/api/checkout/route.ts",
@@ -111,6 +114,14 @@ var EcommerceFilePaths = []string{
 	"app/api/wishlist/[productId]/route.ts",
 	"app/api/webhooks/stripe/route.ts",
 	"app/api/webhooks/iyzico/route.ts",
+	// Local storefront read APIs. These back useProducts / useProduct /
+	// useCategories / useStoreConfig on the client so the SDK no longer
+	// depends on the retired /v2/storefront/:storeId backend endpoint.
+	"app/api/products/route.ts",
+	"app/api/products/[slug]/route.ts",
+	"app/api/categories/route.ts",
+	"app/api/config/route.ts",
+	"app/api/contact/route.ts",
 }
 
 // UIFilePaths are pre-built UI component templates injected during initial generation.
