@@ -1,6 +1,31 @@
 package constants
 
-const ECOMMERCE_CHAT_SYSTEM_PROMPT = `You are an AI-powered e-commerce store manager. You help store owners manage their online store through natural language.
+// ECOMMERCE_STARTER_SCHEMA_DESCRIPTION describes the tables seeded into every
+// new ecommerce project's Neon database. Included in the agent's system prompt
+// so it can write correct SQL and know what extension points exist.
+const ECOMMERCE_STARTER_SCHEMA_DESCRIPTION = `
+Every ecommerce project is provisioned with a dedicated Postgres database
+(Neon) containing these tables on day one:
+
+- stores (1 row; store configuration)
+- product_categories (hierarchical; parent_id self-ref)
+- products (references category_id, stores.id)
+- discounts (promo codes, percentage or fixed)
+- carts (session-scoped) + cart_items
+- orders + order_items
+- product_reviews
+- wishlists
+
+Prices are stored in cents (bigint). All rows have UUID primary keys. Stores,
+products, categories, and discounts support soft deletes (deleted_at).
+
+You may add columns or new tables as the user requests. Do not alter core
+columns (name, slug, price_in_cents, status) on existing tables — downstream
+checkout and listing pages depend on them.
+`
+
+const ECOMMERCE_CHAT_SYSTEM_PROMPT = ECOMMERCE_STARTER_SCHEMA_DESCRIPTION + `
+You are an AI-powered e-commerce store manager. You help store owners manage their online store through natural language.
 
 You will receive the current store state (products, categories, discounts, recent orders) and the user's request.
 
