@@ -100,6 +100,8 @@ var EcommerceFilePaths = []string{
 	"lib/payments/stripe.ts",
 	"lib/payments/iyzico.ts",
 	"lib/payments/cod.ts",
+	"app/api/cart/route.ts",
+	"app/api/cart/[itemId]/route.ts",
 	"app/api/checkout/route.ts",
 	"app/api/webhooks/stripe/route.ts",
 	"app/api/webhooks/iyzico/route.ts",

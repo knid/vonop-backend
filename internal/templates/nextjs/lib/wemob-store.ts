@@ -134,46 +134,86 @@ export async function getCategories(): Promise<StorefrontCategory[]> {
 
 // ---------------------------------------------------------------------------
 // Cart API
+//
+// Cart mutations now target local Next.js route handlers that talk directly
+// to the tenant's Neon DB. The browser automatically sends the httpOnly
+// `wemob_cart_session` cookie owned by those routes, so the legacy
+// `sessionId` parameter is ignored by the HTTP layer. We keep the argument
+// in the function signatures so existing `CartProvider` callers compile
+// unchanged.
 // ---------------------------------------------------------------------------
 
-export async function createCart(sessionId: string): Promise<StorefrontCart> {
-  return apiFetch<StorefrontCart>("/cart", {
-    method: "POST",
-    body: JSON.stringify({ session_id: sessionId }),
-  });
+// Build an empty StorefrontCart so provider state stays well-shaped when
+// the server has no cart row yet (e.g. before the first add-to-cart).
+function emptyCart(): StorefrontCart {
+  return {
+    id: "",
+    session_id: "",
+    items: [],
+    subtotal_cents: 0,
+    discount_code: "",
+    discount_cents: 0,
+    total_cents: 0,
+  };
 }
 
-export async function getCart(sessionId: string): Promise<StorefrontCart> {
-  return apiFetch<StorefrontCart>("/cart/" + sessionId);
+async function localCartFetch(path: string, options?: RequestInit): Promise<StorefrontCart> {
+  const res = await fetch(path, {
+    // Same-origin fetch: browser sends the wemob_cart_session cookie
+    // automatically. credentials:"same-origin" is the default but we're
+    // explicit for clarity.
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    ...options,
+  });
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error("API error " + res.status + ": " + body);
+  }
+  const data = (await res.json()) as StorefrontCart | null;
+  return data ?? emptyCart();
+}
+
+/**
+ * Legacy no-op: carts are now created server-side lazily on first add-item.
+ * Returns an empty StorefrontCart so any caller that expects a Promise of
+ * one still resolves cleanly.
+ */
+export async function createCart(_sessionId: string): Promise<StorefrontCart> {
+  return emptyCart();
+}
+
+export async function getCart(_sessionId: string): Promise<StorefrontCart> {
+  return localCartFetch("/api/cart");
 }
 
 export async function addCartItem(
-  sessionId: string,
+  _sessionId: string,
   productId: string,
   quantity: number
 ): Promise<StorefrontCart> {
-  return apiFetch<StorefrontCart>("/cart/" + sessionId + "/items", {
+  return localCartFetch("/api/cart", {
     method: "POST",
-    body: JSON.stringify({ product_id: productId, quantity }),
+    body: JSON.stringify({ productId, quantity }),
   });
 }
 
 export async function updateCartItem(
-  sessionId: string,
+  _sessionId: string,
   itemId: string,
   quantity: number
 ): Promise<StorefrontCart> {
-  return apiFetch<StorefrontCart>("/cart/" + sessionId + "/items/" + itemId, {
+  return localCartFetch("/api/cart/" + encodeURIComponent(itemId), {
     method: "PUT",
     body: JSON.stringify({ quantity }),
   });
 }
 
 export async function removeCartItem(
-  sessionId: string,
+  _sessionId: string,
   itemId: string
 ): Promise<StorefrontCart> {
-  return apiFetch<StorefrontCart>("/cart/" + sessionId + "/items/" + itemId, {
+  return localCartFetch("/api/cart/" + encodeURIComponent(itemId), {
     method: "DELETE",
   });
 }
