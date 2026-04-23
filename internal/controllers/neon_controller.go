@@ -22,7 +22,7 @@ import (
 
 // provisionNeonDatabase creates a Neon project, runs the schema SQL, and returns the connection string and project ID.
 // If userLimits is non-nil, compute and storage limits are applied to the Neon project.
-func (c *Controller) provisionNeonDatabase(ctx context.Context, project *models.AppProject, dataModels []models.DataModel, userLimits *models.StandartUserLimits, sendEvent func(string, any) bool) (string, string, error) {
+func (c *Controller) provisionNeonDatabase(ctx context.Context, project *models.AppProject, dataModels []models.DataModel, userLimits *models.StandardUserLimits, sendEvent func(string, any) bool) (string, string, error) {
 	if c.NeonService == nil {
 		return "", "", fmt.Errorf("Neon service not configured")
 	}
@@ -501,11 +501,19 @@ func (c *Controller) provisionDatabaseForAgent(ctx context.Context, project *mod
 	if c.isNeonBacked(project.ID.String()) {
 		return fmt.Errorf("project already has a wemob db connected")
 	}
-	if len(tables) == 0 {
+
+	// Ecommerce projects get the canonical starter schema seeded by
+	// seedStarterSchema below — the agent's `tables` argument is ignored to
+	// avoid CREATE TABLE collisions on tables like `stores`/`products` that
+	// appear in both the agent's attempt and the canonical schema.
+	isEcommerce := project.ProjectType == "ecommerce"
+	if isEcommerce {
+		tables = nil
+	} else if len(tables) == 0 {
 		return fmt.Errorf("at least one table is required")
 	}
 
-	var userLimits *models.StandartUserLimits
+	var userLimits *models.StandardUserLimits
 	if user != nil {
 		if limits, err := c.GetUserLimits(user); err == nil {
 			userLimits = limits
@@ -532,12 +540,15 @@ func (c *Controller) provisionDatabaseForAgent(ctx context.Context, project *mod
 		return fmt.Errorf("seed starter schema: %w", err)
 	}
 
-	// Persist the schema on the project so future runs and the dashboard
-	// share a single source of truth for the table layout.
-	if dataModelsJSON, err := models.MarshalDataModels(tables); err == nil && dataModelsJSON != nil {
-		project.DataModels = dataModelsJSON
-	} else if err != nil {
-		slog.Warn("provisionDatabaseForAgent: failed to marshal data models", "error", err, "project_id", project.ID)
+	// Persist the schema on the project so future runs and the dashboard share
+	// a single source of truth. Ecommerce skips this — its schema lives in the
+	// canonical starter SQL and the dashboard reads live from Neon.
+	if !isEcommerce {
+		if dataModelsJSON, err := models.MarshalDataModels(tables); err == nil && dataModelsJSON != nil {
+			project.DataModels = dataModelsJSON
+		} else if err != nil {
+			slog.Warn("provisionDatabaseForAgent: failed to marshal data models", "error", err, "project_id", project.ID)
+		}
 	}
 
 	if project.Settings == nil {
@@ -549,13 +560,15 @@ func (c *Controller) provisionDatabaseForAgent(ctx context.Context, project *mod
 		return fmt.Errorf("persist wemob db on project: %w", err)
 	}
 
-	// Seed images best-effort, matching the template-copy flow. Failures are
-	// logged but not surfaced — the database is already usable without them.
-	go func() {
-		seedCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-		defer cancel()
-		c.generateAndStoreSeedImages(seedCtx, project, tables, noopEvent, 12)
-	}()
+	// Seed images best-effort for normal apps only. Ecommerce projects skip
+	// this — the AI adds products with its own generate_image calls.
+	if !isEcommerce {
+		go func() {
+			seedCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+			defer cancel()
+			c.generateAndStoreSeedImages(seedCtx, project, tables, noopEvent, 12)
+		}()
+	}
 
 	return nil
 }

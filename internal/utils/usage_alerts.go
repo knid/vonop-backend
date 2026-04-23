@@ -85,7 +85,7 @@ func checkUsageAlerts(db *database.Database, crmService crmServices.CRMService) 
 			continue
 		}
 
-		limits, err := db.GetStandartUserLimitsByUser(&user)
+		limits, err := db.GetStandardUserLimitsByUser(&user)
 		if err != nil || limits.MonthlyAICredits == 0 {
 			continue
 		}

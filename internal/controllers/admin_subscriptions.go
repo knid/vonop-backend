@@ -57,7 +57,7 @@ func (c *Controller) AdminUpdateSubscription(subID string, req requests.AdminUpd
 	}
 
 	// Update associated limits
-	limits, err := c.DB.GetStandartUserLimitsById(sub.LimitsID.String())
+	limits, err := c.DB.GetStandardUserLimitsById(sub.LimitsID.String())
 	if err != nil {
 		return nil, fmt.Errorf("limits not found: %w", err)
 	}
@@ -127,7 +127,7 @@ func (c *Controller) AdminUpdateSubscription(subID string, req requests.AdminUpd
 	}
 	limits.UpdatedAt = time.Now()
 
-	if _, err := c.DB.UpdateStandartUserLimits(limits); err != nil {
+	if _, err := c.DB.UpdateStandardUserLimits(limits); err != nil {
 		return nil, fmt.Errorf("failed to update limits: %w", err)
 	}
 

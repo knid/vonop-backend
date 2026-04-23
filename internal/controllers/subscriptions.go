@@ -10,19 +10,19 @@ import (
 
 // GetUserLimits returns the user's plan limits with PostHog remote config overrides.
 // DB values serve as fallback; PostHog flags (rc-plan-{name}-{field}) take precedence.
-func (c *Controller) GetUserLimits(user *models.User) (*models.StandartUserLimits, error) {
+func (c *Controller) GetUserLimits(user *models.User) (*models.StandardUserLimits, error) {
 	limits, _, err := c.GetUserLimitsWithPlan(user)
 	return limits, err
 }
 
 // GetUserLimitsWithPlan is identical to GetUserLimits but also returns the subscription plan name.
-func (c *Controller) GetUserLimitsWithPlan(user *models.User) (*models.StandartUserLimits, string, error) {
-	subs, err := c.DB.GetStandartUserSubscriptionByUser(user)
+func (c *Controller) GetUserLimitsWithPlan(user *models.User) (*models.StandardUserLimits, string, error) {
+	subs, err := c.DB.GetStandardUserSubscriptionByUser(user)
 	if err != nil {
 		return nil, "", err
 	}
 
-	limits, err := c.DB.GetStandartUserLimitsById(subs.LimitsID.String())
+	limits, err := c.DB.GetStandardUserLimitsById(subs.LimitsID.String())
 	if err != nil {
 		return nil, "", err
 	}
@@ -53,7 +53,7 @@ func (c *Controller) GetUserLimitsWithPlan(user *models.User) (*models.StandartU
 }
 
 func (c *Controller) GetSubscription(user *models.User) (*responses.UserSubscriptionInformationResponse, error) {
-	subs, err := c.DB.GetStandartUserSubscriptionByUser(user)
+	subs, err := c.DB.GetStandardUserSubscriptionByUser(user)
 	if err != nil {
 		return nil, err
 	}
@@ -104,7 +104,7 @@ func (c *Controller) UpdateSubscription(user *models.User, subscriptionId string
 		return err
 	}
 
-	_, err = c.DB.SetStandartUserSubscription(user, subs)
+	_, err = c.DB.SetStandardUserSubscription(user, subs)
 	if err != nil {
 		return err
 	}
@@ -113,7 +113,7 @@ func (c *Controller) UpdateSubscription(user *models.User, subscriptionId string
 }
 
 func (c *Controller) CancelSubscription(user *models.User) error {
-	_, err := c.DB.DeleteStandartUserSubscription(user)
+	_, err := c.DB.DeleteStandardUserSubscription(user)
 	if err != nil {
 		return err
 	}

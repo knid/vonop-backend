@@ -6,7 +6,7 @@ import (
 	"github.com/google/uuid"
 )
 
-type StandartUserLimits struct {
+type StandardUserLimits struct {
 	ID                      uuid.UUID `bun:",pk,type:uuid,default:uuid_generate_v4()"`
 	MaximumProjectCount     int       `bun:",notnull"`
 	MaximumCredentialCount  int       `bun:",notnull"`

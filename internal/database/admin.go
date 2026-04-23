@@ -87,7 +87,7 @@ func (db *Database) GetRevenueStats() (*RevenueStats, error) {
 	stats := &RevenueStats{}
 	ctx := context.Background()
 
-	total, err := db.DB.NewSelect().TableExpr("standart_user_subscriptions").Where("deleted_at IS NULL").Count(ctx)
+	total, err := db.DB.NewSelect().TableExpr("standard_user_subscriptions").Where("deleted_at IS NULL").Count(ctx)
 	if err != nil {
 		return nil, err
 	}

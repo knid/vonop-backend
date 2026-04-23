@@ -6,12 +6,12 @@ import (
 	"github.com/google/uuid"
 )
 
-type StandartUserSubscription struct {
+type StandardUserSubscription struct {
 	ID            uuid.UUID           `bun:",pk,type:uuid,default:uuid_generate_v4()"`
 	Name          string              `bun:",notnull"`
 	Description   string              `bun:",notnull"`
 	LimitsID      uuid.UUID           `bun:",notnull,type:uuid"`
-	Limits        *StandartUserLimits `bun:"rel:belongs-to,join:limits_id=id"`
+	Limits        *StandardUserLimits `bun:"rel:belongs-to,join:limits_id=id"`
 	MonthlyPrice  int                 `bun:",notnull"`
 	PriceID       string              `bun:",unique,nullzero"`
 	AnnualPrice   int                 `bun:",nullzero,default:0"`

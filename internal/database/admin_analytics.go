@@ -44,8 +44,8 @@ func (db *Database) GetActiveUsersByDay(since time.Time) ([]DayCount, error) {
 }
 
 // GetAllSubscriptions returns all subscription plans ordered by monthly price ascending.
-func (db *Database) GetAllSubscriptions() ([]models.StandartUserSubscription, error) {
-	var subs []models.StandartUserSubscription
+func (db *Database) GetAllSubscriptions() ([]models.StandardUserSubscription, error) {
+	var subs []models.StandardUserSubscription
 	err := db.DB.NewSelect().
 		Model(&subs).
 		Relation("Limits").

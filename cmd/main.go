@@ -67,8 +67,8 @@ func createSchema(db *bun.DB) error {
 		(*models.UserNotifications)(nil),
 		(*models.Token)(nil),
 		(*models.UserActionToken)(nil),
-		(*models.StandartUserLimits)(nil),
-		(*models.StandartUserSubscription)(nil),
+		(*models.StandardUserLimits)(nil),
+		(*models.StandardUserSubscription)(nil),
 		(*models.Invoice)(nil),
 		(*models.Project)(nil),
 		(*models.Build)(nil),
@@ -156,16 +156,16 @@ func createSchema(db *bun.DB) error {
 	// Each statement uses IF NOT EXISTS so it is safe to run repeatedly.
 	alterStatements := []string{
 		// AI credits fields on limits
-		`ALTER TABLE standart_user_limits ADD COLUMN IF NOT EXISTS monthly_ai_credits int NOT NULL DEFAULT 0`,
+		`ALTER TABLE standard_user_limits ADD COLUMN IF NOT EXISTS monthly_ai_credits int NOT NULL DEFAULT 0`,
 		// Annual billing fields on subscriptions
-		`ALTER TABLE standart_user_subscriptions ADD COLUMN IF NOT EXISTS annual_price int DEFAULT 0`,
-		`ALTER TABLE standart_user_subscriptions ADD COLUMN IF NOT EXISTS annual_price_id text DEFAULT ''`,
+		`ALTER TABLE standard_user_subscriptions ADD COLUMN IF NOT EXISTS annual_price int DEFAULT 0`,
+		`ALTER TABLE standard_user_subscriptions ADD COLUMN IF NOT EXISTS annual_price_id text DEFAULT ''`,
 		// app_snapshots removed — snapshots now use git repos
 		// V2 app builder fields on limits
-		`ALTER TABLE standart_user_limits ADD COLUMN IF NOT EXISTS monthly_app_count int NOT NULL DEFAULT 0`,
-		`ALTER TABLE standart_user_limits ADD COLUMN IF NOT EXISTS monthly_deploy_count int NOT NULL DEFAULT 0`,
-		`ALTER TABLE standart_user_limits ADD COLUMN IF NOT EXISTS can_use_ecommerce boolean NOT NULL DEFAULT false`,
-		`ALTER TABLE standart_user_limits ADD COLUMN IF NOT EXISTS can_deploy_to_vercel boolean NOT NULL DEFAULT false`,
+		`ALTER TABLE standard_user_limits ADD COLUMN IF NOT EXISTS monthly_app_count int NOT NULL DEFAULT 0`,
+		`ALTER TABLE standard_user_limits ADD COLUMN IF NOT EXISTS monthly_deploy_count int NOT NULL DEFAULT 0`,
+		`ALTER TABLE standard_user_limits ADD COLUMN IF NOT EXISTS can_use_ecommerce boolean NOT NULL DEFAULT false`,
+		`ALTER TABLE standard_user_limits ADD COLUMN IF NOT EXISTS can_deploy_to_vercel boolean NOT NULL DEFAULT false`,
 		// Conversation summary for older message summarization
 		`ALTER TABLE app_conversations ADD COLUMN IF NOT EXISTS summary text DEFAULT ''`,
 		// Data models for per-app Neon database provisioning
@@ -174,14 +174,14 @@ func createSchema(db *bun.DB) error {
 		// for refresh recovery of in-flight generation jobs.
 		`ALTER TABLE generation_jobs ADD COLUMN IF NOT EXISTS stream_state jsonb DEFAULT '{}'::jsonb`,
 		// Allow NULL price_id so empty Stripe secrets don't conflict on unique constraint
-		`ALTER TABLE standart_user_subscriptions ALTER COLUMN price_id DROP NOT NULL`,
-		`UPDATE standart_user_subscriptions SET price_id = NULL WHERE price_id = ''`,
+		`ALTER TABLE standard_user_subscriptions ALTER COLUMN price_id DROP NOT NULL`,
+		`UPDATE standard_user_subscriptions SET price_id = NULL WHERE price_id = ''`,
 		// soft_delete column for all tables that use bun:",soft_delete,nullzero"
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
 		`ALTER TABLE user_notifications ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
 		`ALTER TABLE tokens ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
-		`ALTER TABLE standart_user_limits ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
-		`ALTER TABLE standart_user_subscriptions ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
+		`ALTER TABLE standard_user_limits ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
+		`ALTER TABLE standard_user_subscriptions ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
 		`ALTER TABLE projects ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
 		`ALTER TABLE builds ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
 		`ALTER TABLE releases ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
@@ -214,15 +214,15 @@ func createSchema(db *bun.DB) error {
 		// Logo S3 key for AI-generated app logos
 		`ALTER TABLE app_projects ADD COLUMN IF NOT EXISTS logo_s3_key text NOT NULL DEFAULT ''`,
 		// Subscription & limits system v2
-		`ALTER TABLE standart_user_limits ADD COLUMN IF NOT EXISTS max_deployed_web_apps int NOT NULL DEFAULT 0`,
-		`ALTER TABLE standart_user_limits ADD COLUMN IF NOT EXISTS max_deployed_mobile_apps int NOT NULL DEFAULT 0`,
-		`ALTER TABLE standart_user_limits ADD COLUMN IF NOT EXISTS can_deploy_mobile boolean NOT NULL DEFAULT false`,
-		`ALTER TABLE standart_user_limits ADD COLUMN IF NOT EXISTS credit_rollover_months int NOT NULL DEFAULT 0`,
-		`ALTER TABLE standart_user_limits ADD COLUMN IF NOT EXISTS can_access_code boolean NOT NULL DEFAULT false`,
-		`ALTER TABLE standart_user_limits ADD COLUMN IF NOT EXISTS can_buy_domain boolean NOT NULL DEFAULT false`,
-		`ALTER TABLE standart_user_limits ADD COLUMN IF NOT EXISTS can_export_to_github boolean NOT NULL DEFAULT false`,
-		`ALTER TABLE standart_user_limits ADD COLUMN IF NOT EXISTS can_use_email_service boolean NOT NULL DEFAULT false`,
-		`ALTER TABLE standart_user_limits ADD COLUMN IF NOT EXISTS can_build_mobile boolean NOT NULL DEFAULT false`,
+		`ALTER TABLE standard_user_limits ADD COLUMN IF NOT EXISTS max_deployed_web_apps int NOT NULL DEFAULT 0`,
+		`ALTER TABLE standard_user_limits ADD COLUMN IF NOT EXISTS max_deployed_mobile_apps int NOT NULL DEFAULT 0`,
+		`ALTER TABLE standard_user_limits ADD COLUMN IF NOT EXISTS can_deploy_mobile boolean NOT NULL DEFAULT false`,
+		`ALTER TABLE standard_user_limits ADD COLUMN IF NOT EXISTS credit_rollover_months int NOT NULL DEFAULT 0`,
+		`ALTER TABLE standard_user_limits ADD COLUMN IF NOT EXISTS can_access_code boolean NOT NULL DEFAULT false`,
+		`ALTER TABLE standard_user_limits ADD COLUMN IF NOT EXISTS can_buy_domain boolean NOT NULL DEFAULT false`,
+		`ALTER TABLE standard_user_limits ADD COLUMN IF NOT EXISTS can_export_to_github boolean NOT NULL DEFAULT false`,
+		`ALTER TABLE standard_user_limits ADD COLUMN IF NOT EXISTS can_use_email_service boolean NOT NULL DEFAULT false`,
+		`ALTER TABLE standard_user_limits ADD COLUMN IF NOT EXISTS can_build_mobile boolean NOT NULL DEFAULT false`,
 		// Mobile app config: new capability fields
 		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS permissions text[] DEFAULT '{}'`,
 		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS url_scheme text DEFAULT ''`,
@@ -238,12 +238,12 @@ func createSchema(db *bun.DB) error {
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS git_hub_access_token text`,
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS git_hub_username text`,
 		// GitHub export limit on limits
-		`ALTER TABLE standart_user_limits ADD COLUMN IF NOT EXISTS can_export_to_github boolean NOT NULL DEFAULT false`,
+		`ALTER TABLE standard_user_limits ADD COLUMN IF NOT EXISTS can_export_to_github boolean NOT NULL DEFAULT false`,
 		// Deploy resource columns on limits
-		`ALTER TABLE standart_user_limits ADD COLUMN IF NOT EXISTS deploy_memory_mb int NOT NULL DEFAULT 256`,
-		`ALTER TABLE standart_user_limits ADD COLUMN IF NOT EXISTS deploy_cpus text NOT NULL DEFAULT '0.25'`,
-		`ALTER TABLE standart_user_limits ADD COLUMN IF NOT EXISTS deploy_db_max_cu text NOT NULL DEFAULT '0.25'`,
-		`ALTER TABLE standart_user_limits ADD COLUMN IF NOT EXISTS deploy_db_storage_mb int NOT NULL DEFAULT 512`,
+		`ALTER TABLE standard_user_limits ADD COLUMN IF NOT EXISTS deploy_memory_mb int NOT NULL DEFAULT 256`,
+		`ALTER TABLE standard_user_limits ADD COLUMN IF NOT EXISTS deploy_cpus text NOT NULL DEFAULT '0.25'`,
+		`ALTER TABLE standard_user_limits ADD COLUMN IF NOT EXISTS deploy_db_max_cu text NOT NULL DEFAULT '0.25'`,
+		`ALTER TABLE standard_user_limits ADD COLUMN IF NOT EXISTS deploy_db_storage_mb int NOT NULL DEFAULT 512`,
 
 		// Referral two-tier rewards
 		`ALTER TABLE referrals ADD COLUMN IF NOT EXISTS subscription_reward_granted boolean NOT NULL DEFAULT false`,
@@ -492,7 +492,7 @@ func seedPlans(db *database.Database, sm secret.SecretManager) {
 		PriceID       string
 		AnnualPrice   int
 		AnnualPriceID string
-		Limits        models.StandartUserLimits
+		Limits        models.StandardUserLimits
 	}
 
 	plans := []planDef{
@@ -501,7 +501,7 @@ func seedPlans(db *database.Database, sm secret.SecretManager) {
 			Description:  "Free plan with limited features",
 			MonthlyPrice: 0,
 			PriceID:      "free_plan",
-			Limits: models.StandartUserLimits{
+			Limits: models.StandardUserLimits{
 				MaximumProjectCount:     1,
 				MaximumCredentialCount:  0,
 				MontlyBuildCount:        1,
@@ -537,7 +537,7 @@ func seedPlans(db *database.Database, sm secret.SecretManager) {
 			PriceID:       sm.GetSecret("STRIPE_STARTER_PRICE_ID"),
 			AnnualPrice:   19200,
 			AnnualPriceID: sm.GetSecret("STRIPE_STARTER_ANNUAL_PRICE_ID"),
-			Limits: models.StandartUserLimits{
+			Limits: models.StandardUserLimits{
 				MaximumProjectCount:     20,
 				MaximumCredentialCount:  2,
 				MontlyBuildCount:        10,
@@ -573,7 +573,7 @@ func seedPlans(db *database.Database, sm secret.SecretManager) {
 			PriceID:       sm.GetSecret("STRIPE_PROFESSIONAL_PRICE_ID"),
 			AnnualPrice:   38400,
 			AnnualPriceID: sm.GetSecret("STRIPE_PROFESSIONAL_ANNUAL_PRICE_ID"),
-			Limits: models.StandartUserLimits{
+			Limits: models.StandardUserLimits{
 				MaximumProjectCount:     50,
 				MaximumCredentialCount:  10,
 				MontlyBuildCount:        50,
@@ -610,12 +610,12 @@ func seedPlans(db *database.Database, sm secret.SecretManager) {
 		if err != nil {
 			// Plan truly doesn't exist — create limits then subscription
 			limits := p.Limits
-			createdLimits, err := db.CreateStandartUserLimits(&limits)
+			createdLimits, err := db.CreateStandardUserLimits(&limits)
 			if err != nil {
 				slog.Error("failed to create limits for plan", "plan", p.Name, "error", err)
 				continue
 			}
-			sub := &models.StandartUserSubscription{
+			sub := &models.StandardUserSubscription{
 				Name:          p.Name,
 				Description:   p.Description,
 				LimitsID:      createdLimits.ID,
@@ -639,7 +639,7 @@ func seedPlans(db *database.Database, sm secret.SecretManager) {
 		}
 
 		// Plan exists — update limits
-		limits, err := db.GetStandartUserLimitsById(existing.LimitsID.String())
+		limits, err := db.GetStandardUserLimitsById(existing.LimitsID.String())
 		if err != nil {
 			slog.Error("failed to get limits for plan", "plan", p.Name, "error", err)
 			continue
@@ -672,7 +672,7 @@ func seedPlans(db *database.Database, sm secret.SecretManager) {
 		limits.MontlyNotificationCount = p.Limits.MontlyNotificationCount
 		limits.CanExportToGitHub = p.Limits.CanExportToGitHub
 
-		if _, err := db.UpdateStandartUserLimits(limits); err != nil {
+		if _, err := db.UpdateStandardUserLimits(limits); err != nil {
 			slog.Error("failed to update limits for plan", "plan", p.Name, "error", err)
 		}
 
@@ -694,7 +694,7 @@ func migrateInactiveUsersToFree(bundb *bun.DB) {
 	// Assign free plan to inactive users
 	res, err := bundb.ExecContext(context.Background(), `
 		UPDATE users SET subscription_status = 'free', subscription_id = (
-			SELECT id FROM standart_user_subscriptions WHERE name = 'Free' LIMIT 1
+			SELECT id FROM standard_user_subscriptions WHERE name = 'Free' LIMIT 1
 		) WHERE subscription_status = 'inactive'
 		AND (subscription_id IS NULL OR subscription_id = '00000000-0000-0000-0000-000000000000')
 		AND deleted_at IS NULL

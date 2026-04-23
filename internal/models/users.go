@@ -17,11 +17,11 @@ type User struct {
 	Photo               string                    `bun:""`
 	CompanyLogo         string                    `bun:""`
 	Verified            bool                      `bun:",notnull,default:false"`
-	Type                string                    `bun:",notnull,default:'standart'"`
+	Type                string                    `bun:",notnull,default:'standard'"`
 	Company             string                    `bun:",nullzero"`
 	Provider            string                    `bun:",nullzero,notnull,default:'Wemob'"`
 	SubscriptionID      uuid.UUID                 `bun:",type:uuid"`
-	Subscription        *StandartUserSubscription `bun:"rel:belongs-to,join:subscription_id=id"`
+	Subscription        *StandardUserSubscription `bun:"rel:belongs-to,join:subscription_id=id"`
 	SubscriptionStatus  string                    `bun:",notnull,default:'inactive'"`
 	SubscriptionStartAt time.Time                 `bun:""`
 	TrialStartAt        time.Time                 `bun:""`

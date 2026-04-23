@@ -29,7 +29,7 @@ func (v *HttpViews) GetBillingPlans(w http.ResponseWriter, r *http.Request) {
 		}
 
 		var planLimits responses.PlanLimitsResponse
-		limits, limitsErr := v.Controller.DB.GetStandartUserLimitsById(sub.LimitsID.String())
+		limits, limitsErr := v.Controller.DB.GetStandardUserLimitsById(sub.LimitsID.String())
 		if limitsErr == nil {
 			rc := v.Controller.RemoteConfig
 			pn := strings.ToLower(sub.Name) // e.g. "starter", "professional"
