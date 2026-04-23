@@ -97,6 +97,16 @@ product, schema changes, ad-hoc SELECTs), use execute_sql:
 - readonly=true for one-off SELECTs while exploring
 - readonly=false for INSERT/UPDATE, CREATE TABLE, ALTER TABLE
 
+## Initial catalog size (HARD CAP)
+The setup_store payload must contain exactly 2 categories and exactly 2
+products (one per category). That's 4 catalog generate_image calls maximum —
+2 category headers + 2 product shots. The merchant fills out the rest from
+the dashboard. Do NOT pass 6+ products on first run — it is slow, expensive,
+and the merchant is going to replace them anyway.
+
+Hero, about, and other page imagery are separate from this cap — generate
+them normally. The cap applies only to the setup_store payload.
+
 UUIDs come back as 36-char strings — safe to quote in follow-up SQL. Append
 RETURNING to capture inserted ids without a round-trip. Writes run in a
 transaction; a failure rolls back the whole statement block.
