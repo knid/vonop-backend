@@ -182,18 +182,18 @@ export async function removeCartItem(
 }
 
 export async function applyDiscountCode(
-  sessionId: string,
+  _sessionId: string,
   code: string
 ): Promise<StorefrontCart> {
-  return apiFetch<StorefrontCart>("/cart/" + sessionId + "/discount", {
+  return localCartFetch("/api/discount", {
     method: "POST",
     body: JSON.stringify({ code }),
   });
 }
 
 /** Remove the currently applied discount code from the cart. */
-export async function removeDiscount(sessionId: string): Promise<StorefrontCart> {
-  return apiFetch<StorefrontCart>("/cart/" + sessionId + "/discount", {
+export async function removeDiscount(_sessionId: string): Promise<StorefrontCart> {
+  return localCartFetch("/api/discount", {
     method: "DELETE",
   });
 }
@@ -770,7 +770,14 @@ export function useStoreConfig(): {
 
 /** Fetch reviews for a product by slug. */
 export async function getProductReviews(slug: string): Promise<ReviewsResult> {
-  return apiFetch<ReviewsResult>("/products/" + slug + "/reviews");
+  const res = await fetch(
+    "/api/reviews?slug=" + encodeURIComponent(slug),
+    { credentials: "same-origin" }
+  );
+  if (!res.ok) {
+    throw new Error("API error " + res.status + ": " + (await res.text()));
+  }
+  return res.json();
 }
 
 /** Submit a review for a product. */
@@ -778,10 +785,16 @@ export async function submitReview(
   slug: string,
   data: { customer_name: string; customer_email: string; rating: number; title?: string; body?: string }
 ): Promise<{ id: string; status: string; message: string }> {
-  return apiFetch("/products/" + slug + "/reviews", {
+  const res = await fetch("/api/reviews", {
     method: "POST",
-    body: JSON.stringify(data),
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ slug, ...data }),
   });
+  if (!res.ok) {
+    throw new Error("API error " + res.status + ": " + (await res.text()));
+  }
+  return res.json();
 }
 
 /** Hook: fetch and manage reviews for a product. */
@@ -825,24 +838,37 @@ export function useReviews(slug: string) {
 // Wishlist
 // ---------------------------------------------------------------------------
 
-/** Fetch wishlist items for a session. */
-export async function getWishlist(sessionId: string): Promise<WishlistItem[]> {
-  return apiFetch<WishlistItem[]>("/wishlist/" + sessionId);
+/** Fetch wishlist items for the current session. */
+export async function getWishlist(_sessionId: string): Promise<WishlistItem[]> {
+  const res = await fetch("/api/wishlist", { credentials: "same-origin" });
+  if (!res.ok) {
+    throw new Error("API error " + res.status + ": " + (await res.text()));
+  }
+  return res.json();
 }
 
 /** Add a product to the wishlist. */
-export async function addToWishlist(sessionId: string, productId: string): Promise<void> {
-  await apiFetch("/wishlist/" + sessionId, {
+export async function addToWishlist(_sessionId: string, productId: string): Promise<void> {
+  const res = await fetch("/api/wishlist", {
     method: "POST",
-    body: JSON.stringify({ product_id: productId }),
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ productId }),
   });
+  if (!res.ok) {
+    throw new Error("API error " + res.status + ": " + (await res.text()));
+  }
 }
 
 /** Remove a product from the wishlist. */
-export async function removeFromWishlist(sessionId: string, productId: string): Promise<void> {
-  await apiFetch("/wishlist/" + sessionId + "/" + productId, {
+export async function removeFromWishlist(_sessionId: string, productId: string): Promise<void> {
+  const res = await fetch("/api/wishlist/" + encodeURIComponent(productId), {
     method: "DELETE",
+    credentials: "same-origin",
   });
+  if (!res.ok) {
+    throw new Error("API error " + res.status + ": " + (await res.text()));
+  }
 }
 
 /** Hook: manage wishlist state for the current session. */

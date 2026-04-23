@@ -103,6 +103,10 @@ var EcommerceFilePaths = []string{
 	"app/api/cart/route.ts",
 	"app/api/cart/[itemId]/route.ts",
 	"app/api/checkout/route.ts",
+	"app/api/discount/route.ts",
+	"app/api/reviews/route.ts",
+	"app/api/wishlist/route.ts",
+	"app/api/wishlist/[productId]/route.ts",
 	"app/api/webhooks/stripe/route.ts",
 	"app/api/webhooks/iyzico/route.ts",
 }
