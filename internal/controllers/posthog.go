@@ -35,26 +35,6 @@ func (c *Controller) EnsureIdentified(user *models.User) {
 	c.IdentifyUser(user)
 }
 
-// TrackStorefrontEvent sends an anonymous storefront event to PostHog keyed by store ID.
-// Used for public storefront actions (cart, checkout) where there is no authenticated user.
-func (c *Controller) TrackStorefrontEvent(storeID string, event string, props posthog.Properties) {
-	if c.PostHog == nil {
-		return
-	}
-
-	// Resolve store owner for attribution (skip user lookup — store_owner_id is sufficient)
-	store, err := c.DB.GetStoreByID(storeID)
-	if err == nil && store != nil {
-		props.Set("store_owner_id", store.UserID.String())
-	}
-
-	c.PostHog.Enqueue(posthog.Capture{
-		DistinctId: "store:" + storeID,
-		Event:      event,
-		Properties: props,
-	})
-}
-
 // IdentifyUser sets/updates user properties in PostHog. Called on login/register/subscription change.
 func (c *Controller) IdentifyUser(user *models.User) {
 	if c.PostHog == nil || user == nil {

@@ -111,17 +111,6 @@ func createSchema(db *bun.DB) error {
 		(*models.AppEnvVar)(nil),
 		// User-uploaded assets (3D models, fonts, media, etc.)
 		(*models.AppAsset)(nil),
-		// E-commerce models
-		(*models.Store)(nil),
-		(*models.Product)(nil),
-		(*models.ProductCategory)(nil),
-		(*models.Discount)(nil),
-		(*models.Cart)(nil),
-		(*models.CartItem)(nil),
-		(*models.Order)(nil),
-		(*models.OrderItem)(nil),
-		(*models.ProductReview)(nil),
-		(*models.Wishlist)(nil),
 		// LLM token usage tracking
 		(*models.LLMTokenUsage)(nil),
 		// Background jobs
@@ -214,35 +203,9 @@ func createSchema(db *bun.DB) error {
 		`ALTER TABLE app_domains ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
 		`ALTER TABLE app_domains ADD COLUMN IF NOT EXISTS deployment_uuid text`,
 		`ALTER TABLE app_env_vars ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
-		`ALTER TABLE stores ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
-		`ALTER TABLE products ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
-		`ALTER TABLE product_categories ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
-		`ALTER TABLE discounts ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
-		`ALTER TABLE carts ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
-		`ALTER TABLE orders ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
 		`ALTER TABLE app_dashboards ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
 		`ALTER TABLE app_dashboard_panels ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
 		`ALTER TABLE app_notification_tasks ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
-		// Flatten price onto products (remove variant dependency)
-		`ALTER TABLE products ADD COLUMN IF NOT EXISTS price_in_cents integer NOT NULL DEFAULT 0`,
-		`ALTER TABLE products ADD COLUMN IF NOT EXISTS compare_at_price integer DEFAULT 0`,
-		`ALTER TABLE products ADD COLUMN IF NOT EXISTS sku text DEFAULT ''`,
-		`ALTER TABLE products ADD COLUMN IF NOT EXISTS inventory integer NOT NULL DEFAULT 0`,
-		`ALTER TABLE products ADD COLUMN IF NOT EXISTS track_inventory boolean NOT NULL DEFAULT false`,
-		// Migrate default variant prices into products
-		`UPDATE products SET
-			price_in_cents = COALESCE(pv.price_in_cents, 0),
-			compare_at_price = COALESCE(pv.compare_at_price, 0),
-			sku = COALESCE(pv.sku, ''),
-			inventory = COALESCE(pv.inventory, 0),
-			track_inventory = COALESCE(pv.track_inventory, false)
-		FROM (
-			SELECT DISTINCT ON (product_id) product_id, price_in_cents, compare_at_price, sku, inventory, track_inventory
-			FROM product_variants
-			WHERE deleted_at IS NULL
-			ORDER BY product_id, is_default DESC, created_at ASC
-		) pv
-		WHERE products.id = pv.product_id AND products.price_in_cents = 0`,
 		// Fix screenshot_s3_key and sandbox_id: empty string instead of NULL
 		`UPDATE app_projects SET screenshot_s3_key = '' WHERE screenshot_s3_key IS NULL`,
 		`UPDATE app_projects SET sandbox_id = '' WHERE sandbox_id IS NULL`,
@@ -476,9 +439,6 @@ END $$`,
 		`CREATE INDEX IF NOT EXISTS idx_sessions_status_active ON sessions(status) WHERE status = 'active' AND deleted_at IS NULL`,
 		`CREATE INDEX IF NOT EXISTS idx_app_usage_events_session_id ON app_usage_events(session_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_app_usage_events_session_created ON app_usage_events(session_id, created_at DESC) WHERE deleted_at IS NULL`,
-		`CREATE INDEX IF NOT EXISTS idx_products_store_id ON products(store_id)`,
-		`CREATE INDEX IF NOT EXISTS idx_orders_store_id ON orders(store_id)`,
-		`CREATE INDEX IF NOT EXISTS idx_carts_store_id_session_id ON carts(store_id, session_id)`,
 		// app_snapshots index removed — snapshots now use git repos
 		`CREATE INDEX IF NOT EXISTS idx_notifications_project_id ON notifications(project_id)`,
 		// Foreign key indexes for tables frequently queried by user_id or project_id
@@ -495,7 +455,6 @@ END $$`,
 		`CREATE INDEX IF NOT EXISTS idx_app_env_vars_app_project_id ON app_env_vars(app_project_id)`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_app_env_vars_project_key ON app_env_vars(app_project_id, key) WHERE deleted_at IS NULL`,
 		`CREATE INDEX IF NOT EXISTS idx_app_integrations_app_project_id ON app_integrations(app_project_id)`,
-		`CREATE INDEX IF NOT EXISTS idx_stores_app_project_id ON stores(app_project_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_app_dashboards_app_project_id ON app_dashboards(app_project_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_deployments_project_id ON deployments(project_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_ai_credits_balances_user_id ON ai_credits_balances(user_id)`,
@@ -1164,9 +1123,6 @@ func main() {
 	r.Route("/", func(r chi.Router) {
 		r.Route("/webhooks", func(r chi.Router) {
 			r.Post("/stripe", httpViews.Controller.HandleWebhook)
-			// Store payment webhooks
-			r.Post("/store/stripe/{storeId}", httpViews.HandleStoreStripeWebhook)
-			r.Post("/store/iyzico/{storeId}", httpViews.HandleStoreIyzicoWebhook)
 			// Coolify deployment webhook
 			r.Post("/coolify", httpViews.HandleCoolifyWebhook)
 		})
@@ -1732,51 +1688,6 @@ func main() {
 						r.Get("/realtime", httpViews.GetAppAnalyticsRealtime)
 					})
 
-					// E-commerce store (only for ecommerce projects)
-					r.Route("/store", func(r chi.Router) {
-						r.Get("/", httpViews.GetAppStore)
-						r.Put("/settings", httpViews.UpdateAppStoreSettings)
-						r.With(rateLimiter.RateLimit(20, time.Minute, appMiddleware.AIUserKey)).Post("/chat", httpViews.ChatStoreManagement)
-
-						r.Route("/products", func(r chi.Router) {
-							r.Get("/", httpViews.GetStoreProducts)
-							r.Post("/", httpViews.CreateStoreProduct)
-							r.Route("/{productId}", func(r chi.Router) {
-								r.Get("/", httpViews.GetStoreProduct)
-								r.Put("/", httpViews.UpdateStoreProduct)
-								r.Delete("/", httpViews.DeleteStoreProduct)
-							})
-						})
-
-						r.Route("/categories", func(r chi.Router) {
-							r.Get("/", httpViews.GetStoreCategories)
-							r.Post("/", httpViews.CreateStoreCategory)
-							r.Route("/{categoryId}", func(r chi.Router) {
-								r.Put("/", httpViews.UpdateStoreCategory)
-								r.Delete("/", httpViews.DeleteStoreCategory)
-							})
-						})
-
-						r.Route("/discounts", func(r chi.Router) {
-							r.Get("/", httpViews.GetStoreDiscounts)
-							r.Post("/", httpViews.CreateStoreDiscount)
-							r.Route("/{discountId}", func(r chi.Router) {
-								r.Put("/", httpViews.UpdateStoreDiscount)
-								r.Delete("/", httpViews.DeleteStoreDiscount)
-							})
-						})
-
-						r.Route("/orders", func(r chi.Router) {
-							r.Get("/", httpViews.GetStoreOrders)
-							r.Route("/{orderId}", func(r chi.Router) {
-								r.Get("/", httpViews.GetStoreOrder)
-								r.Put("/", httpViews.UpdateStoreOrderStatus)
-							})
-						})
-
-						r.Get("/analytics", httpViews.GetStoreAnalytics)
-					})
-
 					// Gateway key management
 					r.Get("/gateway-key", httpViews.GetGatewayKeyInfo)
 					r.Post("/gateway-key/reveal", httpViews.RevealGatewayKey)
@@ -1800,43 +1711,6 @@ func main() {
 				r.Get("/config", httpViews.GetMobileAppConfig)
 				r.Put("/config", httpViews.UpdateMobileAppConfig)
 			})
-
-			// Public storefront (no auth, per-store-per-IP rate limiting)
-			r.Route("/storefront/{storeId}", func(r chi.Router) {
-				// Fix 3: Read endpoints — relaxed rate limit
-				r.Use(rateLimiter.RateLimit(120, time.Minute, appMiddleware.StorefrontIPKey))
-				r.Get("/config", httpViews.StorefrontGetStoreConfig)
-				r.Get("/products", httpViews.StorefrontGetProducts)
-				r.Get("/products/{slug}", httpViews.StorefrontGetProduct)
-				r.Get("/categories", httpViews.StorefrontGetCategories)
-				r.Get("/cart/{sessionId}", httpViews.StorefrontGetCart)
-				r.Get("/orders/{orderId}", httpViews.StorefrontGetOrder)
-
-				// Fix 3: Write endpoints — tighter rate limit
-				r.With(rateLimiter.RateLimit(40, time.Minute, appMiddleware.StorefrontIPKey)).Post("/cart", httpViews.StorefrontCreateCart)
-				r.With(rateLimiter.RateLimit(40, time.Minute, appMiddleware.StorefrontIPKey)).Post("/cart/{sessionId}/items", httpViews.StorefrontAddCartItem)
-				r.With(rateLimiter.RateLimit(40, time.Minute, appMiddleware.StorefrontIPKey)).Put("/cart/{sessionId}/items/{itemId}", httpViews.StorefrontUpdateCartItem)
-				r.With(rateLimiter.RateLimit(40, time.Minute, appMiddleware.StorefrontIPKey)).Delete("/cart/{sessionId}/items/{itemId}", httpViews.StorefrontDeleteCartItem)
-				r.With(rateLimiter.RateLimit(40, time.Minute, appMiddleware.StorefrontIPKey)).Post("/cart/{sessionId}/discount", httpViews.StorefrontApplyDiscount)
-				r.With(rateLimiter.RateLimit(40, time.Minute, appMiddleware.StorefrontIPKey)).Delete("/cart/{sessionId}/discount", httpViews.StorefrontRemoveDiscount)
-				r.With(rateLimiter.RateLimit(20, time.Minute, appMiddleware.StorefrontIPKey)).Post("/checkout", httpViews.StorefrontCheckout)
-				r.With(rateLimiter.RateLimit(20, time.Minute, appMiddleware.StorefrontIPKey)).Post("/checkout/confirm", httpViews.StorefrontConfirmCheckout)
-
-				// Fix 14: Iyzico payment callback
-				r.Post("/checkout/iyzico-callback", httpViews.StorefrontIyzicoCallback)
-
-				// Reviews
-				r.Get("/products/{slug}/reviews", httpViews.StorefrontGetReviews)
-				r.With(rateLimiter.RateLimit(10, time.Minute, appMiddleware.StorefrontIPKey)).Post("/products/{slug}/reviews", httpViews.StorefrontSubmitReview)
-
-				// Wishlist
-				r.Get("/wishlist/{sessionId}", httpViews.StorefrontGetWishlist)
-				r.With(rateLimiter.RateLimit(40, time.Minute, appMiddleware.StorefrontIPKey)).Post("/wishlist/{sessionId}", httpViews.StorefrontAddToWishlist)
-				r.With(rateLimiter.RateLimit(40, time.Minute, appMiddleware.StorefrontIPKey)).Delete("/wishlist/{sessionId}/{productId}", httpViews.StorefrontRemoveFromWishlist)
-			})
-
-			// Fix 15: Stripe webhook for per-store accounts (outside storeId route)
-			r.Post("/storefront/webhooks/stripe", httpViews.StorefrontStripeWebhook)
 
 			// Admin template management
 			r.Route("/admin/templates", func(r chi.Router) {

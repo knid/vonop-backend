@@ -15,18 +15,17 @@ type CommitHistoryEntry struct {
 }
 
 type AppProjectResponse struct {
-	ID          uuid.UUID      `json:"id"`
-	Name        string         `json:"name"`
-	Slug        string         `json:"slug"`
-	Prompt      string         `json:"prompt"`
-	ProjectType string         `json:"project_type"`
-	Theme       map[string]any `json:"theme"`
-	Settings    map[string]any `json:"settings"`
-	Status      string         `json:"status"`
-	HasStore      bool           `json:"has_store"`
+	ID            uuid.UUID      `json:"id"`
+	Name          string         `json:"name"`
+	Slug          string         `json:"slug"`
+	Prompt        string         `json:"prompt"`
+	ProjectType   string         `json:"project_type"`
+	Theme         map[string]any `json:"theme"`
+	Settings      map[string]any `json:"settings"`
+	Status        string         `json:"status"`
 	ScreenshotURL string         `json:"screenshot_url,omitempty"`
 	CreatedAt     time.Time      `json:"created_at"`
-	UpdatedAt   time.Time      `json:"updated_at"`
+	UpdatedAt     time.Time      `json:"updated_at"`
 }
 
 type AppProjectDetailResponse struct {

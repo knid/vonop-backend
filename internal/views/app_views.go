@@ -186,12 +186,6 @@ func (v *HttpViews) GetApps(w http.ResponseWriter, r *http.Request) {
 		var theme map[string]any
 		json.Unmarshal(p.Theme, &theme)
 
-		hasStore := false
-		store, err := v.Controller.GetStore(p.ID.String())
-		if err == nil && store != nil {
-			hasStore = true
-		}
-
 		status := p.Status
 		if status == "generating" && activeGenJobTypes != nil &&
 			!activeGenJobTypes["generate_app"] && !activeGenJobTypes["generate_ecommerce_app"] {
@@ -215,7 +209,6 @@ func (v *HttpViews) GetApps(w http.ResponseWriter, r *http.Request) {
 			Theme:         theme,
 			Settings:      p.Settings,
 			Status:        status,
-			HasStore:      hasStore,
 			ScreenshotURL: screenshotURL,
 			CreatedAt:     p.CreatedAt,
 			UpdatedAt:     p.UpdatedAt,
@@ -242,12 +235,6 @@ func (v *HttpViews) GetApp(w http.ResponseWriter, r *http.Request) {
 
 	var theme map[string]any
 	json.Unmarshal(project.Theme, &theme)
-
-	hasStore := false
-	store, storeErr := v.Controller.GetStore(project.ID.String())
-	if storeErr == nil && store != nil {
-		hasStore = true
-	}
 
 	// Auto-heal: if status is "generating" but no active generation job exists, update to "ready"
 	if project.Status == "generating" {
@@ -296,7 +283,6 @@ func (v *HttpViews) GetApp(w http.ResponseWriter, r *http.Request) {
 			Theme:         theme,
 			Settings:      project.Settings,
 			Status:        project.Status,
-			HasStore:      hasStore,
 			ScreenshotURL: screenshotURL,
 			CreatedAt:     project.CreatedAt,
 			UpdatedAt:     project.UpdatedAt,
@@ -1010,11 +996,10 @@ func (v *HttpViews) GetAppInit(w http.ResponseWriter, r *http.Request) {
 		missingEnvVars []controllers.RequiredEnvVar
 		integrations   []models.AppIntegration
 		deployment     *models.AppDeployment
-		hasStore       bool
 		screenshotURL  string
 	)
 
-	wg.Add(7)
+	wg.Add(6)
 
 	go func() {
 		defer wg.Done()
@@ -1044,14 +1029,6 @@ func (v *HttpViews) GetAppInit(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		defer wg.Done()
 		deployment, _ = v.Controller.GetLatestDeploymentStatus(project.ID.String())
-	}()
-
-	go func() {
-		defer wg.Done()
-		store, storeErr := v.Controller.GetStore(project.ID.String())
-		if storeErr == nil && store != nil {
-			hasStore = true
-		}
 	}()
 
 	// Screenshot presigned URL (cheap, no goroutine needed)
@@ -1089,7 +1066,6 @@ func (v *HttpViews) GetAppInit(w http.ResponseWriter, r *http.Request) {
 			Theme:         theme,
 			Settings:      project.Settings,
 			Status:        project.Status,
-			HasStore:      hasStore,
 			ScreenshotURL: screenshotURL,
 			CreatedAt:     project.CreatedAt,
 			UpdatedAt:     project.UpdatedAt,

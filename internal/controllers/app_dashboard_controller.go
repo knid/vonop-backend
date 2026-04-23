@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -16,15 +15,6 @@ import (
 	"github.com/knid/wemob/internal/utils"
 	"github.com/posthog/posthog-go"
 )
-
-// platformSchemaCache caches the result of ExtractSchemaFromPlatformDB with a short TTL.
-var platformSchemaCache struct {
-	sync.Mutex
-	data      json.RawMessage
-	expiresAt time.Time
-}
-
-const platformSchemaCacheTTL = 60 * time.Second
 
 // schemaRelevantPatterns are file path patterns that likely contain database schema info.
 var schemaRelevantPatterns = []string{
@@ -90,98 +80,6 @@ func (c *Controller) ExtractSchemaFromGeneratedFiles(ctx context.Context, projec
 	return schema, nil
 }
 
-// ExtractSchemaFromPlatformDB introspects the platform's own PostgreSQL database
-// and returns table/column definitions from information_schema.
-// SECURITY: Only e-commerce tables from platformAllowedTables are returned.
-// Sensitive columns listed in platformSensitiveColumns are stripped.
-// Results are cached for 60 seconds to avoid repeated heavy information_schema queries.
-func (c *Controller) ExtractSchemaFromPlatformDB() (json.RawMessage, error) {
-	platformSchemaCache.Lock()
-	if platformSchemaCache.data != nil && time.Now().Before(platformSchemaCache.expiresAt) {
-		cached := platformSchemaCache.data
-		platformSchemaCache.Unlock()
-		return cached, nil
-	}
-	platformSchemaCache.Unlock()
-
-	db := c.DB.DB.DB
-
-	rows, err := db.Query(`
-		SELECT t.table_name, c.column_name, c.data_type, c.is_nullable,
-			CASE WHEN kcu.column_name IS NOT NULL THEN 'YES' ELSE 'NO' END AS is_primary_key
-		FROM information_schema.tables t
-		JOIN information_schema.columns c ON c.table_name = t.table_name AND c.table_schema = t.table_schema
-		LEFT JOIN information_schema.table_constraints tc
-			ON tc.table_name = t.table_name AND tc.table_schema = t.table_schema AND tc.constraint_type = 'PRIMARY KEY'
-		LEFT JOIN information_schema.key_column_usage kcu
-			ON kcu.constraint_name = tc.constraint_name AND kcu.table_schema = tc.table_schema AND kcu.column_name = c.column_name
-		WHERE t.table_schema = 'public' AND t.table_type = 'BASE TABLE'
-		ORDER BY t.table_name, c.ordinal_position
-	`)
-	if err != nil {
-		return nil, fmt.Errorf("failed to query information_schema: %w", err)
-	}
-	defer rows.Close()
-
-	type column struct {
-		Name         string `json:"name"`
-		Type         string `json:"type"`
-		Nullable     bool   `json:"nullable"`
-		IsPrimaryKey bool   `json:"is_primary_key"`
-	}
-	type table struct {
-		Name    string   `json:"name"`
-		Columns []column `json:"columns"`
-	}
-
-	tableMap := map[string]*table{}
-	var tableOrder []string
-
-	for rows.Next() {
-		var tableName, colName, dataType, isNullable, isPK string
-		if err := rows.Scan(&tableName, &colName, &dataType, &isNullable, &isPK); err != nil {
-			continue
-		}
-		// SECURITY: skip tables not in the e-commerce allowlist
-		if !platformAllowedTables[tableName] {
-			continue
-		}
-		// SECURITY: strip sensitive columns
-		if platformSensitiveColumns[colName] {
-			continue
-		}
-		t, ok := tableMap[tableName]
-		if !ok {
-			t = &table{Name: tableName}
-			tableMap[tableName] = t
-			tableOrder = append(tableOrder, tableName)
-		}
-		t.Columns = append(t.Columns, column{
-			Name:         colName,
-			Type:         dataType,
-			Nullable:     isNullable == "YES",
-			IsPrimaryKey: isPK == "YES",
-		})
-	}
-
-	var tables []table
-	for _, name := range tableOrder {
-		tables = append(tables, *tableMap[name])
-	}
-
-	schema, err := json.Marshal(tables)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal schema: %w", err)
-	}
-
-	platformSchemaCache.Lock()
-	platformSchemaCache.data = schema
-	platformSchemaCache.expiresAt = time.Now().Add(platformSchemaCacheTTL)
-	platformSchemaCache.Unlock()
-
-	return schema, nil
-}
-
 // CreateDashboard creates a new dashboard for a project with AI-generated panels.
 func (c *Controller) CreateDashboard(ctx context.Context, project *models.AppProject, user *models.User, prompt string, events chan<- responses.SSEEvent) {
 	defer close(events)
@@ -225,9 +123,7 @@ func (c *Controller) CreateDashboard(ctx context.Context, project *models.AppPro
 		}
 	}()
 
-	// Find database integration.
-	// Only e-commerce projects may fall back to the platform DB (for built-in
-	// store tables). All other project types require an explicit DB integration.
+	// Find database integration. All project types require an explicit DB integration.
 	dbProvider := ""
 	integrations, err := c.DB.GetAppIntegrationsByProjectID(project.ID.String())
 	if err == nil {
@@ -239,29 +135,14 @@ func (c *Controller) CreateDashboard(ctx context.Context, project *models.AppPro
 		}
 	}
 	if dbProvider == "" {
-		if project.ProjectType == "ecommerce" {
-			// Verify the store actually exists before committing to platform provider,
-			// otherwise all panel queries will fail with "store context required".
-			if _, storeErr := c.GetStore(project.ID.String()); storeErr != nil {
-				sendError("schema", "no store found for this project. Generate your ecommerce app first to create the store.")
-				return
-			}
-			dbProvider = "platform"
-		} else {
-			sendError("schema", "no database integration found. Add a Neon or Supabase integration first.")
-			return
-		}
+		sendError("schema", "no database integration found. Add a Neon or Supabase integration first.")
+		return
 	}
 
 	sendEvent("status", map[string]string{"phase": "extracting_schema"})
 
 	// Extract schema
-	var schema json.RawMessage
-	if dbProvider == "platform" {
-		schema, err = c.ExtractSchemaFromPlatformDB()
-	} else {
-		schema, err = c.ExtractSchemaFromGeneratedFiles(ctx, project.ID.String())
-	}
+	schema, err := c.ExtractSchemaFromGeneratedFiles(ctx, project.ID.String())
 	if err != nil {
 		slog.Error("schema extraction failed", "error", err, "project_id", project.ID)
 		sendError("schema", "failed to extract database schema")
@@ -393,45 +274,12 @@ func (c *Controller) GetDashboard(projectID string) (*models.AppDashboard, []mod
 		return nil, nil, fmt.Errorf("dashboard not found")
 	}
 
-	// Auto-upgrade schema with PK info for platform provider (cheap DB introspection)
-	if dashboard.Provider == "platform" && len(dashboard.Schema) > 0 {
-		c.ensureSchemaPKInfo(dashboard)
-	}
-
 	panels, err := c.DB.GetAppDashboardPanelsByDashboardID(dashboard.ID.String())
 	if err != nil {
 		return dashboard, nil, nil
 	}
 
 	return dashboard, panels, nil
-}
-
-// ensureSchemaPKInfo checks if the cached schema has PK info and re-extracts if missing.
-func (c *Controller) ensureSchemaPKInfo(dashboard *models.AppDashboard) {
-	var tables []struct {
-		Columns []struct {
-			IsPrimaryKey *bool `json:"is_primary_key"`
-		} `json:"columns"`
-	}
-	if err := json.Unmarshal(dashboard.Schema, &tables); err != nil {
-		return
-	}
-	// Check if any column has is_primary_key field
-	for _, t := range tables {
-		for _, col := range t.Columns {
-			if col.IsPrimaryKey != nil {
-				return // already has PK info
-			}
-		}
-	}
-	// Re-extract schema with PK info
-	schema, err := c.ExtractSchemaFromPlatformDB()
-	if err != nil {
-		return
-	}
-	dashboard.Schema = schema
-	dashboard.UpdatedAt = time.Now()
-	c.DB.UpdateAppDashboard(dashboard)
 }
 
 // UpdateDashboard updates the dashboard metadata.
@@ -786,16 +634,9 @@ func (c *Controller) RefreshDashboardSchema(ctx context.Context, projectID strin
 		}
 	}()
 
-	// Check if dashboard uses platform provider
 	dashboard, dashErr := c.DB.GetAppDashboardByProjectID(projectID)
 
-	var schema json.RawMessage
-	var schemaErr error
-	if dashErr == nil && dashboard.Provider == "platform" {
-		schema, schemaErr = c.ExtractSchemaFromPlatformDB()
-	} else {
-		schema, schemaErr = c.ExtractSchemaFromGeneratedFiles(ctx, projectID)
-	}
+	schema, schemaErr := c.ExtractSchemaFromGeneratedFiles(ctx, projectID)
 	if schemaErr != nil {
 		return nil, schemaErr
 	}
