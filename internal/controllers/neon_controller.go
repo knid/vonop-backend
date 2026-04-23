@@ -16,6 +16,7 @@ import (
 	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/services/fal"
 	"github.com/knid/wemob/internal/services/neon"
+	"github.com/knid/wemob/internal/starters"
 	"github.com/knid/wemob/internal/utils"
 )
 
@@ -523,6 +524,14 @@ func (c *Controller) provisionDatabaseForAgent(ctx context.Context, project *mod
 		return fmt.Errorf("store wemob db integration: %w", err)
 	}
 
+	if err := c.seedStarterSchema(ctx, connStr, project); err != nil {
+		// Mark the integration as errored so the agent can re-run provisioning;
+		// otherwise isNeonBacked would keep rejecting retries while has_database
+		// is still false.
+		c.markNeonIntegrationErrored(project, neonProjectID)
+		return fmt.Errorf("seed starter schema: %w", err)
+	}
+
 	// Persist the schema on the project so future runs and the dashboard
 	// share a single source of truth for the table layout.
 	if dataModelsJSON, err := models.MarshalDataModels(tables); err == nil && dataModelsJSON != nil {
@@ -564,4 +573,55 @@ func (c *Controller) getNeonIntegration(projectID string) (*models.AppIntegratio
 		}
 	}
 	return nil, nil
+}
+
+// seedStarterSchema runs the canonical ecommerce starter SQL against a freshly
+// provisioned Neon DB. Called only for projects where ProjectType == "ecommerce".
+// After this runs, wemob never modifies the tenant's schema again — the AI owns
+// it.
+func (c *Controller) seedStarterSchema(ctx context.Context, connStr string, project *models.AppProject) error {
+	if project.ProjectType != "ecommerce" {
+		return nil
+	}
+
+	db, err := sql.Open("postgres", database.NeonConnStrWithEndpoint(connStr))
+	if err != nil {
+		return fmt.Errorf("open neon for seed: %w", err)
+	}
+	defer db.Close()
+
+	execCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	if _, err := db.ExecContext(execCtx, starters.EcommerceSchemaSQL); err != nil {
+		return fmt.Errorf("apply ecommerce starter schema: %w", err)
+	}
+	slog.Info("ecommerce starter schema seeded", "project_id", project.ID)
+	return nil
+}
+
+// markNeonIntegrationErrored flips the Neon integration row's status to "error"
+// so isNeonBacked / getNeonIntegration no longer treat it as live. Used to
+// unblock retries after seedStarterSchema fails — we keep the Neon project
+// itself around (app-deletion flow owns cleanup) but stop advertising it as
+// connected. Errors from this rollback are logged only; the caller surfaces
+// the original seed failure.
+func (c *Controller) markNeonIntegrationErrored(project *models.AppProject, neonProjectID string) {
+	integ, err := c.DB.GetAppIntegrationByProvider(project.ID.String(), "neon")
+	if err != nil {
+		slog.Warn("mark neon errored: integration lookup failed",
+			"error", err, "project_id", project.ID, "neon_project_id", neonProjectID)
+		return
+	}
+	if integ == nil || integ.ID == uuid.Nil {
+		slog.Warn("mark neon errored: no integration found",
+			"project_id", project.ID, "neon_project_id", neonProjectID)
+		return
+	}
+	integ.Status = "error"
+	integ.UpdatedAt = time.Now()
+	if _, err := c.DB.UpdateAppIntegration(integ); err != nil {
+		slog.Warn("mark neon errored: update failed",
+			"error", err, "project_id", project.ID, "neon_project_id", neonProjectID)
+	}
 }
