@@ -10,28 +10,24 @@ import {
   doublePrecision,
   timestamp,
   jsonb,
-  uniqueIndex,
   index,
+  uniqueIndex,
   type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
-// stores
-export const stores = pgTable("stores", {
+// config (exactly one row per tenant DB; UPDATE-only after seeding)
+export const config = pgTable("config", {
   id: uuid("id").primaryKey().default(sql`uuid_generate_v4()`),
-  appProjectId: uuid("app_project_id").notNull().unique(),
-  userId: uuid("user_id").notNull(),
-  storeName: text("store_name").notNull(),
+  storeName: text("store_name").notNull().default("Your Store"),
   currency: text("currency").notNull().default("USD"),
   locale: text("locale").notNull().default("en"),
   taxRate: doublePrecision("tax_rate").notNull().default(0),
   shippingConfig: jsonb("shipping_config").notNull().default(sql`'{}'::jsonb`),
   paymentConfig: jsonb("payment_config").notNull().default(sql`'{}'::jsonb`),
   notifyEmail: text("notify_email"),
-  status: text("status").notNull().default("active"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-  deletedAt: timestamp("deleted_at", { withTimezone: true }),
 });
 
 // product_categories
@@ -39,11 +35,8 @@ export const productCategories = pgTable(
   "product_categories",
   {
     id: uuid("id").primaryKey().default(sql`uuid_generate_v4()`),
-    storeId: uuid("store_id")
-      .notNull()
-      .references(() => stores.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
-    slug: text("slug").notNull(),
+    slug: text("slug").notNull().unique(),
     parentId: uuid("parent_id").references(
       (): AnyPgColumn => productCategories.id,
       { onDelete: "set null" },
@@ -56,13 +49,6 @@ export const productCategories = pgTable(
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
   },
   (t) => ({
-    storeSlugUnique: uniqueIndex("product_categories_store_slug_idx").on(
-      t.storeId,
-      t.slug,
-    ),
-    storeIdx: index("idx_product_categories_store")
-      .on(t.storeId)
-      .where(sql`deleted_at IS NULL`),
     parentIdx: index("idx_product_categories_parent")
       .on(t.parentId)
       .where(sql`deleted_at IS NULL`),
@@ -74,11 +60,8 @@ export const products = pgTable(
   "products",
   {
     id: uuid("id").primaryKey().default(sql`uuid_generate_v4()`),
-    storeId: uuid("store_id")
-      .notNull()
-      .references(() => stores.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
-    slug: text("slug").notNull(),
+    slug: text("slug").notNull().unique(),
     description: text("description"),
     images: jsonb("images").notNull().default(sql`'[]'::jsonb`),
     categoryId: uuid("category_id").references(() => productCategories.id, {
@@ -98,9 +81,8 @@ export const products = pgTable(
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
   },
   (t) => ({
-    storeSlugUnique: uniqueIndex("products_store_slug_idx").on(t.storeId, t.slug),
-    storeStatusIdx: index("idx_products_store_status")
-      .on(t.storeId, t.status)
+    statusIdx: index("products_status_idx")
+      .on(t.status)
       .where(sql`deleted_at IS NULL`),
     categoryIdx: index("idx_products_category")
       .on(t.categoryId)
@@ -113,10 +95,7 @@ export const discounts = pgTable(
   "discounts",
   {
     id: uuid("id").primaryKey().default(sql`uuid_generate_v4()`),
-    storeId: uuid("store_id")
-      .notNull()
-      .references(() => stores.id, { onDelete: "cascade" }),
-    code: text("code").notNull(),
+    code: text("code").notNull().unique(),
     type: text("type").notNull(),
     value: bigint("value", { mode: "number" }).notNull(),
     minOrderCents: bigint("min_order_cents", { mode: "number" }).notNull().default(0),
@@ -131,33 +110,21 @@ export const discounts = pgTable(
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
   },
   (t) => ({
-    storeCodeUnique: uniqueIndex("discounts_store_code_idx").on(t.storeId, t.code),
-    storeActiveIdx: index("idx_discounts_store_active")
-      .on(t.storeId, t.isActive)
-      .where(sql`deleted_at IS NULL`),
+    activeIdx: index("discounts_active_idx").on(t.isActive),
   }),
 );
 
 // carts
-export const carts = pgTable(
-  "carts",
-  {
-    id: uuid("id").primaryKey().default(sql`uuid_generate_v4()`),
-    storeId: uuid("store_id")
-      .notNull()
-      .references(() => stores.id, { onDelete: "cascade" }),
-    sessionId: text("session_id").notNull(),
-    customerEmail: text("customer_email"),
-    discountId: uuid("discount_id").references(() => discounts.id, {
-      onDelete: "set null",
-    }),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-  },
-  (t) => ({
-    sessionIdx: index("idx_carts_session").on(t.storeId, t.sessionId),
+export const carts = pgTable("carts", {
+  id: uuid("id").primaryKey().default(sql`uuid_generate_v4()`),
+  sessionId: text("session_id").notNull().unique(),
+  customerEmail: text("customer_email"),
+  discountId: uuid("discount_id").references(() => discounts.id, {
+    onDelete: "set null",
   }),
-);
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
 
 // cart_items
 export const cartItems = pgTable(
@@ -185,9 +152,6 @@ export const orders = pgTable(
   "orders",
   {
     id: uuid("id").primaryKey().default(sql`uuid_generate_v4()`),
-    storeId: uuid("store_id")
-      .notNull()
-      .references(() => stores.id, { onDelete: "cascade" }),
     orderNumber: text("order_number").notNull().unique(),
     customerEmail: text("customer_email").notNull(),
     customerName: text("customer_name").notNull(),
@@ -211,12 +175,8 @@ export const orders = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
-    customerIdx: index("idx_orders_customer").on(t.storeId, t.customerEmail),
-    statusIdx: index("idx_orders_status").on(
-      t.storeId,
-      t.status,
-      t.createdAt.desc(),
-    ),
+    customerIdx: index("idx_orders_customer").on(t.customerEmail),
+    statusIdx: index("idx_orders_status").on(t.status, t.createdAt.desc()),
   }),
 );
 
@@ -247,9 +207,6 @@ export const productReviews = pgTable(
   "product_reviews",
   {
     id: uuid("id").primaryKey().default(sql`uuid_generate_v4()`),
-    storeId: uuid("store_id")
-      .notNull()
-      .references(() => stores.id, { onDelete: "cascade" }),
     productId: uuid("product_id")
       .notNull()
       .references(() => products.id, { onDelete: "cascade" }),
@@ -263,7 +220,7 @@ export const productReviews = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
-    productIdx: index("idx_reviews_product").on(t.productId, t.status),
+    productIdx: index("idx_product_reviews_product").on(t.productId, t.status),
   }),
 );
 
@@ -272,9 +229,6 @@ export const wishlists = pgTable(
   "wishlists",
   {
     id: uuid("id").primaryKey().default(sql`uuid_generate_v4()`),
-    storeId: uuid("store_id")
-      .notNull()
-      .references(() => stores.id, { onDelete: "cascade" }),
     productId: uuid("product_id")
       .notNull()
       .references(() => products.id, { onDelete: "cascade" }),
@@ -282,14 +236,15 @@ export const wishlists = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
-    storeSessionProductUnique: uniqueIndex(
-      "wishlists_store_session_product_idx",
-    ).on(t.storeId, t.sessionId, t.productId),
+    sessionProductUnique: uniqueIndex("wishlists_session_product_idx").on(
+      t.sessionId,
+      t.productId,
+    ),
   }),
 );
 
 // Type aliases via $inferSelect
-export type Store = typeof stores.$inferSelect;
+export type Config = typeof config.$inferSelect;
 export type ProductCategory = typeof productCategories.$inferSelect;
 export type Product = typeof products.$inferSelect;
 export type Discount = typeof discounts.$inferSelect;

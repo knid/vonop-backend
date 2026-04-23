@@ -18,12 +18,13 @@
 --   Go []string         -> jsonb
 --
 -- Notes:
---   * stores.app_project_id and stores.user_id reference rows in the main
---     platform DB (not this tenant DB), so they are plain uuid columns without
---     foreign keys here.
---   * All other cross-table references stay within this tenant DB and are FKs.
+--   * The tenant Neon DB is already scoped to exactly one store, so there is no
+--     store_id / tenant_id column anywhere. Store-wide settings live on a
+--     single-row `config` table that the AI UPDATEs (never INSERTs) on the
+--     first turn.
+--   * All cross-table references stay within this tenant DB and are FKs.
 --   * Soft-delete is modelled via a nullable deleted_at column on tables whose
---     Go struct declares a ,soft_delete field (Store, Product, ProductCategory,
+--     Go struct declares a ,soft_delete field (Product, ProductCategory,
 --     Discount). Tables without that field (Cart, CartItem, Order, OrderItem,
 --     ProductReview, Wishlist) do not get deleted_at.
 
@@ -31,29 +32,25 @@ BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
--- stores (one row per tenant DB; app_project_id is informational — the DB is
--- already scoped to one tenant)
-CREATE TABLE stores (
+-- config (exactly one row per tenant DB; holds store-wide settings that the
+-- AI UPDATEs on the first turn). The DB itself is the tenant boundary, so
+-- no store_id / tenant_id anywhere else in the schema.
+CREATE TABLE config (
     id               uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
-    app_project_id   uuid NOT NULL UNIQUE,
-    user_id          uuid NOT NULL,
-    store_name       text NOT NULL,
+    store_name       text NOT NULL DEFAULT 'Your Store',
     currency         text NOT NULL DEFAULT 'USD',
     locale           text NOT NULL DEFAULT 'en',
     tax_rate         double precision NOT NULL DEFAULT 0,
     shipping_config  jsonb NOT NULL DEFAULT '{}'::jsonb,
     payment_config   jsonb NOT NULL DEFAULT '{}'::jsonb,
     notify_email     text,
-    status           text NOT NULL DEFAULT 'active',
     created_at       timestamptz NOT NULL DEFAULT current_timestamp,
-    updated_at       timestamptz NOT NULL DEFAULT current_timestamp,
-    deleted_at       timestamptz
+    updated_at       timestamptz NOT NULL DEFAULT current_timestamp
 );
 
 -- product_categories
 CREATE TABLE product_categories (
     id           uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
-    store_id     uuid NOT NULL REFERENCES stores(id) ON DELETE CASCADE,
     name         text NOT NULL,
     slug         text NOT NULL,
     parent_id    uuid REFERENCES product_categories(id) ON DELETE SET NULL,
@@ -63,15 +60,13 @@ CREATE TABLE product_categories (
     created_at   timestamptz NOT NULL DEFAULT current_timestamp,
     updated_at   timestamptz NOT NULL DEFAULT current_timestamp,
     deleted_at   timestamptz,
-    UNIQUE (store_id, slug)
+    UNIQUE (slug)
 );
-CREATE INDEX idx_product_categories_store ON product_categories(store_id) WHERE deleted_at IS NULL;
 CREATE INDEX idx_product_categories_parent ON product_categories(parent_id) WHERE deleted_at IS NULL;
 
 -- products
 CREATE TABLE products (
     id                uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
-    store_id          uuid NOT NULL REFERENCES stores(id) ON DELETE CASCADE,
     name              text NOT NULL,
     slug              text NOT NULL,
     description       text,
@@ -89,15 +84,14 @@ CREATE TABLE products (
     created_at        timestamptz NOT NULL DEFAULT current_timestamp,
     updated_at        timestamptz NOT NULL DEFAULT current_timestamp,
     deleted_at        timestamptz,
-    UNIQUE (store_id, slug)
+    UNIQUE (slug)
 );
-CREATE INDEX idx_products_store_status ON products(store_id, status) WHERE deleted_at IS NULL;
+CREATE INDEX idx_products_status ON products(status) WHERE deleted_at IS NULL;
 CREATE INDEX idx_products_category ON products(category_id) WHERE deleted_at IS NULL;
 
 -- discounts
 CREATE TABLE discounts (
     id               uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
-    store_id         uuid NOT NULL REFERENCES stores(id) ON DELETE CASCADE,
     code             text NOT NULL,
     type             text NOT NULL,               -- 'percentage' | 'fixed'
     value            bigint NOT NULL,             -- percentage (0-100) or fixed amount in cents
@@ -111,21 +105,20 @@ CREATE TABLE discounts (
     created_at       timestamptz NOT NULL DEFAULT current_timestamp,
     updated_at       timestamptz NOT NULL DEFAULT current_timestamp,
     deleted_at       timestamptz,
-    UNIQUE (store_id, code)
+    UNIQUE (code)
 );
-CREATE INDEX idx_discounts_store_active ON discounts(store_id, is_active) WHERE deleted_at IS NULL;
+CREATE INDEX idx_discounts_active ON discounts(is_active);
 
 -- carts
 CREATE TABLE carts (
     id              uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
-    store_id        uuid NOT NULL REFERENCES stores(id) ON DELETE CASCADE,
     session_id      text NOT NULL,
     customer_email  text,
     discount_id     uuid REFERENCES discounts(id) ON DELETE SET NULL,
     created_at      timestamptz NOT NULL DEFAULT current_timestamp,
-    updated_at      timestamptz NOT NULL DEFAULT current_timestamp
+    updated_at      timestamptz NOT NULL DEFAULT current_timestamp,
+    UNIQUE (session_id)
 );
-CREATE INDEX idx_carts_session ON carts(store_id, session_id);
 
 -- cart_items
 CREATE TABLE cart_items (
@@ -142,7 +135,6 @@ CREATE INDEX idx_cart_items_cart ON cart_items(cart_id);
 -- orders
 CREATE TABLE orders (
     id                uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
-    store_id          uuid NOT NULL REFERENCES stores(id) ON DELETE CASCADE,
     order_number      text NOT NULL UNIQUE,
     customer_email    text NOT NULL,
     customer_name     text NOT NULL,
@@ -163,8 +155,8 @@ CREATE TABLE orders (
     created_at        timestamptz NOT NULL DEFAULT current_timestamp,
     updated_at        timestamptz NOT NULL DEFAULT current_timestamp
 );
-CREATE INDEX idx_orders_customer ON orders(store_id, customer_email);
-CREATE INDEX idx_orders_status ON orders(store_id, status, created_at DESC);
+CREATE INDEX idx_orders_customer ON orders(customer_email);
+CREATE INDEX idx_orders_status ON orders(status, created_at DESC);
 
 -- order_items
 CREATE TABLE order_items (
@@ -182,7 +174,6 @@ CREATE INDEX idx_order_items_order ON order_items(order_id);
 -- product_reviews
 CREATE TABLE product_reviews (
     id              uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
-    store_id        uuid NOT NULL REFERENCES stores(id) ON DELETE CASCADE,
     product_id      uuid NOT NULL REFERENCES products(id) ON DELETE CASCADE,
     customer_name   text NOT NULL,
     customer_email  text NOT NULL,
@@ -193,16 +184,20 @@ CREATE TABLE product_reviews (
     status          text NOT NULL DEFAULT 'approved',   -- approved, pending, rejected
     created_at      timestamptz NOT NULL DEFAULT current_timestamp
 );
-CREATE INDEX idx_reviews_product ON product_reviews(product_id, status);
+CREATE INDEX idx_product_reviews_product ON product_reviews(product_id, status);
 
 -- wishlists
 CREATE TABLE wishlists (
     id          uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
-    store_id    uuid NOT NULL REFERENCES stores(id) ON DELETE CASCADE,
     product_id  uuid NOT NULL REFERENCES products(id) ON DELETE CASCADE,
     session_id  text NOT NULL,
     created_at  timestamptz NOT NULL DEFAULT current_timestamp,
-    UNIQUE (store_id, session_id, product_id)
+    UNIQUE (session_id, product_id)
 );
+
+-- Seed the single config row. The AI UPDATEs (never INSERTs) this row on the
+-- first turn to set store_name, currency, locale, tax_rate, and the jsonb
+-- shipping/payment configs.
+INSERT INTO config DEFAULT VALUES;
 
 COMMIT;
