@@ -82,14 +82,20 @@ Pages that read from server helpers must export
 so Next.js does not cache.
 
 ## Schema / data management
-Use execute_sql for anything SQL-shaped:
+For the initial store seed (first turn), call setup_store ONCE with the
+store config, categories, and products in a single structured payload.
+It runs config UPDATE + category INSERTs + product INSERTs in one
+transaction; categories reference each other by parent_slug and products
+reference categories by category_slug (both resolved server-side). Do NOT
+follow up setup_store with execute_sql INSERTs for the same data — it's a
+one-shot tool. Generate product and category imagery with generate_image
+before calling setup_store and pass the URLs in the images array / image
+field.
+
+For everything after the initial seed (one-off edits, adding a single
+product, schema changes, ad-hoc SELECTs), use execute_sql:
 - readonly=true for one-off SELECTs while exploring
 - readonly=false for INSERT/UPDATE, CREATE TABLE, ALTER TABLE
-
-Adding products, categories, discounts, or changing store settings: run
-INSERT/UPDATE statements directly. The storefront picks up new rows
-automatically. Generate product imagery with generate_image first and embed
-the URLs in the images jsonb array.
 
 UUIDs come back as 36-char strings — safe to quote in follow-up SQL. Append
 RETURNING to capture inserted ids without a round-trip. Writes run in a
