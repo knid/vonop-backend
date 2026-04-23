@@ -372,6 +372,16 @@ func Run(
 
 	toolSchemas := registryToUtilsTools(registry)
 
+	// Server tools (e.g. Anthropic-native web_search) are executed by the
+	// provider — no local executor call, so nothing here emits a tool-call
+	// event and the UI never draws a tool card for them. We surface a
+	// start event by name from OnToolCallStart, skipping local tools (the
+	// executor already emits starts for those with correlatable IDs).
+	serverToolNames := make(map[string]bool, len(registry.ServerTools()))
+	for _, st := range registry.ServerTools() {
+		serverToolNames[st.DisplayName] = true
+	}
+
 	_, llmErr := utils.StreamWithTools(
 		ctx,
 		model,
@@ -392,6 +402,17 @@ func Run(
 			MaxTokens:  64000,
 			NudgeAfter: 50,
 			StripAfter: -1,
+			OnToolCallStart: func(toolName string) {
+				if !serverToolNames[toolName] {
+					return
+				}
+				emitter.Emit(EventToolCallStart, ToolCallStartEvent{
+					RunID:      runID,
+					Turn:       turn,
+					ToolCallID: uuid.NewString(),
+					ToolName:   toolName,
+				})
+			},
 			ShouldContinue: func() bool {
 				if ctx.Err() != nil {
 					return false
