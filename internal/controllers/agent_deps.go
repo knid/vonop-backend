@@ -65,9 +65,6 @@ func (c *Controller) AgentDeps(user *models.User) *agent.RunDependencies {
 		RecordLLMError: func(tracker *utils.TokenTracker, action, model, provider, reference, appType string, latencyMs int64, errCode, errMsg string) {
 			c.RecordLLMError(user, tracker, action, model, provider, reference, appType, latencyMs, errCode, errMsg)
 		},
-		StoreOp: func(ctx context.Context, project *models.AppProject, action string, params map[string]any) (string, error) {
-			return c.ExecuteStoreOp(ctx, project, user, action, params)
-		},
 	}
 }
 

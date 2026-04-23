@@ -68,19 +68,6 @@ type AIEnabler func(ctx context.Context, project *models.AppProject) error
 // gateway will actually accept at runtime.
 type GatewayAllowedModelsFn func() []string
 
-// StoreOperator executes one store management operation for an ecommerce
-// project. Bound by the controller layer to Controller.ExecuteStoreOp. The
-// dispatcher inside the controller routes on `action` to the existing
-// *FromChat helpers in ecommerce_controller.go and lazy-creates the Store
-// row on first call. Returns a JSON string for list/get actions, a short
-// success string for mutations, or a non-nil error on failure.
-type StoreOperator func(
-	ctx context.Context,
-	project *models.AppProject,
-	action string,
-	params map[string]any,
-) (result string, err error)
-
 // LLMUsageRecorder is invoked at the end of a successful run (and at the end
 // of a partial-failure run that still made LLM calls) to record per-call
 // $ai_generation events plus a grouping $ai_trace event in PostHog LLM
@@ -130,5 +117,4 @@ type RunDependencies struct {
 	UpdateMobileBridgeMethod MobileBridgeUpdater
 	RecordLLMUsage           LLMUsageRecorder
 	RecordLLMError           LLMErrorRecorder
-	StoreOp                  StoreOperator
 }
