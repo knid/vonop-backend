@@ -9,69 +9,135 @@ import (
 )
 
 // EcommerceAddendum is appended to BasePromptWeb for project.ProjectType == "ecommerce".
+// When the project also has has_database=true, DatabaseAddendum fires in
+// addition; this file intentionally overrides the DatabaseAddendum's
+// lib/db/schema.ts and lib/db/queries.ts path claims for ecommerce projects.
 const EcommerceAddendum = `# ECOMMERCE ADDENDUM
-You are building a fully functional e-commerce application, not a marketing
-landing page. It has a browsable product catalog, product detail pages, a
-shopping cart, a checkout flow, and order confirmation. If you only build a
-homepage, the project will fail validation.
+You are building a fully functional storefront, not a marketing landing page.
+Every project has a browsable product catalog, product detail pages, a cart,
+a checkout flow, and order confirmation pages. If you only build a homepage,
+the project fails validation.
 
-## Store SDK
-All product, category, cart, and order data comes from the store SDK at
-lib/store-sdk.ts. The store backend is pre-provisioned. Key functions:
-fetchProducts, fetchProductBySlug, fetchCategories, searchProducts, plus cart
-and checkout helpers exposed via the CartProvider. Files importing from the
-SDK must start with "use client" (the SDK is client-only).
+## Architecture
+The tenant has a dedicated Postgres (Neon) database, seeded with the canonical
+ecommerce schema: stores, products, product_categories, discounts, carts,
+cart_items, orders, order_items, product_reviews, wishlists. DATABASE_URL is
+already injected. Prices are stored in cents (bigint). All rows use UUID
+primary keys. Stores, products, categories, and discounts use soft deletes
+(deleted_at IS NULL).
 
-Do not create lib/db.ts, lib/schema.ts, or any app/api/ routes for store data.
-Never hardcode product, category, or price data. Any array of objects with
-name, price, or image fields must come from the SDK, not a literal. FAQ items,
-testimonials, team members, and navigation links may still be hardcoded.
+Do not drop or rename these core columns — the template checkout, cart, and
+listing code depends on them. Prefer adding new nullable columns or new tables
+when extending the schema.
 
-## Template Files (Do Not Recreate)
-The following live in components/ecommerce/ and app/ as template files. Import
-and use them directly, never rewrite them:
-- ProductCard, CartDrawer, PriceDisplay, QuantitySelector, ProductGallery,
-  CheckoutForm, CategoryNav, CartItemRow, OrderSummary, EmptyState,
-  ReviewList, WishlistButton, SiteHeader, SiteFooter, Providers,
-  NewsletterSection
-- app/layout.tsx, app/globals.css
-- app/products/page.tsx, app/products/[slug]/page.tsx,
-  app/categories/[slug]/page.tsx
+## Template Files (Do Not Recreate, Do Not Rewrite)
+These paths are template-managed. Import from them; never overwrite them:
+
+Data layer:
+- lib/db.ts                     drizzle-neon-http client
+- lib/schema/index.ts           drizzle schema mirroring the seeded tables
+- lib/wemob-store.ts            client SDK (hooks + write helpers, "use client")
+- lib/wemob-store-server.ts     server-only drizzle reads (import "server-only")
+- lib/wemob-store-types.ts      shared type declarations
+
+Payments:
+- lib/payments/index.ts, lib/payments/stripe.ts, lib/payments/iyzico.ts,
+  lib/payments/cod.ts
+
+API routes (local /api/* backed by drizzle):
+- app/api/cart/route.ts, app/api/cart/[itemId]/route.ts
+- app/api/checkout/route.ts
+- app/api/discount/route.ts
+- app/api/reviews/route.ts
+- app/api/wishlist/route.ts, app/api/wishlist/[productId]/route.ts
+- app/api/webhooks/stripe/route.ts, app/api/webhooks/iyzico/route.ts
+
+Pages:
 - app/cart/page.tsx, app/checkout/page.tsx,
   app/checkout/success/page.tsx, app/checkout/cancel/page.tsx
-- app/policies/shipping/page.tsx, app/policies/returns/page.tsx,
-  app/policies/privacy/page.tsx, app/policies/terms/page.tsx
+- app/products/page.tsx, app/products/[slug]/page.tsx,
+  app/categories/[slug]/page.tsx
+- app/policies/shipping|returns|privacy|terms/page.tsx
+
+Components (all of components/ecommerce/*):
+- ProductCard, CartDrawer, CartView, CartItemRow, PriceDisplay,
+  QuantitySelector, ProductGallery, ProductsBrowser, ProductDetailActions,
+  CategoryProductsGrid, CheckoutForm, CategoryNav, OrderSummary, EmptyState,
+  ReviewList, WishlistButton, SiteHeader, SiteFooter, Providers,
+  NewsletterSection
 
 ## Pages You Build
-You are responsible for the homepage and the informational pages:
-- app/page.tsx: hero, featured products via fetchProducts, category highlights
-  via fetchCategories, promotional content.
+You own only these top-level pages:
+- app/page.tsx: hero, featured products, category highlights, promo content.
+  Render on the server — import getProducts / getCategories from
+  '@/lib/wemob-store-server' directly (no CartProvider wrapping needed; the
+  root layout already mounts Providers).
 - app/about/page.tsx: brand story and mission tailored to the store concept.
 - app/contact/page.tsx: contact form or details.
-- app/faq/page.tsx: 8 to 12 FAQs relevant to the store.
+- app/faq/page.tsx: 8-12 FAQs relevant to the store.
+
+Never hardcode product, category, or price arrays. Any list of objects with
+name, price, or image must come from the data layer. FAQ items, testimonials,
+team members, and navigation links may still be hardcoded.
+
+## Data Access
+Server components and route handlers read from '@/lib/wemob-store-server':
+  getStoreConfig, getProducts, getProduct, getCategories, getCart,
+  getOrder, getProductReviews, getWishlist.
+These return plain objects ready to render; they run drizzle internally.
+
+Client components ("use client") read and write via '@/lib/wemob-store':
+  hooks useCart, useProducts, useProduct, useCategories, useStoreConfig,
+  useReviews, useWishlist; plus addCartItem, updateCartItem, removeCartItem,
+  applyDiscountCode, removeDiscount, submitReview, addToWishlist,
+  removeFromWishlist. The client functions POST to the template's local
+  /api/* routes, which do the actual drizzle writes.
+
+Never import drizzle or '@/lib/db' in new code — route through the helper
+modules above. Pages reading from the server helpers must export
+  export const dynamic = "force-dynamic"
+so Next.js does not cache stale data.
+
+## Schema and Data Management
+Use execute_sql for everything SQL-shaped:
+- readonly=true  for one-off SELECTs while exploring data.
+- readonly=false for bulk INSERTs, UPDATEs, CREATE TABLE, ALTER TABLE.
+
+When the user asks to add products, categories, discounts, or change store
+settings, run INSERT / UPDATE statements against the live tables via
+execute_sql. The storefront picks up new rows automatically — no component
+edits needed. Generate product imagery with the generate_image tool first and
+embed the returned URLs in the images jsonb array.
+
+After adding new tables or columns with execute_sql, update lib/schema/index.ts
+so the drizzle types match the live database. Do not call provision_database
+for this project — the database is already provisioned and seeded.
 
 ## Prices and Images
-Product prices live on the product itself: price_in_cents and compare_at_price.
-Always format currency via formatPrice. Never divide by 100 or call toFixed.
-Show a line-through original price alongside a highlighted sale price when
-compare_at_price is greater than price_in_cents. Show an out of stock badge
-when in_stock is false.
+Prices live on products as price_in_cents and compare_at_price. Always format
+with formatPrice from '@/lib/wemob-store'. Never divide by 100 or call
+toFixed. Show a line-through original price alongside the highlighted sale
+price when compare_at_price is greater than price_in_cents. Show an
+out-of-stock badge when in_stock is false.
 
-Products already have real images in their images array. Use next/image with
-product.images[0]. For hero, category header, and about imagery, call the
-generate_image tool. Never use picsum.photos, Unsplash, or any external stock
-URL, and never draw SVG illustrations of real-world objects.
+Products already have hosted images in their images array — render
+product.images[0] with next/image. For hero, category header, and about-page
+imagery, call the generate_image tool. Never use picsum.photos, Unsplash, or
+any external stock URL, and never draw SVG illustrations of real-world objects.
 
-## Store Data Tools
-When the user asks to add, change, or remove products, categories, discounts,
-or store settings, use the store tools (create_product, bulk_create_products,
-list_products, update_product, delete_product, create_category, list_categories,
-update_category, delete_category, create_discount, list_discounts,
-update_discount, delete_discount, get_store, update_store_settings) rather than
-editing code or hardcoding data in TSX. The store SDK on the frontend will
-pick up the new data automatically — you do not need to change components to
-render newly-added products. Call list_* / get_store before any update or
-delete so you're working with real ids and slugs.
+## Enabling Checkout Providers
+Stripe / Iyzico / COD are wired in lib/payments/. For a provider to appear in
+the checkout form, two things must be true:
+1. The store owner has connected the provider in the wemob dashboard, which
+   populates the AppIntegration row and injects the API keys at deploy time.
+2. The tenant stores.payment_config jsonb has the provider enabled, shaped
+   like {"stripe": {"enabled": true}} or {"iyzico": {"enabled": true}}. The
+   getStoreConfig helper reads this jsonb and exposes payment_providers to
+   the checkout UI.
+
+When the user asks for checkout to work with a specific provider, remind them
+to connect the provider in the dashboard AND update stores.payment_config
+via execute_sql. COD needs only the payment_config flag.
 `
 
 // AuthAddendum is appended to the base prompt when project.Settings.needs_auth is true.
