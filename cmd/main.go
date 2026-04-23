@@ -1701,6 +1701,42 @@ func main() {
 					// Ship tab — Launchpad aggregate
 					r.Get("/launchpad", httpViews.GetLaunchpad)
 					r.Post("/listing/draft", httpViews.DraftListing)
+
+					// Ecommerce admin — proxies to the per-tenant Neon DB.
+					// Apps without a Neon integration get 404 from each handler.
+					r.Route("/store", func(r chi.Router) {
+						r.Get("/", httpViews.GetAppStore)
+						r.Put("/settings", httpViews.UpdateAppStoreSettings)
+						r.Get("/analytics", httpViews.GetStoreAnalytics)
+
+						r.Route("/products", func(r chi.Router) {
+							r.Get("/", httpViews.ListStoreProducts)
+							r.Post("/", httpViews.CreateStoreProduct)
+							r.Get("/{productId}", httpViews.GetStoreProduct)
+							r.Put("/{productId}", httpViews.UpdateStoreProduct)
+							r.Delete("/{productId}", httpViews.DeleteStoreProduct)
+						})
+
+						r.Route("/categories", func(r chi.Router) {
+							r.Get("/", httpViews.ListStoreCategories)
+							r.Post("/", httpViews.CreateStoreCategory)
+							r.Put("/{categoryId}", httpViews.UpdateStoreCategory)
+							r.Delete("/{categoryId}", httpViews.DeleteStoreCategory)
+						})
+
+						r.Route("/discounts", func(r chi.Router) {
+							r.Get("/", httpViews.ListStoreDiscounts)
+							r.Post("/", httpViews.CreateStoreDiscount)
+							r.Put("/{discountId}", httpViews.UpdateStoreDiscount)
+							r.Delete("/{discountId}", httpViews.DeleteStoreDiscount)
+						})
+
+						r.Route("/orders", func(r chi.Router) {
+							r.Get("/", httpViews.ListStoreOrders)
+							r.Get("/{orderId}", httpViews.GetStoreOrder)
+							r.Put("/{orderId}", httpViews.UpdateStoreOrderStatus)
+						})
+					})
 				})
 			})
 
