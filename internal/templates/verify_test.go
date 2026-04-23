@@ -15,12 +15,17 @@ func TestGetTemplateSmoke(t *testing.T) {
 		{"components/ecommerce/product-card.tsx", "ProductCard"},
 		{"lib/db.ts", "drizzle"},
 		{"lib/wemob-store.ts", "CartProvider"},
+		{"lib/wemob-store-server.ts", "server-only"},
+		{"lib/schema/index.ts", "pgTable"},
 		{".gitignore", "node_modules"},
 		{"lib/utils.ts", "twMerge"},
-		{"app/cart/page.tsx", "useCart"},
+		{"app/cart/page.tsx", "getCart"},
+		{"app/api/checkout/route.ts", "getAdapter"},
+		{"app/api/cart/route.ts", "wemob_cart_session"},
+		{"lib/payments/stripe.ts", "stripe"},
 		{"components/ecommerce/site-header.tsx", "SiteHeader"},
 		{"app/policies/shipping/page.tsx", "shipping"},
-		{"components/ecommerce/checkout-form.tsx", "checkout"},
+		{"components/ecommerce/checkout-form.tsx", "/api/checkout"},
 	}
 	for _, c := range checks {
 		content := GetTemplate(c.path)
