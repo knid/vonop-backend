@@ -28,17 +28,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "invalid_rating" }, { status: 400 });
   }
 
-  const [store] = await db.select().from(schema.stores).limit(1);
-  if (!store) {
-    return NextResponse.json({ error: "no_store" }, { status: 500 });
-  }
-
   const [product] = await db
     .select()
     .from(schema.products)
     .where(
       and(
-        eq(schema.products.storeId, store.id),
         eq(schema.products.slug, slug),
         isNull(schema.products.deletedAt),
       ),
@@ -50,7 +44,6 @@ export async function POST(req: NextRequest) {
   const [inserted] = await db
     .insert(schema.productReviews)
     .values({
-      storeId: store.id,
       productId: product.id,
       customerName,
       customerEmail,
@@ -77,15 +70,11 @@ export async function GET(req: NextRequest) {
   const empty = { reviews: [], average_rating: 0, review_count: 0 };
   if (!slug) return NextResponse.json(empty);
 
-  const [store] = await db.select().from(schema.stores).limit(1);
-  if (!store) return NextResponse.json(empty);
-
   const [product] = await db
     .select()
     .from(schema.products)
     .where(
       and(
-        eq(schema.products.storeId, store.id),
         eq(schema.products.slug, slug),
         isNull(schema.products.deletedAt),
       ),

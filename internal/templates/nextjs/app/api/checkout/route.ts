@@ -30,13 +30,13 @@ export async function POST(req: NextRequest) {
   const sessionId = jar.get(CART_SESSION_COOKIE)?.value;
   if (!sessionId) return NextResponse.json({ error: "no_cart_session" }, { status: 400 });
 
-  const [store] = await db.select().from(schema.stores).limit(1);
-  if (!store) return NextResponse.json({ error: "no_store" }, { status: 500 });
+  const [cfg] = await db.select().from(schema.config).limit(1);
+  if (!cfg) return NextResponse.json({ error: "no_config" }, { status: 500 });
 
   const [cart] = await db
     .select()
     .from(schema.carts)
-    .where(and(eq(schema.carts.storeId, store.id), eq(schema.carts.sessionId, sessionId)));
+    .where(eq(schema.carts.sessionId, sessionId));
   if (!cart) return NextResponse.json({ error: "cart_not_found" }, { status: 404 });
 
   const items = await db
@@ -75,11 +75,11 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // Tax + shipping come from store config. For PR 3 keep it simple: tax is a
-  // flat percentage of the discounted subtotal; shipping is 0 (free). Stores
+  // Tax + shipping come from the config row. For PR 3 keep it simple: tax is
+  // a flat percentage of the discounted subtotal; shipping is 0 (free). Stores
   // that want richer logic can extend this route later.
   const taxableBase = subtotal - discountCents;
-  const taxCents = Math.floor((taxableBase * Number(store.taxRate)) / 100);
+  const taxCents = Math.floor((taxableBase * Number(cfg.taxRate)) / 100);
   const shippingCents = 0;
   const totalCents = taxableBase + taxCents + shippingCents;
 
@@ -87,7 +87,6 @@ export async function POST(req: NextRequest) {
   const [order] = await db
     .insert(schema.orders)
     .values({
-      storeId: store.id,
       orderNumber,
       customerEmail: body.email,
       customerName: body.name,
@@ -98,7 +97,7 @@ export async function POST(req: NextRequest) {
       taxCents,
       shippingCents,
       totalCents,
-      currency: store.currency,
+      currency: cfg.currency,
       status: "pending",
       paymentStatus: "pending",
       paymentProvider: body.provider,
@@ -129,7 +128,7 @@ export async function POST(req: NextRequest) {
   let result;
   try {
     const adapter = getAdapter(body.provider);
-    result = await adapter.createSession(order, store);
+    result = await adapter.createSession(order, cfg);
   } catch (err) {
     // Adapter failed — rollback order status so the client can retry.
     await db

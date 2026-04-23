@@ -16,7 +16,7 @@ import "server-only";
 // the package only enters the server bundle for routes that actually hit the
 // Iyzico adapter.
 
-import type { Order, Store } from "@/lib/schema";
+import type { Order, Config } from "@/lib/schema";
 
 import type { CheckoutResult, WebhookEvent } from "./index";
 
@@ -80,7 +80,7 @@ type AddressLike = {
 
 export async function createSession(
   order: Order,
-  store: Store,
+  config: Config,
 ): Promise<CheckoutResult> {
   const iyzipay = await getClient();
   const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "";
@@ -100,11 +100,11 @@ export async function createSession(
     .join(" ") || shippingAddress;
 
   const req: Record<string, unknown> = {
-    locale: store.locale || "en",
+    locale: config.locale || "en",
     conversationId: order.id,
     price: (Number(order.subtotalCents) / 100).toFixed(2),
     paidPrice: (Number(order.totalCents) / 100).toFixed(2),
-    currency: store.currency,
+    currency: config.currency,
     basketId: order.orderNumber,
     paymentGroup: "PRODUCT",
     callbackUrl: `${siteUrl}/api/webhooks/iyzico`,

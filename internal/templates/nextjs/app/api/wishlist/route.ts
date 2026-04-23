@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { randomUUID } from "crypto";
-import { and, desc, eq } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { db, schema } from "@/lib/db";
 
 const CART_SESSION_COOKIE = "wemob_cart_session";
@@ -28,18 +28,10 @@ export async function GET() {
   const sid = jar.get(CART_SESSION_COOKIE)?.value;
   if (!sid) return NextResponse.json([]);
 
-  const [store] = await db.select().from(schema.stores).limit(1);
-  if (!store) return NextResponse.json([]);
-
   const rows = await db
     .select()
     .from(schema.wishlists)
-    .where(
-      and(
-        eq(schema.wishlists.storeId, store.id),
-        eq(schema.wishlists.sessionId, sid),
-      ),
-    )
+    .where(eq(schema.wishlists.sessionId, sid))
     .orderBy(desc(schema.wishlists.createdAt));
 
   const items = rows.map((w) => ({
@@ -67,15 +59,11 @@ export async function POST(req: NextRequest) {
   }
 
   const sid = await ensureSession();
-  const [store] = await db.select().from(schema.stores).limit(1);
-  if (!store) {
-    return NextResponse.json({ error: "no_store" }, { status: 500 });
-  }
 
-  // Idempotent add: upsert via unique (store_id, session_id, product_id).
+  // Idempotent add: upsert via unique (session_id, product_id).
   await db
     .insert(schema.wishlists)
-    .values({ storeId: store.id, productId, sessionId: sid })
+    .values({ productId, sessionId: sid })
     .onConflictDoNothing();
 
   return NextResponse.json({ ok: true });

@@ -6,13 +6,13 @@ import "server-only";
 // order route handler can skip a redirect and mark the order as pending
 // collection directly. `handleWebhook` is never called — COD has no webhooks.
 
-import type { Order, Store } from "@/lib/schema";
+import type { Order, Config } from "@/lib/schema";
 
 import type { CheckoutResult, WebhookEvent } from "./index";
 
 export async function createSession(
   _order: Order,
-  _store: Store,
+  _config: Config,
 ): Promise<CheckoutResult> {
   return { kind: "placed" };
 }

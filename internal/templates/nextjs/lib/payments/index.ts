@@ -4,10 +4,10 @@ import "server-only";
 //
 // Each provider adapter exposes the same `createSession` + `handleWebhook`
 // pair via `PaymentAdapter`. Callers pick the adapter with `getAdapter(provider)`
-// using the `payment_provider` column on the order (or the store's configured
-// default provider) and avoid branching on provider strings elsewhere.
+// using the `payment_provider` column on the order (or the configured default
+// provider) and avoid branching on provider strings elsewhere.
 
-import type { Order, Store } from "@/lib/schema";
+import type { Order, Config } from "@/lib/schema";
 
 import * as stripe from "./stripe";
 import * as iyzico from "./iyzico";
@@ -26,7 +26,7 @@ export type WebhookEvent = {
 };
 
 export type PaymentAdapter = {
-  createSession: (order: Order, store: Store) => Promise<CheckoutResult>;
+  createSession: (order: Order, config: Config) => Promise<CheckoutResult>;
   handleWebhook: (rawBody: string, headers: Headers) => Promise<WebhookEvent>;
 };
 

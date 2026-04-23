@@ -7,12 +7,14 @@ import "server-only";
 // route handlers only — never from a client component. The `server-only`
 // import above causes `next build` to fail fast if that happens.
 //
+// The tenant DB is already scoped to one store — there is no store_id column
+// anywhere in the schema. Store-wide settings live on the single-row `config`
+// table, which the AI UPDATEs (never INSERTs).
+//
 // Client-side write flows (cart mutations, checkout, review submission, etc.)
 // still live in `./wemob-store.ts` and currently call the legacy
 // `/v2/storefront/*` API. They will be migrated to local route handlers in a
 // follow-up PR.
-
-import { cache } from "react";
 
 import { and, asc, desc, eq, ilike, inArray, isNull, sql } from "drizzle-orm";
 
@@ -20,15 +22,14 @@ import { db } from "./db";
 import {
   cartItems,
   carts,
+  config,
   discounts,
   orderItems,
   orders,
   productCategories,
   productReviews,
   products,
-  stores,
   wishlists,
-  type Store,
 } from "./schema";
 import type {
   OrderTracking,
@@ -54,50 +55,34 @@ function escapeLike(input: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Store helper
-// ---------------------------------------------------------------------------
-
-// Each tenant DB holds exactly one `stores` row (not soft-deleted). React's
-// `cache()` scopes memoization to a single render pass, so repeated calls
-// within one request share a result without leaking across requests on a
-// persistent Node runtime.
-const getStore = cache(async (): Promise<Store> => {
-  const rows = await db
-    .select()
-    .from(stores)
-    .where(isNull(stores.deletedAt))
-    .limit(1);
-  if (rows.length === 0) {
-    throw new Error("Store row not found in tenant database");
-  }
-  return rows[0];
-});
-
-// ---------------------------------------------------------------------------
 // Store config
 // ---------------------------------------------------------------------------
 
-/** Fetch the store configuration derived from the single `stores` row. */
+/** Fetch the store configuration from the single `config` row. */
 export async function getStoreConfig(): Promise<StoreConfig> {
-  const store = await getStore();
+  const rows = await db.select().from(config).limit(1);
+  if (rows.length === 0) {
+    throw new Error("Config row not found in tenant database");
+  }
+  const cfg = rows[0];
 
-  // Derive payment_providers from stores.payment_config jsonb. Expected shape
+  // Derive payment_providers from config.payment_config jsonb. Expected shape
   // is an object keyed by provider name, with `{ enabled: boolean }` values.
   // Fallback: emit every non-empty top-level key. The legacy Go API derived
   // this from AppIntegration rows in the main platform DB, which this tenant
   // DB has no visibility into — this is a documented divergence.
   const paymentProviders: string[] = [];
   const paymentConfig =
-    (store.paymentConfig as Record<string, unknown> | null) ?? {};
-  for (const [provider, cfg] of Object.entries(paymentConfig)) {
-    if (cfg && typeof cfg === "object") {
-      const enabled = (cfg as Record<string, unknown>).enabled;
+    (cfg.paymentConfig as Record<string, unknown> | null) ?? {};
+  for (const [provider, providerCfg] of Object.entries(paymentConfig)) {
+    if (providerCfg && typeof providerCfg === "object") {
+      const enabled = (providerCfg as Record<string, unknown>).enabled;
       if (enabled === true) {
         paymentProviders.push(provider);
         continue;
       }
       // No explicit `enabled` key — treat presence as opt-in.
-      if (!("enabled" in (cfg as Record<string, unknown>))) {
+      if (!("enabled" in (providerCfg as Record<string, unknown>))) {
         paymentProviders.push(provider);
       }
     }
@@ -106,17 +91,17 @@ export async function getStoreConfig(): Promise<StoreConfig> {
   // Shipping enabled: mirror the Go logic — truthy if shipping_config has any
   // keys, overridden by an explicit `enabled` flag when present.
   const shippingConfig =
-    (store.shippingConfig as Record<string, unknown> | null) ?? {};
+    (cfg.shippingConfig as Record<string, unknown> | null) ?? {};
   let shippingEnabled = Object.keys(shippingConfig).length > 0;
   if (typeof shippingConfig.enabled === "boolean") {
     shippingEnabled = shippingConfig.enabled;
   }
 
   return {
-    name: store.storeName,
-    currency: store.currency,
-    locale: store.locale,
-    tax_rate: store.taxRate,
+    name: cfg.storeName,
+    currency: cfg.currency,
+    locale: cfg.locale,
+    tax_rate: cfg.taxRate,
     payment_providers: paymentProviders,
     shipping_enabled: shippingEnabled,
   };
@@ -140,22 +125,18 @@ interface GetProductsParams {
 export async function getProducts(
   params?: GetProductsParams,
 ): Promise<StorefrontProduct[]> {
-  const store = await getStore();
-
   const whereConditions = [
-    eq(products.storeId, store.id),
     eq(products.status, "active"),
     isNull(products.deletedAt),
   ];
 
   if (params?.category) {
-    // Resolve category slug -> category id scoped to this store.
+    // Resolve category slug -> category id.
     const catRows = await db
       .select({ id: productCategories.id })
       .from(productCategories)
       .where(
         and(
-          eq(productCategories.storeId, store.id),
           eq(productCategories.slug, params.category),
           isNull(productCategories.deletedAt),
         ),
@@ -213,8 +194,6 @@ export async function getProducts(
 export async function getProduct(
   slug: string,
 ): Promise<StorefrontProduct | null> {
-  const store = await getStore();
-
   const rows = await db
     .select({
       product: products,
@@ -225,7 +204,6 @@ export async function getProduct(
     .leftJoin(productCategories, eq(products.categoryId, productCategories.id))
     .where(
       and(
-        eq(products.storeId, store.id),
         eq(products.slug, slug),
         eq(products.status, "active"),
         isNull(products.deletedAt),
@@ -254,17 +232,10 @@ export async function getProduct(
 
 /** Fetch all non-deleted categories ordered by sort_order. */
 export async function getCategories(): Promise<StorefrontCategory[]> {
-  const store = await getStore();
-
   const rows = await db
     .select()
     .from(productCategories)
-    .where(
-      and(
-        eq(productCategories.storeId, store.id),
-        isNull(productCategories.deletedAt),
-      ),
-    )
+    .where(isNull(productCategories.deletedAt))
     .orderBy(asc(productCategories.sortOrder), asc(productCategories.name));
 
   return rows.map((c) => ({
@@ -286,12 +257,10 @@ export async function getCategories(): Promise<StorefrontCategory[]> {
  * when no cart row exists for the session.
  */
 export async function getCart(sessionId: string): Promise<StorefrontCart | null> {
-  const store = await getStore();
-
   const cartRows = await db
     .select()
     .from(carts)
-    .where(and(eq(carts.storeId, store.id), eq(carts.sessionId, sessionId)))
+    .where(eq(carts.sessionId, sessionId))
     .limit(1);
 
   if (cartRows.length === 0) {
@@ -371,14 +340,12 @@ export async function getCart(sessionId: string): Promise<StorefrontCart | null>
 // Orders
 // ---------------------------------------------------------------------------
 
-/** Fetch an order by id, scoped to the single store, with its line items. */
+/** Fetch an order by id, with its line items. */
 export async function getOrder(orderId: string): Promise<OrderTracking | null> {
-  const store = await getStore();
-
   const orderRows = await db
     .select()
     .from(orders)
-    .where(and(eq(orders.storeId, store.id), eq(orders.id, orderId)))
+    .where(eq(orders.id, orderId))
     .limit(1);
 
   if (orderRows.length === 0) {
@@ -423,14 +390,11 @@ export async function getOrder(orderId: string): Promise<OrderTracking | null> {
  * shape so pages render without branching.
  */
 export async function getProductReviews(slug: string): Promise<ReviewsResult> {
-  const store = await getStore();
-
   const productRows = await db
     .select({ id: products.id })
     .from(products)
     .where(
       and(
-        eq(products.storeId, store.id),
         eq(products.slug, slug),
         isNull(products.deletedAt),
       ),
@@ -477,19 +441,12 @@ export async function getProductReviews(slug: string): Promise<ReviewsResult> {
 // Wishlist
 // ---------------------------------------------------------------------------
 
-/** Fetch wishlist rows for a session, scoped to the single store. */
+/** Fetch wishlist rows for a session. */
 export async function getWishlist(sessionId: string): Promise<WishlistItem[]> {
-  const store = await getStore();
-
   const rows = await db
     .select()
     .from(wishlists)
-    .where(
-      and(
-        eq(wishlists.storeId, store.id),
-        eq(wishlists.sessionId, sessionId),
-      ),
-    )
+    .where(eq(wishlists.sessionId, sessionId))
     .orderBy(desc(wishlists.createdAt));
 
   return rows.map((w) => ({

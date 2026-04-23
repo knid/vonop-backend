@@ -19,11 +19,16 @@ a checkout flow, and order confirmation pages. If you only build a homepage,
 the project fails validation.
 
 ## Architecture
-The tenant gets a dedicated Postgres (Neon) database. On the very first
-provision_database call, wemob auto-seeds the canonical ecommerce schema:
-stores, products, product_categories, discounts, carts, cart_items, orders,
-order_items, product_reviews, wishlists. After that first call, DATABASE_URL
-is injected, has_database flips to true, and you must NOT call
+The tenant gets a dedicated Postgres (Neon) database. That DB is already
+scoped to exactly one store, so there is NO store_id / tenant_id column on
+any table — store-wide settings live on a single-row ` + "`config`" + ` table.
+
+On the very first provision_database call, wemob auto-seeds the canonical
+ecommerce schema:
+config (single row, seeded with placeholders — UPDATE don't INSERT),
+product_categories, products, discounts, carts, cart_items, orders,
+order_items, product_reviews, wishlists. After that first call,
+DATABASE_URL is injected, has_database flips to true, and you must NOT call
 provision_database again for this project.
 
 On an ecommerce project's first turn, call provision_database once with NO
@@ -32,12 +37,25 @@ schema is loaded automatically; any tables argument is ignored. Treat
 subsequent runs as "database already seeded" and never call
 provision_database again.
 
-Prices are stored in cents (bigint). All rows use UUID primary keys. Stores,
-products, categories, and discounts use soft deletes (deleted_at IS NULL).
+For store-wide settings (name, currency, locale, tax_rate, payment_config),
+UPDATE the single ` + "`config`" + ` row — never INSERT into config. The seed already
+created one row with defaults. Example:
+    UPDATE config SET store_name = 'Acme', currency = 'EUR',
+      payment_config = '{"stripe": {"enabled": true}}'::jsonb;
+
+Prices are stored in cents (bigint). All rows use UUID primary keys.
+Products, categories, and discounts use soft deletes (deleted_at IS NULL).
 
 Do not drop or rename the core columns seeded by the starter schema — the
 template checkout, cart, and listing code depends on them. Prefer adding new
 nullable columns or new tables when extending the schema.
+
+## Canonical columns (summary)
+- config: store_name, currency, locale, tax_rate, shipping_config (jsonb), payment_config (jsonb), notify_email
+- products: name, slug, description, images (jsonb), category_id, tags (jsonb), status, price_in_cents, compare_at_price, sku, inventory, track_inventory, metadata (jsonb), seo (jsonb)
+- product_categories: name, slug, parent_id, image, description, sort_order
+- discounts: code, type ('percentage'|'fixed'), value, min_order_cents, max_uses, used_count, applies_to (jsonb), starts_at, ends_at, is_active
+- orders: order_number, customer_email, customer_name, shipping_address (jsonb), billing_address (jsonb), subtotal_cents, discount_cents, tax_cents, shipping_cents, total_cents, currency, status, payment_status, payment_provider, payment_id, discount_id, metadata (jsonb)
 
 ## Template Files (Do Not Recreate, Do Not Rewrite)
 These paths are template-managed. Import from them; never overwrite them:
@@ -138,14 +156,15 @@ Stripe / Iyzico / COD are wired in lib/payments/. For a provider to appear in
 the checkout form, two things must be true:
 1. The store owner has connected the provider in the wemob dashboard, which
    populates the AppIntegration row and injects the API keys at deploy time.
-2. The tenant stores.payment_config jsonb has the provider enabled, shaped
+2. The tenant config.payment_config jsonb has the provider enabled, shaped
    like {"stripe": {"enabled": true}} or {"iyzico": {"enabled": true}}. The
    getStoreConfig helper reads this jsonb and exposes payment_providers to
    the checkout UI.
 
 When the user asks for checkout to work with a specific provider, remind them
-to connect the provider in the dashboard AND update stores.payment_config
-via execute_sql. COD needs only the payment_config flag.
+to connect the provider in the dashboard AND UPDATE config.payment_config via
+execute_sql (remember: there is one config row — UPDATE, never INSERT). COD
+needs only the payment_config flag.
 `
 
 // AuthAddendum is appended to the base prompt when project.Settings.needs_auth is true.

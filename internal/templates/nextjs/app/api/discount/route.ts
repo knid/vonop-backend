@@ -9,21 +9,13 @@ const CART_SESSION_COOKIE = "wemob_cart_session";
 async function getCartForSession() {
   const jar = await cookies();
   const sid = jar.get(CART_SESSION_COOKIE)?.value;
-  if (!sid) return { cart: null, store: null, sid: null };
-
-  const [store] = await db.select().from(schema.stores).limit(1);
-  if (!store) return { cart: null, store: null, sid };
+  if (!sid) return { cart: null, sid: null };
 
   const [cart] = await db
     .select()
     .from(schema.carts)
-    .where(
-      and(
-        eq(schema.carts.storeId, store.id),
-        eq(schema.carts.sessionId, sid),
-      ),
-    );
-  return { cart: cart ?? null, store, sid };
+    .where(eq(schema.carts.sessionId, sid));
+  return { cart: cart ?? null, sid };
 }
 
 // POST /api/discount — apply a discount code to the cookie's cart.
@@ -34,8 +26,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "missing_code" }, { status: 400 });
   }
 
-  const { cart, store, sid } = await getCartForSession();
-  if (!cart || !store || !sid) {
+  const { cart, sid } = await getCartForSession();
+  if (!cart || !sid) {
     return NextResponse.json({ error: "no_cart" }, { status: 404 });
   }
 
@@ -45,7 +37,6 @@ export async function POST(req: NextRequest) {
     .from(schema.discounts)
     .where(
       and(
-        eq(schema.discounts.storeId, store.id),
         eq(schema.discounts.code, code),
         eq(schema.discounts.isActive, true),
       ),

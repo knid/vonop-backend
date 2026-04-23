@@ -9,7 +9,7 @@ import "server-only";
 
 import Stripe from "stripe";
 
-import type { Order, Store } from "@/lib/schema";
+import type { Order, Config } from "@/lib/schema";
 
 import type { CheckoutResult, WebhookEvent } from "./index";
 
@@ -21,7 +21,7 @@ function getClient(): Stripe {
 
 export async function createSession(
   order: Order,
-  store: Store,
+  config: Config,
 ): Promise<CheckoutResult> {
   const stripe = getClient();
   const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "";
@@ -32,7 +32,7 @@ export async function createSession(
       {
         quantity: 1,
         price_data: {
-          currency: store.currency.toLowerCase(),
+          currency: config.currency.toLowerCase(),
           unit_amount: Number(order.totalCents),
           product_data: { name: `Order ${order.orderNumber}` },
         },

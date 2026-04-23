@@ -7,23 +7,15 @@ import { getCart as getCartServer } from "@/lib/wemob-store-server";
 
 const CART_SESSION_COOKIE = "wemob_cart_session";
 
-async function ensureStore() {
-  const [store] = await db.select().from(schema.stores).limit(1);
-  if (!store) throw new Error("Store not provisioned");
-  return store;
-}
-
-async function ensureCart(storeId: string, sessionId: string) {
+async function ensureCart(sessionId: string) {
   let [cart] = await db
     .select()
     .from(schema.carts)
-    .where(
-      and(eq(schema.carts.storeId, storeId), eq(schema.carts.sessionId, sessionId)),
-    );
+    .where(eq(schema.carts.sessionId, sessionId));
   if (!cart) {
     [cart] = await db
       .insert(schema.carts)
-      .values({ storeId, sessionId })
+      .values({ sessionId })
       .returning();
   }
   return cart;
@@ -67,9 +59,8 @@ export async function POST(req: NextRequest) {
   }
   const qty = body.quantity ?? 1;
 
-  const store = await ensureStore();
   const sid = await getOrSetSession();
-  const cart = await ensureCart(store.id, sid);
+  const cart = await ensureCart(sid);
 
   const [product] = await db
     .select()
