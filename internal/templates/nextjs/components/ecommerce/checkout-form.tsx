@@ -1,19 +1,24 @@
 "use client";
 
 import React from "react";
-import { useRouter } from "next/navigation";
-import { Loader2, AlertTriangle, Check, Mail, MapPin, CreditCard, ShieldCheck } from "lucide-react";
-import { useCart, useStoreConfig, renderPaymentForm, formatPrice, type CheckoutParams, type ShippingAddress } from "@/lib/wemob-store";
+import { Loader2, AlertTriangle, Mail, MapPin, CreditCard, ShieldCheck } from "lucide-react";
+import { useCart, useStoreConfig, formatPrice } from "@/lib/wemob-store";
 import { OrderSummary } from "@/components/ecommerce/order-summary";
 
+// Shape returned by the local /api/checkout route handler. Kept inline because
+// the payments module is server-only and can't be imported from a client
+// component.
+type CheckoutResult =
+  | { orderId: string; kind: "redirect"; url: string }
+  | { orderId: string; kind: "client_confirm"; clientSecret: string }
+  | { orderId: string; kind: "placed" };
+
 export function CheckoutForm() {
-  const router = useRouter();
-  const { cart, checkout: doCheckout, isLoading: cartLoading } = useCart();
+  const { cart, isLoading: cartLoading } = useCart();
   const { config, isLoading: configLoading } = useStoreConfig();
   const [isSubmitting, setIsSubmitting] = React.useState(false);
   const [error, setError] = React.useState("");
   const [selectedProvider, setSelectedProvider] = React.useState("");
-  const paymentFormRef = React.useRef<HTMLDivElement>(null);
 
   const [form, setForm] = React.useState({
     email: "",
@@ -41,7 +46,7 @@ export function CheckoutForm() {
     setError("");
     setIsSubmitting(true);
 
-    const shippingAddress: ShippingAddress = {
+    const shippingAddress = {
       line1: form.line1,
       line2: form.line2 || undefined,
       city: form.city,
@@ -51,25 +56,41 @@ export function CheckoutForm() {
     };
 
     try {
-      const result = await doCheckout({
-        sessionId: "",
-        customerEmail: form.email,
-        customerName: form.name,
-        shippingAddress,
-        paymentProvider: selectedProvider || "cod",
+      const res = await fetch("/api/checkout", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          provider: selectedProvider || "cod",
+          email: form.email,
+          name: form.name,
+          shippingAddress,
+          // billingAddress omitted — server defaults to shippingAddress
+        }),
       });
 
-      if (result.client_secret && paymentFormRef.current) {
-        renderPaymentForm(paymentFormRef.current, result.client_secret);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        setError(err.error ?? "{{t.checkoutFailed}}");
+        setIsSubmitting(false);
         return;
       }
 
-      if (!result.payment_url) {
-        router.push("/checkout/success?order_id=" + result.order_id);
+      const result = (await res.json()) as CheckoutResult;
+
+      if (result.kind === "redirect") {
+        window.location.href = result.url;
+      } else if (result.kind === "client_confirm") {
+        // Reserved for Stripe Elements / PaymentIntent confirm flow. In PR 3
+        // adapters return "redirect" for Stripe (Checkout Session) and
+        // "placed" for COD, so this branch shouldn't fire yet.
+        setError("{{t.checkoutFailed}}");
+        console.error("client_confirm not implemented in this template", result);
+        setIsSubmitting(false);
+      } else if (result.kind === "placed") {
+        window.location.href = "/checkout/success?order=" + result.orderId;
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "{{t.checkoutFailed}}");
-    } finally {
       setIsSubmitting(false);
     }
   };
@@ -216,8 +237,6 @@ export function CheckoutForm() {
           {isSubmitting && <Loader2 className="h-4 w-4 animate-spin" />}
           {isSubmitting ? "{{t.processing}}" : "{{t.placeOrder}}" + (cart ? " · " + formatPrice(cart.total_cents) : "")}
         </button>
-
-        <div ref={paymentFormRef} />
 
         <div className="flex items-center justify-center gap-1.5 text-xs text-muted-foreground/60">
           <ShieldCheck className="h-3.5 w-3.5" />

@@ -40,43 +40,6 @@ const API_URL = process.env.NEXT_PUBLIC_WEMOB_API_URL || "";
 const STORE_ID = process.env.NEXT_PUBLIC_STORE_ID || "";
 
 // ---------------------------------------------------------------------------
-// Types — client-only (write flows, kept here because no server code needs them)
-// ---------------------------------------------------------------------------
-
-export interface StorefrontCheckout {
-  order_id: string;
-  order_number: string;
-  total_cents: number;
-  currency: string;
-  payment_url?: string;
-  client_secret?: string;
-}
-
-export interface CheckoutConfirm {
-  order_id: string;
-  order_number: string;
-  status: string;
-}
-
-export interface ShippingAddress {
-  line1: string;
-  line2?: string;
-  city: string;
-  state: string;
-  postal_code: string;
-  country: string;
-}
-
-export interface CheckoutParams {
-  sessionId: string;
-  customerEmail: string;
-  customerName: string;
-  shippingAddress: ShippingAddress;
-  billingAddress?: ShippingAddress;
-  paymentProvider: string;
-}
-
-// ---------------------------------------------------------------------------
 // API Fetch Helper
 // ---------------------------------------------------------------------------
 
@@ -134,144 +97,122 @@ export async function getCategories(): Promise<StorefrontCategory[]> {
 
 // ---------------------------------------------------------------------------
 // Cart API
+//
+// Cart mutations now target local Next.js route handlers that talk directly
+// to the tenant's Neon DB. The browser automatically sends the httpOnly
+// `wemob_cart_session` cookie owned by those routes, so the legacy
+// `sessionId` parameter is ignored by the HTTP layer. We keep the argument
+// in the function signatures so existing `CartProvider` callers compile
+// unchanged.
 // ---------------------------------------------------------------------------
 
-export async function createCart(sessionId: string): Promise<StorefrontCart> {
-  return apiFetch<StorefrontCart>("/cart", {
-    method: "POST",
-    body: JSON.stringify({ session_id: sessionId }),
-  });
+// Build an empty StorefrontCart so provider state stays well-shaped when
+// the server has no cart row yet (e.g. before the first add-to-cart).
+function emptyCart(): StorefrontCart {
+  return {
+    id: "",
+    session_id: "",
+    items: [],
+    subtotal_cents: 0,
+    discount_code: "",
+    discount_cents: 0,
+    total_cents: 0,
+  };
 }
 
-export async function getCart(sessionId: string): Promise<StorefrontCart> {
-  return apiFetch<StorefrontCart>("/cart/" + sessionId);
+async function localCartFetch(path: string, options?: RequestInit): Promise<StorefrontCart> {
+  const res = await fetch(path, {
+    // Same-origin fetch: browser sends the wemob_cart_session cookie
+    // automatically. credentials:"same-origin" is the default but we're
+    // explicit for clarity.
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    ...options,
+  });
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error("API error " + res.status + ": " + body);
+  }
+  const data = (await res.json()) as StorefrontCart | null;
+  return data ?? emptyCart();
+}
+
+/**
+ * Legacy no-op: carts are now created server-side lazily on first add-item.
+ * Returns an empty StorefrontCart so any caller that expects a Promise of
+ * one still resolves cleanly.
+ */
+export async function createCart(_sessionId: string): Promise<StorefrontCart> {
+  return emptyCart();
+}
+
+export async function getCart(_sessionId: string): Promise<StorefrontCart> {
+  return localCartFetch("/api/cart");
 }
 
 export async function addCartItem(
-  sessionId: string,
+  _sessionId: string,
   productId: string,
   quantity: number
 ): Promise<StorefrontCart> {
-  return apiFetch<StorefrontCart>("/cart/" + sessionId + "/items", {
+  return localCartFetch("/api/cart", {
     method: "POST",
-    body: JSON.stringify({ product_id: productId, quantity }),
+    body: JSON.stringify({ productId, quantity }),
   });
 }
 
 export async function updateCartItem(
-  sessionId: string,
+  _sessionId: string,
   itemId: string,
   quantity: number
 ): Promise<StorefrontCart> {
-  return apiFetch<StorefrontCart>("/cart/" + sessionId + "/items/" + itemId, {
+  return localCartFetch("/api/cart/" + encodeURIComponent(itemId), {
     method: "PUT",
     body: JSON.stringify({ quantity }),
   });
 }
 
 export async function removeCartItem(
-  sessionId: string,
+  _sessionId: string,
   itemId: string
 ): Promise<StorefrontCart> {
-  return apiFetch<StorefrontCart>("/cart/" + sessionId + "/items/" + itemId, {
+  return localCartFetch("/api/cart/" + encodeURIComponent(itemId), {
     method: "DELETE",
   });
 }
 
 export async function applyDiscountCode(
-  sessionId: string,
+  _sessionId: string,
   code: string
 ): Promise<StorefrontCart> {
-  return apiFetch<StorefrontCart>("/cart/" + sessionId + "/discount", {
+  return localCartFetch("/api/discount", {
     method: "POST",
     body: JSON.stringify({ code }),
   });
 }
 
 /** Remove the currently applied discount code from the cart. */
-export async function removeDiscount(sessionId: string): Promise<StorefrontCart> {
-  return apiFetch<StorefrontCart>("/cart/" + sessionId + "/discount", {
+export async function removeDiscount(_sessionId: string): Promise<StorefrontCart> {
+  return localCartFetch("/api/discount", {
     method: "DELETE",
   });
 }
 
 // ---------------------------------------------------------------------------
-// Checkout API
+// Checkout
+//
+// The checkout submit flow now POSTs directly to the local /api/checkout
+// route handler, which creates the order row server-side (using the Neon DB)
+// and invokes the selected payment adapter. The form calls fetch() inline
+// rather than going through a helper here — the response shape is tied to
+// `CheckoutResult` in lib/payments/index.ts (a server-only module we can't
+// import from the client-side SDK), so colocating the type with its one
+// caller keeps this file provider-neutral.
+//
+// Order reads (success/cancel pages) go through `getOrder` in
+// wemob-store-server.ts — not re-exported here since client components
+// shouldn't read orders directly.
 // ---------------------------------------------------------------------------
-
-/** Create a checkout session. Returns payment info for redirect or form rendering. */
-export async function checkout(params: CheckoutParams): Promise<StorefrontCheckout> {
-  return apiFetch<StorefrontCheckout>("/checkout", {
-    method: "POST",
-    body: JSON.stringify({
-      session_id: params.sessionId,
-      customer_email: params.customerEmail,
-      customer_name: params.customerName,
-      shipping_address: params.shippingAddress,
-      billing_address: params.billingAddress,
-      payment_provider: params.paymentProvider,
-    }),
-  });
-}
-
-/** Confirm payment after redirect. */
-export async function confirmCheckout(
-  orderId: string,
-  paymentId: string
-): Promise<CheckoutConfirm> {
-  return apiFetch<CheckoutConfirm>("/checkout/confirm", {
-    method: "POST",
-    body: JSON.stringify({ order_id: orderId, payment_id: paymentId }),
-  });
-}
-
-// ---------------------------------------------------------------------------
-// Order Tracking
-// ---------------------------------------------------------------------------
-
-/** Fetch order details for tracking / confirmation page. */
-export async function getOrder(orderId: string): Promise<OrderTracking> {
-  return apiFetch<OrderTracking>("/orders/" + orderId);
-}
-
-// ---------------------------------------------------------------------------
-// Payment Form Helper (Iyzico)
-// ---------------------------------------------------------------------------
-
-/**
- * Safely render an Iyzico checkout form (HTML string with embedded scripts)
- * into a container element. Uses DOMParser for safe HTML parsing, then
- * re-executes script tags so the Iyzico JS runs correctly.
- */
-export function renderPaymentForm(container: HTMLElement, htmlContent: string): void {
-  // Clear previous content safely
-  while (container.firstChild) {
-    container.removeChild(container.firstChild);
-  }
-
-  // Parse HTML safely via DOMParser
-  const parser = new DOMParser();
-  const doc = parser.parseFromString(htmlContent, "text/html");
-
-  // Adopt nodes into the current document
-  const fragment = document.createDocumentFragment();
-  Array.from(doc.body.childNodes).forEach((node) => {
-    const adopted = document.adoptNode(node);
-    fragment.appendChild(adopted);
-  });
-  container.appendChild(fragment);
-
-  // Re-execute script tags (adopted scripts don't execute automatically)
-  const scripts = container.querySelectorAll("script");
-  scripts.forEach((oldScript) => {
-    const newScript = document.createElement("script");
-    Array.from(oldScript.attributes).forEach((attr) => {
-      newScript.setAttribute(attr.name, attr.value);
-    });
-    newScript.textContent = oldScript.textContent;
-    oldScript.parentNode?.replaceChild(newScript, oldScript);
-  });
-}
 
 // ---------------------------------------------------------------------------
 // Price Utilities
@@ -431,7 +372,6 @@ interface CartContextValue {
   removeItem: (itemId: string) => Promise<void>;
   applyDiscount: (code: string) => Promise<void>;
   removeDiscountCode: () => Promise<void>;
-  checkout: (params: CheckoutParams) => Promise<StorefrontCheckout>;
   clearCart: () => void;
 }
 
@@ -619,33 +559,6 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     []
   );
 
-  const handleCheckout = React.useCallback(
-    async (params: CheckoutParams): Promise<StorefrontCheckout> => {
-      const result = await checkout({
-        ...params,
-        sessionId: params.sessionId || sessionIdRef.current,
-      });
-
-      // Auto-redirect to hosted payment page (Stripe) when available
-      if (result.payment_url && isBrowser()) {
-        window.location.href = result.payment_url;
-        return result;
-      }
-
-      // Iyzico: client_secret contains checkout form HTML — don't redirect,
-      // let the caller render it via renderPaymentForm().
-
-      // No payment provider (COD / manual): clear cart, return result for confirmation page
-      if (!result.payment_url && !result.client_secret) {
-        setCart(null);
-        clearCartCache();
-      }
-
-      return result;
-    },
-    []
-  );
-
   const handleClearCart = React.useCallback(() => {
     setCart(null);
     clearCartCache();
@@ -662,7 +575,6 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       removeItem: handleRemoveItem,
       applyDiscount: handleApplyDiscount,
       removeDiscountCode: handleRemoveDiscount,
-      checkout: handleCheckout,
       clearCart: handleClearCart,
     }),
     [
@@ -674,7 +586,6 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       handleRemoveItem,
       handleApplyDiscount,
       handleRemoveDiscount,
-      handleCheckout,
       handleClearCart,
     ]
   );
@@ -859,7 +770,14 @@ export function useStoreConfig(): {
 
 /** Fetch reviews for a product by slug. */
 export async function getProductReviews(slug: string): Promise<ReviewsResult> {
-  return apiFetch<ReviewsResult>("/products/" + slug + "/reviews");
+  const res = await fetch(
+    "/api/reviews?slug=" + encodeURIComponent(slug),
+    { credentials: "same-origin" }
+  );
+  if (!res.ok) {
+    throw new Error("API error " + res.status + ": " + (await res.text()));
+  }
+  return res.json();
 }
 
 /** Submit a review for a product. */
@@ -867,10 +785,16 @@ export async function submitReview(
   slug: string,
   data: { customer_name: string; customer_email: string; rating: number; title?: string; body?: string }
 ): Promise<{ id: string; status: string; message: string }> {
-  return apiFetch("/products/" + slug + "/reviews", {
+  const res = await fetch("/api/reviews", {
     method: "POST",
-    body: JSON.stringify(data),
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ slug, ...data }),
   });
+  if (!res.ok) {
+    throw new Error("API error " + res.status + ": " + (await res.text()));
+  }
+  return res.json();
 }
 
 /** Hook: fetch and manage reviews for a product. */
@@ -914,24 +838,37 @@ export function useReviews(slug: string) {
 // Wishlist
 // ---------------------------------------------------------------------------
 
-/** Fetch wishlist items for a session. */
-export async function getWishlist(sessionId: string): Promise<WishlistItem[]> {
-  return apiFetch<WishlistItem[]>("/wishlist/" + sessionId);
+/** Fetch wishlist items for the current session. */
+export async function getWishlist(_sessionId: string): Promise<WishlistItem[]> {
+  const res = await fetch("/api/wishlist", { credentials: "same-origin" });
+  if (!res.ok) {
+    throw new Error("API error " + res.status + ": " + (await res.text()));
+  }
+  return res.json();
 }
 
 /** Add a product to the wishlist. */
-export async function addToWishlist(sessionId: string, productId: string): Promise<void> {
-  await apiFetch("/wishlist/" + sessionId, {
+export async function addToWishlist(_sessionId: string, productId: string): Promise<void> {
+  const res = await fetch("/api/wishlist", {
     method: "POST",
-    body: JSON.stringify({ product_id: productId }),
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ productId }),
   });
+  if (!res.ok) {
+    throw new Error("API error " + res.status + ": " + (await res.text()));
+  }
 }
 
 /** Remove a product from the wishlist. */
-export async function removeFromWishlist(sessionId: string, productId: string): Promise<void> {
-  await apiFetch("/wishlist/" + sessionId + "/" + productId, {
+export async function removeFromWishlist(_sessionId: string, productId: string): Promise<void> {
+  const res = await fetch("/api/wishlist/" + encodeURIComponent(productId), {
     method: "DELETE",
+    credentials: "same-origin",
   });
+  if (!res.ok) {
+    throw new Error("API error " + res.status + ": " + (await res.text()));
+  }
 }
 
 /** Hook: manage wishlist state for the current session. */
