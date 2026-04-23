@@ -101,6 +101,8 @@ var EcommerceFilePaths = []string{
 	"lib/payments/iyzico.ts",
 	"lib/payments/cod.ts",
 	"app/api/checkout/route.ts",
+	"app/api/webhooks/stripe/route.ts",
+	"app/api/webhooks/iyzico/route.ts",
 }
 
 // UIFilePaths are pre-built UI component templates injected during initial generation.
