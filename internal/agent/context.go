@@ -41,16 +41,21 @@ func BuildSystemMessages(project *models.AppProject, fileMap *SafeFileMap, deps 
 }
 
 // buildAddendum composes project-specific prompt blocks.
+//
+// Ecommerce projects receive EcommerceAddendum only — it already covers the
+// database story for them. DatabaseAddendum is for generic web projects whose
+// user asked for a DB; layering it on top of EcommerceAddendum contradicted
+// the canonical ecommerce schema paths and doubled the token count.
 func buildAddendum(project *models.AppProject, deps *RunDependencies) string {
 	var parts []string
-	switch project.ProjectType {
-	case "ecommerce":
+	isEcommerce := project.ProjectType == "ecommerce"
+	if isEcommerce {
 		parts = append(parts, EcommerceAddendum)
 	}
 	if projectHasAuth(project) {
 		parts = append(parts, AuthAddendum)
 	}
-	if projectHasDatabase(project) {
+	if !isEcommerce && projectHasDatabase(project) {
 		parts = append(parts, DatabaseAddendum)
 	}
 	if projectHasAI(project) {

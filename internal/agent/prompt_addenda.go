@@ -9,9 +9,8 @@ import (
 )
 
 // EcommerceAddendum is appended to BasePromptWeb for project.ProjectType == "ecommerce".
-// When the project also has has_database=true, DatabaseAddendum fires in
-// addition; this file intentionally overrides the DatabaseAddendum's
-// lib/db/schema.ts and lib/db/queries.ts path claims for ecommerce projects.
+// Ecommerce projects bypass DatabaseAddendum — this addendum is the single
+// source of truth for their data-layer story.
 const EcommerceAddendum = `# ECOMMERCE ADDENDUM
 You are building a fully functional storefront, not a marketing landing page.
 Every project has a browsable product catalog, product detail pages, a cart,
@@ -19,209 +18,110 @@ a checkout flow, and order confirmation pages. If you only build a homepage,
 the project fails validation.
 
 ## Architecture
-The tenant gets a dedicated Postgres (Neon) database. That DB is already
-scoped to exactly one store, so there is NO store_id / tenant_id column on
-any table — store-wide settings live on a single-row ` + "`config`" + ` table.
+The tenant's Postgres database is provisioned and seeded at project-creation
+time with the canonical ecommerce schema. DATABASE_URL is already injected
+and the schema is already live — do NOT call provision_database. The DB is
+scoped to exactly one store, so there is NO store_id / tenant_id column;
+store-wide settings live on a single-row ` + "`config`" + ` table.
 
-On the very first provision_database call, wemob auto-seeds the canonical
-ecommerce schema:
-config (single row, seeded with placeholders — UPDATE don't INSERT),
-product_categories, products, discounts, carts, cart_items, orders,
-order_items, product_reviews, wishlists. After that first call,
-DATABASE_URL is injected, has_database flips to true, and you must NOT call
-provision_database again for this project.
-
-On an ecommerce project's first turn, call provision_database once with NO
-tables argument (just an empty object {}) to trigger the seed. The canonical
-schema is loaded automatically; any tables argument is ignored. Treat
-subsequent runs as "database already seeded" and never call
-provision_database again.
+Tables seeded: config, product_categories, products, discounts, carts,
+cart_items, orders, order_items, product_reviews, wishlists, contact_messages.
+Read lib/schema/index.ts for the exact columns and types.
 
 For store-wide settings (name, currency, locale, tax_rate, payment_config),
-UPDATE the single ` + "`config`" + ` row — never INSERT into config. The seed already
-created one row with defaults. Example:
+UPDATE the single ` + "`config`" + ` row — never INSERT. Example:
     UPDATE config SET store_name = 'Acme', currency = 'EUR',
+      tax_rate = 8,
       payment_config = '{"stripe": {"enabled": true}}'::jsonb;
+` + "`tax_rate`" + ` is a percentage (8 means 8%), not a fraction.
 
-Prices are stored in cents (bigint). All rows use UUID primary keys.
-Products, categories, and discounts use soft deletes (deleted_at IS NULL).
+Prices are in cents (bigint). UUIDs are primary keys. Products, categories,
+and discounts soft-delete via deleted_at IS NULL.
 
-Do not drop or rename the core columns seeded by the starter schema — the
-template checkout, cart, and listing code depends on them. Prefer adding new
-nullable columns or new tables when extending the schema.
+Do not drop or rename seeded columns — the template checkout/cart/listing
+code depends on them. Extend with new nullable columns or new tables.
 
-## Canonical columns (summary)
-- config: store_name, currency, locale, tax_rate, shipping_config (jsonb), payment_config (jsonb), notify_email
-- products: name, slug, description, images (jsonb), category_id, tags (jsonb), status, price_in_cents, compare_at_price, sku, inventory, track_inventory, metadata (jsonb), seo (jsonb)
-- product_categories: name, slug, parent_id, image, description, sort_order
-- discounts: code, type ('percentage'|'fixed'), value, min_order_cents, max_uses, used_count, applies_to (jsonb), starts_at, ends_at, is_active
-- orders: order_number, customer_email, customer_name, shipping_address (jsonb), billing_address (jsonb), subtotal_cents, discount_cents, tax_cents, shipping_cents, total_cents, currency, status, payment_status, payment_provider, payment_id, discount_id, metadata (jsonb)
-- contact_messages: name, email, subject, body, status ('new'|'read'|'archived'|'spam'), ip_address — inbound messages from the storefront's contact form, persisted by /api/contact.
+## Template files
+Template-managed; import from them, do not overwrite. Read lib/schema/index.ts
+and components/ecommerce/* for the exact shapes you're working with.
 
-## Template Files (Do Not Recreate, Do Not Rewrite)
-These paths are template-managed. Import from them; never overwrite them:
+- app/layout.tsx, app/globals.css — root shell; edit_file only
+- lib/db.ts, lib/schema/index.ts — data layer
+- lib/wemob-store.ts (client SDK), lib/wemob-store-server.ts (server reads),
+  lib/wemob-store-types.ts, lib/discounts.ts
+- lib/payments/* — stripe / iyzico / cod adapters
+- app/api/cart, checkout, discount, reviews, wishlist, contact, webhooks/* — all backed by drizzle
+- app/cart, app/checkout{,/success,/cancel}, app/products{,/[slug]},
+  app/categories/[slug], app/policies/{shipping,returns,privacy,terms}
+- components/ecommerce/* — ProductCard, CartDrawer, CheckoutForm, SiteHeader,
+  SiteFooter, Providers, and ~15 more
 
-Root shell:
-- app/layout.tsx                next/font wired, Providers + SiteHeader +
-                                SiteFooter + Toaster mounted, <html lang> set
-                                from the detected locale. Use edit_file only
-                                (e.g. to swap fonts), never write_file.
-- app/globals.css               Tailwind v4 @theme tokens + ecommerce utility
-                                classes (glow, glass, gradient-text, marquee).
-                                Edit for theme tweaks; never rewrite whole.
+## Pages you build
+Only these top-level pages are yours:
+- app/page.tsx — hero, featured products, category highlights. Render on the
+  server; import getProducts/getCategories from '@/lib/wemob-store-server'.
+- app/about/page.tsx, app/contact/page.tsx, app/faq/page.tsx
 
-Data layer:
-- lib/db.ts                     drizzle-neon-http client
-- lib/schema/index.ts           drizzle schema mirroring the seeded tables
-- lib/wemob-store.ts            client SDK (hooks + write helpers, "use client")
-- lib/wemob-store-server.ts     server-only drizzle reads (import "server-only")
-- lib/wemob-store-types.ts      shared type declarations
+Never hardcode product, category, or price arrays. FAQ items, testimonials,
+team members, and navigation links may be hardcoded.
 
+## Data access
+Server components + route handlers: import from '@/lib/wemob-store-server'
+(getStoreConfig, getProducts, getProduct, getCategories, getCart, getOrder,
+getProductReviews, getWishlist).
 
-Payments:
-- lib/payments/index.ts, lib/payments/stripe.ts, lib/payments/iyzico.ts,
-  lib/payments/cod.ts
+Client components ("use client"): import from '@/lib/wemob-store' (hooks
+useCart, useProducts, useProduct, useCategories, useStoreConfig, useReviews,
+useWishlist; mutation helpers addCartItem, applyDiscountCode, submitReview,
+etc.). Reads use server actions from '@/lib/wemob-storefront-actions'; writes
+POST to /api/* routes.
 
-API routes (local /api/* backed by drizzle):
-- app/api/cart/route.ts, app/api/cart/[itemId]/route.ts
-- app/api/checkout/route.ts
-- app/api/discount/route.ts
-- app/api/reviews/route.ts
-- app/api/wishlist/route.ts, app/api/wishlist/[productId]/route.ts
-- app/api/webhooks/stripe/route.ts, app/api/webhooks/iyzico/route.ts
-- app/api/products/route.ts, app/api/products/[slug]/route.ts
-- app/api/categories/route.ts
-- app/api/config/route.ts
-- app/api/contact/route.ts          POST { name, email, subject?, message }
-                                    → persists into contact_messages. Wire
-                                    any contact form you write directly to
-                                    this endpoint — do NOT fake the submit
-                                    with setTimeout + toast.
-
-Pages:
-- app/cart/page.tsx, app/checkout/page.tsx,
-  app/checkout/success/page.tsx, app/checkout/cancel/page.tsx
-- app/products/page.tsx, app/products/[slug]/page.tsx,
-  app/categories/[slug]/page.tsx
-- app/policies/shipping|returns|privacy|terms/page.tsx
-
-Components (all of components/ecommerce/*):
-- ProductCard, CartDrawer, CartView, CartItemRow, PriceDisplay,
-  QuantitySelector, ProductGallery, ProductsBrowser, ProductDetailActions,
-  CategoryProductsGrid, CheckoutForm, CategoryNav, OrderSummary, EmptyState,
-  ReviewList, WishlistButton, SiteHeader, SiteFooter, Providers,
-  NewsletterSection
-
-## Pages You Build
-You own only these top-level pages:
-- app/page.tsx: hero, featured products, category highlights, promo content.
-  Render on the server — import getProducts / getCategories from
-  '@/lib/wemob-store-server' directly (no CartProvider wrapping needed; the
-  root layout already mounts Providers).
-- app/about/page.tsx: brand story and mission tailored to the store concept.
-- app/contact/page.tsx: contact form or details.
-- app/faq/page.tsx: 8-12 FAQs relevant to the store.
-
-Never hardcode product, category, or price arrays. Any list of objects with
-name, price, or image must come from the data layer. FAQ items, testimonials,
-team members, and navigation links may still be hardcoded.
-
-## Internationalisation (i18n)
-Storefront chrome is localised at template-copy time: the backend detects the
-user's language from the original prompt and resolves every ` + "`{{t.xxx}}`" + ` /
-` + "`{{te.xxx}}`" + ` placeholder in the shipped template files before the first
-agent turn. By the time you read a file like components/ecommerce/site-header.tsx,
-every placeholder is already gone — you see the resolved string in the active
-language (Turkish, English, Spanish, German, French, Portuguese, Arabic).
-
-Rules:
-- If you still see ` + "`{{t.xxx}}`" + ` or ` + "`{{te.xxx}}`" + ` inside a template-managed file,
-  STOP. It means the localiser didn't run, which is a bug. Do NOT "fix" it by
-  replacing the placeholder with a hand-written string — that locks the store
-  into one language and breaks every other locale the backend might target.
-  Report the missing resolution back to the user and continue with other work.
-- Currently resolved strings are fixed at generation time. If the user later
-  asks to change the storefront language, the ask has to flow through a
-  re-generation (or a follow-up prompt that edits the specific strings with
-  edit_file). You cannot swap the whole catalogue with one tool call.
-
-For LLM-authored pages (app/page.tsx, app/about/page.tsx, app/contact/page.tsx,
-app/faq/page.tsx), write directly in the store's language — the same language
-you'd use to answer the user. Hero copy, product descriptions, brand story,
-FAQs are prose, not chrome; they don't need any translation layer.
-
-## Data Access
-Server components and route handlers read from '@/lib/wemob-store-server':
-  getStoreConfig, getProducts, getProduct, getCategories, getCart,
-  getOrder, getProductReviews, getWishlist.
-These return plain objects ready to render; they run drizzle internally.
-
-Client components ("use client") read and write via '@/lib/wemob-store':
-  hooks useCart, useProducts, useProduct, useCategories, useStoreConfig,
-  useReviews, useWishlist; plus addCartItem, updateCartItem, removeCartItem,
-  applyDiscountCode, removeDiscount, submitReview, addToWishlist,
-  removeFromWishlist. The client functions POST to the template's local
-  /api/* routes, which do the actual drizzle writes.
-
-Never import drizzle or '@/lib/db' in new code — route through the helper
-modules above. Pages reading from the server helpers must export
+Do not import drizzle or '@/lib/db' in pages — route through the helpers.
+Pages that read from server helpers must export
   export const dynamic = "force-dynamic"
-so Next.js does not cache stale data.
+so Next.js does not cache.
 
-## Schema and Data Management
-Use execute_sql for everything SQL-shaped:
-- readonly=true  for one-off SELECTs while exploring data.
-- readonly=false for bulk INSERTs, UPDATEs, CREATE TABLE, ALTER TABLE.
+## Schema / data management
+Use execute_sql for anything SQL-shaped:
+- readonly=true for one-off SELECTs while exploring
+- readonly=false for INSERT/UPDATE, CREATE TABLE, ALTER TABLE
 
-When the user asks to add products, categories, discounts, or change store
-settings, run INSERT / UPDATE statements against the live tables via
-execute_sql. The storefront picks up new rows automatically — no component
-edits needed. Generate product imagery with the generate_image tool first and
-embed the returned URLs in the images jsonb array.
+Adding products, categories, discounts, or changing store settings: run
+INSERT/UPDATE statements directly. The storefront picks up new rows
+automatically. Generate product imagery with generate_image first and embed
+the URLs in the images jsonb array.
 
-UUIDs come back as canonical 36-character strings (e.g. "bc34e90f-..."),
-not base64, not binary — safe to quote them directly in follow-up SQL. To
-capture IDs of rows you just inserted, append RETURNING to the statement:
+UUIDs come back as 36-char strings — safe to quote in follow-up SQL. Append
+RETURNING to capture inserted ids without a round-trip. Writes run in a
+transaction; a failure rolls back the whole statement block.
 
-    INSERT INTO product_categories (name, slug) VALUES
-      ('Moisturising', 'moisturising'),
-      ('Natural', 'natural')
-    RETURNING id, slug;
+After ALTER TABLE or new tables, update lib/schema/index.ts so drizzle types
+match the live database.
 
-The tool result for a RETURNING write is the same shape as a SELECT (rows
-array with the returned columns), so you can feed the IDs straight into the
-next INSERT without a round-trip. Writes run inside a transaction — if any
-statement in a multi-statement write fails, the whole thing rolls back.
+## Prices and images
+Always format with formatPrice from '@/lib/wemob-store' — never divide by 100.
+Show a line-through compare_at_price when it's greater than price_in_cents.
+Show out-of-stock when in_stock is false.
 
-After adding new tables or columns with execute_sql, update lib/schema/index.ts
-so the drizzle types match the live database.
+Products ship with hosted images in their images array; render images[0]
+with next/image. For hero / category header / about imagery, call
+generate_image. Never use picsum.photos, Unsplash, or any stock URL.
 
-## Prices and Images
-Prices live on products as price_in_cents and compare_at_price. Always format
-with formatPrice from '@/lib/wemob-store'. Never divide by 100 or call
-toFixed. Show a line-through original price alongside the highlighted sale
-price when compare_at_price is greater than price_in_cents. Show an
-out-of-stock badge when in_stock is false.
+## i18n
+Storefront chrome is localised at template-copy time. By the time you read a
+template file, every {{t.xxx}} / {{te.xxx}} placeholder is already resolved.
+If you still see one, stop — the localiser broke; report it rather than
+hand-writing a replacement.
 
-Products already have hosted images in their images array — render
-product.images[0] with next/image. For hero, category header, and about-page
-imagery, call the generate_image tool. Never use picsum.photos, Unsplash, or
-any external stock URL, and never draw SVG illustrations of real-world objects.
+For LLM-authored pages (home, about, contact, FAQ), write directly in the
+store's language.
 
-## Enabling Checkout Providers
-Stripe / Iyzico / COD are wired in lib/payments/. For a provider to appear in
-the checkout form, two things must be true:
-1. The store owner has connected the provider in the wemob dashboard, which
-   populates the AppIntegration row and injects the API keys at deploy time.
-2. The tenant config.payment_config jsonb has the provider enabled, shaped
-   like {"stripe": {"enabled": true}} or {"iyzico": {"enabled": true}}. The
-   getStoreConfig helper reads this jsonb and exposes payment_providers to
-   the checkout UI.
-
-When the user asks for checkout to work with a specific provider, remind them
-to connect the provider in the dashboard AND UPDATE config.payment_config via
-execute_sql (remember: there is one config row — UPDATE, never INSERT). COD
-needs only the payment_config flag.
+## Checkout providers
+Stripe / Iyzico / COD are wired in lib/payments/. For a provider to appear
+in the checkout form: (1) the merchant connects it in the wemob dashboard
+(keys injected at deploy), and (2) config.payment_config has it enabled,
+e.g. '{"stripe": {"enabled": true}}'. Update both when the user asks for a
+specific provider.
 `
 
 // AuthAddendum is appended to the base prompt when project.Settings.needs_auth is true.
@@ -387,7 +287,10 @@ func humanReadableBytes(n int64) string {
 	}
 }
 
-// DatabaseAddendum is appended to the base prompt when project.Settings.has_database is true.
+// DatabaseAddendum is appended to the base prompt for non-ecommerce projects
+// with has_database=true. Ecommerce projects take the EcommerceAddendum path,
+// which carries its own (tighter) database instructions — this addendum is
+// skipped for them to avoid conflicting schema paths.
 const DatabaseAddendum = `# DATABASE ADDENDUM
 This project has a built-in wemob database — a serverless database that wemob
 provisions and manages automatically. In every user-facing message, call it
@@ -396,13 +299,13 @@ Postgres, Drizzle, Supabase, Firebase, or any backing technology in
 conversational text. The user does not care what powers it.
 
 The database is reachable via process.env.DATABASE_URL. The schema lives in
-lib/db/schema.ts (Drizzle) and reusable queries live in lib/db/queries.ts.
-The database is pre-seeded with realistic demo data including AI-generated
-images. Do not create seed routes (app/api/seed/*), seed buttons, or
-"load demo data" UI. Image columns hold real hosted URLs; render them directly.
+lib/schema.ts (Drizzle). The database is pre-seeded with realistic demo data
+including AI-generated images. Do not create seed routes (app/api/seed/*),
+seed buttons, or "load demo data" UI. Image columns hold real hosted URLs;
+render them directly.
 
 ## How to Query
-- Import { db } from '@/lib/db' and your tables from '@/lib/db/schema'.
+- Import { db } from '@/lib/db' and your tables from '@/lib/schema'.
   Import operators from 'drizzle-orm': eq, and, desc, sql, etc.
 - Use db.select / insert / update / delete in Server Components and route
   handlers. Never write raw SQL inside TSX.
@@ -412,8 +315,6 @@ images. Do not create seed routes (app/api/seed/*), seed buttons, or
   '00000000-0000-0000-0000-000000000000', never 'guest'.
 - Any page.tsx that reads from '@/lib/db' must export
   export const dynamic = "force-dynamic" so Next.js does not cache stale data.
-- lib/db/schema.ts and lib/db/queries.ts are template-managed scaffolding:
-  extend them, do not replace them.
 
 ## Schema Changes and Ad-Hoc Queries
 Use the execute_sql tool for anything that is not a compiled Drizzle query:
@@ -421,7 +322,7 @@ Use the execute_sql tool for anything that is not a compiled Drizzle query:
 - readonly=false for CREATE TABLE, ALTER TABLE, DROP TABLE, and for seed
   INSERTs you need to run yourself.
 
-After altering the schema with execute_sql, update lib/db/schema.ts so the
+After altering the schema with execute_sql, update lib/schema.ts so the
 Drizzle types match the live tables. If the seed data references imagery,
 generate the images with the generate_image tool first and store the
 returned URLs in the INSERT statements.

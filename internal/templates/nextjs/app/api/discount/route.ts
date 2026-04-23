@@ -1,10 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import { and, eq, isNull } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db, schema } from "@/lib/db";
+import { resolveDiscountByCode } from "@/lib/discounts";
 import { getCart as getCartServer } from "@/lib/wemob-store-server";
 
 const CART_SESSION_COOKIE = "wemob_cart_session";
+
+const INVALID_REASON_STATUS: Record<string, number> = {
+  not_found: 404,
+  not_yet_valid: 400,
+  expired: 400,
+  exhausted: 400,
+  below_minimum: 400,
+};
 
 async function getCartForSession() {
   const jar = await cookies();
@@ -31,34 +40,29 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "no_cart" }, { status: 404 });
   }
 
-  const now = new Date();
-  const [discount] = await db
-    .select()
-    .from(schema.discounts)
-    .where(
-      and(
-        eq(schema.discounts.code, code),
-        eq(schema.discounts.isActive, true),
-        isNull(schema.discounts.deletedAt),
-      ),
-    );
+  // Subtotal drives the min-order check inside resolveDiscountByCode.
+  const itemRows = await db
+    .select({
+      qty: schema.cartItems.quantity,
+      price: schema.cartItems.priceAtAddCents,
+    })
+    .from(schema.cartItems)
+    .where(eq(schema.cartItems.cartId, cart.id));
+  const subtotal = itemRows.reduce(
+    (acc, r) => acc + Number(r.price) * r.qty,
+    0,
+  );
 
-  if (!discount) {
-    return NextResponse.json({ error: "invalid_code" }, { status: 404 });
-  }
-  if (discount.startsAt && discount.startsAt > now) {
-    return NextResponse.json({ error: "not_yet_valid" }, { status: 400 });
-  }
-  if (discount.endsAt && discount.endsAt < now) {
-    return NextResponse.json({ error: "expired" }, { status: 400 });
-  }
-  if (discount.maxUses > 0 && discount.usedCount >= discount.maxUses) {
-    return NextResponse.json({ error: "exhausted" }, { status: 400 });
+  const result = await resolveDiscountByCode(code, subtotal);
+  if (result.kind === "invalid") {
+    const status = INVALID_REASON_STATUS[result.reason] ?? 400;
+    const errorKey = result.reason === "not_found" ? "invalid_code" : result.reason;
+    return NextResponse.json({ error: errorKey }, { status });
   }
 
   await db
     .update(schema.carts)
-    .set({ discountId: discount.id, updatedAt: new Date() })
+    .set({ discountId: result.discount.id, updatedAt: new Date() })
     .where(eq(schema.carts.id, cart.id));
 
   const refreshed = await getCartServer(sid);

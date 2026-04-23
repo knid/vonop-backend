@@ -23,9 +23,7 @@ var processEnvRegex = regexp.MustCompile(`process\.env\.([A-Z_][A-Z0-9_]*)|proce
 // alwaysExcludedEnvVars are env vars that are always provided by the system
 // and should never appear in "missing" detection.
 var alwaysExcludedEnvVars = map[string]bool{
-	"NODE_ENV":                  true,
-	"NEXT_PUBLIC_STORE_ID":      true,
-	"NEXT_PUBLIC_WEMOB_API_URL": true,
+	"NODE_ENV": true,
 }
 
 // envVarNameRegex validates that an env var name contains only uppercase letters, digits, and underscores.

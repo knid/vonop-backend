@@ -69,6 +69,7 @@ var EcommerceFilePaths = []string{
 	"lib/wemob-store.ts",
 	"lib/wemob-store-types.ts",
 	"lib/wemob-store-server.ts",
+	"lib/wemob-storefront-actions.ts",
 	"components/ecommerce/product-card.tsx",
 	"components/ecommerce/cart-drawer.tsx",
 	"components/ecommerce/price-display.tsx",
@@ -100,6 +101,7 @@ var EcommerceFilePaths = []string{
 	"app/policies/returns/page.tsx",
 	"app/policies/privacy/page.tsx",
 	"app/policies/terms/page.tsx",
+	"lib/discounts.ts",
 	"lib/payments/index.ts",
 	"lib/payments/stripe.ts",
 	"lib/payments/iyzico.ts",
@@ -114,13 +116,6 @@ var EcommerceFilePaths = []string{
 	"app/api/wishlist/[productId]/route.ts",
 	"app/api/webhooks/stripe/route.ts",
 	"app/api/webhooks/iyzico/route.ts",
-	// Local storefront read APIs. These back useProducts / useProduct /
-	// useCategories / useStoreConfig on the client so the SDK no longer
-	// depends on the retired /v2/storefront/:storeId backend endpoint.
-	"app/api/products/route.ts",
-	"app/api/products/[slug]/route.ts",
-	"app/api/categories/route.ts",
-	"app/api/config/route.ts",
 	"app/api/contact/route.ts",
 }
 

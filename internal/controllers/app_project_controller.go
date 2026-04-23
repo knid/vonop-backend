@@ -122,6 +122,17 @@ func (c *Controller) CreateAppProject(ctx context.Context, user *models.User, re
 		slog.Error("Failed to create gateway key for project", "error", gwErr, "project_id", project.ID)
 	}
 
+	// Ecommerce projects have a canonical schema — provision the tenant DB
+	// eagerly so the AI never needs to call provision_database. If this fails,
+	// we log and proceed; the model will see has_database=false and can
+	// retry via the tool on its first turn.
+	if project.ProjectType == "ecommerce" && c.NeonService != nil {
+		if err := c.provisionDatabaseForAgent(ctx, project, user, nil); err != nil {
+			slog.Error("eager ecommerce db provision failed",
+				"error", err, "project_id", project.ID)
+		}
+	}
+
 	return project, nil
 }
 

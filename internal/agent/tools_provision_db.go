@@ -21,7 +21,7 @@ type ProvisionDatabaseTool struct {
 func (ProvisionDatabaseTool) Name() string { return "provision_database" }
 
 func (ProvisionDatabaseTool) Description() string {
-	return "Create the project's wemob database. Call this exactly once when the user asks for a database without naming a specific provider. For most projects, provide a `tables` array (each table needs a name and a columns array); the tool creates the database, runs CREATE TABLE for each table, seeds it with realistic demo data (including AI-generated images for image columns), writes lib/db.ts, and unlocks the execute_sql tool. For ecommerce projects, call this with NO tables argument — the canonical ecommerce schema (config, product_categories, products, discounts, carts, cart_items, orders, order_items, product_reviews, wishlists) is seeded automatically and any tables you pass are ignored. Do NOT call this if the user explicitly named a third-party provider (Supabase, Firebase, etc.) — use those integrations directly instead."
+	return "Create the project's wemob database. Call this exactly once when the user asks for a database without naming a specific provider. Provide a `tables` array (each table needs a name and a columns array); the tool creates the database, runs CREATE TABLE for each table, seeds it with realistic demo data (including AI-generated images for image columns), writes lib/db.ts, and unlocks the execute_sql tool. Do NOT call this if the user explicitly named a third-party provider (Supabase, Firebase, etc.) — use those integrations directly instead. Do NOT call this on ecommerce projects — their canonical schema is seeded automatically at project creation time."
 }
 
 func (ProvisionDatabaseTool) Schema() map[string]any {
@@ -71,15 +71,19 @@ func (ProvisionDatabaseTool) Schema() map[string]any {
 }
 
 func (p ProvisionDatabaseTool) Execute(ctx context.Context, rc *RunContext, input json.RawMessage) (string, bool, error) {
+	// Ecommerce projects get their DB provisioned at project-creation time
+	// with the canonical starter schema. There is no scenario where the model
+	// should call provision_database for an ecommerce project.
+	if rc.Project != nil && rc.Project.ProjectType == "ecommerce" {
+		return "ecommerce projects have their database seeded automatically at project creation — do not call provision_database. Use execute_sql for any schema changes and import { db } from '@/lib/db' for compiled queries.", true, nil
+	}
+
 	var args struct {
 		Tables []models.DataModel `json:"tables"`
 	}
 	if err := json.Unmarshal(input, &args); err != nil {
 		return fmt.Sprintf("invalid input: %v", err), true, nil
 	}
-	// Empty tables is valid for ecommerce projects (canonical schema seeded
-	// automatically). For other projects the controller layer below will
-	// reject empty and return a descriptive error.
 	for i, t := range args.Tables {
 		if strings.TrimSpace(t.Name) == "" {
 			return fmt.Sprintf("table[%d] is missing a name", i), true, nil

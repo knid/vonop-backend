@@ -19,11 +19,11 @@ import "server-only";
 import { and, asc, desc, eq, ilike, inArray, isNull, sql } from "drizzle-orm";
 
 import { db } from "./db";
+import { resolveDiscountById } from "./discounts";
 import {
   cartItems,
   carts,
   config,
-  discounts,
   orderItems,
   orders,
   productCategories,
@@ -294,34 +294,17 @@ export async function getCart(sessionId: string): Promise<StorefrontCart | null>
     };
   });
 
-  // Resolve discount (if any), mirroring the server-side buildCartResponse
-  // logic: percentage/fixed types, MinOrderCents guard, subtotal cap.
+  // Resolve discount through the shared helper so cart view, apply endpoint,
+  // and checkout all apply the same validity gates (expiry, max_uses,
+  // min_order). The cart drawer displays empty/zero when the row was valid
+  // at apply-time but has since expired or been exhausted.
   let discountCents = 0;
   let discountCode = "";
   if (cart.discountId) {
-    const discountRows = await db
-      .select()
-      .from(discounts)
-      .where(
-        and(eq(discounts.id, cart.discountId), isNull(discounts.deletedAt)),
-      )
-      .limit(1);
-    if (discountRows.length > 0) {
-      const discount = discountRows[0];
-      if (discount.isActive) {
-        discountCode = discount.code;
-        if (discount.type === "percentage") {
-          discountCents = Math.floor((subtotalCents * discount.value) / 100);
-        } else {
-          discountCents = discount.value;
-        }
-        if (discount.minOrderCents > 0 && subtotalCents < discount.minOrderCents) {
-          discountCents = 0;
-        }
-        if (discountCents > subtotalCents) {
-          discountCents = subtotalCents;
-        }
-      }
+    const resolution = await resolveDiscountById(cart.discountId, subtotalCents);
+    if (resolution.kind === "applied") {
+      discountCode = resolution.discount.code;
+      discountCents = resolution.cents;
     }
   }
 

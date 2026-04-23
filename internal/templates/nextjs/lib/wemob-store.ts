@@ -1,9 +1,15 @@
 "use client";
 // lib/wemob-store.ts — Wemob Storefront SDK
 // This file is template-managed. Do not modify.
-// All exports are client-side only (hooks, context, and async fetch functions).
+// All exports are client-side only (hooks, context, and async helpers).
 
 import React from "react";
+import {
+  getStoreConfigAction,
+  getProductsAction,
+  getProductAction,
+  getCategoriesAction,
+} from "./wemob-storefront-actions";
 import type {
   StoreConfig,
   StorefrontProduct,
@@ -33,19 +39,17 @@ export type {
 };
 
 // ---------------------------------------------------------------------------
-// API Fetch Helper
+// Fetch helper for mutation endpoints
 // ---------------------------------------------------------------------------
 //
-// All reads target the local /api/* routes that back onto this tenant's Neon
-// database via wemob-store-server. The legacy /v2/storefront/:storeId/... path
-// was retired when the schema refactor moved store state into per-tenant DBs,
-// so the old NEXT_PUBLIC_WEMOB_API_URL / NEXT_PUBLIC_STORE_ID envs no longer
-// exist and the client SDK no longer reaches outside the app's own origin.
+// Reads go through React Server Actions (wemob-storefront-actions.ts) — no
+// bespoke /api/* route per resource. Mutations still POST to dedicated
+// /api/cart, /api/discount, /api/wishlist, /api/reviews, /api/checkout,
+// /api/contact routes because those have real business logic beyond a thin
+// wrapper and benefit from explicit HTTP status codes.
 //
-// The browser sends the httpOnly wemob_cart_session cookie automatically for
-// every request — there is no duplicate client-side session id to keep in
-// sync. credentials:"same-origin" is the default but kept explicit for
-// clarity when the SDK is read cold.
+// The browser carries the httpOnly wemob_cart_session cookie on every
+// request; there is no client-side session id to pass around.
 
 async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(path, {
@@ -61,42 +65,32 @@ async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
 }
 
 // ---------------------------------------------------------------------------
-// Store Config
+// Store reads (server actions)
 // ---------------------------------------------------------------------------
 
 /** Fetch the store configuration (name, currency, locale, tax, etc.). */
 export async function getStoreConfig(): Promise<StoreConfig> {
-  return apiFetch<StoreConfig>("/api/config");
+  return getStoreConfigAction();
 }
-
-// ---------------------------------------------------------------------------
-// Products — async functions for use in client components or route handlers
-// ---------------------------------------------------------------------------
 
 /** Fetch products. Optionally filter by category slug or search query. */
 export async function getProducts(params?: {
   category?: string;
   q?: string;
 }): Promise<StorefrontProduct[]> {
-  const query = new URLSearchParams();
-  if (params?.category) query.set("category", params.category);
-  if (params?.q) query.set("q", params.q);
-  const qs = query.toString();
-  return apiFetch<StorefrontProduct[]>("/api/products" + (qs ? "?" + qs : ""));
+  return getProductsAction(params);
 }
 
-/** Fetch a single product by slug. */
-export async function getProduct(slug: string): Promise<StorefrontProduct> {
-  return apiFetch<StorefrontProduct>("/api/products/" + encodeURIComponent(slug));
+/** Fetch a single product by slug. Returns null when no such product exists. */
+export async function getProduct(
+  slug: string,
+): Promise<StorefrontProduct | null> {
+  return getProductAction(slug);
 }
-
-// ---------------------------------------------------------------------------
-// Categories
-// ---------------------------------------------------------------------------
 
 /** Fetch all categories. */
 export async function getCategories(): Promise<StorefrontCategory[]> {
-  return apiFetch<StorefrontCategory[]>("/api/categories");
+  return getCategoriesAction();
 }
 
 // ---------------------------------------------------------------------------
@@ -105,12 +99,7 @@ export async function getCategories(): Promise<StorefrontCategory[]> {
 // Cart mutations target local Next.js route handlers that talk directly
 // to the tenant's Neon DB. The browser automatically sends the httpOnly
 // wemob_cart_session cookie owned by those routes — that is the SINGLE
-// source of truth for which cart belongs to this browser. There is no
-// client-side session id, so none of the mutation helpers need one.
-// The _sessionId first argument on getCart/addCartItem/etc. is a legacy
-// no-op: kept to preserve source compatibility with older callers that
-// still pass `getSessionId()` in. New code should call these without
-// the first argument.
+// source of truth for which cart belongs to this browser.
 // ---------------------------------------------------------------------------
 
 // Build an empty StorefrontCart so provider state stays well-shaped when
@@ -136,21 +125,11 @@ async function cartFetch(path: string, options?: RequestInit): Promise<Storefron
   }
 }
 
-/**
- * Legacy no-op: carts are created server-side lazily on first add-item.
- * Returns an empty StorefrontCart so any caller that expects a Promise of
- * one still resolves cleanly.
- */
-export async function createCart(_sessionId?: string): Promise<StorefrontCart> {
-  return emptyCart();
-}
-
-export async function getCart(_sessionId?: string): Promise<StorefrontCart> {
+export async function getCart(): Promise<StorefrontCart> {
   return cartFetch("/api/cart");
 }
 
 export async function addCartItem(
-  _sessionId: string | undefined,
   productId: string,
   quantity: number
 ): Promise<StorefrontCart> {
@@ -161,7 +140,6 @@ export async function addCartItem(
 }
 
 export async function updateCartItem(
-  _sessionId: string | undefined,
   itemId: string,
   quantity: number
 ): Promise<StorefrontCart> {
@@ -171,19 +149,13 @@ export async function updateCartItem(
   });
 }
 
-export async function removeCartItem(
-  _sessionId: string | undefined,
-  itemId: string
-): Promise<StorefrontCart> {
+export async function removeCartItem(itemId: string): Promise<StorefrontCart> {
   return cartFetch("/api/cart/" + encodeURIComponent(itemId), {
     method: "DELETE",
   });
 }
 
-export async function applyDiscountCode(
-  _sessionId: string | undefined,
-  code: string
-): Promise<StorefrontCart> {
+export async function applyDiscountCode(code: string): Promise<StorefrontCart> {
   return cartFetch("/api/discount", {
     method: "POST",
     body: JSON.stringify({ code }),
@@ -191,7 +163,7 @@ export async function applyDiscountCode(
 }
 
 /** Remove the currently applied discount code from the cart. */
-export async function removeDiscount(_sessionId?: string): Promise<StorefrontCart> {
+export async function removeDiscount(): Promise<StorefrontCart> {
   return cartFetch("/api/discount", {
     method: "DELETE",
   });
@@ -417,9 +389,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
           })
         : null;
 
-      await withOptimistic(optimistic, () =>
-        addCartItem(undefined, productId, qty)
-      );
+      await withOptimistic(optimistic, () => addCartItem(productId, qty));
     },
     [withOptimistic]
   );
@@ -439,9 +409,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         ),
       });
 
-      await withOptimistic(optimistic, () =>
-        updateCartItem(undefined, itemId, quantity)
-      );
+      await withOptimistic(optimistic, () => updateCartItem(itemId, quantity));
     },
     [withOptimistic]
   );
@@ -457,16 +425,14 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         items: current.items.filter((item) => item.id !== itemId),
       });
 
-      await withOptimistic(optimistic, () =>
-        removeCartItem(undefined, itemId)
-      );
+      await withOptimistic(optimistic, () => removeCartItem(itemId));
     },
     [withOptimistic]
   );
 
   const handleApplyDiscount = React.useCallback(
     async (code: string) => {
-      const updated = await applyDiscountCode(undefined, code);
+      const updated = await applyDiscountCode(code);
       setCart(updated);
       saveCartCache(updated);
     },
@@ -763,18 +729,16 @@ export function useReviews(slug: string) {
 // Wishlist
 // ---------------------------------------------------------------------------
 
-// Wishlist uses the same httpOnly cookie as the cart (wemob_cart_session) —
-// no _sessionId arg is actually consumed. The leading parameter stays only
-// for source compatibility with older callers that still forward a
-// session id through the SDK.
+// Wishlist uses the same httpOnly wemob_cart_session cookie as the cart —
+// the browser carries it transparently on every request.
 
 /** Fetch wishlist items for the current session. */
-export async function getWishlist(_sessionId?: string): Promise<WishlistItem[]> {
+export async function getWishlist(): Promise<WishlistItem[]> {
   return apiFetch<WishlistItem[]>("/api/wishlist");
 }
 
 /** Add a product to the wishlist. */
-export async function addToWishlist(_sessionId: string | undefined, productId: string): Promise<void> {
+export async function addToWishlist(productId: string): Promise<void> {
   await apiFetch<{ ok: true }>("/api/wishlist", {
     method: "POST",
     body: JSON.stringify({ productId }),
@@ -782,7 +746,7 @@ export async function addToWishlist(_sessionId: string | undefined, productId: s
 }
 
 /** Remove a product from the wishlist. */
-export async function removeFromWishlist(_sessionId: string | undefined, productId: string): Promise<void> {
+export async function removeFromWishlist(productId: string): Promise<void> {
   await apiFetch<{ ok: true }>("/api/wishlist/" + encodeURIComponent(productId), {
     method: "DELETE",
   });
@@ -808,10 +772,10 @@ export function useWishlist() {
   const toggleWishlist = React.useCallback(
     async (productId: string) => {
       if (items.some((item) => item.product_id === productId)) {
-        await removeFromWishlist(undefined, productId);
+        await removeFromWishlist(productId);
         setItems((prev) => prev.filter((item) => item.product_id !== productId));
       } else {
-        await addToWishlist(undefined, productId);
+        await addToWishlist(productId);
         const updated = await getWishlist();
         setItems(updated || []);
       }

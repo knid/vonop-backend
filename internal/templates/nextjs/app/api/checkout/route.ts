@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { and, eq, isNull, or, gte, sql } from "drizzle-orm";
 import { db, schema } from "@/lib/db";
+import { resolveDiscountById } from "@/lib/discounts";
 import { getAdapter } from "@/lib/payments";
 
 export const runtime = "nodejs";
@@ -71,45 +72,14 @@ export async function POST(req: NextRequest) {
     0,
   );
 
-  // --- Discount re-validation -------------------------------------------
-  //
-  // The bug prior to this was only checking is_active. Expired / exhausted /
-  // soft-deleted coupons still got applied at checkout because the
-  // /api/discount apply path let them through earlier and nothing caught up.
-  // Re-verifying against the live row here means the apply path can be as
-  // permissive as it needs to be — final word is always this block.
+  // Discount re-validation: the apply path can be permissive, this block is
+  // the final word. Shared rules live in lib/discounts.ts so every call site
+  // gates on the same criteria (expiry, max_uses, min_order).
   let discountCents = 0;
   if (cart.discountId) {
-    const now = new Date();
-    const [discount] = await db
-      .select()
-      .from(schema.discounts)
-      .where(
-        and(
-          eq(schema.discounts.id, cart.discountId),
-          eq(schema.discounts.isActive, true),
-          isNull(schema.discounts.deletedAt),
-        ),
-      );
-    if (discount) {
-      const expired =
-        (discount.startsAt && discount.startsAt > now) ||
-        (discount.endsAt && discount.endsAt < now);
-      const exhausted =
-        discount.maxUses > 0 && discount.usedCount >= discount.maxUses;
-      const minOrder = Number(discount.minOrderCents ?? 0);
-      const belowMin = subtotal < minOrder;
-
-      if (!expired && !exhausted && !belowMin) {
-        if (discount.type === "percentage") {
-          discountCents = Math.min(
-            Math.floor((subtotal * Number(discount.value)) / 100),
-            subtotal,
-          );
-        } else if (discount.type === "fixed") {
-          discountCents = Math.min(Number(discount.value), subtotal);
-        }
-      }
+    const resolution = await resolveDiscountById(cart.discountId, subtotal);
+    if (resolution.kind === "applied") {
+      discountCents = resolution.cents;
     }
   }
 
