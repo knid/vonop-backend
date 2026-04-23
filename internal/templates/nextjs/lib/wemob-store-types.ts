@@ -125,4 +125,11 @@ export interface WishlistItem {
   id: string;
   product_id: string;
   created_at: string;
+  // Product fields are joined server-side so a wishlist page renders in a
+  // single round-trip. Older clients that only read `product_id` keep working.
+  product_name?: string;
+  product_slug?: string;
+  product_image?: string;
+  price_cents?: number;
+  in_stock?: boolean;
 }

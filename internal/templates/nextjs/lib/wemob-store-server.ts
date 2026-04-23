@@ -297,7 +297,12 @@ export async function getCart(sessionId: string): Promise<StorefrontCart | null>
   // Resolve discount through the shared helper so cart view, apply endpoint,
   // and checkout all apply the same validity gates (expiry, max_uses,
   // min_order). The cart drawer displays empty/zero when the row was valid
-  // at apply-time but has since expired or been exhausted.
+  // at apply-time but has since expired or been exhausted. When the discount
+  // becomes permanently invalid (not_found / expired / exhausted) we also
+  // null out the cart's discount_id so downstream reads stop paying the
+  // resolve cost and don't surface a "remove discount" button for nothing.
+  // We skip this for `below_minimum` because the customer can still reach
+  // the threshold by adding items.
   let discountCents = 0;
   let discountCode = "";
   if (cart.discountId) {
@@ -305,6 +310,11 @@ export async function getCart(sessionId: string): Promise<StorefrontCart | null>
     if (resolution.kind === "applied") {
       discountCode = resolution.discount.code;
       discountCents = resolution.cents;
+    } else if (resolution.reason !== "below_minimum") {
+      await db
+        .update(carts)
+        .set({ discountId: null, updatedAt: new Date() })
+        .where(eq(carts.id, cart.id));
     }
   }
 
@@ -323,8 +333,14 @@ export async function getCart(sessionId: string): Promise<StorefrontCart | null>
 // Orders
 // ---------------------------------------------------------------------------
 
-/** Fetch an order by id, with its line items. */
-export async function getOrder(orderId: string): Promise<OrderTracking | null> {
+/** Fetch an order by id, with its line items. The viewToken is the IDOR gate
+ * set at checkout init and threaded through the success/cancel redirect URLs —
+ * we return null when it's missing or doesn't match so a scraper with just
+ * the order UUID can't read customer PII. */
+export async function getOrder(
+  orderId: string,
+  viewToken: string,
+): Promise<OrderTracking | null> {
   const orderRows = await db
     .select()
     .from(orders)
@@ -335,6 +351,18 @@ export async function getOrder(orderId: string): Promise<OrderTracking | null> {
     return null;
   }
   const order = orderRows[0];
+  const expected =
+    (order.metadata as Record<string, unknown> | null)?.viewToken;
+  // Orders written before the viewToken gate shipped have no `viewToken` on
+  // metadata. Those rows stay viewable by id alone — otherwise the moment
+  // the updated template redeploys, every in-flight and historical order
+  // confirmation link silently 404s. New orders set the token on insert,
+  // so anything with `expected` defined must match exactly.
+  if (expected !== undefined) {
+    if (typeof expected !== "string" || !expected || expected !== viewToken) {
+      return null;
+    }
+  }
 
   const itemRows = await db
     .select()
@@ -424,19 +452,46 @@ export async function getProductReviews(slug: string): Promise<ReviewsResult> {
 // Wishlist
 // ---------------------------------------------------------------------------
 
-/** Fetch wishlist rows for a session. */
+/** Fetch wishlist rows joined to product data for a session. Archived and
+ * soft-deleted products are filtered out. */
 export async function getWishlist(sessionId: string): Promise<WishlistItem[]> {
   const rows = await db
-    .select()
+    .select({
+      id: wishlists.id,
+      productId: wishlists.productId,
+      createdAt: wishlists.createdAt,
+      productName: products.name,
+      productSlug: products.slug,
+      productImages: products.images,
+      productPriceInCents: products.priceInCents,
+      productInventory: products.inventory,
+      productTrackInventory: products.trackInventory,
+    })
     .from(wishlists)
+    .innerJoin(
+      products,
+      and(
+        eq(wishlists.productId, products.id),
+        eq(products.status, "active"),
+        isNull(products.deletedAt),
+      ),
+    )
     .where(eq(wishlists.sessionId, sessionId))
     .orderBy(desc(wishlists.createdAt));
 
-  return rows.map((w) => ({
-    id: w.id,
-    product_id: w.productId,
-    created_at: w.createdAt.toISOString(),
-  }));
+  return rows.map((w) => {
+    const imgs = (w.productImages as string[] | null) ?? [];
+    return {
+      id: w.id,
+      product_id: w.productId,
+      created_at: w.createdAt.toISOString(),
+      product_name: w.productName,
+      product_slug: w.productSlug,
+      product_image: imgs.length > 0 ? imgs[0] : "",
+      price_cents: w.productPriceInCents,
+      in_stock: !w.productTrackInventory || w.productInventory > 0,
+    };
+  });
 }
 
 // ---------------------------------------------------------------------------

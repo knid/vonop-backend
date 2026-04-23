@@ -1,11 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { randomUUID } from "crypto";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { db, schema } from "@/lib/db";
 import { getCart as getCartServer } from "@/lib/wemob-store-server";
 
 const CART_SESSION_COOKIE = "wemob_cart_session";
+// NODE_ENV is the only reliable signal here: templates ship to production
+// stores behind HTTPS (Caddy / Vercel) where `secure` must be set so the
+// cookie can't leak over plaintext or downgrade. In dev we run on http://
+// localhost and need the flag off.
+const IS_PROD = process.env.NODE_ENV === "production";
 
 async function ensureCart(sessionId: string) {
   let [cart] = await db
@@ -36,6 +41,7 @@ async function getOrSetSession(): Promise<string> {
     jar.set(CART_SESSION_COOKIE, sid, {
       httpOnly: true,
       sameSite: "lax",
+      secure: IS_PROD,
       path: "/",
       maxAge: CART_SESSION_MAX_AGE,
     });
@@ -73,8 +79,17 @@ export async function POST(req: NextRequest) {
   const [product] = await db
     .select()
     .from(schema.products)
-    .where(eq(schema.products.id, body.productId));
+    .where(
+      and(
+        eq(schema.products.id, body.productId),
+        eq(schema.products.status, "active"),
+        isNull(schema.products.deletedAt),
+      ),
+    );
   if (!product) {
+    // Covers unknown id, archived (status !== "active") and soft-deleted —
+    // merging them is fine because the customer sees the same "that product
+    // isn't available" story either way.
     return NextResponse.json({ error: "product_not_found" }, { status: 404 });
   }
 

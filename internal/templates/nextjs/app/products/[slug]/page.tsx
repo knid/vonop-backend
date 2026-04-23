@@ -89,14 +89,14 @@ export default async function ProductDetailPage({
                 <RotateCcw className="h-5 w-5 text-muted-foreground" />
                 <div>
                   <p className="text-xs font-medium text-foreground">{{t.easyReturns}}</p>
-                  <p className="text-[10px] text-muted-foreground">30-day policy</p>
+                  <p className="text-[10px] text-muted-foreground">{{t.returnsPolicyShort}}</p>
                 </div>
               </div>
               <div className="flex flex-col items-center gap-2 rounded-xl border border-border/40 p-3 text-center">
                 <Shield className="h-5 w-5 text-muted-foreground" />
                 <div>
-                  <p className="text-xs font-medium text-foreground">Secure</p>
-                  <p className="text-[10px] text-muted-foreground">SSL encrypted</p>
+                  <p className="text-xs font-medium text-foreground">{{t.secureLabel}}</p>
+                  <p className="text-[10px] text-muted-foreground">{{t.sslEncryptedShort}}</p>
                 </div>
               </div>
             </div>

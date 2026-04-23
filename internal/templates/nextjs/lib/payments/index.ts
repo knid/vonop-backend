@@ -25,8 +25,19 @@ export type WebhookEvent = {
   provider: string;
 };
 
+// Per-request context the checkout route threads into adapters. Kept separate
+// from `Order` so fields that don't belong on the DB row (clientIp, viewToken
+// is on metadata) stay out of the schema.
+export type CheckoutContext = {
+  clientIp: string; // best-effort from x-forwarded-for; "" if unresolved
+};
+
 export type PaymentAdapter = {
-  createSession: (order: Order, config: Config) => Promise<CheckoutResult>;
+  createSession: (
+    order: Order,
+    config: Config,
+    ctx: CheckoutContext,
+  ) => Promise<CheckoutResult>;
   handleWebhook: (rawBody: string, headers: Headers) => Promise<WebhookEvent>;
 };
 

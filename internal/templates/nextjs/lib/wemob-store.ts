@@ -228,11 +228,25 @@ function recalcTotals(c: StorefrontCart): StorefrontCart {
 // Cart Context
 // ---------------------------------------------------------------------------
 
+// Optional product hint passed into addItem so the optimistic drawer row and
+// badge render with the real name/image/price instead of flashing $0 for the
+// round-trip. Callers that already have the product (product detail page,
+// product card) pass it; callers without it (deep-linked add flows) can omit.
+export interface AddItemProductHint {
+  name: string;
+  image: string;
+  priceInCents: number;
+}
+
 interface CartContextValue {
   cart: StorefrontCart | null;
   isLoading: boolean;
   itemCount: number;
-  addItem: (productId: string, quantity?: number) => Promise<void>;
+  addItem: (
+    productId: string,
+    quantity?: number,
+    hint?: AddItemProductHint,
+  ) => Promise<void>;
   updateItem: (itemId: string, quantity: number) => Promise<void>;
   removeItem: (itemId: string) => Promise<void>;
   applyDiscount: (code: string) => Promise<void>;
@@ -310,10 +324,12 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   // --- Actions ---
 
   const handleAddItem = React.useCallback(
-    async (productId: string, quantity?: number) => {
+    async (productId: string, quantity?: number, hint?: AddItemProductHint) => {
       const qty = Math.max(1, quantity ?? 1);
 
-      // Optimistic: add a placeholder item and recalculate totals
+      // Optimistic: add a placeholder item and recalculate totals. When the
+      // caller hands us a product hint we seed real name/image/price so the
+      // drawer doesn't flash $0 while the round-trip is in flight.
       const current = cartRef.current;
       const optimistic = current
         ? recalcTotals({
@@ -323,11 +339,11 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
               {
                 id: "__optimistic__" + Date.now(),
                 product_id: productId,
-                product_name: "",
-                product_image: "",
+                product_name: hint?.name ?? "",
+                product_image: hint?.image ?? "",
                 quantity: qty,
-                price_cents: 0,
-                total_cents: 0,
+                price_cents: hint?.priceInCents ?? 0,
+                total_cents: (hint?.priceInCents ?? 0) * qty,
               },
             ],
           })

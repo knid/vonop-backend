@@ -6,7 +6,7 @@ import { ArrowLeft, Check, Lock, Shield } from "lucide-react";
 import { CheckoutForm } from "@/components/ecommerce/checkout-form";
 
 export default function CheckoutPage() {
-  var steps = ["{{t.stepCart}}", "{{t.stepInformation}}", "{{t.stepPayment}}"];
+  const steps = ["{{t.stepCart}}", "{{t.stepInformation}}", "{{t.stepPayment}}"];
 
   return (
     <div className="mx-auto max-w-4xl px-4 py-12 sm:px-6 sm:py-16 lg:px-8">
@@ -19,9 +19,9 @@ export default function CheckoutPage() {
       {/* Step progress with connecting lines and checkmarks */}
       <div className="mb-10">
         <div className="flex items-center justify-center">
-          {steps.map(function(step, i) {
-            var isCompleted = i < 1;
-            var isCurrent = i === 1;
+          {steps.map((step, i) => {
+            const isCompleted = i < 1;
+            const isCurrent = i === 1;
             return (
               <React.Fragment key={step}>
                 {i > 0 && (

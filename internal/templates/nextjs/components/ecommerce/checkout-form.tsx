@@ -7,11 +7,12 @@ import { OrderSummary } from "@/components/ecommerce/order-summary";
 
 // Shape returned by the local /api/checkout route handler. Kept inline because
 // the payments module is server-only and can't be imported from a client
-// component.
+// component. viewToken is the per-order IDOR gate for /checkout/success and
+// /checkout/cancel pages.
 type CheckoutResult =
-  | { orderId: string; kind: "redirect"; url: string }
-  | { orderId: string; kind: "client_confirm"; clientSecret: string }
-  | { orderId: string; kind: "placed" };
+  | { orderId: string; viewToken: string; kind: "redirect"; url: string }
+  | { orderId: string; viewToken: string; kind: "client_confirm"; clientSecret: string }
+  | { orderId: string; viewToken: string; kind: "placed" };
 
 export function CheckoutForm() {
   const { cart, isLoading: cartLoading } = useCart();
@@ -87,7 +88,8 @@ export function CheckoutForm() {
         console.error("client_confirm not implemented in this template", result);
         setIsSubmitting(false);
       } else if (result.kind === "placed") {
-        window.location.href = "/checkout/success?order=" + result.orderId;
+        window.location.href =
+          "/checkout/success?order=" + result.orderId + "&t=" + result.viewToken;
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "{{t.checkoutFailed}}");
@@ -116,41 +118,6 @@ export function CheckoutForm() {
   return (
     <div className="grid gap-8 lg:grid-cols-[1fr_400px]">
       <form onSubmit={handleSubmit} className="space-y-6">
-        {/* Express Checkout */}
-        <div className="rounded-2xl border border-border/40 p-5">
-          <p className="mb-3 text-center text-xs font-medium uppercase tracking-[0.15em] text-muted-foreground">Express Checkout</p>
-          <div className="flex gap-3">
-            <button type="button" className="flex h-12 flex-1 items-center justify-center rounded-xl bg-black text-white text-sm font-medium transition-opacity hover:opacity-90 dark:bg-white dark:text-black">
-              Apple Pay
-            </button>
-            <button type="button" className="flex h-12 flex-1 items-center justify-center rounded-xl bg-[#ffc439] text-[#003087] text-sm font-semibold transition-opacity hover:opacity-90">
-              PayPal
-            </button>
-          </div>
-          <div className="relative my-5">
-            <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-border/40" /></div>
-            <div className="relative flex justify-center"><span className="bg-background px-3 text-xs text-muted-foreground">{{t.orContinueWith}}</span></div>
-          </div>
-        </div>
-
-        {/* Step indicator */}
-        <div className="flex items-center justify-center gap-0">
-          {["{{t.stepInformation}}", "{{t.stepShipping}}", "{{t.stepPayment}}"].map((step, i) => (
-            <React.Fragment key={step}>
-              {i > 0 && <div className={"mx-2 h-px w-8 sm:mx-3 sm:w-12 " + (i === 0 ? "bg-foreground" : "bg-border/40")} />}
-              <div className="flex items-center gap-1.5">
-                <div className={"flex h-7 w-7 items-center justify-center rounded-full text-xs font-medium " +
-                  (i === 0 ? "bg-foreground text-background" : "border border-border/40 text-muted-foreground/60")}>
-                  {i + 1}
-                </div>
-                <span className={"hidden text-sm sm:block " + (i === 0 ? "font-medium text-foreground" : "text-muted-foreground/60")}>
-                  {step}
-                </span>
-              </div>
-            </React.Fragment>
-          ))}
-        </div>
-
         <div className="rounded-2xl bg-muted/20 p-7">
           <div className="mb-5 flex items-center gap-2">
             <Mail className="h-4 w-4 text-muted-foreground" />

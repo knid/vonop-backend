@@ -13,6 +13,7 @@ import type { CheckoutResult, WebhookEvent } from "./index";
 export async function createSession(
   _order: Order,
   _config: Config,
+  _ctx: import("./index").CheckoutContext,
 ): Promise<CheckoutResult> {
   return { kind: "placed" };
 }

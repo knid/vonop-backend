@@ -8,10 +8,12 @@ import "server-only";
 //   STRIPE_WEBHOOK_SECRET   — signing secret for webhook signature verification
 
 import Stripe from "stripe";
+import { eq } from "drizzle-orm";
 
+import { db, schema } from "@/lib/db";
 import type { Order, Config } from "@/lib/schema";
 
-import type { CheckoutResult, WebhookEvent } from "./index";
+import type { CheckoutContext, CheckoutResult, WebhookEvent } from "./index";
 
 function getClient(): Stripe {
   const sk = process.env.STRIPE_SK;
@@ -19,28 +21,133 @@ function getClient(): Stripe {
   return new Stripe(sk, { apiVersion: "2024-12-18.acacia" });
 }
 
+// Build Stripe line_items from order_items, showing each product at its
+// real unit_amount and quantity. Any delta between subtotal and totalCents
+// (tax + shipping - discount) is added as a single positive or negative
+// adjustment line so the session total matches totalCents. Stripe rejects
+// zero / negative unit_amount, so two edge cases fall back to a single
+// opaque "Order total" line: (a) steep discounts that would round any
+// per-item share to 0 cents; (b) no items. The caller must reject
+// totalCents <= 0 before reaching here — Stripe Checkout sessions require
+// a positive charge amount.
+function buildLineItems(
+  orderItems: Array<{ productName: string; quantity: number; priceInCents: number }>,
+  currency: string,
+  totalCents: number,
+): Stripe.Checkout.SessionCreateParams.LineItem[] {
+  const singleLine = (): Stripe.Checkout.SessionCreateParams.LineItem[] => [
+    {
+      quantity: 1,
+      price_data: {
+        currency,
+        unit_amount: totalCents,
+        product_data: { name: "Order total" },
+      },
+    },
+  ];
+
+  if (orderItems.length === 0) return singleLine();
+
+  const lines: Stripe.Checkout.SessionCreateParams.LineItem[] = orderItems.map(
+    (item) => ({
+      quantity: item.quantity,
+      price_data: {
+        currency,
+        unit_amount: Math.max(0, item.priceInCents),
+        product_data: { name: item.productName },
+      },
+    }),
+  );
+
+  const subtotal = orderItems.reduce(
+    (sum, i) => sum + i.priceInCents * i.quantity,
+    0,
+  );
+  const delta = totalCents - subtotal;
+
+  if (delta > 0) {
+    lines.push({
+      quantity: 1,
+      price_data: {
+        currency,
+        unit_amount: delta,
+        product_data: { name: "Tax & shipping" },
+      },
+    });
+    return lines;
+  }
+
+  if (delta < 0) {
+    // Discount case. Stripe doesn't accept negative unit_amount, so scale
+    // each line's unit_amount down; the last line absorbs rounding drift so
+    // the sum is exact. If any scaled unit_amount rounds to 0 (steep
+    // discount + small per-item price), fall back to a single line — the
+    // customer loses the itemized breakdown on Stripe's page but the
+    // session is guaranteed to initialize.
+    const ratio = totalCents / subtotal; // 0 < ratio < 1 (totalCents > 0 per caller contract)
+    let allocated = 0;
+    const scaled: number[] = [];
+    for (let idx = 0; idx < orderItems.length; idx++) {
+      const item = orderItems[idx];
+      const isLast = idx === orderItems.length - 1;
+      const lineTotal = isLast
+        ? totalCents - allocated
+        : Math.round(item.priceInCents * item.quantity * ratio);
+      allocated += lineTotal;
+      const unitAmount = Math.round(lineTotal / item.quantity);
+      if (unitAmount <= 0) return singleLine();
+      scaled.push(unitAmount);
+    }
+    for (let idx = 0; idx < lines.length; idx++) {
+      lines[idx].price_data!.unit_amount = scaled[idx];
+    }
+  }
+
+  return lines;
+}
+
 export async function createSession(
   order: Order,
   config: Config,
+  _ctx: CheckoutContext,
 ): Promise<CheckoutResult> {
+  const totalCents = Number(order.totalCents);
+  if (totalCents <= 0) {
+    // Stripe Checkout requires a positive charge amount. A $0 order (100%
+    // discount, or promo that fully covers the cart) should be handled by
+    // the caller as a COD-style immediate placement instead of going
+    // through a payment provider. Surface this as a hard error so the
+    // failure is visible in logs — silently rerouting would hide a
+    // pricing misconfiguration.
+    throw new Error("Stripe session requires totalCents > 0");
+  }
+
   const stripe = getClient();
   const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "";
 
+  const items = await db
+    .select({
+      productName: schema.orderItems.productName,
+      quantity: schema.orderItems.quantity,
+      priceInCents: schema.orderItems.priceInCents,
+    })
+    .from(schema.orderItems)
+    .where(eq(schema.orderItems.orderId, order.id));
+
+  const viewToken =
+    (order.metadata as Record<string, unknown> | null)?.viewToken ?? "";
+  const tokenParam = viewToken ? `&t=${viewToken}` : "";
+
   const session = await stripe.checkout.sessions.create({
     mode: "payment",
-    line_items: [
-      {
-        quantity: 1,
-        price_data: {
-          currency: config.currency.toLowerCase(),
-          unit_amount: Number(order.totalCents),
-          product_data: { name: `Order ${order.orderNumber}` },
-        },
-      },
-    ],
+    line_items: buildLineItems(
+      items,
+      config.currency.toLowerCase(),
+      totalCents,
+    ),
     metadata: { order_id: order.id },
-    success_url: `${siteUrl}/checkout/success?order=${order.id}`,
-    cancel_url: `${siteUrl}/checkout/cancel?order=${order.id}`,
+    success_url: `${siteUrl}/checkout/success?order=${order.id}${tokenParam}`,
+    cancel_url: `${siteUrl}/checkout/cancel?order=${order.id}${tokenParam}`,
   });
 
   return { kind: "redirect", url: session.url! };

@@ -178,6 +178,9 @@ var ecommerceStrings = map[string]map[string]string{
 
 		// Checkout cancel
 		"paymentCancelled":       "Your payment was not completed. Your cart is still saved and no charges were made.",
+		"paymentCancelledTitle":  "Payment Cancelled",
+		"orderNotCompleted":      "was not completed.",
+		"contactSupport":         "Contact Support",
 		"cartSavedQuestion":      "Is my cart still saved?",
 		"cartSavedAnswer":        "Yes. Your cart items are saved and will be available when you return to checkout.",
 		"paymentChargedQuestion": "Was I charged?",
@@ -217,6 +220,10 @@ var ecommerceStrings = map[string]map[string]string{
 		"freeShipping":         "Free Shipping",
 		"ordersOver50":         "Orders over $50",
 		"easyReturns":          "Easy Returns",
+		"returnsPolicyShort":   "30-day policy",
+		"secureLabel":          "Secure",
+		"sslEncryptedShort":    "SSL encrypted",
+		"freeShippingExpress":  "Free standard shipping. Express shipping available at checkout.",
 		"guaranteedSafeCheckout": "Guaranteed Safe Checkout",
 		"youMayAlsoLike":       "You May Also Like",
 
@@ -442,6 +449,9 @@ var ecommerceStrings = map[string]map[string]string{
 
 		// Checkout cancel
 		"paymentCancelled":       "\u00d6demeniz tamamlanmad\u0131. Sepetiniz kaydedildi ve herhangi bir \u00fccret kesilmedi.",
+		"paymentCancelledTitle":  "\u00d6deme \u0130ptal Edildi",
+		"orderNotCompleted":      "tamamlanmad\u0131.",
+		"contactSupport":         "Deste\u011fe Ula\u015f",
 		"cartSavedQuestion":      "Sepetim kaydedildi mi?",
 		"cartSavedAnswer":        "Evet. Sepetinizdeki \u00fcr\u00fcnler kaydedilmi\u015ftir ve \u00f6demeye d\u00f6nd\u00fc\u011f\u00fcn\u00fczde haz\u0131r olacakt\u0131r.",
 		"paymentChargedQuestion": "\u00dccret kesildi mi?",
@@ -481,6 +491,10 @@ var ecommerceStrings = map[string]map[string]string{
 		"freeShipping":         "\u00dccretsiz Kargo",
 		"ordersOver50":         "50\u20ba \u00fczeri sipari\u015flerde",
 		"easyReturns":          "Kolay \u0130ade",
+		"returnsPolicyShort":   "30 g\u00fcn i\u00e7inde",
+		"secureLabel":          "G\u00fcvenli",
+		"sslEncryptedShort":    "SSL \u015fifreleme",
+		"freeShippingExpress":  "\u00dccretsiz standart kargo. \u00d6demede h\u0131zl\u0131 kargo se\u00e7ene\u011fi mevcut.",
 		"guaranteedSafeCheckout": "G\u00fcvenli \u00d6deme Garantisi",
 		"youMayAlsoLike":       "Bunlar\u0131 da Be\u011fenebilirsiniz",
 

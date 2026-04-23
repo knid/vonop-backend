@@ -18,7 +18,7 @@ import "server-only";
 
 import type { Order, Config } from "@/lib/schema";
 
-import type { CheckoutResult, WebhookEvent } from "./index";
+import type { CheckoutContext, CheckoutResult, WebhookEvent } from "./index";
 
 type IyzipayCallback<T> = (err: unknown, res: T) => void;
 
@@ -81,6 +81,7 @@ type AddressLike = {
 export async function createSession(
   order: Order,
   config: Config,
+  ctx: CheckoutContext,
 ): Promise<CheckoutResult> {
   const iyzipay = await getClient();
   const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "";
@@ -116,7 +117,10 @@ export async function createSession(
       // Iyzico requires this field; a placeholder is used for non-TR buyers.
       identityNumber: "11111111111",
       email: order.customerEmail,
-      ip: "127.0.0.1",
+      // Real client IP materially improves Iyzico's fraud scoring. Falls
+      // back to a loopback placeholder when the request couldn't resolve
+      // one (e.g. direct connection, header stripped upstream).
+      ip: ctx.clientIp || "127.0.0.1",
       registrationAddress: shippingAddress,
       city: shipping.city || "Not provided",
       country: shipping.country || "Turkey",

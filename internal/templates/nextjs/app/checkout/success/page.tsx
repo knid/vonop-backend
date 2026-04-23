@@ -8,12 +8,15 @@ import { formatPrice } from "@/lib/wemob-store";
 export default async function CheckoutSuccessPage({
   searchParams,
 }: {
-  searchParams: Promise<{ order?: string }>;
+  searchParams: Promise<{ order?: string; t?: string }>;
 }) {
-  const { order: orderId } = await searchParams;
-  if (!orderId) notFound();
+  const { order: orderId, t: viewToken } = await searchParams;
+  if (!orderId || !viewToken) notFound();
 
-  const order = await getOrder(orderId);
+  // `getOrder` returns the customer-facing tracking shape + the view token
+  // stored at checkout. Mismatched or missing tokens fall through to 404 so
+  // a scraper with just the UUID can't read another customer's order.
+  const order = await getOrder(orderId, viewToken);
   if (!order) notFound();
 
   return (

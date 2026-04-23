@@ -46,26 +46,29 @@ export async function POST(req: NextRequest) {
 
   // Read the client IP for rate limiting. x-forwarded-for is the canonical
   // upstream header (Caddy / Vercel / Cloudflare all set it). We only use
-  // the first hop — the rest are proxy chains.
+  // the first hop — the rest are proxy chains. If no IP can be resolved,
+  // reject the write rather than silently bypass the rate limit — a client
+  // that strips both headers would otherwise have unlimited write access.
   const ip =
-    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
-    req.headers.get("x-real-ip") ??
-    null;
+    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+    req.headers.get("x-real-ip")?.trim() ||
+    "";
+  if (!ip) {
+    return NextResponse.json({ error: "ip_unresolved" }, { status: 400 });
+  }
 
-  if (ip) {
-    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
-    const [{ count: recentCount }] = await db
-      .select({ count: sql<number>`count(*)::int` })
-      .from(schema.contactMessages)
-      .where(
-        and(
-          eq(schema.contactMessages.ipAddress, ip),
-          gte(schema.contactMessages.createdAt, oneHourAgo),
-        ),
-      );
-    if (Number(recentCount) >= MESSAGES_PER_IP_PER_HOUR) {
-      return NextResponse.json({ error: "rate_limited" }, { status: 429 });
-    }
+  const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+  const [{ count: recentCount }] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(schema.contactMessages)
+    .where(
+      and(
+        eq(schema.contactMessages.ipAddress, ip),
+        gte(schema.contactMessages.createdAt, oneHourAgo),
+      ),
+    );
+  if (Number(recentCount) >= MESSAGES_PER_IP_PER_HOUR) {
+    return NextResponse.json({ error: "rate_limited" }, { status: 429 });
   }
 
   await db.insert(schema.contactMessages).values({
@@ -74,7 +77,7 @@ export async function POST(req: NextRequest) {
     subject: subject || null,
     body: message,
     status: "new",
-    ipAddress: ip ?? undefined,
+    ipAddress: ip,
   });
 
   return NextResponse.json({ ok: true });

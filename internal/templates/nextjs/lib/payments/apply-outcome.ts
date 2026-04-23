@@ -48,7 +48,7 @@ export async function applyPaymentOutcome(input: PaymentOutcome): Promise<void> 
   const nextOrderStatus =
     input.status === "paid" ? "processing" : "cancelled";
 
-  await db
+  const updated = await db
     .update(schema.orders)
     .set({
       paymentStatus: input.status,
@@ -63,7 +63,14 @@ export async function applyPaymentOutcome(input: PaymentOutcome): Promise<void> 
         // order between our SELECT and UPDATE.
         eq(schema.orders.paymentStatus, "pending"),
       ),
-    );
+    )
+    .returning({ id: schema.orders.id });
+
+  // If the CAS UPDATE affected 0 rows, another concurrent webhook won the
+  // race and already committed a terminal status. Bail without doing the
+  // downstream side-effects (discount increment, cart delete, inventory
+  // restore) or the concurrent writer's side-effects get duplicated.
+  if (updated.length === 0) return;
 
   if (
     input.status === "paid" &&
@@ -86,6 +93,31 @@ export async function applyPaymentOutcome(input: PaymentOutcome): Promise<void> 
     const cartId = (order.metadata as Record<string, unknown> | null)?.cartId;
     if (typeof cartId === "string" && cartId) {
       await db.delete(schema.carts).where(eq(schema.carts.id, cartId));
+    }
+  }
+
+  if (input.status === "failed") {
+    // Restore inventory reserved at checkout init for tracked products so a
+    // cancelled/failed payment doesn't permanently drain stock. A repeat
+    // checkout with the same cart would otherwise decrement inventory a
+    // second time. Untracked products are a no-op (decrement was a
+    // CASE-WHEN noop too). Best-effort: a DB error here leaves stock short
+    // and is treated as a failure path we've already committed to.
+    const items = await db
+      .select({
+        productId: schema.orderItems.productId,
+        quantity: schema.orderItems.quantity,
+      })
+      .from(schema.orderItems)
+      .where(eq(schema.orderItems.orderId, input.orderId));
+    for (const item of items) {
+      await db
+        .update(schema.products)
+        .set({
+          inventory: sql`CASE WHEN ${schema.products.trackInventory} THEN ${schema.products.inventory} + ${item.quantity} ELSE ${schema.products.inventory} END`,
+          updatedAt: new Date(),
+        })
+        .where(eq(schema.products.id, item.productId));
     }
   }
 }

@@ -30,7 +30,11 @@ export function ProductCard({ product, onQuickAdd }: ProductCardProps) {
       if (onQuickAdd) {
         onQuickAdd();
       } else {
-        await addItem(product.id, 1);
+        await addItem(product.id, 1, {
+          name: product.name,
+          image: image ?? "",
+          priceInCents: product.price_in_cents,
+        });
       }
       setAddedToCart(true);
       setTimeout(() => setAddedToCart(false), 1500);

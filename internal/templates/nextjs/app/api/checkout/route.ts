@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
+import { randomUUID } from "crypto";
 import { and, eq, isNull, or, gte, sql } from "drizzle-orm";
 import { db, schema } from "@/lib/db";
 import { resolveDiscountById } from "@/lib/discounts";
@@ -18,10 +19,33 @@ type CheckoutBody = {
   billingAddress?: Record<string, unknown>;
 };
 
+// Collision-resistant order numbers. Math.random() collisions over a short
+// window were possible on the previous 4-char base36 suffix and could crash
+// checkout with a UNIQUE violation mid-flow.
 function generateOrderNumber(): string {
   const ts = Date.now().toString(36).toUpperCase();
-  const rand = Math.random().toString(36).slice(2, 6).toUpperCase();
+  const rand = randomUUID().replace(/-/g, "").slice(0, 8).toUpperCase();
   return `W-${ts}-${rand}`;
+}
+
+function resolveClientIp(req: NextRequest): string {
+  const fwd = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
+  if (fwd) return fwd;
+  return req.headers.get("x-real-ip")?.trim() ?? "";
+}
+
+// Shared with /api/reviews: lowercase + strip plus-addressing so mixed-case
+// and `user+tag` variants of the same mailbox compare equal for the
+// verified-purchase lookup.
+function normalizeEmail(raw: string): string {
+  const email = raw.trim().toLowerCase();
+  const at = email.lastIndexOf("@");
+  if (at < 1) return email;
+  const local = email.slice(0, at);
+  const domain = email.slice(at + 1);
+  const plus = local.indexOf("+");
+  const baseLocal = plus >= 0 ? local.slice(0, plus) : local;
+  return `${baseLocal}@${domain}`;
 }
 
 export async function POST(req: NextRequest) {
@@ -29,6 +53,12 @@ export async function POST(req: NextRequest) {
   if (!body.provider || !body.email || !body.shippingAddress) {
     return NextResponse.json({ error: "missing_fields" }, { status: 400 });
   }
+
+  // Match the normalization used in /api/reviews so the verified-purchase
+  // check finds orders for a customer who paid as `Buyer+tag@gmail.com` and
+  // reviews as `buyer@gmail.com` (or vice versa). Lowercase + plus-strip;
+  // both sides land on the same canonical form.
+  const normalizedEmail = normalizeEmail(body.email);
 
   const jar = await cookies();
   const sessionId = jar.get(CART_SESSION_COOKIE)?.value;
@@ -49,6 +79,8 @@ export async function POST(req: NextRequest) {
       priceAtAddCents: schema.cartItems.priceAtAddCents,
       productId: schema.cartItems.productId,
       productName: schema.products.name,
+      productStatus: schema.products.status,
+      productDeletedAt: schema.products.deletedAt,
       trackInventory: schema.products.trackInventory,
       inventory: schema.products.inventory,
     })
@@ -57,6 +89,20 @@ export async function POST(req: NextRequest) {
     .where(eq(schema.cartItems.cartId, cart.id));
 
   if (items.length === 0) return NextResponse.json({ error: "empty_cart" }, { status: 400 });
+
+  // Reject the checkout if any line item points at a product the merchant
+  // archived or soft-deleted since it was added to the cart. Surfacing this
+  // as a distinct error lets the client prompt the user to remove it rather
+  // than present a misleading "insufficient stock" message.
+  const unavailable = items.find(
+    (i) => i.productDeletedAt !== null || i.productStatus !== "active",
+  );
+  if (unavailable) {
+    return NextResponse.json(
+      { error: "product_unavailable", productName: unavailable.productName },
+      { status: 409 },
+    );
+  }
 
   for (const item of items) {
     if (item.quantity <= 0) {
@@ -137,40 +183,61 @@ export async function POST(req: NextRequest) {
   }
 
   // --- Order + line items -----------------------------------------------
+  //
+  // neon-http has no interactive transactions (only db.batch, which can't
+  // chain results — the order.id is needed for the order_items inserts), so
+  // we can't atomically combine inventory decrement + order insert. The
+  // window for orphaned reserved stock is squeezed as small as possible
+  // here: we catch any throw from the order/items inserts and compensate
+  // the inventory decrement before bubbling the error.
   const orderNumber = generateOrderNumber();
-  const [order] = await db
-    .insert(schema.orders)
-    .values({
-      orderNumber,
-      customerEmail: body.email,
-      customerName: body.name,
-      shippingAddress: body.shippingAddress as unknown as Record<string, unknown>,
-      billingAddress: (body.billingAddress ?? body.shippingAddress) as unknown as Record<string, unknown>,
-      subtotalCents: subtotal,
-      discountCents,
-      taxCents,
-      shippingCents,
-      totalCents,
-      currency: cfg.currency,
-      status: "pending",
-      paymentStatus: "pending",
-      paymentProvider: body.provider,
-      discountId: cart.discountId,
-      // Stash cartId so applyPaymentOutcome can drop the cart after a
-      // successful async payment without needing cookie access in the webhook.
-      metadata: { cartId: cart.id },
-    })
-    .returning();
+  // viewToken scopes /checkout/success and /checkout/cancel to the customer
+  // who just paid — without it, anyone guessing or scraping an order UUID
+  // could read another customer's name, email, address, and line items.
+  const viewToken = randomUUID();
+  let order: typeof schema.orders.$inferSelect;
+  try {
+    const [inserted] = await db
+      .insert(schema.orders)
+      .values({
+        orderNumber,
+        customerEmail: normalizedEmail,
+        customerName: body.name,
+        shippingAddress: body.shippingAddress as unknown as Record<string, unknown>,
+        billingAddress: (body.billingAddress ?? body.shippingAddress) as unknown as Record<string, unknown>,
+        subtotalCents: subtotal,
+        discountCents,
+        taxCents,
+        shippingCents,
+        totalCents,
+        currency: cfg.currency,
+        status: "pending",
+        paymentStatus: "pending",
+        paymentProvider: body.provider,
+        discountId: cart.discountId,
+        // cartId: applyPaymentOutcome drops the cart on pending→paid.
+        // viewToken: gates /checkout/success + /checkout/cancel against IDOR.
+        metadata: { cartId: cart.id, viewToken },
+      })
+      .returning();
+    order = inserted;
 
-  for (const item of items) {
-    await db.insert(schema.orderItems).values({
-      orderId: order.id,
-      productId: item.productId,
-      productName: item.productName,
-      quantity: item.quantity,
-      priceInCents: Number(item.priceAtAddCents),
-      totalCents: Number(item.priceAtAddCents) * item.quantity,
-    });
+    for (const item of items) {
+      await db.insert(schema.orderItems).values({
+        orderId: order.id,
+        productId: item.productId,
+        productName: item.productName,
+        quantity: item.quantity,
+        priceInCents: Number(item.priceAtAddCents),
+        totalCents: Number(item.priceAtAddCents) * item.quantity,
+      });
+    }
+  } catch (err) {
+    await compensateInventory(decrementedTrackedIds);
+    return NextResponse.json(
+      { error: "order_insert_failed", message: (err as Error).message },
+      { status: 500 },
+    );
   }
 
   // discounts.used_count used to be incremented here; it now moves to the
@@ -178,10 +245,11 @@ export async function POST(req: NextRequest) {
   // drain the coupon. See lib/payments/apply-outcome.ts.
 
   // --- Payment session --------------------------------------------------
+  const clientIp = resolveClientIp(req);
   let result;
   try {
     const adapter = getAdapter(body.provider);
-    result = await adapter.createSession(order, cfg);
+    result = await adapter.createSession(order, cfg, { clientIp });
   } catch (err) {
     // Adapter failed — cancel the order and put inventory back so the
     // customer can retry without leaking stock.
@@ -220,7 +288,7 @@ export async function POST(req: NextRequest) {
     await db.delete(schema.carts).where(eq(schema.carts.id, cart.id));
   }
 
-  return NextResponse.json({ orderId: order.id, ...result });
+  return NextResponse.json({ orderId: order.id, viewToken, ...result });
 }
 
 async function compensateInventory(

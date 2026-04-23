@@ -23,7 +23,11 @@ export function ProductDetailActions({ product }: ProductDetailActionsProps) {
     if (outOfStock) return;
     setIsAdding(true);
     try {
-      await addItem(product.id, quantity);
+      await addItem(product.id, quantity, {
+        name: product.name,
+        image: product.images?.[0] ?? "",
+        priceInCents: product.price_in_cents,
+      });
       setAddedToCart(true);
       setTimeout(() => setAddedToCart(false), 2000);
     } catch {
@@ -110,7 +114,7 @@ export function ProductDetailActions({ product }: ProductDetailActionsProps) {
             <p>{product.description || "No description available."}</p>
           ) : (
             <div className="space-y-2">
-              <p>Free standard shipping on orders over $50. Express shipping available at checkout.</p>
+              <p>{{t.freeShippingExpress}}</p>
               <p>{{t.returnsPolicy30d}}</p>
             </div>
           )}

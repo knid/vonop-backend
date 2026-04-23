@@ -18,6 +18,20 @@ const MAX_TITLE_LEN = 200;
 const MAX_NAME_LEN = 100;
 const REVIEWS_PER_EMAIL_PER_DAY = 5;
 
+// Fold plus-addressing and subdomain noise so `buyer@gmail.com`, `Buyer@gmail.com`,
+// and `buyer+r@gmail.com` all count as the same identity for verified-purchase
+// and rate-limit purposes. Leaves unrecognized formats alone.
+function normalizeEmail(raw: string): string {
+  const email = raw.trim().toLowerCase();
+  const at = email.lastIndexOf("@");
+  if (at < 1) return email;
+  const local = email.slice(0, at);
+  const domain = email.slice(at + 1);
+  const plus = local.indexOf("+");
+  const baseLocal = plus >= 0 ? local.slice(0, plus) : local;
+  return `${baseLocal}@${domain}`;
+}
+
 // POST /api/reviews — submit a review for a product identified by slug.
 // Accepts the snake_case shape the existing client sends.
 //
@@ -32,16 +46,16 @@ export async function POST(req: NextRequest) {
 
   const slug = body.slug?.trim();
   const customerName = body.customer_name?.trim();
-  const customerEmail = body.customer_email?.trim().toLowerCase();
+  const rawEmail = body.customer_email?.trim().toLowerCase();
   const rating = body.rating;
 
-  if (!slug || !customerName || !customerEmail || typeof rating !== "number") {
+  if (!slug || !customerName || !rawEmail || typeof rating !== "number") {
     return NextResponse.json({ error: "missing_fields" }, { status: 400 });
   }
   if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
     return NextResponse.json({ error: "invalid_rating" }, { status: 400 });
   }
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customerEmail)) {
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(rawEmail)) {
     return NextResponse.json({ error: "invalid_email" }, { status: 400 });
   }
   if (
@@ -50,6 +64,27 @@ export async function POST(req: NextRequest) {
     (body.body && body.body.length > MAX_BODY_LEN)
   ) {
     return NextResponse.json({ error: "text_too_long" }, { status: 400 });
+  }
+
+  // Normalized form is what we store + compare against so plus-addressing
+  // tricks (`buyer+r1@...`, `buyer+r2@...`) can't dodge the rate limit or
+  // the already-reviewed gate.
+  const customerEmail = normalizeEmail(rawEmail);
+
+  // Rate limit first so repeat hammering on already-reviewed products can't
+  // spin up unlimited DB work before the 409 short-circuit below.
+  const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  const [{ count: recentCount }] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(schema.productReviews)
+    .where(
+      and(
+        eq(schema.productReviews.customerEmail, customerEmail),
+        gte(schema.productReviews.createdAt, oneDayAgo),
+      ),
+    );
+  if (Number(recentCount) >= REVIEWS_PER_EMAIL_PER_DAY) {
+    return NextResponse.json({ error: "rate_limited" }, { status: 429 });
   }
 
   const [product] = await db
@@ -79,22 +114,6 @@ export async function POST(req: NextRequest) {
     );
   if (existing) {
     return NextResponse.json({ error: "already_reviewed" }, { status: 409 });
-  }
-
-  // Rate limit: cap reviews-per-email across ALL products in the last day.
-  // Cheap enough to run inline via a count query; no extra infra required.
-  const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
-  const [{ count: recentCount }] = await db
-    .select({ count: sql<number>`count(*)::int` })
-    .from(schema.productReviews)
-    .where(
-      and(
-        eq(schema.productReviews.customerEmail, customerEmail),
-        gte(schema.productReviews.createdAt, oneDayAgo),
-      ),
-    );
-  if (Number(recentCount) >= REVIEWS_PER_EMAIL_PER_DAY) {
-    return NextResponse.json({ error: "rate_limited" }, { status: 429 });
   }
 
   // Verified purchase: does this email have a paid order containing this
