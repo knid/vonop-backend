@@ -289,17 +289,13 @@ func (v *HttpViews) GetDashboardData(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var integration *models.AppIntegration
-	if dashboard.Provider != "platform" {
-		integration, err = v.getDBIntegration(project, dashboard.Provider)
-		if err != nil {
-			utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
-			return
-		}
+	integration, err := v.getDBIntegration(project, dashboard.Provider)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
 	}
 
-	storeID := v.resolveStoreID(project)
-	results := v.Controller.QueryAllPanels(dashboard, panels, integration, storeID)
+	results := v.Controller.QueryAllPanels(dashboard, panels, integration)
 	utils.JSONResponse(w, responses.DashboardDataResponse{Panels: results}, http.StatusOK)
 }
 
@@ -336,17 +332,13 @@ func (v *HttpViews) GetPanelData(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var integration *models.AppIntegration
-	if dashboard.Provider != "platform" {
-		integration, err = v.getDBIntegration(project, dashboard.Provider)
-		if err != nil {
-			utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
-			return
-		}
+	integration, err := v.getDBIntegration(project, dashboard.Provider)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
 	}
 
-	storeID := v.resolveStoreID(project)
-	result := v.Controller.QueryPanel(dashboard, panel, integration, storeID)
+	result := v.Controller.QueryPanel(dashboard, panel, integration)
 	utils.JSONResponse(w, result, http.StatusOK)
 }
 
@@ -505,13 +497,10 @@ func (v *HttpViews) UpdatePanelCell(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var integration *models.AppIntegration
-	if dashboard.Provider != "platform" {
-		integration, err = v.getDBIntegration(project, dashboard.Provider)
-		if err != nil {
-			utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
-			return
-		}
+	integration, err := v.getDBIntegration(project, dashboard.Provider)
+	if err != nil {
+		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
 	}
 
 	// Resolve column aliases from the panel's SQL query so the UPDATE targets the real column
@@ -531,8 +520,7 @@ func (v *HttpViews) UpdatePanelCell(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	storeID := v.resolveStoreID(project)
-	if err := v.Controller.UpdateCell(dashboard, integration, resolvedTable, resolvedColumn, req.Value, req.PrimaryKey, storeID); err != nil {
+	if err := v.Controller.UpdateCell(dashboard, integration, resolvedTable, resolvedColumn, req.Value, req.PrimaryKey); err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -552,16 +540,6 @@ func (v *HttpViews) getDBIntegration(project *models.AppProject, provider string
 		return nil, fmt.Errorf("database integration not found")
 	}
 	return integration, nil
-}
-
-// resolveStoreID looks up the e-commerce store for a project.
-// Returns the store ID string, or empty string if no store exists (non-ecommerce apps).
-func (v *HttpViews) resolveStoreID(project *models.AppProject) string {
-	store, err := v.Controller.DB.GetStoreByAppProjectID(project.ID.String())
-	if err != nil || store == nil {
-		return ""
-	}
-	return store.ID.String()
 }
 
 func buildDashboardViewResponse(d *models.AppDashboard, panels []models.AppDashboardPanel) responses.DashboardResponse {
