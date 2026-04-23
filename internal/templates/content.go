@@ -391,7 +391,6 @@ export const metadata: Metadata = {
     default: "%s",
     template: "%%s | %s",
   },
-  description: "Welcome to %s — browse our collection and find what you love.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -408,7 +407,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     </html>
   );
 }
-`, fontImports, fontConstructors, storeName, storeName, storeName, lang, bodyClassName)
+`, fontImports, fontConstructors, storeName, storeName, lang, bodyClassName)
 }
 
 // GetContent returns the hardcoded content for a template file.

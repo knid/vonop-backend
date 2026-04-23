@@ -21,6 +21,13 @@ async function ensureCart(sessionId: string) {
   return cart;
 }
 
+// 30 days. Without maxAge the cookie is a session cookie and some browsers
+// (iOS Safari evicting backgrounded tabs, private-mode quirks, full browser
+// restarts) drop it even between simple refreshes — the cart then appears
+// empty on reload because the server can't resolve the caller back to a
+// cart row.
+const CART_SESSION_MAX_AGE = 60 * 60 * 24 * 30;
+
 async function getOrSetSession(): Promise<string> {
   const jar = await cookies();
   let sid = jar.get(CART_SESSION_COOKIE)?.value;
@@ -30,6 +37,7 @@ async function getOrSetSession(): Promise<string> {
       httpOnly: true,
       sameSite: "lax",
       path: "/",
+      maxAge: CART_SESSION_MAX_AGE,
     });
   }
   return sid;

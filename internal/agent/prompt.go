@@ -128,7 +128,9 @@ you emit in one turn and feeds the results back together. One round-trip
 instead of N. Independent examples:
 - Writing 5 sibling page files (app/about/page.tsx, app/contact/page.tsx,
   app/faq/page.tsx, …) — all 5 write_file calls go in one turn.
-- Generating 8 product images — all 8 generate_image calls in one turn.
+- Generating a batch of product images — emit every generate_image call in
+  the same turn. The number of products is your call based on the store
+  concept, not a fixed quota.
 - grep for 3 different symbols you need for the next step — all 3 greps
   in one turn.
 Dependent calls MUST stay sequential: execute_sql for an INSERT, then
@@ -924,7 +926,9 @@ you emit in one turn and feeds the results back together. One round-trip
 instead of N. Independent examples:
 - Writing 5 sibling page files (app/about/page.tsx, app/contact/page.tsx,
   app/faq/page.tsx, …) — all 5 write_file calls go in one turn.
-- Generating 8 product images — all 8 generate_image calls in one turn.
+- Generating a batch of product images — emit every generate_image call in
+  the same turn. The number of products is your call based on the store
+  concept, not a fixed quota.
 - grep for 3 different symbols you need for the next step — all 3 greps
   in one turn.
 Dependent calls MUST stay sequential: execute_sql for an INSERT, then

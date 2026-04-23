@@ -6,6 +6,10 @@ import { db, schema } from "@/lib/db";
 
 const CART_SESSION_COOKIE = "wemob_cart_session";
 
+// 30 days — shared lifetime with the cart session cookie set by
+// /api/cart so a returning visitor sees both cart and wishlist intact.
+const CART_SESSION_MAX_AGE = 60 * 60 * 24 * 30;
+
 async function ensureSession(): Promise<string> {
   const jar = await cookies();
   let sid = jar.get(CART_SESSION_COOKIE)?.value;
@@ -15,6 +19,7 @@ async function ensureSession(): Promise<string> {
       httpOnly: true,
       sameSite: "lax",
       path: "/",
+      maxAge: CART_SESSION_MAX_AGE,
     });
   }
   return sid;
