@@ -40,43 +40,6 @@ const API_URL = process.env.NEXT_PUBLIC_WEMOB_API_URL || "";
 const STORE_ID = process.env.NEXT_PUBLIC_STORE_ID || "";
 
 // ---------------------------------------------------------------------------
-// Types — client-only (write flows, kept here because no server code needs them)
-// ---------------------------------------------------------------------------
-
-export interface StorefrontCheckout {
-  order_id: string;
-  order_number: string;
-  total_cents: number;
-  currency: string;
-  payment_url?: string;
-  client_secret?: string;
-}
-
-export interface CheckoutConfirm {
-  order_id: string;
-  order_number: string;
-  status: string;
-}
-
-export interface ShippingAddress {
-  line1: string;
-  line2?: string;
-  city: string;
-  state: string;
-  postal_code: string;
-  country: string;
-}
-
-export interface CheckoutParams {
-  sessionId: string;
-  customerEmail: string;
-  customerName: string;
-  shippingAddress: ShippingAddress;
-  billingAddress?: ShippingAddress;
-  paymentProvider: string;
-}
-
-// ---------------------------------------------------------------------------
 // API Fetch Helper
 // ---------------------------------------------------------------------------
 
@@ -236,82 +199,20 @@ export async function removeDiscount(sessionId: string): Promise<StorefrontCart>
 }
 
 // ---------------------------------------------------------------------------
-// Checkout API
+// Checkout
+//
+// The checkout submit flow now POSTs directly to the local /api/checkout
+// route handler, which creates the order row server-side (using the Neon DB)
+// and invokes the selected payment adapter. The form calls fetch() inline
+// rather than going through a helper here — the response shape is tied to
+// `CheckoutResult` in lib/payments/index.ts (a server-only module we can't
+// import from the client-side SDK), so colocating the type with its one
+// caller keeps this file provider-neutral.
+//
+// Order reads (success/cancel pages) go through `getOrder` in
+// wemob-store-server.ts — not re-exported here since client components
+// shouldn't read orders directly.
 // ---------------------------------------------------------------------------
-
-/** Create a checkout session. Returns payment info for redirect or form rendering. */
-export async function checkout(params: CheckoutParams): Promise<StorefrontCheckout> {
-  return apiFetch<StorefrontCheckout>("/checkout", {
-    method: "POST",
-    body: JSON.stringify({
-      session_id: params.sessionId,
-      customer_email: params.customerEmail,
-      customer_name: params.customerName,
-      shipping_address: params.shippingAddress,
-      billing_address: params.billingAddress,
-      payment_provider: params.paymentProvider,
-    }),
-  });
-}
-
-/** Confirm payment after redirect. */
-export async function confirmCheckout(
-  orderId: string,
-  paymentId: string
-): Promise<CheckoutConfirm> {
-  return apiFetch<CheckoutConfirm>("/checkout/confirm", {
-    method: "POST",
-    body: JSON.stringify({ order_id: orderId, payment_id: paymentId }),
-  });
-}
-
-// ---------------------------------------------------------------------------
-// Order Tracking
-// ---------------------------------------------------------------------------
-
-/** Fetch order details for tracking / confirmation page. */
-export async function getOrder(orderId: string): Promise<OrderTracking> {
-  return apiFetch<OrderTracking>("/orders/" + orderId);
-}
-
-// ---------------------------------------------------------------------------
-// Payment Form Helper (Iyzico)
-// ---------------------------------------------------------------------------
-
-/**
- * Safely render an Iyzico checkout form (HTML string with embedded scripts)
- * into a container element. Uses DOMParser for safe HTML parsing, then
- * re-executes script tags so the Iyzico JS runs correctly.
- */
-export function renderPaymentForm(container: HTMLElement, htmlContent: string): void {
-  // Clear previous content safely
-  while (container.firstChild) {
-    container.removeChild(container.firstChild);
-  }
-
-  // Parse HTML safely via DOMParser
-  const parser = new DOMParser();
-  const doc = parser.parseFromString(htmlContent, "text/html");
-
-  // Adopt nodes into the current document
-  const fragment = document.createDocumentFragment();
-  Array.from(doc.body.childNodes).forEach((node) => {
-    const adopted = document.adoptNode(node);
-    fragment.appendChild(adopted);
-  });
-  container.appendChild(fragment);
-
-  // Re-execute script tags (adopted scripts don't execute automatically)
-  const scripts = container.querySelectorAll("script");
-  scripts.forEach((oldScript) => {
-    const newScript = document.createElement("script");
-    Array.from(oldScript.attributes).forEach((attr) => {
-      newScript.setAttribute(attr.name, attr.value);
-    });
-    newScript.textContent = oldScript.textContent;
-    oldScript.parentNode?.replaceChild(newScript, oldScript);
-  });
-}
 
 // ---------------------------------------------------------------------------
 // Price Utilities
@@ -471,7 +372,6 @@ interface CartContextValue {
   removeItem: (itemId: string) => Promise<void>;
   applyDiscount: (code: string) => Promise<void>;
   removeDiscountCode: () => Promise<void>;
-  checkout: (params: CheckoutParams) => Promise<StorefrontCheckout>;
   clearCart: () => void;
 }
 
@@ -659,33 +559,6 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     []
   );
 
-  const handleCheckout = React.useCallback(
-    async (params: CheckoutParams): Promise<StorefrontCheckout> => {
-      const result = await checkout({
-        ...params,
-        sessionId: params.sessionId || sessionIdRef.current,
-      });
-
-      // Auto-redirect to hosted payment page (Stripe) when available
-      if (result.payment_url && isBrowser()) {
-        window.location.href = result.payment_url;
-        return result;
-      }
-
-      // Iyzico: client_secret contains checkout form HTML — don't redirect,
-      // let the caller render it via renderPaymentForm().
-
-      // No payment provider (COD / manual): clear cart, return result for confirmation page
-      if (!result.payment_url && !result.client_secret) {
-        setCart(null);
-        clearCartCache();
-      }
-
-      return result;
-    },
-    []
-  );
-
   const handleClearCart = React.useCallback(() => {
     setCart(null);
     clearCartCache();
@@ -702,7 +575,6 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       removeItem: handleRemoveItem,
       applyDiscount: handleApplyDiscount,
       removeDiscountCode: handleRemoveDiscount,
-      checkout: handleCheckout,
       clearCart: handleClearCart,
     }),
     [
@@ -714,7 +586,6 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       handleRemoveItem,
       handleApplyDiscount,
       handleRemoveDiscount,
-      handleCheckout,
       handleClearCart,
     ]
   );
