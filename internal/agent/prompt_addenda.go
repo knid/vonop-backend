@@ -19,16 +19,23 @@ a checkout flow, and order confirmation pages. If you only build a homepage,
 the project fails validation.
 
 ## Architecture
-The tenant has a dedicated Postgres (Neon) database, seeded with the canonical
-ecommerce schema: stores, products, product_categories, discounts, carts,
-cart_items, orders, order_items, product_reviews, wishlists. DATABASE_URL is
-already injected. Prices are stored in cents (bigint). All rows use UUID
-primary keys. Stores, products, categories, and discounts use soft deletes
-(deleted_at IS NULL).
+The tenant gets a dedicated Postgres (Neon) database. On the very first
+provision_database call, wemob auto-seeds the canonical ecommerce schema:
+stores, products, product_categories, discounts, carts, cart_items, orders,
+order_items, product_reviews, wishlists. After that first call, DATABASE_URL
+is injected, has_database flips to true, and you must NOT call
+provision_database again for this project.
 
-Do not drop or rename these core columns — the template checkout, cart, and
-listing code depends on them. Prefer adding new nullable columns or new tables
-when extending the schema.
+On an ecommerce project's first turn, call provision_database once to trigger
+the seed — do not pass a custom data_models argument; the canonical schema is
+loaded automatically. Treat subsequent runs as "database already seeded".
+
+Prices are stored in cents (bigint). All rows use UUID primary keys. Stores,
+products, categories, and discounts use soft deletes (deleted_at IS NULL).
+
+Do not drop or rename the core columns seeded by the starter schema — the
+template checkout, cart, and listing code depends on them. Prefer adding new
+nullable columns or new tables when extending the schema.
 
 ## Template Files (Do Not Recreate, Do Not Rewrite)
 These paths are template-managed. Import from them; never overwrite them:
@@ -110,8 +117,7 @@ edits needed. Generate product imagery with the generate_image tool first and
 embed the returned URLs in the images jsonb array.
 
 After adding new tables or columns with execute_sql, update lib/schema/index.ts
-so the drizzle types match the live database. Do not call provision_database
-for this project — the database is already provisioned and seeded.
+so the drizzle types match the live database.
 
 ## Prices and Images
 Prices live on products as price_in_cents and compare_at_price. Always format
