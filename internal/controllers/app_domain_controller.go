@@ -14,16 +14,24 @@ import (
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/utils"
+	"golang.org/x/net/publicsuffix"
 )
 
 // domainRegex validates domain format: labels separated by dots, TLD at least 2 chars.
 var domainRegex = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)*\.[a-zA-Z]{2,}$`)
 
-// isApexDomain returns true if the domain is a root/apex domain (e.g. "example.com")
-// as opposed to a subdomain (e.g. "www.example.com"). Apex domains cannot use CNAME records.
+// isApexDomain returns true if the domain is a root/apex domain (e.g. "example.com"
+// or "example.co.uk") as opposed to a subdomain (e.g. "www.example.com"). Uses the
+// Public Suffix List so multi-part TLDs are handled correctly — "example.co.uk" is
+// apex, "www.example.co.uk" is not. Falls back to a 2-label check if PSL lookup
+// fails (e.g. unregistered TLD).
 func isApexDomain(domain string) bool {
-	parts := strings.Split(domain, ".")
-	return len(parts) == 2
+	domain = strings.ToLower(strings.TrimSuffix(domain, "."))
+	etldPlusOne, err := publicsuffix.EffectiveTLDPlusOne(domain)
+	if err != nil {
+		return strings.Count(domain, ".") == 1
+	}
+	return domain == etldPlusOne
 }
 
 // resolveTargetIPs resolves the IPs that our CNAME target points to.
