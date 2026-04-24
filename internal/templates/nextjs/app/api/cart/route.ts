@@ -33,20 +33,24 @@ async function ensureCart(sessionId: string) {
 // cart row.
 const CART_SESSION_MAX_AGE = 60 * 60 * 24 * 30;
 
-async function getOrSetSession(): Promise<string> {
+// Read-or-mint the session id. Setting the cookie is deferred to the
+// response via stampSession() below — relying on cookies().set() inside a
+// Route Handler leaves the actual Set-Cookie header up to Next's implicit
+// merge, which has silently failed in prod builds (Add-to-cart succeeds,
+// cookie never reaches the browser, refresh shows an empty cart).
+async function resolveSessionId(): Promise<string> {
   const jar = await cookies();
-  let sid = jar.get(CART_SESSION_COOKIE)?.value;
-  if (!sid) {
-    sid = randomUUID();
-    jar.set(CART_SESSION_COOKIE, sid, {
-      httpOnly: true,
-      sameSite: "lax",
-      secure: IS_PROD,
-      path: "/",
-      maxAge: CART_SESSION_MAX_AGE,
-    });
-  }
-  return sid;
+  return jar.get(CART_SESSION_COOKIE)?.value ?? randomUUID();
+}
+
+function stampSession(response: NextResponse, sid: string): void {
+  response.cookies.set(CART_SESSION_COOKIE, sid, {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: IS_PROD,
+    path: "/",
+    maxAge: CART_SESSION_MAX_AGE,
+  });
 }
 
 // GET /api/cart — returns the current cart + items for the cookie session
@@ -73,8 +77,7 @@ export async function POST(req: NextRequest) {
   }
   const qty = body.quantity ?? 1;
 
-  const sid = await getOrSetSession();
-  const cart = await ensureCart(sid);
+  const sid = await resolveSessionId();
 
   const [product] = await db
     .select()
@@ -89,9 +92,17 @@ export async function POST(req: NextRequest) {
   if (!product) {
     // Covers unknown id, archived (status !== "active") and soft-deleted —
     // merging them is fine because the customer sees the same "that product
-    // isn't available" story either way.
-    return NextResponse.json({ error: "product_not_found" }, { status: 404 });
+    // isn't available" story either way. Stamp the cookie anyway so the next
+    // attempt against a valid product doesn't need to bootstrap from zero.
+    const response = NextResponse.json(
+      { error: "product_not_found" },
+      { status: 404 },
+    );
+    stampSession(response, sid);
+    return response;
   }
+
+  const cart = await ensureCart(sid);
 
   // Merge with existing line item if present.
   const [existing] = await db
@@ -119,5 +130,10 @@ export async function POST(req: NextRequest) {
   }
 
   const refreshed = await getCartServer(sid);
-  return NextResponse.json(refreshed);
+  const response = NextResponse.json(refreshed);
+  // Stamp on every POST — re-affirming the cookie extends maxAge for
+  // returning visitors, and is the only path that guarantees Set-Cookie
+  // actually lands in the response when the session is new.
+  stampSession(response, sid);
+  return response;
 }

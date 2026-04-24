@@ -11,20 +11,24 @@ const CART_SESSION_COOKIE = "wemob_cart_session";
 const CART_SESSION_MAX_AGE = 60 * 60 * 24 * 30;
 const IS_PROD = process.env.NODE_ENV === "production";
 
-async function ensureSession(): Promise<string> {
+// Read-or-mint the session id. Setting the cookie is deferred to the
+// response via stampSession() below — relying on cookies().set() inside a
+// Route Handler leaves the Set-Cookie header up to Next's implicit merge,
+// which has silently failed in prod builds. See app/api/cart/route.ts for
+// the full rationale; keep both files in sync.
+async function resolveSessionId(): Promise<string> {
   const jar = await cookies();
-  let sid = jar.get(CART_SESSION_COOKIE)?.value;
-  if (!sid) {
-    sid = randomUUID();
-    jar.set(CART_SESSION_COOKIE, sid, {
-      httpOnly: true,
-      sameSite: "lax",
-      secure: IS_PROD,
-      path: "/",
-      maxAge: CART_SESSION_MAX_AGE,
-    });
-  }
-  return sid;
+  return jar.get(CART_SESSION_COOKIE)?.value ?? randomUUID();
+}
+
+function stampSession(response: NextResponse, sid: string): void {
+  response.cookies.set(CART_SESSION_COOKIE, sid, {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: IS_PROD,
+    path: "/",
+    maxAge: CART_SESSION_MAX_AGE,
+  });
 }
 
 // GET /api/wishlist — return wishlist items for the cookie session joined to
@@ -108,7 +112,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "product_not_found" }, { status: 404 });
   }
 
-  const sid = await ensureSession();
+  const sid = await resolveSessionId();
 
   // Idempotent add: upsert via unique (session_id, product_id).
   await db
@@ -116,5 +120,7 @@ export async function POST(req: NextRequest) {
     .values({ productId, sessionId: sid })
     .onConflictDoNothing();
 
-  return NextResponse.json({ ok: true });
+  const response = NextResponse.json({ ok: true });
+  stampSession(response, sid);
+  return response;
 }
