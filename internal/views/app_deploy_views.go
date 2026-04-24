@@ -1,6 +1,8 @@
 package views
 
 import (
+	"database/sql"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -70,6 +72,11 @@ func (v *HttpViews) DeployAppWeb(w http.ResponseWriter, r *http.Request) {
 	project, err := v.Controller.GetAppProject(appID, user)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	if existing, err := v.Controller.DB.GetBuildingAppDeployment(project.ID.String()); err == nil && existing != nil && existing.ID.String() != "" {
+		utils.JSONErrorResponse(w, "a deployment is already in progress", http.StatusConflict)
 		return
 	}
 
@@ -198,6 +205,11 @@ func (v *HttpViews) DeployAppMobile(w http.ResponseWriter, r *http.Request) {
 	project, err := v.Controller.GetAppProject(appID, user)
 	if err != nil {
 		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	if existing, err := v.Controller.DB.GetBuildingAppDeployment(project.ID.String()); err == nil && existing != nil && existing.ID.String() != "" {
+		utils.JSONErrorResponse(w, "a deployment is already in progress", http.StatusConflict)
 		return
 	}
 
@@ -449,7 +461,15 @@ func (v *HttpViews) GetDeployStatus(w http.ResponseWriter, r *http.Request) {
 
 	deployment, err := v.Controller.GetLatestDeploymentStatus(project.ID.String())
 	if err != nil {
-		utils.JSONErrorResponse(w, "no deployments found", http.StatusNotFound)
+		if errors.Is(err, sql.ErrNoRows) {
+			utils.JSONResponse(w, responses.AppDeploymentResponse{
+				AppProjectID: project.ID,
+				Platform:     "web",
+				Status:       "not_deployed",
+			}, http.StatusOK)
+			return
+		}
+		utils.JSONErrorResponse(w, "failed to load deployment", http.StatusInternalServerError)
 		return
 	}
 
