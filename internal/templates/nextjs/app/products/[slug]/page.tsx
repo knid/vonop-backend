@@ -10,6 +10,11 @@ import { WishlistButton } from "@/components/ecommerce/wishlist-button";
 import { ProductCard } from "@/components/ecommerce/product-card";
 import { ProductDetailActions } from "@/components/ecommerce/product-detail-actions";
 
+// Cache the rendered HTML for 60s. Caddy (fronting the Coolify container)
+// honours the emitted s-maxage / stale-while-revalidate headers so a
+// merchant update goes live within a minute without a DB round-trip per hit.
+export const revalidate = 60;
+
 export default async function ProductDetailPage({
   params,
 }: {

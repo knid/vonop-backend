@@ -71,15 +71,22 @@ Server components + route handlers: import from '@/lib/wemob-store-server'
 getProductReviews, getWishlist).
 
 Client components ("use client"): import from '@/lib/wemob-store' (hooks
-useCart, useProducts, useProduct, useCategories, useStoreConfig, useReviews,
-useWishlist; mutation helpers addCartItem, applyDiscountCode, submitReview,
-etc.). Reads use server actions from '@/lib/wemob-storefront-actions'; writes
-POST to /api/* routes.
+useCart, useStoreConfig, useCategories, useReviews, useWishlist; mutation
+helpers addCartItem, applyDiscountCode, submitReview, etc.). All reads
+happen in Server Components — client components receive catalog data
+(products, single product) as props and read store-wide config +
+categories from useStoreConfig/useCategories, which are seeded from
+app/layout.tsx SSR with zero client round-trip. Every mutation POSTs to
+a /api/* route; do not write Server Actions ("use server") — the template
+is built around route handlers so the Origin/X-Forwarded-Host CSRF check
+never trips under the preview proxy.
 
 Do not import drizzle or '@/lib/db' in pages — route through the helpers.
-Pages that read from server helpers must export
-  export const dynamic = "force-dynamic"
-so Next.js does not cache.
+Pages that already read cookies(), params, or searchParams are dynamic
+automatically. For catalog pages that don't (product detail, category
+pages), opt into a short revalidation window with
+  export const revalidate = 60
+so Caddy serves cached HTML instead of running a Neon round-trip per hit.
 
 ## Schema / data management
 For the initial store seed (first turn), call setup_store ONCE with the

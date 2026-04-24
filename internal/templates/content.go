@@ -374,6 +374,7 @@ const %s = %s({ subsets: ["latin"], display: "swap"%s });`, headingVar, headingI
 	return fmt.Sprintf(`import type { Metadata, Viewport } from "next";
 %s
 import { Toaster } from "sonner";
+import { getStoreConfig, getCategories } from "@/lib/wemob-store-server";
 import { Providers } from "@/components/ecommerce/providers";
 import { SiteHeader } from "@/components/ecommerce/site-header";
 import { SiteFooter } from "@/components/ecommerce/site-footer";
@@ -393,11 +394,20 @@ export const metadata: Metadata = {
   },
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+// Store-wide config + category list are fetched once per request here and
+// threaded into <Providers>, which seeds a client context so every
+// descendant (SiteHeader, SiteFooter, checkout form, policy pages, etc.)
+// reads them synchronously with no client-side round-trip. Keep this a
+// Server Component — the tenant Neon driver only runs on the server.
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const [config, categories] = await Promise.all([
+    getStoreConfig(),
+    getCategories(),
+  ]);
   return (
     <html lang="%s" suppressHydrationWarning>
       <body className={`+"`"+`%s antialiased`+"`"+`}>
-        <Providers>
+        <Providers config={config} categories={categories}>
           <SiteHeader />
           <main className="min-h-screen">{children}</main>
           <SiteFooter />
@@ -437,19 +447,36 @@ func GetContentWithLang(path string, colorScheme, darkColorScheme map[string]any
 }
 
 // BuildEcommerceProviders returns the Providers component, conditionally including
-// AuthProvider wrapping when needsAuth is true.
+// AuthProvider wrapping when needsAuth is true. Both variants take the
+// server-fetched StoreConfig + category list as props and seed them into a
+// client context via <StoreProvider> — see BuildEcommerceLayout.
 func BuildEcommerceProviders(needsAuth bool) string {
 	if needsAuth {
 		return `"use client";
 
 import React from "react";
-import { CartProvider } from "@/lib/wemob-store";
+import {
+  CartProvider,
+  StoreProvider,
+  type StoreConfig,
+  type StorefrontCategory,
+} from "@/lib/wemob-store";
 import { AuthProvider } from "@/lib/wemob-auth-client";
 
-export function Providers({ children }: { children: React.ReactNode }) {
+export function Providers({
+  config,
+  categories,
+  children,
+}: {
+  config: StoreConfig;
+  categories: StorefrontCategory[];
+  children: React.ReactNode;
+}) {
   return (
     <AuthProvider>
-      <CartProvider>{children}</CartProvider>
+      <StoreProvider config={config} categories={categories}>
+        <CartProvider>{children}</CartProvider>
+      </StoreProvider>
     </AuthProvider>
   );
 }

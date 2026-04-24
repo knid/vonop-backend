@@ -5,6 +5,10 @@ import { getCategories, getProducts } from "@/lib/wemob-store-server";
 import { EmptyState } from "@/components/ecommerce/empty-state";
 import { CategoryProductsGrid } from "@/components/ecommerce/category-products-grid";
 
+// Cache the rendered HTML for 60s so Caddy serves repeat hits without a DB
+// round-trip. Catalog updates land within a minute of the admin edit.
+export const revalidate = 60;
+
 export default async function CategoryPage({
   params,
 }: {
