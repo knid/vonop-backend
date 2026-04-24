@@ -719,12 +719,14 @@ When the routing rule says Wemob AI Gateway:
    writes ` + "`lib/wemob-ai.ts`" + ` into the project, and returns the available
    models plus usage instructions you can use immediately within the same
    run. After it succeeds you import helpers with:
-   ` + "`import { chat, chatStream, generateImage } from '@/lib/wemob-ai'`" + `.
+   ` + "`import { wemobAI, generateImage } from '@/lib/wemob-ai'`" + `.
 
-3. Build the AI feature using ` + "`chat`" + ` (one-shot text), ` + "`chatStream`" + `
-   (streaming chat UI), or ` + "`generateImage`" + ` (image generation). Always
-   from server-side code — API routes, Server Actions, or Server
-   Components. NEVER from a ` + "`\"use client\"`" + ` file.
+3. Build the AI feature using
+   ` + "`wemobAI().chat.completions.create({ ... })`" + ` for one-shot or
+   streaming text (pass ` + "`stream: true`" + ` for streaming), or
+   ` + "`generateImage({ prompt })`" + ` for image generation. Always from
+   server-side code — API routes, Server Actions, or Server Components.
+   NEVER from a ` + "`\"use client\"`" + ` file.
 
 4. NEVER scaffold ` + "`OPENROUTER_API_KEY`" + `, ` + "`OPENAI_API_KEY`" + `,
    ` + "`ANTHROPIC_API_KEY`" + `, ` + "`GOOGLE_API_KEY`" + `, ` + "`FAL_KEY`" + `, or any other
@@ -1654,12 +1656,14 @@ When the routing rule says Wemob AI Gateway:
    writes ` + "`lib/wemob-ai.ts`" + ` into the project, and returns the available
    models plus usage instructions you can use immediately within the same
    run. After it succeeds you import helpers with:
-   ` + "`import { chat, chatStream, generateImage } from '@/lib/wemob-ai'`" + `.
+   ` + "`import { wemobAI, generateImage } from '@/lib/wemob-ai'`" + `.
 
-3. Build the AI feature using ` + "`chat`" + ` (one-shot text), ` + "`chatStream`" + `
-   (streaming chat UI), or ` + "`generateImage`" + ` (image generation). Always
-   from server-side code — API routes, Server Actions, or Server
-   Components. NEVER from a ` + "`\"use client\"`" + ` file.
+3. Build the AI feature using
+   ` + "`wemobAI().chat.completions.create({ ... })`" + ` for one-shot or
+   streaming text (pass ` + "`stream: true`" + ` for streaming), or
+   ` + "`generateImage({ prompt })`" + ` for image generation. Always from
+   server-side code — API routes, Server Actions, or Server Components.
+   NEVER from a ` + "`\"use client\"`" + ` file.
 
 4. NEVER scaffold ` + "`OPENROUTER_API_KEY`" + `, ` + "`OPENAI_API_KEY`" + `,
    ` + "`ANTHROPIC_API_KEY`" + `, ` + "`GOOGLE_API_KEY`" + `, ` + "`FAL_KEY`" + `, or any other

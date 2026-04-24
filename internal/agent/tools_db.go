@@ -41,8 +41,17 @@ var destructiveSQLPatterns = []*regexp.Regexp{
 }
 
 var (
-	deleteFromRe   = regexp.MustCompile(`(?i)\bdelete\s+from\b`)
-	updateSetRe    = regexp.MustCompile(`(?i)\bupdate\s+\w+\s+set\b`)
+	deleteFromRe = regexp.MustCompile(`(?i)\bdelete\s+from\b`)
+	// updateSetRe matches UPDATE ... SET across the target-table forms
+	// Postgres accepts: bare (orders), schema-qualified (public.orders),
+	// quoted ("orders", "public"."orders"), and with an alias (orders o /
+	// orders AS o). The previous `\w+` variant silently missed the
+	// qualified/quoted/aliased cases, which let UPDATE-without-WHERE
+	// bypass the destructive-SQL guard entirely.
+	// The identifier group intentionally excludes whitespace so that
+	// `INSERT ... ON CONFLICT ... DO UPDATE SET` (where `UPDATE` is
+	// immediately followed by `SET`) does not false-positive.
+	updateSetRe    = regexp.MustCompile(`(?is)\bupdate\s+(?:only\s+)?["\w.]+(?:\s+(?:as\s+)?["\w]+)?\s+set\b`)
 	whereRe        = regexp.MustCompile(`(?i)\bwhere\b`)
 	lineCommentRe  = regexp.MustCompile(`--[^\n]*`)
 	blockCommentRe = regexp.MustCompile(`(?s)/\*.*?\*/`)

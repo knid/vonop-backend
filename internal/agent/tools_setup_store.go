@@ -133,7 +133,9 @@ func (s SetupStoreTool) Execute(ctx context.Context, rc *RunContext, input json.
 		return "nothing to do: provide at least one of config, categories, products", true, nil
 	}
 
-	// Catch slug references the LLM can't resolve itself before we open a tx.
+	// In-call dedup + parent-slug sanity checks. Cross-reference validation
+	// against categories that already exist in the database happens AFTER
+	// we connect — see the pre-fetch below.
 	catSlugs := make(map[string]bool, len(args.Categories))
 	for i, c := range args.Categories {
 		if c.Slug == "" || c.Name == "" {
@@ -144,11 +146,6 @@ func (s SetupStoreTool) Execute(ctx context.Context, rc *RunContext, input json.
 		}
 		catSlugs[c.Slug] = true
 	}
-	for i, c := range args.Categories {
-		if c.ParentSlug != "" && !catSlugs[c.ParentSlug] {
-			return fmt.Sprintf("categories[%d]: parent_slug %q does not match any category in this call", i, c.ParentSlug), true, nil
-		}
-	}
 	prodSlugs := make(map[string]bool, len(args.Products))
 	for i, p := range args.Products {
 		if p.Slug == "" || p.Name == "" {
@@ -158,9 +155,6 @@ func (s SetupStoreTool) Execute(ctx context.Context, rc *RunContext, input json.
 			return fmt.Sprintf("products[%d]: duplicate slug %q", i, p.Slug), true, nil
 		}
 		prodSlugs[p.Slug] = true
-		if p.CategorySlug != "" && !catSlugs[p.CategorySlug] {
-			return fmt.Sprintf("products[%d]: category_slug %q does not match any category in this call", i, p.CategorySlug), true, nil
-		}
 	}
 
 	if s.Deps == nil || s.Deps.NeonConnString == nil {
@@ -179,6 +173,43 @@ func (s SetupStoreTool) Execute(ctx context.Context, rc *RunContext, input json.
 	qCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
+	// Pre-fetch existing categories so products can reference categories
+	// that were created by an earlier setup_store / execute_sql call. The
+	// previous validation only consulted the current payload's slug set,
+	// which made every follow-up call fail: re-declaring the category to
+	// satisfy the check trips the unique-slug DB constraint instead. Pull
+	// the live slug→id mapping once, seed catIDs with it, and validate
+	// product references against the merged set.
+	catIDs := make(map[string]string, len(args.Categories))
+	rows, err := db.QueryContext(qCtx, `SELECT id::text, slug FROM product_categories WHERE deleted_at IS NULL`)
+	if err != nil {
+		return fmt.Sprintf("load existing categories: %v", err), true, nil
+	}
+	for rows.Next() {
+		var id, slug string
+		if err := rows.Scan(&id, &slug); err != nil {
+			rows.Close()
+			return fmt.Sprintf("scan existing category: %v", err), true, nil
+		}
+		catIDs[slug] = id
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return fmt.Sprintf("read existing categories: %v", err), true, nil
+	}
+	rows.Close()
+
+	for i, c := range args.Categories {
+		if c.ParentSlug != "" && !catSlugs[c.ParentSlug] && catIDs[c.ParentSlug] == "" {
+			return fmt.Sprintf("categories[%d]: parent_slug %q does not match any category in this call or in the database", i, c.ParentSlug), true, nil
+		}
+	}
+	for i, p := range args.Products {
+		if p.CategorySlug != "" && !catSlugs[p.CategorySlug] && catIDs[p.CategorySlug] == "" {
+			return fmt.Sprintf("products[%d]: category_slug %q does not match any category in this call or in the database", i, p.CategorySlug), true, nil
+		}
+	}
+
 	tx, err := db.BeginTx(qCtx, nil)
 	if err != nil {
 		return fmt.Sprintf("begin tx: %v", err), true, nil
@@ -195,7 +226,6 @@ func (s SetupStoreTool) Execute(ctx context.Context, rc *RunContext, input json.
 
 	// Two-pass category insert: parents first (rows where parent_slug == ""),
 	// then children, so parent_id is resolvable from catIDs at insert time.
-	catIDs := make(map[string]string, len(args.Categories))
 	for _, c := range args.Categories {
 		if c.ParentSlug != "" {
 			continue
@@ -285,7 +315,12 @@ func updateStoreConfig(ctx context.Context, tx *sql.Tx, c *storeConfigInput) err
 		return nil
 	}
 	add("updated_at", time.Now())
-	q := "UPDATE config SET " + strings.Join(sets, ", ")
+	// config is a single-row table, but "UPDATE config SET ..." with no
+	// WHERE would rewrite every row if duplicates ever appeared (bad
+	// migration, manual insert, race). Constrain the update to the
+	// canonical row so a follow-up investigation — not the next LLM
+	// turn — has to reconcile any duplicates.
+	q := "UPDATE config SET " + strings.Join(sets, ", ") + " WHERE id = (SELECT id FROM config ORDER BY id LIMIT 1)"
 	_, err := tx.ExecContext(ctx, q, vals...)
 	return err
 }

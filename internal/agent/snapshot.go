@@ -23,7 +23,10 @@ func PreRunCommit(repo *gitrepo.Repo, runID string) (string, error) {
 }
 
 // FinaliseRun writes the fileMap to disk and commits with the given message.
-// Returns the final commit SHA.
+// Returns the final commit SHA. An informational turn that mutates no files
+// lands here with nothing staged; treat that the same way PreRunCommit does —
+// no commit means HEAD is the correct final SHA — so the run finalises as
+// success instead of being flipped to CodeGitError for doing nothing.
 func FinaliseRun(repo *gitrepo.Repo, fileMap *SafeFileMap, userMessage string) (string, error) {
 	snap := fileMap.Snapshot()
 	if err := repo.WriteFileMap(snap); err != nil {
@@ -32,7 +35,11 @@ func FinaliseRun(repo *gitrepo.Repo, fileMap *SafeFileMap, userMessage string) (
 	msg := fmt.Sprintf("agent: %s", firstLine(userMessage, 80))
 	hash, err := repo.Commit(msg)
 	if err != nil {
-		return "", fmt.Errorf("post-commit: %w", err)
+		head, headErr := repo.Head()
+		if headErr != nil {
+			return "", fmt.Errorf("post-commit: %w (head: %v)", err, headErr)
+		}
+		return head, nil
 	}
 	return hash, nil
 }

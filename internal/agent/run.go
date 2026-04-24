@@ -359,9 +359,27 @@ func Run(
 		// new text part. This is the chronological mirror of what the model
 		// emitted: text → tool → text → tool → text → ... lands as alternating
 		// parts in the slice, which the dashboard renders top-to-bottom.
+		//
+		// A tool_call → text transition marks the boundary between model
+		// rounds: the previous round emitted tool calls, we executed them,
+		// and the model is now narrating its next round. Emit TurnEnd /
+		// TurnStart across the boundary so the UI, analytics, and the
+		// Turns column on app_agent_runs all reflect the true round count
+		// (previously pinned to 1 regardless of how many StreamWithTools
+		// rounds ran).
 		if n := len(parts); n > 0 && parts[n-1].Type == "text" {
 			parts[n-1].Text += chunk
 		} else {
+			if n := len(parts); n > 0 && parts[n-1].Type == "tool_call" {
+				emitter.Emit(EventTurnEnd, TurnEndEvent{
+					RunID:      runID,
+					Turn:       turn,
+					StopReason: "tool_use",
+					Tokens:     trackerDelta(tracker),
+				})
+				turn++
+				emitter.Emit(EventTurnStart, TurnStartEvent{RunID: runID, Turn: turn})
+			}
 			parts = append(parts, models.ChatMessagePart{
 				Type: "text",
 				Text: chunk,

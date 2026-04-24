@@ -282,19 +282,55 @@ func AttachmentsAddendum(pool []models.AppAsset) string {
 	sb.WriteString("| ID | Name | Type | Size | URL |\n")
 	sb.WriteString("|----|------|------|------|-----|\n")
 	for _, a := range pool {
+		// FileName, ContentType, and PublicURL originate from user uploads.
+		// A filename like `|oops|\n# NEW SYSTEM INSTRUCTIONS\n ...` would
+		// otherwise break the table row and inject text that the LLM reads
+		// as part of the system prompt. Scrub newlines, pipes, and
+		// backticks so the cell stays a cell.
 		sb.WriteString("| ")
 		sb.WriteString(a.ID.String())
 		sb.WriteString(" | ")
-		sb.WriteString(a.FileName)
+		sb.WriteString(sanitizeAttachmentCell(a.FileName))
 		sb.WriteString(" | ")
-		sb.WriteString(a.ContentType)
+		sb.WriteString(sanitizeAttachmentCell(a.ContentType))
 		sb.WriteString(" | ")
 		sb.WriteString(humanReadableBytes(a.FileSize))
 		sb.WriteString(" | ")
-		sb.WriteString(a.PublicURL)
+		sb.WriteString(sanitizeAttachmentCell(a.PublicURL))
 		sb.WriteString(" |\n")
 	}
 	return sb.String()
+}
+
+// sanitizeAttachmentCell neutralises user-controlled strings before they are
+// written as Markdown table cells in the system prompt. Drops control chars
+// and newlines (would break the row), replaces `|` (would create new columns),
+// and escapes backticks (would open code spans that let subsequent tokens
+// render as model-targeted instructions). Long values are truncated to keep a
+// single crafted filename from dominating the prompt budget.
+func sanitizeAttachmentCell(s string) string {
+	const maxLen = 200
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		switch {
+		case r == '\n', r == '\r', r == '\t':
+			b.WriteByte(' ')
+		case r < 0x20 || r == 0x7f:
+			// drop other control chars silently
+		case r == '|':
+			b.WriteString(`\|`)
+		case r == '`':
+			b.WriteByte('\'')
+		default:
+			b.WriteRune(r)
+		}
+	}
+	out := b.String()
+	if len(out) > maxLen {
+		out = out[:maxLen] + "…"
+	}
+	return out
 }
 
 // humanReadableBytes formats a byte count as KB / MB for display in the

@@ -142,23 +142,28 @@ func (s SetupAIGatewayTool) Execute(ctx context.Context, rc *RunContext, input j
 		return "no chat models are available on the user's current plan — the Wemob AI Gateway cannot be wired up until they upgrade", true, nil
 	}
 
-	if err := s.Deps.EnableAI(ctx, rc.Project); err != nil {
-		return fmt.Sprintf("enabling AI failed: %v", err), true, nil
+	// Resolve the template body up front. EnableAI must come LAST — if we
+	// flip Settings["has_ai"]=true and then discover the template is
+	// missing, the project is permanently stuck: every subsequent run
+	// sees "already wired" and skips setup, but lib/wemob-ai.ts never
+	// exists so every `@/lib/wemob-ai` import fails the build. Failing
+	// closed here keeps the project recoverable.
+	libAI := templates.GetTemplate("lib/wemob-ai.ts")
+	if libAI == "" {
+		return "Wemob AI Gateway template is not available in this build — cannot wire up AI right now; please retry or contact support if this persists", true, nil
 	}
 
 	// Inject lib/wemob-ai.ts so the model can
 	// `import { wemobAI } from '@/lib/wemob-ai'` immediately within the
 	// same run.
-	if libAI := templates.GetTemplate("lib/wemob-ai.ts"); libAI != "" {
-		rc.FileMap.Set("lib/wemob-ai.ts", libAI)
-		rc.Emitter.Emit(EventFileWritten, FileWrittenEvent{
-			RunID:     rc.RunID,
-			Path:      "lib/wemob-ai.ts",
-			Operation: "create",
-			Bytes:     len(libAI),
-			Content:   libAI,
-		})
-	}
+	rc.FileMap.Set("lib/wemob-ai.ts", libAI)
+	rc.Emitter.Emit(EventFileWritten, FileWrittenEvent{
+		RunID:     rc.RunID,
+		Path:      "lib/wemob-ai.ts",
+		Operation: "create",
+		Bytes:     len(libAI),
+		Content:   libAI,
+	})
 
 	// lib/wemob-ai.ts imports the `openai` npm package. The LLM never
 	// wrote that import so it won't add the dep itself — inject it here
@@ -166,6 +171,14 @@ func (s SetupAIGatewayTool) Execute(ctx context.Context, rc *RunContext, input j
 	addDependenciesToPackageJSON(rc, map[string]string{
 		"openai": "^4.104.0",
 	})
+
+	// Flip the flag only after the file + dep are in place. On failure
+	// here the file is still committed at run end, so a retry can see
+	// the file and either the flag flips on the retry or the model
+	// imports the existing helper without a second setup call.
+	if err := s.Deps.EnableAI(ctx, rc.Project); err != nil {
+		return fmt.Sprintf("enabling AI failed: %v", err), true, nil
+	}
 
 	modelList := renderGatewayChatModelsBlock(allowedChat)
 	defaultModel := defaultGatewayChatModel(allowedChat)
