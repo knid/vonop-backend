@@ -20,7 +20,7 @@ type User struct {
 	Type                string                    `bun:",notnull,default:'standard'"`
 	Company             string                    `bun:",nullzero"`
 	Provider            string                    `bun:",nullzero,notnull,default:'Wemob'"`
-	SubscriptionID      uuid.UUID                 `bun:",type:uuid"`
+	SubscriptionID      uuid.UUID                 `bun:",type:uuid,nullzero"`
 	Subscription        *StandardUserSubscription `bun:"rel:belongs-to,join:subscription_id=id"`
 	SubscriptionStatus  string                    `bun:",notnull,default:'inactive'"`
 	SubscriptionStartAt time.Time                 `bun:""`
