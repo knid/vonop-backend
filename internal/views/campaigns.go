@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/controllers"
 	"github.com/knid/wemob/internal/utils"
 )
@@ -11,7 +12,7 @@ import (
 func (v *HttpViews) SubmitKadinGirisimciler(w http.ResponseWriter, r *http.Request) {
 	// 20 MB max (multiple file uploads)
 	if err := r.ParseMultipartForm(20 << 20); err != nil {
-		utils.JSONErrorResponse(w, "file too large or invalid form data", http.StatusBadRequest)
+		utils.JSONError(w, constants.ErrAssetTooLarge, "File too large or invalid form data.", http.StatusBadRequest, nil)
 		return
 	}
 
@@ -23,7 +24,9 @@ func (v *HttpViews) SubmitKadinGirisimciler(w http.ResponseWriter, r *http.Reque
 	isTanimi := r.FormValue("is_tanimi")
 
 	if isimSoyisim == "" || telefon == "" || ePosta == "" || vergiNo == "" || isTanimi == "" {
-		utils.JSONErrorResponse(w, "isim_soyisim, telefon, e_posta, vergi_no, and is_tanimi are required", http.StatusBadRequest)
+		utils.JSONError(w, constants.ErrValidationRequired, "isim_soyisim, telefon, e_posta, vergi_no, and is_tanimi are required.", http.StatusBadRequest, map[string]any{
+			"fields": []string{"isim_soyisim", "telefon", "e_posta", "vergi_no", "is_tanimi"},
+		})
 		return
 	}
 
@@ -48,7 +51,7 @@ func (v *HttpViews) SubmitKadinGirisimciler(w http.ResponseWriter, r *http.Reque
 
 	if err := v.Controller.SubmitKadinGirisimciler(sub); err != nil {
 		slog.Error("kadin girisimciler submission failed", "error", err)
-		utils.JSONErrorResponse(w, "failed to submit application", http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 

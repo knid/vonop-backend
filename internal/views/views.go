@@ -22,7 +22,7 @@ func requireActiveSubscription(w http.ResponseWriter, user *models.User) bool {
 	case "active", "free", "trial":
 		return false
 	}
-	utils.JSONCodedErrorResponse(w, "SUBSCRIPTION_REQUIRED", "active subscription required", http.StatusForbidden, nil)
+	utils.JSONError(w, constants.ErrSubscriptionRequired, "active subscription required", http.StatusForbidden, nil)
 	return true
 }
 
@@ -31,7 +31,7 @@ func requireActiveSubscription(w http.ResponseWriter, user *models.User) bool {
 func (v *HttpViews) checkAnalyticsAccess(w http.ResponseWriter, user *models.User) bool {
 	limits, err := v.Controller.GetUserLimits(user)
 	if err != nil || !limits.CanUseAnalytics {
-		utils.JSONCodedErrorResponse(w, "FEATURE_NOT_AVAILABLE",
+		utils.JSONError(w, constants.ErrFeatureNotAvailable,
 			"analytics is not available on your plan",
 			http.StatusForbidden, nil)
 		return true
@@ -44,7 +44,7 @@ func (v *HttpViews) checkAnalyticsAccess(w http.ResponseWriter, user *models.Use
 func (v *HttpViews) checkMinimumCredits(w http.ResponseWriter, user *models.User) bool {
 	balance, err := v.Controller.GetOrCreateCreditsBalance(user)
 	if err != nil {
-		utils.JSONErrorResponse(w, "failed to check credits", http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return true
 	}
 	if balance.Balance < 1 {
@@ -59,7 +59,7 @@ func (v *HttpViews) checkMinimumCredits(w http.ResponseWriter, user *models.User
 		}
 		_, renewEnd := utils.BillingPeriod(user.SubscriptionStartAt, time.Now())
 
-		utils.JSONCodedErrorResponse(w, "AI_CREDITS_DEPLETED",
+		utils.JSONError(w, constants.ErrAICreditsDepleted,
 			"insufficient AI credits: have 0, need at least 1",
 			http.StatusPaymentRequired, map[string]any{
 				"credits_required": 1,
@@ -74,4 +74,3 @@ func (v *HttpViews) checkMinimumCredits(w http.ResponseWriter, user *models.User
 	}
 	return false
 }
-

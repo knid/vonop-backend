@@ -15,7 +15,7 @@ func (v *HttpViews) CreateTicket(w http.ResponseWriter, r *http.Request) {
 	var ticketCreateReq requests.CreateTicketRequest
 	err := json.NewDecoder(r.Body).Decode(&ticketCreateReq)
 	if err != nil {
-		utils.JSONErrorResponse(w, "invalid data", http.StatusBadRequest)
+		utils.JSONErrorCode(w, constants.ErrValidationBody, http.StatusBadRequest, nil)
 		return
 	}
 
@@ -23,7 +23,7 @@ func (v *HttpViews) CreateTicket(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		ticket, err := v.Controller.CreateTicket(ticketCreateReq)
 		if err != nil {
-			utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+			utils.JSONInternalError(w, err)
 			return
 		}
 
@@ -44,19 +44,19 @@ func (v *HttpViews) CreateTicket(w http.ResponseWriter, r *http.Request) {
 
 	userInformationRes, err := v.Controller.GetUser(tokenString)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	user, err := v.Controller.GetUserModelById(userInformationRes.ID.String())
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	ticket, err := v.Controller.CreateLoggedInUserTicket(ticketCreateReq, user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 

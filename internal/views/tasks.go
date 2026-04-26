@@ -6,24 +6,25 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/utils"
 )
 
 func (v *HttpViews) CancelBuildTask(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	taskID := chi.URLParam(r, "taskId")
 	if taskID == "" {
-		utils.JSONErrorResponse(w, "task_id is required", http.StatusBadRequest)
+		utils.JSONErrorCode(w, constants.ErrValidationRequired, http.StatusBadRequest, map[string]any{"field": "task_id"})
 		return
 	}
 
 	if err := v.Controller.CancelBuildTask(user, taskID); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
@@ -33,17 +34,17 @@ func (v *HttpViews) CancelBuildTask(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) GetAllTasks(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	tasks, err := v.Controller.GetAllAppBuildTasks(user)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			utils.JSONErrorResponse(w, "not found", http.StatusNotFound)
+			utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 			return
 		}
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
