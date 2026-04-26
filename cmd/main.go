@@ -1119,6 +1119,7 @@ func main() {
 	})
 
 	r.Use(middleware.Recoverer)
+	r.Use(appMiddleware.Locale)
 
 	r.Route("/", func(r chi.Router) {
 		r.Route("/webhooks", func(r chi.Router) {
