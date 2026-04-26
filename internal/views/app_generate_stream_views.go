@@ -17,7 +17,7 @@ import (
 func (v *HttpViews) GenerateAppStream(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 	if requireActiveSubscription(w, user) {
@@ -29,7 +29,7 @@ func (v *HttpViews) GenerateAppStream(w http.ResponseWriter, r *http.Request) {
 
 	var req requests.GenerateAppRequest
 	if err := utils.ParseJSONBody(r, &req); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
@@ -38,7 +38,7 @@ func (v *HttpViews) GenerateAppStream(w http.ResponseWriter, r *http.Request) {
 	activeJobs, _ := v.Controller.GetActiveJobs(user.ID)
 	for _, j := range activeJobs {
 		if j.Type == "generate_app" {
-			utils.JSONErrorResponse(w, "a generation is already in progress", http.StatusTooManyRequests)
+			utils.JSONErrorCode(w, constants.ErrGenerationInProgress, http.StatusTooManyRequests, nil)
 			return
 		}
 	}
@@ -46,7 +46,7 @@ func (v *HttpViews) GenerateAppStream(w http.ResponseWriter, r *http.Request) {
 	// Pre-step: create project synchronously
 	project, err := v.Controller.CreateAppProject(r.Context(), user, req)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 

@@ -5,6 +5,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/utils"
 )
@@ -14,7 +15,7 @@ import (
 func (v *HttpViews) GetMobileAppConfig(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
@@ -27,7 +28,7 @@ func (v *HttpViews) GetMobileAppConfig(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		appProject, appErr := v.Controller.DB.GetAppProjectByID(projectID)
 		if appErr != nil {
-			utils.JSONErrorResponse(w, "project not found", http.StatusNotFound)
+			utils.JSONErrorCode(w, constants.ErrProjectNotFound, http.StatusNotFound, nil)
 			return
 		}
 		ownerID = appProject.UserID
@@ -36,7 +37,7 @@ func (v *HttpViews) GetMobileAppConfig(w http.ResponseWriter, r *http.Request) {
 		oneSignalAppID = project.OneSignalAppID
 	}
 	if ownerID != user.ID {
-		utils.JSONErrorResponse(w, "unauthorized", http.StatusForbidden)
+		utils.JSONErrorCode(w, constants.ErrForbidden, http.StatusForbidden, nil)
 		return
 	}
 
@@ -55,7 +56,7 @@ func (v *HttpViews) GetMobileAppConfig(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) UpdateMobileAppConfig(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
@@ -68,7 +69,7 @@ func (v *HttpViews) UpdateMobileAppConfig(w http.ResponseWriter, r *http.Request
 	if err != nil {
 		appProject, appErr := v.Controller.DB.GetAppProjectByID(projectID)
 		if appErr != nil {
-			utils.JSONErrorResponse(w, "project not found", http.StatusNotFound)
+			utils.JSONErrorCode(w, constants.ErrProjectNotFound, http.StatusNotFound, nil)
 			return
 		}
 		ownerID = appProject.UserID
@@ -77,7 +78,7 @@ func (v *HttpViews) UpdateMobileAppConfig(w http.ResponseWriter, r *http.Request
 		oneSignalAppID = project.OneSignalAppID
 	}
 	if ownerID != user.ID {
-		utils.JSONErrorResponse(w, "unauthorized", http.StatusForbidden)
+		utils.JSONErrorCode(w, constants.ErrForbidden, http.StatusForbidden, nil)
 		return
 	}
 
@@ -100,7 +101,7 @@ func (v *HttpViews) UpdateMobileAppConfig(w http.ResponseWriter, r *http.Request
 		UpdateCheckEnabled   *bool     `json:"update_check_enabled"`
 	}
 	if err := utils.ParseJSONBody(r, &body); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
@@ -179,7 +180,7 @@ func (v *HttpViews) UpdateMobileAppConfig(w http.ResponseWriter, r *http.Request
 
 	updated, err := v.Controller.DB.UpsertMobileAppConfig(config)
 	if err != nil {
-		utils.JSONErrorResponse(w, "failed to update config", http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -192,7 +193,7 @@ func (v *HttpViews) GetPublicMobileConfig(w http.ResponseWriter, r *http.Request
 
 	project, err := v.Controller.GetProjectModelById(projectID)
 	if err != nil {
-		utils.JSONErrorResponse(w, "project not found", http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrProjectNotFound, http.StatusNotFound, nil)
 		return
 	}
 
@@ -250,7 +251,7 @@ func buildMobileConfigResponse(config *models.MobileAppConfig, oneSignalAppID st
 			"enabled":  config.AnalyticsEnabled,
 			"endpoint": "https://api.wemob.io",
 		},
-		"pull_to_refresh":       config.PullToRefreshEnabled,
+		"pull_to_refresh":        config.PullToRefreshEnabled,
 		"external_browser_links": config.ExternalBrowserLinks,
 		"bridge": map[string]any{
 			"enabled": config.BridgeEnabled,
@@ -265,4 +266,3 @@ func buildMobileConfigResponse(config *models.MobileAppConfig, oneSignalAppID st
 		"deep_linking": map[string]any{"url_scheme": config.URLScheme, "universal_link_domain": config.UniversalLinkDomain},
 	}
 }
-

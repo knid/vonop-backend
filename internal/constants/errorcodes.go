@@ -95,9 +95,11 @@ const (
 	ErrNotificationLimitReached = "NOTIFICATION_LIMIT_REACHED"
 
 	// Generic / cross-cutting
-	ErrRateLimited = "RATE_LIMITED" // details: { retryAfterSec }
-	ErrNotFound    = "NOT_FOUND"
-	ErrConflict    = "CONFLICT"
+	ErrRateLimited          = "RATE_LIMITED" // details: { retryAfterSec }
+	ErrNotFound             = "NOT_FOUND"
+	ErrConflict             = "CONFLICT"
+	ErrGenerationInProgress = "GENERATION_IN_PROGRESS"
+	ErrStreamingUnsupported = "STREAMING_UNSUPPORTED"
 
 	// Internal — frontend always shows generic localized message
 	ErrInternal         = "INTERNAL_ERROR"
@@ -183,9 +185,11 @@ var DefaultMessages = map[string]string{
 
 	ErrNotificationLimitReached: "Notification limit reached.",
 
-	ErrRateLimited: "Too many requests. Please try again later.",
-	ErrNotFound:    "Not found.",
-	ErrConflict:    "Conflict.",
+	ErrRateLimited:          "Too many requests. Please try again later.",
+	ErrNotFound:             "Not found.",
+	ErrConflict:             "Conflict.",
+	ErrGenerationInProgress: "A generation is already in progress.",
+	ErrStreamingUnsupported: "Streaming is not supported on this connection.",
 
 	ErrInternal:         "Something went wrong. Please try again.",
 	ErrInternalStorage:  "Storage is temporarily unavailable.",

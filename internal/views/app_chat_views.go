@@ -45,11 +45,11 @@ func extractAssetIDsFromLegacyURLs(urls []string) []uuid.UUID {
 func (v *HttpViews) ChatApp(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 	if user == nil {
-		utils.JSONErrorResponse(w, "unauthorized", http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthRequired, http.StatusUnauthorized, nil)
 		return
 	}
 	if requireActiveSubscription(w, user) {
@@ -62,17 +62,17 @@ func (v *HttpViews) ChatApp(w http.ResponseWriter, r *http.Request) {
 	appID := chi.URLParam(r, "appId")
 	project, err := v.Controller.GetAppProject(appID, user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
 	if project == nil {
-		utils.JSONErrorResponse(w, "project not found", http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrProjectNotFound, http.StatusNotFound, nil)
 		return
 	}
 
 	var req requests.AppChatRequest
 	if err := utils.ParseJSONBody(r, &req); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
@@ -83,16 +83,19 @@ func (v *HttpViews) ChatApp(w http.ResponseWriter, r *http.Request) {
 
 	// Per-turn attachment count cap.
 	if len(req.AttachmentIDs) > constants.MaxAttachmentsPerTurn {
-		utils.JSONErrorResponse(w,
-			fmt.Sprintf("too many attachments (max %d per message)", constants.MaxAttachmentsPerTurn),
-			http.StatusBadRequest)
+		utils.JSONError(w, constants.ErrValidationOutOfRange,
+			fmt.Sprintf("Too many attachments (max %d per message).", constants.MaxAttachmentsPerTurn),
+			http.StatusBadRequest, map[string]any{
+				"field": "attachment_ids",
+				"limit": constants.MaxAttachmentsPerTurn,
+			})
 		return
 	}
 
 	// Resolve attachment IDs and the project-wide pool in one go.
 	turnAttachments, attachErr := loadTurnAttachments(r.Context(), v.Controller.DB, project.ID, req.AttachmentIDs)
 	if attachErr != nil {
-		utils.JSONErrorResponse(w, attachErr.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, attachErr)
 		return
 	}
 
@@ -151,18 +154,18 @@ func (v *HttpViews) ChatApp(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) GetAppActiveJob(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 	if user == nil {
-		utils.JSONErrorResponse(w, "unauthorized", http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthRequired, http.StatusUnauthorized, nil)
 		return
 	}
 
 	appID := chi.URLParam(r, "appId")
 	project, err := v.Controller.GetAppProject(appID, user)
 	if err != nil || project == nil {
-		utils.JSONErrorResponse(w, "project not found", http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrProjectNotFound, http.StatusNotFound, nil)
 		return
 	}
 
@@ -182,7 +185,7 @@ func (v *HttpViews) GetAppActiveJob(w http.ResponseWriter, r *http.Request) {
 // AppAsset table, enforces ownership and the per-turn image cap, and loads
 // the project-wide pool used to build the LLM's manifest.
 //
-// Returns a HTTP-message-grade error suitable for JSONErrorResponse.
+// Returns a HTTP-message-grade error suitable for utils.ValidationError.
 func loadTurnAttachments(
 	ctx context.Context,
 	db *database.Database,
