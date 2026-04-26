@@ -100,13 +100,13 @@ func (c *Controller) ConsumePasswordReset(req requests.UserResetPasswordRequest)
 
 	token, err := c.DB.GetUserActionToken(req.Token, models.UserActionTokenKindPasswordReset)
 	if err != nil || token.User == nil {
-		return errors.New("invalid or expired reset link")
+		return ErrResetTokenInvalid
 	}
 	if token.IsConsumed() {
-		return errors.New("this reset link has already been used")
+		return ErrResetTokenInvalid
 	}
 	if token.IsExpired() {
-		return errors.New("this reset link has expired")
+		return ErrResetTokenExpired
 	}
 
 	hashedPassword, err := utils.HashPassword(req.Password)
@@ -182,13 +182,13 @@ func (c *Controller) ConsumeVerifyEmail(req requests.UserVerifyEmailRequest) (*m
 
 	token, err := c.DB.GetUserActionToken(req.Token, models.UserActionTokenKindVerifyEmail)
 	if err != nil || token.User == nil {
-		return nil, errors.New("invalid verification link")
+		return nil, ErrVerificationInvalid
 	}
 	if token.IsConsumed() {
-		return nil, errors.New("this verification link has already been used")
+		return nil, ErrVerificationInvalid
 	}
 	if token.IsExpired() {
-		return nil, errors.New("this verification link has expired")
+		return nil, ErrVerificationInvalid
 	}
 
 	user := token.User

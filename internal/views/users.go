@@ -1,9 +1,11 @@
 package views
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/knid/wemob/internal/constants"
+	"github.com/knid/wemob/internal/controllers"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/utils"
 	"github.com/posthog/posthog-go"
@@ -52,7 +54,7 @@ func (v *HttpViews) UpdateUser(w http.ResponseWriter, r *http.Request) {
 
 	updatedUserRes, err := v.Controller.UpdateUser(user, userUpdateReq)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -68,7 +70,7 @@ func (v *HttpViews) DeleteUser(w http.ResponseWriter, r *http.Request) {
 
 	deletedUserRes, err := v.Controller.DeleteUser(user.ID.String())
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -88,7 +90,13 @@ func (v *HttpViews) UserLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	userLoginRes, err := v.Controller.LoginUser(userLoginReq)
 	if err != nil {
-		utils.ValidationError(w, err)
+		switch {
+		case errors.Is(err, controllers.ErrInvalidCredentials):
+			utils.JSONErrorCode(w, constants.ErrAuthInvalidCredentials, http.StatusUnauthorized, nil)
+		default:
+			// Validation errors from validate.Struct still flow through here.
+			utils.ValidationError(w, err)
+		}
 		return
 	}
 
@@ -112,7 +120,13 @@ func (v *HttpViews) UserRegister(w http.ResponseWriter, r *http.Request) {
 	}
 	userInformationRes, err := v.Controller.RegisterUser(userRegisterReq)
 	if err != nil {
-		utils.ValidationError(w, err)
+		switch {
+		case errors.Is(err, controllers.ErrEmailTaken):
+			utils.JSONErrorCode(w, constants.ErrAuthEmailTaken, http.StatusConflict, nil)
+		default:
+			// Password mismatch + validate.Struct errors flow through here.
+			utils.ValidationError(w, err)
+		}
 		return
 	}
 
@@ -159,7 +173,15 @@ func (v *HttpViews) UserResetPassword(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := v.Controller.ConsumePasswordReset(req); err != nil {
-		utils.ValidationError(w, err)
+		switch {
+		case errors.Is(err, controllers.ErrResetTokenInvalid):
+			utils.JSONErrorCode(w, constants.ErrAuthResetTokenInvalid, http.StatusBadRequest, nil)
+		case errors.Is(err, controllers.ErrResetTokenExpired):
+			utils.JSONErrorCode(w, constants.ErrAuthResetTokenExpired, http.StatusBadRequest, nil)
+		default:
+			// validate.Struct + password-mismatch errors stay on ValidationError.
+			utils.ValidationError(w, err)
+		}
 		return
 	}
 
@@ -179,7 +201,7 @@ func (v *HttpViews) UserSendVerifyEmail(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if err := v.Controller.SendVerifyEmail(user); err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -200,7 +222,12 @@ func (v *HttpViews) UserConfirmVerifyEmail(w http.ResponseWriter, r *http.Reques
 
 	user, err := v.Controller.ConsumeVerifyEmail(req)
 	if err != nil {
-		utils.ValidationError(w, err)
+		switch {
+		case errors.Is(err, controllers.ErrVerificationInvalid):
+			utils.JSONErrorCode(w, constants.ErrAuthVerificationInvalid, http.StatusBadRequest, nil)
+		default:
+			utils.ValidationError(w, err)
+		}
 		return
 	}
 

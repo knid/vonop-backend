@@ -22,6 +22,19 @@ import (
 	"github.com/stripe/stripe-go/v82/customer"
 )
 
+// Sentinel errors for auth flows. Views switch on these via errors.Is to
+// emit precise coded responses (AUTH_INVALID_CREDENTIALS, AUTH_EMAIL_TAKEN,
+// AUTH_RESET_TOKEN_INVALID, AUTH_RESET_TOKEN_EXPIRED, AUTH_VERIFICATION_INVALID).
+// Anything not matched falls through to JSONInternalError so we never leak
+// raw err.Error() text in 5xx responses.
+var (
+	ErrInvalidCredentials  = errors.New("invalid email or password")
+	ErrEmailTaken          = errors.New("email already in use")
+	ErrResetTokenInvalid   = errors.New("password reset token is invalid")
+	ErrResetTokenExpired   = errors.New("password reset token has expired")
+	ErrVerificationInvalid = errors.New("email verification token is invalid or expired")
+)
+
 func (c *Controller) GetUserModelById(id string) (*models.User, error) {
 	return c.DB.GetUserById(id)
 }
@@ -157,7 +170,7 @@ func (c *Controller) RegisterUser(userRegisterReq requests.UserRegisterRequest) 
 	createdUser, err := c.DB.CreateUser(&user)
 	if err != nil {
 		if strings.Contains(err.Error(), "23505") {
-			return nil, errors.New("user with this email already exists")
+			return nil, ErrEmailTaken
 		}
 		return nil, err
 	}
@@ -232,13 +245,13 @@ func (c *Controller) LoginUser(userLoginReq requests.UserLoginRequest) (*respons
 	user, err := c.DB.GetUserByEmail(userLoginReq.Email)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, errors.New("user with this email does not exist")
+			return nil, ErrInvalidCredentials
 		}
 		return nil, err
 	}
 
 	if !utils.CheckPassword(userLoginReq.Password, user.Password) {
-		return nil, errors.New("password is not correct")
+		return nil, ErrInvalidCredentials
 	}
 
 	// Lazy-migrate SHA-256 passwords to bcrypt on successful login
