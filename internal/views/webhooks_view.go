@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/utils"
 )
@@ -11,7 +12,7 @@ import (
 func (v *HttpViews) CreateWebhookEndpoint(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
@@ -21,13 +22,13 @@ func (v *HttpViews) CreateWebhookEndpoint(w http.ResponseWriter, r *http.Request
 
 	var req requests.CreateWebhookRequest
 	if err := utils.ParseJSONBody(r, &req); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
 	result, err := v.Controller.CreateWebhookEndpoint(user, req)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
@@ -37,13 +38,13 @@ func (v *HttpViews) CreateWebhookEndpoint(w http.ResponseWriter, r *http.Request
 func (v *HttpViews) ListWebhookEndpoints(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	result, err := v.Controller.ListWebhookEndpoints(user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
@@ -53,25 +54,25 @@ func (v *HttpViews) ListWebhookEndpoints(w http.ResponseWriter, r *http.Request)
 func (v *HttpViews) UpdateWebhookEndpoint(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	webhookID := chi.URLParam(r, "webhookId")
 	if webhookID == "" {
-		utils.JSONErrorResponse(w, "webhook id is required", http.StatusBadRequest)
+		utils.JSONErrorCode(w, constants.ErrValidationRequired, http.StatusBadRequest, map[string]any{"field": "webhook_id"})
 		return
 	}
 
 	var req requests.UpdateWebhookRequest
 	if err := utils.ParseJSONBody(r, &req); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
 	result, err := v.Controller.UpdateWebhookEndpoint(user, webhookID, req)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
@@ -81,19 +82,19 @@ func (v *HttpViews) UpdateWebhookEndpoint(w http.ResponseWriter, r *http.Request
 func (v *HttpViews) DeleteWebhookEndpoint(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	webhookID := chi.URLParam(r, "webhookId")
 	if webhookID == "" {
-		utils.JSONErrorResponse(w, "webhook id is required", http.StatusBadRequest)
+		utils.JSONErrorCode(w, constants.ErrValidationRequired, http.StatusBadRequest, map[string]any{"field": "webhook_id"})
 		return
 	}
 
 	err = v.Controller.DeleteWebhookEndpoint(user, webhookID)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 

@@ -35,7 +35,7 @@ func toGitHubExportResponse(export *models.AppGitHubExport) responses.GitHubExpo
 func (v *HttpViews) GitHubAuthRedirect(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
@@ -57,25 +57,25 @@ func (v *HttpViews) GitHubAuthCallback(w http.ResponseWriter, r *http.Request) {
 	stateStr := r.URL.Query().Get("state")
 
 	if code == "" || stateStr == "" {
-		utils.JSONErrorResponse(w, "missing code or state parameter", http.StatusBadRequest)
+		utils.JSONError(w, constants.ErrValidationRequired, "Missing code or state parameter.", http.StatusBadRequest, nil)
 		return
 	}
 
 	clientSecret := v.Controller.SecretManager.GetSecret("GITHUB_CLIENT_SECRET")
 	userID, err := utils.VerifyOAuthState(stateStr, clientSecret)
 	if err != nil {
-		utils.JSONErrorResponse(w, "invalid or expired OAuth state", http.StatusBadRequest)
+		utils.JSONErrorCode(w, constants.ErrAuthOAuthStateInvalid, http.StatusBadRequest, nil)
 		return
 	}
 
 	user, err := v.Controller.GetUserById(userID)
 	if err != nil {
-		utils.JSONErrorResponse(w, "user not found", http.StatusNotFound)
+		utils.JSONError(w, constants.ErrNotFound, "User not found.", http.StatusNotFound, nil)
 		return
 	}
 
 	if err := v.Controller.ConnectGitHub(user, code); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -88,11 +88,11 @@ func (v *HttpViews) GitHubAuthCallback(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) DisconnectGitHub(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 	if err := v.Controller.DisconnectGitHub(user); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 	utils.JSONResponse(w, responses.SuccessResponse{Success: true}, http.StatusOK)
@@ -102,7 +102,7 @@ func (v *HttpViews) DisconnectGitHub(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) GetGitHubConnectionStatus(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 	resp := responses.GitHubConnectionResponse{
@@ -116,7 +116,7 @@ func (v *HttpViews) GetGitHubConnectionStatus(w http.ResponseWriter, r *http.Req
 func (v *HttpViews) ExportToGitHub(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 	if requireActiveSubscription(w, user) {
@@ -127,7 +127,7 @@ func (v *HttpViews) ExportToGitHub(w http.ResponseWriter, r *http.Request) {
 	limits, limitsErr := v.Controller.GetUserLimits(user)
 	if limitsErr == nil && !limits.CanExportToGitHub {
 		go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_NEED, map[string]any{"action": "export_to_github"})
-		utils.JSONCodedErrorResponse(w, "GITHUB_EXPORT_NOT_AVAILABLE",
+		utils.JSONError(w, constants.ErrGitHubExportNotAvailable,
 			"GitHub export is not available on your plan", http.StatusForbidden, nil)
 		return
 	}
@@ -135,18 +135,18 @@ func (v *HttpViews) ExportToGitHub(w http.ResponseWriter, r *http.Request) {
 	appID := chi.URLParam(r, "appId")
 	project, err := v.Controller.GetAppProject(appID, user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
 
 	var req requests.ExportToGitHubRequest
 	if err := utils.ParseJSONBody(r, &req); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 	validate := validator.New()
 	if err := utils.ValidateFunc[requests.ExportToGitHubRequest](req, validate); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
@@ -154,11 +154,11 @@ func (v *HttpViews) ExportToGitHub(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		errMsg := err.Error()
 		if errMsg == "GITHUB_REPO_EXISTS" {
-			utils.JSONCodedErrorResponse(w, "GITHUB_REPO_EXISTS",
-				"a repository with this name already exists on your GitHub account", http.StatusConflict, nil)
+			utils.JSONError(w, constants.ErrGitHubRepoExists,
+				"A repository with this name already exists on your GitHub account.", http.StatusConflict, nil)
 			return
 		}
-		utils.JSONErrorResponse(w, errMsg, http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -178,7 +178,7 @@ func (v *HttpViews) ExportToGitHub(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) PushToGitHub(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 	if requireActiveSubscription(w, user) {
@@ -188,7 +188,7 @@ func (v *HttpViews) PushToGitHub(w http.ResponseWriter, r *http.Request) {
 	appID := chi.URLParam(r, "appId")
 	project, err := v.Controller.GetAppProject(appID, user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
 
@@ -197,19 +197,19 @@ func (v *HttpViews) PushToGitHub(w http.ResponseWriter, r *http.Request) {
 		errMsg := err.Error()
 		switch errMsg {
 		case "GITHUB_AUTH_EXPIRED":
-			utils.JSONCodedErrorResponse(w, "GITHUB_AUTH_EXPIRED",
+			utils.JSONError(w, constants.ErrGitHubAuthExpired,
 				"your GitHub token has expired — please reconnect", http.StatusUnauthorized, nil)
 		case "GITHUB_REPO_NOT_FOUND":
-			utils.JSONCodedErrorResponse(w, "GITHUB_REPO_NOT_FOUND",
+			utils.JSONError(w, constants.ErrGitHubRepoNotFound,
 				"the GitHub repository was deleted — export again to create a new one", http.StatusNotFound, nil)
 		case "GITHUB_PUSH_REJECTED":
-			utils.JSONCodedErrorResponse(w, "GITHUB_PUSH_REJECTED",
+			utils.JSONError(w, constants.ErrGitHubPushRejected,
 				"push rejected by GitHub — the remote history has diverged. Remove the export and re-export.", http.StatusConflict, nil)
 		case "GITHUB_PUSH_TIMEOUT":
-			utils.JSONCodedErrorResponse(w, "GITHUB_PUSH_TIMEOUT",
+			utils.JSONError(w, constants.ErrGitHubPushTimeout,
 				"push timed out — try again later", http.StatusGatewayTimeout, nil)
 		default:
-			utils.JSONErrorResponse(w, errMsg, http.StatusInternalServerError)
+			utils.JSONInternalError(w, err)
 		}
 		return
 	}
@@ -228,21 +228,21 @@ func (v *HttpViews) PushToGitHub(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) GetGitHubExport(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	appID := chi.URLParam(r, "appId")
 	_, err = v.Controller.GetAppProject(appID, user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
 
 	parsedID, _ := uuid.Parse(appID)
 	export, err := v.Controller.GetGitHubExport(parsedID)
 	if err != nil {
-		utils.JSONErrorResponse(w, "no GitHub export for this project", http.StatusNotFound)
+		utils.JSONError(w, constants.ErrNotFound, "No GitHub export for this project.", http.StatusNotFound, nil)
 		return
 	}
 
@@ -253,19 +253,19 @@ func (v *HttpViews) GetGitHubExport(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) RemoveGitHubExport(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	appID := chi.URLParam(r, "appId")
 	project, err := v.Controller.GetAppProject(appID, user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
 
 	if err := v.Controller.RemoveGitHubExport(user, project.ID); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 	utils.JSONResponse(w, responses.SuccessResponse{Success: true}, http.StatusOK)

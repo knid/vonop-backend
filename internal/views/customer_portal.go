@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/utils"
 	"github.com/stripe/stripe-go/v82"
 	"github.com/stripe/stripe-go/v82/billingportal/session"
@@ -16,19 +17,19 @@ func (v *HttpViews) StripeCustomerPortal(w http.ResponseWriter, r *http.Request)
 		tokenString = r.PostFormValue("token")
 	}
 	if tokenString == "" {
-		utils.JSONErrorResponse(w, "authentication required", http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthRequired, http.StatusUnauthorized, nil)
 		return
 	}
 
 	userInformationRes, err := v.Controller.GetUser(tokenString)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	user, err := v.Controller.GetUserModelById(userInformationRes.ID.String())
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 

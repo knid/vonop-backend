@@ -12,13 +12,13 @@ import (
 func (v *HttpViews) GetReferralCode(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	result, err := v.Controller.GetOrCreateReferralCode(user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
@@ -28,13 +28,13 @@ func (v *HttpViews) GetReferralCode(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) GetReferralStats(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	result, err := v.Controller.GetReferralStats(user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
@@ -44,19 +44,19 @@ func (v *HttpViews) GetReferralStats(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) ApplyReferralCode(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	var req requests.ApplyReferralCodeRequest
 	if err := utils.ParseJSONBody(r, &req); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
 	err = v.Controller.ApplyReferralCode(user, req.Code)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
