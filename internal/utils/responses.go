@@ -54,15 +54,3 @@ func JSONInternalError(w http.ResponseWriter, err error) {
 	slog.Error("internal error", "error", err)
 	JSONErrorCode(w, constants.ErrInternal, http.StatusInternalServerError, nil)
 }
-
-// JSONErrorResponse — DEPRECATED, use JSONError. Kept temporarily during
-// the migration; will be removed once all call sites are converted.
-func JSONErrorResponse(w http.ResponseWriter, message string, code int) {
-	JSONResponse(w, map[string]string{"error": message}, code)
-}
-
-// JSONCodedErrorResponse — DEPRECATED, use JSONError. Kept temporarily
-// during the migration; will be removed once all call sites are converted.
-func JSONCodedErrorResponse(w http.ResponseWriter, errorCode string, message string, statusCode int, details map[string]any) {
-	JSONError(w, errorCode, message, statusCode, details)
-}
