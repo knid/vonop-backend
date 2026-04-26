@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/utils"
 	"github.com/redis/go-redis/v9"
 )
@@ -52,7 +53,7 @@ func (rl *RateLimiter) RateLimit(limit int, window time.Duration, keyFunc func(r
 			result, err := rateLimitScript.Run(ctx, rl.client, []string{key}, int(window.Seconds())).Result()
 			if err != nil {
 				slog.Error("rate limiter redis error", "error", err)
-				utils.JSONErrorResponse(w, "service temporarily unavailable", http.StatusServiceUnavailable)
+				utils.JSONErrorCode(w, constants.ErrInternalUpstream, http.StatusServiceUnavailable, nil)
 				return
 			}
 			count, _ := result.(int64)
@@ -79,7 +80,7 @@ func (rl *RateLimiter) RateLimit(limit int, window time.Duration, keyFunc func(r
 					retryAfter = int(window.Seconds())
 				}
 				w.Header().Set("Retry-After", strconv.Itoa(retryAfter))
-				utils.JSONCodedErrorResponse(w, "RATE_LIMITED", "too many requests, please try again later", http.StatusTooManyRequests, map[string]any{
+				utils.JSONErrorCode(w, constants.ErrRateLimited, http.StatusTooManyRequests, map[string]any{
 					"retry_after_seconds": retryAfter,
 				})
 				return

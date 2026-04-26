@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/controllers"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/utils"
@@ -49,7 +50,7 @@ func RequireAuth(controller *controllers.Controller) func(http.Handler) http.Han
 			}
 
 			if err != nil {
-				utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+				utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 				return
 			}
 
@@ -74,12 +75,12 @@ func RequireSubscription(statuses ...string) func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			user := UserFromContext(r.Context())
 			if user == nil {
-				utils.JSONErrorResponse(w, "authentication required", http.StatusUnauthorized)
+				utils.JSONErrorCode(w, constants.ErrAuthRequired, http.StatusUnauthorized, nil)
 				return
 			}
 
 			if !allowed[user.SubscriptionStatus] {
-				utils.JSONCodedErrorResponse(w, "SUBSCRIPTION_REQUIRED", "active subscription required", http.StatusForbidden, nil)
+				utils.JSONErrorCode(w, constants.ErrSubscriptionRequired, http.StatusForbidden, nil)
 				return
 			}
 
@@ -105,7 +106,7 @@ func RequireScope(scopes ...string) func(http.Handler) http.Handler {
 					}
 				}
 				if !hasScope {
-					utils.JSONCodedErrorResponse(w, "INSUFFICIENT_SCOPE", "API key does not have the required scope", http.StatusForbidden, nil)
+					utils.JSONErrorCode(w, constants.ErrInsufficientScope, http.StatusForbidden, nil)
 					return
 				}
 			}
@@ -122,11 +123,11 @@ func RequireAdmin() func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			user := UserFromContext(r.Context())
 			if user == nil {
-				utils.JSONErrorResponse(w, "authentication required", http.StatusUnauthorized)
+				utils.JSONErrorCode(w, constants.ErrAuthRequired, http.StatusUnauthorized, nil)
 				return
 			}
 			if user.Type != "admin" {
-				utils.JSONCodedErrorResponse(w, "ADMIN_REQUIRED", "admin access required", http.StatusForbidden, nil)
+				utils.JSONErrorCode(w, constants.ErrAdminRequired, http.StatusForbidden, nil)
 				return
 			}
 			next.ServeHTTP(w, r)
