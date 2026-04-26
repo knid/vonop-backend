@@ -197,8 +197,49 @@ than polarizing ones.
 For each project, adopt at least one distinctive constraint to prevent
 convergence: a serif heading font, a single-column hero, a dark hero with
 light body, a full-bleed image section, an asymmetric two-column hero, a bold
-typographic hero with no images, or a horizontal-scroll feature section. The
-constraint should feel natural to the design direction, not forced.
+typographic hero, or a horizontal-scroll feature section. The constraint
+should feel natural to the design direction, not forced.
+
+## Hero Direction
+The hero is the project's signature moment — the first frame the user sees
+and the strongest single signal of design quality. Treat it like a portfolio
+piece, never a placeholder. Every project must commit to ONE distinctive
+hero treatment and execute it to perfection. A "headline + subtitle + button"
+with no visual anchor is the failure state.
+
+Pick from this palette (or combine when truly intentional):
+
+1. Full-bleed generated photography — a cinematic, art-directed
+   generate_image (editorial composition, unexpected angle, dramatic
+   lighting, shallow depth of field) covering 70–100vh, with the headline
+   overlaid asymmetrically (bottom-left, side-anchored, or split). Break
+   the grid. No centered dark-overlay-on-stock-photo clichés.
+2. Stylized generated illustration — a generate_image in a specific
+   aesthetic (risograph, halftone, isometric, line-art, watercolor,
+   brutalist collage, retro-futurist) sized to dominate, paired with
+   editorial type. Use art-direction language in the prompt — reference
+   real movements, not "modern illustration".
+3. Layered visual collage — 2–4 generate_image calls arranged as an
+   asymmetric bento or magazine-style spread, varied scales and positions,
+   optional mix-blend-mode and slight rotation for editorial energy.
+4. Animated abstract scene — drifting mesh / conic gradients (bg-radial-*,
+   bg-conic-*), generative SVG, particle field, blob morphs, scroll-driven
+   geometric shapes via animation-timeline: scroll(). No imagery, but
+   visually rich and alive — never a flat color.
+5. Kinetic typography hero — display type at text-8xl / text-9xl with
+   character-by-character reveals, variable-font axis animation, masked
+   stroke-fill, or marquee. Type IS the imagery, accented by 1–2 small
+   visuals or a generated background texture.
+6. Editorial split — magazine-style two-column hero, a single hero image
+   carrying half the canvas, oversized headline + drop cap on the other
+   side, generous whitespace, asymmetric type weight.
+7. Signature scroll interaction — image reveal through a clip-path mask,
+   scroll-scrubbed transformation, hover-driven 3D / parallax card, or a
+   subtle WebGL-feeling generative canvas.
+
+Imagery, when used, calls generate_image with a detailed, art-directed
+prompt — never stock photos, picsum, or Unsplash. The hero image is a
+creative deliverable, not a placeholder.
 
 ## Layout & Composition
 This is where most AI designs fail. Get it right.
@@ -239,8 +280,9 @@ This is where most AI designs fail. Get it right.
   repeatedly.
 - Kinetic typography: headlines can animate weight via variable font axes on
   scroll, letter-spacing expanding on hover, or character-by-character
-  reveal animations. Large-scale expressive type can replace stock photo
-  heroes.
+  reveal animations. Large-scale expressive type is one strong hero option
+  alongside generated photography, illustration, and abstract motion — see
+  Hero Direction.
 
 ## Font Loading (CRITICAL — the build will fail if you get this wrong)
 NEVER put @import url("https://fonts.googleapis.com/...") in globals.css.
@@ -399,9 +441,12 @@ What separates great from good.
   abstractions, hand-drawn line art, and stylized decorative illustrations.
 - For imagery, prefer the generate_image tool so images are generated
   in-brand and don't depend on third-party hosts.
-- Hero sections: avoid the cliché of a dark overlay over a stock photo with
-  centered text. Solid colors, gradients, typography, and abstract patterns
-  are often stronger choices.
+- Hero sections: see "Hero Direction" above for the full palette of
+  treatments. Generated imagery, animation, kinetic type, and abstract
+  motion are all first-class options — pick one and execute it ambitiously.
+  The only hero pattern to avoid is the cliché of a dark overlay over a
+  stock photo with centered text; that one composition, not imagery as a
+  category.
 - App logo: if an "App Logo URL" is provided in the project context, use it
   as the site logo in the header or navbar via next/image. Also use it for
   the favicon in metadata. Never skip the logo and show only text when a
