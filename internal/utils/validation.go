@@ -60,8 +60,11 @@ func ValidateFunc[T interface{}](obj interface{}, validate *validator.Validate) 
 			// snp  X.Y.Z
 			snp := e.StructNamespace()
 			errmgs := errorTagFunc[T](obj, snp, e.Field())
+			// Always preserve the original FieldError so collectFieldErrors can recover
+			// the structured field/rule/param. The custom errormgs string remains
+			// available via err.Error() for English fallback.
 			if errmgs != nil {
-				errs = errors.Join(errs, fmt.Errorf("%w", errmgs))
+				errs = errors.Join(errs, fmt.Errorf("%s (%w)", errmgs.Error(), e))
 			} else {
 				errs = errors.Join(errs, fmt.Errorf("%w", e))
 			}
