@@ -73,7 +73,7 @@ func (v *HttpViews) GetDatabaseTableRows(w http.ResponseWriter, r *http.Request)
 
 	result, err := v.Controller.GetTableRows(appID, tableName, page, pageSize, sortCol, sortDir)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -115,7 +115,7 @@ func (v *HttpViews) InsertDatabaseRow(w http.ResponseWriter, r *http.Request) {
 
 	row, err := v.Controller.InsertTableRow(appID, tableName, req.Data)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -159,7 +159,7 @@ func (v *HttpViews) UpdateDatabaseRow(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := v.Controller.UpdateTableCell(appID, tableName, req.Column, req.Value, req.PrimaryKey); err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -205,7 +205,7 @@ func (v *HttpViews) DeleteDatabaseRow(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := v.Controller.DeleteTableRow(appID, tableName, req.PrimaryKey); err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -246,7 +246,7 @@ func (v *HttpViews) BulkUpdateDatabaseRow(w http.ResponseWriter, r *http.Request
 	}
 
 	if err := v.Controller.UpdateTableRow(appID, tableName, req.Data, req.PrimaryKey); err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 

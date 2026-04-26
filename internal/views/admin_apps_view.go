@@ -75,7 +75,7 @@ func (v *HttpViews) AdminUpdateApp(w http.ResponseWriter, r *http.Request) {
 
 	result, err := v.Controller.AdminUpdateApp(id, req)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -96,7 +96,7 @@ func (v *HttpViews) AdminDeleteApp(w http.ResponseWriter, r *http.Request) {
 
 	id := chi.URLParam(r, "appId")
 	if err := v.Controller.AdminDeleteApp(id); err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 

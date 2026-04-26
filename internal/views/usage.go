@@ -18,13 +18,13 @@ func (v *HttpViews) GetMontlyUsage(w http.ResponseWriter, r *http.Request) {
 
 	buildTasks, err := v.Controller.DB.GetAppBuildTasksByUser(user)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
 	projects, err := v.Controller.GetProjects(user)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 

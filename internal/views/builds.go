@@ -32,18 +32,18 @@ func (v *HttpViews) GetProjectBuilds(w http.ResponseWriter, r *http.Request) {
 
 	projectInformationRes, err := v.Controller.GetProject(user, projectID)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 	project, err := v.Controller.GetProjectModelById(projectInformationRes.ID.String())
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
 	builds, err := v.Controller.GetBuilds(project)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -66,7 +66,7 @@ func (v *HttpViews) CreateProjectBuild(w http.ResponseWriter, r *http.Request) {
 
 	limits, planName, err := v.Controller.GetUserLimitsWithPlan(user)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -114,12 +114,12 @@ func (v *HttpViews) CreateProjectBuild(w http.ResponseWriter, r *http.Request) {
 
 	projectInformationRes, err := v.Controller.GetProject(user, projectID)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 	project, err := v.Controller.GetProjectModelById(projectInformationRes.ID.String())
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -138,7 +138,7 @@ func (v *HttpViews) CreateProjectBuild(w http.ResponseWriter, r *http.Request) {
 
 	buildCreateRes, err := v.Controller.CreateBuild(user, buildCreateReq)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -166,7 +166,7 @@ func (v *HttpViews) GetProjectBuild(w http.ResponseWriter, r *http.Request) {
 
 	build, err := v.Controller.GetBuild(user, buildID)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 

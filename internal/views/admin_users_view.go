@@ -94,7 +94,7 @@ func (v *HttpViews) AdminUpdateUser(w http.ResponseWriter, r *http.Request) {
 
 	result, err := v.Controller.AdminUpdateUser(id, req)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -115,7 +115,7 @@ func (v *HttpViews) AdminDeleteUser(w http.ResponseWriter, r *http.Request) {
 
 	id := chi.URLParam(r, "userId")
 	if err := v.Controller.AdminDeleteUser(id); err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -137,7 +137,7 @@ func (v *HttpViews) AdminImpersonateUser(w http.ResponseWriter, r *http.Request)
 	id := chi.URLParam(r, "userId")
 	result, err := v.Controller.AdminImpersonateUser(id)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -159,7 +159,7 @@ func (v *HttpViews) AdminResetPassword(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "userId")
 	result, err := v.Controller.AdminResetPassword(id)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -193,7 +193,7 @@ func (v *HttpViews) AdminGrantCredits(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := v.Controller.AdminGrantCredits(id, req); err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -228,7 +228,7 @@ func (v *HttpViews) AdminForceSubscription(w http.ResponseWriter, r *http.Reques
 
 	result, err := v.Controller.AdminForceSubscription(id, req)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 

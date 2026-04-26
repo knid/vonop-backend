@@ -30,7 +30,7 @@ func (v *HttpViews) GetNavBarItems(w http.ResponseWriter, r *http.Request) {
 
 	user, err := v.Controller.GetUserModelById(project.UserID.String())
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -68,7 +68,7 @@ func (v *HttpViews) GetNavBarItemsBackground(w http.ResponseWriter, r *http.Requ
 
 	user, err := v.Controller.GetUserModelById(project.UserID.String())
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -106,7 +106,7 @@ func (v *HttpViews) GetJSInjectionData(w http.ResponseWriter, r *http.Request) {
 
 	user, err := v.Controller.GetUserModelById(project.UserID.String())
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 

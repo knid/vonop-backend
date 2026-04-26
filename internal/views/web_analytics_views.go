@@ -26,7 +26,7 @@ func (v *HttpViews) CollectAnalytics(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := v.Controller.CollectAnalyticsEvents(r, batch); err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -42,7 +42,7 @@ func (v *HttpViews) CollectAnalyticsBatch(w http.ResponseWriter, r *http.Request
 	}
 
 	if err := v.Controller.CollectAnalyticsEvents(r, batch); err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 

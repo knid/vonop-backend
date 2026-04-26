@@ -18,7 +18,7 @@ func (v *HttpViews) GetReferralCode(w http.ResponseWriter, r *http.Request) {
 
 	result, err := v.Controller.GetOrCreateReferralCode(user)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -34,7 +34,7 @@ func (v *HttpViews) GetReferralStats(w http.ResponseWriter, r *http.Request) {
 
 	result, err := v.Controller.GetReferralStats(user)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -56,7 +56,7 @@ func (v *HttpViews) ApplyReferralCode(w http.ResponseWriter, r *http.Request) {
 
 	err = v.Controller.ApplyReferralCode(user, req.Code)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 

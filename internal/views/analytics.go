@@ -20,7 +20,7 @@ func (v *HttpViews) CreateSession(w http.ResponseWriter, r *http.Request) {
 
 	response, err := v.Controller.CreateSession(r, req)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -36,7 +36,7 @@ func (v *HttpViews) LogAppEvent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := v.Controller.LogAppEvent(r, req); err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -63,7 +63,7 @@ func (v *HttpViews) GetAllDevices(w http.ResponseWriter, r *http.Request) {
 
 	projectInformationRes, err := v.Controller.GetProject(user, projectID)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -95,7 +95,7 @@ func (v *HttpViews) GetUniqueDevices(w http.ResponseWriter, r *http.Request) {
 
 	projectInformationRes, err := v.Controller.GetProject(user, projectID)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -159,7 +159,7 @@ func (v *HttpViews) GetActiveDevices(w http.ResponseWriter, r *http.Request) {
 
 	projectInformationRes, err := v.Controller.GetProject(user, projectID)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -191,7 +191,7 @@ func (v *HttpViews) GetSessions(w http.ResponseWriter, r *http.Request) {
 
 	projectInformationRes, err := v.Controller.GetProject(user, projectID)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -255,7 +255,7 @@ func (v *HttpViews) GetProjectEvents(w http.ResponseWriter, r *http.Request) {
 
 	projectInformationRes, err := v.Controller.GetProject(user, projectID)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 

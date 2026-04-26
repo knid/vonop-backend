@@ -112,7 +112,7 @@ func (v *HttpViews) UpdateDashboard(w http.ResponseWriter, r *http.Request) {
 
 	dashboard, err := v.Controller.UpdateDashboard(appID, req.Name, req.Description, req.Settings)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -137,7 +137,7 @@ func (v *HttpViews) DeleteDashboard(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := v.Controller.DeleteDashboard(appID); err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -221,7 +221,7 @@ func (v *HttpViews) UpdateDashboardPanel(w http.ResponseWriter, r *http.Request)
 
 	panel, err := v.Controller.UpdateDashboardPanel(panelID, dashboard.ID, req.Title, req.PanelType, req.Config, req.SortOrder, req.GridWidth)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -262,7 +262,7 @@ func (v *HttpViews) DeleteDashboardPanel(w http.ResponseWriter, r *http.Request)
 	}
 
 	if err := v.Controller.DeleteDashboardPanel(panelID, dashboard.ID); err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -292,7 +292,7 @@ func (v *HttpViews) GetDashboardData(w http.ResponseWriter, r *http.Request) {
 
 	integration, err := v.getDBIntegration(project, dashboard.Provider)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -335,7 +335,7 @@ func (v *HttpViews) GetPanelData(w http.ResponseWriter, r *http.Request) {
 
 	integration, err := v.getDBIntegration(project, dashboard.Provider)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -500,7 +500,7 @@ func (v *HttpViews) UpdatePanelCell(w http.ResponseWriter, r *http.Request) {
 
 	integration, err := v.getDBIntegration(project, dashboard.Provider)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -522,7 +522,7 @@ func (v *HttpViews) UpdatePanelCell(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := v.Controller.UpdateCell(dashboard, integration, resolvedTable, resolvedColumn, req.Value, req.PrimaryKey); err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 

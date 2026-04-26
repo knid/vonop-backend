@@ -64,7 +64,7 @@ func (v *HttpViews) SendProjectNotification(w http.ResponseWriter, r *http.Reque
 	var notifications []models.Notification
 	projects, err := v.Controller.GetProjects(user)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -97,7 +97,7 @@ func (v *HttpViews) SendProjectNotification(w http.ResponseWriter, r *http.Reque
 
 	limits, planName, err := v.Controller.GetUserLimitsWithPlan(user)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -136,7 +136,7 @@ func (v *HttpViews) SendProjectNotification(w http.ResponseWriter, r *http.Reque
 
 	notificationSendRes, err := v.Controller.SendNotification(user, notificationCreateReq)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -159,7 +159,7 @@ func (v *HttpViews) GetProjectNotification(w http.ResponseWriter, r *http.Reques
 
 	notificationRes, err := v.Controller.GetNotification(user, notificationID)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 

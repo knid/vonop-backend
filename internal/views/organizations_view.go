@@ -29,7 +29,7 @@ func (v *HttpViews) CreateOrganization(w http.ResponseWriter, r *http.Request) {
 
 	result, err := v.Controller.CreateOrganization(user, req)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -52,7 +52,7 @@ func (v *HttpViews) GetUserOrganizations(w http.ResponseWriter, r *http.Request)
 
 	result, err := v.Controller.GetUserOrganizations(user)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -74,7 +74,7 @@ func (v *HttpViews) GetOrganization(w http.ResponseWriter, r *http.Request) {
 
 	result, err := v.Controller.GetOrganization(user, orgID)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -102,7 +102,7 @@ func (v *HttpViews) UpdateOrganization(w http.ResponseWriter, r *http.Request) {
 
 	result, err := v.Controller.UpdateOrganization(user, orgID, req)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -124,7 +124,7 @@ func (v *HttpViews) DeleteOrganization(w http.ResponseWriter, r *http.Request) {
 
 	err = v.Controller.DeleteOrganization(user, orgID)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -146,7 +146,7 @@ func (v *HttpViews) GetOrganizationMembers(w http.ResponseWriter, r *http.Reques
 
 	result, err := v.Controller.GetOrganizationMembers(user, orgID)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -174,7 +174,7 @@ func (v *HttpViews) InviteOrganizationMember(w http.ResponseWriter, r *http.Requ
 
 	result, err := v.Controller.InviteOrganizationMember(user, orgID, req)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -203,7 +203,7 @@ func (v *HttpViews) AcceptOrganizationInvite(w http.ResponseWriter, r *http.Requ
 
 	result, err := v.Controller.AcceptOrganizationInvite(user, token)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -226,7 +226,7 @@ func (v *HttpViews) RemoveOrganizationMember(w http.ResponseWriter, r *http.Requ
 
 	err = v.Controller.RemoveOrganizationMember(user, orgID, memberID)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -255,7 +255,7 @@ func (v *HttpViews) UpdateMemberRole(w http.ResponseWriter, r *http.Request) {
 
 	result, err := v.Controller.UpdateMemberRole(user, orgID, memberID, req)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 

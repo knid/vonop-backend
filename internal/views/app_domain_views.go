@@ -66,7 +66,7 @@ func (v *HttpViews) AddAppDomain(w http.ResponseWriter, r *http.Request) {
 
 	result, err := v.Controller.AddAppDomain(project, user, req)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -100,7 +100,7 @@ func (v *HttpViews) VerifyAppDomain(w http.ResponseWriter, r *http.Request) {
 
 	result, err := v.Controller.VerifyAppDomain(domainID, project)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -136,7 +136,7 @@ func (v *HttpViews) RemoveAppDomain(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := v.Controller.RemoveAppDomain(domainID, project); err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 

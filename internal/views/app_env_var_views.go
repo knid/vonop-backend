@@ -125,7 +125,7 @@ func (v *HttpViews) SetAppEnvVar(w http.ResponseWriter, r *http.Request) {
 
 	envVar, err := v.Controller.SetAppEnvVar(project, req)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -169,7 +169,7 @@ func (v *HttpViews) UpdateAppEnvVar(w http.ResponseWriter, r *http.Request) {
 
 	envVar, err := v.Controller.UpdateAppEnvVar(evID, project, req)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -206,7 +206,7 @@ func (v *HttpViews) DeleteAppEnvVar(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := v.Controller.DeleteAppEnvVar(evID, project); err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 

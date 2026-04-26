@@ -49,7 +49,7 @@ func (v *HttpViews) UpdateProject(w http.ResponseWriter, r *http.Request) {
 
 	projectCreateRes, err := v.Controller.UpdateProject(r, user, projectCreateReq)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -78,13 +78,13 @@ func (v *HttpViews) CreateProject(w http.ResponseWriter, r *http.Request) {
 
 	limits, planName, err := v.Controller.GetUserLimitsWithPlan(user)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
 	projects, err := v.Controller.GetProjects(user)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -110,7 +110,7 @@ func (v *HttpViews) CreateProject(w http.ResponseWriter, r *http.Request) {
 
 	projectCreateRes, err := v.Controller.CreateProject(user, projectCreateReq)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 

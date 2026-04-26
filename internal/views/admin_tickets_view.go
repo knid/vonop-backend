@@ -75,7 +75,7 @@ func (v *HttpViews) AdminUpdateTicket(w http.ResponseWriter, r *http.Request) {
 
 	result, err := v.Controller.AdminUpdateTicket(id, req)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 

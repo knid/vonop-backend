@@ -66,7 +66,7 @@ func (v *HttpViews) AdminDeleteProject(w http.ResponseWriter, r *http.Request) {
 
 	id := chi.URLParam(r, "projectId")
 	if err := v.Controller.AdminDeleteProject(id); err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 

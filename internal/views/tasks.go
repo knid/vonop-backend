@@ -24,7 +24,7 @@ func (v *HttpViews) CancelBuildTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := v.Controller.CancelBuildTask(user, taskID); err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -44,7 +44,7 @@ func (v *HttpViews) GetAllTasks(w http.ResponseWriter, r *http.Request) {
 			utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 			return
 		}
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 

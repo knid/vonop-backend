@@ -24,7 +24,7 @@ func (v *HttpViews) GetDeployments(w http.ResponseWriter, r *http.Request) {
 
 	deployments, err := v.Controller.GetDeployments(user)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -49,7 +49,7 @@ func (v *HttpViews) GetDeployment(w http.ResponseWriter, r *http.Request) {
 	}
 	deployment, err := v.Controller.GetDeploymentByID(deploymentID)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -80,7 +80,7 @@ func (v *HttpViews) CreateDeployment(w http.ResponseWriter, r *http.Request) {
 
 	deployment, err := v.Controller.CreateDeploymentTask(user, deploymentCreateReq)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -112,7 +112,7 @@ func (v *HttpViews) UpdateDeployment(w http.ResponseWriter, r *http.Request) {
 
 	deployment, err := v.Controller.UpdateDeploymentTask(user, deploymentID, deploymentCreateReq)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -139,7 +139,7 @@ func (v *HttpViews) SwitchDeploymentToManaged(w http.ResponseWriter, r *http.Req
 	}
 	updated, err := v.Controller.SwitchToManaged(r.Context(), user, deploymentID)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 	utils.JSONResponse(w, map[string]interface{}{
@@ -168,7 +168,7 @@ func (v *HttpViews) SignUnsignedIPA(w http.ResponseWriter, r *http.Request) {
 
 	task, err := v.Controller.SignUnsignedIPATask(user, signIPAReq)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -194,13 +194,13 @@ func (v *HttpViews) CheckSignIPATaskStatus(w http.ResponseWriter, r *http.Reques
 
 	signTask, err := v.Controller.DB.GetIOSSignTaskById(signTaskID)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
 	project, err := v.Controller.DB.GetProjectById(signTask.ProjectID.String())
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 	if project.UserID.String() != user.ID.String() {
@@ -243,7 +243,7 @@ func (v *HttpViews) GetBuildSignStatus(w http.ResponseWriter, r *http.Request) {
 			utils.JSONError(w, constants.ErrNotFound, "No sign task for this build.", http.StatusNotFound, nil)
 			return
 		}
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 

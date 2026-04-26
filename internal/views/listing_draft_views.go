@@ -39,7 +39,7 @@ func (v *HttpViews) DraftListing(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := v.Controller.DraftListing(r.Context(), user, appID, req)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 	utils.JSONResponse(w, resp, http.StatusOK)

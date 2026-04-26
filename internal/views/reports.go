@@ -48,13 +48,13 @@ func (v *HttpViews) UpdateBuildTaskStatus(w http.ResponseWriter, r *http.Request
 
 	err = v.Controller.UpdateBuildTaskStatus(reportBuildReq)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
 	task, err := v.Controller.DB.GetAppBuildTaskWithRelations(reportBuildReq.TaskID)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -103,13 +103,13 @@ func (v *HttpViews) UpdateDeploymentStatus(w http.ResponseWriter, r *http.Reques
 
 	err = v.Controller.UpdateDeploymentStatus(reportDeploymentReq)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
 	deployment, err := v.Controller.DB.GetDeploymentWithRelations(reportDeploymentReq.DeploymentID)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -160,7 +160,7 @@ func (v *HttpViews) UpdateSignIPATaskStatus(w http.ResponseWriter, r *http.Reque
 
 	err = v.Controller.UpdateSignIPATaskStatus(reportSignReq)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 

@@ -75,7 +75,7 @@ func (v *HttpViews) CopyTemplate(w http.ResponseWriter, r *http.Request) {
 
 	project, err := v.Controller.CopyTemplate(r.Context(), user, slug)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -116,7 +116,7 @@ func (v *HttpViews) CreateAdminTemplate(w http.ResponseWriter, r *http.Request) 
 
 	template, err := v.Controller.CreateAppTemplate(user, req)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -141,7 +141,7 @@ func (v *HttpViews) CreateTemplateFromApp(w http.ResponseWriter, r *http.Request
 
 	template, err := v.Controller.CreateTemplateFromApp(user, appID, req)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -208,7 +208,7 @@ func (v *HttpViews) UpdateAdminTemplate(w http.ResponseWriter, r *http.Request) 
 
 	template, err := v.Controller.UpdateAppTemplate(id, user, req)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -226,7 +226,7 @@ func (v *HttpViews) DeleteAdminTemplate(w http.ResponseWriter, r *http.Request) 
 
 	id := chi.URLParam(r, "id")
 	if err := v.Controller.DeleteAppTemplate(id, user); err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -250,7 +250,7 @@ func (v *HttpViews) PublishAdminTemplate(w http.ResponseWriter, r *http.Request)
 
 	template, err := v.Controller.PublishAppTemplate(id, user, req)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -275,7 +275,7 @@ func (v *HttpViews) SortAdminTemplate(w http.ResponseWriter, r *http.Request) {
 
 	template, err := v.Controller.SortAppTemplate(id, user, req)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 

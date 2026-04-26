@@ -30,7 +30,7 @@ func (v *HttpViews) CheckStatus(w http.ResponseWriter, r *http.Request) {
 
 	user, err := v.Controller.GetUserModelById(project.UserID.String())
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 

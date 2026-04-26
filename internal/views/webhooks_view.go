@@ -28,7 +28,7 @@ func (v *HttpViews) CreateWebhookEndpoint(w http.ResponseWriter, r *http.Request
 
 	result, err := v.Controller.CreateWebhookEndpoint(user, req)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -44,7 +44,7 @@ func (v *HttpViews) ListWebhookEndpoints(w http.ResponseWriter, r *http.Request)
 
 	result, err := v.Controller.ListWebhookEndpoints(user)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -72,7 +72,7 @@ func (v *HttpViews) UpdateWebhookEndpoint(w http.ResponseWriter, r *http.Request
 
 	result, err := v.Controller.UpdateWebhookEndpoint(user, webhookID, req)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -94,7 +94,7 @@ func (v *HttpViews) DeleteWebhookEndpoint(w http.ResponseWriter, r *http.Request
 
 	err = v.Controller.DeleteWebhookEndpoint(user, webhookID)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 

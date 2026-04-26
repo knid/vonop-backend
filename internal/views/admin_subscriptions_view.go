@@ -52,7 +52,7 @@ func (v *HttpViews) AdminUpdateSubscription(w http.ResponseWriter, r *http.Reque
 
 	result, err := v.Controller.AdminUpdateSubscription(id, req)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 

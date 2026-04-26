@@ -115,7 +115,7 @@ func (v *HttpViews) CreateApp(w http.ResponseWriter, r *http.Request) {
 
 	project, err := v.Controller.CreateDraftAppProject(r.Context(), user, req)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -308,7 +308,7 @@ func (v *HttpViews) UpdateApp(w http.ResponseWriter, r *http.Request) {
 
 	project, err := v.Controller.UpdateAppProject(appID, user, req)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -342,7 +342,7 @@ func (v *HttpViews) DeleteApp(w http.ResponseWriter, r *http.Request) {
 
 	appID := chi.URLParam(r, "appId")
 	if err := v.Controller.DeleteAppProject(appID, user); err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -421,7 +421,7 @@ func (v *HttpViews) CreateAppFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := v.Controller.CreateAppFile(project, req.FilePath, req.Content, req.FileType); err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -470,7 +470,7 @@ func (v *HttpViews) UpdateAppFile(w http.ResponseWriter, r *http.Request) {
 
 	// fid is the file path
 	if err := v.Controller.UpdateAppFile(project, fid, req.Content); err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -507,7 +507,7 @@ func (v *HttpViews) DeleteAppFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := v.Controller.DeleteAppFile(project, fid); err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -603,7 +603,7 @@ func (v *HttpViews) RestoreAppSnapshot(w http.ResponseWriter, r *http.Request) {
 
 	_, err = v.Controller.RestoreAppSnapshot(project, sid)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -638,7 +638,7 @@ func (v *HttpViews) GetAppSnapshotDiff(w http.ResponseWriter, r *http.Request) {
 
 	diff, err := v.Controller.GetAppSnapshotDiff(appID, sid)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -762,7 +762,7 @@ func (v *HttpViews) ConnectAppIntegration(w http.ResponseWriter, r *http.Request
 
 	integ, err := v.Controller.ConnectAppIntegration(project, req)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -811,7 +811,7 @@ func (v *HttpViews) UpdateAppIntegration(w http.ResponseWriter, r *http.Request)
 
 	integ, err := v.Controller.UpdateAppIntegration(iid, project, req)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -844,7 +844,7 @@ func (v *HttpViews) DisconnectAppIntegration(w http.ResponseWriter, r *http.Requ
 	}
 
 	if err := v.Controller.DisconnectAppIntegration(iid, project); err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 

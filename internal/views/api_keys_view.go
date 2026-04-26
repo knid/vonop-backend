@@ -28,7 +28,7 @@ func (v *HttpViews) CreateAPIKey(w http.ResponseWriter, r *http.Request) {
 
 	result, err := v.Controller.CreateAPIKey(user, req)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -44,7 +44,7 @@ func (v *HttpViews) ListAPIKeys(w http.ResponseWriter, r *http.Request) {
 
 	result, err := v.Controller.ListAPIKeys(user)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -66,7 +66,7 @@ func (v *HttpViews) DeleteAPIKey(w http.ResponseWriter, r *http.Request) {
 
 	err = v.Controller.DeleteAPIKey(user, keyID)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 

@@ -655,7 +655,7 @@ func (v *HttpViews) CancelJob(w http.ResponseWriter, r *http.Request) {
 
 	err = v.Controller.CancelJob(jobID, user.ID)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 

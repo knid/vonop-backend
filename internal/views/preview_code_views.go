@@ -33,7 +33,7 @@ func (v *HttpViews) GeneratePreviewCode(w http.ResponseWriter, r *http.Request) 
 
 	pc, err := v.Controller.GeneratePreviewCode(user, req.AppProjectID)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -59,7 +59,7 @@ func (v *HttpViews) RedeemPreviewCode(w http.ResponseWriter, r *http.Request) {
 
 	pc, project, err := v.Controller.RedeemPreviewCode(user, code)
 	if err != nil {
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
