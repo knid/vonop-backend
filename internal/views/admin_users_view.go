@@ -6,6 +6,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-playground/validator/v10"
+	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/utils"
 )
@@ -31,18 +32,18 @@ func adminListParamsFromQuery(r *http.Request) requests.AdminListParams {
 func (v *HttpViews) AdminListUsers(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 	if user.Type != "admin" {
-		utils.JSONErrorResponse(w, "admin access required", http.StatusForbidden)
+		utils.JSONErrorCode(w, constants.ErrAdminRequired, http.StatusForbidden, nil)
 		return
 	}
 
 	params := adminListParamsFromQuery(r)
 	result, err := v.Controller.AdminListUsers(params)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -53,18 +54,18 @@ func (v *HttpViews) AdminListUsers(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) AdminGetUser(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 	if user.Type != "admin" {
-		utils.JSONErrorResponse(w, "admin access required", http.StatusForbidden)
+		utils.JSONErrorCode(w, constants.ErrAdminRequired, http.StatusForbidden, nil)
 		return
 	}
 
 	id := chi.URLParam(r, "userId")
 	result, err := v.Controller.AdminGetUser(id)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
 
@@ -75,11 +76,11 @@ func (v *HttpViews) AdminGetUser(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) AdminUpdateUser(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 	if user.Type != "admin" {
-		utils.JSONErrorResponse(w, "admin access required", http.StatusForbidden)
+		utils.JSONErrorCode(w, constants.ErrAdminRequired, http.StatusForbidden, nil)
 		return
 	}
 
@@ -87,13 +88,13 @@ func (v *HttpViews) AdminUpdateUser(w http.ResponseWriter, r *http.Request) {
 
 	var req requests.AdminUpdateUserRequest
 	if err := utils.ParseJSONBody(r, &req); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
 	result, err := v.Controller.AdminUpdateUser(id, req)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
@@ -104,17 +105,17 @@ func (v *HttpViews) AdminUpdateUser(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) AdminDeleteUser(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 	if user.Type != "admin" {
-		utils.JSONErrorResponse(w, "admin access required", http.StatusForbidden)
+		utils.JSONErrorCode(w, constants.ErrAdminRequired, http.StatusForbidden, nil)
 		return
 	}
 
 	id := chi.URLParam(r, "userId")
 	if err := v.Controller.AdminDeleteUser(id); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
@@ -125,18 +126,18 @@ func (v *HttpViews) AdminDeleteUser(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) AdminImpersonateUser(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 	if user.Type != "admin" {
-		utils.JSONErrorResponse(w, "admin access required", http.StatusForbidden)
+		utils.JSONErrorCode(w, constants.ErrAdminRequired, http.StatusForbidden, nil)
 		return
 	}
 
 	id := chi.URLParam(r, "userId")
 	result, err := v.Controller.AdminImpersonateUser(id)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
@@ -147,18 +148,18 @@ func (v *HttpViews) AdminImpersonateUser(w http.ResponseWriter, r *http.Request)
 func (v *HttpViews) AdminResetPassword(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 	if user.Type != "admin" {
-		utils.JSONErrorResponse(w, "admin access required", http.StatusForbidden)
+		utils.JSONErrorCode(w, constants.ErrAdminRequired, http.StatusForbidden, nil)
 		return
 	}
 
 	id := chi.URLParam(r, "userId")
 	result, err := v.Controller.AdminResetPassword(id)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
@@ -169,11 +170,11 @@ func (v *HttpViews) AdminResetPassword(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) AdminGrantCredits(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 	if user.Type != "admin" {
-		utils.JSONErrorResponse(w, "admin access required", http.StatusForbidden)
+		utils.JSONErrorCode(w, constants.ErrAdminRequired, http.StatusForbidden, nil)
 		return
 	}
 
@@ -181,18 +182,18 @@ func (v *HttpViews) AdminGrantCredits(w http.ResponseWriter, r *http.Request) {
 
 	var req requests.AdminGrantCreditsRequest
 	if err := utils.ParseJSONBody(r, &req); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
 	validate := validator.New()
 	if err := utils.ValidateFunc[requests.AdminGrantCreditsRequest](req, validate); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
 	if err := v.Controller.AdminGrantCredits(id, req); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
@@ -203,11 +204,11 @@ func (v *HttpViews) AdminGrantCredits(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) AdminForceSubscription(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 	if user.Type != "admin" {
-		utils.JSONErrorResponse(w, "admin access required", http.StatusForbidden)
+		utils.JSONErrorCode(w, constants.ErrAdminRequired, http.StatusForbidden, nil)
 		return
 	}
 
@@ -215,19 +216,19 @@ func (v *HttpViews) AdminForceSubscription(w http.ResponseWriter, r *http.Reques
 
 	var req requests.AdminForceSubscriptionRequest
 	if err := utils.ParseJSONBody(r, &req); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
 	validate := validator.New()
 	if err := utils.ValidateFunc[requests.AdminForceSubscriptionRequest](req, validate); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
 	result, err := v.Controller.AdminForceSubscription(id, req)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 

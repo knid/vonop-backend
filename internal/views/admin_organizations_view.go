@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/utils"
 )
 
@@ -11,18 +12,18 @@ import (
 func (v *HttpViews) AdminListOrganizations(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 	if user.Type != "admin" {
-		utils.JSONErrorResponse(w, "admin access required", http.StatusForbidden)
+		utils.JSONErrorCode(w, constants.ErrAdminRequired, http.StatusForbidden, nil)
 		return
 	}
 
 	params := adminListParamsFromQuery(r)
 	result, err := v.Controller.AdminListOrganizations(params)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -33,18 +34,18 @@ func (v *HttpViews) AdminListOrganizations(w http.ResponseWriter, r *http.Reques
 func (v *HttpViews) AdminGetOrganization(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 	if user.Type != "admin" {
-		utils.JSONErrorResponse(w, "admin access required", http.StatusForbidden)
+		utils.JSONErrorCode(w, constants.ErrAdminRequired, http.StatusForbidden, nil)
 		return
 	}
 
 	id := chi.URLParam(r, "orgId")
 	result, err := v.Controller.AdminGetOrganization(id)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
 
