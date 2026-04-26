@@ -3,6 +3,7 @@ package views
 import (
 	"net/http"
 
+	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/utils"
 	"github.com/posthog/posthog-go"
@@ -11,18 +12,18 @@ import (
 func (v *HttpViews) GoogleMobileLogin(w http.ResponseWriter, r *http.Request) {
 	var req requests.GoogleMobileLoginRequest
 	if err := utils.ParseJSONBody(r, &req); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
 	if req.IDToken == "" {
-		utils.JSONErrorResponse(w, "id_token is required", http.StatusBadRequest)
+		utils.JSONErrorCode(w, constants.ErrValidationRequired, http.StatusBadRequest, map[string]any{"field": "id_token"})
 		return
 	}
 
 	loginRes, err := v.Controller.GoogleMobileLogin(req)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
