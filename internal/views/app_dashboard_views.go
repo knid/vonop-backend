@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-playground/validator/v10"
+	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/controllers"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/requests"
@@ -19,7 +20,7 @@ import (
 func (v *HttpViews) CreateDashboard(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 	if requireActiveSubscription(w, user) {
@@ -32,19 +33,19 @@ func (v *HttpViews) CreateDashboard(w http.ResponseWriter, r *http.Request) {
 	appID := chi.URLParam(r, "appId")
 	project, err := v.Controller.GetAppProject(appID, user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
 
 	var req requests.CreateDashboardRequest
 	if err := utils.ParseJSONBody(r, &req); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
 	validate := validator.New()
 	if err := req.Validate(validate); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
@@ -61,20 +62,20 @@ func (v *HttpViews) CreateDashboard(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) GetDashboard(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	appID := chi.URLParam(r, "appId")
 	_, err = v.Controller.GetAppProject(appID, user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
 
 	dashboard, panels, err := v.Controller.GetDashboard(appID)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
 
@@ -86,32 +87,32 @@ func (v *HttpViews) GetDashboard(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) UpdateDashboard(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	appID := chi.URLParam(r, "appId")
 	_, err = v.Controller.GetAppProject(appID, user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
 
 	var req requests.UpdateDashboardRequest
 	if err := utils.ParseJSONBody(r, &req); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
 	validate := validator.New()
 	if err := req.Validate(validate); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
 	dashboard, err := v.Controller.UpdateDashboard(appID, req.Name, req.Description, req.Settings)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
@@ -124,19 +125,19 @@ func (v *HttpViews) UpdateDashboard(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) DeleteDashboard(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	appID := chi.URLParam(r, "appId")
 	_, err = v.Controller.GetAppProject(appID, user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
 
 	if err := v.Controller.DeleteDashboard(appID); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
@@ -147,20 +148,20 @@ func (v *HttpViews) DeleteDashboard(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) GetDashboardPanels(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	appID := chi.URLParam(r, "appId")
 	_, err = v.Controller.GetAppProject(appID, user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
 
 	dashboard, panels, err := v.Controller.GetDashboard(appID)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
 	_ = dashboard
@@ -187,14 +188,14 @@ func (v *HttpViews) GetDashboardPanels(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) UpdateDashboardPanel(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	appID := chi.URLParam(r, "appId")
 	_, err = v.Controller.GetAppProject(appID, user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
 
@@ -202,25 +203,25 @@ func (v *HttpViews) UpdateDashboardPanel(w http.ResponseWriter, r *http.Request)
 
 	dashboard, _, err := v.Controller.GetDashboard(appID)
 	if err != nil {
-		utils.JSONErrorResponse(w, "dashboard not found", http.StatusNotFound)
+		utils.JSONError(w, constants.ErrNotFound, "Dashboard not found.", http.StatusNotFound, nil)
 		return
 	}
 
 	var req requests.UpdateDashboardPanelRequest
 	if err := utils.ParseJSONBody(r, &req); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
 	validate := validator.New()
 	if err := req.Validate(validate); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
 	panel, err := v.Controller.UpdateDashboardPanel(panelID, dashboard.ID, req.Title, req.PanelType, req.Config, req.SortOrder, req.GridWidth)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
@@ -241,14 +242,14 @@ func (v *HttpViews) UpdateDashboardPanel(w http.ResponseWriter, r *http.Request)
 func (v *HttpViews) DeleteDashboardPanel(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	appID := chi.URLParam(r, "appId")
 	_, err = v.Controller.GetAppProject(appID, user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
 
@@ -256,12 +257,12 @@ func (v *HttpViews) DeleteDashboardPanel(w http.ResponseWriter, r *http.Request)
 
 	dashboard, _, err := v.Controller.GetDashboard(appID)
 	if err != nil {
-		utils.JSONErrorResponse(w, "dashboard not found", http.StatusNotFound)
+		utils.JSONError(w, constants.ErrNotFound, "Dashboard not found.", http.StatusNotFound, nil)
 		return
 	}
 
 	if err := v.Controller.DeleteDashboardPanel(panelID, dashboard.ID); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
@@ -272,26 +273,26 @@ func (v *HttpViews) DeleteDashboardPanel(w http.ResponseWriter, r *http.Request)
 func (v *HttpViews) GetDashboardData(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	appID := chi.URLParam(r, "appId")
 	project, err := v.Controller.GetAppProject(appID, user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
 
 	dashboard, panels, err := v.Controller.GetDashboard(appID)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
 
 	integration, err := v.getDBIntegration(project, dashboard.Provider)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
@@ -303,14 +304,14 @@ func (v *HttpViews) GetDashboardData(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) GetPanelData(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	appID := chi.URLParam(r, "appId")
 	project, err := v.Controller.GetAppProject(appID, user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
 
@@ -318,23 +319,23 @@ func (v *HttpViews) GetPanelData(w http.ResponseWriter, r *http.Request) {
 
 	dashboard, _, err := v.Controller.GetDashboard(appID)
 	if err != nil {
-		utils.JSONErrorResponse(w, "dashboard not found", http.StatusNotFound)
+		utils.JSONError(w, constants.ErrNotFound, "Dashboard not found.", http.StatusNotFound, nil)
 		return
 	}
 
 	panel, err := v.Controller.DB.GetAppDashboardPanelByID(panelID)
 	if err != nil {
-		utils.JSONErrorResponse(w, "panel not found", http.StatusNotFound)
+		utils.JSONError(w, constants.ErrNotFound, "Panel not found.", http.StatusNotFound, nil)
 		return
 	}
 	if panel.DashboardID != dashboard.ID {
-		utils.JSONErrorResponse(w, "panel does not belong to this dashboard", http.StatusBadRequest)
+		utils.JSONError(w, constants.ErrValidationBody, "Panel does not belong to this dashboard.", http.StatusBadRequest, nil)
 		return
 	}
 
 	integration, err := v.getDBIntegration(project, dashboard.Provider)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
@@ -346,7 +347,7 @@ func (v *HttpViews) GetPanelData(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) ChatDashboard(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 	if requireActiveSubscription(w, user) {
@@ -359,25 +360,25 @@ func (v *HttpViews) ChatDashboard(w http.ResponseWriter, r *http.Request) {
 	appID := chi.URLParam(r, "appId")
 	project, err := v.Controller.GetAppProject(appID, user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
 
 	dashboard, _, err := v.Controller.GetDashboard(appID)
 	if err != nil {
-		utils.JSONErrorResponse(w, "dashboard not found. Create one first.", http.StatusNotFound)
+		utils.JSONError(w, constants.ErrNotFound, "Dashboard not found. Create one first.", http.StatusNotFound, nil)
 		return
 	}
 
 	var req requests.DashboardChatRequest
 	if err := utils.ParseJSONBody(r, &req); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
 	validate := validator.New()
 	if err := req.Validate(validate); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
@@ -394,20 +395,20 @@ func (v *HttpViews) ChatDashboard(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) GetDashboardSchema(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	appID := chi.URLParam(r, "appId")
 	_, err = v.Controller.GetAppProject(appID, user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
 
 	dashboard, _, err := v.Controller.GetDashboard(appID)
 	if err != nil {
-		utils.JSONErrorResponse(w, "dashboard not found", http.StatusNotFound)
+		utils.JSONError(w, constants.ErrNotFound, "Dashboard not found.", http.StatusNotFound, nil)
 		return
 	}
 
@@ -420,7 +421,7 @@ func (v *HttpViews) GetDashboardSchema(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) RefreshDashboardSchema(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 	if requireActiveSubscription(w, user) {
@@ -433,13 +434,13 @@ func (v *HttpViews) RefreshDashboardSchema(w http.ResponseWriter, r *http.Reques
 	appID := chi.URLParam(r, "appId")
 	_, err = v.Controller.GetAppProject(appID, user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
 
 	schema, err := v.Controller.RefreshDashboardSchema(r.Context(), appID, user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -452,14 +453,14 @@ func (v *HttpViews) RefreshDashboardSchema(w http.ResponseWriter, r *http.Reques
 func (v *HttpViews) UpdatePanelCell(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	appID := chi.URLParam(r, "appId")
 	project, err := v.Controller.GetAppProject(appID, user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
 
@@ -467,39 +468,39 @@ func (v *HttpViews) UpdatePanelCell(w http.ResponseWriter, r *http.Request) {
 
 	dashboard, _, err := v.Controller.GetDashboard(appID)
 	if err != nil {
-		utils.JSONErrorResponse(w, "dashboard not found", http.StatusNotFound)
+		utils.JSONError(w, constants.ErrNotFound, "Dashboard not found.", http.StatusNotFound, nil)
 		return
 	}
 
 	panel, err := v.Controller.DB.GetAppDashboardPanelByID(panelID)
 	if err != nil {
-		utils.JSONErrorResponse(w, "panel not found", http.StatusNotFound)
+		utils.JSONError(w, constants.ErrNotFound, "Panel not found.", http.StatusNotFound, nil)
 		return
 	}
 	if panel.DashboardID != dashboard.ID {
-		utils.JSONErrorResponse(w, "panel does not belong to this dashboard", http.StatusBadRequest)
+		utils.JSONError(w, constants.ErrValidationBody, "Panel does not belong to this dashboard.", http.StatusBadRequest, nil)
 		return
 	}
 	if panel.PanelType != "table" {
-		utils.JSONErrorResponse(w, "cell editing is only supported for table panels", http.StatusBadRequest)
+		utils.JSONError(w, constants.ErrValidationBody, "Cell editing is only supported for table panels.", http.StatusBadRequest, nil)
 		return
 	}
 
 	var req requests.UpdateCellRequest
 	if err := utils.ParseJSONBody(r, &req); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
 	validate := validator.New()
 	if err := req.Validate(validate); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
 	integration, err := v.getDBIntegration(project, dashboard.Provider)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
@@ -521,7 +522,7 @@ func (v *HttpViews) UpdatePanelCell(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := v.Controller.UpdateCell(dashboard, integration, resolvedTable, resolvedColumn, req.Value, req.PrimaryKey); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 

@@ -97,7 +97,7 @@ func (v *HttpViews) GetAppAsset(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) CreateApp(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 	if requireActiveSubscription(w, user) {
@@ -109,13 +109,13 @@ func (v *HttpViews) CreateApp(w http.ResponseWriter, r *http.Request) {
 
 	var req requests.GenerateAppRequest
 	if err := utils.ParseJSONBody(r, &req); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
 	project, err := v.Controller.CreateDraftAppProject(r.Context(), user, req)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
@@ -149,7 +149,7 @@ func (v *HttpViews) CreateApp(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) GetApps(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
@@ -160,7 +160,7 @@ func (v *HttpViews) GetApps(w http.ResponseWriter, r *http.Request) {
 
 	projects, err := v.Controller.GetAppProjectsByUserFiltered(user, types)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -222,14 +222,14 @@ func (v *HttpViews) GetApps(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) GetApp(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	appID := chi.URLParam(r, "appId")
 	project, err := v.Controller.GetAppProject(appID, user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
 
@@ -295,20 +295,20 @@ func (v *HttpViews) GetApp(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) UpdateApp(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	appID := chi.URLParam(r, "appId")
 	var req requests.UpdateAppProjectRequest
 	if err := utils.ParseJSONBody(r, &req); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
 	project, err := v.Controller.UpdateAppProject(appID, user, req)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
@@ -336,13 +336,13 @@ func (v *HttpViews) UpdateApp(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) DeleteApp(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	appID := chi.URLParam(r, "appId")
 	if err := v.Controller.DeleteAppProject(appID, user); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
@@ -356,7 +356,7 @@ func (v *HttpViews) DeleteApp(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) GetAppFiles(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
@@ -364,13 +364,13 @@ func (v *HttpViews) GetAppFiles(w http.ResponseWriter, r *http.Request) {
 	platform := chi.URLParam(r, "platform")
 	project, err := v.Controller.GetAppProject(appID, user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
 
 	fileMap, err := v.Controller.GetAppGeneratedFiles(project.ID.String())
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 	_ = platform // platform param kept for API compatibility
@@ -394,34 +394,34 @@ func (v *HttpViews) GetAppFiles(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) CreateAppFile(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	appID := chi.URLParam(r, "appId")
 	project, err := v.Controller.GetAppProject(appID, user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
 
 	var req requests.AppFileCreateRequest
 	if err := utils.ParseJSONBody(r, &req); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 	validate := validator.New()
 	if err := req.Validate(validate); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 	if utils.IsHiddenEditorFile(req.FilePath) {
-		utils.JSONErrorResponse(w, "this file is managed by the platform and cannot be edited", http.StatusForbidden)
+		utils.JSONError(w, constants.ErrForbidden, "This file is managed by the platform and cannot be edited.", http.StatusForbidden, nil)
 		return
 	}
 
 	if err := v.Controller.CreateAppFile(project, req.FilePath, req.Content, req.FileType); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
@@ -441,7 +441,7 @@ func (v *HttpViews) CreateAppFile(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) UpdateAppFile(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
@@ -449,28 +449,28 @@ func (v *HttpViews) UpdateAppFile(w http.ResponseWriter, r *http.Request) {
 	fid, _ := url.PathUnescape(chi.URLParam(r, "fid"))
 	project, err := v.Controller.GetAppProject(appID, user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
 
 	var req requests.AppFileUpdateRequest
 	if err := utils.ParseJSONBody(r, &req); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 	validate := validator.New()
 	if err := req.Validate(validate); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 	if utils.IsHiddenEditorFile(fid) {
-		utils.JSONErrorResponse(w, "this file is managed by the platform and cannot be edited", http.StatusForbidden)
+		utils.JSONError(w, constants.ErrForbidden, "This file is managed by the platform and cannot be edited.", http.StatusForbidden, nil)
 		return
 	}
 
 	// fid is the file path
 	if err := v.Controller.UpdateAppFile(project, fid, req.Content); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
@@ -490,7 +490,7 @@ func (v *HttpViews) UpdateAppFile(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) DeleteAppFile(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
@@ -498,16 +498,16 @@ func (v *HttpViews) DeleteAppFile(w http.ResponseWriter, r *http.Request) {
 	fid, _ := url.PathUnescape(chi.URLParam(r, "fid"))
 	project, err := v.Controller.GetAppProject(appID, user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
 	if utils.IsHiddenEditorFile(fid) {
-		utils.JSONErrorResponse(w, "this file is managed by the platform and cannot be deleted", http.StatusForbidden)
+		utils.JSONError(w, constants.ErrForbidden, "This file is managed by the platform and cannot be deleted.", http.StatusForbidden, nil)
 		return
 	}
 
 	if err := v.Controller.DeleteAppFile(project, fid); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
@@ -523,20 +523,20 @@ func (v *HttpViews) DeleteAppFile(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) GetAppSnapshots(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	appID := chi.URLParam(r, "appId")
 	project, err := v.Controller.GetAppProject(appID, user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
 
 	entries, err := v.Controller.GetAppSnapshots(project.ID.String())
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -547,26 +547,26 @@ func (v *HttpViews) GetAppSnapshots(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) CreateAppSnapshot(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	appID := chi.URLParam(r, "appId")
 	project, err := v.Controller.GetAppProject(appID, user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
 
 	var req requests.CreateAppSnapshotRequest
 	if err := utils.ParseJSONBody(r, &req); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
 	hash, err := v.Controller.CreateAppSnapshot(project, req.Description, "manual")
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -589,7 +589,7 @@ func (v *HttpViews) CreateAppSnapshot(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) RestoreAppSnapshot(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
@@ -597,13 +597,13 @@ func (v *HttpViews) RestoreAppSnapshot(w http.ResponseWriter, r *http.Request) {
 	sid := chi.URLParam(r, "sid")
 	project, err := v.Controller.GetAppProject(appID, user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
 
 	_, err = v.Controller.RestoreAppSnapshot(project, sid)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
@@ -623,7 +623,7 @@ func (v *HttpViews) RestoreAppSnapshot(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) GetAppSnapshotDiff(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
@@ -631,14 +631,14 @@ func (v *HttpViews) GetAppSnapshotDiff(w http.ResponseWriter, r *http.Request) {
 	sid := chi.URLParam(r, "sid")
 	project, err := v.Controller.GetAppProject(appID, user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
 	_ = project
 
 	diff, err := v.Controller.GetAppSnapshotDiff(appID, sid)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
@@ -649,7 +649,7 @@ func (v *HttpViews) GetAppSnapshotDiff(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) ExportApp(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
@@ -657,7 +657,7 @@ func (v *HttpViews) ExportApp(w http.ResponseWriter, r *http.Request) {
 	limits, limitsErr := v.Controller.GetUserLimits(user)
 	if limitsErr != nil || !limits.CanAccessCode {
 		go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_NEED, map[string]any{"action": "access_code"})
-		utils.JSONCodedErrorResponse(w, "FEATURE_NOT_AVAILABLE", "code access requires Starter or Professional plan", http.StatusForbidden, nil)
+		utils.JSONError(w, constants.ErrFeatureNotAvailable, "code access requires Starter or Professional plan", http.StatusForbidden, nil)
 		return
 	}
 
@@ -665,13 +665,13 @@ func (v *HttpViews) ExportApp(w http.ResponseWriter, r *http.Request) {
 	platform := chi.URLParam(r, "platform")
 	project, err := v.Controller.GetAppProject(appID, user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
 
 	fileMap, err := v.Controller.ExportAppAsZIP(project.ID.String())
 	if err != nil || len(fileMap) == 0 {
-		utils.JSONErrorResponse(w, "no files to export", http.StatusNotFound)
+		utils.JSONError(w, constants.ErrNotFound, "No files to export.", http.StatusNotFound, nil)
 		return
 	}
 	_ = platform // kept for API compatibility
@@ -708,20 +708,20 @@ func (v *HttpViews) ExportApp(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) GetAppIntegrations(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	appID := chi.URLParam(r, "appId")
 	project, err := v.Controller.GetAppProject(appID, user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
 
 	integrations, err := v.Controller.GetAppIntegrations(project.ID.String())
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -743,26 +743,26 @@ func (v *HttpViews) GetAppIntegrations(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) ConnectAppIntegration(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	appID := chi.URLParam(r, "appId")
 	project, err := v.Controller.GetAppProject(appID, user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
 
 	var req requests.ConnectIntegrationRequest
 	if err := utils.ParseJSONBody(r, &req); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
 	integ, err := v.Controller.ConnectAppIntegration(project, req)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
@@ -791,7 +791,7 @@ func (v *HttpViews) ConnectAppIntegration(w http.ResponseWriter, r *http.Request
 func (v *HttpViews) UpdateAppIntegration(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
@@ -799,19 +799,19 @@ func (v *HttpViews) UpdateAppIntegration(w http.ResponseWriter, r *http.Request)
 	iid := chi.URLParam(r, "iid")
 	project, err := v.Controller.GetAppProject(appID, user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
 
 	var req requests.UpdateIntegrationRequest
 	if err := utils.ParseJSONBody(r, &req); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
 	integ, err := v.Controller.UpdateAppIntegration(iid, project, req)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
@@ -831,7 +831,7 @@ func (v *HttpViews) UpdateAppIntegration(w http.ResponseWriter, r *http.Request)
 func (v *HttpViews) DisconnectAppIntegration(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
@@ -839,12 +839,12 @@ func (v *HttpViews) DisconnectAppIntegration(w http.ResponseWriter, r *http.Requ
 	iid := chi.URLParam(r, "iid")
 	project, err := v.Controller.GetAppProject(appID, user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
 
 	if err := v.Controller.DisconnectAppIntegration(iid, project); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
@@ -865,7 +865,7 @@ func (v *HttpViews) DisconnectAppIntegration(w http.ResponseWriter, r *http.Requ
 func (v *HttpViews) ConvertToMobile(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 	if requireActiveSubscription(w, user) {
@@ -875,33 +875,34 @@ func (v *HttpViews) ConvertToMobile(w http.ResponseWriter, r *http.Request) {
 	limits, limitsErr := v.Controller.GetUserLimits(user)
 	if limitsErr != nil || !limits.CanBuildMobile {
 		go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_NEED, map[string]any{"action": "convert_to_mobile"})
-		utils.JSONCodedErrorResponse(w, "FEATURE_NOT_AVAILABLE", "mobile conversion requires Professional plan", http.StatusForbidden, nil)
+		utils.JSONError(w, constants.ErrFeatureNotAvailable, "mobile conversion requires Professional plan", http.StatusForbidden, nil)
 		return
 	}
 
 	if limits.MaxMobileApps > 0 {
 		mobileCount, _ := v.Controller.DB.CountAppProjectsByUserIDAndType(user.ID.String(), "mobile_app")
 		if mobileCount >= limits.MaxMobileApps {
-			utils.JSONCodedErrorResponse(w, "QUOTA_REACHED",
+			utils.JSONError(w, constants.ErrQuotaReached,
 				fmt.Sprintf("you have reached your mobile app limit (%d)", limits.MaxMobileApps),
 				http.StatusForbidden, nil)
 			return
 		}
 	} else if limits.MaxMobileApps == 0 {
-		utils.JSONCodedErrorResponse(w, "FEATURE_NOT_AVAILABLE", "mobile app creation is not available on your plan", http.StatusForbidden, nil)
+		utils.JSONError(w, constants.ErrFeatureNotAvailable, "mobile app creation is not available on your plan", http.StatusForbidden, nil)
 		return
 	}
 
 	appID := chi.URLParam(r, "appId")
 	clone, err := v.Controller.CloneAppProjectAsMobile(user, appID)
 	if err != nil {
-		status := http.StatusInternalServerError
-		if err.Error() == "unauthorized" {
-			status = http.StatusForbidden
-		} else if err.Error() == "source project not found" {
-			status = http.StatusNotFound
+		switch err.Error() {
+		case "unauthorized":
+			utils.JSONErrorCode(w, constants.ErrForbidden, http.StatusForbidden, nil)
+		case "source project not found":
+			utils.JSONErrorCode(w, constants.ErrAppNotFound, http.StatusNotFound, nil)
+		default:
+			utils.JSONInternalError(w, err)
 		}
-		utils.JSONErrorResponse(w, err.Error(), status)
 		return
 	}
 
@@ -932,14 +933,14 @@ func (v *HttpViews) GetV2IntegrationProviders(w http.ResponseWriter, r *http.Req
 func (v *HttpViews) CaptureAppScreenshot(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	appID := chi.URLParam(r, "appId")
 	project, err := v.Controller.GetAppProject(appID, user)
 	if err != nil {
-		utils.JSONErrorResponse(w, "App not found", http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrAppNotFound, http.StatusNotFound, nil)
 		return
 	}
 
@@ -947,7 +948,7 @@ func (v *HttpViews) CaptureAppScreenshot(w http.ResponseWriter, r *http.Request)
 		URL string `json:"url"`
 	}
 	if err := utils.ParseJSONBody(r, &body); err != nil || body.URL == "" {
-		utils.JSONErrorResponse(w, "url required", http.StatusBadRequest)
+		utils.JSONErrorCode(w, constants.ErrValidationRequired, http.StatusBadRequest, map[string]any{"field": "url"})
 		return
 	}
 
@@ -960,14 +961,14 @@ func (v *HttpViews) CaptureAppScreenshot(w http.ResponseWriter, r *http.Request)
 func (v *HttpViews) GetAppInit(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	appID := chi.URLParam(r, "appId")
 	project, err := v.Controller.GetAppProject(appID, user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
 

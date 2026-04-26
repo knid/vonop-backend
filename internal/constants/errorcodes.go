@@ -34,10 +34,12 @@ const (
 	ErrValidationBody          = "VALIDATION_BODY"
 
 	// App
-	ErrAppNotFound     = "APP_NOT_FOUND"
-	ErrAppForbidden    = "APP_FORBIDDEN"
-	ErrAppNameTaken    = "APP_NAME_TAKEN"
-	ErrAppLimitReached = "APP_LIMIT_REACHED" // details: { limit, used }
+	ErrAppNotFound         = "APP_NOT_FOUND"
+	ErrAppForbidden        = "APP_FORBIDDEN"
+	ErrAppNameTaken        = "APP_NAME_TAKEN"
+	ErrAppLimitReached     = "APP_LIMIT_REACHED" // details: { limit, used }
+	ErrProjectNotFound     = "PROJECT_NOT_FOUND"
+	ErrProjectLimitReached = "PROJECT_LIMIT_REACHED" // details: { limit, used, plan_name }
 
 	// Build
 	ErrBuildNotFound     = "BUILD_NOT_FOUND"
@@ -130,10 +132,12 @@ var DefaultMessages = map[string]string{
 	ErrValidationOutOfRange:    "Value is out of range.",
 	ErrValidationBody:          "Could not parse request body.",
 
-	ErrAppNotFound:     "App not found.",
-	ErrAppForbidden:    "You don't have access to this app.",
-	ErrAppNameTaken:    "An app with this name already exists.",
-	ErrAppLimitReached: "App limit reached on your plan.",
+	ErrAppNotFound:         "App not found.",
+	ErrAppForbidden:        "You don't have access to this app.",
+	ErrAppNameTaken:        "An app with this name already exists.",
+	ErrAppLimitReached:     "App limit reached on your plan.",
+	ErrProjectNotFound:     "Project not found.",
+	ErrProjectLimitReached: "You've reached your project limit on this plan.",
 
 	ErrBuildNotFound:     "Build not found.",
 	ErrBuildLimitReached: "Build limit reached on your plan.",
