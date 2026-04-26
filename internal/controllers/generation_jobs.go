@@ -3,12 +3,20 @@ package controllers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/services/remoteconfig"
+)
+
+// Sentinel errors for CreateJob so the view can distinguish "in progress"
+// (429 GENERATION_IN_PROGRESS) from infrastructure failures (500).
+var (
+	ErrConcurrentJobLimit          = errors.New("concurrent job limit reached")
+	ErrGenerationAlreadyInProgress = errors.New("a generation is already in progress")
 )
 
 // --- Conversation / clarification types ---
@@ -72,7 +80,7 @@ func (c *Controller) CreateJob(userID uuid.UUID, jobType string, appID uuid.UUID
 	}
 	maxJobs := c.RemoteConfig.GetInt(remoteconfig.MaxConcurrentJobsPerUser, userID.String())
 	if running >= maxJobs {
-		return nil, fmt.Errorf("maximum %d concurrent jobs allowed", maxJobs)
+		return nil, fmt.Errorf("%w: maximum %d concurrent jobs allowed", ErrConcurrentJobLimit, maxJobs)
 	}
 	// Prevent duplicate initial generation on the same app: if this app already
 	// has a running generate_app job, reject the new one to avoid wasting
@@ -82,7 +90,7 @@ func (c *Controller) CreateJob(userID uuid.UUID, jobType string, appID uuid.UUID
 		activeJobs, _ := c.DB.GetUserActiveJobs(userID.String())
 		for _, j := range activeJobs {
 			if j.Type == "generate_app" && j.AppID == appID {
-				return nil, fmt.Errorf("a generation is already in progress")
+				return nil, ErrGenerationAlreadyInProgress
 			}
 		}
 	}

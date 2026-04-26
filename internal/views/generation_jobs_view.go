@@ -3,6 +3,7 @@ package views
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -37,7 +38,16 @@ func (v *HttpViews) handleStreamOrAsync(w http.ResponseWriter, r *http.Request, 
 	// Always create a background job
 	job, err := v.Controller.CreateJob(user.ID, cfg.JobType, cfg.AppID)
 	if err != nil {
-		utils.JSONError(w, constants.ErrGenerationInProgress, err.Error(), http.StatusTooManyRequests, nil)
+		switch {
+		case errors.Is(err, controllers.ErrGenerationAlreadyInProgress):
+			utils.JSONErrorCode(w, constants.ErrGenerationInProgress, http.StatusTooManyRequests, nil)
+		case errors.Is(err, controllers.ErrConcurrentJobLimit):
+			utils.JSONErrorCode(w, constants.ErrRateLimited, http.StatusTooManyRequests, nil)
+		default:
+			// "failed to check running jobs" / "failed to create job" — infrastructure
+			// failures, not "in progress". Never leak the raw text.
+			utils.JSONInternalError(w, err)
+		}
 		return
 	}
 
