@@ -9,6 +9,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-playground/validator/v10"
 	"github.com/google/uuid"
+	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/utils"
@@ -18,20 +19,20 @@ import (
 func (v *HttpViews) GetDatabaseSchema(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	appID := chi.URLParam(r, "appId")
 	_, err = v.Controller.GetAppProject(appID, user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
 
 	schema, err := v.Controller.GetDatabaseSchema(appID)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -42,20 +43,20 @@ func (v *HttpViews) GetDatabaseSchema(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) GetDatabaseTableRows(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	appID := chi.URLParam(r, "appId")
 	_, err = v.Controller.GetAppProject(appID, user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
 
 	tableName := chi.URLParam(r, "table")
 	if tableName == "" {
-		utils.JSONErrorResponse(w, "table name is required", http.StatusBadRequest)
+		utils.JSONErrorCode(w, constants.ErrValidationRequired, http.StatusBadRequest, map[string]any{"field": "table"})
 		return
 	}
 
@@ -72,7 +73,7 @@ func (v *HttpViews) GetDatabaseTableRows(w http.ResponseWriter, r *http.Request)
 
 	result, err := v.Controller.GetTableRows(appID, tableName, page, pageSize, sortCol, sortDir)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
@@ -83,38 +84,38 @@ func (v *HttpViews) GetDatabaseTableRows(w http.ResponseWriter, r *http.Request)
 func (v *HttpViews) InsertDatabaseRow(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	appID := chi.URLParam(r, "appId")
 	_, err = v.Controller.GetAppProject(appID, user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
 
 	tableName := chi.URLParam(r, "table")
 	if tableName == "" {
-		utils.JSONErrorResponse(w, "table name is required", http.StatusBadRequest)
+		utils.JSONErrorCode(w, constants.ErrValidationRequired, http.StatusBadRequest, map[string]any{"field": "table"})
 		return
 	}
 
 	var req requests.InsertRowRequest
 	if err := utils.ParseJSONBody(r, &req); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
 	validate := validator.New()
 	if err := req.Validate(validate); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
 	row, err := v.Controller.InsertTableRow(appID, tableName, req.Data)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
@@ -128,37 +129,37 @@ func (v *HttpViews) InsertDatabaseRow(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) UpdateDatabaseRow(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	appID := chi.URLParam(r, "appId")
 	_, err = v.Controller.GetAppProject(appID, user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
 
 	tableName := chi.URLParam(r, "table")
 	if tableName == "" {
-		utils.JSONErrorResponse(w, "table name is required", http.StatusBadRequest)
+		utils.JSONErrorCode(w, constants.ErrValidationRequired, http.StatusBadRequest, map[string]any{"field": "table"})
 		return
 	}
 
 	var req requests.UpdateRowRequest
 	if err := utils.ParseJSONBody(r, &req); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
 	validate := validator.New()
 	if err := req.Validate(validate); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
 	if err := v.Controller.UpdateTableCell(appID, tableName, req.Column, req.Value, req.PrimaryKey); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
@@ -174,37 +175,37 @@ func (v *HttpViews) UpdateDatabaseRow(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) DeleteDatabaseRow(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	appID := chi.URLParam(r, "appId")
 	_, err = v.Controller.GetAppProject(appID, user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
 
 	tableName := chi.URLParam(r, "table")
 	if tableName == "" {
-		utils.JSONErrorResponse(w, "table name is required", http.StatusBadRequest)
+		utils.JSONErrorCode(w, constants.ErrValidationRequired, http.StatusBadRequest, map[string]any{"field": "table"})
 		return
 	}
 
 	var req requests.DeleteRowRequest
 	if err := utils.ParseJSONBody(r, &req); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
 	validate := validator.New()
 	if err := req.Validate(validate); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
 	if err := v.Controller.DeleteTableRow(appID, tableName, req.PrimaryKey); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
@@ -215,37 +216,37 @@ func (v *HttpViews) DeleteDatabaseRow(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) BulkUpdateDatabaseRow(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	appID := chi.URLParam(r, "appId")
 	_, err = v.Controller.GetAppProject(appID, user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
 
 	tableName := chi.URLParam(r, "table")
 	if tableName == "" {
-		utils.JSONErrorResponse(w, "table name is required", http.StatusBadRequest)
+		utils.JSONErrorCode(w, constants.ErrValidationRequired, http.StatusBadRequest, map[string]any{"field": "table"})
 		return
 	}
 
 	var req requests.BulkUpdateRowRequest
 	if err := utils.ParseJSONBody(r, &req); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
 	validate := validator.New()
 	if err := req.Validate(validate); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
 	if err := v.Controller.UpdateTableRow(appID, tableName, req.Data, req.PrimaryKey); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
@@ -256,26 +257,26 @@ func (v *HttpViews) BulkUpdateDatabaseRow(w http.ResponseWriter, r *http.Request
 func (v *HttpViews) GetDatabaseUploadURL(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	appID := chi.URLParam(r, "appId")
 	_, err = v.Controller.GetAppProject(appID, user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
 
 	var req requests.DatabaseUploadURLRequest
 	if err := utils.ParseJSONBody(r, &req); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
 	validate := validator.New()
 	if err := req.Validate(validate); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
@@ -288,7 +289,7 @@ func (v *HttpViews) GetDatabaseUploadURL(w http.ResponseWriter, r *http.Request)
 		"image/svg+xml": true,
 	}
 	if !allowedTypes[req.ContentType] {
-		utils.JSONErrorResponse(w, "unsupported content type; allowed: jpeg, png, webp, gif, svg", http.StatusBadRequest)
+		utils.JSONError(w, constants.ErrAssetInvalidType, "Unsupported content type. Allowed: jpeg, png, webp, gif, svg.", http.StatusBadRequest, nil)
 		return
 	}
 
@@ -315,7 +316,7 @@ func (v *HttpViews) GetDatabaseUploadURL(w http.ResponseWriter, r *http.Request)
 
 	presignedRequest, err := v.Controller.AssetsStorage.PutObject(r.Context(), objectKey, 300)
 	if err != nil {
-		utils.JSONErrorResponse(w, "failed to generate upload URL: "+err.Error(), http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 

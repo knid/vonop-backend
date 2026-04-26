@@ -5,12 +5,13 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/utils"
 )
 
 func (v *HttpViews) PutP8KeyToS3Presign(w http.ResponseWriter, r *http.Request) {
 	if _, err := v.Controller.GetUserFromReq(r); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
@@ -19,7 +20,7 @@ func (v *HttpViews) PutP8KeyToS3Presign(w http.ResponseWriter, r *http.Request) 
 
 	presignedRequest, err := v.Controller.UserApiKeysStorage.PutObject(r.Context(), objectKey, 300)
 	if err != nil {
-		utils.JSONErrorResponse(w, "Couldn't generate presigned request: "+err.Error(), http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -31,7 +32,7 @@ func (v *HttpViews) PutP8KeyToS3Presign(w http.ResponseWriter, r *http.Request) 
 
 func (v *HttpViews) PutAPNsKeyToS3Presign(w http.ResponseWriter, r *http.Request) {
 	if _, err := v.Controller.GetUserFromReq(r); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
@@ -40,7 +41,7 @@ func (v *HttpViews) PutAPNsKeyToS3Presign(w http.ResponseWriter, r *http.Request
 
 	presignedRequest, err := v.Controller.UserApiKeysStorage.PutObject(r.Context(), objectKey, 300)
 	if err != nil {
-		utils.JSONErrorResponse(w, "Couldn't generate presigned request: "+err.Error(), http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -52,7 +53,7 @@ func (v *HttpViews) PutAPNsKeyToS3Presign(w http.ResponseWriter, r *http.Request
 
 func (v *HttpViews) PutServiceAccountToS3Presign(w http.ResponseWriter, r *http.Request) {
 	if _, err := v.Controller.GetUserFromReq(r); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
@@ -61,7 +62,7 @@ func (v *HttpViews) PutServiceAccountToS3Presign(w http.ResponseWriter, r *http.
 
 	presignedRequest, err := v.Controller.UserApiKeysStorage.PutObject(r.Context(), objectKey, 300)
 	if err != nil {
-		utils.JSONErrorResponse(w, "Couldn't generate presigned request: "+err.Error(), http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -74,7 +75,7 @@ func (v *HttpViews) PutServiceAccountToS3Presign(w http.ResponseWriter, r *http.
 func (v *HttpViews) GetProfilePhotoFromS3Presign(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
@@ -83,7 +84,7 @@ func (v *HttpViews) GetProfilePhotoFromS3Presign(w http.ResponseWriter, r *http.
 
 	presignedRequest, err := v.Controller.AssetsStorage.GetObject(r.Context(), objectKey, 300)
 	if err != nil {
-		utils.JSONErrorResponse(w, "Couldn't generate presigned request: "+err.Error(), http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -96,7 +97,7 @@ func (v *HttpViews) GetProfilePhotoFromS3Presign(w http.ResponseWriter, r *http.
 func (v *HttpViews) PutProfilePhotoToS3Presign(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
@@ -105,7 +106,7 @@ func (v *HttpViews) PutProfilePhotoToS3Presign(w http.ResponseWriter, r *http.Re
 
 	presignedRequest, err := v.Controller.AssetsStorage.PutObject(r.Context(), objectKey, 300)
 	if err != nil {
-		utils.JSONErrorResponse(w, "Couldn't generate presigned request: "+err.Error(), http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -116,20 +117,20 @@ func (v *HttpViews) PutProfilePhotoToS3Presign(w http.ResponseWriter, r *http.Re
 }
 func (v *HttpViews) GetIconFromS3Presign(w http.ResponseWriter, r *http.Request) {
 	if _, err := v.Controller.GetUserFromReq(r); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	id := chi.URLParam(r, "iconId")
 	if id == "" {
-		utils.JSONErrorResponse(w, "icon ID is required", http.StatusBadRequest)
+		utils.JSONErrorCode(w, constants.ErrValidationRequired, http.StatusBadRequest, map[string]any{"field": "icon_id"})
 		return
 	}
 	objectKey := "icons/" + id + ".png"
 
 	presignedRequest, err := v.Controller.AssetsStorage.GetObject(r.Context(), objectKey, 300)
 	if err != nil {
-		utils.JSONErrorResponse(w, "Couldn't generate presigned request: "+err.Error(), http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -141,7 +142,7 @@ func (v *HttpViews) GetIconFromS3Presign(w http.ResponseWriter, r *http.Request)
 
 func (v *HttpViews) PutIconToS3Presign(w http.ResponseWriter, r *http.Request) {
 	if _, err := v.Controller.GetUserFromReq(r); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
@@ -150,7 +151,7 @@ func (v *HttpViews) PutIconToS3Presign(w http.ResponseWriter, r *http.Request) {
 
 	presignedRequest, err := v.Controller.AssetsStorage.PutObject(r.Context(), objectKey, 300)
 	if err != nil {
-		utils.JSONErrorResponse(w, "Couldn't generate presigned request: "+err.Error(), http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -162,13 +163,13 @@ func (v *HttpViews) PutIconToS3Presign(w http.ResponseWriter, r *http.Request) {
 
 func (v *HttpViews) GetScreenshotFromS3Presign(w http.ResponseWriter, r *http.Request) {
 	if _, err := v.Controller.GetUserFromReq(r); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	id := chi.URLParam(r, "screenshotId")
 	if id == "" {
-		utils.JSONErrorResponse(w, "screenshot ID is required", http.StatusBadRequest)
+		utils.JSONErrorCode(w, constants.ErrValidationRequired, http.StatusBadRequest, map[string]any{"field": "screenshot_id"})
 		return
 	}
 
@@ -176,7 +177,7 @@ func (v *HttpViews) GetScreenshotFromS3Presign(w http.ResponseWriter, r *http.Re
 
 	presignedRequest, err := v.Controller.AssetsStorage.GetObject(r.Context(), objectKey, 300)
 	if err != nil {
-		utils.JSONErrorResponse(w, "Couldn't generate presigned request: "+err.Error(), http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -188,7 +189,7 @@ func (v *HttpViews) GetScreenshotFromS3Presign(w http.ResponseWriter, r *http.Re
 }
 func (v *HttpViews) PutScreenshotToS3Presign(w http.ResponseWriter, r *http.Request) {
 	if _, err := v.Controller.GetUserFromReq(r); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
@@ -197,7 +198,7 @@ func (v *HttpViews) PutScreenshotToS3Presign(w http.ResponseWriter, r *http.Requ
 
 	presignedRequest, err := v.Controller.AssetsStorage.PutObject(r.Context(), objectKey, 300)
 	if err != nil {
-		utils.JSONErrorResponse(w, "Couldn't generate presigned request: "+err.Error(), http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -209,13 +210,13 @@ func (v *HttpViews) PutScreenshotToS3Presign(w http.ResponseWriter, r *http.Requ
 
 func (v *HttpViews) DownloadAABFromS3Presign(w http.ResponseWriter, r *http.Request) {
 	if _, err := v.Controller.GetUserFromReq(r); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	id := chi.URLParam(r, "buildId")
 	if id == "" {
-		utils.JSONErrorResponse(w, "build ID is required", http.StatusBadRequest)
+		utils.JSONErrorCode(w, constants.ErrValidationRequired, http.StatusBadRequest, map[string]any{"field": "build_id"})
 		return
 	}
 
@@ -223,7 +224,7 @@ func (v *HttpViews) DownloadAABFromS3Presign(w http.ResponseWriter, r *http.Requ
 
 	presignedRequest, err := v.Controller.AssetsStorage.GetObject(r.Context(), objectKey, 300)
 	if err != nil {
-		utils.JSONErrorResponse(w, "Couldn't generate presigned request: "+err.Error(), http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -235,13 +236,13 @@ func (v *HttpViews) DownloadAABFromS3Presign(w http.ResponseWriter, r *http.Requ
 
 func (v *HttpViews) DownloadIPAFromS3Presign(w http.ResponseWriter, r *http.Request) {
 	if _, err := v.Controller.GetUserFromReq(r); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	id := chi.URLParam(r, "buildId")
 	if id == "" {
-		utils.JSONErrorResponse(w, "build ID is required", http.StatusBadRequest)
+		utils.JSONErrorCode(w, constants.ErrValidationRequired, http.StatusBadRequest, map[string]any{"field": "build_id"})
 		return
 	}
 
@@ -249,7 +250,7 @@ func (v *HttpViews) DownloadIPAFromS3Presign(w http.ResponseWriter, r *http.Requ
 
 	presignedRequest, err := v.Controller.AssetsStorage.GetObject(r.Context(), objectKey, 300)
 	if err != nil {
-		utils.JSONErrorResponse(w, "Couldn't generate presigned request: "+err.Error(), http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -261,13 +262,13 @@ func (v *HttpViews) DownloadIPAFromS3Presign(w http.ResponseWriter, r *http.Requ
 
 func (v *HttpViews) GetNotificationImageFromS3Presign(w http.ResponseWriter, r *http.Request) {
 	if _, err := v.Controller.GetUserFromReq(r); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	id := chi.URLParam(r, "notificationId")
 	if id == "" {
-		utils.JSONErrorResponse(w, "notification ID is required", http.StatusBadRequest)
+		utils.JSONErrorCode(w, constants.ErrValidationRequired, http.StatusBadRequest, map[string]any{"field": "notification_id"})
 		return
 	}
 
@@ -275,7 +276,7 @@ func (v *HttpViews) GetNotificationImageFromS3Presign(w http.ResponseWriter, r *
 
 	presignedRequest, err := v.Controller.AssetsStorage.GetObject(r.Context(), objectKey, 60*60*24)
 	if err != nil {
-		utils.JSONErrorResponse(w, "Couldn't generate presigned request: "+err.Error(), http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -287,7 +288,7 @@ func (v *HttpViews) GetNotificationImageFromS3Presign(w http.ResponseWriter, r *
 
 func (v *HttpViews) PutNotificationImageToS3Presign(w http.ResponseWriter, r *http.Request) {
 	if _, err := v.Controller.GetUserFromReq(r); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
@@ -296,7 +297,7 @@ func (v *HttpViews) PutNotificationImageToS3Presign(w http.ResponseWriter, r *ht
 
 	presignedRequest, err := v.Controller.AssetsStorage.PutObject(r.Context(), objectKey, 300)
 	if err != nil {
-		utils.JSONErrorResponse(w, "Couldn't generate presigned request: "+err.Error(), http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 

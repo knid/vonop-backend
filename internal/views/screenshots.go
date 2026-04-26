@@ -23,19 +23,19 @@ type Screenshots struct {
 func (v *HttpViews) AutoGenerateScreenshots(w http.ResponseWriter, r *http.Request) {
 	var autoGenerateScreenshotsReq requests.NavBarAutoFillWithAIRequest
 	if err := utils.ParseJSONBody(r, &autoGenerateScreenshotsReq); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
 	validate := validator.New(validator.WithRequiredStructEnabled())
 	if err := utils.ValidateFunc[requests.NavBarAutoFillWithAIRequest](autoGenerateScreenshotsReq, validate); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 	if requireActiveSubscription(w, user) {
@@ -48,14 +48,14 @@ func (v *HttpViews) AutoGenerateScreenshots(w http.ResponseWriter, r *http.Reque
 	html, err := utils.FetchHTML(autoGenerateScreenshotsReq.URL, v.Controller.SecretManager.GetSecret("PROXY_HOST"), v.Controller.SecretManager.GetSecret("PROXY_AUTH"))
 	if err != nil {
 		slog.Error("error fetching page for screenshots", "error", err, "from", "screenshots")
-		utils.JSONErrorResponse(w, "Error fetching website. Try again please.", http.StatusBadRequest)
+		utils.JSONError(w, constants.ErrValidationBody, "Error fetching website. Try again please.", http.StatusBadRequest, nil)
 		return
 	}
 
 	urls := utils.ExtractAllURLs(html, autoGenerateScreenshotsReq.URL)
 	urls = append(urls, autoGenerateScreenshotsReq.URL)
 	if len(urls) == 0 {
-		utils.JSONErrorResponse(w, "No navigation URLs found on the page.", http.StatusBadRequest)
+		utils.JSONError(w, constants.ErrValidationBody, "No navigation URLs found on the page.", http.StatusBadRequest, nil)
 		return
 	}
 	output := map[string]any{"urls": urls}
@@ -69,14 +69,14 @@ func (v *HttpViews) AutoGenerateScreenshots(w http.ResponseWriter, r *http.Reque
 
 	outputJson, err := utils.GetJSONFromLLM(ctx, "claude-haiku-4-5", constants.LINK_SELECTION_FOR_SCREENSHOTS_PROMPT, string(data), v.Controller.AnthropicProvider())
 	if err != nil {
-		utils.JSONErrorResponse(w, "Could not generate screenshots. Try again please.", http.StatusBadRequest)
+		utils.JSONError(w, constants.ErrValidationBody, "Could not generate screenshots. Try again please.", http.StatusBadRequest, nil)
 		return
 	}
 
 	var screenshots Screenshots
 	if err := json.Unmarshal([]byte(outputJson), &screenshots); err != nil {
 		slog.Error("screenshot JSON unmarshal failed", "error", err, "raw_output", outputJson)
-		utils.JSONErrorResponse(w, "Could not generate screenshots. Try again please.", http.StatusBadRequest)
+		utils.JSONError(w, constants.ErrValidationBody, "Could not generate screenshots. Try again please.", http.StatusBadRequest, nil)
 		return
 	}
 

@@ -18,24 +18,23 @@ import (
 	"github.com/knid/wemob/internal/utils"
 )
 
-
 // GET /v2/apps/{appId}/assets
 func (v *HttpViews) GetAppAssets(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	appID := chi.URLParam(r, "appId")
 	if _, err := v.Controller.GetAppProject(appID, user); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
 
 	assets, err := v.Controller.DB.GetAppAssetsByProjectID(appID)
 	if err != nil {
-		utils.JSONErrorResponse(w, "failed to fetch assets", http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -64,25 +63,25 @@ func (v *HttpViews) GetAppAssets(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) RequestAssetUploadURL(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	appID := chi.URLParam(r, "appId")
 	if _, err := v.Controller.GetAppProject(appID, user); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
 
 	var req requests.AssetUploadURLRequest
 	if err := utils.ParseJSONBody(r, &req); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
 	validate := validator.New()
 	if err := req.Validate(validate); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
@@ -90,9 +89,12 @@ func (v *HttpViews) RequestAssetUploadURL(w http.ResponseWriter, r *http.Request
 	kind := constants.ClassifyAttachment(req.ContentType)
 	maxBytes := constants.MaxAttachmentSize(kind)
 	if req.FileSize > maxBytes {
-		utils.JSONErrorResponse(w,
-			fmt.Sprintf("file size exceeds %d MB limit for this file type", constants.MaxAttachmentSizeMB(kind)),
-			http.StatusBadRequest)
+		utils.JSONError(w, constants.ErrAssetTooLarge,
+			fmt.Sprintf("File size exceeds %d MB limit for this file type.", constants.MaxAttachmentSizeMB(kind)),
+			http.StatusBadRequest, map[string]any{
+				"limitBytes": maxBytes,
+				"sizeBytes":  req.FileSize,
+			})
 		return
 	}
 
@@ -107,7 +109,7 @@ func (v *HttpViews) RequestAssetUploadURL(w http.ResponseWriter, r *http.Request
 
 	presignedRequest, err := v.Controller.AssetsStorage.PutObject(r.Context(), objectKey, 300)
 	if err != nil {
-		utils.JSONErrorResponse(w, "failed to generate upload URL: "+err.Error(), http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -125,7 +127,7 @@ func (v *HttpViews) RequestAssetUploadURL(w http.ResponseWriter, r *http.Request
 		PublicURL:    publicURL,
 	}
 	if _, err := v.Controller.DB.CreateAppAsset(asset); err != nil {
-		utils.JSONErrorResponse(w, "failed to create asset record: "+err.Error(), http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -140,25 +142,25 @@ func (v *HttpViews) RequestAssetUploadURL(w http.ResponseWriter, r *http.Request
 func (v *HttpViews) ConfirmAssetUpload(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	appID := chi.URLParam(r, "appId")
 	if _, err := v.Controller.GetAppProject(appID, user); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
 
 	assetID := chi.URLParam(r, "assetId")
 	asset, err := v.Controller.DB.GetAppAssetByID(assetID)
 	if err != nil {
-		utils.JSONErrorResponse(w, "asset not found", http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrAssetNotFound, http.StatusNotFound, nil)
 		return
 	}
 
 	if asset.AppProjectID.String() != appID {
-		utils.JSONErrorResponse(w, "asset does not belong to this app", http.StatusForbidden)
+		utils.JSONError(w, constants.ErrForbidden, "Asset does not belong to this app.", http.StatusForbidden, nil)
 		return
 	}
 
@@ -183,44 +185,44 @@ func (v *HttpViews) ConfirmAssetUpload(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) RenameAppAsset(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	appID := chi.URLParam(r, "appId")
 	if _, err := v.Controller.GetAppProject(appID, user); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
 
 	assetID := chi.URLParam(r, "assetId")
 	asset, err := v.Controller.DB.GetAppAssetByID(assetID)
 	if err != nil {
-		utils.JSONErrorResponse(w, "asset not found", http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrAssetNotFound, http.StatusNotFound, nil)
 		return
 	}
 
 	if asset.AppProjectID.String() != appID {
-		utils.JSONErrorResponse(w, "asset does not belong to this app", http.StatusForbidden)
+		utils.JSONError(w, constants.ErrForbidden, "Asset does not belong to this app.", http.StatusForbidden, nil)
 		return
 	}
 
 	var req requests.AssetRenameRequest
 	if err := utils.ParseJSONBody(r, &req); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
 	validate := validator.New()
 	if err := req.Validate(validate); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
 	asset.FileName = req.FileName
 	asset.UpdatedAt = time.Now()
 	if _, err := v.Controller.DB.UpdateAppAsset(asset); err != nil {
-		utils.JSONErrorResponse(w, "failed to rename asset: "+err.Error(), http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -245,37 +247,37 @@ func (v *HttpViews) RenameAppAsset(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) DeleteAppAsset(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	appID := chi.URLParam(r, "appId")
 	if _, err := v.Controller.GetAppProject(appID, user); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
 
 	assetID := chi.URLParam(r, "assetId")
 	asset, err := v.Controller.DB.GetAppAssetByID(assetID)
 	if err != nil {
-		utils.JSONErrorResponse(w, "asset not found", http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrAssetNotFound, http.StatusNotFound, nil)
 		return
 	}
 
 	if asset.AppProjectID.String() != appID {
-		utils.JSONErrorResponse(w, "asset does not belong to this app", http.StatusForbidden)
+		utils.JSONError(w, constants.ErrForbidden, "Asset does not belong to this app.", http.StatusForbidden, nil)
 		return
 	}
 
 	// Delete from S3
 	if err := v.Controller.AssetsStorage.DeleteObjectDirect(r.Context(), asset.S3Key); err != nil {
-		utils.JSONErrorResponse(w, "failed to delete file from storage: "+err.Error(), http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
 	// Soft delete from DB
 	if err := v.Controller.DB.DeleteAppAsset(asset); err != nil {
-		utils.JSONErrorResponse(w, "failed to delete asset record: "+err.Error(), http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
