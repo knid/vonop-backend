@@ -10,3 +10,10 @@ dev:
 error-codes:
 	go run ./scripts/gen-error-codes
 .PHONY: error-codes
+
+lint-errors:
+	@if grep -rn "JSONErrorResponse\|JSONCodedErrorResponse\|JSONResponse(w, map\[string\]string{\"error\":" internal/ cmd/; then \
+		echo "ERROR: deprecated error helpers detected. Use utils.JSONError / utils.JSONErrorCode / utils.JSONInternalError."; \
+		exit 1; \
+	fi
+.PHONY: lint-errors
