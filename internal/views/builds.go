@@ -16,7 +16,7 @@ func (v *HttpViews) GetProjectBuilds(w http.ResponseWriter, r *http.Request) {
 
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
@@ -26,24 +26,24 @@ func (v *HttpViews) GetProjectBuilds(w http.ResponseWriter, r *http.Request) {
 
 	projectID := chi.URLParam(r, "projectId")
 	if projectID == "" {
-		utils.JSONErrorResponse(w, "project_id is required", http.StatusBadRequest)
+		utils.JSONErrorCode(w, constants.ErrValidationRequired, http.StatusBadRequest, map[string]any{"field": "project_id"})
 		return
 	}
 
 	projectInformationRes, err := v.Controller.GetProject(user, projectID)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 	project, err := v.Controller.GetProjectModelById(projectInformationRes.ID.String())
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
 	builds, err := v.Controller.GetBuilds(project)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
@@ -55,7 +55,7 @@ func (v *HttpViews) CreateProjectBuild(w http.ResponseWriter, r *http.Request) {
 
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
@@ -66,12 +66,12 @@ func (v *HttpViews) CreateProjectBuild(w http.ResponseWriter, r *http.Request) {
 
 	limits, planName, err := v.Controller.GetUserLimitsWithPlan(user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
 	if !limits.CanBuildMobile {
-		utils.JSONCodedErrorResponse(w, "FEATURE_NOT_AVAILABLE", "mobile builds require Professional plan", http.StatusForbidden, nil)
+		utils.JSONError(w, constants.ErrFeatureNotAvailable, "mobile builds require Professional plan", http.StatusForbidden, nil)
 		return
 	}
 
@@ -84,13 +84,13 @@ func (v *HttpViews) CreateProjectBuild(w http.ResponseWriter, r *http.Request) {
 
 	count, err := v.Controller.DB.CountUserBuildsSince(user.ID.String(), renewStart)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
 	if count >= limits.MontlyBuildCount {
 		_, renewEnd := utils.BillingPeriod(user.SubscriptionStartAt, time.Now())
-		utils.JSONCodedErrorResponse(w, "BUILD_LIMIT_REACHED",
+		utils.JSONError(w, constants.ErrBuildLimitReached,
 			"you have reached your monthly build limit",
 			http.StatusForbidden, map[string]any{
 				"used":         count,
@@ -108,37 +108,37 @@ func (v *HttpViews) CreateProjectBuild(w http.ResponseWriter, r *http.Request) {
 
 	projectID := chi.URLParam(r, "projectId")
 	if projectID == "" {
-		utils.JSONErrorResponse(w, "project_id is required", http.StatusBadRequest)
+		utils.JSONErrorCode(w, constants.ErrValidationRequired, http.StatusBadRequest, map[string]any{"field": "project_id"})
 		return
 	}
 
 	projectInformationRes, err := v.Controller.GetProject(user, projectID)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 	project, err := v.Controller.GetProjectModelById(projectInformationRes.ID.String())
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
 	var buildCreateReq requests.BuildCreateRequest
 	if err := utils.ParseJSONBody(r, &buildCreateReq); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
 	buildCreateReq.ProjectID = project.ID
 
 	if buildCreateReq.RemoveWemobBranding && !limits.CanRemoveBrandLogo {
-		utils.JSONErrorResponse(w, "your current subscription plan does not allow removing Wemob branding", http.StatusForbidden)
+		utils.JSONError(w, constants.ErrFeatureNotAvailable, "Your current subscription plan does not allow removing Wemob branding.", http.StatusForbidden, nil)
 		return
 	}
 
 	buildCreateRes, err := v.Controller.CreateBuild(user, buildCreateReq)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
@@ -150,7 +150,7 @@ func (v *HttpViews) GetProjectBuild(w http.ResponseWriter, r *http.Request) {
 
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
@@ -160,13 +160,13 @@ func (v *HttpViews) GetProjectBuild(w http.ResponseWriter, r *http.Request) {
 
 	buildID := chi.URLParam(r, "buildId")
 	if buildID == "" {
-		utils.JSONErrorResponse(w, "build_id is required", http.StatusBadRequest)
+		utils.JSONErrorCode(w, constants.ErrValidationRequired, http.StatusBadRequest, map[string]any{"field": "build_id"})
 		return
 	}
 
 	build, err := v.Controller.GetBuild(user, buildID)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
