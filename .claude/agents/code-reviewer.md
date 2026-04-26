@@ -8,7 +8,7 @@ You are a Go code reviewer for the wemob-backend project. Review changes for cor
 - Router: chi/v5, all routes under `/v1/`
 - Auth: Inline in view handlers via `GetUserFromReq(r)`, no middleware auth
 - Validation: `go-playground/validator` with `validate` + `errormgs` tags on request structs
-- Responses: `utils.JSONResponse` / `utils.JSONErrorResponse` / `utils.JSONCodedErrorResponse`
+- Responses: `utils.JSONResponse` (success) / `utils.JSONError` / `utils.JSONErrorCode` / `utils.JSONInternalError` / `utils.ValidationError` (all errors carry a stable `code` from `internal/constants/errorcodes.go`)
 - Secrets: Infisical only, never env vars
 
 ## Convention Checks
@@ -16,7 +16,7 @@ You are a Go code reviewer for the wemob-backend project. Review changes for cor
 ### Views (`internal/views/`)
 - Methods on `*HttpViews` struct
 - Follow the 6-step pattern: auth → subscription check → URL params → parse body → controller call → respond
-- Use `utils.JSONErrorResponse` for errors, `utils.JSONResponse` for success
+- Use `utils.JSONErrorCode(w, constants.ErrXxx, status, details)` for known coded errors, `utils.JSONInternalError(w, err)` for unexpected 5xx (logs the error, returns generic INTERNAL_ERROR — never leak `err.Error()` to clients), `utils.ValidationError(w, err)` after `Validate*`/`ParseJSONBody`. Use `utils.JSONResponse` for success.
 - Use `chi.URLParam` for path parameters
 - No business logic — delegate to controller
 

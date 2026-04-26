@@ -31,7 +31,9 @@ func (v *HttpViews) authorizeApp(w http.ResponseWriter, r *http.Request) string 
 }
 
 // writeStoreErr maps controller errors to HTTP statuses. ErrNoEcommerceDB and
-// "not found" become 404; the rest are 400.
+// "not found" become 404; everything else is treated as an internal failure
+// — the underlying error is logged via slog and the client sees INTERNAL_ERROR
+// rather than the raw message.
 func writeStoreErr(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, controllers.ErrNoEcommerceDB):
@@ -39,7 +41,7 @@ func writeStoreErr(w http.ResponseWriter, err error) {
 	case strings.Contains(err.Error(), "not found"):
 		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 	default:
-		utils.ValidationError(w, err)
+		utils.JSONInternalError(w, err)
 	}
 }
 

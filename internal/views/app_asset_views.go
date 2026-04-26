@@ -92,8 +92,8 @@ func (v *HttpViews) RequestAssetUploadURL(w http.ResponseWriter, r *http.Request
 		utils.JSONError(w, constants.ErrAssetTooLarge,
 			fmt.Sprintf("File size exceeds %d MB limit for this file type.", constants.MaxAttachmentSizeMB(kind)),
 			http.StatusBadRequest, map[string]any{
-				"limitBytes": maxBytes,
-				"sizeBytes":  req.FileSize,
+				"limit_bytes": maxBytes,
+				"size_bytes":  req.FileSize,
 			})
 		return
 	}

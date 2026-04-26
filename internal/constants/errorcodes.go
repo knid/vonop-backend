@@ -61,7 +61,7 @@ const (
 
 	// Asset / upload
 	ErrAssetNotFound     = "ASSET_NOT_FOUND"
-	ErrAssetTooLarge     = "ASSET_TOO_LARGE" // details: { limitBytes, sizeBytes }
+	ErrAssetTooLarge     = "ASSET_TOO_LARGE" // details: { limit_bytes, size_bytes }
 	ErrAssetInvalidType  = "ASSET_INVALID_TYPE"
 	ErrAssetUploadFailed = "ASSET_UPLOAD_FAILED"
 
@@ -95,7 +95,7 @@ const (
 	ErrNotificationLimitReached = "NOTIFICATION_LIMIT_REACHED"
 
 	// Generic / cross-cutting
-	ErrRateLimited          = "RATE_LIMITED" // details: { retryAfterSec }
+	ErrRateLimited          = "RATE_LIMITED" // details: { retry_after_seconds }
 	ErrNotFound             = "NOT_FOUND"
 	ErrConflict             = "CONFLICT"
 	ErrGenerationInProgress = "GENERATION_IN_PROGRESS"
