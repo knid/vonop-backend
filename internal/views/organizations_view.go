@@ -13,7 +13,7 @@ import (
 func (v *HttpViews) CreateOrganization(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
@@ -23,13 +23,13 @@ func (v *HttpViews) CreateOrganization(w http.ResponseWriter, r *http.Request) {
 
 	var req requests.CreateOrganizationRequest
 	if err := utils.ParseJSONBody(r, &req); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
 	result, err := v.Controller.CreateOrganization(user, req)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
@@ -46,13 +46,13 @@ func (v *HttpViews) CreateOrganization(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) GetUserOrganizations(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	result, err := v.Controller.GetUserOrganizations(user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
@@ -62,19 +62,19 @@ func (v *HttpViews) GetUserOrganizations(w http.ResponseWriter, r *http.Request)
 func (v *HttpViews) GetOrganization(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	orgID := chi.URLParam(r, "orgId")
 	if orgID == "" {
-		utils.JSONErrorResponse(w, "organization id is required", http.StatusBadRequest)
+		utils.JSONErrorCode(w, constants.ErrValidationRequired, http.StatusBadRequest, map[string]any{"field": "organization_id"})
 		return
 	}
 
 	result, err := v.Controller.GetOrganization(user, orgID)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
@@ -84,25 +84,25 @@ func (v *HttpViews) GetOrganization(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) UpdateOrganization(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	orgID := chi.URLParam(r, "orgId")
 	if orgID == "" {
-		utils.JSONErrorResponse(w, "organization id is required", http.StatusBadRequest)
+		utils.JSONErrorCode(w, constants.ErrValidationRequired, http.StatusBadRequest, map[string]any{"field": "organization_id"})
 		return
 	}
 
 	var req requests.UpdateOrganizationRequest
 	if err := utils.ParseJSONBody(r, &req); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
 	result, err := v.Controller.UpdateOrganization(user, orgID, req)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
@@ -112,19 +112,19 @@ func (v *HttpViews) UpdateOrganization(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) DeleteOrganization(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	orgID := chi.URLParam(r, "orgId")
 	if orgID == "" {
-		utils.JSONErrorResponse(w, "organization id is required", http.StatusBadRequest)
+		utils.JSONErrorCode(w, constants.ErrValidationRequired, http.StatusBadRequest, map[string]any{"field": "organization_id"})
 		return
 	}
 
 	err = v.Controller.DeleteOrganization(user, orgID)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
@@ -134,19 +134,19 @@ func (v *HttpViews) DeleteOrganization(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) GetOrganizationMembers(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	orgID := chi.URLParam(r, "orgId")
 	if orgID == "" {
-		utils.JSONErrorResponse(w, "organization id is required", http.StatusBadRequest)
+		utils.JSONErrorCode(w, constants.ErrValidationRequired, http.StatusBadRequest, map[string]any{"field": "organization_id"})
 		return
 	}
 
 	result, err := v.Controller.GetOrganizationMembers(user, orgID)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
@@ -156,25 +156,25 @@ func (v *HttpViews) GetOrganizationMembers(w http.ResponseWriter, r *http.Reques
 func (v *HttpViews) InviteOrganizationMember(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	orgID := chi.URLParam(r, "orgId")
 	if orgID == "" {
-		utils.JSONErrorResponse(w, "organization id is required", http.StatusBadRequest)
+		utils.JSONErrorCode(w, constants.ErrValidationRequired, http.StatusBadRequest, map[string]any{"field": "organization_id"})
 		return
 	}
 
 	var req requests.InviteMemberRequest
 	if err := utils.ParseJSONBody(r, &req); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
 	result, err := v.Controller.InviteOrganizationMember(user, orgID, req)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
@@ -191,19 +191,19 @@ func (v *HttpViews) InviteOrganizationMember(w http.ResponseWriter, r *http.Requ
 func (v *HttpViews) AcceptOrganizationInvite(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	token := chi.URLParam(r, "token")
 	if token == "" {
-		utils.JSONErrorResponse(w, "invite token is required", http.StatusBadRequest)
+		utils.JSONErrorCode(w, constants.ErrValidationRequired, http.StatusBadRequest, map[string]any{"field": "invite_token"})
 		return
 	}
 
 	result, err := v.Controller.AcceptOrganizationInvite(user, token)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
@@ -213,20 +213,20 @@ func (v *HttpViews) AcceptOrganizationInvite(w http.ResponseWriter, r *http.Requ
 func (v *HttpViews) RemoveOrganizationMember(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	orgID := chi.URLParam(r, "orgId")
 	memberID := chi.URLParam(r, "memberId")
 	if orgID == "" || memberID == "" {
-		utils.JSONErrorResponse(w, "organization id and member id are required", http.StatusBadRequest)
+		utils.JSONError(w, constants.ErrValidationRequired, "organization_id and member_id are required.", http.StatusBadRequest, map[string]any{"fields": []string{"organization_id", "member_id"}})
 		return
 	}
 
 	err = v.Controller.RemoveOrganizationMember(user, orgID, memberID)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
@@ -236,26 +236,26 @@ func (v *HttpViews) RemoveOrganizationMember(w http.ResponseWriter, r *http.Requ
 func (v *HttpViews) UpdateMemberRole(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	orgID := chi.URLParam(r, "orgId")
 	memberID := chi.URLParam(r, "memberId")
 	if orgID == "" || memberID == "" {
-		utils.JSONErrorResponse(w, "organization id and member id are required", http.StatusBadRequest)
+		utils.JSONError(w, constants.ErrValidationRequired, "organization_id and member_id are required.", http.StatusBadRequest, map[string]any{"fields": []string{"organization_id", "member_id"}})
 		return
 	}
 
 	var req requests.UpdateMemberRoleRequest
 	if err := utils.ParseJSONBody(r, &req); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
 	result, err := v.Controller.UpdateMemberRole(user, orgID, memberID, req)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 

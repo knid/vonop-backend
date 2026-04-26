@@ -13,13 +13,13 @@ import (
 func (v *HttpViews) ListAppleConnections(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	creds, err := v.Controller.ListAppleConnections(user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -29,7 +29,7 @@ func (v *HttpViews) ListAppleConnections(w http.ResponseWriter, r *http.Request)
 func (v *HttpViews) CreateAppleConnection(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
@@ -42,19 +42,19 @@ func (v *HttpViews) CreateAppleConnection(w http.ResponseWriter, r *http.Request
 
 	var req requests.AppleConnectionCreateRequest
 	if err := utils.ParseJSONBody(r, &req); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
 	validate := validator.New(validator.WithRequiredStructEnabled())
 	if err := utils.ValidateFunc[requests.AppleConnectionCreateRequest](req, validate); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
 	cred, err := v.Controller.CreateAppleConnection(user, req)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -64,7 +64,7 @@ func (v *HttpViews) CreateAppleConnection(w http.ResponseWriter, r *http.Request
 func (v *HttpViews) GetAppleConnection(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
@@ -73,13 +73,13 @@ func (v *HttpViews) GetAppleConnection(w http.ResponseWriter, r *http.Request) {
 		credID = chi.URLParam(r, "credentialId")
 	}
 	if credID == "" {
-		utils.JSONErrorResponse(w, "connection_id is required", http.StatusBadRequest)
+		utils.JSONErrorCode(w, constants.ErrValidationRequired, http.StatusBadRequest, map[string]any{"field": "connection_id"})
 		return
 	}
 
 	cred, err := v.Controller.GetAppleConnectionById(user, credID)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -89,7 +89,7 @@ func (v *HttpViews) GetAppleConnection(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) UpdateAppleConnection(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
@@ -105,25 +105,25 @@ func (v *HttpViews) UpdateAppleConnection(w http.ResponseWriter, r *http.Request
 		credID = chi.URLParam(r, "credentialId")
 	}
 	if credID == "" {
-		utils.JSONErrorResponse(w, "connection_id is required", http.StatusBadRequest)
+		utils.JSONErrorCode(w, constants.ErrValidationRequired, http.StatusBadRequest, map[string]any{"field": "connection_id"})
 		return
 	}
 
 	var req requests.AppleConnectionCreateRequest
 	if err := utils.ParseJSONBody(r, &req); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
 	validate := validator.New(validator.WithRequiredStructEnabled())
 	if err := utils.ValidateFunc[requests.AppleConnectionCreateRequest](req, validate); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
 	cred, err := v.Controller.UpdateAppleConnection(user, credID, req)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -133,7 +133,7 @@ func (v *HttpViews) UpdateAppleConnection(w http.ResponseWriter, r *http.Request
 func (v *HttpViews) DeleteAppleConnection(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
@@ -142,13 +142,13 @@ func (v *HttpViews) DeleteAppleConnection(w http.ResponseWriter, r *http.Request
 		credID = chi.URLParam(r, "credentialId")
 	}
 	if credID == "" {
-		utils.JSONErrorResponse(w, "connection_id is required", http.StatusBadRequest)
+		utils.JSONErrorCode(w, constants.ErrValidationRequired, http.StatusBadRequest, map[string]any{"field": "connection_id"})
 		return
 	}
 
 	err = v.Controller.DeleteAppleConnection(user, credID)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -158,13 +158,13 @@ func (v *HttpViews) DeleteAppleConnection(w http.ResponseWriter, r *http.Request
 func (v *HttpViews) ListGooglePlayConnections(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	creds, err := v.Controller.ListGooglePlayConnections(user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -175,7 +175,7 @@ func (v *HttpViews) ListGooglePlayConnections(w http.ResponseWriter, r *http.Req
 func (v *HttpViews) CreateGooglePlayConnection(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
@@ -188,19 +188,19 @@ func (v *HttpViews) CreateGooglePlayConnection(w http.ResponseWriter, r *http.Re
 
 	var req requests.GooglePlayConnectionCreateRequest
 	if err := utils.ParseJSONBody(r, &req); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
 	validate := validator.New(validator.WithRequiredStructEnabled())
 	if err := utils.ValidateFunc[requests.GooglePlayConnectionCreateRequest](req, validate); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
 	cred, err := v.Controller.CreateGooglePlayConnection(user, req)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -210,7 +210,7 @@ func (v *HttpViews) CreateGooglePlayConnection(w http.ResponseWriter, r *http.Re
 func (v *HttpViews) GetGooglePlayConnection(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
@@ -219,13 +219,13 @@ func (v *HttpViews) GetGooglePlayConnection(w http.ResponseWriter, r *http.Reque
 		credID = chi.URLParam(r, "credentialId")
 	}
 	if credID == "" {
-		utils.JSONErrorResponse(w, "connection_id is required", http.StatusBadRequest)
+		utils.JSONErrorCode(w, constants.ErrValidationRequired, http.StatusBadRequest, map[string]any{"field": "connection_id"})
 		return
 	}
 
 	cred, err := v.Controller.GetGooglePlayConnectionById(user, credID)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -235,7 +235,7 @@ func (v *HttpViews) GetGooglePlayConnection(w http.ResponseWriter, r *http.Reque
 func (v *HttpViews) UpdateGooglePlayConnection(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
@@ -251,25 +251,25 @@ func (v *HttpViews) UpdateGooglePlayConnection(w http.ResponseWriter, r *http.Re
 		credID = chi.URLParam(r, "credentialId")
 	}
 	if credID == "" {
-		utils.JSONErrorResponse(w, "connection_id is required", http.StatusBadRequest)
+		utils.JSONErrorCode(w, constants.ErrValidationRequired, http.StatusBadRequest, map[string]any{"field": "connection_id"})
 		return
 	}
 
 	var req requests.GooglePlayConnectionCreateRequest
 	if err := utils.ParseJSONBody(r, &req); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
 	validate := validator.New(validator.WithRequiredStructEnabled())
 	if err := utils.ValidateFunc[requests.GooglePlayConnectionCreateRequest](req, validate); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
 	cred, err := v.Controller.UpdateGooglePlayConnection(user, credID, req)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -279,7 +279,7 @@ func (v *HttpViews) UpdateGooglePlayConnection(w http.ResponseWriter, r *http.Re
 func (v *HttpViews) DeleteGooglePlayConnection(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
@@ -288,13 +288,13 @@ func (v *HttpViews) DeleteGooglePlayConnection(w http.ResponseWriter, r *http.Re
 		credID = chi.URLParam(r, "credentialId")
 	}
 	if credID == "" {
-		utils.JSONErrorResponse(w, "connection_id is required", http.StatusBadRequest)
+		utils.JSONErrorCode(w, constants.ErrValidationRequired, http.StatusBadRequest, map[string]any{"field": "connection_id"})
 		return
 	}
 
 	err = v.Controller.DeleteGooglePlayConnection(user, credID)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 

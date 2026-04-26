@@ -8,16 +8,16 @@ import (
 	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/models"
-	"github.com/posthog/posthog-go"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/utils"
+	"github.com/posthog/posthog-go"
 )
 
 func (v *HttpViews) GetProjectNotifications(w http.ResponseWriter, r *http.Request) {
 	// Implementation of the view to get notifications for a specific project
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
@@ -27,19 +27,19 @@ func (v *HttpViews) GetProjectNotifications(w http.ResponseWriter, r *http.Reque
 
 	projectID := chi.URLParam(r, "projectId")
 	if projectID == "" {
-		utils.JSONErrorResponse(w, "project_id is required", http.StatusBadRequest)
+		utils.JSONErrorCode(w, constants.ErrValidationRequired, http.StatusBadRequest, map[string]any{"field": "project_id"})
 		return
 	}
 
 	projectInformationRes, err := v.Controller.GetProject(user, projectID)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
 	notificationsRes, err := v.Controller.GetNotifications(projectInformationRes.ID.String())
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -50,7 +50,7 @@ func (v *HttpViews) SendProjectNotification(w http.ResponseWriter, r *http.Reque
 
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
@@ -64,7 +64,7 @@ func (v *HttpViews) SendProjectNotification(w http.ResponseWriter, r *http.Reque
 	var notifications []models.Notification
 	projects, err := v.Controller.GetProjects(user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
@@ -97,13 +97,13 @@ func (v *HttpViews) SendProjectNotification(w http.ResponseWriter, r *http.Reque
 
 	limits, planName, err := v.Controller.GetUserLimitsWithPlan(user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
 	if count >= limits.MontlyNotificationCount {
 		_, renewEnd := utils.BillingPeriod(user.SubscriptionStartAt, time.Now())
-		utils.JSONCodedErrorResponse(w, "NOTIFICATION_LIMIT_REACHED",
+		utils.JSONError(w, constants.ErrNotificationLimitReached,
 			"You have reached your monthly notification limit",
 			http.StatusForbidden, map[string]any{
 				"used":         count,
@@ -122,13 +122,13 @@ func (v *HttpViews) SendProjectNotification(w http.ResponseWriter, r *http.Reque
 	projectId := chi.URLParam(r, "projectId")
 	projectUUID, err := uuid.Parse(projectId)
 	if err != nil {
-		utils.JSONErrorResponse(w, "project_id is required", http.StatusBadRequest)
+		utils.JSONErrorCode(w, constants.ErrValidationRequired, http.StatusBadRequest, map[string]any{"field": "project_id"})
 		return
 	}
 	// Implementation of the view to send a notification
 	var notificationCreateReq requests.NotificationCreateRequest
 	if err := utils.ParseJSONBody(r, &notificationCreateReq); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
@@ -136,7 +136,7 @@ func (v *HttpViews) SendProjectNotification(w http.ResponseWriter, r *http.Reque
 
 	notificationSendRes, err := v.Controller.SendNotification(user, notificationCreateReq)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
@@ -147,19 +147,19 @@ func (v *HttpViews) GetProjectNotification(w http.ResponseWriter, r *http.Reques
 	// Implementation of the view to get a specific notification by ID
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	notificationID := chi.URLParam(r, "notificationId")
 	if notificationID == "" {
-		utils.JSONErrorResponse(w, "notification_id is required", http.StatusBadRequest)
+		utils.JSONErrorCode(w, constants.ErrValidationRequired, http.StatusBadRequest, map[string]any{"field": "notification_id"})
 		return
 	}
 
 	notificationRes, err := v.Controller.GetNotification(user, notificationID)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 

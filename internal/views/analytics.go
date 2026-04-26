@@ -5,6 +5,7 @@ import (
 	"net/url"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/utils"
 )
@@ -13,13 +14,13 @@ import (
 func (v *HttpViews) CreateSession(w http.ResponseWriter, r *http.Request) {
 	var req requests.CreateSessionRequest
 	if err := utils.ParseJSONBody(r, &req); err != nil {
-		utils.JSONErrorResponse(w, "invalid request body", http.StatusBadRequest)
+		utils.JSONErrorCode(w, constants.ErrValidationBody, http.StatusBadRequest, nil)
 		return
 	}
 
 	response, err := v.Controller.CreateSession(r, req)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
@@ -30,12 +31,12 @@ func (v *HttpViews) CreateSession(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) LogAppEvent(w http.ResponseWriter, r *http.Request) {
 	var req requests.LogAppEventRequest
 	if err := utils.ParseJSONBody(r, &req); err != nil {
-		utils.JSONErrorResponse(w, "invalid request body", http.StatusBadRequest)
+		utils.JSONErrorCode(w, constants.ErrValidationBody, http.StatusBadRequest, nil)
 		return
 	}
 
 	if err := v.Controller.LogAppEvent(r, req); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
@@ -46,7 +47,7 @@ func (v *HttpViews) LogAppEvent(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) GetAllDevices(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
@@ -56,19 +57,19 @@ func (v *HttpViews) GetAllDevices(w http.ResponseWriter, r *http.Request) {
 
 	projectID := chi.URLParam(r, "projectId")
 	if projectID == "" {
-		utils.JSONErrorResponse(w, "project_id is required", http.StatusBadRequest)
+		utils.JSONErrorCode(w, constants.ErrValidationRequired, http.StatusBadRequest, map[string]any{"field": "project_id"})
 		return
 	}
 
 	projectInformationRes, err := v.Controller.GetProject(user, projectID)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
 	devices, err := v.Controller.GetDevicesByProjectId(projectInformationRes.ID.String())
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -78,7 +79,7 @@ func (v *HttpViews) GetAllDevices(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) GetUniqueDevices(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
@@ -88,13 +89,13 @@ func (v *HttpViews) GetUniqueDevices(w http.ResponseWriter, r *http.Request) {
 
 	projectID := chi.URLParam(r, "projectId")
 	if projectID == "" {
-		utils.JSONErrorResponse(w, "project_id is required", http.StatusBadRequest)
+		utils.JSONErrorCode(w, constants.ErrValidationRequired, http.StatusBadRequest, map[string]any{"field": "project_id"})
 		return
 	}
 
 	projectInformationRes, err := v.Controller.GetProject(user, projectID)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
@@ -103,36 +104,36 @@ func (v *HttpViews) GetUniqueDevices(w http.ResponseWriter, r *http.Request) {
 
 	timeStartStr, err = url.QueryUnescape(timeStartStr)
 	if err != nil {
-		utils.JSONErrorResponse(w, "unsupported time_start value", http.StatusBadRequest)
+		utils.JSONErrorCode(w, constants.ErrValidationOutOfRange, http.StatusBadRequest, map[string]any{"field": "time_start"})
 		return
 	}
 
 	timeEndStr, err = url.QueryUnescape(timeEndStr)
 	if err != nil {
-		utils.JSONErrorResponse(w, "unsupported time_end value", http.StatusBadRequest)
+		utils.JSONErrorCode(w, constants.ErrValidationOutOfRange, http.StatusBadRequest, map[string]any{"field": "time_end"})
 		return
 	}
 
 	if timeStartStr == "" || timeEndStr == "" {
-		utils.JSONErrorResponse(w, "time_start and time_end are required", http.StatusBadRequest)
+		utils.JSONError(w, constants.ErrValidationRequired, "time_start and time_end are required.", http.StatusBadRequest, map[string]any{"fields": []string{"time_start", "time_end"}})
 		return
 	}
 
 	timeStart, err := utils.ParseTime(timeStartStr)
 	if err != nil {
-		utils.JSONErrorResponse(w, "invalid time_start format", http.StatusBadRequest)
+		utils.JSONErrorCode(w, constants.ErrValidationInvalidFormat, http.StatusBadRequest, map[string]any{"field": "time_start"})
 		return
 	}
 
 	timeEnd, err := utils.ParseTime(timeEndStr)
 	if err != nil {
-		utils.JSONErrorResponse(w, "invalid time_end format", http.StatusBadRequest)
+		utils.JSONErrorCode(w, constants.ErrValidationInvalidFormat, http.StatusBadRequest, map[string]any{"field": "time_end"})
 		return
 	}
 
 	devices, err := v.Controller.GetUniqueDevices(projectInformationRes.ID.String(), timeStart, timeEnd)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -142,7 +143,7 @@ func (v *HttpViews) GetUniqueDevices(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) GetActiveDevices(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
@@ -152,19 +153,19 @@ func (v *HttpViews) GetActiveDevices(w http.ResponseWriter, r *http.Request) {
 
 	projectID := chi.URLParam(r, "projectId")
 	if projectID == "" {
-		utils.JSONErrorResponse(w, "project_id is required", http.StatusBadRequest)
+		utils.JSONErrorCode(w, constants.ErrValidationRequired, http.StatusBadRequest, map[string]any{"field": "project_id"})
 		return
 	}
 
 	projectInformationRes, err := v.Controller.GetProject(user, projectID)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
 	devices, err := v.Controller.GetActiveDevices(projectInformationRes.ID.String())
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -174,7 +175,7 @@ func (v *HttpViews) GetActiveDevices(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) GetSessions(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
@@ -184,13 +185,13 @@ func (v *HttpViews) GetSessions(w http.ResponseWriter, r *http.Request) {
 
 	projectID := chi.URLParam(r, "projectId")
 	if projectID == "" {
-		utils.JSONErrorResponse(w, "project_id is required", http.StatusBadRequest)
+		utils.JSONErrorCode(w, constants.ErrValidationRequired, http.StatusBadRequest, map[string]any{"field": "project_id"})
 		return
 	}
 
 	projectInformationRes, err := v.Controller.GetProject(user, projectID)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
@@ -199,36 +200,36 @@ func (v *HttpViews) GetSessions(w http.ResponseWriter, r *http.Request) {
 
 	timeStartStr, err = url.QueryUnescape(timeStartStr)
 	if err != nil {
-		utils.JSONErrorResponse(w, "unsupported time_start value", http.StatusBadRequest)
+		utils.JSONErrorCode(w, constants.ErrValidationOutOfRange, http.StatusBadRequest, map[string]any{"field": "time_start"})
 		return
 	}
 
 	timeEndStr, err = url.QueryUnescape(timeEndStr)
 	if err != nil {
-		utils.JSONErrorResponse(w, "unsupported time_end value", http.StatusBadRequest)
+		utils.JSONErrorCode(w, constants.ErrValidationOutOfRange, http.StatusBadRequest, map[string]any{"field": "time_end"})
 		return
 	}
 
 	if timeStartStr == "" || timeEndStr == "" {
-		utils.JSONErrorResponse(w, "time_start and time_end are required", http.StatusBadRequest)
+		utils.JSONError(w, constants.ErrValidationRequired, "time_start and time_end are required.", http.StatusBadRequest, map[string]any{"fields": []string{"time_start", "time_end"}})
 		return
 	}
 
 	timeStart, err := utils.ParseTime(timeStartStr)
 	if err != nil {
-		utils.JSONErrorResponse(w, "invalid time_start format", http.StatusBadRequest)
+		utils.JSONErrorCode(w, constants.ErrValidationInvalidFormat, http.StatusBadRequest, map[string]any{"field": "time_start"})
 		return
 	}
 
 	timeEnd, err := utils.ParseTime(timeEndStr)
 	if err != nil {
-		utils.JSONErrorResponse(w, "invalid time_end format", http.StatusBadRequest)
+		utils.JSONErrorCode(w, constants.ErrValidationInvalidFormat, http.StatusBadRequest, map[string]any{"field": "time_end"})
 		return
 	}
 
 	sessions, err := v.Controller.GetSessionsByProject(projectInformationRes.ID.String(), timeStart, timeEnd)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -238,7 +239,7 @@ func (v *HttpViews) GetSessions(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) GetProjectEvents(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
@@ -248,13 +249,13 @@ func (v *HttpViews) GetProjectEvents(w http.ResponseWriter, r *http.Request) {
 
 	projectID := chi.URLParam(r, "projectId")
 	if projectID == "" {
-		utils.JSONErrorResponse(w, "project_id is required", http.StatusBadRequest)
+		utils.JSONErrorCode(w, constants.ErrValidationRequired, http.StatusBadRequest, map[string]any{"field": "project_id"})
 		return
 	}
 
 	projectInformationRes, err := v.Controller.GetProject(user, projectID)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
@@ -263,36 +264,36 @@ func (v *HttpViews) GetProjectEvents(w http.ResponseWriter, r *http.Request) {
 
 	timeStartStr, err = url.QueryUnescape(timeStartStr)
 	if err != nil {
-		utils.JSONErrorResponse(w, "unsupported time_start value", http.StatusBadRequest)
+		utils.JSONErrorCode(w, constants.ErrValidationOutOfRange, http.StatusBadRequest, map[string]any{"field": "time_start"})
 		return
 	}
 
 	timeEndStr, err = url.QueryUnescape(timeEndStr)
 	if err != nil {
-		utils.JSONErrorResponse(w, "unsupported time_end value", http.StatusBadRequest)
+		utils.JSONErrorCode(w, constants.ErrValidationOutOfRange, http.StatusBadRequest, map[string]any{"field": "time_end"})
 		return
 	}
 
 	if timeStartStr == "" || timeEndStr == "" {
-		utils.JSONErrorResponse(w, "time_start and time_end are required", http.StatusBadRequest)
+		utils.JSONError(w, constants.ErrValidationRequired, "time_start and time_end are required.", http.StatusBadRequest, map[string]any{"fields": []string{"time_start", "time_end"}})
 		return
 	}
 
 	timeStart, err := utils.ParseTime(timeStartStr)
 	if err != nil {
-		utils.JSONErrorResponse(w, "invalid time_start format", http.StatusBadRequest)
+		utils.JSONErrorCode(w, constants.ErrValidationInvalidFormat, http.StatusBadRequest, map[string]any{"field": "time_start"})
 		return
 	}
 
 	timeEnd, err := utils.ParseTime(timeEndStr)
 	if err != nil {
-		utils.JSONErrorResponse(w, "invalid time_end format", http.StatusBadRequest)
+		utils.JSONErrorCode(w, constants.ErrValidationInvalidFormat, http.StatusBadRequest, map[string]any{"field": "time_end"})
 		return
 	}
 
 	projectEvents, err := v.Controller.GetProjectEvents(projectInformationRes.ID.String(), timeStart, timeEnd)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
