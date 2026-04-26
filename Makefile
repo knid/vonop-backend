@@ -6,4 +6,7 @@ run: build
 
 dev:
 	go run cmd/main.go
-	
+
+error-codes:
+	go run ./scripts/gen-error-codes
+.PHONY: error-codes
