@@ -224,7 +224,7 @@ func (c *Controller) AddAppDomain(project *models.AppProject, user *models.User,
 	// The domain is marked "deploying" until the Coolify build completes so the
 	// frontend does not expose the URL to users before the app is actually live.
 	var redeployTriggered bool
-	coolifyProject, cpErr := c.DB.GetCoolifyProjectByAppProjectID(project.ID.String())
+	coolifyProject, cpErr := c.DB.GetRuntimeAppByAppProjectID(project.ID.String())
 	if cpErr == nil && coolifyProject != nil && c.CoolifyService != nil {
 		domains := c.buildCoolifyDomainList(coolifyProject, project.ID.String(), domainName)
 		if err := c.CoolifyService.UpdateDomains(coolifyProject.CoolifyAppUUID, domains); err != nil {
@@ -266,7 +266,7 @@ func (c *Controller) RemoveAppDomain(domainID string, project *models.AppProject
 
 	// Also remove from Coolify if project exists there
 	if c.CoolifyService != nil {
-		coolifyProject, cpErr := c.DB.GetCoolifyProjectByAppProjectID(project.ID.String())
+		coolifyProject, cpErr := c.DB.GetRuntimeAppByAppProjectID(project.ID.String())
 		if cpErr == nil && coolifyProject != nil {
 			domains := c.buildCoolifyDomainList(coolifyProject, project.ID.String(), "")
 			// Filter out the domain being removed
@@ -329,7 +329,7 @@ func (c *Controller) VerifyAppDomain(domainID string, project *models.AppProject
 	// Coolify build finishes so the frontend doesn't expose the URL early.
 	var redeployTriggered bool
 	if status == "active" && c.CoolifyService != nil {
-		coolifyProject, cpErr := c.DB.GetCoolifyProjectByAppProjectID(project.ID.String())
+		coolifyProject, cpErr := c.DB.GetRuntimeAppByAppProjectID(project.ID.String())
 		if cpErr == nil && coolifyProject != nil {
 			// Pass domain.Domain as extraDomain so it's included even when its
 			// persisted status is still "pending" (first-time verification).
@@ -361,7 +361,7 @@ func (c *Controller) VerifyAppDomain(domainID string, project *models.AppProject
 // It always includes the default wemob.app subdomain, plus all verified custom
 // domains from the database (whether already live or mid-deploy), plus an
 // optional extra domain being added.
-func (c *Controller) buildCoolifyDomainList(coolifyProject *models.CoolifyProject, projectID string, extraDomain string) []string {
+func (c *Controller) buildCoolifyDomainList(coolifyProject *models.RuntimeApp, projectID string, extraDomain string) []string {
 	domains := []string{"https://" + coolifyProject.CustomDomain}
 
 	// WEM-270: Only include verified custom domains. A "deploying" domain is

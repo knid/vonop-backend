@@ -225,7 +225,7 @@ func (c *Controller) UpdateAppProject(id string, user *models.User, req requests
 	// If slug changed and a Coolify project exists, reassign the wemob.app subdomain
 	if oldSlug != req.Slug && c.CoolifyService != nil {
 		go func() {
-			cp, cpErr := c.DB.GetCoolifyProjectByAppProjectID(id)
+			cp, cpErr := c.DB.GetRuntimeAppByAppProjectID(id)
 			if cpErr != nil || cp == nil {
 				return
 			}
@@ -239,7 +239,7 @@ func (c *Controller) UpdateAppProject(id string, user *models.User, req requests
 
 			cp.CustomDomain = newDomain
 			cp.ProductionURL = "https://" + newDomain
-			c.DB.UpdateCoolifyProject(cp)
+			c.DB.UpdateRuntimeApp(cp)
 		}()
 	}
 
@@ -279,7 +279,7 @@ func (c *Controller) DeleteAppProject(id string, user *models.User) error {
 	}
 
 	// Clean up Coolify app and Gitea repo (best-effort)
-	coolifyProject, cpErr := c.DB.GetCoolifyProjectByAppProjectID(project.ID.String())
+	coolifyProject, cpErr := c.DB.GetRuntimeAppByAppProjectID(project.ID.String())
 	if cpErr == nil && coolifyProject != nil {
 		if c.CoolifyService != nil {
 			if err := c.CoolifyService.DeleteApp(coolifyProject.CoolifyAppUUID); err != nil {
@@ -291,7 +291,7 @@ func (c *Controller) DeleteAppProject(id string, user *models.User) error {
 				slog.Warn("Failed to delete Gitea repo during app deletion", "error", err, "repo", coolifyProject.GiteaRepoName)
 			}
 		}
-		c.DB.DeleteCoolifyProject(coolifyProject)
+		c.DB.DeleteRuntimeApp(coolifyProject)
 	}
 
 	return c.DB.DeleteAppProject(project)

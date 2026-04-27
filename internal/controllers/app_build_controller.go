@@ -59,8 +59,8 @@ func (c *Controller) DeployToCoolify(project *models.AppProject, user *models.Us
 	}
 	repo.Commit("deploy: inject analytics and branding")
 
-	// Get or create Coolify project
-	coolifyProject, err := c.DB.GetCoolifyProjectByAppProjectID(project.ID.String())
+	// Get or create runtime app record
+	coolifyProject, err := c.DB.GetRuntimeAppByAppProjectID(project.ID.String())
 	if err != nil {
 		// First deploy — create Gitea repo and Coolify app (no instant deploy)
 		giteaRepoName := "wemob-" + project.Slug
@@ -103,14 +103,14 @@ func (c *Controller) DeployToCoolify(project *models.AppProject, user *models.Us
 			return nil, fmt.Errorf("failed to create deployment")
 		}
 
-		coolifyProject = &models.CoolifyProject{
+		coolifyProject = &models.RuntimeApp{
 			AppProjectID:   project.ID,
 			CoolifyAppUUID: appUUID,
 			GiteaRepoName:  giteaRepoName,
 			CustomDomain:   subdomain,
 			Framework:      "nextjs",
 		}
-		coolifyProject, err = c.DB.CreateCoolifyProject(coolifyProject)
+		coolifyProject, err = c.DB.CreateRuntimeApp(coolifyProject)
 		if err != nil {
 			slog.Error("Failed to persist Coolify project to DB", "error", err)
 			return nil, fmt.Errorf("failed to save deployment project")
@@ -204,7 +204,7 @@ func (c *Controller) DeployToCoolify(project *models.AppProject, user *models.Us
 	// Update Coolify project record
 	coolifyProject.ProductionURL = deployedURL
 	coolifyProject.CustomDomain = subdomain
-	c.DB.UpdateCoolifyProject(coolifyProject)
+	c.DB.UpdateRuntimeApp(coolifyProject)
 
 	// Update project status
 	c.UpdateAppProjectStatus(project, "deployed")
@@ -457,7 +457,7 @@ func (c *Controller) BuildAppMobile(appProject *models.AppProject, user *models.
 func (c *Controller) UndeployApp(projectID string) error {
 	// Stop the app on Coolify
 	if c.CoolifyService != nil {
-		coolifyProject, err := c.DB.GetCoolifyProjectByAppProjectID(projectID)
+		coolifyProject, err := c.DB.GetRuntimeAppByAppProjectID(projectID)
 		if err == nil && coolifyProject != nil {
 			if err := c.CoolifyService.StopApp(coolifyProject.CoolifyAppUUID); err != nil {
 				slog.Error("failed to stop Coolify app", "error", err, "project_id", projectID)
@@ -499,7 +499,7 @@ func (c *Controller) GetLatestDeploymentStatus(projectID string) (*models.AppDep
 	if (deployment.Status == "building" || deployment.Status == "pending") &&
 		c.CoolifyService != nil && time.Since(deployment.CreatedAt) > 30*time.Second {
 
-		coolifyProject, cpErr := c.DB.GetCoolifyProjectByAppProjectID(projectID)
+		coolifyProject, cpErr := c.DB.GetRuntimeAppByAppProjectID(projectID)
 		if cpErr == nil && coolifyProject != nil {
 			// Primary: check the latest Coolify deployment status
 			dep, depErr := c.CoolifyService.GetLatestDeployment(coolifyProject.CoolifyAppUUID)
@@ -1042,8 +1042,8 @@ func (c *Controller) HandleCoolifyWebhook(event coolify.DeploymentEvent) error {
 		}
 	}
 
-	// Find our CoolifyProject by Coolify's app UUID
-	coolifyProject, err := c.DB.GetCoolifyProjectByCoolifyAppUUID(appUUID)
+	// Find our runtime app record by Coolify's app UUID
+	coolifyProject, err := c.DB.GetRuntimeAppByCoolifyAppUUID(appUUID)
 	if err != nil {
 		return fmt.Errorf("unknown coolify app %s: %w", appUUID, err)
 	}
