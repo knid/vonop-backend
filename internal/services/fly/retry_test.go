@@ -3,6 +3,7 @@ package fly
 import (
 	"errors"
 	"net"
+	"os/exec"
 	"testing"
 )
 
@@ -21,6 +22,7 @@ func TestIsRetryable(t *testing.T) {
 		{"fly 404", &APIError{Status: 404}, false},
 		{"fly 422 invalid spec", &APIError{Status: 422}, false},
 		{"network timeout", &net.OpError{Op: "dial", Err: errors.New("i/o timeout")}, true},
+		{"flyctl exec error", &exec.ExitError{ProcessState: nil, Stderr: nil}, true},
 		{"plain error", errors.New("oops"), false},
 	}
 	for _, c := range cases {

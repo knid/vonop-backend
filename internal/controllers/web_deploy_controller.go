@@ -129,15 +129,17 @@ func (c *Controller) HandleWebDeployTask(ctx context.Context, t *asynq.Task) err
 
 	deployment, err := c.DB.GetAppDeploymentByID(p.DeploymentID)
 	if err != nil {
-		return fmt.Errorf("load deployment: %w", err)
+		// Cannot MarkDeploymentFailed without the row. Log + skip retry.
+		slog.Error("deploy_failed", "deployment_id", p.DeploymentID, "stage", "load_deployment", "error", err)
+		return asynq.SkipRetry
 	}
 	project, err := c.DB.GetAppProjectByID(deployment.AppProjectID.String())
 	if err != nil {
-		return fmt.Errorf("load project: %w", err)
+		return c.failTask(p.DeploymentID, "load_project", err)
 	}
 	user, err := c.DB.GetUserById(deployment.UserID.String())
 	if err != nil {
-		return fmt.Errorf("load user: %w", err)
+		return c.failTask(p.DeploymentID, "load_user", err)
 	}
 
 	if err := c.MarkDeploymentBuilding(p.DeploymentID); err != nil {
@@ -147,11 +149,17 @@ func (c *Controller) HandleWebDeployTask(ctx context.Context, t *asynq.Task) err
 	// 1. Pull source from Gitea, inject analytics + branding, push back.
 	repo, err := c.GitRepoService.Open(project.ID.String())
 	if err != nil {
-		return c.failTask(p.DeploymentID, "gitea_open", err)
+		slog.Warn("deploy_retryable", "deployment_id", p.DeploymentID, "stage", "gitea_open", "error", err)
+		return fmt.Errorf("gitea_open: %w", err)
 	}
 	repoFiles, err := repo.ReadAllFiles()
 	if err != nil || len(repoFiles) == 0 {
-		return c.failTask(p.DeploymentID, "gitea_read", err)
+		if err == nil {
+			// Empty repo is permanent — no files to deploy.
+			return c.failTask(p.DeploymentID, "gitea_read_empty", fmt.Errorf("repo has no files"))
+		}
+		slog.Warn("deploy_retryable", "deployment_id", p.DeploymentID, "stage", "gitea_read", "error", err)
+		return fmt.Errorf("gitea_read: %w", err)
 	}
 	fileMap := make(map[string]string, len(repoFiles))
 	for k, v := range repoFiles {
@@ -233,7 +241,9 @@ func (c *Controller) failTask(deploymentID, stage string, err error) error {
 	slog.Error("deploy_failed",
 		"deployment_id", deploymentID, "stage", stage,
 		"error", err, "retryable", false)
-	c.MarkDeploymentFailed(deploymentID, fmt.Sprintf("%s: %v", stage, err))
+	if mErr := c.MarkDeploymentFailed(deploymentID, fmt.Sprintf("%s: %v", stage, err)); mErr != nil {
+		slog.Error("mark_failed_db_error", "deployment_id", deploymentID, "stage", stage, "err", mErr)
+	}
 	return asynq.SkipRetry
 }
 
@@ -247,6 +257,8 @@ func (c *Controller) maybeRetry(deploymentID, stage string, err error) error {
 	if retryable {
 		return err
 	}
-	c.MarkDeploymentFailed(deploymentID, fmt.Sprintf("%s: %v", stage, err))
+	if mErr := c.MarkDeploymentFailed(deploymentID, fmt.Sprintf("%s: %v", stage, err)); mErr != nil {
+		slog.Error("mark_failed_db_error", "deployment_id", deploymentID, "stage", stage, "err", mErr)
+	}
 	return asynq.SkipRetry
 }

@@ -3,11 +3,13 @@ package fly
 import (
 	"errors"
 	"net"
+	"os/exec"
 )
 
 // IsRetryable returns true if a Fly API or network error should be retried by
 // the worker. 4xx (except 408/429) is non-retryable — the caller's request is
-// malformed. 5xx is retryable. Network/timeout errors are retryable.
+// malformed. 5xx is retryable. Network/timeout errors are retryable. flyctl
+// exec failures are retryable (transient builder/registry issues are common).
 func IsRetryable(err error) bool {
 	if err == nil {
 		return false
@@ -27,6 +29,11 @@ func IsRetryable(err error) bool {
 
 	var netErr *net.OpError
 	if errors.As(err, &netErr) {
+		return true
+	}
+
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
 		return true
 	}
 
