@@ -12,6 +12,13 @@ type AppDomain struct {
 	AppProject     *AppProject `bun:"rel:belongs-to,join:app_project_id=id"`
 	Domain         string      `bun:",notnull"`
 	Status         string      `bun:",notnull,default:'pending'"` // pending, deploying, active, misconfigured, failed
+	// DNS verification status. Empty = not yet checked, "pending" = waiting for
+	// DNS records to point at the edge, "verified" = ready for cert issuance,
+	// "failed" = give up after 30min.
+	DNSCheckStatus  string         `bun:",notnull,default:''"`
+	// JSON blob of DNS records the user must add (A, AAAA, CNAME instructions).
+	// Surfaced in the UI alongside dns_check_status='pending'.
+	DNSInstructions map[string]any `bun:",type:jsonb,notnull,default:'{}'"`
 	DNSRecord      string      `bun:",nullzero"`                  // CNAME value to point to
 	DeploymentUUID string      `bun:",nullzero"`                  // Coolify deployment UUID currently rolling out this domain change
 	CreatedAt      time.Time   `bun:"created_at,nullzero,notnull,default:current_timestamp"`

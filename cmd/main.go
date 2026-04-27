@@ -277,6 +277,12 @@ func createSchema(db *bun.DB) error {
 		`ALTER TABLE runtime_apps ADD COLUMN IF NOT EXISTS current_image_ref text NOT NULL DEFAULT ''`,
 		`ALTER TABLE runtime_apps ADD COLUMN IF NOT EXISTS last_deployed_at timestamptz`,
 		`ALTER TABLE runtime_apps ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
+		// DNS verification fields on app_domains — see Task 1.2 of the Fly migration plan.
+		// dns_check_status: empty=not checked, "pending"=waiting for DNS, "verified"=ok, "failed"=gave up.
+		// dns_instructions: JSON blob surfaced in the UI so users know what records to add.
+		`ALTER TABLE app_domains ADD COLUMN IF NOT EXISTS dns_check_status text NOT NULL DEFAULT ''`,
+		`ALTER TABLE app_domains ADD COLUMN IF NOT EXISTS dns_instructions jsonb NOT NULL DEFAULT '{}'::jsonb`,
+		`CREATE INDEX IF NOT EXISTS idx_app_domains_dns_check_status ON app_domains(dns_check_status) WHERE dns_check_status = 'pending'`,
 	}
 
 	// Deduplicate before creating unique indexes (keep the latest row per group)
@@ -315,7 +321,7 @@ func createSchema(db *bun.DB) error {
 	// Table renames go in renameStatements below, not here — they run unconditionally.
 	var migrationsDone bool
 	row := db.QueryRowContext(context.Background(),
-		"SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='app_build_tasks' AND column_name='error_message')")
+		"SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='app_domains' AND column_name='dns_check_status')")
 	if err := row.Scan(&migrationsDone); err != nil {
 		migrationsDone = false
 	}
