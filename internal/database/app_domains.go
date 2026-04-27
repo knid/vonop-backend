@@ -59,14 +59,3 @@ func (db *Database) MarkAppDomainDNSStatus(domainID string, status string) error
 		Exec(context.Background())
 	return err
 }
-
-// GetAppDomainByHostname looks up a domain row by its hostname. Used by the
-// edge-routing endpoint to resolve a custom hostname back to an AppProject.
-func (db *Database) GetAppDomainByHostname(hostname string) (*models.AppDomain, error) {
-	var d models.AppDomain
-	err := db.DB.NewSelect().Model(&d).Where("domain = ?", hostname).Scan(context.Background())
-	if err != nil {
-		return nil, err
-	}
-	return &d, nil
-}
