@@ -105,7 +105,7 @@ func createSchema(db *bun.DB) error {
 		(*models.AppChatMessage)(nil),
 		(*models.AppAgentRun)(nil),
 		// AppGeneratedFile and AppSnapshot removed — files now in git repos
-		(*models.CoolifyProject)(nil),
+		(*models.RuntimeApp)(nil),
 		(*models.AppDomain)(nil),
 		// Custom environment variables
 		(*models.AppEnvVar)(nil),
@@ -269,6 +269,14 @@ func createSchema(db *bun.DB) error {
 		// USD and almost never land on a whole credit, so the fractional
 		// remainder is tracked here until it crosses an integer.
 		`ALTER TABLE ai_credits_balances ADD COLUMN IF NOT EXISTS pending_gateway double precision NOT NULL DEFAULT 0`,
+		// Fly migration: rename coolify_projects → runtime_apps, add Fly fields.
+		// Both ALTER and RENAME use IF (NOT) EXISTS so the migration is safe to run
+		// repeatedly on already-migrated databases.
+		`ALTER TABLE IF EXISTS coolify_projects RENAME TO runtime_apps`,
+		`ALTER TABLE runtime_apps ADD COLUMN IF NOT EXISTS fly_app_name text NOT NULL DEFAULT ''`,
+		`ALTER TABLE runtime_apps ADD COLUMN IF NOT EXISTS current_image_ref text NOT NULL DEFAULT ''`,
+		`ALTER TABLE runtime_apps ADD COLUMN IF NOT EXISTS last_deployed_at timestamptz`,
+		`ALTER TABLE runtime_apps ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
 	}
 
 	// Deduplicate before creating unique indexes (keep the latest row per group)
