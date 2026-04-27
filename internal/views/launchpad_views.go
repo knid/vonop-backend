@@ -5,6 +5,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/utils"
 )
 
@@ -13,24 +14,24 @@ import (
 func (v *HttpViews) GetLaunchpad(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	appIDStr := chi.URLParam(r, "appId")
 	if appIDStr == "" {
-		utils.JSONErrorResponse(w, "app_id is required", http.StatusBadRequest)
+		utils.JSONErrorCode(w, constants.ErrValidationRequired, http.StatusBadRequest, map[string]any{"field": "app_id"})
 		return
 	}
 	appID, err := uuid.Parse(appIDStr)
 	if err != nil {
-		utils.JSONErrorResponse(w, "invalid app_id", http.StatusBadRequest)
+		utils.JSONErrorCode(w, constants.ErrValidationInvalidFormat, http.StatusBadRequest, map[string]any{"field": "app_id"})
 		return
 	}
 
 	resp, err := v.Controller.GetLaunchpad(r.Context(), user, appID)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
 	utils.JSONResponse(w, resp, http.StatusOK)

@@ -3,6 +3,7 @@ package views
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/controllers"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/responses"
@@ -36,7 +38,16 @@ func (v *HttpViews) handleStreamOrAsync(w http.ResponseWriter, r *http.Request, 
 	// Always create a background job
 	job, err := v.Controller.CreateJob(user.ID, cfg.JobType, cfg.AppID)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusTooManyRequests)
+		switch {
+		case errors.Is(err, controllers.ErrGenerationAlreadyInProgress):
+			utils.JSONErrorCode(w, constants.ErrGenerationInProgress, http.StatusTooManyRequests, nil)
+		case errors.Is(err, controllers.ErrConcurrentJobLimit):
+			utils.JSONErrorCode(w, constants.ErrRateLimited, http.StatusTooManyRequests, nil)
+		default:
+			// "failed to check running jobs" / "failed to create job" — infrastructure
+			// failures, not "in progress". Never leak the raw text.
+			utils.JSONInternalError(w, err)
+		}
 		return
 	}
 
@@ -72,7 +83,7 @@ func (v *HttpViews) handleStreamOrAsync(w http.ResponseWriter, r *http.Request, 
 	if !ok {
 		// Fallback: run as pure background job
 		go v.drainEventsToJob(ctx, cancel, job, events)
-		utils.JSONErrorResponse(w, "streaming not supported", http.StatusInternalServerError)
+		utils.JSONErrorCode(w, constants.ErrStreamingUnsupported, http.StatusInternalServerError, nil)
 		return
 	}
 
@@ -320,19 +331,19 @@ finalize:
 func (v *HttpViews) GetJob(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	jobID := chi.URLParam(r, "jobId")
 	if jobID == "" {
-		utils.JSONErrorResponse(w, "job id is required", http.StatusBadRequest)
+		utils.JSONErrorCode(w, constants.ErrValidationRequired, http.StatusBadRequest, map[string]any{"field": "job_id"})
 		return
 	}
 
 	job, err := v.Controller.GetJob(jobID, user.ID)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
 
@@ -368,13 +379,13 @@ func (v *HttpViews) GetJob(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) GetActiveJobs(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	jobs, err := v.Controller.GetActiveJobs(user.ID)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -418,26 +429,26 @@ func (v *HttpViews) GetActiveJobs(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) StreamJob(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	jobID := chi.URLParam(r, "jobId")
 	if jobID == "" {
-		utils.JSONErrorResponse(w, "job id is required", http.StatusBadRequest)
+		utils.JSONErrorCode(w, constants.ErrValidationRequired, http.StatusBadRequest, map[string]any{"field": "job_id"})
 		return
 	}
 
 	// Verify ownership
 	job, err := v.Controller.GetJob(jobID, user.ID)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		utils.JSONErrorResponse(w, "streaming not supported", http.StatusInternalServerError)
+		utils.JSONErrorCode(w, constants.ErrStreamingUnsupported, http.StatusInternalServerError, nil)
 		return
 	}
 
@@ -623,13 +634,13 @@ func replayPersistedJobEvents(w http.ResponseWriter, flusher http.Flusher, job *
 func (v *HttpViews) CancelJob(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	jobID := chi.URLParam(r, "jobId")
 	if jobID == "" {
-		utils.JSONErrorResponse(w, "job id is required", http.StatusBadRequest)
+		utils.JSONErrorCode(w, constants.ErrValidationRequired, http.StatusBadRequest, map[string]any{"field": "job_id"})
 		return
 	}
 
@@ -654,7 +665,7 @@ func (v *HttpViews) CancelJob(w http.ResponseWriter, r *http.Request) {
 
 	err = v.Controller.CancelJob(jobID, user.ID)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.JSONInternalError(w, err)
 		return
 	}
 

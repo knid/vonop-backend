@@ -24,11 +24,11 @@ func (v *HttpViews) sendCRMEvent(user *models.User, event string, payload map[st
 func (v *HttpViews) verifyWorkerSecret(w http.ResponseWriter, secret string) bool {
 	expected := v.Controller.SecretManager.GetSecret("WORKER_REPORT_SECRET")
 	if expected == "" {
-		utils.JSONErrorResponse(w, "server misconfigured", http.StatusInternalServerError)
+		utils.JSONErrorCode(w, constants.ErrInternal, http.StatusInternalServerError, nil)
 		return false
 	}
 	if subtle.ConstantTimeCompare([]byte(secret), []byte(expected)) != 1 {
-		utils.JSONErrorResponse(w, "unauthorized", http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthRequired, http.StatusUnauthorized, nil)
 		return false
 	}
 	return true
@@ -38,7 +38,7 @@ func (v *HttpViews) UpdateBuildTaskStatus(w http.ResponseWriter, r *http.Request
 	var reportBuildReq requests.ReportBuildRequest
 	err := utils.ParseJSONBody(r, &reportBuildReq)
 	if err != nil {
-		utils.JSONErrorResponse(w, "Invalid request payload", http.StatusBadRequest)
+		utils.JSONErrorCode(w, constants.ErrValidationBody, http.StatusBadRequest, nil)
 		return
 	}
 
@@ -48,13 +48,13 @@ func (v *HttpViews) UpdateBuildTaskStatus(w http.ResponseWriter, r *http.Request
 
 	err = v.Controller.UpdateBuildTaskStatus(reportBuildReq)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
 	task, err := v.Controller.DB.GetAppBuildTaskWithRelations(reportBuildReq.TaskID)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -93,7 +93,7 @@ func (v *HttpViews) UpdateDeploymentStatus(w http.ResponseWriter, r *http.Reques
 	var reportDeploymentReq requests.ReportDeploymentRequest
 	err := utils.ParseJSONBody(r, &reportDeploymentReq)
 	if err != nil {
-		utils.JSONErrorResponse(w, "Invalid request payload", http.StatusBadRequest)
+		utils.JSONErrorCode(w, constants.ErrValidationBody, http.StatusBadRequest, nil)
 		return
 	}
 
@@ -103,13 +103,13 @@ func (v *HttpViews) UpdateDeploymentStatus(w http.ResponseWriter, r *http.Reques
 
 	err = v.Controller.UpdateDeploymentStatus(reportDeploymentReq)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
 	deployment, err := v.Controller.DB.GetDeploymentWithRelations(reportDeploymentReq.DeploymentID)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -150,7 +150,7 @@ func (v *HttpViews) UpdateSignIPATaskStatus(w http.ResponseWriter, r *http.Reque
 	var reportSignReq requests.ReportSignIPARequest
 	err := utils.ParseJSONBody(r, &reportSignReq)
 	if err != nil {
-		utils.JSONErrorResponse(w, "Invalid request payload", http.StatusBadRequest)
+		utils.JSONErrorCode(w, constants.ErrValidationBody, http.StatusBadRequest, nil)
 		return
 	}
 
@@ -160,7 +160,7 @@ func (v *HttpViews) UpdateSignIPATaskStatus(w http.ResponseWriter, r *http.Reque
 
 	err = v.Controller.UpdateSignIPATaskStatus(reportSignReq)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.JSONInternalError(w, err)
 		return
 	}
 

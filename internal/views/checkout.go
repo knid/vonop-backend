@@ -15,12 +15,12 @@ import (
 
 // creditPack defines a credit package with Stripe secret key, display name, credit amount, and price.
 type creditPack struct {
-	ID       string
-	Secret   string
-	Name     string
-	Credits  int
-	Price    int // USD dollars
-	Popular  bool
+	ID      string
+	Secret  string
+	Name    string
+	Credits int
+	Price   int // USD dollars
+	Popular bool
 }
 
 func (v *HttpViews) getCreditPacks(userID string) []creditPack {
@@ -86,7 +86,7 @@ func (v *HttpViews) creditPackByID(packageID string, packs []creditPack) (*credi
 func (v *HttpViews) StripeCheckout(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
@@ -94,14 +94,14 @@ func (v *HttpViews) StripeCheckout(w http.ResponseWriter, r *http.Request) {
 
 	priceID := r.URL.Query().Get("price")
 	if priceID == "" {
-		utils.JSONErrorResponse(w, "price parameter is required", http.StatusBadRequest)
+		utils.JSONErrorCode(w, constants.ErrValidationRequired, http.StatusBadRequest, map[string]any{"field": "price"})
 		return
 	}
 
 	// Validate price ID against known subscription plans
 	allSubs, err := v.Controller.DB.GetSubscriptions()
 	if err != nil {
-		utils.JSONErrorResponse(w, "failed to validate price", http.StatusInternalServerError)
+		utils.JSONErrorCode(w, constants.ErrInternal, http.StatusInternalServerError, nil)
 		return
 	}
 	validPrice := false
@@ -112,7 +112,7 @@ func (v *HttpViews) StripeCheckout(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if !validPrice {
-		utils.JSONErrorResponse(w, "invalid price ID", http.StatusBadRequest)
+		utils.JSONErrorCode(w, constants.ErrValidationInvalidFormat, http.StatusBadRequest, map[string]any{"field": "price"})
 		return
 	}
 
@@ -144,7 +144,7 @@ func (v *HttpViews) StripeCheckout(w http.ResponseWriter, r *http.Request) {
 	s, err := session.New(params)
 	if err != nil {
 		slog.Error("stripe checkout session creation failed", "error", err)
-		utils.JSONErrorResponse(w, "Failed to create checkout session. Please try again.", http.StatusInternalServerError)
+		utils.JSONErrorCode(w, constants.ErrBillingCheckoutFailed, http.StatusInternalServerError, nil)
 		return
 	}
 
@@ -207,7 +207,7 @@ func (v *HttpViews) GetCreditPackages(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) PurchaseCredits(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
@@ -219,13 +219,13 @@ func (v *HttpViews) PurchaseCredits(w http.ResponseWriter, r *http.Request) {
 		PackageID string `json:"package_id"`
 	}
 	if err := utils.ParseJSONBody(r, &req); err != nil {
-		utils.JSONErrorResponse(w, "invalid request body", http.StatusBadRequest)
+		utils.JSONErrorCode(w, constants.ErrValidationBody, http.StatusBadRequest, nil)
 		return
 	}
 
 	pack, priceID := v.creditPackByID(req.PackageID, v.getCreditPacks(user.ID.String()))
 	if pack == nil {
-		utils.JSONErrorResponse(w, "invalid package_id", http.StatusBadRequest)
+		utils.JSONErrorCode(w, constants.ErrValidationInvalidFormat, http.StatusBadRequest, map[string]any{"field": "package_id"})
 		return
 	}
 
@@ -258,7 +258,7 @@ func (v *HttpViews) PurchaseCredits(w http.ResponseWriter, r *http.Request) {
 	s, err := session.New(params)
 	if err != nil {
 		slog.Error("stripe credit purchase checkout failed", "error", err)
-		utils.JSONErrorResponse(w, "Failed to create checkout session. Please try again.", http.StatusInternalServerError)
+		utils.JSONErrorCode(w, constants.ErrBillingCheckoutFailed, http.StatusInternalServerError, nil)
 		return
 	}
 

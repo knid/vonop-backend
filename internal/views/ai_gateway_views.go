@@ -88,7 +88,7 @@ func (v *HttpViews) GatewayModels(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) GetBillingGatewayModels(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
@@ -577,13 +577,13 @@ func (v *HttpViews) GetGatewayKeyInfo(w http.ResponseWriter, r *http.Request) {
 
 	project, err := v.Controller.GetAppProject(projectID, user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
 
 	gwKey, err := v.Controller.DB.GetProjectGatewayKeyByProjectID(project.ID.String())
 	if err != nil {
-		utils.JSONErrorResponse(w, "No gateway key found for this project.", http.StatusNotFound)
+		utils.JSONError(w, constants.ErrNotFound, "No gateway key found for this project.", http.StatusNotFound, nil)
 		return
 	}
 
@@ -599,13 +599,13 @@ func (v *HttpViews) RevealGatewayKey(w http.ResponseWriter, r *http.Request) {
 
 	project, err := v.Controller.GetAppProject(projectID, user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
 
 	rawKey, err := v.Controller.GetDecryptedGatewayKey(project.ID.String())
 	if err != nil {
-		utils.JSONErrorResponse(w, "Failed to decrypt gateway key.", http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -621,13 +621,13 @@ func (v *HttpViews) RotateGatewayKey(w http.ResponseWriter, r *http.Request) {
 
 	project, err := v.Controller.GetAppProject(projectID, user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
 
 	newKey, err := v.Controller.RotateProjectGatewayKey(project)
 	if err != nil {
-		utils.JSONErrorResponse(w, "Failed to rotate gateway key.", http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -649,7 +649,7 @@ func (v *HttpViews) GetProjectAIUsage(w http.ResponseWriter, r *http.Request) {
 	// not owned by this user.
 	project, err := v.Controller.GetAppProject(projectID, user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
 
@@ -660,14 +660,14 @@ func (v *HttpViews) GetProjectAIUsage(w http.ResponseWriter, r *http.Request) {
 	// the app in the first place.
 	entries, err := v.Controller.DB.GetLLMTokenUsageByProject(project.ID.String(), "gateway_", 200)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
 	since := time.Now().AddDate(0, -1, 0)
 	promptTotal, completionTotal, totalTokens, totalCalls, err := v.Controller.DB.GetLLMTokenUsageSummaryByProject(project.ID.String(), "gateway_", since)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 

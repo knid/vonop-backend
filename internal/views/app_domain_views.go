@@ -15,20 +15,20 @@ import (
 func (v *HttpViews) GetAppDomains(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	appID := chi.URLParam(r, "appId")
 	project, err := v.Controller.GetAppProject(appID, user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
 
 	domains, err := v.Controller.GetAppDomains(project.ID.String())
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -39,7 +39,7 @@ func (v *HttpViews) GetAppDomains(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) AddAppDomain(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
@@ -47,26 +47,26 @@ func (v *HttpViews) AddAppDomain(w http.ResponseWriter, r *http.Request) {
 	limits, limitsErr := v.Controller.GetUserLimits(user)
 	if limitsErr != nil || !limits.CanBuyDomain {
 		go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_NEED, map[string]any{"action": "buy_domain"})
-		utils.JSONCodedErrorResponse(w, "SUBSCRIPTION_REQUIRED", "custom domains require a paid plan", http.StatusForbidden, nil)
+		utils.JSONError(w, constants.ErrSubscriptionRequired, "custom domains require a paid plan", http.StatusForbidden, nil)
 		return
 	}
 
 	appID := chi.URLParam(r, "appId")
 	project, err := v.Controller.GetAppProject(appID, user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
 
 	var req requests.AddAppDomainRequest
 	if err := utils.ParseJSONBody(r, &req); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
 	result, err := v.Controller.AddAppDomain(project, user, req)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -86,7 +86,7 @@ func (v *HttpViews) AddAppDomain(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) VerifyAppDomain(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
@@ -94,13 +94,13 @@ func (v *HttpViews) VerifyAppDomain(w http.ResponseWriter, r *http.Request) {
 	domainID := chi.URLParam(r, "did")
 	project, err := v.Controller.GetAppProject(appID, user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
 
 	result, err := v.Controller.VerifyAppDomain(domainID, project)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -123,7 +123,7 @@ func (v *HttpViews) VerifyAppDomain(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) RemoveAppDomain(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
@@ -131,12 +131,12 @@ func (v *HttpViews) RemoveAppDomain(w http.ResponseWriter, r *http.Request) {
 	domainID := chi.URLParam(r, "did")
 	project, err := v.Controller.GetAppProject(appID, user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
 
 	if err := v.Controller.RemoveAppDomain(domainID, project); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.JSONInternalError(w, err)
 		return
 	}
 

@@ -67,7 +67,7 @@ func (v *HttpViews) <Name>(w http.ResponseWriter, r *http.Request) {
 	// 1. Auth (if required)
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
@@ -82,14 +82,25 @@ func (v *HttpViews) <Name>(w http.ResponseWriter, r *http.Request) {
 	// 4. Parse body (if POST/PUT)
 	var req requests.SomethingRequest
 	if err := utils.ParseJSONBody(r, &req); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
+		return
+	}
+	if err := utils.ValidateFunc[requests.SomethingRequest](req, v.validator); err != nil {
+		utils.ValidationError(w, err)
 		return
 	}
 
-	// 5. Call controller
+	// 5. Call controller. Map known sentinel errors to specific codes;
+	//    fall through to JSONInternalError for unexpected failures so
+	//    raw err.Error() text never leaks to the client.
 	result, err := v.Controller.Something(user, req)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		switch {
+		case errors.Is(err, controllers.ErrSomethingNotFound):
+			utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
+		default:
+			utils.JSONInternalError(w, err)
+		}
 		return
 	}
 

@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/controllers"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/utils"
@@ -16,7 +17,7 @@ func (v *HttpViews) CollectAnalytics(w http.ResponseWriter, r *http.Request) {
 	// The JS tracker sends a single event object. Parse it and wrap in a batch.
 	var single requests.CollectAnalyticsRequest
 	if err := utils.ParseJSONBody(r, &single); err != nil {
-		utils.JSONErrorResponse(w, "invalid request body", http.StatusBadRequest)
+		utils.JSONErrorCode(w, constants.ErrValidationBody, http.StatusBadRequest, nil)
 		return
 	}
 
@@ -25,7 +26,7 @@ func (v *HttpViews) CollectAnalytics(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := v.Controller.CollectAnalyticsEvents(r, batch); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -36,12 +37,12 @@ func (v *HttpViews) CollectAnalytics(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) CollectAnalyticsBatch(w http.ResponseWriter, r *http.Request) {
 	var batch requests.CollectAnalyticsBatchRequest
 	if err := utils.ParseJSONBody(r, &batch); err != nil {
-		utils.JSONErrorResponse(w, "invalid request body", http.StatusBadRequest)
+		utils.JSONErrorCode(w, constants.ErrValidationBody, http.StatusBadRequest, nil)
 		return
 	}
 
 	if err := v.Controller.CollectAnalyticsEvents(r, batch); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -52,7 +53,7 @@ func (v *HttpViews) CollectAnalyticsBatch(w http.ResponseWriter, r *http.Request
 func (v *HttpViews) GetAppAnalyticsOverview(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 	if v.checkAnalyticsAccess(w, user) {
@@ -62,14 +63,14 @@ func (v *HttpViews) GetAppAnalyticsOverview(w http.ResponseWriter, r *http.Reque
 	appID := chi.URLParam(r, "appId")
 	project, err := v.Controller.GetAppProject(appID, user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
 
 	start, end := controllers.ParsePeriodFromRequest(r)
 	result, err := v.Controller.GetAnalyticsOverview(project.ID.String(), start, end)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -80,7 +81,7 @@ func (v *HttpViews) GetAppAnalyticsOverview(w http.ResponseWriter, r *http.Reque
 func (v *HttpViews) GetAppAnalyticsPageviews(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 	if v.checkAnalyticsAccess(w, user) {
@@ -90,14 +91,14 @@ func (v *HttpViews) GetAppAnalyticsPageviews(w http.ResponseWriter, r *http.Requ
 	appID := chi.URLParam(r, "appId")
 	project, err := v.Controller.GetAppProject(appID, user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
 
 	start, end := controllers.ParsePeriodFromRequest(r)
 	result, err := v.Controller.GetAnalyticsPageviews(project.ID.String(), start, end)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -108,7 +109,7 @@ func (v *HttpViews) GetAppAnalyticsPageviews(w http.ResponseWriter, r *http.Requ
 func (v *HttpViews) GetAppAnalyticsPages(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 	if v.checkAnalyticsAccess(w, user) {
@@ -118,14 +119,14 @@ func (v *HttpViews) GetAppAnalyticsPages(w http.ResponseWriter, r *http.Request)
 	appID := chi.URLParam(r, "appId")
 	project, err := v.Controller.GetAppProject(appID, user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
 
 	start, end := controllers.ParsePeriodFromRequest(r)
 	result, err := v.Controller.GetAnalyticsTopPages(project.ID.String(), start, end)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -136,7 +137,7 @@ func (v *HttpViews) GetAppAnalyticsPages(w http.ResponseWriter, r *http.Request)
 func (v *HttpViews) GetAppAnalyticsReferrers(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 	if v.checkAnalyticsAccess(w, user) {
@@ -146,14 +147,14 @@ func (v *HttpViews) GetAppAnalyticsReferrers(w http.ResponseWriter, r *http.Requ
 	appID := chi.URLParam(r, "appId")
 	project, err := v.Controller.GetAppProject(appID, user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
 
 	start, end := controllers.ParsePeriodFromRequest(r)
 	result, err := v.Controller.GetAnalyticsReferrers(project.ID.String(), start, end)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -164,7 +165,7 @@ func (v *HttpViews) GetAppAnalyticsReferrers(w http.ResponseWriter, r *http.Requ
 func (v *HttpViews) GetAppAnalyticsDevices(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 	if v.checkAnalyticsAccess(w, user) {
@@ -174,14 +175,14 @@ func (v *HttpViews) GetAppAnalyticsDevices(w http.ResponseWriter, r *http.Reques
 	appID := chi.URLParam(r, "appId")
 	project, err := v.Controller.GetAppProject(appID, user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
 
 	start, end := controllers.ParsePeriodFromRequest(r)
 	result, err := v.Controller.GetAnalyticsDevices(project.ID.String(), start, end)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -192,7 +193,7 @@ func (v *HttpViews) GetAppAnalyticsDevices(w http.ResponseWriter, r *http.Reques
 func (v *HttpViews) GetAppAnalyticsLocations(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 	if v.checkAnalyticsAccess(w, user) {
@@ -202,14 +203,14 @@ func (v *HttpViews) GetAppAnalyticsLocations(w http.ResponseWriter, r *http.Requ
 	appID := chi.URLParam(r, "appId")
 	project, err := v.Controller.GetAppProject(appID, user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
 
 	start, end := controllers.ParsePeriodFromRequest(r)
 	result, err := v.Controller.GetAnalyticsLocations(project.ID.String(), start, end)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -220,7 +221,7 @@ func (v *HttpViews) GetAppAnalyticsLocations(w http.ResponseWriter, r *http.Requ
 func (v *HttpViews) GetAppAnalyticsEvents(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 	if v.checkAnalyticsAccess(w, user) {
@@ -230,14 +231,14 @@ func (v *HttpViews) GetAppAnalyticsEvents(w http.ResponseWriter, r *http.Request
 	appID := chi.URLParam(r, "appId")
 	project, err := v.Controller.GetAppProject(appID, user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
 
 	start, end := controllers.ParsePeriodFromRequest(r)
 	result, err := v.Controller.GetAnalyticsCustomEvents(project.ID.String(), start, end)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -248,7 +249,7 @@ func (v *HttpViews) GetAppAnalyticsEvents(w http.ResponseWriter, r *http.Request
 func (v *HttpViews) GetAppAnalyticsRealtime(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 	if v.checkAnalyticsAccess(w, user) {
@@ -258,13 +259,13 @@ func (v *HttpViews) GetAppAnalyticsRealtime(w http.ResponseWriter, r *http.Reque
 	appID := chi.URLParam(r, "appId")
 	project, err := v.Controller.GetAppProject(appID, user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
 
 	result, err := v.Controller.GetAnalyticsRealtime(project.ID.String())
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 

@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/knid/wemob/internal/constants"
+	"github.com/knid/wemob/internal/controllers"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/utils"
 	"github.com/posthog/posthog-go"
@@ -13,13 +14,13 @@ import (
 func (v *HttpViews) GetUser(w http.ResponseWriter, r *http.Request) {
 	tokenString, err := utils.ExtractTokenFromHeader(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	userInformationRes, err := v.Controller.GetUser(tokenString)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
@@ -29,31 +30,31 @@ func (v *HttpViews) GetUser(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) UpdateUser(w http.ResponseWriter, r *http.Request) {
 	tokenString, err := utils.ExtractTokenFromHeader(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	userInformationRes, err := v.Controller.GetUser(tokenString)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	var userUpdateReq requests.UserUpdateRequest
 	if err := utils.ParseJSONBody(r, &userUpdateReq); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
 	user, err := v.Controller.DB.GetUserById(userInformationRes.ID.String())
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	updatedUserRes, err := v.Controller.UpdateUser(user, userUpdateReq)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -63,13 +64,13 @@ func (v *HttpViews) UpdateUser(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) DeleteUser(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	deletedUserRes, err := v.Controller.DeleteUser(user.ID.String())
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -84,12 +85,18 @@ func (v *HttpViews) DeleteUser(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) UserLogin(w http.ResponseWriter, r *http.Request) {
 	var userLoginReq requests.UserLoginRequest
 	if err := utils.ParseJSONBody(r, &userLoginReq); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 	userLoginRes, err := v.Controller.LoginUser(userLoginReq)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		switch {
+		case errors.Is(err, controllers.ErrInvalidCredentials):
+			utils.JSONErrorCode(w, constants.ErrAuthInvalidCredentials, http.StatusUnauthorized, nil)
+		default:
+			// Validation errors from validate.Struct still flow through here.
+			utils.ValidationError(w, err)
+		}
 		return
 	}
 
@@ -108,12 +115,18 @@ func (v *HttpViews) UserLogin(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) UserRegister(w http.ResponseWriter, r *http.Request) {
 	var userRegisterReq requests.UserRegisterRequest
 	if err := utils.ParseJSONBody(r, &userRegisterReq); err != nil {
-		utils.JSONErrorResponse(w, errors.New("could not parse body").Error(), http.StatusBadRequest)
+		utils.JSONErrorCode(w, constants.ErrValidationBody, http.StatusBadRequest, nil)
 		return
 	}
 	userInformationRes, err := v.Controller.RegisterUser(userRegisterReq)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		switch {
+		case errors.Is(err, controllers.ErrEmailTaken):
+			utils.JSONErrorCode(w, constants.ErrAuthEmailTaken, http.StatusConflict, nil)
+		default:
+			// Password mismatch + validate.Struct errors flow through here.
+			utils.ValidationError(w, err)
+		}
 		return
 	}
 
@@ -134,14 +147,14 @@ func (v *HttpViews) UserRegister(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) UserForgotPassword(w http.ResponseWriter, r *http.Request) {
 	var req requests.UserForgotPasswordRequest
 	if err := utils.ParseJSONBody(r, &req); err != nil {
-		utils.JSONErrorResponse(w, "could not parse body", http.StatusBadRequest)
+		utils.JSONErrorCode(w, constants.ErrValidationBody, http.StatusBadRequest, nil)
 		return
 	}
 
 	if err := v.Controller.RequestPasswordReset(req); err != nil {
 		// Validation errors are the only thing we surface — not "user exists"
 		// vs "user missing". Everything else is swallowed inside the controller.
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
@@ -155,12 +168,20 @@ func (v *HttpViews) UserForgotPassword(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) UserResetPassword(w http.ResponseWriter, r *http.Request) {
 	var req requests.UserResetPasswordRequest
 	if err := utils.ParseJSONBody(r, &req); err != nil {
-		utils.JSONErrorResponse(w, "could not parse body", http.StatusBadRequest)
+		utils.JSONErrorCode(w, constants.ErrValidationBody, http.StatusBadRequest, nil)
 		return
 	}
 
 	if err := v.Controller.ConsumePasswordReset(req); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		switch {
+		case errors.Is(err, controllers.ErrResetTokenInvalid):
+			utils.JSONErrorCode(w, constants.ErrAuthResetTokenInvalid, http.StatusBadRequest, nil)
+		case errors.Is(err, controllers.ErrResetTokenExpired):
+			utils.JSONErrorCode(w, constants.ErrAuthResetTokenExpired, http.StatusBadRequest, nil)
+		default:
+			// validate.Struct + password-mismatch errors stay on ValidationError.
+			utils.ValidationError(w, err)
+		}
 		return
 	}
 
@@ -175,12 +196,12 @@ func (v *HttpViews) UserResetPassword(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) UserSendVerifyEmail(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	if err := v.Controller.SendVerifyEmail(user); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -195,13 +216,18 @@ func (v *HttpViews) UserSendVerifyEmail(w http.ResponseWriter, r *http.Request) 
 func (v *HttpViews) UserConfirmVerifyEmail(w http.ResponseWriter, r *http.Request) {
 	var req requests.UserVerifyEmailRequest
 	if err := utils.ParseJSONBody(r, &req); err != nil {
-		utils.JSONErrorResponse(w, "could not parse body", http.StatusBadRequest)
+		utils.JSONErrorCode(w, constants.ErrValidationBody, http.StatusBadRequest, nil)
 		return
 	}
 
 	user, err := v.Controller.ConsumeVerifyEmail(req)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		switch {
+		case errors.Is(err, controllers.ErrVerificationInvalid):
+			utils.JSONErrorCode(w, constants.ErrAuthVerificationInvalid, http.StatusBadRequest, nil)
+		default:
+			utils.ValidationError(w, err)
+		}
 		return
 	}
 
@@ -211,4 +237,3 @@ func (v *HttpViews) UserConfirmVerifyEmail(w http.ResponseWriter, r *http.Reques
 		"message":  "Email verified.",
 	}, http.StatusOK)
 }
-

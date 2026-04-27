@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/utils"
 )
@@ -12,18 +13,18 @@ import (
 func (v *HttpViews) AdminListTickets(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 	if user.Type != "admin" {
-		utils.JSONErrorResponse(w, "admin access required", http.StatusForbidden)
+		utils.JSONErrorCode(w, constants.ErrAdminRequired, http.StatusForbidden, nil)
 		return
 	}
 
 	params := adminListParamsFromQuery(r)
 	result, err := v.Controller.AdminListTickets(params)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -34,18 +35,18 @@ func (v *HttpViews) AdminListTickets(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) AdminGetTicket(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 	if user.Type != "admin" {
-		utils.JSONErrorResponse(w, "admin access required", http.StatusForbidden)
+		utils.JSONErrorCode(w, constants.ErrAdminRequired, http.StatusForbidden, nil)
 		return
 	}
 
 	id := chi.URLParam(r, "ticketId")
 	result, err := v.Controller.AdminGetTicket(id)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
 
@@ -56,11 +57,11 @@ func (v *HttpViews) AdminGetTicket(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) AdminUpdateTicket(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 	if user.Type != "admin" {
-		utils.JSONErrorResponse(w, "admin access required", http.StatusForbidden)
+		utils.JSONErrorCode(w, constants.ErrAdminRequired, http.StatusForbidden, nil)
 		return
 	}
 
@@ -68,13 +69,13 @@ func (v *HttpViews) AdminUpdateTicket(w http.ResponseWriter, r *http.Request) {
 
 	var req requests.AdminUpdateTicketRequest
 	if err := utils.ParseJSONBody(r, &req); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
 	result, err := v.Controller.AdminUpdateTicket(id, req)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.JSONInternalError(w, err)
 		return
 	}
 

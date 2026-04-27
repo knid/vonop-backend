@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/controllers"
 	"github.com/knid/wemob/internal/utils"
 )
@@ -18,27 +19,29 @@ import (
 func (v *HttpViews) authorizeApp(w http.ResponseWriter, r *http.Request) string {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return ""
 	}
 	appID := chi.URLParam(r, "appId")
 	if _, err := v.Controller.GetAppProject(appID, user); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return ""
 	}
 	return appID
 }
 
 // writeStoreErr maps controller errors to HTTP statuses. ErrNoEcommerceDB and
-// "not found" become 404; the rest are 400.
+// "not found" become 404; everything else is treated as an internal failure
+// — the underlying error is logged via slog and the client sees INTERNAL_ERROR
+// rather than the raw message.
 func writeStoreErr(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, controllers.ErrNoEcommerceDB):
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 	case strings.Contains(err.Error(), "not found"):
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 	default:
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.JSONInternalError(w, err)
 	}
 }
 
@@ -64,7 +67,7 @@ func (v *HttpViews) UpdateAppStoreSettings(w http.ResponseWriter, r *http.Reques
 	}
 	var body map[string]any
 	if err := utils.ParseJSONBody(r, &body); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 	info, err := v.Controller.UpdateAppStoreSettings(appID, body)
@@ -110,7 +113,7 @@ func (v *HttpViews) CreateStoreProduct(w http.ResponseWriter, r *http.Request) {
 	}
 	var body map[string]any
 	if err := utils.ParseJSONBody(r, &body); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 	out, err := v.Controller.CreateStoreProduct(appID, body)
@@ -128,7 +131,7 @@ func (v *HttpViews) UpdateStoreProduct(w http.ResponseWriter, r *http.Request) {
 	}
 	var body map[string]any
 	if err := utils.ParseJSONBody(r, &body); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 	out, err := v.Controller.UpdateStoreProduct(appID, chi.URLParam(r, "productId"), body)
@@ -173,7 +176,7 @@ func (v *HttpViews) CreateStoreCategory(w http.ResponseWriter, r *http.Request) 
 	}
 	var body map[string]any
 	if err := utils.ParseJSONBody(r, &body); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 	out, err := v.Controller.CreateStoreCategory(appID, body)
@@ -191,7 +194,7 @@ func (v *HttpViews) UpdateStoreCategory(w http.ResponseWriter, r *http.Request) 
 	}
 	var body map[string]any
 	if err := utils.ParseJSONBody(r, &body); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 	out, err := v.Controller.UpdateStoreCategory(appID, chi.URLParam(r, "categoryId"), body)
@@ -236,7 +239,7 @@ func (v *HttpViews) CreateStoreDiscount(w http.ResponseWriter, r *http.Request) 
 	}
 	var body map[string]any
 	if err := utils.ParseJSONBody(r, &body); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 	out, err := v.Controller.CreateStoreDiscount(appID, body)
@@ -254,7 +257,7 @@ func (v *HttpViews) UpdateStoreDiscount(w http.ResponseWriter, r *http.Request) 
 	}
 	var body map[string]any
 	if err := utils.ParseJSONBody(r, &body); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 	out, err := v.Controller.UpdateStoreDiscount(appID, chi.URLParam(r, "discountId"), body)
@@ -312,7 +315,7 @@ func (v *HttpViews) UpdateStoreOrderStatus(w http.ResponseWriter, r *http.Reques
 	}
 	var body map[string]any
 	if err := utils.ParseJSONBody(r, &body); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 	out, err := v.Controller.UpdateStoreOrderStatus(appID, chi.URLParam(r, "orderId"), body)

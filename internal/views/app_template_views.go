@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/controllers"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/responses"
@@ -20,7 +21,7 @@ func (v *HttpViews) ListPublishedTemplates(w http.ResponseWriter, r *http.Reques
 
 	templates, err := v.Controller.ListPublishedTemplates(tag, templateType)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -44,7 +45,7 @@ func (v *HttpViews) GetPublishedTemplate(w http.ResponseWriter, r *http.Request)
 
 	template, err := v.Controller.GetPublishedTemplate(slug)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
 
@@ -63,7 +64,7 @@ func (v *HttpViews) GetPublishedTemplate(w http.ResponseWriter, r *http.Request)
 func (v *HttpViews) CopyTemplate(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 	if requireActiveSubscription(w, user) {
@@ -74,7 +75,7 @@ func (v *HttpViews) CopyTemplate(w http.ResponseWriter, r *http.Request) {
 
 	project, err := v.Controller.CopyTemplate(r.Context(), user, slug)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -103,19 +104,19 @@ func (v *HttpViews) CopyTemplate(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) CreateAdminTemplate(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	var req requests.CreateAppTemplateRequest
 	if err := utils.ParseJSONBody(r, &req); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
 	template, err := v.Controller.CreateAppTemplate(user, req)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -127,20 +128,20 @@ func (v *HttpViews) CreateAdminTemplate(w http.ResponseWriter, r *http.Request) 
 func (v *HttpViews) CreateTemplateFromApp(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	appID := chi.URLParam(r, "appId")
 	var req requests.CreateTemplateFromAppRequest
 	if err := utils.ParseJSONBody(r, &req); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
 	template, err := v.Controller.CreateTemplateFromApp(user, appID, req)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -152,13 +153,13 @@ func (v *HttpViews) CreateTemplateFromApp(w http.ResponseWriter, r *http.Request
 func (v *HttpViews) ListAdminTemplates(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	templates, err := v.Controller.ListAllTemplates(user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusForbidden)
+		utils.JSONErrorCode(w, constants.ErrForbidden, http.StatusForbidden, nil)
 		return
 	}
 
@@ -175,14 +176,14 @@ func (v *HttpViews) ListAdminTemplates(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) GetAdminTemplate(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	id := chi.URLParam(r, "id")
 	template, err := v.Controller.GetAppTemplate(id, user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
 
@@ -194,20 +195,20 @@ func (v *HttpViews) GetAdminTemplate(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) UpdateAdminTemplate(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	id := chi.URLParam(r, "id")
 	var req requests.UpdateAppTemplateRequest
 	if err := utils.ParseJSONBody(r, &req); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
 	template, err := v.Controller.UpdateAppTemplate(id, user, req)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -219,13 +220,13 @@ func (v *HttpViews) UpdateAdminTemplate(w http.ResponseWriter, r *http.Request) 
 func (v *HttpViews) DeleteAdminTemplate(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	id := chi.URLParam(r, "id")
 	if err := v.Controller.DeleteAppTemplate(id, user); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -236,20 +237,20 @@ func (v *HttpViews) DeleteAdminTemplate(w http.ResponseWriter, r *http.Request) 
 func (v *HttpViews) PublishAdminTemplate(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	id := chi.URLParam(r, "id")
 	var req requests.PublishAppTemplateRequest
 	if err := utils.ParseJSONBody(r, &req); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
 	template, err := v.Controller.PublishAppTemplate(id, user, req)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -261,20 +262,20 @@ func (v *HttpViews) PublishAdminTemplate(w http.ResponseWriter, r *http.Request)
 func (v *HttpViews) SortAdminTemplate(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	id := chi.URLParam(r, "id")
 	var req requests.SortAppTemplateRequest
 	if err := utils.ParseJSONBody(r, &req); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
 	template, err := v.Controller.SortAppTemplate(id, user, req)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.JSONInternalError(w, err)
 		return
 	}
 

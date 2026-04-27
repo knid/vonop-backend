@@ -5,6 +5,8 @@ import (
 	"log/slog"
 	"net/http"
 	"reflect"
+
+	"github.com/knid/wemob/internal/constants"
 )
 
 func JSONResponse(w http.ResponseWriter, data interface{}, statusCode int) {
@@ -19,20 +21,36 @@ func JSONResponse(w http.ResponseWriter, data interface{}, statusCode int) {
 	}
 }
 
-func JSONErrorResponse(w http.ResponseWriter, message string, code int) {
-	JSONResponse(w, map[string]string{"error": message}, code)
-}
-
-// JSONCodedErrorResponse returns a structured error with a machine-readable code,
-// human-readable message, and optional details. This enables frontends to show
-// contextual upgrade prompts on specific error codes.
-func JSONCodedErrorResponse(w http.ResponseWriter, errorCode string, message string, statusCode int, details map[string]any) {
+// JSONError is the canonical way to send any error response. The response
+// always includes a stable machine-readable code; the English message is
+// a fallback for unknown codes / non-localized clients. Pass details as
+// nil if there are none.
+func JSONError(w http.ResponseWriter, code, message string, status int, details map[string]any) {
 	resp := map[string]any{
-		"error":   message,
-		"code":    errorCode,
+		"error": message,
+		"code":  code,
 	}
 	if details != nil {
 		resp["details"] = details
 	}
-	JSONResponse(w, resp, statusCode)
+	JSONResponse(w, resp, status)
+}
+
+// JSONErrorCode is sugar when the default English message from the
+// constants catalog is fine. Looks up constants.DefaultMessages[code]
+// and falls back to a generic string if the code is unknown.
+func JSONErrorCode(w http.ResponseWriter, code string, status int, details map[string]any) {
+	msg, ok := constants.DefaultMessages[code]
+	if !ok {
+		msg = "An error occurred."
+	}
+	JSONError(w, code, msg, status, details)
+}
+
+// JSONInternalError logs the underlying error and returns INTERNAL_ERROR
+// with no leaked detail to the client. Use anywhere an unexpected error
+// would otherwise surface as `err.Error()` in a 5xx response.
+func JSONInternalError(w http.ResponseWriter, err error) {
+	slog.Error("internal error", "error", err)
+	JSONErrorCode(w, constants.ErrInternal, http.StatusInternalServerError, nil)
 }

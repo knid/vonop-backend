@@ -5,6 +5,7 @@ import (
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/utils"
 )
@@ -16,18 +17,18 @@ import (
 func (v *HttpViews) GetAppMessages(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 	if user == nil {
-		utils.JSONErrorResponse(w, "unauthorized", http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthRequired, http.StatusUnauthorized, nil)
 		return
 	}
 
 	appID := chi.URLParam(r, "appId")
 	project, err := v.Controller.GetAppProject(appID, user)
 	if err != nil || project == nil {
-		utils.JSONErrorResponse(w, "project not found", http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrProjectNotFound, http.StatusNotFound, nil)
 		return
 	}
 
@@ -43,7 +44,7 @@ func (v *HttpViews) GetAppMessages(w http.ResponseWriter, r *http.Request) {
 
 	msgs, err := v.Controller.DB.GetRecentChatMessages(project.ID, limit)
 	if err != nil {
-		utils.JSONErrorResponse(w, "failed to load messages", http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 	if msgs == nil {
@@ -59,23 +60,23 @@ func (v *HttpViews) GetAppMessages(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) ClearAppMessages(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 	if user == nil {
-		utils.JSONErrorResponse(w, "unauthorized", http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthRequired, http.StatusUnauthorized, nil)
 		return
 	}
 
 	appID := chi.URLParam(r, "appId")
 	project, err := v.Controller.GetAppProject(appID, user)
 	if err != nil || project == nil {
-		utils.JSONErrorResponse(w, "project not found", http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrProjectNotFound, http.StatusNotFound, nil)
 		return
 	}
 
 	if err := v.Controller.DB.ClearChatMessages(project.ID); err != nil {
-		utils.JSONErrorResponse(w, "failed to clear messages", http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 	utils.JSONResponse(w, map[string]any{"success": true}, http.StatusOK)

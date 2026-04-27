@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/utils"
 )
@@ -13,7 +14,7 @@ import (
 func (v *HttpViews) GetDeployments(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
@@ -23,7 +24,7 @@ func (v *HttpViews) GetDeployments(w http.ResponseWriter, r *http.Request) {
 
 	deployments, err := v.Controller.GetDeployments(user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -33,7 +34,7 @@ func (v *HttpViews) GetDeployments(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) GetDeployment(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
@@ -43,17 +44,17 @@ func (v *HttpViews) GetDeployment(w http.ResponseWriter, r *http.Request) {
 
 	deploymentID := chi.URLParam(r, "deploymentId")
 	if deploymentID == "" {
-		utils.JSONErrorResponse(w, "deployment ID is required", http.StatusBadRequest)
+		utils.JSONErrorCode(w, constants.ErrValidationRequired, http.StatusBadRequest, map[string]any{"field": "deployment_id"})
 		return
 	}
 	deployment, err := v.Controller.GetDeploymentByID(deploymentID)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
 	if deployment.UserID.String() != user.ID.String() {
-		utils.JSONErrorResponse(w, "you do not have access to this resource", http.StatusForbidden)
+		utils.JSONErrorCode(w, constants.ErrForbidden, http.StatusForbidden, nil)
 		return
 	}
 
@@ -63,7 +64,7 @@ func (v *HttpViews) GetDeployment(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) CreateDeployment(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
@@ -73,13 +74,13 @@ func (v *HttpViews) CreateDeployment(w http.ResponseWriter, r *http.Request) {
 
 	var deploymentCreateReq requests.CreateDeploymentRequest
 	if err := utils.ParseJSONBody(r, &deploymentCreateReq); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
 	deployment, err := v.Controller.CreateDeploymentTask(user, deploymentCreateReq)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -89,7 +90,7 @@ func (v *HttpViews) CreateDeployment(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) UpdateDeployment(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
@@ -99,19 +100,19 @@ func (v *HttpViews) UpdateDeployment(w http.ResponseWriter, r *http.Request) {
 
 	var deploymentCreateReq requests.CreateDeploymentRequest
 	if err := utils.ParseJSONBody(r, &deploymentCreateReq); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
 	deploymentID := chi.URLParam(r, "deploymentId")
 	if deploymentID == "" {
-		utils.JSONErrorResponse(w, "deployment ID is required", http.StatusBadRequest)
+		utils.JSONErrorCode(w, constants.ErrValidationRequired, http.StatusBadRequest, map[string]any{"field": "deployment_id"})
 		return
 	}
 
 	deployment, err := v.Controller.UpdateDeploymentTask(user, deploymentID, deploymentCreateReq)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -123,7 +124,7 @@ func (v *HttpViews) UpdateDeployment(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) SwitchDeploymentToManaged(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
@@ -133,12 +134,12 @@ func (v *HttpViews) SwitchDeploymentToManaged(w http.ResponseWriter, r *http.Req
 
 	deploymentID := chi.URLParam(r, "deploymentId")
 	if deploymentID == "" {
-		utils.JSONErrorResponse(w, "deployment id required", http.StatusBadRequest)
+		utils.JSONErrorCode(w, constants.ErrValidationRequired, http.StatusBadRequest, map[string]any{"field": "deployment_id"})
 		return
 	}
 	updated, err := v.Controller.SwitchToManaged(r.Context(), user, deploymentID)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.JSONInternalError(w, err)
 		return
 	}
 	utils.JSONResponse(w, map[string]interface{}{
@@ -151,7 +152,7 @@ func (v *HttpViews) SwitchDeploymentToManaged(w http.ResponseWriter, r *http.Req
 func (v *HttpViews) SignUnsignedIPA(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
@@ -161,13 +162,13 @@ func (v *HttpViews) SignUnsignedIPA(w http.ResponseWriter, r *http.Request) {
 
 	var signIPAReq requests.SignIPARequest
 	if err := utils.ParseJSONBody(r, &signIPAReq); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
 	task, err := v.Controller.SignUnsignedIPATask(user, signIPAReq)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -177,7 +178,7 @@ func (v *HttpViews) SignUnsignedIPA(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) CheckSignIPATaskStatus(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
@@ -187,23 +188,23 @@ func (v *HttpViews) CheckSignIPATaskStatus(w http.ResponseWriter, r *http.Reques
 
 	signTaskID := chi.URLParam(r, "signTaskId")
 	if signTaskID == "" {
-		utils.JSONErrorResponse(w, "sign task ID is required", http.StatusBadRequest)
+		utils.JSONErrorCode(w, constants.ErrValidationRequired, http.StatusBadRequest, map[string]any{"field": "sign_task_id"})
 		return
 	}
 
 	signTask, err := v.Controller.DB.GetIOSSignTaskById(signTaskID)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
 	project, err := v.Controller.DB.GetProjectById(signTask.ProjectID.String())
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.JSONInternalError(w, err)
 		return
 	}
 	if project.UserID.String() != user.ID.String() {
-		utils.JSONErrorResponse(w, "you do not have access to this resource", http.StatusForbidden)
+		utils.JSONErrorCode(w, constants.ErrForbidden, http.StatusForbidden, nil)
 		return
 	}
 
@@ -221,7 +222,7 @@ func (v *HttpViews) CheckSignIPATaskStatus(w http.ResponseWriter, r *http.Reques
 func (v *HttpViews) GetBuildSignStatus(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 	if requireActiveSubscription(w, user) {
@@ -230,7 +231,7 @@ func (v *HttpViews) GetBuildSignStatus(w http.ResponseWriter, r *http.Request) {
 
 	buildID := chi.URLParam(r, "buildId")
 	if buildID == "" {
-		utils.JSONErrorResponse(w, "build ID is required", http.StatusBadRequest)
+		utils.JSONErrorCode(w, constants.ErrValidationRequired, http.StatusBadRequest, map[string]any{"field": "build_id"})
 		return
 	}
 
@@ -239,19 +240,19 @@ func (v *HttpViews) GetBuildSignStatus(w http.ResponseWriter, r *http.Request) {
 		// sql.ErrNoRows is expected — surface as 404 so the client can
 		// distinguish "never signed" from a real server error.
 		if errors.Is(err, sql.ErrNoRows) {
-			utils.JSONErrorResponse(w, "no sign task for this build", http.StatusNotFound)
+			utils.JSONError(w, constants.ErrNotFound, "No sign task for this build.", http.StatusNotFound, nil)
 			return
 		}
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
 	utils.JSONResponse(w, map[string]any{
-		"task_id":   signTask.ID.String(),
-		"status":    signTask.Status,
-		"message":   signTask.StatusMessage,
-		"finished":  signTask.Finished,
-		"build_id":  signTask.BuildID.String(),
+		"task_id":    signTask.ID.String(),
+		"status":     signTask.Status,
+		"message":    signTask.StatusMessage,
+		"finished":   signTask.Finished,
+		"build_id":   signTask.BuildID.String(),
 		"created_at": signTask.CreatedAt,
 	}, http.StatusOK)
 }

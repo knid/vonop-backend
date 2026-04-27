@@ -13,17 +13,17 @@ import (
 func (v *HttpViews) GetLimits(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	limits, err := v.Controller.GetUserLimits(user)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			utils.JSONErrorResponse(w, "not found", http.StatusNotFound)
+			utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 			return
 		}
-		utils.JSONErrorResponse(w, "failed to retrieve limits", http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -62,17 +62,17 @@ func (v *HttpViews) GetLimits(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) GetSubscription(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	response, err := v.Controller.GetSubscription(user)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			utils.JSONErrorResponse(w, "not found", http.StatusNotFound)
+			utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 			return
 		}
-		utils.JSONErrorResponse(w, "failed to retrieve subscription", http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -80,19 +80,19 @@ func (v *HttpViews) GetSubscription(w http.ResponseWriter, r *http.Request) {
 }
 
 func (v *HttpViews) UpdateSubscription(w http.ResponseWriter, r *http.Request) {
-	utils.JSONCodedErrorResponse(w, "FORBIDDEN", "subscription changes must go through Stripe checkout", http.StatusForbidden, nil)
+	utils.JSONError(w, constants.ErrForbidden, "subscription changes must go through Stripe checkout", http.StatusForbidden, nil)
 }
 
 func (v *HttpViews) CancelSubscription(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	err = v.Controller.CancelSubscription(user)
 	if err != nil {
-		utils.JSONErrorResponse(w, "failed to cancel subscription", http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -100,4 +100,3 @@ func (v *HttpViews) CancelSubscription(w http.ResponseWriter, r *http.Request) {
 
 	utils.JSONResponse(w, map[string]string{"message": "Subscription cancelled successfully"}, http.StatusOK)
 }
-

@@ -3,6 +3,7 @@ package views
 import (
 	"net/http"
 
+	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/utils"
 )
@@ -11,12 +12,12 @@ import (
 func (v *HttpViews) ValidateAppleConnection(w http.ResponseWriter, r *http.Request) {
 	_, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, "unauthorized", http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthRequired, http.StatusUnauthorized, nil)
 		return
 	}
 	var req requests.ValidateAppleConnectionRequest
 	if err := utils.ParseJSONBody(r, &req); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 	result := v.Controller.ValidateAppleConnection(r.Context(), req)
@@ -27,12 +28,12 @@ func (v *HttpViews) ValidateAppleConnection(w http.ResponseWriter, r *http.Reque
 func (v *HttpViews) ValidateGooglePlayConnection(w http.ResponseWriter, r *http.Request) {
 	_, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, "unauthorized", http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthRequired, http.StatusUnauthorized, nil)
 		return
 	}
 	var req requests.ValidateGooglePlayConnectionRequest
 	if err := utils.ParseJSONBody(r, &req); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 	result := v.Controller.ValidateGooglePlayConnection(r.Context(), req)

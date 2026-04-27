@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/services/remoteconfig"
 	"github.com/knid/wemob/internal/utils"
@@ -14,7 +15,7 @@ import (
 func (v *HttpViews) GetBillingPlans(w http.ResponseWriter, r *http.Request) {
 	subs, err := v.Controller.DB.GetSubscriptions()
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -38,24 +39,24 @@ func (v *HttpViews) GetBillingPlans(w http.ResponseWriter, r *http.Request) {
 				MaxDeployedWebApps:    rc.GetInt(remoteconfig.PlanInt(pn, "max-deployed-web-apps", limits.MaxDeployedWebApps), remoteconfig.Global),
 				MaxDeployedMobileApps: rc.GetInt(remoteconfig.PlanInt(pn, "max-deployed-mobile-apps", limits.MaxDeployedMobileApps), remoteconfig.Global),
 				CanDeployMobile:       rc.GetBool(remoteconfig.PlanBool(pn, "can-deploy-mobile", limits.CanDeployMobile), remoteconfig.Global),
-				MonthlyAICredits:     rc.GetInt(remoteconfig.PlanInt(pn, "monthly-ai-credits", limits.MonthlyAICredits), remoteconfig.Global),
-				CreditRolloverMonths: rc.GetInt(remoteconfig.PlanInt(pn, "credit-rollover-months", limits.CreditRolloverMonths), remoteconfig.Global),
-				MontlyBuildCount:     limits.MontlyBuildCount,
-				CanBuildMobile:       rc.GetBool(remoteconfig.PlanBool(pn, "can-build-mobile", limits.CanBuildMobile), remoteconfig.Global),
-				CanUseAnalytics:      rc.GetBool(remoteconfig.PlanBool(pn, "can-use-analytics", limits.CanUseAnalytics), remoteconfig.Global),
-				CanAccessCode:        rc.GetBool(remoteconfig.PlanBool(pn, "can-access-code", limits.CanAccessCode), remoteconfig.Global),
-				CanBuyDomain:         rc.GetBool(remoteconfig.PlanBool(pn, "can-buy-domain", limits.CanBuyDomain), remoteconfig.Global),
-				CanUseEmailService:   rc.GetBool(remoteconfig.PlanBool(pn, "can-use-email-service", limits.CanUseEmailService), remoteconfig.Global),
-				CanUseEcommerce:      rc.GetBool(remoteconfig.PlanBool(pn, "can-use-ecommerce", limits.CanUseEcommerce), remoteconfig.Global),
-				CanDeployWeb:         rc.GetBool(remoteconfig.PlanBool(pn, "can-deploy-web", limits.CanDeployWeb), remoteconfig.Global),
-				MaxWebApps:           rc.GetInt(remoteconfig.PlanInt(pn, "max-web-apps", limits.MaxWebApps), remoteconfig.Global),
-				MaxMobileApps:        rc.GetInt(remoteconfig.PlanInt(pn, "max-mobile-apps", limits.MaxMobileApps), remoteconfig.Global),
-				CanRemoveBrandLogo:   rc.GetBool(remoteconfig.PlanBool(pn, "can-remove-brand-logo", limits.CanRemoveBrandLogo), remoteconfig.Global),
-				CanExportToGitHub:    rc.GetBool(remoteconfig.PlanBool(pn, "can-export-to-github", limits.CanExportToGitHub), remoteconfig.Global),
-				DeployMemoryMB:       limits.DeployMemoryMB,
-				DeployCPUs:           limits.DeployCPUs,
-				DeployDBMaxCU:        limits.DeployDBMaxCU,
-				DeployDBStorageMB:    limits.DeployDBStorageMB,
+				MonthlyAICredits:      rc.GetInt(remoteconfig.PlanInt(pn, "monthly-ai-credits", limits.MonthlyAICredits), remoteconfig.Global),
+				CreditRolloverMonths:  rc.GetInt(remoteconfig.PlanInt(pn, "credit-rollover-months", limits.CreditRolloverMonths), remoteconfig.Global),
+				MontlyBuildCount:      limits.MontlyBuildCount,
+				CanBuildMobile:        rc.GetBool(remoteconfig.PlanBool(pn, "can-build-mobile", limits.CanBuildMobile), remoteconfig.Global),
+				CanUseAnalytics:       rc.GetBool(remoteconfig.PlanBool(pn, "can-use-analytics", limits.CanUseAnalytics), remoteconfig.Global),
+				CanAccessCode:         rc.GetBool(remoteconfig.PlanBool(pn, "can-access-code", limits.CanAccessCode), remoteconfig.Global),
+				CanBuyDomain:          rc.GetBool(remoteconfig.PlanBool(pn, "can-buy-domain", limits.CanBuyDomain), remoteconfig.Global),
+				CanUseEmailService:    rc.GetBool(remoteconfig.PlanBool(pn, "can-use-email-service", limits.CanUseEmailService), remoteconfig.Global),
+				CanUseEcommerce:       rc.GetBool(remoteconfig.PlanBool(pn, "can-use-ecommerce", limits.CanUseEcommerce), remoteconfig.Global),
+				CanDeployWeb:          rc.GetBool(remoteconfig.PlanBool(pn, "can-deploy-web", limits.CanDeployWeb), remoteconfig.Global),
+				MaxWebApps:            rc.GetInt(remoteconfig.PlanInt(pn, "max-web-apps", limits.MaxWebApps), remoteconfig.Global),
+				MaxMobileApps:         rc.GetInt(remoteconfig.PlanInt(pn, "max-mobile-apps", limits.MaxMobileApps), remoteconfig.Global),
+				CanRemoveBrandLogo:    rc.GetBool(remoteconfig.PlanBool(pn, "can-remove-brand-logo", limits.CanRemoveBrandLogo), remoteconfig.Global),
+				CanExportToGitHub:     rc.GetBool(remoteconfig.PlanBool(pn, "can-export-to-github", limits.CanExportToGitHub), remoteconfig.Global),
+				DeployMemoryMB:        limits.DeployMemoryMB,
+				DeployCPUs:            limits.DeployCPUs,
+				DeployDBMaxCU:         limits.DeployDBMaxCU,
+				DeployDBStorageMB:     limits.DeployDBStorageMB,
 			}
 		}
 
@@ -78,13 +79,13 @@ func (v *HttpViews) GetBillingPlans(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) GetAICreditsBalance(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	balance, err := v.Controller.GetOrCreateCreditsBalance(user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -103,7 +104,7 @@ func (v *HttpViews) GetAICreditsBalance(w http.ResponseWriter, r *http.Request) 
 func (v *HttpViews) GetCreditBreakdown(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
@@ -111,13 +112,13 @@ func (v *HttpViews) GetCreditBreakdown(w http.ResponseWriter, r *http.Request) {
 	// derive the breakdown — otherwise the "used this period" counter would
 	// be computed against a stale period_start.
 	if _, err := v.Controller.GetOrCreateCreditsBalance(user); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
 	bd, err := v.Controller.ComputeCreditBreakdown(user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -135,13 +136,13 @@ func (v *HttpViews) GetCreditBreakdown(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) GetAICreditTransactions(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	txs, err := v.Controller.DB.GetAICreditTransactions(user.ID.String(), 50)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -151,7 +152,7 @@ func (v *HttpViews) GetAICreditTransactions(w http.ResponseWriter, r *http.Reque
 func (v *HttpViews) GetCreditHistory(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
@@ -170,7 +171,7 @@ func (v *HttpViews) GetCreditHistory(w http.ResponseWriter, r *http.Request) {
 
 	txs, total, err := v.Controller.DB.GetAICreditTransactionsPaginated(user.ID.String(), page, pageSize)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -233,18 +234,18 @@ func categorizeTxType(action string, amount int) string {
 
 func describeTxAction(action string) string {
 	descriptions := map[string]string{
-		"generate_app":        "App generation",
-		"generate":            "App generation",
-		"app_chat":            "Chat edit",
-		"chat":                "Chat edit",
-		"screenshot_to_code":  "Screenshot to code",
-		"element_edit":        "Element edit",
+		"generate_app":       "App generation",
+		"generate":           "App generation",
+		"app_chat":           "Chat edit",
+		"chat":               "Chat edit",
+		"screenshot_to_code": "Screenshot to code",
+		"element_edit":       "Element edit",
 		"generate_image":     "Image generation",
-		"purchase":            "Credit purchase",
-		"credits_purchased":   "Credit purchase",
-		"monthly_grant":       "Monthly credit allocation",
-		"initial_grant":       "Initial credit allocation",
-		"refund":              "Credit refund",
+		"purchase":           "Credit purchase",
+		"credits_purchased":  "Credit purchase",
+		"monthly_grant":      "Monthly credit allocation",
+		"initial_grant":      "Initial credit allocation",
+		"refund":             "Credit refund",
 	}
 	if desc, ok := descriptions[action]; ok {
 		return desc
@@ -261,20 +262,20 @@ func describeTxAction(action string) string {
 func (v *HttpViews) GetTokenUsage(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	entries, err := v.Controller.DB.GetLLMTokenUsageByUser(user.ID.String(), 100)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
 	since := time.Now().AddDate(0, -1, 0)
 	promptTotal, completionTotal, totalTokens, err := v.Controller.DB.GetLLMTokenUsageSummary(user.ID.String(), since)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 

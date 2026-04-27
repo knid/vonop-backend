@@ -13,13 +13,13 @@ import (
 func (v *HttpViews) GetProjects(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	projects, err := v.Controller.GetProjects(user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -30,7 +30,7 @@ func (v *HttpViews) GetProjects(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) UpdateProject(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
@@ -43,13 +43,13 @@ func (v *HttpViews) UpdateProject(w http.ResponseWriter, r *http.Request) {
 
 	var projectCreateReq requests.ProjectCreateRequest
 	if err := utils.ParseJSONBody(r, &projectCreateReq); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
 	projectCreateRes, err := v.Controller.UpdateProject(r, user, projectCreateReq)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -65,7 +65,7 @@ func (v *HttpViews) UpdateProject(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) CreateProject(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
@@ -78,24 +78,22 @@ func (v *HttpViews) CreateProject(w http.ResponseWriter, r *http.Request) {
 
 	limits, planName, err := v.Controller.GetUserLimitsWithPlan(user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
 	projects, err := v.Controller.GetProjects(user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
 	if len(projects) >= limits.MaximumProjectCount {
-		utils.JSONCodedErrorResponse(w, "PROJECT_LIMIT_REACHED",
-			"you have reached your project limit",
-			http.StatusForbidden, map[string]any{
-				"used":      len(projects),
-				"limit":     limits.MaximumProjectCount,
-				"plan_name": planName,
-			})
+		utils.JSONErrorCode(w, constants.ErrProjectLimitReached, http.StatusForbidden, map[string]any{
+			"used":      len(projects),
+			"limit":     limits.MaximumProjectCount,
+			"plan_name": planName,
+		})
 		go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_QUOTA_REACHED, map[string]any{
 			"action": "create_project",
 			"limit":  limits.MaximumProjectCount,
@@ -106,13 +104,13 @@ func (v *HttpViews) CreateProject(w http.ResponseWriter, r *http.Request) {
 
 	var projectCreateReq requests.ProjectCreateRequest
 	if err := utils.ParseJSONBody(r, &projectCreateReq); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
 	projectCreateRes, err := v.Controller.CreateProject(user, projectCreateReq)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -130,7 +128,7 @@ func (v *HttpViews) GetProject(w http.ResponseWriter, r *http.Request) {
 	// Implementation of the view to list all projects for a user
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
@@ -140,13 +138,13 @@ func (v *HttpViews) GetProject(w http.ResponseWriter, r *http.Request) {
 
 	projectID := chi.URLParam(r, "projectId")
 	if projectID == "" {
-		utils.JSONErrorResponse(w, "project_id is required", http.StatusBadRequest)
+		utils.JSONErrorCode(w, constants.ErrValidationRequired, http.StatusBadRequest, map[string]any{"field": "project_id"})
 		return
 	}
 
 	projectInformationRes, err := v.Controller.GetProject(user, projectID)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -157,7 +155,7 @@ func (v *HttpViews) DeleteProject(w http.ResponseWriter, r *http.Request) {
 	// Implementation of the view to list all projects for a user
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
@@ -167,13 +165,13 @@ func (v *HttpViews) DeleteProject(w http.ResponseWriter, r *http.Request) {
 
 	projectID := chi.URLParam(r, "projectId")
 	if projectID == "" {
-		utils.JSONErrorResponse(w, "project_id is required", http.StatusBadRequest)
+		utils.JSONErrorCode(w, constants.ErrValidationRequired, http.StatusBadRequest, map[string]any{"field": "project_id"})
 		return
 	}
 
 	deletedProjectRes, err := v.Controller.DeleteProject(user, projectID)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 

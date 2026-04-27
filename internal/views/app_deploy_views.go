@@ -21,7 +21,7 @@ import (
 func (v *HttpViews) DeployAppWeb(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 	if requireActiveSubscription(w, user) {
@@ -35,7 +35,7 @@ func (v *HttpViews) DeployAppWeb(w http.ResponseWriter, r *http.Request) {
 	if limitsErr == nil {
 		if !limits.CanDeployWeb {
 			go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_NEED, map[string]any{"action": "deploy_web"})
-			utils.JSONCodedErrorResponse(w, "FEATURE_NOT_AVAILABLE", "web deployments are not available on your plan", http.StatusForbidden, nil)
+			utils.JSONError(w, constants.ErrFeatureNotAvailable, "web deployments are not available on your plan", http.StatusForbidden, nil)
 			return
 		}
 
@@ -55,7 +55,7 @@ func (v *HttpViews) DeployAppWeb(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 
-				utils.JSONCodedErrorResponse(w, "DEPLOY_LIMIT_REACHED",
+				utils.JSONError(w, constants.ErrDeployLimitReached,
 					fmt.Sprintf("you have reached the maximum of %d deployed web apps for your plan", limits.MaxDeployedWebApps),
 					http.StatusForbidden, map[string]any{
 						"deployed_apps": deployedNames,
@@ -71,12 +71,12 @@ func (v *HttpViews) DeployAppWeb(w http.ResponseWriter, r *http.Request) {
 
 	project, err := v.Controller.GetAppProject(appID, user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
 
 	if existing, err := v.Controller.DB.GetBuildingAppDeployment(project.ID.String()); err == nil && existing != nil && existing.ID.String() != "" {
-		utils.JSONErrorResponse(w, "a deployment is already in progress", http.StatusConflict)
+		utils.JSONErrorCode(w, constants.ErrDeployInProgress, http.StatusConflict, nil)
 		return
 	}
 
@@ -92,7 +92,7 @@ func (v *HttpViews) DeployAppWeb(w http.ResponseWriter, r *http.Request) {
 			"project_type":  project.ProjectType,
 			"error_message": err.Error(),
 		})
-		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 	deployDuration := time.Since(deployStart).Seconds()
@@ -127,19 +127,19 @@ func (v *HttpViews) DeployAppWeb(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) UndeployAppWeb(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	appID := chi.URLParam(r, "appId")
 	project, err := v.Controller.GetAppProject(appID, user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
 
 	if err := v.Controller.UndeployApp(project.ID.String()); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -157,7 +157,7 @@ func (v *HttpViews) UndeployAppWeb(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) DeployAppMobile(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 	if requireActiveSubscription(w, user) {
@@ -171,7 +171,7 @@ func (v *HttpViews) DeployAppMobile(w http.ResponseWriter, r *http.Request) {
 	if limitsErr == nil {
 		if !limits.CanDeployMobile {
 			go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_NEED, map[string]any{"action": "deploy_mobile"})
-			utils.JSONCodedErrorResponse(w, "FEATURE_NOT_AVAILABLE", "mobile deployments are not available on your plan", http.StatusForbidden, nil)
+			utils.JSONError(w, constants.ErrFeatureNotAvailable, "mobile deployments are not available on your plan", http.StatusForbidden, nil)
 			return
 		}
 
@@ -189,7 +189,7 @@ func (v *HttpViews) DeployAppMobile(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 
-				utils.JSONCodedErrorResponse(w, "DEPLOY_LIMIT_REACHED",
+				utils.JSONError(w, constants.ErrDeployLimitReached,
 					fmt.Sprintf("you have reached the maximum of %d deployed mobile apps for your plan", limits.MaxDeployedMobileApps),
 					http.StatusForbidden, map[string]any{
 						"deployed_apps": deployedNames,
@@ -204,12 +204,12 @@ func (v *HttpViews) DeployAppMobile(w http.ResponseWriter, r *http.Request) {
 
 	project, err := v.Controller.GetAppProject(appID, user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
 
 	if existing, err := v.Controller.DB.GetBuildingAppDeployment(project.ID.String()); err == nil && existing != nil && existing.ID.String() != "" {
-		utils.JSONErrorResponse(w, "a deployment is already in progress", http.StatusConflict)
+		utils.JSONErrorCode(w, constants.ErrDeployInProgress, http.StatusConflict, nil)
 		return
 	}
 
@@ -225,7 +225,7 @@ func (v *HttpViews) DeployAppMobile(w http.ResponseWriter, r *http.Request) {
 			"project_type":  project.ProjectType,
 			"error_message": err.Error(),
 		})
-		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 	deployDuration := time.Since(deployStart).Seconds()
@@ -260,19 +260,19 @@ func (v *HttpViews) DeployAppMobile(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) UndeployAppMobile(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	appID := chi.URLParam(r, "appId")
 	project, err := v.Controller.GetAppProject(appID, user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
 
 	if err := v.Controller.UndeployApp(project.ID.String()); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -303,7 +303,7 @@ func (v *HttpViews) BuildAppIOS(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) BuildAppMobileMulti(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 	if requireActiveSubscription(w, user) {
@@ -313,25 +313,25 @@ func (v *HttpViews) BuildAppMobileMulti(w http.ResponseWriter, r *http.Request) 
 	limits, limitsErr := v.Controller.GetUserLimits(user)
 	if limitsErr != nil || !limits.CanBuildMobile {
 		go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_NEED, map[string]any{"action": "build_mobile"})
-		utils.JSONCodedErrorResponse(w, "FEATURE_NOT_AVAILABLE", "mobile builds require Professional plan", http.StatusForbidden, nil)
+		utils.JSONError(w, constants.ErrFeatureNotAvailable, "mobile builds require Professional plan", http.StatusForbidden, nil)
 		return
 	}
 
 	appID := chi.URLParam(r, "appId")
 	project, err := v.Controller.GetAppProject(appID, user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
 
 	var req requests.MultiPlatformMobileBuildRequest
 	if err := utils.ParseJSONBody(r, &req); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 	validate := validator.New(validator.WithRequiredStructEnabled())
 	if err := req.Validate(validate); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
@@ -343,7 +343,7 @@ func (v *HttpViews) BuildAppMobileMulti(w http.ResponseWriter, r *http.Request) 
 	// status — we still surface those to the client so the UI can show
 	// the per-platform error messages instead of a bare 500.
 	if triggerErr != nil && (build == nil || len(tasks) == 0) {
-		utils.JSONErrorResponse(w, triggerErr.Error(), http.StatusInternalServerError)
+		utils.JSONInternalError(w, triggerErr)
 		return
 	}
 
@@ -386,7 +386,7 @@ func (v *HttpViews) BuildAppMobileMulti(w http.ResponseWriter, r *http.Request) 
 func (v *HttpViews) buildAppMobile(w http.ResponseWriter, r *http.Request, platform string) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 	if requireActiveSubscription(w, user) {
@@ -396,36 +396,36 @@ func (v *HttpViews) buildAppMobile(w http.ResponseWriter, r *http.Request, platf
 	limits, limitsErr := v.Controller.GetUserLimits(user)
 	if limitsErr != nil || !limits.CanBuildMobile {
 		go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_NEED, map[string]any{"action": "build_mobile", "platform": platform})
-		utils.JSONCodedErrorResponse(w, "FEATURE_NOT_AVAILABLE", "mobile builds require Professional plan", http.StatusForbidden, nil)
+		utils.JSONError(w, constants.ErrFeatureNotAvailable, "mobile builds require Professional plan", http.StatusForbidden, nil)
 		return
 	}
 
 	appID := chi.URLParam(r, "appId")
 	project, err := v.Controller.GetAppProject(appID, user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
 
 	var req requests.MobileBuildRequest
 	if err := utils.ParseJSONBody(r, &req); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
 	validate := validator.New(validator.WithRequiredStructEnabled())
 	if err := req.Validate(validate); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
 	build, tasks, err := v.Controller.BuildAppMobile(project, user, []string{platform}, req.AppName, req.Icon, req.SplashScreenColor)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 	if len(tasks) == 0 {
-		utils.JSONErrorResponse(w, "no build task was created", http.StatusInternalServerError)
+		utils.JSONErrorCode(w, constants.ErrInternal, http.StatusInternalServerError, nil)
 		return
 	}
 	task := tasks[0]
@@ -448,14 +448,14 @@ func (v *HttpViews) buildAppMobile(w http.ResponseWriter, r *http.Request, platf
 func (v *HttpViews) GetDeployStatus(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	appID := chi.URLParam(r, "appId")
 	project, err := v.Controller.GetAppProject(appID, user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
 
@@ -469,7 +469,7 @@ func (v *HttpViews) GetDeployStatus(w http.ResponseWriter, r *http.Request) {
 			}, http.StatusOK)
 			return
 		}
-		utils.JSONErrorResponse(w, "failed to load deployment", http.StatusInternalServerError)
+		utils.JSONErrorCode(w, constants.ErrInternal, http.StatusInternalServerError, nil)
 		return
 	}
 
@@ -491,20 +491,20 @@ func (v *HttpViews) GetDeployStatus(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) GetDeployHistory(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	appID := chi.URLParam(r, "appId")
 	project, err := v.Controller.GetAppProject(appID, user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
 
 	deployments, err := v.Controller.GetAppDeployments(project.ID.String())
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -531,20 +531,20 @@ func (v *HttpViews) GetDeployHistory(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) GetPreviewBundle(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	appID := chi.URLParam(r, "appId")
 	project, err := v.Controller.GetAppProject(appID, user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
 
 	bundle, err := v.Controller.GetPreviewBundle(project)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -555,14 +555,14 @@ func (v *HttpViews) GetPreviewBundle(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) GetAppSandbox(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	appID := chi.URLParam(r, "appId")
 	project, err := v.Controller.GetAppProject(appID, user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
 
@@ -573,14 +573,14 @@ func (v *HttpViews) GetAppSandbox(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) SetAppSandbox(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	appID := chi.URLParam(r, "appId")
 	project, err := v.Controller.GetAppProject(appID, user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
 
@@ -588,12 +588,12 @@ func (v *HttpViews) SetAppSandbox(w http.ResponseWriter, r *http.Request) {
 		SandboxID string `json:"sandbox_id"`
 	}
 	if err := utils.ParseJSONBody(r, &body); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadRequest)
+		utils.ValidationError(w, err)
 		return
 	}
 
 	if err := v.Controller.DB.UpdateAppProjectSandboxID(project.ID.String(), body.SandboxID); err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -604,25 +604,25 @@ func (v *HttpViews) SetAppSandbox(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) StartAppSandbox(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	appID := chi.URLParam(r, "appId")
 	project, err := v.Controller.GetAppProject(appID, user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
 
 	token, err := utils.ExtractTokenFromHeader(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 	result, err := v.Controller.E2BService.StartSandbox(token, appID)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusBadGateway)
+		utils.JSONErrorCode(w, constants.ErrInternalUpstream, http.StatusBadGateway, nil)
 		return
 	}
 
@@ -643,14 +643,14 @@ func (v *HttpViews) StartAppSandbox(w http.ResponseWriter, r *http.Request) {
 func (v *HttpViews) GetAppSandboxStatus(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	appID := chi.URLParam(r, "appId")
 	project, err := v.Controller.GetAppProject(appID, user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
 
@@ -674,20 +674,20 @@ func (v *HttpViews) GetAppSandboxStatus(w http.ResponseWriter, r *http.Request) 
 func (v *HttpViews) ValidateAppFiles(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	appID := chi.URLParam(r, "appId")
 	project, err := v.Controller.GetAppProject(appID, user)
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusNotFound)
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
 
 	result, err := v.Controller.ValidateAppFiles(project.ID.String())
 	if err != nil {
-		utils.JSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		utils.JSONInternalError(w, err)
 		return
 	}
 

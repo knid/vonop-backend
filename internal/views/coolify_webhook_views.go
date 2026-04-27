@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/services/coolify"
 	"github.com/knid/wemob/internal/utils"
 )
@@ -18,7 +19,7 @@ func (v *HttpViews) HandleCoolifyWebhook(w http.ResponseWriter, r *http.Request)
 		secret = r.URL.Query().Get("secret")
 	}
 	if v.Controller.CoolifyService == nil || secret != v.Controller.CoolifyService.WebhookSecret {
-		utils.JSONErrorResponse(w, "unauthorized", http.StatusUnauthorized)
+		utils.JSONErrorCode(w, constants.ErrAuthRequired, http.StatusUnauthorized, nil)
 		return
 	}
 
@@ -26,7 +27,7 @@ func (v *HttpViews) HandleCoolifyWebhook(w http.ResponseWriter, r *http.Request)
 	rawBody, err := io.ReadAll(r.Body)
 	if err != nil {
 		slog.Warn("Coolify webhook: failed to read body", "error", err)
-		utils.JSONErrorResponse(w, "invalid payload", http.StatusBadRequest)
+		utils.JSONErrorCode(w, constants.ErrValidationBody, http.StatusBadRequest, nil)
 		return
 	}
 
@@ -40,7 +41,7 @@ func (v *HttpViews) HandleCoolifyWebhook(w http.ResponseWriter, r *http.Request)
 	var event coolify.DeploymentEvent
 	if err := json.Unmarshal(rawBody, &event); err != nil {
 		slog.Warn("Coolify webhook: invalid payload", "error", err)
-		utils.JSONErrorResponse(w, "invalid payload", http.StatusBadRequest)
+		utils.JSONErrorCode(w, constants.ErrValidationBody, http.StatusBadRequest, nil)
 		return
 	}
 
