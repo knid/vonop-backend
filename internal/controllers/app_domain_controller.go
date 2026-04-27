@@ -169,8 +169,9 @@ func (c *Controller) refreshDeployingDomain(d *models.AppDomain) {
 }
 
 // AddAppDomain adds a custom domain to an app project.
-// The domain is registered with Coolify if available, but stays "pending"
-// until DNS is verified via VerifyAppDomain.
+// The domain is stored with status "pending" and DNS instructions for the
+// user; actual proxy activation happens when the Caddy config is reloaded
+// (a separate concern). DNS verification is done via VerifyAppDomain.
 func (c *Controller) AddAppDomain(project *models.AppProject, user *models.User, req requests.AddAppDomainRequest) (*responses.AppDomainResponse, error) {
 	validate := validator.New(validator.WithRequiredStructEnabled())
 	if err := utils.ValidateFunc[requests.AddAppDomainRequest](req, validate); err != nil {
@@ -195,16 +196,27 @@ func (c *Controller) AddAppDomain(project *models.AppProject, user *models.User,
 		return nil, fmt.Errorf("maximum of %d custom domains per project reached", constants.MAX_DOMAINS_PER_PROJECT)
 	}
 
-	// Check domain is not already in use
+	// Check domain is not already attached to a different project
 	existing, err := c.DB.GetAppDomainByName(domainName)
-	if err == nil && existing.ID.String() != "" {
+	if err == nil && existing != nil && existing.ID.String() != "" {
+		if existing.AppProjectID != project.ID {
+			return nil, errors.New("domain already attached to another app")
+		}
 		return nil, errors.New("domain is already in use")
 	}
 
+	// Runtime row must exist (Fly app must be created before attaching a custom domain)
+	runtimeApp, err := c.DB.GetRuntimeAppByAppProjectID(project.ID.String())
+	if err != nil {
+		return nil, fmt.Errorf("publish the app first before adding a custom domain")
+	}
+
 	domain := models.AppDomain{
-		AppProjectID: project.ID,
-		Domain:       domainName,
-		Status:       "pending",
+		AppProjectID:    project.ID,
+		Domain:          domainName,
+		Status:          "pending",
+		DNSCheckStatus:  "pending",
+		DNSInstructions: dnsInstructionsFor(runtimeApp.FlyAppName, domainName),
 	}
 
 	created, err := c.DB.CreateAppDomain(&domain)
@@ -217,40 +229,29 @@ func (c *Controller) AddAppDomain(project *models.AppProject, user *models.User,
 	}
 
 	// Run an initial DNS check — domain might already be configured
-	status, msg := verifyDomainDNS(domainName)
+	_, msg := verifyDomainDNS(domainName)
 
-	// Register with Coolify and redeploy so the proxy picks up the new domain.
-	// A restart only restarts the container — a deploy regenerates proxy config.
-	// The domain is marked "deploying" until the Coolify build completes so the
-	// frontend does not expose the URL to users before the app is actually live.
-	var redeployTriggered bool
-	coolifyProject, cpErr := c.DB.GetRuntimeAppByAppProjectID(project.ID.String())
-	if cpErr == nil && coolifyProject != nil && c.CoolifyService != nil {
-		domains := c.buildCoolifyDomainList(coolifyProject, project.ID.String(), domainName)
-		if err := c.CoolifyService.UpdateDomains(coolifyProject.CoolifyAppUUID, domains); err != nil {
-			slog.Warn("Failed to add domain to Coolify", "domain", domainName, "error", err)
-		}
-		deploymentUUID, deployErr := c.CoolifyService.DeployApp(coolifyProject.CoolifyAppUUID)
-		if deployErr != nil {
-			slog.Warn("Failed to redeploy Coolify app after domain add", "domain", domainName, "error", deployErr)
-		} else {
-			redeployTriggered = true
-			created.DeploymentUUID = deploymentUUID
-			// Only transition to "deploying" if DNS already resolves correctly —
-			// otherwise stay "pending" so the user still sees DNS guidance.
-			if status == "active" {
-				created.Status = "deploying"
-				msg = "DNS verified — waiting for Coolify to finish deploying."
-			}
-			if _, err := c.DB.UpdateAppDomain(created); err != nil {
-				slog.Error("Failed to persist domain deploy state", "domain", domainName, "error", err)
-			}
+	return buildDomainResponse(created, msg), nil
+}
+
+// dnsInstructionsFor returns the DNS records a user must create at their
+// registrar to point the given hostname at the Wemob edge.
+func dnsInstructionsFor(flyAppName, hostname string) map[string]any {
+	if isApexDomain(hostname) {
+		return map[string]any{
+			"records": []map[string]string{
+				{"type": "A", "host": hostname, "value": "<edge-ipv4>"},
+				{"type": "AAAA", "host": hostname, "value": "<edge-ipv6>"},
+			},
+			"note": "These records must propagate before TLS can be issued.",
 		}
 	}
-
-	resp := buildDomainResponse(created, msg)
-	resp.RedeployTriggered = redeployTriggered
-	return resp, nil
+	return map[string]any{
+		"records": []map[string]string{
+			{"type": "CNAME", "host": hostname, "value": "edge.wemob.app"},
+		},
+		"note": "These records must propagate before TLS can be issued.",
+	}
 }
 
 // RemoveAppDomain removes a custom domain from an app project and Coolify.
