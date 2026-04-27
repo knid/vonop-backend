@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/knid/wemob/internal/models"
+	"github.com/uptrace/bun"
 )
 
 func (db *Database) GetAppDeploymentsByProjectID(projectID string) ([]models.AppDeployment, error) {
@@ -32,7 +33,9 @@ func (db *Database) CreateAppDeployment(d *models.AppDeployment) (*models.AppDep
 func (db *Database) GetBuildingAppDeployment(projectID string) (*models.AppDeployment, error) {
 	var deployment models.AppDeployment
 	err := db.DB.NewSelect().Model(&deployment).
-		Where("app_project_id = ? AND platform = ? AND status IN (?)", projectID, "web", "building").
+		Where("app_project_id = ?", projectID).
+		Where("platform = ?", "web").
+		Where("status IN (?)", bun.In([]string{"queued", "building", "deploying"})).
 		Order("created_at DESC").Limit(1).Scan(context.Background())
 	return &deployment, err
 }

@@ -83,7 +83,9 @@ func (v *HttpViews) DeployAppWeb(w http.ResponseWriter, r *http.Request) {
 	// Admission control — push back rather than queue forever.
 	// Per-tier queue so free-tier saturation never pushes back on paid users.
 	queueName := "deploy-web-free"
-	isPaid := limits != nil && limits.MaxDeployedWebApps > 1
+	// Plan-name-based routing is more robust than threshold-checking limit fields,
+	// which can change as new plans are introduced.
+	isPaid := planName != "" && planName != "free" && planName != "trial"
 	if isPaid {
 		queueName = "deploy-web-pro"
 	}
