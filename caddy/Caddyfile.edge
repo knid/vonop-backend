@@ -1,0 +1,49 @@
+{
+    # On-demand TLS asks our backend before issuing each cert. Without the
+    # ask URL, Caddy would happily issue certs for any hostname pointed at us.
+    on_demand_tls {
+        ask https://api.wemob.io/internal/edge/cert-allowed
+        rate_limit 100 1m
+    }
+    email ops@wemob.io
+}
+
+# wemob.app subdomains: pattern-based routing, single wildcard cert.
+*.wemob.app {
+    tls {
+        dns cloudflare {env.CLOUDFLARE_API_TOKEN}
+    }
+
+    @host header_regexp host Host ^(?P<slug>[^.]+)\.wemob\.app$
+    handle @host {
+        reverse_proxy https://wemob-{re.host.slug}.fly.dev {
+            header_up Host wemob-{re.host.slug}.fly.dev
+            header_up X-Forwarded-Host {host}
+            transport http {
+                tls
+                tls_server_name wemob-{re.host.slug}.fly.dev
+            }
+        }
+    }
+}
+
+# Custom domains: on-demand TLS, dynamic upstream lookup.
+:443 {
+    tls {
+        on_demand
+    }
+
+    reverse_proxy {
+        dynamic http {
+            url https://api.wemob.io/internal/edge/upstream?host={http.request.host}
+            header X-Internal-Token {env.EDGE_INTERNAL_TOKEN}
+            cache_duration 5m
+        }
+
+        header_up Host {upstream_hostport}
+        transport http {
+            tls
+            tls_server_name {upstream_hostport}
+        }
+    }
+}
