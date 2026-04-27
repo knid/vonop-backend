@@ -115,3 +115,42 @@ func (s *Service) VerifyWebhookSignature(payload []byte, sigHex string) bool {
 	mac.Write(payload)
 	return hmac.Equal(mac.Sum(nil), want)
 }
+
+// EnsureApp creates a Fly app if it doesn't already exist. Idempotent.
+func (s *Service) EnsureApp(appName string) error {
+	exists, err := s.AppExists(appName)
+	if err != nil {
+		return err
+	}
+	if exists {
+		return nil
+	}
+	body := map[string]any{
+		"app_name": appName,
+		"org_slug": s.OrgSlug,
+		"network":  "default",
+	}
+	return s.doRequest("POST", "/v1/apps", body, nil)
+}
+
+// AppExists returns true if the named Fly app exists in the current org.
+func (s *Service) AppExists(appName string) (bool, error) {
+	err := s.doRequest("GET", "/v1/apps/"+appName, nil, nil)
+	if err == nil {
+		return true, nil
+	}
+	if apiErr, ok := err.(*APIError); ok && apiErr.Status == http.StatusNotFound {
+		return false, nil
+	}
+	return false, err
+}
+
+// DeleteApp removes a Fly app and all its machines. Idempotent: succeeds
+// silently if the app no longer exists.
+func (s *Service) DeleteApp(appName string) error {
+	err := s.doRequest("DELETE", "/v1/apps/"+appName+"?force=true", nil, nil)
+	if apiErr, ok := err.(*APIError); ok && apiErr.Status == http.StatusNotFound {
+		return nil
+	}
+	return err
+}
