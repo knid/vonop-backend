@@ -26,6 +26,7 @@ import (
 	"github.com/knid/wemob/internal/services"
 	"github.com/knid/wemob/internal/services/codemagic"
 	"github.com/knid/wemob/internal/services/coolify"
+	"github.com/knid/wemob/internal/services/fly"
 	crmServices "github.com/knid/wemob/internal/services/crm"
 	e2bService "github.com/knid/wemob/internal/services/e2b"
 	emailServices "github.com/knid/wemob/internal/services/email"
@@ -900,6 +901,12 @@ func main() {
 			slog.Warn("Failed to register Coolify webhook — falling back to polling", "error", err)
 		}
 	}()
+	flyService := fly.NewService(
+		sm.GetSecret("FLY_API_TOKEN"),
+		sm.GetSecret("FLY_ORG_SLUG"),
+		sm.GetSecret("FLY_PRIMARY_REGION"),
+		sm.GetSecret("FLY_WEBHOOK_SECRET"),
+	)
 	giteaService := gitea.NewService(
 		sm.GetSecret("GITEA_URL"),
 		sm.GetSecret("GITEA_API_TOKEN"),
@@ -987,6 +994,7 @@ func main() {
 		userApiKeysStorage,
 		sm,
 		coolifyService,
+		flyService,
 		giteaService,
 		neonService,
 		posthogClient,
