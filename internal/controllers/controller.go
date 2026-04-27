@@ -33,6 +33,7 @@ type Controller struct {
 	EmailService           emailServices.EmailService
 	CRMService             crmServices.CRMService
 	TaskService            *asynq.Client
+	AsynqInspector         *asynq.Inspector
 	AssetsStorage          *storage.S3Storage
 	UserApiKeysStorage     *storage.S3Storage
 	ConcurrentBuildLimiter chan struct{}
@@ -54,7 +55,8 @@ type Controller struct {
 
 func NewController(db *database.Database, concurrentBuildLimiter chan struct{},
 	slackService *services.SlackService, emailService emailServices.EmailService,
-	crmService crmServices.CRMService, taskService *asynq.Client, assetsStorage *storage.S3Storage,
+	crmService crmServices.CRMService, taskService *asynq.Client, asynqInspector *asynq.Inspector,
+	assetsStorage *storage.S3Storage,
 	userApiKeysStorage *storage.S3Storage, secretManager secret.SecretManager,
 	coolifyService *coolify.Service, flyService *fly.Service, giteaService *gitea.Service,
 	neonService *neon.Service,
@@ -71,6 +73,7 @@ func NewController(db *database.Database, concurrentBuildLimiter chan struct{},
 		CRMService:             crmService,
 		ConcurrentBuildLimiter: concurrentBuildLimiter,
 		TaskService:            taskService,
+		AsynqInspector:         asynqInspector,
 		AssetsStorage:          assetsStorage,
 		UserApiKeysStorage:     userApiKeysStorage,
 		SecretManager:          secretManager,

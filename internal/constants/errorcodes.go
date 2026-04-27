@@ -106,6 +106,9 @@ const (
 	ErrInternalStorage  = "INTERNAL_STORAGE_UNAVAILABLE"
 	ErrInternalDB       = "INTERNAL_DB_FAILURE"
 	ErrInternalUpstream = "INTERNAL_UPSTREAM_FAILURE"
+
+	// System capacity
+	ErrSystemBusy = "SYSTEM_BUSY" // details: { queue, queue_depth }
 )
 
 // DefaultMessages provides the English fallback string for each code.
@@ -195,4 +198,6 @@ var DefaultMessages = map[string]string{
 	ErrInternalStorage:  "Storage is temporarily unavailable.",
 	ErrInternalDB:       "Database is temporarily unavailable.",
 	ErrInternalUpstream: "Upstream service is temporarily unavailable.",
+
+	ErrSystemBusy: "The system is busy, please try again in a moment.",
 }

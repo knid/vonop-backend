@@ -224,6 +224,7 @@ func BootstrapController() (*controllers.Controller, asynq.RedisClientOpt) {
 		emailServices.NewBrevoEmailService(sm.GetSecret("BREVO_API_KEY")),
 		crmServices.NewBrevoCRMService(sm.GetSecret("BREVO_API_KEY")),
 		asynq.NewClient(redisOpts),
+		asynq.NewInspector(redisOpts),
 		assetsStorage,
 		userApiKeysStorage,
 		sm,

@@ -47,6 +47,17 @@ func JSONErrorCode(w http.ResponseWriter, code string, status int, details map[s
 	JSONError(w, code, msg, status, details)
 }
 
+// JSONResponseStatus writes data as JSON with an explicit HTTP status.
+// Unlike JSONResponse it skips the nil-slice normalization; use for
+// struct responses where that optimization is never needed.
+func JSONResponseStatus(w http.ResponseWriter, data any, status int) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	if err := json.NewEncoder(w).Encode(data); err != nil {
+		slog.Error("failed to encode JSON response", "error", err)
+	}
+}
+
 // JSONInternalError logs the underlying error and returns INTERNAL_ERROR
 // with no leaked detail to the client. Use anywhere an unexpected error
 // would otherwise surface as `err.Error()` in a 5xx response.
