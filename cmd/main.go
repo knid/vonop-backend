@@ -1128,7 +1128,22 @@ func main() {
 			r.Post("/coolify", httpViews.HandleCoolifyWebhook)
 		})
 		r.Route("/v1", func(r chi.Router) {
-			r.Use(rateLimiter.RateLimit(600, time.Minute, appMiddleware.UserKey))
+			// OAuth begin/callback are pre-auth, so UserKey falls back to IPKey
+			// and they share the /v1 bucket. A busy household NAT (or a buggy
+			// frontend tab) can fill that bucket and lock every device on the
+			// same public IP out of login. Exempt /v1/users/auth/* — the
+			// global 1200/min IP limiter at the parent router still applies.
+			v1Limiter := rateLimiter.RateLimit(600, time.Minute, appMiddleware.UserKey)
+			r.Use(func(next http.Handler) http.Handler {
+				wrapped := v1Limiter(next)
+				return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+					if strings.HasPrefix(req.URL.Path, "/v1/users/auth/") {
+						next.ServeHTTP(w, req)
+						return
+					}
+					wrapped.ServeHTTP(w, req)
+				})
+			})
 			r.Handle("/static/*", http.StripPrefix("/v1/static/", http.FileServer(utils.NoDirFileSystem{FS: staticDir})))
 			r.Route("/storage", func(r chi.Router) {
 				r.Route("/credentials", func(r chi.Router) {
