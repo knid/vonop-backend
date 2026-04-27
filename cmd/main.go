@@ -719,7 +719,7 @@ func isSensitiveLogPath(path string) bool {
 }
 
 func main() {
-	controller := bootstrap.BootstrapController()
+	controller, _ := bootstrap.BootstrapController()
 
 	// Schema migrations run in main only — workers and migration scripts share
 	// the same BootstrapController but each decides independently whether to run

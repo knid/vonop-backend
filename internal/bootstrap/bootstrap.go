@@ -44,11 +44,12 @@ import (
 	_ "github.com/lib/pq"
 )
 
-// BootstrapController returns a fully-wired Controller ready for use by
-// either the API server, the Asynq worker, or the migration script. Panics
-// on startup errors (mirrors the original main()'s os.Exit(1) behavior on
-// fatal init failures).
-func BootstrapController() *controllers.Controller {
+// BootstrapController returns a fully-wired Controller and the Asynq Redis
+// options used to construct it. The Redis options are also needed by the
+// worker binary to create an asynq.Server against the same Redis instance.
+// Panics on startup errors (mirrors the original main()'s os.Exit(1)
+// behavior on fatal init failures).
+func BootstrapController() (*controllers.Controller, asynq.RedisClientOpt) {
 	infisicalClient := infisical.NewInfisicalClient(context.Background(), infisical.Config{
 		SiteUrl: "https://eu.infisical.com",
 	})
@@ -209,18 +210,20 @@ func BootstrapController() *controllers.Controller {
 	remoteConfigService := remoteconfig.New(posthogClient)
 	slog.Info("RemoteConfig service initialized")
 
+	redisOpts := asynq.RedisClientOpt{
+		Addr:      sm.GetSecret("REDIS_ADDR"),
+		Username:  sm.GetSecret("REDIS_USERNAME"),
+		Password:  sm.GetSecret("REDIS_PASSWORD"),
+		TLSConfig: &tls.Config{},
+	}
+
 	controller := controllers.NewController(
 		db,
 		make(chan struct{}, constants.MAX_CONCURRENT_BUILDS),
 		services.NewSlackService(sm.GetSecret("SLACK_API_KEY")),
 		emailServices.NewBrevoEmailService(sm.GetSecret("BREVO_API_KEY")),
 		crmServices.NewBrevoCRMService(sm.GetSecret("BREVO_API_KEY")),
-		asynq.NewClient(asynq.RedisClientOpt{
-			Addr:      sm.GetSecret("REDIS_ADDR"),
-			Username:  sm.GetSecret("REDIS_USERNAME"),
-			Password:  sm.GetSecret("REDIS_PASSWORD"),
-			TLSConfig: &tls.Config{},
-		}),
+		asynq.NewClient(redisOpts),
 		assetsStorage,
 		userApiKeysStorage,
 		sm,
@@ -251,7 +254,7 @@ func BootstrapController() *controllers.Controller {
 		}()
 	}
 
-	return controller
+	return controller, redisOpts
 }
 
 // BunDB opens and returns the Bun DB handle from a fully-bootstrapped

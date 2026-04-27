@@ -17,3 +17,10 @@ lint-errors:
 		exit 1; \
 	fi
 .PHONY: lint-errors
+
+worker:
+	go build -o bin/worker cmd/worker/main.go
+
+worker-dev:
+	go run cmd/worker/main.go
+.PHONY: worker worker-dev
