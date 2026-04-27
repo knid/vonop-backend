@@ -3,8 +3,7 @@ package main
 import (
 	"context"
 	"crypto/tls"
-	"database/sql"
-	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -17,49 +16,22 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/cors"
 	"github.com/go-chi/httplog/v3"
-	"github.com/hibiken/asynq"
+	"github.com/knid/wemob/internal/bootstrap"
 	"github.com/knid/wemob/internal/constants"
-	"github.com/knid/wemob/internal/controllers"
 	"github.com/knid/wemob/internal/database"
 	appMiddleware "github.com/knid/wemob/internal/middleware"
 	"github.com/knid/wemob/internal/models"
-	"github.com/knid/wemob/internal/services"
-	"github.com/knid/wemob/internal/services/codemagic"
-	"github.com/knid/wemob/internal/services/coolify"
-	"github.com/knid/wemob/internal/services/fly"
 	crmServices "github.com/knid/wemob/internal/services/crm"
-	e2bService "github.com/knid/wemob/internal/services/e2b"
-	emailServices "github.com/knid/wemob/internal/services/email"
-	"github.com/knid/wemob/internal/services/gitea"
-	"github.com/knid/wemob/internal/services/gitrepo"
-	"github.com/knid/wemob/internal/services/mcpclient"
-	"github.com/knid/wemob/internal/services/neon"
 	"github.com/knid/wemob/internal/services/pendingnudge"
-	"github.com/knid/wemob/internal/services/remoteconfig"
 	"github.com/knid/wemob/internal/services/secret"
-	"github.com/knid/wemob/internal/services/storage"
 	"github.com/knid/wemob/internal/services/storepoll"
 	"github.com/knid/wemob/internal/utils"
 	"github.com/knid/wemob/internal/views"
 	"github.com/markbates/goth"
 	"github.com/markbates/goth/providers/google"
 	"github.com/redis/go-redis/v9"
-
-	_ "github.com/lib/pq"
-
-	"github.com/uptrace/bun"
-	"github.com/uptrace/bun/dialect/pgdialect"
-	"github.com/uptrace/bun/driver/pgdriver"
-
-	"github.com/uptrace/bun/extra/bundebug"
-
 	"github.com/stripe/stripe-go/v82"
-
-	"log/slog"
-
-	infisical "github.com/infisical/go-sdk"
-	"github.com/posthog/posthog-go"
-	slogbetterstack "github.com/samber/slog-betterstack"
+	"github.com/uptrace/bun"
 )
 
 func createSchema(db *bun.DB) error {
@@ -747,95 +719,18 @@ func isSensitiveLogPath(path string) bool {
 }
 
 func main() {
-	infisicalClient := infisical.NewInfisicalClient(context.Background(), infisical.Config{
-		SiteUrl: "https://eu.infisical.com",
-	})
+	controller := bootstrap.BootstrapController()
 
-	infisicalClientID := os.Getenv("INFISICAL_CLIENT_ID")
-	infisicalClientSecret := os.Getenv("INFISICAL_CLIENT_SECRET")
-
-	if infisicalClientID == "" || infisicalClientSecret == "" {
-		slog.Error("Infisical client ID or secret is not set in environment variables")
-		return
-	}
-
-	_, err := infisicalClient.Auth().UniversalAuthLogin(infisicalClientID, infisicalClientSecret)
-	if err != nil {
-		slog.Error("Failed to authenticate with Infisical:", slog.String("error", err.Error()))
-		return
-	}
-
-	var sm secret.SecretManager
-	sm = secret.NewInfisicalSecretManager(
-		infisicalClient.(*infisical.InfisicalClient),
-		os.Getenv("INFISICAL_PROJECT_ID"),
-		os.Getenv("ENVIRONMENT"),
-	)
-
-	betterstackHandler := slogbetterstack.Option{
-		Token:    sm.GetSecret("BETTERSTACK_TOKEN"),
-		Endpoint: sm.GetSecret("BETTERSTACK_ENDPOINT"),
-	}.NewBetterstackHandler()
-
-	var logger *slog.Logger
-	if sm.GetEnv() == "dev" {
-		// In dev, log to both stdout and BetterStack
-		stdoutHandler := slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug})
-		logger = slog.New(utils.NewFanoutHandler(stdoutHandler, betterstackHandler))
-	} else {
-		logger = slog.New(betterstackHandler)
-	}
-
-	slog.SetDefault(logger)
-
-	dbHost := sm.GetSecret("DB_HOST")
-	dbPort := sm.GetSecret("DB_PORT")
-	dbName := sm.GetSecret("DB_NAME")
-	dbUser := sm.GetSecret("DB_USER")
-	dbPass := sm.GetSecret("DB_PASSWORD")
-	dbSSL := sm.GetSecret("DB_SSLMODE")
-
-	dsn := fmt.Sprintf(
-		"postgres://%s:%s@%s:%s/%s?sslmode=%s",
-		dbUser, dbPass, dbHost, dbPort, dbName, dbSSL,
-	)
-
-	slog.Info("DB connection config", "host", dbHost, "port", dbPort, "db", dbName, "sslmode", dbSSL)
-
-	sqldb := sql.OpenDB(pgdriver.NewConnector(
-		pgdriver.WithDSN(dsn),
-		pgdriver.WithTLSConfig(&tls.Config{InsecureSkipVerify: true}),
-		pgdriver.WithDialTimeout(5*time.Second),
-		pgdriver.WithReadTimeout(30*time.Second),
-		pgdriver.WithWriteTimeout(10*time.Second),
-	))
-	sqldb.SetMaxOpenConns(25)
-	sqldb.SetMaxIdleConns(10)
-	sqldb.SetConnMaxLifetime(10 * time.Minute)
-	sqldb.SetConnMaxIdleTime(2 * time.Minute)
-	bundb := bun.NewDB(sqldb, pgdialect.New())
-
-	if _, err := bundb.Exec("CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\";"); err != nil {
-		slog.Error("Failed to create uuid-ossp extension", "error", err)
-		os.Exit(1)
-	}
-
-	bundb.AddQueryHook(bundebug.NewQueryHook(
-		bundebug.WithVerbose(os.Getenv("BUNDEBUG") == "2"),
-		bundebug.FromEnv("BUNDEBUG"),
-	))
-
-	bundb.AddQueryHook(utils.NewQueryHook(utils.QueryHookOptions{
-		Logger:       logger,
-		SlowDuration: 200 * time.Millisecond, // Omit to log all operations as debug
-	}))
+	// Schema migrations run in main only — workers and migration scripts share
+	// the same BootstrapController but each decides independently whether to run
+	// createSchema / seedPlans / backfills.
+	bundb := bootstrap.BunDB(controller)
+	db := controller.DB
 
 	if err := createSchema(bundb); err != nil {
 		slog.Error("Failed to create schema", "error", err)
 		os.Exit(1)
 	}
-
-	db := database.NewDatabase(bundb)
 
 	if n, err := db.MarkOrphanedRunsFailed(); err != nil {
 		slog.Warn("failed to mark orphaned agent runs", "error", err)
@@ -880,145 +775,26 @@ func main() {
 		}
 	}
 
+	sm := controller.SecretManager
 	seedPlans(db, sm)
 	migrateInactiveUsersToFree(bundb)
 
 	go utils.CheckSessionStatusJob(db)
 	go utils.CheckUsageAlertsJob(db, crmServices.NewBrevoCRMService(sm.GetSecret("BREVO_API_KEY")))
-	coolifyService := coolify.NewService(
-		sm.GetSecret("COOLIFY_API_URL"),
-		sm.GetSecret("COOLIFY_API_TOKEN"),
-		sm.GetSecret("COOLIFY_SERVER_UUID"),
-		sm.GetSecret("COOLIFY_PROJECT_UUID"),
-		sm.GetSecret("COOLIFY_ENVIRONMENT_NAME"),
-		sm.GetSecret("COOLIFY_PRIVATE_KEY_UUID"),
-		sm.GetSecret("COOLIFY_WEBHOOK_SECRET"),
-	)
+
 	// Register Coolify webhook for deployment status updates (non-blocking)
 	go func() {
-		webhookURL := constants.WEMOB_API_BASE_URL + "/webhooks/coolify?secret=" + coolifyService.WebhookSecret
-		if err := coolifyService.RegisterWebhook(webhookURL); err != nil {
+		webhookURL := constants.WEMOB_API_BASE_URL + "/webhooks/coolify?secret=" + controller.CoolifyService.WebhookSecret
+		if err := controller.CoolifyService.RegisterWebhook(webhookURL); err != nil {
 			slog.Warn("Failed to register Coolify webhook — falling back to polling", "error", err)
 		}
 	}()
-	flyService := fly.NewService(
-		sm.GetSecret("FLY_API_TOKEN"),
-		sm.GetSecret("FLY_ORG_SLUG"),
-		sm.GetSecret("FLY_PRIMARY_REGION"),
-		sm.GetSecret("FLY_WEBHOOK_SECRET"),
-	)
-	giteaService := gitea.NewService(
-		sm.GetSecret("GITEA_URL"),
-		sm.GetSecret("GITEA_API_TOKEN"),
-		sm.GetSecret("GITEA_USERNAME"),
-		sm.GetSecret("GITEA_ORG"),
-		sm.GetSecret("GITEA_SSH_PORT"),
-	)
 
 	// GitHub OAuth secrets (required for GitHub export feature)
 	// GITHUB_CLIENT_ID — OAuth App client ID
 	// GITHUB_CLIENT_SECRET — OAuth App client secret
 	// GITHUB_REDIRECT_URI — OAuth callback URL (e.g. https://api.wemob.io/v2/auth/github/callback)
 	// GITHUB_TOKEN_ENCRYPTION_KEY — 64-char hex string for AES-256-GCM token encryption
-
-	// Neon service (optional — only enabled when API key is set)
-	var neonService *neon.Service
-	if neonKey := sm.GetSecret("NEON_API_KEY"); neonKey != "" {
-		neonOrgID := sm.GetSecret("NEON_ORG_ID")
-		neonService = neon.NewServiceWithOrg(neonKey, neonOrgID)
-		slog.Info("Neon database service enabled", "org_scoped", neonOrgID != "")
-	}
-
-	// PostHog client (optional — only enabled when API key is set)
-	var posthogClient posthog.Client
-	if phKey := sm.GetSecret("POSTHOG_API_KEY"); phKey != "" {
-		phClient, phErr := posthog.NewWithConfig(phKey, posthog.Config{
-			Endpoint:       "https://eu.i.posthog.com",
-			PersonalApiKey: sm.GetSecret("POSTHOG_PERSONAL_API_KEY"),
-		})
-		if phErr != nil {
-			slog.Warn("PostHog initialization failed", "error", phErr)
-		} else {
-			posthogClient = phClient
-			slog.Info("PostHog analytics enabled")
-		}
-	}
-
-	remoteConfigService := remoteconfig.New(posthogClient)
-	slog.Info("RemoteConfig service initialized")
-
-	assetsStorage, err := storage.NewS3Storage(sm.GetSecret("AWS_REGION"), sm.GetSecret("AWS_S3_ASSETS_BUCKET_NAME"), sm.GetSecret("AWS_ACCESS_KEY_ID"), sm.GetSecret("AWS_SECRET_ACCESS_KEY"))
-	if err != nil {
-		slog.Error("Failed to initialize assets S3 storage", "error", err)
-		os.Exit(1)
-	}
-	userApiKeysStorage, err := storage.NewS3Storage(sm.GetSecret("AWS_REGION"), sm.GetSecret("AWS_S3_USER_API_KEYS_BUCKET_NAME"), sm.GetSecret("AWS_ACCESS_KEY_ID"), sm.GetSecret("AWS_SECRET_ACCESS_KEY"))
-	if err != nil {
-		slog.Error("Failed to initialize user API keys S3 storage", "error", err)
-		os.Exit(1)
-	}
-
-	// Git repo service for project file storage
-	repoBasePath := "/data/repos"
-	if envPath := os.Getenv("REPO_BASE_PATH"); envPath != "" {
-		repoBasePath = envPath
-	}
-	gitRepoService := gitrepo.NewService(repoBasePath)
-	slog.Info("Git repo service initialized", "base_path", repoBasePath)
-
-	// Codemagic CI/CD for mobile builds (optional — nil if not configured)
-	var codemagicService *codemagic.Service
-	if cmToken := sm.GetSecret("CODEMAGIC_API_TOKEN"); cmToken != "" {
-		codemagicService = codemagic.NewService(cmToken, sm.GetSecret("CODEMAGIC_APP_ID"))
-		slog.Info("Codemagic service initialized")
-	}
-
-	e2b := e2bService.NewService(
-		sm.GetSecret("DASHBOARD_URL"),
-		sm.GetSecret("E2B_PREVIEW_DOMAIN"),
-	)
-
-	controller := controllers.NewController(
-		db,
-		make(chan struct{}, constants.MAX_CONCURRENT_BUILDS),
-		services.NewSlackService(sm.GetSecret("SLACK_API_KEY")),
-		emailServices.NewBrevoEmailService(sm.GetSecret("BREVO_API_KEY")),
-		crmServices.NewBrevoCRMService(sm.GetSecret("BREVO_API_KEY")),
-		asynq.NewClient(asynq.RedisClientOpt{
-			Addr:      sm.GetSecret("REDIS_ADDR"),
-			Username:  sm.GetSecret("REDIS_USERNAME"),
-			Password:  sm.GetSecret("REDIS_PASSWORD"),
-			TLSConfig: &tls.Config{},
-		}),
-		assetsStorage,
-		userApiKeysStorage,
-		sm,
-		coolifyService,
-		flyService,
-		giteaService,
-		neonService,
-		posthogClient,
-		gitRepoService,
-		codemagicService,
-		remoteConfigService,
-		e2b,
-	)
-
-	// MCP service (optional — connect in background so it doesn't block server startup)
-	if mcpConfig := sm.GetSecret("MCP_SERVERS_CONFIG"); mcpConfig != "" {
-		go func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-			defer cancel()
-			svc, err := mcpclient.NewService(ctx, mcpConfig)
-			if err != nil {
-				slog.Warn("MCP service initialization had errors", "error", err)
-			}
-			if svc != nil && svc.HasTools() {
-				controller.MCPService.Store(svc)
-				slog.Info("MCP service enabled", "tool_count", len(svc.Tools()))
-			}
-		}()
-	}
 
 	goth.UseProviders(
 		google.New(sm.GetSecret("GOOGLE_CLIENT_ID"), sm.GetSecret("GOOGLE_SECRET_KEY"), "https://api.wemob.io/v1/users/auth/google/callback", "email", "profile"),
@@ -1073,7 +849,7 @@ func main() {
 
 	r.Use(rateLimiter.RateLimit(1200, time.Minute, appMiddleware.IPKey))
 
-	r.Use(httplog.RequestLogger(logger, &httplog.Options{
+	r.Use(httplog.RequestLogger(slog.Default(), &httplog.Options{
 		// Level defines the verbosity of the request logs:
 		// slog.LevelDebug - log all responses (incl. OPTIONS)
 		// slog.LevelInfo  - log responses (excl. OPTIONS)
@@ -1879,8 +1655,8 @@ func main() {
 		defer cancel()
 
 		// Flush PostHog events
-		if posthogClient != nil {
-			posthogClient.Close()
+		if controller.PostHog != nil {
+			controller.PostHog.Close()
 		}
 
 		// Stop the store-API poller.
