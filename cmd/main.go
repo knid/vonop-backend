@@ -269,10 +269,8 @@ func createSchema(db *bun.DB) error {
 		// USD and almost never land on a whole credit, so the fractional
 		// remainder is tracked here until it crosses an integer.
 		`ALTER TABLE ai_credits_balances ADD COLUMN IF NOT EXISTS pending_gateway double precision NOT NULL DEFAULT 0`,
-		// Fly migration: rename coolify_projects → runtime_apps, add Fly fields.
-		// Both ALTER and RENAME use IF (NOT) EXISTS so the migration is safe to run
-		// repeatedly on already-migrated databases.
-		`ALTER TABLE IF EXISTS coolify_projects RENAME TO runtime_apps`,
+		// Fly migration: add Fly fields to runtime_apps (renamed from coolify_projects).
+		// The RENAME itself lives in renameStatements below so it runs unconditionally.
 		`ALTER TABLE runtime_apps ADD COLUMN IF NOT EXISTS fly_app_name text NOT NULL DEFAULT ''`,
 		`ALTER TABLE runtime_apps ADD COLUMN IF NOT EXISTS current_image_ref text NOT NULL DEFAULT ''`,
 		`ALTER TABLE runtime_apps ADD COLUMN IF NOT EXISTS last_deployed_at timestamptz`,
@@ -377,6 +375,7 @@ func createSchema(db *bun.DB) error {
 	renameStatements := []string{
 		`ALTER TABLE IF EXISTS app_store_credentials RENAME TO apple_connections`,
 		`ALTER TABLE IF EXISTS google_play_credentials RENAME TO google_play_connections`,
+		`ALTER TABLE IF EXISTS coolify_projects RENAME TO runtime_apps`,
 		// Deployment FK columns — guard with DO block to stay idempotent
 		`DO $$ BEGIN
   IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='deployments' AND column_name='app_store_credentials_id') THEN
