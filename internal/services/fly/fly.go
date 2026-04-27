@@ -154,3 +154,16 @@ func (s *Service) DeleteApp(appName string) error {
 	}
 	return err
 }
+
+// SyncSecrets sets all the listed secrets on a Fly app in one bulk call.
+// Existing secrets not in the map are left alone — this matches Coolify's
+// SyncEnvVars semantics. Idempotent.
+func (s *Service) SyncSecrets(appName string, kv map[string]string) error {
+	if len(kv) == 0 {
+		return nil
+	}
+	body := map[string]any{
+		"secrets": kv,
+	}
+	return s.doRequest("POST", "/v1/apps/"+appName+"/secrets", body, nil)
+}
