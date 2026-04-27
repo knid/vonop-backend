@@ -20,8 +20,8 @@ type RuntimeApp struct {
 	Framework     string `bun:",notnull,default:'nextjs'"`
 
 	// Fly-specific columns (populated post-migration)
-	FlyAppName      string    `bun:",nullzero"`
-	CurrentImageRef string    `bun:",nullzero"`
+	FlyAppName      string    `bun:",notnull,default:''"`
+	CurrentImageRef string    `bun:",notnull,default:''"`
 	LastDeployedAt  time.Time `bun:",nullzero"`
 
 	// Coolify-specific column — kept until cutover, then dropped

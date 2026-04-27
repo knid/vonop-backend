@@ -470,7 +470,7 @@ END $$`,
 		`CREATE INDEX IF NOT EXISTS idx_ai_credit_transactions_user_created ON ai_credit_transactions(user_id, created_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_organization_members_user_id ON organization_members(user_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_organization_members_organization_id ON organization_members(organization_id)`,
-		`CREATE INDEX IF NOT EXISTS idx_coolify_projects_app_project_id ON coolify_projects(app_project_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_runtime_apps_app_project_id ON runtime_apps(app_project_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_webhook_endpoints_user_id ON webhook_endpoints(user_id)`,
 		// Agent rewrite: chat messages + agent runs queried by project, runs also by status.
 		// Kept in perfIndexes (not indexStatements) so already-migrated prod DBs pick
