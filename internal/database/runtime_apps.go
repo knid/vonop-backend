@@ -61,3 +61,12 @@ func (db *Database) ClearCoolifyAppUUID(runtimeAppID string) error {
 		Exec(context.Background())
 	return err
 }
+
+func (db *Database) GetRuntimeAppByFlyAppName(flyAppName string) (*models.RuntimeApp, error) {
+	var ra models.RuntimeApp
+	err := db.DB.NewSelect().Model(&ra).Where("fly_app_name = ?", flyAppName).Scan(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	return &ra, nil
+}
