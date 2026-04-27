@@ -25,7 +25,10 @@ func TestPlanMachineSpec(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			limits := &models.StandardUserLimits{DeployMemoryMB: c.memoryMB}
-			spec := PlanMachineSpec(limits)
+			spec := PlanMachineSpec(limits, "iad")
+			if c.name == "free 256" && spec.Region != "iad" {
+				t.Errorf("Region: got %q, want %q", spec.Region, "iad")
+			}
 			if spec.CPUKind != c.wantCPUKind {
 				t.Errorf("CPUKind: got %q, want %q", spec.CPUKind, c.wantCPUKind)
 			}

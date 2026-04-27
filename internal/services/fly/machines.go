@@ -2,6 +2,7 @@ package fly
 
 import (
 	"fmt"
+	"log/slog"
 	"net/http"
 	"time"
 )
@@ -126,14 +127,15 @@ func (s *Service) DeployMachines(appName string, spec MachineSpec) error {
 		return err
 	}
 	for _, m := range existing[1:] {
-		if err := s.doRequest("DELETE", "/v1/apps/"+appName+"/machines/"+m.ID+"?force=true", nil, nil); err != nil {
-			// log but don't fail — the kept machine is the load-bearing one
-			// and Fly auto-cleans orphaned machines after a TTL.
-			if apiErr, ok := err.(*APIError); !ok || apiErr.Status != http.StatusNotFound {
-				// non-404 errors are surfaced
-				return fmt.Errorf("fly: cleanup orphan machine %s: %w", m.ID, err)
-			}
+		err := s.doRequest("DELETE", "/v1/apps/"+appName+"/machines/"+m.ID+"?force=true", nil, nil)
+		if err == nil {
+			continue
 		}
+		if apiErr, ok := err.(*APIError); ok && apiErr.Status == http.StatusNotFound {
+			continue // already gone
+		}
+		slog.Warn("fly: failed to destroy orphan machine", "app", appName, "machine", m.ID, "error", err)
+		// Continue: the updated primary is serving traffic, orphans don't get traffic.
 	}
 	return nil
 }
@@ -154,9 +156,14 @@ func (s *Service) WaitForHealthy(appName string, timeout time.Duration) error {
 				return nil
 			}
 		}
-		if time.Now().After(deadline) {
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
 			return fmt.Errorf("fly: WaitForHealthy: %s did not reach started state within %s", appName, timeout)
 		}
-		<-tick.C
+		select {
+		case <-tick.C:
+		case <-time.After(remaining):
+			return fmt.Errorf("fly: WaitForHealthy: %s did not reach started state within %s", appName, timeout)
+		}
 	}
 }

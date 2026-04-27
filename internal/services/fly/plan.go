@@ -4,7 +4,8 @@ import "github.com/knid/wemob/internal/models"
 
 // PlanMachineSpec returns the Fly Machine spec corresponding to a user's plan
 // tier. Driven by DeployMemoryMB so existing plan rows don't need new fields.
-func PlanMachineSpec(limits *models.StandardUserLimits) MachineSpec {
+// region should be the value of FLY_PRIMARY_REGION (e.g. "iad").
+func PlanMachineSpec(limits *models.StandardUserLimits, region string) MachineSpec {
 	memoryMB := 256
 	if limits != nil && limits.DeployMemoryMB > 0 {
 		memoryMB = limits.DeployMemoryMB
@@ -14,7 +15,7 @@ func PlanMachineSpec(limits *models.StandardUserLimits) MachineSpec {
 		CPUKind:  "shared",
 		CPUs:     1,
 		MemoryMB: memoryMB,
-		Region:   "iad",
+		Region:   region,
 		Healthcheck: HealthcheckSpec{
 			Type:     "tcp",
 			Port:     3000,

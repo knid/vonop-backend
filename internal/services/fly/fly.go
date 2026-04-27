@@ -130,7 +130,14 @@ func (s *Service) EnsureApp(appName string) error {
 		"org_slug": s.OrgSlug,
 		"network":  "default",
 	}
-	return s.doRequest("POST", "/v1/apps", body, nil)
+	if err := s.doRequest("POST", "/v1/apps", body, nil); err != nil {
+		// Concurrent creation: another caller won the race. Treat as success.
+		if apiErr, ok := err.(*APIError); ok && apiErr.Status == http.StatusUnprocessableEntity {
+			return nil
+		}
+		return err
+	}
+	return nil
 }
 
 // AppExists returns true if the named Fly app exists in the current org.

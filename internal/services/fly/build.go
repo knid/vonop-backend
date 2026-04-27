@@ -23,10 +23,12 @@ func (s *Service) BuildAndPush(appName, sourceDir, imageLabel string) (imageRef 
 		"--image-label", imageLabel,
 	)
 	cmd.Dir = sourceDir
-	cmd.Env = append(os.Environ(),
-		"FLY_API_TOKEN="+s.APIToken,
+	cmd.Env = []string{
+		"HOME=" + os.Getenv("HOME"),        // flyctl reads ~/.fly config
+		"PATH=" + os.Getenv("PATH"),        // flyctl needs to find docker / git
+		"FLY_API_TOKEN=" + s.APIToken,
 		"FLY_NO_UPDATE_CHECK=1",
-	)
+	}
 	out, err := cmd.CombinedOutput()
 	buildLog = string(out)
 	if err != nil {
