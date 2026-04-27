@@ -1386,7 +1386,8 @@ func main() {
 					// Deploy
 					r.Route("/deploy", func(r chi.Router) {
 						r.Post("/validate", httpViews.ValidateAppFiles)
-						r.Post("/web", httpViews.DeployAppWeb)
+						r.With(rateLimiter.RateLimit(3, time.Minute, appMiddleware.UserKey)).
+							Post("/web", httpViews.DeployAppWeb)
 						r.Delete("/web", httpViews.UndeployAppWeb)
 						r.Post("/mobile", httpViews.DeployAppMobile)
 						r.Delete("/mobile", httpViews.UndeployAppMobile)
