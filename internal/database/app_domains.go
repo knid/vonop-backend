@@ -56,6 +56,7 @@ func (db *Database) MarkAppDomainDNSStatus(domainID string, status string) error
 		Set("dns_check_status = ?", status).
 		Set("updated_at = ?", time.Now()).
 		Where("id = ?", domainID).
+		Where("deleted_at IS NULL").
 		Exec(context.Background())
 	return err
 }

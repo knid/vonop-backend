@@ -274,7 +274,6 @@ func createSchema(db *bun.DB) error {
 		`ALTER TABLE runtime_apps ADD COLUMN IF NOT EXISTS fly_app_name text NOT NULL DEFAULT ''`,
 		`ALTER TABLE runtime_apps ADD COLUMN IF NOT EXISTS current_image_ref text NOT NULL DEFAULT ''`,
 		`ALTER TABLE runtime_apps ADD COLUMN IF NOT EXISTS last_deployed_at timestamptz`,
-		`ALTER TABLE runtime_apps ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
 		// DNS verification fields on app_domains — see Task 1.2 of the Fly migration plan.
 		// dns_check_status: empty=not checked, "pending"=waiting for DNS, "verified"=ok, "failed"=gave up.
 		// dns_instructions: JSON blob surfaced in the UI so users know what records to add.
@@ -393,6 +392,8 @@ END $$`,
 		// simultaneously.
 		`ALTER TABLE IF EXISTS apple_connections ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
 		`ALTER TABLE IF EXISTS google_play_connections ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
+		`ALTER TABLE IF EXISTS runtime_apps ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
+		`ALTER TABLE IF EXISTS runtime_apps ALTER COLUMN coolify_app_uuid DROP NOT NULL`,
 		`ALTER TABLE IF EXISTS deployments ADD COLUMN IF NOT EXISTS release_notes text`,
 		`ALTER TABLE IF EXISTS deployments ADD COLUMN IF NOT EXISTS rollout_track text`,
 	}
