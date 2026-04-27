@@ -9,8 +9,10 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
+	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/database"
 	"github.com/knid/wemob/internal/models"
+	"github.com/knid/wemob/internal/services/fly"
 	"github.com/knid/wemob/internal/tasks"
 )
 
@@ -114,4 +116,137 @@ func (c *Controller) MarkDeploymentFailed(deploymentID string, reason string) er
 		Where("id = ?", deploymentID).
 		Exec(context.Background())
 	return err
+}
+
+// HandleWebDeployTask is the Asynq handler for deploy:web tasks. Idempotent:
+// every Fly call is safe to re-run, so a retry after a partial failure picks
+// up from where it left off.
+func (c *Controller) HandleWebDeployTask(ctx context.Context, t *asynq.Task) error {
+	var p tasks.WebDeployPayload
+	if err := json.Unmarshal(t.Payload(), &p); err != nil {
+		return fmt.Errorf("unmarshal payload: %w", err)
+	}
+
+	deployment, err := c.DB.GetAppDeploymentByID(p.DeploymentID)
+	if err != nil {
+		return fmt.Errorf("load deployment: %w", err)
+	}
+	project, err := c.DB.GetAppProjectByID(deployment.AppProjectID.String())
+	if err != nil {
+		return fmt.Errorf("load project: %w", err)
+	}
+	user, err := c.DB.GetUserById(deployment.UserID.String())
+	if err != nil {
+		return fmt.Errorf("load user: %w", err)
+	}
+
+	if err := c.MarkDeploymentBuilding(p.DeploymentID); err != nil {
+		slog.Warn("mark building failed", "err", err)
+	}
+
+	// 1. Pull source from Gitea, inject analytics + branding, push back.
+	repo, err := c.GitRepoService.Open(project.ID.String())
+	if err != nil {
+		return c.failTask(p.DeploymentID, "gitea_open", err)
+	}
+	repoFiles, err := repo.ReadAllFiles()
+	if err != nil || len(repoFiles) == 0 {
+		return c.failTask(p.DeploymentID, "gitea_read", err)
+	}
+	fileMap := make(map[string]string, len(repoFiles))
+	for k, v := range repoFiles {
+		fileMap[k] = v
+	}
+	injectAnalyticsScript(fileMap, project.ID.String())
+	limits, _ := c.GetUserLimits(user)
+	if limits == nil || !limits.CanRemoveBrandLogo {
+		injectWemobBadge(fileMap)
+	}
+	for path, content := range fileMap {
+		if repoFiles[path] != content {
+			if writeErr := repo.WriteFile(path, []byte(content)); writeErr != nil {
+				slog.Warn("write file during deploy", "path", path, "err", writeErr)
+			}
+		}
+	}
+	if _, commitErr := repo.Commit("deploy: inject analytics and branding"); commitErr != nil {
+		slog.Warn("commit branding changes", "err", commitErr)
+	}
+
+	// 2. Use the repo working tree directly as the source for the Fly builder.
+	// MaterializeTo does not exist; repo.Path is the on-disk working tree.
+	sourceDir := repo.Path
+
+	// 3. Get/create the runtime_apps row.
+	flyAppName := "wemob-" + project.Slug
+	runtimeApp, err := c.DB.GetRuntimeAppByAppProjectID(project.ID.String())
+	if err != nil {
+		runtimeApp, err = c.DB.CreateRuntimeApp(&models.RuntimeApp{
+			AppProjectID:  project.ID,
+			GiteaRepoName: project.Slug,
+			FlyAppName:    flyAppName,
+			Framework:     "nextjs",
+			CustomDomain:  project.Slug + "." + constants.WEMOB_APP_BASE_DOMAIN,
+		})
+		if err != nil {
+			return c.failTask(p.DeploymentID, "create_runtime_app", err)
+		}
+	}
+
+	if err := c.FlyService.EnsureApp(flyAppName); err != nil {
+		return c.maybeRetry(p.DeploymentID, "ensure_app", err)
+	}
+
+	// 4. Sync env vars (secrets).
+	envVars := c.CollectAllEnvVars(project)
+	if err := c.FlyService.SyncSecrets(flyAppName, envVars); err != nil {
+		return c.maybeRetry(p.DeploymentID, "sync_secrets", err)
+	}
+
+	// 5. Build + push image.
+	imageRef, _, err := c.FlyService.BuildAndPush(flyAppName, sourceDir, p.DeploymentID)
+	if err != nil {
+		return c.maybeRetry(p.DeploymentID, "build", err)
+	}
+
+	// 6. Deploy machines per plan tier (region from FlyService config).
+	spec := fly.PlanMachineSpec(limits, c.FlyService.Region)
+	spec.Image = imageRef
+	if err := c.FlyService.DeployMachines(flyAppName, spec); err != nil {
+		return c.maybeRetry(p.DeploymentID, "deploy_machines", err)
+	}
+
+	// 7. Persist runtime_apps state and flip deployment to 'deploying'.
+	runtimeApp.CurrentImageRef = imageRef
+	runtimeApp.LastDeployedAt = time.Now()
+	if _, err := c.DB.UpdateRuntimeApp(runtimeApp); err != nil {
+		slog.Warn("update runtime_app", "err", err)
+	}
+	if err := c.MarkDeploymentDeploying(p.DeploymentID); err != nil {
+		slog.Warn("mark deploying", "err", err)
+	}
+	return nil
+}
+
+// failTask marks deployment failed and returns asynq.SkipRetry for non-retryable errors.
+func (c *Controller) failTask(deploymentID, stage string, err error) error {
+	slog.Error("deploy_failed",
+		"deployment_id", deploymentID, "stage", stage,
+		"error", err, "retryable", false)
+	c.MarkDeploymentFailed(deploymentID, fmt.Sprintf("%s: %v", stage, err))
+	return asynq.SkipRetry
+}
+
+// maybeRetry returns the error if it's retryable (asynq backs off), or marks
+// the deployment failed and returns asynq.SkipRetry otherwise.
+func (c *Controller) maybeRetry(deploymentID, stage string, err error) error {
+	retryable := fly.IsRetryable(err)
+	slog.Error("deploy_failed",
+		"deployment_id", deploymentID, "stage", stage,
+		"error", err, "retryable", retryable)
+	if retryable {
+		return err
+	}
+	c.MarkDeploymentFailed(deploymentID, fmt.Sprintf("%s: %v", stage, err))
+	return asynq.SkipRetry
 }
