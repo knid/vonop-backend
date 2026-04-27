@@ -1589,6 +1589,13 @@ func main() {
 			r.Get("/auth/github/status", httpViews.GetGitHubConnectionStatus)
 		})
 
+		edgeToken := sm.GetSecret("EDGE_INTERNAL_TOKEN")
+		r.Route("/internal/edge", func(r chi.Router) {
+			r.Use(appMiddleware.InternalOnly(edgeToken))
+			r.Get("/cert-allowed", httpViews.HandleEdgeCertAllowed)
+			r.Get("/upstream", httpViews.HandleEdgeUpstream)
+		})
+
 		r.Get("/health", httpViews.Health)
 		r.Get("/sdk/wemob-bridge.js", httpViews.ServeBridgeSDK)
 	})
