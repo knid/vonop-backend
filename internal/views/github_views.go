@@ -126,7 +126,7 @@ func (v *HttpViews) ExportToGitHub(w http.ResponseWriter, r *http.Request) {
 	// Check plan limit
 	limits, limitsErr := v.Controller.GetUserLimits(user)
 	if limitsErr == nil && !limits.CanExportToGitHub {
-		go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_NEED, map[string]any{"action": "export_to_github"})
+		go v.Controller.EventService.SendEvent(user, constants.EVENT_SUBSCRIPTION_NEED, map[string]any{"action": "export_to_github"})
 		utils.JSONError(w, constants.ErrGitHubExportNotAvailable,
 			"GitHub export is not available on your plan", http.StatusForbidden, nil)
 		return
@@ -166,7 +166,7 @@ func (v *HttpViews) ExportToGitHub(w http.ResponseWriter, r *http.Request) {
 		Set("app_id", project.ID.String()).
 		Set("repo_name", req.RepoName))
 
-	go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_GITHUB_EXPORTED, map[string]any{
+	go v.Controller.EventService.SendEvent(user, constants.EVENT_GITHUB_EXPORTED, map[string]any{
 		"app_id":    project.ID.String(),
 		"repo_name": req.RepoName,
 	})
@@ -217,7 +217,7 @@ func (v *HttpViews) PushToGitHub(w http.ResponseWriter, r *http.Request) {
 	go v.Controller.TrackUserEvent(user, "github_pushed", posthog.NewProperties().
 		Set("app_id", project.ID.String()))
 
-	go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_GITHUB_PUSHED, map[string]any{
+	go v.Controller.EventService.SendEvent(user, constants.EVENT_GITHUB_PUSHED, map[string]any{
 		"app_id": project.ID.String(),
 	})
 

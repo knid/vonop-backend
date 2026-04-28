@@ -45,7 +45,7 @@ func (c *Controller) AgentDeps(user *models.User) *agent.RunDependencies {
 			c.TrackUserEvent(user, event, p)
 		},
 		SendCRMEvent: func(event string, attrs map[string]any) {
-			go c.CRMService.SendEvent(user, event, attrs)
+			go c.EventService.SendEvent(user, event, attrs)
 		},
 		GenerateImage: c.generateImageForAgent,
 		NeonConnString: func(projectID string) (string, error) {

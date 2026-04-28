@@ -205,7 +205,7 @@ func (c *Controller) RegisterUser(userRegisterReq requests.UserRegisterRequest) 
 		slack.MsgOptionText("New registered user (Wemob): "+user.Email, false),
 	)
 
-	go c.CRMService.SendEvent(createdUser, constants.BREVO_EVENT_NEW_USER, map[string]any{
+	go c.EventService.SendEvent(createdUser, constants.EVENT_NEW_USER, map[string]any{
 		"provider": "wemob",
 	})
 
@@ -279,7 +279,7 @@ func (c *Controller) LoginUser(userLoginReq requests.UserLoginRequest) (*respons
 		return nil, err
 	}
 
-	go c.CRMService.SendEvent(user, constants.BREVO_EVENT_NEW_LOGIN, map[string]any{
+	go c.EventService.SendEvent(user, constants.EVENT_NEW_LOGIN, map[string]any{
 		"provider": "wemob",
 	})
 
@@ -359,7 +359,7 @@ func (c *Controller) GoogleLogin(oauthUser goth.User) (*responses.UserLoginRespo
 				constants.SLACK_CHANNEL_ID_NEW_USER,
 				slack.MsgOptionText("New registered user (Google): "+user.Email, false))
 
-			go c.CRMService.SendEvent(user, constants.BREVO_EVENT_NEW_USER, map[string]any{
+			go c.EventService.SendEvent(user, constants.EVENT_NEW_USER, map[string]any{
 				"provider": "google",
 			})
 		}
@@ -381,7 +381,7 @@ func (c *Controller) GoogleLogin(oauthUser goth.User) (*responses.UserLoginRespo
 		return nil, err
 	}
 
-	go c.CRMService.SendEvent(user, constants.BREVO_EVENT_NEW_LOGIN, map[string]any{
+	go c.EventService.SendEvent(user, constants.EVENT_NEW_LOGIN, map[string]any{
 		"provider": "google",
 	})
 

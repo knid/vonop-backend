@@ -18,10 +18,9 @@ import (
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/controllers"
 	"github.com/knid/wemob/internal/database"
-	crmServices "github.com/knid/wemob/internal/services/crm"
 	e2bService "github.com/knid/wemob/internal/services/e2b"
-	emailServices "github.com/knid/wemob/internal/services/email"
 	"github.com/knid/wemob/internal/services"
+	"github.com/knid/wemob/internal/services/events"
 	"github.com/knid/wemob/internal/services/codemagic"
 	"github.com/knid/wemob/internal/services/coolify"
 	"github.com/knid/wemob/internal/services/fly"
@@ -250,12 +249,18 @@ func BootstrapController() (*controllers.Controller, asynq.RedisClientOpt) {
 		"/etc/caddy/Caddyfile",
 	)
 
+	twentyEvents := events.NewTwentyService(db, sm.GetSecret("TWENTY_API_KEY"), sm.GetSecret("TWENTY_BASE_URL"))
+	resendEvents := events.NewResendService(sm.GetSecret("RESEND_API_KEY"))
+	eventService := events.NewMulticastService(twentyEvents, resendEvents)
+
+	// Bootstrap Twenty custom fields once on startup. Failures log but don't crash.
+	twentyEvents.EnsureSchema(context.Background())
+
 	controller := controllers.NewController(
 		db,
 		make(chan struct{}, constants.MAX_CONCURRENT_BUILDS),
 		services.NewSlackService(sm.GetSecret("SLACK_API_KEY")),
-		emailServices.NewBrevoEmailService(sm.GetSecret("BREVO_API_KEY")),
-		crmServices.NewBrevoCRMService(sm.GetSecret("BREVO_API_KEY")),
+		eventService,
 		asynq.NewClient(redisOpts),
 		asynq.NewInspector(redisOpts),
 		assetsStorage,

@@ -152,7 +152,7 @@ func (v *HttpViews) StripeCheckout(w http.ResponseWriter, r *http.Request) {
 		Set("price_id", priceID).
 		Set("trial_eligible", !user.TrialUsed))
 
-	go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_CHECKOUT_STARTED, map[string]any{
+	go v.Controller.EventService.SendEvent(user, constants.EVENT_CHECKOUT_STARTED, map[string]any{
 		"price_id": priceID,
 	})
 
@@ -267,7 +267,7 @@ func (v *HttpViews) PurchaseCredits(w http.ResponseWriter, r *http.Request) {
 		Set("pack_size", pack.Credits).
 		Set("price_id", priceID))
 
-	go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_CREDIT_PURCHASE_STARTED, map[string]any{
+	go v.Controller.EventService.SendEvent(user, constants.EVENT_CREDIT_PURCHASE_STARTED, map[string]any{
 		"package_id": req.PackageID,
 		"pack_size":  pack.Credits,
 		"price_id":   priceID,

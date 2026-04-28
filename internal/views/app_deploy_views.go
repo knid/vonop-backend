@@ -34,7 +34,7 @@ func (v *HttpViews) DeployAppWeb(w http.ResponseWriter, r *http.Request) {
 	limits, planName, limitsErr := v.Controller.GetUserLimitsWithPlan(user)
 	if limitsErr == nil {
 		if !limits.CanDeployWeb {
-			go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_NEED, map[string]any{"action": "deploy_web"})
+			go v.Controller.EventService.SendEvent(user, constants.EVENT_SUBSCRIPTION_NEED, map[string]any{"action": "deploy_web"})
 			utils.JSONError(w, constants.ErrFeatureNotAvailable, "web deployments are not available on your plan", http.StatusForbidden, nil)
 			return
 		}
@@ -44,7 +44,7 @@ func (v *HttpViews) DeployAppWeb(w http.ResponseWriter, r *http.Request) {
 			// Allow re-deploys: if this app is already deployed, it doesn't count as a new slot
 			alreadyDeployed, _ := v.Controller.DB.IsAppAlreadyDeployed(appID)
 			if !alreadyDeployed && count >= limits.MaxDeployedWebApps {
-				go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_QUOTA_REACHED, map[string]any{"action": "deploy_web", "limit": limits.MaxDeployedWebApps})
+				go v.Controller.EventService.SendEvent(user, constants.EVENT_SUBSCRIPTION_QUOTA_REACHED, map[string]any{"action": "deploy_web", "limit": limits.MaxDeployedWebApps})
 				go v.Controller.TrackUserEvent(user, "quota_reached", posthog.NewProperties().Set("action", "deploy_web").Set("limit", limits.MaxDeployedWebApps))
 
 				// Include deployed app names so the user knows which to undeploy
@@ -153,7 +153,7 @@ func (v *HttpViews) UndeployAppWeb(w http.ResponseWriter, r *http.Request) {
 	v.Controller.TrackUserEvent(user, "app_undeployed_web", posthog.NewProperties().
 		Set("app_id", project.ID.String()))
 
-	go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_WEB_UNDEPLOYED, map[string]any{
+	go v.Controller.EventService.SendEvent(user, constants.EVENT_WEB_UNDEPLOYED, map[string]any{
 		"app_id": project.ID.String(),
 	})
 
@@ -177,7 +177,7 @@ func (v *HttpViews) DeployAppMobile(w http.ResponseWriter, r *http.Request) {
 	limits, planName, limitsErr := v.Controller.GetUserLimitsWithPlan(user)
 	if limitsErr == nil {
 		if !limits.CanDeployMobile {
-			go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_NEED, map[string]any{"action": "deploy_mobile"})
+			go v.Controller.EventService.SendEvent(user, constants.EVENT_SUBSCRIPTION_NEED, map[string]any{"action": "deploy_mobile"})
 			utils.JSONError(w, constants.ErrFeatureNotAvailable, "mobile deployments are not available on your plan", http.StatusForbidden, nil)
 			return
 		}
@@ -186,7 +186,7 @@ func (v *HttpViews) DeployAppMobile(w http.ResponseWriter, r *http.Request) {
 			count, _ := v.Controller.DB.CountDeployedMobileAppsByUserID(user.ID.String())
 			alreadyDeployed, _ := v.Controller.DB.IsAppAlreadyDeployedMobile(appID)
 			if !alreadyDeployed && count >= limits.MaxDeployedMobileApps {
-				go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_QUOTA_REACHED, map[string]any{"action": "deploy_mobile", "limit": limits.MaxDeployedMobileApps})
+				go v.Controller.EventService.SendEvent(user, constants.EVENT_SUBSCRIPTION_QUOTA_REACHED, map[string]any{"action": "deploy_mobile", "limit": limits.MaxDeployedMobileApps})
 				go v.Controller.TrackUserEvent(user, "quota_reached", posthog.NewProperties().Set("action", "deploy_mobile").Set("limit", limits.MaxDeployedMobileApps))
 
 				var deployedNames []string
@@ -227,7 +227,7 @@ func (v *HttpViews) DeployAppMobile(w http.ResponseWriter, r *http.Request) {
 			Set("app_id", project.ID.String()).
 			Set("platform", "mobile").
 			Set("error", err.Error()))
-		go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_MOBILE_DEPLOYMENT_FAILED, map[string]any{
+		go v.Controller.EventService.SendEvent(user, constants.EVENT_MOBILE_DEPLOYMENT_FAILED, map[string]any{
 			"app_id":        project.ID.String(),
 			"project_type":  project.ProjectType,
 			"error_message": err.Error(),
@@ -243,7 +243,7 @@ func (v *HttpViews) DeployAppMobile(w http.ResponseWriter, r *http.Request) {
 		Set("deploy_duration_seconds", deployDuration).
 		Set("deploy_version", deployment.Version))
 
-	go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_MOBILE_DEPLOYMENT_SUCCEEDED, map[string]any{
+	go v.Controller.EventService.SendEvent(user, constants.EVENT_MOBILE_DEPLOYMENT_SUCCEEDED, map[string]any{
 		"app_id":       project.ID.String(),
 		"project_type": project.ProjectType,
 		"version":      deployment.Version,
@@ -286,7 +286,7 @@ func (v *HttpViews) UndeployAppMobile(w http.ResponseWriter, r *http.Request) {
 	v.Controller.TrackUserEvent(user, "app_undeployed_mobile", posthog.NewProperties().
 		Set("app_id", project.ID.String()))
 
-	go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_MOBILE_UNDEPLOYED, map[string]any{
+	go v.Controller.EventService.SendEvent(user, constants.EVENT_MOBILE_UNDEPLOYED, map[string]any{
 		"app_id": project.ID.String(),
 	})
 
@@ -319,7 +319,7 @@ func (v *HttpViews) BuildAppMobileMulti(w http.ResponseWriter, r *http.Request) 
 
 	limits, limitsErr := v.Controller.GetUserLimits(user)
 	if limitsErr != nil || !limits.CanBuildMobile {
-		go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_NEED, map[string]any{"action": "build_mobile"})
+		go v.Controller.EventService.SendEvent(user, constants.EVENT_SUBSCRIPTION_NEED, map[string]any{"action": "build_mobile"})
 		utils.JSONError(w, constants.ErrFeatureNotAvailable, "mobile builds require Professional plan", http.StatusForbidden, nil)
 		return
 	}
@@ -402,7 +402,7 @@ func (v *HttpViews) buildAppMobile(w http.ResponseWriter, r *http.Request, platf
 
 	limits, limitsErr := v.Controller.GetUserLimits(user)
 	if limitsErr != nil || !limits.CanBuildMobile {
-		go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_NEED, map[string]any{"action": "build_mobile", "platform": platform})
+		go v.Controller.EventService.SendEvent(user, constants.EVENT_SUBSCRIPTION_NEED, map[string]any{"action": "build_mobile", "platform": platform})
 		utils.JSONError(w, constants.ErrFeatureNotAvailable, "mobile builds require Professional plan", http.StatusForbidden, nil)
 		return
 	}

@@ -21,7 +21,6 @@ import (
 	"github.com/knid/wemob/internal/database"
 	appMiddleware "github.com/knid/wemob/internal/middleware"
 	"github.com/knid/wemob/internal/models"
-	crmServices "github.com/knid/wemob/internal/services/crm"
 	"github.com/knid/wemob/internal/services/pendingnudge"
 	"github.com/knid/wemob/internal/services/secret"
 	"github.com/knid/wemob/internal/services/storepoll"
@@ -151,6 +150,7 @@ func createSchema(db *bun.DB) error {
 		`UPDATE standard_user_subscriptions SET price_id = NULL WHERE price_id = ''`,
 		// soft_delete column for all tables that use bun:",soft_delete,nullzero"
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS twenty_person_id text`,
 		`ALTER TABLE user_notifications ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
 		`ALTER TABLE tokens ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
 		`ALTER TABLE standard_user_limits ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
@@ -799,7 +799,7 @@ func main() {
 	migrateInactiveUsersToFree(bundb)
 
 	go utils.CheckSessionStatusJob(db)
-	go utils.CheckUsageAlertsJob(db, crmServices.NewBrevoCRMService(sm.GetSecret("BREVO_API_KEY")))
+	go utils.CheckUsageAlertsJob(db, controller.EventService)
 
 	// Register Coolify webhook for deployment status updates (non-blocking)
 	go func() {
@@ -1664,9 +1664,9 @@ func main() {
 	// managed). Max 3 nudges, 2 days apart.
 	nudgeCtx, cancelNudge := context.WithCancel(context.Background())
 	nudgeRunner := &pendingnudge.Runner{
-		DB:    controller.DB,
-		CRM:   controller.CRMService,
-		Every: 6 * time.Hour,
+		DB:           controller.DB,
+		EventService: controller.EventService,
+		Every:        6 * time.Hour,
 	}
 	go nudgeRunner.Run(nudgeCtx)
 

@@ -144,10 +144,10 @@ func (c *Controller) processWebhookEvent(event stripe.Event) error {
 
 		if !user.SetupFinished {
 			user.SetupFinished = true
-			go c.CRMService.SendEvent(user, constants.BREVO_EVENT_USER_SETUP_FINISHED, map[string]any{})
+			go c.EventService.SendEvent(user, constants.EVENT_USER_SETUP_FINISHED, map[string]any{})
 		}
 
-		go c.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_CREATED, map[string]any{
+		go c.EventService.SendEvent(user, constants.EVENT_SUBSCRIPTION_CREATED, map[string]any{
 			"subscription_status": user.SubscriptionStatus,
 			"subscription_id":     user.SubscriptionID.String(),
 			"plan_name":           subs.Name,
@@ -219,7 +219,7 @@ func (c *Controller) processWebhookEvent(event stripe.Event) error {
 			}
 			if !user.SetupFinished {
 				user.SetupFinished = true
-				go c.CRMService.SendEvent(user, constants.BREVO_EVENT_USER_SETUP_FINISHED, map[string]any{})
+				go c.EventService.SendEvent(user, constants.EVENT_USER_SETUP_FINISHED, map[string]any{})
 			}
 
 		case "trialing":
@@ -249,18 +249,18 @@ func (c *Controller) processWebhookEvent(event stripe.Event) error {
 			user.SubscriptionID = uuid.Nil
 		}
 
-		go c.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_UPDATED, map[string]any{
+		go c.EventService.SendEvent(user, constants.EVENT_SUBSCRIPTION_UPDATED, map[string]any{
 			"subscription_status": user.SubscriptionStatus,
 			"subscription_id":     user.SubscriptionID.String(),
 			"plan_name":           subs.Name,
 		})
 
 		if planChanged && user.SubscriptionID != uuid.Nil {
-			changeEvent := constants.BREVO_EVENT_SUBSCRIPTION_UPGRADED
+			changeEvent := constants.EVENT_SUBSCRIPTION_UPGRADED
 			if subs.MonthlyPrice < oldMonthlyPrice {
-				changeEvent = constants.BREVO_EVENT_SUBSCRIPTION_DOWNGRADED
+				changeEvent = constants.EVENT_SUBSCRIPTION_DOWNGRADED
 			}
-			go c.CRMService.SendEvent(user, changeEvent, map[string]any{
+			go c.EventService.SendEvent(user, changeEvent, map[string]any{
 				"old_plan_id":       oldSubID.String(),
 				"new_plan_id":       subs.ID.String(),
 				"new_plan_name":     subs.Name,
@@ -308,15 +308,15 @@ func (c *Controller) processWebhookEvent(event stripe.Event) error {
 
 		if !user.SetupFinished {
 			user.SetupFinished = true
-			go c.CRMService.SendEvent(user, constants.BREVO_EVENT_USER_SETUP_FINISHED, map[string]any{})
+			go c.EventService.SendEvent(user, constants.EVENT_USER_SETUP_FINISHED, map[string]any{})
 		}
 
-		go c.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_UPDATED, map[string]any{
+		go c.EventService.SendEvent(user, constants.EVENT_SUBSCRIPTION_UPDATED, map[string]any{
 			"subscription_status": user.SubscriptionStatus,
 			"subscription_id":     user.SubscriptionID.String(),
 		})
 
-		go c.CRMService.SendEvent(user, constants.BREVO_EVENT_PAYMENT_SUCCEEDED, map[string]any{
+		go c.EventService.SendEvent(user, constants.EVENT_PAYMENT_SUCCEEDED, map[string]any{
 			"amount_paid":    invoice.AmountPaid,
 			"currency":       string(invoice.Currency),
 			"invoice_id":     invoice.ID,
@@ -328,7 +328,7 @@ func (c *Controller) processWebhookEvent(event stripe.Event) error {
 		// Stripe sets BillingReason = "subscription_cycle" on renewal, "subscription_create"
 		// on first charge (which is already covered by customer.subscription.created).
 		if invoice.BillingReason == stripe.InvoiceBillingReasonSubscriptionCycle {
-			go c.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_RENEWED, map[string]any{
+			go c.EventService.SendEvent(user, constants.EVENT_SUBSCRIPTION_RENEWED, map[string]any{
 				"subscription_id": user.SubscriptionID.String(),
 				"amount_paid":     invoice.AmountPaid,
 				"currency":        string(invoice.Currency),
@@ -366,7 +366,7 @@ func (c *Controller) processWebhookEvent(event stripe.Event) error {
 		// event has the authoritative status (past_due on first failure, unpaid after
 		// exhausting retries). Changing status here would be premature.
 
-		go c.CRMService.SendEvent(user, constants.BREVO_EVENT_PAYMENT_FAILED, map[string]any{
+		go c.EventService.SendEvent(user, constants.EVENT_PAYMENT_FAILED, map[string]any{
 			"subscription_status": user.SubscriptionStatus,
 			"subscription_id":     user.SubscriptionID.String(),
 			"pay_invoice_url":     invoice.HostedInvoiceURL,
@@ -392,7 +392,7 @@ func (c *Controller) processWebhookEvent(event stripe.Event) error {
 			return fmt.Errorf("user not found for stripe customer %s: %w", invoice.Customer.ID, err)
 		}
 
-		go c.CRMService.SendEvent(user, constants.BREVO_EVENT_PAYMENT_USER_ACTION_REQUIRED, map[string]any{
+		go c.EventService.SendEvent(user, constants.EVENT_PAYMENT_USER_ACTION_REQUIRED, map[string]any{
 			"subscription_status": user.SubscriptionStatus,
 			"subscription_id":     user.SubscriptionID.String(),
 			"pay_invoice_url":     invoice.HostedInvoiceURL,
@@ -416,7 +416,7 @@ func (c *Controller) processWebhookEvent(event stripe.Event) error {
 			return fmt.Errorf("user not found for stripe customer %s: %w", invoice.Customer.ID, err)
 		}
 
-		go c.CRMService.SendEvent(user, constants.BREVO_EVENT_INVOICE_UPCOMING, map[string]any{
+		go c.EventService.SendEvent(user, constants.EVENT_INVOICE_UPCOMING, map[string]any{
 			"amount_due":   invoice.AmountDue,
 			"currency":     string(invoice.Currency),
 			"period_start": invoice.PeriodStart,
@@ -444,7 +444,7 @@ func (c *Controller) processWebhookEvent(event stripe.Event) error {
 		user.SubscriptionStatus = "canceled"
 		user.SubscriptionID = uuid.Nil
 
-		go c.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_CANCELLED, map[string]any{})
+		go c.EventService.SendEvent(user, constants.EVENT_SUBSCRIPTION_CANCELLED, map[string]any{})
 
 		if _, err := c.DB.UpdateUser(user); err != nil {
 			return fmt.Errorf("failed to update user %s after subscription deleted: %w", user.ID, err)
@@ -466,7 +466,7 @@ func (c *Controller) processWebhookEvent(event stripe.Event) error {
 			return fmt.Errorf("user not found for stripe customer %s: %w", pm.Customer.ID, err)
 		}
 
-		go c.CRMService.SendEvent(user, constants.BREVO_EVENT_PAYMENT_METHOD_ATTACHED, map[string]any{})
+		go c.EventService.SendEvent(user, constants.EVENT_PAYMENT_METHOD_ATTACHED, map[string]any{})
 
 		c.TrackUserEvent(user, "payment_method_attached", posthog.NewProperties().
 			Set("payment_method_type", string(pm.Type)))
@@ -483,7 +483,7 @@ func (c *Controller) processWebhookEvent(event stripe.Event) error {
 			return fmt.Errorf("user not found for stripe customer %s: %w", pm.Customer.ID, err)
 		}
 
-		go c.CRMService.SendEvent(user, constants.BREVO_EVENT_PAYMENT_METHOD_DETACHED, map[string]any{})
+		go c.EventService.SendEvent(user, constants.EVENT_PAYMENT_METHOD_DETACHED, map[string]any{})
 
 		c.TrackUserEvent(user, "payment_method_detached", posthog.NewProperties().
 			Set("payment_method_type", string(pm.Type)))
@@ -524,7 +524,7 @@ func (c *Controller) processWebhookEvent(event stripe.Event) error {
 
 		slog.Info("credits purchased", "user_id", userID, "pack_size", packSize, "session_id", cs.ID)
 
-		go c.CRMService.SendEvent(user, constants.BREVO_EVENT_CREDITS_PURCHASED, map[string]any{
+		go c.EventService.SendEvent(user, constants.EVENT_CREDITS_PURCHASED, map[string]any{
 			"pack_size":    packSize,
 			"session_id":   cs.ID,
 			"amount_total": cs.AmountTotal,
@@ -550,7 +550,7 @@ func (c *Controller) processWebhookEvent(event stripe.Event) error {
 		if ok && customerID != "" {
 			user, err := c.DB.GetUserByStripeCustomerID(customerID)
 			if err == nil {
-				go c.CRMService.SendEvent(user, constants.BREVO_EVENT_UNHANDLED_EVENT, map[string]any{
+				go c.EventService.SendEvent(user, constants.EVENT_UNHANDLED_EVENT, map[string]any{
 					"from":       "stripe-webhook",
 					"event_type": event.Type,
 				})
@@ -558,7 +558,7 @@ func (c *Controller) processWebhookEvent(event stripe.Event) error {
 			}
 		}
 
-		go c.CRMService.SendEvent(&models.User{}, constants.BREVO_EVENT_UNHANDLED_EVENT, map[string]any{
+		go c.EventService.SendEvent(&models.User{}, constants.EVENT_UNHANDLED_EVENT, map[string]any{
 			"from":       "stripe-webhook",
 			"event_type": event.Type,
 		})

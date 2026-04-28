@@ -74,14 +74,11 @@ func (c *Controller) RequestPasswordReset(req requests.UserForgotPasswordRequest
 	}
 	resetURL := fmt.Sprintf("%s/reset-password?token=%s", frontendURL, tokenStr)
 
-	if _, err := c.EmailService.SendEmail(user, constants.BREVO_PASSWORD_RESET_EMAIL_TEMPLATE_ID, map[string]any{
-		"name":      user.Name,
-		"reset_url": resetURL,
+	go c.EventService.SendEvent(user, constants.EVENT_PASSWORD_RESET_REQUESTED, map[string]any{
+		"name":               user.Name,
+		"reset_url":          resetURL,
 		"expires_in_minutes": int(passwordResetTokenTTL / time.Minute),
-	}); err != nil {
-		slog.Error("failed to send password reset email", "error", err, "user_id", user.ID)
-		// Still return nil — we don't want to leak delivery status either.
-	}
+	})
 
 	return nil
 }
@@ -125,7 +122,7 @@ func (c *Controller) ConsumePasswordReset(req requests.UserResetPasswordRequest)
 		slog.Warn("failed to mark reset token consumed", "error", err, "token_id", token.ID)
 	}
 
-	go c.CRMService.SendEvent(user, constants.BREVO_EVENT_PASSWORD_RESET, map[string]any{})
+	go c.EventService.SendEvent(user, constants.EVENT_PASSWORD_RESET, map[string]any{})
 
 	return nil
 }
@@ -162,12 +159,10 @@ func (c *Controller) SendVerifyEmail(user *models.User) error {
 	}
 	verifyURL := fmt.Sprintf("%s/verify-email?token=%s", frontendURL, tokenStr)
 
-	if _, err := c.EmailService.SendEmail(user, constants.BREVO_VERIFACTION_EMAIL_TEMPLATE_ID, map[string]any{
+	go c.EventService.SendEvent(user, constants.EVENT_EMAIL_VERIFICATION_REQUESTED, map[string]any{
 		"name":       user.Name,
 		"verify_url": verifyURL,
-	}); err != nil {
-		return fmt.Errorf("failed to send verification email: %w", err)
-	}
+	})
 
 	return nil
 }
@@ -213,7 +208,7 @@ func (c *Controller) ConsumeVerifyEmail(req requests.UserVerifyEmailRequest) (*m
 		slog.Error("failed to grant initial free credits on verify", "error", err, "user_id", user.ID)
 	}
 
-	go c.CRMService.SendEvent(user, constants.BREVO_EVENT_EMAIL_VERIFIED, map[string]any{})
+	go c.EventService.SendEvent(user, constants.EVENT_EMAIL_VERIFIED, map[string]any{})
 
 	return user, nil
 }

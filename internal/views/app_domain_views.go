@@ -46,7 +46,7 @@ func (v *HttpViews) AddAppDomain(w http.ResponseWriter, r *http.Request) {
 	// WEM-263: Check CanBuyDomain subscription limit
 	limits, limitsErr := v.Controller.GetUserLimits(user)
 	if limitsErr != nil || !limits.CanBuyDomain {
-		go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_NEED, map[string]any{"action": "buy_domain"})
+		go v.Controller.EventService.SendEvent(user, constants.EVENT_SUBSCRIPTION_NEED, map[string]any{"action": "buy_domain"})
 		utils.JSONError(w, constants.ErrSubscriptionRequired, "custom domains require a paid plan", http.StatusForbidden, nil)
 		return
 	}
@@ -74,7 +74,7 @@ func (v *HttpViews) AddAppDomain(w http.ResponseWriter, r *http.Request) {
 		Set("app_id", project.ID.String()).
 		Set("domain", req.Domain))
 
-	go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_DOMAIN_ADDED, map[string]any{
+	go v.Controller.EventService.SendEvent(user, constants.EVENT_DOMAIN_ADDED, map[string]any{
 		"app_id": project.ID.String(),
 		"domain": req.Domain,
 	})
@@ -110,7 +110,7 @@ func (v *HttpViews) VerifyAppDomain(w http.ResponseWriter, r *http.Request) {
 		Set("domain", result.Domain).
 		Set("status", result.Status))
 
-	go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_DOMAIN_VERIFIED, map[string]any{
+	go v.Controller.EventService.SendEvent(user, constants.EVENT_DOMAIN_VERIFIED, map[string]any{
 		"app_id": project.ID.String(),
 		"domain": result.Domain,
 		"status": result.Status,
@@ -143,7 +143,7 @@ func (v *HttpViews) RemoveAppDomain(w http.ResponseWriter, r *http.Request) {
 	v.Controller.TrackUserEvent(user, "domain_removed", posthog.NewProperties().
 		Set("app_id", project.ID.String()))
 
-	go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_DOMAIN_REMOVED, map[string]any{
+	go v.Controller.EventService.SendEvent(user, constants.EVENT_DOMAIN_REMOVED, map[string]any{
 		"app_id": project.ID.String(),
 	})
 

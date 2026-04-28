@@ -76,3 +76,12 @@ func (db *Database) UpdateUserGitHubFields(user *models.User) error {
 		Exec(context.Background())
 	return err
 }
+
+func (db *Database) SetUserTwentyPersonID(userID, twentyPersonID string) error {
+	_, err := db.DB.NewUpdate().
+		Model((*models.User)(nil)).
+		Set("twenty_person_id = ?", twentyPersonID).
+		Where("id = ?", userID).
+		Exec(context.Background())
+	return err
+}

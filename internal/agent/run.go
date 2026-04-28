@@ -821,7 +821,7 @@ func finaliseSuccess(
 		})
 	}
 
-	// 6b. Track CRM (Brevo) — mirrors PostHog event names.
+	// 6b. Fire lifecycle event — mirrors PostHog event names.
 	if deps.SendCRMEvent != nil {
 		crmEvent := "app_chat_completed"
 		if isInitial {
@@ -1003,7 +1003,7 @@ func finaliseFailureV2(
 		})
 	}
 
-	// 6b. Track CRM (Brevo).
+	// 6b. Fire lifecycle event.
 	if deps.SendCRMEvent != nil {
 		deps.SendCRMEvent("app_chat_failed", map[string]any{
 			"app_id":       run.AppProjectID.String(),

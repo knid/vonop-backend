@@ -253,7 +253,7 @@ func (c *Controller) HandleWebDeployTask(ctx context.Context, t *asynq.Task) err
 	if err := c.MarkDeploymentSucceeded(p.DeploymentID, deployedURL); err != nil {
 		slog.Warn("mark succeeded", "err", err)
 	}
-	go c.CRMService.SendEvent(user, constants.BREVO_EVENT_WEB_DEPLOYMENT_SUCCEEDED, map[string]any{
+	go c.EventService.SendEvent(user, constants.EVENT_WEB_DEPLOYMENT_SUCCEEDED, map[string]any{
 		"app_id":       project.ID.String(),
 		"version":      deployment.Version,
 		"deployed_url": deployedURL,
@@ -294,7 +294,7 @@ func (c *Controller) maybeRetry(deploymentID, stage string, err error) error {
 	return asynq.SkipRetry
 }
 
-// fireDeployFailedEvent fires the Brevo + PostHog events for a permanent
+// fireDeployFailedEvent fires the lifecycle + PostHog events for a permanent
 // deploy failure. Best-effort — never blocks the worker.
 func (c *Controller) fireDeployFailedEvent(deploymentID, stage string, deployErr error) {
 	deployment, err := c.DB.GetAppDeploymentByID(deploymentID)
@@ -305,7 +305,7 @@ func (c *Controller) fireDeployFailedEvent(deploymentID, stage string, deployErr
 	if err != nil {
 		return
 	}
-	go c.CRMService.SendEvent(user, constants.BREVO_EVENT_WEB_DEPLOYMENT_FAILED, map[string]any{
+	go c.EventService.SendEvent(user, constants.EVENT_WEB_DEPLOYMENT_FAILED, map[string]any{
 		"app_id":        deployment.AppProjectID.String(),
 		"stage":         stage,
 		"error_message": deployErr.Error(),
@@ -317,7 +317,7 @@ func (c *Controller) fireDeployFailedEvent(deploymentID, stage string, deployErr
 }
 
 // HandleFlyMachineEvent reacts to a Fly webhook. Updates app_deployments
-// based on machine state. Also fires Brevo events for the success path
+// based on machine state. Also fires lifecycle events for the success path
 // (failure events fire from the worker's failTask/maybeRetry path).
 func (c *Controller) HandleFlyMachineEvent(event fly.MachineEvent) error {
 	runtimeApp, err := c.DB.GetRuntimeAppByFlyAppName(event.AppName)
@@ -343,7 +343,7 @@ func (c *Controller) HandleFlyMachineEvent(event fly.MachineEvent) error {
 			// Fire success events for the user — best-effort, don't block.
 			user, uErr := c.DB.GetUserById(deployment.UserID.String())
 			if uErr == nil {
-				go c.CRMService.SendEvent(user, constants.BREVO_EVENT_WEB_DEPLOYMENT_SUCCEEDED, map[string]any{
+				go c.EventService.SendEvent(user, constants.EVENT_WEB_DEPLOYMENT_SUCCEEDED, map[string]any{
 					"app_id":       deployment.AppProjectID.String(),
 					"version":      deployment.Version,
 					"deployed_url": deployedURL,

@@ -32,7 +32,7 @@ func (v *HttpViews) CreateTicket(w http.ResponseWriter, r *http.Request) {
 			Email: ticketCreateReq.SenderEmail,
 		}
 
-		go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_NEW_TICKET, map[string]any{
+		go v.Controller.EventService.SendEvent(user, constants.EVENT_NEW_TICKET, map[string]any{
 			"ticket_subject": ticketCreateReq.Subject,
 			"ticket_message": ticketCreateReq.Message,
 			"ticket_id":      ticket.ID.String(),
@@ -60,7 +60,7 @@ func (v *HttpViews) CreateTicket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_NEW_TICKET, map[string]any{
+	go v.Controller.EventService.SendEvent(user, constants.EVENT_NEW_TICKET, map[string]any{
 		"ticket_subject": ticketCreateReq.Subject,
 		"ticket_message": ticketCreateReq.Message,
 		"ticket_id":      ticket.ID.String(),

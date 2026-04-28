@@ -83,7 +83,7 @@ func (c *Controller) CreateAppProject(ctx context.Context, user *models.User, re
 			if isMobile {
 				action = "create_mobile_app"
 			}
-			go c.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_QUOTA_REACHED, map[string]any{"action": action, "limit": maxApps})
+			go c.EventService.SendEvent(user, constants.EVENT_SUBSCRIPTION_QUOTA_REACHED, map[string]any{"action": action, "limit": maxApps})
 			go c.TrackUserEvent(user, "quota_reached", posthog.NewProperties().Set("action", action).Set("limit", maxApps))
 			if isMobile {
 				return nil, fmt.Errorf("you have reached your mobile app limit (%d)", maxApps)

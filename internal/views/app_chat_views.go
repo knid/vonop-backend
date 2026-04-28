@@ -121,11 +121,11 @@ func (v *HttpViews) ChatApp(w http.ResponseWriter, r *http.Request) {
 		Set("project_type", project.ProjectType).
 		Set("has_images", len(req.Images) > 0))
 
-	brevoEvent := constants.BREVO_EVENT_APP_CHAT_SENT
+	chatEvent := constants.EVENT_APP_CHAT_SENT
 	if isInitialGeneration {
-		brevoEvent = constants.BREVO_EVENT_APP_GENERATION_STARTED
+		chatEvent = constants.EVENT_APP_GENERATION_STARTED
 	}
-	go v.Controller.CRMService.SendEvent(user, brevoEvent, map[string]any{
+	go v.Controller.EventService.SendEvent(user, chatEvent, map[string]any{
 		"app_id":       project.ID.String(),
 		"project_type": project.ProjectType,
 	})

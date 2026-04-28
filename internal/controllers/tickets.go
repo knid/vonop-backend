@@ -45,10 +45,10 @@ func (c *Controller) CreateTicket(ticketCreateReq requests.CreateTicketRequest) 
 		constants.SLACK_CHANNEL_ID_NEW_TICKETS,
 		slack.MsgOptionText("New Ticket: "+ticket.Subject, false))
 
-	c.EmailService.SendEmail(&models.User{
+	go c.EventService.SendEvent(&models.User{
 		Name:  ticket.SenderName,
 		Email: ticket.SenderEmail,
-	}, constants.BREVO_TICKET_RECEIVED_EMAIL_TEMPLATE_ID, map[string]interface{}{
+	}, constants.EVENT_NEW_TICKET, map[string]any{
 		"ticket_id": ticket.ID.String(),
 		"subject":   ticket.Subject,
 		"message":   ticket.Message,

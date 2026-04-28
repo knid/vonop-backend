@@ -8,16 +8,16 @@ import (
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/database"
 	"github.com/knid/wemob/internal/models"
-	crmServices "github.com/knid/wemob/internal/services/crm"
+	"github.com/knid/wemob/internal/services/events"
 )
 
 // Runner periodically scans pending_connection deployments and fires
-// email nudges via the CRM. Up to 3 nudges per deployment, spaced 2
+// email nudges via the EventService. Up to 3 nudges per deployment, spaced 2
 // days apart.
 type Runner struct {
-	DB    *database.Database
-	CRM   crmServices.CRMService
-	Every time.Duration // Default 6h when zero.
+	DB           *database.Database
+	EventService events.EventService
+	Every        time.Duration // Default 6h when zero.
 	// SpacingDays sets the gap between consecutive nudges. Default 2.
 	SpacingDays int
 	// MaxNudges caps the total per deployment. Default 3.
@@ -102,8 +102,8 @@ func (r *Runner) tick(ctx context.Context) {
 			"submitted_at":  d.CreatedAt.UTC().Format(time.RFC3339),
 			"switch_url":    "/ship/" + d.ProjectID.String() + "#app-store",
 		}
-		if err := r.CRM.SendEvent(d.User, constants.BREVO_EVENT_PENDING_CONNECTION_NUDGE, attrs); err != nil {
-			slog.Warn("pendingnudge: brevo send failed", "deployment_id", d.ID, "err", err)
+		if err := r.EventService.SendEvent(d.User, constants.EVENT_PENDING_CONNECTION_NUDGE, attrs); err != nil {
+			slog.Warn("pendingnudge: send failed", "deployment_id", d.ID, "err", err)
 			continue
 		}
 

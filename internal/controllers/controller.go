@@ -9,8 +9,7 @@ import (
 	"github.com/hibiken/asynq"
 	"github.com/knid/wemob/internal/database"
 	"github.com/knid/wemob/internal/services"
-	crmServices "github.com/knid/wemob/internal/services/crm"
-	emailServices "github.com/knid/wemob/internal/services/email"
+	"github.com/knid/wemob/internal/services/events"
 	"github.com/knid/wemob/internal/services/mcpclient"
 	"github.com/knid/wemob/internal/services/gitrepo"
 	"github.com/knid/wemob/internal/services/neon"
@@ -31,8 +30,7 @@ type Controller struct {
 	DB                     *database.Database
 	SecretManager          secret.SecretManager
 	SlackService           *services.SlackService
-	EmailService           emailServices.EmailService
-	CRMService             crmServices.CRMService
+	EventService           events.EventService
 	TaskService            *asynq.Client
 	AsynqInspector         *asynq.Inspector
 	AssetsStorage          *storage.S3Storage
@@ -57,8 +55,8 @@ type Controller struct {
 }
 
 func NewController(db *database.Database, concurrentBuildLimiter chan struct{},
-	slackService *services.SlackService, emailService emailServices.EmailService,
-	crmService crmServices.CRMService, taskService *asynq.Client, asynqInspector *asynq.Inspector,
+	slackService *services.SlackService, eventService events.EventService,
+	taskService *asynq.Client, asynqInspector *asynq.Inspector,
 	assetsStorage *storage.S3Storage,
 	userApiKeysStorage *storage.S3Storage, secretManager secret.SecretManager,
 	coolifyService *coolify.Service, flyService *fly.Service, giteaService *gitea.Service,
@@ -74,8 +72,7 @@ func NewController(db *database.Database, concurrentBuildLimiter chan struct{},
 	return &Controller{
 		DB:                     db,
 		SlackService:           slackService,
-		EmailService:           emailService,
-		CRMService:             crmService,
+		EventService:           eventService,
 		ConcurrentBuildLimiter: concurrentBuildLimiter,
 		TaskService:            taskService,
 		AsynqInspector:         asynqInspector,
