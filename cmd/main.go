@@ -21,7 +21,6 @@ import (
 	"github.com/knid/wemob/internal/database"
 	appMiddleware "github.com/knid/wemob/internal/middleware"
 	"github.com/knid/wemob/internal/models"
-	crmServices "github.com/knid/wemob/internal/services/crm"
 	"github.com/knid/wemob/internal/services/pendingnudge"
 	"github.com/knid/wemob/internal/services/secret"
 	"github.com/knid/wemob/internal/services/storepoll"
@@ -800,7 +799,7 @@ func main() {
 	migrateInactiveUsersToFree(bundb)
 
 	go utils.CheckSessionStatusJob(db)
-	go utils.CheckUsageAlertsJob(db, crmServices.NewBrevoCRMService(sm.GetSecret("BREVO_API_KEY")))
+	go utils.CheckUsageAlertsJob(db, controller.EventService)
 
 	// Register Coolify webhook for deployment status updates (non-blocking)
 	go func() {
