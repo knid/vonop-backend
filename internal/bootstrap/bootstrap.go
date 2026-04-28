@@ -32,6 +32,7 @@ import (
 	"github.com/knid/wemob/internal/services/remoteconfig"
 	"github.com/knid/wemob/internal/services/secret"
 	"github.com/knid/wemob/internal/services/storage"
+	caddyService "github.com/knid/wemob/internal/services/caddy"
 	"github.com/knid/wemob/internal/utils"
 	"github.com/posthog/posthog-go"
 
@@ -232,6 +233,12 @@ func BootstrapController() (*controllers.Controller, asynq.RedisClientOpt) {
 		}
 	}
 
+	caddyAdmin := caddyService.NewAdmin(
+		os.Getenv("CADDY_ADMIN_URL"),
+		os.Getenv("CADDY_CUSTOM_DOMAINS_DIR"),
+		"/etc/caddy/Caddyfile",
+	)
+
 	controller := controllers.NewController(
 		db,
 		make(chan struct{}, constants.MAX_CONCURRENT_BUILDS),
@@ -253,6 +260,7 @@ func BootstrapController() (*controllers.Controller, asynq.RedisClientOpt) {
 		remoteConfigService,
 		e2b,
 		edgeIPs,
+		caddyAdmin,
 	)
 
 	// MCP service (optional — connect in background so it doesn't block server startup)

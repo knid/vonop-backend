@@ -13,8 +13,13 @@ services:
       retries: 5
     env_file:
       - ./.env
+    environment:
+      - CADDY_ADMIN_URL=http://caddy:2019
+      - CADDY_CUSTOM_DOMAINS_DIR=/data/custom-domains
     volumes:
       - repo-data:/data/repos
+      - custom-domains:/data/custom-domains
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
 
   caddy:
     build:
@@ -29,13 +34,26 @@ services:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
+      - custom-domains:/etc/caddy/custom-domains:ro
     environment:
       - CF_API_TOKEN=${CF_API_TOKEN}
     depends_on:
       api:
         condition: service_healthy
 
+  asynqmon:
+    image: hibiken/asynqmon:latest
+    container_name: asynqmon
+    restart: unless-stopped
+    expose:
+      - "8080"
+    command:
+      - --redis-addr=${REDIS_ADDR}
+      - --redis-password=${REDIS_PASSWORD}
+      - --redis-tls=true
+
 volumes:
   caddy_data:
   caddy_config:
   repo-data:
+  custom-domains:

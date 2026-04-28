@@ -29,8 +29,17 @@ func (c *Controller) CheckPendingDomainsTask(ctx context.Context) error {
 		if dnsResolvesToEdge(d.Domain, c.EdgeIPs) {
 			if mErr := c.DB.MarkAppDomainDNSStatus(d.ID.String(), "verified"); mErr != nil {
 				slog.Warn("dns_mark_verified_failed", "domain", d.Domain, "err", mErr)
-			} else {
-				slog.Info("dns_verified", "domain", d.Domain)
+				continue
+			}
+			slog.Info("dns_verified", "domain", d.Domain)
+
+			runtimeApp, err := c.DB.GetRuntimeAppByAppProjectID(d.AppProjectID.String())
+			if err != nil || runtimeApp.FlyAppName == "" {
+				slog.Warn("caddy_route_skipped_no_runtime", "domain", d.Domain, "err", err)
+				continue
+			}
+			if err := c.CaddyAdmin.AddCustomDomainRoute(d.Domain, runtimeApp.FlyAppName); err != nil {
+				slog.Error("caddy_route_add_failed", "domain", d.Domain, "err", err)
 			}
 		}
 	}

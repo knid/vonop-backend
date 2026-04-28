@@ -23,6 +23,7 @@ import (
 	"github.com/knid/wemob/internal/services/gitea"
 	"github.com/knid/wemob/internal/services/remoteconfig"
 	e2bService "github.com/knid/wemob/internal/services/e2b"
+	caddyService "github.com/knid/wemob/internal/services/caddy"
 	"github.com/posthog/posthog-go"
 )
 
@@ -52,6 +53,7 @@ type Controller struct {
 	JobEventBuses          sync.Map       // map[string]*EventBus for live SSE fan-out to multiple clients
 	identifiedUsers        sync.Map       // tracks users already identified to PostHog this process
 	EdgeIPs                []string       // known Fly edge IPs for DNS verification
+	CaddyAdmin             *caddyService.Admin
 }
 
 func NewController(db *database.Database, concurrentBuildLimiter chan struct{},
@@ -66,7 +68,8 @@ func NewController(db *database.Database, concurrentBuildLimiter chan struct{},
 	codemagicService *codemagic.Service,
 	remoteConfigService *remoteconfig.Service,
 	e2b *e2bService.Service,
-	edgeIPs []string) *Controller {
+	edgeIPs []string,
+	caddyAdmin *caddyService.Admin) *Controller {
 
 	return &Controller{
 		DB:                     db,
@@ -89,6 +92,7 @@ func NewController(db *database.Database, concurrentBuildLimiter chan struct{},
 		RemoteConfig:           remoteConfigService,
 		E2BService:             e2b,
 		EdgeIPs:                edgeIPs,
+		CaddyAdmin:             caddyAdmin,
 	}
 }
 

@@ -289,7 +289,14 @@ func (c *Controller) RemoveAppDomain(domainID string, project *models.AppProject
 
 	// WEM-267: Bun's NewDelete().Model() with soft_delete tag automatically
 	// performs a soft delete (UPDATE deleted_at) — no hard delete occurs.
-	return c.DB.DeleteAppDomain(domain)
+	if err := c.DB.DeleteAppDomain(domain); err != nil {
+		return err
+	}
+
+	if err := c.CaddyAdmin.RemoveCustomDomainRoute(domain.Domain); err != nil {
+		slog.Warn("caddy_route_remove_failed", "domain", domain.Domain, "err", err)
+	}
+	return nil
 }
 
 // VerifyAppDomain checks the DNS configuration of a custom domain and
