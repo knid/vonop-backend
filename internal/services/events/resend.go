@@ -86,12 +86,12 @@ func (s *ResendService) SendEvent(user *models.User, event string, attributes ma
 			lastErr = err
 			continue
 		}
-		defer resp.Body.Close()
-
 		if resp.StatusCode < 300 {
+			resp.Body.Close()
 			return nil
 		}
 		respBody, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
 		if resp.StatusCode >= 500 {
 			lastErr = fmt.Errorf("resend events: %s %s", resp.Status, string(respBody))
 			continue

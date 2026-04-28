@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/database"
 	"github.com/knid/wemob/internal/models"
 )
@@ -66,7 +67,10 @@ func (s *TwentyService) SendEvent(user *models.User, event string, _ map[string]
 	if s.apiKey == "" {
 		return errors.New("twenty: not initialized")
 	}
-	if user == nil || user.ID.String() == "" {
+	// Skip ephemeral / guest users (e.g. unauthenticated ticket submitters):
+	// without a real wemobUserId we cannot upsert a Person without colliding
+	// with all other guests on the same zero-UUID.
+	if user == nil || user.ID == (uuid.UUID{}) {
 		return nil
 	}
 
@@ -176,6 +180,14 @@ func (s *TwentyService) createPerson(person twentyPerson) (string, error) {
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		return "", err
+	}
+	if out.Data.CreatePerson.ID == "" {
+		// Twenty's REST response shape varies between versions / GraphQL operation
+		// names. Surface the mismatch so a smoke test catches it before traffic
+		// flows. The caller will skip caching the empty ID and re-issue the
+		// lookup on the next event for this user.
+		slog.Warn("twenty: createPerson returned empty ID — verify response shape",
+			"user_id", person.WemobUserId)
 	}
 	return out.Data.CreatePerson.ID, nil
 }
