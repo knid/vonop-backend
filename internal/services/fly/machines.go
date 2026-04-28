@@ -66,6 +66,33 @@ type machineSummary struct {
 	Name  string `json:"name"`
 }
 
+// retryUntilManifestVisible retries fn while it fails with MANIFEST_UNKNOWN
+// (Fly Machines API can't yet see the image manifest just pushed via Depot).
+// Backoff: 1s, 2s, 4s, 8s, 8s, 8s capped — total ~30s before giving up.
+func retryUntilManifestVisible(appName, imageRef string, fn func() error) error {
+	backoff := time.Second
+	deadline := time.Now().Add(30 * time.Second)
+	attempt := 0
+	for {
+		attempt++
+		err := fn()
+		if err == nil {
+			if attempt > 1 {
+				slog.Info("fly_manifest_visible_after_retry", "app", appName, "image", imageRef, "attempts", attempt)
+			}
+			return nil
+		}
+		if !IsManifestUnknown(err) || time.Now().After(deadline) {
+			return err
+		}
+		slog.Debug("fly_manifest_unknown_retrying", "app", appName, "image", imageRef, "attempt", attempt, "next_backoff", backoff)
+		time.Sleep(backoff)
+		if backoff < 8*time.Second {
+			backoff *= 2
+		}
+	}
+}
+
 // DeployMachines creates the first Machine for an app or replaces the existing
 // fleet with new Machines built from `spec`. Idempotent: safe to call multiple
 // times — replaces the running fleet atomically.
@@ -121,15 +148,22 @@ func (s *Service) DeployMachines(appName string, spec MachineSpec) error {
 	}
 
 	// Strategy: if there are existing machines, update the first one and destroy
-	// the rest. If none, create one.
+	// the rest. If none, create one. The create/update calls are wrapped with
+	// retryUntilManifestVisible because Fly's Machines API has a separate
+	// registry index that lags 5–10s behind Depot's push — the first call
+	// often 400s with MANIFEST_UNKNOWN even though the manifest exists.
 	if len(existing) == 0 {
 		req := machineCreateRequest{Region: spec.Region, Config: cfg}
-		return s.doRequest("POST", "/v1/apps/"+appName+"/machines", req, nil)
+		return retryUntilManifestVisible(appName, spec.Image, func() error {
+			return s.doRequest("POST", "/v1/apps/"+appName+"/machines", req, nil)
+		})
 	}
 
 	keep := existing[0]
 	updateReq := map[string]any{"region": spec.Region, "config": cfg}
-	if err := s.doRequest("POST", "/v1/apps/"+appName+"/machines/"+keep.ID, updateReq, nil); err != nil {
+	if err := retryUntilManifestVisible(appName, spec.Image, func() error {
+		return s.doRequest("POST", "/v1/apps/"+appName+"/machines/"+keep.ID, updateReq, nil)
+	}); err != nil {
 		return err
 	}
 	for _, m := range existing[1:] {

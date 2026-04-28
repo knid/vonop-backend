@@ -4,7 +4,24 @@ import (
 	"errors"
 	"net"
 	"os/exec"
+	"strings"
 )
+
+// IsManifestUnknown returns true when the Fly Machines API rejects a deploy
+// because it can't yet see the image manifest in registry.fly.io. This is a
+// propagation lag: Depot pushes the manifest and flyctl exits, but Machines
+// API has a separate registry index that lags 5–10s behind. The fix is to
+// retry the same request — the manifest will appear shortly.
+func IsManifestUnknown(err error) bool {
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
+		return false
+	}
+	if apiErr.Status != 400 {
+		return false
+	}
+	return strings.Contains(apiErr.Body, "MANIFEST_UNKNOWN")
+}
 
 // IsRetryable returns true if a Fly API or network error should be retried by
 // the worker. 4xx (except 408/429) is non-retryable — the caller's request is
