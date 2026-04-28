@@ -1,69 +1,15 @@
 package fly
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
-	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
 	"time"
 )
-
-type machineConfig struct {
-	Image    string                 `json:"image"`
-	Env      map[string]string      `json:"env,omitempty"`
-	Services []machineServiceConfig `json:"services,omitempty"`
-	Guest    machineGuestConfig     `json:"guest"`
-	Restart  map[string]any         `json:"restart,omitempty"`
-	Metadata map[string]string      `json:"metadata,omitempty"`
-}
-
-type machineServiceConfig struct {
-	InternalPort int                       `json:"internal_port"`
-	Protocol     string                    `json:"protocol"`
-	Ports        []machinePortConfig       `json:"ports"`
-	Concurrency  *machineConcurrencyConfig `json:"concurrency,omitempty"`
-	// Fly's Machines API uses `autostop` / `autostart`, NOT
-	// `auto_stop_machines` / `auto_start_machines` (the latter are fly.toml
-	// keys; flyctl translates them on the way to the API). Sending the
-	// fly.toml names causes Fly to silently strip the fields. autostop
-	// accepts "stop" | "suspend" | "off".
-	AutoStop    string               `json:"autostop,omitempty"`
-	AutoStart   bool                 `json:"autostart"`
-	MinMachines int                  `json:"min_machines_running"`
-	Checks      []machineCheckConfig `json:"checks,omitempty"`
-}
-
-type machinePortConfig struct {
-	Port       int      `json:"port"`
-	Handlers   []string `json:"handlers,omitempty"`
-	ForceHTTPS bool     `json:"force_https,omitempty"`
-}
-
-type machineConcurrencyConfig struct {
-	Type      string `json:"type"`       // "requests" | "connections"
-	HardLimit int    `json:"hard_limit"`
-	SoftLimit int    `json:"soft_limit"`
-}
-
-type machineCheckConfig struct {
-	Type     string `json:"type"`
-	Port     int    `json:"port,omitempty"`
-	Interval string `json:"interval"`
-	Timeout  string `json:"timeout"`
-	Method   string `json:"method,omitempty"`
-	Path     string `json:"path,omitempty"`
-}
-
-type machineGuestConfig struct {
-	CPUKind  string `json:"cpu_kind"`
-	CPUs     int    `json:"cpus"`
-	MemoryMB int    `json:"memory_mb"`
-}
-
-type machineCreateRequest struct {
-	Name   string        `json:"name,omitempty"`
-	Region string        `json:"region"`
-	Config machineConfig `json:"config"`
-}
 
 type machineSummary struct {
 	ID    string `json:"id"`
@@ -71,10 +17,81 @@ type machineSummary struct {
 	Name  string `json:"name"`
 }
 
-// retryUntilManifestVisible retries fn while it fails with MANIFEST_UNKNOWN
-// (Fly Machines API can't yet see the image manifest just pushed via Depot).
-// Backoff: 1s, 2s, 4s, 8s, 8s, 8s capped — total ~30s before giving up.
-func retryUntilManifestVisible(appName, imageRef string, fn func() error) error {
+// DeployMachines releases the image to a Fly Machine via `flyctl deploy --image`.
+//
+// We shell out to flyctl rather than POSTing to the Machines API directly because
+// Apps V2 (Machines) has NO public API to create a "release". The legacy GraphQL
+// `deployImage` mutation 422s for Machines apps ("requires the 'nomad' platform").
+// Without a release, the app stays `deployed=false` forever, secrets stay Staged,
+// and machines never bind to them no matter how many times you create them.
+//
+// flyctl's deploy flow handles all of:
+//   - creating the release (which flips the app to `deployed=true`)
+//   - destroying old machines and creating new ones in one atomic operation
+//   - binding the new machines to the latest secret version (so process.env is set)
+//
+// We write a complete fly.toml in a tmp dir so flyctl uses OUR config
+// (autostop=suspend, scale-to-zero, concurrency limits) instead of inventing
+// defaults. `--ha=false` prevents flyctl's automatic standby machine creation
+// (we'd just have to delete the standby afterwards).
+//
+// `--strategy immediate` replaces all machines at once. Brief downtime is fine
+// for these scale-to-zero apps — they're often already suspended when redeployed.
+func (s *Service) DeployMachines(appName string, spec MachineSpec) error {
+	if spec.Image == "" {
+		return fmt.Errorf("fly: DeployMachines: spec.Image is required")
+	}
+
+	tmpDir, err := os.MkdirTemp("", "fly-deploy-")
+	if err != nil {
+		return fmt.Errorf("fly: mkdir temp: %w", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	tomlPath := filepath.Join(tmpDir, "fly.toml")
+	if err := os.WriteFile(tomlPath, []byte(buildFlyToml(appName, spec)), 0o644); err != nil {
+		return fmt.Errorf("fly: write fly.toml: %w", err)
+	}
+
+	return retryFlyctlDeploy(appName, spec.Image, func() error {
+		cmd := exec.Command("flyctl", "deploy",
+			"--app", appName,
+			"--image", spec.Image,
+			"--strategy", "immediate",
+			"--ha=false",
+			"--yes",
+		)
+		cmd.Dir = tmpDir
+		cmd.Env = []string{
+			"HOME=" + os.Getenv("HOME"),
+			"PATH=" + os.Getenv("PATH"),
+			"FLY_API_TOKEN=" + s.APIToken,
+			"FLY_NO_UPDATE_CHECK=1",
+		}
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			return &flyctlDeployError{err: err, output: string(out)}
+		}
+		slog.Info("fly_release_succeeded", "app", appName, "image", spec.Image)
+		return nil
+	})
+}
+
+// flyctlDeployError wraps flyctl exec failures so the retry layer can
+// pattern-match the output for transient errors (MANIFEST_UNKNOWN).
+type flyctlDeployError struct {
+	err    error
+	output string
+}
+
+func (e *flyctlDeployError) Error() string {
+	return fmt.Sprintf("flyctl: %s (output: %s)", e.err, truncate(e.output, 1000))
+}
+
+// retryFlyctlDeploy retries while flyctl's stderr reports MANIFEST_UNKNOWN —
+// Fly's Machines API registry index lags Depot's push by 5–10s. Backoff
+// 1s/2s/4s/8s capped, 30s deadline.
+func retryFlyctlDeploy(appName, imageRef string, fn func() error) error {
 	backoff := time.Second
 	deadline := time.Now().Add(30 * time.Second)
 	attempt := 0
@@ -83,14 +100,16 @@ func retryUntilManifestVisible(appName, imageRef string, fn func() error) error 
 		err := fn()
 		if err == nil {
 			if attempt > 1 {
-				slog.Info("fly_manifest_visible_after_retry", "app", appName, "image", imageRef, "attempts", attempt)
+				slog.Info("fly_deploy_succeeded_after_retry", "app", appName, "image", imageRef, "attempts", attempt)
 			}
 			return nil
 		}
-		if !IsManifestUnknown(err) || time.Now().After(deadline) {
+		var fe *flyctlDeployError
+		retryable := errors.As(err, &fe) && strings.Contains(fe.output, "MANIFEST_UNKNOWN")
+		if !retryable || time.Now().After(deadline) {
 			return err
 		}
-		slog.Debug("fly_manifest_unknown_retrying", "app", appName, "image", imageRef, "attempt", attempt, "next_backoff", backoff)
+		slog.Debug("fly_deploy_manifest_unknown_retrying", "app", appName, "image", imageRef, "attempt", attempt)
 		time.Sleep(backoff)
 		if backoff < 8*time.Second {
 			backoff *= 2
@@ -98,96 +117,38 @@ func retryUntilManifestVisible(appName, imageRef string, fn func() error) error 
 	}
 }
 
-// DeployMachines creates the first Machine for an app or replaces the existing
-// fleet with new Machines built from `spec`. Idempotent: safe to call multiple
-// times — replaces the running fleet atomically.
-func (s *Service) DeployMachines(appName string, spec MachineSpec) error {
-	if spec.Image == "" {
-		return fmt.Errorf("fly: DeployMachines: spec.Image is required")
-	}
+// buildFlyToml renders a complete fly.toml that captures every machine config
+// knob we care about — flyctl uses this to provision machines with the same
+// shape we used to send via the Machines API directly. The fly.toml syntax
+// (`auto_stop_machines = "suspend"`, etc.) is what flyctl translates internally
+// to the API field names (`autostop`, etc.).
+func buildFlyToml(appName string, spec MachineSpec) string {
+	hard := spec.Concurrency
+	soft := spec.Concurrency * 8 / 10 // soft = 80% of hard
+	return fmt.Sprintf(`app = %q
+primary_region = %q
 
-	cfg := machineConfig{
-		Image: spec.Image,
-		Guest: machineGuestConfig{
-			CPUKind:  spec.CPUKind,
-			CPUs:     spec.CPUs,
-			MemoryMB: spec.MemoryMB,
-		},
-		Services: []machineServiceConfig{{
-			InternalPort: 3000,
-			Protocol:     "tcp",
-			Ports: []machinePortConfig{
-				// 80 redirects to 443 via Fly's edge so we don't serve plain HTTP.
-				{Port: 80, Handlers: []string{"http"}, ForceHTTPS: true},
-				// 443 terminates TLS at Fly's edge using *.fly.dev wildcard cert,
-				// then proxies HTTP to internal_port 3000. Required for Caddy to
-				// reach the app via HTTPS without our own cert plumbing.
-				{Port: 443, Handlers: []string{"tls", "http"}},
-			},
-			Concurrency: &machineConcurrencyConfig{
-				Type:      "requests",
-				HardLimit: spec.Concurrency,
-				SoftLimit: spec.Concurrency * 8 / 10, // soft = 80% of hard
-			},
-			// "suspend" preserves machine RAM for fast wake (~hundreds of ms)
-			// vs "stop" which fully shuts down (~1-2s cold start). Per Fly
-			// docs, suspend costs slightly more (snapshot storage) but keeps
-			// scale-to-zero traffic feeling instant.
-			AutoStop:    "suspend",
-			AutoStart:   true, // wake on incoming request
-			MinMachines: 0,    // scale-to-zero
-			Checks: []machineCheckConfig{{
-				Type:     spec.Healthcheck.Type,
-				Port:     spec.Healthcheck.Port,
-				Interval: spec.Healthcheck.Interval,
-				Timeout:  "5s",
-			}},
-		}},
-		Metadata: map[string]string{
-			"managed_by":     "wemob",
-			"max_machines":   fmt.Sprintf("%d", spec.MaxMachines),
-			"auto_stop_secs": fmt.Sprintf("%d", spec.AutoStopSeconds),
-		},
-	}
+[[vm]]
+  cpu_kind = %q
+  cpus = %d
+  memory_mb = %d
 
-	// Strategy: destroy all existing machines, then create a fresh one.
-	//
-	// Why not update in place? Fly binds secrets to a machine at creation
-	// time via an internal secret-version. POST machine-update changes
-	// config (image, etc.) but the machine stays bound to its original
-	// secret version, so newly-staged secrets sit "Staged" forever. None
-	// of /restart, stop+start, or ?deploy=true releases them. The only
-	// mechanism that works (and what `flyctl secrets deploy` does
-	// internally) is recreating the machine so it binds to the current
-	// secret version on boot.
-	//
-	// We re-stage all auto-injected env vars in SyncSecrets on every
-	// deploy, so destroying-and-recreating here is what makes user-facing
-	// "redeploy" actually pick up changed secrets. Brief downtime during
-	// the swap is acceptable: these apps scale to zero (they're often
-	// suspended at deploy time anyway) and rolling restart for a single-
-	// machine app would need temporary 2x capacity for a marginal benefit.
-	var existing []machineSummary
-	if err := s.doRequest("GET", "/v1/apps/"+appName+"/machines", nil, &existing); err != nil {
-		return err
-	}
-	for _, m := range existing {
-		err := s.doRequest("DELETE", "/v1/apps/"+appName+"/machines/"+m.ID+"?force=true", nil, nil)
-		if err == nil {
-			continue
-		}
-		if apiErr, ok := err.(*APIError); ok && apiErr.Status == http.StatusNotFound {
-			continue // already gone
-		}
-		return fmt.Errorf("destroy machine %s: %w", m.ID, err)
-	}
+[http_service]
+  internal_port = 3000
+  force_https = true
+  auto_stop_machines = "suspend"
+  auto_start_machines = true
+  min_machines_running = 0
 
-	// retryUntilManifestVisible handles Fly's 5–10s registry index lag
-	// behind Depot's push — the first POST often 400s with MANIFEST_UNKNOWN.
-	req := machineCreateRequest{Region: spec.Region, Config: cfg}
-	return retryUntilManifestVisible(appName, spec.Image, func() error {
-		return s.doRequest("POST", "/v1/apps/"+appName+"/machines", req, nil)
-	})
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = %d
+    hard_limit = %d
+`,
+		appName, spec.Region,
+		spec.CPUKind, spec.CPUs, spec.MemoryMB,
+		soft, hard,
+	)
 }
 
 // WaitForHealthy polls until at least one Machine for the app reports state
