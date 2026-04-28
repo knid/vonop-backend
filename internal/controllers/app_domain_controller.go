@@ -131,41 +131,9 @@ func (c *Controller) GetAppDomains(projectID string) ([]responses.AppDomainRespo
 
 	result := make([]responses.AppDomainResponse, len(domains))
 	for i := range domains {
-		d := &domains[i]
-		if d.Status == "deploying" && d.DeploymentUUID != "" && c.CoolifyService != nil {
-			c.refreshDeployingDomain(d)
-		}
-		result[i] = *buildDomainResponse(d, "")
+		result[i] = *buildDomainResponse(&domains[i], "")
 	}
 	return result, nil
-}
-
-// refreshDeployingDomain polls Coolify for the status of the deployment
-// associated with this domain and updates the domain's status in-place
-// (and in the DB) if the deploy reached a terminal state.
-func (c *Controller) refreshDeployingDomain(d *models.AppDomain) {
-	dep, err := c.CoolifyService.GetDeploymentByUUID(d.DeploymentUUID)
-	if err != nil {
-		slog.Warn("Failed to poll Coolify deployment for domain", "domain", d.Domain, "deployment_uuid", d.DeploymentUUID, "error", err)
-		return
-	}
-
-	coolifyStatus := strings.ToLower(dep.Status)
-	switch {
-	case coolifyStatus == "finished" || coolifyStatus == "success":
-		d.Status = "active"
-		d.DeploymentUUID = ""
-	case coolifyStatus == "failed" || coolifyStatus == "error" || coolifyStatus == "cancelled":
-		d.Status = "failed"
-		d.DeploymentUUID = ""
-	default:
-		// still in-progress (queued, running, ...) — leave as "deploying"
-		return
-	}
-
-	if _, err := c.DB.UpdateAppDomain(d); err != nil {
-		slog.Error("Failed to persist domain status after deploy poll", "domain", d.Domain, "error", err)
-	}
 }
 
 // AddAppDomain adds a custom domain to an app project.
@@ -254,7 +222,7 @@ func dnsInstructionsFor(flyAppName, hostname string) map[string]any {
 	}
 }
 
-// RemoveAppDomain removes a custom domain from an app project and Coolify.
+// RemoveAppDomain soft-deletes a custom domain and tears down its Caddy route.
 func (c *Controller) RemoveAppDomain(domainID string, project *models.AppProject) error {
 	domain, err := c.DB.GetAppDomainByID(domainID)
 	if err != nil {
@@ -265,43 +233,28 @@ func (c *Controller) RemoveAppDomain(domainID string, project *models.AppProject
 		return errors.New("domain does not belong to this project")
 	}
 
-	// Also remove from Coolify if project exists there
-	if c.CoolifyService != nil {
-		coolifyProject, cpErr := c.DB.GetRuntimeAppByAppProjectID(project.ID.String())
-		if cpErr == nil && coolifyProject != nil {
-			domains := c.buildCoolifyDomainList(coolifyProject, project.ID.String(), "")
-			// Filter out the domain being removed
-			filtered := make([]string, 0, len(domains))
-			removeDomain := "https://" + domain.Domain
-			for _, d := range domains {
-				if d != removeDomain {
-					filtered = append(filtered, d)
-				}
-			}
-			if err := c.CoolifyService.UpdateDomains(coolifyProject.CoolifyAppUUID, filtered); err != nil {
-				slog.Warn("Failed to remove domain from Coolify", "domain", domain.Domain, "error", err)
-			}
-			if _, err := c.CoolifyService.DeployApp(coolifyProject.CoolifyAppUUID); err != nil {
-				slog.Warn("Failed to redeploy Coolify app after domain remove", "domain", domain.Domain, "error", err)
-			}
-		}
-	}
-
-	// WEM-267: Bun's NewDelete().Model() with soft_delete tag automatically
-	// performs a soft delete (UPDATE deleted_at) — no hard delete occurs.
+	// Bun's NewDelete().Model() with soft_delete tag performs a soft delete
+	// (UPDATE deleted_at) — no hard delete.
 	if err := c.DB.DeleteAppDomain(domain); err != nil {
 		return err
 	}
 
-	if err := c.CaddyAdmin.RemoveCustomDomainRoute(domain.Domain); err != nil {
-		slog.Warn("caddy_route_remove_failed", "domain", domain.Domain, "err", err)
+	if c.CaddyAdmin != nil {
+		if err := c.CaddyAdmin.RemoveCustomDomainRoute(domain.Domain); err != nil {
+			slog.Warn("caddy_route_remove_failed", "domain", domain.Domain, "err", err)
+		}
 	}
 	return nil
 }
 
-// VerifyAppDomain checks the DNS configuration of a custom domain and
-// updates the domain status accordingly. Supports CNAME (subdomains),
-// A/AAAA records (apex domains), and Cloudflare-proxied domains.
+// VerifyAppDomain checks the DNS configuration of a custom domain. When DNS
+// resolves correctly, it wires the domain into Caddy so requests to that
+// hostname proxy to the app's Fly machine.
+//
+// Fly path: no Coolify deploy or re-release is needed — the Fly machine is
+// already running and Caddy on-demand TLS handles the cert at first request.
+// All this method needs to do on success is add the Caddy route and mark the
+// domain active.
 func (c *Controller) VerifyAppDomain(domainID string, project *models.AppProject) (*responses.AppDomainResponse, error) {
 	domain, err := c.DB.GetAppDomainByID(domainID)
 	if err != nil {
@@ -312,57 +265,34 @@ func (c *Controller) VerifyAppDomain(domainID string, project *models.AppProject
 		return nil, errors.New("domain does not belong to this project")
 	}
 
-	// If the domain is already mid-deploy, don't re-trigger Coolify — just
-	// poll the existing deployment and report its current state back.
-	if domain.Status == "deploying" && domain.DeploymentUUID != "" && c.CoolifyService != nil {
-		c.refreshDeployingDomain(domain)
-		msg := "DNS verified — waiting for Coolify to finish deploying."
-		if domain.Status == "active" {
-			msg = "Deployment finished — your custom domain is live."
-		} else if domain.Status == "failed" {
-			msg = "Coolify build failed — try redeploying or contact support."
-		}
-		return buildDomainResponse(domain, msg), nil
-	}
-
 	status, msg := verifyDomainDNS(domain.Domain)
-	if status != "active" {
-		domain.Status = status
-	} else {
-		domain.Status = "active"
-	}
+	domain.Status = status
 
-	// If DNS is verified and Coolify project exists, sync all domains and
-	// kick off a redeploy. The domain stays in "deploying" state until the
-	// Coolify build finishes so the frontend doesn't expose the URL early.
-	var redeployTriggered bool
-	if status == "active" && c.CoolifyService != nil {
-		coolifyProject, cpErr := c.DB.GetRuntimeAppByAppProjectID(project.ID.String())
-		if cpErr == nil && coolifyProject != nil {
-			// Pass domain.Domain as extraDomain so it's included even when its
-			// persisted status is still "pending" (first-time verification).
-			domains := c.buildCoolifyDomainList(coolifyProject, project.ID.String(), domain.Domain)
-			if err := c.CoolifyService.UpdateDomains(coolifyProject.CoolifyAppUUID, domains); err != nil {
-				slog.Warn("Failed to sync verified domain to Coolify", "domain", domain.Domain, "error", err)
-			} else if deploymentUUID, err := c.CoolifyService.DeployApp(coolifyProject.CoolifyAppUUID); err != nil {
-				slog.Warn("Failed to redeploy Coolify app after domain verify", "domain", domain.Domain, "error", err)
+	if status == "active" {
+		runtimeApp, raErr := c.DB.GetRuntimeAppByAppProjectID(project.ID.String())
+		if raErr != nil || runtimeApp == nil || runtimeApp.FlyAppName == "" {
+			// DNS resolves but the app isn't deployed yet — keep status "active"
+			// so the UI shows "verified" but warn that the upstream isn't ready.
+			msg = "DNS verified — deploy the app first so the custom domain has somewhere to route to."
+		} else if c.CaddyAdmin != nil {
+			if err := c.CaddyAdmin.AddCustomDomainRoute(domain.Domain, runtimeApp.FlyAppName); err != nil {
+				slog.Error("caddy_route_add_failed", "domain", domain.Domain, "fly_app", runtimeApp.FlyAppName, "err", err)
+				msg = "DNS verified, but failed to wire up the proxy. Try again in a moment."
+				domain.Status = "pending" // let the user retry
 			} else {
-				redeployTriggered = true
-				domain.Status = "deploying"
-				domain.DeploymentUUID = deploymentUUID
-				msg = "DNS verified — waiting for Coolify to finish deploying."
+				msg = "DNS verified — your custom domain is live."
 			}
 		}
 	}
 
-	// WEM-268: Check UpdateAppDomain error
+	// Clear any legacy Coolify deployment UUID still on the row so the UI
+	// doesn't show stale "deploying" state for migrated domains.
+	domain.DeploymentUUID = ""
+
 	if _, err := c.DB.UpdateAppDomain(domain); err != nil {
 		return nil, fmt.Errorf("failed to update domain status: %v", err)
 	}
-
-	resp := buildDomainResponse(domain, msg)
-	resp.RedeployTriggered = redeployTriggered
-	return resp, nil
+	return buildDomainResponse(domain, msg), nil
 }
 
 // buildCoolifyDomainList builds the complete list of domains for a Coolify app.
