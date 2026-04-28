@@ -2,6 +2,7 @@ package fly
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -9,10 +10,11 @@ import (
 
 // BuildAndPush submits the source directory to Fly's managed builder, waits
 // for the image to be built and pushed to registry.fly.io, and returns the
-// resulting image reference.
+// resulting image reference (the actual tag flyctl chose; we don't try to
+// dictate it because `--image-label` historically produces tag mismatches).
 //
-// imageLabel is appended as the image tag — pass deployment.ID so the image
-// can be tied back to the originating deploy.
+// imageLabel is included in the build log for traceability — it's no longer
+// passed to flyctl.
 //
 // flyctl must be on PATH. The worker container ships it.
 //
@@ -38,24 +40,26 @@ primary_region = %q
 		"--remote-only",
 		"--build-only",
 		"--push",
-		"--image-label", imageLabel,
 	)
 	cmd.Dir = sourceDir
 	cmd.Env = []string{
-		"HOME=" + os.Getenv("HOME"),        // flyctl reads ~/.fly config
-		"PATH=" + os.Getenv("PATH"),        // flyctl needs to find docker / git
+		"HOME=" + os.Getenv("HOME"),
+		"PATH=" + os.Getenv("PATH"),
 		"FLY_API_TOKEN=" + s.APIToken,
 		"FLY_NO_UPDATE_CHECK=1",
 	}
 	out, err := cmd.CombinedOutput()
 	buildLog = string(out)
 	if err != nil {
+		slog.Warn("fly_build_failed", "app", appName, "label", imageLabel, "log_tail", truncate(buildLog, 2000))
 		return "", buildLog, fmt.Errorf("flyctl: %w (output: %s)", err, truncate(buildLog, 2000))
 	}
 	imageRef, err = parseImageRef(buildLog)
 	if err != nil {
+		slog.Error("fly_build_no_image_ref", "app", appName, "label", imageLabel, "log_tail", truncate(buildLog, 2000))
 		return "", buildLog, err
 	}
+	slog.Info("fly_build_succeeded", "app", appName, "label", imageLabel, "image_ref", imageRef)
 	return imageRef, buildLog, nil
 }
 
