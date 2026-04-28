@@ -1598,6 +1598,11 @@ func main() {
 			r.Get("/upstream", httpViews.HandleEdgeUpstream)
 		})
 
+		r.Route("/internal/health", func(r chi.Router) {
+			r.Use(appMiddleware.InternalOnly(edgeToken))
+			r.Get("/deploy-pipeline", httpViews.HandleDeployPipelineHealth)
+		})
+
 		r.Get("/health", httpViews.Health)
 		r.Get("/sdk/wemob-bridge.js", httpViews.ServeBridgeSDK)
 	})
