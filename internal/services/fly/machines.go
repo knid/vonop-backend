@@ -150,32 +150,28 @@ func (s *Service) DeployMachines(appName string, spec MachineSpec) error {
 		},
 	}
 
-	// List existing machines so we can replace or update them.
+	// Strategy: destroy all existing machines, then create a fresh one.
+	//
+	// Why not update in place? Fly binds secrets to a machine at creation
+	// time via an internal secret-version. POST machine-update changes
+	// config (image, etc.) but the machine stays bound to its original
+	// secret version, so newly-staged secrets sit "Staged" forever. None
+	// of /restart, stop+start, or ?deploy=true releases them. The only
+	// mechanism that works (and what `flyctl secrets deploy` does
+	// internally) is recreating the machine so it binds to the current
+	// secret version on boot.
+	//
+	// We re-stage all auto-injected env vars in SyncSecrets on every
+	// deploy, so destroying-and-recreating here is what makes user-facing
+	// "redeploy" actually pick up changed secrets. Brief downtime during
+	// the swap is acceptable: these apps scale to zero (they're often
+	// suspended at deploy time anyway) and rolling restart for a single-
+	// machine app would need temporary 2x capacity for a marginal benefit.
 	var existing []machineSummary
 	if err := s.doRequest("GET", "/v1/apps/"+appName+"/machines", nil, &existing); err != nil {
 		return err
 	}
-
-	// Strategy: if there are existing machines, update the first one and destroy
-	// the rest. If none, create one. The create/update calls are wrapped with
-	// retryUntilManifestVisible because Fly's Machines API has a separate
-	// registry index that lags 5–10s behind Depot's push — the first call
-	// often 400s with MANIFEST_UNKNOWN even though the manifest exists.
-	if len(existing) == 0 {
-		req := machineCreateRequest{Region: spec.Region, Config: cfg}
-		return retryUntilManifestVisible(appName, spec.Image, func() error {
-			return s.doRequest("POST", "/v1/apps/"+appName+"/machines", req, nil)
-		})
-	}
-
-	keep := existing[0]
-	updateReq := map[string]any{"region": spec.Region, "config": cfg}
-	if err := retryUntilManifestVisible(appName, spec.Image, func() error {
-		return s.doRequest("POST", "/v1/apps/"+appName+"/machines/"+keep.ID, updateReq, nil)
-	}); err != nil {
-		return err
-	}
-	for _, m := range existing[1:] {
+	for _, m := range existing {
 		err := s.doRequest("DELETE", "/v1/apps/"+appName+"/machines/"+m.ID+"?force=true", nil, nil)
 		if err == nil {
 			continue
@@ -183,10 +179,15 @@ func (s *Service) DeployMachines(appName string, spec MachineSpec) error {
 		if apiErr, ok := err.(*APIError); ok && apiErr.Status == http.StatusNotFound {
 			continue // already gone
 		}
-		slog.Warn("fly: failed to destroy orphan machine", "app", appName, "machine", m.ID, "error", err)
-		// Continue: the updated primary is serving traffic, orphans don't get traffic.
+		return fmt.Errorf("destroy machine %s: %w", m.ID, err)
 	}
-	return nil
+
+	// retryUntilManifestVisible handles Fly's 5–10s registry index lag
+	// behind Depot's push — the first POST often 400s with MANIFEST_UNKNOWN.
+	req := machineCreateRequest{Region: spec.Region, Config: cfg}
+	return retryUntilManifestVisible(appName, spec.Image, func() error {
+		return s.doRequest("POST", "/v1/apps/"+appName+"/machines", req, nil)
+	})
 }
 
 // WaitForHealthy polls until at least one Machine for the app reports state
