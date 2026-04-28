@@ -31,3 +31,7 @@ migrate-to-fly:
 migrate-to-fly-run: migrate-to-fly
 	./bin/migrate-to-fly
 .PHONY: migrate-to-fly migrate-to-fly-run
+
+loadtest-publish:
+	go build -o bin/loadtest-publish cmd/loadtest-publish/main.go
+.PHONY: loadtest-publish
