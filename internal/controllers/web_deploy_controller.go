@@ -236,6 +236,28 @@ func (c *Controller) HandleWebDeployTask(ctx context.Context, t *asynq.Task) err
 	if err := c.MarkDeploymentDeploying(p.DeploymentID); err != nil {
 		slog.Warn("mark deploying", "err", err)
 	}
+
+	// 8. Wait for the machine to report healthy. Fly doesn't publish
+	// machine-state webhooks to own-org apps, so we poll inline here.
+	// 5min covers a cold-start build + machine launch comfortably.
+	if err := c.FlyService.WaitForHealthy(flyAppName, 5*time.Minute); err != nil {
+		return c.maybeRetry(p.DeploymentID, "wait_healthy", err)
+	}
+
+	// 9. Flip to 'deployed' and fire success events.
+	deployedURL := "https://" + runtimeApp.CustomDomain
+	if err := c.MarkDeploymentSucceeded(p.DeploymentID, deployedURL); err != nil {
+		slog.Warn("mark succeeded", "err", err)
+	}
+	go c.CRMService.SendEvent(user, constants.BREVO_EVENT_WEB_DEPLOYMENT_SUCCEEDED, map[string]any{
+		"app_id":       project.ID.String(),
+		"version":      deployment.Version,
+		"deployed_url": deployedURL,
+	})
+	go c.TrackUserEvent(user, "app_deployed_web", posthog.NewProperties().
+		Set("app_id", project.ID.String()).
+		Set("deploy_version", deployment.Version))
+	slog.Info("deploy_succeeded", "deployment_id", p.DeploymentID, "fly_app", flyAppName)
 	return nil
 }
 
