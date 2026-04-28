@@ -26,6 +26,7 @@ import (
 	"github.com/knid/wemob/internal/services/coolify"
 	"github.com/knid/wemob/internal/services/fly"
 	"github.com/knid/wemob/internal/services/gitea"
+	"github.com/knid/wemob/internal/services/giteabackup"
 	"github.com/knid/wemob/internal/services/gitrepo"
 	"github.com/knid/wemob/internal/services/mcpclient"
 	"github.com/knid/wemob/internal/services/neon"
@@ -188,6 +189,16 @@ func BootstrapController() (*controllers.Controller, asynq.RedisClientOpt) {
 		sm.GetSecret("GITEA_ORG"),
 		sm.GetSecret("GITEA_SSH_PORT"),
 	)
+
+	// Async backup of every project commit to Gitea. Decoupled from the
+	// deploy path: Fly's builder reads the local working tree directly, so
+	// Gitea is purely a durability mirror in case the API container's volume
+	// is lost. The hook is fire-and-forget; commits never block on it.
+	if giteaService != nil && sm.GetSecret("GITEA_URL") != "" {
+		backup := giteabackup.New(giteaService, gitRepoService)
+		gitRepoService.SetCommitHook(backup.OnCommit)
+		slog.Info("Gitea per-commit backup enabled")
+	}
 
 	// Neon service (optional — only enabled when API key is set)
 	var neonService *neon.Service

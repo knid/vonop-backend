@@ -17,13 +17,25 @@ const (
 	metaDir       = "_wemob"
 )
 
+// CommitHook fires after a successful commit. It runs in a separate goroutine
+// after the per-project lock is released, so it must not assume the working
+// tree is unchanged. Used for async backup; errors are the hook's problem.
+type CommitHook func(projectID string)
+
 type Service struct {
 	BasePath string
-	locks    sync.Map // map[projectID]*sync.Mutex
+	locks    sync.Map   // map[projectID]*sync.Mutex
+	onCommit CommitHook // optional, may be nil
 }
 
 func NewService(basePath string) *Service {
 	return &Service{BasePath: basePath}
+}
+
+// SetCommitHook registers a fire-and-forget callback that runs after every
+// successful commit. Pass nil to disable. Setting twice replaces the prior hook.
+func (s *Service) SetCommitHook(hook CommitHook) {
+	s.onCommit = hook
 }
 
 // lock acquires a per-project mutex and returns an unlock function.

@@ -140,11 +140,17 @@ func (r *Repo) commit(message string) (string, error) {
 }
 
 // Commit stages all changes and creates a commit. Returns the commit hash.
-// Acquires the per-project lock.
+// Acquires the per-project lock. Fires the service's CommitHook in a goroutine
+// after the lock is released and only if commit succeeded with a real hash
+// (not a no-op when the working tree is clean).
 func (r *Repo) Commit(message string) (string, error) {
 	unlock := r.service.lock(r.ProjectID)
-	defer unlock()
-	return r.commit(message)
+	hash, err := r.commit(message)
+	unlock()
+	if err == nil && hash != "" && r.service.onCommit != nil {
+		go r.service.onCommit(r.ProjectID)
+	}
+	return hash, err
 }
 
 // revert is the internal, lock-free version. Caller must hold the project lock.
@@ -169,14 +175,20 @@ func (r *Repo) Revert(commitHash string) error {
 }
 
 // RevertAndCommit atomically reverts to a commit and commits the result.
-// Uses a single lock acquisition to avoid deadlock.
+// Uses a single lock acquisition to avoid deadlock. Fires the CommitHook
+// asynchronously after the lock is released, like Commit().
 func (r *Repo) RevertAndCommit(targetHash, commitMessage string) (string, error) {
 	unlock := r.service.lock(r.ProjectID)
-	defer unlock()
 	if err := r.revert(targetHash); err != nil {
+		unlock()
 		return "", err
 	}
-	return r.commit(commitMessage)
+	hash, err := r.commit(commitMessage)
+	unlock()
+	if err == nil && hash != "" && r.service.onCommit != nil {
+		go r.service.onCommit(r.ProjectID)
+	}
+	return hash, err
 }
 
 // WithLock acquires the project lock and calls fn. Use for multi-step

@@ -103,6 +103,29 @@ func (s *Service) CreateRepo(name string) (string, error) {
 	return s.AuthenticatedCloneURL(name), nil
 }
 
+// EnsureRepo returns the authenticated clone URL for a repo, creating it if
+// it doesn't already exist. Idempotent — safe to call on every commit.
+func (s *Service) EnsureRepo(name string) (string, error) {
+	// HEAD /repos/<org>/<name> — 200 if exists, 404 otherwise.
+	req, err := http.NewRequest("HEAD", fmt.Sprintf("%s/api/v1/repos/%s/%s", s.BaseURL, s.Org, name), nil)
+	if err != nil {
+		return "", fmt.Errorf("gitea: new request: %w", err)
+	}
+	req.Header.Set("Authorization", "token "+s.Token)
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("gitea: head: %w", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode == http.StatusOK {
+		return s.AuthenticatedCloneURL(name), nil
+	}
+	if resp.StatusCode != http.StatusNotFound {
+		return "", fmt.Errorf("gitea: unexpected status checking repo: %d", resp.StatusCode)
+	}
+	return s.CreateRepo(name)
+}
+
 // DeleteRepo deletes a repository.
 func (s *Service) DeleteRepo(name string) error {
 	_, err := s.doRequest("DELETE", fmt.Sprintf("/repos/%s/%s", s.Org, name), nil)
