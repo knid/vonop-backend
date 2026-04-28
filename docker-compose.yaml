@@ -13,8 +13,13 @@ services:
       retries: 5
     env_file:
       - ./.env
+    environment:
+      - CADDY_ADMIN_URL=http://caddy:2019
+      - CADDY_CUSTOM_DOMAINS_DIR=/data/custom-domains
     volumes:
       - repo-data:/data/repos
+      - custom-domains:/data/custom-domains
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
 
   caddy:
     build:
@@ -29,13 +34,52 @@ services:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
+      - custom-domains:/etc/caddy/custom-domains:ro
     environment:
       - CF_API_TOKEN=${CF_API_TOKEN}
     depends_on:
       api:
         condition: service_healthy
 
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: wemob-backend-api:latest
+    entrypoint: ["/app/worker"]
+    restart: unless-stopped
+    env_file:
+      - ./.env
+    environment:
+      - CADDY_ADMIN_URL=http://caddy:2019
+      - CADDY_CUSTOM_DOMAINS_DIR=/data/custom-domains
+      - DB_MAX_OPEN_CONNS=10
+    volumes:
+      - repo-data:/data/repos
+      - custom-domains:/data/custom-domains
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+    depends_on:
+      api:
+        condition: service_healthy
+
+  asynqmon:
+    image: hibiken/asynqmon:latest
+    container_name: asynqmon
+    restart: unless-stopped
+    expose:
+      - "8080"
+    # Flag form: -redis-tls expects the hostname for SNI; -redis-insecure-tls
+    # skips cert verification (the minimal image lacks ca-certificates so it
+    # can't validate DO's managed Valkey cert chain). REDIS_HOST in .env is
+    # the hostname without the port; REDIS_ADDR is host:port.
+    command:
+      - --redis-addr=${REDIS_ADDR}
+      - --redis-password=${REDIS_PASSWORD}
+      - --redis-tls=${REDIS_HOST}
+      - --redis-insecure-tls
+
 volumes:
   caddy_data:
   caddy_config:
   repo-data:
+  custom-domains:

@@ -2,8 +2,10 @@ package database
 
 import (
 	"context"
+	"time"
 
 	"github.com/knid/wemob/internal/models"
+	"github.com/uptrace/bun"
 )
 
 func (db *Database) GetAppDeploymentsByProjectID(projectID string) ([]models.AppDeployment, error) {
@@ -32,7 +34,9 @@ func (db *Database) CreateAppDeployment(d *models.AppDeployment) (*models.AppDep
 func (db *Database) GetBuildingAppDeployment(projectID string) (*models.AppDeployment, error) {
 	var deployment models.AppDeployment
 	err := db.DB.NewSelect().Model(&deployment).
-		Where("app_project_id = ? AND platform = ? AND status IN (?)", projectID, "web", "building").
+		Where("app_project_id = ?", projectID).
+		Where("platform = ?", "web").
+		Where("status IN (?)", bun.In([]string{"queued", "building", "deploying"})).
 		Order("created_at DESC").Limit(1).Scan(context.Background())
 	return &deployment, err
 }
@@ -40,6 +44,16 @@ func (db *Database) GetBuildingAppDeployment(projectID string) (*models.AppDeplo
 func (db *Database) UpdateAppDeployment(d *models.AppDeployment) (*models.AppDeployment, error) {
 	_, err := db.DB.NewUpdate().Model(d).Where("id = ?", d.ID).Exec(context.Background())
 	return d, err
+}
+
+// CountAppDeploymentsByStatusSince counts deployments matching `status` whose
+// updated_at is more recent than `since`. Used by the health endpoint to
+// report deploy success/failure rates over a recent window.
+func (db *Database) CountAppDeploymentsByStatusSince(ctx context.Context, status string, since time.Time) (int, error) {
+	return db.DB.NewSelect().Model((*models.AppDeployment)(nil)).
+		Where("status = ?", status).
+		Where("updated_at > ?", since).
+		Count(ctx)
 }
 
 // IsAppAlreadyDeployed returns true if the given app project has any deployment with status "deployed".

@@ -3,8 +3,7 @@ package main
 import (
 	"context"
 	"crypto/tls"
-	"database/sql"
-	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -17,48 +16,22 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/cors"
 	"github.com/go-chi/httplog/v3"
-	"github.com/hibiken/asynq"
+	"github.com/knid/wemob/internal/bootstrap"
 	"github.com/knid/wemob/internal/constants"
-	"github.com/knid/wemob/internal/controllers"
 	"github.com/knid/wemob/internal/database"
 	appMiddleware "github.com/knid/wemob/internal/middleware"
 	"github.com/knid/wemob/internal/models"
-	"github.com/knid/wemob/internal/services"
-	"github.com/knid/wemob/internal/services/codemagic"
-	"github.com/knid/wemob/internal/services/coolify"
 	crmServices "github.com/knid/wemob/internal/services/crm"
-	e2bService "github.com/knid/wemob/internal/services/e2b"
-	emailServices "github.com/knid/wemob/internal/services/email"
-	"github.com/knid/wemob/internal/services/gitea"
-	"github.com/knid/wemob/internal/services/gitrepo"
-	"github.com/knid/wemob/internal/services/mcpclient"
-	"github.com/knid/wemob/internal/services/neon"
 	"github.com/knid/wemob/internal/services/pendingnudge"
-	"github.com/knid/wemob/internal/services/remoteconfig"
 	"github.com/knid/wemob/internal/services/secret"
-	"github.com/knid/wemob/internal/services/storage"
 	"github.com/knid/wemob/internal/services/storepoll"
 	"github.com/knid/wemob/internal/utils"
 	"github.com/knid/wemob/internal/views"
 	"github.com/markbates/goth"
 	"github.com/markbates/goth/providers/google"
 	"github.com/redis/go-redis/v9"
-
-	_ "github.com/lib/pq"
-
-	"github.com/uptrace/bun"
-	"github.com/uptrace/bun/dialect/pgdialect"
-	"github.com/uptrace/bun/driver/pgdriver"
-
-	"github.com/uptrace/bun/extra/bundebug"
-
 	"github.com/stripe/stripe-go/v82"
-
-	"log/slog"
-
-	infisical "github.com/infisical/go-sdk"
-	"github.com/posthog/posthog-go"
-	slogbetterstack "github.com/samber/slog-betterstack"
+	"github.com/uptrace/bun"
 )
 
 func createSchema(db *bun.DB) error {
@@ -105,7 +78,7 @@ func createSchema(db *bun.DB) error {
 		(*models.AppChatMessage)(nil),
 		(*models.AppAgentRun)(nil),
 		// AppGeneratedFile and AppSnapshot removed — files now in git repos
-		(*models.CoolifyProject)(nil),
+		(*models.RuntimeApp)(nil),
 		(*models.AppDomain)(nil),
 		// Custom environment variables
 		(*models.AppEnvVar)(nil),
@@ -269,6 +242,17 @@ func createSchema(db *bun.DB) error {
 		// USD and almost never land on a whole credit, so the fractional
 		// remainder is tracked here until it crosses an integer.
 		`ALTER TABLE ai_credits_balances ADD COLUMN IF NOT EXISTS pending_gateway double precision NOT NULL DEFAULT 0`,
+		// Fly migration: add Fly fields to runtime_apps (renamed from coolify_projects).
+		// The RENAME itself lives in renameStatements below so it runs unconditionally.
+		`ALTER TABLE runtime_apps ADD COLUMN IF NOT EXISTS fly_app_name text NOT NULL DEFAULT ''`,
+		`ALTER TABLE runtime_apps ADD COLUMN IF NOT EXISTS current_image_ref text NOT NULL DEFAULT ''`,
+		`ALTER TABLE runtime_apps ADD COLUMN IF NOT EXISTS last_deployed_at timestamptz`,
+		// DNS verification fields on app_domains — see Task 1.2 of the Fly migration plan.
+		// dns_check_status: empty=not checked, "pending"=waiting for DNS, "verified"=ok, "failed"=gave up.
+		// dns_instructions: JSON blob surfaced in the UI so users know what records to add.
+		`ALTER TABLE app_domains ADD COLUMN IF NOT EXISTS dns_check_status text NOT NULL DEFAULT ''`,
+		`ALTER TABLE app_domains ADD COLUMN IF NOT EXISTS dns_instructions jsonb NOT NULL DEFAULT '{}'::jsonb`,
+		`CREATE INDEX IF NOT EXISTS idx_app_domains_dns_check_status ON app_domains(dns_check_status) WHERE dns_check_status = 'pending'`,
 	}
 
 	// Deduplicate before creating unique indexes (keep the latest row per group)
@@ -307,7 +291,7 @@ func createSchema(db *bun.DB) error {
 	// Table renames go in renameStatements below, not here — they run unconditionally.
 	var migrationsDone bool
 	row := db.QueryRowContext(context.Background(),
-		"SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='app_build_tasks' AND column_name='error_message')")
+		"SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='app_domains' AND column_name='dns_check_status')")
 	if err := row.Scan(&migrationsDone); err != nil {
 		migrationsDone = false
 	}
@@ -363,6 +347,19 @@ func createSchema(db *bun.DB) error {
 	renameStatements := []string{
 		`ALTER TABLE IF EXISTS app_store_credentials RENAME TO apple_connections`,
 		`ALTER TABLE IF EXISTS google_play_credentials RENAME TO google_play_connections`,
+		// Coolify→Fly: rename coolify_projects → runtime_apps. Guarded with a
+		// DO block so it's idempotent on environments where runtime_apps was
+		// already created from scratch by the new schema while coolify_projects
+		// still existed. The bare ALTER ... IF EXISTS form would error with
+		// "relation runtime_apps already exists" on every startup. On affected
+		// environments, data was copied manually with
+		// INSERT INTO runtime_apps SELECT FROM coolify_projects.
+		`DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='coolify_projects')
+  AND NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='runtime_apps') THEN
+    ALTER TABLE coolify_projects RENAME TO runtime_apps;
+  END IF;
+END $$`,
 		// Deployment FK columns — guard with DO block to stay idempotent
 		`DO $$ BEGIN
   IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='deployments' AND column_name='app_store_credentials_id') THEN
@@ -380,6 +377,8 @@ END $$`,
 		// simultaneously.
 		`ALTER TABLE IF EXISTS apple_connections ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
 		`ALTER TABLE IF EXISTS google_play_connections ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
+		`ALTER TABLE IF EXISTS runtime_apps ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
+		`ALTER TABLE IF EXISTS runtime_apps ALTER COLUMN coolify_app_uuid DROP NOT NULL`,
 		`ALTER TABLE IF EXISTS deployments ADD COLUMN IF NOT EXISTS release_notes text`,
 		`ALTER TABLE IF EXISTS deployments ADD COLUMN IF NOT EXISTS rollout_track text`,
 	}
@@ -462,7 +461,7 @@ END $$`,
 		`CREATE INDEX IF NOT EXISTS idx_ai_credit_transactions_user_created ON ai_credit_transactions(user_id, created_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_organization_members_user_id ON organization_members(user_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_organization_members_organization_id ON organization_members(organization_id)`,
-		`CREATE INDEX IF NOT EXISTS idx_coolify_projects_app_project_id ON coolify_projects(app_project_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_runtime_apps_app_project_id ON runtime_apps(app_project_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_webhook_endpoints_user_id ON webhook_endpoints(user_id)`,
 		// Agent rewrite: chat messages + agent runs queried by project, runs also by status.
 		// Kept in perfIndexes (not indexStatements) so already-migrated prod DBs pick
@@ -732,95 +731,25 @@ func isSensitiveLogPath(path string) bool {
 }
 
 func main() {
-	infisicalClient := infisical.NewInfisicalClient(context.Background(), infisical.Config{
-		SiteUrl: "https://eu.infisical.com",
-	})
+	controller, _ := bootstrap.BootstrapController()
 
-	infisicalClientID := os.Getenv("INFISICAL_CLIENT_ID")
-	infisicalClientSecret := os.Getenv("INFISICAL_CLIENT_SECRET")
+	// Schema migrations run in main only — workers and migration scripts share
+	// the same BootstrapController but each decides independently whether to run
+	// createSchema / seedPlans / backfills.
+	bundb := bootstrap.BunDB(controller)
+	db := controller.DB
 
-	if infisicalClientID == "" || infisicalClientSecret == "" {
-		slog.Error("Infisical client ID or secret is not set in environment variables")
-		return
-	}
-
-	_, err := infisicalClient.Auth().UniversalAuthLogin(infisicalClientID, infisicalClientSecret)
-	if err != nil {
-		slog.Error("Failed to authenticate with Infisical:", slog.String("error", err.Error()))
-		return
-	}
-
-	var sm secret.SecretManager
-	sm = secret.NewInfisicalSecretManager(
-		infisicalClient.(*infisical.InfisicalClient),
-		os.Getenv("INFISICAL_PROJECT_ID"),
-		os.Getenv("ENVIRONMENT"),
-	)
-
-	betterstackHandler := slogbetterstack.Option{
-		Token:    sm.GetSecret("BETTERSTACK_TOKEN"),
-		Endpoint: sm.GetSecret("BETTERSTACK_ENDPOINT"),
-	}.NewBetterstackHandler()
-
-	var logger *slog.Logger
-	if sm.GetEnv() == "dev" {
-		// In dev, log to both stdout and BetterStack
-		stdoutHandler := slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug})
-		logger = slog.New(utils.NewFanoutHandler(stdoutHandler, betterstackHandler))
-	} else {
-		logger = slog.New(betterstackHandler)
-	}
-
-	slog.SetDefault(logger)
-
-	dbHost := sm.GetSecret("DB_HOST")
-	dbPort := sm.GetSecret("DB_PORT")
-	dbName := sm.GetSecret("DB_NAME")
-	dbUser := sm.GetSecret("DB_USER")
-	dbPass := sm.GetSecret("DB_PASSWORD")
-	dbSSL := sm.GetSecret("DB_SSLMODE")
-
-	dsn := fmt.Sprintf(
-		"postgres://%s:%s@%s:%s/%s?sslmode=%s",
-		dbUser, dbPass, dbHost, dbPort, dbName, dbSSL,
-	)
-
-	slog.Info("DB connection config", "host", dbHost, "port", dbPort, "db", dbName, "sslmode", dbSSL)
-
-	sqldb := sql.OpenDB(pgdriver.NewConnector(
-		pgdriver.WithDSN(dsn),
-		pgdriver.WithTLSConfig(&tls.Config{InsecureSkipVerify: true}),
-		pgdriver.WithDialTimeout(5*time.Second),
-		pgdriver.WithReadTimeout(30*time.Second),
-		pgdriver.WithWriteTimeout(10*time.Second),
-	))
-	sqldb.SetMaxOpenConns(25)
-	sqldb.SetMaxIdleConns(10)
-	sqldb.SetConnMaxLifetime(10 * time.Minute)
-	sqldb.SetConnMaxIdleTime(2 * time.Minute)
-	bundb := bun.NewDB(sqldb, pgdialect.New())
-
-	if _, err := bundb.Exec("CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\";"); err != nil {
-		slog.Error("Failed to create uuid-ossp extension", "error", err)
+	// uuid-ossp is only needed by the API server (schema owner). Worker and
+	// migration binaries don't run createSchema, so the extension call lives
+	// here rather than in bootstrap.go.
+	if _, err := bundb.ExecContext(context.Background(), `CREATE EXTENSION IF NOT EXISTS "uuid-ossp"`); err != nil {
+		slog.Error("create extension uuid-ossp failed", "err", err)
 		os.Exit(1)
 	}
-
-	bundb.AddQueryHook(bundebug.NewQueryHook(
-		bundebug.WithVerbose(os.Getenv("BUNDEBUG") == "2"),
-		bundebug.FromEnv("BUNDEBUG"),
-	))
-
-	bundb.AddQueryHook(utils.NewQueryHook(utils.QueryHookOptions{
-		Logger:       logger,
-		SlowDuration: 200 * time.Millisecond, // Omit to log all operations as debug
-	}))
-
 	if err := createSchema(bundb); err != nil {
 		slog.Error("Failed to create schema", "error", err)
 		os.Exit(1)
 	}
-
-	db := database.NewDatabase(bundb)
 
 	if n, err := db.MarkOrphanedRunsFailed(); err != nil {
 		slog.Warn("failed to mark orphaned agent runs", "error", err)
@@ -865,138 +794,26 @@ func main() {
 		}
 	}
 
+	sm := controller.SecretManager
 	seedPlans(db, sm)
 	migrateInactiveUsersToFree(bundb)
 
 	go utils.CheckSessionStatusJob(db)
 	go utils.CheckUsageAlertsJob(db, crmServices.NewBrevoCRMService(sm.GetSecret("BREVO_API_KEY")))
-	coolifyService := coolify.NewService(
-		sm.GetSecret("COOLIFY_API_URL"),
-		sm.GetSecret("COOLIFY_API_TOKEN"),
-		sm.GetSecret("COOLIFY_SERVER_UUID"),
-		sm.GetSecret("COOLIFY_PROJECT_UUID"),
-		sm.GetSecret("COOLIFY_ENVIRONMENT_NAME"),
-		sm.GetSecret("COOLIFY_PRIVATE_KEY_UUID"),
-		sm.GetSecret("COOLIFY_WEBHOOK_SECRET"),
-	)
+
 	// Register Coolify webhook for deployment status updates (non-blocking)
 	go func() {
-		webhookURL := constants.WEMOB_API_BASE_URL + "/webhooks/coolify?secret=" + coolifyService.WebhookSecret
-		if err := coolifyService.RegisterWebhook(webhookURL); err != nil {
+		webhookURL := constants.WEMOB_API_BASE_URL + "/webhooks/coolify?secret=" + controller.CoolifyService.WebhookSecret
+		if err := controller.CoolifyService.RegisterWebhook(webhookURL); err != nil {
 			slog.Warn("Failed to register Coolify webhook — falling back to polling", "error", err)
 		}
 	}()
-	giteaService := gitea.NewService(
-		sm.GetSecret("GITEA_URL"),
-		sm.GetSecret("GITEA_API_TOKEN"),
-		sm.GetSecret("GITEA_USERNAME"),
-		sm.GetSecret("GITEA_ORG"),
-		sm.GetSecret("GITEA_SSH_PORT"),
-	)
 
 	// GitHub OAuth secrets (required for GitHub export feature)
 	// GITHUB_CLIENT_ID — OAuth App client ID
 	// GITHUB_CLIENT_SECRET — OAuth App client secret
 	// GITHUB_REDIRECT_URI — OAuth callback URL (e.g. https://api.wemob.io/v2/auth/github/callback)
 	// GITHUB_TOKEN_ENCRYPTION_KEY — 64-char hex string for AES-256-GCM token encryption
-
-	// Neon service (optional — only enabled when API key is set)
-	var neonService *neon.Service
-	if neonKey := sm.GetSecret("NEON_API_KEY"); neonKey != "" {
-		neonOrgID := sm.GetSecret("NEON_ORG_ID")
-		neonService = neon.NewServiceWithOrg(neonKey, neonOrgID)
-		slog.Info("Neon database service enabled", "org_scoped", neonOrgID != "")
-	}
-
-	// PostHog client (optional — only enabled when API key is set)
-	var posthogClient posthog.Client
-	if phKey := sm.GetSecret("POSTHOG_API_KEY"); phKey != "" {
-		phClient, phErr := posthog.NewWithConfig(phKey, posthog.Config{
-			Endpoint:       "https://eu.i.posthog.com",
-			PersonalApiKey: sm.GetSecret("POSTHOG_PERSONAL_API_KEY"),
-		})
-		if phErr != nil {
-			slog.Warn("PostHog initialization failed", "error", phErr)
-		} else {
-			posthogClient = phClient
-			slog.Info("PostHog analytics enabled")
-		}
-	}
-
-	remoteConfigService := remoteconfig.New(posthogClient)
-	slog.Info("RemoteConfig service initialized")
-
-	assetsStorage, err := storage.NewS3Storage(sm.GetSecret("AWS_REGION"), sm.GetSecret("AWS_S3_ASSETS_BUCKET_NAME"), sm.GetSecret("AWS_ACCESS_KEY_ID"), sm.GetSecret("AWS_SECRET_ACCESS_KEY"))
-	if err != nil {
-		slog.Error("Failed to initialize assets S3 storage", "error", err)
-		os.Exit(1)
-	}
-	userApiKeysStorage, err := storage.NewS3Storage(sm.GetSecret("AWS_REGION"), sm.GetSecret("AWS_S3_USER_API_KEYS_BUCKET_NAME"), sm.GetSecret("AWS_ACCESS_KEY_ID"), sm.GetSecret("AWS_SECRET_ACCESS_KEY"))
-	if err != nil {
-		slog.Error("Failed to initialize user API keys S3 storage", "error", err)
-		os.Exit(1)
-	}
-
-	// Git repo service for project file storage
-	repoBasePath := "/data/repos"
-	if envPath := os.Getenv("REPO_BASE_PATH"); envPath != "" {
-		repoBasePath = envPath
-	}
-	gitRepoService := gitrepo.NewService(repoBasePath)
-	slog.Info("Git repo service initialized", "base_path", repoBasePath)
-
-	// Codemagic CI/CD for mobile builds (optional — nil if not configured)
-	var codemagicService *codemagic.Service
-	if cmToken := sm.GetSecret("CODEMAGIC_API_TOKEN"); cmToken != "" {
-		codemagicService = codemagic.NewService(cmToken, sm.GetSecret("CODEMAGIC_APP_ID"))
-		slog.Info("Codemagic service initialized")
-	}
-
-	e2b := e2bService.NewService(
-		sm.GetSecret("DASHBOARD_URL"),
-		sm.GetSecret("E2B_PREVIEW_DOMAIN"),
-	)
-
-	controller := controllers.NewController(
-		db,
-		make(chan struct{}, constants.MAX_CONCURRENT_BUILDS),
-		services.NewSlackService(sm.GetSecret("SLACK_API_KEY")),
-		emailServices.NewBrevoEmailService(sm.GetSecret("BREVO_API_KEY")),
-		crmServices.NewBrevoCRMService(sm.GetSecret("BREVO_API_KEY")),
-		asynq.NewClient(asynq.RedisClientOpt{
-			Addr:      sm.GetSecret("REDIS_ADDR"),
-			Username:  sm.GetSecret("REDIS_USERNAME"),
-			Password:  sm.GetSecret("REDIS_PASSWORD"),
-			TLSConfig: &tls.Config{},
-		}),
-		assetsStorage,
-		userApiKeysStorage,
-		sm,
-		coolifyService,
-		giteaService,
-		neonService,
-		posthogClient,
-		gitRepoService,
-		codemagicService,
-		remoteConfigService,
-		e2b,
-	)
-
-	// MCP service (optional — connect in background so it doesn't block server startup)
-	if mcpConfig := sm.GetSecret("MCP_SERVERS_CONFIG"); mcpConfig != "" {
-		go func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-			defer cancel()
-			svc, err := mcpclient.NewService(ctx, mcpConfig)
-			if err != nil {
-				slog.Warn("MCP service initialization had errors", "error", err)
-			}
-			if svc != nil && svc.HasTools() {
-				controller.MCPService.Store(svc)
-				slog.Info("MCP service enabled", "tool_count", len(svc.Tools()))
-			}
-		}()
-	}
 
 	goth.UseProviders(
 		google.New(sm.GetSecret("GOOGLE_CLIENT_ID"), sm.GetSecret("GOOGLE_SECRET_KEY"), "https://api.wemob.io/v1/users/auth/google/callback", "email", "profile"),
@@ -1051,7 +868,7 @@ func main() {
 
 	r.Use(rateLimiter.RateLimit(1200, time.Minute, appMiddleware.IPKey))
 
-	r.Use(httplog.RequestLogger(logger, &httplog.Options{
+	r.Use(httplog.RequestLogger(slog.Default(), &httplog.Options{
 		// Level defines the verbosity of the request logs:
 		// slog.LevelDebug - log all responses (incl. OPTIONS)
 		// slog.LevelInfo  - log responses (excl. OPTIONS)
@@ -1126,6 +943,8 @@ func main() {
 			r.Post("/stripe", httpViews.Controller.HandleWebhook)
 			// Coolify deployment webhook
 			r.Post("/coolify", httpViews.HandleCoolifyWebhook)
+			// Fly machine state webhook (signature verified inside handler)
+			r.Post("/fly", httpViews.HandleFlyWebhook)
 		})
 		r.Route("/v1", func(r chi.Router) {
 			// OAuth begin/callback are pre-auth, so UserKey falls back to IPKey
@@ -1588,7 +1407,8 @@ func main() {
 					// Deploy
 					r.Route("/deploy", func(r chi.Router) {
 						r.Post("/validate", httpViews.ValidateAppFiles)
-						r.Post("/web", httpViews.DeployAppWeb)
+						r.With(rateLimiter.RateLimit(3, time.Minute, appMiddleware.UserKey)).
+							Post("/web", httpViews.DeployAppWeb)
 						r.Delete("/web", httpViews.UndeployAppWeb)
 						r.Post("/mobile", httpViews.DeployAppMobile)
 						r.Delete("/mobile", httpViews.UndeployAppMobile)
@@ -1790,6 +1610,18 @@ func main() {
 			r.Get("/auth/github/status", httpViews.GetGitHubConnectionStatus)
 		})
 
+		edgeToken := sm.GetSecret("EDGE_INTERNAL_TOKEN")
+		r.Route("/internal/edge", func(r chi.Router) {
+			r.Use(appMiddleware.InternalOnly(edgeToken))
+			r.Get("/cert-allowed", httpViews.HandleEdgeCertAllowed)
+			r.Get("/upstream", httpViews.HandleEdgeUpstream)
+		})
+
+		r.Route("/internal/health", func(r chi.Router) {
+			r.Use(appMiddleware.InternalOnly(edgeToken))
+			r.Get("/deploy-pipeline", httpViews.HandleDeployPipelineHealth)
+		})
+
 		r.Get("/health", httpViews.Health)
 		r.Get("/sdk/wemob-bridge.js", httpViews.ServeBridgeSDK)
 	})
@@ -1857,8 +1689,8 @@ func main() {
 		defer cancel()
 
 		// Flush PostHog events
-		if posthogClient != nil {
-			posthogClient.Close()
+		if controller.PostHog != nil {
+			controller.PostHog.Close()
 		}
 
 		// Stop the store-API poller.

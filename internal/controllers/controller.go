@@ -19,9 +19,11 @@ import (
 	"github.com/knid/wemob/internal/utils"
 	"github.com/knid/wemob/internal/services/codemagic"
 	"github.com/knid/wemob/internal/services/coolify"
+	"github.com/knid/wemob/internal/services/fly"
 	"github.com/knid/wemob/internal/services/gitea"
 	"github.com/knid/wemob/internal/services/remoteconfig"
 	e2bService "github.com/knid/wemob/internal/services/e2b"
+	caddyService "github.com/knid/wemob/internal/services/caddy"
 	"github.com/posthog/posthog-go"
 )
 
@@ -32,11 +34,13 @@ type Controller struct {
 	EmailService           emailServices.EmailService
 	CRMService             crmServices.CRMService
 	TaskService            *asynq.Client
+	AsynqInspector         *asynq.Inspector
 	AssetsStorage          *storage.S3Storage
 	UserApiKeysStorage     *storage.S3Storage
 	ConcurrentBuildLimiter chan struct{}
 	CodemagicService       *codemagic.Service
 	CoolifyService         *coolify.Service
+	FlyService             *fly.Service
 	GiteaService           *gitea.Service
 	NeonService            *neon.Service
 	GitRepoService         *gitrepo.Service
@@ -48,19 +52,24 @@ type Controller struct {
 	PendingClarifications  sync.Map       // map[string]chan ClarificationResult for jobs awaiting user input
 	JobEventBuses          sync.Map       // map[string]*EventBus for live SSE fan-out to multiple clients
 	identifiedUsers        sync.Map       // tracks users already identified to PostHog this process
+	EdgeIPs                []string       // known Fly edge IPs for DNS verification
+	CaddyAdmin             *caddyService.Admin
 }
 
 func NewController(db *database.Database, concurrentBuildLimiter chan struct{},
 	slackService *services.SlackService, emailService emailServices.EmailService,
-	crmService crmServices.CRMService, taskService *asynq.Client, assetsStorage *storage.S3Storage,
+	crmService crmServices.CRMService, taskService *asynq.Client, asynqInspector *asynq.Inspector,
+	assetsStorage *storage.S3Storage,
 	userApiKeysStorage *storage.S3Storage, secretManager secret.SecretManager,
-	coolifyService *coolify.Service, giteaService *gitea.Service,
+	coolifyService *coolify.Service, flyService *fly.Service, giteaService *gitea.Service,
 	neonService *neon.Service,
 	posthogClient posthog.Client,
 	gitRepoService *gitrepo.Service,
 	codemagicService *codemagic.Service,
 	remoteConfigService *remoteconfig.Service,
-	e2b *e2bService.Service) *Controller {
+	e2b *e2bService.Service,
+	edgeIPs []string,
+	caddyAdmin *caddyService.Admin) *Controller {
 
 	return &Controller{
 		DB:                     db,
@@ -69,17 +78,21 @@ func NewController(db *database.Database, concurrentBuildLimiter chan struct{},
 		CRMService:             crmService,
 		ConcurrentBuildLimiter: concurrentBuildLimiter,
 		TaskService:            taskService,
+		AsynqInspector:         asynqInspector,
 		AssetsStorage:          assetsStorage,
 		UserApiKeysStorage:     userApiKeysStorage,
 		SecretManager:          secretManager,
 		CodemagicService:       codemagicService,
 		CoolifyService:         coolifyService,
+		FlyService:             flyService,
 		GiteaService:           giteaService,
 		NeonService:            neonService,
 		GitRepoService:         gitRepoService,
 		PostHog:                posthogClient,
 		RemoteConfig:           remoteConfigService,
 		E2BService:             e2b,
+		EdgeIPs:                edgeIPs,
+		CaddyAdmin:             caddyAdmin,
 	}
 }
 

@@ -1,3 +1,16 @@
+{
+    # Admin API reachable on the docker compose network so the api container
+    # can post /load reload requests. Not exposed to the public internet —
+    # docker-compose isolates this to the internal network.
+    admin 0.0.0.0:2019
+
+    # On-demand TLS for custom user domains (file-imported below). Caddy
+    # asks the api backend before issuing each Let's Encrypt cert.
+    on_demand_tls {
+        ask https://api.wemob.io/internal/edge/cert-allowed
+    }
+}
+
 api.wemob.io {
     encode zstd gzip
 
@@ -32,3 +45,39 @@ api.wemob.io {
         header_up Host {http.request.host.labels.3}.e2b.app
     }
 }
+
+# Wemob user apps deployed on Fly Machines.
+# {slug}.wemob.app → wemob-{slug}.fly.dev via Fly's published A records.
+*.wemob.app {
+    tls {
+        dns cloudflare {env.CF_API_TOKEN}
+    }
+
+    reverse_proxy {
+        dynamic a wemob-{http.request.host.labels.2}.fly.dev 443
+        transport http {
+            tls
+            tls_server_name wemob-{http.request.host.labels.2}.fly.dev
+        }
+        header_up Host wemob-{http.request.host.labels.2}.fly.dev
+    }
+
+    log {
+        output file /var/log/caddy/wemob_app_access.log
+        format console
+    }
+}
+
+# Asynqmon dashboard. Auto-issued via HTTP-01 (same zone as api.wemob.io).
+asynqmon.wemob.io {
+    basicauth {
+        # Replace with `caddy hash-password` output before deploying.
+        # Format: `<username> <bcrypt-hash>`
+        ops $2a$14$REPLACE_BCRYPT_HASH_BEFORE_DEPLOY
+    }
+    reverse_proxy asynqmon:8080
+}
+
+# Custom domains: each verified domain is a separate file written by the api
+# backend. Caddy reloads when /load is hit by the backend after a write.
+import /etc/caddy/custom-domains/*.caddy

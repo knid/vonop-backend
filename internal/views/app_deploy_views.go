@@ -80,47 +80,54 @@ func (v *HttpViews) DeployAppWeb(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	deployStart := time.Now()
-	deployment, err := v.Controller.DeployToCoolify(project, user)
+	// Admission control — push back rather than queue forever.
+	// Per-tier queue so free-tier saturation never pushes back on paid users.
+	queueName := "deploy-web-free"
+	// Plan-name-based routing is more robust than threshold-checking limit fields,
+	// which can change as new plans are introduced.
+	isPaid := planName != "" && planName != "free" && planName != "trial"
+	if isPaid {
+		queueName = "deploy-web-pro"
+	}
+	if v.Controller.AsynqInspector != nil {
+		qi, _ := v.Controller.AsynqInspector.GetQueueInfo(queueName)
+		if qi != nil && qi.Pending+qi.Active > 200 {
+			utils.JSONError(w, constants.ErrSystemBusy,
+				"deploy queue is currently saturated, please try again in a minute",
+				http.StatusServiceUnavailable, map[string]any{
+					"queue":       queueName,
+					"queue_depth": qi.Pending,
+				})
+			return
+		}
+	}
+
+	deployment, err := v.Controller.CreateQueuedWebDeployment(project, user)
 	if err != nil {
-		go v.Controller.TrackUserEvent(user, "app_deploy_failed", posthog.NewProperties().
-			Set("app_id", project.ID.String()).
-			Set("platform", "web").
-			Set("error", err.Error()))
-		go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_WEB_DEPLOYMENT_FAILED, map[string]any{
-			"app_id":        project.ID.String(),
-			"project_type":  project.ProjectType,
-			"error_message": err.Error(),
-		})
 		utils.JSONInternalError(w, err)
 		return
 	}
-	deployDuration := time.Since(deployStart).Seconds()
 
-	v.Controller.TrackUserEvent(user, "app_deployed_web", posthog.NewProperties().
+	queue, err := v.Controller.EnqueueWebDeploy(deployment.ID, isPaid)
+	if err != nil {
+		v.Controller.MarkDeploymentFailed(deployment.ID.String(), "enqueue: "+err.Error())
+		utils.JSONInternalError(w, err)
+		return
+	}
+
+	go v.Controller.TrackUserEvent(user, "app_deploy_enqueued", posthog.NewProperties().
 		Set("app_id", project.ID.String()).
-		Set("project_type", project.ProjectType).
-		Set("deploy_duration_seconds", deployDuration).
-		Set("deploy_version", deployment.Version))
+		Set("platform", "web").
+		Set("queue", queue))
 
-	go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_WEB_DEPLOYMENT_SUCCEEDED, map[string]any{
-		"app_id":       project.ID.String(),
-		"project_type": project.ProjectType,
-		"version":      deployment.Version,
-		"deployed_url": deployment.DeployedURL,
-	})
-
-	utils.JSONResponse(w, responses.AppDeploymentResponse{
+	utils.JSONResponseStatus(w, responses.AppDeploymentResponse{
 		ID:           deployment.ID,
 		AppProjectID: deployment.AppProjectID,
 		Platform:     deployment.Platform,
 		Provider:     deployment.Provider,
 		Status:       deployment.Status,
-		DeployedURL:  deployment.DeployedURL,
 		Version:      deployment.Version,
-		CreatedAt:    deployment.CreatedAt,
-		UpdatedAt:    deployment.UpdatedAt,
-	}, http.StatusCreated)
+	}, http.StatusAccepted)
 }
 
 // DELETE /v2/apps/{appId}/deploy/web
