@@ -88,7 +88,8 @@ func migrateOneApp(c *controllers.Controller, ra *models.RuntimeApp) error {
 	if err := c.FlyService.EnsureApp(flyAppName); err != nil {
 		return err
 	}
-	if err := c.FlyService.SyncSecrets(flyAppName, c.CollectAllEnvVars(project)); err != nil {
+	envVars := c.CollectAllEnvVars(project)
+	if err := c.FlyService.SyncSecrets(flyAppName, envVars); err != nil {
 		return err
 	}
 
@@ -97,7 +98,7 @@ func migrateOneApp(c *controllers.Controller, ra *models.RuntimeApp) error {
 		return err
 	}
 
-	imageRef, _, err := c.FlyService.BuildAndPush(flyAppName, repo.Path, "migration")
+	imageRef, _, err := c.FlyService.BuildAndPush(flyAppName, repo.Path, "migration", envVars)
 	if err != nil {
 		return err
 	}

@@ -214,8 +214,12 @@ func (c *Controller) HandleWebDeployTask(ctx context.Context, t *asynq.Task) err
 		return c.maybeRetry(p.DeploymentID, "sync_secrets", err)
 	}
 
-	// 5. Build + push image.
-	imageRef, _, err := c.FlyService.BuildAndPush(flyAppName, sourceDir, p.DeploymentID)
+	// 5. Build + push image. envVars is forwarded as --build-arg so Next.js
+	// inlines NEXT_PUBLIC_* into the bundle at `next build` time (Fly secrets
+	// reach the process at runtime, which is too late for the build). All
+	// vars are passed; Docker silently ignores --build-arg values whose keys
+	// aren't declared as ARG in the Dockerfile, matching Coolify's behavior.
+	imageRef, _, err := c.FlyService.BuildAndPush(flyAppName, sourceDir, p.DeploymentID, envVars)
 	if err != nil {
 		return c.maybeRetry(p.DeploymentID, "build", err)
 	}
