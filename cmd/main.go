@@ -1665,9 +1665,9 @@ func main() {
 	// managed). Max 3 nudges, 2 days apart.
 	nudgeCtx, cancelNudge := context.WithCancel(context.Background())
 	nudgeRunner := &pendingnudge.Runner{
-		DB:    controller.DB,
-		CRM:   controller.EventService,
-		Every: 6 * time.Hour,
+		DB:           controller.DB,
+		EventService: controller.EventService,
+		Every:        6 * time.Hour,
 	}
 	go nudgeRunner.Run(nudgeCtx)
 
