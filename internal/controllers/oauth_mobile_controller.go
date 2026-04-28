@@ -80,7 +80,7 @@ func (c *Controller) GoogleMobileLogin(req requests.GoogleMobileLoginRequest) (*
 				slog.Error("failed to grant initial free credits on google mobile signup", "error", err, "user_id", user.ID)
 			}
 
-			go c.CRMService.SendEvent(user, constants.EVENT_NEW_USER, map[string]any{
+			go c.EventService.SendEvent(user, constants.EVENT_NEW_USER, map[string]any{
 				"provider": "google_mobile",
 			})
 		} else {
@@ -104,7 +104,7 @@ func (c *Controller) GoogleMobileLogin(req requests.GoogleMobileLoginRequest) (*
 		return nil, err
 	}
 
-	go c.CRMService.SendEvent(user, constants.EVENT_NEW_LOGIN, map[string]any{
+	go c.EventService.SendEvent(user, constants.EVENT_NEW_LOGIN, map[string]any{
 		"provider": "google_mobile",
 	})
 

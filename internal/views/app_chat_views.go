@@ -125,7 +125,7 @@ func (v *HttpViews) ChatApp(w http.ResponseWriter, r *http.Request) {
 	if isInitialGeneration {
 		brevoEvent = constants.EVENT_APP_GENERATION_STARTED
 	}
-	go v.Controller.CRMService.SendEvent(user, brevoEvent, map[string]any{
+	go v.Controller.EventService.SendEvent(user, brevoEvent, map[string]any{
 		"app_id":       project.ID.String(),
 		"project_type": project.ProjectType,
 	})

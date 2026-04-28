@@ -74,7 +74,7 @@ func (v *HttpViews) DeleteUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	go v.Controller.CRMService.SendEvent(user, constants.EVENT_USER_DELETED, map[string]any{})
+	go v.Controller.EventService.SendEvent(user, constants.EVENT_USER_DELETED, map[string]any{})
 
 	v.Controller.TrackUserEvent(user, "user_deleted", posthog.NewProperties().
 		Set("subscription_status", user.SubscriptionStatus))

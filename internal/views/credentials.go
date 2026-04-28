@@ -34,7 +34,7 @@ func (v *HttpViews) CreateAppleConnection(w http.ResponseWriter, r *http.Request
 	}
 
 	if requireActiveSubscription(w, user) {
-		go v.Controller.CRMService.SendEvent(user, constants.EVENT_SUBSCRIPTION_NEED, map[string]any{
+		go v.Controller.EventService.SendEvent(user, constants.EVENT_SUBSCRIPTION_NEED, map[string]any{
 			"action": "create_app_store_credential",
 		})
 		return
@@ -94,7 +94,7 @@ func (v *HttpViews) UpdateAppleConnection(w http.ResponseWriter, r *http.Request
 	}
 
 	if requireActiveSubscription(w, user) {
-		go v.Controller.CRMService.SendEvent(user, constants.EVENT_SUBSCRIPTION_NEED, map[string]any{
+		go v.Controller.EventService.SendEvent(user, constants.EVENT_SUBSCRIPTION_NEED, map[string]any{
 			"action": "create_google_play_credential",
 		})
 		return
@@ -180,7 +180,7 @@ func (v *HttpViews) CreateGooglePlayConnection(w http.ResponseWriter, r *http.Re
 	}
 
 	if requireActiveSubscription(w, user) {
-		go v.Controller.CRMService.SendEvent(user, constants.EVENT_SUBSCRIPTION_NEED, map[string]any{
+		go v.Controller.EventService.SendEvent(user, constants.EVENT_SUBSCRIPTION_NEED, map[string]any{
 			"action": "create_google_play_credential",
 		})
 		return
@@ -240,7 +240,7 @@ func (v *HttpViews) UpdateGooglePlayConnection(w http.ResponseWriter, r *http.Re
 	}
 
 	if requireActiveSubscription(w, user) {
-		go v.Controller.CRMService.SendEvent(user, constants.EVENT_SUBSCRIPTION_NEED, map[string]any{
+		go v.Controller.EventService.SendEvent(user, constants.EVENT_SUBSCRIPTION_NEED, map[string]any{
 			"action": "create_google_play_credential",
 		})
 		return

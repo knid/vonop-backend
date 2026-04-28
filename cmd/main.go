@@ -1666,7 +1666,7 @@ func main() {
 	nudgeCtx, cancelNudge := context.WithCancel(context.Background())
 	nudgeRunner := &pendingnudge.Runner{
 		DB:    controller.DB,
-		CRM:   controller.CRMService,
+		CRM:   controller.EventService,
 		Every: 6 * time.Hour,
 	}
 	go nudgeRunner.Run(nudgeCtx)

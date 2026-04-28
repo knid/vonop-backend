@@ -522,7 +522,7 @@ func (c *Controller) DeductAICreditsToFloor(user *models.User, cost int, action 
 func (c *Controller) emitCreditThresholdEvents(user *models.User, prevBalance, newBalance int, action, reference string) {
 	// Overdraft transition (balance went from >= 0 to < 0)
 	if prevBalance >= 0 && newBalance < 0 {
-		go c.CRMService.SendEvent(user, constants.EVENT_CREDITS_OVERDRAFT_STARTED, map[string]any{
+		go c.EventService.SendEvent(user, constants.EVENT_CREDITS_OVERDRAFT_STARTED, map[string]any{
 			"previous_balance": prevBalance,
 			"new_balance":      newBalance,
 			"action":           action,
@@ -553,7 +553,7 @@ func (c *Controller) emitCreditThresholdEvents(user *models.User, prevBalance, n
 	for _, t := range thresholds {
 		cutoff := (monthly * t.percent) / 100
 		if prevBalance > cutoff && newBalance <= cutoff {
-			go c.CRMService.SendEvent(user, t.event, map[string]any{
+			go c.EventService.SendEvent(user, t.event, map[string]any{
 				"level":             t.level,
 				"threshold_percent": t.percent,
 				"credits_remaining": newBalance,
@@ -655,7 +655,7 @@ func (c *Controller) GrantSubscriptionCredits(user *models.User) {
 
 	slog.Info("subscription credits granted", "user_id", user.ID, "credits", limits.MonthlyAICredits)
 
-	go c.CRMService.SendEvent(user, constants.EVENT_CREDITS_GRANTED, map[string]any{
+	go c.EventService.SendEvent(user, constants.EVENT_CREDITS_GRANTED, map[string]any{
 		"credits":    limits.MonthlyAICredits,
 		"grant_type": "subscription",
 		"reference":  user.SubscriptionID.String(),

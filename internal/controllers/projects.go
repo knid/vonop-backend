@@ -382,7 +382,7 @@ func (c *Controller) DeleteProject(user *models.User, projectId string) (*respon
 		return nil, err
 	}
 
-	go c.CRMService.SendEvent(user, constants.EVENT_PROJECT_DELETED, map[string]any{
+	go c.EventService.SendEvent(user, constants.EVENT_PROJECT_DELETED, map[string]any{
 		"project_id": project.ID.String(),
 	})
 

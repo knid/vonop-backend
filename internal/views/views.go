@@ -48,7 +48,7 @@ func (v *HttpViews) checkMinimumCredits(w http.ResponseWriter, user *models.User
 		return true
 	}
 	if balance.Balance < 1 {
-		go v.Controller.CRMService.SendEvent(user, constants.EVENT_AI_CREDITS_DEPLETED, map[string]any{"balance": balance.Balance})
+		go v.Controller.EventService.SendEvent(user, constants.EVENT_AI_CREDITS_DEPLETED, map[string]any{"balance": balance.Balance})
 		go v.Controller.TrackUserEvent(user, "ai_credits_depleted", posthog.NewProperties().Set("balance", balance.Balance))
 
 		planName := ""

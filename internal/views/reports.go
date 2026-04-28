@@ -14,7 +14,7 @@ import (
 // sendCRMEvent sends a CRM event in a goroutine and logs errors.
 func (v *HttpViews) sendCRMEvent(user *models.User, event string, payload map[string]any) {
 	go func() {
-		if err := v.Controller.CRMService.SendEvent(user, event, payload); err != nil {
+		if err := v.Controller.EventService.SendEvent(user, event, payload); err != nil {
 			slog.Error("failed to send CRM event", "event", event, "error", err)
 		}
 	}()

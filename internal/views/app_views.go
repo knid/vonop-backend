@@ -123,7 +123,7 @@ func (v *HttpViews) CreateApp(w http.ResponseWriter, r *http.Request) {
 		Set("project_type", project.ProjectType).
 		Set("app_id", project.ID.String()))
 
-	go v.Controller.CRMService.SendEvent(user, constants.EVENT_APP_DRAFT_CREATED, map[string]any{
+	go v.Controller.EventService.SendEvent(user, constants.EVENT_APP_DRAFT_CREATED, map[string]any{
 		"app_id":       project.ID.String(),
 		"project_type": project.ProjectType,
 	})
@@ -573,7 +573,7 @@ func (v *HttpViews) CreateAppSnapshot(w http.ResponseWriter, r *http.Request) {
 	v.Controller.TrackUserEvent(user, "app_snapshot_created", posthog.NewProperties().
 		Set("app_id", project.ID.String()))
 
-	go v.Controller.CRMService.SendEvent(user, constants.EVENT_SNAPSHOT_CREATED, map[string]any{
+	go v.Controller.EventService.SendEvent(user, constants.EVENT_SNAPSHOT_CREATED, map[string]any{
 		"app_id": project.ID.String(),
 	})
 
@@ -611,7 +611,7 @@ func (v *HttpViews) RestoreAppSnapshot(w http.ResponseWriter, r *http.Request) {
 		Set("app_id", project.ID.String()).
 		Set("snapshot_id", sid))
 
-	go v.Controller.CRMService.SendEvent(user, constants.EVENT_SNAPSHOT_RESTORED, map[string]any{
+	go v.Controller.EventService.SendEvent(user, constants.EVENT_SNAPSHOT_RESTORED, map[string]any{
 		"app_id":      project.ID.String(),
 		"snapshot_id": sid,
 	})
@@ -656,7 +656,7 @@ func (v *HttpViews) ExportApp(w http.ResponseWriter, r *http.Request) {
 	// Check code access permission
 	limits, limitsErr := v.Controller.GetUserLimits(user)
 	if limitsErr != nil || !limits.CanAccessCode {
-		go v.Controller.CRMService.SendEvent(user, constants.EVENT_SUBSCRIPTION_NEED, map[string]any{"action": "access_code"})
+		go v.Controller.EventService.SendEvent(user, constants.EVENT_SUBSCRIPTION_NEED, map[string]any{"action": "access_code"})
 		utils.JSONError(w, constants.ErrFeatureNotAvailable, "code access requires Starter or Professional plan", http.StatusForbidden, nil)
 		return
 	}
@@ -691,7 +691,7 @@ func (v *HttpViews) ExportApp(w http.ResponseWriter, r *http.Request) {
 		Set("app_id", project.ID.String()).
 		Set("platform", platform))
 
-	go v.Controller.CRMService.SendEvent(user, constants.EVENT_APP_EXPORTED_ZIP, map[string]any{
+	go v.Controller.EventService.SendEvent(user, constants.EVENT_APP_EXPORTED_ZIP, map[string]any{
 		"app_id":   project.ID.String(),
 		"platform": platform,
 	})
@@ -773,7 +773,7 @@ func (v *HttpViews) ConnectAppIntegration(w http.ResponseWriter, r *http.Request
 		Set("app_id", project.ID.String()).
 		Set("provider", integ.Provider))
 
-	go v.Controller.CRMService.SendEvent(user, constants.EVENT_INTEGRATION_CONNECTED, map[string]any{
+	go v.Controller.EventService.SendEvent(user, constants.EVENT_INTEGRATION_CONNECTED, map[string]any{
 		"app_id":   project.ID.String(),
 		"provider": integ.Provider,
 	})
@@ -854,7 +854,7 @@ func (v *HttpViews) DisconnectAppIntegration(w http.ResponseWriter, r *http.Requ
 	v.Controller.TrackUserEvent(user, "integration_disconnected", posthog.NewProperties().
 		Set("app_id", project.ID.String()))
 
-	go v.Controller.CRMService.SendEvent(user, constants.EVENT_INTEGRATION_DISCONNECTED, map[string]any{
+	go v.Controller.EventService.SendEvent(user, constants.EVENT_INTEGRATION_DISCONNECTED, map[string]any{
 		"app_id": project.ID.String(),
 	})
 
@@ -874,7 +874,7 @@ func (v *HttpViews) ConvertToMobile(w http.ResponseWriter, r *http.Request) {
 
 	limits, limitsErr := v.Controller.GetUserLimits(user)
 	if limitsErr != nil || !limits.CanBuildMobile {
-		go v.Controller.CRMService.SendEvent(user, constants.EVENT_SUBSCRIPTION_NEED, map[string]any{"action": "convert_to_mobile"})
+		go v.Controller.EventService.SendEvent(user, constants.EVENT_SUBSCRIPTION_NEED, map[string]any{"action": "convert_to_mobile"})
 		utils.JSONError(w, constants.ErrFeatureNotAvailable, "mobile conversion requires Professional plan", http.StatusForbidden, nil)
 		return
 	}
