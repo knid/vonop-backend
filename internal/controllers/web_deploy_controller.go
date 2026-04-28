@@ -14,6 +14,7 @@ import (
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/services/fly"
 	"github.com/knid/wemob/internal/tasks"
+	"github.com/posthog/posthog-go"
 )
 
 // CreateQueuedWebDeployment writes a deployment row in 'queued' state. The
@@ -244,6 +245,7 @@ func (c *Controller) failTask(deploymentID, stage string, err error) error {
 	if mErr := c.MarkDeploymentFailed(deploymentID, fmt.Sprintf("%s: %v", stage, err)); mErr != nil {
 		slog.Error("mark_failed_db_error", "deployment_id", deploymentID, "stage", stage, "err", mErr)
 	}
+	c.fireDeployFailedEvent(deploymentID, stage, err)
 	return asynq.SkipRetry
 }
 
@@ -260,5 +262,76 @@ func (c *Controller) maybeRetry(deploymentID, stage string, err error) error {
 	if mErr := c.MarkDeploymentFailed(deploymentID, fmt.Sprintf("%s: %v", stage, err)); mErr != nil {
 		slog.Error("mark_failed_db_error", "deployment_id", deploymentID, "stage", stage, "err", mErr)
 	}
+	c.fireDeployFailedEvent(deploymentID, stage, err)
 	return asynq.SkipRetry
+}
+
+// fireDeployFailedEvent fires the Brevo + PostHog events for a permanent
+// deploy failure. Best-effort — never blocks the worker.
+func (c *Controller) fireDeployFailedEvent(deploymentID, stage string, deployErr error) {
+	deployment, err := c.DB.GetAppDeploymentByID(deploymentID)
+	if err != nil {
+		return
+	}
+	user, err := c.DB.GetUserById(deployment.UserID.String())
+	if err != nil {
+		return
+	}
+	go c.CRMService.SendEvent(user, constants.BREVO_EVENT_WEB_DEPLOYMENT_FAILED, map[string]any{
+		"app_id":        deployment.AppProjectID.String(),
+		"stage":         stage,
+		"error_message": deployErr.Error(),
+	})
+	go c.TrackUserEvent(user, "app_deploy_failed", posthog.NewProperties().
+		Set("app_id", deployment.AppProjectID.String()).
+		Set("stage", stage).
+		Set("error", deployErr.Error()))
+}
+
+// HandleFlyMachineEvent reacts to a Fly webhook. Updates app_deployments
+// based on machine state. Also fires Brevo events for the success path
+// (failure events fire from the worker's failTask/maybeRetry path).
+func (c *Controller) HandleFlyMachineEvent(event fly.MachineEvent) error {
+	runtimeApp, err := c.DB.GetRuntimeAppByFlyAppName(event.AppName)
+	if err != nil {
+		return fmt.Errorf("unknown app: %s", event.AppName)
+	}
+
+	deployment, err := c.DB.GetLatestAppDeployment(runtimeApp.AppProjectID.String(), "web")
+	if err != nil || deployment == nil {
+		return fmt.Errorf("no deployment for app %s", event.AppName)
+	}
+
+	switch event.State {
+	case "started":
+		// Only flip in-progress states → succeeded; never override an already-final state.
+		if deployment.Status == "queued" || deployment.Status == "building" || deployment.Status == "deploying" {
+			deployedURL := "https://" + runtimeApp.CustomDomain
+			if err := c.MarkDeploymentSucceeded(deployment.ID.String(), deployedURL); err != nil {
+				slog.Warn("mark succeeded failed", "deployment", deployment.ID, "err", err)
+			}
+			slog.Info("deploy_succeeded", "app", event.AppName, "deployment_id", deployment.ID.String())
+
+			// Fire success events for the user — best-effort, don't block.
+			user, uErr := c.DB.GetUserById(deployment.UserID.String())
+			if uErr == nil {
+				go c.CRMService.SendEvent(user, constants.BREVO_EVENT_WEB_DEPLOYMENT_SUCCEEDED, map[string]any{
+					"app_id":       deployment.AppProjectID.String(),
+					"version":      deployment.Version,
+					"deployed_url": deployedURL,
+				})
+				go c.TrackUserEvent(user, "app_deployed_web", posthog.NewProperties().
+					Set("app_id", deployment.AppProjectID.String()).
+					Set("deploy_version", deployment.Version))
+			}
+		}
+	case "failed", "destroyed":
+		if deployment.Status != "succeeded" && deployment.Status != "failed" {
+			if err := c.MarkDeploymentFailed(deployment.ID.String(), event.Message); err != nil {
+				slog.Warn("mark failed failed", "deployment", deployment.ID, "err", err)
+			}
+			slog.Warn("deploy_failed_via_webhook", "app", event.AppName, "msg", event.Message)
+		}
+	}
+	return nil
 }

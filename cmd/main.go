@@ -924,6 +924,8 @@ func main() {
 			r.Post("/stripe", httpViews.Controller.HandleWebhook)
 			// Coolify deployment webhook
 			r.Post("/coolify", httpViews.HandleCoolifyWebhook)
+			// Fly machine state webhook (signature verified inside handler)
+			r.Post("/fly", httpViews.HandleFlyWebhook)
 		})
 		r.Route("/v1", func(r chi.Router) {
 			// OAuth begin/callback are pre-auth, so UserKey falls back to IPKey
