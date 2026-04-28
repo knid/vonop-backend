@@ -347,7 +347,19 @@ func createSchema(db *bun.DB) error {
 	renameStatements := []string{
 		`ALTER TABLE IF EXISTS app_store_credentials RENAME TO apple_connections`,
 		`ALTER TABLE IF EXISTS google_play_credentials RENAME TO google_play_connections`,
-		`ALTER TABLE IF EXISTS coolify_projects RENAME TO runtime_apps`,
+		// Coolify→Fly: rename coolify_projects → runtime_apps. Guarded with a
+		// DO block so it's idempotent on environments where runtime_apps was
+		// already created from scratch by the new schema while coolify_projects
+		// still existed. The bare ALTER ... IF EXISTS form would error with
+		// "relation runtime_apps already exists" on every startup. On affected
+		// environments, data was copied manually with
+		// INSERT INTO runtime_apps SELECT FROM coolify_projects.
+		`DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='coolify_projects')
+  AND NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='runtime_apps') THEN
+    ALTER TABLE coolify_projects RENAME TO runtime_apps;
+  END IF;
+END $$`,
 		// Deployment FK columns — guard with DO block to stay idempotent
 		`DO $$ BEGIN
   IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='deployments' AND column_name='app_store_credentials_id') THEN
