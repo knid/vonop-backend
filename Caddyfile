@@ -8,7 +8,6 @@
     # asks the api backend before issuing each Let's Encrypt cert.
     on_demand_tls {
         ask https://api.wemob.io/internal/edge/cert-allowed
-        rate_limit 100 1m
     }
 }
 
@@ -69,11 +68,8 @@ api.wemob.io {
     }
 }
 
-# Asynqmon dashboard.
-asynqmon.wemob.app {
-    tls {
-        dns cloudflare {env.CF_API_TOKEN}
-    }
+# Asynqmon dashboard. Auto-issued via HTTP-01 (same zone as api.wemob.io).
+asynqmon.wemob.io {
     basicauth {
         # Replace with `caddy hash-password` output before deploying.
         # Format: `<username> <bcrypt-hash>`
