@@ -28,8 +28,9 @@ type machineServiceConfig struct {
 }
 
 type machinePortConfig struct {
-	Port     int      `json:"port"`
-	Handlers []string `json:"handlers,omitempty"`
+	Port       int      `json:"port"`
+	Handlers   []string `json:"handlers,omitempty"`
+	ForceHTTPS bool     `json:"force_https,omitempty"`
 }
 
 type machineConcurrencyConfig struct {
@@ -84,7 +85,12 @@ func (s *Service) DeployMachines(appName string, spec MachineSpec) error {
 			InternalPort: 3000,
 			Protocol:     "tcp",
 			Ports: []machinePortConfig{
-				{Port: 80, Handlers: []string{"http"}},
+				// 80 redirects to 443 via Fly's edge so we don't serve plain HTTP.
+				{Port: 80, Handlers: []string{"http"}, ForceHTTPS: true},
+				// 443 terminates TLS at Fly's edge using *.fly.dev wildcard cert,
+				// then proxies HTTP to internal_port 3000. Required for Caddy to
+				// reach the app via HTTPS without our own cert plumbing.
+				{Port: 443, Handlers: []string{"tls", "http"}},
 			},
 			Concurrency: &machineConcurrencyConfig{
 				Type:      "requests",

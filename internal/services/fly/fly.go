@@ -10,6 +10,8 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
+	"os/exec"
 	"strings"
 	"time"
 )
@@ -116,26 +118,59 @@ func (s *Service) VerifyWebhookSignature(payload []byte, sigHex string) bool {
 	return hmac.Equal(mac.Sum(nil), want)
 }
 
-// EnsureApp creates a Fly app if it doesn't already exist. Idempotent.
+// EnsureApp creates a Fly app if it doesn't already exist, then allocates
+// public IPs (free shared IPv4 + free dedicated IPv6) so the app is reachable
+// at <name>.fly.dev. Without IPs, the Machines REST API path leaves apps
+// unreachable from the public internet (only flyctl launch auto-allocates).
+// Idempotent.
 func (s *Service) EnsureApp(appName string) error {
 	exists, err := s.AppExists(appName)
 	if err != nil {
 		return err
 	}
-	if exists {
-		return nil
-	}
-	body := map[string]any{
-		"app_name": appName,
-		"org_slug": s.OrgSlug,
-		"network":  "default",
-	}
-	if err := s.doRequest("POST", "/v1/apps", body, nil); err != nil {
-		// Concurrent creation: another caller won the race. Treat as success.
-		if apiErr, ok := err.(*APIError); ok && apiErr.Status == http.StatusUnprocessableEntity {
-			return nil
+	if !exists {
+		body := map[string]any{
+			"app_name": appName,
+			"org_slug": s.OrgSlug,
+			"network":  "default",
 		}
-		return err
+		if err := s.doRequest("POST", "/v1/apps", body, nil); err != nil {
+			// Concurrent creation: another caller won the race. Treat as success.
+			if apiErr, ok := err.(*APIError); ok && apiErr.Status != http.StatusUnprocessableEntity {
+				return err
+			}
+		}
+	}
+	// IP allocation is idempotent on flyctl's side — second call is a no-op
+	// when an IP of that type already exists.
+	return s.allocateIPs(appName)
+}
+
+// allocateIPs assigns a shared IPv4 + dedicated IPv6 to the app. Both are free.
+// flyctl shell-out because Fly's Machines REST API doesn't expose IP allocation
+// directly — it goes through the GraphQL API, and flyctl wraps it cleanly.
+func (s *Service) allocateIPs(appName string) error {
+	calls := [][]string{
+		{"flyctl", "ips", "allocate-v6", "--app", appName, "--yes"},
+		{"flyctl", "ips", "allocate-v4", "--shared", "--app", appName, "--yes"},
+	}
+	for _, args := range calls {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Env = []string{
+			"HOME=" + os.Getenv("HOME"),
+			"PATH=" + os.Getenv("PATH"),
+			"FLY_API_TOKEN=" + s.APIToken,
+			"FLY_NO_UPDATE_CHECK=1",
+		}
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			outStr := string(out)
+			// Already-allocated errors are expected and fine.
+			if strings.Contains(outStr, "already") {
+				continue
+			}
+			return fmt.Errorf("flyctl ips %s: %w (%s)", args[2], err, truncate(outStr, 500))
+		}
 	}
 	return nil
 }
