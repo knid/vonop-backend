@@ -11,7 +11,7 @@ import (
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/database"
 	"github.com/knid/wemob/internal/models"
-	crmServices "github.com/knid/wemob/internal/services/crm"
+	"github.com/knid/wemob/internal/services/events"
 	"github.com/uptrace/bun"
 )
 
@@ -51,18 +51,18 @@ func clearAlert(userID string) {
 	alertHistoryMu.Unlock()
 }
 
-// CheckUsageAlertsJob runs every hour and sends CRM events for usage approaching limits
+// CheckUsageAlertsJob runs every hour and fires events for usage approaching limits
 // and AI credit depletion.
-func CheckUsageAlertsJob(db *database.Database, crmService crmServices.CRMService) {
+func CheckUsageAlertsJob(db *database.Database, eventService events.EventService) {
 	ticker := time.NewTicker(1 * time.Hour)
 	defer ticker.Stop()
 
 	for range ticker.C {
-		checkUsageAlerts(db, crmService)
+		checkUsageAlerts(db, eventService)
 	}
 }
 
-func checkUsageAlerts(db *database.Database, crmService crmServices.CRMService) {
+func checkUsageAlerts(db *database.Database, eventService events.EventService) {
 	var users []models.User
 	err := db.DB.NewSelect().
 		Model(&users).
@@ -94,14 +94,14 @@ func checkUsageAlerts(db *database.Database, crmService crmServices.CRMService) 
 
 		if balance.Balance <= 0 || remainingPercent <= 10 {
 			if shouldAlert(user.ID.String(), "depleted") {
-				go crmService.SendEvent(&user, constants.EVENT_AI_CREDITS_DEPLETED, map[string]any{
+				go eventService.SendEvent(&user, constants.EVENT_AI_CREDITS_DEPLETED, map[string]any{
 					"credits_total":     limits.MonthlyAICredits,
 					"credits_remaining": balance.Balance,
 				})
 			}
 		} else if remainingPercent <= 20 {
 			if shouldAlert(user.ID.String(), "low") {
-				go crmService.SendEvent(&user, constants.EVENT_AI_CREDITS_LOW, map[string]any{
+				go eventService.SendEvent(&user, constants.EVENT_AI_CREDITS_LOW, map[string]any{
 					"credits_remaining": balance.Balance,
 					"credits_total":     limits.MonthlyAICredits,
 					"usage_percent":     int(100 - remainingPercent),
