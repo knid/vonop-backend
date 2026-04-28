@@ -1,4 +1,4 @@
-FROM golang:1.25-alpine AS builder 
+FROM golang:1.25-alpine AS builder
 
 WORKDIR /app
 
@@ -10,7 +10,14 @@ RUN go mod download
 COPY . .
 
 RUN go build -trimpath -ldflags="-s -w" -o bin cmd/main.go
+RUN go build -trimpath -ldflags="-s -w" -o worker cmd/worker/main.go
+RUN go build -trimpath -ldflags="-s -w" -o migrate_to_fly cmd/migrate-to-fly/main.go
+RUN go build -trimpath -ldflags="-s -w" -o loadtest_publish cmd/loadtest-publish/main.go
 RUN go build -trimpath -ldflags="-s -w" -o migrate_to_git cmd/migrate_to_git/main.go
+
+# flyctl is shelled out by the worker to build + push images via Fly's
+# managed builder. Pulled from the official Fly distribution image.
+FROM flyio/flyctl:latest AS flyctl
 
 FROM alpine:3.20
 
@@ -20,10 +27,14 @@ RUN apk add --no-cache ca-certificates tzdata curl git
 
 RUN addgroup -S appuser \
     && adduser -S -G appuser -h /home/appuser -s /sbin/nologin appuser \
-    && mkdir -p /data/repos \
-    && chown appuser:appuser /data/repos
+    && mkdir -p /data/repos /data/custom-domains \
+    && chown -R appuser:appuser /data/repos /data/custom-domains
 
+COPY --from=flyctl /flyctl /usr/local/bin/flyctl
 COPY --from=builder --chown=appuser:appuser /app/bin /app/bin
+COPY --from=builder --chown=appuser:appuser /app/worker /app/worker
+COPY --from=builder --chown=appuser:appuser /app/migrate_to_fly /app/migrate_to_fly
+COPY --from=builder --chown=appuser:appuser /app/loadtest_publish /app/loadtest_publish
 COPY --from=builder --chown=appuser:appuser /app/migrate_to_git /app/migrate_to_git
 COPY --from=builder --chown=appuser:appuser /app/storage /app/storage
 

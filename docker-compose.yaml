@@ -41,6 +41,27 @@ services:
       api:
         condition: service_healthy
 
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: wemob-backend-api:latest
+    entrypoint: ["/app/worker"]
+    restart: unless-stopped
+    env_file:
+      - ./.env
+    environment:
+      - CADDY_ADMIN_URL=http://caddy:2019
+      - CADDY_CUSTOM_DOMAINS_DIR=/data/custom-domains
+      - DB_MAX_OPEN_CONNS=10
+    volumes:
+      - repo-data:/data/repos
+      - custom-domains:/data/custom-domains
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+    depends_on:
+      api:
+        condition: service_healthy
+
   asynqmon:
     image: hibiken/asynqmon:latest
     container_name: asynqmon
