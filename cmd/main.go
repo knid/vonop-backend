@@ -727,6 +727,13 @@ func main() {
 	bundb := bootstrap.BunDB(controller)
 	db := controller.DB
 
+	// uuid-ossp is only needed by the API server (schema owner). Worker and
+	// migration binaries don't run createSchema, so the extension call lives
+	// here rather than in bootstrap.go.
+	if _, err := bundb.ExecContext(context.Background(), `CREATE EXTENSION IF NOT EXISTS "uuid-ossp"`); err != nil {
+		slog.Error("create extension uuid-ossp failed", "err", err)
+		os.Exit(1)
+	}
 	if err := createSchema(bundb); err != nil {
 		slog.Error("Failed to create schema", "error", err)
 		os.Exit(1)

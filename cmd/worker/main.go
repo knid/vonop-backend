@@ -14,6 +14,12 @@ import (
 )
 
 func main() {
+	// Workers only need a small pool — one connection per active task plus a
+	// few for the scheduler and health checks. Ops can override via env.
+	if os.Getenv("DB_MAX_OPEN_CONNS") == "" {
+		os.Setenv("DB_MAX_OPEN_CONNS", "10")
+	}
+
 	controller, redisOpts := bootstrap.BootstrapController()
 
 	srv := asynq.NewServer(redisOpts, asynq.Config{

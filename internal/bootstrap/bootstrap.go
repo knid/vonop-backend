@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -111,15 +112,17 @@ func BootstrapController() (*controllers.Controller, asynq.RedisClientOpt) {
 		pgdriver.WithReadTimeout(30*time.Second),
 		pgdriver.WithWriteTimeout(10*time.Second),
 	))
-	sqldb.SetMaxOpenConns(25)
+	maxConns := 25
+	if v := os.Getenv("DB_MAX_OPEN_CONNS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			maxConns = n
+		}
+	}
+	sqldb.SetMaxOpenConns(maxConns)
 	sqldb.SetMaxIdleConns(10)
 	sqldb.SetConnMaxLifetime(10 * time.Minute)
 	sqldb.SetConnMaxIdleTime(2 * time.Minute)
 	bundb := bun.NewDB(sqldb, pgdialect.New())
-
-	if _, err := bundb.Exec("CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\";"); err != nil {
-		panic(fmt.Errorf("bootstrap: failed to create uuid-ossp extension: %w", err))
-	}
 
 	bundb.AddQueryHook(bundebug.NewQueryHook(
 		bundebug.WithVerbose(os.Getenv("BUNDEBUG") == "2"),

@@ -18,6 +18,12 @@ import (
 )
 
 func main() {
+	// One-shot migration script — limit pool to avoid exhausting Postgres
+	// connections when running alongside other services. Ops can override.
+	if os.Getenv("DB_MAX_OPEN_CONNS") == "" {
+		os.Setenv("DB_MAX_OPEN_CONNS", "5")
+	}
+
 	controller, _ := bootstrap.BootstrapController()
 
 	rows, err := controller.DB.GetAllRuntimeAppsOnCoolify()

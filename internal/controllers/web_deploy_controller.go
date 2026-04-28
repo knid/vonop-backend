@@ -18,7 +18,7 @@ import (
 )
 
 // CreateQueuedWebDeployment writes a deployment row in 'queued' state. The
-// worker will flip it through 'building' → 'deploying' → 'succeeded'/'failed'.
+// worker will flip it through 'building' → 'deploying' → 'deployed'/'failed'.
 func (c *Controller) CreateQueuedWebDeployment(project *models.AppProject, user *models.User) (*models.AppDeployment, error) {
 	deployment := &models.AppDeployment{
 		AppProjectID: project.ID,
@@ -95,10 +95,12 @@ func (c *Controller) MarkDeploymentDeploying(deploymentID string) error {
 
 // MarkDeploymentSucceeded is called when the Fly webhook reports a healthy
 // machine. Also writes deployed_url for the client's response.
+// Status is set to "deployed" — the terminal-success state used by all quota
+// checks, billing queries, admin views, and the preview-code controller.
 func (c *Controller) MarkDeploymentSucceeded(deploymentID string, deployedURL string) error {
 	_, err := c.DB.DB.NewUpdate().
 		Model((*models.AppDeployment)(nil)).
-		Set("status = ?", "succeeded").
+		Set("status = ?", "deployed").
 		Set("deployed_url = ?", deployedURL).
 		Set("updated_at = ?", time.Now()).
 		Where("id = ?", deploymentID).
@@ -326,7 +328,7 @@ func (c *Controller) HandleFlyMachineEvent(event fly.MachineEvent) error {
 			}
 		}
 	case "failed", "destroyed":
-		if deployment.Status != "succeeded" && deployment.Status != "failed" {
+		if deployment.Status != "deployed" && deployment.Status != "failed" {
 			if err := c.MarkDeploymentFailed(deployment.ID.String(), event.Message); err != nil {
 				slog.Warn("mark failed failed", "deployment", deployment.ID, "err", err)
 			}

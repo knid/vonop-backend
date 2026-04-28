@@ -23,7 +23,7 @@ func (v *HttpViews) HandleDeployPipelineHealth(w http.ResponseWriter, r *http.Re
 		"queue_cron": queueInfoMap(v.Controller.AsynqInspector, "cron"),
 	}
 
-	succeeded, _ := v.Controller.DB.CountAppDeploymentsByStatusSince(ctx, "succeeded", since)
+	succeeded, _ := v.Controller.DB.CountAppDeploymentsByStatusSince(ctx, "deployed", since)
 	failed, _ := v.Controller.DB.CountAppDeploymentsByStatusSince(ctx, "failed", since)
 	body["deploys_5min_succeeded"] = succeeded
 	body["deploys_5min_failed"] = failed
