@@ -35,11 +35,19 @@ primary_region = %q
 	}
 	defer os.Remove(tomlPath)
 
+	// `--depot=false` is required: Depot (Fly's default builder) caches build
+	// results and returns a stale `deployment-XXX` ULID for the same source
+	// content WITHOUT actually re-pushing the image to registry.fly.io.
+	// The `Machines API` then 404s on the manifest. The legacy remote builder
+	// pushes every layer reliably. Confirmed with isolation test inside the
+	// worker container: with --depot=false flyctl streams `Pushed` lines for
+	// each layer; without it, flyctl prints a stale image ref and exits.
 	cmd := exec.Command("flyctl", "deploy",
 		"--app", appName,
 		"--remote-only",
 		"--build-only",
 		"--push",
+		"--depot=false",
 	)
 	cmd.Dir = sourceDir
 	cmd.Env = []string{
@@ -50,6 +58,9 @@ primary_region = %q
 	}
 	out, err := cmd.CombinedOutput()
 	buildLog = string(out)
+	// DEBUG: dump full flyctl output to stdout so docker logs sees it.
+	// Remove after diagnosing the deployment-XXX manifest mismatch.
+	fmt.Fprintf(os.Stderr, "\n=== flyctl deploy output for %s ===\n%s\n=== end ===\n", appName, buildLog)
 	if err != nil {
 		slog.Warn("fly_build_failed", "app", appName, "label", imageLabel, "log_tail", truncate(buildLog, 2000))
 		return "", buildLog, fmt.Errorf("flyctl: %w (output: %s)", err, truncate(buildLog, 2000))
