@@ -24,3 +24,10 @@ worker:
 worker-dev:
 	go run cmd/worker/main.go
 .PHONY: worker worker-dev
+
+migrate-to-fly:
+	go build -o bin/migrate-to-fly cmd/migrate-to-fly/main.go
+
+migrate-to-fly-run: migrate-to-fly
+	./bin/migrate-to-fly
+.PHONY: migrate-to-fly migrate-to-fly-run
