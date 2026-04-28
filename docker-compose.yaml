@@ -47,11 +47,13 @@ services:
     restart: unless-stopped
     expose:
       - "8080"
-    # Use rediss:// URL form so TLS + SNI are derived from the host. The
-    # `-redis-tls=true` flag form was wrong: that flag takes a hostname
-    # string for SNI/cert validation, not a boolean, so TLS handshake fails.
+    # rediss:// URL form derives TLS + SNI from the host. --redis-insecure-tls
+    # skips cert verification because hibiken/asynqmon's minimal image lacks
+    # ca-certificates and can't validate DigitalOcean's managed Valkey cert.
+    # Connection is still encrypted; the trust check is what's bypassed.
     command:
       - --redis-url=rediss://default:${REDIS_PASSWORD}@${REDIS_ADDR}/0
+      - --redis-insecure-tls
 
 volumes:
   caddy_data:
