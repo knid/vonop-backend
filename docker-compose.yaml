@@ -47,10 +47,11 @@ services:
     restart: unless-stopped
     expose:
       - "8080"
+    # Use rediss:// URL form so TLS + SNI are derived from the host. The
+    # `-redis-tls=true` flag form was wrong: that flag takes a hostname
+    # string for SNI/cert validation, not a boolean, so TLS handshake fails.
     command:
-      - --redis-addr=${REDIS_ADDR}
-      - --redis-password=${REDIS_PASSWORD}
-      - --redis-tls=true
+      - --redis-url=rediss://default:${REDIS_PASSWORD}@${REDIS_ADDR}/0
 
 volumes:
   caddy_data:
