@@ -294,7 +294,7 @@ func (c *Controller) maybeRetry(deploymentID, stage string, err error) error {
 	return asynq.SkipRetry
 }
 
-// fireDeployFailedEvent fires the Brevo + PostHog events for a permanent
+// fireDeployFailedEvent fires the lifecycle + PostHog events for a permanent
 // deploy failure. Best-effort — never blocks the worker.
 func (c *Controller) fireDeployFailedEvent(deploymentID, stage string, deployErr error) {
 	deployment, err := c.DB.GetAppDeploymentByID(deploymentID)
@@ -317,7 +317,7 @@ func (c *Controller) fireDeployFailedEvent(deploymentID, stage string, deployErr
 }
 
 // HandleFlyMachineEvent reacts to a Fly webhook. Updates app_deployments
-// based on machine state. Also fires Brevo events for the success path
+// based on machine state. Also fires lifecycle events for the success path
 // (failure events fire from the worker's failTask/maybeRetry path).
 func (c *Controller) HandleFlyMachineEvent(event fly.MachineEvent) error {
 	runtimeApp, err := c.DB.GetRuntimeAppByFlyAppName(event.AppName)

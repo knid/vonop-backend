@@ -27,8 +27,8 @@ type CreditDeductor func(ctx context.Context, credits int, action, projectID str
 // Controller.TrackUserEvent helper.
 type EventTracker func(event string, props map[string]any)
 
-// CRMEventSender posts a CRM event (Brevo). Used for lifecycle events that
-// drive marketing automations (generation completed, chat failed, etc.).
+// CRMEventSender posts a lifecycle event. Used for events that drive
+// marketing automations (generation completed, chat failed, etc.).
 type CRMEventSender func(event string, attrs map[string]any)
 
 // ImageGenerator generates an image and returns a stable public URL.

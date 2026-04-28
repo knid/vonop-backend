@@ -513,7 +513,7 @@ func (c *Controller) DeductAICreditsToFloor(user *models.User, cost int, action 
 	return txErr
 }
 
-// emitCreditThresholdEvents fires Brevo events when a deduction crosses a
+// emitCreditThresholdEvents fires lifecycle events when a deduction crosses a
 // percentage-of-monthly-grant threshold (50%, 25%, 10%, 0%) or triggers
 // overdraft. Each crossing fires exactly once per deduction — if a large
 // deduction skips over multiple thresholds, the lowest crossed threshold is

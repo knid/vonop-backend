@@ -81,7 +81,7 @@ func (d *Database) ListInFlightDeployments(ctx context.Context) ([]models.Deploy
 
 // ListPendingConnectionDeployments returns all deployments awaiting a
 // user-side connection. Includes User relation so the nudge runner
-// can address a Brevo email to them.
+// can address an event to them.
 func (d *Database) ListPendingConnectionDeployments(ctx context.Context) ([]models.Deployment, error) {
 	var deployments []models.Deployment
 	if err := d.DB.NewSelect().
