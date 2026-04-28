@@ -260,7 +260,7 @@ func (v *HttpViews) GatewayChat(w http.ResponseWriter, r *http.Request) {
 	}
 	minBalance := v.Controller.RemoteConfig.GetInt(remoteconfig.AICreditsMinBalance, user.ID.String())
 	if balance.Balance <= minBalance {
-		go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_CREDITS_GATEWAY_BLOCKED, map[string]any{
+		go v.Controller.CRMService.SendEvent(user, constants.EVENT_CREDITS_GATEWAY_BLOCKED, map[string]any{
 			"balance":    balance.Balance,
 			"floor":      minBalance,
 			"model":      model,
@@ -520,7 +520,7 @@ func (v *HttpViews) GatewayImage(w http.ResponseWriter, r *http.Request) {
 	if apiKey == "" {
 		// Refund all credits
 		v.Controller.AddAICredits(user, totalCost, "gateway_image_refund", projectID)
-		go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_CREDITS_REFUNDED, map[string]any{
+		go v.Controller.CRMService.SendEvent(user, constants.EVENT_CREDITS_REFUNDED, map[string]any{
 			"credits":    totalCost,
 			"reason":     "service_unavailable",
 			"project_id": projectID,
@@ -549,7 +549,7 @@ func (v *HttpViews) GatewayImage(w http.ResponseWriter, r *http.Request) {
 	failedCount := numImages - generated
 	if failedCount > 0 {
 		refund := costPerImage * failedCount
-		go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_CREDITS_REFUNDED, map[string]any{
+		go v.Controller.CRMService.SendEvent(user, constants.EVENT_CREDITS_REFUNDED, map[string]any{
 			"credits":      refund,
 			"reason":       "image_generation_failed",
 			"failed_count": failedCount,

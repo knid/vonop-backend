@@ -57,7 +57,7 @@ func (v *HttpViews) GenerateAppStream(w http.ResponseWriter, r *http.Request) {
 		Set("project_type", req.ProjectType).
 		Set("app_id", project.ID.String()))
 
-	go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_APP_GENERATION_STARTED, map[string]any{
+	go v.Controller.CRMService.SendEvent(user, constants.EVENT_APP_GENERATION_STARTED, map[string]any{
 		"app_id":       project.ID.String(),
 		"project_type": req.ProjectType,
 	})

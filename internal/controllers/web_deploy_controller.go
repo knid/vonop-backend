@@ -253,7 +253,7 @@ func (c *Controller) HandleWebDeployTask(ctx context.Context, t *asynq.Task) err
 	if err := c.MarkDeploymentSucceeded(p.DeploymentID, deployedURL); err != nil {
 		slog.Warn("mark succeeded", "err", err)
 	}
-	go c.CRMService.SendEvent(user, constants.BREVO_EVENT_WEB_DEPLOYMENT_SUCCEEDED, map[string]any{
+	go c.CRMService.SendEvent(user, constants.EVENT_WEB_DEPLOYMENT_SUCCEEDED, map[string]any{
 		"app_id":       project.ID.String(),
 		"version":      deployment.Version,
 		"deployed_url": deployedURL,
@@ -305,7 +305,7 @@ func (c *Controller) fireDeployFailedEvent(deploymentID, stage string, deployErr
 	if err != nil {
 		return
 	}
-	go c.CRMService.SendEvent(user, constants.BREVO_EVENT_WEB_DEPLOYMENT_FAILED, map[string]any{
+	go c.CRMService.SendEvent(user, constants.EVENT_WEB_DEPLOYMENT_FAILED, map[string]any{
 		"app_id":        deployment.AppProjectID.String(),
 		"stage":         stage,
 		"error_message": deployErr.Error(),
@@ -343,7 +343,7 @@ func (c *Controller) HandleFlyMachineEvent(event fly.MachineEvent) error {
 			// Fire success events for the user — best-effort, don't block.
 			user, uErr := c.DB.GetUserById(deployment.UserID.String())
 			if uErr == nil {
-				go c.CRMService.SendEvent(user, constants.BREVO_EVENT_WEB_DEPLOYMENT_SUCCEEDED, map[string]any{
+				go c.CRMService.SendEvent(user, constants.EVENT_WEB_DEPLOYMENT_SUCCEEDED, map[string]any{
 					"app_id":       deployment.AppProjectID.String(),
 					"version":      deployment.Version,
 					"deployed_url": deployedURL,

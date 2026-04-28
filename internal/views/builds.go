@@ -60,7 +60,7 @@ func (v *HttpViews) CreateProjectBuild(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if requireActiveSubscription(w, user) {
-		go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_NEED, map[string]any{})
+		go v.Controller.CRMService.SendEvent(user, constants.EVENT_SUBSCRIPTION_NEED, map[string]any{})
 		return
 	}
 
@@ -98,7 +98,7 @@ func (v *HttpViews) CreateProjectBuild(w http.ResponseWriter, r *http.Request) {
 				"renewal_date": renewEnd.Format(time.RFC3339),
 				"plan_name":    planName,
 			})
-		go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_QUOTA_REACHED, map[string]any{
+		go v.Controller.CRMService.SendEvent(user, constants.EVENT_SUBSCRIPTION_QUOTA_REACHED, map[string]any{
 			"action": "create_build",
 			"limit":  limits.MontlyBuildCount,
 		})

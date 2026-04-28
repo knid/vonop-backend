@@ -36,7 +36,7 @@ func (v *HttpViews) CreateOrganization(w http.ResponseWriter, r *http.Request) {
 	v.Controller.TrackUserEvent(user, "organization_created", posthog.NewProperties().
 		Set("org_name", req.Name))
 
-	go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_ORGANIZATION_CREATED, map[string]any{
+	go v.Controller.CRMService.SendEvent(user, constants.EVENT_ORGANIZATION_CREATED, map[string]any{
 		"org_name": req.Name,
 	})
 
@@ -181,7 +181,7 @@ func (v *HttpViews) InviteOrganizationMember(w http.ResponseWriter, r *http.Requ
 	v.Controller.TrackUserEvent(user, "organization_member_invited", posthog.NewProperties().
 		Set("org_id", orgID))
 
-	go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_ORGANIZATION_MEMBER_INVITED, map[string]any{
+	go v.Controller.CRMService.SendEvent(user, constants.EVENT_ORGANIZATION_MEMBER_INVITED, map[string]any{
 		"org_id": orgID,
 	})
 

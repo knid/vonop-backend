@@ -96,7 +96,7 @@ func (v *HttpViews) CancelSubscription(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_CANCELLED, map[string]any{})
+	go v.Controller.CRMService.SendEvent(user, constants.EVENT_SUBSCRIPTION_CANCELLED, map[string]any{})
 
 	utils.JSONResponse(w, map[string]string{"message": "Subscription cancelled successfully"}, http.StatusOK)
 }

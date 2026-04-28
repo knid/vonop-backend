@@ -35,7 +35,7 @@ func (v *HttpViews) UpdateProject(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if requireActiveSubscription(w, user) {
-		go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_NEED, map[string]any{
+		go v.Controller.CRMService.SendEvent(user, constants.EVENT_SUBSCRIPTION_NEED, map[string]any{
 			"action": "update_project",
 		})
 		return
@@ -53,7 +53,7 @@ func (v *HttpViews) UpdateProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_PROJECT_UPDATED, map[string]any{
+	go v.Controller.CRMService.SendEvent(user, constants.EVENT_PROJECT_UPDATED, map[string]any{
 		"project_id": projectCreateRes.ID.String(),
 	})
 	go v.Controller.TrackUserEvent(user, "project_updated", posthog.NewProperties().
@@ -70,7 +70,7 @@ func (v *HttpViews) CreateProject(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if requireActiveSubscription(w, user) {
-		go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_NEED, map[string]any{
+		go v.Controller.CRMService.SendEvent(user, constants.EVENT_SUBSCRIPTION_NEED, map[string]any{
 			"action": "create_project",
 		})
 		return
@@ -94,7 +94,7 @@ func (v *HttpViews) CreateProject(w http.ResponseWriter, r *http.Request) {
 			"limit":     limits.MaximumProjectCount,
 			"plan_name": planName,
 		})
-		go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_SUBSCRIPTION_QUOTA_REACHED, map[string]any{
+		go v.Controller.CRMService.SendEvent(user, constants.EVENT_SUBSCRIPTION_QUOTA_REACHED, map[string]any{
 			"action": "create_project",
 			"limit":  limits.MaximumProjectCount,
 		})
@@ -114,7 +114,7 @@ func (v *HttpViews) CreateProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	go v.Controller.CRMService.SendEvent(user, constants.BREVO_EVENT_NEW_PROJECT, map[string]any{
+	go v.Controller.CRMService.SendEvent(user, constants.EVENT_NEW_PROJECT, map[string]any{
 		"project_id": projectCreateRes.ProjectID.String(),
 	})
 	go v.Controller.TrackUserEvent(user, "project_created", posthog.NewProperties().

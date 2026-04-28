@@ -221,7 +221,7 @@ func (c *Controller) CreateDeploymentTask(user *models.User, deploymentReq reque
 				return nil, fmt.Errorf("failed to trigger iOS deploy: %w", err)
 			}
 
-			go c.CRMService.SendEvent(user, constants.BREVO_EVENT_USER_APPLE_DEPLOYMENT_STARTED, map[string]interface{}{
+			go c.CRMService.SendEvent(user, constants.EVENT_USER_APPLE_DEPLOYMENT_STARTED, map[string]interface{}{
 				"project_id":       project.ID.String(),
 				"deployment_id":    deployment.ID.String(),
 				"build_id":         build.ID.String(),
@@ -256,7 +256,7 @@ func (c *Controller) CreateDeploymentTask(user *models.User, deploymentReq reque
 				return nil, fmt.Errorf("failed to trigger Android deploy: %w", err)
 			}
 
-			go c.CRMService.SendEvent(user, constants.BREVO_EVENT_USER_ANDROID_DEPLOYMENT_STARTED, map[string]interface{}{
+			go c.CRMService.SendEvent(user, constants.EVENT_USER_ANDROID_DEPLOYMENT_STARTED, map[string]interface{}{
 				"project_id":       project.ID.String(),
 				"deployment_id":    deployment.ID.String(),
 				"build_id":         build.ID.String(),

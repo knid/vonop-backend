@@ -102,7 +102,7 @@ func (r *Runner) tick(ctx context.Context) {
 			"submitted_at":  d.CreatedAt.UTC().Format(time.RFC3339),
 			"switch_url":    "/ship/" + d.ProjectID.String() + "#app-store",
 		}
-		if err := r.CRM.SendEvent(d.User, constants.BREVO_EVENT_PENDING_CONNECTION_NUDGE, attrs); err != nil {
+		if err := r.CRM.SendEvent(d.User, constants.EVENT_PENDING_CONNECTION_NUDGE, attrs); err != nil {
 			slog.Warn("pendingnudge: brevo send failed", "deployment_id", d.ID, "err", err)
 			continue
 		}

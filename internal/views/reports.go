@@ -71,19 +71,19 @@ func (v *HttpViews) UpdateBuildTaskStatus(w http.ResponseWriter, r *http.Request
 	// a stage ladder (Preparing → Building → Uploading), so gate on the
 	// first stage only to avoid double-firing.
 	if reportBuildReq.Status == "Preparing" && task.Platform == "ios" {
-		v.sendCRMEvent(task.Project.User, constants.BREVO_EVENT_BUILD_STARTED_IOS, payload)
+		v.sendCRMEvent(task.Project.User, constants.EVENT_BUILD_STARTED_IOS, payload)
 	} else if reportBuildReq.Status == "Preparing" && task.Platform == "android" {
-		v.sendCRMEvent(task.Project.User, constants.BREVO_EVENT_BUILD_STARTED_ANDROID, payload)
+		v.sendCRMEvent(task.Project.User, constants.EVENT_BUILD_STARTED_ANDROID, payload)
 	} else if reportBuildReq.Status == "Built" && task.Platform == "ios" {
-		v.sendCRMEvent(task.Project.User, constants.BREVO_EVENT_BUILD_FINISHED_IOS, payload)
+		v.sendCRMEvent(task.Project.User, constants.EVENT_BUILD_FINISHED_IOS, payload)
 	} else if reportBuildReq.Status == "Built" && task.Platform == "android" {
-		v.sendCRMEvent(task.Project.User, constants.BREVO_EVENT_BUILD_FINISHED_ANDROID, payload)
+		v.sendCRMEvent(task.Project.User, constants.EVENT_BUILD_FINISHED_ANDROID, payload)
 	} else if reportBuildReq.Status == "error" && task.Platform == "ios" {
 		payload["error_message"] = reportBuildReq.Message
-		v.sendCRMEvent(task.Project.User, constants.BREVO_EVENT_BUILD_ERROR_IOS, payload)
+		v.sendCRMEvent(task.Project.User, constants.EVENT_BUILD_ERROR_IOS, payload)
 	} else if reportBuildReq.Status == "error" && task.Platform == "android" {
 		payload["error_message"] = reportBuildReq.Message
-		v.sendCRMEvent(task.Project.User, constants.BREVO_EVENT_BUILD_ERROR_ANDROID, payload)
+		v.sendCRMEvent(task.Project.User, constants.EVENT_BUILD_ERROR_ANDROID, payload)
 	}
 
 	utils.JSONResponse(w, map[string]string{"status": "success"}, http.StatusOK)
@@ -124,22 +124,22 @@ func (v *HttpViews) UpdateDeploymentStatus(w http.ResponseWriter, r *http.Reques
 	case "ios":
 		switch reportDeploymentReq.Status {
 		case "Deploying":
-			v.sendCRMEvent(deployment.User, constants.BREVO_EVENT_USER_APPLE_DEPLOYMENT_STARTED, payload)
+			v.sendCRMEvent(deployment.User, constants.EVENT_USER_APPLE_DEPLOYMENT_STARTED, payload)
 		case "Deployed":
-			v.sendCRMEvent(deployment.User, constants.BREVO_EVENT_USER_APPLE_DEPLOYMENT_FINISHED, payload)
+			v.sendCRMEvent(deployment.User, constants.EVENT_USER_APPLE_DEPLOYMENT_FINISHED, payload)
 		case "error":
 			payload["error_message"] = reportDeploymentReq.Message
-			v.sendCRMEvent(deployment.User, constants.BREVO_EVENT_USER_APPLE_DEPLOYMENT_FAILED, payload)
+			v.sendCRMEvent(deployment.User, constants.EVENT_USER_APPLE_DEPLOYMENT_FAILED, payload)
 		}
 	case "android":
 		switch reportDeploymentReq.Status {
 		case "Deploying":
-			v.sendCRMEvent(deployment.User, constants.BREVO_EVENT_USER_ANDROID_DEPLOYMENT_STARTED, payload)
+			v.sendCRMEvent(deployment.User, constants.EVENT_USER_ANDROID_DEPLOYMENT_STARTED, payload)
 		case "Deployed":
-			v.sendCRMEvent(deployment.User, constants.BREVO_EVENT_USER_ANDROID_DEPLOYMENT_FINISHED, payload)
+			v.sendCRMEvent(deployment.User, constants.EVENT_USER_ANDROID_DEPLOYMENT_FINISHED, payload)
 		case "error":
 			payload["error_message"] = reportDeploymentReq.Message
-			v.sendCRMEvent(deployment.User, constants.BREVO_EVENT_USER_ANDROID_DEPLOYMENT_FAILED, payload)
+			v.sendCRMEvent(deployment.User, constants.EVENT_USER_ANDROID_DEPLOYMENT_FAILED, payload)
 		}
 	}
 
