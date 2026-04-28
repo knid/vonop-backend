@@ -151,8 +151,8 @@ func (s *Service) EnsureApp(appName string) error {
 // directly — it goes through the GraphQL API, and flyctl wraps it cleanly.
 func (s *Service) allocateIPs(appName string) error {
 	calls := [][]string{
-		{"flyctl", "ips", "allocate-v6", "--app", appName, "--yes"},
-		{"flyctl", "ips", "allocate-v4", "--shared", "--app", appName, "--yes"},
+		{"flyctl", "ips", "allocate-v6", "--app", appName},
+		{"flyctl", "ips", "allocate-v4", "--shared", "--app", appName},
 	}
 	for _, args := range calls {
 		cmd := exec.Command(args[0], args[1:]...)
