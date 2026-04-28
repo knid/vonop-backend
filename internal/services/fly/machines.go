@@ -21,10 +21,15 @@ type machineServiceConfig struct {
 	Protocol     string                    `json:"protocol"`
 	Ports        []machinePortConfig       `json:"ports"`
 	Concurrency  *machineConcurrencyConfig `json:"concurrency,omitempty"`
-	AutoStop     string                    `json:"auto_stop_machines,omitempty"`
-	AutoStart    bool                      `json:"auto_start_machines"`
-	MinMachines  int                       `json:"min_machines_running"`
-	Checks       []machineCheckConfig      `json:"checks,omitempty"`
+	// Fly's Machines API uses `autostop` / `autostart`, NOT
+	// `auto_stop_machines` / `auto_start_machines` (the latter are fly.toml
+	// keys; flyctl translates them on the way to the API). Sending the
+	// fly.toml names causes Fly to silently strip the fields. autostop
+	// accepts "stop" | "suspend" | "off".
+	AutoStop    string               `json:"autostop,omitempty"`
+	AutoStart   bool                 `json:"autostart"`
+	MinMachines int                  `json:"min_machines_running"`
+	Checks      []machineCheckConfig `json:"checks,omitempty"`
 }
 
 type machinePortConfig struct {
@@ -124,9 +129,13 @@ func (s *Service) DeployMachines(appName string, spec MachineSpec) error {
 				HardLimit: spec.Concurrency,
 				SoftLimit: spec.Concurrency * 8 / 10, // soft = 80% of hard
 			},
-			AutoStop:    "stop", // stop after idle
-			AutoStart:   true,   // wake on incoming request
-			MinMachines: 0,      // scale-to-zero
+			// "suspend" preserves machine RAM for fast wake (~hundreds of ms)
+			// vs "stop" which fully shuts down (~1-2s cold start). Per Fly
+			// docs, suspend costs slightly more (snapshot storage) but keeps
+			// scale-to-zero traffic feeling instant.
+			AutoStop:    "suspend",
+			AutoStart:   true, // wake on incoming request
+			MinMachines: 0,    // scale-to-zero
 			Checks: []machineCheckConfig{{
 				Type:     spec.Healthcheck.Type,
 				Port:     spec.Healthcheck.Port,
