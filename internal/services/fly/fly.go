@@ -197,15 +197,27 @@ func (s *Service) DeleteApp(appName string) error {
 	return err
 }
 
-// SyncSecrets sets all the listed secrets on a Fly app in one bulk call.
-// Existing secrets not in the map are left alone — this matches Coolify's
-// SyncEnvVars semantics. Idempotent.
+// SyncSecrets sets each listed secret on a Fly app via the per-label endpoint.
+// Existing secrets not in the map are left alone — matches Coolify's
+// SyncEnvVars semantics. Idempotent: re-setting an unchanged value is a no-op
+// on Fly's side (digest stays the same).
+//
+// Fly's Machines API requires one POST per secret to /v1/apps/<app>/secrets/<label>;
+// there is NO bulk endpoint despite what the URL pattern might suggest. POSTing
+// to /v1/apps/<app>/secrets returns the *list* of existing secrets and silently
+// ignores the request body — that bug burned us once already, hence this comment.
 func (s *Service) SyncSecrets(appName string, kv map[string]string) error {
 	if len(kv) == 0 {
 		return nil
 	}
-	body := map[string]any{
-		"secrets": kv,
+	for k, v := range kv {
+		body := map[string]any{
+			"value": v,
+			"type":  "shared",
+		}
+		if err := s.doRequest("POST", "/v1/apps/"+appName+"/secrets/"+k, body, nil); err != nil {
+			return fmt.Errorf("set secret %q: %w", k, err)
+		}
 	}
-	return s.doRequest("POST", "/v1/apps/"+appName+"/secrets", body, nil)
+	return nil
 }
