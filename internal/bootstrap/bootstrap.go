@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/hibiken/asynq"
@@ -217,6 +218,17 @@ func BootstrapController() (*controllers.Controller, asynq.RedisClientOpt) {
 		TLSConfig: &tls.Config{},
 	}
 
+	edgeIPsCSV := sm.GetSecret("EDGE_IPS")
+	var edgeIPs []string
+	if edgeIPsCSV != "" {
+		parts := strings.Split(edgeIPsCSV, ",")
+		for _, p := range parts {
+			if trimmed := strings.TrimSpace(p); trimmed != "" {
+				edgeIPs = append(edgeIPs, trimmed)
+			}
+		}
+	}
+
 	controller := controllers.NewController(
 		db,
 		make(chan struct{}, constants.MAX_CONCURRENT_BUILDS),
@@ -237,6 +249,7 @@ func BootstrapController() (*controllers.Controller, asynq.RedisClientOpt) {
 		codemagicService,
 		remoteConfigService,
 		e2b,
+		edgeIPs,
 	)
 
 	// MCP service (optional — connect in background so it doesn't block server startup)

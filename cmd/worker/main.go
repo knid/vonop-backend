@@ -45,7 +45,22 @@ func main() {
 
 	mux := asynq.NewServeMux()
 	mux.HandleFunc(tasks.TypeDeployWeb, controller.HandleWebDeployTask)
-	// Future cron handlers (DNS check, etc.) registered in subsequent phases.
+	mux.HandleFunc("cron:dns-check", func(ctx context.Context, _ *asynq.Task) error {
+		return controller.CheckPendingDomainsTask(ctx)
+	})
+
+	scheduler := asynq.NewScheduler(redisOpts, &asynq.SchedulerOpts{
+		Location: time.UTC,
+	})
+	if _, err := scheduler.Register("@every 30s", asynq.NewTask("cron:dns-check", nil), asynq.Queue("cron")); err != nil {
+		slog.Error("schedule dns-check", "err", err)
+		os.Exit(1)
+	}
+	go func() {
+		if err := scheduler.Run(); err != nil {
+			slog.Error("scheduler exit", "err", err)
+		}
+	}()
 
 	go func() {
 		sig := make(chan os.Signal, 1)

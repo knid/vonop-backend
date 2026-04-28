@@ -51,6 +51,7 @@ type Controller struct {
 	PendingClarifications  sync.Map       // map[string]chan ClarificationResult for jobs awaiting user input
 	JobEventBuses          sync.Map       // map[string]*EventBus for live SSE fan-out to multiple clients
 	identifiedUsers        sync.Map       // tracks users already identified to PostHog this process
+	EdgeIPs                []string       // known Fly edge IPs for DNS verification
 }
 
 func NewController(db *database.Database, concurrentBuildLimiter chan struct{},
@@ -64,7 +65,8 @@ func NewController(db *database.Database, concurrentBuildLimiter chan struct{},
 	gitRepoService *gitrepo.Service,
 	codemagicService *codemagic.Service,
 	remoteConfigService *remoteconfig.Service,
-	e2b *e2bService.Service) *Controller {
+	e2b *e2bService.Service,
+	edgeIPs []string) *Controller {
 
 	return &Controller{
 		DB:                     db,
@@ -86,6 +88,7 @@ func NewController(db *database.Database, concurrentBuildLimiter chan struct{},
 		PostHog:                posthogClient,
 		RemoteConfig:           remoteConfigService,
 		E2BService:             e2b,
+		EdgeIPs:                edgeIPs,
 	}
 }
 
