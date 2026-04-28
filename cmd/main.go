@@ -151,6 +151,7 @@ func createSchema(db *bun.DB) error {
 		`UPDATE standard_user_subscriptions SET price_id = NULL WHERE price_id = ''`,
 		// soft_delete column for all tables that use bun:",soft_delete,nullzero"
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS twenty_person_id text`,
 		`ALTER TABLE user_notifications ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
 		`ALTER TABLE tokens ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
 		`ALTER TABLE standard_user_limits ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
