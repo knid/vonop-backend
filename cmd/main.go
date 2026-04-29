@@ -260,6 +260,11 @@ func createSchema(db *bun.DB) error {
 			LIMIT 1
 		) WHERE organization_id IS NULL`,
 		`ALTER TABLE app_projects ALTER COLUMN organization_id SET NOT NULL`,
+		// Org-scoped credits: add organization_id to balance + transactions, member cap (2026-04-30-org-scoped-credits)
+		`ALTER TABLE ai_credits_balances ADD COLUMN IF NOT EXISTS organization_id uuid`,
+		`ALTER TABLE ai_credits_balances ALTER COLUMN user_id DROP NOT NULL`,
+		`ALTER TABLE ai_credit_transactions ADD COLUMN IF NOT EXISTS organization_id uuid`,
+		`ALTER TABLE organization_members ADD COLUMN IF NOT EXISTS monthly_credit_cap int`,
 	}
 
 	// Deduplicate before creating unique indexes (keep the latest row per group)
@@ -298,7 +303,7 @@ func createSchema(db *bun.DB) error {
 	// Table renames go in renameStatements below, not here — they run unconditionally.
 	var migrationsDone bool
 	row := db.QueryRowContext(context.Background(),
-		"SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='organizations' AND column_name='is_personal')")
+		"SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='ai_credits_balances' AND column_name='organization_id')")
 	if err := row.Scan(&migrationsDone); err != nil {
 		migrationsDone = false
 	}
