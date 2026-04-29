@@ -152,3 +152,20 @@ func (db *Database) CountOrganizationsByUserID(userID string) (int, error) {
 		Count(context.Background())
 	return count, err
 }
+
+// GetPersonalOrgByUserID returns the user's personal organization (the auto-
+// created one with IsPersonal=true and owner=user). Returns sql.ErrNoRows if
+// the user has not been backfilled yet.
+func (db *Database) GetPersonalOrgByUserID(userID string) (*models.Organization, error) {
+	var org models.Organization
+	err := db.DB.NewSelect().
+		Model(&org).
+		Where("owner_id = ?", userID).
+		Where("is_personal = ?", true).
+		Limit(1).
+		Scan(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	return &org, nil
+}

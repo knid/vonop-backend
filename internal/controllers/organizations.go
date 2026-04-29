@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -306,4 +307,46 @@ func (c *Controller) UpdateMemberRole(user *models.User, orgID, memberID string,
 		Role:      updated.Role,
 		CreatedAt: updated.CreatedAt,
 	}, nil
+}
+
+// EnsurePersonalOrg returns the user's personal organization, creating it
+// if one does not exist. Idempotent — safe to call from signup paths and
+// from backfill. Slug is "<slugified-name>-<random6>"; we always append a
+// suffix to avoid scanning the table for free names.
+func (c *Controller) EnsurePersonalOrg(user *models.User) (*models.Organization, error) {
+	existing, err := c.DB.GetPersonalOrgByUserID(user.ID.String())
+	if err == nil && existing != nil {
+		return existing, nil
+	}
+
+	displayName := strings.TrimSpace(user.Name)
+	if displayName == "" {
+		displayName = "Workspace"
+	}
+	orgName := displayName + "'s Workspace"
+
+	base := utils.SlugifyName(displayName)
+	slug := utils.SlugWithSuffix(base)
+
+	org := &models.Organization{
+		Name:       orgName,
+		Slug:       slug,
+		OwnerID:    user.ID,
+		IsPersonal: true,
+	}
+	created, err := c.DB.CreateOrganization(org)
+	if err != nil {
+		return nil, fmt.Errorf("create personal org: %w", err)
+	}
+
+	member := &models.OrganizationMember{
+		OrganizationID: created.ID,
+		UserID:         user.ID,
+		Role:           "owner",
+	}
+	if _, err := c.DB.CreateOrganizationMember(member); err != nil {
+		return nil, fmt.Errorf("create personal org owner membership: %w", err)
+	}
+
+	return created, nil
 }
