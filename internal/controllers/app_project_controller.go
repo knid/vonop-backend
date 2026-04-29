@@ -94,16 +94,22 @@ func (c *Controller) CreateAppProject(ctx context.Context, user *models.User, re
 
 	name, slug := c.generateAppNameAndSlug(ctx, req.Prompt)
 
+	orgID, err := c.RequireOrgIDForUser(user, req.OrganizationID)
+	if err != nil {
+		return nil, err
+	}
+
 	project := &models.AppProject{
-		UserID:      user.ID,
-		Name:        name,
-		Slug:        slug,
-		Prompt:      req.Prompt,
-		ProjectType: projectType,
-		Theme:       []byte("{}"),
-		DataModels:  []byte("[]"),
-		Settings:    map[string]any{},
-		Status:      "generating",
+		UserID:         user.ID,
+		OrganizationID: orgID,
+		Name:           name,
+		Slug:           slug,
+		Prompt:         req.Prompt,
+		ProjectType:    projectType,
+		Theme:          []byte("{}"),
+		DataModels:     []byte("[]"),
+		Settings:       map[string]any{},
+		Status:         "generating",
 	}
 
 	project, err = c.DB.CreateAppProject(project)
@@ -148,15 +154,16 @@ func (c *Controller) CloneAppProjectAsMobile(user *models.User, sourceProjectID 
 	slug := makeSlug(source.Name)
 
 	clone := &models.AppProject{
-		UserID:      user.ID,
-		Name:        source.Name,
-		Slug:        slug,
-		Prompt:      source.Prompt,
-		ProjectType: "mobile_app",
-		Theme:       source.Theme,
-		DataModels:  source.DataModels,
-		Settings:    source.Settings,
-		Status:      "ready",
+		UserID:         user.ID,
+		OrganizationID: source.OrganizationID,
+		Name:           source.Name,
+		Slug:           slug,
+		Prompt:         source.Prompt,
+		ProjectType:    "mobile_app",
+		Theme:          source.Theme,
+		DataModels:     source.DataModels,
+		Settings:       source.Settings,
+		Status:         "ready",
 	}
 
 	clone, err = c.DB.CreateAppProject(clone)

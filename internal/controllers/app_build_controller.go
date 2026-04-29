@@ -623,6 +623,8 @@ func (c *Controller) BackfillV1ProjectsForMobileApps() {
 	slog.Info("BackfillV1ProjectsForMobileApps: starting", "count", len(rows))
 
 	for _, row := range rows {
+		// Note: shell of an existing AppProject (ID parsed from row) — not persisted;
+		// passed to ensureV1ProjectForMobileApp which only creates a v1 Project.
 		appProject := &models.AppProject{
 			Name:      row.Name,
 			LogoS3Key: row.LogoS3Key,
