@@ -1210,12 +1210,15 @@ func main() {
 					r.Get("/", httpViews.GetOrganization)
 					r.Put("/", httpViews.UpdateOrganization)
 					r.Delete("/", httpViews.DeleteOrganization)
+					r.Get("/credits", httpViews.GetOrgCreditsForAdmin)
+					r.Get("/credits/me", httpViews.GetOrgCreditsForMember)
 					r.Route("/members", func(r chi.Router) {
 						r.Get("/", httpViews.GetOrganizationMembers)
 						r.Post("/invite", httpViews.InviteOrganizationMember)
 						r.Route("/{memberId}", func(r chi.Router) {
 							r.Put("/role", httpViews.UpdateMemberRole)
 							r.Delete("/", httpViews.RemoveOrganizationMember)
+							r.Patch("/credit-cap", httpViews.SetMemberCreditCap)
 						})
 					})
 				})
