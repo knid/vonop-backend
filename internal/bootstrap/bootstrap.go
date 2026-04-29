@@ -250,7 +250,13 @@ func BootstrapController() (*controllers.Controller, asynq.RedisClientOpt) {
 	)
 
 	twentyEvents := events.NewTwentyService(db, sm.GetSecret("TWENTY_API_KEY"), sm.GetSecret("TWENTY_BASE_URL"))
-	resendEvents := events.NewResendService(sm.GetSecret("RESEND_API_KEY"))
+	var resendSegmentIDs []string
+	for _, id := range strings.Split(sm.GetSecret("RESEND_SEGMENT_IDS"), ",") {
+		if id = strings.TrimSpace(id); id != "" {
+			resendSegmentIDs = append(resendSegmentIDs, id)
+		}
+	}
+	resendEvents := events.NewResendService(sm.GetSecret("RESEND_API_KEY"), resendSegmentIDs...)
 	eventService := events.NewMulticastService(twentyEvents, resendEvents)
 
 	// Bootstrap Twenty custom fields once on startup. Failures log but don't crash.

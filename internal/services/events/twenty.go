@@ -29,6 +29,11 @@ type TwentyService struct {
 	baseURL string
 	client  *http.Client
 	db      *database.Database
+	// personObjectID is the Twenty metadata UUID for the standard "person"
+	// object. Cached during EnsureSchema for any future metadata operations
+	// that need it. The data-plane endpoints (/rest/people) use the plural
+	// name and don't need this.
+	personObjectID string
 }
 
 func NewTwentyService(db *database.Database, apiKey, baseURL string) *TwentyService {
