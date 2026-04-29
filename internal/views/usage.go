@@ -69,11 +69,12 @@ func (v *HttpViews) GetMontlyUsage(w http.ResponseWriter, r *http.Request) {
 	webAppsUsed, _ := v.Controller.DB.CountAppProjectsByUserIDAndType(user.ID.String(), "")
 	mobileAppsUsed, _ := v.Controller.DB.CountAppProjectsByUserIDAndType(user.ID.String(), "mobile_app")
 
-	// AI credits balance
+	// AI credits balance — read against the user's personal org.
 	var aiCreditsBalance int
-	balance, balErr := v.Controller.GetOrCreateCreditsBalance(user)
-	if balErr == nil {
-		aiCreditsBalance = balance.Balance
+	if orgID, orgErr := v.Controller.RequireOrgIDForUser(user, nil); orgErr == nil {
+		if balance, balErr := v.Controller.GetOrCreateCreditsBalance(user, orgID); balErr == nil {
+			aiCreditsBalance = balance.Balance
+		}
 	}
 
 	output := map[string]any{
