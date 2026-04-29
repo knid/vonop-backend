@@ -355,6 +355,72 @@ func (db *Database) BulkAssignTransactionOrgsFromPersonalOrg() (int, error) {
 	return int(n), nil
 }
 
+// GetAICreditsBalanceByOrg returns the balance for an organization. Returns
+// sql.ErrNoRows if the org has not been backfilled or has never had a balance.
+func (db *Database) GetAICreditsBalanceByOrg(orgID string) (*models.AICreditsBalance, error) {
+	var balance models.AICreditsBalance
+	err := db.DB.NewSelect().Model(&balance).
+		Where("organization_id = ?", orgID).
+		Limit(1).
+		Scan(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	return &balance, nil
+}
+
+// MemberPeriodSpent returns the absolute value of credits a single member has
+// spent within a period (sum of negative-amount transactions). Used for cap
+// enforcement.
+func (db *Database) MemberPeriodSpent(orgID, userID string, periodStart, periodEnd time.Time) (int, error) {
+	var spent int
+	err := db.DB.NewSelect().
+		Model((*models.AICreditTransaction)(nil)).
+		ColumnExpr("COALESCE(SUM(-amount), 0)").
+		Where("organization_id = ?", orgID).
+		Where("user_id = ?", userID).
+		Where("amount < 0").
+		Where("created_at >= ?", periodStart).
+		Where("created_at < ?", periodEnd).
+		Scan(context.Background(), &spent)
+	return spent, err
+}
+
+// OrgUsageBreakdownRow is one row of "spend per member in this org for the period."
+type OrgUsageBreakdownRow struct {
+	UserID    uuid.UUID `bun:"user_id"`
+	UserEmail string    `bun:"user_email"`
+	UserName  string    `bun:"user_name"`
+	Spent     int       `bun:"spent"`
+}
+
+// OrgUsageBreakdown returns each member's period-spend, sorted descending.
+// Members with zero spend are still included (so admin can see caps for everyone).
+func (db *Database) OrgUsageBreakdown(orgID string, periodStart, periodEnd time.Time) ([]OrgUsageBreakdownRow, error) {
+	var rows []OrgUsageBreakdownRow
+	err := db.DB.NewRaw(`
+		SELECT
+			m.user_id AS user_id,
+			COALESCE(u.email, '') AS user_email,
+			COALESCE(u.name, '') AS user_name,
+			COALESCE((
+				SELECT SUM(-t.amount)
+				FROM ai_credit_transactions t
+				WHERE t.organization_id = ?
+				  AND t.user_id = m.user_id
+				  AND t.amount < 0
+				  AND t.created_at >= ?
+				  AND t.created_at < ?
+			), 0) AS spent
+		FROM organization_members m
+		LEFT JOIN users u ON u.id = m.user_id
+		WHERE m.organization_id = ?
+		  AND m.deleted_at IS NULL
+		ORDER BY spent DESC, u.email ASC
+	`, orgID, periodStart, periodEnd, orgID).Scan(context.Background(), &rows)
+	return rows, err
+}
+
 func (db *Database) GetLLMTokenUsageSummaryByProject(projectID, actionPrefix string, since time.Time) (prompt, completion, total, callCount int, err error) {
 	var result struct {
 		Prompt     int `bun:"prompt"`
