@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/models"
 	"github.com/uptrace/bun"
 )
@@ -304,6 +305,56 @@ func (db *Database) GetLLMTokenUsageByProject(projectID, actionPrefix string, li
 // project since the given time. Mirrors GetLLMTokenUsageSummary but
 // scopes by project reference instead of user. If actionPrefix is
 // non-empty, only entries whose action starts with it are aggregated.
+// ListBalancesWithoutOrg returns AICreditsBalance rows where organization_id is NULL.
+func (db *Database) ListBalancesWithoutOrg() ([]models.AICreditsBalance, error) {
+	var rows []models.AICreditsBalance
+	err := db.DB.NewSelect().Model(&rows).
+		Where("organization_id IS NULL").
+		Where("user_id IS NOT NULL").
+		Scan(context.Background())
+	return rows, err
+}
+
+// AssignBalanceOrg sets organization_id on a single AICreditsBalance row.
+func (db *Database) AssignBalanceOrg(balanceID string, orgID uuid.UUID) error {
+	_, err := db.DB.NewUpdate().
+		Model((*models.AICreditsBalance)(nil)).
+		Set("organization_id = ?", orgID).
+		Where("id = ?", balanceID).
+		Exec(context.Background())
+	return err
+}
+
+// CountTransactionsWithoutOrg returns the count of ai_credit_transactions
+// without organization_id (for backfill progress reporting).
+func (db *Database) CountTransactionsWithoutOrg() (int, error) {
+	count, err := db.DB.NewSelect().
+		Model((*models.AICreditTransaction)(nil)).
+		Where("organization_id IS NULL").
+		Count(context.Background())
+	return count, err
+}
+
+// BulkAssignTransactionOrgsFromPersonalOrg sets organization_id on all
+// transactions to the personal org of the transaction's user_id, using a
+// single SQL statement (faster than per-row updates for very large tables).
+func (db *Database) BulkAssignTransactionOrgsFromPersonalOrg() (int, error) {
+	res, err := db.DB.ExecContext(context.Background(), `
+		UPDATE ai_credit_transactions
+		SET organization_id = o.id
+		FROM organizations o
+		WHERE ai_credit_transactions.organization_id IS NULL
+		  AND o.owner_id = ai_credit_transactions.user_id
+		  AND o.is_personal = true
+		  AND o.deleted_at IS NULL
+	`)
+	if err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	return int(n), nil
+}
+
 func (db *Database) GetLLMTokenUsageSummaryByProject(projectID, actionPrefix string, since time.Time) (prompt, completion, total, callCount int, err error) {
 	var result struct {
 		Prompt     int `bun:"prompt"`
