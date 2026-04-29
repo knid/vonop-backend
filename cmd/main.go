@@ -251,6 +251,8 @@ func createSchema(db *bun.DB) error {
 		`ALTER TABLE app_domains ADD COLUMN IF NOT EXISTS dns_check_status text NOT NULL DEFAULT ''`,
 		`ALTER TABLE app_domains ADD COLUMN IF NOT EXISTS dns_instructions jsonb NOT NULL DEFAULT '{}'::jsonb`,
 		`CREATE INDEX IF NOT EXISTS idx_app_domains_dns_check_status ON app_domains(dns_check_status) WHERE dns_check_status = 'pending'`,
+		// Org foundation: personal-workspace flag (2026-04-29-org-foundation)
+		`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS is_personal boolean NOT NULL DEFAULT false`,
 	}
 
 	// Deduplicate before creating unique indexes (keep the latest row per group)
