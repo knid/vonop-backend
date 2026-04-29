@@ -291,7 +291,7 @@ func createSchema(db *bun.DB) error {
 	// Table renames go in renameStatements below, not here — they run unconditionally.
 	var migrationsDone bool
 	row := db.QueryRowContext(context.Background(),
-		"SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='app_domains' AND column_name='dns_check_status')")
+		"SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='organizations' AND column_name='is_personal')")
 	if err := row.Scan(&migrationsDone); err != nil {
 		migrationsDone = false
 	}
