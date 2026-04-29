@@ -137,6 +137,9 @@ func (c *Controller) DeleteOrganization(user *models.User, orgID string) error {
 	if org.OwnerID != user.ID {
 		return errors.New("only the owner can delete an organization")
 	}
+	if org.IsPersonal {
+		return errors.New("personal workspaces cannot be deleted")
+	}
 	return c.DB.DeleteOrganization(org)
 }
 
