@@ -30,6 +30,7 @@ type OrganizationMember struct {
 	UserID         uuid.UUID     `bun:",notnull,type:uuid"`
 	User           *User         `bun:"rel:belongs-to,join:user_id=id"`
 	Role           string        `bun:",notnull,default:'member'"` // owner, admin, member
+	MonthlyCreditCap  *int          `bun:",nullzero"` // NULL = unlimited within pool
 	CreatedAt      time.Time     `bun:"created_at,nullzero,notnull,default:current_timestamp"`
 	UpdatedAt      time.Time     `bun:"updated_at,nullzero,notnull,default:current_timestamp"`
 	DeletedAt      time.Time     `bun:",soft_delete,nullzero"`
