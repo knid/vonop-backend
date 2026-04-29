@@ -193,6 +193,10 @@ func (c *Controller) RegisterUser(userRegisterReq requests.UserRegisterRequest) 
 
 	c.assignFreePlan(createdUser)
 
+	if _, err := c.EnsurePersonalOrg(createdUser); err != nil {
+		slog.Error("failed to ensure personal org on registration", "error", err, "user_id", createdUser.ID)
+	}
+
 	// Apply referral code if provided during registration
 	if userRegisterReq.ReferralCode != "" {
 		if err := c.ApplyReferralCode(createdUser, userRegisterReq.ReferralCode); err != nil {
