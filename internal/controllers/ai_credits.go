@@ -919,6 +919,130 @@ func (c *Controller) RecordTokenUsage(user *models.User, action, model, provider
 	}
 }
 
+// OrgCreditsView is the admin/owner view of an org's credit pool.
+type OrgCreditsView struct {
+	OrganizationID uuid.UUID              `json:"organization_id"`
+	Balance        int                    `json:"balance"`
+	PendingGateway float64                `json:"pending_gateway"`
+	PeriodStart    time.Time              `json:"period_start"`
+	PeriodEnd      time.Time              `json:"period_end"`
+	Members        []OrgCreditsMemberView `json:"members"`
+}
+
+type OrgCreditsMemberView struct {
+	MemberID         uuid.UUID `json:"member_id"`
+	UserID           uuid.UUID `json:"user_id"`
+	UserEmail        string    `json:"user_email"`
+	UserName         string    `json:"user_name"`
+	Role             string    `json:"role"`
+	MonthlyCreditCap *int      `json:"monthly_credit_cap,omitempty"`
+	PeriodSpent      int       `json:"period_spent"`
+}
+
+// GetOrgCreditsViewForAdmin returns the admin/owner view of an org's credits:
+// pool balance, period dates, and per-member usage breakdown with caps.
+// Caller must be owner or admin of the org.
+func (c *Controller) GetOrgCreditsViewForAdmin(user *models.User, orgID string) (*OrgCreditsView, error) {
+	caller, err := c.DB.GetOrganizationMember(orgID, user.ID.String())
+	if err != nil {
+		return nil, errors.New("organization not found or access denied")
+	}
+	if caller.Role != "owner" && caller.Role != "admin" {
+		return nil, errors.New("insufficient permissions")
+	}
+
+	bal, err := c.DB.GetAICreditsBalanceByOrg(orgID)
+	if err != nil {
+		return nil, fmt.Errorf("get balance: %w", err)
+	}
+
+	members, err := c.DB.GetOrganizationMembers(orgID)
+	if err != nil {
+		return nil, fmt.Errorf("get members: %w", err)
+	}
+
+	breakdown, err := c.DB.OrgUsageBreakdown(orgID, bal.PeriodStart, bal.PeriodEnd)
+	if err != nil {
+		return nil, fmt.Errorf("usage breakdown: %w", err)
+	}
+	spentByUser := make(map[uuid.UUID]int, len(breakdown))
+	for _, r := range breakdown {
+		spentByUser[r.UserID] = r.Spent
+	}
+
+	views := make([]OrgCreditsMemberView, 0, len(members))
+	for _, m := range members {
+		mv := OrgCreditsMemberView{
+			MemberID:         m.ID,
+			UserID:           m.UserID,
+			Role:             m.Role,
+			MonthlyCreditCap: m.MonthlyCreditCap,
+			PeriodSpent:      spentByUser[m.UserID],
+		}
+		if m.User != nil {
+			mv.UserEmail = m.User.Email
+			mv.UserName = m.User.Name
+		}
+		views = append(views, mv)
+	}
+
+	return &OrgCreditsView{
+		OrganizationID: bal.OrganizationID,
+		Balance:        bal.Balance,
+		PendingGateway: bal.PendingGateway,
+		PeriodStart:    bal.PeriodStart,
+		PeriodEnd:      bal.PeriodEnd,
+		Members:        views,
+	}, nil
+}
+
+// MemberCreditsView is what a non-admin member sees: their own cap + own usage.
+// Pool total NOT included by design.
+type MemberCreditsView struct {
+	OrganizationID   uuid.UUID `json:"organization_id"`
+	PeriodStart      time.Time `json:"period_start"`
+	PeriodEnd        time.Time `json:"period_end"`
+	MonthlyCreditCap *int      `json:"monthly_credit_cap,omitempty"`
+	PeriodSpent      int       `json:"period_spent"`
+}
+
+// GetOrgCreditsViewForMember returns the caller's own cap + own period spend
+// in an org. No pool total exposed.
+func (c *Controller) GetOrgCreditsViewForMember(user *models.User, orgID string) (*MemberCreditsView, error) {
+	member, err := c.DB.GetOrganizationMember(orgID, user.ID.String())
+	if err != nil {
+		return nil, errors.New("organization not found or access denied")
+	}
+	bal, err := c.DB.GetAICreditsBalanceByOrg(orgID)
+	if err != nil {
+		return nil, fmt.Errorf("get balance: %w", err)
+	}
+	spent, err := c.DB.MemberPeriodSpent(orgID, user.ID.String(), bal.PeriodStart, bal.PeriodEnd)
+	if err != nil {
+		return nil, fmt.Errorf("member spent: %w", err)
+	}
+	return &MemberCreditsView{
+		OrganizationID:   bal.OrganizationID,
+		PeriodStart:      bal.PeriodStart,
+		PeriodEnd:        bal.PeriodEnd,
+		MonthlyCreditCap: member.MonthlyCreditCap,
+		PeriodSpent:      spent,
+	}, nil
+}
+
+// SetMemberCreditCap sets or clears a member's monthly credit cap. cap=nil
+// clears (unlimited within pool). Caller must be owner/admin of the org.
+func (c *Controller) SetMemberCreditCap(user *models.User, orgID, memberID string, cap *int) (*models.OrganizationMember, error) {
+	caller, err := c.DB.GetOrganizationMember(orgID, user.ID.String())
+	if err != nil {
+		return nil, errors.New("organization not found or access denied")
+	}
+	if caller.Role != "owner" && caller.Role != "admin" {
+		return nil, errors.New("insufficient permissions")
+	}
+	return c.DB.UpdateMemberCap(orgID, memberID, cap)
+}
+
 // RecordLLMError sends a PostHog $ai_generation event for a failed LLM call
 // and — when the tracker is non-nil — a matching $ai_trace grouping event so
 // failures always surface on the LLM Analytics dashboard even when no round
