@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/go-playground/validator/v10"
+	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/requests"
@@ -502,5 +504,35 @@ func InferFileType(path string) string {
 	default:
 		return "text"
 	}
+}
+
+// MoveAppProjectToOrg transfers a project between organizations. The caller
+// must own (or be admin of) BOTH the source org (where the project currently
+// lives) and the destination org. The project itself must belong to the
+// caller (UserID match) — we don't yet support agency-style transfers where
+// an org admin moves another member's project.
+func (c *Controller) MoveAppProjectToOrg(user *models.User, projectID string, destOrgID uuid.UUID) (*models.AppProject, error) {
+	project, err := c.DB.GetAppProjectByID(projectID)
+	if err != nil {
+		return nil, errors.New("project not found")
+	}
+	if project.UserID != user.ID {
+		return nil, errors.New("only the project owner can transfer it")
+	}
+
+	srcMember, err := c.DB.GetOrganizationMember(project.OrganizationID.String(), user.ID.String())
+	if err != nil || (srcMember.Role != "owner" && srcMember.Role != "admin") {
+		return nil, errors.New("insufficient permissions on source organization")
+	}
+	dstMember, err := c.DB.GetOrganizationMember(destOrgID.String(), user.ID.String())
+	if err != nil || (dstMember.Role != "owner" && dstMember.Role != "admin") {
+		return nil, errors.New("insufficient permissions on destination organization")
+	}
+
+	if err := c.DB.AssignAppProjectOrg(project.ID.String(), destOrgID); err != nil {
+		return nil, fmt.Errorf("transfer project: %w", err)
+	}
+	project.OrganizationID = destOrgID
+	return project, nil
 }
 

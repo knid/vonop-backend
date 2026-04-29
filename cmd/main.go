@@ -1368,6 +1368,7 @@ func main() {
 					r.Get("/init", httpViews.GetAppInit)
 					r.Put("/", httpViews.UpdateApp)
 					r.Delete("/", httpViews.DeleteApp)
+					r.Post("/transfer", httpViews.TransferAppProject)
 
 					// Files (code-first CRUD)
 					r.Get("/files/{platform}", httpViews.GetAppFiles)

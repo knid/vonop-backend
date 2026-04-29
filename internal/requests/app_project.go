@@ -199,3 +199,11 @@ type ClarifyJobRequest struct {
 func (r *ClarifyJobRequest) Validate(validate *validator.Validate) error {
 	return utils.ValidateFunc[ClarifyJobRequest](*r, validate)
 }
+
+type TransferProjectRequest struct {
+	OrganizationID uuid.UUID `json:"organization_id" validate:"required"`
+}
+
+func (r *TransferProjectRequest) Validate(validate *validator.Validate) error {
+	return utils.ValidateFunc[TransferProjectRequest](*r, validate)
+}
