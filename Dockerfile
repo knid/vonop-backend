@@ -11,7 +11,6 @@ COPY . .
 
 RUN go build -trimpath -ldflags="-s -w" -o bin cmd/main.go
 RUN go build -trimpath -ldflags="-s -w" -o worker cmd/worker/main.go
-RUN go build -trimpath -ldflags="-s -w" -o migrate_to_fly cmd/migrate-to-fly/main.go
 RUN go build -trimpath -ldflags="-s -w" -o loadtest_publish cmd/loadtest-publish/main.go
 RUN go build -trimpath -ldflags="-s -w" -o migrate_to_git cmd/migrate_to_git/main.go
 
@@ -33,7 +32,6 @@ RUN addgroup -S appuser \
 COPY --from=flyctl /flyctl /usr/local/bin/flyctl
 COPY --from=builder --chown=appuser:appuser /app/bin /app/bin
 COPY --from=builder --chown=appuser:appuser /app/worker /app/worker
-COPY --from=builder --chown=appuser:appuser /app/migrate_to_fly /app/migrate_to_fly
 COPY --from=builder --chown=appuser:appuser /app/loadtest_publish /app/loadtest_publish
 COPY --from=builder --chown=appuser:appuser /app/migrate_to_git /app/migrate_to_git
 COPY --from=builder --chown=appuser:appuser /app/storage /app/storage
