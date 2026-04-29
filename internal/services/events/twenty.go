@@ -146,7 +146,12 @@ func (s *TwentyService) writeUserEvent(personID, event string, eventAt time.Time
 		return
 	}
 
+	// Twenty's list views and Person Timeline render the auto-created `name`
+	// field as the row label. We populate it with the event name so records
+	// show as e.g. "user_logged_in" instead of "Untitled". `eventName` stays
+	// for filterable workflow conditions.
 	body, err := json.Marshal(map[string]any{
+		"name":      event,
 		"eventName": event,
 		"eventAt":   eventAt.Format(time.RFC3339),
 		"payload":   attributes,
