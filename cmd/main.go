@@ -276,6 +276,16 @@ func createSchema(db *bun.DB) error {
 			);
 			END IF;
 		END $$;`,
+		// Org-scoped credits: enforce after backfill (2026-04-30-org-scoped-credits)
+		`UPDATE ai_credits_balances SET organization_id = (
+			SELECT id FROM organizations WHERE owner_id = ai_credits_balances.user_id AND is_personal = true LIMIT 1
+		) WHERE organization_id IS NULL AND user_id IS NOT NULL`,
+		`UPDATE ai_credit_transactions SET organization_id = (
+			SELECT id FROM organizations WHERE owner_id = ai_credit_transactions.user_id AND is_personal = true LIMIT 1
+		) WHERE organization_id IS NULL`,
+		`ALTER TABLE ai_credits_balances ALTER COLUMN organization_id SET NOT NULL`,
+		`ALTER TABLE ai_credit_transactions ALTER COLUMN organization_id SET NOT NULL`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS ux_ai_credits_balances_org ON ai_credits_balances(organization_id)`,
 	}
 
 	// Deduplicate before creating unique indexes (keep the latest row per group)

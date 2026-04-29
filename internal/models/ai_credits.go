@@ -18,7 +18,7 @@ import (
 // cheap models like claude-haiku-4-5 by ~20×).
 type AICreditsBalance struct {
 	ID             uuid.UUID     `bun:",pk,type:uuid,default:uuid_generate_v4()"`
-	OrganizationID uuid.UUID     `bun:",type:uuid,nullzero"` // becomes unique+notnull in Phase 7
+	OrganizationID uuid.UUID     `bun:",notnull,unique,type:uuid"`
 	Organization   *Organization `bun:"rel:belongs-to,join:organization_id=id"`
 	UserID         uuid.UUID     `bun:",type:uuid,nullzero"` // deprecated; dropped in a future cleanup
 	User           *User         `bun:"rel:belongs-to,join:user_id=id"`
@@ -33,7 +33,7 @@ type AICreditsBalance struct {
 // AICreditTransaction records individual credit additions or deductions.
 type AICreditTransaction struct {
 	ID             uuid.UUID     `bun:",pk,type:uuid,default:uuid_generate_v4()"`
-	OrganizationID uuid.UUID     `bun:",type:uuid,nullzero"` // becomes notnull in Phase 7
+	OrganizationID uuid.UUID     `bun:",notnull,type:uuid"`
 	Organization   *Organization `bun:"rel:belongs-to,join:organization_id=id"`
 	UserID         uuid.UUID     `bun:",notnull,type:uuid"` // KEPT — "who spent" attribution
 	User           *User         `bun:"rel:belongs-to,join:user_id=id"`
