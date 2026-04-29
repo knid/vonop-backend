@@ -359,6 +359,10 @@ func (c *Controller) GoogleLogin(oauthUser goth.User) (*responses.UserLoginRespo
 				slog.Error("failed to grant initial free credits on google signup", "error", err, "user_id", user.ID)
 			}
 
+			if _, err := c.EnsurePersonalOrg(user); err != nil {
+				slog.Error("failed to ensure personal org on google signup", "error", err, "user_id", user.ID)
+			}
+
 			go c.SlackService.Client.PostMessage(
 				constants.SLACK_CHANNEL_ID_NEW_USER,
 				slack.MsgOptionText("New registered user (Google): "+user.Email, false))
