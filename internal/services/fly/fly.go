@@ -198,9 +198,8 @@ func (s *Service) DeleteApp(appName string) error {
 }
 
 // SyncSecrets sets each listed secret on a Fly app via the per-label endpoint.
-// Existing secrets not in the map are left alone — matches Coolify's
-// SyncEnvVars semantics. Idempotent: re-setting an unchanged value is a no-op
-// on Fly's side (digest stays the same).
+// Existing secrets not in the map are left alone (additive sync). Idempotent:
+// re-setting an unchanged value is a no-op on Fly's side (digest stays the same).
 //
 // Fly's Machines API requires one POST per secret to /v1/apps/<app>/secrets/<label>;
 // there is NO bulk endpoint despite what the URL pattern might suggest. POSTing

@@ -285,49 +285,8 @@ func (c *Controller) VerifyAppDomain(domainID string, project *models.AppProject
 		}
 	}
 
-	// Clear any legacy Coolify deployment UUID still on the row so the UI
-	// doesn't show stale "deploying" state for migrated domains.
-	domain.DeploymentUUID = ""
-
 	if _, err := c.DB.UpdateAppDomain(domain); err != nil {
 		return nil, fmt.Errorf("failed to update domain status: %v", err)
 	}
 	return buildDomainResponse(domain, msg), nil
-}
-
-// buildCoolifyDomainList builds the complete list of domains for a Coolify app.
-// It always includes the default wemob.app subdomain, plus all verified custom
-// domains from the database (whether already live or mid-deploy), plus an
-// optional extra domain being added.
-func (c *Controller) buildCoolifyDomainList(coolifyProject *models.RuntimeApp, projectID string, extraDomain string) []string {
-	domains := []string{"https://" + coolifyProject.CustomDomain}
-
-	// WEM-270: Only include verified custom domains. A "deploying" domain is
-	// still verified — Coolify already knows about it, we just haven't observed
-	// the build finish yet, so we must keep it in the list.
-	appDomains, err := c.DB.GetAppDomainsByProjectID(projectID)
-	if err == nil {
-		for _, d := range appDomains {
-			if d.Status == "active" || d.Status == "deploying" {
-				domains = append(domains, "https://"+d.Domain)
-			}
-		}
-	}
-
-	// Add the extra domain if provided and not already present
-	if extraDomain != "" {
-		extra := "https://" + extraDomain
-		found := false
-		for _, d := range domains {
-			if d == extra {
-				found = true
-				break
-			}
-		}
-		if !found {
-			domains = append(domains, extra)
-		}
-	}
-
-	return domains
 }

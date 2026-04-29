@@ -39,9 +39,6 @@ func resolveCountryMobile(r *http.Request) string {
 	if c := r.Header.Get("CF-IPCountry"); c != "" {
 		return c
 	}
-	if c := r.Header.Get("X-Vercel-IP-Country"); c != "" {
-		return c
-	}
 	return ""
 }
 

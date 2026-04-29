@@ -222,24 +222,18 @@ func (c *Controller) UpdateAppProject(id string, user *models.User, req requests
 		return nil, err
 	}
 
-	// If slug changed and a Coolify project exists, reassign the wemob.app subdomain
-	if oldSlug != req.Slug && c.CoolifyService != nil {
+	// If slug changed, refresh the wemob.app subdomain on the runtime app row.
+	// The actual Caddy/Fly route picks up the new subdomain on the next deploy.
+	if oldSlug != req.Slug {
 		go func() {
-			cp, cpErr := c.DB.GetRuntimeAppByAppProjectID(id)
-			if cpErr != nil || cp == nil {
+			ra, raErr := c.DB.GetRuntimeAppByAppProjectID(id)
+			if raErr != nil || ra == nil {
 				return
 			}
-
 			newDomain := req.Slug + "." + constants.WEMOB_APP_BASE_DOMAIN
-
-			if err := c.CoolifyService.UpdateDomains(cp.CoolifyAppUUID, []string{"https://" + newDomain}); err != nil {
-				slog.Warn("Failed to update wemob.app subdomain on Coolify", "error", err)
-				return
-			}
-
-			cp.CustomDomain = newDomain
-			cp.ProductionURL = "https://" + newDomain
-			c.DB.UpdateRuntimeApp(cp)
+			ra.CustomDomain = newDomain
+			ra.ProductionURL = "https://" + newDomain
+			c.DB.UpdateRuntimeApp(ra)
 		}()
 	}
 
@@ -273,25 +267,22 @@ func (c *Controller) DeleteAppProject(id string, user *models.User) error {
 		slog.Warn("Failed to delete git repo during app deletion", "error", err, "project_id", project.ID)
 	}
 
-	// Mark deployments as undeployed and stop Coolify app (best-effort)
+	// Mark deployments as undeployed (Fly machines auto-suspend; the Fly app
+	// itself can stay — destroying it would orphan its registry images and
+	// the user might re-deploy under the same name).
 	if err := c.UndeployApp(project.ID.String()); err != nil {
 		slog.Warn("Failed to undeploy app during deletion", "error", err, "project_id", project.ID)
 	}
 
-	// Clean up Coolify app and Gitea repo (best-effort)
-	coolifyProject, cpErr := c.DB.GetRuntimeAppByAppProjectID(project.ID.String())
-	if cpErr == nil && coolifyProject != nil {
-		if c.CoolifyService != nil {
-			if err := c.CoolifyService.DeleteApp(coolifyProject.CoolifyAppUUID); err != nil {
-				slog.Warn("Failed to delete Coolify app during app deletion", "error", err, "app_uuid", coolifyProject.CoolifyAppUUID)
-			}
-		}
+	// Clean up Gitea backup repo + runtime_apps row (best-effort).
+	runtimeApp, raErr := c.DB.GetRuntimeAppByAppProjectID(project.ID.String())
+	if raErr == nil && runtimeApp != nil {
 		if c.GiteaService != nil {
-			if err := c.GiteaService.DeleteRepo(coolifyProject.GiteaRepoName); err != nil {
-				slog.Warn("Failed to delete Gitea repo during app deletion", "error", err, "repo", coolifyProject.GiteaRepoName)
+			if err := c.GiteaService.DeleteRepo(runtimeApp.GiteaRepoName); err != nil {
+				slog.Warn("Failed to delete Gitea repo during app deletion", "error", err, "repo", runtimeApp.GiteaRepoName)
 			}
 		}
-		c.DB.DeleteRuntimeApp(coolifyProject)
+		c.DB.DeleteRuntimeApp(runtimeApp)
 	}
 
 	return c.DB.DeleteAppProject(project)

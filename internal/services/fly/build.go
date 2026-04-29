@@ -13,13 +13,13 @@ import (
 // resulting image reference (the actual tag flyctl chose; we don't try to
 // dictate it because `--image-label` historically produces tag mismatches).
 //
-// envVars: every entry is forwarded to the builder as --build-arg, matching
-// Coolify's prior behavior. Docker silently ignores --build-arg values whose
-// keys aren't declared as `ARG` in the Dockerfile, so in practice only the
-// NEXT_PUBLIC_* vars (which the template Dockerfile declares) end up affecting
-// the build. Passing all of them anyway means future Dockerfile additions
-// (e.g., an integration that wants DATABASE_URL at build time for SSG) work
-// without a parallel code change here.
+// envVars: every entry is forwarded to the builder as --build-arg. Docker
+// silently ignores --build-arg values whose keys aren't declared as `ARG` in
+// the Dockerfile, so in practice only the NEXT_PUBLIC_* vars (which the
+// template Dockerfile declares) end up affecting the build. Passing all of
+// them anyway means future Dockerfile additions (e.g., an integration that
+// wants DATABASE_URL at build time for SSG) work without a parallel code
+// change here.
 //
 // Why NEXT_PUBLIC_* must be at build time, not runtime: Next.js inlines
 // NEXT_PUBLIC_* references at `next build` via webpack's DefinePlugin across

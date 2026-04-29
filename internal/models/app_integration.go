@@ -14,7 +14,7 @@ type AppIntegration struct {
 	Credentials  []byte            `bun:",type:jsonb,default:'{}'"` // stored credentials (JSON)
 	Config       map[string]any    `bun:",type:jsonb,default:'{}'"`
 	Status       string            `bun:",notnull,default:'connected'"` // connected, disconnected, error
-	EnvVars      map[string]string `bun:",type:jsonb,default:'{}'"` // env vars to inject into Vercel
+	EnvVars      map[string]string `bun:",type:jsonb,default:'{}'"` // env vars injected at deploy via Fly secrets and `--build-arg`
 	CreatedAt    time.Time         `bun:"created_at,nullzero,notnull,default:current_timestamp"`
 	UpdatedAt    time.Time         `bun:"updated_at,nullzero,notnull,default:current_timestamp"`
 	DeletedAt    time.Time         `bun:",soft_delete,nullzero"`

@@ -17,7 +17,6 @@ import (
 	"github.com/knid/wemob/internal/services/storage"
 	"github.com/knid/wemob/internal/utils"
 	"github.com/knid/wemob/internal/services/codemagic"
-	"github.com/knid/wemob/internal/services/coolify"
 	"github.com/knid/wemob/internal/services/fly"
 	"github.com/knid/wemob/internal/services/gitea"
 	"github.com/knid/wemob/internal/services/remoteconfig"
@@ -37,7 +36,6 @@ type Controller struct {
 	UserApiKeysStorage     *storage.S3Storage
 	ConcurrentBuildLimiter chan struct{}
 	CodemagicService       *codemagic.Service
-	CoolifyService         *coolify.Service
 	FlyService             *fly.Service
 	GiteaService           *gitea.Service
 	NeonService            *neon.Service
@@ -59,7 +57,7 @@ func NewController(db *database.Database, concurrentBuildLimiter chan struct{},
 	taskService *asynq.Client, asynqInspector *asynq.Inspector,
 	assetsStorage *storage.S3Storage,
 	userApiKeysStorage *storage.S3Storage, secretManager secret.SecretManager,
-	coolifyService *coolify.Service, flyService *fly.Service, giteaService *gitea.Service,
+	flyService *fly.Service, giteaService *gitea.Service,
 	neonService *neon.Service,
 	posthogClient posthog.Client,
 	gitRepoService *gitrepo.Service,
@@ -80,7 +78,6 @@ func NewController(db *database.Database, concurrentBuildLimiter chan struct{},
 		UserApiKeysStorage:     userApiKeysStorage,
 		SecretManager:          secretManager,
 		CodemagicService:       codemagicService,
-		CoolifyService:         coolifyService,
 		FlyService:             flyService,
 		GiteaService:           giteaService,
 		NeonService:            neonService,

@@ -15,8 +15,8 @@ const slugMaxBaseLen = 50
 
 // generateAppNameAndSlug asks a fast LLM to produce a short English display
 // name for the project from the user's (possibly non-English) prompt, then
-// derives a URL-safe slug with a Vercel-style 5-char random suffix. Falls
-// back to a truncated prompt if the LLM call fails.
+// derives a URL-safe slug with a 5-char random suffix. Falls back to a
+// truncated prompt if the LLM call fails.
 func (c *Controller) generateAppNameAndSlug(ctx context.Context, prompt string) (string, string) {
 	provider := c.llmProvider()
 	model := "anthropic/claude-haiku-4-5-20251001"

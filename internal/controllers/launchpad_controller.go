@@ -93,8 +93,7 @@ func (c *Controller) GetLaunchpad(ctx context.Context, user *models.User, appID 
 		}
 	}
 
-	// WebPreview — reuse the existing GetLatestDeploymentStatus helper
-	// which resolves the real Coolify status for non-terminal deployments.
+	// WebPreview — read the latest web deployment row.
 	resp.WebPreview = c.buildWebPreview(ctx, project)
 
 	// Stores — per-platform tile.
@@ -146,9 +145,8 @@ func (c *Controller) buildIdentity(ctx context.Context, appProjectID uuid.UUID, 
 	return id
 }
 
-// buildWebPreview delegates to the existing GetLatestDeploymentStatus helper
-// (which handles Coolify polling for non-terminal states) and normalises the
-// result into the LaunchpadWebPreview shape.
+// buildWebPreview reads the latest web deployment row and normalises it
+// into the LaunchpadWebPreview shape.
 func (c *Controller) buildWebPreview(ctx context.Context, project models.AppProject) responses.LaunchpadWebPreview {
 	// GetLatestDeploymentStatus takes a string project ID and queries
 	// AppDeployment (platform="web"). The ctx parameter isn't used by the

@@ -13,7 +13,7 @@ type AppDeployment struct {
 	UserID       uuid.UUID      `bun:",notnull,type:uuid"`
 	User         *User          `bun:"rel:belongs-to,join:user_id=id"`
 	Platform     string         `bun:",notnull"` // "web", "android", "ios"
-	Provider     string         `bun:",notnull"` // "vercel"
+	Provider     string         `bun:",notnull"` // "fly"
 	Status       string         `bun:",notnull,default:'pending'"` // pending, building, deployed, failed
 	ProviderData map[string]any `bun:",type:jsonb,default:'{}'"`
 	DeployedURL  string         `bun:",nullzero"`

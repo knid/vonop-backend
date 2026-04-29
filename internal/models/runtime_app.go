@@ -19,13 +19,9 @@ type RuntimeApp struct {
 	CustomDomain  string `bun:",nullzero"`
 	Framework     string `bun:",notnull,default:'nextjs'"`
 
-	// Fly-specific columns (populated post-migration)
 	FlyAppName      string    `bun:",notnull,default:''"`
 	CurrentImageRef string    `bun:",notnull,default:''"`
 	LastDeployedAt  time.Time `bun:",nullzero"`
-
-	// Coolify-specific column — kept until cutover, then dropped
-	CoolifyAppUUID string `bun:",nullzero"`
 
 	CreatedAt time.Time `bun:"created_at,nullzero,notnull,default:current_timestamp"`
 	UpdatedAt time.Time `bun:"updated_at,nullzero,notnull,default:current_timestamp"`

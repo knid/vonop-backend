@@ -1,6 +1,6 @@
 // Package bootstrap centralizes the application bootstrap (secrets, DB,
-// services, controller) so cmd/main.go (API server), cmd/worker (Asynq
-// workers), and cmd/migrate-to-fly (one-shot migration) can share wiring.
+// services, controller) so cmd/main.go (API server) and cmd/worker (Asynq
+// workers) share wiring.
 package bootstrap
 
 import (
@@ -22,7 +22,6 @@ import (
 	"github.com/knid/wemob/internal/services"
 	"github.com/knid/wemob/internal/services/events"
 	"github.com/knid/wemob/internal/services/codemagic"
-	"github.com/knid/wemob/internal/services/coolify"
 	"github.com/knid/wemob/internal/services/fly"
 	"github.com/knid/wemob/internal/services/gitea"
 	"github.com/knid/wemob/internal/services/giteabackup"
@@ -166,15 +165,6 @@ func BootstrapController() (*controllers.Controller, asynq.RedisClientOpt) {
 		sm.GetSecret("E2B_PREVIEW_DOMAIN"),
 	)
 
-	coolifyService := coolify.NewService(
-		sm.GetSecret("COOLIFY_API_URL"),
-		sm.GetSecret("COOLIFY_API_TOKEN"),
-		sm.GetSecret("COOLIFY_SERVER_UUID"),
-		sm.GetSecret("COOLIFY_PROJECT_UUID"),
-		sm.GetSecret("COOLIFY_ENVIRONMENT_NAME"),
-		sm.GetSecret("COOLIFY_PRIVATE_KEY_UUID"),
-		sm.GetSecret("COOLIFY_WEBHOOK_SECRET"),
-	)
 	flyService := fly.NewService(
 		sm.GetSecret("FLY_API_TOKEN"),
 		sm.GetSecret("FLY_ORG_SLUG"),
@@ -272,7 +262,6 @@ func BootstrapController() (*controllers.Controller, asynq.RedisClientOpt) {
 		assetsStorage,
 		userApiKeysStorage,
 		sm,
-		coolifyService,
 		flyService,
 		giteaService,
 		neonService,

@@ -37,7 +37,7 @@ func ValidateCredentials(provider string, credentials map[string]any) error {
 	return nil
 }
 
-// BuildEnvVars converts integration credentials to Vercel environment variables
+// BuildEnvVars converts integration credentials to deploy-time environment variables
 func BuildEnvVars(provider string, credentials map[string]any) (map[string]string, error) {
 	config, err := GetProviderConfig(provider)
 	if err != nil {

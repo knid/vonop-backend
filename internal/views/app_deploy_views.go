@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-playground/validator/v10"
@@ -220,27 +219,20 @@ func (v *HttpViews) DeployAppMobile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	deployStart := time.Now()
-	deployment, err := v.Controller.DeployToCoolify(project, user)
-	if err != nil {
-		go v.Controller.TrackUserEvent(user, "app_deploy_failed", posthog.NewProperties().
-			Set("app_id", project.ID.String()).
-			Set("platform", "mobile").
-			Set("error", err.Error()))
-		go v.Controller.EventService.SendEvent(user, constants.EVENT_MOBILE_DEPLOYMENT_FAILED, map[string]any{
-			"app_id":        project.ID.String(),
-			"project_type":  project.ProjectType,
-			"error_message": err.Error(),
-		})
-		utils.JSONInternalError(w, err)
+	// Mobile builds wrap a deployed web URL — require the web app to already
+	// be deployed. The user-facing flow on the frontend pushes them through
+	// the web deploy first, so this is mainly a safety check.
+	deployment, err := v.Controller.DB.GetLatestAppDeployment(project.ID.String(), "web")
+	if err != nil || deployment == nil || deployment.Status != "deployed" || deployment.DeployedURL == "" {
+		utils.JSONError(w, constants.ErrDeployInProgress,
+			"deploy this app to the web first; mobile builds wrap the web URL",
+			http.StatusConflict, nil)
 		return
 	}
-	deployDuration := time.Since(deployStart).Seconds()
 
 	v.Controller.TrackUserEvent(user, "app_deployed_mobile", posthog.NewProperties().
 		Set("app_id", project.ID.String()).
 		Set("project_type", project.ProjectType).
-		Set("deploy_duration_seconds", deployDuration).
 		Set("deploy_version", deployment.Version))
 
 	go v.Controller.EventService.SendEvent(user, constants.EVENT_MOBILE_DEPLOYMENT_SUCCEEDED, map[string]any{

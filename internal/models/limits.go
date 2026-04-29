@@ -22,7 +22,7 @@ type StandardUserLimits struct {
 	MaxWebApps         int  `bun:"monthly_app_count,notnull,default:0"`
 	MaxMobileApps      int  `bun:",notnull,default:0"`
 	CanUseEcommerce    bool `bun:",notnull,default:false"`
-	CanDeployWeb       bool `bun:"can_deploy_to_vercel,notnull,default:false"`
+	CanDeployWeb       bool `bun:"can_deploy_web,notnull,default:false"`
 	MaxDeployedWebApps    int    `bun:",notnull,default:0"`
 	MaxDeployedMobileApps int    `bun:",notnull,default:0"`
 	CanDeployMobile       bool   `bun:",notnull,default:false"`

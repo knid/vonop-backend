@@ -10,8 +10,9 @@
 # internal/controllers/ecommerce_controller.go. When a new integration exposes
 # a new NEXT_PUBLIC_* var, add matching ARG and ENV lines below.
 #
-# Coolify automatically injects all build-time env vars as --build-arg when
-# using the dockerfile build pack, so we don't need to pass them explicitly.
+# All envVars from CollectAllEnvVars are forwarded as --build-arg by
+# fly.BuildAndPush; Docker silently ignores undeclared keys, so only the
+# ARG names listed below actually take effect.
 
 FROM node:22-alpine AS deps
 WORKDIR /app

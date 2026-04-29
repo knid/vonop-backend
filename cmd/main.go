@@ -17,7 +17,6 @@ import (
 	"github.com/go-chi/cors"
 	"github.com/go-chi/httplog/v3"
 	"github.com/knid/wemob/internal/bootstrap"
-	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/database"
 	appMiddleware "github.com/knid/wemob/internal/middleware"
 	"github.com/knid/wemob/internal/models"
@@ -137,7 +136,7 @@ func createSchema(db *bun.DB) error {
 		`ALTER TABLE standard_user_limits ADD COLUMN IF NOT EXISTS monthly_app_count int NOT NULL DEFAULT 0`,
 		`ALTER TABLE standard_user_limits ADD COLUMN IF NOT EXISTS monthly_deploy_count int NOT NULL DEFAULT 0`,
 		`ALTER TABLE standard_user_limits ADD COLUMN IF NOT EXISTS can_use_ecommerce boolean NOT NULL DEFAULT false`,
-		`ALTER TABLE standard_user_limits ADD COLUMN IF NOT EXISTS can_deploy_to_vercel boolean NOT NULL DEFAULT false`,
+		`ALTER TABLE standard_user_limits ADD COLUMN IF NOT EXISTS can_deploy_web boolean NOT NULL DEFAULT false`,
 		// Conversation summary for older message summarization
 		`ALTER TABLE app_conversations ADD COLUMN IF NOT EXISTS summary text DEFAULT ''`,
 		// Data models for per-app Neon database provisioning
@@ -174,7 +173,6 @@ func createSchema(db *bun.DB) error {
 		`ALTER TABLE app_projects ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
 		`ALTER TABLE app_integrations ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
 		`ALTER TABLE app_domains ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
-		`ALTER TABLE app_domains ADD COLUMN IF NOT EXISTS deployment_uuid text`,
 		`ALTER TABLE app_env_vars ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
 		`ALTER TABLE app_dashboards ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
 		`ALTER TABLE app_dashboard_panels ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
@@ -378,9 +376,26 @@ END $$`,
 		`ALTER TABLE IF EXISTS apple_connections ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
 		`ALTER TABLE IF EXISTS google_play_connections ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
 		`ALTER TABLE IF EXISTS runtime_apps ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
-		`ALTER TABLE IF EXISTS runtime_apps ALTER COLUMN coolify_app_uuid DROP NOT NULL`,
 		`ALTER TABLE IF EXISTS deployments ADD COLUMN IF NOT EXISTS release_notes text`,
 		`ALTER TABLE IF EXISTS deployments ADD COLUMN IF NOT EXISTS rollout_track text`,
+
+		// Coolify cleanup (post-Fly migration). Idempotent; runs once and
+		// becomes a no-op on subsequent boots.
+		`ALTER TABLE IF EXISTS app_domains DROP COLUMN IF EXISTS deployment_uuid`,
+		`ALTER TABLE IF EXISTS runtime_apps DROP COLUMN IF EXISTS coolify_app_uuid`,
+		`DROP TABLE IF EXISTS coolify_projects`,
+
+		// Vercel cleanup (deploy target retired well before Coolify; column
+		// kept its old name through Coolify era and now matches the renamed
+		// CanDeployWeb Go field).
+		`DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='standard_user_limits' AND column_name='can_deploy_to_vercel')
+  AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='standard_user_limits' AND column_name='can_deploy_web') THEN
+    ALTER TABLE standard_user_limits RENAME COLUMN can_deploy_to_vercel TO can_deploy_web;
+  END IF;
+END $$`,
+		`ALTER TABLE IF EXISTS standard_user_limits DROP COLUMN IF EXISTS can_deploy_to_vercel`,
+		`DROP TABLE IF EXISTS vercel_projects`,
 	}
 	for _, stmt := range renameStatements {
 		if _, err := db.ExecContext(context.Background(), stmt); err != nil {
@@ -801,14 +816,6 @@ func main() {
 	go utils.CheckSessionStatusJob(db)
 	go utils.CheckUsageAlertsJob(db, controller.EventService)
 
-	// Register Coolify webhook for deployment status updates (non-blocking)
-	go func() {
-		webhookURL := constants.WEMOB_API_BASE_URL + "/webhooks/coolify?secret=" + controller.CoolifyService.WebhookSecret
-		if err := controller.CoolifyService.RegisterWebhook(webhookURL); err != nil {
-			slog.Warn("Failed to register Coolify webhook — falling back to polling", "error", err)
-		}
-	}()
-
 	// GitHub OAuth secrets (required for GitHub export feature)
 	// GITHUB_CLIENT_ID — OAuth App client ID
 	// GITHUB_CLIENT_SECRET — OAuth App client secret
@@ -858,7 +865,7 @@ func main() {
 	// Access-Control-Allow-Origin headers (otherwise browsers report a
 	// CORS error instead of showing the real 429).
 	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   []string{"https://app.wemob.io", "https://dashboard.wemob.io", "https://wemob.io", "https://www.wemob.io", "http://localhost:3000", "http://127.0.0.1:3000", "https://*.wemob.app", "https://*.vercel.app", "https://device1.zebu-pain.ts.net", "https://mba.zebu-pain.ts.net"},
+		AllowedOrigins:   []string{"https://app.wemob.io", "https://dashboard.wemob.io", "https://wemob.io", "https://www.wemob.io", "http://localhost:3000", "http://127.0.0.1:3000", "https://*.wemob.app", "https://device1.zebu-pain.ts.net", "https://mba.zebu-pain.ts.net"},
 		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token", "Location"},
 		ExposedHeaders:   []string{"Link"},
@@ -941,8 +948,6 @@ func main() {
 	r.Route("/", func(r chi.Router) {
 		r.Route("/webhooks", func(r chi.Router) {
 			r.Post("/stripe", httpViews.Controller.HandleWebhook)
-			// Coolify deployment webhook
-			r.Post("/coolify", httpViews.HandleCoolifyWebhook)
 			// Fly machine state webhook (signature verified inside handler)
 			r.Post("/fly", httpViews.HandleFlyWebhook)
 		})
