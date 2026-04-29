@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 
+	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/models"
 	"github.com/uptrace/bun"
 )
@@ -153,5 +154,31 @@ func (db *Database) CountAppProjectsByUserIDAndType(userID string, projectType s
 		q = q.Where("project_type != ?", "mobile_app")
 	}
 	return q.Count(context.Background())
+}
+
+// ListAppProjectsWithoutOrg returns AppProjects with NULL organization_id.
+// Used by the org-foundation backfill.
+func (db *Database) ListAppProjectsWithoutOrg() ([]models.AppProject, error) {
+	var projects []models.AppProject
+	err := db.DB.NewSelect().
+		Model(&projects).
+		Where("organization_id IS NULL").
+		Where("deleted_at IS NULL").
+		Scan(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	return projects, nil
+}
+
+// AssignAppProjectOrg sets organization_id on a single AppProject row.
+// Used by the org-foundation backfill.
+func (db *Database) AssignAppProjectOrg(projectID string, orgID uuid.UUID) error {
+	_, err := db.DB.NewUpdate().
+		Model((*models.AppProject)(nil)).
+		Set("organization_id = ?", orgID).
+		Where("id = ?", projectID).
+		Exec(context.Background())
+	return err
 }
 

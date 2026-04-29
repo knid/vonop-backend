@@ -85,3 +85,23 @@ func (db *Database) SetUserTwentyPersonID(userID, twentyPersonID string) error {
 		Exec(context.Background())
 	return err
 }
+
+// ListUsersWithoutPersonalOrg returns users that do not yet own an
+// Organization with is_personal=true. Used by the org-foundation backfill.
+func (db *Database) ListUsersWithoutPersonalOrg() ([]models.User, error) {
+	var users []models.User
+	err := db.DB.NewSelect().
+		Model(&users).
+		Where(`NOT EXISTS (
+			SELECT 1 FROM organizations o
+			WHERE o.owner_id = "user".id
+			  AND o.is_personal = true
+			  AND o.deleted_at IS NULL
+		)`).
+		Where(`"user".deleted_at IS NULL`).
+		Scan(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	return users, nil
+}
