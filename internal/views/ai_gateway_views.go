@@ -253,7 +253,12 @@ func (v *HttpViews) GatewayChat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Pre-check credit balance > overdraft floor
-	balance, err := v.Controller.GetOrCreateCreditsBalance(user)
+	orgID, err := v.Controller.ResolveOrgForProjectID(user, projectID)
+	if err != nil {
+		middleware.GatewayError(w, "failed to resolve organization", "server_error", "credits_error", http.StatusInternalServerError)
+		return
+	}
+	balance, err := v.Controller.GetOrCreateCreditsBalance(user, orgID)
 	if err != nil {
 		middleware.GatewayError(w, "failed to check credits", "server_error", "credits_error", http.StatusInternalServerError)
 		return
@@ -488,8 +493,15 @@ func (v *HttpViews) GatewayImage(w http.ResponseWriter, r *http.Request) {
 	costPerImage := v.Controller.GatewayImageCreditCost(req.Model)
 	totalCost := costPerImage * numImages
 
+	// Resolve project's organization for credit accounting
+	orgID, err := v.Controller.ResolveOrgForProjectID(user, projectID)
+	if err != nil {
+		middleware.GatewayError(w, "failed to resolve organization", "server_error", "credits_error", http.StatusInternalServerError)
+		return
+	}
+
 	// Check balance >= total cost
-	balance, err := v.Controller.GetOrCreateCreditsBalance(user)
+	balance, err := v.Controller.GetOrCreateCreditsBalance(user, orgID)
 	if err != nil {
 		middleware.GatewayError(w, "failed to check credits", "server_error", "credits_error", http.StatusInternalServerError)
 		return
@@ -502,7 +514,7 @@ func (v *HttpViews) GatewayImage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Pre-deduct credits
-	if err := v.Controller.DeductAICreditsUnchecked(user, totalCost, "gateway_image", projectID); err != nil {
+	if err := v.Controller.DeductAICreditsUnchecked(user, orgID, totalCost, "gateway_image", projectID); err != nil {
 		slog.Error("gateway image: failed to pre-deduct credits", "error", err, "user_id", user.ID)
 		middleware.GatewayError(w, "failed to deduct credits", "server_error", "credits_error", http.StatusInternalServerError)
 		return
@@ -519,7 +531,7 @@ func (v *HttpViews) GatewayImage(w http.ResponseWriter, r *http.Request) {
 	apiKey := v.Controller.SecretManager.GetSecret("FAL_API_KEY")
 	if apiKey == "" {
 		// Refund all credits
-		v.Controller.AddAICredits(user, totalCost, "gateway_image_refund", projectID)
+		v.Controller.AddAICredits(user, orgID, totalCost, "gateway_image_refund", projectID)
 		go v.Controller.EventService.SendEvent(user, constants.EVENT_CREDITS_REFUNDED, map[string]any{
 			"credits":    totalCost,
 			"reason":     "service_unavailable",
@@ -555,7 +567,7 @@ func (v *HttpViews) GatewayImage(w http.ResponseWriter, r *http.Request) {
 			"failed_count": failedCount,
 			"project_id":   projectID,
 		})
-		if err := v.Controller.AddAICredits(user, refund, "gateway_image_refund", projectID); err != nil {
+		if err := v.Controller.AddAICredits(user, orgID, refund, "gateway_image_refund", projectID); err != nil {
 			slog.Error("gateway image: failed to refund credits", "error", err, "user_id", user.ID, "refund", refund)
 		}
 	}

@@ -85,7 +85,10 @@ func (c *Controller) DraftListing(ctx context.Context, user *models.User, appID 
 	prompt, completion, total, _ := tracker.Totals()
 	if total > 0 {
 		credits := models.TokensToCredits(prompt, completion)
-		if err := c.DeductAICreditsUnchecked(user, credits, "listing_draft", ""); err != nil {
+		orgID, orgErr := c.ResolveOrgForProjectID(user, project.ID.String())
+		if orgErr != nil {
+			slog.Warn("listing_draft: resolve org failed", "err", orgErr)
+		} else if err := c.DeductAICreditsUnchecked(user, orgID, credits, "listing_draft", ""); err != nil {
 			slog.Warn("listing_draft: deduct credits failed", "err", err)
 		}
 	}

@@ -32,10 +32,25 @@ func (c *Controller) AgentDeps(user *models.User) *agent.RunDependencies {
 		RemoteConfig:  c.RemoteConfig,
 
 		CreditChecker: func(tracker *utils.TokenTracker) func() bool {
-			return c.MakeCreditBudgetChecker(user, tracker)
+			// Budget is org-scoped; resolve via the user's personal org for the
+			// pre-check (the project's org is used for the actual deduction in
+			// DeductCredits below). For the typical solo-user case both resolve
+			// to the same personal org.
+			orgID, err := c.RequireOrgIDForUser(user, nil)
+			if err != nil {
+				slog.Error("agent_deps: failed to resolve personal org for credit checker", "error", err, "user_id", user.ID)
+				return nil
+			}
+			return c.MakeCreditBudgetChecker(user, orgID, tracker)
 		},
 		DeductCredits: func(ctx context.Context, credits int, action, projectID string) error {
-			return c.DeductAICreditsToFloor(user, credits, action, projectID)
+			// Resolve the project's organization so the deduction lands on the
+			// owning org's balance.
+			orgID, err := c.ResolveOrgForProjectID(user, projectID)
+			if err != nil {
+				return err
+			}
+			return c.DeductAICreditsToFloor(user, orgID, credits, action, projectID)
 		},
 		TrackUserEvent: func(event string, props map[string]any) {
 			p := posthog.NewProperties()
@@ -66,6 +81,18 @@ func (c *Controller) AgentDeps(user *models.User) *agent.RunDependencies {
 			c.RecordLLMError(user, tracker, action, model, provider, reference, appType, latencyMs, errCode, errMsg)
 		},
 	}
+}
+
+// ResolveOrgForProjectID returns the OrganizationID owning the given project.
+// Falls back to the user's personal org if the project lookup fails or has no
+// org set (defensive — every project should have an org after Phase 7).
+func (c *Controller) ResolveOrgForProjectID(user *models.User, projectID string) (uuid.UUID, error) {
+	if projectID != "" {
+		if project, err := c.DB.GetAppProjectByID(projectID); err == nil && project != nil && project.OrganizationID != uuid.Nil {
+			return project.OrganizationID, nil
+		}
+	}
+	return c.RequireOrgIDForUser(user, nil)
 }
 
 // generateImageForAgent calls Fal to generate an image from a prompt, downloads

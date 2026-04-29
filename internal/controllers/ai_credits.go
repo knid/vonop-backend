@@ -81,8 +81,8 @@ func classifyLedgerAction(action string, amount int) string {
 //     first, then sub — prefer showing "lost" credits as lost purchased
 //     credits since that's the bucket the old reset bug actually hurt.
 //   - Replay < balance: unlogged adjustments (rare). Assume they were sub.
-func (c *Controller) ComputeCreditBreakdown(user *models.User) (*CreditBreakdown, error) {
-	balance, err := c.GetAICreditsBalanceNoReset(user)
+func (c *Controller) ComputeCreditBreakdown(user *models.User, orgID uuid.UUID) (*CreditBreakdown, error) {
+	balance, err := c.GetAICreditsBalanceNoReset(user, orgID)
 	if err != nil {
 		return nil, err
 	}
@@ -165,21 +165,21 @@ func (c *Controller) ComputeCreditBreakdown(user *models.User) (*CreditBreakdown
 // reset logic itself calls ComputeCreditBreakdown — going through
 // GetOrCreateCreditsBalance would recurse. New-user creation still goes
 // through the full path.
-func (c *Controller) GetAICreditsBalanceNoReset(user *models.User) (*models.AICreditsBalance, error) {
-	balance, err := c.DB.GetAICreditsBalance(user.ID.String())
+func (c *Controller) GetAICreditsBalanceNoReset(user *models.User, orgID uuid.UUID) (*models.AICreditsBalance, error) {
+	balance, err := c.DB.GetAICreditsBalanceByOrg(orgID.String())
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return c.GetOrCreateCreditsBalance(user)
+			return c.GetOrCreateCreditsBalance(user, orgID)
 		}
 		return nil, err
 	}
 	return balance, nil
 }
 
-// GetOrCreateCreditsBalance returns the user's credit balance, creating one if needed.
+// GetOrCreateCreditsBalance returns the org's credit balance, creating one if needed.
 // Period resets use atomic SQL to prevent duplicate monthly_grant transactions.
-func (c *Controller) GetOrCreateCreditsBalance(user *models.User) (*models.AICreditsBalance, error) {
-	balance, err := c.DB.GetAICreditsBalance(user.ID.String())
+func (c *Controller) GetOrCreateCreditsBalance(user *models.User, orgID uuid.UUID) (*models.AICreditsBalance, error) {
+	balance, err := c.DB.GetAICreditsBalanceByOrg(orgID.String())
 	if err != nil {
 		if !errors.Is(err, sql.ErrNoRows) {
 			return nil, err
@@ -188,10 +188,11 @@ func (c *Controller) GetOrCreateCreditsBalance(user *models.User) (*models.AICre
 		// Create a new balance aligned with the subscription billing period
 		periodStart, periodEnd := utils.BillingPeriod(user.SubscriptionStartAt, time.Now())
 		balance = &models.AICreditsBalance{
-			UserID:      user.ID,
-			Balance:     0,
-			PeriodStart: periodStart,
-			PeriodEnd:   periodEnd,
+			OrganizationID: orgID,
+			UserID:         user.ID,
+			Balance:        0,
+			PeriodStart:    periodStart,
+			PeriodEnd:      periodEnd,
 		}
 
 		// Grant monthly credits from plan only for verified users. Unverified
@@ -214,12 +215,13 @@ func (c *Controller) GetOrCreateCreditsBalance(user *models.User) (*models.AICre
 		// Audit the initial credit grant (only if we created the balance recently)
 		if initialGrant > 0 && time.Since(balance.CreatedAt) < time.Second {
 			if _, txErr := c.DB.CreateAICreditTransaction(&models.AICreditTransaction{
-				UserID:    user.ID,
-				Amount:    initialGrant,
-				Action:    "initial_grant",
-				Reference: balance.ID.String(),
+				OrganizationID: orgID,
+				UserID:         user.ID,
+				Amount:         initialGrant,
+				Action:         "initial_grant",
+				Reference:      balance.ID.String(),
 			}); txErr != nil {
-				slog.Error("failed to log initial credit grant", "error", txErr, "user_id", user.ID)
+				slog.Error("failed to log initial credit grant", "error", txErr, "user_id", user.ID, "org_id", orgID)
 			}
 		}
 	}
@@ -248,7 +250,7 @@ func (c *Controller) GetOrCreateCreditsBalance(user *models.User) (*models.AICre
 				balance.PeriodStart = periodStart
 				balance.PeriodEnd = periodEnd
 			} else {
-				balance, err = c.DB.GetAICreditsBalance(user.ID.String())
+				balance, err = c.DB.GetAICreditsBalanceByOrg(orgID.String())
 				if err != nil {
 					return nil, err
 				}
@@ -268,7 +270,7 @@ func (c *Controller) GetOrCreateCreditsBalance(user *models.User) (*models.AICre
 		// replay, apply the cap ONLY to the sub portion, then add purchased
 		// back untouched. Purchased credits never roll over into the cap
 		// because they aren't part of the monthly allowance.
-		breakdown, bdErr := c.ComputeCreditBreakdown(user)
+		breakdown, bdErr := c.ComputeCreditBreakdown(user, orgID)
 		purchasedCarry := 0
 		subCarry := 0
 		if bdErr == nil && breakdown != nil {
@@ -311,16 +313,17 @@ func (c *Controller) GetOrCreateCreditsBalance(user *models.User) (*models.AICre
 
 			// Log the monthly grant (only the winner of the race creates this)
 			if _, err := c.DB.CreateAICreditTransaction(&models.AICreditTransaction{
-				UserID:    user.ID,
-				Amount:    monthlyCredits,
-				Action:    "monthly_grant",
-				Reference: balance.ID.String(),
+				OrganizationID: orgID,
+				UserID:         user.ID,
+				Amount:         monthlyCredits,
+				Action:         "monthly_grant",
+				Reference:      balance.ID.String(),
 			}); err != nil {
-				slog.Error("failed to log monthly_grant transaction", "error", err, "user_id", user.ID)
+				slog.Error("failed to log monthly_grant transaction", "error", err, "user_id", user.ID, "org_id", orgID)
 			}
 		} else {
 			// Another request already reset the period — re-read the current balance
-			balance, err = c.DB.GetAICreditsBalance(user.ID.String())
+			balance, err = c.DB.GetAICreditsBalanceByOrg(orgID.String())
 			if err != nil {
 				return nil, err
 			}
@@ -334,12 +337,12 @@ func (c *Controller) GetOrCreateCreditsBalance(user *models.User) (*models.AICre
 // verified user who has never received them. Idempotent: subsequent calls
 // are no-ops once an initial_grant transaction exists. Called from the email
 // verification flow so unverified signups cannot collect free credits.
-func (c *Controller) GrantInitialFreeCreditsIfNeeded(user *models.User) error {
+func (c *Controller) GrantInitialFreeCreditsIfNeeded(user *models.User, orgID uuid.UUID) error {
 	if !user.Verified {
 		return nil
 	}
 
-	balance, err := c.GetOrCreateCreditsBalance(user)
+	balance, err := c.GetOrCreateCreditsBalance(user, orgID)
 	if err != nil {
 		return fmt.Errorf("failed to get credits balance: %w", err)
 	}
@@ -362,10 +365,11 @@ func (c *Controller) GrantInitialFreeCreditsIfNeeded(user *models.User) error {
 			return fmt.Errorf("failed to add initial credits: %w", err)
 		}
 		if _, err := c.DB.CreateAICreditTransactionTx(tx, &models.AICreditTransaction{
-			UserID:    user.ID,
-			Amount:    limits.MonthlyAICredits,
-			Action:    "initial_grant",
-			Reference: balance.ID.String(),
+			OrganizationID: orgID,
+			UserID:         user.ID,
+			Amount:         limits.MonthlyAICredits,
+			Action:         "initial_grant",
+			Reference:      balance.ID.String(),
 		}); err != nil {
 			return fmt.Errorf("failed to log initial grant: %w", err)
 		}
@@ -385,8 +389,8 @@ func (c *Controller) TokensToCredits(promptTokens, completionTokens int) int {
 // CreditBudget returns the maximum credits the user can spend in a single session.
 // Budget = current balance - floor (floor is negative, so this is balance + |floor|).
 // For example: balance=1, floor=-20 → budget=21.
-func (c *Controller) CreditBudget(user *models.User) (int, error) {
-	balance, err := c.GetOrCreateCreditsBalance(user)
+func (c *Controller) CreditBudget(user *models.User, orgID uuid.UUID) (int, error) {
+	balance, err := c.GetOrCreateCreditsBalance(user, orgID)
 	if err != nil {
 		return 0, err
 	}
@@ -401,8 +405,8 @@ func (c *Controller) CreditBudget(user *models.User) (int, error) {
 // MakeCreditBudgetChecker returns a ShouldContinue-compatible function for
 // StreamWithTools. It checks whether the accumulated credit cost in the tracker
 // has reached the user's budget. When exhausted, it logs a warning and returns false.
-func (c *Controller) MakeCreditBudgetChecker(user *models.User, tracker *utils.TokenTracker) func() bool {
-	budget, err := c.CreditBudget(user)
+func (c *Controller) MakeCreditBudgetChecker(user *models.User, orgID uuid.UUID, tracker *utils.TokenTracker) func() bool {
+	budget, err := c.CreditBudget(user, orgID)
 	if err != nil {
 		return nil
 	}
@@ -420,12 +424,22 @@ func (c *Controller) MakeCreditBudgetChecker(user *models.User, tracker *utils.T
 
 // DeductAICreditsUnchecked deducts credits without checking sufficiency (balance may go negative
 // down to AICreditsMinBalance). Used for post-hoc token-based billing where the pre-check already ran.
-func (c *Controller) DeductAICreditsUnchecked(user *models.User, cost int, action string, reference string) error {
-	balance, err := c.GetOrCreateCreditsBalance(user)
+func (c *Controller) DeductAICreditsUnchecked(user *models.User, orgID uuid.UUID, cost int, action string, reference string) error {
+	balance, err := c.GetOrCreateCreditsBalance(user, orgID)
 	if err != nil {
 		return err
 	}
 	prevBalance := balance.Balance
+
+	// Cap check: if the member has a monthly_credit_cap, verify their period spend + cost ≤ cap.
+	if member, mErr := c.DB.GetOrganizationMember(orgID.String(), user.ID.String()); mErr == nil && member != nil && member.MonthlyCreditCap != nil {
+		if bal, _ := c.DB.GetAICreditsBalanceByOrg(orgID.String()); bal != nil {
+			spent, _ := c.DB.MemberPeriodSpent(orgID.String(), user.ID.String(), bal.PeriodStart, bal.PeriodEnd)
+			if spent+cost > *member.MonthlyCreditCap {
+				return fmt.Errorf("member credit cap reached (cap=%d, spent=%d, requested=%d)", *member.MonthlyCreditCap, spent, cost)
+			}
+		}
+	}
 
 	var newBalance int
 	txErr := c.DB.RunInTx(func(tx bun.Tx) error {
@@ -440,10 +454,11 @@ func (c *Controller) DeductAICreditsUnchecked(user *models.User, cost int, actio
 		}
 
 		_, err = c.DB.CreateAICreditTransactionTx(tx, &models.AICreditTransaction{
-			UserID:    user.ID,
-			Amount:    -cost,
-			Action:    action,
-			Reference: reference,
+			OrganizationID: orgID,
+			UserID:         user.ID,
+			Amount:         -cost,
+			Action:         action,
+			Reference:      reference,
 		})
 		return err
 	})
@@ -464,15 +479,25 @@ func (c *Controller) DeductAICreditsUnchecked(user *models.User, cost int, actio
 // DeductAICreditsToFloor deducts credits, clamping at the overdraft floor instead
 // of failing. Always deducts something if balance is above floor. Used as the
 // primary deduction method for generation sessions where the cost may exceed budget.
-func (c *Controller) DeductAICreditsToFloor(user *models.User, cost int, action string, reference string) error {
+func (c *Controller) DeductAICreditsToFloor(user *models.User, orgID uuid.UUID, cost int, action string, reference string) error {
 	if cost <= 0 {
 		return nil
 	}
-	balance, err := c.GetOrCreateCreditsBalance(user)
+	balance, err := c.GetOrCreateCreditsBalance(user, orgID)
 	if err != nil {
 		return err
 	}
 	prevBalance := balance.Balance
+
+	// Cap check: if the member has a monthly_credit_cap, verify their period spend + cost ≤ cap.
+	if member, mErr := c.DB.GetOrganizationMember(orgID.String(), user.ID.String()); mErr == nil && member != nil && member.MonthlyCreditCap != nil {
+		if bal, _ := c.DB.GetAICreditsBalanceByOrg(orgID.String()); bal != nil {
+			spent, _ := c.DB.MemberPeriodSpent(orgID.String(), user.ID.String(), bal.PeriodStart, bal.PeriodEnd)
+			if spent+cost > *member.MonthlyCreditCap {
+				return fmt.Errorf("member credit cap reached (cap=%d, spent=%d, requested=%d)", *member.MonthlyCreditCap, spent, cost)
+			}
+		}
+	}
 
 	var newBalance, deducted int
 	txErr := c.DB.RunInTx(func(tx bun.Tx) error {
@@ -486,10 +511,11 @@ func (c *Controller) DeductAICreditsToFloor(user *models.User, cost int, action 
 			return nil
 		}
 		_, err = c.DB.CreateAICreditTransactionTx(tx, &models.AICreditTransaction{
-			UserID:    user.ID,
-			Amount:    -deducted,
-			Action:    action,
-			Reference: reference,
+			OrganizationID: orgID,
+			UserID:         user.ID,
+			Amount:         -deducted,
+			Action:         action,
+			Reference:      reference,
 		})
 		return err
 	})
@@ -568,8 +594,8 @@ func (c *Controller) emitCreditThresholdEvents(user *models.User, prevBalance, n
 
 // AddAICredits adds credits to a user's balance (for purchases or grants).
 // Uses atomic SQL + DB transaction to ensure balance and audit log stay consistent.
-func (c *Controller) AddAICredits(user *models.User, amount int, action string, reference string) error {
-	balance, err := c.GetOrCreateCreditsBalance(user)
+func (c *Controller) AddAICredits(user *models.User, orgID uuid.UUID, amount int, action string, reference string) error {
+	balance, err := c.GetOrCreateCreditsBalance(user, orgID)
 	if err != nil {
 		return err
 	}
@@ -581,10 +607,11 @@ func (c *Controller) AddAICredits(user *models.User, amount int, action string, 
 		}
 
 		_, err = c.DB.CreateAICreditTransactionTx(tx, &models.AICreditTransaction{
-			UserID:    user.ID,
-			Amount:    amount,
-			Action:    action,
-			Reference: reference,
+			OrganizationID: orgID,
+			UserID:         user.ID,
+			Amount:         amount,
+			Action:         action,
+			Reference:      reference,
 		})
 		return err
 	})
@@ -594,15 +621,15 @@ func (c *Controller) AddAICredits(user *models.User, amount int, action string, 
 // If a credits balance already exists (created before subscribing), it resets the period
 // to align with the new subscription and adds the plan's monthly credits.
 // Safe to call multiple times — uses a transaction with FOR UPDATE to prevent double grants.
-func (c *Controller) GrantSubscriptionCredits(user *models.User) {
+func (c *Controller) GrantSubscriptionCredits(user *models.User, orgID uuid.UUID) {
 	limits, err := c.GetUserLimits(user)
 	if err != nil || limits.MonthlyAICredits <= 0 {
 		return
 	}
 
-	balance, err := c.GetOrCreateCreditsBalance(user)
+	balance, err := c.GetOrCreateCreditsBalance(user, orgID)
 	if err != nil {
-		slog.Error("failed to get/create credits balance for subscription grant", "error", err, "user_id", user.ID)
+		slog.Error("failed to get/create credits balance for subscription grant", "error", err, "user_id", user.ID, "org_id", orgID)
 		return
 	}
 
@@ -616,11 +643,11 @@ func (c *Controller) GrantSubscriptionCredits(user *models.User) {
 			return fmt.Errorf("lock balance: %w", err)
 		}
 
-		// Check for existing subscription_grant inside the transaction
+		// Check for existing subscription_grant inside the transaction (scoped to this org)
 		var count int
 		if err := tx.NewRaw(
-			"SELECT COUNT(*) FROM ai_credit_transactions WHERE user_id = ? AND action = 'subscription_grant'",
-			user.ID,
+			"SELECT COUNT(*) FROM ai_credit_transactions WHERE organization_id = ? AND action = 'subscription_grant'",
+			orgID,
 		).Scan(context.Background(), &count); err != nil {
 			return fmt.Errorf("check existing grant: %w", err)
 		}
@@ -638,10 +665,11 @@ func (c *Controller) GrantSubscriptionCredits(user *models.User) {
 		}
 
 		if _, err := c.DB.CreateAICreditTransactionTx(tx, &models.AICreditTransaction{
-			UserID:    user.ID,
-			Amount:    limits.MonthlyAICredits,
-			Action:    "subscription_grant",
-			Reference: user.SubscriptionID.String(),
+			OrganizationID: orgID,
+			UserID:         user.ID,
+			Amount:         limits.MonthlyAICredits,
+			Action:         "subscription_grant",
+			Reference:      user.SubscriptionID.String(),
 		}); err != nil {
 			return fmt.Errorf("log grant: %w", err)
 		}
@@ -649,7 +677,7 @@ func (c *Controller) GrantSubscriptionCredits(user *models.User) {
 		return nil
 	})
 	if err != nil {
-		slog.Error("failed to grant subscription credits", "error", err, "user_id", user.ID)
+		slog.Error("failed to grant subscription credits", "error", err, "user_id", user.ID, "org_id", orgID)
 		return
 	}
 

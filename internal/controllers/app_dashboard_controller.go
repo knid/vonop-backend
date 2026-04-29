@@ -117,7 +117,10 @@ func (c *Controller) CreateDashboard(ctx context.Context, project *models.AppPro
 		prompt, completion, total, _ := tracker.Totals()
 		if total > 0 {
 			credits := c.TokensToCredits(prompt, completion)
-			if err := c.DeductAICreditsUnchecked(user, credits, "dashboard_create", project.ID.String()); err != nil {
+			orgID, orgErr := c.ResolveOrgForProjectID(user, project.ID.String())
+			if orgErr != nil {
+				slog.Warn("dashboard_create: resolve org failed", "error", orgErr, "user_id", user.ID)
+			} else if err := c.DeductAICreditsUnchecked(user, orgID, credits, "dashboard_create", project.ID.String()); err != nil {
 				slog.Warn("failed to deduct AI credits for dashboard", "error", err, "user_id", user.ID, "credits", credits)
 			}
 		}
@@ -393,7 +396,10 @@ func (c *Controller) StreamDashboardChat(ctx context.Context, dashboard *models.
 		prompt, completion, total, _ := tracker.Totals()
 		if total > 0 {
 			credits := c.TokensToCredits(prompt, completion)
-			if err := c.DeductAICreditsUnchecked(user, credits, "dashboard_chat", dashboard.AppProjectID.String()); err != nil {
+			orgID, orgErr := c.ResolveOrgForProjectID(user, dashboard.AppProjectID.String())
+			if orgErr != nil {
+				slog.Warn("dashboard_chat: resolve org failed", "error", orgErr, "user_id", user.ID)
+			} else if err := c.DeductAICreditsUnchecked(user, orgID, credits, "dashboard_chat", dashboard.AppProjectID.String()); err != nil {
 				slog.Warn("failed to deduct AI credits for dashboard chat", "error", err)
 			}
 		}
@@ -628,7 +634,10 @@ func (c *Controller) RefreshDashboardSchema(ctx context.Context, projectID strin
 		prompt, completion, total, _ := tracker.Totals()
 		if total > 0 {
 			credits := c.TokensToCredits(prompt, completion)
-			if err := c.DeductAICreditsUnchecked(user, credits, "dashboard_schema_refresh", projectID); err != nil {
+			orgID, orgErr := c.ResolveOrgForProjectID(user, projectID)
+			if orgErr != nil {
+				slog.Warn("dashboard_schema_refresh: resolve org failed", "error", orgErr, "user_id", user.ID)
+			} else if err := c.DeductAICreditsUnchecked(user, orgID, credits, "dashboard_schema_refresh", projectID); err != nil {
 				slog.Warn("failed to deduct AI credits for schema refresh", "error", err, "user_id", user.ID, "credits", credits)
 			}
 		}
