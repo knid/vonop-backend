@@ -355,12 +355,15 @@ func (c *Controller) GoogleLogin(oauthUser goth.User) (*responses.UserLoginRespo
 
 			c.assignFreePlan(user)
 
-			if err := c.GrantInitialFreeCreditsIfNeeded(user); err != nil {
-				slog.Error("failed to grant initial free credits on google signup", "error", err, "user_id", user.ID)
+			personalOrg, orgErr := c.EnsurePersonalOrg(user)
+			if orgErr != nil {
+				slog.Error("failed to ensure personal org on google signup", "error", orgErr, "user_id", user.ID)
 			}
 
-			if _, err := c.EnsurePersonalOrg(user); err != nil {
-				slog.Error("failed to ensure personal org on google signup", "error", err, "user_id", user.ID)
+			if personalOrg != nil {
+				if err := c.GrantInitialFreeCreditsIfNeeded(user, personalOrg.ID); err != nil {
+					slog.Error("failed to grant initial free credits on google signup", "error", err, "user_id", user.ID)
+				}
 			}
 
 			go c.SlackService.Client.PostMessage(
