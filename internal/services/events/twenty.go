@@ -35,6 +35,10 @@ type TwentyService struct {
 	// that need it. The data-plane endpoints (/rest/people) use the plural
 	// name and don't need this.
 	personObjectID string
+	// userEventObjectID is the Twenty metadata UUID for the custom "userEvent"
+	// object. Empty until EnsureSchema runs. When empty, SendEvent skips
+	// writing per-event timeline records.
+	userEventObjectID string
 }
 
 func NewTwentyService(db *database.Database, apiKey, baseURL string) *TwentyService {
@@ -69,7 +73,7 @@ type twentyEmails struct {
 	PrimaryEmail string `json:"primaryEmail,omitempty"`
 }
 
-func (s *TwentyService) SendEvent(user *models.User, event string, _ map[string]any) error {
+func (s *TwentyService) SendEvent(user *models.User, event string, attributes map[string]any) error {
 	if s.apiKey == "" {
 		return errors.New("twenty: not initialized")
 	}
@@ -80,6 +84,7 @@ func (s *TwentyService) SendEvent(user *models.User, event string, _ map[string]
 		return nil
 	}
 
+	now := time.Now().UTC()
 	person := twentyPerson{
 		Name:               twentyName{FirstName: user.Name},
 		Emails:             twentyEmails{PrimaryEmail: user.Email},
@@ -90,7 +95,7 @@ func (s *TwentyService) SendEvent(user *models.User, event string, _ map[string]
 		SubscriptionId:     user.SubscriptionID.String(),
 		TrialUsed:          user.TrialUsed,
 		LastEventName:      event,
-		LastEventAt:        time.Now().UTC().Format(time.RFC3339),
+		LastEventAt:        now.Format(time.RFC3339),
 	}
 
 	personID := user.TwentyPersonID
@@ -109,6 +114,7 @@ func (s *TwentyService) SendEvent(user *models.User, event string, _ map[string]
 			slog.Warn("twenty: patch failed", "err", err, "user_id", user.ID.String())
 			return nil
 		}
+		s.writeUserEvent(personID, event, now, attributes, user.ID.String())
 		return nil
 	}
 
@@ -126,7 +132,44 @@ func (s *TwentyService) SendEvent(user *models.User, event string, _ map[string]
 			user.TwentyPersonID = createdID
 		}
 	}
+	s.writeUserEvent(createdID, event, now, attributes, user.ID.String())
 	return nil
+}
+
+// writeUserEvent appends a record to the userEvent custom object so the event
+// shows up in the Person's Timeline. Skipped silently when the userEvent
+// object UUID hasn't been resolved yet (EnsureSchema didn't run / failed). The
+// payload is the attributes map verbatim — automation conditions can read
+// `event.<key>` without joining back to anything else.
+func (s *TwentyService) writeUserEvent(personID, event string, eventAt time.Time, attributes map[string]any, wemobUserID string) {
+	if s.userEventObjectID == "" || personID == "" {
+		return
+	}
+
+	body, err := json.Marshal(map[string]any{
+		"eventName": event,
+		"eventAt":   eventAt.Format(time.RFC3339),
+		"payload":   attributes,
+		"personId":  personID,
+		"wemobEventId": fmt.Sprintf("%s:%s:%d", wemobUserID, event, eventAt.UnixNano()),
+	})
+	if err != nil {
+		slog.Warn("twenty: userEvent marshal failed", "err", err, "user_id", wemobUserID)
+		return
+	}
+
+	resp, err := s.do(http.MethodPost, s.baseURL+"/rest/userEvents", body)
+	if err != nil {
+		slog.Warn("twenty: userEvent send failed", "err", err, "event", event, "user_id", wemobUserID)
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		respBody, _ := io.ReadAll(resp.Body)
+		slog.Warn("twenty: userEvent non-2xx",
+			"status", resp.Status, "event", event, "user_id", wemobUserID,
+			"body", string(respBody))
+	}
 }
 
 func (s *TwentyService) findPersonIDByWemobUserID(wemobUserID string) (string, error) {
