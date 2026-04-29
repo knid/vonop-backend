@@ -253,6 +253,13 @@ func createSchema(db *bun.DB) error {
 		`CREATE INDEX IF NOT EXISTS idx_app_domains_dns_check_status ON app_domains(dns_check_status) WHERE dns_check_status = 'pending'`,
 		// Org foundation: personal-workspace flag (2026-04-29-org-foundation)
 		`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS is_personal boolean NOT NULL DEFAULT false`,
+		// Org foundation: enforce non-null organization_id after backfill (2026-04-29-org-foundation)
+		`UPDATE app_projects SET organization_id = (
+			SELECT id FROM organizations
+			WHERE owner_id = app_projects.user_id AND is_personal = true
+			LIMIT 1
+		) WHERE organization_id IS NULL`,
+		`ALTER TABLE app_projects ALTER COLUMN organization_id SET NOT NULL`,
 	}
 
 	// Deduplicate before creating unique indexes (keep the latest row per group)

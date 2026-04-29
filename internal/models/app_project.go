@@ -18,7 +18,7 @@ type AppProject struct {
 	ID              uuid.UUID      `bun:",pk,type:uuid,default:uuid_generate_v4()"`
 	UserID          uuid.UUID      `bun:",notnull,type:uuid"`
 	User            *User          `bun:"rel:belongs-to,join:user_id=id"`
-	OrganizationID  uuid.UUID      `bun:",type:uuid,nullzero"`
+	OrganizationID  uuid.UUID      `bun:",notnull,type:uuid"`
 	Organization    *Organization  `bun:"rel:belongs-to,join:organization_id=id"`
 	Name            string         `bun:",notnull"`
 	Slug            string         `bun:",notnull,unique"`
