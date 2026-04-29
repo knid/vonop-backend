@@ -48,7 +48,9 @@ func NewResendService(apiKey string, segmentIDs ...string) *ResendService {
 }
 
 type resendEventPayload struct {
-	Event   string         `json:"event"`
+	// Resend's POST /events expects the trigger name in the `name` field.
+	// (The MCP tool exposes it as `event`, but that's an MCP rename.)
+	Name    string         `json:"name"`
 	Email   string         `json:"email"`
 	Payload map[string]any `json:"payload,omitempty"`
 }
@@ -86,7 +88,7 @@ func (s *ResendService) SendEvent(user *models.User, event string, attributes ma
 	}
 
 	body, err := json.Marshal(resendEventPayload{
-		Event:   event,
+		Name:    event,
 		Email:   user.Email,
 		Payload: payload,
 	})
