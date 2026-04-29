@@ -352,6 +352,31 @@ func (v *HttpViews) DeleteApp(w http.ResponseWriter, r *http.Request) {
 	utils.JSONResponse(w, responses.SuccessResponse{Success: true}, http.StatusOK)
 }
 
+// POST /v2/apps/{appId}/transfer
+func (v *HttpViews) TransferAppProject(w http.ResponseWriter, r *http.Request) {
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
+		return
+	}
+	projectID := chi.URLParam(r, "appId")
+	if projectID == "" {
+		utils.JSONErrorCode(w, constants.ErrValidationRequired, http.StatusBadRequest, map[string]any{"field": "project_id"})
+		return
+	}
+	var req requests.TransferProjectRequest
+	if err := utils.ParseJSONBody(r, &req); err != nil {
+		utils.ValidationError(w, err)
+		return
+	}
+	result, err := v.Controller.MoveAppProjectToOrg(user, projectID, req.OrganizationID)
+	if err != nil {
+		utils.JSONInternalError(w, err)
+		return
+	}
+	utils.JSONResponse(w, result, http.StatusOK)
+}
+
 // GET /v2/apps/{appId}/files/{platform}
 func (v *HttpViews) GetAppFiles(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)

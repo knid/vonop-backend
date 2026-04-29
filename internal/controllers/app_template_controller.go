@@ -273,17 +273,23 @@ func (c *Controller) CopyTemplate(ctx context.Context, user *models.User, slug s
 
 	projectSlug := makeSlug(template.Name)
 
+	orgID, err := c.RequireOrgIDForUser(user, nil)
+	if err != nil {
+		return nil, err
+	}
+
 	project := &models.AppProject{
-		UserID:      user.ID,
-		Name:        template.Name,
-		Slug:        projectSlug,
-		Prompt:      template.Prompt,
-		ProjectType: template.ProjectType,
-		Theme:       template.Theme,
-		DataModels:  template.DataModels,
-		Settings:    template.Settings,
-		Status:      "ready",
-		TemplateID:  &template.ID,
+		UserID:         user.ID,
+		OrganizationID: orgID,
+		Name:           template.Name,
+		Slug:           projectSlug,
+		Prompt:         template.Prompt,
+		ProjectType:    template.ProjectType,
+		Theme:          template.Theme,
+		DataModels:     template.DataModels,
+		Settings:       template.Settings,
+		Status:         "ready",
+		TemplateID:     &template.ID,
 	}
 
 	project, err = c.DB.CreateAppProject(project)

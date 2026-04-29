@@ -7,16 +7,19 @@ import (
 )
 
 // Organization represents a team/company that can own projects and apps.
+// IsPersonal=true marks the auto-created personal workspace each user receives
+// at signup. Personal orgs cannot be deleted and the sole-owner cannot leave.
 type Organization struct {
-	ID        uuid.UUID `bun:",pk,type:uuid,default:uuid_generate_v4()"`
-	Name      string    `bun:",notnull"`
-	Slug      string    `bun:",unique,notnull"`
-	OwnerID   uuid.UUID `bun:",notnull,type:uuid"`
-	Owner     *User     `bun:"rel:belongs-to,join:owner_id=id"`
-	Logo      string    `bun:",nullzero"`
-	CreatedAt time.Time `bun:"created_at,nullzero,notnull,default:current_timestamp"`
-	UpdatedAt time.Time `bun:"updated_at,nullzero,notnull,default:current_timestamp"`
-	DeletedAt time.Time `bun:",soft_delete,nullzero"`
+	ID         uuid.UUID `bun:",pk,type:uuid,default:uuid_generate_v4()"`
+	Name       string    `bun:",notnull"`
+	Slug       string    `bun:",unique,notnull"`
+	OwnerID    uuid.UUID `bun:",notnull,type:uuid"`
+	Owner      *User     `bun:"rel:belongs-to,join:owner_id=id"`
+	Logo       string    `bun:",nullzero"`
+	IsPersonal bool      `bun:",notnull,default:false"`
+	CreatedAt  time.Time `bun:"created_at,nullzero,notnull,default:current_timestamp"`
+	UpdatedAt  time.Time `bun:"updated_at,nullzero,notnull,default:current_timestamp"`
+	DeletedAt  time.Time `bun:",soft_delete,nullzero"`
 }
 
 // OrganizationMember links a user to an organization with a role.

@@ -2,10 +2,12 @@ package controllers
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
 	"github.com/go-playground/validator/v10"
+	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/responses"
@@ -134,6 +136,9 @@ func (c *Controller) DeleteOrganization(user *models.User, orgID string) error {
 	}
 	if org.OwnerID != user.ID {
 		return errors.New("only the owner can delete an organization")
+	}
+	if org.IsPersonal {
+		return errors.New("personal workspaces cannot be deleted")
 	}
 	return c.DB.DeleteOrganization(org)
 }
@@ -306,4 +311,73 @@ func (c *Controller) UpdateMemberRole(user *models.User, orgID, memberID string,
 		Role:      updated.Role,
 		CreatedAt: updated.CreatedAt,
 	}, nil
+}
+
+// EnsurePersonalOrg returns the user's personal organization, creating it
+// if one does not exist. Idempotent — safe to call from signup paths and
+// from backfill. Slug is "<slugified-name>-<random6>"; we always append a
+// suffix to avoid scanning the table for free names.
+func (c *Controller) EnsurePersonalOrg(user *models.User) (*models.Organization, error) {
+	existing, err := c.DB.GetPersonalOrgByUserID(user.ID.String())
+	if err == nil && existing != nil {
+		return existing, nil
+	}
+
+	displayName := strings.TrimSpace(user.Name)
+	if displayName == "" {
+		displayName = "Workspace"
+	}
+	orgName := displayName + "'s Workspace"
+
+	base := utils.SlugifyName(displayName)
+	slug := utils.SlugWithSuffix(base)
+
+	org := &models.Organization{
+		Name:       orgName,
+		Slug:       slug,
+		OwnerID:    user.ID,
+		IsPersonal: true,
+	}
+	created, err := c.DB.CreateOrganization(org)
+	if err != nil {
+		return nil, fmt.Errorf("create personal org: %w", err)
+	}
+
+	member := &models.OrganizationMember{
+		OrganizationID: created.ID,
+		UserID:         user.ID,
+		Role:           "owner",
+	}
+	if _, err := c.DB.CreateOrganizationMember(member); err != nil {
+		return nil, fmt.Errorf("create personal org owner membership: %w", err)
+	}
+
+	return created, nil
+}
+
+// RequireOrgIDForUser returns the org UUID a project should be created in,
+// given a user and an optional explicit org ID from the request.
+//
+// If reqOrgID is nil/zero, return the user's personal org. If non-zero, verify
+// the user is a member with role owner/admin (creators must have write rights
+// on the destination org). Returns an error if the user is not a member or
+// does not have a personal org yet (the latter would only happen if backfill
+// was skipped — defensive).
+func (c *Controller) RequireOrgIDForUser(user *models.User, reqOrgID *uuid.UUID) (uuid.UUID, error) {
+	if reqOrgID != nil && *reqOrgID != uuid.Nil {
+		member, err := c.DB.GetOrganizationMember(reqOrgID.String(), user.ID.String())
+		if err != nil {
+			return uuid.Nil, errors.New("organization not found or access denied")
+		}
+		if member.Role != "owner" && member.Role != "admin" {
+			return uuid.Nil, errors.New("insufficient permissions to create project in this organization")
+		}
+		return *reqOrgID, nil
+	}
+
+	personal, err := c.EnsurePersonalOrg(user)
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("resolve personal org: %w", err)
+	}
+	return personal.ID, nil
 }

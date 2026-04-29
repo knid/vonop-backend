@@ -193,6 +193,10 @@ func (c *Controller) RegisterUser(userRegisterReq requests.UserRegisterRequest) 
 
 	c.assignFreePlan(createdUser)
 
+	if _, err := c.EnsurePersonalOrg(createdUser); err != nil {
+		slog.Error("failed to ensure personal org on registration", "error", err, "user_id", createdUser.ID)
+	}
+
 	// Apply referral code if provided during registration
 	if userRegisterReq.ReferralCode != "" {
 		if err := c.ApplyReferralCode(createdUser, userRegisterReq.ReferralCode); err != nil {
@@ -353,6 +357,10 @@ func (c *Controller) GoogleLogin(oauthUser goth.User) (*responses.UserLoginRespo
 
 			if err := c.GrantInitialFreeCreditsIfNeeded(user); err != nil {
 				slog.Error("failed to grant initial free credits on google signup", "error", err, "user_id", user.ID)
+			}
+
+			if _, err := c.EnsurePersonalOrg(user); err != nil {
+				slog.Error("failed to ensure personal org on google signup", "error", err, "user_id", user.ID)
 			}
 
 			go c.SlackService.Client.PostMessage(
