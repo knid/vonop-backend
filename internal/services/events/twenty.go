@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -214,9 +215,11 @@ func (s *TwentyService) patchPerson(id string, person twentyPerson) error {
 	return nil
 }
 
-// do issues an authenticated HTTP request with 2x exponential retry on 5xx/timeout.
+// do issues an authenticated HTTP request with retry on 5xx/429/timeout.
+// 429 honors the Retry-After header (seconds); 5xx uses linear backoff. Up to
+// 4 attempts so a slow rate-limit window can recover within a single call.
 func (s *TwentyService) do(method, requestURL string, body []byte) (*http.Response, error) {
-	maxRetries := 2
+	maxRetries := 4
 	var lastErr error
 	for attempt := 0; attempt <= maxRetries; attempt++ {
 		if attempt > 0 {
@@ -237,6 +240,21 @@ func (s *TwentyService) do(method, requestURL string, body []byte) (*http.Respon
 		resp, err := s.client.Do(req)
 		if err != nil {
 			lastErr = err
+			continue
+		}
+		if resp.StatusCode == http.StatusTooManyRequests {
+			// Twenty rate limits are short — wait the Retry-After header (or
+			// fall back to 2s * attempt) and try again.
+			wait := 2 * time.Second * time.Duration(attempt+1)
+			if h := resp.Header.Get("Retry-After"); h != "" {
+				if secs, parseErr := strconv.Atoi(h); parseErr == nil && secs > 0 {
+					wait = time.Duration(secs) * time.Second
+				}
+			}
+			respBody, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			lastErr = fmt.Errorf("twenty: 429: %s", string(respBody))
+			time.Sleep(wait)
 			continue
 		}
 		if resp.StatusCode < 500 {

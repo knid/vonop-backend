@@ -35,7 +35,7 @@ func main() {
 	twenty.EnsureSchema(context.Background())
 
 	const pageSize = 1000
-	const concurrency = 10
+	const concurrency = 3
 
 	offset := 0
 	total := 0
