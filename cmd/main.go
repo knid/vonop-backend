@@ -303,6 +303,13 @@ func createSchema(db *bun.DB) error {
 		`ALTER TABLE deployments ALTER COLUMN organization_id SET NOT NULL`,
 		`ALTER TABLE api_keys ALTER COLUMN organization_id SET NOT NULL`,
 		`ALTER TABLE webhook_endpoints ALTER COLUMN organization_id SET NOT NULL`,
+		// Plan 5: billing rebind to org (2026-04-30-stripe-customer-to-org)
+		`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS stripe_customer_id text NOT NULL DEFAULT ''`,
+		`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS subscription_id uuid`,
+		`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS subscription_status text NOT NULL DEFAULT 'inactive'`,
+		`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS subscription_start_at timestamptz`,
+		`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS trial_start_at timestamptz`,
+		`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS trial_used boolean NOT NULL DEFAULT false`,
 	}
 
 	// Deduplicate before creating unique indexes (keep the latest row per group)
@@ -341,7 +348,7 @@ func createSchema(db *bun.DB) error {
 	// Table renames go in renameStatements below, not here — they run unconditionally.
 	var migrationsDone bool
 	row := db.QueryRowContext(context.Background(),
-		"SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='api_keys' AND column_name='organization_id')")
+		"SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='organizations' AND column_name='stripe_customer_id')")
 	if err := row.Scan(&migrationsDone); err != nil {
 		migrationsDone = false
 	}

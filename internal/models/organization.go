@@ -17,6 +17,14 @@ type Organization struct {
 	Owner      *User     `bun:"rel:belongs-to,join:owner_id=id"`
 	Logo       string    `bun:",nullzero"`
 	IsPersonal bool      `bun:",notnull,default:false"`
+	// --- Billing (Plan 5) — single source of truth; matching User columns are deprecated ---
+	StripeCustomerID    string                    `bun:",nullzero"`
+	SubscriptionID      uuid.UUID                 `bun:",type:uuid,nullzero"`
+	Subscription        *StandardUserSubscription `bun:"rel:belongs-to,join:subscription_id=id"`
+	SubscriptionStatus  string                    `bun:",notnull,default:'inactive'"`
+	SubscriptionStartAt time.Time                 `bun:""`
+	TrialStartAt        time.Time                 `bun:""`
+	TrialUsed           bool                      `bun:",notnull,default:false"`
 	CreatedAt  time.Time `bun:"created_at,nullzero,notnull,default:current_timestamp"`
 	UpdatedAt  time.Time `bun:"updated_at,nullzero,notnull,default:current_timestamp"`
 	DeletedAt  time.Time `bun:",soft_delete,nullzero"`
