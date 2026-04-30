@@ -27,35 +27,43 @@ func (db *Database) UpdateSubscription(standardUserSubscription *models.Standard
 	return standardUserSubscription, err
 }
 
-func (db *Database) GetStandardUserSubscriptionByUser(user *models.User) (*models.StandardUserSubscription, error) {
+func (db *Database) GetStandardUserSubscriptionByOrg(org *models.Organization) (*models.StandardUserSubscription, error) {
 	var subs models.StandardUserSubscription
-	err := db.DB.NewSelect().Model(&subs).Where("id = ?", user.SubscriptionID).Scan(context.Background())
+	err := db.DB.NewSelect().Model(&subs).Where("id = ?", org.SubscriptionID).Scan(context.Background())
 
 	return &subs, err
 }
 
-func (db *Database) SetStandardUserSubscription(user *models.User, subs *models.StandardUserSubscription) (*models.User, error) {
-	user.SubscriptionID = subs.ID
-	_, err := db.DB.NewUpdate().Model(user).Where("id = ?", user.ID.String()).Exec(context.Background())
+func (db *Database) SetStandardUserSubscription(org *models.Organization, subs *models.StandardUserSubscription) (*models.Organization, error) {
+	org.SubscriptionID = subs.ID
+	_, err := db.DB.NewUpdate().Model(org).Where("id = ?", org.ID.String()).Exec(context.Background())
 	if err != nil {
 		return nil, err
 	}
 
-	return user, nil
+	return org, nil
 }
 
-func (db *Database) DeleteStandardUserSubscription(user *models.User) (*models.User, error) {
-	user.SubscriptionID = uuid.Nil
-	_, err := db.DB.NewUpdate().Model(user).Where("id = ?", user.ID.String()).Exec(context.Background())
+func (db *Database) DeleteStandardUserSubscription(org *models.Organization) (*models.Organization, error) {
+	org.SubscriptionID = uuid.Nil
+	_, err := db.DB.NewUpdate().Model(org).Where("id = ?", org.ID.String()).Exec(context.Background())
 	if err != nil {
 		return nil, err
 	}
 
-	return user, nil
+	return org, nil
 }
 
+// GetStandardUserLimitsByUser keeps a User-keyed signature because many
+// callers still pass *User. Internally it resolves the user's personal
+// Organization (Plan 5) and delegates to the org-keyed lookup.
 func (db *Database) GetStandardUserLimitsByUser(user *models.User) (*models.StandardUserLimits, error) {
-	subs, err := db.GetStandardUserSubscriptionByUser(user)
+	org, err := db.GetPersonalOrgByUserID(user.ID.String())
+	if err != nil {
+		return nil, err
+	}
+
+	subs, err := db.GetStandardUserSubscriptionByOrg(org)
 	if err != nil {
 		return nil, err
 	}
