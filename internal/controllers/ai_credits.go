@@ -185,8 +185,14 @@ func (c *Controller) GetOrCreateCreditsBalance(user *models.User, orgID uuid.UUI
 			return nil, err
 		}
 
+		// Subscription billing period is anchored on the organization (Plan 5).
+		org, orgErr := c.DB.GetOrganizationByID(orgID.String())
+		if orgErr != nil {
+			return nil, orgErr
+		}
+
 		// Create a new balance aligned with the subscription billing period
-		periodStart, periodEnd := utils.BillingPeriod(user.SubscriptionStartAt, time.Now())
+		periodStart, periodEnd := utils.BillingPeriod(org.SubscriptionStartAt, time.Now())
 		balance = &models.AICreditsBalance{
 			OrganizationID: orgID,
 			UserID:         user.ID,
@@ -228,7 +234,12 @@ func (c *Controller) GetOrCreateCreditsBalance(user *models.User, orgID uuid.UUI
 
 	// Check if period has expired and reset atomically
 	if time.Now().After(balance.PeriodEnd) {
-		periodStart, periodEnd := utils.BillingPeriod(user.SubscriptionStartAt, time.Now())
+		// Subscription billing period is anchored on the organization (Plan 5).
+		org, orgErr := c.DB.GetOrganizationByID(orgID.String())
+		if orgErr != nil {
+			return nil, orgErr
+		}
+		periodStart, periodEnd := utils.BillingPeriod(org.SubscriptionStartAt, time.Now())
 
 		monthlyCredits := 0
 		rolloverMonths := 0
@@ -627,6 +638,13 @@ func (c *Controller) GrantSubscriptionCredits(user *models.User, orgID uuid.UUID
 		return
 	}
 
+	// Subscription state (start, ID) lives on the organization (Plan 5).
+	org, err := c.DB.GetOrganizationByID(orgID.String())
+	if err != nil {
+		slog.Error("failed to load organization for subscription grant", "error", err, "user_id", user.ID, "org_id", orgID)
+		return
+	}
+
 	balance, err := c.GetOrCreateCreditsBalance(user, orgID)
 	if err != nil {
 		slog.Error("failed to get/create credits balance for subscription grant", "error", err, "user_id", user.ID, "org_id", orgID)
@@ -656,7 +674,7 @@ func (c *Controller) GrantSubscriptionCredits(user *models.User, orgID uuid.UUID
 		}
 
 		// Reset period to align with the new subscription start and grant credits
-		periodStart, periodEnd := utils.BillingPeriod(user.SubscriptionStartAt, time.Now())
+		periodStart, periodEnd := utils.BillingPeriod(org.SubscriptionStartAt, time.Now())
 		if _, err := tx.NewRaw(
 			"UPDATE ai_credits_balances SET balance = balance + ?, period_start = ?, period_end = ?, updated_at = NOW() WHERE id = ?",
 			limits.MonthlyAICredits, periodStart, periodEnd, balance.ID,
@@ -669,7 +687,7 @@ func (c *Controller) GrantSubscriptionCredits(user *models.User, orgID uuid.UUID
 			UserID:         user.ID,
 			Amount:         limits.MonthlyAICredits,
 			Action:         "subscription_grant",
-			Reference:      user.SubscriptionID.String(),
+			Reference:      org.SubscriptionID.String(),
 		}); err != nil {
 			return fmt.Errorf("log grant: %w", err)
 		}
@@ -686,7 +704,7 @@ func (c *Controller) GrantSubscriptionCredits(user *models.User, orgID uuid.UUID
 	go c.EventService.SendEvent(user, constants.EVENT_CREDITS_GRANTED, map[string]any{
 		"credits":    limits.MonthlyAICredits,
 		"grant_type": "subscription",
-		"reference":  user.SubscriptionID.String(),
+		"reference":  org.SubscriptionID.String(),
 	})
 }
 
