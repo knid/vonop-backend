@@ -92,6 +92,14 @@ func (v *HttpViews) StripeCheckout(w http.ResponseWriter, r *http.Request) {
 
 	slog.Info("checkout: user authenticated", "user_id", user.ID.String())
 
+	// Stripe customer is bound to the user's personal org (Plan 5).
+	org, err := v.Controller.DB.GetPersonalOrgByUserID(user.ID.String())
+	if err != nil || org == nil || org.StripeCustomerID == "" {
+		slog.Error("no Stripe customer for user's personal org", "error", err, "user_id", user.ID)
+		utils.JSONErrorCode(w, constants.ErrInternal, http.StatusInternalServerError, nil)
+		return
+	}
+
 	priceID := r.URL.Query().Get("price")
 	if priceID == "" {
 		utils.JSONErrorCode(w, constants.ErrValidationRequired, http.StatusBadRequest, map[string]any{"field": "price"})
@@ -133,7 +141,7 @@ func (v *HttpViews) StripeCheckout(w http.ResponseWriter, r *http.Request) {
 	}
 
 	params := &stripe.CheckoutSessionParams{
-		Customer:            stripe.String(user.CustomerID),
+		Customer:            stripe.String(org.StripeCustomerID),
 		LineItems:           lineItems,
 		Mode:                &mode,
 		SuccessURL:          &successURL,
@@ -211,7 +219,15 @@ func (v *HttpViews) PurchaseCredits(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if requireActiveSubscription(w, user) {
+	if requireActiveSubscription(w, v.Controller, user) {
+		return
+	}
+
+	// Stripe customer is bound to the user's personal org (Plan 5).
+	org, err := v.Controller.DB.GetPersonalOrgByUserID(user.ID.String())
+	if err != nil || org == nil || org.StripeCustomerID == "" {
+		slog.Error("no Stripe customer for user's personal org", "error", err, "user_id", user.ID)
+		utils.JSONErrorCode(w, constants.ErrInternal, http.StatusInternalServerError, nil)
 		return
 	}
 
@@ -238,7 +254,7 @@ func (v *HttpViews) PurchaseCredits(w http.ResponseWriter, r *http.Request) {
 
 	mode := string(stripe.CheckoutSessionModePayment)
 	params := &stripe.CheckoutSessionParams{
-		Customer: stripe.String(user.CustomerID),
+		Customer: stripe.String(org.StripeCustomerID),
 		LineItems: []*stripe.CheckoutSessionLineItemParams{
 			{
 				Price:    stripe.String(priceID),

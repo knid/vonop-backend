@@ -17,7 +17,7 @@ func (v *HttpViews) CreateOrganization(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if requireActiveSubscription(w, user) {
+	if requireActiveSubscription(w, v.Controller, user) {
 		return
 	}
 

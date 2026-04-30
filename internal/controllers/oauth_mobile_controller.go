@@ -61,30 +61,36 @@ func (c *Controller) GoogleMobileLogin(req requests.GoogleMobileLoginRequest) (*
 				return nil, fmt.Errorf("failed to create user")
 			}
 
+			personalOrg, orgErr := c.EnsurePersonalOrg(user)
+			if orgErr != nil {
+				slog.Error("failed to ensure personal org on google mobile signup", "error", orgErr, "user_id", user.ID)
+				return nil, fmt.Errorf("failed to create personal org")
+			}
+
 			params := &stripe.CustomerParams{
 				Email: stripe.String(user.Email),
 				Metadata: map[string]string{
-					"user_id": user.ID.String(),
+					"organization_id": personalOrg.ID.String(),
+					"user_id":         user.ID.String(),
 				},
 			}
 			stripeCustomer, err := customer.New(params)
 			if err != nil {
 				return nil, err
 			}
+			personalOrg.StripeCustomerID = stripeCustomer.ID
+			if _, err := c.DB.UpdateOrganization(personalOrg); err != nil {
+				slog.Error("failed to persist Stripe customer to org", "error", err, "org_id", personalOrg.ID, "customer_id", stripeCustomer.ID)
+			}
 			user.CustomerID = stripeCustomer.ID
-			c.DB.UpdateUser(user)
-
-			c.assignFreePlan(user)
-
-			personalOrg, orgErr := c.EnsurePersonalOrg(user)
-			if orgErr != nil {
-				slog.Error("failed to ensure personal org on google mobile signup", "error", orgErr, "user_id", user.ID)
+			if _, err := c.DB.UpdateUser(user); err != nil {
+				slog.Error("failed to persist Stripe customer to user", "error", err, "user_id", user.ID, "customer_id", stripeCustomer.ID)
 			}
 
-			if personalOrg != nil {
-				if err := c.GrantInitialFreeCreditsIfNeeded(user, personalOrg.ID); err != nil {
-					slog.Error("failed to grant initial free credits on google mobile signup", "error", err, "user_id", user.ID)
-				}
+			c.assignFreePlan(personalOrg)
+
+			if err := c.GrantInitialFreeCreditsIfNeeded(user, personalOrg.ID); err != nil {
+				slog.Error("failed to grant initial free credits on google mobile signup", "error", err, "user_id", user.ID)
 			}
 
 			go c.EventService.SendEvent(user, constants.EVENT_NEW_USER, map[string]any{

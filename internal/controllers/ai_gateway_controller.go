@@ -173,12 +173,19 @@ func (c *Controller) GatewayImageCreditCost(modelID string) int {
 	return cost
 }
 
-// GetUserTierName returns a normalized tier name from the user's subscription.
+// GetUserTierName returns a normalized tier name from the user's
+// subscription. Reads SubscriptionStatus / SubscriptionID from the user's
+// personal Organization (Plan 5). Falls back to "free" on any lookup
+// failure to keep gating decisions strict.
 func (c *Controller) GetUserTierName(user *models.User) string {
-	if user.SubscriptionStatus != "active" && user.SubscriptionStatus != "trial" {
+	org, err := c.DB.GetPersonalOrgByUserID(user.ID.String())
+	if err != nil || org == nil {
 		return "free"
 	}
-	sub, err := c.DB.GetSubscriptionById(user.SubscriptionID.String())
+	if org.SubscriptionStatus != "active" && org.SubscriptionStatus != "trial" {
+		return "free"
+	}
+	sub, err := c.DB.GetSubscriptionById(org.SubscriptionID.String())
 	if err != nil {
 		return "free"
 	}

@@ -21,7 +21,7 @@ func (v *HttpViews) GetProjectNotifications(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	if requireActiveSubscription(w, user) {
+	if requireActiveSubscription(w, v.Controller, user) {
 		return
 	}
 
@@ -54,7 +54,7 @@ func (v *HttpViews) SendProjectNotification(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	if requireActiveSubscription(w, user) {
+	if requireActiveSubscription(w, v.Controller, user) {
 		go v.Controller.EventService.SendEvent(user, constants.EVENT_SUBSCRIPTION_NEED, map[string]any{
 			"action": "send_notification",
 		})
@@ -77,7 +77,13 @@ func (v *HttpViews) SendProjectNotification(w http.ResponseWriter, r *http.Reque
 		notifications = append(notifications, projectNotifications...)
 	}
 
-	subsStart := user.SubscriptionStartAt
+	// Subscription billing period anchors on the personal org (Plan 5).
+	org, err := v.Controller.DB.GetPersonalOrgByUserID(user.ID.String())
+	if err != nil {
+		utils.JSONInternalError(w, err)
+		return
+	}
+	subsStart := org.SubscriptionStartAt
 	now := time.Now()
 
 	renewStart := time.Date(now.Year(), now.Month(), subsStart.Day(), 0, 0, 0, 0, now.Location())
@@ -102,7 +108,7 @@ func (v *HttpViews) SendProjectNotification(w http.ResponseWriter, r *http.Reque
 	}
 
 	if count >= limits.MontlyNotificationCount {
-		_, renewEnd := utils.BillingPeriod(user.SubscriptionStartAt, time.Now())
+		_, renewEnd := utils.BillingPeriod(org.SubscriptionStartAt, time.Now())
 		utils.JSONError(w, constants.ErrNotificationLimitReached,
 			"You have reached your monthly notification limit",
 			http.StatusForbidden, map[string]any{

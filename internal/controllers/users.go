@@ -175,10 +175,21 @@ func (c *Controller) RegisterUser(userRegisterReq requests.UserRegisterRequest) 
 		return nil, err
 	}
 
+	// Personal org must exist before we create the Stripe customer so the
+	// customer's metadata.organization_id is set up-front. Webhook routing
+	// keys off this metadata, so any race where Stripe fires before backfill
+	// runs would silently no-op without it.
+	personalOrg, err := c.EnsurePersonalOrg(createdUser)
+	if err != nil {
+		slog.Error("failed to ensure personal org on registration", "error", err, "user_id", createdUser.ID)
+		return nil, err
+	}
+
 	params := stripe.CustomerParams{
 		Email: &createdUser.Email,
 		Metadata: map[string]string{
-			"user_id": user.ID.String(),
+			"organization_id": personalOrg.ID.String(),
+			"user_id":         createdUser.ID.String(),
 		},
 	}
 
@@ -186,16 +197,20 @@ func (c *Controller) RegisterUser(userRegisterReq requests.UserRegisterRequest) 
 	if err != nil {
 		return nil, err
 	}
+
+	// Dual-write the Stripe customer ID to both the org (new home) and the
+	// user (legacy column, kept until cleanup) so any reads hitting the old
+	// path during the transition still resolve.
+	personalOrg.StripeCustomerID = customer.ID
+	if _, err := c.DB.UpdateOrganization(personalOrg); err != nil {
+		slog.Error("failed to persist Stripe customer to org", "error", err, "org_id", personalOrg.ID, "customer_id", customer.ID)
+	}
 	createdUser.CustomerID = customer.ID
 	if _, err := c.DB.UpdateUser(createdUser); err != nil {
-		slog.Error("failed to link Stripe customer to user", "error", err, "user_id", createdUser.ID, "customer_id", customer.ID)
+		slog.Error("failed to persist Stripe customer to user", "error", err, "user_id", createdUser.ID, "customer_id", customer.ID)
 	}
 
-	c.assignFreePlan(createdUser)
-
-	if _, err := c.EnsurePersonalOrg(createdUser); err != nil {
-		slog.Error("failed to ensure personal org on registration", "error", err, "user_id", createdUser.ID)
-	}
+	c.assignFreePlan(personalOrg)
 
 	// Apply referral code if provided during registration
 	if userRegisterReq.ReferralCode != "" {
@@ -337,10 +352,17 @@ func (c *Controller) GoogleLogin(oauthUser goth.User) (*responses.UserLoginRespo
 				return nil, err
 			}
 
+			personalOrg, orgErr := c.EnsurePersonalOrg(user)
+			if orgErr != nil {
+				slog.Error("failed to ensure personal org on google signup", "error", orgErr, "user_id", user.ID)
+				return nil, orgErr
+			}
+
 			params := stripe.CustomerParams{
 				Email: stripe.String(user.Email),
 				Metadata: map[string]string{
-					"user_id": user.ID.String(),
+					"organization_id": personalOrg.ID.String(),
+					"user_id":         user.ID.String(),
 				},
 			}
 
@@ -348,22 +370,19 @@ func (c *Controller) GoogleLogin(oauthUser goth.User) (*responses.UserLoginRespo
 			if err != nil {
 				return nil, err
 			}
+			personalOrg.StripeCustomerID = customer.ID
+			if _, err := c.DB.UpdateOrganization(personalOrg); err != nil {
+				slog.Error("failed to persist Stripe customer to org", "error", err, "org_id", personalOrg.ID, "customer_id", customer.ID)
+			}
 			user.CustomerID = customer.ID
 			if _, err := c.DB.UpdateUser(user); err != nil {
-				slog.Error("failed to link Stripe customer to user", "error", err, "user_id", user.ID, "customer_id", customer.ID)
+				slog.Error("failed to persist Stripe customer to user", "error", err, "user_id", user.ID, "customer_id", customer.ID)
 			}
 
-			c.assignFreePlan(user)
+			c.assignFreePlan(personalOrg)
 
-			personalOrg, orgErr := c.EnsurePersonalOrg(user)
-			if orgErr != nil {
-				slog.Error("failed to ensure personal org on google signup", "error", orgErr, "user_id", user.ID)
-			}
-
-			if personalOrg != nil {
-				if err := c.GrantInitialFreeCreditsIfNeeded(user, personalOrg.ID); err != nil {
-					slog.Error("failed to grant initial free credits on google signup", "error", err, "user_id", user.ID)
-				}
+			if err := c.GrantInitialFreeCreditsIfNeeded(user, personalOrg.ID); err != nil {
+				slog.Error("failed to grant initial free credits on google signup", "error", err, "user_id", user.ID)
 			}
 
 			go c.SlackService.Client.PostMessage(
@@ -403,16 +422,23 @@ func (c *Controller) GoogleLogin(oauthUser goth.User) (*responses.UserLoginRespo
 	}, nil
 }
 
-func (c *Controller) assignFreePlan(user *models.User) {
+// assignFreePlan sets the org onto the "Free" subscription plan and marks
+// its subscription_status as "free". Org-scoped: billing now lives on
+// Organization, not User. Callers wanting to apply this to a user should
+// resolve the user's personal org first via GetPersonalOrgByUserID.
+func (c *Controller) assignFreePlan(org *models.Organization) {
+	if org == nil {
+		return
+	}
 	freePlan, err := c.DB.GetSubscriptionByName("Free")
 	if err != nil {
 		slog.Warn("assignFreePlan: free plan not found", "error", err)
 		return
 	}
-	user.SubscriptionID = freePlan.ID
-	user.SubscriptionStatus = "free"
-	if _, err := c.DB.UpdateUser(user); err != nil {
-		slog.Warn("assignFreePlan: failed to update user", "error", err)
+	org.SubscriptionID = freePlan.ID
+	org.SubscriptionStatus = "free"
+	if _, err := c.DB.UpdateOrganization(org); err != nil {
+		slog.Warn("assignFreePlan: failed to update org", "error", err, "org_id", org.ID)
 		return
 	}
 }

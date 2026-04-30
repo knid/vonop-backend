@@ -33,9 +33,17 @@ func (v *HttpViews) StripeCustomerPortal(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// Stripe customer is bound to the user's personal org (Plan 5).
+	org, err := v.Controller.DB.GetPersonalOrgByUserID(user.ID.String())
+	if err != nil || org == nil || org.StripeCustomerID == "" {
+		slog.Error("no Stripe customer for user's personal org", "error", err, "user_id", user.ID)
+		utils.JSONErrorCode(w, constants.ErrInternal, http.StatusInternalServerError, nil)
+		return
+	}
+
 	params := stripe.BillingPortalSessionParams{
 		Configuration: stripe.String(v.Controller.SecretManager.GetSecret("STRIPE_BILLING_PORTAL_CONFIG_ID")),
-		Customer:      stripe.String(user.CustomerID),
+		Customer:      stripe.String(org.StripeCustomerID),
 	}
 
 	s, err := session.New(&params)

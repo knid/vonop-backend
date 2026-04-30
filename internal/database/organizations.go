@@ -250,6 +250,58 @@ func (db *Database) TransferOrganizationOwnership(orgID string, oldOwnerUserID, 
 	return &org, nil
 }
 
+// BulkBackfillBillingFromUsers copies the 6 billing-related columns from each
+// user's row to their personal org. Idempotent — only fills empty/default
+// values on the org side. Returns rows affected.
+func (db *Database) BulkBackfillBillingFromUsers() (int, error) {
+	res, err := db.DB.ExecContext(context.Background(), `
+		UPDATE organizations o
+		SET
+			stripe_customer_id = COALESCE(NULLIF(u.customer_id, ''), o.stripe_customer_id),
+			subscription_id = COALESCE(u.subscription_id, o.subscription_id),
+			subscription_status = CASE WHEN o.subscription_status = 'inactive' THEN u.subscription_status ELSE o.subscription_status END,
+			subscription_start_at = COALESCE(o.subscription_start_at, u.subscription_start_at),
+			trial_start_at = COALESCE(o.trial_start_at, u.trial_start_at),
+			trial_used = (o.trial_used OR u.trial_used)
+		FROM users u
+		WHERE o.owner_id = u.id
+		  AND o.is_personal = true
+		  AND o.deleted_at IS NULL
+	`)
+	if err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	return int(n), nil
+}
+
+// ListPersonalOrgsWithStripeCustomer returns personal orgs that have a non-empty
+// stripe_customer_id (used by the migration to update Stripe metadata).
+func (db *Database) ListPersonalOrgsWithStripeCustomer() ([]models.Organization, error) {
+	var orgs []models.Organization
+	err := db.DB.NewSelect().Model(&orgs).
+		Where("is_personal = true").
+		Where("stripe_customer_id != ''").
+		Where("deleted_at IS NULL").
+		Scan(context.Background())
+	return orgs, err
+}
+
+// GetOrganizationByStripeCustomerID returns the Organization that owns the
+// given Stripe customer. Replaces GetUserByStripeCustomerID in webhook handlers.
+func (db *Database) GetOrganizationByStripeCustomerID(customerID string) (*models.Organization, error) {
+	var org models.Organization
+	err := db.DB.NewSelect().Model(&org).
+		Where("stripe_customer_id = ?", customerID).
+		Where("deleted_at IS NULL").
+		Limit(1).
+		Scan(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	return &org, nil
+}
+
 // UpdateMemberCap sets monthly_credit_cap on an OrganizationMember. cap=nil
 // clears the cap (member becomes unlimited within the pool). Returns the
 // updated member.
