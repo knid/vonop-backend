@@ -23,6 +23,16 @@ func (db *Database) GetWebhookEndpointsByUserID(userID string) ([]models.Webhook
 	return endpoints, err
 }
 
+func (db *Database) GetWebhookEndpointsByOrgID(orgID string) ([]models.WebhookEndpoint, error) {
+	var endpoints []models.WebhookEndpoint
+	err := db.DB.NewSelect().
+		Model(&endpoints).
+		Where("organization_id = ?", orgID).
+		OrderExpr("created_at DESC").
+		Scan(context.Background())
+	return endpoints, err
+}
+
 func (db *Database) GetWebhookEndpointByID(id string) (*models.WebhookEndpoint, error) {
 	var endpoint models.WebhookEndpoint
 	err := db.DB.NewSelect().

@@ -6,6 +6,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/requests"
+	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/utils"
 )
 
@@ -26,7 +27,13 @@ func (v *HttpViews) CreateWebhookEndpoint(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	result, err := v.Controller.CreateWebhookEndpoint(user, req)
+	orgID, err := v.Controller.RequireOrgIDForUser(user, &req.OrganizationID)
+	if err != nil {
+		utils.JSONInternalError(w, err)
+		return
+	}
+
+	result, err := v.Controller.CreateWebhookEndpoint(user, orgID, req)
 	if err != nil {
 		utils.JSONInternalError(w, err)
 		return
@@ -39,6 +46,31 @@ func (v *HttpViews) ListWebhookEndpoints(w http.ResponseWriter, r *http.Request)
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
 		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
+		return
+	}
+
+	if rawOrgID := r.URL.Query().Get("org_id"); rawOrgID != "" {
+		orgID, oErr := v.Controller.RequireOrgMembership(user, rawOrgID)
+		if oErr != nil {
+			utils.JSONErrorCode(w, constants.ErrForbidden, http.StatusForbidden, nil)
+			return
+		}
+		endpoints, dErr := v.Controller.DB.GetWebhookEndpointsByOrgID(orgID.String())
+		if dErr != nil {
+			utils.JSONInternalError(w, dErr)
+			return
+		}
+		var resp []responses.WebhookEndpointResponse
+		for _, ep := range endpoints {
+			resp = append(resp, responses.WebhookEndpointResponse{
+				ID:        ep.ID,
+				URL:       ep.URL,
+				Events:    ep.Events,
+				Active:    ep.Active,
+				CreatedAt: ep.CreatedAt,
+			})
+		}
+		utils.JSONResponse(w, resp, http.StatusOK)
 		return
 	}
 

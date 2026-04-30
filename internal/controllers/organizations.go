@@ -381,3 +381,16 @@ func (c *Controller) RequireOrgIDForUser(user *models.User, reqOrgID *uuid.UUID)
 	}
 	return personal.ID, nil
 }
+
+// RequireOrgMembership verifies the user is a member of the org (any role)
+// and returns the org's UUID. Use from list handlers when ?org_id= is given.
+func (c *Controller) RequireOrgMembership(user *models.User, orgIDStr string) (uuid.UUID, error) {
+	orgID, err := uuid.Parse(orgIDStr)
+	if err != nil {
+		return uuid.Nil, errors.New("invalid organization id")
+	}
+	if _, err := c.DB.GetOrganizationMember(orgIDStr, user.ID.String()); err != nil {
+		return uuid.Nil, errors.New("organization not found or access denied")
+	}
+	return orgID, nil
+}

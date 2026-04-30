@@ -20,6 +20,13 @@ func (db *Database) GetAppleConnectionsByUser(user models.User) ([]models.AppleC
 	return credentials, err
 }
 
+func (db *Database) GetAppleConnectionsByOrgID(orgID string) ([]models.AppleConnection, error) {
+	var credentials []models.AppleConnection
+	err := db.DB.NewSelect().Model(&credentials).Where("organization_id = ?", orgID).Scan(context.Background())
+
+	return credentials, err
+}
+
 func (db *Database) CreateAppleConnection(credentials *models.AppleConnection) (*models.AppleConnection, error) {
 	_, err := db.DB.NewInsert().Model(credentials).Exec(context.Background())
 
@@ -48,6 +55,13 @@ func (db *Database) GetGooglePlayConnectionById(id string) (*models.GooglePlayCo
 func (db *Database) GetGooglePlayConnectionsByUser(user models.User) ([]models.GooglePlayConnection, error) {
 	var credentials []models.GooglePlayConnection
 	err := db.DB.NewSelect().Model(&credentials).Where("user_id = ?", user.ID.String()).Scan(context.Background())
+
+	return credentials, err
+}
+
+func (db *Database) GetGooglePlayConnectionsByOrgID(orgID string) ([]models.GooglePlayConnection, error) {
+	var credentials []models.GooglePlayConnection
+	err := db.DB.NewSelect().Model(&credentials).Where("organization_id = ?", orgID).Scan(context.Background())
 
 	return credentials, err
 }

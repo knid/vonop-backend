@@ -84,7 +84,7 @@ func (c *Controller) GetDeploymentByID(deploymentID string) (*responses.Deployme
 	}, nil
 }
 
-func (c *Controller) CreateDeploymentTask(user *models.User, deploymentReq requests.CreateDeploymentRequest) (*responses.DeploymentResponse, error) {
+func (c *Controller) CreateDeploymentTask(user *models.User, orgID uuid.UUID, deploymentReq requests.CreateDeploymentRequest) (*responses.DeploymentResponse, error) {
 	validate := validator.New(validator.WithRequiredStructEnabled())
 	if err := validate.Struct(deploymentReq); err != nil {
 		return nil, err
@@ -151,21 +151,22 @@ func (c *Controller) CreateDeploymentTask(user *models.User, deploymentReq reque
 	}
 
 	deployment, err := c.DB.CreateDeployment(&models.Deployment{
-		UserID:                  user.ID,
-		ProjectID:               project.ID,
-		BuildID:                 build.ID,
-		Platforms:               deploymentReq.Platforms,
-		IconPath:                deploymentReq.IconID,
-		Title:                   deploymentReq.Title,
-		Description:             deploymentReq.Description,
-		Locale:                  deploymentReq.Locale,
-		AppleConnectionID:       appStoreCredId,
-		GooglePlayConnectionID:  googlePlayCredId,
-		Status:                  initialStatus,
-		Method:                  deploymentReq.Method,
-		ScreenshotPaths:         deploymentReq.ScreenshotPaths,
-		ReleaseNotes:            deploymentReq.ReleaseNotes,
-		RolloutTrack:            deploymentReq.RolloutTrack,
+		UserID:                 user.ID,
+		OrganizationID:         orgID,
+		ProjectID:              project.ID,
+		BuildID:                build.ID,
+		Platforms:              deploymentReq.Platforms,
+		IconPath:               deploymentReq.IconID,
+		Title:                  deploymentReq.Title,
+		Description:            deploymentReq.Description,
+		Locale:                 deploymentReq.Locale,
+		AppleConnectionID:      appStoreCredId,
+		GooglePlayConnectionID: googlePlayCredId,
+		Status:                 initialStatus,
+		Method:                 deploymentReq.Method,
+		ScreenshotPaths:        deploymentReq.ScreenshotPaths,
+		ReleaseNotes:           deploymentReq.ReleaseNotes,
+		RolloutTrack:           deploymentReq.RolloutTrack,
 	})
 	if err != nil {
 		return nil, err
@@ -291,7 +292,7 @@ func (c *Controller) CreateDeploymentTask(user *models.User, deploymentReq reque
 	}, nil
 }
 
-func (c *Controller) UpdateDeploymentTask(user *models.User, deploymentID string, deploymentReq requests.CreateDeploymentRequest) (*responses.DeploymentResponse, error) {
+func (c *Controller) UpdateDeploymentTask(user *models.User, deploymentID string, deploymentReq requests.UpdateDeploymentRequest) (*responses.DeploymentResponse, error) {
 	validate := validator.New(validator.WithRequiredStructEnabled())
 	if err := validate.Struct(deploymentReq); err != nil {
 		return nil, err

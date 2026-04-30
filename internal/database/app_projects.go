@@ -29,6 +29,26 @@ func (db *Database) GetAppProjectsByUserIDAndTypes(userID string, types []string
 	return projects, err
 }
 
+func (db *Database) GetAppProjectsByOrgID(orgID string) ([]models.AppProject, error) {
+	var projects []models.AppProject
+	err := db.DB.NewSelect().Model(&projects).
+		ExcludeColumn("data_models", "prompt").
+		Where("organization_id = ?", orgID).Order("created_at DESC").Scan(context.Background())
+	return projects, err
+}
+
+func (db *Database) GetAppProjectsByOrgIDAndTypes(orgID string, types []string) ([]models.AppProject, error) {
+	var projects []models.AppProject
+	q := db.DB.NewSelect().Model(&projects).
+		ExcludeColumn("data_models", "prompt").
+		Where("organization_id = ?", orgID)
+	if len(types) > 0 {
+		q = q.Where("project_type IN (?)", bun.In(types))
+	}
+	err := q.Order("created_at DESC").Scan(context.Background())
+	return projects, err
+}
+
 func (db *Database) GetAppProjectByID(id string) (*models.AppProject, error) {
 	if cached, ok := getProjectFromCache(id); ok {
 		return cached, nil

@@ -7,6 +7,7 @@ import (
 	"github.com/go-playground/validator/v10"
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/requests"
+	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/utils"
 )
 
@@ -14,6 +15,34 @@ func (v *HttpViews) ListAppleConnections(w http.ResponseWriter, r *http.Request)
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
 		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
+		return
+	}
+
+	if rawOrgID := r.URL.Query().Get("org_id"); rawOrgID != "" {
+		orgID, oErr := v.Controller.RequireOrgMembership(user, rawOrgID)
+		if oErr != nil {
+			utils.JSONErrorCode(w, constants.ErrForbidden, http.StatusForbidden, nil)
+			return
+		}
+		conns, dErr := v.Controller.DB.GetAppleConnectionsByOrgID(orgID.String())
+		if dErr != nil {
+			utils.JSONInternalError(w, dErr)
+			return
+		}
+		var resp []responses.AppleConnectionResponse
+		for _, cred := range conns {
+			resp = append(resp, responses.AppleConnectionResponse{
+				ID:        cred.ID,
+				Name:      cred.Name,
+				KeyID:     cred.KeyID,
+				APNSKeyID: cred.APNSP8KeyID,
+				TeamID:    cred.TeamID,
+				IssuerID:  cred.IssuerID,
+				CreatedAt: cred.CreatedAt,
+				UpdatedAt: cred.UpdatedAt,
+			})
+		}
+		utils.JSONResponse(w, resp, http.StatusOK)
 		return
 	}
 
@@ -52,7 +81,13 @@ func (v *HttpViews) CreateAppleConnection(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	cred, err := v.Controller.CreateAppleConnection(user, req)
+	orgID, err := v.Controller.RequireOrgIDForUser(user, &req.OrganizationID)
+	if err != nil {
+		utils.JSONInternalError(w, err)
+		return
+	}
+
+	cred, err := v.Controller.CreateAppleConnection(user, orgID, req)
 	if err != nil {
 		utils.JSONInternalError(w, err)
 		return
@@ -109,14 +144,14 @@ func (v *HttpViews) UpdateAppleConnection(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	var req requests.AppleConnectionCreateRequest
+	var req requests.AppleConnectionUpdateRequest
 	if err := utils.ParseJSONBody(r, &req); err != nil {
 		utils.ValidationError(w, err)
 		return
 	}
 
 	validate := validator.New(validator.WithRequiredStructEnabled())
-	if err := utils.ValidateFunc[requests.AppleConnectionCreateRequest](req, validate); err != nil {
+	if err := utils.ValidateFunc[requests.AppleConnectionUpdateRequest](req, validate); err != nil {
 		utils.ValidationError(w, err)
 		return
 	}
@@ -162,6 +197,30 @@ func (v *HttpViews) ListGooglePlayConnections(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	if rawOrgID := r.URL.Query().Get("org_id"); rawOrgID != "" {
+		orgID, oErr := v.Controller.RequireOrgMembership(user, rawOrgID)
+		if oErr != nil {
+			utils.JSONErrorCode(w, constants.ErrForbidden, http.StatusForbidden, nil)
+			return
+		}
+		conns, dErr := v.Controller.DB.GetGooglePlayConnectionsByOrgID(orgID.String())
+		if dErr != nil {
+			utils.JSONInternalError(w, dErr)
+			return
+		}
+		var resp []responses.GooglePlayConnectionResponse
+		for _, cred := range conns {
+			resp = append(resp, responses.GooglePlayConnectionResponse{
+				ID:        cred.ID,
+				Name:      cred.Name,
+				CreatedAt: cred.CreatedAt,
+				UpdatedAt: cred.UpdatedAt,
+			})
+		}
+		utils.JSONResponse(w, resp, http.StatusOK)
+		return
+	}
+
 	creds, err := v.Controller.ListGooglePlayConnections(user)
 	if err != nil {
 		utils.JSONInternalError(w, err)
@@ -198,7 +257,13 @@ func (v *HttpViews) CreateGooglePlayConnection(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	cred, err := v.Controller.CreateGooglePlayConnection(user, req)
+	orgID, err := v.Controller.RequireOrgIDForUser(user, &req.OrganizationID)
+	if err != nil {
+		utils.JSONInternalError(w, err)
+		return
+	}
+
+	cred, err := v.Controller.CreateGooglePlayConnection(user, orgID, req)
 	if err != nil {
 		utils.JSONInternalError(w, err)
 		return
@@ -255,14 +320,14 @@ func (v *HttpViews) UpdateGooglePlayConnection(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	var req requests.GooglePlayConnectionCreateRequest
+	var req requests.GooglePlayConnectionUpdateRequest
 	if err := utils.ParseJSONBody(r, &req); err != nil {
 		utils.ValidationError(w, err)
 		return
 	}
 
 	validate := validator.New(validator.WithRequiredStructEnabled())
-	if err := utils.ValidateFunc[requests.GooglePlayConnectionCreateRequest](req, validate); err != nil {
+	if err := utils.ValidateFunc[requests.GooglePlayConnectionUpdateRequest](req, validate); err != nil {
 		utils.ValidationError(w, err)
 		return
 	}

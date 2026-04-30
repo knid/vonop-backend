@@ -8,6 +8,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/requests"
+	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/utils"
 )
 
@@ -19,6 +20,41 @@ func (v *HttpViews) GetDeployments(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if requireActiveSubscription(w, user) {
+		return
+	}
+
+	if rawOrgID := r.URL.Query().Get("org_id"); rawOrgID != "" {
+		orgID, oErr := v.Controller.RequireOrgMembership(user, rawOrgID)
+		if oErr != nil {
+			utils.JSONErrorCode(w, constants.ErrForbidden, http.StatusForbidden, nil)
+			return
+		}
+		deployments, dErr := v.Controller.DB.GetDeploymentsByOrgID(orgID.String())
+		if dErr != nil {
+			utils.JSONInternalError(w, dErr)
+			return
+		}
+		var resp []responses.DeploymentResponse
+		for _, deployment := range deployments {
+			resp = append(resp, responses.DeploymentResponse{
+				ID:                     deployment.ID,
+				UserID:                 deployment.UserID,
+				ProjectID:              deployment.ProjectID,
+				BuildID:                deployment.BuildID,
+				Platforms:              deployment.Platforms,
+				IconID:                 deployment.IconPath,
+				Title:                  deployment.Title,
+				Description:            deployment.Description,
+				Status:                 deployment.Status,
+				ScreenshotIDs:          deployment.ScreenshotPaths,
+				Method:                 deployment.Method,
+				AppleConnectionID:      deployment.AppleConnectionID,
+				GooglePlayConnectionID: deployment.GooglePlayConnectionID,
+				CreatedAt:              deployment.CreatedAt,
+				UpdatedAt:              deployment.UpdatedAt,
+			})
+		}
+		utils.JSONResponse(w, resp, http.StatusOK)
 		return
 	}
 
@@ -78,7 +114,13 @@ func (v *HttpViews) CreateDeployment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	deployment, err := v.Controller.CreateDeploymentTask(user, deploymentCreateReq)
+	orgID, err := v.Controller.RequireOrgIDForUser(user, &deploymentCreateReq.OrganizationID)
+	if err != nil {
+		utils.JSONInternalError(w, err)
+		return
+	}
+
+	deployment, err := v.Controller.CreateDeploymentTask(user, orgID, deploymentCreateReq)
 	if err != nil {
 		utils.JSONInternalError(w, err)
 		return
@@ -98,7 +140,7 @@ func (v *HttpViews) UpdateDeployment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var deploymentCreateReq requests.CreateDeploymentRequest
+	var deploymentCreateReq requests.UpdateDeploymentRequest
 	if err := utils.ParseJSONBody(r, &deploymentCreateReq); err != nil {
 		utils.ValidationError(w, err)
 		return
