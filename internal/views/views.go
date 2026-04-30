@@ -1,6 +1,7 @@
 package views
 
 import (
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -15,10 +16,20 @@ type HttpViews struct {
 	Controller *controllers.Controller
 }
 
-// requireActiveSubscription checks that the user has an active subscription.
-// Returns true if the request should be blocked (response already written).
-func requireActiveSubscription(w http.ResponseWriter, user *models.User) bool {
-	switch user.SubscriptionStatus {
+// requireActiveSubscription checks that the user's personal org has an
+// active subscription. Returns true if the request should be blocked
+// (response already written).
+//
+// Reads SubscriptionStatus from the user's personal Organization (Plan 5).
+// The user is still passed so the lookup can resolve via GetPersonalOrgByUserID.
+func requireActiveSubscription(w http.ResponseWriter, c *controllers.Controller, user *models.User) bool {
+	org, err := c.DB.GetPersonalOrgByUserID(user.ID.String())
+	if err != nil || org == nil {
+		slog.Error("requireActiveSubscription: failed to load personal org", "error", err, "user_id", user.ID)
+		utils.JSONError(w, constants.ErrSubscriptionRequired, "active subscription required", http.StatusForbidden, nil)
+		return true
+	}
+	switch org.SubscriptionStatus {
 	case "active", "free", "trial":
 		return false
 	}
@@ -62,7 +73,12 @@ func (v *HttpViews) checkMinimumCredits(w http.ResponseWriter, user *models.User
 			monthlyLimit = limits.MonthlyAICredits
 			planName = pn
 		}
-		_, renewEnd := utils.BillingPeriod(user.SubscriptionStartAt, time.Now())
+		// Subscription billing period anchors on the personal org (Plan 5).
+		subsStart := user.SubscriptionStartAt
+		if org, orgErr := v.Controller.DB.GetPersonalOrgByUserID(user.ID.String()); orgErr == nil && org != nil {
+			subsStart = org.SubscriptionStartAt
+		}
+		_, renewEnd := utils.BillingPeriod(subsStart, time.Now())
 
 		utils.JSONError(w, constants.ErrAICreditsDepleted,
 			"insufficient AI credits: have 0, need at least 1",

@@ -20,7 +20,7 @@ func (v *HttpViews) GetProjectBuilds(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if requireActiveSubscription(w, user) {
+	if requireActiveSubscription(w, v.Controller, user) {
 		return
 	}
 
@@ -59,7 +59,7 @@ func (v *HttpViews) CreateProjectBuild(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if requireActiveSubscription(w, user) {
+	if requireActiveSubscription(w, v.Controller, user) {
 		go v.Controller.EventService.SendEvent(user, constants.EVENT_SUBSCRIPTION_NEED, map[string]any{})
 		return
 	}
@@ -75,7 +75,13 @@ func (v *HttpViews) CreateProjectBuild(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	subsStart := user.SubscriptionStartAt
+	// Subscription billing period anchors on the personal org (Plan 5).
+	org, err := v.Controller.DB.GetPersonalOrgByUserID(user.ID.String())
+	if err != nil {
+		utils.JSONInternalError(w, err)
+		return
+	}
+	subsStart := org.SubscriptionStartAt
 	now := time.Now()
 	renewStart := time.Date(now.Year(), now.Month(), subsStart.Day(), 0, 0, 0, 0, now.Location())
 	if now.Before(renewStart) {
@@ -89,7 +95,7 @@ func (v *HttpViews) CreateProjectBuild(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if count >= limits.MontlyBuildCount {
-		_, renewEnd := utils.BillingPeriod(user.SubscriptionStartAt, time.Now())
+		_, renewEnd := utils.BillingPeriod(org.SubscriptionStartAt, time.Now())
 		utils.JSONError(w, constants.ErrBuildLimitReached,
 			"you have reached your monthly build limit",
 			http.StatusForbidden, map[string]any{
@@ -154,7 +160,7 @@ func (v *HttpViews) GetProjectBuild(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if requireActiveSubscription(w, user) {
+	if requireActiveSubscription(w, v.Controller, user) {
 		return
 	}
 

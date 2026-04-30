@@ -51,7 +51,7 @@ func (v *HttpViews) GetAllDevices(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if requireActiveSubscription(w, user) {
+	if requireActiveSubscription(w, v.Controller, user) {
 		return
 	}
 
@@ -83,7 +83,7 @@ func (v *HttpViews) GetUniqueDevices(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if requireActiveSubscription(w, user) {
+	if requireActiveSubscription(w, v.Controller, user) {
 		return
 	}
 
@@ -147,7 +147,7 @@ func (v *HttpViews) GetActiveDevices(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if requireActiveSubscription(w, user) {
+	if requireActiveSubscription(w, v.Controller, user) {
 		return
 	}
 
@@ -179,7 +179,7 @@ func (v *HttpViews) GetSessions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if requireActiveSubscription(w, user) {
+	if requireActiveSubscription(w, v.Controller, user) {
 		return
 	}
 
@@ -243,7 +243,7 @@ func (v *HttpViews) GetProjectEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if requireActiveSubscription(w, user) {
+	if requireActiveSubscription(w, v.Controller, user) {
 		return
 	}
 

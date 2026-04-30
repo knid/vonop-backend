@@ -34,7 +34,7 @@ func (v *HttpViews) UpdateProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if requireActiveSubscription(w, user) {
+	if requireActiveSubscription(w, v.Controller, user) {
 		go v.Controller.EventService.SendEvent(user, constants.EVENT_SUBSCRIPTION_NEED, map[string]any{
 			"action": "update_project",
 		})
@@ -69,7 +69,7 @@ func (v *HttpViews) CreateProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if requireActiveSubscription(w, user) {
+	if requireActiveSubscription(w, v.Controller, user) {
 		go v.Controller.EventService.SendEvent(user, constants.EVENT_SUBSCRIPTION_NEED, map[string]any{
 			"action": "create_project",
 		})
@@ -132,7 +132,7 @@ func (v *HttpViews) GetProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if requireActiveSubscription(w, user) {
+	if requireActiveSubscription(w, v.Controller, user) {
 		return
 	}
 
@@ -159,7 +159,7 @@ func (v *HttpViews) DeleteProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if requireActiveSubscription(w, user) {
+	if requireActiveSubscription(w, v.Controller, user) {
 		return
 	}
 

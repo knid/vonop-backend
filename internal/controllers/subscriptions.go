@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"log/slog"
 	"strings"
 
 	"github.com/knid/wemob/internal/models"
@@ -118,6 +119,15 @@ func (c *Controller) CancelSubscription(user *models.User) error {
 		return err
 	}
 
+	// Mark the user's personal org as canceled (Plan 5 — billing on org).
+	if org, orgErr := c.DB.GetPersonalOrgByUserID(user.ID.String()); orgErr == nil && org != nil {
+		org.SubscriptionStatus = "canceled"
+		if _, err := c.DB.UpdateOrganization(org); err != nil {
+			slog.Error("failed to mark org subscription canceled", "error", err, "org_id", org.ID)
+		}
+	}
+
+	// Legacy dual-write to user (cleanup later).
 	user.SubscriptionStatus = "canceled"
 	_, err = c.DB.UpdateUser(user)
 	return err

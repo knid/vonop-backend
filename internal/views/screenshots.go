@@ -38,7 +38,7 @@ func (v *HttpViews) AutoGenerateScreenshots(w http.ResponseWriter, r *http.Reque
 		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
-	if requireActiveSubscription(w, user) {
+	if requireActiveSubscription(w, v.Controller, user) {
 		return
 	}
 	if v.checkMinimumCredits(w, user) {

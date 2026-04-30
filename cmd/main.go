@@ -1406,12 +1406,12 @@ func main() {
 			})
 
 			// Template copy (requires auth + subscription)
-			r.With(appMiddleware.RequireAuth(controller), appMiddleware.RequireSubscription("active", "trial", "free")).
+			r.With(appMiddleware.RequireAuth(controller), appMiddleware.RequireSubscription(controller, "active", "trial", "free")).
 				Post("/templates/{slug}/copy", httpViews.CopyTemplate)
 
 			r.Route("/apps", func(r chi.Router) {
 				r.Use(appMiddleware.RequireAuth(controller))
-				r.Use(appMiddleware.RequireSubscription("active", "trial", "free"))
+				r.Use(appMiddleware.RequireSubscription(controller, "active", "trial", "free"))
 
 				// Generation endpoints (AI rate limited)
 				r.With(rateLimiter.RateLimit(20, time.Minute, appMiddleware.AIUserKey)).Post("/generate/stream", httpViews.GenerateAppStream)
@@ -1651,7 +1651,7 @@ func main() {
 
 			r.Route("/mobile/{projectId}", func(r chi.Router) {
 				r.Use(appMiddleware.RequireAuth(controller))
-				r.Use(appMiddleware.RequireSubscription("active", "trial", "free"))
+				r.Use(appMiddleware.RequireSubscription(controller, "active", "trial", "free"))
 
 				r.Get("/config", httpViews.GetMobileAppConfig)
 				r.Put("/config", httpViews.UpdateMobileAppConfig)

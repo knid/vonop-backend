@@ -100,7 +100,7 @@ func (v *HttpViews) CreateApp(w http.ResponseWriter, r *http.Request) {
 		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
-	if requireActiveSubscription(w, user) {
+	if requireActiveSubscription(w, v.Controller, user) {
 		return
 	}
 	if v.checkMinimumCredits(w, user) {
@@ -907,7 +907,7 @@ func (v *HttpViews) ConvertToMobile(w http.ResponseWriter, r *http.Request) {
 		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
-	if requireActiveSubscription(w, user) {
+	if requireActiveSubscription(w, v.Controller, user) {
 		return
 	}
 

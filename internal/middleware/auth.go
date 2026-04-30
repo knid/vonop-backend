@@ -63,9 +63,12 @@ func RequireAuth(controller *controllers.Controller) func(http.Handler) http.Han
 	}
 }
 
-// RequireSubscription checks that the authenticated user has one of the allowed subscription statuses.
+// RequireSubscription checks that the authenticated user's personal org
+// has one of the allowed subscription statuses.
 // Must be used after RequireAuth.
-func RequireSubscription(statuses ...string) func(http.Handler) http.Handler {
+//
+// Reads SubscriptionStatus from the user's personal Organization (Plan 5).
+func RequireSubscription(controller *controllers.Controller, statuses ...string) func(http.Handler) http.Handler {
 	allowed := make(map[string]bool, len(statuses))
 	for _, s := range statuses {
 		allowed[s] = true
@@ -79,7 +82,13 @@ func RequireSubscription(statuses ...string) func(http.Handler) http.Handler {
 				return
 			}
 
-			if !allowed[user.SubscriptionStatus] {
+			org, err := controller.DB.GetPersonalOrgByUserID(user.ID.String())
+			if err != nil || org == nil {
+				utils.JSONErrorCode(w, constants.ErrSubscriptionRequired, http.StatusForbidden, nil)
+				return
+			}
+
+			if !allowed[org.SubscriptionStatus] {
 				utils.JSONErrorCode(w, constants.ErrSubscriptionRequired, http.StatusForbidden, nil)
 				return
 			}

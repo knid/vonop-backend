@@ -34,8 +34,15 @@ func (v *HttpViews) CheckStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Subscription status is now bound to the user's personal org (Plan 5).
+	org, err := v.Controller.DB.GetPersonalOrgByUserID(user.ID.String())
+	if err != nil {
+		utils.JSONInternalError(w, err)
+		return
+	}
+
 	var status string
-	switch user.SubscriptionStatus {
+	switch org.SubscriptionStatus {
 	case "active", "free", "trial":
 		status = "active"
 	default:
