@@ -101,6 +101,7 @@ const (
 	// Product surface events
 	EVENT_ORGANIZATION_CREATED         = "organization_created"
 	EVENT_ORGANIZATION_MEMBER_INVITED  = "organization_member_invited"
+	EVENT_ORGANIZATION_INVITE_EMAIL    = "organization_invite_email" // NEW — triggers Resend automation that emails the invitee
 	EVENT_DASHBOARD_CREATED            = "dashboard_created"
 	EVENT_STORE_CHAT_SENT              = "store_chat_sent"
 )
