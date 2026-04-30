@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/responses"
@@ -55,16 +56,17 @@ func (c *Controller) GetAppleConnectionById(user *models.User, id string) (*resp
 
 }
 
-func (c *Controller) CreateAppleConnection(user *models.User, req requests.AppleConnectionCreateRequest) (*responses.AppleConnectionResponse, error) {
+func (c *Controller) CreateAppleConnection(user *models.User, orgID uuid.UUID, req requests.AppleConnectionCreateRequest) (*responses.AppleConnectionResponse, error) {
 	credential := &models.AppleConnection{
-		UserID:        user.ID,
-		Name:          req.Name,
-		TeamID:        req.TeamID,
-		P8KeyPath:     "p8_keys/" + req.P8Key + ".p8",
-		APNSP8KeyPath: "apns_keys/" + req.APNSP8Key + ".p8",
-		APNSP8KeyID:   req.APNSKeyID,
-		KeyID:         req.KeyID,
-		IssuerID:      req.IssuerID,
+		UserID:         user.ID,
+		OrganizationID: orgID,
+		Name:           req.Name,
+		TeamID:         req.TeamID,
+		P8KeyPath:      "p8_keys/" + req.P8Key + ".p8",
+		APNSP8KeyPath:  "apns_keys/" + req.APNSP8Key + ".p8",
+		APNSP8KeyID:    req.APNSKeyID,
+		KeyID:          req.KeyID,
+		IssuerID:       req.IssuerID,
 	}
 	cred, err := c.DB.CreateAppleConnection(credential)
 	if err != nil {
@@ -84,7 +86,7 @@ func (c *Controller) CreateAppleConnection(user *models.User, req requests.Apple
 	}, nil
 }
 
-func (c *Controller) UpdateAppleConnection(user *models.User, credID string, req requests.AppleConnectionCreateRequest) (*responses.AppleConnectionResponse, error) {
+func (c *Controller) UpdateAppleConnection(user *models.User, credID string, req requests.AppleConnectionUpdateRequest) (*responses.AppleConnectionResponse, error) {
 	cred, err := c.DB.GetAppleConnectionById(credID)
 	if err != nil {
 		return nil, err
@@ -184,9 +186,10 @@ func (c *Controller) GetGooglePlayConnectionById(user *models.User, id string) (
 	}, nil
 }
 
-func (c *Controller) CreateGooglePlayConnection(user *models.User, req requests.GooglePlayConnectionCreateRequest) (*models.GooglePlayConnection, error) {
+func (c *Controller) CreateGooglePlayConnection(user *models.User, orgID uuid.UUID, req requests.GooglePlayConnectionCreateRequest) (*models.GooglePlayConnection, error) {
 	credential := &models.GooglePlayConnection{
 		UserID:             user.ID,
+		OrganizationID:     orgID,
 		Name:               req.Name,
 		ServiceAccountPath: "service_accounts/" + req.ServiceAccountKey + ".json",
 	}
@@ -200,7 +203,7 @@ func (c *Controller) CreateGooglePlayConnection(user *models.User, req requests.
 	return cred, nil
 }
 
-func (c *Controller) UpdateGooglePlayConnection(user *models.User, credID string, req requests.GooglePlayConnectionCreateRequest) (*models.GooglePlayConnection, error) {
+func (c *Controller) UpdateGooglePlayConnection(user *models.User, credID string, req requests.GooglePlayConnectionUpdateRequest) (*models.GooglePlayConnection, error) {
 	cred, err := c.DB.GetGooglePlayConnectionById(credID)
 	if err != nil {
 		return nil, err

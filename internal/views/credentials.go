@@ -81,7 +81,13 @@ func (v *HttpViews) CreateAppleConnection(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	cred, err := v.Controller.CreateAppleConnection(user, req)
+	orgID, err := v.Controller.RequireOrgIDForUser(user, &req.OrganizationID)
+	if err != nil {
+		utils.JSONInternalError(w, err)
+		return
+	}
+
+	cred, err := v.Controller.CreateAppleConnection(user, orgID, req)
 	if err != nil {
 		utils.JSONInternalError(w, err)
 		return
@@ -138,14 +144,14 @@ func (v *HttpViews) UpdateAppleConnection(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	var req requests.AppleConnectionCreateRequest
+	var req requests.AppleConnectionUpdateRequest
 	if err := utils.ParseJSONBody(r, &req); err != nil {
 		utils.ValidationError(w, err)
 		return
 	}
 
 	validate := validator.New(validator.WithRequiredStructEnabled())
-	if err := utils.ValidateFunc[requests.AppleConnectionCreateRequest](req, validate); err != nil {
+	if err := utils.ValidateFunc[requests.AppleConnectionUpdateRequest](req, validate); err != nil {
 		utils.ValidationError(w, err)
 		return
 	}
@@ -251,7 +257,13 @@ func (v *HttpViews) CreateGooglePlayConnection(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	cred, err := v.Controller.CreateGooglePlayConnection(user, req)
+	orgID, err := v.Controller.RequireOrgIDForUser(user, &req.OrganizationID)
+	if err != nil {
+		utils.JSONInternalError(w, err)
+		return
+	}
+
+	cred, err := v.Controller.CreateGooglePlayConnection(user, orgID, req)
 	if err != nil {
 		utils.JSONInternalError(w, err)
 		return
@@ -308,14 +320,14 @@ func (v *HttpViews) UpdateGooglePlayConnection(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	var req requests.GooglePlayConnectionCreateRequest
+	var req requests.GooglePlayConnectionUpdateRequest
 	if err := utils.ParseJSONBody(r, &req); err != nil {
 		utils.ValidationError(w, err)
 		return
 	}
 
 	validate := validator.New(validator.WithRequiredStructEnabled())
-	if err := utils.ValidateFunc[requests.GooglePlayConnectionCreateRequest](req, validate); err != nil {
+	if err := utils.ValidateFunc[requests.GooglePlayConnectionUpdateRequest](req, validate); err != nil {
 		utils.ValidationError(w, err)
 		return
 	}

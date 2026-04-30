@@ -114,7 +114,13 @@ func (v *HttpViews) CreateDeployment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	deployment, err := v.Controller.CreateDeploymentTask(user, deploymentCreateReq)
+	orgID, err := v.Controller.RequireOrgIDForUser(user, &deploymentCreateReq.OrganizationID)
+	if err != nil {
+		utils.JSONInternalError(w, err)
+		return
+	}
+
+	deployment, err := v.Controller.CreateDeploymentTask(user, orgID, deploymentCreateReq)
 	if err != nil {
 		utils.JSONInternalError(w, err)
 		return
@@ -134,7 +140,7 @@ func (v *HttpViews) UpdateDeployment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var deploymentCreateReq requests.CreateDeploymentRequest
+	var deploymentCreateReq requests.UpdateDeploymentRequest
 	if err := utils.ParseJSONBody(r, &deploymentCreateReq); err != nil {
 		utils.ValidationError(w, err)
 		return

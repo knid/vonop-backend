@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/go-playground/validator/v10"
+	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/responses"
@@ -16,7 +17,7 @@ import (
 
 const apiKeyPrefix = "wemob_"
 
-func (c *Controller) CreateAPIKey(user *models.User, req requests.CreateAPIKeyRequest) (*responses.APIKeyCreatedResponse, error) {
+func (c *Controller) CreateAPIKey(user *models.User, orgID uuid.UUID, req requests.CreateAPIKeyRequest) (*responses.APIKeyCreatedResponse, error) {
 	validate := validator.New(validator.WithRequiredStructEnabled())
 	if err := utils.ValidateFunc[requests.CreateAPIKeyRequest](req, validate); err != nil {
 		return nil, err
@@ -43,12 +44,13 @@ func (c *Controller) CreateAPIKey(user *models.User, req requests.CreateAPIKeyRe
 	keyHash := utils.GetSHA256Hash(fullKey)
 
 	apiKey := models.APIKey{
-		UserID:    user.ID,
-		Name:      req.Name,
-		KeyHash:   keyHash,
-		KeyPrefix: fullKey[:len(apiKeyPrefix)+8],
-		Scopes:    req.Scopes,
-		ExpiresAt: time.Now().AddDate(1, 0, 0), // 1 year default expiry
+		UserID:         user.ID,
+		OrganizationID: orgID,
+		Name:           req.Name,
+		KeyHash:        keyHash,
+		KeyPrefix:      fullKey[:len(apiKeyPrefix)+8],
+		Scopes:         req.Scopes,
+		ExpiresAt:      time.Now().AddDate(1, 0, 0), // 1 year default expiry
 	}
 
 	created, err := c.DB.CreateAPIKey(&apiKey)

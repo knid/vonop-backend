@@ -16,13 +16,14 @@ import (
 	"time"
 
 	"github.com/go-playground/validator/v10"
+	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/utils"
 )
 
-func (c *Controller) CreateWebhookEndpoint(user *models.User, req requests.CreateWebhookRequest) (*responses.WebhookEndpointCreatedResponse, error) {
+func (c *Controller) CreateWebhookEndpoint(user *models.User, orgID uuid.UUID, req requests.CreateWebhookRequest) (*responses.WebhookEndpointCreatedResponse, error) {
 	validate := validator.New(validator.WithRequiredStructEnabled())
 	if err := utils.ValidateFunc[requests.CreateWebhookRequest](req, validate); err != nil {
 		return nil, err
@@ -48,11 +49,12 @@ func (c *Controller) CreateWebhookEndpoint(user *models.User, req requests.Creat
 	secret := "whsec_" + hex.EncodeToString(secretBytes)
 
 	endpoint := models.WebhookEndpoint{
-		UserID: user.ID,
-		URL:    req.URL,
-		Secret: secret,
-		Events: req.Events,
-		Active: true,
+		UserID:         user.ID,
+		OrganizationID: orgID,
+		URL:            req.URL,
+		Secret:         secret,
+		Events:         req.Events,
+		Active:         true,
 	}
 
 	created, err := c.DB.CreateWebhookEndpoint(&endpoint)

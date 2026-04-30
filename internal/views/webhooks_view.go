@@ -27,7 +27,13 @@ func (v *HttpViews) CreateWebhookEndpoint(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	result, err := v.Controller.CreateWebhookEndpoint(user, req)
+	orgID, err := v.Controller.RequireOrgIDForUser(user, &req.OrganizationID)
+	if err != nil {
+		utils.JSONInternalError(w, err)
+		return
+	}
+
+	result, err := v.Controller.CreateWebhookEndpoint(user, orgID, req)
 	if err != nil {
 		utils.JSONInternalError(w, err)
 		return
