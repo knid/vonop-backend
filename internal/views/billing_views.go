@@ -83,7 +83,12 @@ func (v *HttpViews) GetAICreditsBalance(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	balance, err := v.Controller.GetOrCreateCreditsBalance(user)
+	orgID, err := v.Controller.RequireOrgIDForUser(user, nil)
+	if err != nil {
+		utils.JSONInternalError(w, err)
+		return
+	}
+	balance, err := v.Controller.GetOrCreateCreditsBalance(user, orgID)
 	if err != nil {
 		utils.JSONInternalError(w, err)
 		return
@@ -108,15 +113,21 @@ func (v *HttpViews) GetCreditBreakdown(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Run the period-reset path first so expired periods roll over before we
-	// derive the breakdown — otherwise the "used this period" counter would
-	// be computed against a stale period_start.
-	if _, err := v.Controller.GetOrCreateCreditsBalance(user); err != nil {
+	orgID, err := v.Controller.RequireOrgIDForUser(user, nil)
+	if err != nil {
 		utils.JSONInternalError(w, err)
 		return
 	}
 
-	bd, err := v.Controller.ComputeCreditBreakdown(user)
+	// Run the period-reset path first so expired periods roll over before we
+	// derive the breakdown — otherwise the "used this period" counter would
+	// be computed against a stale period_start.
+	if _, err := v.Controller.GetOrCreateCreditsBalance(user, orgID); err != nil {
+		utils.JSONInternalError(w, err)
+		return
+	}
+
+	bd, err := v.Controller.ComputeCreditBreakdown(user, orgID)
 	if err != nil {
 		utils.JSONInternalError(w, err)
 		return

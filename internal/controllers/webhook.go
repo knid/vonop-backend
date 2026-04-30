@@ -160,7 +160,14 @@ func (c *Controller) processWebhookEvent(event stripe.Event) error {
 
 		// Grant plan's monthly credits (e.g. 100 for Starter).
 		// Must run after UpdateUser so the user has the correct SubscriptionID.
-		c.GrantSubscriptionCredits(user)
+		// Subscriptions are billed at the personal-org level (Plan A); make sure
+		// the org exists before granting so credits land on the right balance.
+		personalOrg, orgErr := c.EnsurePersonalOrg(user)
+		if orgErr != nil {
+			slog.Error("failed to ensure personal org for subscription grant", "error", orgErr, "user_id", user.ID)
+		} else {
+			c.GrantSubscriptionCredits(user, personalOrg.ID)
+		}
 
 		// Grant referral subscription reward (50 credits to both parties) if user was referred
 		// Must be synchronous — if this runs as a goroutine the event is marked processed
@@ -518,7 +525,12 @@ func (c *Controller) processWebhookEvent(event stripe.Event) error {
 			return fmt.Errorf("user %s not found for credit purchase: %w", userID, err)
 		}
 
-		if err := c.AddAICredits(user, packSize, "purchase", cs.ID); err != nil {
+		// Credit purchases are tied to the buyer's personal org (Plan A).
+		personalOrg, orgErr := c.EnsurePersonalOrg(user)
+		if orgErr != nil {
+			return fmt.Errorf("failed to ensure personal org for credit purchase: %w", orgErr)
+		}
+		if err := c.AddAICredits(user, personalOrg.ID, packSize, "purchase", cs.ID); err != nil {
 			return fmt.Errorf("failed to add %d credits for user %s: %w", packSize, userID, err)
 		}
 

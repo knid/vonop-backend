@@ -87,11 +87,14 @@ func (v *HttpViews) NavBarAutoFillWithAI(w http.ResponseWriter, r *http.Request)
 		"claude-haiku-4-5",
 		"anthropic", "", "standard", tracker)
 
-	// Post-hoc token-based billing
+	// Post-hoc token-based billing — no project context, charge personal org.
 	prompt, completion, total, _ := tracker.Totals()
 	if total > 0 {
 		credits := models.TokensToCredits(prompt, completion)
-		if err := v.Controller.DeductAICreditsUnchecked(user, credits, "navbar_autofill", ""); err != nil {
+		orgID, orgErr := v.Controller.RequireOrgIDForUser(user, nil)
+		if orgErr != nil {
+			slog.Warn("navbar_autofill: resolve personal org failed", "error", orgErr, "user_id", user.ID)
+		} else if err := v.Controller.DeductAICreditsUnchecked(user, orgID, credits, "navbar_autofill", ""); err != nil {
 			slog.Warn("failed to deduct AI credits from tokens", "error", err,
 				"user_id", user.ID, "credits", credits, "tokens", total)
 		}

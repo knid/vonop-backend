@@ -79,10 +79,13 @@ func (c *Controller) adminUserDetail(user *models.User) (*responses.AdminUserDet
 		subName = user.Subscription.Name
 	}
 
-	// Credit balance
+	// Credit balance — resolved via the user's personal org so admin views
+	// reflect the same balance the user sees.
 	creditsBalance := 0
-	if bal, err := c.DB.GetAICreditsBalance(user.ID.String()); err == nil {
-		creditsBalance = bal.Balance
+	if org, err := c.DB.GetPersonalOrgByUserID(user.ID.String()); err == nil && org != nil {
+		if bal, err := c.DB.GetAICreditsBalanceByOrg(org.ID.String()); err == nil {
+			creditsBalance = bal.Balance
+		}
 	}
 
 	// Counts
@@ -235,13 +238,20 @@ func (c *Controller) AdminResetPassword(userID string) (*responses.AdminResetPas
 }
 
 // AdminGrantCredits adjusts a user's credit balance and records a transaction.
+// Operates on the user's personal-org balance — the same balance the user
+// sees in their UI and that the rest of the credit pipeline writes to.
 func (c *Controller) AdminGrantCredits(userID string, req requests.AdminGrantCreditsRequest) error {
 	user, err := c.DB.GetUserById(userID)
 	if err != nil {
 		return fmt.Errorf("user not found: %w", err)
 	}
 
-	balance, err := c.DB.GetAICreditsBalance(user.ID.String())
+	org, err := c.DB.GetPersonalOrgByUserID(user.ID.String())
+	if err != nil || org == nil {
+		return fmt.Errorf("personal org not found: %w", err)
+	}
+
+	balance, err := c.DB.GetAICreditsBalanceByOrg(org.ID.String())
 	if err != nil {
 		return fmt.Errorf("credits balance not found: %w", err)
 	}
@@ -256,10 +266,11 @@ func (c *Controller) AdminGrantCredits(userID string, req requests.AdminGrantCre
 	}
 
 	tx := &models.AICreditTransaction{
-		UserID:    user.ID,
-		Amount:    req.Amount,
-		Action:    "admin_grant",
-		Reference: req.Reason,
+		OrganizationID: org.ID,
+		UserID:         user.ID,
+		Amount:         req.Amount,
+		Action:         "admin_grant",
+		Reference:      req.Reason,
 	}
 	if _, err := c.DB.CreateAICreditTransaction(tx); err != nil {
 		return fmt.Errorf("failed to create transaction: %w", err)

@@ -261,3 +261,54 @@ func (v *HttpViews) UpdateMemberRole(w http.ResponseWriter, r *http.Request) {
 
 	utils.JSONResponse(w, result, http.StatusOK)
 }
+
+func (v *HttpViews) GetOrgCreditsForAdmin(w http.ResponseWriter, r *http.Request) {
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
+		return
+	}
+	orgID := chi.URLParam(r, "orgId")
+	result, err := v.Controller.GetOrgCreditsViewForAdmin(user, orgID)
+	if err != nil {
+		utils.JSONInternalError(w, err)
+		return
+	}
+	utils.JSONResponse(w, result, http.StatusOK)
+}
+
+func (v *HttpViews) GetOrgCreditsForMember(w http.ResponseWriter, r *http.Request) {
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
+		return
+	}
+	orgID := chi.URLParam(r, "orgId")
+	result, err := v.Controller.GetOrgCreditsViewForMember(user, orgID)
+	if err != nil {
+		utils.JSONInternalError(w, err)
+		return
+	}
+	utils.JSONResponse(w, result, http.StatusOK)
+}
+
+func (v *HttpViews) SetMemberCreditCap(w http.ResponseWriter, r *http.Request) {
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
+		return
+	}
+	orgID := chi.URLParam(r, "orgId")
+	memberID := chi.URLParam(r, "memberId")
+	var req requests.SetMemberCapRequest
+	if err := utils.ParseJSONBody(r, &req); err != nil {
+		utils.ValidationError(w, err)
+		return
+	}
+	result, err := v.Controller.SetMemberCreditCap(user, orgID, memberID, req.MonthlyCreditCap)
+	if err != nil {
+		utils.JSONInternalError(w, err)
+		return
+	}
+	utils.JSONResponse(w, result, http.StatusOK)
+}

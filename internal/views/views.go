@@ -42,7 +42,12 @@ func (v *HttpViews) checkAnalyticsAccess(w http.ResponseWriter, user *models.Use
 // checkMinimumCredits verifies the user has at least 1 AI credit.
 // Returns true if blocked (response already written).
 func (v *HttpViews) checkMinimumCredits(w http.ResponseWriter, user *models.User) bool {
-	balance, err := v.Controller.GetOrCreateCreditsBalance(user)
+	orgID, err := v.Controller.RequireOrgIDForUser(user, nil)
+	if err != nil {
+		utils.JSONInternalError(w, err)
+		return true
+	}
+	balance, err := v.Controller.GetOrCreateCreditsBalance(user, orgID)
 	if err != nil {
 		utils.JSONInternalError(w, err)
 		return true

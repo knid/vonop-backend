@@ -204,8 +204,14 @@ func (c *Controller) ConsumeVerifyEmail(req requests.UserVerifyEmailRequest) (*m
 		slog.Warn("failed to mark verify token consumed", "error", err, "token_id", token.ID)
 	}
 
-	if err := c.GrantInitialFreeCreditsIfNeeded(user); err != nil {
-		slog.Error("failed to grant initial free credits on verify", "error", err, "user_id", user.ID)
+	personalOrg, orgErr := c.EnsurePersonalOrg(user)
+	if orgErr != nil {
+		slog.Error("failed to ensure personal org on verify", "error", orgErr, "user_id", user.ID)
+	}
+	if personalOrg != nil {
+		if err := c.GrantInitialFreeCreditsIfNeeded(user, personalOrg.ID); err != nil {
+			slog.Error("failed to grant initial free credits on verify", "error", err, "user_id", user.ID)
+		}
 	}
 
 	go c.EventService.SendEvent(user, constants.EVENT_EMAIL_VERIFIED, map[string]any{})

@@ -169,3 +169,29 @@ func (db *Database) GetPersonalOrgByUserID(userID string) (*models.Organization,
 	}
 	return &org, nil
 }
+
+// UpdateMemberCap sets monthly_credit_cap on an OrganizationMember. cap=nil
+// clears the cap (member becomes unlimited within the pool). Returns the
+// updated member.
+func (db *Database) UpdateMemberCap(orgID, memberID string, cap *int) (*models.OrganizationMember, error) {
+	q := db.DB.NewUpdate().
+		Model((*models.OrganizationMember)(nil)).
+		Where("organization_id = ?", orgID).
+		Where("id = ?", memberID)
+	if cap == nil {
+		q = q.Set("monthly_credit_cap = NULL")
+	} else {
+		q = q.Set("monthly_credit_cap = ?", *cap)
+	}
+	if _, err := q.Exec(context.Background()); err != nil {
+		return nil, err
+	}
+	var updated models.OrganizationMember
+	if err := db.DB.NewSelect().Model(&updated).
+		Where("id = ?", memberID).
+		Where("organization_id = ?", orgID).
+		Scan(context.Background()); err != nil {
+		return nil, err
+	}
+	return &updated, nil
+}

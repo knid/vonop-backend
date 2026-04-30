@@ -76,8 +76,15 @@ func (c *Controller) GoogleMobileLogin(req requests.GoogleMobileLoginRequest) (*
 
 			c.assignFreePlan(user)
 
-			if err := c.GrantInitialFreeCreditsIfNeeded(user); err != nil {
-				slog.Error("failed to grant initial free credits on google mobile signup", "error", err, "user_id", user.ID)
+			personalOrg, orgErr := c.EnsurePersonalOrg(user)
+			if orgErr != nil {
+				slog.Error("failed to ensure personal org on google mobile signup", "error", orgErr, "user_id", user.ID)
+			}
+
+			if personalOrg != nil {
+				if err := c.GrantInitialFreeCreditsIfNeeded(user, personalOrg.ID); err != nil {
+					slog.Error("failed to grant initial free credits on google mobile signup", "error", err, "user_id", user.ID)
+				}
 			}
 
 			go c.EventService.SendEvent(user, constants.EVENT_NEW_USER, map[string]any{

@@ -155,11 +155,14 @@ func (v *HttpViews) AutoGenerateScreenshots(w http.ResponseWriter, r *http.Reque
 		"claude-haiku-4-5",
 		"anthropic", "", "standard", tracker)
 
-	// Post-hoc token-based billing
+	// Post-hoc token-based billing — no project context, charge personal org.
 	prompt, completion, total, _ := tracker.Totals()
 	if total > 0 {
 		credits := models.TokensToCredits(prompt, completion)
-		if err := v.Controller.DeductAICreditsUnchecked(user, credits, "screenshot_generate", ""); err != nil {
+		orgID, orgErr := v.Controller.RequireOrgIDForUser(user, nil)
+		if orgErr != nil {
+			slog.Warn("screenshot_generate: resolve personal org failed", "error", orgErr, "user_id", user.ID)
+		} else if err := v.Controller.DeductAICreditsUnchecked(user, orgID, credits, "screenshot_generate", ""); err != nil {
 			slog.Warn("failed to deduct AI credits from tokens", "error", err,
 				"user_id", user.ID, "credits", credits, "tokens", total)
 		}

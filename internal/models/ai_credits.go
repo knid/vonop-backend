@@ -17,26 +17,30 @@ import (
 // round up to a full credit (the previous behavior, which over-taxed
 // cheap models like claude-haiku-4-5 by ~20×).
 type AICreditsBalance struct {
-	ID             uuid.UUID `bun:",pk,type:uuid,default:uuid_generate_v4()"`
-	UserID         uuid.UUID `bun:",notnull,type:uuid,unique"`
-	User           *User     `bun:"rel:belongs-to,join:user_id=id"`
-	Balance        int       `bun:",notnull,default:0"`
-	PendingGateway float64   `bun:",notnull,default:0"`
-	PeriodStart    time.Time `bun:",notnull"`
-	PeriodEnd      time.Time `bun:",notnull"`
-	CreatedAt      time.Time `bun:"created_at,nullzero,notnull,default:current_timestamp"`
-	UpdatedAt      time.Time `bun:"updated_at,nullzero,notnull,default:current_timestamp"`
+	ID             uuid.UUID     `bun:",pk,type:uuid,default:uuid_generate_v4()"`
+	OrganizationID uuid.UUID     `bun:",notnull,unique,type:uuid"`
+	Organization   *Organization `bun:"rel:belongs-to,join:organization_id=id"`
+	UserID         uuid.UUID     `bun:",type:uuid,nullzero"` // deprecated; dropped in a future cleanup
+	User           *User         `bun:"rel:belongs-to,join:user_id=id"`
+	Balance        int           `bun:",notnull,default:0"`
+	PendingGateway float64       `bun:",notnull,default:0"`
+	PeriodStart    time.Time     `bun:",notnull"`
+	PeriodEnd      time.Time     `bun:",notnull"`
+	CreatedAt      time.Time     `bun:"created_at,nullzero,notnull,default:current_timestamp"`
+	UpdatedAt      time.Time     `bun:"updated_at,nullzero,notnull,default:current_timestamp"`
 }
 
 // AICreditTransaction records individual credit additions or deductions.
 type AICreditTransaction struct {
-	ID        uuid.UUID `bun:",pk,type:uuid,default:uuid_generate_v4()"`
-	UserID    uuid.UUID `bun:",notnull,type:uuid"`
-	User      *User     `bun:"rel:belongs-to,join:user_id=id"`
-	Amount    int       `bun:",notnull"`         // positive = added, negative = consumed
-	Action    string    `bun:",notnull"`         // e.g. "generate", "chat", "screenshot_to_code", "element_edit", "purchase", "monthly_grant"
-	Reference string    `bun:",nullzero"`        // optional: website ID, Stripe payment ID, etc.
-	CreatedAt time.Time `bun:"created_at,nullzero,notnull,default:current_timestamp"`
+	ID             uuid.UUID     `bun:",pk,type:uuid,default:uuid_generate_v4()"`
+	OrganizationID uuid.UUID     `bun:",notnull,type:uuid"`
+	Organization   *Organization `bun:"rel:belongs-to,join:organization_id=id"`
+	UserID         uuid.UUID     `bun:",notnull,type:uuid"` // KEPT — "who spent" attribution
+	User           *User         `bun:"rel:belongs-to,join:user_id=id"`
+	Amount         int           `bun:",notnull"`  // positive = added, negative = consumed
+	Action         string        `bun:",notnull"`  // e.g. "generate", "chat", "screenshot_to_code", "element_edit", "purchase", "monthly_grant"
+	Reference      string        `bun:",nullzero"` // optional: website ID, Stripe payment ID, etc.
+	CreatedAt      time.Time     `bun:"created_at,nullzero,notnull,default:current_timestamp"`
 }
 
 // LLMTokenUsage records per-request token consumption for billing visibility and dashboards.
