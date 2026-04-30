@@ -3,11 +3,13 @@ package controllers
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
 	"github.com/go-playground/validator/v10"
 	"github.com/google/uuid"
+	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/responses"
@@ -198,6 +200,31 @@ func (c *Controller) InviteOrganizationMember(user *models.User, orgID string, r
 	if err != nil {
 		return nil, err
 	}
+
+	// Fire the Resend event that triggers the invite email. We use a synthetic
+	// User struct because the invitee may not yet have a Wemob account — the
+	// events service only needs Email + Name to deliver. If the invitee already
+	// has an account, EventService still treats this as a transactional send.
+	go func() {
+		org, oErr := c.DB.GetOrganizationByID(orgID)
+		if oErr != nil {
+			slog.Error("invite email: failed to load org", "error", oErr, "org_id", orgID)
+			return
+		}
+		frontendURL := strings.TrimRight(c.SecretManager.GetSecret("FRONTEND_URL"), "/")
+		if frontendURL == "" {
+			frontendURL = "https://dashboard.wemob.io"
+		}
+		inviteURL := fmt.Sprintf("%s/invites/accept?token=%s", frontendURL, token)
+
+		recipient := &models.User{Email: created.Email}
+		c.EventService.SendEvent(recipient, constants.EVENT_ORGANIZATION_INVITE_EMAIL, map[string]any{
+			"inviter_name": user.Name,
+			"org_name":     org.Name,
+			"role":         created.Role,
+			"invite_url":   inviteURL,
+		})
+	}()
 
 	return &responses.OrganizationInviteResponse{
 		ID:        created.ID,
