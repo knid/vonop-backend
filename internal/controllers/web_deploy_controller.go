@@ -205,13 +205,13 @@ func (c *Controller) HandleWebDeployTask(ctx context.Context, t *asynq.Task) err
 	}
 
 	if err := c.FlyService.EnsureApp(flyAppName); err != nil {
-		return c.maybeRetry(p.DeploymentID, "ensure_app", err)
+		return c.maybeRetry(ctx, p.DeploymentID, "ensure_app", err)
 	}
 
 	// 4. Sync env vars (secrets).
 	envVars := c.CollectAllEnvVars(project)
 	if err := c.FlyService.SyncSecrets(flyAppName, envVars); err != nil {
-		return c.maybeRetry(p.DeploymentID, "sync_secrets", err)
+		return c.maybeRetry(ctx, p.DeploymentID, "sync_secrets", err)
 	}
 
 	// 5. Build + push image. envVars is forwarded as --build-arg so Next.js
@@ -221,14 +221,14 @@ func (c *Controller) HandleWebDeployTask(ctx context.Context, t *asynq.Task) err
 	// aren't declared as ARG in the Dockerfile.
 	imageRef, _, err := c.FlyService.BuildAndPush(flyAppName, sourceDir, p.DeploymentID, envVars)
 	if err != nil {
-		return c.maybeRetry(p.DeploymentID, "build", err)
+		return c.maybeRetry(ctx, p.DeploymentID, "build", err)
 	}
 
 	// 6. Deploy machines per plan tier (region from FlyService config).
 	spec := fly.PlanMachineSpec(limits, c.FlyService.Region)
 	spec.Image = imageRef
 	if err := c.FlyService.DeployMachines(flyAppName, spec); err != nil {
-		return c.maybeRetry(p.DeploymentID, "deploy_machines", err)
+		return c.maybeRetry(ctx, p.DeploymentID, "deploy_machines", err)
 	}
 
 	// 7. Persist runtime_apps state and flip deployment to 'deploying'.
@@ -245,7 +245,7 @@ func (c *Controller) HandleWebDeployTask(ctx context.Context, t *asynq.Task) err
 	// machine-state webhooks to own-org apps, so we poll inline here.
 	// 5min covers a cold-start build + machine launch comfortably.
 	if err := c.FlyService.WaitForHealthy(flyAppName, 5*time.Minute); err != nil {
-		return c.maybeRetry(p.DeploymentID, "wait_healthy", err)
+		return c.maybeRetry(ctx, p.DeploymentID, "wait_healthy", err)
 	}
 
 	// 9. Flip to 'deployed' and fire success events.
@@ -277,14 +277,19 @@ func (c *Controller) failTask(deploymentID, stage string, err error) error {
 	return asynq.SkipRetry
 }
 
-// maybeRetry returns the error if it's retryable (asynq backs off), or marks
-// the deployment failed and returns asynq.SkipRetry otherwise.
-func (c *Controller) maybeRetry(deploymentID, stage string, err error) error {
+// maybeRetry returns the error if it's retryable AND retry budget remains
+// (asynq backs off and re-enters the handler). Otherwise — non-retryable, or
+// retryable but on the final attempt — marks the deployment failed in the DB
+// and returns asynq.SkipRetry. Without the final-attempt check, exhausting the
+// retry budget would archive the task in asynq with the row still stuck in
+// 'building' forever.
+func (c *Controller) maybeRetry(ctx context.Context, deploymentID, stage string, err error) error {
 	retryable := fly.IsRetryable(err)
+	finalAttempt := isFinalRetryAttempt(ctx)
 	slog.Error("deploy_failed",
 		"deployment_id", deploymentID, "stage", stage,
-		"error", err, "retryable", retryable)
-	if retryable {
+		"error", err, "retryable", retryable, "final_attempt", finalAttempt)
+	if retryable && !finalAttempt {
 		return err
 	}
 	if mErr := c.MarkDeploymentFailed(deploymentID, fmt.Sprintf("%s: %v", stage, err)); mErr != nil {
@@ -292,6 +297,19 @@ func (c *Controller) maybeRetry(deploymentID, stage string, err error) error {
 	}
 	c.fireDeployFailedEvent(deploymentID, stage, err)
 	return asynq.SkipRetry
+}
+
+// isFinalRetryAttempt returns true when the current handler invocation is the
+// last one asynq will make for this task — any error returned now will archive
+// the task. Returns false when invoked outside an asynq handler (ctx has no
+// retry metadata), so the caller treats it like a non-final attempt.
+func isFinalRetryAttempt(ctx context.Context) bool {
+	retried, ok1 := asynq.GetRetryCount(ctx)
+	max, ok2 := asynq.GetMaxRetry(ctx)
+	if !ok1 || !ok2 {
+		return false
+	}
+	return retried >= max
 }
 
 // fireDeployFailedEvent fires the lifecycle + PostHog events for a permanent
@@ -314,6 +332,45 @@ func (c *Controller) fireDeployFailedEvent(deploymentID, stage string, deployErr
 		Set("app_id", deployment.AppProjectID.String()).
 		Set("stage", stage).
 		Set("error", deployErr.Error()))
+}
+
+// ReapStuckDeploymentsTask is invoked every minute by the asynq scheduler. It
+// flips any deployment row that's been sitting in an in-progress state for
+// longer than the stale threshold to 'failed', so the UI doesn't lock the user
+// out of redeploying after a worker crash or asynq retry-budget exhaustion.
+//
+// stuckThreshold needs to comfortably exceed the longest legitimate stage
+// duration. Today the worst case is BuildAndPush (Fly remote builder, ~5–10
+// min for a Next.js app) plus WaitForHealthy (5 min, hard cap). 20 min keeps
+// well clear of that while still failing fast enough to feel responsive.
+const stuckDeploymentThreshold = 20 * time.Minute
+
+func (c *Controller) ReapStuckDeploymentsTask(ctx context.Context) error {
+	n, err := c.DB.ReapStuckAppDeployments(ctx, stuckDeploymentThreshold,
+		fmt.Sprintf("worker disappeared (no progress > %s)", stuckDeploymentThreshold))
+	if err != nil {
+		return err
+	}
+	if n > 0 {
+		slog.Warn("reaped_stuck_deployments", "count", n, "stale_after", stuckDeploymentThreshold)
+	}
+	return nil
+}
+
+// MarkDeploymentFailedIfNotTerminal flips the deployment to 'failed' only when
+// it's still in an in-progress state. Used as a backstop from the asynq
+// ErrorHandler — by the time we get there the in-handler logic may have
+// already written the final state, so we don't want to overwrite a clean
+// 'failed' / 'deployed' with a generic timeout reason.
+func (c *Controller) MarkDeploymentFailedIfNotTerminal(deploymentID, reason string) error {
+	d, err := c.DB.GetAppDeploymentByID(deploymentID)
+	if err != nil || d == nil {
+		return err
+	}
+	if d.Status == "deployed" || d.Status == "failed" {
+		return nil
+	}
+	return c.MarkDeploymentFailed(deploymentID, reason)
 }
 
 // HandleFlyMachineEvent reacts to a Fly webhook. Updates app_deployments

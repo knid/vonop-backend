@@ -66,3 +66,24 @@ func (db *Database) IsAppAlreadyDeployed(appProjectID string) (bool, error) {
 		Count(context.Background())
 	return count > 0, err
 }
+
+// ReapStuckAppDeployments flips any deployment row that's been sitting in an
+// in-progress state ('queued', 'building', 'deploying') without a status
+// update for longer than `staleAfter` to 'failed'. Returns the number of rows
+// affected. Last-line defense for cases where the worker died mid-task or the
+// asynq retry budget was exhausted without the handler getting a chance to
+// write the failed state itself.
+func (db *Database) ReapStuckAppDeployments(ctx context.Context, staleAfter time.Duration, reason string) (int, error) {
+	res, err := db.DB.NewUpdate().Model((*models.AppDeployment)(nil)).
+		Set("status = ?", "failed").
+		Set("error_message = ?", reason).
+		Set("updated_at = ?", time.Now()).
+		Where("status IN (?)", bun.In([]string{"queued", "building", "deploying"})).
+		Where("updated_at < ?", time.Now().Add(-staleAfter)).
+		Exec(ctx)
+	if err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	return int(n), nil
+}
