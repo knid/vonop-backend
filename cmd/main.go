@@ -1241,6 +1241,7 @@ func main() {
 					r.Get("/credits/me", httpViews.GetOrgCreditsForMember)
 					r.Get("/invites", httpViews.ListPendingInvites)
 					r.Delete("/invites/{inviteId}", httpViews.CancelOrganizationInvite)
+					r.Post("/transfer-ownership", httpViews.TransferOrganizationOwnership)
 					r.Route("/members", func(r chi.Router) {
 						r.Get("/", httpViews.GetOrganizationMembers)
 						r.Post("/invite", httpViews.InviteOrganizationMember)

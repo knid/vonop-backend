@@ -351,6 +351,39 @@ func (c *Controller) CancelOrganizationInvite(user *models.User, orgID, inviteID
 	return c.DB.DeleteOrganizationInvite(orgID, inviteID)
 }
 
+// TransferOrganizationOwnership transfers org ownership. Preconditions: caller
+// is current owner; new owner is a member; org is not personal.
+func (c *Controller) TransferOrganizationOwnership(user *models.User, orgID string, newOwnerUserID uuid.UUID) (*responses.OrganizationResponse, error) {
+	org, err := c.DB.GetOrganizationByID(orgID)
+	if err != nil {
+		return nil, errors.New("organization not found")
+	}
+	if org.IsPersonal {
+		return nil, errors.New("personal workspaces cannot transfer ownership")
+	}
+	if org.OwnerID != user.ID {
+		return nil, errors.New("only the current owner can transfer ownership")
+	}
+	if newOwnerUserID == user.ID {
+		return nil, errors.New("you are already the owner")
+	}
+	if _, err := c.DB.GetOrganizationMember(orgID, newOwnerUserID.String()); err != nil {
+		return nil, errors.New("new owner must be an existing member of this organization")
+	}
+	updated, err := c.DB.TransferOrganizationOwnership(orgID, user.ID, newOwnerUserID)
+	if err != nil {
+		return nil, err
+	}
+	return &responses.OrganizationResponse{
+		ID:        updated.ID,
+		Name:      updated.Name,
+		Slug:      updated.Slug,
+		Logo:      updated.Logo,
+		OwnerID:   updated.OwnerID,
+		CreatedAt: updated.CreatedAt,
+	}, nil
+}
+
 // EnsurePersonalOrg returns the user's personal organization, creating it
 // if one does not exist. Idempotent — safe to call from signup paths and
 // from backfill. Slug is "<slugified-name>-<random6>"; we always append a
