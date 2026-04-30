@@ -7,6 +7,7 @@ import (
 	"github.com/go-playground/validator/v10"
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/requests"
+	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/utils"
 )
 
@@ -14,6 +15,34 @@ func (v *HttpViews) ListAppleConnections(w http.ResponseWriter, r *http.Request)
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
 		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
+		return
+	}
+
+	if rawOrgID := r.URL.Query().Get("org_id"); rawOrgID != "" {
+		orgID, oErr := v.Controller.RequireOrgMembership(user, rawOrgID)
+		if oErr != nil {
+			utils.JSONErrorCode(w, constants.ErrForbidden, http.StatusForbidden, nil)
+			return
+		}
+		conns, dErr := v.Controller.DB.GetAppleConnectionsByOrgID(orgID.String())
+		if dErr != nil {
+			utils.JSONInternalError(w, dErr)
+			return
+		}
+		var resp []responses.AppleConnectionResponse
+		for _, cred := range conns {
+			resp = append(resp, responses.AppleConnectionResponse{
+				ID:        cred.ID,
+				Name:      cred.Name,
+				KeyID:     cred.KeyID,
+				APNSKeyID: cred.APNSP8KeyID,
+				TeamID:    cred.TeamID,
+				IssuerID:  cred.IssuerID,
+				CreatedAt: cred.CreatedAt,
+				UpdatedAt: cred.UpdatedAt,
+			})
+		}
+		utils.JSONResponse(w, resp, http.StatusOK)
 		return
 	}
 
@@ -159,6 +188,30 @@ func (v *HttpViews) ListGooglePlayConnections(w http.ResponseWriter, r *http.Req
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
 		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
+		return
+	}
+
+	if rawOrgID := r.URL.Query().Get("org_id"); rawOrgID != "" {
+		orgID, oErr := v.Controller.RequireOrgMembership(user, rawOrgID)
+		if oErr != nil {
+			utils.JSONErrorCode(w, constants.ErrForbidden, http.StatusForbidden, nil)
+			return
+		}
+		conns, dErr := v.Controller.DB.GetGooglePlayConnectionsByOrgID(orgID.String())
+		if dErr != nil {
+			utils.JSONInternalError(w, dErr)
+			return
+		}
+		var resp []responses.GooglePlayConnectionResponse
+		for _, cred := range conns {
+			resp = append(resp, responses.GooglePlayConnectionResponse{
+				ID:        cred.ID,
+				Name:      cred.Name,
+				CreatedAt: cred.CreatedAt,
+				UpdatedAt: cred.UpdatedAt,
+			})
+		}
+		utils.JSONResponse(w, resp, http.StatusOK)
 		return
 	}
 

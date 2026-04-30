@@ -158,7 +158,21 @@ func (v *HttpViews) GetApps(w http.ResponseWriter, r *http.Request) {
 		types = strings.Split(typeParam, ",")
 	}
 
-	projects, err := v.Controller.GetAppProjectsByUserFiltered(user, types)
+	var projects []models.AppProject
+	if rawOrgID := r.URL.Query().Get("org_id"); rawOrgID != "" {
+		orgID, oErr := v.Controller.RequireOrgMembership(user, rawOrgID)
+		if oErr != nil {
+			utils.JSONErrorCode(w, constants.ErrForbidden, http.StatusForbidden, nil)
+			return
+		}
+		if len(types) == 0 {
+			projects, err = v.Controller.DB.GetAppProjectsByOrgID(orgID.String())
+		} else {
+			projects, err = v.Controller.DB.GetAppProjectsByOrgIDAndTypes(orgID.String(), types)
+		}
+	} else {
+		projects, err = v.Controller.GetAppProjectsByUserFiltered(user, types)
+	}
 	if err != nil {
 		utils.JSONInternalError(w, err)
 		return
