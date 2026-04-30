@@ -22,6 +22,16 @@ func (db *Database) GetAPIKeysByUserID(userID string) ([]models.APIKey, error) {
 	return keys, err
 }
 
+func (db *Database) GetAPIKeysByOrgID(orgID string) ([]models.APIKey, error) {
+	var keys []models.APIKey
+	err := db.DB.NewSelect().
+		Model(&keys).
+		Where("organization_id = ?", orgID).
+		OrderExpr("created_at DESC").
+		Scan(context.Background())
+	return keys, err
+}
+
 func (db *Database) GetAPIKeyByHash(keyHash string) (*models.APIKey, error) {
 	var key models.APIKey
 	err := db.DB.NewSelect().

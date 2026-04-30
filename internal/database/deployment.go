@@ -22,6 +22,20 @@ func (db *Database) GetDeployments(user *models.User) ([]models.Deployment, erro
 	return deployments, nil
 }
 
+func (db *Database) GetDeploymentsByOrgID(orgID string) ([]models.Deployment, error) {
+	var deployments []models.Deployment
+	err := db.DB.NewSelect().Model(&deployments).
+		Relation("Build").
+		Relation("AppleConnection").
+		Relation("GooglePlayConnection").
+		Where("deployment.organization_id = ?", orgID).
+		Scan(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	return deployments, nil
+}
+
 func (db *Database) GetDeploymentByID(deploymentID string) (*models.Deployment, error) {
 	var deployment models.Deployment
 	err := db.DB.NewSelect().Model(&deployment).Where("id = ?", deploymentID).Scan(context.Background(), &deployment)
