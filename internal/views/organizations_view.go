@@ -262,6 +262,86 @@ func (v *HttpViews) UpdateMemberRole(w http.ResponseWriter, r *http.Request) {
 	utils.JSONResponse(w, result, http.StatusOK)
 }
 
+func (v *HttpViews) ListPendingInvites(w http.ResponseWriter, r *http.Request) {
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
+		return
+	}
+	orgID := chi.URLParam(r, "orgId")
+	if orgID == "" {
+		utils.JSONErrorCode(w, constants.ErrValidationRequired, http.StatusBadRequest, map[string]any{"field": "organization_id"})
+		return
+	}
+	result, err := v.Controller.ListPendingInvites(user, orgID)
+	if err != nil {
+		utils.JSONInternalError(w, err)
+		return
+	}
+	utils.JSONResponse(w, result, http.StatusOK)
+}
+
+func (v *HttpViews) CancelOrganizationInvite(w http.ResponseWriter, r *http.Request) {
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
+		return
+	}
+	orgID := chi.URLParam(r, "orgId")
+	inviteID := chi.URLParam(r, "inviteId")
+	if orgID == "" || inviteID == "" {
+		utils.JSONError(w, constants.ErrValidationRequired, "organization_id and invite_id are required", http.StatusBadRequest, nil)
+		return
+	}
+	if err := v.Controller.CancelOrganizationInvite(user, orgID, inviteID); err != nil {
+		utils.JSONInternalError(w, err)
+		return
+	}
+	utils.JSONResponse(w, nil, http.StatusNoContent)
+}
+
+func (v *HttpViews) TransferOrganizationOwnership(w http.ResponseWriter, r *http.Request) {
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
+		return
+	}
+	orgID := chi.URLParam(r, "orgId")
+	if orgID == "" {
+		utils.JSONErrorCode(w, constants.ErrValidationRequired, http.StatusBadRequest, map[string]any{"field": "organization_id"})
+		return
+	}
+	var req requests.TransferOwnershipRequest
+	if err := utils.ParseJSONBody(r, &req); err != nil {
+		utils.ValidationError(w, err)
+		return
+	}
+	result, err := v.Controller.TransferOrganizationOwnership(user, orgID, req.NewOwnerUserID)
+	if err != nil {
+		utils.JSONInternalError(w, err)
+		return
+	}
+	utils.JSONResponse(w, result, http.StatusOK)
+}
+
+func (v *HttpViews) LeaveOrganization(w http.ResponseWriter, r *http.Request) {
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
+		return
+	}
+	orgID := chi.URLParam(r, "orgId")
+	if orgID == "" {
+		utils.JSONErrorCode(w, constants.ErrValidationRequired, http.StatusBadRequest, map[string]any{"field": "organization_id"})
+		return
+	}
+	if err := v.Controller.LeaveOrganization(user, orgID); err != nil {
+		utils.JSONInternalError(w, err)
+		return
+	}
+	utils.JSONResponse(w, nil, http.StatusNoContent)
+}
+
 func (v *HttpViews) GetOrgCreditsForAdmin(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {

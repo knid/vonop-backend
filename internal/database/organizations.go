@@ -2,8 +2,11 @@ package database
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/models"
 )
 
@@ -165,6 +168,83 @@ func (db *Database) GetPersonalOrgByUserID(userID string) (*models.Organization,
 		Limit(1).
 		Scan(context.Background())
 	if err != nil {
+		return nil, err
+	}
+	return &org, nil
+}
+
+// ListPendingOrganizationInvites returns invites for the given org that have
+// not yet been accepted and are not expired. Sorted by created_at DESC.
+func (db *Database) ListPendingOrganizationInvites(orgID string) ([]models.OrganizationInvite, error) {
+	var invites []models.OrganizationInvite
+	err := db.DB.NewSelect().Model(&invites).
+		Where("organization_id = ?", orgID).
+		Where("accepted_at IS NULL").
+		Where("expires_at > NOW()").
+		Order("created_at DESC").
+		Scan(context.Background())
+	return invites, err
+}
+
+// DeleteOrganizationInvite hard-deletes an invite by id within an org. Used
+// by cancel-invite. Returns an error if no matching invite.
+func (db *Database) DeleteOrganizationInvite(orgID, inviteID string) error {
+	res, err := db.DB.NewDelete().
+		Model((*models.OrganizationInvite)(nil)).
+		Where("organization_id = ?", orgID).
+		Where("id = ?", inviteID).
+		Exec(context.Background())
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return errors.New("invite not found")
+	}
+	return nil
+}
+
+// TransferOrganizationOwnership atomically:
+//  1. Updates organization.owner_id to newOwnerUserID.
+//  2. Sets the new owner's OrganizationMember.role to "owner".
+//  3. Sets the old owner's OrganizationMember.role to "admin".
+//
+// Caller must verify all preconditions before invoking.
+func (db *Database) TransferOrganizationOwnership(orgID string, oldOwnerUserID, newOwnerUserID uuid.UUID) (*models.Organization, error) {
+	ctx := context.Background()
+	tx, err := db.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.NewUpdate().Model((*models.Organization)(nil)).
+		Set("owner_id = ?", newOwnerUserID).
+		Set("updated_at = NOW()").
+		Where("id = ?", orgID).
+		Exec(ctx); err != nil {
+		return nil, fmt.Errorf("update org owner_id: %w", err)
+	}
+	if _, err := tx.NewUpdate().Model((*models.OrganizationMember)(nil)).
+		Set("role = ?", "owner").
+		Where("organization_id = ?", orgID).
+		Where("user_id = ?", newOwnerUserID).
+		Exec(ctx); err != nil {
+		return nil, fmt.Errorf("promote new owner: %w", err)
+	}
+	if _, err := tx.NewUpdate().Model((*models.OrganizationMember)(nil)).
+		Set("role = ?", "admin").
+		Where("organization_id = ?", orgID).
+		Where("user_id = ?", oldOwnerUserID).
+		Exec(ctx); err != nil {
+		return nil, fmt.Errorf("demote old owner: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+
+	var org models.Organization
+	if err := db.DB.NewSelect().Model(&org).Where("id = ?", orgID).Scan(ctx); err != nil {
 		return nil, err
 	}
 	return &org, nil

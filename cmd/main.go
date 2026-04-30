@@ -1239,11 +1239,16 @@ func main() {
 					r.Delete("/", httpViews.DeleteOrganization)
 					r.Get("/credits", httpViews.GetOrgCreditsForAdmin)
 					r.Get("/credits/me", httpViews.GetOrgCreditsForMember)
+					r.Get("/invites", httpViews.ListPendingInvites)
+					r.Delete("/invites/{inviteId}", httpViews.CancelOrganizationInvite)
+					r.Post("/transfer-ownership", httpViews.TransferOrganizationOwnership)
 					r.Route("/members", func(r chi.Router) {
 						r.Get("/", httpViews.GetOrganizationMembers)
 						r.Post("/invite", httpViews.InviteOrganizationMember)
+						r.Delete("/me", httpViews.LeaveOrganization)
 						r.Route("/{memberId}", func(r chi.Router) {
 							r.Put("/role", httpViews.UpdateMemberRole)
+							r.Patch("/role", httpViews.UpdateMemberRole)
 							r.Delete("/", httpViews.RemoveOrganizationMember)
 							r.Patch("/credit-cap", httpViews.SetMemberCreditCap)
 						})

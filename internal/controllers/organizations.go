@@ -222,7 +222,7 @@ func (c *Controller) AcceptOrganizationInvite(user *models.User, inviteToken str
 		return nil, errors.New("invite has already been accepted")
 	}
 
-	if user.Email != invite.Email {
+	if !strings.EqualFold(strings.TrimSpace(user.Email), strings.TrimSpace(invite.Email)) {
 		return nil, errors.New("invite was sent to a different email address")
 	}
 
@@ -311,6 +311,97 @@ func (c *Controller) UpdateMemberRole(user *models.User, orgID, memberID string,
 		Role:      updated.Role,
 		CreatedAt: updated.CreatedAt,
 	}, nil
+}
+
+// ListPendingInvites returns the pending invite list for an org. Caller must be owner or admin.
+func (c *Controller) ListPendingInvites(user *models.User, orgID string) ([]responses.OrganizationInviteResponse, error) {
+	member, err := c.DB.GetOrganizationMember(orgID, user.ID.String())
+	if err != nil {
+		return nil, errors.New("organization not found or access denied")
+	}
+	if member.Role != "owner" && member.Role != "admin" {
+		return nil, errors.New("insufficient permissions")
+	}
+	invites, err := c.DB.ListPendingOrganizationInvites(orgID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]responses.OrganizationInviteResponse, 0, len(invites))
+	for _, inv := range invites {
+		out = append(out, responses.OrganizationInviteResponse{
+			ID:        inv.ID,
+			Email:     inv.Email,
+			Role:      inv.Role,
+			ExpiresAt: inv.ExpiresAt,
+			CreatedAt: inv.CreatedAt,
+		})
+	}
+	return out, nil
+}
+
+// CancelOrganizationInvite hard-deletes a pending invite. Caller must be owner/admin.
+func (c *Controller) CancelOrganizationInvite(user *models.User, orgID, inviteID string) error {
+	member, err := c.DB.GetOrganizationMember(orgID, user.ID.String())
+	if err != nil {
+		return errors.New("organization not found or access denied")
+	}
+	if member.Role != "owner" && member.Role != "admin" {
+		return errors.New("insufficient permissions")
+	}
+	return c.DB.DeleteOrganizationInvite(orgID, inviteID)
+}
+
+// TransferOrganizationOwnership transfers org ownership. Preconditions: caller
+// is current owner; new owner is a member; org is not personal.
+func (c *Controller) TransferOrganizationOwnership(user *models.User, orgID string, newOwnerUserID uuid.UUID) (*responses.OrganizationResponse, error) {
+	org, err := c.DB.GetOrganizationByID(orgID)
+	if err != nil {
+		return nil, errors.New("organization not found")
+	}
+	if org.IsPersonal {
+		return nil, errors.New("personal workspaces cannot transfer ownership")
+	}
+	if org.OwnerID != user.ID {
+		return nil, errors.New("only the current owner can transfer ownership")
+	}
+	if newOwnerUserID == user.ID {
+		return nil, errors.New("you are already the owner")
+	}
+	if _, err := c.DB.GetOrganizationMember(orgID, newOwnerUserID.String()); err != nil {
+		return nil, errors.New("new owner must be an existing member of this organization")
+	}
+	updated, err := c.DB.TransferOrganizationOwnership(orgID, user.ID, newOwnerUserID)
+	if err != nil {
+		return nil, err
+	}
+	return &responses.OrganizationResponse{
+		ID:        updated.ID,
+		Name:      updated.Name,
+		Slug:      updated.Slug,
+		Logo:      updated.Logo,
+		OwnerID:   updated.OwnerID,
+		CreatedAt: updated.CreatedAt,
+	}, nil
+}
+
+// LeaveOrganization removes the caller from the org. Personal orgs reject.
+// Sole owners of non-personal orgs must transfer ownership first.
+func (c *Controller) LeaveOrganization(user *models.User, orgID string) error {
+	org, err := c.DB.GetOrganizationByID(orgID)
+	if err != nil {
+		return errors.New("organization not found")
+	}
+	if org.IsPersonal {
+		return errors.New("you cannot leave your personal workspace")
+	}
+	member, err := c.DB.GetOrganizationMember(orgID, user.ID.String())
+	if err != nil {
+		return errors.New("you are not a member of this organization")
+	}
+	if member.Role == "owner" {
+		return errors.New("transfer ownership before leaving as the sole owner")
+	}
+	return c.DB.DeleteOrganizationMember(member)
 }
 
 // EnsurePersonalOrg returns the user's personal organization, creating it
