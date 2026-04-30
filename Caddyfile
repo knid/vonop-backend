@@ -37,7 +37,14 @@ api.wemob.io {
     }
 
     reverse_proxy {
-        dynamic a {http.request.host.labels.3}.e2b.app 443
+        # versions ipv4: Fly publishes both A and AAAA for *.fly.dev, but the
+        # docker host has no IPv6, so dialing the AAAA address fails with
+        # "network is unreachable" ~50% of requests.
+        dynamic a {
+            name {http.request.host.labels.3}.e2b.app
+            port 443
+            versions ipv4
+        }
         transport http {
             tls
             tls_server_name {http.request.host.labels.3}.e2b.app
@@ -54,7 +61,12 @@ api.wemob.io {
     }
 
     reverse_proxy {
-        dynamic a wemob-{http.request.host.labels.2}.fly.dev 443
+        # versions ipv4: see preview block above.
+        dynamic a {
+            name wemob-{http.request.host.labels.2}.fly.dev
+            port 443
+            versions ipv4
+        }
         transport http {
             tls
             tls_server_name wemob-{http.request.host.labels.2}.fly.dev
