@@ -1684,9 +1684,14 @@ func main() {
 		})
 
 		edgeToken := sm.GetSecret("EDGE_INTERNAL_TOKEN")
+		// cert-allowed is called by Caddy's on_demand_tls.ask, which cannot
+		// send custom headers — InternalOnly would always 401 it. The endpoint
+		// is read-only and only reveals "is this domain registered+verified?",
+		// which is also observable by trying to fetch the site itself, so
+		// public access is acceptable here.
+		r.Get("/internal/edge/cert-allowed", httpViews.HandleEdgeCertAllowed)
 		r.Route("/internal/edge", func(r chi.Router) {
 			r.Use(appMiddleware.InternalOnly(edgeToken))
-			r.Get("/cert-allowed", httpViews.HandleEdgeCertAllowed)
 			r.Get("/upstream", httpViews.HandleEdgeUpstream)
 		})
 
