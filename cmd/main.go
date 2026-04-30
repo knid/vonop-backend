@@ -286,6 +286,12 @@ func createSchema(db *bun.DB) error {
 		`ALTER TABLE ai_credits_balances ALTER COLUMN organization_id SET NOT NULL`,
 		`ALTER TABLE ai_credit_transactions ALTER COLUMN organization_id SET NOT NULL`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS ux_ai_credits_balances_org ON ai_credits_balances(organization_id)`,
+		// Plan 3a: org-scope connections, deployments, api keys, webhooks (2026-04-30-org-filter-list-endpoints)
+		`ALTER TABLE apple_connections ADD COLUMN IF NOT EXISTS organization_id uuid`,
+		`ALTER TABLE google_play_connections ADD COLUMN IF NOT EXISTS organization_id uuid`,
+		`ALTER TABLE deployments ADD COLUMN IF NOT EXISTS organization_id uuid`,
+		`ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS organization_id uuid`,
+		`ALTER TABLE webhook_endpoints ADD COLUMN IF NOT EXISTS organization_id uuid`,
 	}
 
 	// Deduplicate before creating unique indexes (keep the latest row per group)
@@ -324,7 +330,7 @@ func createSchema(db *bun.DB) error {
 	// Table renames go in renameStatements below, not here — they run unconditionally.
 	var migrationsDone bool
 	row := db.QueryRowContext(context.Background(),
-		"SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='ai_credits_balances' AND column_name='organization_id')")
+		"SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='api_keys' AND column_name='organization_id')")
 	if err := row.Scan(&migrationsDone); err != nil {
 		migrationsDone = false
 	}
