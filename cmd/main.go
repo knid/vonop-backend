@@ -1245,6 +1245,7 @@ func main() {
 					r.Route("/members", func(r chi.Router) {
 						r.Get("/", httpViews.GetOrganizationMembers)
 						r.Post("/invite", httpViews.InviteOrganizationMember)
+						r.Delete("/me", httpViews.LeaveOrganization)
 						r.Route("/{memberId}", func(r chi.Router) {
 							r.Put("/role", httpViews.UpdateMemberRole)
 							r.Delete("/", httpViews.RemoveOrganizationMember)

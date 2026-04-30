@@ -384,6 +384,26 @@ func (c *Controller) TransferOrganizationOwnership(user *models.User, orgID stri
 	}, nil
 }
 
+// LeaveOrganization removes the caller from the org. Personal orgs reject.
+// Sole owners of non-personal orgs must transfer ownership first.
+func (c *Controller) LeaveOrganization(user *models.User, orgID string) error {
+	org, err := c.DB.GetOrganizationByID(orgID)
+	if err != nil {
+		return errors.New("organization not found")
+	}
+	if org.IsPersonal {
+		return errors.New("you cannot leave your personal workspace")
+	}
+	member, err := c.DB.GetOrganizationMember(orgID, user.ID.String())
+	if err != nil {
+		return errors.New("you are not a member of this organization")
+	}
+	if member.Role == "owner" {
+		return errors.New("transfer ownership before leaving as the sole owner")
+	}
+	return c.DB.DeleteOrganizationMember(member)
+}
+
 // EnsurePersonalOrg returns the user's personal organization, creating it
 // if one does not exist. Idempotent — safe to call from signup paths and
 // from backfill. Slug is "<slugified-name>-<random6>"; we always append a

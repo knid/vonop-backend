@@ -324,6 +324,24 @@ func (v *HttpViews) TransferOrganizationOwnership(w http.ResponseWriter, r *http
 	utils.JSONResponse(w, result, http.StatusOK)
 }
 
+func (v *HttpViews) LeaveOrganization(w http.ResponseWriter, r *http.Request) {
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
+		return
+	}
+	orgID := chi.URLParam(r, "orgId")
+	if orgID == "" {
+		utils.JSONErrorCode(w, constants.ErrValidationRequired, http.StatusBadRequest, map[string]any{"field": "organization_id"})
+		return
+	}
+	if err := v.Controller.LeaveOrganization(user, orgID); err != nil {
+		utils.JSONInternalError(w, err)
+		return
+	}
+	utils.JSONResponse(w, nil, http.StatusNoContent)
+}
+
 func (v *HttpViews) GetOrgCreditsForAdmin(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
