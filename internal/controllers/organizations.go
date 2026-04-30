@@ -222,7 +222,7 @@ func (c *Controller) AcceptOrganizationInvite(user *models.User, inviteToken str
 		return nil, errors.New("invite has already been accepted")
 	}
 
-	if user.Email != invite.Email {
+	if !strings.EqualFold(strings.TrimSpace(user.Email), strings.TrimSpace(invite.Email)) {
 		return nil, errors.New("invite was sent to a different email address")
 	}
 

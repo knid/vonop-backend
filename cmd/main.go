@@ -1248,6 +1248,7 @@ func main() {
 						r.Delete("/me", httpViews.LeaveOrganization)
 						r.Route("/{memberId}", func(r chi.Router) {
 							r.Put("/role", httpViews.UpdateMemberRole)
+							r.Patch("/role", httpViews.UpdateMemberRole)
 							r.Delete("/", httpViews.RemoveOrganizationMember)
 							r.Patch("/credit-cap", httpViews.SetMemberCreditCap)
 						})
