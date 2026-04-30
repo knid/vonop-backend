@@ -74,7 +74,7 @@ func (v *HttpViews) checkMinimumCredits(w http.ResponseWriter, user *models.User
 			planName = pn
 		}
 		// Subscription billing period anchors on the personal org (Plan 5).
-		subsStart := user.SubscriptionStartAt
+		var subsStart time.Time
 		if org, orgErr := v.Controller.DB.GetPersonalOrgByUserID(user.ID.String()); orgErr == nil && org != nil {
 			subsStart = org.SubscriptionStartAt
 		}

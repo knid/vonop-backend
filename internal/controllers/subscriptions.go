@@ -18,7 +18,12 @@ func (c *Controller) GetUserLimits(user *models.User) (*models.StandardUserLimit
 
 // GetUserLimitsWithPlan is identical to GetUserLimits but also returns the subscription plan name.
 func (c *Controller) GetUserLimitsWithPlan(user *models.User) (*models.StandardUserLimits, string, error) {
-	subs, err := c.DB.GetStandardUserSubscriptionByUser(user)
+	org, err := c.DB.GetPersonalOrgByUserID(user.ID.String())
+	if err != nil {
+		return nil, "", err
+	}
+
+	subs, err := c.DB.GetStandardUserSubscriptionByOrg(org)
 	if err != nil {
 		return nil, "", err
 	}
@@ -54,7 +59,12 @@ func (c *Controller) GetUserLimitsWithPlan(user *models.User) (*models.StandardU
 }
 
 func (c *Controller) GetSubscription(user *models.User) (*responses.UserSubscriptionInformationResponse, error) {
-	subs, err := c.DB.GetStandardUserSubscriptionByUser(user)
+	org, err := c.DB.GetPersonalOrgByUserID(user.ID.String())
+	if err != nil {
+		return nil, err
+	}
+
+	subs, err := c.DB.GetStandardUserSubscriptionByOrg(org)
 	if err != nil {
 		return nil, err
 	}
@@ -105,7 +115,12 @@ func (c *Controller) UpdateSubscription(user *models.User, subscriptionId string
 		return err
 	}
 
-	_, err = c.DB.SetStandardUserSubscription(user, subs)
+	org, err := c.DB.GetPersonalOrgByUserID(user.ID.String())
+	if err != nil {
+		return err
+	}
+
+	_, err = c.DB.SetStandardUserSubscription(org, subs)
 	if err != nil {
 		return err
 	}
@@ -114,17 +129,20 @@ func (c *Controller) UpdateSubscription(user *models.User, subscriptionId string
 }
 
 func (c *Controller) CancelSubscription(user *models.User) error {
-	_, err := c.DB.DeleteStandardUserSubscription(user)
+	org, err := c.DB.GetPersonalOrgByUserID(user.ID.String())
+	if err != nil {
+		return err
+	}
+
+	_, err = c.DB.DeleteStandardUserSubscription(org)
 	if err != nil {
 		return err
 	}
 
 	// Mark the user's personal org as canceled (Plan 5 — billing on org).
-	if org, orgErr := c.DB.GetPersonalOrgByUserID(user.ID.String()); orgErr == nil && org != nil {
-		org.SubscriptionStatus = "canceled"
-		if _, err := c.DB.UpdateOrganization(org); err != nil {
-			slog.Error("failed to mark org subscription canceled", "error", err, "org_id", org.ID)
-		}
+	org.SubscriptionStatus = "canceled"
+	if _, err := c.DB.UpdateOrganization(org); err != nil {
+		slog.Error("failed to mark org subscription canceled", "error", err, "org_id", org.ID)
 	}
 
 	// Legacy dual-write to user (cleanup later).

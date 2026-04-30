@@ -61,13 +61,6 @@ func (db *Database) DeleteExpiredTokens() (int64, error) {
 	return n, nil
 }
 
-func (db *Database) GetUserByStripeCustomerID(customerID string) (*models.User, error) {
-	var user models.User
-	err := db.DB.NewSelect().Model(&user).Where("customer_id = ?", customerID).Scan(context.Background())
-
-	return &user, err
-}
-
 func (db *Database) UpdateUserGitHubFields(user *models.User) error {
 	user.UpdatedAt = time.Now()
 	_, err := db.DB.NewUpdate().Model(user).
