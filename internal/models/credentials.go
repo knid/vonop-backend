@@ -12,19 +12,21 @@ import (
 type AppleConnection struct {
 	bun.BaseModel `bun:"table:apple_connections,alias:ac"`
 
-	ID            uuid.UUID `bun:",pk,type:uuid,default:uuid_generate_v4()"`
-	UserID        uuid.UUID `bun:",notnull,type:uuid"`
-	User          Project   `bun:"rel:belongs-to,join:user_id=id"`
-	Name          string    `bun:",notnull"`
-	KeyID         string    `bun:",notnull"`
-	TeamID        string    `bun:",notnull"`
-	IssuerID      string    `bun:",notnull"`
-	P8KeyPath     string    `bun:",notnull"`
-	APNSP8KeyPath string    `bun:",notnull"`
-	APNSP8KeyID   string    `bun:",notnull"`
-	CreatedAt     time.Time `bun:"created_at,nullzero,notnull,default:current_timestamp"`
-	UpdatedAt     time.Time `bun:"updated_at,nullzero,notnull,default:current_timestamp"`
-	DeletedAt     time.Time `bun:",soft_delete,nullzero"`
+	ID             uuid.UUID     `bun:",pk,type:uuid,default:uuid_generate_v4()"`
+	UserID         uuid.UUID     `bun:",notnull,type:uuid"`
+	User           Project       `bun:"rel:belongs-to,join:user_id=id"`
+	OrganizationID uuid.UUID     `bun:",type:uuid,nullzero"` // becomes notnull in Phase 6
+	Organization   *Organization `bun:"rel:belongs-to,join:organization_id=id"`
+	Name           string        `bun:",notnull"`
+	KeyID          string        `bun:",notnull"`
+	TeamID         string        `bun:",notnull"`
+	IssuerID       string        `bun:",notnull"`
+	P8KeyPath      string        `bun:",notnull"`
+	APNSP8KeyPath  string        `bun:",notnull"`
+	APNSP8KeyID    string        `bun:",notnull"`
+	CreatedAt      time.Time     `bun:"created_at,nullzero,notnull,default:current_timestamp"`
+	UpdatedAt      time.Time     `bun:"updated_at,nullzero,notnull,default:current_timestamp"`
+	DeletedAt      time.Time     `bun:",soft_delete,nullzero"`
 }
 
 // GooglePlayConnection is a user's Google Play Console service account key.
@@ -32,12 +34,14 @@ type AppleConnection struct {
 type GooglePlayConnection struct {
 	bun.BaseModel `bun:"table:google_play_connections,alias:gpc"`
 
-	ID                 uuid.UUID `bun:",pk,type:uuid,default:uuid_generate_v4()"`
-	UserID             uuid.UUID `bun:",notnull,type:uuid"`
-	User               Project   `bun:"rel:belongs-to,join:user_id=id"`
-	Name               string    `bun:",notnull"`
-	ServiceAccountPath string    `bun:",notnull"`
-	CreatedAt          time.Time `bun:"created_at,nullzero,notnull,default:current_timestamp"`
-	UpdatedAt          time.Time `bun:"updated_at,nullzero,notnull,default:current_timestamp"`
-	DeletedAt          time.Time `bun:",soft_delete,nullzero"`
+	ID                 uuid.UUID     `bun:",pk,type:uuid,default:uuid_generate_v4()"`
+	UserID             uuid.UUID     `bun:",notnull,type:uuid"`
+	User               Project       `bun:"rel:belongs-to,join:user_id=id"`
+	OrganizationID     uuid.UUID     `bun:",type:uuid,nullzero"` // becomes notnull in Phase 6
+	Organization       *Organization `bun:"rel:belongs-to,join:organization_id=id"`
+	Name               string        `bun:",notnull"`
+	ServiceAccountPath string        `bun:",notnull"`
+	CreatedAt          time.Time     `bun:"created_at,nullzero,notnull,default:current_timestamp"`
+	UpdatedAt          time.Time     `bun:"updated_at,nullzero,notnull,default:current_timestamp"`
+	DeletedAt          time.Time     `bun:",soft_delete,nullzero"`
 }
