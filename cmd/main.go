@@ -292,6 +292,17 @@ func createSchema(db *bun.DB) error {
 		`ALTER TABLE deployments ADD COLUMN IF NOT EXISTS organization_id uuid`,
 		`ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS organization_id uuid`,
 		`ALTER TABLE webhook_endpoints ADD COLUMN IF NOT EXISTS organization_id uuid`,
+		// Plan 3a: enforce NOT NULL after backfill (2026-04-30)
+		`UPDATE apple_connections t SET organization_id = (SELECT id FROM organizations WHERE owner_id = t.user_id AND is_personal = true LIMIT 1) WHERE organization_id IS NULL AND user_id IS NOT NULL`,
+		`UPDATE google_play_connections t SET organization_id = (SELECT id FROM organizations WHERE owner_id = t.user_id AND is_personal = true LIMIT 1) WHERE organization_id IS NULL AND user_id IS NOT NULL`,
+		`UPDATE deployments t SET organization_id = (SELECT id FROM organizations WHERE owner_id = t.user_id AND is_personal = true LIMIT 1) WHERE organization_id IS NULL AND user_id IS NOT NULL`,
+		`UPDATE api_keys t SET organization_id = (SELECT id FROM organizations WHERE owner_id = t.user_id AND is_personal = true LIMIT 1) WHERE organization_id IS NULL AND user_id IS NOT NULL`,
+		`UPDATE webhook_endpoints t SET organization_id = (SELECT id FROM organizations WHERE owner_id = t.user_id AND is_personal = true LIMIT 1) WHERE organization_id IS NULL AND user_id IS NOT NULL`,
+		`ALTER TABLE apple_connections ALTER COLUMN organization_id SET NOT NULL`,
+		`ALTER TABLE google_play_connections ALTER COLUMN organization_id SET NOT NULL`,
+		`ALTER TABLE deployments ALTER COLUMN organization_id SET NOT NULL`,
+		`ALTER TABLE api_keys ALTER COLUMN organization_id SET NOT NULL`,
+		`ALTER TABLE webhook_endpoints ALTER COLUMN organization_id SET NOT NULL`,
 	}
 
 	// Deduplicate before creating unique indexes (keep the latest row per group)
