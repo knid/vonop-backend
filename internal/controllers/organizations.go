@@ -313,6 +313,32 @@ func (c *Controller) UpdateMemberRole(user *models.User, orgID, memberID string,
 	}, nil
 }
 
+// ListPendingInvites returns the pending invite list for an org. Caller must be owner or admin.
+func (c *Controller) ListPendingInvites(user *models.User, orgID string) ([]responses.OrganizationInviteResponse, error) {
+	member, err := c.DB.GetOrganizationMember(orgID, user.ID.String())
+	if err != nil {
+		return nil, errors.New("organization not found or access denied")
+	}
+	if member.Role != "owner" && member.Role != "admin" {
+		return nil, errors.New("insufficient permissions")
+	}
+	invites, err := c.DB.ListPendingOrganizationInvites(orgID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]responses.OrganizationInviteResponse, 0, len(invites))
+	for _, inv := range invites {
+		out = append(out, responses.OrganizationInviteResponse{
+			ID:        inv.ID,
+			Email:     inv.Email,
+			Role:      inv.Role,
+			ExpiresAt: inv.ExpiresAt,
+			CreatedAt: inv.CreatedAt,
+		})
+	}
+	return out, nil
+}
+
 // EnsurePersonalOrg returns the user's personal organization, creating it
 // if one does not exist. Idempotent — safe to call from signup paths and
 // from backfill. Slug is "<slugified-name>-<random6>"; we always append a

@@ -262,6 +262,25 @@ func (v *HttpViews) UpdateMemberRole(w http.ResponseWriter, r *http.Request) {
 	utils.JSONResponse(w, result, http.StatusOK)
 }
 
+func (v *HttpViews) ListPendingInvites(w http.ResponseWriter, r *http.Request) {
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
+		return
+	}
+	orgID := chi.URLParam(r, "orgId")
+	if orgID == "" {
+		utils.JSONErrorCode(w, constants.ErrValidationRequired, http.StatusBadRequest, map[string]any{"field": "organization_id"})
+		return
+	}
+	result, err := v.Controller.ListPendingInvites(user, orgID)
+	if err != nil {
+		utils.JSONInternalError(w, err)
+		return
+	}
+	utils.JSONResponse(w, result, http.StatusOK)
+}
+
 func (v *HttpViews) GetOrgCreditsForAdmin(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {

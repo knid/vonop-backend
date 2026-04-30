@@ -170,6 +170,19 @@ func (db *Database) GetPersonalOrgByUserID(userID string) (*models.Organization,
 	return &org, nil
 }
 
+// ListPendingOrganizationInvites returns invites for the given org that have
+// not yet been accepted and are not expired. Sorted by created_at DESC.
+func (db *Database) ListPendingOrganizationInvites(orgID string) ([]models.OrganizationInvite, error) {
+	var invites []models.OrganizationInvite
+	err := db.DB.NewSelect().Model(&invites).
+		Where("organization_id = ?", orgID).
+		Where("accepted_at IS NULL").
+		Where("expires_at > NOW()").
+		Order("created_at DESC").
+		Scan(context.Background())
+	return invites, err
+}
+
 // UpdateMemberCap sets monthly_credit_cap on an OrganizationMember. cap=nil
 // clears the cap (member becomes unlimited within the pool). Returns the
 // updated member.

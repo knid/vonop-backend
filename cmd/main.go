@@ -1239,6 +1239,7 @@ func main() {
 					r.Delete("/", httpViews.DeleteOrganization)
 					r.Get("/credits", httpViews.GetOrgCreditsForAdmin)
 					r.Get("/credits/me", httpViews.GetOrgCreditsForMember)
+					r.Get("/invites", httpViews.ListPendingInvites)
 					r.Route("/members", func(r chi.Router) {
 						r.Get("/", httpViews.GetOrganizationMembers)
 						r.Post("/invite", httpViews.InviteOrganizationMember)
