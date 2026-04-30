@@ -22,6 +22,7 @@ type UserInformationResponse struct {
 	TrialStartedAt     time.Time `json:"trial_started_at"`
 	TrialUsed          bool      `json:"trial_used"`
 	SetupFinished      bool      `json:"setup_finished"`
+	Language           string    `json:"language"`
 	CreatedAt          time.Time `json:"created_at"`
 	IsNewUser          bool      `json:"is_new_user"`
 }

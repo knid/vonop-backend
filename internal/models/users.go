@@ -31,6 +31,7 @@ type User struct {
 	GitHubAccessToken string `bun:",nullzero" json:"-"`
 	GitHubUsername    string `bun:",nullzero" json:"github_username"`
 	TwentyPersonID    string `bun:",nullzero" json:"-"`
+	Language            string                    `bun:",notnull,default:'en'" json:"language"`
 	CreatedAt           time.Time                 `bun:"created_at,nullzero,notnull,default:current_timestamp"`
 	UpdatedAt           time.Time                 `bun:"updated_at,nullzero,notnull,default:current_timestamp"`
 	DeletedAt           time.Time                 `bun:",soft_delete,nullzero"`

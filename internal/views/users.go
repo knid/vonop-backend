@@ -61,6 +61,32 @@ func (v *HttpViews) UpdateUser(w http.ResponseWriter, r *http.Request) {
 	utils.JSONResponse(w, updatedUserRes, http.StatusOK)
 }
 
+// UpdateUserLanguage handles PUT /v1/users/me/language. Lightweight endpoint
+// for syncing the i18next-detected (or switcher-selected) locale from the
+// frontend without forcing a full UpdateUser round-trip with name/email/photo.
+func (v *HttpViews) UpdateUserLanguage(w http.ResponseWriter, r *http.Request) {
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
+		return
+	}
+
+	var body struct {
+		Language string `json:"language"`
+	}
+	if err := utils.ParseJSONBody(r, &body); err != nil {
+		utils.ValidationError(w, err)
+		return
+	}
+
+	if _, err := v.Controller.UpdateUserLanguage(user, body.Language); err != nil {
+		utils.JSONError(w, "invalid_language", err.Error(), http.StatusBadRequest, nil)
+		return
+	}
+
+	utils.JSONResponse(w, map[string]string{"language": body.Language}, http.StatusOK)
+}
+
 func (v *HttpViews) DeleteUser(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {

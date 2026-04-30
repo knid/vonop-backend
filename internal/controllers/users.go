@@ -74,9 +74,26 @@ func (c *Controller) GetUser(tokenStr string) (*responses.UserInformationRespons
 		TrialStartedAt:     user.TrialStartAt,
 		SetupFinished:      user.SetupFinished,
 		TrialUsed:          user.TrialUsed,
+		Language:           user.Language,
 		CreatedAt:          user.CreatedAt,
 		IsNewUser:          !hasUsage,
 	}, nil
+}
+
+// UpdateUserLanguage persists the user's preferred email locale. Used by the
+// frontend whenever the i18next-detected (or switcher-selected) locale changes,
+// so Resend automations can branch on contact.language to pick the EN or TR
+// template variant. Validation is intentionally narrow — only "en" or "tr".
+func (c *Controller) UpdateUserLanguage(user *models.User, language string) (*models.User, error) {
+	if language != "en" && language != "tr" {
+		return nil, errors.New("language must be 'en' or 'tr'")
+	}
+	if user.Language == language {
+		return user, nil
+	}
+	user.Language = language
+	user.UpdatedAt = time.Now()
+	return c.DB.UpdateUser(user)
 }
 
 func (c *Controller) UpdateUser(user *models.User, userUpdateReq requests.UserUpdateRequest) (*responses.UserInformationResponse, error) {
@@ -88,6 +105,9 @@ func (c *Controller) UpdateUser(user *models.User, userUpdateReq requests.UserUp
 	user.Name = userUpdateReq.Name
 	if user.Provider == "Wemob" {
 		user.Email = userUpdateReq.Email
+	}
+	if userUpdateReq.Language != "" {
+		user.Language = userUpdateReq.Language
 	}
 	// Upload base64 photos to S3 instead of storing in DB
 	photo := userUpdateReq.Photo
@@ -138,6 +158,7 @@ func (c *Controller) UpdateUser(user *models.User, userUpdateReq requests.UserUp
 		TrialStartedAt:     updatedUser.TrialStartAt,
 		SetupFinished:      updatedUser.SetupFinished,
 		TrialUsed:          updatedUser.TrialUsed,
+		Language:           updatedUser.Language,
 		CreatedAt:          updatedUser.CreatedAt,
 		IsNewUser:          !hasUsage,
 	}, nil

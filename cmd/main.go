@@ -150,6 +150,8 @@ func createSchema(db *bun.DB) error {
 		// soft_delete column for all tables that use bun:",soft_delete,nullzero"
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS twenty_person_id text`,
+		// User locale preference — drives email template language selection (Resend).
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS language text NOT NULL DEFAULT 'en'`,
 		`ALTER TABLE user_notifications ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
 		`ALTER TABLE tokens ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
 		`ALTER TABLE standard_user_limits ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
@@ -348,7 +350,7 @@ func createSchema(db *bun.DB) error {
 	// Table renames go in renameStatements below, not here — they run unconditionally.
 	var migrationsDone bool
 	row := db.QueryRowContext(context.Background(),
-		"SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='organizations' AND column_name='stripe_customer_id')")
+		"SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='language')")
 	if err := row.Scan(&migrationsDone); err != nil {
 		migrationsDone = false
 	}
@@ -1072,6 +1074,7 @@ func main() {
 				r.Route("/me", func(r chi.Router) {
 					r.Get("/", httpViews.GetUser)
 					r.Put("/", httpViews.UpdateUser)
+					r.Put("/language", httpViews.UpdateUserLanguage)
 					r.Delete("/", httpViews.DeleteUser)
 
 					r.Get("/usage", httpViews.GetMontlyUsage)

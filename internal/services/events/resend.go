@@ -169,12 +169,17 @@ func contactProperties(user *models.User) map[string]string {
 	if user == nil {
 		return nil
 	}
+	language := user.Language
+	if language == "" {
+		language = "en"
+	}
 	return map[string]string{
 		"wemob_user_id":       user.ID.String(),
 		"verified":            strconv.FormatBool(user.Verified),
 		"provider":            user.Provider,
 		"subscription_status": user.SubscriptionStatus,
 		"trial_used":          strconv.FormatBool(user.TrialUsed),
+		"language":            language,
 	}
 }
 
