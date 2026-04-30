@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -41,11 +42,33 @@ func main() {
 			}
 			return delays[n]
 		},
-		ErrorHandler: asynq.ErrorHandlerFunc(func(_ context.Context, t *asynq.Task, err error) {
+		ErrorHandler: asynq.ErrorHandlerFunc(func(ctx context.Context, t *asynq.Task, err error) {
+			retried, _ := asynq.GetRetryCount(ctx)
+			max, _ := asynq.GetMaxRetry(ctx)
+			isFinal := retried >= max
 			slog.Error("asynq task failed",
 				"type", t.Type(),
 				"payload_bytes", len(t.Payload()),
+				"retried", retried, "max_retry", max, "final", isFinal,
 				"error", err)
+			// Backstop: if this is the final failure for a deploy:web task and
+			// the in-handler maybeRetry path didn't already write 'failed'
+			// (e.g. the handler panicked, the worker was killed mid-task and
+			// asynq reaped it without re-entering the handler, or some other
+			// path that bypasses our explicit failure marking), flip the row
+			// here so the UI doesn't show 'building' forever.
+			if !isFinal || t.Type() != tasks.TypeDeployWeb {
+				return
+			}
+			var p tasks.WebDeployPayload
+			if uErr := json.Unmarshal(t.Payload(), &p); uErr != nil || p.DeploymentID == "" {
+				slog.Error("error_handler_unmarshal_failed", "type", t.Type(), "err", uErr)
+				return
+			}
+			if mErr := controller.MarkDeploymentFailedIfNotTerminal(p.DeploymentID,
+				"asynq retry budget exhausted: "+err.Error()); mErr != nil {
+				slog.Error("error_handler_mark_failed", "deployment_id", p.DeploymentID, "err", mErr)
+			}
 		}),
 	})
 
@@ -54,12 +77,19 @@ func main() {
 	mux.HandleFunc("cron:dns-check", func(ctx context.Context, _ *asynq.Task) error {
 		return controller.CheckPendingDomainsTask(ctx)
 	})
+	mux.HandleFunc("cron:reap-stuck-deployments", func(ctx context.Context, _ *asynq.Task) error {
+		return controller.ReapStuckDeploymentsTask(ctx)
+	})
 
 	scheduler := asynq.NewScheduler(redisOpts, &asynq.SchedulerOpts{
 		Location: time.UTC,
 	})
 	if _, err := scheduler.Register("@every 30s", asynq.NewTask("cron:dns-check", nil), asynq.Queue("cron")); err != nil {
 		slog.Error("schedule dns-check", "err", err)
+		os.Exit(1)
+	}
+	if _, err := scheduler.Register("@every 1m", asynq.NewTask("cron:reap-stuck-deployments", nil), asynq.Queue("cron")); err != nil {
+		slog.Error("schedule reap-stuck-deployments", "err", err)
 		os.Exit(1)
 	}
 	go func() {
