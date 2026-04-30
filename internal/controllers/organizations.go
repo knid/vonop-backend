@@ -339,6 +339,18 @@ func (c *Controller) ListPendingInvites(user *models.User, orgID string) ([]resp
 	return out, nil
 }
 
+// CancelOrganizationInvite hard-deletes a pending invite. Caller must be owner/admin.
+func (c *Controller) CancelOrganizationInvite(user *models.User, orgID, inviteID string) error {
+	member, err := c.DB.GetOrganizationMember(orgID, user.ID.String())
+	if err != nil {
+		return errors.New("organization not found or access denied")
+	}
+	if member.Role != "owner" && member.Role != "admin" {
+		return errors.New("insufficient permissions")
+	}
+	return c.DB.DeleteOrganizationInvite(orgID, inviteID)
+}
+
 // EnsurePersonalOrg returns the user's personal organization, creating it
 // if one does not exist. Idempotent — safe to call from signup paths and
 // from backfill. Slug is "<slugified-name>-<random6>"; we always append a

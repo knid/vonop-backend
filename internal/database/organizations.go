@@ -2,6 +2,7 @@ package database
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/knid/wemob/internal/models"
@@ -181,6 +182,24 @@ func (db *Database) ListPendingOrganizationInvites(orgID string) ([]models.Organ
 		Order("created_at DESC").
 		Scan(context.Background())
 	return invites, err
+}
+
+// DeleteOrganizationInvite hard-deletes an invite by id within an org. Used
+// by cancel-invite. Returns an error if no matching invite.
+func (db *Database) DeleteOrganizationInvite(orgID, inviteID string) error {
+	res, err := db.DB.NewDelete().
+		Model((*models.OrganizationInvite)(nil)).
+		Where("organization_id = ?", orgID).
+		Where("id = ?", inviteID).
+		Exec(context.Background())
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return errors.New("invite not found")
+	}
+	return nil
 }
 
 // UpdateMemberCap sets monthly_credit_cap on an OrganizationMember. cap=nil
