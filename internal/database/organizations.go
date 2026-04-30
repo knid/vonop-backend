@@ -287,6 +287,21 @@ func (db *Database) ListPersonalOrgsWithStripeCustomer() ([]models.Organization,
 	return orgs, err
 }
 
+// GetOrganizationByStripeCustomerID returns the Organization that owns the
+// given Stripe customer. Replaces GetUserByStripeCustomerID in webhook handlers.
+func (db *Database) GetOrganizationByStripeCustomerID(customerID string) (*models.Organization, error) {
+	var org models.Organization
+	err := db.DB.NewSelect().Model(&org).
+		Where("stripe_customer_id = ?", customerID).
+		Where("deleted_at IS NULL").
+		Limit(1).
+		Scan(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	return &org, nil
+}
+
 // UpdateMemberCap sets monthly_credit_cap on an OrganizationMember. cap=nil
 // clears the cap (member becomes unlimited within the pool). Returns the
 // updated member.
