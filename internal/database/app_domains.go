@@ -51,11 +51,21 @@ func (db *Database) GetAppDomainsPendingDNSCheck() ([]models.AppDomain, error) {
 }
 
 // MarkAppDomainDNSStatus updates the DNS verification status for a domain.
+// Also keeps the legacy `status` column in sync (verified -> active, failed ->
+// failed) until the two columns are unified — Caddy's on-demand-TLS gate keys
+// off dns_check_status while the dashboard keys off status, so they must move
+// together to avoid the cert-issuance/visibility split.
 func (db *Database) MarkAppDomainDNSStatus(domainID string, status string) error {
-	_, err := db.DB.NewUpdate().Model((*models.AppDomain)(nil)).
+	q := db.DB.NewUpdate().Model((*models.AppDomain)(nil)).
 		Set("dns_check_status = ?", status).
-		Set("updated_at = ?", time.Now()).
-		Where("id = ?", domainID).
+		Set("updated_at = ?", time.Now())
+	switch status {
+	case "verified":
+		q = q.Set("status = ?", "active")
+	case "failed":
+		q = q.Set("status = ?", "failed")
+	}
+	_, err := q.Where("id = ?", domainID).
 		Where("deleted_at IS NULL").
 		Exec(context.Background())
 	return err

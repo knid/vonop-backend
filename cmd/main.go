@@ -343,6 +343,15 @@ func createSchema(db *bun.DB) error {
 		   AND o.is_personal = false
 		   AND b.pending_gateway > 0
 		   AND NOT b.gateway_pending_backfilled_v1`,
+		// Domain status sync backfill: VerifyAppDomain wrote only `status` while
+		// the cron wrote only `dns_check_status`, so existing rows are split.
+		// Caddy's on-demand-TLS gate honors only dns_check_status — user-verified
+		// domains were 502'ing. Reconcile both columns and add a marker so the
+		// canary advances. See controllers/app_domain_controller.go.
+		`ALTER TABLE app_domains ADD COLUMN IF NOT EXISTS status_sync_backfilled_v1 boolean NOT NULL DEFAULT false`,
+		`UPDATE app_domains SET dns_check_status = 'verified' WHERE status = 'active' AND dns_check_status != 'verified' AND deleted_at IS NULL`,
+		`UPDATE app_domains SET status = 'active' WHERE dns_check_status = 'verified' AND status != 'active' AND deleted_at IS NULL`,
+		`UPDATE app_domains SET status_sync_backfilled_v1 = true WHERE NOT status_sync_backfilled_v1`,
 	}
 
 	// Deduplicate before creating unique indexes (keep the latest row per group)
@@ -381,7 +390,7 @@ func createSchema(db *bun.DB) error {
 	// Table renames go in renameStatements below, not here — they run unconditionally.
 	var migrationsDone bool
 	row := db.QueryRowContext(context.Background(),
-		"SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='ai_credits_balances' AND column_name='gateway_pending_backfilled_v1')")
+		"SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='app_domains' AND column_name='status_sync_backfilled_v1')")
 	if err := row.Scan(&migrationsDone); err != nil {
 		migrationsDone = false
 	}

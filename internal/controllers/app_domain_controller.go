@@ -267,6 +267,10 @@ func (c *Controller) VerifyAppDomain(domainID string, project *models.AppProject
 
 	status, msg := verifyDomainDNS(domain.Domain)
 	domain.Status = status
+	// kept in sync with Status until the two columns are unified
+	if status == "active" {
+		domain.DNSCheckStatus = "verified"
+	}
 
 	if status == "active" {
 		runtimeApp, raErr := c.DB.GetRuntimeAppByAppProjectID(project.ID.String())
@@ -279,6 +283,7 @@ func (c *Controller) VerifyAppDomain(domainID string, project *models.AppProject
 				slog.Error("caddy_route_add_failed", "domain", domain.Domain, "fly_app", runtimeApp.FlyAppName, "err", err)
 				msg = "DNS verified, but failed to wire up the proxy. Try again in a moment."
 				domain.Status = "pending" // let the user retry
+				domain.DNSCheckStatus = "pending"
 			} else {
 				msg = "DNS verified — your custom domain is live."
 			}
