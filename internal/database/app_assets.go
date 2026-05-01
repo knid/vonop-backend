@@ -71,3 +71,14 @@ func (db *Database) GetRecentAppAssets(projectID uuid.UUID, limit int) ([]models
 		Scan(context.Background())
 	return assets, err
 }
+
+// SoftDeleteAppAssetsByProject soft-deletes every non-deleted AppAsset row
+// for the given project in a single UPDATE. Used by the project/org delete
+// path to clean up DB rows after S3 objects have been removed.
+func (db *Database) SoftDeleteAppAssetsByProject(ctx context.Context, projectID uuid.UUID) error {
+	_, err := db.DB.NewDelete().
+		Model((*models.AppAsset)(nil)).
+		Where("app_project_id = ?", projectID).
+		Exec(ctx)
+	return err
+}

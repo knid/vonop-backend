@@ -294,7 +294,40 @@ func (c *Controller) DeleteAppProject(id string, user *models.User) error {
 		c.DB.DeleteRuntimeApp(runtimeApp)
 	}
 
+	c.cleanupProjectAssets(context.Background(), project.ID)
+
 	return c.DB.DeleteAppProject(project)
+}
+
+// cleanupProjectAssets removes every app_asset for a project — both the S3
+// object and the DB row. Inline; per-project asset count is bounded; an
+// orphan-reaper for failed S3 deletes is TBD. Errors are logged but never
+// returned: the caller is mid-delete and a flaky S3 must not block them.
+func (c *Controller) cleanupProjectAssets(ctx context.Context, projectID uuid.UUID) {
+	assets, err := c.DB.GetAppAssetsByProjectID(projectID.String())
+	if err != nil {
+		slog.Warn("cleanupProjectAssets: failed to list assets", "error", err, "project_id", projectID)
+		return
+	}
+	if len(assets) == 0 {
+		return
+	}
+
+	if c.AssetsStorage != nil {
+		for i := range assets {
+			asset := &assets[i]
+			if asset.S3Key == "" {
+				continue
+			}
+			if err := c.AssetsStorage.DeleteObjectDirect(ctx, asset.S3Key); err != nil {
+				slog.Warn("cleanupProjectAssets: S3 delete failed", "error", err, "project_id", projectID, "asset_id", asset.ID)
+			}
+		}
+	}
+
+	if err := c.DB.SoftDeleteAppAssetsByProject(ctx, projectID); err != nil {
+		slog.Warn("cleanupProjectAssets: bulk soft-delete failed", "error", err, "project_id", projectID)
+	}
 }
 
 func (c *Controller) UpdateAppProjectStatus(project *models.AppProject, status string) (*models.AppProject, error) {

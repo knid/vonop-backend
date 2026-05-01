@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -142,6 +143,17 @@ func (c *Controller) DeleteOrganization(user *models.User, orgID string) error {
 	if org.IsPersonal {
 		return errors.New("personal workspaces cannot be deleted")
 	}
+
+	ctx := context.Background()
+	projects, projErr := c.DB.GetAppProjectsByOrgID(orgID)
+	if projErr != nil {
+		slog.Warn("DeleteOrganization: failed to list projects for asset cleanup", "error", projErr, "org_id", orgID)
+	} else {
+		for _, p := range projects {
+			c.cleanupProjectAssets(ctx, p.ID)
+		}
+	}
+
 	return c.DB.DeleteOrganization(org)
 }
 
