@@ -22,7 +22,7 @@ func (c *Controller) GeneratePreviewCode(user *models.User, appProjectID string)
 	if err != nil {
 		return nil, fmt.Errorf("project not found")
 	}
-	if project.UserID != user.ID {
+	if err := c.AuthorizeProjectAccess(user, project); err != nil {
 		return nil, fmt.Errorf("project not found")
 	}
 

@@ -22,8 +22,8 @@ func (v *HttpViews) GetMobileAppConfig(w http.ResponseWriter, r *http.Request) {
 	projectID := chi.URLParam(r, "projectId")
 
 	// Try Project (URL-wrapper) first, then fall back to AppProject (converted app)
-	var ownerID uuid.UUID
 	var oneSignalAppID string
+	authorized := false
 	project, err := v.Controller.GetProjectModelById(projectID)
 	if err != nil {
 		appProject, appErr := v.Controller.DB.GetAppProjectByID(projectID)
@@ -31,12 +31,16 @@ func (v *HttpViews) GetMobileAppConfig(w http.ResponseWriter, r *http.Request) {
 			utils.JSONErrorCode(w, constants.ErrProjectNotFound, http.StatusNotFound, nil)
 			return
 		}
-		ownerID = appProject.UserID
+		if err := v.Controller.AuthorizeProjectAccess(user, appProject); err == nil {
+			authorized = true
+		}
 	} else {
-		ownerID = project.UserID
 		oneSignalAppID = project.OneSignalAppID
+		if project.UserID == user.ID {
+			authorized = true
+		}
 	}
-	if ownerID != user.ID {
+	if !authorized {
 		utils.JSONErrorCode(w, constants.ErrForbidden, http.StatusForbidden, nil)
 		return
 	}
@@ -63,8 +67,8 @@ func (v *HttpViews) UpdateMobileAppConfig(w http.ResponseWriter, r *http.Request
 	projectID := chi.URLParam(r, "projectId")
 
 	// Try Project (URL-wrapper) first, then fall back to AppProject (converted app)
-	var ownerID uuid.UUID
 	var oneSignalAppID string
+	authorized := false
 	project, err := v.Controller.GetProjectModelById(projectID)
 	if err != nil {
 		appProject, appErr := v.Controller.DB.GetAppProjectByID(projectID)
@@ -72,12 +76,16 @@ func (v *HttpViews) UpdateMobileAppConfig(w http.ResponseWriter, r *http.Request
 			utils.JSONErrorCode(w, constants.ErrProjectNotFound, http.StatusNotFound, nil)
 			return
 		}
-		ownerID = appProject.UserID
+		if err := v.Controller.AuthorizeProjectAccess(user, appProject); err == nil {
+			authorized = true
+		}
 	} else {
-		ownerID = project.UserID
 		oneSignalAppID = project.OneSignalAppID
+		if project.UserID == user.ID {
+			authorized = true
+		}
 	}
-	if ownerID != user.ID {
+	if !authorized {
 		utils.JSONErrorCode(w, constants.ErrForbidden, http.StatusForbidden, nil)
 		return
 	}

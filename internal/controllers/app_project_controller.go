@@ -149,7 +149,7 @@ func (c *Controller) CloneAppProjectAsMobile(user *models.User, sourceProjectID 
 	if err != nil {
 		return nil, fmt.Errorf("source project not found")
 	}
-	if source.UserID != user.ID {
+	if err := c.AuthorizeProjectAccess(user, source); err != nil {
 		return nil, fmt.Errorf("unauthorized")
 	}
 
@@ -195,7 +195,7 @@ func (c *Controller) GetAppProject(id string, user *models.User) (*models.AppPro
 	if err != nil {
 		return nil, fmt.Errorf("project not found")
 	}
-	if project.UserID != user.ID {
+	if err := c.AuthorizeProjectAccess(user, project); err != nil {
 		return nil, fmt.Errorf("unauthorized")
 	}
 	return project, nil

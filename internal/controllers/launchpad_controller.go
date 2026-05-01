@@ -32,9 +32,7 @@ func (c *Controller) GetLaunchpad(ctx context.Context, user *models.User, appID 
 		Scan(ctx); err != nil {
 		return nil, err
 	}
-	if project.UserID != user.ID {
-		// Organization-shared apps land here too; Phase 2a doesn't
-		// cover org membership checks — that's Phase 4/5.
+	if err := c.AuthorizeProjectAccess(user, &project); err != nil {
 		return nil, errors.New("not authorized")
 	}
 

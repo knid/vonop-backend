@@ -4,11 +4,33 @@ import (
 	"errors"
 
 	"github.com/go-playground/validator/v10"
+	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/utils"
 )
+
+// AuthorizeProjectAccess returns nil if the user is allowed to read or modify
+// the given AppProject. Access is granted when either the legacy UserID match
+// holds (personal-org / pre-org-billing rows) or the user is an active member
+// of project.OrganizationID. Otherwise returns an "unauthorized" sentinel —
+// callers wrap or surface their own error string but should not change the
+// resulting HTTP status code.
+func (c *Controller) AuthorizeProjectAccess(user *models.User, project *models.AppProject) error {
+	if user == nil || project == nil {
+		return errors.New("unauthorized")
+	}
+	if project.UserID == user.ID {
+		return nil
+	}
+	if project.OrganizationID != uuid.Nil {
+		if _, err := c.DB.GetOrganizationMember(project.OrganizationID.String(), user.ID.String()); err == nil {
+			return nil
+		}
+	}
+	return errors.New("unauthorized")
+}
 
 func (c *Controller) CreateAndroidStoreAccess(user *models.User, createAndroidStoreAccessReq requests.AndroidStoreAccessRequest) (*responses.SuccessResponse, error) {
 	validate := validator.New(validator.WithRequiredStructEnabled())

@@ -42,7 +42,7 @@ func (c *Controller) DraftListing(ctx context.Context, user *models.User, appID 
 		Scan(ctx); err != nil {
 		return nil, err
 	}
-	if project.UserID != user.ID {
+	if err := c.AuthorizeProjectAccess(user, &project); err != nil {
 		return nil, errors.New("not authorized")
 	}
 
