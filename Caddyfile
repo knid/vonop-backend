@@ -1,8 +1,16 @@
 {
-    # Admin API reachable on the docker compose network so the api container
-    # can post /load reload requests. Not exposed to the public internet —
-    # docker-compose isolates this to the internal network.
-    admin 0.0.0.0:2019
+    # Admin API reachable on the docker compose network so the api/worker
+    # containers can post /load reload requests. Bound to 0.0.0.0 because
+    # clients reach it via the docker service name (http://caddy:2019), not
+    # loopback. Port 2019 is NOT published in docker-compose.yaml, so it is
+    # only reachable inside the compose network — keep it that way. As
+    # defense-in-depth, `origins` + `enforce_origin` restricts which Host
+    # headers the admin API will accept, so only the api/worker services can
+    # mutate config even if another container on the bridge tries to.
+    admin 0.0.0.0:2019 {
+        origins caddy:2019 api:2019 worker:2019 localhost:2019
+        enforce_origin
+    }
 
     # On-demand TLS for custom user domains (file-imported below). Caddy
     # asks the api backend before issuing each Let's Encrypt cert.
