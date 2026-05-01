@@ -82,9 +82,9 @@ func (c *Controller) DraftListing(ctx context.Context, user *models.User, appID 
 	c.RecordTokenUsage(user, "listing_draft",
 		"claude-haiku-4-5",
 		"anthropic", "", "standard", tracker)
-	prompt, completion, total, _ := tracker.Totals()
+	_, _, total, _ := tracker.Totals()
 	if total > 0 {
-		credits := models.TokensToCredits(prompt, completion)
+		credits := c.CreditsForTracker(tracker)
 		orgID, orgErr := c.ResolveOrgForProjectID(user, project.ID.String())
 		if orgErr != nil {
 			slog.Warn("listing_draft: resolve org failed", "err", orgErr)

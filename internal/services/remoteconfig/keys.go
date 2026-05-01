@@ -31,6 +31,7 @@ var CreditPack3000Credits = Key{Flag: "rc-credit-pack-3000-credits", Fallback: 3
 var CreditPack3000Price = Key{Flag: "rc-credit-pack-3000-price", Fallback: 125}
 var AICreditsTokensPerCredit = Key{Flag: "rc-ai-credits-tokens-per-credit", Fallback: 5000}
 var AICreditsOutputMultiplier = Key{Flag: "rc-ai-credits-output-multiplier", Fallback: 5}
+var AICreditsCacheReadDivisor = Key{Flag: "rc-ai-credits-cache-read-divisor", Fallback: 10}
 var AICreditsMinBalance = Key{Flag: "rc-ai-credits-min-balance", Fallback: -100}
 
 // --- Category 1b: Plan Display Overrides ---

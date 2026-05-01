@@ -389,12 +389,47 @@ func (c *Controller) GrantInitialFreeCreditsIfNeeded(user *models.User, orgID uu
 }
 
 // TokensToCredits converts token counts to credits using remote-config values
-// for tokens-per-credit and output multiplier. Falls back to hardcoded defaults
-// if remote config is unavailable.
-func (c *Controller) TokensToCredits(promptTokens, completionTokens int) int {
-	tpc := c.RemoteConfig.GetInt(remoteconfig.AICreditsTokensPerCredit, remoteconfig.Global)
-	om := c.RemoteConfig.GetInt(remoteconfig.AICreditsOutputMultiplier, remoteconfig.Global)
-	return models.TokensToCreditsWithConfig(promptTokens, completionTokens, tpc, om)
+// for tokens-per-credit, output multiplier, and cache-read divisor. Falls back
+// to hardcoded defaults if remote config is unavailable.
+func (c *Controller) TokensToCredits(promptTokens, completionTokens, cacheReadTokens int) int {
+	tpc, om, crd := c.creditFormulaParams()
+	return models.TokensToCreditsWithConfig(promptTokens, completionTokens, cacheReadTokens, tpc, om, crd)
+}
+
+// creditFormulaParams resolves the three remote-config knobs that drive the
+// credit formula, falling back to hardcoded defaults when RC returns
+// non-positive values (treated as "unset").
+func (c *Controller) creditFormulaParams() (tokensPerCredit, outputMultiplier, cacheReadDivisor int) {
+	tokensPerCredit = c.RemoteConfig.GetInt(remoteconfig.AICreditsTokensPerCredit, remoteconfig.Global)
+	outputMultiplier = c.RemoteConfig.GetInt(remoteconfig.AICreditsOutputMultiplier, remoteconfig.Global)
+	cacheReadDivisor = c.RemoteConfig.GetInt(remoteconfig.AICreditsCacheReadDivisor, remoteconfig.Global)
+	if tokensPerCredit <= 0 {
+		tokensPerCredit, _ = remoteconfig.AICreditsTokensPerCredit.Fallback.(int)
+	}
+	if outputMultiplier <= 0 {
+		outputMultiplier, _ = remoteconfig.AICreditsOutputMultiplier.Fallback.(int)
+	}
+	if cacheReadDivisor <= 0 {
+		cacheReadDivisor, _ = remoteconfig.AICreditsCacheReadDivisor.Fallback.(int)
+	}
+	return
+}
+
+// CreditsForTracker totals the credit cost across every recorded LLM call in
+// the tracker, rounding each call up independently. Per-call rounding is what
+// users are actually charged — aggregating tokens first and rounding once
+// systematically under-bills (e.g. a 35-call run was billed 53 credits with
+// aggregate-then-round but should have been 71 with per-call rounding).
+func (c *Controller) CreditsForTracker(tracker *utils.TokenTracker) int {
+	if tracker == nil {
+		return 0
+	}
+	tpc, om, crd := c.creditFormulaParams()
+	total := 0
+	for _, e := range tracker.Entries() {
+		total += models.TokensToCreditsWithConfig(e.PromptTokens, e.CompletionTokens, e.CacheReadInputTokens, tpc, om, crd)
+	}
+	return total
 }
 
 // CreditBudget returns the maximum credits the user can spend in a single session.
@@ -415,15 +450,17 @@ func (c *Controller) CreditBudget(user *models.User, orgID uuid.UUID) (int, erro
 
 // MakeCreditBudgetChecker returns a ShouldContinue-compatible function for
 // StreamWithTools. It checks whether the accumulated credit cost in the tracker
-// has reached the user's budget. When exhausted, it logs a warning and returns false.
+// has reached the user's budget. When exhausted, it logs a warning and returns
+// false. Spent credits are summed per-call (matches what DeductCredits will
+// charge at run end) so a cache-heavy run can't slip past the check by way of
+// aggregate-then-round under-counting.
 func (c *Controller) MakeCreditBudgetChecker(user *models.User, orgID uuid.UUID, tracker *utils.TokenTracker) func() bool {
 	budget, err := c.CreditBudget(user, orgID)
 	if err != nil {
 		return nil
 	}
 	return func() bool {
-		prompt, completion, _, _ := tracker.Totals()
-		spent := c.TokensToCredits(prompt, completion)
+		spent := c.CreditsForTracker(tracker)
 		if spent >= budget {
 			slog.Warn("credit budget exhausted mid-generation",
 				"user_id", user.ID, "spent", spent, "budget", budget)
@@ -793,7 +830,11 @@ func (c *Controller) RecordTokenUsage(user *models.User, action, model, provider
 		}
 	}
 
-	creditsSpent := c.TokensToCredits(prompt, completion)
+	// creditsSpent matches what DeductCredits charges: per-call rounded with
+	// cache-read tokens included. Used only as a PostHog property on the
+	// grouping trace event for ops visibility — actual deduction happens via
+	// DeductCredits at the agent.Run finalisation site.
+	creditsSpent := c.CreditsForTracker(tracker)
 
 	if c.PostHog != nil {
 		// Caller-supplied trace id takes precedence so error events emitted
@@ -826,7 +867,7 @@ func (c *Controller) RecordTokenUsage(user *models.User, action, model, provider
 				Set("$ai_stream", entry.IsStreaming).
 				Set("app_type", appType).
 				Set("project_id", reference).
-				Set("credits_estimated", c.TokensToCredits(entry.PromptTokens, entry.CompletionTokens))
+				Set("credits_estimated", c.TokensToCredits(entry.PromptTokens, entry.CompletionTokens, entry.CacheReadInputTokens))
 			if tracker.RunID != "" {
 				props.Set("run_id", tracker.RunID)
 			}

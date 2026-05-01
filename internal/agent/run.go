@@ -762,7 +762,7 @@ func finaliseSuccess(
 	// 3. Finalise the AppAgentRun row.
 	promptTok, completionTok, totalTok, _ := tracker.Totals()
 	durationMs := int(time.Since(runStart).Milliseconds())
-	credits := tokensToCredits(deps, promptTok, completionTok)
+	credits := creditsBilled(deps, tracker)
 	costUSD := estimateCost(run.Model, promptTok, completionTok)
 
 	run.Status = models.AgentRunStatusCompleted
@@ -872,17 +872,22 @@ func countFileOps(calls []models.ChatMessageToolCall) int {
 	return n
 }
 
-// tokensToCredits computes credit cost via models.TokensToCreditsWithConfig
-// using the same PostHog remote-config flags
-// (rc-ai-credits-tokens-per-credit, rc-ai-credits-output-multiplier) the
-// controller's TokensToCredits reads. Falls back to the per-key defaults if
-// PostHog is unreachable. Without this, the agent overcharged users vs. the
-// budget checker (which already went through remote config).
-func tokensToCredits(deps *RunDependencies, input, output int) int {
-	tpc, om := 0, 0
+// creditsBilled totals the credit cost across every recorded LLM call in the
+// tracker, rounding each call up independently and weighting cache-read
+// tokens at 1/cacheReadDivisor× input. Per-call rounding mirrors what users
+// are actually charged — aggregating tokens first and rounding once
+// systematically under-billed cache-heavy runs (e.g. 53 vs 71 credits on a
+// 35-call agent loop). Falls back to the per-key defaults if PostHog is
+// unreachable.
+func creditsBilled(deps *RunDependencies, tracker *utils.TokenTracker) int {
+	if tracker == nil {
+		return 0
+	}
+	tpc, om, crd := 0, 0, 0
 	if deps != nil && deps.RemoteConfig != nil {
 		tpc = deps.RemoteConfig.GetInt(remoteconfig.AICreditsTokensPerCredit, remoteconfig.Global)
 		om = deps.RemoteConfig.GetInt(remoteconfig.AICreditsOutputMultiplier, remoteconfig.Global)
+		crd = deps.RemoteConfig.GetInt(remoteconfig.AICreditsCacheReadDivisor, remoteconfig.Global)
 	}
 	if tpc <= 0 {
 		tpc, _ = remoteconfig.AICreditsTokensPerCredit.Fallback.(int)
@@ -890,7 +895,14 @@ func tokensToCredits(deps *RunDependencies, input, output int) int {
 	if om <= 0 {
 		om, _ = remoteconfig.AICreditsOutputMultiplier.Fallback.(int)
 	}
-	return models.TokensToCreditsWithConfig(input, output, tpc, om)
+	if crd <= 0 {
+		crd, _ = remoteconfig.AICreditsCacheReadDivisor.Fallback.(int)
+	}
+	total := 0
+	for _, e := range tracker.Entries() {
+		total += models.TokensToCreditsWithConfig(e.PromptTokens, e.CompletionTokens, e.CacheReadInputTokens, tpc, om, crd)
+	}
+	return total
 }
 
 // estimateCost wraps utils.EstimateInputOutputCostUSD.
@@ -969,7 +981,7 @@ func finaliseFailureV2(
 	if tracker != nil {
 		promptTok, completionTok, _, _ = tracker.Totals()
 	}
-	credits := tokensToCredits(deps, promptTok, completionTok)
+	credits := creditsBilled(deps, tracker)
 	costUSD := estimateCost(run.Model, promptTok, completionTok)
 	run.Status = mapCodeToStatus(code)
 	run.Error = fmt.Sprintf("%s: %s", code, message)

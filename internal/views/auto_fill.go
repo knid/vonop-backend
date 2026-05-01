@@ -7,7 +7,6 @@ import (
 
 	"github.com/go-playground/validator/v10"
 	"github.com/knid/wemob/internal/constants"
-	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/utils"
 )
@@ -88,9 +87,9 @@ func (v *HttpViews) NavBarAutoFillWithAI(w http.ResponseWriter, r *http.Request)
 		"anthropic", "", "standard", tracker)
 
 	// Post-hoc token-based billing — no project context, charge personal org.
-	prompt, completion, total, _ := tracker.Totals()
+	_, _, total, _ := tracker.Totals()
 	if total > 0 {
-		credits := models.TokensToCredits(prompt, completion)
+		credits := v.Controller.CreditsForTracker(tracker)
 		orgID, orgErr := v.Controller.RequireOrgIDForUser(user, nil)
 		if orgErr != nil {
 			slog.Warn("navbar_autofill: resolve personal org failed", "error", orgErr, "user_id", user.ID)

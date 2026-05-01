@@ -64,23 +64,34 @@ const AICreditsMinBalance = -100
 // Token-to-credit conversion: 1 credit per 5,000 weighted tokens.
 // Output tokens are weighted at 5× input tokens to reflect API pricing
 // (input: $3/MTok, output: $15/MTok for Sonnet 4.6).
+// Cache-read tokens are weighted at 1/10× input — Anthropic prompt-cache reads
+// are billed at ~10% of the fresh-input rate ($0.30/MTok vs $3/MTok). Counting
+// them as zero (the previous behavior) let cache-heavy agent loops accumulate
+// real cost we never charged for.
 const AICreditsTokensPerCredit = 5_000
 const AICreditsOutputMultiplier = 5
+const AICreditsCacheReadDivisor = 10
 
-// TokensToCredits converts prompt and completion token counts to credit cost
-// using weighted tokens (output × 5) and rounds up.
-func TokensToCredits(promptTokens, completionTokens int) int {
-	weighted := promptTokens + (completionTokens * AICreditsOutputMultiplier)
-	if weighted <= 0 {
-		return 0
-	}
-	return (weighted + AICreditsTokensPerCredit - 1) / AICreditsTokensPerCredit
+// TokensToCredits converts token counts to credit cost using weighted tokens
+// (output × 5, cache-read ÷ 10) and rounds up.
+func TokensToCredits(promptTokens, completionTokens, cacheReadTokens int) int {
+	return TokensToCreditsWithConfig(
+		promptTokens, completionTokens, cacheReadTokens,
+		AICreditsTokensPerCredit, AICreditsOutputMultiplier, AICreditsCacheReadDivisor,
+	)
 }
 
 // TokensToCreditsWithConfig is like TokensToCredits but uses caller-provided
-// conversion parameters from remote config.
-func TokensToCreditsWithConfig(promptTokens, completionTokens, tokensPerCredit, outputMultiplier int) int {
-	weighted := promptTokens + (completionTokens * outputMultiplier)
+// conversion parameters from remote config. cacheReadDivisor falls back to the
+// hardcoded default if non-positive.
+func TokensToCreditsWithConfig(promptTokens, completionTokens, cacheReadTokens, tokensPerCredit, outputMultiplier, cacheReadDivisor int) int {
+	if tokensPerCredit <= 0 {
+		return 0
+	}
+	if cacheReadDivisor <= 0 {
+		cacheReadDivisor = AICreditsCacheReadDivisor
+	}
+	weighted := promptTokens + cacheReadTokens/cacheReadDivisor + (completionTokens * outputMultiplier)
 	if weighted <= 0 {
 		return 0
 	}
