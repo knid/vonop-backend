@@ -392,8 +392,8 @@ func (c *Controller) QueryAllPanels(dashboard *models.AppDashboard, panels []mod
 
 // querySupabase executes a query via the Supabase PostgREST API.
 func (c *Controller) querySupabase(integration *models.AppIntegration, query *models.DashboardQuery) (any, error) {
-	var creds map[string]any
-	if err := json.Unmarshal(integration.Credentials, &creds); err != nil {
+	creds, err := c.DecryptedIntegrationCredentials(integration)
+	if err != nil {
 		return nil, fmt.Errorf("invalid integration credentials")
 	}
 
@@ -497,12 +497,11 @@ func (c *Controller) queryNeon(integration *models.AppIntegration, query *models
 	// Try Credentials.connection_string first, then fall back to EnvVars.DATABASE_URL
 	// (the database editor and codegen store the DSN in EnvVars, not Credentials).
 	var connStr string
-	var creds map[string]any
-	if err := json.Unmarshal(integration.Credentials, &creds); err == nil {
+	if creds, err := c.DecryptedIntegrationCredentials(integration); err == nil {
 		connStr, _ = creds["connection_string"].(string)
 	}
 	if connStr == "" {
-		connStr = integration.EnvVars["DATABASE_URL"]
+		connStr = c.DecryptedIntegrationEnvVars(integration)["DATABASE_URL"]
 	}
 	if connStr == "" {
 		return nil, fmt.Errorf("missing neon connection string")
@@ -990,8 +989,8 @@ func (c *Controller) UpdateCell(dashboard *models.AppDashboard, integration *mod
 
 // updateCellSupabase updates a cell via Supabase PostgREST PATCH.
 func (c *Controller) updateCellSupabase(integration *models.AppIntegration, table, column string, value any, primaryKey map[string]any) error {
-	var creds map[string]any
-	if err := json.Unmarshal(integration.Credentials, &creds); err != nil {
+	creds, err := c.DecryptedIntegrationCredentials(integration)
+	if err != nil {
 		return fmt.Errorf("invalid integration credentials")
 	}
 
@@ -1036,12 +1035,11 @@ func (c *Controller) updateCellSupabase(integration *models.AppIntegration, tabl
 // updateCellNeon updates a cell via a parameterized UPDATE on a Neon Postgres database.
 func (c *Controller) updateCellNeon(integration *models.AppIntegration, table, column string, value any, primaryKey map[string]any) error {
 	var connStr string
-	var creds map[string]any
-	if err := json.Unmarshal(integration.Credentials, &creds); err == nil {
+	if creds, err := c.DecryptedIntegrationCredentials(integration); err == nil {
 		connStr, _ = creds["connection_string"].(string)
 	}
 	if connStr == "" {
-		connStr = integration.EnvVars["DATABASE_URL"]
+		connStr = c.DecryptedIntegrationEnvVars(integration)["DATABASE_URL"]
 	}
 	if connStr == "" {
 		return fmt.Errorf("missing neon connection string")

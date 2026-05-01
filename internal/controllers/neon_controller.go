@@ -109,6 +109,11 @@ func (c *Controller) provisionNeonDatabase(ctx context.Context, project *models.
 
 // storeNeonIntegration saves the Neon connection as an AppIntegration (upsert).
 func (c *Controller) storeNeonIntegration(project *models.AppProject, connStr, neonProjectID string) error {
+	encEnvVars := utils.EncryptIntegrationMapStr(
+		map[string]string{"DATABASE_URL": connStr},
+		c.integrationCredentialsKey(),
+	)
+
 	// Check if a Neon integration already exists — update it instead of creating a duplicate
 	existing, err := c.DB.GetAppIntegrationByProvider(project.ID.String(), "neon")
 	if err == nil && existing.ID != uuid.Nil {
@@ -116,9 +121,7 @@ func (c *Controller) storeNeonIntegration(project *models.AppProject, connStr, n
 			"project_id": neonProjectID,
 		}
 		existing.Status = "connected"
-		existing.EnvVars = map[string]string{
-			"DATABASE_URL": connStr,
-		}
+		existing.EnvVars = encEnvVars
 		existing.UpdatedAt = time.Now()
 		_, err := c.DB.UpdateAppIntegration(existing)
 		return err
@@ -130,10 +133,8 @@ func (c *Controller) storeNeonIntegration(project *models.AppProject, connStr, n
 		Config: map[string]any{
 			"project_id": neonProjectID,
 		},
-		Status: "connected",
-		EnvVars: map[string]string{
-			"DATABASE_URL": connStr,
-		},
+		Status:  "connected",
+		EnvVars: encEnvVars,
 	}
 
 	_, err = c.DB.CreateAppIntegration(integration)

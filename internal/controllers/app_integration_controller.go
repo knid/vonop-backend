@@ -10,7 +10,40 @@ import (
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/services/integrations"
+	"github.com/knid/wemob/internal/utils"
 )
+
+// integrationCredentialsKey returns the AES-256-GCM hex key used to wrap
+// AppIntegration.Credentials and EnvVars at rest. INTEGRATION_CREDENTIALS_ENCRYPTION_KEY
+// is the logical name; if unset we fall back to GITHUB_TOKEN_ENCRYPTION_KEY
+// so this PR doesn't require a new Infisical secret on day one.
+func (c *Controller) integrationCredentialsKey() string {
+	if k := c.SecretManager.GetSecret("INTEGRATION_CREDENTIALS_ENCRYPTION_KEY"); k != "" {
+		return k
+	}
+	return c.SecretManager.GetSecret("GITHUB_TOKEN_ENCRYPTION_KEY")
+}
+
+// DecryptedIntegrationCredentials returns the credentials JSON as a map with
+// any enc:v1: prefixed values decrypted in place. Used by every read path
+// that talks to a third-party API with the stored credential.
+func (c *Controller) DecryptedIntegrationCredentials(integ *models.AppIntegration) (map[string]any, error) {
+	var creds map[string]any
+	if len(integ.Credentials) == 0 {
+		return creds, nil
+	}
+	if err := json.Unmarshal(integ.Credentials, &creds); err != nil {
+		return nil, err
+	}
+	return utils.DecryptIntegrationMapAny(creds, c.integrationCredentialsKey()), nil
+}
+
+// DecryptedIntegrationEnvVars returns the EnvVars map with enc:v1: prefixed
+// values decrypted. Called from CollectAllEnvVars and the dashboard query
+// fallback that reads DATABASE_URL out of EnvVars.
+func (c *Controller) DecryptedIntegrationEnvVars(integ *models.AppIntegration) map[string]string {
+	return utils.DecryptIntegrationMapStr(integ.EnvVars, c.integrationCredentialsKey())
+}
 
 // GetIntegrationProviders returns the provider list derived from the single
 // source of truth in constants.IntegrationProviders.
@@ -68,7 +101,10 @@ func (c *Controller) ConnectAppIntegration(project *models.AppProject, req reque
 		return nil, err
 	}
 
-	credsJSON, _ := json.Marshal(req.Credentials)
+	encKey := c.integrationCredentialsKey()
+	encCreds := utils.EncryptIntegrationMapAny(req.Credentials, encKey)
+	encEnvVars := utils.EncryptIntegrationMapStr(envVars, encKey)
+	credsJSON, _ := json.Marshal(encCreds)
 
 	integration := &models.AppIntegration{
 		AppProjectID: project.ID,
@@ -76,7 +112,7 @@ func (c *Controller) ConnectAppIntegration(project *models.AppProject, req reque
 		Credentials:  credsJSON,
 		Config:       map[string]any{},
 		Status:       "connected",
-		EnvVars:      envVars,
+		EnvVars:      encEnvVars,
 	}
 
 	return c.DB.CreateAppIntegration(integration)
@@ -98,9 +134,12 @@ func (c *Controller) UpdateAppIntegration(integrationID string, project *models.
 
 	envVars, _ := integrations.BuildEnvVars(integ.Provider, req.Credentials)
 
-	credsJSON, _ := json.Marshal(req.Credentials)
+	encKey := c.integrationCredentialsKey()
+	encCreds := utils.EncryptIntegrationMapAny(req.Credentials, encKey)
+	encEnvVars := utils.EncryptIntegrationMapStr(envVars, encKey)
+	credsJSON, _ := json.Marshal(encCreds)
 	integ.Credentials = credsJSON
-	integ.EnvVars = envVars
+	integ.EnvVars = encEnvVars
 	if req.Config != nil {
 		integ.Config = req.Config
 	}

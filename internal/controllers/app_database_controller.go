@@ -89,7 +89,7 @@ func (c *Controller) neonConnString(projectID string) string {
 	if integ == nil {
 		return ""
 	}
-	return integ.EnvVars["DATABASE_URL"]
+	return c.DecryptedIntegrationEnvVars(integ)["DATABASE_URL"]
 }
 
 // openNeonDB opens a direct connection to the app's Neon database.

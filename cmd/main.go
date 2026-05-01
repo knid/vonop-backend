@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"log/slog"
 	"net/http"
 	"os"
@@ -352,6 +353,12 @@ func createSchema(db *bun.DB) error {
 		`UPDATE app_domains SET dns_check_status = 'verified' WHERE status = 'active' AND dns_check_status != 'verified' AND deleted_at IS NULL`,
 		`UPDATE app_domains SET status = 'active' WHERE dns_check_status = 'verified' AND status != 'active' AND deleted_at IS NULL`,
 		`UPDATE app_domains SET status_sync_backfilled_v1 = true WHERE NOT status_sync_backfilled_v1`,
+		// Marker column for the integration-credentials-at-rest encryption
+		// backfill. The actual rewrite happens in Go (see backfillEncryptIntegrations
+		// in cmd/main.go) because Postgres can't call our AES helper without an
+		// extension. Default false flips to true row-by-row as the backfill
+		// encrypts each AppIntegration.
+		`ALTER TABLE app_integrations ADD COLUMN IF NOT EXISTS credentials_encrypted_v1 boolean NOT NULL DEFAULT false`,
 	}
 
 	// Deduplicate before creating unique indexes (keep the latest row per group)
@@ -390,7 +397,7 @@ func createSchema(db *bun.DB) error {
 	// Table renames go in renameStatements below, not here — they run unconditionally.
 	var migrationsDone bool
 	row := db.QueryRowContext(context.Background(),
-		"SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='app_domains' AND column_name='status_sync_backfilled_v1')")
+		"SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='app_integrations' AND column_name='credentials_encrypted_v1')")
 	if err := row.Scan(&migrationsDone); err != nil {
 		migrationsDone = false
 	}
@@ -822,6 +829,79 @@ func migrateInactiveUsersToFree(bundb *bun.DB) {
 
 }
 
+// backfillEncryptIntegrations rewrites every AppIntegration row whose
+// credentials_encrypted_v1 marker is still false: it walks Credentials JSON
+// + EnvVars and wraps each leaf string with the enc:v1: prefix using the
+// integration encryption key. Idempotent — the prefix check inside the
+// utils.Encrypt* helpers means running this twice is a no-op.
+//
+// Deploy ordering note: this runs in-process, AFTER createSchema and BEFORE
+// the HTTP server starts. Old code in a rolling deploy will keep reading
+// plaintext rows until they're flipped, and the new code reads both — so
+// no readers see encrypted rows before they have the decrypt path.
+func backfillEncryptIntegrations(bundb *bun.DB, sm secret.SecretManager) {
+	hexKey := sm.GetSecret("INTEGRATION_CREDENTIALS_ENCRYPTION_KEY")
+	if hexKey == "" {
+		hexKey = sm.GetSecret("GITHUB_TOKEN_ENCRYPTION_KEY")
+	}
+	if hexKey == "" {
+		slog.Warn("backfillEncryptIntegrations: no encryption key available, skipping")
+		return
+	}
+
+	ctx := context.Background()
+	const batchSize = 100
+	total := 0
+	for {
+		var rows []models.AppIntegration
+		if err := bundb.NewSelect().
+			Model(&rows).
+			Where("credentials_encrypted_v1 = false").
+			Where("deleted_at IS NULL").
+			Limit(batchSize).
+			Scan(ctx); err != nil {
+			slog.Error("backfillEncryptIntegrations: scan failed", "error", err)
+			return
+		}
+		if len(rows) == 0 {
+			break
+		}
+		for i := range rows {
+			r := &rows[i]
+			var creds map[string]any
+			if len(r.Credentials) > 0 {
+				if err := json.Unmarshal(r.Credentials, &creds); err != nil {
+					slog.Warn("backfillEncryptIntegrations: bad credentials JSON, marking row done",
+						"id", r.ID, "error", err)
+				} else {
+					encCreds := utils.EncryptIntegrationMapAny(creds, hexKey)
+					if b, err := json.Marshal(encCreds); err == nil {
+						r.Credentials = b
+					}
+				}
+			}
+			r.EnvVars = utils.EncryptIntegrationMapStr(r.EnvVars, hexKey)
+			r.CredentialsEncryptedV1 = true
+			if _, err := bundb.NewUpdate().
+				Model(r).
+				Column("credentials", "env_vars", "credentials_encrypted_v1", "updated_at").
+				Where("id = ?", r.ID).
+				Exec(ctx); err != nil {
+				slog.Warn("backfillEncryptIntegrations: update failed",
+					"id", r.ID, "error", err)
+				continue
+			}
+			total++
+		}
+		if len(rows) < batchSize {
+			break
+		}
+	}
+	if total > 0 {
+		slog.Info("backfillEncryptIntegrations: encrypted rows", "count", total)
+	}
+}
+
 // isSensitiveLogPath returns true if a request URL path is known to carry
 // secrets, credentials, or signed third-party payloads that must never land
 // in BetterStack. Used by httplog LogExtraAttrs to skip body capture on
@@ -911,6 +991,12 @@ func main() {
 	}
 
 	sm := controller.SecretManager
+
+	// One-shot encryption-at-rest backfill for AppIntegration credentials and
+	// env vars. Runs in-process so the new decrypt code is already live when
+	// the rewrite happens — no rolling-deploy ordering trap.
+	backfillEncryptIntegrations(bundb, sm)
+
 	seedPlans(db, sm)
 	migrateInactiveUsersToFree(bundb)
 

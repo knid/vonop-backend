@@ -93,7 +93,7 @@ func (c *Controller) CollectAllEnvVars(project *models.AppProject) map[string]st
 		slog.Warn("Failed to fetch integration env vars", "error", err, "project_id", project.ID)
 	}
 	for _, integ := range appIntegrations {
-		for k, v := range integ.EnvVars {
+		for k, v := range c.DecryptedIntegrationEnvVars(&integ) {
 			envVars[k] = v
 		}
 	}
