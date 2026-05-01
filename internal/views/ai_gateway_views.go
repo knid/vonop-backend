@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/middleware"
 	"github.com/knid/wemob/internal/models"
@@ -344,14 +345,14 @@ func (v *HttpViews) GatewayChat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if stream {
-		v.handleStreamingChat(w, upstreamResp, user, model, provider.Name, projectID)
+		v.handleStreamingChat(w, upstreamResp, user, orgID, model, provider.Name, projectID)
 	} else {
-		v.handleNonStreamingChat(w, upstreamResp, user, model, provider.Name, projectID)
+		v.handleNonStreamingChat(w, upstreamResp, user, orgID, model, provider.Name, projectID)
 	}
 }
 
 // handleStreamingChat proxies a streaming SSE response from the upstream provider.
-func (v *HttpViews) handleStreamingChat(w http.ResponseWriter, upstream *http.Response, user *models.User, model, providerName, projectID string) {
+func (v *HttpViews) handleStreamingChat(w http.ResponseWriter, upstream *http.Response, user *models.User, orgID uuid.UUID, model, providerName, projectID string) {
 	utils.SetSSEHeaders(w)
 	w.WriteHeader(upstream.StatusCode)
 
@@ -389,12 +390,12 @@ func (v *HttpViews) handleStreamingChat(w http.ResponseWriter, upstream *http.Re
 
 	// Post-hoc credit deduction and usage recording
 	if lastUsage != nil {
-		v.recordGatewayChatUsage(user, model, providerName, projectID, lastUsage)
+		v.recordGatewayChatUsage(user, orgID, model, providerName, projectID, lastUsage)
 	}
 }
 
 // handleNonStreamingChat proxies a non-streaming response from the upstream provider.
-func (v *HttpViews) handleNonStreamingChat(w http.ResponseWriter, upstream *http.Response, user *models.User, model, providerName, projectID string) {
+func (v *HttpViews) handleNonStreamingChat(w http.ResponseWriter, upstream *http.Response, user *models.User, orgID uuid.UUID, model, providerName, projectID string) {
 	body, err := io.ReadAll(upstream.Body)
 	if err != nil {
 		slog.Error("gateway chat: failed to read upstream response", "error", err)
@@ -411,7 +412,7 @@ func (v *HttpViews) handleNonStreamingChat(w http.ResponseWriter, upstream *http
 			Usage *utils.UsageInfo `json:"usage"`
 		}
 		if err := json.Unmarshal(body, &resp); err == nil && resp.Usage != nil {
-			v.recordGatewayChatUsage(user, model, providerName, projectID, resp.Usage)
+			v.recordGatewayChatUsage(user, orgID, model, providerName, projectID, resp.Usage)
 		}
 	}
 }
@@ -424,12 +425,12 @@ func (v *HttpViews) handleNonStreamingChat(w http.ResponseWriter, upstream *http
 // TokensToCredits formula handles correctly. See
 // Controller.GatewayChatCreditsOwed and
 // DB.AtomicAccumulateGatewayPending for the math and race semantics.
-func (v *HttpViews) recordGatewayChatUsage(user *models.User, model, providerName, projectID string, usage *utils.UsageInfo) {
+func (v *HttpViews) recordGatewayChatUsage(user *models.User, orgID uuid.UUID, model, providerName, projectID string, usage *utils.UsageInfo) {
 	owed := v.Controller.GatewayChatCreditsOwed(model, usage)
 	if owed > 0 {
-		if _, err := v.Controller.AccumulateGatewayChatCredits(user, owed, "gateway_chat", projectID); err != nil {
+		if _, err := v.Controller.AccumulateGatewayChatCredits(user, orgID, owed, "gateway_chat", projectID); err != nil {
 			slog.Error("gateway chat: failed to accumulate credits",
-				"error", err, "user_id", user.ID, "model", model, "owed", owed)
+				"error", err, "user_id", user.ID, "org_id", orgID, "model", model, "owed", owed)
 		}
 	}
 

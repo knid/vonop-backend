@@ -156,14 +156,14 @@ func (db *Database) AtomicAddCredits(tx bun.IDB, balanceID string, amount int) (
 //
 // Runs as one UPDATE with a CTE so concurrent gateway requests race
 // correctly — each one sees the latest pending_gateway under row lock.
-func (db *Database) AtomicAccumulateGatewayPending(userID string, owed float64) (rolled int, err error) {
+func (db *Database) AtomicAccumulateGatewayPending(organizationID uuid.UUID, owed float64) (rolled int, err error) {
 	var result struct {
 		Rolled int `bun:"rolled"`
 	}
 	err = db.DB.NewRaw(
 		`WITH locked AS (
 			SELECT id, pending_gateway FROM ai_credits_balances
-			WHERE user_id = ? FOR UPDATE
+			WHERE organization_id = ? FOR UPDATE
 		),
 		calc AS (
 			SELECT
@@ -180,7 +180,7 @@ func (db *Database) AtomicAccumulateGatewayPending(userID string, owed float64) 
 		FROM calc
 		WHERE b.id = calc.id
 		RETURNING calc.rolled AS rolled`,
-		userID, owed, owed,
+		organizationID, owed, owed,
 	).Scan(context.Background(), &result)
 	if err != nil {
 		if err == sql.ErrNoRows {

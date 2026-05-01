@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/services/remoteconfig"
@@ -254,23 +255,24 @@ func (c *Controller) GatewayChatCreditsOwed(modelID string, usage *utils.UsageIn
 // an ai_credit_transactions audit row for the whole credits that were
 // moved out of pending_gateway onto balance. Returns the number of whole
 // credits deducted (0 if the call only increased pending).
-func (c *Controller) AccumulateGatewayChatCredits(user *models.User, owed float64, action, reference string) (int, error) {
+func (c *Controller) AccumulateGatewayChatCredits(user *models.User, orgID uuid.UUID, owed float64, action, reference string) (int, error) {
 	if owed <= 0 {
 		return 0, nil
 	}
-	rolled, err := c.DB.AtomicAccumulateGatewayPending(user.ID.String(), owed)
+	rolled, err := c.DB.AtomicAccumulateGatewayPending(orgID, owed)
 	if err != nil {
 		return 0, fmt.Errorf("accumulate gateway pending: %w", err)
 	}
 	if rolled > 0 {
 		if _, terr := c.DB.CreateAICreditTransaction(&models.AICreditTransaction{
-			UserID:    user.ID,
-			Amount:    -rolled,
-			Action:    action,
-			Reference: reference,
+			OrganizationID: orgID,
+			UserID:         user.ID,
+			Amount:         -rolled,
+			Action:         action,
+			Reference:      reference,
 		}); terr != nil {
 			slog.Warn("accumulate gateway pending: failed to emit transaction row",
-				"error", terr, "user_id", user.ID, "rolled", rolled)
+				"error", terr, "user_id", user.ID, "org_id", orgID, "rolled", rolled)
 		}
 	}
 	return rolled, nil

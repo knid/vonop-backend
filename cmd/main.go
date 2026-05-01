@@ -312,6 +312,37 @@ func createSchema(db *bun.DB) error {
 		`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS subscription_start_at timestamptz`,
 		`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS trial_start_at timestamptz`,
 		`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS trial_used boolean NOT NULL DEFAULT false`,
+		// Gateway pending accumulator was keyed on user_id while balances are
+		// org-scoped post Plan A — stranded fractional debt accumulated on
+		// whichever row the buggy WHERE user_id = ? happened to match. Fold
+		// that debt onto each user's personal-org row so nothing is lost.
+		`ALTER TABLE ai_credits_balances ADD COLUMN IF NOT EXISTS gateway_pending_backfilled_v1 boolean NOT NULL DEFAULT false`,
+		`UPDATE ai_credits_balances target
+		 SET pending_gateway = sub.total_pending,
+		     gateway_pending_backfilled_v1 = true,
+		     updated_at = NOW()
+		 FROM (
+		     SELECT po.id AS personal_org_id, SUM(b.pending_gateway) AS total_pending
+		     FROM ai_credits_balances b
+		     JOIN organizations po ON po.owner_id = b.user_id
+		      AND po.is_personal = true
+		      AND po.deleted_at IS NULL
+		     WHERE b.user_id IS NOT NULL
+		       AND b.pending_gateway > 0
+		     GROUP BY po.id
+		     HAVING SUM(b.pending_gateway) > 0
+		 ) sub
+		 WHERE target.organization_id = sub.personal_org_id
+		   AND NOT target.gateway_pending_backfilled_v1`,
+		`UPDATE ai_credits_balances b
+		 SET pending_gateway = 0,
+		     gateway_pending_backfilled_v1 = true,
+		     updated_at = NOW()
+		 FROM organizations o
+		 WHERE b.organization_id = o.id
+		   AND o.is_personal = false
+		   AND b.pending_gateway > 0
+		   AND NOT b.gateway_pending_backfilled_v1`,
 	}
 
 	// Deduplicate before creating unique indexes (keep the latest row per group)
@@ -350,7 +381,7 @@ func createSchema(db *bun.DB) error {
 	// Table renames go in renameStatements below, not here — they run unconditionally.
 	var migrationsDone bool
 	row := db.QueryRowContext(context.Background(),
-		"SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='language')")
+		"SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='ai_credits_balances' AND column_name='gateway_pending_backfilled_v1')")
 	if err := row.Scan(&migrationsDone); err != nil {
 		migrationsDone = false
 	}
