@@ -15,6 +15,7 @@ import (
 	"github.com/posthog/posthog-go"
 	"github.com/stripe/stripe-go/v82"
 	"github.com/stripe/stripe-go/v82/webhook"
+	"github.com/uptrace/bun"
 )
 
 // mapStripeStatus maps a Stripe subscription status to our internal status.
@@ -70,60 +71,83 @@ func (c *Controller) HandleWebhook(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// Deduplication: skip events we have already processed
-	processed, err := c.DB.IsWebhookEventProcessed(event.ID)
-	if err != nil {
-		slog.Error("failed to check webhook event dedup", "error", err, "event_id", event.ID)
+	// Atomic dedup + side-effects: the webhook_events insert and the money-touching
+	// writes (AddAICredits, GrantSubscriptionCredits) share one tx so a process
+	// crash between dedup and money-write can't cause Stripe retries to double-fire.
+	var (
+		alreadyProcessed bool
+		postCommitHooks  []func()
+	)
+	txErr := c.DB.RunInTx(func(tx bun.Tx) error {
+		inserted, err := c.DB.InsertWebhookEventTx(tx, event.ID, string(event.Type))
+		if err != nil {
+			return fmt.Errorf("dedup insert: %w", err)
+		}
+		if !inserted {
+			alreadyProcessed = true
+			return nil
+		}
+		hooks, perr := c.processWebhookEventTx(tx, event)
+		postCommitHooks = hooks
+		return perr
+	})
+	if txErr != nil {
+		slog.Error("webhook processing failed", "error", txErr, "event_id", event.ID, "event_type", event.Type)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
 	}
-	if processed {
+
+	if alreadyProcessed {
 		slog.Info("webhook event already processed, skipping", "event_id", event.ID)
 		w.WriteHeader(http.StatusOK)
 		return
 	}
 
-	// Process the event. On failure, return 500 so Stripe retries.
-	// The event is only marked as processed after successful handling.
-	processingErr := c.processWebhookEvent(event)
-	if processingErr != nil {
-		slog.Error("webhook processing failed", "error", processingErr, "event_id", event.ID, "event_type", event.Type)
-		w.WriteHeader(http.StatusInternalServerError)
-		return
-	}
-
-	// Mark event as processed only after successful handling
-	if err := c.DB.MarkWebhookEventProcessed(event.ID, string(event.Type)); err != nil {
-		slog.Error("failed to mark webhook event as processed", "error", err, "event_id", event.ID)
+	// Async event-sender goroutines deliberately fire only after the dedup tx
+	// has committed, so a Stripe retry that arrives mid-tx doesn't double-fire
+	// CRM events.
+	for _, hook := range postCommitHooks {
+		go hook()
 	}
 
 	w.WriteHeader(http.StatusOK)
 }
 
-// processWebhookEvent handles a verified Stripe event. Returns an error if
-// the event should be retried (e.g. user not found, DB failure).
-func (c *Controller) processWebhookEvent(event stripe.Event) error {
+// processWebhookEventTx handles a verified Stripe event inside a transaction
+// owned by the caller (HandleWebhook). Returns the post-commit hooks to fire
+// after the tx commits — these are the goroutines that publish to the event
+// bus, deliberately deferred so a Stripe retry that arrives mid-tx can't
+// double-fire CRM events. Returns an error if the event should be retried.
+func (c *Controller) processWebhookEventTx(tx bun.Tx, event stripe.Event) ([]func(), error) {
+	var hooks []func()
+	addHook := func(user *models.User, name string, props map[string]any) {
+		u := user
+		hooks = append(hooks, func() { c.EventService.SendEvent(u, name, props) })
+	}
+
 	switch event.Type {
 
 	case "customer.subscription.created":
 		var sub stripe.Subscription
 		if err := json.Unmarshal(event.Data.Raw, &sub); err != nil {
 			slog.Error("webhook: failed to unmarshal subscription", "error", err, "event_id", event.ID)
-			return nil // permanent parse error — don't retry
+			return nil, nil // permanent parse error — don't retry
 		}
 		slog.Info("subscription created", "customer_id", sub.Customer.ID, "status", sub.Status)
 
 		org, err := c.DB.GetOrganizationByStripeCustomerID(sub.Customer.ID)
 		if err != nil {
-			return fmt.Errorf("organization not found for stripe customer %s: %w", sub.Customer.ID, err)
+			return nil, fmt.Errorf("organization not found for stripe customer %s: %w", sub.Customer.ID, err)
 		}
 
 		// Bounds check: ensure subscription has items
 		if len(sub.Items.Data) == 0 {
-			return fmt.Errorf("subscription %s has no items", sub.ID)
+			return nil, fmt.Errorf("subscription %s has no items", sub.ID)
 		}
 
 		subs, err := c.DB.GetSubscriptionByPriceID(sub.Items.Data[0].Price.ID)
 		if err != nil {
-			return fmt.Errorf("plan not found for price ID %s: %w", sub.Items.Data[0].Price.ID, err)
+			return nil, fmt.Errorf("plan not found for price ID %s: %w", sub.Items.Data[0].Price.ID, err)
 		}
 		org.SubscriptionID = subs.ID
 
@@ -145,17 +169,17 @@ func (c *Controller) processWebhookEvent(event stripe.Event) error {
 		// Load org owner for user-keyed notifications, CRM events, and posthog identity.
 		owner, err := c.DB.GetUserById(org.OwnerID.String())
 		if err != nil {
-			return fmt.Errorf("owner not found for org %s: %w", org.ID, err)
+			return nil, fmt.Errorf("owner not found for org %s: %w", org.ID, err)
 		}
 
 		setupJustFinished := false
 		if !owner.SetupFinished {
 			owner.SetupFinished = true
 			setupJustFinished = true
-			go c.EventService.SendEvent(owner, constants.EVENT_USER_SETUP_FINISHED, map[string]any{})
+			addHook(owner, constants.EVENT_USER_SETUP_FINISHED, map[string]any{})
 		}
 
-		go c.EventService.SendEvent(owner, constants.EVENT_SUBSCRIPTION_CREATED, map[string]any{
+		addHook(owner, constants.EVENT_SUBSCRIPTION_CREATED, map[string]any{
 			"subscription_status": org.SubscriptionStatus,
 			"subscription_id":     org.SubscriptionID.String(),
 			"plan_name":           subs.Name,
@@ -163,7 +187,7 @@ func (c *Controller) processWebhookEvent(event stripe.Event) error {
 		})
 
 		if _, err := c.DB.UpdateOrganization(org); err != nil {
-			return fmt.Errorf("failed to update organization %s after subscription created: %w", org.ID, err)
+			return nil, fmt.Errorf("failed to update organization %s after subscription created: %w", org.ID, err)
 		}
 
 		// SetupFinished is still tracked on the user object — persist it.
@@ -173,14 +197,19 @@ func (c *Controller) processWebhookEvent(event stripe.Event) error {
 			}
 		}
 
-		// Grant plan's monthly credits (e.g. 100 for Starter).
+		// Grant plan's monthly credits (e.g. 100 for Starter) inside the dedup tx.
 		// Must run after UpdateOrganization so the org has the correct SubscriptionID.
 		// Subscriptions are billed at the org level (Plan A) — credits land on the org balance.
-		c.GrantSubscriptionCredits(owner, org.ID)
+		hook, gerr := c.GrantSubscriptionCreditsInTx(tx, owner, org.ID)
+		if gerr != nil {
+			return nil, fmt.Errorf("grant subscription credits: %w", gerr)
+		}
+		if hook != nil {
+			hooks = append(hooks, hook)
+		}
 
-		// Grant referral subscription reward (50 credits to both parties) if user was referred
-		// Must be synchronous — if this runs as a goroutine the event is marked processed
-		// before credits are granted, and Stripe won't retry on failure.
+		// Grant referral subscription reward (50 credits to both parties) if user was referred.
+		// Already idempotent via ClaimSubscriptionReward — runs outside the tx.
 		c.GrantReferralSubscriptionReward(owner)
 
 		c.TrackUserEvent(owner, "subscription_created", posthog.NewProperties().
@@ -194,22 +223,22 @@ func (c *Controller) processWebhookEvent(event stripe.Event) error {
 		var sub stripe.Subscription
 		if err := json.Unmarshal(event.Data.Raw, &sub); err != nil {
 			slog.Error("webhook: failed to unmarshal subscription", "error", err, "event_id", event.ID)
-			return nil
+			return nil, nil
 		}
 		slog.Info("subscription updated", "customer_id", sub.Customer.ID, "status", sub.Status)
 
 		org, err := c.DB.GetOrganizationByStripeCustomerID(sub.Customer.ID)
 		if err != nil {
-			return fmt.Errorf("organization not found for stripe customer %s: %w", sub.Customer.ID, err)
+			return nil, fmt.Errorf("organization not found for stripe customer %s: %w", sub.Customer.ID, err)
 		}
 
 		if len(sub.Items.Data) == 0 {
-			return fmt.Errorf("subscription %s has no items", sub.ID)
+			return nil, fmt.Errorf("subscription %s has no items", sub.ID)
 		}
 
 		subs, err := c.DB.GetSubscriptionByPriceID(sub.Items.Data[0].Price.ID)
 		if err != nil {
-			return fmt.Errorf("plan not found for price ID %s: %w", sub.Items.Data[0].Price.ID, err)
+			return nil, fmt.Errorf("plan not found for price ID %s: %w", sub.Items.Data[0].Price.ID, err)
 		}
 
 		// Capture plan change detection BEFORE mutating org.SubscriptionID
@@ -225,7 +254,7 @@ func (c *Controller) processWebhookEvent(event stripe.Event) error {
 		// Load org owner for user-keyed notifications and posthog identity.
 		owner, err := c.DB.GetUserById(org.OwnerID.String())
 		if err != nil {
-			return fmt.Errorf("owner not found for org %s: %w", org.ID, err)
+			return nil, fmt.Errorf("owner not found for org %s: %w", org.ID, err)
 		}
 
 		// Map Stripe status to our internal status
@@ -244,7 +273,7 @@ func (c *Controller) processWebhookEvent(event stripe.Event) error {
 			if !owner.SetupFinished {
 				owner.SetupFinished = true
 				setupJustFinished = true
-				go c.EventService.SendEvent(owner, constants.EVENT_USER_SETUP_FINISHED, map[string]any{})
+				addHook(owner, constants.EVENT_USER_SETUP_FINISHED, map[string]any{})
 			}
 
 		case "trialing":
@@ -274,7 +303,7 @@ func (c *Controller) processWebhookEvent(event stripe.Event) error {
 			org.SubscriptionID = uuid.Nil
 		}
 
-		go c.EventService.SendEvent(owner, constants.EVENT_SUBSCRIPTION_UPDATED, map[string]any{
+		addHook(owner, constants.EVENT_SUBSCRIPTION_UPDATED, map[string]any{
 			"subscription_status": org.SubscriptionStatus,
 			"subscription_id":     org.SubscriptionID.String(),
 			"plan_name":           subs.Name,
@@ -285,7 +314,7 @@ func (c *Controller) processWebhookEvent(event stripe.Event) error {
 			if subs.MonthlyPrice < oldMonthlyPrice {
 				changeEvent = constants.EVENT_SUBSCRIPTION_DOWNGRADED
 			}
-			go c.EventService.SendEvent(owner, changeEvent, map[string]any{
+			addHook(owner, changeEvent, map[string]any{
 				"old_plan_id":       oldSubID.String(),
 				"new_plan_id":       subs.ID.String(),
 				"new_plan_name":     subs.Name,
@@ -295,7 +324,7 @@ func (c *Controller) processWebhookEvent(event stripe.Event) error {
 		}
 
 		if _, err := c.DB.UpdateOrganization(org); err != nil {
-			return fmt.Errorf("failed to update organization %s after subscription change: %w", org.ID, err)
+			return nil, fmt.Errorf("failed to update organization %s after subscription change: %w", org.ID, err)
 		}
 
 		// Persist owner's SetupFinished flag if it was just flipped.
@@ -316,13 +345,13 @@ func (c *Controller) processWebhookEvent(event stripe.Event) error {
 		var invoice stripe.Invoice
 		if err := json.Unmarshal(event.Data.Raw, &invoice); err != nil {
 			slog.Error("webhook: failed to unmarshal invoice", "error", err, "event_id", event.ID)
-			return nil
+			return nil, nil
 		}
 		slog.Info("invoice payment succeeded", "customer_id", invoice.Customer.ID)
 
 		org, err := c.DB.GetOrganizationByStripeCustomerID(invoice.Customer.ID)
 		if err != nil {
-			return fmt.Errorf("organization not found for stripe customer %s: %w", invoice.Customer.ID, err)
+			return nil, fmt.Errorf("organization not found for stripe customer %s: %w", invoice.Customer.ID, err)
 		}
 
 		org.SubscriptionStatus = "active"
@@ -341,22 +370,22 @@ func (c *Controller) processWebhookEvent(event stripe.Event) error {
 		// Load org owner for user-keyed notifications and posthog identity.
 		owner, err := c.DB.GetUserById(org.OwnerID.String())
 		if err != nil {
-			return fmt.Errorf("owner not found for org %s: %w", org.ID, err)
+			return nil, fmt.Errorf("owner not found for org %s: %w", org.ID, err)
 		}
 
 		setupJustFinished := false
 		if !owner.SetupFinished {
 			owner.SetupFinished = true
 			setupJustFinished = true
-			go c.EventService.SendEvent(owner, constants.EVENT_USER_SETUP_FINISHED, map[string]any{})
+			addHook(owner, constants.EVENT_USER_SETUP_FINISHED, map[string]any{})
 		}
 
-		go c.EventService.SendEvent(owner, constants.EVENT_SUBSCRIPTION_UPDATED, map[string]any{
+		addHook(owner, constants.EVENT_SUBSCRIPTION_UPDATED, map[string]any{
 			"subscription_status": org.SubscriptionStatus,
 			"subscription_id":     org.SubscriptionID.String(),
 		})
 
-		go c.EventService.SendEvent(owner, constants.EVENT_PAYMENT_SUCCEEDED, map[string]any{
+		addHook(owner, constants.EVENT_PAYMENT_SUCCEEDED, map[string]any{
 			"amount_paid":    invoice.AmountPaid,
 			"currency":       string(invoice.Currency),
 			"invoice_id":     invoice.ID,
@@ -368,7 +397,7 @@ func (c *Controller) processWebhookEvent(event stripe.Event) error {
 		// Stripe sets BillingReason = "subscription_cycle" on renewal, "subscription_create"
 		// on first charge (which is already covered by customer.subscription.created).
 		if invoice.BillingReason == stripe.InvoiceBillingReasonSubscriptionCycle {
-			go c.EventService.SendEvent(owner, constants.EVENT_SUBSCRIPTION_RENEWED, map[string]any{
+			addHook(owner, constants.EVENT_SUBSCRIPTION_RENEWED, map[string]any{
 				"subscription_id": org.SubscriptionID.String(),
 				"amount_paid":     invoice.AmountPaid,
 				"currency":        string(invoice.Currency),
@@ -377,7 +406,7 @@ func (c *Controller) processWebhookEvent(event stripe.Event) error {
 		}
 
 		if _, err := c.DB.UpdateOrganization(org); err != nil {
-			return fmt.Errorf("failed to update organization %s after payment succeeded: %w", org.ID, err)
+			return nil, fmt.Errorf("failed to update organization %s after payment succeeded: %w", org.ID, err)
 		}
 
 		if setupJustFinished {
@@ -397,19 +426,19 @@ func (c *Controller) processWebhookEvent(event stripe.Event) error {
 		var invoice stripe.Invoice
 		if err := json.Unmarshal(event.Data.Raw, &invoice); err != nil {
 			slog.Error("webhook: failed to unmarshal invoice", "error", err, "event_id", event.ID)
-			return nil
+			return nil, nil
 		}
 		slog.Info("invoice payment failed", "customer_id", invoice.Customer.ID,
 			"attempt_count", invoice.AttemptCount, "next_attempt", invoice.NextPaymentAttempt)
 
 		org, err := c.DB.GetOrganizationByStripeCustomerID(invoice.Customer.ID)
 		if err != nil {
-			return fmt.Errorf("organization not found for stripe customer %s: %w", invoice.Customer.ID, err)
+			return nil, fmt.Errorf("organization not found for stripe customer %s: %w", invoice.Customer.ID, err)
 		}
 
 		owner, err := c.DB.GetUserById(org.OwnerID.String())
 		if err != nil {
-			return fmt.Errorf("owner not found for org %s: %w", org.ID, err)
+			return nil, fmt.Errorf("owner not found for org %s: %w", org.ID, err)
 		}
 
 		// Don't change subscription status here — let customer.subscription.updated
@@ -417,7 +446,7 @@ func (c *Controller) processWebhookEvent(event stripe.Event) error {
 		// event has the authoritative status (past_due on first failure, unpaid after
 		// exhausting retries). Changing status here would be premature.
 
-		go c.EventService.SendEvent(owner, constants.EVENT_PAYMENT_FAILED, map[string]any{
+		addHook(owner, constants.EVENT_PAYMENT_FAILED, map[string]any{
 			"subscription_status": org.SubscriptionStatus,
 			"subscription_id":     org.SubscriptionID.String(),
 			"pay_invoice_url":     invoice.HostedInvoiceURL,
@@ -434,21 +463,21 @@ func (c *Controller) processWebhookEvent(event stripe.Event) error {
 		var invoice stripe.Invoice
 		if err := json.Unmarshal(event.Data.Raw, &invoice); err != nil {
 			slog.Error("webhook: failed to unmarshal invoice", "error", err, "event_id", event.ID)
-			return nil
+			return nil, nil
 		}
 		slog.Info("invoice payment action required", "customer_id", invoice.Customer.ID)
 
 		org, err := c.DB.GetOrganizationByStripeCustomerID(invoice.Customer.ID)
 		if err != nil {
-			return fmt.Errorf("organization not found for stripe customer %s: %w", invoice.Customer.ID, err)
+			return nil, fmt.Errorf("organization not found for stripe customer %s: %w", invoice.Customer.ID, err)
 		}
 
 		owner, err := c.DB.GetUserById(org.OwnerID.String())
 		if err != nil {
-			return fmt.Errorf("owner not found for org %s: %w", org.ID, err)
+			return nil, fmt.Errorf("owner not found for org %s: %w", org.ID, err)
 		}
 
-		go c.EventService.SendEvent(owner, constants.EVENT_PAYMENT_USER_ACTION_REQUIRED, map[string]any{
+		addHook(owner, constants.EVENT_PAYMENT_USER_ACTION_REQUIRED, map[string]any{
 			"subscription_status": org.SubscriptionStatus,
 			"subscription_id":     org.SubscriptionID.String(),
 			"pay_invoice_url":     invoice.HostedInvoiceURL,
@@ -462,22 +491,22 @@ func (c *Controller) processWebhookEvent(event stripe.Event) error {
 		var invoice stripe.Invoice
 		if err := json.Unmarshal(event.Data.Raw, &invoice); err != nil {
 			slog.Error("webhook: failed to unmarshal invoice", "error", err, "event_id", event.ID)
-			return nil
+			return nil, nil
 		}
 		if invoice.Customer == nil {
-			return nil
+			return nil, nil
 		}
 		org, err := c.DB.GetOrganizationByStripeCustomerID(invoice.Customer.ID)
 		if err != nil {
-			return fmt.Errorf("organization not found for stripe customer %s: %w", invoice.Customer.ID, err)
+			return nil, fmt.Errorf("organization not found for stripe customer %s: %w", invoice.Customer.ID, err)
 		}
 
 		owner, err := c.DB.GetUserById(org.OwnerID.String())
 		if err != nil {
-			return fmt.Errorf("owner not found for org %s: %w", org.ID, err)
+			return nil, fmt.Errorf("owner not found for org %s: %w", org.ID, err)
 		}
 
-		go c.EventService.SendEvent(owner, constants.EVENT_INVOICE_UPCOMING, map[string]any{
+		addHook(owner, constants.EVENT_INVOICE_UPCOMING, map[string]any{
 			"amount_due":   invoice.AmountDue,
 			"currency":     string(invoice.Currency),
 			"period_start": invoice.PeriodStart,
@@ -493,27 +522,27 @@ func (c *Controller) processWebhookEvent(event stripe.Event) error {
 		var sub stripe.Subscription
 		if err := json.Unmarshal(event.Data.Raw, &sub); err != nil {
 			slog.Error("webhook: failed to unmarshal subscription", "error", err, "event_id", event.ID)
-			return nil
+			return nil, nil
 		}
 		slog.Info("subscription canceled", "customer_id", sub.Customer.ID)
 
 		org, err := c.DB.GetOrganizationByStripeCustomerID(sub.Customer.ID)
 		if err != nil {
-			return fmt.Errorf("organization not found for stripe customer %s: %w", sub.Customer.ID, err)
+			return nil, fmt.Errorf("organization not found for stripe customer %s: %w", sub.Customer.ID, err)
 		}
 
 		owner, err := c.DB.GetUserById(org.OwnerID.String())
 		if err != nil {
-			return fmt.Errorf("owner not found for org %s: %w", org.ID, err)
+			return nil, fmt.Errorf("owner not found for org %s: %w", org.ID, err)
 		}
 
 		org.SubscriptionStatus = "canceled"
 		org.SubscriptionID = uuid.Nil
 
-		go c.EventService.SendEvent(owner, constants.EVENT_SUBSCRIPTION_CANCELLED, map[string]any{})
+		addHook(owner, constants.EVENT_SUBSCRIPTION_CANCELLED, map[string]any{})
 
 		if _, err := c.DB.UpdateOrganization(org); err != nil {
-			return fmt.Errorf("failed to update organization %s after subscription deleted: %w", org.ID, err)
+			return nil, fmt.Errorf("failed to update organization %s after subscription deleted: %w", org.ID, err)
 		}
 
 		c.TrackUserEvent(owner, "subscription_canceled", posthog.NewProperties().
@@ -524,20 +553,20 @@ func (c *Controller) processWebhookEvent(event stripe.Event) error {
 		var pm stripe.PaymentMethod
 		if err := json.Unmarshal(event.Data.Raw, &pm); err != nil {
 			slog.Error("webhook: failed to unmarshal payment method", "error", err, "event_id", event.ID)
-			return nil
+			return nil, nil
 		}
 
 		org, err := c.DB.GetOrganizationByStripeCustomerID(pm.Customer.ID)
 		if err != nil {
-			return fmt.Errorf("organization not found for stripe customer %s: %w", pm.Customer.ID, err)
+			return nil, fmt.Errorf("organization not found for stripe customer %s: %w", pm.Customer.ID, err)
 		}
 
 		owner, err := c.DB.GetUserById(org.OwnerID.String())
 		if err != nil {
-			return fmt.Errorf("owner not found for org %s: %w", org.ID, err)
+			return nil, fmt.Errorf("owner not found for org %s: %w", org.ID, err)
 		}
 
-		go c.EventService.SendEvent(owner, constants.EVENT_PAYMENT_METHOD_ATTACHED, map[string]any{})
+		addHook(owner, constants.EVENT_PAYMENT_METHOD_ATTACHED, map[string]any{})
 
 		c.TrackUserEvent(owner, "payment_method_attached", posthog.NewProperties().
 			Set("payment_method_type", string(pm.Type)))
@@ -546,20 +575,20 @@ func (c *Controller) processWebhookEvent(event stripe.Event) error {
 		var pm stripe.PaymentMethod
 		if err := json.Unmarshal(event.Data.Raw, &pm); err != nil {
 			slog.Error("webhook: failed to unmarshal payment method", "error", err, "event_id", event.ID)
-			return nil
+			return nil, nil
 		}
 
 		org, err := c.DB.GetOrganizationByStripeCustomerID(pm.Customer.ID)
 		if err != nil {
-			return fmt.Errorf("organization not found for stripe customer %s: %w", pm.Customer.ID, err)
+			return nil, fmt.Errorf("organization not found for stripe customer %s: %w", pm.Customer.ID, err)
 		}
 
 		owner, err := c.DB.GetUserById(org.OwnerID.String())
 		if err != nil {
-			return fmt.Errorf("owner not found for org %s: %w", org.ID, err)
+			return nil, fmt.Errorf("owner not found for org %s: %w", org.ID, err)
 		}
 
-		go c.EventService.SendEvent(owner, constants.EVENT_PAYMENT_METHOD_DETACHED, map[string]any{})
+		addHook(owner, constants.EVENT_PAYMENT_METHOD_DETACHED, map[string]any{})
 
 		c.TrackUserEvent(owner, "payment_method_detached", posthog.NewProperties().
 			Set("payment_method_type", string(pm.Type)))
@@ -568,7 +597,7 @@ func (c *Controller) processWebhookEvent(event stripe.Event) error {
 		var cs stripe.CheckoutSession
 		if err := json.Unmarshal(event.Data.Raw, &cs); err != nil {
 			slog.Error("webhook: failed to unmarshal checkout session", "error", err, "event_id", event.ID)
-			return nil
+			return nil, nil
 		}
 
 		// Only handle credit purchase sessions (identified by metadata)
@@ -580,32 +609,38 @@ func (c *Controller) processWebhookEvent(event stripe.Event) error {
 		packSizeStr := cs.Metadata["pack_size"]
 		if userID == "" || packSizeStr == "" {
 			slog.Error("webhook: credit purchase missing metadata", "event_id", event.ID, "metadata", cs.Metadata)
-			return nil
+			return nil, nil
 		}
 
 		packSize, err := strconv.Atoi(packSizeStr)
 		if err != nil || packSize <= 0 {
 			slog.Error("webhook: invalid pack_size in metadata", "pack_size", packSizeStr, "event_id", event.ID)
-			return nil
+			return nil, nil
 		}
 
 		user, err := c.DB.GetUserById(userID)
 		if err != nil {
-			return fmt.Errorf("user %s not found for credit purchase: %w", userID, err)
+			return nil, fmt.Errorf("user %s not found for credit purchase: %w", userID, err)
 		}
 
 		// Credit purchases are tied to the buyer's personal org (Plan A).
 		personalOrg, orgErr := c.EnsurePersonalOrg(user)
 		if orgErr != nil {
-			return fmt.Errorf("failed to ensure personal org for credit purchase: %w", orgErr)
+			return nil, fmt.Errorf("failed to ensure personal org for credit purchase: %w", orgErr)
 		}
-		if err := c.AddAICredits(user, personalOrg.ID, packSize, "purchase", cs.ID); err != nil {
-			return fmt.Errorf("failed to add %d credits for user %s: %w", packSize, userID, err)
+		// Resolve balance outside the tx (period-reset logic can't share an
+		// outer tx), then do the money-write inside the dedup tx.
+		balance, err := c.GetOrCreateCreditsBalance(user, personalOrg.ID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get credits balance for user %s: %w", userID, err)
+		}
+		if err := c.AddAICreditsInTx(tx, user, personalOrg.ID, balance.ID, packSize, "purchase", cs.ID); err != nil {
+			return nil, fmt.Errorf("failed to add %d credits for user %s: %w", packSize, userID, err)
 		}
 
 		slog.Info("credits purchased", "user_id", userID, "pack_size", packSize, "session_id", cs.ID)
 
-		go c.EventService.SendEvent(user, constants.EVENT_CREDITS_PURCHASED, map[string]any{
+		addHook(user, constants.EVENT_CREDITS_PURCHASED, map[string]any{
 			"pack_size":    packSize,
 			"session_id":   cs.ID,
 			"amount_total": cs.AmountTotal,
@@ -624,27 +659,27 @@ func (c *Controller) processWebhookEvent(event stripe.Event) error {
 		var unmarshalledData map[string]any
 		if err := json.Unmarshal(event.Data.Raw, &unmarshalledData); err != nil {
 			slog.Error("webhook: failed to unmarshal unhandled event data", "error", err, "event_id", event.ID)
-			return nil
+			return hooks, nil
 		}
 
 		customerID, ok := unmarshalledData["customer"].(string)
 		if ok && customerID != "" {
 			if org, err := c.DB.GetOrganizationByStripeCustomerID(customerID); err == nil {
 				if owner, err := c.DB.GetUserById(org.OwnerID.String()); err == nil {
-					go c.EventService.SendEvent(owner, constants.EVENT_UNHANDLED_EVENT, map[string]any{
+					addHook(owner, constants.EVENT_UNHANDLED_EVENT, map[string]any{
 						"from":       "stripe-webhook",
 						"event_type": event.Type,
 					})
-					return nil
+					return hooks, nil
 				}
 			}
 		}
 
-		go c.EventService.SendEvent(&models.User{}, constants.EVENT_UNHANDLED_EVENT, map[string]any{
+		addHook(&models.User{}, constants.EVENT_UNHANDLED_EVENT, map[string]any{
 			"from":       "stripe-webhook",
 			"event_type": event.Type,
 		})
 	}
 
-	return nil
+	return hooks, nil
 }

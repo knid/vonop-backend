@@ -649,12 +649,10 @@ func (c *Controller) AddAICredits(user *models.User, orgID uuid.UUID, amount int
 	}
 
 	return c.DB.RunInTx(func(tx bun.Tx) error {
-		_, err := c.DB.AtomicAddCredits(tx, balance.ID.String(), amount)
-		if err != nil {
+		if _, err := c.DB.AtomicAddCredits(tx, balance.ID.String(), amount); err != nil {
 			return err
 		}
-
-		_, err = c.DB.CreateAICreditTransactionTx(tx, &models.AICreditTransaction{
+		_, err := c.DB.CreateAICreditTransactionTx(tx, &models.AICreditTransaction{
 			OrganizationID: orgID,
 			UserID:         user.ID,
 			Amount:         amount,
@@ -665,37 +663,115 @@ func (c *Controller) AddAICredits(user *models.User, orgID uuid.UUID, amount int
 	})
 }
 
+// AddAICreditsInTx is a tx-aware variant of AddAICredits for retryable callers
+// that need their money-write to share an outer transaction with other writes
+// (e.g. the Stripe webhook dedup row + the credit grant must commit atomically).
+//
+// Idempotent on (action, reference) when reference is non-empty: if a credit
+// transaction with the same action+reference already exists, the call is a
+// no-op. The caller must resolve the credits balance via GetOrCreateCreditsBalance
+// before opening the tx — balance creation involves period-reset logic that
+// can't easily share an outer tx.
+func (c *Controller) AddAICreditsInTx(tx bun.Tx, user *models.User, orgID uuid.UUID, balanceID uuid.UUID, amount int, action string, reference string) error {
+	if reference != "" {
+		exists, err := c.DB.HasAICreditTransactionByRefTx(tx, action, reference)
+		if err != nil {
+			return err
+		}
+		if exists {
+			return nil
+		}
+	}
+
+	if _, err := c.DB.AtomicAddCredits(tx, balanceID.String(), amount); err != nil {
+		return err
+	}
+
+	_, err := c.DB.CreateAICreditTransactionTx(tx, &models.AICreditTransaction{
+		OrganizationID: orgID,
+		UserID:         user.ID,
+		Amount:         amount,
+		Action:         action,
+		Reference:      reference,
+	})
+	return err
+}
+
 // GrantSubscriptionCredits grants the plan's monthly credits when a user first subscribes.
 // If a credits balance already exists (created before subscribing), it resets the period
 // to align with the new subscription and adds the plan's monthly credits.
 // Safe to call multiple times — uses a transaction with FOR UPDATE to prevent double grants.
 func (c *Controller) GrantSubscriptionCredits(user *models.User, orgID uuid.UUID) {
+	granted, credits, subRef, _ := c.grantSubscriptionCreditsCore(nil, user, orgID)
+	if !granted {
+		return
+	}
+	go c.EventService.SendEvent(user, constants.EVENT_CREDITS_GRANTED, map[string]any{
+		"credits":    credits,
+		"grant_type": "subscription",
+		"reference":  subRef,
+	})
+}
+
+// GrantSubscriptionCreditsInTx is a tx-aware variant of GrantSubscriptionCredits
+// for the Stripe webhook dedup path, where the grant must commit atomically
+// with the webhook_events insert. Returns (post-commit hook, error). If err is
+// non-nil the outer tx must be rolled back; if hook is nil the grant was a
+// no-op (already granted) but the tx is still valid to commit.
+func (c *Controller) GrantSubscriptionCreditsInTx(tx bun.Tx, user *models.User, orgID uuid.UUID) (func(), error) {
+	granted, credits, subRef, err := c.grantSubscriptionCreditsCore(&tx, user, orgID)
+	if err != nil {
+		return nil, err
+	}
+	if !granted {
+		return nil, nil
+	}
+	return func() {
+		c.EventService.SendEvent(user, constants.EVENT_CREDITS_GRANTED, map[string]any{
+			"credits":    credits,
+			"grant_type": "subscription",
+			"reference":  subRef,
+		})
+	}, nil
+}
+
+// grantSubscriptionCreditsCore does the actual grant work, optionally inside an
+// outer tx. Returns (granted, credits, subscriptionID, err). When outerTx is
+// non-nil, errors propagate so the caller can roll back; granted=false with
+// err=nil means the grant was a legitimate no-op (already granted, no plan).
+func (c *Controller) grantSubscriptionCreditsCore(outerTx *bun.Tx, user *models.User, orgID uuid.UUID) (bool, int, string, error) {
 	limits, err := c.GetUserLimits(user)
 	if err != nil || limits.MonthlyAICredits <= 0 {
-		return
+		return false, 0, "", nil
 	}
 
 	// Subscription state (start, ID) lives on the organization (Plan 5).
 	org, err := c.DB.GetOrganizationByID(orgID.String())
 	if err != nil {
 		slog.Error("failed to load organization for subscription grant", "error", err, "user_id", user.ID, "org_id", orgID)
-		return
+		if outerTx != nil {
+			return false, 0, "", fmt.Errorf("load organization for subscription grant: %w", err)
+		}
+		return false, 0, "", nil
 	}
 
 	balance, err := c.GetOrCreateCreditsBalance(user, orgID)
 	if err != nil {
 		slog.Error("failed to get/create credits balance for subscription grant", "error", err, "user_id", user.ID, "org_id", orgID)
-		return
+		if outerTx != nil {
+			return false, 0, "", fmt.Errorf("get/create credits balance for subscription grant: %w", err)
+		}
+		return false, 0, "", nil
 	}
 
-	err = c.DB.RunInTx(func(tx bun.Tx) error {
+	work := func(tx bun.Tx) (bool, error) {
 		// Lock the balance row to serialize concurrent grant attempts
 		var locked models.AICreditsBalance
 		if err := tx.NewRaw(
 			"SELECT * FROM ai_credits_balances WHERE id = ? FOR UPDATE",
 			balance.ID,
 		).Scan(context.Background(), &locked); err != nil {
-			return fmt.Errorf("lock balance: %w", err)
+			return false, fmt.Errorf("lock balance: %w", err)
 		}
 
 		// Check for existing subscription_grant inside the transaction (scoped to this org)
@@ -704,10 +780,10 @@ func (c *Controller) GrantSubscriptionCredits(user *models.User, orgID uuid.UUID
 			"SELECT COUNT(*) FROM ai_credit_transactions WHERE organization_id = ? AND action = 'subscription_grant'",
 			orgID,
 		).Scan(context.Background(), &count); err != nil {
-			return fmt.Errorf("check existing grant: %w", err)
+			return false, fmt.Errorf("check existing grant: %w", err)
 		}
 		if count > 0 {
-			return nil // already granted
+			return false, nil // already granted
 		}
 
 		// Reset period to align with the new subscription start and grant credits
@@ -716,7 +792,7 @@ func (c *Controller) GrantSubscriptionCredits(user *models.User, orgID uuid.UUID
 			"UPDATE ai_credits_balances SET balance = balance + ?, period_start = ?, period_end = ?, updated_at = NOW() WHERE id = ?",
 			limits.MonthlyAICredits, periodStart, periodEnd, balance.ID,
 		).Exec(context.Background()); err != nil {
-			return fmt.Errorf("update balance: %w", err)
+			return false, fmt.Errorf("update balance: %w", err)
 		}
 
 		if _, err := c.DB.CreateAICreditTransactionTx(tx, &models.AICreditTransaction{
@@ -726,23 +802,37 @@ func (c *Controller) GrantSubscriptionCredits(user *models.User, orgID uuid.UUID
 			Action:         "subscription_grant",
 			Reference:      org.SubscriptionID.String(),
 		}); err != nil {
-			return fmt.Errorf("log grant: %w", err)
+			return false, fmt.Errorf("log grant: %w", err)
 		}
 
-		return nil
-	})
-	if err != nil {
-		slog.Error("failed to grant subscription credits", "error", err, "user_id", user.ID, "org_id", orgID)
-		return
+		return true, nil
 	}
 
-	slog.Info("subscription credits granted", "user_id", user.ID, "credits", limits.MonthlyAICredits)
+	var granted bool
+	if outerTx != nil {
+		var werr error
+		granted, werr = work(*outerTx)
+		if werr != nil {
+			slog.Error("failed to grant subscription credits", "error", werr, "user_id", user.ID, "org_id", orgID)
+			return false, 0, "", werr
+		}
+	} else {
+		txErr := c.DB.RunInTx(func(tx bun.Tx) error {
+			var werr error
+			granted, werr = work(tx)
+			return werr
+		})
+		if txErr != nil {
+			slog.Error("failed to grant subscription credits", "error", txErr, "user_id", user.ID, "org_id", orgID)
+			return false, 0, "", nil
+		}
+	}
 
-	go c.EventService.SendEvent(user, constants.EVENT_CREDITS_GRANTED, map[string]any{
-		"credits":    limits.MonthlyAICredits,
-		"grant_type": "subscription",
-		"reference":  org.SubscriptionID.String(),
-	})
+	if !granted {
+		return false, 0, "", nil
+	}
+	slog.Info("subscription credits granted", "user_id", user.ID, "credits", limits.MonthlyAICredits)
+	return true, limits.MonthlyAICredits, org.SubscriptionID.String(), nil
 }
 
 // messagesToPostHogInput converts []utils.Message to the format PostHog expects
