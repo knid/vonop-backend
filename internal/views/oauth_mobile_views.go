@@ -21,19 +21,25 @@ func (v *HttpViews) GoogleMobileLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	loginRes, err := v.Controller.GoogleMobileLogin(req)
+	loginRes, err := v.Controller.GoogleMobileLogin(r.Context(), req)
 	if err != nil {
 		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
 
 	go func() {
-		if u, lookupErr := v.Controller.DB.GetUserByEmail(req.Email); lookupErr == nil {
-			v.Controller.EnsureIdentified(u)
-			v.Controller.TrackUserEvent(u, "user_oauth_logged_in", posthog.NewProperties().
-				Set("provider", "google_mobile").
-				Set("subscription_status", u.SubscriptionStatus))
+		token, tokErr := v.Controller.DB.GetTokenByToken(loginRes.Token)
+		if tokErr != nil {
+			return
 		}
+		u, userErr := v.Controller.DB.GetUserById(token.UserID.String())
+		if userErr != nil {
+			return
+		}
+		v.Controller.EnsureIdentified(u)
+		v.Controller.TrackUserEvent(u, "user_oauth_logged_in", posthog.NewProperties().
+			Set("provider", "google_mobile").
+			Set("subscription_status", u.SubscriptionStatus))
 	}()
 
 	utils.JSONResponse(w, loginRes, http.StatusOK)

@@ -1,12 +1,11 @@
 package controllers
 
 import (
+	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
-	"net/http"
 	"time"
 
 	"github.com/knid/wemob/internal/constants"
@@ -16,29 +15,32 @@ import (
 	"github.com/knid/wemob/internal/utils"
 	"github.com/stripe/stripe-go/v82"
 	"github.com/stripe/stripe-go/v82/customer"
+	"google.golang.org/api/idtoken"
 )
 
-func (c *Controller) GoogleMobileLogin(req requests.GoogleMobileLoginRequest) (*responses.UserLoginResponse, error) {
-	resp, err := http.Get("https://oauth2.googleapis.com/tokeninfo?id_token=" + req.IDToken)
-	if err != nil || resp.StatusCode != 200 {
+func (c *Controller) GoogleMobileLogin(ctx context.Context, req requests.GoogleMobileLoginRequest) (*responses.UserLoginResponse, error) {
+	expectedAudience := c.SecretManager.GetSecret("GOOGLE_MOBILE_CLIENT_ID")
+	if expectedAudience == "" {
+		// Fail loud rather than silently accept tokens with unchecked aud.
+		panic("GOOGLE_MOBILE_CLIENT_ID secret is not set; mobile Google login cannot validate id_token audience")
+	}
+
+	// idtoken.Validate verifies aud + iss + signature + exp in one call;
+	// the previous tokeninfo endpoint did none of these.
+	payload, err := idtoken.Validate(ctx, req.IDToken, expectedAudience)
+	if err != nil {
 		return nil, fmt.Errorf("invalid Google token")
 	}
-	defer resp.Body.Close()
 
-	var tokenInfo struct {
-		Email         string `json:"email"`
-		EmailVerified string `json:"email_verified"`
-		Sub           string `json:"sub"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&tokenInfo); err != nil {
-		return nil, fmt.Errorf("failed to verify Google token")
-	}
-
-	if tokenInfo.Email == "" || tokenInfo.EmailVerified != "true" {
+	emailVal, _ := payload.Claims["email"].(string)
+	emailVerified, _ := payload.Claims["email_verified"].(bool)
+	if emailVal == "" || !emailVerified {
 		return nil, fmt.Errorf("invalid Google token: email not verified")
 	}
 
-	email := tokenInfo.Email
+	email := emailVal
+	name, _ := payload.Claims["name"].(string)
+	picture, _ := payload.Claims["picture"].(string)
 
 	isNewUser := false
 	user, err := c.DB.GetUserByEmail(email)
@@ -48,9 +50,9 @@ func (c *Controller) GoogleMobileLogin(req requests.GoogleMobileLoginRequest) (*
 			pass, _ := utils.RandomHex(32)
 			hashedPass, _ := utils.HashPassword(pass)
 			newUser := models.User{
-				Name:     req.Name,
+				Name:     name,
 				Email:    email,
-				Photo:    req.Photo,
+				Photo:    picture,
 				Password: hashedPass,
 				Provider: "Google",
 				Verified: true,
