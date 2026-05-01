@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -116,6 +117,11 @@ func (c *Controller) ConsumePasswordReset(req requests.UserResetPasswordRequest)
 	user.UpdatedAt = time.Now()
 	if _, err := c.DB.UpdateUser(user); err != nil {
 		return fmt.Errorf("failed to update password: %w", err)
+	}
+
+	// Revoke active sessions; stolen tokens shouldn't survive a password change.
+	if err := c.DB.DeleteTokensByUser(context.Background(), user.ID); err != nil {
+		slog.Warn("failed to revoke sessions after password reset", "error", err, "user_id", user.ID)
 	}
 
 	if err := c.DB.ConsumeUserActionToken(token); err != nil {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/models"
 )
 
@@ -47,6 +48,14 @@ func (db *Database) GetTokenByToken(tokenStr string) (*models.Token, error) {
 func (db *Database) CreateToken(token *models.Token) (*models.Token, error) {
 	_, err := db.DB.NewInsert().Model(token).Exec(context.Background())
 	return token, err
+}
+
+func (db *Database) DeleteTokensByUser(ctx context.Context, userID uuid.UUID) error {
+	_, err := db.DB.NewDelete().
+		Model((*models.Token)(nil)).
+		Where("user_id = ?", userID).
+		Exec(ctx)
+	return err
 }
 
 func (db *Database) DeleteExpiredTokens() (int64, error) {

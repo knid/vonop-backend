@@ -130,6 +130,10 @@ func (c *Controller) UpdateUser(user *models.User, userUpdateReq requests.UserUp
 
 	if user.Email != userUpdateReq.Email {
 		user.Verified = false
+		// Revoke active sessions; stolen tokens shouldn't survive an email change.
+		if err := c.DB.DeleteTokensByUser(context.Background(), user.ID); err != nil {
+			slog.Warn("failed to revoke sessions after email change", "error", err, "user_id", user.ID)
+		}
 	}
 
 	updatedUser, err := c.DB.UpdateUser(user)
