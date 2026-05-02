@@ -4,9 +4,9 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/requests"
-	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/utils"
 )
 
@@ -49,34 +49,17 @@ func (v *HttpViews) ListAPIKeys(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var orgIDPtr *uuid.UUID
 	if rawOrgID := r.URL.Query().Get("org_id"); rawOrgID != "" {
-		orgID, oErr := v.Controller.RequireOrgMembership(user, rawOrgID)
-		if oErr != nil {
-			utils.JSONErrorCode(w, constants.ErrForbidden, http.StatusForbidden, nil)
+		parsed, pErr := uuid.Parse(rawOrgID)
+		if pErr != nil {
+			utils.JSONErrorCode(w, constants.ErrValidationRequired, http.StatusBadRequest, map[string]any{"field": "org_id"})
 			return
 		}
-		keys, dErr := v.Controller.DB.GetAPIKeysByOrgID(orgID.String())
-		if dErr != nil {
-			utils.JSONInternalError(w, dErr)
-			return
-		}
-		var resp []responses.APIKeyResponse
-		for _, k := range keys {
-			resp = append(resp, responses.APIKeyResponse{
-				ID:        k.ID,
-				Name:      k.Name,
-				KeyPrefix: k.KeyPrefix,
-				Scopes:    k.Scopes,
-				LastUsed:  k.LastUsed,
-				ExpiresAt: k.ExpiresAt,
-				CreatedAt: k.CreatedAt,
-			})
-		}
-		utils.JSONResponse(w, resp, http.StatusOK)
-		return
+		orgIDPtr = &parsed
 	}
 
-	result, err := v.Controller.ListAPIKeys(user)
+	result, err := v.Controller.ListAPIKeys(user, orgIDPtr)
 	if err != nil {
 		utils.JSONInternalError(w, err)
 		return

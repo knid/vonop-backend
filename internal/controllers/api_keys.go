@@ -71,8 +71,31 @@ func (c *Controller) CreateAPIKey(user *models.User, orgID uuid.UUID, req reques
 	}, nil
 }
 
-func (c *Controller) ListAPIKeys(user *models.User) ([]responses.APIKeyResponse, error) {
-	keys, err := c.DB.GetAPIKeysByUserID(user.ID.String())
+func (c *Controller) ListAPIKeys(user *models.User, reqOrgID *uuid.UUID) ([]responses.APIKeyResponse, error) {
+	var orgID uuid.UUID
+	if reqOrgID != nil && *reqOrgID != uuid.Nil {
+		orgID = *reqOrgID
+	} else {
+		personal, err := c.EnsurePersonalOrg(user)
+		if err != nil {
+			return nil, err
+		}
+		orgID = personal.ID
+	}
+
+	member, err := c.DB.GetOrganizationMember(orgID.String(), user.ID.String())
+	if err != nil {
+		return nil, errors.New("organization not found or access denied")
+	}
+
+	// Admins/owners see every key in the org; members see only their own so
+	// keys minted by other org members aren't exposed.
+	var keys []models.APIKey
+	if member.Role == "owner" || member.Role == "admin" {
+		keys, err = c.DB.GetAPIKeysByOrgID(orgID.String())
+	} else {
+		keys, err = c.DB.GetAPIKeysByUserAndOrgID(user.ID.String(), orgID.String())
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -97,7 +120,11 @@ func (c *Controller) DeleteAPIKey(user *models.User, keyID string) error {
 	if err != nil {
 		return errors.New("API key not found")
 	}
-	if key.UserID != user.ID {
+	member, err := c.DB.GetOrganizationMember(key.OrganizationID.String(), user.ID.String())
+	if err != nil {
+		return errors.New("API key not found")
+	}
+	if member.Role != "owner" && member.Role != "admin" && key.UserID != user.ID {
 		return errors.New("API key not found")
 	}
 	return c.DB.DeleteAPIKey(key)
