@@ -11,7 +11,7 @@ import (
 
 // BuildSystemMessages returns the cached system messages for a run:
 //
-//  1. Base prompt          (BasePromptWeb or BasePromptMobile, stable across all projects of this type)
+//  1. Base prompt          (BasePromptWeb, BasePromptMobile, or BasePromptMobileNative — by project type)
 //  2. Variant addendum     (stable across this project's runs, if applicable)
 //  3. File tree            (stable within this run, reused across turns)
 //  4. Project assets       (per-turn — asset uploads/deletes invalidate this block only)
@@ -24,8 +24,13 @@ import (
 // to a conservative generic block.
 func BuildSystemMessages(project *models.AppProject, fileMap *SafeFileMap, deps *RunDependencies, attachmentsPool []models.AppAsset) []utils.Message {
 	base := BasePromptWeb
-	if project != nil && project.ProjectType == "mobile_app" {
-		base = BasePromptMobile
+	if project != nil {
+		switch project.ProjectType {
+		case models.ProjectTypeMobileAppNative:
+			base = BasePromptMobileNative
+		case models.ProjectTypeMobileAppLegacy:
+			base = BasePromptMobile
+		}
 	}
 	addendum := buildAddendum(project, deps)
 
@@ -83,6 +88,9 @@ func projectHasAI(project *models.AppProject) bool {
 // buildFileTreeBlock produces a deterministic "FILE TREE" listing sorted
 // by path so cache keys remain stable across runs with identical file sets.
 func buildFileTreeBlock(fileMap *SafeFileMap) string {
+	if fileMap == nil {
+		return "FILE TREE\n=========\n\n(empty — this is a new project, start by creating files)\n"
+	}
 	files := fileMap.Snapshot()
 	paths := make([]string, 0, len(files))
 	for p := range files {
