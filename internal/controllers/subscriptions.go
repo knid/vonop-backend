@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/services/remoteconfig"
@@ -109,13 +110,18 @@ func (c *Controller) GetSubscription(user *models.User) (*responses.UserSubscrip
 
 }
 
-func (c *Controller) UpdateSubscription(user *models.User, subscriptionId string) error {
+func (c *Controller) UpdateSubscription(user *models.User, orgID *uuid.UUID, subscriptionId string) error {
 	subs, err := c.DB.GetSubscriptionById(subscriptionId)
 	if err != nil {
 		return err
 	}
 
-	org, err := c.DB.GetPersonalOrgByUserID(user.ID.String())
+	resolvedOrgID, err := c.RequireOrgIDForUser(user, orgID)
+	if err != nil {
+		return err
+	}
+
+	org, err := c.DB.GetOrganizationByID(resolvedOrgID.String())
 	if err != nil {
 		return err
 	}
@@ -128,8 +134,13 @@ func (c *Controller) UpdateSubscription(user *models.User, subscriptionId string
 	return nil
 }
 
-func (c *Controller) CancelSubscription(user *models.User) error {
-	org, err := c.DB.GetPersonalOrgByUserID(user.ID.String())
+func (c *Controller) CancelSubscription(user *models.User, orgID *uuid.UUID) error {
+	resolvedOrgID, err := c.RequireOrgIDForUser(user, orgID)
+	if err != nil {
+		return err
+	}
+
+	org, err := c.DB.GetOrganizationByID(resolvedOrgID.String())
 	if err != nil {
 		return err
 	}
@@ -139,14 +150,17 @@ func (c *Controller) CancelSubscription(user *models.User) error {
 		return err
 	}
 
-	// Mark the user's personal org as canceled (Plan 5 — billing on org).
 	org.SubscriptionStatus = "canceled"
 	if _, err := c.DB.UpdateOrganization(org); err != nil {
 		slog.Error("failed to mark org subscription canceled", "error", err, "org_id", org.ID)
 	}
 
 	// Legacy dual-write to user (cleanup later).
-	user.SubscriptionStatus = "canceled"
-	_, err = c.DB.UpdateUser(user)
-	return err
+	if org.IsPersonal {
+		user.SubscriptionStatus = "canceled"
+		if _, err := c.DB.UpdateUser(user); err != nil {
+			return err
+		}
+	}
+	return nil
 }

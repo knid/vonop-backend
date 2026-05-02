@@ -2,10 +2,13 @@ package views
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 
 	"github.com/knid/wemob/internal/constants"
+	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/utils"
 )
@@ -90,8 +93,24 @@ func (v *HttpViews) CancelSubscription(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = v.Controller.CancelSubscription(user)
-	if err != nil {
+	var req requests.UserSubscriptionCancelRequest
+	if body, _ := io.ReadAll(r.Body); len(body) > 0 {
+		if jerr := json.Unmarshal(body, &req); jerr != nil {
+			utils.JSONErrorCode(w, constants.ErrValidationBody, http.StatusBadRequest, nil)
+			return
+		}
+	}
+
+	if err := v.Controller.CancelSubscription(user, req.OrganizationID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
+			return
+		}
+		msg := err.Error()
+		if msg == "organization not found or access denied" || msg == "insufficient permissions to create project in this organization" {
+			utils.JSONErrorCode(w, constants.ErrForbidden, http.StatusForbidden, nil)
+			return
+		}
 		utils.JSONInternalError(w, err)
 		return
 	}
