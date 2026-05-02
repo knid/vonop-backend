@@ -673,10 +673,20 @@ func convertHistory(history []models.AppChatMessage) []utils.Message {
 		// only apply to the turn they were typed on.
 		if m.Role == "user" {
 			content, _, _ = ExpandSlashCommand(content)
+			content = "<user_message>" + escapeUntrustedTag(content, "user_message") + "</user_message>"
 		}
 		out = append(out, utils.Message{Role: m.Role, Content: content})
 	}
 	return out
+}
+
+// escapeUntrustedTag replaces literal closing-tag substrings inside untrusted
+// content so the user can't break out of the wrapping delimiters. The LLM sees
+// the escaped form (e.g. &lt;/user_message&gt;) as inert text.
+func escapeUntrustedTag(content, tag string) string {
+	closing := "</" + tag + ">"
+	escaped := "&lt;/" + tag + "&gt;"
+	return strings.ReplaceAll(content, closing, escaped)
 }
 
 func finaliseSuccess(

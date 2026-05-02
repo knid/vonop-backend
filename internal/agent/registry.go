@@ -104,7 +104,15 @@ func (r *Registry) Execute(ctx context.Context, rc *RunContext, name string, inp
 	if !ok {
 		return fmt.Sprintf("unknown tool: %s", name), true, nil
 	}
-	return t.Execute(ctx, rc, input)
+	result, isErr, err := t.Execute(ctx, rc, input)
+	// read_attachment wraps its body in <attachment> itself (with filename/mime
+	// metadata); everything else gets the generic <tool_output> wrap. Both are
+	// defense-in-depth boundaries the system prompt teaches the model to treat
+	// as untrusted data.
+	if name != "read_attachment" {
+		result = "<tool_output tool=\"" + name + "\">" + escapeUntrustedTag(result, "tool_output") + "</tool_output>"
+	}
+	return result, isErr, err
 }
 
 // BuildRegistryFor returns a registry populated with the base tools plus any
