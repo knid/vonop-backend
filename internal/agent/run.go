@@ -962,20 +962,25 @@ func finaliseFailureV2(
 		Code:    code,
 	})
 
-	// 4. Persist "sorry" assistant message so the chat UI isn't orphaned.
-	orphanText := "Sorry, that turn failed — your files are unchanged. Please try again."
-	orphanParts, _ := json.Marshal([]models.ChatMessagePart{
-		{Type: "text", Text: orphanText},
+	// 4. Persist failure marker message so the chat UI isn't orphaned. The
+	// frontend renders a rich error card off ErrorKind; Content is a still-
+	// readable fallback so old clients during a rolling deploy don't show
+	// empty bubbles.
+	errorKind := classifyErrorKind(code, wrapped)
+	fallbackText := "Generation failed."
+	fallbackParts, _ := json.Marshal([]models.ChatMessagePart{
+		{Type: "text", Text: fallbackText},
 	})
 	orphanMsg := &models.AppChatMessage{
 		AppProjectID: run.AppProjectID,
 		RunID:        &run.ID,
 		Role:         "assistant",
-		Content:      orphanText,
+		Content:      fallbackText,
 		Images:       []byte("[]"),
 		Attachments:  []byte("[]"),
 		ToolCalls:    []byte("[]"),
-		Parts:        orphanParts,
+		Parts:        fallbackParts,
+		ErrorKind:    errorKind,
 	}
 	if _, err := deps.DB.InsertChatMessage(orphanMsg); err != nil {
 		slog.Warn("failed to persist failure message", "error", err, "run_id", run.ID)
@@ -1149,4 +1154,29 @@ func classifyCtxErr(err error) (ErrorCode, string) {
 		return CodeBudgetExceeded, fmt.Sprintf("run exceeded the %d-minute time limit — try a smaller change", defaultMaxWallclockMs/60000)
 	}
 	return CodeCanceled, "run was canceled"
+}
+
+// classifyErrorKind maps an agent ErrorCode + the wrapped underlying error to
+// the short string persisted on AppChatMessage.ErrorKind. The frontend uses
+// this to render the same rich error card from history that it shows live.
+func classifyErrorKind(code ErrorCode, wrapped error) string {
+	switch code {
+	case CodeCreditsExhausted:
+		return "credit_out"
+	case CodeRateLimited:
+		return "rate_limit"
+	case CodeProviderError:
+		return "provider_error"
+	case CodeBudgetExceeded:
+		return "timeout"
+	case CodeCanceled:
+		if wrapped != nil && errors.Is(wrapped, context.Canceled) {
+			return "context_canceled"
+		}
+		return "context_canceled"
+	case CodeInternal, CodeGitError, CodeToolFailed,
+		CodeTruncated, CodeRepetitionLoop, CodeRunInProgress:
+		return "internal"
+	}
+	return "unknown"
 }

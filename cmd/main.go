@@ -359,6 +359,10 @@ func createSchema(db *bun.DB) error {
 		// extension. Default false flips to true row-by-row as the backfill
 		// encrypts each AppIntegration.
 		`ALTER TABLE app_integrations ADD COLUMN IF NOT EXISTS credentials_encrypted_v1 boolean NOT NULL DEFAULT false`,
+		// Structured failure classification for assistant turns. Empty on
+		// success; otherwise one of the agent ErrorKind enum values used to
+		// render the rich error card from history. See finaliseFailureV2.
+		`ALTER TABLE app_chat_messages ADD COLUMN IF NOT EXISTS error_kind text NOT NULL DEFAULT ''`,
 	}
 
 	// Deduplicate before creating unique indexes (keep the latest row per group)
@@ -397,7 +401,7 @@ func createSchema(db *bun.DB) error {
 	// Table renames go in renameStatements below, not here — they run unconditionally.
 	var migrationsDone bool
 	row := db.QueryRowContext(context.Background(),
-		"SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='app_integrations' AND column_name='credentials_encrypted_v1')")
+		"SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='app_chat_messages' AND column_name='error_kind')")
 	if err := row.Scan(&migrationsDone); err != nil {
 		migrationsDone = false
 	}

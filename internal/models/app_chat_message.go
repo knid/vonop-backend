@@ -34,6 +34,11 @@ type AppChatMessage struct {
 	Attachments  json.RawMessage `bun:",type:jsonb,notnull,default:'[]'" json:"attachments"` // []ChatMessageAttachment
 	ToolCalls    json.RawMessage `bun:",type:jsonb,notnull,default:'[]'" json:"tool_calls"` // []ChatMessageToolCall — derived from Parts, kept for legacy readers
 	Parts        json.RawMessage `bun:",type:jsonb,notnull,default:'[]'" json:"parts"`      // []ChatMessagePart — chronological ordered record (canonical)
+	// ErrorKind classifies a failed assistant turn so the frontend can render
+	// the same rich error card from history that it shows live. Empty on
+	// successful turns; one of "credit_out" | "timeout" | "provider_error" |
+	// "rate_limit" | "context_canceled" | "internal" | "unknown" otherwise.
+	ErrorKind    string          `bun:"error_kind,nullzero" json:"error_kind,omitempty"`
 	CreatedAt    time.Time       `bun:"created_at,nullzero,notnull,default:current_timestamp" json:"created_at"`
 }
 
