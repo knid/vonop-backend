@@ -70,9 +70,12 @@ var milestoneEvents = map[string]bool{
 	"turn_end":         true,
 }
 
-// CreateJob creates a new generation job, enforcing a per-user concurrency limit.
-// For generate_app jobs, only one may run at a time to prevent double-submission.
-// appID is optional — pass uuid.Nil for jobs that aren't scoped to an app.
+// CreateJob creates a new generation job, enforcing both a per-user and a
+// per-org concurrency limit. The per-user limit prevents one member from
+// saturating the org's slots; the per-org limit prevents an N-member org from
+// holding N× the concurrency it pays for. For generate_app jobs, only one may
+// run at a time to prevent double-submission. appID is optional — pass
+// uuid.Nil for jobs that aren't scoped to an app.
 func (c *Controller) CreateJob(userID uuid.UUID, jobType string, appID uuid.UUID) (*models.GenerationJob, error) {
 	running, err := c.DB.GetUserRunningJobs(userID.String())
 	if err != nil {
@@ -81,6 +84,23 @@ func (c *Controller) CreateJob(userID uuid.UUID, jobType string, appID uuid.UUID
 	maxJobs := c.RemoteConfig.GetInt(remoteconfig.MaxConcurrentJobsPerUser, userID.String())
 	if running >= maxJobs {
 		return nil, fmt.Errorf("%w: maximum %d concurrent jobs allowed", ErrConcurrentJobLimit, maxJobs)
+	}
+
+	user, err := c.DB.GetUserById(userID.String())
+	if err != nil {
+		return nil, fmt.Errorf("failed to load user for org cap check: %w", err)
+	}
+	orgID, err := c.RequireOrgIDForUser(user, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve org for job: %w", err)
+	}
+	orgRunning, err := c.DB.GetOrgRunningJobs(context.Background(), orgID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check org running jobs: %w", err)
+	}
+	maxOrgJobs := c.RemoteConfig.GetInt(remoteconfig.MaxConcurrentJobsPerOrg, orgID.String())
+	if orgRunning >= maxOrgJobs {
+		return nil, fmt.Errorf("%w: your organization has reached its concurrent generation limit (%d). Please wait for an existing job to finish", ErrConcurrentJobLimit, maxOrgJobs)
 	}
 	// Prevent duplicate initial generation on the same app: if this app already
 	// has a running generate_app job, reject the new one to avoid wasting

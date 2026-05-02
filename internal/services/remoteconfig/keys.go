@@ -52,6 +52,7 @@ func PlanBool(planName, field string, fallback bool) Key {
 var MaxConcurrentBuilds = Key{Flag: "rc-max-concurrent-builds", Fallback: 1}
 var MaxDomainsPerProject = Key{Flag: "rc-max-domains-per-project", Fallback: 10}
 var MaxConcurrentJobsPerUser = Key{Flag: "rc-max-concurrent-jobs-per-user", Fallback: 3}
+var MaxConcurrentJobsPerOrg = Key{Flag: "rc-max-concurrent-jobs-per-org", Fallback: 6}
 var MaxMobileContentSizeKB = Key{Flag: "rc-max-mobile-content-size-kb", Fallback: 50}
 var MaxQueryRows = Key{Flag: "rc-max-query-rows", Fallback: 1000}
 

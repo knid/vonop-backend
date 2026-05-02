@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/models"
 	"github.com/uptrace/bun"
 )
@@ -116,6 +117,22 @@ func (db *Database) GetUserRunningJobs(userID string) (int, error) {
 		Where("status IN (?)", bun.In([]string{"running", "awaiting_input"})).
 		Where("created_at > ?", time.Now().Add(-15*time.Minute)).
 		Count(context.Background())
+	return count, err
+}
+
+// GetOrgRunningJobs counts running/awaiting_input generation jobs across every
+// member of the org. Mirrors GetUserRunningJobs (same 15-min recency window).
+// GenerationJob has no organization_id column yet, so we join through
+// organization_members.
+func (db *Database) GetOrgRunningJobs(ctx context.Context, orgID uuid.UUID) (int, error) {
+	count, err := db.DB.NewSelect().
+		Model((*models.GenerationJob)(nil)).
+		Join("JOIN organization_members AS om ON om.user_id = generation_job.user_id").
+		Where("om.organization_id = ?", orgID).
+		Where("om.deleted_at IS NULL").
+		Where("generation_job.status IN (?)", bun.In([]string{"running", "awaiting_input"})).
+		Where("generation_job.created_at > ?", time.Now().Add(-15*time.Minute)).
+		Count(ctx)
 	return count, err
 }
 
