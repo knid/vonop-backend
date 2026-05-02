@@ -2,6 +2,7 @@ package database
 
 import (
 	"context"
+	"time"
 
 	"github.com/knid/wemob/internal/models"
 	"github.com/uptrace/bun"
@@ -67,6 +68,24 @@ func (db *Database) GetAppBuildTaskByProject(project *models.Project) ([]models.
 func (db *Database) UpdateAppBuildTask(buildTask *models.AppBuildTask) error {
 	_, err := db.DB.NewUpdate().Model(buildTask).Where("id = ?", buildTask.ID.String()).Exec(context.Background())
 	return err
+}
+
+func (db *Database) MarkOrphanedBuildTasksFailed(ctx context.Context, staleAfter time.Duration) (int64, error) {
+	res, err := db.DB.NewUpdate().
+		TableExpr("app_build_tasks").
+		Set("finished = ?", true).
+		Set("status_text = ?", "error").
+		Set("error_message = ?", "webhook timeout: build did not report within deadline").
+		Set("updated_at = current_timestamp").
+		Where("finished = false").
+		Where("created_at < ?", time.Now().Add(-staleAfter)).
+		Where("deleted_at IS NULL").
+		Exec(ctx)
+	if err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	return n, nil
 }
 
 func (db *Database) CancelAppBuildTask(taskID string) error {
