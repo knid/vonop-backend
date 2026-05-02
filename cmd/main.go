@@ -1804,6 +1804,12 @@ func main() {
 				r.Put("/config", httpViews.UpdateMobileAppConfig)
 			})
 
+			// Expo build status webhook — no user auth, HMAC-signed by Codemagic worker.
+			// TODO(P1.1): wire hmacMaster through controller.SecretManager.GetSecret("WEMOB_WORKER_HMAC_KEY")
+			// instead of os.Getenv once the secret is registered in Infisical.
+			expoReportsHandler := views.NewExpoReportsHandler(controller.DB, os.Getenv("WEMOB_WORKER_HMAC_KEY"))
+			r.Post("/reports/expo-build", expoReportsHandler.UpdateExpoBuildStatus)
+
 			// Admin template management
 			r.Route("/admin/templates", func(r chi.Router) {
 				r.Use(appMiddleware.RequireAuth(controller))
