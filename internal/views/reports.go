@@ -4,6 +4,7 @@ import (
 	"crypto/subtle"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/models"
@@ -70,18 +71,18 @@ func (v *HttpViews) UpdateBuildTaskStatus(w http.ResponseWriter, r *http.Request
 	// Fire the "build started" CRM event once per build. The yaml now emits
 	// a stage ladder (Preparing → Building → Uploading), so gate on the
 	// first stage only to avoid double-firing.
-	if reportBuildReq.Status == "Preparing" && task.Platform == "ios" {
+	if reportBuildReq.Status == "Preparing" && strings.EqualFold(task.Platform, "ios") {
 		v.sendCRMEvent(task.Project.User, constants.EVENT_BUILD_STARTED_IOS, payload)
-	} else if reportBuildReq.Status == "Preparing" && task.Platform == "android" {
+	} else if reportBuildReq.Status == "Preparing" && strings.EqualFold(task.Platform, "android") {
 		v.sendCRMEvent(task.Project.User, constants.EVENT_BUILD_STARTED_ANDROID, payload)
-	} else if reportBuildReq.Status == "Built" && task.Platform == "ios" {
+	} else if reportBuildReq.Status == "Built" && strings.EqualFold(task.Platform, "ios") {
 		v.sendCRMEvent(task.Project.User, constants.EVENT_BUILD_FINISHED_IOS, payload)
-	} else if reportBuildReq.Status == "Built" && task.Platform == "android" {
+	} else if reportBuildReq.Status == "Built" && strings.EqualFold(task.Platform, "android") {
 		v.sendCRMEvent(task.Project.User, constants.EVENT_BUILD_FINISHED_ANDROID, payload)
-	} else if reportBuildReq.Status == "error" && task.Platform == "ios" {
+	} else if reportBuildReq.Status == "error" && strings.EqualFold(task.Platform, "ios") {
 		payload["error_message"] = reportBuildReq.Message
 		v.sendCRMEvent(task.Project.User, constants.EVENT_BUILD_ERROR_IOS, payload)
-	} else if reportBuildReq.Status == "error" && task.Platform == "android" {
+	} else if reportBuildReq.Status == "error" && strings.EqualFold(task.Platform, "android") {
 		payload["error_message"] = reportBuildReq.Message
 		v.sendCRMEvent(task.Project.User, constants.EVENT_BUILD_ERROR_ANDROID, payload)
 	}
