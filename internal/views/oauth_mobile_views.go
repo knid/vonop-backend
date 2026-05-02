@@ -1,9 +1,11 @@
 package views
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/knid/wemob/internal/constants"
+	"github.com/knid/wemob/internal/controllers"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/utils"
 	"github.com/posthog/posthog-go"
@@ -23,6 +25,10 @@ func (v *HttpViews) GoogleMobileLogin(w http.ResponseWriter, r *http.Request) {
 
 	loginRes, err := v.Controller.GoogleMobileLogin(r.Context(), req)
 	if err != nil {
+		if errors.Is(err, controllers.ErrEmailHasCredentialsAccount) {
+			utils.JSONErrorCode(w, constants.ErrAuthEmailHasCredentialsAccount, http.StatusConflict, nil)
+			return
+		}
 		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}

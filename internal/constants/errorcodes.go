@@ -19,6 +19,11 @@ const (
 	ErrAuthResetTokenExpired    = "AUTH_RESET_TOKEN_EXPIRED"
 	ErrAuthOAuthFailed          = "AUTH_OAUTH_FAILED"
 	ErrAuthOAuthStateInvalid    = "AUTH_OAUTH_STATE_INVALID"
+	// Returned when an OAuth login (e.g. Google) is attempted for an email
+	// that already has a credentials (Provider="Wemob") account with no
+	// linked OAuth identity. Refusing the merge prevents account takeover
+	// via a pre-registered email collision.
+	ErrAuthEmailHasCredentialsAccount = "AUTH_EMAIL_HAS_CREDENTIALS_ACCOUNT"
 	ErrAdminRequired            = "ADMIN_REQUIRED"
 	ErrInsufficientScope        = "INSUFFICIENT_SCOPE"
 	ErrForbidden                = "FORBIDDEN"
@@ -124,6 +129,7 @@ var DefaultMessages = map[string]string{
 	ErrAuthResetTokenExpired:    "Password reset link has expired.",
 	ErrAuthOAuthFailed:          "OAuth sign-in failed.",
 	ErrAuthOAuthStateInvalid:    "Invalid or expired OAuth state.",
+	ErrAuthEmailHasCredentialsAccount: "An account exists with this email. Sign in with your password, then link Google from Settings.",
 	ErrAdminRequired:            "Admin access required.",
 	ErrInsufficientScope:        "API key does not have the required scope.",
 	ErrForbidden:                "Access denied.",

@@ -2,7 +2,9 @@ package controllers
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -28,12 +30,20 @@ import (
 // Anything not matched falls through to JSONInternalError so we never leak
 // raw err.Error() text in 5xx responses.
 var (
-	ErrInvalidCredentials  = errors.New("invalid email or password")
-	ErrEmailTaken          = errors.New("email already in use")
-	ErrResetTokenInvalid   = errors.New("password reset token is invalid")
-	ErrResetTokenExpired   = errors.New("password reset token has expired")
-	ErrVerificationInvalid = errors.New("email verification token is invalid or expired")
+	ErrInvalidCredentials          = errors.New("invalid email or password")
+	ErrEmailTaken                  = errors.New("email already in use")
+	ErrResetTokenInvalid           = errors.New("password reset token is invalid")
+	ErrResetTokenExpired           = errors.New("password reset token has expired")
+	ErrVerificationInvalid         = errors.New("email verification token is invalid or expired")
+	ErrEmailHasCredentialsAccount  = errors.New("an account with this email already exists; sign in with your password, then link Google from Settings")
 )
+
+// hashEmailForLog returns the first 8 hex chars of sha256(lowercased email).
+// Used in slog to monitor abuse patterns without writing raw emails to logs.
+func hashEmailForLog(email string) string {
+	sum := sha256.Sum256([]byte(strings.ToLower(strings.TrimSpace(email))))
+	return hex.EncodeToString(sum[:])[:8]
+}
 
 func (c *Controller) GetUserModelById(id string) (*models.User, error) {
 	return c.DB.GetUserById(id)
@@ -358,6 +368,13 @@ func (c *Controller) DeleteUser(tokenStr string) (*models.User, error) {
 func (c *Controller) GoogleLogin(oauthUser goth.User) (*responses.UserLoginResponse, error) {
 	isNewUser := false
 	user, err := c.DB.GetUserByEmail(oauthUser.Email)
+	if err == nil && user != nil && user.Provider == "Wemob" {
+		// Refuse rather than merge: prevents takeover via pre-registered email collision.
+		slog.Warn("google login refused: email has credentials account",
+			"flow", "web",
+			"email_hash", hashEmailForLog(oauthUser.Email))
+		return nil, ErrEmailHasCredentialsAccount
+	}
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			isNewUser = true

@@ -44,6 +44,13 @@ func (c *Controller) GoogleMobileLogin(ctx context.Context, req requests.GoogleM
 
 	isNewUser := false
 	user, err := c.DB.GetUserByEmail(email)
+	if err == nil && user != nil && user.Provider == "Wemob" {
+		// Refuse rather than merge: prevents takeover via pre-registered email collision.
+		slog.Warn("google login refused: email has credentials account",
+			"flow", "mobile",
+			"email_hash", hashEmailForLog(email))
+		return nil, ErrEmailHasCredentialsAccount
+	}
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			isNewUser = true
