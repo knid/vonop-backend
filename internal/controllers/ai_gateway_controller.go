@@ -277,10 +277,17 @@ func (c *Controller) GatewayChatCreditsOwed(modelID string, usage *utils.UsageIn
 }
 
 // AccumulateGatewayChatCredits feeds the fractional owed amount into the
-// database accumulator and, if the accumulator crossed an integer, emits
-// an ai_credit_transactions audit row for the whole credits that were
-// moved out of pending_gateway onto balance. Returns the number of whole
+// database accumulator and emits an ai_credit_transactions audit row for
+// every successful call. When the accumulator crosses an integer boundary
+// the row uses Action=action with Amount=-rolled (the whole credits moved
+// out of pending_gateway onto balance). When only pending_gateway grew
+// the row uses Action=action+"_pending" with Amount=0 and PendingAmount=owed
+// — the sub-credit cost the user was charged. Returns the number of whole
 // credits deducted (0 if the call only increased pending).
+//
+// The action-name distinction (e.g. gateway_chat vs gateway_chat_pending)
+// lets the dashboard hide sub-credit rows by default while keeping them
+// queryable for operator-side reconciliation against gateway request logs.
 func (c *Controller) AccumulateGatewayChatCredits(user *models.User, orgID uuid.UUID, owed float64, action, reference string) (int, error) {
 	if owed <= 0 {
 		return 0, nil
@@ -289,17 +296,22 @@ func (c *Controller) AccumulateGatewayChatCredits(user *models.User, orgID uuid.
 	if err != nil {
 		return 0, fmt.Errorf("accumulate gateway pending: %w", err)
 	}
+	row := &models.AICreditTransaction{
+		OrganizationID: orgID,
+		UserID:         user.ID,
+		Reference:      reference,
+	}
 	if rolled > 0 {
-		if _, terr := c.DB.CreateAICreditTransaction(&models.AICreditTransaction{
-			OrganizationID: orgID,
-			UserID:         user.ID,
-			Amount:         -rolled,
-			Action:         action,
-			Reference:      reference,
-		}); terr != nil {
-			slog.Warn("accumulate gateway pending: failed to emit transaction row",
-				"error", terr, "user_id", user.ID, "org_id", orgID, "rolled", rolled)
-		}
+		row.Amount = -rolled
+		row.Action = action
+	} else {
+		row.Amount = 0
+		row.Action = action + "_pending"
+		row.PendingAmount = owed
+	}
+	if _, terr := c.DB.CreateAICreditTransaction(row); terr != nil {
+		slog.Warn("accumulate gateway pending: failed to emit transaction row",
+			"error", terr, "user_id", user.ID, "org_id", orgID, "rolled", rolled, "owed", owed)
 	}
 	return rolled, nil
 }

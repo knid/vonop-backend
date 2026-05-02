@@ -38,8 +38,13 @@ type AICreditTransaction struct {
 	UserID         uuid.UUID     `bun:",notnull,type:uuid"` // KEPT — "who spent" attribution
 	User           *User         `bun:"rel:belongs-to,join:user_id=id"`
 	Amount         int           `bun:",notnull"`  // positive = added, negative = consumed
-	Action         string        `bun:",notnull"`  // e.g. "generate", "chat", "screenshot_to_code", "element_edit", "purchase", "monthly_grant"
+	Action         string        `bun:",notnull"`  // e.g. "generate", "chat", "screenshot_to_code", "element_edit", "purchase", "monthly_grant", "gateway_chat", "gateway_chat_pending"
 	Reference      string        `bun:",nullzero"` // optional: website ID, Stripe payment ID, etc.
+	// PendingAmount carries the fractional credit cost for sub-credit gateway
+	// calls (action="gateway_chat_pending"), where Amount is 0 because no whole
+	// credit moved out of pending_gateway. Preserves audit fidelity for
+	// reconciliation against gateway request logs.
+	PendingAmount  float64       `bun:"pending_amount,nullzero"`
 	CreatedAt      time.Time     `bun:"created_at,nullzero,notnull,default:current_timestamp"`
 }
 

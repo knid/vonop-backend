@@ -363,6 +363,10 @@ func createSchema(db *bun.DB) error {
 		// success; otherwise one of the agent ErrorKind enum values used to
 		// render the rich error card from history. See finaliseFailureV2.
 		`ALTER TABLE app_chat_messages ADD COLUMN IF NOT EXISTS error_kind text NOT NULL DEFAULT ''`,
+		// Sub-credit gateway audit: stores the fractional credit cost when a
+		// gateway_chat_pending row is written (Amount=0). Nullable so legacy
+		// rows and non-gateway transactions stay untouched.
+		`ALTER TABLE ai_credit_transactions ADD COLUMN IF NOT EXISTS pending_amount double precision`,
 	}
 
 	// Deduplicate before creating unique indexes (keep the latest row per group)
@@ -401,7 +405,7 @@ func createSchema(db *bun.DB) error {
 	// Table renames go in renameStatements below, not here — they run unconditionally.
 	var migrationsDone bool
 	row := db.QueryRowContext(context.Background(),
-		"SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='app_chat_messages' AND column_name='error_kind')")
+		"SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='ai_credit_transactions' AND column_name='pending_amount')")
 	if err := row.Scan(&migrationsDone); err != nil {
 		migrationsDone = false
 	}
