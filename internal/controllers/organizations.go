@@ -308,7 +308,7 @@ func (c *Controller) RemoveOrganizationMember(user *models.User, orgID, memberID
 		return err
 	}
 
-	targetMember, err := c.DB.GetOrganizationMember(orgID, memberID)
+	targetMember, err := c.DB.GetOrganizationMemberByID(orgID, memberID)
 	if err != nil {
 		return errors.New("member not found")
 	}
@@ -344,7 +344,7 @@ func (c *Controller) UpdateMemberRole(user *models.User, orgID, memberID string,
 		return nil, errors.New("only the owner can change member roles")
 	}
 
-	targetMember, err := c.DB.GetOrganizationMember(orgID, memberID)
+	targetMember, err := c.DB.GetOrganizationMemberByID(orgID, memberID)
 	if err != nil {
 		return nil, errors.New("member not found")
 	}

@@ -88,6 +88,21 @@ func (db *Database) GetOrganizationMember(orgID, userID string) (*models.Organiz
 	return &member, err
 }
 
+// GetOrganizationMemberByID looks up a membership by its own row ID, scoped to
+// orgID so a leaked member-row ID can't dereference a different org's row.
+// Distinct from GetOrganizationMember (which keys on user_id); use this when
+// the caller already has the OrganizationMember.ID — e.g. URL params for
+// /organizations/{orgId}/members/{memberId}.
+func (db *Database) GetOrganizationMemberByID(orgID, memberRowID string) (*models.OrganizationMember, error) {
+	var member models.OrganizationMember
+	err := db.DB.NewSelect().
+		Model(&member).
+		Where("id = ?", memberRowID).
+		Where("organization_id = ?", orgID).
+		Scan(context.Background())
+	return &member, err
+}
+
 func (db *Database) UpdateOrganizationMember(member *models.OrganizationMember) (*models.OrganizationMember, error) {
 	member.UpdatedAt = time.Now()
 	_, err := db.DB.NewUpdate().
