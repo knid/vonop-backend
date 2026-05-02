@@ -112,6 +112,8 @@ func createSchema(db *bun.DB) error {
 		(*models.AppStoreListing)(nil),
 		// Known build failure patterns for human-readable error surfacing
 		(*models.BuildAnnotation)(nil),
+		// Expo build event stream (append-only, idempotent by task+message_hash)
+		(*models.BuildEvent)(nil),
 	}
 
 	for _, model := range models {
@@ -610,6 +612,8 @@ END $$`,
 		// level, catching concurrent InsertAgentRun races the app-level pre-check
 		// can't cover.
 		`CREATE UNIQUE INDEX IF NOT EXISTS uniq_app_agent_runs_running ON app_agent_runs (app_project_id) WHERE status = 'running'`,
+		// build_events dedup index — enforces (task_id, message_hash) uniqueness
+		`CREATE UNIQUE INDEX IF NOT EXISTS build_events_task_msg_uniq ON build_events (task_id, message_hash)`,
 	}
 	for _, stmt := range perfIndexes {
 		if _, err := db.ExecContext(context.Background(), stmt); err != nil {
