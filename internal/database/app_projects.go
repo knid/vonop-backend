@@ -176,6 +176,28 @@ func (db *Database) CountAppProjectsByUserIDAndType(userID string, projectType s
 	return q.Count(context.Background())
 }
 
+// ReassignProjectsToOrgOwner reassigns UserID on all of fromUserID's projects
+// in the given org to toUserID. Returns the IDs of affected projects so the
+// caller can invalidate their per-row cache entries — AuthorizeProjectAccess
+// reads UserID from the cached row, and a stale cache would re-grant access
+// to the just-removed member.
+func (db *Database) ReassignProjectsToOrgOwner(ctx context.Context, orgID, fromUserID, toUserID uuid.UUID) ([]string, error) {
+	var ids []string
+	if fromUserID == toUserID {
+		return ids, nil
+	}
+	err := db.DB.NewUpdate().
+		Model((*models.AppProject)(nil)).
+		Set("user_id = ?", toUserID).
+		Set("updated_at = NOW()").
+		Where("organization_id = ?", orgID).
+		Where("user_id = ?", fromUserID).
+		Where("deleted_at IS NULL").
+		Returning("id").
+		Scan(ctx, &ids)
+	return ids, err
+}
+
 // ListAppProjectsWithoutOrg returns AppProjects with NULL organization_id.
 // Used by the org-foundation backfill.
 func (db *Database) ListAppProjectsWithoutOrg() ([]models.AppProject, error) {

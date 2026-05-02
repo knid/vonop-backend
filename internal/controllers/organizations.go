@@ -317,7 +317,22 @@ func (c *Controller) RemoveOrganizationMember(user *models.User, orgID, memberID
 		return errors.New("cannot remove the organization owner")
 	}
 
-	return c.DB.DeleteOrganizationMember(targetMember)
+	if err := c.DB.DeleteOrganizationMember(targetMember); err != nil {
+		return err
+	}
+
+	// Reassign the removed member's projects to the org owner — without this,
+	// AuthorizeProjectAccess (UserID match OR active membership) would still
+	// admit the removed user via the lingering UserID.
+	ids, err := c.DB.ReassignProjectsToOrgOwner(context.Background(), org.ID, targetMember.UserID, org.OwnerID)
+	if err != nil {
+		slog.Error("RemoveOrganizationMember: reassign projects failed", "error", err, "org_id", orgID, "from_user_id", targetMember.UserID, "to_user_id", org.OwnerID)
+		return err
+	}
+	for _, id := range ids {
+		c.DB.InvalidateProjectCache(id)
+	}
+	return nil
 }
 
 func (c *Controller) UpdateMemberRole(user *models.User, orgID, memberID string, req requests.UpdateMemberRoleRequest) (*responses.OrganizationMemberResponse, error) {
@@ -440,7 +455,21 @@ func (c *Controller) LeaveOrganization(user *models.User, orgID string) error {
 	if member.Role == "owner" {
 		return errors.New("transfer ownership before leaving as the sole owner")
 	}
-	return c.DB.DeleteOrganizationMember(member)
+	if err := c.DB.DeleteOrganizationMember(member); err != nil {
+		return err
+	}
+
+	// See RemoveOrganizationMember: reassign so AuthorizeProjectAccess can no
+	// longer admit the leaver via UserID match.
+	ids, err := c.DB.ReassignProjectsToOrgOwner(context.Background(), org.ID, member.UserID, org.OwnerID)
+	if err != nil {
+		slog.Error("LeaveOrganization: reassign projects failed", "error", err, "org_id", orgID, "from_user_id", member.UserID, "to_user_id", org.OwnerID)
+		return err
+	}
+	for _, id := range ids {
+		c.DB.InvalidateProjectCache(id)
+	}
+	return nil
 }
 
 // EnsurePersonalOrg returns the user's personal organization, creating it
