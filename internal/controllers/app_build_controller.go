@@ -3,6 +3,7 @@ package controllers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -248,6 +249,27 @@ func (c *Controller) BuildAppMobile(appProject *models.AppProject, user *models.
 	}
 
 	return build, tasks, nil
+}
+
+// BuildExpoMobile is the entry point for triggering an Expo (mobile_app_native) build.
+// Full implementation lands in P1.1 — this skeleton exists so other code can
+// reference the function signature.
+//
+// TODO(P1.1):
+//  1. Tarball the AI-generated mobile/ source from the project's git repo
+//  2. Upload tarball to s3://$S3_ASSETS_BUCKET/expo-source/$projectID/$buildID.tar.gz
+//  3. Insert Build row + AppBuildTask row(s) for the requested platform(s)
+//  4. Call CodemagicService.TriggerExpoAndroidBuild / TriggerExpoIOSBuild with the right params
+//  5. Return the new Build
+func (c *Controller) BuildExpoMobile(ctx context.Context, project *models.AppProject, opts ExpoBuildOptions) (*models.Build, error) {
+	return nil, errors.New("BuildExpoMobile not implemented until P1.1")
+}
+
+// ExpoBuildOptions describes the parameters for a new Expo mobile build.
+type ExpoBuildOptions struct {
+	Platforms        []string // "android", "ios", or both
+	MarketingVersion string   // semantic version, e.g. "1.2.0"
+	BundleIDOverride string   // optional override; defaults to com.wemob.{slug}
 }
 
 // UndeployApp marks all deployments for this project as undeployed and
