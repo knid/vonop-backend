@@ -345,14 +345,14 @@ func (v *HttpViews) GatewayChat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if stream {
-		v.handleStreamingChat(w, upstreamResp, user, orgID, model, provider.Name, projectID)
+		v.handleStreamingChat(w, r, upstreamResp, user, orgID, model, provider.Name, projectID)
 	} else {
 		v.handleNonStreamingChat(w, upstreamResp, user, orgID, model, provider.Name, projectID)
 	}
 }
 
 // handleStreamingChat proxies a streaming SSE response from the upstream provider.
-func (v *HttpViews) handleStreamingChat(w http.ResponseWriter, upstream *http.Response, user *models.User, orgID uuid.UUID, model, providerName, projectID string) {
+func (v *HttpViews) handleStreamingChat(w http.ResponseWriter, r *http.Request, upstream *http.Response, user *models.User, orgID uuid.UUID, model, providerName, projectID string) {
 	utils.SetSSEHeaders(w)
 	w.WriteHeader(upstream.StatusCode)
 
@@ -363,6 +363,7 @@ func (v *HttpViews) handleStreamingChat(w http.ResponseWriter, upstream *http.Re
 	}
 
 	var lastUsage *utils.UsageInfo
+	var bytesEmitted int64
 	scanner := bufio.NewScanner(upstream.Body)
 	scanner.Buffer(make([]byte, 0, 256*1024), 256*1024)
 
@@ -370,7 +371,8 @@ func (v *HttpViews) handleStreamingChat(w http.ResponseWriter, upstream *http.Re
 		line := scanner.Text()
 
 		// Write every line to the client
-		fmt.Fprintf(w, "%s\n", line)
+		n, _ := fmt.Fprintf(w, "%s\n", line)
+		bytesEmitted += int64(n)
 		flusher.Flush()
 
 		// Parse data lines for usage information
@@ -388,9 +390,21 @@ func (v *HttpViews) handleStreamingChat(w http.ResponseWriter, upstream *http.Re
 		}
 	}
 
-	// Post-hoc credit deduction and usage recording
+	scanErr := scanner.Err()
+	ctxErr := r.Context().Err()
+
+	// Client disconnect or upstream truncation should still bill for tokens we generated.
 	if lastUsage != nil {
 		v.recordGatewayChatUsage(user, orgID, model, providerName, projectID, lastUsage)
+	} else if scanErr != nil || ctxErr != nil {
+		slog.Warn("gateway chat: stream ended without usage chunk",
+			"project_id", projectID,
+			"user_id", user.ID,
+			"model", model,
+			"provider", providerName,
+			"bytes_emitted", bytesEmitted,
+			"scanner_error", scanErr,
+			"context_error", ctxErr)
 	}
 }
 
