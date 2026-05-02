@@ -15,7 +15,15 @@ go build -o bin/app cmd/main.go   # Manual build
 
 **Docker (prod):** `docker-compose up` — multi-stage Alpine build with Caddy reverse proxy
 
-**No test suite exists.** There are no `_test.go` files in this project.
+**Run integration evals** (requires ANTHROPIC_API_KEY; ~$0.50 per full run):
+
+```bash
+go test -tags=integration ./internal/agent/eval/ -v -timeout 10m
+```
+
+Until the agent-runner harness lands (P1.1), the test skips with an "unimplemented" message.
+
+**Note:** A limited test suite exists under `internal/agent/` (context and mobile-config tests) and `internal/agent/eval/` (integration-only eval fixtures). The eval fixtures are build-tag gated and won't run in standard `go test ./...`.
 
 ## Architecture
 
