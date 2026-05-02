@@ -74,6 +74,25 @@ func (db *Database) GetStandardUserLimitsByUser(user *models.User) (*models.Stan
 	return &limits, err
 }
 
+// GetLimitsForOrg resolves limits via the given organization's subscription.
+// Used by background workers that must gate against the billing actor (org)
+// rather than the API actor (user) — Plan A made limits/credits org-scoped.
+func (db *Database) GetLimitsForOrg(ctx context.Context, orgID uuid.UUID) (*models.StandardUserLimits, error) {
+	var org models.Organization
+	if err := db.DB.NewSelect().Model(&org).Where("id = ?", orgID).Scan(ctx); err != nil {
+		return nil, err
+	}
+	subs, err := db.GetStandardUserSubscriptionByOrg(&org)
+	if err != nil {
+		return nil, err
+	}
+	var limits models.StandardUserLimits
+	if err := db.DB.NewSelect().Model(&limits).Where("id = ?", subs.LimitsID).Scan(ctx); err != nil {
+		return nil, err
+	}
+	return &limits, nil
+}
+
 func (db *Database) GetStandardUserLimitsById(id string) (*models.StandardUserLimits, error) {
 	var limits models.StandardUserLimits
 	err := db.DB.NewSelect().Model(&limits).Where("id = ?", id).Scan(context.Background())

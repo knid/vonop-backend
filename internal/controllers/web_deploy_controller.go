@@ -191,7 +191,14 @@ func (c *Controller) HandleWebDeployTask(ctx context.Context, t *asynq.Task) err
 		fileMap[k] = v
 	}
 	injectAnalyticsScript(fileMap, project.ID.String())
-	limits, _ := c.GetUserLimits(user)
+	var limits *models.StandardUserLimits
+	if project.OrganizationID != uuid.Nil {
+		limits, _ = c.DB.GetLimitsForOrg(ctx, project.OrganizationID)
+	}
+	if limits == nil {
+		// Legacy fallback for unmigrated projects (OrganizationID == nil).
+		limits, _ = c.GetUserLimits(user)
+	}
 	if limits == nil || !limits.CanRemoveBrandLogo {
 		injectWemobBadge(fileMap)
 	}
