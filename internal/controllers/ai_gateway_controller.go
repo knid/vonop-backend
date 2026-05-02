@@ -193,6 +193,11 @@ func (c *Controller) GetUserTierName(user *models.User) string {
 	return strings.ToLower(sub.Name)
 }
 
+// upstreamCostSafetyFactor caps trusted upstream usage.Cost at this
+// multiple of catalog-derived USD — absorbs dynamic pricing & cache-shape
+// drift without blanket-trusting upstream.
+const upstreamCostSafetyFactor = 2.0
+
 // GatewayChatCreditsOwed returns the fractional credit amount a gateway
 // chat call should cost. Prefers the upstream-billed USD cost that
 // OpenRouter returns in usage.cost (when the request sent
@@ -232,6 +237,27 @@ func (c *Controller) GatewayChatCreditsOwed(modelID string, usage *utils.UsageIn
 		}
 		upstreamUSD = (float64(usage.PromptTokens)*m.InputUSDPerM +
 			float64(usage.CompletionTokens)*m.OutputUSDPerM) / 1_000_000.0
+	} else {
+		m := constants.GatewayChatModelByID(modelID)
+		switch {
+		case m == nil:
+			slog.Warn("ai_gateway: upstream cost present for model missing from catalog",
+				"model", modelID, "upstream_cost_usd", upstreamUSD)
+		case usage.PromptTokens+usage.CompletionTokens == 0:
+			slog.Warn("ai_gateway: upstream cost present with zero token totals; skipping ceiling cap",
+				"model", modelID, "upstream_cost_usd", upstreamUSD)
+		default:
+			catalogUSD := (float64(usage.PromptTokens)*m.InputUSDPerM +
+				float64(usage.CompletionTokens)*m.OutputUSDPerM) / 1_000_000.0
+			ceiling := catalogUSD * upstreamCostSafetyFactor
+			if upstreamUSD > ceiling {
+				slog.Warn("ai_gateway: upstream cost exceeded catalog ceiling",
+					"model", modelID, "upstream_cost_usd", upstreamUSD,
+					"catalog_max_usd", catalogUSD, "ceiling_usd", ceiling,
+					"input_tokens", usage.PromptTokens, "output_tokens", usage.CompletionTokens)
+				upstreamUSD = ceiling
+			}
+		}
 	}
 
 	markupPct := c.RemoteConfig.GetInt(remoteconfig.GatewayMarkupPercent, remoteconfig.Global)
