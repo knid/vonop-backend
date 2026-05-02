@@ -541,6 +541,36 @@ func (c *Controller) RequireOrgIDForUser(user *models.User, reqOrgID *uuid.UUID)
 	return personal.ID, nil
 }
 
+// BillingURLForOrg returns the org-scoped subscription/billing dashboard URL
+// for the given org. Used by event payloads so emails (Resend templates) can
+// link the user straight to their org's billing page instead of a 404 like
+// /settings or /subscription.
+//
+// If org is nil or has no slug (defensive — should not happen with backfilled
+// data), returns the legacy fallback so the email still has a URL.
+func (c *Controller) BillingURLForOrg(org *models.Organization) string {
+	const fallback = "https://app.wemob.io/subscription"
+	if org == nil || org.Slug == "" {
+		return fallback
+	}
+	return "https://app.wemob.io/orgs/" + org.Slug + "/subscription"
+}
+
+// BillingURLForUser resolves the user's personal org and returns its billing
+// URL. Used by credit-event firing sites where we have a user but not an org
+// in scope (e.g. usage_alerts, threshold crossings keyed only on user). Falls
+// back to the legacy URL if the personal-org lookup fails.
+func (c *Controller) BillingURLForUser(user *models.User) string {
+	if user == nil {
+		return "https://app.wemob.io/subscription"
+	}
+	org, err := c.DB.GetPersonalOrgByUserID(user.ID.String())
+	if err != nil || org == nil {
+		return "https://app.wemob.io/subscription"
+	}
+	return c.BillingURLForOrg(org)
+}
+
 // RequireOrgMembership verifies the user is a member of the org (any role)
 // and returns the org's UUID. Use from list handlers when ?org_id= is given.
 func (c *Controller) RequireOrgMembership(user *models.User, orgIDStr string) (uuid.UUID, error) {

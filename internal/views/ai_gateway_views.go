@@ -272,11 +272,18 @@ func (v *HttpViews) GatewayChat(w http.ResponseWriter, r *http.Request) {
 	}
 	minBalance := v.Controller.RemoteConfig.GetInt(remoteconfig.AICreditsMinBalance, user.ID.String())
 	if balance.Balance <= minBalance {
+		var billingURL string
+		if orgRec, orgErr := v.Controller.DB.GetOrganizationByID(orgID.String()); orgErr == nil {
+			billingURL = v.Controller.BillingURLForOrg(orgRec)
+		} else {
+			billingURL = v.Controller.BillingURLForUser(user)
+		}
 		go v.Controller.EventService.SendEvent(user, constants.EVENT_CREDITS_GATEWAY_BLOCKED, map[string]any{
-			"balance":    balance.Balance,
-			"floor":      minBalance,
-			"model":      model,
-			"project_id": projectID,
+			"balance":     balance.Balance,
+			"floor":       minBalance,
+			"model":       model,
+			"project_id":  projectID,
+			"billing_url": billingURL,
 		})
 		middleware.GatewayError(w, "insufficient AI credits", "insufficient_credits", "credits_depleted", http.StatusPaymentRequired)
 		return

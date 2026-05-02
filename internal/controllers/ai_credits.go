@@ -521,7 +521,7 @@ func (c *Controller) DeductAICreditsUnchecked(user *models.User, orgID uuid.UUID
 			Set("remaining_balance", newBalance).
 			Set("reference", reference))
 
-		c.emitCreditThresholdEvents(user, prevBalance, newBalance, action, reference)
+		c.emitCreditThresholdEvents(user, orgID, prevBalance, newBalance, action, reference)
 	}
 
 	return txErr
@@ -587,7 +587,7 @@ func (c *Controller) DeductAICreditsToFloor(user *models.User, orgID uuid.UUID, 
 				"remaining", newBalance)
 		}
 
-		c.emitCreditThresholdEvents(user, prevBalance, newBalance, action, reference)
+		c.emitCreditThresholdEvents(user, orgID, prevBalance, newBalance, action, reference)
 	}
 
 	return txErr
@@ -599,7 +599,18 @@ func (c *Controller) DeductAICreditsToFloor(user *models.User, orgID uuid.UUID, 
 // deduction skips over multiple thresholds, the lowest crossed threshold is
 // used. Designed to feed marketing workflows without spamming CRM on every
 // deduct, and to fire immediately instead of waiting for the hourly job.
-func (c *Controller) emitCreditThresholdEvents(user *models.User, prevBalance, newBalance int, action, reference string) {
+//
+// orgID is the org the deduction was charged against — used to resolve the
+// org-scoped billing URL we ship to the email templates.
+func (c *Controller) emitCreditThresholdEvents(user *models.User, orgID uuid.UUID, prevBalance, newBalance int, action, reference string) {
+	// Resolve org once for the billing URL injected into every event below.
+	var billingURL string
+	if org, err := c.DB.GetOrganizationByID(orgID.String()); err == nil && org != nil {
+		billingURL = c.BillingURLForOrg(org)
+	} else {
+		billingURL = c.BillingURLForUser(user)
+	}
+
 	// Overdraft transition (balance went from >= 0 to < 0)
 	if prevBalance >= 0 && newBalance < 0 {
 		go c.EventService.SendEvent(user, constants.EVENT_CREDITS_OVERDRAFT_STARTED, map[string]any{
@@ -607,6 +618,7 @@ func (c *Controller) emitCreditThresholdEvents(user *models.User, prevBalance, n
 			"new_balance":      newBalance,
 			"action":           action,
 			"reference":        reference,
+			"billing_url":      billingURL,
 		})
 	}
 
@@ -640,6 +652,7 @@ func (c *Controller) emitCreditThresholdEvents(user *models.User, prevBalance, n
 				"credits_total":     monthly,
 				"action":            action,
 				"reference":         reference,
+				"billing_url":       billingURL,
 			})
 			return // only fire the lowest newly-crossed threshold
 		}

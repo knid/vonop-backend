@@ -490,6 +490,7 @@ func (c *Controller) processWebhookEventTx(tx bun.Tx, event stripe.Event) ([]fun
 			"subscription_id":     org.SubscriptionID.String(),
 			"pay_invoice_url":     invoice.HostedInvoiceURL,
 			"attempt_count":       invoice.AttemptCount,
+			"billing_url":         c.BillingURLForOrg(org),
 		})
 
 		c.TrackUserEvent(owner, "payment_failed", posthog.NewProperties().
@@ -520,6 +521,7 @@ func (c *Controller) processWebhookEventTx(tx bun.Tx, event stripe.Event) ([]fun
 			"subscription_status": org.SubscriptionStatus,
 			"subscription_id":     org.SubscriptionID.String(),
 			"pay_invoice_url":     invoice.HostedInvoiceURL,
+			"billing_url":         c.BillingURLForOrg(org),
 		})
 
 		c.TrackUserEvent(owner, "payment_action_required", posthog.NewProperties().
@@ -603,6 +605,7 @@ func (c *Controller) processWebhookEventTx(tx bun.Tx, event stripe.Event) ([]fun
 			"subscription_id":     sub.ID,
 			"plan_name":           planName,
 			"cancellation_reason": cancelReason,
+			"billing_url":         c.BillingURLForOrg(org),
 		}
 		addHook(owner, cancelEvent, eventProps)
 		// Keep firing the legacy event for backward-compat with existing consumers.

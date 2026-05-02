@@ -64,7 +64,16 @@ func (v *HttpViews) checkMinimumCredits(w http.ResponseWriter, user *models.User
 		return true
 	}
 	if balance.Balance < 1 {
-		go v.Controller.EventService.SendEvent(user, constants.EVENT_AI_CREDITS_DEPLETED, map[string]any{"balance": balance.Balance})
+		var billingURL string
+		if orgRec, orgErr := v.Controller.DB.GetOrganizationByID(orgID.String()); orgErr == nil {
+			billingURL = v.Controller.BillingURLForOrg(orgRec)
+		} else {
+			billingURL = v.Controller.BillingURLForUser(user)
+		}
+		go v.Controller.EventService.SendEvent(user, constants.EVENT_AI_CREDITS_DEPLETED, map[string]any{
+			"balance":     balance.Balance,
+			"billing_url": billingURL,
+		})
 		go v.Controller.TrackUserEvent(user, "ai_credits_depleted", posthog.NewProperties().Set("balance", balance.Balance))
 
 		planName := ""

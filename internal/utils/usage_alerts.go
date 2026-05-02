@@ -92,11 +92,19 @@ func checkUsageAlerts(db *database.Database, eventService events.EventService) {
 
 		remainingPercent := float64(balance.Balance) / float64(limits.MonthlyAICredits) * 100
 
+		// Resolve the user's personal org slug for the org-scoped billing URL.
+		// Falls back to the legacy /subscription URL if the org row is missing.
+		billingURL := "https://app.wemob.io/subscription"
+		if org, oerr := db.GetPersonalOrgByUserID(user.ID.String()); oerr == nil && org != nil && org.Slug != "" {
+			billingURL = "https://app.wemob.io/orgs/" + org.Slug + "/subscription"
+		}
+
 		if balance.Balance <= 0 || remainingPercent <= 10 {
 			if shouldAlert(user.ID.String(), "depleted") {
 				go eventService.SendEvent(&user, constants.EVENT_AI_CREDITS_DEPLETED, map[string]any{
 					"credits_total":     limits.MonthlyAICredits,
 					"credits_remaining": balance.Balance,
+					"billing_url":       billingURL,
 				})
 			}
 		} else if remainingPercent <= 20 {
@@ -105,6 +113,7 @@ func checkUsageAlerts(db *database.Database, eventService events.EventService) {
 					"credits_remaining": balance.Balance,
 					"credits_total":     limits.MonthlyAICredits,
 					"usage_percent":     int(100 - remainingPercent),
+					"billing_url":       billingURL,
 				})
 			}
 		} else {
