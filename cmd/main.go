@@ -947,7 +947,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if n, err := db.MarkOrphanedRunsFailed(); err != nil {
+	if n, err := db.MarkOrphanedRunsFailed(context.Background(), 0); err != nil {
 		slog.Warn("failed to mark orphaned agent runs", "error", err)
 	} else if n > 0 {
 		slog.Info("marked orphaned agent runs as failed", "count", n)

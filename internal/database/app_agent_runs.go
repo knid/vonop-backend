@@ -56,16 +56,23 @@ func (db *Database) GetAgentRun(runID uuid.UUID) (*models.AppAgentRun, error) {
 	return &r, nil
 }
 
-// MarkOrphanedRunsFailed is called on server startup: any `running` rows left
-// over from a previous process are marked `failed`. We don't resume them.
-func (db *Database) MarkOrphanedRunsFailed() (int, error) {
-	res, err := db.DB.NewUpdate().
+// MarkOrphanedRunsFailed flips `running` rows whose created_at is older than
+// staleAfter to `failed`. Pass 0 to fail every running row (used at server
+// startup, where any survivor is by definition a leftover from a prior
+// process). Pass a positive duration from the periodic reaper, where we only
+// want to evict rows that have outlived a normal agent turn — fresh runs on
+// other machines must keep going.
+func (db *Database) MarkOrphanedRunsFailed(ctx context.Context, staleAfter time.Duration) (int, error) {
+	q := db.DB.NewUpdate().
 		Model((*models.AppAgentRun)(nil)).
 		Set("status = ?", models.AgentRunStatusFailed).
-		Set("error = ?", "server restarted").
+		Set("error = ?", "worker disappeared mid-run").
 		Set("completed_at = ?", time.Now()).
-		Where("status = ?", models.AgentRunStatusRunning).
-		Exec(context.Background())
+		Where("status = ?", models.AgentRunStatusRunning)
+	if staleAfter > 0 {
+		q = q.Where("created_at < ?", time.Now().Add(-staleAfter))
+	}
+	res, err := q.Exec(ctx)
 	if err != nil {
 		return 0, err
 	}

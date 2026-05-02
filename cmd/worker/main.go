@@ -80,6 +80,9 @@ func main() {
 	mux.HandleFunc("cron:reap-stuck-deployments", func(ctx context.Context, _ *asynq.Task) error {
 		return controller.ReapStuckDeploymentsTask(ctx)
 	})
+	mux.HandleFunc(tasks.TypeReapStuckAgentRuns, func(ctx context.Context, _ *asynq.Task) error {
+		return controller.ReapStuckAgentRunsTask(ctx)
+	})
 
 	scheduler := asynq.NewScheduler(redisOpts, &asynq.SchedulerOpts{
 		Location: time.UTC,
@@ -90,6 +93,10 @@ func main() {
 	}
 	if _, err := scheduler.Register("@every 1m", asynq.NewTask("cron:reap-stuck-deployments", nil), asynq.Queue("cron")); err != nil {
 		slog.Error("schedule reap-stuck-deployments", "err", err)
+		os.Exit(1)
+	}
+	if _, err := scheduler.Register("@every 5m", asynq.NewTask(tasks.TypeReapStuckAgentRuns, nil), asynq.Queue("cron")); err != nil {
+		slog.Error("schedule reap-stuck-agent-runs", "err", err)
 		os.Exit(1)
 	}
 	go func() {
