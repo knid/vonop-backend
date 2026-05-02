@@ -240,20 +240,28 @@ func (c *Controller) processWebhookEventTx(tx bun.Tx, event stripe.Event) ([]fun
 			return nil, fmt.Errorf("subscription %s has no items", sub.ID)
 		}
 
-		subs, err := c.DB.GetSubscriptionByPriceID(sub.Items.Data[0].Price.ID)
+		newPriceID := sub.Items.Data[0].Price.ID
+		subs, err := c.DB.GetSubscriptionByPriceID(newPriceID)
 		if err != nil {
-			return nil, fmt.Errorf("plan not found for price ID %s: %w", sub.Items.Data[0].Price.ID, err)
+			return nil, fmt.Errorf("plan not found for price ID %s: %w", newPriceID, err)
 		}
 
 		// Capture plan change detection BEFORE mutating org.SubscriptionID
 		oldSubID := org.SubscriptionID
 		planChanged := oldSubID != uuid.Nil && oldSubID != subs.ID
 		var oldMonthlyPrice int
+		var oldSub *models.StandardUserSubscription
 		if planChanged {
-			if oldSub, err := c.DB.GetSubscriptionById(oldSubID.String()); err == nil {
-				oldMonthlyPrice = oldSub.MonthlyPrice
+			if loaded, err := c.DB.GetSubscriptionById(oldSubID.String()); err == nil {
+				oldSub = loaded
+				oldMonthlyPrice = loaded.MonthlyPrice
 			}
 		}
+
+		// Stripe fires customer.subscription.updated for many reasons (payment
+		// method change, cancel-at-period-end, schedule edits). Only treat it
+		// as a plan change when previous_attributes.items is present.
+		_, itemsChanged := event.Data.PreviousAttributes["items"]
 
 		// Load org owner for user-keyed notifications and posthog identity.
 		owner, err := c.DB.GetUserById(org.OwnerID.String())
@@ -335,6 +343,33 @@ func (c *Controller) processWebhookEventTx(tx bun.Tx, event stripe.Event) ([]fun
 		if setupJustFinished {
 			if _, err := c.DB.UpdateUser(owner); err != nil {
 				slog.Error("failed to update user setup_finished flag", "error", err, "user_id", owner.ID)
+			}
+		}
+
+		// Reference scopes by (subID, currentPeriodEnd, newPriceID) so the same
+		// upgrade dedups across Stripe retries while a future-period or
+		// further-upgrade event gets a fresh ledger row.
+		if planChanged && itemsChanged && org.SubscriptionID != uuid.Nil && oldSub != nil {
+			newGrant := c.PlanMonthlyAICredits(subs)
+			oldGrant := c.PlanMonthlyAICredits(oldSub)
+			delta := newGrant - oldGrant
+			if delta > 0 {
+				balance, balErr := c.GetOrCreateCreditsBalance(owner, org.ID)
+				if balErr != nil {
+					return nil, fmt.Errorf("get/create credits balance for upgrade grant: %w", balErr)
+				}
+				periodEnd := sub.Items.Data[0].CurrentPeriodEnd
+				reference := fmt.Sprintf("%s:%d:upgrade-%s", sub.ID, periodEnd, newPriceID)
+				if err := c.AddAICreditsInTx(tx, owner, org.ID, balance.ID, delta, "subscription_upgrade_grant", reference); err != nil {
+					return nil, fmt.Errorf("grant upgrade credits: %w", err)
+				}
+				hooks = append(hooks, func() {
+					c.EventService.SendEvent(owner, constants.EVENT_CREDITS_GRANTED, map[string]any{
+						"credits":    delta,
+						"grant_type": "subscription_upgrade",
+						"reference":  reference,
+					})
+				})
 			}
 		}
 

@@ -17,6 +17,22 @@ func (c *Controller) GetUserLimits(user *models.User) (*models.StandardUserLimit
 	return limits, err
 }
 
+// PlanMonthlyAICredits returns a plan's monthly AI credit grant, applying the
+// same remote-config override (rc-plan-{name}-monthly-ai-credits) that
+// GetUserLimits uses. Returns 0 when the plan or its limits row cannot be
+// resolved — callers in the webhook path treat 0 as "no grant".
+func (c *Controller) PlanMonthlyAICredits(subs *models.StandardUserSubscription) int {
+	if subs == nil {
+		return 0
+	}
+	limits, err := c.DB.GetStandardUserLimitsById(subs.LimitsID.String())
+	if err != nil {
+		return 0
+	}
+	pn := strings.ToLower(subs.Name)
+	return c.RemoteConfig.GetInt(remoteconfig.PlanInt(pn, "monthly-ai-credits", limits.MonthlyAICredits), remoteconfig.Global)
+}
+
 // GetUserLimitsWithPlan is identical to GetUserLimits but also returns the subscription plan name.
 func (c *Controller) GetUserLimitsWithPlan(user *models.User) (*models.StandardUserLimits, string, error) {
 	org, err := c.DB.GetPersonalOrgByUserID(user.ID.String())
