@@ -23,7 +23,7 @@ type AppProject struct {
 	Name            string         `bun:",notnull"`
 	Slug            string         `bun:",notnull,unique"`
 	Prompt          string         `bun:",notnull,type:text"`
-	ProjectType     string         `bun:",notnull,default:'app'"` // "app" or "ecommerce"
+	ProjectType     string         `bun:",notnull,default:'app'"` // one of: ProjectType{App,Ecommerce,MobileAppNative,MobileAppLegacy}
 	// AST field removed — files now stored in git repos
 	Theme           []byte         `bun:",type:jsonb,default:'{}'"` // stores AppTheme as JSON
 	DataModels      []byte         `bun:",type:jsonb,default:'[]'"` // stores data model definitions
@@ -37,3 +37,15 @@ type AppProject struct {
 	UpdatedAt       time.Time      `bun:"updated_at,nullzero,notnull,default:current_timestamp"`
 	DeletedAt       time.Time      `bun:",soft_delete,nullzero"`
 }
+
+// ProjectType values used in AppProject.ProjectType.
+const (
+	ProjectTypeApp             = "app"
+	ProjectTypeEcommerce       = "ecommerce"
+	ProjectTypeMobileAppNative = "mobile_app_native"
+)
+
+// ProjectTypeMobileAppLegacy is the deprecated WebView-shell mobile type.
+// Read-only display of legacy rows; new projects must use ProjectTypeMobileAppNative.
+// Removed entirely in P3.3.
+const ProjectTypeMobileAppLegacy = "mobile_app"
