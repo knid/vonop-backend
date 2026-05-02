@@ -54,6 +54,78 @@ func TestBuildSystemMessages_LegacyMobileUsesLegacyPrompt(t *testing.T) {
 	}
 }
 
+func TestBuildSystemMessages_MobileNativeIncludesConfigAddendum(t *testing.T) {
+	project := &models.AppProject{
+		ProjectType: models.ProjectTypeMobileAppNative,
+		Settings:    map[string]any{},
+	}
+	cfg := &models.MobileAppConfig{
+		BridgeMethods:       []string{"camera.takePhoto", "biometric"},
+		URLScheme:           "myapp",
+		UniversalLinkDomain: "example.com",
+		BiometricEnabled:    true,
+		PushEnabled:         true,
+		DarkModeEnabled:     true,
+		OfflineEnabled:      false,
+		Permissions:         []string{"camera", "location"},
+	}
+	deps := newDepsWithMobileConfig(t, project, cfg)
+	msgs := BuildSystemMessages(project, nil, deps, nil)
+	joined := concatMessages(msgs)
+
+	if !strings.Contains(joined, "camera.takePhoto") {
+		t.Error("expected enabled bridge methods listed in addendum")
+	}
+	if !strings.Contains(joined, "myapp") {
+		t.Error("expected URL scheme listed in addendum")
+	}
+	if !strings.Contains(joined, "example.com") {
+		t.Error("expected universal link domain listed in addendum")
+	}
+	if !strings.Contains(joined, "Biometric enabled: true") {
+		t.Error("expected biometric flag listed")
+	}
+	if !strings.Contains(joined, "Permissions:") || !strings.Contains(joined, "camera, location") {
+		t.Error("expected permissions list")
+	}
+}
+
+func TestBuildSystemMessages_MobileNativeNoConfigSkipsAddendum(t *testing.T) {
+	project := &models.AppProject{
+		ProjectType: models.ProjectTypeMobileAppNative,
+		Settings:    map[string]any{},
+	}
+	deps := newDepsWithMobileConfig(t, project, nil) // explicitly no config
+	msgs := BuildSystemMessages(project, nil, deps, nil)
+	joined := concatMessages(msgs)
+
+	if strings.Contains(joined, "Current MobileAppConfig") {
+		t.Error("expected no MobileAppConfig addendum when config is nil")
+	}
+	// The base prompt should still be present
+	if !strings.Contains(joined, "Expo Router") {
+		t.Error("expected base prompt to still be present")
+	}
+}
+
+// fakeMobileConfigGetter is a test double for mobileConfigGetter.
+type fakeMobileConfigGetter struct {
+	cfg *models.MobileAppConfig
+}
+
+func (f *fakeMobileConfigGetter) GetMobileAppConfig(projectID string) (*models.MobileAppConfig, error) {
+	return f.cfg, nil
+}
+
+// newDepsWithMobileConfig constructs RunDependencies with a fake mobileConfigGetter
+// so T20 tests run without a real database connection.
+func newDepsWithMobileConfig(t *testing.T, project *models.AppProject, cfg *models.MobileAppConfig) *RunDependencies {
+	t.Helper()
+	return &RunDependencies{
+		mobileConfigFetcher: &fakeMobileConfigGetter{cfg: cfg},
+	}
+}
+
 func concatMessages(msgs []utils.Message) string {
 	var sb strings.Builder
 	for _, m := range msgs {

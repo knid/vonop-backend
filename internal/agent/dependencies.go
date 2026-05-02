@@ -97,6 +97,11 @@ type LLMErrorRecorder func(
 type RunDependencies struct {
 	DB            *database.Database
 	GitRepo       *gitrepo.Service
+
+	// mobileConfigFetcher overrides DB for GetMobileAppConfig lookups. Used in
+	// tests to inject a fake without a real database connection. When nil,
+	// context.go falls back to DB directly.
+	mobileConfigFetcher mobileConfigGetter
 	AssetsStorage *storage.S3Storage
 	SecretManager secret.SecretManager
 	NeonService   *neon.Service

@@ -9,6 +9,12 @@ import (
 	"github.com/knid/wemob/internal/utils"
 )
 
+// mobileConfigGetter abstracts GetMobileAppConfig so context.go can be tested
+// without a real *database.Database. *database.Database satisfies this interface.
+type mobileConfigGetter interface {
+	GetMobileAppConfig(projectID string) (*models.MobileAppConfig, error)
+}
+
 // BuildSystemMessages returns the cached system messages for a run:
 //
 //  1. Base prompt          (BasePromptWeb, BasePromptMobile, or BasePromptMobileNative — by project type)
@@ -51,7 +57,31 @@ func BuildSystemMessages(project *models.AppProject, fileMap *SafeFileMap, deps 
 // database story for them. DatabaseAddendum is for generic web projects whose
 // user asked for a DB; layering it on top of EcommerceAddendum contradicted
 // the canonical ecommerce schema paths and doubled the token count.
+//
+// mobile_app_native projects receive a MobileAppConfig addendum listing the
+// currently-enabled native features so the agent doesn't need to call
+// read_mobile_config every turn.
 func buildAddendum(project *models.AppProject, deps *RunDependencies) string {
+	if project.ProjectType == models.ProjectTypeMobileAppNative {
+		var fetcher mobileConfigGetter
+		if deps != nil {
+			if deps.mobileConfigFetcher != nil {
+				fetcher = deps.mobileConfigFetcher
+			} else if deps.DB != nil {
+				fetcher = deps.DB
+			}
+		}
+		if fetcher != nil {
+			cfg, err := fetcher.GetMobileAppConfig(project.ID.String())
+			if err == nil && cfg != nil {
+				if a := mobileNativeAddendum(cfg); a != "" {
+					return a
+				}
+			}
+		}
+		return ""
+	}
+
 	var parts []string
 	isEcommerce := project.ProjectType == "ecommerce"
 	if isEcommerce {
@@ -70,6 +100,35 @@ func buildAddendum(project *models.AppProject, deps *RunDependencies) string {
 		return ""
 	}
 	return strings.Join(parts, "\n\n")
+}
+
+// mobileNativeAddendum formats the current MobileAppConfig as a system-message
+// addendum so the agent sees the project's enabled native features on every
+// turn without calling read_mobile_config first.
+func mobileNativeAddendum(cfg *models.MobileAppConfig) string {
+	if cfg == nil {
+		return ""
+	}
+	methods := cfg.BridgeMethods
+	if methods == nil {
+		methods = []string{}
+	}
+	permissions := cfg.Permissions
+	if permissions == nil {
+		permissions = []string{}
+	}
+	var sb strings.Builder
+	sb.WriteString("## Current MobileAppConfig (read by the agent — call read_mobile_config to refetch)\n\n")
+	sb.WriteString(fmt.Sprintf("Enabled native features: [%s]\n", strings.Join(methods, ", ")))
+	sb.WriteString(fmt.Sprintf("URL scheme: %q\n", cfg.URLScheme))
+	sb.WriteString(fmt.Sprintf("Universal link domain: %q\n", cfg.UniversalLinkDomain))
+	sb.WriteString(fmt.Sprintf("Biometric enabled: %v\n", cfg.BiometricEnabled))
+	sb.WriteString(fmt.Sprintf("Push enabled: %v\n", cfg.PushEnabled))
+	sb.WriteString(fmt.Sprintf("Dark mode enabled: %v\n", cfg.DarkModeEnabled))
+	sb.WriteString(fmt.Sprintf("Offline enabled: %v\n", cfg.OfflineEnabled))
+	sb.WriteString(fmt.Sprintf("Permissions: [%s]\n", strings.Join(permissions, ", ")))
+	sb.WriteString("\nIf you need a feature not in the list, call configure_mobile_bridge first.")
+	return sb.String()
 }
 
 // projectHasAI returns true if the project has the Wemob AI Gateway wired up
