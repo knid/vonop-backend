@@ -74,6 +74,7 @@ func main() {
 
 	mux := asynq.NewServeMux()
 	mux.HandleFunc(tasks.TypeDeployWeb, controller.HandleWebDeployTask)
+	mux.HandleFunc(tasks.TypeDeleteFlyApp, controller.HandleDeleteFlyAppTask)
 	mux.HandleFunc("cron:dns-check", func(ctx context.Context, _ *asynq.Task) error {
 		return controller.CheckPendingDomainsTask(ctx)
 	})

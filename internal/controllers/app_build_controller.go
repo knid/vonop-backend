@@ -250,10 +250,9 @@ func (c *Controller) BuildAppMobile(appProject *models.AppProject, user *models.
 	return build, tasks, nil
 }
 
-// UndeployApp marks all deployments for this project as undeployed in our DB.
-// The Fly machines themselves are torn down by the worker's deploy pipeline
-// on the next deploy (destroy+recreate); idle ones are also auto-suspended,
-// so we don't need to issue an explicit stop here.
+// UndeployApp marks all deployments for this project as undeployed and
+// enqueues a Fly app teardown so machines, IPs, and registry images stop
+// accumulating on canceled accounts.
 func (c *Controller) UndeployApp(projectID string) error {
 	deployments, err := c.DB.GetAppDeploymentsByProjectID(projectID)
 	if err != nil {
@@ -266,6 +265,12 @@ func (c *Controller) UndeployApp(projectID string) error {
 			if _, err := c.DB.UpdateAppDeployment(&d); err != nil {
 				slog.Error("failed to update deployment status", "error", err, "deployment_id", d.ID)
 			}
+		}
+	}
+
+	if runtimeApp, raErr := c.DB.GetRuntimeAppByAppProjectID(projectID); raErr == nil && runtimeApp != nil && runtimeApp.FlyAppName != "" {
+		if err := c.EnqueueFlyDelete(runtimeApp.FlyAppName, runtimeApp.ID); err != nil {
+			slog.Warn("failed to enqueue Fly app delete on undeploy", "error", err, "fly_app", runtimeApp.FlyAppName, "project_id", projectID)
 		}
 	}
 	return nil

@@ -276,16 +276,20 @@ func (c *Controller) DeleteAppProject(id string, user *models.User) error {
 		slog.Warn("Failed to delete git repo during app deletion", "error", err, "project_id", project.ID)
 	}
 
-	// Mark deployments as undeployed (Fly machines auto-suspend; the Fly app
-	// itself can stay — destroying it would orphan its registry images and
-	// the user might re-deploy under the same name).
 	if err := c.UndeployApp(project.ID.String()); err != nil {
 		slog.Warn("Failed to undeploy app during deletion", "error", err, "project_id", project.ID)
 	}
 
-	// Clean up Gitea backup repo + runtime_apps row (best-effort).
+	// Clean up Gitea backup repo + runtime_apps row (best-effort). The Fly
+	// teardown is enqueued (not inline) so an unreachable Fly API doesn't
+	// block project deletion; Asynq retries handle transient failures.
 	runtimeApp, raErr := c.DB.GetRuntimeAppByAppProjectID(project.ID.String())
 	if raErr == nil && runtimeApp != nil {
+		if runtimeApp.FlyAppName != "" {
+			if err := c.EnqueueFlyDelete(runtimeApp.FlyAppName, runtimeApp.ID); err != nil {
+				slog.Warn("Failed to enqueue Fly app delete during app deletion", "error", err, "fly_app", runtimeApp.FlyAppName)
+			}
+		}
 		if c.GiteaService != nil {
 			if err := c.GiteaService.DeleteRepo(runtimeApp.GiteaRepoName); err != nil {
 				slog.Warn("Failed to delete Gitea repo during app deletion", "error", err, "repo", runtimeApp.GiteaRepoName)
