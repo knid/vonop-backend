@@ -59,7 +59,9 @@ func (v *HttpViews) handleStreamOrAsync(w http.ResponseWriter, r *http.Request, 
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Minute)
 	v.Controller.RunningJobs.Store(job.ID.String(), cancel)
 
-	events := make(chan responses.SSEEvent, 100)
+	// Buffer sized for slow mobile SSE consumers; events are ~1KB so worst-case
+	// memory per stalled stream is ~1MB.
+	events := make(chan responses.SSEEvent, 1000)
 
 	// Create an event bus for this job so reconnected clients can subscribe
 	bus := controllers.NewEventBus()

@@ -68,7 +68,7 @@ func (v *HttpViews) GenerateAppStream(w http.ResponseWriter, r *http.Request) {
 		StreamFunc: func(ctx context.Context, events chan<- responses.SSEEvent, jobID string) {
 			defer close(events)
 			deps := v.Controller.AgentDeps(user)
-			emitter := newAgentSSEAdapter(events)
+			emitter := newAgentSSEAdapter(events, jobID)
 			if err := agent.Run(ctx, deps, project, user, req.Prompt, agent.TurnAttachments{}, emitter); err != nil {
 				slog.Error("agent.Run failed (generate)", "error", err, "project_id", project.ID)
 			}
