@@ -125,6 +125,15 @@ func retryFlyctlDeploy(appName, imageRef string, fn func() error) error {
 func buildFlyToml(appName string, spec MachineSpec) string {
 	hard := spec.Concurrency
 	soft := spec.Concurrency * 8 / 10 // soft = 80% of hard
+
+	var extras strings.Builder
+	if spec.MaxMachines > 0 {
+		fmt.Fprintf(&extras, "  max_machines_running = %d\n", spec.MaxMachines)
+	}
+	if spec.AutoStopSeconds > 0 {
+		fmt.Fprintf(&extras, "  auto_stop_machines_seconds = %d\n", spec.AutoStopSeconds)
+	}
+
 	return fmt.Sprintf(`app = %q
 primary_region = %q
 
@@ -139,7 +148,7 @@ primary_region = %q
   auto_stop_machines = "suspend"
   auto_start_machines = true
   min_machines_running = 0
-
+%s
   [http_service.concurrency]
     type = "requests"
     soft_limit = %d
@@ -147,6 +156,7 @@ primary_region = %q
 `,
 		appName, spec.Region,
 		spec.CPUKind, spec.CPUs, spec.MemoryMB,
+		extras.String(),
 		soft, hard,
 	)
 }
