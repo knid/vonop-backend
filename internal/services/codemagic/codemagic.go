@@ -26,6 +26,11 @@ type Service struct {
 	APIToken string
 	AppID    string
 	Branch   string
+	// apiBaseURL and httpClient may be overridden in tests; zero values fall
+	// back to the production defaults (https://api.codemagic.io and the
+	// package-level httpClient with 30s timeout).
+	apiBaseURL string
+	client     *http.Client
 }
 
 func NewService(apiToken, appID string) *Service {
@@ -34,6 +39,22 @@ func NewService(apiToken, appID string) *Service {
 		AppID:    appID,
 		Branch:   "main",
 	}
+}
+
+// baseURL returns the Codemagic API base URL, falling back to production.
+func (s *Service) baseURL() string {
+	if s.apiBaseURL != "" {
+		return s.apiBaseURL
+	}
+	return "https://api.codemagic.io"
+}
+
+// httpClientOrDefault returns s.client if set, else the package-level httpClient.
+func (s *Service) httpClientOrDefault() *http.Client {
+	if s.client != nil {
+		return s.client
+	}
+	return httpClient
 }
 
 type triggerRequest struct {
@@ -67,14 +88,14 @@ func (s *Service) TriggerBuild(workflowID string, variables map[string]string) (
 		return "", fmt.Errorf("codemagic: marshal: %w", err)
 	}
 
-	req, err := http.NewRequest("POST", "https://api.codemagic.io/builds", bytes.NewReader(jsonBody))
+	req, err := http.NewRequest("POST", s.baseURL()+"/builds", bytes.NewReader(jsonBody))
 	if err != nil {
 		return "", fmt.Errorf("codemagic: create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("x-auth-token", s.APIToken)
 
-	resp, err := httpClient.Do(req)
+	resp, err := s.httpClientOrDefault().Do(req)
 	if err != nil {
 		return "", fmt.Errorf("codemagic: request failed: %w", err)
 	}
