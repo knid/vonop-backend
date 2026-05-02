@@ -95,6 +95,7 @@ const (
 	ErrFeatureNotAvailable   = "FEATURE_NOT_AVAILABLE"
 	ErrBillingCheckoutFailed = "BILLING_CHECKOUT_FAILED"
 	ErrBillingPortalFailed   = "BILLING_PORTAL_FAILED"
+	ErrOrgInDunning          = "ORG_IN_DUNNING" // details: { subscription_status, billing_portal }
 
 	// Notifications
 	ErrNotificationLimitReached = "NOTIFICATION_LIMIT_REACHED"
@@ -191,6 +192,7 @@ var DefaultMessages = map[string]string{
 	ErrFeatureNotAvailable:   "This feature is not available on your plan.",
 	ErrBillingCheckoutFailed: "Could not start checkout. Please try again.",
 	ErrBillingPortalFailed:   "Could not open the billing portal. Please try again.",
+	ErrOrgInDunning:          "Your subscription has a payment issue. Please update your payment method in the billing portal to continue.",
 
 	ErrNotificationLimitReached: "Notification limit reached.",
 

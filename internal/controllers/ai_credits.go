@@ -473,6 +473,9 @@ func (c *Controller) MakeCreditBudgetChecker(user *models.User, orgID uuid.UUID,
 // DeductAICreditsUnchecked deducts credits without checking sufficiency (balance may go negative
 // down to AICreditsMinBalance). Used for post-hoc token-based billing where the pre-check already ran.
 func (c *Controller) DeductAICreditsUnchecked(user *models.User, orgID uuid.UUID, cost int, action string, reference string) error {
+	if org, orgErr := c.DB.GetOrganizationByID(orgID.String()); orgErr == nil && IsOrgInDunning(org) {
+		return ErrOrgInDunning
+	}
 	balance, err := c.GetOrCreateCreditsBalance(user, orgID)
 	if err != nil {
 		return err
@@ -530,6 +533,9 @@ func (c *Controller) DeductAICreditsUnchecked(user *models.User, orgID uuid.UUID
 func (c *Controller) DeductAICreditsToFloor(user *models.User, orgID uuid.UUID, cost int, action string, reference string) error {
 	if cost <= 0 {
 		return nil
+	}
+	if org, orgErr := c.DB.GetOrganizationByID(orgID.String()); orgErr == nil && IsOrgInDunning(org) {
+		return ErrOrgInDunning
 	}
 	balance, err := c.GetOrCreateCreditsBalance(user, orgID)
 	if err != nil {

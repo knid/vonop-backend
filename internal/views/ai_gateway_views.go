@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -15,6 +16,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/constants"
+	"github.com/knid/wemob/internal/controllers"
 	"github.com/knid/wemob/internal/middleware"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/requests"
@@ -257,6 +259,10 @@ func (v *HttpViews) GatewayChat(w http.ResponseWriter, r *http.Request) {
 	orgID, err := v.Controller.ResolveOrgForProjectID(user, projectID)
 	if err != nil {
 		middleware.GatewayError(w, "failed to resolve organization", "server_error", "credits_error", http.StatusInternalServerError)
+		return
+	}
+	if org, orgErr := v.Controller.DB.GetOrganizationByID(orgID.String()); orgErr == nil && controllers.IsOrgInDunning(org) {
+		middleware.GatewayError(w, constants.DefaultMessages[constants.ErrOrgInDunning], "billing_error", "org_in_dunning", http.StatusPaymentRequired)
 		return
 	}
 	balance, err := v.Controller.GetOrCreateCreditsBalance(user, orgID)
@@ -530,6 +536,10 @@ func (v *HttpViews) GatewayImage(w http.ResponseWriter, r *http.Request) {
 
 	// Pre-deduct credits
 	if err := v.Controller.DeductAICreditsUnchecked(user, orgID, totalCost, "gateway_image", projectID); err != nil {
+		if errors.Is(err, controllers.ErrOrgInDunning) {
+			middleware.GatewayError(w, constants.DefaultMessages[constants.ErrOrgInDunning], "billing_error", "org_in_dunning", http.StatusPaymentRequired)
+			return
+		}
 		slog.Error("gateway image: failed to pre-deduct credits", "error", err, "user_id", user.ID)
 		middleware.GatewayError(w, "failed to deduct credits", "server_error", "credits_error", http.StatusInternalServerError)
 		return

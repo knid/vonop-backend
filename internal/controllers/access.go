@@ -11,6 +11,28 @@ import (
 	"github.com/knid/wemob/internal/utils"
 )
 
+// ErrOrgInDunning is returned by credit-deduction paths when the org's
+// subscription is in a payment-failed state. Views surface this as a 402 with
+// a billing-portal pointer so the user can resolve their payment method.
+var ErrOrgInDunning = errors.New("organization subscription is in dunning")
+
+// IsOrgInDunning reports whether an org's billing state should block
+// credit-spend operations. Money-failed states (past_due, unpaid,
+// incomplete_expired) and operator-paused (paused) all qualify; transient
+// pre-confirmation (incomplete) does NOT — Stripe uses it briefly while a
+// PaymentIntent confirms and the user has not actually failed to pay yet.
+// Active/free/trial flow through unchanged.
+func IsOrgInDunning(org *models.Organization) bool {
+	if org == nil {
+		return false
+	}
+	switch org.SubscriptionStatus {
+	case "past_due", "unpaid", "incomplete_expired", "paused":
+		return true
+	}
+	return false
+}
+
 // AuthorizeProjectAccess returns nil if the user is allowed to read or modify
 // the given AppProject. Access is granted when either the legacy UserID match
 // holds (personal-org / pre-org-billing rows) or the user is an active member

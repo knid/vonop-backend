@@ -292,6 +292,9 @@ func (c *Controller) AccumulateGatewayChatCredits(user *models.User, orgID uuid.
 	if owed <= 0 {
 		return 0, nil
 	}
+	if org, orgErr := c.DB.GetOrganizationByID(orgID.String()); orgErr == nil && IsOrgInDunning(org) {
+		return 0, ErrOrgInDunning
+	}
 	rolled, err := c.DB.AtomicAccumulateGatewayPending(orgID, owed)
 	if err != nil {
 		return 0, fmt.Errorf("accumulate gateway pending: %w", err)
