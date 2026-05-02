@@ -259,6 +259,42 @@ func (db *Database) HasAICreditTransactionByRefTx(tx bun.IDB, action, reference 
 	return count > 0, err
 }
 
+// GetAICreditTransactionByActionRefsTx returns the first credit transaction
+// matching action and any of the given candidate references. Used by the
+// charge.refunded webhook to locate the original purchase row when the
+// reference convention may be cs.ID, payment_intent.ID, or charge.ID.
+// Returns sql.ErrNoRows if no match.
+func (db *Database) GetAICreditTransactionByActionRefsTx(tx bun.IDB, action string, references []string) (*models.AICreditTransaction, error) {
+	if len(references) == 0 {
+		return nil, sql.ErrNoRows
+	}
+	var t models.AICreditTransaction
+	err := tx.NewSelect().
+		Model(&t).
+		Where("action = ?", action).
+		Where("reference IN (?)", bun.In(references)).
+		Limit(1).
+		Scan(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	return &t, nil
+}
+
+// SumAICreditAmountsByActionRefPrefixTx returns the sum of `amount` across all
+// credit transactions matching action with reference matching the given LIKE
+// pattern. Used by the charge.refunded handler to compute cumulative prior
+// refund debits on a charge (refund rows reference charge.ID:refund.ID, so
+// the prefix is charge.ID:%).
+func (db *Database) SumAICreditAmountsByActionRefPrefixTx(tx bun.IDB, action, refPrefix string) (int, error) {
+	var sum int
+	err := tx.NewRaw(
+		"SELECT COALESCE(SUM(amount), 0) FROM ai_credit_transactions WHERE action = ? AND reference LIKE ?",
+		action, refPrefix,
+	).Scan(context.Background(), &sum)
+	return sum, err
+}
+
 // --- LLM Token Usage ---
 
 func (db *Database) CreateLLMTokenUsage(usage *models.LLMTokenUsage) error {

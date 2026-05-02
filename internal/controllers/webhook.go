@@ -1,10 +1,13 @@
 package controllers
 
 import (
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"net/http"
 	"strconv"
 	"time"
@@ -14,6 +17,7 @@ import (
 	"github.com/knid/wemob/internal/models"
 	"github.com/posthog/posthog-go"
 	"github.com/stripe/stripe-go/v82"
+	checkoutsession "github.com/stripe/stripe-go/v82/checkout/session"
 	"github.com/stripe/stripe-go/v82/webhook"
 	"github.com/uptrace/bun"
 )
@@ -652,6 +656,126 @@ func (c *Controller) processWebhookEventTx(tx bun.Tx, event stripe.Event) ([]fun
 			Set("session_id", cs.ID).
 			Set("amount_total", cs.AmountTotal))
 		c.IdentifyUser(user)
+
+	case "charge.refunded":
+		var charge stripe.Charge
+		if err := json.Unmarshal(event.Data.Raw, &charge); err != nil {
+			slog.Error("webhook: failed to unmarshal charge", "error", err, "event_id", event.ID)
+			return nil, nil
+		}
+
+		if charge.Amount <= 0 || charge.AmountRefunded <= 0 {
+			slog.Warn("charge.refunded with non-positive amounts; skipping",
+				"charge_id", charge.ID, "amount", charge.Amount, "amount_refunded", charge.AmountRefunded)
+			break
+		}
+
+		// Resolve candidate references for the original purchase row. Existing
+		// purchases store cs.ID (see checkout.session.completed); fall back to
+		// payment_intent and charge IDs for resilience against future changes.
+		candidates := []string{}
+		if charge.PaymentIntent != nil && charge.PaymentIntent.ID != "" {
+			listParams := &stripe.CheckoutSessionListParams{PaymentIntent: stripe.String(charge.PaymentIntent.ID)}
+			iter := checkoutsession.List(listParams)
+			for iter.Next() {
+				if s := iter.CheckoutSession(); s != nil && s.ID != "" {
+					candidates = append(candidates, s.ID)
+				}
+			}
+			if iterErr := iter.Err(); iterErr != nil {
+				slog.Warn("charge.refunded: failed to list checkout sessions for payment_intent",
+					"error", iterErr, "charge_id", charge.ID, "payment_intent", charge.PaymentIntent.ID)
+			}
+			candidates = append(candidates, charge.PaymentIntent.ID)
+		}
+		candidates = append(candidates, charge.ID)
+
+		original, err := c.DB.GetAICreditTransactionByActionRefsTx(tx, "purchase", candidates)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				slog.Warn("charge.refunded: no matching purchase row; skipping",
+					"charge_id", charge.ID, "candidates", candidates)
+				break
+			}
+			return nil, fmt.Errorf("lookup purchase tx for charge %s: %w", charge.ID, err)
+		}
+
+		var latestRefund *stripe.Refund
+		if charge.Refunds != nil {
+			for _, r := range charge.Refunds.Data {
+				if r == nil {
+					continue
+				}
+				if latestRefund == nil || r.Created > latestRefund.Created {
+					latestRefund = r
+				}
+			}
+		}
+		if latestRefund == nil || latestRefund.ID == "" {
+			slog.Warn("charge.refunded: event has no refund records; skipping",
+				"charge_id", charge.ID)
+			break
+		}
+
+		// Stripe re-fires charge.refunded for each refund; AmountRefunded is
+		// cumulative across all refunds on the charge. targetDebit is the total
+		// debit that should exist; priorDebit is what we've already written on
+		// earlier refund rows for this charge. Only write the delta.
+		refundFraction := float64(charge.AmountRefunded) / float64(charge.Amount)
+		creditsToDebit := int(math.Round(float64(original.Amount) * refundFraction))
+		if charge.AmountRefunded == charge.Amount {
+			creditsToDebit = original.Amount
+		}
+		targetDebit := -creditsToDebit
+
+		priorDebit, err := c.DB.SumAICreditAmountsByActionRefPrefixTx(tx, "refund", charge.ID+":%")
+		if err != nil {
+			return nil, fmt.Errorf("sum prior refund debits for charge %s: %w", charge.ID, err)
+		}
+		thisDelta := targetDebit - priorDebit
+		if thisDelta == 0 {
+			slog.Info("charge.refunded: no delta to apply", "charge_id", charge.ID,
+				"target_debit", targetDebit, "prior_debit", priorDebit)
+			break
+		}
+
+		balance, err := c.DB.GetAICreditsBalanceByOrg(original.OrganizationID.String())
+		if err != nil {
+			return nil, fmt.Errorf("get balance for org %s: %w", original.OrganizationID, err)
+		}
+
+		owner, err := c.DB.GetUserById(original.UserID.String())
+		if err != nil {
+			return nil, fmt.Errorf("user %s not found for refund: %w", original.UserID, err)
+		}
+
+		refundRef := charge.ID + ":" + latestRefund.ID
+		if err := c.AddAICreditsInTx(tx, owner, original.OrganizationID, balance.ID, thisDelta, "refund", refundRef); err != nil {
+			return nil, fmt.Errorf("debit %d credits for refund %s: %w", thisDelta, refundRef, err)
+		}
+
+		slog.Info("credits refunded", "user_id", owner.ID, "org_id", original.OrganizationID,
+			"charge_id", charge.ID, "refund_id", latestRefund.ID,
+			"delta", thisDelta, "target_debit", targetDebit, "prior_debit", priorDebit,
+			"amount_refunded", charge.AmountRefunded, "amount", charge.Amount)
+
+		addHook(owner, constants.EVENT_CREDITS_REFUNDED, map[string]any{
+			"charge_id":       charge.ID,
+			"refund_id":       latestRefund.ID,
+			"delta":           thisDelta,
+			"target_debit":    targetDebit,
+			"prior_debit":     priorDebit,
+			"amount_refunded": charge.AmountRefunded,
+			"amount":          charge.Amount,
+		})
+
+		c.TrackUserEvent(owner, "credits_refunded", posthog.NewProperties().
+			Set("charge_id", charge.ID).
+			Set("refund_id", latestRefund.ID).
+			Set("delta", thisDelta).
+			Set("amount_refunded", charge.AmountRefunded).
+			Set("amount", charge.Amount))
+		c.IdentifyUser(owner)
 
 	default:
 		slog.Warn("unhandled webhook event type", "event_type", event.Type, "event_id", event.ID)
