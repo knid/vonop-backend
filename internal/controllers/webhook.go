@@ -540,17 +540,47 @@ func (c *Controller) processWebhookEventTx(tx bun.Tx, event stripe.Event) ([]fun
 			return nil, fmt.Errorf("owner not found for org %s: %w", org.ID, err)
 		}
 
+		// Resolve the plan name BEFORE nulling SubscriptionID so the email
+		// payload can name the plan the user is losing.
+		var planName string
+		if org.SubscriptionID != uuid.Nil {
+			if subs, perr := c.DB.GetSubscriptionById(org.SubscriptionID.String()); perr == nil && subs != nil {
+				planName = subs.Name
+			}
+		}
+
 		org.SubscriptionStatus = "canceled"
 		org.SubscriptionID = uuid.Nil
 
-		addHook(owner, constants.EVENT_SUBSCRIPTION_CANCELLED, map[string]any{})
+		// Stripe fires customer.subscription.deleted for both voluntary cancels
+		// and dunning-driven cancels (final retry exhausted / dispute). Branch
+		// on CancellationDetails.Reason so the user gets the right email.
+		cancelEvent := constants.EVENT_SUBSCRIPTION_CANCELED_DUNNING
+		if sub.CancellationDetails != nil &&
+			sub.CancellationDetails.Reason == stripe.SubscriptionCancellationDetailsReasonCancellationRequested {
+			cancelEvent = constants.EVENT_SUBSCRIPTION_CANCELED_VOLUNTARY
+		}
+		cancelReason := ""
+		if sub.CancellationDetails != nil {
+			cancelReason = string(sub.CancellationDetails.Reason)
+		}
+		eventProps := map[string]any{
+			"subscription_id":     sub.ID,
+			"plan_name":           planName,
+			"cancellation_reason": cancelReason,
+		}
+		addHook(owner, cancelEvent, eventProps)
+		// Keep firing the legacy event for backward-compat with existing consumers.
+		addHook(owner, constants.EVENT_SUBSCRIPTION_CANCELLED, eventProps)
 
 		if _, err := c.DB.UpdateOrganization(org); err != nil {
 			return nil, fmt.Errorf("failed to update organization %s after subscription deleted: %w", org.ID, err)
 		}
 
 		c.TrackUserEvent(owner, "subscription_canceled", posthog.NewProperties().
-			Set("subscription_id", sub.ID))
+			Set("subscription_id", sub.ID).
+			Set("cancellation_reason", cancelReason).
+			Set("category", cancelEvent))
 		c.IdentifyUser(owner)
 
 	case "payment_method.attached":
