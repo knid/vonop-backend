@@ -3,8 +3,10 @@ package controllers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -16,6 +18,23 @@ import (
 	"github.com/knid/wemob/internal/tasks"
 	"github.com/posthog/posthog-go"
 )
+
+// ErrDeployInProgress is returned by CreateQueuedWebDeployment when the
+// partial unique index on (app_project_id, platform) WHERE non-terminal
+// rejects the insert because another deploy is already enqueued or running.
+var ErrDeployInProgress = errors.New("deploy already in progress for this project")
+
+func isUniqueViolation(err error) bool {
+	if err == nil {
+		return false
+	}
+	type pgError interface{ SQLState() string }
+	var pe pgError
+	if errors.As(err, &pe) {
+		return pe.SQLState() == "23505"
+	}
+	return strings.Contains(err.Error(), "23505") || strings.Contains(err.Error(), "duplicate key")
+}
 
 // CreateQueuedWebDeployment writes a deployment row in 'queued' state. The
 // worker will flip it through 'building' → 'deploying' → 'deployed'/'failed'.
@@ -33,6 +52,9 @@ func (c *Controller) CreateQueuedWebDeployment(project *models.AppProject, user 
 	}
 	deployment, err := c.DB.CreateAppDeployment(deployment)
 	if err != nil {
+		if isUniqueViolation(err) {
+			return nil, ErrDeployInProgress
+		}
 		return nil, err
 	}
 

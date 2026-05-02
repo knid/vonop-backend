@@ -10,6 +10,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-playground/validator/v10"
 	"github.com/knid/wemob/internal/constants"
+	"github.com/knid/wemob/internal/controllers"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/utils"
@@ -103,6 +104,10 @@ func (v *HttpViews) DeployAppWeb(w http.ResponseWriter, r *http.Request) {
 
 	deployment, err := v.Controller.CreateQueuedWebDeployment(project, user)
 	if err != nil {
+		if errors.Is(err, controllers.ErrDeployInProgress) {
+			utils.JSONErrorCode(w, constants.ErrDeployInProgress, http.StatusConflict, nil)
+			return
+		}
 		utils.JSONInternalError(w, err)
 		return
 	}

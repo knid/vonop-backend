@@ -367,6 +367,12 @@ func createSchema(db *bun.DB) error {
 		// gateway_chat_pending row is written (Amount=0). Nullable so legacy
 		// rows and non-gateway transactions stay untouched.
 		`ALTER TABLE ai_credit_transactions ADD COLUMN IF NOT EXISTS pending_amount double precision`,
+		// Partial unique index: at most one non-terminal deployment per
+		// (project, platform). Catches the concurrent-POST race that the
+		// app-level GetBuildingAppDeployment pre-check can't cover.
+		`CREATE UNIQUE INDEX IF NOT EXISTS uniq_app_deployments_in_progress
+		   ON app_deployments (app_project_id, platform)
+		   WHERE status IN ('queued','building','deploying')`,
 	}
 
 	// Deduplicate before creating unique indexes (keep the latest row per group)
@@ -405,7 +411,7 @@ func createSchema(db *bun.DB) error {
 	// Table renames go in renameStatements below, not here — they run unconditionally.
 	var migrationsDone bool
 	row := db.QueryRowContext(context.Background(),
-		"SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='ai_credit_transactions' AND column_name='pending_amount')")
+		"SELECT EXISTS(SELECT 1 FROM pg_indexes WHERE indexname='uniq_app_deployments_in_progress')")
 	if err := row.Scan(&migrationsDone); err != nil {
 		migrationsDone = false
 	}
