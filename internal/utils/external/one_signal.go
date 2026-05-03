@@ -2,6 +2,7 @@ package external
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,10 +14,23 @@ import (
 	"github.com/knid/wemob/internal/models"
 )
 
-var onesignalHTTPClient = &http.Client{Timeout: 10 * time.Second}
+var (
+	onesignalHTTPClient = &http.Client{Timeout: 30 * time.Second}
+	onesignalAPIBaseURL = "https://api.onesignal.com"
+)
+
+// SetOneSignalTestEndpoint redirects all OneSignal calls (CreateApplication,
+// CreateAppToken, UploadAPNSP8Key, SendOneSignalNotification, SendNotificationViaSDK)
+// to a test server. Returns a restore function. Test-only; do not call from
+// production code.
+func SetOneSignalTestEndpoint(u string) (restore func()) {
+	prev := onesignalAPIBaseURL
+	onesignalAPIBaseURL = u
+	return func() { onesignalAPIBaseURL = prev }
+}
 
 func CreateOneSignalApplication(project models.Project, orgId, orgApiKey, fcmB64 string) (string, error) {
-	url := "https://api.onesignal.com/apps"
+	url := onesignalAPIBaseURL + "/apps"
 
 	payloadStr := map[string]string{
 		"name":                        project.PackageName,
@@ -54,7 +68,7 @@ func CreateOneSignalApplication(project models.Project, orgId, orgApiKey, fcmB64
 }
 
 func CreateOneSignalAppToken(project models.Project, orgApiKey string) (string, error) {
-	url := fmt.Sprintf("https://api.onesignal.com/apps/%s/auth/tokens", project.OneSignalAppID)
+	url := fmt.Sprintf("%s/apps/%s/auth/tokens", onesignalAPIBaseURL, project.OneSignalAppID)
 
 	payloadStr := map[string]string{
 		"name": "wemob-api",
@@ -88,7 +102,7 @@ func CreateOneSignalAppToken(project models.Project, orgApiKey string) (string, 
 }
 
 func UploadAPNSP8KeyToOneSignal(project models.Project, apnsP8Key string, apnsKeyID string, apnsTeamID string, apnsBundleID string, orgId, orgApiKey string) error {
-	url := fmt.Sprintf("https://api.onesignal.com/apps/%s", project.OneSignalAppID)
+	url := fmt.Sprintf("%s/apps/%s", onesignalAPIBaseURL, project.OneSignalAppID)
 	payloadStr := map[string]string{
 		"organization_id": orgId,
 		"apns_p8":         apnsP8Key,
@@ -126,7 +140,7 @@ func UploadAPNSP8KeyToOneSignal(project models.Project, apnsP8Key string, apnsKe
 }
 
 func SendOneSignalNotification(notification *models.Notification, project *models.Project) error {
-	url := "https://api.onesignal.com/notifications?c=push"
+	url := onesignalAPIBaseURL + "/notifications?c=push"
 
 	payloadStr := map[string]any{
 		"app_id": project.OneSignalAppID,
@@ -174,4 +188,130 @@ func SendOneSignalNotification(notification *models.Notification, project *model
 	json.Unmarshal(body, &response)
 
 	return nil
+}
+
+// SendNotificationParams is the structured payload for SendNotificationViaSDK.
+// Use Headings + Contents maps keyed by IETF language tag (e.g. "en", "tr") so
+// the user app can show the right locale automatically when OneSignal picks
+// based on the device language.
+type SendNotificationParams struct {
+	Headings map[string]string // {"en": "Title", "tr": "Başlık"}
+	Contents map[string]string // {"en": "Body", "tr": "Gövde"}
+
+	// Audience — exactly one of IncludedSegments / IncludeAliases must be non-empty.
+	// IncludedSegments is the OneSignal segment-name list (e.g. ["Subscribed Users"]).
+	// IncludeAliases.external_id targets specific Better-Auth user IDs.
+	IncludedSegments []string
+	IncludeAliases   map[string][]string // {"external_id": ["user-uuid-1", "user-uuid-2"]}
+
+	// Optional metadata for client-side handling (deep-link, custom data).
+	Data map[string]string
+}
+
+// SendNotificationResult is the OneSignal response we surface to callers.
+// The OneSignal v1 shape returns id + recipients (int).
+type SendNotificationResult struct {
+	NotificationID  string `json:"id"`
+	RecipientsCount int    `json:"recipients"`
+}
+
+// ErrOneSignalAuth is returned on 401 (bad/missing REST API key for the app).
+var ErrOneSignalAuth = errors.New("onesignal: authentication failed (401) — check rest API key")
+
+// ErrOneSignalRateLimit is returned after exhausting the 429 retry budget.
+var ErrOneSignalRateLimit = errors.New("onesignal: rate limit exceeded after retries")
+
+// SendNotificationViaSDK posts a structured notification to OneSignal's v1
+// notifications endpoint using the per-tenant REST API key.
+//
+// Retry policy:
+//
+//	429 → 3 attempts with exponential backoff (1s, 2s, 4s)
+//	5xx → 1 retry
+//	401 → wrap as ErrOneSignalAuth, no retry
+//	other 4xx → fail fast
+//
+// Total worst-case ~7s.
+func SendNotificationViaSDK(ctx context.Context, appID, restAPIKey string, params SendNotificationParams) (*SendNotificationResult, error) {
+	if appID == "" {
+		return nil, errors.New("onesignal: appID is required")
+	}
+	if restAPIKey == "" {
+		return nil, errors.New("onesignal: restAPIKey is required")
+	}
+	if len(params.Headings) == 0 || len(params.Contents) == 0 {
+		return nil, errors.New("onesignal: headings and contents are required")
+	}
+	if len(params.IncludedSegments) == 0 && len(params.IncludeAliases) == 0 {
+		return nil, errors.New("onesignal: must specify either IncludedSegments or IncludeAliases")
+	}
+
+	body := map[string]any{
+		"app_id":   appID,
+		"headings": params.Headings,
+		"contents": params.Contents,
+	}
+	if len(params.IncludedSegments) > 0 {
+		body["included_segments"] = params.IncludedSegments
+	}
+	if len(params.IncludeAliases) > 0 {
+		body["include_aliases"] = params.IncludeAliases
+		body["target_channel"] = "push"
+	}
+	if len(params.Data) > 0 {
+		body["data"] = params.Data
+	}
+
+	delays := []time.Duration{0, 1 * time.Second, 2 * time.Second, 4 * time.Second}
+	var lastErr error
+
+	for attempt, delay := range delays {
+		if delay > 0 {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(delay):
+			}
+		}
+
+		marshalled, _ := json.Marshal(body)
+		req, err := http.NewRequestWithContext(ctx, "POST", onesignalAPIBaseURL+"/notifications", bytes.NewReader(marshalled))
+		if err != nil {
+			return nil, fmt.Errorf("onesignal: new request: %w", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Basic "+restAPIKey)
+
+		resp, err := onesignalHTTPClient.Do(req)
+		if err != nil {
+			lastErr = fmt.Errorf("onesignal: http: %w", err)
+			if attempt >= 1 {
+				return nil, lastErr
+			}
+			continue
+		}
+		respBody, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+
+		switch {
+		case resp.StatusCode >= 200 && resp.StatusCode < 300:
+			var out SendNotificationResult
+			if err := json.Unmarshal(respBody, &out); err != nil {
+				return nil, fmt.Errorf("onesignal: unmarshal %d: %w", resp.StatusCode, err)
+			}
+			return &out, nil
+		case resp.StatusCode == 401:
+			return nil, ErrOneSignalAuth
+		case resp.StatusCode == 429:
+			lastErr = fmt.Errorf("%w: %s", ErrOneSignalRateLimit, string(respBody))
+		case resp.StatusCode >= 500:
+			lastErr = fmt.Errorf("onesignal: server %d: %s", resp.StatusCode, string(respBody))
+			if attempt >= 1 {
+				return nil, lastErr
+			}
+		default:
+			return nil, fmt.Errorf("onesignal: client %d: %s", resp.StatusCode, string(respBody))
+		}
+	}
+	return nil, lastErr
 }

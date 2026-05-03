@@ -20,6 +20,7 @@ import (
 	"github.com/knid/wemob/internal/services/fly"
 	"github.com/knid/wemob/internal/services/gitea"
 	"github.com/knid/wemob/internal/services/remoteconfig"
+	"github.com/knid/wemob/internal/services/revenuecat"
 	e2bService "github.com/knid/wemob/internal/services/e2b"
 	caddyService "github.com/knid/wemob/internal/services/caddy"
 	"github.com/posthog/posthog-go"
@@ -38,6 +39,10 @@ type Controller struct {
 	CredStore              *storage.CredStore
 	ConcurrentBuildLimiter chan struct{}
 	CodemagicService       *codemagic.Service
+	// RevenueCatService is nil when REVENUECAT_API_KEY is unset (graceful
+	// degrade: IAP auto-provisioning skips, builds proceed with empty IAP
+	// keys, the template's lib/iap.ts initIAP() no-ops + warns).
+	RevenueCatService      *revenuecat.Service
 	FlyService             *fly.Service
 	GiteaService           *gitea.Service
 	NeonService            *neon.Service
@@ -67,6 +72,7 @@ func NewController(db *database.Database, concurrentBuildLimiter chan struct{},
 	posthogClient posthog.Client,
 	gitRepoService *gitrepo.Service,
 	codemagicService *codemagic.Service,
+	revenueCatService *revenuecat.Service,
 	remoteConfigService *remoteconfig.Service,
 	e2b *e2bService.Service,
 	edgeIPs []string,
@@ -85,6 +91,7 @@ func NewController(db *database.Database, concurrentBuildLimiter chan struct{},
 		CredStore:              credStore,
 		SecretManager:          secretManager,
 		CodemagicService:       codemagicService,
+		RevenueCatService:      revenueCatService,
 		FlyService:             flyService,
 		GiteaService:           giteaService,
 		NeonService:            neonService,

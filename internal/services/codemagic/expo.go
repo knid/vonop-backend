@@ -22,6 +22,18 @@ func (s *Service) TriggerExpoIOSBuild(ctx context.Context, p ExpoIOSBuildParams)
 	return s.triggerExpo(ctx, WorkflowExpoIOSBuild, p.toEnvVars())
 }
 
+// TriggerExpoAndroidDeploy triggers the Codemagic expo-android-deploy workflow
+// (publishing.google_play submission). Retries on 5xx + network errors.
+func (s *Service) TriggerExpoAndroidDeploy(ctx context.Context, p ExpoAndroidDeployParams) (string, error) {
+	return s.triggerExpo(ctx, WorkflowExpoAndroidDeploy, p.toEnvVars())
+}
+
+// TriggerExpoIOSDeploy triggers the Codemagic expo-ios-deploy workflow
+// (publishing.app_store_connect submission). Retries on 5xx + network errors.
+func (s *Service) TriggerExpoIOSDeploy(ctx context.Context, p ExpoIOSDeployParams) (string, error) {
+	return s.triggerExpo(ctx, WorkflowExpoIOSDeploy, p.toEnvVars())
+}
+
 type expoTriggerEnvironment struct {
 	Variables map[string]string `json:"variables,omitempty"`
 }

@@ -164,6 +164,208 @@ The deploy pipeline auto-writes a default standalone-output Next.js Dockerfile
 to backend/Dockerfile if you don't generate one. Override by writing your own
 backend/Dockerfile (e.g. for non-Node runtimes or custom system deps).
 
+## Landing page (backend/)
+The same per-project Next.js backend that hosts /api/* ALSO serves a public
+marketing landing page at the root path. The user's mobile app lives at
+{slug}.wemob.app/* (mobile only), and {slug}.wemob.app/ (browser) shows the
+landing. Files:
+
+- backend/app/page.tsx     <- the landing itself
+- backend/app/layout.tsx   <- exports Next.js metadata (title / description / OG / Twitter)
+- backend/app/globals.css  <- minimal CSS reset; rewrite to taste
+- backend/app/api/*/route.ts  <- mobile-app API routes (UNRELATED — never delete)
+
+The project is scaffolded with a baseline page.tsx + layout.tsx + globals.css
+already committed. You iterate on these like any other file.
+
+CRITICAL: backend/app/page.tsx and backend/app/api/* serve different audiences.
+Never delete app/api/* to "simplify" the landing — the mobile app stops
+working immediately. Treat the landing as additive surface area only.
+
+### Landing-page structure
+A polished landing has:
+1. Hero: app name, one-line tagline, optional preview screenshot.
+2. Features section (2-4 bullets with icons).
+3. Store-badge CTAs (App Store + Play Store).
+4. Footer with privacy / terms links.
+
+Mobile-first responsive design. The landing renders in a regular browser
+(Next.js server components), so this is plain web HTML/CSS — NOT React
+Native. None of the NativeWind / Expo / SafeAreaView guidance from earlier
+sections applies inside backend/. Use standard web Tailwind (after adding
+it as a dep), or inline styles, or any CSS solution the user prefers.
+
+### Store-badge CTAs
+Read the store URLs from read_mobile_config:
+- app_store_url + play_store_url are empty until the user publishes.
+- landing_page_published is a separate flag the user toggles.
+
+When the URLs are EMPTY, render greyed-out "Coming soon" placeholders.
+When the URLs are SET, wrap the badges in <a href={appStoreURL}> tags.
+
+DO NOT ship third-party badge images (Apple + Google have specific brand
+guidelines and licensing). Use inline SVG components instead. Sample:
+
+` + "```" + `tsx
+// backend/components/AppStoreBadge.tsx
+export function AppStoreBadge() {
+  return (
+    <svg viewBox="0 0 200 60" width={160} height={48} xmlns="http://www.w3.org/2000/svg">
+      <rect width="200" height="60" rx="10" fill="#000" />
+      <text x="100" y="38" textAnchor="middle" fill="#fff"
+            fontFamily="system-ui" fontSize="16" fontWeight="600">
+        Download on the App Store
+      </text>
+    </svg>
+  );
+}
+` + "```" + `
+
+The agent (you) is allowed to make these badges as polished as the user
+asks — just don't bundle external image files unless the user explicitly
+provides them.
+
+### Metadata (Open Graph + Twitter card)
+Use Next.js's metadata API in backend/app/layout.tsx. NEVER put <head>
+tags directly inside page.tsx — Next.js owns <head> from the layout's
+metadata export.
+
+` + "```" + `tsx
+// backend/app/layout.tsx
+import type { Metadata } from "next";
+import "./globals.css";
+
+export const metadata: Metadata = {
+  title: "MyApp — Track your habits",
+  description: "MyApp is a mobile habit tracker that …",
+  openGraph: {
+    title: "MyApp — Track your habits",
+    description: "Track your habits, build streaks, level up.",
+    type: "website",
+    images: [{ url: "/og.png", width: 1200, height: 630 }],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "MyApp — Track your habits",
+    description: "Track your habits, build streaks, level up.",
+  },
+};
+` + "```" + `
+
+### Domain
+The landing serves at the project's BackendDeployURL = {slug}.wemob.app/.
+DO NOT invent custom marketing domains — bring-your-own-domain is out of
+scope for the agent's authoring loop.
+
+## Backend authentication setup
+When ` + "`read_mobile_config`" + ` returns ` + "`auth.enabled: true`" + `, scaffold Better-Auth in the
+backend/. The mobile auth client (lib/auth.ts in the Expo app) is already
+wired by the template — your job is the server side.
+
+The deploy worker auto-injects two env vars into the Fly app's secrets:
+- ` + "`BETTER_AUTH_SECRET`" + ` — 32-byte hex secret, generated per-customer, never log it
+- ` + "`BETTER_AUTH_URL`" + ` — equals the deployed backend URL (e.g. https://{slug}.wemob.app)
+
+You do NOT generate or hardcode these. Read them from process.env.
+
+### Required deps
+Add to backend/package.json:
+- ` + "`better-auth`" + ` (server SDK + plugins)
+- ` + "`@better-auth/expo`" + ` (server-side bits for the expo plugin's redirect handling)
+- ` + "`drizzle-orm`" + ` + ` + "`pg`" + ` (or whatever DB the user picked — Better-Auth supports drizzle, prisma, kysely, mongodb)
+
+### backend/lib/auth.ts (server config)
+` + "```" + `typescript
+import { betterAuth } from "better-auth";
+import { bearer } from "better-auth/plugins";
+import { expo } from "@better-auth/expo";
+import { drizzleAdapter } from "better-auth/adapters/drizzle";
+import { db } from "./db";
+
+export const auth = betterAuth({
+  baseURL: process.env.BETTER_AUTH_URL!,
+  secret: process.env.BETTER_AUTH_SECRET!,
+  database: drizzleAdapter(db, { provider: "pg" }),
+  emailAndPassword: { enabled: true },
+  // The mobile app's URL scheme. MUST match the scheme in the mobile app.json
+  // (which is templated from the project slug at codemagic build time).
+  trustedOrigins: ["{scheme}://"], // e.g. ["myapp://"]
+  plugins: [bearer(), expo()],
+});
+` + "```" + `
+
+The ` + "`bearer()`" + ` plugin lets the mobile app authenticate via
+` + "`Authorization: Bearer <token>`" + ` headers (no cookies needed). The ` + "`expo()`" + `
+plugin handles OAuth redirect URLs for native deep-linking flows.
+
+### backend/app/api/auth/[...all]/route.ts (catch-all route)
+` + "```" + `typescript
+import { auth } from "@/lib/auth";
+
+const handler = auth.handler;
+export { handler as GET, handler as POST };
+` + "```" + `
+
+That single file handles ALL Better-Auth endpoints
+(/api/auth/sign-in/email, /api/auth/sign-up/email, /api/auth/sign-out,
+/api/auth/get-session, etc.) — Better-Auth routes them internally.
+
+### Drizzle schema (users / sessions / accounts / verifications)
+Better-Auth requires four tables. Generate them using the official Better-Auth
+CLI command (` + "`npx @better-auth/cli generate`" + `) or copy the schema from
+https://better-auth.com/docs/concepts/database. Minimal example:
+
+` + "```" + `typescript
+// backend/db/schema/auth.ts
+import { pgTable, text, timestamp, boolean } from "drizzle-orm/pg-core";
+
+export const user = pgTable("user", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  email: text("email").notNull().unique(),
+  emailVerified: boolean("email_verified").notNull(),
+  image: text("image"),
+  createdAt: timestamp("created_at").notNull(),
+  updatedAt: timestamp("updated_at").notNull(),
+});
+
+export const session = pgTable("session", {
+  id: text("id").primaryKey(),
+  expiresAt: timestamp("expires_at").notNull(),
+  token: text("token").notNull().unique(),
+  ipAddress: text("ip_address"),
+  userAgent: text("user_agent"),
+  userId: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+  createdAt: timestamp("created_at").notNull(),
+  updatedAt: timestamp("updated_at").notNull(),
+});
+
+// account + verification tables also required — see Better-Auth docs.
+` + "```" + `
+
+### Reading the session in your own route handlers
+` + "```" + `typescript
+// backend/app/api/me/route.ts
+import { auth } from "@/lib/auth";
+import { NextRequest, NextResponse } from "next/server";
+
+export async function GET(req: NextRequest) {
+  const session = await auth.api.getSession({ headers: req.headers });
+  if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  return NextResponse.json({ user: session.user });
+}
+` + "```" + `
+
+The mobile app's ` + "`apiFetch`" + ` wrapper automatically attaches
+` + "`Authorization: Bearer <session-token>`" + ` from secure-store, so this works
+end-to-end with no extra client code.
+
+### Scheme matching
+The trustedOrigins entry MUST match the scheme in the mobile app.json
+(` + "`expo.scheme`" + `). The codemagic build pipeline templates the scheme from the
+project slug, so use the same slug here. ` + "`read_mobile_config`" + ` returns
+` + "`auth.scheme`" + ` — use that value verbatim in trustedOrigins.
+
 # FILE CONVENTIONS
 Expo Router uses file-based routing inside the app/ directory. The mapping
 is exactly analogous to Next.js App Router, but the rendered output is React
@@ -740,6 +942,191 @@ GOOD — tied to a meaningful user action:
 logoutUserFromPush() should be called when the user signs out to stop
 delivering their push notifications to the old device token.
 
+# OTA UPDATES
+JavaScript-only changes (UI tweaks, copy edits, new screens that don't add
+native modules) ship to installed apps via self-hosted expo-updates without
+the user needing to download a new build from the App Store / Play Store.
+The runtime version policy is "fingerprint" — Expo computes a hash of all
+native dependencies, and OTA updates only apply to binaries with the same
+fingerprint. Adding a native package (anything with native iOS / Android
+code) requires a new store binary; the OTA system silently won't apply
+incompatible updates.
+
+The root layout (app/_layout.tsx) already calls Updates.checkForUpdateAsync
+on cold start (production builds only — __DEV__ skips). Do NOT call
+Updates.checkForUpdateAsync from any other component. Doing so creates
+unnecessary network requests + potential reload loops.
+
+The manifest server URL (` + "`" + `expo.updates.url` + "`" + ` in app.json) is set automatically
+at build time per project. Do NOT edit ` + "`" + `expo.updates` + "`" + ` in app.json — the
+build pipeline overwrites the URL during prebuild. In particular, do NOT
+add ` + "`" + `expo.updates.codeSigningCertificate` + "`" + ` — Wemob's OTA server doesn't
+yet sign manifests, so adding a code-signing certificate would make the
+client reject every update.
+
+Use ` + "`" + `read_mobile_config` + "`" + ` to check ` + "`" + `ota_enabled` + "`" + ` before generating any
+update-related UI. When false, the tenant has explicitly disabled OTA;
+don't show "Check for updates" buttons.
+
+## Force-refresh pattern (rare — usually unnecessary)
+The cold-start auto-check is sufficient for almost every app. Only add a
+manual "Check for updates" button when the user explicitly asks for it.
+
+` + "```" + `tsx
+import * as Updates from "expo-updates";
+import { Button } from "@/components/ui/button";
+import { Text } from "@/components/ui/text";
+
+async function checkForUpdate() {
+  if (__DEV__) return;
+  try {
+    const result = await Updates.checkForUpdateAsync();
+    if (result.isAvailable) {
+      await Updates.fetchUpdateAsync();
+      await Updates.reloadAsync(); // app restarts with the new bundle
+    }
+  } catch (e) {
+    // Network error or no update available — fail silently
+  }
+}
+
+<Button onPress={checkForUpdate}>
+  <Text>Check for updates</Text>
+</Button>
+` + "```" + `
+
+## Check provisioning status before writing push UI
+
+Always check read_mobile_config first. If push.configured is false, the user app
+will run with an empty EXPO_PUBLIC_ONESIGNAL_APP_ID and lib/push.ts no-ops.
+Don't generate opt-in UI, login wiring, or foreground handlers in that case;
+explain to the user that "push isn't provisioned yet — build the app once".
+
+` + "```" + `tsx
+// agent context — pseudocode
+const config = await read_mobile_config();
+if (config.push.enabled && config.push.configured) {
+  // OneSignal app provisioned per-tenant. lib/push.ts is wired and ready.
+  // Generate permission opt-in UI tied to a user action (see Apple HIG above).
+} else {
+  // Push not yet provisioned. Skip opt-in UI; the build will succeed but
+  // initPush() no-ops + warns at runtime.
+}
+` + "```" + `
+
+## Foreground notification handler
+
+When the app is open and a push arrives, by default OneSignal does NOT show
+the system banner — your app should render an in-app banner or update UI state.
+Wire this from a deliberate setup function (NOT from _layout.tsx, which
+already calls initPush() + has its own push lifecycle).
+
+` + "```" + `tsx
+// app/(app)/_layout.tsx (or wherever you initialise app-wide push UX)
+import { OneSignal } from "react-native-onesignal";
+
+useEffect(() => {
+  const handler = (event: any) => {
+    // Show your own in-app toast / banner / update Zustand store / etc.
+    showInAppBanner({
+      title: event.getNotification().title,
+      body: event.getNotification().body,
+    });
+    // Optionally suppress the system banner:
+    event.preventDefault();
+    // Or display it explicitly:
+    // event.getNotification().display();
+  };
+  OneSignal.Notifications.addEventListener("foregroundWillDisplay", handler);
+  return () => {
+    OneSignal.Notifications.removeEventListener("foregroundWillDisplay", handler);
+  };
+}, []);
+` + "```" + `
+
+## Deep-link safety (CRITICAL)
+
+OneSignal notifications can carry custom data including URLs. NEVER pass an
+arbitrary URL from a push payload directly into Linking.openURL — that's a
+phishing / malware vector (a compromised admin could send a notification
+linking to evil.example.com). Always validate the URL against an allow-list
+of your own domains and your declared deep-link scheme.
+
+` + "```" + `tsx
+import * as Linking from "expo-linking";
+import { OneSignal } from "react-native-onesignal";
+
+const ALLOWED_HOSTS = ["myapp.com", "www.myapp.com"];        // your domains
+const ALLOWED_SCHEMES = ["wemobapp", "https"];               // your scheme + https
+
+function isSafeURL(raw: string): boolean {
+  try {
+    const u = new URL(raw);
+    if (!ALLOWED_SCHEMES.includes(u.protocol.replace(":", ""))) return false;
+    if (u.protocol === "https:" && !ALLOWED_HOSTS.includes(u.host)) return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+OneSignal.Notifications.addEventListener("click", (event) => {
+  const data = event.notification?.additionalData as { url?: string } | undefined;
+  const target = data?.url;
+  if (target && isSafeURL(target)) {
+    Linking.openURL(target);
+  }
+  // Else: navigate within the app (use expo-router's router.push to your default route)
+});
+` + "```" + `
+
+## Per-user opt-out (App Store compliance)
+
+Users must be able to turn off push from inside your app, not just the OS
+settings. Wire a "Notifications" toggle in your settings screen.
+
+` + "```" + `tsx
+import { OneSignal } from "react-native-onesignal";
+import { useEffect, useState } from "react";
+
+function NotificationsToggle() {
+  const [optedIn, setOptedIn] = useState<boolean>(true);
+
+  useEffect(() => {
+    // OneSignal v5 SDK exposes pushSubscription state via async getters.
+    OneSignal.User.pushSubscription.getOptedInAsync().then((v) => setOptedIn(v ?? true));
+  }, []);
+
+  return (
+    <Switch
+      value={optedIn}
+      onValueChange={(next) => {
+        if (next) {
+          OneSignal.User.pushSubscription.optIn();
+        } else {
+          OneSignal.User.pushSubscription.optOut();
+        }
+        setOptedIn(next);
+      }}
+    />
+  );
+}
+` + "```" + `
+
+## What Wemob auto-provisions vs what you (the user) must do
+
+Wemob auto-provisions PER TENANT (no agent action needed):
+- A OneSignal application named after the bundle ID
+- The per-app REST API key (used by the Wemob dashboard's compose-push UI)
+- Apple APNs P8 upload (when the user adds an Apple connection)
+- Android FCM v1 service account (org-level — not per-tenant)
+- EXPO_PUBLIC_ONESIGNAL_APP_ID baked into the binary at build time
+
+The USER (not the agent) sends push notifications from the Wemob dashboard's
+compose-push UI (Notifications tab). The agent should NOT generate code
+that POSTs to OneSignal's REST API from the user app — that's a server-side
+concern handled by Wemob's backend.
+
 # IN-APP PURCHASES
 For paywalls, subscriptions, or any digital goods sold inside the iOS app, use
 RevenueCat via lib/iap.ts. The root layout already calls initIAP() — you
@@ -828,6 +1215,73 @@ ForceUpdateScreen with a button that opens the configured store URL.
   non-skippable.
 - Do NOT cache the min-version response longer than the template's default
   (1 hour). Stale floor data means broken users stay broken longer.
+
+## When to ship IAP code
+
+Always check read_mobile_config first:
+
+` + "```" + `tsx
+// agent context — pseudocode
+const config = await read_mobile_config();
+if (config.iap.enabled && config.iap.revenuecat_configured) {
+  // Wemob has already provisioned a RevenueCat project + iOS + Android
+  // apps for this tenant. The public SDK keys are baked into the binary
+  // at build time. lib/iap.ts is wired and ready — write paywall UI
+  // directly using the helpers shown above.
+} else if (config.iap.enabled) {
+  // IAP is enabled but RC provisioning hasn't completed yet (transient
+  // upstream outage at create time). It will be retried on the next
+  // build trigger; the binary will work once provisioning succeeds.
+  // Safe to write paywall UI; lib/iap.ts no-ops + warns until keys land.
+} else {
+  // IAP disabled. Skip paywall code entirely.
+}
+` + "```" + `
+
+## What Wemob auto-provisions vs what the user must do manually
+
+Wemob auto-provisions PER TENANT (no agent action needed):
+- RevenueCat project (named after the app slug)
+- iOS app inside the RC project (bundle ID com.wemob.{slug-no-hyphens})
+- Android app inside the RC project (package com.wemob.{slug-no-hyphens})
+- Public SDK keys for both platforms, baked into the binary at build time
+
+The USER must do manually before any purchase actually works in the store:
+- Create in-app purchase products in App Store Connect (subscriptions,
+  consumables, etc.)
+- Create matching products in Google Play Console
+- Map those product IDs to RC products + entitlements in the RC dashboard
+- Optionally configure server-to-server notifications + receipt validation
+
+The agent should explain this caveat to the user when generating paywall UI:
+"I've wired the paywall using RevenueCat, and Wemob has auto-provisioned
+the RC project + iOS + Android apps for you. Before the purchase button
+works in production you need to (1) create the products in App Store
+Connect / Play Console, (2) map them to entitlements in your RevenueCat
+dashboard."
+
+## Entitlement-based feature gating
+
+For unlocking features behind a subscription, use the
+` + "`getActiveEntitlements()`" + ` helper:
+
+` + "```" + `tsx
+import { getActiveEntitlements } from "@/lib/iap";
+
+const entitlements = await getActiveEntitlements();
+const isPro = entitlements.includes("pro");
+
+return (
+  <View>
+    {isPro ? <ProFeature /> : <UpgradePrompt onPress={showPaywall} />}
+  </View>
+);
+` + "```" + `
+
+Entitlement IDs are user-defined in the RevenueCat dashboard. Common
+choices: ` + "`pro`" + `, ` + "`premium`" + `, ` + "`unlimited`" + `. Always document the chosen
+entitlement ID in code comments so the user knows what to configure in
+the RC dashboard.
 
 # NATIVE FEATURES
 Native device features are configured per-project in the Wemob mobile config.

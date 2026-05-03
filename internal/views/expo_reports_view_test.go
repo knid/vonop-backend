@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -204,5 +205,39 @@ func TestUpdateExpoBuildStatus_FutureTimestamp(t *testing.T) {
 	store.mu.Unlock()
 	if evCount != 0 {
 		t.Errorf("expected 0 events stored on future-timestamp request, got %d", evCount)
+	}
+}
+
+// TestUpdateExpoBuildStatus_SubmitPhase verifies the P1.2 phase=submit
+// extension: payloads with phase="submit" are accepted and stored verbatim
+// (the field lands in BuildEvent.Payload jsonb so downstream queries can
+// filter via @> operator).
+func TestUpdateExpoBuildStatus_SubmitPhase(t *testing.T) {
+	store := &fakeBuildEventStoreForViews{}
+	handler := newTestExpoReportsHandler(t, store, testHMACMaster)
+
+	taskID := uuid.New().String()
+	ts := strconv.FormatInt(time.Now().Unix(), 10)
+	body := fmt.Sprintf(`{"task_id":%q,"status":"submitted","phase":"submit","timestamp":%s}`, taskID, ts)
+	sig := signTestRequest(t, taskID, ts, body)
+
+	req := httptest.NewRequest(http.MethodPost, "/v2/reports/expo-build", bytes.NewBufferString(body))
+	req.Header.Set("X-Wemob-Signature", sig)
+	req.Header.Set("X-Wemob-Timestamp", ts)
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+
+	handler.UpdateExpoBuildStatus(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("got %d body=%s", rr.Code, rr.Body.String())
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if len(store.events) != 1 {
+		t.Fatalf("expected 1 stored event, got %d", len(store.events))
+	}
+	if !strings.Contains(string(store.events[0].Payload), `"phase":"submit"`) {
+		t.Errorf("payload missing phase=submit: %s", store.events[0].Payload)
 	}
 }
