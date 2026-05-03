@@ -232,6 +232,10 @@ func createSchema(db *bun.DB) error {
 		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS revenuecat_android_app_id text`,
 		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS revenuecat_public_key_ios text`,
 		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS revenuecat_public_key_android text`,
+		// Force-update / min_version (P3.2)
+		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS min_build_number_ios bigint NOT NULL DEFAULT 0`,
+		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS min_build_number_android bigint NOT NULL DEFAULT 0`,
+		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS min_version_message text`,
 		// GitHub integration fields on users
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS git_hub_access_token text`,
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS git_hub_username text`,
@@ -459,10 +463,10 @@ func createSchema(db *bun.DB) error {
 	// IMPORTANT: when adding a new ALTER TABLE above, update this canary to the newest column,
 	// otherwise the new ALTER will be silently skipped on servers that already have older columns.
 	// Table renames go in renameStatements below, not here — they run unconditionally.
-	// Canary: landing_page_published — the LAST column in the P3.1 batch.
+	// Canary: min_version_message — the LAST column added (P3.2 force-update).
 	var migrationsDone bool
 	row := db.QueryRowContext(context.Background(),
-		"SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='mobile_app_configs' AND column_name='landing_page_published')")
+		"SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='mobile_app_configs' AND column_name='min_version_message')")
 	if err := row.Scan(&migrationsDone); err != nil {
 		migrationsDone = false
 	}
@@ -1752,6 +1756,14 @@ func main() {
 				r.Use(rateLimiter.RateLimit(120, time.Minute, appMiddleware.IPKey))
 				r.Get("/config", httpViews.GetPublicMobileConfig)
 			})
+
+			// Force-update gate: the mobile app cold-start hits this with the
+			// project slug (typical case) or UUID (fallback). Un-authenticated
+			// — the response only exposes operator-controlled values.
+			r.Route("/mobile/{slugOrID}/min-version", func(r chi.Router) {
+				r.Use(rateLimiter.RateLimit(120, time.Minute, appMiddleware.IPKey))
+				r.Get("/", httpViews.GetMinVersion)
+			})
 		})
 		// AI Gateway — separate from /v2 to avoid inheriting UserKey rate limiter
 		r.Route("/v2/gateway", func(r chi.Router) {
@@ -1911,6 +1923,11 @@ func main() {
 						r.Get("/", httpViews.GetAppStoreListing)
 						r.Put("/", httpViews.UpdateAppStoreListing)
 					})
+
+					// Force-update min_build_number (P3.2) — admin/owner-only;
+					// bumping the floor locks out users on older builds, so
+					// non-admins are rejected at the controller layer with 403.
+					r.Patch("/min-version", httpViews.UpdateMinVersion)
 
 					r.Post("/convert-to-mobile", httpViews.ConvertToMobile)
 					r.Post("/capture-screenshot", httpViews.CaptureAppScreenshot)

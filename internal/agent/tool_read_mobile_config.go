@@ -45,12 +45,17 @@ type readMobileConfigOutput struct {
 	// self-hosted expo-updates.
 	OTAEnabled bool `json:"ota_enabled"`
 
-	// Landing-page metadata (P3.1) — empty until the user publishes to the
-	// stores. The agent uses these to decide between real store-badge CTAs
-	// and "Coming soon" placeholders on backend/app/page.tsx.
+	// Landing-page metadata (P3.1).
 	AppStoreURL          string `json:"app_store_url"`
 	PlayStoreURL         string `json:"play_store_url"`
 	LandingPagePublished bool   `json:"landing_page_published"`
+
+	// Force update (P3.2) — read-only. The agent should NOT modify these via
+	// configure_mobile_bridge; they're operator-controlled (admin/owner only)
+	// because bumping the floor locks out users on older builds.
+	MinBuildNumberIOS     int64  `json:"min_build_number_ios"`
+	MinBuildNumberAndroid int64  `json:"min_build_number_android"`
+	MinVersionMessage     string `json:"min_version_message"`
 }
 
 // authInfo summarises the project's authentication configuration.
@@ -111,6 +116,9 @@ func (t *ReadMobileConfigTool) Execute(ctx context.Context, rc *RunContext, _ js
 		out.AppStoreURL = cfg.AppStoreURL
 		out.PlayStoreURL = cfg.PlayStoreURL
 		out.LandingPagePublished = cfg.LandingPagePublished
+		out.MinBuildNumberIOS = cfg.MinBuildNumberIOS
+		out.MinBuildNumberAndroid = cfg.MinBuildNumberAndroid
+		out.MinVersionMessage = cfg.MinVersionMessage
 
 		out.Push.Enabled = cfg.PushEnabled
 		// Configured = there's a real OneSignal app ID on the v1 shadow row

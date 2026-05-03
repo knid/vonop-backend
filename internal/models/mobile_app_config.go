@@ -49,9 +49,7 @@ type MobileAppConfig struct {
 	// Updates (runtime)
 	UpdateCheckEnabled bool `bun:",notnull,default:false" json:"update_check_enabled"`
 
-	// Auth (build + deploy time). When AuthEnabled=true the deploy worker
-	// injects BETTER_AUTH_SECRET + BETTER_AUTH_URL into Fly secrets and the
-	// build worker bakes EXPO_PUBLIC_AUTH_BASE_URL into the mobile binary.
+	// Auth (build + deploy time).
 	AuthEnabled   bool     `bun:",notnull,default:false" json:"auth_enabled"`
 	AuthProviders []string `bun:",array,type:text[]" json:"auth_providers"`
 	AuthScheme    string   `bun:",nullzero" json:"auth_scheme"`
@@ -68,11 +66,18 @@ type MobileAppConfig struct {
 	OTAEnabled        bool   `bun:",notnull,default:true" json:"ota_enabled"`
 	OTAReleaseChannel string `bun:",nullzero,default:'production'" json:"ota_release_channel"`
 
-	// Landing page (P3.1) — store URLs become real CTAs once published; until
-	// then the agent renders "Coming soon" placeholders.
+	// Landing page (P3.1) — store URLs become real CTAs once published.
 	AppStoreURL          string `bun:",nullzero" json:"app_store_url"`
 	PlayStoreURL         string `bun:",nullzero" json:"play_store_url"`
 	LandingPagePublished bool   `bun:",notnull,default:false" json:"landing_page_published"`
+
+	// Force update (P3.2) — per-platform minimum native build number.
+	// 0 means "no minimum" (the gate is disabled). The mobile app reads this
+	// at cold-start via GET /v1/mobile/{slug}/min-version and shows a hard
+	// "update required" screen when its native build < min.
+	MinBuildNumberIOS     int64  `bun:",notnull,default:0" json:"min_build_number_ios"`
+	MinBuildNumberAndroid int64  `bun:",notnull,default:0" json:"min_build_number_android"`
+	MinVersionMessage     string `bun:",nullzero" json:"min_version_message"`
 
 	CreatedAt time.Time `bun:",nullzero,notnull,default:current_timestamp" json:"created_at"`
 	UpdatedAt time.Time `bun:",nullzero,notnull,default:current_timestamp" json:"updated_at"`

@@ -38,15 +38,18 @@ func TestReadMobileConfigTool_ReturnsEnabledMethods(t *testing.T) {
 	}
 
 	cfg := &models.MobileAppConfig{
-		ProjectID:            project.ID,
-		BridgeMethods:        []string{"camera", "biometric"},
-		URLScheme:            "wemobapp",
-		UniversalLinkDomain:  "example.com",
-		BiometricEnabled:     true,
-		OTAEnabled:           true,
-		AppStoreURL:          "https://apps.apple.com/app/example/id123",
-		PlayStoreURL:         "https://play.google.com/store/apps/details?id=com.example",
-		LandingPagePublished: true,
+		ProjectID:             project.ID,
+		BridgeMethods:         []string{"camera", "biometric"},
+		URLScheme:             "wemobapp",
+		UniversalLinkDomain:   "example.com",
+		BiometricEnabled:      true,
+		OTAEnabled:            true,
+		AppStoreURL:           "https://apps.apple.com/app/example/id123",
+		PlayStoreURL:          "https://play.google.com/store/apps/details?id=com.example",
+		LandingPagePublished:  true,
+		MinBuildNumberIOS:     42,
+		MinBuildNumberAndroid: 17,
+		MinVersionMessage:     "Critical fix — please update.",
 	}
 	if _, err := db.DB.NewInsert().Model(cfg).Exec(ctx); err != nil {
 		t.Fatalf("insert mobile config: %v", err)
@@ -93,6 +96,15 @@ func TestReadMobileConfigTool_ReturnsEnabledMethods(t *testing.T) {
 	}
 	if !got.OTAEnabled {
 		t.Errorf("OTAEnabled = false, want true")
+	}
+	if got.MinBuildNumberIOS != 42 {
+		t.Errorf("MinBuildNumberIOS = %d, want 42", got.MinBuildNumberIOS)
+	}
+	if got.MinBuildNumberAndroid != 17 {
+		t.Errorf("MinBuildNumberAndroid = %d, want 17", got.MinBuildNumberAndroid)
+	}
+	if got.MinVersionMessage != "Critical fix — please update." {
+		t.Errorf("MinVersionMessage = %q, want %q", got.MinVersionMessage, "Critical fix — please update.")
 	}
 }
 
