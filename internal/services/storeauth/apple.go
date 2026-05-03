@@ -8,6 +8,7 @@ import (
 	"encoding/pem"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -119,7 +120,14 @@ func parseCertificatesResponse(body []byte) ([]AppleCertificate, error) {
 	}
 	out := make([]AppleCertificate, 0, len(resp.Data))
 	for _, d := range resp.Data {
-		exp, _ := time.Parse(time.RFC3339, d.Attributes.ExpirationDate)
+		exp, err := time.Parse(time.RFC3339, d.Attributes.ExpirationDate)
+		if err != nil {
+			slog.Warn("apple cert: invalid expiration date, skipping",
+				"id", d.ID,
+				"raw", d.Attributes.ExpirationDate,
+				"err", err)
+			continue
+		}
 		out = append(out, AppleCertificate{
 			ID:              d.ID,
 			SerialNumber:    d.Attributes.SerialNumber,
@@ -148,7 +156,14 @@ func parseProfilesResponse(body []byte) ([]AppleProvisioningProfile, error) {
 	}
 	out := make([]AppleProvisioningProfile, 0, len(resp.Data))
 	for _, d := range resp.Data {
-		exp, _ := time.Parse(time.RFC3339, d.Attributes.ExpirationDate)
+		exp, err := time.Parse(time.RFC3339, d.Attributes.ExpirationDate)
+		if err != nil {
+			slog.Warn("apple profile: invalid expiration date, skipping",
+				"id", d.ID,
+				"raw", d.Attributes.ExpirationDate,
+				"err", err)
+			continue
+		}
 		out = append(out, AppleProvisioningProfile{
 			ID:          d.ID,
 			UUID:        d.Attributes.UUID,
