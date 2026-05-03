@@ -24,8 +24,14 @@ type AppProjectResponse struct {
 	Settings      map[string]any `json:"settings"`
 	Status        string         `json:"status"`
 	ScreenshotURL string         `json:"screenshot_url,omitempty"`
-	CreatedAt     time.Time      `json:"created_at"`
-	UpdatedAt     time.Time      `json:"updated_at"`
+	// WebPreviewURL is set for mobile_app_native projects only — it's the
+	// canonical URL of the Expo Web build served by the per-project Fly app
+	// at /_web/. The studio's MobilePreview pane sources its iframe from
+	// here. Empty for non-mobile_app_native projects (omitted via omitempty).
+	// See controllers.WebPreviewURL().
+	WebPreviewURL string    `json:"web_preview_url,omitempty"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 type AppProjectDetailResponse struct {
