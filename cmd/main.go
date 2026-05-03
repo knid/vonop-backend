@@ -17,6 +17,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/cors"
 	"github.com/go-chi/httplog/v3"
+	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/bootstrap"
 	"github.com/knid/wemob/internal/database"
 	appMiddleware "github.com/knid/wemob/internal/middleware"
@@ -958,13 +959,23 @@ func backfillEncryptCredentials(bundb *bun.DB, credStore *storage.CredStore, use
 	// path being present so rows with no encryptable content are excluded —
 	// otherwise the loop would re-fetch them forever (a row with p8 done but
 	// apns_p8_key_path == "" would still match the NULL-ref check).
+	//
+	// Pagination is cursor-based on `id`: each batch fetches rows with id > the
+	// last seen id. This guarantees forward progress even if every row in a
+	// batch fails to encrypt (e.g. orphaned S3 object, IAM gap) — the failed
+	// rows would otherwise reappear in the next SELECT and wedge the loop.
+	// Partial successes are still preserved (a row with one ref encrypted
+	// keeps that ref persisted; subsequent runs pick up the missing leaf).
 	totalApple := 0
+	var appleCursor uuid.UUID
 	for {
 		var rows []models.AppleConnection
 		if err := bundb.NewSelect().
 			Model(&rows).
 			Where("(p8_key_cred_ref IS NULL AND p8_key_path != '') OR (apns_p8_key_cred_ref IS NULL AND apns_p8_key_path != '')").
 			Where("deleted_at IS NULL").
+			Where("id > ?", appleCursor).
+			Order("id ASC").
 			Limit(batchSize).
 			Scan(ctx); err != nil {
 			slog.Error("backfillEncryptCredentials apple: scan failed", "err", err)
@@ -973,6 +984,7 @@ func backfillEncryptCredentials(bundb *bun.DB, credStore *storage.CredStore, use
 		if len(rows) == 0 {
 			break
 		}
+		appleCursor = rows[len(rows)-1].ID
 		for i := range rows {
 			r := &rows[i]
 			changed := false
@@ -1031,13 +1043,17 @@ func backfillEncryptCredentials(bundb *bun.DB, credStore *storage.CredStore, use
 	}
 
 	// Google Play. Single ref column, so the gated WHERE is straightforward.
+	// Same cursor-based pagination as the Apple loop above.
 	totalGoogle := 0
+	var googleCursor uuid.UUID
 	for {
 		var rows []models.GooglePlayConnection
 		if err := bundb.NewSelect().
 			Model(&rows).
 			Where("service_account_cred_ref IS NULL AND service_account_path != ''").
 			Where("deleted_at IS NULL").
+			Where("id > ?", googleCursor).
+			Order("id ASC").
 			Limit(batchSize).
 			Scan(ctx); err != nil {
 			slog.Error("backfillEncryptCredentials google: scan failed", "err", err)
@@ -1046,11 +1062,9 @@ func backfillEncryptCredentials(bundb *bun.DB, credStore *storage.CredStore, use
 		if len(rows) == 0 {
 			break
 		}
+		googleCursor = rows[len(rows)-1].ID
 		for i := range rows {
 			r := &rows[i]
-			if r.ServiceAccountPath == "" {
-				continue
-			}
 			pt, err := userKeys.ReadObjectBytes(ctx, r.ServiceAccountPath)
 			if err != nil {
 				slog.Warn("backfill google sa read", "id", r.ID, "path", r.ServiceAccountPath, "err", err)
