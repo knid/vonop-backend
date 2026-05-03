@@ -139,11 +139,35 @@ try {
 NEVER use raw fetch() directly in screen code. NEVER construct the base URL
 manually. NEVER import API_URL — always go through apiFetch.
 
-## Backend folder structure
-The backend for a mobile_app_native project is a Next.js project in a sibling
-backend/ folder. It has ONLY app/api/*/route.ts Route Handlers — no
-page.tsx files, no frontend UI at all. This is identical to a standard
-Next.js App Router API routes project.
+## Backend folder is OPTIONAL — do not create it by default
+The backend/ subtree is a Next.js project that hosts (1) mobile-app API
+routes at /api/*, and (2) a marketing landing page at /. It is created
+ONLY when the user explicitly asks for server-side functionality. Most
+mobile apps don't need it.
+
+**Skip backend/ entirely for purely client-side apps:** calculators,
+timers, drawing tools, animations, single-screen utilities, offline
+note-takers, local-only games. These run with mobile/ alone — no Fly
+deploy, no /api/* routes, no landing page. Don't create backend/.gitkeep,
+don't write a backend/Dockerfile, don't touch the subtree.
+
+**Create backend/ ONLY when the user asks for one of these:**
+- Persisted data the user can access from multiple devices (todo lists,
+  notes, journals)
+- Authentication / accounts (login, signup, password reset)
+- In-app purchases / subscriptions (when paywall logic needs server-side
+  receipt validation beyond what RevenueCat handles client-side)
+- Push notifications composed by the app (vs operator-composed via the
+  Wemob dashboard, which is already wired)
+- Any AI / LLM call that consumes a server-held API key
+- A marketing landing page at {slug}.wemob.app/
+
+When you DO create backend/, write all four pieces in one turn:
+- backend/package.json — Next.js + whatever DB / auth lib the user picked
+- backend/Dockerfile — standalone-output Next.js (the deploy pipeline writes
+  a default if missing, but writing your own is fine)
+- backend/app/layout.tsx + backend/app/page.tsx — landing or stub
+- backend/app/api/<your-route>/route.ts — the actual API handler
 
 Example backend endpoint at backend/app/api/todos/route.ts:
 
@@ -160,30 +184,16 @@ When the user asks you to write backend logic, put it in
 backend/app/api/<path>/route.ts. When you write frontend screens, call
 those routes via apiFetch.
 
-The deploy pipeline auto-writes a default standalone-output Next.js Dockerfile
-to backend/Dockerfile if you don't generate one. Override by writing your own
-backend/Dockerfile (e.g. for non-Node runtimes or custom system deps).
+CRITICAL: if backend/ exists, backend/app/page.tsx and backend/app/api/*
+serve different audiences (browsers vs the mobile app). Never delete
+app/api/* to "simplify" the landing — the mobile app stops working
+immediately. Treat the landing as additive surface area only.
 
-## Landing page (backend/)
-The same per-project Next.js backend that hosts /api/* ALSO serves a public
-marketing landing page at the root path. The user's mobile app lives at
-{slug}.wemob.app/* (mobile only), and {slug}.wemob.app/ (browser) shows the
-landing. Files:
+### Landing-page structure (only when the user explicitly asks for one)
+DO NOT scaffold a landing page proactively. {slug}.wemob.app/ returning a
+404 is the correct default — most apps never need a marketing site.
 
-- backend/app/page.tsx     <- the landing itself
-- backend/app/layout.tsx   <- exports Next.js metadata (title / description / OG / Twitter)
-- backend/app/globals.css  <- minimal CSS reset; rewrite to taste
-- backend/app/api/*/route.ts  <- mobile-app API routes (UNRELATED — never delete)
-
-The project is scaffolded with a baseline page.tsx + layout.tsx + globals.css
-already committed. You iterate on these like any other file.
-
-CRITICAL: backend/app/page.tsx and backend/app/api/* serve different audiences.
-Never delete app/api/* to "simplify" the landing — the mobile app stops
-working immediately. Treat the landing as additive surface area only.
-
-### Landing-page structure
-A polished landing has:
+When the user does ask for a landing page, a polished one has:
 1. Hero: app name, one-line tagline, optional preview screenshot.
 2. Features section (2-4 bullets with icons).
 3. Store-badge CTAs (App Store + Play Store).
