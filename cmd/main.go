@@ -1862,6 +1862,14 @@ func main() {
 						r.Post("/expo", httpViews.BuildAppExpo)
 					})
 
+					// Mobile submissions (P1.2 — Codemagic publishing blocks).
+					// POST /v2/apps/{appId}/submit/{platform} — submits the latest
+					// successful Expo build to TestFlight (iOS) or the configured
+					// Play track (Android).
+					r.Route("/submit", func(r chi.Router) {
+						r.Post("/{platform}", httpViews.SubmitAppExpo)
+					})
+
 					// Persistent store listing — replaces the per-wizard form
 					// state so icon/title/description/screenshots survive
 					// refresh, re-submission, and future multi-locale work.
