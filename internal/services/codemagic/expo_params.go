@@ -21,6 +21,11 @@ type ExpoAndroidBuildParams struct {
 	FirstBuild       bool
 	IconKey          string
 	EASProjectUUID   string
+	// Build-time public env vars baked into the JS bundle by webpack.
+	// Must be set BEFORE expo prebuild — runtime env is too late (NEXT_PUBLIC-style).
+	// Empty string is passed through; the AI-generated lib/api.ts can fall back.
+	ExpoPublicAPIURL    string
+	ExpoPublicProjectID string
 }
 
 func (p ExpoAndroidBuildParams) toEnvVars() map[string]string {
@@ -35,9 +40,11 @@ func (p ExpoAndroidBuildParams) toEnvVars() map[string]string {
 		"CM_BUILD_NUMBER":      strconv.Itoa(p.BuildNumber),
 		"CM_MARKETING_VERSION": p.MarketingVersion,
 		"CM_SPLASH_COLOR":      p.SplashColor,
-		"CM_FIRST_BUILD":       boolStr(p.FirstBuild),
-		"CM_ICON_KEY":          p.IconKey,
-		"CM_EAS_PROJECT_UUID":  p.EASProjectUUID,
+		"CM_FIRST_BUILD":         boolStr(p.FirstBuild),
+		"CM_ICON_KEY":            p.IconKey,
+		"CM_EAS_PROJECT_UUID":    p.EASProjectUUID,
+		"EXPO_PUBLIC_API_URL":    p.ExpoPublicAPIURL,
+		"EXPO_PUBLIC_PROJECT_ID": p.ExpoPublicProjectID,
 	}
 }
 
@@ -55,6 +62,9 @@ type ExpoIOSBuildParams struct {
 	IconKey          string
 	EASProjectUUID   string
 	XcodeScheme      string // defaults to "WemobApp"
+	// Build-time public env vars (see ExpoAndroidBuildParams above).
+	ExpoPublicAPIURL    string
+	ExpoPublicProjectID string
 }
 
 func (p ExpoIOSBuildParams) toEnvVars() map[string]string {
@@ -73,8 +83,10 @@ func (p ExpoIOSBuildParams) toEnvVars() map[string]string {
 		"CM_BUILD_NUMBER":      strconv.Itoa(p.BuildNumber),
 		"CM_MARKETING_VERSION": p.MarketingVersion,
 		"CM_SPLASH_COLOR":      p.SplashColor,
-		"CM_ICON_KEY":          p.IconKey,
-		"CM_EAS_PROJECT_UUID":  p.EASProjectUUID,
-		"XCODE_SCHEME":         scheme,
+		"CM_ICON_KEY":            p.IconKey,
+		"CM_EAS_PROJECT_UUID":    p.EASProjectUUID,
+		"XCODE_SCHEME":           scheme,
+		"EXPO_PUBLIC_API_URL":    p.ExpoPublicAPIURL,
+		"EXPO_PUBLIC_PROJECT_ID": p.ExpoPublicProjectID,
 	}
 }

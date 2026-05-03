@@ -24,19 +24,21 @@ func TestTriggerExpoAndroidBuild_PassesAllExpectedEnvVars(t *testing.T) {
 	s := newServiceForTest(t, server.URL, "test-token", "expo-app-id")
 
 	params := ExpoAndroidBuildParams{
-		ProjectID:        uuid.New(),
-		BuildID:          uuid.New(),
-		TaskID:           uuid.New(),
-		AppTitle:         "Test App",
-		AppSlug:          "testapp",
-		BundleID:         "com.wemob.testapp",
-		PackageName:      "com.wemob.testapp",
-		BuildNumber:      42,
-		MarketingVersion: "1.2.0",
-		SplashColor:      "#000000",
-		FirstBuild:       true,
-		IconKey:          "icon-uuid",
-		EASProjectUUID:   "stable-uuid",
+		ProjectID:           uuid.New(),
+		BuildID:             uuid.New(),
+		TaskID:              uuid.New(),
+		AppTitle:            "Test App",
+		AppSlug:             "testapp",
+		BundleID:            "com.wemob.testapp",
+		PackageName:         "com.wemob.testapp",
+		BuildNumber:         42,
+		MarketingVersion:    "1.2.0",
+		SplashColor:         "#000000",
+		FirstBuild:          true,
+		IconKey:             "icon-uuid",
+		EASProjectUUID:      "stable-uuid",
+		ExpoPublicAPIURL:    "https://testapp.wemob.app",
+		ExpoPublicProjectID: "11111111-1111-1111-1111-111111111111",
 	}
 
 	buildID, err := s.TriggerExpoAndroidBuild(context.Background(), params)
@@ -67,6 +69,7 @@ func TestTriggerExpoAndroidBuild_PassesAllExpectedEnvVars(t *testing.T) {
 		"CM_BUILD_NUMBER", "CM_MARKETING_VERSION",
 		"CM_SPLASH_COLOR", "CM_FIRST_BUILD",
 		"CM_ICON_KEY", "CM_EAS_PROJECT_UUID",
+		"EXPO_PUBLIC_API_URL", "EXPO_PUBLIC_PROJECT_ID",
 	}
 	for _, k := range expectKeys {
 		if _, present := vars[k]; !present {
@@ -78,6 +81,12 @@ func TestTriggerExpoAndroidBuild_PassesAllExpectedEnvVars(t *testing.T) {
 	}
 	if vars["CM_BUILD_NUMBER"].(string) != "42" {
 		t.Errorf("CM_BUILD_NUMBER: got %v want 42", vars["CM_BUILD_NUMBER"])
+	}
+	if vars["EXPO_PUBLIC_API_URL"].(string) != "https://testapp.wemob.app" {
+		t.Errorf("EXPO_PUBLIC_API_URL: got %v want https://testapp.wemob.app", vars["EXPO_PUBLIC_API_URL"])
+	}
+	if vars["EXPO_PUBLIC_PROJECT_ID"].(string) != "11111111-1111-1111-1111-111111111111" {
+		t.Errorf("EXPO_PUBLIC_PROJECT_ID: got %v want UUID", vars["EXPO_PUBLIC_PROJECT_ID"])
 	}
 }
 
