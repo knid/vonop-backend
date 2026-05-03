@@ -1729,6 +1729,14 @@ func main() {
 				r.Use(rateLimiter.RateLimit(120, time.Minute, appMiddleware.IPKey))
 				r.Get("/config", httpViews.GetPublicMobileConfig)
 			})
+
+			// Force-update gate: the mobile app cold-start hits this with the
+			// project slug (typical case) or UUID (fallback). Un-authenticated
+			// — the response only exposes operator-controlled values.
+			r.Route("/mobile/{slugOrID}/min-version", func(r chi.Router) {
+				r.Use(rateLimiter.RateLimit(120, time.Minute, appMiddleware.IPKey))
+				r.Get("/", httpViews.GetMinVersion)
+			})
 		})
 		// AI Gateway — separate from /v2 to avoid inheriting UserKey rate limiter
 		r.Route("/v2/gateway", func(r chi.Router) {
@@ -1870,6 +1878,11 @@ func main() {
 						r.Get("/", httpViews.GetAppStoreListing)
 						r.Put("/", httpViews.UpdateAppStoreListing)
 					})
+
+					// Force-update min_build_number (P3.2) — admin/owner-only;
+					// bumping the floor locks out users on older builds, so
+					// non-admins are rejected at the controller layer with 403.
+					r.Patch("/min-version", httpViews.UpdateMinVersion)
 
 					r.Post("/convert-to-mobile", httpViews.ConvertToMobile)
 					r.Post("/capture-screenshot", httpViews.CaptureAppScreenshot)
