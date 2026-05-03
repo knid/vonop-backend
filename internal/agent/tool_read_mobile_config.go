@@ -37,6 +37,13 @@ type readMobileConfigOutput struct {
 	URLScheme             string   `json:"url_scheme"`
 	UniversalLinkDomain   string   `json:"universal_link_domain"`
 	BiometricEnabled      bool     `json:"biometric_enabled"`
+
+	// Force update (P3.2) — read-only. The agent should NOT modify these via
+	// configure_mobile_bridge; they're operator-controlled (admin/owner only)
+	// because bumping the floor locks out users on older builds.
+	MinBuildNumberIOS     int64  `json:"min_build_number_ios"`
+	MinBuildNumberAndroid int64  `json:"min_build_number_android"`
+	MinVersionMessage     string `json:"min_version_message"`
 }
 
 func (t *ReadMobileConfigTool) Execute(ctx context.Context, rc *RunContext, _ json.RawMessage) (string, bool, error) {
@@ -61,6 +68,9 @@ func (t *ReadMobileConfigTool) Execute(ctx context.Context, rc *RunContext, _ js
 		out.URLScheme = cfg.URLScheme
 		out.UniversalLinkDomain = cfg.UniversalLinkDomain
 		out.BiometricEnabled = cfg.BiometricEnabled
+		out.MinBuildNumberIOS = cfg.MinBuildNumberIOS
+		out.MinBuildNumberAndroid = cfg.MinBuildNumberAndroid
+		out.MinVersionMessage = cfg.MinVersionMessage
 	}
 
 	b, err := json.Marshal(out)
