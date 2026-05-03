@@ -193,6 +193,22 @@ func (c *Controller) CreateAppProject(ctx context.Context, user *models.User, re
 			}
 		}(project)
 
+		// P2.2 — OneSignal app provisioning. Fire-and-forget so a flaky
+		// OneSignal API doesn't block project creation. The build path
+		// (BuildExpoMobile) re-checks and lazy-provisions if this goroutine
+		// fails or the API outage was resolved by then. Idempotent: a
+		// successful first call replaces the v1-shadow row's expo-shadow-*
+		// placeholders with real IDs and subsequent calls (including
+		// build-path retry) skip cleanly.
+		go func(p *models.AppProject) {
+			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			defer cancel()
+			if err := c.provisionOneSignalApp(ctx, p); err != nil {
+				slog.Warn("eager OneSignal provision failed (build-path will retry)",
+					"error", err, "project_id", p.ID)
+			}
+		}(project)
+
 		// Scaffold the canonical mobile_app_native layout in the project
 		// repo so the agent has somewhere to write from turn 1 and the
 		// build pipeline can find the mobile/ subtree.

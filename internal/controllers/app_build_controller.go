@@ -447,6 +447,25 @@ func (c *Controller) BuildExpoMobile(ctx context.Context, project *models.AppPro
 		}
 	}
 
+	// P2.2 — OneSignal app ID (per-tenant). Lazy-provision when the v1
+	// shadow row still has the "expo-shadow-{projectID}" placeholder.
+	// Failures here are logged + swallowed: build proceeds with empty
+	// EXPO_PUBLIC_ONESIGNAL_APP_ID, the template's initPush() no-ops + warns,
+	// user can re-trigger build later.
+	osAppID := ""
+	if !strings.HasPrefix(v1project.OneSignalAppID, onesignalShadowPrefix) {
+		osAppID = v1project.OneSignalAppID
+	} else {
+		if perr := c.provisionOneSignalApp(ctx, project); perr != nil {
+			slog.Warn("BuildExpoMobile: lazy OneSignal provision failed; building with empty app ID",
+				"error", perr, "project_id", project.ID)
+		}
+		// Re-fetch the shadow to pick up the real ID.
+		if refreshed, rerr := c.DB.GetProjectByUserAndURL(user.ID.String(), shadowURL); rerr == nil && refreshed != nil && !strings.HasPrefix(refreshed.OneSignalAppID, onesignalShadowPrefix) {
+			osAppID = refreshed.OneSignalAppID
+		}
+	}
+
 	ordered := make([]string, 0, 2)
 	if wantAndroid {
 		ordered = append(ordered, "android")
@@ -492,6 +511,7 @@ func (c *Controller) BuildExpoMobile(ctx context.Context, project *models.AppPro
 				ExpoPublicAuthBaseURL:          expoPublicAuthBaseURL,
 				ExpoPublicRevenueCatKeyIOS:     rcKeyIOS,
 				ExpoPublicRevenueCatKeyAndroid: rcKeyAndroid,
+				ExpoPublicOneSignalAppID:       osAppID,
 			})
 		case "ios":
 			_, triggerErr = c.CodemagicService.TriggerExpoIOSBuild(ctx, codemagic.ExpoIOSBuildParams{
@@ -513,6 +533,7 @@ func (c *Controller) BuildExpoMobile(ctx context.Context, project *models.AppPro
 				ExpoPublicAuthBaseURL:          expoPublicAuthBaseURL,
 				ExpoPublicRevenueCatKeyIOS:     rcKeyIOS,
 				ExpoPublicRevenueCatKeyAndroid: rcKeyAndroid,
+				ExpoPublicOneSignalAppID:       osAppID,
 			})
 		}
 
