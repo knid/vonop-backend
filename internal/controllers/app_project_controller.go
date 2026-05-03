@@ -176,7 +176,10 @@ func (c *Controller) CreateAppProject(ctx context.Context, user *models.User, re
 
 		// Scaffold the canonical mobile_app_native layout in the project
 		// repo so the agent has somewhere to write from turn 1 and the
-		// build pipeline can find the mobile/ subtree.
+		// build pipeline can find the mobile/ subtree. Includes the
+		// marketing landing page at backend/app/page.tsx (P3.1) so the
+		// per-project Fly app serves SOMETHING at {slug}.wemob.app/ from
+		// day 1, even before the user's first chat turn.
 		if c.GitRepoService != nil {
 			if repo, err := c.GitRepoService.Open(project.ID.String()); err == nil {
 				skeleton := map[string]string{
@@ -187,7 +190,9 @@ func (c *Controller) CreateAppProject(ctx context.Context, user *models.User, re
 This project has two top-level subtrees:
 
 - mobile/ — Expo (React Native) app. Built by Codemagic into a signed APK/IPA.
-- backend/ — Next.js API routes. Deployed to Fly at ` + c.BackendDeployURL(project) + `.
+- backend/ — Next.js project. Deployed to Fly at ` + c.BackendDeployURL(project) + `.
+  Serves both the mobile app's API at /api/* AND the marketing landing
+  page at / (backend/app/page.tsx).
 
 The AI agent writes into both. Don't move files between subtrees without
 updating the build pipeline (see internal/controllers/app_build_controller.go).
@@ -199,7 +204,15 @@ updating the build pipeline (see internal/controllers/app_build_controller.go).
 							"error", err, "project_id", project.ID, "path", path)
 					}
 				}
-				if _, err := repo.Commit("scaffold: mobile/ + backend/ skeleton"); err != nil {
+				// Write the landing-page baseline (P3.1) — page.tsx + layout.tsx
+				// + globals.css — so {slug}.wemob.app/ renders a marketing page
+				// from day 1. Best-effort: a flaky disk doesn't fail project
+				// creation, the agent can re-scaffold via chat if needed.
+				if err := scaffoldMobileLandingPage(repo, project); err != nil {
+					slog.Warn("mobile_app_native landing scaffold failed",
+						"error", err, "project_id", project.ID)
+				}
+				if _, err := repo.Commit("scaffold: mobile/ + backend/ skeleton + landing page"); err != nil {
 					slog.Warn("mobile_app_native skeleton commit failed",
 						"error", err, "project_id", project.ID)
 				}
