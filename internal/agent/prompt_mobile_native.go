@@ -164,6 +164,115 @@ The deploy pipeline auto-writes a default standalone-output Next.js Dockerfile
 to backend/Dockerfile if you don't generate one. Override by writing your own
 backend/Dockerfile (e.g. for non-Node runtimes or custom system deps).
 
+## Backend authentication setup
+When ` + "`read_mobile_config`" + ` returns ` + "`auth.enabled: true`" + `, scaffold Better-Auth in the
+backend/. The mobile auth client (lib/auth.ts in the Expo app) is already
+wired by the template — your job is the server side.
+
+The deploy worker auto-injects two env vars into the Fly app's secrets:
+- ` + "`BETTER_AUTH_SECRET`" + ` — 32-byte hex secret, generated per-customer, never log it
+- ` + "`BETTER_AUTH_URL`" + ` — equals the deployed backend URL (e.g. https://{slug}.wemob.app)
+
+You do NOT generate or hardcode these. Read them from process.env.
+
+### Required deps
+Add to backend/package.json:
+- ` + "`better-auth`" + ` (server SDK + plugins)
+- ` + "`@better-auth/expo`" + ` (server-side bits for the expo plugin's redirect handling)
+- ` + "`drizzle-orm`" + ` + ` + "`pg`" + ` (or whatever DB the user picked — Better-Auth supports drizzle, prisma, kysely, mongodb)
+
+### backend/lib/auth.ts (server config)
+` + "```" + `typescript
+import { betterAuth } from "better-auth";
+import { bearer } from "better-auth/plugins";
+import { expo } from "@better-auth/expo";
+import { drizzleAdapter } from "better-auth/adapters/drizzle";
+import { db } from "./db";
+
+export const auth = betterAuth({
+  baseURL: process.env.BETTER_AUTH_URL!,
+  secret: process.env.BETTER_AUTH_SECRET!,
+  database: drizzleAdapter(db, { provider: "pg" }),
+  emailAndPassword: { enabled: true },
+  // The mobile app's URL scheme. MUST match the scheme in the mobile app.json
+  // (which is templated from the project slug at codemagic build time).
+  trustedOrigins: ["{scheme}://"], // e.g. ["myapp://"]
+  plugins: [bearer(), expo()],
+});
+` + "```" + `
+
+The ` + "`bearer()`" + ` plugin lets the mobile app authenticate via
+` + "`Authorization: Bearer <token>`" + ` headers (no cookies needed). The ` + "`expo()`" + `
+plugin handles OAuth redirect URLs for native deep-linking flows.
+
+### backend/app/api/auth/[...all]/route.ts (catch-all route)
+` + "```" + `typescript
+import { auth } from "@/lib/auth";
+
+const handler = auth.handler;
+export { handler as GET, handler as POST };
+` + "```" + `
+
+That single file handles ALL Better-Auth endpoints
+(/api/auth/sign-in/email, /api/auth/sign-up/email, /api/auth/sign-out,
+/api/auth/get-session, etc.) — Better-Auth routes them internally.
+
+### Drizzle schema (users / sessions / accounts / verifications)
+Better-Auth requires four tables. Generate them using the official Better-Auth
+CLI command (` + "`npx @better-auth/cli generate`" + `) or copy the schema from
+https://better-auth.com/docs/concepts/database. Minimal example:
+
+` + "```" + `typescript
+// backend/db/schema/auth.ts
+import { pgTable, text, timestamp, boolean } from "drizzle-orm/pg-core";
+
+export const user = pgTable("user", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  email: text("email").notNull().unique(),
+  emailVerified: boolean("email_verified").notNull(),
+  image: text("image"),
+  createdAt: timestamp("created_at").notNull(),
+  updatedAt: timestamp("updated_at").notNull(),
+});
+
+export const session = pgTable("session", {
+  id: text("id").primaryKey(),
+  expiresAt: timestamp("expires_at").notNull(),
+  token: text("token").notNull().unique(),
+  ipAddress: text("ip_address"),
+  userAgent: text("user_agent"),
+  userId: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+  createdAt: timestamp("created_at").notNull(),
+  updatedAt: timestamp("updated_at").notNull(),
+});
+
+// account + verification tables also required — see Better-Auth docs.
+` + "```" + `
+
+### Reading the session in your own route handlers
+` + "```" + `typescript
+// backend/app/api/me/route.ts
+import { auth } from "@/lib/auth";
+import { NextRequest, NextResponse } from "next/server";
+
+export async function GET(req: NextRequest) {
+  const session = await auth.api.getSession({ headers: req.headers });
+  if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  return NextResponse.json({ user: session.user });
+}
+` + "```" + `
+
+The mobile app's ` + "`apiFetch`" + ` wrapper automatically attaches
+` + "`Authorization: Bearer <session-token>`" + ` from secure-store, so this works
+end-to-end with no extra client code.
+
+### Scheme matching
+The trustedOrigins entry MUST match the scheme in the mobile app.json
+(` + "`expo.scheme`" + `). The codemagic build pipeline templates the scheme from the
+project slug, so use the same slug here. ` + "`read_mobile_config`" + ` returns
+` + "`auth.scheme`" + ` — use that value verbatim in trustedOrigins.
+
 # FILE CONVENTIONS
 Expo Router uses file-based routing inside the app/ directory. The mapping
 is exactly analogous to Next.js App Router, but the rendered output is React

@@ -216,6 +216,11 @@ func createSchema(db *bun.DB) error {
 		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS rating_enabled boolean NOT NULL DEFAULT false`,
 		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS rating_sessions int NOT NULL DEFAULT 5`,
 		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS update_check_enabled boolean NOT NULL DEFAULT false`,
+		// P2.4 — Better-Auth integration
+		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS auth_enabled boolean NOT NULL DEFAULT false`,
+		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS auth_providers text[] DEFAULT '{}'`,
+		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS auth_scheme text`,
+		`ALTER TABLE app_projects ADD COLUMN IF NOT EXISTS better_auth_secret_cred_ref jsonb`,
 		// P2.3 — RevenueCat IAP auto-provisioning per tenant
 		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS iap_enabled boolean NOT NULL DEFAULT false`,
 		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS revenuecat_project_id text`,
@@ -398,6 +403,11 @@ func createSchema(db *bun.DB) error {
 		`ALTER TABLE apple_connections ADD COLUMN IF NOT EXISTS p8_key_cred_ref jsonb`,
 		`ALTER TABLE apple_connections ADD COLUMN IF NOT EXISTS apns_p8_key_cred_ref jsonb`,
 		`ALTER TABLE google_play_connections ADD COLUMN IF NOT EXISTS service_account_cred_ref jsonb`,
+		// P1.2 — per-app publishing settings for Codemagic submit workflows
+		`ALTER TABLE app_projects ADD COLUMN IF NOT EXISTS app_store_track text NOT NULL DEFAULT 'internal'`,
+		`ALTER TABLE app_projects ADD COLUMN IF NOT EXISTS play_store_track text NOT NULL DEFAULT 'internal'`,
+		`ALTER TABLE app_projects ADD COLUMN IF NOT EXISTS phased_release boolean NOT NULL DEFAULT false`,
+		`ALTER TABLE app_projects ADD COLUMN IF NOT EXISTS submit_as_draft boolean NOT NULL DEFAULT false`,
 	}
 
 	// Deduplicate before creating unique indexes (keep the latest row per group)
@@ -434,10 +444,10 @@ func createSchema(db *bun.DB) error {
 	// IMPORTANT: when adding a new ALTER TABLE above, update this canary to the newest column,
 	// otherwise the new ALTER will be silently skipped on servers that already have older columns.
 	// Table renames go in renameStatements below, not here — they run unconditionally.
-	// Canary: revenuecat_public_key_android — the LAST column in the P2.3 batch.
+	// Canary: revenuecat_public_key_android — the LAST column added (P2.3 RevenueCat).
 	// Pointing the canary at the last new column (rather than the first) means
 	// a partial migration failure mid-batch will be detected on the next boot
-	// and the loop will retry the missed ALTERs. P2.3 RevenueCat IAP (2026-05-03).
+	// and the loop will retry the missed ALTERs.
 	var migrationsDone bool
 	row := db.QueryRowContext(context.Background(),
 		"SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='mobile_app_configs' AND column_name='revenuecat_public_key_android')")
@@ -1862,6 +1872,14 @@ func main() {
 						// Expo (mobile_app_native) — separate endpoint because the
 						// request shape + permission gate route through BuildExpoMobile.
 						r.Post("/expo", httpViews.BuildAppExpo)
+					})
+
+					// Mobile submissions (P1.2 — Codemagic publishing blocks).
+					// POST /v2/apps/{appId}/submit/{platform} — submits the latest
+					// successful Expo build to TestFlight (iOS) or the configured
+					// Play track (Android).
+					r.Route("/submit", func(r chi.Router) {
+						r.Post("/{platform}", httpViews.SubmitAppExpo)
 					})
 
 					// Persistent store listing — replaces the per-wizard form

@@ -49,6 +49,13 @@ type MobileAppConfig struct {
 	// Updates (runtime)
 	UpdateCheckEnabled bool `bun:",notnull,default:false" json:"update_check_enabled"`
 
+	// Auth (build + deploy time). When AuthEnabled=true the deploy worker
+	// injects BETTER_AUTH_SECRET + BETTER_AUTH_URL into Fly secrets and the
+	// build worker bakes EXPO_PUBLIC_AUTH_BASE_URL into the mobile binary.
+	AuthEnabled   bool     `bun:",notnull,default:false" json:"auth_enabled"`
+	AuthProviders []string `bun:",array,type:text[]" json:"auth_providers"`
+	AuthScheme    string   `bun:",nullzero" json:"auth_scheme"`
+
 	// IAP / RevenueCat (build-time — public keys baked into the binary).
 	// Provisioned per-tenant by Controller.provisionRevenueCat at create-time
 	// (eager) or on first build (lazy). The org-level REVENUECAT_API_KEY
