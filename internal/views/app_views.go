@@ -287,6 +287,14 @@ func (v *HttpViews) GetApp(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// WebPreviewURL is set only for mobile_app_native projects so the studio
+	// MobilePreview pane can source its iframe; non-mobile_app_native types
+	// see the empty string elided via omitempty.
+	var webPreviewURL string
+	if project.ProjectType == models.ProjectTypeMobileAppNative {
+		webPreviewURL = v.Controller.WebPreviewURL(project)
+	}
+
 	utils.JSONResponse(w, responses.AppProjectDetailResponse{
 		AppProjectResponse: responses.AppProjectResponse{
 			ID:            project.ID,
@@ -298,6 +306,7 @@ func (v *HttpViews) GetApp(w http.ResponseWriter, r *http.Request) {
 			Settings:      project.Settings,
 			Status:        project.Status,
 			ScreenshotURL: screenshotURL,
+			WebPreviewURL: webPreviewURL,
 			CreatedAt:     project.CreatedAt,
 			UpdatedAt:     project.UpdatedAt,
 		},
@@ -1096,6 +1105,13 @@ func (v *HttpViews) GetAppInit(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
+	// WebPreviewURL is mobile_app_native-only; omitempty elides it for other
+	// project types in the JSON payload.
+	var webPreviewURL string
+	if project.ProjectType == models.ProjectTypeMobileAppNative {
+		webPreviewURL = v.Controller.WebPreviewURL(project)
+	}
+
 	projectResp := responses.AppProjectDetailResponse{
 		AppProjectResponse: responses.AppProjectResponse{
 			ID:            project.ID,
@@ -1107,6 +1123,7 @@ func (v *HttpViews) GetAppInit(w http.ResponseWriter, r *http.Request) {
 			Settings:      project.Settings,
 			Status:        project.Status,
 			ScreenshotURL: screenshotURL,
+			WebPreviewURL: webPreviewURL,
 			CreatedAt:     project.CreatedAt,
 			UpdatedAt:     project.UpdatedAt,
 		},
