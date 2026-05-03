@@ -34,6 +34,7 @@ type Controller struct {
 	AsynqInspector         *asynq.Inspector
 	AssetsStorage          *storage.S3Storage
 	UserApiKeysStorage     *storage.S3Storage
+	AndroidKeysStorage     *storage.S3Storage
 	ConcurrentBuildLimiter chan struct{}
 	CodemagicService       *codemagic.Service
 	FlyService             *fly.Service
@@ -56,7 +57,9 @@ func NewController(db *database.Database, concurrentBuildLimiter chan struct{},
 	slackService *services.SlackService, eventService events.EventService,
 	taskService *asynq.Client, asynqInspector *asynq.Inspector,
 	assetsStorage *storage.S3Storage,
-	userApiKeysStorage *storage.S3Storage, secretManager secret.SecretManager,
+	userApiKeysStorage *storage.S3Storage,
+	androidKeysStorage *storage.S3Storage,
+	secretManager secret.SecretManager,
 	flyService *fly.Service, giteaService *gitea.Service,
 	neonService *neon.Service,
 	posthogClient posthog.Client,
@@ -76,6 +79,7 @@ func NewController(db *database.Database, concurrentBuildLimiter chan struct{},
 		AsynqInspector:         asynqInspector,
 		AssetsStorage:          assetsStorage,
 		UserApiKeysStorage:     userApiKeysStorage,
+		AndroidKeysStorage:     androidKeysStorage,
 		SecretManager:          secretManager,
 		CodemagicService:       codemagicService,
 		FlyService:             flyService,

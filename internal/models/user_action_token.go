@@ -11,8 +11,9 @@ import (
 type UserActionTokenKind string
 
 const (
-	UserActionTokenKindPasswordReset UserActionTokenKind = "password_reset"
-	UserActionTokenKindVerifyEmail   UserActionTokenKind = "verify_email"
+	UserActionTokenKindPasswordReset    UserActionTokenKind = "password_reset"
+	UserActionTokenKindVerifyEmail      UserActionTokenKind = "verify_email"
+	UserActionTokenKindKeystoreDownload UserActionTokenKind = "keystore_download"
 )
 
 // UserActionToken represents a short-lived, single-use token for

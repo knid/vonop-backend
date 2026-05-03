@@ -144,6 +144,10 @@ func BootstrapController() (*controllers.Controller, asynq.RedisClientOpt) {
 	if err != nil {
 		panic(fmt.Errorf("bootstrap: failed to initialize user API keys S3 storage: %w", err))
 	}
+	androidKeysStorage, err := storage.NewS3Storage(sm.GetSecret("AWS_REGION"), sm.GetSecret("S3_ANDROID_KEYS_BUCKET"), sm.GetSecret("AWS_ACCESS_KEY_ID"), sm.GetSecret("AWS_SECRET_ACCESS_KEY"))
+	if err != nil {
+		panic(fmt.Errorf("bootstrap: failed to initialize android keys S3 storage: %w", err))
+	}
 
 	// Git repo service for project file storage
 	repoBasePath := "/data/repos"
@@ -261,6 +265,7 @@ func BootstrapController() (*controllers.Controller, asynq.RedisClientOpt) {
 		asynq.NewInspector(redisOpts),
 		assetsStorage,
 		userApiKeysStorage,
+		androidKeysStorage,
 		sm,
 		flyService,
 		giteaService,

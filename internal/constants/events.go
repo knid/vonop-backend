@@ -10,6 +10,7 @@ const (
 	EVENT_PASSWORD_RESET                 = "password_reset"
 	EVENT_PASSWORD_RESET_REQUESTED       = "password_reset_requested"     // NEW — triggers password-reset email
 	EVENT_EMAIL_VERIFICATION_REQUESTED   = "email_verification_requested" // NEW — triggers verification email
+	EVENT_KEYSTORE_DOWNLOAD_OTP          = "keystore_download_otp"         // triggers OTP email for keystore download gate
 
 	// Support events — EVENT_NEW_TICKET also triggers ticket-received email.
 	EVENT_NEW_TICKET = "support_ticket_created"

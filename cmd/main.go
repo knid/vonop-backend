@@ -1291,6 +1291,10 @@ func main() {
 							r.Get("/js", httpViews.GetJSInjectionData)
 						})
 					})
+					r.Route("/keystore/download", func(r chi.Router) {
+						r.Post("/request", httpViews.RequestKeystoreDownload)
+						r.Post("/redeem", httpViews.RedeemKeystoreDownload)
+					})
 				})
 				r.Route("/autofill", func(r chi.Router) {
 					r.Post("/navbar", httpViews.NavBarAutoFillWithAI)
