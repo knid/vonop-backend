@@ -411,6 +411,16 @@ func (c *Controller) BuildExpoMobile(ctx context.Context, project *models.AppPro
 	// {slug}.wemob.app fallback for first builds before any deploy lands.
 	expoPublicAPIURL := c.BackendDeployURL(project)
 
+	// Compute the auth base URL. Empty when MobileAppConfig.AuthEnabled is
+	// false; the mobile auth client falls back to EXPO_PUBLIC_API_URL in that
+	// case. Today this is identical to expoPublicAPIURL when auth is on, but
+	// the separate var leaves room for future "auth on a different host" use
+	// cases without re-baking the binary.
+	expoPublicAuthBaseURL := ""
+	if cfg, cfgErr := c.DB.GetMobileAppConfig(project.ID.String()); cfgErr == nil && cfg != nil && cfg.AuthEnabled {
+		expoPublicAuthBaseURL = expoPublicAPIURL
+	}
+
 	ordered := make([]string, 0, 2)
 	if wantAndroid {
 		ordered = append(ordered, "android")
@@ -450,9 +460,10 @@ func (c *Controller) BuildExpoMobile(ctx context.Context, project *models.AppPro
 				SplashColor:         build.SplashScreenColor,
 				FirstBuild:          firstBuild,
 				IconKey:             opts.Icon,
-				EASProjectUUID:      project.ID.String(), // stable per project, set in P0.1
-				ExpoPublicAPIURL:    expoPublicAPIURL,
-				ExpoPublicProjectID: project.ID.String(),
+				EASProjectUUID:        project.ID.String(), // stable per project, set in P0.1
+				ExpoPublicAPIURL:      expoPublicAPIURL,
+				ExpoPublicProjectID:   project.ID.String(),
+				ExpoPublicAuthBaseURL: expoPublicAuthBaseURL,
 			})
 		case "ios":
 			_, triggerErr = c.CodemagicService.TriggerExpoIOSBuild(ctx, codemagic.ExpoIOSBuildParams{
@@ -466,11 +477,12 @@ func (c *Controller) BuildExpoMobile(ctx context.Context, project *models.AppPro
 				MarketingVersion:    marketingVer,
 				SplashColor:         build.SplashScreenColor,
 				IconKey:             opts.Icon,
-				EASProjectUUID:      project.ID.String(),
+				EASProjectUUID:        project.ID.String(),
 				// XcodeScheme intentionally left blank — codemagic.yaml derives
 				// it post-prebuild (P1.1.A T4 fix).
-				ExpoPublicAPIURL:    expoPublicAPIURL,
-				ExpoPublicProjectID: project.ID.String(),
+				ExpoPublicAPIURL:      expoPublicAPIURL,
+				ExpoPublicProjectID:   project.ID.String(),
+				ExpoPublicAuthBaseURL: expoPublicAuthBaseURL,
 			})
 		}
 
