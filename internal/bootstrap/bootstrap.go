@@ -152,31 +152,15 @@ func BootstrapController() (*controllers.Controller, asynq.RedisClientOpt) {
 		panic(fmt.Errorf("bootstrap: failed to initialize android keys S3 storage: %w", err))
 	}
 
-	// KMS-backed envelope encryption for stored credentials.
-	// The keyID is read from secrets (alias/wemob-credentials by convention).
-	// In production this MUST be set; dev/test may set it to a local KMS or
-	// mocked value via env override.
-	kmsKeyID := sm.GetSecret("WEMOB_CREDENTIAL_KMS_KEY_ID")
-	if kmsKeyID == "" {
-		// Fail fast: silent KMS misconfiguration would degrade to plaintext.
-		panic("bootstrap: WEMOB_CREDENTIAL_KMS_KEY_ID secret is required")
-	}
-	kmsRegion := sm.GetSecret("AWS_REGION")
-	awsCfg, err := awsConfig.LoadDefaultConfig(context.Background(),
-		awsConfig.WithRegion(kmsRegion),
-		awsConfig.WithCredentialsProvider(awsCreds.NewStaticCredentialsProvider(
-			sm.GetSecret("AWS_ACCESS_KEY_ID"),
-			sm.GetSecret("AWS_SECRET_ACCESS_KEY"),
-			"",
-		)),
-	)
-	if err != nil {
-		panic(fmt.Errorf("bootstrap: aws config for KMS: %w", err))
-	}
-	kmsClient := kms.NewFromConfig(awsCfg)
-	kmsManager := secret.NewKMSManager(kmsClient, kmsKeyID)
-	credStore := storage.NewCredStore(userApiKeysStorage, kmsManager)
-	slog.Info("CredStore initialized", "kms_key", kmsKeyID, "bucket", "user_api_keys")
+	// CredStore — envelope-encryption-at-rest for stored credentials.
+	// Two modes:
+	//   1. WEMOB_CREDENTIAL_KMS_KEY_ID set → real AWS KMS (production)
+	//   2. WEMOB_CREDENTIAL_LOCAL_DEK_HEX set → local-only DEK (dev/staging)
+	// Exactly one must be set. Local mode skips the KMS round-trip — real
+	// AES-256-GCM stays in place but no key rotation, no IAM gating, no
+	// CloudTrail audit log. Rows encrypted under local mode are NOT readable
+	// by KMS mode (the persisted DEK blob is meaningless to KMS.Decrypt).
+	credStore := initCredStore(sm, userApiKeysStorage)
 
 	// Git repo service for project file storage
 	repoBasePath := "/data/repos"
@@ -333,4 +317,55 @@ func BootstrapController() (*controllers.Controller, asynq.RedisClientOpt) {
 // *bun.DB (e.g. for schema migrations) can call this after BootstrapController.
 func BunDB(c *controllers.Controller) *bun.DB {
 	return c.DB.DB
+}
+
+// initCredStore wires CredStore against either AWS KMS (production) or a
+// local static DEK (dev/staging — set WEMOB_CREDENTIAL_LOCAL_DEK_HEX to a
+// 32-byte hex string from `openssl rand -hex 32`).
+//
+// Exactly one of WEMOB_CREDENTIAL_KMS_KEY_ID or WEMOB_CREDENTIAL_LOCAL_DEK_HEX
+// must be set. KMS wins if both are present (so dev configs that get pushed
+// to prod with a KMS key alongside don't silently downgrade).
+//
+// Panics on misconfiguration — every credential read/write path assumes
+// CredStore is non-nil after bootstrap.
+func initCredStore(sm secret.SecretManager, s3Storage *storage.S3Storage) *storage.CredStore {
+	kmsKeyID := sm.GetSecret("WEMOB_CREDENTIAL_KMS_KEY_ID")
+	localDEKHex := sm.GetSecret("WEMOB_CREDENTIAL_LOCAL_DEK_HEX")
+
+	switch {
+	case kmsKeyID != "":
+		kmsRegion := sm.GetSecret("AWS_REGION")
+		awsCfg, err := awsConfig.LoadDefaultConfig(context.Background(),
+			awsConfig.WithRegion(kmsRegion),
+			awsConfig.WithCredentialsProvider(awsCreds.NewStaticCredentialsProvider(
+				sm.GetSecret("AWS_ACCESS_KEY_ID"),
+				sm.GetSecret("AWS_SECRET_ACCESS_KEY"),
+				"",
+			)),
+		)
+		if err != nil {
+			panic(fmt.Errorf("bootstrap: aws config for KMS: %w", err))
+		}
+		kmsClient := kms.NewFromConfig(awsCfg)
+		kmsManager := secret.NewKMSManager(kmsClient, kmsKeyID)
+		slog.Info("CredStore: AWS KMS mode", "kms_key", kmsKeyID, "bucket", s3Storage.Bucket)
+		return storage.NewCredStore(s3Storage, kmsManager)
+
+	case localDEKHex != "":
+		localManager, err := secret.NewLocalDEKManager(localDEKHex)
+		if err != nil {
+			panic(fmt.Errorf("bootstrap: WEMOB_CREDENTIAL_LOCAL_DEK_HEX: %w", err))
+		}
+		slog.Warn("CredStore: LOCAL DEK mode (no KMS) — dev/staging only. " +
+			"Real AES-256-GCM is in place but no key rotation, no IAM gating, " +
+			"no audit log. Rows encrypted under local mode are NOT readable " +
+			"by KMS mode — switching requires re-encrypting all existing rows.")
+		return storage.NewCredStore(s3Storage, localManager)
+
+	default:
+		panic("bootstrap: one of WEMOB_CREDENTIAL_KMS_KEY_ID (production) or " +
+			"WEMOB_CREDENTIAL_LOCAL_DEK_HEX (dev/staging — generate with " +
+			"`openssl rand -hex 32`) must be set")
+	}
 }
