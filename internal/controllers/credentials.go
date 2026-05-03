@@ -184,7 +184,9 @@ func (c *Controller) UpdateAppleConnection(user *models.User, credID string, req
 			slog.Warn("UpdateAppleConnection: p8 encrypt failed", "conn", cred.ID, "err", err)
 		} else if ref != nil {
 			cred.P8KeyCredRef = ref
-			c.DB.UpdateAppleConnection(cred)
+			if _, err := c.DB.UpdateAppleConnection(cred); err != nil {
+				slog.Warn("UpdateAppleConnection: persist p8 ref failed", "conn", cred.ID, "err", err)
+			}
 		}
 	}
 	if req.APNSP8Key != "" {
@@ -192,7 +194,9 @@ func (c *Controller) UpdateAppleConnection(user *models.User, credID string, req
 			slog.Warn("UpdateAppleConnection: apns encrypt failed", "conn", cred.ID, "err", err)
 		} else if ref != nil {
 			cred.APNSP8KeyCredRef = ref
-			c.DB.UpdateAppleConnection(cred)
+			if _, err := c.DB.UpdateAppleConnection(cred); err != nil {
+				slog.Warn("UpdateAppleConnection: persist apns ref failed", "conn", cred.ID, "err", err)
+			}
 		}
 	}
 
@@ -321,7 +325,9 @@ func (c *Controller) UpdateGooglePlayConnection(user *models.User, credID string
 			slog.Warn("UpdateGooglePlayConnection: sa encrypt failed", "conn", saved.ID, "err", err)
 		} else if ref != nil {
 			saved.ServiceAccountCredRef = ref
-			c.DB.UpdateGooglePlayConnection(saved)
+			if _, err := c.DB.UpdateGooglePlayConnection(saved); err != nil {
+				slog.Warn("UpdateGooglePlayConnection: persist sa ref failed", "conn", saved.ID, "err", err)
+			}
 		}
 	}
 
@@ -458,7 +464,9 @@ func (c *Controller) UpdateAppleConnectionForOrg(ctx context.Context, requesting
 			slog.Warn("UpdateAppleConnectionForOrg: p8 encrypt failed", "conn", saved.ID, "err", err)
 		} else if ref != nil {
 			saved.P8KeyCredRef = ref
-			c.DB.UpdateAppleConnection(saved)
+			if _, err := c.DB.UpdateAppleConnection(saved); err != nil {
+				slog.Warn("UpdateAppleConnectionForOrg: persist p8 ref failed", "conn", saved.ID, "err", err)
+			}
 		}
 	}
 	if req.APNSP8Key != "" {
@@ -466,7 +474,9 @@ func (c *Controller) UpdateAppleConnectionForOrg(ctx context.Context, requesting
 			slog.Warn("UpdateAppleConnectionForOrg: apns encrypt failed", "conn", saved.ID, "err", err)
 		} else if ref != nil {
 			saved.APNSP8KeyCredRef = ref
-			c.DB.UpdateAppleConnection(saved)
+			if _, err := c.DB.UpdateAppleConnection(saved); err != nil {
+				slog.Warn("UpdateAppleConnectionForOrg: persist apns ref failed", "conn", saved.ID, "err", err)
+			}
 		}
 	}
 
@@ -595,7 +605,9 @@ func (c *Controller) UpdateGooglePlayConnectionForOrg(ctx context.Context, reque
 			slog.Warn("UpdateGooglePlayConnectionForOrg: sa encrypt failed", "conn", saved.ID, "err", err)
 		} else if ref != nil {
 			saved.ServiceAccountCredRef = ref
-			c.DB.UpdateGooglePlayConnection(saved)
+			if _, err := c.DB.UpdateGooglePlayConnection(saved); err != nil {
+				slog.Warn("UpdateGooglePlayConnectionForOrg: persist sa ref failed", "conn", saved.ID, "err", err)
+			}
 		}
 	}
 
