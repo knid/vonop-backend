@@ -2,6 +2,7 @@ package models
 
 import (
 	"encoding/json"
+	"fmt"
 
 	"github.com/google/uuid"
 )
@@ -37,7 +38,7 @@ func (r *CredRefJSON) UnmarshalJSON(data []byte) error {
 	}
 	id, err := uuid.Parse(raw.OrgID)
 	if err != nil {
-		return err
+		return fmt.Errorf("credref: org_id parse: %w", err)
 	}
 	r.OrgID = id
 	r.Kind = raw.Kind

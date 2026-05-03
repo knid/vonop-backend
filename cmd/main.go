@@ -425,10 +425,13 @@ func createSchema(db *bun.DB) error {
 	// IMPORTANT: when adding a new ALTER TABLE above, update this canary to the newest column,
 	// otherwise the new ALTER will be silently skipped on servers that already have older columns.
 	// Table renames go in renameStatements below, not here — they run unconditionally.
-	// Canary: p8_key_cred_ref column added in P1.0 CredStore wiring (2026-05-03).
+	// Canary: service_account_cred_ref — the LAST column in the P1.0 batch.
+	// Pointing the canary at the last new column (rather than the first) means
+	// a partial migration failure mid-batch will be detected on the next boot
+	// and the loop will retry the missed ALTERs. P1.0 CredStore wiring (2026-05-03).
 	var migrationsDone bool
 	row := db.QueryRowContext(context.Background(),
-		"SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='apple_connections' AND column_name='p8_key_cred_ref')")
+		"SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='google_play_connections' AND column_name='service_account_cred_ref')")
 	if err := row.Scan(&migrationsDone); err != nil {
 		migrationsDone = false
 	}
