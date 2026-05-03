@@ -5,7 +5,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -62,7 +64,16 @@ func (h *CodemagicKeystoreHandler) RegisterKeystore(w http.ResponseWriter, r *ht
 		return
 	}
 	if err := h.Controller.RegisterCodemagicKeystore(r.Context(), req.ProjectID, req.KeystoreB64, req.PropertiesB64); err != nil {
-		utils.JSONError(w, "internal", err.Error(), http.StatusInternalServerError, nil)
+		// Caller errors (bad UUID, decode fail, empty blob) → 400 with the
+		// specific message. Internal failures (KMS / S3 / DB) → 500 with a
+		// generic message; the detail goes to logs only so we don't leak
+		// infrastructure error strings to the HMAC client.
+		if errors.Is(err, controllers.ErrKeystoreInvalidInput) {
+			utils.JSONError(w, "bad_request", err.Error(), http.StatusBadRequest, nil)
+			return
+		}
+		slog.Error("codemagic keystore register failed", "project_id", req.ProjectID, "err", err)
+		utils.JSONError(w, "internal", "register keystore failed", http.StatusInternalServerError, nil)
 		return
 	}
 	utils.JSONResponse(w, map[string]string{"status": "ok"}, http.StatusOK)
@@ -85,7 +96,15 @@ func (h *CodemagicKeystoreHandler) FetchKeystore(w http.ResponseWriter, r *http.
 	}
 	keystoreB64, propsB64, err := h.Controller.FetchCodemagicKeystore(r.Context(), req.ProjectID)
 	if err != nil {
-		utils.JSONError(w, "not_found", err.Error(), http.StatusNotFound, nil)
+		switch {
+		case errors.Is(err, controllers.ErrKeystoreNotRegistered):
+			utils.JSONError(w, "not_found", "keystore not registered", http.StatusNotFound, nil)
+		case errors.Is(err, controllers.ErrKeystoreInvalidInput):
+			utils.JSONError(w, "bad_request", err.Error(), http.StatusBadRequest, nil)
+		default:
+			slog.Error("codemagic keystore fetch failed", "project_id", req.ProjectID, "err", err)
+			utils.JSONError(w, "internal", "fetch keystore failed", http.StatusInternalServerError, nil)
+		}
 		return
 	}
 	utils.JSONResponse(w, fetchKeystoreResponse{KeystoreB64: keystoreB64, PropertiesB64: propsB64}, http.StatusOK)
