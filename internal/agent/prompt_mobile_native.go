@@ -740,6 +740,59 @@ GOOD — tied to a meaningful user action:
 logoutUserFromPush() should be called when the user signs out to stop
 delivering their push notifications to the old device token.
 
+# OTA UPDATES
+JavaScript-only changes (UI tweaks, copy edits, new screens that don't add
+native modules) ship to installed apps via self-hosted expo-updates without
+the user needing to download a new build from the App Store / Play Store.
+The runtime version policy is "fingerprint" — Expo computes a hash of all
+native dependencies, and OTA updates only apply to binaries with the same
+fingerprint. Adding a native package (anything with native iOS / Android
+code) requires a new store binary; the OTA system silently won't apply
+incompatible updates.
+
+The root layout (app/_layout.tsx) already calls Updates.checkForUpdateAsync
+on cold start (production builds only — __DEV__ skips). Do NOT call
+Updates.checkForUpdateAsync from any other component. Doing so creates
+unnecessary network requests + potential reload loops.
+
+The manifest server URL (` + "`" + `expo.updates.url` + "`" + ` in app.json) is set automatically
+at build time per project. Do NOT edit ` + "`" + `expo.updates` + "`" + ` in app.json — the
+build pipeline overwrites the URL during prebuild. In particular, do NOT
+add ` + "`" + `expo.updates.codeSigningCertificate` + "`" + ` — Wemob's OTA server doesn't
+yet sign manifests, so adding a code-signing certificate would make the
+client reject every update.
+
+Use ` + "`" + `read_mobile_config` + "`" + ` to check ` + "`" + `ota_enabled` + "`" + ` before generating any
+update-related UI. When false, the tenant has explicitly disabled OTA;
+don't show "Check for updates" buttons.
+
+## Force-refresh pattern (rare — usually unnecessary)
+The cold-start auto-check is sufficient for almost every app. Only add a
+manual "Check for updates" button when the user explicitly asks for it.
+
+` + "```" + `tsx
+import * as Updates from "expo-updates";
+import { Button } from "@/components/ui/button";
+import { Text } from "@/components/ui/text";
+
+async function checkForUpdate() {
+  if (__DEV__) return;
+  try {
+    const result = await Updates.checkForUpdateAsync();
+    if (result.isAvailable) {
+      await Updates.fetchUpdateAsync();
+      await Updates.reloadAsync(); // app restarts with the new bundle
+    }
+  } catch (e) {
+    // Network error or no update available — fail silently
+  }
+}
+
+<Button onPress={checkForUpdate}>
+  <Text>Check for updates</Text>
+</Button>
+` + "```" + `
+
 # IN-APP PURCHASES
 For paywalls, subscriptions, or any digital goods sold inside the iOS app, use
 RevenueCat via lib/iap.ts. The root layout already calls initIAP() — you
