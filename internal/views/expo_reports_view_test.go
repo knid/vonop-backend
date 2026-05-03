@@ -22,16 +22,17 @@ import (
 
 const testHMACMaster = "test-master-key-do-not-use-in-prod"
 
-// signTestBody mirrors the Codemagic signing logic.
-func signTestBody(t *testing.T, taskID, body string) (sig string) {
+// signTestRequest mirrors the Codemagic signing logic: HMAC over "<ts>.<body>".
+func signTestRequest(t *testing.T, taskID, tsHeader, body string) (sig string) {
 	t.Helper()
 	h := hmac.New(sha256.New, []byte(testHMACMaster))
 	h.Write([]byte(taskID))
 	buildSecret := hex.EncodeToString(h.Sum(nil))
 	h2 := hmac.New(sha256.New, []byte(buildSecret))
-	h2.Write([]byte(body))
+	h2.Write([]byte(tsHeader + "." + body))
 	return "sha256=" + hex.EncodeToString(h2.Sum(nil))
 }
+
 
 // fakeBuildEventStoreForViews is local to views tests.
 type fakeBuildEventStoreForViews struct {
@@ -76,9 +77,9 @@ func TestUpdateExpoBuildStatus_ValidSignature(t *testing.T) {
 	handler := newTestExpoReportsHandler(t, store, testHMACMaster)
 
 	taskID := uuid.New().String()
-	body := fmt.Sprintf(`{"task_id":%q,"status":"building","message":"go","timestamp":%d}`, taskID, time.Now().Unix())
-	sig := signTestBody(t, taskID, body)
 	ts := strconv.FormatInt(time.Now().Unix(), 10)
+	body := fmt.Sprintf(`{"task_id":%q,"status":"building","message":"go","timestamp":%s}`, taskID, ts)
+	sig := signTestRequest(t, taskID, ts, body)
 
 	req := httptest.NewRequest(http.MethodPost, "/v2/reports/expo-build", bytes.NewBufferString(body))
 	req.Header.Set("X-Wemob-Signature", sig)
@@ -103,10 +104,11 @@ func TestUpdateExpoBuildStatus_InvalidSignature(t *testing.T) {
 	store := &fakeBuildEventStoreForViews{}
 	handler := newTestExpoReportsHandler(t, store, testHMACMaster)
 
-	body := `{"task_id":"task-123","status":"building","timestamp":` + strconv.FormatInt(time.Now().Unix(), 10) + `}`
+	ts := strconv.FormatInt(time.Now().Unix(), 10)
+	body := `{"task_id":"task-123","status":"building","timestamp":` + ts + `}`
 	req := httptest.NewRequest(http.MethodPost, "/v2/reports/expo-build", bytes.NewBufferString(body))
 	req.Header.Set("X-Wemob-Signature", "sha256=deadbeef")
-	req.Header.Set("X-Wemob-Timestamp", strconv.FormatInt(time.Now().Unix(), 10))
+	req.Header.Set("X-Wemob-Timestamp", ts)
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
 
@@ -128,12 +130,13 @@ func TestUpdateExpoBuildStatus_StaleTimestamp(t *testing.T) {
 	handler := newTestExpoReportsHandler(t, store, testHMACMaster)
 
 	taskID := uuid.New().String()
+	staleTS := "1000" // way in the past
 	body := fmt.Sprintf(`{"task_id":%q,"status":"built","timestamp":1000}`, taskID)
-	sig := signTestBody(t, taskID, body)
+	sig := signTestRequest(t, taskID, staleTS, body)
 
 	req := httptest.NewRequest(http.MethodPost, "/v2/reports/expo-build", bytes.NewBufferString(body))
 	req.Header.Set("X-Wemob-Signature", sig)
-	req.Header.Set("X-Wemob-Timestamp", "1000") // way in the past
+	req.Header.Set("X-Wemob-Timestamp", staleTS)
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
 
@@ -149,9 +152,9 @@ func TestUpdateExpoBuildStatus_IdempotentRedelivery(t *testing.T) {
 	handler := newTestExpoReportsHandler(t, store, testHMACMaster)
 
 	taskID := uuid.New().String()
-	body := fmt.Sprintf(`{"task_id":%q,"status":"built","message":"done","timestamp":%d}`, taskID, time.Now().Unix())
-	sig := signTestBody(t, taskID, body)
 	ts := strconv.FormatInt(time.Now().Unix(), 10)
+	body := fmt.Sprintf(`{"task_id":%q,"status":"built","message":"done","timestamp":%s}`, taskID, ts)
+	sig := signTestRequest(t, taskID, ts, body)
 
 	for i := 0; i < 3; i++ {
 		req := httptest.NewRequest(http.MethodPost, "/v2/reports/expo-build", bytes.NewBufferString(body))
@@ -169,5 +172,37 @@ func TestUpdateExpoBuildStatus_IdempotentRedelivery(t *testing.T) {
 	store.mu.Unlock()
 	if evCount != 1 {
 		t.Errorf("expected 1 event after triple-delivery (deduped), got %d", evCount)
+	}
+}
+
+// TestUpdateExpoBuildStatus_FutureTimestamp verifies that a request with a
+// timestamp 30 minutes in the future is rejected even when the signature is
+// otherwise valid (forward-timestamp attack).
+func TestUpdateExpoBuildStatus_FutureTimestamp(t *testing.T) {
+	store := &fakeBuildEventStoreForViews{}
+	handler := newTestExpoReportsHandler(t, store, testHMACMaster)
+
+	taskID := uuid.New().String()
+	futureTS := strconv.FormatInt(time.Now().Add(30*time.Minute).Unix(), 10)
+	body := fmt.Sprintf(`{"task_id":%q,"status":"built","timestamp":%s}`, taskID, futureTS)
+	// Sign with the correct format (ts.body) so the only reason for rejection is the timestamp.
+	sig := signTestRequest(t, taskID, futureTS, body)
+
+	req := httptest.NewRequest(http.MethodPost, "/v2/reports/expo-build", bytes.NewBufferString(body))
+	req.Header.Set("X-Wemob-Signature", sig)
+	req.Header.Set("X-Wemob-Timestamp", futureTS)
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+
+	handler.UpdateExpoBuildStatus(rr, req)
+
+	if rr.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401 for future timestamp (+30min), got %d: %s", rr.Code, rr.Body.String())
+	}
+	store.mu.Lock()
+	evCount := len(store.events)
+	store.mu.Unlock()
+	if evCount != 0 {
+		t.Errorf("expected 0 events stored on future-timestamp request, got %d", evCount)
 	}
 }

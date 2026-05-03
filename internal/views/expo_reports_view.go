@@ -57,6 +57,8 @@ func NewExpoReportsHandler(store database.BuildEventStore, hmacMaster string) *E
 // Idempotency: events deduped by SHA-256 of the raw body. A retry of the
 // exact same body produces no second row.
 func (h *ExpoReportsHandler) UpdateExpoBuildStatus(w http.ResponseWriter, r *http.Request) {
+	// Bound the body to prevent memory exhaustion from oversized payloads.
+	r.Body = http.MaxBytesReader(w, r.Body, 64*1024)
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		utils.JSONError(w, "bad_request", "read body", http.StatusBadRequest, nil)
@@ -71,7 +73,10 @@ func (h *ExpoReportsHandler) UpdateExpoBuildStatus(w http.ResponseWriter, r *htt
 	}
 
 	ts, err := strconv.ParseInt(tsHeader, 10, 64)
-	if err != nil || time.Since(time.Unix(ts, 0)) > expoReportsTimestampSkew {
+	tsTime := time.Unix(ts, 0)
+	// Reject both stale (too old) and future-dated timestamps to prevent replays and
+	// forward-timestamp attacks. Allow ±5 min clock skew in either direction.
+	if err != nil || time.Since(tsTime) > expoReportsTimestampSkew || time.Until(tsTime) > expoReportsTimestampSkew {
 		utils.JSONError(w, "unauthorized", "stale timestamp", http.StatusUnauthorized, nil)
 		return
 	}
@@ -87,9 +92,10 @@ func (h *ExpoReportsHandler) UpdateExpoBuildStatus(w http.ResponseWriter, r *htt
 	h1.Write([]byte(report.TaskID))
 	buildSecret := hex.EncodeToString(h1.Sum(nil))
 
-	// Compute expected signature over the raw body
+	// Compute expected signature over "<timestamp>.<body>" so the timestamp is
+	// bound to the signature and cannot be substituted independently.
 	h2 := hmac.New(sha256.New, []byte(buildSecret))
-	h2.Write(body)
+	h2.Write([]byte(tsHeader + "." + string(body)))
 	expected := "sha256=" + hex.EncodeToString(h2.Sum(nil))
 
 	// Constant-time compare
