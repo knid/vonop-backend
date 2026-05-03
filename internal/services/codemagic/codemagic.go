@@ -49,6 +49,16 @@ func (s *Service) baseURL() string {
 	return "https://api.codemagic.io"
 }
 
+// SetTestEndpoint overrides the API base URL for testing. Use only from
+// integration tests; production callers should construct via NewService.
+//
+// Exists so integration tests in other packages (e.g. controllers) can
+// redirect Codemagic API calls to an httptest.Server without exposing the
+// unexported apiBaseURL field directly.
+func (s *Service) SetTestEndpoint(baseURL string) {
+	s.apiBaseURL = baseURL
+}
+
 // httpClientOrDefault returns s.client if set, else the package-level httpClient.
 func (s *Service) httpClientOrDefault() *http.Client {
 	if s.client != nil {

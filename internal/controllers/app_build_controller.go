@@ -3,7 +3,6 @@ package controllers
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -251,25 +250,283 @@ func (c *Controller) BuildAppMobile(appProject *models.AppProject, user *models.
 	return build, tasks, nil
 }
 
-// BuildExpoMobile is the entry point for triggering an Expo (mobile_app_native) build.
-// Full implementation lands in P1.1 — this skeleton exists so other code can
-// reference the function signature.
+// BuildExpoMobile triggers a new Expo build for a mobile_app_native project.
 //
-// TODO(P1.1):
-//  1. Tarball the AI-generated mobile/ source from the project's git repo
-//  2. Upload tarball to s3://$S3_ASSETS_BUCKET/expo-source/$projectID/$buildID.tar.gz
-//  3. Insert Build row + AppBuildTask row(s) for the requested platform(s)
-//  4. Call CodemagicService.TriggerExpoAndroidBuild / TriggerExpoIOSBuild with the right params
-//  5. Return the new Build
-func (c *Controller) BuildExpoMobile(ctx context.Context, project *models.AppProject, opts ExpoBuildOptions) (*models.Build, error) {
-	return nil, errors.New("BuildExpoMobile not implemented until P1.1")
+// Flow:
+//  1. Validate project type + per-platform CanBuild* permissions
+//  2. Find or create a v1 Project shadow keyed by url="expo://"+slug — the
+//     AppBuildTask FK still references the legacy Project model, so we need
+//     a stable shadow row per AppProject (mirrors BuildAppMobile pattern)
+//  3. Reject if a build for that shadow project is still in flight
+//  4. Compute the next build number from the last shadow-project build
+//  5. Tarball the mobile/ subtree from the project's git repo
+//  6. Upload tarball to s3://{assets}/expo-source/{projectID}/{buildID}.tar.gz
+//  7. Insert Build + per-platform AppBuildTask rows
+//  8. Trigger Codemagic per platform; mark per-task failed on trigger error
+//
+// Per-platform error isolation matches BuildAppMobile: a triggerErr on one
+// platform marks that task Failed and continues with the others. Returns a
+// non-nil error only when the call can't make ANY progress (no platforms
+// triggered) OR a precondition failed (limits, pending build, missing
+// services, repo open failure).
+func (c *Controller) BuildExpoMobile(ctx context.Context, project *models.AppProject, user *models.User, opts ExpoBuildOptions) (*models.Build, []*models.AppBuildTask, error) {
+	if project == nil {
+		return nil, nil, fmt.Errorf("project is required")
+	}
+	if project.ProjectType != models.ProjectTypeMobileAppNative {
+		return nil, nil, fmt.Errorf("BuildExpoMobile: project type %q is not %q", project.ProjectType, models.ProjectTypeMobileAppNative)
+	}
+	if user == nil {
+		return nil, nil, fmt.Errorf("user is required")
+	}
+	if c.CodemagicService == nil {
+		return nil, nil, fmt.Errorf("codemagic service is not configured")
+	}
+	if c.GitRepoService == nil {
+		return nil, nil, fmt.Errorf("git repo service is not configured")
+	}
+	if c.AssetsStorage == nil {
+		return nil, nil, fmt.Errorf("assets storage is not configured")
+	}
+
+	// Normalise + dedupe platform list so downstream code can rely on a
+	// clean ["android"]/["ios"]/["android","ios"] shape.
+	wantAndroid := false
+	wantIOS := false
+	for _, p := range opts.Platforms {
+		switch strings.ToLower(strings.TrimSpace(p)) {
+		case "android":
+			wantAndroid = true
+		case "ios":
+			wantIOS = true
+		default:
+			return nil, nil, fmt.Errorf("unsupported platform: %q", p)
+		}
+	}
+	if !wantAndroid && !wantIOS {
+		return nil, nil, fmt.Errorf("at least one platform is required")
+	}
+
+	// Per-platform permission gate. GetUserLimits returns an error when the
+	// user has no subscription/limits row — we silently skip the check in
+	// that case (matches BuildAppMobile behavior; the test fixture for the
+	// permission-denied case wires real limits + RemoteConfig).
+	if limits, err := c.GetUserLimits(user); err == nil && limits != nil {
+		if wantAndroid && !limits.CanBuildToAndroid {
+			return nil, nil, fmt.Errorf("your subscription does not allow Android builds")
+		}
+		if wantIOS && !limits.CanBuildToIOS {
+			return nil, nil, fmt.Errorf("your subscription does not allow iOS builds")
+		}
+	}
+
+	bundleID := bundleIDForProject(project, opts.BundleIDOverride)
+
+	// AppBuildTask + Build are keyed by v1 Project. Find or create the
+	// shadow row keyed by URL="expo://"+slug (unique per AppProject,
+	// avoids collision with legacy URL-wrapper builds).
+	shadowURL := "expo://" + project.Slug
+	v1project, err := c.DB.GetProjectByUserAndURL(user.ID.String(), shadowURL)
+	if err != nil || v1project == nil || v1project.ID == uuid.Nil {
+		// OneSignal IDs are notnull,unique on Project. Expo apps don't use
+		// OneSignal (push goes through Expo Notifications), so we stash
+		// stable placeholders here that won't collide with the real
+		// "wemob-app-{appProjectID}" prefix used by BuildAppMobile.
+		v1project = &models.Project{
+			UserID:            user.ID,
+			URL:               shadowURL,
+			PackageName:       bundleID,
+			IconPath:          opts.Icon,
+			OneSignalAppID:    "expo-shadow-" + project.ID.String(),
+			OneSignalAppToken: "expo-shadow-token-" + project.ID.String(),
+			BuildForAndroid:   wantAndroid,
+			BuildForIOS:       wantIOS,
+		}
+		v1project, err = c.DB.CreateProject(v1project)
+		if err != nil {
+			return nil, nil, fmt.Errorf("create v1 shadow project: %w", err)
+		}
+	} else {
+		// Union platform flags so a re-build picks up new platforms.
+		if wantAndroid {
+			v1project.BuildForAndroid = true
+		}
+		if wantIOS {
+			v1project.BuildForIOS = true
+		}
+		if opts.Icon != "" {
+			v1project.IconPath = opts.Icon
+		}
+		c.DB.UpdateProject(v1project)
+	}
+
+	// Pending build guard.
+	if pending, perr := c.DB.GetPendingAppBuildTasks(v1project); perr == nil && len(pending) > 0 {
+		return nil, nil, fmt.Errorf("a build is already in progress, please wait")
+	}
+
+	// Next build number.
+	var lastBuildNumber int
+	if last, lerr := c.DB.GetLastProjectBuild(v1project); lerr == nil && last != nil {
+		lastBuildNumber = last.BuildNumber
+	}
+	nextNum := lastBuildNumber + 1
+
+	marketingVer := nonEmptyOr(opts.MarketingVersion, "1.0.0")
+
+	// Tarball mobile/ from the project repo.
+	repo, err := c.GitRepoService.Open(project.ID.String())
+	if err != nil {
+		return nil, nil, fmt.Errorf("open project repo: %w", err)
+	}
+	tarball, err := repo.TarSubtree("mobile/")
+	if err != nil {
+		return nil, nil, fmt.Errorf("tarball mobile/ subtree: %w", err)
+	}
+
+	// Create Build row first so we have the buildID for the S3 path.
+	build := &models.Build{
+		ProjectID:         v1project.ID,
+		Active:            false,
+		Title:             nonEmptyOr(opts.AppName, project.Name),
+		Icon:              opts.Icon,
+		SplashScreenColor: nonEmptyOr(opts.SplashColor, "#FFFFFF"),
+		NavBarStyle:       "default",
+		BuildNumber:       nextNum,
+		VersionString:     utils.CreateVersionString(nextNum),
+	}
+	build, err = c.DB.CreateProjectBuild(build)
+	if err != nil {
+		return nil, nil, fmt.Errorf("create build row: %w", err)
+	}
+
+	// Upload tarball to S3 at the path the codemagic.yaml expects.
+	tarKey := fmt.Sprintf("expo-source/%s/%s.tar.gz", project.ID.String(), build.ID.String())
+	if err := c.AssetsStorage.PutBytes(ctx, tarKey, tarball, "application/gzip"); err != nil {
+		return build, nil, fmt.Errorf("upload tarball to %s: %w", tarKey, err)
+	}
+
+	// Compute the public API URL the mobile app will hit at runtime.
+	// P1.1.D wires this from the actual Fly deploy; for now use the
+	// canonical {slug}.wemob.app pattern as a fallback.
+	expoPublicAPIURL := "https://" + project.Slug + ".wemob.app"
+
+	ordered := make([]string, 0, 2)
+	if wantAndroid {
+		ordered = append(ordered, "android")
+	}
+	if wantIOS {
+		ordered = append(ordered, "ios")
+	}
+
+	tasks := make([]*models.AppBuildTask, 0, len(ordered))
+	triggerErrs := make([]string, 0)
+	firstBuild := lastBuildNumber == 0
+
+	for _, platform := range ordered {
+		label := "Android"
+		if platform == "ios" {
+			label = "IOS"
+		}
+		task, err := c.DB.CreateAppBuildTask(*build, label, "Queued", false)
+		if err != nil {
+			return build, tasks, fmt.Errorf("create %s build task: %w", platform, err)
+		}
+		tasks = append(tasks, task)
+
+		var triggerErr error
+		switch platform {
+		case "android":
+			_, triggerErr = c.CodemagicService.TriggerExpoAndroidBuild(ctx, codemagic.ExpoAndroidBuildParams{
+				ProjectID:           project.ID,
+				BuildID:             build.ID,
+				TaskID:              task.ID,
+				AppTitle:            build.Title,
+				AppSlug:             project.Slug,
+				BundleID:            bundleID,
+				PackageName:         bundleID,
+				BuildNumber:         nextNum,
+				MarketingVersion:    marketingVer,
+				SplashColor:         build.SplashScreenColor,
+				FirstBuild:          firstBuild,
+				IconKey:             opts.Icon,
+				EASProjectUUID:      project.ID.String(), // stable per project, set in P0.1
+				ExpoPublicAPIURL:    expoPublicAPIURL,
+				ExpoPublicProjectID: project.ID.String(),
+			})
+		case "ios":
+			_, triggerErr = c.CodemagicService.TriggerExpoIOSBuild(ctx, codemagic.ExpoIOSBuildParams{
+				ProjectID:           project.ID,
+				BuildID:             build.ID,
+				TaskID:              task.ID,
+				AppTitle:            build.Title,
+				AppSlug:             project.Slug,
+				BundleID:            bundleID,
+				BuildNumber:         nextNum,
+				MarketingVersion:    marketingVer,
+				SplashColor:         build.SplashScreenColor,
+				IconKey:             opts.Icon,
+				EASProjectUUID:      project.ID.String(),
+				// XcodeScheme intentionally left blank — codemagic.yaml derives
+				// it post-prebuild (P1.1.A T4 fix).
+				ExpoPublicAPIURL:    expoPublicAPIURL,
+				ExpoPublicProjectID: project.ID.String(),
+			})
+		}
+
+		if triggerErr != nil {
+			task.StatusText = "Failed"
+			task.ErrorMessage = triggerErr.Error()
+			task.Finished = true
+			_ = c.DB.UpdateAppBuildTask(task)
+			triggerErrs = append(triggerErrs, fmt.Sprintf("%s: %v", platform, triggerErr))
+		}
+	}
+
+	slog.Info("BuildExpoMobile: build enqueued",
+		"project_id", project.ID,
+		"v1_project_id", v1project.ID,
+		"build_id", build.ID,
+		"platforms", ordered,
+		"tarball_size_bytes", len(tarball),
+	)
+
+	if len(triggerErrs) == len(ordered) {
+		return build, tasks, fmt.Errorf("failed to trigger build(s): %s", strings.Join(triggerErrs, "; "))
+	}
+	return build, tasks, nil
 }
 
 // ExpoBuildOptions describes the parameters for a new Expo mobile build.
+// User-passthrough fields (AppName, Icon, SplashColor) mirror
+// BuildAppMobile's signature so the HTTP view can pass them through
+// unchanged in P1.1.C T3.
 type ExpoBuildOptions struct {
 	Platforms        []string // "android", "ios", or both
-	MarketingVersion string   // semantic version, e.g. "1.2.0"
+	AppName          string   // user-facing app title (Info.plist + strings.xml)
+	Icon             string   // S3 key (under icons/) for the app icon
+	SplashColor      string   // hex color for the splash screen
+	MarketingVersion string   // semantic version, e.g. "1.2.0"; defaults to "1.0.0"
 	BundleIDOverride string   // optional override; defaults to com.wemob.{slug}
+}
+
+// bundleIDForProject returns opts.BundleIDOverride if set, else
+// `com.wemob.{slug}` with hyphens stripped (Apple bundle IDs disallow
+// hyphens in the application identifier).
+func bundleIDForProject(project *models.AppProject, override string) string {
+	if override != "" {
+		return override
+	}
+	clean := strings.ReplaceAll(strings.ToLower(project.Slug), "-", "")
+	return "com.wemob." + clean
+}
+
+// nonEmptyOr returns s if non-empty, otherwise fallback.
+func nonEmptyOr(s, fallback string) string {
+	if s == "" {
+		return fallback
+	}
+	return s
 }
 
 // UndeployApp marks all deployments for this project as undeployed and
