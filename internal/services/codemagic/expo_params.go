@@ -32,6 +32,11 @@ type ExpoAndroidBuildParams struct {
 	// yet; lib/iap.ts no-ops + warns at runtime in that case.
 	ExpoPublicRevenueCatKeyIOS     string
 	ExpoPublicRevenueCatKeyAndroid string
+	// ExpoPublicOneSignalAppID — OneSignal app ID baked into the binary at
+	// expo prebuild time. Empty when MobileAppConfig.PushEnabled is false OR
+	// provisioning hasn't happened yet (placeholder still present); the
+	// template's lib/push.ts initPush() no-ops + warns at runtime in that case.
+	ExpoPublicOneSignalAppID string
 }
 
 func (p ExpoAndroidBuildParams) toEnvVars() map[string]string {
@@ -53,6 +58,7 @@ func (p ExpoAndroidBuildParams) toEnvVars() map[string]string {
 		"EXPO_PUBLIC_PROJECT_ID":             p.ExpoPublicProjectID,
 		"EXPO_PUBLIC_REVENUECAT_KEY_IOS":     p.ExpoPublicRevenueCatKeyIOS,
 		"EXPO_PUBLIC_REVENUECAT_KEY_ANDROID": p.ExpoPublicRevenueCatKeyAndroid,
+		"EXPO_PUBLIC_ONESIGNAL_APP_ID":       p.ExpoPublicOneSignalAppID,
 	}
 }
 
@@ -76,6 +82,8 @@ type ExpoIOSBuildParams struct {
 	// ExpoPublicRevenueCatKeyIOS / Android — see ExpoAndroidBuildParams above.
 	ExpoPublicRevenueCatKeyIOS     string
 	ExpoPublicRevenueCatKeyAndroid string
+	// ExpoPublicOneSignalAppID — see ExpoAndroidBuildParams above.
+	ExpoPublicOneSignalAppID string
 }
 
 func (p ExpoIOSBuildParams) toEnvVars() map[string]string {
@@ -101,5 +109,6 @@ func (p ExpoIOSBuildParams) toEnvVars() map[string]string {
 		"EXPO_PUBLIC_PROJECT_ID":             p.ExpoPublicProjectID,
 		"EXPO_PUBLIC_REVENUECAT_KEY_IOS":     p.ExpoPublicRevenueCatKeyIOS,
 		"EXPO_PUBLIC_REVENUECAT_KEY_ANDROID": p.ExpoPublicRevenueCatKeyAndroid,
+		"EXPO_PUBLIC_ONESIGNAL_APP_ID":       p.ExpoPublicOneSignalAppID,
 	}
 }
