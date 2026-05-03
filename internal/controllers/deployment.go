@@ -547,38 +547,38 @@ func (c *Controller) SignUnsignedIPATask(user *models.User, signReq requests.Sig
 }
 
 // AutoSignIOSBuildIfPossible is called from the build-completed webhook.
-// If the completed build is iOS and the owner has at least one active
-// Apple connection, it enqueues a sign task using that connection.
-// Silent no-op otherwise — this is a convenience path, not a guarantee.
+// If the completed build is iOS and the project has a DefaultAppleConnectionID
+// set, it enqueues a sign task using that connection. Returns (false, nil) when
+// no connection is configured — the UI will show 'Built (unsigned)' and prompt
+// the user to configure one in project settings.
 //
-// Returns (true, nil) when a sign was enqueued.
+// Returns (true, nil) when a sign task was enqueued.
 func (c *Controller) AutoSignIOSBuildIfPossible(ctx context.Context, task *models.AppBuildTask) (bool, error) {
 	if task.Platform != "ios" {
 		return false, nil
 	}
-	// Load the project to get the user.
-	project, err := c.DB.GetProjectById(task.ProjectID.String())
+	// Load the AppProject to check for a configured default connection.
+	appProject, err := c.DB.GetAppProjectByID(task.ProjectID.String())
 	if err != nil {
 		return false, err
 	}
-	user, err := c.DB.GetUserById(project.UserID.String())
-	if err != nil {
-		return false, err
-	}
-	// Pick the user's most-recently-used Apple connection.
-	var conn models.AppleConnection
-	err = c.DB.DB.NewSelect().
-		Model(&conn).
-		Where("user_id = ?", user.ID).
-		Order("updated_at DESC").
-		Limit(1).
-		Scan(ctx)
-	if err != nil {
-		// No connection → graceful exit (user is on managed, or hasn't
-		// connected yet; the UI will show 'Built (unsigned)' and prompt
-		// them to connect).
+	if appProject.DefaultAppleConnectionID == nil {
+		// No connection configured — graceful exit.
 		return false, nil
 	}
+
+	user, err := c.DB.GetUserById(appProject.UserID.String())
+	if err != nil {
+		return false, err
+	}
+
+	// Verify the connection belongs to the project's org before using it.
+	conn, err := c.DB.GetAppleConnectionByOrg(ctx, appProject.OrganizationID, *appProject.DefaultAppleConnectionID)
+	if err != nil {
+		// Connection was deleted or moved to a different org — treat as not configured.
+		return false, nil
+	}
+
 	// Idempotency guard: if a non-failed sign task already exists for this
 	// build (e.g., the Codemagic webhook fired twice), don't create a duplicate.
 	existing, existsErr := c.DB.GetLatestIOSSignTaskByBuild(task.BuildID.String())

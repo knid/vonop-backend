@@ -377,6 +377,10 @@ func createSchema(db *bun.DB) error {
 		`CREATE UNIQUE INDEX IF NOT EXISTS uniq_app_deployments_in_progress
 		   ON app_deployments (app_project_id, platform)
 		   WHERE status IN ('queued','building','deploying')`,
+		// Expo Phase 0: per-project default connections for auto-sign / auto-deploy.
+		// Nil = "no default configured" — no auto-sign happens until set.
+		`ALTER TABLE app_projects ADD COLUMN IF NOT EXISTS default_apple_connection_id uuid`,
+		`ALTER TABLE app_projects ADD COLUMN IF NOT EXISTS default_google_connection_id uuid`,
 	}
 
 	// Deduplicate before creating unique indexes (keep the latest row per group)
@@ -413,9 +417,10 @@ func createSchema(db *bun.DB) error {
 	// IMPORTANT: when adding a new ALTER TABLE above, update this canary to the newest column,
 	// otherwise the new ALTER will be silently skipped on servers that already have older columns.
 	// Table renames go in renameStatements below, not here — they run unconditionally.
+	// Canary: default_apple_connection_id column added in Expo Phase 0 (2026-05-02).
 	var migrationsDone bool
 	row := db.QueryRowContext(context.Background(),
-		"SELECT EXISTS(SELECT 1 FROM pg_indexes WHERE indexname='uniq_app_deployments_in_progress')")
+		"SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='app_projects' AND column_name='default_apple_connection_id')")
 	if err := row.Scan(&migrationsDone); err != nil {
 		migrationsDone = false
 	}

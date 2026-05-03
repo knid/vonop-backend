@@ -33,6 +33,12 @@ type AppProject struct {
 	SandboxID       string         `bun:",notnull,default:''"`
 	Status          string         `bun:",notnull,default:'draft'"` // draft, generating, ready, deployed
 	TemplateID      *uuid.UUID     `bun:",type:uuid,nullzero"` // source template if created from a template
+	// DefaultAppleConnectionID is the Apple connection preferred for auto-signing iOS builds
+	// for this project. Nil means "none configured" — no auto-sign will happen.
+	DefaultAppleConnectionID  *uuid.UUID `bun:",type:uuid,nullzero"`
+	// DefaultGoogleConnectionID is the Google Play connection preferred for auto-deployment
+	// for this project. Nil means "none configured".
+	DefaultGoogleConnectionID *uuid.UUID `bun:",type:uuid,nullzero"`
 	CreatedAt       time.Time      `bun:"created_at,nullzero,notnull,default:current_timestamp"`
 	UpdatedAt       time.Time      `bun:"updated_at,nullzero,notnull,default:current_timestamp"`
 	DeletedAt       time.Time      `bun:",soft_delete,nullzero"`
