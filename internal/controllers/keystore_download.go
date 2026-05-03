@@ -74,8 +74,10 @@ func (c *Controller) RequestKeystoreDownload(ctx context.Context, requestingUser
 		return fmt.Errorf("generate otp: %w", err)
 	}
 
-	// Bind the OTP to the project: token value = "{projectID}:{otp}".
-	tokenValue := projectIDStr + ":" + otp
+	// Bind the OTP to the user and project: token value = "{userID}:{projectID}:{otp}".
+	// Including the user ID ensures two users who happen to generate the same 6-digit
+	// OTP at the same time for the same project cannot redeem each other's tokens.
+	tokenValue := requestingUser.ID.String() + ":" + projectIDStr + ":" + otp
 	token := &models.UserActionToken{
 		UserID:    requestingUser.ID,
 		Kind:      models.UserActionTokenKindKeystoreDownload,
@@ -127,7 +129,7 @@ func (c *Controller) RedeemKeystoreDownload(ctx context.Context, requestingUser 
 		return "", errors.New("project not found in org")
 	}
 
-	tokenValue := projectIDStr + ":" + strings.TrimSpace(otp)
+	tokenValue := requestingUser.ID.String() + ":" + projectIDStr + ":" + strings.TrimSpace(otp)
 	token, err := c.DB.GetUserActionToken(tokenValue, models.UserActionTokenKindKeystoreDownload)
 	if err != nil || token == nil || token.ID == uuid.Nil {
 		return "", ErrKeystoreOTPInvalid
