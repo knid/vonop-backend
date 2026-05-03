@@ -1127,6 +1127,12 @@ func isSensitiveLogPath(path string) bool {
 func main() {
 	controller, _ := bootstrap.BootstrapController()
 
+	// Idempotent: ensures the keystore-bundles/ prefix expires after 1 day.
+	// Failure-soft — log+continue so a missing IAM permission doesn't block startup.
+	if err := storage.EnsureKeystoreBundlesLifecycle(context.Background(), controller.AssetsStorage.Client, controller.AssetsStorage.Bucket); err != nil {
+		slog.Warn("keystore-bundles lifecycle bootstrap failed (non-fatal)", "err", err)
+	}
+
 	// Schema migrations run in main only — workers and migration scripts share
 	// the same BootstrapController but each decides independently whether to run
 	// createSchema / seedPlans / backfills.
