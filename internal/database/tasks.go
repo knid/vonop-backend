@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/models"
 	"github.com/uptrace/bun"
 )
@@ -63,6 +64,26 @@ func (db *Database) GetAppBuildTaskByProject(project *models.Project) ([]models.
 	err := db.DB.NewSelect().Model(&appBuildTasks).Where("project_id = ?", project.ID).Scan(context.Background())
 
 	return appBuildTasks, err
+}
+
+// GetLatestSuccessfulBuildTaskByProjectAndPlatform returns the most recent
+// successful build task for a v1 project + platform combination. Used by
+// SubmitExpoMobile to find which build to submit. Platform values are
+// "Android" or "IOS" (matches AppBuildTask.Platform vocabulary).
+func (db *Database) GetLatestSuccessfulBuildTaskByProjectAndPlatform(ctx context.Context, v1ProjectID uuid.UUID, platform string) (*models.AppBuildTask, error) {
+	var task models.AppBuildTask
+	err := db.DB.NewSelect().Model(&task).
+		Where("project_id = ?", v1ProjectID).
+		Where("platform = ?", platform).
+		Where("status_text = ?", "Succeeded").
+		Where("finished = true").
+		Order("created_at DESC").
+		Limit(1).
+		Scan(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &task, nil
 }
 
 func (db *Database) UpdateAppBuildTask(buildTask *models.AppBuildTask) error {
