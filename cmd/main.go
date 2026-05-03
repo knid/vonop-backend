@@ -1812,6 +1812,12 @@ func main() {
 				r.Put("/config", httpViews.UpdateMobileAppConfig)
 			})
 
+			// Connection validation status — requires auth, no subscription gate.
+			r.Route("/connections/{kind}/{connectionId}", func(r chi.Router) {
+				r.Use(appMiddleware.RequireAuth(controller))
+				r.Get("/latest-validation", httpViews.GetLatestConnectionValidation)
+			})
+
 			// Expo build status webhook — no user auth, HMAC-signed by Codemagic worker.
 			// TODO(P1.1): wire hmacMaster through controller.SecretManager.GetSecret("WEMOB_WORKER_HMAC_KEY")
 			// instead of os.Getenv once the secret is registered in Infisical.
