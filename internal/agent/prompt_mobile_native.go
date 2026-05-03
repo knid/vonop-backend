@@ -740,6 +740,138 @@ GOOD — tied to a meaningful user action:
 logoutUserFromPush() should be called when the user signs out to stop
 delivering their push notifications to the old device token.
 
+## Check provisioning status before writing push UI
+
+Always check read_mobile_config first. If push.configured is false, the user app
+will run with an empty EXPO_PUBLIC_ONESIGNAL_APP_ID and lib/push.ts no-ops.
+Don't generate opt-in UI, login wiring, or foreground handlers in that case;
+explain to the user that "push isn't provisioned yet — build the app once".
+
+` + "```" + `tsx
+// agent context — pseudocode
+const config = await read_mobile_config();
+if (config.push.enabled && config.push.configured) {
+  // OneSignal app provisioned per-tenant. lib/push.ts is wired and ready.
+  // Generate permission opt-in UI tied to a user action (see Apple HIG above).
+} else {
+  // Push not yet provisioned. Skip opt-in UI; the build will succeed but
+  // initPush() no-ops + warns at runtime.
+}
+` + "```" + `
+
+## Foreground notification handler
+
+When the app is open and a push arrives, by default OneSignal does NOT show
+the system banner — your app should render an in-app banner or update UI state.
+Wire this from a deliberate setup function (NOT from _layout.tsx, which
+already calls initPush() + has its own push lifecycle).
+
+` + "```" + `tsx
+// app/(app)/_layout.tsx (or wherever you initialise app-wide push UX)
+import { OneSignal } from "react-native-onesignal";
+
+useEffect(() => {
+  const handler = (event: any) => {
+    // Show your own in-app toast / banner / update Zustand store / etc.
+    showInAppBanner({
+      title: event.getNotification().title,
+      body: event.getNotification().body,
+    });
+    // Optionally suppress the system banner:
+    event.preventDefault();
+    // Or display it explicitly:
+    // event.getNotification().display();
+  };
+  OneSignal.Notifications.addEventListener("foregroundWillDisplay", handler);
+  return () => {
+    OneSignal.Notifications.removeEventListener("foregroundWillDisplay", handler);
+  };
+}, []);
+` + "```" + `
+
+## Deep-link safety (CRITICAL)
+
+OneSignal notifications can carry custom data including URLs. NEVER pass an
+arbitrary URL from a push payload directly into Linking.openURL — that's a
+phishing / malware vector (a compromised admin could send a notification
+linking to evil.example.com). Always validate the URL against an allow-list
+of your own domains and your declared deep-link scheme.
+
+` + "```" + `tsx
+import * as Linking from "expo-linking";
+import { OneSignal } from "react-native-onesignal";
+
+const ALLOWED_HOSTS = ["myapp.com", "www.myapp.com"];        // your domains
+const ALLOWED_SCHEMES = ["wemobapp", "https"];               // your scheme + https
+
+function isSafeURL(raw: string): boolean {
+  try {
+    const u = new URL(raw);
+    if (!ALLOWED_SCHEMES.includes(u.protocol.replace(":", ""))) return false;
+    if (u.protocol === "https:" && !ALLOWED_HOSTS.includes(u.host)) return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+OneSignal.Notifications.addEventListener("click", (event) => {
+  const data = event.notification?.additionalData as { url?: string } | undefined;
+  const target = data?.url;
+  if (target && isSafeURL(target)) {
+    Linking.openURL(target);
+  }
+  // Else: navigate within the app (use expo-router's router.push to your default route)
+});
+` + "```" + `
+
+## Per-user opt-out (App Store compliance)
+
+Users must be able to turn off push from inside your app, not just the OS
+settings. Wire a "Notifications" toggle in your settings screen.
+
+` + "```" + `tsx
+import { OneSignal } from "react-native-onesignal";
+import { useEffect, useState } from "react";
+
+function NotificationsToggle() {
+  const [optedIn, setOptedIn] = useState<boolean>(true);
+
+  useEffect(() => {
+    // OneSignal v5 SDK exposes pushSubscription state synchronously.
+    setOptedIn(OneSignal.User.pushSubscription.getOptedIn() ?? true);
+  }, []);
+
+  return (
+    <Switch
+      value={optedIn}
+      onValueChange={(next) => {
+        if (next) {
+          OneSignal.User.pushSubscription.optIn();
+        } else {
+          OneSignal.User.pushSubscription.optOut();
+        }
+        setOptedIn(next);
+      }}
+    />
+  );
+}
+` + "```" + `
+
+## What Wemob auto-provisions vs what you (the user) must do
+
+Wemob auto-provisions PER TENANT (no agent action needed):
+- A OneSignal application named after the bundle ID
+- The per-app REST API key (used by the Wemob dashboard's compose-push UI)
+- Apple APNs P8 upload (when the user adds an Apple connection)
+- Android FCM v1 service account (org-level — not per-tenant)
+- EXPO_PUBLIC_ONESIGNAL_APP_ID baked into the binary at build time
+
+The USER (not the agent) sends push notifications from the Wemob dashboard's
+compose-push UI (Notifications tab). The agent should NOT generate code
+that POSTs to OneSignal's REST API from the user app — that's a server-side
+concern handled by Wemob's backend.
+
 # IN-APP PURCHASES
 For paywalls, subscriptions, or any digital goods sold inside the iOS app, use
 RevenueCat via lib/iap.ts. The root layout already calls initIAP() — you
