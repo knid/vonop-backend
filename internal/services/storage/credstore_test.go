@@ -3,6 +3,7 @@ package storage
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -135,5 +136,25 @@ func TestCredStore_ScopesS3KeysUnderOrg(t *testing.T) {
 	}
 	if !strings.HasPrefix(ref.DEKBlobS3Key, expectedPrefix) {
 		t.Errorf("DEKBlobS3Key = %q, expected prefix %q", ref.DEKBlobS3Key, expectedPrefix)
+	}
+}
+
+func TestCredRef_JSONRoundtrip(t *testing.T) {
+	orig := CredRef{
+		OrgID:        uuid.MustParse("11111111-1111-1111-1111-111111111111"),
+		Kind:         "apple-p8",
+		BlobS3Key:    "orgs/x/credentials/apple-p8/abc.ct",
+		DEKBlobS3Key: "orgs/x/credentials/apple-p8/abc.dek",
+	}
+	b, err := json.Marshal(orig)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var got CredRef
+	if err := json.Unmarshal(b, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got != orig {
+		t.Errorf("roundtrip mismatch: got %+v want %+v", got, orig)
 	}
 }

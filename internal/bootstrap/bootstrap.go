@@ -14,6 +14,9 @@ import (
 	"strings"
 	"time"
 
+	awsConfig "github.com/aws/aws-sdk-go-v2/config"
+	awsCreds "github.com/aws/aws-sdk-go-v2/credentials"
+	"github.com/aws/aws-sdk-go-v2/service/kms"
 	"github.com/hibiken/asynq"
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/controllers"
@@ -149,6 +152,32 @@ func BootstrapController() (*controllers.Controller, asynq.RedisClientOpt) {
 		panic(fmt.Errorf("bootstrap: failed to initialize android keys S3 storage: %w", err))
 	}
 
+	// KMS-backed envelope encryption for stored credentials.
+	// The keyID is read from secrets (alias/wemob-credentials by convention).
+	// In production this MUST be set; dev/test may set it to a local KMS or
+	// mocked value via env override.
+	kmsKeyID := sm.GetSecret("WEMOB_CREDENTIAL_KMS_KEY_ID")
+	if kmsKeyID == "" {
+		// Fail fast: silent KMS misconfiguration would degrade to plaintext.
+		panic("bootstrap: WEMOB_CREDENTIAL_KMS_KEY_ID secret is required")
+	}
+	kmsRegion := sm.GetSecret("AWS_REGION")
+	awsCfg, err := awsConfig.LoadDefaultConfig(context.Background(),
+		awsConfig.WithRegion(kmsRegion),
+		awsConfig.WithCredentialsProvider(awsCreds.NewStaticCredentialsProvider(
+			sm.GetSecret("AWS_ACCESS_KEY_ID"),
+			sm.GetSecret("AWS_SECRET_ACCESS_KEY"),
+			"",
+		)),
+	)
+	if err != nil {
+		panic(fmt.Errorf("bootstrap: aws config for KMS: %w", err))
+	}
+	kmsClient := kms.NewFromConfig(awsCfg)
+	kmsManager := secret.NewKMSManager(kmsClient, kmsKeyID)
+	credStore := storage.NewCredStore(userApiKeysStorage, kmsManager)
+	slog.Info("CredStore initialized", "kms_key", kmsKeyID, "bucket", "user_api_keys")
+
 	// Git repo service for project file storage
 	repoBasePath := "/data/repos"
 	if envPath := os.Getenv("REPO_BASE_PATH"); envPath != "" {
@@ -266,6 +295,7 @@ func BootstrapController() (*controllers.Controller, asynq.RedisClientOpt) {
 		assetsStorage,
 		userApiKeysStorage,
 		androidKeysStorage,
+		credStore,
 		sm,
 		flyService,
 		giteaService,

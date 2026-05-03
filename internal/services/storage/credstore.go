@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -53,6 +54,44 @@ type CredRef struct {
 	Kind         string // "apple-p8" | "apple-apns" | "google-sa" | "android-keystore" | etc.
 	BlobS3Key    string
 	DEKBlobS3Key string
+}
+
+// MarshalJSON implements json.Marshaler so CredRef can be persisted as a
+// jsonb column via Bun. UUID is marshalled as a string.
+func (r CredRef) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		OrgID        string `json:"org_id"`
+		Kind         string `json:"kind"`
+		BlobS3Key    string `json:"blob_s3_key"`
+		DEKBlobS3Key string `json:"dek_blob_s3_key"`
+	}{
+		OrgID:        r.OrgID.String(),
+		Kind:         r.Kind,
+		BlobS3Key:    r.BlobS3Key,
+		DEKBlobS3Key: r.DEKBlobS3Key,
+	})
+}
+
+// UnmarshalJSON parses a jsonb-stored CredRef.
+func (r *CredRef) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		OrgID        string `json:"org_id"`
+		Kind         string `json:"kind"`
+		BlobS3Key    string `json:"blob_s3_key"`
+		DEKBlobS3Key string `json:"dek_blob_s3_key"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	id, err := uuid.Parse(raw.OrgID)
+	if err != nil {
+		return fmt.Errorf("credref: org_id parse: %w", err)
+	}
+	r.OrgID = id
+	r.Kind = raw.Kind
+	r.BlobS3Key = raw.BlobS3Key
+	r.DEKBlobS3Key = raw.DEKBlobS3Key
+	return nil
 }
 
 // Put encrypts plaintext, stores ciphertext + encrypted DEK in S3 under

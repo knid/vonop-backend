@@ -35,6 +35,7 @@ type Controller struct {
 	AssetsStorage          *storage.S3Storage
 	UserApiKeysStorage     *storage.S3Storage
 	AndroidKeysStorage     *storage.S3Storage
+	CredStore              *storage.CredStore
 	ConcurrentBuildLimiter chan struct{}
 	CodemagicService       *codemagic.Service
 	FlyService             *fly.Service
@@ -59,6 +60,7 @@ func NewController(db *database.Database, concurrentBuildLimiter chan struct{},
 	assetsStorage *storage.S3Storage,
 	userApiKeysStorage *storage.S3Storage,
 	androidKeysStorage *storage.S3Storage,
+	credStore *storage.CredStore,
 	secretManager secret.SecretManager,
 	flyService *fly.Service, giteaService *gitea.Service,
 	neonService *neon.Service,
@@ -80,6 +82,7 @@ func NewController(db *database.Database, concurrentBuildLimiter chan struct{},
 		AssetsStorage:          assetsStorage,
 		UserApiKeysStorage:     userApiKeysStorage,
 		AndroidKeysStorage:     androidKeysStorage,
+		CredStore:              credStore,
 		SecretManager:          secretManager,
 		CodemagicService:       codemagicService,
 		FlyService:             flyService,
