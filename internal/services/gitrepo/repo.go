@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"bufio"
 	"bytes"
+	"compress/gzip"
 	"context"
 	"fmt"
 	"io"
@@ -416,6 +417,88 @@ func (r *Repo) WriteFileMap(fileMap map[string]string) error {
 		}
 		return nil
 	})
+}
+
+// TarSubtree returns a gzipped tarball containing every regular file under
+// `<repo>/<prefix>`, with the prefix stripped from each entry's name.
+//
+// Example: if the repo contains `mobile/app/index.tsx` and `mobile/lib/api.ts`,
+// TarSubtree("mobile/") returns a .tar.gz whose entries are `app/index.tsx`
+// and `lib/api.ts`. The .git directory and prefix-external paths are excluded.
+//
+// Returns an error if prefix doesn't exist, isn't a directory, or escapes the
+// repo root via .. components. Empty subtree is allowed (returns an empty but
+// well-formed gzip).
+func (r *Repo) TarSubtree(prefix string) ([]byte, error) {
+	cleanPrefix := strings.TrimSuffix(strings.TrimPrefix(filepath.Clean(prefix), "/"), "/")
+	if cleanPrefix == "" || cleanPrefix == "." || strings.HasPrefix(cleanPrefix, "..") {
+		return nil, fmt.Errorf("TarSubtree: invalid prefix %q", prefix)
+	}
+	root := filepath.Join(r.Path, cleanPrefix)
+	info, err := os.Stat(root)
+	if err != nil {
+		return nil, fmt.Errorf("TarSubtree: stat %q: %w", root, err)
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("TarSubtree: prefix %q is not a directory", prefix)
+	}
+
+	var buf bytes.Buffer
+	gw := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gw)
+
+	walkErr := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			if d.Name() == ".git" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !d.Type().IsRegular() {
+			return nil
+		}
+		rel, relErr := filepath.Rel(root, path)
+		if relErr != nil {
+			return fmt.Errorf("rel %q: %w", path, relErr)
+		}
+		entryName := filepath.ToSlash(rel)
+		fi, fiErr := d.Info()
+		if fiErr != nil {
+			return fmt.Errorf("info %q: %w", path, fiErr)
+		}
+		hdr := &tar.Header{
+			Name:    entryName,
+			Mode:    int64(fi.Mode().Perm()),
+			Size:    fi.Size(),
+			ModTime: fi.ModTime(),
+		}
+		if err := tw.WriteHeader(hdr); err != nil {
+			return fmt.Errorf("tar header %q: %w", entryName, err)
+		}
+		f, openErr := os.Open(path)
+		if openErr != nil {
+			return fmt.Errorf("open %q: %w", path, openErr)
+		}
+		_, copyErr := io.Copy(tw, f)
+		f.Close()
+		if copyErr != nil {
+			return fmt.Errorf("copy %q: %w", path, copyErr)
+		}
+		return nil
+	})
+	if walkErr != nil {
+		return nil, fmt.Errorf("TarSubtree: walk: %w", walkErr)
+	}
+	if err := tw.Close(); err != nil {
+		return nil, fmt.Errorf("TarSubtree: tar close: %w", err)
+	}
+	if err := gw.Close(); err != nil {
+		return nil, fmt.Errorf("TarSubtree: gzip close: %w", err)
+	}
+	return buf.Bytes(), nil
 }
 
 // Reset performs a hard reset of the working tree to the given commit hash.
