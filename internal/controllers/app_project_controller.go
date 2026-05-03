@@ -142,6 +142,74 @@ func (c *Controller) CreateAppProject(ctx context.Context, user *models.User, re
 		}
 	}
 
+	// mobile_app_native projects get an eager MobileAppConfig row + a
+	// canonical mobile/ + backend/ skeleton in the project repo so the
+	// agent has somewhere to write from turn 1 and read_mobile_config
+	// returns sensible defaults instead of "missing config".
+	if project.ProjectType == models.ProjectTypeMobileAppNative {
+		// Pre-populate every field with the same defaults the DB column
+		// DEFAULT clauses use. Bun's INSERT emits explicit values for all
+		// non-pointer scalar fields (including bool zeros), which would
+		// override the column defaults if we left them unset.
+		cfg := &models.MobileAppConfig{
+			ProjectID:            project.ID,
+			PushEnabled:          true,
+			AnalyticsEnabled:     true,
+			PullToRefreshEnabled: true,
+			ExternalBrowserLinks: true,
+			BridgeEnabled:        true,
+			OfflineEnabled:       false,
+			CachingStrategy:      "network-first",
+			BiometricEnabled:     false,
+			DarkModeEnabled:      true,
+			RatingEnabled:        false,
+			RatingSessions:       5,
+			UpdateCheckEnabled:   false,
+		}
+		if _, err := c.DB.UpsertMobileAppConfig(cfg); err != nil {
+			// Non-fatal: the agent can still call read_mobile_config and
+			// get a missing-config response. Log so we can investigate
+			// if this becomes a pattern.
+			slog.Warn("eager MobileAppConfig insert failed",
+				"error", err, "project_id", project.ID)
+		}
+
+		// Scaffold the canonical mobile_app_native layout in the project
+		// repo so the agent has somewhere to write from turn 1 and the
+		// build pipeline can find the mobile/ subtree.
+		if c.GitRepoService != nil {
+			if repo, err := c.GitRepoService.Open(project.ID.String()); err == nil {
+				skeleton := map[string]string{
+					"mobile/.gitkeep":  "",
+					"backend/.gitkeep": "",
+					"README.md": "# " + project.Name + `
+
+This project has two top-level subtrees:
+
+- mobile/ — Expo (React Native) app. Built by Codemagic into a signed APK/IPA.
+- backend/ — Next.js API routes. Deployed to Fly at https://` + project.Slug + `.wemob.app.
+
+The AI agent writes into both. Don't move files between subtrees without
+updating the build pipeline (see internal/controllers/app_build_controller.go).
+`,
+				}
+				for path, content := range skeleton {
+					if err := repo.WriteFile(path, []byte(content)); err != nil {
+						slog.Warn("mobile_app_native skeleton write failed",
+							"error", err, "project_id", project.ID, "path", path)
+					}
+				}
+				if _, err := repo.Commit("scaffold: mobile/ + backend/ skeleton"); err != nil {
+					slog.Warn("mobile_app_native skeleton commit failed",
+						"error", err, "project_id", project.ID)
+				}
+			} else {
+				slog.Warn("mobile_app_native skeleton: failed to open repo (will rely on agent to create dirs)",
+					"error", err, "project_id", project.ID)
+			}
+		}
+	}
+
 	return project, nil
 }
 
