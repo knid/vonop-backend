@@ -149,14 +149,9 @@ func (c *Controller) RedeemKeystoreDownload(ctx context.Context, requestingUser 
 		return "", fmt.Errorf("consume otp: %w", err)
 	}
 
-	// Read both the keystore and its key.properties from S3.
-	jksBytes, err := c.AndroidKeysStorage.ReadObjectBytes(ctx, fmt.Sprintf("keystores/%s.jks", projectIDStr))
+	jksBytes, propsBytes, err := c.readAndroidKeystoreAndProperties(ctx, projectUUID, projectIDStr)
 	if err != nil {
-		return "", fmt.Errorf("read keystore: %w", err)
-	}
-	propsBytes, err := c.AndroidKeysStorage.ReadObjectBytes(ctx, fmt.Sprintf("key_properties/%s.properties", projectIDStr))
-	if err != nil {
-		return "", fmt.Errorf("read key properties: %w", err)
+		return "", err
 	}
 
 	// Bundle both files into a single in-memory zip so the frontend only needs

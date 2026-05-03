@@ -72,6 +72,33 @@ func credRefFromStorage(s *storage.CredRef) *models.CredRefJSON {
 	}
 }
 
+// readAndroidKeystoreAndProperties prefers the encrypted AndroidKeystore row
+// when present; falls back to legacy S3 paths for projects whose keystore
+// hasn't yet been re-uploaded through the new endpoint.
+func (c *Controller) readAndroidKeystoreAndProperties(ctx context.Context, projectID uuid.UUID, projectIDStr string) ([]byte, []byte, error) {
+	row, err := c.DB.GetAndroidKeystoreByProject(ctx, projectID)
+	if err == nil && row != nil && row.KeystoreCredRef != nil && row.PropertiesCredRef != nil {
+		jks, kerr := c.CredStore.Get(ctx, row.OrganizationID, credRefToStorage(row.KeystoreCredRef))
+		if kerr == nil {
+			props, perr := c.CredStore.Get(ctx, row.OrganizationID, credRefToStorage(row.PropertiesCredRef))
+			if perr == nil {
+				return jks, props, nil
+			}
+		}
+		// fall through to legacy on decrypt failure (rare; subsequent legacy read
+		// keeps the user's download flow working).
+	}
+	jksBytes, err := c.AndroidKeysStorage.ReadObjectBytes(ctx, fmt.Sprintf("keystores/%s.jks", projectIDStr))
+	if err != nil {
+		return nil, nil, fmt.Errorf("read keystore: %w", err)
+	}
+	propsBytes, err := c.AndroidKeysStorage.ReadObjectBytes(ctx, fmt.Sprintf("key_properties/%s.properties", projectIDStr))
+	if err != nil {
+		return nil, nil, fmt.Errorf("read key properties: %w", err)
+	}
+	return jksBytes, propsBytes, nil
+}
+
 // encryptAndStoreCredential reads the just-uploaded plaintext from the legacy
 // S3 path, re-encrypts it via CredStore, and returns a CredRefJSON the caller
 // persists on the model row. Returns (nil, nil) if legacyPath is empty.

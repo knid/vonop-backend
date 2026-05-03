@@ -2009,6 +2009,10 @@ func main() {
 			expoReportsHandler := views.NewExpoReportsHandler(controller.DB, workerHMACKey)
 			r.Post("/reports/expo-build", expoReportsHandler.UpdateExpoBuildStatus)
 
+			keystoreHandler := views.NewCodemagicKeystoreHandler(controller, workerHMACKey)
+			r.Post("/codemagic/keystore", keystoreHandler.RegisterKeystore)
+			r.Post("/codemagic/keystore/fetch", keystoreHandler.FetchKeystore)
+
 			// Admin template management
 			r.Route("/admin/templates", func(r chi.Router) {
 				r.Use(appMiddleware.RequireAuth(controller))
