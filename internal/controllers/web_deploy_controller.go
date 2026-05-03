@@ -254,8 +254,18 @@ func (c *Controller) HandleWebDeployTask(ctx context.Context, t *asynq.Task) err
 		return c.maybeRetry(ctx, p.DeploymentID, "ensure_app", err)
 	}
 
-	// 4. Sync env vars (secrets).
+	// 4. Sync env vars (secrets). Includes Better-Auth env vars when
+	// MobileAppConfig.AuthEnabled is true; CollectBetterAuthEnvVars also
+	// lazily generates + persists the per-customer BETTER_AUTH_SECRET on
+	// first call (envelope-encrypted via CredStore).
 	envVars := c.CollectAllEnvVars(project)
+	authVars, err := c.CollectBetterAuthEnvVars(ctx, project)
+	if err != nil {
+		return c.maybeRetry(ctx, p.DeploymentID, "collect_auth_env", err)
+	}
+	for k, v := range authVars {
+		envVars[k] = v
+	}
 	if err := c.FlyService.SyncSecrets(flyAppName, envVars); err != nil {
 		return c.maybeRetry(ctx, p.DeploymentID, "sync_secrets", err)
 	}
