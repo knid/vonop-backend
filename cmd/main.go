@@ -98,6 +98,8 @@ func createSchema(db *bun.DB) error {
 		(*models.AppNotificationTask)(nil),
 		// Mobile app config (feature flags, plugin toggles, bridge settings)
 		(*models.MobileAppConfig)(nil),
+		// Compose-push audit log (P2.2: dashboard-driven push notifications for mobile_app_native)
+		(*models.ComposePushHistory)(nil),
 		// Preview codes for Try With Wemob
 		(*models.PreviewCode)(nil),
 		// GitHub export tracking
@@ -398,6 +400,10 @@ func createSchema(db *bun.DB) error {
 		`ALTER TABLE apple_connections ADD COLUMN IF NOT EXISTS p8_key_cred_ref jsonb`,
 		`ALTER TABLE apple_connections ADD COLUMN IF NOT EXISTS apns_p8_key_cred_ref jsonb`,
 		`ALTER TABLE google_play_connections ADD COLUMN IF NOT EXISTS service_account_cred_ref jsonb`,
+		// P2.2 — compose-push audit log table. The CREATE happens via createSchema
+		// (IfNotExists); the column ALTER below is a no-op on a fresh DB but acts
+		// as the canary marker for this batch.
+		`ALTER TABLE compose_push_histories ADD COLUMN IF NOT EXISTS recipients_count integer NOT NULL DEFAULT 0`,
 	}
 
 	// Deduplicate before creating unique indexes (keep the latest row per group)
@@ -426,6 +432,8 @@ func createSchema(db *bun.DB) error {
 		`CREATE INDEX IF NOT EXISTS idx_app_github_exports_app_project_id ON app_github_exports(app_project_id)`,
 		// Active-job lookup per app — used by GET /v2/apps/{appId}/active-job.
 		`CREATE INDEX IF NOT EXISTS idx_generation_jobs_app_status ON generation_jobs (app_id, status) WHERE app_id IS NOT NULL`,
+		// P2.2 — compose-push history listing index (most-recent-first per project).
+		`CREATE INDEX IF NOT EXISTS idx_compose_push_histories_app_created ON compose_push_histories (app_project_id, created_at DESC)`,
 	}
 	alterStatements = append(alterStatements, indexStatements...)
 	// Check if migrations have already been applied by testing for a column from the latest batch.
@@ -434,13 +442,14 @@ func createSchema(db *bun.DB) error {
 	// IMPORTANT: when adding a new ALTER TABLE above, update this canary to the newest column,
 	// otherwise the new ALTER will be silently skipped on servers that already have older columns.
 	// Table renames go in renameStatements below, not here — they run unconditionally.
-	// Canary: revenuecat_public_key_android — the LAST column in the P2.3 batch.
-	// Pointing the canary at the last new column (rather than the first) means
-	// a partial migration failure mid-batch will be detected on the next boot
-	// and the loop will retry the missed ALTERs. P2.3 RevenueCat IAP (2026-05-03).
+	// Canary: idx_compose_push_histories_app_created — the LAST migration in the P2.2 batch.
+	// (Previous canary: revenuecat_public_key_android, P2.3 RevenueCat IAP.)
+	// Pointing the canary at the last new migration means a partial-failure mid-batch
+	// is detected on next boot and the loop retries the missed ALTERs.
+	// P2.2 OneSignal compose-push (2026-05-03).
 	var migrationsDone bool
 	row := db.QueryRowContext(context.Background(),
-		"SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='mobile_app_configs' AND column_name='revenuecat_public_key_android')")
+		"SELECT EXISTS(SELECT 1 FROM pg_indexes WHERE indexname='idx_compose_push_histories_app_created')")
 	if err := row.Scan(&migrationsDone); err != nil {
 		migrationsDone = false
 	}
