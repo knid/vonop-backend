@@ -407,9 +407,9 @@ func (c *Controller) BuildExpoMobile(ctx context.Context, project *models.AppPro
 	}
 
 	// Compute the public API URL the mobile app will hit at runtime.
-	// P1.1.D wires this from the actual Fly deploy; for now use the
-	// canonical {slug}.wemob.app pattern as a fallback.
-	expoPublicAPIURL := "https://" + project.Slug + ".wemob.app"
+	// Resolves to the backend's deployed URL when present, or the canonical
+	// {slug}.wemob.app fallback for first builds before any deploy lands.
+	expoPublicAPIURL := c.BackendDeployURL(project)
 
 	ordered := make([]string, 0, 2)
 	if wantAndroid {
@@ -928,6 +928,30 @@ func (c *Controller) BackfillV1ProjectsForMobileApps() {
 	}
 
 	slog.Info("BackfillV1ProjectsForMobileApps: done", "processed", len(rows))
+}
+
+// BackendDeployURL returns the URL where the project's backend is (or will
+// be) deployed. Used by BuildExpoMobile to bake the right EXPO_PUBLIC_API_URL
+// into the mobile binary at build time, and by the README scaffold so docs
+// stay in sync with reality.
+//
+// Resolution order:
+//  1. RuntimeApp.CustomDomain (set on first deploy; equals {slug}.wemob.app
+//     by default but extensible for future user-bring-your-own-domain support)
+//  2. Canonical {slug}.{WEMOB_APP_BASE_DOMAIN} fallback (used for first-build
+//     before any deploy lands the runtime app row)
+//
+// Always returns an https:// scheme. Returns "" only when project is nil.
+func (c *Controller) BackendDeployURL(project *models.AppProject) string {
+	if project == nil {
+		return ""
+	}
+	if c.DB != nil {
+		if ra, err := c.DB.GetRuntimeAppByAppProjectID(project.ID.String()); err == nil && ra != nil && ra.CustomDomain != "" {
+			return "https://" + ra.CustomDomain
+		}
+	}
+	return "https://" + project.Slug + "." + constants.WEMOB_APP_BASE_DOMAIN
 }
 
 // replaceWithRealOneSignal replaces fake placeholder OneSignal IDs on a v1

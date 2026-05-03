@@ -187,7 +187,7 @@ func (c *Controller) CreateAppProject(ctx context.Context, user *models.User, re
 This project has two top-level subtrees:
 
 - mobile/ — Expo (React Native) app. Built by Codemagic into a signed APK/IPA.
-- backend/ — Next.js API routes. Deployed to Fly at https://` + project.Slug + `.wemob.app.
+- backend/ — Next.js API routes. Deployed to Fly at ` + c.BackendDeployURL(project) + `.
 
 The AI agent writes into both. Don't move files between subtrees without
 updating the build pipeline (see internal/controllers/app_build_controller.go).
