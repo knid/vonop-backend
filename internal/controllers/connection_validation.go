@@ -5,9 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
+	"github.com/google/uuid"
+
+	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/services/storeauth"
@@ -15,7 +20,20 @@ import (
 
 // ValidateAppleConnection downloads the .p8 key from S3, signs a short-lived
 // App Store Connect JWT, and GETs /v1/apps to verify the credentials are valid.
+// If req.ConnectionID is non-nil the outcome is persisted to connection_validations.
 func (c *Controller) ValidateAppleConnection(ctx context.Context, req requests.ValidateAppleConnectionRequest) responses.ValidationResult {
+	result := c.validateAppleConnectionCore(ctx, req)
+	if req.ConnectionID != nil {
+		status := "invalid"
+		if result.Valid {
+			status = "valid"
+		}
+		persistConnectionValidation(ctx, c.DB, "apple", *req.ConnectionID, status, result.Message, len(result.Apps))
+	}
+	return result
+}
+
+func (c *Controller) validateAppleConnectionCore(ctx context.Context, req requests.ValidateAppleConnectionRequest) responses.ValidationResult {
 	// --- early-exit on missing fields ---
 	if req.KeyID == "" || req.IssuerID == "" || req.TeamID == "" || req.P8KeyID == "" {
 		missing := ""
@@ -137,10 +155,23 @@ func (c *Controller) ValidateAppleConnection(ctx context.Context, req requests.V
 
 // ValidateGooglePlayConnection validates a Google Play service account JSON by
 // exchanging it for an OAuth2 access token and pinging the Play Publishing API.
+// If req.ConnectionID is non-nil the outcome is persisted to connection_validations.
 //
 // NOTE (Phase 3a): Full service-account OAuth2 token exchange is implemented below
 // using the standard JWT-signed grant flow (no external SDK required).
 func (c *Controller) ValidateGooglePlayConnection(ctx context.Context, req requests.ValidateGooglePlayConnectionRequest) responses.ValidationResult {
+	result := c.validateGooglePlayConnectionCore(ctx, req)
+	if req.ConnectionID != nil {
+		status := "invalid"
+		if result.Valid {
+			status = "valid"
+		}
+		persistConnectionValidation(ctx, c.DB, "google_play", *req.ConnectionID, status, result.Message, 0)
+	}
+	return result
+}
+
+func (c *Controller) validateGooglePlayConnectionCore(ctx context.Context, req requests.ValidateGooglePlayConnectionRequest) responses.ValidationResult {
 	if req.ServiceAccountID == "" {
 		return responses.ValidationResult{
 			Valid:   false,
@@ -263,5 +294,32 @@ func (c *Controller) ValidateGooglePlayConnection(ctx context.Context, req reque
 			Valid:   false,
 			Message: fmt.Sprintf("Google Play returned an unexpected status %d when validating the service account.", pubResp.StatusCode),
 		}
+	}
+}
+
+// connectionValidationAppender is the minimal write surface needed by
+// persistConnectionValidation. *database.Database satisfies it via
+// AppendConnectionValidation (added in P0.3 T4).
+type connectionValidationAppender interface {
+	AppendConnectionValidation(ctx context.Context, v *models.ConnectionValidation) error
+}
+
+// persistConnectionValidation writes a validation outcome row. Best-effort:
+// errors are logged at warn level but never returned, so a failed persist
+// doesn't break the validation flow itself.
+func persistConnectionValidation(ctx context.Context, store connectionValidationAppender, kind string, connID uuid.UUID, status, message string, appCount int) {
+	if store == nil {
+		return
+	}
+	err := store.AppendConnectionValidation(ctx, &models.ConnectionValidation{
+		ConnectionKind: kind,
+		ConnectionID:   connID,
+		Status:         status,
+		Message:        message,
+		AppCount:       appCount,
+		ValidatedAt:    time.Now().UTC(),
+	})
+	if err != nil {
+		slog.Warn("persist connection validation failed", "err", err, "kind", kind, "conn", connID)
 	}
 }
