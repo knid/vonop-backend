@@ -236,7 +236,8 @@ func (c *Controller) CopyTemplate(ctx context.Context, user *models.User, slug s
 	}
 
 	// Enforce app project limit (same logic as CreateAppProject)
-	isMobile := template.ProjectType == "mobile_app"
+	isMobile := template.ProjectType == models.ProjectTypeMobileAppLegacy ||
+		template.ProjectType == models.ProjectTypeMobileAppNative
 	var userLimits *models.StandardUserLimits
 	limits, limErr := c.GetUserLimits(user)
 	if limErr != nil {
@@ -247,7 +248,7 @@ func (c *Controller) CopyTemplate(ctx context.Context, user *models.User, slug s
 		var countFilter string
 		if isMobile {
 			maxApps = limits.MaxMobileApps
-			countFilter = "mobile_app"
+			countFilter = "mobile" // counts both legacy + native
 		} else {
 			maxApps = limits.MaxWebApps
 			countFilter = ""

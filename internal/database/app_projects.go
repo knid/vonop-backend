@@ -163,15 +163,22 @@ func (db *Database) CountAppProjectsByUserID(userID string) (int, error) {
 }
 
 // CountAppProjectsByUserIDAndType counts total app projects for a user.
-// If projectType is "mobile_app", counts only mobile. If empty, counts non-mobile (web/ecommerce).
+// projectType filter values:
+//   "mobile"           — counts both legacy mobile_app and new mobile_app_native (use for quota gates)
+//   "mobile_app"       — legacy compatibility: counts only legacy mobile_app rows
+//   "mobile_app_native" — counts only new native rows
+//   ""                 — counts non-mobile (web/ecommerce)
 func (db *Database) CountAppProjectsByUserIDAndType(userID string, projectType string) (int, error) {
 	q := db.DB.NewSelect().Model((*models.AppProject)(nil)).
 		Where("user_id = ?", userID).
 		Where("status != ?", "generating")
-	if projectType == "mobile_app" {
-		q = q.Where("project_type = ?", "mobile_app")
-	} else {
-		q = q.Where("project_type != ?", "mobile_app")
+	switch projectType {
+	case "mobile":
+		q = q.Where("project_type IN (?, ?)", "mobile_app", "mobile_app_native")
+	case "mobile_app", "mobile_app_native":
+		q = q.Where("project_type = ?", projectType)
+	default:
+		q = q.Where("project_type NOT IN (?, ?)", "mobile_app", "mobile_app_native")
 	}
 	return q.Count(context.Background())
 }
