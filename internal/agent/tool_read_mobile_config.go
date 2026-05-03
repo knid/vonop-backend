@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 // ReadMobileConfigTool exposes the project's MobileAppConfig to the AI agent
@@ -20,7 +21,7 @@ func (t *ReadMobileConfigTool) Name() string {
 }
 
 func (t *ReadMobileConfigTool) Description() string {
-	return "Read the current mobile app configuration: enabled native features (bridge methods), URL scheme for deep links, universal link domain, biometric flag, AND in-app purchase config (whether IAP is enabled and whether RevenueCat is provisioned, so paywalls and entitlement gating can rely on lib/iap.ts). Use this BEFORE writing code that depends on a native feature or IAP, to confirm it's enabled."
+	return "Read the current mobile app configuration: enabled native features (bridge methods), URL scheme for deep links, universal link domain, biometric flag, in-app purchase config (whether IAP is enabled and whether RevenueCat is provisioned, so paywalls and entitlement gating can rely on lib/iap.ts), AND push notification status (whether OneSignal is provisioned, so opt-in UI patterns and lib/push.ts helpers are safe to call). Use this BEFORE writing code that depends on a native feature, IAP, or push, to confirm it's enabled."
 }
 
 func (t *ReadMobileConfigTool) Schema() map[string]any {
@@ -38,6 +39,7 @@ type readMobileConfigOutput struct {
 	UniversalLinkDomain   string   `json:"universal_link_domain"`
 	BiometricEnabled      bool     `json:"biometric_enabled"`
 	IAP                   iapInfo  `json:"iap"`
+	Push                  pushInfo `json:"push"`
 }
 
 // iapInfo summarises in-app purchase configuration. RevenueCatConfigured is
@@ -48,6 +50,16 @@ type readMobileConfigOutput struct {
 type iapInfo struct {
 	Enabled              bool `json:"enabled"`
 	RevenueCatConfigured bool `json:"revenuecat_configured"`
+}
+
+// pushInfo summarises push-notification configuration. Configured is true
+// when the per-tenant OneSignal app has been provisioned (the v1 shadow row's
+// app ID is no longer the "expo-shadow-{projectID}" placeholder). The actual
+// app ID is NOT exposed — it's build-time-baked into the binary by Codemagic
+// and the agent doesn't need it to write opt-in UI.
+type pushInfo struct {
+	Enabled    bool `json:"enabled"`
+	Configured bool `json:"configured"`
 }
 
 func (t *ReadMobileConfigTool) Execute(ctx context.Context, rc *RunContext, _ json.RawMessage) (string, bool, error) {
@@ -74,6 +86,17 @@ func (t *ReadMobileConfigTool) Execute(ctx context.Context, rc *RunContext, _ js
 		out.BiometricEnabled = cfg.BiometricEnabled
 		out.IAP.Enabled = cfg.IAPEnabled
 		out.IAP.RevenueCatConfigured = cfg.RevenueCatPublicKeyIOS != "" && cfg.RevenueCatPublicKeyAndroid != ""
+
+		out.Push.Enabled = cfg.PushEnabled
+		// Configured = there's a real OneSignal app ID on the v1 shadow row
+		// (not the "expo-shadow-{projectID}" placeholder). Resolve lazily
+		// to keep the tool cheap when push isn't enabled.
+		if out.Push.Enabled {
+			shadowURL := "expo://" + rc.Project.Slug
+			if v1, _ := rc.Deps.DB.GetProjectByUserAndURL(rc.Project.UserID.String(), shadowURL); v1 != nil && v1.OneSignalAppID != "" && !strings.HasPrefix(v1.OneSignalAppID, "expo-shadow-") {
+				out.Push.Configured = true
+			}
+		}
 	}
 
 	b, err := json.Marshal(out)
