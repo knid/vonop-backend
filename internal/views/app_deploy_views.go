@@ -11,6 +11,7 @@ import (
 	"github.com/go-playground/validator/v10"
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/controllers"
+	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/utils"
@@ -373,6 +374,101 @@ func (v *HttpViews) BuildAppMobileMulti(w http.ResponseWriter, r *http.Request) 
 	// 207 Multi-Status when every platform's trigger failed but we still
 	// have tasks to show. 201 Created for the normal (including partial
 	// success) path. The client treats both as "inspect tasks".
+	statusCode := http.StatusCreated
+	allFailed := len(tasks) > 0 && triggerErr != nil
+	if allFailed {
+		statusCode = http.StatusMultiStatus
+	}
+
+	utils.JSONResponse(w, map[string]any{
+		"build_id":   build.ID,
+		"project_id": build.ProjectID,
+		"version":    build.BuildNumber,
+		"tasks":      taskResponses,
+	}, statusCode)
+}
+
+// BuildAppExpo triggers an Expo (mobile_app_native) build.
+// Mirrors BuildAppMobileMulti's auth + permission flow but routes to
+// BuildExpoMobile instead of the legacy URL-wrapper BuildAppMobile.
+//
+// Rejects non-mobile_app_native projects with HTTP 400 and a clear
+// message pointing at the legacy /build endpoint.
+func (v *HttpViews) BuildAppExpo(w http.ResponseWriter, r *http.Request) {
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
+		return
+	}
+	if requireActiveSubscription(w, v.Controller, user) {
+		return
+	}
+
+	limits, limitsErr := v.Controller.GetUserLimits(user)
+	if limitsErr != nil || !limits.CanBuildMobile {
+		go v.Controller.EventService.SendEvent(user, constants.EVENT_SUBSCRIPTION_NEED, map[string]any{"action": "build_expo"})
+		utils.JSONError(w, constants.ErrFeatureNotAvailable, "mobile builds require Professional plan", http.StatusForbidden, nil)
+		return
+	}
+
+	appID := chi.URLParam(r, "appId")
+	project, err := v.Controller.GetAppProject(appID, user)
+	if err != nil {
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
+		return
+	}
+	if project.ProjectType != models.ProjectTypeMobileAppNative {
+		utils.JSONError(w, constants.ErrValidationBody,
+			"this endpoint only accepts mobile_app_native projects; use /build for legacy WebView mobile",
+			http.StatusBadRequest, nil)
+		return
+	}
+
+	var req requests.ExpoBuildRequest
+	if err := utils.ParseJSONBody(r, &req); err != nil {
+		utils.ValidationError(w, err)
+		return
+	}
+	validate := validator.New(validator.WithRequiredStructEnabled())
+	if err := req.Validate(validate); err != nil {
+		utils.ValidationError(w, err)
+		return
+	}
+
+	build, tasks, triggerErr := v.Controller.BuildExpoMobile(r.Context(), project, user, controllers.ExpoBuildOptions{
+		Platforms:        req.Platforms,
+		AppName:          req.AppName,
+		Icon:             req.Icon,
+		SplashColor:      req.SplashColor,
+		MarketingVersion: req.MarketingVersion,
+		BundleIDOverride: req.BundleIDOverride,
+	})
+
+	// Same partial-failure handling as BuildAppMobileMulti: surface
+	// per-task Failed status to the client when at least one platform
+	// produced a task row, even if triggerErr is non-nil.
+	if triggerErr != nil && (build == nil || len(tasks) == 0) {
+		utils.JSONInternalError(w, triggerErr)
+		return
+	}
+
+	taskResponses := make([]map[string]any, 0, len(tasks))
+	for _, t := range tasks {
+		taskResponses = append(taskResponses, map[string]any{
+			"task_id":       t.ID,
+			"platform":      strings.ToLower(t.Platform),
+			"status":        t.StatusText,
+			"finished":      t.Finished,
+			"error_message": t.ErrorMessage,
+		})
+	}
+
+	for _, platform := range req.Platforms {
+		v.Controller.TrackUserEvent(user, "app_built_expo_"+platform, posthog.NewProperties().
+			Set("app_id", project.ID.String()).
+			Set("project_type", project.ProjectType))
+	}
+
 	statusCode := http.StatusCreated
 	allFailed := len(tasks) > 0 && triggerErr != nil
 	if allFailed {

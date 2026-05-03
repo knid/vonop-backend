@@ -96,6 +96,23 @@ func (r *MultiPlatformMobileBuildRequest) Validate(validate *validator.Validate)
 	return utils.ValidateFunc[MultiPlatformMobileBuildRequest](*r, validate)
 }
 
+// ExpoBuildRequest is the body for POST /v2/apps/{appId}/build/expo.
+// Separate from MultiPlatformMobileBuildRequest because the Expo flow
+// will diverge (e.g., RC public keys when P2.3 lands) and a distinct
+// type avoids polluting the legacy WebView path.
+type ExpoBuildRequest struct {
+	Platforms        []string `json:"platforms" validate:"required,min=1,dive,oneof=android ios" errormgs:"platforms must include android and/or ios"`
+	AppName          string   `json:"app_name" validate:"required,min=1,max=100" errormgs:"must be between 1 and 100 characters"`
+	Icon             string   `json:"icon"`
+	SplashColor      string   `json:"splash_color"`
+	MarketingVersion string   `json:"marketing_version"`
+	BundleIDOverride string   `json:"bundle_id_override"`
+}
+
+func (r *ExpoBuildRequest) Validate(validate *validator.Validate) error {
+	return utils.ValidateFunc[ExpoBuildRequest](*r, validate)
+}
+
 type CreateAppSnapshotRequest struct {
 	Description string `json:"description" validate:"required,min=2,max=200" errormgs:"must be between 2 and 200 characters long"`
 }

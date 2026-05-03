@@ -1847,6 +1847,9 @@ func main() {
 						r.Post("/", httpViews.BuildAppMobileMulti)
 						r.Post("/android", httpViews.BuildAppAndroid)
 						r.Post("/ios", httpViews.BuildAppIOS)
+						// Expo (mobile_app_native) — separate endpoint because the
+						// request shape + permission gate route through BuildExpoMobile.
+						r.Post("/expo", httpViews.BuildAppExpo)
 					})
 
 					// Persistent store listing — replaces the per-wizard form
