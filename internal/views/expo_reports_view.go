@@ -35,8 +35,8 @@ type ExpoReportsHandler struct {
 }
 
 // NewExpoReportsHandler constructs an ExpoReportsHandler.
-// hmacMaster is the WEMOB_WORKER_HMAC_KEY secret used to derive per-build
-// signing keys. TODO(P1.1): wire through SecretManager instead of os.Getenv.
+// hmacMaster is the WEMOB_WORKER_HMAC_KEY secret (loaded from SecretManager
+// in cmd/main.go) used to derive per-build signing keys.
 func NewExpoReportsHandler(store database.BuildEventStore, hmacMaster string) *ExpoReportsHandler {
 	return &ExpoReportsHandler{Store: store, HMACMaster: hmacMaster}
 }
