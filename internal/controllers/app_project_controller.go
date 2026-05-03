@@ -165,10 +165,10 @@ func (c *Controller) CreateAppProject(ctx context.Context, user *models.User, re
 			RatingEnabled:        false,
 			RatingSessions:       5,
 			UpdateCheckEnabled:   false,
-			// P2.3 — IAP first-class default for new mobile_app_native projects.
-			// Triggers eager RC provisioning below. Existing projects pre-P2.3
-			// keep iap_enabled=false (DB column default) and stay opt-in.
-			IAPEnabled: true,
+			// IAP defaults OFF — most apps don't need payments. The agent flips
+			// this on (and triggers lazy RC provisioning at next build) only
+			// when the user asks for paywalls / subscriptions.
+			IAPEnabled: false,
 		}
 		if _, err := c.DB.UpsertMobileAppConfig(cfg); err != nil {
 			// Non-fatal: the agent can still call read_mobile_config and
@@ -178,59 +178,30 @@ func (c *Controller) CreateAppProject(ctx context.Context, user *models.User, re
 				"error", err, "project_id", project.ID)
 		}
 
-		// P2.3 — RevenueCat IAP auto-provisioning. Fire-and-forget so a
-		// flaky RC API doesn't block project creation. The build path
-		// (BuildExpoMobile) re-checks and lazy-provisions if this
-		// goroutine fails or RC is back up by then. Idempotent: a
-		// successful first call sets RevenueCatProjectID and subsequent
-		// calls (including the build-path lazy retry) skip cleanly.
-		go func(p *models.AppProject) {
-			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-			defer cancel()
-			if err := c.provisionRevenueCat(ctx, p); err != nil {
-				slog.Warn("eager RC provision failed (build-path will retry)",
-					"error", err, "project_id", p.ID)
-			}
-		}(project)
+		// RevenueCat + OneSignal provisioning is intentionally LAZY — only
+		// triggered from the build path (BuildExpoMobile) when the agent has
+		// flipped iap_enabled / push_enabled on. Eager goroutines were
+		// dropped because most projects (calculators, utilities, single-
+		// purpose tools) never need IAP or push, and provisioning created
+		// orphan RC projects + OneSignal apps for every signup.
 
-		// P2.2 — OneSignal app provisioning. Fire-and-forget so a flaky
-		// OneSignal API doesn't block project creation. The build path
-		// (BuildExpoMobile) re-checks and lazy-provisions if this goroutine
-		// fails or the API outage was resolved by then. Idempotent: a
-		// successful first call replaces the v1-shadow row's expo-shadow-*
-		// placeholders with real IDs and subsequent calls (including
-		// build-path retry) skip cleanly.
-		go func(p *models.AppProject) {
-			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-			defer cancel()
-			if err := c.provisionOneSignalApp(ctx, p); err != nil {
-				slog.Warn("eager OneSignal provision failed (build-path will retry)",
-					"error", err, "project_id", p.ID)
-			}
-		}(project)
-
-		// Scaffold the canonical mobile_app_native layout in the project
-		// repo so the agent has somewhere to write from turn 1 and the
-		// build pipeline can find the mobile/ subtree. Includes the
-		// marketing landing page at backend/app/page.tsx (P3.1) so the
-		// per-project Fly app serves SOMETHING at {slug}.wemob.app/ from
-		// day 1, even before the user's first chat turn.
+		// Scaffold ONLY mobile/ by default. backend/ is opt-in: the agent
+		// creates it (via the write tool) when the user asks for server-side
+		// state, auth, payments, or a marketing landing. For pure client-side
+		// apps (calculators, drawing tools, timers, animations) the project
+		// stays mobile-only and never spawns a Fly machine.
 		if c.GitRepoService != nil {
 			if repo, err := c.GitRepoService.Open(project.ID.String()); err == nil {
 				skeleton := map[string]string{
-					"mobile/.gitkeep":  "",
-					"backend/.gitkeep": "",
+					"mobile/.gitkeep": "",
 					"README.md": "# " + project.Name + `
 
-This project has two top-level subtrees:
+The mobile app source lives in mobile/ — an Expo (React Native) project
+built by Codemagic into a signed APK/IPA.
 
-- mobile/ — Expo (React Native) app. Built by Codemagic into a signed APK/IPA.
-- backend/ — Next.js project. Deployed to Fly at ` + c.BackendDeployURL(project) + `.
-  Serves both the mobile app's API at /api/* AND the marketing landing
-  page at / (backend/app/page.tsx).
-
-The AI agent writes into both. Don't move files between subtrees without
-updating the build pipeline (see internal/controllers/app_build_controller.go).
+backend/ is OPTIONAL — it only exists when this app needs server-side
+functionality (persisted data, auth, payments, push, marketing landing).
+The AI agent creates it the first time the user asks for any of those.
 `,
 				}
 				for path, content := range skeleton {
@@ -239,15 +210,7 @@ updating the build pipeline (see internal/controllers/app_build_controller.go).
 							"error", err, "project_id", project.ID, "path", path)
 					}
 				}
-				// Write the landing-page baseline (P3.1) — page.tsx + layout.tsx
-				// + globals.css — so {slug}.wemob.app/ renders a marketing page
-				// from day 1. Best-effort: a flaky disk doesn't fail project
-				// creation, the agent can re-scaffold via chat if needed.
-				if err := scaffoldMobileLandingPage(repo, project); err != nil {
-					slog.Warn("mobile_app_native landing scaffold failed",
-						"error", err, "project_id", project.ID)
-				}
-				if _, err := repo.Commit("scaffold: mobile/ + backend/ skeleton + landing page"); err != nil {
+				if _, err := repo.Commit("scaffold: mobile/ skeleton"); err != nil {
 					slog.Warn("mobile_app_native skeleton commit failed",
 						"error", err, "project_id", project.ID)
 				}

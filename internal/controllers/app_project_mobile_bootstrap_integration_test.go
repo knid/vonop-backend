@@ -149,9 +149,10 @@ func TestCreateAppProject_NonMobile_DoesNotSeedMobileAppConfig(t *testing.T) {
 	}
 }
 
-// TestCreateAppProject_MobileAppNative_ScaffoldsRepoSkeleton verifies the
-// canonical mobile/ + backend/ skeleton is committed to the project's git
-// repo on creation, with a README.md mentioning the project name and slug.
+// TestCreateAppProject_MobileAppNative_ScaffoldsRepoSkeleton verifies that
+// the mobile/ skeleton is committed on project creation. backend/ is opt-in
+// and intentionally NOT scaffolded — see TestCreateAppProject_MobileAppNative_DoesNotScaffoldBackend
+// for the negative assertion.
 func TestCreateAppProject_MobileAppNative_ScaffoldsRepoSkeleton(t *testing.T) {
 	c, _, user, org := setupMobileBootstrapTest(t)
 	ctx := context.Background()
@@ -172,9 +173,6 @@ func TestCreateAppProject_MobileAppNative_ScaffoldsRepoSkeleton(t *testing.T) {
 	if !repo.FileExists("mobile/.gitkeep") {
 		t.Error("expected mobile/.gitkeep to exist in scaffold")
 	}
-	if !repo.FileExists("backend/.gitkeep") {
-		t.Error("expected backend/.gitkeep to exist in scaffold")
-	}
 	if !repo.FileExists("README.md") {
 		t.Error("expected README.md to exist in scaffold")
 	}
@@ -187,14 +185,11 @@ func TestCreateAppProject_MobileAppNative_ScaffoldsRepoSkeleton(t *testing.T) {
 	if !strings.Contains(body, project.Name) {
 		t.Errorf("README.md missing project Name %q; got: %s", project.Name, body)
 	}
-	if !strings.Contains(body, project.Slug) {
-		t.Errorf("README.md missing project Slug %q; got: %s", project.Slug, body)
-	}
 	if !strings.Contains(body, "mobile/") {
 		t.Errorf("README.md missing 'mobile/' subtree mention; got: %s", body)
 	}
 	if !strings.Contains(body, "backend/") {
-		t.Errorf("README.md missing 'backend/' subtree mention; got: %s", body)
+		t.Errorf("README.md missing 'backend/' (opt-in) explanation; got: %s", body)
 	}
 
 	// Verify the scaffold commit landed in the repo log so a future
