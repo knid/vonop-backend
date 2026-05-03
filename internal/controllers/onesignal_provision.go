@@ -102,7 +102,7 @@ func (c *Controller) persistShadowOneSignalIDs(ctx context.Context, v1 *models.P
 	}
 	_, err := c.DB.DB.NewUpdate().
 		Model(v1).
-		Column("onesignal_app_id", "onesignal_app_token", "package_name", "updated_at").
+		Column("one_signal_app_id", "one_signal_app_token", "package_name", "updated_at").
 		WherePK().
 		Exec(ctx)
 	return err
