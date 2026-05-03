@@ -49,6 +49,25 @@ type MobileAppConfig struct {
 	// Updates (runtime)
 	UpdateCheckEnabled bool `bun:",notnull,default:false" json:"update_check_enabled"`
 
+	// Auth (build + deploy time). When AuthEnabled=true the deploy worker
+	// injects BETTER_AUTH_SECRET + BETTER_AUTH_URL into Fly secrets and the
+	// build worker bakes EXPO_PUBLIC_AUTH_BASE_URL into the mobile binary.
+	AuthEnabled   bool     `bun:",notnull,default:false" json:"auth_enabled"`
+	AuthProviders []string `bun:",array,type:text[]" json:"auth_providers"`
+	AuthScheme    string   `bun:",nullzero" json:"auth_scheme"`
+
+	// IAP / RevenueCat (build-time — public keys baked into the binary).
+	// Provisioned per-tenant by Controller.provisionRevenueCat at create-time
+	// (eager) or on first build (lazy). The org-level REVENUECAT_API_KEY
+	// (secret) lives in Infisical; these columns hold non-secret IDs +
+	// public SDK keys (the same keys that ship inside every App Store binary).
+	IAPEnabled                 bool   `bun:"iap_enabled,notnull,default:false" json:"iap_enabled"`
+	RevenueCatProjectID        string `bun:"revenuecat_project_id,nullzero" json:"revenuecat_project_id"`
+	RevenueCatIOSAppID         string `bun:"revenuecat_ios_app_id,nullzero" json:"revenuecat_ios_app_id"`
+	RevenueCatAndroidAppID     string `bun:"revenuecat_android_app_id,nullzero" json:"revenuecat_android_app_id"`
+	RevenueCatPublicKeyIOS     string `bun:"revenuecat_public_key_ios,nullzero" json:"revenuecat_public_key_ios"`
+	RevenueCatPublicKeyAndroid string `bun:"revenuecat_public_key_android,nullzero" json:"revenuecat_public_key_android"`
+
 	// Self-hosted OTA (expo-updates) — P2.1.
 	// OTAEnabled defaults true because the template ships with expo-updates
 	// pre-configured per P0.1; flip off to skip the publish step + null out

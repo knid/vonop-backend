@@ -98,6 +98,8 @@ func createSchema(db *bun.DB) error {
 		(*models.AppNotificationTask)(nil),
 		// Mobile app config (feature flags, plugin toggles, bridge settings)
 		(*models.MobileAppConfig)(nil),
+		// Compose-push audit log (P2.2: dashboard-driven push notifications for mobile_app_native)
+		(*models.ComposePushHistory)(nil),
 		// Preview codes for Try With Wemob
 		(*models.PreviewCode)(nil),
 		// GitHub export tracking
@@ -218,6 +220,18 @@ func createSchema(db *bun.DB) error {
 		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS rating_enabled boolean NOT NULL DEFAULT false`,
 		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS rating_sessions int NOT NULL DEFAULT 5`,
 		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS update_check_enabled boolean NOT NULL DEFAULT false`,
+		// P2.4 — Better-Auth integration
+		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS auth_enabled boolean NOT NULL DEFAULT false`,
+		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS auth_providers text[] DEFAULT '{}'`,
+		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS auth_scheme text`,
+		`ALTER TABLE app_projects ADD COLUMN IF NOT EXISTS better_auth_secret_cred_ref jsonb`,
+		// P2.3 — RevenueCat IAP auto-provisioning per tenant
+		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS iap_enabled boolean NOT NULL DEFAULT false`,
+		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS revenuecat_project_id text`,
+		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS revenuecat_ios_app_id text`,
+		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS revenuecat_android_app_id text`,
+		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS revenuecat_public_key_ios text`,
+		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS revenuecat_public_key_android text`,
 		// GitHub integration fields on users
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS git_hub_access_token text`,
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS git_hub_username text`,
@@ -393,6 +407,15 @@ func createSchema(db *bun.DB) error {
 		`ALTER TABLE apple_connections ADD COLUMN IF NOT EXISTS p8_key_cred_ref jsonb`,
 		`ALTER TABLE apple_connections ADD COLUMN IF NOT EXISTS apns_p8_key_cred_ref jsonb`,
 		`ALTER TABLE google_play_connections ADD COLUMN IF NOT EXISTS service_account_cred_ref jsonb`,
+		// P1.2 — per-app publishing settings for Codemagic submit workflows
+		`ALTER TABLE app_projects ADD COLUMN IF NOT EXISTS app_store_track text NOT NULL DEFAULT 'internal'`,
+		`ALTER TABLE app_projects ADD COLUMN IF NOT EXISTS play_store_track text NOT NULL DEFAULT 'internal'`,
+		`ALTER TABLE app_projects ADD COLUMN IF NOT EXISTS phased_release boolean NOT NULL DEFAULT false`,
+		`ALTER TABLE app_projects ADD COLUMN IF NOT EXISTS submit_as_draft boolean NOT NULL DEFAULT false`,
+		// P2.2 — compose-push audit log table. The CREATE happens via createSchema
+		// (IfNotExists); the column ALTER below is a no-op on a fresh DB but acts
+		// as the canary marker for this batch.
+		`ALTER TABLE compose_push_histories ADD COLUMN IF NOT EXISTS recipients_count integer NOT NULL DEFAULT 0`,
 		// P2.1: self-hosted OTA updates feature flags on MobileAppConfig.
 		// ota_enabled defaults true because the template ships with expo-updates
 		// pre-configured per P0.1; tenants flip it off explicitly.
@@ -427,6 +450,8 @@ func createSchema(db *bun.DB) error {
 		`CREATE INDEX IF NOT EXISTS idx_app_github_exports_app_project_id ON app_github_exports(app_project_id)`,
 		// Active-job lookup per app — used by GET /v2/apps/{appId}/active-job.
 		`CREATE INDEX IF NOT EXISTS idx_generation_jobs_app_status ON generation_jobs (app_id, status) WHERE app_id IS NOT NULL`,
+		// P2.2 — compose-push history listing index (most-recent-first per project).
+		`CREATE INDEX IF NOT EXISTS idx_compose_push_histories_app_created ON compose_push_histories (app_project_id, created_at DESC)`,
 	}
 	alterStatements = append(alterStatements, indexStatements...)
 	// Check if migrations have already been applied by testing for a column from the latest batch.
@@ -438,7 +463,7 @@ func createSchema(db *bun.DB) error {
 	// Canary: ota_release_channel — the LAST column in the P2.1 batch.
 	// Pointing the canary at the last new column (rather than the first) means
 	// a partial migration failure mid-batch will be detected on the next boot
-	// and the loop will retry the missed ALTERs. P2.1 self-hosted OTA (2026-05-03).
+	// and the loop will retry the missed ALTERs.
 	var migrationsDone bool
 	row := db.QueryRowContext(context.Background(),
 		"SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='mobile_app_configs' AND column_name='ota_release_channel')")
@@ -1863,6 +1888,24 @@ func main() {
 						// Expo (mobile_app_native) — separate endpoint because the
 						// request shape + permission gate route through BuildExpoMobile.
 						r.Post("/expo", httpViews.BuildAppExpo)
+					})
+
+					// Compose-push (P2.2) — dashboard-driven push notifications
+					// for mobile_app_native projects. 5/min/user rate limit
+					// stops a malicious admin from spamming OneSignal's per-app
+					// rate limit (T8.3 audit fix).
+					r.Route("/push", func(r chi.Router) {
+						r.With(rateLimiter.RateLimit(5, time.Minute, appMiddleware.UserKey)).
+							Post("/compose", httpViews.ComposePush)
+						r.Get("/history", httpViews.GetComposePushHistory)
+					})
+
+					// Mobile submissions (P1.2 — Codemagic publishing blocks).
+					// POST /v2/apps/{appId}/submit/{platform} — submits the latest
+					// successful Expo build to TestFlight (iOS) or the configured
+					// Play track (Android).
+					r.Route("/submit", func(r chi.Router) {
+						r.Post("/{platform}", httpViews.SubmitAppExpo)
 					})
 
 					// Persistent store listing — replaces the per-wizard form

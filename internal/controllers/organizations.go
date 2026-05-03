@@ -583,3 +583,27 @@ func (c *Controller) RequireOrgMembership(user *models.User, orgIDStr string) (u
 	}
 	return orgID, nil
 }
+
+// RequireOrgAdminOrOwner verifies the user is a member of the org with role
+// "owner" or "admin" and returns the org's UUID. Use for sensitive operations
+// (e.g. signing-keystore download, member management) where plain "member"
+// access is insufficient.
+//
+// Returns the same "organization not found or access denied" error string
+// for both "not a member" and "wrong role" so the endpoint does not leak
+// org existence to non-admins. Callers that want a distinct forbidden error
+// should branch before this helper.
+func (c *Controller) RequireOrgAdminOrOwner(user *models.User, orgIDStr string) (uuid.UUID, error) {
+	orgID, err := uuid.Parse(orgIDStr)
+	if err != nil {
+		return uuid.Nil, errors.New("invalid organization id")
+	}
+	member, err := c.DB.GetOrganizationMember(orgIDStr, user.ID.String())
+	if err != nil {
+		return uuid.Nil, errors.New("organization not found or access denied")
+	}
+	if member.Role != "owner" && member.Role != "admin" {
+		return uuid.Nil, errors.New("organization not found or access denied")
+	}
+	return orgID, nil
+}

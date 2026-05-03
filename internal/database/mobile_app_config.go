@@ -36,6 +36,15 @@ func (db *Database) UpsertMobileAppConfig(config *models.MobileAppConfig) (*mode
 		Set("rating_enabled = EXCLUDED.rating_enabled").
 		Set("rating_sessions = EXCLUDED.rating_sessions").
 		Set("update_check_enabled = EXCLUDED.update_check_enabled").
+		Set("auth_enabled = EXCLUDED.auth_enabled").
+		Set("auth_providers = EXCLUDED.auth_providers").
+		Set("auth_scheme = EXCLUDED.auth_scheme").
+		Set("iap_enabled = EXCLUDED.iap_enabled").
+		Set("revenuecat_project_id = EXCLUDED.revenuecat_project_id").
+		Set("revenuecat_ios_app_id = EXCLUDED.revenuecat_ios_app_id").
+		Set("revenuecat_android_app_id = EXCLUDED.revenuecat_android_app_id").
+		Set("revenuecat_public_key_ios = EXCLUDED.revenuecat_public_key_ios").
+		Set("revenuecat_public_key_android = EXCLUDED.revenuecat_public_key_android").
 		Set("ota_enabled = EXCLUDED.ota_enabled").
 		Set("ota_release_channel = EXCLUDED.ota_release_channel").
 		Set("updated_at = now()").
