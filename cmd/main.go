@@ -958,7 +958,12 @@ func backfillEncryptCredentials(bundb *bun.DB, credStore *storage.CredStore, use
 	// Apple: p8 + apns p8 in one pass per row. The WHERE gates on a non-empty
 	// path being present so rows with no encryptable content are excluded —
 	// otherwise the loop would re-fetch them forever (a row with p8 done but
-	// apns_p8_key_path == "" would still match the NULL-ref check).
+	// apnsp8_key_path == "" would still match the NULL-ref check).
+	//
+	// Note on column name: APNSP8KeyPath has no explicit bun tag, so Bun's
+	// snake_case keeps the all-caps run together → `apnsp8_key_path` (no
+	// underscore between "apns" and "p8"). The new CredRef columns DO have
+	// explicit tags so they use `apns_p8_key_cred_ref`.
 	//
 	// Pagination is cursor-based on `id`: each batch fetches rows with id > the
 	// last seen id. This guarantees forward progress even if every row in a
@@ -972,7 +977,7 @@ func backfillEncryptCredentials(bundb *bun.DB, credStore *storage.CredStore, use
 		var rows []models.AppleConnection
 		if err := bundb.NewSelect().
 			Model(&rows).
-			Where("(p8_key_cred_ref IS NULL AND p8_key_path != '') OR (apns_p8_key_cred_ref IS NULL AND apns_p8_key_path != '')").
+			Where("(p8_key_cred_ref IS NULL AND p8_key_path != '') OR (apns_p8_key_cred_ref IS NULL AND apnsp8_key_path != '')").
 			Where("deleted_at IS NULL").
 			Where("id > ?", appleCursor).
 			Order("id ASC").
