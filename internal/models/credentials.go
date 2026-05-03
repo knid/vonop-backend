@@ -24,9 +24,13 @@ type AppleConnection struct {
 	P8KeyPath      string        `bun:",notnull"`
 	APNSP8KeyPath  string        `bun:",notnull"`
 	APNSP8KeyID    string        `bun:",notnull"`
-	CreatedAt      time.Time     `bun:"created_at,nullzero,notnull,default:current_timestamp"`
-	UpdatedAt      time.Time     `bun:"updated_at,nullzero,notnull,default:current_timestamp"`
-	DeletedAt      time.Time     `bun:",soft_delete,nullzero"`
+	// Encrypted-at-rest references for the .p8 contents (KMS envelope via CredStore).
+	// nullzero so legacy rows that haven't been backfilled stay unmarshallable.
+	P8KeyCredRef     *CredRefJSON `bun:"p8_key_cred_ref,type:jsonb,nullzero"`
+	APNSP8KeyCredRef *CredRefJSON `bun:"apns_p8_key_cred_ref,type:jsonb,nullzero"`
+	CreatedAt        time.Time    `bun:"created_at,nullzero,notnull,default:current_timestamp"`
+	UpdatedAt        time.Time    `bun:"updated_at,nullzero,notnull,default:current_timestamp"`
+	DeletedAt        time.Time    `bun:",soft_delete,nullzero"`
 }
 
 // GooglePlayConnection is a user's Google Play Console service account key.
@@ -41,7 +45,9 @@ type GooglePlayConnection struct {
 	Organization       *Organization `bun:"rel:belongs-to,join:organization_id=id"`
 	Name               string        `bun:",notnull"`
 	ServiceAccountPath string        `bun:",notnull"`
-	CreatedAt          time.Time     `bun:"created_at,nullzero,notnull,default:current_timestamp"`
-	UpdatedAt          time.Time     `bun:"updated_at,nullzero,notnull,default:current_timestamp"`
-	DeletedAt          time.Time     `bun:",soft_delete,nullzero"`
+	// Encrypted-at-rest reference for the service account JSON (KMS envelope via CredStore).
+	ServiceAccountCredRef *CredRefJSON `bun:"service_account_cred_ref,type:jsonb,nullzero"`
+	CreatedAt             time.Time    `bun:"created_at,nullzero,notnull,default:current_timestamp"`
+	UpdatedAt             time.Time    `bun:"updated_at,nullzero,notnull,default:current_timestamp"`
+	DeletedAt             time.Time    `bun:",soft_delete,nullzero"`
 }
