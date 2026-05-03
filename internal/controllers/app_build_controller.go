@@ -954,6 +954,23 @@ func (c *Controller) BackendDeployURL(project *models.AppProject) string {
 	return "https://" + project.Slug + "." + constants.WEMOB_APP_BASE_DOMAIN
 }
 
+// WebPreviewURL returns the URL where the project's Expo Web preview is
+// served. P1.3 locked architecture: same Fly app as the Next.js backend,
+// with the web export bundled into the Next.js public/_web/ directory at
+// deploy time (see web_deploy_controller.go for the bake step — a follow-up
+// in P1.3.B). The studio's MobilePreview pane points an iframe at this URL.
+//
+// Builds atop BackendDeployURL so a custom domain on RuntimeApp transparently
+// flows through. Returns "" only when project is nil — the dashboard treats
+// "" as "render the empty state".
+func (c *Controller) WebPreviewURL(project *models.AppProject) string {
+	base := c.BackendDeployURL(project)
+	if base == "" {
+		return ""
+	}
+	return base + "/_web/"
+}
+
 // replaceWithRealOneSignal replaces fake placeholder OneSignal IDs on a v1
 // Project with real ones from the OneSignal API. Mutates the project in place
 // (caller is responsible for persisting via UpdateProject).
