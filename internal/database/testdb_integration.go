@@ -65,6 +65,8 @@ func NewTestDB(t *testing.T, modelObjs ...interface{}) *Database {
 	}
 
 	// Use bun's pgdriver — same path as production (see internal/bootstrap).
+	// WithInsecure(true) disables TLS — only safe for the local testcontainer.
+	// Never copy this option into non-test code.
 	sqldb := sql.OpenDB(pgdriver.NewConnector(
 		pgdriver.WithDSN(dsn),
 		pgdriver.WithInsecure(true),

@@ -34,6 +34,8 @@ Two reusable helpers live under `//go:build integration`:
 - `database.NewTestDB(t, models...)` — fresh Postgres 16 container per test, creates the requested model tables via Bun, terminates on cleanup.
 - `controllers.NewTestController(t, db, opts)` — wires a `*Controller` with fake `CredStore` (KMS+S3), fake `SecretManager`, fake `EventService`. Returns the controller plus a `*TestFakes` handle so tests can assert on captured events or peek at stored blobs.
 
+> **Note on `go mod tidy`:** the testcontainers-go dependencies are only imported behind `//go:build integration`. Always run `go vet -tags=integration ./...` before `go mod tidy` so the deps stay listed in `go.mod`. CI / release scripts that call `go mod tidy` without exercising the integration build will silently prune the deps.
+
 **Note:** A limited test suite exists under `internal/agent/` (context and mobile-config tests) and `internal/agent/eval/` (integration-only eval fixtures). The eval fixtures are build-tag gated and won't run in standard `go test ./...`.
 
 ## Architecture
