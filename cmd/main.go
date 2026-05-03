@@ -114,6 +114,8 @@ func createSchema(db *bun.DB) error {
 		(*models.BuildAnnotation)(nil),
 		// Expo build event stream (append-only, idempotent by task+message_hash)
 		(*models.BuildEvent)(nil),
+		// Append-only validation outcome per Apple/Google Play connection
+		(*models.ConnectionValidation)(nil),
 	}
 
 	for _, model := range models {
@@ -614,6 +616,8 @@ END $$`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS uniq_app_agent_runs_running ON app_agent_runs (app_project_id) WHERE status = 'running'`,
 		// build_events dedup index — enforces (task_id, message_hash) uniqueness
 		`CREATE UNIQUE INDEX IF NOT EXISTS build_events_task_msg_uniq ON build_events (task_id, message_hash)`,
+		// connection_validations: LatestConnectionValidation ORDER BY validated_at DESC
+		`CREATE INDEX IF NOT EXISTS connection_validations_kind_id_at ON connection_validations (connection_kind, connection_id, validated_at DESC)`,
 	}
 	for _, stmt := range perfIndexes {
 		if _, err := db.ExecContext(context.Background(), stmt); err != nil {
