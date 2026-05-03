@@ -51,6 +51,12 @@ type AppProject struct {
 	// SubmitAsDraft submits without releasing — uploads the build but doesn't push to TestFlight/Play.
 	// Useful for staged manual review.
 	SubmitAsDraft bool `bun:",notnull,default:false"`
+	// BetterAuthSecretCredRef is the encrypted-at-rest reference to this
+	// project's per-customer BETTER_AUTH_SECRET (32 random bytes hex-encoded,
+	// envelope-encrypted via CredStore). Generated lazily on the first build
+	// or deploy when MobileAppConfig.AuthEnabled is true. Never returned to
+	// the agent or the user — deploy-time concern only.
+	BetterAuthSecretCredRef *CredRefJSON `bun:"better_auth_secret_cred_ref,type:jsonb,nullzero"`
 	CreatedAt       time.Time      `bun:"created_at,nullzero,notnull,default:current_timestamp"`
 	UpdatedAt       time.Time      `bun:"updated_at,nullzero,notnull,default:current_timestamp"`
 	DeletedAt       time.Time      `bun:",soft_delete,nullzero"`
