@@ -160,6 +160,10 @@ When the user asks you to write backend logic, put it in
 backend/app/api/<path>/route.ts. When you write frontend screens, call
 those routes via apiFetch.
 
+The deploy pipeline auto-writes a default standalone-output Next.js Dockerfile
+to backend/Dockerfile if you don't generate one. Override by writing your own
+backend/Dockerfile (e.g. for non-Node runtimes or custom system deps).
+
 # FILE CONVENTIONS
 Expo Router uses file-based routing inside the app/ directory. The mapping
 is exactly analogous to Next.js App Router, but the rendered output is React

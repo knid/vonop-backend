@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -213,9 +215,24 @@ func (c *Controller) HandleWebDeployTask(ctx context.Context, t *asynq.Task) err
 		slog.Warn("commit branding changes", "err", commitErr)
 	}
 
-	// 2. Use the repo working tree directly as the source for the Fly builder.
-	// MaterializeTo does not exist; repo.Path is the on-disk working tree.
+	// 2. Use the repo working tree as the Fly builder source. mobile_app_native
+	// projects have a backend/ + mobile/ split at the repo root; deploy only
+	// the backend/ subtree (Next.js API routes). Other project types deploy
+	// the whole repo.
 	sourceDir := repo.Path
+	if project.ProjectType == models.ProjectTypeMobileAppNative {
+		sourceDir = filepath.Join(repo.Path, "backend")
+		if info, statErr := os.Stat(sourceDir); statErr != nil || !info.IsDir() {
+			return c.failTask(p.DeploymentID, "missing_backend_subtree",
+				fmt.Errorf("mobile_app_native project has no backend/ subtree at %s — agent must scaffold it before deploying", sourceDir))
+		}
+		// Defensive: ensure a Dockerfile exists. If the agent didn't generate
+		// one, write a sensible Next.js default. The AI can override it on
+		// the next turn by writing its own backend/Dockerfile.
+		if err := ensureNextjsDockerfile(sourceDir); err != nil {
+			return c.failTask(p.DeploymentID, "ensure_dockerfile", err)
+		}
+	}
 
 	// 3. Get/create the runtime_apps row.
 	flyAppName := "wemob-" + project.Slug
@@ -449,3 +466,53 @@ func (c *Controller) HandleFlyMachineEvent(event fly.MachineEvent) error {
 	}
 	return nil
 }
+
+// ensureNextjsDockerfile writes a default standalone-output Next.js Dockerfile
+// into sourceDir if one doesn't already exist. Idempotent — pre-existing
+// Dockerfiles (whether AI-generated or human-written) are left untouched so
+// users can override the default by writing their own backend/Dockerfile.
+//
+// The default mirrors the standalone-output Dockerfile from the official
+// Next.js examples (https://github.com/vercel/next.js/blob/canary/examples/with-docker/Dockerfile)
+// so it works with `next build` + `output: 'standalone'` in next.config.js.
+func ensureNextjsDockerfile(sourceDir string) error {
+	dockerPath := filepath.Join(sourceDir, "Dockerfile")
+	if _, err := os.Stat(dockerPath); err == nil {
+		return nil // already exists
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("stat Dockerfile: %w", err)
+	}
+	if err := os.WriteFile(dockerPath, []byte(defaultNextjsDockerfile), 0o644); err != nil {
+		return fmt.Errorf("write default Dockerfile: %w", err)
+	}
+	return nil
+}
+
+// defaultNextjsDockerfile is the standalone-output Next.js Dockerfile we
+// write into backend/ when the agent didn't generate one. Multi-stage build
+// (deps → builder → runner). Final image is ~150MB on alpine.
+const defaultNextjsDockerfile = `# syntax=docker/dockerfile:1.7
+FROM node:20-alpine AS deps
+WORKDIR /app
+COPY package.json package-lock.json* ./
+RUN npm ci --omit=dev=false
+
+FROM node:20-alpine AS builder
+WORKDIR /app
+COPY --from=deps /app/node_modules ./node_modules
+COPY . .
+RUN npm run build
+
+FROM node:20-alpine AS runner
+WORKDIR /app
+ENV NODE_ENV=production
+ENV PORT=3000
+ENV HOSTNAME=0.0.0.0
+RUN addgroup --system --gid 1001 nodejs && adduser --system --uid 1001 nextjs
+COPY --from=builder /app/public ./public
+COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
+COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+USER nextjs
+EXPOSE 3000
+CMD ["node", "server.js"]
+`
