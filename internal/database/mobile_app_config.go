@@ -36,6 +36,9 @@ func (db *Database) UpsertMobileAppConfig(config *models.MobileAppConfig) (*mode
 		Set("rating_enabled = EXCLUDED.rating_enabled").
 		Set("rating_sessions = EXCLUDED.rating_sessions").
 		Set("update_check_enabled = EXCLUDED.update_check_enabled").
+		Set("app_store_url = EXCLUDED.app_store_url").
+		Set("play_store_url = EXCLUDED.play_store_url").
+		Set("landing_page_published = EXCLUDED.landing_page_published").
 		Set("updated_at = now()").
 		Returning("*").
 		Exec(context.Background())

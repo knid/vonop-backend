@@ -391,6 +391,13 @@ func createSchema(db *bun.DB) error {
 		`ALTER TABLE apple_connections ADD COLUMN IF NOT EXISTS p8_key_cred_ref jsonb`,
 		`ALTER TABLE apple_connections ADD COLUMN IF NOT EXISTS apns_p8_key_cred_ref jsonb`,
 		`ALTER TABLE google_play_connections ADD COLUMN IF NOT EXISTS service_account_cred_ref jsonb`,
+		// P3.1: landing-page metadata on mobile app configs. Store URLs come
+		// from the user (or future store-approval webhooks); empty until set.
+		// LandingPagePublished is reserved for a future "private vs public"
+		// toggle — persisted today, not yet wired to any gate.
+		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS app_store_url text DEFAULT ''`,
+		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS play_store_url text DEFAULT ''`,
+		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS landing_page_published boolean NOT NULL DEFAULT false`,
 	}
 
 	// Deduplicate before creating unique indexes (keep the latest row per group)
@@ -427,13 +434,13 @@ func createSchema(db *bun.DB) error {
 	// IMPORTANT: when adding a new ALTER TABLE above, update this canary to the newest column,
 	// otherwise the new ALTER will be silently skipped on servers that already have older columns.
 	// Table renames go in renameStatements below, not here — they run unconditionally.
-	// Canary: service_account_cred_ref — the LAST column in the P1.0 batch.
+	// Canary: landing_page_published — the LAST column in the P3.1 batch.
 	// Pointing the canary at the last new column (rather than the first) means
 	// a partial migration failure mid-batch will be detected on the next boot
-	// and the loop will retry the missed ALTERs. P1.0 CredStore wiring (2026-05-03).
+	// and the loop will retry the missed ALTERs. P3.1 landing pages (2026-05-03).
 	var migrationsDone bool
 	row := db.QueryRowContext(context.Background(),
-		"SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='google_play_connections' AND column_name='service_account_cred_ref')")
+		"SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='mobile_app_configs' AND column_name='landing_page_published')")
 	if err := row.Scan(&migrationsDone); err != nil {
 		migrationsDone = false
 	}

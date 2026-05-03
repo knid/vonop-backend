@@ -49,6 +49,13 @@ type MobileAppConfig struct {
 	// Updates (runtime)
 	UpdateCheckEnabled bool `bun:",notnull,default:false" json:"update_check_enabled"`
 
+	// Landing page (P3.1) — store URLs become real CTAs once published; until
+	// then the agent renders "Coming soon" placeholders. The flag is persisted
+	// so a future "make this landing private" toggle can hang off it.
+	AppStoreURL          string `bun:",nullzero" json:"app_store_url"`
+	PlayStoreURL         string `bun:",nullzero" json:"play_store_url"`
+	LandingPagePublished bool   `bun:",notnull,default:false" json:"landing_page_published"`
+
 	CreatedAt time.Time `bun:",nullzero,notnull,default:current_timestamp" json:"created_at"`
 	UpdatedAt time.Time `bun:",nullzero,notnull,default:current_timestamp" json:"updated_at"`
 }
