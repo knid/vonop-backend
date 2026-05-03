@@ -216,6 +216,13 @@ func createSchema(db *bun.DB) error {
 		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS rating_enabled boolean NOT NULL DEFAULT false`,
 		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS rating_sessions int NOT NULL DEFAULT 5`,
 		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS update_check_enabled boolean NOT NULL DEFAULT false`,
+		// P2.3 — RevenueCat IAP auto-provisioning per tenant
+		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS iap_enabled boolean NOT NULL DEFAULT false`,
+		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS revenuecat_project_id text`,
+		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS revenuecat_ios_app_id text`,
+		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS revenuecat_android_app_id text`,
+		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS revenuecat_public_key_ios text`,
+		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS revenuecat_public_key_android text`,
 		// GitHub integration fields on users
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS git_hub_access_token text`,
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS git_hub_username text`,
@@ -427,13 +434,13 @@ func createSchema(db *bun.DB) error {
 	// IMPORTANT: when adding a new ALTER TABLE above, update this canary to the newest column,
 	// otherwise the new ALTER will be silently skipped on servers that already have older columns.
 	// Table renames go in renameStatements below, not here — they run unconditionally.
-	// Canary: service_account_cred_ref — the LAST column in the P1.0 batch.
+	// Canary: revenuecat_public_key_android — the LAST column in the P2.3 batch.
 	// Pointing the canary at the last new column (rather than the first) means
 	// a partial migration failure mid-batch will be detected on the next boot
-	// and the loop will retry the missed ALTERs. P1.0 CredStore wiring (2026-05-03).
+	// and the loop will retry the missed ALTERs. P2.3 RevenueCat IAP (2026-05-03).
 	var migrationsDone bool
 	row := db.QueryRowContext(context.Background(),
-		"SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='google_play_connections' AND column_name='service_account_cred_ref')")
+		"SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='mobile_app_configs' AND column_name='revenuecat_public_key_android')")
 	if err := row.Scan(&migrationsDone); err != nil {
 		migrationsDone = false
 	}
