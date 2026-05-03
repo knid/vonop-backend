@@ -67,7 +67,7 @@ func (v *HttpViews) GetMontlyUsage(w http.ResponseWriter, r *http.Request) {
 
 	// App project counts by type (total, not period-based)
 	webAppsUsed, _ := v.Controller.DB.CountAppProjectsByUserIDAndType(user.ID.String(), "")
-	mobileAppsUsed, _ := v.Controller.DB.CountAppProjectsByUserIDAndType(user.ID.String(), "mobile_app")
+	mobileAppsUsed, _ := v.Controller.DB.CountAppProjectsByUserIDAndType(user.ID.String(), "mobile")
 
 	// AI credits balance — read against the user's personal org.
 	var aiCreditsBalance int

@@ -919,7 +919,7 @@ func (v *HttpViews) ConvertToMobile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if limits.MaxMobileApps > 0 {
-		mobileCount, _ := v.Controller.DB.CountAppProjectsByUserIDAndType(user.ID.String(), "mobile_app")
+		mobileCount, _ := v.Controller.DB.CountAppProjectsByUserIDAndType(user.ID.String(), "mobile")
 		if mobileCount >= limits.MaxMobileApps {
 			utils.JSONError(w, constants.ErrQuotaReached,
 				fmt.Sprintf("you have reached your mobile app limit (%d)", limits.MaxMobileApps),
