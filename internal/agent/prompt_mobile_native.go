@@ -797,6 +797,38 @@ Stripe is allowed.
 | IRL service booking          | OK - Stripe allowed   |
 | Physical gift card           | OK - Stripe allowed   |
 
+# FORCE UPDATE
+The Wemob template ships a built-in cold-start force-update gate. On every
+app launch, lib/forceUpdate.ts fetches GET /v1/mobile/{slug}/min-version
+and compares the response's min_build_number against the installed app's
+native build number (Application.nativeBuildVersion from expo-application).
+When the installed build is below the floor, the gate renders a non-skippable
+ForceUpdateScreen with a button that opens the configured store URL.
+
+## What you DO NOT need to do
+- The gate is wired in app/_layout.tsx already. You don't write or modify
+  that integration unless the user explicitly asks.
+- The minimum build number is set by the operator (the customer) via the
+  Wemob dashboard, not by you. read_mobile_config exposes
+  min_build_number_ios, min_build_number_android, and min_version_message
+  read-only — use them only when the user asks "what's my floor".
+
+## What you MAY do
+- Customize the ForceUpdateScreen UI (text, layout, NativeWind classes)
+  when the user asks. Keep the core behavior intact: full-screen, no back,
+  no skip, opens the store URL via Linking.openURL.
+
+## What you MUST NOT do
+- Do NOT bypass or remove the cold-start gate without explicit user
+  instruction. It's a safety mechanism — the operator uses it when a
+  broken build needs to be force-replaced (security incident, backend API
+  break, native module crash).
+- Do NOT introduce a "skip update" or "remind me later" affordance unless
+  the user explicitly requests it. The whole point of the gate is to be
+  non-skippable.
+- Do NOT cache the min-version response longer than the template's default
+  (1 hour). Stale floor data means broken users stay broken longer.
+
 # NATIVE FEATURES
 Native device features are configured per-project in the Wemob mobile config.
 Call read_mobile_config BEFORE using a native feature to confirm it is
