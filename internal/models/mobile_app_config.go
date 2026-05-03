@@ -57,10 +57,6 @@ type MobileAppConfig struct {
 	AuthScheme    string   `bun:",nullzero" json:"auth_scheme"`
 
 	// IAP / RevenueCat (build-time — public keys baked into the binary).
-	// Provisioned per-tenant by Controller.provisionRevenueCat at create-time
-	// (eager) or on first build (lazy). The org-level REVENUECAT_API_KEY
-	// (secret) lives in Infisical; these columns hold non-secret IDs +
-	// public SDK keys (the same keys that ship inside every App Store binary).
 	IAPEnabled                 bool   `bun:"iap_enabled,notnull,default:false" json:"iap_enabled"`
 	RevenueCatProjectID        string `bun:"revenuecat_project_id,nullzero" json:"revenuecat_project_id"`
 	RevenueCatIOSAppID         string `bun:"revenuecat_ios_app_id,nullzero" json:"revenuecat_ios_app_id"`
@@ -69,14 +65,14 @@ type MobileAppConfig struct {
 	RevenueCatPublicKeyAndroid string `bun:"revenuecat_public_key_android,nullzero" json:"revenuecat_public_key_android"`
 
 	// Self-hosted OTA (expo-updates) — P2.1.
-	// OTAEnabled defaults true because the template ships with expo-updates
-	// pre-configured per P0.1; flip off to skip the publish step + null out
-	// the manifest URL at build time so the template's checkForUpdateAsync
-	// silently no-ops.
-	// OTAReleaseChannel is reserved for future staging vs production support;
-	// v1 ignores the value and always serves the latest update.
 	OTAEnabled        bool   `bun:",notnull,default:true" json:"ota_enabled"`
 	OTAReleaseChannel string `bun:",nullzero,default:'production'" json:"ota_release_channel"`
+
+	// Landing page (P3.1) — store URLs become real CTAs once published; until
+	// then the agent renders "Coming soon" placeholders.
+	AppStoreURL          string `bun:",nullzero" json:"app_store_url"`
+	PlayStoreURL         string `bun:",nullzero" json:"play_store_url"`
+	LandingPagePublished bool   `bun:",notnull,default:false" json:"landing_page_published"`
 
 	CreatedAt time.Time `bun:",nullzero,notnull,default:current_timestamp" json:"created_at"`
 	UpdatedAt time.Time `bun:",nullzero,notnull,default:current_timestamp" json:"updated_at"`

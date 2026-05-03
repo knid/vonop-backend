@@ -164,6 +164,99 @@ The deploy pipeline auto-writes a default standalone-output Next.js Dockerfile
 to backend/Dockerfile if you don't generate one. Override by writing your own
 backend/Dockerfile (e.g. for non-Node runtimes or custom system deps).
 
+## Landing page (backend/)
+The same per-project Next.js backend that hosts /api/* ALSO serves a public
+marketing landing page at the root path. The user's mobile app lives at
+{slug}.wemob.app/* (mobile only), and {slug}.wemob.app/ (browser) shows the
+landing. Files:
+
+- backend/app/page.tsx     <- the landing itself
+- backend/app/layout.tsx   <- exports Next.js metadata (title / description / OG / Twitter)
+- backend/app/globals.css  <- minimal CSS reset; rewrite to taste
+- backend/app/api/*/route.ts  <- mobile-app API routes (UNRELATED — never delete)
+
+The project is scaffolded with a baseline page.tsx + layout.tsx + globals.css
+already committed. You iterate on these like any other file.
+
+CRITICAL: backend/app/page.tsx and backend/app/api/* serve different audiences.
+Never delete app/api/* to "simplify" the landing — the mobile app stops
+working immediately. Treat the landing as additive surface area only.
+
+### Landing-page structure
+A polished landing has:
+1. Hero: app name, one-line tagline, optional preview screenshot.
+2. Features section (2-4 bullets with icons).
+3. Store-badge CTAs (App Store + Play Store).
+4. Footer with privacy / terms links.
+
+Mobile-first responsive design. The landing renders in a regular browser
+(Next.js server components), so this is plain web HTML/CSS — NOT React
+Native. None of the NativeWind / Expo / SafeAreaView guidance from earlier
+sections applies inside backend/. Use standard web Tailwind (after adding
+it as a dep), or inline styles, or any CSS solution the user prefers.
+
+### Store-badge CTAs
+Read the store URLs from read_mobile_config:
+- app_store_url + play_store_url are empty until the user publishes.
+- landing_page_published is a separate flag the user toggles.
+
+When the URLs are EMPTY, render greyed-out "Coming soon" placeholders.
+When the URLs are SET, wrap the badges in <a href={appStoreURL}> tags.
+
+DO NOT ship third-party badge images (Apple + Google have specific brand
+guidelines and licensing). Use inline SVG components instead. Sample:
+
+` + "```" + `tsx
+// backend/components/AppStoreBadge.tsx
+export function AppStoreBadge() {
+  return (
+    <svg viewBox="0 0 200 60" width={160} height={48} xmlns="http://www.w3.org/2000/svg">
+      <rect width="200" height="60" rx="10" fill="#000" />
+      <text x="100" y="38" textAnchor="middle" fill="#fff"
+            fontFamily="system-ui" fontSize="16" fontWeight="600">
+        Download on the App Store
+      </text>
+    </svg>
+  );
+}
+` + "```" + `
+
+The agent (you) is allowed to make these badges as polished as the user
+asks — just don't bundle external image files unless the user explicitly
+provides them.
+
+### Metadata (Open Graph + Twitter card)
+Use Next.js's metadata API in backend/app/layout.tsx. NEVER put <head>
+tags directly inside page.tsx — Next.js owns <head> from the layout's
+metadata export.
+
+` + "```" + `tsx
+// backend/app/layout.tsx
+import type { Metadata } from "next";
+import "./globals.css";
+
+export const metadata: Metadata = {
+  title: "MyApp — Track your habits",
+  description: "MyApp is a mobile habit tracker that …",
+  openGraph: {
+    title: "MyApp — Track your habits",
+    description: "Track your habits, build streaks, level up.",
+    type: "website",
+    images: [{ url: "/og.png", width: 1200, height: 630 }],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "MyApp — Track your habits",
+    description: "Track your habits, build streaks, level up.",
+  },
+};
+` + "```" + `
+
+### Domain
+The landing serves at the project's BackendDeployURL = {slug}.wemob.app/.
+DO NOT invent custom marketing domains — bring-your-own-domain is out of
+scope for the agent's authoring loop.
+
 ## Backend authentication setup
 When ` + "`read_mobile_config`" + ` returns ` + "`auth.enabled: true`" + `, scaffold Better-Auth in the
 backend/. The mobile auth client (lib/auth.ts in the Expo app) is already

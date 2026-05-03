@@ -412,16 +412,15 @@ func createSchema(db *bun.DB) error {
 		`ALTER TABLE app_projects ADD COLUMN IF NOT EXISTS play_store_track text NOT NULL DEFAULT 'internal'`,
 		`ALTER TABLE app_projects ADD COLUMN IF NOT EXISTS phased_release boolean NOT NULL DEFAULT false`,
 		`ALTER TABLE app_projects ADD COLUMN IF NOT EXISTS submit_as_draft boolean NOT NULL DEFAULT false`,
-		// P2.2 — compose-push audit log table. The CREATE happens via createSchema
-		// (IfNotExists); the column ALTER below is a no-op on a fresh DB but acts
-		// as the canary marker for this batch.
+		// P2.2 — compose-push audit log table.
 		`ALTER TABLE compose_push_histories ADD COLUMN IF NOT EXISTS recipients_count integer NOT NULL DEFAULT 0`,
-		// P2.1: self-hosted OTA updates feature flags on MobileAppConfig.
-		// ota_enabled defaults true because the template ships with expo-updates
-		// pre-configured per P0.1; tenants flip it off explicitly.
-		// ota_release_channel is reserved for future staging vs production support.
+		// P2.1: self-hosted OTA updates feature flags.
 		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS ota_enabled boolean NOT NULL DEFAULT true`,
 		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS ota_release_channel text NOT NULL DEFAULT 'production'`,
+		// P3.1: landing-page metadata on mobile app configs.
+		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS app_store_url text DEFAULT ''`,
+		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS play_store_url text DEFAULT ''`,
+		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS landing_page_published boolean NOT NULL DEFAULT false`,
 	}
 
 	// Deduplicate before creating unique indexes (keep the latest row per group)
@@ -460,13 +459,10 @@ func createSchema(db *bun.DB) error {
 	// IMPORTANT: when adding a new ALTER TABLE above, update this canary to the newest column,
 	// otherwise the new ALTER will be silently skipped on servers that already have older columns.
 	// Table renames go in renameStatements below, not here — they run unconditionally.
-	// Canary: ota_release_channel — the LAST column in the P2.1 batch.
-	// Pointing the canary at the last new column (rather than the first) means
-	// a partial migration failure mid-batch will be detected on the next boot
-	// and the loop will retry the missed ALTERs.
+	// Canary: landing_page_published — the LAST column in the P3.1 batch.
 	var migrationsDone bool
 	row := db.QueryRowContext(context.Background(),
-		"SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='mobile_app_configs' AND column_name='ota_release_channel')")
+		"SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='mobile_app_configs' AND column_name='landing_page_published')")
 	if err := row.Scan(&migrationsDone); err != nil {
 		migrationsDone = false
 	}

@@ -21,7 +21,7 @@ func (t *ReadMobileConfigTool) Name() string {
 }
 
 func (t *ReadMobileConfigTool) Description() string {
-	return "Read the current mobile app configuration: enabled native features (bridge methods), URL scheme for deep links, universal link domain, biometric flag, authentication config (whether Better-Auth is enabled, which providers are wired, OAuth redirect scheme), in-app purchase config (whether IAP is enabled and whether RevenueCat is provisioned, so paywalls and entitlement gating can rely on lib/iap.ts), AND push notification status (whether OneSignal is provisioned, so opt-in UI patterns and lib/push.ts helpers are safe to call). Use this BEFORE writing code that depends on a native feature, auth, IAP, or push, to confirm it's enabled."
+	return "Read the current mobile app configuration: enabled native features (bridge methods), URL scheme for deep links, universal link domain, biometric flag, authentication config (Better-Auth providers/scheme), in-app purchase config (IAP + RevenueCat provisioning), push notification status (OneSignal provisioning), OTA flag, App Store + Play Store URLs (for the marketing landing at backend/app/page.tsx), and the landing_page_published flag. Use this BEFORE writing code that depends on any of these features."
 }
 
 func (t *ReadMobileConfigTool) Schema() map[string]any {
@@ -42,39 +42,31 @@ type readMobileConfigOutput struct {
 	IAP                   iapInfo  `json:"iap"`
 	Push                  pushInfo `json:"push"`
 	// OTAEnabled — true when the project ships JS-only updates via
-	// self-hosted expo-updates. When true, the template's checkForUpdateAsync
-	// in app/_layout.tsx is wired to our manifest URL (set at build time);
-	// the agent should NOT attempt to call Updates.checkForUpdateAsync from
-	// other components. Default true on new projects (P2.1).
+	// self-hosted expo-updates.
 	OTAEnabled bool `json:"ota_enabled"`
+
+	// Landing-page metadata (P3.1) — empty until the user publishes to the
+	// stores. The agent uses these to decide between real store-badge CTAs
+	// and "Coming soon" placeholders on backend/app/page.tsx.
+	AppStoreURL          string `json:"app_store_url"`
+	PlayStoreURL         string `json:"play_store_url"`
+	LandingPagePublished bool   `json:"landing_page_published"`
 }
 
-// authInfo summarises the project's authentication configuration. Sourced
-// from MobileAppConfig.AuthEnabled / AuthProviders / AuthScheme. The
-// per-customer BETTER_AUTH_SECRET is intentionally NOT exposed here — it's
-// a deploy-time concern, encrypted via CredStore, and never returned to
-// the agent.
+// authInfo summarises the project's authentication configuration.
 type authInfo struct {
 	Enabled   bool     `json:"enabled"`
 	Providers []string `json:"providers"`
 	Scheme    string   `json:"scheme"`
 }
 
-// iapInfo summarises in-app purchase configuration. RevenueCatConfigured is
-// true when both platform public keys are populated (RC provisioning
-// succeeded). The actual public SDK keys are NOT exposed — they're build-
-// time-baked into the binary by the Codemagic pipeline and the agent
-// doesn't need them to write paywall code.
+// iapInfo summarises in-app purchase configuration.
 type iapInfo struct {
 	Enabled              bool `json:"enabled"`
 	RevenueCatConfigured bool `json:"revenuecat_configured"`
 }
 
-// pushInfo summarises push-notification configuration. Configured is true
-// when the per-tenant OneSignal app has been provisioned (the v1 shadow row's
-// app ID is no longer the "expo-shadow-{projectID}" placeholder). The actual
-// app ID is NOT exposed — it's build-time-baked into the binary by Codemagic
-// and the agent doesn't need it to write opt-in UI.
+// pushInfo summarises push-notification configuration.
 type pushInfo struct {
 	Enabled    bool `json:"enabled"`
 	Configured bool `json:"configured"`
@@ -116,6 +108,9 @@ func (t *ReadMobileConfigTool) Execute(ctx context.Context, rc *RunContext, _ js
 		out.IAP.Enabled = cfg.IAPEnabled
 		out.IAP.RevenueCatConfigured = cfg.RevenueCatPublicKeyIOS != "" && cfg.RevenueCatPublicKeyAndroid != ""
 		out.OTAEnabled = cfg.OTAEnabled
+		out.AppStoreURL = cfg.AppStoreURL
+		out.PlayStoreURL = cfg.PlayStoreURL
+		out.LandingPagePublished = cfg.LandingPagePublished
 
 		out.Push.Enabled = cfg.PushEnabled
 		// Configured = there's a real OneSignal app ID on the v1 shadow row
