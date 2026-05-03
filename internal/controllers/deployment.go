@@ -18,9 +18,14 @@ import (
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/services/codemagic"
+	"github.com/knid/wemob/internal/services/storeauth"
 	"github.com/knid/wemob/internal/utils/external"
 	"github.com/slack-go/slack"
 )
+
+// ErrPlayAppSigningRequired is returned when an Android first-publish is
+// attempted but Play App Signing is not yet enrolled for the package name.
+var ErrPlayAppSigningRequired = errors.New("Play App Signing must be enabled before first publish — see https://play.google.com/console (Setup → App integrity → Play App Signing)")
 
 var localeRegexp = regexp.MustCompile(`^[a-zA-Z]{2}(-[a-zA-Z]{2,4})?$`)
 
@@ -233,6 +238,13 @@ func (c *Controller) CreateDeploymentTask(user *models.User, orgID uuid.UUID, de
 		if hasAndroid {
 			cred, err := c.DB.GetGooglePlayConnectionById(googlePlayCredId.String())
 			if err != nil {
+				return nil, err
+			}
+
+			// First-publish gate: verify Play App Signing is enrolled before
+			// sending to Codemagic. A missing enrolment causes silent failures
+			// mid-pipeline; surfacing it here gives the user a clear error.
+			if err := c.RequirePlayAppSigning(context.Background(), cred, project.PackageName); err != nil {
 				return nil, err
 			}
 
@@ -614,4 +626,40 @@ func (c *Controller) GetLatestSignStatusForBuild(user *models.User, buildID stri
 		return nil, err
 	}
 	return signTask, nil
+}
+
+// RequirePlayAppSigning checks that Play App Signing is enrolled for the
+// given package name before triggering a first Android publish. Returns
+// ErrPlayAppSigningRequired if not enrolled, nil if enrolled or if the check
+// cannot be performed (in which case we log and allow through, so a temporary
+// SA permission issue doesn't permanently block the user).
+//
+// Callers on the update path (re-deploy) may skip this check since the app is
+// already live and signing must already be configured.
+func (c *Controller) RequirePlayAppSigning(ctx context.Context, cred *models.GooglePlayConnection, packageName string) error {
+	saBytes, err := c.UserApiKeysStorage.ReadObjectBytes(ctx, cred.ServiceAccountPath)
+	if err != nil {
+		// Can't read the SA — let the deploy proceed and fail at Codemagic with
+		// a more actionable error than "SA unreadable".
+		slog.Warn("RequirePlayAppSigning: read service account failed, skipping gate",
+			"conn", cred.ID, "err", err)
+		return nil
+	}
+	sa, err := storeauth.ParseServiceAccount(saBytes)
+	if err != nil {
+		slog.Warn("RequirePlayAppSigning: parse service account failed, skipping gate",
+			"conn", cred.ID, "err", err)
+		return nil
+	}
+	enrolled, err := storeauth.CheckPlayAppSigningEnrolment(ctx, sa, packageName)
+	if err != nil {
+		// Network or unexpected API error — don't block the user.
+		slog.Warn("RequirePlayAppSigning: enrolment check error, skipping gate",
+			"conn", cred.ID, "package", packageName, "err", err)
+		return nil
+	}
+	if !enrolled {
+		return ErrPlayAppSigningRequired
+	}
+	return nil
 }
