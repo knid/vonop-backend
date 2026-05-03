@@ -49,6 +49,14 @@ type MobileAppConfig struct {
 	// Updates (runtime)
 	UpdateCheckEnabled bool `bun:",notnull,default:false" json:"update_check_enabled"`
 
+	// Force update (P3.2) — per-platform minimum native build number.
+	// 0 means "no minimum" (the gate is disabled). The mobile app reads this
+	// at cold-start via GET /v1/mobile/{slug}/min-version and shows a hard
+	// "update required" screen when its native build < min.
+	MinBuildNumberIOS     int64  `bun:",notnull,default:0" json:"min_build_number_ios"`
+	MinBuildNumberAndroid int64  `bun:",notnull,default:0" json:"min_build_number_android"`
+	MinVersionMessage     string `bun:",nullzero" json:"min_version_message"`
+
 	CreatedAt time.Time `bun:",nullzero,notnull,default:current_timestamp" json:"created_at"`
 	UpdatedAt time.Time `bun:",nullzero,notnull,default:current_timestamp" json:"updated_at"`
 }

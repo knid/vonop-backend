@@ -216,6 +216,12 @@ func createSchema(db *bun.DB) error {
 		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS rating_enabled boolean NOT NULL DEFAULT false`,
 		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS rating_sessions int NOT NULL DEFAULT 5`,
 		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS update_check_enabled boolean NOT NULL DEFAULT false`,
+		// Force-update / min_version (P3.2) — per-platform native build floor +
+		// optional custom message. The mobile app cold-start gate reads these
+		// via GET /v1/mobile/{slug}/min-version. 0 = no minimum.
+		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS min_build_number_ios bigint NOT NULL DEFAULT 0`,
+		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS min_build_number_android bigint NOT NULL DEFAULT 0`,
+		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS min_version_message text`,
 		// GitHub integration fields on users
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS git_hub_access_token text`,
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS git_hub_username text`,
@@ -427,13 +433,13 @@ func createSchema(db *bun.DB) error {
 	// IMPORTANT: when adding a new ALTER TABLE above, update this canary to the newest column,
 	// otherwise the new ALTER will be silently skipped on servers that already have older columns.
 	// Table renames go in renameStatements below, not here — they run unconditionally.
-	// Canary: service_account_cred_ref — the LAST column in the P1.0 batch.
+	// Canary: min_version_message — the LAST column in the P3.2 batch.
 	// Pointing the canary at the last new column (rather than the first) means
 	// a partial migration failure mid-batch will be detected on the next boot
-	// and the loop will retry the missed ALTERs. P1.0 CredStore wiring (2026-05-03).
+	// and the loop will retry the missed ALTERs. P3.2 force-update (2026-05-03).
 	var migrationsDone bool
 	row := db.QueryRowContext(context.Background(),
-		"SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='google_play_connections' AND column_name='service_account_cred_ref')")
+		"SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='mobile_app_configs' AND column_name='min_version_message')")
 	if err := row.Scan(&migrationsDone); err != nil {
 		migrationsDone = false
 	}
