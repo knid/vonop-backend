@@ -797,6 +797,73 @@ Stripe is allowed.
 | IRL service booking          | OK - Stripe allowed   |
 | Physical gift card           | OK - Stripe allowed   |
 
+## When to ship IAP code
+
+Always check read_mobile_config first:
+
+` + "```" + `tsx
+// agent context — pseudocode
+const config = await read_mobile_config();
+if (config.iap.enabled && config.iap.revenuecat_configured) {
+  // Wemob has already provisioned a RevenueCat project + iOS + Android
+  // apps for this tenant. The public SDK keys are baked into the binary
+  // at build time. lib/iap.ts is wired and ready — write paywall UI
+  // directly using the helpers shown above.
+} else if (config.iap.enabled) {
+  // IAP is enabled but RC provisioning hasn't completed yet (transient
+  // upstream outage at create time). It will be retried on the next
+  // build trigger; the binary will work once provisioning succeeds.
+  // Safe to write paywall UI; lib/iap.ts no-ops + warns until keys land.
+} else {
+  // IAP disabled. Skip paywall code entirely.
+}
+` + "```" + `
+
+## What Wemob auto-provisions vs what the user must do manually
+
+Wemob auto-provisions PER TENANT (no agent action needed):
+- RevenueCat project (named after the app slug)
+- iOS app inside the RC project (bundle ID com.wemob.{slug-no-hyphens})
+- Android app inside the RC project (package com.wemob.{slug-no-hyphens})
+- Public SDK keys for both platforms, baked into the binary at build time
+
+The USER must do manually before any purchase actually works in the store:
+- Create in-app purchase products in App Store Connect (subscriptions,
+  consumables, etc.)
+- Create matching products in Google Play Console
+- Map those product IDs to RC products + entitlements in the RC dashboard
+- Optionally configure server-to-server notifications + receipt validation
+
+The agent should explain this caveat to the user when generating paywall UI:
+"I've wired the paywall using RevenueCat, and Wemob has auto-provisioned
+the RC project + iOS + Android apps for you. Before the purchase button
+works in production you need to (1) create the products in App Store
+Connect / Play Console, (2) map them to entitlements in your RevenueCat
+dashboard."
+
+## Entitlement-based feature gating
+
+For unlocking features behind a subscription, use the
+` + "`getActiveEntitlements()`" + ` helper:
+
+` + "```" + `tsx
+import { getActiveEntitlements } from "@/lib/iap";
+
+const entitlements = await getActiveEntitlements();
+const isPro = entitlements.includes("pro");
+
+return (
+  <View>
+    {isPro ? <ProFeature /> : <UpgradePrompt onPress={showPaywall} />}
+  </View>
+);
+` + "```" + `
+
+Entitlement IDs are user-defined in the RevenueCat dashboard. Common
+choices: ` + "`pro`" + `, ` + "`premium`" + `, ` + "`unlimited`" + `. Always document the chosen
+entitlement ID in code comments so the user knows what to configure in
+the RC dashboard.
+
 # NATIVE FEATURES
 Native device features are configured per-project in the Wemob mobile config.
 Call read_mobile_config BEFORE using a native feature to confirm it is
