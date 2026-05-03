@@ -28,3 +28,7 @@ worker-dev:
 loadtest-publish:
 	go build -o bin/loadtest-publish cmd/loadtest-publish/main.go
 .PHONY: loadtest-publish
+
+test-integration:
+	go test -tags=integration ./...
+.PHONY: test-integration

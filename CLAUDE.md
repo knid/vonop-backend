@@ -23,6 +23,17 @@ go test -tags=integration ./internal/agent/eval/ -v -timeout 10m
 
 Until the agent-runner harness lands (P1.1), the test skips with an "unimplemented" message.
 
+**Run DB-backed integration tests** (requires Docker — testcontainers-go boots a fresh Postgres per test):
+
+```bash
+make test-integration              # all integration-tagged tests
+go test -tags=integration ./...   # equivalent
+```
+
+Two reusable helpers live under `//go:build integration`:
+- `database.NewTestDB(t, models...)` — fresh Postgres 16 container per test, creates the requested model tables via Bun, terminates on cleanup.
+- `controllers.NewTestController(t, db, opts)` — wires a `*Controller` with fake `CredStore` (KMS+S3), fake `SecretManager`, fake `EventService`. Returns the controller plus a `*TestFakes` handle so tests can assert on captured events or peek at stored blobs.
+
 **Note:** A limited test suite exists under `internal/agent/` (context and mobile-config tests) and `internal/agent/eval/` (integration-only eval fixtures). The eval fixtures are build-tag gated and won't run in standard `go test ./...`.
 
 ## Architecture
