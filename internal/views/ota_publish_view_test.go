@@ -19,16 +19,18 @@ import (
 
 const testOTAHMACMaster = "test-ota-master-key-do-not-use-in-prod"
 
-// signOTAPublishTestRequest mirrors the worker-side signing logic.
-func signOTAPublishTestRequest(t *testing.T, appID, ts string, body []byte) string {
+// signOTAPublishTestRequest mirrors the worker-side signing logic. Returns
+// (signature, body-hash-hex) — both must go on the request.
+func signOTAPublishTestRequest(t *testing.T, appID, ts string, distBytes []byte) (string, string) {
 	t.Helper()
-	bh := sha256.Sum256(body)
+	bh := sha256.Sum256(distBytes)
+	bodyHashHex := hex.EncodeToString(bh[:])
 	h1 := hmac.New(sha256.New, []byte(testOTAHMACMaster))
 	h1.Write([]byte(appID))
 	perCall := hex.EncodeToString(h1.Sum(nil))
 	h2 := hmac.New(sha256.New, []byte(perCall))
-	h2.Write([]byte(ts + "." + hex.EncodeToString(bh[:])))
-	return "sha256=" + hex.EncodeToString(h2.Sum(nil))
+	h2.Write([]byte(ts + "." + bodyHashHex))
+	return "sha256=" + hex.EncodeToString(h2.Sum(nil)), bodyHashHex
 }
 
 func newOTAPublishTestServer(t *testing.T) (*chi.Mux, *OTAPublishHandler) {
@@ -39,8 +41,12 @@ func newOTAPublishTestServer(t *testing.T) (*chi.Mux, *OTAPublishHandler) {
 	return r, h
 }
 
-func makeMinimalMultipartBody(t *testing.T) []byte {
+// makeMinimalMultipartBody returns (body, contentType, distBytes). The
+// test uses distBytes as input to the signing helper; body is what the
+// HTTP request carries.
+func makeMinimalMultipartBody(t *testing.T) ([]byte, string, []byte) {
 	t.Helper()
+	distBytes := []byte("not a real tarball")
 	var buf bytes.Buffer
 	mw := multipart.NewWriter(&buf)
 	_ = mw.WriteField("runtime_version", "fingerprint:abc")
@@ -50,21 +56,23 @@ func makeMinimalMultipartBody(t *testing.T) []byte {
 	if err != nil {
 		t.Fatalf("create dist file: %v", err)
 	}
-	_, _ = dw.Write([]byte("not a real tarball"))
+	_, _ = dw.Write(distBytes)
 	_ = mw.Close()
-	return buf.Bytes()
+	return buf.Bytes(), mw.FormDataContentType(), distBytes
 }
 
 func TestPublishOTA_BadSignature(t *testing.T) {
 	mux, _ := newOTAPublishTestServer(t)
 	appID := uuid.New().String()
-	body := makeMinimalMultipartBody(t)
+	body, ct, distBytes := makeMinimalMultipartBody(t)
 	ts := strconv.FormatInt(time.Now().Unix(), 10)
+	_, bodyHash := signOTAPublishTestRequest(t, appID, ts, distBytes)
 
 	req := httptest.NewRequest(http.MethodPost, "/v2/apps/"+appID+"/ota/publish", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "multipart/form-data; boundary=----not-real")
+	req.Header.Set("Content-Type", ct)
 	req.Header.Set("X-Wemob-Signature", "sha256=deadbeef")
 	req.Header.Set("X-Wemob-Timestamp", ts)
+	req.Header.Set("X-Wemob-Body-Hash", bodyHash)
 	req.Header.Set(otaPublishHeaderApp, appID)
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
@@ -77,13 +85,15 @@ func TestPublishOTA_BadSignature(t *testing.T) {
 func TestPublishOTA_StaleTimestamp(t *testing.T) {
 	mux, _ := newOTAPublishTestServer(t)
 	appID := uuid.New().String()
-	body := makeMinimalMultipartBody(t)
+	body, ct, distBytes := makeMinimalMultipartBody(t)
 	staleTS := "1000"
-	sig := signOTAPublishTestRequest(t, appID, staleTS, body)
+	sig, bodyHash := signOTAPublishTestRequest(t, appID, staleTS, distBytes)
 
 	req := httptest.NewRequest(http.MethodPost, "/v2/apps/"+appID+"/ota/publish", bytes.NewReader(body))
+	req.Header.Set("Content-Type", ct)
 	req.Header.Set("X-Wemob-Signature", sig)
 	req.Header.Set("X-Wemob-Timestamp", staleTS)
+	req.Header.Set("X-Wemob-Body-Hash", bodyHash)
 	req.Header.Set(otaPublishHeaderApp, appID)
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
@@ -96,13 +106,15 @@ func TestPublishOTA_StaleTimestamp(t *testing.T) {
 func TestPublishOTA_FutureTimestamp(t *testing.T) {
 	mux, _ := newOTAPublishTestServer(t)
 	appID := uuid.New().String()
-	body := makeMinimalMultipartBody(t)
+	body, ct, distBytes := makeMinimalMultipartBody(t)
 	futureTS := strconv.FormatInt(time.Now().Add(30*time.Minute).Unix(), 10)
-	sig := signOTAPublishTestRequest(t, appID, futureTS, body)
+	sig, bodyHash := signOTAPublishTestRequest(t, appID, futureTS, distBytes)
 
 	req := httptest.NewRequest(http.MethodPost, "/v2/apps/"+appID+"/ota/publish", bytes.NewReader(body))
+	req.Header.Set("Content-Type", ct)
 	req.Header.Set("X-Wemob-Signature", sig)
 	req.Header.Set("X-Wemob-Timestamp", futureTS)
+	req.Header.Set("X-Wemob-Body-Hash", bodyHash)
 	req.Header.Set(otaPublishHeaderApp, appID)
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
@@ -116,14 +128,16 @@ func TestPublishOTA_AppIDMismatch(t *testing.T) {
 	mux, _ := newOTAPublishTestServer(t)
 	urlAppID := uuid.New().String()
 	hdrAppID := uuid.New().String() // different
-	body := makeMinimalMultipartBody(t)
+	body, ct, distBytes := makeMinimalMultipartBody(t)
 	ts := strconv.FormatInt(time.Now().Unix(), 10)
 	// Sign for hdrAppID — shouldn't matter, the bad-request check fires first.
-	sig := signOTAPublishTestRequest(t, hdrAppID, ts, body)
+	sig, bodyHash := signOTAPublishTestRequest(t, hdrAppID, ts, distBytes)
 
 	req := httptest.NewRequest(http.MethodPost, "/v2/apps/"+urlAppID+"/ota/publish", bytes.NewReader(body))
+	req.Header.Set("Content-Type", ct)
 	req.Header.Set("X-Wemob-Signature", sig)
 	req.Header.Set("X-Wemob-Timestamp", ts)
+	req.Header.Set("X-Wemob-Body-Hash", bodyHash)
 	req.Header.Set(otaPublishHeaderApp, hdrAppID)
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
@@ -139,9 +153,10 @@ func TestPublishOTA_AppIDMismatch(t *testing.T) {
 func TestPublishOTA_MissingHeaders(t *testing.T) {
 	mux, _ := newOTAPublishTestServer(t)
 	appID := uuid.New().String()
-	body := makeMinimalMultipartBody(t)
+	body, ct, _ := makeMinimalMultipartBody(t)
 
 	req := httptest.NewRequest(http.MethodPost, "/v2/apps/"+appID+"/ota/publish", bytes.NewReader(body))
+	req.Header.Set("Content-Type", ct)
 	// No X-Wemob-* headers + no X-Wemob-AppProject-Id.
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
@@ -155,18 +170,49 @@ func TestPublishOTA_MissingHeaders(t *testing.T) {
 func TestPublishOTA_InvalidAppIDFormat(t *testing.T) {
 	mux, _ := newOTAPublishTestServer(t)
 	notAUUID := "not-a-uuid"
-	body := makeMinimalMultipartBody(t)
+	body, ct, distBytes := makeMinimalMultipartBody(t)
 	ts := strconv.FormatInt(time.Now().Unix(), 10)
-	sig := signOTAPublishTestRequest(t, notAUUID, ts, body)
+	sig, bodyHash := signOTAPublishTestRequest(t, notAUUID, ts, distBytes)
 
 	req := httptest.NewRequest(http.MethodPost, "/v2/apps/"+notAUUID+"/ota/publish", bytes.NewReader(body))
+	req.Header.Set("Content-Type", ct)
 	req.Header.Set("X-Wemob-Signature", sig)
 	req.Header.Set("X-Wemob-Timestamp", ts)
+	req.Header.Set("X-Wemob-Body-Hash", bodyHash)
 	req.Header.Set(otaPublishHeaderApp, notAUUID)
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 
 	if rr.Code != http.StatusBadRequest {
 		t.Errorf("expected 400 for invalid app id, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestPublishOTA_DistHashMismatch — even with a valid HMAC over the
+// declared body hash, if the dist file in the multipart doesn't match
+// that hash, reject. Defends against an attacker swapping the dist file
+// after the signature was minted.
+func TestPublishOTA_DistHashMismatch(t *testing.T) {
+	mux, _ := newOTAPublishTestServer(t)
+	appID := uuid.New().String()
+	body, ct, _ := makeMinimalMultipartBody(t)
+	ts := strconv.FormatInt(time.Now().Unix(), 10)
+	// Sign over the hash of DIFFERENT bytes.
+	sig, bodyHash := signOTAPublishTestRequest(t, appID, ts, []byte("different bytes"))
+
+	req := httptest.NewRequest(http.MethodPost, "/v2/apps/"+appID+"/ota/publish", bytes.NewReader(body))
+	req.Header.Set("Content-Type", ct)
+	req.Header.Set("X-Wemob-Signature", sig)
+	req.Header.Set("X-Wemob-Timestamp", ts)
+	req.Header.Set("X-Wemob-Body-Hash", bodyHash) // valid for "different bytes"
+	req.Header.Set(otaPublishHeaderApp, appID)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401 for dist hash mismatch, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "dist body hash mismatch") {
+		t.Errorf("expected dist-hash-mismatch error, got %s", rr.Body.String())
 	}
 }
