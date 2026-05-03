@@ -391,6 +391,11 @@ func createSchema(db *bun.DB) error {
 		`ALTER TABLE apple_connections ADD COLUMN IF NOT EXISTS p8_key_cred_ref jsonb`,
 		`ALTER TABLE apple_connections ADD COLUMN IF NOT EXISTS apns_p8_key_cred_ref jsonb`,
 		`ALTER TABLE google_play_connections ADD COLUMN IF NOT EXISTS service_account_cred_ref jsonb`,
+		// P1.2 — per-app publishing settings for Codemagic submit workflows
+		`ALTER TABLE app_projects ADD COLUMN IF NOT EXISTS app_store_track text NOT NULL DEFAULT 'internal'`,
+		`ALTER TABLE app_projects ADD COLUMN IF NOT EXISTS play_store_track text NOT NULL DEFAULT 'internal'`,
+		`ALTER TABLE app_projects ADD COLUMN IF NOT EXISTS phased_release boolean NOT NULL DEFAULT false`,
+		`ALTER TABLE app_projects ADD COLUMN IF NOT EXISTS submit_as_draft boolean NOT NULL DEFAULT false`,
 	}
 
 	// Deduplicate before creating unique indexes (keep the latest row per group)
@@ -427,13 +432,13 @@ func createSchema(db *bun.DB) error {
 	// IMPORTANT: when adding a new ALTER TABLE above, update this canary to the newest column,
 	// otherwise the new ALTER will be silently skipped on servers that already have older columns.
 	// Table renames go in renameStatements below, not here — they run unconditionally.
-	// Canary: service_account_cred_ref — the LAST column in the P1.0 batch.
+	// Canary: submit_as_draft — the LAST column in the P1.2 batch.
 	// Pointing the canary at the last new column (rather than the first) means
 	// a partial migration failure mid-batch will be detected on the next boot
-	// and the loop will retry the missed ALTERs. P1.0 CredStore wiring (2026-05-03).
+	// and the loop will retry the missed ALTERs. P1.2 publishing-blocks (2026-05-03).
 	var migrationsDone bool
 	row := db.QueryRowContext(context.Background(),
-		"SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='google_play_connections' AND column_name='service_account_cred_ref')")
+		"SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='app_projects' AND column_name='submit_as_draft')")
 	if err := row.Scan(&migrationsDone); err != nil {
 		migrationsDone = false
 	}
