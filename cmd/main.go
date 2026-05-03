@@ -2035,6 +2035,16 @@ func main() {
 			r.Post("/codemagic/keystore", keystoreHandler.RegisterKeystore)
 			r.Post("/codemagic/keystore/fetch", keystoreHandler.FetchKeystore)
 
+			// P2.1: self-hosted expo-updates OTA.
+			//   POST /v2/apps/{appId}/ota/publish     — HMAC, worker-only
+			//   GET  /v2/apps/{appId}/ota/manifest    — un-authenticated, mobile client
+			//   GET  /v2/apps/{appId}/ota/assets      — un-authenticated, mobile client
+			otaPublishHandler := views.NewOTAPublishHandler(controller, workerHMACKey)
+			otaManifestHandler := views.NewOTAManifestHandler(controller)
+			r.Post("/apps/{appId}/ota/publish", otaPublishHandler.PublishOTA)
+			r.Get("/apps/{appId}/ota/manifest", otaManifestHandler.GetManifest)
+			r.Get("/apps/{appId}/ota/assets", otaManifestHandler.GetAsset)
+
 			// Admin template management
 			r.Route("/admin/templates", func(r chi.Router) {
 				r.Use(appMiddleware.RequireAuth(controller))
