@@ -20,7 +20,7 @@ func (t *ReadMobileConfigTool) Name() string {
 }
 
 func (t *ReadMobileConfigTool) Description() string {
-	return "Read the current mobile app configuration: enabled native features (bridge methods), URL scheme for deep links, universal link domain, biometric flag. Use this BEFORE writing code that depends on a native feature, to confirm it's enabled."
+	return "Read the current mobile app configuration: enabled native features (bridge methods), URL scheme for deep links, universal link domain, biometric flag, AND authentication config (whether Better-Auth is enabled, which providers are wired, and the URL scheme used for OAuth redirects). Use this BEFORE writing code that depends on a native feature OR auth, to confirm it's enabled."
 }
 
 func (t *ReadMobileConfigTool) Schema() map[string]any {
@@ -37,6 +37,18 @@ type readMobileConfigOutput struct {
 	URLScheme             string   `json:"url_scheme"`
 	UniversalLinkDomain   string   `json:"universal_link_domain"`
 	BiometricEnabled      bool     `json:"biometric_enabled"`
+	Auth                  authInfo `json:"auth"`
+}
+
+// authInfo summarises the project's authentication configuration. Sourced
+// from MobileAppConfig.AuthEnabled / AuthProviders / AuthScheme. The
+// per-customer BETTER_AUTH_SECRET is intentionally NOT exposed here — it's
+// a deploy-time concern, encrypted via CredStore, and never returned to
+// the agent.
+type authInfo struct {
+	Enabled   bool     `json:"enabled"`
+	Providers []string `json:"providers"`
+	Scheme    string   `json:"scheme"`
 }
 
 func (t *ReadMobileConfigTool) Execute(ctx context.Context, rc *RunContext, _ json.RawMessage) (string, bool, error) {
@@ -48,12 +60,16 @@ func (t *ReadMobileConfigTool) Execute(ctx context.Context, rc *RunContext, _ js
 	if err != nil {
 		// Missing config is not an error — new projects may not have one yet.
 		// Return empty feature list so the agent can proceed without crashing.
-		out := readMobileConfigOutput{EnabledNativeFeatures: []string{}}
+		out := readMobileConfigOutput{
+			EnabledNativeFeatures: []string{},
+			Auth:                  authInfo{Providers: []string{}},
+		}
 		b, _ := json.Marshal(out)
 		return string(b), false, nil
 	}
 
 	out := readMobileConfigOutput{EnabledNativeFeatures: []string{}}
+	out.Auth.Providers = []string{}
 	if cfg != nil {
 		if cfg.BridgeMethods != nil {
 			out.EnabledNativeFeatures = cfg.BridgeMethods
@@ -61,6 +77,11 @@ func (t *ReadMobileConfigTool) Execute(ctx context.Context, rc *RunContext, _ js
 		out.URLScheme = cfg.URLScheme
 		out.UniversalLinkDomain = cfg.UniversalLinkDomain
 		out.BiometricEnabled = cfg.BiometricEnabled
+		out.Auth.Enabled = cfg.AuthEnabled
+		if cfg.AuthProviders != nil {
+			out.Auth.Providers = cfg.AuthProviders
+		}
+		out.Auth.Scheme = cfg.AuthScheme
 	}
 
 	b, err := json.Marshal(out)
