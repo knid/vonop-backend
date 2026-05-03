@@ -141,6 +141,56 @@ func EncryptIntegrationMapStr(m map[string]string, hexKey string) map[string]str
 	return out
 }
 
+// EncryptBytesEnvelope encrypts plaintext with a caller-provided 32-byte DEK
+// using AES-256-GCM. The DEK should be a single-use data key issued by KMS
+// (KMS.GenerateDataKey returns plaintext + ciphertext-blob; the encrypted
+// DEK blob is stored alongside the ciphertext separately — the caller of
+// this function only sees the plaintext DEK and discards it after use).
+//
+// Returned ciphertext format: nonce(12) || ciphertext || tag(16).
+//
+// Differs from EncryptToken (above): this works on raw bytes (not hex-encoded
+// strings), takes the key as raw bytes (not hex), and returns raw bytes.
+// Use this when the caller manages the DEK lifecycle externally (e.g., KMS).
+func EncryptBytesEnvelope(plaintext, dek []byte) ([]byte, error) {
+	if len(dek) != 32 {
+		return nil, fmt.Errorf("envelope encrypt: dek must be 32 bytes (AES-256), got %d", len(dek))
+	}
+	block, err := aes.NewCipher(dek)
+	if err != nil {
+		return nil, fmt.Errorf("envelope encrypt: %w", err)
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, fmt.Errorf("envelope encrypt: %w", err)
+	}
+	nonce := make([]byte, gcm.NonceSize())
+	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
+		return nil, fmt.Errorf("envelope encrypt: %w", err)
+	}
+	return gcm.Seal(nonce, nonce, plaintext, nil), nil
+}
+
+// DecryptBytesEnvelope reverses EncryptBytesEnvelope.
+func DecryptBytesEnvelope(ciphertext, dek []byte) ([]byte, error) {
+	if len(dek) != 32 {
+		return nil, fmt.Errorf("envelope decrypt: dek must be 32 bytes (AES-256), got %d", len(dek))
+	}
+	block, err := aes.NewCipher(dek)
+	if err != nil {
+		return nil, fmt.Errorf("envelope decrypt: %w", err)
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, fmt.Errorf("envelope decrypt: %w", err)
+	}
+	if len(ciphertext) < gcm.NonceSize()+16 {
+		return nil, fmt.Errorf("envelope decrypt: ciphertext too short (%d bytes)", len(ciphertext))
+	}
+	nonce, ct := ciphertext[:gcm.NonceSize()], ciphertext[gcm.NonceSize():]
+	return gcm.Open(nil, nonce, ct, nil)
+}
+
 func DecryptIntegrationMapStr(m map[string]string, hexKey string) map[string]string {
 	if m == nil {
 		return nil
