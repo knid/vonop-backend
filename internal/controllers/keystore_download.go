@@ -1,6 +1,8 @@
 package controllers
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
 	"crypto/rand"
 	"errors"
@@ -145,10 +147,42 @@ func (c *Controller) RedeemKeystoreDownload(ctx context.Context, requestingUser 
 		return "", fmt.Errorf("consume otp: %w", err)
 	}
 
-	s3Key := fmt.Sprintf("keystores/%s.jks", projectIDStr)
-	presigned, err := c.AndroidKeysStorage.GetObject(ctx, s3Key, int64(keystoreURLTTL/time.Second))
+	// Read both the keystore and its key.properties from S3.
+	jksBytes, err := c.AndroidKeysStorage.ReadObjectBytes(ctx, fmt.Sprintf("keystores/%s.jks", projectIDStr))
 	if err != nil {
-		return "", fmt.Errorf("presign keystore: %w", err)
+		return "", fmt.Errorf("read keystore: %w", err)
+	}
+	propsBytes, err := c.AndroidKeysStorage.ReadObjectBytes(ctx, fmt.Sprintf("key_properties/%s.properties", projectIDStr))
+	if err != nil {
+		return "", fmt.Errorf("read key properties: %w", err)
+	}
+
+	// Bundle both files into a single in-memory zip so the frontend only needs
+	// one download and the password is never returned in plaintext over the API.
+	buf := &bytes.Buffer{}
+	zw := zip.NewWriter(buf)
+	if jw, err := zw.Create("upload-keystore.jks"); err != nil {
+		return "", fmt.Errorf("create zip entry for jks: %w", err)
+	} else if _, err = jw.Write(jksBytes); err != nil {
+		return "", fmt.Errorf("write jks into zip: %w", err)
+	}
+	if pw, err := zw.Create("key.properties"); err != nil {
+		return "", fmt.Errorf("create zip entry for key.properties: %w", err)
+	} else if _, err = pw.Write(propsBytes); err != nil {
+		return "", fmt.Errorf("write key.properties into zip: %w", err)
+	}
+	if err := zw.Close(); err != nil {
+		return "", fmt.Errorf("close zip: %w", err)
+	}
+
+	// Upload the zip to a one-shot key in the assets bucket, then presign it.
+	zipKey := fmt.Sprintf("keystore-bundles/%s/%s.zip", projectIDStr, uuid.New().String())
+	if err := c.AssetsStorage.PutBytes(ctx, zipKey, buf.Bytes(), "application/zip"); err != nil {
+		return "", fmt.Errorf("upload keystore bundle: %w", err)
+	}
+	presigned, err := c.AssetsStorage.GetObject(ctx, zipKey, int64(keystoreURLTTL/time.Second))
+	if err != nil {
+		return "", fmt.Errorf("presign keystore bundle: %w", err)
 	}
 	return presigned.URL, nil
 }
