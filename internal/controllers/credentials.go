@@ -3,12 +3,38 @@ package controllers
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/responses"
 )
+
+// applyP8Prefix turns a bare UUID into the canonical S3 key for an Apple
+// .p8 file. Pass-through if already prefixed. Empty in → empty out.
+func applyP8Prefix(s string) string {
+	if s == "" || strings.HasPrefix(s, "p8_keys/") {
+		return s
+	}
+	return "p8_keys/" + s + ".p8"
+}
+
+// applyAPNSP8Prefix is the APNs .p8 key equivalent.
+func applyAPNSP8Prefix(s string) string {
+	if s == "" || strings.HasPrefix(s, "apns_keys/") {
+		return s
+	}
+	return "apns_keys/" + s + ".p8"
+}
+
+// applyServiceAccountPrefix is for Google Play service-account JSONs.
+func applyServiceAccountPrefix(s string) string {
+	if s == "" || strings.HasPrefix(s, "service_accounts/") {
+		return s
+	}
+	return "service_accounts/" + s + ".json"
+}
 
 func (c *Controller) ListAppleConnections(user *models.User) ([]responses.AppleConnectionResponse, error) {
 	creds, err := c.DB.GetAppleConnectionsByUser(*user)
@@ -62,8 +88,8 @@ func (c *Controller) CreateAppleConnection(user *models.User, orgID uuid.UUID, r
 		OrganizationID: orgID,
 		Name:           req.Name,
 		TeamID:         req.TeamID,
-		P8KeyPath:      "p8_keys/" + req.P8Key + ".p8",
-		APNSP8KeyPath:  "apns_keys/" + req.APNSP8Key + ".p8",
+		P8KeyPath:      applyP8Prefix(req.P8Key),
+		APNSP8KeyPath:  applyAPNSP8Prefix(req.APNSP8Key),
 		APNSP8KeyID:    req.APNSKeyID,
 		KeyID:          req.KeyID,
 		IssuerID:       req.IssuerID,
@@ -99,13 +125,13 @@ func (c *Controller) UpdateAppleConnection(user *models.User, credID string, req
 	p8KeyPath := cred.P8KeyPath
 	if req.P8Key != "" {
 		// upload new p8 key to storage
-		p8KeyPath = req.P8Key
+		p8KeyPath = applyP8Prefix(req.P8Key)
 	}
 
 	apnsP8KeyPath := cred.APNSP8KeyPath
 	if req.APNSP8Key != "" {
 		// upload new apns p8 key to storage
-		apnsP8KeyPath = req.APNSP8Key
+		apnsP8KeyPath = applyAPNSP8Prefix(req.APNSP8Key)
 	}
 
 	credentials := &models.AppleConnection{
@@ -191,7 +217,7 @@ func (c *Controller) CreateGooglePlayConnection(user *models.User, orgID uuid.UU
 		UserID:             user.ID,
 		OrganizationID:     orgID,
 		Name:               req.Name,
-		ServiceAccountPath: "service_accounts/" + req.ServiceAccountKey + ".json",
+		ServiceAccountPath: applyServiceAccountPrefix(req.ServiceAccountKey),
 	}
 	cred, err := c.DB.CreateGooglePlayConnection(credential)
 	if err != nil {
@@ -216,7 +242,7 @@ func (c *Controller) UpdateGooglePlayConnection(user *models.User, credID string
 	serviceAccountPath := cred.ServiceAccountPath
 	if req.ServiceAccountKey != "" {
 		// upload new service account key to storage
-		serviceAccountPath = req.ServiceAccountKey
+		serviceAccountPath = applyServiceAccountPrefix(req.ServiceAccountKey)
 	}
 
 	credentials := &models.GooglePlayConnection{
