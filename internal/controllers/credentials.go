@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/models"
@@ -168,6 +169,8 @@ func (c *Controller) UpdateAppleConnection(user *models.User, credID string, req
 		IssuerID:         req.IssuerID,
 		P8KeyCredRef:     cred.P8KeyCredRef,     // preserved; replaced below if key rotated
 		APNSP8KeyCredRef: cred.APNSP8KeyCredRef, // preserved; replaced below if key rotated
+		CreatedAt:        cred.CreatedAt,        // Bun whole-row UPDATE + nullzero would emit NULL otherwise
+		UpdatedAt:        time.Now(),            // bump on every update
 	}
 
 	cred, err = c.DB.UpdateAppleConnection(credentials)
@@ -312,6 +315,8 @@ func (c *Controller) UpdateGooglePlayConnection(user *models.User, credID string
 		Name:                  req.Name,
 		ServiceAccountPath:    serviceAccountPath,
 		ServiceAccountCredRef: cred.ServiceAccountCredRef, // preserved; replaced below if key rotated
+		CreatedAt:             cred.CreatedAt,             // Bun whole-row UPDATE + nullzero would emit NULL otherwise
+		UpdatedAt:             time.Now(),                 // bump on every update
 	}
 	saved, err := c.DB.UpdateGooglePlayConnection(credentials)
 	if err != nil {
@@ -452,6 +457,8 @@ func (c *Controller) UpdateAppleConnectionForOrg(ctx context.Context, requesting
 		IssuerID:         req.IssuerID,
 		P8KeyCredRef:     cred.P8KeyCredRef,     // preserved; replaced below if key rotated
 		APNSP8KeyCredRef: cred.APNSP8KeyCredRef, // preserved; replaced below if key rotated
+		CreatedAt:        cred.CreatedAt,        // Bun whole-row UPDATE + nullzero would emit NULL otherwise
+		UpdatedAt:        time.Now(),            // bump on every update
 	}
 	saved, err := c.DB.UpdateAppleConnection(updated)
 	if err != nil {
@@ -593,6 +600,8 @@ func (c *Controller) UpdateGooglePlayConnectionForOrg(ctx context.Context, reque
 		Name:                  req.Name,
 		ServiceAccountPath:    serviceAccountPath,
 		ServiceAccountCredRef: cred.ServiceAccountCredRef, // preserved; replaced below if key rotated
+		CreatedAt:             cred.CreatedAt,             // Bun whole-row UPDATE + nullzero would emit NULL otherwise
+		UpdatedAt:             time.Now(),                 // bump on every update
 	}
 	saved, err := c.DB.UpdateGooglePlayConnection(updated)
 	if err != nil {

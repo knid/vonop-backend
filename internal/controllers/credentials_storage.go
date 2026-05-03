@@ -110,6 +110,13 @@ func (c *Controller) encryptAndStoreCredential(ctx context.Context, orgID uuid.U
 	if legacyPath == "" {
 		return nil, nil
 	}
+	if c.UserApiKeysStorage == nil {
+		// Defensive — callers above wrap this in slog.Warn + continue, so missing
+		// legacy storage degrades gracefully (no encryption, no panic) instead
+		// of hard-crashing the request. Hit by integration tests where the
+		// legacy bucket is intentionally not wired.
+		return nil, fmt.Errorf("encryptAndStoreCredential: UserApiKeysStorage not configured")
+	}
 	plaintext, err := c.UserApiKeysStorage.ReadObjectBytes(ctx, legacyPath)
 	if err != nil {
 		return nil, fmt.Errorf("encryptAndStoreCredential: read legacy %q: %w", legacyPath, err)
