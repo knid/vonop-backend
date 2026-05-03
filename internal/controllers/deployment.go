@@ -509,7 +509,7 @@ func (c *Controller) SignUnsignedIPATask(user *models.User, signReq requests.Sig
 		return nil, err
 	}
 
-	apnsP8KeyBytes, err := c.UserApiKeysStorage.ReadObjectBytes(context.TODO(), cred.APNSP8KeyPath)
+	apnsP8KeyBytes, err := c.readAppleAPNSP8(context.TODO(), cred)
 	if err != nil {
 		return nil, err
 	}

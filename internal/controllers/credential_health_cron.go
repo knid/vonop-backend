@@ -50,7 +50,7 @@ func (c *Controller) runAppleCredentialHealth(ctx context.Context) error {
 		conn := conn // capture loop variable
 		eg.Go(func() error {
 			// Load the p8 key from S3.
-			p8Bytes, err := c.UserApiKeysStorage.ReadObjectBytes(ctx, conn.P8KeyPath)
+			p8Bytes, err := c.readApplePrimaryP8(ctx, conn)
 			if err != nil {
 				slog.Warn("credential_health: read p8 failed", "conn", conn.ID, "err", err)
 				persistConnectionValidation(ctx, c.DB, "apple", conn.ID, "invalid", "p8 unreadable: "+err.Error(), 0)
