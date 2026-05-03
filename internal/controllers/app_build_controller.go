@@ -411,6 +411,20 @@ func (c *Controller) BuildExpoMobile(ctx context.Context, project *models.AppPro
 	// {slug}.wemob.app fallback for first builds before any deploy lands.
 	expoPublicAPIURL := c.BackendDeployURL(project)
 
+	// P2.1: per-app self-hosted OTA URL. The codemagic.yaml step substitutes
+	// this into app.json's expo.updates.url at prebuild time so the mobile
+	// client cold-start checkForUpdateAsync hits us. When OTAEnabled=false on
+	// MobileAppConfig, we pass empty string — the codemagic step then sets
+	// expo.updates = null, which makes checkForUpdateAsync silently no-op.
+	expoPublicOTAURL := ""
+	if cfg, cfgErr := c.DB.GetMobileAppConfig(project.ID.String()); cfgErr == nil && cfg != nil && cfg.OTAEnabled {
+		expoPublicOTAURL = expoPublicAPIURL + "/v2/apps/" + project.ID.String() + "/ota"
+	} else if cfgErr != nil {
+		// No config row yet (new project) — default to OTA enabled, matching
+		// the column's NOT NULL DEFAULT true.
+		expoPublicOTAURL = expoPublicAPIURL + "/v2/apps/" + project.ID.String() + "/ota"
+	}
+
 	ordered := make([]string, 0, 2)
 	if wantAndroid {
 		ordered = append(ordered, "android")
@@ -453,6 +467,7 @@ func (c *Controller) BuildExpoMobile(ctx context.Context, project *models.AppPro
 				EASProjectUUID:      project.ID.String(), // stable per project, set in P0.1
 				ExpoPublicAPIURL:    expoPublicAPIURL,
 				ExpoPublicProjectID: project.ID.String(),
+				ExpoPublicOTAURL:    expoPublicOTAURL,
 			})
 		case "ios":
 			_, triggerErr = c.CodemagicService.TriggerExpoIOSBuild(ctx, codemagic.ExpoIOSBuildParams{
@@ -471,6 +486,7 @@ func (c *Controller) BuildExpoMobile(ctx context.Context, project *models.AppPro
 				// it post-prebuild (P1.1.A T4 fix).
 				ExpoPublicAPIURL:    expoPublicAPIURL,
 				ExpoPublicProjectID: project.ID.String(),
+				ExpoPublicOTAURL:    expoPublicOTAURL,
 			})
 		}
 

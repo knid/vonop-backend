@@ -26,6 +26,12 @@ type ExpoAndroidBuildParams struct {
 	// Empty string is passed through; the AI-generated lib/api.ts can fall back.
 	ExpoPublicAPIURL    string
 	ExpoPublicProjectID string
+	// P2.1: per-app self-hosted expo-updates manifest URL (without trailing
+	// /manifest). The codemagic.yaml step substitutes this into
+	// app.json's expo.updates.url at prebuild time. Empty string means OTA
+	// is disabled for this project — codemagic publishing step is gated on
+	// it being non-empty.
+	ExpoPublicOTAURL string
 }
 
 func (p ExpoAndroidBuildParams) toEnvVars() map[string]string {
@@ -45,6 +51,7 @@ func (p ExpoAndroidBuildParams) toEnvVars() map[string]string {
 		"CM_EAS_PROJECT_UUID":    p.EASProjectUUID,
 		"EXPO_PUBLIC_API_URL":    p.ExpoPublicAPIURL,
 		"EXPO_PUBLIC_PROJECT_ID": p.ExpoPublicProjectID,
+		"EXPO_PUBLIC_OTA_URL":    p.ExpoPublicOTAURL,
 	}
 }
 
@@ -65,6 +72,8 @@ type ExpoIOSBuildParams struct {
 	// Build-time public env vars (see ExpoAndroidBuildParams above).
 	ExpoPublicAPIURL    string
 	ExpoPublicProjectID string
+	// P2.1: per-app self-hosted expo-updates manifest URL.
+	ExpoPublicOTAURL string
 }
 
 func (p ExpoIOSBuildParams) toEnvVars() map[string]string {
@@ -88,5 +97,6 @@ func (p ExpoIOSBuildParams) toEnvVars() map[string]string {
 		"XCODE_SCHEME":           scheme,
 		"EXPO_PUBLIC_API_URL":    p.ExpoPublicAPIURL,
 		"EXPO_PUBLIC_PROJECT_ID": p.ExpoPublicProjectID,
+		"EXPO_PUBLIC_OTA_URL":    p.ExpoPublicOTAURL,
 	}
 }
