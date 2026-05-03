@@ -49,6 +49,16 @@ type MobileAppConfig struct {
 	// Updates (runtime)
 	UpdateCheckEnabled bool `bun:",notnull,default:false" json:"update_check_enabled"`
 
+	// Self-hosted OTA (expo-updates) — P2.1.
+	// OTAEnabled defaults true because the template ships with expo-updates
+	// pre-configured per P0.1; flip off to skip the publish step + null out
+	// the manifest URL at build time so the template's checkForUpdateAsync
+	// silently no-ops.
+	// OTAReleaseChannel is reserved for future staging vs production support;
+	// v1 ignores the value and always serves the latest update.
+	OTAEnabled        bool   `bun:",notnull,default:true" json:"ota_enabled"`
+	OTAReleaseChannel string `bun:",nullzero,default:'production'" json:"ota_release_channel"`
+
 	CreatedAt time.Time `bun:",nullzero,notnull,default:current_timestamp" json:"created_at"`
 	UpdatedAt time.Time `bun:",nullzero,notnull,default:current_timestamp" json:"updated_at"`
 }
