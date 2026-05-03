@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/services/storage"
 )
@@ -69,4 +70,26 @@ func credRefFromStorage(s *storage.CredRef) *models.CredRefJSON {
 		BlobS3Key:    s.BlobS3Key,
 		DEKBlobS3Key: s.DEKBlobS3Key,
 	}
+}
+
+// encryptAndStoreCredential reads the just-uploaded plaintext from the legacy
+// S3 path, re-encrypts it via CredStore, and returns a CredRefJSON the caller
+// persists on the model row. Returns (nil, nil) if legacyPath is empty.
+//
+// Used by Create/Update flows: the user POSTs the .p8 to a presigned URL
+// (legacy path), then the controller sweeps it through CredStore and persists
+// the ref. Legacy plaintext is left in place for the dual-read transition.
+func (c *Controller) encryptAndStoreCredential(ctx context.Context, orgID uuid.UUID, kind string, legacyPath string) (*models.CredRefJSON, error) {
+	if legacyPath == "" {
+		return nil, nil
+	}
+	plaintext, err := c.UserApiKeysStorage.ReadObjectBytes(ctx, legacyPath)
+	if err != nil {
+		return nil, fmt.Errorf("encryptAndStoreCredential: read legacy %q: %w", legacyPath, err)
+	}
+	ref, err := c.CredStore.Put(ctx, orgID, kind, plaintext)
+	if err != nil {
+		return nil, fmt.Errorf("encryptAndStoreCredential: credstore put: %w", err)
+	}
+	return credRefFromStorage(ref), nil
 }

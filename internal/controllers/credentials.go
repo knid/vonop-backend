@@ -3,6 +3,7 @@ package controllers
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"strings"
 
 	"github.com/google/uuid"
@@ -99,6 +100,26 @@ func (c *Controller) CreateAppleConnection(user *models.User, orgID uuid.UUID, r
 		return nil, err
 	}
 
+	// Encrypt at rest via CredStore. Legacy plaintext path stays for dual-read
+	// during the transition; backfillEncryptCredentials handles pre-existing rows.
+	ctx := context.Background()
+	if ref, err := c.encryptAndStoreCredential(ctx, orgID, "apple-p8", cred.P8KeyPath); err != nil {
+		slog.Warn("CreateAppleConnection: p8 encrypt failed (legacy path stays usable)", "conn", cred.ID, "err", err)
+	} else if ref != nil {
+		cred.P8KeyCredRef = ref
+		if _, err := c.DB.UpdateAppleConnection(cred); err != nil {
+			slog.Warn("CreateAppleConnection: persist p8 ref failed", "conn", cred.ID, "err", err)
+		}
+	}
+	if ref, err := c.encryptAndStoreCredential(ctx, orgID, "apple-apns", cred.APNSP8KeyPath); err != nil {
+		slog.Warn("CreateAppleConnection: apns encrypt failed", "conn", cred.ID, "err", err)
+	} else if ref != nil {
+		cred.APNSP8KeyCredRef = ref
+		if _, err := c.DB.UpdateAppleConnection(cred); err != nil {
+			slog.Warn("CreateAppleConnection: persist apns ref failed", "conn", cred.ID, "err", err)
+		}
+	}
+
 	go c.ResumePendingDeployments(context.Background(), user, "ios", cred.ID)
 
 	return &responses.AppleConnectionResponse{
@@ -135,20 +156,44 @@ func (c *Controller) UpdateAppleConnection(user *models.User, credID string, req
 	}
 
 	credentials := &models.AppleConnection{
-		ID:            cred.ID,
-		UserID:        user.ID,
-		Name:          req.Name,
-		P8KeyPath:     p8KeyPath,
-		APNSP8KeyPath: apnsP8KeyPath,
-		APNSP8KeyID:   req.APNSKeyID,
-		KeyID:         req.KeyID,
-		TeamID:        req.TeamID,
-		IssuerID:      req.IssuerID,
+		ID:               cred.ID,
+		UserID:           user.ID,
+		OrganizationID:   cred.OrganizationID,   // preserved — Bun does whole-row update
+		Name:             req.Name,
+		P8KeyPath:        p8KeyPath,
+		APNSP8KeyPath:    apnsP8KeyPath,
+		APNSP8KeyID:      req.APNSKeyID,
+		KeyID:            req.KeyID,
+		TeamID:           req.TeamID,
+		IssuerID:         req.IssuerID,
+		P8KeyCredRef:     cred.P8KeyCredRef,     // preserved; replaced below if key rotated
+		APNSP8KeyCredRef: cred.APNSP8KeyCredRef, // preserved; replaced below if key rotated
 	}
 
 	cred, err = c.DB.UpdateAppleConnection(credentials)
 	if err != nil {
 		return nil, err
+	}
+
+	// Dual-write: when the user rotated a key, sweep the new plaintext through
+	// CredStore and persist a fresh CredRef. Legacy path remains source of truth
+	// until backfill + dual-read phase-out.
+	ctx := context.Background()
+	if req.P8Key != "" {
+		if ref, err := c.encryptAndStoreCredential(ctx, cred.OrganizationID, "apple-p8", cred.P8KeyPath); err != nil {
+			slog.Warn("UpdateAppleConnection: p8 encrypt failed", "conn", cred.ID, "err", err)
+		} else if ref != nil {
+			cred.P8KeyCredRef = ref
+			c.DB.UpdateAppleConnection(cred)
+		}
+	}
+	if req.APNSP8Key != "" {
+		if ref, err := c.encryptAndStoreCredential(ctx, cred.OrganizationID, "apple-apns", cred.APNSP8KeyPath); err != nil {
+			slog.Warn("UpdateAppleConnection: apns encrypt failed", "conn", cred.ID, "err", err)
+		} else if ref != nil {
+			cred.APNSP8KeyCredRef = ref
+			c.DB.UpdateAppleConnection(cred)
+		}
 	}
 
 	return &responses.AppleConnectionResponse{
@@ -224,6 +269,17 @@ func (c *Controller) CreateGooglePlayConnection(user *models.User, orgID uuid.UU
 		return nil, err
 	}
 
+	// Encrypt at rest via CredStore; legacy path stays for dual-read transition.
+	ctx := context.Background()
+	if ref, err := c.encryptAndStoreCredential(ctx, orgID, "google-sa", cred.ServiceAccountPath); err != nil {
+		slog.Warn("CreateGooglePlayConnection: sa encrypt failed", "conn", cred.ID, "err", err)
+	} else if ref != nil {
+		cred.ServiceAccountCredRef = ref
+		if _, err := c.DB.UpdateGooglePlayConnection(cred); err != nil {
+			slog.Warn("CreateGooglePlayConnection: persist sa ref failed", "conn", cred.ID, "err", err)
+		}
+	}
+
 	go c.ResumePendingDeployments(context.Background(), user, "android", cred.ID)
 
 	return cred, nil
@@ -246,12 +302,30 @@ func (c *Controller) UpdateGooglePlayConnection(user *models.User, credID string
 	}
 
 	credentials := &models.GooglePlayConnection{
-		ID:                 cred.ID,
-		UserID:             user.ID,
-		Name:               req.Name,
-		ServiceAccountPath: serviceAccountPath,
+		ID:                    cred.ID,
+		UserID:                user.ID,
+		OrganizationID:        cred.OrganizationID,        // preserved — Bun does whole-row update
+		Name:                  req.Name,
+		ServiceAccountPath:    serviceAccountPath,
+		ServiceAccountCredRef: cred.ServiceAccountCredRef, // preserved; replaced below if key rotated
 	}
-	return c.DB.UpdateGooglePlayConnection(credentials)
+	saved, err := c.DB.UpdateGooglePlayConnection(credentials)
+	if err != nil {
+		return nil, err
+	}
+
+	// Dual-write when the user rotated the SA key.
+	if req.ServiceAccountKey != "" {
+		ctx := context.Background()
+		if ref, err := c.encryptAndStoreCredential(ctx, saved.OrganizationID, "google-sa", saved.ServiceAccountPath); err != nil {
+			slog.Warn("UpdateGooglePlayConnection: sa encrypt failed", "conn", saved.ID, "err", err)
+		} else if ref != nil {
+			saved.ServiceAccountCredRef = ref
+			c.DB.UpdateGooglePlayConnection(saved)
+		}
+	}
+
+	return saved, nil
 }
 
 func (c *Controller) DeleteGooglePlayConnection(user *models.User, credID string) error {
@@ -360,21 +434,42 @@ func (c *Controller) UpdateAppleConnectionForOrg(ctx context.Context, requesting
 	}
 
 	updated := &models.AppleConnection{
-		ID:             cred.ID,
-		UserID:         cred.UserID,         // preserved — do not overwrite with requesting user
-		OrganizationID: cred.OrganizationID, // preserved
-		Name:           req.Name,
-		P8KeyPath:      p8KeyPath,
-		APNSP8KeyPath:  apnsP8KeyPath,
-		APNSP8KeyID:    req.APNSKeyID,
-		KeyID:          req.KeyID,
-		TeamID:         req.TeamID,
-		IssuerID:       req.IssuerID,
+		ID:               cred.ID,
+		UserID:           cred.UserID,           // preserved — do not overwrite with requesting user
+		OrganizationID:   cred.OrganizationID,   // preserved
+		Name:             req.Name,
+		P8KeyPath:        p8KeyPath,
+		APNSP8KeyPath:    apnsP8KeyPath,
+		APNSP8KeyID:      req.APNSKeyID,
+		KeyID:            req.KeyID,
+		TeamID:           req.TeamID,
+		IssuerID:         req.IssuerID,
+		P8KeyCredRef:     cred.P8KeyCredRef,     // preserved; replaced below if key rotated
+		APNSP8KeyCredRef: cred.APNSP8KeyCredRef, // preserved; replaced below if key rotated
 	}
 	saved, err := c.DB.UpdateAppleConnection(updated)
 	if err != nil {
 		return nil, err
 	}
+
+	// Dual-write: re-encrypt rotated keys via CredStore and persist a fresh ref.
+	if req.P8Key != "" {
+		if ref, err := c.encryptAndStoreCredential(ctx, saved.OrganizationID, "apple-p8", saved.P8KeyPath); err != nil {
+			slog.Warn("UpdateAppleConnectionForOrg: p8 encrypt failed", "conn", saved.ID, "err", err)
+		} else if ref != nil {
+			saved.P8KeyCredRef = ref
+			c.DB.UpdateAppleConnection(saved)
+		}
+	}
+	if req.APNSP8Key != "" {
+		if ref, err := c.encryptAndStoreCredential(ctx, saved.OrganizationID, "apple-apns", saved.APNSP8KeyPath); err != nil {
+			slog.Warn("UpdateAppleConnectionForOrg: apns encrypt failed", "conn", saved.ID, "err", err)
+		} else if ref != nil {
+			saved.APNSP8KeyCredRef = ref
+			c.DB.UpdateAppleConnection(saved)
+		}
+	}
+
 	return &responses.AppleConnectionResponse{
 		ID:        saved.ID,
 		Name:      saved.Name,
@@ -482,16 +577,28 @@ func (c *Controller) UpdateGooglePlayConnectionForOrg(ctx context.Context, reque
 	}
 
 	updated := &models.GooglePlayConnection{
-		ID:                 cred.ID,
-		UserID:             cred.UserID,         // preserved — do not overwrite with requesting user
-		OrganizationID:     cred.OrganizationID, // preserved
-		Name:               req.Name,
-		ServiceAccountPath: serviceAccountPath,
+		ID:                    cred.ID,
+		UserID:                cred.UserID,                // preserved — do not overwrite with requesting user
+		OrganizationID:        cred.OrganizationID,        // preserved
+		Name:                  req.Name,
+		ServiceAccountPath:    serviceAccountPath,
+		ServiceAccountCredRef: cred.ServiceAccountCredRef, // preserved; replaced below if key rotated
 	}
 	saved, err := c.DB.UpdateGooglePlayConnection(updated)
 	if err != nil {
 		return nil, err
 	}
+
+	// Dual-write: re-encrypt rotated SA via CredStore and persist a fresh ref.
+	if req.ServiceAccountKey != "" {
+		if ref, err := c.encryptAndStoreCredential(ctx, saved.OrganizationID, "google-sa", saved.ServiceAccountPath); err != nil {
+			slog.Warn("UpdateGooglePlayConnectionForOrg: sa encrypt failed", "conn", saved.ID, "err", err)
+		} else if ref != nil {
+			saved.ServiceAccountCredRef = ref
+			c.DB.UpdateGooglePlayConnection(saved)
+		}
+	}
+
 	return &responses.GooglePlayConnectionResponse{
 		ID:        saved.ID,
 		Name:      saved.Name,
