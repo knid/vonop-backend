@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/utils"
 )
 
@@ -111,6 +112,38 @@ func isProtectedRead(path string) bool {
 		return true
 	}
 	return false
+}
+
+// Allowed top-level subtrees for mobile_app_native projects. The AI agent
+// writes Expo source into mobile/ and Next.js API routes into backend/;
+// any write at the repo root or under another prefix is almost certainly
+// a hallucination.
+const (
+	mobileNativePathPrefixMobile  = "mobile/"
+	mobileNativePathPrefixBackend = "backend/"
+)
+
+// enforceProjectPathScope rejects writes outside the canonical subtrees
+// for the project type. Currently only mobile_app_native is constrained;
+// app/ecommerce projects can write anywhere.
+//
+// Returns "" if the path is allowed; an error message string (suitable for
+// returning as the tool's first return value with isError=true) if not.
+func enforceProjectPathScope(rc *RunContext, path string) string {
+	if rc == nil || rc.Project == nil {
+		return ""
+	}
+	if rc.Project.ProjectType != models.ProjectTypeMobileAppNative {
+		return ""
+	}
+	if strings.HasPrefix(path, mobileNativePathPrefixMobile) ||
+		strings.HasPrefix(path, mobileNativePathPrefixBackend) {
+		return ""
+	}
+	return fmt.Sprintf(
+		"path %q is outside the allowed mobile_app_native subtrees. Write Expo source under %q (e.g. mobile/app/index.tsx) and Next.js API routes under %q (e.g. backend/app/api/users/route.ts).",
+		path, mobileNativePathPrefixMobile, mobileNativePathPrefixBackend,
+	)
 }
 
 // ---------- read_file ----------
@@ -238,6 +271,9 @@ func (DeleteFileTool) Execute(ctx context.Context, rc *RunContext, input json.Ra
 	if isProtected(path) {
 		return fmt.Sprintf("protected file, cannot delete: %s", path), true, nil
 	}
+	if msg := enforceProjectPathScope(rc, path); msg != "" {
+		return msg, true, nil
+	}
 	if !rc.FileMap.Delete(path) {
 		return fmt.Sprintf("file not found: %s", path), true, nil
 	}
@@ -282,6 +318,9 @@ func (WriteFileTool) Execute(ctx context.Context, rc *RunContext, input json.Raw
 	}
 	if isProtected(path) {
 		return fmt.Sprintf("protected file, cannot overwrite: %s", path), true, nil
+	}
+	if msg := enforceProjectPathScope(rc, path); msg != "" {
+		return msg, true, nil
 	}
 	if len(args.Content) > maxWriteBytes {
 		return fmt.Sprintf("content too large: %d bytes (max %d)", len(args.Content), maxWriteBytes), true, nil
@@ -339,6 +378,9 @@ func (EditFileTool) Execute(ctx context.Context, rc *RunContext, input json.RawM
 	}
 	if isProtected(path) {
 		return fmt.Sprintf("protected file, cannot edit: %s", path), true, nil
+	}
+	if msg := enforceProjectPathScope(rc, path); msg != "" {
+		return msg, true, nil
 	}
 	content, ok := rc.FileMap.Get(path)
 	if !ok {
@@ -541,6 +583,9 @@ func (MultiEditTool) Execute(ctx context.Context, rc *RunContext, input json.Raw
 	}
 	if isProtected(path) {
 		return fmt.Sprintf("protected file, cannot edit: %s", path), true, nil
+	}
+	if msg := enforceProjectPathScope(rc, path); msg != "" {
+		return msg, true, nil
 	}
 	if len(args.Edits) == 0 {
 		return "edits must contain at least one entry", true, nil
