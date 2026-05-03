@@ -87,6 +87,9 @@ func main() {
 	mux.HandleFunc(tasks.TypeReapStuckBuildTasks, func(ctx context.Context, _ *asynq.Task) error {
 		return controller.ReapStuckBuildTasksTask(ctx)
 	})
+	mux.HandleFunc(tasks.TypeRunCredentialHealthCheck, func(ctx context.Context, _ *asynq.Task) error {
+		return controller.RunCredentialHealthCheck(ctx)
+	})
 
 	scheduler := asynq.NewScheduler(redisOpts, &asynq.SchedulerOpts{
 		Location: time.UTC,
@@ -105,6 +108,10 @@ func main() {
 	}
 	if _, err := scheduler.Register("@every 5m", asynq.NewTask(tasks.TypeReapStuckBuildTasks, nil), asynq.Queue("cron")); err != nil {
 		slog.Error("schedule reap-stuck-build-tasks", "err", err)
+		os.Exit(1)
+	}
+	if _, err := scheduler.Register("@every 24h", asynq.NewTask(tasks.TypeRunCredentialHealthCheck, nil), asynq.Queue("cron")); err != nil {
+		slog.Error("schedule credential-health-daily", "err", err)
 		os.Exit(1)
 	}
 	go func() {

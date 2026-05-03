@@ -146,3 +146,19 @@ func (db *Database) DeleteGooglePlayConnection(credentials *models.GooglePlayCon
 
 	return err
 }
+
+// ListAllAppleConnections returns every non-deleted Apple connection across all
+// orgs, ordered newest first. Used by the daily credential health cron.
+func (db *Database) ListAllAppleConnections(ctx context.Context) ([]*models.AppleConnection, error) {
+	var out []*models.AppleConnection
+	err := db.DB.NewSelect().Model(&out).Order("created_at DESC").Scan(ctx)
+	return out, err
+}
+
+// ListAllGooglePlayConnections returns every non-deleted Google Play connection
+// across all orgs, ordered newest first. Used by the daily credential health cron.
+func (db *Database) ListAllGooglePlayConnections(ctx context.Context) ([]*models.GooglePlayConnection, error) {
+	var out []*models.GooglePlayConnection
+	err := db.DB.NewSelect().Model(&out).Order("created_at DESC").Scan(ctx)
+	return out, err
+}
