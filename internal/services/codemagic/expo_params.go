@@ -26,6 +26,12 @@ type ExpoAndroidBuildParams struct {
 	// Empty string is passed through; the AI-generated lib/api.ts can fall back.
 	ExpoPublicAPIURL    string
 	ExpoPublicProjectID string
+	// ExpoPublicRevenueCatKeyIOS / Android — RevenueCat public SDK keys
+	// baked into the binary at expo prebuild time. Empty when
+	// MobileAppConfig.IAPEnabled is false OR provisioning hasn't happened
+	// yet; lib/iap.ts no-ops + warns at runtime in that case.
+	ExpoPublicRevenueCatKeyIOS     string
+	ExpoPublicRevenueCatKeyAndroid string
 }
 
 func (p ExpoAndroidBuildParams) toEnvVars() map[string]string {
@@ -40,11 +46,13 @@ func (p ExpoAndroidBuildParams) toEnvVars() map[string]string {
 		"CM_BUILD_NUMBER":      strconv.Itoa(p.BuildNumber),
 		"CM_MARKETING_VERSION": p.MarketingVersion,
 		"CM_SPLASH_COLOR":      p.SplashColor,
-		"CM_FIRST_BUILD":         boolStr(p.FirstBuild),
-		"CM_ICON_KEY":            p.IconKey,
-		"CM_EAS_PROJECT_UUID":    p.EASProjectUUID,
-		"EXPO_PUBLIC_API_URL":    p.ExpoPublicAPIURL,
-		"EXPO_PUBLIC_PROJECT_ID": p.ExpoPublicProjectID,
+		"CM_FIRST_BUILD":                     boolStr(p.FirstBuild),
+		"CM_ICON_KEY":                        p.IconKey,
+		"CM_EAS_PROJECT_UUID":                p.EASProjectUUID,
+		"EXPO_PUBLIC_API_URL":                p.ExpoPublicAPIURL,
+		"EXPO_PUBLIC_PROJECT_ID":             p.ExpoPublicProjectID,
+		"EXPO_PUBLIC_REVENUECAT_KEY_IOS":     p.ExpoPublicRevenueCatKeyIOS,
+		"EXPO_PUBLIC_REVENUECAT_KEY_ANDROID": p.ExpoPublicRevenueCatKeyAndroid,
 	}
 }
 
@@ -65,6 +73,9 @@ type ExpoIOSBuildParams struct {
 	// Build-time public env vars (see ExpoAndroidBuildParams above).
 	ExpoPublicAPIURL    string
 	ExpoPublicProjectID string
+	// ExpoPublicRevenueCatKeyIOS / Android — see ExpoAndroidBuildParams above.
+	ExpoPublicRevenueCatKeyIOS     string
+	ExpoPublicRevenueCatKeyAndroid string
 }
 
 func (p ExpoIOSBuildParams) toEnvVars() map[string]string {
@@ -83,10 +94,12 @@ func (p ExpoIOSBuildParams) toEnvVars() map[string]string {
 		"CM_BUILD_NUMBER":      strconv.Itoa(p.BuildNumber),
 		"CM_MARKETING_VERSION": p.MarketingVersion,
 		"CM_SPLASH_COLOR":      p.SplashColor,
-		"CM_ICON_KEY":            p.IconKey,
-		"CM_EAS_PROJECT_UUID":    p.EASProjectUUID,
-		"XCODE_SCHEME":           scheme,
-		"EXPO_PUBLIC_API_URL":    p.ExpoPublicAPIURL,
-		"EXPO_PUBLIC_PROJECT_ID": p.ExpoPublicProjectID,
+		"CM_ICON_KEY":                        p.IconKey,
+		"CM_EAS_PROJECT_UUID":                p.EASProjectUUID,
+		"XCODE_SCHEME":                       scheme,
+		"EXPO_PUBLIC_API_URL":                p.ExpoPublicAPIURL,
+		"EXPO_PUBLIC_PROJECT_ID":             p.ExpoPublicProjectID,
+		"EXPO_PUBLIC_REVENUECAT_KEY_IOS":     p.ExpoPublicRevenueCatKeyIOS,
+		"EXPO_PUBLIC_REVENUECAT_KEY_ANDROID": p.ExpoPublicRevenueCatKeyAndroid,
 	}
 }
