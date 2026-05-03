@@ -838,8 +838,8 @@ function NotificationsToggle() {
   const [optedIn, setOptedIn] = useState<boolean>(true);
 
   useEffect(() => {
-    // OneSignal v5 SDK exposes pushSubscription state synchronously.
-    setOptedIn(OneSignal.User.pushSubscription.getOptedIn() ?? true);
+    // OneSignal v5 SDK exposes pushSubscription state via async getters.
+    OneSignal.User.pushSubscription.getOptedInAsync().then((v) => setOptedIn(v ?? true));
   }, []);
 
   return (
