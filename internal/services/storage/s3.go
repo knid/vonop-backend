@@ -216,6 +216,24 @@ func (s *S3Storage) UploadFileBytePublic(ctx context.Context, key string, data [
 	return publicURL, nil
 }
 
+// PutBytes stores raw bytes at key with the given content type.
+// Satisfies credStoreS3 — thin wrapper over UploadFileByteWithContentType.
+func (s *S3Storage) PutBytes(ctx context.Context, key string, body []byte, contentType string) error {
+	return s.UploadFileByteWithContentType(ctx, key, body, contentType)
+}
+
+// GetBytes retrieves raw bytes at key.
+// Satisfies credStoreS3 — thin wrapper over ReadObjectBytes.
+func (s *S3Storage) GetBytes(ctx context.Context, key string) ([]byte, error) {
+	return s.ReadObjectBytes(ctx, key)
+}
+
+// DeleteBytes removes the object at key.
+// Satisfies credStoreS3 — thin wrapper over DeleteObjectDirect.
+func (s *S3Storage) DeleteBytes(ctx context.Context, key string) error {
+	return s.DeleteObjectDirect(ctx, key)
+}
+
 func (s S3Storage) PresignPostObject(ctx context.Context, objectKey string, lifetimeSecs int64) (*s3.PresignedPostRequest, error) {
 	if lifetimeSecs <= 0 {
 		lifetimeSecs = 3600 // default 1 hour
