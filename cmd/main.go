@@ -1873,6 +1873,16 @@ func main() {
 						r.Post("/expo", httpViews.BuildAppExpo)
 					})
 
+					// Compose-push (P2.2) — dashboard-driven push notifications
+					// for mobile_app_native projects. 5/min/user rate limit
+					// stops a malicious admin from spamming OneSignal's per-app
+					// rate limit (T8.3 audit fix).
+					r.Route("/push", func(r chi.Router) {
+						r.With(rateLimiter.RateLimit(5, time.Minute, appMiddleware.UserKey)).
+							Post("/compose", httpViews.ComposePush)
+						r.Get("/history", httpViews.GetComposePushHistory)
+					})
+
 					// Persistent store listing — replaces the per-wizard form
 					// state so icon/title/description/screenshots survive
 					// refresh, re-submission, and future multi-locale work.
