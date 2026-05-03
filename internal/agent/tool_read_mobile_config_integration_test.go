@@ -43,6 +43,7 @@ func TestReadMobileConfigTool_ReturnsEnabledMethods(t *testing.T) {
 		URLScheme:            "wemobapp",
 		UniversalLinkDomain:  "example.com",
 		BiometricEnabled:     true,
+		OTAEnabled:           true,
 		AppStoreURL:          "https://apps.apple.com/app/example/id123",
 		PlayStoreURL:         "https://play.google.com/store/apps/details?id=com.example",
 		LandingPagePublished: true,
@@ -89,6 +90,9 @@ func TestReadMobileConfigTool_ReturnsEnabledMethods(t *testing.T) {
 	}
 	if !got.LandingPagePublished {
 		t.Error("LandingPagePublished = false, want true")
+	}
+	if !got.OTAEnabled {
+		t.Errorf("OTAEnabled = false, want true")
 	}
 }
 
@@ -195,5 +199,9 @@ func TestReadMobileConfigTool_HandlesMissingConfig(t *testing.T) {
 	}
 	if len(got.EnabledNativeFeatures) != 0 {
 		t.Errorf("expected empty EnabledNativeFeatures for missing config, got %v", got.EnabledNativeFeatures)
+	}
+	// Default OTA-on for new projects (matches the column DEFAULT true).
+	if !got.OTAEnabled {
+		t.Errorf("OTAEnabled default = false, want true")
 	}
 }

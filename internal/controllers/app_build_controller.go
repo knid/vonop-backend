@@ -411,6 +411,62 @@ func (c *Controller) BuildExpoMobile(ctx context.Context, project *models.AppPro
 	// {slug}.wemob.app fallback for first builds before any deploy lands.
 	expoPublicAPIURL := c.BackendDeployURL(project)
 
+	// Fetch MobileAppConfig once. nil-safe — a missing config (e.g. legacy
+	// mobile_app projects) leaves all the optional sets empty.
+	mobileCfg, _ := c.DB.GetMobileAppConfig(project.ID.String())
+
+	// Compute the auth base URL (P2.4). Empty when AuthEnabled is false; the
+	// mobile auth client falls back to EXPO_PUBLIC_API_URL in that case.
+	expoPublicAuthBaseURL := ""
+	if mobileCfg != nil && mobileCfg.AuthEnabled {
+		expoPublicAuthBaseURL = expoPublicAPIURL
+	}
+
+	// IAP / RevenueCat (P2.3): bake public SDK keys into the binary at
+	// build time. Lazy-provision when iap_enabled=true but RC project ID is
+	// missing — covers projects created before P2.3 shipped, transient
+	// outages, and future config-toggle flow.
+	rcKeyIOS, rcKeyAndroid := "", ""
+	if mobileCfg != nil && mobileCfg.IAPEnabled {
+		if mobileCfg.RevenueCatProjectID == "" && c.RevenueCatService != nil {
+			if perr := c.provisionRevenueCat(ctx, project); perr != nil {
+				slog.Warn("BuildExpoMobile: lazy RC provision failed; building with empty IAP keys",
+					"error", perr, "project_id", project.ID)
+			}
+			mobileCfg, _ = c.DB.GetMobileAppConfig(project.ID.String())
+		}
+		if mobileCfg != nil {
+			rcKeyIOS = mobileCfg.RevenueCatPublicKeyIOS
+			rcKeyAndroid = mobileCfg.RevenueCatPublicKeyAndroid
+		}
+	}
+
+	// P2.2 — OneSignal app ID (per-tenant). Lazy-provision when the v1
+	// shadow row still has the "expo-shadow-{projectID}" placeholder.
+	osAppID := ""
+	if !strings.HasPrefix(v1project.OneSignalAppID, onesignalShadowPrefix) {
+		osAppID = v1project.OneSignalAppID
+	} else {
+		if perr := c.provisionOneSignalApp(ctx, project); perr != nil {
+			slog.Warn("BuildExpoMobile: lazy OneSignal provision failed; building with empty app ID",
+				"error", perr, "project_id", project.ID)
+		}
+		if refreshed, rerr := c.DB.GetProjectByUserAndURL(user.ID.String(), shadowURL); rerr == nil && refreshed != nil && !strings.HasPrefix(refreshed.OneSignalAppID, onesignalShadowPrefix) {
+			osAppID = refreshed.OneSignalAppID
+		}
+	}
+
+	// P2.1: per-app self-hosted OTA URL. The codemagic.yaml step substitutes
+	// this into app.json's expo.updates.url at prebuild time so the mobile
+	// client cold-start checkForUpdateAsync hits us. When OTAEnabled=false on
+	// MobileAppConfig, we pass empty string — the codemagic step then sets
+	// expo.updates = null, which makes checkForUpdateAsync silently no-op.
+	// Default true on missing config (matches the column's NOT NULL DEFAULT true).
+	expoPublicOTAURL := ""
+	if mobileCfg == nil || mobileCfg.OTAEnabled {
+		expoPublicOTAURL = expoPublicAPIURL + "/v2/apps/" + project.ID.String() + "/ota"
+	}
+
 	ordered := make([]string, 0, 2)
 	if wantAndroid {
 		ordered = append(ordered, "android")
@@ -438,39 +494,49 @@ func (c *Controller) BuildExpoMobile(ctx context.Context, project *models.AppPro
 		switch platform {
 		case "android":
 			_, triggerErr = c.CodemagicService.TriggerExpoAndroidBuild(ctx, codemagic.ExpoAndroidBuildParams{
-				ProjectID:           project.ID,
-				BuildID:             build.ID,
-				TaskID:              task.ID,
-				AppTitle:            build.Title,
-				AppSlug:             project.Slug,
-				BundleID:            bundleID,
-				PackageName:         bundleID,
-				BuildNumber:         nextNum,
-				MarketingVersion:    marketingVer,
-				SplashColor:         build.SplashScreenColor,
-				FirstBuild:          firstBuild,
-				IconKey:             opts.Icon,
-				EASProjectUUID:      project.ID.String(), // stable per project, set in P0.1
-				ExpoPublicAPIURL:    expoPublicAPIURL,
-				ExpoPublicProjectID: project.ID.String(),
+				ProjectID:                      project.ID,
+				BuildID:                        build.ID,
+				TaskID:                         task.ID,
+				AppTitle:                       build.Title,
+				AppSlug:                        project.Slug,
+				BundleID:                       bundleID,
+				PackageName:                    bundleID,
+				BuildNumber:                    nextNum,
+				MarketingVersion:               marketingVer,
+				SplashColor:                    build.SplashScreenColor,
+				FirstBuild:                     firstBuild,
+				IconKey:                        opts.Icon,
+				EASProjectUUID:                 project.ID.String(), // stable per project, set in P0.1
+				ExpoPublicAPIURL:               expoPublicAPIURL,
+				ExpoPublicProjectID:            project.ID.String(),
+				ExpoPublicAuthBaseURL:          expoPublicAuthBaseURL,
+				ExpoPublicRevenueCatKeyIOS:     rcKeyIOS,
+				ExpoPublicRevenueCatKeyAndroid: rcKeyAndroid,
+				ExpoPublicOneSignalAppID:       osAppID,
+				ExpoPublicOTAURL:               expoPublicOTAURL,
 			})
 		case "ios":
 			_, triggerErr = c.CodemagicService.TriggerExpoIOSBuild(ctx, codemagic.ExpoIOSBuildParams{
-				ProjectID:           project.ID,
-				BuildID:             build.ID,
-				TaskID:              task.ID,
-				AppTitle:            build.Title,
-				AppSlug:             project.Slug,
-				BundleID:            bundleID,
-				BuildNumber:         nextNum,
-				MarketingVersion:    marketingVer,
-				SplashColor:         build.SplashScreenColor,
-				IconKey:             opts.Icon,
-				EASProjectUUID:      project.ID.String(),
+				ProjectID:                      project.ID,
+				BuildID:                        build.ID,
+				TaskID:                         task.ID,
+				AppTitle:                       build.Title,
+				AppSlug:                        project.Slug,
+				BundleID:                       bundleID,
+				BuildNumber:                    nextNum,
+				MarketingVersion:               marketingVer,
+				SplashColor:                    build.SplashScreenColor,
+				IconKey:                        opts.Icon,
+				EASProjectUUID:                 project.ID.String(),
 				// XcodeScheme intentionally left blank — codemagic.yaml derives
 				// it post-prebuild (P1.1.A T4 fix).
-				ExpoPublicAPIURL:    expoPublicAPIURL,
-				ExpoPublicProjectID: project.ID.String(),
+				ExpoPublicAPIURL:               expoPublicAPIURL,
+				ExpoPublicProjectID:            project.ID.String(),
+				ExpoPublicAuthBaseURL:          expoPublicAuthBaseURL,
+				ExpoPublicRevenueCatKeyIOS:     rcKeyIOS,
+				ExpoPublicRevenueCatKeyAndroid: rcKeyAndroid,
+				ExpoPublicOneSignalAppID:       osAppID,
+				ExpoPublicOTAURL:               expoPublicOTAURL,
 			})
 		}
 

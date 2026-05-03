@@ -39,6 +39,7 @@ func TestTriggerExpoAndroidBuild_PassesAllExpectedEnvVars(t *testing.T) {
 		EASProjectUUID:      "stable-uuid",
 		ExpoPublicAPIURL:    "https://testapp.wemob.app",
 		ExpoPublicProjectID: "11111111-1111-1111-1111-111111111111",
+		ExpoPublicOTAURL:    "https://testapp.wemob.app/v2/apps/11111111-1111-1111-1111-111111111111/ota",
 	}
 
 	buildID, err := s.TriggerExpoAndroidBuild(context.Background(), params)
@@ -70,11 +71,15 @@ func TestTriggerExpoAndroidBuild_PassesAllExpectedEnvVars(t *testing.T) {
 		"CM_SPLASH_COLOR", "CM_FIRST_BUILD",
 		"CM_ICON_KEY", "CM_EAS_PROJECT_UUID",
 		"EXPO_PUBLIC_API_URL", "EXPO_PUBLIC_PROJECT_ID",
+		"EXPO_PUBLIC_OTA_URL",
 	}
 	for _, k := range expectKeys {
 		if _, present := vars[k]; !present {
 			t.Errorf("expected env var %q not set", k)
 		}
+	}
+	if got := vars["EXPO_PUBLIC_OTA_URL"].(string); got != "https://testapp.wemob.app/v2/apps/11111111-1111-1111-1111-111111111111/ota" {
+		t.Errorf("EXPO_PUBLIC_OTA_URL: got %v", got)
 	}
 	if vars["CM_FIRST_BUILD"].(string) != "true" {
 		t.Errorf("CM_FIRST_BUILD: got %v want true", vars["CM_FIRST_BUILD"])

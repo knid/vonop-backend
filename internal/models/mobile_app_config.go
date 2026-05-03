@@ -49,9 +49,27 @@ type MobileAppConfig struct {
 	// Updates (runtime)
 	UpdateCheckEnabled bool `bun:",notnull,default:false" json:"update_check_enabled"`
 
+	// Auth (build + deploy time). When AuthEnabled=true the deploy worker
+	// injects BETTER_AUTH_SECRET + BETTER_AUTH_URL into Fly secrets and the
+	// build worker bakes EXPO_PUBLIC_AUTH_BASE_URL into the mobile binary.
+	AuthEnabled   bool     `bun:",notnull,default:false" json:"auth_enabled"`
+	AuthProviders []string `bun:",array,type:text[]" json:"auth_providers"`
+	AuthScheme    string   `bun:",nullzero" json:"auth_scheme"`
+
+	// IAP / RevenueCat (build-time — public keys baked into the binary).
+	IAPEnabled                 bool   `bun:"iap_enabled,notnull,default:false" json:"iap_enabled"`
+	RevenueCatProjectID        string `bun:"revenuecat_project_id,nullzero" json:"revenuecat_project_id"`
+	RevenueCatIOSAppID         string `bun:"revenuecat_ios_app_id,nullzero" json:"revenuecat_ios_app_id"`
+	RevenueCatAndroidAppID     string `bun:"revenuecat_android_app_id,nullzero" json:"revenuecat_android_app_id"`
+	RevenueCatPublicKeyIOS     string `bun:"revenuecat_public_key_ios,nullzero" json:"revenuecat_public_key_ios"`
+	RevenueCatPublicKeyAndroid string `bun:"revenuecat_public_key_android,nullzero" json:"revenuecat_public_key_android"`
+
+	// Self-hosted OTA (expo-updates) — P2.1.
+	OTAEnabled        bool   `bun:",notnull,default:true" json:"ota_enabled"`
+	OTAReleaseChannel string `bun:",nullzero,default:'production'" json:"ota_release_channel"`
+
 	// Landing page (P3.1) — store URLs become real CTAs once published; until
-	// then the agent renders "Coming soon" placeholders. The flag is persisted
-	// so a future "make this landing private" toggle can hang off it.
+	// then the agent renders "Coming soon" placeholders.
 	AppStoreURL          string `bun:",nullzero" json:"app_store_url"`
 	PlayStoreURL         string `bun:",nullzero" json:"play_store_url"`
 	LandingPagePublished bool   `bun:",notnull,default:false" json:"landing_page_published"`

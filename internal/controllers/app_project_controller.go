@@ -165,6 +165,10 @@ func (c *Controller) CreateAppProject(ctx context.Context, user *models.User, re
 			RatingEnabled:        false,
 			RatingSessions:       5,
 			UpdateCheckEnabled:   false,
+			// P2.3 — IAP first-class default for new mobile_app_native projects.
+			// Triggers eager RC provisioning below. Existing projects pre-P2.3
+			// keep iap_enabled=false (DB column default) and stay opt-in.
+			IAPEnabled: true,
 		}
 		if _, err := c.DB.UpsertMobileAppConfig(cfg); err != nil {
 			// Non-fatal: the agent can still call read_mobile_config and
@@ -173,6 +177,37 @@ func (c *Controller) CreateAppProject(ctx context.Context, user *models.User, re
 			slog.Warn("eager MobileAppConfig insert failed",
 				"error", err, "project_id", project.ID)
 		}
+
+		// P2.3 — RevenueCat IAP auto-provisioning. Fire-and-forget so a
+		// flaky RC API doesn't block project creation. The build path
+		// (BuildExpoMobile) re-checks and lazy-provisions if this
+		// goroutine fails or RC is back up by then. Idempotent: a
+		// successful first call sets RevenueCatProjectID and subsequent
+		// calls (including the build-path lazy retry) skip cleanly.
+		go func(p *models.AppProject) {
+			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			defer cancel()
+			if err := c.provisionRevenueCat(ctx, p); err != nil {
+				slog.Warn("eager RC provision failed (build-path will retry)",
+					"error", err, "project_id", p.ID)
+			}
+		}(project)
+
+		// P2.2 — OneSignal app provisioning. Fire-and-forget so a flaky
+		// OneSignal API doesn't block project creation. The build path
+		// (BuildExpoMobile) re-checks and lazy-provisions if this goroutine
+		// fails or the API outage was resolved by then. Idempotent: a
+		// successful first call replaces the v1-shadow row's expo-shadow-*
+		// placeholders with real IDs and subsequent calls (including
+		// build-path retry) skip cleanly.
+		go func(p *models.AppProject) {
+			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			defer cancel()
+			if err := c.provisionOneSignalApp(ctx, p); err != nil {
+				slog.Warn("eager OneSignal provision failed (build-path will retry)",
+					"error", err, "project_id", p.ID)
+			}
+		}(project)
 
 		// Scaffold the canonical mobile_app_native layout in the project
 		// repo so the agent has somewhere to write from turn 1 and the

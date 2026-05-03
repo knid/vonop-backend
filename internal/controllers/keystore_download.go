@@ -30,17 +30,17 @@ var ErrKeystoreOTPRequired = errors.New("keystore download: no pending OTP for t
 var ErrKeystoreOTPInvalid = errors.New("keystore download: invalid or expired OTP")
 
 // RequestKeystoreDownload starts the download flow:
-//  1. Verifies the requesting user belongs to the project's org.
+//  1. Verifies the requesting user is an org admin or owner (P0.4 — was
+//     previously any member, which let agency contractors with view access
+//     exfiltrate signing material).
 //  2. Invalidates any existing keystore-download OTPs for this user.
 //  3. Mints a new 6-digit OTP and stores it as a UserActionToken.
 //  4. Emails the OTP to the user.
 //
 // The token's stored value is "{projectID}:{otp}" so we can validate both
 // in Redeem without an extra column.
-//
-// TODO(P1.1): tighten to admin/owner role — RequireOrgMembership accepts any member.
 func (c *Controller) RequestKeystoreDownload(ctx context.Context, requestingUser *models.User, orgIDStr, projectIDStr string) error {
-	if _, err := c.RequireOrgMembership(requestingUser, orgIDStr); err != nil {
+	if _, err := c.RequireOrgAdminOrOwner(requestingUser, orgIDStr); err != nil {
 		return err
 	}
 
@@ -103,9 +103,12 @@ func (c *Controller) RequestKeystoreDownload(ctx context.Context, requestingUser
 // for the keystore. Returns ErrKeystoreOTPRequired if no token exists,
 // ErrKeystoreOTPInvalid if the OTP doesn't match or is expired/consumed.
 //
-// TODO(P1.1): tighten to admin/owner role — RequireOrgMembership accepts any member.
+// Re-checks admin/owner role independently (P0.4 — defence in depth: even if
+// an OTP somehow leaks to a non-admin, redeem must still verify the caller's
+// role at consume time, since role demotions between Request and Redeem
+// should revoke access immediately).
 func (c *Controller) RedeemKeystoreDownload(ctx context.Context, requestingUser *models.User, orgIDStr, projectIDStr, otp string) (string, error) {
-	if _, err := c.RequireOrgMembership(requestingUser, orgIDStr); err != nil {
+	if _, err := c.RequireOrgAdminOrOwner(requestingUser, orgIDStr); err != nil {
 		return "", err
 	}
 
