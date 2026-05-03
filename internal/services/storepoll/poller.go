@@ -6,16 +6,24 @@ import (
 	"time"
 
 	"github.com/knid/wemob/internal/database"
-	"github.com/knid/wemob/internal/services/storage"
+	"github.com/knid/wemob/internal/models"
 )
+
+// ConnectionReader returns plaintext credential bytes for a connection.
+// Callers (controller.ReadApplePrimaryP8 / controller.ReadGoogleSA) implement
+// the dual-read CredStore-or-legacy fallback.
+type ConnectionReader interface {
+	ReadApplePrimaryP8(ctx context.Context, conn *models.AppleConnection) ([]byte, error)
+	ReadGoogleSA(ctx context.Context, conn *models.GooglePlayConnection) ([]byte, error)
+}
 
 // Poller periodically queries App Store Connect + Google Play
 // Publishing APIs to detect state transitions on in-flight
 // deployments and writes corresponding deployment_events with
 // actor_type = "store_api".
 type Poller struct {
-	DB             *database.Database
-	UserKeyStorage *storage.S3Storage
+	DB     *database.Database
+	Reader ConnectionReader
 	// PollEvery controls the ticker cadence. Sensible range 5-15 minutes;
 	// under 1 minute will rate-limit against Apple.
 	PollEvery time.Duration
@@ -68,16 +76,26 @@ func (p *Poller) tick(ctx context.Context) {
 				if d.AppleConnection == nil {
 					continue
 				}
-				chk := AppleChecker{DB: p.DB, UserKeyStorage: p.UserKeyStorage}
-				if err := chk.Check(ctx, d); err != nil {
+				p8Bytes, err := p.Reader.ReadApplePrimaryP8(ctx, d.AppleConnection)
+				if err != nil {
+					slog.Warn("storepoll: apple read p8 failed", "deployment_id", d.ID, "err", err)
+					continue
+				}
+				chk := AppleChecker{DB: p.DB}
+				if err := chk.Check(ctx, d, p8Bytes); err != nil {
 					slog.Warn("storepoll: apple check failed", "deployment_id", d.ID, "err", err)
 				}
 			case "android":
 				if d.GooglePlayConnection == nil {
 					continue
 				}
-				chk := PlayChecker{DB: p.DB, UserKeyStorage: p.UserKeyStorage}
-				if err := chk.Check(ctx, d); err != nil {
+				saBytes, err := p.Reader.ReadGoogleSA(ctx, d.GooglePlayConnection)
+				if err != nil {
+					slog.Warn("storepoll: play read service account failed", "deployment_id", d.ID, "err", err)
+					continue
+				}
+				chk := PlayChecker{DB: p.DB}
+				if err := chk.Check(ctx, d, saBytes); err != nil {
 					slog.Warn("storepoll: play check failed", "deployment_id", d.ID, "err", err)
 				}
 			}

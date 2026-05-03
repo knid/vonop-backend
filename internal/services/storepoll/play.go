@@ -10,13 +10,11 @@ import (
 
 	"github.com/knid/wemob/internal/database"
 	"github.com/knid/wemob/internal/models"
-	"github.com/knid/wemob/internal/services/storage"
 	"github.com/knid/wemob/internal/services/storeauth"
 )
 
 type PlayChecker struct {
-	DB             *database.Database
-	UserKeyStorage *storage.S3Storage
+	DB *database.Database
 }
 
 // Check opens a Play Publishing edit for the package, reads the
@@ -26,13 +24,9 @@ type PlayChecker struct {
 //
 // Edits are ephemeral objects; we open, read, and deleteEdit in one
 // pass (no commit, so we don't accidentally mutate user state).
-func (c PlayChecker) Check(ctx context.Context, d models.Deployment) error {
+func (c PlayChecker) Check(ctx context.Context, d models.Deployment, saBytes []byte) error {
 	if d.GooglePlayConnection == nil || d.Project == nil {
 		return fmt.Errorf("deployment missing connection or project")
-	}
-	saBytes, err := c.UserKeyStorage.ReadObjectBytes(ctx, d.GooglePlayConnection.ServiceAccountPath)
-	if err != nil {
-		return fmt.Errorf("read service account: %w", err)
 	}
 	sa, err := storeauth.ParseServiceAccount(saBytes)
 	if err != nil {

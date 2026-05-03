@@ -8,12 +8,12 @@ import (
 	"github.com/knid/wemob/internal/services/storage"
 )
 
-// readApplePrimaryP8 returns the plaintext .p8 contents for an Apple
+// ReadApplePrimaryP8 returns the plaintext .p8 contents for an Apple
 // connection. Prefers the encrypted CredRef when present; falls back to
 // the legacy S3 path during the dual-read transition window.
-func (c *Controller) readApplePrimaryP8(ctx context.Context, conn *models.AppleConnection) ([]byte, error) {
+func (c *Controller) ReadApplePrimaryP8(ctx context.Context, conn *models.AppleConnection) ([]byte, error) {
 	if conn == nil {
-		return nil, fmt.Errorf("readApplePrimaryP8: nil conn")
+		return nil, fmt.Errorf("ReadApplePrimaryP8: nil conn")
 	}
 	if conn.P8KeyCredRef != nil {
 		ref := credRefToStorage(conn.P8KeyCredRef)
@@ -22,10 +22,10 @@ func (c *Controller) readApplePrimaryP8(ctx context.Context, conn *models.AppleC
 	return c.UserApiKeysStorage.ReadObjectBytes(ctx, conn.P8KeyPath)
 }
 
-// readAppleAPNSP8 mirrors readApplePrimaryP8 for the APNs key.
-func (c *Controller) readAppleAPNSP8(ctx context.Context, conn *models.AppleConnection) ([]byte, error) {
+// ReadAppleAPNSP8 mirrors ReadApplePrimaryP8 for the APNs key.
+func (c *Controller) ReadAppleAPNSP8(ctx context.Context, conn *models.AppleConnection) ([]byte, error) {
 	if conn == nil {
-		return nil, fmt.Errorf("readAppleAPNSP8: nil conn")
+		return nil, fmt.Errorf("ReadAppleAPNSP8: nil conn")
 	}
 	if conn.APNSP8KeyCredRef != nil {
 		ref := credRefToStorage(conn.APNSP8KeyCredRef)
@@ -34,10 +34,10 @@ func (c *Controller) readAppleAPNSP8(ctx context.Context, conn *models.AppleConn
 	return c.UserApiKeysStorage.ReadObjectBytes(ctx, conn.APNSP8KeyPath)
 }
 
-// readGoogleSA returns plaintext SA JSON for a Google Play connection.
-func (c *Controller) readGoogleSA(ctx context.Context, conn *models.GooglePlayConnection) ([]byte, error) {
+// ReadGoogleSA returns plaintext SA JSON for a Google Play connection.
+func (c *Controller) ReadGoogleSA(ctx context.Context, conn *models.GooglePlayConnection) ([]byte, error) {
 	if conn == nil {
-		return nil, fmt.Errorf("readGoogleSA: nil conn")
+		return nil, fmt.Errorf("ReadGoogleSA: nil conn")
 	}
 	if conn.ServiceAccountCredRef != nil {
 		ref := credRefToStorage(conn.ServiceAccountCredRef)

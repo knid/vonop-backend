@@ -10,13 +10,11 @@ import (
 
 	"github.com/knid/wemob/internal/database"
 	"github.com/knid/wemob/internal/models"
-	"github.com/knid/wemob/internal/services/storage"
 	"github.com/knid/wemob/internal/services/storeauth"
 )
 
 type AppleChecker struct {
-	DB             *database.Database
-	UserKeyStorage *storage.S3Storage
+	DB *database.Database
 }
 
 // Check resolves the Apple app by bundle id, finds the latest
@@ -29,15 +27,11 @@ type AppleChecker struct {
 //
 // Other states (PREPARE_FOR_SUBMISSION, WAITING_FOR_REVIEW, …) are
 // informational and produce no event. Idempotent via HasEvent.
-func (c AppleChecker) Check(ctx context.Context, d models.Deployment) error {
+func (c AppleChecker) Check(ctx context.Context, d models.Deployment, p8Bytes []byte) error {
 	if d.AppleConnection == nil || d.Project == nil {
 		return fmt.Errorf("deployment missing connection or project")
 	}
 
-	p8Bytes, err := c.UserKeyStorage.ReadObjectBytes(ctx, d.AppleConnection.P8KeyPath)
-	if err != nil {
-		return fmt.Errorf("read p8 from storage: %w", err)
-	}
 	token, err := storeauth.AppleToken(storeauth.AppleConnectionInput{
 		KeyID:    d.AppleConnection.KeyID,
 		IssuerID: d.AppleConnection.IssuerID,

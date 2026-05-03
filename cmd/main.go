@@ -1919,9 +1919,9 @@ func main() {
 	// on in-flight deployments, writing store_* events.
 	pollerCtx, cancelPoller := context.WithCancel(context.Background())
 	poller := &storepoll.Poller{
-		DB:             controller.DB,
-		UserKeyStorage: controller.UserApiKeysStorage,
-		PollEvery:      10 * time.Minute,
+		DB:        controller.DB,
+		Reader:    controller,
+		PollEvery: 10 * time.Minute,
 	}
 	go poller.Run(pollerCtx)
 

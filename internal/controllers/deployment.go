@@ -509,7 +509,7 @@ func (c *Controller) SignUnsignedIPATask(user *models.User, signReq requests.Sig
 		return nil, err
 	}
 
-	apnsP8KeyBytes, err := c.readAppleAPNSP8(context.TODO(), cred)
+	apnsP8KeyBytes, err := c.ReadAppleAPNSP8(context.TODO(), cred)
 	if err != nil {
 		return nil, err
 	}
@@ -637,7 +637,7 @@ func (c *Controller) GetLatestSignStatusForBuild(user *models.User, buildID stri
 // Callers on the update path (re-deploy) may skip this check since the app is
 // already live and signing must already be configured.
 func (c *Controller) RequirePlayAppSigning(ctx context.Context, cred *models.GooglePlayConnection, packageName string) error {
-	saBytes, err := c.UserApiKeysStorage.ReadObjectBytes(ctx, cred.ServiceAccountPath)
+	saBytes, err := c.ReadGoogleSA(ctx, cred)
 	if err != nil {
 		// Can't read the SA — let the deploy proceed and fail at Codemagic with
 		// a more actionable error than "SA unreadable".

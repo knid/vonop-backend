@@ -50,7 +50,7 @@ func (c *Controller) runAppleCredentialHealth(ctx context.Context) error {
 		conn := conn // capture loop variable
 		eg.Go(func() error {
 			// Load the p8 key from S3.
-			p8Bytes, err := c.readApplePrimaryP8(ctx, conn)
+			p8Bytes, err := c.ReadApplePrimaryP8(ctx, conn)
 			if err != nil {
 				slog.Warn("credential_health: read p8 failed", "conn", conn.ID, "err", err)
 				persistConnectionValidation(ctx, c.DB, "apple", conn.ID, "invalid", "p8 unreadable: "+err.Error(), 0)
@@ -102,7 +102,7 @@ func (c *Controller) runGoogleCredentialHealth(ctx context.Context) error {
 	for _, conn := range conns {
 		conn := conn // capture loop variable
 		eg.Go(func() error {
-			saBytes, err := c.UserApiKeysStorage.ReadObjectBytes(ctx, conn.ServiceAccountPath)
+			saBytes, err := c.ReadGoogleSA(ctx, conn)
 			if err != nil {
 				slog.Warn("credential_health: read sa json failed", "conn", conn.ID, "err", err)
 				persistConnectionValidation(ctx, c.DB, "google_play", conn.ID, "invalid", "sa json unreadable", 0)
