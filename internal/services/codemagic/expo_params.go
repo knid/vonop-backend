@@ -26,6 +26,10 @@ type ExpoAndroidBuildParams struct {
 	// Empty string is passed through; the AI-generated lib/api.ts can fall back.
 	ExpoPublicAPIURL    string
 	ExpoPublicProjectID string
+	// ExpoPublicAuthBaseURL is the Better-Auth base URL (matches the backend's
+	// deployed URL). Empty when MobileAppConfig.AuthEnabled is false; the
+	// mobile auth client falls back to EXPO_PUBLIC_API_URL.
+	ExpoPublicAuthBaseURL string
 }
 
 func (p ExpoAndroidBuildParams) toEnvVars() map[string]string {
@@ -40,11 +44,12 @@ func (p ExpoAndroidBuildParams) toEnvVars() map[string]string {
 		"CM_BUILD_NUMBER":      strconv.Itoa(p.BuildNumber),
 		"CM_MARKETING_VERSION": p.MarketingVersion,
 		"CM_SPLASH_COLOR":      p.SplashColor,
-		"CM_FIRST_BUILD":         boolStr(p.FirstBuild),
-		"CM_ICON_KEY":            p.IconKey,
-		"CM_EAS_PROJECT_UUID":    p.EASProjectUUID,
-		"EXPO_PUBLIC_API_URL":    p.ExpoPublicAPIURL,
-		"EXPO_PUBLIC_PROJECT_ID": p.ExpoPublicProjectID,
+		"CM_FIRST_BUILD":            boolStr(p.FirstBuild),
+		"CM_ICON_KEY":               p.IconKey,
+		"CM_EAS_PROJECT_UUID":       p.EASProjectUUID,
+		"EXPO_PUBLIC_API_URL":       p.ExpoPublicAPIURL,
+		"EXPO_PUBLIC_PROJECT_ID":    p.ExpoPublicProjectID,
+		"EXPO_PUBLIC_AUTH_BASE_URL": p.ExpoPublicAuthBaseURL,
 	}
 }
 
@@ -65,6 +70,8 @@ type ExpoIOSBuildParams struct {
 	// Build-time public env vars (see ExpoAndroidBuildParams above).
 	ExpoPublicAPIURL    string
 	ExpoPublicProjectID string
+	// ExpoPublicAuthBaseURL is the Better-Auth base URL. See above.
+	ExpoPublicAuthBaseURL string
 }
 
 func (p ExpoIOSBuildParams) toEnvVars() map[string]string {
@@ -83,11 +90,12 @@ func (p ExpoIOSBuildParams) toEnvVars() map[string]string {
 		"CM_BUILD_NUMBER":      strconv.Itoa(p.BuildNumber),
 		"CM_MARKETING_VERSION": p.MarketingVersion,
 		"CM_SPLASH_COLOR":      p.SplashColor,
-		"CM_ICON_KEY":            p.IconKey,
-		"CM_EAS_PROJECT_UUID":    p.EASProjectUUID,
-		"XCODE_SCHEME":           scheme,
-		"EXPO_PUBLIC_API_URL":    p.ExpoPublicAPIURL,
-		"EXPO_PUBLIC_PROJECT_ID": p.ExpoPublicProjectID,
+		"CM_ICON_KEY":               p.IconKey,
+		"CM_EAS_PROJECT_UUID":       p.EASProjectUUID,
+		"XCODE_SCHEME":              scheme,
+		"EXPO_PUBLIC_API_URL":       p.ExpoPublicAPIURL,
+		"EXPO_PUBLIC_PROJECT_ID":    p.ExpoPublicProjectID,
+		"EXPO_PUBLIC_AUTH_BASE_URL": p.ExpoPublicAuthBaseURL,
 	}
 }
 
