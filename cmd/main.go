@@ -23,6 +23,7 @@ import (
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/services/pendingnudge"
 	"github.com/knid/wemob/internal/services/secret"
+	"github.com/knid/wemob/internal/services/storage"
 	"github.com/knid/wemob/internal/services/storepoll"
 	"github.com/knid/wemob/internal/utils"
 	"github.com/knid/wemob/internal/views"
@@ -940,6 +941,151 @@ func backfillEncryptIntegrations(bundb *bun.DB, sm secret.SecretManager) {
 	}
 }
 
+// backfillEncryptCredentials sweeps every Apple + Google Play connection
+// row whose CredRef columns are NULL: reads the legacy S3 plaintext,
+// encrypts via CredStore, persists the ref. Idempotent — rows with a
+// non-NULL ref are skipped. Legacy plaintext is left in place for the
+// dual-read transition.
+//
+// Deploy ordering: runs in-process AFTER createSchema and BEFORE the HTTP
+// server starts. Old code paths that haven't been switched to dual-read keep
+// reading legacy plaintext; new dual-read paths prefer CredRef when present.
+func backfillEncryptCredentials(bundb *bun.DB, credStore *storage.CredStore, userKeys *storage.S3Storage) {
+	ctx := context.Background()
+	const batchSize = 100
+
+	// Apple: p8 + apns p8 in one pass per row. The WHERE gates on a non-empty
+	// path being present so rows with no encryptable content are excluded —
+	// otherwise the loop would re-fetch them forever (a row with p8 done but
+	// apns_p8_key_path == "" would still match the NULL-ref check).
+	totalApple := 0
+	for {
+		var rows []models.AppleConnection
+		if err := bundb.NewSelect().
+			Model(&rows).
+			Where("(p8_key_cred_ref IS NULL AND p8_key_path != '') OR (apns_p8_key_cred_ref IS NULL AND apns_p8_key_path != '')").
+			Where("deleted_at IS NULL").
+			Limit(batchSize).
+			Scan(ctx); err != nil {
+			slog.Error("backfillEncryptCredentials apple: scan failed", "err", err)
+			break
+		}
+		if len(rows) == 0 {
+			break
+		}
+		for i := range rows {
+			r := &rows[i]
+			changed := false
+			if r.P8KeyCredRef == nil && r.P8KeyPath != "" {
+				if pt, err := userKeys.ReadObjectBytes(ctx, r.P8KeyPath); err == nil {
+					if ref, err := credStore.Put(ctx, r.OrganizationID, "apple-p8", pt); err == nil {
+						r.P8KeyCredRef = &models.CredRefJSON{
+							OrgID:        ref.OrgID,
+							Kind:         ref.Kind,
+							BlobS3Key:    ref.BlobS3Key,
+							DEKBlobS3Key: ref.DEKBlobS3Key,
+						}
+						changed = true
+					} else {
+						slog.Warn("backfill apple p8 put", "id", r.ID, "err", err)
+					}
+				} else {
+					slog.Warn("backfill apple p8 read", "id", r.ID, "path", r.P8KeyPath, "err", err)
+				}
+			}
+			if r.APNSP8KeyCredRef == nil && r.APNSP8KeyPath != "" {
+				if pt, err := userKeys.ReadObjectBytes(ctx, r.APNSP8KeyPath); err == nil {
+					if ref, err := credStore.Put(ctx, r.OrganizationID, "apple-apns", pt); err == nil {
+						r.APNSP8KeyCredRef = &models.CredRefJSON{
+							OrgID:        ref.OrgID,
+							Kind:         ref.Kind,
+							BlobS3Key:    ref.BlobS3Key,
+							DEKBlobS3Key: ref.DEKBlobS3Key,
+						}
+						changed = true
+					} else {
+						slog.Warn("backfill apple apns put", "id", r.ID, "err", err)
+					}
+				} else {
+					slog.Warn("backfill apple apns read", "id", r.ID, "path", r.APNSP8KeyPath, "err", err)
+				}
+			}
+			if changed {
+				if _, err := bundb.NewUpdate().
+					Model(r).
+					Column("p8_key_cred_ref", "apns_p8_key_cred_ref", "updated_at").
+					Where("id = ?", r.ID).
+					Exec(ctx); err != nil {
+					slog.Warn("backfill apple update", "id", r.ID, "err", err)
+					continue
+				}
+				totalApple++
+			}
+		}
+		if len(rows) < batchSize {
+			break
+		}
+	}
+	if totalApple > 0 {
+		slog.Info("backfillEncryptCredentials apple: encrypted rows", "count", totalApple)
+	}
+
+	// Google Play. Single ref column, so the gated WHERE is straightforward.
+	totalGoogle := 0
+	for {
+		var rows []models.GooglePlayConnection
+		if err := bundb.NewSelect().
+			Model(&rows).
+			Where("service_account_cred_ref IS NULL AND service_account_path != ''").
+			Where("deleted_at IS NULL").
+			Limit(batchSize).
+			Scan(ctx); err != nil {
+			slog.Error("backfillEncryptCredentials google: scan failed", "err", err)
+			break
+		}
+		if len(rows) == 0 {
+			break
+		}
+		for i := range rows {
+			r := &rows[i]
+			if r.ServiceAccountPath == "" {
+				continue
+			}
+			pt, err := userKeys.ReadObjectBytes(ctx, r.ServiceAccountPath)
+			if err != nil {
+				slog.Warn("backfill google sa read", "id", r.ID, "path", r.ServiceAccountPath, "err", err)
+				continue
+			}
+			ref, err := credStore.Put(ctx, r.OrganizationID, "google-sa", pt)
+			if err != nil {
+				slog.Warn("backfill google sa put", "id", r.ID, "err", err)
+				continue
+			}
+			r.ServiceAccountCredRef = &models.CredRefJSON{
+				OrgID:        ref.OrgID,
+				Kind:         ref.Kind,
+				BlobS3Key:    ref.BlobS3Key,
+				DEKBlobS3Key: ref.DEKBlobS3Key,
+			}
+			if _, err := bundb.NewUpdate().
+				Model(r).
+				Column("service_account_cred_ref", "updated_at").
+				Where("id = ?", r.ID).
+				Exec(ctx); err != nil {
+				slog.Warn("backfill google update", "id", r.ID, "err", err)
+				continue
+			}
+			totalGoogle++
+		}
+		if len(rows) < batchSize {
+			break
+		}
+	}
+	if totalGoogle > 0 {
+		slog.Info("backfillEncryptCredentials google: encrypted rows", "count", totalGoogle)
+	}
+}
+
 // isSensitiveLogPath returns true if a request URL path is known to carry
 // secrets, credentials, or signed third-party payloads that must never land
 // in BetterStack. Used by httplog LogExtraAttrs to skip body capture on
@@ -1034,6 +1180,10 @@ func main() {
 	// env vars. Runs in-process so the new decrypt code is already live when
 	// the rewrite happens — no rolling-deploy ordering trap.
 	backfillEncryptIntegrations(bundb, sm)
+
+	// One-shot CredStore backfill for Apple + Google Play connection rows
+	// whose CredRef columns are NULL. Idempotent — re-running is a no-op.
+	backfillEncryptCredentials(bundb, controller.CredStore, controller.UserApiKeysStorage)
 
 	seedPlans(db, sm)
 	migrateInactiveUsersToFree(bundb)
