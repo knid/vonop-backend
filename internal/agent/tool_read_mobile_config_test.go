@@ -41,13 +41,6 @@ func TestReadMobileConfigTool_NilDeps(t *testing.T) {
 }
 
 // TestReadMobileConfigTool_ReturnsEnabledMethods and
-// TestReadMobileConfigTool_HandlesMissingConfig require a real PostgreSQL
-// connection and are skipped unless integration test infrastructure is wired.
-// TODO(P1.1): wire sqlite-in-memory or test-db fixture so these execute.
-func TestReadMobileConfigTool_ReturnsEnabledMethods(t *testing.T) {
-	t.Skip("requires real DB connection — re-enable in P1.1 when integration test infra is wired")
-}
-
-func TestReadMobileConfigTool_HandlesMissingConfig(t *testing.T) {
-	t.Skip("requires real DB connection — re-enable in P1.1 when integration test infra is wired")
-}
+// TestReadMobileConfigTool_HandlesMissingConfig live in
+// tool_read_mobile_config_integration_test.go — they need a real Postgres
+// container via testcontainers-go and are tagged //go:build integration.

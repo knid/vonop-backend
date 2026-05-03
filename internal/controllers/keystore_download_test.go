@@ -2,7 +2,6 @@ package controllers
 
 import (
 	"strconv"
-	"strings"
 	"testing"
 )
 
@@ -42,8 +41,6 @@ func TestGenerateNumericOTP_RandomEnough(t *testing.T) {
 	}
 }
 
-// Behavioral test for Request/Redeem flow needs DB infra — defer to P1.1.
-func TestRequestRedeemKeystoreDownload_FullFlow(t *testing.T) {
-	t.Skip("requires test DB + email service mock; TODO(P1.1)")
-	_ = strings.TrimSpace
-}
+// Behavioral coverage for the Request flow lives in
+// keystore_download_integration_test.go — it needs a real Postgres container
+// via testcontainers-go and is tagged //go:build integration.

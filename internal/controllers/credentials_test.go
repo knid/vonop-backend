@@ -1,7 +1,6 @@
 package controllers
 
 import (
-	"strings"
 	"testing"
 )
 
@@ -60,20 +59,6 @@ func TestApplyServiceAccountPrefix(t *testing.T) {
 	}
 }
 
-func TestUpdateAppleConnection_PrefixesNewP8(t *testing.T) {
-	// Compile-time check that UpdateAppleConnection does NOT do
-	// `p8KeyPath = req.P8Key` (bare assignment) anywhere — should always
-	// go through applyP8Prefix.
-	//
-	// This test is documentary only; the real check is the unit tests on
-	// applyP8Prefix above + a careful read of the controller body to make
-	// sure the new helper is wired in.
-	//
-	// To make this test meaningful in the future: write an integration test
-	// that actually invokes UpdateAppleConnection with a bare UUID and
-	// asserts the resulting P8KeyPath in the DB starts with "p8_keys/".
-	// Skipping for now — depends on test DB infra (TODO P1.1).
-	t.Skip("integration test — requires DB; TODO(P1.1)")
-
-	_ = strings.HasPrefix // keep import alive
-}
+// TestUpdateAppleConnection_PrefixesNewP8 lives in
+// credentials_integration_test.go — it needs a real Postgres container via
+// testcontainers-go and is tagged //go:build integration.
