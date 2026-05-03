@@ -122,6 +122,8 @@ func createSchema(db *bun.DB) error {
 		(*models.ConnectionValidation)(nil),
 		// Encrypted Android keystore + key.properties (replaces plaintext S3 path).
 		(*models.AndroidKeystore)(nil),
+		// Self-hosted expo-updates manifests for mobile_app_native projects (P2.1).
+		(*models.OTAUpdate)(nil),
 	}
 
 	for _, model := range models {
@@ -414,6 +416,12 @@ func createSchema(db *bun.DB) error {
 		// (IfNotExists); the column ALTER below is a no-op on a fresh DB but acts
 		// as the canary marker for this batch.
 		`ALTER TABLE compose_push_histories ADD COLUMN IF NOT EXISTS recipients_count integer NOT NULL DEFAULT 0`,
+		// P2.1: self-hosted OTA updates feature flags on MobileAppConfig.
+		// ota_enabled defaults true because the template ships with expo-updates
+		// pre-configured per P0.1; tenants flip it off explicitly.
+		// ota_release_channel is reserved for future staging vs production support.
+		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS ota_enabled boolean NOT NULL DEFAULT true`,
+		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS ota_release_channel text NOT NULL DEFAULT 'production'`,
 	}
 
 	// Deduplicate before creating unique indexes (keep the latest row per group)
@@ -452,13 +460,13 @@ func createSchema(db *bun.DB) error {
 	// IMPORTANT: when adding a new ALTER TABLE above, update this canary to the newest column,
 	// otherwise the new ALTER will be silently skipped on servers that already have older columns.
 	// Table renames go in renameStatements below, not here — they run unconditionally.
-	// Canary: idx_compose_push_histories_app_created — the LAST migration in the P2.2 batch.
-	// (Previous canary: revenuecat_public_key_android, P2.3 RevenueCat IAP.)
-	// Pointing the canary at the last new migration means a partial-failure mid-batch
-	// is detected on next boot and the loop retries the missed ALTERs.
+	// Canary: ota_release_channel — the LAST column in the P2.1 batch.
+	// Pointing the canary at the last new column (rather than the first) means
+	// a partial migration failure mid-batch will be detected on the next boot
+	// and the loop will retry the missed ALTERs.
 	var migrationsDone bool
 	row := db.QueryRowContext(context.Background(),
-		"SELECT EXISTS(SELECT 1 FROM pg_indexes WHERE indexname='idx_compose_push_histories_app_created')")
+		"SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='mobile_app_configs' AND column_name='ota_release_channel')")
 	if err := row.Scan(&migrationsDone); err != nil {
 		migrationsDone = false
 	}
@@ -2069,6 +2077,16 @@ func main() {
 			keystoreHandler := views.NewCodemagicKeystoreHandler(controller, workerHMACKey)
 			r.Post("/codemagic/keystore", keystoreHandler.RegisterKeystore)
 			r.Post("/codemagic/keystore/fetch", keystoreHandler.FetchKeystore)
+
+			// P2.1: self-hosted expo-updates OTA.
+			//   POST /v2/apps/{appId}/ota/publish     — HMAC, worker-only
+			//   GET  /v2/apps/{appId}/ota/manifest    — un-authenticated, mobile client
+			//   GET  /v2/apps/{appId}/ota/assets      — un-authenticated, mobile client
+			otaPublishHandler := views.NewOTAPublishHandler(controller, workerHMACKey)
+			otaManifestHandler := views.NewOTAManifestHandler(controller)
+			r.Post("/apps/{appId}/ota/publish", otaPublishHandler.PublishOTA)
+			r.Get("/apps/{appId}/ota/manifest", otaManifestHandler.GetManifest)
+			r.Get("/apps/{appId}/ota/assets", otaManifestHandler.GetAsset)
 
 			// Admin template management
 			r.Route("/admin/templates", func(r chi.Router) {

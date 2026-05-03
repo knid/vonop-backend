@@ -41,6 +41,12 @@ type readMobileConfigOutput struct {
 	Auth                  authInfo `json:"auth"`
 	IAP                   iapInfo  `json:"iap"`
 	Push                  pushInfo `json:"push"`
+	// OTAEnabled — true when the project ships JS-only updates via
+	// self-hosted expo-updates. When true, the template's checkForUpdateAsync
+	// in app/_layout.tsx is wired to our manifest URL (set at build time);
+	// the agent should NOT attempt to call Updates.checkForUpdateAsync from
+	// other components. Default true on new projects (P2.1).
+	OTAEnabled bool `json:"ota_enabled"`
 }
 
 // authInfo summarises the project's authentication configuration. Sourced
@@ -82,16 +88,18 @@ func (t *ReadMobileConfigTool) Execute(ctx context.Context, rc *RunContext, _ js
 	cfg, err := rc.Deps.DB.GetMobileAppConfig(rc.Project.ID.String())
 	if err != nil {
 		// Missing config is not an error — new projects may not have one yet.
-		// Return empty feature list so the agent can proceed without crashing.
+		// Return empty feature list + OTA-on default (matches the column's
+		// NOT NULL DEFAULT true) so the agent can proceed without crashing.
 		out := readMobileConfigOutput{
 			EnabledNativeFeatures: []string{},
 			Auth:                  authInfo{Providers: []string{}},
+			OTAEnabled:            true,
 		}
 		b, _ := json.Marshal(out)
 		return string(b), false, nil
 	}
 
-	out := readMobileConfigOutput{EnabledNativeFeatures: []string{}}
+	out := readMobileConfigOutput{EnabledNativeFeatures: []string{}, OTAEnabled: true}
 	out.Auth.Providers = []string{}
 	if cfg != nil {
 		if cfg.BridgeMethods != nil {
@@ -107,6 +115,7 @@ func (t *ReadMobileConfigTool) Execute(ctx context.Context, rc *RunContext, _ js
 		out.Auth.Scheme = cfg.AuthScheme
 		out.IAP.Enabled = cfg.IAPEnabled
 		out.IAP.RevenueCatConfigured = cfg.RevenueCatPublicKeyIOS != "" && cfg.RevenueCatPublicKeyAndroid != ""
+		out.OTAEnabled = cfg.OTAEnabled
 
 		out.Push.Enabled = cfg.PushEnabled
 		// Configured = there's a real OneSignal app ID on the v1 shadow row

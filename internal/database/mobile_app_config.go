@@ -45,6 +45,8 @@ func (db *Database) UpsertMobileAppConfig(config *models.MobileAppConfig) (*mode
 		Set("revenuecat_android_app_id = EXCLUDED.revenuecat_android_app_id").
 		Set("revenuecat_public_key_ios = EXCLUDED.revenuecat_public_key_ios").
 		Set("revenuecat_public_key_android = EXCLUDED.revenuecat_public_key_android").
+		Set("ota_enabled = EXCLUDED.ota_enabled").
+		Set("ota_release_channel = EXCLUDED.ota_release_channel").
 		Set("updated_at = now()").
 		Returning("*").
 		Exec(context.Background())

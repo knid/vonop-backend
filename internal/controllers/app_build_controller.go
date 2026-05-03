@@ -411,27 +411,21 @@ func (c *Controller) BuildExpoMobile(ctx context.Context, project *models.AppPro
 	// {slug}.wemob.app fallback for first builds before any deploy lands.
 	expoPublicAPIURL := c.BackendDeployURL(project)
 
-	// Fetch MobileAppConfig once for both auth + IAP gating. nil-safe — a
-	// missing config (e.g. legacy mobile_app projects) leaves both sets empty.
+	// Fetch MobileAppConfig once. nil-safe — a missing config (e.g. legacy
+	// mobile_app projects) leaves all the optional sets empty.
 	mobileCfg, _ := c.DB.GetMobileAppConfig(project.ID.String())
 
 	// Compute the auth base URL (P2.4). Empty when AuthEnabled is false; the
 	// mobile auth client falls back to EXPO_PUBLIC_API_URL in that case.
-	// Today this is identical to expoPublicAPIURL when auth is on, but the
-	// separate var leaves room for future "auth on a different host" use
-	// cases without re-baking the binary.
 	expoPublicAuthBaseURL := ""
 	if mobileCfg != nil && mobileCfg.AuthEnabled {
 		expoPublicAuthBaseURL = expoPublicAPIURL
 	}
 
 	// IAP / RevenueCat (P2.3): bake public SDK keys into the binary at
-	// build time. Lazy-provision when iap_enabled=true but RC project ID
-	// is missing — covers (a) projects created before P2.3 shipped,
-	// (b) the create-time goroutine hit a transient outage,
-	// (c) future config-toggle flow that flips iap_enabled false→true.
-	// Failures here are logged + swallowed: build proceeds with empty
-	// keys, lib/iap.ts no-ops + warns, user can re-trigger build later.
+	// build time. Lazy-provision when iap_enabled=true but RC project ID is
+	// missing — covers projects created before P2.3 shipped, transient
+	// outages, and future config-toggle flow.
 	rcKeyIOS, rcKeyAndroid := "", ""
 	if mobileCfg != nil && mobileCfg.IAPEnabled {
 		if mobileCfg.RevenueCatProjectID == "" && c.RevenueCatService != nil {
@@ -449,9 +443,6 @@ func (c *Controller) BuildExpoMobile(ctx context.Context, project *models.AppPro
 
 	// P2.2 — OneSignal app ID (per-tenant). Lazy-provision when the v1
 	// shadow row still has the "expo-shadow-{projectID}" placeholder.
-	// Failures here are logged + swallowed: build proceeds with empty
-	// EXPO_PUBLIC_ONESIGNAL_APP_ID, the template's initPush() no-ops + warns,
-	// user can re-trigger build later.
 	osAppID := ""
 	if !strings.HasPrefix(v1project.OneSignalAppID, onesignalShadowPrefix) {
 		osAppID = v1project.OneSignalAppID
@@ -460,10 +451,20 @@ func (c *Controller) BuildExpoMobile(ctx context.Context, project *models.AppPro
 			slog.Warn("BuildExpoMobile: lazy OneSignal provision failed; building with empty app ID",
 				"error", perr, "project_id", project.ID)
 		}
-		// Re-fetch the shadow to pick up the real ID.
 		if refreshed, rerr := c.DB.GetProjectByUserAndURL(user.ID.String(), shadowURL); rerr == nil && refreshed != nil && !strings.HasPrefix(refreshed.OneSignalAppID, onesignalShadowPrefix) {
 			osAppID = refreshed.OneSignalAppID
 		}
+	}
+
+	// P2.1: per-app self-hosted OTA URL. The codemagic.yaml step substitutes
+	// this into app.json's expo.updates.url at prebuild time so the mobile
+	// client cold-start checkForUpdateAsync hits us. When OTAEnabled=false on
+	// MobileAppConfig, we pass empty string — the codemagic step then sets
+	// expo.updates = null, which makes checkForUpdateAsync silently no-op.
+	// Default true on missing config (matches the column's NOT NULL DEFAULT true).
+	expoPublicOTAURL := ""
+	if mobileCfg == nil || mobileCfg.OTAEnabled {
+		expoPublicOTAURL = expoPublicAPIURL + "/v2/apps/" + project.ID.String() + "/ota"
 	}
 
 	ordered := make([]string, 0, 2)
@@ -512,6 +513,7 @@ func (c *Controller) BuildExpoMobile(ctx context.Context, project *models.AppPro
 				ExpoPublicRevenueCatKeyIOS:     rcKeyIOS,
 				ExpoPublicRevenueCatKeyAndroid: rcKeyAndroid,
 				ExpoPublicOneSignalAppID:       osAppID,
+				ExpoPublicOTAURL:               expoPublicOTAURL,
 			})
 		case "ios":
 			_, triggerErr = c.CodemagicService.TriggerExpoIOSBuild(ctx, codemagic.ExpoIOSBuildParams{
@@ -534,6 +536,7 @@ func (c *Controller) BuildExpoMobile(ctx context.Context, project *models.AppPro
 				ExpoPublicRevenueCatKeyIOS:     rcKeyIOS,
 				ExpoPublicRevenueCatKeyAndroid: rcKeyAndroid,
 				ExpoPublicOneSignalAppID:       osAppID,
+				ExpoPublicOTAURL:               expoPublicOTAURL,
 			})
 		}
 

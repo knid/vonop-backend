@@ -107,6 +107,8 @@ func (v *HttpViews) UpdateMobileAppConfig(w http.ResponseWriter, r *http.Request
 		RatingEnabled        *bool     `json:"rating_enabled"`
 		RatingSessions       *int      `json:"rating_sessions"`
 		UpdateCheckEnabled   *bool     `json:"update_check_enabled"`
+		OTAEnabled           *bool     `json:"ota_enabled"`
+		OTAReleaseChannel    *string   `json:"ota_release_channel"`
 	}
 	if err := utils.ParseJSONBody(r, &body); err != nil {
 		utils.ValidationError(w, err)
@@ -169,6 +171,12 @@ func (v *HttpViews) UpdateMobileAppConfig(w http.ResponseWriter, r *http.Request
 	if body.UpdateCheckEnabled != nil {
 		config.UpdateCheckEnabled = *body.UpdateCheckEnabled
 	}
+	if body.OTAEnabled != nil {
+		config.OTAEnabled = *body.OTAEnabled
+	}
+	if body.OTAReleaseChannel != nil {
+		config.OTAReleaseChannel = *body.OTAReleaseChannel
+	}
 
 	// Bridge and push are always on — ignore any request to disable them
 	config.BridgeEnabled = true
@@ -224,6 +232,8 @@ func defaultMobileConfigResponse(oneSignalAppID string) map[string]any {
 		DarkModeEnabled:      true,
 		RatingSessions:       5,
 		CachingStrategy:      "network-first",
+		OTAEnabled:           true,
+		OTAReleaseChannel:    "production",
 	}, oneSignalAppID)
 }
 
@@ -269,6 +279,10 @@ func buildMobileConfigResponse(config *models.MobileAppConfig, oneSignalAppID st
 		"dark_mode":    map[string]any{"enabled": config.DarkModeEnabled},
 		"rating":       map[string]any{"enabled": config.RatingEnabled, "sessions": config.RatingSessions},
 		"update_check": map[string]any{"enabled": config.UpdateCheckEnabled},
+		"ota": map[string]any{
+			"enabled":         config.OTAEnabled,
+			"release_channel": config.OTAReleaseChannel,
+		},
 		"offline":      map[string]any{"enabled": config.OfflineEnabled, "caching_strategy": config.CachingStrategy},
 		"permissions":  permissions,
 		"deep_linking": map[string]any{"url_scheme": config.URLScheme, "universal_link_domain": config.UniversalLinkDomain},

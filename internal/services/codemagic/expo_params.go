@@ -41,6 +41,12 @@ type ExpoAndroidBuildParams struct {
 	// provisioning hasn't happened yet (placeholder still present); the
 	// template's lib/push.ts initPush() no-ops + warns at runtime in that case.
 	ExpoPublicOneSignalAppID string
+	// P2.1: per-app self-hosted expo-updates manifest URL (without trailing
+	// /manifest). The codemagic.yaml step substitutes this into
+	// app.json's expo.updates.url at prebuild time. Empty string means OTA
+	// is disabled for this project — codemagic publishing step is gated on
+	// it being non-empty.
+	ExpoPublicOTAURL string
 }
 
 func (p ExpoAndroidBuildParams) toEnvVars() map[string]string {
@@ -64,6 +70,7 @@ func (p ExpoAndroidBuildParams) toEnvVars() map[string]string {
 		"EXPO_PUBLIC_REVENUECAT_KEY_IOS":     p.ExpoPublicRevenueCatKeyIOS,
 		"EXPO_PUBLIC_REVENUECAT_KEY_ANDROID": p.ExpoPublicRevenueCatKeyAndroid,
 		"EXPO_PUBLIC_ONESIGNAL_APP_ID":       p.ExpoPublicOneSignalAppID,
+		"EXPO_PUBLIC_OTA_URL":                p.ExpoPublicOTAURL,
 	}
 }
 
@@ -91,6 +98,8 @@ type ExpoIOSBuildParams struct {
 	ExpoPublicRevenueCatKeyAndroid string
 	// ExpoPublicOneSignalAppID — see ExpoAndroidBuildParams above.
 	ExpoPublicOneSignalAppID string
+	// P2.1: per-app self-hosted expo-updates manifest URL.
+	ExpoPublicOTAURL string
 }
 
 func (p ExpoIOSBuildParams) toEnvVars() map[string]string {
@@ -118,6 +127,7 @@ func (p ExpoIOSBuildParams) toEnvVars() map[string]string {
 		"EXPO_PUBLIC_REVENUECAT_KEY_IOS":     p.ExpoPublicRevenueCatKeyIOS,
 		"EXPO_PUBLIC_REVENUECAT_KEY_ANDROID": p.ExpoPublicRevenueCatKeyAndroid,
 		"EXPO_PUBLIC_ONESIGNAL_APP_ID":       p.ExpoPublicOneSignalAppID,
+		"EXPO_PUBLIC_OTA_URL":                p.ExpoPublicOTAURL,
 	}
 }
 
