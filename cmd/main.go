@@ -1826,7 +1826,12 @@ func main() {
 			// Expo build status webhook — no user auth, HMAC-signed by Codemagic worker.
 			// TODO(P1.1): wire hmacMaster through controller.SecretManager.GetSecret("WEMOB_WORKER_HMAC_KEY")
 			// instead of os.Getenv once the secret is registered in Infisical.
-			expoReportsHandler := views.NewExpoReportsHandler(controller.DB, os.Getenv("WEMOB_WORKER_HMAC_KEY"))
+			workerHMACKey := os.Getenv("WEMOB_WORKER_HMAC_KEY")
+			if workerHMACKey == "" {
+				slog.Error("WEMOB_WORKER_HMAC_KEY env var is required (generate with: openssl rand -hex 32)")
+				os.Exit(1)
+			}
+			expoReportsHandler := views.NewExpoReportsHandler(controller.DB, workerHMACKey)
 			r.Post("/reports/expo-build", expoReportsHandler.UpdateExpoBuildStatus)
 
 			// Admin template management
