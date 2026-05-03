@@ -218,6 +218,11 @@ func createSchema(db *bun.DB) error {
 		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS rating_enabled boolean NOT NULL DEFAULT false`,
 		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS rating_sessions int NOT NULL DEFAULT 5`,
 		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS update_check_enabled boolean NOT NULL DEFAULT false`,
+		// P2.4 — Better-Auth integration
+		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS auth_enabled boolean NOT NULL DEFAULT false`,
+		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS auth_providers text[] DEFAULT '{}'`,
+		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS auth_scheme text`,
+		`ALTER TABLE app_projects ADD COLUMN IF NOT EXISTS better_auth_secret_cred_ref jsonb`,
 		// P2.3 — RevenueCat IAP auto-provisioning per tenant
 		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS iap_enabled boolean NOT NULL DEFAULT false`,
 		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS revenuecat_project_id text`,
@@ -400,6 +405,11 @@ func createSchema(db *bun.DB) error {
 		`ALTER TABLE apple_connections ADD COLUMN IF NOT EXISTS p8_key_cred_ref jsonb`,
 		`ALTER TABLE apple_connections ADD COLUMN IF NOT EXISTS apns_p8_key_cred_ref jsonb`,
 		`ALTER TABLE google_play_connections ADD COLUMN IF NOT EXISTS service_account_cred_ref jsonb`,
+		// P1.2 — per-app publishing settings for Codemagic submit workflows
+		`ALTER TABLE app_projects ADD COLUMN IF NOT EXISTS app_store_track text NOT NULL DEFAULT 'internal'`,
+		`ALTER TABLE app_projects ADD COLUMN IF NOT EXISTS play_store_track text NOT NULL DEFAULT 'internal'`,
+		`ALTER TABLE app_projects ADD COLUMN IF NOT EXISTS phased_release boolean NOT NULL DEFAULT false`,
+		`ALTER TABLE app_projects ADD COLUMN IF NOT EXISTS submit_as_draft boolean NOT NULL DEFAULT false`,
 		// P2.2 — compose-push audit log table. The CREATE happens via createSchema
 		// (IfNotExists); the column ALTER below is a no-op on a fresh DB but acts
 		// as the canary marker for this batch.
@@ -446,7 +456,6 @@ func createSchema(db *bun.DB) error {
 	// (Previous canary: revenuecat_public_key_android, P2.3 RevenueCat IAP.)
 	// Pointing the canary at the last new migration means a partial-failure mid-batch
 	// is detected on next boot and the loop retries the missed ALTERs.
-	// P2.2 OneSignal compose-push (2026-05-03).
 	var migrationsDone bool
 	row := db.QueryRowContext(context.Background(),
 		"SELECT EXISTS(SELECT 1 FROM pg_indexes WHERE indexname='idx_compose_push_histories_app_created')")
@@ -1881,6 +1890,14 @@ func main() {
 						r.With(rateLimiter.RateLimit(5, time.Minute, appMiddleware.UserKey)).
 							Post("/compose", httpViews.ComposePush)
 						r.Get("/history", httpViews.GetComposePushHistory)
+					})
+
+					// Mobile submissions (P1.2 — Codemagic publishing blocks).
+					// POST /v2/apps/{appId}/submit/{platform} — submits the latest
+					// successful Expo build to TestFlight (iOS) or the configured
+					// Play track (Android).
+					r.Route("/submit", func(r chi.Router) {
+						r.Post("/{platform}", httpViews.SubmitAppExpo)
 					})
 
 					// Persistent store listing — replaces the per-wizard form

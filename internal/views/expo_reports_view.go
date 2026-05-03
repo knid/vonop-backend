@@ -21,9 +21,14 @@ import (
 const expoReportsTimestampSkew = 5 * time.Minute
 
 type expoBuildReport struct {
-	TaskID    string `json:"task_id"`
-	Status    string `json:"status"`
-	Message   string `json:"message,omitempty"`
+	TaskID  string `json:"task_id"`
+	Status  string `json:"status"`
+	Message string `json:"message,omitempty"`
+	// Phase distinguishes build status events from submit status events.
+	// "build" (default — used when absent) | "submit". Stored verbatim in
+	// the event payload jsonb so downstream queries can filter via
+	// `payload @> '{"phase":"submit"}'`. P1.2 publishing-blocks (2026-05-03).
+	Phase     string `json:"phase,omitempty"`
 	Timestamp int64  `json:"timestamp"`
 }
 

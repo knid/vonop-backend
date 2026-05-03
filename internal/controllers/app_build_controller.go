@@ -411,6 +411,20 @@ func (c *Controller) BuildExpoMobile(ctx context.Context, project *models.AppPro
 	// {slug}.wemob.app fallback for first builds before any deploy lands.
 	expoPublicAPIURL := c.BackendDeployURL(project)
 
+	// Fetch MobileAppConfig once for both auth + IAP gating. nil-safe — a
+	// missing config (e.g. legacy mobile_app projects) leaves both sets empty.
+	mobileCfg, _ := c.DB.GetMobileAppConfig(project.ID.String())
+
+	// Compute the auth base URL (P2.4). Empty when AuthEnabled is false; the
+	// mobile auth client falls back to EXPO_PUBLIC_API_URL in that case.
+	// Today this is identical to expoPublicAPIURL when auth is on, but the
+	// separate var leaves room for future "auth on a different host" use
+	// cases without re-baking the binary.
+	expoPublicAuthBaseURL := ""
+	if mobileCfg != nil && mobileCfg.AuthEnabled {
+		expoPublicAuthBaseURL = expoPublicAPIURL
+	}
+
 	// IAP / RevenueCat (P2.3): bake public SDK keys into the binary at
 	// build time. Lazy-provision when iap_enabled=true but RC project ID
 	// is missing — covers (a) projects created before P2.3 shipped,
@@ -419,17 +433,17 @@ func (c *Controller) BuildExpoMobile(ctx context.Context, project *models.AppPro
 	// Failures here are logged + swallowed: build proceeds with empty
 	// keys, lib/iap.ts no-ops + warns, user can re-trigger build later.
 	rcKeyIOS, rcKeyAndroid := "", ""
-	if cfg, cfgErr := c.DB.GetMobileAppConfig(project.ID.String()); cfgErr == nil && cfg != nil && cfg.IAPEnabled {
-		if cfg.RevenueCatProjectID == "" && c.RevenueCatService != nil {
+	if mobileCfg != nil && mobileCfg.IAPEnabled {
+		if mobileCfg.RevenueCatProjectID == "" && c.RevenueCatService != nil {
 			if perr := c.provisionRevenueCat(ctx, project); perr != nil {
 				slog.Warn("BuildExpoMobile: lazy RC provision failed; building with empty IAP keys",
 					"error", perr, "project_id", project.ID)
 			}
-			cfg, _ = c.DB.GetMobileAppConfig(project.ID.String())
+			mobileCfg, _ = c.DB.GetMobileAppConfig(project.ID.String())
 		}
-		if cfg != nil {
-			rcKeyIOS = cfg.RevenueCatPublicKeyIOS
-			rcKeyAndroid = cfg.RevenueCatPublicKeyAndroid
+		if mobileCfg != nil {
+			rcKeyIOS = mobileCfg.RevenueCatPublicKeyIOS
+			rcKeyAndroid = mobileCfg.RevenueCatPublicKeyAndroid
 		}
 	}
 
@@ -494,6 +508,7 @@ func (c *Controller) BuildExpoMobile(ctx context.Context, project *models.AppPro
 				EASProjectUUID:                 project.ID.String(), // stable per project, set in P0.1
 				ExpoPublicAPIURL:               expoPublicAPIURL,
 				ExpoPublicProjectID:            project.ID.String(),
+				ExpoPublicAuthBaseURL:          expoPublicAuthBaseURL,
 				ExpoPublicRevenueCatKeyIOS:     rcKeyIOS,
 				ExpoPublicRevenueCatKeyAndroid: rcKeyAndroid,
 				ExpoPublicOneSignalAppID:       osAppID,
@@ -515,6 +530,7 @@ func (c *Controller) BuildExpoMobile(ctx context.Context, project *models.AppPro
 				// it post-prebuild (P1.1.A T4 fix).
 				ExpoPublicAPIURL:               expoPublicAPIURL,
 				ExpoPublicProjectID:            project.ID.String(),
+				ExpoPublicAuthBaseURL:          expoPublicAuthBaseURL,
 				ExpoPublicRevenueCatKeyIOS:     rcKeyIOS,
 				ExpoPublicRevenueCatKeyAndroid: rcKeyAndroid,
 				ExpoPublicOneSignalAppID:       osAppID,

@@ -21,7 +21,7 @@ func (t *ReadMobileConfigTool) Name() string {
 }
 
 func (t *ReadMobileConfigTool) Description() string {
-	return "Read the current mobile app configuration: enabled native features (bridge methods), URL scheme for deep links, universal link domain, biometric flag, in-app purchase config (whether IAP is enabled and whether RevenueCat is provisioned, so paywalls and entitlement gating can rely on lib/iap.ts), AND push notification status (whether OneSignal is provisioned, so opt-in UI patterns and lib/push.ts helpers are safe to call). Use this BEFORE writing code that depends on a native feature, IAP, or push, to confirm it's enabled."
+	return "Read the current mobile app configuration: enabled native features (bridge methods), URL scheme for deep links, universal link domain, biometric flag, authentication config (whether Better-Auth is enabled, which providers are wired, OAuth redirect scheme), in-app purchase config (whether IAP is enabled and whether RevenueCat is provisioned, so paywalls and entitlement gating can rely on lib/iap.ts), AND push notification status (whether OneSignal is provisioned, so opt-in UI patterns and lib/push.ts helpers are safe to call). Use this BEFORE writing code that depends on a native feature, auth, IAP, or push, to confirm it's enabled."
 }
 
 func (t *ReadMobileConfigTool) Schema() map[string]any {
@@ -38,8 +38,20 @@ type readMobileConfigOutput struct {
 	URLScheme             string   `json:"url_scheme"`
 	UniversalLinkDomain   string   `json:"universal_link_domain"`
 	BiometricEnabled      bool     `json:"biometric_enabled"`
+	Auth                  authInfo `json:"auth"`
 	IAP                   iapInfo  `json:"iap"`
 	Push                  pushInfo `json:"push"`
+}
+
+// authInfo summarises the project's authentication configuration. Sourced
+// from MobileAppConfig.AuthEnabled / AuthProviders / AuthScheme. The
+// per-customer BETTER_AUTH_SECRET is intentionally NOT exposed here — it's
+// a deploy-time concern, encrypted via CredStore, and never returned to
+// the agent.
+type authInfo struct {
+	Enabled   bool     `json:"enabled"`
+	Providers []string `json:"providers"`
+	Scheme    string   `json:"scheme"`
 }
 
 // iapInfo summarises in-app purchase configuration. RevenueCatConfigured is
@@ -71,12 +83,16 @@ func (t *ReadMobileConfigTool) Execute(ctx context.Context, rc *RunContext, _ js
 	if err != nil {
 		// Missing config is not an error — new projects may not have one yet.
 		// Return empty feature list so the agent can proceed without crashing.
-		out := readMobileConfigOutput{EnabledNativeFeatures: []string{}}
+		out := readMobileConfigOutput{
+			EnabledNativeFeatures: []string{},
+			Auth:                  authInfo{Providers: []string{}},
+		}
 		b, _ := json.Marshal(out)
 		return string(b), false, nil
 	}
 
 	out := readMobileConfigOutput{EnabledNativeFeatures: []string{}}
+	out.Auth.Providers = []string{}
 	if cfg != nil {
 		if cfg.BridgeMethods != nil {
 			out.EnabledNativeFeatures = cfg.BridgeMethods
@@ -84,6 +100,11 @@ func (t *ReadMobileConfigTool) Execute(ctx context.Context, rc *RunContext, _ js
 		out.URLScheme = cfg.URLScheme
 		out.UniversalLinkDomain = cfg.UniversalLinkDomain
 		out.BiometricEnabled = cfg.BiometricEnabled
+		out.Auth.Enabled = cfg.AuthEnabled
+		if cfg.AuthProviders != nil {
+			out.Auth.Providers = cfg.AuthProviders
+		}
+		out.Auth.Scheme = cfg.AuthScheme
 		out.IAP.Enabled = cfg.IAPEnabled
 		out.IAP.RevenueCatConfigured = cfg.RevenueCatPublicKeyIOS != "" && cfg.RevenueCatPublicKeyAndroid != ""
 
