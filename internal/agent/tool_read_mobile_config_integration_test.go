@@ -38,11 +38,14 @@ func TestReadMobileConfigTool_ReturnsEnabledMethods(t *testing.T) {
 	}
 
 	cfg := &models.MobileAppConfig{
-		ProjectID:           project.ID,
-		BridgeMethods:       []string{"camera", "biometric"},
-		URLScheme:           "wemobapp",
-		UniversalLinkDomain: "example.com",
-		BiometricEnabled:    true,
+		ProjectID:            project.ID,
+		BridgeMethods:        []string{"camera", "biometric"},
+		URLScheme:            "wemobapp",
+		UniversalLinkDomain:  "example.com",
+		BiometricEnabled:     true,
+		AppStoreURL:          "https://apps.apple.com/app/example/id123",
+		PlayStoreURL:         "https://play.google.com/store/apps/details?id=com.example",
+		LandingPagePublished: true,
 	}
 	if _, err := db.DB.NewInsert().Model(cfg).Exec(ctx); err != nil {
 		t.Fatalf("insert mobile config: %v", err)
@@ -77,6 +80,73 @@ func TestReadMobileConfigTool_ReturnsEnabledMethods(t *testing.T) {
 	}
 	if len(got.EnabledNativeFeatures) != 2 || got.EnabledNativeFeatures[0] != "camera" || got.EnabledNativeFeatures[1] != "biometric" {
 		t.Errorf("EnabledNativeFeatures = %v, want [camera biometric]", got.EnabledNativeFeatures)
+	}
+	if got.AppStoreURL != "https://apps.apple.com/app/example/id123" {
+		t.Errorf("AppStoreURL = %q, want apps.apple.com URL", got.AppStoreURL)
+	}
+	if got.PlayStoreURL != "https://play.google.com/store/apps/details?id=com.example" {
+		t.Errorf("PlayStoreURL = %q, want Play Store URL", got.PlayStoreURL)
+	}
+	if !got.LandingPagePublished {
+		t.Error("LandingPagePublished = false, want true")
+	}
+}
+
+// TestReadMobileConfigTool_LandingFieldsEmptyByDefault verifies that a fresh
+// MobileAppConfig with no store URLs reports them as empty strings and the
+// landing-published flag as false — the "agent should render Coming soon
+// placeholders" path on the landing page.
+func TestReadMobileConfigTool_LandingFieldsEmptyByDefault(t *testing.T) {
+	db := database.NewTestDB(t,
+		(*models.AppProject)(nil),
+		(*models.MobileAppConfig)(nil),
+	)
+	ctx := context.Background()
+
+	project := &models.AppProject{
+		ID:             uuid.New(),
+		UserID:         uuid.New(),
+		OrganizationID: uuid.New(),
+		Name:           "test",
+		Slug:           "test-" + uuid.NewString(),
+		Prompt:         "n/a",
+		ProjectType:    models.ProjectTypeMobileAppNative,
+		Status:         "draft",
+	}
+	if _, err := db.DB.NewInsert().Model(project).Exec(ctx); err != nil {
+		t.Fatalf("insert project: %v", err)
+	}
+
+	cfg := &models.MobileAppConfig{
+		ProjectID: project.ID,
+	}
+	if _, err := db.DB.NewInsert().Model(cfg).Exec(ctx); err != nil {
+		t.Fatalf("insert mobile config: %v", err)
+	}
+
+	tool := &ReadMobileConfigTool{}
+	rc := &RunContext{
+		Deps:    &RunDependencies{DB: db},
+		Project: project,
+	}
+
+	out, _, err := tool.Execute(ctx, rc, json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatalf("tool execute: %v", err)
+	}
+
+	var got readMobileConfigOutput
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("unmarshal output: %v; out=%s", err, out)
+	}
+	if got.AppStoreURL != "" {
+		t.Errorf("AppStoreURL = %q, want empty string", got.AppStoreURL)
+	}
+	if got.PlayStoreURL != "" {
+		t.Errorf("PlayStoreURL = %q, want empty string", got.PlayStoreURL)
+	}
+	if got.LandingPagePublished {
+		t.Error("LandingPagePublished = true, want false (default)")
 	}
 }
 

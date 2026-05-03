@@ -20,7 +20,7 @@ func (t *ReadMobileConfigTool) Name() string {
 }
 
 func (t *ReadMobileConfigTool) Description() string {
-	return "Read the current mobile app configuration: enabled native features (bridge methods), URL scheme for deep links, universal link domain, biometric flag. Use this BEFORE writing code that depends on a native feature, to confirm it's enabled."
+	return "Read the current mobile app configuration: enabled native features (bridge methods), URL scheme for deep links, universal link domain, biometric flag, App Store + Play Store URLs (for the marketing landing at backend/app/page.tsx), and the landing_page_published flag. Use this BEFORE writing code that depends on a native feature, and BEFORE writing the marketing landing page so you know whether to render real store-badge links or 'Coming soon' placeholders."
 }
 
 func (t *ReadMobileConfigTool) Schema() map[string]any {
@@ -37,6 +37,13 @@ type readMobileConfigOutput struct {
 	URLScheme             string   `json:"url_scheme"`
 	UniversalLinkDomain   string   `json:"universal_link_domain"`
 	BiometricEnabled      bool     `json:"biometric_enabled"`
+
+	// Landing-page metadata (P3.1) — empty until the user publishes to the
+	// stores. The agent uses these to decide between real store-badge CTAs
+	// and "Coming soon" placeholders on backend/app/page.tsx.
+	AppStoreURL          string `json:"app_store_url"`
+	PlayStoreURL         string `json:"play_store_url"`
+	LandingPagePublished bool   `json:"landing_page_published"`
 }
 
 func (t *ReadMobileConfigTool) Execute(ctx context.Context, rc *RunContext, _ json.RawMessage) (string, bool, error) {
@@ -61,6 +68,9 @@ func (t *ReadMobileConfigTool) Execute(ctx context.Context, rc *RunContext, _ js
 		out.URLScheme = cfg.URLScheme
 		out.UniversalLinkDomain = cfg.UniversalLinkDomain
 		out.BiometricEnabled = cfg.BiometricEnabled
+		out.AppStoreURL = cfg.AppStoreURL
+		out.PlayStoreURL = cfg.PlayStoreURL
+		out.LandingPagePublished = cfg.LandingPagePublished
 	}
 
 	b, err := json.Marshal(out)
