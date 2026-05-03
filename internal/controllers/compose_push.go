@@ -43,19 +43,21 @@ func (c *Controller) SendComposePush(ctx context.Context, project *models.AppPro
 	}
 
 	// Resolve v1 shadow row to get the per-tenant OneSignal app ID + REST key.
+	// Lazy-provision when the row is missing OR still has the placeholder ID
+	// (covers projects whose CreateAppProject goroutine missed, or test fixtures
+	// that don't run the eager bootstrap).
 	shadowURL := "expo://" + project.Slug
 	v1, err := c.DB.GetProjectByUserAndURL(project.UserID.String(), shadowURL)
-	if err != nil || v1 == nil || v1.ID == uuid.Nil {
-		return nil, errors.New("compose-push: OneSignal app not yet provisioned for this project; build the app once to trigger provisioning")
-	}
-	if strings.HasPrefix(v1.OneSignalAppID, onesignalShadowPrefix) || v1.OneSignalAppID == "" {
-		// Lazy-provision now (covers projects whose CreateAppProject goroutine missed).
+	needsProvision := err != nil || v1 == nil || v1.ID == uuid.Nil ||
+		v1.OneSignalAppID == "" || strings.HasPrefix(v1.OneSignalAppID, onesignalShadowPrefix)
+	if needsProvision {
 		if perr := c.provisionOneSignalApp(ctx, project); perr != nil {
 			return nil, fmt.Errorf("compose-push: OneSignal provisioning failed: %w", perr)
 		}
 		v1, err = c.DB.GetProjectByUserAndURL(project.UserID.String(), shadowURL)
-		if err != nil || v1 == nil || strings.HasPrefix(v1.OneSignalAppID, onesignalShadowPrefix) {
-			return nil, errors.New("compose-push: OneSignal still not provisioned after retry")
+		if err != nil || v1 == nil || v1.ID == uuid.Nil ||
+			v1.OneSignalAppID == "" || strings.HasPrefix(v1.OneSignalAppID, onesignalShadowPrefix) {
+			return nil, errors.New("compose-push: OneSignal app not yet provisioned for this project; verify ONESIGNAL_ORG_ID + ONESIGNAL_ORG_API_KEY are set, then retry")
 		}
 	}
 
