@@ -266,3 +266,257 @@ func (c *Controller) DeleteGooglePlayConnection(user *models.User, credID string
 
 	return c.DB.DeleteGooglePlayConnection(cred)
 }
+
+// ---- Org-scoped credential methods ----
+//
+// These replace the user-scoped methods above for HTTP handler use.
+// The user-scoped methods are kept for system callers (cron,
+// AutoSignIOSBuildIfPossible, deployment, pending_connection) that don't
+// carry a user context.
+
+// GetAppleConnectionForOrg loads an Apple connection scoped to the given org.
+// The requesting user must be a member of orgID (any role).
+func (c *Controller) GetAppleConnectionForOrg(ctx context.Context, requestingUser *models.User, orgIDStr, credID string) (*responses.AppleConnectionResponse, error) {
+	orgID, err := c.RequireOrgMembership(requestingUser, orgIDStr)
+	if err != nil {
+		return nil, err
+	}
+	credUUID, err := uuid.Parse(credID)
+	if err != nil {
+		return nil, errors.New("invalid credential id")
+	}
+	cred, err := c.DB.GetAppleConnectionByOrg(ctx, orgID, credUUID)
+	if err != nil {
+		return nil, err
+	}
+	if cred == nil {
+		return nil, errors.New("not found")
+	}
+	return &responses.AppleConnectionResponse{
+		ID:        cred.ID,
+		Name:      cred.Name,
+		KeyID:     cred.KeyID,
+		APNSKeyID: cred.APNSP8KeyID,
+		TeamID:    cred.TeamID,
+		IssuerID:  cred.IssuerID,
+		CreatedAt: cred.CreatedAt,
+		UpdatedAt: cred.UpdatedAt,
+	}, nil
+}
+
+// ListAppleConnectionsForOrg returns all Apple connections owned by an org.
+// Requesting user must be an org member.
+func (c *Controller) ListAppleConnectionsForOrg(ctx context.Context, requestingUser *models.User, orgIDStr string) ([]responses.AppleConnectionResponse, error) {
+	orgID, err := c.RequireOrgMembership(requestingUser, orgIDStr)
+	if err != nil {
+		return nil, err
+	}
+	creds, err := c.DB.ListAppleConnectionsByOrg(ctx, orgID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]responses.AppleConnectionResponse, 0, len(creds))
+	for _, cred := range creds {
+		out = append(out, responses.AppleConnectionResponse{
+			ID:        cred.ID,
+			Name:      cred.Name,
+			KeyID:     cred.KeyID,
+			APNSKeyID: cred.APNSP8KeyID,
+			TeamID:    cred.TeamID,
+			IssuerID:  cred.IssuerID,
+			CreatedAt: cred.CreatedAt,
+			UpdatedAt: cred.UpdatedAt,
+		})
+	}
+	return out, nil
+}
+
+// UpdateAppleConnectionForOrg updates an Apple connection. Requesting user
+// must be an org member; the original UserID (creator) is preserved.
+func (c *Controller) UpdateAppleConnectionForOrg(ctx context.Context, requestingUser *models.User, orgIDStr, credID string, req requests.AppleConnectionUpdateRequest) (*responses.AppleConnectionResponse, error) {
+	orgID, err := c.RequireOrgMembership(requestingUser, orgIDStr)
+	if err != nil {
+		return nil, err
+	}
+	credUUID, err := uuid.Parse(credID)
+	if err != nil {
+		return nil, errors.New("invalid credential id")
+	}
+	cred, err := c.DB.GetAppleConnectionByOrg(ctx, orgID, credUUID)
+	if err != nil {
+		return nil, err
+	}
+	if cred == nil {
+		return nil, errors.New("not found")
+	}
+
+	p8KeyPath := cred.P8KeyPath
+	if req.P8Key != "" {
+		p8KeyPath = applyP8Prefix(req.P8Key)
+	}
+	apnsP8KeyPath := cred.APNSP8KeyPath
+	if req.APNSP8Key != "" {
+		apnsP8KeyPath = applyAPNSP8Prefix(req.APNSP8Key)
+	}
+
+	updated := &models.AppleConnection{
+		ID:             cred.ID,
+		UserID:         cred.UserID,         // preserved — do not overwrite with requesting user
+		OrganizationID: cred.OrganizationID, // preserved
+		Name:           req.Name,
+		P8KeyPath:      p8KeyPath,
+		APNSP8KeyPath:  apnsP8KeyPath,
+		APNSP8KeyID:    req.APNSKeyID,
+		KeyID:          req.KeyID,
+		TeamID:         req.TeamID,
+		IssuerID:       req.IssuerID,
+	}
+	saved, err := c.DB.UpdateAppleConnection(updated)
+	if err != nil {
+		return nil, err
+	}
+	return &responses.AppleConnectionResponse{
+		ID:        saved.ID,
+		Name:      saved.Name,
+		KeyID:     saved.KeyID,
+		APNSKeyID: saved.APNSP8KeyID,
+		TeamID:    saved.TeamID,
+		IssuerID:  saved.IssuerID,
+		CreatedAt: saved.CreatedAt,
+		UpdatedAt: saved.UpdatedAt,
+	}, nil
+}
+
+// DeleteAppleConnectionForOrg deletes an Apple connection. Requesting user
+// must be an org member.
+func (c *Controller) DeleteAppleConnectionForOrg(ctx context.Context, requestingUser *models.User, orgIDStr, credID string) error {
+	orgID, err := c.RequireOrgMembership(requestingUser, orgIDStr)
+	if err != nil {
+		return err
+	}
+	credUUID, err := uuid.Parse(credID)
+	if err != nil {
+		return errors.New("invalid credential id")
+	}
+	cred, err := c.DB.GetAppleConnectionByOrg(ctx, orgID, credUUID)
+	if err != nil {
+		return err
+	}
+	if cred == nil {
+		return errors.New("not found")
+	}
+	return c.DB.DeleteAppleConnection(cred)
+}
+
+// GetGooglePlayConnectionForOrg loads a Google Play connection scoped to the
+// given org. The requesting user must be an org member (any role).
+func (c *Controller) GetGooglePlayConnectionForOrg(ctx context.Context, requestingUser *models.User, orgIDStr, credID string) (*responses.GooglePlayConnectionResponse, error) {
+	orgID, err := c.RequireOrgMembership(requestingUser, orgIDStr)
+	if err != nil {
+		return nil, err
+	}
+	credUUID, err := uuid.Parse(credID)
+	if err != nil {
+		return nil, errors.New("invalid credential id")
+	}
+	cred, err := c.DB.GetGooglePlayConnectionByOrg(ctx, orgID, credUUID)
+	if err != nil {
+		return nil, err
+	}
+	if cred == nil {
+		return nil, errors.New("not found")
+	}
+	return &responses.GooglePlayConnectionResponse{
+		ID:        cred.ID,
+		Name:      cred.Name,
+		CreatedAt: cred.CreatedAt,
+		UpdatedAt: cred.UpdatedAt,
+	}, nil
+}
+
+// ListGooglePlayConnectionsForOrg returns all Google Play connections owned by
+// an org. Requesting user must be an org member.
+func (c *Controller) ListGooglePlayConnectionsForOrg(ctx context.Context, requestingUser *models.User, orgIDStr string) ([]responses.GooglePlayConnectionResponse, error) {
+	orgID, err := c.RequireOrgMembership(requestingUser, orgIDStr)
+	if err != nil {
+		return nil, err
+	}
+	creds, err := c.DB.ListGooglePlayConnectionsByOrg(ctx, orgID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]responses.GooglePlayConnectionResponse, 0, len(creds))
+	for _, cred := range creds {
+		out = append(out, responses.GooglePlayConnectionResponse{
+			ID:        cred.ID,
+			Name:      cred.Name,
+			CreatedAt: cred.CreatedAt,
+			UpdatedAt: cred.UpdatedAt,
+		})
+	}
+	return out, nil
+}
+
+// UpdateGooglePlayConnectionForOrg updates a Google Play connection. Requesting
+// user must be an org member; the original UserID (creator) is preserved.
+func (c *Controller) UpdateGooglePlayConnectionForOrg(ctx context.Context, requestingUser *models.User, orgIDStr, credID string, req requests.GooglePlayConnectionUpdateRequest) (*responses.GooglePlayConnectionResponse, error) {
+	orgID, err := c.RequireOrgMembership(requestingUser, orgIDStr)
+	if err != nil {
+		return nil, err
+	}
+	credUUID, err := uuid.Parse(credID)
+	if err != nil {
+		return nil, errors.New("invalid credential id")
+	}
+	cred, err := c.DB.GetGooglePlayConnectionByOrg(ctx, orgID, credUUID)
+	if err != nil {
+		return nil, err
+	}
+	if cred == nil {
+		return nil, errors.New("not found")
+	}
+
+	serviceAccountPath := cred.ServiceAccountPath
+	if req.ServiceAccountKey != "" {
+		serviceAccountPath = applyServiceAccountPrefix(req.ServiceAccountKey)
+	}
+
+	updated := &models.GooglePlayConnection{
+		ID:                 cred.ID,
+		UserID:             cred.UserID,         // preserved — do not overwrite with requesting user
+		OrganizationID:     cred.OrganizationID, // preserved
+		Name:               req.Name,
+		ServiceAccountPath: serviceAccountPath,
+	}
+	saved, err := c.DB.UpdateGooglePlayConnection(updated)
+	if err != nil {
+		return nil, err
+	}
+	return &responses.GooglePlayConnectionResponse{
+		ID:        saved.ID,
+		Name:      saved.Name,
+		CreatedAt: saved.CreatedAt,
+		UpdatedAt: saved.UpdatedAt,
+	}, nil
+}
+
+// DeleteGooglePlayConnectionForOrg deletes a Google Play connection. Requesting
+// user must be an org member.
+func (c *Controller) DeleteGooglePlayConnectionForOrg(ctx context.Context, requestingUser *models.User, orgIDStr, credID string) error {
+	orgID, err := c.RequireOrgMembership(requestingUser, orgIDStr)
+	if err != nil {
+		return err
+	}
+	credUUID, err := uuid.Parse(credID)
+	if err != nil {
+		return errors.New("invalid credential id")
+	}
+	cred, err := c.DB.GetGooglePlayConnectionByOrg(ctx, orgID, credUUID)
+	if err != nil {
+		return err
+	}
+	if cred == nil {
+		return errors.New("not found")
+	}
+	return c.DB.DeleteGooglePlayConnection(cred)
+}

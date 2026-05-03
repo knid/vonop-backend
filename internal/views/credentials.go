@@ -7,7 +7,6 @@ import (
 	"github.com/go-playground/validator/v10"
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/requests"
-	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/utils"
 )
 
@@ -19,30 +18,12 @@ func (v *HttpViews) ListAppleConnections(w http.ResponseWriter, r *http.Request)
 	}
 
 	if rawOrgID := r.URL.Query().Get("org_id"); rawOrgID != "" {
-		orgID, oErr := v.Controller.RequireOrgMembership(user, rawOrgID)
+		creds, oErr := v.Controller.ListAppleConnectionsForOrg(r.Context(), user, rawOrgID)
 		if oErr != nil {
 			utils.JSONErrorCode(w, constants.ErrForbidden, http.StatusForbidden, nil)
 			return
 		}
-		conns, dErr := v.Controller.DB.GetAppleConnectionsByOrgID(orgID.String())
-		if dErr != nil {
-			utils.JSONInternalError(w, dErr)
-			return
-		}
-		var resp []responses.AppleConnectionResponse
-		for _, cred := range conns {
-			resp = append(resp, responses.AppleConnectionResponse{
-				ID:        cred.ID,
-				Name:      cred.Name,
-				KeyID:     cred.KeyID,
-				APNSKeyID: cred.APNSP8KeyID,
-				TeamID:    cred.TeamID,
-				IssuerID:  cred.IssuerID,
-				CreatedAt: cred.CreatedAt,
-				UpdatedAt: cred.UpdatedAt,
-			})
-		}
-		utils.JSONResponse(w, resp, http.StatusOK)
+		utils.JSONResponse(w, creds, http.StatusOK)
 		return
 	}
 
@@ -112,6 +93,20 @@ func (v *HttpViews) GetAppleConnection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	orgID := chi.URLParam(r, "org_id")
+	if orgID == "" {
+		orgID = r.URL.Query().Get("org_id")
+	}
+	if orgID != "" {
+		cred, oErr := v.Controller.GetAppleConnectionForOrg(r.Context(), user, orgID, credID)
+		if oErr != nil {
+			utils.JSONInternalError(w, oErr)
+			return
+		}
+		utils.JSONResponse(w, cred, http.StatusOK)
+		return
+	}
+
 	cred, err := v.Controller.GetAppleConnectionById(user, credID)
 	if err != nil {
 		utils.JSONInternalError(w, err)
@@ -156,6 +151,20 @@ func (v *HttpViews) UpdateAppleConnection(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	orgID := chi.URLParam(r, "org_id")
+	if orgID == "" {
+		orgID = r.URL.Query().Get("org_id")
+	}
+	if orgID != "" {
+		cred, oErr := v.Controller.UpdateAppleConnectionForOrg(r.Context(), user, orgID, credID, req)
+		if oErr != nil {
+			utils.JSONInternalError(w, oErr)
+			return
+		}
+		utils.JSONResponse(w, cred, http.StatusOK)
+		return
+	}
+
 	cred, err := v.Controller.UpdateAppleConnection(user, credID, req)
 	if err != nil {
 		utils.JSONInternalError(w, err)
@@ -181,6 +190,19 @@ func (v *HttpViews) DeleteAppleConnection(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	orgID := chi.URLParam(r, "org_id")
+	if orgID == "" {
+		orgID = r.URL.Query().Get("org_id")
+	}
+	if orgID != "" {
+		if oErr := v.Controller.DeleteAppleConnectionForOrg(r.Context(), user, orgID, credID); oErr != nil {
+			utils.JSONInternalError(w, oErr)
+			return
+		}
+		utils.JSONResponse(w, "", http.StatusNoContent)
+		return
+	}
+
 	err = v.Controller.DeleteAppleConnection(user, credID)
 	if err != nil {
 		utils.JSONInternalError(w, err)
@@ -198,26 +220,12 @@ func (v *HttpViews) ListGooglePlayConnections(w http.ResponseWriter, r *http.Req
 	}
 
 	if rawOrgID := r.URL.Query().Get("org_id"); rawOrgID != "" {
-		orgID, oErr := v.Controller.RequireOrgMembership(user, rawOrgID)
+		creds, oErr := v.Controller.ListGooglePlayConnectionsForOrg(r.Context(), user, rawOrgID)
 		if oErr != nil {
 			utils.JSONErrorCode(w, constants.ErrForbidden, http.StatusForbidden, nil)
 			return
 		}
-		conns, dErr := v.Controller.DB.GetGooglePlayConnectionsByOrgID(orgID.String())
-		if dErr != nil {
-			utils.JSONInternalError(w, dErr)
-			return
-		}
-		var resp []responses.GooglePlayConnectionResponse
-		for _, cred := range conns {
-			resp = append(resp, responses.GooglePlayConnectionResponse{
-				ID:        cred.ID,
-				Name:      cred.Name,
-				CreatedAt: cred.CreatedAt,
-				UpdatedAt: cred.UpdatedAt,
-			})
-		}
-		utils.JSONResponse(w, resp, http.StatusOK)
+		utils.JSONResponse(w, creds, http.StatusOK)
 		return
 	}
 
@@ -288,6 +296,20 @@ func (v *HttpViews) GetGooglePlayConnection(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	orgID := chi.URLParam(r, "org_id")
+	if orgID == "" {
+		orgID = r.URL.Query().Get("org_id")
+	}
+	if orgID != "" {
+		cred, oErr := v.Controller.GetGooglePlayConnectionForOrg(r.Context(), user, orgID, credID)
+		if oErr != nil {
+			utils.JSONInternalError(w, oErr)
+			return
+		}
+		utils.JSONResponse(w, cred, http.StatusOK)
+		return
+	}
+
 	cred, err := v.Controller.GetGooglePlayConnectionById(user, credID)
 	if err != nil {
 		utils.JSONInternalError(w, err)
@@ -332,6 +354,20 @@ func (v *HttpViews) UpdateGooglePlayConnection(w http.ResponseWriter, r *http.Re
 		return
 	}
 
+	orgID := chi.URLParam(r, "org_id")
+	if orgID == "" {
+		orgID = r.URL.Query().Get("org_id")
+	}
+	if orgID != "" {
+		cred, oErr := v.Controller.UpdateGooglePlayConnectionForOrg(r.Context(), user, orgID, credID, req)
+		if oErr != nil {
+			utils.JSONInternalError(w, oErr)
+			return
+		}
+		utils.JSONResponse(w, cred, http.StatusOK)
+		return
+	}
+
 	cred, err := v.Controller.UpdateGooglePlayConnection(user, credID, req)
 	if err != nil {
 		utils.JSONInternalError(w, err)
@@ -354,6 +390,19 @@ func (v *HttpViews) DeleteGooglePlayConnection(w http.ResponseWriter, r *http.Re
 	}
 	if credID == "" {
 		utils.JSONErrorCode(w, constants.ErrValidationRequired, http.StatusBadRequest, map[string]any{"field": "connection_id"})
+		return
+	}
+
+	orgID := chi.URLParam(r, "org_id")
+	if orgID == "" {
+		orgID = r.URL.Query().Get("org_id")
+	}
+	if orgID != "" {
+		if oErr := v.Controller.DeleteGooglePlayConnectionForOrg(r.Context(), user, orgID, credID); oErr != nil {
+			utils.JSONInternalError(w, oErr)
+			return
+		}
+		utils.JSONResponse(w, "", http.StatusNoContent)
 		return
 	}
 
