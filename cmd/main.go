@@ -221,6 +221,13 @@ func createSchema(db *bun.DB) error {
 		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS auth_providers text[] DEFAULT '{}'`,
 		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS auth_scheme text`,
 		`ALTER TABLE app_projects ADD COLUMN IF NOT EXISTS better_auth_secret_cred_ref jsonb`,
+		// P2.3 — RevenueCat IAP auto-provisioning per tenant
+		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS iap_enabled boolean NOT NULL DEFAULT false`,
+		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS revenuecat_project_id text`,
+		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS revenuecat_ios_app_id text`,
+		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS revenuecat_android_app_id text`,
+		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS revenuecat_public_key_ios text`,
+		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS revenuecat_public_key_android text`,
 		// GitHub integration fields on users
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS git_hub_access_token text`,
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS git_hub_username text`,
@@ -437,13 +444,13 @@ func createSchema(db *bun.DB) error {
 	// IMPORTANT: when adding a new ALTER TABLE above, update this canary to the newest column,
 	// otherwise the new ALTER will be silently skipped on servers that already have older columns.
 	// Table renames go in renameStatements below, not here — they run unconditionally.
-	// Canary: better_auth_secret_cred_ref — the LAST column added to app_projects.
+	// Canary: revenuecat_public_key_android — the LAST column added (P2.3 RevenueCat).
 	// Pointing the canary at the last new column (rather than the first) means
 	// a partial migration failure mid-batch will be detected on the next boot
-	// and the loop will retry the missed ALTERs. P2.4 Better-Auth (2026-05-03).
+	// and the loop will retry the missed ALTERs.
 	var migrationsDone bool
 	row := db.QueryRowContext(context.Background(),
-		"SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='app_projects' AND column_name='better_auth_secret_cred_ref')")
+		"SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='mobile_app_configs' AND column_name='revenuecat_public_key_android')")
 	if err := row.Scan(&migrationsDone); err != nil {
 		migrationsDone = false
 	}

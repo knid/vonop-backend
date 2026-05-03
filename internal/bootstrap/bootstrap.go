@@ -32,6 +32,7 @@ import (
 	"github.com/knid/wemob/internal/services/mcpclient"
 	"github.com/knid/wemob/internal/services/neon"
 	"github.com/knid/wemob/internal/services/remoteconfig"
+	"github.com/knid/wemob/internal/services/revenuecat"
 	"github.com/knid/wemob/internal/services/secret"
 	"github.com/knid/wemob/internal/services/storage"
 	caddyService "github.com/knid/wemob/internal/services/caddy"
@@ -177,6 +178,22 @@ func BootstrapController() (*controllers.Controller, asynq.RedisClientOpt) {
 		slog.Info("Codemagic service initialized")
 	}
 
+	// RevenueCat REST v2 — IAP auto-provisioning per tenant (P2.3).
+	// Gracefully degrades when REVENUECAT_API_KEY is unset: provisioning
+	// skips, mobile builds proceed with empty EXPO_PUBLIC_REVENUECAT_KEY_*
+	// env vars, and the template's lib/iap.ts initIAP() already no-ops +
+	// warns on missing keys. Set REVENUECAT_API_KEY in Infisical with
+	// scopes project_configuration:projects:read_write +
+	// project_configuration:apps:read_write before shipping IAP-enabled
+	// mobile_app_native projects to production.
+	var revenueCatService *revenuecat.Service
+	if rcKey := sm.GetSecret("REVENUECAT_API_KEY"); rcKey != "" {
+		revenueCatService = revenuecat.NewService(rcKey)
+		slog.Info("RevenueCat service initialized")
+	} else {
+		slog.Warn("REVENUECAT_API_KEY not set — IAP auto-provisioning disabled (mobile_app_native projects will build with empty IAP keys)")
+	}
+
 	e2b := e2bService.NewService(
 		sm.GetSecret("DASHBOARD_URL"),
 		sm.GetSecret("E2B_PREVIEW_DOMAIN"),
@@ -287,6 +304,7 @@ func BootstrapController() (*controllers.Controller, asynq.RedisClientOpt) {
 		posthogClient,
 		gitRepoService,
 		codemagicService,
+		revenueCatService,
 		remoteConfigService,
 		e2b,
 		edgeIPs,

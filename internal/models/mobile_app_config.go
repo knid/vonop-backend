@@ -56,6 +56,18 @@ type MobileAppConfig struct {
 	AuthProviders []string `bun:",array,type:text[]" json:"auth_providers"`
 	AuthScheme    string   `bun:",nullzero" json:"auth_scheme"`
 
+	// IAP / RevenueCat (build-time — public keys baked into the binary).
+	// Provisioned per-tenant by Controller.provisionRevenueCat at create-time
+	// (eager) or on first build (lazy). The org-level REVENUECAT_API_KEY
+	// (secret) lives in Infisical; these columns hold non-secret IDs +
+	// public SDK keys (the same keys that ship inside every App Store binary).
+	IAPEnabled                 bool   `bun:"iap_enabled,notnull,default:false" json:"iap_enabled"`
+	RevenueCatProjectID        string `bun:"revenuecat_project_id,nullzero" json:"revenuecat_project_id"`
+	RevenueCatIOSAppID         string `bun:"revenuecat_ios_app_id,nullzero" json:"revenuecat_ios_app_id"`
+	RevenueCatAndroidAppID     string `bun:"revenuecat_android_app_id,nullzero" json:"revenuecat_android_app_id"`
+	RevenueCatPublicKeyIOS     string `bun:"revenuecat_public_key_ios,nullzero" json:"revenuecat_public_key_ios"`
+	RevenueCatPublicKeyAndroid string `bun:"revenuecat_public_key_android,nullzero" json:"revenuecat_public_key_android"`
+
 	CreatedAt time.Time `bun:",nullzero,notnull,default:current_timestamp" json:"created_at"`
 	UpdatedAt time.Time `bun:",nullzero,notnull,default:current_timestamp" json:"updated_at"`
 }

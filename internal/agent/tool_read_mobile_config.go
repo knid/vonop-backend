@@ -20,7 +20,7 @@ func (t *ReadMobileConfigTool) Name() string {
 }
 
 func (t *ReadMobileConfigTool) Description() string {
-	return "Read the current mobile app configuration: enabled native features (bridge methods), URL scheme for deep links, universal link domain, biometric flag, AND authentication config (whether Better-Auth is enabled, which providers are wired, and the URL scheme used for OAuth redirects). Use this BEFORE writing code that depends on a native feature OR auth, to confirm it's enabled."
+	return "Read the current mobile app configuration: enabled native features (bridge methods), URL scheme for deep links, universal link domain, biometric flag, authentication config (whether Better-Auth is enabled, which providers are wired, and the URL scheme used for OAuth redirects), AND in-app purchase config (whether IAP is enabled and whether RevenueCat is provisioned, so paywalls and entitlement gating can rely on lib/iap.ts). Use this BEFORE writing code that depends on a native feature, auth, or IAP, to confirm it's enabled."
 }
 
 func (t *ReadMobileConfigTool) Schema() map[string]any {
@@ -38,6 +38,7 @@ type readMobileConfigOutput struct {
 	UniversalLinkDomain   string   `json:"universal_link_domain"`
 	BiometricEnabled      bool     `json:"biometric_enabled"`
 	Auth                  authInfo `json:"auth"`
+	IAP                   iapInfo  `json:"iap"`
 }
 
 // authInfo summarises the project's authentication configuration. Sourced
@@ -49,6 +50,16 @@ type authInfo struct {
 	Enabled   bool     `json:"enabled"`
 	Providers []string `json:"providers"`
 	Scheme    string   `json:"scheme"`
+}
+
+// iapInfo summarises in-app purchase configuration. RevenueCatConfigured is
+// true when both platform public keys are populated (RC provisioning
+// succeeded). The actual public SDK keys are NOT exposed — they're build-
+// time-baked into the binary by the Codemagic pipeline and the agent
+// doesn't need them to write paywall code.
+type iapInfo struct {
+	Enabled              bool `json:"enabled"`
+	RevenueCatConfigured bool `json:"revenuecat_configured"`
 }
 
 func (t *ReadMobileConfigTool) Execute(ctx context.Context, rc *RunContext, _ json.RawMessage) (string, bool, error) {
@@ -82,6 +93,8 @@ func (t *ReadMobileConfigTool) Execute(ctx context.Context, rc *RunContext, _ js
 			out.Auth.Providers = cfg.AuthProviders
 		}
 		out.Auth.Scheme = cfg.AuthScheme
+		out.IAP.Enabled = cfg.IAPEnabled
+		out.IAP.RevenueCatConfigured = cfg.RevenueCatPublicKeyIOS != "" && cfg.RevenueCatPublicKeyAndroid != ""
 	}
 
 	b, err := json.Marshal(out)

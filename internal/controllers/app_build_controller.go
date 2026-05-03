@@ -411,14 +411,40 @@ func (c *Controller) BuildExpoMobile(ctx context.Context, project *models.AppPro
 	// {slug}.wemob.app fallback for first builds before any deploy lands.
 	expoPublicAPIURL := c.BackendDeployURL(project)
 
-	// Compute the auth base URL. Empty when MobileAppConfig.AuthEnabled is
-	// false; the mobile auth client falls back to EXPO_PUBLIC_API_URL in that
-	// case. Today this is identical to expoPublicAPIURL when auth is on, but
-	// the separate var leaves room for future "auth on a different host" use
+	// Fetch MobileAppConfig once for both auth + IAP gating. nil-safe — a
+	// missing config (e.g. legacy mobile_app projects) leaves both sets empty.
+	mobileCfg, _ := c.DB.GetMobileAppConfig(project.ID.String())
+
+	// Compute the auth base URL (P2.4). Empty when AuthEnabled is false; the
+	// mobile auth client falls back to EXPO_PUBLIC_API_URL in that case.
+	// Today this is identical to expoPublicAPIURL when auth is on, but the
+	// separate var leaves room for future "auth on a different host" use
 	// cases without re-baking the binary.
 	expoPublicAuthBaseURL := ""
-	if cfg, cfgErr := c.DB.GetMobileAppConfig(project.ID.String()); cfgErr == nil && cfg != nil && cfg.AuthEnabled {
+	if mobileCfg != nil && mobileCfg.AuthEnabled {
 		expoPublicAuthBaseURL = expoPublicAPIURL
+	}
+
+	// IAP / RevenueCat (P2.3): bake public SDK keys into the binary at
+	// build time. Lazy-provision when iap_enabled=true but RC project ID
+	// is missing — covers (a) projects created before P2.3 shipped,
+	// (b) the create-time goroutine hit a transient outage,
+	// (c) future config-toggle flow that flips iap_enabled false→true.
+	// Failures here are logged + swallowed: build proceeds with empty
+	// keys, lib/iap.ts no-ops + warns, user can re-trigger build later.
+	rcKeyIOS, rcKeyAndroid := "", ""
+	if mobileCfg != nil && mobileCfg.IAPEnabled {
+		if mobileCfg.RevenueCatProjectID == "" && c.RevenueCatService != nil {
+			if perr := c.provisionRevenueCat(ctx, project); perr != nil {
+				slog.Warn("BuildExpoMobile: lazy RC provision failed; building with empty IAP keys",
+					"error", perr, "project_id", project.ID)
+			}
+			mobileCfg, _ = c.DB.GetMobileAppConfig(project.ID.String())
+		}
+		if mobileCfg != nil {
+			rcKeyIOS = mobileCfg.RevenueCatPublicKeyIOS
+			rcKeyAndroid = mobileCfg.RevenueCatPublicKeyAndroid
+		}
 	}
 
 	ordered := make([]string, 0, 2)
@@ -448,41 +474,45 @@ func (c *Controller) BuildExpoMobile(ctx context.Context, project *models.AppPro
 		switch platform {
 		case "android":
 			_, triggerErr = c.CodemagicService.TriggerExpoAndroidBuild(ctx, codemagic.ExpoAndroidBuildParams{
-				ProjectID:           project.ID,
-				BuildID:             build.ID,
-				TaskID:              task.ID,
-				AppTitle:            build.Title,
-				AppSlug:             project.Slug,
-				BundleID:            bundleID,
-				PackageName:         bundleID,
-				BuildNumber:         nextNum,
-				MarketingVersion:    marketingVer,
-				SplashColor:         build.SplashScreenColor,
-				FirstBuild:          firstBuild,
-				IconKey:             opts.Icon,
-				EASProjectUUID:        project.ID.String(), // stable per project, set in P0.1
-				ExpoPublicAPIURL:      expoPublicAPIURL,
-				ExpoPublicProjectID:   project.ID.String(),
-				ExpoPublicAuthBaseURL: expoPublicAuthBaseURL,
+				ProjectID:                      project.ID,
+				BuildID:                        build.ID,
+				TaskID:                         task.ID,
+				AppTitle:                       build.Title,
+				AppSlug:                        project.Slug,
+				BundleID:                       bundleID,
+				PackageName:                    bundleID,
+				BuildNumber:                    nextNum,
+				MarketingVersion:               marketingVer,
+				SplashColor:                    build.SplashScreenColor,
+				FirstBuild:                     firstBuild,
+				IconKey:                        opts.Icon,
+				EASProjectUUID:                 project.ID.String(), // stable per project, set in P0.1
+				ExpoPublicAPIURL:               expoPublicAPIURL,
+				ExpoPublicProjectID:            project.ID.String(),
+				ExpoPublicAuthBaseURL:          expoPublicAuthBaseURL,
+				ExpoPublicRevenueCatKeyIOS:     rcKeyIOS,
+				ExpoPublicRevenueCatKeyAndroid: rcKeyAndroid,
 			})
 		case "ios":
 			_, triggerErr = c.CodemagicService.TriggerExpoIOSBuild(ctx, codemagic.ExpoIOSBuildParams{
-				ProjectID:           project.ID,
-				BuildID:             build.ID,
-				TaskID:              task.ID,
-				AppTitle:            build.Title,
-				AppSlug:             project.Slug,
-				BundleID:            bundleID,
-				BuildNumber:         nextNum,
-				MarketingVersion:    marketingVer,
-				SplashColor:         build.SplashScreenColor,
-				IconKey:             opts.Icon,
-				EASProjectUUID:        project.ID.String(),
+				ProjectID:                      project.ID,
+				BuildID:                        build.ID,
+				TaskID:                         task.ID,
+				AppTitle:                       build.Title,
+				AppSlug:                        project.Slug,
+				BundleID:                       bundleID,
+				BuildNumber:                    nextNum,
+				MarketingVersion:               marketingVer,
+				SplashColor:                    build.SplashScreenColor,
+				IconKey:                        opts.Icon,
+				EASProjectUUID:                 project.ID.String(),
 				// XcodeScheme intentionally left blank — codemagic.yaml derives
 				// it post-prebuild (P1.1.A T4 fix).
-				ExpoPublicAPIURL:      expoPublicAPIURL,
-				ExpoPublicProjectID:   project.ID.String(),
-				ExpoPublicAuthBaseURL: expoPublicAuthBaseURL,
+				ExpoPublicAPIURL:               expoPublicAPIURL,
+				ExpoPublicProjectID:            project.ID.String(),
+				ExpoPublicAuthBaseURL:          expoPublicAuthBaseURL,
+				ExpoPublicRevenueCatKeyIOS:     rcKeyIOS,
+				ExpoPublicRevenueCatKeyAndroid: rcKeyAndroid,
 			})
 		}
 
