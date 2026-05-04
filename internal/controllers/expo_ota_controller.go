@@ -35,6 +35,20 @@ const otaDeployPlatform = "ota"
 // 10-minute budget covers a cold install from scratch.
 const expoOTABuildTimeout = 10 * time.Minute
 
+// expoOTAExportSemaphore caps in-flight `expo export` runs to one across
+// the worker process. Each export pegs a CPU core + ~600 MB RSS, so the
+// 1 vCPU / 2 GB host can only handle one at a time — running two saturates
+// the box, which in turn starves asynq's heartbeat to Redis, expires the
+// task lease, and causes asynq's recoverer to re-dispatch a task whose
+// original handler goroutine is still running. That spawned a duplicate
+// `expo export` for the same repo on 2026-05-04, driving load avg to 20+.
+//
+// Holding this semaphore from npm-install through the publish loop means
+// the second handler invocation blocks until the first finishes, then
+// proceeds (or hits asynq's per-task Timeout while waiting and exits
+// cleanly) — never a parallel export.
+var expoOTAExportSemaphore = make(chan struct{}, 1)
+
 // CreateQueuedExpoOTADeployment writes an AppDeployment row in 'queued' state
 // for an expo-updates publish. The partial unique index gives concurrent-POST
 // safety; isUniqueViolation maps it to ErrDeployInProgress.
@@ -147,6 +161,16 @@ func (c *Controller) HandleExpoOTAPublishTask(ctx context.Context, t *asynq.Task
 
 	buildCtx, cancel := context.WithTimeout(ctx, expoOTABuildTimeout)
 	defer cancel()
+
+	// Block until we own the single export slot, or the task times out /
+	// asynq cancels us. The wait is bounded by buildCtx, which is the
+	// asynq.Timeout from EnqueueExpoOTAPublish.
+	select {
+	case expoOTAExportSemaphore <- struct{}{}:
+		defer func() { <-expoOTAExportSemaphore }()
+	case <-buildCtx.Done():
+		return c.maybeRetryOTA(ctx, p.DeploymentID, "wait_export_slot", buildCtx.Err(), true)
+	}
 
 	if err := ensureNodeModules(buildCtx, mobileDir); err != nil {
 		// npm registry blips are common — retry once before giving up.

@@ -23,8 +23,16 @@ func main() {
 
 	controller, redisOpts := bootstrap.BootstrapController()
 
+	// Concurrency caps total in-flight tasks across queues. The current host
+	// is 1 vCPU / 2 GB and `expo export --platform all` already saturates a
+	// core + ~600 MB RSS, so 8 was wildly over-budget — a fan-out of OTA
+	// publishes (or even a single one alongside a web deploy) drove load avg
+	// past 20 and starved the asynq heartbeat, causing duplicate execution
+	// via lease recovery. 4 leaves headroom for parallel web/cron tasks
+	// (which are IO-bound) while OTA publishes are further serialized to 1
+	// by expoOTAExportSemaphore in expo_ota_controller.go.
 	srv := asynq.NewServer(redisOpts, asynq.Config{
-		Concurrency: 8,
+		Concurrency: 4,
 		Queues: map[string]int{
 			"deploy-web-pro":  6,
 			"deploy-web-free": 2,
