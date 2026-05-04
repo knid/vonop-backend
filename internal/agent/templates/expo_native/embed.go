@@ -22,5 +22,5 @@ import "embed"
 //
 //go:embed all:app all:assets all:components all:lib all:plugins
 //go:embed app.json global.css metro.config.js postcss.config.mjs
-//go:embed nativewind-env.d.ts package.json tsconfig.json
+//go:embed nativewind-env.d.ts package.json tsconfig.json .npmrc
 var FS embed.FS

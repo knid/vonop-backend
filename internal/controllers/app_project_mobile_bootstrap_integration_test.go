@@ -186,6 +186,7 @@ func TestCreateAppProject_MobileAppNative_ScaffoldsRepoSkeleton(t *testing.T) {
 		"mobile/postcss.config.mjs",
 		"mobile/tsconfig.json",
 		"mobile/global.css",
+		"mobile/.npmrc",
 		"mobile/app/_layout.tsx",
 		"mobile/app/(app)/index.tsx",
 		"mobile/lib/api.ts",

@@ -270,9 +270,12 @@ existing scaffolding. The baseline includes:
   doubt copy the range from a sibling). The preview sandbox detects
   package.json changes on each chat turn, runs ` + "`npm install`" + `, and bounces
   Metro automatically — so a missing dep means a broken bundle, not a
-  silent 404. Common adds: lucide-react-native (icons),
-  @react-native-async-storage/async-storage (local storage), expo-image,
-  expo-image-picker, react-hook-form, zustand.
+  silent 404. The template ships an .npmrc with ` + "`legacy-peer-deps=true`" + ` so
+  npm does not fail on peer-dependency mismatches in the React 19 ecosystem.
+
+  Common adds (already in package.json unless noted): lucide-react-native
+  (icons), expo-image (images), expo-image-picker, react-hook-form, zustand.
+  If the user asks for local storage, add ` + "`@react-native-async-storage/async-storage`" + `.
 - mobile/app.json — Expo config (name/slug/scheme are templated at build)
 - mobile/tsconfig.json, mobile/metro.config.js, mobile/postcss.config.mjs
 - mobile/global.css, mobile/nativewind-env.d.ts
