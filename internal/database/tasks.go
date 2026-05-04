@@ -28,6 +28,25 @@ func (db *Database) GetAppBuildTasksByUser(user *models.User) ([]models.AppBuild
 	return appBuildTasks, nil
 }
 
+// GetAppBuildTasksByUserAndProject scopes the task list to a single v1
+// Project shadow row owned by the user. The Publish UI uses this so a
+// brand-new project doesn't get a Native-build row sourced from a 2-week-
+// old food-photo app the same user happened to build. The user-ownership
+// join is preserved so a forged project_id query can't read someone
+// else's tasks.
+func (db *Database) GetAppBuildTasksByUserAndProject(user *models.User, projectID string) ([]models.AppBuildTask, error) {
+	var appBuildTasks []models.AppBuildTask
+	err := db.DB.NewSelect().Model(&appBuildTasks).
+		Join("JOIN projects ON projects.id = app_build_task.project_id").
+		Where("projects.user_id = ?", user.ID.String()).
+		Where("app_build_task.project_id = ?", projectID).
+		Scan(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	return appBuildTasks, nil
+}
+
 func (db *Database) GetPendingAppBuildTasks(project *models.Project) ([]models.AppBuildTask, error) {
 	var appBuildTasks []models.AppBuildTask
 	err := db.DB.NewSelect().Model(&appBuildTasks).

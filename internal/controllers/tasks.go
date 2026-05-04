@@ -29,8 +29,22 @@ func (c *Controller) CancelBuildTask(user *models.User, taskID string) error {
 	return c.DB.CancelAppBuildTask(taskID)
 }
 
-func (c *Controller) GetAllAppBuildTasks(user *models.User) ([]responses.BuildTaskInformationResponse, error) {
-	tasks, err := c.DB.GetAppBuildTasksByUser(user)
+// GetAllAppBuildTasks returns build tasks for the authenticated user.
+// When projectID is non-empty, the result is scoped to that v1 Project
+// shadow row (still ownership-checked via the join in the DB layer); when
+// empty, returns the user's full task history (legacy behavior — kept so
+// any existing caller that doesn't yet pass a project_id keeps working,
+// but the Publish UI always passes one now).
+func (c *Controller) GetAllAppBuildTasks(user *models.User, projectID string) ([]responses.BuildTaskInformationResponse, error) {
+	var (
+		tasks []models.AppBuildTask
+		err   error
+	)
+	if projectID != "" {
+		tasks, err = c.DB.GetAppBuildTasksByUserAndProject(user, projectID)
+	} else {
+		tasks, err = c.DB.GetAppBuildTasksByUser(user)
+	}
 	if err != nil {
 		return nil, err
 	}
