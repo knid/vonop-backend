@@ -161,26 +161,44 @@ func BuildManifest(update *models.OTAUpdate, metadata *MetadataFile, assetBytes 
 // manifest JSON. Returns (body, boundary, err) — caller writes
 // "Content-Type: multipart/mixed; boundary=<boundary>" + body to the
 // response.
+//
+// Use MarshalMultipartWithBody when you also need the unwrapped manifest
+// JSON bytes (for code-signing purposes).
 func MarshalMultipart(manifest Manifest) ([]byte, string, error) {
-	var buf bytes.Buffer
-	mw := multipart.NewWriter(&buf)
-	defer mw.Close()
+	_, body, boundary, err := MarshalMultipartWithBody(manifest)
+	return body, boundary, err
+}
 
+// MarshalMultipartWithBody is MarshalMultipart but also returns the raw
+// manifest JSON bytes (the body of the "manifest" multipart part). The
+// expo-updates code-signing scheme (P0 #8a) signs over these bytes, so
+// we surface them rather than re-marshalling and risking a byte-level
+// drift between sign-time and serve-time encoding.
+//
+// Returns (manifestBody, multipartBody, boundary, err).
+func MarshalMultipartWithBody(manifest Manifest) ([]byte, []byte, string, error) {
+	var manifestBuf bytes.Buffer
+	if err := json.NewEncoder(&manifestBuf).Encode(manifest); err != nil {
+		return nil, nil, "", fmt.Errorf("ota: encode manifest: %w", err)
+	}
+	manifestBody := manifestBuf.Bytes()
+
+	var multiBuf bytes.Buffer
+	mw := multipart.NewWriter(&multiBuf)
 	header := textproto.MIMEHeader{}
 	header.Set("Content-Disposition", `form-data; name="manifest"`)
 	header.Set("Content-Type", "application/json; charset=utf-8")
-
 	part, err := mw.CreatePart(header)
 	if err != nil {
-		return nil, "", fmt.Errorf("ota: create manifest part: %w", err)
+		return nil, nil, "", fmt.Errorf("ota: create manifest part: %w", err)
 	}
-	if err := json.NewEncoder(part).Encode(manifest); err != nil {
-		return nil, "", fmt.Errorf("ota: encode manifest: %w", err)
+	if _, err := part.Write(manifestBody); err != nil {
+		return nil, nil, "", fmt.Errorf("ota: write manifest part: %w", err)
 	}
 	if err := mw.Close(); err != nil {
-		return nil, "", fmt.Errorf("ota: close multipart: %w", err)
+		return nil, nil, "", fmt.Errorf("ota: close multipart: %w", err)
 	}
-	return buf.Bytes(), mw.Boundary(), nil
+	return manifestBody, multiBuf.Bytes(), mw.Boundary(), nil
 }
 
 // assetURL builds the absolute URL the mobile client fetches each asset

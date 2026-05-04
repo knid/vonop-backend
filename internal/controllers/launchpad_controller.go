@@ -38,8 +38,9 @@ func (c *Controller) GetLaunchpad(ctx context.Context, user *models.User, appID 
 
 	resp := &responses.LaunchpadResponse{
 		App: responses.LaunchpadApp{
-			ID:   project.ID.String(),
-			Name: project.Name,
+			ID:          project.ID.String(),
+			Name:        project.Name,
+			ProjectType: string(project.ProjectType),
 		},
 	}
 

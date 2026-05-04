@@ -17,6 +17,7 @@
       "supportsTablet": true,
       "bundleIdentifier": "__BUNDLE_ID__",
       "buildNumber": "__BUILD_NUMBER__",
+      "usesAppleSignIn": true,
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }
@@ -32,14 +33,29 @@
     "plugins": [
       "expo-router",
       "expo-secure-store",
-      ["onesignal-expo-plugin", { "mode": "production" }]
+      ["onesignal-expo-plugin", { "mode": "production" }],
+      "expo-local-authentication",
+      "expo-image-picker",
+      ["expo-document-picker", { "iCloudContainerEnvironment": "Production" }],
+      ["expo-notifications", { "color": "__SPLASH_COLOR__" }],
+      "expo-camera",
+      "expo-location",
+      "expo-calendar",
+      "expo-contacts",
+      "expo-apple-authentication",
+      "./plugins/with-privacy-manifest"
     ],
     "experiments": { "typedRoutes": true },
     "runtimeVersion": { "policy": "fingerprint" },
     "updates": {
       "url": "__OTA_URL__",
       "checkAutomatically": "ON_LOAD",
-      "fallbackToCacheTimeout": 0
+      "fallbackToCacheTimeout": 0,
+      "codeSigningCertificate": "./certs/ota-cert.pem",
+      "codeSigningMetadata": {
+        "keyid": "__OTA_KEY_ID__",
+        "alg": "rsa-v1_5-sha256"
+      }
     },
     "extra": {
       "eas": { "projectId": "__EAS_PROJECT_ID_NOT_USED_BUT_REQUIRED_FOR_RUNTIME__" }

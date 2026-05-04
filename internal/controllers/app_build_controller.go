@@ -516,6 +516,15 @@ func (c *Controller) BuildExpoMobile(ctx context.Context, project *models.AppPro
 				ExpoPublicOTAURL:               expoPublicOTAURL,
 			})
 		case "ios":
+			// P0 #6 (mobile audit): render NS*UsageDescription strings from
+			// MobileAppConfig.Permissions[]. Empty when config is missing /
+			// has no permissions — toEnvVars() then emits no CM_PERM_*.
+			// Apple rejects generic copy ("This app needs camera access")
+			// since 2021; templates per-permission carry a concrete purpose.
+			iosPermissions := map[string]string{}
+			if mobileCfg != nil {
+				iosPermissions = renderPermissionUsageStrings(build.Title, "", mobileCfg.Permissions)
+			}
 			_, triggerErr = c.CodemagicService.TriggerExpoIOSBuild(ctx, codemagic.ExpoIOSBuildParams{
 				ProjectID:                      project.ID,
 				BuildID:                        build.ID,
@@ -537,6 +546,7 @@ func (c *Controller) BuildExpoMobile(ctx context.Context, project *models.AppPro
 				ExpoPublicRevenueCatKeyAndroid: rcKeyAndroid,
 				ExpoPublicOneSignalAppID:       osAppID,
 				ExpoPublicOTAURL:               expoPublicOTAURL,
+				Permissions:                    iosPermissions,
 			})
 		}
 

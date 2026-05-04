@@ -20,7 +20,7 @@ import "embed"
 // (e.g. nativewind-env.d.ts is fine, but if we add a .env.example later
 // it would be skipped without `all:`).
 //
-//go:embed all:app all:assets all:components all:lib
+//go:embed all:app all:assets all:components all:lib all:plugins
 //go:embed app.json babel.config.js global.css metro.config.js
 //go:embed nativewind-env.d.ts package.json tailwind.config.js tsconfig.json
 var FS embed.FS

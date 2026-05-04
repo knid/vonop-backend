@@ -47,10 +47,18 @@ type fetchKeystoreResponse struct {
 }
 
 // RegisterKeystore — POST /v2/codemagic/keystore.
-// Per-call secret = HMAC-SHA256(HMACMaster, project_id) hex.
+//
+// Per-call secret = HKDF-SHA256(HMACMaster,
+//
+//	salt="wemob-worker-hmac-v1", info="keystore-register:<project_id>")
+//
+// hex-encoded.
 // Signature = "sha256=" + hex(HMAC-SHA256(per-call secret, "<ts>.<body>")).
+//
+// P0 #8b: separate purpose from FetchKeystore so a leaked register key
+// can't be used to fetch (or vice versa).
 func (h *CodemagicKeystoreHandler) RegisterKeystore(w http.ResponseWriter, r *http.Request) {
-	body, projectID, ok := h.readSignedBody(w, r)
+	body, projectID, ok := h.readSignedBody(w, r, "keystore-register")
 	if !ok {
 		return
 	}
@@ -80,8 +88,14 @@ func (h *CodemagicKeystoreHandler) RegisterKeystore(w http.ResponseWriter, r *ht
 }
 
 // FetchKeystore — POST /v2/codemagic/keystore/fetch.
+//
+// Per-call secret = HKDF-SHA256(HMACMaster,
+//
+//	salt="wemob-worker-hmac-v1", info="keystore-fetch:<project_id>")
+//
+// hex-encoded.
 func (h *CodemagicKeystoreHandler) FetchKeystore(w http.ResponseWriter, r *http.Request) {
-	body, projectID, ok := h.readSignedBody(w, r)
+	body, projectID, ok := h.readSignedBody(w, r, "keystore-fetch")
 	if !ok {
 		return
 	}
@@ -111,10 +125,16 @@ func (h *CodemagicKeystoreHandler) FetchKeystore(w http.ResponseWriter, r *http.
 }
 
 // readSignedBody validates the HMAC signature and returns (body, projectID, ok).
-// Mirrors the scheme in expo_reports_view.go but uses project_id as the per-call
-// secret derivation input. Caller must compare projectID to the parsed body's
-// project_id field to ensure the signed identity matches the requested resource.
-func (h *CodemagicKeystoreHandler) readSignedBody(w http.ResponseWriter, r *http.Request) ([]byte, string, bool) {
+//
+// purpose is the HKDF info-string label for this call site:
+//   - "keystore-register" for POST /v2/codemagic/keystore
+//   - "keystore-fetch"    for POST /v2/codemagic/keystore/fetch
+//
+// Caller must compare projectID to the parsed body's project_id field to
+// ensure the signed identity matches the requested resource (defends
+// against a body that has a different project_id than the one in the
+// header used to derive the per-call key).
+func (h *CodemagicKeystoreHandler) readSignedBody(w http.ResponseWriter, r *http.Request, purpose string) ([]byte, string, bool) {
 	r.Body = http.MaxBytesReader(w, r.Body, keystoreMaxBody)
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -137,10 +157,9 @@ func (h *CodemagicKeystoreHandler) readSignedBody(w http.ResponseWriter, r *http
 		return nil, "", false
 	}
 
-	// Per-call secret = HMAC-SHA256(master, project_id) hex
-	h1 := hmac.New(sha256.New, []byte(h.HMACMaster))
-	h1.Write([]byte(pidHeader))
-	perCallSecret := hex.EncodeToString(h1.Sum(nil))
+	// Per-call key = hex(HKDF(master, salt, info="<purpose>:<project_id>"))
+	derived := utils.DeriveHMACKey([]byte(h.HMACMaster), purpose, pidHeader)
+	perCallSecret := hex.EncodeToString(derived)
 
 	// Expected sig = "sha256=" + hex(HMAC-SHA256(perCallSecret, "<ts>.<body>"))
 	h2 := hmac.New(sha256.New, []byte(perCallSecret))

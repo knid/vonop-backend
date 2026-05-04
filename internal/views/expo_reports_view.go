@@ -48,9 +48,10 @@ func NewExpoReportsHandler(store database.BuildEventStore, hmacMaster string) *E
 
 // UpdateExpoBuildStatus is the HTTP handler for /v2/reports/expo-build.
 //
-// Auth: HMAC-SHA256 over the raw body using a per-build secret derived as
+// Auth: HMAC-SHA256 over "<ts>.<body>" using a purpose-bound key derived as
 //
-//	buildSecret = HMAC-SHA256(HMACMaster, task_id) (hex)
+//	buildKey = HKDF-SHA256(HMACMaster, salt="wemob-worker-hmac-v1",
+//	                       info="build-webhook:<task_id>")
 //
 // The request must have:
 //
@@ -61,6 +62,10 @@ func NewExpoReportsHandler(store database.BuildEventStore, hmacMaster string) *E
 //
 // Idempotency: events deduped by SHA-256 of the raw body. A retry of the
 // exact same body produces no second row.
+//
+// P0 #8b (mobile audit, 2026-05-04): migrated from
+// HMAC(master, task_id) to HKDF with a "build-webhook" purpose so a leaked
+// build secret can't be used to sign keystore or OTA webhooks.
 func (h *ExpoReportsHandler) UpdateExpoBuildStatus(w http.ResponseWriter, r *http.Request) {
 	// Bound the body to prevent memory exhaustion from oversized payloads.
 	r.Body = http.MaxBytesReader(w, r.Body, 64*1024)
@@ -92,10 +97,12 @@ func (h *ExpoReportsHandler) UpdateExpoBuildStatus(w http.ResponseWriter, r *htt
 		return
 	}
 
-	// Derive per-build secret: HMAC-SHA256(master, task_id) hex
-	h1 := hmac.New(sha256.New, []byte(h.HMACMaster))
-	h1.Write([]byte(report.TaskID))
-	buildSecret := hex.EncodeToString(h1.Sum(nil))
+	// Derive per-build, per-purpose key via HKDF — a leak of this key
+	// only compromises the build webhook for this task_id (not other
+	// builds, not other webhook types). Hex-encode the 32-byte derived
+	// key so the shell-side derivation in codemagic.yaml matches.
+	derived := utils.DeriveHMACKey([]byte(h.HMACMaster), "build-webhook", report.TaskID)
+	buildSecret := hex.EncodeToString(derived)
 
 	// Compute expected signature over "<timestamp>.<body>" so the timestamp is
 	// bound to the signature and cannot be substituted independently.

@@ -19,16 +19,18 @@ import (
 
 	"github.com/knid/wemob/internal/database"
 	"github.com/knid/wemob/internal/models"
+	"github.com/knid/wemob/internal/utils"
 )
 
 const testHMACMaster = "test-master-key-do-not-use-in-prod"
 
-// signTestRequest mirrors the Codemagic signing logic: HMAC over "<ts>.<body>".
+// signTestRequest mirrors the Codemagic signing logic post-P0 #8b:
+// per-build secret = hex(HKDF(master, salt, info="build-webhook:<task_id>"));
+// signature = "sha256=" + HMAC(per-build, "<ts>.<body>").
 func signTestRequest(t *testing.T, taskID, tsHeader, body string) (sig string) {
 	t.Helper()
-	h := hmac.New(sha256.New, []byte(testHMACMaster))
-	h.Write([]byte(taskID))
-	buildSecret := hex.EncodeToString(h.Sum(nil))
+	derived := utils.DeriveHMACKey([]byte(testHMACMaster), "build-webhook", taskID)
+	buildSecret := hex.EncodeToString(derived)
 	h2 := hmac.New(sha256.New, []byte(buildSecret))
 	h2.Write([]byte(tsHeader + "." + body))
 	return "sha256=" + hex.EncodeToString(h2.Sum(nil))

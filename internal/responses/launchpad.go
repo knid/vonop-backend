@@ -41,12 +41,17 @@ type LaunchpadRecentDeployment struct {
 }
 
 type LaunchpadApp struct {
-	ID            string                 `json:"id"`            // AppProject ID (uuid string)
-	Name          string                 `json:"name"`
-	BundleID      string                 `json:"bundle_id"`     // e.g. "com.tasktracker.pro"
-	IconS3Key     string                 `json:"icon_s3_key"`   // build_defaults.icon_s3_key
-	VersionName   string                 `json:"version_name"`  // "1.0.3"
-	BuildNumber   int                    `json:"build_number"`  // monotonic
+	ID   string `json:"id"` // AppProject ID (uuid string)
+	Name string `json:"name"`
+	// ProjectType mirrors AppProject.ProjectType so the UI can branch
+	// the submit flow between the legacy WebView path (`createDeployment`
+	// → /v1/deployments) and the Phase 1.2 native Expo path
+	// (`submitExpoMobile` → /v2/apps/{id}/submit/{platform}).
+	ProjectType   string                 `json:"project_type"`
+	BundleID      string                 `json:"bundle_id"`    // e.g. "com.tasktracker.pro"
+	IconS3Key     string                 `json:"icon_s3_key"`  // build_defaults.icon_s3_key
+	VersionName   string                 `json:"version_name"` // "1.0.3"
+	BuildNumber   int                    `json:"build_number"` // monotonic
 	V1ProjectID   string                 `json:"v1_project_id,omitempty"`
 	BuildDefaults LaunchpadBuildDefaults `json:"build_defaults"`
 }

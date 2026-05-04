@@ -15,19 +15,22 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+
+	"github.com/knid/wemob/internal/utils"
 )
 
 const testOTAHMACMaster = "test-ota-master-key-do-not-use-in-prod"
 
-// signOTAPublishTestRequest mirrors the worker-side signing logic. Returns
-// (signature, body-hash-hex) — both must go on the request.
+// signOTAPublishTestRequest mirrors the worker-side signing logic post-P0
+// #8b: per-call key = hex(HKDF(master, salt, info="ota-publish:<app_id>"));
+// signature = HMAC(per-call, "<ts>.<sha256(dist)>"). Returns the (sig,
+// body-hash-hex) pair — both must go on the request.
 func signOTAPublishTestRequest(t *testing.T, appID, ts string, distBytes []byte) (string, string) {
 	t.Helper()
 	bh := sha256.Sum256(distBytes)
 	bodyHashHex := hex.EncodeToString(bh[:])
-	h1 := hmac.New(sha256.New, []byte(testOTAHMACMaster))
-	h1.Write([]byte(appID))
-	perCall := hex.EncodeToString(h1.Sum(nil))
+	derived := utils.DeriveHMACKey([]byte(testOTAHMACMaster), "ota-publish", appID)
+	perCall := hex.EncodeToString(derived)
 	h2 := hmac.New(sha256.New, []byte(perCall))
 	h2.Write([]byte(ts + "." + bodyHashHex))
 	return "sha256=" + hex.EncodeToString(h2.Sum(nil)), bodyHashHex

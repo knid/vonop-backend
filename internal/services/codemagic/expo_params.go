@@ -1,10 +1,53 @@
 package codemagic
 
 import (
+	"encoding/json"
 	"strconv"
+	"strings"
 
 	"github.com/google/uuid"
 )
+
+// ListingLocale is one row of per-locale store metadata serialized into
+// CM_LOCALES_JSON. Apple / Google Play accept different fields, so the
+// struct is the union; the codemagic.yaml step writes only the fields
+// relevant to the platform it's running for.
+//
+// Apple uses: Title, Subtitle, Description, Keywords, PromotionalText,
+// ReleaseNotes, MarketingURL, SupportURL.
+//
+// Play uses: Title, ShortDescription, Description (full description),
+// ReleaseNotes (whatsnew/<lang>.txt).
+//
+// Screenshots maps device_type → list of S3 keys; the workflow downloads
+// each from S3 into the fastlane metadata folder per locale.
+type ListingLocale struct {
+	Locale           string              `json:"locale"`
+	Title            string              `json:"title,omitempty"`
+	Subtitle         string              `json:"subtitle,omitempty"`
+	Description      string              `json:"description,omitempty"`
+	Keywords         string              `json:"keywords,omitempty"`
+	PromotionalText  string              `json:"promotional_text,omitempty"`
+	ReleaseNotes     string              `json:"release_notes,omitempty"`
+	ShortDescription string              `json:"short_description,omitempty"`
+	MarketingURL     string              `json:"marketing_url,omitempty"`
+	SupportURL       string              `json:"support_url,omitempty"`
+	Screenshots      map[string][]string `json:"screenshots,omitempty"`
+}
+
+// localesJSON returns the JSON encoding of locales for CM_LOCALES_JSON.
+// Returns "[]" (not empty string) for nil/empty input so the workflow's
+// jq parse step doesn't fail on an unset variable.
+func localesJSON(locales []ListingLocale) string {
+	if len(locales) == 0 {
+		return "[]"
+	}
+	b, err := json.Marshal(locales)
+	if err != nil {
+		return "[]"
+	}
+	return string(b)
+}
 
 // ExpoAndroidBuildParams are the parameters for the expo-android-build workflow.
 type ExpoAndroidBuildParams struct {
@@ -100,6 +143,17 @@ type ExpoIOSBuildParams struct {
 	ExpoPublicOneSignalAppID string
 	// P2.1: per-app self-hosted expo-updates manifest URL.
 	ExpoPublicOTAURL string
+	// Permissions is a map of permission key → rendered NS*UsageDescription
+	// string emitted to Codemagic as CM_PERM_<KEY> env vars. Keys (lowercase,
+	// snake_case) cover the common Expo-module-driven sensitive APIs:
+	//   camera, photo_library, microphone, location_when_in_use,
+	//   location_always, contacts, calendar, reminders, face_id, motion,
+	//   bluetooth, speech_recognition, media_library, tracking
+	// Empty / nil map means no per-permission env vars are emitted (the
+	// codemagic.yaml step then leaves the bundled app.json values intact).
+	// Keys with empty-string values are skipped during env emission so the
+	// CI step can use [ -z "$VAL" ] && continue.
+	Permissions map[string]string
 }
 
 func (p ExpoIOSBuildParams) toEnvVars() map[string]string {
@@ -107,7 +161,7 @@ func (p ExpoIOSBuildParams) toEnvVars() map[string]string {
 	if scheme == "" {
 		scheme = "WemobApp"
 	}
-	return map[string]string{
+	env := map[string]string{
 		"CM_PROJECT_ID":        p.ProjectID.String(),
 		"CM_BUILD_ID":          p.BuildID.String(),
 		"CM_TASK_ID":           p.TaskID.String(),
@@ -129,6 +183,16 @@ func (p ExpoIOSBuildParams) toEnvVars() map[string]string {
 		"EXPO_PUBLIC_ONESIGNAL_APP_ID":       p.ExpoPublicOneSignalAppID,
 		"EXPO_PUBLIC_OTA_URL":                p.ExpoPublicOTAURL,
 	}
+	// Emit per-permission usage strings as CM_PERM_<KEY>. Empty values are
+	// skipped so the codemagic step's "[ -z "$VAL" ] && continue" guard
+	// doesn't accidentally null out an existing Info.plist entry.
+	for key, val := range p.Permissions {
+		if val == "" {
+			continue
+		}
+		env["CM_PERM_"+strings.ToUpper(key)] = val
+	}
+	return env
 }
 
 // ExpoAndroidDeployParams are the parameters for the expo-android-deploy
@@ -155,6 +219,19 @@ type ExpoAndroidDeployParams struct {
 	SubmitAsDraft bool
 	// AABS3Key points the workflow at the AAB to download from S3.
 	AABS3Key string
+
+	// P1#15 — per-locale store metadata. Serialized to CM_LOCALES_JSON env
+	// var; the workflow's "Write per-locale store metadata" step parses it
+	// and writes fastlane/metadata/android/<locale>/ files. Empty slice
+	// means no per-locale metadata; the publishing block falls back to
+	// whatever is already in the Play Console.
+	Locales []ListingLocale
+	// P1#15 — locale-independent metadata applicable across all locales.
+	Copyright         string
+	PrimaryCategory   string
+	SecondaryCategory string
+	EULAType          string // "apple_default" | "custom_url" — Play ignores; iOS uses
+	EULAURL           string
 }
 
 func (p ExpoAndroidDeployParams) toEnvVars() map[string]string {
@@ -177,6 +254,13 @@ func (p ExpoAndroidDeployParams) toEnvVars() map[string]string {
 		"CM_PLAY_ROLLOUT_FRACTION":   rollout,
 		"CM_SUBMIT_AS_DRAFT":         boolStr(p.SubmitAsDraft),
 		"CM_AAB_S3_KEY":              p.AABS3Key,
+		// P1#15 — per-locale store metadata + parent-listing locale-independent fields.
+		"CM_LOCALES_JSON":      localesJSON(p.Locales),
+		"CM_COPYRIGHT":         p.Copyright,
+		"CM_PRIMARY_CATEGORY":  p.PrimaryCategory,
+		"CM_SECONDARY_CATEGORY": p.SecondaryCategory,
+		"CM_EULA_TYPE":         p.EULAType,
+		"CM_EULA_URL":          p.EULAURL,
 	}
 }
 
@@ -206,6 +290,19 @@ type ExpoIOSDeployParams struct {
 	SubmitAsDraft bool
 	// IPAS3Key points the workflow at the IPA to download from S3.
 	IPAS3Key string
+
+	// P1#15 — per-locale App Store Connect metadata. Serialized to
+	// CM_LOCALES_JSON env var; the workflow's "Write per-locale store
+	// metadata" step parses it and writes fastlane/metadata/<locale>/
+	// files. Empty slice means no per-locale metadata; the publishing
+	// block falls back to whatever is already in App Store Connect.
+	Locales []ListingLocale
+	// P1#15 — locale-independent App Store Connect metadata.
+	Copyright         string
+	PrimaryCategory   string
+	SecondaryCategory string
+	EULAType          string // "apple_default" | "custom_url"
+	EULAURL           string
 }
 
 func (p ExpoIOSDeployParams) toEnvVars() map[string]string {
@@ -223,5 +320,12 @@ func (p ExpoIOSDeployParams) toEnvVars() map[string]string {
 		"CM_PHASED_RELEASE":       boolStr(p.PhasedRelease),
 		"CM_SUBMIT_AS_DRAFT":      boolStr(p.SubmitAsDraft),
 		"CM_IPA_S3_KEY":           p.IPAS3Key,
+		// P1#15 — per-locale store metadata + locale-independent fields.
+		"CM_LOCALES_JSON":      localesJSON(p.Locales),
+		"CM_COPYRIGHT":         p.Copyright,
+		"CM_PRIMARY_CATEGORY":  p.PrimaryCategory,
+		"CM_SECONDARY_CATEGORY": p.SecondaryCategory,
+		"CM_EULA_TYPE":         p.EULAType,
+		"CM_EULA_URL":          p.EULAURL,
 	}
 }

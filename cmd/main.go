@@ -19,6 +19,7 @@ import (
 	"github.com/go-chi/httplog/v3"
 	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/bootstrap"
+	"github.com/knid/wemob/internal/controllers"
 	"github.com/knid/wemob/internal/database"
 	appMiddleware "github.com/knid/wemob/internal/middleware"
 	"github.com/knid/wemob/internal/models"
@@ -46,6 +47,8 @@ func createSchema(db *bun.DB) error {
 		(*models.Invoice)(nil),
 		(*models.Project)(nil),
 		(*models.Build)(nil),
+		// <P1#16> releases (replace stub) — promoted to a full release model
+		// covering uploaded → in_review → approved → live → rejected lifecycle.
 		(*models.Release)(nil),
 		(*models.Device)(nil),
 		(*models.Notification)(nil),
@@ -114,6 +117,8 @@ func createSchema(db *bun.DB) error {
 		(*models.ProjectGatewayKey)(nil),
 		// Persistent store listing per AppProject (replaces per-wizard form state)
 		(*models.AppStoreListing)(nil),
+		// <P1#15> app_store_listing_localizations — per-locale title/desc/keywords/screenshots
+		(*models.AppStoreListingLocalization)(nil),
 		// Known build failure patterns for human-readable error surfacing
 		(*models.BuildAnnotation)(nil),
 		// Expo build event stream (append-only, idempotent by task+message_hash)
@@ -124,6 +129,15 @@ func createSchema(db *bun.DB) error {
 		(*models.AndroidKeystore)(nil),
 		// Self-hosted expo-updates manifests for mobile_app_native projects (P2.1).
 		(*models.OTAUpdate)(nil),
+		// Per-project OTA manifest signing keys (P0 #8a — code-signed updates).
+		(*models.OTAUpdateSigningKey)(nil),
+		// <P1#14> apple_signing_assets — auto-generated iOS distribution
+		// cert + provisioning profile per project (P1 #14, mobile audit).
+		(*models.AppleSigningAssets)(nil),
+		// <P2#25> mobile_subscriptions — RC v2 webhook landing zone for
+		// native subscription state. Backend mirror of "active subscribers"
+		// for dashboard panels + paywall enforcement on backend resources.
+		(*models.MobileSubscription)(nil),
 	}
 
 	for _, model := range models {
@@ -425,6 +439,70 @@ func createSchema(db *bun.DB) error {
 		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS app_store_url text DEFAULT ''`,
 		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS play_store_url text DEFAULT ''`,
 		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS landing_page_published boolean NOT NULL DEFAULT false`,
+		// P1#15 — locale-independent fields on the parent listing
+		`ALTER TABLE app_store_listings ADD COLUMN IF NOT EXISTS copyright text NOT NULL DEFAULT ''`,
+		`ALTER TABLE app_store_listings ADD COLUMN IF NOT EXISTS primary_category text NOT NULL DEFAULT ''`,
+		`ALTER TABLE app_store_listings ADD COLUMN IF NOT EXISTS secondary_category text NOT NULL DEFAULT ''`,
+		`ALTER TABLE app_store_listings ADD COLUMN IF NOT EXISTS eula_type text NOT NULL DEFAULT 'apple_default'`,
+		`ALTER TABLE app_store_listings ADD COLUMN IF NOT EXISTS eula_url text NOT NULL DEFAULT ''`,
+		// P1#15 — unique (listing_id, locale) on app_store_listing_localizations.
+		// Bun's CreateTable doesn't emit composite uniques; we add it here so
+		// On("CONFLICT (listing_id, locale)") in UpsertLocalization works.
+		`CREATE UNIQUE INDEX IF NOT EXISTS uniq_app_store_listing_localizations_listing_locale
+		   ON app_store_listing_localizations (listing_id, locale)
+		   WHERE deleted_at IS NULL`,
+
+		// <P1#16> releases — promote the legacy stub to a real release model.
+		// Each ALTER is IF NOT EXISTS-idempotent. Existing rows keep their
+		// project_id + version_number; new code writes to app_project_id +
+		// version_code with both kept in sync at the upsert layer.
+		`ALTER TABLE releases ADD COLUMN IF NOT EXISTS app_project_id uuid`,
+		`ALTER TABLE releases ADD COLUMN IF NOT EXISTS organization_id uuid`,
+		`ALTER TABLE releases ADD COLUMN IF NOT EXISTS platform text NOT NULL DEFAULT ''`,
+		`ALTER TABLE releases ADD COLUMN IF NOT EXISTS track text NOT NULL DEFAULT ''`,
+		`ALTER TABLE releases ADD COLUMN IF NOT EXISTS version_code int NOT NULL DEFAULT 0`,
+		`ALTER TABLE releases ADD COLUMN IF NOT EXISTS marketing_version text NOT NULL DEFAULT ''`,
+		`ALTER TABLE releases ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'draft'`,
+		`ALTER TABLE releases ADD COLUMN IF NOT EXISTS status_message text NOT NULL DEFAULT ''`,
+		`ALTER TABLE releases ADD COLUMN IF NOT EXISTS codemagic_task_id uuid`,
+		`ALTER TABLE releases ADD COLUMN IF NOT EXISTS build_id uuid`,
+		`ALTER TABLE releases ADD COLUMN IF NOT EXISTS store_release_id text NOT NULL DEFAULT ''`,
+		`ALTER TABLE releases ADD COLUMN IF NOT EXISTS phased_release_state text NOT NULL DEFAULT ''`,
+		`ALTER TABLE releases ADD COLUMN IF NOT EXISTS rollout_fraction double precision NOT NULL DEFAULT 0`,
+		`ALTER TABLE releases ADD COLUMN IF NOT EXISTS rolled_back_from_release_id uuid`,
+		`ALTER TABLE releases ADD COLUMN IF NOT EXISTS submitted_at timestamptz`,
+		`ALTER TABLE releases ADD COLUMN IF NOT EXISTS approved_at timestamptz`,
+		`ALTER TABLE releases ADD COLUMN IF NOT EXISTS live_at timestamptz`,
+		`ALTER TABLE releases ADD COLUMN IF NOT EXISTS rejected_at timestamptz`,
+		`ALTER TABLE releases ADD COLUMN IF NOT EXISTS rejection_message text NOT NULL DEFAULT ''`,
+		// Legacy notnull on project_id no longer matches the new schema —
+		// app_project_id is the canonical FK going forward; keep project_id for
+		// backwards compat but stop forcing inserts to populate it.
+		`ALTER TABLE releases ALTER COLUMN project_id DROP NOT NULL`,
+		// Composite uniqueness on (app_project_id, platform, track, version_code).
+		// WHERE clause excludes soft-deleted rows so a re-submit after delete
+		// gets a fresh row instead of conflicting on tombstones.
+		`CREATE UNIQUE INDEX IF NOT EXISTS uniq_releases_project_platform_track_version
+		   ON releases (app_project_id, platform, track, version_code)
+		   WHERE deleted_at IS NULL AND app_project_id IS NOT NULL`,
+		// Lookup index: webhook arrives with only a store-side id.
+		`CREATE INDEX IF NOT EXISTS idx_releases_platform_store_id
+		   ON releases (platform, store_release_id)
+		   WHERE store_release_id <> ''`,
+
+		// <P2#22> ota channels + rollout — promote ota_updates to channel-aware
+		// rows so "preview"/"staging" publishes don't leak into the production
+		// rollout, plus per-row rollout-percentage gating for staged rollouts and
+		// is_active for one-click rollback. Each ALTER is IF NOT EXISTS so re-runs
+		// are no-ops. Defaults preserve pre-P2#22 behavior on existing rows.
+		`ALTER TABLE ota_updates ADD COLUMN IF NOT EXISTS channel text NOT NULL DEFAULT 'production'`,
+		`ALTER TABLE ota_updates ADD COLUMN IF NOT EXISTS rollout_percentage smallint NOT NULL DEFAULT 100`,
+		`ALTER TABLE ota_updates ADD COLUMN IF NOT EXISTS is_active boolean NOT NULL DEFAULT true`,
+		`ALTER TABLE ota_updates ADD COLUMN IF NOT EXISTS rolled_back_from_update_id uuid`,
+		// Manifest lookup index: covers GetLatestForChannel's most-common path.
+		`CREATE INDEX IF NOT EXISTS idx_ota_updates_channel_lookup
+		   ON ota_updates (app_project_id, runtime_version, platform, channel, created_at DESC)
+		   WHERE is_active = true`,
 	}
 
 	// Deduplicate before creating unique indexes (keep the latest row per group)
@@ -455,6 +533,14 @@ func createSchema(db *bun.DB) error {
 		`CREATE INDEX IF NOT EXISTS idx_generation_jobs_app_status ON generation_jobs (app_id, status) WHERE app_id IS NOT NULL`,
 		// P2.2 — compose-push history listing index (most-recent-first per project).
 		`CREATE INDEX IF NOT EXISTS idx_compose_push_histories_app_created ON compose_push_histories (app_project_id, created_at DESC)`,
+		// <P2#25> mobile_subscriptions — unique key for upsert + lookup index for
+		// per-project listing. WHERE deleted_at IS NULL so soft-deleted rows
+		// don't block a re-purchase landing as a fresh row.
+		`CREATE UNIQUE INDEX IF NOT EXISTS uniq_mobile_subscriptions_project_user_product
+		   ON mobile_subscriptions (app_project_id, rc_app_user_id, product_id)
+		   WHERE deleted_at IS NULL`,
+		`CREATE INDEX IF NOT EXISTS idx_mobile_subscriptions_project_status
+		   ON mobile_subscriptions (app_project_id, status) WHERE deleted_at IS NULL`,
 	}
 	alterStatements = append(alterStatements, indexStatements...)
 	// Check if migrations have already been applied by testing for a column from the latest batch.
@@ -463,10 +549,13 @@ func createSchema(db *bun.DB) error {
 	// IMPORTANT: when adding a new ALTER TABLE above, update this canary to the newest column,
 	// otherwise the new ALTER will be silently skipped on servers that already have older columns.
 	// Table renames go in renameStatements below, not here — they run unconditionally.
-	// Canary: min_version_message — the LAST column added (P3.2 force-update).
+	// Canary: ota_updates.channel — the LAST column added (<P2#22> ota
+	// channels + rollout). Bumped past <P2#25>'s pg_indexes-based canary
+	// (uniq_mobile_subscriptions_project_user_product) so the new
+	// ota_updates ALTERs run on servers that already passed the #25 check.
 	var migrationsDone bool
 	row := db.QueryRowContext(context.Background(),
-		"SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='mobile_app_configs' AND column_name='min_version_message')")
+		"SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='ota_updates' AND column_name='channel')")
 	if err := row.Scan(&migrationsDone); err != nil {
 		migrationsDone = false
 	}
@@ -1146,6 +1235,7 @@ func isSensitiveLogPath(path string) bool {
 	lower := strings.ToLower(path)
 	prefixes := []string{
 		"/webhooks/",      // Stripe, Iyzico, Coolify — all signed, all contain PII
+		"/v2/webhooks/",   // <P1#16> ASC notifications + Play RTDN
 		"/v1/auth/",       // login / signup / password reset
 		"/v1/password/",   // password reset
 		"/v1/login",       // plain login
@@ -1383,6 +1473,17 @@ func main() {
 			r.Post("/stripe", httpViews.Controller.HandleWebhook)
 			// Fly machine state webhook (signature verified inside handler)
 			r.Post("/fly", httpViews.HandleFlyWebhook)
+		})
+		// <P1#16> webhook routes — store-side notifications for Release status.
+		// Mounted under /v2/webhooks (not /webhooks) to align with the v2 API
+		// surface; signature verification happens inside each handler.
+		r.Route("/v2/webhooks", func(r chi.Router) {
+			r.Post("/asc-notifications", httpViews.HandleASCNotification)
+			r.Post("/play-rtdn", httpViews.HandlePlayRTDN)
+			// <P2#25> RevenueCat v2 webhook — bearer-token auth, see
+			// internal/views/revenuecat_webhook_view.go. Powers the
+			// Subscriptions panel in Studio + dashboard-side churn fires.
+			r.Post("/revenuecat", httpViews.HandleRevenueCatWebhook)
 		})
 		r.Route("/v1", func(r chi.Router) {
 			// OAuth begin/callback are pre-auth, so UserKey falls back to IPKey
@@ -1877,6 +1978,19 @@ func main() {
 						r.Get("/history", httpViews.GetDeployHistory)
 					})
 
+					// P1 #12 mobile audit: JS-only OTA quick publish via Codemagic.
+					r.With(rateLimiter.RateLimit(5, time.Minute, appMiddleware.UserKey)).
+						Post("/ota/quick-publish", httpViews.QuickPublishOTA)
+
+					// <P2#22> ota rollback + promote — project-owner-authenticated
+					// recovery + staged-rollout controls. Rate limit is intentionally
+					// tight (10/min) since these are operator actions, not anything
+					// triggered by automation.
+					r.With(rateLimiter.RateLimit(10, time.Minute, appMiddleware.UserKey)).
+						Post("/ota/rollback", httpViews.RollbackOTA)
+					r.With(rateLimiter.RateLimit(10, time.Minute, appMiddleware.UserKey)).
+						Post("/ota/promote", httpViews.PromoteOTA)
+
 					// GitHub export
 					r.Route("/github", func(r chi.Router) {
 						r.Get("/", httpViews.GetGitHubExport)
@@ -1907,6 +2021,12 @@ func main() {
 						r.With(rateLimiter.RateLimit(5, time.Minute, appMiddleware.UserKey)).
 							Post("/compose", httpViews.ComposePush)
 						r.Get("/history", httpViews.GetComposePushHistory)
+					})
+
+					// <P2#25> Subscriptions panel — backend mirror of RC state.
+					// Reads only; the RC v2 webhook does the writes.
+					r.Route("/subscriptions", func(r chi.Router) {
+						r.Get("/summary", httpViews.GetSubscriptionsSummary)
 					})
 
 					// Mobile submissions (P1.2 — Codemagic publishing blocks).
@@ -2077,6 +2197,16 @@ func main() {
 				r.Get("/latest-validation", httpViews.GetLatestConnectionValidation)
 			})
 
+			// <P1#13> build events list + SSE — exposes the granular Codemagic
+			// event stream captured by /v2/reports/expo-build to the frontend so
+			// publish surfaces drive their build-stage ladder off the actual
+			// stream instead of string-matching on a coarse status field.
+			r.Route("/tasks/{taskId}/events", func(r chi.Router) {
+				r.Use(appMiddleware.RequireAuth(controller))
+				r.Get("/", httpViews.GetBuildEvents)
+				r.Get("/stream", httpViews.StreamBuildEvents)
+			})
+
 			// Expo build status webhook — no user auth, HMAC-signed by Codemagic worker.
 			// Per-build secret derived as HMAC(master, task_id); the keystore endpoints
 			// at /v2/codemagic/keystore[/fetch] use the same master with HMAC(master, project_id).
@@ -2091,6 +2221,20 @@ func main() {
 			keystoreHandler := views.NewCodemagicKeystoreHandler(controller, workerHMACKey)
 			r.Post("/codemagic/keystore", keystoreHandler.RegisterKeystore)
 			r.Post("/codemagic/keystore/fetch", keystoreHandler.FetchKeystore)
+
+			// P0 #8a — OTA manifest signing: codemagic fetches the public cert
+			// to bake into the binary at build time. Cert is non-secret; the
+			// HMAC scheme just confirms the worker's identity (rate-limit /
+			// audit purposes; no secrets cross this wire).
+			otaCertHandler := views.NewCodemagicOTACertHandler(controller, workerHMACKey)
+			r.Post("/codemagic/ota-cert", otaCertHandler.FetchOTACert)
+
+			// <P1#14> apple-signing route — Codemagic worker fetches the
+			// auto-generated iOS distribution cert + profile + private key
+			// at build time. HMAC-protected; per-project AppleSigningAssets
+			// row is generated lazily on first call (or renewed if expiring).
+			appleSigningHandler := views.NewCodemagicAppleSigningHandler(controller, workerHMACKey)
+			r.Post("/codemagic/apple-signing", appleSigningHandler.FetchAppleSigning)
 
 			// P2.1: self-hosted expo-updates OTA.
 			//   POST /v2/apps/{appId}/ota/publish     — HMAC, worker-only
@@ -2182,6 +2326,17 @@ func main() {
 	}
 	go poller.Run(pollerCtx)
 
+	// <P1#16> release status poll — once a minute, scan all releases in
+	// non-terminal status and ask App Store Connect / Google Play for the
+	// latest state. Replaces "Codemagic finished uploading" as the source of
+	// truth for "live on store".
+	releasePollCtx, cancelReleasePoll := context.WithCancel(context.Background())
+	releasePoller := &controllers.ReleaseStatusPoller{
+		Controller: controller,
+		PollEvery:  60 * time.Second,
+	}
+	go releasePoller.Run(releasePollCtx)
+
 	// Phase 5c-iii: periodically email users with pending_connection
 	// deployments that they should wire up a connection (or switch to
 	// managed). Max 3 nudges, 2 days apart.
@@ -2219,6 +2374,7 @@ func main() {
 		// Stop the store-API poller.
 		cancelPoller()
 		cancelNudge()
+		cancelReleasePoll()
 
 		// Shutdown main server
 		if err := mainServer.Shutdown(ctx); err != nil {

@@ -561,6 +561,92 @@ func TestBuildExpoMobile_RejectsConcurrentBuild(t *testing.T) {
 	}
 }
 
+// TestBuildExpoMobile_iOSPermissionsEmitCMPermEnv verifies that iOS builds
+// emit CM_PERM_<KEY> env vars rendered from MobileAppConfig.Permissions[].
+// The codemagic.yaml step then writes these into Info.plist's
+// NS*UsageDescription keys — required for App Store review (P0 #6,
+// 2026-05-02 mobile audit).
+func TestBuildExpoMobile_iOSPermissionsEmitCMPermEnv(t *testing.T) {
+	f := setupExpoBuildTest(t)
+	ctx := context.Background()
+
+	// Seed a MobileAppConfig with a couple of sensitive iOS perms + an
+	// Android-only "notifications" entry that should be silently dropped.
+	if _, err := f.c.DB.UpsertMobileAppConfig(&models.MobileAppConfig{
+		ProjectID:   f.project.ID,
+		Permissions: []string{"camera", "photo_library", "notifications"},
+	}); err != nil {
+		t.Fatalf("upsert mobile config: %v", err)
+	}
+
+	build, _, err := f.c.BuildExpoMobile(ctx, f.project, f.user, ExpoBuildOptions{
+		Platforms:   []string{"ios"},
+		AppName:     "Acme",
+		Icon:        "icons/x.png",
+		SplashColor: "#000000",
+	})
+	if err != nil {
+		t.Fatalf("BuildExpoMobile: %v", err)
+	}
+	if build == nil {
+		t.Fatal("expected build, got nil")
+	}
+
+	calls := f.cmRec.snapshot()
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 codemagic call, got %d", len(calls))
+	}
+	got := calls[0].Variables
+
+	if camera := got["CM_PERM_CAMERA"]; camera == "" {
+		t.Error("CM_PERM_CAMERA should be set when Permissions[]=[camera]")
+	} else if !strings.Contains(camera, "Acme") || !strings.Contains(camera, "camera") {
+		t.Errorf("CM_PERM_CAMERA = %q, want substring 'Acme' + 'camera'", camera)
+	}
+	if photo := got["CM_PERM_PHOTO_LIBRARY"]; photo == "" {
+		t.Error("CM_PERM_PHOTO_LIBRARY should be set when Permissions[]=[photo_library]")
+	}
+	// Notifications has no NS key — must NOT be emitted.
+	if _, ok := got["CM_PERM_NOTIFICATIONS"]; ok {
+		t.Errorf("CM_PERM_NOTIFICATIONS should not be emitted, got %q", got["CM_PERM_NOTIFICATIONS"])
+	}
+	// A perm we didn't declare must not leak.
+	if _, ok := got["CM_PERM_BLUETOOTH"]; ok {
+		t.Errorf("CM_PERM_BLUETOOTH should not be emitted (not in declared list), got %q", got["CM_PERM_BLUETOOTH"])
+	}
+}
+
+// TestBuildExpoMobile_iOSNoConfigEmitsNoPermEnv verifies the safe-default
+// behavior: when MobileAppConfig is missing entirely, no CM_PERM_* env vars
+// are emitted (the legacy bundled app.json values stay intact).
+func TestBuildExpoMobile_iOSNoConfigEmitsNoPermEnv(t *testing.T) {
+	f := setupExpoBuildTest(t)
+	ctx := context.Background()
+
+	build, _, err := f.c.BuildExpoMobile(ctx, f.project, f.user, ExpoBuildOptions{
+		Platforms:   []string{"ios"},
+		AppName:     "NoCfg",
+		Icon:        "icons/x.png",
+		SplashColor: "#000000",
+	})
+	if err != nil {
+		t.Fatalf("BuildExpoMobile: %v", err)
+	}
+	if build == nil {
+		t.Fatal("expected build, got nil")
+	}
+
+	calls := f.cmRec.snapshot()
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 codemagic call, got %d", len(calls))
+	}
+	for k := range calls[0].Variables {
+		if strings.HasPrefix(k, "CM_PERM_") {
+			t.Errorf("expected no CM_PERM_* without MobileAppConfig, got %s=%q", k, calls[0].Variables[k])
+		}
+	}
+}
+
 // recordedKeys is a debug helper for the s3 PUT recorder.
 func recordedKeys(r *s3PutRecorder) []string {
 	r.mu.Lock()

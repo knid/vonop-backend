@@ -1,6 +1,8 @@
 package views
 
 import (
+	"crypto/sha256"
+	"encoding/binary"
 	"errors"
 	"io"
 	"log/slog"
@@ -14,6 +16,23 @@ import (
 	"github.com/knid/wemob/internal/services/ota"
 	"github.com/knid/wemob/internal/utils"
 )
+
+// otaDefaultChannel is the channel returned when the device sends no
+// expo-channel-name header. Picked to keep existing single-channel
+// deployments behaving exactly as before P2#22.
+const otaDefaultChannel = "production"
+
+// rolloutBucket returns a deterministic 0-99 bucket for (clientID, updateID).
+// Same input ⇒ same bucket ⇒ same gate decision on every poll, so a device
+// that just missed the rollout doesn't randomly catch it on a retry. clientID
+// is whatever the caller passes — we treat it as opaque bytes; if the device
+// sends expo-current-update-id we use that, otherwise we fall back to the
+// candidate update's UpdateID so the bucket is at least stable across retries
+// of the same update (every device gets the same bucket, but it's stable).
+func rolloutBucket(clientID, updateID string) uint32 {
+	sum := sha256.Sum256([]byte(clientID + ":" + updateID))
+	return binary.BigEndian.Uint32(sum[:4]) % 100
+}
 
 // OTAManifestHandler holds dependencies for the un-authenticated mobile-
 // client-facing endpoints:
@@ -66,18 +85,42 @@ func (h *OTAManifestHandler) GetManifest(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	if r.Header.Get("expo-expect-signature") != "" {
-		// V1 ships without manifest signing. Client may reject the
-		// unsigned response. Log so we have a metric we can graph later.
-		slog.Warn("ota: client requested signed manifest but signing is unimplemented (P2.1.B)",
-			"app_project_id", appProjectID, "platform", platform, "runtime_version", runtimeVersion)
+	// expo-expect-signature is informational — when present we also validate
+	// the algorithm is one we support (defensive; old binaries that don't
+	// send the header still get a signed manifest).
+	if got := r.Header.Get("expo-expect-signature"); got != "" {
+		if !strings.Contains(got, ota.SigningAlgorithmRSAv15SHA256) {
+			slog.Warn("ota: client expects unsupported signature algorithm",
+				"app_project_id", appProjectID, "expect", got)
+		}
 	}
 
-	update, err := h.Controller.GetLatestOTAManifest(r.Context(), appProjectID, runtimeVersion, platform)
+	// P2#22 — channel + rollout filtering.
+	//
+	// expo-channel-name: the channel the binary was built against (set in
+	// the EXPO_PUBLIC_OTA_URL → manifest fetch; defaults to "production"
+	// when absent so single-channel deployments keep working unchanged).
+	//
+	// expo-current-update-id: the update the device is currently running.
+	// Used as the deterministic key for the rollout-percentage gate so a
+	// device that doesn't qualify on one poll keeps not qualifying until
+	// the gate widens — no flapping across retries.
+	channel := strings.TrimSpace(r.Header.Get("expo-channel-name"))
+	if channel == "" {
+		channel = otaDefaultChannel
+	}
+	currentUpdateID := strings.TrimSpace(r.Header.Get("expo-current-update-id"))
+
+	update, err := h.Controller.GetLatestOTAManifestForChannel(r.Context(), appProjectID, runtimeVersion, platform, channel)
 	if err != nil {
 		switch {
 		case errors.Is(err, controllers.ErrOTANotFound):
-			utils.JSONError(w, "not_found", "no update for runtime version", http.StatusNotFound, nil)
+			// No active update for this (channel, RV, platform). Return 204
+			// so the expo-updates client treats it as "stay on the embedded
+			// bundle" rather than logging a hard error like a 404 would.
+			w.Header().Set("expo-protocol-version", "0")
+			w.Header().Set("expo-sfv-version", "0")
+			w.WriteHeader(http.StatusNoContent)
 		case errors.Is(err, controllers.ErrOTAInvalidPlatform):
 			utils.JSONError(w, "bad_request", "invalid platform", http.StatusBadRequest, nil)
 		default:
@@ -85,6 +128,37 @@ func (h *OTAManifestHandler) GetManifest(w http.ResponseWriter, r *http.Request)
 			utils.JSONError(w, "internal", "manifest lookup failed", http.StatusInternalServerError, nil)
 		}
 		return
+	}
+
+	// Rollout gate: clamp out-of-range values defensively (DB has notnull
+	// + default 100; this is belt-and-braces against a bad insert). 0 ⇒
+	// nobody, 100 ⇒ everyone, 1-99 ⇒ deterministic-hash bucketed.
+	pct := int(update.RolloutPercentage)
+	if pct < 0 {
+		pct = 0
+	}
+	if pct > 100 {
+		pct = 100
+	}
+	if pct < 100 {
+		clientID := currentUpdateID
+		if clientID == "" {
+			// No prior update id (fresh install). Fall back to the
+			// candidate's UpdateID so the bucket is at least deterministic
+			// across retries of THIS update — same device hits the same
+			// bucket on every poll until something else changes.
+			clientID = update.UpdateID.String()
+		}
+		bucket := rolloutBucket(clientID, update.UpdateID.String())
+		if int(bucket) >= pct {
+			// Outside the rollout window for this device. 204 ⇒ stay on
+			// whatever you've got. Don't 404 — the update DOES exist for
+			// some devices, just not this one.
+			w.Header().Set("expo-protocol-version", "0")
+			w.Header().Set("expo-sfv-version", "0")
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
 	}
 
 	metadata, err := ota.ParseMetadataJSON(update.MetadataJSON)
@@ -109,16 +183,41 @@ func (h *OTAManifestHandler) GetManifest(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	body, boundary, err := ota.MarshalMultipart(manifest)
+	manifestBody, body, boundary, err := ota.MarshalMultipartWithBody(manifest)
 	if err != nil {
 		slog.Error("ota: marshal multipart", "update_id", update.ID, "err", err)
 		utils.JSONError(w, "internal", "manifest construction failed", http.StatusInternalServerError, nil)
 		return
 	}
 
+	// Sign the manifest body bytes. P0 #8a — without signing, expo-updates
+	// clients built with a codeSigningCertificate would reject the response,
+	// AND clients built without one accept any unsigned manifest as a
+	// silent RCE channel. Lazily generate the per-project keypair on first
+	// publish.
+	signKey, err := h.Controller.EnsureOTAUpdateSigningKey(r.Context(), appProjectID)
+	if err != nil {
+		slog.Error("ota: ensure signing key", "app_project_id", appProjectID, "err", err)
+		utils.JSONError(w, "internal", "manifest signing failed", http.StatusInternalServerError, nil)
+		return
+	}
+	privPEM, err := h.Controller.LoadOTAUpdateSigningPrivateKeyPEM(r.Context(), signKey)
+	if err != nil {
+		slog.Error("ota: load signing key", "app_project_id", appProjectID, "err", err)
+		utils.JSONError(w, "internal", "manifest signing failed", http.StatusInternalServerError, nil)
+		return
+	}
+	sigHeader, err := ota.SignManifest(manifestBody, privPEM, signKey.KeyID)
+	if err != nil {
+		slog.Error("ota: sign manifest", "app_project_id", appProjectID, "err", err)
+		utils.JSONError(w, "internal", "manifest signing failed", http.StatusInternalServerError, nil)
+		return
+	}
+
 	w.Header().Set("Content-Type", "multipart/mixed; boundary="+boundary)
 	w.Header().Set("expo-protocol-version", "0")
 	w.Header().Set("expo-sfv-version", "0")
+	w.Header().Set("expo-signature", sigHeader)
 	w.Header().Set("cache-control", "private, max-age=0")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(body)

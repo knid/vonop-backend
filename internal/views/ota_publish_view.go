@@ -30,7 +30,9 @@ const (
 //
 // HMAC scheme:
 //
-//	per-call secret = HMAC-SHA256(HMACMaster, app_id) hex
+//	per-call secret = hex(HKDF-SHA256(HMACMaster,
+//	                      salt="wemob-worker-hmac-v1",
+//	                      info="ota-publish:<app_id>"))
 //	signature       = "sha256=" + hex(HMAC-SHA256(per-call secret, "<ts>.<sha256(dist.tar.gz bytes)>"))
 //
 // We sign over sha256(dist.tar.gz) rather than the raw multipart body
@@ -142,7 +144,32 @@ func (h *OTAPublishHandler) PublishOTA(w http.ResponseWriter, r *http.Request) {
 		expoConfigBytes, _ = io.ReadAll(expoConfigFile)
 	}
 
-	update, err := h.Controller.PublishOTAUpdate(r.Context(), appProjectID, runtimeVersion, platform, timestamp, distBytes, expoConfigBytes)
+	// P2#22 — optional channel + rollout fields. Both default to the safe
+	// pre-P2#22 behavior (production, full rollout) so legacy workers that
+	// don't send them keep working unchanged.
+	publishChannel := strings.TrimSpace(r.FormValue("channel"))
+	if publishChannel == "" {
+		publishChannel = "production"
+	}
+	rolloutPct := int16(100)
+	if rolloutStr := strings.TrimSpace(r.FormValue("rollout_percentage")); rolloutStr != "" {
+		if v, parseErr := strconv.Atoi(rolloutStr); parseErr == nil {
+			if v < 0 {
+				v = 0
+			}
+			if v > 100 {
+				v = 100
+			}
+			rolloutPct = int16(v)
+		}
+	}
+
+	update, err := h.Controller.PublishOTAUpdateWithOptions(r.Context(),
+		appProjectID, runtimeVersion, platform, timestamp, distBytes, expoConfigBytes,
+		controllers.OTAPublishOptions{
+			Channel:           publishChannel,
+			RolloutPercentage: rolloutPct,
+		})
 	if err != nil {
 		switch {
 		case errors.Is(err, controllers.ErrOTABadTarball),
@@ -157,10 +184,12 @@ func (h *OTAPublishHandler) PublishOTA(w http.ResponseWriter, r *http.Request) {
 	}
 
 	utils.JSONResponse(w, map[string]any{
-		"update_id":    update.UpdateID.String(),
-		"manifest_url": fmt.Sprintf("/v2/apps/%s/ota/manifest", appProjectID),
-		"runtime_version": update.RuntimeVersion,
-		"platform":     update.Platform,
+		"update_id":          update.UpdateID.String(),
+		"manifest_url":       fmt.Sprintf("/v2/apps/%s/ota/manifest", appProjectID),
+		"runtime_version":    update.RuntimeVersion,
+		"platform":           update.Platform,
+		"channel":            update.Channel,
+		"rollout_percentage": update.RolloutPercentage,
 	}, http.StatusOK)
 }
 
@@ -171,10 +200,12 @@ func (h *OTAPublishHandler) PublishOTA(w http.ResponseWriter, r *http.Request) {
 // client uploaded — it's a header value (X-Wemob-Body-Hash) the client
 // sends and the server cross-checks against the actually-received dist
 // file post-multipart-parsing.
+//
+// P0 #8b: per-call key is now HKDF-derived with purpose "ota-publish",
+// so a leak of this key cannot sign keystore, OTA-cert, or build webhooks.
 func verifyOTAPublishSignature(master, appID, ts, bodyHashHex, sigHeader string) bool {
-	h1 := hmac.New(sha256.New, []byte(master))
-	h1.Write([]byte(appID))
-	perCall := hex.EncodeToString(h1.Sum(nil))
+	derived := utils.DeriveHMACKey([]byte(master), "ota-publish", appID)
+	perCall := hex.EncodeToString(derived)
 
 	h2 := hmac.New(sha256.New, []byte(perCall))
 	h2.Write([]byte(ts + "." + strings.ToLower(bodyHashHex)))
