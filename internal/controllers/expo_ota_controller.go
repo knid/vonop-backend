@@ -140,13 +140,9 @@ func (c *Controller) HandleExpoOTAPublishTask(ctx context.Context, t *asynq.Task
 			fmt.Errorf("mobile_app_native project has no mobile/ subtree at %s", mobileDir))
 	}
 
-	expoConfigBytes, runtimeVersion, err := readExpoAppJSON(mobileDir, project)
+	expoConfigBytes, err := readExpoAppJSON(mobileDir)
 	if err != nil {
 		return c.failTask(p.DeploymentID, "read_app_json", err)
-	}
-	if runtimeVersion == "" {
-		return c.failTask(p.DeploymentID, "runtime_version_missing",
-			fmt.Errorf("expo.runtimeVersion missing in app.json — required for OTA"))
 	}
 
 	buildCtx, cancel := context.WithTimeout(ctx, expoOTABuildTimeout)
@@ -168,11 +164,21 @@ func (c *Controller) HandleExpoOTAPublishTask(ctx context.Context, t *asynq.Task
 		return c.maybeRetryOTA(ctx, p.DeploymentID, "tar_dist", err, true)
 	}
 
+	// Resolve runtime version per platform via expo's own CLI. Handles every
+	// policy expo supports (appVersion, sdkVersion, nativeVersion, fingerprint)
+	// without us having to mirror their resolution logic. Fingerprint policy
+	// can yield different hashes for ios vs android, so resolve separately.
 	timestamp := time.Now().UnixMilli()
+	publishedVersions := make(map[string]string, 2)
 	for _, platform := range []string{"ios", "android"} {
-		if _, err := c.PublishOTAUpdate(ctx, project.ID, runtimeVersion, platform, timestamp, distTarGz, expoConfigBytes); err != nil {
+		rv, err := resolveRuntimeVersionViaExpoCLI(buildCtx, mobileDir, platform)
+		if err != nil {
+			return c.failTask(p.DeploymentID, "resolve_runtime_version_"+platform, err)
+		}
+		if _, err := c.PublishOTAUpdate(ctx, project.ID, rv, platform, timestamp, distTarGz, expoConfigBytes); err != nil {
 			return c.maybeRetryOTA(ctx, p.DeploymentID, "publish_"+platform, err, true)
 		}
+		publishedVersions[platform] = rv
 	}
 
 	manifestURL := fmt.Sprintf("/v2/apps/%s/ota/manifest", project.ID.String())
@@ -182,75 +188,83 @@ func (c *Controller) HandleExpoOTAPublishTask(ctx context.Context, t *asynq.Task
 	slog.Info("ota_publish_succeeded",
 		"deployment_id", p.DeploymentID,
 		"app_project_id", project.ID.String(),
-		"runtime_version", runtimeVersion,
+		"runtime_version_ios", publishedVersions["ios"],
+		"runtime_version_android", publishedVersions["android"],
 		"dist_bytes", len(distTarGz))
 
 	if user, err := c.DB.GetUserById(deployment.UserID.String()); err == nil {
 		go c.EventService.SendEvent(user, constants.EVENT_OTA_PUBLISH_SUCCEEDED, map[string]any{
-			"app_id":          project.ID.String(),
-			"runtime_version": runtimeVersion,
-			"version":         deployment.Version,
+			"app_id":                  project.ID.String(),
+			"runtime_version_ios":     publishedVersions["ios"],
+			"runtime_version_android": publishedVersions["android"],
+			"version":                 deployment.Version,
 		})
 	}
 	return nil
 }
 
-// readExpoAppJSON reads mobile/app.json and returns the raw expo block as
-// JSON plus the resolved runtimeVersion string. Resolves runtimeVersion
-// policies ("appVersion", "nativeVersion", "sdkVersion") to a concrete
-// string so the manifest table key is stable.
-func readExpoAppJSON(mobileDir string, project *models.AppProject) ([]byte, string, error) {
+// readExpoAppJSON reads mobile/app.json and returns the raw expo block
+// JSON. The block is passed to PublishOTAUpdate as expoConfigJSON so the
+// manifest's `extra.expoClient` mirrors the project's actual config.
+//
+// Runtime version resolution is deferred to resolveRuntimeVersionViaExpoCLI
+// because the `fingerprint` policy requires a project-tree hash that only
+// expo's own CLI can compute correctly.
+func readExpoAppJSON(mobileDir string) ([]byte, error) {
 	raw, err := os.ReadFile(filepath.Join(mobileDir, "app.json"))
 	if err != nil {
-		return nil, "", fmt.Errorf("read app.json: %w", err)
+		return nil, fmt.Errorf("read app.json: %w", err)
 	}
 	var top map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &top); err != nil {
-		return nil, "", fmt.Errorf("parse app.json: %w", err)
+		return nil, fmt.Errorf("parse app.json: %w", err)
 	}
 	expoRaw, ok := top["expo"]
 	if !ok {
-		return nil, "", fmt.Errorf("app.json has no expo block")
+		return nil, fmt.Errorf("app.json has no expo block")
 	}
-	var expo struct {
-		Version        string          `json:"version"`
-		RuntimeVersion json.RawMessage `json:"runtimeVersion"`
-		SDKVersion     string          `json:"sdkVersion"`
-	}
-	if err := json.Unmarshal(expoRaw, &expo); err != nil {
-		return nil, "", fmt.Errorf("parse expo block: %w", err)
-	}
-	rv := resolveRuntimeVersion(expo.RuntimeVersion, expo.Version, expo.SDKVersion)
-	_ = project
-	return expoRaw, rv, nil
+	return expoRaw, nil
 }
 
-// resolveRuntimeVersion handles the three legal shapes of expo.runtimeVersion:
-// a literal string, or {"policy": "..."} where policy is appVersion |
-// nativeVersion | sdkVersion. Returns "" when unresolvable.
-func resolveRuntimeVersion(rvRaw json.RawMessage, appVersion, sdkVersion string) string {
-	if len(rvRaw) == 0 {
-		return ""
+// resolveRuntimeVersionViaExpoCLI shells out to `npx expo-updates
+// runtimeversion:resolve` to get the concrete runtime version for the
+// given platform. This handles every legal expo.runtimeVersion shape:
+// literal strings, policy-based resolution (appVersion / sdkVersion /
+// nativeVersion), and the fingerprint policy that requires hashing the
+// project tree via @expo/fingerprint.
+//
+// Requires node_modules to be installed (the binary lives under
+// mobile/node_modules/expo-updates/bin).
+func resolveRuntimeVersionViaExpoCLI(ctx context.Context, mobileDir, platform string) (string, error) {
+	cmd := exec.CommandContext(ctx, "npx", "--yes", "expo-updates", "runtimeversion:resolve", "--platform", platform)
+	cmd.Dir = mobileDir
+	cmd.Env = append(os.Environ(), "CI=1")
+	out, err := cmd.Output()
+	if err != nil {
+		stderr := ""
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			stderr = string(exitErr.Stderr)
+		}
+		return "", fmt.Errorf("expo-updates runtimeversion:resolve %s: %w (stderr: %s)", platform, err, truncateOutput([]byte(stderr)))
 	}
-	var s string
-	if err := json.Unmarshal(rvRaw, &s); err == nil && s != "" {
-		return s
+	// CLI output forms across versions:
+	//   - bare string: "1.0.0\n"
+	//   - JSON line:   `{"runtimeVersion":"abc123"}`
+	// Try JSON first; fall back to last non-empty line trim.
+	trimmed := bytes.TrimSpace(out)
+	var asJSON struct {
+		RuntimeVersion string `json:"runtimeVersion"`
 	}
-	var policy struct {
-		Policy string `json:"policy"`
+	if err := json.Unmarshal(trimmed, &asJSON); err == nil && asJSON.RuntimeVersion != "" {
+		return asJSON.RuntimeVersion, nil
 	}
-	if err := json.Unmarshal(rvRaw, &policy); err != nil {
-		return ""
+	for _, line := range bytes.Split(trimmed, []byte("\n")) {
+		s := strings.TrimSpace(string(line))
+		if s != "" {
+			return s, nil
+		}
 	}
-	switch policy.Policy {
-	case "appVersion":
-		return appVersion
-	case "sdkVersion":
-		return sdkVersion
-	case "nativeVersion":
-		return appVersion
-	}
-	return ""
+	return "", fmt.Errorf("expo-updates runtimeversion:resolve %s returned empty output", platform)
 }
 
 // ensureNodeModules runs `npm install` in mobileDir if node_modules is
