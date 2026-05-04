@@ -627,7 +627,15 @@ func (c *Controller) GetAppDeployments(projectID string) ([]models.AppDeployment
 }
 
 func (c *Controller) GetLatestDeploymentStatus(projectID string) (*models.AppDeployment, error) {
-	return c.DB.GetLatestAppDeployment(projectID, "web")
+	// For mobile_app_native projects, the user-facing deploy is an
+	// expo-updates publish (platform="ota"). All other types deploy a
+	// web bundle to Fly (platform="web").
+	platform := "web"
+	if project, err := c.DB.GetAppProjectByID(projectID); err == nil && project != nil &&
+		project.ProjectType == models.ProjectTypeMobileAppNative {
+		platform = otaDeployPlatform
+	}
+	return c.DB.GetLatestAppDeployment(projectID, platform)
 }
 
 type AppValidationError struct {

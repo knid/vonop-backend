@@ -22,7 +22,7 @@ FROM alpine:3.20
 
 WORKDIR /app
 
-RUN apk add --no-cache ca-certificates tzdata curl git
+RUN apk add --no-cache ca-certificates tzdata curl git nodejs npm
 
 RUN addgroup -S appuser \
     && adduser -S -G appuser -h /home/appuser -s /sbin/nologin appuser \

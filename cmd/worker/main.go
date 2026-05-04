@@ -51,29 +51,44 @@ func main() {
 				"payload_bytes", len(t.Payload()),
 				"retried", retried, "max_retry", max, "final", isFinal,
 				"error", err)
-			// Backstop: if this is the final failure for a deploy:web task and
-			// the in-handler maybeRetry path didn't already write 'failed'
-			// (e.g. the handler panicked, the worker was killed mid-task and
-			// asynq reaped it without re-entering the handler, or some other
-			// path that bypasses our explicit failure marking), flip the row
-			// here so the UI doesn't show 'building' forever.
-			if !isFinal || t.Type() != tasks.TypeDeployWeb {
+			// Backstop: if this is the final failure for a deploy task and
+			// the in-handler path didn't already write 'failed' (e.g. the
+			// handler panicked, the worker was killed mid-task and asynq
+			// reaped it without re-entering the handler, or some other path
+			// that bypasses our explicit failure marking), flip the row here
+			// so the UI doesn't show 'building' forever. Both deploy:web and
+			// expo:ota_publish use the same payload shape (DeploymentID).
+			if !isFinal {
 				return
 			}
-			var p tasks.WebDeployPayload
-			if uErr := json.Unmarshal(t.Payload(), &p); uErr != nil || p.DeploymentID == "" {
-				slog.Error("error_handler_unmarshal_failed", "type", t.Type(), "err", uErr)
-				return
-			}
-			if mErr := controller.MarkDeploymentFailedIfNotTerminal(p.DeploymentID,
-				"asynq retry budget exhausted: "+err.Error()); mErr != nil {
-				slog.Error("error_handler_mark_failed", "deployment_id", p.DeploymentID, "err", mErr)
+			switch t.Type() {
+			case tasks.TypeDeployWeb:
+				var p tasks.WebDeployPayload
+				if uErr := json.Unmarshal(t.Payload(), &p); uErr != nil || p.DeploymentID == "" {
+					slog.Error("error_handler_unmarshal_failed", "type", t.Type(), "err", uErr)
+					return
+				}
+				if mErr := controller.MarkDeploymentFailedIfNotTerminal(p.DeploymentID,
+					"asynq retry budget exhausted: "+err.Error()); mErr != nil {
+					slog.Error("error_handler_mark_failed", "deployment_id", p.DeploymentID, "err", mErr)
+				}
+			case tasks.TypeExpoOTAPublish:
+				var p tasks.ExpoOTAPublishPayload
+				if uErr := json.Unmarshal(t.Payload(), &p); uErr != nil || p.DeploymentID == "" {
+					slog.Error("error_handler_unmarshal_failed", "type", t.Type(), "err", uErr)
+					return
+				}
+				if mErr := controller.MarkDeploymentFailedIfNotTerminal(p.DeploymentID,
+					"asynq retry budget exhausted: "+err.Error()); mErr != nil {
+					slog.Error("error_handler_mark_failed", "deployment_id", p.DeploymentID, "err", mErr)
+				}
 			}
 		}),
 	})
 
 	mux := asynq.NewServeMux()
 	mux.HandleFunc(tasks.TypeDeployWeb, controller.HandleWebDeployTask)
+	mux.HandleFunc(tasks.TypeExpoOTAPublish, controller.HandleExpoOTAPublishTask)
 	mux.HandleFunc(tasks.TypeDeleteFlyApp, controller.HandleDeleteFlyAppTask)
 	mux.HandleFunc("cron:dns-check", func(ctx context.Context, _ *asynq.Task) error {
 		return controller.CheckPendingDomainsTask(ctx)

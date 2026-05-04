@@ -57,6 +57,8 @@ const (
 	EVENT_MOBILE_DEPLOYMENT_SUCCEEDED = "app_deployed_mobile"
 	EVENT_MOBILE_DEPLOYMENT_FAILED    = "app_deploy_mobile_failed"
 	EVENT_MOBILE_UNDEPLOYED           = "app_undeployed_mobile"
+	EVENT_OTA_PUBLISH_SUCCEEDED       = "app_ota_published"
+	EVENT_OTA_PUBLISH_FAILED          = "app_ota_publish_failed"
 
 	// Domain events
 	EVENT_DOMAIN_ADDED    = "domain_added"

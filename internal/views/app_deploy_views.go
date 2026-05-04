@@ -220,17 +220,24 @@ func (v *HttpViews) DeployAppMobile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Native Expo apps publish via the self-hosted expo-updates pipeline.
+	// Same endpoint, different worker — installed clients pick up the new
+	// JS bundle on next launch (no app store review).
+	if project.ProjectType == models.ProjectTypeMobileAppNative {
+		v.deployExpoOTA(w, r, project, user)
+		return
+	}
+
 	if existing, err := v.Controller.DB.GetBuildingAppDeployment(project.ID.String()); err == nil && existing != nil && existing.ID.String() != "" {
 		utils.JSONErrorCode(w, constants.ErrDeployInProgress, http.StatusConflict, nil)
 		return
 	}
 
-	// Mobile builds wrap a deployed web URL — require the web app to already
-	// be deployed. The user-facing flow on the frontend pushes them through
-	// the web deploy first, so this is mainly a safety check.
+	// Legacy WebView mobile wraps a deployed web URL — require the web app
+	// to already be deployed.
 	deployment, err := v.Controller.DB.GetLatestAppDeployment(project.ID.String(), "web")
 	if err != nil || deployment == nil || deployment.Status != "deployed" || deployment.DeployedURL == "" {
-		utils.JSONError(w, constants.ErrDeployInProgress,
+		utils.JSONError(w, constants.ErrDeployWebRequired,
 			"deploy this app to the web first; mobile builds wrap the web URL",
 			http.StatusConflict, nil)
 		return
@@ -259,6 +266,42 @@ func (v *HttpViews) DeployAppMobile(w http.ResponseWriter, r *http.Request) {
 		CreatedAt:    deployment.CreatedAt,
 		UpdatedAt:    deployment.UpdatedAt,
 	}, http.StatusCreated)
+}
+
+// deployExpoOTA enqueues a self-hosted expo-updates publish for a
+// mobile_app_native project. Returns the queued AppDeployment so the
+// frontend's existing deploy-status polling Just Works.
+func (v *HttpViews) deployExpoOTA(w http.ResponseWriter, r *http.Request, project *models.AppProject, user *models.User) {
+	deployment, err := v.Controller.CreateQueuedExpoOTADeployment(project, user)
+	if err != nil {
+		if errors.Is(err, controllers.ErrDeployInProgress) {
+			utils.JSONErrorCode(w, constants.ErrDeployInProgress, http.StatusConflict, nil)
+			return
+		}
+		utils.JSONInternalError(w, err)
+		return
+	}
+	if _, err := v.Controller.EnqueueExpoOTAPublish(deployment.ID); err != nil {
+		v.Controller.MarkDeploymentFailed(deployment.ID.String(), "enqueue: "+err.Error())
+		utils.JSONInternalError(w, err)
+		return
+	}
+
+	v.Controller.TrackUserEvent(user, "app_deployed_expo_ota", posthog.NewProperties().
+		Set("app_id", project.ID.String()).
+		Set("deploy_version", deployment.Version))
+
+	utils.JSONResponse(w, responses.AppDeploymentResponse{
+		ID:           deployment.ID,
+		AppProjectID: deployment.AppProjectID,
+		Platform:     deployment.Platform,
+		Provider:     deployment.Provider,
+		Status:       deployment.Status,
+		DeployedURL:  deployment.DeployedURL,
+		Version:      deployment.Version,
+		CreatedAt:    deployment.CreatedAt,
+		UpdatedAt:    deployment.UpdatedAt,
+	}, http.StatusAccepted)
 }
 
 // DELETE /v2/apps/{appId}/deploy/mobile
