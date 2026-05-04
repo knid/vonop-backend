@@ -23,6 +23,7 @@ type Service struct {
 	OrgSlug       string
 	Region        string
 	Registry      string
+	APIBase       string // overridable for tests; defaults to machinesAPIBase
 	WebhookSecret string
 	httpClient    *http.Client
 }
@@ -33,6 +34,7 @@ func NewService(apiToken, orgSlug, region, webhookSecret string) *Service {
 		OrgSlug:       orgSlug,
 		Region:        region,
 		Registry:      "registry.fly.io",
+		APIBase:       machinesAPIBase,
 		WebhookSecret: webhookSecret,
 		httpClient:    &http.Client{Timeout: 60 * time.Second},
 	}
@@ -51,7 +53,7 @@ func (s *Service) doRequest(method, path string, body any, out any) error {
 		reqBody = bytes.NewReader(b)
 	}
 
-	req, err := http.NewRequest(method, machinesAPIBase+path, reqBody)
+	req, err := http.NewRequest(method, s.APIBase+path, reqBody)
 	if err != nil {
 		return fmt.Errorf("fly: create request: %w", err)
 	}
