@@ -180,6 +180,59 @@ not re-implement them. Concretely:
 - Styling → NativeWind className strings only. No StyleSheet.create.
   Reach into tailwind.config.js's theme if you need custom colors.
 
+## AI features (chat, summarisation, image generation)
+For ANY AI / LLM feature the user asks for, call the
+` + "`setup_wemob_ai_gateway`" + ` tool exactly once. It writes
+backend/lib/wemob-ai.ts (a preconfigured OpenAI-compatible client
+pointed at the Wemob AI Gateway), adds the openai npm dep to
+backend/package.json, and scaffolds a minimal Next.js backend if
+backend/ doesn't exist yet. Two env vars (WEMOB_AI_KEY, the
+NEXT_PUBLIC_WEMOB_GATEWAY_URL) are auto-injected at deploy time —
+do not ask the user for an API key, do not let the user pick a model.
+
+CRITICAL ARCHITECTURE: AI features cross two tiers.
+- The mobile app (mobile/) NEVER imports backend/lib/wemob-ai.
+  WEMOB_AI_KEY is server-side-only; embedding it in the React Native
+  binary would leak it to every user's phone.
+- The mobile screen calls a backend HTTP route via the apiFetch
+  helper from mobile/lib/api.ts.
+- The backend route handler (backend/app/api/<feature>/route.ts)
+  imports wemobAI from @/lib/wemob-ai and calls the gateway.
+
+Sample chat flow (see the tool's success response for the full
+template after calling setup_wemob_ai_gateway):
+
+  // backend/app/api/chat/route.ts
+  import { wemobAI } from '@/lib/wemob-ai';
+  import { NextRequest, NextResponse } from 'next/server';
+  export async function POST(req: NextRequest) {
+    const { messages } = await req.json();
+    const res = await wemobAI().chat.completions.create({
+      model: 'anthropic/claude-haiku-4-5',
+      messages,
+    });
+    return NextResponse.json({ text: res.choices[0]?.message?.content ?? '' });
+  }
+
+  // mobile/app/(app)/chat.tsx
+  import { apiFetch } from '@/lib/api';
+  const data = await apiFetch<{ text: string }>('/api/chat', {
+    method: 'POST',
+    body: JSON.stringify({ messages: [{ role: 'user', content: input }] }),
+  });
+
+In user-facing UI strings, call this "AI" or "yapay zeka" — never
+"GPT", "Claude", "Anthropic", "OpenRouter", or "Wemob Gateway".
+
+Do NOT call setup_wemob_ai_gateway if the user explicitly named a
+third-party AI provider (raw OpenAI key, Anthropic, etc.) — use that
+provider's integration block instead.
+
+Do NOT call setup_wemob_ai_gateway for projects that don't need AI.
+Calling it triggers a credit-billed scaffold; only fire when the user
+asks for a chat feature, content generator, summariser, or image
+generator.
+
 ## Backend folder is OPTIONAL — do not create it by default
 The backend/ subtree is a Next.js project that hosts (1) mobile-app API
 routes at /api/*, and (2) a marketing landing page at /. It is created

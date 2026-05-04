@@ -5,8 +5,93 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/templates"
 )
+
+// mobileNativeSetupAIResultTemplate is the success payload returned for
+// mobile_app_native projects. The AI gateway helper lives in backend/
+// (the per-customer Next.js backend) — never in the mobile/ subtree —
+// because WEMOB_AI_KEY is server-side-only and React Native binaries
+// must never embed it. The mobile app calls a backend route via
+// apiFetch; the backend route calls wemobAI(); the gateway proxies to
+// OpenRouter / fal.ai.
+const mobileNativeSetupAIResultTemplate = `Wemob AI Gateway is ready for this project.
+
+What is now true:
+- backend/lib/wemob-ai.ts has been written. It exports a preconfigured
+  OpenAI client plus a small image helper:
+    import { wemobAI, generateImage } from '@/lib/wemob-ai';
+- The ` + "`openai`" + ` npm package has been added to backend/package.json
+  (a minimal Next.js backend was also scaffolded under backend/ if it
+  didn't already exist). Do NOT add openai or next/react/react-dom again.
+- Two env vars are auto-injected into the deployed Fly app at deploy
+  time — do NOT add them yourself, do NOT ask the user to paste an API
+  key, do NOT create a settings screen for choosing a model:
+    WEMOB_AI_KEY                  (server-side only, never expose)
+    NEXT_PUBLIC_WEMOB_GATEWAY_URL (OpenAI-compatible base URL)
+- Available chat models on the user's current plan (pass as the model
+  field on wemobAI().chat.completions.create — models not listed here
+  will be rejected by the gateway with HTTP 403):
+%s
+- Available image models (passed to generateImage):
+    fal-ai/flux/schnell         — fast (default)
+    fal-ai/flux-pro/v1.1        — HD
+    fal-ai/flux-pro/v1.1-ultra  — premium
+
+How to wire AI into a mobile_app_native app:
+
+  CRITICAL ARCHITECTURE: AI features cross two tiers. The mobile app
+  (mobile/) NEVER imports backend/lib/wemob-ai. Instead it calls a
+  backend HTTP route via apiFetch. The backend route calls wemobAI().
+
+1. Backend route (backend/app/api/<feature>/route.ts):
+    import { wemobAI } from '@/lib/wemob-ai';
+    import { NextRequest, NextResponse } from 'next/server';
+    export async function POST(req: NextRequest) {
+      const { messages } = await req.json();
+      const res = await wemobAI().chat.completions.create({
+        model: '%s',
+        messages,
+      });
+      return NextResponse.json({ text: res.choices[0]?.message?.content ?? '' });
+    }
+
+2. Mobile screen (mobile/app/<route>.tsx):
+    import { apiFetch } from '@/lib/api';
+    const data = await apiFetch<{ text: string }>('/api/<feature>', {
+      method: 'POST',
+      body: JSON.stringify({ messages: [{ role: 'user', content: '...' }] }),
+    });
+
+- Streaming chat — return the OpenAI stream directly from the route via
+  Response constructor with a TransformStream. Mobile-side, consume the
+  stream chunk-by-chunk via fetch + ReadableStream.getReader(). Don't
+  use the OpenAI SDK on the mobile side — it's a server-only library.
+- Tool calling / structured output — pass ` + "`tools`" + `, ` + "`tool_choice`" + `, or
+  ` + "`response_format`" + ` directly to chat.completions.create on the backend.
+- Vision (image input) — accept image URLs in the request body and
+  pass them through as image_url content parts in the message array.
+- Image generation:
+    const urls = await generateImage({ prompt: '...' });
+    // return urls[0] from the route; mobile renders with <Image source={{ uri: urls[0] }} />
+
+Rules:
+1. backend/lib/wemob-ai.ts MUST only be imported from backend/app/api/**/route.ts,
+   Server Components, or Server Actions. NEVER export it through any
+   route that returns it to the client. NEVER import it from anything
+   under mobile/. WEMOB_AI_KEY must never reach the React Native binary.
+2. In every user-facing message + UI string, call this "AI" or
+   "yapay zeka" — never "Wemob Gateway", "OpenRouter", "Claude", "GPT",
+   "Anthropic", or any underlying model name.
+
+Next steps for this run:
+1. Build the AI feature the user asked for (chat UI, summarizer, image
+   generator, etc.).
+2. Always create the backend route handler first, then wire the mobile
+   screen to call it via apiFetch.
+3. Show a loading state while the request is in flight + a friendly
+   error toast (use react-native-reusables primitives) if it fails.`
 
 // setupAIResultTemplate is the success payload the tool returns. The chat
 // model list and the default model ID are injected at call time so the LLM
@@ -153,13 +238,37 @@ func (s SetupAIGatewayTool) Execute(ctx context.Context, rc *RunContext, input j
 		return "Wemob AI Gateway template is not available in this build — cannot wire up AI right now; please retry or contact support if this persists", true, nil
 	}
 
+	// Branch on project type: mobile_app_native projects host the AI
+	// helper in their backend/ subtree (the per-customer Next.js backend
+	// that will deploy to Fly), not at the project root. The mobile
+	// binary itself NEVER imports the helper — WEMOB_AI_KEY is
+	// server-side-only and must never reach a React Native build.
+	isMobileNative := rc.Project != nil && rc.Project.ProjectType == models.ProjectTypeMobileAppNative
+	libAIPath := "lib/wemob-ai.ts"
+	pkgJSONPath := "package.json"
+	resultTemplate := setupAIResultTemplate
+	if isMobileNative {
+		libAIPath = "backend/lib/wemob-ai.ts"
+		pkgJSONPath = "backend/package.json"
+		resultTemplate = mobileNativeSetupAIResultTemplate
+
+		// Scaffold a minimal Next.js backend if the agent hasn't created
+		// one yet. Without backend/package.json, addDependenciesToPackageJSONAt
+		// would no-op and the project would be undeployable. The deploy
+		// worker auto-writes backend/Dockerfile if missing (per P1.1.D),
+		// so we only need the bare-minimum Next.js source structure here.
+		if _, ok := rc.FileMap.Get(pkgJSONPath); !ok {
+			scaffoldMinimalBackendForAI(rc, libAIPath)
+		}
+	}
+
 	// Inject lib/wemob-ai.ts so the model can
 	// `import { wemobAI } from '@/lib/wemob-ai'` immediately within the
 	// same run.
-	rc.FileMap.Set("lib/wemob-ai.ts", libAI)
+	rc.FileMap.Set(libAIPath, libAI)
 	rc.Emitter.Emit(EventFileWritten, FileWrittenEvent{
 		RunID:     rc.RunID,
-		Path:      "lib/wemob-ai.ts",
+		Path:      libAIPath,
 		Operation: "create",
 		Bytes:     len(libAI),
 		Content:   libAI,
@@ -168,7 +277,7 @@ func (s SetupAIGatewayTool) Execute(ctx context.Context, rc *RunContext, input j
 	// lib/wemob-ai.ts imports the `openai` npm package. The LLM never
 	// wrote that import so it won't add the dep itself — inject it here
 	// exactly like provision_database does for neon/drizzle.
-	addDependenciesToPackageJSON(rc, map[string]string{
+	addDependenciesToPackageJSONAt(rc, pkgJSONPath, map[string]string{
 		"openai": "^4.104.0",
 	})
 
@@ -182,7 +291,89 @@ func (s SetupAIGatewayTool) Execute(ctx context.Context, rc *RunContext, input j
 
 	modelList := renderGatewayChatModelsBlock(allowedChat)
 	defaultModel := defaultGatewayChatModel(allowedChat)
-	result := fmt.Sprintf(setupAIResultTemplate, modelList, defaultModel, defaultModel)
+	result := fmt.Sprintf(resultTemplate, modelList, defaultModel, defaultModel)
 
 	return result, false, nil
+}
+
+// scaffoldMinimalBackendForAI writes a minimum-viable Next.js App Router
+// backend under backend/ so addDependenciesToPackageJSONAt can edit
+// backend/package.json and the eventual Fly deploy can `next build`. The
+// agent layers actual route handlers (backend/app/api/<feature>/route.ts)
+// on top from there.
+//
+// Files written:
+//   - backend/package.json — minimal deps (next, react, react-dom).
+//     The openai dep is added by the caller via addDependenciesToPackageJSONAt
+//     immediately after this returns.
+//   - backend/tsconfig.json — Next.js App Router config with the @/* alias
+//     so `import { wemobAI } from '@/lib/wemob-ai'` resolves.
+//   - backend/next.config.mjs — standalone output for Fly deploy.
+//
+// Dockerfile is intentionally NOT written here — the deploy worker
+// auto-writes a default standalone Next.js Dockerfile if missing (P1.1.D).
+func scaffoldMinimalBackendForAI(rc *RunContext, libAIPath string) {
+	files := map[string]string{
+		"backend/package.json": `{
+  "name": "backend",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start"
+  },
+  "dependencies": {
+    "next": "^15.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "@types/node": "^20.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0"
+  }
+}
+`,
+		"backend/tsconfig.json": `{
+  "compilerOptions": {
+    "lib": ["dom", "dom.iterable", "esnext"],
+    "allowJs": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "jsx": "react-jsx",
+    "incremental": true,
+    "plugins": [{ "name": "next" }],
+    "paths": { "@/*": ["./*"] }
+  },
+  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
+  "exclude": ["node_modules"]
+}
+`,
+		"backend/next.config.mjs": `/** @type {import('next').NextConfig} */
+const nextConfig = {
+  output: "standalone",
+  typescript: { ignoreBuildErrors: true },
+};
+
+export default nextConfig;
+`,
+	}
+	for path, content := range files {
+		rc.FileMap.Set(path, content)
+		rc.Emitter.Emit(EventFileWritten, FileWrittenEvent{
+			RunID:     rc.RunID,
+			Path:      path,
+			Operation: "create",
+			Bytes:     len(content),
+			Content:   content,
+		})
+	}
 }
