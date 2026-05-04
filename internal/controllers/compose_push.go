@@ -83,6 +83,17 @@ func (c *Controller) SendComposePush(ctx context.Context, project *models.AppPro
 		audienceIDs = req.AudienceExternalUserIDs
 	}
 
+	// <P2#25> rich notification + scheduling + deep-link forwarding.
+	// All fields are optional — empty strings stay empty and OneSignal
+	// silently drops the keys.
+	params.SendAfter = req.SendAfter
+	params.BigPicture = req.BigPicture
+	if req.IOSAttachmentURL != "" {
+		params.IOSAttachments = map[string]string{"id": req.IOSAttachmentURL}
+	}
+	params.WebURL = req.WebURL
+	params.AppURL = req.AppURL
+
 	osResult, err := external.SendNotificationViaSDK(ctx, v1.OneSignalAppID, v1.OneSignalAppToken, params)
 	if err != nil {
 		return nil, fmt.Errorf("compose-push: send: %w", err)

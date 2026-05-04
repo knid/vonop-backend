@@ -119,6 +119,7 @@ func setupOTATest(t *testing.T) *otaTestFixture {
 		(*models.Organization)(nil),
 		(*models.AppProject)(nil),
 		(*models.OTAUpdate)(nil),
+		(*models.OTAUpdateSigningKey)(nil),
 	)
 	c, _ := NewTestController(t, db, TestControllerOptions{})
 
@@ -378,5 +379,246 @@ func TestOTA_FetchManifestAssets_RoundTripBytes(t *testing.T) {
 	}
 	if !bytes.Equal(bytesMap["assets/ios-icon"], iconBody) {
 		t.Errorf("icon round-trip mismatch")
+	}
+}
+
+// <P2#22> ota channels + rollout — channel + rollback integration tests.
+
+// TestOTA_ChannelSegregation_StagingDoesNotServeProduction — a "staging"
+// publish must be invisible to production-channel manifest queries.
+// Production stays sealed off.
+func TestOTA_ChannelSegregation_StagingDoesNotServeProduction(t *testing.T) {
+	fix := setupOTATest(t)
+	ctx := context.Background()
+
+	tarball := buildFixtureTarball(t, "android", "bundles/staging.js", "var s=1;", "assets/icon", []byte{0x89})
+
+	// Publish to staging.
+	stagingUpdate, err := fix.c.PublishOTAUpdateWithOptions(ctx, fix.project.ID, "fingerprint:rv", "android", 1700000000, tarball, []byte(`{}`),
+		OTAPublishOptions{Channel: "staging", RolloutPercentage: 100})
+	if err != nil {
+		t.Fatalf("publish to staging: %v", err)
+	}
+	if stagingUpdate.Channel != "staging" {
+		t.Errorf("expected channel=staging, got %q", stagingUpdate.Channel)
+	}
+
+	// Production channel sees nothing.
+	_, err = fix.c.GetLatestOTAManifestForChannel(ctx, fix.project.ID, "fingerprint:rv", "android", "production")
+	if !errors.Is(err, ErrOTANotFound) {
+		t.Errorf("production should see no update, got %v", err)
+	}
+
+	// Staging channel sees the staging publish.
+	got, err := fix.c.GetLatestOTAManifestForChannel(ctx, fix.project.ID, "fingerprint:rv", "android", "staging")
+	if err != nil {
+		t.Fatalf("staging lookup: %v", err)
+	}
+	if got.UpdateID != stagingUpdate.UpdateID {
+		t.Errorf("staging UpdateID mismatch")
+	}
+	if got.Channel != "staging" {
+		t.Errorf("expected channel=staging, got %q", got.Channel)
+	}
+}
+
+// TestOTA_ChannelDefault_ProductionWhenAbsent — publishing without an
+// explicit channel ⇒ "production"; a production-channel manifest query
+// finds it.
+func TestOTA_ChannelDefault_ProductionWhenAbsent(t *testing.T) {
+	fix := setupOTATest(t)
+	ctx := context.Background()
+
+	tarball := buildFixtureTarball(t, "android", "bundles/p.js", "var p=1;", "assets/icon", []byte{0x89})
+
+	// Publish without channel — legacy callers do this.
+	pub, err := fix.c.PublishOTAUpdate(ctx, fix.project.ID, "fingerprint:rv", "android", 1700000000, tarball, []byte(`{}`))
+	if err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+	if pub.Channel != "production" {
+		t.Errorf("default channel should be production, got %q", pub.Channel)
+	}
+	if pub.RolloutPercentage != 100 {
+		t.Errorf("default rollout should be 100, got %d", pub.RolloutPercentage)
+	}
+	if !pub.IsActive {
+		t.Errorf("new publish should be is_active=true")
+	}
+
+	// Production channel finds it.
+	got, err := fix.c.GetLatestOTAManifestForChannel(ctx, fix.project.ID, "fingerprint:rv", "android", "production")
+	if err != nil {
+		t.Fatalf("production lookup: %v", err)
+	}
+	if got.UpdateID != pub.UpdateID {
+		t.Errorf("UpdateID mismatch")
+	}
+}
+
+// TestOTA_Rollback_FlipsIsActiveOnNewer — publish v1, v2, v3 to production
+// (all active). Roll back to v1: v2 + v3 become inactive, v1 stays active,
+// production manifest queries return v1.
+func TestOTA_Rollback_FlipsIsActiveOnNewer(t *testing.T) {
+	fix := setupOTATest(t)
+	ctx := context.Background()
+
+	mkTar := func(label string) []byte {
+		return buildFixtureTarball(t, "android", "bundles/"+label+".js", "var x=\""+label+"\";", "assets/icon-"+label, []byte{0x89})
+	}
+
+	// Distinct timestamps so created_at orders v1 < v2 < v3 deterministically.
+	v1, err := fix.c.PublishOTAUpdate(ctx, fix.project.ID, "fingerprint:rv", "android", 1700000001, mkTar("v1"), []byte(`{}`))
+	if err != nil {
+		t.Fatalf("publish v1: %v", err)
+	}
+	// Force created_at ordering by sleeping a hair (Postgres now() resolves
+	// to microseconds; back-to-back inserts in the same statement-clock
+	// could collide).
+	if _, err := fix.db.DB.NewUpdate().Model((*models.OTAUpdate)(nil)).Set("created_at = now() - interval '2 seconds'").Where("id = ?", v1.ID).Exec(ctx); err != nil {
+		t.Fatalf("backdate v1: %v", err)
+	}
+	v2, err := fix.c.PublishOTAUpdate(ctx, fix.project.ID, "fingerprint:rv", "android", 1700000002, mkTar("v2"), []byte(`{}`))
+	if err != nil {
+		t.Fatalf("publish v2: %v", err)
+	}
+	if _, err := fix.db.DB.NewUpdate().Model((*models.OTAUpdate)(nil)).Set("created_at = now() - interval '1 seconds'").Where("id = ?", v2.ID).Exec(ctx); err != nil {
+		t.Fatalf("backdate v2: %v", err)
+	}
+	v3, err := fix.c.PublishOTAUpdate(ctx, fix.project.ID, "fingerprint:rv", "android", 1700000003, mkTar("v3"), []byte(`{}`))
+	if err != nil {
+		t.Fatalf("publish v3: %v", err)
+	}
+
+	// Pre-rollback: v3 is the latest active.
+	pre, err := fix.c.GetLatestOTAManifestForChannel(ctx, fix.project.ID, "fingerprint:rv", "android", "production")
+	if err != nil {
+		t.Fatalf("pre-rollback lookup: %v", err)
+	}
+	if pre.ID != v3.ID {
+		t.Errorf("expected v3 as latest, got %v (v1=%v v2=%v v3=%v)", pre.ID, v1.ID, v2.ID, v3.ID)
+	}
+
+	// Rollback to v1.
+	rolled, err := fix.c.RollbackOTAUpdate(ctx, fix.project.ID, "production", v1.ID)
+	if err != nil {
+		t.Fatalf("rollback to v1: %v", err)
+	}
+	if rolled.ID != v1.ID {
+		t.Errorf("rollback returned wrong row: got %v, want %v", rolled.ID, v1.ID)
+	}
+
+	// Post-rollback: v1 is the latest active for production.
+	post, err := fix.c.GetLatestOTAManifestForChannel(ctx, fix.project.ID, "fingerprint:rv", "android", "production")
+	if err != nil {
+		t.Fatalf("post-rollback lookup: %v", err)
+	}
+	if post.ID != v1.ID {
+		t.Errorf("expected v1 after rollback, got %v", post.ID)
+	}
+
+	// Verify v2 and v3 are now is_active=false.
+	for _, oldID := range []uuid.UUID{v2.ID, v3.ID} {
+		row, err := fix.db.GetOTAUpdateByID(ctx, oldID)
+		if err != nil {
+			t.Fatalf("load %v: %v", oldID, err)
+		}
+		if row.IsActive {
+			t.Errorf("expected %v to be inactive after rollback", oldID)
+		}
+		if row.RolledBackFromUpdateID == nil || *row.RolledBackFromUpdateID != v1.ID {
+			t.Errorf("expected rolled_back_from_update_id=%v on %v, got %v", v1.ID, oldID, row.RolledBackFromUpdateID)
+		}
+	}
+}
+
+// TestOTA_Rollback_RejectsCrossChannel — rolling back with the wrong
+// channel name on the request rejects with ErrOTAChannelMismatch instead
+// of silently moving rows in the target's actual channel.
+func TestOTA_Rollback_RejectsCrossChannel(t *testing.T) {
+	fix := setupOTATest(t)
+	ctx := context.Background()
+	tarball := buildFixtureTarball(t, "android", "bundles/x.js", "var x=1;", "assets/i", []byte{0x89})
+
+	staged, err := fix.c.PublishOTAUpdateWithOptions(ctx, fix.project.ID, "fingerprint:rv", "android", 1700000000, tarball, []byte(`{}`),
+		OTAPublishOptions{Channel: "staging"})
+	if err != nil {
+		t.Fatalf("publish to staging: %v", err)
+	}
+
+	_, err = fix.c.RollbackOTAUpdate(ctx, fix.project.ID, "production", staged.ID)
+	if !errors.Is(err, ErrOTAChannelMismatch) {
+		t.Errorf("expected ErrOTAChannelMismatch, got %v", err)
+	}
+}
+
+// TestOTA_Rollback_RejectsCrossProject — rolling back with a target
+// from a different project rejects without revealing the row exists.
+func TestOTA_Rollback_RejectsCrossProject(t *testing.T) {
+	fix := setupOTATest(t)
+	ctx := context.Background()
+	tarball := buildFixtureTarball(t, "android", "bundles/x.js", "var x=1;", "assets/i", []byte{0x89})
+
+	pub, err := fix.c.PublishOTAUpdate(ctx, fix.project.ID, "fingerprint:rv", "android", 1700000000, tarball, []byte(`{}`))
+	if err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+
+	otherProject := uuid.New()
+	_, err = fix.c.RollbackOTAUpdate(ctx, otherProject, "production", pub.ID)
+	if !errors.Is(err, ErrOTAProjectMismatch) {
+		t.Errorf("expected ErrOTAProjectMismatch, got %v", err)
+	}
+}
+
+// TestOTA_Promote_BumpsRolloutPercentage — PromoteRollout sets the new
+// percentage on the row and clamps out-of-range values.
+func TestOTA_Promote_BumpsRolloutPercentage(t *testing.T) {
+	fix := setupOTATest(t)
+	ctx := context.Background()
+	tarball := buildFixtureTarball(t, "android", "bundles/x.js", "var x=1;", "assets/i", []byte{0x89})
+
+	pub, err := fix.c.PublishOTAUpdateWithOptions(ctx, fix.project.ID, "fingerprint:rv", "android", 1700000000, tarball, []byte(`{}`),
+		OTAPublishOptions{Channel: "production", RolloutPercentage: 10})
+	if err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+	if pub.RolloutPercentage != 10 {
+		t.Errorf("expected initial rollout=10, got %d", pub.RolloutPercentage)
+	}
+
+	bumped, err := fix.c.PromoteRollout(ctx, fix.project.ID, pub.ID, 50)
+	if err != nil {
+		t.Fatalf("promote: %v", err)
+	}
+	if bumped.RolloutPercentage != 50 {
+		t.Errorf("expected rollout=50 after promote, got %d", bumped.RolloutPercentage)
+	}
+
+	// Clamp >100 → 100.
+	clamped, err := fix.c.PromoteRollout(ctx, fix.project.ID, pub.ID, 150)
+	if err != nil {
+		t.Fatalf("promote clamp: %v", err)
+	}
+	if clamped.RolloutPercentage != 100 {
+		t.Errorf("expected clamped to 100, got %d", clamped.RolloutPercentage)
+	}
+
+	// Clamp <0 → 0.
+	clamped2, err := fix.c.PromoteRollout(ctx, fix.project.ID, pub.ID, -5)
+	if err != nil {
+		t.Fatalf("promote negative clamp: %v", err)
+	}
+	if clamped2.RolloutPercentage != 0 {
+		t.Errorf("expected clamped to 0, got %d", clamped2.RolloutPercentage)
+	}
+
+	// Verify the persisted row matches what the controller returned.
+	persisted, err := fix.db.GetOTAUpdateByID(ctx, pub.ID)
+	if err != nil {
+		t.Fatalf("re-load: %v", err)
+	}
+	if persisted.RolloutPercentage != 0 {
+		t.Errorf("DB shows %d, expected 0", persisted.RolloutPercentage)
 	}
 }

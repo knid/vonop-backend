@@ -206,6 +206,22 @@ type SendNotificationParams struct {
 
 	// Optional metadata for client-side handling (deep-link, custom data).
 	Data map[string]string
+
+	// <P2#25> rich notification fields.
+	// SendAfter is the ISO-8601 / RFC 3339 string OneSignal accepts for
+	// scheduled delivery (e.g. "2026-05-04T18:30:00Z"). Empty = send now.
+	SendAfter string
+	// BigPicture is an absolute https URL for the Android big-picture style.
+	BigPicture string
+	// IOSAttachments is the iOS rich-media map (id → URL); only one key
+	// matters in practice. Pass {"id": "https://..."} to attach a media
+	// payload to the alert.
+	IOSAttachments map[string]string
+	// WebURL / AppURL → OneSignal's `web_url` / `app_url` for click-through
+	// behaviour. Caller is expected to pre-validate these against the
+	// project's allow-list (http(s) + project URL scheme).
+	WebURL string
+	AppURL string
 }
 
 // SendNotificationResult is the OneSignal response we surface to callers.
@@ -260,6 +276,24 @@ func SendNotificationViaSDK(ctx context.Context, appID, restAPIKey string, param
 	}
 	if len(params.Data) > 0 {
 		body["data"] = params.Data
+	}
+	// <P2#25> rich notification + scheduled-send fields. All optional;
+	// OneSignal silently ignores empty/missing keys, so we only emit what
+	// the caller actually populated.
+	if params.SendAfter != "" {
+		body["send_after"] = params.SendAfter
+	}
+	if params.BigPicture != "" {
+		body["big_picture"] = params.BigPicture
+	}
+	if len(params.IOSAttachments) > 0 {
+		body["ios_attachments"] = params.IOSAttachments
+	}
+	if params.WebURL != "" {
+		body["web_url"] = params.WebURL
+	}
+	if params.AppURL != "" {
+		body["app_url"] = params.AppURL
 	}
 
 	delays := []time.Duration{0, 1 * time.Second, 2 * time.Second, 4 * time.Second}

@@ -161,6 +161,81 @@ func TestSendNotificationViaSDK_5xxRetriesOnce(t *testing.T) {
 	}
 }
 
+// <P2#25> rich notification fields propagate into the OneSignal request body
+// only when populated. Verifies send_after, big_picture, ios_attachments,
+// web_url, and app_url all serialise correctly + per-locale headings flow
+// through verbatim.
+func TestSendNotificationViaSDK_RichFieldsPropagate(t *testing.T) {
+	var gotBody string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		gotBody = string(b)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "n-1", "recipients": 1})
+	}))
+	defer server.Close()
+	restore := SetOneSignalTestEndpoint(server.URL)
+	defer restore()
+
+	_, err := SendNotificationViaSDK(context.Background(), "app", "key", SendNotificationParams{
+		Headings:         map[string]string{"en": "Hi", "tr": "Merhaba"},
+		Contents:         map[string]string{"en": "Hello", "tr": "Selam"},
+		IncludedSegments: []string{"Subscribed Users", "Active Users"},
+		SendAfter:        "2026-05-04T18:30:00Z",
+		BigPicture:       "https://cdn/x.png",
+		IOSAttachments:   map[string]string{"id": "https://cdn/x.png"},
+		WebURL:           "https://example.com/page",
+		AppURL:           "myapp://route",
+	})
+	if err != nil {
+		t.Fatalf("SendNotificationViaSDK: %v", err)
+	}
+
+	mustContain := []string{
+		`"included_segments":["Subscribed Users","Active Users"]`,
+		`"send_after":"2026-05-04T18:30:00Z"`,
+		`"big_picture":"https://cdn/x.png"`,
+		`"ios_attachments":{"id":"https://cdn/x.png"}`,
+		`"web_url":"https://example.com/page"`,
+		`"app_url":"myapp://route"`,
+		`"tr":"Merhaba"`,
+		`"tr":"Selam"`,
+	}
+	for _, s := range mustContain {
+		if !strings.Contains(gotBody, s) {
+			t.Errorf("body missing %q\nfull body: %s", s, gotBody)
+		}
+	}
+}
+
+// Empty rich fields don't appear in the request body.
+func TestSendNotificationViaSDK_NoRichFieldsWhenEmpty(t *testing.T) {
+	var gotBody string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		gotBody = string(b)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "n-1", "recipients": 1})
+	}))
+	defer server.Close()
+	restore := SetOneSignalTestEndpoint(server.URL)
+	defer restore()
+
+	_, err := SendNotificationViaSDK(context.Background(), "app", "key", SendNotificationParams{
+		Headings:         map[string]string{"en": "h"},
+		Contents:         map[string]string{"en": "b"},
+		IncludedSegments: []string{"x"},
+	})
+	if err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	for _, k := range []string{"send_after", "big_picture", "ios_attachments", "web_url", "app_url"} {
+		if strings.Contains(gotBody, `"`+k+`"`) {
+			t.Errorf("body should not contain %q when empty: %s", k, gotBody)
+		}
+	}
+}
+
 func TestSendNotificationViaSDK_RequiredFields(t *testing.T) {
 	cases := []struct {
 		name   string

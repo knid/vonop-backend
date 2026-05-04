@@ -38,6 +38,20 @@ const (
 	otaKeepLastN           = 10                // size-cap pruning per (RV, platform)
 )
 
+// OTAPublishOptions carries the optional channel + rollout-percentage
+// fields on a publish call. Zero-value defaults: channel="production",
+// rollout_percentage=100. Pre-P2#22 callers that don't set these get
+// the same behavior they always did.
+type OTAPublishOptions struct {
+	// Channel — "production"/"staging"/"preview"/etc. Empty ⇒ "production".
+	Channel string
+	// RolloutPercentage — 0-100. Zero is treated as 100 (full rollout) so
+	// the zero-value of the struct keeps the legacy behavior. To actually
+	// gate to 0% (publish-but-don't-serve), use the explicit RollbackOTAUpdate
+	// path or the /promote endpoint.
+	RolloutPercentage int16
+}
+
 // PublishOTAUpdate is the worker-facing entry point for the
 // POST /v2/apps/{appId}/ota/publish endpoint. It takes the dist.tar.gz
 // produced by `npx expo export`, validates it, uploads each file to S3,
@@ -45,6 +59,10 @@ const (
 //
 // HMAC verification is the view's job — by the time we get here the
 // caller is trusted to act on behalf of appProjectID.
+//
+// Pre-P2#22 signature kept for back-compat: defaults channel="production"
+// and rollout_percentage=100. Callers that need to publish to a non-
+// production channel or rollout < 100 should use PublishOTAUpdateWithOptions.
 //
 // Returns the persisted update on success.
 func (c *Controller) PublishOTAUpdate(
@@ -54,6 +72,20 @@ func (c *Controller) PublishOTAUpdate(
 	timestamp int64,
 	distTarGz []byte,
 	expoConfigJSON []byte,
+) (*models.OTAUpdate, error) {
+	return c.PublishOTAUpdateWithOptions(ctx, appProjectID, runtimeVersion, platform, timestamp, distTarGz, expoConfigJSON, OTAPublishOptions{})
+}
+
+// PublishOTAUpdateWithOptions is the channel/rollout-aware publish path.
+// Identical to PublishOTAUpdate aside from the extra options struct.
+func (c *Controller) PublishOTAUpdateWithOptions(
+	ctx context.Context,
+	appProjectID uuid.UUID,
+	runtimeVersion, platform string,
+	timestamp int64,
+	distTarGz []byte,
+	expoConfigJSON []byte,
+	opts OTAPublishOptions,
 ) (*models.OTAUpdate, error) {
 	if platform != "android" && platform != "ios" {
 		return nil, fmt.Errorf("%w: %q", ErrOTAInvalidPlatform, platform)
@@ -141,23 +173,40 @@ func (c *Controller) PublishOTAUpdate(
 	}
 	updateID := utils.ManifestID(idSeed.Bytes())
 
+	// P2#22 — channel + rollout. Empty channel ⇒ "production"; 0 percent ⇒
+	// 100 (zero-value preserves legacy behavior — see OTAPublishOptions docs).
+	channel := strings.TrimSpace(opts.Channel)
+	if channel == "" {
+		channel = "production"
+	}
+	rolloutPct := opts.RolloutPercentage
+	if rolloutPct <= 0 {
+		rolloutPct = 100
+	}
+	if rolloutPct > 100 {
+		rolloutPct = 100
+	}
+
 	row := &models.OTAUpdate{
-		AppProjectID:   appProjectID,
-		RuntimeVersion: runtimeVersion,
-		Platform:       platform,
-		UpdateID:       updateID,
-		S3Prefix:       prefix,
-		MetadataJSON:   metaBytes,
-		ExpoConfigJSON: expoConfigJSON,
+		AppProjectID:      appProjectID,
+		RuntimeVersion:    runtimeVersion,
+		Platform:          platform,
+		UpdateID:          updateID,
+		S3Prefix:          prefix,
+		MetadataJSON:      metaBytes,
+		ExpoConfigJSON:    expoConfigJSON,
+		Channel:           channel,
+		RolloutPercentage: rolloutPct,
+		IsActive:          true,
 	}
 	if err := c.DB.InsertOTAUpdate(ctx, row); err != nil {
 		return nil, fmt.Errorf("ota: persist update: %w", err)
 	}
 
 	// Size-cap pruning: keep the otaKeepLastN most recent updates per
-	// (project, RV, platform); delete the rest. Best-effort — log on
-	// failure but don't fail the publish.
-	go c.pruneOldOTAUpdates(context.Background(), appProjectID, runtimeVersion, platform)
+	// (project, RV, platform, channel); delete the rest. Best-effort —
+	// log on failure but don't fail the publish.
+	go c.pruneOldOTAUpdates(context.Background(), appProjectID, runtimeVersion, platform, channel)
 
 	return row, nil
 }
@@ -165,11 +214,40 @@ func (c *Controller) PublishOTAUpdate(
 // GetLatestOTAManifest returns the most-recent OTAUpdate for
 // (appProjectID, runtimeVersion, platform). Translates "no rows" to
 // ErrOTANotFound for the view.
+//
+// Pre-P2#22 callers (asset-fetch path, integration tests) keep using this
+// method; it has no channel filter and no is_active filter. If you're
+// serving the manifest itself, use GetLatestOTAManifestForChannel instead.
 func (c *Controller) GetLatestOTAManifest(ctx context.Context, appProjectID uuid.UUID, runtimeVersion, platform string) (*models.OTAUpdate, error) {
 	if platform != "android" && platform != "ios" {
 		return nil, fmt.Errorf("%w: %q", ErrOTAInvalidPlatform, platform)
 	}
 	row, err := c.DB.GetLatestOTAUpdate(ctx, appProjectID, runtimeVersion, platform)
+	if err != nil {
+		if database.IsErrNoOTAUpdate(err) {
+			return nil, ErrOTANotFound
+		}
+		return nil, err
+	}
+	return row, nil
+}
+
+// GetLatestOTAManifestForChannel returns the most-recent active OTAUpdate
+// for (appProjectID, runtimeVersion, platform, channel). Translates "no
+// rows" to ErrOTANotFound for the view, which converts that to a 204 so
+// the expo-updates client treats it as "no update available, stay where
+// you are" rather than "server error".
+//
+// P2#22 — channel matching is exact-string. No glob, no fallback. A
+// "preview" publish must NOT serve to a "production" device.
+func (c *Controller) GetLatestOTAManifestForChannel(ctx context.Context, appProjectID uuid.UUID, runtimeVersion, platform, channel string) (*models.OTAUpdate, error) {
+	if platform != "android" && platform != "ios" {
+		return nil, fmt.Errorf("%w: %q", ErrOTAInvalidPlatform, platform)
+	}
+	if channel == "" {
+		channel = "production"
+	}
+	row, err := c.DB.GetLatestForChannel(ctx, appProjectID, runtimeVersion, platform, channel)
 	if err != nil {
 		if database.IsErrNoOTAUpdate(err) {
 			return nil, ErrOTANotFound
@@ -231,10 +309,16 @@ func (c *Controller) GetOTAAsset(ctx context.Context, appProjectID uuid.UUID, ru
 }
 
 // pruneOldOTAUpdates deletes OTAUpdate rows + their S3 objects beyond the
-// otaKeepLastN most recent for a (project, RV, platform). Best-effort —
-// runs in a goroutine after a successful publish.
-func (c *Controller) pruneOldOTAUpdates(ctx context.Context, appProjectID uuid.UUID, runtimeVersion, platform string) {
-	rows, err := c.DB.ListOldOTAUpdatesForRV(ctx, appProjectID, runtimeVersion, platform, otaKeepLastN)
+// otaKeepLastN most recent for a (project, RV, platform, channel).
+// Best-effort — runs in a goroutine after a successful publish.
+//
+// Channel-scoped (P2#22): a hot "preview" channel must not prune older
+// "production" rows that production devices may still depend on.
+func (c *Controller) pruneOldOTAUpdates(ctx context.Context, appProjectID uuid.UUID, runtimeVersion, platform, channel string) {
+	if channel == "" {
+		channel = "production"
+	}
+	rows, err := c.DB.ListOldOTAUpdatesForChannel(ctx, appProjectID, runtimeVersion, platform, channel, otaKeepLastN)
 	if err != nil {
 		slog.Warn("ota prune: list failed", "app_project_id", appProjectID, "err", err)
 		return
