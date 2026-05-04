@@ -17,6 +17,7 @@ import (
 )
 
 const machinesAPIBase = "https://api.machines.dev"
+const flyGraphQLBase = "https://api.fly.io/graphql"
 
 type Service struct {
 	APIToken      string
@@ -24,6 +25,7 @@ type Service struct {
 	Region        string
 	Registry      string
 	APIBase       string // overridable for tests; defaults to machinesAPIBase
+	GraphQLBase   string // overridable for tests; defaults to flyGraphQLBase
 	WebhookSecret string
 	httpClient    *http.Client
 }
@@ -35,6 +37,7 @@ func NewService(apiToken, orgSlug, region, webhookSecret string) *Service {
 		Region:        region,
 		Registry:      "registry.fly.io",
 		APIBase:       machinesAPIBase,
+		GraphQLBase:   flyGraphQLBase,
 		WebhookSecret: webhookSecret,
 		httpClient:    &http.Client{Timeout: 60 * time.Second},
 	}
