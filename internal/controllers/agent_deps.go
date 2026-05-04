@@ -70,6 +70,9 @@ func (c *Controller) AgentDeps(user *models.User) *agent.RunDependencies {
 			return c.provisionDatabaseForAgent(ctx, project, user, tables)
 		},
 		EnableAI: c.enableProjectAIForAgent,
+		AutoDeployBackend: func(ctx context.Context, project *models.AppProject) error {
+			return c.autoDeployBackendForAgent(ctx, project, user)
+		},
 		GatewayAllowedModels: func() []string {
 			return c.GatewayAllowedModels(user)
 		},

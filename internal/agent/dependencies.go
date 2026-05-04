@@ -60,6 +60,19 @@ type MobileBridgeUpdater func(ctx context.Context, projectID, method string, ena
 // SetupAIGatewayTool checks the existing flag before invoking this callback.
 type AIEnabler func(ctx context.Context, project *models.AppProject) error
 
+// BackendAutoDeployer queues a Fly deploy for the project's backend/ subtree
+// when the agent run touched it. mobile_app_native projects rely on this to
+// avoid the "user describes an AI feature but nothing works because they
+// didn't click Deploy" UX gap — the agent commits the backend code AND
+// queues the deploy in one shot. Bound by the controller layer to
+// Controller.autoDeployBackendForAgent. The agent runner calls this AFTER
+// FinaliseRun so the just-committed code is what ships.
+//
+// Best-effort by design: implementations should swallow ErrDeployInProgress
+// (a manual deploy was already running) and log other errors. The chat run
+// must not fail because a background deploy failed to enqueue.
+type BackendAutoDeployer func(ctx context.Context, project *models.AppProject) error
+
 // GatewayAllowedModelsFn returns the model IDs (chat + image, OpenRouter /
 // fal format) the current user's subscription tier can reach through the
 // Wemob AI Gateway. Bound per-run in AgentDeps so the agent package never has
@@ -118,6 +131,7 @@ type RunDependencies struct {
 	NeonConnString           NeonConnResolver
 	ProvisionDatabase        DatabaseProvisioner
 	EnableAI                 AIEnabler
+	AutoDeployBackend        BackendAutoDeployer
 	GatewayAllowedModels     GatewayAllowedModelsFn
 	UpdateMobileBridgeMethod MobileBridgeUpdater
 	RecordLLMUsage           LLMUsageRecorder

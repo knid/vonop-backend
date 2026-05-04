@@ -278,6 +278,34 @@ func (r *Repo) DiffLastCommit() (string, error) {
 	return string(out), nil
 }
 
+// ChangedPathsSince returns the list of file paths changed between fromHash
+// and HEAD (one path per slice entry, no leading "a/" or "b/" prefix). Used
+// by the agent runner to decide whether a chat turn touched the backend/
+// subtree (and therefore warrants an auto-deploy). Empty result on identical
+// hashes / clean tree.
+func (r *Repo) ChangedPathsSince(fromHash string) ([]string, error) {
+	if fromHash == "" {
+		return nil, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), readTimeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "git", "diff", "--name-only", fromHash, "HEAD")
+	cmd.Dir = r.Path
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("gitrepo: diff names: %w", err)
+	}
+	raw := strings.Split(strings.TrimRight(string(out), "\n"), "\n")
+	paths := make([]string, 0, len(raw))
+	for _, p := range raw {
+		if p != "" {
+			paths = append(paths, p)
+		}
+	}
+	return paths, nil
+}
+
 // ReadAllFilesAtCommit reads all files at a specific commit using git archive.
 func (r *Repo) ReadAllFilesAtCommit(commitHash string) (map[string]string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), commitTimeout)
