@@ -975,10 +975,18 @@ func (c *Controller) RecordTokenUsage(user *models.User, action, model, provider
 				Set("$ai_is_error", false).
 				Set("$ai_stream", entry.IsStreaming).
 				Set("app_type", appType).
+				Set("app_id", reference).
 				Set("project_id", reference).
 				Set("credits_estimated", c.TokensToCredits(entry.PromptTokens, entry.CompletionTokens, entry.CacheReadInputTokens))
+			if tracker.OrganizationID != "" {
+				props.Set("org_id", tracker.OrganizationID)
+			}
 			if tracker.RunID != "" {
 				props.Set("run_id", tracker.RunID)
+				// Bind PostHog session-replay correlation to the agent run so a
+				// single chat thread's worth of LLM calls cluster as one
+				// $session_id in dashboards.
+				props.Set("$session_id", tracker.RunID)
 			}
 			if entry.CacheCreationInputTokens > 0 {
 				props.Set("$ai_cache_creation_input_tokens", entry.CacheCreationInputTokens)
@@ -1052,10 +1060,15 @@ func (c *Controller) RecordTokenUsage(user *models.User, action, model, provider
 			Set("$ai_input_tokens", prompt).
 			Set("$ai_output_tokens", completion).
 			Set("app_type", appType).
+			Set("app_id", reference).
 			Set("project_id", reference).
 			Set("credits_estimated", creditsSpent)
+		if tracker.OrganizationID != "" {
+			traceProps.Set("org_id", tracker.OrganizationID)
+		}
 		if tracker.RunID != "" {
 			traceProps.Set("run_id", tracker.RunID)
+			traceProps.Set("$session_id", tracker.RunID)
 		}
 		if totalCost > 0 {
 			traceProps.Set("$ai_total_cost_usd", totalCost)
@@ -1240,12 +1253,21 @@ func (c *Controller) RecordLLMError(user *models.User, tracker *utils.TokenTrack
 		Set("$ai_is_error", true).
 		Set("$ai_latency", float64(latencyMs)/1000.0).
 		Set("$ai_session_id", reference).
+		// PostHog LLM Analytics dashboards key off $ai_error (the message
+		// string); $ai_error_message stays in parallel for any HogQL queries
+		// that already reference the legacy name.
+		Set("$ai_error", errMsg).
 		Set("$ai_error_message", errMsg).
 		Set("$ai_span_name", "agent_error").
 		Set("app_type", appType).
+		Set("app_id", reference).
 		Set("project_id", reference)
 	if errCode != "" {
 		props.Set("$ai_error_code", errCode)
+		props.Set("$ai_error_type", errCode)
+	}
+	if tracker != nil && tracker.OrganizationID != "" {
+		props.Set("org_id", tracker.OrganizationID)
 	}
 	if traceID != "" {
 		props.Set("$ai_trace_id", traceID)
@@ -1256,6 +1278,7 @@ func (c *Controller) RecordLLMError(user *models.User, tracker *utils.TokenTrack
 	}
 	if runID != "" {
 		props.Set("run_id", runID)
+		props.Set("$session_id", runID)
 	}
 	if user.Email != "" {
 		props.Set("$email", user.Email)

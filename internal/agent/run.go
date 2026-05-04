@@ -208,6 +208,7 @@ func Run(
 	tracker := utils.NewTokenTracker()
 	tracker.UserID = user.ID.String()
 	tracker.ProjectID = project.ID.String()
+	tracker.OrganizationID = project.OrganizationID.String()
 	// Bind the PostHog trace id to AppAgentRun.ID so $ai_generation and
 	// $ai_trace events share an id operators can pivot from — both to the
 	// agent_runs row and to error events emitted from finaliseFailureV2,
@@ -665,6 +666,15 @@ func normaliseImages(images []string) []map[string]string {
 func convertHistory(history []models.AppChatMessage) []utils.Message {
 	var out []utils.Message
 	for _, m := range history {
+		// Skip failed assistant turns — these rows exist so the chat UI can
+		// render an error card (keyed off ErrorKind), but their Content is a
+		// fallback string like "Generation failed." that, when replayed to the
+		// LLM, poisons the conversation: the model sees itself "responding"
+		// with error text and the prompt cache is invalidated. The previous
+		// user turn is kept so on retry the model still has the question.
+		if m.ErrorKind != "" {
+			continue
+		}
 		content := m.Content
 		// Historical user messages are stored literally (e.g. "/plan a blog").
 		// Re-expand on every load so the LLM sees the same prompt body it saw

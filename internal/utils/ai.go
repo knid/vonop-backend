@@ -263,8 +263,9 @@ type TokenTracker struct {
 	TrackContent bool      // opt-in: when true, StreamWithTools records message content per round
 	TraceInput   string    // user's original message (for $ai_trace)
 	TraceOutput  string    // final assistant response (for $ai_trace)
-	UserID       string    // for slog attribution
-	ProjectID    string    // for slog attribution
+	UserID         string // for slog attribution
+	ProjectID      string // for slog attribution
+	OrganizationID string // for PostHog org_id attribution on $ai_generation / $ai_trace
 	// TraceID, when non-empty, overrides the auto-generated trace id in
 	// RecordTokenUsage so callers (agent.Run) can bind the PostHog trace to
 	// an external identifier such as AppAgentRun.ID. Error events emitted
