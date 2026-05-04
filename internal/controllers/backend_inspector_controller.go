@@ -130,6 +130,66 @@ func (c *Controller) GetBackendHealth(ctx context.Context, project *models.AppPr
 	return out, nil
 }
 
+// GetBackendRoutes lists API route handlers detected in backend/app/api/**.
+// Reads files via the existing gitrepo store. Returns an empty slice when
+// the project has no repo or no backend/app/api/ subtree — never errors
+// for "no routes".
+func (c *Controller) GetBackendRoutes(ctx context.Context, project *models.AppProject) ([]responses.BackendRouteEntry, error) {
+	if project == nil {
+		return nil, errors.New("nil project")
+	}
+	if c.GitRepoService == nil {
+		return []responses.BackendRouteEntry{}, nil
+	}
+	repo, err := c.GitRepoService.Open(project.ID.String())
+	if err != nil || repo == nil {
+		return []responses.BackendRouteEntry{}, nil
+	}
+	files, err := repo.ReadAllFiles()
+	if err != nil {
+		return nil, err
+	}
+	parsed := ParseRoutes(files)
+	out := make([]responses.BackendRouteEntry, 0, len(parsed))
+	for _, r := range parsed {
+		out = append(out, responses.BackendRouteEntry{
+			Method: r.Method,
+			Path:   r.Path,
+			File:   r.File,
+		})
+	}
+	return out, nil
+}
+
+// GetBackendLogs returns recent log lines for the deployed backend, filtered
+// by since/level. Returns empty slice for projects without a backend or
+// without a wired FlyInspector — never errors for "no backend".
+func (c *Controller) GetBackendLogs(ctx context.Context, project *models.AppProject, since time.Time, level string) ([]responses.BackendLogLine, error) {
+	if project == nil {
+		return nil, errors.New("nil project")
+	}
+	runtimeApp, err := c.DB.GetRuntimeAppByAppProjectID(project.ID.String())
+	if err != nil || runtimeApp == nil || runtimeApp.FlyAppName == "" {
+		return []responses.BackendLogLine{}, nil
+	}
+	if c.FlyInspector == nil {
+		return []responses.BackendLogLine{}, nil
+	}
+	raw, err := c.FlyInspector.GetLogs(runtimeApp.FlyAppName, since, level)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]responses.BackendLogLine, 0, len(raw))
+	for _, ln := range raw {
+		out = append(out, responses.BackendLogLine{
+			Timestamp: ln.Timestamp,
+			Level:     ln.Level,
+			Message:   ln.Message,
+		})
+	}
+	return out, nil
+}
+
 // deriveBackendColor encodes the spec's color rules:
 //
 //	green  — machine started + last deploy succeeded
