@@ -21,7 +21,10 @@ type LogLine struct {
 // and `level` filters are applied client-side on the returned buffer.
 //
 // `since`: zero value disables the filter; otherwise lines with a parseable
-// Timestamp older than since are dropped.
+// Timestamp older than since are dropped. The boundary is inclusive — a line
+// timestamped exactly at `since` is kept. Lines whose Timestamp does not parse
+// as RFC3339 (empty, malformed, or non-conforming) are always included
+// regardless of the filter.
 // `level`: empty string disables the filter; otherwise an exact match.
 func (s *Service) GetLogs(appName string, since time.Time, level string) ([]LogLine, error) {
 	payload := map[string]any{
