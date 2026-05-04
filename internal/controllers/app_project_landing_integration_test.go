@@ -38,9 +38,10 @@ func TestCreateAppProject_MobileAppNative_DoesNotScaffoldBackend(t *testing.T) {
 		t.Fatalf("open repo: %v", err)
 	}
 
-	// mobile/ skeleton exists.
-	if !repo.FileExists("mobile/.gitkeep") {
-		t.Error("expected mobile/.gitkeep to exist as scaffold marker")
+	// mobile/ scaffolded with the Expo template baseline (assert on
+	// package.json — gitkeep markers were replaced with real files).
+	if !repo.FileExists("mobile/package.json") {
+		t.Error("expected mobile/package.json to exist (Expo template baseline)")
 	}
 	if !repo.FileExists("README.md") {
 		t.Error("expected README.md to exist")
