@@ -67,10 +67,14 @@ func (c *Controller) CreateQueuedExpoOTADeployment(project *models.AppProject, u
 	return deployment, nil
 }
 
-// EnqueueExpoOTAPublish submits an expo:ota_publish task to the worker.
-// Returns the queue name for response observability.
-func (c *Controller) EnqueueExpoOTAPublish(deploymentID uuid.UUID) (string, error) {
-	queue := "deploy-web-pro"
+// EnqueueExpoOTAPublish submits an expo:ota_publish task to the worker on
+// the matching plan-tier queue, isolated from web deploys so a 10-minute
+// expo export burst can't starve Fly deploys (or vice versa).
+func (c *Controller) EnqueueExpoOTAPublish(deploymentID uuid.UUID, isPaidPlan bool) (string, error) {
+	queue := "expo-ota-free"
+	if isPaidPlan {
+		queue = "expo-ota-pro"
+	}
 	payload, err := json.Marshal(tasks.ExpoOTAPublishPayload{DeploymentID: deploymentID.String()})
 	if err != nil {
 		return "", fmt.Errorf("marshal payload: %w", err)
@@ -115,7 +119,7 @@ func (c *Controller) HandleExpoOTAPublishTask(ctx context.Context, t *asynq.Task
 	}
 	project, err := c.DB.GetAppProjectByID(deployment.AppProjectID.String())
 	if err != nil {
-		return c.failTask(p.DeploymentID, "load_project", err)
+		return c.maybeRetryOTA(ctx, p.DeploymentID, "load_project", err, true)
 	}
 	if project.ProjectType != models.ProjectTypeMobileAppNative {
 		return c.failTask(p.DeploymentID, "wrong_project_type",
@@ -128,7 +132,7 @@ func (c *Controller) HandleExpoOTAPublishTask(ctx context.Context, t *asynq.Task
 
 	repo, err := c.GitRepoService.Open(project.ID.String())
 	if err != nil {
-		return c.failTask(p.DeploymentID, "git_open", err)
+		return c.maybeRetryOTA(ctx, p.DeploymentID, "git_open", err, true)
 	}
 	mobileDir := filepath.Join(repo.Path, "mobile")
 	if info, statErr := os.Stat(mobileDir); statErr != nil || !info.IsDir() {
@@ -149,22 +153,25 @@ func (c *Controller) HandleExpoOTAPublishTask(ctx context.Context, t *asynq.Task
 	defer cancel()
 
 	if err := ensureNodeModules(buildCtx, mobileDir); err != nil {
-		return c.failTask(p.DeploymentID, "npm_install", err)
+		// npm registry blips are common — retry once before giving up.
+		return c.maybeRetryOTA(ctx, p.DeploymentID, "npm_install", err, true)
 	}
 	distDir, err := runExpoExport(buildCtx, mobileDir)
 	if err != nil {
+		// expo export almost always fails on user code (TS/JS errors,
+		// missing deps). Retrying won't fix that — surface immediately.
 		return c.failTask(p.DeploymentID, "expo_export", err)
 	}
 
 	distTarGz, err := tarDirGzip(distDir)
 	if err != nil {
-		return c.failTask(p.DeploymentID, "tar_dist", err)
+		return c.maybeRetryOTA(ctx, p.DeploymentID, "tar_dist", err, true)
 	}
 
 	timestamp := time.Now().UnixMilli()
 	for _, platform := range []string{"ios", "android"} {
 		if _, err := c.PublishOTAUpdate(ctx, project.ID, runtimeVersion, platform, timestamp, distTarGz, expoConfigBytes); err != nil {
-			return c.failTask(p.DeploymentID, "publish_"+platform, err)
+			return c.maybeRetryOTA(ctx, p.DeploymentID, "publish_"+platform, err, true)
 		}
 	}
 
@@ -330,6 +337,25 @@ func tarDirGzip(dir string) ([]byte, error) {
 		return nil, err
 	}
 	return buf.Bytes(), nil
+}
+
+// maybeRetryOTA returns the original error (asynq backs off + re-enters the
+// handler) when the stage is retryable AND retry budget remains; otherwise
+// marks the deployment failed and returns asynq.SkipRetry. Mirrors the
+// pattern used by HandleWebDeployTask.maybeRetry but takes an explicit
+// retryable bool because OTA failure modes are stage-shaped, not error-typed.
+func (c *Controller) maybeRetryOTA(ctx context.Context, deploymentID, stage string, err error, retryable bool) error {
+	finalAttempt := isFinalRetryAttempt(ctx)
+	slog.Error("ota_publish_failed",
+		"deployment_id", deploymentID, "stage", stage,
+		"error", err, "retryable", retryable, "final_attempt", finalAttempt)
+	if retryable && !finalAttempt {
+		return err
+	}
+	if mErr := c.MarkDeploymentFailed(deploymentID, fmt.Sprintf("%s: %v", stage, err)); mErr != nil {
+		slog.Error("mark_failed_db_error", "deployment_id", deploymentID, "stage", stage, "err", mErr)
+	}
+	return asynq.SkipRetry
 }
 
 func truncateOutput(b []byte) string {

@@ -1870,7 +1870,8 @@ func main() {
 						r.With(rateLimiter.RateLimit(3, time.Minute, appMiddleware.UserKey)).
 							Post("/web", httpViews.DeployAppWeb)
 						r.Delete("/web", httpViews.UndeployAppWeb)
-						r.Post("/mobile", httpViews.DeployAppMobile)
+						r.With(rateLimiter.RateLimit(3, time.Minute, appMiddleware.UserKey)).
+							Post("/mobile", httpViews.DeployAppMobile)
 						r.Delete("/mobile", httpViews.UndeployAppMobile)
 						r.Get("/status", httpViews.GetDeployStatus)
 						r.Get("/history", httpViews.GetDeployHistory)

@@ -168,14 +168,23 @@ func (db *Database) GetDeployedWebAppsByUserID(userID string) ([]DeployedWebAppI
 	return apps, err
 }
 
+// "Mobile-deployed" means the project is a mobile project type AND has a
+// live deployment in app_deployments. The deployment row varies by flavor:
+//   - mobile_app (legacy WebView): the wrapped web URL on platform='web'
+//   - mobile_app_native (Expo): the OTA bundle on platform='ota'
+//
+// Nothing ever writes platform='mobile' — the original queries did, which
+// is why the MaxDeployedMobileApps quota always reported 0.
 func (db *Database) CountDeployedMobileAppsByUserID(userID string) (int, error) {
 	var count int
 	err := db.DB.NewSelect().
-		TableExpr("app_deployments").
-		ColumnExpr("COUNT(DISTINCT app_project_id)").
-		Where("user_id = ?", userID).
-		Where("platform = 'mobile'").
-		Where("status = 'deployed'").
+		TableExpr("app_deployments AS d").
+		Join("JOIN app_projects AS p ON p.id = d.app_project_id").
+		ColumnExpr("COUNT(DISTINCT d.app_project_id)").
+		Where("d.user_id = ?", userID).
+		Where("d.status = 'deployed'").
+		Where("p.project_type IN (?, ?)", "mobile_app", "mobile_app_native").
+		Where("(p.project_type = 'mobile_app_native' AND d.platform = 'ota') OR (p.project_type = 'mobile_app' AND d.platform = 'web')").
 		Scan(context.Background(), &count)
 	return count, err
 }
@@ -187,18 +196,21 @@ func (db *Database) GetDeployedMobileAppsByUserID(userID string) ([]DeployedWebA
 		Join("JOIN app_projects AS p ON p.id = d.app_project_id").
 		ColumnExpr("DISTINCT d.app_project_id, p.name").
 		Where("d.user_id = ?", userID).
-		Where("d.platform = 'mobile'").
 		Where("d.status = 'deployed'").
+		Where("p.project_type IN (?, ?)", "mobile_app", "mobile_app_native").
+		Where("(p.project_type = 'mobile_app_native' AND d.platform = 'ota') OR (p.project_type = 'mobile_app' AND d.platform = 'web')").
 		Scan(context.Background(), &apps)
 	return apps, err
 }
 
 func (db *Database) IsAppAlreadyDeployedMobile(appProjectID string) (bool, error) {
 	count, err := db.DB.NewSelect().
-		TableExpr("app_deployments").
-		Where("app_project_id = ?", appProjectID).
-		Where("platform = 'mobile'").
-		Where("status = 'deployed'").
+		TableExpr("app_deployments AS d").
+		Join("JOIN app_projects AS p ON p.id = d.app_project_id").
+		Where("d.app_project_id = ?", appProjectID).
+		Where("d.status = 'deployed'").
+		Where("p.project_type IN (?, ?)", "mobile_app", "mobile_app_native").
+		Where("(p.project_type = 'mobile_app_native' AND d.platform = 'ota') OR (p.project_type = 'mobile_app' AND d.platform = 'web')").
 		Count(context.Background())
 	return count > 0, err
 }

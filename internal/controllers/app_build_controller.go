@@ -603,8 +603,13 @@ func (c *Controller) UndeployApp(projectID string) error {
 	if err != nil {
 		return fmt.Errorf("failed to get deployments: %w", err)
 	}
+	// Include in-progress states (queued, building, deploying) so a user
+	// who undeploys mid-build doesn't leave rows orphaned in their pre-
+	// terminal state forever (the partial unique index would then refuse
+	// the next deploy).
 	for _, d := range deployments {
-		if d.Status == "deployed" || d.Status == "building" {
+		switch d.Status {
+		case "deployed", "queued", "building", "deploying":
 			d.Status = "undeployed"
 			d.UpdatedAt = time.Now()
 			if _, err := c.DB.UpdateAppDeployment(&d); err != nil {

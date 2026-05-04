@@ -447,6 +447,19 @@ func (r *Repo) WriteFileMap(fileMap map[string]string) error {
 	})
 }
 
+// tarSubtreeSkipDirs lists directory names that TarSubtree skips wherever
+// they appear in the walked tree. .git is always excluded. The rest are
+// regenerable JS/Expo build artifacts that explode the tarball size when
+// the worker has run npm install / expo export against the repo.
+var tarSubtreeSkipDirs = map[string]struct{}{
+	".git":         {},
+	"node_modules": {},
+	"dist":         {},
+	".expo":        {},
+	".next":        {},
+	".turbo":       {},
+}
+
 // TarSubtree returns a gzipped tarball containing every regular file under
 // `<repo>/<prefix>`, with the prefix stripped from each entry's name.
 //
@@ -480,7 +493,7 @@ func (r *Repo) TarSubtree(prefix string) ([]byte, error) {
 			return err
 		}
 		if d.IsDir() {
-			if d.Name() == ".git" {
+			if _, skip := tarSubtreeSkipDirs[d.Name()]; skip {
 				return filepath.SkipDir
 			}
 			return nil

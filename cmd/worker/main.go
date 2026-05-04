@@ -28,6 +28,8 @@ func main() {
 		Queues: map[string]int{
 			"deploy-web-pro":  6,
 			"deploy-web-free": 2,
+			"expo-ota-pro":    4,
+			"expo-ota-free":   1,
 			"cron":            1,
 		},
 		RetryDelayFunc: func(n int, _ error, _ *asynq.Task) time.Duration {
