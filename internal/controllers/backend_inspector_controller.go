@@ -1,9 +1,16 @@
 package controllers
 
 import (
+	"context"
+	"errors"
 	"regexp"
 	"sort"
 	"strings"
+	"time"
+
+	"github.com/knid/wemob/internal/models"
+	"github.com/knid/wemob/internal/responses"
+	"github.com/knid/wemob/internal/services/fly"
 )
 
 // RouteEntry is one method-handler exported from a Next.js route.ts file.
@@ -70,4 +77,84 @@ func nextRouteURL(filePath string) string {
 		}
 	}
 	return "/" + strings.Join(parts, "/")
+}
+
+// FlyInspector is the slice of fly.Service the studio inspector consumes.
+// Defined as an interface so tests can substitute a fake without spinning
+// an httptest.Server. *fly.Service satisfies it.
+type FlyInspector interface {
+	GetMachineStatus(appName string) (fly.MachineStatus, error)
+	GetLogs(appName string, since time.Time, level string) ([]fly.LogLine, error)
+}
+
+// Compile-time guarantee that *fly.Service implements FlyInspector.
+var _ FlyInspector = (*fly.Service)(nil)
+
+// GetBackendHealth aggregates Fly machine status + last-deploy info for the
+// given mobile-native project. Returns a fully populated response even when
+// the backend doesn't exist yet (HasBackend=false, color=gray) — never errs
+// for "no backend".
+func (c *Controller) GetBackendHealth(ctx context.Context, project *models.AppProject) (responses.BackendHealthResponse, error) {
+	out := responses.BackendHealthResponse{
+		DerivedColor: "gray",
+	}
+
+	if project == nil {
+		return out, errors.New("nil project")
+	}
+
+	runtimeApp, err := c.DB.GetRuntimeAppByAppProjectID(project.ID.String())
+	if err != nil || runtimeApp == nil || runtimeApp.FlyAppName == "" {
+		return out, nil // gray, no backend
+	}
+
+	out.HasBackend = true
+	out.URL = c.BackendDeployURL(project)
+
+	if c.FlyInspector != nil {
+		if status, ferr := c.FlyInspector.GetMachineStatus(runtimeApp.FlyAppName); ferr == nil {
+			out.MachineState = status.State
+			out.Region = status.Region
+			out.Image = status.Image
+			out.UpdatedAt = status.UpdatedAt
+		}
+	}
+
+	if dep, derr := c.DB.GetLatestAppDeployment(project.ID.String(), "web"); derr == nil && dep != nil && !dep.CreatedAt.IsZero() {
+		out.LastDeployAt = dep.CreatedAt.Format(time.RFC3339)
+		out.LastDeployOK = dep.Status == "deployed"
+		out.LastDeployURL = dep.DeployedURL
+	}
+
+	out.DerivedColor = deriveBackendColor(out)
+	return out, nil
+}
+
+// deriveBackendColor encodes the spec's color rules:
+//
+//	green  — machine started + last deploy succeeded
+//	yellow — deploying / never deployed / auto-stopped (idle, not broken)
+//	red    — last deploy failed or machine in an error state
+//	gray   — no backend yet (caller handles this; here we expect HasBackend=true)
+func deriveBackendColor(h responses.BackendHealthResponse) string {
+	if !h.HasBackend {
+		return "gray"
+	}
+	switch h.MachineState {
+	case "destroyed", "destroying", "failed":
+		return "red"
+	}
+	if h.LastDeployAt != "" && !h.LastDeployOK {
+		return "red"
+	}
+	if h.LastDeployAt == "" {
+		return "yellow"
+	}
+	if h.MachineState == "stopped" || h.MachineState == "" {
+		return "yellow"
+	}
+	if h.MachineState == "started" && h.LastDeployOK {
+		return "green"
+	}
+	return "yellow"
 }

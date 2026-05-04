@@ -4,6 +4,8 @@ import (
 	"reflect"
 	"sort"
 	"testing"
+
+	"github.com/knid/wemob/internal/responses"
 )
 
 func TestParseRoutes_BasicGET(t *testing.T) {
@@ -87,5 +89,28 @@ func TestParseRoutes_NoHandlersIsEmpty(t *testing.T) {
 	got := ParseRoutes(files)
 	if len(got) != 0 {
 		t.Errorf("expected empty, got %+v", got)
+	}
+}
+
+func TestDeriveBackendColor(t *testing.T) {
+	tests := []struct {
+		name string
+		in   responses.BackendHealthResponse
+		want string
+	}{
+		{"no backend", responses.BackendHealthResponse{HasBackend: false}, "gray"},
+		{"never deployed", responses.BackendHealthResponse{HasBackend: true, MachineState: ""}, "yellow"},
+		{"deploy failed", responses.BackendHealthResponse{HasBackend: true, MachineState: "started", LastDeployAt: "t", LastDeployOK: false}, "red"},
+		{"machine destroyed", responses.BackendHealthResponse{HasBackend: true, MachineState: "destroyed", LastDeployAt: "t", LastDeployOK: true}, "red"},
+		{"started + deployed", responses.BackendHealthResponse{HasBackend: true, MachineState: "started", LastDeployAt: "t", LastDeployOK: true}, "green"},
+		{"auto-stopped (idle)", responses.BackendHealthResponse{HasBackend: true, MachineState: "stopped", LastDeployAt: "t", LastDeployOK: true}, "yellow"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := deriveBackendColor(tc.in)
+			if got != tc.want {
+				t.Errorf("got %q, want %q", got, tc.want)
+			}
+		})
 	}
 }

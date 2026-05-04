@@ -44,6 +44,7 @@ type Controller struct {
 	// keys, the template's lib/iap.ts initIAP() no-ops + warns).
 	RevenueCatService      *revenuecat.Service
 	FlyService             *fly.Service
+	FlyInspector           FlyInspector
 	GiteaService           *gitea.Service
 	NeonService            *neon.Service
 	GitRepoService         *gitrepo.Service
@@ -93,6 +94,7 @@ func NewController(db *database.Database, concurrentBuildLimiter chan struct{},
 		CodemagicService:       codemagicService,
 		RevenueCatService:      revenueCatService,
 		FlyService:             flyService,
+		FlyInspector:           flyService,
 		GiteaService:           giteaService,
 		NeonService:            neonService,
 		GitRepoService:         gitRepoService,
