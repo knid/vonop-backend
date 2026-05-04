@@ -23,7 +23,6 @@ import (
 	"github.com/knid/wemob/internal/database"
 	appMiddleware "github.com/knid/wemob/internal/middleware"
 	"github.com/knid/wemob/internal/models"
-	"github.com/knid/wemob/internal/services/pendingnudge"
 	"github.com/knid/wemob/internal/services/secret"
 	"github.com/knid/wemob/internal/services/storage"
 	"github.com/knid/wemob/internal/services/storepoll"
@@ -2319,17 +2318,6 @@ func main() {
 	}
 	go releasePoller.Run(releasePollCtx)
 
-	// Phase 5c-iii: periodically email users with pending_connection
-	// deployments that they should wire up a connection (or switch to
-	// managed). Max 3 nudges, 2 days apart.
-	nudgeCtx, cancelNudge := context.WithCancel(context.Background())
-	nudgeRunner := &pendingnudge.Runner{
-		DB:           controller.DB,
-		EventService: controller.EventService,
-		Every:        6 * time.Hour,
-	}
-	go nudgeRunner.Run(nudgeCtx)
-
 	// Graceful shutdown on SIGINT/SIGTERM
 	go func() {
 		quit := make(chan os.Signal, 1)
@@ -2355,7 +2343,6 @@ func main() {
 
 		// Stop the store-API poller.
 		cancelPoller()
-		cancelNudge()
 		cancelReleasePoll()
 
 		// Shutdown main server

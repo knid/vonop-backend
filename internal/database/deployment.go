@@ -92,19 +92,3 @@ func (d *Database) ListInFlightDeployments(ctx context.Context) ([]models.Deploy
 	}
 	return deployments, nil
 }
-
-// ListPendingConnectionDeployments returns all deployments awaiting a
-// user-side connection. Includes User relation so the nudge runner
-// can address an event to them.
-func (d *Database) ListPendingConnectionDeployments(ctx context.Context) ([]models.Deployment, error) {
-	var deployments []models.Deployment
-	if err := d.DB.NewSelect().
-		Model(&deployments).
-		Relation("User").
-		Where("deployment.status = ?", "pending_connection").
-		Scan(ctx); err != nil {
-		return nil, err
-	}
-	return deployments, nil
-}
-

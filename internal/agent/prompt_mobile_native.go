@@ -1,8 +1,8 @@
 // internal/agent/prompt_mobile_native.go
 //
-// BasePromptMobileNative is the base system prompt for the new Expo (React Native)
-// mobile_app_native project type. Replaces the legacy WebView shell prompt
-// (BasePromptMobile in prompt_mobile_legacy.go) which is removed in P3.3.
+// BasePromptMobileNative is the base system prompt for the Expo (React Native)
+// mobile_app_native project type. Replaced the legacy WebView shell prompt;
+// the legacy file was removed.
 //
 // Designed for prompt caching — its text does NOT change between runs.
 // Project-specific content lives in AuthAddendum / DatabaseAddendum.

@@ -22,7 +22,7 @@ import (
 //  1. Validate project type + per-platform CanBuild* permissions
 //  2. Find or create a v1 Project shadow keyed by url="expo://"+slug — the
 //     AppBuildTask FK still references the legacy Project model, so we need
-//     a stable shadow row per AppProject (mirrors BuildAppMobile pattern)
+//     a stable shadow row per AppProject
 //  3. Reject if a build for that shadow project is still in flight
 //  4. Compute the next build number from the last shadow-project build
 //  5. Tarball the mobile/ subtree from the project's git repo
@@ -30,11 +30,10 @@ import (
 //  7. Insert Build + per-platform AppBuildTask rows
 //  8. Trigger Codemagic per platform; mark per-task failed on trigger error
 //
-// Per-platform error isolation matches BuildAppMobile: a triggerErr on one
-// platform marks that task Failed and continues with the others. Returns a
-// non-nil error only when the call can't make ANY progress (no platforms
-// triggered) OR a precondition failed (limits, pending build, missing
-// services, repo open failure).
+// Per-platform error isolation: a triggerErr on one platform marks that task
+// Failed and continues with the others. Returns a non-nil error only when the
+// call can't make ANY progress (no platforms triggered) OR a precondition
+// failed (limits, pending build, missing services, repo open failure).
 func (c *Controller) BuildExpoMobile(ctx context.Context, project *models.AppProject, user *models.User, opts ExpoBuildOptions) (*models.Build, []*models.AppBuildTask, error) {
 	if project == nil {
 		return nil, nil, fmt.Errorf("project is required")
@@ -75,8 +74,8 @@ func (c *Controller) BuildExpoMobile(ctx context.Context, project *models.AppPro
 
 	// Per-platform permission gate. GetUserLimits returns an error when the
 	// user has no subscription/limits row — we silently skip the check in
-	// that case (matches BuildAppMobile behavior; the test fixture for the
-	// permission-denied case wires real limits + RemoteConfig).
+	// that case (the test fixture for the permission-denied case wires real
+	// limits + RemoteConfig).
 	if limits, err := c.GetUserLimits(user); err == nil && limits != nil {
 		if wantAndroid && !limits.CanBuildToAndroid {
 			return nil, nil, fmt.Errorf("your subscription does not allow Android builds")
@@ -96,8 +95,7 @@ func (c *Controller) BuildExpoMobile(ctx context.Context, project *models.AppPro
 	if err != nil || v1project == nil || v1project.ID == uuid.Nil {
 		// OneSignal IDs are notnull,unique on Project. Expo apps don't use
 		// OneSignal (push goes through Expo Notifications), so we stash
-		// stable placeholders here that won't collide with the real
-		// "wemob-app-{appProjectID}" prefix used by BuildAppMobile.
+		// stable placeholders here keyed by the AppProject UUID.
 		v1project = &models.Project{
 			UserID:            user.ID,
 			URL:               shadowURL,
@@ -342,9 +340,9 @@ func (c *Controller) BuildExpoMobile(ctx context.Context, project *models.AppPro
 }
 
 // ExpoBuildOptions describes the parameters for a new Expo mobile build.
-// User-passthrough fields (AppName, Icon, SplashColor) mirror
-// BuildAppMobile's signature so the HTTP view can pass them through
-// unchanged in P1.1.C T3.
+// User-passthrough fields (AppName, Icon, SplashColor) are forwarded to
+// Codemagic via env vars so the HTTP view can pass user input through
+// unchanged.
 type ExpoBuildOptions struct {
 	Platforms        []string // "android", "ios", or both
 	AppName          string   // user-facing app title (Info.plist + strings.xml)

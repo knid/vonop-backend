@@ -26,13 +26,6 @@ type ProjectListResponse struct {
 	ProjectList []ProjectInformationResponse `json:"project_list"`
 }
 
-type ProjectCreateResponse struct {
-	ProjectID uuid.UUID `json:"project_id"`
-	TaskID    uuid.UUID `json:"task_id"`
-	SuccessResponse
-	// ProjectInformationResponse
-}
-
 type ProjectUpdateResponse struct {
 	ProjectInformationResponse
 }

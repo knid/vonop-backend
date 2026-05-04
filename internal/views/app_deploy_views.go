@@ -166,6 +166,10 @@ func (v *HttpViews) UndeployAppWeb(w http.ResponseWriter, r *http.Request) {
 }
 
 // POST /v2/apps/{appId}/deploy/mobile
+//
+// Only mobile_app_native projects are accepted — they publish via the
+// self-hosted expo-updates pipeline. Other project types are rejected with
+// HTTP 400 (the legacy WebView wrap-the-web-URL flow has been removed).
 func (v *HttpViews) DeployAppMobile(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
@@ -177,6 +181,18 @@ func (v *HttpViews) DeployAppMobile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	appID := chi.URLParam(r, "appId")
+
+	project, err := v.Controller.GetAppProject(appID, user)
+	if err != nil {
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
+		return
+	}
+	if project.ProjectType != models.ProjectTypeMobileAppNative {
+		utils.JSONError(w, constants.ErrValidationBody,
+			"this endpoint only accepts mobile_app_native projects",
+			http.StatusBadRequest, nil)
+		return
+	}
 
 	// Check mobile deploy permission and limits
 	limits, planName, limitsErr := v.Controller.GetUserLimitsWithPlan(user)
@@ -214,58 +230,10 @@ func (v *HttpViews) DeployAppMobile(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	project, err := v.Controller.GetAppProject(appID, user)
-	if err != nil {
-		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
-		return
-	}
-
 	// Native Expo apps publish via the self-hosted expo-updates pipeline.
-	// Same endpoint, different worker — installed clients pick up the new
-	// JS bundle on next launch (no app store review).
-	if project.ProjectType == models.ProjectTypeMobileAppNative {
-		v.deployExpoOTA(w, r, project, user)
-		return
-	}
-
-	if existing, err := v.Controller.DB.GetBuildingAppDeployment(project.ID.String()); err == nil && existing != nil && existing.ID.String() != "" {
-		utils.JSONErrorCode(w, constants.ErrDeployInProgress, http.StatusConflict, nil)
-		return
-	}
-
-	// Legacy WebView mobile wraps a deployed web URL — require the web app
-	// to already be deployed.
-	deployment, err := v.Controller.DB.GetLatestAppDeployment(project.ID.String(), "web")
-	if err != nil || deployment == nil || deployment.Status != "deployed" || deployment.DeployedURL == "" {
-		utils.JSONError(w, constants.ErrDeployWebRequired,
-			"deploy this app to the web first; mobile builds wrap the web URL",
-			http.StatusConflict, nil)
-		return
-	}
-
-	v.Controller.TrackUserEvent(user, "app_deployed_mobile", posthog.NewProperties().
-		Set("app_id", project.ID.String()).
-		Set("project_type", project.ProjectType).
-		Set("deploy_version", deployment.Version))
-
-	go v.Controller.EventService.SendEvent(user, constants.EVENT_MOBILE_DEPLOYMENT_SUCCEEDED, map[string]any{
-		"app_id":       project.ID.String(),
-		"project_type": project.ProjectType,
-		"version":      deployment.Version,
-		"deployed_url": deployment.DeployedURL,
-	})
-
-	utils.JSONResponse(w, responses.AppDeploymentResponse{
-		ID:           deployment.ID,
-		AppProjectID: deployment.AppProjectID,
-		Platform:     deployment.Platform,
-		Provider:     deployment.Provider,
-		Status:       deployment.Status,
-		DeployedURL:  deployment.DeployedURL,
-		Version:      deployment.Version,
-		CreatedAt:    deployment.CreatedAt,
-		UpdatedAt:    deployment.UpdatedAt,
-	}, http.StatusCreated)
+	// Installed clients pick up the new JS bundle on next launch (no app
+	// store review).
+	v.deployExpoOTA(w, r, project, user)
 }
 
 // deployExpoOTA enqueues a self-hosted expo-updates publish for a
@@ -307,6 +275,9 @@ func (v *HttpViews) deployExpoOTA(w http.ResponseWriter, r *http.Request, projec
 }
 
 // DELETE /v2/apps/{appId}/deploy/mobile
+//
+// Only mobile_app_native projects are accepted; other project types are
+// rejected with HTTP 400.
 func (v *HttpViews) UndeployAppMobile(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
@@ -318,6 +289,12 @@ func (v *HttpViews) UndeployAppMobile(w http.ResponseWriter, r *http.Request) {
 	project, err := v.Controller.GetAppProject(appID, user)
 	if err != nil {
 		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
+		return
+	}
+	if project.ProjectType != models.ProjectTypeMobileAppNative {
+		utils.JSONError(w, constants.ErrValidationBody,
+			"this endpoint only accepts mobile_app_native projects",
+			http.StatusBadRequest, nil)
 		return
 	}
 

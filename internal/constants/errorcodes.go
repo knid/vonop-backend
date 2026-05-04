@@ -57,7 +57,6 @@ const (
 	ErrDeployLimitReached = "DEPLOY_LIMIT_REACHED" // details: { limit, used }
 	ErrDeployInProgress   = "DEPLOY_IN_PROGRESS"
 	ErrDeployFailed       = "DEPLOY_FAILED"
-	ErrDeployWebRequired  = "DEPLOY_WEB_REQUIRED" // legacy WebView mobile deploy: web must be deployed first
 
 	// Domain
 	ErrDomainTaken     = "DOMAIN_TAKEN"
@@ -161,7 +160,6 @@ var DefaultMessages = map[string]string{
 	ErrDeployLimitReached: "Deploy limit reached on your plan.",
 	ErrDeployInProgress:   "A deployment is already in progress.",
 	ErrDeployFailed:       "Deployment failed.",
-	ErrDeployWebRequired:  "Deploy this app to the web first.",
 
 	ErrDomainTaken:     "This domain is already in use.",
 	ErrDomainInvalid:   "Invalid domain.",
