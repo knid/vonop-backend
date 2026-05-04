@@ -1,6 +1,7 @@
 import * as React from "react";
-import { View, type ViewProps } from "react-native";
-import { Text as RNText, type TextProps as RNTextProps } from "react-native";
+import { type ViewProps } from "react-native";
+import { type TextProps as RNTextProps } from "react-native";
+import { View, Text as RNText } from "@/components/tw";
 import { cn } from "@/lib/utils";
 
 // ---------------------------------------------------------------------------

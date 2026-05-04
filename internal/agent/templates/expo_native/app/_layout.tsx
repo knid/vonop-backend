@@ -5,12 +5,12 @@ import "../global.css";
 import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { useEffect } from "react";
-import { View } from "react-native";
 import * as Updates from "expo-updates";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { PortalHost } from "@rn-primitives/portal";
 
+import { View } from "@/components/tw";
 import { ForceUpdateScreen } from "@/components/ForceUpdateScreen";
 import { useMinVersionCheck } from "@/lib/forceUpdate";
 import { initIAP } from "@/lib/iap";

@@ -182,10 +182,9 @@ func TestCreateAppProject_MobileAppNative_ScaffoldsRepoSkeleton(t *testing.T) {
 	for _, expected := range []string{
 		"mobile/package.json",
 		"mobile/app.json",
-		"mobile/babel.config.js",
 		"mobile/metro.config.js",
+		"mobile/postcss.config.mjs",
 		"mobile/tsconfig.json",
-		"mobile/tailwind.config.js",
 		"mobile/global.css",
 		"mobile/app/_layout.tsx",
 		"mobile/app/(app)/index.tsx",
@@ -194,6 +193,7 @@ func TestCreateAppProject_MobileAppNative_ScaffoldsRepoSkeleton(t *testing.T) {
 		"mobile/lib/iap.ts",
 		"mobile/lib/push.ts",
 		"mobile/components/ui/button.tsx",
+		"mobile/components/tw/index.tsx",
 	} {
 		if !repo.FileExists(expected) {
 			t.Errorf("expected %s to exist in mobile_app_native scaffold", expected)

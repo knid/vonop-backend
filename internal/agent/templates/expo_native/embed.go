@@ -7,9 +7,9 @@
 //
 // Used by Controller.scaffoldExpoTemplate at project creation time —
 // every mobile_app_native project's git repo gets an opinionated Expo
-// SDK 54 + Expo Router + NativeWind v4 + react-native-reusables baseline
+// SDK 54 + Expo Router + NativeWind v5 + react-native-css baseline
 // under mobile/ so the AI agent can read existing files (lib/api.ts,
-// lib/auth.ts, components/ui/*) and the preview sandbox can run
+// lib/auth.ts, components/ui/*, components/tw/*) and the preview sandbox can run
 // `npx expo start --web` with no extra setup.
 package expo_native
 
@@ -21,6 +21,6 @@ import "embed"
 // it would be skipped without `all:`).
 //
 //go:embed all:app all:assets all:components all:lib all:plugins
-//go:embed app.json babel.config.js global.css metro.config.js
-//go:embed nativewind-env.d.ts package.json tailwind.config.js tsconfig.json
+//go:embed app.json global.css metro.config.js postcss.config.mjs
+//go:embed nativewind-env.d.ts package.json tsconfig.json
 var FS embed.FS

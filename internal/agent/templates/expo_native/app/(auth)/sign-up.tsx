@@ -1,7 +1,8 @@
 import React from "react";
-import { Platform, View } from "react-native";
+import { Platform } from "react-native";
 import { Link, router } from "expo-router";
 import * as AppleAuthentication from "expo-apple-authentication";
+import { View } from "@/components/tw";
 
 import {
   authClient,

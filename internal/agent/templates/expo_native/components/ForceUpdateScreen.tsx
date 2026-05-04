@@ -1,4 +1,5 @@
-import { Linking, View } from "react-native";
+import { Linking } from "react-native";
+import { View } from "@/components/tw";
 
 import { Button } from "@/components/ui/button";
 import { Text } from "@/components/ui/text";

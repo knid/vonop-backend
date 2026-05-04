@@ -1,5 +1,6 @@
 import * as React from "react";
-import { Text as RNText, type TextProps as RNTextProps } from "react-native";
+import { type TextProps as RNTextProps } from "react-native";
+import { Text as TWText } from "@/components/tw";
 import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 
@@ -23,10 +24,10 @@ export interface TextProps extends RNTextProps, VariantProps<typeof textVariants
   className?: string;
 }
 
-const Text = React.forwardRef<React.ElementRef<typeof RNText>, TextProps>(
+const Text = React.forwardRef<React.ElementRef<typeof TWText>, TextProps>(
   ({ className, variant, ...props }, ref) => {
     return (
-      <RNText
+      <TWText
         ref={ref}
         className={cn(textVariants({ variant }), className)}
         {...props}
