@@ -315,6 +315,7 @@ func (v *HttpViews) GatewayChat(w http.ResponseWriter, r *http.Request) {
 	}
 	utils.SetLLMHeaders(upstreamReq, provider)
 
+	upstreamStart := time.Now()
 	upstreamResp, err := gatewayHTTPClient.Do(upstreamReq)
 	if err != nil {
 		slog.Error("gateway chat: upstream request failed", "error", err, "model", model)
@@ -358,14 +359,14 @@ func (v *HttpViews) GatewayChat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if stream {
-		v.handleStreamingChat(w, r, upstreamResp, user, orgID, model, provider.Name, projectID)
+		v.handleStreamingChat(w, r, upstreamResp, user, orgID, model, provider.Name, projectID, upstreamStart)
 	} else {
-		v.handleNonStreamingChat(w, upstreamResp, user, orgID, model, provider.Name, projectID)
+		v.handleNonStreamingChat(w, upstreamResp, user, orgID, model, provider.Name, projectID, upstreamStart)
 	}
 }
 
 // handleStreamingChat proxies a streaming SSE response from the upstream provider.
-func (v *HttpViews) handleStreamingChat(w http.ResponseWriter, r *http.Request, upstream *http.Response, user *models.User, orgID uuid.UUID, model, providerName, projectID string) {
+func (v *HttpViews) handleStreamingChat(w http.ResponseWriter, r *http.Request, upstream *http.Response, user *models.User, orgID uuid.UUID, model, providerName, projectID string, upstreamStart time.Time) {
 	utils.SetSSEHeaders(w)
 	w.WriteHeader(upstream.StatusCode)
 
@@ -408,7 +409,7 @@ func (v *HttpViews) handleStreamingChat(w http.ResponseWriter, r *http.Request, 
 
 	// Client disconnect or upstream truncation should still bill for tokens we generated.
 	if lastUsage != nil {
-		v.recordGatewayChatUsage(user, orgID, model, providerName, projectID, lastUsage)
+		v.recordGatewayChatUsage(user, orgID, model, providerName, projectID, lastUsage, time.Since(upstreamStart).Milliseconds(), true)
 	} else if scanErr != nil || ctxErr != nil {
 		slog.Warn("gateway chat: stream ended without usage chunk",
 			"project_id", projectID,
@@ -422,7 +423,7 @@ func (v *HttpViews) handleStreamingChat(w http.ResponseWriter, r *http.Request, 
 }
 
 // handleNonStreamingChat proxies a non-streaming response from the upstream provider.
-func (v *HttpViews) handleNonStreamingChat(w http.ResponseWriter, upstream *http.Response, user *models.User, orgID uuid.UUID, model, providerName, projectID string) {
+func (v *HttpViews) handleNonStreamingChat(w http.ResponseWriter, upstream *http.Response, user *models.User, orgID uuid.UUID, model, providerName, projectID string, upstreamStart time.Time) {
 	body, err := io.ReadAll(upstream.Body)
 	if err != nil {
 		slog.Error("gateway chat: failed to read upstream response", "error", err)
@@ -439,7 +440,7 @@ func (v *HttpViews) handleNonStreamingChat(w http.ResponseWriter, upstream *http
 			Usage *utils.UsageInfo `json:"usage"`
 		}
 		if err := json.Unmarshal(body, &resp); err == nil && resp.Usage != nil {
-			v.recordGatewayChatUsage(user, orgID, model, providerName, projectID, resp.Usage)
+			v.recordGatewayChatUsage(user, orgID, model, providerName, projectID, resp.Usage, time.Since(upstreamStart).Milliseconds(), false)
 		}
 	}
 }
@@ -452,7 +453,7 @@ func (v *HttpViews) handleNonStreamingChat(w http.ResponseWriter, upstream *http
 // TokensToCredits formula handles correctly. See
 // Controller.GatewayChatCreditsOwed and
 // DB.AtomicAccumulateGatewayPending for the math and race semantics.
-func (v *HttpViews) recordGatewayChatUsage(user *models.User, orgID uuid.UUID, model, providerName, projectID string, usage *utils.UsageInfo) {
+func (v *HttpViews) recordGatewayChatUsage(user *models.User, orgID uuid.UUID, model, providerName, projectID string, usage *utils.UsageInfo, latencyMs int64, isStreaming bool) {
 	owed := v.Controller.GatewayChatCreditsOwed(model, usage)
 	if owed > 0 {
 		if _, err := v.Controller.AccumulateGatewayChatCredits(user, orgID, owed, "gateway_chat", projectID); err != nil {
@@ -462,8 +463,12 @@ func (v *HttpViews) recordGatewayChatUsage(user *models.User, orgID uuid.UUID, m
 	}
 
 	tracker := utils.NewTokenTracker()
-	tracker.Record(model, *usage, 0, true)
-	go v.Controller.RecordTokenUsage(user, "gateway_chat", model, providerName, projectID, "gateway", tracker)
+	tracker.UserID = user.ID.String()
+	tracker.ProjectID = projectID
+	tracker.OrganizationID = orgID.String()
+	tracker.TraceID = uuid.New().String()
+	tracker.Record(model, *usage, latencyMs, isStreaming, "gateway_chat")
+	v.Controller.RecordTokenUsage(user, "gateway_chat", model, providerName, projectID, "gateway", tracker)
 }
 
 // GatewayImage handles POST /v2/gateway/images/generate.

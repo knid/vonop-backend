@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/go-playground/validator/v10"
+	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/utils"
@@ -74,6 +75,12 @@ func (v *HttpViews) NavBarAutoFillWithAI(w http.ResponseWriter, r *http.Request)
 	// Token tracking for post-hoc billing
 	tracker := utils.NewTokenTracker()
 	tracker.UserID = user.ID.String()
+	tracker.TraceID = uuid.New().String()
+	tracker.TrackContent = true
+	tracker.TraceInput = string(data)
+	if orgID, orgErr := v.Controller.RequireOrgIDForUser(user, nil); orgErr == nil {
+		tracker.OrganizationID = orgID.String()
+	}
 	ctx := utils.WithTokenTracker(r.Context(), tracker)
 
 	outputJson, err := utils.GetJSONFromLLM(ctx, "claude-haiku-4-5", constants.NAVBAR_ITEM_GENERATOR_PROMPT, string(data), v.Controller.AnthropicProvider())
@@ -81,6 +88,7 @@ func (v *HttpViews) NavBarAutoFillWithAI(w http.ResponseWriter, r *http.Request)
 		utils.JSONError(w, constants.ErrValidationBody, "Error generating items. Try again please.", http.StatusBadRequest, nil)
 		return
 	}
+	tracker.TraceOutput = outputJson
 
 	v.Controller.RecordTokenUsage(user, "navbar_autofill",
 		"claude-haiku-4-5",

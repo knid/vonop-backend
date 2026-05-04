@@ -14,7 +14,11 @@ import (
 // The mobile keyword fast-path runs first; the LLM still distinguishes
 // "ecommerce" vs "app" for non-mobile prompts. Falls back to keyword detection
 // if the LLM call fails.
-func (c *Controller) classifyProjectType(ctx context.Context, prompt string) string {
+//
+// The optional `user` is purely for PostHog attribution — the call runs before
+// CreateAppProject persists anything, so credit deduction is handled by the
+// caller after the project lands. Pass nil to skip the trace.
+func (c *Controller) classifyProjectType(ctx context.Context, prompt string, user *models.User) string {
 	// Fast path: mobile keyword classifier (added in P0.1 T15)
 	if looksLikeMobileNative(prompt) {
 		return models.ProjectTypeMobileAppNative
@@ -29,6 +33,12 @@ func (c *Controller) classifyProjectType(ctx context.Context, prompt string) str
 	if provider.IsAnthropic() {
 		model = "claude-haiku-4-5-20251001"
 	}
+
+	tracker := utils.NewTokenTracker()
+	if user != nil {
+		tracker.UserID = user.ID.String()
+	}
+	ctx = utils.WithTokenTracker(ctx, tracker)
 
 	system := `Classify the user's project description into exactly one category.
 Reply with ONLY the category name, nothing else.
@@ -47,6 +57,9 @@ Examples:
 - "iOS fitness app with HealthKit" → mobile_app_native`
 
 	result, err := utils.GetTextFromLLM(ctx, model, system, prompt, provider, 256)
+	if user != nil {
+		c.RecordTokenUsage(user, "project_classify", model, provider.Name, "", "standard", tracker)
+	}
 	if err != nil {
 		slog.Warn("LLM classification failed, falling back to keyword detection", "error", err)
 		if looksLikeEcommerce(prompt) {

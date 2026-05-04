@@ -856,22 +856,52 @@ func (c *Controller) grantSubscriptionCreditsCore(outerTx *bun.Tx, user *models.
 
 // messagesToPostHogInput converts []utils.Message to the format PostHog expects
 // for $ai_input: [{role, content: [{type: "text", text: "..."}]}].
-// Truncates to last 50 messages and 10K chars per message.
+// Caps the payload at 50 messages × 10K chars each. When the conversation is
+// longer than the message cap, the leading system prompt is pinned and the
+// remainder is filled from the tail — a straight tail-slice was dropping the
+// system block on long chats, which made traces useless for debugging cache
+// behaviour and prompt issues.
 func messagesToPostHogInput(msgs []utils.Message) []map[string]interface{} {
 	const maxMessages = 50
 	const maxChars = 10000
-	start := 0
-	if len(msgs) > maxMessages {
-		start = len(msgs) - maxMessages
+
+	pickIndices := func() []int {
+		if len(msgs) <= maxMessages {
+			indices := make([]int, len(msgs))
+			for i := range msgs {
+				indices[i] = i
+			}
+			return indices
+		}
+		// Long chat: keep the system prompt (always msgs[0] when present)
+		// + last (maxMessages-1) messages.
+		systemHead := 0
+		if msgs[0].Role == "system" {
+			systemHead = 1
+		}
+		tailStart := len(msgs) - (maxMessages - systemHead)
+		if tailStart < systemHead {
+			tailStart = systemHead
+		}
+		indices := make([]int, 0, maxMessages)
+		for i := 0; i < systemHead; i++ {
+			indices = append(indices, i)
+		}
+		for i := tailStart; i < len(msgs); i++ {
+			indices = append(indices, i)
+		}
+		return indices
 	}
-	out := make([]map[string]interface{}, 0, len(msgs)-start)
-	for _, m := range msgs[start:] {
-		content := m.Content
+
+	indices := pickIndices()
+	out := make([]map[string]interface{}, 0, len(indices))
+	for _, i := range indices {
+		content := msgs[i].Content
 		if len(content) > maxChars {
 			content = content[:maxChars] + "..."
 		}
 		out = append(out, map[string]interface{}{
-			"role": m.Role,
+			"role": msgs[i].Role,
 			"content": []map[string]string{
 				{"type": "text", "text": content},
 			},
@@ -954,6 +984,17 @@ func (c *Controller) RecordTokenUsage(user *models.User, action, model, provider
 			traceID = uuid.New().String()
 		}
 
+		// $ai_session_id groups events from one conversational session in
+		// PostHog's LLM dashboards. Use RunID when the caller has one (agent
+		// runs); fall back to the trace id so single-trace events still
+		// group (instead of every chat-turn for the same project being
+		// collapsed into a project-id "session", which is what reference=projectID
+		// caused before).
+		sessionID := tracker.RunID
+		if sessionID == "" {
+			sessionID = traceID
+		}
+
 		// Per-call $ai_generation events
 		for _, entry := range tracker.Entries() {
 			// Normalize per-entry model name too (tracker records raw model from each call).
@@ -970,7 +1011,7 @@ func (c *Controller) RecordTokenUsage(user *models.User, action, model, provider
 				Set("$ai_trace_id", traceID).
 				Set("$ai_span_id", spanID).
 				Set("$ai_parent_id", traceID).
-				Set("$ai_session_id", reference).
+				Set("$ai_session_id", sessionID).
 				Set("$ai_latency", float64(entry.LatencyMs)/1000.0).
 				Set("$ai_is_error", false).
 				Set("$ai_stream", entry.IsStreaming).
@@ -1002,17 +1043,20 @@ func (c *Controller) RecordTokenUsage(user *models.User, action, model, provider
 			}
 			if entry.CostUSD > 0 {
 				props.Set("$ai_total_cost_usd", entry.CostUSD)
-				// Standard PostHog LLM Analytics properties for built-in dashboard
-				inputCost, outputCost := utils.EstimateInputOutputCostUSD(
-					entryModel, entry.PromptTokens, entry.CompletionTokens,
-					entry.CacheCreationInputTokens, entry.CacheReadInputTokens,
-				)
-				if inputCost > 0 {
-					props.Set("$ai_input_cost", inputCost)
-				}
-				if outputCost > 0 {
-					props.Set("$ai_output_cost", outputCost)
-				}
+			}
+			// Always compute the catalog-based input/output split so PostHog's
+			// built-in cost panels work for every model in modelCosts. Returns
+			// (0, 0) for unknown models — emit only the non-zero leg so we don't
+			// distort dashboards by claiming we know a cost we don't.
+			inputCost, outputCost := utils.EstimateInputOutputCostUSD(
+				entryModel, entry.PromptTokens, entry.CompletionTokens,
+				entry.CacheCreationInputTokens, entry.CacheReadInputTokens,
+			)
+			if inputCost > 0 {
+				props.Set("$ai_input_cost", inputCost)
+			}
+			if outputCost > 0 {
+				props.Set("$ai_output_cost", outputCost)
 			}
 			if entry.InputMessages != nil {
 				props.Set("$ai_input", messagesToPostHogInput(entry.InputMessages))
@@ -1052,7 +1096,7 @@ func (c *Controller) RecordTokenUsage(user *models.User, action, model, provider
 		traceProps := posthog.NewProperties().
 			Set("$ai_trace_id", traceID).
 			Set("$ai_trace_name", action).
-			Set("$ai_session_id", reference).
+			Set("$ai_session_id", sessionID).
 			Set("$ai_model", model).
 			Set("$ai_provider", provider).
 			Set("$ai_latency", float64(wallClockMs)/1000.0).
@@ -1224,13 +1268,23 @@ func (c *Controller) SetMemberCreditCap(user *models.User, orgID, memberID strin
 	return c.DB.UpdateMemberCap(orgID, memberID, cap)
 }
 
-// RecordLLMError sends a PostHog $ai_generation event for a failed LLM call
-// and — when the tracker is non-nil — a matching $ai_trace grouping event so
-// failures always surface on the LLM Analytics dashboard even when no round
-// completed. The tracker's TraceID/RunID link this error to the run's other
-// events and to the AppAgentRun row.
+// RecordLLMError emits a synthetic error $ai_generation span so the failure
+// shows up as a child node in the PostHog trace timeline alongside the run's
+// successful generations. Skipped when the tracker has zero entries — the
+// $ai_trace event already carries TraceErrorCode/Message in that case (set by
+// agent.Run before invoking RecordLLMUsage), so emitting an extra
+// $ai_generation here would only inflate error-rate panels with a synthetic
+// 0-token row that filters like `input_tokens > 0` would silently miss anyway.
+//
+// The tracker's TraceID/RunID/OrgID link this error to the run's other events
+// and to the AppAgentRun row.
 func (c *Controller) RecordLLMError(user *models.User, tracker *utils.TokenTracker, action, model, provider, reference, appType string, latencyMs int64, errCode, errMsg string) {
 	if c.PostHog == nil || user == nil {
+		return
+	}
+	// No entries → the $ai_trace event already represents the failure. Don't
+	// double-emit a synthetic generation that distorts error counts.
+	if tracker == nil || len(tracker.Entries()) == 0 {
 		return
 	}
 
@@ -1240,11 +1294,13 @@ func (c *Controller) RecordLLMError(user *models.User, tracker *utils.TokenTrack
 		model = model[idx+1:]
 	}
 
-	traceID := ""
-	runID := ""
-	if tracker != nil {
-		traceID = tracker.TraceID
-		runID = tracker.RunID
+	traceID := tracker.TraceID
+	runID := tracker.RunID
+
+	// Mirror RecordTokenUsage: $ai_session_id = runID when present, otherwise traceID.
+	sessionID := runID
+	if sessionID == "" {
+		sessionID = traceID
 	}
 
 	props := posthog.NewProperties().
@@ -1252,7 +1308,7 @@ func (c *Controller) RecordLLMError(user *models.User, tracker *utils.TokenTrack
 		Set("$ai_model", model).
 		Set("$ai_is_error", true).
 		Set("$ai_latency", float64(latencyMs)/1000.0).
-		Set("$ai_session_id", reference).
+		Set("$ai_session_id", sessionID).
 		// PostHog LLM Analytics dashboards key off $ai_error (the message
 		// string); $ai_error_message stays in parallel for any HogQL queries
 		// that already reference the legacy name.
@@ -1266,7 +1322,7 @@ func (c *Controller) RecordLLMError(user *models.User, tracker *utils.TokenTrack
 		props.Set("$ai_error_code", errCode)
 		props.Set("$ai_error_type", errCode)
 	}
-	if tracker != nil && tracker.OrganizationID != "" {
+	if tracker.OrganizationID != "" {
 		props.Set("org_id", tracker.OrganizationID)
 	}
 	if traceID != "" {

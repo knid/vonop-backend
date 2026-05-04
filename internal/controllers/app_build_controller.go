@@ -668,7 +668,10 @@ type AppValidationResult struct {
 // ValidateAppFiles runs LLM-based validation on project files.
 // Static deterministic checks were removed — the E2B sandbox catches build
 // errors at runtime, making a static pre-flight layer redundant.
-func (c *Controller) ValidateAppFiles(projectID string) (*AppValidationResult, error) {
+//
+// `user` is optional and only used for PostHog attribution. Pass nil to skip
+// the trace.
+func (c *Controller) ValidateAppFiles(ctx context.Context, projectID string, user *models.User) (*AppValidationResult, error) {
 	repo, err := c.GitRepoService.Open(projectID)
 	if err != nil {
 		return nil, fmt.Errorf("no files found to validate")
@@ -693,7 +696,20 @@ func (c *Controller) ValidateAppFiles(projectID string) (*AppValidationResult, e
 		fileContext.WriteString(fmt.Sprintf("\n--- %s (%s) ---\n%s\n", path, InferFileType(path), content))
 	}
 
-	responseJSON, err := utils.GetJSONFromLLM(context.Background(), model, constants.NEXTJS_VALIDATE_PROMPT, fileContext.String(), provider)
+	tracker := utils.NewTokenTracker()
+	if user != nil {
+		tracker.UserID = user.ID.String()
+		tracker.ProjectID = projectID
+		if orgID, orgErr := c.ResolveOrgForProjectID(user, projectID); orgErr == nil {
+			tracker.OrganizationID = orgID.String()
+		}
+	}
+	llmCtx := utils.WithTokenTracker(ctx, tracker)
+
+	responseJSON, err := utils.GetJSONFromLLM(llmCtx, model, constants.NEXTJS_VALIDATE_PROMPT, fileContext.String(), provider)
+	if user != nil {
+		c.RecordTokenUsage(user, "validate_app_files", model, provider.Name, projectID, "validate", tracker)
+	}
 	if err != nil {
 		slog.Error("validation LLM call failed", "error", err)
 		return &result, nil

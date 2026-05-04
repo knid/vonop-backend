@@ -198,6 +198,20 @@ Rules:
 	provider := c.llmProvider()
 	model := provider.FastModel()
 
+	// Defensive: if the caller didn't put a tracker on ctx, attach one bound to
+	// the project so the LLM helpers don't drop usage data on the floor. A
+	// future revival of this code path should also call RecordTokenUsage with
+	// the invoking user (this function intentionally has no User parameter so
+	// it stays callable from non-user paths like template provisioning).
+	if utils.TokenTrackerFromContext(ctx) == nil {
+		tracker := utils.NewTokenTracker()
+		tracker.ProjectID = project.ID.String()
+		if project.OrganizationID != uuid.Nil {
+			tracker.OrganizationID = project.OrganizationID.String()
+		}
+		ctx = utils.WithTokenTracker(ctx, tracker)
+	}
+
 	seedSQL, err := utils.GetTextFromLLM(ctx, model, "You are a SQL expert. Generate realistic seed data. Return ONLY valid SQL.", seedPrompt, provider, 8192)
 	if err != nil {
 		return "", fmt.Errorf("LLM seed generation: %w", err)

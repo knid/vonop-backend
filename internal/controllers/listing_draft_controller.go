@@ -58,6 +58,13 @@ func (c *Controller) DraftListing(ctx context.Context, user *models.User, appID 
 
 	tracker := utils.NewTokenTracker()
 	tracker.UserID = user.ID.String()
+	tracker.ProjectID = project.ID.String()
+	tracker.TraceID = uuid.New().String()
+	tracker.TrackContent = true
+	tracker.TraceInput = string(userJSON)
+	if project.OrganizationID != uuid.Nil {
+		tracker.OrganizationID = project.OrganizationID.String()
+	}
 	ctx = utils.WithTokenTracker(ctx, tracker)
 
 	raw, err := utils.GetJSONFromLLM(
@@ -70,6 +77,7 @@ func (c *Controller) DraftListing(ctx context.Context, user *models.User, appID 
 	if err != nil {
 		return nil, fmt.Errorf("listing draft LLM call failed: %w", err)
 	}
+	tracker.TraceOutput = raw
 
 	var out responses.ListingDraftResponse
 	if err := json.Unmarshal([]byte(raw), &out); err != nil {
@@ -81,14 +89,14 @@ func (c *Controller) DraftListing(ctx context.Context, user *models.User, appID 
 
 	c.RecordTokenUsage(user, "listing_draft",
 		"claude-haiku-4-5",
-		"anthropic", "", "standard", tracker)
+		"anthropic", project.ID.String(), "standard", tracker)
 	_, _, total, _ := tracker.Totals()
 	if total > 0 {
 		credits := c.CreditsForTracker(tracker)
 		orgID, orgErr := c.ResolveOrgForProjectID(user, project.ID.String())
 		if orgErr != nil {
 			slog.Warn("listing_draft: resolve org failed", "err", orgErr)
-		} else if err := c.DeductAICreditsUnchecked(user, orgID, credits, "listing_draft", ""); err != nil {
+		} else if err := c.DeductAICreditsUnchecked(user, orgID, credits, "listing_draft", project.ID.String()); err != nil {
 			slog.Warn("listing_draft: deduct credits failed", "err", err)
 		}
 	}

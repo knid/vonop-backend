@@ -830,7 +830,7 @@ func (v *HttpViews) ValidateAppFiles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := v.Controller.ValidateAppFiles(project.ID.String())
+	result, err := v.Controller.ValidateAppFiles(r.Context(), project.ID.String(), user)
 	if err != nil {
 		utils.JSONInternalError(w, err)
 		return

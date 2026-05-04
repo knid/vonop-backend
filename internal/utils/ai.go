@@ -255,6 +255,18 @@ func estimateCostUSD(model string, inputTokens, outputTokens, cacheCreation, cac
 	return cost
 }
 
+// resolveCostUSD picks the most accurate cost for a single LLM call: the
+// upstream-billed `usage.cost` (OpenRouter) when present, otherwise the
+// catalog-based estimate. Without this fallback, every PostHog $ai_generation
+// for a non-Claude model (modelCosts only carries Claude SKUs) reported
+// $ai_total_cost_usd = 0 even though OpenRouter knew the real number.
+func resolveCostUSD(model string, usage UsageInfo) float64 {
+	if usage.Cost > 0 {
+		return usage.Cost
+	}
+	return estimateCostUSD(model, usage.PromptTokens, usage.CompletionTokens, usage.CacheCreationInputTokens, usage.CacheReadInputTokens)
+}
+
 // TokenTracker is a thread-safe accumulator that collects token usage across multiple LLM calls.
 type TokenTracker struct {
 	mu           sync.Mutex
@@ -340,7 +352,7 @@ func (t *TokenTracker) Record(model string, usage UsageInfo, latencyMs int64, is
 		IsStreaming:              isStreaming,
 		SpanName:                 name,
 		RecordedAt:               time.Now(),
-		CostUSD:                  estimateCostUSD(model, usage.PromptTokens, usage.CompletionTokens, usage.CacheCreationInputTokens, usage.CacheReadInputTokens),
+		CostUSD:                  resolveCostUSD(model, usage),
 	})
 }
 
@@ -381,7 +393,7 @@ func (t *TokenTracker) RecordWithContent(model string, usage UsageInfo, latencyM
 		OutputText:               outputText,
 		SpanName:                 name,
 		RecordedAt:               time.Now(),
-		CostUSD:                  estimateCostUSD(model, usage.PromptTokens, usage.CompletionTokens, usage.CacheCreationInputTokens, usage.CacheReadInputTokens),
+		CostUSD:                  resolveCostUSD(model, usage),
 	})
 }
 
@@ -1514,7 +1526,11 @@ func streamJSONFromLLMWithMessagesOnce(ctx context.Context, model string, messag
 			latencyMs := time.Since(start).Milliseconds()
 			slog.Info("LLM usage", append([]any{"from", "llm_stream_chat", "model", model, "prompt_tokens", result.Usage.PromptTokens, "completion_tokens", result.Usage.CompletionTokens, "total_tokens", result.Usage.TotalTokens, "latency_ms", latencyMs}, trackerAttrs(ctx)...)...)
 			if tracker := TokenTrackerFromContext(ctx); tracker != nil {
-				tracker.Record(model, result.Usage, latencyMs, true, "stream_json")
+				if tracker.TrackContent {
+					tracker.RecordWithContent(model, result.Usage, latencyMs, true, messages, result.Text, "stream_json")
+				} else {
+					tracker.Record(model, result.Usage, latencyMs, true, "stream_json")
+				}
 			}
 		}
 		return result.Text, nil
@@ -1591,7 +1607,11 @@ func streamJSONFromLLMWithMessagesOnce(ctx context.Context, model string, messag
 		latencyMs := time.Since(start).Milliseconds()
 		slog.Info("LLM usage", append([]any{"from", "llm_stream_chat", "model", model, "prompt_tokens", lastUsage.PromptTokens, "completion_tokens", lastUsage.CompletionTokens, "total_tokens", lastUsage.TotalTokens, "latency_ms", latencyMs}, trackerAttrs(ctx)...)...)
 		if tracker := TokenTrackerFromContext(ctx); tracker != nil {
-			tracker.Record(model, lastUsage, latencyMs, true, "stream_json")
+			if tracker.TrackContent {
+				tracker.RecordWithContent(model, lastUsage, latencyMs, true, messages, fullText.String(), "stream_json")
+			} else {
+				tracker.Record(model, lastUsage, latencyMs, true, "stream_json")
+			}
 		}
 	}
 

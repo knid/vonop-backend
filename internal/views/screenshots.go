@@ -64,6 +64,12 @@ func (v *HttpViews) AutoGenerateScreenshots(w http.ResponseWriter, r *http.Reque
 	// Token tracking for post-hoc billing
 	tracker := utils.NewTokenTracker()
 	tracker.UserID = user.ID.String()
+	tracker.TraceID = uuid.New().String()
+	tracker.TrackContent = true
+	tracker.TraceInput = string(data)
+	if orgID, orgErr := v.Controller.RequireOrgIDForUser(user, nil); orgErr == nil {
+		tracker.OrganizationID = orgID.String()
+	}
 	ctx := utils.WithTokenTracker(r.Context(), tracker)
 
 	outputJson, err := utils.GetJSONFromLLM(ctx, "claude-haiku-4-5", constants.LINK_SELECTION_FOR_SCREENSHOTS_PROMPT, string(data), v.Controller.AnthropicProvider())
@@ -71,6 +77,7 @@ func (v *HttpViews) AutoGenerateScreenshots(w http.ResponseWriter, r *http.Reque
 		utils.JSONError(w, constants.ErrValidationBody, "Could not generate screenshots. Try again please.", http.StatusBadRequest, nil)
 		return
 	}
+	tracker.TraceOutput = outputJson
 
 	var screenshots Screenshots
 	if err := json.Unmarshal([]byte(outputJson), &screenshots); err != nil {

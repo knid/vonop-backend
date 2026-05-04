@@ -111,6 +111,11 @@ func (c *Controller) CreateDashboard(ctx context.Context, project *models.AppPro
 	tracker.TrackContent = true
 	tracker.UserID = user.ID.String()
 	tracker.ProjectID = project.ID.String()
+	tracker.TraceID = uuid.New().String()
+	tracker.TraceInput = prompt
+	if project.OrganizationID != uuid.Nil {
+		tracker.OrganizationID = project.OrganizationID.String()
+	}
 	ctx = utils.WithTokenTracker(ctx, tracker)
 	defer func() {
 		c.RecordTokenUsage(user, "dashboard_create", model, provider.Name, project.ID.String(), project.ProjectType, tracker)
@@ -390,6 +395,11 @@ func (c *Controller) StreamDashboardChat(ctx context.Context, dashboard *models.
 	tracker.TrackContent = true
 	tracker.UserID = user.ID.String()
 	tracker.ProjectID = dashboard.AppProjectID.String()
+	tracker.TraceID = uuid.New().String()
+	tracker.TraceInput = message
+	if orgID, orgErr := c.ResolveOrgForProjectID(user, dashboard.AppProjectID.String()); orgErr == nil {
+		tracker.OrganizationID = orgID.String()
+	}
 	ctx = utils.WithTokenTracker(ctx, tracker)
 	defer func() {
 		c.RecordTokenUsage(user, "dashboard_chat", model, provider.Name, dashboard.AppProjectID.String(), "dashboard", tracker)
@@ -628,6 +638,10 @@ func (c *Controller) RefreshDashboardSchema(ctx context.Context, projectID strin
 	tracker.TrackContent = true
 	tracker.UserID = user.ID.String()
 	tracker.ProjectID = projectID
+	tracker.TraceID = uuid.New().String()
+	if orgID, orgErr := c.ResolveOrgForProjectID(user, projectID); orgErr == nil {
+		tracker.OrganizationID = orgID.String()
+	}
 	ctx = utils.WithTokenTracker(ctx, tracker)
 	defer func() {
 		c.RecordTokenUsage(user, "dashboard_schema_refresh", model, provider.Name, projectID, "dashboard", tracker)

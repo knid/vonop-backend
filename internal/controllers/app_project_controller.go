@@ -45,7 +45,7 @@ func (c *Controller) CreateAppProject(ctx context.Context, user *models.User, re
 	// Determine project type first so we can enforce the right limit
 	projectType := req.ProjectType
 	if projectType == "" || projectType == "app" {
-		classified := c.classifyProjectType(ctx, req.Prompt)
+		classified := c.classifyProjectType(ctx, req.Prompt, user)
 		if classified != "" {
 			projectType = classified
 		}
@@ -95,7 +95,7 @@ func (c *Controller) CreateAppProject(ctx context.Context, user *models.User, re
 		}
 	}
 
-	name, slug := c.generateAppNameAndSlug(ctx, req.Prompt)
+	name, slug := c.generateAppNameAndSlug(ctx, req.Prompt, user)
 
 	orgID, err := c.RequireOrgIDForUser(user, req.OrganizationID)
 	if err != nil {

@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/utils"
 )
 
@@ -17,12 +18,21 @@ const slugMaxBaseLen = 50
 // name for the project from the user's (possibly non-English) prompt, then
 // derives a URL-safe slug with a 5-char random suffix. Falls back to a
 // truncated prompt if the LLM call fails.
-func (c *Controller) generateAppNameAndSlug(ctx context.Context, prompt string) (string, string) {
+//
+// The optional `user` is purely for PostHog attribution. Pass nil to skip
+// the trace.
+func (c *Controller) generateAppNameAndSlug(ctx context.Context, prompt string, user *models.User) (string, string) {
 	provider := c.llmProvider()
 	model := "anthropic/claude-haiku-4-5-20251001"
 	if provider.IsAnthropic() {
 		model = "claude-haiku-4-5-20251001"
 	}
+
+	tracker := utils.NewTokenTracker()
+	if user != nil {
+		tracker.UserID = user.ID.String()
+	}
+	ctx = utils.WithTokenTracker(ctx, tracker)
 
 	system := `You name apps. Given a project description in any language, respond with a short 2-4 word English app name in Title Case. No punctuation, emoji, quotes, or explanation — just the name.
 
@@ -33,6 +43,9 @@ Examples:
 - "dashboard for tracking my team's OKRs" → Team OKR Tracker`
 
 	result, err := utils.GetTextFromLLM(ctx, model, system, prompt, provider, 64)
+	if user != nil {
+		c.RecordTokenUsage(user, "project_name", model, provider.Name, "", "standard", tracker)
+	}
 	if err != nil {
 		slog.Warn("LLM name generation failed, falling back to truncated prompt", "error", err)
 		return fallbackNameAndSlug(prompt)
