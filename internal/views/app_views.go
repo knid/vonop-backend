@@ -909,68 +909,6 @@ func (v *HttpViews) DisconnectAppIntegration(w http.ResponseWriter, r *http.Requ
 	utils.JSONResponse(w, responses.SuccessResponse{Success: true}, http.StatusOK)
 }
 
-// POST /v2/apps/{appId}/convert-to-mobile
-func (v *HttpViews) ConvertToMobile(w http.ResponseWriter, r *http.Request) {
-	user, err := v.Controller.GetUserFromReq(r)
-	if err != nil {
-		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
-		return
-	}
-	if requireActiveSubscription(w, v.Controller, user) {
-		return
-	}
-
-	limits, limitsErr := v.Controller.GetUserLimits(user)
-	if limitsErr != nil || !limits.CanBuildMobile {
-		go v.Controller.EventService.SendEvent(user, constants.EVENT_SUBSCRIPTION_NEED, map[string]any{"action": "convert_to_mobile"})
-		utils.JSONError(w, constants.ErrFeatureNotAvailable, "mobile conversion requires Professional plan", http.StatusForbidden, nil)
-		return
-	}
-
-	if limits.MaxMobileApps > 0 {
-		mobileCount, _ := v.Controller.DB.CountAppProjectsByUserIDAndType(user.ID.String(), "mobile")
-		if mobileCount >= limits.MaxMobileApps {
-			utils.JSONError(w, constants.ErrQuotaReached,
-				fmt.Sprintf("you have reached your mobile app limit (%d)", limits.MaxMobileApps),
-				http.StatusForbidden, nil)
-			return
-		}
-	} else if limits.MaxMobileApps == 0 {
-		utils.JSONError(w, constants.ErrFeatureNotAvailable, "mobile app creation is not available on your plan", http.StatusForbidden, nil)
-		return
-	}
-
-	appID := chi.URLParam(r, "appId")
-	clone, err := v.Controller.CloneAppProjectAsMobile(user, appID)
-	if err != nil {
-		switch err.Error() {
-		case "unauthorized":
-			utils.JSONErrorCode(w, constants.ErrForbidden, http.StatusForbidden, nil)
-		case "source project not found":
-			utils.JSONErrorCode(w, constants.ErrAppNotFound, http.StatusNotFound, nil)
-		default:
-			utils.JSONInternalError(w, err)
-		}
-		return
-	}
-
-	var theme map[string]any
-	json.Unmarshal(clone.Theme, &theme)
-
-	utils.JSONResponse(w, responses.AppProjectResponse{
-		ID:          clone.ID,
-		Name:        clone.Name,
-		Slug:        clone.Slug,
-		Prompt:      clone.Prompt,
-		ProjectType: clone.ProjectType,
-		Theme:       theme,
-		Settings:    clone.Settings,
-		Status:      clone.Status,
-		CreatedAt:   clone.CreatedAt,
-		UpdatedAt:   clone.UpdatedAt,
-	}, http.StatusOK)
-}
-
 // GET /v2/integrations/providers
 func (v *HttpViews) GetV2IntegrationProviders(w http.ResponseWriter, r *http.Request) {
 	providers := v.Controller.GetIntegrationProviders()

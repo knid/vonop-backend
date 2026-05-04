@@ -212,7 +212,7 @@ functionality (persisted data, auth, payments, push, marketing landing).
 					slog.Warn("mobile_app_native README write failed",
 						"error", err, "project_id", project.ID)
 				}
-				if err := scaffoldExpoTemplate(c, repo, project); err != nil {
+				if err := scaffoldExpoTemplate(c, repo, project, cfg.AuthEnabled); err != nil {
 					slog.Warn("mobile_app_native template scaffold failed",
 						"error", err, "project_id", project.ID)
 				}
@@ -228,45 +228,6 @@ functionality (persisted data, auth, payments, push, marketing landing).
 	}
 
 	return project, nil
-}
-
-func (c *Controller) CloneAppProjectAsMobile(user *models.User, sourceProjectID string) (*models.AppProject, error) {
-	source, err := c.DB.GetAppProjectByID(sourceProjectID)
-	if err != nil {
-		return nil, fmt.Errorf("source project not found")
-	}
-	if err := c.AuthorizeProjectAccess(user, source); err != nil {
-		return nil, fmt.Errorf("unauthorized")
-	}
-
-	slug := makeSlug(source.Name)
-
-	clone := &models.AppProject{
-		UserID:         user.ID,
-		OrganizationID: source.OrganizationID,
-		Name:           source.Name,
-		Slug:           slug,
-		Prompt:         source.Prompt,
-		ProjectType:    "mobile_app",
-		Theme:          source.Theme,
-		DataModels:     source.DataModels,
-		Settings:       source.Settings,
-		Status:         "ready",
-	}
-
-	clone, err = c.DB.CreateAppProject(clone)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create mobile project")
-	}
-
-	// Clone git repo from source to new project
-	if _, cloneErr := c.GitRepoService.Clone(source.ID.String(), clone.ID.String()); cloneErr != nil {
-		slog.Error("Failed to clone git repo for mobile project", "error", cloneErr,
-			"source_id", source.ID, "clone_id", clone.ID)
-		return nil, fmt.Errorf("failed to copy files to mobile project")
-	}
-
-	return clone, nil
 }
 
 func (c *Controller) GetAppProjectsByUserFiltered(user *models.User, types []string) ([]models.AppProject, error) {

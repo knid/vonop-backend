@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/services/codemagic"
+	"github.com/knid/wemob/internal/services/storeauth"
 )
 
 // SubmitExpoOptions describes which platform to submit + per-call overrides.
@@ -29,6 +30,8 @@ type SubmitExpoOptions struct {
 	// IOS-only: when true, push to App Store review (in addition to TestFlight).
 	// Defaults to false (TestFlight-only submission).
 	SubmitToAppStore bool
+	// ReleaseNotes: per-platform release notes sent to the store.
+	ReleaseNotes string
 }
 
 // SubmitResult is what SubmitExpoMobile returns to the view.
@@ -45,6 +48,7 @@ var (
 	ErrSubmitMissingCredential = errors.New("submit: project has no default connection for that platform")
 	ErrSubmitInvalidPlatform   = errors.New("submit: platform must be android or ios")
 	ErrSubmitInvalidTrack      = errors.New("submit: invalid track value")
+	ErrVersionMustBeGreater    = errors.New("submit: build version must be greater than the live store version")
 )
 
 // SubmitExpoMobile submits the latest successful Expo build to the App Store
@@ -133,9 +137,9 @@ func (c *Controller) SubmitExpoMobile(ctx context.Context, project *models.AppPr
 
 	switch platform {
 	case "android":
-		return c.submitAndroid(ctx, project, build, task, playTrack, opts.RolloutFraction, draft, listing, locales)
+		return c.submitAndroid(ctx, project, build, task, playTrack, opts.RolloutFraction, draft, opts.ReleaseNotes, listing, locales)
 	case "ios":
-		return c.submitIOS(ctx, project, build, task, appStoreTrack, opts.SubmitToAppStore, phased, draft, listing, locales)
+		return c.submitIOS(ctx, project, build, task, appStoreTrack, opts.SubmitToAppStore, phased, draft, opts.ReleaseNotes, listing, locales)
 	}
 	return nil, ErrSubmitInvalidPlatform
 }
@@ -186,7 +190,7 @@ func listingLocalesForSubmit(listing *models.AppStoreListing, locales map[string
 	return out
 }
 
-func (c *Controller) submitAndroid(ctx context.Context, project *models.AppProject, build *models.Build, task *models.AppBuildTask, track string, rolloutFraction float64, draft bool, listing *models.AppStoreListing, locales map[string]*models.AppStoreListingLocalization) (*SubmitResult, error) {
+func (c *Controller) submitAndroid(ctx context.Context, project *models.AppProject, build *models.Build, task *models.AppBuildTask, track string, rolloutFraction float64, draft bool, releaseNotes string, listing *models.AppStoreListing, locales map[string]*models.AppStoreListingLocalization) (*SubmitResult, error) {
 	switch track {
 	case "internal", "alpha", "beta", "production":
 	default:
@@ -203,8 +207,18 @@ func (c *Controller) submitAndroid(ctx context.Context, project *models.AppProje
 	if err != nil {
 		return nil, fmt.Errorf("submit: decrypt SA JSON: %w", err)
 	}
-
+	sa, err := storeauth.ParseServiceAccount(saBytes)
+	if err != nil {
+		return nil, fmt.Errorf("submit: parse SA JSON: %w", err)
+	}
 	bundleID := bundleIDForProject(project, "")
+	liveVC, err := storeauth.GetPlayLiveVersionCode(ctx, sa, bundleID, track)
+	if err != nil {
+		return nil, fmt.Errorf("submit: check live play version: %w", err)
+	}
+	if liveVC > 0 && int64(build.BuildNumber) <= liveVC {
+		return nil, fmt.Errorf("submit: build number %d is not greater than live version code %d on track %q: %w", build.BuildNumber, liveVC, track, ErrVersionMustBeGreater)
+	}
 	params := codemagic.ExpoAndroidDeployParams{
 		ProjectID:             project.ID,
 		BuildID:               build.ID,
@@ -216,6 +230,7 @@ func (c *Controller) submitAndroid(ctx context.Context, project *models.AppProje
 		RolloutFraction:       rolloutFraction,
 		SubmitAsDraft:         draft,
 		AABS3Key:              fmt.Sprintf("aabs/%s.aab", build.ID.String()),
+		ReleaseNotes:          releaseNotes,
 		Locales:               listingLocalesForSubmit(listing, locales),
 	}
 	if listing != nil {
@@ -235,7 +250,7 @@ func (c *Controller) submitAndroid(ctx context.Context, project *models.AppProje
 	return &SubmitResult{Platform: "android", BuildTaskID: task.ID, CodemagicBuildID: cmBuildID}, nil
 }
 
-func (c *Controller) submitIOS(ctx context.Context, project *models.AppProject, build *models.Build, task *models.AppBuildTask, track string, submitToAppStore bool, phased bool, draft bool, listing *models.AppStoreListing, locales map[string]*models.AppStoreListingLocalization) (*SubmitResult, error) {
+func (c *Controller) submitIOS(ctx context.Context, project *models.AppProject, build *models.Build, task *models.AppBuildTask, track string, submitToAppStore bool, phased bool, draft bool, releaseNotes string, listing *models.AppStoreListing, locales map[string]*models.AppStoreListingLocalization) (*SubmitResult, error) {
 	switch track {
 	case "internal", "external", "production":
 	default:
@@ -252,8 +267,18 @@ func (c *Controller) submitIOS(ctx context.Context, project *models.AppProject, 
 	if err != nil {
 		return nil, fmt.Errorf("submit: decrypt .p8: %w", err)
 	}
-
 	bundleID := bundleIDForProject(project, "")
+	liveBuild, err := storeauth.FetchLatestBuildNumber(ctx, storeauth.AppleConnectionInput{
+		KeyID:    conn.KeyID,
+		IssuerID: conn.IssuerID,
+		P8PEM:    p8Bytes,
+	}, bundleID)
+	if err != nil {
+		return nil, fmt.Errorf("submit: check live apple build number: %w", err)
+	}
+	if liveBuild > 0 && build.BuildNumber <= liveBuild {
+		return nil, fmt.Errorf("submit: build number %d is not greater than live build number %d: %w", build.BuildNumber, liveBuild, ErrVersionMustBeGreater)
+	}
 	// Always submit to TestFlight; SubmitToAppStore toggles the additional production push.
 	params := codemagic.ExpoIOSDeployParams{
 		ProjectID:          project.ID,
@@ -269,6 +294,7 @@ func (c *Controller) submitIOS(ctx context.Context, project *models.AppProject, 
 		PhasedRelease:      phased && (submitToAppStore || track == "production"),
 		SubmitAsDraft:      draft,
 		IPAS3Key:           fmt.Sprintf("ipas/%s.ipa", build.ID.String()),
+		ReleaseNotes:       releaseNotes,
 		Locales:            listingLocalesForSubmit(listing, locales),
 	}
 	if listing != nil {

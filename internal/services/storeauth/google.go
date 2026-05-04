@@ -154,6 +154,25 @@ func GetPlayTrackRelease(ctx context.Context, sa GoogleServiceAccount, packageNa
 	return out, nil
 }
 
+// GetPlayLiveVersionCode returns the highest version code currently on the
+// given track, or 0 if the track has no releases.
+func GetPlayLiveVersionCode(ctx context.Context, sa GoogleServiceAccount, packageName, track string) (int64, error) {
+	rel, err := GetPlayTrackRelease(ctx, sa, packageName, track)
+	if err != nil {
+		return 0, err
+	}
+	if rel == nil || len(rel.VersionCodes) == 0 {
+		return 0, nil
+	}
+	var max int64
+	for _, vc := range rel.VersionCodes {
+		if vc > max {
+			max = vc
+		}
+	}
+	return max, nil
+}
+
 // GoogleToken mints a short-lived OAuth2 access token scoped to the
 // androidpublisher API via the JWT-bearer grant.
 func GoogleToken(ctx context.Context, sa GoogleServiceAccount) (string, error) {

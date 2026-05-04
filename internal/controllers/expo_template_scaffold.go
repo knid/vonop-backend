@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/knid/wemob/internal/agent/templates/expo_native"
@@ -31,14 +32,14 @@ import (
 // get the substitutions applied; values are JSON-string-escaped because
 // every placeholder in the template lives inside a JSON string or a
 // TS double-quoted literal.
-func scaffoldExpoTemplate(c *Controller, repo *gitrepo.Repo, project *models.AppProject) error {
+func scaffoldExpoTemplate(c *Controller, repo *gitrepo.Repo, project *models.AppProject, authEnabled bool) error {
 	if repo == nil {
 		return fmt.Errorf("scaffoldExpoTemplate: nil repo")
 	}
 	if project == nil {
 		return fmt.Errorf("scaffoldExpoTemplate: nil project")
 	}
-	subs := expoTemplateSubstitutions(c, project)
+	subs := expoTemplateSubstitutions(c, project, authEnabled)
 
 	return fs.WalkDir(expo_native.FS, ".", func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -50,6 +51,11 @@ func scaffoldExpoTemplate(c *Controller, repo *gitrepo.Repo, project *models.App
 		// Skip the embed.go directive file itself — it's pulled in by `all:`
 		// otherwise but doesn't belong in the user's repo.
 		if p == "embed.go" || strings.HasSuffix(p, "/embed.go") {
+			return nil
+		}
+		// When auth is disabled, omit the entire (auth) route group and its
+		// sign-in / sign-up screens so the app boots straight into (app).
+		if !authEnabled && (strings.HasPrefix(p, "app/(auth)/") || p == "app/(auth)/_layout.tsx" || p == "app/(auth)/sign-in.tsx" || p == "app/(auth)/sign-up.tsx") {
 			return nil
 		}
 		data, err := expo_native.FS.ReadFile(p)
@@ -75,7 +81,7 @@ func scaffoldExpoTemplate(c *Controller, repo *gitrepo.Repo, project *models.App
 // values at build time using its existing CM_* env vars (it would need to
 // switch from sed-replacing placeholders to a JSON-aware update — outside
 // the scope of this change).
-func expoTemplateSubstitutions(c *Controller, project *models.AppProject) map[string]string {
+func expoTemplateSubstitutions(c *Controller, project *models.AppProject, authEnabled bool) map[string]string {
 	bundleID := bundleIDForProject(project, "")
 	otaURL := c.BackendDeployURL(project) + "/v2/apps/" + project.ID.String() + "/ota"
 	return map[string]string{
@@ -87,7 +93,10 @@ func expoTemplateSubstitutions(c *Controller, project *models.AppProject) map[st
 		"__BUILD_NUMBER__":      "1",
 		"__SPLASH_COLOR__":      "#FFFFFF",
 		"__OTA_URL__":           otaURL,
+		"__OTA_KEY_ID__":        "",
+		"__APP_SCHEME__":        strings.ToLower(strings.TrimSpace(project.Slug)),
 		"__EAS_PROJECT_ID_NOT_USED_BUT_REQUIRED_FOR_RUNTIME__": project.ID.String(),
+		"__AUTH_ENABLED__":      strconv.FormatBool(authEnabled),
 	}
 }
 

@@ -209,9 +209,10 @@ func (c *Controller) HaltPhasedRollout(ctx context.Context, releaseID uuid.UUID)
 		}
 		return c.DB.GetRelease(ctx, r.ID)
 	case models.ReleasePlatformAndroid:
-		// Play's "halt" requires opening an edit and writing a release with
-		// status=halted. Not implemented in this pass — local state is paused
-		// so the dashboard reflects intent.
+		// TODO: Play's "halt" requires opening an edit and writing a release
+		// with status=halted. Not implemented yet — the frontend should hide
+		// or disable the "Pause Rollout" button for Android until this is wired.
+		// Returning ErrReleaseNotImplemented so callers can surface a clear message.
 		return r, ErrReleaseNotImplemented
 	default:
 		return nil, ErrReleasePlatformInvalid

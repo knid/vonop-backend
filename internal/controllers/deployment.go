@@ -630,33 +630,29 @@ func (c *Controller) GetLatestSignStatusForBuild(user *models.User, buildID stri
 
 // RequirePlayAppSigning checks that Play App Signing is enrolled for the
 // given package name before triggering a first Android publish. Returns
-// ErrPlayAppSigningRequired if not enrolled, nil if enrolled or if the check
-// cannot be performed (in which case we log and allow through, so a temporary
-// SA permission issue doesn't permanently block the user).
+// ErrPlayAppSigningRequired if not enrolled or if the check cannot be
+// performed, nil if enrolled.
 //
 // Callers on the update path (re-deploy) may skip this check since the app is
 // already live and signing must already be configured.
 func (c *Controller) RequirePlayAppSigning(ctx context.Context, cred *models.GooglePlayConnection, packageName string) error {
 	saBytes, err := c.ReadGoogleSA(ctx, cred)
 	if err != nil {
-		// Can't read the SA — let the deploy proceed and fail at Codemagic with
-		// a more actionable error than "SA unreadable".
-		slog.Warn("RequirePlayAppSigning: read service account failed, skipping gate",
+		slog.Warn("RequirePlayAppSigning: read service account failed",
 			"conn", cred.ID, "err", err)
-		return nil
+		return fmt.Errorf("Play App Signing check failed (unable to read service account): %w", ErrPlayAppSigningRequired)
 	}
 	sa, err := storeauth.ParseServiceAccount(saBytes)
 	if err != nil {
-		slog.Warn("RequirePlayAppSigning: parse service account failed, skipping gate",
+		slog.Warn("RequirePlayAppSigning: parse service account failed",
 			"conn", cred.ID, "err", err)
-		return nil
+		return fmt.Errorf("Play App Signing check failed (invalid service account): %w", ErrPlayAppSigningRequired)
 	}
 	enrolled, err := storeauth.CheckPlayAppSigningEnrolment(ctx, sa, packageName)
 	if err != nil {
-		// Network or unexpected API error — don't block the user.
-		slog.Warn("RequirePlayAppSigning: enrolment check error, skipping gate",
+		slog.Warn("RequirePlayAppSigning: enrolment check error",
 			"conn", cred.ID, "package", packageName, "err", err)
-		return nil
+		return fmt.Errorf("Play App Signing check failed: %w", ErrPlayAppSigningRequired)
 	}
 	if !enrolled {
 		return ErrPlayAppSigningRequired

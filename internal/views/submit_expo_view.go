@@ -80,6 +80,7 @@ func (v *HttpViews) SubmitAppExpo(w http.ResponseWriter, r *http.Request) {
 		SubmitAsDraftOverride: req.SubmitAsDraft,
 		RolloutFraction:       req.RolloutFraction,
 		SubmitToAppStore:      req.SubmitToAppStore,
+		ReleaseNotes:          req.ReleaseNotes,
 	})
 	if err != nil {
 		switch {

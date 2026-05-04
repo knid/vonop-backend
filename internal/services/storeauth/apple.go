@@ -574,6 +574,61 @@ func CreateProfile(ctx context.Context, in AppleConnectionInput, name, profileTy
 	return out, nil
 }
 
+// FetchLatestBuildNumber resolves the highest build number (the "version"
+// attribute on a Build) currently visible in App Store Connect for the app
+// identified by bundleID. Returns 0 when the app or its builds do not yet
+// exist.
+func FetchLatestBuildNumber(ctx context.Context, in AppleConnectionInput, bundleID string) (int, error) {
+	if bundleID == "" {
+		return 0, fmt.Errorf("bundleID required")
+	}
+	// 1. Resolve app ID by bundle id.
+	appsBody, err := ascGetJSON(ctx, in, "/v1/apps?filter[bundleId]="+url.QueryEscape(bundleID)+"&limit=1")
+	if err != nil {
+		return 0, fmt.Errorf("fetch apps: %w", err)
+	}
+	var appsResp struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(appsBody, &appsResp); err != nil {
+		return 0, fmt.Errorf("parse apps: %w", err)
+	}
+	if len(appsResp.Data) == 0 {
+		return 0, nil // app not registered yet
+	}
+	appID := appsResp.Data[0].ID
+
+	// 2. Fetch the most recently uploaded build.
+	buildsBody, err := ascGetJSON(ctx, in, "/v1/builds?filter[app]="+url.QueryEscape(appID)+"&sort=-uploadedDate&limit=1")
+	if err != nil {
+		return 0, fmt.Errorf("fetch builds: %w", err)
+	}
+	var buildsResp struct {
+		Data []struct {
+			Attributes struct {
+				Version string `json:"version"`
+			} `json:"attributes"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(buildsBody, &buildsResp); err != nil {
+		return 0, fmt.Errorf("parse builds: %w", err)
+	}
+	if len(buildsResp.Data) == 0 {
+		return 0, nil // no builds yet
+	}
+	vStr := buildsResp.Data[0].Attributes.Version
+	if vStr == "" {
+		return 0, nil
+	}
+	var n int
+	if _, err := fmt.Sscanf(vStr, "%d", &n); err != nil {
+		return 0, fmt.Errorf("parse build number %q: %w", vStr, err)
+	}
+	return n, nil
+}
+
 // SetASCAPIBaseForTest overrides the ASC API base URL. Test-only; never call
 // from production code.
 func SetASCAPIBaseForTest(base string) (restore func()) {

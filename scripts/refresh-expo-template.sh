@@ -40,7 +40,6 @@ rsync -a \
   --exclude='dist' \
   --exclude='package-lock.json' \
   --exclude='codemagic.yaml' \
-  --exclude='.gitignore' \
   --exclude='README.md' \
   "$SOURCE/" "$DEST/"
 

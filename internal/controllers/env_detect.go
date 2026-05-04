@@ -60,6 +60,11 @@ func detectEnvVarsFromCode(files map[string]string) []string {
 func (c *Controller) computeMissingEnvVars(project *models.AppProject, llmVars []RequiredEnvVar, codeKeys []string) []RequiredEnvVar {
 	existing := c.CollectAllEnvVars(project)
 
+	publicPrefix := "NEXT_PUBLIC_"
+	if project.ProjectType == models.ProjectTypeMobileAppNative {
+		publicPrefix = "EXPO_PUBLIC_"
+	}
+
 	required := map[string]RequiredEnvVar{}
 	for _, v := range llmVars {
 		if !envVarNameRegex.MatchString(v.Key) {
@@ -76,16 +81,16 @@ func (c *Controller) computeMissingEnvVars(project *models.AppProject, llmVars [
 			required[key] = RequiredEnvVar{
 				Key:         key,
 				Description: "Used in generated code",
-				IsPublic:    strings.HasPrefix(key, "NEXT_PUBLIC_"),
+				IsPublic:    strings.HasPrefix(key, publicPrefix),
 			}
 		}
 	}
 
 	var missing []RequiredEnvVar
 	for _, v := range required {
-		// Check both the raw key and the NEXT_PUBLIC_ prefixed form,
+		// Check both the raw key and the public prefixed form,
 		// since CollectAllEnvVars auto-prefixes public custom vars.
-		if existing[v.Key] == "" && existing["NEXT_PUBLIC_"+v.Key] == "" {
+		if existing[v.Key] == "" && existing[publicPrefix+v.Key] == "" {
 			missing = append(missing, v)
 		}
 	}

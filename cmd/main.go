@@ -2050,7 +2050,6 @@ func main() {
 					// non-admins are rejected at the controller layer with 403.
 					r.Patch("/min-version", httpViews.UpdateMinVersion)
 
-					r.Post("/convert-to-mobile", httpViews.ConvertToMobile)
 					r.Post("/capture-screenshot", httpViews.CaptureAppScreenshot)
 
 					// Snapshots

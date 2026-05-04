@@ -5,7 +5,7 @@
     "version": "__MARKETING_VERSION__",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "scheme": "wemobapp",
+    "scheme": "__APP_SCHEME__",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "splash": {
@@ -58,7 +58,8 @@
       }
     },
     "extra": {
-      "eas": { "projectId": "__EAS_PROJECT_ID_NOT_USED_BUT_REQUIRED_FOR_RUNTIME__" }
+      "eas": { "projectId": "__EAS_PROJECT_ID_NOT_USED_BUT_REQUIRED_FOR_RUNTIME__" },
+      "authEnabled": __AUTH_ENABLED__
     }
   }
 }

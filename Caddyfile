@@ -93,7 +93,7 @@ asynqmon.wemob.io {
     basicauth {
         # Replace with `caddy hash-password` output before deploying.
         # Format: `<username> <bcrypt-hash>`
-        ops $2a$14$REPLACE_BCRYPT_HASH_BEFORE_DEPLOY
+        ops $2a$14$7yMqiqJf4KaSMqD2yNXwDeO7gIFP52/k7v09ki3zL7dl56WCp550C
     }
     reverse_proxy asynqmon:8080
 }

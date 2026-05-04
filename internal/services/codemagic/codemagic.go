@@ -83,6 +83,7 @@ type triggerResponse struct {
 }
 
 // TriggerBuild starts a Codemagic build and returns the build ID.
+// Retries up to 3 times on 5xx and network errors with ~2s linear backoff.
 func (s *Service) TriggerBuild(workflowID string, variables map[string]string) (string, error) {
 	body := triggerRequest{
 		AppID:      s.AppID,
@@ -98,44 +99,56 @@ func (s *Service) TriggerBuild(workflowID string, variables map[string]string) (
 		return "", fmt.Errorf("codemagic: marshal: %w", err)
 	}
 
-	req, err := http.NewRequest("POST", s.baseURL()+"/builds", bytes.NewReader(jsonBody))
-	if err != nil {
-		return "", fmt.Errorf("codemagic: create request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("x-auth-token", s.APIToken)
+	var lastErr error
+	for attempt := 1; attempt <= 3; attempt++ {
+		req, err := http.NewRequest("POST", s.baseURL()+"/builds", bytes.NewReader(jsonBody))
+		if err != nil {
+			return "", fmt.Errorf("codemagic: create request: %w", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("x-auth-token", s.APIToken)
 
-	resp, err := s.httpClientOrDefault().Do(req)
-	if err != nil {
-		return "", fmt.Errorf("codemagic: request failed: %w", err)
-	}
-	defer resp.Body.Close()
+		resp, err := s.httpClientOrDefault().Do(req)
+		if err != nil {
+			lastErr = err
+			time.Sleep(2 * time.Second)
+			continue
+		}
 
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("codemagic: read response: %w", err)
-	}
+		respBody, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			return "", fmt.Errorf("codemagic: read response: %w", err)
+		}
 
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		slog.Error("codemagic: trigger failed",
-			"status", resp.StatusCode,
-			"body", string(respBody),
+		if resp.StatusCode >= 500 {
+			lastErr = fmt.Errorf("codemagic: API returned %d: %s", resp.StatusCode, string(respBody))
+			time.Sleep(2 * time.Second)
+			continue
+		}
+
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			slog.Error("codemagic: trigger failed",
+				"status", resp.StatusCode,
+				"body", string(respBody),
+				"workflow", workflowID,
+			)
+			return "", fmt.Errorf("codemagic: API returned %d: %s", resp.StatusCode, string(respBody))
+		}
+
+		var result triggerResponse
+		if err := json.Unmarshal(respBody, &result); err != nil {
+			return "", fmt.Errorf("codemagic: unmarshal response: %w", err)
+		}
+
+		slog.Info("codemagic: build triggered",
+			"build_id", result.BuildID,
 			"workflow", workflowID,
 		)
-		return "", fmt.Errorf("codemagic: API returned %d: %s", resp.StatusCode, string(respBody))
+
+		return result.BuildID, nil
 	}
-
-	var result triggerResponse
-	if err := json.Unmarshal(respBody, &result); err != nil {
-		return "", fmt.Errorf("codemagic: unmarshal response: %w", err)
-	}
-
-	slog.Info("codemagic: build triggered",
-		"build_id", result.BuildID,
-		"workflow", workflowID,
-	)
-
-	return result.BuildID, nil
+	return "", fmt.Errorf("codemagic: trigger failed after retries: %w", lastErr)
 }
 
 // TriggerAndroidBuild triggers an Android build workflow.

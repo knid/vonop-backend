@@ -232,6 +232,10 @@ type ExpoAndroidDeployParams struct {
 	SecondaryCategory string
 	EULAType          string // "apple_default" | "custom_url" — Play ignores; iOS uses
 	EULAURL           string
+	// ReleaseNotes is the per-platform release notes sent to the store.
+	// When empty, the publishing block falls back to whatever is already
+	// in Play Console.
+	ReleaseNotes string
 }
 
 func (p ExpoAndroidDeployParams) toEnvVars() map[string]string {
@@ -261,6 +265,7 @@ func (p ExpoAndroidDeployParams) toEnvVars() map[string]string {
 		"CM_SECONDARY_CATEGORY": p.SecondaryCategory,
 		"CM_EULA_TYPE":         p.EULAType,
 		"CM_EULA_URL":          p.EULAURL,
+		"CM_RELEASE_NOTES":     p.ReleaseNotes,
 	}
 }
 
@@ -303,6 +308,10 @@ type ExpoIOSDeployParams struct {
 	SecondaryCategory string
 	EULAType          string // "apple_default" | "custom_url"
 	EULAURL           string
+	// ReleaseNotes is the per-platform release notes sent to the store.
+	// When empty, the publishing block falls back to whatever is already
+	// in App Store Connect.
+	ReleaseNotes string
 }
 
 func (p ExpoIOSDeployParams) toEnvVars() map[string]string {
@@ -327,5 +336,6 @@ func (p ExpoIOSDeployParams) toEnvVars() map[string]string {
 		"CM_SECONDARY_CATEGORY": p.SecondaryCategory,
 		"CM_EULA_TYPE":         p.EULAType,
 		"CM_EULA_URL":          p.EULAURL,
+		"CM_RELEASE_NOTES":     p.ReleaseNotes,
 	}
 }

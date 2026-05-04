@@ -87,6 +87,13 @@ func (c *Controller) DeleteAppEnvVar(id string, project *models.AppProject) erro
 func (c *Controller) CollectAllEnvVars(project *models.AppProject) map[string]string {
 	envVars := make(map[string]string)
 
+	// Determine public prefix based on project type
+	publicPrefix := "NEXT_PUBLIC_"
+	isMobile := project.ProjectType == models.ProjectTypeMobileAppNative
+	if isMobile {
+		publicPrefix = "EXPO_PUBLIC_"
+	}
+
 	// 1. Integration env vars
 	appIntegrations, err := c.DB.GetAppIntegrationsByProjectID(project.ID.String())
 	if err != nil {
@@ -98,15 +105,15 @@ func (c *Controller) CollectAllEnvVars(project *models.AppProject) map[string]st
 		}
 	}
 
-	// 2. Custom env vars (with NEXT_PUBLIC_ prefix if IsPublic)
+	// 2. Custom env vars (with public prefix if IsPublic)
 	customVars, err := c.DB.GetAppEnvVarsByProjectID(project.ID.String())
 	if err != nil {
 		slog.Warn("Failed to fetch custom env vars", "error", err, "project_id", project.ID)
 	}
 	for _, ev := range customVars {
 		key := ev.Key
-		if ev.IsPublic && !strings.HasPrefix(key, "NEXT_PUBLIC_") {
-			key = "NEXT_PUBLIC_" + key
+		if ev.IsPublic && !strings.HasPrefix(key, publicPrefix) {
+			key = publicPrefix + key
 		}
 		envVars[key] = ev.Value
 	}
@@ -114,7 +121,13 @@ func (c *Controller) CollectAllEnvVars(project *models.AppProject) map[string]st
 	// 3. Auto-inject AI gateway key (server-side) and gateway URL (public)
 	if gwKey, err := c.GetDecryptedGatewayKey(project.ID.String()); err == nil && gwKey != "" {
 		envVars["WEMOB_AI_KEY"] = gwKey
-		envVars["NEXT_PUBLIC_WEMOB_GATEWAY_URL"] = constants.WEMOB_API_BASE_URL + "/v2/gateway"
+		envVars[publicPrefix+"WEMOB_GATEWAY_URL"] = constants.WEMOB_API_BASE_URL + "/v2/gateway"
+	}
+
+	// 4. Mobile-specific public vars
+	if isMobile {
+		envVars["EXPO_PUBLIC_API_URL"] = c.BackendDeployURL(project)
+		envVars["EXPO_PUBLIC_PROJECT_ID"] = project.ID.String()
 	}
 
 	return envVars

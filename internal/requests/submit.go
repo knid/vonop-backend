@@ -29,6 +29,10 @@ type SubmitExpoRequest struct {
 	// SubmitToAppStore: iOS-only. When true, additionally push to App Store
 	// review (production submission). Defaults to false.
 	SubmitToAppStore bool `json:"submit_to_app_store,omitempty"`
+	// ReleaseNotes: per-platform release notes sent to the store.
+	// When empty, the publishing block falls back to whatever is already
+	// in App Store Connect / Play Console.
+	ReleaseNotes string `json:"release_notes,omitempty"`
 }
 
 func (r *SubmitExpoRequest) Validate(validate *validator.Validate) error {
