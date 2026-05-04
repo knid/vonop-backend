@@ -34,6 +34,15 @@ func (s *Service) TriggerExpoIOSDeploy(ctx context.Context, p ExpoIOSDeployParam
 	return s.triggerExpo(ctx, WorkflowExpoIOSDeploy, p.toEnvVars())
 }
 
+// TriggerExpoOTAPublish triggers the Codemagic expo-ota-publish workflow
+// (P1 #12 mobile audit, 2026-05-04). Runs `expo export --platform all` and
+// uploads the resulting bundle to /v2/apps/{id}/ota/publish per platform —
+// ~3 min vs ~25 min for a full native rebuild. Retries up to 3 times on
+// 5xx + network errors with linear backoff.
+func (s *Service) TriggerExpoOTAPublish(ctx context.Context, p ExpoOTAPublishParams) (string, error) {
+	return s.triggerExpo(ctx, WorkflowExpoOTAPublish, p.toEnvVars())
+}
+
 type expoTriggerEnvironment struct {
 	Variables map[string]string `json:"variables,omitempty"`
 }

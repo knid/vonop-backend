@@ -73,6 +73,21 @@ type AIEnabler func(ctx context.Context, project *models.AppProject) error
 // must not fail because a background deploy failed to enqueue.
 type BackendAutoDeployer func(ctx context.Context, project *models.AppProject) error
 
+// MobileBuildTrigger kicks off a fresh Expo (mobile_app_native) build for
+// the project, on behalf of the chat agent. Used by trigger_build_after_fix
+// so the agent can close the read-fix-rebuild loop without forcing the
+// user back to the build tab. Returns the build ID + the per-platform
+// task IDs so the tool result can include status URLs.
+//
+// platforms is a (possibly empty) slice of "android" / "ios". Empty means
+// "rebuild whatever the last build targeted" — the controller layer
+// resolves this from the v1 shadow project's BuildFor* flags.
+//
+// Best-effort by design: implementations must NOT panic on partial
+// failures (single-platform trigger errors). The tool reports the status
+// to the model so it can react.
+type MobileBuildTrigger func(ctx context.Context, project *models.AppProject, user *models.User, platforms []string) (buildID string, taskIDs map[string]string, err error)
+
 // GatewayAllowedModelsFn returns the model IDs (chat + image, OpenRouter /
 // fal format) the current user's subscription tier can reach through the
 // Wemob AI Gateway. Bound per-run in AgentDeps so the agent package never has
@@ -134,6 +149,7 @@ type RunDependencies struct {
 	AutoDeployBackend        BackendAutoDeployer
 	GatewayAllowedModels     GatewayAllowedModelsFn
 	UpdateMobileBridgeMethod MobileBridgeUpdater
+	TriggerMobileBuild       MobileBuildTrigger
 	RecordLLMUsage           LLMUsageRecorder
 	RecordLLMError           LLMErrorRecorder
 }

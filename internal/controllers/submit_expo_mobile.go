@@ -118,16 +118,75 @@ func (c *Controller) SubmitExpoMobile(ctx context.Context, project *models.AppPr
 		draft = *opts.SubmitAsDraftOverride
 	}
 
+	// P1#15 — load the per-project store listing + every per-locale row so we
+	// can pass the metadata through to Apple/Play. Best-effort: if the listing
+	// hasn't been saved yet, we fall back to an empty set so the submission
+	// still goes through (the publishing block then keeps whatever is already
+	// in App Store Connect / Play Console).
+	listing, locales, listingErr := c.GetListingForSubmit(ctx, project.ID.String(), "")
+	if listingErr != nil {
+		slog.Warn("SubmitExpoMobile: listing not found, submitting without per-locale metadata",
+			"project_id", project.ID, "err", listingErr)
+		listing = nil
+		locales = nil
+	}
+
 	switch platform {
 	case "android":
-		return c.submitAndroid(ctx, project, build, task, playTrack, opts.RolloutFraction, draft)
+		return c.submitAndroid(ctx, project, build, task, playTrack, opts.RolloutFraction, draft, listing, locales)
 	case "ios":
-		return c.submitIOS(ctx, project, build, task, appStoreTrack, opts.SubmitToAppStore, phased, draft)
+		return c.submitIOS(ctx, project, build, task, appStoreTrack, opts.SubmitToAppStore, phased, draft, listing, locales)
 	}
 	return nil, ErrSubmitInvalidPlatform
 }
 
-func (c *Controller) submitAndroid(ctx context.Context, project *models.AppProject, build *models.Build, task *models.AppBuildTask, track string, rolloutFraction float64, draft bool) (*SubmitResult, error) {
+// listingLocalesForSubmit converts the per-locale rows into the codemagic
+// ListingLocale slice. The parent listing's default Locale is added with
+// the parent's Title/Description if no row for it exists yet — this means
+// the wizard's single-locale path stays compatible with the new flow.
+func listingLocalesForSubmit(listing *models.AppStoreListing, locales map[string]*models.AppStoreListingLocalization) []codemagic.ListingLocale {
+	if listing == nil {
+		return nil
+	}
+	out := make([]codemagic.ListingLocale, 0, len(locales)+1)
+	seen := make(map[string]bool, len(locales))
+	for loc, row := range locales {
+		if row == nil {
+			continue
+		}
+		out = append(out, codemagic.ListingLocale{
+			Locale:           loc,
+			Title:            row.Title,
+			Subtitle:         row.Subtitle,
+			Description:      row.Description,
+			Keywords:         row.Keywords,
+			PromotionalText:  row.PromotionalText,
+			ReleaseNotes:     row.ReleaseNotes,
+			ShortDescription: row.ShortDescription,
+			MarketingURL:     row.MarketingURL,
+			SupportURL:       row.SupportURL,
+			Screenshots:      row.Screenshots,
+		})
+		seen[loc] = true
+	}
+	// Backfill the parent listing's default locale from the legacy
+	// Title / Description / Locale fields when no per-locale row exists
+	// for it yet — preserves single-locale-wizard behavior.
+	defaultLoc := listing.Locale
+	if defaultLoc == "" {
+		defaultLoc = "en-US"
+	}
+	if !seen[defaultLoc] && (listing.Title != "" || listing.Description != "") {
+		out = append(out, codemagic.ListingLocale{
+			Locale:      defaultLoc,
+			Title:       listing.Title,
+			Description: listing.Description,
+		})
+	}
+	return out
+}
+
+func (c *Controller) submitAndroid(ctx context.Context, project *models.AppProject, build *models.Build, task *models.AppBuildTask, track string, rolloutFraction float64, draft bool, listing *models.AppStoreListing, locales map[string]*models.AppStoreListingLocalization) (*SubmitResult, error) {
 	switch track {
 	case "internal", "alpha", "beta", "production":
 	default:
@@ -146,7 +205,7 @@ func (c *Controller) submitAndroid(ctx context.Context, project *models.AppProje
 	}
 
 	bundleID := bundleIDForProject(project, "")
-	cmBuildID, err := c.CodemagicService.TriggerExpoAndroidDeploy(ctx, codemagic.ExpoAndroidDeployParams{
+	params := codemagic.ExpoAndroidDeployParams{
 		ProjectID:             project.ID,
 		BuildID:               build.ID,
 		TaskID:                task.ID,
@@ -157,7 +216,16 @@ func (c *Controller) submitAndroid(ctx context.Context, project *models.AppProje
 		RolloutFraction:       rolloutFraction,
 		SubmitAsDraft:         draft,
 		AABS3Key:              fmt.Sprintf("aabs/%s.aab", build.ID.String()),
-	})
+		Locales:               listingLocalesForSubmit(listing, locales),
+	}
+	if listing != nil {
+		params.Copyright = listing.Copyright
+		params.PrimaryCategory = listing.PrimaryCategory
+		params.SecondaryCategory = listing.SecondaryCategory
+		params.EULAType = listing.EULAType
+		params.EULAURL = listing.EULAURL
+	}
+	cmBuildID, err := c.CodemagicService.TriggerExpoAndroidDeploy(ctx, params)
 	if err != nil {
 		return nil, fmt.Errorf("submit: trigger codemagic android deploy: %w", err)
 	}
@@ -167,7 +235,7 @@ func (c *Controller) submitAndroid(ctx context.Context, project *models.AppProje
 	return &SubmitResult{Platform: "android", BuildTaskID: task.ID, CodemagicBuildID: cmBuildID}, nil
 }
 
-func (c *Controller) submitIOS(ctx context.Context, project *models.AppProject, build *models.Build, task *models.AppBuildTask, track string, submitToAppStore bool, phased bool, draft bool) (*SubmitResult, error) {
+func (c *Controller) submitIOS(ctx context.Context, project *models.AppProject, build *models.Build, task *models.AppBuildTask, track string, submitToAppStore bool, phased bool, draft bool, listing *models.AppStoreListing, locales map[string]*models.AppStoreListingLocalization) (*SubmitResult, error) {
 	switch track {
 	case "internal", "external", "production":
 	default:
@@ -187,7 +255,7 @@ func (c *Controller) submitIOS(ctx context.Context, project *models.AppProject, 
 
 	bundleID := bundleIDForProject(project, "")
 	// Always submit to TestFlight; SubmitToAppStore toggles the additional production push.
-	cmBuildID, err := c.CodemagicService.TriggerExpoIOSDeploy(ctx, codemagic.ExpoIOSDeployParams{
+	params := codemagic.ExpoIOSDeployParams{
 		ProjectID:          project.ID,
 		BuildID:            build.ID,
 		TaskID:             task.ID,
@@ -201,7 +269,16 @@ func (c *Controller) submitIOS(ctx context.Context, project *models.AppProject, 
 		PhasedRelease:      phased && (submitToAppStore || track == "production"),
 		SubmitAsDraft:      draft,
 		IPAS3Key:           fmt.Sprintf("ipas/%s.ipa", build.ID.String()),
-	})
+		Locales:            listingLocalesForSubmit(listing, locales),
+	}
+	if listing != nil {
+		params.Copyright = listing.Copyright
+		params.PrimaryCategory = listing.PrimaryCategory
+		params.SecondaryCategory = listing.SecondaryCategory
+		params.EULAType = listing.EULAType
+		params.EULAURL = listing.EULAURL
+	}
+	cmBuildID, err := c.CodemagicService.TriggerExpoIOSDeploy(ctx, params)
 	if err != nil {
 		return nil, fmt.Errorf("submit: trigger codemagic ios deploy: %w", err)
 	}

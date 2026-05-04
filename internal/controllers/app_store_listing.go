@@ -1,8 +1,11 @@
 package controllers
 
 import (
+	"context"
 	"database/sql"
 	"errors"
+
+	"github.com/google/uuid"
 
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/requests"
@@ -69,6 +72,54 @@ func (c *Controller) UpdateAppStoreListing(
 	}
 
 	saved, err := c.DB.UpsertAppStoreListing(listing)
+	if err != nil {
+		return nil, err
+	}
+	return saved, nil
+}
+
+// GetListingForSubmit loads the parent listing + every locale row for a
+// project. Used by the submit pipeline to populate ExpoIOSDeployParams /
+// ExpoAndroidDeployParams.Locales so per-locale store metadata reaches
+// Apple / Google Play.
+//
+// Returns (nil, nil, sql.ErrNoRows) when the project has no listing yet —
+// callers should treat that as a hard error (the wizard requires the
+// listing be saved before submit).
+//
+// `locale` is currently unused — the entire localization set is returned
+// so the submit step can write all per-locale metadata folders. Reserved
+// for a future "submit only this locale" override.
+func (c *Controller) GetListingForSubmit(ctx context.Context, projectID string, locale string) (*models.AppStoreListing, map[string]*models.AppStoreListingLocalization, error) {
+	_ = locale // reserved for future per-locale submission filtering
+	listing, err := c.DB.GetAppStoreListing(projectID)
+	if err != nil {
+		return nil, nil, err
+	}
+	locales, err := c.DB.GetLocalizationsByListing(ctx, listing.ID)
+	if err != nil {
+		return listing, nil, err
+	}
+	return listing, locales, nil
+}
+
+// UpsertListingLocalization writes one locale's per-locale copy +
+// screenshots. Creates the row if it doesn't exist, otherwise updates in
+// place. Caller is responsible for resolving listingID from the project
+// (typically via GetOrCreateAppStoreListing → save → ID).
+func (c *Controller) UpsertListingLocalization(ctx context.Context, listingID uuid.UUID, locale string, fields *models.AppStoreListingLocalization) (*models.AppStoreListingLocalization, error) {
+	if fields == nil {
+		return nil, errors.New("upsert localization: fields is required")
+	}
+	if locale == "" {
+		return nil, errors.New("upsert localization: locale is required")
+	}
+	if listingID == uuid.Nil {
+		return nil, errors.New("upsert localization: listingID is required")
+	}
+	fields.ListingID = listingID
+	fields.Locale = locale
+	saved, err := c.DB.UpsertLocalization(ctx, fields)
 	if err != nil {
 		return nil, err
 	}

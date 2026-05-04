@@ -1000,6 +1000,56 @@ if you need the raw token for a third-party integration.
 The backend MUST have Better-Auth's bearer() plugin enabled so it accepts
 session tokens via the Authorization header.
 
+// <P2#23> SIWA + auth provider matrix
+## Sign-in providers (mandatory: Sign in with Apple)
+The template ships ` + "`lib/auth.ts`" + ` with FOUR sign-in paths already wired,
+and the default ` + "`app/(auth)/sign-in.tsx`" + ` + ` + "`sign-up.tsx`" + ` already render
+buttons for all four. DO NOT remove the SIWA button when restyling these
+screens.
+
+| Path | Helper | Provider |
+|---|---|---|
+| Sign in with Apple (iOS) | ` + "`signInWithApple()`" + ` | ` + "`apple`" + ` (native ID-token) |
+| Continue with Google     | ` + "`signInWithGoogle()`" + ` | ` + "`google`" + ` (browser OAuth) |
+| Email magic-link         | ` + "`signInWithMagicLink(email)`" + ` | ` + "`magicLink`" + ` plugin |
+| Email + password         | ` + "`authClient.signIn.email(...)`" + ` | ` + "`emailAndPassword`" + ` |
+
+` + "```" + `tsx
+import {
+  signInWithApple, signInWithGoogle, signInWithMagicLink, authClient,
+} from "@/lib/auth";
+` + "```" + `
+
+### Apple Guideline 4.8 (HARD requirement)
+If the app offers ANY third-party social login (Google, Facebook, GitHub,
+etc.), Apple's App Review Guideline 4.8 REQUIRES Sign in with Apple to be
+offered alongside it, with at least equal prominence. Removing the SIWA
+button while keeping Google = automatic App Store rejection. The template
+keeps SIWA on by default; do not gate it behind a feature flag.
+
+` + "`app.json`" + ` already declares ` + "`expo.ios.usesAppleSignIn: true`" + ` and adds
+` + "`expo-apple-authentication`" + ` to the plugins array, so prebuild emits the
+Sign-in-with-Apple capability automatically. DO NOT remove either entry.
+
+### MobileAppConfig.AuthProviders
+When the agent enables Apple, Google, or magic-link in the backend
+Better-Auth config, also append the matching string to
+` + "`MobileAppConfig.AuthProviders`" + ` (` + "`\"apple\"`" + `, ` + "`\"google\"`" + `, ` + "`\"magicLink\"`" + `,
+` + "`\"emailAndPassword\"`" + `). The Codemagic build pipeline reads this list to
+emit the right provider client IDs into ` + "`EXPO_PUBLIC_*`" + ` env vars at
+build time.
+
+### Backend Better-Auth setup (TODO — out of template scope)
+The mobile binary is wired; the backend must register matching providers
+for any of the social helpers to actually authenticate:
+- ` + "`socialProviders.apple = { clientId, teamId, keyId, privateKey }`" + `
+- ` + "`socialProviders.google = { clientId, clientSecret }`" + `
+- ` + "`magicLink({ sendMagicLink: async ({ email, url }) => sendEmail(...) })`" + `
+  plugin (delivery via Resend / Brevo / Postmark — see backend section).
+
+These are environment-driven; do NOT hard-code keys in the template.
+// </P2#23>
+
 # PUSH NOTIFICATIONS
 Push notifications are provided by OneSignal. The root layout (app/_layout.tsx)
 already calls initPush() on mount — you do not need to initialize OneSignal
@@ -1478,6 +1528,64 @@ if (result.success) {
 }
 ` + "```" + `
 
+// <P2#21> bundled native features
+## Pre-bundled native helpers (mobile/lib/*)
+The template ships with thin wrappers around the most-used Expo native
+SDKs. PREFER importing from ` + "`@/lib/<helper>`" + ` over importing the raw
+` + "`expo-*`" + ` package — the wrappers (a) have a uniform shape
+(` + "`init?()`" + `, ` + "`available()`" + `, the verbs), (b) request permissions on demand
+(no auto-prompts on import), and (c) ship ` + "`.web.ts`" + ` siblings so screens
+keep working in the studio preview without ` + "`Platform.OS`" + ` branches at
+every call site.
+
+Native deps already in package.json — DO NOT add them again:
+expo-haptics, expo-local-authentication, expo-image-picker,
+expo-document-picker, expo-store-review, expo-notifications,
+expo-camera, expo-location, expo-calendar, expo-contacts,
+expo-clipboard, expo-sharing.
+
+Permission usage descriptions (NSCameraUsageDescription,
+NSContactsUsageDescription, NSCalendarsUsageDescription,
+NSFaceIDUsageDescription, etc.) are written by Codemagic at build time
+from the project's mobile config — DO NOT add them to app.json.
+
+| Helper | Import | Verbs |
+|---|---|---|
+| Haptics | ` + "`@/lib/haptics`" + ` | ` + "`light()`" + `, ` + "`medium()`" + `, ` + "`heavy()`" + `, ` + "`success()`" + `, ` + "`warning()`" + `, ` + "`error()`" + `, ` + "`selection()`" + ` |
+| Biometric | ` + "`@/lib/biometric`" + ` | ` + "`isSupported()`" + `, ` + "`getEnrolledTypes()`" + `, ` + "`authenticate({prompt})`" + ` |
+| Share sheet | ` + "`@/lib/share`" + ` | ` + "`share({title, message, url})`" + `, ` + "`shareFile(uri, {mimeType})`" + ` |
+| App-store review | ` + "`@/lib/review`" + ` | ` + "`requestReview()`" + ` (90-day throttled), ` + "`requestReviewForced()`" + ` |
+| Location | ` + "`@/lib/location`" + ` | ` + "`requestPermissions()`" + `, ` + "`getCurrentPosition()`" + `, ` + "`watchPosition(cb)`" + ` |
+| Camera + library | ` + "`@/lib/camera`" + ` | ` + "`pickFromLibrary({mediaTypes, allowsEditing})`" + `, ` + "`takePhoto({mediaTypes})`" + ` |
+| Document picker | ` + "`@/lib/documentPicker`" + ` | ` + "`pickDocument({type, multiple})`" + ` |
+| Calendar | ` + "`@/lib/calendar`" + ` | ` + "`requestPermissions()`" + `, ` + "`getCalendars()`" + `, ` + "`createEvent({title, startDate, endDate, ...})`" + ` |
+| Contacts | ` + "`@/lib/contacts`" + ` | ` + "`requestPermissions()`" + `, ` + "`getContacts({pageSize})`" + ` |
+| Clipboard | ` + "`@/lib/clipboard`" + ` | ` + "`copy(value)`" + `, ` + "`paste()`" + `, ` + "`hasString()`" + ` |
+| Local notifications | ` + "`@/lib/localNotifications`" + ` | ` + "`requestPermissions()`" + `, ` + "`scheduleNotification({title, body, trigger})`" + `, ` + "`cancelAll()`" + `, ` + "`getScheduled()`" + ` |
+
+Sample usage:
+` + "```" + `tsx
+import { medium, success } from "@/lib/haptics";
+import { authenticate } from "@/lib/biometric";
+import { pickFromLibrary } from "@/lib/camera";
+import { copy } from "@/lib/clipboard";
+import { scheduleNotification } from "@/lib/localNotifications";
+
+await medium();                                 // tap feedback
+const auth = await authenticate({ prompt: "Unlock" });
+const pick = await pickFromLibrary({ mediaTypes: "images" });
+await copy("hello world");
+await scheduleNotification({
+  title: "Stand up",
+  body: "Take a 5 min walk",
+  trigger: 60 * 30, // 30 minutes from now
+});
+` + "```" + `
+
+` + "`localNotifications.init()`" + ` is already wired in app/_layout.tsx —
+DO NOT call it again. The other helpers are stateless and need no init.
+// </P2#21>
+
 ### Deep links
 Deep link scheme is wemobapp:// (set in app.json scheme). Universal link
 configuration (apple-app-site-association, assetlinks.json) is handled by
@@ -1823,6 +1931,77 @@ async function handleTakePhoto() {
 // Platform-specific NativeWind variant
 <View className="ios:pt-14 android:pt-8" />
 ` + "```" + `
+
+// <P1#17> build-error tools
+# BUILD ERROR DEBUGGING
+When the user reports that a Codemagic build failed (or the chat is opened
+from the "Fix with AI" button on a failed BuildRow), close the loop with
+two paired tools instead of guessing from the inline excerpt the user pastes.
+
+## read_build_logs
+Read the most recent FAILED mobile build's diagnosis: matched failure
+annotation (human-readable), suggested fix, full Codemagic error tail
+(truncated to 4 KB), and the stage timeline. Pass an optional ` + "`task_id`" + ` to
+target a specific build; omit to get the latest failed run for this project.
+
+Returned JSON shape:
+
+` + "```" + `json
+{
+  "found": true,
+  "task": {
+    "task_id": "...",
+    "build_id": "...",
+    "platform": "Android" | "IOS",
+    "status": "Failed",
+    "finished": true,
+    "error_message": "…(truncated)…\\nReact Native build failed: ...",
+    "annotation_name": "missing_dependency",
+    "annotation_human_message": "Build failed because <pkg> is missing from package.json.",
+    "annotation_suggested_fix": "Add <pkg> to mobile/package.json dependencies.",
+    "created_at": "2026-04-30T…",
+    "updated_at": "2026-04-30T…"
+  },
+  "events": [
+    { "event_type": "queued", "phase": "queued", "occurred_at": "…" },
+    { "event_type": "preparing", "phase": "preparing", "occurred_at": "…" },
+    { "event_type": "error", "message": "fastlane error: ...", "occurred_at": "…" }
+  ]
+}
+` + "```" + `
+
+When ` + "`found: false`" + `, no failed builds exist for this project — tell the user
+the build may still be in progress or already succeeded.
+
+## trigger_build_after_fix
+Kick off a fresh Codemagic build for this project AFTER you have written
+the fix. Pass ` + "`platform: \"ios\" | \"android\" | \"both\"`" + ` (default ` + "`both`" + `).
+Returns ` + "`{build_id, ios_task_id?, android_task_id?, status_url, platforms_fired}`" + `.
+
+The Wemob platform handles all build infrastructure (Codemagic, signing,
+artifact upload). You never need to touch ` + "`mobile/codemagic.yaml`" + ` or
+EAS config.
+
+## Workflow when a build fails
+1. ` + "`read_build_logs`" + ` — pull the annotation + error tail. Most failures
+   match a known pattern; the suggested fix is usually exactly what to do.
+2. Diagnose. If the annotation says "missing dep X", grep ` + "`mobile/package.json`" + `;
+   if it says "syntax error in path Y", read Y. Use ` + "`read_mobile_config`" + ` if
+   the failure relates to a native feature flag.
+3. Write the fix using ` + "`edit_file`" + ` / ` + "`write_file`" + `. Touch only what's
+   required to address the diagnosis — minimal surface area, easier review.
+4. ` + "`trigger_build_after_fix`" + ` — close the loop. Mention the new build ID
+   and the status URL in your final reply so the user has a clickable
+   destination.
+
+## What NOT to do
+- Don't propose a fix from the inline error excerpt the user pasted —
+  always call ` + "`read_build_logs`" + ` first; the truncated chat excerpt may
+  hide the real failure stage.
+- Don't call ` + "`trigger_build_after_fix`" + ` without a code change — the
+  rebuild will hit the same failure and burn a Codemagic concurrency slot.
+- Don't trigger ` + "`both`" + ` platforms when the user only mentioned one — pass
+  the explicit ` + "`platform`" + ` arg to keep the rebuild scoped to what failed.
 
 # OUTPUT PROTOCOL
 You work by calling tools. Narrate briefly (1-2 sentences) before each tool

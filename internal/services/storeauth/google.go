@@ -41,6 +41,119 @@ func ParseServiceAccount(saJSON []byte) (GoogleServiceAccount, error) {
 	return sa, nil
 }
 
+// PlayTrackRelease is the subset of Play `Release` we use for status polling
+// (P1#16). One Release per (track, version-code) tuple.
+type PlayTrackRelease struct {
+	Name            string  // optional human-readable
+	VersionCodes    []int64 // version codes contained in this release
+	Status          string  // "draft" | "inProgress" | "halted" | "completed"
+	UserFraction    float64 // 0..1, only meaningful for inProgress
+	ReleaseNotes    string  // empty when not present
+	StoreReleaseRef string  // synthesized as "{track}#{joinedVersionCodes}"
+}
+
+// PlayEdit is the minimum we read back from the edits.insert call.
+type PlayEdit struct {
+	ID            string `json:"id"`
+	ExpiryTimeSec string `json:"expiryTimeSeconds"`
+}
+
+// GetPlayTrackRelease opens a fresh edit, reads the named track, and returns
+// the most recent release on it. Used by the release status polling worker
+// (P1#16). Caller supplies a context — the edit is always deleted before
+// returning to avoid mutating user state.
+func GetPlayTrackRelease(ctx context.Context, sa GoogleServiceAccount, packageName, track string) (*PlayTrackRelease, error) {
+	if packageName == "" || track == "" {
+		return nil, fmt.Errorf("packageName and track required")
+	}
+	token, err := GoogleToken(ctx, sa)
+	if err != nil {
+		return nil, fmt.Errorf("mint google token: %w", err)
+	}
+	pkg := url.PathEscape(packageName)
+	editURL := fmt.Sprintf("%s/applications/%s/edits", playAPIBase, pkg)
+
+	editReq, _ := http.NewRequestWithContext(ctx, http.MethodPost, editURL, nil)
+	editReq.Header.Set("Authorization", "Bearer "+token)
+	editReq.Header.Set("Content-Type", "application/json")
+	editResp, err := playHTTPClient.Do(editReq)
+	if err != nil {
+		return nil, fmt.Errorf("open edit: %w", err)
+	}
+	defer editResp.Body.Close()
+	editBody, _ := io.ReadAll(io.LimitReader(editResp.Body, 4096))
+	if editResp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("open edit status %d: %s", editResp.StatusCode, string(editBody))
+	}
+	var edit PlayEdit
+	if err := json.Unmarshal(editBody, &edit); err != nil || edit.ID == "" {
+		return nil, fmt.Errorf("parse edit response: %w", err)
+	}
+
+	// Best-effort cleanup; failure to delete the edit is non-fatal.
+	defer func() {
+		delURL := editURL + "/" + edit.ID
+		delReq, _ := http.NewRequestWithContext(context.Background(), http.MethodDelete, delURL, nil)
+		delReq.Header.Set("Authorization", "Bearer "+token)
+		if delResp, err := playHTTPClient.Do(delReq); err == nil {
+			_, _ = io.ReadAll(delResp.Body)
+			delResp.Body.Close()
+		}
+	}()
+
+	trackURL := fmt.Sprintf("%s/%s/tracks/%s", editURL, edit.ID, url.PathEscape(track))
+	trackReq, _ := http.NewRequestWithContext(ctx, http.MethodGet, trackURL, nil)
+	trackReq.Header.Set("Authorization", "Bearer "+token)
+	trackResp, err := playHTTPClient.Do(trackReq)
+	if err != nil {
+		return nil, fmt.Errorf("read track: %w", err)
+	}
+	defer trackResp.Body.Close()
+	trackBody, _ := io.ReadAll(io.LimitReader(trackResp.Body, 64*1024))
+	if trackResp.StatusCode == http.StatusNotFound {
+		return nil, nil
+	}
+	if trackResp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("read track status %d: %s", trackResp.StatusCode, string(trackBody))
+	}
+	var t struct {
+		Track    string `json:"track"`
+		Releases []struct {
+			Name         string   `json:"name"`
+			VersionCodes []string `json:"versionCodes"`
+			Status       string   `json:"status"`
+			UserFraction float64  `json:"userFraction"`
+			ReleaseNotes []struct {
+				Language string `json:"language"`
+				Text     string `json:"text"`
+			} `json:"releaseNotes"`
+		} `json:"releases"`
+	}
+	if err := json.Unmarshal(trackBody, &t); err != nil {
+		return nil, fmt.Errorf("parse track: %w", err)
+	}
+	if len(t.Releases) == 0 {
+		return nil, nil
+	}
+	rel := t.Releases[0]
+	out := &PlayTrackRelease{
+		Name:         rel.Name,
+		Status:       rel.Status,
+		UserFraction: rel.UserFraction,
+	}
+	for _, vc := range rel.VersionCodes {
+		// Play returns version codes as decimal strings.
+		var n int64
+		_, _ = fmt.Sscanf(vc, "%d", &n)
+		out.VersionCodes = append(out.VersionCodes, n)
+	}
+	if len(rel.ReleaseNotes) > 0 {
+		out.ReleaseNotes = rel.ReleaseNotes[0].Text
+	}
+	out.StoreReleaseRef = fmt.Sprintf("%s#%v", track, out.VersionCodes)
+	return out, nil
+}
+
 // GoogleToken mints a short-lived OAuth2 access token scoped to the
 // androidpublisher API via the JWT-bearer grant.
 func GoogleToken(ctx context.Context, sa GoogleServiceAccount) (string, error) {

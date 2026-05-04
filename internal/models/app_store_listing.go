@@ -40,6 +40,16 @@ type AppStoreListing struct {
 	// Stored here so the pre-submit checklist can validate it.
 	PrivacyPolicyURL string `bun:",nullzero" json:"privacy_policy_url"`
 
+	// P1#15 — locale-independent metadata that applies across all listings.
+	// Apple App Store Connect refuses submissions without primary category +
+	// copyright; Google Play requires the same. EULA defaults to Apple's
+	// standard terms unless the developer supplies a custom URL.
+	Copyright         string `bun:",nullzero" json:"copyright"`
+	PrimaryCategory   string `bun:",nullzero" json:"primary_category"`
+	SecondaryCategory string `bun:",nullzero" json:"secondary_category"`
+	EULAType          string `bun:",nullzero,default:'apple_default'" json:"eula_type"` // "apple_default" | "custom_url"
+	EULAURL           string `bun:",nullzero" json:"eula_url"`
+
 	CreatedAt time.Time `bun:",nullzero,notnull,default:current_timestamp" json:"created_at"`
 	UpdatedAt time.Time `bun:",nullzero,notnull,default:current_timestamp" json:"updated_at"`
 }

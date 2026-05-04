@@ -23,6 +23,10 @@ const (
 //  2. Fetch certificates / profiles (Apple) and check expiry. Notify the org
 //     if any expire within 30/7-day windows.
 //
+// Additionally renews per-project AppleSigningAssets (P1 #14) when cert /
+// profile is < 30 days from expiry — calls EnsureAppleSigningAssets which
+// re-mints both via ASC.
+//
 // Errors per-connection are logged but don't abort the run — one bad
 // credential shouldn't stop the others.
 func (c *Controller) RunCredentialHealthCheck(ctx context.Context) error {
@@ -32,7 +36,56 @@ func (c *Controller) RunCredentialHealthCheck(ctx context.Context) error {
 	if err := c.runGoogleCredentialHealth(ctx); err != nil {
 		slog.Warn("google credential health failed", "err", err)
 	}
+	if err := c.runAppleSigningRenewal(ctx); err != nil {
+		slog.Warn("apple signing renewal failed", "err", err)
+	}
 	return nil
+}
+
+// runAppleSigningRenewal walks every AppleSigningAssets row that's within
+// 30 days of expiry and calls EnsureAppleSigningAssets on it — which
+// re-mints the cert + profile via ASC and upserts the row. Failures are
+// logged per-project; one bad ASC connection doesn't abort the rest.
+func (c *Controller) runAppleSigningRenewal(ctx context.Context) error {
+	rows, err := c.DB.ListExpiringAppleSigningAssets(ctx, credExpiryWarnDays)
+	if err != nil {
+		return err
+	}
+	if len(rows) == 0 {
+		return nil
+	}
+
+	eg, ctx := errgroup.WithContext(ctx)
+	eg.SetLimit(credHealthConcurrency)
+
+	for _, row := range rows {
+		row := row // capture loop variable
+		eg.Go(func() error {
+			project, err := c.DB.GetAppProjectByID(row.AppProjectID.String())
+			if err != nil || project == nil {
+				slog.Warn("apple signing renewal: project lookup", "project_id", row.AppProjectID, "err", err)
+				return nil
+			}
+			conn, err := c.DB.GetAppleConnectionById(row.AppleConnectionID.String())
+			if err != nil || conn == nil {
+				slog.Warn("apple signing renewal: connection lookup", "conn_id", row.AppleConnectionID, "err", err)
+				return nil
+			}
+			if _, err := c.EnsureAppleSigningAssets(ctx, project, conn); err != nil {
+				slog.Warn("apple signing renewal: ensure failed",
+					"project_id", row.AppProjectID,
+					"conn_id", row.AppleConnectionID,
+					"err", err)
+				return nil
+			}
+			slog.Info("apple signing renewed",
+				"project_id", row.AppProjectID,
+				"old_cert_expires", row.CertificateExpiresAt,
+				"old_profile_expires", row.ProfileExpiresAt)
+			return nil
+		})
+	}
+	return eg.Wait()
 }
 
 const credHealthConcurrency = 10

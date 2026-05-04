@@ -77,6 +77,13 @@ func (c *Controller) AgentDeps(user *models.User) *agent.RunDependencies {
 			return c.GatewayAllowedModels(user)
 		},
 		UpdateMobileBridgeMethod: c.updateMobileBridgeMethodForAgent,
+		// <P1#17> trigger_build_after_fix — bound here so the agent tool
+		// closes the read-fix-rebuild loop without poking BuildExpoMobile
+		// directly. Non-owner / non-mobile callers are rejected upstream
+		// at the tool layer (rc.Project + rc.User checks).
+		TriggerMobileBuild: func(ctx context.Context, project *models.AppProject, user *models.User, platforms []string) (string, map[string]string, error) {
+			return c.triggerMobileBuildForAgent(ctx, project, user, platforms)
+		},
 		RecordLLMUsage: func(tracker *utils.TokenTracker, action, model, provider, reference, appType string) {
 			c.RecordTokenUsage(user, action, model, provider, reference, appType, tracker)
 		},
@@ -179,6 +186,71 @@ func (c *Controller) enableProjectAIForAgent(ctx context.Context, project *model
 		return fmt.Errorf("persist has_ai on project: %w", err)
 	}
 	return nil
+}
+
+// triggerMobileBuildForAgent kicks off a fresh Codemagic Expo build on
+// behalf of the chat agent's trigger_build_after_fix tool (P1 #17). Wraps
+// BuildExpoMobile with the minimal options the agent path can supply:
+// app name + icon are pulled from the project / its last build, splash
+// color falls back to the controller default. Per-platform error
+// isolation is preserved — partial-failure builds (one platform triggers,
+// the other fails) still return a non-nil buildID so the agent can report
+// the partial success to the user.
+//
+// platforms may be ["android"], ["ios"], or ["android", "ios"]. Empty
+// slice defaults to "both" — matches the tool's schema default.
+func (c *Controller) triggerMobileBuildForAgent(ctx context.Context, project *models.AppProject, user *models.User, platforms []string) (string, map[string]string, error) {
+	if project == nil {
+		return "", nil, fmt.Errorf("project is required")
+	}
+	if user == nil {
+		return "", nil, fmt.Errorf("user is required")
+	}
+	if len(platforms) == 0 {
+		platforms = []string{"android", "ios"}
+	}
+
+	// Pull last-build metadata so we keep app name / icon / splash color
+	// stable across the rebuild. A first-time build (no v1 shadow project,
+	// no Build row yet) is fine — BuildExpoMobile creates them.
+	opts := ExpoBuildOptions{
+		Platforms: platforms,
+		AppName:   project.Name,
+	}
+
+	shadowURL := "expo://" + project.Slug
+	if v1, err := c.DB.GetProjectByUserAndURL(user.ID.String(), shadowURL); err == nil && v1 != nil {
+		if last, lerr := c.DB.GetLastProjectBuild(v1); lerr == nil && last != nil {
+			if last.Title != "" {
+				opts.AppName = last.Title
+			}
+			if last.Icon != "" {
+				opts.Icon = last.Icon
+			}
+			if last.SplashScreenColor != "" {
+				opts.SplashColor = last.SplashScreenColor
+			}
+		}
+	}
+
+	build, tasks, err := c.BuildExpoMobile(ctx, project, user, opts)
+	taskIDs := make(map[string]string, len(tasks))
+	for _, t := range tasks {
+		if t == nil {
+			continue
+		}
+		switch t.Platform {
+		case "Android":
+			taskIDs["android"] = t.ID.String()
+		case "IOS":
+			taskIDs["ios"] = t.ID.String()
+		}
+	}
+	buildID := ""
+	if build != nil {
+		buildID = build.ID.String()
+	}
+	return buildID, taskIDs, err
 }
 
 // updateMobileBridgeMethodForAgent toggles a bridge method on a project's
