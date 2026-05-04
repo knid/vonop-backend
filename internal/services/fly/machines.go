@@ -17,6 +17,18 @@ type machineSummary struct {
 	Name  string `json:"name"`
 }
 
+// MachineStatus is the studio-facing summary of one Fly machine.
+// Mirrors the Fly Machines API response, trimmed to the fields the
+// studio actually displays.
+type MachineStatus struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	State     string `json:"state"`       // "started" | "stopped" | "destroyed" | ...
+	Region    string `json:"region"`
+	Image     string `json:"image"`       // e.g. "registry.fly.io/wemob-acme:abc123"
+	UpdatedAt string `json:"updated_at"` // RFC3339, as returned by Fly
+}
+
 // DeployMachines releases the image to a Fly Machine via `flyctl deploy --image`.
 //
 // We shell out to flyctl rather than POSTing to the Machines API directly because
@@ -159,6 +171,48 @@ primary_region = %q
 		extras.String(),
 		soft, hard,
 	)
+}
+
+// GetMachineStatus returns the most representative machine for the given
+// Fly app. If multiple machines exist (we don't run multi-machine apps
+// today, but tolerate it), the first machine in the response wins. If
+// there are zero machines, returns a non-nil error so callers can show
+// a "not deployed yet" state.
+func (s *Service) GetMachineStatus(appName string) (MachineStatus, error) {
+	var raw []struct {
+		ID       string `json:"id"`
+		Name     string `json:"name"`
+		State    string `json:"state"`
+		Region   string `json:"region"`
+		ImageRef struct {
+			Registry   string `json:"registry"`
+			Repository string `json:"repository"`
+			Tag        string `json:"tag"`
+		} `json:"image_ref"`
+		UpdatedAt string `json:"updated_at"`
+	}
+	if err := s.doRequest("GET", "/v1/apps/"+appName+"/machines", nil, &raw); err != nil {
+		return MachineStatus{}, err
+	}
+	if len(raw) == 0 {
+		return MachineStatus{}, fmt.Errorf("fly: no machines for app %q", appName)
+	}
+	m := raw[0]
+	var image string
+	if m.ImageRef.Registry != "" && m.ImageRef.Repository != "" {
+		image = m.ImageRef.Registry + "/" + m.ImageRef.Repository
+		if m.ImageRef.Tag != "" {
+			image += ":" + m.ImageRef.Tag
+		}
+	}
+	return MachineStatus{
+		ID:        m.ID,
+		Name:      m.Name,
+		State:     m.State,
+		Region:    m.Region,
+		Image:     image,
+		UpdatedAt: m.UpdatedAt,
+	}, nil
 }
 
 // WaitForHealthy polls until at least one Machine for the app reports state

@@ -17,12 +17,15 @@ import (
 )
 
 const machinesAPIBase = "https://api.machines.dev"
+const flyGraphQLBase = "https://api.fly.io/graphql"
 
 type Service struct {
 	APIToken      string
 	OrgSlug       string
 	Region        string
 	Registry      string
+	APIBase       string // overridable for tests; defaults to machinesAPIBase
+	GraphQLBase   string // overridable for tests; defaults to flyGraphQLBase
 	WebhookSecret string
 	httpClient    *http.Client
 }
@@ -33,6 +36,8 @@ func NewService(apiToken, orgSlug, region, webhookSecret string) *Service {
 		OrgSlug:       orgSlug,
 		Region:        region,
 		Registry:      "registry.fly.io",
+		APIBase:       machinesAPIBase,
+		GraphQLBase:   flyGraphQLBase,
 		WebhookSecret: webhookSecret,
 		httpClient:    &http.Client{Timeout: 60 * time.Second},
 	}
@@ -51,7 +56,7 @@ func (s *Service) doRequest(method, path string, body any, out any) error {
 		reqBody = bytes.NewReader(b)
 	}
 
-	req, err := http.NewRequest(method, machinesAPIBase+path, reqBody)
+	req, err := http.NewRequest(method, s.APIBase+path, reqBody)
 	if err != nil {
 		return fmt.Errorf("fly: create request: %w", err)
 	}
