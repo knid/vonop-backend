@@ -13,12 +13,16 @@ type RouteEntry struct {
 	File   string `json:"file"`
 }
 
-var routeFilePattern = regexp.MustCompile(`^backend/app/api/(.*/)?route\.ts$`)
+var routeFilePattern = regexp.MustCompile(`^backend/app/api/(?:.*/)?route\.ts$`)
 var handlerExportPattern = regexp.MustCompile(`export\s+(?:async\s+)?function\s+(GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD)\b`)
 
 // ParseRoutes scans a map of repo-relative file paths to file contents and
 // returns the list of API route handlers exported from
 // backend/app/api/**/route.ts. Pure; does no IO.
+//
+// Limitation: scans raw text, so a single-line-commented handler signature
+// (`// export async function GET() {}`) is incorrectly counted. Acceptable
+// for the studio's "what handlers exist?" view; not suitable as a lint.
 func ParseRoutes(files map[string]string) []RouteEntry {
 	var out []RouteEntry
 	for path, content := range files {
