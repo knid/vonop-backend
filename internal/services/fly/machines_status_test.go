@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-func TestGetMachineStatus_ReturnsFirstStartedMachine(t *testing.T) {
+func TestGetMachineStatus_SingleMachineHappyPath(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/apps/wemob-acme/machines" {
 			t.Errorf("unexpected path: %s", r.URL.Path)
@@ -42,8 +42,8 @@ func TestGetMachineStatus_ReturnsFirstStartedMachine(t *testing.T) {
 	if got.Region != "ams" {
 		t.Errorf("region = %q, want ams", got.Region)
 	}
-	if !strings.Contains(got.Image, "wemob-acme") {
-		t.Errorf("image = %q, expected to contain wemob-acme", got.Image)
+	if got.Image != "registry.fly.io/wemob-acme:v1" {
+		t.Errorf("image = %q, want %q", got.Image, "registry.fly.io/wemob-acme:v1")
 	}
 }
 
@@ -58,5 +58,31 @@ func TestGetMachineStatus_NoMachines(t *testing.T) {
 	_, err := s.GetMachineStatus("wemob-acme")
 	if err == nil || !strings.Contains(err.Error(), "no machines") {
 		t.Errorf("expected 'no machines' error, got %v", err)
+	}
+}
+
+func TestGetMachineStatus_EmptyImageRefProducesEmptyImage(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		machines := []map[string]any{
+			{
+				"id":         "m1",
+				"name":       "wemob-acme-app",
+				"state":      "created",
+				"region":     "ams",
+				// image_ref intentionally omitted
+				"updated_at": "2026-05-04T12:00:00Z",
+			},
+		}
+		_ = json.NewEncoder(w).Encode(machines)
+	}))
+	defer server.Close()
+
+	s := &Service{APIToken: "test-token", APIBase: server.URL, httpClient: server.Client()}
+	got, err := s.GetMachineStatus("wemob-acme")
+	if err != nil {
+		t.Fatalf("GetMachineStatus: %v", err)
+	}
+	if got.Image != "" {
+		t.Errorf("image = %q, want empty when image_ref is absent", got.Image)
 	}
 }

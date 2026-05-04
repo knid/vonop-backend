@@ -198,7 +198,13 @@ func (s *Service) GetMachineStatus(appName string) (MachineStatus, error) {
 		return MachineStatus{}, fmt.Errorf("fly: no machines for app %q", appName)
 	}
 	m := raw[0]
-	image := m.ImageRef.Registry + "/" + m.ImageRef.Repository + ":" + m.ImageRef.Tag
+	var image string
+	if m.ImageRef.Registry != "" && m.ImageRef.Repository != "" {
+		image = m.ImageRef.Registry + "/" + m.ImageRef.Repository
+		if m.ImageRef.Tag != "" {
+			image += ":" + m.ImageRef.Tag
+		}
+	}
 	return MachineStatus{
 		ID:        m.ID,
 		Name:      m.Name,
