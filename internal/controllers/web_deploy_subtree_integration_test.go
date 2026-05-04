@@ -27,7 +27,8 @@ func TestEnsureNextjsDockerfile_WritesWhenAbsent(t *testing.T) {
 
 	contents := string(got)
 	for _, want := range []string{
-		"FROM node:20-alpine AS deps",
+		"FROM node:22-alpine AS deps",
+		"mkdir -p ./public",
 		"next/standalone",
 	} {
 		if !strings.Contains(contents, want) {
