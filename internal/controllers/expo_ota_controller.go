@@ -152,28 +152,35 @@ func (c *Controller) HandleExpoOTAPublishTask(ctx context.Context, t *asynq.Task
 		// npm registry blips are common — retry once before giving up.
 		return c.maybeRetryOTA(ctx, p.DeploymentID, "npm_install", err, true)
 	}
-	distDir, err := runExpoExport(buildCtx, mobileDir)
-	if err != nil {
-		// expo export almost always fails on user code (TS/JS errors,
-		// missing deps). Retrying won't fix that — surface immediately.
-		return c.failTask(p.DeploymentID, "expo_export", err)
-	}
 
-	distTarGz, err := tarDirGzip(distDir)
-	if err != nil {
-		return c.maybeRetryOTA(ctx, p.DeploymentID, "tar_dist", err, true)
-	}
-
-	// Resolve runtime version per platform via expo's own CLI. Handles every
-	// policy expo supports (appVersion, sdkVersion, nativeVersion, fingerprint)
-	// without us having to mirror their resolution logic. Fingerprint policy
-	// can yield different hashes for ios vs android, so resolve separately.
+	// Per-platform prebuild + export. Mirrors Codemagic's pipeline:
+	//   1. expo prebuild --platform <p> --no-install --clean → generates ios/ or android/
+	//   2. expo export --platform <p> → writes dist-<p>/metadata.json with fingerprintHash
+	//   3. publish keyed on "fingerprint:<hash>" so the row matches what the
+	//      installed binary sends in expo-runtime-version (the binary's value
+	//      is baked in by the SAME prebuild + export at Codemagic build time).
+	// Without prebuild, @expo/fingerprint sees a different project state
+	// (no native dirs) and produces a hash that doesn't match the binary's,
+	// silently breaking OTA delivery.
 	timestamp := time.Now().UnixMilli()
 	publishedVersions := make(map[string]string, 2)
 	for _, platform := range []string{"ios", "android"} {
-		rv, err := resolveRuntimeVersionViaExpoCLI(buildCtx, mobileDir, platform)
+		if err := runExpoPrebuild(buildCtx, mobileDir, platform); err != nil {
+			return c.failTask(p.DeploymentID, "expo_prebuild_"+platform, err)
+		}
+		distDir, err := runExpoExport(buildCtx, mobileDir, platform)
+		if err != nil {
+			// expo export almost always fails on user code (TS/JS errors,
+			// missing deps). Retrying won't fix that — surface immediately.
+			return c.failTask(p.DeploymentID, "expo_export_"+platform, err)
+		}
+		rv, err := readRuntimeVersionFromMetadata(distDir, expoConfigBytes)
 		if err != nil {
 			return c.failTask(p.DeploymentID, "resolve_runtime_version_"+platform, err)
+		}
+		distTarGz, err := tarDirGzip(distDir)
+		if err != nil {
+			return c.maybeRetryOTA(ctx, p.DeploymentID, "tar_dist_"+platform, err, true)
 		}
 		if _, err := c.PublishOTAUpdate(ctx, project.ID, rv, platform, timestamp, distTarGz, expoConfigBytes); err != nil {
 			return c.maybeRetryOTA(ctx, p.DeploymentID, "publish_"+platform, err, true)
@@ -189,8 +196,7 @@ func (c *Controller) HandleExpoOTAPublishTask(ctx context.Context, t *asynq.Task
 		"deployment_id", p.DeploymentID,
 		"app_project_id", project.ID.String(),
 		"runtime_version_ios", publishedVersions["ios"],
-		"runtime_version_android", publishedVersions["android"],
-		"dist_bytes", len(distTarGz))
+		"runtime_version_android", publishedVersions["android"])
 
 	if user, err := c.DB.GetUserById(deployment.UserID.String()); err == nil {
 		go c.EventService.SendEvent(user, constants.EVENT_OTA_PUBLISH_SUCCEEDED, map[string]any{
@@ -226,45 +232,39 @@ func readExpoAppJSON(mobileDir string) ([]byte, error) {
 	return expoRaw, nil
 }
 
-// resolveRuntimeVersionViaExpoCLI shells out to `npx expo-updates
-// runtimeversion:resolve` to get the concrete runtime version for the
-// given platform. This handles every legal expo.runtimeVersion shape:
-// literal strings, policy-based resolution (appVersion / sdkVersion /
-// nativeVersion), and the fingerprint policy that requires hashing the
-// project tree via @expo/fingerprint.
+// readRuntimeVersionFromMetadata returns the runtime version that the
+// installed binary will send in its `expo-runtime-version` header. We
+// derive it the same way Codemagic does (see codemagic.yaml's "Publish
+// OTA update" step) so the OTA bundle's row in ota_updates is keyed on
+// the exact same string the binary sends — otherwise the mobile client's
+// manifest GET 404s and OTA delivery silently no-ops.
 //
-// Requires node_modules to be installed (the binary lives under
-// mobile/node_modules/expo-updates/bin).
-func resolveRuntimeVersionViaExpoCLI(ctx context.Context, mobileDir, platform string) (string, error) {
-	cmd := exec.CommandContext(ctx, "npx", "--yes", "expo-updates", "runtimeversion:resolve", "--platform", platform)
-	cmd.Dir = mobileDir
-	cmd.Env = append(os.Environ(), "CI=1")
-	out, err := cmd.Output()
+// Resolution order:
+//  1. dist/metadata.json fingerprintHash → "fingerprint:<hash>"  (policy=fingerprint, the template default)
+//  2. expo block's runtimeVersion as a literal string fallback     (policy="1.0.0" style)
+//
+// Returns an error when neither source yields a usable value.
+func readRuntimeVersionFromMetadata(distDir string, expoConfigBytes []byte) (string, error) {
+	metaBytes, err := os.ReadFile(filepath.Join(distDir, "metadata.json"))
 	if err != nil {
-		stderr := ""
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			stderr = string(exitErr.Stderr)
-		}
-		return "", fmt.Errorf("expo-updates runtimeversion:resolve %s: %w (stderr: %s)", platform, err, truncateOutput([]byte(stderr)))
+		return "", fmt.Errorf("read metadata.json: %w", err)
 	}
-	// CLI output forms across versions:
-	//   - bare string: "1.0.0\n"
-	//   - JSON line:   `{"runtimeVersion":"abc123"}`
-	// Try JSON first; fall back to last non-empty line trim.
-	trimmed := bytes.TrimSpace(out)
-	var asJSON struct {
-		RuntimeVersion string `json:"runtimeVersion"`
+	var meta struct {
+		FingerprintHash string `json:"fingerprintHash"`
 	}
-	if err := json.Unmarshal(trimmed, &asJSON); err == nil && asJSON.RuntimeVersion != "" {
-		return asJSON.RuntimeVersion, nil
+	if err := json.Unmarshal(metaBytes, &meta); err == nil && meta.FingerprintHash != "" {
+		return "fingerprint:" + meta.FingerprintHash, nil
 	}
-	for _, line := range bytes.Split(trimmed, []byte("\n")) {
-		s := strings.TrimSpace(string(line))
-		if s != "" {
-			return s, nil
+	var expo struct {
+		RuntimeVersion json.RawMessage `json:"runtimeVersion"`
+	}
+	if err := json.Unmarshal(expoConfigBytes, &expo); err == nil {
+		var literal string
+		if err := json.Unmarshal(expo.RuntimeVersion, &literal); err == nil && literal != "" {
+			return literal, nil
 		}
 	}
-	return "", fmt.Errorf("expo-updates runtimeversion:resolve %s returned empty output", platform)
+	return "", fmt.Errorf("no fingerprintHash in metadata.json and no literal expo.runtimeVersion")
 }
 
 // ensureNodeModules runs `npm install` in mobileDir if node_modules is
@@ -286,20 +286,42 @@ func ensureNodeModules(ctx context.Context, mobileDir string) error {
 	return nil
 }
 
-// runExpoExport runs `npx expo export --platform all` in mobileDir and
-// returns the absolute path to the produced dist directory.
-func runExpoExport(ctx context.Context, mobileDir string) (string, error) {
-	distDir := filepath.Join(mobileDir, "dist")
-	_ = os.RemoveAll(distDir)
-	cmd := exec.CommandContext(ctx, "npx", "--yes", "expo", "export", "--platform", "all", "--output-dir", "dist")
+// runExpoPrebuild runs `npx expo prebuild --platform <p> --no-install
+// --clean` in mobileDir. Generates the per-platform native folder
+// (ios/ or android/) deterministically from app.json + plugins. Mirrors
+// the corresponding step in Codemagic's build job — running it here
+// ensures @expo/fingerprint sees the SAME project tree at our OTA-export
+// time as it does at Codemagic's build-time export, so the resulting
+// fingerprintHash values match.
+func runExpoPrebuild(ctx context.Context, mobileDir, platform string) error {
+	cmd := exec.CommandContext(ctx, "npx", "--yes", "expo", "prebuild",
+		"--platform", platform, "--no-install", "--clean")
 	cmd.Dir = mobileDir
 	cmd.Env = append(os.Environ(), "CI=1")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return "", fmt.Errorf("expo export: %w (output: %s)", err, truncateOutput(out))
+		return fmt.Errorf("expo prebuild %s: %w (output: %s)", platform, err, truncateOutput(out))
+	}
+	return nil
+}
+
+// runExpoExport runs `npx expo export --platform <p>` in mobileDir and
+// returns the absolute path to the produced per-platform dist directory.
+// Per-platform output dirs (dist-ios / dist-android) so the caller can
+// publish each independently with its own fingerprint hash.
+func runExpoExport(ctx context.Context, mobileDir, platform string) (string, error) {
+	outName := "dist-" + platform
+	distDir := filepath.Join(mobileDir, outName)
+	_ = os.RemoveAll(distDir)
+	cmd := exec.CommandContext(ctx, "npx", "--yes", "expo", "export", "--platform", platform, "--output-dir", outName)
+	cmd.Dir = mobileDir
+	cmd.Env = append(os.Environ(), "CI=1")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("expo export %s: %w (output: %s)", platform, err, truncateOutput(out))
 	}
 	if _, statErr := os.Stat(filepath.Join(distDir, "metadata.json")); statErr != nil {
-		return "", fmt.Errorf("expo export produced no metadata.json (output: %s)", truncateOutput(out))
+		return "", fmt.Errorf("expo export %s produced no metadata.json (output: %s)", platform, truncateOutput(out))
 	}
 	return distDir, nil
 }
