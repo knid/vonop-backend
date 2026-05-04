@@ -145,7 +145,17 @@ COMPLETE Expo SDK 54 baseline under mobile/. You should ALWAYS use
 read_file or list_files BEFORE writing new code so you don't duplicate
 existing scaffolding. The baseline includes:
 
-- mobile/package.json — locked Expo + NativeWind + react-native-reusables deps
+- mobile/package.json — Expo + NativeWind + react-native-reusables baseline.
+  You own this file. When you import a third-party package that is not
+  already in dependencies, add it via edit_file in the SAME turn — never
+  rewrite the whole file. Pin the same version range style other entries in
+  the same family use (expo-* uses ~x.y.z, others use ^x.y.z; when in
+  doubt copy the range from a sibling). The preview sandbox detects
+  package.json changes on each chat turn, runs ` + "`npm install`" + `, and bounces
+  Metro automatically — so a missing dep means a broken bundle, not a
+  silent 404. Common adds: lucide-react-native (icons),
+  @react-native-async-storage/async-storage (local storage), expo-image,
+  expo-image-picker, react-hook-form, zustand.
 - mobile/app.json — Expo config (name/slug/scheme are templated at build)
 - mobile/tsconfig.json, mobile/babel.config.js, mobile/metro.config.js
 - mobile/tailwind.config.js, mobile/global.css, mobile/nativewind-env.d.ts
