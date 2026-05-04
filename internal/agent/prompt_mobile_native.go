@@ -1698,6 +1698,44 @@ import { css } from "@emotion/native";
 <Text className="text-sm text-slate-500" />
 ` + "```" + `
 
+## Function-form style on Pressable (CRITICAL — silently broken on web)
+React Native's <Pressable> supports a function form of the style prop
+that takes the press state. This pattern interacts badly with the
+NativeWind v4 runtime: width/height set inside the function are SILENTLY
+DROPPED in the web preview, collapsing buttons to ~20px (content size)
+even though the native build looks fine. Symptom: tiny buttons clustered
+at the bottom of the screen in the studio preview iframe.
+
+NEVER write width/height inside a function-form style prop. Use
+className-based sizing for ANYTHING dimensional, and the function form
+only for transient effects like opacity:
+
+` + "```" + `tsx
+// WRONG — width:80 vanishes on web
+<Pressable
+  className="rounded-full bg-orange-400"
+  style={({ pressed }) => ({
+    width: 80,            // dropped by NativeWind on web
+    height: 80,           // sometimes dropped
+    opacity: pressed ? 0.75 : 1,
+  })}
+/>
+
+// RIGHT — sizing via className, press state via active:* utilities
+<Pressable className="rounded-full bg-orange-400 w-20 h-20 active:opacity-75" />
+
+// ALSO RIGHT — className itself can be a function on Pressable
+<Pressable
+  className={({ pressed }) =>
+    "rounded-full bg-orange-400 w-20 h-20 " + (pressed ? "opacity-75" : "")
+  }
+/>
+` + "```" + `
+
+For aspect-ratio buttons (calculator, grid items), prefer
+` + "`w-20 h-20`" + ` (fixed) or ` + "`flex-1 aspect-square`" + ` (responsive grid).
+Both work in className.
+
 ## StyleSheet.create
 ` + "```" + `tsx
 // Not needed with NativeWind
