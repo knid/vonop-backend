@@ -693,7 +693,20 @@ func (c *Controller) ValidateAppFiles(projectID string) (*AppValidationResult, e
 	return &result, nil
 }
 
-// GetPreviewBundle returns all project files and env vars for client-side WebContainer preview.
+// GetPreviewBundle returns all project files and env vars for the E2B
+// sandbox preview. The shape varies by project_type:
+//
+//   - mobile_app_native: returns only the mobile/ subtree (with the prefix
+//     stripped) so the sandbox runs `npx expo start --web` against the
+//     Expo project directly. backend/ is omitted — it deploys to Fly,
+//     not into the preview sandbox. Next.js-specific patches
+//     (custom error pages, analytics script) are skipped because the
+//     sandbox runs Metro/Expo, not Next.js.
+//   - everything else: returns the full file map with Next.js patches.
+//
+// project_type is included so the frontend's /api/e2b/start route can
+// branch its sandbox setup (which dev-server command, which port to wait
+// on) without an extra backend round-trip.
 func (c *Controller) GetPreviewBundle(project *models.AppProject) (map[string]interface{}, error) {
 	repo, err := c.GitRepoService.Open(project.ID.String())
 	if err != nil {
@@ -704,16 +717,31 @@ func (c *Controller) GetPreviewBundle(project *models.AppProject) (map[string]in
 		return nil, fmt.Errorf("no generated files found")
 	}
 
+	envVars := c.CollectAllEnvVars(project)
+
+	if project.ProjectType == models.ProjectTypeMobileAppNative {
+		mobileFiles := make(map[string]string, len(fileMap))
+		for path, content := range fileMap {
+			if strings.HasPrefix(path, "mobile/") {
+				mobileFiles[strings.TrimPrefix(path, "mobile/")] = content
+			}
+		}
+		return map[string]interface{}{
+			"files":        mobileFiles,
+			"env_vars":     envVars,
+			"project_type": project.ProjectType,
+		}, nil
+	}
+
 	// Defensive: ensure the preview bundle always ships custom error pages so
 	// users never see Next.js's default dev error UI in the iframe. Only writes
 	// files that are missing — user-customized versions are preserved.
 	injectCustomErrorPages(fileMap, constants.DetectLanguage(project.Prompt))
 
-	envVars := c.CollectAllEnvVars(project)
-
 	return map[string]interface{}{
-		"files":    fileMap,
-		"env_vars": envVars,
+		"files":        fileMap,
+		"env_vars":     envVars,
+		"project_type": project.ProjectType,
 	}, nil
 }
 
