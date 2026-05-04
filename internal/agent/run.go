@@ -729,6 +729,39 @@ func finaliseSuccess(
 			run.PreCommit, tracker, runStart)
 	}
 
+	// 1b. Auto-deploy the backend/ subtree if this turn touched it.
+	// mobile_app_native projects often have a Next.js backend (auth, AI,
+	// payments) that the user expects to "just work" after a chat turn.
+	// Without this, the user has to remember to click Deploy after every
+	// AI/auth feature ask — see the BackendAutoDeployer dependency type
+	// for the full reasoning. Diff is run synchronously (cheap, single
+	// git command) but the deploy itself is fired in a goroutine so the
+	// user gets the chat response immediately and the deploy completes
+	// over the next ~1 min in the background. Best-effort by design —
+	// errors are swallowed so the chat turn never fails on a hiccup
+	// in the Asynq queue or the credit checker.
+	if project != nil &&
+		project.ProjectType == models.ProjectTypeMobileAppNative &&
+		deps.AutoDeployBackend != nil &&
+		finalCommit != "" &&
+		finalCommit != run.PreCommit {
+		changed, diffErr := repo.ChangedPathsSince(run.PreCommit)
+		if diffErr != nil {
+			slog.Warn("agent: auto-deploy diff failed",
+				"error", diffErr, "project_id", project.ID, "pre_commit", run.PreCommit)
+		} else if anyBackendPath(changed) {
+			projectCopy := *project
+			go func() {
+				bgCtx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+				defer cancel()
+				if err := deps.AutoDeployBackend(bgCtx, &projectCopy); err != nil {
+					slog.Warn("agent: auto-deploy backend failed",
+						"error", err, "project_id", projectCopy.ID)
+				}
+			}()
+		}
+	}
+
 	// 1a. Flip the project status from "draft" to "ready" on the first
 	// successful generation. The dashboard's preview boot logic, the studio
 	// hasStreamedOnce gate, and the templates-vs-edit branch in agent.Run
@@ -1108,6 +1141,18 @@ var googleFontsImportPattern = regexp.MustCompile(`(?m)^\s*@import\s+url\(['"]?h
 // Fonts @import statements from any .css file. The app may render without
 // the intended font after stripping, but a working app with fallback fonts
 // beats a broken build.
+// anyBackendPath returns true when the slice contains a path under
+// backend/. Used by the auto-deploy hook to decide whether the chat turn
+// produced a deployable change. Cheap; runs once per turn.
+func anyBackendPath(paths []string) bool {
+	for _, p := range paths {
+		if strings.HasPrefix(p, "backend/") {
+			return true
+		}
+	}
+	return false
+}
+
 func sanitizeFileMapForBuild(fileMap *SafeFileMap) {
 	if fileMap == nil {
 		return
