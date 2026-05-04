@@ -177,12 +177,16 @@ func (c *Controller) HandleExpoOTAPublishTask(ctx context.Context, t *asynq.Task
 		return c.maybeRetryOTA(ctx, p.DeploymentID, "npm_install", err, true)
 	}
 
-	// Per-platform prebuild + export. Mirrors Codemagic's pipeline:
+	// Per-platform prebuild + export + fingerprint. Mirrors what Codemagic does
+	// at binary-build time so the runtime version we publish under matches what
+	// the installed binary will send in `expo-runtime-version`:
 	//   1. expo prebuild --platform <p> --no-install --clean → generates ios/ or android/
-	//   2. expo export --platform <p> → writes dist-<p>/metadata.json with fingerprintHash
-	//   3. publish keyed on "fingerprint:<hash>" so the row matches what the
-	//      installed binary sends in expo-runtime-version (the binary's value
-	//      is baked in by the SAME prebuild + export at Codemagic build time).
+	//   2. expo export --platform <p> → writes the JS bundle + assets to dist-<p>/
+	//   3. @expo/fingerprint fingerprint:generate --platform <p> → walks the
+	//      prebuilt project tree and prints {hash, sources} JSON. The bare hex
+	//      `hash` is the runtime version. (expo export does NOT embed this in
+	//      metadata.json — verified empirically; only `version`, `bundler`,
+	//      `fileMetadata` ship there.)
 	// Without prebuild, @expo/fingerprint sees a different project state
 	// (no native dirs) and produces a hash that doesn't match the binary's,
 	// silently breaking OTA delivery.
@@ -198,7 +202,7 @@ func (c *Controller) HandleExpoOTAPublishTask(ctx context.Context, t *asynq.Task
 			// missing deps). Retrying won't fix that — surface immediately.
 			return c.failTask(p.DeploymentID, "expo_export_"+platform, err)
 		}
-		rv, err := readRuntimeVersionFromMetadata(distDir, expoConfigBytes)
+		rv, err := resolveRuntimeVersion(buildCtx, mobileDir, platform, expoConfigBytes)
 		if err != nil {
 			return c.failTask(p.DeploymentID, "resolve_runtime_version_"+platform, err)
 		}
@@ -237,9 +241,9 @@ func (c *Controller) HandleExpoOTAPublishTask(ctx context.Context, t *asynq.Task
 // JSON. The block is passed to PublishOTAUpdate as expoConfigJSON so the
 // manifest's `extra.expoClient` mirrors the project's actual config.
 //
-// Runtime version resolution is deferred to resolveRuntimeVersionViaExpoCLI
-// because the `fingerprint` policy requires a project-tree hash that only
-// expo's own CLI can compute correctly.
+// Runtime version resolution is deferred to resolveRuntimeVersion because
+// the `fingerprint` policy requires a project-tree hash that only
+// @expo/fingerprint can compute correctly.
 func readExpoAppJSON(mobileDir string) ([]byte, error) {
 	raw, err := os.ReadFile(filepath.Join(mobileDir, "app.json"))
 	if err != nil {
@@ -256,48 +260,97 @@ func readExpoAppJSON(mobileDir string) ([]byte, error) {
 	return expoRaw, nil
 }
 
-// readRuntimeVersionFromMetadata returns the runtime version that the
-// installed binary will send in its `expo-runtime-version` header.
+// resolveRuntimeVersion returns the runtime version that the installed binary
+// will send in its `expo-runtime-version` header for `platform`.
 //
 // Verified against Expo's own source:
-//  - resolveRuntimeVersionAsync.ts returns `fingerprint.hash` directly
-//    (bare hex hash, NO "fingerprint:" prefix)
-//  - expo-updates Android FileDownloader.kt sends
-//    `header("Expo-Runtime-Version", configuration.runtimeVersionRaw)`
-//    as-is with no transformation
-//  - expo's reference custom-expo-updates-server reads the header as an
-//    opaque string with no prefix parsing
+//   - resolveRuntimeVersionAsync.ts returns `fingerprint.hash` directly
+//     (bare hex hash, NO "fingerprint:" prefix)
+//   - expo-updates Android FileDownloader.kt sends
+//     `header("Expo-Runtime-Version", configuration.runtimeVersionRaw)`
+//     as-is with no transformation
+//   - expo's reference custom-expo-updates-server reads the header as an
+//     opaque string with no prefix parsing
 //
-// So we publish keyed on the bare hash. (Codemagic's existing yaml
-// adds a "fingerprint:" prefix — that's a bug; needs to be fixed there
-// too. Until both sides drop the prefix, a Codemagic-published OTA
-// would never match a binary's request, which is why ota_updates was
-// empty in production.)
+// Resolution:
+//   - Literal "runtimeVersion": "1.0.0" → return as-is.
+//   - {"policy": "fingerprint"} → shell out to @expo/fingerprint
+//     fingerprint:generate, parse {hash, sources} JSON, return hash.
 //
-// Resolution order:
-//  1. dist/metadata.json fingerprintHash  (policy=fingerprint, the template default)
-//  2. expo block's runtimeVersion as a literal string fallback (policy="1.0.0" style)
-func readRuntimeVersionFromMetadata(distDir string, expoConfigBytes []byte) (string, error) {
-	metaBytes, err := os.ReadFile(filepath.Join(distDir, "metadata.json"))
+// `expo export` does NOT embed the fingerprint hash in dist/metadata.json
+// (verified empirically — only `version`, `bundler`, `fileMetadata` ship
+// there). @expo/fingerprint is the source of truth, and Codemagic's binary
+// build runs the same CLI, so the hashes line up.
+func resolveRuntimeVersion(ctx context.Context, mobileDir, platform string, expoConfigBytes []byte) (string, error) {
+	literal, policy, err := parseRuntimeVersionShape(expoConfigBytes)
 	if err != nil {
-		return "", fmt.Errorf("read metadata.json: %w", err)
+		return "", err
 	}
-	var meta struct {
-		FingerprintHash string `json:"fingerprintHash"`
+	switch {
+	case literal != "":
+		return literal, nil
+	case policy == "fingerprint":
+		return runFingerprintGenerate(ctx, mobileDir, platform)
+	case policy == "":
+		return "", fmt.Errorf("expo.runtimeVersion is missing in app.json")
+	default:
+		return "", fmt.Errorf("unsupported runtimeVersion policy %q (expected \"fingerprint\" or a literal string)", policy)
 	}
-	if err := json.Unmarshal(metaBytes, &meta); err == nil && meta.FingerprintHash != "" {
-		return meta.FingerprintHash, nil
-	}
+}
+
+// parseRuntimeVersionShape inspects the expo block and returns either a
+// literal string or a policy name. Returns ("", "", nil) when the field is
+// absent.
+func parseRuntimeVersionShape(expoConfigBytes []byte) (literal, policy string, err error) {
 	var expo struct {
 		RuntimeVersion json.RawMessage `json:"runtimeVersion"`
 	}
-	if err := json.Unmarshal(expoConfigBytes, &expo); err == nil {
-		var literal string
-		if err := json.Unmarshal(expo.RuntimeVersion, &literal); err == nil && literal != "" {
-			return literal, nil
-		}
+	if err := json.Unmarshal(expoConfigBytes, &expo); err != nil {
+		return "", "", fmt.Errorf("parse expo block: %w", err)
 	}
-	return "", fmt.Errorf("no fingerprintHash in metadata.json and no literal expo.runtimeVersion")
+	if len(expo.RuntimeVersion) == 0 {
+		return "", "", nil
+	}
+	var asString string
+	if err := json.Unmarshal(expo.RuntimeVersion, &asString); err == nil {
+		return asString, "", nil
+	}
+	var asObj struct {
+		Policy string `json:"policy"`
+	}
+	if err := json.Unmarshal(expo.RuntimeVersion, &asObj); err == nil {
+		return "", asObj.Policy, nil
+	}
+	return "", "", fmt.Errorf("unrecognized runtimeVersion shape in app.json")
+}
+
+// runFingerprintGenerate invokes `npx @expo/fingerprint fingerprint:generate
+// --platform <p>` in mobileDir and returns the bare hex `hash` from its JSON
+// output. Must run AFTER expo prebuild so the native dirs (ios/ or android/)
+// exist — without them @expo/fingerprint sees a different project tree than
+// the binary did at build time and produces a non-matching hash.
+func runFingerprintGenerate(ctx context.Context, mobileDir, platform string) (string, error) {
+	cmd := exec.CommandContext(ctx, "npx", "--no-install",
+		"@expo/fingerprint", "fingerprint:generate", "--platform", platform)
+	cmd.Dir = mobileDir
+	cmd.Env = append(os.Environ(), "CI=1")
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("@expo/fingerprint fingerprint:generate %s: %w (stderr: %s)",
+			platform, err, truncateOutput(stderr.Bytes()))
+	}
+	var fp struct {
+		Hash string `json:"hash"`
+	}
+	if err := json.Unmarshal(out, &fp); err != nil {
+		return "", fmt.Errorf("parse fingerprint output: %w (output: %s)", err, truncateOutput(out))
+	}
+	if fp.Hash == "" {
+		return "", fmt.Errorf("@expo/fingerprint returned empty hash (output: %s)", truncateOutput(out))
+	}
+	return fp.Hash, nil
 }
 
 // ensureNodeModules runs `npm install` in mobileDir if node_modules is
