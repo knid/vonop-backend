@@ -104,6 +104,7 @@ func TestDeriveBackendColor(t *testing.T) {
 		{"machine destroyed", responses.BackendHealthResponse{HasBackend: true, MachineState: "destroyed", LastDeployAt: "t", LastDeployOK: true}, "red"},
 		{"started + deployed", responses.BackendHealthResponse{HasBackend: true, MachineState: "started", LastDeployAt: "t", LastDeployOK: true}, "green"},
 		{"auto-stopped (idle)", responses.BackendHealthResponse{HasBackend: true, MachineState: "stopped", LastDeployAt: "t", LastDeployOK: true}, "yellow"},
+		{"deploying", responses.BackendHealthResponse{HasBackend: true, MachineState: "started", IsDeploying: true, DeployStatus: "building"}, "yellow"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

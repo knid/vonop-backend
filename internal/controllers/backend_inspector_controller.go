@@ -124,6 +124,11 @@ func (c *Controller) GetBackendHealth(ctx context.Context, project *models.AppPr
 		out.LastDeployAt = dep.CreatedAt.Format(time.RFC3339)
 		out.LastDeployOK = dep.Status == "deployed"
 		out.LastDeployURL = dep.DeployedURL
+		if dep.Status == "queued" || dep.Status == "building" || dep.Status == "deploying" {
+			out.IsDeploying = true
+			out.DeployStatus = dep.Status
+			out.DeployStartedAt = dep.CreatedAt.Format(time.RFC3339)
+		}
 	}
 
 	out.DerivedColor = deriveBackendColor(out)
@@ -199,6 +204,9 @@ func (c *Controller) GetBackendLogs(ctx context.Context, project *models.AppProj
 func deriveBackendColor(h responses.BackendHealthResponse) string {
 	if !h.HasBackend {
 		return "gray"
+	}
+	if h.IsDeploying {
+		return "yellow"
 	}
 	switch h.MachineState {
 	case "destroyed", "destroying", "failed":
