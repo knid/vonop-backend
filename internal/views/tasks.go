@@ -38,7 +38,13 @@ func (v *HttpViews) GetAllTasks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tasks, err := v.Controller.GetAllAppBuildTasks(user)
+	// Optional ?project_id=<v1-project-uuid> scopes the result to a single
+	// project the user owns. Without it the response is the full task
+	// history across every project the user has ever built (kept for
+	// backwards compatibility with any caller that hasn't been updated).
+	projectID := r.URL.Query().Get("project_id")
+
+	tasks, err := v.Controller.GetAllAppBuildTasks(user, projectID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
