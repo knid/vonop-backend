@@ -212,7 +212,7 @@ functionality (persisted data, auth, payments, push, marketing landing).
 					slog.Warn("mobile_app_native README write failed",
 						"error", err, "project_id", project.ID)
 				}
-				if err := scaffoldExpoTemplate(repo); err != nil {
+				if err := scaffoldExpoTemplate(c, repo, project); err != nil {
 					slog.Warn("mobile_app_native template scaffold failed",
 						"error", err, "project_id", project.ID)
 				}
