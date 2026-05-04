@@ -95,21 +95,25 @@ The complete dependency set pre-installed in every mobile_app_native project:
 
 ## CSS Component Wrappers (CRITICAL)
 With react-native-css + NativeWind v5, raw React Native primitives do NOT
-support className. You MUST import wrapped components from @/components/tw
-for any element that receives a className prop.
+support className on native. You MUST import wrapped components from
+@/components/tw for any element that receives a className prop.
+
+On web preview (React Native Web), the wrappers fall back to raw primitives
+because RN Web supports className natively. The same import works on both
+platforms.
 
 ` + "```" + `typescript
-// CORRECT — use @/components/tw wrappers
+// CORRECT — use @/components/tw wrappers (works on native + web)
 import { View, Text, ScrollView, Pressable, TextInput } from "@/components/tw";
 
 <View className="flex-1 bg-background p-4">
   <Text className="text-lg font-semibold">Hello</Text>
 </View>
 
-// WRONG — raw react-native components silently ignore className
+// WRONG — raw react-native components silently ignore className on native
 import { View, Text } from "react-native";
 
-<View className="flex-1"> {/* className does NOTHING here */}
+<View className="flex-1"> {/* className does NOTHING on native */}
   <Text className="text-lg">Hello</Text>
 </View>
 ` + "```" + `
