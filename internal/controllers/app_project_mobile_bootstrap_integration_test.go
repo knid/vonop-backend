@@ -150,9 +150,10 @@ func TestCreateAppProject_NonMobile_DoesNotSeedMobileAppConfig(t *testing.T) {
 }
 
 // TestCreateAppProject_MobileAppNative_ScaffoldsRepoSkeleton verifies that
-// the mobile/ skeleton is committed on project creation. backend/ is opt-in
-// and intentionally NOT scaffolded — see TestCreateAppProject_MobileAppNative_DoesNotScaffoldBackend
-// for the negative assertion.
+// the wemob-expo-template baseline lands under mobile/ on project creation.
+// The AI agent + preview sandbox both depend on a complete Expo SDK 54
+// source tree being present from turn 1. backend/ stays opt-in — see
+// TestCreateAppProject_MobileAppNative_DoesNotScaffoldBackend.
 func TestCreateAppProject_MobileAppNative_ScaffoldsRepoSkeleton(t *testing.T) {
 	c, _, user, org := setupMobileBootstrapTest(t)
 	ctx := context.Background()
@@ -170,11 +171,41 @@ func TestCreateAppProject_MobileAppNative_ScaffoldsRepoSkeleton(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open repo: %v", err)
 	}
-	if !repo.FileExists("mobile/.gitkeep") {
-		t.Error("expected mobile/.gitkeep to exist in scaffold")
-	}
 	if !repo.FileExists("README.md") {
 		t.Error("expected README.md to exist in scaffold")
+	}
+
+	// Spot-check the canonical Expo baseline files under mobile/. If any of
+	// these are missing, the embed.FS lost a file or the scaffold helper
+	// stopped writing it — both are silent breakages that would only surface
+	// in a sandbox cold-start, where they're hard to diagnose.
+	for _, expected := range []string{
+		"mobile/package.json",
+		"mobile/app.json",
+		"mobile/babel.config.js",
+		"mobile/metro.config.js",
+		"mobile/tsconfig.json",
+		"mobile/tailwind.config.js",
+		"mobile/global.css",
+		"mobile/app/_layout.tsx",
+		"mobile/app/(app)/index.tsx",
+		"mobile/lib/api.ts",
+		"mobile/lib/auth.ts",
+		"mobile/lib/iap.ts",
+		"mobile/lib/push.ts",
+		"mobile/components/ui/button.tsx",
+	} {
+		if !repo.FileExists(expected) {
+			t.Errorf("expected %s to exist in mobile_app_native scaffold", expected)
+		}
+	}
+
+	pkgRaw, err := repo.ReadFile("mobile/package.json")
+	if err != nil {
+		t.Fatalf("read mobile/package.json: %v", err)
+	}
+	if !strings.Contains(string(pkgRaw), `"expo"`) {
+		t.Errorf("mobile/package.json missing expo dep; got: %s", pkgRaw)
 	}
 
 	readme, err := repo.ReadFile("README.md")

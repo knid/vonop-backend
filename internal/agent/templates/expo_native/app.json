@@ -1,0 +1,48 @@
+{
+  "expo": {
+    "name": "__APP_TITLE__",
+    "slug": "__APP_SLUG__",
+    "version": "__MARKETING_VERSION__",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "scheme": "wemobapp",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "__SPLASH_COLOR__"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "__BUNDLE_ID__",
+      "buildNumber": "__BUILD_NUMBER__",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "__SPLASH_COLOR__"
+      },
+      "package": "__PACKAGE_NAME__",
+      "versionCode": 1
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      ["onesignal-expo-plugin", { "mode": "production" }]
+    ],
+    "experiments": { "typedRoutes": true },
+    "runtimeVersion": { "policy": "fingerprint" },
+    "updates": {
+      "url": "__OTA_URL__",
+      "checkAutomatically": "ON_LOAD",
+      "fallbackToCacheTimeout": 0
+    },
+    "extra": {
+      "eas": { "projectId": "__EAS_PROJECT_ID_NOT_USED_BUT_REQUIRED_FOR_RUNTIME__" }
+    }
+  }
+}

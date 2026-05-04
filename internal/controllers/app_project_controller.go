@@ -185,32 +185,38 @@ func (c *Controller) CreateAppProject(ctx context.Context, user *models.User, re
 		// purpose tools) never need IAP or push, and provisioning created
 		// orphan RC projects + OneSignal apps for every signup.
 
-		// Scaffold ONLY mobile/ by default. backend/ is opt-in: the agent
-		// creates it (via the write tool) when the user asks for server-side
-		// state, auth, payments, or a marketing landing. For pure client-side
-		// apps (calculators, drawing tools, timers, animations) the project
-		// stays mobile-only and never spawns a Fly machine.
+		// Scaffold the wemob-expo-template baseline into mobile/ so the AI
+		// agent has a complete Expo SDK 54 + Expo Router + NativeWind v4 +
+		// react-native-reusables source tree to read + edit, AND the preview
+		// sandbox can run `npx expo start --web` against it with no extra
+		// setup. Without this, the agent flies blind (no package.json to
+		// read, no lib/api.ts to import) and the preview sandbox can't
+		// resolve its own Expo CLI.
+		//
+		// backend/ is opt-in: the agent creates it (via the write tool) only
+		// when the user asks for server-side state, auth, payments, or a
+		// marketing landing. For pure client-side apps the project stays
+		// mobile-only and never spawns a Fly machine.
 		if c.GitRepoService != nil {
 			if repo, err := c.GitRepoService.Open(project.ID.String()); err == nil {
-				skeleton := map[string]string{
-					"mobile/.gitkeep": "",
-					"README.md": "# " + project.Name + `
+				readme := "# " + project.Name + `
 
-The mobile app source lives in mobile/ — an Expo (React Native) project
-built by Codemagic into a signed APK/IPA.
+The mobile app source lives in mobile/ — a complete Expo SDK 54 +
+NativeWind v4 + react-native-reusables baseline. The AI agent edits
+this directly; Codemagic builds it into a signed APK/IPA.
 
-backend/ is OPTIONAL — it only exists when this app needs server-side
+backend/ is OPTIONAL — created only when this app needs server-side
 functionality (persisted data, auth, payments, push, marketing landing).
-The AI agent creates it the first time the user asks for any of those.
-`,
+`
+				if err := repo.WriteFile("README.md", []byte(readme)); err != nil {
+					slog.Warn("mobile_app_native README write failed",
+						"error", err, "project_id", project.ID)
 				}
-				for path, content := range skeleton {
-					if err := repo.WriteFile(path, []byte(content)); err != nil {
-						slog.Warn("mobile_app_native skeleton write failed",
-							"error", err, "project_id", project.ID, "path", path)
-					}
+				if err := scaffoldExpoTemplate(repo); err != nil {
+					slog.Warn("mobile_app_native template scaffold failed",
+						"error", err, "project_id", project.ID)
 				}
-				if _, err := repo.Commit("scaffold: mobile/ skeleton"); err != nil {
+				if _, err := repo.Commit("scaffold: Expo template baseline under mobile/"); err != nil {
 					slog.Warn("mobile_app_native skeleton commit failed",
 						"error", err, "project_id", project.ID)
 				}

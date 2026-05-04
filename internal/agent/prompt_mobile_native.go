@@ -139,6 +139,47 @@ try {
 NEVER use raw fetch() directly in screen code. NEVER construct the base URL
 manually. NEVER import API_URL — always go through apiFetch.
 
+## Repository layout — what's already there
+Every mobile_app_native project is scaffolded at creation time with a
+COMPLETE Expo SDK 54 baseline under mobile/. You should ALWAYS use
+read_file or list_files BEFORE writing new code so you don't duplicate
+existing scaffolding. The baseline includes:
+
+- mobile/package.json — locked Expo + NativeWind + react-native-reusables deps
+- mobile/app.json — Expo config (name/slug/scheme are templated at build)
+- mobile/tsconfig.json, mobile/babel.config.js, mobile/metro.config.js
+- mobile/tailwind.config.js, mobile/global.css, mobile/nativewind-env.d.ts
+- mobile/app/_layout.tsx — root Expo Router layout. Initialises auth (when
+  enabled), IAP, push, and the force-update gate. DO NOT modify unless
+  the user asks for layout changes — touching this file changes app-wide
+  behavior.
+- mobile/app/(app)/_layout.tsx + index.tsx — the authenticated user surface;
+  this is your entry point for new screens
+- mobile/app/(auth)/_layout.tsx + sign-in.tsx + sign-up.tsx — auth screens
+  (only shown when MobileAppConfig.AuthEnabled is true; otherwise inert)
+- mobile/app/+not-found.tsx — 404
+- mobile/lib/api.ts — apiFetch wrapper. Use it for ALL backend calls.
+  NEVER use raw fetch() and NEVER hardcode the API URL.
+- mobile/lib/auth.ts — Better-Auth client (call signIn/signUp from here)
+- mobile/lib/iap.ts — RevenueCat helpers (initIAP, getActiveEntitlements,
+  purchasePackage). Already wired in _layout.tsx — don't re-init.
+- mobile/lib/push.ts — OneSignal helpers (foreground handler, opt-out)
+- mobile/lib/utils.ts — cn() Tailwind merger
+- mobile/components/ui/{button,card,input,text}.tsx — react-native-reusables
+  primitives. PREFER these over building from <View> / <Text> directly.
+- mobile/assets/icon.png + favicon.png + adaptive-icon.png + splash-icon.png
+
+When the user asks for a feature, you EDIT or EXTEND these files; you do
+not re-implement them. Concretely:
+- Adding a screen → write mobile/app/(app)/<route>.tsx, route via
+  expo-router's <Link href="/<route>"> from existing screens
+- Adding a UI component → extend components/ui/* or write a new
+  components/<feature>.tsx that composes the existing primitives
+- Adding an API call → use apiFetch from lib/api.ts; route handlers go
+  in backend/app/api/* (only if backend/ exists, see below)
+- Styling → NativeWind className strings only. No StyleSheet.create.
+  Reach into tailwind.config.js's theme if you need custom colors.
+
 ## Backend folder is OPTIONAL — do not create it by default
 The backend/ subtree is a Next.js project that hosts (1) mobile-app API
 routes at /api/*, and (2) a marketing landing page at /. It is created
