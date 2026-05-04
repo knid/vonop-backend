@@ -17,7 +17,7 @@ type mobileConfigGetter interface {
 
 // BuildSystemMessages returns the cached system messages for a run:
 //
-//  1. Base prompt          (BasePromptWeb, BasePromptMobile, or BasePromptMobileNative — by project type)
+//  1. Base prompt          (BasePromptWeb or BasePromptMobileNative — by project type)
 //  2. Variant addendum     (stable across this project's runs, if applicable)
 //  3. File tree            (stable within this run, reused across turns)
 //  4. Project assets       (per-turn — asset uploads/deletes invalidate this block only)
@@ -34,8 +34,6 @@ func BuildSystemMessages(project *models.AppProject, fileMap *SafeFileMap, deps 
 		switch project.ProjectType {
 		case models.ProjectTypeMobileAppNative:
 			base = BasePromptMobileNative
-		case models.ProjectTypeMobileAppLegacy:
-			base = BasePromptMobile
 		}
 	}
 	addendum := buildAddendum(project, deps)

@@ -40,20 +40,6 @@ func TestBuildSystemMessages_AppTypeUsesWebPrompt(t *testing.T) {
 	}
 }
 
-func TestBuildSystemMessages_LegacyMobileUsesLegacyPrompt(t *testing.T) {
-	project := &models.AppProject{
-		ProjectType: models.ProjectTypeMobileAppLegacy,
-		Settings:    map[string]any{},
-	}
-	msgs := BuildSystemMessages(project, nil, nil, nil)
-	joined := concatMessages(msgs)
-
-	// Legacy WebView prompt content (BasePromptMobile) should NOT mention "Expo Router".
-	if strings.Contains(joined, "Expo Router") {
-		t.Error("legacy mobile_app should use BasePromptMobile, not BasePromptMobileNative")
-	}
-}
-
 func TestBuildSystemMessages_MobileNativeIncludesConfigAddendum(t *testing.T) {
 	project := &models.AppProject{
 		ProjectType: models.ProjectTypeMobileAppNative,

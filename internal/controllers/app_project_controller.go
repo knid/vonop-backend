@@ -59,13 +59,12 @@ func (c *Controller) CreateAppProject(ctx context.Context, user *models.User, re
 	if err != nil {
 		slog.Warn("CreateAppProject: failed to get user limits", "error", err, "user_id", user.ID)
 	} else {
-		isMobile := projectType == models.ProjectTypeMobileAppLegacy ||
-			projectType == models.ProjectTypeMobileAppNative
+		isMobile := projectType == models.ProjectTypeMobileAppNative
 		var maxApps int
 		var countFilter string
 		if isMobile {
 			maxApps = limits.MaxMobileApps
-			countFilter = "mobile" // counts both legacy + native
+			countFilter = "mobile"
 		} else {
 			maxApps = limits.MaxWebApps
 			countFilter = "" // counts all non-mobile

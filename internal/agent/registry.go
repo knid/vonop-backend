@@ -156,9 +156,6 @@ func BuildRegistryFor(project *models.AppProject, deps *RunDependencies) *Regist
 	// AIAddendum in context.go so the addendum only injects after setup.
 	r.Register(SetupAIGatewayTool{Deps: deps})
 
-	if project != nil && project.ProjectType == models.ProjectTypeMobileAppLegacy {
-		r.Register(ConfigureMobileBridgeTool{Deps: deps})
-	}
 	if project != nil && project.ProjectType == models.ProjectTypeMobileAppNative {
 		r.Register(&ReadMobileConfigTool{})
 		// <P1#17> read_build_logs + trigger_build_after_fix — gated to

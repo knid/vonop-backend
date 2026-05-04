@@ -48,12 +48,6 @@ type NeonConnResolver func(projectID string) (string, error)
 // existing connection before invoking this callback.
 type DatabaseProvisioner func(ctx context.Context, project *models.AppProject, tables []models.DataModel) error
 
-// MobileBridgeUpdater enables/disables a native mobile bridge method on the
-// project's MobileAppConfig row. BridgeMethods is a flat []string of enabled
-// method names — enabled=true appends to the slice (idempotent), enabled=false
-// removes it.
-type MobileBridgeUpdater func(ctx context.Context, projectID, method string, enabled bool) error
-
 // AIEnabler marks a project as needing the Wemob AI Gateway and persists the
 // flag so the AIAddendum is appended to subsequent runs. Bound by the
 // controller layer to Controller.enableProjectAIForAgent. Idempotent — the
@@ -147,9 +141,8 @@ type RunDependencies struct {
 	ProvisionDatabase        DatabaseProvisioner
 	EnableAI                 AIEnabler
 	AutoDeployBackend        BackendAutoDeployer
-	GatewayAllowedModels     GatewayAllowedModelsFn
-	UpdateMobileBridgeMethod MobileBridgeUpdater
-	TriggerMobileBuild       MobileBuildTrigger
-	RecordLLMUsage           LLMUsageRecorder
-	RecordLLMError           LLMErrorRecorder
+	GatewayAllowedModels GatewayAllowedModelsFn
+	TriggerMobileBuild   MobileBuildTrigger
+	RecordLLMUsage       LLMUsageRecorder
+	RecordLLMError       LLMErrorRecorder
 }

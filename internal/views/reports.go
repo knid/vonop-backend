@@ -147,23 +147,3 @@ func (v *HttpViews) UpdateDeploymentStatus(w http.ResponseWriter, r *http.Reques
 	utils.JSONResponse(w, map[string]string{"status": "success"}, http.StatusOK)
 }
 
-func (v *HttpViews) UpdateSignIPATaskStatus(w http.ResponseWriter, r *http.Request) {
-	var reportSignReq requests.ReportSignIPARequest
-	err := utils.ParseJSONBody(r, &reportSignReq)
-	if err != nil {
-		utils.JSONErrorCode(w, constants.ErrValidationBody, http.StatusBadRequest, nil)
-		return
-	}
-
-	if !v.verifyWorkerSecret(w, reportSignReq.Secret) {
-		return
-	}
-
-	err = v.Controller.UpdateSignIPATaskStatus(reportSignReq)
-	if err != nil {
-		utils.JSONInternalError(w, err)
-		return
-	}
-
-	utils.JSONResponse(w, map[string]string{"status": "success"}, http.StatusOK)
-}

@@ -36,10 +36,7 @@ func InjectTemplates(repo *gitrepo.Repo, project *models.AppProject) (int, error
 	// Base templates (package.json, tsconfig, next.config, etc.).
 	// app/globals.css is skipped here for ecommerce because the ecommerce
 	// branch below writes a richer type-specific version via
-	// BuildEcommerceGlobalsCSSTheme. Mobile projects fall through the
-	// base loop — GetContentWithLang inspects projectType and returns a
-	// mobile-appropriate globals.css (BuildGlobalsCSSTheme with
-	// isMobile=true) for them. Non-ecommerce web projects also pick up
+	// BuildEcommerceGlobalsCSSTheme. Non-ecommerce web projects pick up
 	// the base globals.css here.
 	for _, p := range templates.BaseFilePaths {
 		if p == "app/globals.css" && project.ProjectType == "ecommerce" {

@@ -76,7 +76,6 @@ func (c *Controller) AgentDeps(user *models.User) *agent.RunDependencies {
 		GatewayAllowedModels: func() []string {
 			return c.GatewayAllowedModels(user)
 		},
-		UpdateMobileBridgeMethod: c.updateMobileBridgeMethodForAgent,
 		// <P1#17> trigger_build_after_fix — bound here so the agent tool
 		// closes the read-fix-rebuild loop without poking BuildExpoMobile
 		// directly. Non-owner / non-mobile callers are rejected upstream
@@ -251,50 +250,4 @@ func (c *Controller) triggerMobileBuildForAgent(ctx context.Context, project *mo
 		buildID = build.ID.String()
 	}
 	return buildID, taskIDs, err
-}
-
-// updateMobileBridgeMethodForAgent toggles a bridge method on a project's
-// MobileAppConfig row. BridgeMethods is a []string — enabled=true appends,
-// enabled=false removes.
-func (c *Controller) updateMobileBridgeMethodForAgent(ctx context.Context, projectID, method string, enabled bool) error {
-	cfg, err := c.DB.GetMobileAppConfig(projectID)
-	if err != nil || cfg == nil {
-		// No config row yet — create one with sensible defaults matching the
-		// bun:",default:true" column defaults so the upsert doesn't clobber
-		// features the user hasn't opted into toggling.
-		parsed, perr := uuid.Parse(projectID)
-		if perr != nil {
-			return perr
-		}
-		cfg = &models.MobileAppConfig{
-			ProjectID:            parsed,
-			PushEnabled:          true,
-			AnalyticsEnabled:     true,
-			PullToRefreshEnabled: true,
-			ExternalBrowserLinks: true,
-			BridgeEnabled:        true,
-			DarkModeEnabled:      true,
-			CachingStrategy:      "network-first",
-			RatingSessions:       5,
-		}
-	}
-	// Add or remove the method from the flat slice.
-	present := false
-	kept := cfg.BridgeMethods[:0]
-	for _, m := range cfg.BridgeMethods {
-		if m == method {
-			present = true
-			if enabled {
-				kept = append(kept, m)
-			}
-			continue
-		}
-		kept = append(kept, m)
-	}
-	if enabled && !present {
-		kept = append(kept, method)
-	}
-	cfg.BridgeMethods = kept
-	_, err = c.DB.UpsertMobileAppConfig(cfg)
-	return err
 }

@@ -7,20 +7,11 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"strings"
 	"time"
 )
 
 var httpClient = &http.Client{Timeout: 30 * time.Second}
 
-// Workflow IDs matching codemagic.yaml
-const (
-	WorkflowAndroidBuild  = "android-build"
-	WorkflowIOSBuild      = "ios-build"
-	WorkflowIOSSign       = "ios-sign"
-	WorkflowAndroidDeploy = "android-deploy"
-	WorkflowIOSDeploy     = "ios-deploy"
-)
 
 type Service struct {
 	APIToken string
@@ -149,115 +140,6 @@ func (s *Service) TriggerBuild(workflowID string, variables map[string]string) (
 		return result.BuildID, nil
 	}
 	return "", fmt.Errorf("codemagic: trigger failed after retries: %w", lastErr)
-}
-
-// TriggerAndroidBuild triggers an Android build workflow.
-func (s *Service) TriggerAndroidBuild(params AndroidBuildParams) (string, error) {
-	vars := map[string]string{
-		"CM_PROJECT_ID":           params.ProjectID,
-		"CM_BUILD_ID":             params.BuildID,
-		"CM_TASK_ID":              params.TaskID,
-		"CM_VERSION":              fmt.Sprintf("%d", params.Version),
-		"CM_TITLE":                params.Title,
-		"CM_URL":                  params.URL,
-		"CM_ICON_URL":             params.IconURL,
-		"CM_SPLASH_COLOR":         params.SplashColor,
-		"CM_ONESIGNAL_APP_ID":     params.OneSignalAppID,
-		"CM_PACKAGE_NAME":         params.PackageName,
-		"CM_REMOVE_BRANDING":      boolStr(params.RemoveBranding),
-		"CM_PERMISSIONS":          strings.Join(params.Permissions, ","),
-		"CM_URL_SCHEME":           params.URLScheme,
-		"CM_UNIVERSAL_LINK_DOMAIN": params.UniversalLinkDomain,
-	}
-	return s.TriggerBuild(WorkflowAndroidBuild, vars)
-}
-
-// TriggerIOSBuild triggers an iOS build workflow.
-func (s *Service) TriggerIOSBuild(params IOSBuildParams) (string, error) {
-	vars := map[string]string{
-		"CM_PROJECT_ID":           params.ProjectID,
-		"CM_BUILD_ID":             params.BuildID,
-		"CM_TASK_ID":              params.TaskID,
-		"CM_VERSION":              fmt.Sprintf("%d", params.Version),
-		"CM_TITLE":                params.Title,
-		"CM_URL":                  params.URL,
-		"CM_ICON_URL":             params.IconURL,
-		"CM_SPLASH_COLOR":         params.SplashColor,
-		"CM_ONESIGNAL_APP_ID":     params.OneSignalAppID,
-		"CM_PACKAGE_NAME":         params.PackageName,
-		"CM_REMOVE_BRANDING":      boolStr(params.RemoveBranding),
-		"CM_PERMISSIONS":          strings.Join(params.Permissions, ","),
-		"CM_URL_SCHEME":           params.URLScheme,
-		"CM_UNIVERSAL_LINK_DOMAIN": params.UniversalLinkDomain,
-	}
-	return s.TriggerBuild(WorkflowIOSBuild, vars)
-}
-
-// TriggerIOSSign triggers an iOS signing workflow.
-func (s *Service) TriggerIOSSign(params IOSSignParams) (string, error) {
-	vars := map[string]string{
-		"CM_BUILD_ID":       params.BuildID,
-		"CM_TASK_ID":        params.TaskID,
-		"CM_PACKAGE_NAME":   params.PackageName,
-		"CM_TEAM_ID":        params.TeamID,
-		"CM_KEY_ID":         params.KeyID,
-		"CM_ISSUER_ID":      params.IssuerID,
-		"CM_P8_KEY_S3_PATH": params.P8KeyS3Path,
-	}
-	return s.TriggerBuild(WorkflowIOSSign, vars)
-}
-
-// TriggerAndroidDeploy triggers an Android deploy workflow.
-func (s *Service) TriggerAndroidDeploy(params AndroidDeployParams) (string, error) {
-	vars := map[string]string{
-		"CM_BUILD_ID":             params.BuildID,
-		"CM_DEPLOYMENT_ID":        params.DeploymentID,
-		"CM_PACKAGE_NAME":         params.PackageName,
-		"CM_VERSION":              fmt.Sprintf("%d", params.Version),
-		"CM_TITLE":                params.Title,
-		"CM_DESCRIPTION":          params.Description,
-		"CM_SCREENSHOTS":          strings.Join(params.Screenshots, ","),
-		"CM_ICON_PATH":            params.IconPath,
-		"CM_LOCALE":               params.Locale,
-		"CM_SERVICE_ACCOUNT_S3":   params.ServiceAccountS3Path,
-		"CM_NEW_APP":              boolStr(params.NewApp),
-		"CM_CHANGED_BUILD":        boolStr(params.ChangedBuild),
-		"CM_TITLE_CHANGED":        boolStr(params.TitleChanged),
-		"CM_DESC_CHANGED":         boolStr(params.DescChanged),
-		"CM_SCREENSHOTS_CHANGED":  boolStr(params.ScreenshotsChanged),
-		"CM_ICON_CHANGED":         boolStr(params.IconChanged),
-	}
-	return s.TriggerBuild(WorkflowAndroidDeploy, vars)
-}
-
-// TriggerIOSDeploy triggers an iOS deploy workflow.
-func (s *Service) TriggerIOSDeploy(params IOSDeployParams) (string, error) {
-	vars := map[string]string{
-		"CM_BUILD_ID":             params.BuildID,
-		"CM_DEPLOYMENT_ID":        params.DeploymentID,
-		"CM_PACKAGE_NAME":         params.PackageName,
-		"CM_TEAM_ID":              params.TeamID,
-		"CM_KEY_ID":               params.KeyID,
-		"CM_ISSUER_ID":            params.IssuerID,
-		"CM_P8_KEY_S3_PATH":       params.P8KeyS3Path,
-		"CM_TITLE":                params.Title,
-		"CM_DESCRIPTION":          params.Description,
-		"CM_SCREENSHOTS":          strings.Join(params.Screenshots, ","),
-		"CM_ICON":                 params.Icon,
-		"CM_LOCALE":               params.Locale,
-		"CM_NEW_APP":              boolStr(params.NewApp),
-		"CM_CHANGED_BUILD":        boolStr(params.ChangedBuild),
-		"CM_TITLE_CHANGED":        boolStr(params.TitleChanged),
-		"CM_DESC_CHANGED":         boolStr(params.DescChanged),
-		"CM_SCREENSHOTS_CHANGED":  boolStr(params.ScreenshotsChanged),
-	}
-	if params.RolloutTrack != "" {
-		vars["CM_ROLLOUT_TRACK"] = params.RolloutTrack
-	}
-	if params.ReleaseNotes != "" {
-		vars["CM_RELEASE_NOTES"] = params.ReleaseNotes
-	}
-	return s.TriggerBuild(WorkflowIOSDeploy, vars)
 }
 
 func boolStr(b bool) string {

@@ -1373,9 +1373,6 @@ func main() {
 		slog.Info("Cleaned up stale awaiting_input jobs", "count", staleCount)
 	}
 
-	// Backfill v1 Projects for deployed mobile_app AppProjects that don't have one yet
-	go controller.BackfillV1ProjectsForMobileApps()
-
 	workDir, _ := os.Getwd()
 	staticDir := http.Dir(filepath.Join(workDir, "storage/public"))
 
@@ -1577,10 +1574,8 @@ func main() {
 			r.Get("/ship", httpViews.GetShipItems)
 			r.Route("/projects", func(r chi.Router) {
 				r.Get("/", httpViews.GetProjects)
-				r.Post("/", httpViews.CreateProject)
 				r.Route("/{projectId}", func(r chi.Router) {
 					r.Get("/", httpViews.GetProject)
-					r.Put("/", httpViews.UpdateProject)
 					r.Delete("/", httpViews.DeleteProject)
 					r.Route("/analytics", func(r chi.Router) {
 						r.Route("/events", func(r chi.Router) {
@@ -1602,7 +1597,6 @@ func main() {
 					})
 					r.Route("/builds", func(r chi.Router) {
 						r.Get("/", httpViews.GetProjectBuilds)
-						r.Post("/", httpViews.CreateProjectBuild)
 						r.Route("/{buildId}", func(r chi.Router) {
 							r.Get("/", httpViews.GetProjectBuild)
 						})
@@ -1674,25 +1668,14 @@ func main() {
 			r.Route("/deployments", func(r chi.Router) {
 				r.Get("/", httpViews.GetDeployments)
 				r.Get("/{deploymentId}", httpViews.GetDeployment)
-				r.Put("/{deploymentId}", httpViews.UpdateDeployment)
 				r.Get("/{deploymentId}/events", httpViews.GetDeploymentEvents)
-				r.Post("/{deploymentId}/switch-to-managed", httpViews.SwitchDeploymentToManaged)
-				r.Post("/", httpViews.CreateDeployment)
 				r.Route("/tools", func(r chi.Router) {
 					r.Post("/generate_screenshots", httpViews.AutoGenerateScreenshots)
-					r.Post("/sign_ipa", httpViews.SignUnsignedIPA)
-					r.Get("/sign_ipa/{signTaskId}", httpViews.CheckSignIPATaskStatus)
 				})
 			})
 			r.Route("/reports", func(r chi.Router) {
 				r.Post("/build", httpViews.UpdateBuildTaskStatus)
-				r.Post("/sign", httpViews.UpdateSignIPATaskStatus)
 				r.Post("/deploy", httpViews.UpdateDeploymentStatus)
-			})
-			// Flat, cross-project build lookups so the UI can address a
-			// build by its id without knowing the project it belongs to.
-			r.Route("/builds/{buildId}", func(r chi.Router) {
-				r.Get("/sign-status", httpViews.GetBuildSignStatus)
 			})
 			r.Route("/billing", func(r chi.Router) {
 				r.Get("/plans", httpViews.GetBillingPlans)
@@ -1999,17 +1982,10 @@ func main() {
 						r.Delete("/", httpViews.RemoveGitHubExport)
 					})
 
-					// Mobile builds
+					// Mobile builds (Expo / mobile_app_native only)
 					r.Route("/build", func(r chi.Router) {
-						// Combined endpoint: accepts {platforms:[...]} and enqueues
-						// both Android and iOS in one call so the UI can ship a
-						// "check both" build dialog without sequential collisions
-						// with the pending-task guard.
-						r.Post("/", httpViews.BuildAppMobileMulti)
-						r.Post("/android", httpViews.BuildAppAndroid)
-						r.Post("/ios", httpViews.BuildAppIOS)
-						// Expo (mobile_app_native) — separate endpoint because the
-						// request shape + permission gate route through BuildExpoMobile.
+						// Expo (mobile_app_native) — request shape + permission
+						// gate route through BuildExpoMobile.
 						r.Post("/expo", httpViews.BuildAppExpo)
 					})
 

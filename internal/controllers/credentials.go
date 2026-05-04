@@ -121,8 +121,6 @@ func (c *Controller) CreateAppleConnection(user *models.User, orgID uuid.UUID, r
 		}
 	}
 
-	go c.ResumePendingDeployments(context.Background(), user, "ios", cred.ID)
-
 	return &responses.AppleConnectionResponse{
 		ID:        cred.ID,
 		Name:      cred.Name,
@@ -287,8 +285,6 @@ func (c *Controller) CreateGooglePlayConnection(user *models.User, orgID uuid.UU
 		}
 	}
 
-	go c.ResumePendingDeployments(context.Background(), user, "android", cred.ID)
-
 	return cred, nil
 }
 
@@ -355,8 +351,7 @@ func (c *Controller) DeleteGooglePlayConnection(user *models.User, credID string
 // ---- Org-scoped credential methods ----
 //
 // These replace the user-scoped methods above for HTTP handler use.
-// The user-scoped methods are kept for system callers (cron,
-// AutoSignIOSBuildIfPossible, deployment, pending_connection) that don't
+// The user-scoped methods are kept for system callers (cron) that don't
 // carry a user context.
 
 // GetAppleConnectionForOrg loads an Apple connection scoped to the given org.

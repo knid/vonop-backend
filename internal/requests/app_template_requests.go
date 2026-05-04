@@ -11,7 +11,7 @@ type CreateAppTemplateRequest struct {
 	Description  string         `json:"description" validate:"omitempty,max=2000" errormgs:"must be at most 2000 characters"`
 	Tags         []string       `json:"tags"`
 	TemplateType string         `json:"template_type" validate:"required,oneof=web mobile both" errormgs:"must be 'web', 'mobile', or 'both'"`
-	ProjectType  string         `json:"project_type" validate:"required,oneof=app ecommerce mobile_app" errormgs:"must be 'app', 'ecommerce', or 'mobile_app'"`
+	ProjectType  string         `json:"project_type" validate:"required,oneof=app ecommerce" errormgs:"must be 'app' or 'ecommerce'"`
 	Prompt       string         `json:"prompt"`
 	Theme        map[string]any `json:"theme"`
 	DataModels   []any          `json:"data_models"`
@@ -28,7 +28,7 @@ type UpdateAppTemplateRequest struct {
 	Description     string         `json:"description" validate:"omitempty,max=2000" errormgs:"must be at most 2000 characters"`
 	Tags            []string       `json:"tags"`
 	TemplateType    string         `json:"template_type" validate:"omitempty,oneof=web mobile both" errormgs:"must be 'web', 'mobile', or 'both'"`
-	ProjectType     string         `json:"project_type" validate:"omitempty,oneof=app ecommerce mobile_app" errormgs:"must be 'app', 'ecommerce', or 'mobile_app'"`
+	ProjectType     string         `json:"project_type" validate:"omitempty,oneof=app ecommerce" errormgs:"must be 'app' or 'ecommerce'"`
 	Prompt          string         `json:"prompt"`
 	PreviewImageKey string         `json:"preview_image_key"`
 	PreviewURL      string         `json:"preview_url"`

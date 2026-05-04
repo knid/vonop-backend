@@ -8,7 +8,7 @@ import (
 
 type GenerateAppRequest struct {
 	Prompt         string     `json:"prompt" validate:"required" errormgs:"is required"`
-	ProjectType    string     `json:"project_type" validate:"omitempty,oneof=app ecommerce mobile_app mobile_app_native" errormgs:"must be 'app', 'ecommerce', 'mobile_app', or 'mobile_app_native'"`
+	ProjectType    string     `json:"project_type" validate:"omitempty,oneof=app ecommerce mobile_app_native" errormgs:"must be 'app', 'ecommerce', or 'mobile_app_native'"`
 	Images         []string   `json:"images,omitempty"`
 	OrganizationID *uuid.UUID `json:"organization_id,omitempty"`
 }
@@ -72,34 +72,7 @@ type DeployWebRequest struct {
 	Target string `json:"target" validate:"omitempty,oneof=production preview" errormgs:"must be 'production' or 'preview'"`
 }
 
-type MobileBuildRequest struct {
-	AppName           string `json:"app_name" validate:"required,min=2" errormgs:"must be at least 2 characters"`
-	Icon              string `json:"icon" validate:"required" errormgs:"app icon is required"`
-	SplashScreenColor string `json:"splash_screen_color"`
-}
-
-func (r *MobileBuildRequest) Validate(validate *validator.Validate) error {
-	return utils.ValidateFunc[MobileBuildRequest](*r, validate)
-}
-
-// MultiPlatformMobileBuildRequest is the body shape for the combined build
-// endpoint that enqueues Android and iOS in one call. Platforms must be a
-// non-empty subset of {"android","ios"}.
-type MultiPlatformMobileBuildRequest struct {
-	Platforms         []string `json:"platforms" validate:"required,min=1,dive,oneof=android ios" errormgs:"platforms must include android and/or ios"`
-	AppName           string   `json:"app_name" validate:"required,min=2" errormgs:"must be at least 2 characters"`
-	Icon              string   `json:"icon" validate:"required" errormgs:"app icon is required"`
-	SplashScreenColor string   `json:"splash_screen_color"`
-}
-
-func (r *MultiPlatformMobileBuildRequest) Validate(validate *validator.Validate) error {
-	return utils.ValidateFunc[MultiPlatformMobileBuildRequest](*r, validate)
-}
-
 // ExpoBuildRequest is the body for POST /v2/apps/{appId}/build/expo.
-// Separate from MultiPlatformMobileBuildRequest because the Expo flow
-// will diverge (e.g., RC public keys when P2.3 lands) and a distinct
-// type avoids polluting the legacy WebView path.
 type ExpoBuildRequest struct {
 	Platforms        []string `json:"platforms" validate:"required,min=1,dive,oneof=android ios" errormgs:"platforms must include android and/or ios"`
 	AppName          string   `json:"app_name" validate:"required,min=1,max=100" errormgs:"must be between 1 and 100 characters"`

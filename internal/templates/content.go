@@ -68,13 +68,13 @@ func getColor(scheme map[string]any, key, fallback string) string {
 	return fallback
 }
 
-// BuildGlobalsCSSTheme generates the globals.css content with Tailwind v4 @theme colors,
-// body base styles, and mobile utilities when isMobile is true.
+// BuildGlobalsCSSTheme generates the globals.css content with Tailwind v4 @theme colors
+// and body base styles.
 // Includes semantic tokens (foreground, muted, border, input, ring) derived from
 // the color scheme so that shadcn-style utility classes work (bg-foreground,
 // text-muted-foreground, border-border, etc.).
 // Light theme only — no dark mode overrides.
-func BuildGlobalsCSSTheme(colorScheme, darkColorScheme map[string]any, isMobile bool) string {
+func BuildGlobalsCSSTheme(colorScheme, darkColorScheme map[string]any) string {
 	var sb strings.Builder
 
 	fg := getColor(colorScheme, "text", "#111827")
@@ -148,53 +148,7 @@ func BuildGlobalsCSSTheme(colorScheme, darkColorScheme map[string]any, isMobile 
   }
 `)
 
-	// Mobile-specific base styles
-	if isMobile {
-		sb.WriteString(`  html {
-    overscroll-behavior: none;
-  }
-  body {
-    padding-top: env(safe-area-inset-top);
-    padding-bottom: env(safe-area-inset-bottom);
-    overscroll-behavior-y: contain;
-    -webkit-tap-highlight-color: transparent;
-    min-height: 100dvh;
-  }
-`)
-	}
-
 	sb.WriteString("}\n\n")
-
-	// Mobile-specific utility classes for snap scroll and hidden scrollbar.
-	// These are commonly needed by mobile apps (swipeable feeds, carousels,
-	// game reels) and their absence causes layout bugs.
-	if isMobile {
-		sb.WriteString(`/* Mobile snap scroll & scrollbar utilities */
-@layer utilities {
-  .snap-y-mandatory {
-    scroll-snap-type: y mandatory;
-    overflow-y: auto;
-  }
-  .snap-x-mandatory {
-    scroll-snap-type: x mandatory;
-    overflow-x: auto;
-  }
-  .snap-start {
-    scroll-snap-align: start;
-  }
-  .snap-center {
-    scroll-snap-align: center;
-  }
-  .no-scrollbar::-webkit-scrollbar {
-    display: none;
-  }
-  .no-scrollbar {
-    -ms-overflow-style: none;
-    scrollbar-width: none;
-  }
-}
-`)
-	}
 
 	// Hide Next.js dev error overlay indicator in preview (must be outside @layer to win specificity)
 	sb.WriteString(`nextjs-portal,
@@ -210,7 +164,7 @@ func BuildGlobalsCSSTheme(colorScheme, darkColorScheme map[string]any, isMobile 
 // BuildEcommerceGlobalsCSSTheme generates the globals.css content for e-commerce projects.
 // It extends the standard theme with e-commerce-specific utility classes and animations.
 func BuildEcommerceGlobalsCSSTheme(colorScheme, darkColorScheme map[string]any) string {
-	base := BuildGlobalsCSSTheme(colorScheme, darkColorScheme, false)
+	base := BuildGlobalsCSSTheme(colorScheme, darkColorScheme)
 
 	primary := getColor(colorScheme, "primary", "#3B82F6")
 
@@ -432,7 +386,7 @@ func GetContentWithLang(path string, colorScheme, darkColorScheme map[string]any
 	// Dynamic templates that can't be static files
 	switch path {
 	case "app/globals.css":
-		return BuildGlobalsCSSTheme(colorScheme, darkColorScheme, projectType == "mobile_app")
+		return BuildGlobalsCSSTheme(colorScheme, darkColorScheme)
 	case "app/not-found.tsx":
 		return constants.GetNotFoundTemplate(lang)
 	case "app/error.tsx":

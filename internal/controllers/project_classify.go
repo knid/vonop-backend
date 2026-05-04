@@ -68,7 +68,7 @@ Examples:
 		return models.ProjectTypeApp
 	}
 	result = strings.TrimSpace(strings.ToLower(result))
-	if result == "mobile_app_native" || result == "mobile" || result == "mobile_app" {
+	if result == "mobile_app_native" || result == "mobile" {
 		return models.ProjectTypeMobileAppNative
 	}
 	if result == "ecommerce" || result == "e-commerce" {
