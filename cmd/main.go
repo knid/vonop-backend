@@ -2060,6 +2060,13 @@ func main() {
 							r.Put("/{orderId}", httpViews.UpdateStoreOrderStatus)
 						})
 					})
+
+					// Backend introspection (studio mode split)
+					r.Route("/backend", func(r chi.Router) {
+						r.Get("/health", httpViews.GetBackendHealth)
+						r.Get("/routes", httpViews.GetBackendRoutes)
+						r.Get("/logs", httpViews.GetBackendLogs)
+					})
 				})
 			})
 
