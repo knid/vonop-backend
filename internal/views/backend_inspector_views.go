@@ -75,7 +75,7 @@ func (v *HttpViews) GetBackendLogs(w http.ResponseWriter, r *http.Request) {
 	sinceStr := strings.TrimSpace(r.URL.Query().Get("since"))
 	var since time.Time
 	if sinceStr != "" {
-		if d, err := time.ParseDuration(sinceStr); err == nil {
+		if d, err := time.ParseDuration(sinceStr); err == nil && d > 0 {
 			since = time.Now().Add(-d)
 		}
 	}
