@@ -233,17 +233,26 @@ func readExpoAppJSON(mobileDir string) ([]byte, error) {
 }
 
 // readRuntimeVersionFromMetadata returns the runtime version that the
-// installed binary will send in its `expo-runtime-version` header. We
-// derive it the same way Codemagic does (see codemagic.yaml's "Publish
-// OTA update" step) so the OTA bundle's row in ota_updates is keyed on
-// the exact same string the binary sends — otherwise the mobile client's
-// manifest GET 404s and OTA delivery silently no-ops.
+// installed binary will send in its `expo-runtime-version` header.
+//
+// Verified against Expo's own source:
+//  - resolveRuntimeVersionAsync.ts returns `fingerprint.hash` directly
+//    (bare hex hash, NO "fingerprint:" prefix)
+//  - expo-updates Android FileDownloader.kt sends
+//    `header("Expo-Runtime-Version", configuration.runtimeVersionRaw)`
+//    as-is with no transformation
+//  - expo's reference custom-expo-updates-server reads the header as an
+//    opaque string with no prefix parsing
+//
+// So we publish keyed on the bare hash. (Codemagic's existing yaml
+// adds a "fingerprint:" prefix — that's a bug; needs to be fixed there
+// too. Until both sides drop the prefix, a Codemagic-published OTA
+// would never match a binary's request, which is why ota_updates was
+// empty in production.)
 //
 // Resolution order:
-//  1. dist/metadata.json fingerprintHash → "fingerprint:<hash>"  (policy=fingerprint, the template default)
-//  2. expo block's runtimeVersion as a literal string fallback     (policy="1.0.0" style)
-//
-// Returns an error when neither source yields a usable value.
+//  1. dist/metadata.json fingerprintHash  (policy=fingerprint, the template default)
+//  2. expo block's runtimeVersion as a literal string fallback (policy="1.0.0" style)
 func readRuntimeVersionFromMetadata(distDir string, expoConfigBytes []byte) (string, error) {
 	metaBytes, err := os.ReadFile(filepath.Join(distDir, "metadata.json"))
 	if err != nil {
@@ -253,7 +262,7 @@ func readRuntimeVersionFromMetadata(distDir string, expoConfigBytes []byte) (str
 		FingerprintHash string `json:"fingerprintHash"`
 	}
 	if err := json.Unmarshal(metaBytes, &meta); err == nil && meta.FingerprintHash != "" {
-		return "fingerprint:" + meta.FingerprintHash, nil
+		return meta.FingerprintHash, nil
 	}
 	var expo struct {
 		RuntimeVersion json.RawMessage `json:"runtimeVersion"`
