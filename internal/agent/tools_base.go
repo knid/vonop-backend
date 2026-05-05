@@ -42,8 +42,6 @@ var protectedPaths = map[string]bool{
 	"postcss.config.mjs":  true,
 	"drizzle.config.ts":   true,
 	"drizzle.config.js":   true,
-	"middleware.ts":       true,
-	"middleware.js":       true,
 	// Env files — all variants
 	".env":             true,
 	".env.local":       true,
