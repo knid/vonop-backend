@@ -24,24 +24,26 @@ const maxReadBytes = 200 * 1024 // 200 KB
 // invent fake hashes.
 var protectedPaths = map[string]bool{
 	// Lock files — npm/yarn/pnpm/bun manage these, not the LLM
-	"package-lock.json":   true,
-	"yarn.lock":           true,
-	"pnpm-lock.yaml":      true,
-	"bun.lockb":           true,
-	// Config files at project root
-	"tsconfig.json":       true,
-	"next.config.ts":      true,
-	"next.config.js":      true,
-	"next.config.mjs":     true,
-	"next.config.cjs":     true,
-	"tailwind.config.ts":  true,
-	"tailwind.config.js":  true,
-	"tailwind.config.mjs": true,
-	"postcss.config.ts":   true,
-	"postcss.config.js":   true,
-	"postcss.config.mjs":  true,
-	"drizzle.config.ts":   true,
-	"drizzle.config.js":   true,
+	"package-lock.json":  true,
+	"yarn.lock":          true,
+	"pnpm-lock.yaml":     true,
+	"bun.lockb":          true,
+	// Build/config files where a wrong edit silently breaks the build pipeline
+	// (Next.js / TS / PostCSS / Drizzle drivers) without a clear error path.
+	// tailwind.config.* is intentionally NOT here — the agent legitimately
+	// extends the theme (fonts, custom colors). middleware.ts is also NOT
+	// here even though the template ships one; per-app CORS/header tweaks
+	// are valid agent work.
+	"tsconfig.json":      true,
+	"next.config.ts":     true,
+	"next.config.js":     true,
+	"next.config.mjs":    true,
+	"next.config.cjs":    true,
+	"postcss.config.ts":  true,
+	"postcss.config.js":  true,
+	"postcss.config.mjs": true,
+	"drizzle.config.ts":  true,
+	"drizzle.config.js":  true,
 	// Env files — all variants
 	".env":             true,
 	".env.local":       true,
