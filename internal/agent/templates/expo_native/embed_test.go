@@ -16,6 +16,11 @@ import (
 func TestEmbedIncludesTemplateBootFiles(t *testing.T) {
 	required := []string{
 		"app.json",
+		// app.config.js patches the resolved Expo config based on
+		// EXPO_GO_MODE — strips EAS / fingerprint when the Expo Go-targeted
+		// Metro starts. Drop it and the Expo Go preview hits a non-
+		// interactive auth wall on manifest fetch.
+		"app.config.js",
 		"babel.config.js",
 		"eas.json",
 		"global.css",
