@@ -53,6 +53,19 @@ type expoReportsTaskStore interface {
 	) (int64, error)
 }
 
+// expoReportsReleaseStore captures the subset of *controllers.Controller
+// operations needed to advance Release.Status when a submit-phase terminal
+// event arrives. Optional — when nil the handler skips the writeback (the
+// task projection still happens). Defined here so tests can inject a fake.
+//
+// *controllers.Controller satisfies this interface (see GetReleaseByCodemagicTaskID,
+// MarkReleaseInReview, MarkReleaseRejected on the controller).
+type expoReportsReleaseStore interface {
+	GetReleaseByCodemagicTaskID(ctx context.Context, taskID uuid.UUID) (*models.Release, error)
+	MarkReleaseInReview(ctx context.Context, id uuid.UUID, message string, occurredAt time.Time) (*models.Release, error)
+	MarkReleaseRejected(ctx context.Context, id uuid.UUID, message string, occurredAt time.Time) (*models.Release, error)
+}
+
 // ExpoReportsHandler holds the small dependency set the webhook handler needs.
 // Decoupled from the larger HttpViews so it's straightforward to test.
 type ExpoReportsHandler struct {
@@ -63,6 +76,11 @@ type ExpoReportsHandler struct {
 	// skipped (the failure is still recorded). Production wires this from
 	// controller.DB.DB; tests can leave it nil.
 	AnnotationDB *bun.DB
+	// ReleaseStore advances the Release row when a submit-phase terminal
+	// event arrives. Optional — when nil, submit-phase events still update
+	// the task projection but the Release row stays at "uploaded" forever.
+	// Wire via WithReleaseStore in production.
+	ReleaseStore expoReportsReleaseStore
 }
 
 // NewExpoReportsHandler constructs an ExpoReportsHandler.
@@ -77,6 +95,14 @@ func NewExpoReportsHandler(store expoReportsTaskStore, hmacMaster string) *ExpoR
 	if d, ok := store.(*database.Database); ok {
 		h.AnnotationDB = d.DB
 	}
+	return h
+}
+
+// WithReleaseStore wires the controller-side hook used to advance
+// Release.Status when a submit-phase terminal event arrives. Returns the
+// receiver so production wiring can chain: NewExpoReportsHandler(...).WithReleaseStore(c).
+func (h *ExpoReportsHandler) WithReleaseStore(rs expoReportsReleaseStore) *ExpoReportsHandler {
+	h.ReleaseStore = rs
 	return h
 }
 
@@ -193,7 +219,80 @@ func (h *ExpoReportsHandler) UpdateExpoBuildStatus(w http.ResponseWriter, r *htt
 			"task_id", taskID.String(), "status", report.Status, "err", err)
 	}
 
+	// On submit-phase terminal events, also advance the Release row.
+	// Without this the row stays at "uploaded" forever and the studio UI
+	// shows "Uploading…" even after Codemagic has finished pushing to
+	// TestFlight / Play Internal. P0 from the 2026-05-05 audit.
+	h.applyReleaseStatusUpdate(r.Context(), taskID, &report)
+
 	utils.JSONResponse(w, map[string]string{"status": "ok"}, http.StatusOK)
+}
+
+// applyReleaseStatusUpdate advances Release.Status when a submit-phase
+// terminal event arrives. Build-phase events have no Release row to
+// advance — they're handled solely by applyTaskStatusUpdate.
+//
+// Best-effort: errors are logged and swallowed so a transient lookup
+// failure doesn't make the worker retry the whole webhook (the build
+// task row was already updated; we don't want to re-process that path).
+func (h *ExpoReportsHandler) applyReleaseStatusUpdate(
+	ctx context.Context,
+	taskID uuid.UUID,
+	report *expoBuildReport,
+) {
+	if h.ReleaseStore == nil {
+		return // tests / pre-wiring path
+	}
+	if !strings.EqualFold(report.Phase, "submit") {
+		return // build-phase events have no associated release row
+	}
+	statusText, finished, isTerminal := classifyExpoStatus(report.Status)
+	if !finished || !isTerminal {
+		return
+	}
+	rel, err := h.ReleaseStore.GetReleaseByCodemagicTaskID(ctx, taskID)
+	if err != nil || rel == nil {
+		// Most common cause: a submit fired before recordReleaseFromSubmit
+		// could insert the row, or insert failed and was logged at warn
+		// level. We don't want to re-fail the worker for this.
+		if err != nil {
+			slog.Warn("expo submit webhook: release lookup failed — skipping status writeback",
+				"task_id", taskID.String(), "phase", report.Phase, "status", report.Status, "err", err)
+		}
+		return
+	}
+	// Idempotent — terminal Release statuses block further transitions in
+	// transitionRelease, so a duplicate webhook is a no-op.
+	if models.IsTerminalReleaseStatus(rel.Status) {
+		return
+	}
+	occurred := time.Unix(report.Timestamp, 0).UTC()
+	if occurred.IsZero() {
+		occurred = time.Now().UTC()
+	}
+	if statusText == "Failed" {
+		msg := report.Message
+		if msg == "" {
+			msg = "submit failed (codemagic deploy reported error)"
+		}
+		if _, err := h.ReleaseStore.MarkReleaseRejected(ctx, rel.ID, msg, occurred); err != nil {
+			slog.Warn("expo submit webhook: MarkReleaseRejected failed",
+				"task_id", taskID.String(), "release_id", rel.ID, "err", err)
+		}
+		return
+	}
+	// Terminal success — Codemagic has handed the binary off to the store.
+	// Apple/Play take it from here; the release_status_poll_cron will
+	// continue advancing the row through approved/live as the store
+	// progresses.
+	msg := report.Message
+	if msg == "" {
+		msg = "submitted to store via codemagic"
+	}
+	if _, err := h.ReleaseStore.MarkReleaseInReview(ctx, rel.ID, msg, occurred); err != nil {
+		slog.Warn("expo submit webhook: MarkReleaseInReview failed",
+			"task_id", taskID.String(), "release_id", rel.ID, "err", err)
+	}
 }
 
 // applyTaskStatusUpdate maps a Codemagic status event onto the

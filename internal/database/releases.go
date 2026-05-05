@@ -102,6 +102,28 @@ func (db *Database) GetReleaseByStoreID(ctx context.Context, platform, storeRele
 	return &r, nil
 }
 
+// GetReleaseByCodemagicTaskID looks up a release by the AppBuildTask whose
+// Codemagic deploy workflow produced it. Used by the submit-phase webhook
+// handler to advance Release.Status from "uploaded" to "in_review" or
+// "rejected" when the workflow reports a terminal status. Returns
+// (nil, sql.ErrNoRows) when no matching release row exists — caller treats
+// that as a non-error (build phase events have no release row).
+func (db *Database) GetReleaseByCodemagicTaskID(ctx context.Context, taskID uuid.UUID) (*models.Release, error) {
+	if taskID == uuid.Nil {
+		return nil, fmt.Errorf("task_id is required")
+	}
+	var r models.Release
+	err := db.DB.NewSelect().Model(&r).
+		Where("codemagic_task_id = ?", taskID).
+		Order("created_at DESC").
+		Limit(1).
+		Scan(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &r, nil
+}
+
 // ListReleasesByProject returns all releases for an AppProject, newest first.
 func (db *Database) ListReleasesByProject(ctx context.Context, appProjectID uuid.UUID) ([]models.Release, error) {
 	if appProjectID == uuid.Nil {
