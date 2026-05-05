@@ -118,10 +118,16 @@ func (c *Controller) CollectAllEnvVars(project *models.AppProject) map[string]st
 		envVars[key] = ev.Value
 	}
 
-	// 3. Auto-inject AI gateway key (server-side) and gateway URL (public)
+	// 3. Auto-inject AI gateway key (server-side) and gateway URL (public).
+	// The gateway URL is always NEXT_PUBLIC_ — it's read by lib/wemob-ai.ts
+	// in the Next.js backend, never by the mobile bundle. mobile_app_native
+	// projects produce two build artifacts (Expo + Next.js) and only the
+	// Next.js side talks to the gateway, so an EXPO_PUBLIC_ prefix here would
+	// silently break the backend build (webpack inlines NEXT_PUBLIC_* via
+	// DefinePlugin at `next build` time and bakes `undefined` if absent).
 	if gwKey, err := c.GetDecryptedGatewayKey(project.ID.String()); err == nil && gwKey != "" {
 		envVars["WEMOB_AI_KEY"] = gwKey
-		envVars[publicPrefix+"WEMOB_GATEWAY_URL"] = constants.WEMOB_API_BASE_URL + "/v2/gateway"
+		envVars["NEXT_PUBLIC_WEMOB_GATEWAY_URL"] = constants.WEMOB_API_BASE_URL + "/v2/gateway"
 	}
 
 	// 4. Mobile-specific public vars
