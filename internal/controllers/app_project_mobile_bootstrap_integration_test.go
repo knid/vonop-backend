@@ -183,10 +183,14 @@ func TestCreateAppProject_MobileAppNative_ScaffoldsRepoSkeleton(t *testing.T) {
 		"mobile/package.json",
 		"mobile/app.json",
 		"mobile/metro.config.js",
+		"mobile/babel.config.js",     // Metro requires `nativewind/babel` plugin
+		"mobile/tailwind.config.js",  // withNativeWind() loads this at startup
 		"mobile/postcss.config.mjs",
 		"mobile/tsconfig.json",
 		"mobile/global.css",
+		"mobile/nativewind-env.d.ts",
 		"mobile/.npmrc",
+		"mobile/.gitignore",
 		"mobile/app/_layout.tsx",
 		"mobile/app/(app)/index.tsx",
 		"mobile/lib/api.ts",
@@ -195,6 +199,7 @@ func TestCreateAppProject_MobileAppNative_ScaffoldsRepoSkeleton(t *testing.T) {
 		"mobile/lib/push.ts",
 		"mobile/components/ui/button.tsx",
 		"mobile/components/tw/index.tsx",
+		"mobile/store/index.ts",
 	} {
 		if !repo.FileExists(expected) {
 			t.Errorf("expected %s to exist in mobile_app_native scaffold", expected)
