@@ -10,6 +10,20 @@ import (
 	"github.com/knid/wemob/internal/templates"
 )
 
+const genericProvisionDatabaseResultTemplate = `Wemob db is ready. Tables created and seeded with realistic demo data (including AI-generated images for any image columns): %s.
+
+What is now true:
+- lib/db.ts has been written. Import the database client with: import { db } from '@/lib/db'
+- You MUST now write lib/schema.ts yourself with Drizzle pgTable definitions matching every table above. lib/db.ts imports './schema', so the file must exist before any page can build. Use snake_case column names in the SQL but camelCase property names in the Drizzle definitions.
+- The execute_sql tool now works against this database. Use readonly=true for one-off SELECTs while exploring, readonly=false for ALTER TABLE and any extra INSERTs you need.
+- Pages that read from @/lib/db must export: export const dynamic = "force-dynamic"
+- In every user-facing message, call this "your database" / "wemob db" / "veritabanın". NEVER say Neon, Postgres, Drizzle, Supabase, or Firebase to the user.
+
+Next steps for this run:
+1. write_file lib/schema.ts with Drizzle pgTable definitions matching the schema you just provisioned.
+2. Replace any hardcoded mock data in pages and components with real db.select / db.insert calls.
+3. Add export const dynamic = "force-dynamic" to every page.tsx that reads from the DB.`
+
 // ProvisionDatabaseTool is the agent-callable entry point for creating the
 // project's wemob db on demand. It is registered unconditionally; the tool
 // internally rejects calls when a database already exists for the project so
@@ -135,20 +149,7 @@ func (p ProvisionDatabaseTool) Execute(ctx context.Context, rc *RunContext, inpu
 		tableNames = append(tableNames, t.Name)
 	}
 
-	result := fmt.Sprintf(`Wemob db is ready. Tables created and seeded with realistic demo data (including AI-generated images for any image columns): %s.
-
-What is now true:
-- lib/db.ts has been written. Import the database client with: import { db } from '@/lib/db'
-- You MUST now write lib/schema.ts yourself with Drizzle pgTable definitions matching every table above. lib/db.ts imports './schema', so the file must exist before any page can build. Use snake_case column names in the SQL but camelCase property names in the Drizzle definitions.
-- The execute_sql tool now works against this database. Use readonly=true for one-off SELECTs while exploring, readonly=false for ALTER TABLE and any extra INSERTs you need.
-- Pages that read from @/lib/db must export: export const dynamic = "force-dynamic"
-- In every user-facing message, call this "your database" / "wemob db" / "veritabanın". NEVER say Neon, Postgres, Drizzle, Supabase, or Firebase to the user.
-
-Next steps for this run:
-1. write_file lib/schema.ts with Drizzle pgTable definitions matching the schema you just provisioned.
-2. Replace any hardcoded mock data in pages and components with real db.select / db.insert calls.
-3. Add export const dynamic = "force-dynamic" to every page.tsx that reads from the DB.`,
-		strings.Join(tableNames, ", "))
+	result := fmt.Sprintf(genericProvisionDatabaseResultTemplate, strings.Join(tableNames, ", "))
 
 	return result, false, nil
 }
