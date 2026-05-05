@@ -9,7 +9,7 @@ import (
 	"github.com/knid/wemob/internal/utils"
 )
 
-// GetLaunchpad handles GET /v1/apps/{appId}/launchpad. Returns the
+// GetLaunchpad handles GET /v2/apps/{appId}/launchpad. Returns the
 // single aggregate response powering the Ship tab's Launchpad surface.
 func (v *HttpViews) GetLaunchpad(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
