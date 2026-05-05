@@ -1,7 +1,14 @@
+// NativeWind v4 requires its own preset — without it Metro throws
+// "Tailwind CSS has not been configured with the NativeWind preset" at
+// startup. The preset registers the React Native compatibility layer
+// (sets darkMode=class, scopes the prefixed plugin, registers the JIT
+// transformer the Metro pipeline depends on).
+
 /** @type {import('tailwindcss').Config} */
 module.exports = {
   darkMode: ["class"],
   content: ["./app/**/*.{ts,tsx}", "./components/**/*.{ts,tsx}"],
+  presets: [require("nativewind/preset")],
   theme: {
     extend: {
       colors: {
