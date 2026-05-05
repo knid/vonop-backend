@@ -180,6 +180,16 @@ func (c *Controller) HandleExpoOTAPublishTask(ctx context.Context, t *asynq.Task
 		return c.maybeRetryOTA(ctx, p.DeploymentID, "npm_install", err, true)
 	}
 
+	// Materialize the per-project signing cert + keyid into the mobile/ tree.
+	// app.json declares expo.updates.codeSigningCertificate = "./certs/ota-cert.pem";
+	// without the file on disk, `expo prebuild` throws "File not found at
+	// updates.codeSigningCertificate path" before any platform work starts.
+	// Codemagic builds get the same file via POST /v2/codemagic/ota-cert (HMAC);
+	// the worker, running in-process, calls EnsureOTAUpdateSigningKey directly.
+	if _, err := c.prepareOTAArtifactsInRepo(buildCtx, project, mobileDir); err != nil {
+		return c.maybeRetryOTA(ctx, p.DeploymentID, "prepare_ota_artifacts", err, true)
+	}
+
 	// Per-platform prebuild + export + fingerprint. Mirrors what Codemagic does
 	// at binary-build time so the runtime version we publish under matches what
 	// the installed binary will send in `expo-runtime-version`:
