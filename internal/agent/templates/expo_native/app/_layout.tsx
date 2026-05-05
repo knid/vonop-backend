@@ -2,6 +2,11 @@ import "react-native-gesture-handler";
 
 import "../global.css";
 
+// Side-effect import: registers cssInterop for Animated.* components so
+// `<Animated.View className="px-5">` actually applies styles. MUST run
+// before any Animated component is rendered, hence the top-level import.
+import "@/lib/nativewind-setup";
+
 import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { Component, useEffect } from "react";
