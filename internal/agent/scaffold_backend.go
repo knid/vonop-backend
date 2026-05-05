@@ -1,5 +1,7 @@
 package agent
 
+import "github.com/knid/wemob/internal/templates"
+
 // scaffoldMinimalBackend writes a minimum-viable Next.js App Router
 // backend under backend/ so package.json editors can add dependencies
 // and the eventual Fly deploy can `next build`. The agent layers actual
@@ -13,6 +15,10 @@ package agent
 //   - backend/tsconfig.json — Next.js App Router config with the @/* alias
 //     so `import { ... } from '@/lib/...'` resolves.
 //   - backend/next.config.mjs — standalone output for Fly deploy.
+//   - backend/middleware.ts — CORS for /api/* sourced from the canonical
+//     nextjs template. The system prompt promises this file is shipped;
+//     without it the agent fabricates ad-hoc CORS each time it's asked
+//     about cross-origin issues.
 //
 // Dockerfile is intentionally NOT written here — the deploy worker
 // auto-writes a default standalone Next.js Dockerfile if missing (P1.1.D).
@@ -69,8 +75,12 @@ const nextConfig = {
 
 export default nextConfig;
 `,
+		"backend/middleware.ts": templates.GetTemplate("middleware.ts"),
 	}
 	for path, content := range files {
+		if content == "" {
+			continue
+		}
 		rc.FileMap.Set(path, content)
 		rc.Emitter.Emit(EventFileWritten, FileWrittenEvent{
 			RunID:     rc.RunID,

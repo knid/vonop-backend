@@ -65,6 +65,13 @@ func TestProvisionDatabase_NativeWritesBackendPaths(t *testing.T) {
 	if _, ok := rc.FileMap.Get("backend/tsconfig.json"); !ok {
 		t.Error("expected backend/tsconfig.json (auto-scaffold)")
 	}
+	mw, ok := rc.FileMap.Get("backend/middleware.ts")
+	if !ok {
+		t.Error("expected backend/middleware.ts (auto-scaffold) — system prompt promises it ships with the template")
+	}
+	if !strings.Contains(mw, "Access-Control-Allow-Origin") {
+		t.Errorf("backend/middleware.ts missing CORS header logic; got: %s", mw)
+	}
 
 	pkg, _ := rc.FileMap.Get("backend/package.json")
 	if !strings.Contains(pkg, "@neondatabase/serverless") {
