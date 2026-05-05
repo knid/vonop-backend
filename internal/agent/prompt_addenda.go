@@ -386,3 +386,73 @@ Drizzle types match the live tables. If the seed data references imagery,
 generate the images with the generate_image tool first and store the
 returned URLs in the INSERT statements.
 `
+
+// DatabaseAddendumNative is appended to the base prompt for mobile_app_native
+// projects whose backend/ Postgres database has been provisioned (signaled by
+// project.Settings["has_database"] = true). Replaces DatabaseAddendum on
+// native projects — the file paths and import patterns differ.
+//
+// Independent of LocalDatabaseAddendum — a synced app may carry both.
+const DatabaseAddendumNative = `# DATABASE ADDENDUM (native + backend)
+
+This project has a wemob db wired through its Next.js backend. Schema files:
+- backend/lib/db.ts — Drizzle Postgres client. Imports the schema.
+- backend/lib/schema.ts — Drizzle pgTable definitions; you author this.
+- backend/app/api/<resource>/route.ts — CRUD endpoints; you author these.
+- mobile/lib/api.ts — already in the Expo template; mobile screens call backend routes through apiFetch.
+
+Pattern (must follow exactly):
+1. backend/lib/db.ts is imported ONLY from server-side code under backend/.
+   Examples: backend/app/api/<x>/route.ts, server actions, Server Components.
+2. Mobile screens (mobile/**/*.tsx) call backend routes through apiFetch:
+     const rows = await apiFetch<Item[]>('/api/<resource>');
+3. NEVER import '@/lib/db' from anywhere under mobile/. NEVER reference
+   DATABASE_URL in mobile code. NEVER expose connection strings through any
+   API response.
+
+Schema changes:
+- ALTER TABLE / extra INSERTs go through the execute_sql tool. Use
+  readonly=false for mutations, readonly=true for exploration.
+- Keep backend/lib/schema.ts in sync with the live database — Drizzle's TS
+  types come from it.
+
+User-facing language:
+- Call this "your database" / "wemob db" / "veritabanın". NEVER say Neon,
+  Postgres, Drizzle, Supabase, or Firebase to the user.
+`
+
+// LocalDatabaseAddendum is appended to the base prompt for mobile_app_native
+// projects whose on-device SQLite database has been provisioned (signaled by
+// project.Settings["has_local_database"] = true). Independent of
+// DatabaseAddendumNative — a synced app gets both.
+const LocalDatabaseAddendum = `# LOCAL DATABASE ADDENDUM (on-device SQLite)
+
+This native project has on-device SQLite wired via expo-sqlite + Drizzle.
+Schema files:
+- mobile/lib/db.tsx — Drizzle expo-sqlite client + DatabaseProvider component.
+- mobile/lib/schema.ts — sqliteTable definitions.
+- mobile/lib/migrations.ts — runSync(db) with idempotent CREATE TABLE
+  IF NOT EXISTS / ALTER TABLE … ADD COLUMN. Runs on every app launch.
+
+Pattern (must follow exactly):
+1. Reactive reads in screens use useLiveQuery — never useEffect + setState
+   to mirror db rows:
+     import { useLiveQuery } from "drizzle-orm/expo-sqlite";
+     const { data } = useLiveQuery(db.select().from(<table>));
+2. Writes from event handlers use db.insert/update/delete — never inside
+   render. Wrap multi-step writes in db.transaction() if you need atomicity.
+3. NEVER import 'mobile/lib/db.tsx' from anything under backend/. The
+   SQLite file is device-only.
+4. NEVER persist auth tokens / secrets here — use expo-secure-store
+   (already in the Expo template).
+
+Schema changes:
+- Edit mobile/lib/schema.ts AND mobile/lib/migrations.ts together. Append
+  fresh CREATE TABLE IF NOT EXISTS / ALTER TABLE … ADD COLUMN statements;
+  the migrations function is idempotent so re-running it is safe.
+- Do not call provision_local_database again — it's one-shot.
+
+User-facing language:
+- Call this "your data" / "this app's storage" / "veritabanın". NEVER
+  say SQLite, expo-sqlite, or Drizzle to the user.
+`

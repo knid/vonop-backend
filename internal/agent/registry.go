@@ -164,6 +164,7 @@ func BuildRegistryFor(project *models.AppProject, deps *RunDependencies) *Regist
 		// runs for this project type.
 		r.Register(&ReadBuildLogsTool{Deps: deps})
 		r.Register(&TriggerBuildAfterFixTool{Deps: deps})
+		r.Register(ProvisionLocalDatabaseTool{Deps: deps})
 	}
 	// Ecommerce projects use the same generic DB tools as every other app;
 	// their tenant Neon database is seeded from
@@ -186,6 +187,19 @@ func projectHasDatabase(project *models.AppProject) bool {
 		return false
 	}
 	if v, ok := project.Settings["has_database"].(bool); ok {
+		return v
+	}
+	return false
+}
+
+// projectHasLocalDatabase returns true if the project has an on-device
+// SQLite database wired (signaled by Settings["has_local_database"]).
+// Used by context.go to gate LocalDatabaseAddendum.
+func projectHasLocalDatabase(project *models.AppProject) bool {
+	if project == nil || project.Settings == nil {
+		return false
+	}
+	if v, ok := project.Settings["has_local_database"].(bool); ok {
 		return v
 	}
 	return false
