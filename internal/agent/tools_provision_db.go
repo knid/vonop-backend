@@ -24,6 +24,55 @@ Next steps for this run:
 2. Replace any hardcoded mock data in pages and components with real db.select / db.insert calls.
 3. Add export const dynamic = "force-dynamic" to every page.tsx that reads from the DB.`
 
+// mobileNativeProvisionDatabaseResultTemplate is returned by ProvisionDatabaseTool.Execute when the project is mobile_app_native. Teaches the API-route proxy pattern that mobile screens use to reach the backend Postgres database.
+const mobileNativeProvisionDatabaseResultTemplate = `Wemob db is ready. Tables created and seeded with realistic demo data (including AI-generated images for any image columns): %s.
+
+What is now true:
+- backend/lib/db.ts has been written. Import the database client from a Next.js API route with:
+    import { db } from '@/lib/db';
+- backend/package.json now lists @neondatabase/serverless and drizzle-orm. A minimal Next.js backend was scaffolded under backend/ if it didn't already exist.
+- You MUST now write backend/lib/schema.ts with Drizzle pgTable definitions matching every table above. backend/lib/db.ts imports './schema', so the file must exist before any backend page can build. Use snake_case column names in the SQL but camelCase property names in the Drizzle definitions.
+- The execute_sql tool now works against this database. Use readonly=true for SELECTs while exploring, readonly=false for ALTER TABLE / extra INSERTs.
+
+How CRUD reaches the mobile app:
+
+  CRITICAL ARCHITECTURE: backend/lib/db.ts MUST only be imported from Next.js
+  API routes under backend/app/api/**/route.ts. The mobile app (mobile/) NEVER
+  imports it — DATABASE_URL is server-side-only and must never reach the
+  React Native binary.
+
+1. Backend route (backend/app/api/<resource>/route.ts):
+    import { db } from '@/lib/db';
+    import { %s } from '@/lib/schema';
+    import { NextRequest, NextResponse } from 'next/server';
+    export async function GET() {
+      const rows = await db.select().from(%s);
+      return NextResponse.json(rows);
+    }
+    export async function POST(req: NextRequest) {
+      const body = await req.json();
+      const [row] = await db.insert(%s).values(body).returning();
+      return NextResponse.json(row);
+    }
+
+2. Mobile screen (mobile/app/<route>.tsx):
+    import { apiFetch } from '@/lib/api';
+    const rows = await apiFetch<Item[]>('/api/<resource>');
+
+Rules:
+1. NEVER import '@/lib/db' from anything under mobile/. NEVER add DATABASE_URL
+   to mobile/ source. NEVER expose connection strings through API responses.
+2. Backend API responses must shape the data — strip secrets, derive computed
+   fields, paginate. The route handler is the trust boundary.
+3. In every user-facing message, call this "your database" / "wemob db" /
+   "veritabanın". NEVER say Neon, Postgres, Drizzle, Supabase, or Firebase
+   to the user.
+
+Next steps for this run:
+1. write_file backend/lib/schema.ts with Drizzle pgTable definitions matching the schema you just provisioned.
+2. write_file backend/app/api/<resource>/route.ts handlers for each table the UI needs (GET list, POST create, optionally PUT/DELETE on /<id>).
+3. Wire mobile screens to call those routes via apiFetch instead of any hardcoded mock data.`
+
 // ProvisionDatabaseTool is the agent-callable entry point for creating the
 // project's wemob db on demand. It is registered unconditionally; the tool
 // internally rejects calls when a database already exists for the project so
