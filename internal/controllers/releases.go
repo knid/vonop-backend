@@ -146,6 +146,13 @@ func (c *Controller) GetReleasesForApp(ctx context.Context, appProjectID uuid.UU
 	return c.DB.ListReleasesByProject(ctx, appProjectID)
 }
 
+// GetReleaseByCodemagicTaskID is a thin pass-through to the DB lookup that
+// the submit-phase webhook handler uses to find the Release row associated
+// with a Codemagic deploy workflow.
+func (c *Controller) GetReleaseByCodemagicTaskID(ctx context.Context, taskID uuid.UUID) (*models.Release, error) {
+	return c.DB.GetReleaseByCodemagicTaskID(ctx, taskID)
+}
+
 // GetCurrentLiveRelease returns the latest live release for (project, platform).
 // Returns (nil, nil) when nothing is live yet.
 func (c *Controller) GetCurrentLiveRelease(ctx context.Context, appProjectID uuid.UUID, platform string) (*models.Release, error) {

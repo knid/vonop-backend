@@ -2210,7 +2210,8 @@ func main() {
 				slog.Error("WEMOB_WORKER_HMAC_KEY secret is required (generate with: openssl rand -hex 32, then set in Infisical)")
 				os.Exit(1)
 			}
-			expoReportsHandler := views.NewExpoReportsHandler(controller.DB, workerHMACKey)
+			expoReportsHandler := views.NewExpoReportsHandler(controller.DB, workerHMACKey).
+				WithReleaseStore(controller)
 			r.Post("/reports/expo-build", expoReportsHandler.UpdateExpoBuildStatus)
 
 			keystoreHandler := views.NewCodemagicKeystoreHandler(controller, workerHMACKey)
