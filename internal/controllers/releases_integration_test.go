@@ -21,6 +21,13 @@ func TestRelease_StatusTransitions_Idempotent(t *testing.T) {
 	db := database.NewTestDB(t,
 		(*models.Release)(nil),
 	)
+	// UpsertRelease's ON CONFLICT clause requires the partial unique index
+	// that prod migrations install. Without it the upsert returns SQLSTATE
+	// 42P10 ("no unique or exclusion constraint matching the ON CONFLICT").
+	if _, err := db.DB.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS uniq_releases_project_platform_track_version
+		ON releases (app_project_id, platform, track, version_code) WHERE deleted_at IS NULL`); err != nil {
+		t.Fatalf("create unique index: %v", err)
+	}
 	c, _ := NewTestController(t, db, TestControllerOptions{})
 	ctx := context.Background()
 
@@ -88,6 +95,13 @@ func TestRelease_RollbackFlipsTerminalState(t *testing.T) {
 	db := database.NewTestDB(t,
 		(*models.Release)(nil),
 	)
+	// UpsertRelease's ON CONFLICT clause requires the partial unique index
+	// that prod migrations install. Without it the upsert returns SQLSTATE
+	// 42P10 ("no unique or exclusion constraint matching the ON CONFLICT").
+	if _, err := db.DB.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS uniq_releases_project_platform_track_version
+		ON releases (app_project_id, platform, track, version_code) WHERE deleted_at IS NULL`); err != nil {
+		t.Fatalf("create unique index: %v", err)
+	}
 	c, _ := NewTestController(t, db, TestControllerOptions{})
 	ctx := context.Background()
 
@@ -138,6 +152,13 @@ func TestRelease_GetCurrentLiveRelease(t *testing.T) {
 	db := database.NewTestDB(t,
 		(*models.Release)(nil),
 	)
+	// UpsertRelease's ON CONFLICT clause requires the partial unique index
+	// that prod migrations install. Without it the upsert returns SQLSTATE
+	// 42P10 ("no unique or exclusion constraint matching the ON CONFLICT").
+	if _, err := db.DB.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS uniq_releases_project_platform_track_version
+		ON releases (app_project_id, platform, track, version_code) WHERE deleted_at IS NULL`); err != nil {
+		t.Fatalf("create unique index: %v", err)
+	}
 	c, _ := NewTestController(t, db, TestControllerOptions{})
 	ctx := context.Background()
 	appID := uuid.New()
@@ -178,6 +199,13 @@ func TestRelease_HandleASCNotification_TransitionsRelease(t *testing.T) {
 	db := database.NewTestDB(t,
 		(*models.Release)(nil),
 	)
+	// UpsertRelease's ON CONFLICT clause requires the partial unique index
+	// that prod migrations install. Without it the upsert returns SQLSTATE
+	// 42P10 ("no unique or exclusion constraint matching the ON CONFLICT").
+	if _, err := db.DB.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS uniq_releases_project_platform_track_version
+		ON releases (app_project_id, platform, track, version_code) WHERE deleted_at IS NULL`); err != nil {
+		t.Fatalf("create unique index: %v", err)
+	}
 	c, _ := NewTestController(t, db, TestControllerOptions{})
 	ctx := context.Background()
 

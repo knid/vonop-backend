@@ -38,22 +38,27 @@ func (db *Database) UpsertRelease(ctx context.Context, r *models.Release) (*mode
 	}
 	r.UpdatedAt = now
 
+	// IMPORTANT: the Release model is declared with `bun:"...,alias:r"`,
+	// so Bun emits `INSERT INTO releases AS r ...`. The conflict-update SET
+	// clause must therefore reference the existing row as `r.<col>`, not
+	// `releases.<col>` — Postgres rejects the table-name form with
+	// "invalid reference to FROM-clause entry for table 'releases'".
 	_, err := db.DB.NewInsert().Model(r).
 		On("CONFLICT (app_project_id, platform, track, version_code) WHERE deleted_at IS NULL DO UPDATE").
 		Set("status = EXCLUDED.status").
 		Set("status_message = EXCLUDED.status_message").
 		Set("marketing_version = EXCLUDED.marketing_version").
-		Set("codemagic_task_id = COALESCE(EXCLUDED.codemagic_task_id, releases.codemagic_task_id)").
-		Set("build_id = COALESCE(EXCLUDED.build_id, releases.build_id)").
-		Set("store_release_id = CASE WHEN EXCLUDED.store_release_id <> '' THEN EXCLUDED.store_release_id ELSE releases.store_release_id END").
-		Set("phased_release_state = CASE WHEN EXCLUDED.phased_release_state <> '' THEN EXCLUDED.phased_release_state ELSE releases.phased_release_state END").
+		Set("codemagic_task_id = COALESCE(EXCLUDED.codemagic_task_id, r.codemagic_task_id)").
+		Set("build_id = COALESCE(EXCLUDED.build_id, r.build_id)").
+		Set("store_release_id = CASE WHEN EXCLUDED.store_release_id <> '' THEN EXCLUDED.store_release_id ELSE r.store_release_id END").
+		Set("phased_release_state = CASE WHEN EXCLUDED.phased_release_state <> '' THEN EXCLUDED.phased_release_state ELSE r.phased_release_state END").
 		Set("rollout_fraction = EXCLUDED.rollout_fraction").
-		Set("rolled_back_from_release_id = COALESCE(EXCLUDED.rolled_back_from_release_id, releases.rolled_back_from_release_id)").
-		Set("submitted_at = COALESCE(releases.submitted_at, EXCLUDED.submitted_at)").
-		Set("approved_at = COALESCE(releases.approved_at, EXCLUDED.approved_at)").
-		Set("live_at = COALESCE(releases.live_at, EXCLUDED.live_at)").
-		Set("rejected_at = COALESCE(releases.rejected_at, EXCLUDED.rejected_at)").
-		Set("rejection_message = CASE WHEN EXCLUDED.rejection_message <> '' THEN EXCLUDED.rejection_message ELSE releases.rejection_message END").
+		Set("rolled_back_from_release_id = COALESCE(EXCLUDED.rolled_back_from_release_id, r.rolled_back_from_release_id)").
+		Set("submitted_at = COALESCE(r.submitted_at, EXCLUDED.submitted_at)").
+		Set("approved_at = COALESCE(r.approved_at, EXCLUDED.approved_at)").
+		Set("live_at = COALESCE(r.live_at, EXCLUDED.live_at)").
+		Set("rejected_at = COALESCE(r.rejected_at, EXCLUDED.rejected_at)").
+		Set("rejection_message = CASE WHEN EXCLUDED.rejection_message <> '' THEN EXCLUDED.rejection_message ELSE r.rejection_message END").
 		Set("updated_at = EXCLUDED.updated_at").
 		Set("version_number = EXCLUDED.version_number").
 		Returning("*").

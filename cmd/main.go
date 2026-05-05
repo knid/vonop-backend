@@ -2012,6 +2012,20 @@ func main() {
 						r.Post("/{platform}", httpViews.SubmitAppExpo)
 					})
 
+					// Releases (P1#16) — store-side lifecycle for each submission.
+					// CreateReleaseFromSubmit writes the row from submit_expo_mobile;
+					// these routes expose the resulting Release lifecycle to the dashboard.
+					//   GET  /releases                     — list (?platform= filter)
+					//   GET  /releases/current?platform=   — current live release
+					//   POST /releases/{releaseID}/halt    — pause iOS phased rollout
+					//   POST /releases/rollback            — rollback live → previous
+					r.Route("/releases", func(r chi.Router) {
+						r.Get("/", httpViews.ListReleases)
+						r.Get("/current", httpViews.GetCurrentLiveRelease)
+						r.Post("/rollback", httpViews.RollbackRelease)
+						r.Post("/{releaseID}/halt", httpViews.HaltPhasedRollout)
+					})
+
 					// Persistent store listing — replaces the per-wizard form
 					// state so icon/title/description/screenshots survive
 					// refresh, re-submission, and future multi-locale work.

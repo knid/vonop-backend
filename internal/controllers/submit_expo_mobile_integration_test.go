@@ -320,3 +320,143 @@ func TestSubmitExpoMobile_RejectsBadAndroidTrack(t *testing.T) {
 		t.Errorf("got %v want ErrSubmitInvalidTrack", err)
 	}
 }
+
+// TestRecordReleaseFromSubmit_PersistsRowForBothPlatforms is the P1 #6
+// regression test for the submit→release wiring. It exercises the
+// recordReleaseFromSubmit helper directly so the test doesn't have to mock
+// the live App Store / Play Store version-check HTTP calls that the full
+// SubmitExpoMobile path makes (those are an unrelated, pre-existing test
+// pain point — the existing happy-path tests fail on main for the same
+// reason; tracked as adjacent bug, not in this PR's scope).
+//
+// Without the wiring, the polling cron, ASC notification handler,
+// halt/rollback all operate on an empty result set — the entire
+// release-management surface is dead.
+func TestRecordReleaseFromSubmit_PersistsRowForBothPlatforms(t *testing.T) {
+	db := database.NewTestDB(t,
+		(*models.Release)(nil),
+	)
+	if _, err := db.DB.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS uniq_releases_project_platform_track_version
+		ON releases (app_project_id, platform, track, version_code) WHERE deleted_at IS NULL`); err != nil {
+		t.Fatalf("create unique index: %v", err)
+	}
+	c, _ := NewTestController(t, db, TestControllerOptions{})
+	ctx := context.Background()
+
+	project := &models.AppProject{
+		ID:             uuid.New(),
+		OrganizationID: uuid.New(),
+	}
+	build := &models.Build{
+		ID:            uuid.New(),
+		BuildNumber:   42,
+		VersionString: "1.2.3",
+	}
+	task := &models.AppBuildTask{ID: uuid.New()}
+
+	// Android — non-phased.
+	relID := c.recordReleaseFromSubmit(ctx, project, build, task,
+		models.ReleasePlatformAndroid, "internal", 0, false, "cm-build-and-1")
+	if relID == uuid.Nil {
+		t.Fatalf("android: expected ReleaseID set; got uuid.Nil (release row creation silently failed)")
+	}
+	andRel, err := c.DB.GetRelease(ctx, relID)
+	if err != nil {
+		t.Fatalf("load android release: %v", err)
+	}
+	if andRel.AppProjectID != project.ID {
+		t.Errorf("AppProjectID: got %s want %s", andRel.AppProjectID, project.ID)
+	}
+	if andRel.OrganizationID != project.OrganizationID {
+		t.Errorf("OrganizationID: got %s want %s (org-scope leak?)", andRel.OrganizationID, project.OrganizationID)
+	}
+	if andRel.Platform != models.ReleasePlatformAndroid {
+		t.Errorf("Platform: got %q want android", andRel.Platform)
+	}
+	if andRel.Track != "internal" {
+		t.Errorf("Track: got %q want internal", andRel.Track)
+	}
+	if andRel.VersionCode != build.BuildNumber {
+		t.Errorf("VersionCode: got %d want %d", andRel.VersionCode, build.BuildNumber)
+	}
+	if andRel.MarketingVersion != build.VersionString {
+		t.Errorf("MarketingVersion: got %q want %q", andRel.MarketingVersion, build.VersionString)
+	}
+	if andRel.BuildID == nil || *andRel.BuildID != build.ID {
+		t.Errorf("BuildID: got %v want %v", andRel.BuildID, build.ID)
+	}
+	if andRel.CodemagicTaskID == nil || *andRel.CodemagicTaskID != task.ID {
+		t.Errorf("CodemagicTaskID: got %v want %v", andRel.CodemagicTaskID, task.ID)
+	}
+	if andRel.Status != models.ReleaseStatusUploaded {
+		t.Errorf("Status: got %q want uploaded", andRel.Status)
+	}
+
+	// iOS — phased = true. PhasedReleaseState should track to ACTIVE.
+	iosBuild := &models.Build{
+		ID:            uuid.New(),
+		BuildNumber:   100,
+		VersionString: "2.0.0",
+	}
+	iosTask := &models.AppBuildTask{ID: uuid.New()}
+	iosRelID := c.recordReleaseFromSubmit(ctx, project, iosBuild, iosTask,
+		models.ReleasePlatformIOS, "production", 0, true, "cm-build-ios-1")
+	if iosRelID == uuid.Nil {
+		t.Fatalf("ios: expected ReleaseID set; got uuid.Nil")
+	}
+	iosRel, err := c.DB.GetRelease(ctx, iosRelID)
+	if err != nil {
+		t.Fatalf("load ios release: %v", err)
+	}
+	if iosRel.Platform != models.ReleasePlatformIOS {
+		t.Errorf("ios.Platform: got %q want ios", iosRel.Platform)
+	}
+	if iosRel.Track != "production" {
+		t.Errorf("ios.Track: got %q want production", iosRel.Track)
+	}
+	if iosRel.PhasedReleaseState != "ACTIVE" {
+		t.Errorf("ios.PhasedReleaseState: got %q want ACTIVE (phased iOS submit)", iosRel.PhasedReleaseState)
+	}
+}
+
+// TestRecordReleaseFromSubmit_Idempotent — re-recording the same
+// (project, platform, track, version_code) tuple MUST NOT create a duplicate
+// Release row. UpsertRelease conflates on the unique index, so a re-submit
+// (e.g. user double-clicks) gets the existing row's id back.
+func TestRecordReleaseFromSubmit_Idempotent(t *testing.T) {
+	db := database.NewTestDB(t,
+		(*models.Release)(nil),
+	)
+	if _, err := db.DB.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS uniq_releases_project_platform_track_version
+		ON releases (app_project_id, platform, track, version_code) WHERE deleted_at IS NULL`); err != nil {
+		t.Fatalf("create unique index: %v", err)
+	}
+	c, _ := NewTestController(t, db, TestControllerOptions{})
+	ctx := context.Background()
+
+	project := &models.AppProject{ID: uuid.New(), OrganizationID: uuid.New()}
+	build := &models.Build{ID: uuid.New(), BuildNumber: 1, VersionString: "1"}
+	task := &models.AppBuildTask{ID: uuid.New()}
+
+	first := c.recordReleaseFromSubmit(ctx, project, build, task,
+		models.ReleasePlatformAndroid, "internal", 0, false, "cm-1")
+	second := c.recordReleaseFromSubmit(ctx, project, build, task,
+		models.ReleasePlatformAndroid, "internal", 0, false, "cm-2")
+
+	if first == uuid.Nil || second == uuid.Nil {
+		t.Fatalf("both ids should be non-nil; got first=%v second=%v", first, second)
+	}
+
+	var count int
+	if err := db.DB.NewSelect().Model((*models.Release)(nil)).
+		Where("app_project_id = ?", project.ID).
+		Where("platform = ?", models.ReleasePlatformAndroid).
+		Where("track = ?", "internal").
+		Where("version_code = ?", build.BuildNumber).
+		ColumnExpr("count(*)").Scan(ctx, &count); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("expected exactly 1 release row after re-submit, got %d (idempotency broken)", count)
+	}
+}
