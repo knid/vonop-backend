@@ -40,6 +40,10 @@ func TestEmbedIncludesTemplateBootFiles(t *testing.T) {
 		// time the moment a project is opened in Expo Go.
 		"lib/push.ts",
 		"lib/iap.ts",
+		// nativewind-setup registers cssInterop for Animated.* components.
+		// Without it, every <Animated.View className="..."> in user code
+		// silently drops styles, breaking screen padding everywhere.
+		"lib/nativewind-setup.ts",
 	}
 	for _, p := range required {
 		if _, err := fs.Stat(FS, p); err != nil {
