@@ -20,6 +20,13 @@ const (
 	DeploymentEventCanceled           = "canceled"
 	DeploymentEventFailed             = "failed"
 	DeploymentEventNudgeSent          = "nudge_sent" // pending_connection reminder email dispatched
+
+	// DeploymentEventFlyHostRemediation is fired when the deploy worker detects
+	// a Fly platform host-init bug on the primary region and auto-redeploys in
+	// a fallback region. Metadata: from_region, to_region, machine_id,
+	// restart_count, kind. Worker also reads this row on retry to skip the
+	// known-bad primary region instead of round-tripping through it again.
+	DeploymentEventFlyHostRemediation = "fly_host_remediation"
 )
 
 // Actor type — who caused the event.
