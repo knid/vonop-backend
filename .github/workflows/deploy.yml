@@ -109,13 +109,23 @@ jobs:
             docker compose pull api worker caddy
             docker compose up -d --no-deps --remove-orphans --wait --wait-timeout 90 api worker caddy
 
-            # End-to-end smoke through the public path (Caddy → api). -k because
-            # Caddy serves the api.wemob.io cert; Host header so Caddy routes to
-            # the right vhost when curling 127.0.0.1.
-            if ! curl -fsSk -H "Host: api.wemob.io" https://127.0.0.1/health > /dev/null; then
-              docker compose logs --tail=80 api caddy
-              exit 1
-            fi
+            # End-to-end smoke through the public path (Caddy → api). --resolve
+            # short-circuits DNS so we hit the local Caddy directly, but still
+            # presents api.wemob.io as the SNI/Host so Caddy serves the right
+            # cert + vhost. Caddy has no compose healthcheck so we retry a few
+            # times to cover its config-load + 443-bind warmup window.
+            for attempt in 1 2 3 4 5; do
+              if curl -fsS --resolve api.wemob.io:443:127.0.0.1 https://api.wemob.io/health > /dev/null; then
+                echo "Smoke ok on attempt $attempt"
+                break
+              fi
+              if [ "$attempt" = 5 ]; then
+                echo "Smoke failed after 5 attempts" >&2
+                docker compose logs --tail=80 api caddy
+                exit 1
+              fi
+              sleep 2
+            done
 
             docker image prune -f --filter "until=24h"
             docker logout ghcr.io
