@@ -14,11 +14,27 @@
 # fly.BuildAndPush; Docker silently ignores undeclared keys, so only the
 # ARG names listed below actually take effect.
 
-FROM node:22-alpine AS deps
+# WEMOB_BASE_IMAGE points at our pre-warmed base (wemob-base-nextjs) which
+# ships /root/.npm pre-populated with seed deps. Override via --build-arg if
+# the base image is unavailable (e.g. registry outage):
+#   --build-arg WEMOB_BASE_IMAGE=node:22-alpine
+ARG WEMOB_BASE_IMAGE=registry.fly.io/wemob-base-nextjs:v1
+
+FROM ${WEMOB_BASE_IMAGE} AS deps
 WORKDIR /app
 # Lock file is optional — generated apps don't ship one, `npm install` resolves fresh.
 COPY package.json package-lock.json* ./
-RUN npm install --no-audit --no-fund --prefer-offline
+# `--mount=type=cache` persists the npm cache across builds on the same BuildKit
+# builder VM — first build seeds it from the base image's /root/.npm, every
+# subsequent build resolves locally.
+# `--ignore-scripts` skips package postinstall hooks; standard Next.js deps
+# don't require them and skipping shaves a few seconds off every install.
+# `--legacy-peer-deps` keeps the install green when an agent-added dep
+# (e.g. better-auth, which wants drizzle-kit >=0.31.4) clashes with a
+# template-pinned peer (drizzle-kit ^0.28.0). NPM 7+ enforces peer deps
+# strictly by default; the legacy resolver picks one without erroring.
+RUN --mount=type=cache,target=/root/.npm \
+    npm install --no-audit --no-fund --prefer-offline --ignore-scripts --legacy-peer-deps
 
 FROM node:22-alpine AS builder
 WORKDIR /app
@@ -59,7 +75,11 @@ ENV NEXT_PUBLIC_SUPABASE_URL=$NEXT_PUBLIC_SUPABASE_URL \
     NEXT_PUBLIC_WEMOB_GATEWAY_URL=$NEXT_PUBLIC_WEMOB_GATEWAY_URL \
     NEXT_TELEMETRY_DISABLED=1
 
-RUN npm run build
+# `.next/cache` is Next.js's incremental build cache. Persisting it across
+# builds on the same BuildKit builder VM cuts repeat-build time from
+# ~60–90s to ~10–20s for unchanged routes.
+RUN --mount=type=cache,target=/app/.next/cache \
+    npm run build
 
 FROM node:22-alpine AS runner
 WORKDIR /app

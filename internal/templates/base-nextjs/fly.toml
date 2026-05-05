@@ -1,0 +1,9 @@
+# Minimal fly.toml so `flyctl deploy --build-only --push` knows what app
+# namespace to push to. No machines run from this image — it's a build-time
+# base only. The `wemob-base-nextjs` app must exist in the org first
+# (`flyctl apps create wemob-base-nextjs --org <wemob-org>`).
+app = "wemob-base-nextjs"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"

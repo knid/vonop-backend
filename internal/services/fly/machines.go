@@ -217,9 +217,13 @@ func (s *Service) GetMachineStatus(appName string) (MachineStatus, error) {
 
 // WaitForHealthy polls until at least one Machine for the app reports state
 // "started" or returns an error after `timeout`.
+//
+// Tick is 1s — flyctl deploy --strategy immediate often returns within a few
+// seconds of the machine actually being ready, so a 3s poll added avoidable
+// tail latency to first-deploy time-to-served.
 func (s *Service) WaitForHealthy(appName string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
-	tick := time.NewTicker(3 * time.Second)
+	tick := time.NewTicker(time.Second)
 	defer tick.Stop()
 	for {
 		var machines []machineSummary

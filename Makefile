@@ -32,3 +32,15 @@ loadtest-publish:
 test-integration:
 	go test -tags=integration ./...
 .PHONY: test-integration
+
+# Build + push the wemob-base-nextjs base image used as the FROM root for
+# customer Next.js Dockerfiles. The base image pre-warms /root/.npm with the
+# most common seed deps so customer `npm install --prefer-offline` resolves
+# locally instead of hitting the registry. Run this whenever
+# internal/templates/base-nextjs/package.json changes or a new dep enters
+# common rotation. One-time prerequisite:
+#   flyctl apps create wemob-base-nextjs --org <wemob-org>
+base-image:
+	cd internal/templates/base-nextjs && \
+	flyctl deploy --app wemob-base-nextjs --remote-only --build-only --push --image-label v1
+.PHONY: base-image
