@@ -27,6 +27,7 @@ type Service struct {
 	APIBase       string // overridable for tests; defaults to machinesAPIBase
 	GraphQLBase   string // overridable for tests; defaults to flyGraphQLBase
 	WebhookSecret string
+	StatusClient  *StatusClient
 	httpClient    *http.Client
 }
 
@@ -39,6 +40,7 @@ func NewService(apiToken, orgSlug, region, webhookSecret string) *Service {
 		APIBase:       machinesAPIBase,
 		GraphQLBase:   flyGraphQLBase,
 		WebhookSecret: webhookSecret,
+		StatusClient:  NewStatusClient(),
 		httpClient:    &http.Client{Timeout: 60 * time.Second},
 	}
 }

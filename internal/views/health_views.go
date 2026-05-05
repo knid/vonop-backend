@@ -30,6 +30,14 @@ func (v *HttpViews) HandleDeployPipelineHealth(w http.ResponseWriter, r *http.Re
 
 	body["redis_responsive"] = redisResponsive(v.Controller.AsynqInspector)
 
+	if v.Controller.FlyService != nil && v.Controller.FlyService.StatusClient != nil {
+		fs := v.Controller.FlyService.StatusClient.GetStatus()
+		body["host_status"] = map[string]string{
+			"indicator": fs.Indicator,
+			"message":   hostStatusMessage(fs.Indicator),
+		}
+	}
+
 	utils.JSONResponse(w, body, http.StatusOK)
 }
 
