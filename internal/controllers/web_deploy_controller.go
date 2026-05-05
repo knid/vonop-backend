@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -257,6 +258,13 @@ func (c *Controller) HandleWebDeployTask(ctx context.Context, t *asynq.Task) err
 		if err := ensureNextjsDockerfile(sourceDir); err != nil {
 			return c.failTask(p.DeploymentID, "ensure_dockerfile", err)
 		}
+	}
+	// Defensive: backfill a root layout when the agent shipped a page.tsx
+	// without one. Next.js fails `next build` with "page.tsx doesn't have a
+	// root layout" — runs for ALL project types since web/ecommerce templates
+	// also occasionally have agent-generated pages outside the templated tree.
+	if err := ensureNextjsRootLayout(sourceDir); err != nil {
+		return c.failTask(p.DeploymentID, "ensure_root_layout", err)
 	}
 
 	// 3. Get/create the runtime_apps row.
@@ -631,6 +639,79 @@ func (c *Controller) HandleFlyMachineEvent(event fly.MachineEvent) error {
 	}
 	return nil
 }
+
+// ensureNextjsRootLayout writes a minimal app/layout.tsx when the project
+// has any page.tsx under the App Router but no accompanying layout — Next.js
+// fails `next build` with "page.tsx doesn't have a root layout" otherwise.
+//
+// Idempotent: returns immediately if a layout exists in any common form
+// (.tsx/.jsx/.ts/.js) under either app/ or src/app/. Looks for pages with a
+// shallow walk so route-grouped pages (app/(marketing)/page.tsx) also count.
+//
+// The default content is intentionally minimal: a valid <html><body> shell,
+// a `metadata` export, and no external imports. The agent can overwrite it
+// on the next turn — this is a safety net, not a style decision.
+func ensureNextjsRootLayout(sourceDir string) error {
+	for _, prefix := range []string{"app", "src/app"} {
+		appDir := filepath.Join(sourceDir, prefix)
+		info, err := os.Stat(appDir)
+		if err != nil || !info.IsDir() {
+			continue
+		}
+		for _, ext := range []string{"layout.tsx", "layout.jsx", "layout.ts", "layout.js"} {
+			if _, err := os.Stat(filepath.Join(appDir, ext)); err == nil {
+				return nil
+			}
+		}
+		hasPage := false
+		walkErr := filepath.WalkDir(appDir, func(p string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if d.IsDir() {
+				if d.Name() == "node_modules" || strings.HasPrefix(d.Name(), ".") {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			switch d.Name() {
+			case "page.tsx", "page.jsx", "page.ts", "page.js":
+				hasPage = true
+				return filepath.SkipAll
+			}
+			return nil
+		})
+		if walkErr != nil {
+			return fmt.Errorf("walk %s: %w", appDir, walkErr)
+		}
+		if !hasPage {
+			return nil
+		}
+		layoutPath := filepath.Join(appDir, "layout.tsx")
+		if err := os.WriteFile(layoutPath, []byte(defaultNextjsRootLayout), 0o644); err != nil {
+			return fmt.Errorf("write default root layout: %w", err)
+		}
+		slog.Warn("backfilled missing root layout", "path", layoutPath)
+		return nil
+	}
+	return nil
+}
+
+const defaultNextjsRootLayout = `import type { Metadata } from "next";
+
+export const metadata: Metadata = {
+  title: "App",
+  description: "",
+};
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <html lang="en">
+      <body>{children}</body>
+    </html>
+  );
+}
+`
 
 // ensureNextjsDockerfile writes a default standalone-output Next.js Dockerfile
 // into sourceDir if one doesn't already exist. Idempotent — pre-existing
