@@ -1,7 +1,9 @@
-// Tailwind CSS v4 + NativeWind v5 — CSS-first configuration.
-// No tailwind.config.js or babel.config.js needed.
-export default {
+/** @type {import('postcss-load-config').Config} */
+const config = {
   plugins: {
-    "@tailwindcss/postcss": {},
+    tailwindcss: {},
+    autoprefixer: {},
   },
 };
+
+export default config;
