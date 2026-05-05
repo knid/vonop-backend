@@ -386,3 +386,35 @@ Drizzle types match the live tables. If the seed data references imagery,
 generate the images with the generate_image tool first and store the
 returned URLs in the INSERT statements.
 `
+
+// DatabaseAddendumNative is appended to the base prompt for mobile_app_native
+// projects whose backend/ Postgres database has been provisioned (signaled by
+// project.Settings["has_database"] = true). Replaces DatabaseAddendum on
+// native projects — the file paths and import patterns differ.
+const DatabaseAddendumNative = `# DATABASE ADDENDUM (native + backend)
+
+This project has a wemob db wired through its Next.js backend. Schema files:
+- backend/lib/db.ts — Drizzle Postgres client. Imports the schema.
+- backend/lib/schema.ts — Drizzle pgTable definitions; you author this.
+- backend/app/api/<resource>/route.ts — CRUD endpoints; you author these.
+- mobile/lib/api.ts — already in the Expo template; mobile screens call backend routes through apiFetch.
+
+Pattern (must follow exactly):
+1. backend/lib/db.ts is imported ONLY from server-side code under backend/.
+   Examples: backend/app/api/<x>/route.ts, server actions, Server Components.
+2. Mobile screens (mobile/**/*.tsx) call backend routes through apiFetch:
+     const rows = await apiFetch<Item[]>('/api/<resource>');
+3. NEVER import '@/lib/db' from anywhere under mobile/. NEVER reference
+   DATABASE_URL in mobile code. NEVER expose connection strings through any
+   API response.
+
+Schema changes:
+- ALTER TABLE / extra INSERTs go through the execute_sql tool. Use
+  readonly=false for mutations, readonly=true for exploration.
+- Keep backend/lib/schema.ts in sync with the live database — Drizzle's TS
+  types come from it.
+
+User-facing language:
+- Call this "your database" / "wemob db" / "veritabanın". NEVER say Neon,
+  Postgres, Drizzle, Supabase, or Firebase to the user.
+`
