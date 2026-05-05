@@ -710,15 +710,14 @@ asks for a chat feature, content generator, summariser, or image
 generator.
 
 ## Backend folder is OPTIONAL — do not create it by default
-The backend/ subtree is a Next.js project that hosts (1) mobile-app API
-routes at /api/*, and (2) a marketing landing page at /. It is created
-ONLY when the user explicitly asks for server-side functionality. Most
-mobile apps don't need it.
+The backend/ subtree is a Next.js project that hosts mobile-app API routes
+at /api/*. It is created ONLY when the user explicitly asks for server-side
+functionality. Most mobile apps don't need it.
 
 **Skip backend/ entirely for purely client-side apps:** calculators,
 timers, drawing tools, animations, single-screen utilities, offline
 note-takers, local-only games. These run with mobile/ alone — no Fly
-deploy, no /api/* routes, no landing page. Don't create backend/.gitkeep,
+deploy, no /api/* routes. Don't create backend/.gitkeep,
 don't write a backend/Dockerfile, don't touch the subtree.
 
 **Create backend/ ONLY when the user asks for one of these:**
@@ -730,14 +729,15 @@ don't write a backend/Dockerfile, don't touch the subtree.
 - Push notifications composed by the app (vs operator-composed via the
   Wemob dashboard, which is already wired)
 - Any AI / LLM call that consumes a server-held API key
-- A marketing landing page at {slug}.wemob.app/
 
-When you DO create backend/, write all four pieces in one turn:
+When you DO create backend/, write these pieces in one turn:
 - backend/package.json — Next.js + whatever DB / auth lib the user picked
-- backend/Dockerfile — standalone-output Next.js (the deploy pipeline writes
-  a default if missing, but writing your own is fine)
-- backend/app/layout.tsx + backend/app/page.tsx — landing or stub
+- backend/app/layout.tsx — required by Next.js App Router whenever any file
+  exists under backend/app/. Minimal ` + "`<html><body>{children}</body></html>`" + `
+  shell with a metadata export.
 - backend/app/api/<your-route>/route.ts — the actual API handler
+
+backend/Dockerfile is optional — the deploy pipeline writes a default if missing.
 
 Example backend endpoint at backend/app/api/todos/route.ts:
 
@@ -753,89 +753,6 @@ export async function GET(_req: NextRequest) {
 When the user asks you to write backend logic, put it in
 backend/app/api/<path>/route.ts. When you write frontend screens, call
 those routes via apiFetch.
-
-CRITICAL: if backend/ exists, backend/app/page.tsx and backend/app/api/*
-serve different audiences (browsers vs the mobile app). Never delete
-app/api/* to "simplify" the landing — the mobile app stops working
-immediately. Treat the landing as additive surface area only.
-
-### Landing-page structure (only when the user explicitly asks for one)
-DO NOT scaffold a landing page proactively. {slug}.wemob.app/ returning a
-404 is the correct default — most apps never need a marketing site.
-
-When the user does ask for a landing page, a polished one has:
-1. Hero: app name, one-line tagline, optional preview screenshot.
-2. Features section (2-4 bullets with icons).
-3. Store-badge CTAs (App Store + Play Store).
-4. Footer with privacy / terms links.
-
-Mobile-first responsive design. The landing renders in a regular browser
-(Next.js server components), so this is plain web HTML/CSS — NOT React
-Native. None of the NativeWind / Expo / SafeAreaView guidance from earlier
-sections applies inside backend/. Use standard web Tailwind (after adding
-it as a dep), or inline styles, or any CSS solution the user prefers.
-
-### Store-badge CTAs
-Read the store URLs from read_mobile_config:
-- app_store_url + play_store_url are empty until the user publishes.
-- landing_page_published is a separate flag the user toggles.
-
-When the URLs are EMPTY, render greyed-out "Coming soon" placeholders.
-When the URLs are SET, wrap the badges in <a href={appStoreURL}> tags.
-
-DO NOT ship third-party badge images (Apple + Google have specific brand
-guidelines and licensing). Use inline SVG components instead. Sample:
-
-` + "```" + `tsx
-// backend/components/AppStoreBadge.tsx
-export function AppStoreBadge() {
-  return (
-    <svg viewBox="0 0 200 60" width={160} height={48} xmlns="http://www.w3.org/2000/svg">
-      <rect width="200" height="60" rx="10" fill="#000" />
-      <text x="100" y="38" textAnchor="middle" fill="#fff"
-            fontFamily="system-ui" fontSize="16" fontWeight="600">
-        Download on the App Store
-      </text>
-    </svg>
-  );
-}
-` + "```" + `
-
-The agent (you) is allowed to make these badges as polished as the user
-asks — just don't bundle external image files unless the user explicitly
-provides them.
-
-### Metadata (Open Graph + Twitter card)
-Use Next.js's metadata API in backend/app/layout.tsx. NEVER put <head>
-tags directly inside page.tsx — Next.js owns <head> from the layout's
-metadata export.
-
-` + "```" + `tsx
-// backend/app/layout.tsx
-import type { Metadata } from "next";
-import "./globals.css";
-
-export const metadata: Metadata = {
-  title: "MyApp — Track your habits",
-  description: "MyApp is a mobile habit tracker that …",
-  openGraph: {
-    title: "MyApp — Track your habits",
-    description: "Track your habits, build streaks, level up.",
-    type: "website",
-    images: [{ url: "/og.png", width: 1200, height: 630 }],
-  },
-  twitter: {
-    card: "summary_large_image",
-    title: "MyApp — Track your habits",
-    description: "Track your habits, build streaks, level up.",
-  },
-};
-` + "```" + `
-
-### Domain
-The landing serves at the project's BackendDeployURL = {slug}.wemob.app/.
-DO NOT invent custom marketing domains — bring-your-own-domain is out of
-scope for the agent's authoring loop.
 
 ## CORS — handled centrally, do not duplicate
 ` + "`backend/middleware.ts`" + ` is shipped by the template. It allow-lists
