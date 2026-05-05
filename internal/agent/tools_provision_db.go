@@ -172,23 +172,31 @@ func (p ProvisionDatabaseTool) Execute(ctx context.Context, rc *RunContext, inpu
 		return fmt.Sprintf("provisioning failed: %v", err), true, nil
 	}
 
-	// Inject lib/db.ts so the model can `import { db } from '@/lib/db'`
-	// immediately within the same run. lib/schema.ts is left for the model
-	// to author so the Drizzle types match the live tables it just designed.
+	isMobileNative := rc.Project != nil && rc.Project.ProjectType == models.ProjectTypeMobileAppNative
+	libDBPath := "lib/db.ts"
+	pkgJSONPath := "package.json"
+	resultTemplate := genericProvisionDatabaseResultTemplate
+	if isMobileNative {
+		libDBPath = "backend/lib/db.ts"
+		pkgJSONPath = "backend/package.json"
+		resultTemplate = mobileNativeProvisionDatabaseResultTemplate
+		if _, ok := rc.FileMap.Get(pkgJSONPath); !ok {
+			scaffoldMinimalBackend(rc)
+		}
+	}
+
 	if libDB := templates.GetTemplate("lib/db.ts"); libDB != "" {
-		rc.FileMap.Set("lib/db.ts", libDB)
+		rc.FileMap.Set(libDBPath, libDB)
 		rc.Emitter.Emit(EventFileWritten, FileWrittenEvent{
 			RunID:     rc.RunID,
-			Path:      "lib/db.ts",
+			Path:      libDBPath,
 			Operation: "create",
 			Bytes:     len(libDB),
 			Content:   libDB,
 		})
 	}
 
-	// Add the packages lib/db.ts imports to package.json. The LLM never
-	// wrote these imports, so it won't add them itself.
-	addDependenciesToPackageJSON(rc, map[string]string{
+	addDependenciesToPackageJSONAt(rc, pkgJSONPath, map[string]string{
 		"@neondatabase/serverless": "^0.10.0",
 		"drizzle-orm":              "^0.39.0",
 	})
@@ -198,7 +206,13 @@ func (p ProvisionDatabaseTool) Execute(ctx context.Context, rc *RunContext, inpu
 		tableNames = append(tableNames, t.Name)
 	}
 
-	result := fmt.Sprintf(genericProvisionDatabaseResultTemplate, strings.Join(tableNames, ", "))
+	var result string
+	if isMobileNative {
+		first := tableNames[0]
+		result = fmt.Sprintf(resultTemplate, strings.Join(tableNames, ", "), first, first, first)
+	} else {
+		result = fmt.Sprintf(resultTemplate, strings.Join(tableNames, ", "))
+	}
 
 	return result, false, nil
 }
