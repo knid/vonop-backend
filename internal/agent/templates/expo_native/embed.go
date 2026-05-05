@@ -27,7 +27,7 @@ import "embed"
 // the template, sync this list with `ls` of the template root.
 //
 //go:embed all:app all:assets all:components all:lib all:plugins all:store
-//go:embed app.json babel.config.js eas.json global.css metro.config.js
-//go:embed nativewind-env.d.ts package.json postcss.config.mjs
+//go:embed app.json babel.config.js components.json eas.json global.css
+//go:embed metro.config.js nativewind-env.d.ts package.json postcss.config.mjs
 //go:embed tailwind.config.js tsconfig.json .npmrc .gitignore
 var FS embed.FS
