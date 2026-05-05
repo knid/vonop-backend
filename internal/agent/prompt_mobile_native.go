@@ -185,12 +185,15 @@ When you need a custom color palette, add CSS variables to global.css inside
 hex colors in className strings — always go through the theme system.
 
 # BACKEND
-The backend lives at the URL injected at build time:
+Two backend URLs are injected at build time:
 
-  process.env.EXPO_PUBLIC_API_URL  →  https://{slug}.wemob.app  (at runtime)
+  process.env.EXPO_PUBLIC_API_URL        →  https://{slug}.wemob.app  (user's backend)
+  process.env.EXPO_PUBLIC_WEMOB_API_URL  →  https://api.wemob.io      (Wemob platform API)
 
-Never hardcode the base URL. Always read it from the env var — the wrapper in
-lib/api.ts already does this for you.
+Never hardcode URLs. Use the env vars:
+- ` + "`EXPO_PUBLIC_API_URL`" + ` for app-specific API calls (via ` + "`apiFetch`" + ` in lib/api.ts)
+- ` + "`EXPO_PUBLIC_WEMOB_API_URL`" + ` for Wemob platform endpoints such as
+  min-version checks (handled automatically by lib/forceUpdate.ts)
 
 ## The apiFetch wrapper
 ALL backend calls MUST go through apiFetch from @/lib/api:
@@ -548,6 +551,49 @@ export { handler as GET, handler as POST };
 That single file handles ALL Better-Auth endpoints
 (/api/auth/sign-in/email, /api/auth/sign-up/email, /api/auth/sign-out,
 /api/auth/get-session, etc.) — Better-Auth routes them internally.
+
+### CORS for mobile web preview (CRITICAL)
+The mobile web preview runs on ` + "`*.preview.wemob.app`" + ` and makes cross-origin
+requests to the user's backend. You MUST add CORS headers to the Next.js backend
+so the preview (and native builds) can call auth endpoints.
+
+Add a CORS middleware in ` + "`backend/middleware.ts`" + ` (or ` + "`backend/app/middleware.ts`" + `):
+` + "```" + `typescript
+import { NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
+
+export function middleware(request: NextRequest) {
+  const response = NextResponse.next();
+  const origin = request.headers.get("origin") ?? "";
+
+  // Allow the mobile preview domain and the deployed backend itself
+  if (
+    origin.endsWith(".wemob.app") ||
+    origin.endsWith(".preview.wemob.app") ||
+    origin.startsWith("http://localhost:")
+  ) {
+    response.headers.set("Access-Control-Allow-Origin", origin);
+    response.headers.set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
+    response.headers.set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-CSRF-Token");
+    response.headers.set("Access-Control-Allow-Credentials", "true");
+  }
+
+  // Handle preflight
+  if (request.method === "OPTIONS") {
+    return new NextResponse(null, { status: 204, headers: response.headers });
+  }
+
+  return response;
+}
+
+export const config = {
+  matcher: ["/api/:path*"],
+};
+` + "```" + `
+
+If ` + "`middleware.ts`" + ` already exists, MERGE the CORS logic into it — do not
+replace the whole file. The matcher MUST include ` + "`/api/:path*`" + ` so every
+backend endpoint (including Better-Auth) gets CORS headers.
 
 ### Drizzle schema (users / sessions / accounts / verifications)
 Better-Auth requires four tables. Generate them using the official Better-Auth
@@ -1216,9 +1262,11 @@ Never put secrets in ` + "`EXPO_PUBLIC_`" + ` variables — they are visible in 
 ` + "```" + `tsx
 // .env
 EXPO_PUBLIC_API_URL=https://myapp.wemob.app
+EXPO_PUBLIC_WEMOB_API_URL=https://api.wemob.io
 
 // Usage
 const API_URL = process.env.EXPO_PUBLIC_API_URL;
+const WEMOB_API_URL = process.env.EXPO_PUBLIC_WEMOB_API_URL;
 ` + "```" + `
 
 # AUTH

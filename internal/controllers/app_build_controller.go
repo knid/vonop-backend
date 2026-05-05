@@ -514,6 +514,7 @@ func (c *Controller) BuildExpoMobile(ctx context.Context, project *models.AppPro
 				ExpoPublicRevenueCatKeyAndroid: rcKeyAndroid,
 				ExpoPublicOneSignalAppID:       osAppID,
 				ExpoPublicOTAURL:               expoPublicOTAURL,
+				ExpoPublicWEMOBAPIURL:          constants.WEMOB_API_BASE_URL,
 			})
 		case "ios":
 			// P0 #6 (mobile audit): render NS*UsageDescription strings from
@@ -546,6 +547,7 @@ func (c *Controller) BuildExpoMobile(ctx context.Context, project *models.AppPro
 				ExpoPublicRevenueCatKeyAndroid: rcKeyAndroid,
 				ExpoPublicOneSignalAppID:       osAppID,
 				ExpoPublicOTAURL:               expoPublicOTAURL,
+				ExpoPublicWEMOBAPIURL:          constants.WEMOB_API_BASE_URL,
 				Permissions:                    iosPermissions,
 			})
 		}

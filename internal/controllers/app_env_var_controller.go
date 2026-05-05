@@ -128,6 +128,7 @@ func (c *Controller) CollectAllEnvVars(project *models.AppProject) map[string]st
 	if isMobile {
 		envVars["EXPO_PUBLIC_API_URL"] = c.BackendDeployURL(project)
 		envVars["EXPO_PUBLIC_PROJECT_ID"] = project.ID.String()
+		envVars["EXPO_PUBLIC_WEMOB_API_URL"] = constants.WEMOB_API_BASE_URL
 	}
 
 	return envVars

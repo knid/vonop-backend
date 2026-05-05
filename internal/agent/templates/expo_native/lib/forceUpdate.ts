@@ -22,7 +22,7 @@ import * as SecureStore from "expo-secure-store";
  * served immediately and re-fetched in the background.
  */
 
-const API_URL = process.env.EXPO_PUBLIC_API_URL ?? "";
+const WEMOB_API_URL = process.env.EXPO_PUBLIC_WEMOB_API_URL ?? "https://api.wemob.io";
 const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
 const CACHE_KEY_PREFIX = "wemob.min_version";
 
@@ -88,9 +88,9 @@ async function fetchFromBackend(
   slug: string,
   platform: "ios" | "android"
 ): Promise<BackendResponse | null> {
-  if (!API_URL || !slug) return null;
+  if (!WEMOB_API_URL || !slug) return null;
   try {
-    const url = `${API_URL}/v1/mobile/${encodeURIComponent(slug)}/min-version?platform=${platform}`;
+    const url = `${WEMOB_API_URL}/v1/mobile/${encodeURIComponent(slug)}/min-version?platform=${platform}`;
     const res = await fetch(url, { method: "GET" });
     if (!res.ok) return null;
     const body = (await res.json()) as Partial<BackendResponse>;
@@ -137,8 +137,8 @@ export function useMinVersionCheck(): MinVersionState {
       const currentBuild = parseCurrentBuild();
 
       // Without a slug we can't query the backend — fail open and render
-      // the app. Same when API_URL is missing (dev / unconfigured).
-      if (!slug || !API_URL) {
+      // the app. Same when WEMOB_API_URL is missing (dev / unconfigured).
+      if (!slug || !WEMOB_API_URL) {
         if (!cancelled) setState({ status: "ok", currentBuild });
         return;
       }

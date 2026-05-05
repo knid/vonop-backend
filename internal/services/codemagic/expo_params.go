@@ -90,6 +90,9 @@ type ExpoAndroidBuildParams struct {
 	// is disabled for this project — codemagic publishing step is gated on
 	// it being non-empty.
 	ExpoPublicOTAURL string
+	// ExpoPublicWEMOBAPIURL is the Wemob platform API base URL. Used by
+	// lib/forceUpdate.ts for min-version checks and other platform endpoints.
+	ExpoPublicWEMOBAPIURL string
 }
 
 func (p ExpoAndroidBuildParams) toEnvVars() map[string]string {
@@ -114,6 +117,7 @@ func (p ExpoAndroidBuildParams) toEnvVars() map[string]string {
 		"EXPO_PUBLIC_REVENUECAT_KEY_ANDROID": p.ExpoPublicRevenueCatKeyAndroid,
 		"EXPO_PUBLIC_ONESIGNAL_APP_ID":       p.ExpoPublicOneSignalAppID,
 		"EXPO_PUBLIC_OTA_URL":                p.ExpoPublicOTAURL,
+		"EXPO_PUBLIC_WEMOB_API_URL":          p.ExpoPublicWEMOBAPIURL,
 	}
 }
 
@@ -143,6 +147,8 @@ type ExpoIOSBuildParams struct {
 	ExpoPublicOneSignalAppID string
 	// P2.1: per-app self-hosted expo-updates manifest URL.
 	ExpoPublicOTAURL string
+	// ExpoPublicWEMOBAPIURL is the Wemob platform API base URL. See above.
+	ExpoPublicWEMOBAPIURL string
 	// Permissions is a map of permission key → rendered NS*UsageDescription
 	// string emitted to Codemagic as CM_PERM_<KEY> env vars. Keys (lowercase,
 	// snake_case) cover the common Expo-module-driven sensitive APIs:
@@ -182,6 +188,7 @@ func (p ExpoIOSBuildParams) toEnvVars() map[string]string {
 		"EXPO_PUBLIC_REVENUECAT_KEY_ANDROID": p.ExpoPublicRevenueCatKeyAndroid,
 		"EXPO_PUBLIC_ONESIGNAL_APP_ID":       p.ExpoPublicOneSignalAppID,
 		"EXPO_PUBLIC_OTA_URL":                p.ExpoPublicOTAURL,
+		"EXPO_PUBLIC_WEMOB_API_URL":          p.ExpoPublicWEMOBAPIURL,
 	}
 	// Emit per-permission usage strings as CM_PERM_<KEY>. Empty values are
 	// skipped so the codemagic step's "[ -z "$VAL" ] && continue" guard

@@ -351,8 +351,9 @@ func TestBuildExpoMobile_HappyPath_AndroidOnly(t *testing.T) {
 		"CM_FIRST_BUILD":         "true",
 		"CM_ICON_KEY":            "icons/test.png",
 		"CM_EAS_PROJECT_UUID":    f.project.ID.String(),
-		"EXPO_PUBLIC_API_URL":    "https://" + f.project.Slug + ".wemob.app",
-		"EXPO_PUBLIC_PROJECT_ID": f.project.ID.String(),
+		"EXPO_PUBLIC_API_URL":       "https://" + f.project.Slug + ".wemob.app",
+		"EXPO_PUBLIC_PROJECT_ID":    f.project.ID.String(),
+		"EXPO_PUBLIC_WEMOB_API_URL": "https://api.wemob.io",
 	}
 	for k, want := range wantEnv {
 		if got := call.Variables[k]; got != want {
