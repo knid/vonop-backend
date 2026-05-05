@@ -69,7 +69,8 @@ func (c *Controller) AgentDeps(user *models.User) *agent.RunDependencies {
 		ProvisionDatabase: func(ctx context.Context, project *models.AppProject, tables []models.DataModel) error {
 			return c.provisionDatabaseForAgent(ctx, project, user, tables)
 		},
-		EnableAI: c.enableProjectAIForAgent,
+		EnableAI:            c.enableProjectAIForAgent,
+		EnableLocalDatabase: c.enableProjectLocalDatabaseForAgent,
 		AutoDeployBackend: func(ctx context.Context, project *models.AppProject) error {
 			return c.autoDeployBackendForAgent(ctx, project, user)
 		},
@@ -184,6 +185,25 @@ func (c *Controller) enableProjectAIForAgent(ctx context.Context, project *model
 	project.Settings["has_ai"] = true
 	if _, err := c.DB.UpdateAppProject(project); err != nil {
 		return fmt.Errorf("persist has_ai on project: %w", err)
+	}
+	return nil
+}
+
+// enableProjectLocalDatabaseForAgent flips Settings["has_local_database"] = true
+// on the project so the LocalDatabaseAddendum is appended on subsequent runs.
+// Idempotent at the tool layer — ProvisionLocalDatabaseTool checks the flag
+// before invoking this callback.
+func (c *Controller) enableProjectLocalDatabaseForAgent(ctx context.Context, project *models.AppProject) error {
+	_ = ctx
+	if project == nil {
+		return fmt.Errorf("project is required")
+	}
+	if project.Settings == nil {
+		project.Settings = make(map[string]any)
+	}
+	project.Settings["has_local_database"] = true
+	if _, err := c.DB.UpdateAppProject(project); err != nil {
+		return fmt.Errorf("persist has_local_database on project: %w", err)
 	}
 	return nil
 }

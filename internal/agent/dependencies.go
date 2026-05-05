@@ -60,6 +60,14 @@ type MobileBridgeUpdater func(ctx context.Context, projectID, method string, ena
 // SetupAIGatewayTool checks the existing flag before invoking this callback.
 type AIEnabler func(ctx context.Context, project *models.AppProject) error
 
+// LocalDatabaseEnabler marks a project as having an on-device SQLite database
+// wired (mobile/lib/db.ts + schema + migrations) and persists the flag so
+// the LocalDatabaseAddendum is appended to subsequent runs. Bound by the
+// controller layer to Controller.enableProjectLocalDatabaseForAgent.
+// Idempotent at the tool layer — ProvisionLocalDatabaseTool checks the
+// flag before invoking this callback.
+type LocalDatabaseEnabler func(ctx context.Context, project *models.AppProject) error
+
 // BackendAutoDeployer queues a Fly deploy for the project's backend/ subtree
 // when the agent run touched it. mobile_app_native projects rely on this to
 // avoid the "user describes an AI feature but nothing works because they
@@ -146,6 +154,7 @@ type RunDependencies struct {
 	NeonConnString           NeonConnResolver
 	ProvisionDatabase        DatabaseProvisioner
 	EnableAI                 AIEnabler
+	EnableLocalDatabase      LocalDatabaseEnabler
 	AutoDeployBackend        BackendAutoDeployer
 	GatewayAllowedModels     GatewayAllowedModelsFn
 	UpdateMobileBridgeMethod MobileBridgeUpdater
