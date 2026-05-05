@@ -1,8 +1,6 @@
 services:
   api:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: ghcr.io/knid/wemob-backend:${IMAGE_TAG:-latest}
     restart: unless-stopped
     expose:
       - "8001"
@@ -22,9 +20,7 @@ services:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
 
   caddy:
-    build:
-      context: ./caddy
-      dockerfile: Dockerfile
+    image: ghcr.io/knid/wemob-backend-caddy:${CADDY_IMAGE_TAG:-latest}
     container_name: caddy_proxy
     restart: always
     ports:
@@ -42,10 +38,7 @@ services:
         condition: service_healthy
 
   worker:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: wemob-backend-api:latest
+    image: ghcr.io/knid/wemob-backend:${IMAGE_TAG:-latest}
     entrypoint: ["/app/worker"]
     restart: unless-stopped
     env_file:
