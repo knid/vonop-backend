@@ -110,6 +110,54 @@ func (db *Database) UpdateAppBuildTask(buildTask *models.AppBuildTask) error {
 	return err
 }
 
+// ApplyExpoBuildStatusUpdate updates a single app_build_task row's status
+// fields from a webhook event. It is intentionally column-constrained — Bun's
+// `NewUpdate().Model(task)` would write ALL columns and silently null fields
+// like ProjectID/CreatedAt if the caller built a fresh struct (see memory
+// `feedback_bun_whole_row_update.md`). Only the four fields touched here are
+// written.
+//
+// Idempotency: rows with finished=true are NOT updated — late or duplicate
+// webhook deliveries cannot regress a terminal state.
+//
+// finished=false → progress event, only status_text changes.
+// finished=true  → terminal event; status_text + error_message + annotation
+//                  are set in the same UPDATE.
+//
+// Returns the number of rows updated (0 means: row was already finished and
+// the update was skipped, or the task_id did not match any row).
+func (db *Database) ApplyExpoBuildStatusUpdate(
+	ctx context.Context,
+	taskID uuid.UUID,
+	statusText string,
+	finished bool,
+	errorMessage string,
+	annotationID *uuid.UUID,
+) (int64, error) {
+	q := db.DB.NewUpdate().
+		TableExpr("app_build_tasks").
+		Set("status_text = ?", statusText).
+		Set("updated_at = current_timestamp").
+		Where("id = ?", taskID).
+		Where("finished = false").
+		Where("deleted_at IS NULL")
+
+	if finished {
+		q = q.Set("finished = ?", true).
+			Set("error_message = ?", errorMessage)
+		if annotationID != nil {
+			q = q.Set("annotation_id = ?", *annotationID)
+		}
+	}
+
+	res, err := q.Exec(ctx)
+	if err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	return n, nil
+}
+
 func (db *Database) MarkOrphanedBuildTasksFailed(ctx context.Context, staleAfter time.Duration) (int64, error) {
 	res, err := db.DB.NewUpdate().
 		TableExpr("app_build_tasks").

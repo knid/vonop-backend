@@ -1,17 +1,20 @@
 package views
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/uptrace/bun"
 
 	"github.com/knid/wemob/internal/database"
 	"github.com/knid/wemob/internal/models"
@@ -32,18 +35,49 @@ type expoBuildReport struct {
 	Timestamp int64  `json:"timestamp"`
 }
 
+// expoReportsTaskStore captures the subset of *database.Database operations
+// the handler needs. Defined locally so tests can inject a fake without
+// pulling in the full Database surface.
+//
+// *database.Database satisfies this interface — see ApplyExpoBuildStatusUpdate
+// in internal/database/tasks.go and the bun.IDB returned by Database.DB.
+type expoReportsTaskStore interface {
+	database.BuildEventStore
+	ApplyExpoBuildStatusUpdate(
+		ctx context.Context,
+		taskID uuid.UUID,
+		statusText string,
+		finished bool,
+		errorMessage string,
+		annotationID *uuid.UUID,
+	) (int64, error)
+}
+
 // ExpoReportsHandler holds the small dependency set the webhook handler needs.
 // Decoupled from the larger HttpViews so it's straightforward to test.
 type ExpoReportsHandler struct {
-	Store      database.BuildEventStore
+	Store      expoReportsTaskStore
 	HMACMaster string
+	// AnnotationDB is the *bun.DB used to look up build annotations on
+	// terminal failure events. Optional — if nil, annotation lookup is
+	// skipped (the failure is still recorded). Production wires this from
+	// controller.DB.DB; tests can leave it nil.
+	AnnotationDB *bun.DB
 }
 
 // NewExpoReportsHandler constructs an ExpoReportsHandler.
 // hmacMaster is the WEMOB_WORKER_HMAC_KEY secret (loaded from SecretManager
 // in cmd/main.go) used to derive per-build signing keys.
-func NewExpoReportsHandler(store database.BuildEventStore, hmacMaster string) *ExpoReportsHandler {
-	return &ExpoReportsHandler{Store: store, HMACMaster: hmacMaster}
+//
+// If db is a *database.Database, its underlying *bun.DB is wired up as the
+// annotation lookup source. Other implementations (test fakes) skip that
+// lookup, which is fine — the failure is still persisted.
+func NewExpoReportsHandler(store expoReportsTaskStore, hmacMaster string) *ExpoReportsHandler {
+	h := &ExpoReportsHandler{Store: store, HMACMaster: hmacMaster}
+	if d, ok := store.(*database.Database); ok {
+		h.AnnotationDB = d.DB
+	}
+	return h
 }
 
 // UpdateExpoBuildStatus is the HTTP handler for /v2/reports/expo-build.
@@ -136,5 +170,102 @@ func (h *ExpoReportsHandler) UpdateExpoBuildStatus(w http.ResponseWriter, r *htt
 		return
 	}
 
+	// P0 #1 (mobile audit, 2026-05-04): also project the event onto the
+	// app_build_task row so cron / UI / latest-successful queries see it.
+	// Without this, every Expo build sits at status_text="Queued" forever
+	// and MarkOrphanedBuildTasksFailed marks successful builds as stuck
+	// 35 min after they actually finished.
+	//
+	// Vocabulary mirrors the legacy v1 path in controllers/reports.go:
+	//   built/submitted/published → "Built", finished=true
+	//   error                     → "Failed", finished=true
+	//   preparing/building/uploading → "Preparing"/"Building"/"Uploading"
+	//
+	// Submit-phase terminal events ("submitted") share the same task row as
+	// the parent build, so we treat them the same as a "built" — the row
+	// reflects the final outcome of whatever workflow is in flight. Status
+	// vocabulary unification is P0 #2, intentionally not tackled here.
+	if err := h.applyTaskStatusUpdate(r.Context(), taskID, &report); err != nil {
+		// Status update failed but the event was already recorded — log
+		// and continue so the worker doesn't retry-spam (the event row
+		// is the source of truth; the projection is best-effort).
+		slog.Warn("expo build status update failed",
+			"task_id", taskID.String(), "status", report.Status, "err", err)
+	}
+
 	utils.JSONResponse(w, map[string]string{"status": "ok"}, http.StatusOK)
+}
+
+// applyTaskStatusUpdate maps a Codemagic status event onto the
+// app_build_task row. Returns nil for unknown statuses (we still want the
+// event recorded — just don't touch the projection).
+func (h *ExpoReportsHandler) applyTaskStatusUpdate(
+	ctx context.Context,
+	taskID uuid.UUID,
+	report *expoBuildReport,
+) error {
+	statusText, finished, isTerminal := classifyExpoStatus(report.Status)
+	if !isTerminal && statusText == "" {
+		// Unknown / unmapped status — no projection.
+		return nil
+	}
+
+	var annotationID *uuid.UUID
+	errorMessage := ""
+	if finished && isTerminalFailure(report.Status) {
+		errorMessage = report.Message
+		if h.AnnotationDB != nil && errorMessage != "" {
+			id, annotErr := database.MatchBuildAnnotation(ctx, h.AnnotationDB, errorMessage)
+			if annotErr != nil {
+				slog.Warn("expo annotation match failed",
+					"task_id", taskID.String(), "err", annotErr)
+			} else if id != uuid.Nil {
+				annotationID = &id
+			}
+		}
+	}
+
+	_, err := h.Store.ApplyExpoBuildStatusUpdate(
+		ctx, taskID, statusText, finished, errorMessage, annotationID,
+	)
+	return err
+}
+
+// classifyExpoStatus maps a webhook status string to the canonical
+// app_build_task.status_text and whether the build is in a terminal
+// (Finished=true) state.
+//
+// Returns (statusText, finished, isTerminal). isTerminal=false with
+// statusText="" means the status is unrecognized and the caller should skip
+// the projection update.
+func classifyExpoStatus(raw string) (statusText string, finished bool, isTerminal bool) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	// Terminal success vocabulary. "submitted"/"published" come from the
+	// submit-phase workflows — they share the same task row, so a
+	// successful submit transitions the row to its final state too.
+	case "built", "success", "completed", "done", "submitted", "published":
+		return "Built", true, true
+	case "error", "failed", "cancelled", "canceled":
+		return "Failed", true, true
+	// Non-terminal progress events.
+	case "preparing":
+		return "Preparing", false, false
+	case "building":
+		return "Building", false, false
+	case "uploading":
+		return "Uploading", false, false
+	case "queued":
+		return "Queued", false, false
+	}
+	return "", false, false
+}
+
+// isTerminalFailure reports whether the status indicates a failed terminal
+// state (so the handler should populate ErrorMessage / annotation lookup).
+func isTerminalFailure(raw string) bool {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "error", "failed", "cancelled", "canceled":
+		return true
+	}
+	return false
 }
