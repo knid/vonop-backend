@@ -66,21 +66,25 @@ primary_region = %q
 	out, err := cmd.CombinedOutput()
 	buildLog = string(out)
 	if err != nil {
-		slog.Warn("fly_build_failed", "app", appName, "label", imageLabel, "log_tail", truncate(buildLog, 2000))
-		return "", buildLog, fmt.Errorf("flyctl: %w (output: %s)", err, truncate(buildLog, 2000))
+		slog.Warn("fly_build_failed", "app", appName, "label", imageLabel, "log_tail", truncate(buildLog, 8000))
+		return "", buildLog, fmt.Errorf("flyctl: %w (output: %s)", err, truncate(buildLog, 8000))
 	}
 	imageRef, err = parseImageRef(buildLog)
 	if err != nil {
-		slog.Error("fly_build_no_image_ref", "app", appName, "label", imageLabel, "log_tail", truncate(buildLog, 2000))
+		slog.Error("fly_build_no_image_ref", "app", appName, "label", imageLabel, "log_tail", truncate(buildLog, 8000))
 		return "", buildLog, err
 	}
 	slog.Info("fly_build_succeeded", "app", appName, "label", imageLabel, "image_ref", imageRef, "build_args", len(envVars))
 	return imageRef, buildLog, nil
 }
 
+// truncate keeps the LAST n bytes of s. Docker/flyctl failures put the actual
+// error (npm run build stderr, TS stack, machine launch failure) at the tail —
+// the head is always cached-step preamble. Earlier head-truncation hid every
+// real failure behind 2KB of "DONE/CACHED" noise.
 func truncate(s string, n int) string {
 	if len(s) <= n {
 		return s
 	}
-	return s[:n] + "...(truncated)"
+	return "...(truncated)..." + s[len(s)-n:]
 }
