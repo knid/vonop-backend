@@ -1511,11 +1511,10 @@ Updates.checkForUpdateAsync from any other component. Doing so creates
 unnecessary network requests + potential reload loops.
 
 The manifest server URL (` + "`" + `expo.updates.url` + "`" + ` in app.json) is set automatically
-at build time per project. Do NOT edit ` + "`" + `expo.updates` + "`" + ` in app.json — the
-build pipeline overwrites the URL during prebuild. In particular, do NOT
-add ` + "`" + `expo.updates.codeSigningCertificate` + "`" + ` — Wemob's OTA server doesn't
-yet sign manifests, so adding a code-signing certificate would make the
-client reject every update.
+at scaffold time per project, and the build pipeline materializes the
+` + "`" + `codeSigningCertificate` + "`" + ` + ` + "`" + `codeSigningMetadata.keyid` + "`" + ` so installed clients
+verify every manifest. Do NOT edit anything under ` + "`" + `expo.updates` + "`" + ` in app.json
+— hand-edits are overwritten on the next publish.
 
 Use ` + "`" + `read_mobile_config` + "`" + ` to check ` + "`" + `ota_enabled` + "`" + ` before generating any
 update-related UI. When false, the tenant has explicitly disabled OTA;
