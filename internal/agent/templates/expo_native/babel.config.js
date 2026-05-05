@@ -35,6 +35,21 @@ module.exports = function (api) {
       ["babel-preset-expo", { jsxImportSource: "nativewind" }],
       "nativewind/babel",
     ],
-    plugins: [stripImportMeta],
+    plugins: [
+      stripImportMeta,
+      // Reanimated 4 worklets plugin — MUST be the last plugin per Reanimated
+      // docs. Without it, worklet macros aren't compiled and any animated
+      // component (FadeIn, useAnimatedStyle, runOnJS, etc.) crashes at
+      // runtime with "Exception in HostFunction: <unknown>" the first time
+      // it tries to invoke a worklet. Web preview survives because
+      // Reanimated's web entry uses CSS animations and never invokes the
+      // worklet runtime — so the bug only surfaces in Expo Go / dev clients
+      // / production native builds.
+      //
+      // The plugin lives in the `react-native-worklets` package (Reanimated 3
+      // shipped it as `react-native-reanimated/plugin`; v4 split worklets
+      // into a separate package).
+      "react-native-worklets/plugin",
+    ],
   };
 };
