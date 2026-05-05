@@ -30,6 +30,11 @@ func TestEmbedIncludesTemplateBootFiles(t *testing.T) {
 		"store/index.ts",
 		"app/_layout.tsx",
 		"lib/api.ts",
+		// push.ts and iap.ts carry the Expo Go runtime guards. Dropping
+		// them would let the agent's generated code crash at module-eval
+		// time the moment a project is opened in Expo Go.
+		"lib/push.ts",
+		"lib/iap.ts",
 	}
 	for _, p := range required {
 		if _, err := fs.Stat(FS, p); err != nil {
