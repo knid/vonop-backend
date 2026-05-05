@@ -429,7 +429,7 @@ const LocalDatabaseAddendum = `# LOCAL DATABASE ADDENDUM (on-device SQLite)
 
 This native project has on-device SQLite wired via expo-sqlite + Drizzle.
 Schema files:
-- mobile/lib/db.ts — Drizzle expo-sqlite client + DatabaseProvider component.
+- mobile/lib/db.tsx — Drizzle expo-sqlite client + DatabaseProvider component.
 - mobile/lib/schema.ts — sqliteTable definitions.
 - mobile/lib/migrations.ts — runSync(db) with idempotent CREATE TABLE
   IF NOT EXISTS / ALTER TABLE … ADD COLUMN. Runs on every app launch.
@@ -441,7 +441,7 @@ Pattern (must follow exactly):
      const { data } = useLiveQuery(db.select().from(<table>));
 2. Writes from event handlers use db.insert/update/delete — never inside
    render. Wrap multi-step writes in db.transaction() if you need atomicity.
-3. NEVER import 'mobile/lib/db.ts' from anything under backend/. The
+3. NEVER import 'mobile/lib/db.tsx' from anything under backend/. The
    SQLite file is device-only.
 4. NEVER persist auth tokens / secrets here — use expo-secure-store
    (already in the Expo template).

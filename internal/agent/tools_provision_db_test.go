@@ -118,6 +118,23 @@ func TestProvisionDatabase_NativeReusesExistingBackendPackageJSON(t *testing.T) 
 	}
 }
 
+func TestProvisionDatabase_RejectsEmptyTablesNative(t *testing.T) {
+	project := &models.AppProject{
+		ProjectType: models.ProjectTypeMobileAppNative,
+		Settings:    map[string]any{},
+	}
+	rc := fakeRunContextForDB(t, project, nil)
+	tool := ProvisionDatabaseTool{Deps: &RunDependencies{
+		ProvisionDatabase: func(_ context.Context, _ *models.AppProject, _ []models.DataModel) error { return nil },
+		NeonConnString:    func(_ string) (string, error) { return "", nil },
+	}}
+	input, _ := json.Marshal(map[string]any{"tables": []any{}})
+	result, isErr, _ := tool.Execute(context.Background(), rc, input)
+	if !isErr {
+		t.Fatalf("expected isError=true on empty tables, got result=%q", result)
+	}
+}
+
 func TestProvisionDatabase_WebProjectUnchanged(t *testing.T) {
 	project := &models.AppProject{ProjectType: models.ProjectTypeApp, Settings: map[string]any{}}
 	rc := fakeRunContextForDB(t, project, map[string]string{"package.json": `{"name":"app","dependencies":{}}`})

@@ -130,6 +130,7 @@ func (ProvisionDatabaseTool) Schema() map[string]any {
 				},
 			},
 		},
+		"required": []string{"tables"},
 	}
 }
 
@@ -146,6 +147,9 @@ func (p ProvisionDatabaseTool) Execute(ctx context.Context, rc *RunContext, inpu
 	}
 	if err := json.Unmarshal(input, &args); err != nil {
 		return fmt.Sprintf("invalid input: %v", err), true, nil
+	}
+	if len(args.Tables) == 0 {
+		return "tables is required — provide at least one table with an id primary key column", true, nil
 	}
 	for i, t := range args.Tables {
 		if strings.TrimSpace(t.Name) == "" {
@@ -209,7 +213,8 @@ func (p ProvisionDatabaseTool) Execute(ctx context.Context, rc *RunContext, inpu
 	var result string
 	if isMobileNative {
 		first := tableNames[0]
-		result = fmt.Sprintf(resultTemplate, strings.Join(tableNames, ", "), first, first, first)
+		firstCamel := camelCaseSnake(first)
+		result = fmt.Sprintf(resultTemplate, strings.Join(tableNames, ", "), firstCamel, firstCamel, firstCamel)
 	} else {
 		result = fmt.Sprintf(resultTemplate, strings.Join(tableNames, ", "))
 	}

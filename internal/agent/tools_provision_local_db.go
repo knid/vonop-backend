@@ -23,7 +23,7 @@ type ProvisionLocalDatabaseTool struct {
 func (ProvisionLocalDatabaseTool) Name() string { return "provision_local_database" }
 
 func (ProvisionLocalDatabaseTool) Description() string {
-	return "Create an on-device SQLite database for a native mobile app (offline-first apps, instant local reads, journaling/calculator/checklist apps with no server). Provide a `tables` array (same shape as provision_database); the tool writes mobile/lib/db.ts (Drizzle expo-sqlite client + DatabaseProvider), mobile/lib/schema.ts (Drizzle sqliteTable defs), mobile/lib/migrations.ts (idempotent CREATE TABLE IF NOT EXISTS run on every launch), and adds expo-sqlite + drizzle-orm to mobile/package.json. The data lives on the user's device and never reaches the network — for shared / multi-device data use `provision_database` instead. Native projects only."
+	return "Create an on-device SQLite database for a native mobile app (offline-first apps, instant local reads, journaling/calculator/checklist apps with no server). Provide a `tables` array (same shape as provision_database); the tool writes mobile/lib/db.tsx (Drizzle expo-sqlite client + DatabaseProvider), mobile/lib/schema.ts (Drizzle sqliteTable defs), mobile/lib/migrations.ts (idempotent CREATE TABLE IF NOT EXISTS run on every launch), and adds expo-sqlite + drizzle-orm to mobile/package.json. The data lives on the user's device and never reaches the network — for shared / multi-device data use `provision_database` instead. Native projects only."
 }
 
 func (ProvisionLocalDatabaseTool) Schema() map[string]any {
@@ -93,9 +93,9 @@ func (p ProvisionLocalDatabaseTool) Execute(ctx context.Context, rc *RunContext,
 	}
 
 	dbTS := localDatabaseClientTS
-	rc.FileMap.Set("mobile/lib/db.ts", dbTS)
+	rc.FileMap.Set("mobile/lib/db.tsx", dbTS)
 	rc.Emitter.Emit(EventFileWritten, FileWrittenEvent{
-		RunID: rc.RunID, Path: "mobile/lib/db.ts", Operation: "create",
+		RunID: rc.RunID, Path: "mobile/lib/db.tsx", Operation: "create",
 		Bytes: len(dbTS), Content: dbTS,
 	})
 
@@ -127,10 +127,11 @@ func (p ProvisionLocalDatabaseTool) Execute(ctx context.Context, rc *RunContext,
 		tableNames = append(tableNames, t.Name)
 	}
 	first := tableNames[0]
-	return fmt.Sprintf(localDatabaseResultTemplate, strings.Join(tableNames, ", "), first, first, first, first), false, nil
+	firstCamel := camelCaseSnake(first)
+	return fmt.Sprintf(localDatabaseResultTemplate, strings.Join(tableNames, ", "), firstCamel, firstCamel, firstCamel, firstCamel), false, nil
 }
 
-// localDatabaseClientTS is mobile/lib/db.ts. The DatabaseProvider runs
+// localDatabaseClientTS is mobile/lib/db.tsx. The DatabaseProvider runs
 // migrations on first render and exposes the Drizzle client through context;
 // useDb returns the typed client. Screens use useLiveQuery for reactive reads.
 const localDatabaseClientTS = `import { drizzle } from "drizzle-orm/expo-sqlite";
@@ -172,7 +173,7 @@ export function useDb() {
 const localDatabaseResultTemplate = `On-device storage is ready. Tables created in mobile/lib/schema.ts and mobile/lib/migrations.ts: %s.
 
 What is now true:
-- mobile/lib/db.ts has been written. Import the client with:
+- mobile/lib/db.tsx has been written. Import the client with:
     import { db } from '@/lib/db';
 - mobile/lib/schema.ts has been written with Drizzle sqliteTable definitions.
 - mobile/lib/migrations.ts has been written. Migrations run automatically on every launch (CREATE TABLE IF NOT EXISTS — idempotent).
@@ -215,7 +216,7 @@ How to use it in screens:
     }
 
 Rules:
-1. mobile/lib/db.ts MUST NOT be imported from anything under backend/. The
+1. mobile/lib/db.tsx MUST NOT be imported from anything under backend/. The
    SQLite handle is device-only — the backend has no access to it.
 2. Never persist auth tokens or other secrets in this database — use
    expo-secure-store (already in the Expo template) for those.

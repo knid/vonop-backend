@@ -51,7 +51,7 @@ func TestProvisionLocalDatabase_NativeWritesMobilePaths(t *testing.T) {
 		t.Error("expected EnableLocalDatabase callback to be invoked")
 	}
 
-	for _, p := range []string{"mobile/lib/db.ts", "mobile/lib/schema.ts", "mobile/lib/migrations.ts"} {
+	for _, p := range []string{"mobile/lib/db.tsx", "mobile/lib/schema.ts", "mobile/lib/migrations.ts"} {
 		if _, ok := rc.FileMap.Get(p); !ok {
 			t.Errorf("expected %s to be written", p)
 		}
@@ -78,6 +78,46 @@ func TestProvisionLocalDatabase_NativeWritesMobilePaths(t *testing.T) {
 	}
 	if !strings.Contains(result, "DatabaseProvider") {
 		t.Error("expected result text to mention DatabaseProvider in _layout.tsx")
+	}
+}
+
+func TestProvisionLocalDatabase_MultiWordTableUsesCamelCaseInResult(t *testing.T) {
+	project := &models.AppProject{
+		ProjectType: models.ProjectTypeMobileAppNative,
+		Settings:    map[string]any{},
+	}
+	rc := fakeRunContextForDB(t, project, map[string]string{
+		"mobile/package.json": `{"name":"mobile","dependencies":{}}`,
+	})
+	deps := &RunDependencies{
+		EnableLocalDatabase: func(_ context.Context, p *models.AppProject) error {
+			if p.Settings == nil {
+				p.Settings = map[string]any{}
+			}
+			p.Settings["has_local_database"] = true
+			return nil
+		},
+	}
+	tool := ProvisionLocalDatabaseTool{Deps: deps}
+	input, _ := json.Marshal(map[string]any{
+		"tables": []map[string]any{{
+			"name":    "user_profiles",
+			"columns": []map[string]any{{"name": "id", "type": "uuid", "primary_key": true}},
+		}},
+	})
+	result, isErr, _ := tool.Execute(context.Background(), rc, input)
+	if isErr {
+		t.Fatalf("unexpected isError: %s", result)
+	}
+	if !strings.Contains(result, "import { userProfiles }") {
+		t.Errorf("expected camelCase 'userProfiles' in result imports, got:\n%s", result)
+	}
+	if strings.Contains(result, "import { user_profiles }") {
+		t.Errorf("result should NOT use snake_case in imports")
+	}
+	if !strings.Contains(result, ": user_profiles.") {
+		// Tables-created header should keep raw SQL name
+		t.Errorf("expected 'user_profiles' in tables-created header (raw SQL name)")
 	}
 }
 
