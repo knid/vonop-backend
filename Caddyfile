@@ -88,16 +88,6 @@ api.wemob.io {
     }
 }
 
-# Asynqmon dashboard. Auto-issued via HTTP-01 (same zone as api.wemob.io).
-asynqmon.wemob.io {
-    basicauth {
-        # Replace with `caddy hash-password` output before deploying.
-        # Format: `<username> <bcrypt-hash>`
-        ops $2a$14$7yMqiqJf4KaSMqD2yNXwDeO7gIFP52/k7v09ki3zL7dl56WCp550C
-    }
-    reverse_proxy asynqmon:8080
-}
-
 # Custom domains: each verified domain is a separate file written by the api
 # backend. Caddy reloads when /load is hit by the backend after a write.
 import /etc/caddy/custom-domains/*.caddy
