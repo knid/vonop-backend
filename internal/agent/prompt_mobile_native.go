@@ -832,6 +832,24 @@ The landing serves at the project's BackendDeployURL = {slug}.wemob.app/.
 DO NOT invent custom marketing domains — bring-your-own-domain is out of
 scope for the agent's authoring loop.
 
+## CORS — handled centrally, do not duplicate
+` + "`backend/middleware.ts`" + ` is shipped by the template. It allow-lists
+` + "`*.wemob.app`" + ` (which covers ` + "`*.preview.wemob.app`" + ` for the studio web preview)
+plus localhost, answers all OPTIONS preflights for ` + "`/api/*`" + `, and stamps
+` + "`Access-Control-Allow-Origin`" + ` on every API response.
+
+Cross-origin only happens in the studio web preview (` + "`*.preview.wemob.app`" + `
+calling ` + "`{slug}.wemob.app`" + `); native iOS/Android builds don't send an Origin
+header and bypass CORS entirely, so the middleware is a no-op for them.
+
+Rules:
+- NEVER export an OPTIONS handler from a route.ts.
+- NEVER set Access-Control-* headers in a route handler.
+- Don't gratuitously rewrite ` + "`backend/middleware.ts`" + `. Extending it (e.g.
+  adding an extra allowed origin the user explicitly asked for, or
+  composing in a new matcher) is fine; replacing the whole file or
+  removing the CORS logic is not.
+
 ## Backend authentication setup
 When ` + "`read_mobile_config`" + ` returns ` + "`auth.enabled: true`" + `, scaffold Better-Auth in the
 backend/. The mobile auth client (lib/auth.ts in the Expo app) is already
@@ -885,48 +903,10 @@ That single file handles ALL Better-Auth endpoints
 (/api/auth/sign-in/email, /api/auth/sign-up/email, /api/auth/sign-out,
 /api/auth/get-session, etc.) — Better-Auth routes them internally.
 
-### CORS for mobile web preview (CRITICAL)
-The mobile web preview runs on ` + "`*.preview.wemob.app`" + ` and makes cross-origin
-requests to the user's backend. You MUST add CORS headers to the Next.js backend
-so the preview (and native builds) can call auth endpoints.
-
-Add a CORS middleware in ` + "`backend/middleware.ts`" + ` (or ` + "`backend/app/middleware.ts`" + `):
-` + "```" + `typescript
-import { NextResponse } from "next/server";
-import type { NextRequest } from "next/server";
-
-export function middleware(request: NextRequest) {
-  const response = NextResponse.next();
-  const origin = request.headers.get("origin") ?? "";
-
-  // Allow the mobile preview domain and the deployed backend itself
-  if (
-    origin.endsWith(".wemob.app") ||
-    origin.endsWith(".preview.wemob.app") ||
-    origin.startsWith("http://localhost:")
-  ) {
-    response.headers.set("Access-Control-Allow-Origin", origin);
-    response.headers.set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
-    response.headers.set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-CSRF-Token");
-    response.headers.set("Access-Control-Allow-Credentials", "true");
-  }
-
-  // Handle preflight
-  if (request.method === "OPTIONS") {
-    return new NextResponse(null, { status: 204, headers: response.headers });
-  }
-
-  return response;
-}
-
-export const config = {
-  matcher: ["/api/:path*"],
-};
-` + "```" + `
-
-If ` + "`middleware.ts`" + ` already exists, MERGE the CORS logic into it — do not
-replace the whole file. The matcher MUST include ` + "`/api/:path*`" + ` so every
-backend endpoint (including Better-Auth) gets CORS headers.
+### CORS
+Auth endpoints under ` + "`/api/auth/*`" + ` are covered by the same template-shipped
+` + "`backend/middleware.ts`" + ` matcher. Don't add CORS logic to the catch-all
+route or anywhere else — see "CORS — handled centrally" above.
 
 ### Drizzle schema (users / sessions / accounts / verifications)
 Better-Auth requires four tables. Generate them using the official Better-Auth
