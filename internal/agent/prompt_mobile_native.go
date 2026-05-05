@@ -1359,6 +1359,17 @@ export default function RootLayout() {
 ` + "```" + `
 
 ## Tabs layout
+Expo Router's ` + "`<Tabs>`" + ` AUTO-INCLUDES every file in the group as a tab. If you
+add ` + "`add-item.tsx`" + ` or ` + "`item-detail.tsx`" + ` next to ` + "`index.tsx`" + ` / ` + "`profile.tsx`" + `,
+they show up as their own tabs and the bar overflows + clips. Three rules:
+
+1. Enumerate every tab you actually want with ` + "`<Tabs.Screen name=… />`" + `.
+2. Hide every non-tab route in the same group with ` + "`options={{ href: null }}`" + `.
+   The route stays navigable via ` + "`router.push(\"/add-item\")`" + ` — it just
+   doesn't get a button in the tab bar.
+3. Keep visible tabs to 3–5. More than 5 = redesign (move secondary actions
+   into a stack or a "More" tab), don't shrink the labels.
+
 ` + "```" + `tsx
 // app/(app)/_layout.tsx
 import { Tabs } from "expo-router";
@@ -1388,10 +1399,18 @@ export default function TabsLayout() {
           tabBarIcon: ({ color, size }) => <Settings color={color} size={size} />,
         }}
       />
+      {/* Non-tab routes that live under (app)/ — navigated to via router.push */}
+      <Tabs.Screen name="add-item"    options={{ href: null }} />
+      <Tabs.Screen name="item-detail" options={{ href: null }} />
     </Tabs>
   );
 }
 ` + "```" + `
+
+For modal-style screens (add-item, edit-x, item-detail), prefer
+` + "`presentation: \"modal\"`" + ` on a parent Stack OR a ` + "`(modals)/`" + ` sub-group, which
+keeps them off the tab bar by construction. ` + "`href: null`" + ` is the minimum fix
+when you've already created the file as a sibling of your tab routes.
 
 ## Drawer layout
 ` + "```" + `tsx
@@ -2384,6 +2403,9 @@ Do NOT re-initialize push or IAP in individual screens. Do NOT call
 Updates.checkForUpdateAsync outside the root layout.
 
 ## Minimal working screen
+Static content padding (` + "`px-5`" + `) is part of the screen — NOT a safe-area
+concern. Insets only handle the variable space above/below system chrome.
+
 ` + "```" + `tsx
 // app/(app)/index.tsx
 import { View } from "react-native";
@@ -2402,8 +2424,8 @@ export default function HomeScreen() {
   }
 
   return (
-    <SafeAreaView className="flex-1 bg-background">
-      <View className="flex-1 p-4 gap-4">
+    <SafeAreaView className="flex-1 bg-background" edges={["top"]}>
+      <View className="flex-1 px-5 pt-2 gap-4">
         <Text variant="large">Hello, {session?.user.name}</Text>
         <Button variant="outline" onPress={handleSignOut}>
           <Text>Sign out</Text>
@@ -2414,18 +2436,56 @@ export default function HomeScreen() {
 }
 ` + "```" + `
 
-## Safe areas
-Always wrap screen root views with SafeAreaView from
-react-native-safe-area-context so content does not render behind the notch
-or home indicator.
+## Safe areas (CRITICAL — works on web AND native)
+The Studio preview runs Expo Web inside a phone-frame iframe. On web,
+` + "`useSafeAreaInsets()`" + ` returns ` + "`{ top: 0, right: 0, bottom: 0, left: 0 }`" + ` and
+` + "`SafeAreaView`" + ` adds zero padding. On native, the same hooks return real
+notch / home-indicator values. **Screens that rely on insets for ALL their
+padding render flush against the screen edges in the Studio preview** — the
+"broken, no margin" look users complain about.
+
+The rule: **static content padding always, insets in addition**. Never let
+insets be the only thing standing between your content and the screen edge.
 
 ` + "```" + `tsx
+// CORRECT — works identically on web and native
 import { SafeAreaView } from "react-native-safe-area-context";
+import { View } from "react-native";
 
-<SafeAreaView className="flex-1 bg-background">
-  {/* screen content */}
+<SafeAreaView className="flex-1 bg-background" edges={["top"]}>
+  <View className="flex-1 px-5 gap-4">
+    {/* px-5 is the content padding — present on web, present on native */}
+    {/* SafeAreaView adds the notch/status-bar inset on top of px-5 */}
+  </View>
 </SafeAreaView>
 ` + "```" + `
+
+` + "```" + `tsx
+// WRONG — flush against the edges in the Studio preview because insets are 0
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+
+const insets = useSafeAreaInsets();
+<View style={{ flex: 1, paddingHorizontal: insets.left, paddingTop: insets.top }}>
+  <Text>Title</Text>  {/* zero padding on web */}
+</View>
+` + "```" + `
+
+Applied to common screen patterns:
+
+- **Standard screen** — wrap in ` + "`SafeAreaView edges={[\"top\"]}`" + `, then a
+  child ` + "`<View className=\"flex-1 px-5\">`" + ` for content padding.
+- **ScrollView** — set ` + "`contentContainerClassName=\"px-5 pt-2 pb-8 gap-4\"`" + `.
+  Static padding lives in the container; SafeAreaView wraps the ScrollView.
+- **FlatList** — same: ` + "`contentContainerClassName=\"px-5 pt-2 pb-8 gap-3\"`" + `.
+- **Full-bleed hero** — opt out of horizontal padding for the hero, then
+  re-introduce ` + "`px-5`" + ` on the next section. Don't try to do it via insets.
+- **Bottom tab bar** — Tabs handles its own bottom inset; do not double-pad.
+  Use ` + "`SafeAreaView edges={[\"top\"]}`" + ` on tab screens, not ` + "`[\"top\", \"bottom\"]`" + `.
+- **Modal / sheet screens** — use ` + "`edges={[\"top\", \"bottom\"]}`" + ` because there's
+  no tab bar absorbing the bottom inset.
+
+Test mentally: with insets at ` + "`{0,0,0,0}`" + ` (web), does my screen still have
+visible breathing room on every side? If no, the layout is broken.
 
 ## ScrollView
 Use ScrollView from react-native for scrollable content. Pair with
@@ -2652,7 +2712,10 @@ need attention.
 - expo-secure-store falls back to localStorage on web — session works.
 - Touch events: use Pressable (works on both), not TouchableOpacity (web
   has minor differences). This is already enforced by using @/components/ui/button.
-- SafeAreaView is a no-op on web — padding is still rendered, which is fine.
+- SafeAreaView and useSafeAreaInsets() return ZERO padding on web. Screens
+  that rely on insets alone will render flush against the iframe edges in
+  the Studio preview. Always combine static ` + "`px-N`" + ` with insets — see the
+  "Safe areas" section above.
 - FlatList renders all items on web (no virtualization) — for large lists
   add a note, but don't optimize for it.
 
