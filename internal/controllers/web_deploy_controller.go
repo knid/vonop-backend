@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -40,6 +41,11 @@ func isUniqueViolation(err error) bool {
 
 // CreateQueuedWebDeployment writes a deployment row in 'queued' state. The
 // worker will flip it through 'building' → 'deploying' → 'deployed'/'failed'.
+//
+// Fires preWarmFlyApp asynchronously: by the time the asynq worker picks up
+// the task and finishes its git/scaffold prep, the Fly app + IPs already
+// exist, so the worker's EnsureApp call inside processWebDeployTask becomes
+// a fast no-op.
 func (c *Controller) CreateQueuedWebDeployment(project *models.AppProject, user *models.User) (*models.AppDeployment, error) {
 	deployment := &models.AppDeployment{
 		AppProjectID: project.ID,
@@ -66,7 +72,26 @@ func (c *Controller) CreateQueuedWebDeployment(project *models.AppProject, user 
 		map[string]any{"method": "fly"}); err != nil {
 		slog.Warn("append deployment_events.submitted failed", "err", err)
 	}
+
+	go c.preWarmFlyApp(project)
+
 	return deployment, nil
+}
+
+// preWarmFlyApp creates the Fly app + allocates IPs eagerly so the deploy
+// worker's EnsureApp call lands on an already-provisioned app (~3-7s saved
+// off first-deploy wall clock). Idempotent on the Fly side, safe to race
+// against the worker's own EnsureApp call. Best-effort: any error here
+// just means the worker pays the original cost.
+func (c *Controller) preWarmFlyApp(project *models.AppProject) {
+	if c.FlyService == nil || project == nil {
+		return
+	}
+	flyAppName := "wemob-" + project.Slug
+	if err := c.FlyService.EnsureApp(flyAppName); err != nil {
+		slog.Warn("preWarmFlyApp failed (worker will retry inline)",
+			"fly_app", flyAppName, "project_id", project.ID, "err", err)
+	}
 }
 
 // EnqueueWebDeploy submits a deploy:web task to the Asynq queue tier matching
@@ -250,14 +275,10 @@ func (c *Controller) HandleWebDeployTask(ctx context.Context, t *asynq.Task) err
 		}
 	}
 
-	if err := c.FlyService.EnsureApp(flyAppName); err != nil {
-		return c.maybeRetry(ctx, p.DeploymentID, "ensure_app", err)
-	}
-
-	// 4. Sync env vars (secrets). Includes Better-Auth env vars when
-	// MobileAppConfig.AuthEnabled is true; CollectBetterAuthEnvVars also
-	// lazily generates + persists the per-customer BETTER_AUTH_SECRET on
-	// first call (envelope-encrypted via CredStore).
+	// 4. Collect env vars (DB read + lazy Better-Auth secret generation).
+	// Includes Better-Auth env vars when MobileAppConfig.AuthEnabled is true;
+	// CollectBetterAuthEnvVars also lazily generates + persists the per-customer
+	// BETTER_AUTH_SECRET on first call (envelope-encrypted via CredStore).
 	envVars := c.CollectAllEnvVars(project)
 	authVars, err := c.CollectBetterAuthEnvVars(ctx, project)
 	if err != nil {
@@ -266,28 +287,57 @@ func (c *Controller) HandleWebDeployTask(ctx context.Context, t *asynq.Task) err
 	for k, v := range authVars {
 		envVars[k] = v
 	}
-	if err := c.FlyService.SyncSecrets(flyAppName, envVars); err != nil {
-		return c.maybeRetry(ctx, p.DeploymentID, "sync_secrets", err)
+
+	// 5. Ensure the Fly app exists. Required gate before BuildAndPush (which
+	// pushes to registry.fly.io/<appName>) and SyncSecrets (which targets the
+	// app's secret namespace).
+	if err := c.FlyService.EnsureApp(flyAppName); err != nil {
+		return c.maybeRetry(ctx, p.DeploymentID, "ensure_app", err)
 	}
 
-	// 5. Build + push image. envVars is forwarded as --build-arg so Next.js
-	// inlines NEXT_PUBLIC_* into the bundle at `next build` time (Fly secrets
-	// reach the process at runtime, which is too late for the build). All
-	// vars are passed; Docker silently ignores --build-arg values whose keys
-	// aren't declared as ARG in the Dockerfile.
-	imageRef, _, err := c.FlyService.BuildAndPush(flyAppName, sourceDir, p.DeploymentID, envVars)
-	if err != nil {
-		return c.maybeRetry(ctx, p.DeploymentID, "build", err)
+	// 6. Build + push image AND sync secrets in parallel. Both depend on
+	// EnsureApp (step 5) but are otherwise independent: BuildAndPush takes
+	// 60–180s on Fly's remote builder, SyncSecrets takes 3–10s
+	// (one POST per secret); fanning them out makes secrets effectively
+	// free relative to the build wall-clock.
+	//
+	// envVars is forwarded as --build-arg so Next.js inlines NEXT_PUBLIC_*
+	// into the bundle at `next build` time (Fly secrets reach the process at
+	// runtime, which is too late for the build). All vars are passed; Docker
+	// silently ignores --build-arg values whose keys aren't declared as ARG
+	// in the Dockerfile.
+	var (
+		imageRef          string
+		buildErr, syncErr error
+		wg                sync.WaitGroup
+	)
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		imageRef, _, buildErr = c.FlyService.BuildAndPush(flyAppName, sourceDir, p.DeploymentID, envVars)
+	}()
+	go func() {
+		defer wg.Done()
+		syncErr = c.FlyService.SyncSecrets(flyAppName, envVars)
+	}()
+	wg.Wait()
+	// Build failure dominates: without the image we can't deploy machines, and
+	// retrying handles secrets idempotently on the next attempt.
+	if buildErr != nil {
+		return c.maybeRetry(ctx, p.DeploymentID, "build", buildErr)
+	}
+	if syncErr != nil {
+		return c.maybeRetry(ctx, p.DeploymentID, "sync_secrets", syncErr)
 	}
 
-	// 6. Deploy machines per plan tier (region from FlyService config).
+	// 7. Deploy machines per plan tier (region from FlyService config).
 	spec := fly.PlanMachineSpec(limits, c.FlyService.Region)
 	spec.Image = imageRef
 	if err := c.FlyService.DeployMachines(flyAppName, spec); err != nil {
 		return c.maybeRetry(ctx, p.DeploymentID, "deploy_machines", err)
 	}
 
-	// 7. Persist runtime_apps state and flip deployment to 'deploying'.
+	// 8. Persist runtime_apps state and flip deployment to 'deploying'.
 	runtimeApp.CurrentImageRef = imageRef
 	runtimeApp.LastDeployedAt = time.Now()
 	if _, err := c.DB.UpdateRuntimeApp(runtimeApp); err != nil {
@@ -297,14 +347,14 @@ func (c *Controller) HandleWebDeployTask(ctx context.Context, t *asynq.Task) err
 		slog.Warn("mark deploying", "err", err)
 	}
 
-	// 8. Wait for the machine to report healthy. Fly doesn't publish
+	// 9. Wait for the machine to report healthy. Fly doesn't publish
 	// machine-state webhooks to own-org apps, so we poll inline here.
 	// 5min covers a cold-start build + machine launch comfortably.
 	if err := c.FlyService.WaitForHealthy(flyAppName, 5*time.Minute); err != nil {
 		return c.maybeRetry(ctx, p.DeploymentID, "wait_healthy", err)
 	}
 
-	// 9. Flip to 'deployed' and fire success events.
+	// 10. Flip to 'deployed' and fire success events.
 	deployedURL := "https://" + runtimeApp.CustomDomain
 	if err := c.MarkDeploymentSucceeded(p.DeploymentID, deployedURL); err != nil {
 		slog.Warn("mark succeeded", "err", err)
@@ -502,10 +552,22 @@ func ensureNextjsDockerfile(sourceDir string) error {
 // write into backend/ when the agent didn't generate one. Multi-stage build
 // (deps → builder → runner). Final image is ~150MB on alpine.
 const defaultNextjsDockerfile = `# syntax=docker/dockerfile:1.7
-FROM node:22-alpine AS deps
+# WEMOB_BASE_IMAGE points at the pre-warmed wemob-base-nextjs image whose
+# /root/.npm is pre-populated with seed deps. Override via --build-arg if the
+# base image is unavailable: --build-arg WEMOB_BASE_IMAGE=node:22-alpine
+ARG WEMOB_BASE_IMAGE=registry.fly.io/wemob-base-nextjs:v1
+
+FROM ${WEMOB_BASE_IMAGE} AS deps
 WORKDIR /app
 COPY package.json package-lock.json* ./
-RUN npm install --no-audit --no-fund --prefer-offline
+# --mount=type=cache persists the npm cache across builds on the same BuildKit
+# builder VM (seeded from the base image's /root/.npm on first hit).
+# --ignore-scripts skips package postinstall hooks (standard Next.js deps
+# don't need them). --legacy-peer-deps preempts ERESOLVE failures when an
+# agent-added dep (better-auth) conflicts with a template-pinned peer
+# (drizzle-kit ^0.28.0 vs better-auth's drizzle-kit >=0.31.4 requirement).
+RUN --mount=type=cache,target=/root/.npm \
+    npm install --no-audit --no-fund --prefer-offline --ignore-scripts --legacy-peer-deps
 
 FROM node:22-alpine AS builder
 WORKDIR /app
@@ -542,7 +604,11 @@ ENV NEXT_PUBLIC_SUPABASE_URL=$NEXT_PUBLIC_SUPABASE_URL \
     NEXT_PUBLIC_WEMOB_GATEWAY_URL=$NEXT_PUBLIC_WEMOB_GATEWAY_URL \
     NEXT_TELEMETRY_DISABLED=1
 
-RUN npm run build
+# .next/cache is Next.js's incremental build cache; persisting it across
+# builds on the same BuildKit builder VM is the largest single Dockerfile
+# win for repeat deploys.
+RUN --mount=type=cache,target=/app/.next/cache \
+    npm run build
 
 FROM node:22-alpine AS runner
 WORKDIR /app
