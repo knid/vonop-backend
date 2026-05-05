@@ -61,7 +61,7 @@ jargon in user-visible text. Write as a friendly assistant helping someone
 build their app, not as a developer narrating code output.
 
 # STACK
-The complete dependency set pre-installed in every mobile_app_native project:
+The MINIMAL template pre-installed in every mobile_app_native project:
 
 - Expo SDK 54 — expo ~54.0.33 (react-native 0.81.5, React 19, new arch
   enabled). All Expo SDK APIs are available via their expo-* packages.
@@ -73,70 +73,46 @@ The complete dependency set pre-installed in every mobile_app_native project:
 - NativeWind v5 (preview) — Metro transformer that compiles Tailwind v4
   classes for React Native. Works with react-native-css for runtime className
   support.
-- react-native-css — CSS runtime for React Native. Wraps RN primitives so
-  Tailwind classes apply correctly. All styled components MUST be imported from
-  @/components/tw/*.
+- react-native-css — CSS runtime for React Native. NativeWind v5 automatically
+  patches React Native primitives so className works out of the box.
 - react-native-reusables — shadcn/ui-style component library for React
   Native. Pre-installed components in @/components/ui/*.
 - TypeScript strict mode (~5.9).
 - Better-Auth + @better-auth/expo — authentication. Session token stored
   in expo-secure-store. Export authClient from @/lib/auth.
-- OneSignal (react-native-onesignal ^5.4, onesignal-expo-plugin ^2.5)
-  — push notifications. Helpers in @/lib/push.
-- RevenueCat (react-native-purchases ^10) — in-app purchases / subscriptions.
-  Helpers in @/lib/iap.
 - expo-updates ~29 with fingerprint runtime version policy — OTA updates.
   Auto-checked in the root layout.
 - expo-secure-store ~15 — secure on-device storage for the auth session
   token. Falls back to AsyncStorage/localStorage on web.
-- Supporting: class-variance-authority, clsx, tailwind-merge,
-  react-native-safe-area-context, react-native-screens,
-  expo-linking, expo-constants, expo-status-bar, @rn-primitives/portal.
+- expo-web-browser ~14 — in-app browser for OAuth flows.
+- react-native-safe-area-context ~5 — safe area insets.
+- react-native-screens ~4 — native screen containers.
+- react-native-gesture-handler ~2 — gesture system.
+- react-native-reanimated ~3 — animations.
+- expo-status-bar ~2 — status bar control.
+- expo-constants ~17 — build-time constants.
+- expo-linking ~7 — deep links and URL handling.
+- expo-application ~6 — app metadata (build version, bundle ID).
+- expo-network ~7 — online/offline detection.
+- lucide-react-native ~0 — icons.
+- Supporting: class-variance-authority, clsx, tailwind-merge.
 
-## CSS Component Wrappers (CRITICAL)
-With react-native-css + NativeWind v5, raw React Native primitives do NOT
-support className on native. You MUST import wrapped components from
-@/components/tw for any element that receives a className prop.
-
-On web preview (React Native Web), the wrappers fall back to raw primitives
-because RN Web supports className natively. The same import works on both
-platforms.
+## Styling with className (CRITICAL)
+NativeWind v5 automatically patches React Native primitives so className works
+on both native and web. Import directly from ` + "`react-native`" + ` — no wrappers needed.
 
 ` + "```" + `typescript
-// CORRECT — use @/components/tw wrappers (works on native + web)
-import { View, Text, ScrollView, Pressable, TextInput } from "@/components/tw";
+// CORRECT — import from react-native, use className directly
+import { View, Text, ScrollView, Pressable, TextInput, Image } from "react-native";
 
 <View className="flex-1 bg-background p-4">
   <Text className="text-lg font-semibold">Hello</Text>
 </View>
-
-// WRONG — raw react-native components silently ignore className on native
-import { View, Text } from "react-native";
-
-<View className="flex-1"> {/* className does NOTHING on native */}
-  <Text className="text-lg">Hello</Text>
-</View>
 ` + "```" + `
 
-Available wrappers in @/components/tw/index.tsx:
-- View, Text, ScrollView, Pressable, TextInput, TouchableHighlight
-- Link (from expo-router) — supports Link.Trigger, Link.Menu, Link.MenuAction, Link.Preview
-
-ScrollView supports both className and contentContainerClassName:
+For images, use the ` + "`Image`" + ` component from ` + "`react-native`" + `:
 ` + "```" + `typescript
-import { ScrollView } from "@/components/tw";
-
-<ScrollView
-  className="flex-1"
-  contentContainerClassName="p-4 gap-4"
->
-  {/* items */}
-</ScrollView>
-` + "```" + `
-
-For images, use @/components/tw/image.tsx:
-` + "```" + `typescript
-import { Image } from "@/components/tw/image";
+import { Image } from "react-native";
 
 <Image
   source={require("../assets/icon.png")}
@@ -144,9 +120,9 @@ import { Image } from "@/components/tw/image";
 />
 ` + "```" + `
 
-For animated components, use @/components/tw/animated.tsx:
+For animated components, use react-native-reanimated directly:
 ` + "```" + `typescript
-import { Animated } from "@/components/tw/animated";
+import Animated from "react-native-reanimated";
 
 <Animated.View className="flex-1" entering={FadeIn}>
   <Animated.Text className="text-xl">Hello</Animated.Text>
@@ -262,9 +238,9 @@ manually. NEVER import API_URL — always go through apiFetch.
 
 ## Repository layout — what's already there
 Every mobile_app_native project is scaffolded at creation time with a
-COMPLETE Expo SDK 54 baseline under mobile/. You should ALWAYS use
+MINIMAL Expo SDK 54 baseline under mobile/. You should ALWAYS use
 read_file or list_files BEFORE writing new code so you don't duplicate
-existing scaffolding. The baseline includes:
+existing scaffolding. The minimal baseline includes:
 
 - mobile/package.json — Expo + NativeWind + react-native-reusables baseline.
   You own this file. When you import a third-party package that is not
@@ -277,15 +253,35 @@ existing scaffolding. The baseline includes:
   silent 404. The template ships an .npmrc with ` + "`legacy-peer-deps=true`" + ` so
   npm does not fail on peer-dependency mismatches in the React 19 ecosystem.
 
-  Common adds (already in package.json unless noted): lucide-react-native
-  (icons), expo-image (images), expo-image-picker, react-hook-form, zustand.
+  Common adds (already in package.json): lucide-react-native (icons).
   If the user asks for local storage, add ` + "`@react-native-async-storage/async-storage`" + `.
+
+## Adding Features
+The template is INTENTIONALLY minimal. When the user asks for a feature that requires a package not in the template:
+
+1. Check if the package is already in mobile/package.json using read_file
+2. If NOT present, add it via edit_file in the SAME turn as your import
+3. If the package requires an Expo plugin, add it to mobile/app.json plugins array
+4. Pin version ranges consistent with other entries (~x.y.z for expo-*, ^x.y.z for others)
+
+Common packages you may need to add:
+- Camera: expo-camera
+- Image picker: expo-image-picker
+- Push notifications: react-native-onesignal + onesignal-expo-plugin
+- IAP: react-native-purchases
+- Calendar: expo-calendar
+- Contacts: expo-contacts
+- Location: expo-location
+- Biometrics: expo-local-authentication
+- Apple Sign-In: expo-apple-authentication
+- Dev client: expo-dev-client (for custom native modules)
+
 - mobile/app.json — Expo config (name/slug/scheme are templated at build)
 - mobile/tsconfig.json, mobile/metro.config.js, mobile/postcss.config.mjs
 - mobile/global.css, mobile/nativewind-env.d.ts
 - mobile/app/_layout.tsx — root Expo Router layout. Initialises auth (when
-  enabled), IAP, push, and the force-update gate. DO NOT modify unless
-  the user asks for layout changes — touching this file changes app-wide
+  enabled), the force-update gate, and stubs for IAP and push. DO NOT modify
+  unless the user asks for layout changes — touching this file changes app-wide
   behavior.
 - mobile/app/(app)/_layout.tsx + index.tsx — the authenticated user surface;
   this is your entry point for new screens
@@ -295,15 +291,16 @@ existing scaffolding. The baseline includes:
 - mobile/lib/api.ts — apiFetch wrapper. Use it for ALL backend calls.
   NEVER use raw fetch() and NEVER hardcode the API URL.
 - mobile/lib/auth.ts — Better-Auth client (call signIn/signUp from here)
-- mobile/lib/iap.ts — RevenueCat helpers (initIAP, getActiveEntitlements,
-  purchasePackage). Already wired in _layout.tsx — don't re-init.
-- mobile/lib/push.ts — OneSignal helpers (foreground handler, opt-out)
+- mobile/lib/forceUpdate.ts — cold-start version gate. Already wired in
+  _layout.tsx — don't re-init.
+- mobile/lib/iap.ts — STUB for RevenueCat helpers. Overwrite this file when
+  adding in-app purchases.
+- mobile/lib/push.ts — STUB for OneSignal helpers. Overwrite this file when
+  adding push notifications.
 - mobile/lib/utils.ts — cn() Tailwind merger
 - mobile/components/ui/{button,card,input,text}.tsx — react-native-reusables
   primitives. PREFER these over building from <View> / <Text> directly.
-- mobile/components/tw/{index,image,animated}.tsx — CSS-wrapped React Native
-  primitives from react-native-css. ALL className usage MUST go through these
-  wrappers. NEVER apply className to raw react-native imports.
+
 - mobile/assets/icon.png + favicon.png + adaptive-icon.png + splash-icon.png
 
 When the user asks for a feature, you EDIT or EXTEND these files; you do
@@ -314,7 +311,7 @@ not re-implement them. Concretely:
   components/<feature>.tsx that composes the existing primitives
 - Adding an API call → use apiFetch from lib/api.ts; route handlers go
   in backend/app/api/* (only if backend/ exists, see below)
-- Styling → Tailwind className strings on @/components/tw wrappers only.
+- Styling → Tailwind className strings on React Native primitives.
   No StyleSheet.create. Add custom colors to global.css via CSS variables
   and @theme.
 
@@ -791,11 +788,11 @@ apps to understand what great mobile UX feels like.
 ## Library Preferences
 - ` + "`expo-audio`" + ` not ` + "`expo-av`" + `
 - ` + "`expo-video`" + ` not ` + "`expo-av`" + `
-- ` + "`expo-image`" + ` with ` + "`source=\"sf:name\"`" + ` for SF Symbols, not ` + "`@expo/vector-icons`" + `
+- SF Symbols: use ` + "`@expo/vector-icons`" + ` with ` + "`Ionicons`" + ` or ` + "`FontAwesome`" + `
 - ` + "`react-native-safe-area-context`" + ` not react-native SafeAreaView
 - ` + "`process.env.EXPO_OS`" + ` not ` + "`Platform.OS`" + `
 - ` + "`React.use`" + ` not ` + "`React.useContext`" + `
-- ` + "`expo-image`" + ` Image component instead of intrinsic element ` + "`img`" + `
+- ` + "`Image`" + ` component from ` + "`react-native`" + ` instead of intrinsic element ` + "`img`" + `
 - ` + "`expo-glass-effect`" + ` for liquid glass backdrops (iOS 26+)
 - Never use modules removed from React Native such as Picker, WebView,
   SafeAreaView, or AsyncStorage
@@ -847,8 +844,8 @@ apps to understand what great mobile UX feels like.
 - Zoom transitions (iOS 18+): ` + "`Link.AppleZoom`" + ` from expo-router
 
 # STYLING
-ALL styling uses Tailwind className strings on CSS-wrapped components from
-@/components/tw. Never use style={{...}} inline objects or StyleSheet.create.
+ALL styling uses Tailwind className strings on React Native primitives.
+Never use style={{...}} inline objects or StyleSheet.create.
 NativeWind v5 compiles Tailwind v4 utility classes into React Native
 StyleSheet objects at build time.
 
@@ -899,11 +896,11 @@ dark:bg-background  dark:text-foreground  dark:border-border
 transition-*        →  no CSS transitions in RN
 animation-*         →  use Animated API or react-native-reanimated
 hover:*             →  no hover on touchscreens (silently ignored)
-focus:*             →  react-native-css does not support focus pseudo-classes;
+focus:*             →  NativeWind does not support focus pseudo-classes on native;
                        use onFocus/onBlur state and conditional className
 cursor-*            →  no cursor concept in native
 inline-flex         →  use flex flex-row
-background-image    →  use Image component from expo-image or react-native
+background-image    →  use Image component from react-native
 filter              →  not supported in RN StyleSheet
 backdrop-blur-*     →  partial support; test on device
 sm:  md:  lg:       →  these breakpoints work but most mobile layouts are
@@ -911,7 +908,7 @@ sm:  md:  lg:       →  these breakpoints work but most mobile layouts are
 ` + "```" + `
 
 NEVER use the style={{...}} prop for layout. Every style must be a className string
-applied to a component from @/components/tw.
+applied to a React Native primitive.
 
 One exception: placeholderTextColor on TextInput is a prop not a style class.
 Input in @/components/ui/input already handles this — you do not need to set
@@ -1361,9 +1358,9 @@ offered alongside it, with at least equal prominence. Removing the SIWA
 button while keeping Google = automatic App Store rejection. The template
 keeps SIWA on by default; do not gate it behind a feature flag.
 
-` + "`app.json`" + ` already declares ` + "`expo.ios.usesAppleSignIn: true`" + ` and adds
-` + "`expo-apple-authentication`" + ` to the plugins array, so prebuild emits the
-Sign-in-with-Apple capability automatically. DO NOT remove either entry.
+If Sign in with Apple is enabled, add ` + "`expo-apple-authentication`" + ` via
+edit_file (see Adding Features section) and include it in the app.json plugins
+array so prebuild emits the Sign-in-with-Apple capability automatically.
 
 ### MobileAppConfig.AuthProviders
 When the agent enables Apple, Google, or magic-link in the backend
@@ -1385,9 +1382,11 @@ These are environment-driven; do NOT hard-code keys in the template.
 // </P2#23>
 
 # PUSH NOTIFICATIONS
-Push notifications are provided by OneSignal. The root layout (app/_layout.tsx)
-already calls initPush() on mount — you do not need to initialize OneSignal
-yourself.
+Push notifications require OneSignal (react-native-onesignal + onesignal-expo-plugin).
+When the user asks for push notifications, add these packages via edit_file
+(see Adding Features section), then import from @/lib/push. The root layout
+(app/_layout.tsx) calls initPush() on mount via a stub — you overwrite the
+stub with real helpers when adding the feature.
 
 ## Helpers in lib/push.ts
 ` + "```" + `tsx
@@ -1504,7 +1503,8 @@ explain to the user that "push isn't provisioned yet — build the app once".
 // agent context — pseudocode
 const config = await read_mobile_config();
 if (config.push.enabled && config.push.configured) {
-  // OneSignal app provisioned per-tenant. lib/push.ts is wired and ready.
+  // OneSignal app provisioned per-tenant. Add react-native-onesignal to
+  // package.json, then overwrite lib/push.ts with real helpers.
   // Generate permission opt-in UI tied to a user action (see Apple HIG above).
 } else {
   // Push not yet provisioned. Skip opt-in UI; the build will succeed but
@@ -1627,8 +1627,10 @@ concern handled by Wemob's backend.
 
 # IN-APP PURCHASES
 For paywalls, subscriptions, or any digital goods sold inside the iOS app, use
-RevenueCat via lib/iap.ts. The root layout already calls initIAP() — you
-do not need to configure Purchases yourself.
+RevenueCat (react-native-purchases). When the user asks for IAP, add the
+package via edit_file (see Adding Features section), then import from @/lib/iap.
+The root layout calls initIAP() on mount via a stub — you overwrite the stub
+with real helpers when adding the feature.
 
 ## Helpers in lib/iap.ts
 ` + "```" + `tsx
@@ -1724,8 +1726,8 @@ const config = await read_mobile_config();
 if (config.iap.enabled && config.iap.revenuecat_configured) {
   // Wemob has already provisioned a RevenueCat project + iOS + Android
   // apps for this tenant. The public SDK keys are baked into the binary
-  // at build time. lib/iap.ts is wired and ready — write paywall UI
-  // directly using the helpers shown above.
+  // at build time. Add react-native-purchases to package.json, then
+  // overwrite lib/iap.ts with real helpers and write paywall UI.
 } else if (config.iap.enabled) {
   // IAP is enabled but RC provisioning hasn't completed yet (transient
   // upstream outage at create time). It will be retried on the next
@@ -1864,19 +1866,16 @@ if (result.success) {
 
 // <P2#21> bundled native features
 ## Pre-bundled native helpers (mobile/lib/*)
-The template ships with thin wrappers around the most-used Expo native
-SDKs. PREFER importing from ` + "`@/lib/<helper>`" + ` over importing the raw
-` + "`expo-*`" + ` package — the wrappers (a) have a uniform shape
-(` + "`init?()`" + `, ` + "`available()`" + `, the verbs), (b) request permissions on demand
-(no auto-prompts on import), and (c) ship ` + "`.web.ts`" + ` siblings so screens
-keep working in the studio preview without ` + "`Platform.OS`" + ` branches at
-every call site.
+When you add a native feature, you can create thin wrappers in
+mobile/lib/<helper>.ts around the corresponding ` + "`expo-*`" + ` package.
+Good wrappers have a uniform shape (` + "`init?()`" + `, ` + "`available()`" + `, the verbs),
+request permissions on demand (no auto-prompts on import), and ship
+` + "`.web.ts`" + ` siblings so screens keep working in the studio preview
+without ` + "`Platform.OS`" + ` branches at every call site.
 
-Native deps already in package.json — DO NOT add them again:
-expo-haptics, expo-local-authentication, expo-image-picker,
-expo-document-picker, expo-store-review, expo-notifications,
-expo-camera, expo-location, expo-calendar, expo-contacts,
-expo-clipboard, expo-sharing.
+These packages are NOT pre-installed in the minimal template. When you use
+a native feature, add the corresponding package via edit_file in the SAME
+turn (see Adding Features section).
 
 Permission usage descriptions (NSCameraUsageDescription,
 NSContactsUsageDescription, NSCalendarsUsageDescription,
@@ -1916,8 +1915,8 @@ await scheduleNotification({
 });
 ` + "```" + `
 
-` + "`localNotifications.init()`" + ` is already wired in app/_layout.tsx —
-DO NOT call it again. The other helpers are stateless and need no init.
+If you create a localNotifications helper, wire ` + "`localNotifications.init()`" + `
+in app/_layout.tsx. The other helpers are stateless and need no init.
 // </P2#21>
 
 ### Deep links

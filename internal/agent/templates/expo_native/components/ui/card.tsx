@@ -1,7 +1,6 @@
 import * as React from "react";
-import { type ViewProps } from "react-native";
-import { type TextProps as RNTextProps } from "react-native";
-import { View, Text as RNText } from "@/components/tw";
+import { View, type ViewProps } from "react-native";
+import { Text as RNText, type TextProps as RNTextProps } from "react-native";
 import { cn } from "@/lib/utils";
 
 // ---------------------------------------------------------------------------
@@ -13,7 +12,7 @@ const Card = React.forwardRef<React.ElementRef<typeof View>, ViewProps & { class
     <View
       ref={ref}
       className={cn(
-        "rounded-lg border border-slate-200 bg-white shadow-sm",
+        "rounded-lg border border-border bg-card shadow-sm",
         className
       )}
       {...props}
@@ -49,7 +48,7 @@ const CardTitle = React.forwardRef<
   <RNText
     ref={ref}
     className={cn(
-      "text-2xl font-semibold leading-none tracking-tight text-slate-950",
+      "text-2xl font-semibold leading-none tracking-tight text-card-foreground",
       className
     )}
     {...props}
@@ -67,7 +66,7 @@ const CardDescription = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <RNText
     ref={ref}
-    className={cn("text-sm text-slate-500", className)}
+    className={cn("text-sm text-muted-foreground", className)}
     {...props}
   />
 ));

@@ -1,4 +1,4 @@
-import { View } from "@/components/tw";
+import { View } from "react-native";
 import { Button } from "@/components/ui/button";
 import { Text } from "@/components/ui/text";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";

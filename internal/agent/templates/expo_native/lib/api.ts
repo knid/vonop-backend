@@ -1,4 +1,5 @@
-import { getJwtToken } from "@/lib/auth";
+import { getJwtToken, authClient } from "@/lib/auth";
+import { router } from "expo-router";
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL ?? "";
 
@@ -25,6 +26,11 @@ export async function apiFetch<T = unknown>(
   const res = await fetch(url, { ...init, headers });
 
   if (!res.ok) {
+    if (res.status === 401) {
+      await authClient.signOut();
+      router.replace("/(auth)/sign-in");
+    }
+
     let body: unknown = null;
     try {
       body = await res.json();

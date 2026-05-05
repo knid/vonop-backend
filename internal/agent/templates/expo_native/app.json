@@ -5,7 +5,7 @@
     "version": "__MARKETING_VERSION__",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "scheme": "__APP_SCHEME__",
+    "scheme": "wemobapp",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "splash": {
@@ -28,7 +28,7 @@
         "backgroundColor": "__SPLASH_COLOR__"
       },
       "package": "__PACKAGE_NAME__",
-      "versionCode": 1
+      "versionCode": "__BUILD_NUMBER__"
     },
     "plugins": [
       "expo-router",
@@ -50,7 +50,7 @@
     "updates": {
       "url": "__OTA_URL__",
       "checkAutomatically": "ON_LOAD",
-      "fallbackToCacheTimeout": 0,
+      "fallbackToCacheTimeout": 30000,
       "codeSigningCertificate": "./certs/ota-cert.pem",
       "codeSigningMetadata": {
         "keyid": "__OTA_KEY_ID__",

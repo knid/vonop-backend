@@ -1,6 +1,5 @@
 import * as React from "react";
-import { type TextInputProps } from "react-native";
-import { TextInput } from "@/components/tw";
+import { TextInput, type TextInputProps } from "react-native";
 import { cn } from "@/lib/utils";
 
 export interface InputProps extends TextInputProps {
@@ -17,12 +16,11 @@ const Input = React.forwardRef<React.ElementRef<typeof TextInput>, InputProps>(
         ref={ref}
         editable={editable}
         className={cn(
-          "h-10 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-base text-slate-950",
-          "placeholder:text-slate-500",
+          "h-10 w-full rounded-md border border-border bg-background px-3 py-2 text-base text-foreground",
+          "placeholder:text-muted-foreground",
           !editable && "opacity-50",
           className
         )}
-        placeholderTextColor="#6b7280"
         {...props}
       />
     );

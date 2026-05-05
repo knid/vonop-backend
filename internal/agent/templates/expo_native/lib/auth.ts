@@ -1,10 +1,16 @@
 import { expoClient } from "@better-auth/expo/client";
 import { magicLinkClient } from "better-auth/client/plugins";
 import { createAuthClient } from "better-auth/react";
-import * as AppleAuthentication from "expo-apple-authentication";
 import Constants from "expo-constants";
 import * as SecureStore from "expo-secure-store";
 import * as WebBrowser from "expo-web-browser";
+
+let AppleAuthentication: typeof import("expo-apple-authentication") | null = null;
+try {
+  AppleAuthentication = require("expo-apple-authentication");
+} catch {
+  // Not installed
+}
 
 // Ensure any in-flight web auth session is dismissed when the app rehydrates,
 // e.g. after returning from a Google OAuth redirect. Safe no-op on native if
@@ -87,6 +93,9 @@ export async function getJwtToken(): Promise<string | null> {
  * (or links) a session user.
  */
 export async function signInWithApple() {
+  if (!AppleAuthentication) {
+    throw new Error("Apple Sign-In is not available");
+  }
   const credential = await AppleAuthentication.signInAsync({
     requestedScopes: [
       AppleAuthentication.AppleAuthenticationScope.FULL_NAME,

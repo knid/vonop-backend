@@ -1,7 +1,6 @@
 import * as React from "react";
-import { type PressableProps } from "react-native";
+import { Pressable, type PressableProps } from "react-native";
 import { cva, type VariantProps } from "class-variance-authority";
-import { Pressable } from "@/components/tw";
 import { cn } from "@/lib/utils";
 
 const buttonVariants = cva(
@@ -10,17 +9,17 @@ const buttonVariants = cva(
     variants: {
       variant: {
         default:
-          "bg-slate-900 text-slate-50 active:opacity-90",
+          "bg-primary text-primary-foreground active:opacity-90",
         destructive:
-          "bg-red-500 text-slate-50 active:opacity-90",
+          "bg-destructive text-destructive-foreground active:opacity-90",
         outline:
-          "border border-slate-200 bg-transparent active:bg-slate-100",
+          "border border-border bg-transparent active:bg-muted",
         secondary:
-          "bg-slate-100 text-slate-900 active:bg-slate-200",
+          "bg-secondary text-secondary-foreground active:bg-muted",
         ghost:
-          "bg-transparent active:bg-slate-100",
+          "bg-transparent active:bg-muted",
         link:
-          "text-slate-900 underline-offset-4 underline",
+          "text-primary underline-offset-4 underline",
       },
       size: {
         default: "h-10 px-4 py-2",

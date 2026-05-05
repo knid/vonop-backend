@@ -4,18 +4,17 @@ import "../global.css";
 
 import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import { useEffect } from "react";
+import { Component, useEffect } from "react";
+import { Button, Text, View } from "react-native";
 import * as Updates from "expo-updates";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
-import { PortalHost } from "@rn-primitives/portal";
+import { QueryClientProvider } from "@tanstack/react-query";
 
-import { View } from "@/components/tw";
 import { ForceUpdateScreen } from "@/components/ForceUpdateScreen";
+import { OfflineBanner } from "@/components/OfflineBanner";
 import { useMinVersionCheck } from "@/lib/forceUpdate";
-import { initIAP } from "@/lib/iap";
-import { init as initLocalNotifications } from "@/lib/localNotifications";
-import { initPush } from "@/lib/push";
+import { queryClient } from "@/lib/query-client";
 
 export default function RootLayout() {
   // Force-update gate runs FIRST. While loading we render a transparent
@@ -27,10 +26,6 @@ export default function RootLayout() {
 
   useEffect(() => {
     if (minVersion.status !== "ok") return;
-
-    initPush();
-    initIAP();
-    initLocalNotifications();
 
     async function checkForUpdates() {
       if (__DEV__) return;
@@ -70,11 +65,60 @@ export default function RootLayout() {
   }
 
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
-      <SafeAreaProvider>
-        {content}
-        <PortalHost name="root" />
-      </SafeAreaProvider>
-    </GestureHandlerRootView>
+    <QueryClientProvider client={queryClient}>
+      <GestureHandlerRootView style={{ flex: 1 }}>
+        <SafeAreaProvider>
+          <OfflineBanner />
+          <ErrorBoundary>
+            {content}
+          </ErrorBoundary>
+        </SafeAreaProvider>
+      </GestureHandlerRootView>
+    </QueryClientProvider>
   );
+}
+
+type ErrorBoundaryState = {
+  hasError: boolean;
+  error: Error | null;
+};
+
+class ErrorBoundary extends Component<
+  { children: React.ReactNode },
+  ErrorBoundaryState
+> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    console.error("ErrorBoundary caught an error:", error, errorInfo);
+  }
+
+  handleRetry = () => {
+    this.setState({ hasError: false, error: null });
+  };
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <View className="flex-1 items-center justify-center bg-background p-6">
+          <Text className="text-foreground text-lg font-semibold mb-2">
+            Something went wrong
+          </Text>
+          <Text className="text-muted-foreground text-sm text-center mb-6">
+            {this.state.error?.message ?? "An unexpected error occurred."}
+          </Text>
+          <Button title="Retry" onPress={this.handleRetry} />
+        </View>
+      );
+    }
+
+    return this.props.children;
+  }
 }
