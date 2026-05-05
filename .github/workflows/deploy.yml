@@ -106,8 +106,12 @@ jobs:
             echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
 
             export IMAGE_TAG
-            docker compose pull api worker caddy
-            docker compose up -d --no-deps --remove-orphans --wait --wait-timeout 90 api worker caddy
+            # Apply to all services so non-build-pinned ones (asynqmon) pick up
+            # compose-only changes (port rebinding, env, etc.) on subsequent
+            # deploys. Without this, only api/worker/caddy got recreated and
+            # an asynqmon ports change wouldn't take effect.
+            docker compose pull
+            docker compose up -d --remove-orphans --wait --wait-timeout 90
 
             # End-to-end smoke through the public path (Caddy → api). --resolve
             # short-circuits DNS so we hit the local Caddy directly, but still

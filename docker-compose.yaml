@@ -59,10 +59,13 @@ services:
     image: hibiken/asynqmon:latest
     container_name: asynqmon
     restart: unless-stopped
-    # Bound to host loopback only; Tailscale Serve on the host proxies it
-    # over the tailnet. Not reachable from the public internet.
+    # Bound to the VPS's tailnet IP only — reachable as
+    # http://wemob-backend.zebu-pain.ts.net:8080/ from any device on the
+    # tailnet, not on the public internet. The IP is the value of
+    # `tailscale ip -4` on this host; if you re-add the node to the
+    # tailnet and it gets a different IP, update this line.
     ports:
-      - "127.0.0.1:8080:8080"
+      - "100.80.70.96:8080:8080"
     # Flag form: -redis-tls expects the hostname for SNI; -redis-insecure-tls
     # skips cert verification (the minimal image lacks ca-certificates so it
     # can't validate DO's managed Valkey cert chain). REDIS_HOST in .env is
