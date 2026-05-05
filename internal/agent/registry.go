@@ -167,6 +167,7 @@ func BuildRegistryFor(project *models.AppProject, deps *RunDependencies) *Regist
 		// runs for this project type.
 		r.Register(&ReadBuildLogsTool{Deps: deps})
 		r.Register(&TriggerBuildAfterFixTool{Deps: deps})
+		r.Register(ProvisionLocalDatabaseTool{Deps: deps})
 	}
 	// Ecommerce projects use the same generic DB tools as every other app;
 	// their tenant Neon database is seeded from
