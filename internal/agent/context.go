@@ -63,6 +63,7 @@ func BuildSystemMessages(project *models.AppProject, fileMap *SafeFileMap, deps 
 // read_mobile_config every turn.
 func buildAddendum(project *models.AppProject, deps *RunDependencies) string {
 	if project.ProjectType == models.ProjectTypeMobileAppNative {
+		var parts []string
 		var fetcher mobileConfigGetter
 		if deps != nil {
 			if deps.mobileConfigFetcher != nil {
@@ -75,11 +76,17 @@ func buildAddendum(project *models.AppProject, deps *RunDependencies) string {
 			cfg, err := fetcher.GetMobileAppConfig(project.ID.String())
 			if err == nil && cfg != nil {
 				if a := mobileNativeAddendum(cfg); a != "" {
-					return a
+					parts = append(parts, a)
 				}
 			}
 		}
-		return ""
+		if projectHasDatabase(project) {
+			parts = append(parts, DatabaseAddendumNative)
+		}
+		if len(parts) == 0 {
+			return ""
+		}
+		return strings.Join(parts, "\n\n")
 	}
 
 	var parts []string

@@ -126,6 +126,35 @@ func newDepsWithMobileConfig(t *testing.T, project *models.AppProject, cfg *mode
 	}
 }
 
+func TestBuildSystemMessages_NativeWithDatabaseUsesNativeAddendum(t *testing.T) {
+	project := &models.AppProject{
+		ProjectType: models.ProjectTypeMobileAppNative,
+		Settings:    map[string]any{"has_database": true},
+	}
+	msgs := BuildSystemMessages(project, nil, nil, nil)
+	joined := concatMessages(msgs)
+
+	if !strings.Contains(joined, "DATABASE ADDENDUM (native + backend)") {
+		t.Error("expected DatabaseAddendumNative on native project with has_database=true")
+	}
+	if strings.Contains(joined, "export const dynamic") {
+		t.Error("native project must NOT receive the web-shaped DatabaseAddendum")
+	}
+}
+
+func TestBuildSystemMessages_WebWithDatabaseUsesGenericAddendum(t *testing.T) {
+	project := &models.AppProject{
+		ProjectType: models.ProjectTypeApp,
+		Settings:    map[string]any{"has_database": true},
+	}
+	msgs := BuildSystemMessages(project, nil, nil, nil)
+	joined := concatMessages(msgs)
+
+	if strings.Contains(joined, "DATABASE ADDENDUM (native + backend)") {
+		t.Error("web project must NOT receive DatabaseAddendumNative")
+	}
+}
+
 func concatMessages(msgs []utils.Message) string {
 	var sb strings.Builder
 	for _, m := range msgs {
