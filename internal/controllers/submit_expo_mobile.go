@@ -9,6 +9,8 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/posthog/posthog-go"
+
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/services/codemagic"
 	"github.com/knid/wemob/internal/services/storeauth"
@@ -39,6 +41,10 @@ type SubmitResult struct {
 	Platform         string
 	BuildTaskID      uuid.UUID // the AppBuildTask the deploy was based on
 	CodemagicBuildID string
+	// ReleaseID is the Release row created for this submission, when one was
+	// successfully recorded. Nil/zero when the Release insert failed (the
+	// submit itself still succeeded — Codemagic was triggered).
+	ReleaseID uuid.UUID
 }
 
 // Sentinel errors so the view can map to specific HTTP statuses.
@@ -247,7 +253,8 @@ func (c *Controller) submitAndroid(ctx context.Context, project *models.AppProje
 	slog.Info("SubmitExpoMobile: android submit triggered",
 		"project_id", project.ID, "build_id", build.ID, "task_id", task.ID,
 		"track", track, "draft", draft, "codemagic_build_id", cmBuildID)
-	return &SubmitResult{Platform: "android", BuildTaskID: task.ID, CodemagicBuildID: cmBuildID}, nil
+	releaseID := c.recordReleaseFromSubmit(ctx, project, build, task, models.ReleasePlatformAndroid, track, rolloutFraction, false, cmBuildID)
+	return &SubmitResult{Platform: "android", BuildTaskID: task.ID, CodemagicBuildID: cmBuildID, ReleaseID: releaseID}, nil
 }
 
 func (c *Controller) submitIOS(ctx context.Context, project *models.AppProject, build *models.Build, task *models.AppBuildTask, track string, submitToAppStore bool, phased bool, draft bool, releaseNotes string, listing *models.AppStoreListing, locales map[string]*models.AppStoreListingLocalization) (*SubmitResult, error) {
@@ -312,5 +319,50 @@ func (c *Controller) submitIOS(ctx context.Context, project *models.AppProject, 
 		"project_id", project.ID, "build_id", build.ID, "task_id", task.ID,
 		"track", track, "submit_to_app_store", submitToAppStore, "phased", phased, "draft", draft,
 		"codemagic_build_id", cmBuildID)
-	return &SubmitResult{Platform: "ios", BuildTaskID: task.ID, CodemagicBuildID: cmBuildID}, nil
+	releaseID := c.recordReleaseFromSubmit(ctx, project, build, task, models.ReleasePlatformIOS, track, 0, phased, cmBuildID)
+	return &SubmitResult{Platform: "ios", BuildTaskID: task.ID, CodemagicBuildID: cmBuildID, ReleaseID: releaseID}, nil
+}
+
+// recordReleaseFromSubmit hands the just-triggered submission off to
+// CreateReleaseFromSubmit so the release-management surface (polling cron,
+// ASC notification handler, halt/rollback) has a row to operate on.
+//
+// Failure semantics: best-effort. Codemagic has already accepted the deploy;
+// a Release-row insert error must NOT mask a successful submit, so we log
+// at warn level + emit a PostHog signal for visibility and return uuid.Nil.
+func (c *Controller) recordReleaseFromSubmit(ctx context.Context, project *models.AppProject, build *models.Build, task *models.AppBuildTask, platform, track string, rolloutFraction float64, phased bool, codemagicBuildID string) uuid.UUID {
+	in := CreateReleaseFromSubmitInput{
+		AppProjectID:     project.ID,
+		OrganizationID:   project.OrganizationID,
+		Platform:         platform,
+		Track:            track,
+		VersionCode:      build.BuildNumber,
+		MarketingVersion: build.VersionString,
+		CodemagicTaskID:  &task.ID,
+		BuildID:          &build.ID,
+		RolloutFraction:  rolloutFraction,
+		PhasedRequested:  phased,
+	}
+	rel, err := c.CreateReleaseFromSubmit(ctx, in)
+	if err != nil {
+		slog.Warn("SubmitExpoMobile: CreateReleaseFromSubmit failed — submit succeeded, release row not recorded",
+			"project_id", project.ID, "task_id", task.ID, "platform", platform, "track", track,
+			"version_code", build.BuildNumber, "codemagic_build_id", codemagicBuildID, "err", err)
+		if c.PostHog != nil {
+			c.PostHog.Enqueue(posthog.Capture{
+				DistinctId: project.ID.String(),
+				Event:      "release_create_failed",
+				Properties: posthog.NewProperties().
+					Set("app_project_id", project.ID.String()).
+					Set("organization_id", project.OrganizationID.String()).
+					Set("platform", platform).
+					Set("track", track).
+					Set("version_code", build.BuildNumber).
+					Set("codemagic_build_id", codemagicBuildID).
+					Set("error", err.Error()),
+			})
+		}
+		return uuid.Nil
+	}
+	return rel.ID
 }

@@ -235,10 +235,13 @@ func (t *ReadBuildLogsTool) Execute(ctx context.Context, rc *RunContext, input j
 }
 
 // isTaskFailed reports whether an AppBuildTask is in a terminal failed
-// state. Codemagic + our cron mark failed tasks with status_text in
-// {Failed, error, failed} and Finished=true. The cron-fail path is the
-// "webhook timeout" branch (status="error", finished=true) — also a
-// failure for our purposes.
+// state. The canonical terminal-failure value is "Failed" (P0 #2
+// vocabulary unification, 2026-05-05) — both the webhook path
+// (ApplyExpoBuildStatusUpdate) and the cron-fail path
+// (MarkOrphanedBuildTasksFailed) now write that. Lowercase {error, failed}
+// and "Error" remain in the match list for historical rows and for the
+// legacy v1 reports path (controllers/reports.go) which writes the
+// caller-supplied verbatim string.
 func isTaskFailed(task *models.AppBuildTask) bool {
 	if task == nil {
 		return false

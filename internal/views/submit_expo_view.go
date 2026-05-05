@@ -6,6 +6,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-playground/validator/v10"
+	"github.com/google/uuid"
 	"github.com/posthog/posthog-go"
 
 	"github.com/knid/wemob/internal/constants"
@@ -101,10 +102,18 @@ func (v *HttpViews) SubmitAppExpo(w http.ResponseWriter, r *http.Request) {
 		Set("app_id", project.ID.String()).
 		Set("codemagic_build_id", result.CodemagicBuildID))
 
-	utils.JSONResponse(w, map[string]any{
+	resp := map[string]any{
 		"platform":           result.Platform,
 		"build_task_id":      result.BuildTaskID,
 		"codemagic_build_id": result.CodemagicBuildID,
 		"status":             "queued",
-	}, http.StatusAccepted)
+	}
+	// Only surface release_id when the Release row was actually recorded.
+	// recordReleaseFromSubmit returns uuid.Nil when the insert failed; the
+	// frontend should treat the absence of release_id as "release tracking
+	// not available for this submission" rather than crash on a nil id.
+	if result.ReleaseID != uuid.Nil {
+		resp["release_id"] = result.ReleaseID
+	}
+	utils.JSONResponse(w, resp, http.StatusAccepted)
 }

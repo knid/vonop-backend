@@ -37,10 +37,26 @@ func signTestRequest(t *testing.T, taskID, tsHeader, body string) (sig string) {
 }
 
 
-// fakeBuildEventStoreForViews is local to views tests.
+// fakeBuildEventStoreForViews is local to views tests. It also satisfies
+// expoReportsTaskStore so the handler can call ApplyExpoBuildStatusUpdate
+// without a real Postgres in unit tests.
 type fakeBuildEventStoreForViews struct {
 	mu     sync.Mutex
 	events []*models.BuildEvent
+	// statusUpdates captures the (status_text, finished, error_message,
+	// annotation_id) tuple for each ApplyExpoBuildStatusUpdate call. Tests
+	// assert on this directly. Idempotency is simulated: once a task is
+	// finished, subsequent updates are no-ops (mirrors prod SQL guard).
+	statusUpdates    []capturedStatusUpdate
+	finishedTaskIDs  map[uuid.UUID]bool
+}
+
+type capturedStatusUpdate struct {
+	TaskID       uuid.UUID
+	StatusText   string
+	Finished     bool
+	ErrorMessage string
+	AnnotationID *uuid.UUID
 }
 
 func (s *fakeBuildEventStoreForViews) AppendBuildEvent(_ context.Context, e *models.BuildEvent) error {
@@ -67,10 +83,38 @@ func (s *fakeBuildEventStoreForViews) ListBuildEventsByTask(_ context.Context, t
 	return out, nil
 }
 
-// compile-time check that fakeBuildEventStoreForViews satisfies the interface
-var _ database.BuildEventStore = (*fakeBuildEventStoreForViews)(nil)
+func (s *fakeBuildEventStoreForViews) ApplyExpoBuildStatusUpdate(
+	_ context.Context,
+	taskID uuid.UUID,
+	statusText string,
+	finished bool,
+	errorMessage string,
+	annotationID *uuid.UUID,
+) (int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.finishedTaskIDs == nil {
+		s.finishedTaskIDs = map[uuid.UUID]bool{}
+	}
+	if s.finishedTaskIDs[taskID] {
+		// Mirror the prod SQL: WHERE finished = false skips the row.
+		return 0, nil
+	}
+	s.statusUpdates = append(s.statusUpdates, capturedStatusUpdate{
+		TaskID: taskID, StatusText: statusText, Finished: finished,
+		ErrorMessage: errorMessage, AnnotationID: annotationID,
+	})
+	if finished {
+		s.finishedTaskIDs[taskID] = true
+	}
+	return 1, nil
+}
 
-func newTestExpoReportsHandler(t *testing.T, store database.BuildEventStore, hmacKey string) *ExpoReportsHandler {
+// compile-time check that fakeBuildEventStoreForViews satisfies the interfaces
+var _ database.BuildEventStore = (*fakeBuildEventStoreForViews)(nil)
+var _ expoReportsTaskStore = (*fakeBuildEventStoreForViews)(nil)
+
+func newTestExpoReportsHandler(t *testing.T, store expoReportsTaskStore, hmacKey string) *ExpoReportsHandler {
 	t.Helper()
 	return NewExpoReportsHandler(store, hmacKey)
 }

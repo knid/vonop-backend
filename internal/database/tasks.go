@@ -89,12 +89,21 @@ func (db *Database) GetAppBuildTaskByProject(project *models.Project) ([]models.
 // successful build task for a v1 project + platform combination. Used by
 // SubmitExpoMobile to find which build to submit. Platform values are
 // "Android" or "IOS" (matches AppBuildTask.Platform vocabulary).
+//
+// Status vocabulary (P0 #2 unification, 2026-05-05): the canonical success
+// value is "Built" — what UpdateExpoBuildStatus and the legacy v1 path
+// (controllers/reports.go) both write. "Succeeded" is kept in the IN list
+// as a safety net for any historical rows that might still carry it (it is
+// no longer written by any code path) and for the existing
+// submit_expo_mobile_integration_test.go fixtures. The real semantic gate
+// is `finished = true` — without that, an in-progress row matching by
+// status alone would be wrongly returned.
 func (db *Database) GetLatestSuccessfulBuildTaskByProjectAndPlatform(ctx context.Context, v1ProjectID uuid.UUID, platform string) (*models.AppBuildTask, error) {
 	var task models.AppBuildTask
 	err := db.DB.NewSelect().Model(&task).
 		Where("project_id = ?", v1ProjectID).
 		Where("platform = ?", platform).
-		Where("status_text = ?", "Succeeded").
+		Where("status_text IN (?)", bun.In([]string{"Built", "Succeeded"})).
 		Where("finished = true").
 		Order("created_at DESC").
 		Limit(1).
@@ -110,11 +119,70 @@ func (db *Database) UpdateAppBuildTask(buildTask *models.AppBuildTask) error {
 	return err
 }
 
+// ApplyExpoBuildStatusUpdate updates a single app_build_task row's status
+// fields from a webhook event. It is intentionally column-constrained — Bun's
+// `NewUpdate().Model(task)` would write ALL columns and silently null fields
+// like ProjectID/CreatedAt if the caller built a fresh struct (see memory
+// `feedback_bun_whole_row_update.md`). Only the four fields touched here are
+// written.
+//
+// Idempotency: rows with finished=true are NOT updated — late or duplicate
+// webhook deliveries cannot regress a terminal state.
+//
+// finished=false → progress event, only status_text changes.
+// finished=true  → terminal event; status_text + error_message + annotation
+//                  are set in the same UPDATE.
+//
+// Returns the number of rows updated (0 means: row was already finished and
+// the update was skipped, or the task_id did not match any row).
+func (db *Database) ApplyExpoBuildStatusUpdate(
+	ctx context.Context,
+	taskID uuid.UUID,
+	statusText string,
+	finished bool,
+	errorMessage string,
+	annotationID *uuid.UUID,
+) (int64, error) {
+	q := db.DB.NewUpdate().
+		TableExpr("app_build_tasks").
+		Set("status_text = ?", statusText).
+		Set("updated_at = current_timestamp").
+		Where("id = ?", taskID).
+		Where("finished = false").
+		Where("deleted_at IS NULL")
+
+	if finished {
+		q = q.Set("finished = ?", true).
+			Set("error_message = ?", errorMessage)
+		if annotationID != nil {
+			q = q.Set("annotation_id = ?", *annotationID)
+		}
+	}
+
+	res, err := q.Exec(ctx)
+	if err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	return n, nil
+}
+
+// MarkOrphanedBuildTasksFailed terminally fails any unfinished
+// app_build_tasks older than staleAfter. The cron caller
+// (ReapStuckBuildTasksTask) runs this on the assumption that a Codemagic
+// workflow that hasn't reported within the threshold isn't going to.
+//
+// Status vocabulary: writes the canonical "Failed" terminal value (P0 #2
+// unification, 2026-05-05) — was previously lowercase "error" which left
+// the cron-killed rows inconsistent with both the webhook-failure path
+// (P0 #1 writes "Failed") and the legacy v1 path. The column-constrained
+// UPDATE pattern (TableExpr + Set, no whole-row Model() call) is preserved
+// to avoid the Bun whole-row footgun (memory feedback_bun_whole_row_update.md).
 func (db *Database) MarkOrphanedBuildTasksFailed(ctx context.Context, staleAfter time.Duration) (int64, error) {
 	res, err := db.DB.NewUpdate().
 		TableExpr("app_build_tasks").
 		Set("finished = ?", true).
-		Set("status_text = ?", "error").
+		Set("status_text = ?", "Failed").
 		Set("error_message = ?", "webhook timeout: build did not report within deadline").
 		Set("updated_at = current_timestamp").
 		Where("finished = false").
