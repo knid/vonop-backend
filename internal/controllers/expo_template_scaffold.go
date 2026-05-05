@@ -6,7 +6,6 @@ import (
 	"io/fs"
 	"path"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	"github.com/knid/wemob/internal/agent/templates/expo_native"
@@ -96,7 +95,6 @@ func expoTemplateSubstitutions(c *Controller, project *models.AppProject, authEn
 		"__OTA_KEY_ID__":        "",
 		"__APP_SCHEME__":        strings.ToLower(strings.TrimSpace(project.Slug)),
 		"__EAS_PROJECT_ID_NOT_USED_BUT_REQUIRED_FOR_RUNTIME__": project.ID.String(),
-		"__AUTH_ENABLED__":      strconv.FormatBool(authEnabled),
 	}
 }
 

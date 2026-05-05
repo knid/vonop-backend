@@ -58,8 +58,7 @@
       }
     },
     "extra": {
-      "eas": { "projectId": "__EAS_PROJECT_ID_NOT_USED_BUT_REQUIRED_FOR_RUNTIME__" },
-      "authEnabled": __AUTH_ENABLED__
+      "eas": { "projectId": "__EAS_PROJECT_ID_NOT_USED_BUT_REQUIRED_FOR_RUNTIME__" }
     }
   }
 }

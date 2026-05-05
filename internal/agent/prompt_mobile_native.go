@@ -633,8 +633,13 @@ Common packages you may need to add:
 - mobile/lib/push.ts — STUB for OneSignal helpers. Overwrite this file when
   adding push notifications.
 - mobile/lib/utils.ts — cn() Tailwind merger
-- mobile/components/ui/{button,card,input,text}.tsx — react-native-reusables
-  primitives. PREFER these over building from <View> / <Text> directly.
+- mobile/components/ui/*.tsx — react-native-reusables primitives, all
+  pre-installed: alert-dialog, avatar, badge, button, card, checkbox,
+  dialog, dropdown-menu, icon, input, label, native-only-animated-view,
+  progress, separator, skeleton, switch, text. PREFER these over
+  building from <View> / <Text> directly. They are imported via
+  @/components/ui/<name> and follow shadcn-style APIs (variant prop,
+  forwardRef, asChild where applicable).
 
 - mobile/assets/icon.png + favicon.png + adaptive-icon.png + splash-icon.png
 
@@ -1029,14 +1034,26 @@ import { Button } from "@/components/ui/button";
 ` + "```" + `typescript
 import { Text } from "@/components/ui/text";
 
-// Variants: "default" | "lead" | "large" | "small" | "muted" | "blockquote"
+// Variants: "default" | "h1" | "h2" | "h3" | "h4" | "p" | "blockquote" |
+//           "code" | "lead" | "large" | "small" | "muted"
 
-<Text>Body copy</Text>
-<Text variant="lead">Subtitle text</Text>
-<Text variant="large">Section heading</Text>
-<Text variant="small">Fine print</Text>
-<Text variant="muted">Helper text</Text>
+<Text variant="h1">Hero headline</Text>
+<Text variant="h2">Section heading</Text>
+<Text variant="h3">Subsection heading</Text>
+<Text variant="h4">Card title</Text>
+<Text variant="p">Body paragraph with proper line height</Text>
+<Text variant="lead">Subtitle / intro text (larger, muted)</Text>
+<Text variant="large">Emphasized line</Text>
+<Text variant="small">Fine print / labels</Text>
+<Text variant="muted">Secondary helper text</Text>
+<Text variant="code">inline code</Text>
+<Text variant="blockquote">Pulled quote</Text>
+<Text>Body copy (default)</Text>
 ` + "```" + `
+
+Text inside ` + "`<Button>`" + ` and ` + "`<Card>`" + ` automatically picks up the parent's
+text styling via TextClassContext — you don't need to set ` + "`text-primary-foreground`" + `
+on Button labels yourself.
 
 ### Input
 ` + "```" + `typescript
@@ -1086,13 +1103,44 @@ import {
 </Card>
 ` + "```" + `
 
-## Additional components (auto-installed by the build pipeline)
-The build pipeline runs the react-native-reusables CLI to install missing
-components. If you reference @/components/ui/dialog, @/components/ui/sheet,
-@/components/ui/badge, @/components/ui/select, or any other standard
-shadcn-style component name, the build will install it automatically. Use any
-standard react-native-reusables component name freely — you do not need to
-pre-check whether it is installed.
+## Pre-installed components (full catalog)
+Every mobile_app_native project ships with the following react-native-reusables
+primitives already installed under ` + "`@/components/ui/`" + `. Import them directly —
+no install step needed.
+
+| Import | Component | Use for |
+|---|---|---|
+| ` + "`@/components/ui/alert-dialog`" + ` | AlertDialog + parts | Destructive confirms ("Delete this?") |
+| ` + "`@/components/ui/avatar`" + ` | Avatar, AvatarImage, AvatarFallback | User photos, chat avatars, profile pictures |
+| ` + "`@/components/ui/badge`" + ` | Badge | Status pills, counts, tags, categories |
+| ` + "`@/components/ui/button`" + ` | Button | Primary/secondary/outline/ghost/destructive/link CTAs |
+| ` + "`@/components/ui/card`" + ` | Card + Header/Title/Description/Content/Footer | Containers, list rows, dashboards |
+| ` + "`@/components/ui/checkbox`" + ` | Checkbox | Multi-select, ToS, filters |
+| ` + "`@/components/ui/dialog`" + ` | Dialog + Trigger/Content/Header/Footer/Title/Description/Close | Modals, info popups |
+| ` + "`@/components/ui/dropdown-menu`" + ` | DropdownMenu + parts | Overflow menus, sort/filter pickers |
+| ` + "`@/components/ui/icon`" + ` | Icon | Themed icon wrapper for lucide-react-native |
+| ` + "`@/components/ui/input`" + ` | Input | TextInput with consistent styling |
+| ` + "`@/components/ui/label`" + ` | Label | Form labels with accessibility wiring |
+| ` + "`@/components/ui/progress`" + ` | Progress | Uploads, multi-step flows, onboarding |
+| ` + "`@/components/ui/separator`" + ` | Separator | Section dividers (use over harsh borders) |
+| ` + "`@/components/ui/skeleton`" + ` | Skeleton | Loading placeholders, typing indicators |
+| ` + "`@/components/ui/switch`" + ` | Switch | Settings toggles, preferences |
+| ` + "`@/components/ui/text`" + ` | Text (variants: default, h1-h4, p, lead, large, small, muted, blockquote, code) | All typography |
+
+Components NOT in the kit (build them from primitives or add the package):
+- **Bottom sheets**: not in RNR. Use ` + "`@gorhom/bottom-sheet`" + ` (de-facto
+  standard). Add it via edit_file in the same turn as your import.
+- **Tabs**: use expo-router's native ` + "`Tabs`" + ` from ` + "`expo-router`" + ` —
+  better than a JS tab control.
+- **Toast**: use ` + "`burnt`" + ` (native iOS/Android toasts) or ` + "`sonner-native`" + `.
+  Add the package when needed.
+- **Tooltip / hover-card**: skip on mobile (no hover affordance); use
+  badges or inline help text instead.
+
+When you need any other shadcn-pattern component name not in the table above
+(e.g. accordion, tabs as JS, popover, tooltip), build it yourself from
+existing primitives — DO NOT assume it's installed and DO NOT call any
+install tool. The kit above is the complete library.
 
 ## GOOD vs BAD: component choices
 

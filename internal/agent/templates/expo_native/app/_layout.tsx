@@ -9,6 +9,7 @@ import { Button, Text, View } from "react-native";
 import * as Updates from "expo-updates";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
+import { PortalHost } from "@rn-primitives/portal";
 import { QueryClientProvider } from "@tanstack/react-query";
 
 import { ForceUpdateScreen } from "@/components/ForceUpdateScreen";
@@ -72,6 +73,7 @@ export default function RootLayout() {
           <ErrorBoundary>
             {content}
           </ErrorBoundary>
+          <PortalHost />
         </SafeAreaProvider>
       </GestureHandlerRootView>
     </QueryClientProvider>
