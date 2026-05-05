@@ -101,6 +101,18 @@ func (c *Controller) CreateAppProject(ctx context.Context, user *models.User, re
 		return nil, err
 	}
 
+	// Seed build_defaults for native mobile apps so the Ship page's
+	// "+ New build" button is enabled from app creation. Without this the
+	// launchpad gate (build_defaults.app_name must be set) blocks the user
+	// until the agent or a manual edit writes one — but the project
+	// already has a generated name we can mirror in.
+	settings := map[string]any{}
+	if projectType == models.ProjectTypeMobileAppNative {
+		settings["build_defaults"] = map[string]any{
+			"app_name": name,
+		}
+	}
+
 	project := &models.AppProject{
 		UserID:         user.ID,
 		OrganizationID: orgID,
@@ -110,7 +122,7 @@ func (c *Controller) CreateAppProject(ctx context.Context, user *models.User, re
 		ProjectType:    projectType,
 		Theme:          []byte("{}"),
 		DataModels:     []byte("[]"),
-		Settings:       map[string]any{},
+		Settings:       settings,
 		Status:         "generating",
 	}
 
