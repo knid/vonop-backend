@@ -215,6 +215,32 @@ func (s *Service) GetMachineStatus(appName string) (MachineStatus, error) {
 	}, nil
 }
 
+// DestroyAllMachines stops + removes every Machine on the app. Used by the
+// auto-remediation path: a redeploy in a fallback region needs the stuck-in-
+// `fra` machines gone first, otherwise flyctl deploy keeps the dead ones
+// around alongside the new replacements. Best-effort per-machine: a single
+// failure is logged and skipped so one stubborn machine can't block the rest.
+//
+// Note: flyctl deploy already destroys+recreates machines as part of a normal
+// release. Use this only when the existing machines are in an unrecoverable
+// state (looping on init failure) AND you need to change deploy parameters
+// (e.g. region) that flyctl deploy alone won't shift.
+func (s *Service) DestroyAllMachines(appName string) error {
+	var machines []machineSummary
+	if err := s.doRequest("GET", "/v1/apps/"+appName+"/machines", nil, &machines); err != nil {
+		return fmt.Errorf("fly: list machines for destroy: %w", err)
+	}
+	for _, m := range machines {
+		// force=true is required when the machine is in stopped/failed state
+		// because the API otherwise expects a stop call first.
+		if err := s.doRequest("DELETE", "/v1/apps/"+appName+"/machines/"+m.ID+"?force=true", nil, nil); err != nil {
+			slog.Warn("fly: destroy machine failed (continuing)", "app", appName, "machine", m.ID, "err", err)
+			continue
+		}
+	}
+	return nil
+}
+
 // WaitForHealthy polls until at least one Machine for the app reports state
 // "started" or returns an error after `timeout`.
 //

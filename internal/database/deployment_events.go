@@ -64,6 +64,30 @@ func HasEvent(ctx context.Context, db *bun.DB, deploymentID uuid.UUID, eventType
 	return count > 0, nil
 }
 
+// LatestEventMetadata returns the most recent event of the given type for a
+// deployment, or nil if none exists. The Fly auto-remediation path uses this
+// to recover its state across asynq retries (the original handler invocation
+// might be long gone, but the deployment_events row persists).
+func LatestEventMetadata(
+	ctx context.Context,
+	db *bun.DB,
+	deploymentID uuid.UUID,
+	eventType string,
+) (map[string]interface{}, error) {
+	var ev models.DeploymentEvent
+	err := db.NewSelect().
+		Model(&ev).
+		Where("deployment_id = ?", deploymentID).
+		Where("event_type = ?", eventType).
+		Order("occurred_at DESC").
+		Limit(1).
+		Scan(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return ev.Metadata, nil
+}
+
 // CountEventsOfType returns how many events of the given type exist
 // for a deployment. Used by the nudge runner to pick the next attempt
 // number.

@@ -330,8 +330,11 @@ func (c *Controller) HandleWebDeployTask(ctx context.Context, t *asynq.Task) err
 		return c.maybeRetry(ctx, p.DeploymentID, "sync_secrets", syncErr)
 	}
 
-	// 7. Deploy machines per plan tier (region from FlyService config).
-	spec := fly.PlanMachineSpec(limits, c.FlyService.Region)
+	// 7. Deploy machines per plan tier. Region defaults to FlyService.Region,
+	// but if a previous attempt for this deployment hit the Fly host-init bug
+	// and remediated to a fallback region, honor that on retry — re-trying the
+	// known-bad primary region would just burn another 5min WaitForHealthy.
+	spec := fly.PlanMachineSpec(limits, c.resolveDeployRegion(ctx, p.DeploymentID))
 	spec.Image = imageRef
 	if err := c.FlyService.DeployMachines(flyAppName, spec); err != nil {
 		return c.maybeRetry(ctx, p.DeploymentID, "deploy_machines", err)
@@ -350,7 +353,12 @@ func (c *Controller) HandleWebDeployTask(ctx context.Context, t *asynq.Task) err
 	// 9. Wait for the machine to report healthy. Fly doesn't publish
 	// machine-state webhooks to own-org apps, so we poll inline here.
 	// 5min covers a cold-start build + machine launch comfortably.
-	if err := c.FlyService.WaitForHealthy(flyAppName, 5*time.Minute); err != nil {
+	//
+	// If the wait fails AND the failure looks like the Fly host-init bug
+	// (machine never reaches "started" before flyd's restart cap), this
+	// destroys the stuck machines and redeploys once in a fallback region.
+	// Other failures (app crash, real timeout) bubble up unchanged.
+	if err := c.waitForHealthyWithRemediation(ctx, p.DeploymentID, flyAppName, spec, 5*time.Minute); err != nil {
 		return c.maybeRetry(ctx, p.DeploymentID, "wait_healthy", err)
 	}
 
@@ -369,6 +377,103 @@ func (c *Controller) HandleWebDeployTask(ctx context.Context, t *asynq.Task) err
 		Set("deploy_version", deployment.Version))
 	slog.Info("deploy_succeeded", "deployment_id", p.DeploymentID, "fly_app", flyAppName)
 	return nil
+}
+
+// resolveDeployRegion picks the region for this deploy attempt. Defaults to
+// FlyService.Region (the configured primary). If a prior attempt for this
+// deployment auto-remediated past the Fly host-init bug and persisted a
+// fallback region in deployment_events, that region wins — re-running the
+// known-bad primary would just waste another WaitForHealthy budget.
+func (c *Controller) resolveDeployRegion(ctx context.Context, deploymentID string) string {
+	id, err := uuid.Parse(deploymentID)
+	if err != nil {
+		return c.FlyService.Region
+	}
+	meta, err := database.LatestEventMetadata(ctx, c.DB.DB, id, models.DeploymentEventFlyHostRemediation)
+	if err != nil || meta == nil {
+		return c.FlyService.Region
+	}
+	if to, ok := meta["to_region"].(string); ok && to != "" {
+		slog.Info("deploy_region_overridden_by_prior_remediation",
+			"deployment_id", deploymentID, "region", to, "primary", c.FlyService.Region)
+		return to
+	}
+	return c.FlyService.Region
+}
+
+// waitForHealthyWithRemediation wraps Fly's WaitForHealthy with a one-shot
+// auto-recovery for the Fly host-init bug — a Fly platform-side failure where
+// init kernel-panics during net-namespace setup, before the app's container
+// runs. The signature is unmistakable (machine never reaches "started" across
+// 10 restart cycles), so we can safely auto-redeploy in a sibling region
+// without risking masking real app bugs.
+//
+// Budget: at most one fallback. If the fallback region also fails, that's
+// either a Fly-wide incident or a real app bug — either way, bubble up so
+// the operator sees it and the asynq retry budget kicks in normally.
+//
+// State: the remediation event is persisted to deployment_events so an asynq
+// retry that re-enters this handler picks up the fallback region directly
+// (see resolveDeployRegion), instead of re-trying the known-bad primary.
+func (c *Controller) waitForHealthyWithRemediation(
+	ctx context.Context, deploymentID, appName string, spec fly.MachineSpec, timeout time.Duration,
+) error {
+	waitErr := c.FlyService.WaitForHealthy(appName, timeout)
+	if waitErr == nil {
+		return nil
+	}
+
+	diag, dErr := c.FlyService.DiagnoseDeploymentFailure(appName)
+	if dErr != nil {
+		slog.Warn("fly_diagnose_failed", "deployment_id", deploymentID, "app", appName, "err", dErr)
+		return waitErr
+	}
+	if diag.Kind != fly.FailureHostInitBug {
+		// App crash or unknown — not auto-remediable. Caller's maybeRetry
+		// path handles asynq retries normally.
+		return waitErr
+	}
+
+	// Already in a remediated region? Then the fallback also failed — bail
+	// before cycling regions further.
+	if spec.Region != c.FlyService.Region {
+		slog.Error("fly_host_init_bug_persisted_across_regions",
+			"deployment_id", deploymentID, "app", appName,
+			"primary", c.FlyService.Region, "fallback", spec.Region,
+			"detail", diag.Detail)
+		return fmt.Errorf("fly host init bug persisted in fallback region %s: %w", spec.Region, waitErr)
+	}
+
+	fallback := fly.FallbackRegion(spec.Region)
+	slog.Warn("fly_host_init_bug_detected_remediating",
+		"deployment_id", deploymentID, "app", appName,
+		"from_region", spec.Region, "to_region", fallback,
+		"machine_id", diag.MachineID, "restart_count", diag.RestartCount,
+		"exit_count", diag.ExitCount, "detail", diag.Detail)
+
+	if id, err := uuid.Parse(deploymentID); err == nil {
+		_ = database.AppendDeploymentEvent(ctx, c.DB.DB, id,
+			models.DeploymentEventFlyHostRemediation,
+			models.DeploymentEventActorSystem, nil,
+			map[string]any{
+				"kind":          "host_init_bug",
+				"from_region":   spec.Region,
+				"to_region":     fallback,
+				"machine_id":    diag.MachineID,
+				"restart_count": diag.RestartCount,
+				"exit_count":    diag.ExitCount,
+				"detail":        diag.Detail,
+			})
+	}
+
+	if err := c.FlyService.DestroyAllMachines(appName); err != nil {
+		return fmt.Errorf("destroy_stuck_machines: %w", err)
+	}
+	spec.Region = fallback
+	if err := c.FlyService.DeployMachines(appName, spec); err != nil {
+		return fmt.Errorf("redeploy_alt_region: %w", err)
+	}
+	return c.FlyService.WaitForHealthy(appName, timeout)
 }
 
 // failTask marks deployment failed and returns asynq.SkipRetry for non-retryable errors.
