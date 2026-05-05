@@ -83,6 +83,9 @@ func buildAddendum(project *models.AppProject, deps *RunDependencies) string {
 		if projectHasDatabase(project) {
 			parts = append(parts, DatabaseAddendumNative)
 		}
+		if projectHasLocalDatabase(project) {
+			parts = append(parts, LocalDatabaseAddendum)
+		}
 		if len(parts) == 0 {
 			return ""
 		}

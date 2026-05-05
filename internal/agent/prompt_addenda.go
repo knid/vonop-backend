@@ -391,6 +391,8 @@ returned URLs in the INSERT statements.
 // projects whose backend/ Postgres database has been provisioned (signaled by
 // project.Settings["has_database"] = true). Replaces DatabaseAddendum on
 // native projects — the file paths and import patterns differ.
+//
+// Independent of LocalDatabaseAddendum — a synced app may carry both.
 const DatabaseAddendumNative = `# DATABASE ADDENDUM (native + backend)
 
 This project has a wemob db wired through its Next.js backend. Schema files:
@@ -417,4 +419,40 @@ Schema changes:
 User-facing language:
 - Call this "your database" / "wemob db" / "veritabanın". NEVER say Neon,
   Postgres, Drizzle, Supabase, or Firebase to the user.
+`
+
+// LocalDatabaseAddendum is appended to the base prompt for mobile_app_native
+// projects whose on-device SQLite database has been provisioned (signaled by
+// project.Settings["has_local_database"] = true). Independent of
+// DatabaseAddendumNative — a synced app gets both.
+const LocalDatabaseAddendum = `# LOCAL DATABASE ADDENDUM (on-device SQLite)
+
+This native project has on-device SQLite wired via expo-sqlite + Drizzle.
+Schema files:
+- mobile/lib/db.ts — Drizzle expo-sqlite client + DatabaseProvider component.
+- mobile/lib/schema.ts — sqliteTable definitions.
+- mobile/lib/migrations.ts — runSync(db) with idempotent CREATE TABLE
+  IF NOT EXISTS / ALTER TABLE … ADD COLUMN. Runs on every app launch.
+
+Pattern (must follow exactly):
+1. Reactive reads in screens use useLiveQuery — never useEffect + setState
+   to mirror db rows:
+     import { useLiveQuery } from "drizzle-orm/expo-sqlite";
+     const { data } = useLiveQuery(db.select().from(<table>));
+2. Writes from event handlers use db.insert/update/delete — never inside
+   render. Wrap multi-step writes in db.transaction() if you need atomicity.
+3. NEVER import 'mobile/lib/db.ts' from anything under backend/. The
+   SQLite file is device-only.
+4. NEVER persist auth tokens / secrets here — use expo-secure-store
+   (already in the Expo template).
+
+Schema changes:
+- Edit mobile/lib/schema.ts AND mobile/lib/migrations.ts together. Append
+  fresh CREATE TABLE IF NOT EXISTS / ALTER TABLE … ADD COLUMN statements;
+  the migrations function is idempotent so re-running it is safe.
+- Do not call provision_local_database again — it's one-shot.
+
+User-facing language:
+- Call this "your data" / "this app's storage" / "veritabanın". NEVER
+  say SQLite, expo-sqlite, or Drizzle to the user.
 `
