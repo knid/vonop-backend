@@ -59,6 +59,7 @@ func TestChargeBuildCredits_DeductsCorrectAmountPerKind(t *testing.T) {
 func TestChargeBuildCredits_UnknownKindErrors(t *testing.T) {
 	db := database.NewTestDB(t, (*models.User)(nil))
 	c, _ := NewTestController(t, db, TestControllerOptions{})
+	c.RemoteConfig = remoteconfig.New(nil) // guard against nil-deref if the kind-lookup guard is ever reordered
 
 	err := c.ChargeBuildCredits(&models.User{ID: uuid.New()}, uuid.New(), "bogus", "ref")
 	if err == nil {
