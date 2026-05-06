@@ -549,6 +549,8 @@ func createSchema(db *bun.DB) error {
 		// E6 Phase 8: per-app Fly region override (Pro+ feature, gated on
 		// limits.CanChooseRegion). Empty string = use FLY_PRIMARY_REGION.
 		`ALTER TABLE app_projects ADD COLUMN IF NOT EXISTS region text NOT NULL DEFAULT ''`,
+		// 2026-05-06: subscription-plan-revamp — seat caps for Hobby/Pro/Max.
+		`ALTER TABLE standard_user_limits ADD COLUMN IF NOT EXISTS max_seats int NOT NULL DEFAULT 1`,
 	}
 
 	// Deduplicate before creating unique indexes (keep the latest row per group)
@@ -595,14 +597,12 @@ func createSchema(db *bun.DB) error {
 	// IMPORTANT: when adding a new ALTER TABLE above, update this canary to the newest column,
 	// otherwise the new ALTER will be silently skipped on servers that already have older columns.
 	// Table renames go in renameStatements below, not here — they run unconditionally.
-	// Canary: app_projects.region — the LAST column added (plan/limits
-	// Phase 8 / E6 region selection). Bumped past can_choose_region so the
-	// region ALTER, the bandwidth-usage indexes, and the store-access
-	// org_id backfill all run on servers that already passed the earlier
-	// canaries.
+	// Canary: standard_user_limits.max_seats — last column added (subscription
+	// plan revamp 2026-05-06). Bumped past app_projects.region so the new
+	// max_seats ALTER runs on servers that already passed earlier canaries.
 	var migrationsDone bool
 	row := db.QueryRowContext(context.Background(),
-		"SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='app_projects' AND column_name='region')")
+		"SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='standard_user_limits' AND column_name='max_seats')")
 	if err := row.Scan(&migrationsDone); err != nil {
 		migrationsDone = false
 	}
