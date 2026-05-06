@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -22,6 +23,27 @@ import (
 	"github.com/knid/wemob/internal/utils"
 	"github.com/posthog/posthog-go"
 )
+
+// writeAppLimitError translates a controller-side AppLimitError into a
+// structured 4xx response. Returns true when the error was handled.
+// Plan-level "feature unavailable" (Limit == 0) maps to FEATURE_NOT_AVAILABLE;
+// quota exhaustion maps to APP_LIMIT_REACHED.
+func writeAppLimitError(w http.ResponseWriter, err error) bool {
+	var limitErr *controllers.AppLimitError
+	if !errors.As(err, &limitErr) {
+		return false
+	}
+	code := constants.ErrAppLimitReached
+	if limitErr.Limit == 0 {
+		code = constants.ErrFeatureNotAvailable
+	}
+	utils.JSONError(w, code, limitErr.Error(), http.StatusForbidden, map[string]any{
+		"is_mobile": limitErr.IsMobile,
+		"limit":     limitErr.Limit,
+		"used":      limitErr.Used,
+	})
+	return true
+}
 
 // GET /v2/apps/{appId}/logo — public endpoint that redirects to a fresh pre-signed S3 URL.
 // No auth required — logos are public assets embedded in generated app code.
@@ -115,6 +137,9 @@ func (v *HttpViews) CreateApp(w http.ResponseWriter, r *http.Request) {
 
 	project, err := v.Controller.CreateDraftAppProject(r.Context(), user, req)
 	if err != nil {
+		if writeAppLimitError(w, err) {
+			return
+		}
 		utils.JSONInternalError(w, err)
 		return
 	}

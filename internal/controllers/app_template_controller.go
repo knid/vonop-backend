@@ -254,20 +254,14 @@ func (c *Controller) CopyTemplate(ctx context.Context, user *models.User, slug s
 		}
 
 		if maxApps == 0 {
-			if isMobile {
-				return nil, fmt.Errorf("mobile app creation is not available on your plan")
-			}
-			return nil, fmt.Errorf("web app creation is not available on your plan")
+			return nil, &AppLimitError{IsMobile: isMobile, Limit: 0}
 		}
 
 		appCount, countErr := c.DB.CountAppProjectsByUserIDAndType(user.ID.String(), countFilter)
 		if countErr != nil {
 			slog.Warn("CopyTemplate: failed to count projects", "error", countErr, "user_id", user.ID)
 		} else if appCount >= maxApps {
-			if isMobile {
-				return nil, fmt.Errorf("you have reached your mobile app limit (%d)", maxApps)
-			}
-			return nil, fmt.Errorf("you have reached your web app limit (%d)", maxApps)
+			return nil, &AppLimitError{IsMobile: isMobile, Limit: maxApps, Used: appCount}
 		}
 	}
 
