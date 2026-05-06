@@ -465,17 +465,17 @@ func (c *Controller) GoogleLogin(oauthUser goth.User) (*responses.UserLoginRespo
 	}, nil
 }
 
-// assignFreePlan sets the org onto the "Free" subscription plan and marks
-// its subscription_status as "free". Org-scoped: billing now lives on
-// Organization, not User. Callers wanting to apply this to a user should
-// resolve the user's personal org first via GetPersonalOrgByUserID.
+// assignFreePlan sets the org onto the "Starter" subscription plan (the free
+// tier) and marks its subscription_status as "free". Org-scoped: billing now
+// lives on Organization, not User. Callers wanting to apply this to a user
+// should resolve the user's personal org first via GetPersonalOrgByUserID.
 func (c *Controller) assignFreePlan(org *models.Organization) {
 	if org == nil {
 		return
 	}
-	freePlan, err := c.DB.GetSubscriptionByName("Free")
+	freePlan, err := c.DB.GetSubscriptionByName("Starter")
 	if err != nil {
-		slog.Warn("assignFreePlan: free plan not found", "error", err)
+		slog.Warn("assignFreePlan: starter plan not found", "error", err)
 		return
 	}
 	org.SubscriptionID = freePlan.ID
@@ -486,14 +486,15 @@ func (c *Controller) assignFreePlan(org *models.Organization) {
 	}
 }
 
-// freePlanIDOrNil returns the Free plan's UUID, or uuid.Nil if the plan row
-// is missing (shouldn't happen post-seedPlans). Used by the cancellation /
-// dunning paths in webhook.go to re-home an org's subscription_id to Free
-// instead of nulling it (A5/A7/A8 — fail-closed on enforcement).
+// freePlanIDOrNil returns the Starter (free tier) plan's UUID, or uuid.Nil if
+// the plan row is missing (shouldn't happen post-seedPlans). Used by the
+// cancellation / dunning paths in webhook.go to re-home an org's
+// subscription_id to the free tier instead of nulling it
+// (A5/A7/A8 — fail-closed on enforcement).
 func (c *Controller) freePlanIDOrNil() uuid.UUID {
-	freePlan, err := c.DB.GetSubscriptionByName("Free")
+	freePlan, err := c.DB.GetSubscriptionByName("Starter")
 	if err != nil || freePlan == nil {
-		slog.Warn("freePlanIDOrNil: free plan not found", "error", err)
+		slog.Warn("freePlanIDOrNil: starter plan not found", "error", err)
 		return uuid.Nil
 	}
 	return freePlan.ID

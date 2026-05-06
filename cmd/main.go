@@ -1007,26 +1007,6 @@ func seedPlans(db *database.Database, sm secret.SecretManager) {
 		},
 	}
 
-	// 2026-05-06: soft-delete legacy plan rows ("Free", "Professional")
-	// before seeding the new four-tier shape. The new "Starter" replaces
-	// "Free" semantically; the old "Starter" $20 row has the same Name as
-	// the new "Starter" $0 row and gets matched-and-updated by the existing
-	// GetSubscriptionByNameIncludeDeleted path below.
-	//
-	// Use Bun's NewDelete on the model so the soft_delete struct tag fires
-	// (sets deleted_at instead of removing the row).
-	for _, legacyName := range []string{"Free", "Professional"} {
-		existing, err := db.GetSubscriptionByName(legacyName)
-		if err != nil {
-			continue // already gone or never seeded
-		}
-		if _, dErr := db.DB.NewDelete().Model(existing).Where("id = ?", existing.ID).Exec(context.Background()); dErr != nil {
-			slog.Warn("failed to soft-delete legacy plan", "name", legacyName, "error", dErr)
-		} else {
-			slog.Info("soft-deleted legacy plan", "name", legacyName)
-		}
-	}
-
 	for _, p := range plans {
 		// First check including soft-deleted rows to prevent unique constraint violations
 		existing, err := db.GetSubscriptionByNameIncludeDeleted(p.Name)
@@ -1120,21 +1100,58 @@ func seedPlans(db *database.Database, sm secret.SecretManager) {
 
 		slog.Info("updated subscription plan", "plan", p.Name)
 	}
+
+	// 2026-05-06: re-home orgs from the legacy "Free" plan to the new "Starter"
+	// plan, then soft-delete legacy plan rows ("Free", "Professional").
+	//
+	// ORDER MATTERS: the re-home step must run AFTER the seed-create-or-update
+	// loop above, because the new "Starter" $0 row is created/updated by that
+	// loop. Soft-deleting "Free" must happen AFTER the re-home so that orgs are
+	// never left pointing at a soft-deleted subscription row.
+	//
+	// Use Bun's NewDelete on the model so the soft_delete struct tag fires
+	// (sets deleted_at instead of removing the row).
+	freeRow, freeErr := db.GetSubscriptionByName("Free")
+	starterRow, starterErr := db.GetSubscriptionByName("Starter")
+	if freeErr == nil && starterErr == nil {
+		res, err := db.DB.NewUpdate().
+			Table("organizations").
+			Set("subscription_id = ?", starterRow.ID).
+			Where("subscription_id = ?", freeRow.ID).
+			Exec(context.Background())
+		if err != nil {
+			slog.Warn("failed to re-home orgs from Free to Starter", "error", err)
+		} else if n, _ := res.RowsAffected(); n > 0 {
+			slog.Info("re-homed orgs from Free to Starter", "count", n)
+		}
+	}
+
+	for _, legacyName := range []string{"Free", "Professional"} {
+		existing, err := db.GetSubscriptionByName(legacyName)
+		if err != nil {
+			continue // already gone or never seeded
+		}
+		if _, dErr := db.DB.NewDelete().Model(existing).Where("id = ?", existing.ID).Exec(context.Background()); dErr != nil {
+			slog.Warn("failed to soft-delete legacy plan", "name", legacyName, "error", dErr)
+		} else {
+			slog.Info("soft-deleted legacy plan", "name", legacyName)
+		}
+	}
 }
 
 func migrateInactiveUsersToFree(bundb *bun.DB) {
-	// Assign free plan to inactive users
+	// Assign starter plan (free tier) to inactive users
 	res, err := bundb.ExecContext(context.Background(), `
 		UPDATE users SET subscription_status = 'free', subscription_id = (
-			SELECT id FROM standard_user_subscriptions WHERE name = 'Free' LIMIT 1
+			SELECT id FROM standard_user_subscriptions WHERE name = 'Starter' AND deleted_at IS NULL LIMIT 1
 		) WHERE subscription_status = 'inactive'
 		AND (subscription_id IS NULL OR subscription_id = '00000000-0000-0000-0000-000000000000')
 		AND deleted_at IS NULL
 	`)
 	if err != nil {
-		slog.Warn("migrate inactive users to free failed", "error", err)
+		slog.Warn("migrate inactive users to starter plan failed", "error", err)
 	} else if n, _ := res.RowsAffected(); n > 0 {
-		slog.Info("migrated inactive users to free plan", "count", n)
+		slog.Info("migrated inactive users to starter plan", "count", n)
 	}
 
 }
