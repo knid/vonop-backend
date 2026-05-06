@@ -223,12 +223,52 @@ func BootstrapController() (*controllers.Controller, asynq.RedisClientOpt) {
 		slog.Info("Gitea per-commit backup enabled")
 	}
 
-	// Neon service (optional — only enabled when API key is set)
+	// Neon service: agent-plan two-org wiring. Free org is sponsored by Neon
+	// and carries free-tier projects; Paid org is metered against Wemob's
+	// credits and holds Starter/Professional projects. The personal API key
+	// is required for cross-org transfers on plan change. Falls back to the
+	// legacy single NEON_API_KEY when only one key is set so existing
+	// environments keep booting.
 	var neonService *neon.Service
-	if neonKey := sm.GetSecret("NEON_API_KEY"); neonKey != "" {
-		neonOrgID := sm.GetSecret("NEON_ORG_ID")
-		neonService = neon.NewServiceWithOrg(neonKey, neonOrgID)
-		slog.Info("Neon database service enabled", "org_scoped", neonOrgID != "")
+	var neonRegistry *neon.Registry
+	{
+		legacyKey := sm.GetSecret("NEON_API_KEY")
+		legacyOrgID := sm.GetSecret("NEON_ORG_ID")
+		freeKey := sm.GetSecret("NEON_FREE_ORG_API_KEY")
+		freeOrgID := sm.GetSecret("NEON_FREE_ORG_ID")
+		paidKey := sm.GetSecret("NEON_PAID_ORG_API_KEY")
+		paidOrgID := sm.GetSecret("NEON_PAID_ORG_ID")
+		personalKey := sm.GetSecret("NEON_PERSONAL_API_KEY")
+
+		var freeSvc, paidSvc *neon.Service
+		if freeKey != "" {
+			freeSvc = neon.NewServiceWithOrg(freeKey, freeOrgID)
+		}
+		if paidKey != "" {
+			paidSvc = neon.NewServiceWithOrg(paidKey, paidOrgID)
+		}
+		// Legacy fallback: single NEON_API_KEY/NEON_ORG_ID drives both tiers.
+		if freeSvc == nil && paidSvc == nil && legacyKey != "" {
+			legacySvc := neon.NewServiceWithOrg(legacyKey, legacyOrgID)
+			freeSvc = legacySvc
+			paidSvc = legacySvc
+		}
+
+		if freeSvc != nil || paidSvc != nil {
+			reg, err := neon.NewRegistry(freeSvc, paidSvc, personalKey)
+			if err != nil {
+				slog.Error("Neon registry init failed", "error", err)
+			} else {
+				neonRegistry = reg
+				// Back-compat: NeonService points at the paid org so legacy
+				// callers (provisioner before tier wiring, app deletion) keep
+				// working unchanged.
+				neonService = reg.For(neon.TierPaid)
+				slog.Info("Neon registry enabled",
+					"free_org", freeOrgID, "paid_org", paidOrgID,
+					"transfer_enabled", reg.CanTransfer())
+			}
+		}
 	}
 
 	// PostHog client (optional — only enabled when API key is set)
@@ -301,6 +341,7 @@ func BootstrapController() (*controllers.Controller, asynq.RedisClientOpt) {
 		flyService,
 		giteaService,
 		neonService,
+		neonRegistry,
 		posthogClient,
 		gitRepoService,
 		codemagicService,

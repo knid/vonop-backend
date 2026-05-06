@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -379,6 +380,26 @@ func (c *Controller) processWebhookEventTx(tx bun.Tx, event stripe.Event) ([]fun
 			Set("plan_name", subs.Name).
 			Set("price_id", sub.Items.Data[0].Price.ID))
 		c.IdentifyUser(owner)
+
+		// Sync Neon projects to the new plan tier: transfer free↔paid org
+		// (using personal API key) and PATCH per-project quotas. Done as a
+		// post-commit hook so the webhook doesn't block on Neon API; we
+		// snapshot the org ID + new limits inside the closure to avoid a
+		// race with later state mutations.
+		if planChanged && org.SubscriptionID != uuid.Nil {
+			newLimits, limitsErr := c.DB.GetStandardUserLimitsById(subs.LimitsID.String())
+			if limitsErr != nil {
+				slog.Warn("subscription_updated: failed to load new limits for Neon sync",
+					"error", limitsErr, "subscription_id", subs.ID)
+			} else {
+				orgID := org.ID
+				hooks = append(hooks, func() {
+					ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+					defer cancel()
+					c.SyncNeonProjectsForOrgPlan(ctx, orgID, newLimits)
+				})
+			}
+		}
 
 	case "invoice.payment_succeeded":
 		var invoice stripe.Invoice

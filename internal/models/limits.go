@@ -30,6 +30,17 @@ type StandardUserLimits struct {
 	DeployCPUs           string `bun:"deploy_cpus,notnull,default:'0.25'"`
 	DeployDBMaxCU        string `bun:"deploy_db_max_cu,notnull,default:'0.25'"`
 	DeployDBStorageMB    int    `bun:"deploy_db_storage_mb,notnull,default:512"`
+	// Neon agent-plan quotas. ActiveTime + DataTransfer are the levers Neon
+	// actually meters on the Free org; storage alone won't hold a free user
+	// in the sponsored org. OrgTier picks which Neon org (Free vs Paid) the
+	// user's project lives in — transferred via personal API key on plan
+	// change. SuspendTimeout shortens cold-suspend on free tiers to cap
+	// active_time consumption.
+	DeployDBActiveTimeSec     int    `bun:"deploy_db_active_time_sec,notnull,default:360000"`
+	DeployDBDataTransferBytes int64  `bun:"deploy_db_data_transfer_bytes,notnull,default:5368709120"`
+	DeployDBComputeTimeSec    int    `bun:"deploy_db_compute_time_sec,notnull,default:0"`
+	DeployDBSuspendTimeoutSec int    `bun:"deploy_db_suspend_timeout_sec,notnull,default:300"`
+	DeployDBOrgTier           string `bun:"deploy_db_org_tier,notnull,default:'free'"`
 	CreditRolloverMonths int    `bun:",notnull,default:0"`
 	CanAccessCode        bool `bun:",notnull,default:false"`
 	CanBuyDomain         bool `bun:",notnull,default:false"`

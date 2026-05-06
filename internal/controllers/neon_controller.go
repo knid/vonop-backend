@@ -20,41 +20,97 @@ import (
 	"github.com/knid/wemob/internal/utils"
 )
 
-// provisionNeonDatabase creates a Neon project, runs the schema SQL, and returns the connection string and project ID.
-// If userLimits is non-nil, compute and storage limits are applied to the Neon project.
-func (c *Controller) provisionNeonDatabase(ctx context.Context, project *models.AppProject, dataModels []models.DataModel, userLimits *models.StandardUserLimits, sendEvent func(string, any) bool) (string, string, error) {
-	if c.NeonService == nil {
-		return "", "", fmt.Errorf("Neon service not configured")
+// neonTierFromLimits picks "free" vs "paid" from a plan's limits. Empty
+// tier or nil limits → "paid" so existing single-org installs keep working.
+func neonTierFromLimits(l *models.StandardUserLimits) string {
+	if l == nil || l.DeployDBOrgTier == "" {
+		return neon.TierPaid
+	}
+	if l.DeployDBOrgTier == neon.TierFree {
+		return neon.TierFree
+	}
+	return neon.TierPaid
+}
+
+// resolveProvisionTier picks the tier to provision under, accounting for
+// single-org installs. When the registry only wires one Neon org (legacy
+// NEON_API_KEY mode, or one of FREE/PAID missing), every project lives in
+// that one org regardless of plan — we stamp them all as "paid" so a future
+// split (Paid points at the legacy org, fresh Free org added) doesn't leave
+// pre-existing projects mis-tagged and 404'ing against the wrong service.
+func (c *Controller) resolveProvisionTier(l *models.StandardUserLimits) string {
+	if c.NeonRegistry != nil && c.NeonRegistry.IsSingleOrg() {
+		return neon.TierPaid
+	}
+	return neonTierFromLimits(l)
+}
+
+// neonForTier returns the org-scoped Neon service for a tier, falling back
+// to the legacy single-service field when no registry is wired.
+func (c *Controller) neonForTier(tier string) *neon.Service {
+	if c.NeonRegistry != nil {
+		return c.NeonRegistry.For(tier)
+	}
+	return c.NeonService
+}
+
+// dbLimitsFromUserLimits builds the wire-format DB limits payload from a
+// plan's limits row. Returns nil when no fields are populated so callers can
+// no-op gracefully.
+func dbLimitsFromUserLimits(l *models.StandardUserLimits) *neon.DBLimits {
+	if l == nil {
+		return nil
+	}
+	maxCU := 0.0
+	if l.DeployDBMaxCU != "" {
+		if parsed, err := strconv.ParseFloat(l.DeployDBMaxCU, 64); err == nil {
+			maxCU = parsed
+		}
+	}
+	if maxCU == 0 && l.DeployDBStorageMB == 0 && l.DeployDBActiveTimeSec == 0 &&
+		l.DeployDBDataTransferBytes == 0 && l.DeployDBSuspendTimeoutSec == 0 {
+		return nil
+	}
+	return &neon.DBLimits{
+		MaxCU:                 maxCU,
+		StorageMB:             l.DeployDBStorageMB,
+		ActiveTimeSec:         l.DeployDBActiveTimeSec,
+		DataTransferBytes:     l.DeployDBDataTransferBytes,
+		ComputeTimeSec:        l.DeployDBComputeTimeSec,
+		SuspendTimeoutSeconds: l.DeployDBSuspendTimeoutSec,
+	}
+}
+
+// provisionNeonDatabase creates a Neon project under the tier dictated by
+// userLimits, runs the schema SQL, and returns the connection string, project
+// ID, and resolved tier. The caller persists tier on the AppIntegration so
+// future ops (transfer on plan change, deletion) know which org to talk to.
+//
+// Quotas applied at create time cover active_time + data_transfer + storage +
+// autoscaling + suspend timeout — Neon meters all of these on the Free org,
+// so storage alone wouldn't keep a sponsored project free.
+func (c *Controller) provisionNeonDatabase(ctx context.Context, project *models.AppProject, dataModels []models.DataModel, userLimits *models.StandardUserLimits, sendEvent func(string, any) bool) (string, string, string, error) {
+	tier := c.resolveProvisionTier(userLimits)
+	svc := c.neonForTier(tier)
+	if svc == nil {
+		return "", "", "", fmt.Errorf("Neon service not configured for tier %q", tier)
 	}
 
-	sendEvent("neon_provision", map[string]any{"phase": "creating_project"})
+	sendEvent("neon_provision", map[string]any{"phase": "creating_project", "tier": tier})
 
 	projectName := fmt.Sprintf("wemob-%s", project.Slug)
 	if len(projectName) > 60 {
 		projectName = projectName[:60]
 	}
 
-	// Build DB limits from the user's plan
-	var dbLimits *neon.DBLimits
-	if userLimits != nil && (userLimits.DeployDBMaxCU != "" || userLimits.DeployDBStorageMB > 0) {
-		maxCU := 0.25
-		if userLimits.DeployDBMaxCU != "" {
-			if parsed, err := strconv.ParseFloat(userLimits.DeployDBMaxCU, 64); err == nil {
-				maxCU = parsed
-			}
-		}
-		dbLimits = &neon.DBLimits{
-			MaxCU:     maxCU,
-			StorageMB: userLimits.DeployDBStorageMB,
-		}
-	}
+	dbLimits := dbLimitsFromUserLimits(userLimits)
 
-	neonProjectID, connStr, err := c.NeonService.CreateProject(projectName, "", dbLimits)
+	neonProjectID, connStr, err := svc.CreateProject(projectName, "", dbLimits)
 	if err != nil {
-		return "", "", fmt.Errorf("create Neon project: %w", err)
+		return "", "", tier, fmt.Errorf("create Neon project: %w", err)
 	}
 
-	slog.Info("Neon project created", "neon_project_id", neonProjectID, "conn_str_len", len(connStr), "app_project_id", project.ID)
+	slog.Info("Neon project created", "neon_project_id", neonProjectID, "tier", tier, "conn_str_len", len(connStr), "app_project_id", project.ID)
 
 	// Build and execute schema SQL directly via the connection string.
 	schemaSQL := database.BuildCreateTableSQL(dataModels)
@@ -65,7 +121,7 @@ func (c *Controller) provisionNeonDatabase(ctx context.Context, project *models.
 		neonDB, err := sql.Open("postgres", database.NeonConnStrWithEndpoint(connStr))
 		if err != nil {
 			slog.Error("Failed to open Neon database driver", "error", err, "neon_project_id", neonProjectID)
-			return connStr, neonProjectID, fmt.Errorf("open Neon driver: %w", err)
+			return connStr, neonProjectID, tier, fmt.Errorf("open Neon driver: %w", err)
 		}
 		defer neonDB.Close()
 
@@ -91,7 +147,7 @@ func (c *Controller) provisionNeonDatabase(ctx context.Context, project *models.
 		}
 		if pingErr != nil {
 			slog.Error("Neon database not reachable after retries", "error", pingErr, "neon_project_id", neonProjectID)
-			return connStr, neonProjectID, fmt.Errorf("neon database not reachable: %w", pingErr)
+			return connStr, neonProjectID, tier, fmt.Errorf("neon database not reachable: %w", pingErr)
 		}
 
 		execCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
@@ -99,26 +155,34 @@ func (c *Controller) provisionNeonDatabase(ctx context.Context, project *models.
 
 		if _, err := neonDB.ExecContext(execCtx, schemaSQL); err != nil {
 			slog.Error("Failed to execute schema SQL on Neon", "error", err, "neon_project_id", neonProjectID, "sql", schemaSQL)
-			return connStr, neonProjectID, fmt.Errorf("execute schema SQL: %w", err)
+			return connStr, neonProjectID, tier, fmt.Errorf("execute schema SQL: %w", err)
 		}
 		slog.Info("Neon schema created successfully", "neon_project_id", neonProjectID, "tables", len(dataModels))
 	}
 
-	return connStr, neonProjectID, nil
+	return connStr, neonProjectID, tier, nil
 }
 
 // storeNeonIntegration saves the Neon connection as an AppIntegration (upsert).
-func (c *Controller) storeNeonIntegration(project *models.AppProject, connStr, neonProjectID string) error {
+// tier is persisted on Config["org_tier"] so subsequent transfers/deletes know
+// which org-scoped service to talk to without re-resolving from the user's
+// current plan (which may have changed since provision).
+func (c *Controller) storeNeonIntegration(project *models.AppProject, connStr, neonProjectID, tier string) error {
 	encEnvVars := utils.EncryptIntegrationMapStr(
 		map[string]string{"DATABASE_URL": connStr},
 		c.integrationCredentialsKey(),
 	)
+
+	if tier == "" {
+		tier = neon.TierPaid
+	}
 
 	// Check if a Neon integration already exists — update it instead of creating a duplicate
 	existing, err := c.DB.GetAppIntegrationByProvider(project.ID.String(), "neon")
 	if err == nil && existing.ID != uuid.Nil {
 		existing.Config = map[string]any{
 			"project_id": neonProjectID,
+			"org_tier":   tier,
 		}
 		existing.Status = "connected"
 		existing.EnvVars = encEnvVars
@@ -132,6 +196,7 @@ func (c *Controller) storeNeonIntegration(project *models.AppProject, connStr, n
 		Provider:     "neon",
 		Config: map[string]any{
 			"project_id": neonProjectID,
+			"org_tier":   tier,
 		},
 		Status:  "connected",
 		EnvVars: encEnvVars,
@@ -139,6 +204,31 @@ func (c *Controller) storeNeonIntegration(project *models.AppProject, connStr, n
 
 	_, err = c.DB.CreateAppIntegration(integration)
 	return err
+}
+
+// neonProjectIDFromIntegration pulls the Neon project ID off an integration's
+// Config map. Returns empty string when the integration is nil or malformed.
+func neonProjectIDFromIntegration(integ *models.AppIntegration) string {
+	if integ == nil {
+		return ""
+	}
+	if id, ok := integ.Config["project_id"].(string); ok {
+		return id
+	}
+	return ""
+}
+
+// neonTierFromIntegration pulls the stored tier off an integration's Config
+// map. Falls back to "paid" when missing — matches legacy single-org installs
+// where every project lived in the paid org.
+func neonTierFromIntegration(integ *models.AppIntegration) string {
+	if integ == nil {
+		return neon.TierPaid
+	}
+	if t, ok := integ.Config["org_tier"].(string); ok && t != "" {
+		return t
+	}
+	return neon.TierPaid
 }
 
 // seedNeonDatabase uses an LLM to generate seed SQL and executes it on the app's Neon database.
@@ -510,7 +600,7 @@ func (c *Controller) generateAndStoreSeedImages(
 //
 // Errors are returned verbatim; the tool surfaces them to the model.
 func (c *Controller) provisionDatabaseForAgent(ctx context.Context, project *models.AppProject, user *models.User, tables []models.DataModel) error {
-	if c.NeonService == nil {
+	if c.NeonService == nil && c.NeonRegistry == nil {
 		return fmt.Errorf("wemob db is not configured on this environment")
 	}
 	if c.isNeonBacked(project.ID.String()) {
@@ -538,12 +628,12 @@ func (c *Controller) provisionDatabaseForAgent(ctx context.Context, project *mod
 	}
 
 	noopEvent := func(string, any) bool { return false }
-	connStr, neonProjectID, err := c.provisionNeonDatabase(ctx, project, tables, userLimits, noopEvent)
+	connStr, neonProjectID, tier, err := c.provisionNeonDatabase(ctx, project, tables, userLimits, noopEvent)
 	if err != nil {
 		return fmt.Errorf("provision wemob db: %w", err)
 	}
 
-	if err := c.storeNeonIntegration(project, connStr, neonProjectID); err != nil {
+	if err := c.storeNeonIntegration(project, connStr, neonProjectID, tier); err != nil {
 		return fmt.Errorf("store wemob db integration: %w", err)
 	}
 
@@ -626,6 +716,107 @@ func (c *Controller) seedStarterSchema(ctx context.Context, connStr string, proj
 	}
 	slog.Info("ecommerce starter schema seeded", "project_id", project.ID)
 	return nil
+}
+
+// SyncNeonProjectsForOrgPlan walks every Neon-backed project in the given
+// organization and, when the new plan moves the project to a different Neon
+// org tier, transfers the project (using the personal API key) and PATCHes
+// the quotas to match the new plan. Best-effort: per-project failures are
+// logged and don't fail the caller.
+//
+// Called from the Stripe webhook on customer.subscription.updated when the
+// plan changes between tiers (free↔paid). Re-quoting on intra-tier changes
+// (Starter↔Professional, both paid) is also useful — the quota PATCH runs
+// even when transfer is a no-op.
+func (c *Controller) SyncNeonProjectsForOrgPlan(ctx context.Context, orgID uuid.UUID, newLimits *models.StandardUserLimits) {
+	if newLimits == nil {
+		return
+	}
+	if c.NeonRegistry == nil && c.NeonService == nil {
+		return
+	}
+	projects, err := c.DB.GetAppProjectsByOrgID(orgID.String())
+	if err != nil {
+		slog.Warn("SyncNeonProjectsForOrgPlan: failed to list projects", "error", err, "org_id", orgID)
+		return
+	}
+
+	targetTier := neonTierFromLimits(newLimits)
+	// Single-org installs: every existing project is tagged "paid" by
+	// resolveProvisionTier (see comment there). Force the target tier to
+	// match so we don't trigger spurious "transfer disabled" warnings on
+	// every plan change in legacy mode.
+	if c.NeonRegistry != nil && c.NeonRegistry.IsSingleOrg() {
+		targetTier = neon.TierPaid
+	}
+	dbLimits := dbLimitsFromUserLimits(newLimits)
+
+	for i := range projects {
+		project := &projects[i]
+		integ, err := c.getNeonIntegration(project.ID.String())
+		if err != nil {
+			slog.Warn("SyncNeonProjectsForOrgPlan: integration lookup failed",
+				"error", err, "project_id", project.ID)
+			continue
+		}
+		if integ == nil {
+			continue
+		}
+		neonProjectID := neonProjectIDFromIntegration(integ)
+		if neonProjectID == "" {
+			continue
+		}
+		currentTier := neonTierFromIntegration(integ)
+
+		// Transfer between orgs when the tier flipped. Cross-org transfers
+		// need the personal API key; if missing we log and skip transfer
+		// but still try the PATCH against the source-tier service so at
+		// least the source-org quota is updated.
+		if currentTier != targetTier {
+			if c.NeonRegistry != nil && c.NeonRegistry.CanTransfer() {
+				if err := c.NeonRegistry.Transfer(neonProjectID, currentTier, targetTier); err != nil {
+					slog.Warn("SyncNeonProjectsForOrgPlan: transfer failed",
+						"error", err, "neon_project_id", neonProjectID,
+						"from", currentTier, "to", targetTier)
+					// Skip quota PATCH — destination service would 404 if
+					// the transfer didn't land.
+					continue
+				}
+				// Persist the new tier on the integration.
+				if integ.Config == nil {
+					integ.Config = make(map[string]any)
+				}
+				integ.Config["org_tier"] = targetTier
+				integ.UpdatedAt = time.Now()
+				if _, err := c.DB.UpdateAppIntegration(integ); err != nil {
+					slog.Warn("SyncNeonProjectsForOrgPlan: persist tier failed",
+						"error", err, "project_id", project.ID)
+				}
+				slog.Info("SyncNeonProjectsForOrgPlan: transferred",
+					"neon_project_id", neonProjectID,
+					"from", currentTier, "to", targetTier)
+				currentTier = targetTier
+			} else {
+				slog.Warn("SyncNeonProjectsForOrgPlan: tier change but transfer disabled",
+					"neon_project_id", neonProjectID,
+					"from", currentTier, "to", targetTier)
+			}
+		}
+
+		// PATCH the new quotas using the (possibly post-transfer) tier's
+		// service.
+		svc := c.neonForTier(currentTier)
+		if svc == nil {
+			continue
+		}
+		if err := svc.UpdateProjectLimits(neonProjectID, dbLimits); err != nil {
+			slog.Warn("SyncNeonProjectsForOrgPlan: quota update failed",
+				"error", err, "neon_project_id", neonProjectID, "tier", currentTier)
+			continue
+		}
+		slog.Info("SyncNeonProjectsForOrgPlan: re-quoted",
+			"neon_project_id", neonProjectID, "tier", currentTier)
+	}
 }
 
 // markNeonIntegrationErrored flips the Neon integration row's status to "error"

@@ -502,6 +502,17 @@ func createSchema(db *bun.DB) error {
 		`CREATE INDEX IF NOT EXISTS idx_ota_updates_channel_lookup
 		   ON ota_updates (app_project_id, runtime_version, platform, channel, created_at DESC)
 		   WHERE is_active = true`,
+
+		// Neon agent-plan migration: per-tier quotas + org tier on limits.
+		// ActiveTime + DataTransfer are the levers Neon's Free org actually
+		// meters; storage alone won't keep a free user free. SuspendTimeout
+		// shortens cold-suspend to cap active_time consumption. OrgTier picks
+		// which Neon org owns the project (free sponsored vs paid metered).
+		`ALTER TABLE standard_user_limits ADD COLUMN IF NOT EXISTS deploy_db_active_time_sec int NOT NULL DEFAULT 360000`,
+		`ALTER TABLE standard_user_limits ADD COLUMN IF NOT EXISTS deploy_db_data_transfer_bytes bigint NOT NULL DEFAULT 5368709120`,
+		`ALTER TABLE standard_user_limits ADD COLUMN IF NOT EXISTS deploy_db_compute_time_sec int NOT NULL DEFAULT 0`,
+		`ALTER TABLE standard_user_limits ADD COLUMN IF NOT EXISTS deploy_db_suspend_timeout_sec int NOT NULL DEFAULT 300`,
+		`ALTER TABLE standard_user_limits ADD COLUMN IF NOT EXISTS deploy_db_org_tier text NOT NULL DEFAULT 'free'`,
 	}
 
 	// Deduplicate before creating unique indexes (keep the latest row per group)
@@ -548,13 +559,12 @@ func createSchema(db *bun.DB) error {
 	// IMPORTANT: when adding a new ALTER TABLE above, update this canary to the newest column,
 	// otherwise the new ALTER will be silently skipped on servers that already have older columns.
 	// Table renames go in renameStatements below, not here — they run unconditionally.
-	// Canary: ota_updates.channel — the LAST column added (<P2#22> ota
-	// channels + rollout). Bumped past <P2#25>'s pg_indexes-based canary
-	// (uniq_mobile_subscriptions_project_user_product) so the new
-	// ota_updates ALTERs run on servers that already passed the #25 check.
+	// Canary: standard_user_limits.deploy_db_org_tier — the LAST column added
+	// (Neon agent-plan migration). Bumped past ota_updates.channel so the new
+	// deploy_db_* ALTERs run on servers that already passed the channel check.
 	var migrationsDone bool
 	row := db.QueryRowContext(context.Background(),
-		"SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='ota_updates' AND column_name='channel')")
+		"SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='standard_user_limits' AND column_name='deploy_db_org_tier')")
 	if err := row.Scan(&migrationsDone); err != nil {
 		migrationsDone = false
 	}
@@ -797,8 +807,14 @@ func seedPlans(db *database.Database, sm secret.SecretManager) {
 				CanDeployMobile:         false,
 				DeployMemoryMB:          256,
 				DeployCPUs:              "0.25",
-				DeployDBMaxCU:           "0.25",
-				DeployDBStorageMB:       512,
+				// Neon Free org (Neon-sponsored). 100h compute / 512MB / 5GB
+				// transfer, 5-min suspend. Matches Neon's Free plan reference.
+				DeployDBOrgTier:           "free",
+				DeployDBMaxCU:             "1",
+				DeployDBStorageMB:         512,
+				DeployDBActiveTimeSec:     360000,
+				DeployDBDataTransferBytes: 5 * 1024 * 1024 * 1024,
+				DeployDBSuspendTimeoutSec: 300,
 				CreditRolloverMonths:    0,
 				CanBuildToAndroid:       true,
 				CanBuildToIOS:           true,
@@ -833,8 +849,15 @@ func seedPlans(db *database.Database, sm secret.SecretManager) {
 				CanDeployMobile:         true,
 				DeployMemoryMB:          512,
 				DeployCPUs:              "0.5",
-				DeployDBMaxCU:           "0.5",
-				DeployDBStorageMB:       2048,
+				// Neon Paid org (metered against Wemob credits). Mid-tier
+				// quotas: still 100h compute, 2GB storage, 25GB transfer,
+				// 5-min suspend. autoscaling up to 2 CU.
+				DeployDBOrgTier:           "paid",
+				DeployDBMaxCU:             "2",
+				DeployDBStorageMB:         2048,
+				DeployDBActiveTimeSec:     360000,
+				DeployDBDataTransferBytes: 25 * 1024 * 1024 * 1024,
+				DeployDBSuspendTimeoutSec: 300,
 				CreditRolloverMonths:    1,
 				CanBuildToAndroid:       true,
 				CanBuildToIOS:           true,
@@ -869,8 +892,15 @@ func seedPlans(db *database.Database, sm secret.SecretManager) {
 				CanDeployMobile:         true,
 				DeployMemoryMB:          1024,
 				DeployCPUs:              "1",
-				DeployDBMaxCU:           "1",
-				DeployDBStorageMB:       10240,
+				// Neon Paid org. Higher compute (200h), 10GB storage, 100GB
+				// transfer, 1-min suspend (paid org's minimum). autoscaling
+				// up to 4 CU for heavier workloads.
+				DeployDBOrgTier:           "paid",
+				DeployDBMaxCU:             "4",
+				DeployDBStorageMB:         10240,
+				DeployDBActiveTimeSec:     720000,
+				DeployDBDataTransferBytes: 100 * 1024 * 1024 * 1024,
+				DeployDBSuspendTimeoutSec: 60,
 				CreditRolloverMonths:    1,
 				CanBuildToAndroid:       true,
 				CanBuildToIOS:           true,
@@ -939,6 +969,11 @@ func seedPlans(db *database.Database, sm secret.SecretManager) {
 		limits.DeployCPUs = p.Limits.DeployCPUs
 		limits.DeployDBMaxCU = p.Limits.DeployDBMaxCU
 		limits.DeployDBStorageMB = p.Limits.DeployDBStorageMB
+		limits.DeployDBActiveTimeSec = p.Limits.DeployDBActiveTimeSec
+		limits.DeployDBDataTransferBytes = p.Limits.DeployDBDataTransferBytes
+		limits.DeployDBComputeTimeSec = p.Limits.DeployDBComputeTimeSec
+		limits.DeployDBSuspendTimeoutSec = p.Limits.DeployDBSuspendTimeoutSec
+		limits.DeployDBOrgTier = p.Limits.DeployDBOrgTier
 		limits.CreditRolloverMonths = p.Limits.CreditRolloverMonths
 		limits.CanBuildToAndroid = p.Limits.CanBuildToAndroid
 		limits.CanBuildToIOS = p.Limits.CanBuildToIOS

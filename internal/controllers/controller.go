@@ -47,6 +47,13 @@ type Controller struct {
 	FlyInspector           FlyInspector
 	GiteaService           *gitea.Service
 	NeonService            *neon.Service
+	// NeonRegistry routes Neon API calls to the right org-scoped service
+	// (free vs paid) based on a project's tier. NeonService remains a
+	// back-compat pointer to the paid-tier service for callers that don't
+	// need tier routing (e.g. project deletion: the registry's For() handles
+	// any tier so the legacy field is fine for one-shot DELETEs against the
+	// project's current org — see app deletion path).
+	NeonRegistry           *neon.Registry
 	GitRepoService         *gitrepo.Service
 	MCPService             atomic.Pointer[mcpclient.Service]
 	PostHog                posthog.Client // nil = disabled
@@ -70,6 +77,7 @@ func NewController(db *database.Database, concurrentBuildLimiter chan struct{},
 	secretManager secret.SecretManager,
 	flyService *fly.Service, giteaService *gitea.Service,
 	neonService *neon.Service,
+	neonRegistry *neon.Registry,
 	posthogClient posthog.Client,
 	gitRepoService *gitrepo.Service,
 	codemagicService *codemagic.Service,
@@ -97,6 +105,7 @@ func NewController(db *database.Database, concurrentBuildLimiter chan struct{},
 		FlyInspector:           flyService,
 		GiteaService:           giteaService,
 		NeonService:            neonService,
+		NeonRegistry:           neonRegistry,
 		GitRepoService:         gitRepoService,
 		PostHog:                posthogClient,
 		RemoteConfig:           remoteConfigService,

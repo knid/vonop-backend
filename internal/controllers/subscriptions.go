@@ -115,6 +115,15 @@ func (c *Controller) GetSubscription(user *models.User) (*responses.UserSubscrip
 		CanUseEcommerce:         limits.CanUseEcommerce,
 		CanDeployWeb:            limits.CanDeployWeb,
 		CanExportToGitHub:       limits.CanExportToGitHub,
+		DeployMemoryMB:          limits.DeployMemoryMB,
+		DeployCPUs:              limits.DeployCPUs,
+		DeployDBMaxCU:           limits.DeployDBMaxCU,
+		DeployDBStorageMB:       limits.DeployDBStorageMB,
+		DeployDBActiveTimeSec:     limits.DeployDBActiveTimeSec,
+		DeployDBDataTransferBytes: limits.DeployDBDataTransferBytes,
+		DeployDBComputeTimeSec:    limits.DeployDBComputeTimeSec,
+		DeployDBSuspendTimeoutSec: limits.DeployDBSuspendTimeoutSec,
+		DeployDBOrgTier:           limits.DeployDBOrgTier,
 	}
 
 	return &responses.UserSubscriptionInformationResponse{
