@@ -1068,7 +1068,11 @@ func seedPlans(db *database.Database, sm secret.SecretManager) {
 			continue
 		}
 
+		limits.MaximumCredentialCount = p.Limits.MaximumCredentialCount
+		limits.MontlyBuildCount = p.Limits.MontlyBuildCount
+		limits.MontlyNotificationCount = p.Limits.MontlyNotificationCount
 		limits.MonthlyAICredits = p.Limits.MonthlyAICredits
+		limits.MaxSeats = p.Limits.MaxSeats
 		limits.MaxWebApps = p.Limits.MaxWebApps
 		limits.MaxMobileApps = p.Limits.MaxMobileApps
 		limits.MaxDeployedWebApps = p.Limits.MaxDeployedWebApps
@@ -1076,15 +1080,13 @@ func seedPlans(db *database.Database, sm secret.SecretManager) {
 		limits.CanDeployMobile = p.Limits.CanDeployMobile
 		limits.DeployMemoryMB = p.Limits.DeployMemoryMB
 		limits.DeployCPUs = p.Limits.DeployCPUs
+		limits.DeployDBOrgTier = p.Limits.DeployDBOrgTier
 		limits.DeployDBMaxCU = p.Limits.DeployDBMaxCU
 		limits.DeployDBStorageMB = p.Limits.DeployDBStorageMB
 		limits.DeployDBActiveTimeSec = p.Limits.DeployDBActiveTimeSec
 		limits.DeployDBDataTransferBytes = p.Limits.DeployDBDataTransferBytes
-		limits.DeployDBComputeTimeSec = p.Limits.DeployDBComputeTimeSec
 		limits.DeployDBSuspendTimeoutSec = p.Limits.DeployDBSuspendTimeoutSec
-		limits.DeployDBOrgTier = p.Limits.DeployDBOrgTier
-		// Plan/limits Phase 1: re-seed the new fields on every startup so
-		// admin-UI tinkering doesn't drift from the source-of-truth in this file.
+		limits.DeployDBComputeTimeSec = p.Limits.DeployDBComputeTimeSec
 		limits.MinMachinesRunning = p.Limits.MinMachinesRunning
 		limits.MonthlyBandwidthGB = p.Limits.MonthlyBandwidthGB
 		limits.MonthlyOTAPublishCount = p.Limits.MonthlyOTAPublishCount
@@ -1098,12 +1100,9 @@ func seedPlans(db *database.Database, sm secret.SecretManager) {
 		limits.CanBuyDomain = p.Limits.CanBuyDomain
 		limits.CanUseEmailService = p.Limits.CanUseEmailService
 		limits.CanUseEcommerce = p.Limits.CanUseEcommerce
+		limits.CanExportToGitHub = p.Limits.CanExportToGitHub
 		limits.CanDeployWeb = p.Limits.CanDeployWeb
 		limits.CanRemoveBrandLogo = p.Limits.CanRemoveBrandLogo
-		limits.MaximumCredentialCount = p.Limits.MaximumCredentialCount
-		limits.MontlyBuildCount = p.Limits.MontlyBuildCount
-		limits.MontlyNotificationCount = p.Limits.MontlyNotificationCount
-		limits.CanExportToGitHub = p.Limits.CanExportToGitHub
 
 		if _, err := db.UpdateStandardUserLimits(limits); err != nil {
 			slog.Error("failed to update limits for plan", "plan", p.Name, "error", err)
