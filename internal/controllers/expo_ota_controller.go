@@ -87,7 +87,10 @@ func (c *Controller) CreateQueuedExpoOTADeployment(project *models.AppProject, u
 // EnqueueExpoOTAPublish submits an expo:ota_publish task to the worker on
 // the matching plan-tier queue, isolated from web deploys so a 10-minute
 // expo export burst can't starve Fly deploys (or vice versa).
-func (c *Controller) EnqueueExpoOTAPublish(deploymentID uuid.UUID, isPaidPlan bool) (string, error) {
+func (c *Controller) EnqueueExpoOTAPublish(user *models.User, orgID uuid.UUID, deploymentID uuid.UUID, isPaidPlan bool) (string, error) {
+	if err := c.ChargeBuildCredits(user, orgID, constants.BuildCreditKindOTA, deploymentID.String()); err != nil {
+		return "", fmt.Errorf("insufficient credits for OTA publish: %w", err)
+	}
 	queue := "expo-ota-free"
 	if isPaidPlan {
 		queue = "expo-ota-pro"

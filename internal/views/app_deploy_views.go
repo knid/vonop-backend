@@ -318,7 +318,7 @@ func (v *HttpViews) deployExpoOTA(w http.ResponseWriter, r *http.Request, projec
 	}
 	_, planName, _ := v.Controller.GetUserLimitsWithPlan(user)
 	isPaid := planName != "" && planName != "free" && planName != "trial"
-	if _, err := v.Controller.EnqueueExpoOTAPublish(deployment.ID, isPaid); err != nil {
+	if _, err := v.Controller.EnqueueExpoOTAPublish(user, project.OrganizationID, deployment.ID, isPaid); err != nil {
 		v.Controller.MarkDeploymentFailed(deployment.ID.String(), "enqueue: "+err.Error())
 		utils.JSONInternalError(w, err)
 		return
