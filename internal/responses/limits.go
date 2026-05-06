@@ -34,6 +34,8 @@ type LimitsResponse struct {
 	DeployDBComputeTimeSec    int    `json:"deploy_db_compute_time_sec"`
 	DeployDBSuspendTimeoutSec int    `json:"deploy_db_suspend_timeout_sec"`
 	DeployDBOrgTier           string `json:"deploy_db_org_tier"`
+	MaxSeats                  int            `json:"max_seats"`
+	BuildCreditCosts          map[string]int `json:"build_credit_costs"`
 }
 
 // Note: LimitsResponse used to omit Deploy* fields entirely — the
