@@ -828,27 +828,23 @@ func seedPlans(db *database.Database, sm secret.SecretManager) {
 
 	plans := []planDef{
 		{
-			Name:         "Free",
-			Description:  "Free plan with limited features",
+			Name:         "Starter",
+			Description:  "Free tier — try Wemob with no commitment",
 			MonthlyPrice: 0,
 			PriceID:      "free_plan",
 			Limits: models.StandardUserLimits{
-				// A14: bumped from 0 → 2 so CanBuildToAndroid/iOS isn't a
-				// dead-end. Free still can't actually build mobile (CanBuildMobile=false),
-				// but legacy v1 paths can attach a credential without immediate failure.
-				MaximumCredentialCount:  2,
-				MontlyBuildCount:        1,
-				MontlyNotificationCount: 3,
-				MonthlyAICredits:        50,
-				MaxWebApps:              1,
-				MaxMobileApps:           0,
-				MaxDeployedWebApps:      1,
-				MaxDeployedMobileApps:   0,
-				CanDeployMobile:         false,
-				DeployMemoryMB:          256,
-				DeployCPUs:              "1",
-				// Neon Free org (Neon-sponsored). 100h compute / 512MB / 5GB
-				// transfer, 5-min suspend. Matches Neon's Free plan reference.
+				MaximumCredentialCount:    2,
+				MontlyBuildCount:          0, // retired — credits gate builds
+				MontlyNotificationCount:   3,
+				MonthlyAICredits:          50,
+				MaxSeats:                  1,
+				MaxWebApps:                1,
+				MaxMobileApps:             0,
+				MaxDeployedWebApps:        1,
+				MaxDeployedMobileApps:     0,
+				CanDeployMobile:           false,
+				DeployMemoryMB:            256,
+				DeployCPUs:                "1",
 				DeployDBOrgTier:           "free",
 				DeployDBMaxCU:             "1",
 				DeployDBStorageMB:         512,
@@ -858,7 +854,7 @@ func seedPlans(db *database.Database, sm secret.SecretManager) {
 				DeployDBComputeTimeSec:    0,
 				MinMachinesRunning:        0,
 				MonthlyBandwidthGB:        10,
-				MonthlyOTAPublishCount:    5,
+				MonthlyOTAPublishCount:    0, // retired — credits gate OTAs
 				CanChooseRegion:           false,
 				CreditRolloverMonths:      0,
 				CanBuildToAndroid:         true,
@@ -875,40 +871,35 @@ func seedPlans(db *database.Database, sm secret.SecretManager) {
 			},
 		},
 		{
-			Name:          "Starter",
-			Description:   "Starter plan for growing projects",
-			MonthlyPrice:  2000,
-			PriceID:       sm.GetSecret("STRIPE_STARTER_PRICE_ID"),
-			AnnualPrice:   19200,
-			AnnualPriceID: sm.GetSecret("STRIPE_STARTER_ANNUAL_PRICE_ID"),
+			Name:          "Hobby",
+			Description:   "For solo builders shipping their first apps",
+			MonthlyPrice:  1900,
+			PriceID:       sm.GetSecret("STRIPE_HOBBY_PRICE_ID"),
+			AnnualPrice:   18200,
+			AnnualPriceID: sm.GetSecret("STRIPE_HOBBY_ANNUAL_PRICE_ID"),
 			Limits: models.StandardUserLimits{
-				MaximumCredentialCount:  2,
-				MontlyBuildCount:        10,
-				MontlyNotificationCount: 50,
-				MonthlyAICredits:        100,
-				MaxWebApps:              20,
-				// A13: was 0 (contradicted CanBuildMobile=true + MaxDeployedMobileApps=1).
-				// Starter can now actually create a mobile_app_native project.
-				MaxMobileApps:         1,
-				MaxDeployedWebApps:    3,
-				MaxDeployedMobileApps: 1,
-				CanDeployMobile:       true,
-				DeployMemoryMB:        512,
-				DeployCPUs:            "1",
-				// Neon Paid org (metered against Wemob credits). Mid-tier
-				// quotas: 100h active + 100h compute, 2GB storage, 25GB transfer,
-				// 5-min suspend. autoscaling up to 2 CU. D1: ComputeTimeSec
-				// raised from 0 (uncapped) to 360000s (100h).
+				MaximumCredentialCount:    2,
+				MontlyBuildCount:          0,
+				MontlyNotificationCount:   50,
+				MonthlyAICredits:          200,
+				MaxSeats:                  2,
+				MaxWebApps:                20,
+				MaxMobileApps:             1,
+				MaxDeployedWebApps:        3,
+				MaxDeployedMobileApps:     1,
+				CanDeployMobile:           true,
+				DeployMemoryMB:            512,
+				DeployCPUs:                "1",
 				DeployDBOrgTier:           "paid",
-				DeployDBMaxCU:             "2",
+				DeployDBMaxCU:             "1",
 				DeployDBStorageMB:         2048,
 				DeployDBActiveTimeSec:     360000,
 				DeployDBDataTransferBytes: 25 * 1024 * 1024 * 1024,
 				DeployDBSuspendTimeoutSec: 300,
-				DeployDBComputeTimeSec:    360000,
+				DeployDBComputeTimeSec:    180000,
 				MinMachinesRunning:        0,
 				MonthlyBandwidthGB:        100,
-				MonthlyOTAPublishCount:    50,
+				MonthlyOTAPublishCount:    0,
 				CanChooseRegion:           false,
 				CreditRolloverMonths:      1,
 				CanBuildToAndroid:         true,
@@ -925,65 +916,115 @@ func seedPlans(db *database.Database, sm secret.SecretManager) {
 			},
 		},
 		{
-			Name:          "Professional",
-			Description:   "Professional plan for power users",
-			MonthlyPrice:  4000,
-			PriceID:       sm.GetSecret("STRIPE_PROFESSIONAL_PRICE_ID"),
-			AnnualPrice:   38400,
-			AnnualPriceID: sm.GetSecret("STRIPE_PROFESSIONAL_ANNUAL_PRICE_ID"),
+			Name:          "Pro",
+			Description:   "For freelancers and small teams shipping production apps",
+			MonthlyPrice:  3900,
+			PriceID:       sm.GetSecret("STRIPE_PRO_PRICE_ID"),
+			AnnualPrice:   37400,
+			AnnualPriceID: sm.GetSecret("STRIPE_PRO_ANNUAL_PRICE_ID"),
 			Limits: models.StandardUserLimits{
-				MaximumCredentialCount:  10,
-				MontlyBuildCount:        50,
-				MontlyNotificationCount: 200,
-				MonthlyAICredits:        200,
-				MaxWebApps:              100,
-				MaxMobileApps:           5,
-				// E1/E2: was 10 — combined with the A1 DeployCPUs fix that put
-				// Pro on shared-cpu-2x (~$8/mo per app), 10 deploys = ~$80 Fly
-				// compute on a $40 plan. Cut to 5 deploys at 512MB so worst-case
-				// stays around $20 (≈50% gross margin before Stripe + Codemagic +
-				// Neon + bandwidth).
-				MaxDeployedWebApps:    5,
-				MaxDeployedMobileApps: 3,
-				CanDeployMobile:       true,
-				// E1/E2: was 1024 (shared-cpu-2x ≈ $8/mo per app). Dropped to
-				// 512 (shared-cpu-1x ≈ $4/mo) to make Pro economics work. Pro
-				// keeps the differentiation via more deploy slots, more
-				// bandwidth, mobile, region selection, and OTA-unlimited.
-				DeployMemoryMB: 512,
-				DeployCPUs:     "1",
-				// Neon Paid org. Higher compute (200h), 10GB storage, 100GB
-				// transfer, 1-min suspend (paid org's minimum). autoscaling
-				// up to 4 CU for heavier workloads.
+				MaximumCredentialCount:    10,
+				MontlyBuildCount:          0,
+				MontlyNotificationCount:   200,
+				MonthlyAICredits:          500,
+				MaxSeats:                  5,
+				MaxWebApps:                100,
+				MaxMobileApps:             5,
+				MaxDeployedWebApps:        5,
+				MaxDeployedMobileApps:     3,
+				CanDeployMobile:           true,
+				DeployMemoryMB:            512,
+				DeployCPUs:                "1",
 				DeployDBOrgTier:           "paid",
-				DeployDBMaxCU:             "4",
+				DeployDBMaxCU:             "1",
 				DeployDBStorageMB:         10240,
 				DeployDBActiveTimeSec:     720000,
 				DeployDBDataTransferBytes: 100 * 1024 * 1024 * 1024,
 				DeployDBSuspendTimeoutSec: 60,
-				// D1: was 0 (uncapped). 200h matches the active-time tier.
-				DeployDBComputeTimeSec: 720000,
-				// A10: knob in place; Pro stays at 0 (cold start) for now.
-				// Flip to 1 alongside a price increase if/when we want
-				// always-warm as a Pro perk.
-				MinMachinesRunning:     0,
-				MonthlyBandwidthGB:     1024,
-				MonthlyOTAPublishCount: 0, // 0 = unlimited for Pro
-				CanChooseRegion:        true,
-				CreditRolloverMonths:   1,
-				CanBuildToAndroid:      true,
-				CanBuildToIOS:          true,
-				CanBuildMobile:         true,
-				CanUseAnalytics:        true,
-				CanAccessCode:          true,
-				CanBuyDomain:           true,
-				CanUseEmailService:     true,
-				CanUseEcommerce:        true,
-				CanExportToGitHub:      true,
-				CanDeployWeb:           true,
-				CanRemoveBrandLogo:     true,
+				DeployDBComputeTimeSec:    360000,
+				MinMachinesRunning:        0,
+				MonthlyBandwidthGB:        250,
+				MonthlyOTAPublishCount:    0,
+				CanChooseRegion:           true,
+				CreditRolloverMonths:      1,
+				CanBuildToAndroid:         true,
+				CanBuildToIOS:             true,
+				CanBuildMobile:            true,
+				CanUseAnalytics:           true,
+				CanAccessCode:             true,
+				CanBuyDomain:              true,
+				CanUseEmailService:        true,
+				CanUseEcommerce:           true,
+				CanExportToGitHub:         true,
+				CanDeployWeb:              true,
+				CanRemoveBrandLogo:        true,
 			},
 		},
+		{
+			Name:          "Max",
+			Description:   "For agencies and teams running multiple production apps",
+			MonthlyPrice:  6900,
+			PriceID:       sm.GetSecret("STRIPE_MAX_PRICE_ID"),
+			AnnualPrice:   66200,
+			AnnualPriceID: sm.GetSecret("STRIPE_MAX_ANNUAL_PRICE_ID"),
+			Limits: models.StandardUserLimits{
+				MaximumCredentialCount:    25,
+				MontlyBuildCount:          0,
+				MontlyNotificationCount:   500,
+				MonthlyAICredits:          1000,
+				MaxSeats:                  10,
+				MaxWebApps:                200,
+				MaxMobileApps:             10,
+				MaxDeployedWebApps:        10,
+				MaxDeployedMobileApps:     5,
+				CanDeployMobile:           true,
+				DeployMemoryMB:            512,
+				DeployCPUs:                "1",
+				DeployDBOrgTier:           "paid",
+				DeployDBMaxCU:             "2",
+				DeployDBStorageMB:         20480,
+				DeployDBActiveTimeSec:     1080000,
+				DeployDBDataTransferBytes: 200 * 1024 * 1024 * 1024,
+				DeployDBSuspendTimeoutSec: 60,
+				DeployDBComputeTimeSec:    360000,
+				MinMachinesRunning:        0,
+				MonthlyBandwidthGB:        500,
+				MonthlyOTAPublishCount:    0,
+				CanChooseRegion:           true,
+				CreditRolloverMonths:      2,
+				CanBuildToAndroid:         true,
+				CanBuildToIOS:             true,
+				CanBuildMobile:            true,
+				CanUseAnalytics:           true,
+				CanAccessCode:             true,
+				CanBuyDomain:              true,
+				CanUseEmailService:        true,
+				CanUseEcommerce:           true,
+				CanExportToGitHub:         true,
+				CanDeployWeb:              true,
+				CanRemoveBrandLogo:        true,
+			},
+		},
+	}
+
+	// 2026-05-06: soft-delete legacy plan rows ("Free", "Professional")
+	// before seeding the new four-tier shape. The new "Starter" replaces
+	// "Free" semantically; the old "Starter" $20 row has the same Name as
+	// the new "Starter" $0 row and gets matched-and-updated by the existing
+	// GetSubscriptionByNameIncludeDeleted path below.
+	//
+	// Use Bun's NewDelete on the model so the soft_delete struct tag fires
+	// (sets deleted_at instead of removing the row).
+	for _, legacyName := range []string{"Free", "Professional"} {
+		existing, err := db.GetSubscriptionByName(legacyName)
+		if err != nil {
+			continue // already gone or never seeded
+		}
+		if _, dErr := db.DB.NewDelete().Model(existing).Where("id = ?", existing.ID).Exec(context.Background()); dErr != nil {
+			slog.Warn("failed to soft-delete legacy plan", "name", legacyName, "error", dErr)
+		} else {
+			slog.Info("soft-deleted legacy plan", "name", legacyName)
+		}
 	}
 
 	for _, p := range plans {
