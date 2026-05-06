@@ -14,7 +14,6 @@ import (
 	"github.com/knid/wemob/internal/services/codemagic"
 	"github.com/knid/wemob/internal/utils"
 	"github.com/knid/wemob/internal/utils/external"
-	"github.com/posthog/posthog-go"
 )
 
 // BuildExpoMobile triggers a new Expo build for a mobile_app_native project.
@@ -88,32 +87,6 @@ func (c *Controller) BuildExpoMobile(ctx context.Context, project *models.AppPro
 	if wantIOS && !limits.CanBuildToIOS {
 		return nil, nil, fmt.Errorf("your subscription does not allow iOS builds")
 	}
-	// MontlyBuildCount = 0 means unlimited; >0 enforces a per-billing-period cap.
-	if limits.MontlyBuildCount > 0 {
-		org, orgErr := c.DB.GetPersonalOrgByUserID(user.ID.String())
-		if orgErr != nil || org == nil {
-			return nil, nil, fmt.Errorf("could not resolve org for build quota: %w", orgErr)
-		}
-		periodStart, periodEnd := utils.BillingPeriod(org.SubscriptionStartAt, time.Now())
-		used, countErr := c.DB.CountAppBuildTasksByOrgInPeriod(ctx, org.ID.String(), periodStart, periodEnd)
-		if countErr != nil {
-			slog.Warn("BuildExpoMobile: failed to count org builds; failing closed", "error", countErr, "org_id", org.ID)
-			return nil, nil, fmt.Errorf("could not check build quota: %w", countErr)
-		}
-		if used >= limits.MontlyBuildCount {
-			go c.EventService.SendEvent(user, constants.EVENT_SUBSCRIPTION_QUOTA_REACHED, map[string]any{
-				"action": "build_native",
-				"limit":  limits.MontlyBuildCount,
-				"used":   used,
-			})
-			go c.TrackUserEvent(user, "quota_reached", posthog.NewProperties().
-				Set("action", "build_native").
-				Set("limit", limits.MontlyBuildCount).
-				Set("used", used))
-			return nil, nil, fmt.Errorf("you have reached your monthly build limit (%d). Renews on %s", limits.MontlyBuildCount, periodEnd.Format("Jan 2"))
-		}
-	}
-
 	bundleID := bundleIDForProject(project, opts.BundleIDOverride)
 
 	// AppBuildTask + Build are keyed by v1 Project. Find or create the
