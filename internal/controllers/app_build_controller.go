@@ -324,30 +324,35 @@ func (c *Controller) BuildExpoMobile(ctx context.Context, project *models.AppPro
 			if mobileCfg != nil {
 				iosPermissions = renderPermissionUsageStrings(build.Title, "", mobileCfg.Permissions)
 			}
-			_, triggerErr = c.CodemagicService.TriggerExpoIOSBuild(ctx, codemagic.ExpoIOSBuildParams{
-				ProjectID:                      project.ID,
-				BuildID:                        build.ID,
-				TaskID:                         task.ID,
-				AppTitle:                       build.Title,
-				AppSlug:                        project.Slug,
-				BundleID:                       bundleID,
-				BuildNumber:                    nextNum,
-				MarketingVersion:               marketingVer,
-				SplashColor:                    build.SplashScreenColor,
-				IconKey:                        opts.Icon,
-				EASProjectUUID:                 project.ID.String(),
-				// XcodeScheme intentionally left blank — the Codemagic workflow
-				// derives it post-prebuild (P1.1.A T4 fix).
-				ExpoPublicAPIURL:               expoPublicAPIURL,
-				ExpoPublicProjectID:            project.ID.String(),
-				ExpoPublicAuthBaseURL:          expoPublicAuthBaseURL,
-				ExpoPublicRevenueCatKeyIOS:     rcKeyIOS,
-				ExpoPublicRevenueCatKeyAndroid: rcKeyAndroid,
-				ExpoPublicOneSignalAppID:       osAppID,
-				ExpoPublicOTAURL:               expoPublicOTAURL,
-				ExpoPublicWEMOBAPIURL:          constants.WEMOB_API_BASE_URL,
-				Permissions:                    iosPermissions,
-			})
+			if chargeErr := c.ChargeBuildCredits(user, project.OrganizationID, constants.BuildCreditKindIOS, build.ID.String()); chargeErr != nil {
+				slog.Warn("failed to charge ios build credits", "error", chargeErr, "build_id", build.ID, "org_id", project.OrganizationID)
+				triggerErr = fmt.Errorf("insufficient credits to trigger iOS build: %w", chargeErr)
+			} else {
+				_, triggerErr = c.CodemagicService.TriggerExpoIOSBuild(ctx, codemagic.ExpoIOSBuildParams{
+					ProjectID:                      project.ID,
+					BuildID:                        build.ID,
+					TaskID:                         task.ID,
+					AppTitle:                       build.Title,
+					AppSlug:                        project.Slug,
+					BundleID:                       bundleID,
+					BuildNumber:                    nextNum,
+					MarketingVersion:               marketingVer,
+					SplashColor:                    build.SplashScreenColor,
+					IconKey:                        opts.Icon,
+					EASProjectUUID:                 project.ID.String(),
+					// XcodeScheme intentionally left blank — the Codemagic workflow
+					// derives it post-prebuild (P1.1.A T4 fix).
+					ExpoPublicAPIURL:               expoPublicAPIURL,
+					ExpoPublicProjectID:            project.ID.String(),
+					ExpoPublicAuthBaseURL:          expoPublicAuthBaseURL,
+					ExpoPublicRevenueCatKeyIOS:     rcKeyIOS,
+					ExpoPublicRevenueCatKeyAndroid: rcKeyAndroid,
+					ExpoPublicOneSignalAppID:       osAppID,
+					ExpoPublicOTAURL:               expoPublicOTAURL,
+					ExpoPublicWEMOBAPIURL:          constants.WEMOB_API_BASE_URL,
+					Permissions:                    iosPermissions,
+				})
+			}
 		}
 
 		if triggerErr != nil {
