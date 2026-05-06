@@ -32,6 +32,19 @@ func neonTierFromLimits(l *models.StandardUserLimits) string {
 	return neon.TierPaid
 }
 
+// resolveProvisionTier picks the tier to provision under, accounting for
+// single-org installs. When the registry only wires one Neon org (legacy
+// NEON_API_KEY mode, or one of FREE/PAID missing), every project lives in
+// that one org regardless of plan — we stamp them all as "paid" so a future
+// split (Paid points at the legacy org, fresh Free org added) doesn't leave
+// pre-existing projects mis-tagged and 404'ing against the wrong service.
+func (c *Controller) resolveProvisionTier(l *models.StandardUserLimits) string {
+	if c.NeonRegistry != nil && c.NeonRegistry.IsSingleOrg() {
+		return neon.TierPaid
+	}
+	return neonTierFromLimits(l)
+}
+
 // neonForTier returns the org-scoped Neon service for a tier, falling back
 // to the legacy single-service field when no registry is wired.
 func (c *Controller) neonForTier(tier string) *neon.Service {
@@ -77,7 +90,7 @@ func dbLimitsFromUserLimits(l *models.StandardUserLimits) *neon.DBLimits {
 // autoscaling + suspend timeout — Neon meters all of these on the Free org,
 // so storage alone wouldn't keep a sponsored project free.
 func (c *Controller) provisionNeonDatabase(ctx context.Context, project *models.AppProject, dataModels []models.DataModel, userLimits *models.StandardUserLimits, sendEvent func(string, any) bool) (string, string, string, error) {
-	tier := neonTierFromLimits(userLimits)
+	tier := c.resolveProvisionTier(userLimits)
 	svc := c.neonForTier(tier)
 	if svc == nil {
 		return "", "", "", fmt.Errorf("Neon service not configured for tier %q", tier)
@@ -729,6 +742,13 @@ func (c *Controller) SyncNeonProjectsForOrgPlan(ctx context.Context, orgID uuid.
 	}
 
 	targetTier := neonTierFromLimits(newLimits)
+	// Single-org installs: every existing project is tagged "paid" by
+	// resolveProvisionTier (see comment there). Force the target tier to
+	// match so we don't trigger spurious "transfer disabled" warnings on
+	// every plan change in legacy mode.
+	if c.NeonRegistry != nil && c.NeonRegistry.IsSingleOrg() {
+		targetTier = neon.TierPaid
+	}
 	dbLimits := dbLimitsFromUserLimits(newLimits)
 
 	for i := range projects {

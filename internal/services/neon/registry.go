@@ -75,6 +75,23 @@ func (r *Registry) For(tier string) *Service {
 	return r.services[TierFree]
 }
 
+// IsSingleOrg reports whether free and paid tiers point at the same
+// underlying service — true when only the legacy NEON_API_KEY is set, or
+// when only one of the FREE/PAID keys is configured. Callers use this to
+// suppress tier-aware behavior (project-tagging by plan, transfer on plan
+// change) that would store wrong metadata in single-org mode.
+func (r *Registry) IsSingleOrg() bool {
+	if r == nil {
+		return true
+	}
+	free, hasFree := r.services[TierFree]
+	paid, hasPaid := r.services[TierPaid]
+	if !hasFree || !hasPaid {
+		return true
+	}
+	return free == paid
+}
+
 // OrgID returns the Neon organization ID for a tier. Empty when the tier
 // is unknown or the service was constructed without an org ID (personal key).
 func (r *Registry) OrgID(tier string) string {
