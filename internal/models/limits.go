@@ -44,6 +44,10 @@ type StandardUserLimits struct {
 	// at least N machines running so the first request after idle skips the
 	// 100ms-2s wake. Each warm machine adds steady-state Fly compute cost.
 	MinMachinesRunning int `bun:"min_machines_running,notnull,default:0"`
+	// Maximum number of organization members allowed on this plan.
+	// Enforcement (blocking the Nth invite) is handled by the org-agency
+	// roadmap; this field exists so that work can read it.
+	MaxSeats int `bun:"max_seats,notnull,default:1"`
 	// Fly egress quota per billing period. Metered daily via Fly GraphQL.
 	// 0 = unlimited (avoid; pre-A1 default).
 	MonthlyBandwidthGB int `bun:"monthly_bandwidth_gb,notnull,default:0"`

@@ -232,40 +232,6 @@ func (v *HttpViews) DeployAppMobile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// F4: MonthlyOTAPublishCount enforcement (0 = unlimited). Counted across
-	// every OTA deploy attempt the org made this billing period. Run before
-	// the deployed-slot gate because publish quota is the more common limit
-	// in steady-state.
-	if limits.MonthlyOTAPublishCount > 0 {
-		org, orgErr := v.Controller.DB.GetPersonalOrgByUserID(user.ID.String())
-		if orgErr != nil || org == nil {
-			utils.JSONInternalError(w, orgErr)
-			return
-		}
-		periodStart, periodEnd := utils.BillingPeriod(org.SubscriptionStartAt, time.Now())
-		used, _ := v.Controller.DB.CountOTAPublishesByOrgInPeriod(r.Context(), org.ID.String(), periodStart, periodEnd)
-		if used >= limits.MonthlyOTAPublishCount {
-			go v.Controller.EventService.SendEvent(user, constants.EVENT_SUBSCRIPTION_QUOTA_REACHED, map[string]any{
-				"action": "ota_publish",
-				"limit":  limits.MonthlyOTAPublishCount,
-				"used":   used,
-			})
-			go v.Controller.TrackUserEvent(user, "quota_reached", posthog.NewProperties().
-				Set("action", "ota_publish").
-				Set("limit", limits.MonthlyOTAPublishCount).
-				Set("used", used))
-			utils.JSONError(w, constants.ErrDeployLimitReached,
-				fmt.Sprintf("you have reached the maximum of %d OTA publishes for your plan this period", limits.MonthlyOTAPublishCount),
-				http.StatusForbidden, map[string]any{
-					"used":         used,
-					"limit":        limits.MonthlyOTAPublishCount,
-					"renewal_date": periodEnd.Format(time.RFC3339),
-					"plan_name":    planName,
-				})
-			return
-		}
-	}
-
 	if limits.MaxDeployedMobileApps > 0 {
 		orgIDForDeploy, orgErr := v.Controller.RequireOrgIDForUser(user, nil)
 		if orgErr != nil {
@@ -318,7 +284,7 @@ func (v *HttpViews) deployExpoOTA(w http.ResponseWriter, r *http.Request, projec
 	}
 	_, planName, _ := v.Controller.GetUserLimitsWithPlan(user)
 	isPaid := planName != "" && planName != "free" && planName != "trial"
-	if _, err := v.Controller.EnqueueExpoOTAPublish(deployment.ID, isPaid); err != nil {
+	if _, err := v.Controller.EnqueueExpoOTAPublish(user, project.OrganizationID, deployment.ID, isPaid); err != nil {
 		v.Controller.MarkDeploymentFailed(deployment.ID.String(), "enqueue: "+err.Error())
 		utils.JSONInternalError(w, err)
 		return

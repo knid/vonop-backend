@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/services/remoteconfig"
@@ -124,6 +125,8 @@ func (c *Controller) GetSubscription(user *models.User) (*responses.UserSubscrip
 		DeployDBComputeTimeSec:    limits.DeployDBComputeTimeSec,
 		DeployDBSuspendTimeoutSec: limits.DeployDBSuspendTimeoutSec,
 		DeployDBOrgTier:           limits.DeployDBOrgTier,
+		MaxSeats:                  limits.MaxSeats,
+		BuildCreditCosts:          buildCreditCostsForResponse(),
 	}
 
 	return &responses.UserSubscriptionInformationResponse{
@@ -157,6 +160,16 @@ func (c *Controller) UpdateSubscription(user *models.User, orgID *uuid.UUID, sub
 	}
 
 	return nil
+}
+
+// buildCreditCostsForResponse converts the typed BuildCreditCosts map to a
+// JSON-friendly string-keyed shape for the billing API response.
+func buildCreditCostsForResponse() map[string]int {
+	out := make(map[string]int, len(constants.BuildCreditCosts))
+	for k, v := range constants.BuildCreditCosts {
+		out[string(k)] = v
+	}
+	return out
 }
 
 func (c *Controller) CancelSubscription(user *models.User, orgID *uuid.UUID) error {
