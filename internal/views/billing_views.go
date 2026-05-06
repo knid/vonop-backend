@@ -12,6 +12,17 @@ import (
 	"github.com/knid/wemob/internal/utils"
 )
 
+// buildCreditCostsMap converts the typed BuildCreditCosts table to a
+// JSON-friendly string-keyed shape. Same shape used by the per-user
+// /v1/users/subscription endpoint (controllers/subscriptions.go).
+func buildCreditCostsMap() map[string]int {
+	out := make(map[string]int, len(constants.BuildCreditCosts))
+	for k, v := range constants.BuildCreditCosts {
+		out[string(k)] = v
+	}
+	return out
+}
+
 func (v *HttpViews) GetBillingPlans(w http.ResponseWriter, r *http.Request) {
 	subs, err := v.Controller.DB.GetSubscriptions()
 	if err != nil {
@@ -33,35 +44,51 @@ func (v *HttpViews) GetBillingPlans(w http.ResponseWriter, r *http.Request) {
 		limits, limitsErr := v.Controller.DB.GetStandardUserLimitsById(sub.LimitsID.String())
 		if limitsErr == nil {
 			rc := v.Controller.RemoteConfig
-			pn := strings.ToLower(sub.Name) // e.g. "starter", "professional"
+			pn := strings.ToLower(sub.Name) // e.g. "starter", "hobby", "pro", "max"
 
 			planLimits = responses.PlanLimitsResponse{
-				MaxDeployedWebApps:    rc.GetInt(remoteconfig.PlanInt(pn, "max-deployed-web-apps", limits.MaxDeployedWebApps), remoteconfig.Global),
-				MaxDeployedMobileApps: rc.GetInt(remoteconfig.PlanInt(pn, "max-deployed-mobile-apps", limits.MaxDeployedMobileApps), remoteconfig.Global),
-				CanDeployMobile:       rc.GetBool(remoteconfig.PlanBool(pn, "can-deploy-mobile", limits.CanDeployMobile), remoteconfig.Global),
-				MonthlyAICredits:      rc.GetInt(remoteconfig.PlanInt(pn, "monthly-ai-credits", limits.MonthlyAICredits), remoteconfig.Global),
-				CreditRolloverMonths:  rc.GetInt(remoteconfig.PlanInt(pn, "credit-rollover-months", limits.CreditRolloverMonths), remoteconfig.Global),
-				MontlyBuildCount:      limits.MontlyBuildCount,
-				CanBuildMobile:        rc.GetBool(remoteconfig.PlanBool(pn, "can-build-mobile", limits.CanBuildMobile), remoteconfig.Global),
-				CanUseAnalytics:       rc.GetBool(remoteconfig.PlanBool(pn, "can-use-analytics", limits.CanUseAnalytics), remoteconfig.Global),
-				CanAccessCode:         rc.GetBool(remoteconfig.PlanBool(pn, "can-access-code", limits.CanAccessCode), remoteconfig.Global),
-				CanBuyDomain:          rc.GetBool(remoteconfig.PlanBool(pn, "can-buy-domain", limits.CanBuyDomain), remoteconfig.Global),
-				CanUseEmailService:    rc.GetBool(remoteconfig.PlanBool(pn, "can-use-email-service", limits.CanUseEmailService), remoteconfig.Global),
-				CanUseEcommerce:       rc.GetBool(remoteconfig.PlanBool(pn, "can-use-ecommerce", limits.CanUseEcommerce), remoteconfig.Global),
-				CanDeployWeb:          rc.GetBool(remoteconfig.PlanBool(pn, "can-deploy-web", limits.CanDeployWeb), remoteconfig.Global),
+				// Credits
+				MonthlyAICredits:     rc.GetInt(remoteconfig.PlanInt(pn, "monthly-ai-credits", limits.MonthlyAICredits), remoteconfig.Global),
+				CreditRolloverMonths: rc.GetInt(remoteconfig.PlanInt(pn, "credit-rollover-months", limits.CreditRolloverMonths), remoteconfig.Global),
+				BuildCreditCosts:     buildCreditCostsMap(),
+				// Org / plan caps
+				MaxSeats:               limits.MaxSeats,
+				MaximumCredentialCount: limits.MaximumCredentialCount,
+				// App project caps
 				MaxWebApps:            rc.GetInt(remoteconfig.PlanInt(pn, "max-web-apps", limits.MaxWebApps), remoteconfig.Global),
 				MaxMobileApps:         rc.GetInt(remoteconfig.PlanInt(pn, "max-mobile-apps", limits.MaxMobileApps), remoteconfig.Global),
-				CanRemoveBrandLogo:    rc.GetBool(remoteconfig.PlanBool(pn, "can-remove-brand-logo", limits.CanRemoveBrandLogo), remoteconfig.Global),
-				CanExportToGitHub:     rc.GetBool(remoteconfig.PlanBool(pn, "can-export-to-github", limits.CanExportToGitHub), remoteconfig.Global),
-				DeployMemoryMB:        rc.GetInt(remoteconfig.PlanInt(pn, "deploy-memory-mb", limits.DeployMemoryMB), remoteconfig.Global),
-				DeployCPUs:            limits.DeployCPUs,
-				DeployDBMaxCU:         limits.DeployDBMaxCU,
-				DeployDBStorageMB:     rc.GetInt(remoteconfig.PlanInt(pn, "deploy-db-storage-mb", limits.DeployDBStorageMB), remoteconfig.Global),
-				// Neon agent-plan quotas. Active-time + data-transfer override
-				// via RC so we can tune sponsored-tier consumption without a
-				// re-seed; data-transfer is int64 but RC stores Go int (64-bit
-				// on every supported platform), so the cast is lossless for
-				// any plausible byte count.
+				MaxDeployedWebApps:    rc.GetInt(remoteconfig.PlanInt(pn, "max-deployed-web-apps", limits.MaxDeployedWebApps), remoteconfig.Global),
+				MaxDeployedMobileApps: rc.GetInt(remoteconfig.PlanInt(pn, "max-deployed-mobile-apps", limits.MaxDeployedMobileApps), remoteconfig.Global),
+				// Build / notification quotas (legacy — credits gate now)
+				MontlyBuildCount:        limits.MontlyBuildCount,
+				MontlyNotificationCount: limits.MontlyNotificationCount,
+				MonthlyOTAPublishCount:  limits.MonthlyOTAPublishCount,
+				// Capability flags
+				CanBuildToAndroid:  limits.CanBuildToAndroid,
+				CanBuildToIOS:      limits.CanBuildToIOS,
+				CanBuildMobile:     rc.GetBool(remoteconfig.PlanBool(pn, "can-build-mobile", limits.CanBuildMobile), remoteconfig.Global),
+				CanDeployMobile:    rc.GetBool(remoteconfig.PlanBool(pn, "can-deploy-mobile", limits.CanDeployMobile), remoteconfig.Global),
+				CanDeployWeb:       rc.GetBool(remoteconfig.PlanBool(pn, "can-deploy-web", limits.CanDeployWeb), remoteconfig.Global),
+				CanUseAnalytics:    rc.GetBool(remoteconfig.PlanBool(pn, "can-use-analytics", limits.CanUseAnalytics), remoteconfig.Global),
+				CanAccessCode:      rc.GetBool(remoteconfig.PlanBool(pn, "can-access-code", limits.CanAccessCode), remoteconfig.Global),
+				CanBuyDomain:       rc.GetBool(remoteconfig.PlanBool(pn, "can-buy-domain", limits.CanBuyDomain), remoteconfig.Global),
+				CanUseEmailService: rc.GetBool(remoteconfig.PlanBool(pn, "can-use-email-service", limits.CanUseEmailService), remoteconfig.Global),
+				CanUseEcommerce:    rc.GetBool(remoteconfig.PlanBool(pn, "can-use-ecommerce", limits.CanUseEcommerce), remoteconfig.Global),
+				CanExportToGitHub:  rc.GetBool(remoteconfig.PlanBool(pn, "can-export-to-github", limits.CanExportToGitHub), remoteconfig.Global),
+				CanRemoveBrandLogo: rc.GetBool(remoteconfig.PlanBool(pn, "can-remove-brand-logo", limits.CanRemoveBrandLogo), remoteconfig.Global),
+				CanChooseRegion:    limits.CanChooseRegion,
+				// Fly machine spec
+				DeployMemoryMB:     rc.GetInt(remoteconfig.PlanInt(pn, "deploy-memory-mb", limits.DeployMemoryMB), remoteconfig.Global),
+				DeployCPUs:         limits.DeployCPUs,
+				MinMachinesRunning: limits.MinMachinesRunning,
+				MonthlyBandwidthGB: limits.MonthlyBandwidthGB,
+				// Neon database quotas. Active-time + data-transfer override via
+				// RC so we can tune sponsored-tier consumption without a re-seed;
+				// data-transfer is int64 but RC stores Go int (64-bit on every
+				// supported platform), so the cast is lossless for any plausible
+				// byte count.
+				DeployDBMaxCU:             limits.DeployDBMaxCU,
+				DeployDBStorageMB:         rc.GetInt(remoteconfig.PlanInt(pn, "deploy-db-storage-mb", limits.DeployDBStorageMB), remoteconfig.Global),
 				DeployDBActiveTimeSec:     rc.GetInt(remoteconfig.PlanInt(pn, "deploy-db-active-time-sec", limits.DeployDBActiveTimeSec), remoteconfig.Global),
 				DeployDBDataTransferBytes: int64(rc.GetInt(remoteconfig.PlanInt(pn, "deploy-db-data-transfer-bytes", int(limits.DeployDBDataTransferBytes)), remoteconfig.Global)),
 				DeployDBComputeTimeSec:    rc.GetInt(remoteconfig.PlanInt(pn, "deploy-db-compute-time-sec", limits.DeployDBComputeTimeSec), remoteconfig.Global),
