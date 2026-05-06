@@ -110,7 +110,16 @@ func (v *HttpViews) GetBillingPlans(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	utils.JSONResponse(w, plans, http.StatusOK)
+	defaultRegion := ""
+	if v.Controller.FlyService != nil {
+		defaultRegion = v.Controller.FlyService.Region
+	}
+
+	utils.JSONResponse(w, responses.PlansListResponse{
+		Plans:            plans,
+		AvailableRegions: constants.FlyRegions,
+		DefaultRegion:    defaultRegion,
+	}, http.StatusOK)
 }
 
 func (v *HttpViews) GetAICreditsBalance(w http.ResponseWriter, r *http.Request) {

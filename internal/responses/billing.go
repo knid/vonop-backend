@@ -1,5 +1,17 @@
 package responses
 
+import "github.com/knid/wemob/internal/constants"
+
+// PlansListResponse is the wrapper returned by GET /v1/billing/plans. It
+// carries the plan list plus platform-wide context the frontend needs to
+// render the comparison table (available Fly regions, the default region a
+// user lands on if their plan can't pick).
+type PlansListResponse struct {
+	Plans            []PlanResponse        `json:"plans"`
+	AvailableRegions []constants.FlyRegion `json:"available_regions"`
+	DefaultRegion    string                `json:"default_region"`
+}
+
 type PlanLimitsResponse struct {
 	// Credits
 	MonthlyAICredits     int            `json:"monthly_ai_credits"`
