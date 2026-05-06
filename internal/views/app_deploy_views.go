@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-playground/validator/v10"
@@ -31,43 +32,59 @@ func (v *HttpViews) DeployAppWeb(w http.ResponseWriter, r *http.Request) {
 
 	appID := chi.URLParam(r, "appId")
 
-	// Check web deploy permission and limits
+	// Check web deploy permission and limits.
+	// A5/A7/A8: limit lookup failures now fail closed. §B Phase 4: deploy
+	// quota counts are org-scoped, so we look up the actor's org once.
 	limits, planName, limitsErr := v.Controller.GetUserLimitsWithPlan(user)
-	if limitsErr == nil {
-		if !limits.CanDeployWeb {
-			go v.Controller.EventService.SendEvent(user, constants.EVENT_SUBSCRIPTION_NEED, map[string]any{"action": "deploy_web"})
-			utils.JSONError(w, constants.ErrFeatureNotAvailable, "web deployments are not available on your plan", http.StatusForbidden, nil)
+	if limitsErr != nil {
+		utils.JSONError(w, constants.ErrSubscriptionRequired, "active subscription required", http.StatusForbidden, nil)
+		return
+	}
+	if !limits.CanDeployWeb {
+		go v.Controller.EventService.SendEvent(user, constants.EVENT_SUBSCRIPTION_NEED, map[string]any{"action": "deploy_web"})
+		utils.JSONError(w, constants.ErrFeatureNotAvailable, "web deployments are not available on your plan", http.StatusForbidden, nil)
+		return
+	}
+
+	// E3 Phase 7: bandwidth quota gate. Reads the daily-cron-populated
+	// app_bandwidth_usages row for the org's current billing period; blocks
+	// new deploys when bytes_used >= MonthlyBandwidthGB. Existing deploys
+	// keep serving traffic — auto-suspend on overage is a follow-up.
+	if blocked := v.checkBandwidthQuota(w, r, user, limits, planName); blocked {
+		return
+	}
+
+	if limits.MaxDeployedWebApps > 0 {
+		orgIDForDeploy, orgErr := v.Controller.RequireOrgIDForUser(user, nil)
+		if orgErr != nil {
+			utils.JSONInternalError(w, orgErr)
 			return
 		}
+		count, _ := v.Controller.DB.CountDeployedWebAppsByOrgID(orgIDForDeploy.String())
+		// Allow re-deploys: if this app is already deployed, it doesn't count as a new slot
+		alreadyDeployed, _ := v.Controller.DB.IsAppAlreadyDeployed(appID)
+		if !alreadyDeployed && count >= limits.MaxDeployedWebApps {
+			go v.Controller.EventService.SendEvent(user, constants.EVENT_SUBSCRIPTION_QUOTA_REACHED, map[string]any{"action": "deploy_web", "limit": limits.MaxDeployedWebApps})
+			go v.Controller.TrackUserEvent(user, "quota_reached", posthog.NewProperties().Set("action", "deploy_web").Set("limit", limits.MaxDeployedWebApps))
 
-		if limits.MaxDeployedWebApps > 0 {
-			count, _ := v.Controller.DB.CountDeployedWebAppsByUserID(user.ID.String())
-			// Allow re-deploys: if this app is already deployed, it doesn't count as a new slot
-			alreadyDeployed, _ := v.Controller.DB.IsAppAlreadyDeployed(appID)
-			if !alreadyDeployed && count >= limits.MaxDeployedWebApps {
-				go v.Controller.EventService.SendEvent(user, constants.EVENT_SUBSCRIPTION_QUOTA_REACHED, map[string]any{"action": "deploy_web", "limit": limits.MaxDeployedWebApps})
-				go v.Controller.TrackUserEvent(user, "quota_reached", posthog.NewProperties().Set("action", "deploy_web").Set("limit", limits.MaxDeployedWebApps))
-
-				// Include deployed app names so the user knows which to undeploy
-				var deployedNames []string
-				if apps, err := v.Controller.DB.GetDeployedWebAppsByUserID(user.ID.String()); err == nil {
-					for _, a := range apps {
-						deployedNames = append(deployedNames, a.Name)
-					}
+			// Include deployed app names so the user knows which to undeploy
+			var deployedNames []string
+			if apps, err := v.Controller.DB.GetDeployedWebAppsByOrgID(orgIDForDeploy.String()); err == nil {
+				for _, a := range apps {
+					deployedNames = append(deployedNames, a.Name)
 				}
-
-				utils.JSONError(w, constants.ErrDeployLimitReached,
-					fmt.Sprintf("you have reached the maximum of %d deployed web apps for your plan", limits.MaxDeployedWebApps),
-					http.StatusForbidden, map[string]any{
-						"deployed_apps": deployedNames,
-						"used":          count,
-						"limit":         limits.MaxDeployedWebApps,
-						"plan_name":     planName,
-					})
-				return
 			}
-		}
 
+			utils.JSONError(w, constants.ErrDeployLimitReached,
+				fmt.Sprintf("you have reached the maximum of %d deployed web apps for your plan", limits.MaxDeployedWebApps),
+				http.StatusForbidden, map[string]any{
+					"deployed_apps": deployedNames,
+					"used":          count,
+					"limit":         limits.MaxDeployedWebApps,
+					"plan_name":     planName,
+				})
+			return
+		}
 	}
 
 	project, err := v.Controller.GetAppProject(appID, user)
@@ -194,39 +211,89 @@ func (v *HttpViews) DeployAppMobile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check mobile deploy permission and limits
+	// Check mobile deploy permission and limits.
+	// A5/A7/A8: limit lookup failures now fail closed. §B Phase 4: deploy
+	// quota counts are org-scoped.
 	limits, planName, limitsErr := v.Controller.GetUserLimitsWithPlan(user)
-	if limitsErr == nil {
-		if !limits.CanDeployMobile {
-			go v.Controller.EventService.SendEvent(user, constants.EVENT_SUBSCRIPTION_NEED, map[string]any{"action": "deploy_mobile"})
-			utils.JSONError(w, constants.ErrFeatureNotAvailable, "mobile deployments are not available on your plan", http.StatusForbidden, nil)
+	if limitsErr != nil {
+		utils.JSONError(w, constants.ErrSubscriptionRequired, "active subscription required", http.StatusForbidden, nil)
+		return
+	}
+	if !limits.CanDeployMobile {
+		go v.Controller.EventService.SendEvent(user, constants.EVENT_SUBSCRIPTION_NEED, map[string]any{"action": "deploy_mobile"})
+		utils.JSONError(w, constants.ErrFeatureNotAvailable, "mobile deployments are not available on your plan", http.StatusForbidden, nil)
+		return
+	}
+
+	// E3 Phase 7: bandwidth quota gate. OTA payloads count against the same
+	// MonthlyBandwidthGB tally as web egress (Fly billing rolls them up
+	// together via runtime_apps).
+	if blocked := v.checkBandwidthQuota(w, r, user, limits, planName); blocked {
+		return
+	}
+
+	// F4: MonthlyOTAPublishCount enforcement (0 = unlimited). Counted across
+	// every OTA deploy attempt the org made this billing period. Run before
+	// the deployed-slot gate because publish quota is the more common limit
+	// in steady-state.
+	if limits.MonthlyOTAPublishCount > 0 {
+		org, orgErr := v.Controller.DB.GetPersonalOrgByUserID(user.ID.String())
+		if orgErr != nil || org == nil {
+			utils.JSONInternalError(w, orgErr)
 			return
 		}
+		periodStart, periodEnd := utils.BillingPeriod(org.SubscriptionStartAt, time.Now())
+		used, _ := v.Controller.DB.CountOTAPublishesByOrgInPeriod(r.Context(), org.ID.String(), periodStart, periodEnd)
+		if used >= limits.MonthlyOTAPublishCount {
+			go v.Controller.EventService.SendEvent(user, constants.EVENT_SUBSCRIPTION_QUOTA_REACHED, map[string]any{
+				"action": "ota_publish",
+				"limit":  limits.MonthlyOTAPublishCount,
+				"used":   used,
+			})
+			go v.Controller.TrackUserEvent(user, "quota_reached", posthog.NewProperties().
+				Set("action", "ota_publish").
+				Set("limit", limits.MonthlyOTAPublishCount).
+				Set("used", used))
+			utils.JSONError(w, constants.ErrDeployLimitReached,
+				fmt.Sprintf("you have reached the maximum of %d OTA publishes for your plan this period", limits.MonthlyOTAPublishCount),
+				http.StatusForbidden, map[string]any{
+					"used":         used,
+					"limit":        limits.MonthlyOTAPublishCount,
+					"renewal_date": periodEnd.Format(time.RFC3339),
+					"plan_name":    planName,
+				})
+			return
+		}
+	}
 
-		if limits.MaxDeployedMobileApps > 0 {
-			count, _ := v.Controller.DB.CountDeployedMobileAppsByUserID(user.ID.String())
-			alreadyDeployed, _ := v.Controller.DB.IsAppAlreadyDeployedMobile(appID)
-			if !alreadyDeployed && count >= limits.MaxDeployedMobileApps {
-				go v.Controller.EventService.SendEvent(user, constants.EVENT_SUBSCRIPTION_QUOTA_REACHED, map[string]any{"action": "deploy_mobile", "limit": limits.MaxDeployedMobileApps})
-				go v.Controller.TrackUserEvent(user, "quota_reached", posthog.NewProperties().Set("action", "deploy_mobile").Set("limit", limits.MaxDeployedMobileApps))
+	if limits.MaxDeployedMobileApps > 0 {
+		orgIDForDeploy, orgErr := v.Controller.RequireOrgIDForUser(user, nil)
+		if orgErr != nil {
+			utils.JSONInternalError(w, orgErr)
+			return
+		}
+		count, _ := v.Controller.DB.CountDeployedMobileAppsByOrgID(orgIDForDeploy.String())
+		alreadyDeployed, _ := v.Controller.DB.IsAppAlreadyDeployedMobile(appID)
+		if !alreadyDeployed && count >= limits.MaxDeployedMobileApps {
+			go v.Controller.EventService.SendEvent(user, constants.EVENT_SUBSCRIPTION_QUOTA_REACHED, map[string]any{"action": "deploy_mobile", "limit": limits.MaxDeployedMobileApps})
+			go v.Controller.TrackUserEvent(user, "quota_reached", posthog.NewProperties().Set("action", "deploy_mobile").Set("limit", limits.MaxDeployedMobileApps))
 
-				var deployedNames []string
-				if apps, err := v.Controller.DB.GetDeployedMobileAppsByUserID(user.ID.String()); err == nil {
-					for _, a := range apps {
-						deployedNames = append(deployedNames, a.Name)
-					}
+			var deployedNames []string
+			if apps, err := v.Controller.DB.GetDeployedMobileAppsByOrgID(orgIDForDeploy.String()); err == nil {
+				for _, a := range apps {
+					deployedNames = append(deployedNames, a.Name)
 				}
-
-				utils.JSONError(w, constants.ErrDeployLimitReached,
-					fmt.Sprintf("you have reached the maximum of %d deployed mobile apps for your plan", limits.MaxDeployedMobileApps),
-					http.StatusForbidden, map[string]any{
-						"deployed_apps": deployedNames,
-						"used":          count,
-						"limit":         limits.MaxDeployedMobileApps,
-						"plan_name":     planName,
-					})
-				return
 			}
+
+			utils.JSONError(w, constants.ErrDeployLimitReached,
+				fmt.Sprintf("you have reached the maximum of %d deployed mobile apps for your plan", limits.MaxDeployedMobileApps),
+				http.StatusForbidden, map[string]any{
+					"deployed_apps": deployedNames,
+					"used":          count,
+					"limit":         limits.MaxDeployedMobileApps,
+					"plan_name":     planName,
+				})
+			return
 		}
 	}
 
@@ -327,9 +394,11 @@ func (v *HttpViews) BuildAppExpo(w http.ResponseWriter, r *http.Request) {
 	}
 
 	limits, limitsErr := v.Controller.GetUserLimits(user)
+	// A9: any paid plan unlocks CanBuildMobile (Starter + Pro), not just Pro.
+	// Old message lied. A5/A7/A8: limitsErr now fails closed.
 	if limitsErr != nil || !limits.CanBuildMobile {
 		go v.Controller.EventService.SendEvent(user, constants.EVENT_SUBSCRIPTION_NEED, map[string]any{"action": "build_expo"})
-		utils.JSONError(w, constants.ErrFeatureNotAvailable, "mobile builds require Professional plan", http.StatusForbidden, nil)
+		utils.JSONError(w, constants.ErrFeatureNotAvailable, "mobile builds are not available on your plan", http.StatusForbidden, nil)
 		return
 	}
 
@@ -653,4 +722,46 @@ func (v *HttpViews) ValidateAppFiles(w http.ResponseWriter, r *http.Request) {
 	}
 
 	utils.JSONResponse(w, result, http.StatusOK)
+}
+
+// checkBandwidthQuota gates a deploy on the org's MonthlyBandwidthGB. Returns
+// true when the deploy must be blocked (response already written). Bandwidth
+// usage comes from app_bandwidth_usages, populated by the daily Fly GraphQL
+// sync cron (E3 Phase 7); a missing row means "no usage tracked yet, allow".
+func (v *HttpViews) checkBandwidthQuota(w http.ResponseWriter, r *http.Request, user *models.User, limits *models.StandardUserLimits, planName string) bool {
+	if limits == nil || limits.MonthlyBandwidthGB <= 0 {
+		return false
+	}
+	org, orgErr := v.Controller.DB.GetPersonalOrgByUserID(user.ID.String())
+	if orgErr != nil || org == nil {
+		// Best-effort: don't lock users out of deploying because the org
+		// lookup hiccupped. The cron will catch up next pass.
+		return false
+	}
+	periodStart, periodEnd := utils.BillingPeriod(org.SubscriptionStartAt, time.Now())
+	usage, _ := v.Controller.DB.GetBandwidthUsageForOrgPeriod(r.Context(), org.ID, periodStart)
+	const bytesPerGB = int64(1024 * 1024 * 1024)
+	limitBytes := int64(limits.MonthlyBandwidthGB) * bytesPerGB
+	if usage == nil || usage.BytesUsed < limitBytes {
+		return false
+	}
+	go v.Controller.EventService.SendEvent(user, constants.EVENT_SUBSCRIPTION_QUOTA_REACHED, map[string]any{
+		"action":     "bandwidth",
+		"limit_gb":   limits.MonthlyBandwidthGB,
+		"bytes_used": usage.BytesUsed,
+	})
+	go v.Controller.TrackUserEvent(user, "quota_reached", posthog.NewProperties().
+		Set("action", "bandwidth").
+		Set("limit_gb", limits.MonthlyBandwidthGB).
+		Set("bytes_used", usage.BytesUsed))
+	utils.JSONError(w, constants.ErrDeployLimitReached,
+		fmt.Sprintf("you have used %d GB of %d GB bandwidth for this billing period",
+			usage.BytesUsed/bytesPerGB, limits.MonthlyBandwidthGB),
+		http.StatusForbidden, map[string]any{
+			"bytes_used":   usage.BytesUsed,
+			"limit_gb":     limits.MonthlyBandwidthGB,
+			"renewal_date": periodEnd.Format(time.RFC3339),
+			"plan_name":    planName,
+		})
+	return true
 }

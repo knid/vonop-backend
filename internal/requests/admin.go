@@ -61,7 +61,6 @@ type AdminUpdateSubscriptionPlanRequest struct {
 	Name         *string `json:"name"`
 	MonthlyPrice *int    `json:"monthly_price"`
 	AnnualPrice  *int    `json:"annual_price"`
-	MaximumProjectCount     *int  `json:"maximum_project_count"`
 	MaximumCredentialCount  *int  `json:"maximum_credential_count"`
 	MontlyNotificationCount *int  `json:"montly_notification_count"`
 	MontlyBuildCount        *int  `json:"montly_build_count"`
@@ -82,4 +81,8 @@ type AdminUpdateSubscriptionPlanRequest struct {
 	CanExportToGitHub       *bool `json:"can_export_to_github"`
 	CanUseEmailService      *bool `json:"can_use_email_service"`
 	CanBuildMobile          *bool `json:"can_build_mobile"`
+	MinMachinesRunning      *int  `json:"min_machines_running"`
+	MonthlyBandwidthGB      *int  `json:"monthly_bandwidth_gb"`
+	MonthlyOTAPublishCount  *int  `json:"monthly_ota_publish_count"`
+	CanChooseRegion         *bool `json:"can_choose_region"`
 }

@@ -28,6 +28,28 @@ func (db *Database) GetAppBuildTasksByUser(user *models.User) ([]models.AppBuild
 	return appBuildTasks, nil
 }
 
+// CountAppBuildTasksByOrgInPeriod counts native (Android/iOS) build tasks
+// triggered by any member of the given org within [start, end). Used by the
+// MontlyBuildCount enforcement gate (A3 — previously theatrical).
+//
+// app_build_tasks.project_id references the v1 `projects` table whose UserID
+// is the trigger user. Org membership is resolved via organization_members so
+// every member's builds count against the same monthly budget.
+func (db *Database) CountAppBuildTasksByOrgInPeriod(ctx context.Context, orgID string, start, end time.Time) (int, error) {
+	var count int
+	err := db.DB.NewSelect().
+		TableExpr("app_build_tasks AS abt").
+		Join("JOIN projects p ON p.id = abt.project_id").
+		Join("JOIN organization_members om ON om.user_id = p.user_id").
+		ColumnExpr("COUNT(*)").
+		Where("om.organization_id = ?", orgID).
+		Where("abt.platform IN ('Android','IOS')").
+		Where("abt.created_at >= ?", start).
+		Where("abt.created_at < ?", end).
+		Scan(ctx, &count)
+	return count, err
+}
+
 // GetAppBuildTasksByUserAndProject scopes the task list to a single v1
 // Project shadow row owned by the user. The Publish UI uses this so a
 // brand-new project doesn't get a Native-build row sourced from a 2-week-

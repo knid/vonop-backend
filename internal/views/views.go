@@ -30,7 +30,10 @@ func requireActiveSubscription(w http.ResponseWriter, c *controllers.Controller,
 		return true
 	}
 	switch org.SubscriptionStatus {
-	case "active", "free", "trial":
+	// F3: 'trial' was historically whitelisted but no Trial plan row was
+	// seeded and Stripe trials aren't currently configured; treating it as
+	// active-equivalent created a state we couldn't actually reach. Removed.
+	case "active", "free":
 		return false
 	}
 	utils.JSONError(w, constants.ErrSubscriptionRequired, "active subscription required", http.StatusForbidden, nil)

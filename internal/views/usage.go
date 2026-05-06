@@ -38,7 +38,15 @@ func (v *HttpViews) GetMontlyUsage(w http.ResponseWriter, r *http.Request) {
 		notifications = append(notifications, projectNotifications...)
 	}
 
-	renewStart, renewEnd := utils.BillingPeriod(user.SubscriptionStartAt, time.Now())
+	// A15: anchor billing window on the personal org's SubscriptionStartAt
+	// (Plan A made billing org-scoped). Falls back to user.SubscriptionStartAt
+	// only when the org lookup fails — keeps the view from crashing on rows
+	// that haven't been migrated yet.
+	subsStart := user.SubscriptionStartAt
+	if org, orgErr := v.Controller.DB.GetPersonalOrgByUserID(user.ID.String()); orgErr == nil && org != nil {
+		subsStart = org.SubscriptionStartAt
+	}
+	renewStart, renewEnd := utils.BillingPeriod(subsStart, time.Now())
 
 	notificationCount := 0
 	for _, notification := range notifications {
@@ -65,9 +73,17 @@ func (v *HttpViews) GetMontlyUsage(w http.ResponseWriter, r *http.Request) {
 		aiCreditsLimit = limits.MonthlyAICredits
 	}
 
-	// App project counts by type (total, not period-based)
-	webAppsUsed, _ := v.Controller.DB.CountAppProjectsByUserIDAndType(user.ID.String(), "")
-	mobileAppsUsed, _ := v.Controller.DB.CountAppProjectsByUserIDAndType(user.ID.String(), "mobile")
+	// App project counts by type (total, not period-based). §B Phase 4:
+	// org-scoped — limits are billed at the org, so usage is too. Falls back
+	// to user-scoped on org lookup failure so the view stays renderable.
+	var webAppsUsed, mobileAppsUsed int
+	if org, orgErr := v.Controller.DB.GetPersonalOrgByUserID(user.ID.String()); orgErr == nil && org != nil {
+		webAppsUsed, _ = v.Controller.DB.CountAppProjectsByOrgIDAndType(org.ID.String(), "")
+		mobileAppsUsed, _ = v.Controller.DB.CountAppProjectsByOrgIDAndType(org.ID.String(), "mobile")
+	} else {
+		webAppsUsed, _ = v.Controller.DB.CountAppProjectsByUserIDAndType(user.ID.String(), "")
+		mobileAppsUsed, _ = v.Controller.DB.CountAppProjectsByUserIDAndType(user.ID.String(), "mobile")
+	}
 
 	// AI credits balance — read against the user's personal org.
 	var aiCreditsBalance int

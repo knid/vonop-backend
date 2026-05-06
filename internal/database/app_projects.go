@@ -180,6 +180,25 @@ func (db *Database) CountAppProjectsByUserIDAndType(userID string, projectType s
 	return q.Count(context.Background())
 }
 
+// CountAppProjectsByOrgIDAndType is the org-scoped variant used for plan
+// limit enforcement. Plan/limits Phase 4 (§B): limits are billed at the org,
+// so the count must be too — otherwise each org member could create up to
+// MaxWebApps/MaxMobileApps independently.
+//
+// projectType filter values match CountAppProjectsByUserIDAndType.
+func (db *Database) CountAppProjectsByOrgIDAndType(orgID string, projectType string) (int, error) {
+	q := db.DB.NewSelect().Model((*models.AppProject)(nil)).
+		Where("organization_id = ?", orgID).
+		Where("status != ?", "generating")
+	switch projectType {
+	case "mobile", "mobile_app_native":
+		q = q.Where("project_type = ?", "mobile_app_native")
+	default:
+		q = q.Where("project_type != ?", "mobile_app_native")
+	}
+	return q.Count(context.Background())
+}
+
 // ReassignProjectsToOrgOwner reassigns UserID on all of fromUserID's projects
 // in the given org to toUserID. Returns the IDs of affected projects so the
 // caller can invalidate their per-row cache entries — AuthorizeProjectAccess

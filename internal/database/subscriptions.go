@@ -2,6 +2,7 @@ package database
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/models"
@@ -149,6 +150,23 @@ func (db *Database) CountDeployedWebAppsByUserID(userID string) (int, error) {
 	return count, err
 }
 
+// CountDeployedWebAppsByOrgID is the org-scoped variant used for plan limit
+// enforcement. Plan/limits Phase 4 (§B): limits live on the org, so the count
+// must too. Joins via app_projects.organization_id since app_deployments
+// itself doesn't carry org_id.
+func (db *Database) CountDeployedWebAppsByOrgID(orgID string) (int, error) {
+	var count int
+	err := db.DB.NewSelect().
+		TableExpr("app_deployments AS d").
+		Join("JOIN app_projects AS p ON p.id = d.app_project_id").
+		ColumnExpr("COUNT(DISTINCT d.app_project_id)").
+		Where("p.organization_id = ?", orgID).
+		Where("d.platform = 'web'").
+		Where("d.status = 'deployed'").
+		Scan(context.Background(), &count)
+	return count, err
+}
+
 // DeployedWebAppInfo holds the name and ID of a deployed web app.
 type DeployedWebAppInfo struct {
 	AppProjectID string `bun:"app_project_id"`
@@ -162,6 +180,21 @@ func (db *Database) GetDeployedWebAppsByUserID(userID string) ([]DeployedWebAppI
 		Join("JOIN app_projects AS p ON p.id = d.app_project_id").
 		ColumnExpr("DISTINCT d.app_project_id, p.name").
 		Where("d.user_id = ?", userID).
+		Where("d.platform = 'web'").
+		Where("d.status = 'deployed'").
+		Scan(context.Background(), &apps)
+	return apps, err
+}
+
+// GetDeployedWebAppsByOrgID — org-scoped sibling used by the over-quota error
+// payload so the message can list every deployed app the user could clean up.
+func (db *Database) GetDeployedWebAppsByOrgID(orgID string) ([]DeployedWebAppInfo, error) {
+	var apps []DeployedWebAppInfo
+	err := db.DB.NewSelect().
+		TableExpr("app_deployments AS d").
+		Join("JOIN app_projects AS p ON p.id = d.app_project_id").
+		ColumnExpr("DISTINCT d.app_project_id, p.name").
+		Where("p.organization_id = ?", orgID).
 		Where("d.platform = 'web'").
 		Where("d.status = 'deployed'").
 		Scan(context.Background(), &apps)
@@ -184,6 +217,21 @@ func (db *Database) CountDeployedMobileAppsByUserID(userID string) (int, error) 
 	return count, err
 }
 
+// CountDeployedMobileAppsByOrgID — org-scoped sibling for plan limit gating.
+func (db *Database) CountDeployedMobileAppsByOrgID(orgID string) (int, error) {
+	var count int
+	err := db.DB.NewSelect().
+		TableExpr("app_deployments AS d").
+		Join("JOIN app_projects AS p ON p.id = d.app_project_id").
+		ColumnExpr("COUNT(DISTINCT d.app_project_id)").
+		Where("p.organization_id = ?", orgID).
+		Where("d.status = 'deployed'").
+		Where("p.project_type = ?", "mobile_app_native").
+		Where("d.platform = ?", "ota").
+		Scan(context.Background(), &count)
+	return count, err
+}
+
 func (db *Database) GetDeployedMobileAppsByUserID(userID string) ([]DeployedWebAppInfo, error) {
 	var apps []DeployedWebAppInfo
 	err := db.DB.NewSelect().
@@ -191,6 +239,40 @@ func (db *Database) GetDeployedMobileAppsByUserID(userID string) ([]DeployedWebA
 		Join("JOIN app_projects AS p ON p.id = d.app_project_id").
 		ColumnExpr("DISTINCT d.app_project_id, p.name").
 		Where("d.user_id = ?", userID).
+		Where("d.status = 'deployed'").
+		Where("p.project_type = ?", "mobile_app_native").
+		Where("d.platform = ?", "ota").
+		Scan(context.Background(), &apps)
+	return apps, err
+}
+
+// CountOTAPublishesByOrgInPeriod counts every OTA deploy attempt across an
+// org's mobile_app_native projects within [start, end). Includes failed
+// attempts because each one consumed publish-pipeline work. Used by the
+// MonthlyOTAPublishCount enforcement gate (F4).
+func (db *Database) CountOTAPublishesByOrgInPeriod(ctx context.Context, orgID string, start, end time.Time) (int, error) {
+	var count int
+	err := db.DB.NewSelect().
+		TableExpr("app_deployments AS d").
+		Join("JOIN app_projects AS p ON p.id = d.app_project_id").
+		ColumnExpr("COUNT(*)").
+		Where("p.organization_id = ?", orgID).
+		Where("p.project_type = ?", "mobile_app_native").
+		Where("d.platform = ?", "ota").
+		Where("d.created_at >= ?", start).
+		Where("d.created_at < ?", end).
+		Scan(ctx, &count)
+	return count, err
+}
+
+// GetDeployedMobileAppsByOrgID — org-scoped sibling for the over-quota error payload.
+func (db *Database) GetDeployedMobileAppsByOrgID(orgID string) ([]DeployedWebAppInfo, error) {
+	var apps []DeployedWebAppInfo
+	err := db.DB.NewSelect().
+		TableExpr("app_deployments AS d").
+		Join("JOIN app_projects AS p ON p.id = d.app_project_id").
+		ColumnExpr("DISTINCT d.app_project_id, p.name").
+		Where("p.organization_id = ?", orgID).
 		Where("d.status = 'deployed'").
 		Where("p.project_type = ?", "mobile_app_native").
 		Where("d.platform = ?", "ota").

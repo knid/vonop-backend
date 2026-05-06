@@ -60,17 +60,24 @@ func (c *Controller) CreateAndroidStoreAccess(user *models.User, createAndroidSt
 		return nil, err
 	}
 
+	// Plan/limits Phase 4 (§B): credential quota is org-scoped, not user-scoped.
+	// Lookup the actor's org once and use it for both the gate and the row.
+	orgID, err := c.RequireOrgIDForUser(user, nil)
+	if err != nil {
+		return nil, err
+	}
+
 	limits, err := c.GetUserLimits(user)
 	if err != nil {
 		return nil, err
 	}
 
-	androidStoreAccessList, err := c.DB.GetAndroidStoreAccessByUser(user.ID.String())
+	androidStoreAccessList, err := c.DB.GetAndroidStoreAccessByOrg(orgID.String())
 	if err != nil {
 		return nil, err
 	}
 
-	iosStoreAccessList, err := c.DB.GetIOSStoreAccessByUser(user.ID.String())
+	iosStoreAccessList, err := c.DB.GetIOSStoreAccessByOrg(orgID.String())
 	if err != nil {
 		return nil, err
 	}
@@ -81,6 +88,7 @@ func (c *Controller) CreateAndroidStoreAccess(user *models.User, createAndroidSt
 
 	androidStoreAccess := &models.AndroidStoreAccess{
 		UserID:                user.ID,
+		OrganizationID:        orgID,
 		Name:                  createAndroidStoreAccessReq.Name,
 		ServiceAccountKeyHash: utils.GetSHA256Hash(createAndroidStoreAccessReq.ServiceAccountKey),
 	}
@@ -134,17 +142,23 @@ func (c *Controller) CreateIOSStoreAccess(user *models.User, createIOSStoreAcces
 		return nil, err
 	}
 
+	// Plan/limits Phase 4 (§B): credential quota is org-scoped, not user-scoped.
+	orgID, err := c.RequireOrgIDForUser(user, nil)
+	if err != nil {
+		return nil, err
+	}
+
 	limits, err := c.GetUserLimits(user)
 	if err != nil {
 		return nil, err
 	}
 
-	iosStoreAccessList, err := c.DB.GetIOSStoreAccessByUser(user.ID.String())
+	iosStoreAccessList, err := c.DB.GetIOSStoreAccessByOrg(orgID.String())
 	if err != nil {
 		return nil, err
 	}
 
-	androidStoreAccessList, err := c.DB.GetAndroidStoreAccessByUser(user.ID.String())
+	androidStoreAccessList, err := c.DB.GetAndroidStoreAccessByOrg(orgID.String())
 	if err != nil {
 		return nil, err
 	}
@@ -155,6 +169,7 @@ func (c *Controller) CreateIOSStoreAccess(user *models.User, createIOSStoreAcces
 
 	iosStoreAccess := &models.IOSStoreAccess{
 		UserID:           user.ID,
+		OrganizationID:   orgID,
 		Name:             createIOSStoreAccessReq.Name,
 		TeamID:           createIOSStoreAccessReq.TeamID,
 		IssuerID:         createIOSStoreAccessReq.IssuerID,

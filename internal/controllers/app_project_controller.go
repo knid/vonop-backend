@@ -54,11 +54,20 @@ func (c *Controller) CreateAppProject(ctx context.Context, user *models.User, re
 		projectType = "app"
 	}
 
-	// Enforce app project limit by type
+	// Enforce app project limit by type. A5/A7/A8: limits errors now fail
+	// closed instead of silently allowing the action.
 	limits, err := c.GetUserLimits(user)
 	if err != nil {
-		slog.Warn("CreateAppProject: failed to get user limits", "error", err, "user_id", user.ID)
-	} else {
+		return nil, fmt.Errorf("could not load plan limits: %w", err)
+	}
+	// §B Phase 4: project quota is org-scoped (Plan A made limits org-scoped),
+	// so the count must be too. Resolve the actor's org early so both the count
+	// and the new project row write the same organization_id.
+	orgIDForCount, err := c.RequireOrgIDForUser(user, req.OrganizationID)
+	if err != nil {
+		return nil, err
+	}
+	{
 		isMobile := projectType == models.ProjectTypeMobileAppNative
 		var maxApps int
 		var countFilter string
@@ -77,9 +86,9 @@ func (c *Controller) CreateAppProject(ctx context.Context, user *models.User, re
 			return nil, fmt.Errorf("web app creation is not available on your plan")
 		}
 
-		appCount, countErr := c.DB.CountAppProjectsByUserIDAndType(user.ID.String(), countFilter)
+		appCount, countErr := c.DB.CountAppProjectsByOrgIDAndType(orgIDForCount.String(), countFilter)
 		if countErr != nil {
-			slog.Warn("CreateAppProject: failed to count projects", "error", countErr, "user_id", user.ID)
+			slog.Warn("CreateAppProject: failed to count projects", "error", countErr, "org_id", orgIDForCount)
 		} else if appCount >= maxApps {
 			action := "create_app"
 			if isMobile {
@@ -96,10 +105,9 @@ func (c *Controller) CreateAppProject(ctx context.Context, user *models.User, re
 
 	name, slug := c.generateAppNameAndSlug(ctx, req.Prompt, user)
 
-	orgID, err := c.RequireOrgIDForUser(user, req.OrganizationID)
-	if err != nil {
-		return nil, err
-	}
+	// Reuse the org we already resolved for the quota gate above. Avoids a
+	// second RequireOrgIDForUser call (and its DB roundtrip).
+	orgID := orgIDForCount
 
 	// Seed build_defaults for native mobile apps so the Ship page's
 	// "+ New build" button is enabled from app creation. Without this the
@@ -312,7 +320,18 @@ func (c *Controller) DeleteAppProject(id string, user *models.User) error {
 	if err != nil {
 		return err
 	}
+	c.tearDownProjectInfra(context.Background(), project)
+	return c.DB.DeleteAppProject(project)
+}
 
+// tearDownProjectInfra runs every external-resource cleanup associated with an
+// AppProject: Neon DB delete, git repo delete, undeploy + Fly teardown enqueue,
+// Gitea backup repo delete, runtime_apps row delete, and S3 asset cleanup.
+// Each step is best-effort and logged but never returned, so a flaky downstream
+// (Fly, Neon, S3, Gitea) can't block deletion. Used both by the user-driven
+// DeleteAppProject and the system-driven org grace-teardown handler — neither
+// can afford a partial failure to abort the rest of the cleanup.
+func (c *Controller) tearDownProjectInfra(ctx context.Context, project *models.AppProject) {
 	// Clean up Neon database project (best-effort). Resolve the right
 	// org-scoped service from the integration's stored tier — a project
 	// living in the Free org can't be deleted with a Paid-org API key.
@@ -363,9 +382,7 @@ func (c *Controller) DeleteAppProject(id string, user *models.User) error {
 		c.DB.DeleteRuntimeApp(runtimeApp)
 	}
 
-	c.cleanupProjectAssets(context.Background(), project.ID)
-
-	return c.DB.DeleteAppProject(project)
+	c.cleanupProjectAssets(ctx, project.ID)
 }
 
 // cleanupProjectAssets removes every app_asset for a project — both the S3

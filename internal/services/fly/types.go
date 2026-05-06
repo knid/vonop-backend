@@ -3,15 +3,16 @@ package fly
 import "time"
 
 type MachineSpec struct {
-	Image           string
-	MemoryMB        int
-	CPUKind         string // "shared" | "performance"
-	CPUs            int
-	MaxMachines     int
-	Concurrency     int
-	AutoStopSeconds int
-	Region          string
-	Healthcheck     HealthcheckSpec
+	Image              string
+	MemoryMB           int
+	CPUKind            string // "shared" | "performance"
+	CPUs               int
+	MaxMachines        int
+	Concurrency        int
+	AutoStopSeconds    int
+	MinMachinesRunning int // 0 = scale-to-zero; >=1 keeps machines warm
+	Region             string
+	Healthcheck        HealthcheckSpec
 }
 
 type HealthcheckSpec struct {

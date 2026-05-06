@@ -137,6 +137,9 @@ func createSchema(db *bun.DB) error {
 		// native subscription state. Backend mirror of "active subscribers"
 		// for dashboard panels + paywall enforcement on backend resources.
 		(*models.MobileSubscription)(nil),
+		// E3 Phase 7 — per-org bandwidth tally, populated by the daily Fly
+		// GraphQL sync cron and read by the deploy gate.
+		(*models.AppBandwidthUsage)(nil),
 	}
 
 	for _, model := range models {
@@ -513,6 +516,39 @@ func createSchema(db *bun.DB) error {
 		`ALTER TABLE standard_user_limits ADD COLUMN IF NOT EXISTS deploy_db_compute_time_sec int NOT NULL DEFAULT 0`,
 		`ALTER TABLE standard_user_limits ADD COLUMN IF NOT EXISTS deploy_db_suspend_timeout_sec int NOT NULL DEFAULT 300`,
 		`ALTER TABLE standard_user_limits ADD COLUMN IF NOT EXISTS deploy_db_org_tier text NOT NULL DEFAULT 'free'`,
+		// Plan/limits Phase 1: warm-machine + bandwidth + OTA + region knobs,
+		// plus removal of the never-enforced MaximumProjectCount (replaced by
+		// per-type MaxWebApps/MaxMobileApps gates years ago).
+		`ALTER TABLE standard_user_limits ADD COLUMN IF NOT EXISTS min_machines_running int NOT NULL DEFAULT 0`,
+		`ALTER TABLE standard_user_limits ADD COLUMN IF NOT EXISTS monthly_bandwidth_gb int NOT NULL DEFAULT 0`,
+		`ALTER TABLE standard_user_limits ADD COLUMN IF NOT EXISTS monthly_ota_publish_count int NOT NULL DEFAULT 0`,
+		`ALTER TABLE standard_user_limits ADD COLUMN IF NOT EXISTS can_choose_region boolean NOT NULL DEFAULT false`,
+		// MaximumProjectCount was decorative — no controller ever read it. The
+		// real gate is MaxWebApps + MaxMobileApps. Drop the column to keep the
+		// admin UI honest.
+		`ALTER TABLE standard_user_limits DROP COLUMN IF EXISTS maximum_project_count`,
+		// §B Phase 4: store-access tables get organization_id so credential
+		// quota gates can be org-scoped (Plan A made limits org-scoped, but
+		// access.go was still counting per user, letting each org member add
+		// up to MaximumCredentialCount independently). Backfilled from the
+		// owning user's personal org so existing rows survive.
+		`ALTER TABLE android_store_accesses ADD COLUMN IF NOT EXISTS organization_id uuid`,
+		`ALTER TABLE ios_store_accesses ADD COLUMN IF NOT EXISTS organization_id uuid`,
+		`UPDATE android_store_accesses t SET organization_id = (
+			SELECT id FROM organizations WHERE owner_id = t.user_id AND is_personal = true LIMIT 1
+		) WHERE organization_id IS NULL AND user_id IS NOT NULL`,
+		`UPDATE ios_store_accesses t SET organization_id = (
+			SELECT id FROM organizations WHERE owner_id = t.user_id AND is_personal = true LIMIT 1
+		) WHERE organization_id IS NULL AND user_id IS NOT NULL`,
+		`CREATE INDEX IF NOT EXISTS idx_android_store_accesses_org ON android_store_accesses(organization_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_ios_store_accesses_org ON ios_store_accesses(organization_id)`,
+		// E3 Phase 7: unique key for the bandwidth-usage upsert (one row per
+		// org per billing period).
+		`CREATE UNIQUE INDEX IF NOT EXISTS uniq_app_bandwidth_usage_org_period
+		   ON app_bandwidth_usages (organization_id, period_start)`,
+		// E6 Phase 8: per-app Fly region override (Pro+ feature, gated on
+		// limits.CanChooseRegion). Empty string = use FLY_PRIMARY_REGION.
+		`ALTER TABLE app_projects ADD COLUMN IF NOT EXISTS region text NOT NULL DEFAULT ''`,
 	}
 
 	// Deduplicate before creating unique indexes (keep the latest row per group)
@@ -559,12 +595,14 @@ func createSchema(db *bun.DB) error {
 	// IMPORTANT: when adding a new ALTER TABLE above, update this canary to the newest column,
 	// otherwise the new ALTER will be silently skipped on servers that already have older columns.
 	// Table renames go in renameStatements below, not here — they run unconditionally.
-	// Canary: standard_user_limits.deploy_db_org_tier — the LAST column added
-	// (Neon agent-plan migration). Bumped past ota_updates.channel so the new
-	// deploy_db_* ALTERs run on servers that already passed the channel check.
+	// Canary: app_projects.region — the LAST column added (plan/limits
+	// Phase 8 / E6 region selection). Bumped past can_choose_region so the
+	// region ALTER, the bandwidth-usage indexes, and the store-access
+	// org_id backfill all run on servers that already passed the earlier
+	// canaries.
 	var migrationsDone bool
 	row := db.QueryRowContext(context.Background(),
-		"SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='standard_user_limits' AND column_name='deploy_db_org_tier')")
+		"SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='app_projects' AND column_name='region')")
 	if err := row.Scan(&migrationsDone); err != nil {
 		migrationsDone = false
 	}
@@ -795,8 +833,10 @@ func seedPlans(db *database.Database, sm secret.SecretManager) {
 			MonthlyPrice: 0,
 			PriceID:      "free_plan",
 			Limits: models.StandardUserLimits{
-				MaximumProjectCount:     1,
-				MaximumCredentialCount:  0,
+				// A14: bumped from 0 → 2 so CanBuildToAndroid/iOS isn't a
+				// dead-end. Free still can't actually build mobile (CanBuildMobile=false),
+				// but legacy v1 paths can attach a credential without immediate failure.
+				MaximumCredentialCount:  2,
 				MontlyBuildCount:        1,
 				MontlyNotificationCount: 3,
 				MonthlyAICredits:        50,
@@ -806,7 +846,7 @@ func seedPlans(db *database.Database, sm secret.SecretManager) {
 				MaxDeployedMobileApps:   0,
 				CanDeployMobile:         false,
 				DeployMemoryMB:          256,
-				DeployCPUs:              "0.25",
+				DeployCPUs:              "1",
 				// Neon Free org (Neon-sponsored). 100h compute / 512MB / 5GB
 				// transfer, 5-min suspend. Matches Neon's Free plan reference.
 				DeployDBOrgTier:           "free",
@@ -815,18 +855,23 @@ func seedPlans(db *database.Database, sm secret.SecretManager) {
 				DeployDBActiveTimeSec:     360000,
 				DeployDBDataTransferBytes: 5 * 1024 * 1024 * 1024,
 				DeployDBSuspendTimeoutSec: 300,
-				CreditRolloverMonths:    0,
-				CanBuildToAndroid:       true,
-				CanBuildToIOS:           true,
-				CanBuildMobile:          false,
-				CanUseAnalytics:         false,
-				CanAccessCode:           false,
-				CanBuyDomain:            false,
-				CanUseEmailService:      false,
-				CanUseEcommerce:         true,
-				CanExportToGitHub:       false,
-				CanDeployWeb:            true,
-				CanRemoveBrandLogo:      false,
+				DeployDBComputeTimeSec:    0,
+				MinMachinesRunning:        0,
+				MonthlyBandwidthGB:        10,
+				MonthlyOTAPublishCount:    5,
+				CanChooseRegion:           false,
+				CreditRolloverMonths:      0,
+				CanBuildToAndroid:         true,
+				CanBuildToIOS:             true,
+				CanBuildMobile:            false,
+				CanUseAnalytics:           false,
+				CanAccessCode:             false,
+				CanBuyDomain:              false,
+				CanUseEmailService:        false,
+				CanUseEcommerce:           true,
+				CanExportToGitHub:         false,
+				CanDeployWeb:              true,
+				CanRemoveBrandLogo:        false,
 			},
 		},
 		{
@@ -837,39 +882,46 @@ func seedPlans(db *database.Database, sm secret.SecretManager) {
 			AnnualPrice:   19200,
 			AnnualPriceID: sm.GetSecret("STRIPE_STARTER_ANNUAL_PRICE_ID"),
 			Limits: models.StandardUserLimits{
-				MaximumProjectCount:     20,
 				MaximumCredentialCount:  2,
 				MontlyBuildCount:        10,
 				MontlyNotificationCount: 50,
 				MonthlyAICredits:        100,
 				MaxWebApps:              20,
-				MaxMobileApps:           0,
-				MaxDeployedWebApps:      3,
-				MaxDeployedMobileApps:   1,
-				CanDeployMobile:         true,
-				DeployMemoryMB:          512,
-				DeployCPUs:              "0.5",
+				// A13: was 0 (contradicted CanBuildMobile=true + MaxDeployedMobileApps=1).
+				// Starter can now actually create a mobile_app_native project.
+				MaxMobileApps:         1,
+				MaxDeployedWebApps:    3,
+				MaxDeployedMobileApps: 1,
+				CanDeployMobile:       true,
+				DeployMemoryMB:        512,
+				DeployCPUs:            "1",
 				// Neon Paid org (metered against Wemob credits). Mid-tier
-				// quotas: still 100h compute, 2GB storage, 25GB transfer,
-				// 5-min suspend. autoscaling up to 2 CU.
+				// quotas: 100h active + 100h compute, 2GB storage, 25GB transfer,
+				// 5-min suspend. autoscaling up to 2 CU. D1: ComputeTimeSec
+				// raised from 0 (uncapped) to 360000s (100h).
 				DeployDBOrgTier:           "paid",
 				DeployDBMaxCU:             "2",
 				DeployDBStorageMB:         2048,
 				DeployDBActiveTimeSec:     360000,
 				DeployDBDataTransferBytes: 25 * 1024 * 1024 * 1024,
 				DeployDBSuspendTimeoutSec: 300,
-				CreditRolloverMonths:    1,
-				CanBuildToAndroid:       true,
-				CanBuildToIOS:           true,
-				CanBuildMobile:          true,
-				CanUseAnalytics:         true,
-				CanAccessCode:           true,
-				CanBuyDomain:            true,
-				CanUseEmailService:      false,
-				CanUseEcommerce:         true,
-				CanExportToGitHub:       true,
-				CanDeployWeb:            true,
-				CanRemoveBrandLogo:      true,
+				DeployDBComputeTimeSec:    360000,
+				MinMachinesRunning:        0,
+				MonthlyBandwidthGB:        100,
+				MonthlyOTAPublishCount:    50,
+				CanChooseRegion:           false,
+				CreditRolloverMonths:      1,
+				CanBuildToAndroid:         true,
+				CanBuildToIOS:             true,
+				CanBuildMobile:            true,
+				CanUseAnalytics:           true,
+				CanAccessCode:             true,
+				CanBuyDomain:              true,
+				CanUseEmailService:        false,
+				CanUseEcommerce:           true,
+				CanExportToGitHub:         true,
+				CanDeployWeb:              true,
+				CanRemoveBrandLogo:        true,
 			},
 		},
 		{
@@ -880,18 +932,26 @@ func seedPlans(db *database.Database, sm secret.SecretManager) {
 			AnnualPrice:   38400,
 			AnnualPriceID: sm.GetSecret("STRIPE_PROFESSIONAL_ANNUAL_PRICE_ID"),
 			Limits: models.StandardUserLimits{
-				MaximumProjectCount:     50,
 				MaximumCredentialCount:  10,
 				MontlyBuildCount:        50,
 				MontlyNotificationCount: 200,
 				MonthlyAICredits:        200,
 				MaxWebApps:              100,
 				MaxMobileApps:           5,
-				MaxDeployedWebApps:      10,
-				MaxDeployedMobileApps:   3,
-				CanDeployMobile:         true,
-				DeployMemoryMB:          1024,
-				DeployCPUs:              "1",
+				// E1/E2: was 10 — combined with the A1 DeployCPUs fix that put
+				// Pro on shared-cpu-2x (~$8/mo per app), 10 deploys = ~$80 Fly
+				// compute on a $40 plan. Cut to 5 deploys at 512MB so worst-case
+				// stays around $20 (≈50% gross margin before Stripe + Codemagic +
+				// Neon + bandwidth).
+				MaxDeployedWebApps:    5,
+				MaxDeployedMobileApps: 3,
+				CanDeployMobile:       true,
+				// E1/E2: was 1024 (shared-cpu-2x ≈ $8/mo per app). Dropped to
+				// 512 (shared-cpu-1x ≈ $4/mo) to make Pro economics work. Pro
+				// keeps the differentiation via more deploy slots, more
+				// bandwidth, mobile, region selection, and OTA-unlimited.
+				DeployMemoryMB: 512,
+				DeployCPUs:     "1",
 				// Neon Paid org. Higher compute (200h), 10GB storage, 100GB
 				// transfer, 1-min suspend (paid org's minimum). autoscaling
 				// up to 4 CU for heavier workloads.
@@ -901,18 +961,27 @@ func seedPlans(db *database.Database, sm secret.SecretManager) {
 				DeployDBActiveTimeSec:     720000,
 				DeployDBDataTransferBytes: 100 * 1024 * 1024 * 1024,
 				DeployDBSuspendTimeoutSec: 60,
-				CreditRolloverMonths:    1,
-				CanBuildToAndroid:       true,
-				CanBuildToIOS:           true,
-				CanBuildMobile:          true,
-				CanUseAnalytics:         true,
-				CanAccessCode:           true,
-				CanBuyDomain:            true,
-				CanUseEmailService:      true,
-				CanUseEcommerce:         true,
-				CanExportToGitHub:       true,
-				CanDeployWeb:            true,
-				CanRemoveBrandLogo:      true,
+				// D1: was 0 (uncapped). 200h matches the active-time tier.
+				DeployDBComputeTimeSec: 720000,
+				// A10: knob in place; Pro stays at 0 (cold start) for now.
+				// Flip to 1 alongside a price increase if/when we want
+				// always-warm as a Pro perk.
+				MinMachinesRunning:     0,
+				MonthlyBandwidthGB:     1024,
+				MonthlyOTAPublishCount: 0, // 0 = unlimited for Pro
+				CanChooseRegion:        true,
+				CreditRolloverMonths:   1,
+				CanBuildToAndroid:      true,
+				CanBuildToIOS:          true,
+				CanBuildMobile:         true,
+				CanUseAnalytics:        true,
+				CanAccessCode:          true,
+				CanBuyDomain:           true,
+				CanUseEmailService:     true,
+				CanUseEcommerce:        true,
+				CanExportToGitHub:      true,
+				CanDeployWeb:           true,
+				CanRemoveBrandLogo:     true,
 			},
 		},
 	}
@@ -958,7 +1027,6 @@ func seedPlans(db *database.Database, sm secret.SecretManager) {
 			continue
 		}
 
-		limits.MaximumProjectCount = p.Limits.MaximumProjectCount
 		limits.MonthlyAICredits = p.Limits.MonthlyAICredits
 		limits.MaxWebApps = p.Limits.MaxWebApps
 		limits.MaxMobileApps = p.Limits.MaxMobileApps
@@ -974,6 +1042,12 @@ func seedPlans(db *database.Database, sm secret.SecretManager) {
 		limits.DeployDBComputeTimeSec = p.Limits.DeployDBComputeTimeSec
 		limits.DeployDBSuspendTimeoutSec = p.Limits.DeployDBSuspendTimeoutSec
 		limits.DeployDBOrgTier = p.Limits.DeployDBOrgTier
+		// Plan/limits Phase 1: re-seed the new fields on every startup so
+		// admin-UI tinkering doesn't drift from the source-of-truth in this file.
+		limits.MinMachinesRunning = p.Limits.MinMachinesRunning
+		limits.MonthlyBandwidthGB = p.Limits.MonthlyBandwidthGB
+		limits.MonthlyOTAPublishCount = p.Limits.MonthlyOTAPublishCount
+		limits.CanChooseRegion = p.Limits.CanChooseRegion
 		limits.CreditRolloverMonths = p.Limits.CreditRolloverMonths
 		limits.CanBuildToAndroid = p.Limits.CanBuildToAndroid
 		limits.CanBuildToIOS = p.Limits.CanBuildToIOS
