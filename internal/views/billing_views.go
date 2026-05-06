@@ -53,10 +53,20 @@ func (v *HttpViews) GetBillingPlans(w http.ResponseWriter, r *http.Request) {
 				MaxMobileApps:         rc.GetInt(remoteconfig.PlanInt(pn, "max-mobile-apps", limits.MaxMobileApps), remoteconfig.Global),
 				CanRemoveBrandLogo:    rc.GetBool(remoteconfig.PlanBool(pn, "can-remove-brand-logo", limits.CanRemoveBrandLogo), remoteconfig.Global),
 				CanExportToGitHub:     rc.GetBool(remoteconfig.PlanBool(pn, "can-export-to-github", limits.CanExportToGitHub), remoteconfig.Global),
-				DeployMemoryMB:        limits.DeployMemoryMB,
+				DeployMemoryMB:        rc.GetInt(remoteconfig.PlanInt(pn, "deploy-memory-mb", limits.DeployMemoryMB), remoteconfig.Global),
 				DeployCPUs:            limits.DeployCPUs,
 				DeployDBMaxCU:         limits.DeployDBMaxCU,
-				DeployDBStorageMB:     limits.DeployDBStorageMB,
+				DeployDBStorageMB:     rc.GetInt(remoteconfig.PlanInt(pn, "deploy-db-storage-mb", limits.DeployDBStorageMB), remoteconfig.Global),
+				// Neon agent-plan quotas. Active-time + data-transfer override
+				// via RC so we can tune sponsored-tier consumption without a
+				// re-seed; data-transfer is int64 but RC stores Go int (64-bit
+				// on every supported platform), so the cast is lossless for
+				// any plausible byte count.
+				DeployDBActiveTimeSec:     rc.GetInt(remoteconfig.PlanInt(pn, "deploy-db-active-time-sec", limits.DeployDBActiveTimeSec), remoteconfig.Global),
+				DeployDBDataTransferBytes: int64(rc.GetInt(remoteconfig.PlanInt(pn, "deploy-db-data-transfer-bytes", int(limits.DeployDBDataTransferBytes)), remoteconfig.Global)),
+				DeployDBComputeTimeSec:    rc.GetInt(remoteconfig.PlanInt(pn, "deploy-db-compute-time-sec", limits.DeployDBComputeTimeSec), remoteconfig.Global),
+				DeployDBSuspendTimeoutSec: rc.GetInt(remoteconfig.PlanInt(pn, "deploy-db-suspend-timeout-sec", limits.DeployDBSuspendTimeoutSec), remoteconfig.Global),
+				DeployDBOrgTier:           limits.DeployDBOrgTier,
 			}
 		}
 

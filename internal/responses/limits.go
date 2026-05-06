@@ -29,4 +29,13 @@ type LimitsResponse struct {
 	DeployCPUs              string    `json:"deploy_cpus"`
 	DeployDBMaxCU           string    `json:"deploy_db_max_cu"`
 	DeployDBStorageMB       int       `json:"deploy_db_storage_mb"`
+	DeployDBActiveTimeSec     int    `json:"deploy_db_active_time_sec"`
+	DeployDBDataTransferBytes int64  `json:"deploy_db_data_transfer_bytes"`
+	DeployDBComputeTimeSec    int    `json:"deploy_db_compute_time_sec"`
+	DeployDBSuspendTimeoutSec int    `json:"deploy_db_suspend_timeout_sec"`
+	DeployDBOrgTier           string `json:"deploy_db_org_tier"`
 }
+
+// Note: LimitsResponse used to omit Deploy* fields entirely — the
+// /v1/billing/subscription handler in controllers/subscriptions.go now
+// populates them from the user's resolved limits row.

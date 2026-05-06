@@ -313,17 +313,24 @@ func (c *Controller) DeleteAppProject(id string, user *models.User) error {
 		return err
 	}
 
-	// Clean up Neon database project (best-effort)
-	if c.NeonService != nil {
+	// Clean up Neon database project (best-effort). Resolve the right
+	// org-scoped service from the integration's stored tier — a project
+	// living in the Free org can't be deleted with a Paid-org API key.
+	if c.NeonService != nil || c.NeonRegistry != nil {
 		neonInteg, neonErr := c.getNeonIntegration(project.ID.String())
 		if neonErr != nil {
 			slog.Warn("Failed to look up Neon integration during app deletion", "error", neonErr, "app_project_id", project.ID)
 		} else if neonInteg != nil {
-			if neonProjectID, ok := neonInteg.Config["project_id"].(string); ok && neonProjectID != "" {
-				if err := c.NeonService.DeleteProject(neonProjectID); err != nil {
+			neonProjectID := neonProjectIDFromIntegration(neonInteg)
+			tier := neonTierFromIntegration(neonInteg)
+			if neonProjectID != "" {
+				svc := c.neonForTier(tier)
+				if svc == nil {
+					slog.Warn("No Neon service configured for tier; skipping delete", "tier", tier, "neon_project_id", neonProjectID, "app_project_id", project.ID)
+				} else if err := svc.DeleteProject(neonProjectID); err != nil {
 					slog.Warn("Failed to delete Neon project during app deletion", "error", err, "neon_project_id", neonProjectID, "app_project_id", project.ID)
 				} else {
-					slog.Info("Deleted Neon project", "neon_project_id", neonProjectID, "app_project_id", project.ID)
+					slog.Info("Deleted Neon project", "neon_project_id", neonProjectID, "tier", tier, "app_project_id", project.ID)
 				}
 			}
 		}

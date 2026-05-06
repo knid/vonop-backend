@@ -313,13 +313,13 @@ func (c *Controller) CopyTemplate(ctx context.Context, user *models.User, slug s
 	}
 
 	// Provision a new Neon database if the template has data models
-	if len(project.DataModels) > 0 && c.NeonService != nil {
+	if len(project.DataModels) > 0 && (c.NeonService != nil || c.NeonRegistry != nil) {
 		dataModels, parseErr := models.ParseDataModels(unwrapBase64JSON(project.DataModels))
 		if parseErr == nil && len(dataModels) > 0 {
 			noopEvent := func(string, any) bool { return false }
-			connStr, neonProjectID, neonErr := c.provisionNeonDatabase(ctx, project, dataModels, userLimits, noopEvent)
+			connStr, neonProjectID, tier, neonErr := c.provisionNeonDatabase(ctx, project, dataModels, userLimits, noopEvent)
 			if connStr != "" && neonProjectID != "" && neonErr == nil {
-				if err := c.storeNeonIntegration(project, connStr, neonProjectID); err != nil {
+				if err := c.storeNeonIntegration(project, connStr, neonProjectID, tier); err != nil {
 					slog.Error("CopyTemplate: failed to store neon integration", "error", err, "project_id", project.ID)
 				}
 			} else if neonErr != nil {
