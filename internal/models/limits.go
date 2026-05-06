@@ -62,7 +62,14 @@ type StandardUserLimits struct {
 	CanExportToGitHub    bool `bun:"can_export_to_github,notnull,default:false"`
 	CanUseEmailService   bool `bun:",notnull,default:false"`
 	CanBuildMobile       bool `bun:",notnull,default:false"`
-	CreatedAt            time.Time `bun:"created_at,nullzero,notnull,default:current_timestamp"`
+	// Deprecated: removed from product surface in commit ab7c5f0 ("Remove
+	// CanSeeActiveUsers from usage"), but the DB column still exists with a
+	// NOT NULL constraint. We keep this field on the model so Bun's INSERT
+	// path includes it (default false) — without it, every new
+	// StandardUserLimits row hits a NOT NULL violation on prod. A separate
+	// cleanup spec can DROP COLUMN once we're sure no admin tooling reads it.
+	CanSeeActiveUsers bool `bun:",notnull,default:false"`
+	CreatedAt         time.Time `bun:"created_at,nullzero,notnull,default:current_timestamp"`
 	UpdatedAt            time.Time `bun:"updated_at,nullzero,notnull,default:current_timestamp"`
 	DeletedAt            time.Time `bun:",soft_delete,nullzero"`
 }
