@@ -277,14 +277,23 @@ Apply SURGICALLY:
 DO NOT glass-effect everything. Apple HIG: text always on solid layers,
 NEVER directly on glass — readability fails fast.
 
-### iOS 26 inset tab bar pattern
-Tab bar in iOS 26 is a horizontal capsule, INSET from edges, glass:
-` + "```tsx" + `
-<View className="absolute bottom-6 self-center flex-row gap-1 bg-white/80 dark:bg-black/40 rounded-full px-2 py-1.5 shadow-lg">
-  {/* 3-5 items max — usability data shows 20-30% faster nav */}
-</View>
-` + "```" + `
-3-5 tab items, never 6+. Wrap in ` + "`BlurView`" + ` for true glass effect.
+### Floating capsule tab bar — THE DEFAULT in 2026
+Every app with bottom-tab navigation uses a floating glass capsule, NOT
+the docked-to-bottom-edge default. This is non-negotiable unless the
+design direction explicitly demands otherwise (e.g., a brutalist or
+data-dense dashboard where every pixel counts and the tabs are docked
+on purpose).
+
+The floating capsule:
+- Sits 24pt above the bottom safe-area edge
+- Inset 24pt from left/right edges
+- Pill-shaped (rounded-full / borderRadius: 32)
+- Glass via ` + "`BlurView`" + ` (iOS) or translucent white (Android)
+- 3-5 items, NEVER 6+ (usability data: 20-30% faster nav)
+- Active state is a filled icon or scaled icon, NOT just a color tint
+
+The technical recipe lives in the ## Tabs layout section below — copy
+that as your starting point on every project.
 
 ### Material 3 Expressive shape variety
 Don't use ` + "`rounded-md`" + ` (looks dated) or one shape everywhere. Mix:
@@ -353,10 +362,13 @@ own sake.
 
 ### Navigation
 - Stack with native slide transitions
-- Bottom tabs with 3-5 items (iOS 26 capsule preferred)
+- Bottom tabs: ALWAYS use the floating glass capsule pattern (see
+  Tabs layout recipe). 3-5 items only. The docked-to-edge default
+  React Navigation tab bar is forbidden unless the design direction
+  explicitly demands it.
 - Drawer for complex apps
-- Custom active indicator: dot, pill, filled icon, scaled icon. NEVER
-  default blue tint.
+- Active state is a filled icon or scaled icon. NEVER just a default
+  blue tint.
 
 ### Bottom Sheets & Modals
 - ` + "`presentation: \"formSheet\"`" + ` for iOS modals — feels native.
@@ -1406,42 +1418,107 @@ they show up as their own tabs and the bar overflows + clips. Three rules:
 3. Keep visible tabs to 3–5. More than 5 = redesign (move secondary actions
    into a stack or a "More" tab), don't shrink the labels.
 
+**Use the floating glass capsule recipe below by default.** It is the 2026
+standard pattern (see DESIGN PRINCIPLES). The plain docked tab bar
+(no ` + "`tabBarStyle`" + ` overrides) is FORBIDDEN unless the design direction
+explicitly calls for it.
+
 ` + "```" + `tsx
 // app/(app)/_layout.tsx
 import { Tabs } from "expo-router";
+import { BlurView } from "expo-blur";
 import { House, User, Settings } from "lucide-react-native";
+import { Platform, StyleSheet } from "react-native";
 
 export default function TabsLayout() {
   return (
-    <Tabs screenOptions={{ headerShown: false }}>
+    <Tabs
+      screenOptions={{
+        headerShown: false,
+        tabBarShowLabel: false,
+        tabBarActiveTintColor: "hsl(var(--primary))",
+        tabBarInactiveTintColor: "hsl(var(--muted-foreground))",
+        // Floating capsule: 24pt inset on all four sides, pill shape,
+        // glass on iOS / translucent white on Android. Active item gets
+        // a filled icon (not just a color tint) — see icon render below.
+        tabBarStyle: {
+          position: "absolute",
+          left: 24,
+          right: 24,
+          bottom: 24,
+          height: 64,
+          borderRadius: 32,
+          borderTopWidth: 0,
+          backgroundColor:
+            Platform.OS === "ios" ? "transparent" : "rgba(255,255,255,0.92)",
+          elevation: 12,
+          shadowColor: "#000",
+          shadowOpacity: 0.12,
+          shadowRadius: 24,
+          shadowOffset: { width: 0, height: 6 },
+          paddingHorizontal: 8,
+          overflow: "hidden",
+        },
+        // Liquid Glass via expo-blur on iOS. Android falls through to the
+        // translucent backgroundColor above (BlurView on Android is less
+        // performant and uses a different visual idiom anyway).
+        tabBarBackground:
+          Platform.OS === "ios"
+            ? () => (
+                <BlurView
+                  intensity={70}
+                  tint="systemThickMaterialLight"
+                  style={[
+                    StyleSheet.absoluteFill,
+                    { borderRadius: 32, overflow: "hidden" },
+                  ]}
+                />
+              )
+            : undefined,
+        tabBarItemStyle: { height: 56, borderRadius: 28 },
+      }}
+    >
       <Tabs.Screen
         name="index"
         options={{
-          title: "Home",
-          tabBarIcon: ({ color, size }) => <House color={color} size={size} />,
+          tabBarIcon: ({ color, focused }) => (
+            <House color={color} size={24} strokeWidth={focused ? 2.5 : 1.8} />
+          ),
         }}
       />
       <Tabs.Screen
         name="profile"
         options={{
-          title: "Profile",
-          tabBarIcon: ({ color, size }) => <User color={color} size={size} />,
+          tabBarIcon: ({ color, focused }) => (
+            <User color={color} size={24} strokeWidth={focused ? 2.5 : 1.8} />
+          ),
         }}
       />
       <Tabs.Screen
         name="settings"
         options={{
-          title: "Settings",
-          tabBarIcon: ({ color, size }) => <Settings color={color} size={size} />,
+          tabBarIcon: ({ color, focused }) => (
+            <Settings color={color} size={24} strokeWidth={focused ? 2.5 : 1.8} />
+          ),
         }}
       />
-      {/* Non-tab routes that live under (app)/ — navigated to via router.push */}
+      {/* Non-tab routes that live under (app)/ — navigated via router.push */}
       <Tabs.Screen name="add-item"    options={{ href: null }} />
       <Tabs.Screen name="item-detail" options={{ href: null }} />
     </Tabs>
   );
 }
 ` + "```" + `
+
+**Required: bottom padding on every screen** so content doesn't slide under
+the floating capsule. Add ` + "`pb-28`" + ` (or ` + "`paddingBottom: 112`" + ` on a
+ScrollView's contentContainerStyle) — that's 64pt bar height + 24pt
+bottom inset + ~24pt breathing room. FlatList: same via
+` + "`contentContainerStyle={{ paddingBottom: 112 }}`" + `.
+
+**Dark mode tweak:** when ` + "`useColorScheme() === \"dark\"`" + `, swap the
+BlurView ` + "`tint`" + ` to ` + "`\"systemThickMaterialDark\"`" + ` and the Android fallback
+` + "`backgroundColor`" + ` to ` + "`\"rgba(0,0,0,0.55)\"`" + `.
 
 For modal-style screens (add-item, edit-x, item-detail), prefer
 ` + "`presentation: \"modal\"`" + ` on a parent Stack OR a ` + "`(modals)/`" + ` sub-group, which
