@@ -146,6 +146,14 @@ func buildFlyToml(appName string, spec MachineSpec) string {
 		fmt.Fprintf(&extras, "  auto_stop_machines_seconds = %d\n", spec.AutoStopSeconds)
 	}
 
+	// A10: min_machines_running is a per-plan knob now. 0 keeps the historical
+	// scale-to-zero behavior; >=1 keeps machines warm so paid plans can opt
+	// out of cold starts at the cost of steady-state Fly compute.
+	minRunning := spec.MinMachinesRunning
+	if minRunning < 0 {
+		minRunning = 0
+	}
+
 	return fmt.Sprintf(`app = %q
 primary_region = %q
 
@@ -159,7 +167,7 @@ primary_region = %q
   force_https = true
   auto_stop_machines = "suspend"
   auto_start_machines = true
-  min_machines_running = 0
+  min_machines_running = %d
 %s
   [http_service.concurrency]
     type = "requests"
@@ -168,6 +176,7 @@ primary_region = %q
 `,
 		appName, spec.Region,
 		spec.CPUKind, spec.CPUs, spec.MemoryMB,
+		minRunning,
 		extras.String(),
 		soft, hard,
 	)

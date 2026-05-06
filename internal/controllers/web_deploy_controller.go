@@ -338,11 +338,12 @@ func (c *Controller) HandleWebDeployTask(ctx context.Context, t *asynq.Task) err
 		return c.maybeRetry(ctx, p.DeploymentID, "sync_secrets", syncErr)
 	}
 
-	// 7. Deploy machines per plan tier. Region defaults to FlyService.Region,
-	// but if a previous attempt for this deployment hit the Fly host-init bug
-	// and remediated to a fallback region, honor that on retry — re-trying the
-	// known-bad primary region would just burn another 5min WaitForHealthy.
-	spec := fly.PlanMachineSpec(limits, c.resolveDeployRegion(ctx, p.DeploymentID))
+	// 7. Deploy machines per plan tier. Region precedence (highest → lowest):
+	//   1. host-init-bug remediation override (per-attempt, persisted in
+	//      deployment_events)
+	//   2. project.Region (Pro+ region selection, gated on CanChooseRegion)
+	//   3. FlyService.Region (FLY_PRIMARY_REGION)
+	spec := fly.PlanMachineSpec(limits, c.resolveDeployRegion(ctx, p.DeploymentID, project, limits))
 	spec.Image = imageRef
 	if err := c.FlyService.DeployMachines(flyAppName, spec); err != nil {
 		return c.maybeRetry(ctx, p.DeploymentID, "deploy_machines", err)
@@ -387,24 +388,27 @@ func (c *Controller) HandleWebDeployTask(ctx context.Context, t *asynq.Task) err
 	return nil
 }
 
-// resolveDeployRegion picks the region for this deploy attempt. Defaults to
-// FlyService.Region (the configured primary). If a prior attempt for this
-// deployment auto-remediated past the Fly host-init bug and persisted a
-// fallback region in deployment_events, that region wins — re-running the
-// known-bad primary would just waste another WaitForHealthy budget.
-func (c *Controller) resolveDeployRegion(ctx context.Context, deploymentID string) string {
-	id, err := uuid.Parse(deploymentID)
-	if err != nil {
-		return c.FlyService.Region
+// resolveDeployRegion picks the region for this deploy attempt. Precedence:
+//   1. host-init-bug remediation override (per-attempt, persisted in
+//      deployment_events) — re-running the known-bad primary would burn
+//      another 5min WaitForHealthy budget.
+//   2. project.Region (E6 region selection), gated on limits.CanChooseRegion.
+//   3. FlyService.Region (FLY_PRIMARY_REGION fallback).
+func (c *Controller) resolveDeployRegion(ctx context.Context, deploymentID string, project *models.AppProject, limits *models.StandardUserLimits) string {
+	if id, err := uuid.Parse(deploymentID); err == nil {
+		if meta, err := database.LatestEventMetadata(ctx, c.DB.DB, id, models.DeploymentEventFlyHostRemediation); err == nil && meta != nil {
+			if to, ok := meta["to_region"].(string); ok && to != "" {
+				slog.Info("deploy_region_overridden_by_prior_remediation",
+					"deployment_id", deploymentID, "region", to, "primary", c.FlyService.Region)
+				return to
+			}
+		}
 	}
-	meta, err := database.LatestEventMetadata(ctx, c.DB.DB, id, models.DeploymentEventFlyHostRemediation)
-	if err != nil || meta == nil {
-		return c.FlyService.Region
-	}
-	if to, ok := meta["to_region"].(string); ok && to != "" {
-		slog.Info("deploy_region_overridden_by_prior_remediation",
-			"deployment_id", deploymentID, "region", to, "primary", c.FlyService.Region)
-		return to
+	// E6: per-app region preference (Pro+ only). Silently ignored on plans
+	// without CanChooseRegion so a downgrade doesn't break the next deploy
+	// — the app falls back to the primary region instead.
+	if project != nil && project.Region != "" && limits != nil && limits.CanChooseRegion {
+		return project.Region
 	}
 	return c.FlyService.Region
 }

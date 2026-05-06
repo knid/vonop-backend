@@ -100,6 +100,10 @@ func main() {
 	mux.HandleFunc(tasks.TypeDeployWeb, controller.HandleWebDeployTask)
 	mux.HandleFunc(tasks.TypeExpoOTAPublish, controller.HandleExpoOTAPublishTask)
 	mux.HandleFunc(tasks.TypeDeleteFlyApp, controller.HandleDeleteFlyAppTask)
+	// A6: 7-day grace teardown of an org's Fly + Neon resources after a
+	// Stripe customer.subscription.deleted event. Re-checks the org's status
+	// before destroying anything (re-subscribe wins).
+	mux.HandleFunc(tasks.TypeOrgGraceTeardown, controller.HandleOrgGraceTeardownTask)
 	mux.HandleFunc("cron:dns-check", func(ctx context.Context, _ *asynq.Task) error {
 		return controller.CheckPendingDomainsTask(ctx)
 	})
@@ -114,6 +118,11 @@ func main() {
 	})
 	mux.HandleFunc(tasks.TypeRunCredentialHealthCheck, func(ctx context.Context, _ *asynq.Task) error {
 		return controller.RunCredentialHealthCheck(ctx)
+	})
+	// E3 Phase 7: daily Fly GraphQL pull → per-org egress tally for the
+	// MonthlyBandwidthGB deploy gate.
+	mux.HandleFunc(tasks.TypeFlyBandwidthSync, func(ctx context.Context, _ *asynq.Task) error {
+		return controller.SyncFlyBandwidthTask(ctx)
 	})
 
 	scheduler := asynq.NewScheduler(redisOpts, &asynq.SchedulerOpts{
@@ -137,6 +146,12 @@ func main() {
 	}
 	if _, err := scheduler.Register("@every 24h", asynq.NewTask(tasks.TypeRunCredentialHealthCheck, nil), asynq.Queue("cron")); err != nil {
 		slog.Error("schedule credential-health-daily", "err", err)
+		os.Exit(1)
+	}
+	// E3 Phase 7: daily Fly bandwidth sync. Once a day is plenty — quotas
+	// are gated at deploy time (not per-request) so 24h staleness is fine.
+	if _, err := scheduler.Register("@every 24h", asynq.NewTask(tasks.TypeFlyBandwidthSync, nil), asynq.Queue("cron")); err != nil {
+		slog.Error("schedule fly-bandwidth-sync", "err", err)
 		os.Exit(1)
 	}
 	go func() {

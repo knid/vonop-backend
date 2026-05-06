@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/go-playground/validator/v10"
+	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/requests"
@@ -483,6 +484,19 @@ func (c *Controller) assignFreePlan(org *models.Organization) {
 		slog.Warn("assignFreePlan: failed to update org", "error", err, "org_id", org.ID)
 		return
 	}
+}
+
+// freePlanIDOrNil returns the Free plan's UUID, or uuid.Nil if the plan row
+// is missing (shouldn't happen post-seedPlans). Used by the cancellation /
+// dunning paths in webhook.go to re-home an org's subscription_id to Free
+// instead of nulling it (A5/A7/A8 — fail-closed on enforcement).
+func (c *Controller) freePlanIDOrNil() uuid.UUID {
+	freePlan, err := c.DB.GetSubscriptionByName("Free")
+	if err != nil || freePlan == nil {
+		slog.Warn("freePlanIDOrNil: free plan not found", "error", err)
+		return uuid.Nil
+	}
+	return freePlan.ID
 }
 
 func (c *Controller) GetUserFromReq(r *http.Request) (*models.User, error) {

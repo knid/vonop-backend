@@ -79,3 +79,25 @@ func (db *Database) DeleteIOSStoreAccess(access *models.IOSStoreAccess) error {
 
 	return err
 }
+
+// GetAndroidStoreAccessByOrg returns every Android-store credential attached
+// to the org's workspace. Plan/limits Phase 4 (§B): credential quota gates are
+// org-scoped, so multi-member orgs share one MaximumCredentialCount budget.
+func (db *Database) GetAndroidStoreAccessByOrg(orgID string) ([]models.AndroidStoreAccess, error) {
+	var access []models.AndroidStoreAccess
+	err := db.DB.NewSelect().Model(&access).Where("organization_id = ?", orgID).Scan(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	return access, nil
+}
+
+// GetIOSStoreAccessByOrg — see GetAndroidStoreAccessByOrg.
+func (db *Database) GetIOSStoreAccessByOrg(orgID string) ([]models.IOSStoreAccess, error) {
+	var access []models.IOSStoreAccess
+	err := db.DB.NewSelect().Model(&access).Where("organization_id = ?", orgID).Scan(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	return access, nil
+}

@@ -40,3 +40,26 @@ func (db *Database) GetRuntimeAppByFlyAppName(flyAppName string) (*models.Runtim
 	}
 	return &ra, nil
 }
+
+// RuntimeAppOrg is a thin row used by the bandwidth-sync cron to walk every
+// live Fly app and tally egress by org without N+1 lookups.
+type RuntimeAppOrg struct {
+	FlyAppName     string
+	OrganizationID string
+}
+
+// ListRuntimeAppsWithOrg returns every runtime_app row whose Fly app is still
+// provisioned (fly_app_name != ''), joined to its parent app_project's
+// organization_id. Used by the daily bandwidth-sync cron.
+func (db *Database) ListRuntimeAppsWithOrg(ctx context.Context) ([]RuntimeAppOrg, error) {
+	var rows []RuntimeAppOrg
+	err := db.DB.NewSelect().
+		TableExpr("runtime_apps AS r").
+		Join("JOIN app_projects AS p ON p.id = r.app_project_id").
+		ColumnExpr("r.fly_app_name AS fly_app_name").
+		ColumnExpr("p.organization_id AS organization_id").
+		Where("r.fly_app_name != ''").
+		Where("p.deleted_at IS NULL").
+		Scan(ctx, &rows)
+	return rows, err
+}

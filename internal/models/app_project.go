@@ -51,6 +51,11 @@ type AppProject struct {
 	// SubmitAsDraft submits without releasing — uploads the build but doesn't push to TestFlight/Play.
 	// Useful for staged manual review.
 	SubmitAsDraft bool `bun:",notnull,default:false"`
+	// Region pins the Fly machine region for deploys. Empty = inherit
+	// FLY_PRIMARY_REGION. Only honored when the org's plan has
+	// CanChooseRegion=true (Pro+); the deploy controller falls back to the
+	// primary region otherwise. See web_deploy_controller.go:resolveDeployRegion.
+	Region string `bun:",notnull,default:''"`
 	// BetterAuthSecretCredRef is the encrypted-at-rest reference to this
 	// project's per-customer BETTER_AUTH_SECRET (32 random bytes hex-encoded,
 	// envelope-encrypted via CredStore). Generated lazily on the first build

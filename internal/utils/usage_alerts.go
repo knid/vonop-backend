@@ -67,7 +67,9 @@ func checkUsageAlerts(db *database.Database, eventService events.EventService) {
 	err := db.DB.NewSelect().
 		Model(&users).
 		Where("deleted_at IS NULL").
-		Where("subscription_status IN (?)", bun.In([]string{"active", "free", "trial"})).
+		// F3: dropped 'trial' from the whitelist — no Trial plan row exists
+		// and Stripe trials are not configured today.
+		Where("subscription_status IN (?)", bun.In([]string{"active", "free"})).
 		Scan(context.Background())
 	if err != nil {
 		slog.Error("usage alerts: failed to fetch users", "error", err)

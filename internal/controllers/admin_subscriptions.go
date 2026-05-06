@@ -62,9 +62,6 @@ func (c *Controller) AdminUpdateSubscription(subID string, req requests.AdminUpd
 		return nil, fmt.Errorf("limits not found: %w", err)
 	}
 
-	if req.MaximumProjectCount != nil {
-		limits.MaximumProjectCount = *req.MaximumProjectCount
-	}
 	if req.MaximumCredentialCount != nil {
 		limits.MaximumCredentialCount = *req.MaximumCredentialCount
 	}
@@ -124,6 +121,18 @@ func (c *Controller) AdminUpdateSubscription(subID string, req requests.AdminUpd
 	}
 	if req.CanBuildMobile != nil {
 		limits.CanBuildMobile = *req.CanBuildMobile
+	}
+	if req.MinMachinesRunning != nil {
+		limits.MinMachinesRunning = *req.MinMachinesRunning
+	}
+	if req.MonthlyBandwidthGB != nil {
+		limits.MonthlyBandwidthGB = *req.MonthlyBandwidthGB
+	}
+	if req.MonthlyOTAPublishCount != nil {
+		limits.MonthlyOTAPublishCount = *req.MonthlyOTAPublishCount
+	}
+	if req.CanChooseRegion != nil {
+		limits.CanChooseRegion = *req.CanChooseRegion
 	}
 	limits.UpdatedAt = time.Now()
 

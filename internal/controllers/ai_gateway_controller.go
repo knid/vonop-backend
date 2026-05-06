@@ -183,7 +183,8 @@ func (c *Controller) GetUserTierName(user *models.User) string {
 	if err != nil || org == nil {
 		return "free"
 	}
-	if org.SubscriptionStatus != "active" && org.SubscriptionStatus != "trial" {
+	// F3: dropped 'trial' from the whitelist — no Trial plan row exists.
+	if org.SubscriptionStatus != "active" {
 		return "free"
 	}
 	sub, err := c.DB.GetSubscriptionById(org.SubscriptionID.String())

@@ -43,7 +43,9 @@ func (v *HttpViews) CheckStatus(w http.ResponseWriter, r *http.Request) {
 
 	var status string
 	switch org.SubscriptionStatus {
-	case "active", "free", "trial":
+	// F3: 'trial' dropped — no Trial plan row exists and Stripe trials are
+	// not configured today. Add back if we turn trials on.
+	case "active", "free":
 		status = "active"
 	default:
 		status = "unactive"

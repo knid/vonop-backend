@@ -288,12 +288,20 @@ func (c *Controller) processWebhookEventTx(tx bun.Tx, event stripe.Event) ([]fun
 				setupJustFinished = true
 				addHook(owner, constants.EVENT_USER_SETUP_FINISHED, map[string]any{})
 			}
+			// A6: re-subscribed within the grace window → kill any pending
+			// teardown so the org's apps + DBs aren't destroyed mid-flight.
+			if err := c.CancelOrgGraceTeardown(org.ID); err != nil {
+				slog.Warn("active: failed to cancel grace teardown", "error", err, "org_id", org.ID)
+			}
 
 		case "trialing":
 			org.SubscriptionID = subs.ID
 			org.SubscriptionStatus = newStatus
 			if org.TrialStartAt.IsZero() {
 				org.TrialStartAt = time.Now()
+			}
+			if err := c.CancelOrgGraceTeardown(org.ID); err != nil {
+				slog.Warn("trialing: failed to cancel grace teardown", "error", err, "org_id", org.ID)
 			}
 
 		case "past_due":
@@ -302,8 +310,18 @@ func (c *Controller) processWebhookEventTx(tx bun.Tx, event stripe.Event) ([]fun
 			org.SubscriptionStatus = newStatus
 
 		case "canceled":
+			// A5/A7/A8: re-home to the Free plan instead of nulling SubscriptionID.
+			// Otherwise GetStandardUserSubscriptionByOrg errors and every
+			// `if err == nil` enforcement gate falls through, letting cancelled
+			// users keep deploying unbounded. With Free's tight quotas in place,
+			// the gates fire correctly while requireActiveSubscription still
+			// blocks "canceled" status on write paths.
 			org.SubscriptionStatus = newStatus
-			org.SubscriptionID = uuid.Nil
+			org.SubscriptionID = c.freePlanIDOrNil()
+			// A6: schedule the 7-day grace teardown.
+			if err := c.EnqueueOrgGraceTeardown(org.ID); err != nil {
+				slog.Warn("canceled: failed to schedule grace teardown", "error", err, "org_id", org.ID)
+			}
 
 		case "unpaid":
 			// Keep SubscriptionID — subscription still exists in Stripe, just unpaid
@@ -311,9 +329,10 @@ func (c *Controller) processWebhookEventTx(tx bun.Tx, event stripe.Event) ([]fun
 			org.SubscriptionStatus = newStatus
 
 		default:
-			// incomplete, incomplete_expired, paused
+			// incomplete, incomplete_expired, paused — re-home to Free for the
+			// same reason as "canceled" above (avoid fail-open enforcement gates).
 			org.SubscriptionStatus = newStatus
-			org.SubscriptionID = uuid.Nil
+			org.SubscriptionID = c.freePlanIDOrNil()
 		}
 
 		addHook(owner, constants.EVENT_SUBSCRIPTION_UPDATED, map[string]any{
@@ -415,6 +434,13 @@ func (c *Controller) processWebhookEventTx(tx bun.Tx, event stripe.Event) ([]fun
 		}
 
 		org.SubscriptionStatus = "active"
+
+		// A6: payment-succeeded after a cancellation/dunning event implies
+		// re-subscribe. Cancel any pending grace teardown so the org's apps
+		// stay intact.
+		if err := c.CancelOrgGraceTeardown(org.ID); err != nil {
+			slog.Warn("invoice.payment_succeeded: failed to cancel grace teardown", "error", err, "org_id", org.ID)
+		}
 
 		// Restore SubscriptionID if it was cleared by a prior canceled/inactive event.
 		// Look up plan from invoice line items (v82: Pricing.PriceDetails.Price).
@@ -607,8 +633,18 @@ func (c *Controller) processWebhookEventTx(tx bun.Tx, event stripe.Event) ([]fun
 			}
 		}
 
+		// A5/A7/A8: re-home to Free instead of nulling SubscriptionID so the
+		// limit-lookup path returns Free's tight quotas, and fail-closed
+		// enforcement gates still see a real plan after cancellation.
 		org.SubscriptionStatus = "canceled"
-		org.SubscriptionID = uuid.Nil
+		org.SubscriptionID = c.freePlanIDOrNil()
+
+		// A6: schedule a 7-day-out teardown of the org's Fly apps + Neon DBs.
+		// Cancelled gracefully if the user re-subscribes within the window.
+		if err := c.EnqueueOrgGraceTeardown(org.ID); err != nil {
+			slog.Warn("subscription_canceled: failed to schedule grace teardown",
+				"error", err, "org_id", org.ID)
+		}
 
 		// Stripe fires customer.subscription.deleted for both voluntary cancels
 		// and dunning-driven cancels (final retry exhausted / dispute). Branch
