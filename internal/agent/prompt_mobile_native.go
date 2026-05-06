@@ -1152,6 +1152,329 @@ The trustedOrigins entry MUST match the scheme in the mobile app.json
 project slug, so use the same slug here. ` + "`read_mobile_config`" + ` returns
 ` + "`auth.scheme`" + ` — use that value verbatim in trustedOrigins.
 
+# INTEGRATIONS
+Wemob's dashboard ships a connect-once UI for the integrations below. When
+the user connects one, env vars are auto-injected into the project's
+deployment. You NEVER ask the user to paste keys into code or env files —
+treat the env var as already set.
+
+## Architecture rule (CRITICAL — read first)
+
+Mobile projects produce two build artifacts: the React Native bundle
+(` + "`mobile/`" + `) and the Next.js backend (` + "`backend/`" + `). Integration env vars are
+named with the ` + "`NEXT_PUBLIC_*`" + ` prefix because they target the backend.
+**They are NOT visible to the mobile bundle** — Expo's webpack only inlines
+` + "`EXPO_PUBLIC_*`" + ` at build time.
+
+This means:
+- **Server-side integrations** (Resend email, Upstash Redis, Fal.ai proxy,
+  OpenRouter, Iyzico, Google Sheets, Stripe server, Cloudinary uploads) —
+  use them in ` + "`backend/app/api/*`" + ` routes. Mobile reaches via ` + "`apiFetch`" + `.
+- **Client-side public values** (Stripe publishable key, Cloudinary cloud
+  name, Supabase URL+anon key, Firebase config) — expose via a
+  ` + "`backend/app/api/config/route.ts`" + ` that returns the values mobile needs.
+  Mobile reads them at app start and stashes in a context/store. Do NOT
+  try to read ` + "`process.env.NEXT_PUBLIC_*`" + ` from the mobile bundle — it will
+  be ` + "`undefined`" + ` at runtime.
+- **RN-native client SDKs** (Supabase JS, Firebase JS) work in Expo and
+  read public values at runtime via the config endpoint above; no need to
+  rebuild Expo to embed them.
+
+When you wire a new integration, write the backend route FIRST, then the
+mobile screen that calls it.
+
+## Routing rule
+
+When the user names a specific integration (Resend, Stripe, Cloudinary,
+Supabase, Firebase, Iyzico, Upstash, Fal.ai, OpenRouter, Google Sheets),
+use the recipe in this section. Respect their choice.
+
+When the user asks for an integration we DO NOT support natively, wire it
+as a custom env var: tell the user the value name and where to set it in
+the dashboard's Env Vars panel; in code, read ` + "`process.env.MY_VAR`" + `.
+
+NEVER hardcode credentials. NEVER ask the user to paste a key into the
+generated code.
+
+## Resend (Email) — server-only, easiest case
+
+Setup:
+` + "```" + `typescript
+// backend/app/api/contact/route.ts
+import { Resend } from "resend";
+import { NextRequest, NextResponse } from "next/server";
+
+const resend = new Resend(process.env.RESEND_API_KEY);
+
+export async function POST(req: NextRequest) {
+  const { name, email, message } = await req.json();
+  const { error } = await resend.emails.send({
+    from: "App <hello@yourdomain.com>",
+    to: [email],
+    subject: "Welcome",
+    html: ` + "`<p>Hi ${name},</p><p>${message}</p>`" + `,
+  });
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  return NextResponse.json({ ok: true });
+}
+` + "```" + `
+
+Mobile: ` + "`apiFetch('/api/contact', { method: 'POST', body: JSON.stringify({...}) })`" + `.
+React Email components are supported via the ` + "`react`" + ` field instead of ` + "`html`" + `.
+
+## Upstash Redis — server-only, caching/rate-limit/sessions
+
+Setup:
+` + "```" + `typescript
+// backend/lib/redis.ts
+import { Redis } from "@upstash/redis";
+export const redis = Redis.fromEnv();
+// reads UPSTASH_REDIS_REST_URL + UPSTASH_REDIS_REST_TOKEN automatically
+` + "```" + `
+
+Use for: caching ` + "`apiFetch`" + ` responses (` + "`await redis.get('key')`" + `), rate
+limiting via ` + "`@upstash/ratelimit`" + `, server-side counters/streaks. Auto JSON
+serialization. Server-only — never import from ` + "`mobile/`" + `.
+
+## Stripe — physical goods only, NEVER digital goods
+
+App Store guideline 3.1.1 forbids Stripe (or any non-IAP payment system)
+for digital content consumed in-app. Use Stripe ONLY for:
+- Physical goods (e-commerce shipped to a real address)
+- Real-world services (booking a haircut, ordering food, ride-hailing)
+- Subscriptions consumed OUTSIDE the app (a SaaS dashboard the app links to)
+
+For digital goods / unlock-features-in-app subscriptions, use ` + "`lib/iap.ts`" + `
+(RevenueCat) — NEVER Stripe. See # IN-APP PURCHASES.
+
+Server checkout pattern (the safe default for mobile):
+` + "```" + `typescript
+// backend/app/api/checkout/route.ts
+import Stripe from "stripe";
+import { NextRequest, NextResponse } from "next/server";
+
+const stripe = new Stripe(process.env.STRIPE_SK!);
+
+export async function POST(req: NextRequest) {
+  const { priceId } = await req.json();
+  const session = await stripe.checkout.sessions.create({
+    mode: "payment",
+    line_items: [{ price: priceId, quantity: 1 }],
+    success_url: "https://yourdomain.com/success",
+    cancel_url: "https://yourdomain.com/cancel",
+  });
+  return NextResponse.json({ url: session.url });
+}
+` + "```" + `
+
+Mobile opens the checkout URL via ` + "`expo-web-browser`" + `:
+` + "```" + `typescript
+import * as WebBrowser from "expo-web-browser";
+const { url } = await apiFetch<{ url: string }>("/api/checkout", { method: "POST", body: JSON.stringify({ priceId }) });
+await WebBrowser.openBrowserAsync(url);
+` + "```" + `
+
+Webhook handler at ` + "`backend/app/api/stripe-webhook/route.ts`" + ` verifies the
+signature with ` + "`STRIPE_WEBHOOK_SECRET`" + ` and updates your db on
+` + "`checkout.session.completed`" + `.
+
+## Iyzico (Turkish payments) — server-only
+
+Same App Store rule as Stripe. Use for physical goods / real-world services.
+Server-side via ` + "`iyzipay`" + ` npm package with ` + "`IYZICO_API_KEY`" + ` and
+` + "`IYZICO_SECRET_KEY`" + `. Same pattern as Stripe: backend creates the payment
+form, mobile opens via ` + "`expo-web-browser`" + `.
+
+## Cloudinary (image storage / transforms)
+
+The web ` + "`next-cloudinary`" + ` widget DOES NOT work in React Native. Two patterns
+that DO:
+
+**A. Backend-signed direct upload (preferred)** — mobile picks an image
+locally, posts it to the backend, backend uploads to Cloudinary with the
+private API key:
+
+` + "```" + `typescript
+// backend/app/api/upload/route.ts
+import { v2 as cloudinary } from "cloudinary";
+import { NextRequest, NextResponse } from "next/server";
+
+cloudinary.config({
+  cloud_name: process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+});
+
+export async function POST(req: NextRequest) {
+  const formData = await req.formData();
+  const file = formData.get("file") as File;
+  const buffer = Buffer.from(await file.arrayBuffer());
+  const result = await new Promise<any>((resolve, reject) => {
+    cloudinary.uploader.upload_stream({}, (err, res) => err ? reject(err) : resolve(res)).end(buffer);
+  });
+  return NextResponse.json({ url: result.secure_url });
+}
+` + "```" + `
+
+` + "```" + `typescript
+// mobile screen
+import * as ImagePicker from "expo-image-picker";
+const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images });
+if (!result.canceled) {
+  const uri = result.assets[0].uri;
+  const formData = new FormData();
+  formData.append("file", { uri, name: "upload.jpg", type: "image/jpeg" } as any);
+  const { url } = await apiFetch<{ url: string }>("/api/upload", { method: "POST", body: formData });
+  // url is the public Cloudinary URL — store in your db / display via <Image source={{ uri: url }} />
+}
+` + "```" + `
+
+**B. Unsigned client upload via upload preset** — for low-friction galleries.
+Mobile fetches the cloud name + upload preset from a config endpoint, then
+POSTs directly to Cloudinary's public upload URL. Less secure (preset is
+public), only use for non-sensitive uploads.
+
+Display: ` + "`<Image source={{ uri: cloudinaryUrl }} />`" + ` — Cloudinary auto-serves
+the right format. For transformations, build URL manually:
+` + "`https://res.cloudinary.com/{cloud}/image/upload/w_400,h_400,c_fill/{publicId}`" + `.
+
+## Fal.ai (AI image generation) — when explicitly named
+
+If the user named Fal.ai (otherwise use the Wemob AI Gateway via
+` + "`generate_image`" + ` — see DATABASE-style routing rule equivalent in the AI
+section), proxy through the backend:
+
+` + "```" + `typescript
+// backend/app/api/fal/proxy/route.ts
+export { GET, POST } from "@fal-ai/server-proxy/nextjs";
+` + "```" + `
+
+` + "```" + `typescript
+// mobile screen
+import { fal } from "@fal-ai/client";
+fal.config({ proxyUrl: ` + "`${process.env.EXPO_PUBLIC_API_URL}/api/fal/proxy`" + ` });
+const result = await fal.subscribe("fal-ai/flux/dev", { input: { prompt, image_size: "square_hd" } });
+` + "```" + `
+
+Models: ` + "`fal-ai/flux/dev`" + ` (quality), ` + "`fal-ai/flux/schnell`" + ` (fast),
+` + "`fal-ai/flux-pro/v1.1-ultra`" + ` (premium). image_size: square_hd, square,
+landscape_4_3, landscape_16_9, portrait_4_3, portrait_16_9.
+
+## OpenRouter (AI) — when explicitly named
+
+Default for AI is the Wemob AI Gateway (see ## AI features above) — use
+OpenRouter ONLY when the user explicitly asks. OpenRouter is OpenAI-
+compatible:
+
+` + "```" + `typescript
+// backend/app/api/chat/route.ts
+import OpenAI from "openai";
+const client = new OpenAI({
+  baseURL: "https://openrouter.ai/api/v1",
+  apiKey: process.env.OPENROUTER_API_KEY,
+});
+
+export async function POST(req: NextRequest) {
+  const { messages } = await req.json();
+  const stream = await client.chat.completions.create({
+    model: "anthropic/claude-sonnet-4",
+    messages,
+    stream: true,
+  });
+  // ... stream to client (see Wemob AI Gateway recipe for streaming pattern)
+}
+` + "```" + `
+
+For streaming chat UIs use the Vercel AI SDK (` + "`ai`" + ` package) with the
+openai provider pointed at the OpenRouter baseURL.
+
+## Supabase (when explicitly named) — full RN support
+
+Supabase JS SDK works in Expo. Use ` + "`@supabase/supabase-js`" + ` plus
+` + "`react-native-url-polyfill`" + ` and ` + "`expo-secure-store`" + ` for the auth storage
+adapter.
+
+` + "```" + `typescript
+// mobile/lib/supabase.ts
+import "react-native-url-polyfill/auto";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { createClient } from "@supabase/supabase-js";
+
+// Public values come from the backend's /api/config route, NOT
+// process.env.NEXT_PUBLIC_* directly (that doesn't reach the Expo bundle).
+import { supabaseConfig } from "@/lib/runtime-config";
+
+export const supabase = createClient(supabaseConfig.url, supabaseConfig.anonKey, {
+  auth: {
+    storage: AsyncStorage,
+    autoRefreshToken: true,
+    persistSession: true,
+    detectSessionInUrl: false,
+  },
+});
+` + "```" + `
+
+Backend ` + "`/api/config/route.ts`" + ` returns ` + "`{ supabase: { url, anonKey } }`" + ` reading
+from ` + "`NEXT_PUBLIC_SUPABASE_URL`" + ` and ` + "`NEXT_PUBLIC_SUPABASE_ANON_KEY`" + `.
+
+Auth: ` + "`supabase.auth.signUp`" + ` / ` + "`signInWithPassword`" + `. Database:
+` + "`supabase.from('table').select / insert / update / delete`" + `. Always check
+the ` + "`error`" + ` field on every result.
+
+If user wants Supabase Auth specifically, prefer it over Better-Auth (don't
+wire both). The Wemob auth helpers in ` + "`lib/auth.ts`" + ` are Better-Auth-shaped;
+swap to Supabase's API throughout.
+
+## Firebase (when explicitly named)
+
+Firebase JS SDK (` + "`firebase`" + `) works in Expo Go. Native ` + "`@react-native-firebase/*`" + `
+packages do NOT — they require ` + "`google-services.json`" + ` /
+` + "`GoogleService-Info.plist`" + ` and a custom dev-client build.
+
+For Expo Go-compatible code:
+` + "```" + `typescript
+// mobile/lib/firebase.ts
+import { initializeApp } from "firebase/app";
+import { getAuth, initializeAuth, getReactNativePersistence } from "firebase/auth";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { firebaseConfig } from "@/lib/runtime-config"; // fetched from backend /api/config
+
+const app = initializeApp(firebaseConfig);
+export const auth = initializeAuth(app, {
+  persistence: getReactNativePersistence(AsyncStorage),
+});
+` + "```" + `
+
+Same /api/config route pattern: backend reads ` + "`NEXT_PUBLIC_FIREBASE_*`" + ` env
+vars and returns the public config. Modular tree-shakeable imports
+(` + "`firebase/app`" + `, ` + "`firebase/auth`" + `, ` + "`firebase/firestore`" + `, ` + "`firebase/storage`" + `).
+
+## Google Sheets — server-only, simple data source
+
+Cheapest dynamic-content backend. Server reads/writes a sheet via the
+public API:
+
+` + "```" + `typescript
+// backend/app/api/sheet-rows/route.ts
+const range = "Sheet1!A2:E";
+const url = ` + "`https://sheets.googleapis.com/v4/spreadsheets/${process.env.NEXT_PUBLIC_GOOGLE_SHEET_ID}/values/${encodeURIComponent(range)}?key=${process.env.GOOGLE_SHEETS_API_KEY}`" + `;
+const res = await fetch(url);
+const { values } = await res.json();
+return NextResponse.json(values);
+` + "```" + `
+
+Mobile: ` + "`apiFetch<string[][]>('/api/sheet-rows')`" + `. Useful for: marketing copy,
+FAQ, event listings, anything an operator should edit without redeploying.
+
+## Custom env vars (anything not in the dashboard's integration list)
+
+For arbitrary 3rd-party APIs the user wants to wire (Twilio, Mapbox,
+Plaid, etc.), tell the user to add the value via the dashboard's Env Vars
+panel (NOT in code). Then in your code:
+- Server-only secret → ` + "`process.env.MY_API_KEY`" + ` (read in backend routes only)
+- Client-readable value → user marks it Public; expose via ` + "`/api/config`" + `
+  same pattern as Supabase/Firebase.
+
 # FILE CONVENTIONS
 Expo Router uses file-based routing inside the app/ directory. The mapping
 is exactly analogous to Next.js App Router, but the rendered output is React
