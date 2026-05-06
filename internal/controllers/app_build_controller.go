@@ -286,29 +286,34 @@ func (c *Controller) BuildExpoMobile(ctx context.Context, project *models.AppPro
 		var triggerErr error
 		switch platform {
 		case "android":
-			_, triggerErr = c.CodemagicService.TriggerExpoAndroidBuild(ctx, codemagic.ExpoAndroidBuildParams{
-				ProjectID:                      project.ID,
-				BuildID:                        build.ID,
-				TaskID:                         task.ID,
-				AppTitle:                       build.Title,
-				AppSlug:                        project.Slug,
-				BundleID:                       bundleID,
-				PackageName:                    bundleID,
-				BuildNumber:                    nextNum,
-				MarketingVersion:               marketingVer,
-				SplashColor:                    build.SplashScreenColor,
-				FirstBuild:                     firstBuild,
-				IconKey:                        opts.Icon,
-				EASProjectUUID:                 project.ID.String(), // stable per project, set in P0.1
-				ExpoPublicAPIURL:               expoPublicAPIURL,
-				ExpoPublicProjectID:            project.ID.String(),
-				ExpoPublicAuthBaseURL:          expoPublicAuthBaseURL,
-				ExpoPublicRevenueCatKeyIOS:     rcKeyIOS,
-				ExpoPublicRevenueCatKeyAndroid: rcKeyAndroid,
-				ExpoPublicOneSignalAppID:       osAppID,
-				ExpoPublicOTAURL:               expoPublicOTAURL,
-				ExpoPublicWEMOBAPIURL:          constants.WEMOB_API_BASE_URL,
-			})
+			if chargeErr := c.ChargeBuildCredits(user, project.OrganizationID, constants.BuildCreditKindAndroid, build.ID.String()); chargeErr != nil {
+				slog.Warn("failed to charge android build credits", "error", chargeErr, "build_id", build.ID, "org_id", project.OrganizationID)
+				triggerErr = fmt.Errorf("insufficient credits to trigger Android build: %w", chargeErr)
+			} else {
+				_, triggerErr = c.CodemagicService.TriggerExpoAndroidBuild(ctx, codemagic.ExpoAndroidBuildParams{
+					ProjectID:                      project.ID,
+					BuildID:                        build.ID,
+					TaskID:                         task.ID,
+					AppTitle:                       build.Title,
+					AppSlug:                        project.Slug,
+					BundleID:                       bundleID,
+					PackageName:                    bundleID,
+					BuildNumber:                    nextNum,
+					MarketingVersion:               marketingVer,
+					SplashColor:                    build.SplashScreenColor,
+					FirstBuild:                     firstBuild,
+					IconKey:                        opts.Icon,
+					EASProjectUUID:                 project.ID.String(), // stable per project, set in P0.1
+					ExpoPublicAPIURL:               expoPublicAPIURL,
+					ExpoPublicProjectID:            project.ID.String(),
+					ExpoPublicAuthBaseURL:          expoPublicAuthBaseURL,
+					ExpoPublicRevenueCatKeyIOS:     rcKeyIOS,
+					ExpoPublicRevenueCatKeyAndroid: rcKeyAndroid,
+					ExpoPublicOneSignalAppID:       osAppID,
+					ExpoPublicOTAURL:               expoPublicOTAURL,
+					ExpoPublicWEMOBAPIURL:          constants.WEMOB_API_BASE_URL,
+				})
+			}
 		case "ios":
 			// P0 #6 (mobile audit): render NS*UsageDescription strings from
 			// MobileAppConfig.Permissions[]. Empty when config is missing /
