@@ -18,6 +18,18 @@ import (
 func (v *HttpViews) OAuthBegin(w http.ResponseWriter, r *http.Request) {
 	provider := chi.URLParam(r, "provider")
 	r = r.WithContext(context.WithValue(r.Context(), "provider", provider))
+
+	// Bridge Meta Pixel cookies (set on the front-end origin) across the
+	// Google → callback redirect. The frontend appends them as query params
+	// on this begin request; we stash them in a SameSite=Lax cookie scoped
+	// to api.wemob.io so they're sent back when the user returns from Google.
+	q := r.URL.Query()
+	controllers.SetMetaAttrCookie(w, r, controllers.MetaAttribution{
+		Fbp:            q.Get("fbp"),
+		Fbc:            q.Get("fbc"),
+		EventSourceURL: q.Get("event_source_url"),
+	})
+
 	gothic.BeginAuthHandler(w, r)
 }
 
@@ -31,7 +43,10 @@ func (v *HttpViews) OAuthCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userLoginRes, err := v.Controller.GoogleLogin(oauthUser)
+	attr := controllers.ReadMetaAttrCookie(r)
+	controllers.ClearMetaAttrCookie(w, r)
+
+	userLoginRes, err := v.Controller.GoogleLogin(oauthUser, attr)
 	if err != nil {
 		if errors.Is(err, controllers.ErrEmailHasCredentialsAccount) {
 			frontendURL := strings.TrimRight(v.Controller.SecretManager.GetSecret("FRONTEND_URL"), "/")

@@ -3,10 +3,90 @@ package controllers
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/knid/wemob/internal/models"
 )
+
+func TestMetaAttrCookieRoundTrip(t *testing.T) {
+	t.Run("set then read recovers fbp/fbc/url", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		setReq := httptest.NewRequest("GET", "https://api.example.com/auth", nil)
+		// Simulate a request behind a TLS-terminating proxy (Caddy/Fly edge).
+		setReq.Header.Set("X-Forwarded-Proto", "https")
+
+		SetMetaAttrCookie(w, setReq, MetaAttribution{
+			Fbp:            "fb.1.111.aaa",
+			Fbc:            "fb.1.222.bbb",
+			EventSourceURL: "https://app.example.com/register",
+		})
+
+		setCookie := w.Header().Get("Set-Cookie")
+		if setCookie == "" {
+			t.Fatal("expected Set-Cookie header")
+		}
+		if !strings.Contains(setCookie, "Secure") {
+			t.Error("Secure flag missing on HTTPS request")
+		}
+		if !strings.Contains(setCookie, "HttpOnly") {
+			t.Error("HttpOnly flag missing")
+		}
+		if !strings.Contains(setCookie, "SameSite=Lax") {
+			t.Error("SameSite=Lax missing — cross-origin redirect would drop the cookie")
+		}
+
+		readReq := httptest.NewRequest("GET", "https://api.example.com/callback", nil)
+		readReq.Header.Set("Cookie", strings.SplitN(setCookie, ";", 2)[0])
+
+		got := ReadMetaAttrCookie(readReq)
+		if got.Fbp != "fb.1.111.aaa" {
+			t.Errorf("Fbp = %q, want fb.1.111.aaa", got.Fbp)
+		}
+		if got.Fbc != "fb.1.222.bbb" {
+			t.Errorf("Fbc = %q, want fb.1.222.bbb", got.Fbc)
+		}
+		if got.EventSourceURL != "https://app.example.com/register" {
+			t.Errorf("EventSourceURL = %q", got.EventSourceURL)
+		}
+	})
+
+	t.Run("missing cookie still surfaces request IP/UA", func(t *testing.T) {
+		r := httptest.NewRequest("GET", "/", nil)
+		r.RemoteAddr = "1.2.3.4:5555"
+		r.Header.Set("User-Agent", "TestUA")
+		got := ReadMetaAttrCookie(r)
+		if got.Fbp != "" || got.Fbc != "" || got.EventSourceURL != "" {
+			t.Errorf("expected empty cookie payload, got %+v", got)
+		}
+		if got.ClientIP != "1.2.3.4" {
+			t.Errorf("ClientIP = %q, want 1.2.3.4 (port stripped)", got.ClientIP)
+		}
+		if got.ClientUA != "TestUA" {
+			t.Errorf("ClientUA = %q", got.ClientUA)
+		}
+	})
+
+	t.Run("empty bundle does not write cookie", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest("GET", "/", nil)
+		SetMetaAttrCookie(w, r, MetaAttribution{})
+		if w.Header().Get("Set-Cookie") != "" {
+			t.Error("empty bundle should not emit Set-Cookie")
+		}
+	})
+
+	t.Run("clear sets max-age to expire", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest("GET", "/", nil)
+		ClearMetaAttrCookie(w, r)
+		got := w.Header().Get("Set-Cookie")
+		if !strings.Contains(got, "Max-Age=0") {
+			t.Errorf("expected Max-Age=0 in clear cookie, got %q", got)
+		}
+	})
+}
+
 
 func TestApplyMetaAttribution(t *testing.T) {
 	t.Run("populates empty user fields", func(t *testing.T) {
