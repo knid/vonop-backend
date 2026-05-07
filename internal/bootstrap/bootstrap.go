@@ -104,6 +104,23 @@ func BootstrapController() (*controllers.Controller, asynq.RedisClientOpt) {
 	dbPass := sm.GetSecret("DB_PASSWORD")
 	dbSSL := sm.GetSecret("DB_SSLMODE")
 
+	// Fail fast if Infisical returned empty for any required DB secret.
+	// Without this, a flaky Infisical fetch (the same one that silently
+	// broke the worker on 2026-05-07) would build a malformed DSN and
+	// every query would fail at runtime instead of crashing at boot.
+	// Docker's restart: unless-stopped policy then retries the bootstrap,
+	// usually picking up the right secret on the second attempt.
+	if dbHost == "" || dbPort == "" || dbName == "" || dbUser == "" || dbPass == "" {
+		slog.Error("bootstrap: required DB secret(s) empty — Infisical fetch failed; refusing to start",
+			"db_host_set", dbHost != "",
+			"db_port_set", dbPort != "",
+			"db_name_set", dbName != "",
+			"db_user_set", dbUser != "",
+			"db_password_set", dbPass != "",
+		)
+		os.Exit(1)
+	}
+
 	dsn := fmt.Sprintf(
 		"postgres://%s:%s@%s:%s/%s?sslmode=%s",
 		dbUser, dbPass, dbHost, dbPort, dbName, dbSSL,
@@ -304,10 +321,28 @@ func BootstrapController() (*controllers.Controller, asynq.RedisClientOpt) {
 	remoteConfigService := remoteconfig.New(posthogClient)
 	slog.Info("RemoteConfig service initialized")
 
+	// Fail fast on empty Redis secrets. Asynq defaults Addr="" to localhost:6379
+	// (which doesn't exist on prod), and Asynq surfaces this only as a stream of
+	// "dial tcp [::1]:6379: connect: connection refused" errors after startup —
+	// the worker keeps running but never processes a task. The 2026-05-07
+	// silent-worker incident (worker dialing localhost for 6+ hours after a
+	// deploy) was exactly this. Crash at boot instead, and let Docker
+	// restart: unless-stopped retry the bootstrap with a fresh Infisical fetch.
+	// REDIS_USERNAME stays optional (managed Valkey doesn't require it).
+	redisAddr := sm.GetSecret("REDIS_ADDR")
+	redisPassword := sm.GetSecret("REDIS_PASSWORD")
+	if redisAddr == "" || redisPassword == "" {
+		slog.Error("bootstrap: required Redis secret(s) empty — Infisical fetch failed; refusing to start",
+			"redis_addr_set", redisAddr != "",
+			"redis_password_set", redisPassword != "",
+		)
+		os.Exit(1)
+	}
+
 	redisOpts := asynq.RedisClientOpt{
-		Addr:      sm.GetSecret("REDIS_ADDR"),
+		Addr:      redisAddr,
 		Username:  sm.GetSecret("REDIS_USERNAME"),
-		Password:  sm.GetSecret("REDIS_PASSWORD"),
+		Password:  redisPassword,
 		TLSConfig: &tls.Config{},
 	}
 
