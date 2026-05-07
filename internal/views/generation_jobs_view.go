@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/controllers"
+	"github.com/knid/wemob/internal/jobstate"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/utils"
@@ -106,7 +107,7 @@ func (v *HttpViews) handleStreamOrAsync(w http.ResponseWriter, r *http.Request, 
 	var lastEvent *responses.SSEEvent
 	var allMilestoneEvents []models.JobEvent
 
-	streamState := newStreamStateBuffer()
+	streamState := jobstate.NewStreamStateBuffer()
 	keepalive := time.NewTicker(15 * time.Second)
 	defer keepalive.Stop()
 	stateFlush := time.NewTicker(500 * time.Millisecond)
@@ -118,7 +119,7 @@ func (v *HttpViews) handleStreamOrAsync(w http.ResponseWriter, r *http.Request, 
 	// timeout and silently dropped events. The async flusher coalesces
 	// bursty updates and drains the tail in a single goroutine so the event
 	// loop never waits on the DB.
-	stateFlusher := newAsyncStateFlusher(
+	stateFlusher := jobstate.NewAsyncStateFlusher(
 		streamState.Snapshot,
 		func(raw json.RawMessage) {
 			if err := v.Controller.DB.UpdateGenerationJobStreamState(job.ID.String(), raw); err != nil {
@@ -245,12 +246,12 @@ func (v *HttpViews) drainEventsToJob(ctx context.Context, cancel context.CancelF
 	var lastEvent *responses.SSEEvent
 	var allMilestoneEvents []models.JobEvent
 
-	streamState := newStreamStateBuffer()
+	streamState := jobstate.NewStreamStateBuffer()
 	stateFlush := time.NewTicker(500 * time.Millisecond)
 	defer stateFlush.Stop()
 
 	// See handleStreamOrAsync for the async flusher rationale.
-	stateFlusher := newAsyncStateFlusher(
+	stateFlusher := jobstate.NewAsyncStateFlusher(
 		streamState.Snapshot,
 		func(raw json.RawMessage) {
 			if err := v.Controller.DB.UpdateGenerationJobStreamState(job.ID.String(), raw); err != nil {

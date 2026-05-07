@@ -1,4 +1,4 @@
-package views
+package jobstate
 
 import (
 	"encoding/json"
@@ -29,11 +29,11 @@ type streamStateProgress struct {
 	Total   int    `json:"total,omitempty"`
 }
 
-// streamStateBuffer accumulates the partial streaming data for a running job so
+// StreamStateBuffer accumulates the partial streaming data for a running job so
 // clients that disconnect mid-stream can rehydrate on reconnect. All mutations must
 // go through its methods; the internal mutex makes it safe to flush from a separate
 // goroutine while the event loop keeps ingesting events.
-type streamStateBuffer struct {
+type StreamStateBuffer struct {
 	mu               sync.Mutex
 	streamingText    string
 	thinkingText     string
@@ -44,13 +44,13 @@ type streamStateBuffer struct {
 	dirty            bool
 }
 
-func newStreamStateBuffer() *streamStateBuffer {
-	return &streamStateBuffer{}
+func NewStreamStateBuffer() *StreamStateBuffer {
+	return &StreamStateBuffer{}
 }
 
 // Apply folds a single SSE event into the buffer. It returns true when the event
 // actually mutated the buffer, which lets the caller gate unnecessary flushes.
-func (b *streamStateBuffer) Apply(event responses.SSEEvent) bool {
+func (b *StreamStateBuffer) Apply(event responses.SSEEvent) bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -316,7 +316,7 @@ func (b *streamStateBuffer) Apply(event responses.SSEEvent) bool {
 
 // replaceOrAppendToolCall matches a previous placeholder (from tool_start) with the
 // concrete tool_call payload, or appends a fresh entry when no placeholder exists.
-func (b *streamStateBuffer) replaceOrAppendToolCall(tool, arguments string) {
+func (b *StreamStateBuffer) replaceOrAppendToolCall(tool, arguments string) {
 	for i := len(b.toolCalls) - 1; i >= 0; i-- {
 		if b.toolCalls[i].Tool == tool && b.toolCalls[i].Pending {
 			b.toolCalls[i] = streamStateToolCall{Tool: tool, Arguments: arguments}
@@ -329,7 +329,7 @@ func (b *streamStateBuffer) replaceOrAppendToolCall(tool, arguments string) {
 // attachToolResult folds a tool_result event into the most recent matching
 // tool entry that doesn't already carry a result. This keeps reconnect state
 // consistent with what the client would have seen live.
-func (b *streamStateBuffer) attachToolResult(tool, preview, summary, status string) {
+func (b *StreamStateBuffer) attachToolResult(tool, preview, summary, status string) {
 	for i := len(b.toolCalls) - 1; i >= 0; i-- {
 		if b.toolCalls[i].Tool == tool && b.toolCalls[i].Result == "" {
 			b.toolCalls[i].Result = preview
@@ -350,7 +350,7 @@ func (b *streamStateBuffer) attachToolResult(tool, preview, summary, status stri
 // Snapshot returns the current state as a JSON-serialisable map and clears the
 // dirty flag. It returns (nil, false) when nothing has changed since the last
 // snapshot, which the caller can use to skip writes.
-func (b *streamStateBuffer) Snapshot() (json.RawMessage, bool) {
+func (b *StreamStateBuffer) Snapshot() (json.RawMessage, bool) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
