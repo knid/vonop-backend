@@ -87,6 +87,13 @@ func (c *Controller) BuildExpoMobile(ctx context.Context, project *models.AppPro
 	if wantIOS && !limits.CanBuildToIOS {
 		return nil, nil, fmt.Errorf("your subscription does not allow iOS builds")
 	}
+	// Apple signing precondition. The Codemagic iOS workflow fetches a fresh
+	// distribution cert + provisioning profile via /v2/codemagic/apple-signing
+	// at build time, which resolves project.DefaultAppleConnectionID. Without
+	// it the worker would burn ~25 min before failing — fail fast here.
+	if wantIOS && project.DefaultAppleConnectionID == nil {
+		return nil, nil, fmt.Errorf("iOS builds require an Apple connection on this app — add an App Store Connect API key in Credentials and set it as the default for this app")
+	}
 	bundleID := bundleIDForProject(project, opts.BundleIDOverride)
 
 	// AppBuildTask + Build are keyed by v1 Project. Find or create the

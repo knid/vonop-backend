@@ -1,19 +1,13 @@
 package views
 
 import (
-	"crypto/hmac"
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"io"
 	"log/slog"
 	"net/http"
-	"strconv"
-	"strings"
-	"time"
 
 	"github.com/google/uuid"
 
@@ -21,7 +15,6 @@ import (
 	"github.com/knid/wemob/internal/utils"
 )
 
-const appleSigningTimestampSkew = 5 * time.Minute
 const appleSigningMaxBody = 4 << 10 // 4 KiB; the body is just {project_id, timestamp}
 
 // CodemagicAppleSigningHandler holds dependencies for POST
@@ -66,7 +59,7 @@ type fetchAppleSigningResponse struct {
 //     AppleConnection.
 //  3. Returns cert + key + profile + a fresh random P12 password.
 func (h *CodemagicAppleSigningHandler) FetchAppleSigning(w http.ResponseWriter, r *http.Request) {
-	body, projectID, ok := h.readSignedBody(w, r)
+	body, projectID, ok := readSignedBodyByProjectID(w, r, h.HMACMaster, "apple-signing-fetch", appleSigningMaxBody)
 	if !ok {
 		return
 	}
@@ -146,43 +139,4 @@ func (h *CodemagicAppleSigningHandler) FetchAppleSigning(w http.ResponseWriter, 
 		BundleID:      row.BundleID,
 		P12Password:   hex.EncodeToString(pwBytes),
 	}, http.StatusOK)
-}
-
-// readSignedBody is identical to the OTA-cert handler's variant, just with
-// "apple-signing-fetch" as the HKDF purpose.
-func (h *CodemagicAppleSigningHandler) readSignedBody(w http.ResponseWriter, r *http.Request) ([]byte, string, bool) {
-	r.Body = http.MaxBytesReader(w, r.Body, appleSigningMaxBody)
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		utils.JSONError(w, "bad_request", "read body", http.StatusBadRequest, nil)
-		return nil, "", false
-	}
-
-	sigHeader := strings.TrimSpace(r.Header.Get("X-Wemob-Signature"))
-	tsHeader := strings.TrimSpace(r.Header.Get("X-Wemob-Timestamp"))
-	pidHeader := strings.TrimSpace(r.Header.Get("X-Wemob-Project-Id"))
-	if sigHeader == "" || tsHeader == "" || pidHeader == "" {
-		utils.JSONError(w, "unauthorized", "missing signature, timestamp, or project id header", http.StatusUnauthorized, nil)
-		return nil, "", false
-	}
-
-	ts, err := strconv.ParseInt(tsHeader, 10, 64)
-	tsTime := time.Unix(ts, 0)
-	if err != nil || time.Since(tsTime) > appleSigningTimestampSkew || time.Until(tsTime) > appleSigningTimestampSkew {
-		utils.JSONError(w, "unauthorized", "stale timestamp", http.StatusUnauthorized, nil)
-		return nil, "", false
-	}
-
-	derived := utils.DeriveHMACKey([]byte(h.HMACMaster), "apple-signing-fetch", pidHeader)
-	perCallSecret := hex.EncodeToString(derived)
-
-	h2 := hmac.New(sha256.New, []byte(perCallSecret))
-	h2.Write([]byte(tsHeader + "." + string(body)))
-	expected := "sha256=" + hex.EncodeToString(h2.Sum(nil))
-
-	if !hmac.Equal([]byte(sigHeader), []byte(expected)) {
-		utils.JSONError(w, "unauthorized", "bad signature", http.StatusUnauthorized, nil)
-		return nil, "", false
-	}
-	return body, pidHeader, true
 }

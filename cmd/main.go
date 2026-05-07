@@ -54,14 +54,12 @@ func createSchema(db *bun.DB) error {
 		(*models.Session)(nil),
 		(*models.AppUsageEvent)(nil),
 		(*models.AppBuildTask)(nil),
-		(*models.AppReleaseTask)(nil),
 		(*models.Ticket)(nil),
 		(*models.NavBarItems)(nil),
 		(*models.JSInjectData)(nil),
 		(*models.GooglePlayConnection)(nil),
 		(*models.AppleConnection)(nil),
 		(*models.Deployment)(nil),
-		(*models.SignIPATask)(nil),
 		(*models.DeploymentEvent)(nil),
 		(*models.AICreditsBalance)(nil),
 		(*models.AICreditTransaction)(nil),
@@ -193,10 +191,8 @@ func createSchema(db *bun.DB) error {
 		`ALTER TABLE store_page_images ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
 		`ALTER TABLE app_build_tasks ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
 		`ALTER TABLE app_build_tasks ADD COLUMN IF NOT EXISTS error_message text`,
-		`ALTER TABLE app_release_tasks ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
 		`ALTER TABLE tickets ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
 		`ALTER TABLE deployments ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
-		`ALTER TABLE sign_ipa_tasks ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
 		`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
 		`ALTER TABLE organization_members ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
 		`ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
@@ -1774,12 +1770,6 @@ func main() {
 						r.Get("/", httpViews.GetProjectNotifications)
 						r.Post("/", httpViews.SendProjectNotification)
 						r.Get("/{notificationId}", httpViews.GetProjectNotification)
-					})
-					r.Route("/builds", func(r chi.Router) {
-						r.Get("/", httpViews.GetProjectBuilds)
-						r.Route("/{buildId}", func(r chi.Router) {
-							r.Get("/", httpViews.GetProjectBuild)
-						})
 					})
 					r.Route("/public", func(r chi.Router) {
 						r.Route("/navbar", func(r chi.Router) {
