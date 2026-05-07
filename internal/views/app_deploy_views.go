@@ -405,7 +405,31 @@ func (v *HttpViews) BuildAppExpo(w http.ResponseWriter, r *http.Request) {
 	// when at least one platform produced a task row, even if triggerErr is
 	// non-nil.
 	if triggerErr != nil && (build == nil || len(tasks) == 0) {
-		utils.JSONInternalError(w, triggerErr)
+		var platformErr *controllers.BuildPlatformNotAllowedError
+		var capErr *controllers.MemberCreditCapError
+		switch {
+		case errors.As(triggerErr, &platformErr):
+			utils.JSONError(w, constants.ErrFeatureNotAvailable, platformErr.Error(), http.StatusForbidden, map[string]any{
+				"platform": platformErr.Platform,
+			})
+		case errors.Is(triggerErr, controllers.ErrBuildAlreadyInProgress):
+			utils.JSONErrorCode(w, constants.ErrBuildInProgress, http.StatusConflict, nil)
+		case errors.As(triggerErr, &capErr):
+			utils.JSONError(w, constants.ErrAICreditsDepleted, capErr.Error(), http.StatusPaymentRequired, map[string]any{
+				"cap":       capErr.Cap,
+				"spent":     capErr.Spent,
+				"requested": capErr.Requested,
+				"reason":    "member_credit_cap",
+			})
+		case errors.Is(triggerErr, controllers.ErrAICreditsFloorReached):
+			utils.JSONError(w, constants.ErrAICreditsDepleted, triggerErr.Error(), http.StatusPaymentRequired, map[string]any{
+				"reason": "overdraft_floor",
+			})
+		case errors.Is(triggerErr, controllers.ErrOrgInDunning):
+			utils.JSONErrorCode(w, constants.ErrOrgInDunning, http.StatusPaymentRequired, nil)
+		default:
+			utils.JSONInternalError(w, triggerErr)
+		}
 		return
 	}
 

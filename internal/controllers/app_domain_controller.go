@@ -20,6 +20,27 @@ import (
 // domainRegex validates domain format: labels separated by dots, TLD at least 2 chars.
 var domainRegex = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)*\.[a-zA-Z]{2,}$`)
 
+// User-facing errors returned by AddAppDomain. Views detect these via
+// errors.Is / errors.As to emit structured 4xx responses; without them the
+// view's catch-all routes every rejection through INTERNAL_ERROR.
+var (
+	ErrDomainInvalidFormat   = errors.New("invalid domain format")
+	ErrDomainReserved        = errors.New("wemob.app subdomains are managed automatically")
+	ErrDomainAttachedToOther = errors.New("domain already attached to another app")
+	ErrDomainAlreadyInUse    = errors.New("domain is already in use")
+	ErrAppNotDeployed        = errors.New("publish the app first before adding a custom domain")
+)
+
+// DomainLimitError signals the per-project custom-domain count cap was hit.
+type DomainLimitError struct {
+	Limit int
+	Used  int
+}
+
+func (e *DomainLimitError) Error() string {
+	return fmt.Sprintf("maximum of %d custom domains per project reached", e.Limit)
+}
+
 // isApexDomain returns true if the domain is a root/apex domain (e.g. "example.com"
 // or "example.co.uk") as opposed to a subdomain (e.g. "www.example.com"). Uses the
 // Public Suffix List so multi-part TLDs are handled correctly — "example.co.uk" is
@@ -150,33 +171,33 @@ func (c *Controller) AddAppDomain(project *models.AppProject, user *models.User,
 
 	// WEM-262: Secondary regex validation for domain format
 	if !domainRegex.MatchString(domainName) {
-		return nil, errors.New("invalid domain format")
+		return nil, ErrDomainInvalidFormat
 	}
 
 	// Block manual additions of *.wemob.app subdomains — these are managed automatically
 	if strings.HasSuffix(domainName, "."+constants.WEMOB_APP_BASE_DOMAIN) {
-		return nil, errors.New("wemob.app subdomains are managed automatically")
+		return nil, ErrDomainReserved
 	}
 
 	// WEM-264: Check per-project domain limit
 	existingDomains, err := c.DB.GetAppDomainsByProjectID(project.ID.String())
 	if err == nil && len(existingDomains) >= constants.MAX_DOMAINS_PER_PROJECT {
-		return nil, fmt.Errorf("maximum of %d custom domains per project reached", constants.MAX_DOMAINS_PER_PROJECT)
+		return nil, &DomainLimitError{Limit: constants.MAX_DOMAINS_PER_PROJECT, Used: len(existingDomains)}
 	}
 
 	// Check domain is not already attached to a different project
 	existing, err := c.DB.GetAppDomainByName(domainName)
 	if err == nil && existing != nil && existing.ID.String() != "" {
 		if existing.AppProjectID != project.ID {
-			return nil, errors.New("domain already attached to another app")
+			return nil, ErrDomainAttachedToOther
 		}
-		return nil, errors.New("domain is already in use")
+		return nil, ErrDomainAlreadyInUse
 	}
 
 	// Runtime row must exist (Fly app must be created before attaching a custom domain)
 	runtimeApp, err := c.DB.GetRuntimeAppByAppProjectID(project.ID.String())
 	if err != nil {
-		return nil, fmt.Errorf("publish the app first before adding a custom domain")
+		return nil, ErrAppNotDeployed
 	}
 
 	domain := models.AppDomain{
@@ -191,7 +212,7 @@ func (c *Controller) AddAppDomain(project *models.AppProject, user *models.User,
 	if err != nil {
 		// WEM-265: Handle unique constraint violation from DB index
 		if strings.Contains(err.Error(), "duplicate key") || strings.Contains(err.Error(), "unique constraint") {
-			return nil, errors.New("domain is already in use")
+			return nil, ErrDomainAlreadyInUse
 		}
 		return nil, fmt.Errorf("failed to add domain: %v", err)
 	}

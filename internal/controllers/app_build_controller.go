@@ -3,6 +3,7 @@ package controllers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -15,6 +16,26 @@ import (
 	"github.com/knid/wemob/internal/utils"
 	"github.com/knid/wemob/internal/utils/external"
 )
+
+// User-facing rejections from BuildExpoMobile. Views detect these via
+// errors.Is / errors.As to emit structured 4xx responses instead of 500.
+var ErrBuildAlreadyInProgress = errors.New("a build is already in progress, please wait")
+
+// BuildPlatformNotAllowedError signals the org's plan does not include a
+// mobile build platform. Platform is "android" or "ios".
+type BuildPlatformNotAllowedError struct {
+	Platform string
+}
+
+func (e *BuildPlatformNotAllowedError) Error() string {
+	label := strings.ToUpper(e.Platform)
+	if e.Platform == "android" {
+		label = "Android"
+	} else if e.Platform == "ios" {
+		label = "iOS"
+	}
+	return fmt.Sprintf("your subscription does not allow %s builds", label)
+}
 
 // BuildExpoMobile triggers a new Expo build for a mobile_app_native project.
 //
@@ -82,10 +103,10 @@ func (c *Controller) BuildExpoMobile(ctx context.Context, project *models.AppPro
 		return nil, nil, fmt.Errorf("could not load plan limits: %w", err)
 	}
 	if wantAndroid && !limits.CanBuildToAndroid {
-		return nil, nil, fmt.Errorf("your subscription does not allow Android builds")
+		return nil, nil, &BuildPlatformNotAllowedError{Platform: "android"}
 	}
 	if wantIOS && !limits.CanBuildToIOS {
-		return nil, nil, fmt.Errorf("your subscription does not allow iOS builds")
+		return nil, nil, &BuildPlatformNotAllowedError{Platform: "ios"}
 	}
 	bundleID := bundleIDForProject(project, opts.BundleIDOverride)
 
@@ -128,7 +149,7 @@ func (c *Controller) BuildExpoMobile(ctx context.Context, project *models.AppPro
 
 	// Pending build guard.
 	if pending, perr := c.DB.GetPendingAppBuildTasks(v1project); perr == nil && len(pending) > 0 {
-		return nil, nil, fmt.Errorf("a build is already in progress, please wait")
+		return nil, nil, ErrBuildAlreadyInProgress
 	}
 
 	// Next build number.
