@@ -63,9 +63,14 @@ func (c *Controller) CreateAppProject(ctx context.Context, user *models.User, re
 		return nil, err
 	}
 
-	// Determine project type first so we can enforce the right limit
+	// Determine project type first so we can enforce the right limit. Only
+	// auto-classify when the client didn't pick one — an explicit "app"
+	// (web) selection from the home composer must be honored, otherwise the
+	// LLM classifier can flip prompts that "sound mobile" (camera, scanning,
+	// etc.) into mobile_app_native and bounce Starter users with a misleading
+	// "not available in your plan" 403.
 	projectType := req.ProjectType
-	if projectType == "" || projectType == "app" {
+	if projectType == "" {
 		classified := c.classifyProjectType(ctx, req.Prompt, user)
 		if classified != "" {
 			projectType = classified
