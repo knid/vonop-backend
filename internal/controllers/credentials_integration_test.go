@@ -4,7 +4,6 @@ package controllers
 
 import (
 	"context"
-	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -14,11 +13,12 @@ import (
 	"github.com/knid/wemob/internal/requests"
 )
 
-// TestUpdateAppleConnection_PrefixesNewP8 validates the T3 audit fix:
-// passing a bare UUID in req.P8Key results in a P8KeyPath in the DB
-// that starts with "p8_keys/", not the bare UUID. This is the regression
-// guard for "applyP8Prefix is not wired into UpdateAppleConnection".
-func TestUpdateAppleConnection_PrefixesNewP8(t *testing.T) {
+// TestUpdateAppleConnection_NoP8KeepsExistingRef verifies that an update with
+// an empty P8Key preserves the existing CredRef (i.e. Bun's whole-row UPDATE
+// doesn't null it out). The post-2026-05-07 cleanup made CredRef the sole
+// credential storage, so this is the regression guard for "nullzero on
+// whole-row update wipes the encrypted blob pointer".
+func TestUpdateAppleConnection_NoP8KeepsExistingRef(t *testing.T) {
 	db := database.NewTestDB(t,
 		(*models.User)(nil),
 		(*models.Organization)(nil),
@@ -40,22 +40,26 @@ func TestUpdateAppleConnection_PrefixesNewP8(t *testing.T) {
 		t.Fatalf("insert org: %v", err)
 	}
 
+	// Seed an encrypted .p8 via CredStore so the connection row has a real ref
+	// to preserve across the no-op update.
+	ref, err := c.CredStore.Put(ctx, org.ID, "apple-p8", []byte("FAKE-P8"))
+	if err != nil {
+		t.Fatalf("seed cred: %v", err)
+	}
+
 	conn := &models.AppleConnection{
 		ID: uuid.New(), UserID: user.ID, OrganizationID: org.ID,
 		Name: "test", KeyID: "K", TeamID: "T", IssuerID: "I",
-		P8KeyPath: "p8_keys/old.p8",
+		P8KeyCredRef: credRefFromStorage(ref),
 	}
 	if _, err := db.DB.NewInsert().Model(conn).Exec(ctx); err != nil {
 		t.Fatalf("insert conn: %v", err)
 	}
 
-	bareUUID := uuid.New().String()
-	_, err := c.UpdateAppleConnection(user, conn.ID.String(),
+	_, err = c.UpdateAppleConnection(user, conn.ID.String(),
 		requests.AppleConnectionUpdateRequest{
 			Name: "renamed", KeyID: "K", TeamID: "T", IssuerID: "I",
-			P8Key: bareUUID, // bare UUID — must be prefixed by applyP8Prefix
-			// APNSP8Key + APNSKeyID intentionally empty so we exercise the bare-UUID
-			// path in isolation.
+			// P8Key intentionally empty — keeps existing ref.
 		})
 	if err != nil {
 		t.Fatalf("update: %v", err)
@@ -65,10 +69,13 @@ func TestUpdateAppleConnection_PrefixesNewP8(t *testing.T) {
 	if err := db.DB.NewSelect().Model(&saved).Where("id = ?", conn.ID).Scan(ctx); err != nil {
 		t.Fatalf("reload: %v", err)
 	}
-	if !strings.HasPrefix(saved.P8KeyPath, "p8_keys/") {
-		t.Errorf("P8KeyPath = %q, want prefix p8_keys/", saved.P8KeyPath)
+	if saved.P8KeyCredRef == nil {
+		t.Fatal("P8KeyCredRef nil after update — whole-row UPDATE clobbered the encrypted ref")
 	}
-	if !strings.Contains(saved.P8KeyPath, bareUUID) {
-		t.Errorf("P8KeyPath = %q, want to contain bare UUID %q", saved.P8KeyPath, bareUUID)
+	if saved.P8KeyCredRef.BlobS3Key != ref.BlobS3Key {
+		t.Errorf("P8KeyCredRef changed: got %q want %q", saved.P8KeyCredRef.BlobS3Key, ref.BlobS3Key)
+	}
+	if saved.Name != "renamed" {
+		t.Errorf("Name not updated: got %q want renamed", saved.Name)
 	}
 }

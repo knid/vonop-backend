@@ -20,8 +20,8 @@ var (
 )
 
 // SetOneSignalTestEndpoint redirects all OneSignal calls (CreateApplication,
-// CreateAppToken, UploadAPNSP8Key, SendOneSignalNotification, SendNotificationViaSDK)
-// to a test server. Returns a restore function. Test-only; do not call from
+// CreateAppToken, SendOneSignalNotification, SendNotificationViaSDK) to a
+// test server. Returns a restore function. Test-only; do not call from
 // production code.
 func SetOneSignalTestEndpoint(u string) (restore func()) {
 	prev := onesignalAPIBaseURL

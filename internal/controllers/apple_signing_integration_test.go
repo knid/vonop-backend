@@ -188,7 +188,6 @@ func setupAppleSigningTest(t *testing.T) (c *Controller, project *models.AppProj
 		KeyID:          "TESTKEYID",
 		TeamID:         "TESTTEAM",
 		IssuerID:       "00000000-0000-0000-0000-000000000000",
-		P8KeyPath:      "p8_keys/test.p8",
 		P8KeyCredRef:   credRefFromStorage(credRef),
 	}
 	if _, err := db.DB.NewInsert().Model(conn).Exec(ctx); err != nil {

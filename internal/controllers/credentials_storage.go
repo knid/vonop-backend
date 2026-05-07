@@ -10,41 +10,29 @@ import (
 )
 
 // ReadApplePrimaryP8 returns the plaintext .p8 contents for an Apple
-// connection. Prefers the encrypted CredRef when present; falls back to
-// the legacy S3 path during the dual-read transition window.
+// connection by decrypting the CredRef via CredStore. The legacy plaintext-S3
+// fallback was dropped 2026-05-07 alongside the P8KeyPath column.
 func (c *Controller) ReadApplePrimaryP8(ctx context.Context, conn *models.AppleConnection) ([]byte, error) {
 	if conn == nil {
 		return nil, fmt.Errorf("ReadApplePrimaryP8: nil conn")
 	}
-	if conn.P8KeyCredRef != nil {
-		ref := credRefToStorage(conn.P8KeyCredRef)
-		return c.CredStore.Get(ctx, conn.OrganizationID, ref)
+	if conn.P8KeyCredRef == nil {
+		return nil, fmt.Errorf("ReadApplePrimaryP8: connection %s has no encrypted p8 ref", conn.ID)
 	}
-	return c.UserApiKeysStorage.ReadObjectBytes(ctx, conn.P8KeyPath)
+	return c.CredStore.Get(ctx, conn.OrganizationID, credRefToStorage(conn.P8KeyCredRef))
 }
 
-// ReadAppleAPNSP8 mirrors ReadApplePrimaryP8 for the APNs key.
-func (c *Controller) ReadAppleAPNSP8(ctx context.Context, conn *models.AppleConnection) ([]byte, error) {
-	if conn == nil {
-		return nil, fmt.Errorf("ReadAppleAPNSP8: nil conn")
-	}
-	if conn.APNSP8KeyCredRef != nil {
-		ref := credRefToStorage(conn.APNSP8KeyCredRef)
-		return c.CredStore.Get(ctx, conn.OrganizationID, ref)
-	}
-	return c.UserApiKeysStorage.ReadObjectBytes(ctx, conn.APNSP8KeyPath)
-}
-
-// ReadGoogleSA returns plaintext SA JSON for a Google Play connection.
+// ReadGoogleSA returns plaintext SA JSON for a Google Play connection by
+// decrypting the CredRef via CredStore. The legacy plaintext-S3 fallback
+// was dropped 2026-05-07 alongside the ServiceAccountPath column.
 func (c *Controller) ReadGoogleSA(ctx context.Context, conn *models.GooglePlayConnection) ([]byte, error) {
 	if conn == nil {
 		return nil, fmt.Errorf("ReadGoogleSA: nil conn")
 	}
-	if conn.ServiceAccountCredRef != nil {
-		ref := credRefToStorage(conn.ServiceAccountCredRef)
-		return c.CredStore.Get(ctx, conn.OrganizationID, ref)
+	if conn.ServiceAccountCredRef == nil {
+		return nil, fmt.Errorf("ReadGoogleSA: connection %s has no encrypted SA ref", conn.ID)
 	}
-	return c.UserApiKeysStorage.ReadObjectBytes(ctx, conn.ServiceAccountPath)
+	return c.CredStore.Get(ctx, conn.OrganizationID, credRefToStorage(conn.ServiceAccountCredRef))
 }
 
 // credRefToStorage converts the model-side CredRefJSON (kept in models to

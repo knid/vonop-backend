@@ -72,7 +72,6 @@ func TestGetAppleConnectionForOrg_RejectsNonMember(t *testing.T) {
 		OrganizationID: org.ID,
 		Name:           "test",
 		KeyID:          "K", TeamID: "T", IssuerID: "I",
-		P8KeyPath: "p8_keys/x.p8",
 	}
 	if _, err := db.DB.NewInsert().Model(conn).Exec(ctx); err != nil {
 		t.Fatalf("insert conn: %v", err)
@@ -95,7 +94,6 @@ func TestGetAppleConnectionForOrg_AllowsOrgMember(t *testing.T) {
 	conn := &models.AppleConnection{
 		ID: uuid.New(), UserID: owner.ID, OrganizationID: org.ID,
 		Name: "test", KeyID: "K", TeamID: "T", IssuerID: "I",
-		P8KeyPath: "p8_keys/x.p8",
 	}
 	if _, err := db.DB.NewInsert().Model(conn).Exec(ctx); err != nil {
 		t.Fatalf("insert conn: %v", err)
@@ -133,7 +131,6 @@ func TestUpdateAppleConnectionForOrg_PreservesOriginalUserID(t *testing.T) {
 	conn := &models.AppleConnection{
 		ID: uuid.New(), UserID: owner.ID, OrganizationID: org.ID,
 		Name: "original", KeyID: "K", TeamID: "T", IssuerID: "I",
-		P8KeyPath: "p8_keys/x.p8",
 	}
 	if _, err := db.DB.NewInsert().Model(conn).Exec(ctx); err != nil {
 		t.Fatalf("insert conn: %v", err)
@@ -142,8 +139,8 @@ func TestUpdateAppleConnectionForOrg_PreservesOriginalUserID(t *testing.T) {
 	_, err := c.UpdateAppleConnectionForOrg(ctx, editor, org.ID.String(), conn.ID.String(),
 		requests.AppleConnectionUpdateRequest{
 			Name: "renamed", KeyID: "K2", TeamID: "T2", IssuerID: "I2",
-			// P8Key/APNSP8Key/APNSKeyID intentionally empty so we don't trigger the
-			// dual-write CredStore path that would need additional setup.
+			// P8Key intentionally empty so we don't trigger the encrypt path
+			// that would need a real S3 staging blob.
 		})
 	if err != nil {
 		t.Fatalf("update: %v", err)
@@ -171,7 +168,7 @@ func TestGetGooglePlayConnectionForOrg_RejectsNonMember(t *testing.T) {
 	ctx := context.Background()
 	conn := &models.GooglePlayConnection{
 		ID: uuid.New(), UserID: owner.ID, OrganizationID: org.ID,
-		Name: "test", ServiceAccountPath: "service_accounts/x.json",
+		Name: "test",
 	}
 	if _, err := db.DB.NewInsert().Model(conn).Exec(ctx); err != nil {
 		t.Fatalf("insert: %v", err)
@@ -190,7 +187,7 @@ func TestGetGooglePlayConnectionForOrg_AllowsOrgMember(t *testing.T) {
 	ctx := context.Background()
 	conn := &models.GooglePlayConnection{
 		ID: uuid.New(), UserID: owner.ID, OrganizationID: org.ID,
-		Name: "test", ServiceAccountPath: "service_accounts/x.json",
+		Name: "test",
 	}
 	if _, err := db.DB.NewInsert().Model(conn).Exec(ctx); err != nil {
 		t.Fatalf("insert: %v", err)
@@ -222,7 +219,7 @@ func TestUpdateGooglePlayConnectionForOrg_PreservesOriginalUserID(t *testing.T) 
 
 	conn := &models.GooglePlayConnection{
 		ID: uuid.New(), UserID: owner.ID, OrganizationID: org.ID,
-		Name: "original", ServiceAccountPath: "service_accounts/x.json",
+		Name: "original",
 	}
 	if _, err := db.DB.NewInsert().Model(conn).Exec(ctx); err != nil {
 		t.Fatalf("insert: %v", err)

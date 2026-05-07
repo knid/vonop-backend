@@ -30,27 +30,6 @@ func (v *HttpViews) PutP8KeyToS3Presign(w http.ResponseWriter, r *http.Request) 
 	}, http.StatusOK)
 }
 
-func (v *HttpViews) PutAPNsKeyToS3Presign(w http.ResponseWriter, r *http.Request) {
-	if _, err := v.Controller.GetUserFromReq(r); err != nil {
-		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
-		return
-	}
-
-	id := uuid.New().String()
-	objectKey := "apns_keys/" + id + ".p8"
-
-	presignedRequest, err := v.Controller.UserApiKeysStorage.PutObject(r.Context(), objectKey, 300)
-	if err != nil {
-		utils.JSONInternalError(w, err)
-		return
-	}
-
-	utils.JSONResponse(w, map[string]interface{}{
-		"id":                id,
-		"presigned_request": presignedRequest,
-	}, http.StatusOK)
-}
-
 func (v *HttpViews) PutServiceAccountToS3Presign(w http.ResponseWriter, r *http.Request) {
 	if _, err := v.Controller.GetUserFromReq(r); err != nil {
 		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
