@@ -162,27 +162,21 @@ func (h *ExpoReportsHandler) UpdateExpoBuildStatus(w http.ResponseWriter, r *htt
 		return
 	}
 
-	// P0 #1 (mobile audit, 2026-05-04): also project the event onto the
-	// app_build_task row so cron / UI / latest-successful queries see it.
-	// Without this, every Expo build sits at status_text="Queued" forever
-	// and MarkOrphanedBuildTasksFailed marks successful builds as stuck
-	// 35 min after they actually finished.
-	//
-	// Vocabulary mirrors the legacy v1 path in controllers/reports.go:
-	//   built/submitted/published → "Built", finished=true
-	//   error                     → "Failed", finished=true
+	// Project build-phase events onto the app_build_task row so cron / UI /
+	// latest-successful queries see terminal state. Submit-phase events
+	// don't touch app_build_task — they advance the Release row instead
+	// (applyReleaseStatusUpdate below). Vocabulary:
+	//   built/success/completed/done → "Built", finished=true
+	//   error/failed/cancelled       → "Failed", finished=true
 	//   preparing/building/uploading → "Preparing"/"Building"/"Uploading"
-	//
-	// Submit-phase terminal events ("submitted") share the same task row as
-	// the parent build, so we treat them the same as a "built" — the row
-	// reflects the final outcome of whatever workflow is in flight. Status
-	// vocabulary unification is P0 #2, intentionally not tackled here.
-	if err := h.applyTaskStatusUpdate(r.Context(), taskID, &report); err != nil {
-		// Status update failed but the event was already recorded — log
-		// and continue so the worker doesn't retry-spam (the event row
-		// is the source of truth; the projection is best-effort).
-		slog.Warn("expo build status update failed",
-			"task_id", taskID.String(), "status", report.Status, "err", err)
+	if !strings.EqualFold(report.Phase, "submit") {
+		if err := h.applyTaskStatusUpdate(r.Context(), taskID, &report); err != nil {
+			// Status update failed but the event was already recorded — log
+			// and continue so the worker doesn't retry-spam (the event row
+			// is the source of truth; the projection is best-effort).
+			slog.Warn("expo build status update failed",
+				"task_id", taskID.String(), "status", report.Status, "err", err)
+		}
 	}
 
 	// On submit-phase terminal events, also advance the Release row.
@@ -261,9 +255,11 @@ func (h *ExpoReportsHandler) applyReleaseStatusUpdate(
 	}
 }
 
-// applyTaskStatusUpdate maps a Codemagic status event onto the
-// app_build_task row. Returns nil for unknown statuses (we still want the
-// event recorded — just don't touch the projection).
+// applyTaskStatusUpdate maps a Codemagic build-phase status event onto the
+// app_build_task row. Caller is responsible for filtering submit-phase
+// events out — those advance Release, not AppBuildTask. Returns nil for
+// unknown statuses (we still want the event recorded — just don't touch
+// the projection).
 func (h *ExpoReportsHandler) applyTaskStatusUpdate(
 	ctx context.Context,
 	taskID uuid.UUID,
@@ -296,18 +292,21 @@ func (h *ExpoReportsHandler) applyTaskStatusUpdate(
 	return err
 }
 
-// classifyExpoStatus maps a webhook status string to the canonical
-// app_build_task.status_text and whether the build is in a terminal
-// (Finished=true) state.
+// classifyExpoStatus maps a webhook status string to a canonical status
+// vocabulary and whether the event is a terminal state.
+//
+// Used by both the build-phase projection (writes to app_build_task.status_text)
+// and the submit-phase projection (advances Release.status). Submit-phase
+// terms ("submitted"/"published") map to the same "Built" terminal so the
+// release-side caller can read terminal-success uniformly; the caller for
+// app_build_task filters submit-phase events out before calling this so
+// the row never gets a "submit succeeded" written as the build status.
 //
 // Returns (statusText, finished, isTerminal). isTerminal=false with
 // statusText="" means the status is unrecognized and the caller should skip
 // the projection update.
 func classifyExpoStatus(raw string) (statusText string, finished bool, isTerminal bool) {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
-	// Terminal success vocabulary. "submitted"/"published" come from the
-	// submit-phase workflows — they share the same task row, so a
-	// successful submit transitions the row to its final state too.
 	case "built", "success", "completed", "done", "submitted", "published":
 		return "Built", true, true
 	case "error", "failed", "cancelled", "canceled":
