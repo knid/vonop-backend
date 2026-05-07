@@ -12,8 +12,8 @@ import (
 )
 
 // redisEventEmitter implements agent.EventEmitter. Each Emit call:
-//   1. Stamps a per-job monotonic seq into the SSEEvent.
-//   2. Publishes the JSON-encoded event on jobstream.EventsChannel(jobID).
+//  1. Stamps a per-job monotonic seq into the SSEEvent.
+//  2. Publishes the JSON-encoded event on jobstream.EventsChannel(jobID).
 //
 // Milestone-event persistence + stream_state buffering is handled by the
 // task handler in agent_run_handler.go — NOT here. Keeping the emitter
