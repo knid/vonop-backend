@@ -2,14 +2,11 @@ package views
 
 import (
 	"context"
-	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"io"
 	"log/slog"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -21,7 +18,7 @@ import (
 	"github.com/knid/wemob/internal/utils"
 )
 
-const expoReportsTimestampSkew = 5 * time.Minute
+const expoReportsMaxBody = 64 * 1024
 
 type expoBuildReport struct {
 	TaskID  string `json:"task_id"`
@@ -127,52 +124,21 @@ func (h *ExpoReportsHandler) WithReleaseStore(rs expoReportsReleaseStore) *ExpoR
 // HMAC(master, task_id) to HKDF with a "build-webhook" purpose so a leaked
 // build secret can't be used to sign keystore or OTA webhooks.
 func (h *ExpoReportsHandler) UpdateExpoBuildStatus(w http.ResponseWriter, r *http.Request) {
-	// Bound the body to prevent memory exhaustion from oversized payloads.
-	r.Body = http.MaxBytesReader(w, r.Body, 64*1024)
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		utils.JSONError(w, "bad_request", "read body", http.StatusBadRequest, nil)
+	body, ok := readBodyWithLimit(w, r, expoReportsMaxBody)
+	if !ok {
 		return
 	}
 
-	sigHeader := strings.TrimSpace(r.Header.Get("X-Wemob-Signature"))
-	tsHeader := strings.TrimSpace(r.Header.Get("X-Wemob-Timestamp"))
-	if sigHeader == "" || tsHeader == "" {
-		utils.JSONError(w, "unauthorized", "missing signature or timestamp", http.StatusUnauthorized, nil)
-		return
-	}
-
-	ts, err := strconv.ParseInt(tsHeader, 10, 64)
-	tsTime := time.Unix(ts, 0)
-	// Reject both stale (too old) and future-dated timestamps to prevent replays and
-	// forward-timestamp attacks. Allow ±5 min clock skew in either direction.
-	if err != nil || time.Since(tsTime) > expoReportsTimestampSkew || time.Until(tsTime) > expoReportsTimestampSkew {
-		utils.JSONError(w, "unauthorized", "stale timestamp", http.StatusUnauthorized, nil)
-		return
-	}
-
+	// Build-webhook scope is task_id from the parsed body — unique here,
+	// since other handlers scope by project_id from the X-Wemob-Project-Id
+	// header. Decode first, then verify.
 	var report expoBuildReport
 	if err := json.Unmarshal(body, &report); err != nil {
 		utils.JSONError(w, "bad_request", "invalid json", http.StatusBadRequest, nil)
 		return
 	}
 
-	// Derive per-build, per-purpose key via HKDF — a leak of this key
-	// only compromises the build webhook for this task_id (not other
-	// builds, not other webhook types). Hex-encode the 32-byte derived
-	// key so the shell-side derivation in codemagic.yaml matches.
-	derived := utils.DeriveHMACKey([]byte(h.HMACMaster), "build-webhook", report.TaskID)
-	buildSecret := hex.EncodeToString(derived)
-
-	// Compute expected signature over "<timestamp>.<body>" so the timestamp is
-	// bound to the signature and cannot be substituted independently.
-	h2 := hmac.New(sha256.New, []byte(buildSecret))
-	h2.Write([]byte(tsHeader + "." + string(body)))
-	expected := "sha256=" + hex.EncodeToString(h2.Sum(nil))
-
-	// Constant-time compare
-	if !hmac.Equal([]byte(sigHeader), []byte(expected)) {
-		utils.JSONError(w, "unauthorized", "bad signature", http.StatusUnauthorized, nil)
+	if !verifyHMACSignature(w, r, body, h.HMACMaster, "build-webhook", report.TaskID) {
 		return
 	}
 
