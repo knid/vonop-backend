@@ -75,6 +75,9 @@ func (v *HttpViews) CopyTemplate(w http.ResponseWriter, r *http.Request) {
 
 	project, err := v.Controller.CopyTemplate(r.Context(), user, slug)
 	if err != nil {
+		if writeAppLimitError(w, err) {
+			return
+		}
 		utils.JSONInternalError(w, err)
 		return
 	}

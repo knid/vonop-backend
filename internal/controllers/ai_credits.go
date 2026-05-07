@@ -487,7 +487,7 @@ func (c *Controller) DeductAICreditsUnchecked(user *models.User, orgID uuid.UUID
 		if bal, _ := c.DB.GetAICreditsBalanceByOrg(orgID.String()); bal != nil {
 			spent, _ := c.DB.MemberPeriodSpent(orgID.String(), user.ID.String(), bal.PeriodStart, bal.PeriodEnd)
 			if spent+cost > *member.MonthlyCreditCap {
-				return fmt.Errorf("member credit cap reached (cap=%d, spent=%d, requested=%d)", *member.MonthlyCreditCap, spent, cost)
+				return &MemberCreditCapError{Cap: *member.MonthlyCreditCap, Spent: spent, Requested: cost}
 			}
 		}
 	}
@@ -499,7 +499,7 @@ func (c *Controller) DeductAICreditsUnchecked(user *models.User, orgID uuid.UUID
 		newBalance, err = c.DB.AtomicDeductCreditsUnchecked(tx, balance.ID.String(), cost, minBalance)
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
-				return fmt.Errorf("AI credits overdraft limit reached (floor: %d)", minBalance)
+				return fmt.Errorf("%w (floor: %d)", ErrAICreditsFloorReached, minBalance)
 			}
 			return err
 		}
@@ -548,7 +548,7 @@ func (c *Controller) DeductAICreditsToFloor(user *models.User, orgID uuid.UUID, 
 		if bal, _ := c.DB.GetAICreditsBalanceByOrg(orgID.String()); bal != nil {
 			spent, _ := c.DB.MemberPeriodSpent(orgID.String(), user.ID.String(), bal.PeriodStart, bal.PeriodEnd)
 			if spent+cost > *member.MonthlyCreditCap {
-				return fmt.Errorf("member credit cap reached (cap=%d, spent=%d, requested=%d)", *member.MonthlyCreditCap, spent, cost)
+				return &MemberCreditCapError{Cap: *member.MonthlyCreditCap, Spent: spent, Requested: cost}
 			}
 		}
 	}

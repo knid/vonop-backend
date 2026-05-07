@@ -1,15 +1,45 @@
 package views
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/go-playground/validator/v10"
 	"github.com/knid/wemob/internal/constants"
+	"github.com/knid/wemob/internal/controllers"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/utils"
 	"github.com/posthog/posthog-go"
 )
+
+// writeAddAppDomainError translates user-facing rejections from
+// AddAppDomain into structured 4xx responses. Returns true when handled.
+func writeAddAppDomainError(w http.ResponseWriter, err error) bool {
+	var limitErr *controllers.DomainLimitError
+	if errors.As(err, &limitErr) {
+		utils.JSONError(w, constants.ErrDomainLimitReached, limitErr.Error(), http.StatusForbidden, map[string]any{
+			"limit": limitErr.Limit,
+			"used":  limitErr.Used,
+		})
+		return true
+	}
+	switch {
+	case errors.Is(err, controllers.ErrDomainInvalidFormat):
+		utils.JSONError(w, constants.ErrDomainInvalid, err.Error(), http.StatusBadRequest, nil)
+	case errors.Is(err, controllers.ErrDomainReserved):
+		utils.JSONError(w, constants.ErrDomainInvalid, err.Error(), http.StatusBadRequest, nil)
+	case errors.Is(err, controllers.ErrDomainAttachedToOther),
+		errors.Is(err, controllers.ErrDomainAlreadyInUse):
+		utils.JSONError(w, constants.ErrDomainTaken, err.Error(), http.StatusConflict, nil)
+	case errors.Is(err, controllers.ErrAppNotDeployed):
+		utils.JSONError(w, constants.ErrAppNotDeployed, err.Error(), http.StatusConflict, nil)
+	default:
+		return false
+	}
+	return true
+}
 
 // GET /v2/apps/{appId}/domains
 func (v *HttpViews) GetAppDomains(w http.ResponseWriter, r *http.Request) {
@@ -66,6 +96,16 @@ func (v *HttpViews) AddAppDomain(w http.ResponseWriter, r *http.Request) {
 
 	result, err := v.Controller.AddAppDomain(project, user, req)
 	if err != nil {
+		if writeAddAppDomainError(w, err) {
+			return
+		}
+		// Validator errors (e.g. ValidateFunc on the request struct) also
+		// surface here; route them to the field-level catalog.
+		var verr validator.ValidationErrors
+		if errors.As(err, &verr) {
+			utils.ValidationError(w, err)
+			return
+		}
 		utils.JSONInternalError(w, err)
 		return
 	}

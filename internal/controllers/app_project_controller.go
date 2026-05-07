@@ -18,6 +18,27 @@ import (
 	"github.com/posthog/posthog-go"
 )
 
+// AppLimitError signals that an app-creation request was rejected by the
+// org's plan limits. HTTP views detect this via errors.As and translate it
+// into a structured 4xx response; without it the error falls through to the
+// catch-all 500 path and the client sees an opaque "internal error".
+type AppLimitError struct {
+	IsMobile bool
+	Limit    int // 0 means the feature is not available on this plan
+	Used     int
+}
+
+func (e *AppLimitError) Error() string {
+	kind := "web"
+	if e.IsMobile {
+		kind = "mobile"
+	}
+	if e.Limit == 0 {
+		return fmt.Sprintf("%s app creation is not available on your plan", kind)
+	}
+	return fmt.Sprintf("you have reached your %s app limit (%d)", kind, e.Limit)
+}
+
 // CreateDraftAppProject creates a new app project in "draft" status — no
 // generation is kicked off. Used by the home composer flow, which creates the
 // project synchronously, navigates the user to the studio, and then lets the
@@ -80,10 +101,7 @@ func (c *Controller) CreateAppProject(ctx context.Context, user *models.User, re
 		}
 
 		if maxApps == 0 {
-			if isMobile {
-				return nil, fmt.Errorf("mobile app creation is not available on your plan")
-			}
-			return nil, fmt.Errorf("web app creation is not available on your plan")
+			return nil, &AppLimitError{IsMobile: isMobile, Limit: 0}
 		}
 
 		appCount, countErr := c.DB.CountAppProjectsByOrgIDAndType(orgIDForCount.String(), countFilter)
@@ -96,10 +114,7 @@ func (c *Controller) CreateAppProject(ctx context.Context, user *models.User, re
 			}
 			go c.EventService.SendEvent(user, constants.EVENT_SUBSCRIPTION_QUOTA_REACHED, map[string]any{"action": action, "limit": maxApps})
 			go c.TrackUserEvent(user, "quota_reached", posthog.NewProperties().Set("action", action).Set("limit", maxApps))
-			if isMobile {
-				return nil, fmt.Errorf("you have reached your mobile app limit (%d)", maxApps)
-			}
-			return nil, fmt.Errorf("you have reached your web app limit (%d)", maxApps)
+			return nil, &AppLimitError{IsMobile: isMobile, Limit: maxApps, Used: appCount}
 		}
 	}
 
