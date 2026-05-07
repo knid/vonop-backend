@@ -18,6 +18,7 @@ import (
 	"github.com/knid/wemob/internal/services/jobstream"
 	"github.com/knid/wemob/internal/tasks"
 	"github.com/knid/wemob/internal/utils"
+	"github.com/redis/go-redis/v9"
 )
 
 // AgentRunRequest carries the inputs needed to enqueue a worker-side
@@ -55,7 +56,7 @@ func (v *HttpViews) enqueueAgentRunAndStream(
 		return
 	}
 
-	// Build the payload + enqueue.
+	// Marshal the payload (cheap; do before subscribe so we can fail fast).
 	attachmentIDs := make([]string, 0, len(req.AttachmentIDs))
 	for _, id := range req.AttachmentIDs {
 		attachmentIDs = append(attachmentIDs, id.String())
@@ -72,6 +73,54 @@ func (v *HttpViews) enqueueAgentRunAndStream(
 		utils.JSONInternalError(w, err)
 		return
 	}
+
+	// Background mode: enqueue + return 202 immediately. No subscription
+	// needed — the client polls /v1/jobs/{id} for milestones.
+	if r.URL.Query().Get("background") == "true" {
+		task := asynq.NewTask(tasks.TypeAgentRun, payload)
+		if _, err := v.Controller.TaskService.Enqueue(task,
+			asynq.Queue("agent"),
+			asynq.MaxRetry(0), // Non-idempotent — partial unique index on app_agent_runs
+			asynq.Timeout(50*time.Minute),
+			asynq.TaskID(job.ID.String()),
+		); err != nil {
+			_ = v.Controller.DB.UpdateGenerationJobStatus(job.ID.String(), "failed", "enqueue: "+err.Error())
+			utils.JSONInternalError(w, err)
+			return
+		}
+		utils.JSONResponse(w, responses.JobCreatedResponse{
+			JobID:  job.ID,
+			Status: job.Status,
+		}, http.StatusAccepted)
+		return
+	}
+
+	// SSE mode: SUBSCRIBE FIRST so we don't miss any events the worker emits
+	// between enqueue and the start of our read loop. Subscription
+	// confirmation (sub.Receive inside SubscribeEvents) guarantees that by
+	// the time we return from that call, any subsequent Publish on the
+	// channel will be delivered to our subscription.
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		// We haven't enqueued yet — can still report the failure cleanly.
+		_ = v.Controller.DB.UpdateGenerationJobStatus(job.ID.String(), "failed", "client does not support streaming")
+		utils.JSONErrorCode(w, constants.ErrStreamingUnsupported, http.StatusInternalServerError, nil)
+		return
+	}
+	utils.SetSSEHeaders(w)
+
+	subCtx, subCancel := context.WithCancel(r.Context())
+	defer subCancel()
+	sub, err := jobstream.SubscribeEvents(subCtx, v.Controller.RedisPubSub, job.ID.String())
+	if err != nil {
+		_ = v.Controller.DB.UpdateGenerationJobStatus(job.ID.String(), "failed", "subscribe: "+err.Error())
+		slog.Error("agent_run_stream: subscribe before enqueue failed", "job_id", job.ID, "error", err)
+		return
+	}
+	defer sub.Close()
+
+	// NOW enqueue — any event the worker emits will land on our active
+	// subscription.
 	task := asynq.NewTask(tasks.TypeAgentRun, payload)
 	if _, err := v.Controller.TaskService.Enqueue(task,
 		asynq.Queue("agent"),
@@ -87,35 +136,19 @@ func (v *HttpViews) enqueueAgentRunAndStream(
 		return
 	}
 
-	// Background mode: return 202 + JobID immediately. The worker will run
-	// to completion regardless of client connection state; the client polls
-	// /v1/jobs/{id} for milestones.
-	if r.URL.Query().Get("background") == "true" {
-		utils.JSONResponse(w, responses.JobCreatedResponse{
-			JobID:  job.ID,
-			Status: job.Status,
-		}, http.StatusAccepted)
-		return
-	}
-
-	// SSE mode: subscribe to Redis pub/sub for the events channel and stream.
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		// Worker keeps running; client just doesn't get the live tail.
-		utils.JSONErrorCode(w, constants.ErrStreamingUnsupported, http.StatusInternalServerError, nil)
-		return
-	}
-	utils.SetSSEHeaders(w)
 	_ = utils.WriteSSEEvent(w, flusher, 0, "job_started", map[string]any{"job_id": job.ID})
 
-	v.streamFromJobChannel(w, r, flusher, job.ID.String(), 0)
+	v.streamFromActiveSubscription(w, r, flusher, job.ID.String(), 0, sub)
 }
 
 // streamFromJobChannel subscribes to jobstream.EventsChannel(jobID) and
-// pumps events to the SSE response until the worker publishes the
-// terminal "end" frame, the client disconnects, or the keepalive
-// fails. `since` is the resume cursor (Last-Event-ID); events with
-// seq <= since are dropped (already replayed by the caller).
+// pumps events to the SSE response. It is a convenience wrapper that
+// subscribes then delegates to streamFromActiveSubscription. Use it when
+// the caller has not yet subscribed; if you've already subscribed (e.g.
+// to close a race window), call streamFromActiveSubscription directly.
+//
+// `since` is the resume cursor (Last-Event-ID); events with seq <= since
+// are dropped (already replayed by the caller).
 func (v *HttpViews) streamFromJobChannel(
 	w http.ResponseWriter,
 	r *http.Request,
@@ -133,6 +166,24 @@ func (v *HttpViews) streamFromJobChannel(
 	}
 	defer sub.Close()
 
+	v.streamFromActiveSubscription(w, r, flusher, jobID, since, sub)
+}
+
+// streamFromActiveSubscription reads from an already-confirmed Redis
+// pub/sub subscription and pumps decoded events to the SSE response
+// until the worker publishes the terminal "end" frame, the client
+// disconnects, or the keepalive write fails. The caller owns sub's
+// lifecycle (Close on return).
+//
+// `since` is the resume cursor; events with seq <= since are dropped.
+func (v *HttpViews) streamFromActiveSubscription(
+	w http.ResponseWriter,
+	r *http.Request,
+	flusher http.Flusher,
+	jobID string,
+	since int64,
+	sub *redis.PubSub,
+) {
 	keepalive := time.NewTicker(15 * time.Second)
 	defer keepalive.Stop()
 
