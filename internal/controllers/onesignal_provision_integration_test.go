@@ -57,7 +57,7 @@ func setupOneSignalProvisionTest(t *testing.T, secrets map[string]string) (*Cont
 		(*models.User)(nil),
 		(*models.Organization)(nil),
 		(*models.AppProject)(nil),
-		(*models.Project)(nil),
+		(*models.MobileAppConfig)(nil),
 	)
 	c, _ := NewTestController(t, db, TestControllerOptions{Secrets: secrets})
 
@@ -82,13 +82,14 @@ func setupOneSignalProvisionTest(t *testing.T, secrets map[string]string) (*Cont
 }
 
 // TestProvisionOneSignalApp_HappyPath_PersistsIDs exercises the full provisioning
-// flow against a fake OneSignal server, asserts that the IDs land on the v1
-// shadow row, then calls provisionOneSignalApp AGAIN to verify idempotency:
-// the second call must NOT hit the OS API.
+// flow against a fake OneSignal server, asserts that the IDs land on
+// MobileAppConfig (REST key encrypted via CredStore, app id stored plain),
+// then calls provisionOneSignalApp AGAIN to verify idempotency: the second
+// call must NOT hit the OS API.
 func TestProvisionOneSignalApp_HappyPath_PersistsIDs(t *testing.T) {
-	c, _, project, user := setupOneSignalProvisionTest(t, map[string]string{
-		"ONESIGNAL_ORG_ID":               "org-id-fake",
-		"ONESIGNAL_ORG_API_KEY":          "org-key-fake",
+	c, _, project, _ := setupOneSignalProvisionTest(t, map[string]string{
+		"ONESIGNAL_ORG_ID":                "org-id-fake",
+		"ONESIGNAL_ORG_API_KEY":           "org-key-fake",
 		"FCM_V1_SERVICE_ACCOUNT_JSON_B64": "",
 	})
 
@@ -101,15 +102,27 @@ func TestProvisionOneSignalApp_HappyPath_PersistsIDs(t *testing.T) {
 		t.Fatalf("first provision: %v", err)
 	}
 
-	v1, err := c.DB.GetProjectByUserAndURL(user.ID.String(), "expo://"+project.Slug)
-	if err != nil || v1 == nil {
-		t.Fatalf("v1 shadow not found: %v", err)
+	cfg, err := c.DB.GetMobileAppConfig(project.ID.String())
+	if err != nil || cfg == nil {
+		t.Fatalf("MobileAppConfig not found: %v", err)
 	}
-	if v1.OneSignalAppID != "os-app-real-1" {
-		t.Errorf("os app id: got %q, want os-app-real-1", v1.OneSignalAppID)
+	if cfg.OneSignalAppID != "os-app-real-1" {
+		t.Errorf("os app id: got %q, want os-app-real-1", cfg.OneSignalAppID)
 	}
-	if v1.OneSignalAppToken != "tok-real-1" {
-		t.Errorf("os token: got %q, want tok-real-1", v1.OneSignalAppToken)
+	if cfg.OneSignalRESTKeyCredRef == nil {
+		t.Fatal("expected OneSignalRESTKeyCredRef to be set after provisioning")
+	}
+	if cfg.OneSignalRESTKeyCredRef.Kind != onesignalRESTKeyKind {
+		t.Errorf("cred ref kind: got %q, want %q", cfg.OneSignalRESTKeyCredRef.Kind, onesignalRESTKeyKind)
+	}
+	// Round-trip the cred via CredStore — confirms the encrypted blob is the
+	// real REST token returned by the fake OS server.
+	plain, err := c.CredStore.Get(context.Background(), project.OrganizationID, credRefToStorage(cfg.OneSignalRESTKeyCredRef))
+	if err != nil {
+		t.Fatalf("credstore get: %v", err)
+	}
+	if string(plain) != "tok-real-1" {
+		t.Errorf("decrypted REST key: got %q, want tok-real-1", string(plain))
 	}
 
 	if counters.createApp.Load() != 1 {
@@ -134,14 +147,14 @@ func TestProvisionOneSignalApp_HappyPath_PersistsIDs(t *testing.T) {
 // ONESIGNAL_ORG_ID / ONESIGNAL_ORG_API_KEY secrets result in a no-op rather
 // than an error. This is the path dev / staging boxes without OS credentials take.
 func TestProvisionOneSignalApp_GracefulDegradeWhenKeysUnset(t *testing.T) {
-	c, _, project, user := setupOneSignalProvisionTest(t, nil)
+	c, _, project, _ := setupOneSignalProvisionTest(t, nil)
 
 	if err := c.provisionOneSignalApp(context.Background(), project); err != nil {
 		t.Fatalf("expected nil error when keys unset, got %v", err)
 	}
-	// No v1 shadow should have been created.
-	v1, _ := c.DB.GetProjectByUserAndURL(user.ID.String(), "expo://"+project.Slug)
-	if v1 != nil && v1.ID != uuid.Nil {
-		t.Errorf("expected no v1 shadow row when keys unset, got %v", v1)
+	// No MobileAppConfig should have been created either.
+	cfg, _ := c.DB.GetMobileAppConfig(project.ID.String())
+	if cfg != nil && cfg.OneSignalAppID != "" {
+		t.Errorf("expected no MobileAppConfig with OneSignalAppID when keys unset, got %q", cfg.OneSignalAppID)
 	}
 }

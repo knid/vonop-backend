@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/services/codemagic"
@@ -20,15 +19,13 @@ import (
 //
 // Flow:
 //  1. Validate project type + per-platform CanBuild* permissions
-//  2. Find or create a v1 Project shadow keyed by url="expo://"+slug — the
-//     AppBuildTask FK still references the legacy Project model, so we need
-//     a stable shadow row per AppProject
-//  3. Reject if a build for that shadow project is still in flight
-//  4. Compute the next build number from the last shadow-project build
-//  5. Tarball the mobile/ subtree from the project's git repo
-//  6. Upload tarball to s3://{assets}/expo-source/{projectID}/{buildID}.tar.gz
-//  7. Insert Build + per-platform AppBuildTask rows
-//  8. Trigger Codemagic per platform; mark per-task failed on trigger error
+//  2. Reject if an AppBuildTask for this AppProject is still in flight
+//  3. Compute the next build number from the last AppProject-scoped build
+//  4. Tarball the mobile/ subtree from the project's git repo
+//  5. Upload tarball to s3://{assets}/expo-source/{projectID}/{buildID}.tar.gz
+//  6. Insert Build + per-platform AppBuildTask rows (keyed by AppProject FK,
+//     legacy v1 ProjectID column left NULL)
+//  7. Trigger Codemagic per platform; mark per-task failed on trigger error
 //
 // Per-platform error isolation: a triggerErr on one platform marks that task
 // Failed and continues with the others. Returns a non-nil error only when the
@@ -89,51 +86,15 @@ func (c *Controller) BuildExpoMobile(ctx context.Context, project *models.AppPro
 	}
 	bundleID := bundleIDForProject(project, opts.BundleIDOverride)
 
-	// AppBuildTask + Build are keyed by v1 Project. Find or create the
-	// shadow row keyed by URL="expo://"+slug (unique per AppProject,
-	// avoids collision with legacy URL-wrapper builds).
-	shadowURL := "expo://" + project.Slug
-	v1project, err := c.DB.GetProjectByUserAndURL(user.ID.String(), shadowURL)
-	if err != nil || v1project == nil || v1project.ID == uuid.Nil {
-		// OneSignal IDs are notnull,unique on Project. Expo apps don't use
-		// OneSignal (push goes through Expo Notifications), so we stash
-		// stable placeholders here keyed by the AppProject UUID.
-		v1project = &models.Project{
-			UserID:            user.ID,
-			URL:               shadowURL,
-			PackageName:       bundleID,
-			IconPath:          opts.Icon,
-			OneSignalAppID:    "expo-shadow-" + project.ID.String(),
-			OneSignalAppToken: "expo-shadow-token-" + project.ID.String(),
-			BuildForAndroid:   wantAndroid,
-			BuildForIOS:       wantIOS,
-		}
-		v1project, err = c.DB.CreateProject(v1project)
-		if err != nil {
-			return nil, nil, fmt.Errorf("create v1 shadow project: %w", err)
-		}
-	} else {
-		// Union platform flags so a re-build picks up new platforms.
-		if wantAndroid {
-			v1project.BuildForAndroid = true
-		}
-		if wantIOS {
-			v1project.BuildForIOS = true
-		}
-		if opts.Icon != "" {
-			v1project.IconPath = opts.Icon
-		}
-		c.DB.UpdateProject(v1project)
-	}
-
-	// Pending build guard.
-	if pending, perr := c.DB.GetPendingAppBuildTasks(v1project); perr == nil && len(pending) > 0 {
+	// Pending build guard — direct AppProject scope (replaces the legacy
+	// v1-shadow-Project pending check).
+	if pending, perr := c.DB.GetPendingAppBuildTasksByAppProject(project.ID.String()); perr == nil && len(pending) > 0 {
 		return nil, nil, fmt.Errorf("a build is already in progress, please wait")
 	}
 
-	// Next build number.
+	// Next build number — direct AppProject scope.
 	var lastBuildNumber int
-	if last, lerr := c.DB.GetLastProjectBuild(v1project); lerr == nil && last != nil {
+	if last, lerr := c.DB.GetLastBuildByAppProject(project.ID.String()); lerr == nil && last != nil {
 		lastBuildNumber = last.BuildNumber
 	}
 	nextNum := lastBuildNumber + 1
@@ -151,8 +112,10 @@ func (c *Controller) BuildExpoMobile(ctx context.Context, project *models.AppPro
 	}
 
 	// Create Build row first so we have the buildID for the S3 path.
+	// AppProjectID is the new direct FK target; legacy ProjectID column is
+	// left NULL on Expo mobile builds (v1 shadow Project has been removed).
 	build := &models.Build{
-		ProjectID:         v1project.ID,
+		AppProjectID:      &project.ID,
 		Active:            false,
 		Title:             nonEmptyOr(opts.AppName, project.Name),
 		Icon:              opts.Icon,
@@ -207,17 +170,17 @@ func (c *Controller) BuildExpoMobile(ctx context.Context, project *models.AppPro
 		}
 	}
 
-	// P2.2 — OneSignal app ID (per-tenant). Lazy-provision when the v1
-	// shadow row still has the "expo-shadow-{projectID}" placeholder.
+	// P2.2 — OneSignal app ID (per-tenant). Read from MobileAppConfig (per-
+	// tenant push id baked into the binary). Lazy-provision when absent.
 	osAppID := ""
-	if !strings.HasPrefix(v1project.OneSignalAppID, onesignalShadowPrefix) {
-		osAppID = v1project.OneSignalAppID
+	if mobileCfg != nil && mobileCfg.OneSignalAppID != "" {
+		osAppID = mobileCfg.OneSignalAppID
 	} else {
 		if perr := c.provisionOneSignalApp(ctx, project); perr != nil {
 			slog.Warn("BuildExpoMobile: lazy OneSignal provision failed; building with empty app ID",
 				"error", perr, "project_id", project.ID)
 		}
-		if refreshed, rerr := c.DB.GetProjectByUserAndURL(user.ID.String(), shadowURL); rerr == nil && refreshed != nil && !strings.HasPrefix(refreshed.OneSignalAppID, onesignalShadowPrefix) {
+		if refreshed, _ := c.DB.GetMobileAppConfig(project.ID.String()); refreshed != nil {
 			osAppID = refreshed.OneSignalAppID
 		}
 	}
@@ -339,7 +302,6 @@ func (c *Controller) BuildExpoMobile(ctx context.Context, project *models.AppPro
 
 	slog.Info("BuildExpoMobile: build enqueued",
 		"project_id", project.ID,
-		"v1_project_id", v1project.ID,
 		"build_id", build.ID,
 		"platforms", ordered,
 		"tarball_size_bytes", len(tarball),

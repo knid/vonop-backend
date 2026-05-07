@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/credentials"
@@ -171,6 +172,8 @@ func setupExpoBuildTest(t *testing.T) *expoBuildTestFixture {
 		(*models.Project)(nil),
 		(*models.Build)(nil),
 		(*models.AppBuildTask)(nil),
+		(*models.AICreditsBalance)(nil),
+		(*models.AICreditTransaction)(nil),
 	)
 	c, _ := NewTestController(t, db, TestControllerOptions{})
 
@@ -219,6 +222,28 @@ func setupExpoBuildTest(t *testing.T) *expoBuildTestFixture {
 	}
 	if _, err := db.DB.NewInsert().Model(project).Exec(ctx); err != nil {
 		t.Fatalf("insert project: %v", err)
+	}
+
+	// Seed a permissive default plan so GetUserLimits doesn't blow up with
+	// "could not load plan limits: sql: no rows in result set". Tests that
+	// want to assert plan-level rejection (TestBuildExpoMobile_RejectsWhen
+	// AndroidPermissionMissing) can call seedSubscriptionLimits afterwards
+	// — Bun's UPDATE on the org's SubscriptionID will swap to the new plan.
+	seedSubscriptionLimits(t, db, org, &models.StandardUserLimits{
+		CanBuildToAndroid: true,
+		CanBuildToIOS:     true,
+		CanBuildMobile:    true,
+	})
+
+	// Seed an AI credits balance with plenty of credits so ChargeBuildCredits
+	// doesn't fail on the platform fan-out path. The Android build charge is
+	// 20, iOS is 30 — 10000 covers any realistic test scenario.
+	if _, err := db.DB.NewInsert().Model(&models.AICreditsBalance{
+		ID: uuid.New(), OrganizationID: org.ID, UserID: user.ID, Balance: 10000,
+		PeriodStart: time.Now().Add(-24 * time.Hour),
+		PeriodEnd:   time.Now().Add(30 * 24 * time.Hour),
+	}).Exec(ctx); err != nil {
+		t.Fatalf("insert credits balance: %v", err)
 	}
 
 	// Seed the project repo with a small mobile/ skeleton + a backend file
@@ -316,16 +341,11 @@ func TestBuildExpoMobile_HappyPath_AndroidOnly(t *testing.T) {
 		t.Errorf("build.SplashScreenColor = %q, want #112233", build.SplashScreenColor)
 	}
 
-	// Verify the v1 shadow project was created with url="expo://"+slug.
-	v1, err := f.db.GetProjectByUserAndURL(f.user.ID.String(), "expo://"+f.project.Slug)
-	if err != nil {
-		t.Fatalf("v1 shadow project not found: %v", err)
-	}
-	if v1.PackageName == "" {
-		t.Error("v1 shadow project PackageName is empty")
-	}
-	if !strings.HasPrefix(v1.PackageName, "com.wemob.") {
-		t.Errorf("v1 shadow PackageName = %q, want com.wemob.* prefix", v1.PackageName)
+	// Post-Task-2: NO v1 shadow Project row should be created on the mobile path.
+	assertNoExpoShadowProject(t, f.db, f.project.Slug)
+	// Build row must carry the new direct AppProject FK.
+	if build.AppProjectID == nil || *build.AppProjectID != f.project.ID {
+		t.Errorf("build.AppProjectID = %v, want %s", build.AppProjectID, f.project.ID)
 	}
 
 	// Verify Codemagic trigger.
@@ -508,36 +528,27 @@ func TestBuildExpoMobile_RejectsWhenAndroidPermissionMissing(t *testing.T) {
 }
 
 // TestBuildExpoMobile_RejectsConcurrentBuild verifies the in-flight-build
-// guard: if a non-Finished AppBuildTask already exists for the v1 shadow
-// project, a second BuildExpoMobile call must fail with "already in progress".
+// guard: if a non-Finished AppBuildTask already exists for this AppProject
+// (direct FK scope, no v1 shadow), a second BuildExpoMobile call must fail
+// with "already in progress".
 func TestBuildExpoMobile_RejectsConcurrentBuild(t *testing.T) {
 	f := setupExpoBuildTest(t)
 	ctx := context.Background()
 
-	// Pre-insert the v1 shadow project (URL "expo://" + slug) and a
-	// non-Finished AppBuildTask for it.
-	shadow := &models.Project{
-		UserID:            f.user.ID,
-		URL:               "expo://" + f.project.Slug,
-		PackageName:       bundleIDForProject(f.project, ""),
-		IconPath:          "",
-		OneSignalAppID:    "expo-shadow-" + f.project.ID.String(),
-		OneSignalAppToken: "expo-shadow-token-" + f.project.ID.String(),
-		BuildForAndroid:   true,
-		BuildForIOS:       true,
-	}
-	shadow, err := f.db.CreateProject(shadow)
-	if err != nil {
-		t.Fatalf("create shadow project: %v", err)
-	}
+	// Pre-insert a Build + non-Finished AppBuildTask scoped by AppProject.
 	pendingBuild, err := f.db.CreateProjectBuild(&models.Build{
-		ProjectID: shadow.ID, BuildNumber: 1, VersionString: "0.0.1",
-		Title: "prior", Icon: "", SplashScreenColor: "#fff", NavBarStyle: "default",
+		AppProjectID:  &f.project.ID,
+		BuildNumber:   1,
+		VersionString: "0.0.1",
+		Title:         "prior",
+		Icon:          "",
+		SplashScreenColor: "#fff",
+		NavBarStyle:   "default",
 	})
 	if err != nil {
 		t.Fatalf("create prior build: %v", err)
 	}
-	if _, err := f.db.CreateAppBuildTask(*pendingBuild, nil, "Android", "Building", false); err != nil {
+	if _, err := f.db.CreateAppBuildTask(*pendingBuild, &f.project.ID, "Android", "Building", false); err != nil {
 		t.Fatalf("create pending task: %v", err)
 	}
 
@@ -559,6 +570,25 @@ func TestBuildExpoMobile_RejectsConcurrentBuild(t *testing.T) {
 	}
 	if got := len(f.cmRec.snapshot()); got != 0 {
 		t.Errorf("expected 0 codemagic calls, got %d", got)
+	}
+	// And no v1 shadow Project row should have appeared.
+	assertNoExpoShadowProject(t, f.db, f.project.Slug)
+}
+
+// assertNoExpoShadowProject fails the test if any v1 Project row exists with
+// URL = "expo://<slug>" (the legacy shadow-Project marker that Task 2 dropped).
+func assertNoExpoShadowProject(t *testing.T, db *database.Database, slug string) {
+	t.Helper()
+	ctx := context.Background()
+	var shadowCount int
+	if err := db.DB.NewRaw(
+		"SELECT COUNT(*) FROM projects WHERE url = ? AND deleted_at IS NULL",
+		"expo://"+slug,
+	).Scan(ctx, &shadowCount); err != nil {
+		t.Fatalf("count shadow projects: %v", err)
+	}
+	if shadowCount != 0 {
+		t.Fatalf("expected no expo:// shadow Project row, got %d", shadowCount)
 	}
 }
 
@@ -645,6 +675,39 @@ func TestBuildExpoMobile_iOSNoConfigEmitsNoPermEnv(t *testing.T) {
 		if strings.HasPrefix(k, "CM_PERM_") {
 			t.Errorf("expected no CM_PERM_* without MobileAppConfig, got %s=%q", k, calls[0].Variables[k])
 		}
+	}
+}
+
+// TestTriggerCodemagicOTAPublish_NoShadowProject pins the Task 2 invariant:
+// the OTA Quick-Publish path must NOT create an "expo://<slug>" v1 Project
+// row. The Build/AppBuildTask rows it produces should carry the new direct
+// AppProject FK.
+func TestTriggerCodemagicOTAPublish_NoShadowProject(t *testing.T) {
+	f := setupExpoBuildTest(t)
+	ctx := context.Background()
+
+	build, task, err := f.c.TriggerCodemagicOTAPublish(ctx, f.project, f.user)
+	if err != nil {
+		t.Fatalf("TriggerCodemagicOTAPublish: %v", err)
+	}
+	if build == nil || task == nil {
+		t.Fatalf("expected build+task, got build=%v task=%v", build, task)
+	}
+	if build.AppProjectID == nil || *build.AppProjectID != f.project.ID {
+		t.Errorf("build.AppProjectID = %v, want %s", build.AppProjectID, f.project.ID)
+	}
+	if task.AppProjectID == nil || *task.AppProjectID != f.project.ID {
+		t.Errorf("task.AppProjectID = %v, want %s", task.AppProjectID, f.project.ID)
+	}
+	assertNoExpoShadowProject(t, f.db, f.project.Slug)
+
+	// Codemagic should have been called once with the expo-ota-publish workflow.
+	calls := f.cmRec.snapshot()
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 codemagic call, got %d", len(calls))
+	}
+	if calls[0].WorkflowID != codemagic.WorkflowExpoOTAPublish {
+		t.Errorf("workflowID = %q, want %q", calls[0].WorkflowID, codemagic.WorkflowExpoOTAPublish)
 	}
 }
 
