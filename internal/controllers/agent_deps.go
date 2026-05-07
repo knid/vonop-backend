@@ -230,25 +230,23 @@ func (c *Controller) triggerMobileBuildForAgent(ctx context.Context, project *mo
 	}
 
 	// Pull last-build metadata so we keep app name / icon / splash color
-	// stable across the rebuild. A first-time build (no v1 shadow project,
-	// no Build row yet) is fine — BuildExpoMobile creates them.
+	// stable across the rebuild. A first-time build (no Build row yet) is
+	// fine — BuildExpoMobile creates one.
 	opts := ExpoBuildOptions{
 		Platforms: platforms,
 		AppName:   project.Name,
 	}
 
-	shadowURL := "expo://" + project.Slug
-	if v1, err := c.DB.GetProjectByUserAndURL(user.ID.String(), shadowURL); err == nil && v1 != nil {
-		if last, lerr := c.DB.GetLastProjectBuild(v1); lerr == nil && last != nil {
-			if last.Title != "" {
-				opts.AppName = last.Title
-			}
-			if last.Icon != "" {
-				opts.Icon = last.Icon
-			}
-			if last.SplashScreenColor != "" {
-				opts.SplashColor = last.SplashScreenColor
-			}
+	// Inherit metadata from last build via direct AppProject scope.
+	if last, lerr := c.DB.GetLastBuildByAppProject(project.ID.String()); lerr == nil && last != nil {
+		if last.Title != "" {
+			opts.AppName = last.Title
+		}
+		if last.Icon != "" {
+			opts.Icon = last.Icon
+		}
+		if last.SplashScreenColor != "" {
+			opts.SplashColor = last.SplashScreenColor
 		}
 	}
 

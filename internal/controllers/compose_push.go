@@ -5,10 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"strings"
 
 	"github.com/go-playground/validator/v10"
-	"github.com/google/uuid"
 
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/requests"
@@ -19,7 +17,8 @@ import (
 // SendComposePush executes a dashboard-driven push:
 //  1. Validates the user belongs to the project's org (any role; admin-only
 //     tightening is a follow-up — see plan §Open questions §9).
-//  2. Resolves the v1 shadow row's OneSignal app ID + REST API key.
+//  2. Resolves the project's MobileAppConfig OneSignal app ID + decrypts the
+//     REST API key via CredStore.
 //  3. POSTs to OneSignal via SendNotificationViaSDK.
 //  4. Persists a ComposePushHistory audit-log row (T8.4 fix).
 //  5. Returns the OneSignal notification ID + recipients count.
@@ -42,24 +41,33 @@ func (c *Controller) SendComposePush(ctx context.Context, project *models.AppPro
 		return nil, err
 	}
 
-	// Resolve v1 shadow row to get the per-tenant OneSignal app ID + REST key.
-	// Lazy-provision when the row is missing OR still has the placeholder ID
-	// (covers projects whose CreateAppProject goroutine missed, or test fixtures
-	// that don't run the eager bootstrap).
-	shadowURL := "expo://" + project.Slug
-	v1, err := c.DB.GetProjectByUserAndURL(project.UserID.String(), shadowURL)
-	needsProvision := err != nil || v1 == nil || v1.ID == uuid.Nil ||
-		v1.OneSignalAppID == "" || strings.HasPrefix(v1.OneSignalAppID, onesignalShadowPrefix)
+	// Resolve MobileAppConfig to get the per-AppProject OneSignal app ID +
+	// encrypted REST key. Lazy-provision when missing (covers projects whose
+	// CreateAppProject goroutine missed, or test fixtures that don't run the
+	// eager bootstrap).
+	cfg, _ := c.DB.GetMobileAppConfig(project.ID.String())
+	needsProvision := cfg == nil || cfg.OneSignalAppID == "" || cfg.OneSignalRESTKeyCredRef == nil
 	if needsProvision {
 		if perr := c.provisionOneSignalApp(ctx, project); perr != nil {
 			return nil, fmt.Errorf("compose-push: OneSignal provisioning failed: %w", perr)
 		}
-		v1, err = c.DB.GetProjectByUserAndURL(project.UserID.String(), shadowURL)
-		if err != nil || v1 == nil || v1.ID == uuid.Nil ||
-			v1.OneSignalAppID == "" || strings.HasPrefix(v1.OneSignalAppID, onesignalShadowPrefix) {
+		cfg, _ = c.DB.GetMobileAppConfig(project.ID.String())
+		if cfg == nil || cfg.OneSignalAppID == "" || cfg.OneSignalRESTKeyCredRef == nil {
 			return nil, errors.New("compose-push: OneSignal app not yet provisioned for this project; verify ONESIGNAL_ORG_ID + ONESIGNAL_ORG_API_KEY are set, then retry")
 		}
 	}
+
+	// Decrypt the REST key. CredStore handles envelope decryption; the
+	// plaintext key never lives at rest in the DB.
+	if c.CredStore == nil {
+		return nil, errors.New("compose-push: CredStore is not configured")
+	}
+	restKeyBytes, err := c.CredStore.Get(ctx, project.OrganizationID, credRefToStorage(cfg.OneSignalRESTKeyCredRef))
+	if err != nil {
+		return nil, fmt.Errorf("compose-push: decrypt OneSignal REST key: %w", err)
+	}
+	oneSignalAppID := cfg.OneSignalAppID
+	oneSignalRestKey := string(restKeyBytes)
 
 	// Build the audience.
 	params := external.SendNotificationParams{
@@ -94,7 +102,7 @@ func (c *Controller) SendComposePush(ctx context.Context, project *models.AppPro
 	params.WebURL = req.WebURL
 	params.AppURL = req.AppURL
 
-	osResult, err := external.SendNotificationViaSDK(ctx, v1.OneSignalAppID, v1.OneSignalAppToken, params)
+	osResult, err := external.SendNotificationViaSDK(ctx, oneSignalAppID, oneSignalRestKey, params)
 	if err != nil {
 		return nil, fmt.Errorf("compose-push: send: %w", err)
 	}

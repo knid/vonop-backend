@@ -83,7 +83,7 @@ type BackendAutoDeployer func(ctx context.Context, project *models.AppProject) e
 //
 // platforms is a (possibly empty) slice of "android" / "ios". Empty means
 // "rebuild whatever the last build targeted" — the controller layer
-// resolves this from the v1 shadow project's BuildFor* flags.
+// resolves this from MobileAppConfig.BuildFor* flags.
 //
 // Best-effort by design: implementations must NOT panic on partial
 // failures (single-platform trigger errors). The tool reports the status

@@ -63,12 +63,12 @@ var (
 //
 // Resolution flow:
 //  1. Project type guard (mobile_app_native only)
-//  2. Find the v1 shadow project for slug (created by BuildExpoMobile)
-//  3. Find the latest successful AppBuildTask for the requested platform
-//  4. Resolve per-app default credential (Apple via DefaultAppleConnectionID;
+//  2. Find the latest successful AppBuildTask for the requested platform
+//     (scoped directly by app_project_id — no v1 shadow row indirection)
+//  3. Resolve per-app default credential (Apple via DefaultAppleConnectionID;
 //     Google via DefaultGoogleConnectionID)
-//  5. Decrypt via CredStore (P0.3+P1.0); base64-encode for transport
-//  6. Trigger the Codemagic deploy workflow with all submission flags
+//  4. Decrypt via CredStore (P0.3+P1.0); base64-encode for transport
+//  5. Trigger the Codemagic deploy workflow with all submission flags
 func (c *Controller) SubmitExpoMobile(ctx context.Context, project *models.AppProject, user *models.User, opts SubmitExpoOptions) (*SubmitResult, error) {
 	if project == nil {
 		return nil, fmt.Errorf("project is required")
@@ -90,18 +90,13 @@ func (c *Controller) SubmitExpoMobile(ctx context.Context, project *models.AppPr
 		return nil, ErrSubmitInvalidPlatform
 	}
 
-	// Find the v1 shadow project keyed by URL = expo://<slug> (created by BuildExpoMobile).
-	v1project, err := c.DB.GetProjectByUserAndURL(user.ID.String(), "expo://"+project.Slug)
-	if err != nil || v1project == nil || v1project.ID == uuid.Nil {
-		return nil, ErrSubmitNoBuildToSubmit
-	}
-
-	// Find the most recent successful AppBuildTask for the requested platform.
+	// Find the most recent successful AppBuildTask for the requested platform,
+	// scoped directly by app_project_id.
 	platformLabel := "Android"
 	if platform == "ios" {
 		platformLabel = "IOS"
 	}
-	task, err := c.DB.GetLatestSuccessfulBuildTaskByProjectAndPlatform(ctx, v1project.ID, platformLabel)
+	task, err := c.DB.GetLatestSuccessfulBuildTaskByAppProjectAndPlatform(ctx, project.ID, platformLabel)
 	if err != nil || task == nil {
 		return nil, ErrSubmitNoBuildToSubmit
 	}

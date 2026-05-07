@@ -546,6 +546,32 @@ func createSchema(db *bun.DB) error {
 		`ALTER TABLE app_projects ADD COLUMN IF NOT EXISTS region text NOT NULL DEFAULT ''`,
 		// 2026-05-06: subscription-plan-revamp — seat caps for Hobby/Pro/Max.
 		`ALTER TABLE standard_user_limits ADD COLUMN IF NOT EXISTS max_seats int NOT NULL DEFAULT 1`,
+		// V1 shadow Project removal — add direct FK from Build/AppBuildTask to AppProject.
+		`ALTER TABLE builds ADD COLUMN IF NOT EXISTS app_project_id uuid`,
+		`ALTER TABLE app_build_tasks ADD COLUMN IF NOT EXISTS app_project_id uuid`,
+		`ALTER TABLE builds ALTER COLUMN project_id DROP NOT NULL`,
+		`ALTER TABLE app_build_tasks ALTER COLUMN project_id DROP NOT NULL`,
+		`CREATE INDEX IF NOT EXISTS idx_builds_app_project_id ON builds(app_project_id) WHERE deleted_at IS NULL`,
+		`CREATE INDEX IF NOT EXISTS idx_app_build_tasks_app_project_id ON app_build_tasks(app_project_id) WHERE deleted_at IS NULL`,
+		// OneSignal credentials moving from v1 shadow Project to MobileAppConfig.
+		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS one_signal_app_id text`,
+		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS one_signal_rest_key_cred_ref jsonb`,
+		// V1 shadow Project removal — final cleanup (2026-05-07).
+		// Soft-delete any leftover expo://* shadow Project rows. Idempotent:
+		// the IS NULL guard on deleted_at means a re-run is a no-op.
+		`UPDATE projects SET deleted_at = current_timestamp WHERE url LIKE 'expo://%' AND deleted_at IS NULL`,
+		// Drop orphan app_build_tasks/builds rows (none in prod per user — defensive).
+		// Any row without an app_project_id is unreachable through V2 code paths,
+		// so it's safe to delete unconditionally before the SET NOT NULL below.
+		`DELETE FROM app_build_tasks WHERE app_project_id IS NULL`,
+		`DELETE FROM builds WHERE app_project_id IS NULL`,
+		// Tighten the new FKs.
+		`ALTER TABLE builds ALTER COLUMN app_project_id SET NOT NULL`,
+		`ALTER TABLE app_build_tasks ALTER COLUMN app_project_id SET NOT NULL`,
+		// Drop the legacy v1-Project FK columns. After this, Bun reads/writes go
+		// directly through app_project_id.
+		`ALTER TABLE builds DROP COLUMN IF EXISTS project_id`,
+		`ALTER TABLE app_build_tasks DROP COLUMN IF EXISTS project_id`,
 	}
 
 	// Deduplicate before creating unique indexes (keep the latest row per group)
@@ -592,12 +618,16 @@ func createSchema(db *bun.DB) error {
 	// IMPORTANT: when adding a new ALTER TABLE above, update this canary to the newest column,
 	// otherwise the new ALTER will be silently skipped on servers that already have older columns.
 	// Table renames go in renameStatements below, not here — they run unconditionally.
-	// Canary: standard_user_limits.max_seats — last column added (subscription
-	// plan revamp 2026-05-06). Bumped past app_projects.region so the new
-	// max_seats ALTER runs on servers that already passed earlier canaries.
+	//
+	// Canary: builds.project_id must NOT exist (dropped 2026-05-07 as part of
+	// the v1 shadow Project removal final cleanup). This is an inverse-style
+	// canary because the latest batch only DROPs / DELETEs / TIGHTENs — there's
+	// no new column to assert positive existence on. migrationsDone=true means
+	// the column has been dropped, so we skip the ALTERs; false means we still
+	// need to run them.
 	var migrationsDone bool
 	row := db.QueryRowContext(context.Background(),
-		"SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='standard_user_limits' AND column_name='max_seats')")
+		"SELECT NOT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='builds' AND column_name='project_id')")
 	if err := row.Scan(&migrationsDone); err != nil {
 		migrationsDone = false
 	}
@@ -1843,7 +1873,6 @@ func main() {
 				})
 			})
 			r.Route("/reports", func(r chi.Router) {
-				r.Post("/build", httpViews.UpdateBuildTaskStatus)
 				r.Post("/deploy", httpViews.UpdateDeploymentStatus)
 			})
 			r.Route("/billing", func(r chi.Router) {

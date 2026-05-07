@@ -38,14 +38,14 @@ var terminalEventTypes = map[string]bool{
 	"cancelled": true,
 }
 
-// authorizeTaskAccess fetches the task by id, ensures it belongs to a project
-// owned by the calling user, and returns the parsed UUID.
+// authorizeTaskAccess fetches the task by id, ensures it belongs to an
+// AppProject owned by the calling user, and returns the parsed UUID.
 //
 // Mirrors the ownership guard in CancelBuildTask (controllers/tasks.go) so
-// we don't leak event streams across users. P0 #2 (mobile audit, 2026-05-04):
-// the `project.UserID == user.ID` invariant is the single source of truth
-// for project-scoped read access; org-member sharing isn't wired in yet, so
-// we keep this strict until the org access layer lands.
+// we don't leak event streams across users. The `appProject.UserID == user.ID`
+// invariant is the single source of truth for project-scoped read access;
+// org-member sharing isn't wired in yet, so we keep this strict until the
+// org access layer lands.
 func (v *HttpViews) authorizeTaskAccess(r *http.Request) (taskID uuid.UUID, ok bool, errCode string, status int) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
@@ -63,12 +63,15 @@ func (v *HttpViews) authorizeTaskAccess(r *http.Request) (taskID uuid.UUID, ok b
 		return uuid.Nil, false, constants.ErrNotFound, http.StatusNotFound
 	}
 
-	project, err := v.Controller.DB.GetProjectById(task.ProjectID.String())
-	if err != nil {
+	if task.AppProjectID == uuid.Nil {
+		return uuid.Nil, false, constants.ErrNotFound, http.StatusNotFound
+	}
+	appProject, err := v.Controller.DB.GetAppProjectByID(task.AppProjectID.String())
+	if err != nil || appProject == nil {
 		return uuid.Nil, false, constants.ErrNotFound, http.StatusNotFound
 	}
 
-	if project.UserID.String() != user.ID.String() {
+	if appProject.UserID.String() != user.ID.String() {
 		return uuid.Nil, false, constants.ErrForbidden, http.StatusForbidden
 	}
 

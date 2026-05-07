@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 )
 
 // ReadMobileConfigTool exposes the project's MobileAppConfig to the AI agent
@@ -121,15 +120,9 @@ func (t *ReadMobileConfigTool) Execute(ctx context.Context, rc *RunContext, _ js
 		out.MinVersionMessage = cfg.MinVersionMessage
 
 		out.Push.Enabled = cfg.PushEnabled
-		// Configured = there's a real OneSignal app ID on the v1 shadow row
-		// (not the "expo-shadow-{projectID}" placeholder). Resolve lazily
-		// to keep the tool cheap when push isn't enabled.
-		if out.Push.Enabled {
-			shadowURL := "expo://" + rc.Project.Slug
-			if v1, _ := rc.Deps.DB.GetProjectByUserAndURL(rc.Project.UserID.String(), shadowURL); v1 != nil && v1.OneSignalAppID != "" && !strings.HasPrefix(v1.OneSignalAppID, "expo-shadow-") {
-				out.Push.Configured = true
-			}
-		}
+		// Configured = MobileAppConfig has a real OneSignal app id persisted by
+		// provisionOneSignalApp. Pre-provisioning, the column is empty.
+		out.Push.Configured = cfg.OneSignalAppID != ""
 	}
 
 	b, err := json.Marshal(out)

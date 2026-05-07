@@ -20,23 +20,24 @@ import (
 )
 
 // TestSendComposePush_HappyPath exercises the full compose-push flow:
-//  1. Provisioning kicks in lazily (v1 shadow has placeholder ID).
+//  1. Provisioning kicks in lazily (no MobileAppConfig.OneSignalAppID yet).
 //  2. OneSignal /apps + /auth/tokens + /notifications fakes return success.
-//  3. Persists a ComposePushHistory audit-log row.
-//  4. Returns the OneSignal notification ID + recipients count.
+//  3. The encrypted REST key round-trips through CredStore.
+//  4. Persists a ComposePushHistory audit-log row.
+//  5. Returns the OneSignal notification ID + recipients count.
 func TestSendComposePush_HappyPath_PersistsHistory(t *testing.T) {
 	db := database.NewTestDB(t,
 		(*models.User)(nil),
 		(*models.Organization)(nil),
 		(*models.OrganizationMember)(nil),
 		(*models.AppProject)(nil),
-		(*models.Project)(nil),
+		(*models.MobileAppConfig)(nil),
 		(*models.ComposePushHistory)(nil),
 	)
 	c, _ := NewTestController(t, db, TestControllerOptions{
 		Secrets: map[string]string{
-			"ONESIGNAL_ORG_ID":               "x",
-			"ONESIGNAL_ORG_API_KEY":          "y",
+			"ONESIGNAL_ORG_ID":                "x",
+			"ONESIGNAL_ORG_API_KEY":           "y",
 			"FCM_V1_SERVICE_ACCOUNT_JSON_B64": "",
 		},
 	})

@@ -4,7 +4,6 @@ import (
 	"crypto/subtle"
 	"log/slog"
 	"net/http"
-	"strings"
 
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/models"
@@ -33,61 +32,6 @@ func (v *HttpViews) verifyWorkerSecret(w http.ResponseWriter, secret string) boo
 		return false
 	}
 	return true
-}
-
-func (v *HttpViews) UpdateBuildTaskStatus(w http.ResponseWriter, r *http.Request) {
-	var reportBuildReq requests.ReportBuildRequest
-	err := utils.ParseJSONBody(r, &reportBuildReq)
-	if err != nil {
-		utils.JSONErrorCode(w, constants.ErrValidationBody, http.StatusBadRequest, nil)
-		return
-	}
-
-	if !v.verifyWorkerSecret(w, reportBuildReq.Secret) {
-		return
-	}
-
-	err = v.Controller.UpdateBuildTaskStatus(reportBuildReq)
-	if err != nil {
-		utils.JSONInternalError(w, err)
-		return
-	}
-
-	task, err := v.Controller.DB.GetAppBuildTaskWithRelations(reportBuildReq.TaskID)
-	if err != nil {
-		utils.JSONInternalError(w, err)
-		return
-	}
-
-	payload := map[string]any{
-		"build_id":     task.BuildID.String(),
-		"task_id":      task.ID.String(),
-		"project_id":   task.ProjectID.String(),
-		"build_title":  task.Build.Title,
-		"build_number": task.Build.BuildNumber,
-		"package_name": task.Build.Project.PackageName,
-	}
-
-	// Fire the "build started" CRM event once per build. The yaml now emits
-	// a stage ladder (Preparing → Building → Uploading), so gate on the
-	// first stage only to avoid double-firing.
-	if reportBuildReq.Status == "Preparing" && strings.EqualFold(task.Platform, "ios") {
-		v.sendCRMEvent(task.Project.User, constants.EVENT_BUILD_STARTED_IOS, payload)
-	} else if reportBuildReq.Status == "Preparing" && strings.EqualFold(task.Platform, "android") {
-		v.sendCRMEvent(task.Project.User, constants.EVENT_BUILD_STARTED_ANDROID, payload)
-	} else if reportBuildReq.Status == "Built" && strings.EqualFold(task.Platform, "ios") {
-		v.sendCRMEvent(task.Project.User, constants.EVENT_BUILD_FINISHED_IOS, payload)
-	} else if reportBuildReq.Status == "Built" && strings.EqualFold(task.Platform, "android") {
-		v.sendCRMEvent(task.Project.User, constants.EVENT_BUILD_FINISHED_ANDROID, payload)
-	} else if reportBuildReq.Status == "error" && strings.EqualFold(task.Platform, "ios") {
-		payload["error_message"] = reportBuildReq.Message
-		v.sendCRMEvent(task.Project.User, constants.EVENT_BUILD_ERROR_IOS, payload)
-	} else if reportBuildReq.Status == "error" && strings.EqualFold(task.Platform, "android") {
-		payload["error_message"] = reportBuildReq.Message
-		v.sendCRMEvent(task.Project.User, constants.EVENT_BUILD_ERROR_ANDROID, payload)
-	}
-
-	utils.JSONResponse(w, map[string]string{"status": "success"}, http.StatusOK)
 }
 
 func (v *HttpViews) UpdateDeploymentStatus(w http.ResponseWriter, r *http.Request) {

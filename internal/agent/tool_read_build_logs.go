@@ -18,9 +18,9 @@ import (
 // projects to close the "fix-with-AI" loop kicked off from the BuildRow
 // "Fix with AI" button (P1 #17 mobile pipeline audit).
 //
-// The tool is auth-scoped to the project owner: it walks v1 shadow row
-// owned by rc.User, then v1-project-owned AppBuildTasks, so a forged
-// task_id cannot leak another user's logs.
+// The tool is auth-scoped to the project owner: it queries AppBuildTasks
+// joined to AppProjects.user_id, so a forged task_id cannot leak another
+// user's logs.
 type ReadBuildLogsTool struct {
 	Deps *RunDependencies
 }
@@ -97,21 +97,10 @@ func (t *ReadBuildLogsTool) Execute(ctx context.Context, rc *RunContext, input j
 		_ = json.Unmarshal(input, &args)
 	}
 
-	// Resolve the v1 shadow project for this AppProject. AppBuildTask FKs
-	// reference Project (v1), not AppProject — same shadow row that
-	// BuildExpoMobile creates with URL="expo://"+slug.
-	shadowURL := "expo://" + rc.Project.Slug
-	v1Project, err := rc.Deps.DB.GetProjectByUserAndURL(rc.User.ID.String(), shadowURL)
-	if err != nil || v1Project == nil || v1Project.ID == uuid.Nil {
-		// No shadow row → no builds have ever run for this project.
-		out := readBuildLogsOutput{Found: false, Note: "No mobile builds have been triggered for this project yet."}
-		b, _ := json.Marshal(out)
-		return string(b), false, nil
-	}
-
-	// Pull all tasks for the v1 project (user-ownership join keeps this
-	// auth-safe — a forged task_id can't read someone else's build).
-	tasks, err := rc.Deps.DB.GetAppBuildTasksByUserAndProject(rc.User, v1Project.ID.String())
+	// Pull all tasks for this AppProject. The user-ownership join in the
+	// helper keeps this auth-safe — a forged task_id can't read someone
+	// else's build.
+	tasks, err := rc.Deps.DB.GetAppBuildTasksByUserAndAppProject(rc.User, rc.Project.ID.String())
 	if err != nil {
 		return fmt.Sprintf("read_build_logs: failed to load tasks: %v", err), true, nil
 	}

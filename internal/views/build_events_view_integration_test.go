@@ -21,12 +21,13 @@ import (
 )
 
 // seedAuthFixtures creates the minimum graph required by the build-events
-// handlers: a user, a personal org, a v1 Project, an AppBuildTask scoped to
-// that project, plus an auth Token. Returns the token string and the task
-// id so tests can assemble httptest requests.
+// handlers: a user, a personal org, an AppProject, a Build + AppBuildTask
+// scoped to that AppProject, plus an auth Token. Returns the token string
+// and the task id so tests can assemble httptest requests.
 //
-// Returns a cleanup function via t.Cleanup — testdb container itself is
-// already terminated by NewTestDB's cleanup hook.
+// Auth gate: build_events_view.authorizeTaskAccess looks up
+// AppBuildTask → AppProject → user, so the row that gates access is the
+// AppProject (the v1 shadow Project FK was removed 2026-05-07).
 func seedAuthFixtures(t *testing.T, db *database.Database) (token string, taskID uuid.UUID, projectID uuid.UUID, otherUserToken string) {
 	t.Helper()
 	ctx := context.Background()
@@ -49,19 +50,26 @@ func seedAuthFixtures(t *testing.T, db *database.Database) (token string, taskID
 		t.Fatalf("insert other token: %v", err)
 	}
 
-	// v1 Project owned by `user`. Auth gate compares Project.UserID to
-	// the caller's id, so this is the row that gates access.
-	project := &models.Project{
-		ID: uuid.New(), UserID: user.ID,
-		URL: "expo://acme-" + uuid.NewString()[:8], PackageName: "io.acme.test." + uuid.NewString()[:8],
-		IconPath: "x", OneSignalAppID: uuid.NewString(), OneSignalAppToken: uuid.NewString(),
+	org := &models.Organization{
+		ID: uuid.New(), Name: "Personal " + uuid.NewString()[:6],
+		Slug: "org-" + uuid.NewString()[:8], OwnerID: user.ID, IsPersonal: true,
 	}
-	if _, err := db.DB.NewInsert().Model(project).Exec(ctx); err != nil {
-		t.Fatalf("insert project: %v", err)
+	if _, err := db.DB.NewInsert().Model(org).Exec(ctx); err != nil {
+		t.Fatalf("insert org: %v", err)
+	}
+
+	appProject := &models.AppProject{
+		ID: uuid.New(), UserID: user.ID, OrganizationID: org.ID,
+		Name: "App " + uuid.NewString()[:6],
+		Slug: "app-" + uuid.NewString()[:8],
+		Prompt: "test", ProjectType: models.ProjectTypeMobileAppNative,
+	}
+	if _, err := db.DB.NewInsert().Model(appProject).Exec(ctx); err != nil {
+		t.Fatalf("insert app project: %v", err)
 	}
 
 	build := &models.Build{
-		ID: uuid.New(), ProjectID: project.ID,
+		ID: uuid.New(), AppProjectID: appProject.ID,
 		Title: "T", Description: "D", Icon: "i", SplashScreenColor: "#fff",
 		NavBarStyle: "default", BuildNumber: 1, VersionString: "1.0.0",
 	}
@@ -70,14 +78,14 @@ func seedAuthFixtures(t *testing.T, db *database.Database) (token string, taskID
 	}
 
 	task := &models.AppBuildTask{
-		ID: uuid.New(), ProjectID: project.ID, BuildID: build.ID,
+		ID: uuid.New(), AppProjectID: appProject.ID, BuildID: build.ID,
 		Platform: "Android", StatusText: "Queued",
 	}
 	if _, err := db.DB.NewInsert().Model(task).Exec(ctx); err != nil {
 		t.Fatalf("insert task: %v", err)
 	}
 
-	return tok.String, task.ID, project.ID, otherTok.String
+	return tok.String, task.ID, appProject.ID, otherTok.String
 }
 
 // seedBuildEvents inserts `n` BuildEvents with sequential occurred_at so
@@ -116,7 +124,8 @@ func TestGetBuildEvents_ReturnsEventsInOrder(t *testing.T) {
 	db := database.NewTestDB(t,
 		(*models.User)(nil),
 		(*models.Token)(nil),
-		(*models.Project)(nil),
+		(*models.Organization)(nil),
+		(*models.AppProject)(nil),
 		(*models.Build)(nil),
 		(*models.AppBuildTask)(nil),
 		(*models.BuildEvent)(nil),
@@ -186,7 +195,8 @@ func TestStreamBuildEvents_SnapshotAndLiveEvents(t *testing.T) {
 	db := database.NewTestDB(t,
 		(*models.User)(nil),
 		(*models.Token)(nil),
-		(*models.Project)(nil),
+		(*models.Organization)(nil),
+		(*models.AppProject)(nil),
 		(*models.Build)(nil),
 		(*models.AppBuildTask)(nil),
 		(*models.BuildEvent)(nil),

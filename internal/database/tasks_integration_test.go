@@ -2,11 +2,16 @@
 
 // Integration tests for the P0 #2 fix (mobile audit, 2026-05-04):
 // status vocabulary unification across app_build_tasks. After P0 #1,
-// successful Expo native builds write status_text="Built" but
-// GetLatestSuccessfulBuildTaskByProjectAndPlatform was filtering on
-// "Succeeded", so SubmitExpoMobile returned ErrSubmitNoBuildToSubmit
-// for every native project. These tests pin the new IN-clause filter
-// and the canonical "Failed" value the cron now writes.
+// successful Expo native builds write status_text="Built" but the lookup
+// was filtering on "Succeeded", so SubmitExpoMobile returned
+// ErrSubmitNoBuildToSubmit for every native project. These tests pin the
+// new finished+Built filter and the canonical "Failed" value the cron now
+// writes.
+//
+// Post-shadow-removal (2026-05-07): the lookup is now scoped by
+// AppProject directly via GetLatestSuccessfulBuildTaskByAppProjectAndPlatform.
+// The helper no longer accepts the legacy "Succeeded" status — that vocabulary
+// only existed on the v1 reports path, which the AppProject path never used.
 package database
 
 import (
@@ -19,11 +24,11 @@ import (
 	"github.com/knid/wemob/internal/models"
 )
 
-// seedTaskFixtures inserts a User, a v1 Project, and a Build, returning
+// seedTaskFixtures inserts a User, an AppProject, and a Build, returning
 // the project + build so tests can attach AppBuildTask rows. Kept narrow
 // — tests insert their own AppBuildTask rows so they can vary status,
 // finished, and platform per-row.
-func seedTaskFixtures(t *testing.T, db *Database) (*models.Project, *models.Build) {
+func seedTaskFixtures(t *testing.T, db *Database) (*models.AppProject, *models.Build) {
 	t.Helper()
 	ctx := context.Background()
 
@@ -35,20 +40,24 @@ func seedTaskFixtures(t *testing.T, db *Database) (*models.Project, *models.Buil
 		t.Fatalf("insert user: %v", err)
 	}
 
-	project := &models.Project{
-		ID: uuid.New(), UserID: user.ID,
-		URL:               "expo://acme-" + uuid.NewString()[:8],
-		PackageName:       "io.acme.test." + uuid.NewString()[:8],
-		IconPath:          "x",
-		OneSignalAppID:    uuid.NewString(),
-		OneSignalAppToken: uuid.NewString(),
+	org := &models.Organization{
+		ID: uuid.New(), Name: "O", Slug: "o-" + uuid.NewString()[:8], OwnerID: user.ID,
+	}
+	if _, err := db.DB.NewInsert().Model(org).Exec(ctx); err != nil {
+		t.Fatalf("insert org: %v", err)
+	}
+
+	project := &models.AppProject{
+		ID: uuid.New(), UserID: user.ID, OrganizationID: org.ID,
+		Name: "Acme", Slug: "acme-" + uuid.NewString()[:8], Prompt: "n",
+		ProjectType: models.ProjectTypeMobileAppNative, Status: "draft",
 	}
 	if _, err := db.DB.NewInsert().Model(project).Exec(ctx); err != nil {
-		t.Fatalf("insert project: %v", err)
+		t.Fatalf("insert app project: %v", err)
 	}
 
 	build := &models.Build{
-		ID: uuid.New(), ProjectID: project.ID,
+		ID: uuid.New(), AppProjectID: project.ID,
 		Title: "T", Description: "D", Icon: "i", SplashScreenColor: "#fff",
 		NavBarStyle: "default", BuildNumber: 1, VersionString: "1.0.0",
 	}
@@ -59,27 +68,29 @@ func seedTaskFixtures(t *testing.T, db *Database) (*models.Project, *models.Buil
 	return project, build
 }
 
-// TestGetLatestSuccessfulBuildTaskByProjectAndPlatform_ReturnsBuiltFinishedRow
+// TestGetLatestSuccessfulBuildTaskByAppProjectAndPlatform_ReturnsBuiltFinishedRow
 // is the core P0 #2 regression test: a task written with the new canonical
 // "Built" + finished=true MUST be returned by the lookup, otherwise
 // SubmitExpoMobile cannot find any build to submit.
-func TestGetLatestSuccessfulBuildTaskByProjectAndPlatform_ReturnsBuiltFinishedRow(t *testing.T) {
+func TestGetLatestSuccessfulBuildTaskByAppProjectAndPlatform_ReturnsBuiltFinishedRow(t *testing.T) {
 	if testing.Short() {
 		t.Skip("integration test: skipping in short mode")
 	}
 
 	db := NewTestDB(t,
 		(*models.User)(nil),
-		(*models.Project)(nil),
+		(*models.Organization)(nil),
+		(*models.AppProject)(nil),
 		(*models.Build)(nil),
 		(*models.AppBuildTask)(nil),
 	)
 
 	ctx := context.Background()
 	project, build := seedTaskFixtures(t, db)
+	apID := project.ID
 
 	task := &models.AppBuildTask{
-		ID: uuid.New(), ProjectID: project.ID, BuildID: build.ID,
+		ID: uuid.New(), AppProjectID: apID, BuildID: build.ID,
 		Platform: "Android", StatusText: "Built", Finished: true,
 		CreatedAt: time.Now(),
 	}
@@ -87,7 +98,7 @@ func TestGetLatestSuccessfulBuildTaskByProjectAndPlatform_ReturnsBuiltFinishedRo
 		t.Fatalf("insert task: %v", err)
 	}
 
-	got, err := db.GetLatestSuccessfulBuildTaskByProjectAndPlatform(ctx, project.ID, "Android")
+	got, err := db.GetLatestSuccessfulBuildTaskByAppProjectAndPlatform(ctx, project.ID, "Android")
 	if err != nil {
 		t.Fatalf("lookup: %v", err)
 	}
@@ -105,31 +116,33 @@ func TestGetLatestSuccessfulBuildTaskByProjectAndPlatform_ReturnsBuiltFinishedRo
 	}
 }
 
-// TestGetLatestSuccessfulBuildTaskByProjectAndPlatform_RejectsBuiltButUnfinished
+// TestGetLatestSuccessfulBuildTaskByAppProjectAndPlatform_RejectsBuiltButUnfinished
 // pins the finished-gate semantics: a row in mid-build that has had its
 // status_text optimistically set to "Built" but has NOT yet been marked
 // finished=true must NOT be returned. Without this gate the lookup would
 // pick up rows that are still streaming and SubmitExpoMobile would try to
 // submit a build that doesn't have an artifact yet.
-func TestGetLatestSuccessfulBuildTaskByProjectAndPlatform_RejectsBuiltButUnfinished(t *testing.T) {
+func TestGetLatestSuccessfulBuildTaskByAppProjectAndPlatform_RejectsBuiltButUnfinished(t *testing.T) {
 	if testing.Short() {
 		t.Skip("integration test: skipping in short mode")
 	}
 
 	db := NewTestDB(t,
 		(*models.User)(nil),
-		(*models.Project)(nil),
+		(*models.Organization)(nil),
+		(*models.AppProject)(nil),
 		(*models.Build)(nil),
 		(*models.AppBuildTask)(nil),
 	)
 
 	ctx := context.Background()
 	project, build := seedTaskFixtures(t, db)
+	apID := project.ID
 
 	// Mid-build row: status_text already says "Built" but the row has not
 	// yet been flagged finished. Should not be selected.
 	task := &models.AppBuildTask{
-		ID: uuid.New(), ProjectID: project.ID, BuildID: build.ID,
+		ID: uuid.New(), AppProjectID: apID, BuildID: build.ID,
 		Platform: "Android", StatusText: "Built", Finished: false,
 		CreatedAt: time.Now(),
 	}
@@ -137,78 +150,42 @@ func TestGetLatestSuccessfulBuildTaskByProjectAndPlatform_RejectsBuiltButUnfinis
 		t.Fatalf("insert task: %v", err)
 	}
 
-	got, err := db.GetLatestSuccessfulBuildTaskByProjectAndPlatform(ctx, project.ID, "Android")
+	got, err := db.GetLatestSuccessfulBuildTaskByAppProjectAndPlatform(ctx, project.ID, "Android")
 	if err == nil {
 		t.Fatalf("expected sql.ErrNoRows-style error, got task %+v", got)
 	}
 }
 
-// TestGetLatestSuccessfulBuildTaskByProjectAndPlatform_AcceptsLegacySucceeded
-// is the historical-row safety net: rows written before P0 #1 (or by the
-// legacy v1 reports path with status="Succeeded") must still be returned.
-// The IN clause keeps this working without a backfill migration.
-func TestGetLatestSuccessfulBuildTaskByProjectAndPlatform_AcceptsLegacySucceeded(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration test: skipping in short mode")
-	}
-
-	db := NewTestDB(t,
-		(*models.User)(nil),
-		(*models.Project)(nil),
-		(*models.Build)(nil),
-		(*models.AppBuildTask)(nil),
-	)
-
-	ctx := context.Background()
-	project, build := seedTaskFixtures(t, db)
-
-	task := &models.AppBuildTask{
-		ID: uuid.New(), ProjectID: project.ID, BuildID: build.ID,
-		Platform: "IOS", StatusText: "Succeeded", Finished: true,
-		CreatedAt: time.Now(),
-	}
-	if _, err := db.DB.NewInsert().Model(task).Exec(ctx); err != nil {
-		t.Fatalf("insert task: %v", err)
-	}
-
-	got, err := db.GetLatestSuccessfulBuildTaskByProjectAndPlatform(ctx, project.ID, "IOS")
-	if err != nil {
-		t.Fatalf("lookup: %v", err)
-	}
-	if got == nil || got.ID != task.ID {
-		t.Errorf("legacy Succeeded row not returned; got %+v want %s", got, task.ID)
-	}
-}
-
-// TestGetLatestSuccessfulBuildTaskByProjectAndPlatform_PrefersMostRecent
+// TestGetLatestSuccessfulBuildTaskByAppProjectAndPlatform_PrefersMostRecent
 // pins the ORDER BY contract — when two finished+successful rows exist for
-// the same (project, platform), the more-recent one wins regardless of
-// which canonical value it carries.
-func TestGetLatestSuccessfulBuildTaskByProjectAndPlatform_PrefersMostRecent(t *testing.T) {
+// the same (app_project, platform), the more-recent one wins.
+func TestGetLatestSuccessfulBuildTaskByAppProjectAndPlatform_PrefersMostRecent(t *testing.T) {
 	if testing.Short() {
 		t.Skip("integration test: skipping in short mode")
 	}
 
 	db := NewTestDB(t,
 		(*models.User)(nil),
-		(*models.Project)(nil),
+		(*models.Organization)(nil),
+		(*models.AppProject)(nil),
 		(*models.Build)(nil),
 		(*models.AppBuildTask)(nil),
 	)
 
 	ctx := context.Background()
 	project, build := seedTaskFixtures(t, db)
+	apID := project.ID
 
 	older := &models.AppBuildTask{
-		ID: uuid.New(), ProjectID: project.ID, BuildID: build.ID,
-		Platform: "Android", StatusText: "Succeeded", Finished: true,
+		ID: uuid.New(), AppProjectID: apID, BuildID: build.ID,
+		Platform: "Android", StatusText: "Built", Finished: true,
 		CreatedAt: time.Now().Add(-2 * time.Hour),
 	}
 	if _, err := db.DB.NewInsert().Model(older).Exec(ctx); err != nil {
 		t.Fatalf("insert older: %v", err)
 	}
 	newer := &models.AppBuildTask{
-		ID: uuid.New(), ProjectID: project.ID, BuildID: build.ID,
+		ID: uuid.New(), AppProjectID: apID, BuildID: build.ID,
 		Platform: "Android", StatusText: "Built", Finished: true,
 		CreatedAt: time.Now(),
 	}
@@ -216,7 +193,7 @@ func TestGetLatestSuccessfulBuildTaskByProjectAndPlatform_PrefersMostRecent(t *t
 		t.Fatalf("insert newer: %v", err)
 	}
 
-	got, err := db.GetLatestSuccessfulBuildTaskByProjectAndPlatform(ctx, project.ID, "Android")
+	got, err := db.GetLatestSuccessfulBuildTaskByAppProjectAndPlatform(ctx, project.ID, "Android")
 	if err != nil {
 		t.Fatalf("lookup: %v", err)
 	}
@@ -235,17 +212,19 @@ func TestMarkOrphanedBuildTasksFailed_WritesCanonicalFailed(t *testing.T) {
 
 	db := NewTestDB(t,
 		(*models.User)(nil),
-		(*models.Project)(nil),
+		(*models.Organization)(nil),
+		(*models.AppProject)(nil),
 		(*models.Build)(nil),
 		(*models.AppBuildTask)(nil),
 	)
 
 	ctx := context.Background()
 	project, build := seedTaskFixtures(t, db)
+	apID := project.ID
 
 	// Insert a stuck row with created_at 2h in the past.
 	stuck := &models.AppBuildTask{
-		ID: uuid.New(), ProjectID: project.ID, BuildID: build.ID,
+		ID: uuid.New(), AppProjectID: apID, BuildID: build.ID,
 		Platform: "Android", StatusText: "Queued", Finished: false,
 		CreatedAt: time.Now().Add(-2 * time.Hour),
 	}
@@ -255,7 +234,7 @@ func TestMarkOrphanedBuildTasksFailed_WritesCanonicalFailed(t *testing.T) {
 
 	// And a fresh row that should NOT be reaped.
 	fresh := &models.AppBuildTask{
-		ID: uuid.New(), ProjectID: project.ID, BuildID: build.ID,
+		ID: uuid.New(), AppProjectID: apID, BuildID: build.ID,
 		Platform: "Android", StatusText: "Queued", Finished: false,
 		CreatedAt: time.Now(),
 	}
@@ -297,10 +276,10 @@ func TestMarkOrphanedBuildTasksFailed_WritesCanonicalFailed(t *testing.T) {
 		t.Errorf("fresh row status_text overwritten: got %q", freshGot.StatusText)
 	}
 
-	// Bonus: the just-reaped stuck row is now visible to
-	// GetLatestSuccessfulBuildTaskByProjectAndPlatform's anti-target — it
-	// must NOT be returned (status=Failed is not in the success set).
-	if hit, _ := db.GetLatestSuccessfulBuildTaskByProjectAndPlatform(ctx, project.ID, "Android"); hit != nil {
+	// Bonus: the just-reaped stuck row is now visible to the success
+	// lookup's anti-target — it must NOT be returned (status=Failed is
+	// not in the success set).
+	if hit, _ := db.GetLatestSuccessfulBuildTaskByAppProjectAndPlatform(ctx, project.ID, "Android"); hit != nil {
 		t.Errorf("reaped row leaked into success lookup: %+v", hit)
 	}
 }

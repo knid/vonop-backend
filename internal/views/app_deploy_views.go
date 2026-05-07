@@ -458,7 +458,7 @@ func (v *HttpViews) BuildAppExpo(w http.ResponseWriter, r *http.Request) {
 
 	utils.JSONResponse(w, map[string]any{
 		"build_id":   build.ID,
-		"project_id": build.ProjectID,
+		"project_id": build.AppProjectID,
 		"version":    build.BuildNumber,
 		"tasks":      taskResponses,
 	}, statusCode)

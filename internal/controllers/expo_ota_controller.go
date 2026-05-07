@@ -551,28 +551,9 @@ func (c *Controller) TriggerCodemagicOTAPublish(
 
 	bundleID := bundleIDForProject(project, "")
 
-	// Find or create the v1 shadow project. Same shape as BuildExpoMobile —
-	// keyed by URL="expo://"+slug so it doesn't collide with legacy URL-
-	// wrapper builds. We don't UPDATE here (no platform flags to change for
-	// an OTA publish).
-	shadowURL := "expo://" + project.Slug
-	v1project, err := c.DB.GetProjectByUserAndURL(user.ID.String(), shadowURL)
-	if err != nil || v1project == nil || v1project.ID == uuid.Nil {
-		v1project = &models.Project{
-			UserID:            user.ID,
-			URL:               shadowURL,
-			PackageName:       bundleID,
-			OneSignalAppID:    "expo-shadow-" + project.ID.String(),
-			OneSignalAppToken: "expo-shadow-token-" + project.ID.String(),
-		}
-		v1project, err = c.DB.CreateProject(v1project)
-		if err != nil {
-			return nil, nil, fmt.Errorf("create v1 shadow project: %w", err)
-		}
-	}
-
-	// Pending build guard — same OneSignal-style mutex as BuildExpoMobile.
-	if pending, perr := c.DB.GetPendingAppBuildTasks(v1project); perr == nil && len(pending) > 0 {
+	// Pending build guard — direct AppProject scope (replaces the legacy
+	// v1-shadow-Project pending check).
+	if pending, perr := c.DB.GetPendingAppBuildTasksByAppProject(project.ID.String()); perr == nil && len(pending) > 0 {
 		return nil, nil, fmt.Errorf("a build is already in progress, please wait")
 	}
 
@@ -586,16 +567,18 @@ func (c *Controller) TriggerCodemagicOTAPublish(
 		return nil, nil, fmt.Errorf("tarball mobile/ subtree: %w", err)
 	}
 
-	// Next build number for the shadow row — keeps the same monotonic
+	// Next build number — direct AppProject scope. Keeps the same monotonic
 	// sequence as native builds so AppBuildTask history reads cleanly.
 	var lastBuildNumber int
-	if last, lerr := c.DB.GetLastProjectBuild(v1project); lerr == nil && last != nil {
+	if last, lerr := c.DB.GetLastBuildByAppProject(project.ID.String()); lerr == nil && last != nil {
 		lastBuildNumber = last.BuildNumber
 	}
 	nextNum := lastBuildNumber + 1
 
+	// AppProjectID is the canonical FK to AppProject (v1 shadow Project was
+	// removed 2026-05-07).
 	build := &models.Build{
-		ProjectID:         v1project.ID,
+		AppProjectID:      project.ID,
 		Active:            false,
 		Title:             nonEmptyOr(project.Name, project.Slug),
 		Icon:              "",
@@ -615,7 +598,7 @@ func (c *Controller) TriggerCodemagicOTAPublish(
 		return build, nil, fmt.Errorf("upload tarball to %s: %w", tarKey, err)
 	}
 
-	task, err := c.DB.CreateAppBuildTask(*build, "OTA", "Queued", false)
+	task, err := c.DB.CreateAppBuildTask(*build, project.ID, "OTA", "Queued", false)
 	if err != nil {
 		return build, nil, fmt.Errorf("create OTA build task: %w", err)
 	}
@@ -636,8 +619,8 @@ func (c *Controller) TriggerCodemagicOTAPublish(
 	}
 
 	osAppID := ""
-	if !strings.HasPrefix(v1project.OneSignalAppID, "expo-shadow-") {
-		osAppID = v1project.OneSignalAppID
+	if mobileCfg != nil && mobileCfg.OneSignalAppID != "" {
+		osAppID = mobileCfg.OneSignalAppID
 	}
 
 	expoPublicOTAURL := ""

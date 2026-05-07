@@ -141,9 +141,9 @@ func BuildRegistryFor(project *models.AppProject, deps *RunDependencies) *Regist
 	if project != nil && project.ProjectType == models.ProjectTypeMobileAppNative {
 		r.Register(&ReadMobileConfigTool{})
 		// <P1#17> read_build_logs + trigger_build_after_fix — gated to
-		// mobile_app_native because both tools resolve the v1 shadow
-		// project keyed by url="expo://"+slug, and BuildExpoMobile only
-		// runs for this project type.
+		// mobile_app_native because both tools depend on the
+		// AppProject-scoped build pipeline (BuildExpoMobile only runs for
+		// this project type).
 		r.Register(&ReadBuildLogsTool{Deps: deps})
 		r.Register(&TriggerBuildAfterFixTool{Deps: deps})
 		r.Register(ProvisionLocalDatabaseTool{Deps: deps})
