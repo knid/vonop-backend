@@ -27,6 +27,10 @@ type UserRegisterRequest struct {
 	Password      string `json:"password" validate:"required,min=8,max=64" errormgs:"must be between 8 and 64 characters long"`
 	PasswordCheck string `json:"password_check" validate:"required,min=8,max=64" errormgs:"must be between 8 and 64 characters long"`
 	ReferralCode  string `json:"referral_code"`
+	// Meta CAPI ad attribution from the front-end Pixel. All optional.
+	Fbp            string `json:"fbp"`
+	Fbc            string `json:"fbc"`
+	EventSourceURL string `json:"event_source_url"`
 }
 
 func (u *UserRegisterRequest) Validate(validate *validator.Validate) error {

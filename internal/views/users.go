@@ -156,13 +156,20 @@ func (v *HttpViews) UserRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	attr := controllers.MetaAttributionFromRequest(r,
+		userRegisterReq.Fbp, userRegisterReq.Fbc, userRegisterReq.EventSourceURL)
+
 	go func() {
-		if u, lookupErr := v.Controller.DB.GetUserById(userInformationRes.ID.String()); lookupErr == nil {
-			v.Controller.EnsureIdentified(u)
-			v.Controller.TrackUserEvent(u, "user_registered", posthog.NewProperties().
-				Set("provider", u.Provider).
-				Set("email", u.Email))
+		u, lookupErr := v.Controller.DB.GetUserById(userInformationRes.ID.String())
+		if lookupErr != nil {
+			return
 		}
+		v.Controller.PersistMetaAttribution(u, attr)
+		v.Controller.EnsureIdentified(u)
+		v.Controller.TrackUserEvent(u, "user_registered", posthog.NewProperties().
+			Set("provider", u.Provider).
+			Set("email", u.Email))
+		v.Controller.FireMetaCompleteRegistration(u, attr)
 	}()
 
 	utils.JSONResponse(w, userInformationRes, http.StatusOK)

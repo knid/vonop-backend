@@ -12,6 +12,7 @@ import (
 	"github.com/knid/wemob/internal/services/events"
 	"github.com/knid/wemob/internal/services/mcpclient"
 	"github.com/knid/wemob/internal/services/gitrepo"
+	"github.com/knid/wemob/internal/services/meta"
 	"github.com/knid/wemob/internal/services/neon"
 	"github.com/knid/wemob/internal/services/secret"
 	"github.com/knid/wemob/internal/services/storage"
@@ -43,6 +44,10 @@ type Controller struct {
 	// degrade: IAP auto-provisioning skips, builds proceed with empty IAP
 	// keys, the template's lib/iap.ts initIAP() no-ops + warns).
 	RevenueCatService      *revenuecat.Service
+	// MetaCAPI is nil when META_PIXEL_ID or META_CAPI_ACCESS_TOKEN is unset.
+	// Conversion events skip silently in that case; client-side Pixel still
+	// fires PageView from the front-end if NEXT_PUBLIC_META_PIXEL_ID is set.
+	MetaCAPI               *meta.Service
 	FlyService             *fly.Service
 	FlyInspector           FlyInspector
 	GiteaService           *gitea.Service
@@ -82,6 +87,7 @@ func NewController(db *database.Database, concurrentBuildLimiter chan struct{},
 	gitRepoService *gitrepo.Service,
 	codemagicService *codemagic.Service,
 	revenueCatService *revenuecat.Service,
+	metaCAPI *meta.Service,
 	remoteConfigService *remoteconfig.Service,
 	e2b *e2bService.Service,
 	edgeIPs []string,
@@ -101,6 +107,7 @@ func NewController(db *database.Database, concurrentBuildLimiter chan struct{},
 		SecretManager:          secretManager,
 		CodemagicService:       codemagicService,
 		RevenueCatService:      revenueCatService,
+		MetaCAPI:               metaCAPI,
 		FlyService:             flyService,
 		FlyInspector:           flyService,
 		GiteaService:           giteaService,
