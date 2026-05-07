@@ -1,6 +1,8 @@
 package secret
 
 import (
+	"log/slog"
+
 	infisical "github.com/infisical/go-sdk"
 )
 
@@ -27,6 +29,17 @@ func (ism *InfisicalSecretManager) GetSecret(key string) string {
 		SecretPath:  "/",
 	})
 	if err != nil {
+		// Surface the Infisical fetch failure so silent empties are
+		// visible in BetterStack. Returning "" is preserved for back-compat
+		// with callers that treat empty as "feature disabled" (e.g.
+		// optional services like REVENUECAT_API_KEY, CODEMAGIC_API_TOKEN).
+		// Empty-on-failure for *required* secrets is caught downstream by
+		// the bootstrap empty-check guards.
+		slog.Error("infisical: secret fetch failed",
+			"key", key,
+			"environment", ism.environment,
+			"error", err,
+		)
 		return ""
 	}
 	return secret.SecretValue
