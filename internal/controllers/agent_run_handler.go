@@ -176,17 +176,40 @@ func (c *Controller) HandleAgentRunTask(ctx context.Context, t *asynq.Task) erro
 // markAgentJobFailed flips a generation_job to failed when a precondition
 // (user/project lookup, attachment resolution) fails before agent.Run gets
 // a chance to emit its own error event.
+//
+// The error is persisted as a milestone event so a later reconnect via
+// StreamJob (terminal-job replay path) surfaces the failure reason
+// instead of an empty events[] slice. Two pub/sub frames are then
+// published in order — error, then end — so any subscribed SSE client
+// receives the reason and exits its read loop. The DB row is the
+// durable record; the publishes are best-effort.
 func (c *Controller) markAgentJobFailed(jobID, reason string) {
-	if err := c.DB.UpdateGenerationJobStatus(jobID, "failed", reason); err != nil {
-		slog.Error("agent_run: mark failed", "job_id", jobID, "reason", reason, "error", err)
+	errEvent := models.JobEvent{
+		Seq:   1, // Single milestone, fixed seq.
+		Event: "error",
+		Data: map[string]any{
+			"job_id":  jobID,
+			"phase":   "preflight",
+			"message": reason,
+		},
+		Time: time.Now().UnixMilli(),
 	}
-	// Best-effort terminal frame so any subscribed client exits its read loop.
-	endEv := responses.SSEEvent{Seq: 0, Event: "error", Data: map[string]any{
-		"job_id":  jobID,
-		"phase":   "preflight",
-		"message": reason,
-	}}
-	_ = jobstream.PublishEvent(context.Background(), c.RedisPubSub, jobID, endEv)
+	if err := c.DB.AppendGenerationJobEvent(jobID, errEvent); err != nil {
+		slog.Error("agent_run: mark failed (append event)", "job_id", jobID, "reason", reason, "error", err)
+	}
+
+	if err := c.DB.UpdateGenerationJobStatus(jobID, "failed", reason); err != nil {
+		slog.Error("agent_run: mark failed (status)", "job_id", jobID, "reason", reason, "error", err)
+	}
+
+	// Publish the error frame AND the terminal end frame so any subscribed
+	// SSE client receives the reason then exits its read loop. Both are
+	// best-effort — persisted state in the DB is the durable record.
+	publishCtx := context.Background()
+	errFrame := responses.SSEEvent{Seq: 1, Event: "error", Data: errEvent.Data}
+	_ = jobstream.PublishEvent(publishCtx, c.RedisPubSub, jobID, errFrame)
+	endFrame := responses.SSEEvent{Seq: 0, Event: "end", Data: map[string]any{"job_id": jobID}}
+	_ = jobstream.PublishEvent(publishCtx, c.RedisPubSub, jobID, endFrame)
 }
 
 // loadAgentTurnAttachments mirrors views.loadTurnAttachments, but lives in
