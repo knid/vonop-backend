@@ -127,11 +127,3 @@ func AIUserKey(r *http.Request) string {
 	return "ai:" + IPKey(r)
 }
 
-// GatewayProjectKey returns the gateway project ID as a rate-limit key.
-func GatewayProjectKey(r *http.Request) string {
-	projectID := GatewayProjectIDFromContext(r.Context())
-	if projectID != "" {
-		return "gw:" + projectID
-	}
-	return "gw:" + IPKey(r)
-}

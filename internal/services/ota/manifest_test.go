@@ -1,9 +1,6 @@
 package ota
 
 import (
-	"encoding/json"
-	"mime"
-	"mime/multipart"
 	"strings"
 	"testing"
 	"time"
@@ -111,60 +108,6 @@ func TestBuildManifest_MissingBundleBytes(t *testing.T) {
 	_, err := BuildManifest(update, meta, map[string][]byte{}, "https://x.example/ota")
 	if err == nil || !strings.Contains(err.Error(), "bundle bytes missing") {
 		t.Errorf("expected bundle-missing error, got %v", err)
-	}
-}
-
-func TestMarshalMultipart_Boundary(t *testing.T) {
-	m := Manifest{
-		ID:             "test-id",
-		CreatedAt:      "2026-05-03T00:00:00Z",
-		RuntimeVersion: "fingerprint:abc",
-		Assets:         []Asset{},
-		LaunchAsset: Asset{
-			Hash:          "deadbeef",
-			Key:           "ios-cafe",
-			FileExtension: ".bundle",
-			ContentType:   "application/javascript",
-			URL:           "https://x.example/asset",
-		},
-		Metadata: map[string]any{},
-		Extra:    map[string]any{},
-	}
-	body, boundary, err := MarshalMultipart(m)
-	if err != nil {
-		t.Fatalf("MarshalMultipart: %v", err)
-	}
-	if boundary == "" {
-		t.Fatal("empty boundary")
-	}
-	if !strings.Contains(string(body), "name=\"manifest\"") {
-		t.Errorf("body missing manifest part name; got:\n%s", body)
-	}
-
-	// Round-trip: parse the body using mime/multipart.
-	mr := multipart.NewReader(strings.NewReader(string(body)), boundary)
-	part, err := mr.NextPart()
-	if err != nil {
-		t.Fatalf("NextPart: %v", err)
-	}
-	if got := part.FormName(); got != "manifest" {
-		t.Errorf("FormName = %q, want 'manifest'", got)
-	}
-	// Content-Type with charset round-trips.
-	mediaType, _, err := mime.ParseMediaType(part.Header.Get("Content-Type"))
-	if err != nil {
-		t.Errorf("parse content-type: %v", err)
-	}
-	if mediaType != "application/json" {
-		t.Errorf("Content-Type = %q", mediaType)
-	}
-	// Body decodes to a Manifest.
-	var got Manifest
-	if err := json.NewDecoder(part).Decode(&got); err != nil {
-		t.Errorf("decode manifest part: %v", err)
-	}
-	if got.ID != "test-id" {
-		t.Errorf("decoded ID = %q", got.ID)
 	}
 }
 

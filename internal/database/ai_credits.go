@@ -20,12 +20,16 @@ func (db *Database) GetAICreditsBalance(userID string) (*models.AICreditsBalance
 }
 
 func (db *Database) CreateAICreditsBalance(balance *models.AICreditsBalance) (*models.AICreditsBalance, error) {
-	_, err := db.DB.NewInsert().Model(balance).On("CONFLICT (user_id) DO NOTHING").Exec(context.Background())
+	// The unique constraint on this table is ux_ai_credits_balances_org
+	// (organization_id) — user_id is no longer unique since the org-scoped
+	// migration on 2026-04-30. ON CONFLICT must match the existing constraint
+	// or the INSERT errors out, leaving signups with no balance row.
+	_, err := db.DB.NewInsert().Model(balance).On("CONFLICT (organization_id) DO NOTHING").Exec(context.Background())
 	if err != nil {
 		return nil, err
 	}
 	// Re-read to get the actual row (whether we inserted or it already existed)
-	return db.GetAICreditsBalance(balance.UserID.String())
+	return db.GetAICreditsBalanceByOrg(balance.OrganizationID.String())
 }
 
 func (db *Database) UpdateAICreditsBalance(balance *models.AICreditsBalance) (*models.AICreditsBalance, error) {

@@ -1,14 +1,11 @@
 package controllers
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
-	"net/http"
 	"time"
 
 	"github.com/google/uuid"
@@ -437,26 +434,4 @@ func (c *Controller) HandlePlayRTDN(ctx context.Context, cleartext []byte) error
 	return nil
 }
 
-// httpDoLimited is a tiny helper used by ASC release calls. It mirrors the
-// pattern in storepoll/apple.go — bounded body read, 4xx surfaced.
-func httpDoLimited(req *http.Request, client *http.Client, max int64) ([]byte, int, error) {
-	if client == nil {
-		client = http.DefaultClient
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, 0, err
-	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, max))
-	return body, resp.StatusCode, nil
-}
 
-// jsonBuf serializes any to a *bytes.Buffer for HTTP POST/PATCH bodies.
-func jsonBuf(v any) (*bytes.Buffer, error) {
-	b, err := json.Marshal(v)
-	if err != nil {
-		return nil, err
-	}
-	return bytes.NewBuffer(b), nil
-}

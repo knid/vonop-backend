@@ -235,6 +235,15 @@ func (c *Controller) CopyTemplate(ctx context.Context, user *models.User, slug s
 		return nil, fmt.Errorf("template not found")
 	}
 
+	// Resolve the org early so the quota count below is org-scoped (matches
+	// CreateAppProject after the Plan A org-billing migration). Counting by
+	// user.ID would let templates bypass the org cap that POST /v2/apps now
+	// enforces.
+	orgID, err := c.RequireOrgIDForUser(user, nil)
+	if err != nil {
+		return nil, err
+	}
+
 	// Enforce app project limit (same logic as CreateAppProject)
 	isMobile := template.ProjectType == models.ProjectTypeMobileAppNative
 	var userLimits *models.StandardUserLimits
@@ -254,29 +263,18 @@ func (c *Controller) CopyTemplate(ctx context.Context, user *models.User, slug s
 		}
 
 		if maxApps == 0 {
-			if isMobile {
-				return nil, fmt.Errorf("mobile app creation is not available on your plan")
-			}
-			return nil, fmt.Errorf("web app creation is not available on your plan")
+			return nil, &AppLimitError{IsMobile: isMobile, Limit: 0}
 		}
 
-		appCount, countErr := c.DB.CountAppProjectsByUserIDAndType(user.ID.String(), countFilter)
+		appCount, countErr := c.DB.CountAppProjectsByOrgIDAndType(orgID.String(), countFilter)
 		if countErr != nil {
-			slog.Warn("CopyTemplate: failed to count projects", "error", countErr, "user_id", user.ID)
+			slog.Warn("CopyTemplate: failed to count projects", "error", countErr, "org_id", orgID)
 		} else if appCount >= maxApps {
-			if isMobile {
-				return nil, fmt.Errorf("you have reached your mobile app limit (%d)", maxApps)
-			}
-			return nil, fmt.Errorf("you have reached your web app limit (%d)", maxApps)
+			return nil, &AppLimitError{IsMobile: isMobile, Limit: maxApps, Used: appCount}
 		}
 	}
 
 	projectSlug := makeSlug(template.Name)
-
-	orgID, err := c.RequireOrgIDForUser(user, nil)
-	if err != nil {
-		return nil, err
-	}
 
 	project := &models.AppProject{
 		UserID:         user.ID,

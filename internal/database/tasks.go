@@ -235,37 +235,3 @@ func (db *Database) CancelAppBuildTask(taskID string) error {
 	return err
 }
 
-func (db *Database) GetIOSSignTaskById(id string) (*models.SignIPATask, error) {
-	var signTask models.SignIPATask
-	err := db.DB.NewSelect().Model(&signTask).Where("id = ?", id).Scan(context.Background())
-
-	return &signTask, err
-}
-
-func (db *Database) CreateIOSSignTask(signTask models.SignIPATask) (*models.SignIPATask, error) {
-	_, err := db.DB.NewInsert().Model(&signTask).Exec(context.Background())
-
-	return &signTask, err
-}
-
-func (db *Database) UpdateIOSSignTask(signTask *models.SignIPATask) error {
-	_, err := db.DB.NewUpdate().Model(signTask).Where("id = ?", signTask.ID.String()).Exec(context.Background())
-	return err
-}
-
-// GetLatestIOSSignTaskByBuild returns the most recent sign task for a given
-// build, or sql.ErrNoRows if none has been run. Used by the build card UI
-// to display signing state after a page refresh.
-func (db *Database) GetLatestIOSSignTaskByBuild(buildID string) (*models.SignIPATask, error) {
-	var signTask models.SignIPATask
-	err := db.DB.NewSelect().
-		Model(&signTask).
-		Where("build_id = ?", buildID).
-		Order("created_at DESC").
-		Limit(1).
-		Scan(context.Background())
-	if err != nil {
-		return nil, err
-	}
-	return &signTask, nil
-}

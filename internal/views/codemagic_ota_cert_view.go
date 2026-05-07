@@ -1,17 +1,10 @@
 package views
 
 import (
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"io"
 	"log/slog"
 	"net/http"
-	"strconv"
-	"strings"
-	"time"
 
 	"github.com/google/uuid"
 
@@ -19,7 +12,6 @@ import (
 	"github.com/knid/wemob/internal/utils"
 )
 
-const otaCertTimestampSkew = 5 * time.Minute
 const otaCertMaxBody = 4 << 10 // 4 KiB; this is a tiny GET-with-body
 
 // CodemagicOTACertHandler holds dependencies for POST /v2/codemagic/ota-cert.
@@ -65,7 +57,7 @@ type fetchOTACertResponse struct {
 // the cert needs to be present in the binary before any signed manifest
 // arrives.
 func (h *CodemagicOTACertHandler) FetchOTACert(w http.ResponseWriter, r *http.Request) {
-	body, projectID, ok := h.readSignedBody(w, r)
+	body, projectID, ok := readSignedBodyByProjectID(w, r, h.HMACMaster, "ota-cert-fetch", otaCertMaxBody)
 	if !ok {
 		return
 	}
@@ -101,45 +93,4 @@ func (h *CodemagicOTACertHandler) FetchOTACert(w http.ResponseWriter, r *http.Re
 		KeyID:     row.KeyID,
 		Algorithm: row.Algorithm,
 	}, http.StatusOK)
-}
-
-// readSignedBody validates the HMAC signature and returns (body, projectID, ok).
-// Identical to CodemagicKeystoreHandler.readSignedBody — duplicated rather
-// than shared because each handler holds its own HMACMaster wiring.
-func (h *CodemagicOTACertHandler) readSignedBody(w http.ResponseWriter, r *http.Request) ([]byte, string, bool) {
-	r.Body = http.MaxBytesReader(w, r.Body, otaCertMaxBody)
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		utils.JSONError(w, "bad_request", "read body", http.StatusBadRequest, nil)
-		return nil, "", false
-	}
-
-	sigHeader := strings.TrimSpace(r.Header.Get("X-Wemob-Signature"))
-	tsHeader := strings.TrimSpace(r.Header.Get("X-Wemob-Timestamp"))
-	pidHeader := strings.TrimSpace(r.Header.Get("X-Wemob-Project-Id"))
-	if sigHeader == "" || tsHeader == "" || pidHeader == "" {
-		utils.JSONError(w, "unauthorized", "missing signature, timestamp, or project id header", http.StatusUnauthorized, nil)
-		return nil, "", false
-	}
-
-	ts, err := strconv.ParseInt(tsHeader, 10, 64)
-	tsTime := time.Unix(ts, 0)
-	if err != nil || time.Since(tsTime) > otaCertTimestampSkew || time.Until(tsTime) > otaCertTimestampSkew {
-		utils.JSONError(w, "unauthorized", "stale timestamp", http.StatusUnauthorized, nil)
-		return nil, "", false
-	}
-
-	// Per-call key = hex(HKDF(master, salt, info="ota-cert-fetch:<project_id>")).
-	derived := utils.DeriveHMACKey([]byte(h.HMACMaster), "ota-cert-fetch", pidHeader)
-	perCallSecret := hex.EncodeToString(derived)
-
-	h2 := hmac.New(sha256.New, []byte(perCallSecret))
-	h2.Write([]byte(tsHeader + "." + string(body)))
-	expected := "sha256=" + hex.EncodeToString(h2.Sum(nil))
-
-	if !hmac.Equal([]byte(sigHeader), []byte(expected)) {
-		utils.JSONError(w, "unauthorized", "bad signature", http.StatusUnauthorized, nil)
-		return nil, "", false
-	}
-	return body, pidHeader, true
 }

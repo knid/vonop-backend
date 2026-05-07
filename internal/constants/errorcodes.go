@@ -59,10 +59,12 @@ const (
 	ErrDeployFailed       = "DEPLOY_FAILED"
 
 	// Domain
-	ErrDomainTaken     = "DOMAIN_TAKEN"
-	ErrDomainInvalid   = "DOMAIN_INVALID"
-	ErrDomainDNSFailed = "DOMAIN_DNS_FAILED"
-	ErrDomainNotFound  = "DOMAIN_NOT_FOUND"
+	ErrDomainTaken         = "DOMAIN_TAKEN"
+	ErrDomainInvalid       = "DOMAIN_INVALID"
+	ErrDomainDNSFailed     = "DOMAIN_DNS_FAILED"
+	ErrDomainNotFound      = "DOMAIN_NOT_FOUND"
+	ErrDomainLimitReached  = "DOMAIN_LIMIT_REACHED" // details: { limit, used }
+	ErrAppNotDeployed      = "APP_NOT_DEPLOYED"
 
 	// Asset / upload
 	ErrAssetNotFound     = "ASSET_NOT_FOUND"
@@ -161,10 +163,12 @@ var DefaultMessages = map[string]string{
 	ErrDeployInProgress:   "A deployment is already in progress.",
 	ErrDeployFailed:       "Deployment failed.",
 
-	ErrDomainTaken:     "This domain is already in use.",
-	ErrDomainInvalid:   "Invalid domain.",
-	ErrDomainDNSFailed: "DNS verification failed.",
-	ErrDomainNotFound:  "Domain not found.",
+	ErrDomainTaken:        "This domain is already in use.",
+	ErrDomainInvalid:      "Invalid domain.",
+	ErrDomainDNSFailed:    "DNS verification failed.",
+	ErrDomainNotFound:     "Domain not found.",
+	ErrDomainLimitReached: "Custom domain limit reached for this app.",
+	ErrAppNotDeployed:     "Publish the app before performing this action.",
 
 	ErrAssetNotFound:     "Asset not found.",
 	ErrAssetTooLarge:     "File too large.",

@@ -22,12 +22,6 @@ func UserFromContext(ctx context.Context) *models.User {
 	return user
 }
 
-// APIKeyFromContext retrieves the API key from the request context, if present.
-// Returns nil for session-based (non-API-key) authentication.
-func APIKeyFromContext(ctx context.Context) *models.APIKey {
-	key, _ := ctx.Value(apiKeyContextKey).(*models.APIKey)
-	return key
-}
 
 // RequireAuth is middleware that extracts the bearer token, validates it,
 // and injects *models.User into the request context.
@@ -98,32 +92,6 @@ func RequireSubscription(controller *controllers.Controller, statuses ...string)
 	}
 }
 
-// RequireScope checks that if the request was authenticated with an API key,
-// the key has one of the required scopes. Session-based auth (no API key) passes through.
-// Must be used after RequireAuth.
-func RequireScope(scopes ...string) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			apiKey := APIKeyFromContext(r.Context())
-			if apiKey != nil {
-				// API key auth — check that the key has at least one required scope
-				hasScope := false
-				for _, scope := range scopes {
-					if apiKey.HasScope(scope) {
-						hasScope = true
-						break
-					}
-				}
-				if !hasScope {
-					utils.JSONErrorCode(w, constants.ErrInsufficientScope, http.StatusForbidden, nil)
-					return
-				}
-			}
-			// Session-based auth — no scope check needed
-			next.ServeHTTP(w, r)
-		})
-	}
-}
 
 // RequireAdmin checks that the authenticated user is an admin.
 // Must be used after RequireAuth.

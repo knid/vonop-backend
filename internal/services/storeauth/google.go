@@ -15,6 +15,12 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
+const playAPIBase = "https://androidpublisher.googleapis.com/androidpublisher/v3"
+
+// playHTTPClient is the package-level HTTP client used for Play API calls.
+// 15-second timeout (avoids http.DefaultClient per T5 audit).
+var playHTTPClient = &http.Client{Timeout: 15 * time.Second}
+
 // GoogleServiceAccount is the subset of fields we read from a Google
 // service-account JSON key.
 type GoogleServiceAccount struct {

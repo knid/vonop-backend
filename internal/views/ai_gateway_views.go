@@ -548,12 +548,18 @@ func (v *HttpViews) GatewayImage(w http.ResponseWriter, r *http.Request) {
 
 	// Pre-deduct credits
 	if err := v.Controller.DeductAICreditsUnchecked(user, orgID, totalCost, "gateway_image", projectID); err != nil {
-		if errors.Is(err, controllers.ErrOrgInDunning) {
+		var capErr *controllers.MemberCreditCapError
+		switch {
+		case errors.Is(err, controllers.ErrOrgInDunning):
 			middleware.GatewayError(w, constants.DefaultMessages[constants.ErrOrgInDunning], "billing_error", "org_in_dunning", http.StatusPaymentRequired)
-			return
+		case errors.As(err, &capErr):
+			middleware.GatewayError(w, capErr.Error(), "billing_error", "member_credit_cap_reached", http.StatusForbidden)
+		case errors.Is(err, controllers.ErrAICreditsFloorReached):
+			middleware.GatewayError(w, err.Error(), "insufficient_credits", "credits_overdraft_floor", http.StatusPaymentRequired)
+		default:
+			slog.Error("gateway image: failed to pre-deduct credits", "error", err, "user_id", user.ID)
+			middleware.GatewayError(w, "failed to deduct credits", "server_error", "credits_error", http.StatusInternalServerError)
 		}
-		slog.Error("gateway image: failed to pre-deduct credits", "error", err, "user_id", user.ID)
-		middleware.GatewayError(w, "failed to deduct credits", "server_error", "credits_error", http.StatusInternalServerError)
 		return
 	}
 

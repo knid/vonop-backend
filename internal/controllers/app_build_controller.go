@@ -3,6 +3,7 @@ package controllers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -14,6 +15,26 @@ import (
 	"github.com/knid/wemob/internal/utils"
 	"github.com/knid/wemob/internal/utils/external"
 )
+
+// User-facing rejections from BuildExpoMobile. Views detect these via
+// errors.Is / errors.As to emit structured 4xx responses instead of 500.
+var ErrBuildAlreadyInProgress = errors.New("a build is already in progress, please wait")
+
+// BuildPlatformNotAllowedError signals the org's plan does not include a
+// mobile build platform. Platform is "android" or "ios".
+type BuildPlatformNotAllowedError struct {
+	Platform string
+}
+
+func (e *BuildPlatformNotAllowedError) Error() string {
+	label := strings.ToUpper(e.Platform)
+	if e.Platform == "android" {
+		label = "Android"
+	} else if e.Platform == "ios" {
+		label = "iOS"
+	}
+	return fmt.Sprintf("your subscription does not allow %s builds", label)
+}
 
 // BuildExpoMobile triggers a new Expo build for a mobile_app_native project.
 //
@@ -79,10 +100,17 @@ func (c *Controller) BuildExpoMobile(ctx context.Context, project *models.AppPro
 		return nil, nil, fmt.Errorf("could not load plan limits: %w", err)
 	}
 	if wantAndroid && !limits.CanBuildToAndroid {
-		return nil, nil, fmt.Errorf("your subscription does not allow Android builds")
+		return nil, nil, &BuildPlatformNotAllowedError{Platform: "android"}
 	}
 	if wantIOS && !limits.CanBuildToIOS {
-		return nil, nil, fmt.Errorf("your subscription does not allow iOS builds")
+		return nil, nil, &BuildPlatformNotAllowedError{Platform: "ios"}
+	}
+	// Apple signing precondition. The Codemagic iOS workflow fetches a fresh
+	// distribution cert + provisioning profile via /v2/codemagic/apple-signing
+	// at build time, which resolves project.DefaultAppleConnectionID. Without
+	// it the worker would burn ~25 min before failing — fail fast here.
+	if wantIOS && project.DefaultAppleConnectionID == nil {
+		return nil, nil, fmt.Errorf("iOS builds require an Apple connection on this app — add an App Store Connect API key in Credentials and set it as the default for this app")
 	}
 	bundleID := bundleIDForProject(project, opts.BundleIDOverride)
 

@@ -1,7 +1,6 @@
 package utils
 
 import (
-	"bytes"
 	"context"
 	"database/sql"
 	"errors"
@@ -139,13 +138,3 @@ type CommandLogWriter struct {
 	Meta  map[string]any
 }
 
-func (lw *CommandLogWriter) Write(p []byte) (n int, err error) {
-	logger := slog.Default().With("from", "build_cmds")
-	msg := string(bytes.TrimSpace(p))
-	args := []any{}
-	for k, v := range lw.Meta {
-		args = append(args, k, v)
-	}
-	logger.Log(context.Background(), lw.Level, msg, args...)
-	return len(p), nil
-}

@@ -78,24 +78,6 @@ func (r *Registry) Names() []string {
 	return out
 }
 
-// AnthropicSchemas returns schemas for executor tools only (server tools are
-// opaque to us — the provider handles them). Shape matches the native
-// Anthropic tools API: { name, description, input_schema }.
-func (r *Registry) AnthropicSchemas() []map[string]any {
-	out := make([]map[string]any, 0, len(r.tools))
-	for _, name := range r.order {
-		t, ok := r.tools[name]
-		if !ok {
-			continue // server tool — skip
-		}
-		out = append(out, map[string]any{
-			"name":         t.Name(),
-			"description":  t.Description(),
-			"input_schema": t.Schema(),
-		})
-	}
-	return out
-}
 
 // Execute dispatches to the named tool. Unknown names return isError=true
 // rather than error, so one bad tool call doesn't kill the run.

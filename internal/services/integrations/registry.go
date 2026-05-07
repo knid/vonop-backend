@@ -56,22 +56,3 @@ func BuildEnvVars(provider string, credentials map[string]any) (map[string]strin
 	return envVars, nil
 }
 
-// CollectEnvVarsFromIntegrations gathers all env vars from a list of integrations
-func CollectEnvVarsFromIntegrations(integrations []struct {
-	Provider    string
-	Credentials map[string]any
-}) (map[string]string, error) {
-	allEnvVars := make(map[string]string)
-
-	for _, integ := range integrations {
-		envVars, err := BuildEnvVars(integ.Provider, integ.Credentials)
-		if err != nil {
-			return nil, fmt.Errorf("integration %s: %w", integ.Provider, err)
-		}
-		for k, v := range envVars {
-			allEnvVars[k] = v
-		}
-	}
-
-	return allEnvVars, nil
-}

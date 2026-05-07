@@ -106,10 +106,6 @@ type ScreenshotToAppRequest struct {
 	ImageBase64 string `json:"image_base64" validate:"required" errormgs:"is required"`
 }
 
-func (r *ScreenshotToAppRequest) Validate(validate *validator.Validate) error {
-	return utils.ValidateFunc[ScreenshotToAppRequest](*r, validate)
-}
-
 type AppFileCreateRequest struct {
 	FilePath string `json:"file_path" validate:"required,min=2" errormgs:"must be at least 2 characters"`
 	Content  string `json:"content" validate:"required" errormgs:"is required"`
@@ -172,10 +168,6 @@ type ReplyJobRequest struct {
 	Message string `json:"message" validate:"required,min=1" errormgs:"message is required"`
 }
 
-func (r *ReplyJobRequest) Validate(validate *validator.Validate) error {
-	return utils.ValidateFunc[ReplyJobRequest](*r, validate)
-}
-
 type ClarifyJobAnswer struct {
 	ID     string `json:"id" validate:"required" errormgs:"is required"`
 	Answer string `json:"answer" validate:"required" errormgs:"is required"`
@@ -184,10 +176,6 @@ type ClarifyJobAnswer struct {
 type ClarifyJobRequest struct {
 	Answers []ClarifyJobAnswer `json:"answers" validate:"omitempty,dive" errormgs:"must contain valid answers"`
 	Skip    bool               `json:"skip"`
-}
-
-func (r *ClarifyJobRequest) Validate(validate *validator.Validate) error {
-	return utils.ValidateFunc[ClarifyJobRequest](*r, validate)
 }
 
 type TransferProjectRequest struct {

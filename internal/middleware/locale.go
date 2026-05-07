@@ -23,13 +23,6 @@ func Locale(next http.Handler) http.Handler {
 	})
 }
 
-// LocaleFrom returns the resolved locale on the context, or "en" if none.
-func LocaleFrom(ctx context.Context) string {
-	if v, ok := ctx.Value(localeKey{}).(string); ok && v != "" {
-		return v
-	}
-	return "en"
-}
 
 func resolveLocale(header string) string {
 	if header == "" {

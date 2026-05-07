@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"errors"
+	"fmt"
 
 	"github.com/go-playground/validator/v10"
 	"github.com/google/uuid"
@@ -15,6 +16,25 @@ import (
 // subscription is in a payment-failed state. Views surface this as a 402 with
 // a billing-portal pointer so the user can resolve their payment method.
 var ErrOrgInDunning = errors.New("organization subscription is in dunning")
+
+// ErrAICreditsFloorReached is returned by credit-deduction paths when the
+// deduction would push the org's balance below the configured overdraft
+// floor. Wrapped errors carry the floor value in the format "AI credits
+// overdraft limit reached (floor: N)".
+var ErrAICreditsFloorReached = errors.New("AI credits overdraft limit reached")
+
+// MemberCreditCapError signals the actor has exceeded their per-member
+// monthly credit cap. Carries the cap, period spend, and requested cost so
+// views can render an actionable message and surface the gap to the UI.
+type MemberCreditCapError struct {
+	Cap       int
+	Spent     int
+	Requested int
+}
+
+func (e *MemberCreditCapError) Error() string {
+	return fmt.Sprintf("member credit cap reached (cap=%d, spent=%d, requested=%d)", e.Cap, e.Spent, e.Requested)
+}
 
 // IsOrgInDunning reports whether an org's billing state should block
 // credit-spend operations. Money-failed states (past_due, unpaid,

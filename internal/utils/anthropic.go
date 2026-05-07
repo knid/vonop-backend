@@ -517,46 +517,6 @@ func parseDataURI(dataURI string) (mediaType, data string) {
 	return "image/png", dataURI
 }
 
-// --- Vision Translation ---
-
-// convertVisionToAnthropic creates an Anthropic request for a vision (image) call.
-func convertVisionToAnthropic(model, system, userText, base64Image string, provider *LLMProvider) AnthropicRequest {
-	model = strings.TrimPrefix(model, "anthropic/")
-
-	// Parse media type from the base64 data URL prefix if present
-	mediaType, imageData := parseDataURI(base64Image)
-
-	systemBlocks := []AnthropicContentBlock{
-		{
-			Type:         "text",
-			Text:         system,
-			CacheControl: &AnthropicCacheControl{Type: "ephemeral"},
-		},
-	}
-
-	userBlocks := []AnthropicContentBlock{
-		{Type: "text", Text: userText},
-		{
-			Type: "image",
-			Source: &AnthropicImageSource{
-				Type:      "base64",
-				MediaType: mediaType,
-				Data:      imageData,
-			},
-		},
-	}
-
-	return AnthropicRequest{
-		Model:     model,
-		MaxTokens: 16384,
-		System:    systemBlocks,
-		Messages: []AnthropicMessage{
-			{Role: "user", Content: userBlocks},
-		},
-		Stream: false,
-	}
-}
-
 // --- Non-Streaming Response Parser ---
 
 // parseAnthropicResponse converts an Anthropic API response to internal ChatResponse.
