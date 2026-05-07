@@ -58,7 +58,11 @@ type resendContactPayload struct {
 	FirstName  string            `json:"first_name,omitempty"`
 	LastName   string            `json:"last_name,omitempty"`
 	Properties map[string]string `json:"properties,omitempty"`
-	SegmentIDs []string          `json:"segment_ids,omitempty"`
+	Segments   []resendSegmentID `json:"segments,omitempty"`
+}
+
+type resendSegmentID struct {
+	ID string `json:"id"`
 }
 
 func (s *ResendService) SendEvent(user *models.User, event string, attributes map[string]any) error {
@@ -95,18 +99,22 @@ func (s *ResendService) SendEvent(user *models.User, event string, attributes ma
 		return nil
 	}
 
-	s.postWithRetry(s.baseURL+"/events", body, "resend events", event, user.ID.String())
+	s.postWithRetry(s.baseURL+"/events/send", body, "resend events", event, user.ID.String())
 	return nil
 }
 
 func (s *ResendService) upsertContact(user *models.User) {
 	firstName, lastName := splitName(user.Name)
+	segments := make([]resendSegmentID, 0, len(s.segmentIDs))
+	for _, id := range s.segmentIDs {
+		segments = append(segments, resendSegmentID{ID: id})
+	}
 	body, err := json.Marshal(resendContactPayload{
 		Email:      strings.ToLower(strings.TrimSpace(user.Email)),
 		FirstName:  firstName,
 		LastName:   lastName,
 		Properties: contactProperties(user),
-		SegmentIDs: s.segmentIDs,
+		Segments:   segments,
 	})
 	if err != nil {
 		slog.Error("resend contact: marshal failed", "user_id", user.ID.String(), "err", err)
@@ -143,12 +151,19 @@ func (s *ResendService) postWithRetry(url string, body []byte, ctx, event, userI
 			return
 		}
 		respBody, _ := io.ReadAll(resp.Body)
+		retryAfter := resp.Header.Get("Retry-After")
 		resp.Body.Close()
 		if resp.StatusCode >= 500 {
 			lastErr = fmt.Errorf("%s: %s %s", ctx, resp.Status, string(respBody))
 			continue
 		}
-		// 4xx — no retry; log once.
+		if resp.StatusCode == http.StatusTooManyRequests {
+			wait := parseRetryAfter(retryAfter, time.Duration(attempt+1)*time.Second)
+			lastErr = fmt.Errorf("%s: %s %s", ctx, resp.Status, string(respBody))
+			time.Sleep(wait)
+			continue
+		}
+		// other 4xx — no retry; log once.
 		slog.Warn(ctx+": 4xx response",
 			"event", event, "user_id", userID,
 			"status", resp.Status, "body", string(respBody))
@@ -179,6 +194,21 @@ func contactProperties(user *models.User) map[string]string {
 		"trial_used":          strconv.FormatBool(user.TrialUsed),
 		"language":            language,
 	}
+}
+
+// parseRetryAfter reads a Retry-After header (seconds form) and returns the
+// requested wait, capped at 10s. Falls back to fallback when missing/invalid.
+func parseRetryAfter(header string, fallback time.Duration) time.Duration {
+	if header != "" {
+		if secs, err := strconv.Atoi(strings.TrimSpace(header)); err == nil && secs > 0 {
+			d := time.Duration(secs) * time.Second
+			if d > 10*time.Second {
+				return 10 * time.Second
+			}
+			return d
+		}
+	}
+	return fallback
 }
 
 // splitName splits "First Middle Last" into ("First", "Middle Last"). Empty
