@@ -378,24 +378,3 @@ func (b *streamStateBuffer) Snapshot() (json.RawMessage, bool) {
 	return raw, true
 }
 
-// CurrentJSON always serialises the current state, regardless of the dirty flag.
-// Used for the final flush at job finalisation.
-func (b *streamStateBuffer) CurrentJSON() json.RawMessage {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-
-	payload := map[string]any{
-		"streaming_text":    b.streamingText,
-		"thinking_text":     b.thinkingText,
-		"conversation_text": b.conversationText,
-		"tool_calls":        b.toolCalls,
-	}
-	if b.progress != nil {
-		payload["progress"] = b.progress
-	}
-	if b.phase != "" {
-		payload["phase"] = b.phase
-	}
-	raw, _ := json.Marshal(payload)
-	return raw
-}

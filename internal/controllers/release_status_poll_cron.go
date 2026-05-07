@@ -5,7 +5,6 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/services/storeauth"
 )
@@ -158,18 +157,3 @@ func (p *ReleaseStatusPoller) checkPlay(ctx context.Context, r *models.Release) 
 	return err
 }
 
-// touchReleaseStoreID is a small helper to persist a freshly-discovered
-// store release id without going through Upsert. Currently unused; reserved
-// for future hot-path optimization.
-func touchReleaseStoreID(ctx context.Context, c *Controller, id uuid.UUID, ref string) error {
-	r, err := c.DB.GetRelease(ctx, id)
-	if err != nil {
-		return err
-	}
-	if r.StoreReleaseID == ref {
-		return nil
-	}
-	r.StoreReleaseID = ref
-	_, err = c.DB.UpsertRelease(ctx, r)
-	return err
-}

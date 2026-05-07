@@ -77,14 +77,6 @@ const AICreditsTokensPerCredit = 5_000
 const AICreditsOutputMultiplier = 5
 const AICreditsCacheReadDivisor = 10
 
-// TokensToCredits converts token counts to credit cost using weighted tokens
-// (output × 5, cache-read ÷ 10) and rounds up.
-func TokensToCredits(promptTokens, completionTokens, cacheReadTokens int) int {
-	return TokensToCreditsWithConfig(
-		promptTokens, completionTokens, cacheReadTokens,
-		AICreditsTokensPerCredit, AICreditsOutputMultiplier, AICreditsCacheReadDivisor,
-	)
-}
 
 // TokensToCreditsWithConfig is like TokensToCredits but uses caller-provided
 // conversion parameters from remote config. cacheReadDivisor falls back to the

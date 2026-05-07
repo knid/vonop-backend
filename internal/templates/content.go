@@ -374,11 +374,6 @@ export default async function RootLayout({ children }: { children: React.ReactNo
 `, fontImports, fontConstructors, storeName, storeName, lang, bodyClassName)
 }
 
-// GetContent returns the hardcoded content for a template file.
-// dataModels is used to generate the dynamic lib/schema.ts file.
-func GetContent(path string, colorScheme, darkColorScheme map[string]any, projectType string, dataModels []models.DataModel) string {
-	return GetContentWithLang(path, colorScheme, darkColorScheme, projectType, dataModels, "en")
-}
 
 // GetContentWithLang returns the hardcoded content for a template file, with a language code
 // for localizing dynamic templates (not-found, error).

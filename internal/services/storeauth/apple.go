@@ -99,14 +99,6 @@ func FetchCertificates(ctx context.Context, in AppleConnectionInput) ([]AppleCer
 	return parseCertificatesResponse(body)
 }
 
-// FetchProvisioningProfiles calls /v1/profiles and returns the parsed list.
-func FetchProvisioningProfiles(ctx context.Context, in AppleConnectionInput) ([]AppleProvisioningProfile, error) {
-	body, err := ascGetJSON(ctx, in, "/v1/profiles")
-	if err != nil {
-		return nil, fmt.Errorf("fetch profiles: %w", err)
-	}
-	return parseProfilesResponse(body)
-}
 
 func parseCertificatesResponse(body []byte) ([]AppleCertificate, error) {
 	var resp struct {
@@ -144,41 +136,6 @@ func parseCertificatesResponse(body []byte) ([]AppleCertificate, error) {
 	return out, nil
 }
 
-func parseProfilesResponse(body []byte) ([]AppleProvisioningProfile, error) {
-	var resp struct {
-		Data []struct {
-			ID         string `json:"id"`
-			Attributes struct {
-				Name           string `json:"name"`
-				UUID           string `json:"uuid"`
-				ProfileType    string `json:"profileType"`
-				ExpirationDate string `json:"expirationDate"`
-			} `json:"attributes"`
-		} `json:"data"`
-	}
-	if err := json.Unmarshal(body, &resp); err != nil {
-		return nil, fmt.Errorf("parse profiles: %w", err)
-	}
-	out := make([]AppleProvisioningProfile, 0, len(resp.Data))
-	for _, d := range resp.Data {
-		exp, err := time.Parse(time.RFC3339, d.Attributes.ExpirationDate)
-		if err != nil {
-			slog.Warn("apple profile: invalid expiration date, skipping",
-				"id", d.ID,
-				"raw", d.Attributes.ExpirationDate,
-				"err", err)
-			continue
-		}
-		out = append(out, AppleProvisioningProfile{
-			ID:          d.ID,
-			UUID:        d.Attributes.UUID,
-			Name:        d.Attributes.Name,
-			ProfileType: d.Attributes.ProfileType,
-			ExpiresAt:   exp,
-		})
-	}
-	return out, nil
-}
 
 // AppleAppStoreVersion is the parsed shape we surface to callers from
 // /v1/appStoreVersions/{id}. Used by the release status polling worker
