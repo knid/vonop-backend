@@ -62,7 +62,10 @@ func (db *Database) GetLastBuildByAppProject(appProjectID string) (*models.Build
 		Order("build_number DESC").
 		Limit(1).
 		Scan(context.Background())
-	return &build, err
+	if err != nil {
+		return nil, err
+	}
+	return &build, nil
 }
 
 // GetBuildsByAppProject returns all builds for an AppProject ordered newest
@@ -89,6 +92,9 @@ func (db *Database) GetLastSuccessfulBuildByAppProject(appProjectID string) (*mo
 		Order("build.build_number DESC").
 		Limit(1).
 		Scan(context.Background())
-	return &build, err
+	if err != nil {
+		return nil, err
+	}
+	return &build, nil
 }
 

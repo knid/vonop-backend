@@ -315,6 +315,16 @@ func TestGetPendingAppBuildTasksByAppProject_ReturnsOnlyUnfinishedNativeTasks(t 
 	mkTask(&appProj.ID, v1proj.ID, b1, "Android", true)
 	// Other app project — should be excluded
 	mkTask(&otherAppProj.ID, otherV1proj.ID, otherB, "Android", false)
+	// Soft-deleted unfinished Android — should be excluded by Bun's automatic
+	// soft-delete filter on Model(&tasks). Lock that filter in.
+	softDeleted := mkTask(&appProj.ID, v1proj.ID, b1, "Android", false)
+	if _, err := db.DB.NewUpdate().
+		TableExpr("app_build_tasks").
+		Set("deleted_at = current_timestamp").
+		Where("id = ?", softDeleted.ID).
+		Exec(ctx); err != nil {
+		t.Fatalf("soft-delete: %v", err)
+	}
 
 	got, err := db.GetPendingAppBuildTasksByAppProject(appProj.ID.String())
 	if err != nil {
@@ -332,6 +342,9 @@ func TestGetPendingAppBuildTasksByAppProject_ReturnsOnlyUnfinishedNativeTasks(t 
 	}
 	if !seen[pendingIOS.ID] {
 		t.Errorf("pendingIOS missing")
+	}
+	if seen[softDeleted.ID] {
+		t.Errorf("softDeleted task should be excluded by Bun's soft-delete filter")
 	}
 }
 
