@@ -281,13 +281,10 @@ func (v *HttpViews) DeployAppMobile(w http.ResponseWriter, r *http.Request) {
 		Set("build_id", build.ID.String()).
 		Set("task_id", task.ID.String()))
 
-	utils.JSONResponse(w, map[string]any{
-		"build_id":     build.ID.String(),
-		"task_id":      task.ID.String(),
-		"build_number": build.BuildNumber,
-		"version":      build.VersionString,
-		"status":       task.StatusText,
-	}, http.StatusAccepted)
+	// Return the synthesized AppDeploymentResponse shape so the frontend's
+	// existing deploy-status polling reads the same shape from the trigger
+	// response and the subsequent /deploy/status calls.
+	utils.JSONResponseStatus(w, synthesizeMobileDeployResponse(build, task), http.StatusAccepted)
 }
 
 // synthesizeMobileDeployResponse builds an AppDeploymentResponse from a
