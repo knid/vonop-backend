@@ -14,7 +14,6 @@ import (
 	"github.com/knid/wemob/internal/database"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/requests"
-	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/utils"
 	"github.com/posthog/posthog-go"
 )
@@ -92,9 +91,11 @@ func (v *HttpViews) ChatApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Resolve attachment IDs and the project-wide pool in one go.
-	turnAttachments, attachErr := loadTurnAttachments(r.Context(), v.Controller.DB, project.ID, req.AttachmentIDs)
-	if attachErr != nil {
+	// Pre-flight attachment validation. The worker reloads attachments by ID at
+	// execution time, but we still validate here so invalid IDs surface as a
+	// 400 with field details rather than a worker-emitted error frame after
+	// enqueue.
+	if _, attachErr := loadTurnAttachments(r.Context(), v.Controller.DB, project.ID, req.AttachmentIDs); attachErr != nil {
 		utils.ValidationError(w, attachErr)
 		return
 	}
@@ -130,18 +131,12 @@ func (v *HttpViews) ChatApp(w http.ResponseWriter, r *http.Request) {
 		"project_type": project.ProjectType,
 	})
 
-	v.handleStreamOrAsync(w, r, user, StreamConfig{
-		JobType: jobType,
-		AppID:   project.ID,
-		StreamFunc: func(ctx context.Context, events chan<- responses.SSEEvent, jobID string) {
-			defer close(events)
-			deps := v.Controller.AgentDeps(user)
-			emitter := newAgentSSEAdapter(events, jobID)
-			if err := agent.Run(ctx, deps, project, user, req.Message, turnAttachments, emitter); err != nil {
-				slog.Error("agent.Run failed", "error", err, "project_id", project.ID)
-			}
-			emitter.Close()
-		},
+	v.enqueueAgentRunAndStream(w, r, user, AgentRunRequest{
+		JobType:       jobType,
+		AppID:         project.ID,
+		UserID:        user.ID,
+		Message:       req.Message,
+		AttachmentIDs: req.AttachmentIDs,
 	})
 }
 

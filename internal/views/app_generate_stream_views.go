@@ -1,14 +1,10 @@
 package views
 
 import (
-	"context"
-	"log/slog"
 	"net/http"
 
-	"github.com/knid/wemob/internal/agent"
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/requests"
-	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/utils"
 	"github.com/posthog/posthog-go"
 )
@@ -33,8 +29,10 @@ func (v *HttpViews) GenerateAppStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check for active generation jobs BEFORE creating a new project to prevent
-	// orphan projects from spam-clicks (each click was creating a new DB record).
+	// Pre-build dedup: see CreateJob's per-app generate_app block, which is
+	// authoritative. This kept-around check rejects the request before
+	// CreateAppProject runs, so a spam-clicked Create button doesn't churn
+	// orphan AppProject rows.
 	activeJobs, _ := v.Controller.GetActiveJobs(user.ID)
 	for _, j := range activeJobs {
 		if j.Type == "generate_app" {
@@ -43,15 +41,11 @@ func (v *HttpViews) GenerateAppStream(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Pre-step: create project synchronously
 	project, err := v.Controller.CreateAppProject(r.Context(), user, req)
 	if err != nil {
 		utils.JSONInternalError(w, err)
 		return
 	}
-
-	// Store creation is handled by agent.Run's pre-generation setup
-	// (with existence check), so no need to create it here.
 
 	v.Controller.TrackUserEvent(user, "app_generation_started", posthog.NewProperties().
 		Set("project_type", req.ProjectType).
@@ -62,17 +56,11 @@ func (v *HttpViews) GenerateAppStream(w http.ResponseWriter, r *http.Request) {
 		"project_type": req.ProjectType,
 	})
 
-	v.handleStreamOrAsync(w, r, user, StreamConfig{
+	v.enqueueAgentRunAndStream(w, r, user, AgentRunRequest{
 		JobType: "generate_app",
 		AppID:   project.ID,
-		StreamFunc: func(ctx context.Context, events chan<- responses.SSEEvent, jobID string) {
-			defer close(events)
-			deps := v.Controller.AgentDeps(user)
-			emitter := newAgentSSEAdapter(events, jobID)
-			if err := agent.Run(ctx, deps, project, user, req.Prompt, agent.TurnAttachments{}, emitter); err != nil {
-				slog.Error("agent.Run failed (generate)", "error", err, "project_id", project.ID)
-			}
-			emitter.Close()
-		},
+		UserID:  user.ID,
+		Message: req.Prompt,
+		// Initial generation has no per-turn attachments.
 	})
 }
