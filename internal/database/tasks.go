@@ -97,6 +97,29 @@ func (db *Database) GetAppBuildTaskById(id string) (*models.AppBuildTask, error)
 	return &appBuildTask, err
 }
 
+// GetLatestAppBuildTaskByBuildID returns the most recently updated
+// AppBuildTask attached to a Build. Used by GetDeployStatus /
+// GetDeployHistory to synthesize an AppDeploymentResponse for mobile
+// projects (which now publish via Codemagic and write Build +
+// AppBuildTask rather than AppDeployment).
+//
+// A native mobile build can produce up to two task rows (Android + iOS);
+// an OTA publish produces one row with platform="OTA". Returning the
+// latest by updated_at gives the most recent terminal status.
+func (db *Database) GetLatestAppBuildTaskByBuildID(buildID string) (*models.AppBuildTask, error) {
+	var task models.AppBuildTask
+	err := db.DB.NewSelect().
+		Model(&task).
+		Where("build_id = ?", buildID).
+		Order("updated_at DESC").
+		Limit(1).
+		Scan(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	return &task, nil
+}
+
 func (db *Database) GetAppBuildTaskWithRelations(id string) (*models.AppBuildTask, error) {
 	var appBuildTask models.AppBuildTask
 	err := db.DB.NewSelect().Model(&appBuildTask).

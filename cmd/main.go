@@ -1994,10 +1994,6 @@ func main() {
 						r.Get("/history", httpViews.GetDeployHistory)
 					})
 
-					// P1 #12 mobile audit: JS-only OTA quick publish via Codemagic.
-					r.With(rateLimiter.RateLimit(5, time.Minute, appMiddleware.UserKey)).
-						Post("/ota/quick-publish", httpViews.QuickPublishOTA)
-
 					// <P2#22> ota rollback + promote — project-owner-authenticated
 					// recovery + staged-rollout controls. Rate limit is intentionally
 					// tight (10/min) since these are operator actions, not anything

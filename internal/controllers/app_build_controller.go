@@ -418,16 +418,12 @@ func (c *Controller) GetAppDeployments(projectID string) ([]models.AppDeployment
 	return c.DB.GetAppDeploymentsByProjectID(projectID)
 }
 
+// GetLatestDeploymentStatus returns the latest web AppDeployment for a
+// project. Mobile (mobile_app_native) projects publish via Codemagic and
+// do not write AppDeployment rows — callers that handle mobile must
+// short-circuit before calling this helper.
 func (c *Controller) GetLatestDeploymentStatus(projectID string) (*models.AppDeployment, error) {
-	// For mobile_app_native projects, the user-facing deploy is an
-	// expo-updates publish (platform="ota"). All other types deploy a
-	// web bundle to Fly (platform="web").
-	platform := "web"
-	if project, err := c.DB.GetAppProjectByID(projectID); err == nil && project != nil &&
-		project.ProjectType == models.ProjectTypeMobileAppNative {
-		platform = otaDeployPlatform
-	}
-	return c.DB.GetLatestAppDeployment(projectID, platform)
+	return c.DB.GetLatestAppDeployment(projectID, "web")
 }
 
 type AppValidationError struct {
