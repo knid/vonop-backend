@@ -69,7 +69,7 @@ Go monolith (module `github.com/knid/wemob`) serving a REST API for the Wemob mo
 - **HTTP server**: Main API on `:8001`. Caddy sits in front in production, routing `api.wemob.io` → `:8001`.
 - **Secrets**: All secrets fetched from Infisical at startup via `SecretManager`, not from env vars directly (env vars only hold Infisical credentials).
 - **Billing**: Stripe integration with webhooks, checkout, customer portal, subscriptions.
-- **Background tasks**: Asynq client enqueues build/deploy tasks to Redis workers (workers are external).
+- **Background tasks**: Asynq client enqueues build/deploy/agent tasks to Redis workers. Long-running AI agent runs (`generate_app`, `app_chat`) are dispatched as `agent:run` Asynq tasks rather than in-process goroutines, so API container restarts don't interrupt customer generations. SSE events stream from worker → API via Redis pub/sub on `job:events:<jobID>`; cancel signals travel back via `job:cancel:<jobID>`.
 - **Schema migration**: Auto-create tables in `createSchema()` in `main.go`. No formal migration tool.
 - **Logging**: `slog` with BetterStack handler and `httplog` middleware for request logging.
 

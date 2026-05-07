@@ -39,6 +39,7 @@ import (
 	caddyService "github.com/knid/wemob/internal/services/caddy"
 	"github.com/knid/wemob/internal/utils"
 	"github.com/posthog/posthog-go"
+	"github.com/redis/go-redis/v9"
 
 	infisical "github.com/infisical/go-sdk"
 	slogbetterstack "github.com/samber/slog-betterstack"
@@ -310,6 +311,13 @@ func BootstrapController() (*controllers.Controller, asynq.RedisClientOpt) {
 		TLSConfig: &tls.Config{},
 	}
 
+	redisClient := redis.NewClient(&redis.Options{
+		Addr:      redisOpts.Addr,
+		Username:  redisOpts.Username,
+		Password:  redisOpts.Password,
+		TLSConfig: redisOpts.TLSConfig,
+	})
+
 	edgeIPsCSV := sm.GetSecret("EDGE_IPS")
 	var edgeIPs []string
 	if edgeIPsCSV != "" {
@@ -347,6 +355,7 @@ func BootstrapController() (*controllers.Controller, asynq.RedisClientOpt) {
 		eventService,
 		asynq.NewClient(redisOpts),
 		asynq.NewInspector(redisOpts),
+		redisClient,
 		assetsStorage,
 		userApiKeysStorage,
 		androidKeysStorage,

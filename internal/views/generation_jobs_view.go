@@ -15,9 +15,12 @@ import (
 	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/controllers"
+	"github.com/knid/wemob/internal/jobstate"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/responses"
+	"github.com/knid/wemob/internal/services/jobstream"
 	"github.com/knid/wemob/internal/utils"
+	"github.com/redis/go-redis/v9"
 )
 
 // StreamConfig holds the configuration for handleStreamOrAsync.
@@ -106,7 +109,7 @@ func (v *HttpViews) handleStreamOrAsync(w http.ResponseWriter, r *http.Request, 
 	var lastEvent *responses.SSEEvent
 	var allMilestoneEvents []models.JobEvent
 
-	streamState := newStreamStateBuffer()
+	streamState := jobstate.NewStreamStateBuffer()
 	keepalive := time.NewTicker(15 * time.Second)
 	defer keepalive.Stop()
 	stateFlush := time.NewTicker(500 * time.Millisecond)
@@ -118,7 +121,7 @@ func (v *HttpViews) handleStreamOrAsync(w http.ResponseWriter, r *http.Request, 
 	// timeout and silently dropped events. The async flusher coalesces
 	// bursty updates and drains the tail in a single goroutine so the event
 	// loop never waits on the DB.
-	stateFlusher := newAsyncStateFlusher(
+	stateFlusher := jobstate.NewAsyncStateFlusher(
 		streamState.Snapshot,
 		func(raw json.RawMessage) {
 			if err := v.Controller.DB.UpdateGenerationJobStreamState(job.ID.String(), raw); err != nil {
@@ -245,12 +248,12 @@ func (v *HttpViews) drainEventsToJob(ctx context.Context, cancel context.CancelF
 	var lastEvent *responses.SSEEvent
 	var allMilestoneEvents []models.JobEvent
 
-	streamState := newStreamStateBuffer()
+	streamState := jobstate.NewStreamStateBuffer()
 	stateFlush := time.NewTicker(500 * time.Millisecond)
 	defer stateFlush.Stop()
 
 	// See handleStreamOrAsync for the async flusher rationale.
-	stateFlusher := newAsyncStateFlusher(
+	stateFlusher := jobstate.NewAsyncStateFlusher(
 		streamState.Snapshot,
 		func(raw json.RawMessage) {
 			if err := v.Controller.DB.UpdateGenerationJobStreamState(job.ID.String(), raw); err != nil {
@@ -462,6 +465,33 @@ func (v *HttpViews) StreamJob(w http.ResponseWriter, r *http.Request) {
 
 	utils.SetSSEHeaders(w)
 
+	// For agent-run jobs that look live, SUBSCRIBE BEFORE replaying from
+	// the DB. The previous order (DB read → replay → subscribe) had a
+	// race window where an event whose DB write completed and was
+	// published between the read and the subscribe was lost from the
+	// live tail (it's in DB but not re-read; pub/sub doesn't replay).
+	// Subscribing first means any concurrent Publish lands in our
+	// buffered subscription and gets delivered after the replay, with
+	// the seq dedupe loop dropping anything we already wrote.
+	//
+	// Non-agent jobs (dashboard_create, dashboard_chat) use the
+	// in-process EventBus, which doesn't have the same race; their
+	// subscription is created later, after the live-vs-terminal branch.
+	isAgentJob := job.Type == "generate_app" || job.Type == "app_chat"
+	isLive := job.Status == "running" || job.Status == "awaiting_input"
+
+	var sub *redis.PubSub
+	if isAgentJob && isLive {
+		var err error
+		sub, err = jobstream.SubscribeEvents(r.Context(), v.Controller.RedisPubSub, jobID)
+		if err != nil {
+			slog.Error("StreamJob: subscribe failed", "job_id", jobID, "error", err)
+			// Continue — replay-from-DB is still useful even without a live tail.
+		} else {
+			defer sub.Close()
+		}
+	}
+
 	// Step 1: always replay the persisted stream buffer + milestone events
 	// the client hasn't seen yet. `since` filters out anything <= the last
 	// event id the client confirms it already has, so reconnect doesn't
@@ -476,9 +506,6 @@ func (v *HttpViews) StreamJob(w http.ResponseWriter, r *http.Request) {
 	maxReplayedSeq := computeMaxReplayedSeq(job, since)
 
 	// Step 2: decide whether a live subscription is possible.
-	isLive := job.Status == "running" || job.Status == "awaiting_input"
-	busVal, busOK := v.Controller.JobEventBuses.Load(jobID)
-
 	if !isLive {
 		// Terminal job — the replay is authoritative. Send the explicit
 		// terminal frame so the client's stream listener exits cleanly,
@@ -490,15 +517,36 @@ func (v *HttpViews) StreamJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Agent-run jobs (generate_app, app_chat) live in the worker — tail
+	// Redis pub/sub via the subscription we opened above.
+	if isAgentJob {
+		if sub == nil {
+			// Subscribe failed; replay was authoritative. Already returned
+			// above for terminal jobs; for live jobs without a subscription
+			// there is nothing to tail. Emit error+end frames so the client's
+			// read loop exits cleanly instead of hanging on an open stream.
+			slog.Warn("StreamJob: agent job has no subscription — replay only", "job_id", jobID)
+			_ = utils.WriteSSEEvent(w, flusher, 0, "error", map[string]any{
+				"job_id":  job.ID,
+				"phase":   "subscribe",
+				"message": "failed to subscribe to job events",
+			})
+			_ = utils.WriteSSEEvent(w, flusher, 0, "end", map[string]any{"job_id": job.ID})
+			return
+		}
+		v.streamFromActiveSubscription(w, r, flusher, jobID, maxReplayedSeq, sub)
+		return
+	}
+
+	busVal, busOK := v.Controller.JobEventBuses.Load(jobID)
 	if !busOK {
 		// Running job with no bus: the process that owned the job is gone
 		// (or never existed — multi-instance deployments). Serve what we
 		// have; the next /active-job poll after the sweeper runs will
 		// reflect the eventual failure.
-		slog.Warn("StreamJob: running job has no event bus — replay only", "job_id", jobID)
+		slog.Warn("StreamJob: in-process running job has no event bus — replay only", "job_id", jobID)
 		return
 	}
-
 	bus, ok := busVal.(*controllers.EventBus)
 	if !ok {
 		slog.Error("StreamJob: JobEventBuses entry is not *EventBus", "job_id", jobID)

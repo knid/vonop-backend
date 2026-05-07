@@ -25,6 +25,7 @@ import (
 	e2bService "github.com/knid/wemob/internal/services/e2b"
 	caddyService "github.com/knid/wemob/internal/services/caddy"
 	"github.com/posthog/posthog-go"
+	"github.com/redis/go-redis/v9"
 )
 
 type Controller struct {
@@ -34,6 +35,7 @@ type Controller struct {
 	EventService           events.EventService
 	TaskService            *asynq.Client
 	AsynqInspector         *asynq.Inspector
+	RedisPubSub            *redis.Client // raw client for pub/sub channels (job events, cancel signals from worker ↔ API)
 	AssetsStorage          *storage.S3Storage
 	UserApiKeysStorage     *storage.S3Storage
 	AndroidKeysStorage     *storage.S3Storage
@@ -75,6 +77,7 @@ type Controller struct {
 func NewController(db *database.Database, concurrentBuildLimiter chan struct{},
 	slackService *services.SlackService, eventService events.EventService,
 	taskService *asynq.Client, asynqInspector *asynq.Inspector,
+	redisClient *redis.Client,
 	assetsStorage *storage.S3Storage,
 	userApiKeysStorage *storage.S3Storage,
 	androidKeysStorage *storage.S3Storage,
@@ -100,6 +103,7 @@ func NewController(db *database.Database, concurrentBuildLimiter chan struct{},
 		ConcurrentBuildLimiter: concurrentBuildLimiter,
 		TaskService:            taskService,
 		AsynqInspector:         asynqInspector,
+		RedisPubSub:            redisClient,
 		AssetsStorage:          assetsStorage,
 		UserApiKeysStorage:     userApiKeysStorage,
 		AndroidKeysStorage:     androidKeysStorage,

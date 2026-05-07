@@ -1,11 +1,11 @@
-package views
+package jobstate
 
 import (
 	"encoding/json"
 	"sync"
 )
 
-// asyncStateFlusher decouples the stream_state DB write from the SSE event
+// AsyncStateFlusher decouples the stream_state DB write from the SSE event
 // loop. Previously the view goroutine called UpdateGenerationJobStreamState
 // synchronously on every milestone and every 500ms ticker tick — a single
 // slow DB write would block the event loop, fill the event channel, and
@@ -28,7 +28,7 @@ import (
 // Wait() blocks until any in-flight goroutine completes. Call it at job
 // finalisation, before the authoritative `{}` clear write, to avoid a race
 // between the final clear and a background flush.
-type asyncStateFlusher struct {
+type AsyncStateFlusher struct {
 	snapshot func() (json.RawMessage, bool)
 	write    func(json.RawMessage)
 
@@ -37,15 +37,15 @@ type asyncStateFlusher struct {
 	wg      sync.WaitGroup
 }
 
-func newAsyncStateFlusher(
+func NewAsyncStateFlusher(
 	snapshot func() (json.RawMessage, bool),
 	write func(json.RawMessage),
-) *asyncStateFlusher {
-	return &asyncStateFlusher{snapshot: snapshot, write: write}
+) *AsyncStateFlusher {
+	return &AsyncStateFlusher{snapshot: snapshot, write: write}
 }
 
 // Trigger schedules a flush. Returns immediately.
-func (f *asyncStateFlusher) Trigger() {
+func (f *AsyncStateFlusher) Trigger() {
 	f.mu.Lock()
 	if f.running {
 		f.mu.Unlock()
@@ -73,6 +73,6 @@ func (f *asyncStateFlusher) Trigger() {
 }
 
 // Wait blocks until any in-flight flush goroutine completes.
-func (f *asyncStateFlusher) Wait() {
+func (f *AsyncStateFlusher) Wait() {
 	f.wg.Wait()
 }

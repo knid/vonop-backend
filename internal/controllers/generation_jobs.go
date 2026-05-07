@@ -5,10 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/responses"
+	"github.com/knid/wemob/internal/services/jobstream"
 	"github.com/knid/wemob/internal/services/remoteconfig"
 )
 
@@ -138,7 +141,16 @@ func (c *Controller) GetAppActiveJob(appID uuid.UUID) (*models.GenerationJob, er
 	return c.DB.GetAppActiveJob(appID.String())
 }
 
-// CancelJob cancels a running or awaiting_input job by calling its stored cancel function.
+// CancelJob cancels a running or awaiting_input job. For agent-run jobs
+// (executed in the worker) this publishes to jobstream.CancelChannel(jobID);
+// the worker subscribes for the duration of agent.Run and unwinds via its
+// existing ctx-aware paths. For legacy in-API-process jobs (dashboards) it
+// invokes the in-process cancelFn registered in RunningJobs.
+//
+// In both cases the DB row is flipped to "cancelled" so the UI sees the
+// terminal state regardless of whether the cancel signal reached its
+// target — a worker that's already past its emit-loop will still finish
+// the run, but its FinalizeJob won't reopen a cancelled row.
 func (c *Controller) CancelJob(jobID string, userID uuid.UUID) error {
 	job, err := c.DB.GetGenerationJob(jobID)
 	if err != nil {
@@ -151,11 +163,28 @@ func (c *Controller) CancelJob(jobID string, userID uuid.UUID) error {
 		return fmt.Errorf("job is not running")
 	}
 
-	// Clean up pending clarification channel if present
+	// Drop pending clarification channel if present (legacy path; no production
+	// agent path emits this today, but the helper still services older clients).
 	if ch, ok := c.PendingClarifications.LoadAndDelete(jobID); ok {
 		if typedCh, ok := ch.(chan ClarificationResult); ok {
 			close(typedCh)
 		}
+	}
+
+	// Try the worker-side cancel first. If the job was created by the new
+	// agent-run path the worker has a subscription on this channel; if it
+	// was created by a legacy in-API-process StreamFunc (dashboards) the
+	// publish has 0 receivers and we fall through to the in-process cancel.
+	//
+	// Bound the publish by a short timeout — go-redis's default dial timeout
+	// is 5s, and without an explicit ctx every CancelJob would block that
+	// long when Redis is unreachable. 2s is plenty for a healthy publish on
+	// a managed Valkey; the in-process cancel below still fires regardless.
+	publishCtx, publishCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer publishCancel()
+	if err := jobstream.PublishCancel(publishCtx, c.RedisPubSub, jobID); err != nil {
+		slog.Warn("CancelJob: publish cancel failed (will still try in-process cancel)",
+			"job_id", jobID, "error", err)
 	}
 
 	if cancelFn, ok := c.RunningJobs.LoadAndDelete(jobID); ok {
