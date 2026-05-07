@@ -523,8 +523,15 @@ func (v *HttpViews) StreamJob(w http.ResponseWriter, r *http.Request) {
 		if sub == nil {
 			// Subscribe failed; replay was authoritative. Already returned
 			// above for terminal jobs; for live jobs without a subscription
-			// there is nothing to tail, so exit cleanly.
+			// there is nothing to tail. Emit error+end frames so the client's
+			// read loop exits cleanly instead of hanging on an open stream.
 			slog.Warn("StreamJob: agent job has no subscription — replay only", "job_id", jobID)
+			_ = utils.WriteSSEEvent(w, flusher, 0, "error", map[string]any{
+				"job_id":  job.ID,
+				"phase":   "subscribe",
+				"message": "failed to subscribe to job events",
+			})
+			_ = utils.WriteSSEEvent(w, flusher, 0, "end", map[string]any{"job_id": job.ID})
 			return
 		}
 		v.streamFromActiveSubscription(w, r, flusher, jobID, maxReplayedSeq, sub)

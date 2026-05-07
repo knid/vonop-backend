@@ -115,6 +115,14 @@ func (v *HttpViews) enqueueAgentRunAndStream(
 	if err != nil {
 		_ = v.Controller.DB.UpdateGenerationJobStatus(job.ID.String(), "failed", "subscribe: "+err.Error())
 		slog.Error("agent_run_stream: subscribe before enqueue failed", "job_id", job.ID, "error", err)
+		// SSE headers already sent — write a clean terminal pair so the
+		// client exits its read loop instead of hanging on an empty stream.
+		_ = utils.WriteSSEEvent(w, flusher, 0, "error", map[string]any{
+			"job_id":  job.ID,
+			"phase":   "subscribe",
+			"message": "failed to subscribe to job events",
+		})
+		_ = utils.WriteSSEEvent(w, flusher, 0, "end", map[string]any{"job_id": job.ID})
 		return
 	}
 	defer sub.Close()
