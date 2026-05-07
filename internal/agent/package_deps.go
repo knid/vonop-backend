@@ -5,13 +5,6 @@ import (
 	"log/slog"
 )
 
-// addDependenciesToPackageJSON merges the given name→version pairs into
-// `package.json` at the project root. See addDependenciesToPackageJSONAt
-// for the path-aware version used by tools that target a sub-tree like
-// mobile_app_native's `backend/package.json`.
-func addDependenciesToPackageJSON(rc *RunContext, deps map[string]string) {
-	addDependenciesToPackageJSONAt(rc, "package.json", deps)
-}
 
 // addDependenciesToPackageJSONAt merges the given name→version pairs into
 // the dependencies map of a package.json at an arbitrary path. Used by

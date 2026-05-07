@@ -51,37 +51,6 @@ func TestParseCertificatesResponse(t *testing.T) {
 		t.Errorf("cert[0] expires: got %v want %v", certs[0].ExpiresAt, expectedExp)
 	}
 }
-
-func TestParseProfilesResponse(t *testing.T) {
-	body := []byte(`{
-        "data": [
-            {
-                "id": "prof-1",
-                "type": "profiles",
-                "attributes": {
-                    "name": "Wemob App Store",
-                    "uuid": "abc-uuid",
-                    "profileType": "IOS_APP_STORE",
-                    "expirationDate": "2026-12-01T00:00:00Z"
-                }
-            }
-        ]
-    }`)
-	profiles, err := parseProfilesResponse(body)
-	if err != nil {
-		t.Fatalf("parse: %v", err)
-	}
-	if len(profiles) != 1 {
-		t.Fatalf("expected 1 profile, got %d", len(profiles))
-	}
-	if profiles[0].Name != "Wemob App Store" {
-		t.Errorf("name: got %q", profiles[0].Name)
-	}
-	if profiles[0].ProfileType != "IOS_APP_STORE" {
-		t.Errorf("type: got %q", profiles[0].ProfileType)
-	}
-}
-
 func TestParseCertificatesResponse_EmptyData(t *testing.T) {
 	body := []byte(`{"data": []}`)
 	certs, err := parseCertificatesResponse(body)

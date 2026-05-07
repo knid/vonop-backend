@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -229,122 +228,6 @@ func neonTierFromIntegration(integ *models.AppIntegration) string {
 		return t
 	}
 	return neon.TierPaid
-}
-
-// seedNeonDatabase uses an LLM to generate seed SQL and executes it on the app's Neon database.
-func (c *Controller) seedNeonDatabase(ctx context.Context, project *models.AppProject, dataModels []models.DataModel, sendEvent func(string, any) bool) (string, error) {
-	// Get connection string from the stored integration
-	connStr := c.neonConnString(project.ID.String())
-	if connStr == "" {
-		return "", fmt.Errorf("no Neon connection string found for project")
-	}
-
-	// Build schema description for the LLM
-	var schemaDesc strings.Builder
-	for _, m := range dataModels {
-		schemaDesc.WriteString(fmt.Sprintf("Table: %s\n", m.Name))
-		for _, col := range m.Columns {
-			schemaDesc.WriteString(fmt.Sprintf("  - %s %s", col.Name, col.Type))
-			if col.PrimaryKey {
-				schemaDesc.WriteString(" PRIMARY KEY")
-			}
-			if !col.Nullable && !col.PrimaryKey {
-				schemaDesc.WriteString(" NOT NULL")
-			}
-			if col.Default != "" {
-				schemaDesc.WriteString(fmt.Sprintf(" DEFAULT %s", col.Default))
-			}
-			if col.References != "" {
-				schemaDesc.WriteString(fmt.Sprintf(" REFERENCES %s", col.References))
-			}
-			schemaDesc.WriteString("\n")
-		}
-		schemaDesc.WriteString("\n")
-	}
-
-	seedPrompt := fmt.Sprintf(`Generate realistic seed data SQL INSERT statements for a database with the following schema:
-
-%s
-
-The app description: %s
-
-Rules:
-1. Generate 3-5 rows of realistic data for each table. Keep it concise — this is demo data for a preview environment.
-2. Use gen_random_uuid() for UUID primary keys.
-3. CRITICAL: Insert tables in dependency order — parent tables with referenced primary keys MUST be inserted BEFORE child tables that reference them via foreign keys.
-4. Use NOW() for timestamp columns.
-5. Make the data contextually relevant to the app description.
-6. For JSONB columns, use valid JSON strings.
-7. Return ONLY valid SQL INSERT statements, no explanations.
-8. Use single-line INSERT statements (one per row).
-9. Do NOT include CREATE TABLE or DROP statements.
-10. Do NOT wrap the output in markdown code fences. Return raw SQL only.
-11. CRITICAL: For image/photo columns (cover_image, image_url, avatar_url, thumbnail, photo, banner, logo, icon, etc.), set them to NULL. Images will be generated separately by the platform. Do NOT use placeholder URLs or fake image paths.
-12. CRITICAL: Escape all single quotes inside string values by doubling them (e.g., 'Türkiye''nin' not 'Türkiye'nin'). This is standard PostgreSQL escaping and prevents syntax errors.
-13. CRITICAL: All text content (names, titles, descriptions, labels, etc.) MUST be in the SAME LANGUAGE as the app description above. If the app description is in English, all seed data text must be in English. If in Turkish, all seed data text must be in Turkish. Match the user's language exactly.`, schemaDesc.String(), utils.SanitizePromptContent(project.Prompt))
-
-	sendEvent("neon_provision", map[string]any{"phase": "seeding_data"})
-
-	provider := c.llmProvider()
-	model := provider.FastModel()
-
-	// Defensive: if the caller didn't put a tracker on ctx, attach one bound to
-	// the project so the LLM helpers don't drop usage data on the floor. A
-	// future revival of this code path should also call RecordTokenUsage with
-	// the invoking user (this function intentionally has no User parameter so
-	// it stays callable from non-user paths like template provisioning).
-	if utils.TokenTrackerFromContext(ctx) == nil {
-		tracker := utils.NewTokenTracker()
-		tracker.ProjectID = project.ID.String()
-		if project.OrganizationID != uuid.Nil {
-			tracker.OrganizationID = project.OrganizationID.String()
-		}
-		ctx = utils.WithTokenTracker(ctx, tracker)
-	}
-
-	seedSQL, err := utils.GetTextFromLLM(ctx, model, "You are a SQL expert. Generate realistic seed data. Return ONLY valid SQL.", seedPrompt, provider, 8192)
-	if err != nil {
-		return "", fmt.Errorf("LLM seed generation: %w", err)
-	}
-
-	// Clean the SQL (strip markdown fences if present)
-	seedSQL = strings.TrimSpace(seedSQL)
-	seedSQL = strings.TrimPrefix(seedSQL, "```sql")
-	seedSQL = strings.TrimPrefix(seedSQL, "```")
-	seedSQL = strings.TrimSuffix(seedSQL, "```")
-	seedSQL = strings.TrimSpace(seedSQL)
-
-	if seedSQL == "" {
-		return "", fmt.Errorf("LLM returned empty seed SQL")
-	}
-
-	// Fix unescaped single quotes inside SQL string literals.
-	// LLMs often forget to double-escape quotes in non-English text
-	// (e.g., Turkish: Türkiye'nin → should be Türkiye''nin).
-	seedSQL = database.FixUnescapedSQLQuotes(seedSQL)
-
-	// Validate that the seed SQL only contains INSERT statements
-	if err := database.ValidateSeedSQL(seedSQL); err != nil {
-		slog.Warn("LLM generated invalid seed SQL", "error", err, "project_id", project.ID)
-		return "", fmt.Errorf("invalid seed SQL: %w", err)
-	}
-
-	neonDB, err := sql.Open("postgres", database.NeonConnStrWithEndpoint(connStr))
-	if err != nil {
-		return "", fmt.Errorf("connect to Neon for seeding: %w", err)
-	}
-	defer neonDB.Close()
-
-	execCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-
-	if _, err := neonDB.ExecContext(execCtx, seedSQL); err != nil {
-		slog.Warn("Failed to seed Neon database", "error", err, "project_id", project.ID)
-		return "", fmt.Errorf("execute seed SQL: %w", err)
-	}
-	slog.Info("Neon database seeded", "project_id", project.ID)
-
-	return "Seeded database with sample data.", nil
 }
 
 // imageColumnNames are column names that typically hold image URLs.

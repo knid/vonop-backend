@@ -74,83 +74,6 @@ type SiteMetadata struct {
 	Favicon     string `json:"favicon"`
 }
 
-// ExtractSiteMetadata parses HTML and returns the page title, meta description,
-// and favicon URL. The baseURL is used to resolve relative favicon paths.
-func ExtractSiteMetadata(htmlContent string, baseURL string) SiteMetadata {
-	meta := SiteMetadata{}
-	base, _ := url.Parse(baseURL)
-	tokenizer := html.NewTokenizer(strings.NewReader(htmlContent))
-	inTitle := false
-
-	for {
-		tt := tokenizer.Next()
-		if tt == html.ErrorToken {
-			break
-		}
-		token := tokenizer.Token()
-
-		switch tt {
-		case html.StartTagToken, html.SelfClosingTagToken:
-			switch token.DataAtom.String() {
-			case "title":
-				inTitle = true
-			case "meta":
-				var name, property, content string
-				for _, a := range token.Attr {
-					switch strings.ToLower(a.Key) {
-					case "name":
-						name = strings.ToLower(a.Val)
-					case "property":
-						property = strings.ToLower(a.Val)
-					case "content":
-						content = a.Val
-					}
-				}
-				if (name == "description" || property == "og:description") && content != "" && meta.Description == "" {
-					meta.Description = content
-				}
-				if property == "og:title" && content != "" && meta.Title == "" {
-					meta.Title = content
-				}
-			case "link":
-				var rel, href string
-				for _, a := range token.Attr {
-					switch strings.ToLower(a.Key) {
-					case "rel":
-						rel = strings.ToLower(a.Val)
-					case "href":
-						href = a.Val
-					}
-				}
-				if (strings.Contains(rel, "icon")) && href != "" && meta.Favicon == "" {
-					if parsed, err := url.Parse(href); err == nil && base != nil {
-						meta.Favicon = base.ResolveReference(parsed).String()
-					}
-				}
-			}
-		case html.TextToken:
-			if inTitle && meta.Title == "" {
-				meta.Title = strings.TrimSpace(token.Data)
-			}
-		case html.EndTagToken:
-			if token.DataAtom.String() == "title" {
-				inTitle = false
-			}
-			// Stop parsing after </head> for performance
-			if token.DataAtom.String() == "head" {
-				goto done
-			}
-		}
-	}
-done:
-
-	// Truncate long descriptions
-	if len(meta.Description) > 200 {
-		meta.Description = meta.Description[:200] + "..."
-	}
-
-	return meta
-}
 
 // extractAllURLs parses HTML and collects all unique normalized hrefs.
 func ExtractAllURLs(htmlContent string, baseURL string) []string {
@@ -202,39 +125,6 @@ func ExtractAllURLs(htmlContent string, baseURL string) []string {
 	return results
 }
 
-// StripCodeFences removes markdown code fences (```lang ... ```) that wrap
-// LLM-generated file content. Only strips when the content genuinely begins
-// with a fence — never searches for fences in the interior, because legitimate
-// file content may contain ``` literals (e.g. a markdown renderer that
-// detects code blocks via line.startsWith('```')). An earlier version used
-// strings.Index/LastIndex, which mangled any file containing a triple-backtick
-// literal by treating it as a fence and discarding everything before/after.
-func StripCodeFences(content string) string {
-	trimmed := strings.TrimSpace(content)
-	if !strings.HasPrefix(trimmed, "```") {
-		// No opening fence at the start — content is already clean. Return
-		// the ORIGINAL (not the trimmed copy) so we don't silently strip
-		// leading/trailing whitespace that the caller may intentionally preserve.
-		return content
-	}
-
-	// Strip the opening fence line. The opening line is "```" optionally
-	// followed by a language hint (e.g. "```tsx"), terminated by a newline.
-	inner := trimmed[3:]
-	if nlIdx := strings.Index(inner, "\n"); nlIdx >= 0 {
-		inner = inner[nlIdx+1:]
-	} else {
-		// Opening fence with no newline after it — treat the whole remainder
-		// as content and let any trailing-fence stripping below handle it.
-	}
-
-	// Strip the closing fence if the (trimmed) content ends with ```.
-	inner = strings.TrimRight(inner, " \t\n\r")
-	if strings.HasSuffix(inner, "```") {
-		inner = strings.TrimRight(strings.TrimSuffix(inner, "```"), " \t\n\r")
-	}
-	return inner
-}
 
 // ExtractJSON finds the outermost JSON object or array in a string by matching braces/brackets.
 func ExtractJSON(raw string) string {

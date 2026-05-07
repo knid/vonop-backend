@@ -156,18 +156,6 @@ func BuildManifest(update *models.OTAUpdate, metadata *MetadataFile, assetBytes 
 	}, nil
 }
 
-// MarshalMultipart produces the multipart/mixed body the expo-updates
-// client expects: a single part with name="manifest", containing the
-// manifest JSON. Returns (body, boundary, err) — caller writes
-// "Content-Type: multipart/mixed; boundary=<boundary>" + body to the
-// response.
-//
-// Use MarshalMultipartWithBody when you also need the unwrapped manifest
-// JSON bytes (for code-signing purposes).
-func MarshalMultipart(manifest Manifest) ([]byte, string, error) {
-	_, body, boundary, err := MarshalMultipartWithBody(manifest)
-	return body, boundary, err
-}
 
 // MarshalMultipartWithBody is MarshalMultipart but also returns the raw
 // manifest JSON bytes (the body of the "manifest" multipart part). The

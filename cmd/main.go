@@ -43,7 +43,6 @@ func createSchema(db *bun.DB) error {
 		(*models.UserActionToken)(nil),
 		(*models.StandardUserLimits)(nil),
 		(*models.StandardUserSubscription)(nil),
-		(*models.Invoice)(nil),
 		(*models.Project)(nil),
 		(*models.Build)(nil),
 		// <P1#16> releases (replace stub) — promoted to a full release model

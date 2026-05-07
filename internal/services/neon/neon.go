@@ -21,9 +21,6 @@ type Service struct {
 	OrgID  string // optional — required for org-scoped Neon accounts
 }
 
-func NewService(apiKey string) *Service {
-	return &Service{APIKey: apiKey}
-}
 
 // NewServiceWithOrg creates a Neon service scoped to a specific organization.
 // Required when using an org-scoped API key (personal keys can pass orgID="").

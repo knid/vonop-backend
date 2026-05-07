@@ -78,20 +78,3 @@ func ValidateThemeJSON(data []byte) error {
 	return nil
 }
 
-// MergeDataModelColumns keeps all auth columns and appends non-conflicting LLM columns.
-func MergeDataModelColumns(auth, llm DataModel) DataModel {
-	merged := DataModel{Name: auth.Name, Columns: make([]DataColumn, len(auth.Columns))}
-	copy(merged.Columns, auth.Columns)
-
-	authCols := make(map[string]bool)
-	for _, col := range auth.Columns {
-		authCols[col.Name] = true
-	}
-
-	for _, col := range llm.Columns {
-		if !authCols[col.Name] {
-			merged.Columns = append(merged.Columns, col)
-		}
-	}
-	return merged
-}

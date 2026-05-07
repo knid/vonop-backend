@@ -2,7 +2,6 @@ package templates
 
 import (
 	"embed"
-	"io/fs"
 )
 
 //go:embed all:nextjs
@@ -24,21 +23,7 @@ func GetTemplate(path string) string {
 	return string(data)
 }
 
-// FS returns the embedded filesystem rooted at nextjs/.
-func FS() fs.FS {
-	sub, _ := fs.Sub(nextjsFS, "nextjs")
-	return sub
-}
 
-// HasTemplate reports whether a template file exists at the given path.
-func HasTemplate(path string) bool {
-	fsPath := "nextjs/" + path
-	if path == ".gitignore" {
-		fsPath = "nextjs/.gitignore.tmpl"
-	}
-	_, err := nextjsFS.ReadFile(fsPath)
-	return err == nil
-}
 
 // Template file paths that are managed by hardcoded templates, not LLM-generated.
 var BaseFilePaths = []string{
