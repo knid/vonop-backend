@@ -909,7 +909,12 @@ func seedPlans(db *database.Database, sm secret.SecretManager) {
 				MonthlyAICredits:          50,
 				MaxSeats:                  1,
 				MaxWebApps:                1,
-				MaxMobileApps:             0,
+				// 1 mobile draft on the free tier so users can try the
+				// mobile composer end-to-end. Build / deploy / store
+				// submission stay gated (CanBuildMobile, CanDeployMobile,
+				// MaxDeployedMobileApps below all 0/false) — Hobby is the
+				// upgrade path for actually shipping a mobile app.
+				MaxMobileApps:             1,
 				MaxDeployedWebApps:        1,
 				MaxDeployedMobileApps:     0,
 				CanDeployMobile:           false,
