@@ -62,6 +62,12 @@ func (c *Controller) HandleAgentRunTask(ctx context.Context, t *asynq.Task) erro
 	// --- Cancel subscription (best-effort; if Redis is down we still run) ---
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	// stopCancel is closed after agent.Run returns so a late cancel signal
+	// can't reach FinalizeJob and flip a completed run to "cancelled".
+	// Closing an unread channel is a no-op, so it's safe to close
+	// unconditionally even when no listener goroutine was started (i.e.
+	// when SubscribeCancel failed).
+	stopCancel := make(chan struct{})
 	cancelSub, subErr := jobstream.SubscribeCancel(runCtx, c.RedisPubSub, p.JobID)
 	if subErr != nil {
 		slog.Warn("agent_run: cancel subscribe failed; cancellation via DELETE will not interrupt this run",
@@ -71,9 +77,19 @@ func (c *Controller) HandleAgentRunTask(ctx context.Context, t *asynq.Task) erro
 		go func() {
 			ch := cancelSub.Channel()
 			select {
-			case <-ch:
+			case msg, ok := <-ch:
+				// ok=false means the subscription was closed by the deferred
+				// Close at function exit. Treat as benign exit, NOT a cancel,
+				// otherwise a successful run could be flipped to "cancelled"
+				// by FinalizeJob's runCtx.Err() check.
+				if !ok {
+					return
+				}
+				_ = msg
 				slog.Info("agent_run: cancel signal received", "job_id", p.JobID)
 				cancel()
+			case <-stopCancel:
+				return
 			case <-runCtx.Done():
 				return
 			}
@@ -146,6 +162,13 @@ func (c *Controller) HandleAgentRunTask(ctx context.Context, t *asynq.Task) erro
 		// we don't double-emit here. FinalizeJob picks up "error" from
 		// lastEvent and flips the job row to failed.
 	}
+
+	// Disarm the cancel listener so a late DELETE /v1/jobs/{id} arriving
+	// after agent.Run completed but before this function returns can't
+	// flip a completed run to "cancelled" via runCtx.Err() in FinalizeJob.
+	// Safe to close unconditionally — no goroutine was started when
+	// SubscribeCancel failed, and closing an unread channel is a no-op.
+	close(stopCancel)
 
 	// --- Final consistency: re-write events array + clear stream_state ---
 	stateFlusher.Wait()
