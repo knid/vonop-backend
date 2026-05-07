@@ -634,18 +634,34 @@ func createSchema(db *bun.DB) error {
 		   ON mobile_subscriptions (app_project_id, status) WHERE deleted_at IS NULL`,
 	}
 	alterStatements = append(alterStatements, indexStatements...)
-	// Check if migrations have already been applied by testing for a column from the latest batch.
-	// This avoids running ALTER TABLE statements on every startup, which take AccessExclusiveLock
-	// and block all reads on the affected tables.
-	// IMPORTANT: when adding a new ALTER TABLE above, update this canary to the newest column,
-	// otherwise the new ALTER will be silently skipped on servers that already have older columns.
-	// Table renames go in renameStatements below, not here — they run unconditionally.
+	// Check if migrations have already been applied by probing schema state.
+	// This avoids running ALTER TABLE statements on every startup, which take
+	// AccessExclusiveLock and block all reads on the affected tables.
 	//
-	// Canary: apple_connections.p8_key_path must NOT exist (dropped 2026-05-07
-	// when CredRef became the sole credential storage). Negative-existence
-	// check because this batch only DROPs columns — we have no newly-added
-	// column to assert positive existence on. migrationsDone=true means the
-	// drops have already run on this DB.
+	// CANARY MAINTENANCE — read this before adding a new ALTER above:
+	//
+	// The canary fires when the probe returns false → "migrations not done
+	// → run them." After the latest batch lands, the probe must return true
+	// so the next restart skips. Two valid styles:
+	//
+	//   1. Positive existence — `EXISTS(... column='X')` where X is a column
+	//      ADDED by the latest batch. Default style for ADD COLUMN batches.
+	//   2. Negative existence — `NOT EXISTS(... column='Y')` where Y is a
+	//      column DROPPED by the latest batch (or a table). Use when the
+	//      batch is purely DROPs / DELETEs / SET NOT NULLs with no new
+	//      column to assert on.
+	//
+	// When you add a new ALTER above, update this probe to a column / table
+	// that the new ALTER guarantees the post-state of. Otherwise the new
+	// ALTER will be silently skipped on servers that already passed an
+	// earlier canary.
+	//
+	// Table renames go in renameStatements below, not here — they run
+	// unconditionally.
+	//
+	// Current canary: negative existence on apple_connections.p8_key_path.
+	// Dropped 2026-05-07 when CredRef became the sole credential storage.
+	// migrationsDone=true means the drops have already run on this DB.
 	var migrationsDone bool
 	row := db.QueryRowContext(context.Background(),
 		"SELECT NOT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='apple_connections' AND column_name='p8_key_path')")
