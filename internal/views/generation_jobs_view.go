@@ -18,7 +18,9 @@ import (
 	"github.com/knid/wemob/internal/jobstate"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/responses"
+	"github.com/knid/wemob/internal/services/jobstream"
 	"github.com/knid/wemob/internal/utils"
+	"github.com/redis/go-redis/v9"
 )
 
 // StreamConfig holds the configuration for handleStreamOrAsync.
@@ -463,6 +465,33 @@ func (v *HttpViews) StreamJob(w http.ResponseWriter, r *http.Request) {
 
 	utils.SetSSEHeaders(w)
 
+	// For agent-run jobs that look live, SUBSCRIBE BEFORE replaying from
+	// the DB. The previous order (DB read → replay → subscribe) had a
+	// race window where an event whose DB write completed and was
+	// published between the read and the subscribe was lost from the
+	// live tail (it's in DB but not re-read; pub/sub doesn't replay).
+	// Subscribing first means any concurrent Publish lands in our
+	// buffered subscription and gets delivered after the replay, with
+	// the seq dedupe loop dropping anything we already wrote.
+	//
+	// Non-agent jobs (dashboard_create, dashboard_chat) use the
+	// in-process EventBus, which doesn't have the same race; their
+	// subscription is created later, after the live-vs-terminal branch.
+	isAgentJob := job.Type == "generate_app" || job.Type == "app_chat"
+	isLive := job.Status == "running" || job.Status == "awaiting_input"
+
+	var sub *redis.PubSub
+	if isAgentJob && isLive {
+		var err error
+		sub, err = jobstream.SubscribeEvents(r.Context(), v.Controller.RedisPubSub, jobID)
+		if err != nil {
+			slog.Error("StreamJob: subscribe failed", "job_id", jobID, "error", err)
+			// Continue — replay-from-DB is still useful even without a live tail.
+		} else {
+			defer sub.Close()
+		}
+	}
+
 	// Step 1: always replay the persisted stream buffer + milestone events
 	// the client hasn't seen yet. `since` filters out anything <= the last
 	// event id the client confirms it already has, so reconnect doesn't
@@ -477,7 +506,6 @@ func (v *HttpViews) StreamJob(w http.ResponseWriter, r *http.Request) {
 	maxReplayedSeq := computeMaxReplayedSeq(job, since)
 
 	// Step 2: decide whether a live subscription is possible.
-	isLive := job.Status == "running" || job.Status == "awaiting_input"
 	if !isLive {
 		// Terminal job — the replay is authoritative. Send the explicit
 		// terminal frame so the client's stream listener exits cleanly,
@@ -490,10 +518,16 @@ func (v *HttpViews) StreamJob(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Agent-run jobs (generate_app, app_chat) live in the worker — tail
-	// Redis pub/sub. Other job types (dashboard_create, dashboard_chat)
-	// still live in this process — tail the in-process EventBus.
-	if job.Type == "generate_app" || job.Type == "app_chat" {
-		v.streamFromJobChannel(w, r, flusher, jobID, maxReplayedSeq)
+	// Redis pub/sub via the subscription we opened above.
+	if isAgentJob {
+		if sub == nil {
+			// Subscribe failed; replay was authoritative. Already returned
+			// above for terminal jobs; for live jobs without a subscription
+			// there is nothing to tail, so exit cleanly.
+			slog.Warn("StreamJob: agent job has no subscription — replay only", "job_id", jobID)
+			return
+		}
+		v.streamFromActiveSubscription(w, r, flusher, jobID, maxReplayedSeq, sub)
 		return
 	}
 
