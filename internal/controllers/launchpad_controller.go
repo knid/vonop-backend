@@ -79,17 +79,11 @@ func (c *Controller) GetLaunchpad(ctx context.Context, user *models.User, appID 
 	}
 	resp.App.V1ProjectID = v1ProjectID
 
-	if v1ProjectID != "" {
-		var latestBuild models.Build
-		if err := c.DB.DB.NewSelect().
-			Model(&latestBuild).
-			Where("project_id = ?", v1ProjectID).
-			Order("created_at DESC").
-			Limit(1).
-			Scan(ctx); err == nil {
-			resp.App.VersionName = latestBuild.VersionString
-			resp.App.BuildNumber = latestBuild.BuildNumber
-		}
+	// Latest build comes from app_project_id now — the v1 shadow Project FK
+	// was dropped 2026-05-07. Missing/no-builds case leaves the zero value.
+	if last, err := c.DB.GetLastBuildByAppProject(project.ID.String()); err == nil && last != nil {
+		resp.App.VersionName = last.VersionString
+		resp.App.BuildNumber = last.BuildNumber
 	}
 
 	// WebPreview — read the latest web deployment row.
@@ -103,7 +97,7 @@ func (c *Controller) GetLaunchpad(ctx context.Context, user *models.User, appID 
 	resp.Listing = c.buildListing(ctx, project.ID)
 
 	// Builds — active (in-flight) + recent (last 5 finished) build tasks.
-	resp.Builds = c.buildBuilds(ctx, v1ProjectID)
+	resp.Builds = c.buildBuilds(ctx, project.ID.String())
 
 	// RecentDeployment — most-recent submission in the last 7 days.
 	resp.RecentDeployment = c.buildRecentDeployment(ctx, v1ProjectID)
@@ -467,19 +461,19 @@ func firstNonEmpty(a, b string) string {
 	return b
 }
 
-// buildBuilds queries AppBuildTask for the given v1ProjectID and returns
+// buildBuilds queries AppBuildTask for the given AppProject ID and returns
 // a LaunchpadBuilds with two slices:
 //   - Active: all tasks where finished=false, ordered newest first.
 //   - Recent: last 5 tasks where finished=true, ordered newest first.
 //
 // Both slices are always initialised (never nil) so the JSON serialises
 // as [] rather than null.
-func (c *Controller) buildBuilds(ctx context.Context, v1ProjectID string) responses.LaunchpadBuilds {
+func (c *Controller) buildBuilds(ctx context.Context, appProjectID string) responses.LaunchpadBuilds {
 	builds := responses.LaunchpadBuilds{
 		Active: []responses.LaunchpadBuildSummary{},
 		Recent: []responses.LaunchpadBuildSummary{},
 	}
-	if v1ProjectID == "" {
+	if appProjectID == "" {
 		return builds
 	}
 
@@ -488,7 +482,7 @@ func (c *Controller) buildBuilds(ctx context.Context, v1ProjectID string) respon
 		Model(&active).
 		Relation("Annotation").
 		Relation("Build").
-		Where("app_build_task.project_id = ?", v1ProjectID).
+		Where("app_build_task.app_project_id = ?", appProjectID).
 		Where("app_build_task.finished = ?", false).
 		Order("app_build_task.created_at DESC").
 		Scan(ctx); err == nil {
@@ -502,7 +496,7 @@ func (c *Controller) buildBuilds(ctx context.Context, v1ProjectID string) respon
 		Model(&recent).
 		Relation("Annotation").
 		Relation("Build").
-		Where("app_build_task.project_id = ?", v1ProjectID).
+		Where("app_build_task.app_project_id = ?", appProjectID).
 		Where("app_build_task.finished = ?", true).
 		Order("app_build_task.created_at DESC").
 		Limit(5).

@@ -51,11 +51,10 @@ func (c *Controller) GetProject(user *models.User, project_id string) (*response
 		CreatedAt:   project.CreatedAt,
 	}
 
-	lastBuild, err := c.DB.GetLastProjectBuild(project)
-	if err == nil {
-		resp.Title = lastBuild.Title
-		resp.Description = lastBuild.Description
-	}
+	// Title/Description previously came from the most recent legacy Build row,
+	// but the v1 builds.project_id FK was dropped 2026-05-07. The legacy v1
+	// web project info endpoint now leaves these fields zero — clients should
+	// read project metadata from AppProject going forward.
 
 	return resp, nil
 }

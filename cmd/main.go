@@ -566,8 +566,10 @@ func createSchema(db *bun.DB) error {
 		// the IS NULL guard on deleted_at means a re-run is a no-op.
 		`UPDATE projects SET deleted_at = current_timestamp WHERE url LIKE 'expo://%' AND deleted_at IS NULL`,
 		// Drop orphan app_build_tasks/builds rows (none in prod per user — defensive).
+		// Any row without an app_project_id is unreachable through V2 code paths,
+		// so it's safe to delete unconditionally before the SET NOT NULL below.
 		`DELETE FROM app_build_tasks WHERE app_project_id IS NULL`,
-		`DELETE FROM builds WHERE app_project_id IS NULL AND id IN (SELECT id FROM builds WHERE project_id IS NULL OR project_id NOT IN (SELECT id FROM projects))`,
+		`DELETE FROM builds WHERE app_project_id IS NULL`,
 		// Tighten the new FKs.
 		`ALTER TABLE builds ALTER COLUMN app_project_id SET NOT NULL`,
 		`ALTER TABLE app_build_tasks ALTER COLUMN app_project_id SET NOT NULL`,
@@ -1802,12 +1804,6 @@ func main() {
 						r.Get("/", httpViews.GetProjectNotifications)
 						r.Post("/", httpViews.SendProjectNotification)
 						r.Get("/{notificationId}", httpViews.GetProjectNotification)
-					})
-					r.Route("/builds", func(r chi.Router) {
-						r.Get("/", httpViews.GetProjectBuilds)
-						r.Route("/{buildId}", func(r chi.Router) {
-							r.Get("/", httpViews.GetProjectBuild)
-						})
 					})
 					r.Route("/public", func(r chi.Router) {
 						r.Route("/navbar", func(r chi.Router) {
