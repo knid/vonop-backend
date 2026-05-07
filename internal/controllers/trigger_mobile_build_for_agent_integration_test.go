@@ -132,22 +132,18 @@ func TestTriggerMobileBuildForAgent_RejectsNonMobileNative(t *testing.T) {
 }
 
 // TestTriggerMobileBuildForAgent_RejectsForeignUser — auth scope check:
-// when the caller is NOT the project owner, the controller should error
-// out (BuildExpoMobile creates the v1 shadow project keyed by user_id +
-// url, so a foreign user would silently fork into a parallel shadow row;
-// we surface the mismatch by exercising a foreign user against the same
-// project record). This isn't a strict "permission denied" code path
-// today — it's "the build runs against the foreign user's shadow", which
-// would still return a buildID. The agent layer's rc.User check is what
-// keeps the boundary tight; this test documents the expected behavior so
-// future refactors don't accidentally remove that guard.
+// the controller layer does NOT check project.UserID == user.ID, so a
+// foreign user still gets a buildID back from
+// BuildExpoMobile / triggerMobileBuildForAgent. The agent-layer
+// rc.User check (in tool_trigger_build.go) is the authoritative scope
+// boundary; this test pins the controller's permissive behavior so a
+// future refactor that tightens the controller-side check doesn't go
+// unnoticed.
 //
 // Concretely: with a foreign user, the build STILL succeeds end-to-end,
 // because BuildExpoMobile only checks platform permissions and pending
-// builds — it doesn't verify project.UserID == user.ID. The test pins
-// this behavior to the controller boundary so the agent-layer auth
-// gate (RunContext.User check in tool_trigger_build.go) stays the
-// authoritative scope check.
+// builds. The test pins this controller-side behavior so the agent-layer
+// auth gate stays the single source of truth.
 func TestTriggerMobileBuildForAgent_ForeignUserCreatesParallelShadow(t *testing.T) {
 	f := setupExpoBuildTest(t)
 	ctx := context.Background()

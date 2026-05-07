@@ -19,11 +19,11 @@ import (
 )
 
 // seedAppProjectFixtures inserts a User, a personal Organization, an
-// AppProject (the new direct-FK target) and a v1 Project (still required
-// to satisfy the legacy NOT-NULL-dropped-but-still-present project_id
-// columns on Build / AppBuildTask). Returns the AppProject + v1 Project so
-// callers can attach builds/tasks. The v1 project URL is keyed off the
-// AppProject id so each call produces a unique row.
+// AppProject (the canonical FK target) and a v1 Project. The v1 Project is
+// retained only for callers that still want to seed legacy Deployment rows
+// keyed by v1 project_id; new tests should ignore the second return value.
+// The v1 project URL is keyed off the AppProject id so each call produces a
+// unique row.
 func seedAppProjectFixtures(t *testing.T, db *Database) (*models.AppProject, *models.Project, *models.User) {
 	t.Helper()
 	ctx := context.Background()
@@ -86,12 +86,12 @@ func TestGetLastBuildByAppProject_ReturnsHighestNumberedAndIgnoresOtherProjects(
 	)
 
 	ctx := context.Background()
-	appProj, v1proj, _ := seedAppProjectFixtures(t, db)
-	otherAppProj, otherV1proj, _ := seedAppProjectFixtures(t, db)
+	appProj, _, _ := seedAppProjectFixtures(t, db)
+	otherAppProj, _, _ := seedAppProjectFixtures(t, db)
 
-	mkBuild := func(appPID *uuid.UUID, v1PID uuid.UUID, num int) *models.Build {
+	mkBuild := func(appPID uuid.UUID, num int) *models.Build {
 		b := &models.Build{
-			ID: uuid.New(), ProjectID: v1PID, AppProjectID: appPID,
+			ID: uuid.New(), AppProjectID: appPID,
 			Title: "T", Description: "D", Icon: "i", SplashScreenColor: "#fff",
 			NavBarStyle: "default", BuildNumber: num,
 			VersionString: "1.0." + uuid.NewString()[:4],
@@ -102,10 +102,10 @@ func TestGetLastBuildByAppProject_ReturnsHighestNumberedAndIgnoresOtherProjects(
 		return b
 	}
 
-	mkBuild(&appProj.ID, v1proj.ID, 1)
-	want := mkBuild(&appProj.ID, v1proj.ID, 7) // highest for our project
-	mkBuild(&appProj.ID, v1proj.ID, 3)
-	mkBuild(&otherAppProj.ID, otherV1proj.ID, 99) // higher, but other project
+	mkBuild(appProj.ID, 1)
+	want := mkBuild(appProj.ID, 7) // highest for our project
+	mkBuild(appProj.ID, 3)
+	mkBuild(otherAppProj.ID, 99) // higher, but other project
 
 	got, err := db.GetLastBuildByAppProject(appProj.ID.String())
 	if err != nil {
@@ -135,11 +135,11 @@ func TestGetBuildsByAppProject_ReturnsBuildsInDescOrder(t *testing.T) {
 	)
 
 	ctx := context.Background()
-	appProj, v1proj, _ := seedAppProjectFixtures(t, db)
+	appProj, _, _ := seedAppProjectFixtures(t, db)
 
 	mkBuild := func(num int) {
 		b := &models.Build{
-			ID: uuid.New(), ProjectID: v1proj.ID, AppProjectID: &appProj.ID,
+			ID: uuid.New(), AppProjectID: appProj.ID,
 			Title: "T", Description: "D", Icon: "i", SplashScreenColor: "#fff",
 			NavBarStyle: "default", BuildNumber: num,
 			VersionString: "1.0." + uuid.NewString()[:4],
@@ -186,11 +186,11 @@ func TestGetLastSuccessfulBuildByAppProject_OnlyReturnsBuiltAndFinished(t *testi
 	)
 
 	ctx := context.Background()
-	appProj, v1proj, _ := seedAppProjectFixtures(t, db)
+	appProj, _, _ := seedAppProjectFixtures(t, db)
 
 	mkBuild := func(num int) *models.Build {
 		b := &models.Build{
-			ID: uuid.New(), ProjectID: v1proj.ID, AppProjectID: &appProj.ID,
+			ID: uuid.New(), AppProjectID: appProj.ID,
 			Title: "T", Description: "D", Icon: "i", SplashScreenColor: "#fff",
 			NavBarStyle: "default", BuildNumber: num,
 			VersionString: "1.0." + uuid.NewString()[:4],
@@ -203,7 +203,7 @@ func TestGetLastSuccessfulBuildByAppProject_OnlyReturnsBuiltAndFinished(t *testi
 
 	mkTask := func(b *models.Build, status string, finished bool, softDeleted bool) {
 		task := &models.AppBuildTask{
-			ID: uuid.New(), ProjectID: v1proj.ID, AppProjectID: &appProj.ID,
+			ID: uuid.New(), AppProjectID: appProj.ID,
 			BuildID: b.ID, Platform: "Android",
 			StatusText: status, Finished: finished,
 			CreatedAt: time.Now(),
@@ -275,12 +275,12 @@ func TestGetPendingAppBuildTasksByAppProject_ReturnsOnlyUnfinishedNativeTasks(t 
 	)
 
 	ctx := context.Background()
-	appProj, v1proj, _ := seedAppProjectFixtures(t, db)
-	otherAppProj, otherV1proj, _ := seedAppProjectFixtures(t, db)
+	appProj, _, _ := seedAppProjectFixtures(t, db)
+	otherAppProj, _, _ := seedAppProjectFixtures(t, db)
 
-	mkBuild := func(appPID *uuid.UUID, v1PID uuid.UUID, num int) *models.Build {
+	mkBuild := func(appPID uuid.UUID, num int) *models.Build {
 		b := &models.Build{
-			ID: uuid.New(), ProjectID: v1PID, AppProjectID: appPID,
+			ID: uuid.New(), AppProjectID: appPID,
 			Title: "T", Description: "D", Icon: "i", SplashScreenColor: "#fff",
 			NavBarStyle: "default", BuildNumber: num,
 			VersionString: "1.0." + uuid.NewString()[:4],
@@ -291,12 +291,12 @@ func TestGetPendingAppBuildTasksByAppProject_ReturnsOnlyUnfinishedNativeTasks(t 
 		return b
 	}
 
-	b1 := mkBuild(&appProj.ID, v1proj.ID, 1)
-	otherB := mkBuild(&otherAppProj.ID, otherV1proj.ID, 1)
+	b1 := mkBuild(appProj.ID, 1)
+	otherB := mkBuild(otherAppProj.ID, 1)
 
-	mkTask := func(appPID *uuid.UUID, v1PID uuid.UUID, b *models.Build, platform string, finished bool) *models.AppBuildTask {
+	mkTask := func(appPID uuid.UUID, b *models.Build, platform string, finished bool) *models.AppBuildTask {
 		task := &models.AppBuildTask{
-			ID: uuid.New(), ProjectID: v1PID, AppProjectID: appPID,
+			ID: uuid.New(), AppProjectID: appPID,
 			BuildID: b.ID, Platform: platform,
 			StatusText: "Queued", Finished: finished,
 			CreatedAt: time.Now(),
@@ -308,16 +308,16 @@ func TestGetPendingAppBuildTasksByAppProject_ReturnsOnlyUnfinishedNativeTasks(t 
 	}
 
 	// Pending Android — should be returned
-	pendingAndroid := mkTask(&appProj.ID, v1proj.ID, b1, "Android", false)
+	pendingAndroid := mkTask(appProj.ID, b1, "Android", false)
 	// Pending iOS — should be returned
-	pendingIOS := mkTask(&appProj.ID, v1proj.ID, b1, "IOS", false)
+	pendingIOS := mkTask(appProj.ID, b1, "IOS", false)
 	// Finished — should be excluded
-	mkTask(&appProj.ID, v1proj.ID, b1, "Android", true)
+	mkTask(appProj.ID, b1, "Android", true)
 	// Other app project — should be excluded
-	mkTask(&otherAppProj.ID, otherV1proj.ID, otherB, "Android", false)
+	mkTask(otherAppProj.ID, otherB, "Android", false)
 	// Soft-deleted unfinished Android — should be excluded by Bun's automatic
 	// soft-delete filter on Model(&tasks). Lock that filter in.
-	softDeleted := mkTask(&appProj.ID, v1proj.ID, b1, "Android", false)
+	softDeleted := mkTask(appProj.ID, b1, "Android", false)
 	if _, err := db.DB.NewUpdate().
 		TableExpr("app_build_tasks").
 		Set("deleted_at = current_timestamp").

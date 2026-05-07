@@ -57,7 +57,7 @@ func seedTaskFixtures(t *testing.T, db *Database) (*models.AppProject, *models.B
 	}
 
 	build := &models.Build{
-		ID: uuid.New(), AppProjectID: &project.ID,
+		ID: uuid.New(), AppProjectID: project.ID,
 		Title: "T", Description: "D", Icon: "i", SplashScreenColor: "#fff",
 		NavBarStyle: "default", BuildNumber: 1, VersionString: "1.0.0",
 	}
@@ -90,7 +90,7 @@ func TestGetLatestSuccessfulBuildTaskByAppProjectAndPlatform_ReturnsBuiltFinishe
 	apID := project.ID
 
 	task := &models.AppBuildTask{
-		ID: uuid.New(), AppProjectID: &apID, BuildID: build.ID,
+		ID: uuid.New(), AppProjectID: apID, BuildID: build.ID,
 		Platform: "Android", StatusText: "Built", Finished: true,
 		CreatedAt: time.Now(),
 	}
@@ -142,7 +142,7 @@ func TestGetLatestSuccessfulBuildTaskByAppProjectAndPlatform_RejectsBuiltButUnfi
 	// Mid-build row: status_text already says "Built" but the row has not
 	// yet been flagged finished. Should not be selected.
 	task := &models.AppBuildTask{
-		ID: uuid.New(), AppProjectID: &apID, BuildID: build.ID,
+		ID: uuid.New(), AppProjectID: apID, BuildID: build.ID,
 		Platform: "Android", StatusText: "Built", Finished: false,
 		CreatedAt: time.Now(),
 	}
@@ -177,7 +177,7 @@ func TestGetLatestSuccessfulBuildTaskByAppProjectAndPlatform_PrefersMostRecent(t
 	apID := project.ID
 
 	older := &models.AppBuildTask{
-		ID: uuid.New(), AppProjectID: &apID, BuildID: build.ID,
+		ID: uuid.New(), AppProjectID: apID, BuildID: build.ID,
 		Platform: "Android", StatusText: "Built", Finished: true,
 		CreatedAt: time.Now().Add(-2 * time.Hour),
 	}
@@ -185,7 +185,7 @@ func TestGetLatestSuccessfulBuildTaskByAppProjectAndPlatform_PrefersMostRecent(t
 		t.Fatalf("insert older: %v", err)
 	}
 	newer := &models.AppBuildTask{
-		ID: uuid.New(), AppProjectID: &apID, BuildID: build.ID,
+		ID: uuid.New(), AppProjectID: apID, BuildID: build.ID,
 		Platform: "Android", StatusText: "Built", Finished: true,
 		CreatedAt: time.Now(),
 	}
@@ -224,7 +224,7 @@ func TestMarkOrphanedBuildTasksFailed_WritesCanonicalFailed(t *testing.T) {
 
 	// Insert a stuck row with created_at 2h in the past.
 	stuck := &models.AppBuildTask{
-		ID: uuid.New(), AppProjectID: &apID, BuildID: build.ID,
+		ID: uuid.New(), AppProjectID: apID, BuildID: build.ID,
 		Platform: "Android", StatusText: "Queued", Finished: false,
 		CreatedAt: time.Now().Add(-2 * time.Hour),
 	}
@@ -234,7 +234,7 @@ func TestMarkOrphanedBuildTasksFailed_WritesCanonicalFailed(t *testing.T) {
 
 	// And a fresh row that should NOT be reaped.
 	fresh := &models.AppBuildTask{
-		ID: uuid.New(), AppProjectID: &apID, BuildID: build.ID,
+		ID: uuid.New(), AppProjectID: apID, BuildID: build.ID,
 		Platform: "Android", StatusText: "Queued", Finished: false,
 		CreatedAt: time.Now(),
 	}

@@ -30,19 +30,13 @@ func BackfillBuildDefaults(ctx context.Context, db *bun.DB) error {
 				continue
 			}
 		}
-		// Find the latest build for this project. Builds are linked to
-		// v1 projects (Build.ProjectID is v1 project id, not AppProject
-		// id). Use app_project.settings.v1_project_id to find the v1
-		// project id; else skip.
-		v1, ok := p.Settings["v1_project_id"].(string)
-		if !ok || v1 == "" {
-			skipped++
-			continue
-		}
+		// Find the latest build for this AppProject via the direct
+		// app_project_id FK. The v1 shadow Project indirection was
+		// removed 2026-05-07.
 		var latest models.Build
 		err := db.NewSelect().
 			Model(&latest).
-			Where("project_id = ?", v1).
+			Where("app_project_id = ?", p.ID.String()).
 			Order("created_at DESC").
 			Limit(1).
 			Scan(ctx)

@@ -561,6 +561,20 @@ func createSchema(db *bun.DB) error {
 		// OneSignal credentials moving from v1 shadow Project to MobileAppConfig.
 		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS one_signal_app_id text`,
 		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS one_signal_rest_key_cred_ref jsonb`,
+		// V1 shadow Project removal — final cleanup (2026-05-07).
+		// Soft-delete any leftover expo://* shadow Project rows. Idempotent:
+		// the IS NULL guard on deleted_at means a re-run is a no-op.
+		`UPDATE projects SET deleted_at = current_timestamp WHERE url LIKE 'expo://%' AND deleted_at IS NULL`,
+		// Drop orphan app_build_tasks/builds rows (none in prod per user — defensive).
+		`DELETE FROM app_build_tasks WHERE app_project_id IS NULL`,
+		`DELETE FROM builds WHERE app_project_id IS NULL AND id IN (SELECT id FROM builds WHERE project_id IS NULL OR project_id NOT IN (SELECT id FROM projects))`,
+		// Tighten the new FKs.
+		`ALTER TABLE builds ALTER COLUMN app_project_id SET NOT NULL`,
+		`ALTER TABLE app_build_tasks ALTER COLUMN app_project_id SET NOT NULL`,
+		// Drop the legacy v1-Project FK columns. After this, Bun reads/writes go
+		// directly through app_project_id.
+		`ALTER TABLE builds DROP COLUMN IF EXISTS project_id`,
+		`ALTER TABLE app_build_tasks DROP COLUMN IF EXISTS project_id`,
 	}
 
 	// Deduplicate before creating unique indexes (keep the latest row per group)
@@ -607,12 +621,16 @@ func createSchema(db *bun.DB) error {
 	// IMPORTANT: when adding a new ALTER TABLE above, update this canary to the newest column,
 	// otherwise the new ALTER will be silently skipped on servers that already have older columns.
 	// Table renames go in renameStatements below, not here — they run unconditionally.
-	// Canary: builds.app_project_id — added 2026-05-07 as part of the v1 shadow
-	// Project removal. Bumped past max_seats so the new ALTERs run on servers
-	// that already passed earlier canaries.
+	//
+	// Canary: builds.project_id must NOT exist (dropped 2026-05-07 as part of
+	// the v1 shadow Project removal final cleanup). This is an inverse-style
+	// canary because the latest batch only DROPs / DELETEs / TIGHTENs — there's
+	// no new column to assert positive existence on. migrationsDone=true means
+	// the column has been dropped, so we skip the ALTERs; false means we still
+	// need to run them.
 	var migrationsDone bool
 	row := db.QueryRowContext(context.Background(),
-		"SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='builds' AND column_name='app_project_id')")
+		"SELECT NOT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='builds' AND column_name='project_id')")
 	if err := row.Scan(&migrationsDone); err != nil {
 		migrationsDone = false
 	}
@@ -1864,7 +1882,6 @@ func main() {
 				})
 			})
 			r.Route("/reports", func(r chi.Router) {
-				r.Post("/build", httpViews.UpdateBuildTaskStatus)
 				r.Post("/deploy", httpViews.UpdateDeploymentStatus)
 			})
 			r.Route("/billing", func(r chi.Router) {

@@ -575,10 +575,10 @@ func (c *Controller) TriggerCodemagicOTAPublish(
 	}
 	nextNum := lastBuildNumber + 1
 
-	// AppProjectID is the new direct FK target; legacy ProjectID column is
-	// left NULL on Expo mobile builds (v1 shadow Project has been removed).
+	// AppProjectID is the canonical FK to AppProject (v1 shadow Project was
+	// removed 2026-05-07).
 	build := &models.Build{
-		AppProjectID:      &project.ID,
+		AppProjectID:      project.ID,
 		Active:            false,
 		Title:             nonEmptyOr(project.Name, project.Slug),
 		Icon:              "",
@@ -598,7 +598,7 @@ func (c *Controller) TriggerCodemagicOTAPublish(
 		return build, nil, fmt.Errorf("upload tarball to %s: %w", tarKey, err)
 	}
 
-	task, err := c.DB.CreateAppBuildTask(*build, &project.ID, "OTA", "Queued", false)
+	task, err := c.DB.CreateAppBuildTask(*build, project.ID, "OTA", "Queued", false)
 	if err != nil {
 		return build, nil, fmt.Errorf("create OTA build task: %w", err)
 	}

@@ -9,10 +9,9 @@ import (
 	"github.com/uptrace/bun"
 )
 
-func (db *Database) CreateAppBuildTask(build models.Build, appProjectID *uuid.UUID, platform, status string, autoDeploy bool) (*models.AppBuildTask, error) {
+func (db *Database) CreateAppBuildTask(build models.Build, appProjectID uuid.UUID, platform, status string, autoDeploy bool) (*models.AppBuildTask, error) {
 	appBuildTask := models.AppBuildTask{
 		BuildID:      build.ID,
-		ProjectID:    build.ProjectID,
 		AppProjectID: appProjectID,
 		Platform:     platform,
 		StatusText:   status,
@@ -77,20 +76,9 @@ func (db *Database) GetAppBuildTasksByUserAndAppProject(user *models.User, appPr
 	return appBuildTasks, nil
 }
 
-func (db *Database) GetPendingAppBuildTasks(project *models.Project) ([]models.AppBuildTask, error) {
-	var appBuildTasks []models.AppBuildTask
-	err := db.DB.NewSelect().Model(&appBuildTasks).
-		Where("project_id = ?", project.ID.String()).
-		Where("platform IN (?)", bun.In([]string{"Android", "IOS"})).
-		Where("finished = false").
-		Scan(context.Background())
-
-	return appBuildTasks, err
-}
-
 // GetPendingAppBuildTasksByAppProject returns unfinished build tasks scoped
-// by the new direct FK. Replaces GetPendingAppBuildTasks (legacy v1 Project
-// scope) for the Expo mobile path.
+// by the AppProject FK. The Expo mobile path uses this to gate concurrent
+// build attempts on the same AppProject.
 func (db *Database) GetPendingAppBuildTasksByAppProject(appProjectID string) ([]models.AppBuildTask, error) {
 	var tasks []models.AppBuildTask
 	err := db.DB.NewSelect().
@@ -113,20 +101,12 @@ func (db *Database) GetAppBuildTaskWithRelations(id string) (*models.AppBuildTas
 	var appBuildTask models.AppBuildTask
 	err := db.DB.NewSelect().Model(&appBuildTask).
 		Relation("Build").
-		Relation("Build.Project").
-		Relation("Project").
-		Relation("Project.User").
+		Relation("AppProject").
+		Relation("Annotation").
 		Where("app_build_task.id = ?", id).
 		Scan(context.Background())
 
 	return &appBuildTask, err
-}
-
-func (db *Database) GetAppBuildTaskByProject(project *models.Project) ([]models.AppBuildTask, error) {
-	var appBuildTasks []models.AppBuildTask
-	err := db.DB.NewSelect().Model(&appBuildTasks).Where("project_id = ?", project.ID).Scan(context.Background())
-
-	return appBuildTasks, err
 }
 
 // GetLatestSuccessfulBuildTaskByAppProjectAndPlatform returns the most

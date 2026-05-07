@@ -31,17 +31,25 @@ func (c *Controller) GetShipItems(ctx context.Context, user *models.User) (*resp
 		AppID   string
 		AppName string
 	}
+	// Map keyed by AppProject ID — Build/AppBuildTask carry app_project_id
+	// directly (the v1 shadow Project FK was removed 2026-05-07).
+	byApp := map[string]projInfo{}
+	appIDs := make([]string, 0, len(projects))
+	// Deployments still carry the legacy v1 project_id, so keep a parallel
+	// v1-keyed map for the Deployment join below. A blank entry means we
+	// know the AppProject but it never had a v1 shadow row.
 	byV1 := map[string]projInfo{}
 	v1IDs := make([]string, 0, len(projects))
 	for _, p := range projects {
-		v1, ok := p.Settings["v1_project_id"].(string)
-		if !ok || v1 == "" {
-			continue
+		info := projInfo{AppID: p.ID.String(), AppName: p.Name}
+		byApp[p.ID.String()] = info
+		appIDs = append(appIDs, p.ID.String())
+		if v1, ok := p.Settings["v1_project_id"].(string); ok && v1 != "" {
+			byV1[v1] = info
+			v1IDs = append(v1IDs, v1)
 		}
-		byV1[v1] = projInfo{AppID: p.ID.String(), AppName: p.Name}
-		v1IDs = append(v1IDs, v1)
 	}
-	if len(v1IDs) == 0 {
+	if len(appIDs) == 0 {
 		return &responses.ShipResponse{Items: []responses.ShipItem{}}, nil
 	}
 
@@ -51,7 +59,7 @@ func (c *Controller) GetShipItems(ctx context.Context, user *models.User) (*resp
 	if err := c.DB.DB.NewSelect().
 		Model(&tasks).
 		Relation("Build").
-		Where("t.project_id IN (?)", bun.In(v1IDs)).
+		Where("t.app_project_id IN (?)", bun.In(appIDs)).
 		Where("t.created_at > ?", since).
 		Order("t.created_at DESC").
 		Scan(ctx); err != nil {
@@ -59,19 +67,21 @@ func (c *Controller) GetShipItems(ctx context.Context, user *models.User) (*resp
 	}
 
 	var deployments []models.Deployment
-	if err := c.DB.DB.NewSelect().
-		Model(&deployments).
-		Where("project_id IN (?)", bun.In(v1IDs)).
-		Where("created_at > ?", since).
-		Order("created_at DESC").
-		Scan(ctx); err != nil {
-		return nil, err
+	if len(v1IDs) > 0 {
+		if err := c.DB.DB.NewSelect().
+			Model(&deployments).
+			Where("project_id IN (?)", bun.In(v1IDs)).
+			Where("created_at > ?", since).
+			Order("created_at DESC").
+			Scan(ctx); err != nil {
+			return nil, err
+		}
 	}
 
 	items := make([]responses.ShipItem, 0, len(tasks)+len(deployments))
 
 	for _, t := range tasks {
-		info, ok := byV1[t.ProjectID.String()]
+		info, ok := byApp[t.AppProjectID.String()]
 		if !ok {
 			continue
 		}

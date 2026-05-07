@@ -36,12 +36,14 @@ func (c *Controller) GetBuild(user *models.User, id string) (*responses.BuildInf
 		return nil, err
 	}
 
-	project, err := c.DB.GetProjectById(build.ProjectID.String())
+	// Auth via AppProject ownership (the v1 shadow Project FK was removed
+	// 2026-05-07).
+	appProject, err := c.DB.GetAppProjectByID(build.AppProjectID.String())
 	if err != nil {
 		return nil, err
 	}
 
-	if project.UserID.String() != user.ID.String() {
+	if appProject.UserID.String() != user.ID.String() {
 		return nil, errors.New("you do not have access to this resource")
 	}
 

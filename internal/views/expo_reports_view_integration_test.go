@@ -41,9 +41,11 @@ func signRequest(t *testing.T, taskID, ts, body string) string {
 }
 
 // seedExpoBuildFixtures inserts the minimum graph for the webhook to update
-// a real app_build_task row: a User, Project, Build, and an unfinished
+// a real app_build_task row: a User, AppProject, Build, and an unfinished
 // AppBuildTask with status_text="Queued" (matching prod creation defaults).
-func seedExpoBuildFixtures(t *testing.T, db *database.Database) (project *models.Project, build *models.Build, task *models.AppBuildTask) {
+// The legacy v1 Project FK was removed 2026-05-07; the second return value
+// is retained for callers that previously needed the v1 Project's URL.
+func seedExpoBuildFixtures(t *testing.T, db *database.Database) (appProject *models.AppProject, build *models.Build, task *models.AppBuildTask) {
 	t.Helper()
 	ctx := context.Background()
 
@@ -55,18 +57,26 @@ func seedExpoBuildFixtures(t *testing.T, db *database.Database) (project *models
 		t.Fatalf("insert user: %v", err)
 	}
 
-	project = &models.Project{
-		ID: uuid.New(), UserID: user.ID,
-		URL: "expo://acme-" + uuid.NewString()[:8],
-		PackageName: "io.acme.test." + uuid.NewString()[:8],
-		IconPath: "x", OneSignalAppID: uuid.NewString(), OneSignalAppToken: uuid.NewString(),
+	org := &models.Organization{
+		ID: uuid.New(), Name: "Personal " + uuid.NewString()[:6],
+		Slug: "org-" + uuid.NewString()[:8], OwnerID: user.ID, IsPersonal: true,
 	}
-	if _, err := db.DB.NewInsert().Model(project).Exec(ctx); err != nil {
-		t.Fatalf("insert project: %v", err)
+	if _, err := db.DB.NewInsert().Model(org).Exec(ctx); err != nil {
+		t.Fatalf("insert org: %v", err)
+	}
+
+	appProject = &models.AppProject{
+		ID: uuid.New(), UserID: user.ID, OrganizationID: org.ID,
+		Name: "App " + uuid.NewString()[:6],
+		Slug: "app-" + uuid.NewString()[:8],
+		Prompt: "test", ProjectType: models.ProjectTypeMobileAppNative,
+	}
+	if _, err := db.DB.NewInsert().Model(appProject).Exec(ctx); err != nil {
+		t.Fatalf("insert app project: %v", err)
 	}
 
 	build = &models.Build{
-		ID: uuid.New(), ProjectID: project.ID,
+		ID: uuid.New(), AppProjectID: appProject.ID,
 		Title: "T", Description: "D", Icon: "i", SplashScreenColor: "#fff",
 		NavBarStyle: "default", BuildNumber: 1, VersionString: "1.0.0",
 	}
@@ -75,14 +85,14 @@ func seedExpoBuildFixtures(t *testing.T, db *database.Database) (project *models
 	}
 
 	task = &models.AppBuildTask{
-		ID: uuid.New(), ProjectID: project.ID, BuildID: build.ID,
+		ID: uuid.New(), AppProjectID: appProject.ID, BuildID: build.ID,
 		Platform: "Android", StatusText: "Queued",
 	}
 	if _, err := db.DB.NewInsert().Model(task).Exec(ctx); err != nil {
 		t.Fatalf("insert task: %v", err)
 	}
 
-	return project, build, task
+	return appProject, build, task
 }
 
 // postWebhook fires a single signed webhook at the handler. Returns the
@@ -122,7 +132,8 @@ func reloadTask(t *testing.T, db *database.Database, id uuid.UUID) *models.AppBu
 func TestUpdateExpoBuildStatus_BuiltEventUpdatesTaskRow(t *testing.T) {
 	db := database.NewTestDB(t,
 		(*models.User)(nil),
-		(*models.Project)(nil),
+		(*models.Organization)(nil),
+		(*models.AppProject)(nil),
 		(*models.Build)(nil),
 		(*models.AppBuildTask)(nil),
 		(*models.BuildEvent)(nil),
@@ -163,10 +174,10 @@ func TestUpdateExpoBuildStatus_BuiltEventUpdatesTaskRow(t *testing.T) {
 	// nulled out by Bun's whole-row-update footgun (see memory
 	// `feedback_bun_whole_row_update.md`). If we accidentally regress to
 	// `db.NewUpdate().Model(task).Where(...)` with a stripped-down struct,
-	// project_id / build_id / platform would silently null. This catches
+	// app_project_id / build_id / platform would silently null. This catches
 	// that regression at the row level.
-	if got.ProjectID == uuid.Nil {
-		t.Errorf("project_id was nulled (bun whole-row footgun?)")
+	if got.AppProjectID == uuid.Nil {
+		t.Errorf("app_project_id was nulled (bun whole-row footgun?)")
 	}
 	if got.BuildID == uuid.Nil {
 		t.Errorf("build_id was nulled (bun whole-row footgun?)")
@@ -181,7 +192,8 @@ func TestUpdateExpoBuildStatus_BuiltEventUpdatesTaskRow(t *testing.T) {
 func TestUpdateExpoBuildStatus_FailedEventPopulatesError(t *testing.T) {
 	db := database.NewTestDB(t,
 		(*models.User)(nil),
-		(*models.Project)(nil),
+		(*models.Organization)(nil),
+		(*models.AppProject)(nil),
 		(*models.Build)(nil),
 		(*models.AppBuildTask)(nil),
 		(*models.BuildEvent)(nil),
@@ -216,7 +228,8 @@ func TestUpdateExpoBuildStatus_FailedEventPopulatesError(t *testing.T) {
 func TestUpdateExpoBuildStatus_ProgressEventDoesNotFinish(t *testing.T) {
 	db := database.NewTestDB(t,
 		(*models.User)(nil),
-		(*models.Project)(nil),
+		(*models.Organization)(nil),
+		(*models.AppProject)(nil),
 		(*models.Build)(nil),
 		(*models.AppBuildTask)(nil),
 		(*models.BuildEvent)(nil),
@@ -265,7 +278,8 @@ func TestUpdateExpoBuildStatus_ProgressEventDoesNotFinish(t *testing.T) {
 func TestUpdateExpoBuildStatus_IdempotencyDoesNotRegressTerminal(t *testing.T) {
 	db := database.NewTestDB(t,
 		(*models.User)(nil),
-		(*models.Project)(nil),
+		(*models.Organization)(nil),
+		(*models.AppProject)(nil),
 		(*models.Build)(nil),
 		(*models.AppBuildTask)(nil),
 		(*models.BuildEvent)(nil),
@@ -335,7 +349,8 @@ func TestUpdateExpoBuildStatus_IdempotencyDoesNotRegressTerminal(t *testing.T) {
 func TestUpdateExpoBuildStatus_FailedAnnotationLookup(t *testing.T) {
 	db := database.NewTestDB(t,
 		(*models.User)(nil),
-		(*models.Project)(nil),
+		(*models.Organization)(nil),
+		(*models.AppProject)(nil),
 		(*models.Build)(nil),
 		(*models.AppBuildTask)(nil),
 		(*models.BuildEvent)(nil),

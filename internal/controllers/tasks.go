@@ -15,10 +15,10 @@ func (c *Controller) CancelBuildTask(user *models.User, taskID string) error {
 		return errors.New("task not found")
 	}
 
-	// Scope ownership through AppProject (mobile builds carry app_project_id;
-	// the legacy v1 project_id path is dropped — those builds had project_id
-	// pointing at a shadow row that's no longer being written).
-	if task.AppProjectID == nil {
+	// Scope ownership through AppProject. Build tasks always carry
+	// app_project_id directly (the v1 shadow Project FK was removed
+	// 2026-05-07).
+	if task.AppProjectID == uuid.Nil {
 		return errors.New("task not found")
 	}
 	appProject, err := c.DB.GetAppProjectByID(task.AppProjectID.String())
@@ -36,12 +36,10 @@ func (c *Controller) CancelBuildTask(user *models.User, taskID string) error {
 	return c.DB.CancelAppBuildTask(taskID)
 }
 
-// GetAllAppBuildTasks returns build tasks for the authenticated user.
-// When projectID is non-empty, the result is scoped to that AppProject
-// (still ownership-checked via the join in the DB layer); when empty,
-// returns the user's full task history (legacy behavior — kept so any
-// existing caller that doesn't yet pass a project_id keeps working, but
-// the Publish UI always passes one now).
+// GetAllAppBuildTasks returns build tasks for the authenticated user. When
+// projectID is non-empty, the result is scoped to that AppProject (the DB
+// layer enforces ownership via the join). When empty, returns the user's
+// full build-task history across every AppProject they own.
 func (c *Controller) GetAllAppBuildTasks(user *models.User, projectID string) ([]responses.BuildTaskInformationResponse, error) {
 	var (
 		tasks []models.AppBuildTask
@@ -59,16 +57,10 @@ func (c *Controller) GetAllAppBuildTasks(user *models.User, projectID string) ([
 	var buildTaskInformationResponses []responses.BuildTaskInformationResponse
 	for _, task := range tasks {
 		// Surface the AppProject FK as project_id in the JSON — the frontend
-		// keys the build-card list off this field. Older v1 tasks (none in
-		// prod) would carry only the v1 project_id; for those we fall through
-		// to zero, which the frontend already handles.
-		var projectIDOut uuid.UUID
-		if task.AppProjectID != nil {
-			projectIDOut = *task.AppProjectID
-		}
+		// keys the build-card list off this field.
 		buildTaskInformationResponse := responses.BuildTaskInformationResponse{
 			ID:           task.ID,
-			ProjectID:    projectIDOut,
+			ProjectID:    task.AppProjectID,
 			BuildID:      task.BuildID,
 			Finished:     task.Finished,
 			Platform:     task.Platform,

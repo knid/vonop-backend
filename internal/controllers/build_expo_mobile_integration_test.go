@@ -343,8 +343,8 @@ func TestBuildExpoMobile_HappyPath_AndroidOnly(t *testing.T) {
 
 	// Post-Task-2: NO v1 shadow Project row should be created on the mobile path.
 	assertNoExpoShadowProject(t, f.db, f.project.Slug)
-	// Build row must carry the new direct AppProject FK.
-	if build.AppProjectID == nil || *build.AppProjectID != f.project.ID {
+	// Build row must carry the direct AppProject FK.
+	if build.AppProjectID != f.project.ID {
 		t.Errorf("build.AppProjectID = %v, want %s", build.AppProjectID, f.project.ID)
 	}
 
@@ -537,7 +537,7 @@ func TestBuildExpoMobile_RejectsConcurrentBuild(t *testing.T) {
 
 	// Pre-insert a Build + non-Finished AppBuildTask scoped by AppProject.
 	pendingBuild, err := f.db.CreateProjectBuild(&models.Build{
-		AppProjectID:  &f.project.ID,
+		AppProjectID:  f.project.ID,
 		BuildNumber:   1,
 		VersionString: "0.0.1",
 		Title:         "prior",
@@ -548,7 +548,7 @@ func TestBuildExpoMobile_RejectsConcurrentBuild(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create prior build: %v", err)
 	}
-	if _, err := f.db.CreateAppBuildTask(*pendingBuild, &f.project.ID, "Android", "Building", false); err != nil {
+	if _, err := f.db.CreateAppBuildTask(*pendingBuild, f.project.ID, "Android", "Building", false); err != nil {
 		t.Fatalf("create pending task: %v", err)
 	}
 
@@ -693,10 +693,10 @@ func TestTriggerCodemagicOTAPublish_NoShadowProject(t *testing.T) {
 	if build == nil || task == nil {
 		t.Fatalf("expected build+task, got build=%v task=%v", build, task)
 	}
-	if build.AppProjectID == nil || *build.AppProjectID != f.project.ID {
+	if build.AppProjectID != f.project.ID {
 		t.Errorf("build.AppProjectID = %v, want %s", build.AppProjectID, f.project.ID)
 	}
-	if task.AppProjectID == nil || *task.AppProjectID != f.project.ID {
+	if task.AppProjectID != f.project.ID {
 		t.Errorf("task.AppProjectID = %v, want %s", task.AppProjectID, f.project.ID)
 	}
 	assertNoExpoShadowProject(t, f.db, f.project.Slug)

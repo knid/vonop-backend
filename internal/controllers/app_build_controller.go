@@ -112,10 +112,10 @@ func (c *Controller) BuildExpoMobile(ctx context.Context, project *models.AppPro
 	}
 
 	// Create Build row first so we have the buildID for the S3 path.
-	// AppProjectID is the new direct FK target; legacy ProjectID column is
-	// left NULL on Expo mobile builds (v1 shadow Project has been removed).
+	// AppProjectID is the canonical FK to AppProject (v1 shadow Project was
+	// removed 2026-05-07).
 	build := &models.Build{
-		AppProjectID:      &project.ID,
+		AppProjectID:      project.ID,
 		Active:            false,
 		Title:             nonEmptyOr(opts.AppName, project.Name),
 		Icon:              opts.Icon,
@@ -213,7 +213,7 @@ func (c *Controller) BuildExpoMobile(ctx context.Context, project *models.AppPro
 		if platform == "ios" {
 			label = "IOS"
 		}
-		task, err := c.DB.CreateAppBuildTask(*build, &project.ID, label, "Queued", false)
+		task, err := c.DB.CreateAppBuildTask(*build, project.ID, label, "Queued", false)
 		if err != nil {
 			return build, tasks, fmt.Errorf("create %s build task: %w", platform, err)
 		}

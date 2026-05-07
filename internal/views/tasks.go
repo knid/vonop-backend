@@ -38,10 +38,9 @@ func (v *HttpViews) GetAllTasks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Optional ?project_id=<v1-project-uuid> scopes the result to a single
-	// project the user owns. Without it the response is the full task
-	// history across every project the user has ever built (kept for
-	// backwards compatibility with any caller that hasn't been updated).
+	// Optional ?project_id=<app-project-uuid> scopes the result to a single
+	// AppProject the user owns. Without it the response is the full task
+	// history across every AppProject the user has ever built.
 	projectID := r.URL.Query().Get("project_id")
 
 	tasks, err := v.Controller.GetAllAppBuildTasks(user, projectID)

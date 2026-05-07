@@ -139,7 +139,7 @@ func newSubmitFixture(t *testing.T, withApple, withGoogle, withBuild bool) *subm
 		// app_project_id directly (no v1 shadow row).
 		build := &models.Build{
 			ID:                uuid.New(),
-			AppProjectID:      &project.ID,
+			AppProjectID:      project.ID,
 			BuildNumber:       1,
 			Title:             "X",
 			Description:       "test build",
@@ -151,10 +151,9 @@ func newSubmitFixture(t *testing.T, withApple, withGoogle, withBuild bool) *subm
 		if _, err := db.DB.NewInsert().Model(build).Exec(ctx); err != nil {
 			t.Fatalf("seed build: %v", err)
 		}
-		appProjectID := project.ID
 		for _, platform := range []string{"Android", "IOS"} {
 			task := &models.AppBuildTask{
-				ID: uuid.New(), AppProjectID: &appProjectID, BuildID: build.ID, Platform: platform,
+				ID: uuid.New(), AppProjectID: project.ID, BuildID: build.ID, Platform: platform,
 				StatusText: "Built", Finished: true,
 				CreatedAt: time.Now(),
 			}
