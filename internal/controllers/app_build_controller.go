@@ -107,10 +107,23 @@ func (c *Controller) BuildExpoMobile(ctx context.Context, project *models.AppPro
 	}
 	// Apple signing precondition. The Codemagic iOS workflow fetches a fresh
 	// distribution cert + provisioning profile via /v2/codemagic/apple-signing
-	// at build time, which resolves project.DefaultAppleConnectionID. Without
-	// it the worker would burn ~25 min before failing — fail fast here.
-	if wantIOS && project.DefaultAppleConnectionID == nil {
-		return nil, nil, fmt.Errorf("iOS builds require an Apple connection on this app — add an App Store Connect API key in Credentials and set it as the default for this app")
+	// at build time, which resolves project.DefaultAppleConnectionID. Two
+	// failure modes need to be caught at trigger time, not 25 min into the
+	// Codemagic workflow:
+	//  1. No default connection → user hasn't linked their ASC API key.
+	//  2. Connection exists but ASC mint fails (revoked key, expired, ASC
+	//     downtime) → cert+profile can't be ensured.
+	if wantIOS {
+		if project.DefaultAppleConnectionID == nil {
+			return nil, nil, fmt.Errorf("iOS builds require an Apple connection on this app — add an App Store Connect API key in Credentials and set it as the default for this app")
+		}
+		conn, err := c.DB.GetAppleConnectionById(project.DefaultAppleConnectionID.String())
+		if err != nil || conn == nil {
+			return nil, nil, fmt.Errorf("iOS builds: Apple connection lookup failed — verify the linked App Store Connect key still exists: %w", err)
+		}
+		if _, err := c.EnsureAppleSigningAssets(ctx, project, conn); err != nil {
+			return nil, nil, fmt.Errorf("iOS builds: could not mint signing cert + profile via Apple — verify your ASC API key is still valid: %w", err)
+		}
 	}
 	bundleID := bundleIDForProject(project, opts.BundleIDOverride)
 

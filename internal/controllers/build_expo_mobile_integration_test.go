@@ -222,6 +222,8 @@ func setupExpoBuildTest(t *testing.T) *expoBuildTestFixture {
 		(*models.AppBuildTask)(nil),
 		(*models.AICreditsBalance)(nil),
 		(*models.AICreditTransaction)(nil),
+		(*models.AppleConnection)(nil),
+		(*models.AppleSigningAssets)(nil),
 	)
 	c, _ := NewTestController(t, db, TestControllerOptions{})
 
@@ -314,6 +316,47 @@ func setupExpoBuildTest(t *testing.T) *expoBuildTestFixture {
 	return &expoBuildTestFixture{
 		c: c, db: db, user: user, org: org, project: project,
 		cmRec: cmRec, s3Rec: s3Rec,
+	}
+}
+
+// seedAppleSigningForFixture wires the iOS precondition: creates an
+// AppleConnection, points project.DefaultAppleConnectionID at it, and
+// pre-populates an AppleSigningAssets row with a far-future expiry so
+// BuildExpoMobile's EnsureAppleSigningAssets returns the existing row
+// without calling Apple's ASC API. Required by any test that triggers
+// an iOS build through BuildExpoMobile.
+func seedAppleSigningForFixture(t *testing.T, f *expoBuildTestFixture) {
+	t.Helper()
+	ctx := context.Background()
+
+	conn := &models.AppleConnection{
+		ID: uuid.New(), UserID: f.user.ID, OrganizationID: f.org.ID,
+		Name: "Test ASC", KeyID: "K1", TeamID: "T1", IssuerID: "I1",
+	}
+	if _, err := f.db.DB.NewInsert().Model(conn).Exec(ctx); err != nil {
+		t.Fatalf("seed apple connection: %v", err)
+	}
+	f.project.DefaultAppleConnectionID = &conn.ID
+	if _, err := f.db.DB.NewUpdate().Model(f.project).
+		Column("default_apple_connection_id").
+		WherePK().Exec(ctx); err != nil {
+		t.Fatalf("set default apple connection: %v", err)
+	}
+
+	// Pre-seed AppleSigningAssets with a far-future expiry so EnsureAppleSigningAssets
+	// short-circuits on the reuse path and never hits the ASC API.
+	farFuture := time.Now().Add(365 * 24 * time.Hour)
+	assets := &models.AppleSigningAssets{
+		ID: uuid.New(), AppProjectID: f.project.ID, OrganizationID: f.org.ID,
+		AppleConnectionID:    conn.ID,
+		CertificateID:        "test-cert-" + uuid.NewString()[:8],
+		CertificateExpiresAt: farFuture,
+		ProfileID:            "test-profile-" + uuid.NewString()[:8],
+		ProfileExpiresAt:     farFuture,
+		BundleID:             bundleIDForProject(f.project, ""),
+	}
+	if _, err := f.db.DB.NewInsert().Model(assets).Exec(ctx); err != nil {
+		t.Fatalf("seed apple signing assets: %v", err)
 	}
 }
 
@@ -448,6 +491,7 @@ func TestBuildExpoMobile_HappyPath_AndroidOnly(t *testing.T) {
 // fan-out: 1 Build, 2 AppBuildTasks, both Android+iOS triggers fired.
 func TestBuildExpoMobile_HappyPath_BothPlatforms(t *testing.T) {
 	f := setupExpoBuildTest(t)
+	seedAppleSigningForFixture(t, f)
 	ctx := context.Background()
 
 	build, tasks, err := f.c.BuildExpoMobile(ctx, f.project, f.user, ExpoBuildOptions{
@@ -647,6 +691,7 @@ func assertNoExpoShadowProject(t *testing.T, db *database.Database, slug string)
 // 2026-05-02 mobile audit).
 func TestBuildExpoMobile_iOSPermissionsEmitCMPermEnv(t *testing.T) {
 	f := setupExpoBuildTest(t)
+	seedAppleSigningForFixture(t, f)
 	ctx := context.Background()
 
 	// Seed a MobileAppConfig with a couple of sensitive iOS perms + an
@@ -700,6 +745,7 @@ func TestBuildExpoMobile_iOSPermissionsEmitCMPermEnv(t *testing.T) {
 // are emitted (the legacy bundled app.json values stay intact).
 func TestBuildExpoMobile_iOSNoConfigEmitsNoPermEnv(t *testing.T) {
 	f := setupExpoBuildTest(t)
+	seedAppleSigningForFixture(t, f)
 	ctx := context.Background()
 
 	build, _, err := f.c.BuildExpoMobile(ctx, f.project, f.user, ExpoBuildOptions{
