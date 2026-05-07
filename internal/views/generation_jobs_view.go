@@ -478,8 +478,6 @@ func (v *HttpViews) StreamJob(w http.ResponseWriter, r *http.Request) {
 
 	// Step 2: decide whether a live subscription is possible.
 	isLive := job.Status == "running" || job.Status == "awaiting_input"
-	busVal, busOK := v.Controller.JobEventBuses.Load(jobID)
-
 	if !isLive {
 		// Terminal job — the replay is authoritative. Send the explicit
 		// terminal frame so the client's stream listener exits cleanly,
@@ -491,15 +489,23 @@ func (v *HttpViews) StreamJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Agent-run jobs (generate_app, app_chat) live in the worker — tail
+	// Redis pub/sub. Other job types (dashboard_create, dashboard_chat)
+	// still live in this process — tail the in-process EventBus.
+	if job.Type == "generate_app" || job.Type == "app_chat" {
+		v.streamFromJobChannel(w, r, flusher, jobID, maxReplayedSeq)
+		return
+	}
+
+	busVal, busOK := v.Controller.JobEventBuses.Load(jobID)
 	if !busOK {
 		// Running job with no bus: the process that owned the job is gone
 		// (or never existed — multi-instance deployments). Serve what we
 		// have; the next /active-job poll after the sweeper runs will
 		// reflect the eventual failure.
-		slog.Warn("StreamJob: running job has no event bus — replay only", "job_id", jobID)
+		slog.Warn("StreamJob: in-process running job has no event bus — replay only", "job_id", jobID)
 		return
 	}
-
 	bus, ok := busVal.(*controllers.EventBus)
 	if !ok {
 		slog.Error("StreamJob: JobEventBuses entry is not *EventBus", "job_id", jobID)
