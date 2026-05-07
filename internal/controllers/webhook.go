@@ -224,6 +224,28 @@ func (c *Controller) processWebhookEventTx(tx bun.Tx, event stripe.Event) ([]fun
 			Set("price_id", sub.Items.Data[0].Price.ID))
 		c.IdentifyUser(owner)
 
+		// Meta CAPI: Subscribe fires once on initial subscription create. Skip
+		// trial-only states ("trialing") since no money has moved yet — wait
+		// for invoice.payment_succeeded to fire Purchase. We currently never
+		// open subscriptions in trialing mode, so this branch is forward-safe.
+		if sub.Status == "active" {
+			price := sub.Items.Data[0].Price
+			var value float64
+			if price != nil && price.UnitAmount > 0 {
+				value = float64(price.UnitAmount) / 100.0
+			}
+			currency := "USD"
+			if price != nil && price.Currency != "" {
+				currency = string(price.Currency)
+			}
+			ownerSnap := owner
+			subID := sub.ID
+			planName := subs.Name
+			hooks = append(hooks, func() {
+				c.FireMetaSubscribe(ownerSnap, subID, planName, value, currency)
+			})
+		}
+
 	case "customer.subscription.updated":
 		var sub stripe.Subscription
 		if err := json.Unmarshal(event.Data.Raw, &sub); err != nil {
@@ -508,6 +530,22 @@ func (c *Controller) processWebhookEventTx(tx bun.Tx, event stripe.Event) ([]fun
 			Set("billing_reason", string(invoice.BillingReason)))
 		c.IdentifyUser(owner)
 
+		// Meta CAPI: Purchase fires on every paid subscription invoice (first
+		// charge + renewals). EventID derives from invoice.ID so dedup is
+		// automatic across webhook retries.
+		if invoice.AmountPaid > 0 {
+			value := float64(invoice.AmountPaid) / 100.0
+			currency := "USD"
+			if invoice.Currency != "" {
+				currency = string(invoice.Currency)
+			}
+			ownerSnap := owner
+			invoiceID := invoice.ID
+			hooks = append(hooks, func() {
+				c.FireMetaPurchase(ownerSnap, invoiceID, "Subscription", []string{invoiceID}, value, currency, "subscription")
+			})
+		}
+
 	case "invoice.payment_failed":
 		var invoice stripe.Invoice
 		if err := json.Unmarshal(event.Data.Raw, &invoice); err != nil {
@@ -781,6 +819,22 @@ func (c *Controller) processWebhookEventTx(tx bun.Tx, event stripe.Event) ([]fun
 			Set("session_id", cs.ID).
 			Set("amount_total", cs.AmountTotal))
 		c.IdentifyUser(user)
+
+		// Meta CAPI: Purchase for the one-shot credit-pack flow. EventID
+		// derives from cs.ID so retries dedup automatically.
+		if cs.AmountTotal > 0 {
+			value := float64(cs.AmountTotal) / 100.0
+			currency := "USD"
+			if cs.Currency != "" {
+				currency = string(cs.Currency)
+			}
+			userSnap := user
+			sessionID := cs.ID
+			packLabel := fmt.Sprintf("%d AI Credits", packSize)
+			hooks = append(hooks, func() {
+				c.FireMetaPurchase(userSnap, sessionID, packLabel, []string{sessionID}, value, currency, "credit_pack")
+			})
+		}
 
 	case "charge.refunded":
 		var charge stripe.Charge

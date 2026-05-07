@@ -30,6 +30,7 @@ import (
 	"github.com/knid/wemob/internal/services/giteabackup"
 	"github.com/knid/wemob/internal/services/gitrepo"
 	"github.com/knid/wemob/internal/services/mcpclient"
+	"github.com/knid/wemob/internal/services/meta"
 	"github.com/knid/wemob/internal/services/neon"
 	"github.com/knid/wemob/internal/services/remoteconfig"
 	"github.com/knid/wemob/internal/services/revenuecat"
@@ -194,6 +195,19 @@ func BootstrapController() (*controllers.Controller, asynq.RedisClientOpt) {
 		slog.Warn("REVENUECAT_API_KEY not set — IAP auto-provisioning disabled (mobile_app_native projects will build with empty IAP keys)")
 	}
 
+	// Meta Conversions API — server-side ad-conversion events. Returns nil
+	// when either secret is unset; downstream calls become no-ops.
+	metaCAPI := meta.NewService(
+		sm.GetSecret("META_PIXEL_ID"),
+		sm.GetSecret("META_CAPI_ACCESS_TOKEN"),
+		sm.GetSecret("META_CAPI_TEST_EVENT_CODE"),
+	)
+	if metaCAPI != nil {
+		slog.Info("Meta CAPI service initialized")
+	} else {
+		slog.Info("Meta CAPI disabled (META_PIXEL_ID or META_CAPI_ACCESS_TOKEN unset)")
+	}
+
 	e2b := e2bService.NewService(
 		sm.GetSecret("DASHBOARD_URL"),
 		sm.GetSecret("E2B_PREVIEW_DOMAIN"),
@@ -346,6 +360,7 @@ func BootstrapController() (*controllers.Controller, asynq.RedisClientOpt) {
 		gitRepoService,
 		codemagicService,
 		revenueCatService,
+		metaCAPI,
 		remoteConfigService,
 		e2b,
 		edgeIPs,

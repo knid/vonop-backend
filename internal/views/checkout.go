@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/knid/wemob/internal/constants"
+	"github.com/knid/wemob/internal/controllers"
 	"github.com/knid/wemob/internal/services/remoteconfig"
 	"github.com/knid/wemob/internal/utils"
 	"github.com/posthog/posthog-go"
@@ -106,6 +107,16 @@ func (v *HttpViews) StripeCheckout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Optional Meta CAPI tracking payload — frontend includes _fbp/_fbc cookies
+	// and the page URL on the POST body. Ignore parse errors so a missing or
+	// empty body doesn't break checkout.
+	var trackingBody struct {
+		Fbp            string `json:"fbp"`
+		Fbc            string `json:"fbc"`
+		EventSourceURL string `json:"event_source_url"`
+	}
+	_ = utils.ParseJSONBody(r, &trackingBody)
+
 	// Validate price ID against known subscription plans
 	allSubs, err := v.Controller.DB.GetSubscriptions()
 	if err != nil {
@@ -163,6 +174,30 @@ func (v *HttpViews) StripeCheckout(w http.ResponseWriter, r *http.Request) {
 	go v.Controller.EventService.SendEvent(user, constants.EVENT_CHECKOUT_STARTED, map[string]any{
 		"price_id": priceID,
 	})
+
+	attr := controllers.MetaAttributionFromRequest(r,
+		trackingBody.Fbp, trackingBody.Fbc, trackingBody.EventSourceURL)
+	// Persist synchronously before returning the Stripe URL: the webhook for
+	// customer.subscription.created can fire within 1–3 seconds of payment,
+	// and a slow goroutine here would leave it reading empty attribution and
+	// degrading match quality on Subscribe / Purchase events.
+	v.Controller.PersistMetaAttribution(user, attr)
+	go func() {
+		// Stripe CheckoutSession.AmountTotal is in cents. Currency comes from
+		// the Stripe price; we don't pre-load Subscriptions here, so rely on
+		// the session for the resolved currency.
+		var value float64
+		var currency string
+		if s.AmountTotal > 0 {
+			value = float64(s.AmountTotal) / 100.0
+		}
+		if s.Currency != "" {
+			currency = string(s.Currency)
+		} else {
+			currency = "USD"
+		}
+		v.Controller.FireMetaInitiateCheckout(user, attr, s.ID, "Subscription", value, currency)
+	}()
 
 	utils.JSONResponse(w, map[string]string{"url": s.URL}, http.StatusCreated)
 }
@@ -232,7 +267,10 @@ func (v *HttpViews) PurchaseCredits(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		PackageID string `json:"package_id"`
+		PackageID      string `json:"package_id"`
+		Fbp            string `json:"fbp"`
+		Fbc            string `json:"fbc"`
+		EventSourceURL string `json:"event_source_url"`
 	}
 	if err := utils.ParseJSONBody(r, &req); err != nil {
 		utils.JSONErrorCode(w, constants.ErrValidationBody, http.StatusBadRequest, nil)
@@ -288,6 +326,24 @@ func (v *HttpViews) PurchaseCredits(w http.ResponseWriter, r *http.Request) {
 		"pack_size":  pack.Credits,
 		"price_id":   priceID,
 	})
+
+	attr := controllers.MetaAttributionFromRequest(r, req.Fbp, req.Fbc, req.EventSourceURL)
+	// Sync persist for the same reason as StripeCheckout: the
+	// checkout.session.completed webhook can fire within seconds of payment.
+	v.Controller.PersistMetaAttribution(user, attr)
+	go func() {
+		var value float64
+		if s.AmountTotal > 0 {
+			value = float64(s.AmountTotal) / 100.0
+		} else {
+			value = float64(pack.Price)
+		}
+		currency := "USD"
+		if s.Currency != "" {
+			currency = string(s.Currency)
+		}
+		v.Controller.FireMetaInitiateCheckout(user, attr, s.ID, pack.Name, value, currency)
+	}()
 
 	utils.JSONResponse(w, map[string]string{"url": s.URL}, http.StatusCreated)
 }

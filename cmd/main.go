@@ -250,6 +250,14 @@ func createSchema(db *bun.DB) error {
 		// GitHub integration fields on users
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS git_hub_access_token text`,
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS git_hub_username text`,
+		// Meta CAPI ad attribution: persisted at register/checkout time so the
+		// async Stripe webhook can include browser signals (fbp, fbc, IP, UA)
+		// in Subscribe/Purchase events for high match quality.
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS meta_fbp text`,
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS meta_fbc text`,
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS meta_client_ip text`,
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS meta_client_ua text`,
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS meta_event_source_url text`,
 		// GitHub export limit on limits
 		`ALTER TABLE standard_user_limits ADD COLUMN IF NOT EXISTS can_export_to_github boolean NOT NULL DEFAULT false`,
 		// Deploy resource columns on limits

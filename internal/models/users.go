@@ -31,6 +31,15 @@ type User struct {
 	GitHubAccessToken string `bun:",nullzero" json:"-"`
 	GitHubUsername    string `bun:",nullzero" json:"github_username"`
 	TwentyPersonID    string `bun:",nullzero" json:"-"`
+	// Meta CAPI ad attribution. Captured from request body (fbp/fbc/url) and
+	// headers (ip/ua) on register and checkout, then read by the async Stripe
+	// webhook to keep Subscribe/Purchase match quality high. Never returned
+	// in JSON responses.
+	MetaFbp            string `bun:",nullzero" json:"-"`
+	MetaFbc            string `bun:",nullzero" json:"-"`
+	MetaClientIP       string `bun:",nullzero" json:"-"`
+	MetaClientUA       string `bun:",nullzero" json:"-"`
+	MetaEventSourceURL string `bun:",nullzero" json:"-"`
 	Language            string                    `bun:",notnull,default:'en'" json:"language"`
 	CreatedAt           time.Time                 `bun:"created_at,nullzero,notnull,default:current_timestamp"`
 	UpdatedAt           time.Time                 `bun:"updated_at,nullzero,notnull,default:current_timestamp"`
