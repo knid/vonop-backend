@@ -16,7 +16,6 @@ import (
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/services/codemagic"
 	"github.com/knid/wemob/internal/services/remoteconfig"
-	"github.com/knid/wemob/internal/services/storage"
 )
 
 // submitFixture wires a test controller + project + user + org +
@@ -49,11 +48,6 @@ func newSubmitFixture(t *testing.T, withApple, withGoogle, withBuild bool) *subm
 	)
 	c, _ := NewTestController(t, db, TestControllerOptions{})
 	c.RemoteConfig = remoteconfig.New(nil)
-
-	// UserApiKeysStorage stub — required for the encryptAndStoreCredential
-	// path; we set the legacy *Path to "" on connections to short-circuit
-	// reads to CredStore-only.
-	c.UserApiKeysStorage = &storage.S3Storage{Region: "us-east-1", Bucket: "test-keys"}
 
 	// Codemagic test server (records trigger calls).
 	cmServer, cmRec := newCodemagicTestServer(t)
@@ -97,11 +91,8 @@ func newSubmitFixture(t *testing.T, withApple, withGoogle, withBuild bool) *subm
 		conn := &models.AppleConnection{
 			ID: uuid.New(), UserID: user.ID, OrganizationID: org.ID,
 			Name: "test", KeyID: "ABCDEFGHIJ", TeamID: "TEAM01",
-			IssuerID:      "11111111-1111-1111-1111-111111111111",
-			P8KeyPath:     "p8_keys/dummy.p8",
-			APNSP8KeyPath: "p8_keys/dummy-apns.p8",
-			APNSP8KeyID:   "K",
-			P8KeyCredRef:  credRefFromStorage(ref),
+			IssuerID:     "11111111-1111-1111-1111-111111111111",
+			P8KeyCredRef: credRefFromStorage(ref),
 		}
 		if _, err := db.DB.NewInsert().Model(conn).Exec(ctx); err != nil {
 			t.Fatalf("seed apple conn: %v", err)
@@ -121,7 +112,7 @@ func newSubmitFixture(t *testing.T, withApple, withGoogle, withBuild bool) *subm
 		}
 		conn := &models.GooglePlayConnection{
 			ID: uuid.New(), UserID: user.ID, OrganizationID: org.ID,
-			Name: "test", ServiceAccountPath: "service_accounts/dummy.json",
+			Name:                  "test",
 			ServiceAccountCredRef: credRefFromStorage(ref),
 		}
 		if _, err := db.DB.NewInsert().Model(conn).Exec(ctx); err != nil {

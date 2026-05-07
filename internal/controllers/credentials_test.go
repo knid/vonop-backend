@@ -27,22 +27,6 @@ func TestApplyP8Prefix(t *testing.T) {
 	}
 }
 
-func TestApplyAPNSP8Prefix(t *testing.T) {
-	cases := []struct{ in, want string }{
-		{"abc-123", "apns_keys/abc-123.p8"},
-		{"", ""},
-		{"apns_keys/abc-123.p8", "apns_keys/abc-123.p8"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.in, func(t *testing.T) {
-			got := applyAPNSP8Prefix(tc.in)
-			if got != tc.want {
-				t.Errorf("applyAPNSP8Prefix(%q) = %q, want %q", tc.in, got, tc.want)
-			}
-		})
-	}
-}
-
 func TestApplyServiceAccountPrefix(t *testing.T) {
 	cases := []struct{ in, want string }{
 		{"abc-123", "service_accounts/abc-123.json"},

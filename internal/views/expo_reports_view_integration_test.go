@@ -99,9 +99,22 @@ func seedExpoBuildFixtures(t *testing.T, db *database.Database) (appProject *mod
 // recorder so callers can inspect status/body.
 func postWebhook(t *testing.T, h *ExpoReportsHandler, taskID, status, message string) *httptest.ResponseRecorder {
 	t.Helper()
+	return postWebhookWithPhase(t, h, taskID, status, message, "")
+}
+
+// postWebhookWithPhase is the phase-aware variant. Empty phase = build (the
+// default). "submit" exercises the submit-phase routing.
+func postWebhookWithPhase(t *testing.T, h *ExpoReportsHandler, taskID, status, message, phase string) *httptest.ResponseRecorder {
+	t.Helper()
 	ts := strconv.FormatInt(time.Now().Unix(), 10)
-	body := fmt.Sprintf(`{"task_id":%q,"status":%q,"message":%q,"timestamp":%s}`,
-		taskID, status, message, ts)
+	var body string
+	if phase == "" {
+		body = fmt.Sprintf(`{"task_id":%q,"status":%q,"message":%q,"timestamp":%s}`,
+			taskID, status, message, ts)
+	} else {
+		body = fmt.Sprintf(`{"task_id":%q,"status":%q,"message":%q,"phase":%q,"timestamp":%s}`,
+			taskID, status, message, phase, ts)
+	}
 	sig := signRequest(t, taskID, ts, body)
 
 	req := httptest.NewRequest(http.MethodPost, "/v2/reports/expo-build", bytes.NewBufferString(body))
@@ -184,6 +197,48 @@ func TestUpdateExpoBuildStatus_BuiltEventUpdatesTaskRow(t *testing.T) {
 	}
 	if got.Platform != "Android" {
 		t.Errorf("platform: got %q want Android (bun whole-row footgun?)", got.Platform)
+	}
+}
+
+// TestUpdateExpoBuildStatus_SubmitPhase_LeavesAppBuildTaskAlone is the
+// inverse of BuiltEventUpdatesTaskRow: a submit-phase webhook ("submitted",
+// the terminal-success vocab from the submit pipeline) must NOT mutate the
+// build task's status_text. Submit-phase events advance Release; the build
+// task is the build-phase projection only. Without the phase gate, a
+// successful App Store submit would overwrite a "Building" task row to
+// "Built" and confuse the studio UI.
+func TestUpdateExpoBuildStatus_SubmitPhase_LeavesAppBuildTaskAlone(t *testing.T) {
+	db := database.NewTestDB(t,
+		(*models.User)(nil),
+		(*models.Organization)(nil),
+		(*models.AppProject)(nil),
+		(*models.Build)(nil),
+		(*models.AppBuildTask)(nil),
+		(*models.BuildEvent)(nil),
+	)
+	if _, err := db.DB.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS build_events_task_msg_uniq ON build_events (task_id, message_hash)`); err != nil {
+		t.Fatalf("create unique index: %v", err)
+	}
+
+	_, _, task := seedExpoBuildFixtures(t, db)
+
+	pre := reloadTask(t, db, task.ID)
+	if pre.StatusText != "Queued" {
+		t.Fatalf("seed bug: status_text=%q want Queued", pre.StatusText)
+	}
+
+	h := NewExpoReportsHandler(db, testHMACMaster)
+	rr := postWebhookWithPhase(t, h, task.ID.String(), "submitted", "", "submit")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("webhook: got %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	got := reloadTask(t, db, task.ID)
+	if got.StatusText != "Queued" {
+		t.Errorf("submit-phase event mutated build status: got %q want Queued", got.StatusText)
+	}
+	if got.Finished {
+		t.Errorf("submit-phase event finalized build task")
 	}
 }
 

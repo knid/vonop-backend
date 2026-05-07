@@ -1,7 +1,9 @@
 package controllers
 
 import (
+	"context"
 	"errors"
+	"log/slog"
 
 	"github.com/google/uuid"
 
@@ -31,6 +33,18 @@ func (c *Controller) CancelBuildTask(user *models.User, taskID string) error {
 
 	if task.Finished {
 		return errors.New("task is already finished")
+	}
+
+	// Best-effort: tell Codemagic to stop the build before we mark the local
+	// row Cancelled. If the Codemagic call fails (network, expired API
+	// token), log + continue — the worst case is Codemagic finishes the
+	// build and the webhook resolves to terminal Failed/Built; the user
+	// sees their cancel intent honored locally.
+	if task.CodemagicBuildID != "" && c.CodemagicService != nil {
+		if cerr := c.CodemagicService.CancelBuild(context.Background(), task.CodemagicBuildID); cerr != nil {
+			slog.Warn("codemagic cancel failed; marking local row anyway",
+				"task_id", taskID, "codemagic_build_id", task.CodemagicBuildID, "err", cerr)
+		}
 	}
 
 	return c.DB.CancelAppBuildTask(taskID)

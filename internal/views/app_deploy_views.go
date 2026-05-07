@@ -263,48 +263,67 @@ func (v *HttpViews) DeployAppMobile(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Native Expo apps publish via the self-hosted expo-updates pipeline.
-	// Installed clients pick up the new JS bundle on next launch (no app
-	// store review).
-	v.deployExpoOTA(w, r, project, user)
-}
-
-// deployExpoOTA enqueues a self-hosted expo-updates publish for a
-// mobile_app_native project. Returns the queued AppDeployment so the
-// frontend's existing deploy-status polling Just Works.
-func (v *HttpViews) deployExpoOTA(w http.ResponseWriter, r *http.Request, project *models.AppProject, user *models.User) {
-	deployment, err := v.Controller.CreateQueuedExpoOTADeployment(project, user)
+	// Native Expo apps publish via Codemagic's expo-ota-publish workflow
+	// (~3 min vs 25 min for the legacy native rebuild). Installed clients
+	// pick up the new JS bundle on next launch (no app store review).
+	build, task, err := v.Controller.TriggerCodemagicOTAPublish(r.Context(), project, user)
 	if err != nil {
-		if errors.Is(err, controllers.ErrDeployInProgress) {
-			utils.JSONErrorCode(w, constants.ErrDeployInProgress, http.StatusConflict, nil)
+		if errors.Is(err, controllers.ErrQuickPublishWrongType) {
+			utils.JSONError(w, "wrong_project_type", err.Error(), http.StatusConflict, nil)
 			return
 		}
-		utils.JSONInternalError(w, err)
-		return
-	}
-	_, planName, _ := v.Controller.GetUserLimitsWithPlan(user)
-	isPaid := planName != "" && planName != "free" && planName != "trial"
-	if _, err := v.Controller.EnqueueExpoOTAPublish(user, project.OrganizationID, deployment.ID, isPaid); err != nil {
-		v.Controller.MarkDeploymentFailed(deployment.ID.String(), "enqueue: "+err.Error())
 		utils.JSONInternalError(w, err)
 		return
 	}
 
 	v.Controller.TrackUserEvent(user, "app_deployed_expo_ota", posthog.NewProperties().
 		Set("app_id", project.ID.String()).
-		Set("deploy_version", deployment.Version))
+		Set("build_id", build.ID.String()).
+		Set("task_id", task.ID.String()))
 
-	utils.JSONResponse(w, responses.AppDeploymentResponse{
-		ID:           deployment.ID,
-		AppProjectID: deployment.AppProjectID,
-		Platform:     deployment.Platform,
-		Provider:     deployment.Provider,
-		Status:       deployment.Status,
-		DeployedURL:  deployment.DeployedURL,
-		Version:      deployment.Version,
-		CreatedAt:    deployment.CreatedAt,
-		UpdatedAt:    deployment.UpdatedAt,
-	}, http.StatusAccepted)
+	// Return the synthesized AppDeploymentResponse shape so the frontend's
+	// existing deploy-status polling reads the same shape from the trigger
+	// response and the subsequent /deploy/status calls.
+	utils.JSONResponseStatus(w, synthesizeMobileDeployResponse(build, task), http.StatusAccepted)
+}
+
+// synthesizeMobileDeployResponse builds an AppDeploymentResponse from a
+// Build + AppBuildTask pair. Used by GetDeployStatus / GetDeployHistory for
+// mobile_app_native projects, which now publish via Codemagic and write to
+// Build/AppBuildTask rather than AppDeployment. Frontend polling reads the
+// same response shape regardless of project type.
+func synthesizeMobileDeployResponse(build *models.Build, task *models.AppBuildTask) responses.AppDeploymentResponse {
+	return responses.AppDeploymentResponse{
+		ID:           task.ID,
+		AppProjectID: build.AppProjectID,
+		Platform:     "ota",
+		Provider:     "codemagic",
+		Status:       normalizeMobileDeployStatus(task.StatusText),
+		Version:      build.BuildNumber,
+		ErrorMessage: task.ErrorMessage,
+		CreatedAt:    task.CreatedAt,
+		UpdatedAt:    task.UpdatedAt,
+	}
+}
+
+// normalizeMobileDeployStatus maps AppBuildTask.StatusText vocabulary
+// ("Queued", "Building", "Built", "Failed", "Cancelled") into the
+// AppDeployment status vocabulary the frontend already understands
+// ("queued", "building", "deployed", "failed", "cancelled").
+func normalizeMobileDeployStatus(statusText string) string {
+	switch statusText {
+	case "Built":
+		return "deployed"
+	case "Building":
+		return "building"
+	case "Queued":
+		return "queued"
+	case "Failed":
+		return "failed"
+	case "Cancelled":
+		return "cancelled"
+	}
+	return strings.ToLower(statusText)
 }
 
 // DELETE /v2/apps/{appId}/deploy/mobile
@@ -479,6 +498,32 @@ func (v *HttpViews) GetDeployStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Mobile projects publish via Codemagic and write Build + AppBuildTask
+	// rows, not AppDeployment. Synthesize an AppDeploymentResponse from the
+	// latest build's task so the frontend's existing polling JustWorks.
+	if project.ProjectType == models.ProjectTypeMobileAppNative {
+		build, err := v.Controller.DB.GetLastBuildByAppProject(project.ID.String())
+		if err != nil || build == nil {
+			utils.JSONResponse(w, responses.AppDeploymentResponse{
+				AppProjectID: project.ID,
+				Platform:     "ota",
+				Status:       "not_deployed",
+			}, http.StatusOK)
+			return
+		}
+		task, err := v.Controller.DB.GetLatestAppBuildTaskByBuildID(build.ID.String())
+		if err != nil || task == nil {
+			utils.JSONResponse(w, responses.AppDeploymentResponse{
+				AppProjectID: project.ID,
+				Platform:     "ota",
+				Status:       "not_deployed",
+			}, http.StatusOK)
+			return
+		}
+		utils.JSONResponse(w, synthesizeMobileDeployResponse(build, task), http.StatusOK)
+		return
+	}
+
 	deployment, err := v.Controller.GetLatestDeploymentStatus(project.ID.String())
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -519,6 +564,26 @@ func (v *HttpViews) GetDeployHistory(w http.ResponseWriter, r *http.Request) {
 	project, err := v.Controller.GetAppProject(appID, user)
 	if err != nil {
 		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
+		return
+	}
+
+	// Mobile projects: synthesize from Build + AppBuildTask history.
+	if project.ProjectType == models.ProjectTypeMobileAppNative {
+		builds, err := v.Controller.DB.GetBuildsByAppProject(project.ID.String())
+		if err != nil {
+			utils.JSONInternalError(w, err)
+			return
+		}
+		resp := make([]responses.AppDeploymentResponse, 0, len(builds))
+		for i := range builds {
+			b := builds[i]
+			task, err := v.Controller.DB.GetLatestAppBuildTaskByBuildID(b.ID.String())
+			if err != nil || task == nil {
+				continue
+			}
+			resp = append(resp, synthesizeMobileDeployResponse(&b, task))
+		}
+		utils.JSONResponse(w, resp, http.StatusOK)
 		return
 	}
 

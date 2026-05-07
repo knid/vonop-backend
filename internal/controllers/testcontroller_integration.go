@@ -41,11 +41,10 @@ type TestFakes struct {
 //   - FlyService, GiteaService, NeonService, GitRepoService
 //   - CodemagicService, RemoteConfig, E2BService, PostHog, CaddyAdmin, EdgeIPs
 //
-// Tests that touch the legacy S3 fallback path (encryptAndStoreCredential when
-// CredRef is nil, presigned URL generation, RedeemKeystoreDownload's S3 read)
-// will nil-deref on the storage fields. Either inject a real or fake
-// *storage.S3Storage on the returned Controller, OR set the *Path columns
-// to "" so the dual-write/read short-circuits before reaching S3.
+// Tests that touch S3 directly (presigned URL generation, RedeemKeystoreDownload's
+// S3 read, the encryptAndStoreCredential staging-bucket read used by Create/Update
+// connection flows) will nil-deref on the storage fields. Inject a real or fake
+// *storage.S3Storage on the returned Controller in those tests.
 func NewTestController(t *testing.T, db *database.Database, opts TestControllerOptions) (*Controller, *TestFakes) {
 	t.Helper()
 

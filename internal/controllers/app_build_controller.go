@@ -107,10 +107,23 @@ func (c *Controller) BuildExpoMobile(ctx context.Context, project *models.AppPro
 	}
 	// Apple signing precondition. The Codemagic iOS workflow fetches a fresh
 	// distribution cert + provisioning profile via /v2/codemagic/apple-signing
-	// at build time, which resolves project.DefaultAppleConnectionID. Without
-	// it the worker would burn ~25 min before failing — fail fast here.
-	if wantIOS && project.DefaultAppleConnectionID == nil {
-		return nil, nil, fmt.Errorf("iOS builds require an Apple connection on this app — add an App Store Connect API key in Credentials and set it as the default for this app")
+	// at build time, which resolves project.DefaultAppleConnectionID. Two
+	// failure modes need to be caught at trigger time, not 25 min into the
+	// Codemagic workflow:
+	//  1. No default connection → user hasn't linked their ASC API key.
+	//  2. Connection exists but ASC mint fails (revoked key, expired, ASC
+	//     downtime) → cert+profile can't be ensured.
+	if wantIOS {
+		if project.DefaultAppleConnectionID == nil {
+			return nil, nil, fmt.Errorf("iOS builds require an Apple connection on this app — add an App Store Connect API key in Credentials and set it as the default for this app")
+		}
+		conn, err := c.DB.GetAppleConnectionById(project.DefaultAppleConnectionID.String())
+		if err != nil || conn == nil {
+			return nil, nil, fmt.Errorf("iOS builds: Apple connection lookup failed — verify the linked App Store Connect key still exists: %w", err)
+		}
+		if _, err := c.EnsureAppleSigningAssets(ctx, project, conn); err != nil {
+			return nil, nil, fmt.Errorf("iOS builds: could not mint signing cert + profile via Apple — verify your ASC API key is still valid: %w", err)
+		}
 	}
 	bundleID := bundleIDForProject(project, opts.BundleIDOverride)
 
@@ -248,13 +261,14 @@ func (c *Controller) BuildExpoMobile(ctx context.Context, project *models.AppPro
 		tasks = append(tasks, task)
 
 		var triggerErr error
+		var cmBuildID string
 		switch platform {
 		case "android":
 			if chargeErr := c.ChargeBuildCredits(user, project.OrganizationID, constants.BuildCreditKindAndroid, build.ID.String()); chargeErr != nil {
 				slog.Warn("failed to charge android build credits", "error", chargeErr, "build_id", build.ID, "org_id", project.OrganizationID)
 				triggerErr = fmt.Errorf("insufficient credits to trigger Android build: %w", chargeErr)
 			} else {
-				_, triggerErr = c.CodemagicService.TriggerExpoAndroidBuild(ctx, codemagic.ExpoAndroidBuildParams{
+				cmBuildID, triggerErr = c.CodemagicService.TriggerExpoAndroidBuild(ctx, codemagic.ExpoAndroidBuildParams{
 					ProjectID:                      project.ID,
 					BuildID:                        build.ID,
 					TaskID:                         task.ID,
@@ -292,7 +306,7 @@ func (c *Controller) BuildExpoMobile(ctx context.Context, project *models.AppPro
 				slog.Warn("failed to charge ios build credits", "error", chargeErr, "build_id", build.ID, "org_id", project.OrganizationID)
 				triggerErr = fmt.Errorf("insufficient credits to trigger iOS build: %w", chargeErr)
 			} else {
-				_, triggerErr = c.CodemagicService.TriggerExpoIOSBuild(ctx, codemagic.ExpoIOSBuildParams{
+				cmBuildID, triggerErr = c.CodemagicService.TriggerExpoIOSBuild(ctx, codemagic.ExpoIOSBuildParams{
 					ProjectID:                      project.ID,
 					BuildID:                        build.ID,
 					TaskID:                         task.ID,
@@ -325,6 +339,14 @@ func (c *Controller) BuildExpoMobile(ctx context.Context, project *models.AppPro
 			task.Finished = true
 			_ = c.DB.UpdateAppBuildTask(task)
 			triggerErrs = append(triggerErrs, fmt.Sprintf("%s: %v", platform, triggerErr))
+		} else if cmBuildID != "" {
+			// Persist the Codemagic build id so CancelBuildTask can call
+			// POST /builds/{id}/cancel and stop the in-flight build instead
+			// of letting it burn ~25 min after the user hits cancel.
+			task.CodemagicBuildID = cmBuildID
+			if uerr := c.DB.SetAppBuildTaskCodemagicBuildID(ctx, task.ID, cmBuildID); uerr != nil {
+				slog.Warn("failed to persist codemagic build id", "task_id", task.ID, "err", uerr)
+			}
 		}
 	}
 
@@ -409,16 +431,12 @@ func (c *Controller) GetAppDeployments(projectID string) ([]models.AppDeployment
 	return c.DB.GetAppDeploymentsByProjectID(projectID)
 }
 
+// GetLatestDeploymentStatus returns the latest web AppDeployment for a
+// project. Mobile (mobile_app_native) projects publish via Codemagic and
+// do not write AppDeployment rows — callers that handle mobile must
+// short-circuit before calling this helper.
 func (c *Controller) GetLatestDeploymentStatus(projectID string) (*models.AppDeployment, error) {
-	// For mobile_app_native projects, the user-facing deploy is an
-	// expo-updates publish (platform="ota"). All other types deploy a
-	// web bundle to Fly (platform="web").
-	platform := "web"
-	if project, err := c.DB.GetAppProjectByID(projectID); err == nil && project != nil &&
-		project.ProjectType == models.ProjectTypeMobileAppNative {
-		platform = otaDeployPlatform
-	}
-	return c.DB.GetLatestAppDeployment(projectID, platform)
+	return c.DB.GetLatestAppDeployment(projectID, "web")
 }
 
 type AppValidationError struct {

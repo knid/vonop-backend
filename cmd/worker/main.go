@@ -23,19 +23,15 @@ func main() {
 
 	controller, redisOpts := bootstrap.BootstrapController()
 
-	// Concurrency caps total in-flight tasks across queues. The current host
-	// is 1 vCPU / 2 GB and `expo export --platform all` already saturates a
-	// core + ~600 MB RSS, so 8 was wildly over-budget. 6 accommodates the
-	// agent-run queue added 2026-05 (LLM-call-bound, low CPU) without
-	// re-introducing the lease-recovery duplicates we saw at 8. OTA publishes
-	// stay serialized to 1 by expoOTAExportSemaphore in expo_ota_controller.go.
+	// Concurrency caps total in-flight tasks across queues. 4 leaves
+	// headroom for parallel web/cron tasks (which are IO-bound). The
+	// historical in-process Expo OTA publisher has been removed — OTA
+	// publishes now run on Codemagic, not the worker.
 	srv := asynq.NewServer(redisOpts, asynq.Config{
 		Concurrency: 6,
 		Queues: map[string]int{
 			"deploy-web-pro":  6,
 			"deploy-web-free": 2,
-			"expo-ota-pro":    4,
-			"expo-ota-free":   1,
 			"agent":           5, // agent runs are I/O-bound (LLM streaming);
 			// weight 5 keeps them ahead of free-tier deploys
 			// but behind paid web deploys.
@@ -67,8 +63,7 @@ func main() {
 			// handler panicked, the worker was killed mid-task and asynq
 			// reaped it without re-entering the handler, or some other path
 			// that bypasses our explicit failure marking), flip the row here
-			// so the UI doesn't show 'building' forever. Both deploy:web and
-			// expo:ota_publish use the same payload shape (DeploymentID).
+			// so the UI doesn't show 'building' forever.
 			if !isFinal {
 				return
 			}
@@ -83,23 +78,12 @@ func main() {
 					"asynq retry budget exhausted: "+err.Error()); mErr != nil {
 					slog.Error("error_handler_mark_failed", "deployment_id", p.DeploymentID, "err", mErr)
 				}
-			case tasks.TypeExpoOTAPublish:
-				var p tasks.ExpoOTAPublishPayload
-				if uErr := json.Unmarshal(t.Payload(), &p); uErr != nil || p.DeploymentID == "" {
-					slog.Error("error_handler_unmarshal_failed", "type", t.Type(), "err", uErr)
-					return
-				}
-				if mErr := controller.MarkDeploymentFailedIfNotTerminal(p.DeploymentID,
-					"asynq retry budget exhausted: "+err.Error()); mErr != nil {
-					slog.Error("error_handler_mark_failed", "deployment_id", p.DeploymentID, "err", mErr)
-				}
 			}
 		}),
 	})
 
 	mux := asynq.NewServeMux()
 	mux.HandleFunc(tasks.TypeDeployWeb, controller.HandleWebDeployTask)
-	mux.HandleFunc(tasks.TypeExpoOTAPublish, controller.HandleExpoOTAPublishTask)
 	mux.HandleFunc(tasks.TypeDeleteFlyApp, controller.HandleDeleteFlyAppTask)
 	mux.HandleFunc(tasks.TypeAgentRun, controller.HandleAgentRunTask)
 	// A6: 7-day grace teardown of an org's Fly + Neon resources after a

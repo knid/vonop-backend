@@ -34,14 +34,30 @@ type expoTriggerCall struct {
 
 // expoTriggerRecorder collects trigger calls for assertions.
 type expoTriggerRecorder struct {
-	mu    sync.Mutex
-	calls []expoTriggerCall
+	mu      sync.Mutex
+	calls   []expoTriggerCall
+	cancels []string // build IDs received on POST /builds/{id}/cancel
+
+	// cancelStatus, when non-zero, overrides the cancel response status.
+	// Defaults to 200. Tests use this to simulate Codemagic outages.
+	cancelStatus int
+
+	// triggerBuildID, when non-empty, overrides the build_id returned on
+	// trigger POSTs. Lets a test fix the value so it can later assert the
+	// task row stored exactly that id.
+	triggerBuildID string
 }
 
 func (r *expoTriggerRecorder) record(call expoTriggerCall) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.calls = append(r.calls, call)
+}
+
+func (r *expoTriggerRecorder) recordCancel(buildID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.cancels = append(r.cancels, buildID)
 }
 
 func (r *expoTriggerRecorder) snapshot() []expoTriggerCall {
@@ -52,13 +68,39 @@ func (r *expoTriggerRecorder) snapshot() []expoTriggerCall {
 	return out
 }
 
+func (r *expoTriggerRecorder) cancelSnapshot() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]string, len(r.cancels))
+	copy(out, r.cancels)
+	return out
+}
+
 // newCodemagicTestServer returns an httptest.Server that decodes Codemagic
 // trigger POSTs into expoTriggerCall records and replies with a fake
-// build_id, plus a recorder the test can inspect.
+// build_id. Also handles POST /builds/{id}/cancel — the build id is
+// recorded so cancel-propagation tests can assert it. The recorder
+// handle exposes both queues plus knobs for fault injection.
 func newCodemagicTestServer(t *testing.T) (*httptest.Server, *expoTriggerRecorder) {
 	t.Helper()
 	rec := &expoTriggerRecorder{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Cancel: POST /builds/{buildId}/cancel
+		if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/cancel") {
+			// Strip /builds/ prefix and /cancel suffix to recover the id.
+			p := strings.TrimPrefix(r.URL.Path, "/builds/")
+			p = strings.TrimSuffix(p, "/cancel")
+			rec.recordCancel(p)
+			rec.mu.Lock()
+			status := rec.cancelStatus
+			rec.mu.Unlock()
+			if status == 0 {
+				status = http.StatusOK
+			}
+			w.WriteHeader(status)
+			return
+		}
+
 		var body struct {
 			WorkflowID  string `json:"workflowId"`
 			Environment struct {
@@ -72,7 +114,13 @@ func newCodemagicTestServer(t *testing.T) (*httptest.Server, *expoTriggerRecorde
 		}
 		rec.record(expoTriggerCall{WorkflowID: body.WorkflowID, Variables: body.Environment.Variables})
 		w.WriteHeader(http.StatusOK)
-		_ = json.NewEncoder(w).Encode(map[string]any{"build_id": "cm-build-" + uuid.NewString()})
+		rec.mu.Lock()
+		buildID := rec.triggerBuildID
+		rec.mu.Unlock()
+		if buildID == "" {
+			buildID = "cm-build-" + uuid.NewString()
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"build_id": buildID})
 	}))
 	t.Cleanup(srv.Close)
 	return srv, rec
@@ -174,6 +222,8 @@ func setupExpoBuildTest(t *testing.T) *expoBuildTestFixture {
 		(*models.AppBuildTask)(nil),
 		(*models.AICreditsBalance)(nil),
 		(*models.AICreditTransaction)(nil),
+		(*models.AppleConnection)(nil),
+		(*models.AppleSigningAssets)(nil),
 	)
 	c, _ := NewTestController(t, db, TestControllerOptions{})
 
@@ -266,6 +316,47 @@ func setupExpoBuildTest(t *testing.T) *expoBuildTestFixture {
 	return &expoBuildTestFixture{
 		c: c, db: db, user: user, org: org, project: project,
 		cmRec: cmRec, s3Rec: s3Rec,
+	}
+}
+
+// seedAppleSigningForFixture wires the iOS precondition: creates an
+// AppleConnection, points project.DefaultAppleConnectionID at it, and
+// pre-populates an AppleSigningAssets row with a far-future expiry so
+// BuildExpoMobile's EnsureAppleSigningAssets returns the existing row
+// without calling Apple's ASC API. Required by any test that triggers
+// an iOS build through BuildExpoMobile.
+func seedAppleSigningForFixture(t *testing.T, f *expoBuildTestFixture) {
+	t.Helper()
+	ctx := context.Background()
+
+	conn := &models.AppleConnection{
+		ID: uuid.New(), UserID: f.user.ID, OrganizationID: f.org.ID,
+		Name: "Test ASC", KeyID: "K1", TeamID: "T1", IssuerID: "I1",
+	}
+	if _, err := f.db.DB.NewInsert().Model(conn).Exec(ctx); err != nil {
+		t.Fatalf("seed apple connection: %v", err)
+	}
+	f.project.DefaultAppleConnectionID = &conn.ID
+	if _, err := f.db.DB.NewUpdate().Model(f.project).
+		Column("default_apple_connection_id").
+		WherePK().Exec(ctx); err != nil {
+		t.Fatalf("set default apple connection: %v", err)
+	}
+
+	// Pre-seed AppleSigningAssets with a far-future expiry so EnsureAppleSigningAssets
+	// short-circuits on the reuse path and never hits the ASC API.
+	farFuture := time.Now().Add(365 * 24 * time.Hour)
+	assets := &models.AppleSigningAssets{
+		ID: uuid.New(), AppProjectID: f.project.ID, OrganizationID: f.org.ID,
+		AppleConnectionID:    conn.ID,
+		CertificateID:        "test-cert-" + uuid.NewString()[:8],
+		CertificateExpiresAt: farFuture,
+		ProfileID:            "test-profile-" + uuid.NewString()[:8],
+		ProfileExpiresAt:     farFuture,
+		BundleID:             bundleIDForProject(f.project, ""),
+	}
+	if _, err := f.db.DB.NewInsert().Model(assets).Exec(ctx); err != nil {
+		t.Fatalf("seed apple signing assets: %v", err)
 	}
 }
 
@@ -400,6 +491,7 @@ func TestBuildExpoMobile_HappyPath_AndroidOnly(t *testing.T) {
 // fan-out: 1 Build, 2 AppBuildTasks, both Android+iOS triggers fired.
 func TestBuildExpoMobile_HappyPath_BothPlatforms(t *testing.T) {
 	f := setupExpoBuildTest(t)
+	seedAppleSigningForFixture(t, f)
 	ctx := context.Background()
 
 	build, tasks, err := f.c.BuildExpoMobile(ctx, f.project, f.user, ExpoBuildOptions{
@@ -599,6 +691,7 @@ func assertNoExpoShadowProject(t *testing.T, db *database.Database, slug string)
 // 2026-05-02 mobile audit).
 func TestBuildExpoMobile_iOSPermissionsEmitCMPermEnv(t *testing.T) {
 	f := setupExpoBuildTest(t)
+	seedAppleSigningForFixture(t, f)
 	ctx := context.Background()
 
 	// Seed a MobileAppConfig with a couple of sensitive iOS perms + an
@@ -652,6 +745,7 @@ func TestBuildExpoMobile_iOSPermissionsEmitCMPermEnv(t *testing.T) {
 // are emitted (the legacy bundled app.json values stay intact).
 func TestBuildExpoMobile_iOSNoConfigEmitsNoPermEnv(t *testing.T) {
 	f := setupExpoBuildTest(t)
+	seedAppleSigningForFixture(t, f)
 	ctx := context.Background()
 
 	build, _, err := f.c.BuildExpoMobile(ctx, f.project, f.user, ExpoBuildOptions{

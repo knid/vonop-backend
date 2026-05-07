@@ -17,7 +17,6 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/cors"
 	"github.com/go-chi/httplog/v3"
-	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/bootstrap"
 	"github.com/knid/wemob/internal/controllers"
 	"github.com/knid/wemob/internal/database"
@@ -25,7 +24,6 @@ import (
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/services/secret"
 	"github.com/knid/wemob/internal/services/storage"
-	"github.com/knid/wemob/internal/services/storepoll"
 	"github.com/knid/wemob/internal/utils"
 	"github.com/knid/wemob/internal/views"
 	"github.com/markbates/goth"
@@ -58,7 +56,6 @@ func createSchema(db *bun.DB) error {
 		(*models.JSInjectData)(nil),
 		(*models.GooglePlayConnection)(nil),
 		(*models.AppleConnection)(nil),
-		(*models.Deployment)(nil),
 		(*models.DeploymentEvent)(nil),
 		(*models.AICreditsBalance)(nil),
 		(*models.AICreditTransaction)(nil),
@@ -191,7 +188,6 @@ func createSchema(db *bun.DB) error {
 		`ALTER TABLE app_build_tasks ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
 		`ALTER TABLE app_build_tasks ADD COLUMN IF NOT EXISTS error_message text`,
 		`ALTER TABLE tickets ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
-		`ALTER TABLE deployments ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
 		`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
 		`ALTER TABLE organization_members ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
 		`ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
@@ -339,18 +335,15 @@ func createSchema(db *bun.DB) error {
 		// Plan 3a: org-scope connections, deployments, api keys, webhooks (2026-04-30-org-filter-list-endpoints)
 		`ALTER TABLE apple_connections ADD COLUMN IF NOT EXISTS organization_id uuid`,
 		`ALTER TABLE google_play_connections ADD COLUMN IF NOT EXISTS organization_id uuid`,
-		`ALTER TABLE deployments ADD COLUMN IF NOT EXISTS organization_id uuid`,
 		`ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS organization_id uuid`,
 		`ALTER TABLE webhook_endpoints ADD COLUMN IF NOT EXISTS organization_id uuid`,
 		// Plan 3a: enforce NOT NULL after backfill (2026-04-30)
 		`UPDATE apple_connections t SET organization_id = (SELECT id FROM organizations WHERE owner_id = t.user_id AND is_personal = true LIMIT 1) WHERE organization_id IS NULL AND user_id IS NOT NULL`,
 		`UPDATE google_play_connections t SET organization_id = (SELECT id FROM organizations WHERE owner_id = t.user_id AND is_personal = true LIMIT 1) WHERE organization_id IS NULL AND user_id IS NOT NULL`,
-		`UPDATE deployments t SET organization_id = (SELECT id FROM organizations WHERE owner_id = t.user_id AND is_personal = true LIMIT 1) WHERE organization_id IS NULL AND user_id IS NOT NULL`,
 		`UPDATE api_keys t SET organization_id = (SELECT id FROM organizations WHERE owner_id = t.user_id AND is_personal = true LIMIT 1) WHERE organization_id IS NULL AND user_id IS NOT NULL`,
 		`UPDATE webhook_endpoints t SET organization_id = (SELECT id FROM organizations WHERE owner_id = t.user_id AND is_personal = true LIMIT 1) WHERE organization_id IS NULL AND user_id IS NOT NULL`,
 		`ALTER TABLE apple_connections ALTER COLUMN organization_id SET NOT NULL`,
 		`ALTER TABLE google_play_connections ALTER COLUMN organization_id SET NOT NULL`,
-		`ALTER TABLE deployments ALTER COLUMN organization_id SET NOT NULL`,
 		`ALTER TABLE api_keys ALTER COLUMN organization_id SET NOT NULL`,
 		`ALTER TABLE webhook_endpoints ALTER COLUMN organization_id SET NOT NULL`,
 		// Plan 5: billing rebind to org (2026-04-30-stripe-customer-to-org)
@@ -424,11 +417,11 @@ func createSchema(db *bun.DB) error {
 		// Nil = "no default configured" — no auto-sign happens until set.
 		`ALTER TABLE app_projects ADD COLUMN IF NOT EXISTS default_apple_connection_id uuid`,
 		`ALTER TABLE app_projects ADD COLUMN IF NOT EXISTS default_google_connection_id uuid`,
-		// P1.0: encrypted-at-rest credential refs. nullzero so legacy rows
-		// without backfill stay readable; backfillEncryptCredentials populates
-		// these in-process at startup.
+		// P1.0: encrypted-at-rest credential refs. CreateTable for fresh DBs
+		// emits the column from the model tag, but existing prod DBs from before
+		// the model field landed need this ALTER. The companion APNs CredRef is
+		// dropped further below (2026-05-07).
 		`ALTER TABLE apple_connections ADD COLUMN IF NOT EXISTS p8_key_cred_ref jsonb`,
-		`ALTER TABLE apple_connections ADD COLUMN IF NOT EXISTS apns_p8_key_cred_ref jsonb`,
 		`ALTER TABLE google_play_connections ADD COLUMN IF NOT EXISTS service_account_cred_ref jsonb`,
 		// P1.2 — per-app publishing settings for Codemagic submit workflows
 		`ALTER TABLE app_projects ADD COLUMN IF NOT EXISTS app_store_track text NOT NULL DEFAULT 'internal'`,
@@ -580,6 +573,27 @@ func createSchema(db *bun.DB) error {
 		// directly through app_project_id.
 		`ALTER TABLE builds DROP COLUMN IF EXISTS project_id`,
 		`ALTER TABLE app_build_tasks DROP COLUMN IF EXISTS project_id`,
+		// 2026-05-07: store the Codemagic-side build id on each task so we
+		// can propagate cancel requests via POST /builds/{id}/cancel.
+		// Empty for legacy rows or builds whose trigger response we couldn't
+		// persist; CancelBuildTask treats empty as a no-op on the remote side.
+		`ALTER TABLE app_build_tasks ADD COLUMN IF NOT EXISTS codemagic_build_id text`,
+		// 2026-05-07: drop legacy plaintext-pointer columns on connection rows.
+		// CredRef is the sole credential storage now (CredStore-encrypted blobs);
+		// the *Path columns were the dual-write fallback during the encryption
+		// rollout and are now dead weight. APNs subsystem is dropped wholesale —
+		// no business logic ever read APNSP8Key{Path,ID,CredRef}, so when iOS
+		// push gets wired up later it gets a fresh APNsCredential model with
+		// real consumers. See models/credentials.go.
+		//
+		// Column name `apnsp8_key_path` (no underscore between "apns" and "p8")
+		// is a Bun snake_case quirk: the original APNSP8KeyPath field had no
+		// explicit tag, so all-caps runs stay together.
+		`ALTER TABLE apple_connections DROP COLUMN IF EXISTS p8_key_path`,
+		`ALTER TABLE apple_connections DROP COLUMN IF EXISTS apnsp8_key_path`,
+		`ALTER TABLE apple_connections DROP COLUMN IF EXISTS apns_p8_key_id`,
+		`ALTER TABLE apple_connections DROP COLUMN IF EXISTS apns_p8_key_cred_ref`,
+		`ALTER TABLE google_play_connections DROP COLUMN IF EXISTS service_account_path`,
 	}
 
 	// Deduplicate before creating unique indexes (keep the latest row per group)
@@ -620,22 +634,37 @@ func createSchema(db *bun.DB) error {
 		   ON mobile_subscriptions (app_project_id, status) WHERE deleted_at IS NULL`,
 	}
 	alterStatements = append(alterStatements, indexStatements...)
-	// Check if migrations have already been applied by testing for a column from the latest batch.
-	// This avoids running ALTER TABLE statements on every startup, which take AccessExclusiveLock
-	// and block all reads on the affected tables.
-	// IMPORTANT: when adding a new ALTER TABLE above, update this canary to the newest column,
-	// otherwise the new ALTER will be silently skipped on servers that already have older columns.
-	// Table renames go in renameStatements below, not here — they run unconditionally.
+	// Check if migrations have already been applied by probing schema state.
+	// This avoids running ALTER TABLE statements on every startup, which take
+	// AccessExclusiveLock and block all reads on the affected tables.
 	//
-	// Canary: builds.project_id must NOT exist (dropped 2026-05-07 as part of
-	// the v1 shadow Project removal final cleanup). This is an inverse-style
-	// canary because the latest batch only DROPs / DELETEs / TIGHTENs — there's
-	// no new column to assert positive existence on. migrationsDone=true means
-	// the column has been dropped, so we skip the ALTERs; false means we still
-	// need to run them.
+	// CANARY MAINTENANCE — read this before adding a new ALTER above:
+	//
+	// The canary fires when the probe returns false → "migrations not done
+	// → run them." After the latest batch lands, the probe must return true
+	// so the next restart skips. Two valid styles:
+	//
+	//   1. Positive existence — `EXISTS(... column='X')` where X is a column
+	//      ADDED by the latest batch. Default style for ADD COLUMN batches.
+	//   2. Negative existence — `NOT EXISTS(... column='Y')` where Y is a
+	//      column DROPPED by the latest batch (or a table). Use when the
+	//      batch is purely DROPs / DELETEs / SET NOT NULLs with no new
+	//      column to assert on.
+	//
+	// When you add a new ALTER above, update this probe to a column / table
+	// that the new ALTER guarantees the post-state of. Otherwise the new
+	// ALTER will be silently skipped on servers that already passed an
+	// earlier canary.
+	//
+	// Table renames go in renameStatements below, not here — they run
+	// unconditionally.
+	//
+	// Current canary: negative existence on apple_connections.p8_key_path.
+	// Dropped 2026-05-07 when CredRef became the sole credential storage.
+	// migrationsDone=true means the drops have already run on this DB.
 	var migrationsDone bool
 	row := db.QueryRowContext(context.Background(),
-		"SELECT NOT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='builds' AND column_name='project_id')")
+		"SELECT NOT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='apple_connections' AND column_name='p8_key_path')")
 	if err := row.Scan(&migrationsDone); err != nil {
 		migrationsDone = false
 	}
@@ -704,17 +733,6 @@ func createSchema(db *bun.DB) error {
     ALTER TABLE coolify_projects RENAME TO runtime_apps;
   END IF;
 END $$`,
-		// Deployment FK columns — guard with DO block to stay idempotent
-		`DO $$ BEGIN
-  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='deployments' AND column_name='app_store_credentials_id') THEN
-    ALTER TABLE deployments RENAME COLUMN app_store_credentials_id TO apple_connection_id;
-  END IF;
-END $$`,
-		`DO $$ BEGIN
-  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='deployments' AND column_name='google_play_credentials_id') THEN
-    ALTER TABLE deployments RENAME COLUMN google_play_credentials_id TO google_play_connection_id;
-  END IF;
-END $$`,
 		// Ensure soft-delete columns exist on the renamed tables. Moved out
 		// of alterStatements so the canary can't skip them when a
 		// transitional DB had the old tables + error_message column
@@ -722,8 +740,13 @@ END $$`,
 		`ALTER TABLE IF EXISTS apple_connections ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
 		`ALTER TABLE IF EXISTS google_play_connections ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
 		`ALTER TABLE IF EXISTS runtime_apps ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
-		`ALTER TABLE IF EXISTS deployments ADD COLUMN IF NOT EXISTS release_notes text`,
-		`ALTER TABLE IF EXISTS deployments ADD COLUMN IF NOT EXISTS rollout_track text`,
+
+		// Drop the legacy deployments table — replaced by Release (submission
+		// tracking) + AppDeployment (deploy events). The legacy WebView
+		// submission pipeline is gone, no code path writes new rows, and the
+		// table's project_id FK pointed at v1 shadow Project rows that were
+		// soft-deleted in PR #96 (2026-05-07). Idempotent on second runs.
+		`DROP TABLE IF EXISTS deployments`,
 
 		// Coolify cleanup (post-Fly migration). Idempotent; runs once and
 		// becomes a no-op on subsequent boots.
@@ -816,7 +839,6 @@ END $$`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_app_env_vars_project_key ON app_env_vars(app_project_id, key) WHERE deleted_at IS NULL`,
 		`CREATE INDEX IF NOT EXISTS idx_app_integrations_app_project_id ON app_integrations(app_project_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_app_dashboards_app_project_id ON app_dashboards(app_project_id)`,
-		`CREATE INDEX IF NOT EXISTS idx_deployments_project_id ON deployments(project_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_ai_credits_balances_user_id ON ai_credits_balances(user_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_ai_credit_transactions_user_id ON ai_credit_transactions(user_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_ai_credit_transactions_user_created ON ai_credit_transactions(user_id, created_at DESC)`,
@@ -1277,169 +1299,6 @@ func backfillEncryptIntegrations(bundb *bun.DB, sm secret.SecretManager) {
 	}
 }
 
-// backfillEncryptCredentials sweeps every Apple + Google Play connection
-// row whose CredRef columns are NULL: reads the legacy S3 plaintext,
-// encrypts via CredStore, persists the ref. Idempotent — rows with a
-// non-NULL ref are skipped. Legacy plaintext is left in place for the
-// dual-read transition.
-//
-// Deploy ordering: runs in-process AFTER createSchema and BEFORE the HTTP
-// server starts. Old code paths that haven't been switched to dual-read keep
-// reading legacy plaintext; new dual-read paths prefer CredRef when present.
-func backfillEncryptCredentials(bundb *bun.DB, credStore *storage.CredStore, userKeys *storage.S3Storage) {
-	ctx := context.Background()
-	const batchSize = 100
-
-	// Apple: p8 + apns p8 in one pass per row. The WHERE gates on a non-empty
-	// path being present so rows with no encryptable content are excluded —
-	// otherwise the loop would re-fetch them forever (a row with p8 done but
-	// apnsp8_key_path == "" would still match the NULL-ref check).
-	//
-	// Note on column name: APNSP8KeyPath has no explicit bun tag, so Bun's
-	// snake_case keeps the all-caps run together → `apnsp8_key_path` (no
-	// underscore between "apns" and "p8"). The new CredRef columns DO have
-	// explicit tags so they use `apns_p8_key_cred_ref`.
-	//
-	// Pagination is cursor-based on `id`: each batch fetches rows with id > the
-	// last seen id. This guarantees forward progress even if every row in a
-	// batch fails to encrypt (e.g. orphaned S3 object, IAM gap) — the failed
-	// rows would otherwise reappear in the next SELECT and wedge the loop.
-	// Partial successes are still preserved (a row with one ref encrypted
-	// keeps that ref persisted; subsequent runs pick up the missing leaf).
-	totalApple := 0
-	var appleCursor uuid.UUID
-	for {
-		var rows []models.AppleConnection
-		if err := bundb.NewSelect().
-			Model(&rows).
-			Where("(p8_key_cred_ref IS NULL AND p8_key_path != '') OR (apns_p8_key_cred_ref IS NULL AND apnsp8_key_path != '')").
-			Where("deleted_at IS NULL").
-			Where("id > ?", appleCursor).
-			Order("id ASC").
-			Limit(batchSize).
-			Scan(ctx); err != nil {
-			slog.Error("backfillEncryptCredentials apple: scan failed", "err", err)
-			break
-		}
-		if len(rows) == 0 {
-			break
-		}
-		appleCursor = rows[len(rows)-1].ID
-		for i := range rows {
-			r := &rows[i]
-			changed := false
-			if r.P8KeyCredRef == nil && r.P8KeyPath != "" {
-				if pt, err := userKeys.ReadObjectBytes(ctx, r.P8KeyPath); err == nil {
-					if ref, err := credStore.Put(ctx, r.OrganizationID, "apple-p8", pt); err == nil {
-						r.P8KeyCredRef = &models.CredRefJSON{
-							OrgID:        ref.OrgID,
-							Kind:         ref.Kind,
-							BlobS3Key:    ref.BlobS3Key,
-							DEKBlobS3Key: ref.DEKBlobS3Key,
-						}
-						changed = true
-					} else {
-						slog.Warn("backfill apple p8 put", "id", r.ID, "err", err)
-					}
-				} else {
-					slog.Warn("backfill apple p8 read", "id", r.ID, "path", r.P8KeyPath, "err", err)
-				}
-			}
-			if r.APNSP8KeyCredRef == nil && r.APNSP8KeyPath != "" {
-				if pt, err := userKeys.ReadObjectBytes(ctx, r.APNSP8KeyPath); err == nil {
-					if ref, err := credStore.Put(ctx, r.OrganizationID, "apple-apns", pt); err == nil {
-						r.APNSP8KeyCredRef = &models.CredRefJSON{
-							OrgID:        ref.OrgID,
-							Kind:         ref.Kind,
-							BlobS3Key:    ref.BlobS3Key,
-							DEKBlobS3Key: ref.DEKBlobS3Key,
-						}
-						changed = true
-					} else {
-						slog.Warn("backfill apple apns put", "id", r.ID, "err", err)
-					}
-				} else {
-					slog.Warn("backfill apple apns read", "id", r.ID, "path", r.APNSP8KeyPath, "err", err)
-				}
-			}
-			if changed {
-				if _, err := bundb.NewUpdate().
-					Model(r).
-					Column("p8_key_cred_ref", "apns_p8_key_cred_ref", "updated_at").
-					Where("id = ?", r.ID).
-					Exec(ctx); err != nil {
-					slog.Warn("backfill apple update", "id", r.ID, "err", err)
-					continue
-				}
-				totalApple++
-			}
-		}
-		if len(rows) < batchSize {
-			break
-		}
-	}
-	if totalApple > 0 {
-		slog.Info("backfillEncryptCredentials apple: encrypted rows", "count", totalApple)
-	}
-
-	// Google Play. Single ref column, so the gated WHERE is straightforward.
-	// Same cursor-based pagination as the Apple loop above.
-	totalGoogle := 0
-	var googleCursor uuid.UUID
-	for {
-		var rows []models.GooglePlayConnection
-		if err := bundb.NewSelect().
-			Model(&rows).
-			Where("service_account_cred_ref IS NULL AND service_account_path != ''").
-			Where("deleted_at IS NULL").
-			Where("id > ?", googleCursor).
-			Order("id ASC").
-			Limit(batchSize).
-			Scan(ctx); err != nil {
-			slog.Error("backfillEncryptCredentials google: scan failed", "err", err)
-			break
-		}
-		if len(rows) == 0 {
-			break
-		}
-		googleCursor = rows[len(rows)-1].ID
-		for i := range rows {
-			r := &rows[i]
-			pt, err := userKeys.ReadObjectBytes(ctx, r.ServiceAccountPath)
-			if err != nil {
-				slog.Warn("backfill google sa read", "id", r.ID, "path", r.ServiceAccountPath, "err", err)
-				continue
-			}
-			ref, err := credStore.Put(ctx, r.OrganizationID, "google-sa", pt)
-			if err != nil {
-				slog.Warn("backfill google sa put", "id", r.ID, "err", err)
-				continue
-			}
-			r.ServiceAccountCredRef = &models.CredRefJSON{
-				OrgID:        ref.OrgID,
-				Kind:         ref.Kind,
-				BlobS3Key:    ref.BlobS3Key,
-				DEKBlobS3Key: ref.DEKBlobS3Key,
-			}
-			if _, err := bundb.NewUpdate().
-				Model(r).
-				Column("service_account_cred_ref", "updated_at").
-				Where("id = ?", r.ID).
-				Exec(ctx); err != nil {
-				slog.Warn("backfill google update", "id", r.ID, "err", err)
-				continue
-			}
-			totalGoogle++
-		}
-		if len(rows) < batchSize {
-			break
-		}
-	}
-	if totalGoogle > 0 {
-		slog.Info("backfillEncryptCredentials google: encrypted rows", "count", totalGoogle)
-	}
-}
-
 // isSensitiveLogPath returns true if a request URL path is known to carry
 // secrets, credentials, or signed third-party payloads that must never land
 // in BetterStack. Used by httplog LogExtraAttrs to skip body capture on
@@ -1541,10 +1400,6 @@ func main() {
 	// env vars. Runs in-process so the new decrypt code is already live when
 	// the rewrite happens — no rolling-deploy ordering trap.
 	backfillEncryptIntegrations(bundb, sm)
-
-	// One-shot CredStore backfill for Apple + Google Play connection rows
-	// whose CredRef columns are NULL. Idempotent — re-running is a no-op.
-	backfillEncryptCredentials(bundb, controller.CredStore, controller.UserApiKeysStorage)
 
 	seedPlans(db, sm)
 	migrateInactiveUsersToFree(bundb)
@@ -1717,7 +1572,6 @@ func main() {
 				r.Route("/credentials", func(r chi.Router) {
 					r.Route("/apple", func(r chi.Router) {
 						r.Post("/", httpViews.PutP8KeyToS3Presign)
-						r.Post("/apns", httpViews.PutAPNsKeyToS3Presign)
 					})
 					r.Route("/google", func(r chi.Router) {
 						r.Post("/", httpViews.PutServiceAccountToS3Presign)
@@ -1871,17 +1725,6 @@ func main() {
 						r.Delete("/", httpViews.DeleteAppleConnection)
 					})
 				})
-			})
-			r.Route("/deployments", func(r chi.Router) {
-				r.Get("/", httpViews.GetDeployments)
-				r.Get("/{deploymentId}", httpViews.GetDeployment)
-				r.Get("/{deploymentId}/events", httpViews.GetDeploymentEvents)
-				r.Route("/tools", func(r chi.Router) {
-					r.Post("/generate_screenshots", httpViews.AutoGenerateScreenshots)
-				})
-			})
-			r.Route("/reports", func(r chi.Router) {
-				r.Post("/deploy", httpViews.UpdateDeploymentStatus)
 			})
 			r.Route("/billing", func(r chi.Router) {
 				r.Get("/plans", httpViews.GetBillingPlans)
@@ -2166,10 +2009,6 @@ func main() {
 						r.Get("/status", httpViews.GetDeployStatus)
 						r.Get("/history", httpViews.GetDeployHistory)
 					})
-
-					// P1 #12 mobile audit: JS-only OTA quick publish via Codemagic.
-					r.With(rateLimiter.RateLimit(5, time.Minute, appMiddleware.UserKey)).
-						Post("/ota/quick-publish", httpViews.QuickPublishOTA)
 
 					// <P2#22> ota rollback + promote — project-owner-authenticated
 					// recovery + staged-rollout controls. Rate limit is intentionally
@@ -2519,16 +2358,6 @@ func main() {
 		}
 	}()
 
-	// Phase 5c-i: poll App Store Connect + Google Play for state changes
-	// on in-flight deployments, writing store_* events.
-	pollerCtx, cancelPoller := context.WithCancel(context.Background())
-	poller := &storepoll.Poller{
-		DB:        controller.DB,
-		Reader:    controller,
-		PollEvery: 10 * time.Minute,
-	}
-	go poller.Run(pollerCtx)
-
 	// <P1#16> release status poll — once a minute, scan all releases in
 	// non-terminal status and ask App Store Connect / Google Play for the
 	// latest state. Replaces "Codemagic finished uploading" as the source of
@@ -2563,8 +2392,7 @@ func main() {
 			controller.PostHog.Close()
 		}
 
-		// Stop the store-API poller.
-		cancelPoller()
+		// Stop the release-status poller.
 		cancelReleasePoll()
 
 		// Shutdown main server

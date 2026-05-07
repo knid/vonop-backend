@@ -97,6 +97,29 @@ func (db *Database) GetAppBuildTaskById(id string) (*models.AppBuildTask, error)
 	return &appBuildTask, err
 }
 
+// GetLatestAppBuildTaskByBuildID returns the most recently updated
+// AppBuildTask attached to a Build. Used by GetDeployStatus /
+// GetDeployHistory to synthesize an AppDeploymentResponse for mobile
+// projects (which now publish via Codemagic and write Build +
+// AppBuildTask rather than AppDeployment).
+//
+// A native mobile build can produce up to two task rows (Android + iOS);
+// an OTA publish produces one row with platform="OTA". Returning the
+// latest by updated_at gives the most recent terminal status.
+func (db *Database) GetLatestAppBuildTaskByBuildID(buildID string) (*models.AppBuildTask, error) {
+	var task models.AppBuildTask
+	err := db.DB.NewSelect().
+		Model(&task).
+		Where("build_id = ?", buildID).
+		Order("updated_at DESC").
+		Limit(1).
+		Scan(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	return &task, nil
+}
+
 func (db *Database) GetAppBuildTaskWithRelations(id string) (*models.AppBuildTask, error) {
 	var appBuildTask models.AppBuildTask
 	err := db.DB.NewSelect().Model(&appBuildTask).
@@ -143,6 +166,23 @@ func (db *Database) GetLatestSuccessfulBuildTaskByAppProjectAndPlatform(
 
 func (db *Database) UpdateAppBuildTask(buildTask *models.AppBuildTask) error {
 	_, err := db.DB.NewUpdate().Model(buildTask).Where("id = ?", buildTask.ID.String()).Exec(context.Background())
+	return err
+}
+
+// SetAppBuildTaskCodemagicBuildID writes only codemagic_build_id + updated_at
+// on the row. Avoids the Bun whole-row footgun (memory
+// feedback_bun_whole_row_update.md): a NewUpdate().Model(task) here would
+// also write status_text, finished, error_message etc. — and on the
+// trigger path the row was just inserted with status_text = "Queued",
+// so a whole-row write would clobber any concurrent webhook that flipped
+// the row to "Building" or "Failed" between the insert and our update.
+func (db *Database) SetAppBuildTaskCodemagicBuildID(ctx context.Context, taskID uuid.UUID, codemagicBuildID string) error {
+	_, err := db.DB.NewUpdate().
+		TableExpr("app_build_tasks").
+		Set("codemagic_build_id = ?", codemagicBuildID).
+		Set("updated_at = current_timestamp").
+		Where("id = ?", taskID).
+		Exec(ctx)
 	return err
 }
 

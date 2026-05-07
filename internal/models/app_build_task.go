@@ -27,6 +27,11 @@ type AppBuildTask struct {
 	// either the build succeeded, or no pattern matched.
 	AnnotationID *uuid.UUID       `bun:",type:uuid,nullzero"`
 	Annotation   *BuildAnnotation `bun:"rel:belongs-to,join:annotation_id=id"`
+	// CodemagicBuildID is the Codemagic-side build identifier returned by the
+	// trigger API. Stored so we can call Codemagic's POST /builds/{id}/cancel
+	// when a user cancels mid-build. Empty for legacy rows or builds whose
+	// trigger response we couldn't persist.
+	CodemagicBuildID string `bun:"codemagic_build_id,nullzero"`
 	ExecuteTime  time.Time        `bun:",nullzero,notnull,default:current_timestamp"`
 	CreatedAt    time.Time        `bun:"created_at,nullzero,notnull,default:current_timestamp"`
 	UpdatedAt    time.Time        `bun:"updated_at,nullzero,notnull,default:current_timestamp"`
