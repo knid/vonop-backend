@@ -20,7 +20,7 @@ import (
 )
 
 // submitFixture wires a test controller + project + user + org +
-// (optional) Apple/Google connections + (optional) v1 shadow project + successful build.
+// (optional) Apple/Google connections + (optional) successful build.
 type submitFixture struct {
 	c       *Controller
 	db      *database.Database
@@ -28,7 +28,6 @@ type submitFixture struct {
 	user    *models.User
 	org     *models.Organization
 	project *models.AppProject
-	v1      *models.Project
 	build   *models.Build
 }
 
@@ -43,7 +42,6 @@ func newSubmitFixture(t *testing.T, withApple, withGoogle, withBuild bool) *subm
 		(*models.Organization)(nil),
 		(*models.OrganizationMember)(nil),
 		(*models.AppProject)(nil),
-		(*models.Project)(nil),
 		(*models.Build)(nil),
 		(*models.AppBuildTask)(nil),
 		(*models.AppleConnection)(nil),
@@ -137,20 +135,12 @@ func newSubmitFixture(t *testing.T, withApple, withGoogle, withBuild bool) *subm
 	}
 
 	if withBuild {
-		// Seed a v1 shadow project + Build + successful AppBuildTask for both platforms.
-		v1 := &models.Project{
-			ID: uuid.New(), UserID: user.ID, URL: "expo://" + project.Slug,
-			PackageName:       "com.wemob." + strings.ReplaceAll(project.Slug, "-", ""),
-			IconPath:          "",
-			OneSignalAppID:    "expo-shadow-" + project.ID.String(),
-			OneSignalAppToken: "expo-shadow-token-" + project.ID.String(),
-			BuildForAndroid:   true, BuildForIOS: true,
-		}
-		if _, err := db.DB.NewInsert().Model(v1).Exec(ctx); err != nil {
-			t.Fatalf("seed v1 project: %v", err)
-		}
+		// Seed Build + successful AppBuildTask for both platforms, scoped via
+		// app_project_id directly (no v1 shadow row).
 		build := &models.Build{
-			ID: uuid.New(), ProjectID: v1.ID, BuildNumber: 1,
+			ID:                uuid.New(),
+			AppProjectID:      &project.ID,
+			BuildNumber:       1,
 			Title:             "X",
 			Description:       "test build",
 			Icon:              "",
@@ -161,17 +151,17 @@ func newSubmitFixture(t *testing.T, withApple, withGoogle, withBuild bool) *subm
 		if _, err := db.DB.NewInsert().Model(build).Exec(ctx); err != nil {
 			t.Fatalf("seed build: %v", err)
 		}
+		appProjectID := project.ID
 		for _, platform := range []string{"Android", "IOS"} {
 			task := &models.AppBuildTask{
-				ID: uuid.New(), ProjectID: v1.ID, BuildID: build.ID, Platform: platform,
-				StatusText: "Succeeded", Finished: true,
+				ID: uuid.New(), AppProjectID: &appProjectID, BuildID: build.ID, Platform: platform,
+				StatusText: "Built", Finished: true,
 				CreatedAt: time.Now(),
 			}
 			if _, err := db.DB.NewInsert().Model(task).Exec(ctx); err != nil {
 				t.Fatalf("seed task %s: %v", platform, err)
 			}
 		}
-		fx.v1 = v1
 		fx.build = build
 	}
 

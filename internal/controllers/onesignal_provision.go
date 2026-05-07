@@ -15,13 +15,6 @@ import (
 // these from Apple/Google credentials.
 const onesignalRESTKeyKind = "onesignal-rest-key"
 
-// onesignalShadowPrefix is retained as a compatibility shim for the few
-// remaining v1-shadow consumers (compose_push.go in particular). Task 3
-// rewrites those paths to read from MobileAppConfig directly, at which point
-// this constant can be removed. Until then it lets the build keep compiling
-// while Task 2 lands.
-const onesignalShadowPrefix = "expo-shadow-"
-
 // provisionOneSignalApp ensures a real OneSignal application + REST API token
 // exist for this mobile_app_native project. Persists the app id +
 // envelope-encrypted REST key on MobileAppConfig (per-AppProject) — the v1

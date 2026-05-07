@@ -39,14 +39,17 @@ func (db *Database) CreateProjectBuild(build *models.Build) (*models.Build, erro
 	return build, err
 }
 
+// CountUserBuildsSince counts builds owned by the user (via AppProject)
+// since `since`. Mobile builds now carry app_project_id directly; the legacy
+// v1 join was dropped because mobile builds have project_id = NULL.
 func (db *Database) CountUserBuildsSince(userID string, since time.Time) (int, error) {
 	count, err := db.DB.NewSelect().
 		TableExpr("builds AS b").
-		Join("JOIN projects AS p ON p.id = b.project_id").
-		Where("p.user_id = ?", userID).
+		Join("JOIN app_projects AS ap ON ap.id = b.app_project_id").
+		Where("ap.user_id = ?", userID).
 		Where("b.created_at >= ?", since).
 		Where("b.deleted_at IS NULL").
-		Where("p.deleted_at IS NULL").
+		Where("ap.deleted_at IS NULL").
 		Count(context.Background())
 	return count, err
 }

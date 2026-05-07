@@ -381,6 +381,19 @@ func TestUpsertMobileAppConfigOneSignal_CreatesThenUpdates(t *testing.T) {
 	if cfg1.OneSignalRESTKeyCredRef == nil || cfg1.OneSignalRESTKeyCredRef.BlobS3Key != "blob/v1" {
 		t.Errorf("first upsert credref: got %+v", cfg1.OneSignalRESTKeyCredRef)
 	}
+	// Bun whole-row-insert footgun guard (memory feedback_bun_whole_row_update.md):
+	// the INSERT must not stomp the column-level defaults for sibling fields.
+	// PushEnabled and OTAEnabled both default to true at the PG layer; if the
+	// upsert leaks Go zero values into the INSERT, both will come back false.
+	if !cfg1.PushEnabled {
+		t.Errorf("PushEnabled = false on fresh row; expected true (column default stomped by Bun whole-row INSERT)")
+	}
+	if !cfg1.OTAEnabled {
+		t.Errorf("OTAEnabled = false on fresh row; expected true (column default stomped by Bun whole-row INSERT)")
+	}
+	if cfg1.RatingSessions != 5 {
+		t.Errorf("RatingSessions = %d on fresh row; expected 5 (column default stomped)", cfg1.RatingSessions)
+	}
 
 	// Second upsert — same project_id, different values. Must update in
 	// place, not insert a duplicate row.

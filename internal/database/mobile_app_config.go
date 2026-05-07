@@ -64,6 +64,13 @@ func (db *Database) UpsertMobileAppConfig(config *models.MobileAppConfig) (*mode
 // key reference on the project's MobileAppConfig, creating the row if
 // missing. Idempotent. Used by provisionOneSignalApp + the cross-app
 // OneSignal lifecycle. CredRef envelope means we never persist the raw key.
+//
+// IMPORTANT: the INSERT enumerates only the columns it owns (project_id +
+// the two OneSignal fields) so PG applies column-level defaults for every
+// other field. Letting Bun emit a whole-row INSERT would send Go zero
+// values (false / 0 / "") for sibling columns like PushEnabled (default:true)
+// and RatingSessions (default:5), overriding the PG defaults — see memory
+// `feedback_bun_whole_row_update.md`.
 func (db *Database) UpsertMobileAppConfigOneSignal(
 	ctx context.Context,
 	appProjectID uuid.UUID,
@@ -77,6 +84,7 @@ func (db *Database) UpsertMobileAppConfigOneSignal(
 	}
 	_, err := db.DB.NewInsert().
 		Model(cfg).
+		Column("project_id", "one_signal_app_id", "one_signal_rest_key_cred_ref").
 		On("CONFLICT (project_id) DO UPDATE").
 		Set("one_signal_app_id = EXCLUDED.one_signal_app_id").
 		Set("one_signal_rest_key_cred_ref = EXCLUDED.one_signal_rest_key_cred_ref").

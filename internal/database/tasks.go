@@ -23,11 +23,15 @@ func (db *Database) CreateAppBuildTask(build models.Build, appProjectID *uuid.UU
 	return &appBuildTask, err
 }
 
+// GetAppBuildTasksByUser returns every build task owned by `user` (via the
+// AppProject ownership chain). Mobile_app_native builds carry app_project_id;
+// the legacy v1 join was dropped because mobile builds now have project_id =
+// NULL.
 func (db *Database) GetAppBuildTasksByUser(user *models.User) ([]models.AppBuildTask, error) {
 	var appBuildTasks []models.AppBuildTask
 	err := db.DB.NewSelect().Model(&appBuildTasks).
-		Join("JOIN projects ON projects.id = app_build_task.project_id").
-		Where("projects.user_id = ?", user.ID.String()).
+		Join("JOIN app_projects ap ON ap.id = app_build_task.app_project_id").
+		Where("ap.user_id = ?", user.ID.String()).
 		Scan(context.Background())
 	if err != nil {
 		return nil, err
@@ -36,20 +40,18 @@ func (db *Database) GetAppBuildTasksByUser(user *models.User) ([]models.AppBuild
 }
 
 // CountAppBuildTasksByOrgInPeriod counts native (Android/iOS) build tasks
-// triggered by any member of the given org within [start, end). Used by the
-// MontlyBuildCount enforcement gate (A3 — previously theatrical).
+// triggered for any AppProject in the given org within [start, end). Used by
+// the MontlyBuildCount enforcement gate (A3 — previously theatrical).
 //
-// app_build_tasks.project_id references the v1 `projects` table whose UserID
-// is the trigger user. Org membership is resolved via organization_members so
-// every member's builds count against the same monthly budget.
+// Joins through app_projects.organization_id so every member's builds count
+// against the same monthly budget.
 func (db *Database) CountAppBuildTasksByOrgInPeriod(ctx context.Context, orgID string, start, end time.Time) (int, error) {
 	var count int
 	err := db.DB.NewSelect().
 		TableExpr("app_build_tasks AS abt").
-		Join("JOIN projects p ON p.id = abt.project_id").
-		Join("JOIN organization_members om ON om.user_id = p.user_id").
+		Join("JOIN app_projects ap ON ap.id = abt.app_project_id").
 		ColumnExpr("COUNT(*)").
-		Where("om.organization_id = ?", orgID).
+		Where("ap.organization_id = ?", orgID).
 		Where("abt.platform IN ('Android','IOS')").
 		Where("abt.created_at >= ?", start).
 		Where("abt.created_at < ?", end).
@@ -57,18 +59,17 @@ func (db *Database) CountAppBuildTasksByOrgInPeriod(ctx context.Context, orgID s
 	return count, err
 }
 
-// GetAppBuildTasksByUserAndProject scopes the task list to a single v1
-// Project shadow row owned by the user. The Publish UI uses this so a
-// brand-new project doesn't get a Native-build row sourced from a 2-week-
-// old food-photo app the same user happened to build. The user-ownership
-// join is preserved so a forged project_id query can't read someone
-// else's tasks.
-func (db *Database) GetAppBuildTasksByUserAndProject(user *models.User, projectID string) ([]models.AppBuildTask, error) {
+// GetAppBuildTasksByUserAndAppProject scopes the task list to a single
+// AppProject owned by the user. The Publish UI uses this so a brand-new
+// project doesn't get a Native-build row sourced from a 2-week-old food-photo
+// app the same user happened to build. The user-ownership join is preserved
+// so a forged project_id query can't read someone else's tasks.
+func (db *Database) GetAppBuildTasksByUserAndAppProject(user *models.User, appProjectID string) ([]models.AppBuildTask, error) {
 	var appBuildTasks []models.AppBuildTask
 	err := db.DB.NewSelect().Model(&appBuildTasks).
-		Join("JOIN projects ON projects.id = app_build_task.project_id").
-		Where("projects.user_id = ?", user.ID.String()).
-		Where("app_build_task.project_id = ?", projectID).
+		Join("JOIN app_projects ap ON ap.id = app_build_task.app_project_id").
+		Where("ap.user_id = ?", user.ID.String()).
+		Where("app_build_task.app_project_id = ?", appProjectID).
 		Scan(context.Background())
 	if err != nil {
 		return nil, err
@@ -128,26 +129,29 @@ func (db *Database) GetAppBuildTaskByProject(project *models.Project) ([]models.
 	return appBuildTasks, err
 }
 
-// GetLatestSuccessfulBuildTaskByProjectAndPlatform returns the most recent
-// successful build task for a v1 project + platform combination. Used by
-// SubmitExpoMobile to find which build to submit. Platform values are
-// "Android" or "IOS" (matches AppBuildTask.Platform vocabulary).
+// GetLatestSuccessfulBuildTaskByAppProjectAndPlatform returns the most
+// recent finished+Built AppBuildTask for an AppProject + platform.
+// Returns sql.ErrNoRows if no such task exists.
 //
-// Status vocabulary (P0 #2 unification, 2026-05-05): the canonical success
-// value is "Built" — what UpdateExpoBuildStatus and the legacy v1 path
-// (controllers/reports.go) both write. "Succeeded" is kept in the IN list
-// as a safety net for any historical rows that might still carry it (it is
-// no longer written by any code path) and for the existing
-// submit_expo_mobile_integration_test.go fixtures. The real semantic gate
-// is `finished = true` — without that, an in-progress row matching by
-// status alone would be wrongly returned.
-func (db *Database) GetLatestSuccessfulBuildTaskByProjectAndPlatform(ctx context.Context, v1ProjectID uuid.UUID, platform string) (*models.AppBuildTask, error) {
+// Replaces GetLatestSuccessfulBuildTaskByProjectAndPlatform (which joined
+// through the v1 shadow Project) — mobile builds now carry app_project_id
+// directly. Platform values are "Android" or "IOS" (matches
+// AppBuildTask.Platform vocabulary). The semantic gate is `finished = true`
+// AND status_text = "Built"; "Succeeded" rows from the historical v1 path
+// are NOT matched (they don't exist on the AppProject path).
+func (db *Database) GetLatestSuccessfulBuildTaskByAppProjectAndPlatform(
+	ctx context.Context,
+	appProjectID uuid.UUID,
+	platform string,
+) (*models.AppBuildTask, error) {
 	var task models.AppBuildTask
-	err := db.DB.NewSelect().Model(&task).
-		Where("project_id = ?", v1ProjectID).
+	err := db.DB.NewSelect().
+		Model(&task).
+		Where("app_project_id = ?", appProjectID).
 		Where("platform = ?", platform).
-		Where("status_text IN (?)", bun.In([]string{"Built", "Succeeded"})).
-		Where("finished = true").
+		Where("status_text = ?", "Built").
+		Where("finished = ?", true).
+		Where("deleted_at IS NULL").
 		Order("created_at DESC").
 		Limit(1).
 		Scan(ctx)
