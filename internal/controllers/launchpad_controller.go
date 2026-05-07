@@ -90,8 +90,8 @@ func (c *Controller) GetLaunchpad(ctx context.Context, user *models.User, appID 
 	resp.WebPreview = c.buildWebPreview(ctx, project)
 
 	// Stores — per-platform tile.
-	resp.Stores.PlayStore = c.buildStoreTile(ctx, user.ID, v1ProjectID, "android")
-	resp.Stores.AppStore = c.buildStoreTile(ctx, user.ID, v1ProjectID, "ios")
+	resp.Stores.PlayStore = c.buildStoreTile(ctx, user.ID, project.ID, "android")
+	resp.Stores.AppStore = c.buildStoreTile(ctx, user.ID, project.ID, "ios")
 
 	// Listing — tile-by-tile store listing readiness.
 	resp.Listing = c.buildListing(ctx, project.ID)
@@ -100,7 +100,7 @@ func (c *Controller) GetLaunchpad(ctx context.Context, user *models.User, appID 
 	resp.Builds = c.buildBuilds(ctx, project.ID.String())
 
 	// RecentDeployment — most-recent submission in the last 7 days.
-	resp.RecentDeployment = c.buildRecentDeployment(ctx, v1ProjectID)
+	resp.RecentDeployment = c.buildRecentDeployment(ctx, project.ID)
 
 	// Identity — bundle ID, version string, and permissions.
 	resp.Identity = c.buildIdentity(ctx, project.ID, resp.App)
@@ -179,14 +179,14 @@ func normalizeWebStatus(s string) string {
 	return "none"
 }
 
-// buildStoreTile queries the latest Deployment for the given platform and
+// buildStoreTile queries the latest Release for the given platform and
 // the user's connection presence, then returns a LaunchpadStoreTile.
-func (c *Controller) buildStoreTile(ctx context.Context, userID uuid.UUID, v1ProjectID, platform string) responses.LaunchpadStoreTile {
+func (c *Controller) buildStoreTile(ctx context.Context, userID uuid.UUID, appProjectID uuid.UUID, platform string) responses.LaunchpadStoreTile {
 	tile := responses.LaunchpadStoreTile{
 		Status:       "not_configured",
 		MissingItems: []string{},
 	}
-	if v1ProjectID == "" {
+	if appProjectID == uuid.Nil {
 		return tile
 	}
 
@@ -213,19 +213,19 @@ func (c *Controller) buildStoreTile(ctx context.Context, userID uuid.UUID, v1Pro
 		hasConnection = count > 0
 	}
 
-	// Latest deployment for this platform.
-	var latestDep models.Deployment
+	// Latest release for this platform — replaces the legacy Deployment query.
+	var latest models.Release
 	err := c.DB.DB.NewSelect().
-		Model(&latestDep).
-		Where("project_id = ?", v1ProjectID).
-		Where("? = ANY(platforms)", platform).
+		Model(&latest).
+		Where("app_project_id = ?", appProjectID).
+		Where("platform = ?", platform).
 		Where("deleted_at IS NULL").
 		Order("created_at DESC").
 		Limit(1).
 		Scan(ctx)
 
 	if err != nil {
-		// No deployment yet — compute readiness from connection presence.
+		// No release yet — compute readiness from connection presence.
 		if !hasConnection {
 			switch platform {
 			case "ios":
@@ -243,49 +243,45 @@ func (c *Controller) buildStoreTile(ctx context.Context, userID uuid.UUID, v1Pro
 		return tile
 	}
 
-	// We have a latest deployment — surface its id so the frontend can
-	// POST to /v1/deployments/:id/switch-to-managed from the store tile.
-	tile.LatestDeploymentID = latestDep.ID.String()
+	// We have a latest release — surface its id so the frontend can deep-link.
+	tile.LatestDeploymentID = latest.ID.String()
 
-	// Map deployment status to tile status.
-	// Real values written by the reports webhook: "Queued", "Deploying",
-	// "Deployed", "error". Case-insensitive matching handles any
-	// capitalisation variance from Codemagic.
-	switch strings.ToLower(latestDep.Status) {
-	case "deployed":
+	// Map release status to tile status.
+	switch latest.Status {
+	case models.ReleaseStatusLive:
 		tile.Status = "live"
 		tile.PrimaryAction = "Submit update"
-	case "deploying":
+	case models.ReleaseStatusUploaded:
 		tile.Status = "submitted"
 		tile.PrimaryAction = "View listing"
-	case "reviewing", "submitted":
+	case models.ReleaseStatusInReview:
 		tile.Status = "in_review"
 		tile.PrimaryAction = "View listing"
-	case "error", "rejected":
-		tile.Status = "rejected"
-		tile.PrimaryAction = "Fix"
-	case "queued", "building":
+	case models.ReleaseStatusApproved:
 		tile.Status = "submitted"
 		tile.PrimaryAction = "View listing"
-	case "pending_connection":
-		tile.Status = "needs_connection"
-		tile.PrimaryAction = "Add connection"
-		// Advertise missing pieces so the tile body surfaces specifics.
-		switch platform {
-		case "ios":
-			tile.MissingItems = []string{"App Store Connect API key"}
-		case "android":
-			tile.MissingItems = []string{"Google Play service account"}
-		}
+	case models.ReleaseStatusRejected,
+		models.ReleaseStatusManuallyRejected,
+		models.ReleaseStatusInvalid:
+		tile.Status = "rejected"
+		tile.PrimaryAction = "Fix"
+	case models.ReleaseStatusPaused:
+		tile.Status = "live"
+		tile.PrimaryAction = "Resume rollout"
+	case models.ReleaseStatusRolledBack:
+		tile.Status = "live"
+		tile.PrimaryAction = "Submit update"
+	case models.ReleaseStatusDraft:
+		tile.Status = "submitted"
+		tile.PrimaryAction = "View listing"
 	default:
 		tile.Status = "submitted"
 		tile.PrimaryAction = "View listing"
 	}
 
-	// managed vs user track.
-	if strings.EqualFold(latestDep.Method, "wemob") {
-		tile.ConnectionKind = "managed"
-	} else {
+	// Release doesn't carry a managed/user track flag — leave ConnectionKind
+	// unset and let the dashboard infer from the connection.
+	if hasConnection {
 		tile.ConnectionKind = "user"
 	}
 
@@ -539,18 +535,19 @@ func buildTaskToSummary(t models.AppBuildTask) responses.LaunchpadBuildSummary {
 	return s
 }
 
-// buildRecentDeployment returns the most-recent deployment created in the last
-// 7 days for the given v1ProjectID, or nil when none exists.
-func (c *Controller) buildRecentDeployment(ctx context.Context, v1ProjectID string) *responses.LaunchpadRecentDeployment {
-	if v1ProjectID == "" {
+// buildRecentDeployment returns the most-recent release created in the last
+// 7 days for the given AppProject, or nil when none exists.
+func (c *Controller) buildRecentDeployment(ctx context.Context, appProjectID uuid.UUID) *responses.LaunchpadRecentDeployment {
+	if appProjectID == uuid.Nil {
 		return nil
 	}
 	cutoff := time.Now().Add(-7 * 24 * time.Hour)
-	var d models.Deployment
+	var r models.Release
 	err := c.DB.DB.NewSelect().
-		Model(&d).
-		Where("project_id = ?", v1ProjectID).
+		Model(&r).
+		Where("app_project_id = ?", appProjectID).
 		Where("created_at > ?", cutoff).
+		Where("deleted_at IS NULL").
 		Order("created_at DESC").
 		Limit(1).
 		Scan(ctx)
@@ -559,19 +556,14 @@ func (c *Controller) buildRecentDeployment(ctx context.Context, v1ProjectID stri
 	}
 
 	store := ""
-	for _, p := range d.Platforms {
-		pl := strings.ToLower(p)
-		if pl == "ios" {
-			store = "app_store"
-			break
-		}
-		if pl == "android" {
-			store = "play_store"
-			break
-		}
+	switch strings.ToLower(r.Platform) {
+	case "ios":
+		store = "app_store"
+	case "android":
+		store = "play_store"
 	}
 
-	status, kind := classifyDeploymentStatus(d.Status)
+	status, kind := classifyReleaseStatus(r.Status)
 
 	// Compute ETA from submitted → store_live, 30-day lookback.
 	etaSec, _ := database.MedianElapsedSeconds(ctx, c.DB.DB,
@@ -579,18 +571,21 @@ func (c *Controller) buildRecentDeployment(ctx context.Context, v1ProjectID stri
 		models.DeploymentEventStoreLive,
 		30)
 
+	submittedAt := r.CreatedAt
+	if r.SubmittedAt != nil {
+		submittedAt = *r.SubmittedAt
+	}
+
 	resp := &responses.LaunchpadRecentDeployment{
-		ID:          d.ID.String(),
+		ID:          r.ID.String(),
 		Store:       store,
 		Status:      status,
 		StatusKind:  kind,
-		SubmittedAt: d.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),
-		Method:      d.Method,
+		SubmittedAt: submittedAt.UTC().Format("2006-01-02T15:04:05Z"),
 		ETASeconds:  etaSec,
 	}
 	// Only emit a non-zero ETA for submissions that are actually in flight
-	// (not store_live, not store_rejected, not failed) — otherwise the ETA
-	// is irrelevant.
+	// (not live, not rejected, not failed) — otherwise the ETA is irrelevant.
 	if kind == "success" || kind == "danger" {
 		resp.ETASeconds = 0
 	}

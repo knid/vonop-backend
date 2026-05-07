@@ -25,7 +25,6 @@ import (
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/services/secret"
 	"github.com/knid/wemob/internal/services/storage"
-	"github.com/knid/wemob/internal/services/storepoll"
 	"github.com/knid/wemob/internal/utils"
 	"github.com/knid/wemob/internal/views"
 	"github.com/markbates/goth"
@@ -58,7 +57,6 @@ func createSchema(db *bun.DB) error {
 		(*models.JSInjectData)(nil),
 		(*models.GooglePlayConnection)(nil),
 		(*models.AppleConnection)(nil),
-		(*models.Deployment)(nil),
 		(*models.DeploymentEvent)(nil),
 		(*models.AICreditsBalance)(nil),
 		(*models.AICreditTransaction)(nil),
@@ -191,7 +189,6 @@ func createSchema(db *bun.DB) error {
 		`ALTER TABLE app_build_tasks ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
 		`ALTER TABLE app_build_tasks ADD COLUMN IF NOT EXISTS error_message text`,
 		`ALTER TABLE tickets ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
-		`ALTER TABLE deployments ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
 		`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
 		`ALTER TABLE organization_members ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
 		`ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
@@ -339,18 +336,15 @@ func createSchema(db *bun.DB) error {
 		// Plan 3a: org-scope connections, deployments, api keys, webhooks (2026-04-30-org-filter-list-endpoints)
 		`ALTER TABLE apple_connections ADD COLUMN IF NOT EXISTS organization_id uuid`,
 		`ALTER TABLE google_play_connections ADD COLUMN IF NOT EXISTS organization_id uuid`,
-		`ALTER TABLE deployments ADD COLUMN IF NOT EXISTS organization_id uuid`,
 		`ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS organization_id uuid`,
 		`ALTER TABLE webhook_endpoints ADD COLUMN IF NOT EXISTS organization_id uuid`,
 		// Plan 3a: enforce NOT NULL after backfill (2026-04-30)
 		`UPDATE apple_connections t SET organization_id = (SELECT id FROM organizations WHERE owner_id = t.user_id AND is_personal = true LIMIT 1) WHERE organization_id IS NULL AND user_id IS NOT NULL`,
 		`UPDATE google_play_connections t SET organization_id = (SELECT id FROM organizations WHERE owner_id = t.user_id AND is_personal = true LIMIT 1) WHERE organization_id IS NULL AND user_id IS NOT NULL`,
-		`UPDATE deployments t SET organization_id = (SELECT id FROM organizations WHERE owner_id = t.user_id AND is_personal = true LIMIT 1) WHERE organization_id IS NULL AND user_id IS NOT NULL`,
 		`UPDATE api_keys t SET organization_id = (SELECT id FROM organizations WHERE owner_id = t.user_id AND is_personal = true LIMIT 1) WHERE organization_id IS NULL AND user_id IS NOT NULL`,
 		`UPDATE webhook_endpoints t SET organization_id = (SELECT id FROM organizations WHERE owner_id = t.user_id AND is_personal = true LIMIT 1) WHERE organization_id IS NULL AND user_id IS NOT NULL`,
 		`ALTER TABLE apple_connections ALTER COLUMN organization_id SET NOT NULL`,
 		`ALTER TABLE google_play_connections ALTER COLUMN organization_id SET NOT NULL`,
-		`ALTER TABLE deployments ALTER COLUMN organization_id SET NOT NULL`,
 		`ALTER TABLE api_keys ALTER COLUMN organization_id SET NOT NULL`,
 		`ALTER TABLE webhook_endpoints ALTER COLUMN organization_id SET NOT NULL`,
 		// Plan 5: billing rebind to org (2026-04-30-stripe-customer-to-org)
@@ -708,17 +702,6 @@ func createSchema(db *bun.DB) error {
     ALTER TABLE coolify_projects RENAME TO runtime_apps;
   END IF;
 END $$`,
-		// Deployment FK columns — guard with DO block to stay idempotent
-		`DO $$ BEGIN
-  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='deployments' AND column_name='app_store_credentials_id') THEN
-    ALTER TABLE deployments RENAME COLUMN app_store_credentials_id TO apple_connection_id;
-  END IF;
-END $$`,
-		`DO $$ BEGIN
-  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='deployments' AND column_name='google_play_credentials_id') THEN
-    ALTER TABLE deployments RENAME COLUMN google_play_credentials_id TO google_play_connection_id;
-  END IF;
-END $$`,
 		// Ensure soft-delete columns exist on the renamed tables. Moved out
 		// of alterStatements so the canary can't skip them when a
 		// transitional DB had the old tables + error_message column
@@ -726,8 +709,13 @@ END $$`,
 		`ALTER TABLE IF EXISTS apple_connections ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
 		`ALTER TABLE IF EXISTS google_play_connections ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
 		`ALTER TABLE IF EXISTS runtime_apps ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
-		`ALTER TABLE IF EXISTS deployments ADD COLUMN IF NOT EXISTS release_notes text`,
-		`ALTER TABLE IF EXISTS deployments ADD COLUMN IF NOT EXISTS rollout_track text`,
+
+		// Drop the legacy deployments table — replaced by Release (submission
+		// tracking) + AppDeployment (deploy events). The legacy WebView
+		// submission pipeline is gone, no code path writes new rows, and the
+		// table's project_id FK pointed at v1 shadow Project rows that were
+		// soft-deleted in PR #96 (2026-05-07). Idempotent on second runs.
+		`DROP TABLE IF EXISTS deployments`,
 
 		// Coolify cleanup (post-Fly migration). Idempotent; runs once and
 		// becomes a no-op on subsequent boots.
@@ -820,7 +808,6 @@ END $$`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_app_env_vars_project_key ON app_env_vars(app_project_id, key) WHERE deleted_at IS NULL`,
 		`CREATE INDEX IF NOT EXISTS idx_app_integrations_app_project_id ON app_integrations(app_project_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_app_dashboards_app_project_id ON app_dashboards(app_project_id)`,
-		`CREATE INDEX IF NOT EXISTS idx_deployments_project_id ON deployments(project_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_ai_credits_balances_user_id ON ai_credits_balances(user_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_ai_credit_transactions_user_id ON ai_credit_transactions(user_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_ai_credit_transactions_user_created ON ai_credit_transactions(user_id, created_at DESC)`,
@@ -1876,17 +1863,6 @@ func main() {
 					})
 				})
 			})
-			r.Route("/deployments", func(r chi.Router) {
-				r.Get("/", httpViews.GetDeployments)
-				r.Get("/{deploymentId}", httpViews.GetDeployment)
-				r.Get("/{deploymentId}/events", httpViews.GetDeploymentEvents)
-				r.Route("/tools", func(r chi.Router) {
-					r.Post("/generate_screenshots", httpViews.AutoGenerateScreenshots)
-				})
-			})
-			r.Route("/reports", func(r chi.Router) {
-				r.Post("/deploy", httpViews.UpdateDeploymentStatus)
-			})
 			r.Route("/billing", func(r chi.Router) {
 				r.Get("/plans", httpViews.GetBillingPlans)
 				r.Get("/gateway-models", httpViews.GetBillingGatewayModels)
@@ -2523,16 +2499,6 @@ func main() {
 		}
 	}()
 
-	// Phase 5c-i: poll App Store Connect + Google Play for state changes
-	// on in-flight deployments, writing store_* events.
-	pollerCtx, cancelPoller := context.WithCancel(context.Background())
-	poller := &storepoll.Poller{
-		DB:        controller.DB,
-		Reader:    controller,
-		PollEvery: 10 * time.Minute,
-	}
-	go poller.Run(pollerCtx)
-
 	// <P1#16> release status poll — once a minute, scan all releases in
 	// non-terminal status and ask App Store Connect / Google Play for the
 	// latest state. Replaces "Codemagic finished uploading" as the source of
@@ -2567,8 +2533,7 @@ func main() {
 			controller.PostHog.Close()
 		}
 
-		// Stop the store-API poller.
-		cancelPoller()
+		// Stop the release-status poller.
 		cancelReleasePoll()
 
 		// Shutdown main server

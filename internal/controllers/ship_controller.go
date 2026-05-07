@@ -35,19 +35,10 @@ func (c *Controller) GetShipItems(ctx context.Context, user *models.User) (*resp
 	// directly (the v1 shadow Project FK was removed 2026-05-07).
 	byApp := map[string]projInfo{}
 	appIDs := make([]string, 0, len(projects))
-	// Deployments still carry the legacy v1 project_id, so keep a parallel
-	// v1-keyed map for the Deployment join below. A blank entry means we
-	// know the AppProject but it never had a v1 shadow row.
-	byV1 := map[string]projInfo{}
-	v1IDs := make([]string, 0, len(projects))
 	for _, p := range projects {
 		info := projInfo{AppID: p.ID.String(), AppName: p.Name}
 		byApp[p.ID.String()] = info
 		appIDs = append(appIDs, p.ID.String())
-		if v1, ok := p.Settings["v1_project_id"].(string); ok && v1 != "" {
-			byV1[v1] = info
-			v1IDs = append(v1IDs, v1)
-		}
 	}
 	if len(appIDs) == 0 {
 		return &responses.ShipResponse{Items: []responses.ShipItem{}}, nil
@@ -66,19 +57,19 @@ func (c *Controller) GetShipItems(ctx context.Context, user *models.User) (*resp
 		return nil, err
 	}
 
-	var deployments []models.Deployment
-	if len(v1IDs) > 0 {
-		if err := c.DB.DB.NewSelect().
-			Model(&deployments).
-			Where("project_id IN (?)", bun.In(v1IDs)).
-			Where("created_at > ?", since).
-			Order("created_at DESC").
-			Scan(ctx); err != nil {
-			return nil, err
-		}
+	// Releases — submission tracking (replaces legacy Deployment rows).
+	var releases []models.Release
+	if err := c.DB.DB.NewSelect().
+		Model(&releases).
+		Where("app_project_id IN (?)", bun.In(appIDs)).
+		Where("created_at > ?", since).
+		Where("deleted_at IS NULL").
+		Order("created_at DESC").
+		Scan(ctx); err != nil {
+		return nil, err
 	}
 
-	items := make([]responses.ShipItem, 0, len(tasks)+len(deployments))
+	items := make([]responses.ShipItem, 0, len(tasks)+len(releases))
 
 	for _, t := range tasks {
 		info, ok := byApp[t.AppProjectID.String()]
@@ -110,43 +101,42 @@ func (c *Controller) GetShipItems(ctx context.Context, user *models.User) (*resp
 	}
 
 	var etaForDeployments int
-	if len(deployments) > 0 {
+	if len(releases) > 0 {
 		etaForDeployments, _ = database.MedianElapsedSeconds(ctx, c.DB.DB,
 			models.DeploymentEventSubmitted,
 			models.DeploymentEventStoreLive,
 			30)
 	}
 
-	for _, d := range deployments {
-		info, ok := byV1[d.ProjectID.String()]
+	for _, r := range releases {
+		info, ok := byApp[r.AppProjectID.String()]
 		if !ok {
 			continue
 		}
 		store, platform := "", ""
-		for _, p := range d.Platforms {
-			pl := strings.ToLower(p)
-			if pl == "ios" {
-				store, platform = "app_store", "ios"
-				break
-			}
-			if pl == "android" {
-				store, platform = "play_store", "android"
-				break
-			}
+		switch strings.ToLower(r.Platform) {
+		case "ios":
+			store, platform = "app_store", "ios"
+		case "android":
+			store, platform = "play_store", "android"
 		}
-		status, kind := classifyDeploymentStatus(d.Status)
+		status, kind := classifyReleaseStatus(r.Status)
+		version := r.MarketingVersion
+		if version == "" && r.VersionCode > 0 {
+			version = fmt.Sprintf("%d", r.VersionCode)
+		}
 		item := responses.ShipItem{
-			ID:         d.ID.String(),
+			ID:         r.ID.String(),
 			Kind:       "deployment",
 			AppID:      info.AppID,
 			AppName:    info.AppName,
 			Store:      store,
 			Platform:   platform,
-			Version:    d.Title,
+			Version:    version,
 			Status:     status,
 			StatusKind: kind,
-			CreatedAt:  d.CreatedAt.UTC().Format(time.RFC3339),
-			UpdatedAt:  d.UpdatedAt.UTC().Format(time.RFC3339),
+			CreatedAt:  r.CreatedAt.UTC().Format(time.RFC3339),
+			UpdatedAt:  r.UpdatedAt.UTC().Format(time.RFC3339),
 		}
 		if kind == "info" && etaForDeployments > 0 {
 			item.ETASeconds = etaForDeployments
@@ -188,21 +178,26 @@ func classifyBuildStatus(raw string, finished bool, errorMessage string) (string
 	return "Done", "neutral"
 }
 
-func classifyDeploymentStatus(raw string) (string, string) {
-	key := strings.ToLower(strings.TrimSpace(raw))
-	switch key {
-	case "deployed", "published", "live":
+// classifyReleaseStatus maps Release.Status → (human label, kind) for the
+// Ship list and Launchpad recent-deployment surfaces. Replaces the legacy
+// classifyDeploymentStatus once Deployment rows were retired in favour of
+// Release-based submission tracking.
+func classifyReleaseStatus(raw string) (string, string) {
+	switch raw {
+	case models.ReleaseStatusLive:
 		return "Live", "success"
-	case "submitted", "reviewing", "in_review":
+	case models.ReleaseStatusInReview:
 		return "In review", "info"
-	case "queued", "deploying":
+	case models.ReleaseStatusUploaded, models.ReleaseStatusApproved, models.ReleaseStatusDraft:
 		return "Submitting", "info"
-	case "rejected":
+	case models.ReleaseStatusRejected,
+		models.ReleaseStatusManuallyRejected,
+		models.ReleaseStatusInvalid:
 		return "Rejected", "danger"
-	case "error", "failed":
-		return "Failed", "danger"
-	case "pending_connection":
-		return "Waiting for connection", "warn"
+	case models.ReleaseStatusPaused:
+		return "Paused", "warn"
+	case models.ReleaseStatusRolledBack:
+		return "Rolled back", "warn"
 	}
 	return raw, "neutral"
 }
