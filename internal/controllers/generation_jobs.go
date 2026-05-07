@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/models"
@@ -174,7 +175,14 @@ func (c *Controller) CancelJob(jobID string, userID uuid.UUID) error {
 	// agent-run path the worker has a subscription on this channel; if it
 	// was created by a legacy in-API-process StreamFunc (dashboards) the
 	// publish has 0 receivers and we fall through to the in-process cancel.
-	if err := jobstream.PublishCancel(context.Background(), c.RedisPubSub, jobID); err != nil {
+	//
+	// Bound the publish by a short timeout — go-redis's default dial timeout
+	// is 5s, and without an explicit ctx every CancelJob would block that
+	// long when Redis is unreachable. 2s is plenty for a healthy publish on
+	// a managed Valkey; the in-process cancel below still fires regardless.
+	publishCtx, publishCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer publishCancel()
+	if err := jobstream.PublishCancel(publishCtx, c.RedisPubSub, jobID); err != nil {
 		slog.Warn("CancelJob: publish cancel failed (will still try in-process cancel)",
 			"job_id", jobID, "error", err)
 	}
