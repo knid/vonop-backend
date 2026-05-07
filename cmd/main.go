@@ -580,6 +580,11 @@ func createSchema(db *bun.DB) error {
 		// directly through app_project_id.
 		`ALTER TABLE builds DROP COLUMN IF EXISTS project_id`,
 		`ALTER TABLE app_build_tasks DROP COLUMN IF EXISTS project_id`,
+		// 2026-05-07: store the Codemagic-side build id on each task so we
+		// can propagate cancel requests via POST /builds/{id}/cancel.
+		// Empty for legacy rows or builds whose trigger response we couldn't
+		// persist; CancelBuildTask treats empty as a no-op on the remote side.
+		`ALTER TABLE app_build_tasks ADD COLUMN IF NOT EXISTS codemagic_build_id text`,
 	}
 
 	// Deduplicate before creating unique indexes (keep the latest row per group)
@@ -627,15 +632,14 @@ func createSchema(db *bun.DB) error {
 	// otherwise the new ALTER will be silently skipped on servers that already have older columns.
 	// Table renames go in renameStatements below, not here — they run unconditionally.
 	//
-	// Canary: builds.project_id must NOT exist (dropped 2026-05-07 as part of
-	// the v1 shadow Project removal final cleanup). This is an inverse-style
-	// canary because the latest batch only DROPs / DELETEs / TIGHTENs — there's
-	// no new column to assert positive existence on. migrationsDone=true means
-	// the column has been dropped, so we skip the ALTERs; false means we still
-	// need to run them.
+	// Canary: app_build_tasks.codemagic_build_id — added 2026-05-07 to support
+	// remote build cancellation. Positive-existence check (back to the standard
+	// pattern after the inverse one used by the v1-shadow-removal cleanup).
+	// migrationsDone=true means the column already exists, so we skip the
+	// ALTERs; false means we still need to run them.
 	var migrationsDone bool
 	row := db.QueryRowContext(context.Background(),
-		"SELECT NOT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='builds' AND column_name='project_id')")
+		"SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='app_build_tasks' AND column_name='codemagic_build_id')")
 	if err := row.Scan(&migrationsDone); err != nil {
 		migrationsDone = false
 	}

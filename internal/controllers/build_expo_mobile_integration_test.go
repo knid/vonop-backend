@@ -34,14 +34,30 @@ type expoTriggerCall struct {
 
 // expoTriggerRecorder collects trigger calls for assertions.
 type expoTriggerRecorder struct {
-	mu    sync.Mutex
-	calls []expoTriggerCall
+	mu      sync.Mutex
+	calls   []expoTriggerCall
+	cancels []string // build IDs received on POST /builds/{id}/cancel
+
+	// cancelStatus, when non-zero, overrides the cancel response status.
+	// Defaults to 200. Tests use this to simulate Codemagic outages.
+	cancelStatus int
+
+	// triggerBuildID, when non-empty, overrides the build_id returned on
+	// trigger POSTs. Lets a test fix the value so it can later assert the
+	// task row stored exactly that id.
+	triggerBuildID string
 }
 
 func (r *expoTriggerRecorder) record(call expoTriggerCall) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.calls = append(r.calls, call)
+}
+
+func (r *expoTriggerRecorder) recordCancel(buildID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.cancels = append(r.cancels, buildID)
 }
 
 func (r *expoTriggerRecorder) snapshot() []expoTriggerCall {
@@ -52,13 +68,39 @@ func (r *expoTriggerRecorder) snapshot() []expoTriggerCall {
 	return out
 }
 
+func (r *expoTriggerRecorder) cancelSnapshot() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]string, len(r.cancels))
+	copy(out, r.cancels)
+	return out
+}
+
 // newCodemagicTestServer returns an httptest.Server that decodes Codemagic
 // trigger POSTs into expoTriggerCall records and replies with a fake
-// build_id, plus a recorder the test can inspect.
+// build_id. Also handles POST /builds/{id}/cancel — the build id is
+// recorded so cancel-propagation tests can assert it. The recorder
+// handle exposes both queues plus knobs for fault injection.
 func newCodemagicTestServer(t *testing.T) (*httptest.Server, *expoTriggerRecorder) {
 	t.Helper()
 	rec := &expoTriggerRecorder{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Cancel: POST /builds/{buildId}/cancel
+		if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/cancel") {
+			// Strip /builds/ prefix and /cancel suffix to recover the id.
+			p := strings.TrimPrefix(r.URL.Path, "/builds/")
+			p = strings.TrimSuffix(p, "/cancel")
+			rec.recordCancel(p)
+			rec.mu.Lock()
+			status := rec.cancelStatus
+			rec.mu.Unlock()
+			if status == 0 {
+				status = http.StatusOK
+			}
+			w.WriteHeader(status)
+			return
+		}
+
 		var body struct {
 			WorkflowID  string `json:"workflowId"`
 			Environment struct {
@@ -72,7 +114,13 @@ func newCodemagicTestServer(t *testing.T) (*httptest.Server, *expoTriggerRecorde
 		}
 		rec.record(expoTriggerCall{WorkflowID: body.WorkflowID, Variables: body.Environment.Variables})
 		w.WriteHeader(http.StatusOK)
-		_ = json.NewEncoder(w).Encode(map[string]any{"build_id": "cm-build-" + uuid.NewString()})
+		rec.mu.Lock()
+		buildID := rec.triggerBuildID
+		rec.mu.Unlock()
+		if buildID == "" {
+			buildID = "cm-build-" + uuid.NewString()
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"build_id": buildID})
 	}))
 	t.Cleanup(srv.Close)
 	return srv, rec

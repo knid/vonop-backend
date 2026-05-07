@@ -630,7 +630,7 @@ func (c *Controller) TriggerCodemagicOTAPublish(
 
 	marketingVer := "1.0.0"
 
-	_, triggerErr := c.CodemagicService.TriggerExpoOTAPublish(ctx, codemagic.ExpoOTAPublishParams{
+	cmBuildID, triggerErr := c.CodemagicService.TriggerExpoOTAPublish(ctx, codemagic.ExpoOTAPublishParams{
 		ProjectID:                      project.ID,
 		BuildID:                        build.ID,
 		TaskID:                         task.ID,
@@ -656,6 +656,15 @@ func (c *Controller) TriggerCodemagicOTAPublish(
 		task.Finished = true
 		_ = c.DB.UpdateAppBuildTask(task)
 		return build, task, fmt.Errorf("trigger codemagic ota-publish: %w", triggerErr)
+	}
+	if cmBuildID != "" {
+		// Persist the Codemagic build id so CancelBuildTask can call
+		// POST /builds/{id}/cancel mid-publish (~3 min OTA workflow, but a
+		// user might still cancel a stuck one).
+		task.CodemagicBuildID = cmBuildID
+		if uerr := c.DB.SetAppBuildTaskCodemagicBuildID(ctx, task.ID, cmBuildID); uerr != nil {
+			slog.Warn("failed to persist codemagic build id (OTA)", "task_id", task.ID, "err", uerr)
+		}
 	}
 
 	slog.Info("ota_quick_publish_triggered",

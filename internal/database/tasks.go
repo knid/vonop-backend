@@ -146,6 +146,23 @@ func (db *Database) UpdateAppBuildTask(buildTask *models.AppBuildTask) error {
 	return err
 }
 
+// SetAppBuildTaskCodemagicBuildID writes only codemagic_build_id + updated_at
+// on the row. Avoids the Bun whole-row footgun (memory
+// feedback_bun_whole_row_update.md): a NewUpdate().Model(task) here would
+// also write status_text, finished, error_message etc. — and on the
+// trigger path the row was just inserted with status_text = "Queued",
+// so a whole-row write would clobber any concurrent webhook that flipped
+// the row to "Building" or "Failed" between the insert and our update.
+func (db *Database) SetAppBuildTaskCodemagicBuildID(ctx context.Context, taskID uuid.UUID, codemagicBuildID string) error {
+	_, err := db.DB.NewUpdate().
+		TableExpr("app_build_tasks").
+		Set("codemagic_build_id = ?", codemagicBuildID).
+		Set("updated_at = current_timestamp").
+		Where("id = ?", taskID).
+		Exec(ctx)
+	return err
+}
+
 // ApplyExpoBuildStatusUpdate updates a single app_build_task row's status
 // fields from a webhook event. It is intentionally column-constrained — Bun's
 // `NewUpdate().Model(task)` would write ALL columns and silently null fields

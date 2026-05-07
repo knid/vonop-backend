@@ -248,13 +248,14 @@ func (c *Controller) BuildExpoMobile(ctx context.Context, project *models.AppPro
 		tasks = append(tasks, task)
 
 		var triggerErr error
+		var cmBuildID string
 		switch platform {
 		case "android":
 			if chargeErr := c.ChargeBuildCredits(user, project.OrganizationID, constants.BuildCreditKindAndroid, build.ID.String()); chargeErr != nil {
 				slog.Warn("failed to charge android build credits", "error", chargeErr, "build_id", build.ID, "org_id", project.OrganizationID)
 				triggerErr = fmt.Errorf("insufficient credits to trigger Android build: %w", chargeErr)
 			} else {
-				_, triggerErr = c.CodemagicService.TriggerExpoAndroidBuild(ctx, codemagic.ExpoAndroidBuildParams{
+				cmBuildID, triggerErr = c.CodemagicService.TriggerExpoAndroidBuild(ctx, codemagic.ExpoAndroidBuildParams{
 					ProjectID:                      project.ID,
 					BuildID:                        build.ID,
 					TaskID:                         task.ID,
@@ -292,7 +293,7 @@ func (c *Controller) BuildExpoMobile(ctx context.Context, project *models.AppPro
 				slog.Warn("failed to charge ios build credits", "error", chargeErr, "build_id", build.ID, "org_id", project.OrganizationID)
 				triggerErr = fmt.Errorf("insufficient credits to trigger iOS build: %w", chargeErr)
 			} else {
-				_, triggerErr = c.CodemagicService.TriggerExpoIOSBuild(ctx, codemagic.ExpoIOSBuildParams{
+				cmBuildID, triggerErr = c.CodemagicService.TriggerExpoIOSBuild(ctx, codemagic.ExpoIOSBuildParams{
 					ProjectID:                      project.ID,
 					BuildID:                        build.ID,
 					TaskID:                         task.ID,
@@ -325,6 +326,14 @@ func (c *Controller) BuildExpoMobile(ctx context.Context, project *models.AppPro
 			task.Finished = true
 			_ = c.DB.UpdateAppBuildTask(task)
 			triggerErrs = append(triggerErrs, fmt.Sprintf("%s: %v", platform, triggerErr))
+		} else if cmBuildID != "" {
+			// Persist the Codemagic build id so CancelBuildTask can call
+			// POST /builds/{id}/cancel and stop the in-flight build instead
+			// of letting it burn ~25 min after the user hits cancel.
+			task.CodemagicBuildID = cmBuildID
+			if uerr := c.DB.SetAppBuildTaskCodemagicBuildID(ctx, task.ID, cmBuildID); uerr != nil {
+				slog.Warn("failed to persist codemagic build id", "task_id", task.ID, "err", uerr)
+			}
 		}
 	}
 

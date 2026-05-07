@@ -2,6 +2,7 @@ package codemagic
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -147,4 +148,39 @@ func boolStr(b bool) string {
 		return "true"
 	}
 	return "false"
+}
+
+// CancelBuild calls Codemagic's POST /builds/{buildId}/cancel to stop an
+// in-flight build. Idempotent on Codemagic's side (cancelling a finished
+// build returns a 4xx that we treat as a no-op — the goal is "build is no
+// longer running," and a 4xx confirms that). Returns nil on success or
+// already-finished, error on network or 5xx failure.
+//
+// No retry: this is a best-effort, user-triggered call. If the call fails,
+// the worst case is Codemagic finishes the build and the existing webhook
+// flow resolves to terminal Failed/Built; the local row is still marked
+// Cancelled by the caller.
+func (s *Service) CancelBuild(ctx context.Context, buildID string) error {
+	if buildID == "" {
+		return nil
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.baseURL()+"/builds/"+buildID+"/cancel", nil)
+	if err != nil {
+		return fmt.Errorf("codemagic: create cancel request: %w", err)
+	}
+	req.Header.Set("x-auth-token", s.APIToken)
+	resp, err := s.httpClientOrDefault().Do(req)
+	if err != nil {
+		return fmt.Errorf("codemagic: cancel build: %w", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	// 2xx = cancelled. 4xx = already finished or otherwise no-op (Codemagic
+	// returns 400/404 for terminal builds). Either way the build is no
+	// longer running, which is what the caller wants.
+	if resp.StatusCode >= 200 && resp.StatusCode < 500 {
+		slog.Info("codemagic: cancel build", "build_id", buildID, "status", resp.StatusCode)
+		return nil
+	}
+	return fmt.Errorf("codemagic: cancel returned %d: %s", resp.StatusCode, string(body))
 }
