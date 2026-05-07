@@ -41,6 +41,12 @@ services:
     image: ghcr.io/knid/wemob-backend:${IMAGE_TAG:-latest}
     entrypoint: ["/app/worker"]
     restart: unless-stopped
+    # Agent runs can take up to agent.defaultMaxWallclockMs (45 min) plus
+    # finalisation; matches asynq.Timeout(50min) at enqueue time. Asynq's
+    # srv.Shutdown() (cmd/worker/main.go) drains in-flight tasks before the
+    # binary exits, so this grace window lets a deploy finish out a customer
+    # generation rather than SIGKILLing it.
+    stop_grace_period: 60m
     env_file:
       - ./.env
     environment:
