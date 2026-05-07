@@ -9,8 +9,15 @@ import (
 	"github.com/uptrace/bun"
 )
 
-func (db *Database) CreateAppBuildTask(build models.Build, platform, status string, autoDeploy bool) (*models.AppBuildTask, error) {
-	appBuildTask := models.AppBuildTask{BuildID: build.ID, ProjectID: build.ProjectID, Platform: platform, StatusText: status, AutoDeploy: autoDeploy}
+func (db *Database) CreateAppBuildTask(build models.Build, appProjectID *uuid.UUID, platform, status string, autoDeploy bool) (*models.AppBuildTask, error) {
+	appBuildTask := models.AppBuildTask{
+		BuildID:      build.ID,
+		ProjectID:    build.ProjectID,
+		AppProjectID: appProjectID,
+		Platform:     platform,
+		StatusText:   status,
+		AutoDeploy:   autoDeploy,
+	}
 	_, err := db.DB.NewInsert().Model(&appBuildTask).Exec(context.Background())
 
 	return &appBuildTask, err
@@ -78,6 +85,20 @@ func (db *Database) GetPendingAppBuildTasks(project *models.Project) ([]models.A
 		Scan(context.Background())
 
 	return appBuildTasks, err
+}
+
+// GetPendingAppBuildTasksByAppProject returns unfinished build tasks scoped
+// by the new direct FK. Replaces GetPendingAppBuildTasks (legacy v1 Project
+// scope) for the Expo mobile path.
+func (db *Database) GetPendingAppBuildTasksByAppProject(appProjectID string) ([]models.AppBuildTask, error) {
+	var tasks []models.AppBuildTask
+	err := db.DB.NewSelect().
+		Model(&tasks).
+		Where("app_project_id = ?", appProjectID).
+		Where("platform IN (?)", bun.In([]string{"Android", "IOS"})).
+		Where("finished = ?", false).
+		Scan(context.Background())
+	return tasks, err
 }
 
 func (db *Database) GetAppBuildTaskById(id string) (*models.AppBuildTask, error) {

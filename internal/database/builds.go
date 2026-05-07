@@ -51,3 +51,44 @@ func (db *Database) CountUserBuildsSince(userID string, since time.Time) (int, e
 	return count, err
 }
 
+// GetLastBuildByAppProject returns the highest-numbered Build for an
+// AppProject. Used by BuildExpoMobile to compute the next build number
+// without going through the v1 shadow Project.
+func (db *Database) GetLastBuildByAppProject(appProjectID string) (*models.Build, error) {
+	var build models.Build
+	err := db.DB.NewSelect().
+		Model(&build).
+		Where("app_project_id = ?", appProjectID).
+		Order("build_number DESC").
+		Limit(1).
+		Scan(context.Background())
+	return &build, err
+}
+
+// GetBuildsByAppProject returns all builds for an AppProject ordered newest
+// first. Used by the agent's read_build_logs tool.
+func (db *Database) GetBuildsByAppProject(appProjectID string) ([]models.Build, error) {
+	var builds []models.Build
+	err := db.DB.NewSelect().
+		Model(&builds).
+		Where("app_project_id = ?", appProjectID).
+		Order("build_number DESC").
+		Scan(context.Background())
+	return builds, err
+}
+
+// GetLastSuccessfulBuildByAppProject returns the highest-numbered Build for
+// an AppProject that has at least one AppBuildTask with status_text = "Built"
+// and finished = true. Used by SubmitExpoMobile to find what to upload.
+func (db *Database) GetLastSuccessfulBuildByAppProject(appProjectID string) (*models.Build, error) {
+	var build models.Build
+	err := db.DB.NewSelect().
+		Model(&build).
+		Where("build.app_project_id = ?", appProjectID).
+		Where("EXISTS (SELECT 1 FROM app_build_tasks t WHERE t.build_id = build.id AND t.status_text = ? AND t.finished = ? AND t.deleted_at IS NULL)", "Built", true).
+		Order("build.build_number DESC").
+		Limit(1).
+		Scan(context.Background())
+	return &build, err
+}
+

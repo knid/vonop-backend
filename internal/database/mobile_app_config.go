@@ -3,6 +3,7 @@ package database
 import (
 	"context"
 
+	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/models"
 )
 
@@ -57,4 +58,30 @@ func (db *Database) UpsertMobileAppConfig(config *models.MobileAppConfig) (*mode
 		Returning("*").
 		Exec(context.Background())
 	return config, err
+}
+
+// UpsertMobileAppConfigOneSignal sets the OneSignal app id + encrypted REST
+// key reference on the project's MobileAppConfig, creating the row if
+// missing. Idempotent. Used by provisionOneSignalApp + the cross-app
+// OneSignal lifecycle. CredRef envelope means we never persist the raw key.
+func (db *Database) UpsertMobileAppConfigOneSignal(
+	ctx context.Context,
+	appProjectID uuid.UUID,
+	oneSignalAppID string,
+	credRef *models.CredRefJSON,
+) (*models.MobileAppConfig, error) {
+	cfg := &models.MobileAppConfig{
+		ProjectID:               appProjectID,
+		OneSignalAppID:          oneSignalAppID,
+		OneSignalRESTKeyCredRef: credRef,
+	}
+	_, err := db.DB.NewInsert().
+		Model(cfg).
+		On("CONFLICT (project_id) DO UPDATE").
+		Set("one_signal_app_id = EXCLUDED.one_signal_app_id").
+		Set("one_signal_rest_key_cred_ref = EXCLUDED.one_signal_rest_key_cred_ref").
+		Set("updated_at = current_timestamp").
+		Returning("*").
+		Exec(ctx)
+	return cfg, err
 }

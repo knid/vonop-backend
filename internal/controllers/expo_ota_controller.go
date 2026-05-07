@@ -615,7 +615,7 @@ func (c *Controller) TriggerCodemagicOTAPublish(
 		return build, nil, fmt.Errorf("upload tarball to %s: %w", tarKey, err)
 	}
 
-	task, err := c.DB.CreateAppBuildTask(*build, "OTA", "Queued", false)
+	task, err := c.DB.CreateAppBuildTask(*build, &project.ID, "OTA", "Queued", false)
 	if err != nil {
 		return build, nil, fmt.Errorf("create OTA build task: %w", err)
 	}

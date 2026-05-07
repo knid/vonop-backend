@@ -250,7 +250,7 @@ func (c *Controller) BuildExpoMobile(ctx context.Context, project *models.AppPro
 		if platform == "ios" {
 			label = "IOS"
 		}
-		task, err := c.DB.CreateAppBuildTask(*build, label, "Queued", false)
+		task, err := c.DB.CreateAppBuildTask(*build, &project.ID, label, "Queued", false)
 		if err != nil {
 			return build, tasks, fmt.Errorf("create %s build task: %w", platform, err)
 		}

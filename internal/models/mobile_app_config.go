@@ -79,6 +79,12 @@ type MobileAppConfig struct {
 	MinBuildNumberAndroid int64  `bun:",notnull,default:0" json:"min_build_number_android"`
 	MinVersionMessage     string `bun:",nullzero" json:"min_version_message"`
 
+	// OneSignal (P2.2 — push notifications). Per-tenant app id + REST API
+	// key. Key stored encrypted via CredRef envelope; id is non-secret.
+	// Replaces the v1 shadow Project's OneSignalAppID/OneSignalAppToken.
+	OneSignalAppID          string       `bun:"one_signal_app_id,nullzero" json:"one_signal_app_id"`
+	OneSignalRESTKeyCredRef *CredRefJSON `bun:"one_signal_rest_key_cred_ref,type:jsonb,nullzero" json:"one_signal_rest_key_cred_ref,omitempty"`
+
 	CreatedAt time.Time `bun:",nullzero,notnull,default:current_timestamp" json:"created_at"`
 	UpdatedAt time.Time `bun:",nullzero,notnull,default:current_timestamp" json:"updated_at"`
 }

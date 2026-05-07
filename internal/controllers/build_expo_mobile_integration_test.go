@@ -537,7 +537,7 @@ func TestBuildExpoMobile_RejectsConcurrentBuild(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create prior build: %v", err)
 	}
-	if _, err := f.db.CreateAppBuildTask(*pendingBuild, "Android", "Building", false); err != nil {
+	if _, err := f.db.CreateAppBuildTask(*pendingBuild, nil, "Android", "Building", false); err != nil {
 		t.Fatalf("create pending task: %v", err)
 	}
 

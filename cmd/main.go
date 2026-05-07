@@ -551,6 +551,16 @@ func createSchema(db *bun.DB) error {
 		`ALTER TABLE app_projects ADD COLUMN IF NOT EXISTS region text NOT NULL DEFAULT ''`,
 		// 2026-05-06: subscription-plan-revamp — seat caps for Hobby/Pro/Max.
 		`ALTER TABLE standard_user_limits ADD COLUMN IF NOT EXISTS max_seats int NOT NULL DEFAULT 1`,
+		// V1 shadow Project removal — add direct FK from Build/AppBuildTask to AppProject.
+		`ALTER TABLE builds ADD COLUMN IF NOT EXISTS app_project_id uuid`,
+		`ALTER TABLE app_build_tasks ADD COLUMN IF NOT EXISTS app_project_id uuid`,
+		`ALTER TABLE builds ALTER COLUMN project_id DROP NOT NULL`,
+		`ALTER TABLE app_build_tasks ALTER COLUMN project_id DROP NOT NULL`,
+		`CREATE INDEX IF NOT EXISTS idx_builds_app_project_id ON builds(app_project_id) WHERE deleted_at IS NULL`,
+		`CREATE INDEX IF NOT EXISTS idx_app_build_tasks_app_project_id ON app_build_tasks(app_project_id) WHERE deleted_at IS NULL`,
+		// OneSignal credentials moving from v1 shadow Project to MobileAppConfig.
+		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS one_signal_app_id text`,
+		`ALTER TABLE mobile_app_configs ADD COLUMN IF NOT EXISTS one_signal_rest_key_cred_ref jsonb`,
 	}
 
 	// Deduplicate before creating unique indexes (keep the latest row per group)
@@ -597,12 +607,12 @@ func createSchema(db *bun.DB) error {
 	// IMPORTANT: when adding a new ALTER TABLE above, update this canary to the newest column,
 	// otherwise the new ALTER will be silently skipped on servers that already have older columns.
 	// Table renames go in renameStatements below, not here — they run unconditionally.
-	// Canary: standard_user_limits.max_seats — last column added (subscription
-	// plan revamp 2026-05-06). Bumped past app_projects.region so the new
-	// max_seats ALTER runs on servers that already passed earlier canaries.
+	// Canary: builds.app_project_id — added 2026-05-07 as part of the v1 shadow
+	// Project removal. Bumped past max_seats so the new ALTERs run on servers
+	// that already passed earlier canaries.
 	var migrationsDone bool
 	row := db.QueryRowContext(context.Background(),
-		"SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='standard_user_limits' AND column_name='max_seats')")
+		"SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='builds' AND column_name='app_project_id')")
 	if err := row.Scan(&migrationsDone); err != nil {
 		migrationsDone = false
 	}

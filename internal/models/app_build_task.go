@@ -10,6 +10,10 @@ type AppBuildTask struct {
 	ID         uuid.UUID `bun:",pk,type:uuid,default:uuid_generate_v4()"`
 	ProjectID  uuid.UUID `bun:",notnull,type:uuid"`
 	Project    *Project  `bun:"rel:belongs-to,join:project_id=id"`
+	// AppProjectID is the new direct FK target (replaces the v1 shadow Project
+	// indirection). Pointer + nullzero through Phase 1; later phases will tighten.
+	AppProjectID *uuid.UUID  `bun:"app_project_id,type:uuid,nullzero"`
+	AppProject   *AppProject `bun:"rel:belongs-to,join:app_project_id=id"`
 	BuildID    uuid.UUID `bun:",notnull,type:uuid"`
 	Build      *Build    `bun:"rel:belongs-to,join:build_id=id"`
 	Finished   bool      `bun:",notnull"`
