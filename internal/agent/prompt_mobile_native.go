@@ -465,6 +465,15 @@ The biggest 2026 quality bar. Most AI apps fail it.
 ❌ Generic tab bar with default icons + blue active tint.
 ✅ Custom icons, custom active indicator (dot/pill/scale), 3-5 items, capsule.
 
+❌ Floating capsule with icons pinned to the top and a fat empty band
+   below them. This is React Navigation auto-injecting
+   ` + "`paddingBottom: insets.bottom`" + ` into a bar that's already floated above
+   the home indicator.
+✅ Pass ` + "`safeAreaInsets={{ bottom: 0 }}`" + ` on ` + "`<Tabs>`" + `, zero out
+   ` + "`paddingTop`" + `/` + "`paddingBottom`" + ` on ` + "`tabBarStyle`" + `, and set
+   ` + "`tabBarItemStyle.height`" + ` equal to bar height with
+   ` + "`justifyContent: \"center\"`" + `. See the Tabs layout recipe.
+
 ❌ "No items" in muted gray on empty screens.
 ✅ Illustration + conversational copy + CTA + sample item to interact with.
 
@@ -1891,6 +1900,14 @@ import { Platform, StyleSheet } from "react-native";
 export default function TabsLayout() {
   return (
     <Tabs
+      // CRITICAL: zero out bottom safe-area inset. Because the bar is
+      // floated 24pt above the screen edge, it's already clear of the
+      // home indicator. React Navigation otherwise injects
+      // paddingBottom: insets.bottom (~34pt on notched iPhones) into the
+      // bar's interior, pinning icons to the top of the capsule with a
+      // fat empty band along the bottom. This is the #1 cause of broken
+      // floating capsule renders.
+      safeAreaInsets={{ bottom: 0 }}
       screenOptions={{
         headerShown: false,
         tabBarShowLabel: false,
@@ -1907,6 +1924,12 @@ export default function TabsLayout() {
           height: 64,
           borderRadius: 32,
           borderTopWidth: 0,
+          // Zero out vertical padding too — items center themselves via
+          // tabBarItemStyle below. Any non-zero padding here re-creates
+          // the "icons jammed to the top" look.
+          paddingTop: 0,
+          paddingBottom: 0,
+          paddingHorizontal: 8,
           backgroundColor:
             Platform.OS === "ios" ? "transparent" : "rgba(255,255,255,0.92)",
           elevation: 12,
@@ -1914,7 +1937,6 @@ export default function TabsLayout() {
           shadowOpacity: 0.12,
           shadowRadius: 24,
           shadowOffset: { width: 0, height: 6 },
-          paddingHorizontal: 8,
           overflow: "hidden",
         },
         // Liquid Glass via expo-blur on iOS. Android falls through to the
@@ -1933,7 +1955,14 @@ export default function TabsLayout() {
                 />
               )
             : undefined,
-        tabBarItemStyle: { height: 56, borderRadius: 28 },
+        // Match the bar height and center contents — do NOT use a smaller
+        // item height (e.g. 56) inside a 64pt bar; that re-introduces
+        // vertical empty space inside the capsule.
+        tabBarItemStyle: {
+          height: 64,
+          justifyContent: "center",
+          paddingVertical: 0,
+        },
       }}
     >
       <Tabs.Screen
