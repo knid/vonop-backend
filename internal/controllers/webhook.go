@@ -420,6 +420,28 @@ func (c *Controller) processWebhookEventTx(tx bun.Tx, event stripe.Event) ([]fun
 			Set("stripe_status", string(sub.Status)).
 			Set("plan_name", subs.Name).
 			Set("price_id", sub.Items.Data[0].Price.ID))
+
+		// Plan change → fire a separate upgrade/downgrade event so funnels can
+		// distinguish a real plan transition from cancel-at-period-end toggles
+		// or payment-method updates (all of which also raise subscription_updated).
+		if planChanged && org.SubscriptionID != uuid.Nil {
+			changeEventName := "subscription_upgraded"
+			if subs.MonthlyPrice < oldMonthlyPrice {
+				changeEventName = "subscription_downgraded"
+			}
+			c.TrackUserEvent(owner, changeEventName, posthog.NewProperties().
+				Set("old_plan_id", oldSubID.String()).
+				Set("new_plan_id", subs.ID.String()).
+				Set("new_plan_name", subs.Name).
+				Set("old_monthly_price", oldMonthlyPrice).
+				Set("new_monthly_price", subs.MonthlyPrice))
+		}
+
+		if setupJustFinished {
+			c.TrackUserEvent(owner, constants.EVENT_USER_SETUP_FINISHED, posthog.NewProperties().
+				Set("trigger", "subscription_active"))
+		}
+
 		c.IdentifyUser(owner)
 
 		// Sync Neon projects to the new plan tier: transfer free↔paid org
@@ -528,6 +550,23 @@ func (c *Controller) processWebhookEventTx(tx bun.Tx, event stripe.Event) ([]fun
 			Set("currency", string(invoice.Currency)).
 			Set("invoice_id", invoice.ID).
 			Set("billing_reason", string(invoice.BillingReason)))
+
+		// Recurring-cycle invoice → fire subscription_renewed too, so retention
+		// funnels can separate first-charge from rebill without mining
+		// billing_reason on every payment_succeeded event.
+		if invoice.BillingReason == stripe.InvoiceBillingReasonSubscriptionCycle {
+			c.TrackUserEvent(owner, constants.EVENT_SUBSCRIPTION_RENEWED, posthog.NewProperties().
+				Set("subscription_id", org.SubscriptionID.String()).
+				Set("amount_paid", invoice.AmountPaid).
+				Set("currency", string(invoice.Currency)).
+				Set("invoice_id", invoice.ID))
+		}
+
+		if setupJustFinished {
+			c.TrackUserEvent(owner, constants.EVENT_USER_SETUP_FINISHED, posthog.NewProperties().
+				Set("trigger", "invoice_paid"))
+		}
+
 		c.IdentifyUser(owner)
 
 		// Meta CAPI: Purchase fires on every paid subscription invoice (first
