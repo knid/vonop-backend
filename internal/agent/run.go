@@ -223,6 +223,20 @@ func Run(
 	tracker.TraceInput = message
 	ctx = utils.WithTokenTracker(ctx, tracker)
 
+	// emitCreditsUpdate fires a credits_update event with the running
+	// cumulative billed credits so the frontend can render a live meter
+	// after each turn end. Tokens is informational (input+output total).
+	emitCreditsUpdate := func(turn int) {
+		credits := creditsBilled(deps, tracker)
+		_, _, total, _ := tracker.Totals()
+		emitter.Emit(EventCreditsUpdate, CreditsUpdateEvent{
+			RunID:       runID,
+			Turn:        turn,
+			CreditsUsed: credits,
+			Tokens:      total,
+		})
+	}
+
 	// Bind the credit checker to the run's token tracker.
 	var creditCheck func() bool
 	if deps.CreditChecker != nil {
@@ -378,6 +392,7 @@ func Run(
 					StopReason: "tool_use",
 					Tokens:     trackerDelta(tracker),
 				})
+				emitCreditsUpdate(turn)
 				turn++
 				emitter.Emit(EventTurnStart, TurnStartEvent{RunID: runID, Turn: turn})
 			}
@@ -511,6 +526,7 @@ func Run(
 		StopReason: "end_turn",
 		Tokens:     trackerDelta(tracker),
 	})
+	emitCreditsUpdate(turn)
 
 	// --- Step 13: success shutdown (continued in C2.20) ---
 	return finaliseSuccess(ctx, deps, repo, run, emitter, fileMap,
