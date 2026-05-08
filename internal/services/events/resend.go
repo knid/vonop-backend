@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/knid/wemob/internal/database"
 	"github.com/knid/wemob/internal/models"
 )
 
@@ -33,17 +34,19 @@ type ResendService struct {
 	client     *http.Client
 	baseURL    string   // overridable for tests/staging; defaults to https://api.resend.com
 	segmentIDs []string // segments every upserted contact joins; empty = no segment assignment
+	db         *database.Database
 }
 
 // NewResendService constructs the service. segmentIDs is the list of Resend
 // segment UUIDs every contact should be added to (e.g. the "General" segment).
 // Empty list = contacts created without segment membership.
-func NewResendService(apiKey string, segmentIDs ...string) *ResendService {
+func NewResendService(db *database.Database, apiKey string, segmentIDs ...string) *ResendService {
 	return &ResendService{
 		apiKey:     apiKey,
 		client:     &http.Client{Timeout: 8 * time.Second},
 		baseURL:    "https://api.resend.com",
 		segmentIDs: segmentIDs,
+		db:         db,
 	}
 }
 
@@ -84,7 +87,7 @@ func (s *ResendService) SendEvent(user *models.User, event string, attributes ma
 	s.upsertContact(user)
 
 	// Build event payload: contact attrs first, caller-supplied attrs override.
-	payload := contactPayload(user)
+	payload := contactPayload(s.db, user)
 	for k, v := range attributes {
 		payload[k] = v
 	}
@@ -113,7 +116,7 @@ func (s *ResendService) upsertContact(user *models.User) {
 		Email:      strings.ToLower(strings.TrimSpace(user.Email)),
 		FirstName:  firstName,
 		LastName:   lastName,
-		Properties: contactProperties(user),
+		Properties: contactProperties(s.db, user),
 		Segments:   segments,
 	})
 	if err != nil {
@@ -178,7 +181,7 @@ func (s *ResendService) postWithRetry(url string, body []byte, ctx, event, userI
 // contactProperties returns the user attribute set as Resend property values.
 // Resend properties accept string or number only — booleans are stringified
 // to "true"/"false" to match the values the backfill seeded.
-func contactProperties(user *models.User) map[string]string {
+func contactProperties(db *database.Database, user *models.User) map[string]string {
 	if user == nil {
 		return nil
 	}
@@ -186,12 +189,13 @@ func contactProperties(user *models.User) map[string]string {
 	if language == "" {
 		language = "en"
 	}
+	status, _, trial := billingSnapshot(db, user)
 	return map[string]string{
 		"wemob_user_id":       user.ID.String(),
 		"verified":            strconv.FormatBool(user.Verified),
 		"provider":            user.Provider,
-		"subscription_status": user.SubscriptionStatus,
-		"trial_used":          strconv.FormatBool(user.TrialUsed),
+		"subscription_status": status,
+		"trial_used":          strconv.FormatBool(trial),
 		"language":            language,
 	}
 }

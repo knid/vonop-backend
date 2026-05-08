@@ -491,11 +491,22 @@ func (c *Controller) EnsurePersonalOrg(user *models.User) (*models.Organization,
 	base := utils.SlugifyName(displayName)
 	slug := utils.SlugWithSuffix(base)
 
+	// Default new personal orgs to the Starter plan so callers don't have to
+	// remember to call assignFreePlan. Defensive: if Starter is missing for
+	// any reason, fall through with a zero SubscriptionID and let the
+	// startup migration sweep it up.
+	var starterID uuid.UUID
+	if starter, err := c.DB.GetSubscriptionByName("Starter"); err == nil && starter != nil {
+		starterID = starter.ID
+	}
+
 	org := &models.Organization{
-		Name:       orgName,
-		Slug:       slug,
-		OwnerID:    user.ID,
-		IsPersonal: true,
+		Name:               orgName,
+		Slug:               slug,
+		OwnerID:            user.ID,
+		IsPersonal:         true,
+		SubscriptionID:     starterID,
+		SubscriptionStatus: "free",
 	}
 	created, err := c.DB.CreateOrganization(org)
 	if err != nil {

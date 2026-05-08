@@ -45,7 +45,7 @@ func (v *HttpViews) GoogleMobileLogin(w http.ResponseWriter, r *http.Request) {
 		v.Controller.EnsureIdentified(u)
 		v.Controller.TrackUserEvent(u, "user_oauth_logged_in", posthog.NewProperties().
 			Set("provider", "google_mobile").
-			Set("subscription_status", u.SubscriptionStatus))
+			Set("subscription_status", v.Controller.GetUserBilling(u).SubscriptionStatus))
 	}()
 
 	utils.JSONResponse(w, loginRes, http.StatusOK)

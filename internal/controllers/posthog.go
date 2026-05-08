@@ -40,6 +40,7 @@ func (c *Controller) IdentifyUser(user *models.User) {
 	if c.PostHog == nil || user == nil {
 		return
 	}
+	billing := c.GetUserBilling(user)
 	c.PostHog.Enqueue(posthog.Identify{
 		DistinctId: user.ID.String(),
 		Properties: posthog.NewProperties().
@@ -47,9 +48,9 @@ func (c *Controller) IdentifyUser(user *models.User) {
 			Set("$name", user.Name).
 			Set("company", user.Company).
 			Set("provider", user.Provider).
-			Set("subscription_status", user.SubscriptionStatus).
-			Set("subscription_id", user.SubscriptionID.String()).
-			Set("trial_used", user.TrialUsed).
+			Set("subscription_status", billing.SubscriptionStatus).
+			Set("subscription_id", billing.SubscriptionID.String()).
+			Set("trial_used", billing.TrialUsed).
 			Set("setup_finished", user.SetupFinished).
 			Set("verified", user.Verified).
 			Set("user_type", user.Type).

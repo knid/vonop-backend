@@ -35,9 +35,13 @@ func (c *Controller) AdminListUsers(params requests.AdminListParams) (*responses
 
 	items := make([]responses.AdminUserResponse, len(users))
 	for i, u := range users {
+		// Source billing from the user's personal org (Plan A — org-billed).
+		// N+1 is acceptable here: admin lists are paginated to ~50 users.
+		uCopy := u
+		billing := c.GetUserBilling(&uCopy)
 		subName := ""
-		if u.Subscription != nil {
-			subName = u.Subscription.Name
+		if billing.Subscription != nil {
+			subName = billing.Subscription.Name
 		}
 		items[i] = responses.AdminUserResponse{
 			ID:                 u.ID,
@@ -48,10 +52,10 @@ func (c *Controller) AdminListUsers(params requests.AdminListParams) (*responses
 			Type:               u.Type,
 			Company:            u.Company,
 			Provider:           u.Provider,
-			SubscriptionStatus: u.SubscriptionStatus,
+			SubscriptionStatus: billing.SubscriptionStatus,
 			SubscriptionName:   subName,
-			CustomerID:         u.CustomerID,
-			TrialUsed:          u.TrialUsed,
+			CustomerID:         billing.StripeCustomerID,
+			TrialUsed:          billing.TrialUsed,
 			SetupFinished:      u.SetupFinished,
 			CreatedAt:          u.CreatedAt,
 			UpdatedAt:          u.UpdatedAt,
@@ -74,9 +78,10 @@ func (c *Controller) AdminListUsers(params requests.AdminListParams) (*responses
 
 // adminUserDetail builds a detailed user response including counts and credit balance.
 func (c *Controller) adminUserDetail(user *models.User) (*responses.AdminUserDetailResponse, error) {
+	billing := c.GetUserBilling(user)
 	subName := ""
-	if user.Subscription != nil {
-		subName = user.Subscription.Name
+	if billing.Subscription != nil {
+		subName = billing.Subscription.Name
 	}
 
 	// Credit balance — resolved via the user's personal org so admin views
@@ -103,10 +108,10 @@ func (c *Controller) adminUserDetail(user *models.User) (*responses.AdminUserDet
 			Type:               user.Type,
 			Company:            user.Company,
 			Provider:           user.Provider,
-			SubscriptionStatus: user.SubscriptionStatus,
+			SubscriptionStatus: billing.SubscriptionStatus,
 			SubscriptionName:   subName,
-			CustomerID:         user.CustomerID,
-			TrialUsed:          user.TrialUsed,
+			CustomerID:         billing.StripeCustomerID,
+			TrialUsed:          billing.TrialUsed,
 			SetupFinished:      user.SetupFinished,
 			CreatedAt:          user.CreatedAt,
 			UpdatedAt:          user.UpdatedAt,

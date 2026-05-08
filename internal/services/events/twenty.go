@@ -85,15 +85,16 @@ func (s *TwentyService) SendEvent(user *models.User, event string, attributes ma
 	}
 
 	now := time.Now().UTC()
+	status, subID, trial := billingSnapshot(s.db, user)
 	person := twentyPerson{
 		Name:               twentyName{FirstName: user.Name},
 		Emails:             twentyEmails{PrimaryEmail: user.Email},
 		WemobUserId:        user.ID.String(),
 		Verified:           user.Verified,
 		Provider:           user.Provider,
-		SubscriptionStatus: user.SubscriptionStatus,
-		SubscriptionId:     user.SubscriptionID.String(),
-		TrialUsed:          user.TrialUsed,
+		SubscriptionStatus: status,
+		SubscriptionId:     subID,
+		TrialUsed:          trial,
 		LastEventName:      event,
 		LastEventAt:        now.Format(time.RFC3339),
 	}
