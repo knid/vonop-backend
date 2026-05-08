@@ -141,8 +141,9 @@ func (v *HttpViews) StripeCheckout(w http.ResponseWriter, r *http.Request) {
 	if dashboardURL == "" {
 		dashboardURL = "https://dashboard.wemob.io"
 	}
-	successURL := dashboardURL + "/success?session_id={CHECKOUT_SESSION_ID}"
-	cancelURL := dashboardURL + "/subscription"
+	subscriptionPath := "/orgs/" + org.Slug + "/subscription"
+	successURL := dashboardURL + subscriptionPath + "?checkout=success&session_id={CHECKOUT_SESSION_ID}"
+	cancelURL := dashboardURL + subscriptionPath
 
 	lineItems := []*stripe.CheckoutSessionLineItemParams{
 		{
@@ -287,8 +288,9 @@ func (v *HttpViews) PurchaseCredits(w http.ResponseWriter, r *http.Request) {
 	if dashboardURL == "" {
 		dashboardURL = "https://dashboard.wemob.io"
 	}
-	successURL := dashboardURL + "/subscription?credits=purchased"
-	cancelURL := dashboardURL + "/subscription"
+	subscriptionPath := "/orgs/" + org.Slug + "/subscription"
+	successURL := dashboardURL + subscriptionPath + "?checkout=success&credits=purchased"
+	cancelURL := dashboardURL + subscriptionPath
 
 	mode := string(stripe.CheckoutSessionModePayment)
 	params := &stripe.CheckoutSessionParams{
