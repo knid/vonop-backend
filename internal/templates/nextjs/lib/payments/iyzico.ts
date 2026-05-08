@@ -191,6 +191,20 @@ export async function createSession(
       ? collectedIdentity
       : "11111111111";
 
+  // gsmNumber is REQUIRED on the buyer per Iyzico docs — initialize calls
+  // without it return errorMessage "buyer.gsmNumber" and the customer never
+  // reaches the hosted form. /api/checkout normalizes the storefront-
+  // collected phone to E.164 and stashes it on metadata. When normalization
+  // failed (e.g. legacy order from before the phone field shipped, or
+  // unparseable input) we fall back to a generic Turkish-format placeholder
+  // so the API still succeeds; this trades fraud-score quality for "checkout
+  // works at all."
+  const collectedPhone = orderMetadata.phone;
+  const gsmNumber =
+    typeof collectedPhone === "string" && /^\+\d{8,15}$/.test(collectedPhone)
+      ? collectedPhone
+      : "+905000000000";
+
   const req: Record<string, unknown> = {
     locale: config.locale || "en",
     conversationId: order.id,
@@ -206,6 +220,7 @@ export async function createSession(
       surname,
       identityNumber,
       email: order.customerEmail,
+      gsmNumber,
       // Real client IP materially improves Iyzico's fraud scoring. Falls
       // back to a loopback placeholder when the request couldn't resolve
       // one (e.g. direct connection, header stripped upstream).
@@ -286,11 +301,24 @@ export async function handleWebhook(
     throw new Error("iyzico webhook missing conversationId");
   }
 
-  const paid = result.paymentStatus === "SUCCESS";
+  // Iyzico's paymentStatus is not boolean. Beyond SUCCESS/FAILURE the
+  // hosted form can also report INIT_THREEDS, CALLBACK_THREEDS, and
+  // BANK_FRAUD_CHECK while the transaction is still in flight. Marking
+  // any of those as "failed" terminates the order, restores inventory,
+  // and cancels the cart — but the customer's payment may still settle
+  // a moment later, leaving a captured charge with no order to ship.
+  // Map only SUCCESS → paid, only FAILURE → failed, and let the
+  // pending states no-op via apply-outcome.ts; the eventual final
+  // callback (or the abandoned-order sweep at 45min) will resolve the
+  // order to its terminal state.
+  const ps = result.paymentStatus;
+  const status: "paid" | "failed" | "pending" =
+    ps === "SUCCESS" ? "paid" : ps === "FAILURE" ? "failed" : "pending";
+
   return {
     orderId,
     paymentId: result.paymentId ?? token,
-    status: paid ? "paid" : "failed",
+    status,
     provider: "iyzico",
   };
 }

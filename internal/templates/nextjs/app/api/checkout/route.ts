@@ -15,10 +15,40 @@ type CheckoutBody = {
   provider: string;      // "stripe" | "iyzico" | "cod"
   email: string;
   name: string;
+  phone?: string;        // raw input; iyzico requires gsmNumber on buyer
   shippingAddress: Record<string, unknown>;
   billingAddress?: Record<string, unknown>;
   identityNumber?: string;  // 11-digit TC kimlik for iyzico
 };
+
+// Iyzico's checkoutFormInitialize rejects every call without buyer.gsmNumber,
+// so we normalize the storefront-collected phone number to E.164 here and
+// stash it on order.metadata for the adapter to read. Non-digits are
+// stripped, a leading "00" is rewritten to "+", and a +90 prefix is added
+// when the number looks like a Turkish 10-digit local number. Anything that
+// doesn't end up matching E.164 returns "" — the iyzico adapter falls back
+// to a placeholder so the API call still succeeds, at the cost of weaker
+// fraud scoring on that transaction.
+function normalizePhone(raw: string | undefined): string {
+  if (!raw) return "";
+  let s = raw.trim();
+  if (s.startsWith("00")) s = "+" + s.slice(2);
+  const hasPlus = s.startsWith("+");
+  const digits = s.replace(/\D/g, "");
+  if (digits.length === 0) return "";
+  // Bare 10-digit Turkish format (5XXXXXXXXX) — assume +90.
+  if (!hasPlus && digits.length === 10 && digits.startsWith("5")) {
+    return "+90" + digits;
+  }
+  // Bare 11-digit with leading 0 (05XXXXXXXXX).
+  if (!hasPlus && digits.length === 11 && digits.startsWith("05")) {
+    return "+90" + digits.slice(1);
+  }
+  if (hasPlus && digits.length >= 8 && digits.length <= 15) {
+    return "+" + digits;
+  }
+  return "";
+}
 
 // Collision-resistant order numbers. Math.random() collisions over a short
 // window were possible on the previous 4-char base36 suffix and could crash
@@ -274,12 +304,14 @@ export async function POST(req: NextRequest) {
         discountId: cart.discountId,
         // cartId: applyPaymentOutcome drops the cart on pending→paid.
         // viewToken: gates /checkout/success + /checkout/cancel against IDOR.
+        // phone: iyzico adapter reads this to populate buyer.gsmNumber.
         metadata: {
           cartId: cart.id,
           viewToken,
           ...(typeof body.identityNumber === "string" && /^\d{11}$/.test(body.identityNumber)
             ? { identityNumber: body.identityNumber }
             : {}),
+          ...(normalizePhone(body.phone) ? { phone: normalizePhone(body.phone) } : {}),
         },
       })
       .returning();
