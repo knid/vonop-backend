@@ -23,6 +23,25 @@ func (c *Controller) TrackUserEvent(user *models.User, event string, props posth
 	})
 }
 
+// TrackSystemEvent fires a PostHog event keyed by an opaque distinct ID
+// rather than a *models.User. Used by background paths that don't always
+// have a user attached — Asynq job lifecycle, cron heartbeats, webhook
+// ingestion. distinctID falls back to "system" when empty so events are
+// still queryable by task_type / queue.
+func (c *Controller) TrackSystemEvent(distinctID, event string, props posthog.Properties) {
+	if c.PostHog == nil {
+		return
+	}
+	if distinctID == "" {
+		distinctID = "system"
+	}
+	c.PostHog.Enqueue(posthog.Capture{
+		DistinctId: distinctID,
+		Event:      event,
+		Properties: props,
+	})
+}
+
 // EnsureIdentified lazily identifies a user in PostHog at most once per process lifetime.
 func (c *Controller) EnsureIdentified(user *models.User) {
 	if c.PostHog == nil || user == nil {
