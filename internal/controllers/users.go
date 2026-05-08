@@ -69,6 +69,8 @@ func (c *Controller) GetUser(tokenStr string) (*responses.UserInformationRespons
 	// Determine if user has ever used credits (for welcome experience)
 	hasUsage, _ := c.DB.HasUsageTransactions(user.ID.String())
 
+	billing := c.GetUserBilling(user)
+
 	return &responses.UserInformationResponse{
 		ID:                 user.ID,
 		Name:               user.Name,
@@ -79,12 +81,12 @@ func (c *Controller) GetUser(tokenStr string) (*responses.UserInformationRespons
 		Type:               user.Type,
 		Company:            user.Company,
 		CompanyLogo:        user.CompanyLogo,
-		SubscriptionID:     user.SubscriptionID.String(),
-		SubscriptionStatus: user.SubscriptionStatus,
-		SubscribedAt:       user.SubscriptionStartAt,
-		TrialStartedAt:     user.TrialStartAt,
+		SubscriptionID:     billing.SubscriptionID.String(),
+		SubscriptionStatus: billing.SubscriptionStatus,
+		SubscribedAt:       billing.SubscriptionStartAt,
+		TrialStartedAt:     billing.TrialStartAt,
 		SetupFinished:      user.SetupFinished,
-		TrialUsed:          user.TrialUsed,
+		TrialUsed:          billing.TrialUsed,
 		Language:           user.Language,
 		CreatedAt:          user.CreatedAt,
 		IsNewUser:          !hasUsage,
@@ -157,6 +159,8 @@ func (c *Controller) UpdateUser(user *models.User, userUpdateReq requests.UserUp
 
 	hasUsage, _ := c.DB.HasUsageTransactions(updatedUser.ID.String())
 
+	billing := c.GetUserBilling(updatedUser)
+
 	return &responses.UserInformationResponse{
 		ID:                 updatedUser.ID,
 		Name:               updatedUser.Name,
@@ -167,12 +171,12 @@ func (c *Controller) UpdateUser(user *models.User, userUpdateReq requests.UserUp
 		Type:               updatedUser.Type,
 		Company:            updatedUser.Company,
 		CompanyLogo:        updatedUser.CompanyLogo,
-		SubscriptionID:     updatedUser.SubscriptionID.String(),
-		SubscriptionStatus: updatedUser.SubscriptionStatus,
-		SubscribedAt:       updatedUser.SubscriptionStartAt,
-		TrialStartedAt:     updatedUser.TrialStartAt,
+		SubscriptionID:     billing.SubscriptionID.String(),
+		SubscriptionStatus: billing.SubscriptionStatus,
+		SubscribedAt:       billing.SubscriptionStartAt,
+		TrialStartedAt:     billing.TrialStartAt,
 		SetupFinished:      updatedUser.SetupFinished,
-		TrialUsed:          updatedUser.TrialUsed,
+		TrialUsed:          billing.TrialUsed,
 		Language:           updatedUser.Language,
 		CreatedAt:          updatedUser.CreatedAt,
 		IsNewUser:          !hasUsage,
@@ -280,12 +284,12 @@ func (c *Controller) RegisterUser(userRegisterReq requests.UserRegisterRequest) 
 		Type:               createdUser.Type,
 		Company:            createdUser.Company,
 		CompanyLogo:        createdUser.CompanyLogo,
-		SubscriptionID:     createdUser.SubscriptionID.String(),
-		SubscriptionStatus: createdUser.SubscriptionStatus,
-		SubscribedAt:       createdUser.SubscriptionStartAt,
-		TrialStartedAt:     createdUser.TrialStartAt,
+		SubscriptionID:     personalOrg.SubscriptionID.String(),
+		SubscriptionStatus: personalOrg.SubscriptionStatus,
+		SubscribedAt:       personalOrg.SubscriptionStartAt,
+		TrialStartedAt:     personalOrg.TrialStartAt,
 		SetupFinished:      createdUser.SetupFinished,
-		TrialUsed:          createdUser.TrialUsed,
+		TrialUsed:          personalOrg.TrialUsed,
 		CreatedAt:          createdUser.CreatedAt,
 		IsNewUser:          true,
 	}, nil

@@ -103,7 +103,7 @@ func (v *HttpViews) DeleteUser(w http.ResponseWriter, r *http.Request) {
 	go v.Controller.EventService.SendEvent(user, constants.EVENT_USER_DELETED, map[string]any{})
 
 	v.Controller.TrackUserEvent(user, "user_deleted", posthog.NewProperties().
-		Set("subscription_status", user.SubscriptionStatus))
+		Set("subscription_status", v.Controller.GetUserBilling(user).SubscriptionStatus))
 
 	utils.JSONResponse(w, deletedUserRes, http.StatusOK)
 }
@@ -131,7 +131,7 @@ func (v *HttpViews) UserLogin(w http.ResponseWriter, r *http.Request) {
 			v.Controller.EnsureIdentified(u)
 			v.Controller.TrackUserEvent(u, "user_logged_in", posthog.NewProperties().
 				Set("provider", u.Provider).
-				Set("subscription_status", u.SubscriptionStatus))
+				Set("subscription_status", v.Controller.GetUserBilling(u).SubscriptionStatus))
 		}
 	}()
 

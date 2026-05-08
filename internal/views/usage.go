@@ -38,11 +38,10 @@ func (v *HttpViews) GetMontlyUsage(w http.ResponseWriter, r *http.Request) {
 		notifications = append(notifications, projectNotifications...)
 	}
 
-	// A15: anchor billing window on the personal org's SubscriptionStartAt
-	// (Plan A made billing org-scoped). Falls back to user.SubscriptionStartAt
-	// only when the org lookup fails — keeps the view from crashing on rows
-	// that haven't been migrated yet.
-	subsStart := user.SubscriptionStartAt
+	// Anchor billing window on the personal org's SubscriptionStartAt
+	// (Plan A made billing org-scoped). Zero time falls through to
+	// BillingPeriod's "first of month" fallback.
+	var subsStart time.Time
 	if org, orgErr := v.Controller.DB.GetPersonalOrgByUserID(user.ID.String()); orgErr == nil && org != nil {
 		subsStart = org.SubscriptionStartAt
 	}
@@ -93,6 +92,7 @@ func (v *HttpViews) GetMontlyUsage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	billing := v.Controller.GetUserBilling(user)
 	output := map[string]any{
 		"notifications_used":    notificationCount,
 		"app_builds_used":       appBuildTaskCount,
@@ -104,9 +104,9 @@ func (v *HttpViews) GetMontlyUsage(w http.ResponseWriter, r *http.Request) {
 		"mobile_apps_limit":     mobileAppLimit,
 		"ai_credits_balance":    aiCreditsBalance,
 		"ai_credits_limit":      aiCreditsLimit,
-		"subscription_status":   user.SubscriptionStatus,
-		"subscription_plan_id":  user.SubscriptionID,
-		"subscription_start_at": user.SubscriptionStartAt,
+		"subscription_status":   billing.SubscriptionStatus,
+		"subscription_plan_id":  billing.SubscriptionID,
+		"subscription_start_at": billing.SubscriptionStartAt,
 		"renewal_period_start":  renewStart,
 		"renewal_period_end":    renewEnd,
 	}
