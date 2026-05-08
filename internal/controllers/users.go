@@ -366,7 +366,7 @@ func (c *Controller) DeleteUser(tokenStr string) (*models.User, error) {
 	return deletedUser, nil
 }
 
-func (c *Controller) GoogleLogin(oauthUser goth.User) (*responses.UserLoginResponse, error) {
+func (c *Controller) GoogleLogin(oauthUser goth.User, attr MetaAttribution) (*responses.UserLoginResponse, error) {
 	isNewUser := false
 	user, err := c.DB.GetUserByEmail(oauthUser.Email)
 	if err == nil && user != nil && user.Provider == "Wemob" {
@@ -435,6 +435,12 @@ func (c *Controller) GoogleLogin(oauthUser goth.User) (*responses.UserLoginRespo
 			go c.EventService.SendEvent(user, constants.EVENT_NEW_USER, map[string]any{
 				"provider": "google",
 			})
+
+			// Meta CAPI: fire CompleteRegistration only on first signup. The
+			// OAuth bridge cookie (set in OAuthBegin) carries fbp/fbc across
+			// the Google redirect so match quality matches the password flow.
+			c.PersistMetaAttribution(user, attr)
+			go c.FireMetaCompleteRegistration(user, attr)
 		}
 	}
 

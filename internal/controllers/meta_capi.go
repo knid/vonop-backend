@@ -2,6 +2,8 @@ package controllers
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"log/slog"
 	"net"
 	"net/http"
@@ -11,6 +13,95 @@ import (
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/services/meta"
 )
+
+// metaAttrCookieName is the short-lived cookie used to bridge fbp/fbc/source
+// URL across the Google OAuth roundtrip. The Pixel cookies (_fbp, _fbc) live
+// on the front-end origin (app.wemob.io) and don't follow the browser to the
+// API origin (api.wemob.io) where the OAuth callback lands. The frontend
+// instead appends them as query params on the OAuthBegin request; the begin
+// handler then writes this cookie scoped to the API origin so SameSite=Lax
+// preserves it across the Google → callback redirect.
+const metaAttrCookieName = "meta_attr"
+
+// metaAttrCookieMaxAge bounds the bridge to a single OAuth flow. 10 minutes
+// is plenty even on a slow network — Google's hosted page typically commits
+// within seconds.
+const metaAttrCookieMaxAge = 600
+
+type metaAttrCookiePayload struct {
+	Fbp            string `json:"fbp,omitempty"`
+	Fbc            string `json:"fbc,omitempty"`
+	EventSourceURL string `json:"event_source_url,omitempty"`
+}
+
+// SetMetaAttrCookie writes the OAuth-bridge cookie. No-op when the bundle has
+// nothing to carry (avoids creating an empty cookie that just adds bytes to
+// every subsequent request).
+func SetMetaAttrCookie(w http.ResponseWriter, r *http.Request, attr MetaAttribution) {
+	if attr.Fbp == "" && attr.Fbc == "" && attr.EventSourceURL == "" {
+		return
+	}
+	buf, err := json.Marshal(metaAttrCookiePayload{
+		Fbp:            attr.Fbp,
+		Fbc:            attr.Fbc,
+		EventSourceURL: attr.EventSourceURL,
+	})
+	if err != nil {
+		return
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     metaAttrCookieName,
+		Value:    base64.URLEncoding.EncodeToString(buf),
+		Path:     "/",
+		MaxAge:   metaAttrCookieMaxAge,
+		HttpOnly: true,
+		Secure:   isHTTPS(r),
+		SameSite: http.SameSiteLaxMode,
+	})
+}
+
+// ReadMetaAttrCookie reads the OAuth-bridge cookie, returning a fully-populated
+// MetaAttribution (cookie payload + request-time IP/UA). Missing or malformed
+// cookies degrade silently to "no browser signal" — the Stripe webhook can
+// still fire with email + IP + UA match.
+func ReadMetaAttrCookie(r *http.Request) MetaAttribution {
+	c, err := r.Cookie(metaAttrCookieName)
+	if err != nil || c.Value == "" {
+		return MetaAttributionFromRequest(r, "", "", "")
+	}
+	decoded, err := base64.URLEncoding.DecodeString(c.Value)
+	if err != nil {
+		return MetaAttributionFromRequest(r, "", "", "")
+	}
+	var payload metaAttrCookiePayload
+	if err := json.Unmarshal(decoded, &payload); err != nil {
+		return MetaAttributionFromRequest(r, "", "", "")
+	}
+	return MetaAttributionFromRequest(r, payload.Fbp, payload.Fbc, payload.EventSourceURL)
+}
+
+// ClearMetaAttrCookie expires the bridge cookie immediately so it doesn't
+// leak into subsequent OAuth attempts on shared devices.
+func ClearMetaAttrCookie(w http.ResponseWriter, r *http.Request) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     metaAttrCookieName,
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		HttpOnly: true,
+		Secure:   isHTTPS(r),
+		SameSite: http.SameSiteLaxMode,
+	})
+}
+
+// isHTTPS detects a TLS-terminated request, including behind the Caddy/Fly
+// edge proxy where r.TLS is nil but X-Forwarded-Proto is set.
+func isHTTPS(r *http.Request) bool {
+	if r.TLS != nil {
+		return true
+	}
+	return r.Header.Get("X-Forwarded-Proto") == "https"
+}
 
 // MetaAttribution is the per-request bundle of ad-tracking signals we capture
 // from the front-end Pixel and the originating HTTP request. Persisted on the
