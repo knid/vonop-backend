@@ -61,13 +61,13 @@ export async function POST(req: NextRequest) {
   // both sides land on the same canonical form.
   const normalizedEmail = normalizeEmail(body.email);
 
+  // Sweep abandoned pending orders. Cutoff is 45min to stay safely outside
+  // Iyzico's 30min hosted-form lifetime + a buffer for delayed webhooks; a
+  // tighter cutoff risks marking a paid-but-late-webhook order as failed.
   try {
-    const cutoff = new Date(Date.now() - 30 * 60 * 1000);
+    const cutoff = new Date(Date.now() - 45 * 60 * 1000);
     const stale = await db
-      .select({
-        id: schema.orders.id,
-        cartId: sql<string | null>`(${schema.orders.metadata}->>'cartId')`.as("cartId"),
-      })
+      .select({ id: schema.orders.id })
       .from(schema.orders)
       .where(
         and(

@@ -157,8 +157,14 @@ UPDATE config SET
   updated_at = NOW()
 WHERE id = (SELECT id FROM config ORDER BY id LIMIT 1)`
 
-	if _, err := db.ExecContext(ctx, q, provider); err != nil {
+	res, err := db.ExecContext(ctx, q, provider)
+	if err != nil {
 		slog.Warn("payment_config: tenant UPDATE failed", "err", err, "project_id", projectID, "provider", provider)
+		return
+	}
+	rows, _ := res.RowsAffected()
+	if rows == 0 {
+		slog.Warn("payment_config: tenant UPDATE matched 0 rows (config table empty?)", "project_id", projectID, "provider", provider)
 		return
 	}
 	slog.Info("payment_config: enabled in tenant DB", "project_id", projectID, "provider", provider)

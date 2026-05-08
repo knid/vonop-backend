@@ -79,12 +79,16 @@ function promisify<T>(fn: (cb: IyzipayCallback<T>) => void): Promise<T> {
 }
 
 function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
-  return Promise.race<T>([
-    p,
-    new Promise<T>((_, reject) =>
-      setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms),
-    ),
-  ]);
+  let timerId: ReturnType<typeof setTimeout> | undefined;
+  const timer = new Promise<T>((_, reject) => {
+    timerId = setTimeout(
+      () => reject(new Error(`${label} timed out after ${ms}ms`)),
+      ms,
+    );
+  });
+  return Promise.race<T>([p, timer]).finally(() => {
+    if (timerId !== undefined) clearTimeout(timerId);
+  });
 }
 
 function normalizeCountry(raw: string | undefined): string {
