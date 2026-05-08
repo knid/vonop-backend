@@ -11,6 +11,7 @@ import (
 
 	"github.com/hibiken/asynq"
 	"github.com/knid/wemob/internal/bootstrap"
+	"github.com/knid/wemob/internal/middleware"
 	"github.com/knid/wemob/internal/tasks"
 )
 
@@ -83,6 +84,10 @@ func main() {
 	})
 
 	mux := asynq.NewServeMux()
+	// PostHog lifecycle: emits job_started / job_succeeded / job_failed for
+	// every task — including cron heartbeats — so worker activity is queryable
+	// alongside user events in PostHog rather than only in BetterStack logs.
+	mux.Use(middleware.AsynqPostHogLifecycle(controller))
 	mux.HandleFunc(tasks.TypeDeployWeb, controller.HandleWebDeployTask)
 	mux.HandleFunc(tasks.TypeDeleteFlyApp, controller.HandleDeleteFlyAppTask)
 	mux.HandleFunc(tasks.TypeAgentRun, controller.HandleAgentRunTask)
