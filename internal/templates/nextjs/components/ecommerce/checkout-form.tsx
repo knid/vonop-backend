@@ -24,6 +24,7 @@ export function CheckoutForm() {
   const [form, setForm] = React.useState({
     email: "",
     name: "",
+    phone: "",
     line1: "",
     line2: "",
     city: "",
@@ -34,7 +35,15 @@ export function CheckoutForm() {
   });
 
   const providers = config?.payment_providers || [];
-  const showIdentityField = config?.locale === "tr";
+  // Show TR-specific fields whenever the store is configured for Turkey: by
+  // locale OR by currency. Iyzico's checkoutFormInitialize rejects every
+  // call without a buyer.gsmNumber, so we have to collect a phone for any
+  // store the merchant has pointed at TR — even if locale was left at "en"
+  // because the AI seeded the store before that prompt-addendum landed.
+  const isTurkishStore =
+    config?.locale === "tr" || config?.currency === "TRY";
+  const showIdentityField = isTurkishStore;
+  const showPhoneField = isTurkishStore;
 
   React.useEffect(() => {
     if (providers.length === 1) setSelectedProvider(providers[0]);
@@ -66,6 +75,7 @@ export function CheckoutForm() {
           provider: selectedProvider || "cod",
           email: form.email,
           name: form.name,
+          phone: form.phone || undefined,
           shippingAddress,
           identityNumber: form.identity_number || undefined,
           // billingAddress omitted — server defaults to shippingAddress
@@ -148,6 +158,24 @@ export function CheckoutForm() {
               <label htmlFor="name" className="mb-1.5 block text-xs uppercase tracking-wider text-muted-foreground">{{t.fullName}}</label>
               <input id="name" name="name" type="text" required value={form.name} onChange={handleChange} className={inputClass} />
             </div>
+            {showPhoneField && (
+              <div className="sm:col-span-2">
+                <label htmlFor="phone" className="mb-1.5 block text-xs uppercase tracking-wider text-muted-foreground">{`{{t.phone}}`}</label>
+                <input
+                  id="phone"
+                  name="phone"
+                  type="tel"
+                  inputMode="tel"
+                  autoComplete="tel"
+                  required
+                  value={form.phone}
+                  onChange={handleChange}
+                  className={inputClass}
+                  placeholder="+905XXXXXXXXX"
+                />
+                <p className="mt-1 text-xs text-muted-foreground/70">{`{{t.phoneHelp}}`}</p>
+              </div>
+            )}
           </div>
         </div>
 

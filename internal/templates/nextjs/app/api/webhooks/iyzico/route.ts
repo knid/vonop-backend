@@ -52,10 +52,16 @@ export async function POST(req: NextRequest) {
       tokenParam = `&t=${viewToken}`;
     }
   }
+  // event.status can be "pending" when Iyzico's paymentStatus is one of the
+  // in-flight 3DS / fraud-check states (INIT_THREEDS, CALLBACK_THREEDS,
+  // BANK_FRAUD_CHECK). The customer's payment hasn't failed — it's still
+  // settling — so route them to /checkout/success rather than /cancel. The
+  // success page reads order.payment_status from the DB and will reflect
+  // "pending" until the next callback flips it terminal.
   const target =
-    event.status === "paid"
-      ? `${siteUrl}/checkout/success?order=${event.orderId}${tokenParam}`
-      : `${siteUrl}/checkout/cancel?order=${event.orderId}${tokenParam}`;
+    event.status === "failed"
+      ? `${siteUrl}/checkout/cancel?order=${event.orderId}${tokenParam}`
+      : `${siteUrl}/checkout/success?order=${event.orderId}${tokenParam}`;
 
   // 303 See Other: converts the iyzico POST callback into a GET redirect
   // to the success/cancel page. Faster and more reliable than the old
