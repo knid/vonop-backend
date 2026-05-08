@@ -13,6 +13,7 @@ import (
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/utils"
+	"github.com/posthog/posthog-go"
 )
 
 // Lifetimes for one-time action tokens. Short enough to limit the damage
@@ -169,6 +170,7 @@ func (c *Controller) SendVerifyEmail(user *models.User) error {
 		"name":       user.Name,
 		"verify_url": verifyURL,
 	})
+	c.TrackUserEvent(user, constants.EVENT_EMAIL_VERIFICATION_REQUESTED, posthog.NewProperties())
 
 	return nil
 }
@@ -221,6 +223,7 @@ func (c *Controller) ConsumeVerifyEmail(req requests.UserVerifyEmailRequest) (*m
 	}
 
 	go c.EventService.SendEvent(user, constants.EVENT_EMAIL_VERIFIED, map[string]any{})
+	c.TrackUserEvent(user, constants.EVENT_EMAIL_VERIFIED, posthog.NewProperties())
 
 	return user, nil
 }

@@ -620,6 +620,10 @@ func (c *Controller) emitCreditThresholdEvents(user *models.User, orgID uuid.UUI
 			"reference":        reference,
 			"billing_url":      billingURL,
 		})
+		c.TrackUserEvent(user, constants.EVENT_CREDITS_OVERDRAFT_STARTED, posthog.NewProperties().
+			Set("previous_balance", prevBalance).
+			Set("new_balance", newBalance).
+			Set("action", action))
 	}
 
 	// Percentage thresholds — only meaningful when user has a monthly grant
@@ -654,6 +658,12 @@ func (c *Controller) emitCreditThresholdEvents(user *models.User, orgID uuid.UUI
 				"reference":         reference,
 				"billing_url":       billingURL,
 			})
+			c.TrackUserEvent(user, t.event, posthog.NewProperties().
+				Set("level", t.level).
+				Set("threshold_percent", t.percent).
+				Set("credits_remaining", newBalance).
+				Set("credits_total", monthly).
+				Set("action", action))
 			return // only fire the lowest newly-crossed threshold
 		}
 	}
