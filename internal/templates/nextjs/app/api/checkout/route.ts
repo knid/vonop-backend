@@ -17,6 +17,7 @@ type CheckoutBody = {
   name: string;
   shippingAddress: Record<string, unknown>;
   billingAddress?: Record<string, unknown>;
+  identityNumber?: string;  // 11-digit TC kimlik for iyzico
 };
 
 // Collision-resistant order numbers. Math.random() collisions over a short
@@ -59,6 +60,62 @@ export async function POST(req: NextRequest) {
   // reviews as `buyer@gmail.com` (or vice versa). Lowercase + plus-strip;
   // both sides land on the same canonical form.
   const normalizedEmail = normalizeEmail(body.email);
+
+  // Sweep abandoned pending orders. Cutoff is 45min to stay safely outside
+  // Iyzico's 30min hosted-form lifetime + a buffer for delayed webhooks; a
+  // tighter cutoff risks marking a paid-but-late-webhook order as failed.
+  try {
+    const cutoff = new Date(Date.now() - 45 * 60 * 1000);
+    const stale = await db
+      .select({ id: schema.orders.id })
+      .from(schema.orders)
+      .where(
+        and(
+          eq(schema.orders.paymentStatus, "pending"),
+          sql`${schema.orders.createdAt} < ${cutoff}`,
+        ),
+      )
+      .limit(50);
+
+    for (const s of stale) {
+      const updated = await db
+        .update(schema.orders)
+        .set({
+          paymentStatus: "failed",
+          status: "cancelled",
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(schema.orders.id, s.id),
+            eq(schema.orders.paymentStatus, "pending"),
+          ),
+        )
+        .returning({ id: schema.orders.id });
+
+      if (updated.length === 0) continue;
+
+      const staleItems = await db
+        .select({
+          productId: schema.orderItems.productId,
+          quantity: schema.orderItems.quantity,
+        })
+        .from(schema.orderItems)
+        .where(eq(schema.orderItems.orderId, s.id));
+
+      for (const item of staleItems) {
+        await db
+          .update(schema.products)
+          .set({
+            inventory: sql`CASE WHEN ${schema.products.trackInventory} THEN ${schema.products.inventory} + ${item.quantity} ELSE ${schema.products.inventory} END`,
+            updatedAt: new Date(),
+          })
+          .where(eq(schema.products.id, item.productId));
+      }
+    }
+  } catch (err) {
+    console.warn("abandoned-order sweep failed", err);
+  }
 
   const jar = await cookies();
   const sessionId = jar.get(CART_SESSION_COOKIE)?.value;
@@ -217,7 +274,13 @@ export async function POST(req: NextRequest) {
         discountId: cart.discountId,
         // cartId: applyPaymentOutcome drops the cart on pending→paid.
         // viewToken: gates /checkout/success + /checkout/cancel against IDOR.
-        metadata: { cartId: cart.id, viewToken },
+        metadata: {
+          cartId: cart.id,
+          viewToken,
+          ...(typeof body.identityNumber === "string" && /^\d{11}$/.test(body.identityNumber)
+            ? { identityNumber: body.identityNumber }
+            : {}),
+        },
       })
       .returning();
     order = inserted;

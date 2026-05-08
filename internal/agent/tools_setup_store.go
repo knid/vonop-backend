@@ -64,7 +64,7 @@ type setupStoreInput struct {
 func (SetupStoreTool) Name() string { return "setup_store" }
 
 func (SetupStoreTool) Description() string {
-	return "One-shot ecommerce seed: UPDATEs the config row and bulk-INSERTs categories and products in a single transaction. Use this on the first turn to populate the store instead of calling execute_sql 3 times. Categories reference each other by `parent_slug` (resolved server-side). Products reference categories by `category_slug`. For later edits (adding one product, tweaking a price, adding a column), use execute_sql — this tool is seed-only. Prices are bigint cents. tax_rate is a percentage (8 means 8%)."
+	return "One-shot ecommerce seed: UPDATEs the config row and bulk-INSERTs categories and products in a single transaction. Use this on the first turn to populate the store instead of calling execute_sql 3 times. Categories reference each other by `parent_slug` (resolved server-side). Products reference categories by `category_slug`. For later edits (adding one product, tweaking a price, adding a column), use execute_sql — this tool is seed-only. Prices are bigint cents. tax_rate is a percentage (8 means 8%). For Turkish stores (Turkish prompt, TL/TRY, or Turkish merchant brand), set config.currency=\"TRY\", config.locale=\"tr\", and config.payment_config={\"iyzico\":{\"enabled\":true},\"cod\":{\"enabled\":true}}. The seed defaults are USD/en — these will break Iyzico checkout for Turkish customers if not overridden on the first turn."
 }
 
 func (SetupStoreTool) Schema() map[string]any {
@@ -76,11 +76,11 @@ func (SetupStoreTool) Schema() map[string]any {
 				"description": "Store-wide settings. All fields optional; omitted fields keep their seeded defaults.",
 				"properties": map[string]any{
 					"store_name":      map[string]any{"type": "string"},
-					"currency":        map[string]any{"type": "string", "description": "ISO 4217, e.g. USD, EUR, TRY"},
-					"locale":          map[string]any{"type": "string", "description": "BCP 47, e.g. en, tr, de"},
+					"currency":        map[string]any{"type": "string", "description": "ISO 4217. e.g. USD, EUR, TRY. ALWAYS pass TRY for Turkish stores — installments + Iyzico hosted form depend on it."},
+					"locale":          map[string]any{"type": "string", "description": "BCP 47. e.g. en, tr, de. ALWAYS pass tr for Turkish stores — Iyzico hosted form renders in Turkish only when this is tr."},
 					"tax_rate":        map[string]any{"type": "number", "description": "Percentage (8 means 8%)"},
 					"shipping_config": map[string]any{"type": "object", "description": "Free-form jsonb"},
-					"payment_config":  map[string]any{"type": "object", "description": "e.g. {\"stripe\":{\"enabled\":true}}"},
+					"payment_config":  map[string]any{"type": "object", "description": "e.g. {\"stripe\":{\"enabled\":true}}. For TR stores ALWAYS pass {\"iyzico\":{\"enabled\":true},\"cod\":{\"enabled\":true}} so the storefront's checkout form picks them up."},
 					"notify_email":    map[string]any{"type": "string"},
 				},
 			},

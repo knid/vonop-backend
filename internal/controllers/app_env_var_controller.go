@@ -135,6 +135,12 @@ func (c *Controller) CollectAllEnvVars(project *models.AppProject) map[string]st
 		envVars["EXPO_PUBLIC_API_URL"] = c.BackendDeployURL(project)
 		envVars["EXPO_PUBLIC_PROJECT_ID"] = project.ID.String()
 		envVars["EXPO_PUBLIC_WEMOB_API_URL"] = constants.WEMOB_API_BASE_URL
+	} else {
+		// Next.js payment adapters (iyzico, stripe) read NEXT_PUBLIC_SITE_URL
+		// to build callbackUrl/success_url. Skip if user already set it explicitly.
+		if envVars["NEXT_PUBLIC_SITE_URL"] == "" {
+			envVars["NEXT_PUBLIC_SITE_URL"] = c.BackendDeployURL(project)
+		}
 	}
 
 	return envVars

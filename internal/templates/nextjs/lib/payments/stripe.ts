@@ -18,7 +18,7 @@ import type { CheckoutContext, CheckoutResult, WebhookEvent } from "./index";
 function getClient(): Stripe {
   const sk = process.env.STRIPE_SK;
   if (!sk) throw new Error("STRIPE_SK not set");
-  return new Stripe(sk, { apiVersion: "2024-12-18.acacia" });
+  return new Stripe(sk, { apiVersion: "2024-12-18.acacia", timeout: 15000 });
 }
 
 // Build Stripe line_items from order_items, showing each product at its

@@ -97,6 +97,13 @@ func ValidateIntegrationConfig(provider string, credentials map[string]any) erro
 				return fmt.Errorf("openrouter API key must start with sk-or-")
 			}
 		}
+
+	case "iyzico":
+		if bu, ok := credString(credentials, "base_url"); ok {
+			if !strings.HasPrefix(bu, "https://") {
+				return fmt.Errorf("iyzico base_url must start with https://")
+			}
+		}
 	}
 
 	return nil
