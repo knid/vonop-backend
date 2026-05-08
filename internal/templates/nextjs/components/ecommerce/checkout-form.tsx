@@ -30,9 +30,11 @@ export function CheckoutForm() {
     state: "",
     postal_code: "",
     country: "",
+    identity_number: "",
   });
 
   const providers = config?.payment_providers || [];
+  const showIdentityField = config?.locale === "tr";
 
   React.useEffect(() => {
     if (providers.length === 1) setSelectedProvider(providers[0]);
@@ -65,13 +67,27 @@ export function CheckoutForm() {
           email: form.email,
           name: form.name,
           shippingAddress,
+          identityNumber: form.identity_number || undefined,
           // billingAddress omitted — server defaults to shippingAddress
         }),
       });
 
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        setError(err.error ?? "{{t.checkoutFailed}}");
+        const ERROR_KEYS: Record<string, string> = {
+          missing_fields: "{{t.errorMissingFields}}",
+          no_cart_session: "{{t.errorNoCartSession}}",
+          no_config: "{{t.errorNoConfig}}",
+          cart_not_found: "{{t.errorCartNotFound}}",
+          empty_cart: "{{t.errorEmptyCart}}",
+          product_unavailable: "{{t.errorProductUnavailable}}",
+          invalid_quantity: "{{t.errorInvalidQuantity}}",
+          insufficient_stock: "{{t.errorInsufficientStock}}",
+          order_insert_failed: "{{t.errorOrderInsertFailed}}",
+          payment_init_failed: "{{t.errorPaymentInitFailed}}",
+        };
+        const code = err.error ?? "";
+        setError(ERROR_KEYS[code] ?? "{{t.checkoutFailed}}");
         setIsSubmitting(false);
         return;
       }
@@ -165,6 +181,23 @@ export function CheckoutForm() {
               <label htmlFor="country" className="mb-1.5 block text-xs uppercase tracking-wider text-muted-foreground">{{t.country}}</label>
               <input id="country" name="country" type="text" required value={form.country} onChange={handleChange} className={inputClass} />
             </div>
+            {showIdentityField && (
+              <div className="sm:col-span-2">
+                <label htmlFor="identity_number" className="mb-1.5 block text-xs uppercase tracking-wider text-muted-foreground">{`{{t.identityNumber}}`}</label>
+                <input
+                  id="identity_number"
+                  name="identity_number"
+                  type="text"
+                  inputMode="numeric"
+                  pattern="\d{11}"
+                  maxLength={11}
+                  value={form.identity_number}
+                  onChange={handleChange}
+                  className={inputClass}
+                  placeholder="11111111111"
+                />
+              </div>
+            )}
           </div>
         </div>
 

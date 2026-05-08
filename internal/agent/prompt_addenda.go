@@ -140,11 +140,30 @@ For LLM-authored pages (home, about, contact, FAQ), write directly in the
 store's language.
 
 ## Checkout providers
-Stripe / Iyzico / COD are wired in lib/payments/. For a provider to appear
+
+Stripe / Iyzico / COD are wired in lib/payments/. For a provider to show up
 in the checkout form: (1) the merchant connects it in the wemob dashboard
-(keys injected at deploy), and (2) config.payment_config has it enabled,
-e.g. '{"stripe": {"enabled": true}}'. Update both when the user asks for a
-specific provider.
+(keys injected at deploy), AND (2) config.payment_config in the tenant DB
+has it enabled, e.g. '{"iyzico": {"enabled": true}}'. The dashboard
+connect flow auto-enables iyzico/stripe in payment_config server-side now,
+so you usually don't have to. But the AI must always make sure that the
+config in setup_store reflects the user's intent, and the merchant's
+connected providers.
+
+## Turkish stores: hard defaults
+
+If the user is building for Turkey (prompt is in Turkish, mentions TRY/TL/lira,
+or names Turkish brands), set ALL of these in setup_store.config on the first
+turn — do NOT rely on the seed defaults (USD/en):
+  - currency: "TRY"
+  - locale:   "tr"
+  - tax_rate: 20      (Turkish KDV; merchant can change later)
+  - payment_config: {"iyzico": {"enabled": true}, "cod": {"enabled": true}}
+
+Iyzico installments only fire for TRY, the hosted form renders in Turkish only
+when locale=tr, and a TR store with USD pricing is a launch-blocker. If you
+detect Turkish but skip these, the merchant's customers will see a broken
+checkout.
 `
 
 // AuthAddendum is appended to the base prompt when project.Settings.needs_auth is true.

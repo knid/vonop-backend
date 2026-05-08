@@ -75,8 +75,7 @@ var IntegrationProviders = []IntegrationProviderConfig{
 		Name:           "Stripe",
 		Description:    "Payment processing platform for online businesses.",
 		Category:       "payment",
-		RequiredFields: []string{"publishable_key", "secret_key"},
-		OptionalFields: []string{"webhook_secret"},
+		RequiredFields: []string{"publishable_key", "secret_key", "webhook_secret"},
 		EnvVarMapping: map[string]string{
 			"publishable_key": "NEXT_PUBLIC_STRIPE_PK",
 			"secret_key":      "STRIPE_SK",
@@ -90,9 +89,11 @@ var IntegrationProviders = []IntegrationProviderConfig{
 		Description:    "Turkish payment gateway for local and international payments.",
 		Category:       "payment",
 		RequiredFields: []string{"api_key", "secret_key"},
+		OptionalFields: []string{"base_url"},
 		EnvVarMapping: map[string]string{
 			"api_key":    "IYZICO_API_KEY",
 			"secret_key": "IYZICO_SECRET_KEY",
+			"base_url":   "IYZICO_BASE_URL",
 		},
 		Website: "https://www.iyzico.com",
 	},

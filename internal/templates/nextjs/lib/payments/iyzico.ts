@@ -78,6 +78,26 @@ function promisify<T>(fn: (cb: IyzipayCallback<T>) => void): Promise<T> {
   );
 }
 
+function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  return Promise.race<T>([
+    p,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms),
+    ),
+  ]);
+}
+
+function normalizeCountry(raw: string | undefined): string {
+  if (!raw) return "Turkey";
+  const v = raw.trim();
+  if (!v) return "Turkey";
+  const lower = v.toLowerCase();
+  if (lower === "türkiye" || lower === "turkiye" || lower === "tr" || lower === "tur" || lower === "türkiye cumhuriyeti") {
+    return "Turkey";
+  }
+  return v;
+}
+
 type AddressLike = {
   line1?: string;
   line2?: string;
@@ -188,21 +208,21 @@ export async function createSession(
       ip: ctx.clientIp || "127.0.0.1",
       registrationAddress: shippingAddress,
       city: shipping.city || "Not provided",
-      country: shipping.country || "Turkey",
+      country: normalizeCountry(shipping.country),
       zipCode: shipping.postal_code ?? "",
     },
     shippingAddress: {
       contactName: order.customerName ?? "",
       address: shippingAddress,
       city: shipping.city || "Not provided",
-      country: shipping.country || "Turkey",
+      country: normalizeCountry(shipping.country),
       zipCode: shipping.postal_code ?? "",
     },
     billingAddress: {
       contactName: order.customerName ?? "",
       address: billingAddress,
       city: billing.city || shipping.city || "Not provided",
-      country: billing.country || shipping.country || "Turkey",
+      country: normalizeCountry(billing.country || shipping.country),
     },
     basketItems,
   };
@@ -213,8 +233,12 @@ export async function createSession(
     req.enabledInstallments = [1, 2, 3, 6, 9];
   }
 
-  const result = await promisify<IyzipayInitResult>((cb) =>
-    iyzipay.checkoutFormInitialize.create(req, cb),
+  const result = await withTimeout(
+    promisify<IyzipayInitResult>((cb) =>
+      iyzipay.checkoutFormInitialize.create(req, cb),
+    ),
+    15000,
+    "iyzico checkoutFormInitialize.create",
   );
   if (result.status !== "success" || !result.paymentPageUrl) {
     throw new Error(
@@ -239,8 +263,12 @@ export async function handleWebhook(
   // or come back with status != "success", which we reject below. This
   // is why we don't need (and Iyzico doesn't send) a request-body
   // signature header.
-  const result = await promisify<IyzipayRetrieveResult>((cb) =>
-    iyzipay.checkoutForm.retrieve({ locale: "en", token }, cb),
+  const result = await withTimeout(
+    promisify<IyzipayRetrieveResult>((cb) =>
+      iyzipay.checkoutForm.retrieve({ locale: "en", token }, cb),
+    ),
+    15000,
+    "iyzico checkoutForm.retrieve",
   );
 
   if (result.status !== "success") {

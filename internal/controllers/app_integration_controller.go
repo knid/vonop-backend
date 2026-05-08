@@ -1,8 +1,11 @@
 package controllers
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
+	"time"
 
 	"github.com/go-playground/validator/v10"
 	"github.com/knid/wemob/internal/constants"
@@ -115,7 +118,50 @@ func (c *Controller) ConnectAppIntegration(project *models.AppProject, req reque
 		EnvVars:      encEnvVars,
 	}
 
-	return c.DB.CreateAppIntegration(integration)
+	created, err := c.DB.CreateAppIntegration(integration)
+	if err != nil {
+		return nil, err
+	}
+
+	if req.Provider == constants.IntegrationIyzico || req.Provider == constants.IntegrationStripe {
+		c.enablePaymentProviderInTenantDB(project.ID.String(), req.Provider)
+	}
+
+	return created, nil
+}
+
+// enablePaymentProviderInTenantDB flips the provider's enabled flag inside the
+// tenant Neon DB's config.payment_config jsonb so the storefront /checkout flow
+// stops showing "Payment not yet configured". Best-effort: if neon isn't wired
+// or the table is missing we log and return nil — the dashboard connect flow
+// must not fail when the tenant DB lags behind.
+func (c *Controller) enablePaymentProviderInTenantDB(projectID, provider string) {
+	db, err := c.openNeonDB(projectID)
+	if err != nil {
+		slog.Warn("payment_config: skip tenant DB enable", "err", err, "project_id", projectID, "provider", provider)
+		return
+	}
+	defer db.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	const q = `
+UPDATE config SET
+  payment_config = jsonb_set(
+    COALESCE(payment_config, '{}'::jsonb),
+    ARRAY[$1],
+    '{"enabled": true}'::jsonb,
+    true
+  ),
+  updated_at = NOW()
+WHERE id = (SELECT id FROM config ORDER BY id LIMIT 1)`
+
+	if _, err := db.ExecContext(ctx, q, provider); err != nil {
+		slog.Warn("payment_config: tenant UPDATE failed", "err", err, "project_id", projectID, "provider", provider)
+		return
+	}
+	slog.Info("payment_config: enabled in tenant DB", "project_id", projectID, "provider", provider)
 }
 
 func (c *Controller) UpdateAppIntegration(integrationID string, project *models.AppProject, req requests.UpdateIntegrationRequest) (*models.AppIntegration, error) {

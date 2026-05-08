@@ -85,6 +85,7 @@ export interface OrderTracking {
   subtotal_cents: number;
   discount_cents: number;
   tax_cents: number;
+  shipping_cents: number;
   total_cents: number;
   currency: string;
   created_at: string;

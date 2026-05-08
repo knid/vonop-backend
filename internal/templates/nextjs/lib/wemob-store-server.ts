@@ -88,6 +88,17 @@ export async function getStoreConfig(): Promise<StoreConfig> {
     }
   }
 
+  if (cfg.currency === "TRY") {
+    paymentProviders.sort((a, b) => {
+      if (a === b) return 0;
+      if (a === "iyzico") return -1;
+      if (b === "iyzico") return 1;
+      if (a === "stripe") return -1;
+      if (b === "stripe") return 1;
+      return 0;
+    });
+  }
+
   // Shipping enabled: mirror the Go logic — truthy if shipping_config has any
   // keys, overridden by an explicit `enabled` flag when present.
   const shippingConfig =
@@ -385,6 +396,7 @@ export async function getOrder(
     subtotal_cents: order.subtotalCents,
     discount_cents: order.discountCents,
     tax_cents: order.taxCents,
+    shipping_cents: order.shippingCents,
     total_cents: order.totalCents,
     currency: order.currency,
     created_at: order.createdAt.toISOString(),
