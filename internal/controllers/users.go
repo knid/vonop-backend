@@ -20,6 +20,7 @@ import (
 	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/utils"
 	"github.com/markbates/goth"
+	"github.com/posthog/posthog-go"
 	"github.com/slack-go/slack"
 	"github.com/stripe/stripe-go/v82"
 	"github.com/stripe/stripe-go/v82/customer"
@@ -439,6 +440,14 @@ func (c *Controller) GoogleLogin(oauthUser goth.User, attr MetaAttribution) (*re
 			go c.EventService.SendEvent(user, constants.EVENT_NEW_USER, map[string]any{
 				"provider": "google",
 			})
+
+			// Google asserts email_verified in its OAuth payload so we set
+			// Verified: true above without a confirmation roundtrip. Mirror
+			// that as a PostHog event so funnels treat OAuth signups the
+			// same as email-confirmed signups instead of dropping them at
+			// the verification step.
+			c.TrackUserEvent(user, constants.EVENT_EMAIL_VERIFIED, posthog.NewProperties().
+				Set("verified_via", "google_oauth_web"))
 
 			// Meta CAPI: fire CompleteRegistration only on first signup. The
 			// OAuth bridge cookie (set in OAuthBegin) carries fbp/fbc across

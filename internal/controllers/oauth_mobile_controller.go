@@ -13,6 +13,7 @@ import (
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/utils"
+	"github.com/posthog/posthog-go"
 	"github.com/stripe/stripe-go/v82"
 	"github.com/stripe/stripe-go/v82/customer"
 	"google.golang.org/api/idtoken"
@@ -105,6 +106,12 @@ func (c *Controller) GoogleMobileLogin(ctx context.Context, req requests.GoogleM
 			go c.EventService.SendEvent(user, constants.EVENT_NEW_USER, map[string]any{
 				"provider": "google_mobile",
 			})
+
+			// Google id_token already carries email_verified=true (validated
+			// at line 36 above). Mirror it to PostHog so OAuth signups don't
+			// register as a drop-off at the funnel's verify step.
+			c.TrackUserEvent(user, constants.EVENT_EMAIL_VERIFIED, posthog.NewProperties().
+				Set("verified_via", "google_oauth_mobile"))
 		} else {
 			return nil, fmt.Errorf("failed to look up user")
 		}
