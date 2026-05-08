@@ -86,6 +86,18 @@ type TurnEndEvent struct {
 	Tokens     TokenUsage `json:"tokens"`
 }
 
+// CreditsUpdateEvent is emitted after each turn so the frontend can render
+// a live credit meter mid-run instead of only at done. CreditsUsed is the
+// cumulative billed credits for the run so far (matches the final
+// DoneEvent.CreditsUsed when the run completes cleanly). Tokens is this
+// turn's input+output token total — informational, not used for billing.
+type CreditsUpdateEvent struct {
+	RunID       uuid.UUID `json:"run_id"`
+	Turn        int       `json:"turn"`
+	CreditsUsed int       `json:"credits_used"`
+	Tokens      int       `json:"tokens,omitempty"`
+}
+
 type TokenUsage struct {
 	Input      int `json:"input"`
 	Output     int `json:"output"`
@@ -134,6 +146,7 @@ const (
 	EventFileWritten    = "file_written"
 	EventFileDeleted    = "file_deleted"
 	EventTurnEnd        = "turn_end"
+	EventCreditsUpdate  = "credits_update"
 	EventRollback       = "rollback"
 	EventError          = "error"
 	EventDone           = "done"
