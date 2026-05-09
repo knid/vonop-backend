@@ -16,8 +16,6 @@ const (
 	EVENT_NEW_TICKET = "support_ticket_created"
 
 	// Project events
-	EVENT_NEW_PROJECT                = "project_created"
-	EVENT_PROJECT_UPDATED            = "project_updated"
 	EVENT_PROJECT_DELETED            = "project_deleted"
 	EVENT_APP_DRAFT_CREATED          = "app_draft_created"
 	EVENT_APP_GENERATION_STARTED     = "app_generation_started"
@@ -33,32 +31,11 @@ const (
 	EVENT_APP_CHAT_COMPLETED       = "app_chat_completed"
 	EVENT_APP_CHAT_FAILED          = "app_chat_failed"
 
-	// Build events (reported by workers)
-	EVENT_BUILD_STARTED_IOS     = "ios_build_started"
-	EVENT_BUILD_STARTED_ANDROID = "android_build_started"
-	EVENT_BUILD_FINISHED_IOS    = "ios_build_finished"
-	EVENT_BUILD_FINISHED_ANDROID = "android_build_finished"
-	EVENT_BUILD_ERROR_IOS       = "ios_build_error"
-	EVENT_BUILD_ERROR_ANDROID   = "android_build_error"
-
-	// Deployment events (reported by workers)
-	EVENT_USER_APPLE_DEPLOYMENT_STARTED    = "user_apple_deployment_started"
-	EVENT_USER_APPLE_DEPLOYMENT_FINISHED   = "user_apple_deployment_finished"
-	EVENT_USER_APPLE_DEPLOYMENT_FAILED     = "user_apple_deployment_failed"
-	EVENT_USER_ANDROID_DEPLOYMENT_STARTED  = "user_android_deployment_started"
-	EVENT_USER_ANDROID_DEPLOYMENT_FINISHED = "user_android_deployment_finished"
-	EVENT_USER_ANDROID_DEPLOYMENT_FAILED   = "user_android_deployment_failed"
-	EVENT_PENDING_CONNECTION_NUDGE         = "pending_connection_nudge"
-
 	// Web deployment events — names match PostHog for cross-system analysis.
 	EVENT_WEB_DEPLOYMENT_SUCCEEDED    = "app_deployed_web"
 	EVENT_WEB_DEPLOYMENT_FAILED       = "app_deploy_failed"
 	EVENT_WEB_UNDEPLOYED              = "app_undeployed_web"
-	EVENT_MOBILE_DEPLOYMENT_SUCCEEDED = "app_deployed_mobile"
-	EVENT_MOBILE_DEPLOYMENT_FAILED    = "app_deploy_mobile_failed"
 	EVENT_MOBILE_UNDEPLOYED           = "app_undeployed_mobile"
-	EVENT_OTA_PUBLISH_SUCCEEDED       = "app_ota_published"
-	EVENT_OTA_PUBLISH_FAILED          = "app_ota_publish_failed"
 
 	// Domain events
 	EVENT_DOMAIN_ADDED    = "domain_added"
@@ -108,5 +85,4 @@ const (
 	EVENT_ORGANIZATION_MEMBER_INVITED  = "organization_member_invited"
 	EVENT_ORGANIZATION_INVITE_EMAIL    = "organization_invite_email" // NEW — triggers Resend automation that emails the invitee
 	EVENT_DASHBOARD_CREATED            = "dashboard_created"
-	EVENT_STORE_CHAT_SENT              = "store_chat_sent"
 )
