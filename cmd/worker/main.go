@@ -85,8 +85,8 @@ func main() {
 
 	mux := asynq.NewServeMux()
 	// PostHog lifecycle: emits job_started / job_succeeded / job_failed for
-	// every task — including cron heartbeats — so worker activity is queryable
-	// alongside user events in PostHog rather than only in BetterStack logs.
+	// every task except cron heartbeats (cron:* types are skipped — they fire
+	// on tight schedules and would drown out user-triggered job events).
 	mux.Use(middleware.AsynqPostHogLifecycle(controller))
 	mux.HandleFunc(tasks.TypeDeployWeb, controller.HandleWebDeployTask)
 	mux.HandleFunc(tasks.TypeDeleteFlyApp, controller.HandleDeleteFlyAppTask)
