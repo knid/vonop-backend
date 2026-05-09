@@ -17,14 +17,17 @@ var SupportedLocales = []string{"en", "tr"}
 // or log enrichment.
 func Locale(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		loc := resolveLocale(r.Header.Get("Accept-Language"))
+		loc := ResolveLocale(r.Header.Get("Accept-Language"))
 		ctx := context.WithValue(r.Context(), localeKey{}, loc)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
-
-func resolveLocale(header string) string {
+// ResolveLocale parses an Accept-Language header value and returns the first
+// supported base locale (e.g. "tr-TR" → "tr"), defaulting to "en". Exported
+// so OAuth signup flows can seed new users' preferred language without
+// routing through the middleware.
+func ResolveLocale(header string) string {
 	if header == "" {
 		return "en"
 	}
