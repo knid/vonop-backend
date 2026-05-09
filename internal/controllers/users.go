@@ -184,7 +184,12 @@ func (c *Controller) UpdateUser(user *models.User, userUpdateReq requests.UserUp
 	}, nil
 }
 
-func (c *Controller) RegisterUser(userRegisterReq requests.UserRegisterRequest) (*responses.UserInformationResponse, error) {
+// RegisterUser creates a new email/password account. `locale` is the base
+// language code resolved from Accept-Language (one of middleware.SupportedLocales),
+// used to seed the user's Language so the first welcome email and any pre-login
+// reads of user.language hit the right bundle without waiting on the frontend
+// to push an update. Pass "" to fall back to the DB default.
+func (c *Controller) RegisterUser(userRegisterReq requests.UserRegisterRequest, locale string) (*responses.UserInformationResponse, error) {
 	if userRegisterReq.Password != userRegisterReq.PasswordCheck {
 		return nil, errors.New("passwords doesn't match")
 	}
@@ -206,6 +211,9 @@ func (c *Controller) RegisterUser(userRegisterReq requests.UserRegisterRequest) 
 		Type:     "user",
 		Company:  userRegisterReq.Company,
 		Password: hashedPassword,
+	}
+	if locale != "" {
+		user.Language = locale
 	}
 
 	createdUser, err := c.DB.CreateUser(&user)
