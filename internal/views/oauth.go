@@ -67,11 +67,27 @@ func (v *HttpViews) OAuthCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	isNewUser := userLoginRes.IsNewUser
 	go func() {
 		if u, lookupErr := v.Controller.DB.GetUserByEmail(oauthUser.Email); lookupErr == nil {
 			v.Controller.EnsureIdentified(u)
 			v.Controller.TrackUserEvent(u, "user_oauth_logged_in", posthog.NewProperties().
 				Set("provider", "Google"))
+			// Also fire the unified user_logged_in event so dashboards and
+			// funnels filtering on "any login" see OAuth users alongside
+			// email-form logins instead of only one or the other.
+			v.Controller.TrackUserEvent(u, "user_logged_in", posthog.NewProperties().
+				Set("provider", u.Provider).
+				Set("subscription_status", v.Controller.GetUserBilling(u).SubscriptionStatus))
+			// First-time OAuth signup: also fire user_registered so the
+			// activation funnel's first step matches reality. Without this,
+			// only email-form signups appear in the funnel and the OAuth
+			// majority is invisible.
+			if isNewUser {
+				v.Controller.TrackUserEvent(u, "user_registered", posthog.NewProperties().
+					Set("provider", u.Provider).
+					Set("email", u.Email))
+			}
 		}
 	}()
 
