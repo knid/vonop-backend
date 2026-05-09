@@ -3,18 +3,23 @@
 // state where Asynq lifecycle was only visible via slog → BetterStack and
 // could not be queried, alerted on, or correlated with user events.
 //
+// Cron tasks (type prefix `cron:`) are skipped — they fire on tight
+// schedules with no user attribution and would drown out user-triggered
+// job events.
+//
 // Distinct ID resolution — best-effort, in priority order:
 //   1. user_id from payload (agent:run carries this directly)
 //   2. org_id from payload (billing:org-grace-teardown)
 //   3. deployment_id (deploy:web — no user in payload, but joinable in queries)
 //   4. runtime_app_id (fly:delete-app)
 //   5. job_id (agent:run secondary key, also unique)
-//   6. "system" (cron heartbeats with empty payloads)
+//   6. "system" (fallback for tasks with empty payloads)
 package middleware
 
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"time"
 
 	"github.com/hibiken/asynq"
@@ -41,6 +46,13 @@ type jobPayloadProbe struct {
 func AsynqPostHogLifecycle(c *controllers.Controller) asynq.MiddlewareFunc {
 	return func(next asynq.Handler) asynq.Handler {
 		return asynq.HandlerFunc(func(ctx context.Context, t *asynq.Task) error {
+			// Skip PostHog tracking for cron heartbeats — they fire on tight
+			// schedules (every 30s/1m/5m), have no user attribution, and
+			// drown out user-triggered job events in the activity feed.
+			if strings.HasPrefix(t.Type(), "cron:") {
+				return next.ProcessTask(ctx, t)
+			}
+
 			start := time.Now()
 
 			queue, _ := asynq.GetQueueName(ctx)
