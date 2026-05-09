@@ -491,12 +491,17 @@ func (c *Controller) EnsurePersonalOrg(user *models.User) (*models.Organization,
 	base := utils.SlugifyName(displayName)
 	slug := utils.SlugWithSuffix(base)
 
-	// Default new personal orgs to the Starter plan so callers don't have to
-	// remember to call assignFreePlan. Defensive: if Starter is missing for
-	// any reason, fall through with a zero SubscriptionID and let the
-	// startup migration sweep it up.
+	// Default new personal orgs to the Starter plan. If the Starter row is
+	// missing the new org is born with SubscriptionID=uuid.Nil; every limits
+	// and credits lookup that joins through it then breaks silently. We hit
+	// this in 2026-05 when a botched seed left no Starter row and 328 personal
+	// orgs landed unattached. Log loudly so BetterStack alerts the next time.
 	var starterID uuid.UUID
-	if starter, err := c.DB.GetSubscriptionByName("Starter"); err == nil && starter != nil {
+	starter, err := c.DB.GetSubscriptionByName("Starter")
+	if err != nil || starter == nil {
+		slog.Error("EnsurePersonalOrg: Starter plan not found — new org will have NULL subscription_id",
+			"user_id", user.ID, "error", err)
+	} else {
 		starterID = starter.ID
 	}
 
