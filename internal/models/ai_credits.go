@@ -26,8 +26,13 @@ type AICreditsBalance struct {
 	PendingGateway float64       `bun:",notnull,default:0"`
 	PeriodStart    time.Time     `bun:",notnull"`
 	PeriodEnd      time.Time     `bun:",notnull"`
-	CreatedAt      time.Time     `bun:"created_at,nullzero,notnull,default:current_timestamp"`
-	UpdatedAt      time.Time     `bun:"updated_at,nullzero,notnull,default:current_timestamp"`
+	// Backfill marker — see Plan A migration in cmd/main.go that re-keyed legacy
+	// per-user pending_gateway debt onto each user's personal-org balance row.
+	// Declared so `SELECT *` raw queries (e.g. the FOR UPDATE row lock in
+	// GrantSubscriptionCredits) can scan into this struct without erroring.
+	GatewayPendingBackfilledV1 bool      `bun:"gateway_pending_backfilled_v1,notnull,default:false"`
+	CreatedAt                  time.Time `bun:"created_at,nullzero,notnull,default:current_timestamp"`
+	UpdatedAt                  time.Time `bun:"updated_at,nullzero,notnull,default:current_timestamp"`
 }
 
 // AICreditTransaction records individual credit additions or deductions.
