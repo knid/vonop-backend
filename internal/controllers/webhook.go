@@ -191,14 +191,14 @@ func (c *Controller) processWebhookEventTx(tx bun.Tx, event stripe.Event) ([]fun
 			"price_id":            sub.Items.Data[0].Price.ID,
 		})
 
-		if _, err := c.DB.UpdateOrganization(org); err != nil {
+		if _, err := c.DB.UpdateOrganizationTx(tx, org); err != nil {
 			return nil, fmt.Errorf("failed to update organization %s after subscription created: %w", org.ID, err)
 		}
 
 		// SetupFinished is still tracked on the user object — persist it.
 		if setupJustFinished {
-			if _, err := c.DB.UpdateUser(owner); err != nil {
-				slog.Error("failed to update user setup_finished flag", "error", err, "user_id", owner.ID)
+			if _, err := c.DB.UpdateUserTx(tx, owner); err != nil {
+				return nil, fmt.Errorf("update user setup_finished flag: %w", err)
 			}
 		}
 
@@ -377,14 +377,14 @@ func (c *Controller) processWebhookEventTx(tx bun.Tx, event stripe.Event) ([]fun
 			})
 		}
 
-		if _, err := c.DB.UpdateOrganization(org); err != nil {
+		if _, err := c.DB.UpdateOrganizationTx(tx, org); err != nil {
 			return nil, fmt.Errorf("failed to update organization %s after subscription change: %w", org.ID, err)
 		}
 
 		// Persist owner's SetupFinished flag if it was just flipped.
 		if setupJustFinished {
-			if _, err := c.DB.UpdateUser(owner); err != nil {
-				slog.Error("failed to update user setup_finished flag", "error", err, "user_id", owner.ID)
+			if _, err := c.DB.UpdateUserTx(tx, owner); err != nil {
+				return nil, fmt.Errorf("update user setup_finished flag: %w", err)
 			}
 		}
 
@@ -535,13 +535,13 @@ func (c *Controller) processWebhookEventTx(tx bun.Tx, event stripe.Event) ([]fun
 			})
 		}
 
-		if _, err := c.DB.UpdateOrganization(org); err != nil {
+		if _, err := c.DB.UpdateOrganizationTx(tx, org); err != nil {
 			return nil, fmt.Errorf("failed to update organization %s after payment succeeded: %w", org.ID, err)
 		}
 
 		if setupJustFinished {
-			if _, err := c.DB.UpdateUser(owner); err != nil {
-				slog.Error("failed to update user setup_finished flag", "error", err, "user_id", owner.ID)
+			if _, err := c.DB.UpdateUserTx(tx, owner); err != nil {
+				return nil, fmt.Errorf("update user setup_finished flag: %w", err)
 			}
 		}
 
@@ -745,7 +745,7 @@ func (c *Controller) processWebhookEventTx(tx bun.Tx, event stripe.Event) ([]fun
 		// Keep firing the legacy event for backward-compat with existing consumers.
 		addHook(owner, constants.EVENT_SUBSCRIPTION_CANCELLED, eventProps)
 
-		if _, err := c.DB.UpdateOrganization(org); err != nil {
+		if _, err := c.DB.UpdateOrganizationTx(tx, org); err != nil {
 			return nil, fmt.Errorf("failed to update organization %s after subscription deleted: %w", org.ID, err)
 		}
 
