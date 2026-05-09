@@ -139,7 +139,7 @@ func (v *HttpViews) StripeCheckout(w http.ResponseWriter, r *http.Request) {
 
 	dashboardURL := v.Controller.SecretManager.GetSecret("FRONTEND_URL")
 	if dashboardURL == "" {
-		dashboardURL = "https://dashboard.wemob.io"
+		dashboardURL = "https://app.wemob.io"
 	}
 	subscriptionPath := "/orgs/" + org.Slug + "/subscription"
 	successURL := dashboardURL + subscriptionPath + "?checkout=success&session_id={CHECKOUT_SESSION_ID}"
@@ -286,7 +286,7 @@ func (v *HttpViews) PurchaseCredits(w http.ResponseWriter, r *http.Request) {
 
 	dashboardURL := v.Controller.SecretManager.GetSecret("FRONTEND_URL")
 	if dashboardURL == "" {
-		dashboardURL = "https://dashboard.wemob.io"
+		dashboardURL = "https://app.wemob.io"
 	}
 	subscriptionPath := "/orgs/" + org.Slug + "/subscription"
 	successURL := dashboardURL + subscriptionPath + "?checkout=success&credits=purchased"

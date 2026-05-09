@@ -57,7 +57,7 @@ func (v *HttpViews) OAuthCallback(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(err, controllers.ErrEmailHasCredentialsAccount) {
 			frontendURL := strings.TrimRight(v.Controller.SecretManager.GetSecret("FRONTEND_URL"), "/")
 			if frontendURL == "" {
-				frontendURL = "https://dashboard.wemob.io"
+				frontendURL = "https://app.wemob.io"
 			}
 			redirect := fmt.Sprintf("%s/login/handleGoogle?error=%s", frontendURL, constants.ErrAuthEmailHasCredentialsAccount)
 			http.Redirect(w, r, redirect, http.StatusTemporaryRedirect)
@@ -93,7 +93,7 @@ func (v *HttpViews) OAuthCallback(w http.ResponseWriter, r *http.Request) {
 
 	frontendURL := strings.TrimRight(v.Controller.SecretManager.GetSecret("FRONTEND_URL"), "/")
 	if frontendURL == "" {
-		frontendURL = "https://dashboard.wemob.io"
+		frontendURL = "https://app.wemob.io"
 	}
 	url := fmt.Sprintf("%s/login/handleGoogle?token=%s", frontendURL, userLoginRes.Token)
 	if userLoginRes.IsNewUser {
