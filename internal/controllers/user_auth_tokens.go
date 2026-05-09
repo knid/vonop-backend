@@ -72,7 +72,7 @@ func (c *Controller) RequestPasswordReset(req requests.UserForgotPasswordRequest
 
 	frontendURL := strings.TrimRight(c.SecretManager.GetSecret("FRONTEND_URL"), "/")
 	if frontendURL == "" {
-		frontendURL = "https://dashboard.wemob.io"
+		frontendURL = "https://app.wemob.io"
 	}
 	resetURL := fmt.Sprintf("%s/reset-password?token=%s", frontendURL, tokenStr)
 
@@ -162,7 +162,7 @@ func (c *Controller) SendVerifyEmail(user *models.User) error {
 
 	frontendURL := strings.TrimRight(c.SecretManager.GetSecret("FRONTEND_URL"), "/")
 	if frontendURL == "" {
-		frontendURL = "https://dashboard.wemob.io"
+		frontendURL = "https://app.wemob.io"
 	}
 	verifyURL := fmt.Sprintf("%s/verify-email?token=%s", frontendURL, tokenStr)
 

@@ -22,7 +22,7 @@ type StartResult struct {
 
 // Service proxies sandbox operations to the dashboard's E2B API routes.
 type Service struct {
-	DashboardURL  string // e.g. https://dashboard.wemob.io
+	DashboardURL  string // e.g. https://app.wemob.io
 	PreviewDomain string // e.g. preview.wemob.app
 }
 

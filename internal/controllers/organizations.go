@@ -225,7 +225,7 @@ func (c *Controller) InviteOrganizationMember(user *models.User, orgID string, r
 		}
 		frontendURL := strings.TrimRight(c.SecretManager.GetSecret("FRONTEND_URL"), "/")
 		if frontendURL == "" {
-			frontendURL = "https://dashboard.wemob.io"
+			frontendURL = "https://app.wemob.io"
 		}
 		inviteURL := fmt.Sprintf("%s/invites/accept?token=%s", frontendURL, token)
 
