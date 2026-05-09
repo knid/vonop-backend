@@ -19,7 +19,7 @@ require (
 	github.com/lib/pq v1.10.9
 	github.com/markbates/goth v1.82.0
 	github.com/modelcontextprotocol/go-sdk v1.3.0
-	github.com/posthog/posthog-go v1.10.0
+	github.com/posthog/posthog-go v1.12.5
 	github.com/redis/go-redis/v9 v9.17.0
 	github.com/samber/slog-betterstack v1.4.2
 	github.com/slack-go/slack v0.17.3
