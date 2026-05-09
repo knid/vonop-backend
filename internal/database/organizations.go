@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/models"
+	"github.com/uptrace/bun"
 )
 
 func (db *Database) CreateOrganization(org *models.Organization) (*models.Organization, error) {
@@ -45,8 +46,17 @@ func (db *Database) GetOrganizationsByUserID(userID string) ([]models.Organizati
 }
 
 func (db *Database) UpdateOrganization(org *models.Organization) (*models.Organization, error) {
+	return db.UpdateOrganizationTx(db.DB, org)
+}
+
+// UpdateOrganizationTx is the tx-aware variant. Webhook handlers must use this
+// (with the outer dedup tx) so org-state changes roll back together with the
+// webhook_events insert and the credit grant — otherwise the org persists with
+// e.g. subscription_status='active' even when a downstream step fails and the
+// rest of the work rolls back.
+func (db *Database) UpdateOrganizationTx(tx bun.IDB, org *models.Organization) (*models.Organization, error) {
 	org.UpdatedAt = time.Now()
-	_, err := db.DB.NewUpdate().
+	_, err := tx.NewUpdate().
 		Model(org).
 		Where("id = ?", org.ID).
 		Exec(context.Background())
