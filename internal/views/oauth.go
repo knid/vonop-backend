@@ -10,6 +10,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/controllers"
+	"github.com/knid/wemob/internal/middleware"
 	"github.com/knid/wemob/internal/utils"
 	"github.com/markbates/goth/gothic"
 	"github.com/posthog/posthog-go"
@@ -46,7 +47,12 @@ func (v *HttpViews) OAuthCallback(w http.ResponseWriter, r *http.Request) {
 	attr := controllers.ReadMetaAttrCookie(r)
 	controllers.ClearMetaAttrCookie(w, r)
 
-	userLoginRes, err := v.Controller.GoogleLogin(oauthUser, attr)
+	// Seed the new user's Language from the browser's Accept-Language so
+	// transactional emails and the first UI render match. Without this, OAuth
+	// signups always default to "en" and the frontend's reconcileLanguage
+	// then clobbers any browser-detected locale on first refresh().
+	locale := middleware.ResolveLocale(r.Header.Get("Accept-Language"))
+	userLoginRes, err := v.Controller.GoogleLogin(oauthUser, attr, locale)
 	if err != nil {
 		if errors.Is(err, controllers.ErrEmailHasCredentialsAccount) {
 			frontendURL := strings.TrimRight(v.Controller.SecretManager.GetSecret("FRONTEND_URL"), "/")

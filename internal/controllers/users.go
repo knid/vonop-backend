@@ -371,7 +371,12 @@ func (c *Controller) DeleteUser(tokenStr string) (*models.User, error) {
 	return deletedUser, nil
 }
 
-func (c *Controller) GoogleLogin(oauthUser goth.User, attr MetaAttribution) (*responses.UserLoginResponse, error) {
+// GoogleLogin signs in (or signs up) a user via the goth web OAuth callback.
+// `locale` is the base language code resolved from the browser's
+// Accept-Language header — used to seed new users' Language so transactional
+// emails and the first UI render match the browser, instead of falling back
+// to the DB default "en". Pass "" to skip and let the default apply.
+func (c *Controller) GoogleLogin(oauthUser goth.User, attr MetaAttribution, locale string) (*responses.UserLoginResponse, error) {
 	isNewUser := false
 	user, err := c.DB.GetUserByEmail(oauthUser.Email)
 	if err == nil && user != nil && user.Provider == "Wemob" {
@@ -393,6 +398,9 @@ func (c *Controller) GoogleLogin(oauthUser goth.User, attr MetaAttribution) (*re
 				Password: hashedPass,
 				Provider: "Google",
 				Verified: true,
+			}
+			if locale != "" {
+				newUser.Language = locale
 			}
 
 			user, err = c.DB.CreateUser(&newUser)

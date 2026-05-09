@@ -6,6 +6,7 @@ import (
 
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/controllers"
+	"github.com/knid/wemob/internal/middleware"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/utils"
 	"github.com/posthog/posthog-go"
@@ -23,7 +24,8 @@ func (v *HttpViews) GoogleMobileLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	loginRes, err := v.Controller.GoogleMobileLogin(r.Context(), req)
+	locale := middleware.ResolveLocale(r.Header.Get("Accept-Language"))
+	loginRes, err := v.Controller.GoogleMobileLogin(r.Context(), req, locale)
 	if err != nil {
 		if errors.Is(err, controllers.ErrEmailHasCredentialsAccount) {
 			utils.JSONErrorCode(w, constants.ErrAuthEmailHasCredentialsAccount, http.StatusConflict, nil)

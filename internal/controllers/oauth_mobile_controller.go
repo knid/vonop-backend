@@ -19,7 +19,11 @@ import (
 	"google.golang.org/api/idtoken"
 )
 
-func (c *Controller) GoogleMobileLogin(ctx context.Context, req requests.GoogleMobileLoginRequest) (*responses.UserLoginResponse, error) {
+// GoogleMobileLogin signs in (or signs up) a user via the mobile id_token
+// flow. `locale` is the base language code resolved from Accept-Language,
+// used to seed new users' Language so emails and first UI render match the
+// device locale.
+func (c *Controller) GoogleMobileLogin(ctx context.Context, req requests.GoogleMobileLoginRequest, locale string) (*responses.UserLoginResponse, error) {
 	expectedAudience := c.SecretManager.GetSecret("GOOGLE_MOBILE_CLIENT_ID")
 	if expectedAudience == "" {
 		// Fail loud rather than silently accept tokens with unchecked aud.
@@ -64,6 +68,9 @@ func (c *Controller) GoogleMobileLogin(ctx context.Context, req requests.GoogleM
 				Password: hashedPass,
 				Provider: "Google",
 				Verified: true,
+			}
+			if locale != "" {
+				newUser.Language = locale
 			}
 
 			user, err = c.DB.CreateUser(&newUser)
