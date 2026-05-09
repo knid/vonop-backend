@@ -873,9 +873,9 @@ func finaliseSuccess(
 
 	// 6. Track PostHog.
 	if deps.TrackUserEvent != nil {
-		action := "app_chat_completed"
+		action := constants.EVENT_APP_CHAT_COMPLETED
 		if isInitial {
-			action = "generate_app_completed"
+			action = constants.EVENT_APP_GENERATION_COMPLETED
 		}
 		deps.TrackUserEvent(action, map[string]any{
 			"app_id":            project.ID.String(),
@@ -892,9 +892,9 @@ func finaliseSuccess(
 
 	// 6b. Fire lifecycle event — mirrors PostHog event names.
 	if deps.SendCRMEvent != nil {
-		crmEvent := "app_chat_completed"
+		crmEvent := constants.EVENT_APP_CHAT_COMPLETED
 		if isInitial {
-			crmEvent = "generate_app_completed"
+			crmEvent = constants.EVENT_APP_GENERATION_COMPLETED
 		}
 		deps.SendCRMEvent(crmEvent, map[string]any{
 			"app_id":       project.ID.String(),
@@ -1080,7 +1080,7 @@ func finaliseFailureV2(
 
 	// 6. Track PostHog.
 	if deps.TrackUserEvent != nil {
-		deps.TrackUserEvent("app_chat_failed", map[string]any{
+		deps.TrackUserEvent(constants.EVENT_APP_CHAT_FAILED, map[string]any{
 			"app_id":       run.AppProjectID.String(),
 			"code":         string(code),
 			"phase":        phase,
@@ -1091,7 +1091,7 @@ func finaliseFailureV2(
 
 	// 6b. Fire lifecycle event.
 	if deps.SendCRMEvent != nil {
-		deps.SendCRMEvent("app_chat_failed", map[string]any{
+		deps.SendCRMEvent(constants.EVENT_APP_CHAT_FAILED, map[string]any{
 			"app_id":       run.AppProjectID.String(),
 			"code":         string(code),
 			"phase":        phase,
