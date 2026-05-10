@@ -90,7 +90,7 @@ func (c *Controller) ComputeCreditBreakdown(user *models.User, orgID uuid.UUID) 
 	if err != nil {
 		return nil, err
 	}
-	txs, err := c.DB.GetAllAICreditTransactionsAsc(user.ID.String())
+	txs, err := c.DB.GetAllAICreditTransactionsAsc(orgID.String())
 	if err != nil {
 		return nil, err
 	}

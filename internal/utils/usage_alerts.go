@@ -77,7 +77,20 @@ func checkUsageAlerts(db *database.Database, eventService events.EventService) {
 	}
 
 	for _, user := range users {
-		balance, err := db.GetAICreditsBalance(user.ID.String())
+		// Personal-org-scoped: ai_credits_balances rows are unique by
+		// organization_id since the 2026-04-30 migration, and the cron only
+		// alerts on subscription credits (loaded into the personal org).
+		// The deprecated user-scoped query returned a nondeterministic row
+		// for users in multiple orgs; this resolves the right org explicitly.
+		org, oerr := db.GetPersonalOrgByUserID(user.ID.String())
+		if oerr != nil || org == nil {
+			if !errors.Is(oerr, sql.ErrNoRows) && oerr != nil {
+				slog.Warn("usage alerts: failed to resolve personal org", "error", oerr, "user_id", user.ID.String())
+			}
+			continue
+		}
+
+		balance, err := db.GetAICreditsBalanceByOrg(org.ID.String())
 		if err != nil {
 			// Users without a balance row yet have nothing to alert on; skip quietly.
 			if errors.Is(err, sql.ErrNoRows) {
@@ -94,10 +107,10 @@ func checkUsageAlerts(db *database.Database, eventService events.EventService) {
 
 		remainingPercent := float64(balance.Balance) / float64(limits.MonthlyAICredits) * 100
 
-		// Resolve the user's personal org slug for the org-scoped billing URL.
-		// Falls back to the legacy /subscription URL if the org row is missing.
+		// Org-scoped billing URL using the slug we already resolved.
+		// Falls back to the legacy /subscription URL when the slug is missing.
 		billingURL := "https://app.wemob.io/subscription"
-		if org, oerr := db.GetPersonalOrgByUserID(user.ID.String()); oerr == nil && org != nil && org.Slug != "" {
+		if org.Slug != "" {
 			billingURL = "https://app.wemob.io/orgs/" + org.Slug + "/subscription"
 		}
 
