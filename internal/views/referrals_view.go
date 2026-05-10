@@ -60,7 +60,7 @@ func (v *HttpViews) ApplyReferralCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	v.Controller.TrackUserEvent(user, "referral_code_applied", posthog.NewProperties().
+	v.Controller.TrackUserEvent(user, constants.EVENT_REFERRAL_CODE_APPLIED, posthog.NewProperties().
 		Set("code", req.Code))
 
 	go v.Controller.EventService.SendEvent(user, constants.EVENT_REFERRAL_CODE_APPLIED, map[string]any{

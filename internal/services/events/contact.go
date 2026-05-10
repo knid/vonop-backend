@@ -5,11 +5,10 @@ import (
 	"github.com/knid/wemob/internal/models"
 )
 
-// contactPayload builds the standard attribute set sent both to Twenty
-// (as Person custom fields) and to Resend (as event payload). Keeping
-// this in one place ensures both destinations see the same view of the
-// user. Billing fields are sourced from the user's personal org
-// (Plan A — org-billed; the matching User columns are deprecated).
+// contactPayload builds the standard attribute set sent to Resend with
+// every event so automations can read user state without a contact join.
+// Billing fields are sourced from the user's personal org (Plan A —
+// org-billed; the matching User columns are deprecated).
 func contactPayload(db *database.Database, user *models.User) map[string]any {
 	if user == nil {
 		return map[string]any{}

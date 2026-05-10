@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/services/storeauth"
 	"github.com/posthog/posthog-go"
@@ -289,7 +290,7 @@ func (c *Controller) emitReleaseEvent(r *models.Release, kind string, extra map[
 	}
 	c.PostHog.Enqueue(posthog.Capture{
 		DistinctId: r.AppProjectID.String(),
-		Event:      "release_lifecycle",
+		Event:      string(constants.EVENT_RELEASE_LIFECYCLE),
 		Properties: props,
 	})
 }

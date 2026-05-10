@@ -381,7 +381,7 @@ func (c *Controller) HandleWebDeployTask(ctx context.Context, t *asynq.Task) err
 		"version":      deployment.Version,
 		"deployed_url": deployedURL,
 	})
-	go c.TrackUserEvent(user, "app_deployed_web", posthog.NewProperties().
+	go c.TrackUserEvent(user, constants.EVENT_WEB_DEPLOYMENT_SUCCEEDED, posthog.NewProperties().
 		Set("app_id", project.ID.String()).
 		Set("deploy_version", deployment.Version))
 	slog.Info("deploy_succeeded", "deployment_id", p.DeploymentID, "fly_app", flyAppName)
@@ -551,7 +551,7 @@ func (c *Controller) fireDeployFailedEvent(deploymentID, stage string, deployErr
 		"stage":         stage,
 		"error_message": deployErr.Error(),
 	})
-	go c.TrackUserEvent(user, "app_deploy_failed", posthog.NewProperties().
+	go c.TrackUserEvent(user, constants.EVENT_WEB_DEPLOYMENT_FAILED, posthog.NewProperties().
 		Set("app_id", deployment.AppProjectID.String()).
 		Set("stage", stage).
 		Set("error", deployErr.Error()))
@@ -628,7 +628,7 @@ func (c *Controller) HandleFlyMachineEvent(event fly.MachineEvent) error {
 					"version":      deployment.Version,
 					"deployed_url": deployedURL,
 				})
-				go c.TrackUserEvent(user, "app_deployed_web", posthog.NewProperties().
+				go c.TrackUserEvent(user, constants.EVENT_WEB_DEPLOYMENT_SUCCEEDED, posthog.NewProperties().
 					Set("app_id", deployment.AppProjectID.String()).
 					Set("deploy_version", deployment.Version))
 			}

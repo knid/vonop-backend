@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/hibiken/asynq"
+	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/controllers"
 	"github.com/posthog/posthog-go"
 )
@@ -73,14 +74,14 @@ func AsynqPostHogLifecycle(c *controllers.Controller) asynq.MiddlewareFunc {
 				baseProps.Set(k, v)
 			}
 
-			c.TrackSystemEvent(distinctID, "job_started", cloneProps(baseProps))
+			c.TrackSystemEvent(distinctID, constants.EVENT_JOB_STARTED, cloneProps(baseProps))
 
 			err := next.ProcessTask(ctx, t)
 			durationMs := time.Since(start).Milliseconds()
 			done := cloneProps(baseProps).Set("duration_ms", durationMs)
 
 			if err == nil {
-				c.TrackSystemEvent(distinctID, "job_succeeded", done)
+				c.TrackSystemEvent(distinctID, constants.EVENT_JOB_SUCCEEDED, done)
 				return nil
 			}
 
@@ -88,7 +89,7 @@ func AsynqPostHogLifecycle(c *controllers.Controller) asynq.MiddlewareFunc {
 			done.
 				Set("error", truncate(err.Error(), 500)).
 				Set("is_final", isFinal)
-			c.TrackSystemEvent(distinctID, "job_failed", done)
+			c.TrackSystemEvent(distinctID, constants.EVENT_JOB_FAILED, done)
 			return err
 		})
 	}

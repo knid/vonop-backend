@@ -144,7 +144,7 @@ func (v *HttpViews) CreateApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	v.Controller.TrackUserEvent(user, "app_draft_created", posthog.NewProperties().
+	v.Controller.TrackUserEvent(user, constants.EVENT_APP_DRAFT_CREATED, posthog.NewProperties().
 		Set("project_type", project.ProjectType).
 		Set("app_id", project.ID.String()))
 
@@ -363,7 +363,7 @@ func (v *HttpViews) UpdateApp(w http.ResponseWriter, r *http.Request) {
 	var theme map[string]any
 	json.Unmarshal(project.Theme, &theme)
 
-	v.Controller.TrackUserEvent(user, "app_updated", posthog.NewProperties().
+	v.Controller.TrackUserEvent(user, constants.EVENT_APP_UPDATED, posthog.NewProperties().
 		Set("app_id", project.ID.String()))
 
 	utils.JSONResponse(w, responses.AppProjectResponse{
@@ -394,7 +394,7 @@ func (v *HttpViews) DeleteApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	v.Controller.TrackUserEvent(user, "app_deleted", posthog.NewProperties().
+	v.Controller.TrackUserEvent(user, constants.EVENT_APP_DELETED, posthog.NewProperties().
 		Set("app_id", appID))
 
 	utils.JSONResponse(w, responses.SuccessResponse{Success: true}, http.StatusOK)
@@ -498,7 +498,7 @@ func (v *HttpViews) CreateAppFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	v.Controller.TrackUserEvent(user, "app_file_created", posthog.NewProperties().
+	v.Controller.TrackUserEvent(user, constants.EVENT_APP_FILE_CREATED, posthog.NewProperties().
 		Set("app_id", project.ID.String()).
 		Set("file_path", req.FilePath))
 
@@ -547,7 +547,7 @@ func (v *HttpViews) UpdateAppFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	v.Controller.TrackUserEvent(user, "app_file_updated", posthog.NewProperties().
+	v.Controller.TrackUserEvent(user, constants.EVENT_APP_FILE_UPDATED, posthog.NewProperties().
 		Set("app_id", project.ID.String()).
 		Set("file_path", fid))
 
@@ -584,7 +584,7 @@ func (v *HttpViews) DeleteAppFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	v.Controller.TrackUserEvent(user, "app_file_deleted", posthog.NewProperties().
+	v.Controller.TrackUserEvent(user, constants.EVENT_APP_FILE_DELETED, posthog.NewProperties().
 		Set("app_id", project.ID.String()))
 
 	utils.JSONResponse(w, responses.SuccessResponse{Success: true}, http.StatusOK)
@@ -643,7 +643,7 @@ func (v *HttpViews) CreateAppSnapshot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	v.Controller.TrackUserEvent(user, "app_snapshot_created", posthog.NewProperties().
+	v.Controller.TrackUserEvent(user, constants.EVENT_SNAPSHOT_CREATED, posthog.NewProperties().
 		Set("app_id", project.ID.String()))
 
 	go v.Controller.EventService.SendEvent(user, constants.EVENT_SNAPSHOT_CREATED, map[string]any{
@@ -680,7 +680,7 @@ func (v *HttpViews) RestoreAppSnapshot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	v.Controller.TrackUserEvent(user, "app_snapshot_restored", posthog.NewProperties().
+	v.Controller.TrackUserEvent(user, constants.EVENT_SNAPSHOT_RESTORED, posthog.NewProperties().
 		Set("app_id", project.ID.String()).
 		Set("snapshot_id", sid))
 
@@ -760,7 +760,7 @@ func (v *HttpViews) ExportApp(w http.ResponseWriter, r *http.Request) {
 	}
 	zw.Close()
 
-	v.Controller.TrackUserEvent(user, "app_exported", posthog.NewProperties().
+	v.Controller.TrackUserEvent(user, constants.EVENT_APP_EXPORTED_ZIP, posthog.NewProperties().
 		Set("app_id", project.ID.String()).
 		Set("platform", platform))
 
@@ -842,7 +842,7 @@ func (v *HttpViews) ConnectAppIntegration(w http.ResponseWriter, r *http.Request
 	// Sync env vars to preview so new integration vars are available immediately
 	go v.syncEnvVarsToPreview(project)
 
-	v.Controller.TrackUserEvent(user, "integration_connected", posthog.NewProperties().
+	v.Controller.TrackUserEvent(user, constants.EVENT_INTEGRATION_CONNECTED, posthog.NewProperties().
 		Set("app_id", project.ID.String()).
 		Set("provider", integ.Provider))
 
@@ -924,7 +924,7 @@ func (v *HttpViews) DisconnectAppIntegration(w http.ResponseWriter, r *http.Requ
 	// Sync env vars to preview so removed integration vars are cleared
 	go v.syncEnvVarsToPreview(project)
 
-	v.Controller.TrackUserEvent(user, "integration_disconnected", posthog.NewProperties().
+	v.Controller.TrackUserEvent(user, constants.EVENT_INTEGRATION_DISCONNECTED, posthog.NewProperties().
 		Set("app_id", project.ID.String()))
 
 	go v.Controller.EventService.SendEvent(user, constants.EVENT_INTEGRATION_DISCONNECTED, map[string]any{

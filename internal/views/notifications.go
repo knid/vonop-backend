@@ -121,7 +121,7 @@ func (v *HttpViews) SendProjectNotification(w http.ResponseWriter, r *http.Reque
 			"action": "send_notification",
 			"limit":  limits.MontlyNotificationCount,
 		})
-		go v.Controller.TrackUserEvent(user, "quota_reached", posthog.NewProperties().Set("action", "send_notification").Set("limit", limits.MontlyNotificationCount))
+		go v.Controller.TrackUserEvent(user, constants.EVENT_QUOTA_REACHED, posthog.NewProperties().Set("action", "send_notification").Set("limit", limits.MontlyNotificationCount))
 		return
 	}
 

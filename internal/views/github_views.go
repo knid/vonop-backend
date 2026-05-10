@@ -162,7 +162,7 @@ func (v *HttpViews) ExportToGitHub(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	go v.Controller.TrackUserEvent(user, "github_exported", posthog.NewProperties().
+	go v.Controller.TrackUserEvent(user, constants.EVENT_GITHUB_EXPORTED, posthog.NewProperties().
 		Set("app_id", project.ID.String()).
 		Set("repo_name", req.RepoName))
 
@@ -214,7 +214,7 @@ func (v *HttpViews) PushToGitHub(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	go v.Controller.TrackUserEvent(user, "github_pushed", posthog.NewProperties().
+	go v.Controller.TrackUserEvent(user, constants.EVENT_GITHUB_PUSHED, posthog.NewProperties().
 		Set("app_id", project.ID.String()))
 
 	go v.Controller.EventService.SendEvent(user, constants.EVENT_GITHUB_PUSHED, map[string]any{

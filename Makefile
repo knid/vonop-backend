@@ -18,6 +18,13 @@ lint-errors:
 	fi
 .PHONY: lint-errors
 
+lint-events:
+	@./scripts/check-event-literals.sh
+.PHONY: lint-events
+
+lint: lint-errors lint-events
+.PHONY: lint
+
 worker:
 	go build -o bin/worker cmd/worker/main.go
 

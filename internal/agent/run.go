@@ -893,12 +893,12 @@ func finaliseSuccess(
 	}
 
 	// 6b. Fire lifecycle event — mirrors PostHog event names.
-	if deps.SendCRMEvent != nil {
+	if deps.SendResendEvent != nil {
 		crmEvent := constants.EVENT_APP_CHAT_COMPLETED
 		if isInitial {
 			crmEvent = constants.EVENT_APP_GENERATION_COMPLETED
 		}
-		deps.SendCRMEvent(crmEvent, map[string]any{
+		deps.SendResendEvent(crmEvent, map[string]any{
 			"app_id":       project.ID.String(),
 			"project_type": project.ProjectType,
 			"credits_used": credits,
@@ -1077,9 +1077,9 @@ func finaliseFailureV2(
 		})
 	}
 
-	// 4b. Fire lifecycle event.
-	if deps.SendCRMEvent != nil {
-		deps.SendCRMEvent(constants.EVENT_APP_CHAT_FAILED, map[string]any{
+	// 6b. Fire lifecycle event.
+	if deps.SendResendEvent != nil {
+		deps.SendResendEvent(constants.EVENT_APP_CHAT_FAILED, map[string]any{
 			"app_id":       run.AppProjectID.String(),
 			"code":         string(code),
 			"phase":        phase,

@@ -100,7 +100,7 @@ func (v *HttpViews) RollbackOTA(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	v.Controller.TrackUserEvent(user, "app_ota_rolled_back", posthog.NewProperties().
+	v.Controller.TrackUserEvent(user, constants.EVENT_OTA_ROLLED_BACK, posthog.NewProperties().
 		Set("app_id", appProjectID.String()).
 		Set("channel", row.Channel).
 		Set("platform", row.Platform).
@@ -172,7 +172,7 @@ func (v *HttpViews) PromoteOTA(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	v.Controller.TrackUserEvent(user, "app_ota_promoted", posthog.NewProperties().
+	v.Controller.TrackUserEvent(user, constants.EVENT_OTA_PROMOTED, posthog.NewProperties().
 		Set("app_id", appProjectID.String()).
 		Set("channel", row.Channel).
 		Set("platform", row.Platform).

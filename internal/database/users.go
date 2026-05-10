@@ -87,15 +87,6 @@ func (db *Database) UpdateUserGitHubFields(user *models.User) error {
 	return err
 }
 
-func (db *Database) SetUserTwentyPersonID(userID, twentyPersonID string) error {
-	_, err := db.DB.NewUpdate().
-		Model((*models.User)(nil)).
-		Set("twenty_person_id = ?", twentyPersonID).
-		Where("id = ?", userID).
-		Exec(context.Background())
-	return err
-}
-
 // ListUsersWithoutPersonalOrg returns users that do not yet own an
 // Organization with is_personal=true. Used by the org-foundation backfill.
 func (db *Database) ListUsersWithoutPersonalOrg() ([]models.User, error) {

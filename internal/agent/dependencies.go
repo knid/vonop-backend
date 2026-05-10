@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 
+	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/database"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/services/gitrepo"
@@ -25,11 +26,11 @@ type CreditDeductor func(ctx context.Context, credits int, action, projectID str
 
 // EventTracker posts a PostHog event. Matches the shape of the existing
 // Controller.TrackUserEvent helper.
-type EventTracker func(event string, props map[string]any)
+type EventTracker func(event constants.EventName, props map[string]any)
 
-// CRMEventSender posts a lifecycle event. Used for events that drive
-// marketing automations (generation completed, chat failed, etc.).
-type CRMEventSender func(event string, attrs map[string]any)
+// ResendEventSender posts a lifecycle event to Resend so an email
+// automation can match it (generation completed, chat failed, etc.).
+type ResendEventSender func(event constants.EventName, attrs map[string]any)
 
 // ImageGenerator generates an image and returns a stable public URL.
 // Implementations call the image service, upload bytes to AssetsStorage, and
@@ -143,7 +144,7 @@ type RunDependencies struct {
 	CreditChecker            CreditCheckerFactory
 	DeductCredits            CreditDeductor
 	TrackUserEvent           EventTracker
-	SendCRMEvent             CRMEventSender
+	SendResendEvent          ResendEventSender
 	GenerateImage            ImageGenerator
 	NeonConnString           NeonConnResolver
 	ProvisionDatabase        DatabaseProvisioner

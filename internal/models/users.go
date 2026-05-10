@@ -30,7 +30,6 @@ type User struct {
 	SetupFinished       bool                      `bun:",notnull,default:false"`
 	GitHubAccessToken string `bun:",nullzero" json:"-"`
 	GitHubUsername    string `bun:",nullzero" json:"github_username"`
-	TwentyPersonID    string `bun:",nullzero" json:"-"`
 	// Meta CAPI ad attribution. Captured from request body (fbp/fbc/url) and
 	// headers (ip/ua) on register and checkout, then read by the async Stripe
 	// webhook to keep Subscribe/Purchase match quality high. Never returned

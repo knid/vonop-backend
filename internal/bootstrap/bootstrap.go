@@ -370,18 +370,13 @@ func BootstrapController() (*controllers.Controller, asynq.RedisClientOpt) {
 		"/etc/caddy/Caddyfile",
 	)
 
-	twentyEvents := events.NewTwentyService(db, sm.GetSecret("TWENTY_API_KEY"), sm.GetSecret("TWENTY_BASE_URL"))
 	var resendSegmentIDs []string
 	for _, id := range strings.Split(sm.GetSecret("RESEND_SEGMENT_IDS"), ",") {
 		if id = strings.TrimSpace(id); id != "" {
 			resendSegmentIDs = append(resendSegmentIDs, id)
 		}
 	}
-	resendEvents := events.NewResendService(db, sm.GetSecret("RESEND_API_KEY"), resendSegmentIDs...)
-	eventService := events.NewMulticastService(twentyEvents, resendEvents)
-
-	// Bootstrap Twenty custom fields once on startup. Failures log but don't crash.
-	twentyEvents.EnsureSchema(context.Background())
+	eventService := events.NewResendService(db, sm.GetSecret("RESEND_API_KEY"), resendSegmentIDs...)
 
 	controller := controllers.NewController(
 		db,

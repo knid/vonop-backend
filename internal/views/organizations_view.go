@@ -33,7 +33,7 @@ func (v *HttpViews) CreateOrganization(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	v.Controller.TrackUserEvent(user, "organization_created", posthog.NewProperties().
+	v.Controller.TrackUserEvent(user, constants.EVENT_ORGANIZATION_CREATED, posthog.NewProperties().
 		Set("org_name", req.Name))
 
 	go v.Controller.EventService.SendEvent(user, constants.EVENT_ORGANIZATION_CREATED, map[string]any{
@@ -178,7 +178,7 @@ func (v *HttpViews) InviteOrganizationMember(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	v.Controller.TrackUserEvent(user, "organization_member_invited", posthog.NewProperties().
+	v.Controller.TrackUserEvent(user, constants.EVENT_ORGANIZATION_MEMBER_INVITED, posthog.NewProperties().
 		Set("org_id", orgID))
 
 	go v.Controller.EventService.SendEvent(user, constants.EVENT_ORGANIZATION_MEMBER_INVITED, map[string]any{
