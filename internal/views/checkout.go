@@ -333,13 +333,17 @@ func (v *HttpViews) PurchaseCredits(w http.ResponseWriter, r *http.Request) {
 
 	v.Controller.TrackUserEvent(user, constants.EVENT_CREDIT_PURCHASE_STARTED, posthog.NewProperties().
 		Set("package_id", req.PackageID).
+		Set("pack_name", pack.Name).
 		Set("pack_size", pack.Credits).
-		Set("price_id", priceID))
+		Set("price_id", priceID).
+		Set("price_usd", pack.Price))
 
 	go v.Controller.EventService.SendEvent(user, constants.EVENT_CREDIT_PURCHASE_STARTED, map[string]any{
 		"package_id": req.PackageID,
+		"pack_name":  pack.Name,
 		"pack_size":  pack.Credits,
 		"price_id":   priceID,
+		"price_usd":  pack.Price,
 	})
 
 	attr := controllers.MetaAttributionFromRequest(r, req.Fbp, req.Fbc, req.EventSourceURL)
