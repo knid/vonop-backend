@@ -81,21 +81,29 @@ func (s *ResendService) SendEvent(user *models.User, event constants.EventName, 
 		return errors.New("resend events: empty event name")
 	}
 
+	// Resolve billing info once — both the contact upsert and the event
+	// payload need it, and a fresh DB roundtrip per surface is wasteful on
+	// hot paths. The snapshot lives only for this SendEvent call.
+	info := resolveBillingInfo(s.db, user)
+
 	// Sync contact state (first/last name, segment, custom properties). Done
 	// before the event POST so any automation that reads contact properties
 	// sees the freshest values. Failures are logged and swallowed — the event
 	// itself still goes through.
-	s.upsertContact(user)
+	s.upsertContact(user, info)
 
 	// Build event payload: contact attrs first, caller-supplied attrs override.
-	payload := contactPayload(s.db, user)
+	payload := contactPayload(user, info)
 	for k, v := range attributes {
 		payload[k] = v
 	}
 
+	// Lowercase the email on the event POST too so it associates with the
+	// upserted contact (which is always lowercased) regardless of how the
+	// user's email is cased in our DB.
 	body, err := json.Marshal(resendEventPayload{
 		Event:   string(event),
-		Email:   user.Email,
+		Email:   strings.ToLower(strings.TrimSpace(user.Email)),
 		Payload: payload,
 	})
 	if err != nil {
@@ -107,7 +115,7 @@ func (s *ResendService) SendEvent(user *models.User, event constants.EventName, 
 	return nil
 }
 
-func (s *ResendService) upsertContact(user *models.User) {
+func (s *ResendService) upsertContact(user *models.User, info billingInfo) {
 	firstName, lastName := splitName(user.Name)
 	segments := make([]resendSegmentID, 0, len(s.segmentIDs))
 	for _, id := range s.segmentIDs {
@@ -117,7 +125,7 @@ func (s *ResendService) upsertContact(user *models.User) {
 		Email:      strings.ToLower(strings.TrimSpace(user.Email)),
 		FirstName:  firstName,
 		LastName:   lastName,
-		Properties: contactProperties(s.db, user),
+		Properties: contactProperties(user, info),
 		Segments:   segments,
 	})
 	if err != nil {
@@ -182,7 +190,7 @@ func (s *ResendService) postWithRetry(url string, body []byte, ctx, event, userI
 // contactProperties returns the user attribute set as Resend property values.
 // Resend properties accept string or number only — booleans are stringified
 // to "true"/"false" to match the values the backfill seeded.
-func contactProperties(db *database.Database, user *models.User) map[string]string {
+func contactProperties(user *models.User, info billingInfo) map[string]string {
 	if user == nil {
 		return nil
 	}
@@ -190,13 +198,12 @@ func contactProperties(db *database.Database, user *models.User) map[string]stri
 	if language == "" {
 		language = "en"
 	}
-	status, _, trial := billingSnapshot(db, user)
 	return map[string]string{
 		"wemob_user_id":       user.ID.String(),
 		"verified":            strconv.FormatBool(user.Verified),
 		"provider":            user.Provider,
-		"subscription_status": status,
-		"trial_used":          strconv.FormatBool(trial),
+		"subscription_status": info.Status,
+		"trial_used":          strconv.FormatBool(info.TrialUsed),
 		"language":            language,
 	}
 }
