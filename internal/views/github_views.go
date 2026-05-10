@@ -13,7 +13,6 @@ import (
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/utils"
-	"github.com/posthog/posthog-go"
 )
 
 // toGitHubExportResponse converts a model to a response struct.
@@ -162,9 +161,9 @@ func (v *HttpViews) ExportToGitHub(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	go v.Controller.TrackUserEvent(user, constants.EVENT_GITHUB_EXPORTED, posthog.NewProperties().
-		Set("app_id", project.ID.String()).
-		Set("repo_name", req.RepoName))
+	go v.Controller.TrackUserEvent(user, constants.EVENT_GITHUB_EXPORTED,
+		v.Controller.AppEventProps(project.ID.String()).
+			Set("repo_name", req.RepoName))
 
 	go v.Controller.EventService.SendEvent(user, constants.EVENT_GITHUB_EXPORTED, map[string]any{
 		"app_id":    project.ID.String(),
@@ -214,8 +213,8 @@ func (v *HttpViews) PushToGitHub(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	go v.Controller.TrackUserEvent(user, constants.EVENT_GITHUB_PUSHED, posthog.NewProperties().
-		Set("app_id", project.ID.String()))
+	go v.Controller.TrackUserEvent(user, constants.EVENT_GITHUB_PUSHED,
+		v.Controller.AppEventProps(project.ID.String()))
 
 	go v.Controller.EventService.SendEvent(user, constants.EVENT_GITHUB_PUSHED, map[string]any{
 		"app_id": project.ID.String(),

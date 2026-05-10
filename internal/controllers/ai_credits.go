@@ -476,37 +476,14 @@ func (c *Controller) MakeCreditBudgetChecker(user *models.User, orgID uuid.UUID,
 // `prompt_preview` from agent runs) for fields not derivable from the
 // deduction signature.
 func (c *Controller) deductionEventProps(action, reference string, extra map[string]any) posthog.Properties {
-	props := posthog.NewProperties().
+	props := c.AppEventProps(reference).
 		Set("action", action).
 		Set("reference", reference)
-
-	if reference != "" {
-		if _, err := uuid.Parse(reference); err == nil {
-			if proj, pErr := c.DB.GetAppProjectByID(reference); pErr == nil && proj != nil {
-				props.Set("app_id", proj.ID.String())
-				props.Set("app_title", proj.Name)
-			}
-		}
-	}
 
 	for k, v := range extra {
 		props.Set(k, v)
 	}
 	return props
-}
-
-// truncatePromptPreview returns at most n runes of s with an ellipsis when
-// truncation occurred. Empty input yields empty output.
-func truncatePromptPreview(s string, n int) string {
-	s = strings.TrimSpace(s)
-	if s == "" || n <= 0 {
-		return s
-	}
-	r := []rune(s)
-	if len(r) <= n {
-		return s
-	}
-	return string(r[:n]) + "…"
 }
 
 // DeductAICreditsUnchecked deducts credits without checking sufficiency (balance may go negative

@@ -15,7 +15,6 @@ import (
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/utils"
-	"github.com/posthog/posthog-go"
 )
 
 // legacyProxyURLPattern matches our own asset proxy URL shape so the deprecated
@@ -117,10 +116,11 @@ func (v *HttpViews) ChatApp(w http.ResponseWriter, r *http.Request) {
 		chatEvent = constants.EVENT_APP_GENERATION_STARTED
 	}
 
-	v.Controller.TrackUserEvent(user, chatEvent, posthog.NewProperties().
-		Set("app_id", project.ID.String()).
-		Set("project_type", project.ProjectType).
-		Set("has_images", len(req.Images) > 0))
+	v.Controller.TrackUserEvent(user, chatEvent,
+		v.Controller.AppEventProps(project.ID.String()).
+			Set("project_type", project.ProjectType).
+			Set("has_images", len(req.Images) > 0).
+			Set("prompt_preview", utils.TruncatePromptPreview(req.Message, 50)))
 
 	go v.Controller.EventService.SendEvent(user, chatEvent, map[string]any{
 		"app_id":       project.ID.String(),

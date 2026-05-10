@@ -56,7 +56,7 @@ func (c *Controller) AgentDeps(user *models.User) *agent.RunDependencies {
 			// have a prompt in scope, so this enrichment stays agent-only.
 			var meta map[string]any
 			if t := utils.TokenTrackerFromContext(ctx); t != nil && t.TraceInput != "" {
-				meta = map[string]any{"prompt_preview": truncatePromptPreview(t.TraceInput, 50)}
+				meta = map[string]any{"prompt_preview": utils.TruncatePromptPreview(t.TraceInput, 50)}
 			}
 			return c.DeductAICreditsToFloor(user, orgID, credits, action, projectID, meta)
 		},

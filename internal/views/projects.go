@@ -6,7 +6,6 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/utils"
-	"github.com/posthog/posthog-go"
 )
 
 func (v *HttpViews) GetProjects(w http.ResponseWriter, r *http.Request) {
@@ -77,8 +76,12 @@ func (v *HttpViews) DeleteProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	go v.Controller.TrackUserEvent(user, constants.EVENT_PROJECT_DELETED, posthog.NewProperties().
-		Set("project_id", projectID))
+	// EVENT_PROJECT_DELETED previously used `project_id`; switching to the
+	// shared AppEventProps so dashboards can filter every app-scoped event by
+	// `app_id`. The project row is already gone by this point, so the
+	// title-lookup inside AppEventProps will no-op — only `app_id` lands.
+	go v.Controller.TrackUserEvent(user, constants.EVENT_PROJECT_DELETED,
+		v.Controller.AppEventProps(projectID))
 
 	utils.JSONResponse(w, deletedProjectRes, http.StatusOK)
 }

@@ -1,10 +1,30 @@
 package controllers
 
 import (
+	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/models"
 	"github.com/posthog/posthog-go"
 )
+
+// AppEventProps builds a PostHog properties bundle pre-populated with the
+// app_id and app_title for `projectID`. Callers should pass any event-specific
+// props by chaining `.Set(...)` on the returned value. The DB lookup is best-
+// effort — when projectID is empty or unresolvable, only `app_id` is set (and
+// it may be the empty string), so the event still emits.
+func (c *Controller) AppEventProps(projectID string) posthog.Properties {
+	props := posthog.NewProperties().Set("app_id", projectID)
+	if projectID == "" {
+		return props
+	}
+	if _, err := uuid.Parse(projectID); err != nil {
+		return props
+	}
+	if proj, err := c.DB.GetAppProjectByID(projectID); err == nil && proj != nil {
+		props.Set("app_title", proj.Name)
+	}
+	return props
+}
 
 // TrackUserEvent sends a named event to PostHog using an already-loaded user.
 // Auto-injects $email and org_id (the user's personal org) when those props
