@@ -382,7 +382,8 @@ func (c *Controller) HandleWebDeployTask(ctx context.Context, t *asynq.Task) err
 	})
 	go c.TrackUserEvent(user, constants.EVENT_WEB_DEPLOYMENT_SUCCEEDED,
 		c.AppEventProps(project.ID.String()).
-			Set("deploy_version", deployment.Version))
+			Set("deploy_version", deployment.Version).
+			Set("deployed_url", deployedURL))
 	slog.Info("deploy_succeeded", "deployment_id", p.DeploymentID, "fly_app", flyAppName)
 	return nil
 }
@@ -629,7 +630,8 @@ func (c *Controller) HandleFlyMachineEvent(event fly.MachineEvent) error {
 				})
 				go c.TrackUserEvent(user, constants.EVENT_WEB_DEPLOYMENT_SUCCEEDED,
 					c.AppEventProps(deployment.AppProjectID.String()).
-						Set("deploy_version", deployment.Version))
+						Set("deploy_version", deployment.Version).
+						Set("deployed_url", deployedURL))
 			}
 		}
 	case "failed", "destroyed":
