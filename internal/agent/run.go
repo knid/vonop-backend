@@ -175,7 +175,7 @@ func Run(
 	}
 
 	// --- Step 9: build system messages + registry + tracker ---
-	llmMessages := BuildSystemMessages(project, fileMap, deps, turnAttachments.Pool)
+	llmMessages := BuildSystemMessages(project, deps, turnAttachments.Pool)
 
 	// Modal commands (/plan, /explain, /review) inject an extra system block
 	// that forbids file mutations on the current turn only. We append it to
@@ -199,7 +199,14 @@ func Run(
 	// full prompt body while the persisted DB row (above) keeps the literal
 	// text the user typed.
 	expandedMessage, _, _ := ExpandSlashCommand(message)
-	userTurn := utils.Message{Role: "user", Content: expandedMessage}
+	turnContent := expandedMessage
+	if fileTreePrefix := BuildFileTreeUserPrefix(fileMap); fileTreePrefix != "" {
+		// File tree rides with the user turn instead of the system prefix —
+		// keeps prompt-cache stable across rounds when write_file mutates
+		// the tree mid-run. See BuildSystemMessages doc.
+		turnContent = fileTreePrefix + "\n" + expandedMessage
+	}
+	userTurn := utils.Message{Role: "user", Content: turnContent}
 	if len(currentImageURLs) > 0 {
 		userTurn.Images = currentImageURLs
 	}
