@@ -6,17 +6,29 @@ import (
 	"github.com/knid/wemob/internal/models"
 )
 
-// billingSnapshot returns the user's billing status/subscriptionID/trialUsed
-// from their personal organization (Plan A — org-billed). Empty values are
-// returned when the org or its subscription cannot be resolved; callers
-// surface them as empty fields in CRM/event payloads.
-func billingSnapshot(db *database.Database, user *models.User) (status, subID string, trialUsed bool) {
+// billingInfo is the resolved per-user billing state used to populate both
+// the Resend contact properties and the event payload. Cached per SendEvent
+// call so a single hot-path doesn't query GetPersonalOrgByUserID twice.
+type billingInfo struct {
+	Status    string
+	SubID     string
+	TrialUsed bool
+}
+
+// resolveBillingInfo loads the user's billing snapshot from their personal
+// organization (Plan A — org-billed). Empty values are returned when the
+// user/db are nil or the org cannot be resolved.
+func resolveBillingInfo(db *database.Database, user *models.User) billingInfo {
 	if db == nil || user == nil {
-		return "", uuid.Nil.String(), false
+		return billingInfo{SubID: uuid.Nil.String()}
 	}
 	org, err := db.GetPersonalOrgByUserID(user.ID.String())
 	if err != nil || org == nil {
-		return "", uuid.Nil.String(), false
+		return billingInfo{SubID: uuid.Nil.String()}
 	}
-	return org.SubscriptionStatus, org.SubscriptionID.String(), org.TrialUsed
+	return billingInfo{
+		Status:    org.SubscriptionStatus,
+		SubID:     org.SubscriptionID.String(),
+		TrialUsed: org.TrialUsed,
+	}
 }
