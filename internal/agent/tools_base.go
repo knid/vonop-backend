@@ -190,6 +190,73 @@ func (ReadFileTool) Execute(ctx context.Context, rc *RunContext, input json.RawM
 	return content, false, nil
 }
 
+// ---------- read_files ----------
+
+const readFilesMaxPaths = 20
+
+type ReadFilesTool struct{}
+
+func (ReadFilesTool) Name() string { return "read_files" }
+func (ReadFilesTool) Description() string {
+	return "Read multiple files in one call. Pass an array of project-relative paths. Returns each file's content delimited by '===== <path> =====' headers, or an error line for paths that fail. Strongly prefer this over multiple sequential read_file calls when you need to inspect ≥2 files — same semantics, one round-trip."
+}
+func (ReadFilesTool) Schema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"paths": map[string]any{
+				"type":        "array",
+				"description": "Project-relative file paths to read in one batch.",
+				"items":       map[string]any{"type": "string"},
+			},
+		},
+		"required": []string{"paths"},
+	}
+}
+
+func (ReadFilesTool) Execute(ctx context.Context, rc *RunContext, input json.RawMessage) (string, bool, error) {
+	var args struct {
+		Paths []string `json:"paths"`
+	}
+	if err := json.Unmarshal(input, &args); err != nil {
+		return fmt.Sprintf("invalid input: %v", err), true, nil
+	}
+	if len(args.Paths) == 0 {
+		return "paths must contain at least one entry", true, nil
+	}
+	if len(args.Paths) > readFilesMaxPaths {
+		return fmt.Sprintf("too many paths: %d (max %d) — split into multiple calls", len(args.Paths), readFilesMaxPaths), true, nil
+	}
+
+	var sb strings.Builder
+	for i, raw := range args.Paths {
+		if i > 0 {
+			sb.WriteString("\n\n")
+		}
+		path, err := sanitizePath(raw)
+		if err != nil {
+			fmt.Fprintf(&sb, "===== %s =====\nERROR: %s", raw, err.Error())
+			continue
+		}
+		fmt.Fprintf(&sb, "===== %s =====\n", path)
+		if isProtectedRead(path) {
+			fmt.Fprintf(&sb, "ERROR: reading %s is not allowed (contains secrets or system files)", path)
+			continue
+		}
+		content, ok := rc.FileMap.Get(path)
+		if !ok {
+			sb.WriteString("ERROR: file not found")
+			continue
+		}
+		if len(content) > maxReadBytes {
+			fmt.Fprintf(&sb, "<truncated: file is %d bytes, max %d>\n\n%s", len(content), maxReadBytes, content[:maxReadBytes])
+			continue
+		}
+		sb.WriteString(content)
+	}
+	return sb.String(), false, nil
+}
+
 // ---------- list_files ----------
 
 type ListFilesTool struct{}
@@ -283,7 +350,18 @@ func (DeleteFileTool) Execute(ctx context.Context, rc *RunContext, input json.Ra
 
 // ---------- write_file ----------
 
-const maxWriteBytes = 200 * 1024 // 200 KB
+const (
+	maxWriteBytes = 200 * 1024 // 200 KB
+
+	// maxRewriteExistingBytes caps the size of an existing file that
+	// write_file is allowed to wholesale overwrite. Whole-file rewrites cost
+	// the LLM the entire body in output tokens (and again as fresh input on
+	// the next turn before caching catches up); a 60 KB rewrite is ~15k
+	// output tokens (~$0.225 on Sonnet 4.6) plus ~$0.20 of cascading
+	// cache-write/read. Above this threshold the model must use multi_edit
+	// instead, which only emits the changed regions.
+	maxRewriteExistingBytes = 5 * 1024 // 5 KB
+)
 
 type WriteFileTool struct{}
 
@@ -327,8 +405,14 @@ func (WriteFileTool) Execute(ctx context.Context, rc *RunContext, input json.Raw
 	}
 
 	op := "update"
-	if _, exists := rc.FileMap.Get(path); !exists {
+	existing, exists := rc.FileMap.Get(path)
+	if !exists {
 		op = "create"
+	} else if len(existing) > maxRewriteExistingBytes {
+		return fmt.Sprintf(
+			"refusing to wholesale-overwrite %s: existing file is %d bytes (>%d KB rewrite cap). use multi_edit for targeted changes — same semantics, but only the changed regions are emitted as output tokens. if you genuinely need to replace the whole file, delete_file first then write_file with the new content.",
+			path, len(existing), maxRewriteExistingBytes/1024,
+		), true, nil
 	}
 	rc.FileMap.Set(path, args.Content)
 	rc.Emitter.Emit(EventFileWritten, FileWrittenEvent{

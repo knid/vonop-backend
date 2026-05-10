@@ -107,6 +107,7 @@ func (r *Registry) Execute(ctx context.Context, rc *RunContext, name string, inp
 func BuildRegistryFor(project *models.AppProject, deps *RunDependencies) *Registry {
 	r := NewRegistry()
 	r.Register(ReadFileTool{})
+	r.Register(ReadFilesTool{})
 	r.Register(ListFilesTool{})
 	r.Register(GrepTool{})
 	r.Register(WriteFileTool{})

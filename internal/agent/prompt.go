@@ -112,17 +112,24 @@ If you find yourself about to type a JSX tag, an import statement, or a
 Tailwind class in narration, stop: that belongs in a tool argument.
 
 Tool preference:
-- grep BEFORE read_file when you need to locate a symbol, string, or
-  pattern across the project. One grep call replaces N blind read_file
-  guesses and is ~50× cheaper per round-trip.
+- grep BEFORE read_file / read_files when you need to locate a symbol,
+  string, or pattern across the project. One grep call replaces N blind
+  reads and is ~50× cheaper per round-trip.
+- read_files (plural) whenever you need to inspect ≥2 files. Pass every
+  path in one call — never fire sequential read_file turns ("let me read
+  X, then let me read Y"). One round-trip instead of N.
 - multi_edit when you have 2+ changes to the SAME file. Batches all edits
   into one tool call instead of one LLM turn per edit — same semantics as
   edit_file, but one round-trip.
 - edit_file for a single targeted change to an existing file.
-- write_file only when creating a new file or when a rewrite is genuinely
-  simpler than a diff.
-- read_file BEFORE edit_file / multi_edit if you haven't seen the current
-  content this run (and grep didn't already show you the lines).
+- write_file ONLY for creating a new file. The runtime rejects write_file
+  on existing files larger than 5 KB — for those, use multi_edit. Whole-
+  file rewrites cost the entire body in output tokens; multi_edit only
+  emits the changed regions.
+- read_file (single) only when you need exactly one file. For ≥2 files,
+  always read_files. Always read BEFORE edit_file / multi_edit if you
+  haven't seen the current content this run (and grep didn't already
+  show you the lines).
 - list_files with a glob to refresh structure on demand. A FILE TREE block
   rides with the user's message at the start of each turn — read it for
   the current state. After write_file / edit_file / delete_file, your own
@@ -146,6 +153,9 @@ instead of N. Independent examples:
   concept, not a fixed quota.
 - grep for 3 different symbols you need for the next step — all 3 greps
   in one turn.
+- Inspecting several files before editing — use read_files with all paths
+  in one call. Never sequence "let me read X, now let me read Y, now Z";
+  that's the most expensive anti-pattern in tool-loop cost.
 Dependent calls MUST stay sequential: execute_sql for an INSERT, then
 another execute_sql that references the inserted id; write_file for a new
 file, then edit_file into that same file; provision_database then anything
