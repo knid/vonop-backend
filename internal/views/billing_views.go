@@ -6,11 +6,29 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/constants"
+	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/services/remoteconfig"
 	"github.com/knid/wemob/internal/utils"
 )
+
+// resolveCreditOrgID extracts an optional ?org_id= from the request and
+// resolves it through RequireOrgIDForUser, which verifies membership and
+// falls back to the user's personal org when the query param is absent or
+// unparseable. All credit endpoints route through this so a user viewing
+// a workspace org sees that org's balance/history, not their personal
+// org's leftover credits.
+func (v *HttpViews) resolveCreditOrgID(r *http.Request, user *models.User) (uuid.UUID, error) {
+	var reqOrgID *uuid.UUID
+	if raw := r.URL.Query().Get("org_id"); raw != "" {
+		if parsed, parseErr := uuid.Parse(raw); parseErr == nil {
+			reqOrgID = &parsed
+		}
+	}
+	return v.Controller.RequireOrgIDForUser(user, reqOrgID)
+}
 
 // buildCreditCostsMap converts the typed BuildCreditCosts table to a
 // JSON-friendly string-keyed shape. Same shape used by the per-user
@@ -129,7 +147,7 @@ func (v *HttpViews) GetAICreditsBalance(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	orgID, err := v.Controller.RequireOrgIDForUser(user, nil)
+	orgID, err := v.resolveCreditOrgID(r, user)
 	if err != nil {
 		utils.JSONInternalError(w, err)
 		return
@@ -159,7 +177,7 @@ func (v *HttpViews) GetCreditBreakdown(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	orgID, err := v.Controller.RequireOrgIDForUser(user, nil)
+	orgID, err := v.resolveCreditOrgID(r, user)
 	if err != nil {
 		utils.JSONInternalError(w, err)
 		return
@@ -197,7 +215,13 @@ func (v *HttpViews) GetAICreditTransactions(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	txs, err := v.Controller.DB.GetAICreditTransactions(user.ID.String(), 50)
+	orgID, err := v.resolveCreditOrgID(r, user)
+	if err != nil {
+		utils.JSONInternalError(w, err)
+		return
+	}
+
+	txs, err := v.Controller.DB.GetAICreditTransactions(orgID.String(), 50)
 	if err != nil {
 		utils.JSONInternalError(w, err)
 		return
@@ -210,6 +234,12 @@ func (v *HttpViews) GetCreditHistory(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
 		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
+		return
+	}
+
+	orgID, err := v.resolveCreditOrgID(r, user)
+	if err != nil {
+		utils.JSONInternalError(w, err)
 		return
 	}
 
@@ -226,22 +256,26 @@ func (v *HttpViews) GetCreditHistory(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	txs, total, err := v.Controller.DB.GetAICreditTransactionsPaginated(user.ID.String(), page, pageSize)
+	orgIDStr := orgID.String()
+	txs, total, err := v.Controller.DB.GetAICreditTransactionsPaginated(orgIDStr, page, pageSize)
 	if err != nil {
 		utils.JSONInternalError(w, err)
 		return
 	}
 
 	// Compute running balance_after for each transaction (newest first).
-	// balance_after[i] = current_balance - sum(amounts of transactions newer than i)
+	// balance_after[i] = current_balance - sum(amounts of transactions newer than i).
+	// Balance lookup is by orgID — the org's pool is the credit ledger's
+	// ground truth post the 2026-04-30 migration. The deprecated user-id
+	// query returned nondeterministic rows for users in multiple orgs.
 	currentBalance := 0
-	if bal, balErr := v.Controller.DB.GetAICreditsBalance(user.ID.String()); balErr == nil {
+	if bal, balErr := v.Controller.DB.GetAICreditsBalanceByOrg(orgIDStr); balErr == nil {
 		currentBalance = bal.Balance
 	}
 	// For pages after 1, subtract the sum of newer transactions not on this page
 	offset := (page - 1) * pageSize
 	if offset > 0 {
-		if newerSum, sumErr := v.Controller.DB.SumRecentTransactionAmounts(user.ID.String(), offset); sumErr == nil {
+		if newerSum, sumErr := v.Controller.DB.SumRecentTransactionAmounts(orgIDStr, offset); sumErr == nil {
 			currentBalance -= newerSum
 		}
 	}
@@ -249,6 +283,14 @@ func (v *HttpViews) GetCreditHistory(w http.ResponseWriter, r *http.Request) {
 	transactions := make([]responses.CreditTransactionResponse, 0, len(txs))
 	runningBalance := currentBalance
 	for _, tx := range txs {
+		// gateway_chat_pending records 0-amount placeholder rows for
+		// fractional gateway debt (see AtomicAccumulateGatewayPending).
+		// They have no display value in the history list and previously
+		// rendered as misleading "Usage 0" rows; skip them client-side
+		// rather than spend a category on a no-op.
+		if tx.Amount == 0 && tx.Action == "gateway_chat_pending" {
+			continue
+		}
 		transactions = append(transactions, responses.CreditTransactionResponse{
 			ID:           tx.ID.String(),
 			Type:         categorizeTxType(tx.Action, tx.Amount),

@@ -10,15 +10,6 @@ import (
 	"github.com/uptrace/bun"
 )
 
-func (db *Database) GetAICreditsBalance(userID string) (*models.AICreditsBalance, error) {
-	var balance models.AICreditsBalance
-	err := db.DB.NewSelect().
-		Model(&balance).
-		Where("user_id = ?", userID).
-		Scan(context.Background())
-	return &balance, err
-}
-
 func (db *Database) CreateAICreditsBalance(balance *models.AICreditsBalance) (*models.AICreditsBalance, error) {
 	// The unique constraint on this table is ux_ai_credits_balances_org
 	// (organization_id) — user_id is no longer unique since the org-scoped
@@ -46,40 +37,44 @@ func (db *Database) CreateAICreditTransaction(tx *models.AICreditTransaction) (*
 	return tx, err
 }
 
-func (db *Database) GetAICreditTransactions(userID string, limit int) ([]models.AICreditTransaction, error) {
+// GetAICreditTransactions returns the most recent transactions for an
+// organization. Scoped to organization_id since the 2026-04-30 migration
+// — ai_credits_balances is org-keyed and users in multiple orgs would
+// otherwise see other orgs' transactions in their credit history.
+func (db *Database) GetAICreditTransactions(orgID string, limit int) ([]models.AICreditTransaction, error) {
 	var txs []models.AICreditTransaction
 	err := db.DB.NewSelect().
 		Model(&txs).
-		Where("user_id = ?", userID).
+		Where("organization_id = ?", orgID).
 		OrderExpr("created_at DESC").
 		Limit(limit).
 		Scan(context.Background())
 	return txs, err
 }
 
-// GetAllAICreditTransactionsAsc returns every credit transaction for a user in
+// GetAllAICreditTransactionsAsc returns every credit transaction for an org in
 // chronological (ascending) order. Used for ledger replay — notably by
 // ComputeCreditBreakdown, which derives the subscription-vs-purchased bucket
 // split by walking the ledger forward. No pagination: we need the full ledger
-// to reconcile against the ground-truth balance, and per-user ledgers stay
+// to reconcile against the ground-truth balance, and per-org ledgers stay
 // small (a year of heavy use is < a few thousand rows).
-func (db *Database) GetAllAICreditTransactionsAsc(userID string) ([]models.AICreditTransaction, error) {
+func (db *Database) GetAllAICreditTransactionsAsc(orgID string) ([]models.AICreditTransaction, error) {
 	var txs []models.AICreditTransaction
 	err := db.DB.NewSelect().
 		Model(&txs).
-		Where("user_id = ?", userID).
+		Where("organization_id = ?", orgID).
 		OrderExpr("created_at ASC").
 		Scan(context.Background())
 	return txs, err
 }
 
-func (db *Database) GetAICreditTransactionsPaginated(userID string, page, pageSize int) ([]models.AICreditTransaction, int, error) {
+func (db *Database) GetAICreditTransactionsPaginated(orgID string, page, pageSize int) ([]models.AICreditTransaction, int, error) {
 	var txs []models.AICreditTransaction
 	offset := (page - 1) * pageSize
 
 	total, err := db.DB.NewSelect().
 		Model(&txs).
-		Where("user_id = ?", userID).
+		Where("organization_id = ?", orgID).
 		OrderExpr("created_at DESC").
 		Limit(pageSize).
 		Offset(offset).
@@ -88,12 +83,13 @@ func (db *Database) GetAICreditTransactionsPaginated(userID string, page, pageSi
 }
 
 // SumRecentTransactionAmounts returns the sum of amounts for the N most recent
-// transactions (by created_at DESC). Used to compute running balance_after in paginated history.
-func (db *Database) SumRecentTransactionAmounts(userID string, limit int) (int, error) {
+// transactions in an organization (by created_at DESC). Used to compute
+// running balance_after in paginated history for the org-scoped credit pool.
+func (db *Database) SumRecentTransactionAmounts(orgID string, limit int) (int, error) {
 	var sum int
 	err := db.DB.NewRaw(
-		"SELECT COALESCE(SUM(amount), 0) FROM (SELECT amount FROM ai_credit_transactions WHERE user_id = ? ORDER BY created_at DESC LIMIT ?) sub",
-		userID, limit,
+		"SELECT COALESCE(SUM(amount), 0) FROM (SELECT amount FROM ai_credit_transactions WHERE organization_id = ? ORDER BY created_at DESC LIMIT ?) sub",
+		orgID, limit,
 	).Scan(context.Background(), &sum)
 	return sum, err
 }
