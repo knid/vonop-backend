@@ -15,6 +15,15 @@ type cachedEntry struct {
 	expiresAt time.Time
 }
 
+// disableFlagEvents is a stable pointer-to-false used to opt every flag read
+// out of the SDK's automatic `$feature_flag_called` capture. Wemob uses
+// PostHog flags as a remote-config backend (rc-credit-pack-*, rc-ai-*, etc.)
+// rather than for A/B testing — the per-call events are pure noise and the
+// hottest reads use distinct_id="__global__" so they aren't person-attributable
+// anyway. PostHog can still derive STALE flag detection from non-flag
+// activity-log signals after this is on.
+var disableFlagEvents = func() *bool { v := false; return &v }()
+
 // Service provides typed, cached access to PostHog feature flag payloads
 // with hardcoded fallbacks. Safe to use when PostHog is nil (returns fallbacks).
 type Service struct {
@@ -94,8 +103,9 @@ func (s *Service) GetVariant(key Key, userID string) string {
 	}
 
 	variant, err := s.posthog.GetFeatureFlag(posthog.FeatureFlagPayload{
-		Key:        key.Flag,
-		DistinctId: userID,
+		Key:                   key.Flag,
+		DistinctId:            userID,
+		SendFeatureFlagEvents: disableFlagEvents,
 	})
 	if err != nil {
 		slog.Debug("remoteconfig: GetVariant error", "flag", key.Flag, "error", err)
@@ -122,8 +132,9 @@ func (s *Service) getPayload(flag string, userID string) interface{} {
 	}
 
 	payload, err := s.posthog.GetFeatureFlagPayload(posthog.FeatureFlagPayload{
-		Key:        flag,
-		DistinctId: userID,
+		Key:                   flag,
+		DistinctId:            userID,
+		SendFeatureFlagEvents: disableFlagEvents,
 	})
 	if err != nil {
 		slog.Debug("remoteconfig: getPayload error", "flag", flag, "error", err)
