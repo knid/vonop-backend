@@ -1066,24 +1066,35 @@ func finaliseFailureV2(
 		}
 	}
 
-	// 4. Track PostHog.
+	// 4. Track PostHog. Mirror the success-path properties so analytics can
+	// compare model/token spend and durations across success and failure on
+	// the same axes — without this, error funnels can't surface "expensive
+	// failures" or per-model failure rates.
+	totalTok := promptTok + completionTok
+	durationSeconds := float64(run.DurationMs) / 1000.0
 	if deps.TrackUserEvent != nil {
 		deps.TrackUserEvent(constants.EVENT_APP_CHAT_FAILED, map[string]any{
-			"app_id":       run.AppProjectID.String(),
-			"code":         string(code),
-			"phase":        phase,
-			"duration":     run.DurationMs,
-			"credits_used": credits,
+			"app_id":            run.AppProjectID.String(),
+			"code":              string(code),
+			"phase":             phase,
+			"duration_seconds":  durationSeconds,
+			"credits_used":      credits,
+			"model":             run.Model,
+			"prompt_tokens":     promptTok,
+			"completion_tokens": completionTok,
+			"total_tokens":      totalTok,
 		})
 	}
 
 	// 6b. Fire lifecycle event.
 	if deps.SendResendEvent != nil {
 		deps.SendResendEvent(constants.EVENT_APP_CHAT_FAILED, map[string]any{
-			"app_id":       run.AppProjectID.String(),
-			"code":         string(code),
-			"phase":        phase,
-			"credits_used": credits,
+			"app_id":           run.AppProjectID.String(),
+			"code":             string(code),
+			"phase":            phase,
+			"duration_seconds": durationSeconds,
+			"credits_used":     credits,
+			"model":            run.Model,
 		})
 	}
 

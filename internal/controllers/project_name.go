@@ -31,6 +31,9 @@ func (c *Controller) generateAppNameAndSlug(ctx context.Context, prompt string, 
 	tracker := utils.NewTokenTracker()
 	if user != nil {
 		tracker.UserID = user.ID.String()
+		if orgID, orgErr := c.RequireOrgIDForUser(user, nil); orgErr == nil {
+			tracker.OrganizationID = orgID.String()
+		}
 	}
 	ctx = utils.WithTokenTracker(ctx, tracker)
 
