@@ -129,20 +129,29 @@ func (v *HttpViews) StripeCheckout(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = utils.ParseJSONBody(r, &trackingBody)
 
-	// Validate price ID against known subscription plans
+	// Validate price ID against known subscription plans + capture plan name +
+	// billing interval so we can attach them to the checkout_started event for
+	// readable PostHog/Resend breakdowns (otherwise the event only carries the
+	// opaque Stripe price_id and dashboards have to maintain a lookup).
 	allSubs, err := v.Controller.DB.GetSubscriptions()
 	if err != nil {
 		utils.JSONErrorCode(w, constants.ErrInternal, http.StatusInternalServerError, nil)
 		return
 	}
-	validPrice := false
+	var planName, billingInterval string
 	for _, s := range *allSubs {
-		if s.PriceID == priceID || s.AnnualPriceID == priceID {
-			validPrice = true
+		if s.PriceID == priceID {
+			planName = s.Name
+			billingInterval = "monthly"
+			break
+		}
+		if s.AnnualPriceID == priceID {
+			planName = s.Name
+			billingInterval = "annual"
 			break
 		}
 	}
-	if !validPrice {
+	if planName == "" {
 		utils.JSONErrorCode(w, constants.ErrValidationInvalidFormat, http.StatusBadRequest, map[string]any{"field": "price"})
 		return
 	}
@@ -182,10 +191,14 @@ func (v *HttpViews) StripeCheckout(w http.ResponseWriter, r *http.Request) {
 
 	v.Controller.TrackUserEvent(user, constants.EVENT_CHECKOUT_STARTED, posthog.NewProperties().
 		Set("price_id", priceID).
+		Set("plan_name", planName).
+		Set("billing_interval", billingInterval).
 		Set("trial_eligible", !org.TrialUsed))
 
 	go v.Controller.EventService.SendEvent(user, constants.EVENT_CHECKOUT_STARTED, map[string]any{
-		"price_id": priceID,
+		"price_id":         priceID,
+		"plan_name":        planName,
+		"billing_interval": billingInterval,
 	})
 
 	attr := controllers.MetaAttributionFromRequest(r,
@@ -373,13 +386,17 @@ func (v *HttpViews) PurchaseCredits(w http.ResponseWriter, r *http.Request) {
 
 	v.Controller.TrackUserEvent(user, constants.EVENT_CREDIT_PURCHASE_STARTED, posthog.NewProperties().
 		Set("package_id", req.PackageID).
+		Set("pack_name", pack.Name).
 		Set("pack_size", pack.Credits).
-		Set("price_id", priceID))
+		Set("price_id", priceID).
+		Set("price_usd", pack.Price))
 
 	go v.Controller.EventService.SendEvent(user, constants.EVENT_CREDIT_PURCHASE_STARTED, map[string]any{
 		"package_id": req.PackageID,
+		"pack_name":  pack.Name,
 		"pack_size":  pack.Credits,
 		"price_id":   priceID,
+		"price_usd":  pack.Price,
 	})
 
 	attr := controllers.MetaAttributionFromRequest(r, req.Fbp, req.Fbc, req.EventSourceURL)
