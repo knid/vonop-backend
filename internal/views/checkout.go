@@ -22,10 +22,18 @@ type creditPack struct {
 	Credits int
 	Price   int // USD dollars
 	Popular bool
+	// FirstPurchaseOnly marks packs that are surfaced ONLY to users who have
+	// never bought a credit pack before (first-completion onboarding lever).
+	// GetCreditPackages filters these out post-first-purchase, and
+	// PurchaseCredits rejects them server-side so the gate can't be bypassed
+	// by replaying an old package_id.
+	FirstPurchaseOnly bool
 }
 
 func (v *HttpViews) getCreditPacks(userID string) []creditPack {
 	rc := v.Controller.RemoteConfig
+	cFC := rc.GetInt(remoteconfig.CreditPackFirstCompletionCredits, userID)
+	pFC := rc.GetInt(remoteconfig.CreditPackFirstCompletionPrice, userID)
 	c100 := rc.GetInt(remoteconfig.CreditPack100Credits, userID)
 	p100 := rc.GetInt(remoteconfig.CreditPack100Price, userID)
 	c200 := rc.GetInt(remoteconfig.CreditPack200Credits, userID)
@@ -37,7 +45,10 @@ func (v *HttpViews) getCreditPacks(userID string) []creditPack {
 	c3000 := rc.GetInt(remoteconfig.CreditPack3000Credits, userID)
 	p3000 := rc.GetInt(remoteconfig.CreditPack3000Price, userID)
 	// Keep the 100 pack first — packageSavingsPercent relies on the smallest
-	// pack being the "base rate" for the savings calculation on larger packs.
+	// non-first-purchase pack being the "base rate" for the savings
+	// calculation on larger packs. The first-completion pack is appended at
+	// the end and marked FirstPurchaseOnly: GetCreditPackages filters it
+	// before computing savings, so the base-rate logic is unaffected.
 	// 1000 is marked popular: it lands near the sweet spot of the pricing
 	// curve (30% savings) and is our expected top seller.
 	return []creditPack{
@@ -46,6 +57,7 @@ func (v *HttpViews) getCreditPacks(userID string) []creditPack {
 		{ID: "credits_500", Secret: "STRIPE_CREDITS_500_PRICE_ID", Name: fmt.Sprintf("%d AI Credits", c500), Credits: c500, Price: p500},
 		{ID: "credits_1000", Secret: "STRIPE_CREDITS_1000_PRICE_ID", Name: fmt.Sprintf("%d AI Credits", c1000), Credits: c1000, Price: p1000, Popular: true},
 		{ID: "credits_3000", Secret: "STRIPE_CREDITS_3000_PRICE_ID", Name: fmt.Sprintf("%d AI Credits", c3000), Credits: c3000, Price: p3000},
+		{ID: "credits_first_completion", Secret: "STRIPE_CREDITS_FIRST_COMPLETION_PRICE_ID", Name: fmt.Sprintf("%d AI Credits", cFC), Credits: cFC, Price: pFC, FirstPurchaseOnly: true},
 	}
 }
 
@@ -203,25 +215,43 @@ func (v *HttpViews) StripeCheckout(w http.ResponseWriter, r *http.Request) {
 	utils.JSONResponse(w, map[string]string{"url": s.URL}, http.StatusCreated)
 }
 
-// GetCreditPackages returns the available credit packs for purchase.
+// GetCreditPackages returns the available credit packs for purchase. Packs
+// flagged FirstPurchaseOnly are filtered out for users who have already
+// purchased a pack before — keeps the onboarding micro-pack a true one-time
+// activation lever instead of a permanent discount.
 func (v *HttpViews) GetCreditPackages(w http.ResponseWriter, r *http.Request) {
 	type packageResponse struct {
-		ID             string `json:"id"`
-		Name           string `json:"name"`
-		Credits        int    `json:"credits"`
-		Price          int    `json:"price"`
-		Popular        bool   `json:"popular,omitempty"`
-		SavingsPercent int    `json:"savings_percent,omitempty"`
+		ID                string `json:"id"`
+		Name              string `json:"name"`
+		Credits           int    `json:"credits"`
+		Price             int    `json:"price"`
+		Popular           bool   `json:"popular,omitempty"`
+		FirstPurchaseOnly bool   `json:"first_purchase_only,omitempty"`
+		SavingsPercent    int    `json:"savings_percent,omitempty"`
+	}
+
+	// Look up the caller (best-effort) so we can hide first-purchase-only
+	// packs once they've already bought once. An anonymous caller hitting
+	// this endpoint sees the full list — which is fine for marketing pages
+	// or the dashboard's pricing table where the user isn't yet authed; the
+	// purchase endpoint enforces the rule again on submit.
+	hasPriorPurchase := false
+	if user, err := v.Controller.GetUserFromReq(r); err == nil && user != nil {
+		if has, herr := v.Controller.DB.HasCreditPurchase(user.ID.String()); herr == nil {
+			hasPriorPurchase = has
+		}
 	}
 
 	packs := v.getCreditPacks(remoteconfig.Global)
-	// Use the first pack (the smallest, by convention of getCreditPacks) as
-	// the savings reference. If that secret isn't configured we still need
-	// a reference rate, so we fall back to the first listed pack regardless
-	// of whether its Stripe secret is set.
+	// Compute savings against the smallest non-first-purchase pack so the
+	// onboarding micro-pack (which is intentionally cheap per credit) doesn't
+	// pull the reference rate down and zero out savings on every other pack.
 	var reference creditPack
-	if len(packs) > 0 {
-		reference = packs[0]
+	for _, p := range packs {
+		if !p.FirstPurchaseOnly {
+			reference = p
+			break
+		}
 	}
 
 	var packages []packageResponse
@@ -230,17 +260,22 @@ func (v *HttpViews) GetCreditPackages(w http.ResponseWriter, r *http.Request) {
 		if v.Controller.SecretManager.GetSecret(p.Secret) == "" {
 			continue
 		}
+		// Hide first-purchase-only packs from users who have already bought.
+		if p.FirstPurchaseOnly && hasPriorPurchase {
+			continue
+		}
 		savings := 0
-		if p.ID != reference.ID {
+		if p.ID != reference.ID && !p.FirstPurchaseOnly {
 			savings = packageSavingsPercent(p, reference)
 		}
 		packages = append(packages, packageResponse{
-			ID:             p.ID,
-			Name:           p.Name,
-			Credits:        p.Credits,
-			Price:          p.Price,
-			Popular:        p.Popular,
-			SavingsPercent: savings,
+			ID:                p.ID,
+			Name:              p.Name,
+			Credits:           p.Credits,
+			Price:             p.Price,
+			Popular:           p.Popular,
+			FirstPurchaseOnly: p.FirstPurchaseOnly,
+			SavingsPercent:    savings,
 		})
 	}
 
@@ -282,6 +317,24 @@ func (v *HttpViews) PurchaseCredits(w http.ResponseWriter, r *http.Request) {
 	if pack == nil {
 		utils.JSONErrorCode(w, constants.ErrValidationInvalidFormat, http.StatusBadRequest, map[string]any{"field": "package_id"})
 		return
+	}
+
+	// Server-side defense: a FirstPurchaseOnly pack must only succeed for
+	// users with no prior `purchase` row. The list endpoint already hides
+	// these packs, but a client replaying an old package_id would otherwise
+	// get the discounted rate again. We treat a DB lookup error as
+	// "deny" — failing closed is the safer default for billing.
+	if pack.FirstPurchaseOnly {
+		hasPrior, err := v.Controller.DB.HasCreditPurchase(user.ID.String())
+		if err != nil {
+			slog.Error("first-purchase pack: failed to check prior purchases", "error", err, "user_id", user.ID)
+			utils.JSONErrorCode(w, constants.ErrInternal, http.StatusInternalServerError, nil)
+			return
+		}
+		if hasPrior {
+			utils.JSONErrorCode(w, constants.ErrValidationInvalidFormat, http.StatusBadRequest, map[string]any{"field": "package_id"})
+			return
+		}
 	}
 
 	dashboardURL := v.Controller.SecretManager.GetSecret("FRONTEND_URL")

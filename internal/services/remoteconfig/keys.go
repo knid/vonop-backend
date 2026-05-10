@@ -29,6 +29,12 @@ var CreditPack1000Price = Key{Flag: "rc-credit-pack-1000-price", Fallback: 50}
 // Power pack — ~58% savings over the base rate ($125 vs $300 nominal).
 var CreditPack3000Credits = Key{Flag: "rc-credit-pack-3000-credits", Fallback: 3000}
 var CreditPack3000Price = Key{Flag: "rc-credit-pack-3000-price", Fallback: 125}
+// First-completion pack — micro top-up sized to finish a typical first app
+// (median first run is ~30 credits, p90 is ~57 — 50 credits @ $3 covers the
+// long tail). Server filters this pack out once the user has any prior
+// `purchase` transaction so it's a true one-time onboarding lever.
+var CreditPackFirstCompletionCredits = Key{Flag: "rc-credit-pack-first-completion-credits", Fallback: 50}
+var CreditPackFirstCompletionPrice = Key{Flag: "rc-credit-pack-first-completion-price", Fallback: 3}
 var AICreditsTokensPerCredit = Key{Flag: "rc-ai-credits-tokens-per-credit", Fallback: 5000}
 var AICreditsOutputMultiplier = Key{Flag: "rc-ai-credits-output-multiplier", Fallback: 5}
 var AICreditsCacheReadDivisor = Key{Flag: "rc-ai-credits-cache-read-divisor", Fallback: 10}

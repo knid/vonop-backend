@@ -245,6 +245,20 @@ func (db *Database) HasInitialGrant(userID string) (bool, error) {
 	return count > 0, err
 }
 
+// HasCreditPurchase returns true if the user has ever paid for a credit pack
+// (any successfully-credited Stripe checkout — see webhook.go's
+// `checkout.session.completed` handler, which writes action="purchase"). Used
+// to gate first-purchase-only packs (e.g. the $3 onboarding micro-pack) so
+// they only show up to users who have never paid before.
+func (db *Database) HasCreditPurchase(userID string) (bool, error) {
+	var count int
+	err := db.DB.NewRaw(
+		"SELECT COUNT(*) FROM ai_credit_transactions WHERE user_id = ? AND action = 'purchase'",
+		userID,
+	).Scan(context.Background(), &count)
+	return count > 0, err
+}
+
 // HasAICreditTransactionByRefTx returns true if a credit transaction already
 // exists for the given (action, reference) pair. Used as an idempotency guard
 // for retryable callers (e.g. Stripe webhooks where the same event can fire
