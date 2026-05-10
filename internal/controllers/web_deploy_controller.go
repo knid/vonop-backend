@@ -20,7 +20,6 @@ import (
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/services/fly"
 	"github.com/knid/wemob/internal/tasks"
-	"github.com/posthog/posthog-go"
 )
 
 // ErrDeployInProgress is returned by CreateQueuedWebDeployment when the
@@ -381,9 +380,9 @@ func (c *Controller) HandleWebDeployTask(ctx context.Context, t *asynq.Task) err
 		"version":      deployment.Version,
 		"deployed_url": deployedURL,
 	})
-	go c.TrackUserEvent(user, constants.EVENT_WEB_DEPLOYMENT_SUCCEEDED, posthog.NewProperties().
-		Set("app_id", project.ID.String()).
-		Set("deploy_version", deployment.Version))
+	go c.TrackUserEvent(user, constants.EVENT_WEB_DEPLOYMENT_SUCCEEDED,
+		c.AppEventProps(project.ID.String()).
+			Set("deploy_version", deployment.Version))
 	slog.Info("deploy_succeeded", "deployment_id", p.DeploymentID, "fly_app", flyAppName)
 	return nil
 }
@@ -551,10 +550,10 @@ func (c *Controller) fireDeployFailedEvent(deploymentID, stage string, deployErr
 		"stage":         stage,
 		"error_message": deployErr.Error(),
 	})
-	go c.TrackUserEvent(user, constants.EVENT_WEB_DEPLOYMENT_FAILED, posthog.NewProperties().
-		Set("app_id", deployment.AppProjectID.String()).
-		Set("stage", stage).
-		Set("error", deployErr.Error()))
+	go c.TrackUserEvent(user, constants.EVENT_WEB_DEPLOYMENT_FAILED,
+		c.AppEventProps(deployment.AppProjectID.String()).
+			Set("stage", stage).
+			Set("error", deployErr.Error()))
 }
 
 // ReapStuckDeploymentsTask is invoked every minute by the asynq scheduler. It
@@ -628,9 +627,9 @@ func (c *Controller) HandleFlyMachineEvent(event fly.MachineEvent) error {
 					"version":      deployment.Version,
 					"deployed_url": deployedURL,
 				})
-				go c.TrackUserEvent(user, constants.EVENT_WEB_DEPLOYMENT_SUCCEEDED, posthog.NewProperties().
-					Set("app_id", deployment.AppProjectID.String()).
-					Set("deploy_version", deployment.Version))
+				go c.TrackUserEvent(user, constants.EVENT_WEB_DEPLOYMENT_SUCCEEDED,
+					c.AppEventProps(deployment.AppProjectID.String()).
+						Set("deploy_version", deployment.Version))
 			}
 		}
 	case "failed", "destroyed":

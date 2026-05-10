@@ -13,7 +13,6 @@ import (
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/utils"
-	"github.com/posthog/posthog-go"
 )
 
 // schemaRelevantPatterns are file path patterns that likely contain database schema info.
@@ -261,10 +260,10 @@ func (c *Controller) CreateDashboard(ctx context.Context, project *models.AppPro
 	// Fetch created panels for response
 	createdPanels, _ := c.DB.GetAppDashboardPanelsByDashboardID(dashboard.ID.String())
 
-	c.TrackUserEvent(user, constants.EVENT_DASHBOARD_CREATED, posthog.NewProperties().
-		Set("app_id", project.ID.String()).
-		Set("provider", dbProvider).
-		Set("panel_count", len(createdPanels)))
+	c.TrackUserEvent(user, constants.EVENT_DASHBOARD_CREATED,
+		c.AppEventProps(project.ID.String()).
+			Set("provider", dbProvider).
+			Set("panel_count", len(createdPanels)))
 
 	go c.EventService.SendEvent(user, constants.EVENT_DASHBOARD_CREATED, map[string]any{
 		"app_id":      project.ID.String(),

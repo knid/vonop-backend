@@ -11,7 +11,6 @@ import (
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/utils"
-	"github.com/posthog/posthog-go"
 )
 
 // writeAddAppDomainError translates user-facing rejections from
@@ -110,9 +109,9 @@ func (v *HttpViews) AddAppDomain(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	v.Controller.TrackUserEvent(user, constants.EVENT_DOMAIN_ADDED, posthog.NewProperties().
-		Set("app_id", project.ID.String()).
-		Set("domain", req.Domain))
+	v.Controller.TrackUserEvent(user, constants.EVENT_DOMAIN_ADDED,
+		v.Controller.AppEventProps(project.ID.String()).
+			Set("domain", req.Domain))
 
 	go v.Controller.EventService.SendEvent(user, constants.EVENT_DOMAIN_ADDED, map[string]any{
 		"app_id": project.ID.String(),
@@ -145,10 +144,10 @@ func (v *HttpViews) VerifyAppDomain(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// WEM-271: Track domain verification events
-	v.Controller.TrackUserEvent(user, constants.EVENT_DOMAIN_VERIFIED, posthog.NewProperties().
-		Set("app_id", project.ID.String()).
-		Set("domain", result.Domain).
-		Set("status", result.Status))
+	v.Controller.TrackUserEvent(user, constants.EVENT_DOMAIN_VERIFIED,
+		v.Controller.AppEventProps(project.ID.String()).
+			Set("domain", result.Domain).
+			Set("status", result.Status))
 
 	go v.Controller.EventService.SendEvent(user, constants.EVENT_DOMAIN_VERIFIED, map[string]any{
 		"app_id": project.ID.String(),
@@ -180,8 +179,8 @@ func (v *HttpViews) RemoveAppDomain(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	v.Controller.TrackUserEvent(user, constants.EVENT_DOMAIN_REMOVED, posthog.NewProperties().
-		Set("app_id", project.ID.String()))
+	v.Controller.TrackUserEvent(user, constants.EVENT_DOMAIN_REMOVED,
+		v.Controller.AppEventProps(project.ID.String()))
 
 	go v.Controller.EventService.SendEvent(user, constants.EVENT_DOMAIN_REMOVED, map[string]any{
 		"app_id": project.ID.String(),

@@ -137,10 +137,10 @@ func (v *HttpViews) DeployAppWeb(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	go v.Controller.TrackUserEvent(user, constants.EVENT_APP_DEPLOY_ENQUEUED, posthog.NewProperties().
-		Set("app_id", project.ID.String()).
-		Set("platform", "web").
-		Set("queue", queue))
+	go v.Controller.TrackUserEvent(user, constants.EVENT_APP_DEPLOY_ENQUEUED,
+		v.Controller.AppEventProps(project.ID.String()).
+			Set("platform", "web").
+			Set("queue", queue))
 
 	utils.JSONResponseStatus(w, responses.AppDeploymentResponse{
 		ID:           deployment.ID,
@@ -172,8 +172,8 @@ func (v *HttpViews) UndeployAppWeb(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	v.Controller.TrackUserEvent(user, constants.EVENT_WEB_UNDEPLOYED, posthog.NewProperties().
-		Set("app_id", project.ID.String()))
+	v.Controller.TrackUserEvent(user, constants.EVENT_WEB_UNDEPLOYED,
+		v.Controller.AppEventProps(project.ID.String()))
 
 	go v.Controller.EventService.SendEvent(user, constants.EVENT_WEB_UNDEPLOYED, map[string]any{
 		"app_id": project.ID.String(),
@@ -276,10 +276,10 @@ func (v *HttpViews) DeployAppMobile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	v.Controller.TrackUserEvent(user, constants.EVENT_APP_DEPLOYED_EXPO_OTA, posthog.NewProperties().
-		Set("app_id", project.ID.String()).
-		Set("build_id", build.ID.String()).
-		Set("task_id", task.ID.String()))
+	v.Controller.TrackUserEvent(user, constants.EVENT_APP_DEPLOYED_EXPO_OTA,
+		v.Controller.AppEventProps(project.ID.String()).
+			Set("build_id", build.ID.String()).
+			Set("task_id", task.ID.String()))
 
 	// Return the synthesized AppDeploymentResponse shape so the frontend's
 	// existing deploy-status polling reads the same shape from the trigger
@@ -355,8 +355,8 @@ func (v *HttpViews) UndeployAppMobile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	v.Controller.TrackUserEvent(user, constants.EVENT_MOBILE_UNDEPLOYED, posthog.NewProperties().
-		Set("app_id", project.ID.String()))
+	v.Controller.TrackUserEvent(user, constants.EVENT_MOBILE_UNDEPLOYED,
+		v.Controller.AppEventProps(project.ID.String()))
 
 	go v.Controller.EventService.SendEvent(user, constants.EVENT_MOBILE_UNDEPLOYED, map[string]any{
 		"app_id": project.ID.String(),
@@ -464,9 +464,9 @@ func (v *HttpViews) BuildAppExpo(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for _, platform := range req.Platforms {
-		v.Controller.TrackUserEvent(user, constants.EVENT_PREFIX_APP_BUILT_EXPO+constants.EventName(platform), posthog.NewProperties().
-			Set("app_id", project.ID.String()).
-			Set("project_type", project.ProjectType))
+		v.Controller.TrackUserEvent(user, constants.EVENT_PREFIX_APP_BUILT_EXPO+constants.EventName(platform),
+			v.Controller.AppEventProps(project.ID.String()).
+				Set("project_type", project.ProjectType))
 	}
 
 	statusCode := http.StatusCreated

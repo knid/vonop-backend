@@ -888,6 +888,8 @@ func finaliseSuccess(
 		}
 		deps.TrackUserEvent(action, map[string]any{
 			"app_id":            project.ID.String(),
+			"app_title":         project.Name,
+			"prompt_preview":    utils.TruncatePromptPreview(tracker.TraceInput, 50),
 			"duration_seconds":  float64(durationMs) / 1000.0,
 			"total_tokens":      totalTok,
 			"prompt_tokens":     promptTok,
@@ -1080,7 +1082,7 @@ func finaliseFailureV2(
 	totalTok := promptTok + completionTok
 	durationSeconds := float64(run.DurationMs) / 1000.0
 	if deps.TrackUserEvent != nil {
-		deps.TrackUserEvent(constants.EVENT_APP_CHAT_FAILED, map[string]any{
+		failedProps := map[string]any{
 			"app_id":            run.AppProjectID.String(),
 			"code":              string(code),
 			"phase":             phase,
@@ -1090,7 +1092,14 @@ func finaliseFailureV2(
 			"prompt_tokens":     promptTok,
 			"completion_tokens": completionTok,
 			"total_tokens":      totalTok,
-		})
+		}
+		if project != nil {
+			failedProps["app_title"] = project.Name
+		}
+		if tracker != nil && tracker.TraceInput != "" {
+			failedProps["prompt_preview"] = utils.TruncatePromptPreview(tracker.TraceInput, 50)
+		}
+		deps.TrackUserEvent(constants.EVENT_APP_CHAT_FAILED, failedProps)
 	}
 
 	// 6b. Fire lifecycle event.
