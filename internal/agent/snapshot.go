@@ -44,16 +44,6 @@ func FinaliseRun(repo *gitrepo.Repo, fileMap *SafeFileMap, userMessage string) (
 	return hash, nil
 }
 
-// RollbackTo hard-resets to the given commit. Called on run failure as a
-// defensive measure; in practice tool mutations only touch the in-memory
-// fileMap so there's usually nothing on disk to undo.
-func RollbackTo(repo *gitrepo.Repo, preCommit string) error {
-	if preCommit == "" {
-		return nil
-	}
-	return repo.Reset(preCommit)
-}
-
 // firstLine returns the first non-empty line of s, truncated to max characters.
 func firstLine(s string, max int) string {
 	for i, r := range s {
