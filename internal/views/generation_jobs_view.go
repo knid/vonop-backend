@@ -200,9 +200,9 @@ done:
 
 	// Explicit terminal SSE frame so clients know unambiguously that the
 	// stream is over. Without this, the FE has to infer "done" from event
-	// names ("done"/"error"/"rollback"), which is fragile under reconnect
-	// races and unknown future event types. The frame uses seq=0 — it's
-	// out-of-band metadata, not a numbered event.
+	// names ("done"/"error"), which is fragile under reconnect races and
+	// unknown future event types. The frame uses seq=0 — it's out-of-band
+	// metadata, not a numbered event.
 	if !clientGone {
 		_ = utils.WriteSSEEvent(w, flusher, 0, "end", map[string]any{
 			"job_id": job.ID,

@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/models"
+	"github.com/uptrace/bun"
 )
 
 func (db *Database) GetUserById(id string) (*models.User, error) {
@@ -29,7 +30,14 @@ func (db *Database) CreateUser(user *models.User) (*models.User, error) {
 }
 
 func (db *Database) UpdateUser(user *models.User) (*models.User, error) {
-	_, err := db.DB.NewUpdate().Model(user).Where("id = ?", user.ID).Exec(context.Background())
+	return db.UpdateUserTx(db.DB, user)
+}
+
+// UpdateUserTx is the tx-aware variant. Use it from webhook handlers so user
+// flag flips (e.g. setup_finished, verified) commit atomically with the
+// surrounding dedup tx instead of leaking through on rollback.
+func (db *Database) UpdateUserTx(tx bun.IDB, user *models.User) (*models.User, error) {
+	_, err := tx.NewUpdate().Model(user).Where("id = ?", user.ID).Exec(context.Background())
 	return user, err
 }
 

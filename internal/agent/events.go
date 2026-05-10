@@ -105,13 +105,6 @@ type TokenUsage struct {
 	CacheWrite int `json:"cache_write"`
 }
 
-type RollbackEvent struct {
-	RunID         uuid.UUID `json:"run_id"`
-	PreCommit     string    `json:"pre_commit"`
-	Reason        string    `json:"reason"`
-	FilesReverted int       `json:"files_reverted"`
-}
-
 type ErrorEvent struct {
 	RunID   uuid.UUID `json:"run_id"`
 	Phase   string    `json:"phase"`
@@ -147,7 +140,6 @@ const (
 	EventFileDeleted    = "file_deleted"
 	EventTurnEnd        = "turn_end"
 	EventCreditsUpdate  = "credits_update"
-	EventRollback       = "rollback"
 	EventError          = "error"
 	EventDone           = "done"
 )

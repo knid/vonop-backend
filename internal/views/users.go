@@ -6,6 +6,7 @@ import (
 
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/controllers"
+	"github.com/knid/wemob/internal/middleware"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/utils"
 	"github.com/posthog/posthog-go"
@@ -144,7 +145,8 @@ func (v *HttpViews) UserRegister(w http.ResponseWriter, r *http.Request) {
 		utils.JSONErrorCode(w, constants.ErrValidationBody, http.StatusBadRequest, nil)
 		return
 	}
-	userInformationRes, err := v.Controller.RegisterUser(userRegisterReq)
+	locale := middleware.ResolveLocale(r.Header.Get("Accept-Language"))
+	userInformationRes, err := v.Controller.RegisterUser(userRegisterReq, locale)
 	if err != nil {
 		switch {
 		case errors.Is(err, controllers.ErrEmailTaken):
