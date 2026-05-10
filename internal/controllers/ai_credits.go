@@ -470,9 +470,49 @@ func (c *Controller) MakeCreditBudgetChecker(user *models.User, orgID uuid.UUID,
 	}
 }
 
+// deductionEventProps builds the PostHog properties for an ai_credits_deducted
+// event. `reference` is parsed as an AppProject UUID when possible to enrich
+// the event with `app_id` + `app_title`; callers can pass an `extra` map (e.g.
+// `prompt_preview` from agent runs) for fields not derivable from the
+// deduction signature.
+func (c *Controller) deductionEventProps(action, reference string, extra map[string]any) posthog.Properties {
+	props := posthog.NewProperties().
+		Set("action", action).
+		Set("reference", reference)
+
+	if reference != "" {
+		if _, err := uuid.Parse(reference); err == nil {
+			if proj, pErr := c.DB.GetAppProjectByID(reference); pErr == nil && proj != nil {
+				props.Set("app_id", proj.ID.String())
+				props.Set("app_title", proj.Name)
+			}
+		}
+	}
+
+	for k, v := range extra {
+		props.Set(k, v)
+	}
+	return props
+}
+
+// truncatePromptPreview returns at most n runes of s with an ellipsis when
+// truncation occurred. Empty input yields empty output.
+func truncatePromptPreview(s string, n int) string {
+	s = strings.TrimSpace(s)
+	if s == "" || n <= 0 {
+		return s
+	}
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n]) + "…"
+}
+
 // DeductAICreditsUnchecked deducts credits without checking sufficiency (balance may go negative
 // down to AICreditsMinBalance). Used for post-hoc token-based billing where the pre-check already ran.
-func (c *Controller) DeductAICreditsUnchecked(user *models.User, orgID uuid.UUID, cost int, action string, reference string) error {
+// Optional `extra` is merged into the ai_credits_deducted PostHog event (e.g. prompt_preview from agent paths).
+func (c *Controller) DeductAICreditsUnchecked(user *models.User, orgID uuid.UUID, cost int, action string, reference string, extra ...map[string]any) error {
 	if org, orgErr := c.DB.GetOrganizationByID(orgID.String()); orgErr == nil && IsOrgInDunning(org) {
 		return ErrOrgInDunning
 	}
@@ -515,11 +555,14 @@ func (c *Controller) DeductAICreditsUnchecked(user *models.User, orgID uuid.UUID
 	})
 
 	if txErr == nil {
-		c.TrackUserEvent(user, constants.EVENT_AI_CREDITS_DEDUCTED, posthog.NewProperties().
-			Set("action", action).
+		var meta map[string]any
+		if len(extra) > 0 {
+			meta = extra[0]
+		}
+		props := c.deductionEventProps(action, reference, meta).
 			Set("cost", cost).
-			Set("remaining_balance", newBalance).
-			Set("reference", reference))
+			Set("remaining_balance", newBalance)
+		c.TrackUserEvent(user, constants.EVENT_AI_CREDITS_DEDUCTED, props)
 
 		c.emitCreditThresholdEvents(user, orgID, prevBalance, newBalance, action, reference)
 	}
@@ -530,7 +573,8 @@ func (c *Controller) DeductAICreditsUnchecked(user *models.User, orgID uuid.UUID
 // DeductAICreditsToFloor deducts credits, clamping at the overdraft floor instead
 // of failing. Always deducts something if balance is above floor. Used as the
 // primary deduction method for generation sessions where the cost may exceed budget.
-func (c *Controller) DeductAICreditsToFloor(user *models.User, orgID uuid.UUID, cost int, action string, reference string) error {
+// Optional `extra` is merged into the ai_credits_deducted PostHog event (e.g. prompt_preview from agent paths).
+func (c *Controller) DeductAICreditsToFloor(user *models.User, orgID uuid.UUID, cost int, action string, reference string, extra ...map[string]any) error {
 	if cost <= 0 {
 		return nil
 	}
@@ -575,12 +619,15 @@ func (c *Controller) DeductAICreditsToFloor(user *models.User, orgID uuid.UUID, 
 	})
 
 	if txErr == nil && deducted > 0 {
-		c.TrackUserEvent(user, constants.EVENT_AI_CREDITS_DEDUCTED, posthog.NewProperties().
-			Set("action", action).
+		var meta map[string]any
+		if len(extra) > 0 {
+			meta = extra[0]
+		}
+		props := c.deductionEventProps(action, reference, meta).
 			Set("cost", cost).
 			Set("deducted", deducted).
-			Set("remaining_balance", newBalance).
-			Set("reference", reference))
+			Set("remaining_balance", newBalance)
+		c.TrackUserEvent(user, constants.EVENT_AI_CREDITS_DEDUCTED, props)
 		if deducted < cost {
 			slog.Warn("partial credit deduction (clamped at floor)",
 				"user_id", user.ID, "requested", cost, "deducted", deducted,

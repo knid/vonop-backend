@@ -50,7 +50,15 @@ func (c *Controller) AgentDeps(user *models.User) *agent.RunDependencies {
 			if err != nil {
 				return err
 			}
-			return c.DeductAICreditsToFloor(user, orgID, credits, action, projectID)
+			// Pull the user's first message off the in-flight TokenTracker (if any)
+			// so the ai_credits_deducted event carries a prompt_preview. Other
+			// deduction call sites (dashboard_chat, navbar_autofill, …) don't
+			// have a prompt in scope, so this enrichment stays agent-only.
+			var meta map[string]any
+			if t := utils.TokenTrackerFromContext(ctx); t != nil && t.TraceInput != "" {
+				meta = map[string]any{"prompt_preview": truncatePromptPreview(t.TraceInput, 50)}
+			}
+			return c.DeductAICreditsToFloor(user, orgID, credits, action, projectID, meta)
 		},
 		TrackUserEvent: func(event constants.EventName, props map[string]any) {
 			p := posthog.NewProperties()
