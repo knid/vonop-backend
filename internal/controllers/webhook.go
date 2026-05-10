@@ -125,7 +125,7 @@ func (c *Controller) HandleWebhook(w http.ResponseWriter, req *http.Request) {
 // double-fire CRM events. Returns an error if the event should be retried.
 func (c *Controller) processWebhookEventTx(tx bun.Tx, event stripe.Event) ([]func(), error) {
 	var hooks []func()
-	addHook := func(user *models.User, name string, props map[string]any) {
+	addHook := func(user *models.User, name constants.EventName, props map[string]any) {
 		u := user
 		hooks = append(hooks, func() { c.EventService.SendEvent(u, name, props) })
 	}
@@ -217,7 +217,7 @@ func (c *Controller) processWebhookEventTx(tx bun.Tx, event stripe.Event) ([]fun
 		// Already idempotent via ClaimSubscriptionReward — runs outside the tx.
 		c.GrantReferralSubscriptionReward(owner)
 
-		c.TrackUserEvent(owner, "subscription_created", posthog.NewProperties().
+		c.TrackUserEvent(owner, constants.EVENT_SUBSCRIPTION_CREATED, posthog.NewProperties().
 			Set("status", org.SubscriptionStatus).
 			Set("stripe_status", string(sub.Status)).
 			Set("plan_name", subs.Name).
@@ -415,7 +415,7 @@ func (c *Controller) processWebhookEventTx(tx bun.Tx, event stripe.Event) ([]fun
 			}
 		}
 
-		c.TrackUserEvent(owner, "subscription_updated", posthog.NewProperties().
+		c.TrackUserEvent(owner, constants.EVENT_SUBSCRIPTION_UPDATED, posthog.NewProperties().
 			Set("status", org.SubscriptionStatus).
 			Set("stripe_status", string(sub.Status)).
 			Set("plan_name", subs.Name).
@@ -425,9 +425,9 @@ func (c *Controller) processWebhookEventTx(tx bun.Tx, event stripe.Event) ([]fun
 		// distinguish a real plan transition from cancel-at-period-end toggles
 		// or payment-method updates (all of which also raise subscription_updated).
 		if planChanged && org.SubscriptionID != uuid.Nil {
-			changeEventName := "subscription_upgraded"
+			changeEventName := constants.EVENT_SUBSCRIPTION_UPGRADED
 			if subs.MonthlyPrice < oldMonthlyPrice {
-				changeEventName = "subscription_downgraded"
+				changeEventName = constants.EVENT_SUBSCRIPTION_DOWNGRADED
 			}
 			c.TrackUserEvent(owner, changeEventName, posthog.NewProperties().
 				Set("old_plan_id", oldSubID.String()).
@@ -545,7 +545,7 @@ func (c *Controller) processWebhookEventTx(tx bun.Tx, event stripe.Event) ([]fun
 			}
 		}
 
-		c.TrackUserEvent(owner, "payment_succeeded", posthog.NewProperties().
+		c.TrackUserEvent(owner, constants.EVENT_PAYMENT_SUCCEEDED, posthog.NewProperties().
 			Set("amount_paid", invoice.AmountPaid).
 			Set("currency", string(invoice.Currency)).
 			Set("invoice_id", invoice.ID).
@@ -617,7 +617,7 @@ func (c *Controller) processWebhookEventTx(tx bun.Tx, event stripe.Event) ([]fun
 			"billing_url":         c.BillingURLForOrg(org),
 		})
 
-		c.TrackUserEvent(owner, "payment_failed", posthog.NewProperties().
+		c.TrackUserEvent(owner, constants.EVENT_PAYMENT_FAILED, posthog.NewProperties().
 			Set("invoice_url", invoice.HostedInvoiceURL).
 			Set("amount_due", invoice.AmountDue).
 			Set("attempt_count", invoice.AttemptCount))
@@ -648,7 +648,7 @@ func (c *Controller) processWebhookEventTx(tx bun.Tx, event stripe.Event) ([]fun
 			"billing_url":         c.BillingURLForOrg(org),
 		})
 
-		c.TrackUserEvent(owner, "payment_action_required", posthog.NewProperties().
+		c.TrackUserEvent(owner, constants.EVENT_PAYMENT_USER_ACTION_REQUIRED, posthog.NewProperties().
 			Set("invoice_url", invoice.HostedInvoiceURL))
 		c.IdentifyUser(owner)
 
@@ -679,7 +679,7 @@ func (c *Controller) processWebhookEventTx(tx bun.Tx, event stripe.Event) ([]fun
 			"invoice_url":  invoice.HostedInvoiceURL,
 		})
 
-		c.TrackUserEvent(owner, "invoice_upcoming", posthog.NewProperties().
+		c.TrackUserEvent(owner, constants.EVENT_INVOICE_UPCOMING, posthog.NewProperties().
 			Set("amount_due", invoice.AmountDue).
 			Set("currency", string(invoice.Currency)))
 
@@ -743,13 +743,13 @@ func (c *Controller) processWebhookEventTx(tx bun.Tx, event stripe.Event) ([]fun
 		}
 		addHook(owner, cancelEvent, eventProps)
 		// Keep firing the legacy event for backward-compat with existing consumers.
-		addHook(owner, constants.EVENT_SUBSCRIPTION_CANCELLED, eventProps)
+		addHook(owner, constants.EVENT_SUBSCRIPTION_CANCELED, eventProps)
 
 		if _, err := c.DB.UpdateOrganization(org); err != nil {
 			return nil, fmt.Errorf("failed to update organization %s after subscription deleted: %w", org.ID, err)
 		}
 
-		c.TrackUserEvent(owner, "subscription_canceled", posthog.NewProperties().
+		c.TrackUserEvent(owner, constants.EVENT_SUBSCRIPTION_CANCELED, posthog.NewProperties().
 			Set("subscription_id", sub.ID).
 			Set("cancellation_reason", cancelReason).
 			Set("category", cancelEvent))
@@ -774,7 +774,7 @@ func (c *Controller) processWebhookEventTx(tx bun.Tx, event stripe.Event) ([]fun
 
 		addHook(owner, constants.EVENT_PAYMENT_METHOD_ATTACHED, map[string]any{})
 
-		c.TrackUserEvent(owner, "payment_method_attached", posthog.NewProperties().
+		c.TrackUserEvent(owner, constants.EVENT_PAYMENT_METHOD_ATTACHED, posthog.NewProperties().
 			Set("payment_method_type", string(pm.Type)))
 
 	case "payment_method.detached":
@@ -796,7 +796,7 @@ func (c *Controller) processWebhookEventTx(tx bun.Tx, event stripe.Event) ([]fun
 
 		addHook(owner, constants.EVENT_PAYMENT_METHOD_DETACHED, map[string]any{})
 
-		c.TrackUserEvent(owner, "payment_method_detached", posthog.NewProperties().
+		c.TrackUserEvent(owner, constants.EVENT_PAYMENT_METHOD_DETACHED, posthog.NewProperties().
 			Set("payment_method_type", string(pm.Type)))
 
 	case "checkout.session.completed":
@@ -853,7 +853,7 @@ func (c *Controller) processWebhookEventTx(tx bun.Tx, event stripe.Event) ([]fun
 			"currency":     string(cs.Currency),
 		})
 
-		c.TrackUserEvent(user, "credits_purchased", posthog.NewProperties().
+		c.TrackUserEvent(user, constants.EVENT_CREDITS_PURCHASED, posthog.NewProperties().
 			Set("pack_size", packSize).
 			Set("session_id", cs.ID).
 			Set("amount_total", cs.AmountTotal))
@@ -987,7 +987,7 @@ func (c *Controller) processWebhookEventTx(tx bun.Tx, event stripe.Event) ([]fun
 			"amount":          charge.Amount,
 		})
 
-		c.TrackUserEvent(owner, "credits_refunded", posthog.NewProperties().
+		c.TrackUserEvent(owner, constants.EVENT_CREDITS_REFUNDED, posthog.NewProperties().
 			Set("charge_id", charge.ID).
 			Set("refund_id", latestRefund.ID).
 			Set("delta", thisDelta).

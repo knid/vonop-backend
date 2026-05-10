@@ -111,21 +111,17 @@ func (v *HttpViews) ChatApp(w http.ResponseWriter, r *http.Request) {
 	isInitialGeneration := project.Status == "draft"
 
 	jobType := "app_chat"
-	eventName := "app_chat_sent"
+	chatEvent := constants.EVENT_APP_CHAT_SENT
 	if isInitialGeneration {
 		jobType = "generate_app"
-		eventName = "app_generation_started"
+		chatEvent = constants.EVENT_APP_GENERATION_STARTED
 	}
 
-	v.Controller.TrackUserEvent(user, eventName, posthog.NewProperties().
+	v.Controller.TrackUserEvent(user, chatEvent, posthog.NewProperties().
 		Set("app_id", project.ID.String()).
 		Set("project_type", project.ProjectType).
 		Set("has_images", len(req.Images) > 0))
 
-	chatEvent := constants.EVENT_APP_CHAT_SENT
-	if isInitialGeneration {
-		chatEvent = constants.EVENT_APP_GENERATION_STARTED
-	}
 	go v.Controller.EventService.SendEvent(user, chatEvent, map[string]any{
 		"app_id":       project.ID.String(),
 		"project_type": project.ProjectType,

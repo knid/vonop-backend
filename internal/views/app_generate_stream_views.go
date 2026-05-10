@@ -47,7 +47,7 @@ func (v *HttpViews) GenerateAppStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	v.Controller.TrackUserEvent(user, "app_generation_started", posthog.NewProperties().
+	v.Controller.TrackUserEvent(user, constants.EVENT_APP_GENERATION_STARTED, posthog.NewProperties().
 		Set("project_type", req.ProjectType).
 		Set("app_id", project.ID.String()))
 

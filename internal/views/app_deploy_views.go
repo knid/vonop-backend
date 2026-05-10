@@ -65,7 +65,7 @@ func (v *HttpViews) DeployAppWeb(w http.ResponseWriter, r *http.Request) {
 		alreadyDeployed, _ := v.Controller.DB.IsAppAlreadyDeployed(appID)
 		if !alreadyDeployed && count >= limits.MaxDeployedWebApps {
 			go v.Controller.EventService.SendEvent(user, constants.EVENT_SUBSCRIPTION_QUOTA_REACHED, map[string]any{"action": "deploy_web", "limit": limits.MaxDeployedWebApps})
-			go v.Controller.TrackUserEvent(user, "quota_reached", posthog.NewProperties().Set("action", "deploy_web").Set("limit", limits.MaxDeployedWebApps))
+			go v.Controller.TrackUserEvent(user, constants.EVENT_QUOTA_REACHED, posthog.NewProperties().Set("action", "deploy_web").Set("limit", limits.MaxDeployedWebApps))
 
 			// Include deployed app names so the user knows which to undeploy
 			var deployedNames []string
@@ -137,7 +137,7 @@ func (v *HttpViews) DeployAppWeb(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	go v.Controller.TrackUserEvent(user, "app_deploy_enqueued", posthog.NewProperties().
+	go v.Controller.TrackUserEvent(user, constants.EVENT_APP_DEPLOY_ENQUEUED, posthog.NewProperties().
 		Set("app_id", project.ID.String()).
 		Set("platform", "web").
 		Set("queue", queue))
@@ -172,7 +172,7 @@ func (v *HttpViews) UndeployAppWeb(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	v.Controller.TrackUserEvent(user, "app_undeployed_web", posthog.NewProperties().
+	v.Controller.TrackUserEvent(user, constants.EVENT_WEB_UNDEPLOYED, posthog.NewProperties().
 		Set("app_id", project.ID.String()))
 
 	go v.Controller.EventService.SendEvent(user, constants.EVENT_WEB_UNDEPLOYED, map[string]any{
@@ -242,7 +242,7 @@ func (v *HttpViews) DeployAppMobile(w http.ResponseWriter, r *http.Request) {
 		alreadyDeployed, _ := v.Controller.DB.IsAppAlreadyDeployedMobile(appID)
 		if !alreadyDeployed && count >= limits.MaxDeployedMobileApps {
 			go v.Controller.EventService.SendEvent(user, constants.EVENT_SUBSCRIPTION_QUOTA_REACHED, map[string]any{"action": "deploy_mobile", "limit": limits.MaxDeployedMobileApps})
-			go v.Controller.TrackUserEvent(user, "quota_reached", posthog.NewProperties().Set("action", "deploy_mobile").Set("limit", limits.MaxDeployedMobileApps))
+			go v.Controller.TrackUserEvent(user, constants.EVENT_QUOTA_REACHED, posthog.NewProperties().Set("action", "deploy_mobile").Set("limit", limits.MaxDeployedMobileApps))
 
 			var deployedNames []string
 			if apps, err := v.Controller.DB.GetDeployedMobileAppsByOrgID(orgIDForDeploy.String()); err == nil {
@@ -276,7 +276,7 @@ func (v *HttpViews) DeployAppMobile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	v.Controller.TrackUserEvent(user, "app_deployed_expo_ota", posthog.NewProperties().
+	v.Controller.TrackUserEvent(user, constants.EVENT_APP_DEPLOYED_EXPO_OTA, posthog.NewProperties().
 		Set("app_id", project.ID.String()).
 		Set("build_id", build.ID.String()).
 		Set("task_id", task.ID.String()))
@@ -355,7 +355,7 @@ func (v *HttpViews) UndeployAppMobile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	v.Controller.TrackUserEvent(user, "app_undeployed_mobile", posthog.NewProperties().
+	v.Controller.TrackUserEvent(user, constants.EVENT_MOBILE_UNDEPLOYED, posthog.NewProperties().
 		Set("app_id", project.ID.String()))
 
 	go v.Controller.EventService.SendEvent(user, constants.EVENT_MOBILE_UNDEPLOYED, map[string]any{
@@ -464,7 +464,7 @@ func (v *HttpViews) BuildAppExpo(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for _, platform := range req.Platforms {
-		v.Controller.TrackUserEvent(user, "app_built_expo_"+platform, posthog.NewProperties().
+		v.Controller.TrackUserEvent(user, constants.EVENT_PREFIX_APP_BUILT_EXPO+constants.EventName(platform), posthog.NewProperties().
 			Set("app_id", project.ID.String()).
 			Set("project_type", project.ProjectType))
 	}
@@ -805,7 +805,7 @@ func (v *HttpViews) checkBandwidthQuota(w http.ResponseWriter, r *http.Request, 
 		"limit_gb":   limits.MonthlyBandwidthGB,
 		"bytes_used": usage.BytesUsed,
 	})
-	go v.Controller.TrackUserEvent(user, "quota_reached", posthog.NewProperties().
+	go v.Controller.TrackUserEvent(user, constants.EVENT_QUOTA_REACHED, posthog.NewProperties().
 		Set("action", "bandwidth").
 		Set("limit_gb", limits.MonthlyBandwidthGB).
 		Set("bytes_used", usage.BytesUsed))

@@ -168,7 +168,7 @@ func (v *HttpViews) StripeCheckout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	v.Controller.TrackUserEvent(user, "checkout_started", posthog.NewProperties().
+	v.Controller.TrackUserEvent(user, constants.EVENT_CHECKOUT_STARTED, posthog.NewProperties().
 		Set("price_id", priceID).
 		Set("trial_eligible", !org.TrialUsed))
 
@@ -318,7 +318,7 @@ func (v *HttpViews) PurchaseCredits(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	v.Controller.TrackUserEvent(user, "credit_purchase_started", posthog.NewProperties().
+	v.Controller.TrackUserEvent(user, constants.EVENT_CREDIT_PURCHASE_STARTED, posthog.NewProperties().
 		Set("package_id", req.PackageID).
 		Set("pack_size", pack.Credits).
 		Set("price_id", priceID))

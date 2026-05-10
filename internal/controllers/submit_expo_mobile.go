@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/posthog/posthog-go"
 
+	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/services/codemagic"
 	"github.com/knid/wemob/internal/services/storeauth"
@@ -346,7 +347,7 @@ func (c *Controller) recordReleaseFromSubmit(ctx context.Context, project *model
 		if c.PostHog != nil {
 			c.PostHog.Enqueue(posthog.Capture{
 				DistinctId: project.ID.String(),
-				Event:      "release_create_failed",
+				Event:      string(constants.EVENT_RELEASE_CREATE_FAILED),
 				Properties: posthog.NewProperties().
 					Set("app_project_id", project.ID.String()).
 					Set("organization_id", project.OrganizationID.String()).

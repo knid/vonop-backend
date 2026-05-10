@@ -98,7 +98,7 @@ func (v *HttpViews) SubmitAppExpo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	v.Controller.TrackUserEvent(user, "app_submitted_"+result.Platform, posthog.NewProperties().
+	v.Controller.TrackUserEvent(user, constants.EVENT_PREFIX_APP_SUBMITTED+constants.EventName(result.Platform), posthog.NewProperties().
 		Set("app_id", project.ID.String()).
 		Set("codemagic_build_id", result.CodemagicBuildID))
 

@@ -102,7 +102,7 @@ func (v *HttpViews) DeleteUser(w http.ResponseWriter, r *http.Request) {
 
 	go v.Controller.EventService.SendEvent(user, constants.EVENT_USER_DELETED, map[string]any{})
 
-	v.Controller.TrackUserEvent(user, "user_deleted", posthog.NewProperties().
+	v.Controller.TrackUserEvent(user, constants.EVENT_USER_DELETED, posthog.NewProperties().
 		Set("subscription_status", v.Controller.GetUserBilling(user).SubscriptionStatus))
 
 	utils.JSONResponse(w, deletedUserRes, http.StatusOK)
@@ -129,7 +129,7 @@ func (v *HttpViews) UserLogin(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		if u, lookupErr := v.Controller.DB.GetUserByEmail(userLoginReq.Email); lookupErr == nil {
 			v.Controller.EnsureIdentified(u)
-			v.Controller.TrackUserEvent(u, "user_logged_in", posthog.NewProperties().
+			v.Controller.TrackUserEvent(u, constants.EVENT_NEW_LOGIN, posthog.NewProperties().
 				Set("provider", u.Provider).
 				Set("subscription_status", v.Controller.GetUserBilling(u).SubscriptionStatus))
 		}
@@ -166,7 +166,7 @@ func (v *HttpViews) UserRegister(w http.ResponseWriter, r *http.Request) {
 		}
 		v.Controller.PersistMetaAttribution(u, attr)
 		v.Controller.EnsureIdentified(u)
-		v.Controller.TrackUserEvent(u, "user_registered", posthog.NewProperties().
+		v.Controller.TrackUserEvent(u, constants.EVENT_NEW_USER, posthog.NewProperties().
 			Set("provider", u.Provider).
 			Set("email", u.Email))
 		v.Controller.FireMetaCompleteRegistration(u, attr)

@@ -52,14 +52,14 @@ func (c *Controller) AgentDeps(user *models.User) *agent.RunDependencies {
 			}
 			return c.DeductAICreditsToFloor(user, orgID, credits, action, projectID)
 		},
-		TrackUserEvent: func(event string, props map[string]any) {
+		TrackUserEvent: func(event constants.EventName, props map[string]any) {
 			p := posthog.NewProperties()
 			for k, v := range props {
 				p.Set(k, v)
 			}
 			c.TrackUserEvent(user, event, p)
 		},
-		SendCRMEvent: func(event string, attrs map[string]any) {
+		SendResendEvent: func(event constants.EventName, attrs map[string]any) {
 			go c.EventService.SendEvent(user, event, attrs)
 		},
 		GenerateImage: c.generateImageForAgent,

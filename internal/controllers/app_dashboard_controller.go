@@ -261,7 +261,7 @@ func (c *Controller) CreateDashboard(ctx context.Context, project *models.AppPro
 	// Fetch created panels for response
 	createdPanels, _ := c.DB.GetAppDashboardPanelsByDashboardID(dashboard.ID.String())
 
-	c.TrackUserEvent(user, "dashboard_created", posthog.NewProperties().
+	c.TrackUserEvent(user, constants.EVENT_DASHBOARD_CREATED, posthog.NewProperties().
 		Set("app_id", project.ID.String()).
 		Set("provider", dbProvider).
 		Set("panel_count", len(createdPanels)))

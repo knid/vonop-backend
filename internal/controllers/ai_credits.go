@@ -515,7 +515,7 @@ func (c *Controller) DeductAICreditsUnchecked(user *models.User, orgID uuid.UUID
 	})
 
 	if txErr == nil {
-		c.TrackUserEvent(user, "ai_credits_deducted", posthog.NewProperties().
+		c.TrackUserEvent(user, constants.EVENT_AI_CREDITS_DEDUCTED, posthog.NewProperties().
 			Set("action", action).
 			Set("cost", cost).
 			Set("remaining_balance", newBalance).
@@ -575,7 +575,7 @@ func (c *Controller) DeductAICreditsToFloor(user *models.User, orgID uuid.UUID, 
 	})
 
 	if txErr == nil && deducted > 0 {
-		c.TrackUserEvent(user, "ai_credits_deducted", posthog.NewProperties().
+		c.TrackUserEvent(user, constants.EVENT_AI_CREDITS_DEDUCTED, posthog.NewProperties().
 			Set("action", action).
 			Set("cost", cost).
 			Set("deducted", deducted).
@@ -636,7 +636,7 @@ func (c *Controller) emitCreditThresholdEvents(user *models.User, orgID uuid.UUI
 	// Thresholds in descending order so we report the lowest newly-crossed one.
 	type threshold struct {
 		percent int
-		event   string
+		event   constants.EventName
 		level   string
 	}
 	thresholds := []threshold{
@@ -1082,7 +1082,7 @@ func (c *Controller) RecordTokenUsage(user *models.User, action, model, provider
 			}
 			capture := posthog.Capture{
 				DistinctId: user.ID.String(),
-				Event:      "$ai_generation",
+				Event:      string(constants.EVENT_AI_GENERATION),
 				Properties: props,
 			}
 			if !entry.RecordedAt.IsZero() {
@@ -1148,7 +1148,7 @@ func (c *Controller) RecordTokenUsage(user *models.User, action, model, provider
 		}
 		c.PostHog.Enqueue(posthog.Capture{
 			DistinctId: user.ID.String(),
-			Event:      "$ai_trace",
+			Event:      string(constants.EVENT_AI_TRACE),
 			Properties: traceProps,
 		})
 	}
@@ -1351,7 +1351,7 @@ func (c *Controller) RecordLLMError(user *models.User, tracker *utils.TokenTrack
 	}
 	c.PostHog.Enqueue(posthog.Capture{
 		DistinctId: user.ID.String(),
-		Event:      "$ai_generation",
+		Event:      string(constants.EVENT_AI_GENERATION),
 		Properties: props,
 	})
 }

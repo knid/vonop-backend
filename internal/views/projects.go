@@ -77,7 +77,7 @@ func (v *HttpViews) DeleteProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	go v.Controller.TrackUserEvent(user, "project_deleted", posthog.NewProperties().
+	go v.Controller.TrackUserEvent(user, constants.EVENT_PROJECT_DELETED, posthog.NewProperties().
 		Set("project_id", projectID))
 
 	utils.JSONResponse(w, deletedProjectRes, http.StatusOK)

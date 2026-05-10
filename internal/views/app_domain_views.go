@@ -110,7 +110,7 @@ func (v *HttpViews) AddAppDomain(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	v.Controller.TrackUserEvent(user, "domain_added", posthog.NewProperties().
+	v.Controller.TrackUserEvent(user, constants.EVENT_DOMAIN_ADDED, posthog.NewProperties().
 		Set("app_id", project.ID.String()).
 		Set("domain", req.Domain))
 
@@ -145,7 +145,7 @@ func (v *HttpViews) VerifyAppDomain(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// WEM-271: Track domain verification events
-	v.Controller.TrackUserEvent(user, "domain_verified", posthog.NewProperties().
+	v.Controller.TrackUserEvent(user, constants.EVENT_DOMAIN_VERIFIED, posthog.NewProperties().
 		Set("app_id", project.ID.String()).
 		Set("domain", result.Domain).
 		Set("status", result.Status))
@@ -180,7 +180,7 @@ func (v *HttpViews) RemoveAppDomain(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	v.Controller.TrackUserEvent(user, "domain_removed", posthog.NewProperties().
+	v.Controller.TrackUserEvent(user, constants.EVENT_DOMAIN_REMOVED, posthog.NewProperties().
 		Set("app_id", project.ID.String()))
 
 	go v.Controller.EventService.SendEvent(user, constants.EVENT_DOMAIN_REMOVED, map[string]any{

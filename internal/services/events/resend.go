@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/database"
 	"github.com/knid/wemob/internal/models"
 )
@@ -68,7 +69,7 @@ type resendSegmentID struct {
 	ID string `json:"id"`
 }
 
-func (s *ResendService) SendEvent(user *models.User, event string, attributes map[string]any) error {
+func (s *ResendService) SendEvent(user *models.User, event constants.EventName, attributes map[string]any) error {
 	if s.apiKey == "" {
 		return errors.New("resend events: not initialized")
 	}
@@ -93,7 +94,7 @@ func (s *ResendService) SendEvent(user *models.User, event string, attributes ma
 	}
 
 	body, err := json.Marshal(resendEventPayload{
-		Event:   event,
+		Event:   string(event),
 		Email:   user.Email,
 		Payload: payload,
 	})
@@ -102,7 +103,7 @@ func (s *ResendService) SendEvent(user *models.User, event string, attributes ma
 		return nil
 	}
 
-	s.postWithRetry(s.baseURL+"/events/send", body, "resend events", event, user.ID.String())
+	s.postWithRetry(s.baseURL+"/events/send", body, "resend events", string(event), user.ID.String())
 	return nil
 }
 

@@ -1,13 +1,14 @@
 package controllers
 
 import (
+	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/models"
 	"github.com/posthog/posthog-go"
 )
 
 // TrackUserEvent sends a named event to PostHog using an already-loaded user.
 // Avoids the extra DB lookup that TrackEvent performs.
-func (c *Controller) TrackUserEvent(user *models.User, event string, props posthog.Properties) {
+func (c *Controller) TrackUserEvent(user *models.User, event constants.EventName, props posthog.Properties) {
 	if c.PostHog == nil || user == nil {
 		return
 	}
@@ -18,7 +19,7 @@ func (c *Controller) TrackUserEvent(user *models.User, event string, props posth
 
 	c.PostHog.Enqueue(posthog.Capture{
 		DistinctId: user.ID.String(),
-		Event:      event,
+		Event:      string(event),
 		Properties: props,
 	})
 }
@@ -28,7 +29,7 @@ func (c *Controller) TrackUserEvent(user *models.User, event string, props posth
 // have a user attached — Asynq job lifecycle, cron heartbeats, webhook
 // ingestion. distinctID falls back to "system" when empty so events are
 // still queryable by task_type / queue.
-func (c *Controller) TrackSystemEvent(distinctID, event string, props posthog.Properties) {
+func (c *Controller) TrackSystemEvent(distinctID string, event constants.EventName, props posthog.Properties) {
 	if c.PostHog == nil {
 		return
 	}
@@ -37,7 +38,7 @@ func (c *Controller) TrackSystemEvent(distinctID, event string, props posthog.Pr
 	}
 	c.PostHog.Enqueue(posthog.Capture{
 		DistinctId: distinctID,
-		Event:      event,
+		Event:      string(event),
 		Properties: props,
 	})
 }

@@ -45,7 +45,7 @@ func (v *HttpViews) GoogleMobileLogin(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		v.Controller.EnsureIdentified(u)
-		v.Controller.TrackUserEvent(u, "user_oauth_logged_in", posthog.NewProperties().
+		v.Controller.TrackUserEvent(u, constants.EVENT_USER_OAUTH_LOGGED_IN, posthog.NewProperties().
 			Set("provider", "google_mobile").
 			Set("subscription_status", v.Controller.GetUserBilling(u).SubscriptionStatus))
 	}()

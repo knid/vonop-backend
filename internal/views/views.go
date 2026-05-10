@@ -77,7 +77,7 @@ func (v *HttpViews) checkMinimumCredits(w http.ResponseWriter, user *models.User
 			"balance":     balance.Balance,
 			"billing_url": billingURL,
 		})
-		go v.Controller.TrackUserEvent(user, "ai_credits_depleted", posthog.NewProperties().Set("balance", balance.Balance))
+		go v.Controller.TrackUserEvent(user, constants.EVENT_AI_CREDITS_DEPLETED, posthog.NewProperties().Set("balance", balance.Balance))
 
 		planName := ""
 		monthlyLimit := 0
