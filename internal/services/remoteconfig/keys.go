@@ -49,24 +49,14 @@ func PlanBool(planName, field string, fallback bool) Key {
 
 // --- Category 2: Platform Limits ---
 
-var MaxConcurrentBuilds = Key{Flag: "rc-max-concurrent-builds", Fallback: 1}
-var MaxDomainsPerProject = Key{Flag: "rc-max-domains-per-project", Fallback: 10}
 var MaxConcurrentJobsPerUser = Key{Flag: "rc-max-concurrent-jobs-per-user", Fallback: 3}
 var MaxConcurrentJobsPerOrg = Key{Flag: "rc-max-concurrent-jobs-per-org", Fallback: 6}
-var MaxMobileContentSizeKB = Key{Flag: "rc-max-mobile-content-size-kb", Fallback: 50}
 var MaxQueryRows = Key{Flag: "rc-max-query-rows", Fallback: 1000}
 
 // --- Category 3: AI Generation Tuning ---
 
-var AIMaxChatMessages = Key{Flag: "rc-ai-max-chat-messages", Fallback: 200}
 var AIChatKeepRecent = Key{Flag: "rc-ai-chat-keep-recent", Fallback: 10}
-var AIChatSummarizeThreshold = Key{Flag: "rc-ai-chat-summarize-threshold", Fallback: 15}
 var AIMaxStructureFiles = Key{Flag: "rc-ai-max-structure-files", Fallback: 25}
-var AIBuilderMaxAutoInline = Key{Flag: "rc-ai-builder-max-auto-inline", Fallback: 15}
-var AIBuilderMaxExpandedFiles = Key{Flag: "rc-ai-builder-max-expanded-files", Fallback: 25}
-var AIBuilderMaxFileChars = Key{Flag: "rc-ai-builder-max-file-chars", Fallback: 150000}
-var AIValidationMaxFiles = Key{Flag: "rc-ai-validation-max-files", Fallback: 15}
-var AIValidationMaxChars = Key{Flag: "rc-ai-validation-max-chars", Fallback: 60000}
 var AIBuilderToolMaxRounds = Key{Flag: "rc-ai-builder-tool-max-rounds", Fallback: 30}
 var AIGenerationMaxRounds = Key{Flag: "rc-ai-generation-max-rounds", Fallback: 8}
 
