@@ -70,6 +70,7 @@ type Controller struct {
 	PendingClarifications  sync.Map       // map[string]chan ClarificationResult for jobs awaiting user input
 	JobEventBuses          sync.Map       // map[string]*EventBus for live SSE fan-out to multiple clients
 	identifiedUsers        sync.Map       // tracks users already identified to PostHog this process
+	personalOrgIDs         sync.Map       // user.ID.String() → org.ID.String() lookup cache for PostHog org_id attribution
 	EdgeIPs                []string       // known Fly edge IPs for DNS verification
 	CaddyAdmin             *caddyService.Admin
 }
