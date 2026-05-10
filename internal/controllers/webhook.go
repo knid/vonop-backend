@@ -110,7 +110,7 @@ func (c *Controller) HandleWebhook(w http.ResponseWriter, req *http.Request) {
 
 	// Async event-sender goroutines deliberately fire only after the dedup tx
 	// has committed, so a Stripe retry that arrives mid-tx doesn't double-fire
-	// CRM events.
+	// Resend events.
 	for _, hook := range postCommitHooks {
 		go hook()
 	}
@@ -122,7 +122,7 @@ func (c *Controller) HandleWebhook(w http.ResponseWriter, req *http.Request) {
 // owned by the caller (HandleWebhook). Returns the post-commit hooks to fire
 // after the tx commits — these are the goroutines that publish to the event
 // bus, deliberately deferred so a Stripe retry that arrives mid-tx can't
-// double-fire CRM events. Returns an error if the event should be retried.
+// double-fire Resend events. Returns an error if the event should be retried.
 func (c *Controller) processWebhookEventTx(tx bun.Tx, event stripe.Event) ([]func(), error) {
 	var hooks []func()
 	addHook := func(user *models.User, name constants.EventName, props map[string]any) {
@@ -171,7 +171,7 @@ func (c *Controller) processWebhookEventTx(tx bun.Tx, event stripe.Event) ([]fun
 			org.TrialUsed = true
 		}
 
-		// Load org owner for user-keyed notifications, CRM events, and posthog identity.
+		// Load org owner for user-keyed notifications, Resend events, and posthog identity.
 		owner, err := c.DB.GetUserById(org.OwnerID.String())
 		if err != nil {
 			return nil, fmt.Errorf("owner not found for org %s: %w", org.ID, err)
