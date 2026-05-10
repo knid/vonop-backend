@@ -13,7 +13,7 @@ func TestBuildSystemMessages_MobileAppNativeUsesExpoPrompt(t *testing.T) {
 		ProjectType: models.ProjectTypeMobileAppNative,
 		Settings:    map[string]any{},
 	}
-	msgs := BuildSystemMessages(project, nil, nil, nil)
+	msgs := BuildSystemMessages(project, nil, nil)
 	joined := concatMessages(msgs)
 
 	if !strings.Contains(joined, "Expo Router") {
@@ -32,7 +32,7 @@ func TestBuildSystemMessages_AppTypeUsesWebPrompt(t *testing.T) {
 		ProjectType: models.ProjectTypeApp,
 		Settings:    map[string]any{},
 	}
-	msgs := BuildSystemMessages(project, nil, nil, nil)
+	msgs := BuildSystemMessages(project, nil, nil)
 	joined := concatMessages(msgs)
 
 	if strings.Contains(joined, "Expo Router") {
@@ -56,7 +56,7 @@ func TestBuildSystemMessages_MobileNativeIncludesConfigAddendum(t *testing.T) {
 		Permissions:         []string{"camera", "location"},
 	}
 	deps := newDepsWithMobileConfig(t, project, cfg)
-	msgs := BuildSystemMessages(project, nil, deps, nil)
+	msgs := BuildSystemMessages(project, deps, nil)
 	joined := concatMessages(msgs)
 
 	if !strings.Contains(joined, "camera.takePhoto") {
@@ -82,7 +82,7 @@ func TestBuildSystemMessages_MobileNativeNoConfigSkipsAddendum(t *testing.T) {
 		Settings:    map[string]any{},
 	}
 	deps := newDepsWithMobileConfig(t, project, nil) // explicitly no config
-	msgs := BuildSystemMessages(project, nil, deps, nil)
+	msgs := BuildSystemMessages(project, deps, nil)
 	joined := concatMessages(msgs)
 
 	if strings.Contains(joined, "Current MobileAppConfig") {
@@ -117,7 +117,7 @@ func TestBuildSystemMessages_NativeWithDatabaseUsesNativeAddendum(t *testing.T) 
 		ProjectType: models.ProjectTypeMobileAppNative,
 		Settings:    map[string]any{"has_database": true},
 	}
-	msgs := BuildSystemMessages(project, nil, nil, nil)
+	msgs := BuildSystemMessages(project, nil, nil)
 	joined := concatMessages(msgs)
 
 	if !strings.Contains(joined, "DATABASE ADDENDUM (native + backend)") {
@@ -133,7 +133,7 @@ func TestBuildSystemMessages_WebWithDatabaseUsesGenericAddendum(t *testing.T) {
 		ProjectType: models.ProjectTypeApp,
 		Settings:    map[string]any{"has_database": true},
 	}
-	msgs := BuildSystemMessages(project, nil, nil, nil)
+	msgs := BuildSystemMessages(project, nil, nil)
 	joined := concatMessages(msgs)
 
 	if strings.Contains(joined, "DATABASE ADDENDUM (native + backend)") {
@@ -146,7 +146,7 @@ func TestBuildSystemMessages_LocalDatabaseAddendumOnFlag(t *testing.T) {
 		ProjectType: models.ProjectTypeMobileAppNative,
 		Settings:    map[string]any{"has_local_database": true},
 	}
-	msgs := BuildSystemMessages(project, nil, nil, nil)
+	msgs := BuildSystemMessages(project, nil, nil)
 	joined := concatMessages(msgs)
 
 	if !strings.Contains(joined, "LOCAL DATABASE ADDENDUM") {
@@ -159,7 +159,7 @@ func TestBuildSystemMessages_LocalDatabaseAddendumNotInjectedWithoutFlag(t *test
 		ProjectType: models.ProjectTypeMobileAppNative,
 		Settings:    map[string]any{},
 	}
-	msgs := BuildSystemMessages(project, nil, nil, nil)
+	msgs := BuildSystemMessages(project, nil, nil)
 	joined := concatMessages(msgs)
 
 	if strings.Contains(joined, "LOCAL DATABASE ADDENDUM") {
@@ -172,7 +172,7 @@ func TestBuildSystemMessages_BothAddendaForSyncedNative(t *testing.T) {
 		ProjectType: models.ProjectTypeMobileAppNative,
 		Settings:    map[string]any{"has_database": true, "has_local_database": true},
 	}
-	msgs := BuildSystemMessages(project, nil, nil, nil)
+	msgs := BuildSystemMessages(project, nil, nil)
 	joined := concatMessages(msgs)
 
 	if !strings.Contains(joined, "DATABASE ADDENDUM (native + backend)") {
@@ -180,6 +180,51 @@ func TestBuildSystemMessages_BothAddendaForSyncedNative(t *testing.T) {
 	}
 	if !strings.Contains(joined, "LOCAL DATABASE ADDENDUM") {
 		t.Error("expected LocalDatabaseAddendum")
+	}
+}
+
+// TestBuildSystemMessages_FileTreeNotInSystemBlocks locks in the prompt-cache
+// fix: the rendered FILE TREE block must NOT appear in system messages. If it
+// did, every write_file would mutate the system prefix and force a fresh
+// prompt-cache write across the whole downstream conversation. The tree now
+// rides with the user turn via BuildFileTreeUserPrefix instead.
+//
+// We assert by checking that the unique sentinel content of buildFileTreeBlock
+// — the "=========" underline that follows the FILE TREE header — is absent.
+// The string "FILE TREE" alone now appears in prompt copy, so it isn't a
+// useful marker.
+func TestBuildSystemMessages_FileTreeNotInSystemBlocks(t *testing.T) {
+	const fileTreeSentinel = "FILE TREE\n========="
+	for _, projectType := range []string{models.ProjectTypeApp, models.ProjectTypeMobileAppNative, "ecommerce"} {
+		project := &models.AppProject{
+			ProjectType: projectType,
+			Settings:    map[string]any{},
+		}
+
+		msgs := BuildSystemMessages(project, nil, nil)
+		joined := concatMessages(msgs)
+
+		if strings.Contains(joined, fileTreeSentinel) {
+			t.Errorf("project_type=%s: rendered FILE TREE block must not appear in system messages (cache thrash regression)", projectType)
+		}
+	}
+}
+
+// TestBuildFileTreeUserPrefix_RendersTree verifies the file tree helper
+// returns a non-empty block when files exist, so the caller (run.go) can
+// prepend it to the user turn.
+func TestBuildFileTreeUserPrefix_RendersTree(t *testing.T) {
+	fileMap := NewSafeFileMap(map[string]string{
+		"app/layout.tsx": "layout",
+		"app/page.tsx":   "page",
+	})
+
+	prefix := BuildFileTreeUserPrefix(fileMap)
+	if !strings.Contains(prefix, "FILE TREE") {
+		t.Error("expected FILE TREE header in user-prefix output")
+	}
+	if !strings.Contains(prefix, "app/layout.tsx") || !strings.Contains(prefix, "app/page.tsx") {
+		t.Error("expected file paths in user-prefix output")
 	}
 }
 

@@ -19,8 +19,14 @@ type mobileConfigGetter interface {
 //
 //  1. Base prompt          (BasePromptWeb or BasePromptMobileNative — by project type)
 //  2. Variant addendum     (stable across this project's runs, if applicable)
-//  3. File tree            (stable within this run, reused across turns)
-//  4. Project assets       (per-turn — asset uploads/deletes invalidate this block only)
+//  3. Project assets       (per-turn — asset uploads/deletes invalidate this block only)
+//
+// The file tree is intentionally NOT a system block. It now rides along with
+// the user turn (see BuildFileTreeUserPrefix), because every write_file used
+// to mutate the system prefix and force a fresh prompt-cache write across all
+// downstream blocks. Moving it into the user message keeps system content
+// stable across rounds; the agent uses list_files / grep to refresh state
+// on demand, and the in-history tool results already report each write.
 //
 // anthropic.go marks up to 4 system blocks with cache_control, so each block
 // becomes its own cache breakpoint for prompt caching.
@@ -28,7 +34,7 @@ type mobileConfigGetter interface {
 // deps is passed in so the AI addendum can render only the chat models the
 // current user's subscription tier can actually reach; passing nil degrades
 // to a conservative generic block.
-func BuildSystemMessages(project *models.AppProject, fileMap *SafeFileMap, deps *RunDependencies, attachmentsPool []models.AppAsset) []utils.Message {
+func BuildSystemMessages(project *models.AppProject, deps *RunDependencies, attachmentsPool []models.AppAsset) []utils.Message {
 	base := BasePromptWeb
 	if project != nil {
 		switch project.ProjectType {
@@ -42,11 +48,21 @@ func BuildSystemMessages(project *models.AppProject, fileMap *SafeFileMap, deps 
 	if addendum != "" {
 		msgs = append(msgs, utils.Message{Role: "system", Content: addendum})
 	}
-	msgs = append(msgs, utils.Message{Role: "system", Content: buildFileTreeBlock(fileMap)})
 	if manifest := AttachmentsAddendum(attachmentsPool); manifest != "" {
 		msgs = append(msgs, utils.Message{Role: "system", Content: manifest})
 	}
 	return msgs
+}
+
+// BuildFileTreeUserPrefix returns the file-tree context block that should be
+// prepended to the current turn's user message. Returning an empty string is
+// a valid signal that no prefix is needed (e.g. brand-new project with no
+// files yet — the agent already knows from the system prompt that it's
+// starting from a templated scaffold).
+//
+// Why this lives outside system messages: see BuildSystemMessages doc.
+func BuildFileTreeUserPrefix(fileMap *SafeFileMap) string {
+	return buildFileTreeBlock(fileMap)
 }
 
 // buildAddendum composes project-specific prompt blocks.

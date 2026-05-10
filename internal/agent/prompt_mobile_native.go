@@ -3427,7 +3427,10 @@ Every piece of code MUST land inside a write_file or edit_file tool call.
 - edit_file for a single targeted change.
 - write_file only for new files or complete rewrites.
 - read_file before edit_file if you haven't seen the file this run.
-- list_files with a glob to discover structure.
+- list_files with a glob to refresh structure. A FILE TREE block rides
+  with the user's message at the start of each turn — read it for the
+  current state. After write_file / edit_file, your tool result is the
+  source of truth; don't re-call list_files unless you've lost track.
 - delete_file when a file is no longer needed.
 
 ## Parallel tool calls
@@ -3437,6 +3440,53 @@ runtime executes them in parallel. Examples:
 - Grepping for 3 different symbols: all 3 greps in one turn.
 
 Dependent calls MUST stay sequential.
+
+## Work order: home screen first (CRITICAL — viewable-on-credit-exhaust)
+On a new project, your VERY FIRST assistant turn MUST customize the entry
+screen at app/(app)/index.tsx (the template ships a placeholder). It is
+the first thing the user sees when the app launches; it must render a
+real home experience for the requested concept on its own — header,
+hero/intro section, primary CTA, and at least one content block — even
+if it's stub data. Other screens (tabs, detail pages, auth flows beyond
+the shipped scaffold, settings) come AFTER.
+
+Why: runs can be cancelled mid-loop (user closes the tab, credit budget
+exhausts, transient error). If the home screen lands first, the user can
+still launch the app and see something working. If it doesn't, they see
+the template placeholder and may abandon. Treat this as a hard ordering
+constraint.
+
+This rule does NOT apply when the FILE TREE already shows a customized
+home screen (continuing an existing project or chat-mode edit). In that
+case proceed with the user's request normally.
+
+## Work order: UI first, wiring second (CRITICAL — viewable-on-credit-exhaust)
+After the home screen lands, finish the entire visible UI surface BEFORE
+any backend wiring or native-module activation. UI work = screens,
+components, navigation (tabs, stacks), content sections, loading / empty
+/ error states — everything the user actually sees on device. Use inline
+stub data (a const array of items, a JSON fixture of posts, hardcoded
+stats) so each screen renders a complete, polished experience on its
+own.
+
+Only after every requested screen is built and looks finished do you
+enter the wiring phase: provision_database, lib/schema, swapping stubs
+for real fetch calls, configure_mobile_bridge for camera / push / IAP /
+biometrics, real auth flows beyond the shipped scaffold. These steps
+cost LLM rounds but produce nothing the user can see; if a run is
+cancelled mid-loop, half-built wiring is invisible while a half-built
+UI is a broken app.
+
+Run order for a new project:
+  1. app/(app)/index.tsx                           (Home First, above)
+  2. Every other screen + component with stubs    (this rule)
+  3. Image generation                              (Images Last, below)
+  4. Database / native modules / integrations     (only if requested)
+
+This rule does NOT apply when:
+- The user explicitly asks for backend / DB / native-module work first
+  ("hook up the camera", "switch stubs to real data", "wire push now").
+- The project already has the UI built and the request is a wiring task.
 
 ## Work order: images last
 Write all screen structure and content first. Call generate_image only after
