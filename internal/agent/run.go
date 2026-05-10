@@ -46,9 +46,11 @@ const (
 // On success: files are committed to git, AppAgentRun is finalised, credits
 // are deducted, events are emitted, and nil is returned.
 //
-// On failure: the in-memory fileMap is discarded, git is defensively reset to
-// pre-commit, AppAgentRun is marked failed, NO credits are deducted, error
-// events are emitted, and a *Error is returned.
+// On failure: the in-memory fileMap is discarded (so any uncommitted tool
+// edits never reach disk), AppAgentRun is marked failed, credits for tokens
+// already consumed are billed, an error event is emitted, and a *Error is
+// returned. The pre-run git commit is kept untouched on disk — there's no
+// auto-reset on failure.
 func Run(
 	ctx context.Context,
 	deps *RunDependencies,
@@ -278,7 +280,7 @@ func Run(
 		if r := recover(); r != nil {
 			slog.Error("agent.Run panicked", "error", r, "project_id", project.ID, "stack", string(debug.Stack()))
 			runErr = finaliseFailureV2(ctx, deps, repo, run, project, emitter, "agent_loop",
-				CodeInternal, fmt.Sprintf("panic: %v", r), nil, preCommit, tracker, runStart)
+				CodeInternal, fmt.Sprintf("panic: %v", r), nil, tracker, runStart)
 		}
 	}()
 
@@ -301,7 +303,7 @@ func Run(
 	if creditCheck != nil && !creditCheck() {
 		return finaliseFailureV2(ctx, deps, repo, run, project, emitter, "agent_loop",
 			CodeCreditsExhausted, "AI credits exhausted before run started", nil,
-			preCommit, tracker, runStart)
+			tracker, runStart)
 	}
 
 	// The dedicated keepalive goroutine that used to emit a typed
@@ -472,7 +474,7 @@ func Run(
 			"project_id", project.ID, "run_id", runID)
 		return finaliseFailureV2(ctx, deps, repo, run, project, emitter, "agent_loop",
 			CodeRepetitionLoop, "model got stuck repeating output", nil,
-			preCommit, tracker, runStart)
+			tracker, runStart)
 	}
 	if llmErr != nil {
 		// A ctx-triggered stream abort surfaces here as llmErr — classify it
@@ -485,7 +487,7 @@ func Run(
 			code, msg := classifyCtxErr(ctxErr)
 			return finaliseFailureV2(ctx, deps, repo, run, project, emitter, "agent_loop",
 				code, msg, ctxErr,
-				preCommit, tracker, runStart)
+				tracker, runStart)
 		}
 		// Truncation isn't a provider fault — it means the model exhausted
 		// its per-call token budget and the continuation loop failed too.
@@ -494,11 +496,11 @@ func Run(
 		if errors.Is(llmErr, utils.ErrResponseTruncated) {
 			return finaliseFailureV2(ctx, deps, repo, run, project, emitter, "agent_loop",
 				CodeTruncated, "model response exceeded token budget", llmErr,
-				preCommit, tracker, runStart)
+				tracker, runStart)
 		}
 		return finaliseFailureV2(ctx, deps, repo, run, project, emitter, "agent_loop",
 			CodeProviderError, "LLM call failed", llmErr,
-			preCommit, tracker, runStart)
+			tracker, runStart)
 	}
 
 	// Post-loop budget checks to classify why the loop ended.
@@ -506,18 +508,18 @@ func Run(
 		code, msg := classifyCtxErr(ctxErr)
 		return finaliseFailureV2(ctx, deps, repo, run, project, emitter, "agent_loop",
 			code, msg, ctxErr,
-			preCommit, tracker, runStart)
+			tracker, runStart)
 	}
 	if creditCheck != nil && !creditCheck() {
 		return finaliseFailureV2(ctx, deps, repo, run, project, emitter, "agent_loop",
 			CodeCreditsExhausted, "AI credits exhausted mid-run", nil,
-			preCommit, tracker, runStart)
+			tracker, runStart)
 	}
 	if _, _, total, _ := tracker.Totals(); total > defaultMaxTokensPerRun {
 		return finaliseFailureV2(ctx, deps, repo, run, project, emitter, "agent_loop",
 			CodeBudgetExceeded,
 			fmt.Sprintf("token budget exceeded (%d > %d)", total, defaultMaxTokensPerRun), nil,
-			preCommit, tracker, runStart)
+			tracker, runStart)
 	}
 
 	emitter.Emit(EventTurnEnd, TurnEndEvent{
@@ -752,7 +754,7 @@ func finaliseSuccess(
 	if err != nil {
 		return finaliseFailureV2(ctx, deps, repo, run, project, emitter, "commit",
 			CodeGitError, "failed to write and commit files", err,
-			run.PreCommit, tracker, runStart)
+			tracker, runStart)
 	}
 
 	// 1b. Auto-deploy the backend/ subtree if this turn touched it.
@@ -991,29 +993,15 @@ func finaliseFailureV2(
 	code ErrorCode,
 	message string,
 	wrapped error,
-	preCommit string,
 	tracker *utils.TokenTracker,
 	runStart time.Time,
 ) error {
-	// 1. Defensive git reset (usually a no-op — tools only touched fileMap).
-	filesReverted := 0
-	if preCommit != "" && repo != nil {
-		if err := RollbackTo(repo, preCommit); err != nil {
-			slog.Warn("rollback reset failed", "error", err, "run_id", run.ID)
-		} else {
-			filesReverted = 1
-		}
-	}
-
-	// 2. Emit rollback event.
-	emitter.Emit(EventRollback, RollbackEvent{
-		RunID:         run.ID,
-		PreCommit:     preCommit,
-		Reason:        string(code),
-		FilesReverted: filesReverted,
-	})
-
-	// 3. Emit error event.
+	// 1. Emit error event. We do NOT touch the working tree on failure —
+	// tool mutations only ever land in the in-memory fileMap, which is
+	// discarded on return, so disk is already at the pre-run commit.
+	// (`repo` is kept in the signature for symmetry with the success path
+	// and in case future failure handling needs it.)
+	_ = repo
 	emitter.Emit(EventError, ErrorEvent{
 		RunID:   run.ID,
 		Phase:   phase,
@@ -1021,7 +1009,7 @@ func finaliseFailureV2(
 		Code:    code,
 	})
 
-	// 4. Persist failure marker message so the chat UI isn't orphaned. The
+	// 2. Persist failure marker message so the chat UI isn't orphaned. The
 	// frontend renders a rich error card off ErrorKind; Content is a still-
 	// readable fallback so old clients during a rolling deploy don't show
 	// empty bubbles.
@@ -1045,7 +1033,7 @@ func finaliseFailureV2(
 		slog.Warn("failed to persist failure message", "error", err, "run_id", run.ID)
 	}
 
-	// 5. Finalise the run row. We bill for whatever tokens were actually
+	// 3. Finalise the run row. We bill for whatever tokens were actually
 	// consumed before the failure — Anthropic charges us regardless of
 	// whether the run completed, so a canceled or budget_exceeded run still
 	// represents real spend. Without this, a free user could burn unlimited
@@ -1069,7 +1057,7 @@ func finaliseFailureV2(
 		slog.Warn("failed to finalise failed agent run row", "error", err, "run_id", run.ID)
 	}
 
-	// 5b. Deduct credits for consumed tokens. Uses the same action label as
+	// 3b. Deduct credits for consumed tokens. Uses the same action label as
 	// the success path so ai_credit_transactions rows group consistently.
 	if deps.DeductCredits != nil && credits > 0 {
 		deductAction := runAction(project)
@@ -1078,7 +1066,7 @@ func finaliseFailureV2(
 		}
 	}
 
-	// 6. Track PostHog.
+	// 4. Track PostHog.
 	if deps.TrackUserEvent != nil {
 		deps.TrackUserEvent(constants.EVENT_APP_CHAT_FAILED, map[string]any{
 			"app_id":       run.AppProjectID.String(),
@@ -1089,7 +1077,7 @@ func finaliseFailureV2(
 		})
 	}
 
-	// 6b. Fire lifecycle event.
+	// 4b. Fire lifecycle event.
 	if deps.SendCRMEvent != nil {
 		deps.SendCRMEvent(constants.EVENT_APP_CHAT_FAILED, map[string]any{
 			"app_id":       run.AppProjectID.String(),
@@ -1099,7 +1087,7 @@ func finaliseFailureV2(
 		})
 	}
 
-	// 7. PostHog LLM Analytics: surface the failure on the LLM dashboard.
+	// 5. PostHog LLM Analytics: surface the failure on the LLM dashboard.
 	// We always send an $ai_generation error event so error-rate panels see
 	// the failure; if any LLM calls actually succeeded before the failure
 	// (partial work), we ALSO emit the per-call generations + trace via

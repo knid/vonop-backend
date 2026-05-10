@@ -59,7 +59,6 @@ var milestoneEvents = map[string]bool{
 	"clarification_received": true,
 	"conversation_done":      true,
 	"awaiting_reply":         true,
-	"rollback":               true,
 	"deps_ready":             true,
 	// Agent runtime events (2026-04 rewrite). On reconnect these get
 	// replayed so the client's timeline rebuilds past tool calls + file
