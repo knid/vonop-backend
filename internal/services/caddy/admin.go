@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -107,6 +108,14 @@ func (a *Admin) reload() error {
 		return err
 	}
 	req.Header.Set("Content-Type", "text/caddyfile")
+	// Caddy's admin block runs with `enforce_origin`, which rejects requests
+	// whose Origin header isn't on the allow list. Go's HTTP client doesn't
+	// send Origin by default, so derive one from the admin URL — for
+	// AdminURL=http://caddy:2019 this becomes Origin: http://caddy:2019,
+	// matching the `caddy:2019` entry in the Caddyfile origins directive.
+	if u, parseErr := url.Parse(a.AdminURL); parseErr == nil && u.Host != "" {
+		req.Header.Set("Origin", u.Scheme+"://"+u.Host)
+	}
 	resp, err := a.httpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("post /load: %w", err)
