@@ -6,7 +6,6 @@ import (
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/utils"
-	"github.com/posthog/posthog-go"
 )
 
 // POST /v2/apps/generate/stream
@@ -47,9 +46,10 @@ func (v *HttpViews) GenerateAppStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	v.Controller.TrackUserEvent(user, constants.EVENT_APP_GENERATION_STARTED, posthog.NewProperties().
-		Set("project_type", req.ProjectType).
-		Set("app_id", project.ID.String()))
+	v.Controller.TrackUserEvent(user, constants.EVENT_APP_GENERATION_STARTED,
+		v.Controller.AppEventProps(project.ID.String()).
+			Set("project_type", req.ProjectType).
+			Set("prompt_preview", utils.TruncatePromptPreview(req.Prompt, 50)))
 
 	go v.Controller.EventService.SendEvent(user, constants.EVENT_APP_GENERATION_STARTED, map[string]any{
 		"app_id":       project.ID.String(),

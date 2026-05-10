@@ -16,7 +16,6 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
-	"github.com/posthog/posthog-go"
 
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/controllers"
@@ -100,11 +99,11 @@ func (v *HttpViews) RollbackOTA(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	v.Controller.TrackUserEvent(user, constants.EVENT_OTA_ROLLED_BACK, posthog.NewProperties().
-		Set("app_id", appProjectID.String()).
-		Set("channel", row.Channel).
-		Set("platform", row.Platform).
-		Set("target_update_id", row.UpdateID.String()))
+	v.Controller.TrackUserEvent(user, constants.EVENT_OTA_ROLLED_BACK,
+		v.Controller.AppEventProps(appProjectID.String()).
+			Set("channel", row.Channel).
+			Set("platform", row.Platform).
+			Set("target_update_id", row.UpdateID.String()))
 
 	utils.JSONResponse(w, map[string]any{
 		"update_id":          row.UpdateID.String(),
@@ -172,11 +171,11 @@ func (v *HttpViews) PromoteOTA(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	v.Controller.TrackUserEvent(user, constants.EVENT_OTA_PROMOTED, posthog.NewProperties().
-		Set("app_id", appProjectID.String()).
-		Set("channel", row.Channel).
-		Set("platform", row.Platform).
-		Set("rollout_percentage", row.RolloutPercentage))
+	v.Controller.TrackUserEvent(user, constants.EVENT_OTA_PROMOTED,
+		v.Controller.AppEventProps(appProjectID.String()).
+			Set("channel", row.Channel).
+			Set("platform", row.Platform).
+			Set("rollout_percentage", row.RolloutPercentage))
 
 	utils.JSONResponse(w, map[string]any{
 		"update_id":          row.UpdateID.String(),

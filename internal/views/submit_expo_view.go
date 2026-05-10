@@ -7,7 +7,6 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-playground/validator/v10"
 	"github.com/google/uuid"
-	"github.com/posthog/posthog-go"
 
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/controllers"
@@ -98,9 +97,9 @@ func (v *HttpViews) SubmitAppExpo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	v.Controller.TrackUserEvent(user, constants.EVENT_PREFIX_APP_SUBMITTED+constants.EventName(result.Platform), posthog.NewProperties().
-		Set("app_id", project.ID.String()).
-		Set("codemagic_build_id", result.CodemagicBuildID))
+	v.Controller.TrackUserEvent(user, constants.EVENT_PREFIX_APP_SUBMITTED+constants.EventName(result.Platform),
+		v.Controller.AppEventProps(project.ID.String()).
+			Set("codemagic_build_id", result.CodemagicBuildID))
 
 	resp := map[string]any{
 		"platform":           result.Platform,
