@@ -385,6 +385,16 @@ func (c *Controller) HandleWebDeployTask(ctx context.Context, t *asynq.Task) err
 		return c.maybeRetry(ctx, p.DeploymentID, "wait_healthy", err)
 	}
 
+	// Revert working-tree modifications (badge injection, defensive scaffolding)
+	// so they don't persist in the repo between deploys.
+	if head, headErr := repo.Head(); headErr == nil {
+		if revertErr := repo.Revert(head); revertErr != nil {
+			slog.Warn("deploy: failed to revert working tree", "deployment_id", p.DeploymentID, "error", revertErr)
+		}
+	} else {
+		slog.Warn("deploy: failed to read HEAD for revert", "deployment_id", p.DeploymentID, "error", headErr)
+	}
+
 	// 10. Flip to 'deployed' and fire success events.
 	deployedURL := "https://" + runtimeApp.CustomDomain
 	if err := c.MarkDeploymentSucceeded(p.DeploymentID, deployedURL); err != nil {
