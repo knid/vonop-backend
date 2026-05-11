@@ -547,6 +547,7 @@ func (v *HttpViews) GetDeployStatus(w http.ResponseWriter, r *http.Request) {
 		DeployedURL:  deployment.DeployedURL,
 		Version:      deployment.Version,
 		ErrorMessage: deployment.ErrorMessage,
+		ProviderData: deployment.ProviderData,
 		CreatedAt:    deployment.CreatedAt,
 		UpdatedAt:    deployment.UpdatedAt,
 	}, http.StatusOK)
@@ -604,6 +605,7 @@ func (v *HttpViews) GetDeployHistory(w http.ResponseWriter, r *http.Request) {
 			DeployedURL:  d.DeployedURL,
 			Version:      d.Version,
 			ErrorMessage: d.ErrorMessage,
+			ProviderData: d.ProviderData,
 			CreatedAt:    d.CreatedAt,
 			UpdatedAt:    d.UpdatedAt,
 		})

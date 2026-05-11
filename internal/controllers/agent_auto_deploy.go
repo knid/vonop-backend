@@ -89,3 +89,49 @@ func (c *Controller) autoDeployBackendForAgent(ctx context.Context, project *mod
 		"paid", isPaid)
 	return nil
 }
+
+// triggerWebDeployForAgent queues a Fly web deploy for the project on behalf
+// of the chat agent's trigger_web_deploy tool. Works for any project type
+// with a web deploy pipeline (web, ecommerce, mobile_app_native).
+//
+// Guards:
+//   - The owning user is resolved from project.UserID so billing lands on the
+//     project owner even when a collaborator initiated the chat.
+//   - ErrDeployInProgress is returned as a normal error so the agent can tell
+//     the user a deploy is already running.
+//   - All other errors bubble up so the agent knows the deploy didn't start.
+func (c *Controller) triggerWebDeployForAgent(ctx context.Context, project *models.AppProject, agentUser *models.User) (string, error) {
+	if project == nil {
+		return "", fmt.Errorf("triggerWebDeploy: nil project")
+	}
+
+	// Resolve the project owner.
+	owner := agentUser
+	if project.UserID != owner.ID {
+		ownerLookup, err := c.DB.GetUserById(project.UserID.String())
+		if err != nil {
+			return "", fmt.Errorf("failed to load project owner: %w", err)
+		}
+		owner = ownerLookup
+	}
+
+	deployment, err := c.CreateQueuedWebDeployment(project, owner)
+	if err != nil {
+		return "", err
+	}
+
+	_, planName, _ := c.GetUserLimitsWithPlan(owner)
+	isPaid := planName != "" && planName != "free" && planName != "trial"
+
+	if _, err := c.EnqueueWebDeploy(deployment.ID, isPaid); err != nil {
+		c.MarkDeploymentFailed(deployment.ID.String(), "agent-enqueue: "+err.Error())
+		return "", err
+	}
+
+	slog.Info("triggerWebDeploy: queued",
+		"project_id", project.ID,
+		"deployment_id", deployment.ID,
+		"plan", planName,
+		"paid", isPaid)
+	return deployment.ID.String(), nil
+}

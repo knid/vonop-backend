@@ -56,16 +56,17 @@ type AppIntegrationResp struct {
 }
 
 type AppDeploymentResponse struct {
-	ID           uuid.UUID `json:"id"`
-	AppProjectID uuid.UUID `json:"app_project_id"`
-	Platform     string    `json:"platform"`
-	Provider     string    `json:"provider"`
-	Status       string    `json:"status"`
-	DeployedURL  string    `json:"deployed_url"`
-	Version      int       `json:"version"`
-	ErrorMessage string    `json:"error_message,omitempty"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	ID           uuid.UUID      `json:"id"`
+	AppProjectID uuid.UUID      `json:"app_project_id"`
+	Platform     string         `json:"platform"`
+	Provider     string         `json:"provider"`
+	Status       string         `json:"status"`
+	DeployedURL  string         `json:"deployed_url"`
+	Version      int            `json:"version"`
+	ErrorMessage string         `json:"error_message,omitempty"`
+	ProviderData map[string]any `json:"provider_data,omitempty"`
+	CreatedAt    time.Time      `json:"created_at"`
+	UpdatedAt    time.Time      `json:"updated_at"`
 }
 
 type AppConversationResponse struct {

@@ -92,6 +92,11 @@ func (c *Controller) AgentDeps(user *models.User) *agent.RunDependencies {
 		TriggerMobileBuild: func(ctx context.Context, project *models.AppProject, user *models.User, platforms []string) (string, map[string]string, error) {
 			return c.triggerMobileBuildForAgent(ctx, project, user, platforms)
 		},
+		// trigger_web_deploy — bound here so the agent can close the
+		// read-fix-redeploy loop for web deploy failures.
+		TriggerWebDeploy: func(ctx context.Context, project *models.AppProject, user *models.User) (string, error) {
+			return c.triggerWebDeployForAgent(ctx, project, user)
+		},
 		RecordLLMUsage: func(tracker *utils.TokenTracker, action, model, provider, reference, appType string) {
 			c.RecordTokenUsage(user, action, model, provider, reference, appType, tracker)
 		},
