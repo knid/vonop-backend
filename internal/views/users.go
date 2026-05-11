@@ -3,6 +3,7 @@ package views
 import (
 	"errors"
 	"net/http"
+	"net/url"
 
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/controllers"
@@ -161,6 +162,12 @@ func (v *HttpViews) UserRegister(w http.ResponseWriter, r *http.Request) {
 	attr := controllers.MetaAttributionFromRequest(r,
 		userRegisterReq.Fbp, userRegisterReq.Fbc, userRegisterReq.EventSourceURL)
 
+	// Capture acquisition-source props for the user_registered event so the
+	// activation funnel can be split by traffic source. EventSourceURL is the
+	// originating page (front-end posts this from window.location); we mine it
+	// for utm_* + referrer query params. Falls back gracefully when missing.
+	signupProps := signupAcquisitionProps(r, userRegisterReq.EventSourceURL)
+
 	go func() {
 		u, lookupErr := v.Controller.DB.GetUserById(userInformationRes.ID.String())
 		if lookupErr != nil {
@@ -168,9 +175,8 @@ func (v *HttpViews) UserRegister(w http.ResponseWriter, r *http.Request) {
 		}
 		v.Controller.PersistMetaAttribution(u, attr)
 		v.Controller.EnsureIdentified(u)
-		v.Controller.TrackUserEvent(u, constants.EVENT_NEW_USER, posthog.NewProperties().
-			Set("provider", u.Provider).
-			Set("email", u.Email))
+		signupProps.Set("provider", u.Provider)
+		v.Controller.TrackUserEvent(u, constants.EVENT_NEW_USER, signupProps)
 		v.Controller.FireMetaCompleteRegistration(u, attr)
 	}()
 
@@ -224,6 +230,46 @@ func (v *HttpViews) UserResetPassword(w http.ResponseWriter, r *http.Request) {
 		"success": true,
 		"message": "Your password has been updated. You can sign in now.",
 	}, http.StatusOK)
+}
+
+// signupAcquisitionProps mines acquisition-source signals from a signup
+// request. `eventSourceURL` is the front-end window.location at submit time
+// (already posted on the registration body) — it carries any utm_* and ad
+// click IDs that landed in the URL. The HTTP Referer header is a secondary
+// source for older referrers. Returns a PostHog properties bag that the caller
+// composes onto the user_registered event.
+//
+// Properties emitted (only when present):
+//   utm_source, utm_medium, utm_campaign, utm_term, utm_content
+//   referrer            (Referer header, or referrer query param)
+//   landing_url         (eventSourceURL with query stripped)
+//   gclid, fbclid       (Google / Meta click IDs, used by ads attribution)
+func signupAcquisitionProps(r *http.Request, eventSourceURL string) posthog.Properties {
+	props := posthog.NewProperties()
+	if eventSourceURL != "" {
+		if parsed, err := url.Parse(eventSourceURL); err == nil {
+			q := parsed.Query()
+			for _, k := range []string{"utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content", "gclid", "fbclid"} {
+				if v := q.Get(k); v != "" {
+					props.Set(k, v)
+				}
+			}
+			if v := q.Get("referrer"); v != "" {
+				props.Set("referrer", v)
+			}
+			parsed.RawQuery = ""
+			parsed.Fragment = ""
+			props.Set("landing_url", parsed.String())
+		}
+	}
+	if r != nil {
+		if _, set := props["referrer"]; !set {
+			if ref := r.Header.Get("Referer"); ref != "" {
+				props.Set("referrer", ref)
+			}
+		}
+	}
+	return props
 }
 
 // UserSendVerifyEmail (authenticated) issues a fresh verification email to

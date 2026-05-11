@@ -82,11 +82,11 @@ func (v *HttpViews) OAuthCallback(w http.ResponseWriter, r *http.Request) {
 			// First-time OAuth signup: also fire user_registered so the
 			// activation funnel's first step matches reality. Without this,
 			// only email-form signups appear in the funnel and the OAuth
-			// majority is invisible.
+			// majority is invisible. $email is auto-injected by
+			// TrackUserEvent — no need to pass a duplicate plain `email`.
 			if isNewUser {
 				v.Controller.TrackUserEvent(u, constants.EVENT_NEW_USER, posthog.NewProperties().
-					Set("provider", u.Provider).
-					Set("email", u.Email))
+					Set("provider", u.Provider))
 			}
 		}
 	}()

@@ -65,7 +65,10 @@ func (v *HttpViews) DeployAppWeb(w http.ResponseWriter, r *http.Request) {
 		alreadyDeployed, _ := v.Controller.DB.IsAppAlreadyDeployed(appID)
 		if !alreadyDeployed && count >= limits.MaxDeployedWebApps {
 			go v.Controller.EventService.SendEvent(user, constants.EVENT_SUBSCRIPTION_QUOTA_REACHED, map[string]any{"action": "deploy_web", "limit": limits.MaxDeployedWebApps})
-			go v.Controller.TrackUserEvent(user, constants.EVENT_QUOTA_REACHED, posthog.NewProperties().Set("action", "deploy_web").Set("limit", limits.MaxDeployedWebApps))
+			go v.Controller.TrackUserEvent(user, constants.EVENT_QUOTA_REACHED,
+				v.Controller.AppEventProps(appID).
+					Set("action", "deploy_web").
+					Set("limit", limits.MaxDeployedWebApps))
 
 			// Include deployed app names so the user knows which to undeploy
 			var deployedNames []string
@@ -242,7 +245,10 @@ func (v *HttpViews) DeployAppMobile(w http.ResponseWriter, r *http.Request) {
 		alreadyDeployed, _ := v.Controller.DB.IsAppAlreadyDeployedMobile(appID)
 		if !alreadyDeployed && count >= limits.MaxDeployedMobileApps {
 			go v.Controller.EventService.SendEvent(user, constants.EVENT_SUBSCRIPTION_QUOTA_REACHED, map[string]any{"action": "deploy_mobile", "limit": limits.MaxDeployedMobileApps})
-			go v.Controller.TrackUserEvent(user, constants.EVENT_QUOTA_REACHED, posthog.NewProperties().Set("action", "deploy_mobile").Set("limit", limits.MaxDeployedMobileApps))
+			go v.Controller.TrackUserEvent(user, constants.EVENT_QUOTA_REACHED,
+				v.Controller.AppEventProps(appID).
+					Set("action", "deploy_mobile").
+					Set("limit", limits.MaxDeployedMobileApps))
 
 			var deployedNames []string
 			if apps, err := v.Controller.DB.GetDeployedMobileAppsByOrgID(orgIDForDeploy.String()); err == nil {

@@ -1078,7 +1078,16 @@ func finaliseFailureV2(
 	// 4. Track PostHog. Mirror the success-path properties so analytics can
 	// compare model/token spend and durations across success and failure on
 	// the same axes — without this, error funnels can't surface "expensive
-	// failures" or per-model failure rates.
+	// failures" or per-model failure rates. Split chat vs initial generation
+	// onto separate events so the activation funnel can measure first-app
+	// success rate independently from steady-state chat reliability — without
+	// this, a spike in chat errors looks identical to a regression in initial
+	// generation in dashboards.
+	isInitial := project != nil && project.Status == "draft"
+	failEvent := constants.EVENT_APP_CHAT_FAILED
+	if isInitial {
+		failEvent = constants.EVENT_APP_GENERATION_FAILED
+	}
 	totalTok := promptTok + completionTok
 	durationSeconds := float64(run.DurationMs) / 1000.0
 	if deps.TrackUserEvent != nil {
@@ -1099,12 +1108,12 @@ func finaliseFailureV2(
 		if tracker != nil && tracker.TraceInput != "" {
 			failedProps["prompt_preview"] = utils.TruncatePromptPreview(tracker.TraceInput, 50)
 		}
-		deps.TrackUserEvent(constants.EVENT_APP_CHAT_FAILED, failedProps)
+		deps.TrackUserEvent(failEvent, failedProps)
 	}
 
 	// 6b. Fire lifecycle event.
 	if deps.SendResendEvent != nil {
-		deps.SendResendEvent(constants.EVENT_APP_CHAT_FAILED, map[string]any{
+		deps.SendResendEvent(failEvent, map[string]any{
 			"app_id":           run.AppProjectID.String(),
 			"code":             string(code),
 			"phase":            phase,

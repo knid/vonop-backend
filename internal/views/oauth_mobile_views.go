@@ -35,6 +35,7 @@ func (v *HttpViews) GoogleMobileLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	isNewUser := loginRes.IsNewUser
 	go func() {
 		token, tokErr := v.Controller.DB.GetTokenByToken(loginRes.Token)
 		if tokErr != nil {
@@ -46,8 +47,20 @@ func (v *HttpViews) GoogleMobileLogin(w http.ResponseWriter, r *http.Request) {
 		}
 		v.Controller.EnsureIdentified(u)
 		v.Controller.TrackUserEvent(u, constants.EVENT_USER_OAUTH_LOGGED_IN, posthog.NewProperties().
-			Set("provider", "google_mobile").
-			Set("subscription_status", v.Controller.GetUserBilling(u).SubscriptionStatus))
+			Set("provider", "google_mobile"))
+		// Mirror the web OAuth flow (views/oauth.go): emit the unified
+		// user_logged_in event so dashboards filtering on "any login" pick
+		// up mobile sign-ins alongside web ones, and on first sign-in also
+		// fire user_registered so mobile OAuth signups appear in the
+		// activation funnel. Without these the mobile cohort was entirely
+		// invisible — user_oauth_logged_in alone isn't in the canonical
+		// signup/login funnels.
+		v.Controller.TrackUserEvent(u, constants.EVENT_NEW_LOGIN, posthog.NewProperties().
+			Set("provider", u.Provider))
+		if isNewUser {
+			v.Controller.TrackUserEvent(u, constants.EVENT_NEW_USER, posthog.NewProperties().
+				Set("provider", u.Provider))
+		}
 	}()
 
 	utils.JSONResponse(w, loginRes, http.StatusOK)

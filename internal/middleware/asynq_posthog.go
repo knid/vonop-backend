@@ -3,9 +3,18 @@
 // state where Asynq lifecycle was only visible via slog → BetterStack and
 // could not be queried, alerted on, or correlated with user events.
 //
-// Cron tasks (type prefix `cron:`) are skipped — they fire on tight
-// schedules with no user attribution and would drown out user-triggered
-// job events.
+// Cron tasks are skipped — they fire on tight schedules with no user
+// attribution and would drown out user-triggered job events. We skip on
+// BOTH the `cron:` task-type prefix AND the `cron` queue, because the
+// queue is the more reliable signal in production (some cron tasks were
+// found in PostHog despite the prefix check, indicating the prefix may
+// not always be set as expected).
+//
+// Reliability — every event emit is deferred so the lifecycle survives
+// panics inside the handler. Without defer, a panicking handler would
+// fire job_started but neither job_succeeded nor job_failed, leaking
+// half-recorded jobs (observed in the F6 reliability dashboard: 50% of
+// agent:run jobs had no terminal event).
 //
 // Distinct ID resolution — best-effort, in priority order:
 //   1. user_id from payload (agent:run carries this directly)
@@ -19,6 +28,7 @@ package middleware
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 
@@ -46,17 +56,20 @@ type jobPayloadProbe struct {
 // attached via mux.Use(...).
 func AsynqPostHogLifecycle(c *controllers.Controller) asynq.MiddlewareFunc {
 	return func(next asynq.Handler) asynq.Handler {
-		return asynq.HandlerFunc(func(ctx context.Context, t *asynq.Task) error {
+		return asynq.HandlerFunc(func(ctx context.Context, t *asynq.Task) (handlerErr error) {
+			queue, _ := asynq.GetQueueName(ctx)
+
 			// Skip PostHog tracking for cron heartbeats — they fire on tight
-			// schedules (every 30s/1m/5m), have no user attribution, and
-			// drown out user-triggered job events in the activity feed.
-			if strings.HasPrefix(t.Type(), "cron:") {
+			// schedules, have no user attribution, and drown out
+			// user-triggered job events. Check both the task-type prefix and
+			// the queue name; the queue name is the authoritative signal in
+			// prod.
+			if queue == "cron" || strings.HasPrefix(t.Type(), "cron:") {
 				return next.ProcessTask(ctx, t)
 			}
 
 			start := time.Now()
 
-			queue, _ := asynq.GetQueueName(ctx)
 			taskID, _ := asynq.GetTaskID(ctx)
 			attempt, _ := asynq.GetRetryCount(ctx)
 			maxRetry, _ := asynq.GetMaxRetry(ctx)
@@ -76,21 +89,39 @@ func AsynqPostHogLifecycle(c *controllers.Controller) asynq.MiddlewareFunc {
 
 			c.TrackSystemEvent(distinctID, constants.EVENT_JOB_STARTED, cloneProps(baseProps))
 
-			err := next.ProcessTask(ctx, t)
-			durationMs := time.Since(start).Milliseconds()
-			done := cloneProps(baseProps).Set("duration_ms", durationMs)
+			// Defer the terminal emit so a panic inside next.ProcessTask
+			// still records job_failed and re-raises. Without this, panicking
+			// handlers leak as job_started with no terminal event, which
+			// silently destroys success/failure metrics for any handler that
+			// can panic (the agent run loop, in particular).
+			defer func() {
+				durationMs := time.Since(start).Milliseconds()
+				done := cloneProps(baseProps).Set("duration_ms", durationMs)
 
-			if err == nil {
-				c.TrackSystemEvent(distinctID, constants.EVENT_JOB_SUCCEEDED, done)
-				return nil
-			}
+				if r := recover(); r != nil {
+					done.
+						Set("error", truncate(fmt.Sprintf("panic: %v", r), 500)).
+						Set("is_final", true).
+						Set("panic", true)
+					c.TrackSystemEvent(distinctID, constants.EVENT_JOB_FAILED, done)
+					handlerErr = fmt.Errorf("task panic: %v", r)
+					return
+				}
 
-			isFinal := attempt >= maxRetry
-			done.
-				Set("error", truncate(err.Error(), 500)).
-				Set("is_final", isFinal)
-			c.TrackSystemEvent(distinctID, constants.EVENT_JOB_FAILED, done)
-			return err
+				if handlerErr == nil {
+					c.TrackSystemEvent(distinctID, constants.EVENT_JOB_SUCCEEDED, done)
+					return
+				}
+
+				isFinal := attempt >= maxRetry
+				done.
+					Set("error", truncate(handlerErr.Error(), 500)).
+					Set("is_final", isFinal)
+				c.TrackSystemEvent(distinctID, constants.EVENT_JOB_FAILED, done)
+			}()
+
+			handlerErr = next.ProcessTask(ctx, t)
+			return
 		})
 	}
 }

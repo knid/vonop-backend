@@ -217,12 +217,16 @@ func (c *Controller) processWebhookEventTx(tx bun.Tx, event stripe.Event) ([]fun
 		// Already idempotent via ClaimSubscriptionReward — runs outside the tx.
 		c.GrantReferralSubscriptionReward(owner)
 
+		// subscription_status (the mapped internal value, formerly `status`) is
+		// auto-injected by TrackUserEvent off the user's billing snapshot —
+		// dropping the explicit Set so we don't carry two near-identical keys
+		// on the same event. stripe_status keeps the raw Stripe state for
+		// debugging mismatches between the two.
+		c.IdentifyUser(owner)
 		c.TrackUserEvent(owner, constants.EVENT_SUBSCRIPTION_CREATED, posthog.NewProperties().
-			Set("status", org.SubscriptionStatus).
 			Set("stripe_status", string(sub.Status)).
 			Set("plan_name", subs.Name).
 			Set("price_id", sub.Items.Data[0].Price.ID))
-		c.IdentifyUser(owner)
 
 		// Meta CAPI: Subscribe fires once on initial subscription create. Skip
 		// trial-only states ("trialing") since no money has moved yet — wait
@@ -415,8 +419,11 @@ func (c *Controller) processWebhookEventTx(tx bun.Tx, event stripe.Event) ([]fun
 			}
 		}
 
+		// subscription_status is auto-injected via the billing snapshot (see
+		// posthog.go TrackUserEvent). Identify first so the cached snapshot
+		// picks up the just-written org.SubscriptionStatus.
+		c.IdentifyUser(owner)
 		c.TrackUserEvent(owner, constants.EVENT_SUBSCRIPTION_UPDATED, posthog.NewProperties().
-			Set("status", org.SubscriptionStatus).
 			Set("stripe_status", string(sub.Status)).
 			Set("plan_name", subs.Name).
 			Set("price_id", sub.Items.Data[0].Price.ID))
@@ -441,8 +448,6 @@ func (c *Controller) processWebhookEventTx(tx bun.Tx, event stripe.Event) ([]fun
 			c.TrackUserEvent(owner, constants.EVENT_USER_SETUP_FINISHED, posthog.NewProperties().
 				Set("trigger", "subscription_active"))
 		}
-
-		c.IdentifyUser(owner)
 
 		// Sync Neon projects to the new plan tier: transfer free↔paid org
 		// (using personal API key) and PATCH per-project quotas. Done as a
