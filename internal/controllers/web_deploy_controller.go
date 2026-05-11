@@ -229,7 +229,6 @@ func (c *Controller) HandleWebDeployTask(ctx context.Context, t *asynq.Task) err
 	for k, v := range repoFiles {
 		fileMap[k] = v
 	}
-	injectAnalyticsScript(fileMap, project.ID.String())
 	var limits *models.StandardUserLimits
 	if project.OrganizationID != uuid.Nil {
 		limits, _ = c.DB.GetLimitsForOrg(ctx, project.OrganizationID)
