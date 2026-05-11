@@ -599,7 +599,7 @@ func injectCustomErrorPages(fileMap map[string]string, lang string) {
 // using dangerouslySetInnerHTML here.
 func injectWemobBadge(fileMap map[string]string) {
 	escapedBody := strings.ReplaceAll(constants.WEMOB_BADGE_SCRIPT, "`", "\\`")
-	jsxScript := `<script data-wemob-badge dangerouslySetInnerHTML={{ __html: ` + "`" + escapedBody + "`" + ` }} />`
+	jsxScript := `<script data-wemob-badge dangerouslySetInnerHTML={{ __html: ` + "`" + escapedBody + "`" + ` }}></script>`
 
 	layoutPaths := []string{
 		"app/layout.tsx",

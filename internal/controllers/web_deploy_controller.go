@@ -231,7 +231,7 @@ func (c *Controller) HandleWebDeployTask(ctx context.Context, t *asynq.Task) err
 	}
 	var limits *models.StandardUserLimits
 	if project.OrganizationID != uuid.Nil {
-		limits, _ = c.DB.GetLimitsForOrg(ctx, project.OrganizationID)
+		limits, _ = c.GetOrgLimits(project.OrganizationID.String())
 	}
 	if limits == nil {
 		// Legacy fallback for unmigrated projects (OrganizationID == nil).
@@ -246,9 +246,6 @@ func (c *Controller) HandleWebDeployTask(ctx context.Context, t *asynq.Task) err
 				slog.Warn("write file during deploy", "path", path, "err", writeErr)
 			}
 		}
-	}
-	if _, commitErr := repo.Commit("deploy: inject analytics and branding"); commitErr != nil {
-		slog.Warn("commit branding changes", "err", commitErr)
 	}
 
 	// 2. Use the repo working tree as the Fly builder source. mobile_app_native
