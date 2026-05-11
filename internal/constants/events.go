@@ -39,8 +39,14 @@ const (
 	EVENT_INTEGRATION_DISCONNECTED EventName = "integration_disconnected"
 	EVENT_QUOTA_REACHED            EventName = "quota_reached"
 
-	// Chat / generation completion (fired from agent)
+	// Chat / generation completion (fired from agent). The initial generation
+	// and follow-up chat turns are intentionally split into two events each
+	// (started/completed/failed) so the activation funnel and the per-turn
+	// reliability dashboard can measure them independently — conflating them
+	// makes "first-app success rate" indistinguishable from steady-state chat
+	// reliability.
 	EVENT_APP_GENERATION_COMPLETED EventName = "generate_app_completed"
+	EVENT_APP_GENERATION_FAILED    EventName = "generate_app_failed"
 	EVENT_APP_CHAT_SENT            EventName = "app_chat_sent"
 	EVENT_APP_CHAT_COMPLETED       EventName = "app_chat_completed"
 	EVENT_APP_CHAT_FAILED          EventName = "app_chat_failed"

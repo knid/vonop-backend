@@ -2391,17 +2391,22 @@ func main() {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
-		// Flush PostHog events
-		if controller.PostHog != nil {
-			controller.PostHog.Close()
-		}
-
 		// Stop the release-status poller.
 		cancelReleasePoll()
 
-		// Shutdown main server
+		// Shutdown main server first — in-flight requests need to complete
+		// (and the events they enqueue need to land in the PostHog buffer)
+		// before we flush. Closing PostHog before Shutdown drops every event
+		// fired during the drain window, including the final job_failed /
+		// job_succeeded emits from the deferred Asynq middleware.
 		if err := mainServer.Shutdown(ctx); err != nil {
 			slog.Error("Main server shutdown error", "error", err)
+		}
+
+		// Flush PostHog events AFTER the server stops accepting requests so
+		// the queue contains every event from the drain window.
+		if controller.PostHog != nil {
+			controller.PostHog.Close()
 		}
 
 		// Close database connection pool
