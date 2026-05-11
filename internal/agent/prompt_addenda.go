@@ -29,10 +29,13 @@ cart_items, orders, order_items, product_reviews, wishlists, contact_messages.
 Read lib/schema/index.ts for the exact columns and types.
 
 For store-wide settings (name, currency, locale, tax_rate, payment_config),
-UPDATE the single ` + "`config`" + ` row — never INSERT. Example:
+UPDATE the single ` + "`config`" + ` row — never INSERT. The execute_sql guard
+blocks UPDATE without a WHERE, so target the row by its id even though
+there is only one. Example:
     UPDATE config SET store_name = 'Acme', currency = 'EUR',
       tax_rate = 8,
-      payment_config = '{"stripe": {"enabled": true}}'::jsonb;
+      payment_config = '{"stripe": {"enabled": true}}'::jsonb
+    WHERE id = (SELECT id FROM config LIMIT 1);
 ` + "`tax_rate`" + ` is a percentage (8 means 8%), not a fraction.
 
 Prices are in cents (bigint). UUIDs are primary keys. Products, categories,
