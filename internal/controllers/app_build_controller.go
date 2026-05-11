@@ -594,52 +594,9 @@ func injectCustomErrorPages(fileMap map[string]string, lang string) {
 	writeIfMissing(prefix+"global-error.tsx", constants.GetGlobalErrorTemplate(lang))
 }
 
-// injectAnalyticsScript adds the web analytics tracking script into the root
-// layout file. For JSX files (.tsx/.jsx) it uses the JSX-safe
-// dangerouslySetInnerHTML pattern so the parser doesn't choke on raw JS.
-// The __PROJECT_ID__ placeholder is replaced with the actual project UUID.
-// Note: the script body is a static, server-controlled string (not user input)
-// so there is no XSS risk from using dangerouslySetInnerHTML here.
-func injectAnalyticsScript(fileMap map[string]string, projectID string) {
-	jsBody := strings.Replace(constants.WEB_ANALYTICS_SCRIPT_BODY, "__PROJECT_ID__", projectID, 1)
-
-	// Escape backticks so the JS body is safe inside a JSX template literal
-	escapedBody := strings.ReplaceAll(jsBody, "`", "\\`")
-
-	// JSX-compatible: uses dangerouslySetInnerHTML so the JSX parser
-	// doesn't try to interpret the JS as JSX children.
-	jsxScript := `<script data-wemob-analytics dangerouslySetInnerHTML={{ __html: ` + "`" + escapedBody + "`" + ` }} />`
-
-	layoutPaths := []string{
-		"app/layout.tsx",
-		"app/layout.jsx",
-		"src/app/layout.tsx",
-		"src/app/layout.jsx",
-	}
-
-	for _, path := range layoutPaths {
-		content, ok := fileMap[path]
-		if !ok {
-			continue
-		}
-
-		// Prefer injecting before </head>
-		if idx := strings.Index(content, "</head>"); idx != -1 {
-			fileMap[path] = content[:idx] + jsxScript + "\n" + content[idx:]
-			return
-		}
-		// Fallback: inject before </body>
-		if idx := strings.Index(content, "</body>"); idx != -1 {
-			fileMap[path] = content[:idx] + jsxScript + "\n" + content[idx:]
-			return
-		}
-	}
-
-	slog.Warn("analytics script injection: no suitable layout found", "project_id", projectID)
-}
-
 // injectWemobBadge injects a "Created by Wemob" badge script into the root layout.
-// Uses the same pattern as injectAnalyticsScript — hardcoded constant, not user input.
+// Uses a hardcoded constant (not user input) so there is no XSS risk from
+// using dangerouslySetInnerHTML here.
 func injectWemobBadge(fileMap map[string]string) {
 	escapedBody := strings.ReplaceAll(constants.WEMOB_BADGE_SCRIPT, "`", "\\`")
 	jsxScript := `<script data-wemob-badge dangerouslySetInnerHTML={{ __html: ` + "`" + escapedBody + "`" + ` }} />`
