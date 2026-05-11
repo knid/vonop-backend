@@ -51,8 +51,41 @@ func (c *Controller) GetUserLimitsWithPlan(user *models.User) (*models.StandardU
 		return nil, "", err
 	}
 
+	c.applyPlanRemoteConfigOverrides(limits, subs.Name)
+
+	return limits, subs.Name, nil
+}
+
+// GetOrgLimits returns the organization's plan limits with remote config overrides.
+func (c *Controller) GetOrgLimits(orgID string) (*models.StandardUserLimits, error) {
+	limits, _, err := c.GetOrgLimitsWithPlan(orgID)
+	return limits, err
+}
+
+// GetOrgLimitsWithPlan is identical to GetOrgLimits but also returns the subscription plan name.
+func (c *Controller) GetOrgLimitsWithPlan(orgID string) (*models.StandardUserLimits, string, error) {
+	org, err := c.DB.GetOrganizationByID(orgID)
+	if err != nil {
+		return nil, "", err
+	}
+
+	subs, err := c.DB.GetStandardUserSubscriptionByOrg(org)
+	if err != nil {
+		return nil, "", err
+	}
+
+	limits, err := c.DB.GetStandardUserLimitsById(subs.LimitsID.String())
+	if err != nil {
+		return nil, "", err
+	}
+
+	c.applyPlanRemoteConfigOverrides(limits, subs.Name)
+	return limits, subs.Name, nil
+}
+
+func (c *Controller) applyPlanRemoteConfigOverrides(limits *models.StandardUserLimits, planName string) {
 	rc := c.RemoteConfig
-	pn := strings.ToLower(subs.Name)
+	pn := strings.ToLower(planName)
 
 	limits.MaxDeployedWebApps = rc.GetInt(remoteconfig.PlanInt(pn, "max-deployed-web-apps", limits.MaxDeployedWebApps), remoteconfig.Global)
 	limits.MaxDeployedMobileApps = rc.GetInt(remoteconfig.PlanInt(pn, "max-deployed-mobile-apps", limits.MaxDeployedMobileApps), remoteconfig.Global)
@@ -72,8 +105,6 @@ func (c *Controller) GetUserLimitsWithPlan(user *models.User) (*models.StandardU
 	limits.CanExportToGitHub = rc.GetBool(remoteconfig.PlanBool(pn, "can-export-to-github", limits.CanExportToGitHub), remoteconfig.Global)
 	limits.CanDeployWeb = rc.GetBool(remoteconfig.PlanBool(pn, "can-deploy-web", limits.CanDeployWeb), remoteconfig.Global)
 	limits.CanRemoveBrandLogo = rc.GetBool(remoteconfig.PlanBool(pn, "can-remove-brand-logo", limits.CanRemoveBrandLogo), remoteconfig.Global)
-
-	return limits, subs.Name, nil
 }
 
 func (c *Controller) GetSubscription(user *models.User) (*responses.UserSubscriptionInformationResponse, error) {

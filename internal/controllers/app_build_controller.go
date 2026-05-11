@@ -642,7 +642,7 @@ func injectAnalyticsScript(fileMap map[string]string, projectID string) {
 // Uses the same pattern as injectAnalyticsScript — hardcoded constant, not user input.
 func injectWemobBadge(fileMap map[string]string) {
 	escapedBody := strings.ReplaceAll(constants.WEMOB_BADGE_SCRIPT, "`", "\\`")
-	jsxScript := `<script data-wemob-badge dangerouslySetInnerHTML={{ __html: ` + "`" + escapedBody + "`" + ` }} />`
+	jsxScript := `<script data-wemob-badge dangerouslySetInnerHTML={{ __html: ` + "`" + escapedBody + "`" + ` }}></script>`
 
 	layoutPaths := []string{
 		"app/layout.tsx",
