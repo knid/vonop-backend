@@ -91,6 +91,16 @@ type BackendAutoDeployer func(ctx context.Context, project *models.AppProject) e
 // to the model so it can react.
 type MobileBuildTrigger func(ctx context.Context, project *models.AppProject, user *models.User, platforms []string) (buildID string, taskIDs map[string]string, err error)
 
+// WebDeployTrigger queues a fresh Fly web deploy for the project, on behalf
+// of the chat agent. Used by trigger_web_deploy so the agent can close the
+// read-fix-redeploy loop after diagnosing a failed deployment. Returns the
+// new deployment ID so the tool result can include a status URL.
+//
+// Best-effort by design: implementations must swallow ErrDeployInProgress
+// (a manual deploy was already running) and log other errors. The chat turn
+// must not fail because a background deploy failed to enqueue.
+type WebDeployTrigger func(ctx context.Context, project *models.AppProject, user *models.User) (deploymentID string, err error)
+
 // GatewayAllowedModelsFn returns the model IDs (chat + image, OpenRouter /
 // fal format) the current user's subscription tier can reach through the
 // Wemob AI Gateway. Bound per-run in AgentDeps so the agent package never has
@@ -153,6 +163,7 @@ type RunDependencies struct {
 	AutoDeployBackend        BackendAutoDeployer
 	GatewayAllowedModels GatewayAllowedModelsFn
 	TriggerMobileBuild   MobileBuildTrigger
+	TriggerWebDeploy     WebDeployTrigger
 	RecordLLMUsage       LLMUsageRecorder
 	RecordLLMError       LLMErrorRecorder
 }

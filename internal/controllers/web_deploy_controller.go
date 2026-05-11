@@ -160,10 +160,22 @@ func (c *Controller) MarkDeploymentSucceeded(deploymentID string, deployedURL st
 // MarkDeploymentFailed records the reason in the deployment row so the UI can
 // show a useful error.
 func (c *Controller) MarkDeploymentFailed(deploymentID string, reason string) error {
+	return c.MarkDeploymentFailedWithDetails(deploymentID, reason, nil)
+}
+
+// MarkDeploymentFailedWithDetails records the failure reason and stores
+// structured error details in ProviderData so the agent's read_deploy_logs tool
+// can surface build logs, stage info, etc.
+func (c *Controller) MarkDeploymentFailedWithDetails(deploymentID string, reason string, details map[string]any) error {
+	pd := map[string]any{}
+	if len(details) > 0 {
+		pd["error"] = details
+	}
 	_, err := c.DB.DB.NewUpdate().
 		Model((*models.AppDeployment)(nil)).
 		Set("status = ?", "failed").
 		Set("error_message = ?", reason).
+		Set("provider_data = ?", pd).
 		Set("updated_at = ?", time.Now()).
 		Where("id = ?", deploymentID).
 		Exec(context.Background())
@@ -315,13 +327,14 @@ func (c *Controller) HandleWebDeployTask(ctx context.Context, t *asynq.Task) err
 	// in the Dockerfile.
 	var (
 		imageRef          string
+		buildLog          string
 		buildErr, syncErr error
 		wg                sync.WaitGroup
 	)
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		imageRef, _, buildErr = c.FlyService.BuildAndPush(flyAppName, sourceDir, p.DeploymentID, envVars)
+		imageRef, buildLog, buildErr = c.FlyService.BuildAndPush(flyAppName, sourceDir, p.DeploymentID, envVars)
 	}()
 	go func() {
 		defer wg.Done()
@@ -331,7 +344,9 @@ func (c *Controller) HandleWebDeployTask(ctx context.Context, t *asynq.Task) err
 	// Build failure dominates: without the image we can't deploy machines, and
 	// retrying handles secrets idempotently on the next attempt.
 	if buildErr != nil {
-		return c.maybeRetry(ctx, p.DeploymentID, "build", buildErr)
+		return c.maybeRetryWithDetails(ctx, p.DeploymentID, "build", buildErr, map[string]any{
+			"build_log": buildLog,
+		})
 	}
 	if syncErr != nil {
 		return c.maybeRetry(ctx, p.DeploymentID, "sync_secrets", syncErr)
@@ -490,10 +505,17 @@ func (c *Controller) waitForHealthyWithRemediation(
 
 // failTask marks deployment failed and returns asynq.SkipRetry for non-retryable errors.
 func (c *Controller) failTask(deploymentID, stage string, err error) error {
+	return c.failTaskWithDetails(deploymentID, stage, err, nil)
+}
+
+// failTaskWithDetails is like failTask but stores additional structured error
+// details in the deployment row's ProviderData so the agent's read_deploy_logs
+// tool can surface rich context (e.g. flyctl build output) to the model.
+func (c *Controller) failTaskWithDetails(deploymentID, stage string, err error, details map[string]any) error {
 	slog.Error("deploy_failed",
 		"deployment_id", deploymentID, "stage", stage,
 		"error", err, "retryable", false)
-	if mErr := c.MarkDeploymentFailed(deploymentID, fmt.Sprintf("%s: %v", stage, err)); mErr != nil {
+	if mErr := c.MarkDeploymentFailedWithDetails(deploymentID, fmt.Sprintf("%s: %v", stage, err), details); mErr != nil {
 		slog.Error("mark_failed_db_error", "deployment_id", deploymentID, "stage", stage, "err", mErr)
 	}
 	c.fireDeployFailedEvent(deploymentID, stage, err)
@@ -507,6 +529,12 @@ func (c *Controller) failTask(deploymentID, stage string, err error) error {
 // retry budget would archive the task in asynq with the row still stuck in
 // 'building' forever.
 func (c *Controller) maybeRetry(ctx context.Context, deploymentID, stage string, err error) error {
+	return c.maybeRetryWithDetails(ctx, deploymentID, stage, err, nil)
+}
+
+// maybeRetryWithDetails is like maybeRetry but stores additional structured
+// error details on the final failure mark.
+func (c *Controller) maybeRetryWithDetails(ctx context.Context, deploymentID, stage string, err error, details map[string]any) error {
 	retryable := fly.IsRetryable(err)
 	finalAttempt := isFinalRetryAttempt(ctx)
 	slog.Error("deploy_failed",
@@ -515,7 +543,7 @@ func (c *Controller) maybeRetry(ctx context.Context, deploymentID, stage string,
 	if retryable && !finalAttempt {
 		return err
 	}
-	if mErr := c.MarkDeploymentFailed(deploymentID, fmt.Sprintf("%s: %v", stage, err)); mErr != nil {
+	if mErr := c.MarkDeploymentFailedWithDetails(deploymentID, fmt.Sprintf("%s: %v", stage, err), details); mErr != nil {
 		slog.Error("mark_failed_db_error", "deployment_id", deploymentID, "stage", stage, "err", mErr)
 	}
 	c.fireDeployFailedEvent(deploymentID, stage, err)

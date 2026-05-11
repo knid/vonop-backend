@@ -139,16 +139,22 @@ func BuildRegistryFor(project *models.AppProject, deps *RunDependencies) *Regist
 	// AIAddendum in context.go so the addendum only injects after setup.
 	r.Register(SetupAIGatewayTool{Deps: deps})
 
+	// <P1#17> read_build_logs + trigger_build_after_fix — gated to
+	// mobile_app_native because both tools depend on the
+	// AppProject-scoped build pipeline (BuildExpoMobile only runs for
+	// this project type).
 	if project != nil && project.ProjectType == models.ProjectTypeMobileAppNative {
 		r.Register(&ReadMobileConfigTool{})
-		// <P1#17> read_build_logs + trigger_build_after_fix — gated to
-		// mobile_app_native because both tools depend on the
-		// AppProject-scoped build pipeline (BuildExpoMobile only runs for
-		// this project type).
 		r.Register(&ReadBuildLogsTool{Deps: deps})
 		r.Register(&TriggerBuildAfterFixTool{Deps: deps})
 		r.Register(ProvisionLocalDatabaseTool{Deps: deps})
 	}
+
+	// read_deploy_logs + trigger_web_deploy — available for all project types
+	// that have a web deploy pipeline (web, ecommerce, and mobile_app_native
+	// which deploys a backend/ subtree to Fly).
+	r.Register(&ReadDeployLogsTool{Deps: deps})
+	r.Register(&TriggerWebDeployTool{Deps: deps})
 	// Ecommerce projects use the same generic DB tools as every other app;
 	// their tenant Neon database is seeded from
 	// internal/starters/ecommerce_schema.sql at provisioning time. On top of
