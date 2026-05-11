@@ -13,7 +13,18 @@ func (v *HttpViews) GetShipItems(w http.ResponseWriter, r *http.Request) {
 		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
-	resp, err := v.Controller.GetShipItems(r.Context(), user)
+
+	var orgID string
+	if rawOrgID := r.URL.Query().Get("org_id"); rawOrgID != "" {
+		verifiedOrgID, oErr := v.Controller.RequireOrgMembership(user, rawOrgID)
+		if oErr != nil {
+			utils.JSONErrorCode(w, constants.ErrForbidden, http.StatusForbidden, nil)
+			return
+		}
+		orgID = verifiedOrgID.String()
+	}
+
+	resp, err := v.Controller.GetShipItems(r.Context(), user, orgID)
 	if err != nil {
 		utils.JSONInternalError(w, err)
 		return

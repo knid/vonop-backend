@@ -14,16 +14,25 @@ import (
 	"github.com/uptrace/bun"
 )
 
-func (c *Controller) GetShipItems(ctx context.Context, user *models.User) (*responses.ShipResponse, error) {
+func (c *Controller) GetShipItems(ctx context.Context, user *models.User, orgID string) (*responses.ShipResponse, error) {
 	if user == nil {
 		return nil, errors.New("user required")
 	}
 
 	var projects []models.AppProject
-	if err := c.DB.DB.NewSelect().
-		Model(&projects).
-		Where("user_id = ?", user.ID).
-		Scan(ctx); err != nil {
+	var err error
+	if orgID != "" {
+		err = c.DB.DB.NewSelect().
+			Model(&projects).
+			Where("organization_id = ?", orgID).
+			Scan(ctx)
+	} else {
+		err = c.DB.DB.NewSelect().
+			Model(&projects).
+			Where("user_id = ?", user.ID).
+			Scan(ctx)
+	}
+	if err != nil {
 		return nil, err
 	}
 
@@ -50,9 +59,9 @@ func (c *Controller) GetShipItems(ctx context.Context, user *models.User) (*resp
 	if err := c.DB.DB.NewSelect().
 		Model(&tasks).
 		Relation("Build").
-		Where("t.app_project_id IN (?)", bun.In(appIDs)).
-		Where("t.created_at > ?", since).
-		Order("t.created_at DESC").
+		Where("app_project_id IN (?)", bun.In(appIDs)).
+		Where("created_at > ?", since).
+		Order("created_at DESC").
 		Scan(ctx); err != nil {
 		return nil, err
 	}
