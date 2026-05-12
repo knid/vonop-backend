@@ -58,6 +58,20 @@ api.wemob.io {
             tls_server_name {http.request.host.labels.3}.e2b.app
         }
         header_up Host {http.request.host.labels.3}.e2b.app
+
+        # Sandbox expired (~1h idle) — E2B returns 502 with a JSON body.
+        # Swap it for the branded static page from wemob.app so the iframe
+        # (and direct visitors to shared preview URLs) get something
+        # actionable instead of raw JSON. The static page postMessages the
+        # studio parent so the preview UI auto-recovers.
+        @sandbox_gone status 502
+        handle_response @sandbox_gone {
+            header -Content-Type
+            rewrite * /sandbox-expired.html
+            reverse_proxy https://wemob.app {
+                header_up Host wemob.app
+            }
+        }
     }
 }
 
