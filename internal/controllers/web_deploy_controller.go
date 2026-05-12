@@ -371,13 +371,16 @@ func (c *Controller) HandleWebDeployTask(ctx context.Context, t *asynq.Task) err
 
 	// 9. Wait for the machine to report healthy. Fly doesn't publish
 	// machine-state webhooks to own-org apps, so we poll inline here.
-	// 5min covers a cold-start build + machine launch comfortably.
+	// 10min gives slow Next.js boots (large dep trees, first-run npm
+	// cache fill) room before we declare the deploy stuck. The full 10
+	// is only realized when build/push is fast; on worst-case ~10-min
+	// builds, asynq.Timeout (15min) kicks in first.
 	//
 	// If the wait fails AND the failure looks like the Fly host-init bug
 	// (machine never reaches "started" before flyd's restart cap), this
 	// destroys the stuck machines and redeploys once in a fallback region.
 	// Other failures (app crash, real timeout) bubble up unchanged.
-	if err := c.waitForHealthyWithRemediation(ctx, p.DeploymentID, flyAppName, spec, 5*time.Minute); err != nil {
+	if err := c.waitForHealthyWithRemediation(ctx, p.DeploymentID, flyAppName, spec, 10*time.Minute); err != nil {
 		return c.maybeRetry(ctx, p.DeploymentID, "wait_healthy", err)
 	}
 
@@ -412,7 +415,7 @@ func (c *Controller) HandleWebDeployTask(ctx context.Context, t *asynq.Task) err
 // resolveDeployRegion picks the region for this deploy attempt. Precedence:
 //   1. host-init-bug remediation override (per-attempt, persisted in
 //      deployment_events) — re-running the known-bad primary would burn
-//      another 5min WaitForHealthy budget.
+//      another 10min WaitForHealthy budget.
 //   2. project.Region (E6 region selection), gated on limits.CanChooseRegion.
 //   3. FlyService.Region (FLY_PRIMARY_REGION fallback).
 func (c *Controller) resolveDeployRegion(ctx context.Context, deploymentID string, project *models.AppProject, limits *models.StandardUserLimits) string {
@@ -598,8 +601,9 @@ func (c *Controller) fireDeployFailedEvent(deploymentID, stage string, deployErr
 //
 // stuckThreshold needs to comfortably exceed the longest legitimate stage
 // duration. Today the worst case is BuildAndPush (Fly remote builder, ~5–10
-// min for a Next.js app) plus WaitForHealthy (5 min, hard cap). 20 min keeps
-// well clear of that while still failing fast enough to feel responsive.
+// min for a Next.js app) plus WaitForHealthy (10 min budget, capped by
+// asynq.Timeout at 15 min total). 20 min keeps well clear of that while
+// still failing fast enough to feel responsive.
 const stuckDeploymentThreshold = 20 * time.Minute
 
 func (c *Controller) ReapStuckDeploymentsTask(ctx context.Context) error {
