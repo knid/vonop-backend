@@ -66,12 +66,29 @@ api.wemob.io {
         # JSON. The static page postMessages the studio parent so the
         # preview UI auto-recovers. Self-hosted from Caddy so the error
         # path has no cross-domain dependency on the studio frontend.
+        #
+        # Two variants, switched on Referer:
+        #   - Iframe in the studio sends Referer https://app.wemob.io/
+        #     (origin-only under default strict-origin-when-cross-origin)
+        #     → /sandbox-expired.html, which has the deploy hint and no
+        #     "Open Studio" CTA (the studio shell already handles the
+        #     restart via postMessage).
+        #   - Anything else (direct visitor on a shared preview link,
+        #     no Referer, or external Referer) → /sandbox-expired-shared.html
+        #     which links back to the studio so they have somewhere to go.
         @sandbox_gone status 502
         handle_response @sandbox_gone {
             header -Content-Type
-            rewrite * /sandbox-expired.html
             root * /etc/caddy/static
-            file_server
+            @from_studio header Referer https://app.wemob.io/*
+            handle @from_studio {
+                rewrite * /sandbox-expired.html
+                file_server
+            }
+            handle {
+                rewrite * /sandbox-expired-shared.html
+                file_server
+            }
         }
     }
 }
