@@ -402,7 +402,14 @@ func (c *Controller) processWebhookEventTx(tx bun.Tx, event stripe.Event) ([]fun
 			oldGrant := c.PlanMonthlyAICredits(oldSub)
 			delta := newGrant - oldGrant
 			if delta > 0 {
-				balance, balErr := c.GetOrCreateCreditsBalance(owner, org.ID)
+				// Resolve limits from the new plan so the tx-aware balance path
+				// sees the new rollover / credit settings instead of reading stale
+				// committed state via GetUserLimits.
+				newLimits, _ := c.DB.GetStandardUserLimitsById(subs.LimitsID.String())
+				// Use the tx-aware variant so the balance creation/reset sees
+				// the just-updated org state instead of reading stale committed
+				// state via GetOrganizationByID / GetUserLimits.
+				balance, balErr := c.GetOrCreateCreditsBalanceInTx(tx, owner, org.ID, org, newGrant, newLimits)
 				if balErr != nil {
 					return nil, fmt.Errorf("get/create credits balance for upgrade grant: %w", balErr)
 				}
