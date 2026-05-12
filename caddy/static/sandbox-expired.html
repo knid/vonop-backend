@@ -192,13 +192,13 @@
   <body>
     <main class="card" role="alert" aria-live="polite">
       <div class="section-mark">
-        <span class="roman">Chapter II</span>
-        <span class="label">Preview</span>
+        <span class="roman" id="chapter">Chapter II</span>
+        <span class="label" id="section-label">Preview</span>
         <span class="rule" aria-hidden="true"></span>
       </div>
 
       <h1>
-        Your preview <em>has rested.</em>
+        <span id="headline-prefix">Your preview </span><em id="headline-accent">has rested.</em>
       </h1>
 
       <p class="lede" id="lede">
@@ -208,21 +208,21 @@
 
       <div class="actions">
         <button id="restart" class="primary" type="button" hidden>
-          <span>Restart preview</span>
+          <span id="restart-label">Restart preview</span>
           <svg class="arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <polyline points="1 4 1 10 7 10"></polyline>
             <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path>
           </svg>
         </button>
         <a id="open-studio" class="primary" href="https://wemob.app" hidden>
-          <span>Open Wemob Studio</span>
+          <span id="open-studio-label">Open Wemob Studio</span>
           <svg class="arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M5 12h14"></path>
             <path d="M12 5l7 7-7 7"></path>
           </svg>
         </a>
         <div class="meta" id="meta" hidden>
-          <span class="label">Sandbox</span>
+          <span class="label" id="sandbox-label">Sandbox</span>
           <span class="value" id="sandbox-id"></span>
         </div>
       </div>
@@ -230,6 +230,71 @@
 
     <script>
       (function () {
+        // Browser-language-aware copy. English is the fallback and matches the
+        // markup above so a no-JS render still reads correctly.
+        var STRINGS = {
+          en: {
+            title: "Preview expired · Wemob",
+            chapter: "Chapter II",
+            sectionLabel: "Preview",
+            headlinePrefix: "Your preview ",
+            headlineAccent: "has rested.",
+            iframeLede:
+              "Wemob sandboxes power down after an hour of activity to keep things light. Start a new one and we'll pick up right where you left off.",
+            standaloneLede:
+              "This preview link has expired. Open Wemob Studio to restart your app's preview.",
+            restartLabel: "Restart preview",
+            openStudioLabel: "Open Wemob Studio",
+            sandboxLabel: "Sandbox",
+          },
+          tr: {
+            title: "Önizleme süresi doldu · Wemob",
+            chapter: "Bölüm II",
+            sectionLabel: "Önizleme",
+            headlinePrefix: "Önizlemeniz ",
+            headlineAccent: "dinleniyor.",
+            iframeLede:
+              "Wemob sandbox'ları, sistemi hafif tutmak için bir saatlik etkinliğin ardından kapanır. Yeni bir tane başlatın, kaldığınız yerden devam edelim.",
+            standaloneLede:
+              "Bu önizleme bağlantısının süresi dolmuş. Uygulamanızın önizlemesini yeniden başlatmak için Wemob Studio'yu açın.",
+            restartLabel: "Önizlemeyi yeniden başlat",
+            openStudioLabel: "Wemob Studio'yu aç",
+            sandboxLabel: "Sandbox",
+          },
+        };
+
+        // Walk navigator.languages (most-preferred first) and pick the first
+        // supported base tag. Region/script suffixes are stripped (tr-TR → tr,
+        // en-GB → en). Anything we don't ship falls through to English.
+        function detectLang() {
+          try {
+            var prefs =
+              navigator.languages && navigator.languages.length
+                ? navigator.languages
+                : [navigator.language || "en"];
+            for (var i = 0; i < prefs.length; i++) {
+              var base = String(prefs[i]).toLowerCase().split("-")[0];
+              if (STRINGS[base]) return base;
+            }
+          } catch (e) {}
+          return "en";
+        }
+
+        var lang = detectLang();
+        var t = STRINGS[lang];
+        document.documentElement.lang = lang;
+        document.title = t.title;
+        document.getElementById("chapter").textContent = t.chapter;
+        document.getElementById("section-label").textContent = t.sectionLabel;
+        document.getElementById("headline-prefix").textContent =
+          t.headlinePrefix;
+        document.getElementById("headline-accent").textContent =
+          t.headlineAccent;
+        document.getElementById("restart-label").textContent = t.restartLabel;
+        document.getElementById("open-studio-label").textContent =
+          t.openStudioLabel;
+        document.getElementById("sandbox-label").textContent = t.sandboxLabel;
+
         // Hostname shape: {port}-{sandboxId}.preview.wemob.app. The first
         // label is split on the first '-' — anything after is the sandbox
         // id, even though E2B's IDs don't currently contain dashes.
@@ -279,6 +344,7 @@
           // The studio reacts to the postMessage by swapping its preview
           // pane into the "expired" state with a restart button — the
           // primary CTA lives there, so we just surface a hint here.
+          lede.textContent = t.iframeLede;
           restartBtn.hidden = false;
           restartBtn.addEventListener("click", function () {
             notifyParent();
@@ -298,10 +364,7 @@
           // don't know the appId from this origin, so root is best we can
           // do without a server-side lookup.
           openStudio.hidden = false;
-          // Override the lede with copy that makes more sense without a
-          // restart button in reach.
-          lede.textContent =
-            "This preview link has expired. Open Wemob Studio to restart your app's preview.";
+          lede.textContent = t.standaloneLede;
         }
       })();
     </script>
