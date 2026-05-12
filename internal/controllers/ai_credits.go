@@ -755,7 +755,7 @@ func (c *Controller) AddAICreditsInTx(tx bun.Tx, user *models.User, orgID uuid.U
 // to align with the new subscription and adds the plan's monthly credits.
 // Safe to call multiple times — uses a transaction with FOR UPDATE to prevent double grants.
 func (c *Controller) GrantSubscriptionCredits(user *models.User, orgID uuid.UUID) {
-	granted, credits, subRef, _ := c.grantSubscriptionCreditsCore(nil, user, orgID)
+	granted, credits, subRef, _ := c.grantSubscriptionCreditsCore(nil, user, orgID, nil, 0)
 	if !granted {
 		return
 	}
@@ -772,7 +772,15 @@ func (c *Controller) GrantSubscriptionCredits(user *models.User, orgID uuid.UUID
 // non-nil the outer tx must be rolled back; if hook is nil the grant was a
 // no-op (already granted) but the tx is still valid to commit.
 func (c *Controller) GrantSubscriptionCreditsInTx(tx bun.Tx, user *models.User, orgID uuid.UUID) (func(), error) {
-	granted, credits, subRef, err := c.grantSubscriptionCreditsCore(&tx, user, orgID)
+	return c.GrantSubscriptionCreditsInTxWithResolved(tx, user, orgID, nil, 0)
+}
+
+// GrantSubscriptionCreditsInTxWithResolved is like GrantSubscriptionCreditsInTx
+// but accepts a pre-resolved organization and monthly credit count. Use this
+// when calling inside a transaction that just mutated the org's subscription,
+// so the grant sees the new plan instead of reading stale committed state.
+func (c *Controller) GrantSubscriptionCreditsInTxWithResolved(tx bun.Tx, user *models.User, orgID uuid.UUID, org *models.Organization, monthlyCredits int) (func(), error) {
+	granted, credits, subRef, err := c.grantSubscriptionCreditsCore(&tx, user, orgID, org, monthlyCredits)
 	if err != nil {
 		return nil, err
 	}
@@ -792,20 +800,29 @@ func (c *Controller) GrantSubscriptionCreditsInTx(tx bun.Tx, user *models.User, 
 // outer tx. Returns (granted, credits, subscriptionID, err). When outerTx is
 // non-nil, errors propagate so the caller can roll back; granted=false with
 // err=nil means the grant was a legitimate no-op (already granted, no plan).
-func (c *Controller) grantSubscriptionCreditsCore(outerTx *bun.Tx, user *models.User, orgID uuid.UUID) (bool, int, string, error) {
-	limits, err := c.GetUserLimits(user)
-	if err != nil || limits.MonthlyAICredits <= 0 {
-		return false, 0, "", nil
+//
+// If org is non-nil it is used directly instead of querying the DB (prevents
+// stale reads when the caller is inside a tx that just updated the org).
+// If monthlyCredits > 0 it is used directly instead of resolving via GetUserLimits.
+func (c *Controller) grantSubscriptionCreditsCore(outerTx *bun.Tx, user *models.User, orgID uuid.UUID, org *models.Organization, monthlyCredits int) (bool, int, string, error) {
+	if monthlyCredits <= 0 {
+		limits, err := c.GetUserLimits(user)
+		if err != nil || limits.MonthlyAICredits <= 0 {
+			return false, 0, "", nil
+		}
+		monthlyCredits = limits.MonthlyAICredits
 	}
 
-	// Subscription state (start, ID) lives on the organization (Plan 5).
-	org, err := c.DB.GetOrganizationByID(orgID.String())
-	if err != nil {
-		slog.Error("failed to load organization for subscription grant", "error", err, "user_id", user.ID, "org_id", orgID)
-		if outerTx != nil {
-			return false, 0, "", fmt.Errorf("load organization for subscription grant: %w", err)
+	if org == nil {
+		var err error
+		org, err = c.DB.GetOrganizationByID(orgID.String())
+		if err != nil {
+			slog.Error("failed to load organization for subscription grant", "error", err, "user_id", user.ID, "org_id", orgID)
+			if outerTx != nil {
+				return false, 0, "", fmt.Errorf("load organization for subscription grant: %w", err)
+			}
+			return false, 0, "", nil
 		}
-		return false, 0, "", nil
 	}
 
 	balance, err := c.GetOrCreateCreditsBalance(user, orgID)
@@ -843,7 +860,7 @@ func (c *Controller) grantSubscriptionCreditsCore(outerTx *bun.Tx, user *models.
 		periodStart, periodEnd := utils.BillingPeriod(org.SubscriptionStartAt, time.Now())
 		if _, err := tx.NewRaw(
 			"UPDATE ai_credits_balances SET balance = balance + ?, period_start = ?, period_end = ?, updated_at = NOW() WHERE id = ?",
-			limits.MonthlyAICredits, periodStart, periodEnd, balance.ID,
+			monthlyCredits, periodStart, periodEnd, balance.ID,
 		).Exec(context.Background()); err != nil {
 			return false, fmt.Errorf("update balance: %w", err)
 		}
@@ -851,7 +868,7 @@ func (c *Controller) grantSubscriptionCreditsCore(outerTx *bun.Tx, user *models.
 		if _, err := c.DB.CreateAICreditTransactionTx(tx, &models.AICreditTransaction{
 			OrganizationID: orgID,
 			UserID:         user.ID,
-			Amount:         limits.MonthlyAICredits,
+			Amount:         monthlyCredits,
 			Action:         "subscription_grant",
 			Reference:      org.SubscriptionID.String(),
 		}); err != nil {
@@ -884,8 +901,8 @@ func (c *Controller) grantSubscriptionCreditsCore(outerTx *bun.Tx, user *models.
 	if !granted {
 		return false, 0, "", nil
 	}
-	slog.Info("subscription credits granted", "user_id", user.ID, "credits", limits.MonthlyAICredits)
-	return true, limits.MonthlyAICredits, org.SubscriptionID.String(), nil
+	slog.Info("subscription credits granted", "user_id", user.ID, "credits", monthlyCredits)
+	return true, monthlyCredits, org.SubscriptionID.String(), nil
 }
 
 // messagesToPostHogInput converts []utils.Message to the format PostHog expects

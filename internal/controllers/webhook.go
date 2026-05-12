@@ -202,10 +202,12 @@ func (c *Controller) processWebhookEventTx(tx bun.Tx, event stripe.Event) ([]fun
 			}
 		}
 
-		// Grant plan's monthly credits (e.g. 100 for Starter) inside the dedup tx.
-		// Must run after UpdateOrganization so the org has the correct SubscriptionID.
-		// Subscriptions are billed at the org level (Plan A) — credits land on the org balance.
-		hook, gerr := c.GrantSubscriptionCreditsInTx(tx, owner, org.ID)
+		// Grant plan's monthly credits inside the dedup tx. Must run after
+		// UpdateOrganization so the org has the correct SubscriptionID.
+		// Pass the already-resolved org and credit count so the grant sees the
+		// new plan instead of reading stale committed state via GetUserLimits.
+		monthlyCredits := c.PlanMonthlyAICredits(subs)
+		hook, gerr := c.GrantSubscriptionCreditsInTxWithResolved(tx, owner, org.ID, org, monthlyCredits)
 		if gerr != nil {
 			return nil, fmt.Errorf("grant subscription credits: %w", gerr)
 		}
