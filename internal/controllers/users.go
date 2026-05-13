@@ -259,8 +259,6 @@ func (c *Controller) RegisterUser(userRegisterReq requests.UserRegisterRequest, 
 		slog.Error("failed to persist Stripe customer to user", "error", err, "user_id", createdUser.ID, "customer_id", customer.ID)
 	}
 
-	c.assignFreePlan(personalOrg)
-
 	// Apply referral code if provided during registration
 	if userRegisterReq.ReferralCode != "" {
 		if err := c.ApplyReferralCode(createdUser, userRegisterReq.ReferralCode); err != nil {
@@ -442,8 +440,6 @@ func (c *Controller) GoogleLogin(oauthUser goth.User, attr MetaAttribution, loca
 			if _, err := c.DB.UpdateUser(user); err != nil {
 				slog.Error("failed to persist Stripe customer to user", "error", err, "user_id", user.ID, "customer_id", customer.ID)
 			}
-
-			c.assignFreePlan(personalOrg)
 
 			if err := c.GrantInitialFreeCreditsIfNeeded(user, personalOrg.ID); err != nil {
 				slog.Error("failed to grant initial free credits on google signup", "error", err, "user_id", user.ID)
