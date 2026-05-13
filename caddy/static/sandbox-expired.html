@@ -73,30 +73,22 @@
           box-shadow: var(--shadow-xl);
         }
       }
-      .section-mark {
+      .brand {
         display: flex;
         align-items: center;
-        gap: 12px;
+        gap: 10px;
         margin-bottom: 28px;
       }
-      .section-mark .roman {
+      .brand img {
+        width: 32px;
+        height: 32px;
+        display: block;
+      }
+      .brand .wordmark {
         font-family: var(--font-serif);
-        font-style: italic;
-        font-size: 13px;
-        letter-spacing: 0.02em;
-        color: var(--ink-faint);
-      }
-      .section-mark .label {
-        font-size: 11px;
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 0.18em;
-        color: var(--ink-faint);
-      }
-      .section-mark .rule {
-        flex: 1;
-        height: 1px;
-        background: var(--border);
+        font-size: 18px;
+        letter-spacing: -0.01em;
+        color: var(--ink);
       }
       h1 {
         font-family: var(--font-serif);
@@ -199,10 +191,9 @@
   </head>
   <body>
     <main class="card" role="alert" aria-live="polite">
-      <div class="section-mark">
-        <span class="roman" id="chapter">Chapter II</span>
-        <span class="label" id="section-label">Preview</span>
-        <span class="rule" aria-hidden="true"></span>
+      <div class="brand" aria-hidden="true">
+        <img src="/wemob.png" alt="" width="32" height="32" />
+        <span class="wordmark">Wemob</span>
       </div>
 
       <h1>
@@ -241,8 +232,6 @@
         var STRINGS = {
           en: {
             title: "Preview expired · Wemob",
-            chapter: "Chapter II",
-            sectionLabel: "Preview",
             headlinePrefix: "Your preview ",
             headlineAccent: "has rested.",
             iframeLede:
@@ -256,10 +245,8 @@
           },
           tr: {
             title: "Önizleme süresi doldu · Wemob",
-            chapter: "Bölüm II",
-            sectionLabel: "Önizleme",
-            headlinePrefix: "Önizlemeniz ",
-            headlineAccent: "dinleniyor.",
+            headlinePrefix: "Önizlemenin ",
+            headlineAccent: "süresi doldu.",
             iframeLede:
               "Wemob sandbox'ları, sistemi hafif tutmak için bir saatlik etkinliğin ardından kapanır. Yeni bir tane başlatın, kaldığınız yerden devam edelim.",
             standaloneLede:
@@ -292,8 +279,6 @@
         var t = STRINGS[lang];
         document.documentElement.lang = lang;
         document.title = t.title;
-        document.getElementById("chapter").textContent = t.chapter;
-        document.getElementById("section-label").textContent = t.sectionLabel;
         document.getElementById("headline-prefix").textContent =
           t.headlinePrefix;
         document.getElementById("headline-accent").textContent =
