@@ -338,14 +338,12 @@ func (c *Controller) processWebhookEventTx(tx bun.Tx, event stripe.Event) ([]fun
 			org.SubscriptionStatus = newStatus
 
 		case "canceled":
-			// A5/A7/A8: re-home to the Free plan instead of nulling SubscriptionID.
-			// Otherwise GetStandardUserSubscriptionByOrg errors and every
-			// `if err == nil` enforcement gate falls through, letting cancelled
-			// users keep deploying unbounded. With Free's tight quotas in place,
-			// the gates fire correctly while requireActiveSubscription still
-			// blocks "canceled" status on write paths.
+			// Free tier removed 2026-05-13: cancelled orgs go to no plan.
+			// SubscriptionID = uuid.Nil causes GetStandardUserSubscriptionByOrg to
+			// return sql.ErrNoRows, which propagates up through most limit lookups
+			// and blocks the operation — fail-closed.
 			org.SubscriptionStatus = newStatus
-			org.SubscriptionID = c.freePlanIDOrNil()
+			org.SubscriptionID = uuid.Nil
 			// A6: schedule the 7-day grace teardown.
 			if err := c.EnqueueOrgGraceTeardown(org.ID); err != nil {
 				slog.Warn("canceled: failed to schedule grace teardown", "error", err, "org_id", org.ID)
@@ -357,10 +355,10 @@ func (c *Controller) processWebhookEventTx(tx bun.Tx, event stripe.Event) ([]fun
 			org.SubscriptionStatus = newStatus
 
 		default:
-			// incomplete, incomplete_expired, paused — re-home to Free for the
-			// same reason as "canceled" above (avoid fail-open enforcement gates).
+			// incomplete, incomplete_expired, paused — null the plan for the
+			// same reason as "canceled" above (no more free tier).
 			org.SubscriptionStatus = newStatus
-			org.SubscriptionID = c.freePlanIDOrNil()
+			org.SubscriptionID = uuid.Nil
 		}
 
 		addHook(owner, constants.EVENT_SUBSCRIPTION_UPDATED, map[string]any{
@@ -724,11 +722,12 @@ func (c *Controller) processWebhookEventTx(tx bun.Tx, event stripe.Event) ([]fun
 			}
 		}
 
-		// A5/A7/A8: re-home to Free instead of nulling SubscriptionID so the
-		// limit-lookup path returns Free's tight quotas, and fail-closed
-		// enforcement gates still see a real plan after cancellation.
+		// Free tier removed 2026-05-13: cancelled orgs go to no plan.
+		// SubscriptionID = uuid.Nil causes GetStandardUserSubscriptionByOrg to
+		// return sql.ErrNoRows, which propagates up through most limit lookups
+		// and blocks the operation — fail-closed.
 		org.SubscriptionStatus = "canceled"
-		org.SubscriptionID = c.freePlanIDOrNil()
+		org.SubscriptionID = uuid.Nil
 
 		// A6: schedule a 7-day-out teardown of the org's Fly apps + Neon DBs.
 		// Cancelled gracefully if the user re-subscribes within the window.

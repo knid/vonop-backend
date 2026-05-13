@@ -880,70 +880,7 @@ func seedPlans(db *database.Database, sm secret.SecretManager) {
 		Limits        models.StandardUserLimits
 	}
 
-	// 2026-05-06: free up the "free_plan" sentinel price_id from the legacy
-	// "Free" row so the seed-update loop below can assign the same sentinel
-	// to the new "Starter" $0 row. Without this, the UPDATE hits the
-	// price_id unique constraint and the new Starter row keeps the OLD
-	// Stripe price ID and $20 monthly_price (the symptom we hit on first
-	// post-revamp prod boot). The legacy Free row gets soft-deleted further
-	// down anyway, so clearing its price_id is safe.
-	if _, err := db.DB.NewUpdate().
-		Table("standard_user_subscriptions").
-		Set("price_id = NULL").
-		Where("name = ? AND price_id = ?", "Free", "free_plan").
-		Exec(context.Background()); err != nil {
-		slog.Warn("failed to clear legacy Free price_id pre-seed", "error", err)
-	}
-
 	plans := []planDef{
-		{
-			Name:         "Starter",
-			Description:  "Free tier — try Wemob with no commitment",
-			MonthlyPrice: 0,
-			PriceID:      "free_plan",
-			Limits: models.StandardUserLimits{
-				MaximumCredentialCount:    2,
-				MontlyBuildCount:          0, // retired — credits gate builds
-				MontlyNotificationCount:   3,
-				MonthlyAICredits:          50,
-				MaxSeats:                  1,
-				MaxWebApps:                1,
-				// 1 mobile draft on the free tier so users can try the
-				// mobile composer end-to-end. Build / deploy / store
-				// submission stay gated (CanBuildMobile, CanDeployMobile,
-				// MaxDeployedMobileApps below all 0/false) — Hobby is the
-				// upgrade path for actually shipping a mobile app.
-				MaxMobileApps:             1,
-				MaxDeployedWebApps:        1,
-				MaxDeployedMobileApps:     0,
-				CanDeployMobile:           false,
-				DeployMemoryMB:            256,
-				DeployCPUs:                "1",
-				DeployDBOrgTier:           "free",
-				DeployDBMaxCU:             "1",
-				DeployDBStorageMB:         512,
-				DeployDBActiveTimeSec:     360000,
-				DeployDBDataTransferBytes: 5 * 1024 * 1024 * 1024,
-				DeployDBSuspendTimeoutSec: 300,
-				DeployDBComputeTimeSec:    0,
-				MinMachinesRunning:        0,
-				MonthlyBandwidthGB:        10,
-				MonthlyOTAPublishCount:    0, // retired — credits gate OTAs
-				CanChooseRegion:           false,
-				CreditRolloverMonths:      0,
-				CanBuildToAndroid:         true,
-				CanBuildToIOS:             true,
-				CanBuildMobile:            false,
-				CanUseAnalytics:           false,
-				CanAccessCode:             false,
-				CanBuyDomain:              false,
-				CanUseEmailService:        false,
-				CanUseEcommerce:           true,
-				CanExportToGitHub:         false,
-				CanDeployWeb:              true,
-				CanRemoveBrandLogo:        false,
-			},
-		},
 		{
 			Name:          "Hobby",
 			Description:   "For solo builders shipping their first apps",
@@ -1175,59 +1112,6 @@ func seedPlans(db *database.Database, sm secret.SecretManager) {
 		slog.Info("updated subscription plan", "plan", p.Name)
 	}
 
-	// 2026-05-06: re-home orgs from the legacy "Free" plan to the new "Starter"
-	// plan, then soft-delete legacy plan rows ("Free", "Professional").
-	//
-	// ORDER MATTERS: the re-home step must run AFTER the seed-create-or-update
-	// loop above, because the new "Starter" $0 row is created/updated by that
-	// loop. Soft-deleting "Free" must happen AFTER the re-home so that orgs are
-	// never left pointing at a soft-deleted subscription row.
-	//
-	// Use Bun's NewDelete on the model so the soft_delete struct tag fires
-	// (sets deleted_at instead of removing the row).
-	freeRow, freeErr := db.GetSubscriptionByName("Free")
-	starterRow, starterErr := db.GetSubscriptionByName("Starter")
-	if freeErr == nil && starterErr == nil {
-		res, err := db.DB.NewUpdate().
-			Table("organizations").
-			Set("subscription_id = ?", starterRow.ID).
-			Where("subscription_id = ?", freeRow.ID).
-			Exec(context.Background())
-		if err != nil {
-			slog.Warn("failed to re-home orgs from Free to Starter", "error", err)
-		} else if n, _ := res.RowsAffected(); n > 0 {
-			slog.Info("re-homed orgs from Free to Starter", "count", n)
-		}
-	}
-
-	for _, legacyName := range []string{"Free", "Professional"} {
-		existing, err := db.GetSubscriptionByName(legacyName)
-		if err != nil {
-			continue // already gone or never seeded
-		}
-		if _, dErr := db.DB.NewDelete().Model(existing).Where("id = ?", existing.ID).Exec(context.Background()); dErr != nil {
-			slog.Warn("failed to soft-delete legacy plan", "name", legacyName, "error", dErr)
-		} else {
-			slog.Info("soft-deleted legacy plan", "name", legacyName)
-		}
-	}
-}
-
-func migrateInactiveUsersToFree(bundb *bun.DB) {
-	// Assign starter plan (free tier) to inactive users
-	res, err := bundb.ExecContext(context.Background(), `
-		UPDATE users SET subscription_status = 'free', subscription_id = (
-			SELECT id FROM standard_user_subscriptions WHERE name = 'Starter' AND deleted_at IS NULL LIMIT 1
-		) WHERE subscription_status = 'inactive'
-		AND (subscription_id IS NULL OR subscription_id = '00000000-0000-0000-0000-000000000000')
-		AND deleted_at IS NULL
-	`)
-	if err != nil {
-		slog.Warn("migrate inactive users to starter plan failed", "error", err)
-	} else if n, _ := res.RowsAffected(); n > 0 {
-		slog.Info("migrated inactive users to starter plan", "count", n)
-	}
-
 }
 
 // backfillEncryptIntegrations rewrites every AppIntegration row whose
@@ -1406,7 +1290,6 @@ func main() {
 	backfillEncryptIntegrations(bundb, sm)
 
 	seedPlans(db, sm)
-	migrateInactiveUsersToFree(bundb)
 
 	go utils.CheckSessionStatusJob(db)
 	go utils.CheckUsageAlertsJob(db, controller.EventService)
