@@ -880,70 +880,7 @@ func seedPlans(db *database.Database, sm secret.SecretManager) {
 		Limits        models.StandardUserLimits
 	}
 
-	// 2026-05-06: free up the "free_plan" sentinel price_id from the legacy
-	// "Free" row so the seed-update loop below can assign the same sentinel
-	// to the new "Starter" $0 row. Without this, the UPDATE hits the
-	// price_id unique constraint and the new Starter row keeps the OLD
-	// Stripe price ID and $20 monthly_price (the symptom we hit on first
-	// post-revamp prod boot). The legacy Free row gets soft-deleted further
-	// down anyway, so clearing its price_id is safe.
-	if _, err := db.DB.NewUpdate().
-		Table("standard_user_subscriptions").
-		Set("price_id = NULL").
-		Where("name = ? AND price_id = ?", "Free", "free_plan").
-		Exec(context.Background()); err != nil {
-		slog.Warn("failed to clear legacy Free price_id pre-seed", "error", err)
-	}
-
 	plans := []planDef{
-		{
-			Name:         "Starter",
-			Description:  "Free tier — try Wemob with no commitment",
-			MonthlyPrice: 0,
-			PriceID:      "free_plan",
-			Limits: models.StandardUserLimits{
-				MaximumCredentialCount:    2,
-				MontlyBuildCount:          0, // retired — credits gate builds
-				MontlyNotificationCount:   3,
-				MonthlyAICredits:          50,
-				MaxSeats:                  1,
-				MaxWebApps:                1,
-				// 1 mobile draft on the free tier so users can try the
-				// mobile composer end-to-end. Build / deploy / store
-				// submission stay gated (CanBuildMobile, CanDeployMobile,
-				// MaxDeployedMobileApps below all 0/false) — Hobby is the
-				// upgrade path for actually shipping a mobile app.
-				MaxMobileApps:             1,
-				MaxDeployedWebApps:        1,
-				MaxDeployedMobileApps:     0,
-				CanDeployMobile:           false,
-				DeployMemoryMB:            256,
-				DeployCPUs:                "1",
-				DeployDBOrgTier:           "free",
-				DeployDBMaxCU:             "1",
-				DeployDBStorageMB:         512,
-				DeployDBActiveTimeSec:     360000,
-				DeployDBDataTransferBytes: 5 * 1024 * 1024 * 1024,
-				DeployDBSuspendTimeoutSec: 300,
-				DeployDBComputeTimeSec:    0,
-				MinMachinesRunning:        0,
-				MonthlyBandwidthGB:        10,
-				MonthlyOTAPublishCount:    0, // retired — credits gate OTAs
-				CanChooseRegion:           false,
-				CreditRolloverMonths:      0,
-				CanBuildToAndroid:         true,
-				CanBuildToIOS:             true,
-				CanBuildMobile:            false,
-				CanUseAnalytics:           false,
-				CanAccessCode:             false,
-				CanBuyDomain:              false,
-				CanUseEmailService:        false,
-				CanUseEcommerce:           true,
-				CanExportToGitHub:         false,
-				CanDeployWeb:              true,
-				CanRemoveBrandLogo:        false,
-			},
-		},
 		{
 			Name:          "Hobby",
 			Description:   "For solo builders shipping their first apps",
