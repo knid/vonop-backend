@@ -494,7 +494,7 @@ func (c *Controller) EnsurePersonalOrg(user *models.User) (*models.Organization,
 	// Free tier removed 2026-05-13: new personal orgs are born with no plan.
 	// The frontend renders a plan-picker / paywall when SubscriptionID is zero;
 	// every backend feature gate fails closed (subscription lookup returns
-	// sql.ErrNoRows, callers operate on zero-value limits).
+	// sql.ErrNoRows, which propagates up and blocks the operation).
 	org := &models.Organization{
 		Name:       orgName,
 		Slug:       slug,

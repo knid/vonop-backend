@@ -338,10 +338,10 @@ func (c *Controller) processWebhookEventTx(tx bun.Tx, event stripe.Event) ([]fun
 			org.SubscriptionStatus = newStatus
 
 		case "canceled":
-			// Free tier is gone (2026-05-13): cancelled orgs go to no plan.
-			// Every feature gate fails closed on SubscriptionID == uuid.Nil because
-			// the subscription lookup returns sql.ErrNoRows and callers operate
-			// on a zero-value *StandardUserLimits (all Can* false, all counts 0).
+			// Free tier removed 2026-05-13: cancelled orgs go to no plan.
+			// SubscriptionID = uuid.Nil causes GetStandardUserSubscriptionByOrg to
+			// return sql.ErrNoRows, which propagates up through most limit lookups
+			// and blocks the operation — fail-closed.
 			org.SubscriptionStatus = newStatus
 			org.SubscriptionID = uuid.Nil
 			// A6: schedule the 7-day grace teardown.
@@ -716,9 +716,9 @@ func (c *Controller) processWebhookEventTx(tx bun.Tx, event stripe.Event) ([]fun
 		}
 
 		// Free tier removed 2026-05-13: cancelled orgs go to no plan.
-		// Feature gates fail closed because the subscription lookup returns
-		// sql.ErrNoRows on uuid.Nil and callers treat the resulting zero-value
-		// limits as Can*=false / count=0.
+		// SubscriptionID = uuid.Nil causes GetStandardUserSubscriptionByOrg to
+		// return sql.ErrNoRows, which propagates up through most limit lookups
+		// and blocks the operation — fail-closed.
 		org.SubscriptionStatus = "canceled"
 		org.SubscriptionID = uuid.Nil
 
