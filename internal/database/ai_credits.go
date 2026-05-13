@@ -11,16 +11,21 @@ import (
 )
 
 func (db *Database) CreateAICreditsBalance(balance *models.AICreditsBalance) (*models.AICreditsBalance, error) {
+	return db.CreateAICreditsBalanceTx(db.DB, balance)
+}
+
+// CreateAICreditsBalanceTx is the tx-aware variant of CreateAICreditsBalance.
+func (db *Database) CreateAICreditsBalanceTx(tx bun.IDB, balance *models.AICreditsBalance) (*models.AICreditsBalance, error) {
 	// The unique constraint on this table is ux_ai_credits_balances_org
 	// (organization_id) — user_id is no longer unique since the org-scoped
 	// migration on 2026-04-30. ON CONFLICT must match the existing constraint
 	// or the INSERT errors out, leaving signups with no balance row.
-	_, err := db.DB.NewInsert().Model(balance).On("CONFLICT (organization_id) DO NOTHING").Exec(context.Background())
+	_, err := tx.NewInsert().Model(balance).On("CONFLICT (organization_id) DO NOTHING").Exec(context.Background())
 	if err != nil {
 		return nil, err
 	}
 	// Re-read to get the actual row (whether we inserted or it already existed)
-	return db.GetAICreditsBalanceByOrg(balance.OrganizationID.String())
+	return db.GetAICreditsBalanceByOrgTx(tx, balance.OrganizationID.String())
 }
 
 func (db *Database) UpdateAICreditsBalance(balance *models.AICreditsBalance) (*models.AICreditsBalance, error) {
@@ -59,8 +64,13 @@ func (db *Database) GetAICreditTransactions(orgID string, limit int) ([]models.A
 // to reconcile against the ground-truth balance, and per-org ledgers stay
 // small (a year of heavy use is < a few thousand rows).
 func (db *Database) GetAllAICreditTransactionsAsc(orgID string) ([]models.AICreditTransaction, error) {
+	return db.GetAllAICreditTransactionsAscTx(db.DB, orgID)
+}
+
+// GetAllAICreditTransactionsAscTx is the tx-aware variant of GetAllAICreditTransactionsAsc.
+func (db *Database) GetAllAICreditTransactionsAscTx(tx bun.IDB, orgID string) ([]models.AICreditTransaction, error) {
 	var txs []models.AICreditTransaction
-	err := db.DB.NewSelect().
+	err := tx.NewSelect().
 		Model(&txs).
 		Where("organization_id = ?", orgID).
 		OrderExpr("created_at ASC").
@@ -195,8 +205,13 @@ func (db *Database) AtomicAccumulateGatewayPending(organizationID uuid.UUID, owe
 // Returns (newBalance, true, nil) if the reset happened, or (0, false, nil) if
 // the period was already current (another request won the race).
 func (db *Database) AtomicResetPeriod(balanceID string, newBalance int, periodStart, periodEnd time.Time) (int, bool, error) {
+	return db.AtomicResetPeriodTx(db.DB, balanceID, newBalance, periodStart, periodEnd)
+}
+
+// AtomicResetPeriodTx is the tx-aware variant of AtomicResetPeriod.
+func (db *Database) AtomicResetPeriodTx(tx bun.IDB, balanceID string, newBalance int, periodStart, periodEnd time.Time) (int, bool, error) {
 	var bal int
-	err := db.DB.NewRaw(
+	err := tx.NewRaw(
 		"UPDATE ai_credits_balances SET balance = ?, period_start = ?, period_end = ?, updated_at = NOW() WHERE id = ? AND period_end < NOW() RETURNING balance",
 		newBalance, periodStart, periodEnd, balanceID,
 	).Scan(context.Background(), &bal)
@@ -422,8 +437,13 @@ func (db *Database) BulkAssignTransactionOrgsFromPersonalOrg() (int, error) {
 // GetAICreditsBalanceByOrg returns the balance for an organization. Returns
 // sql.ErrNoRows if the org has not been backfilled or has never had a balance.
 func (db *Database) GetAICreditsBalanceByOrg(orgID string) (*models.AICreditsBalance, error) {
+	return db.GetAICreditsBalanceByOrgTx(db.DB, orgID)
+}
+
+// GetAICreditsBalanceByOrgTx is the tx-aware variant of GetAICreditsBalanceByOrg.
+func (db *Database) GetAICreditsBalanceByOrgTx(tx bun.IDB, orgID string) (*models.AICreditsBalance, error) {
 	var balance models.AICreditsBalance
-	err := db.DB.NewSelect().Model(&balance).
+	err := tx.NewSelect().Model(&balance).
 		Where("organization_id = ?", orgID).
 		Limit(1).
 		Scan(context.Background())

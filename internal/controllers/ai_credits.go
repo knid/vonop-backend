@@ -344,6 +344,223 @@ func (c *Controller) GetOrCreateCreditsBalance(user *models.User, orgID uuid.UUI
 	return balance, nil
 }
 
+// ComputeCreditBreakdownInTx is the tx-aware variant of ComputeCreditBreakdown.
+// The caller must supply pre-resolved limits to avoid stale reads.
+func (c *Controller) ComputeCreditBreakdownInTx(tx bun.Tx, user *models.User, orgID uuid.UUID, limits *models.StandardUserLimits) (*CreditBreakdown, error) {
+	var balance models.AICreditsBalance
+	err := tx.NewSelect().Model(&balance).Where("organization_id = ?", orgID).Limit(1).Scan(context.Background())
+	if err != nil {
+		return nil, err
+	}
+
+	txs, err := c.DB.GetAllAICreditTransactionsAscTx(tx, orgID.String())
+	if err != nil {
+		return nil, err
+	}
+
+	var sub, purchased, subUsedInPeriod int
+	for _, tx := range txs {
+		inPeriod := !tx.CreatedAt.Before(balance.PeriodStart)
+		switch classifyLedgerAction(tx.Action, tx.Amount) {
+		case "allocation":
+			sub += tx.Amount
+		case "purchase":
+			purchased += tx.Amount
+		case "refund":
+			purchased += tx.Amount
+		case "usage":
+			need := -tx.Amount
+			if need <= 0 {
+				continue
+			}
+			drainedFromSub := need
+			if drainedFromSub > sub {
+				drainedFromSub = sub
+			}
+			sub -= drainedFromSub
+			purchased -= (need - drainedFromSub)
+			if inPeriod {
+				subUsedInPeriod += drainedFromSub
+			}
+		}
+	}
+	if sub < 0 {
+		sub = 0
+	}
+	if purchased < 0 {
+		purchased = 0
+	}
+
+	total := sub + purchased
+	if total > balance.Balance {
+		excess := total - balance.Balance
+		if purchased >= excess {
+			purchased -= excess
+		} else {
+			remaining := excess - purchased
+			purchased = 0
+			if sub >= remaining {
+				sub -= remaining
+			} else {
+				sub = 0
+			}
+		}
+	} else if total < balance.Balance {
+		sub += balance.Balance - total
+	}
+
+	return &CreditBreakdown{
+		Balance:           balance.Balance,
+		SubBalance:        sub,
+		PurchasedBalance:  purchased,
+		SubLimit:          limits.MonthlyAICredits,
+		SubUsedThisPeriod: subUsedInPeriod,
+		PeriodStart:       balance.PeriodStart,
+		PeriodEnd:         balance.PeriodEnd,
+	}, nil
+}
+
+// GetOrCreateCreditsBalanceInTx is the tx-aware variant of GetOrCreateCreditsBalance.
+// Use this when calling inside a transaction that just mutated the org's subscription,
+// so the balance creation/reset sees the new plan instead of reading stale committed state.
+// The caller must pass a pre-resolved org and monthlyCredits. If limits is non-nil it is
+// used for rolloverMonths and ComputeCreditBreakdownInTx; otherwise GetUserLimits is called
+// (safe only when the caller is NOT inside a tx that just changed the org's plan).
+func (c *Controller) GetOrCreateCreditsBalanceInTx(tx bun.Tx, user *models.User, orgID uuid.UUID, org *models.Organization, monthlyCredits int, limits *models.StandardUserLimits) (*models.AICreditsBalance, error) {
+	balance, err := c.DB.GetAICreditsBalanceByOrgTx(tx, orgID.String())
+	if err != nil {
+		if !errors.Is(err, sql.ErrNoRows) {
+			return nil, err
+		}
+
+		if org == nil {
+			return nil, errors.New("org required for balance creation in tx")
+		}
+
+		periodStart, periodEnd := utils.BillingPeriod(org.SubscriptionStartAt, time.Now())
+		balance = &models.AICreditsBalance{
+			OrganizationID: orgID,
+			UserID:         user.ID,
+			Balance:        0,
+			PeriodStart:    periodStart,
+			PeriodEnd:      periodEnd,
+		}
+
+		initialGrant := 0
+		if user.Verified && monthlyCredits > 0 {
+			balance.Balance = monthlyCredits
+			initialGrant = monthlyCredits
+		}
+
+		balance, err = c.DB.CreateAICreditsBalanceTx(tx, balance)
+		if err != nil {
+			return nil, err
+		}
+
+		if initialGrant > 0 && time.Since(balance.CreatedAt) < time.Second {
+			if _, txErr := c.DB.CreateAICreditTransactionTx(tx, &models.AICreditTransaction{
+				OrganizationID: orgID,
+				UserID:         user.ID,
+				Amount:         initialGrant,
+				Action:         "initial_grant",
+				Reference:      balance.ID.String(),
+			}); txErr != nil {
+				slog.Error("failed to log initial credit grant in tx", "error", txErr, "user_id", user.ID, "org_id", orgID)
+			}
+		}
+	}
+
+	if time.Now().After(balance.PeriodEnd) {
+		if org == nil {
+			return nil, errors.New("org required for period reset in tx")
+		}
+		periodStart, periodEnd := utils.BillingPeriod(org.SubscriptionStartAt, time.Now())
+
+		rolloverMonths := 0
+		if limits == nil {
+			limits, _ = c.GetUserLimits(user)
+		}
+		if limits != nil {
+			rolloverMonths = limits.CreditRolloverMonths
+		}
+
+		if monthlyCredits == 0 {
+			periodEnd = time.Now().AddDate(100, 0, 0)
+			_, didReset, resetErr := c.DB.AtomicResetPeriodTx(tx, balance.ID.String(), balance.Balance, periodStart, periodEnd)
+			if resetErr != nil {
+				return nil, resetErr
+			}
+			if didReset {
+				balance.PeriodStart = periodStart
+				balance.PeriodEnd = periodEnd
+			} else {
+				balance, err = c.DB.GetAICreditsBalanceByOrgTx(tx, orgID.String())
+				if err != nil {
+					return nil, err
+				}
+			}
+			return balance, nil
+		}
+
+		var breakdown *CreditBreakdown
+		if limits != nil {
+			breakdown, _ = c.ComputeCreditBreakdownInTx(tx, user, orgID, limits)
+		}
+		purchasedCarry := 0
+		subCarry := 0
+		if breakdown != nil {
+			purchasedCarry = breakdown.PurchasedBalance
+			subCarry = breakdown.SubBalance
+		}
+
+		var newBalance int
+		if balance.Balance < 0 {
+			newBalance = monthlyCredits + balance.Balance
+			if newBalance < 0 {
+				newBalance = 0
+			}
+			newBalance += purchasedCarry
+		} else if rolloverMonths > 0 {
+			subCap := monthlyCredits * (rolloverMonths + 1)
+			newSub := subCarry + monthlyCredits
+			if newSub > subCap {
+				newSub = subCap
+			}
+			newBalance = newSub + purchasedCarry
+		} else {
+			newBalance = monthlyCredits + purchasedCarry
+		}
+
+		newBal, didReset, resetErr := c.DB.AtomicResetPeriodTx(tx, balance.ID.String(), newBalance, periodStart, periodEnd)
+		if resetErr != nil {
+			return nil, resetErr
+		}
+
+		if didReset {
+			balance.Balance = newBal
+			balance.PeriodStart = periodStart
+			balance.PeriodEnd = periodEnd
+
+			if _, err := c.DB.CreateAICreditTransactionTx(tx, &models.AICreditTransaction{
+				OrganizationID: orgID,
+				UserID:         user.ID,
+				Amount:         monthlyCredits,
+				Action:         "monthly_grant",
+				Reference:      balance.ID.String(),
+			}); err != nil {
+				slog.Error("failed to log monthly_grant transaction in tx", "error", err, "user_id", user.ID, "org_id", orgID)
+			}
+		} else {
+			balance, err = c.DB.GetAICreditsBalanceByOrgTx(tx, orgID.String())
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	return balance, nil
+}
+
 // GrantInitialFreeCreditsIfNeeded grants the plan's monthly credits to a
 // verified user who has never received them. Idempotent: subsequent calls
 // are no-ops once an initial_grant transaction exists. Called from the email
