@@ -104,8 +104,6 @@ func (c *Controller) GoogleMobileLogin(ctx context.Context, req requests.GoogleM
 				slog.Error("failed to persist Stripe customer to user", "error", err, "user_id", user.ID, "customer_id", stripeCustomer.ID)
 			}
 
-			c.assignFreePlan(personalOrg)
-
 			if err := c.GrantInitialFreeCreditsIfNeeded(user, personalOrg.ID); err != nil {
 				slog.Error("failed to grant initial free credits on google mobile signup", "error", err, "user_id", user.ID)
 			}
