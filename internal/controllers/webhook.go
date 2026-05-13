@@ -171,6 +171,9 @@ func (c *Controller) processWebhookEventTx(tx bun.Tx, event stripe.Event) ([]fun
 			org.TrialUsed = true
 		}
 
+		// Mark intro discount as used since the org just subscribed
+		org.IntroDiscountUsed = true
+
 		// Load org owner for user-keyed notifications, Resend events, and posthog identity.
 		owner, err := c.DB.GetUserById(org.OwnerID.String())
 		if err != nil {

@@ -796,6 +796,17 @@ END $$`,
 		}
 	}
 
+	// introDiscountMigration adds the eligibility column for the Hobby intro
+	// offer. ADD COLUMN IF NOT EXISTS is idempotent — safe on every boot.
+	introDiscountMigration := []string{
+		`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS intro_discount_used boolean NOT NULL DEFAULT false`,
+	}
+	for _, stmt := range introDiscountMigration {
+		if _, err := db.ExecContext(context.Background(), stmt); err != nil {
+			slog.Warn("intro discount migration skipped", "statement", stmt, "error", err)
+		}
+	}
+
 	// shipMarkersMigrations creates the schema_ship_markers table used to gate
 	// one-time backfills so they run exactly once per deploy cluster.
 	// CREATE TABLE IF NOT EXISTS is idempotent — safe to run on every boot.
@@ -808,6 +819,28 @@ END $$`,
 	for _, stmt := range shipMarkersMigrations {
 		if _, err := db.ExecContext(context.Background(), stmt); err != nil {
 			slog.Warn("ship markers migration skipped", "statement", stmt, "error", err)
+		}
+	}
+
+	// Backfill IntroDiscountUsed for orgs that already have a paid subscription.
+	// These orgs are not eligible for the intro offer. Runs exactly once.
+	var introBackfillDone bool
+	if err := db.NewSelect().
+		ColumnExpr("EXISTS (SELECT 1 FROM schema_ship_markers WHERE name = ?)", "intro_discount_backfill_v1").
+		Scan(context.Background(), &introBackfillDone); err != nil {
+		slog.Error("check intro_discount_backfill_v1 marker failed", "err", err)
+	} else if !introBackfillDone {
+		if _, err := db.NewRaw(
+			`UPDATE organizations SET intro_discount_used = true WHERE subscription_status != 'inactive' OR subscription_id IS NOT NULL`,
+		).Exec(context.Background()); err != nil {
+			slog.Error("intro_discount_backfill_v1 failed", "err", err)
+		} else {
+			if _, err := db.NewRaw(
+				"INSERT INTO schema_ship_markers (name) VALUES (?)",
+				"intro_discount_backfill_v1",
+			).Exec(context.Background()); err != nil {
+				slog.Warn("mark intro_discount_backfill_v1 failed", "err", err)
+			}
 		}
 	}
 

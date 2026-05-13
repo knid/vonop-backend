@@ -66,8 +66,11 @@ type PlanResponse struct {
 	AnnualPrice   int                `json:"annual_price"`
 	PriceID       string             `json:"price_id"`
 	AnnualPriceID string             `json:"annual_price_id,omitempty"`
-	AnnualSavings int                `json:"annual_savings"`
-	Limits        PlanLimitsResponse `json:"limits"`
+	AnnualSavings    int                `json:"annual_savings"`
+	IntroPrice       int                `json:"intro_price,omitempty"`
+	IntroPriceMonths int                `json:"intro_price_months,omitempty"`
+	IntroEligible    bool               `json:"intro_eligible,omitempty"`
+	Limits           PlanLimitsResponse `json:"limits"`
 }
 
 type AICreditsBalanceResponse struct {
