@@ -174,19 +174,21 @@ func (v *HttpViews) StripeCheckout(w http.ResponseWriter, r *http.Request) {
 	}
 
 	params := &stripe.CheckoutSessionParams{
-		Customer:            stripe.String(org.StripeCustomerID),
-		LineItems:           lineItems,
-		Mode:                &mode,
-		SuccessURL:          &successURL,
-		CancelURL:           &cancelURL,
-		AllowPromotionCodes: stripe.Bool(true),
+		Customer:   stripe.String(org.StripeCustomerID),
+		LineItems:  lineItems,
+		Mode:       &mode,
+		SuccessURL: &successURL,
+		CancelURL:  &cancelURL,
 	}
 
-	// Auto-apply Hobby intro coupon for first-time orgs
+	// Auto-apply Hobby intro coupon for first-time orgs.
+	// Stripe rejects having both Discounts and AllowPromotionCodes set.
 	if planName == "Hobby" && !org.IntroDiscountUsed {
 		params.Discounts = []*stripe.CheckoutSessionDiscountParams{
 			{Coupon: stripe.String(constants.StripeHobbyIntroCouponID)},
 		}
+	} else {
+		params.AllowPromotionCodes = stripe.Bool(true)
 	}
 
 	s, err := session.New(params)
