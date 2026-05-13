@@ -42,6 +42,15 @@ func buildCreditCostsMap() map[string]int {
 }
 
 func (v *HttpViews) GetBillingPlans(w http.ResponseWriter, r *http.Request) {
+	// Best-effort: resolve the caller's personal org so we can compute
+	// per-org intro eligibility. Anonymous callers (no auth) get IntroEligible=false.
+	var personalOrg *models.Organization
+	if user, err := v.Controller.GetUserFromReq(r); err == nil && user != nil {
+		if org, orgErr := v.Controller.DB.GetPersonalOrgByUserID(user.ID.String()); orgErr == nil {
+			personalOrg = org
+		}
+	}
+
 	subs, err := v.Controller.DB.GetSubscriptions()
 	if err != nil {
 		utils.JSONInternalError(w, err)
@@ -115,7 +124,7 @@ func (v *HttpViews) GetBillingPlans(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		plans = append(plans, responses.PlanResponse{
+		planResp := responses.PlanResponse{
 			ID:            sub.ID.String(),
 			Name:          sub.Name,
 			Description:   sub.Description,
@@ -125,7 +134,18 @@ func (v *HttpViews) GetBillingPlans(w http.ResponseWriter, r *http.Request) {
 			AnnualPriceID: sub.AnnualPriceID,
 			AnnualSavings: annualSavings,
 			Limits:        planLimits,
-		})
+		}
+
+		// Hobby intro offer: $9 first month for first-time orgs
+		if sub.Name == "Hobby" {
+			planResp.IntroPrice = 900
+			planResp.IntroPriceMonths = 1
+			if personalOrg != nil && !personalOrg.IntroDiscountUsed {
+				planResp.IntroEligible = true
+			}
+		}
+
+		plans = append(plans, planResp)
 	}
 
 	defaultRegion := ""
