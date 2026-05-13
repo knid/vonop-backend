@@ -831,7 +831,7 @@ END $$`,
 		slog.Error("check intro_discount_backfill_v1 marker failed", "err", err)
 	} else if !introBackfillDone {
 		if _, err := db.NewRaw(
-			`UPDATE organizations SET intro_discount_used = true WHERE subscription_id IS NOT NULL`,
+			`UPDATE organizations SET intro_discount_used = true WHERE subscription_status != 'inactive' OR subscription_id IS NOT NULL`,
 		).Exec(context.Background()); err != nil {
 			slog.Error("intro_discount_backfill_v1 failed", "err", err)
 		} else {
