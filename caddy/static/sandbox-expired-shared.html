@@ -202,19 +202,12 @@
       </h1>
 
       <p class="lede" id="lede">
-        Wemob sandboxes power down after an hour of activity to keep things
-        light. Start a new one and we'll pick up right where you left off.
+        This preview link has expired. Open Wemob Studio to restart your
+        app's preview.
       </p>
 
       <div class="actions">
-        <button id="restart" class="primary" type="button" hidden>
-          <span id="restart-label">Restart preview</span>
-          <svg class="arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <polyline points="1 4 1 10 7 10"></polyline>
-            <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path>
-          </svg>
-        </button>
-        <a id="open-studio" class="primary" href="https://app.wemob.io" hidden>
+        <a id="open-studio" class="primary" href="https://app.wemob.io">
           <span id="open-studio-label">Open Wemob Studio</span>
           <svg class="arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M5 12h14"></path>
@@ -239,11 +232,8 @@
             sectionLabel: "Preview",
             headlinePrefix: "Your preview ",
             headlineAccent: "has rested.",
-            iframeLede:
-              "Wemob sandboxes power down after an hour of activity to keep things light. Start a new one and we'll pick up right where you left off.",
             standaloneLede:
               "This preview link has expired. Open Wemob Studio to restart your app's preview.",
-            restartLabel: "Restart preview",
             openStudioLabel: "Open Wemob Studio",
             sandboxLabel: "Sandbox",
           },
@@ -253,11 +243,8 @@
             sectionLabel: "Önizleme",
             headlinePrefix: "Önizlemeniz ",
             headlineAccent: "dinleniyor.",
-            iframeLede:
-              "Wemob sandbox'ları, sistemi hafif tutmak için bir saatlik etkinliğin ardından kapanır. Yeni bir tane başlatın, kaldığınız yerden devam edelim.",
             standaloneLede:
               "Bu önizleme bağlantısının süresi dolmuş. Uygulamanızın önizlemesini yeniden başlatmak için Wemob Studio'yu açın.",
-            restartLabel: "Önizlemeyi yeniden başlat",
             openStudioLabel: "Wemob Studio'yu aç",
             sandboxLabel: "Sandbox",
           },
@@ -290,7 +277,6 @@
           t.headlinePrefix;
         document.getElementById("headline-accent").textContent =
           t.headlineAccent;
-        document.getElementById("restart-label").textContent = t.restartLabel;
         document.getElementById("open-studio-label").textContent =
           t.openStudioLabel;
         document.getElementById("sandbox-label").textContent = t.sandboxLabel;
@@ -311,11 +297,8 @@
         }
 
         var sandboxId = parseSandboxId();
-        var inIframe = window.self !== window.top;
         var meta = document.getElementById("meta");
         var sandboxIdEl = document.getElementById("sandbox-id");
-        var restartBtn = document.getElementById("restart");
-        var openStudio = document.getElementById("open-studio");
         var lede = document.getElementById("lede");
 
         if (sandboxId) {
@@ -323,49 +306,14 @@
           meta.hidden = false;
         }
 
-        function notifyParent() {
-          if (!inIframe) return false;
-          try {
-            window.parent.postMessage(
-              {
-                type: "wemob:sandbox-expired",
-                sandboxId: sandboxId,
-                source: "preview-iframe",
-              },
-              "*"
-            );
-            return true;
-          } catch (e) {
-            return false;
-          }
-        }
-
-        if (inIframe) {
-          // The studio reacts to the postMessage by swapping its preview
-          // pane into the "expired" state with a restart button — the
-          // primary CTA lives there, so we just surface a hint here.
-          lede.textContent = t.iframeLede;
-          restartBtn.hidden = false;
-          restartBtn.addEventListener("click", function () {
-            notifyParent();
-          });
-          notifyParent();
-          // Re-send periodically while the iframe is visible, in case the
-          // parent mounts its listener after our initial load (race during
-          // hydration). 5s × 3 attempts is plenty.
-          var attempts = 0;
-          var resend = setInterval(function () {
-            attempts += 1;
-            if (attempts > 3 || !notifyParent()) clearInterval(resend);
-          }, 5000);
-        } else {
-          // Standalone navigation (someone opened/shared the preview URL
-          // after the sandbox died). Point them back at the studio — we
-          // don't know the appId from this origin, so root is best we can
-          // do without a server-side lookup.
-          openStudio.hidden = false;
-          lede.textContent = t.standaloneLede;
-        }
+        // This file is only served to direct visitors of a shared preview
+        // URL — Caddy routes studio iframe traffic (Referer
+        // https://app.wemob.io/*) to the other variant, where the
+        // postMessage/restart handshake lives. From here there's nothing
+        // actionable except sending the user back to the studio, and the
+        // CTA is rendered unconditionally in the markup so the no-JS
+        // fallback still works.
+        lede.textContent = t.standaloneLede;
       })();
     </script>
   </body>
