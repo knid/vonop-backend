@@ -182,6 +182,13 @@ func (v *HttpViews) StripeCheckout(w http.ResponseWriter, r *http.Request) {
 		AllowPromotionCodes: stripe.Bool(true),
 	}
 
+	// Auto-apply Hobby intro coupon for first-time orgs
+	if planName == "Hobby" && !org.IntroDiscountUsed {
+		params.Discounts = []*stripe.CheckoutSessionDiscountParams{
+			{Coupon: stripe.String(constants.StripeHobbyIntroCouponID)},
+		}
+	}
+
 	s, err := session.New(params)
 	if err != nil {
 		slog.Error("stripe checkout session creation failed", "error", err)
@@ -193,7 +200,8 @@ func (v *HttpViews) StripeCheckout(w http.ResponseWriter, r *http.Request) {
 		Set("price_id", priceID).
 		Set("plan_name", planName).
 		Set("billing_interval", billingInterval).
-		Set("trial_eligible", !org.TrialUsed))
+		Set("trial_eligible", !org.TrialUsed).
+		Set("intro_eligible", planName == "Hobby" && !org.IntroDiscountUsed))
 
 	go v.Controller.EventService.SendEvent(user, constants.EVENT_CHECKOUT_STARTED, map[string]any{
 		"price_id":         priceID,
