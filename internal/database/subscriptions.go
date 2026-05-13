@@ -10,7 +10,10 @@ import (
 
 func (db *Database) GetSubscriptions() (*[]models.StandardUserSubscription, error) {
 	var standardUserSubscriptions []models.StandardUserSubscription
-	err := db.DB.NewSelect().Model(&standardUserSubscriptions).Scan(context.Background())
+	err := db.DB.NewSelect().
+		Model(&standardUserSubscriptions).
+		Order("monthly_price ASC").
+		Scan(context.Background())
 
 	return &standardUserSubscriptions, err
 }
