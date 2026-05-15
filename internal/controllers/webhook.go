@@ -423,6 +423,30 @@ func (c *Controller) processWebhookEventTx(tx bun.Tx, event stripe.Event) ([]fun
 						"reference":  reference,
 					})
 				})
+			} else if delta < 0 {
+				// Downgrade: cap balance at the new plan's monthly credits.
+				balance, balErr := c.DB.GetAICreditsBalanceByOrgTx(tx, org.ID.String())
+				if balErr != nil {
+					return nil, fmt.Errorf("get credits balance for downgrade adjustment: %w", balErr)
+				}
+				deduction := -delta
+				if deduction > balance.Balance {
+					deduction = balance.Balance
+				}
+				if deduction > 0 {
+					periodEnd := sub.Items.Data[0].CurrentPeriodEnd
+					reference := fmt.Sprintf("%s:%d:downgrade-%s", sub.ID, periodEnd, newPriceID)
+					if err := c.AddAICreditsInTx(tx, owner, org.ID, balance.ID, -deduction, "subscription_downgrade_adjustment", reference); err != nil {
+						return nil, fmt.Errorf("apply downgrade credit adjustment: %w", err)
+					}
+					hooks = append(hooks, func() {
+						c.EventService.SendEvent(owner, constants.EVENT_CREDITS_GRANTED, map[string]any{
+							"credits":    -deduction,
+							"grant_type": "subscription_downgrade",
+							"reference":  reference,
+						})
+					})
+				}
 			}
 		}
 
@@ -500,11 +524,14 @@ func (c *Controller) processWebhookEventTx(tx bun.Tx, event stripe.Event) ([]fun
 
 		// Restore SubscriptionID if it was cleared by a prior canceled/inactive event.
 		// Look up plan from invoice line items (v82: Pricing.PriceDetails.Price).
+		var restoredSub *models.StandardUserSubscription
 		if org.SubscriptionID == uuid.Nil && invoice.Lines != nil && len(invoice.Lines.Data) > 0 {
 			lineItem := invoice.Lines.Data[0]
 			if lineItem.Pricing != nil && lineItem.Pricing.PriceDetails != nil && lineItem.Pricing.PriceDetails.Price != "" {
 				if subs, err := c.DB.GetSubscriptionByPriceID(lineItem.Pricing.PriceDetails.Price); err == nil {
 					org.SubscriptionID = subs.ID
+					org.SubscriptionStartAt = time.Now()
+					restoredSub = subs
 				}
 			}
 		}
@@ -549,6 +576,20 @@ func (c *Controller) processWebhookEventTx(tx bun.Tx, event stripe.Event) ([]fun
 
 		if _, err := c.DB.UpdateOrganizationTx(tx, org); err != nil {
 			return nil, fmt.Errorf("failed to update organization %s after payment succeeded: %w", org.ID, err)
+		}
+
+		// Grant credits for reactivated subscriptions that had no active plan.
+		if restoredSub != nil {
+			monthlyCredits := c.PlanMonthlyAICredits(restoredSub)
+			if monthlyCredits > 0 {
+				hook, gerr := c.GrantSubscriptionCreditsInTxWithResolved(tx, owner, org.ID, org, monthlyCredits)
+				if gerr != nil {
+					return nil, fmt.Errorf("grant credits for reactivated subscription: %w", gerr)
+				}
+				if hook != nil {
+					hooks = append(hooks, hook)
+				}
+			}
 		}
 
 		if setupJustFinished {
