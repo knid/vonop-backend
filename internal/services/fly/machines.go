@@ -65,7 +65,7 @@ func (s *Service) DeployMachines(appName string, spec MachineSpec) error {
 		return fmt.Errorf("fly: write fly.toml: %w", err)
 	}
 
-	return retryFlyctlDeploy(appName, spec.Image, func() error {
+	if err := retryFlyctlDeploy(appName, spec.Image, func() error {
 		cmd := exec.Command("flyctl", "deploy",
 			"--app", appName,
 			"--image", spec.Image,
@@ -86,7 +86,39 @@ func (s *Service) DeployMachines(appName string, spec MachineSpec) error {
 		}
 		slog.Info("fly_release_succeeded", "app", appName, "image", spec.Image)
 		return nil
-	})
+	}); err != nil {
+		return err
+	}
+
+	// flyctl deploy leaves machines in "stopped" state for autostart-on-traffic
+	// apps (auto_start_machines=true, min_machines_running=0). There's no traffic
+	// during deploy, so WaitForHealthy would otherwise wait 10 minutes for an
+	// autostart that never comes. Kick them explicitly.
+	return s.StartStoppedMachines(appName)
+}
+
+// StartStoppedMachines explicitly starts any machines on the app that are in
+// the "stopped" state. Works around the flyctl deploy + scale-to-zero combo
+// described in DeployMachines: machines come up stopped and only start on
+// first request, which means deploys appear hung from WaitForHealthy's view.
+//
+// Idempotent for already-started machines (they're skipped). Errors propagate
+// so a deploy fails fast instead of timing out on the healthcheck.
+func (s *Service) StartStoppedMachines(appName string) error {
+	var machines []machineSummary
+	if err := s.doRequest("GET", "/v1/apps/"+appName+"/machines", nil, &machines); err != nil {
+		return fmt.Errorf("fly: list machines for start: %w", err)
+	}
+	for _, m := range machines {
+		if m.State != "stopped" {
+			continue
+		}
+		if err := s.doRequest("POST", "/v1/apps/"+appName+"/machines/"+m.ID+"/start", nil, nil); err != nil {
+			return fmt.Errorf("fly: start machine %s: %w", m.ID, err)
+		}
+		slog.Info("fly_machine_started", "app", appName, "machine", m.ID)
+	}
+	return nil
 }
 
 // flyctlDeployError wraps flyctl exec failures so the retry layer can
