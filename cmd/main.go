@@ -593,6 +593,9 @@ func createSchema(db *bun.DB) error {
 		`ALTER TABLE apple_connections DROP COLUMN IF EXISTS apns_p8_key_id`,
 		`ALTER TABLE apple_connections DROP COLUMN IF EXISTS apns_p8_key_cred_ref`,
 		`ALTER TABLE google_play_connections DROP COLUMN IF EXISTS service_account_path`,
+		// Intro pricing on subscriptions
+		`ALTER TABLE standard_user_subscriptions ADD COLUMN IF NOT EXISTS intro_price int DEFAULT 0`,
+		`ALTER TABLE standard_user_subscriptions ADD COLUMN IF NOT EXISTS intro_price_months int DEFAULT 1`,
 	}
 
 	// Deduplicate before creating unique indexes (keep the latest row per group)
@@ -873,21 +876,25 @@ func seedPlans(db *database.Database, sm secret.SecretManager) {
 	type planDef struct {
 		Name          string
 		Description   string
-		MonthlyPrice  int
-		PriceID       string
-		AnnualPrice   int
-		AnnualPriceID string
-		Limits        models.StandardUserLimits
+		MonthlyPrice     int
+		PriceID          string
+		AnnualPrice      int
+		AnnualPriceID    string
+		IntroPrice       int
+		IntroPriceMonths int
+		Limits           models.StandardUserLimits
 	}
 
 	plans := []planDef{
 		{
 			Name:          "Hobby",
 			Description:   "For solo builders shipping their first apps",
-			MonthlyPrice:  1900,
-			PriceID:       sm.GetSecret("STRIPE_HOBBY_PRICE_ID"),
-			AnnualPrice:   18200,
-			AnnualPriceID: sm.GetSecret("STRIPE_HOBBY_ANNUAL_PRICE_ID"),
+			MonthlyPrice:     1900,
+			PriceID:          sm.GetSecret("STRIPE_HOBBY_PRICE_ID"),
+			AnnualPrice:      18200,
+			AnnualPriceID:    sm.GetSecret("STRIPE_HOBBY_ANNUAL_PRICE_ID"),
+			IntroPrice:       900,
+			IntroPriceMonths: 1,
 			Limits: models.StandardUserLimits{
 				MaximumCredentialCount:    2,
 				MontlyBuildCount:          0,
@@ -1030,13 +1037,15 @@ func seedPlans(db *database.Database, sm secret.SecretManager) {
 				continue
 			}
 			sub := &models.StandardUserSubscription{
-				Name:          p.Name,
-				Description:   p.Description,
-				LimitsID:      createdLimits.ID,
-				MonthlyPrice:  p.MonthlyPrice,
-				PriceID:       p.PriceID,
-				AnnualPrice:   p.AnnualPrice,
-				AnnualPriceID: p.AnnualPriceID,
+				Name:             p.Name,
+				Description:      p.Description,
+				LimitsID:         createdLimits.ID,
+				MonthlyPrice:     p.MonthlyPrice,
+				PriceID:          p.PriceID,
+				AnnualPrice:      p.AnnualPrice,
+				AnnualPriceID:    p.AnnualPriceID,
+				IntroPrice:       p.IntroPrice,
+				IntroPriceMonths: p.IntroPriceMonths,
 			}
 			if _, err := db.CreateSubscription(sub); err != nil {
 				slog.Error("failed to create subscription plan", "plan", p.Name, "error", err)
@@ -1104,6 +1113,8 @@ func seedPlans(db *database.Database, sm secret.SecretManager) {
 		existing.AnnualPriceID = p.AnnualPriceID
 		existing.MonthlyPrice = p.MonthlyPrice
 		existing.AnnualPrice = p.AnnualPrice
+		existing.IntroPrice = p.IntroPrice
+		existing.IntroPriceMonths = p.IntroPriceMonths
 		existing.Description = p.Description
 		if _, err := db.UpdateSubscription(existing); err != nil {
 			slog.Error("failed to update subscription plan", "plan", p.Name, "error", err)

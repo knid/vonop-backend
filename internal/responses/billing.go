@@ -59,15 +59,18 @@ type PlanLimitsResponse struct {
 }
 
 type PlanResponse struct {
-	ID            string             `json:"id"`
-	Name          string             `json:"name"`
-	Description   string             `json:"description"`
-	MonthlyPrice  int                `json:"monthly_price"`
-	AnnualPrice   int                `json:"annual_price"`
-	PriceID       string             `json:"price_id"`
-	AnnualPriceID string             `json:"annual_price_id,omitempty"`
-	AnnualSavings int                `json:"annual_savings"`
-	Limits        PlanLimitsResponse `json:"limits"`
+	ID               string             `json:"id"`
+	Name             string             `json:"name"`
+	Description      string             `json:"description"`
+	MonthlyPrice     int                `json:"monthly_price"`
+	AnnualPrice      int                `json:"annual_price"`
+	PriceID          string             `json:"price_id"`
+	AnnualPriceID    string             `json:"annual_price_id,omitempty"`
+	AnnualSavings    int                `json:"annual_savings"`
+	IntroPrice       int                `json:"intro_price,omitempty"`
+	IntroPriceMonths int                `json:"intro_price_months,omitempty"`
+	IntroEligible    bool               `json:"intro_eligible,omitempty"`
+	Limits           PlanLimitsResponse `json:"limits"`
 }
 
 type AICreditsBalanceResponse struct {

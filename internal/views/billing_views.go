@@ -116,15 +116,18 @@ func (v *HttpViews) GetBillingPlans(w http.ResponseWriter, r *http.Request) {
 		}
 
 		plans = append(plans, responses.PlanResponse{
-			ID:            sub.ID.String(),
-			Name:          sub.Name,
-			Description:   sub.Description,
-			MonthlyPrice:  sub.MonthlyPrice,
-			AnnualPrice:   sub.AnnualPrice,
-			PriceID:       sub.PriceID,
-			AnnualPriceID: sub.AnnualPriceID,
-			AnnualSavings: annualSavings,
-			Limits:        planLimits,
+			ID:               sub.ID.String(),
+			Name:             sub.Name,
+			Description:      sub.Description,
+			MonthlyPrice:     sub.MonthlyPrice,
+			AnnualPrice:      sub.AnnualPrice,
+			PriceID:          sub.PriceID,
+			AnnualPriceID:    sub.AnnualPriceID,
+			AnnualSavings:    annualSavings,
+			IntroPrice:       sub.IntroPrice,
+			IntroPriceMonths: sub.IntroPriceMonths,
+			IntroEligible:    sub.IntroPrice > 0,
+			Limits:           planLimits,
 		})
 	}
 
