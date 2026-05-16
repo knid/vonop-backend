@@ -47,12 +47,13 @@ func (c *Controller) CreateOrganization(user *models.User, req requests.CreateOr
 	c.DB.CreateOrganizationMember(&member)
 
 	return &responses.OrganizationResponse{
-		ID:        createdOrg.ID,
-		Name:      createdOrg.Name,
-		Slug:      createdOrg.Slug,
-		Logo:      createdOrg.Logo,
-		OwnerID:   createdOrg.OwnerID,
-		CreatedAt: createdOrg.CreatedAt,
+		ID:                 createdOrg.ID,
+		Name:               createdOrg.Name,
+		Slug:               createdOrg.Slug,
+		Logo:               createdOrg.Logo,
+		OwnerID:            createdOrg.OwnerID,
+		SubscriptionStatus: createdOrg.SubscriptionStatus,
+		CreatedAt:          createdOrg.CreatedAt,
 	}, nil
 }
 
@@ -65,12 +66,13 @@ func (c *Controller) GetUserOrganizations(user *models.User) ([]responses.Organi
 	var result []responses.OrganizationResponse
 	for _, org := range orgs {
 		result = append(result, responses.OrganizationResponse{
-			ID:        org.ID,
-			Name:      org.Name,
-			Slug:      org.Slug,
-			Logo:      org.Logo,
-			OwnerID:   org.OwnerID,
-			CreatedAt: org.CreatedAt,
+			ID:                 org.ID,
+			Name:               org.Name,
+			Slug:               org.Slug,
+			Logo:               org.Logo,
+			OwnerID:            org.OwnerID,
+			SubscriptionStatus: org.SubscriptionStatus,
+			CreatedAt:          org.CreatedAt,
 		})
 	}
 	return result, nil
@@ -89,12 +91,13 @@ func (c *Controller) GetOrganization(user *models.User, orgID string) (*response
 	}
 
 	return &responses.OrganizationResponse{
-		ID:        org.ID,
-		Name:      org.Name,
-		Slug:      org.Slug,
-		Logo:      org.Logo,
-		OwnerID:   org.OwnerID,
-		CreatedAt: org.CreatedAt,
+		ID:                 org.ID,
+		Name:               org.Name,
+		Slug:               org.Slug,
+		Logo:               org.Logo,
+		OwnerID:            org.OwnerID,
+		SubscriptionStatus: org.SubscriptionStatus,
+		CreatedAt:          org.CreatedAt,
 	}, nil
 }
 
@@ -123,12 +126,13 @@ func (c *Controller) UpdateOrganization(user *models.User, orgID string, req req
 	}
 
 	return &responses.OrganizationResponse{
-		ID:        updated.ID,
-		Name:      updated.Name,
-		Slug:      updated.Slug,
-		Logo:      updated.Logo,
-		OwnerID:   updated.OwnerID,
-		CreatedAt: updated.CreatedAt,
+		ID:                 updated.ID,
+		Name:               updated.Name,
+		Slug:               updated.Slug,
+		Logo:               updated.Logo,
+		OwnerID:            updated.OwnerID,
+		SubscriptionStatus: updated.SubscriptionStatus,
+		CreatedAt:          updated.CreatedAt,
 	}, nil
 }
 
@@ -429,12 +433,13 @@ func (c *Controller) TransferOrganizationOwnership(user *models.User, orgID stri
 		return nil, err
 	}
 	return &responses.OrganizationResponse{
-		ID:        updated.ID,
-		Name:      updated.Name,
-		Slug:      updated.Slug,
-		Logo:      updated.Logo,
-		OwnerID:   updated.OwnerID,
-		CreatedAt: updated.CreatedAt,
+		ID:                 updated.ID,
+		Name:               updated.Name,
+		Slug:               updated.Slug,
+		Logo:               updated.Logo,
+		OwnerID:            updated.OwnerID,
+		SubscriptionStatus: updated.SubscriptionStatus,
+		CreatedAt:          updated.CreatedAt,
 	}, nil
 }
 

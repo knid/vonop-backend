@@ -7,12 +7,13 @@ import (
 )
 
 type OrganizationResponse struct {
-	ID        uuid.UUID `json:"id"`
-	Name      string    `json:"name"`
-	Slug      string    `json:"slug"`
-	Logo      string    `json:"logo,omitempty"`
-	OwnerID   uuid.UUID `json:"owner_id"`
-	CreatedAt time.Time `json:"created_at"`
+	ID                 uuid.UUID `json:"id"`
+	Name               string    `json:"name"`
+	Slug               string    `json:"slug"`
+	Logo               string    `json:"logo,omitempty"`
+	OwnerID            uuid.UUID `json:"owner_id"`
+	SubscriptionStatus string    `json:"subscription_status"`
+	CreatedAt          time.Time `json:"created_at"`
 }
 
 type OrganizationMemberResponse struct {
