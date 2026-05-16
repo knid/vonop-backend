@@ -1061,16 +1061,17 @@ func (c *Controller) grantSubscriptionCreditsCore(outerTx *bun.Tx, user *models.
 			return false, fmt.Errorf("lock balance: %w", err)
 		}
 
-		// Check for existing subscription_grant inside the transaction (scoped to this org)
+		// Check for existing subscription_grant inside the transaction scoped to
+		// this subscription reference so re-subscribes to a new plan get a fresh grant.
 		var count int
 		if err := tx.NewRaw(
-			"SELECT COUNT(*) FROM ai_credit_transactions WHERE organization_id = ? AND action = 'subscription_grant'",
-			orgID,
+			"SELECT COUNT(*) FROM ai_credit_transactions WHERE organization_id = ? AND action = 'subscription_grant' AND reference = ?",
+			orgID, org.SubscriptionID.String(),
 		).Scan(context.Background(), &count); err != nil {
 			return false, fmt.Errorf("check existing grant: %w", err)
 		}
 		if count > 0 {
-			return false, nil // already granted
+			return false, nil // already granted for this subscription
 		}
 
 		// Reset period to align with the new subscription start and grant credits
