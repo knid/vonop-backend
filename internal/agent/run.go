@@ -106,7 +106,7 @@ func Run(
 
 	// --- Step 6: insert AppAgentRun row ---
 	provider := deps.LLMProvider
-	model := resolveModel(deps.SecretManager, project)
+	model := resolveModel(deps.SecretManager, provider, project)
 	run := &models.AppAgentRun{
 		ID:           runID,
 		AppProjectID: project.ID,
@@ -654,7 +654,7 @@ func runAction(project *models.AppProject) string {
 }
 
 // resolveModel picks the LLM model for this run based on project state and secrets.
-func resolveModel(sm secret.SecretManager, project *models.AppProject) string {
+func resolveModel(sm secret.SecretManager, provider *utils.LLMProvider, project *models.AppProject) string {
 	if project.Status == "draft" {
 		if m := sm.GetSecret("WEBSITE_BUILDER_LLM_MODEL"); m != "" {
 			return m
@@ -665,6 +665,9 @@ func resolveModel(sm secret.SecretManager, project *models.AppProject) string {
 	}
 	if m := sm.GetSecret("WEBSITE_BUILDER_LLM_MODEL"); m != "" {
 		return m
+	}
+	if provider != nil {
+		return provider.DefaultModel()
 	}
 	return "claude-sonnet-4"
 }
