@@ -32,7 +32,7 @@ type TurnAttachments struct {
 
 // Budget limits (package-level defaults; can be overridden later if needed).
 const (
-	defaultMaxTurns            = 35
+	defaultMaxTurns            = 50
 	defaultMaxToolCallsPerTurn = 20
 	defaultMaxTokensPerRun     = 500_000
 	defaultMaxWallclockMs      = 45 * 60 * 1000
@@ -443,8 +443,8 @@ func Run(
 			// max keeps the continuation dance (finish_reason=length → send
 			// "continue") from firing in all but pathological runs.
 			MaxTokens:  64000,
-			NudgeAfter: 25,
-			StripAfter: 30,
+			NudgeAfter: 50,
+			StripAfter: -1,
 			OnToolCallStart: func(toolName string) {
 				if !serverToolNames[toolName] {
 					return
