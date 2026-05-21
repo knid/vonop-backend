@@ -478,7 +478,20 @@ func (c *Controller) ValidateAppFiles(ctx context.Context, projectID string, use
 
 	var fileContext strings.Builder
 	fileContext.WriteString("Project files:\n")
+	const maxValidationBytes = 100_000
+	totalBytes := 0
+	filesWritten := 0
 	for path, content := range fileMap {
+		size := len(path) + len(content) + 30 // overhead for "--- path (type) ---\n"
+		if totalBytes+size > maxValidationBytes {
+			remaining := len(fileMap) - filesWritten
+			if remaining > 0 {
+				fileContext.WriteString(fmt.Sprintf("\n... (%d more files omitted to stay within token budget)\n", remaining))
+			}
+			break
+		}
+		totalBytes += size
+		filesWritten++
 		fileContext.WriteString(fmt.Sprintf("\n--- %s (%s) ---\n%s\n", path, InferFileType(path), content))
 	}
 

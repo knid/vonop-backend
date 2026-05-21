@@ -702,7 +702,7 @@ func getJSONFromLLMOnce(ctx context.Context, model, system, message string, prov
 			{Role: "user", Content: message},
 		},
 		ResponseFormat:     &ResponseFormat{Type: "json_object"},
-		DisablePromptCache: true, // one-shot call — no follow-up will read the cache
+		DisablePromptCache: false, // enable cache — identical system prompts (classification, naming, validation) benefit from repeated calls
 	}, provider)
 	if err != nil {
 		return "", fmt.Errorf("error building request: %w", err)
@@ -811,7 +811,7 @@ func getTextFromLLMOnce(ctx context.Context, model, system, message string, prov
 			{Role: "user", Content: message},
 		},
 		MaxTokens:          tokenLimit,
-		DisablePromptCache: true, // one-shot call — no follow-up will read the cache
+		DisablePromptCache: false, // enable cache — identical system prompts (classification, naming, validation) benefit from repeated calls
 	}, provider)
 	if err != nil {
 		return "", fmt.Errorf("error building request: %w", err)

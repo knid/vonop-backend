@@ -265,44 +265,6 @@ import { BlurView } from "expo-blur";
 <BlurView intensity={50} tint="systemThinMaterialLight" className="rounded-2xl overflow-hidden">
   <View className="p-5">…</View>
 </BlurView>
-` + "```" + `
-
-Apply SURGICALLY:
-- Floating capsule tab bar (iOS 26 inset-tab-bar pattern below)
-- Sticky headers that blur as content scrolls under
-- Bottom sheets with grabber + glass background
-- Contextual menus and popovers
-- Notification cards over content
-
-DO NOT glass-effect everything. Apple HIG: text always on solid layers,
-NEVER directly on glass — readability fails fast.
-
-### Floating capsule tab bar — THE DEFAULT in 2026
-Every app with bottom-tab navigation uses a floating glass capsule, NOT
-the docked-to-bottom-edge default. This is non-negotiable unless the
-design direction explicitly demands otherwise (e.g., a brutalist or
-data-dense dashboard where every pixel counts and the tabs are docked
-on purpose).
-
-The floating capsule:
-- Sits 24pt above the bottom safe-area edge
-- Inset 24pt from left/right edges
-- Pill-shaped (rounded-full / borderRadius: 32)
-- Glass via ` + "`BlurView`" + ` (iOS) or translucent white (Android)
-- 3-5 items, NEVER 6+ (usability data: 20-30% faster nav)
-- Active state is a filled icon or scaled icon, NOT just a color tint
-
-The technical recipe lives in the ## Tabs layout section below — copy
-that as your starting point on every project.
-
-### Material 3 Expressive shape variety
-Don't use ` + "`rounded-md`" + ` (looks dated) or one shape everywhere. Mix:
-- Cards: ` + "`rounded-3xl`" + `
-- Pills/tags: ` + "`rounded-full`" + `
-- FAB: ` + "`rounded-full`" + `
-- Sheet headers: ` + "`rounded-t-3xl`" + `
-- Buttons: ` + "`rounded-2xl`" + `
-
 ## Visual Polish & Depth
 What separates featured from forgettable.
 
@@ -444,76 +406,28 @@ The biggest 2026 quality bar. Most AI apps fail it.
 
 ## Anti-Patterns (NEVER do these)
 
-❌ List with search bar + identical white cards in vertical stack — #1 AI slop layout.
-✅ SectionList with section headers, varied row densities, leading icons.
 
-❌ Flat designs with no depth, shadow, or layering.
-✅ Subtle shadows + borders + occasional glass for floating elements.
 
-❌ Default Tailwind gray everywhere.
-✅ Warm or tinted neutrals (#FAF9F6, #F8FAFC, #FDF6F0).
 
-❌ Centered text on stock photo with dark overlay.
-✅ Generated illustration with intentional composition.
 
-❌ ` + "`bg-indigo-500`" + ` / ` + "`bg-violet-500`" + ` / ` + "`bg-purple-600`" + ` as primary.
-✅ Coral, terracotta, sage, navy, emerald — context-aware.
 
-❌ Tiny touch targets (< 44pt iOS / 48dp Android).
-✅ Minimum 44x44pt for any tappable surface.
 
-❌ Generic tab bar with default icons + blue active tint.
-✅ Custom icons, custom active indicator (dot/pill/scale), 3-5 items, capsule.
 
-❌ Floating capsule with icons pinned to the top and a fat empty band
-   below them. This is React Navigation auto-injecting
-   ` + "`paddingBottom: insets.bottom`" + ` into a bar that's already floated above
-   the home indicator.
-✅ Pass ` + "`safeAreaInsets={{ bottom: 0 }}`" + ` on ` + "`<Tabs>`" + `, zero out
-   ` + "`paddingTop`" + `/` + "`paddingBottom`" + ` on ` + "`tabBarStyle`" + `, and set
-   ` + "`tabBarItemStyle.height`" + ` equal to bar height with
-   ` + "`justifyContent: \"center\"`" + `. See the Tabs layout recipe.
 
-❌ "No items" in muted gray on empty screens.
-✅ Illustration + conversational copy + CTA + sample item to interact with.
 
-❌ Screens with no visual anchor — text + buttons floating on white.
-✅ Hero card, big stat, illustration, color block, full-bleed image.
 
-❌ All-caps body text.
-✅ Uppercase only for tiny labels (` + "`text-xs uppercase tracking-widest`" + `).
 
-❌ No press feedback on interactive elements.
-✅ ` + "`active:opacity-90 active:scale-95`" + ` minimum.
 
-❌ Perfectly flat, textureless surfaces everywhere.
-✅ Grain, noise, depth, subtle pattern at SOMEPLACE in the app.
 
-❌ Spinner during AI inference.
-✅ Streaming output, even if mocked at first.
 
-❌ AI options (2-3 buttons) with no escape hatch.
-✅ Always include "regenerate" or free-text input.
 
-❌ Leading with "✨ AI" branding.
-✅ Lead with the verb ("Summarize", "Suggest", "Draft").
 
-❌ Adding a duplicate ` + "`colors:`" + ` key in ` + "`tailwind.config.js`" + ` when extending.
-✅ MERGE into the existing colors block. Same for fontFamily, borderRadius, etc.
 
-❌ Hesitating to put className on ` + "`Animated.View`" + ` because "it might not work."
-✅ It works — cssInterop is registered in ` + "`lib/nativewind-setup.ts`" + ` already.
-   Use Animated.View / ScrollView / Text / Image / FlatList freely with className.
 
-❌ Glass effect (BlurView) on text-heavy screens or as global background.
-✅ Glass on overlays, floating elements, sheets, sticky headers — never body text.
 
-❌ 6+ tab bar items.
-✅ 3-5 items (data: 20-30% faster navigation).
 
-❌ Using a generic loading skeleton box for everything.
-✅ Skeleton matches the SHAPE of the final content (image placeholder,
-   text-line placeholder, card placeholder).
+
+
 
 ## Image Guidance
 - ` + "`generate_image`" + ` for onboarding, empty states, avatar placeholders,
@@ -608,40 +522,9 @@ The design system uses Tailwind v3's classic CSS-variable pattern. Tokens
 live in global.css under @layer base; tailwind.config.js maps them to
 utility names via hsl(var(--token)).
 
-` + "```" + `css
-/* global.css — already wired in the template, do not duplicate */
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
-
-@layer base {
-  :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
-    --primary: 222.2 47.4% 11.2%;
-    --primary-foreground: 210 40% 98%;
-    --border: 214.3 31.8% 91.4%;
-    --radius: 0.5rem;
-    /* … and the rest */
-  }
-
-  .dark {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
-    /* … inverted palette */
-  }
-}
-` + "```" + `
 
 Usage on screens — every semantic token is already available as a Tailwind
 utility (bg-background, text-foreground, border-border, …):
-` + "```" + `tsx
-<View className="bg-background">
-  <Text className="text-foreground">Default text</Text>
-  <Text className="text-muted-foreground">Secondary text</Text>
-  <View className="border border-border rounded-lg" />
-</View>
-` + "```" + `
 
 When you need a NEW custom color, take BOTH steps:
 1. Add the HSL channels to :root (and .dark) in global.css.
@@ -741,34 +624,7 @@ When the routing rule says cloud:
 
 Example wiring after ` + "`provision_database`" + ` runs for a wardrobe app:
 
-` + "```" + `typescript
-// backend/app/api/items/route.ts
-import { db } from "@/lib/db";
-import { items } from "@/lib/schema";
-import { NextRequest, NextResponse } from "next/server";
 
-export async function GET() {
-  const rows = await db.select().from(items);
-  return NextResponse.json(rows);
-}
-
-export async function POST(req: NextRequest) {
-  const body = await req.json();
-  const [row] = await db.insert(items).values(body).returning();
-  return NextResponse.json(row);
-}
-` + "```" + `
-
-` + "```" + `typescript
-// mobile/app/(app)/index.tsx
-import { apiFetch } from "@/lib/api";
-import { useQuery } from "@tanstack/react-query";
-
-const { data: items } = useQuery({
-  queryKey: ["items"],
-  queryFn: () => apiFetch<Item[]>("/api/items"),
-});
-` + "```" + `
 
 ## Local SQLite (on-device, offline-first)
 
@@ -886,50 +742,9 @@ Common packages you may need to add:
 - Apple Sign-In: expo-apple-authentication
 - Dev client: expo-dev-client (for custom native modules)
 
-- mobile/app.json — Expo config (name/slug/scheme are templated at build)
-- mobile/tsconfig.json, mobile/metro.config.js, mobile/postcss.config.mjs
-- mobile/global.css, mobile/nativewind-env.d.ts
-- mobile/app/_layout.tsx — root Expo Router layout. Initialises auth (when
-  enabled), the force-update gate, and stubs for IAP and push. DO NOT modify
-  unless the user asks for layout changes — touching this file changes app-wide
-  behavior.
-- mobile/app/(app)/_layout.tsx + index.tsx — the authenticated user surface;
-  this is your entry point for new screens
-- mobile/app/(auth)/_layout.tsx + sign-in.tsx + sign-up.tsx — auth screens
-  (only shown when MobileAppConfig.AuthEnabled is true; otherwise inert)
-- mobile/app/+not-found.tsx — 404
-- mobile/lib/api.ts — apiFetch wrapper. Use it for ALL backend calls.
-  NEVER use raw fetch() and NEVER hardcode the API URL.
-- mobile/lib/auth.ts — Better-Auth client (call signIn/signUp from here)
-- mobile/lib/forceUpdate.ts — cold-start version gate. Already wired in
-  _layout.tsx — don't re-init.
-- mobile/lib/iap.ts — STUB for RevenueCat helpers. Overwrite this file when
-  adding in-app purchases.
-- mobile/lib/push.ts — STUB for OneSignal helpers. Overwrite this file when
-  adding push notifications.
-- mobile/lib/utils.ts — cn() Tailwind merger
-- mobile/components/ui/*.tsx — react-native-reusables primitives, all
-  pre-installed: alert-dialog, avatar, badge, button, card, checkbox,
-  dialog, dropdown-menu, icon, input, label, native-only-animated-view,
-  progress, separator, skeleton, switch, text. PREFER these over
-  building from <View> / <Text> directly. They are imported via
-  @/components/ui/<name> and follow shadcn-style APIs (variant prop,
-  forwardRef, asChild where applicable).
+Key files in the template:
+Key template files: app.json, tsconfig.json, global.css, app/(app)/_layout.tsx, app/(auth)/_layout.tsx, lib/api.ts, lib/auth.ts, lib/forceUpdate.ts, lib/iap.ts, lib/push.ts, components/ui/*.tsx.
 
-- mobile/assets/icon.png + favicon.png + adaptive-icon.png + splash-icon.png
-
-When the user asks for a feature, you EDIT or EXTEND these files; you do
-not re-implement them. Concretely:
-- Adding a screen → write mobile/app/(app)/<route>.tsx, route via
-  expo-router's <Link href="/<route>"> from existing screens
-- Adding a UI component → extend components/ui/* or write a new
-  components/<feature>.tsx that composes the existing primitives
-- Adding an API call → use apiFetch from lib/api.ts; route handlers go
-  in backend/app/api/* (only if backend/ exists, see below)
-- Styling → Tailwind className strings on React Native primitives.
-  No StyleSheet.create. Add custom colors as HSL CSS variables in
-  global.css's @layer base { :root { ... } .dark { ... } } and register
-  them under theme.extend.colors in tailwind.config.js.
 
 ## AI features (chat, summarisation, image generation)
 For ANY AI / LLM feature the user asks for, call the
@@ -1016,14 +831,6 @@ backend/Dockerfile is optional — the deploy pipeline writes a default if missi
 
 Example backend endpoint at backend/app/api/todos/route.ts:
 
-` + "```" + `typescript
-// backend/app/api/todos/route.ts
-import { NextRequest, NextResponse } from "next/server";
-
-export async function GET(_req: NextRequest) {
-  return NextResponse.json([{ id: 1, title: "Example" }]);
-}
-` + "```" + `
 
 When the user asks you to write backend logic, put it in
 backend/app/api/<path>/route.ts. When you write frontend screens, call
@@ -1065,36 +872,12 @@ Add to backend/package.json:
 - ` + "`drizzle-orm`" + ` + ` + "`pg`" + ` (or whatever DB the user picked — Better-Auth supports drizzle, prisma, kysely, mongodb)
 
 ### backend/lib/auth.ts (server config)
-` + "```" + `typescript
-import { betterAuth } from "better-auth";
-import { bearer } from "better-auth/plugins";
-import { expo } from "@better-auth/expo";
-import { drizzleAdapter } from "better-auth/adapters/drizzle";
-import { db } from "./db";
-
-export const auth = betterAuth({
-  baseURL: process.env.BETTER_AUTH_URL!,
-  secret: process.env.BETTER_AUTH_SECRET!,
-  database: drizzleAdapter(db, { provider: "pg" }),
-  emailAndPassword: { enabled: true },
-  // The mobile app's URL scheme. MUST match the scheme in the mobile app.json
-  // (which is templated from the project slug at codemagic build time).
-  trustedOrigins: ["{scheme}://"], // e.g. ["myapp://"]
-  plugins: [bearer(), expo()],
-});
-` + "```" + `
 
 The ` + "`bearer()`" + ` plugin lets the mobile app authenticate via
 ` + "`Authorization: Bearer <token>`" + ` headers (no cookies needed). The ` + "`expo()`" + `
 plugin handles OAuth redirect URLs for native deep-linking flows.
 
 ### backend/app/api/auth/[...all]/route.ts (catch-all route)
-` + "```" + `typescript
-import { auth } from "@/lib/auth";
-
-const handler = auth.handler;
-export { handler as GET, handler as POST };
-` + "```" + `
 
 That single file handles ALL Better-Auth endpoints
 (/api/auth/sign-in/email, /api/auth/sign-up/email, /api/auth/sign-out,
@@ -1110,46 +893,8 @@ Better-Auth requires four tables. Generate them using the official Better-Auth
 CLI command (` + "`npx @better-auth/cli generate`" + `) or copy the schema from
 https://better-auth.com/docs/concepts/database. Minimal example:
 
-` + "```" + `typescript
-// backend/db/schema/auth.ts
-import { pgTable, text, timestamp, boolean } from "drizzle-orm/pg-core";
-
-export const user = pgTable("user", {
-  id: text("id").primaryKey(),
-  name: text("name").notNull(),
-  email: text("email").notNull().unique(),
-  emailVerified: boolean("email_verified").notNull(),
-  image: text("image"),
-  createdAt: timestamp("created_at").notNull(),
-  updatedAt: timestamp("updated_at").notNull(),
-});
-
-export const session = pgTable("session", {
-  id: text("id").primaryKey(),
-  expiresAt: timestamp("expires_at").notNull(),
-  token: text("token").notNull().unique(),
-  ipAddress: text("ip_address"),
-  userAgent: text("user_agent"),
-  userId: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
-  createdAt: timestamp("created_at").notNull(),
-  updatedAt: timestamp("updated_at").notNull(),
-});
-
-// account + verification tables also required — see Better-Auth docs.
-` + "```" + `
 
 ### Reading the session in your own route handlers
-` + "```" + `typescript
-// backend/app/api/me/route.ts
-import { auth } from "@/lib/auth";
-import { NextRequest, NextResponse } from "next/server";
-
-export async function GET(req: NextRequest) {
-  const session = await auth.api.getSession({ headers: req.headers });
-  if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  return NextResponse.json({ user: session.user });
-}
-` + "```" + `
 
 The mobile app's ` + "`apiFetch`" + ` wrapper automatically attaches
 ` + "`Authorization: Bearer <session-token>`" + ` from secure-store, so this works
@@ -1257,31 +1002,8 @@ For digital goods / unlock-features-in-app subscriptions, use ` + "`lib/iap.ts`"
 (RevenueCat) — NEVER Stripe. See # IN-APP PURCHASES.
 
 Server checkout pattern (the safe default for mobile):
-` + "```" + `typescript
-// backend/app/api/checkout/route.ts
-import Stripe from "stripe";
-import { NextRequest, NextResponse } from "next/server";
-
-const stripe = new Stripe(process.env.STRIPE_SK!);
-
-export async function POST(req: NextRequest) {
-  const { priceId } = await req.json();
-  const session = await stripe.checkout.sessions.create({
-    mode: "payment",
-    line_items: [{ price: priceId, quantity: 1 }],
-    success_url: "https://yourdomain.com/success",
-    cancel_url: "https://yourdomain.com/cancel",
-  });
-  return NextResponse.json({ url: session.url });
-}
-` + "```" + `
 
 Mobile opens the checkout URL via ` + "`expo-web-browser`" + `:
-` + "```" + `typescript
-import * as WebBrowser from "expo-web-browser";
-const { url } = await apiFetch<{ url: string }>("/api/checkout", { method: "POST", body: JSON.stringify({ priceId }) });
-await WebBrowser.openBrowserAsync(url);
-` + "```" + `
 
 Webhook handler at ` + "`backend/app/api/stripe-webhook/route.ts`" + ` verifies the
 signature with ` + "`STRIPE_WEBHOOK_SECRET`" + ` and updates your db on
@@ -1303,40 +1025,7 @@ that DO:
 locally, posts it to the backend, backend uploads to Cloudinary with the
 private API key:
 
-` + "```" + `typescript
-// backend/app/api/upload/route.ts
-import { v2 as cloudinary } from "cloudinary";
-import { NextRequest, NextResponse } from "next/server";
 
-cloudinary.config({
-  cloud_name: process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME,
-  api_key: process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET,
-});
-
-export async function POST(req: NextRequest) {
-  const formData = await req.formData();
-  const file = formData.get("file") as File;
-  const buffer = Buffer.from(await file.arrayBuffer());
-  const result = await new Promise<any>((resolve, reject) => {
-    cloudinary.uploader.upload_stream({}, (err, res) => err ? reject(err) : resolve(res)).end(buffer);
-  });
-  return NextResponse.json({ url: result.secure_url });
-}
-` + "```" + `
-
-` + "```" + `typescript
-// mobile screen
-import * as ImagePicker from "expo-image-picker";
-const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images });
-if (!result.canceled) {
-  const uri = result.assets[0].uri;
-  const formData = new FormData();
-  formData.append("file", { uri, name: "upload.jpg", type: "image/jpeg" } as any);
-  const { url } = await apiFetch<{ url: string }>("/api/upload", { method: "POST", body: formData });
-  // url is the public Cloudinary URL — store in your db / display via <Image source={{ uri: url }} />
-}
-` + "```" + `
 
 **B. Unsigned client upload via upload preset** — for low-friction galleries.
 Mobile fetches the cloud name + upload preset from a config endpoint, then
@@ -1519,106 +1208,6 @@ Always use react-native-reusables components from @/components/ui/* instead
 of raw React Native primitives.
 
 ## Pre-installed components
-
-### Button
-` + "```" + `typescript
-import { Button } from "@/components/ui/button";
-
-// Variants: "default" | "destructive" | "outline" | "secondary" | "ghost" | "link"
-// Sizes:    "default" | "sm" | "lg" | "icon"
-// Button wraps Pressable — pass children, do not pass a label prop.
-
-<Button onPress={handleSave}>
-  <Text>Save</Text>
-</Button>
-
-<Button variant="destructive" onPress={handleDelete}>
-  <Text>Delete</Text>
-</Button>
-
-<Button variant="outline" size="sm" onPress={handleCancel}>
-  <Text>Cancel</Text>
-</Button>
-
-<Button variant="ghost" size="icon" onPress={handleClose}>
-  <Text>✕</Text>
-</Button>
-` + "```" + `
-
-### Text
-` + "```" + `typescript
-import { Text } from "@/components/ui/text";
-
-// Variants: "default" | "h1" | "h2" | "h3" | "h4" | "p" | "blockquote" |
-//           "code" | "lead" | "large" | "small" | "muted"
-
-<Text variant="h1">Hero headline</Text>
-<Text variant="h2">Section heading</Text>
-<Text variant="h3">Subsection heading</Text>
-<Text variant="h4">Card title</Text>
-<Text variant="p">Body paragraph with proper line height</Text>
-<Text variant="lead">Subtitle / intro text (larger, muted)</Text>
-<Text variant="large">Emphasized line</Text>
-<Text variant="small">Fine print / labels</Text>
-<Text variant="muted">Secondary helper text</Text>
-<Text variant="code">inline code</Text>
-<Text variant="blockquote">Pulled quote</Text>
-<Text>Body copy (default)</Text>
-` + "```" + `
-
-Text inside ` + "`<Button>`" + ` and ` + "`<Card>`" + ` automatically picks up the parent's
-text styling via TextClassContext — you don't need to set ` + "`text-primary-foreground`" + `
-on Button labels yourself.
-
-### Input
-` + "```" + `typescript
-import { Input } from "@/components/ui/input";
-
-// Wraps TextInput. All TextInputProps forwarded.
-// NativeWind does NOT support focus: pseudo-classes on React Native.
-// For a visible focus ring, manage focused state manually:
-
-const [focused, setFocused] = React.useState(false);
-<Input
-  placeholder="Email"
-  value={email}
-  onChangeText={setEmail}
-  onFocus={() => setFocused(true)}
-  onBlur={() => setFocused(false)}
-  className={focused ? "border-blue-500" : ""}
-  autoCapitalize="none"
-  keyboardType="email-address"
-/>
-` + "```" + `
-
-### Card
-` + "```" + `typescript
-import {
-  Card,
-  CardHeader,
-  CardTitle,
-  CardDescription,
-  CardContent,
-  CardFooter,
-} from "@/components/ui/card";
-
-<Card className="w-full">
-  <CardHeader>
-    <CardTitle>Card title</CardTitle>
-    <CardDescription>Optional subtitle</CardDescription>
-  </CardHeader>
-  <CardContent>
-    <Text>Main content goes here.</Text>
-  </CardContent>
-  <CardFooter>
-    <Button className="flex-1">
-      <Text>Action</Text>
-    </Button>
-  </CardFooter>
-</Card>
-` + "```" + `
-
-## Pre-installed components (full catalog)
 Every mobile_app_native project ships with the following react-native-reusables
 primitives already installed under ` + "`@/components/ui/`" + `. Import them directly —
 no install step needed.
@@ -1874,143 +1463,16 @@ export default function RootLayout() {
 ` + "```" + `
 
 ## Tabs layout
-Expo Router's ` + "`<Tabs>`" + ` AUTO-INCLUDES every file in the group as a tab. If you
-add ` + "`add-item.tsx`" + ` or ` + "`item-detail.tsx`" + ` next to ` + "`index.tsx`" + ` / ` + "`profile.tsx`" + `,
-they show up as their own tabs and the bar overflows + clips. Three rules:
+Expo Router's Tabs auto-includes every file in the group as a tab. Rules:
+1. Enumerate wanted tabs with Tabs.Screen name=…
+2. Hide non-tab routes with options={{ href: null }}.
+3. Keep visible tabs to 3–5.
 
-1. Enumerate every tab you actually want with ` + "`<Tabs.Screen name=… />`" + `.
-2. Hide every non-tab route in the same group with ` + "`options={{ href: null }}`" + `.
-   The route stays navigable via ` + "`router.push(\"/add-item\")`" + ` — it just
-   doesn't get a button in the tab bar.
-3. Keep visible tabs to 3–5. More than 5 = redesign (move secondary actions
-   into a stack or a "More" tab), don't shrink the labels.
-
-**Use the floating glass capsule recipe below by default.** It is the 2026
-standard pattern (see DESIGN PRINCIPLES). The plain docked tab bar
-(no ` + "`tabBarStyle`" + ` overrides) is FORBIDDEN unless the design direction
-explicitly calls for it.
-
-` + "```" + `tsx
-// app/(app)/_layout.tsx
-import { Tabs } from "expo-router";
-import { BlurView } from "expo-blur";
-import { House, User, Settings } from "lucide-react-native";
-import { Platform, StyleSheet } from "react-native";
-
-export default function TabsLayout() {
-  return (
-    <Tabs
-      // CRITICAL: zero out bottom safe-area inset. Because the bar is
-      // floated 24pt above the screen edge, it's already clear of the
-      // home indicator. React Navigation otherwise injects
-      // paddingBottom: insets.bottom (~34pt on notched iPhones) into the
-      // bar's interior, pinning icons to the top of the capsule with a
-      // fat empty band along the bottom. This is the #1 cause of broken
-      // floating capsule renders.
-      safeAreaInsets={{ bottom: 0 }}
-      screenOptions={{
-        headerShown: false,
-        tabBarShowLabel: false,
-        tabBarActiveTintColor: "hsl(var(--primary))",
-        tabBarInactiveTintColor: "hsl(var(--muted-foreground))",
-        // Floating capsule: 24pt inset on all four sides, pill shape,
-        // glass on iOS / translucent white on Android. Active item gets
-        // a filled icon (not just a color tint) — see icon render below.
-        tabBarStyle: {
-          position: "absolute",
-          left: 24,
-          right: 24,
-          bottom: 24,
-          height: 64,
-          borderRadius: 32,
-          borderTopWidth: 0,
-          // Zero out vertical padding too — items center themselves via
-          // tabBarItemStyle below. Any non-zero padding here re-creates
-          // the "icons jammed to the top" look.
-          paddingTop: 0,
-          paddingBottom: 0,
-          paddingHorizontal: 8,
-          backgroundColor:
-            Platform.OS === "ios" ? "transparent" : "rgba(255,255,255,0.92)",
-          elevation: 12,
-          shadowColor: "#000",
-          shadowOpacity: 0.12,
-          shadowRadius: 24,
-          shadowOffset: { width: 0, height: 6 },
-          overflow: "hidden",
-        },
-        // Liquid Glass via expo-blur on iOS. Android falls through to the
-        // translucent backgroundColor above (BlurView on Android is less
-        // performant and uses a different visual idiom anyway).
-        tabBarBackground:
-          Platform.OS === "ios"
-            ? () => (
-                <BlurView
-                  intensity={70}
-                  tint="systemThickMaterialLight"
-                  style={[
-                    StyleSheet.absoluteFill,
-                    { borderRadius: 32, overflow: "hidden" },
-                  ]}
-                />
-              )
-            : undefined,
-        // Match the bar height and center contents — do NOT use a smaller
-        // item height (e.g. 56) inside a 64pt bar; that re-introduces
-        // vertical empty space inside the capsule.
-        tabBarItemStyle: {
-          height: 64,
-          justifyContent: "center",
-          paddingVertical: 0,
-        },
-      }}
-    >
-      <Tabs.Screen
-        name="index"
-        options={{
-          tabBarIcon: ({ color, focused }) => (
-            <House color={color} size={24} strokeWidth={focused ? 2.5 : 1.8} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="profile"
-        options={{
-          tabBarIcon: ({ color, focused }) => (
-            <User color={color} size={24} strokeWidth={focused ? 2.5 : 1.8} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="settings"
-        options={{
-          tabBarIcon: ({ color, focused }) => (
-            <Settings color={color} size={24} strokeWidth={focused ? 2.5 : 1.8} />
-          ),
-        }}
-      />
-      {/* Non-tab routes that live under (app)/ — navigated via router.push */}
-      <Tabs.Screen name="add-item"    options={{ href: null }} />
-      <Tabs.Screen name="item-detail" options={{ href: null }} />
-    </Tabs>
-  );
-}
-` + "```" + `
-
-**Required: bottom padding on every screen** so content doesn't slide under
-the floating capsule. Add ` + "`pb-28`" + ` (or ` + "`paddingBottom: 112`" + ` on a
-ScrollView's contentContainerStyle) — that's 64pt bar height + 24pt
-bottom inset + ~24pt breathing room. FlatList: same via
-` + "`contentContainerStyle={{ paddingBottom: 112 }}`" + `.
-
-**Dark mode tweak:** when ` + "`useColorScheme() === \"dark\"`" + `, swap the
-BlurView ` + "`tint`" + ` to ` + "`\"systemThickMaterialDark\"`" + ` and the Android fallback
-` + "`backgroundColor`" + ` to ` + "`\"rgba(0,0,0,0.55)\"`" + `.
-
-For modal-style screens (add-item, edit-x, item-detail), prefer
-` + "`presentation: \"modal\"`" + ` on a parent Stack OR a ` + "`(modals)/`" + ` sub-group, which
-keeps them off the tab bar by construction. ` + "`href: null`" + ` is the minimum fix
-when you've already created the file as a sibling of your tab routes.
+Default: floating glass capsule tab bar (24pt inset, 64pt height, 32px radius).
+Key config: safeAreaInsets={{ bottom: 0 }}, tabBarStyle position absolute with 24pt inset and 64pt height,
+tabBarBackground uses BlurView on iOS, translucent white on Android.
+Use pb-28 padding on screens so content clears the floating bar.
+For modal screens, prefer a (modals)/ sub-group or presentation modal.
 
 ## Drawer layout
 ` + "```" + `tsx
@@ -2373,11 +1835,6 @@ screens.
 | Email magic-link         | ` + "`signInWithMagicLink(email)`" + ` | ` + "`magicLink`" + ` plugin |
 | Email + password         | ` + "`authClient.signIn.email(...)`" + ` | ` + "`emailAndPassword`" + ` |
 
-` + "```" + `tsx
-import {
-  signInWithApple, signInWithGoogle, signInWithMagicLink, authClient,
-} from "@/lib/auth";
-` + "```" + `
 
 ### Apple Guideline 4.8 (HARD requirement)
 If the app offers ANY third-party social login (Google, Facebook, GitHub,
@@ -2446,23 +1903,8 @@ Always tie the permission request to a user action that explains the value:
 - An in-app permission prompt screen with a clear explanation
 
 BAD — causes App Store rejection:
-` + "```" + `tsx
-// app/_layout.tsx
-useEffect(() => {
-  requestPushPermission(); // NEVER do this on app launch
-}, []);
-` + "```" + `
 
 GOOD — tied to a meaningful user action:
-` + "```" + `tsx
-// app/(app)/settings.tsx
-<Button onPress={async () => {
-  const granted = await requestPushPermission();
-  if (granted) loginUserToPush(session.user.id);
-}}>
-  <Text>Enable order notifications</Text>
-</Button>
-` + "```" + `
 
 logoutUserFromPush() should be called when the user signs out to stop
 delivering their push notifications to the old device token.
@@ -2819,77 +2261,16 @@ to enable it.
 ## Available native features (when enabled)
 
 ### Camera
-` + "```" + `tsx
-import * as ImagePicker from "expo-image-picker";
-
-const result = await ImagePicker.launchCameraAsync({
-  mediaTypes: ImagePicker.MediaTypeOptions.Images,
-  quality: 0.8,
-});
-if (!result.canceled) {
-  const uri = result.assets[0].uri;
-}
-` + "```" + `
 
 ### Photo library
-` + "```" + `tsx
-import * as ImagePicker from "expo-image-picker";
-
-const result = await ImagePicker.launchImageLibraryAsync({
-  mediaTypes: ImagePicker.MediaTypeOptions.All,
-  allowsMultipleSelection: true,
-});
-` + "```" + `
 
 ### Document picker
-` + "```" + `tsx
-import * as DocumentPicker from "expo-document-picker";
-
-const result = await DocumentPicker.getDocumentAsync({
-  type: "application/pdf",
-});
-if (result.assets) {
-  const file = result.assets[0];
-  // file.uri, file.name, file.size, file.mimeType
-}
-` + "```" + `
 
 ### Share sheet
-` + "```" + `tsx
-import { Share } from "react-native";
-
-await Share.share({
-  message: "Check out this app!",
-  url: "https://example.com",  // iOS only; Android uses message
-});
-` + "```" + `
 
 ### Haptics
-` + "```" + `tsx
-import * as Haptics from "expo-haptics";
-
-// Light tap
-await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-
-// Medium tap (default for button presses)
-await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-
-// Success notification
-await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-` + "```" + `
 
 ### Biometric authentication
-` + "```" + `tsx
-import * as LocalAuthentication from "expo-local-authentication";
-
-const result = await LocalAuthentication.authenticateAsync({
-  promptMessage: "Confirm your identity",
-  fallbackLabel: "Use passcode",
-});
-if (result.success) {
-  // Proceed with sensitive action
-}
-` + "```" + `
 
 // <P2#21> bundled native features
 ## Pre-bundled native helpers (mobile/lib/*)
@@ -2923,24 +2304,6 @@ from the project's mobile config — DO NOT add them to app.json.
 | Clipboard | ` + "`@/lib/clipboard`" + ` | ` + "`copy(value)`" + `, ` + "`paste()`" + `, ` + "`hasString()`" + ` |
 | Local notifications | ` + "`@/lib/localNotifications`" + ` | ` + "`requestPermissions()`" + `, ` + "`scheduleNotification({title, body, trigger})`" + `, ` + "`cancelAll()`" + `, ` + "`getScheduled()`" + ` |
 
-Sample usage:
-` + "```" + `tsx
-import { medium, success } from "@/lib/haptics";
-import { authenticate } from "@/lib/biometric";
-import { pickFromLibrary } from "@/lib/camera";
-import { copy } from "@/lib/clipboard";
-import { scheduleNotification } from "@/lib/localNotifications";
-
-await medium();                                 // tap feedback
-const auth = await authenticate({ prompt: "Unlock" });
-const pick = await pickFromLibrary({ mediaTypes: "images" });
-await copy("hello world");
-await scheduleNotification({
-  title: "Stand up",
-  body: "Take a 5 min walk",
-  trigger: 60 * 30, // 30 minutes from now
-});
-` + "```" + `
 
 If you create a localNotifications helper, wire ` + "`localNotifications.init()`" + `
 in app/_layout.tsx. The other helpers are stateless and need no init.
@@ -2951,12 +2314,6 @@ Deep link scheme is wemobapp:// (set in app.json scheme). Universal link
 configuration (apple-app-site-association, assetlinks.json) is handled by
 the Wemob platform — read from read_mobile_config for the full config.
 
-` + "```" + `tsx
-import * as Linking from "expo-linking";
-
-const url = Linking.createURL("/profile/42");
-// → wemobapp://profile/42
-` + "```" + `
 
 ## Platform guard for native-only APIs
 Some native modules are no-ops or crash on web. Guard them when the app also
@@ -3047,28 +2404,7 @@ padding render flush against the screen edges in the Studio preview** — the
 The rule: **static content padding always, insets in addition**. Never let
 insets be the only thing standing between your content and the screen edge.
 
-` + "```" + `tsx
-// CORRECT — works identically on web and native
-import { SafeAreaView } from "react-native-safe-area-context";
-import { View } from "react-native";
 
-<SafeAreaView className="flex-1 bg-background" edges={["top"]}>
-  <View className="flex-1 px-5 gap-4">
-    {/* px-5 is the content padding — present on web, present on native */}
-    {/* SafeAreaView adds the notch/status-bar inset on top of px-5 */}
-  </View>
-</SafeAreaView>
-` + "```" + `
-
-` + "```" + `tsx
-// WRONG — flush against the edges in the Studio preview because insets are 0
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-
-const insets = useSafeAreaInsets();
-<View style={{ flex: 1, paddingHorizontal: insets.left, paddingTop: insets.top }}>
-  <Text>Title</Text>  {/* zero padding on web */}
-</View>
-` + "```" + `
 
 Applied to common screen patterns:
 

@@ -170,6 +170,7 @@ func projectHasAI(project *models.AppProject) bool {
 
 // buildFileTreeBlock produces a deterministic "FILE TREE" listing sorted
 // by path so cache keys remain stable across runs with identical file sets.
+// Large projects are truncated to keep the context window lean.
 func buildFileTreeBlock(fileMap *SafeFileMap) string {
 	if fileMap == nil {
 		return "FILE TREE\n=========\n\n(empty — this is a new project, start by creating files)\n"
@@ -188,8 +189,41 @@ func buildFileTreeBlock(fileMap *SafeFileMap) string {
 		sb.WriteString("(empty — this is a new project, start by creating files)\n")
 		return sb.String()
 	}
-	for _, p := range paths {
-		fmt.Fprintf(&sb, "%s (%d bytes)\n", p, len(files[p]))
+
+	const maxTreeLines = 100
+	if len(paths) > maxTreeLines {
+		// Prioritize config/entry files, then truncate
+		prioritySuffixes := []string{"package.json", "app.json", "tsconfig.json", "tailwind.config.js", ".env", "/index.tsx", "/_layout.tsx", "/page.tsx"}
+		priority := make([]string, 0, len(paths))
+		rest := make([]string, 0, len(paths))
+		for _, p := range paths {
+			isPriority := false
+			for _, suffix := range prioritySuffixes {
+				if strings.HasSuffix(p, suffix) {
+					isPriority = true
+					break
+				}
+			}
+			if isPriority {
+				priority = append(priority, p)
+			} else {
+				rest = append(rest, p)
+			}
+		}
+		for _, p := range priority {
+			fmt.Fprintf(&sb, "%s (%d bytes)\n", p, len(files[p]))
+		}
+		remaining := maxTreeLines - len(priority)
+		if remaining > 0 && len(rest) > remaining {
+			for _, p := range rest[:remaining] {
+				fmt.Fprintf(&sb, "%s (%d bytes)\n", p, len(files[p]))
+			}
+		}
+		fmt.Fprintf(&sb, "... (%d more files)\n", len(paths)-len(priority)-remaining)
+	} else {
+		for _, p := range paths {
+			fmt.Fprintf(&sb, "%s (%d bytes)\n", p, len(files[p]))
+		}
 	}
 	return sb.String()
 }
