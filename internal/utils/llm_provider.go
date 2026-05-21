@@ -23,7 +23,7 @@ func bareModel(id string) string {
 // LLMProvider holds the base URL and API key for a specific LLM provider.
 // All supported providers expose an OpenAI-compatible /chat/completions endpoint.
 type LLMProvider struct {
-	Name              string // "openrouter", "anthropic", "google", "moonshot", "zai", "litellm"
+	Name              string // "openrouter", "anthropic", "google", "moonshot", "zai"
 	BaseURL           string
 	APIKey            string
 	DefaultReasoning  *ReasoningConfig // applied when no explicit Reasoning/Thinking is set
@@ -39,7 +39,7 @@ type LLMProvider struct {
 
 // Endpoint returns the full chat completions URL for this provider.
 func (p *LLMProvider) Endpoint() string {
-	if p.UsesAnthropicFormat() {
+	if p.IsAnthropic() {
 		return p.BaseURL + "/messages"
 	}
 	return p.BaseURL + "/chat/completions"
@@ -65,26 +65,15 @@ func (p *LLMProvider) IsAnthropic() bool {
 	return p.Name == "anthropic"
 }
 
-// IsLiteLLM returns true when using the LiteLLM Proxy gateway.
-func (p *LLMProvider) IsLiteLLM() bool {
-	return p.Name == "litellm"
-}
-
-// UsesAnthropicFormat returns true for providers that accept Anthropic Messages API format.
-// This includes native Anthropic and LiteLLM Proxy (which translates internally).
-func (p *LLMProvider) UsesAnthropicFormat() bool {
-	return p.IsAnthropic() || p.IsLiteLLM()
-}
-
 // UsesThinkingFormat returns true for providers that use a non-OpenRouter
 // thinking/reasoning format. This includes ZAI, Moonshot, and Anthropic.
 func (p *LLMProvider) UsesThinkingFormat() bool {
-	return p.IsZAI() || p.IsMoonshot() || p.IsAnthropic() || p.IsLiteLLM()
+	return p.IsZAI() || p.IsMoonshot() || p.IsAnthropic()
 }
 
 // WebSearchTool returns the builtin web search tool for providers that support it, or nil.
 func (p *LLMProvider) WebSearchTool() *Tool {
-	if p.IsAnthropic() || p.IsLiteLLM() {
+	if p.IsAnthropic() {
 		return &Tool{
 			Type: "server_tool",
 			ServerTool: &ServerTool{
@@ -112,8 +101,6 @@ func (p *LLMProvider) DefaultModel() string {
 	switch p.Name {
 	case "anthropic":
 		return bareModel(constants.GatewayPreferredChatModel)
-	case "litellm":
-		return constants.GatewayPreferredChatModel
 	case "moonshot":
 		return "kimi-k2.5"
 	case "google":
@@ -136,8 +123,6 @@ func (p *LLMProvider) FastModel() string {
 	case "anthropic":
 		// TODO keep synced with GatewayDefaultChatModel when Anthropic publishes a new haiku
 		return "claude-haiku-4-5-20251001"
-	case "litellm":
-		return constants.GatewayDefaultChatModel
 	case "google":
 		return "gemini-2.5-flash"
 	default:
@@ -157,7 +142,7 @@ func SetLLMHeaders(req *http.Request, provider *LLMProvider) {
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if provider.IsAnthropic() && !provider.IsLiteLLM() {
+	if provider.IsAnthropic() {
 		req.Header.Set("x-api-key", provider.APIKey)
 		req.Header.Set("anthropic-version", "2023-06-01")
 		req.Header.Set("anthropic-beta", anthropicBetaFeatures)

@@ -29,7 +29,10 @@ func (c *Controller) classifyProjectType(ctx context.Context, prompt string, use
 	// for non-mobile prompts.)
 	provider := c.llmProvider()
 	// Use a fast/cheap model for classification
-	model := provider.FastModel()
+	model := "anthropic/claude-haiku-4-5-20251001"
+	if provider.IsAnthropic() {
+		model = "claude-haiku-4-5-20251001"
+	}
 
 	tracker := utils.NewTokenTracker()
 	if user != nil {

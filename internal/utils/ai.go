@@ -206,8 +206,6 @@ var modelCosts = map[string][2]float64{
 	"claude-opus-4.7":           {5.0, 25.0},
 	"claude-opus-4-6":           {15.0, 75.0},
 	"claude-opus-4-5":           {15.0, 75.0},
-	"kimi-k2.5":                 {0.5, 2.0},
-	"kimi-k2.6":                 {0.6, 2.8},
 }
 
 // EstimateInputOutputCostUSD returns separate input and output costs for a single LLM call.
@@ -599,9 +597,9 @@ type ChatResponse struct {
 }
 
 // buildLLMRequestBody marshals a ChatRequest into the correct wire format
-// for the given provider. For Anthropic-format providers, it translates to the Messages API format.
+// for the given provider. For Anthropic, it translates to the Messages API format.
 func buildLLMRequestBody(req ChatRequest, provider *LLMProvider) ([]byte, error) {
-	if provider != nil && provider.UsesAnthropicFormat() {
+	if provider != nil && provider.IsAnthropic() {
 		anthReq := convertToAnthropicRequest(req, provider)
 		return json.Marshal(anthReq)
 	}
@@ -612,7 +610,7 @@ func buildLLMRequestBody(req ChatRequest, provider *LLMProvider) ([]byte, error)
 
 // parseLLMResponseBody unmarshals a non-streaming LLM response body.
 func parseLLMResponseBody(body []byte, provider *LLMProvider) (ChatResponse, error) {
-	if provider != nil && provider.UsesAnthropicFormat() {
+	if provider != nil && provider.IsAnthropic() {
 		return parseAnthropicResponse(body)
 	}
 	var parsed ChatResponse
@@ -631,8 +629,8 @@ func prepareChatRequest(req ChatRequest, provider *LLMProvider) ChatRequest {
 		return req
 	}
 
-	// Anthropic-format providers use a different request format entirely (handled by buildLLMRequestBody)
-	if provider.UsesAnthropicFormat() {
+	// Anthropic uses a different request format entirely (handled by buildLLMRequestBody)
+	if provider.IsAnthropic() {
 		return req
 	}
 
@@ -1177,7 +1175,7 @@ func StreamWithTools(
 		toolCallsMap := make(map[int]*ToolCall)
 
 		// Anthropic SSE format — use dedicated parser then map to local vars
-		if provider.UsesAnthropicFormat() {
+		if provider.IsAnthropic() {
 			var toolStartCb func(string)
 			if len(opts) > 0 && opts[0].OnToolCallStart != nil {
 				toolStartCb = opts[0].OnToolCallStart
