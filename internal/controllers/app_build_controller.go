@@ -633,6 +633,39 @@ func injectWemobBadge(fileMap map[string]string) {
 	}
 }
 
+// injectWemobAnalytics injects a lightweight JS tracker into the root layout of
+// deployed apps. The script captures pageviews, pageleaves (with duration),
+// referrer, UTM params, screen size, and language, and POSTs them to the
+// analytics collect endpoint. projectID is the AppProject UUID.
+func injectWemobAnalytics(fileMap map[string]string, projectID string) {
+	script := strings.ReplaceAll(constants.WEMOB_ANALYTICS_SCRIPT, "__WEMOB_PROJECT_ID__", projectID)
+	escapedBody := strings.ReplaceAll(script, "`", "\\`")
+	prop := "dangerouslySetInnerHTML"
+	jsxScript := `<script data-wemob-analytics ` + prop + `={{ __html: ` + "`" + escapedBody + "`" + ` }}></script>`
+
+	layoutPaths := []string{
+		"app/layout.tsx",
+		"app/layout.jsx",
+		"src/app/layout.tsx",
+		"src/app/layout.jsx",
+		"backend/app/layout.tsx",
+		"backend/app/layout.jsx",
+		"backend/src/app/layout.tsx",
+		"backend/src/app/layout.jsx",
+	}
+
+	for _, path := range layoutPaths {
+		content, ok := fileMap[path]
+		if !ok {
+			continue
+		}
+		if idx := strings.Index(content, "</body>"); idx != -1 {
+			fileMap[path] = content[:idx] + jsxScript + "\n" + content[idx:]
+			return
+		}
+	}
+}
+
 // CaptureAppScreenshot takes a desktop screenshot of the preview URL and uploads it to S3.
 // Intended to be called in a goroutine (fire-and-forget).
 func (c *Controller) CaptureAppScreenshot(project *models.AppProject, previewURL string) {
