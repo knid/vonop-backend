@@ -104,9 +104,12 @@ func Run(
 		return New(CodeGitError, "setup", "failed to create pre-run snapshot", err)
 	}
 
+	// --- Step 5b: classify complexity for model routing ---
+	complexity := classifyComplexity(ctx, deps.SecretManager, project, message, deps.LLMProvider)
+
 	// --- Step 6: insert AppAgentRun row ---
 	provider := deps.LLMProvider
-	model := resolveModel(deps.SecretManager, project, provider)
+	model := resolveModel(deps.SecretManager, project, provider, complexity)
 	run := &models.AppAgentRun{
 		ID:           runID,
 		AppProjectID: project.ID,
@@ -274,12 +277,13 @@ func Run(
 
 	// --- Step 10: emit run_start ---
 	emitter.Emit(EventRunStart, RunStartEvent{
-		RunID:     runID,
-		PreCommit: preCommit,
-		Model:     model,
-		Provider:  provider.Name,
-		MaxTurns:  maxTurns,
-		Tools:     registry.Names(),
+		RunID:      runID,
+		PreCommit:  preCommit,
+		Model:      model,
+		Provider:   provider.Name,
+		Complexity: string(complexity),
+		MaxTurns:   maxTurns,
+		Tools:      registry.Names(),
 	})
 
 	// --- Step 11: panic guard ---
@@ -662,10 +666,11 @@ func runAction(project *models.AppProject) string {
 	return "app_chat"
 }
 
-// resolveModel picks the LLM model for this run based on project state and secrets.
+// resolveModel picks the LLM model for this run based on project state, secrets,
+// and complexity classification. Secret overrides always take precedence.
 // Falls back to provider.DefaultModel() so switching LLM_PROVIDER doesn't leave
 // a hardcoded Anthropic model name in the request.
-func resolveModel(sm secret.SecretManager, project *models.AppProject, provider *utils.LLMProvider) string {
+func resolveModel(sm secret.SecretManager, project *models.AppProject, provider *utils.LLMProvider, complexity ComplexityLevel) string {
 	if project.Status == "draft" {
 		if m := sm.GetSecret("WEBSITE_BUILDER_LLM_MODEL"); m != "" {
 			return m
@@ -676,6 +681,11 @@ func resolveModel(sm secret.SecretManager, project *models.AppProject, provider 
 	}
 	if m := sm.GetSecret("WEBSITE_BUILDER_LLM_MODEL"); m != "" {
 		return m
+	}
+	if complexity == ComplexitySimple && provider != nil {
+		if fast := provider.FastModel(); fast != "" {
+			return fast
+		}
 	}
 	if provider != nil {
 		return provider.DefaultModel()

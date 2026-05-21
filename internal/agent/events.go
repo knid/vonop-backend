@@ -25,12 +25,13 @@ type EventEmitter interface {
 // ---- Event payload types ----
 
 type RunStartEvent struct {
-	RunID     uuid.UUID `json:"run_id"`
-	PreCommit string    `json:"pre_commit"`
-	Model     string    `json:"model"`
-	Provider  string    `json:"provider"`
-	MaxTurns  int       `json:"max_turns"`
-	Tools     []string  `json:"tools"`
+	RunID      uuid.UUID `json:"run_id"`
+	PreCommit  string    `json:"pre_commit"`
+	Model      string    `json:"model"`
+	Provider   string    `json:"provider"`
+	Complexity string    `json:"complexity"`
+	MaxTurns   int       `json:"max_turns"`
+	Tools      []string  `json:"tools"`
 }
 
 type TurnStartEvent struct {
