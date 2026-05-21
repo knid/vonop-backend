@@ -240,6 +240,7 @@ func (c *Controller) HandleWebDeployTask(ctx context.Context, t *asynq.Task) err
 	if limits == nil || !limits.CanRemoveBrandLogo {
 		injectWemobBadge(fileMap)
 	}
+	injectWemobAnalytics(fileMap, project.ID.String())
 	for path, content := range fileMap {
 		if repoFiles[path] != content {
 			if writeErr := repo.WriteFile(path, []byte(content)); writeErr != nil {
