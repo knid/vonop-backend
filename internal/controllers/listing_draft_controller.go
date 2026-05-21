@@ -66,15 +66,13 @@ func (c *Controller) DraftListing(ctx context.Context, user *models.User, appID 
 		tracker.OrganizationID = project.OrganizationID.String()
 	}
 	ctx = utils.WithTokenTracker(ctx, tracker)
-	provider := c.LLMProvider()
-	model := provider.FastModel()
 
 	raw, err := utils.GetJSONFromLLM(
 		ctx,
-		model,
+		"claude-haiku-4-5",
 		constants.LISTING_DRAFT_PROMPT,
 		string(userJSON),
-		provider,
+		c.AnthropicProvider(),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("listing draft LLM call failed: %w", err)
@@ -90,8 +88,8 @@ func (c *Controller) DraftListing(ctx context.Context, user *models.User, appID 
 	}
 
 	c.RecordTokenUsage(user, "listing_draft",
-		model,
-		provider.Name, project.ID.String(), "standard", tracker)
+		"claude-haiku-4-5",
+		"anthropic", project.ID.String(), "standard", tracker)
 	_, _, total, _ := tracker.Totals()
 	if total > 0 {
 		credits := c.CreditsForTracker(tracker)

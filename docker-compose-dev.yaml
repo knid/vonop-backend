@@ -25,18 +25,6 @@ services:
     ports:
       - "5433:5432"
 
-  litellm:
-    image: ghcr.io/berriai/litellm:main-latest
-    ports:
-      - "4000:4000"
-    volumes:
-      - ./litellm_config.yaml:/app/config.yaml
-    environment:
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-      - MOONSHOT_API_KEY=${MOONSHOT_API_KEY}
-      - LITELLM_API_KEY=${LITELLM_API_KEY}
-    command: ["--config", "/app/config.yaml", "--port", "4000"]
-
 volumes:
   db_data:
   redis_data:
