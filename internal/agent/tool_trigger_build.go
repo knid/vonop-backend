@@ -31,7 +31,7 @@ var _ ToolExecutor = (*TriggerBuildAfterFixTool)(nil)
 func (t *TriggerBuildAfterFixTool) Name() string { return "trigger_build_after_fix" }
 
 func (t *TriggerBuildAfterFixTool) Description() string {
-	return "Trigger a new mobile build for this project after applying a fix to the codebase. Use this AFTER you have written the fix to close the read-fix-rebuild loop kicked off by a build failure. Returns the new build_id, per-platform task_id(s), and a status URL the user can follow. Pass platform='android', 'ios', or 'both' (default 'both') to control which platforms re-build."
+	return "Trigger a new mobile build for this project. Use this ONLY when the user explicitly asks you to build, or AFTER you have written a fix to close the read-fix-rebuild loop kicked off by a previously-failed build. Do NOT call this automatically during initial app creation or when the user has not asked for a build. Returns the new build_id, per-platform task_id(s), and a status URL the user can follow. Pass platform='android', 'ios', or 'both' (default 'both') to control which platforms re-build."
 }
 
 func (t *TriggerBuildAfterFixTool) Schema() map[string]any {
