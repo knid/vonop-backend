@@ -1949,6 +1949,7 @@ func main() {
 
 					// Mobile builds (Expo / mobile_app_native only)
 					r.Route("/build", func(r chi.Router) {
+						r.Post("/", httpViews.BuildAppExpo)
 						// Expo (mobile_app_native) — request shape + permission
 						// gate route through BuildExpoMobile.
 						r.Post("/expo", httpViews.BuildAppExpo)
