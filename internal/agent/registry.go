@@ -104,7 +104,7 @@ func (r *Registry) Execute(ctx context.Context, rc *RunContext, name string, inp
 // tool exposed via deps.LLMProvider.WebSearchTool(). If the provider is
 // not Anthropic (OpenRouter, Google, etc.) the server tool returns nil and
 // the agent runs without web search for that project.
-func BuildRegistryFor(project *models.AppProject, deps *RunDependencies) *Registry {
+func BuildRegistryFor(project *models.AppProject, deps *RunDependencies, model string) *Registry {
 	r := NewRegistry()
 	r.Register(ReadFileTool{})
 	r.Register(ReadFilesTool{})
@@ -118,7 +118,7 @@ func BuildRegistryFor(project *models.AppProject, deps *RunDependencies) *Regist
 	r.Register(ReadAttachmentTool{Deps: deps})
 
 	if deps != nil && deps.LLMProvider != nil {
-		if ws := deps.LLMProvider.WebSearchTool(); ws != nil {
+		if ws := deps.LLMProvider.WebSearchTool(model); ws != nil {
 			r.AddServerTool(ServerToolRef{Tool: ws, DisplayName: "web_search"})
 		}
 	}
