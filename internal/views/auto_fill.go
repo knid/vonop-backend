@@ -82,8 +82,10 @@ func (v *HttpViews) NavBarAutoFillWithAI(w http.ResponseWriter, r *http.Request)
 		tracker.OrganizationID = orgID.String()
 	}
 	ctx := utils.WithTokenTracker(r.Context(), tracker)
+	provider := v.Controller.LLMProvider()
+	model := provider.FastModel()
 
-	outputJson, err := utils.GetJSONFromLLM(ctx, "claude-haiku-4-5", constants.NAVBAR_ITEM_GENERATOR_PROMPT, string(data), v.Controller.AnthropicProvider())
+	outputJson, err := utils.GetJSONFromLLM(ctx, model, constants.NAVBAR_ITEM_GENERATOR_PROMPT, string(data), provider)
 	if err != nil {
 		utils.JSONError(w, constants.ErrValidationBody, "Error generating items. Try again please.", http.StatusBadRequest, nil)
 		return
@@ -91,8 +93,8 @@ func (v *HttpViews) NavBarAutoFillWithAI(w http.ResponseWriter, r *http.Request)
 	tracker.TraceOutput = outputJson
 
 	v.Controller.RecordTokenUsage(user, "navbar_autofill",
-		"claude-haiku-4-5",
-		"anthropic", "", "standard", tracker)
+		model,
+		provider.Name, "", "standard", tracker)
 
 	// Post-hoc token-based billing — no project context, charge personal org.
 	_, _, total, _ := tracker.Totals()

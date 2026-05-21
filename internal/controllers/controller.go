@@ -128,7 +128,7 @@ func NewController(db *database.Database, concurrentBuildLimiter chan struct{},
 }
 
 // llmProvider resolves the active LLM provider from the LLM_PROVIDER secret.
-// Supported values: "openrouter" (default), "anthropic", "google", "moonshot", "zai".
+// Supported values: "openrouter" (default), "anthropic", "google", "moonshot", "zai", "litellm".
 //
 // When the primary is "anthropic" and OPENROUTER_API_KEY is set, an OpenRouter
 // fallback is attached. On Anthropic overload (529 / overloaded_error) the call
@@ -152,6 +152,12 @@ func (c *Controller) llmProvider() *utils.LLMProvider {
 		return &utils.LLMProvider{Name: "moonshot", BaseURL: "https://api.moonshot.ai/v1", APIKey: c.SecretManager.GetSecret("MOONSHOT_API_KEY"), DefaultReasoning: c.reasoningConfig(), FastModelOverride: fastModel}
 	case "zai":
 		return &utils.LLMProvider{Name: "zai", BaseURL: "https://api.z.ai/api/paas/v4", APIKey: c.SecretManager.GetSecret("ZAI_API_KEY"), DefaultReasoning: c.reasoningConfig(), FastModelOverride: fastModel}
+	case "litellm":
+		baseURL := c.SecretManager.GetSecret("LITELLM_BASE_URL")
+		if baseURL == "" {
+			baseURL = "http://litellm:4000"
+		}
+		return &utils.LLMProvider{Name: "litellm", BaseURL: baseURL, APIKey: c.SecretManager.GetSecret("LITELLM_API_KEY"), DefaultReasoning: c.reasoningConfig(), FastModelOverride: fastModel}
 	default:
 		slog.Warn("Unknown or empty LLM_PROVIDER, falling back to openrouter", "raw", raw)
 		return &utils.LLMProvider{Name: "openrouter", BaseURL: "https://openrouter.ai/api/v1", APIKey: c.SecretManager.GetSecret("OPENROUTER_API_KEY"), FastModelOverride: fastModel}
@@ -185,16 +191,6 @@ func (c *Controller) attachOverloadFallback(primary *utils.LLMProvider, fastMode
 // LLMProvider is the exported version of llmProvider for use in views.
 func (c *Controller) LLMProvider() *utils.LLMProvider {
 	return c.llmProvider()
-}
-
-// AnthropicProvider returns an Anthropic-only LLM provider for lightweight
-// tasks (screenshots, autofill) that always use the native Anthropic API.
-func (c *Controller) AnthropicProvider() *utils.LLMProvider {
-	return &utils.LLMProvider{
-		Name:    "anthropic",
-		BaseURL: "https://api.anthropic.com/v1",
-		APIKey:  c.SecretManager.GetSecret("ANTHROPIC_API_KEY"),
-	}
 }
 
 // reasoningConfig returns the ReasoningConfig from the LLM_REASONING_EFFORT secret.

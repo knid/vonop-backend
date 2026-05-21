@@ -27,8 +27,8 @@ const GatewayDefaultImageModel = "fal-ai/flux/schnell"
 var DefaultGatewayModels = map[string][]string{
 	"free":     {"openai/gpt-4.1-mini", "anthropic/claude-haiku-4-5"},
 	"starter":  {"openai/gpt-4.1-mini", "anthropic/claude-haiku-4-5", "fal-ai/flux/schnell"},
-	"pro":      {"openai/gpt-4.1-mini", "openai/gpt-4.1", "anthropic/claude-haiku-4-5", "anthropic/claude-sonnet-4.6", "fal-ai/flux/schnell", "fal-ai/flux-pro/v1.1"},
-	"business": {"openai/gpt-4.1-mini", "openai/gpt-4.1", "anthropic/claude-haiku-4-5", "anthropic/claude-sonnet-4.6", "anthropic/claude-opus-4.7", "google/gemini-2.5-pro", "fal-ai/flux/schnell", "fal-ai/flux-pro/v1.1"},
+	"pro":      {"openai/gpt-4.1-mini", "openai/gpt-4.1", "anthropic/claude-haiku-4-5", "anthropic/claude-sonnet-4.6", "moonshot/kimi-k2.5", "fal-ai/flux/schnell", "fal-ai/flux-pro/v1.1"},
+	"business": {"openai/gpt-4.1-mini", "openai/gpt-4.1", "anthropic/claude-haiku-4-5", "anthropic/claude-sonnet-4.6", "anthropic/claude-opus-4.7", "google/gemini-2.5-pro", "moonshot/kimi-k2.5", "moonshot/kimi-k2.6", "fal-ai/flux/schnell", "fal-ai/flux-pro/v1.1"},
 }
 
 // DefaultGatewayRPM is the fallback requests-per-minute limit per tier.
@@ -84,6 +84,8 @@ var GatewayModelCatalog = []GatewayModelInfo{
 	{ID: "anthropic/claude-sonnet-4.6", Name: "Claude Sonnet 4.6", Provider: "anthropic", Type: "chat", MaxContext: 200000, InputUSDPerM: 3.00, OutputUSDPerM: 15.00, CostPer1kInput: 3, CostPer1kOutput: 15, Capabilities: []string{"streaming", "vision"}},
 	{ID: "anthropic/claude-opus-4.7", Name: "Claude Opus 4.7", Provider: "anthropic", Type: "chat", MaxContext: 200000, InputUSDPerM: 5.00, OutputUSDPerM: 25.00, CostPer1kInput: 5, CostPer1kOutput: 25, Capabilities: []string{"streaming", "vision"}},
 	{ID: "google/gemini-2.5-pro", Name: "Gemini 2.5 Pro", Provider: "google", Type: "chat", MaxContext: 1048576, InputUSDPerM: 1.25, OutputUSDPerM: 5.00, CostPer1kInput: 1, CostPer1kOutput: 4, Capabilities: []string{"streaming", "vision"}},
+	{ID: "moonshot/kimi-k2.5", Name: "Kimi K2.5", Provider: "moonshot", Type: "chat", MaxContext: 256000, InputUSDPerM: 0.50, OutputUSDPerM: 2.00, CostPer1kInput: 1, CostPer1kOutput: 2, Capabilities: []string{"streaming", "vision"}},
+	{ID: "moonshot/kimi-k2.6", Name: "Kimi K2.6", Provider: "moonshot", Type: "chat", MaxContext: 256000, InputUSDPerM: 0.60, OutputUSDPerM: 2.80, CostPer1kInput: 1, CostPer1kOutput: 3, Capabilities: []string{"streaming", "vision"}},
 	// Image models — proxied directly to fal.ai, not through OpenRouter.
 	{ID: "fal-ai/flux/schnell", Name: "FLUX Schnell", Provider: "fal", Type: "image", CostCredits: 5, Capabilities: []string{"fast"}},
 	{ID: "fal-ai/flux-pro/v1.1", Name: "FLUX Pro v1.1", Provider: "fal", Type: "image", CostCredits: 15, Capabilities: []string{"hd"}},

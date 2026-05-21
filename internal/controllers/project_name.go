@@ -23,10 +23,7 @@ const slugMaxBaseLen = 50
 // the trace.
 func (c *Controller) generateAppNameAndSlug(ctx context.Context, prompt string, user *models.User) (string, string) {
 	provider := c.llmProvider()
-	model := "anthropic/claude-haiku-4-5-20251001"
-	if provider.IsAnthropic() {
-		model = "claude-haiku-4-5-20251001"
-	}
+	model := provider.FastModel()
 
 	tracker := utils.NewTokenTracker()
 	if user != nil {
