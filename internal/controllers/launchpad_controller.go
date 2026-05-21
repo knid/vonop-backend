@@ -582,7 +582,6 @@ func (c *Controller) buildRecentDeployment(ctx context.Context, appProjectID uui
 		Status:      status,
 		StatusKind:  kind,
 		SubmittedAt: submittedAt.UTC().Format("2006-01-02T15:04:05Z"),
-		Method:      "wemob",
 		ETASeconds:  etaSec,
 	}
 	// Only emit a non-zero ETA for submissions that are actually in flight
