@@ -59,7 +59,7 @@ func (c *Controller) ExtractSchemaFromGeneratedFiles(ctx context.Context, projec
 	provider := c.llmProvider()
 	model := c.SecretManager.GetSecret("WEBSITE_BUILDER_LLM_MODEL")
 	if model == "" {
-		model = provider.DefaultModel()
+		model = provider.FastModel()
 	}
 
 	message := "Extract the database schema from these source code files:\n\n" + strings.Join(relevantFiles, "\n\n")
@@ -102,7 +102,7 @@ func (c *Controller) CreateDashboard(ctx context.Context, project *models.AppPro
 	provider := c.llmProvider()
 	model := c.SecretManager.GetSecret("WEBSITE_BUILDER_LLM_MODEL")
 	if model == "" {
-		model = provider.DefaultModel()
+		model = provider.FastModel()
 	}
 
 	// Token tracking
@@ -630,7 +630,7 @@ func (c *Controller) RefreshDashboardSchema(ctx context.Context, projectID strin
 	provider := c.llmProvider()
 	model := c.SecretManager.GetSecret("WEBSITE_BUILDER_LLM_MODEL")
 	if model == "" {
-		model = provider.DefaultModel()
+		model = provider.FastModel()
 	}
 
 	tracker := utils.NewTokenTracker()
