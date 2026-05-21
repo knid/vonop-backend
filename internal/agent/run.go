@@ -125,7 +125,7 @@ func Run(
 	}
 
 	// --- Step 7: load conversation history (BEFORE inserting the current turn) ---
-	history, err := deps.DB.GetRecentChatMessages(project.ID, 30)
+	history, err := deps.DB.GetRecentChatMessages(project.ID, 15)
 	if err != nil {
 		slog.Warn("failed to load history, starting fresh", "error", err, "project_id", project.ID)
 		history = nil
