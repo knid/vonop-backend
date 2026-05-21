@@ -277,7 +277,7 @@ var modelCosts = map[string][2]float64{
 	"claude-opus-4.7":           {5.0, 25.0},
 	"claude-opus-4-6":           {15.0, 75.0},
 	"claude-opus-4-5":           {15.0, 75.0},
-	"kimi-k2.6":                 {2.0, 8.0},
+	"kimi-k2.6":                 {1.0, 4.0},
 	"kimi-k2.5":                 {2.0, 8.0},
 }
 
