@@ -106,7 +106,7 @@ func Run(
 
 	// --- Step 6: insert AppAgentRun row ---
 	provider := deps.LLMProvider
-	model := resolveModel(deps.SecretManager, project)
+	model := resolveModel(deps.SecretManager, project, provider)
 	run := &models.AppAgentRun{
 		ID:           runID,
 		AppProjectID: project.ID,
@@ -212,7 +212,7 @@ func Run(
 	}
 	llmMessages = append(llmMessages, userTurn)
 
-	registry := BuildRegistryFor(project, deps)
+	registry := BuildRegistryFor(project, deps, model)
 
 	tracker := utils.NewTokenTracker()
 	tracker.UserID = user.ID.String()
@@ -442,9 +442,18 @@ func Run(
 			// Sonnet 4.6's non-extended output cap. Running at the provider
 			// max keeps the continuation dance (finish_reason=length → send
 			// "continue") from firing in all but pathological runs.
-			MaxTokens:  64000,
-			NudgeAfter: 50,
-			StripAfter: -1,
+			MaxTokens:      64000,
+			NudgeAfter:     50,
+			StripAfter:     -1,
+			// Moonshot K2.6 prompt_cache_key: stable per-project so the system
+			// prompt is cached across runs. Only set for Moonshot — other
+			// providers may reject unknown fields.
+			PromptCacheKey: func() string {
+				if provider.IsMoonshot() {
+					return "wemob:" + project.ID.String()
+				}
+				return ""
+			}(),
 			OnToolCallStart: func(toolName string) {
 				if !serverToolNames[toolName] {
 					return
@@ -654,7 +663,9 @@ func runAction(project *models.AppProject) string {
 }
 
 // resolveModel picks the LLM model for this run based on project state and secrets.
-func resolveModel(sm secret.SecretManager, project *models.AppProject) string {
+// Falls back to provider.DefaultModel() so switching LLM_PROVIDER doesn't leave
+// a hardcoded Anthropic model name in the request.
+func resolveModel(sm secret.SecretManager, project *models.AppProject, provider *utils.LLMProvider) string {
 	if project.Status == "draft" {
 		if m := sm.GetSecret("WEBSITE_BUILDER_LLM_MODEL"); m != "" {
 			return m
@@ -665,6 +676,9 @@ func resolveModel(sm secret.SecretManager, project *models.AppProject) string {
 	}
 	if m := sm.GetSecret("WEBSITE_BUILDER_LLM_MODEL"); m != "" {
 		return m
+	}
+	if provider != nil {
+		return provider.DefaultModel()
 	}
 	return "claude-sonnet-4"
 }

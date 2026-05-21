@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -69,6 +70,76 @@ func truncateBody(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen] + "...(truncated)"
+}
+
+// imageDownloadClient is a shared HTTP client for fetching image URLs to
+// base64. Reuses connections and avoids creating a new client per call.
+var imageDownloadClient = &http.Client{Timeout: 15 * time.Second}
+
+// downloadImageToBase64 fetches an image URL and returns it as a base64 data URI.
+func downloadImageToBase64(url string) (string, error) {
+	resp, err := imageDownloadClient.Get(url)
+	if err != nil {
+		return "", fmt.Errorf("download image: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("download image: status %d", resp.StatusCode)
+	}
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("read image body: %w", err)
+	}
+	mediaType := resp.Header.Get("Content-Type")
+	if mediaType == "" {
+		mediaType = "image/png"
+	}
+	b64 := base64.StdEncoding.EncodeToString(data)
+	return fmt.Sprintf("data:%s;base64,%s", mediaType, b64), nil
+}
+
+// convertMessagesForMoonshot converts any HTTPS image URLs in messages to
+// base64 data URIs. Kimi K2.6 only accepts base64-encoded images; it rejects
+// HTTPS URLs in image_url blocks.
+//
+// It shallow-copies the slice and deep-copies only image slices that contain
+// at least one HTTP URL, avoiding unnecessary allocations when images are
+// already base64.
+func convertMessagesForMoonshot(msgs []Message) ([]Message, error) {
+	if len(msgs) == 0 {
+		return msgs, nil
+	}
+	out := make([]Message, len(msgs))
+	copy(out, msgs)
+	for i := range out {
+		if len(out[i].Images) == 0 {
+			continue
+		}
+		hasHTTP := false
+		for _, img := range out[i].Images {
+			if strings.HasPrefix(img, "http://") || strings.HasPrefix(img, "https://") {
+				hasHTTP = true
+				break
+			}
+		}
+		if !hasHTTP {
+			continue
+		}
+		imgs := make([]string, len(out[i].Images))
+		for j, img := range out[i].Images {
+			if strings.HasPrefix(img, "http://") || strings.HasPrefix(img, "https://") {
+				b64, err := downloadImageToBase64(img)
+				if err != nil {
+					return nil, fmt.Errorf("convert image %s: %w", img, err)
+				}
+				imgs[j] = b64
+			} else {
+				imgs[j] = img
+			}
+		}
+		out[i].Images = imgs
+	}
+	return out, nil
 }
 
 // --- LLM error types ---
@@ -206,6 +277,8 @@ var modelCosts = map[string][2]float64{
 	"claude-opus-4.7":           {5.0, 25.0},
 	"claude-opus-4-6":           {15.0, 75.0},
 	"claude-opus-4-5":           {15.0, 75.0},
+	"kimi-k2.6":                 {2.0, 8.0},
+	"kimi-k2.5":                 {2.0, 8.0},
 }
 
 // EstimateInputOutputCostUSD returns separate input and output costs for a single LLM call.
@@ -502,6 +575,7 @@ type ReasoningConfig struct {
 type ThinkingConfig struct {
 	Type          string `json:"type"`                     // "enabled" or "disabled"
 	ClearThinking bool   `json:"clear_thinking,omitempty"` // false = preserve for cache
+	Keep          string `json:"keep,omitempty"`           // "all" = preserve reasoning_content across multi-turn (Moonshot K2.6)
 }
 
 type StreamOptionsConfig struct {
@@ -523,6 +597,7 @@ type ChatRequest struct {
 	Reasoning           *ReasoningConfig      `json:"reasoning,omitempty"`
 	Thinking            *ThinkingConfig       `json:"thinking,omitempty"`
 	DisablePromptCache  bool                  `json:"-"` // skip Anthropic cache_control on system blocks (for one-shot calls with no follow-up)
+	PromptCacheKey      string                `json:"prompt_cache_key,omitempty"` // Moonshot K2.6 session-level prompt cache key
 }
 
 type Message struct {
@@ -603,7 +678,10 @@ func buildLLMRequestBody(req ChatRequest, provider *LLMProvider) ([]byte, error)
 		anthReq := convertToAnthropicRequest(req, provider)
 		return json.Marshal(anthReq)
 	}
-	prepared := prepareChatRequest(req, provider)
+	prepared, err := prepareChatRequest(req, provider)
+	if err != nil {
+		return nil, err
+	}
 	return json.Marshal(prepared)
 }
 
@@ -624,14 +702,33 @@ func parseLLMResponseBody(body []byte, provider *LLMProvider) (ChatResponse, err
 // format expected by the target LLM provider. For providers that use the
 // "thinking" format (ZAI, Moonshot/Kimi), it converts the OpenRouter-style
 // "reasoning" config into the thinking config and sets required defaults.
-func prepareChatRequest(req ChatRequest, provider *LLMProvider) ChatRequest {
+func prepareChatRequest(req ChatRequest, provider *LLMProvider) (ChatRequest, error) {
 	if provider == nil {
-		return req
+		return req, nil
 	}
 
 	// Anthropic uses a different request format entirely (handled by buildLLMRequestBody)
 	if provider.IsAnthropic() {
-		return req
+		return req, nil
+	}
+
+	// --- Moonshot K2.6 specific transformations ---
+	if provider.IsMoonshot() {
+		// Kimi K2.6 defaults thinking to "enabled" when omitted. Explicitly
+		// default to disabled for predictable agent behavior unless reasoning
+		// was explicitly requested.
+		if req.Reasoning == nil && req.Thinking == nil && provider.DefaultReasoning == nil {
+			req.Thinking = &ThinkingConfig{Type: "disabled"}
+		}
+
+		// K2.6 only accepts base64-encoded images; HTTPS URLs are rejected.
+		if len(req.Messages) > 0 {
+			converted, err := convertMessagesForMoonshot(req.Messages)
+			if err != nil {
+				return req, err
+			}
+			req.Messages = converted
+		}
 	}
 
 	// Apply provider's default reasoning when no explicit config was supplied
@@ -653,7 +750,7 @@ func prepareChatRequest(req ChatRequest, provider *LLMProvider) ChatRequest {
 		req.Reasoning = nil // don't send OpenRouter format
 
 		if thinkingType == "enabled" {
-			// K2.5 thinking: temperature MUST be 1.0, top_p MUST be 0.95
+			// K2.5/K2.6 thinking: temperature MUST be 1.0, top_p MUST be 0.95
 			t := 1.0
 			req.Temperature = &t
 			tp := 0.95
@@ -664,8 +761,13 @@ func prepareChatRequest(req ChatRequest, provider *LLMProvider) ChatRequest {
 				req.MaxCompletionTokens = req.MaxTokens
 				req.MaxTokens = 0
 			}
+			// Moonshot K2.6: preserve reasoning_content across multi-turn tool
+			// calling so the model doesn't re-reason from scratch each round.
+			if provider.IsMoonshot() {
+				req.Thinking.Keep = "all"
+			}
 		} else if provider.IsMoonshot() {
-			// K2.5 non-thinking: temperature MUST be 0.6, top_p MUST be 0.95
+			// K2.5/K2.6 non-thinking: temperature MUST be 0.6, top_p MUST be 0.95
 			t := 0.6
 			req.Temperature = &t
 			tp := 0.95
@@ -673,13 +775,13 @@ func prepareChatRequest(req ChatRequest, provider *LLMProvider) ChatRequest {
 		}
 	}
 
-	// Moonshot/K2.5: always prefer max_completion_tokens over max_tokens
+	// Moonshot/K2.5/K2.6: always prefer max_completion_tokens over max_tokens
 	if provider.IsMoonshot() && req.MaxTokens > 0 && req.MaxCompletionTokens == 0 {
 		req.MaxCompletionTokens = req.MaxTokens
 		req.MaxTokens = 0
 	}
 
-	return req
+	return req, nil
 }
 
 // GetJSONFromLLM sends a system+user message to the LLM and returns the raw response text.
@@ -944,6 +1046,7 @@ type ToolCallConfig struct {
 	OnRoundStart      func(round int)                                       // Called at the start of each round (useful for resetting per-round state like text buffers)
 	MaxContinuations  int            // Max finish_reason=length continuation rounds (default 3). -1 = disable continuations entirely.
 	ShouldContinue    func() bool    // Called before each round/continuation. Return false to abort. nil = always continue.
+	PromptCacheKey    string         // Moonshot K2.6 session-level prompt cache key (sent on every round)
 }
 
 // An optional ToolCallConfig can be passed to override defaults.
@@ -986,6 +1089,10 @@ func StreamWithTools(
 		if opts[0].MaxContinuations != 0 { // 0 = use default; -1 = disable; positive = explicit limit
 			maxContinuations = opts[0].MaxContinuations
 		}
+	}
+	promptCacheKey := ""
+	if len(opts) > 0 {
+		promptCacheKey = opts[0].PromptCacheKey
 	}
 	currentMessages := make([]Message, len(messages))
 	copy(currentMessages, messages)
@@ -1072,14 +1179,15 @@ func StreamWithTools(
 		}
 
 		body, err := buildLLMRequestBody(ChatRequest{
-			Model:          model,
-			Stream:         true,
-			StreamOptions:  &StreamOptionsConfig{IncludeUsage: true},
-			MaxTokens:      maxTokens,
-			Reasoning:      reasoning,
-			Messages:       currentMessages,
-			Tools:          roundTools,
-			ResponseFormat: responseFormat,
+			Model:           model,
+			Stream:          true,
+			StreamOptions:   &StreamOptionsConfig{IncludeUsage: true},
+			MaxTokens:       maxTokens,
+			Reasoning:       reasoning,
+			Messages:        currentMessages,
+			Tools:           roundTools,
+			ResponseFormat:  responseFormat,
+			PromptCacheKey:  promptCacheKey,
 		}, provider)
 		if err != nil {
 			return "", fmt.Errorf("round %d: error building request: %w", round, err)

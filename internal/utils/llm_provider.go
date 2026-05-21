@@ -72,7 +72,9 @@ func (p *LLMProvider) UsesThinkingFormat() bool {
 }
 
 // WebSearchTool returns the builtin web search tool for providers that support it, or nil.
-func (p *LLMProvider) WebSearchTool() *Tool {
+// The model parameter is used to disable web_search for Moonshot K2.6 specifically,
+// since K2.6's thinking mode is incompatible with the $web_search builtin.
+func (p *LLMProvider) WebSearchTool(model string) *Tool {
 	if p.IsAnthropic() {
 		return &Tool{
 			Type: "server_tool",
@@ -82,6 +84,11 @@ func (p *LLMProvider) WebSearchTool() *Tool {
 				MaxUses: 5,
 			},
 		}
+	}
+	// Moonshot K2.6: $web_search is temporarily incompatible with thinking mode.
+	// Only disable for K2.6; K2.5 and earlier models are unaffected.
+	if p.IsMoonshot() && strings.Contains(model, "k2.6") {
+		return nil
 	}
 	if p.IsMoonshot() {
 		return &Tool{
@@ -102,7 +109,7 @@ func (p *LLMProvider) DefaultModel() string {
 	case "anthropic":
 		return bareModel(constants.GatewayPreferredChatModel)
 	case "moonshot":
-		return "kimi-k2.5"
+		return "kimi-k2.6"
 	case "google":
 		return "gemini-2.5-flash"
 	case "zai":
