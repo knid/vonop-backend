@@ -26,7 +26,7 @@ var _ ToolExecutor = (*TriggerWebDeployTool)(nil)
 func (t *TriggerWebDeployTool) Name() string { return "trigger_web_deploy" }
 
 func (t *TriggerWebDeployTool) Description() string {
-	return "Trigger a new web deployment for this project after applying a fix to the codebase. Use this AFTER you have written the fix to close the read-fix-redeploy loop kicked off by a web deploy failure. Returns the new deployment_id and a status URL the user can follow."
+	return "Trigger a new web deployment for this project. Use this ONLY when the user explicitly asks you to deploy, or AFTER you have written a fix to close the read-fix-redeploy loop kicked off by a previously-failed web deployment. Do NOT call this automatically during initial app creation or when the user has not asked for deployment. Returns the new deployment_id and a status URL the user can follow."
 }
 
 func (t *TriggerWebDeployTool) Schema() map[string]any {
