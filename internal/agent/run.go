@@ -262,15 +262,6 @@ func Run(
 		}
 	}
 
-	// Resolve the per-run token budget from remote config. Falls back to the
-	// package default when RC is unavailable or returns a non-positive value.
-	maxTokensPerRun := defaultMaxTokensPerRun
-	if deps.RemoteConfig != nil {
-		if rcTokens := deps.RemoteConfig.GetInt(remoteconfig.AIMaxTokensPerRun, remoteconfig.Global); rcTokens > 0 {
-			maxTokensPerRun = rcTokens
-		}
-	}
-
 	rc := &RunContext{
 		RunID:   runID,
 		Project: project,
@@ -481,7 +472,7 @@ func Run(
 				if creditCheck != nil && !creditCheck() {
 					return false
 				}
-				if _, _, total, _ := tracker.Totals(); total > maxTokensPerRun {
+				if _, _, total, _ := tracker.Totals(); total > defaultMaxTokensPerRun {
 					return false
 				}
 				if repetition.Tripped() {
@@ -540,10 +531,10 @@ func Run(
 			CodeCreditsExhausted, "AI credits exhausted mid-run", nil,
 			tracker, runStart)
 	}
-	if _, _, total, _ := tracker.Totals(); total > maxTokensPerRun {
+	if _, _, total, _ := tracker.Totals(); total > defaultMaxTokensPerRun {
 		return finaliseFailureV2(ctx, deps, repo, run, project, emitter, "agent_loop",
 			CodeBudgetExceeded,
-			fmt.Sprintf("token budget exceeded (%d > %d)", total, maxTokensPerRun), nil,
+			fmt.Sprintf("token budget exceeded (%d > %d)", total, defaultMaxTokensPerRun), nil,
 			tracker, runStart)
 	}
 
