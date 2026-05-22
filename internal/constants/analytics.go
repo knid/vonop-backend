@@ -6,6 +6,8 @@ package constants
 // endpoint. The string __WEMOB_PROJECT_ID__ is replaced with the actual project
 // UUID at deploy time.
 const WEMOB_ANALYTICS_SCRIPT = `(function(){
+  if(window.__wemobAnalyticsInit)return;
+  window.__wemobAnalyticsInit=true;
   var PROJECT_ID='__WEMOB_PROJECT_ID__';
   var ENDPOINT='https://api.wemob.io/v1/analytics/collect';
   function getStorage(k){try{return localStorage.getItem(k);}catch(e){return null;}}
@@ -35,6 +37,7 @@ const WEMOB_ANALYTICS_SCRIPT = `(function(){
   }
 
   var startTime=Date.now();
+  var lastUrl=location.href;
   send('pageview');
 
   function sendLeave(){send('pageleave',{duration:Math.round((Date.now()-startTime)/1000)});}
@@ -44,6 +47,8 @@ const WEMOB_ANALYTICS_SCRIPT = `(function(){
   var origPush=history.pushState;
   var origReplace=history.replaceState;
   function onNav(){
+    if(location.href===lastUrl)return;
+    lastUrl=location.href;
     sendLeave();
     startTime=Date.now();
     send('pageview');
