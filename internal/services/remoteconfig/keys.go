@@ -65,6 +65,8 @@ var AIChatKeepRecent = Key{Flag: "rc-ai-chat-keep-recent", Fallback: 10}
 var AIMaxStructureFiles = Key{Flag: "rc-ai-max-structure-files", Fallback: 25}
 var AIBuilderToolMaxRounds = Key{Flag: "rc-ai-builder-tool-max-rounds", Fallback: 30}
 var AIGenerationMaxRounds = Key{Flag: "rc-ai-generation-max-rounds", Fallback: 8}
+var AIMaxTokensPerRun = Key{Flag: "rc-ai-max-tokens-per-run", Fallback: 500000}
+var AIMoonshotThinkingEnabled = Key{Flag: "rc-ai-moonshot-thinking-enabled", Fallback: true}
 
 // --- Category 4: AI Gateway ---
 
