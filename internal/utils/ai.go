@@ -285,7 +285,7 @@ var modelCosts = map[string][2]float64{
 	"kimi-k2.6":                 {1.0, 4.0},
 	"kimi-k2.5":                 {2.0, 8.0},
 	// OpenRouter models
-	"deepseek-chat-v4":          {0.5, 2.0},
+	"deepseek-v4-flash":         {0.1, 0.2},
 	"deepseek-chat":             {0.5, 2.0},
 	"deepseek-reasoner":         {0.5, 2.0},
 	"deepseek-r1":               {0.5, 2.0},
