@@ -132,7 +132,7 @@ var DefaultMessages = map[string]string{
 	ErrAuthResetTokenExpired:    "Password reset link has expired.",
 	ErrAuthOAuthFailed:          "OAuth sign-in failed.",
 	ErrAuthOAuthStateInvalid:    "Invalid or expired OAuth state.",
-	ErrAuthEmailHasCredentialsAccount: "An account exists with this email. Sign in with your password, then link Google from Settings.",
+	ErrAuthEmailHasCredentialsAccount: "This email is already registered with a password. Please sign in with your password.",
 	ErrAdminRequired:            "Admin access required.",
 	ErrInsufficientScope:        "API key does not have the required scope.",
 	ErrForbidden:                "Access denied.",
