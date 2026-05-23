@@ -1532,6 +1532,7 @@ func main() {
 					r.Get("/", httpViews.GetUser)
 					r.Put("/", httpViews.UpdateUser)
 					r.Put("/language", httpViews.UpdateUserLanguage)
+					r.Post("/setup-finished", httpViews.FinishSetup)
 					r.Delete("/", httpViews.DeleteUser)
 
 					r.Get("/usage", httpViews.GetMontlyUsage)

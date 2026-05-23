@@ -110,6 +110,22 @@ func (v *HttpViews) DeleteUser(w http.ResponseWriter, r *http.Request) {
 	utils.JSONResponse(w, deletedUserRes, http.StatusOK)
 }
 
+func (v *HttpViews) FinishSetup(w http.ResponseWriter, r *http.Request) {
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
+		return
+	}
+
+	updatedUser, err := v.Controller.FinishSetup(user)
+	if err != nil {
+		utils.JSONInternalError(w, err)
+		return
+	}
+
+	utils.JSONResponse(w, map[string]bool{"setup_finished": updatedUser.SetupFinished}, http.StatusOK)
+}
+
 func (v *HttpViews) UserLogin(w http.ResponseWriter, r *http.Request) {
 	var userLoginReq requests.UserLoginRequest
 	if err := utils.ParseJSONBody(r, &userLoginReq); err != nil {
