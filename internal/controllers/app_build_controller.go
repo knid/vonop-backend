@@ -470,11 +470,8 @@ func (c *Controller) ValidateAppFiles(ctx context.Context, projectID string, use
 	result := AppValidationResult{Valid: true}
 
 	// Run LLM-based validation
-	provider := c.llmProvider()
-	model := c.SecretManager.GetSecret("WEBSITE_BUILDER_LLM_MODEL")
-	if model == "" {
-		model = provider.DefaultModel()
-	}
+	provider := c.llmProviderForUser(user)
+	model := c.builderModel(provider)
 
 	var fileContext strings.Builder
 	fileContext.WriteString("Project files:\n")

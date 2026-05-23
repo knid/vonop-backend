@@ -27,12 +27,9 @@ func (c *Controller) classifyProjectType(ctx context.Context, prompt string, use
 	// (Existing LLM-based classifier code follows — DO NOT remove it. The mobile
 	// fast-path runs first, but the LLM still distinguishes "ecommerce" vs "app"
 	// for non-mobile prompts.)
-	provider := c.llmProvider()
+	provider := c.llmProviderForUser(user)
 	// Use a fast/cheap model for classification
-	model := "anthropic/claude-haiku-4-5-20251001"
-	if provider.IsAnthropic() {
-		model = "claude-haiku-4-5-20251001"
-	}
+	model := provider.FastModel()
 
 	tracker := utils.NewTokenTracker()
 	if user != nil {

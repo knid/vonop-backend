@@ -675,7 +675,12 @@ func runAction(project *models.AppProject) string {
 // Falls back to provider.DefaultModel() so switching LLM_PROVIDER doesn't leave
 // a hardcoded Anthropic model name in the request.
 func resolveModel(sm secret.SecretManager, project *models.AppProject, provider *utils.LLMProvider) string {
-	if project.Status == "draft" {
+	// Per-user configured model (from PostHog flag) takes priority over
+	// global Infisical secrets.
+	if provider != nil && provider.ConfiguredModel != "" {
+		return provider.ConfiguredModel
+	}
+	if project != nil && project.Status == "draft" {
 		if m := sm.GetSecret("WEBSITE_BUILDER_LLM_MODEL"); m != "" {
 			return m
 		}

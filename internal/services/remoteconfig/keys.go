@@ -87,6 +87,16 @@ var GatewayImageCostFluxUltra = Key{Flag: "rc-gateway-image-cost-flux-ultra", Fa
 var GatewayChatTimeoutSeconds = Key{Flag: "rc-gateway-chat-timeout-seconds", Fallback: 30}
 var GatewayImageTimeoutSeconds = Key{Flag: "rc-gateway-image-timeout-seconds", Fallback: 120}
 
+// --- Category 5: Builder LLM Provider / Model (per plan) ---
+// These control which LLM provider + model the app builder uses per user plan.
+// Format: "provider/model" — e.g. "anthropic/claude-sonnet-4.6" or
+// "deepseek/deepseek-chat-v4" (implicit openrouter).
+
+var BuilderProviderModelStarter = Key{Flag: "rc-builder-provider-model-starter", Fallback: "deepseek/deepseek-chat-v4"}
+var BuilderProviderModelHobby   = Key{Flag: "rc-builder-provider-model-hobby",   Fallback: "moonshot/kimi-k2.6"}
+var BuilderProviderModelPro     = Key{Flag: "rc-builder-provider-model-pro",     Fallback: "anthropic/claude-sonnet-4.6"}
+var BuilderProviderModelMax     = Key{Flag: "rc-builder-provider-model-max",     Fallback: "anthropic/claude-opus-4.7"}
+
 // Gateway chat pricing — cost-based (computed from upstream OpenRouter USD
 // prices in the model catalog), not token-based. Markup is an integer
 // percent on top of the raw upstream cost (5 = 5%). Credit reference

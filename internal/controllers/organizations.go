@@ -496,17 +496,24 @@ func (c *Controller) EnsurePersonalOrg(user *models.User) (*models.Organization,
 	base := utils.SlugifyName(displayName)
 	slug := utils.SlugWithSuffix(base)
 
-	// Free tier removed 2026-05-13: new personal orgs are born with no plan.
-	// The frontend renders a plan-picker / paywall when SubscriptionID is zero;
-	// every backend feature gate fails closed (subscription lookup returns
-	// sql.ErrNoRows, which propagates up and blocks the operation).
+	// 2026-05-23: re-enable Starter (free) plan. New personal orgs are born
+	// on the Starter plan so users can try the platform without payment.
+	var starterID uuid.UUID
+	starter, err := c.DB.GetSubscriptionByName("Starter")
+	if err != nil || starter == nil {
+		slog.Error("EnsurePersonalOrg: Starter plan not found — new org will have NULL subscription_id",
+			"user_id", user.ID, "error", err)
+	} else {
+		starterID = starter.ID
+	}
+
 	org := &models.Organization{
-		Name:       orgName,
-		Slug:       slug,
-		OwnerID:    user.ID,
-		IsPersonal: true,
-		// SubscriptionID left zero — serializes as NULL via Bun.
-		// SubscriptionStatus left at column default 'inactive'.
+		Name:               orgName,
+		Slug:               slug,
+		OwnerID:            user.ID,
+		IsPersonal:         true,
+		SubscriptionID:     starterID,
+		SubscriptionStatus: "free",
 	}
 	created, err := c.DB.CreateOrganization(org)
 	if err != nil {

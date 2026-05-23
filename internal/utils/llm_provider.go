@@ -35,6 +35,11 @@ type LLMProvider struct {
 	// rate-limit retries continue against the fallback provider.
 	Fallback      *LLMProvider
 	FallbackModel string // model ID to use with Fallback (provider-specific format)
+
+	// ConfiguredModel is set when the provider was resolved per-user from a
+	// PostHog feature flag (e.g. rc-builder-provider-model-starter). When set,
+	// it overrides the global WEBSITE_BUILDER_LLM_MODEL secret.
+	ConfiguredModel string
 }
 
 // Endpoint returns the full chat completions URL for this provider.
