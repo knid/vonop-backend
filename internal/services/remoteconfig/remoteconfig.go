@@ -45,6 +45,13 @@ func (s *Service) GetInt(key Key, userID string) int {
 	fallback, _ := key.Fallback.(int)
 	raw := s.getPayload(key.Flag, userID)
 	if raw == nil {
+		// Fallback to GetFeatureFlag variant for flags configured without a JSON payload.
+		variant := s.GetVariant(key, userID)
+		if variant != "" {
+			if i, err := strconv.Atoi(variant); err == nil {
+				return i
+			}
+		}
 		return fallback
 	}
 	switch v := raw.(type) {
@@ -65,6 +72,10 @@ func (s *Service) GetString(key Key, userID string) string {
 	fallback, _ := key.Fallback.(string)
 	raw := s.getPayload(key.Flag, userID)
 	if raw == nil {
+		// Fallback to GetFeatureFlag variant for flags configured without a JSON payload.
+		if variant := s.GetVariant(key, userID); variant != "" {
+			return variant
+		}
 		return fallback
 	}
 	if v, ok := raw.(string); ok {
@@ -78,6 +89,14 @@ func (s *Service) GetBool(key Key, userID string) bool {
 	fallback, _ := key.Fallback.(bool)
 	raw := s.getPayload(key.Flag, userID)
 	if raw == nil {
+		// Fallback to GetFeatureFlag variant for flags configured without a JSON payload.
+		variant := s.GetVariant(key, userID)
+		switch variant {
+		case "true":
+			return true
+		case "false":
+			return false
+		}
 		return fallback
 	}
 	if v, ok := raw.(bool); ok {
