@@ -229,7 +229,7 @@ func (c *Controller) llmProviderForUser(user *models.User) *utils.LLMProvider {
 // parseProviderModel splits a "provider/model" string into provider name and
 // bare model ID. Known providers: anthropic, moonshot, google, zai, openrouter.
 // If the first segment is not a known provider, the whole string is treated as
-// an OpenRouter model ID (e.g. "deepseek/deepseek-chat-v4").
+// an OpenRouter model ID (e.g. "deepseek/deepseek-v4-flash").
 func (c *Controller) parseProviderModel(providerModel string) (provider, model string) {
 	providerModel = strings.TrimSpace(strings.ToLower(providerModel))
 	parts := strings.SplitN(providerModel, "/", 2)
