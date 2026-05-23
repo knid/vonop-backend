@@ -14,6 +14,7 @@ import (
 	"github.com/knid/wemob/internal/services/gitrepo"
 	"github.com/knid/wemob/internal/services/meta"
 	"github.com/knid/wemob/internal/services/neon"
+	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/services/secret"
 	"github.com/knid/wemob/internal/services/storage"
 	"github.com/knid/wemob/internal/utils"
@@ -144,7 +145,7 @@ func (c *Controller) llmProvider() *utils.LLMProvider {
 	switch provider {
 	case "anthropic":
 		p := &utils.LLMProvider{Name: "anthropic", BaseURL: "https://api.anthropic.com/v1", APIKey: c.SecretManager.GetSecret("ANTHROPIC_API_KEY"), DefaultReasoning: c.reasoningConfig(), FastModelOverride: fastModel}
-		c.attachOverloadFallback(p, fastModel)
+		c.attachOpenRouterFallback(p, fastModel)
 		return p
 	case "google":
 		return &utils.LLMProvider{Name: "google", BaseURL: "https://generativelanguage.googleapis.com/v1beta/openai", APIKey: c.SecretManager.GetSecret("GOOGLE_API_KEY"), FastModelOverride: fastModel}
@@ -153,19 +154,101 @@ func (c *Controller) llmProvider() *utils.LLMProvider {
 		if c.RemoteConfig != nil && !c.RemoteConfig.GetBool(remoteconfig.AIMoonshotThinkingEnabled, remoteconfig.Global) {
 			moonshotReasoning = nil
 		}
-		return &utils.LLMProvider{Name: "moonshot", BaseURL: "https://api.moonshot.ai/v1", APIKey: c.SecretManager.GetSecret("MOONSHOT_API_KEY"), DefaultReasoning: moonshotReasoning, FastModelOverride: fastModel}
+		p := &utils.LLMProvider{Name: "moonshot", BaseURL: "https://api.moonshot.ai/v1", APIKey: c.SecretManager.GetSecret("MOONSHOT_API_KEY"), DefaultReasoning: moonshotReasoning, FastModelOverride: fastModel}
+		c.attachOpenRouterFallback(p, fastModel)
+		return p
 	case "zai":
-		return &utils.LLMProvider{Name: "zai", BaseURL: "https://api.z.ai/api/paas/v4", APIKey: c.SecretManager.GetSecret("ZAI_API_KEY"), DefaultReasoning: c.reasoningConfig(), FastModelOverride: fastModel}
+		p := &utils.LLMProvider{Name: "zai", BaseURL: "https://api.z.ai/api/paas/v4", APIKey: c.SecretManager.GetSecret("ZAI_API_KEY"), DefaultReasoning: c.reasoningConfig(), FastModelOverride: fastModel}
+		c.attachOpenRouterFallback(p, fastModel)
+		return p
 	default:
 		slog.Warn("Unknown or empty LLM_PROVIDER, falling back to openrouter", "raw", raw)
-		return &utils.LLMProvider{Name: "openrouter", BaseURL: "https://openrouter.ai/api/v1", APIKey: c.SecretManager.GetSecret("OPENROUTER_API_KEY"), FastModelOverride: fastModel}
+		return &utils.LLMProvider{Name: "openrouter", BaseURL: "https://openrouter.ai/api/v1", APIKey: c.SecretManager.GetSecret("OPENROUTER_API_KEY"), DefaultReasoning: c.reasoningConfig(), FastModelOverride: fastModel}
 	}
 }
 
-// attachOverloadFallback wires an OpenRouter fallback onto an Anthropic-native
+// llmProviderForUser resolves the LLM provider + model for a specific user based
+// on their subscription tier and PostHog feature flags.
+// Falls back to the global llmProvider() when the user is nil or the flag is empty.
+func (c *Controller) llmProviderForUser(user *models.User) *utils.LLMProvider {
+	if user == nil || c.RemoteConfig == nil {
+		return c.llmProvider()
+	}
+
+	tier := c.GetUserTierName(user)
+	var flagKey remoteconfig.Key
+	switch tier {
+	case "starter", "free":
+		flagKey = remoteconfig.BuilderProviderModelStarter
+	case "hobby":
+		flagKey = remoteconfig.BuilderProviderModelHobby
+	case "pro":
+		flagKey = remoteconfig.BuilderProviderModelPro
+	case "max":
+		flagKey = remoteconfig.BuilderProviderModelMax
+	default:
+		return c.llmProvider()
+	}
+
+	providerModel := strings.TrimSpace(c.RemoteConfig.GetString(flagKey, user.ID.String()))
+	if providerModel == "" {
+		return c.llmProvider()
+	}
+
+	providerName, model := c.parseProviderModel(providerModel)
+	fastModel := c.SecretManager.GetSecret("WEBSITE_BUILDER_FAST_MODEL")
+
+	var p *utils.LLMProvider
+	switch providerName {
+	case "anthropic":
+		p = &utils.LLMProvider{Name: "anthropic", BaseURL: "https://api.anthropic.com/v1", APIKey: c.SecretManager.GetSecret("ANTHROPIC_API_KEY"), DefaultReasoning: c.reasoningConfig(), FastModelOverride: fastModel, ConfiguredModel: model}
+	case "google":
+		p = &utils.LLMProvider{Name: "google", BaseURL: "https://generativelanguage.googleapis.com/v1beta/openai", APIKey: c.SecretManager.GetSecret("GOOGLE_API_KEY"), FastModelOverride: fastModel, ConfiguredModel: model}
+	case "moonshot":
+		moonshotReasoning := c.reasoningConfig()
+		if !c.RemoteConfig.GetBool(remoteconfig.AIMoonshotThinkingEnabled, remoteconfig.Global) {
+			moonshotReasoning = nil
+		}
+		p = &utils.LLMProvider{Name: "moonshot", BaseURL: "https://api.moonshot.ai/v1", APIKey: c.SecretManager.GetSecret("MOONSHOT_API_KEY"), DefaultReasoning: moonshotReasoning, FastModelOverride: fastModel, ConfiguredModel: model}
+	case "zai":
+		p = &utils.LLMProvider{Name: "zai", BaseURL: "https://api.z.ai/api/paas/v4", APIKey: c.SecretManager.GetSecret("ZAI_API_KEY"), DefaultReasoning: c.reasoningConfig(), FastModelOverride: fastModel, ConfiguredModel: model}
+	default:
+		p = &utils.LLMProvider{Name: "openrouter", BaseURL: "https://openrouter.ai/api/v1", APIKey: c.SecretManager.GetSecret("OPENROUTER_API_KEY"), DefaultReasoning: c.reasoningConfig(), FastModelOverride: fastModel, ConfiguredModel: model}
+	}
+
+	// Every non-OpenRouter primary gets an OpenRouter fallback.
+	if !p.IsOpenRouter() {
+		c.attachOpenRouterFallback(p, fastModel)
+	}
+
+	slog.Info("LLM provider resolved per user", "user_id", user.ID, "tier", tier, "provider", p.Name, "model", model)
+	return p
+}
+
+// parseProviderModel splits a "provider/model" string into provider name and
+// bare model ID. Known providers: anthropic, moonshot, google, zai, openrouter.
+// If the first segment is not a known provider, the whole string is treated as
+// an OpenRouter model ID (e.g. "deepseek/deepseek-chat-v4").
+func (c *Controller) parseProviderModel(providerModel string) (provider, model string) {
+	providerModel = strings.TrimSpace(strings.ToLower(providerModel))
+	parts := strings.SplitN(providerModel, "/", 2)
+	if len(parts) != 2 {
+		return "openrouter", providerModel
+	}
+
+	switch parts[0] {
+	case "anthropic", "moonshot", "google", "zai", "openrouter":
+		return parts[0], parts[1]
+	default:
+		// First segment is a vendor namespace on OpenRouter (e.g. "deepseek/...")
+		return "openrouter", providerModel
+	}
+}
+
+// attachOpenRouterFallback wires an OpenRouter fallback onto any primary
 // provider when OPENROUTER_API_KEY is configured. The fallback model is read
 // from LLM_FALLBACK_MODEL (default: anthropic/claude-sonnet-4.6).
-func (c *Controller) attachOverloadFallback(primary *utils.LLMProvider, fastModel string) {
+func (c *Controller) attachOpenRouterFallback(primary *utils.LLMProvider, fastModel string) {
 	openRouterKey := c.SecretManager.GetSecret("OPENROUTER_API_KEY")
 	if openRouterKey == "" {
 		slog.Info("LLM overload fallback disabled — OPENROUTER_API_KEY not set")
@@ -191,6 +274,11 @@ func (c *Controller) LLMProvider() *utils.LLMProvider {
 	return c.llmProvider()
 }
 
+// LLMProviderForUser returns the per-user LLM provider for the given user.
+func (c *Controller) LLMProviderForUser(user *models.User) *utils.LLMProvider {
+	return c.llmProviderForUser(user)
+}
+
 // AnthropicProvider returns an Anthropic-only LLM provider for lightweight
 // tasks (screenshots, autofill) that always use the native Anthropic API.
 func (c *Controller) AnthropicProvider() *utils.LLMProvider {
@@ -210,4 +298,21 @@ func (c *Controller) reasoningConfig() *utils.ReasoningConfig {
 		return nil
 	}
 	return &utils.ReasoningConfig{Effort: effort}
+}
+
+// builderModel resolves the LLM model for a builder task given a provider.
+// When the provider has a per-user ConfiguredModel (from PostHog), that wins.
+// Otherwise falls back to the global WEBSITE_BUILDER_LLM_MODEL secret, then
+// the provider's default.
+func (c *Controller) builderModel(provider *utils.LLMProvider) string {
+	if provider != nil && provider.ConfiguredModel != "" {
+		return provider.ConfiguredModel
+	}
+	if m := c.SecretManager.GetSecret("WEBSITE_BUILDER_LLM_MODEL"); m != "" {
+		return m
+	}
+	if provider != nil {
+		return provider.DefaultModel()
+	}
+	return constants.GatewayPreferredChatModel
 }

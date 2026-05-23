@@ -22,7 +22,7 @@ var schemaRelevantPatterns = []string{
 }
 
 // ExtractSchemaFromGeneratedFiles reads generated code files and uses LLM to extract table definitions.
-func (c *Controller) ExtractSchemaFromGeneratedFiles(ctx context.Context, projectID string) (json.RawMessage, error) {
+func (c *Controller) ExtractSchemaFromGeneratedFiles(ctx context.Context, projectID string, user *models.User) (json.RawMessage, error) {
 	repo, err := c.GitRepoService.Open(projectID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load project files: %w", err)
@@ -56,8 +56,8 @@ func (c *Controller) ExtractSchemaFromGeneratedFiles(ctx context.Context, projec
 		return json.RawMessage("[]"), nil
 	}
 
-	provider := c.llmProvider()
-	model := c.SecretManager.GetSecret("WEBSITE_BUILDER_LLM_MODEL")
+	provider := c.llmProviderForUser(user)
+	model := c.builderModel(provider)
 	if model == "" {
 		model = provider.FastModel()
 	}
@@ -99,8 +99,8 @@ func (c *Controller) CreateDashboard(ctx context.Context, project *models.AppPro
 		})
 	}
 
-	provider := c.llmProvider()
-	model := c.SecretManager.GetSecret("WEBSITE_BUILDER_LLM_MODEL")
+	provider := c.llmProviderForUser(user)
+	model := c.builderModel(provider)
 	if model == "" {
 		model = provider.FastModel()
 	}
@@ -149,7 +149,7 @@ func (c *Controller) CreateDashboard(ctx context.Context, project *models.AppPro
 	sendEvent("status", map[string]string{"phase": "extracting_schema"})
 
 	// Extract schema
-	schema, err := c.ExtractSchemaFromGeneratedFiles(ctx, project.ID.String())
+	schema, err := c.ExtractSchemaFromGeneratedFiles(ctx, project.ID.String(), user)
 	if err != nil {
 		slog.Error("schema extraction failed", "error", err, "project_id", project.ID)
 		sendError("schema", "failed to extract database schema")
@@ -383,8 +383,8 @@ func (c *Controller) StreamDashboardChat(ctx context.Context, dashboard *models.
 		})
 	}
 
-	provider := c.llmProvider()
-	model := c.SecretManager.GetSecret("WEBSITE_BUILDER_LLM_MODEL")
+	provider := c.llmProviderForUser(user)
+	model := c.builderModel(provider)
 	if model == "" {
 		model = provider.DefaultModel()
 	}
@@ -627,8 +627,8 @@ func (c *Controller) StreamDashboardChat(ctx context.Context, dashboard *models.
 
 // RefreshDashboardSchema re-extracts the schema from generated files and updates the dashboard.
 func (c *Controller) RefreshDashboardSchema(ctx context.Context, projectID string, user *models.User) (json.RawMessage, error) {
-	provider := c.llmProvider()
-	model := c.SecretManager.GetSecret("WEBSITE_BUILDER_LLM_MODEL")
+	provider := c.llmProviderForUser(user)
+	model := c.builderModel(provider)
 	if model == "" {
 		model = provider.FastModel()
 	}
@@ -658,7 +658,7 @@ func (c *Controller) RefreshDashboardSchema(ctx context.Context, projectID strin
 
 	dashboard, dashErr := c.DB.GetAppDashboardByProjectID(projectID)
 
-	schema, schemaErr := c.ExtractSchemaFromGeneratedFiles(ctx, projectID)
+	schema, schemaErr := c.ExtractSchemaFromGeneratedFiles(ctx, projectID, user)
 	if schemaErr != nil {
 		return nil, schemaErr
 	}

@@ -19,7 +19,7 @@ import (
 // Credit lifecycle callbacks are bound to the specific user at call time.
 // This method is called once per HTTP chat/generate request from the view layer.
 func (c *Controller) AgentDeps(user *models.User) *agent.RunDependencies {
-	provider := c.llmProvider()
+	provider := c.llmProviderForUser(user)
 
 	return &agent.RunDependencies{
 		DB:            c.DB,

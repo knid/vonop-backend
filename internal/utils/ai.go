@@ -186,7 +186,12 @@ func IsPermanentError(err error) bool {
 }
 
 // parseRateLimitError returns an ErrRateLimited for 429/529 responses, nil otherwise.
+// OpenRouter returns 402 when the account has insufficient credits — treated as
+// a permanent error rather than a rate limit.
 func parseRateLimitError(resp *http.Response, body []byte) *ErrRateLimited {
+	if resp.StatusCode == 402 {
+		return nil // handled as permanent error by caller
+	}
 	if resp.StatusCode != http.StatusTooManyRequests && resp.StatusCode != 529 {
 		return nil
 	}
@@ -279,6 +284,16 @@ var modelCosts = map[string][2]float64{
 	"claude-opus-4-5":           {15.0, 75.0},
 	"kimi-k2.6":                 {1.0, 4.0},
 	"kimi-k2.5":                 {2.0, 8.0},
+	// OpenRouter models
+	"deepseek-chat-v4":          {0.5, 2.0},
+	"deepseek-chat":             {0.5, 2.0},
+	"deepseek-reasoner":         {0.5, 2.0},
+	"deepseek-r1":               {0.5, 2.0},
+	"grok-3-beta":               {3.0, 15.0},
+	"grok-3":                    {3.0, 15.0},
+	"grok-3-fast-beta":          {5.0, 25.0},
+	"gemini-2.5-flash":          {0.15, 0.6},
+	"gemini-2.5-pro":            {1.25, 10.0},
 }
 
 // EstimateInputOutputCostUSD returns separate input and output costs for a single LLM call.
@@ -731,8 +746,9 @@ func prepareChatRequest(req ChatRequest, provider *LLMProvider) (ChatRequest, er
 		}
 	}
 
-	// Apply provider's default reasoning when no explicit config was supplied
-	if provider.UsesThinkingFormat() && req.Reasoning == nil && req.Thinking == nil && provider.DefaultReasoning != nil {
+	// Apply provider's default reasoning when no explicit config was supplied.
+	// All providers inherit it; thinking-format providers translate it below.
+	if req.Reasoning == nil && req.Thinking == nil && provider.DefaultReasoning != nil {
 		req.Reasoning = provider.DefaultReasoning
 	}
 
@@ -831,6 +847,9 @@ func getJSONFromLLMOnce(ctx context.Context, model, system, message string, prov
 			bodyStr = bodyStr[:2000] + "...(truncated)"
 		}
 		slog.Error("LLM returned non-200", "status", resp.StatusCode, "body", bodyStr, "model", model, "provider", provider.Name)
+		if resp.StatusCode == 402 {
+			return "", &ErrPermanentLLM{ErrorType: "payment_required", Message: "OpenRouter account has insufficient credits"}
+		}
 		if rlErr := parseRateLimitError(resp, errBody); rlErr != nil {
 			return "", rlErr
 		}
@@ -940,6 +959,9 @@ func getTextFromLLMOnce(ctx context.Context, model, system, message string, prov
 			bodyStr = bodyStr[:2000] + "...(truncated)"
 		}
 		slog.Error("LLM returned non-200", "status", resp.StatusCode, "body", bodyStr, "model", model, "provider", provider.Name)
+		if resp.StatusCode == 402 {
+			return "", &ErrPermanentLLM{ErrorType: "payment_required", Message: "OpenRouter account has insufficient credits"}
+		}
 		if rlErr := parseRateLimitError(resp, errBody); rlErr != nil {
 			return "", rlErr
 		}
@@ -1252,6 +1274,10 @@ func StreamWithTools(
 				}
 				round-- // retry same round
 				continue
+			}
+			// OpenRouter 402 = insufficient credits — permanent error, do not retry
+			if resp.StatusCode == 402 {
+				return "", &ErrPermanentLLM{ErrorType: "payment_required", Message: "OpenRouter account has insufficient credits"}
 			}
 			// Retry transient server errors (500, 502, 503) up to 3 times
 			if resp.StatusCode >= 500 && resp.StatusCode != 529 && transientRetries < 3 {

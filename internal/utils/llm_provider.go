@@ -35,6 +35,11 @@ type LLMProvider struct {
 	// rate-limit retries continue against the fallback provider.
 	Fallback      *LLMProvider
 	FallbackModel string // model ID to use with Fallback (provider-specific format)
+
+	// ConfiguredModel is set when the provider was resolved per-user from a
+	// PostHog feature flag (e.g. rc-builder-provider-model-starter). When set,
+	// it overrides the global WEBSITE_BUILDER_LLM_MODEL secret.
+	ConfiguredModel string
 }
 
 // Endpoint returns the full chat completions URL for this provider.
@@ -133,8 +138,7 @@ func (p *LLMProvider) FastModel() string {
 	case "google":
 		return "gemini-2.5-flash"
 	default:
-		// TODO keep synced with GatewayDefaultChatModel when Anthropic publishes a new haiku
-		return "anthropic/claude-haiku-4-5-20251001" // OpenRouter format
+		return "google/gemini-2.5-flash" // OpenRouter format
 	}
 }
 

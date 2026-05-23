@@ -915,6 +915,49 @@ func seedPlans(db *database.Database, sm secret.SecretManager) {
 
 	plans := []planDef{
 		{
+			Name:         "Starter",
+			Description:  "Free tier — try Wemob with no commitment",
+			MonthlyPrice: 0,
+			PriceID:      "free_plan",
+			Limits: models.StandardUserLimits{
+				MaximumCredentialCount:    2,
+				MontlyBuildCount:          0,
+				MontlyNotificationCount:   3,
+				MonthlyAICredits:          50,
+				MaxSeats:                  1,
+				MaxWebApps:                1,
+				MaxMobileApps:             1,
+				MaxDeployedWebApps:        1,
+				MaxDeployedMobileApps:     0,
+				CanDeployMobile:           false,
+				DeployMemoryMB:            256,
+				DeployCPUs:                "1",
+				DeployDBOrgTier:           "free",
+				DeployDBMaxCU:             "1",
+				DeployDBStorageMB:         512,
+				DeployDBActiveTimeSec:     360000,
+				DeployDBDataTransferBytes: 5 * 1024 * 1024 * 1024,
+				DeployDBSuspendTimeoutSec: 300,
+				DeployDBComputeTimeSec:    0,
+				MinMachinesRunning:        0,
+				MonthlyBandwidthGB:        10,
+				MonthlyOTAPublishCount:    0,
+				CanChooseRegion:           false,
+				CreditRolloverMonths:      0,
+				CanBuildToAndroid:         true,
+				CanBuildToIOS:             true,
+				CanBuildMobile:            false,
+				CanUseAnalytics:           false,
+				CanAccessCode:             false,
+				CanBuyDomain:              false,
+				CanUseEmailService:        false,
+				CanUseEcommerce:           true,
+				CanExportToGitHub:         false,
+				CanDeployWeb:              true,
+				CanRemoveBrandLogo:        false,
+			},
+		},
+		{
 			Name:          "Hobby",
 			Description:   "For solo builders shipping their first apps",
 			MonthlyPrice:  1900,
@@ -1147,6 +1190,23 @@ func seedPlans(db *database.Database, sm secret.SecretManager) {
 
 }
 
+func migrateInactiveOrgsToStarter(bundb *bun.DB) {
+	// Assign Starter plan to personal orgs that have no subscription.
+	res, err := bundb.ExecContext(context.Background(), `
+		UPDATE organizations SET subscription_status = 'free', subscription_id = (
+			SELECT id FROM standard_user_subscriptions WHERE name = 'Starter' AND deleted_at IS NULL LIMIT 1
+		) WHERE subscription_status = 'inactive'
+		AND (subscription_id IS NULL OR subscription_id = '00000000-0000-0000-0000-000000000000')
+		AND is_personal = true
+		AND deleted_at IS NULL
+	`)
+	if err != nil {
+		slog.Warn("migrate inactive orgs to starter plan failed", "error", err)
+	} else if n, _ := res.RowsAffected(); n > 0 {
+		slog.Info("migrated inactive orgs to starter plan", "count", n)
+	}
+}
+
 // backfillEncryptIntegrations rewrites every AppIntegration row whose
 // credentials_encrypted_v1 marker is still false: it walks Credentials JSON
 // + EnvVars and wraps each leaf string with the enc:v1: prefix using the
@@ -1323,6 +1383,7 @@ func main() {
 	backfillEncryptIntegrations(bundb, sm)
 
 	seedPlans(db, sm)
+	migrateInactiveOrgsToStarter(bundb)
 
 	go utils.CheckSessionStatusJob(db)
 	go utils.CheckUsageAlertsJob(db, controller.EventService)
