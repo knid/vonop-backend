@@ -138,8 +138,7 @@ func (p *LLMProvider) FastModel() string {
 	case "google":
 		return "gemini-2.5-flash"
 	default:
-		// TODO keep synced with GatewayDefaultChatModel when Anthropic publishes a new haiku
-		return "anthropic/claude-haiku-4-5-20251001" // OpenRouter format
+		return "google/gemini-2.5-flash" // OpenRouter format
 	}
 }
 
