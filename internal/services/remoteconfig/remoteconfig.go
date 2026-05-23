@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -61,6 +62,8 @@ func (s *Service) GetInt(key Key, userID string) int {
 }
 
 // GetString returns the string value of a feature flag payload, or the key's fallback.
+// Strips surrounding curly/smart quotes (", ", ', ') and regular quotes
+// so that values pasted from rich-text editors are cleaned automatically.
 func (s *Service) GetString(key Key, userID string) string {
 	fallback, _ := key.Fallback.(string)
 	raw := s.getPayload(key.Flag, userID)
@@ -68,9 +71,15 @@ func (s *Service) GetString(key Key, userID string) string {
 		return fallback
 	}
 	if v, ok := raw.(string); ok {
-		return v
+		return stripQuotes(v)
 	}
 	return fallback
+}
+
+// stripQuotes removes leading and trailing quote characters — regular
+// (", ') and curly/smart (", ", ', ') — from a string.
+func stripQuotes(s string) string {
+	return strings.Trim(s, `""''"'`)
 }
 
 // GetBool returns the boolean value of a feature flag payload, or the key's fallback.
