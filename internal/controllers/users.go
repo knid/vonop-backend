@@ -495,6 +495,15 @@ func (c *Controller) GoogleLogin(oauthUser goth.User, attr MetaAttribution, loca
 	}, nil
 }
 
+func (c *Controller) FinishSetup(user *models.User) (*models.User, error) {
+	if user.SetupFinished {
+		return user, nil
+	}
+	user.SetupFinished = true
+	user.UpdatedAt = time.Now()
+	return c.DB.UpdateUser(user)
+}
+
 func (c *Controller) GetUserFromReq(r *http.Request) (*models.User, error) {
 	tokenString, err := utils.ExtractTokenFromHeader(r)
 	if err != nil {
