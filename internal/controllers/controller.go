@@ -8,6 +8,7 @@ import (
 
 	"github.com/hibiken/asynq"
 	"github.com/knid/wemob/internal/database"
+	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/services"
 	"github.com/knid/wemob/internal/services/events"
 	"github.com/knid/wemob/internal/services/mcpclient"
