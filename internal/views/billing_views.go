@@ -45,10 +45,22 @@ func (v *HttpViews) GetBillingPlans(w http.ResponseWriter, r *http.Request) {
 	// Best-effort: resolve the caller's personal org so we can compute
 	// per-org intro eligibility. Anonymous callers (no auth) get IntroEligible=false.
 	var personalOrg *models.Organization
+	var authUser *models.User
 	if user, err := v.Controller.GetUserFromReq(r); err == nil && user != nil {
+		authUser = user
 		if org, orgErr := v.Controller.DB.GetPersonalOrgByUserID(user.ID.String()); orgErr == nil {
 			personalOrg = org
 		}
+	}
+
+	// rc-starter-plan-enabled: when false the Starter plan is hidden from the
+	// plans list so users must select a paid plan. Per-user evaluation supports
+	// A/B testing; anonymous callers fall back to the global default.
+	var starterEnabled bool
+	if authUser != nil {
+		starterEnabled = v.Controller.RemoteConfig.GetBool(remoteconfig.StarterPlanEnabled, authUser.ID.String())
+	} else {
+		starterEnabled = v.Controller.RemoteConfig.GetBool(remoteconfig.StarterPlanEnabled, remoteconfig.Global)
 	}
 
 	subs, err := v.Controller.DB.GetSubscriptions()
@@ -59,6 +71,9 @@ func (v *HttpViews) GetBillingPlans(w http.ResponseWriter, r *http.Request) {
 
 	var plans []responses.PlanResponse
 	for _, sub := range *subs {
+		if sub.Name == "Starter" && !starterEnabled {
+			continue
+		}
 		annualSavings := 0
 		if sub.AnnualPrice > 0 && sub.MonthlyPrice > 0 {
 			savings := (sub.MonthlyPrice * 12) - sub.AnnualPrice
