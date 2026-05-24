@@ -40,6 +40,12 @@ var AICreditsOutputMultiplier = Key{Flag: "rc-ai-credits-output-multiplier", Fal
 var AICreditsCacheReadDivisor = Key{Flag: "rc-ai-credits-cache-read-divisor", Fallback: 10}
 var AICreditsMinBalance = Key{Flag: "rc-ai-credits-min-balance", Fallback: -100}
 
+// StarterPlanEnabled controls whether new users are automatically assigned
+// the free Starter plan on signup. When false, users must select a paid plan
+// (Hobby/Pro/Max) before they can use Wemob. Supports A/B testing via PostHog
+// percentage rollouts — evaluate per-user during signup.
+var StarterPlanEnabled = Key{Flag: "rc-starter-plan-enabled", Fallback: true}
+
 // --- Category 1b: Plan Display Overrides ---
 // These override the DB-stored plan limits for the billing/plans API.
 // Flag names: rc-plan-{planName}-{field} where planName is lowercased.

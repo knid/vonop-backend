@@ -13,6 +13,7 @@ import (
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/requests"
+	"github.com/knid/wemob/internal/services/remoteconfig"
 	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/utils"
 )
@@ -496,15 +497,22 @@ func (c *Controller) EnsurePersonalOrg(user *models.User) (*models.Organization,
 	base := utils.SlugifyName(displayName)
 	slug := utils.SlugWithSuffix(base)
 
-	// 2026-05-23: re-enable Starter (free) plan. New personal orgs are born
-	// on the Starter plan so users can try the platform without payment.
+	// rc-starter-plan-enabled controls whether new users get the free Starter
+	// plan automatically. When false, users must select a paid plan before
+	// using Wemob. Supports A/B testing via PostHog percentage rollouts.
 	var starterID uuid.UUID
-	starter, err := c.DB.GetSubscriptionByName("Starter")
-	if err != nil || starter == nil {
-		slog.Error("EnsurePersonalOrg: Starter plan not found — new org will have NULL subscription_id",
-			"user_id", user.ID, "error", err)
+	var subStatus string
+	if c.RemoteConfig.GetBool(remoteconfig.StarterPlanEnabled, user.ID.String()) {
+		starter, err := c.DB.GetSubscriptionByName("Starter")
+		if err != nil || starter == nil {
+			slog.Error("EnsurePersonalOrg: Starter plan not found — new org will have NULL subscription_id",
+				"user_id", user.ID, "error", err)
+		} else {
+			starterID = starter.ID
+		}
+		subStatus = "free"
 	} else {
-		starterID = starter.ID
+		subStatus = "inactive"
 	}
 
 	org := &models.Organization{
@@ -513,7 +521,7 @@ func (c *Controller) EnsurePersonalOrg(user *models.User) (*models.Organization,
 		OwnerID:            user.ID,
 		IsPersonal:         true,
 		SubscriptionID:     starterID,
-		SubscriptionStatus: "free",
+		SubscriptionStatus: subStatus,
 	}
 	created, err := c.DB.CreateOrganization(org)
 	if err != nil {
