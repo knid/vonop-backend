@@ -130,7 +130,8 @@ func NewController(db *database.Database, concurrentBuildLimiter chan struct{},
 }
 
 // llmProvider resolves the active LLM provider from the LLM_PROVIDER secret.
-// Supported values: "openrouter" (default), "anthropic", "google", "moonshot", "zai".
+// Supported values: "openrouter" (default), "anthropic", "moonshot", "zai".
+// Google models (e.g. "google/gemini-2.5-flash-lite") are routed through OpenRouter.
 //
 // When the primary is "anthropic" and OPENROUTER_API_KEY is set, an OpenRouter
 // fallback is attached. On Anthropic overload (529 / overloaded_error) the call
@@ -148,8 +149,6 @@ func (c *Controller) llmProvider() *utils.LLMProvider {
 		p := &utils.LLMProvider{Name: "anthropic", BaseURL: "https://api.anthropic.com/v1", APIKey: c.SecretManager.GetSecret("ANTHROPIC_API_KEY"), DefaultReasoning: c.reasoningConfig(), FastModelOverride: fastModel}
 		c.attachOpenRouterFallback(p, fastModel)
 		return p
-	case "google":
-		return &utils.LLMProvider{Name: "google", BaseURL: "https://generativelanguage.googleapis.com/v1beta/openai", APIKey: c.SecretManager.GetSecret("GOOGLE_API_KEY"), FastModelOverride: fastModel}
 	case "moonshot":
 		moonshotReasoning := c.reasoningConfig()
 		if c.RemoteConfig != nil && !c.RemoteConfig.GetBool(remoteconfig.AIMoonshotThinkingEnabled, remoteconfig.Global) {
@@ -203,8 +202,6 @@ func (c *Controller) llmProviderForUser(user *models.User) *utils.LLMProvider {
 	switch providerName {
 	case "anthropic":
 		p = &utils.LLMProvider{Name: "anthropic", BaseURL: "https://api.anthropic.com/v1", APIKey: c.SecretManager.GetSecret("ANTHROPIC_API_KEY"), DefaultReasoning: c.reasoningConfig(), FastModelOverride: fastModel, ConfiguredModel: model}
-	case "google":
-		p = &utils.LLMProvider{Name: "google", BaseURL: "https://generativelanguage.googleapis.com/v1beta/openai", APIKey: c.SecretManager.GetSecret("GOOGLE_API_KEY"), FastModelOverride: fastModel, ConfiguredModel: model}
 	case "moonshot":
 		moonshotReasoning := c.reasoningConfig()
 		if !c.RemoteConfig.GetBool(remoteconfig.AIMoonshotThinkingEnabled, remoteconfig.Global) {
@@ -227,9 +224,9 @@ func (c *Controller) llmProviderForUser(user *models.User) *utils.LLMProvider {
 }
 
 // parseProviderModel splits a "provider/model" string into provider name and
-// bare model ID. Known providers: anthropic, moonshot, google, zai, openrouter.
+// bare model ID. Known providers: anthropic, moonshot, zai, openrouter.
 // If the first segment is not a known provider, the whole string is treated as
-// an OpenRouter model ID (e.g. "deepseek/deepseek-v4-flash").
+// an OpenRouter model ID (e.g. "deepseek/deepseek-v4-flash", "google/gemini-2.5-flash-lite").
 func (c *Controller) parseProviderModel(providerModel string) (provider, model string) {
 	providerModel = strings.TrimSpace(strings.ToLower(providerModel))
 	parts := strings.SplitN(providerModel, "/", 2)
@@ -238,7 +235,7 @@ func (c *Controller) parseProviderModel(providerModel string) (provider, model s
 	}
 
 	switch parts[0] {
-	case "anthropic", "moonshot", "google", "zai", "openrouter":
+	case "anthropic", "moonshot", "zai", "openrouter":
 		return parts[0], parts[1]
 	default:
 		// First segment is a vendor namespace on OpenRouter (e.g. "deepseek/...")
