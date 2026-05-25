@@ -83,6 +83,16 @@ services:
       - --redis-tls=${REDIS_HOST}
       - --redis-insecure-tls
 
+  admin:
+    image: ghcr.io/knid/wemob-admin:${ADMIN_IMAGE_TAG:-latest}
+    container_name: wemob_admin
+    restart: unless-stopped
+    # Bound to the VPS's tailnet IP only — same pattern as asynqmon.
+    # Reachable at http://wemob-backend.zebu-pain.ts.net:3000/ from any
+    # device on the tailnet, not on the public internet.
+    ports:
+      - "100.80.70.96:3000:80"
+
 volumes:
   caddy_data:
   caddy_config:
