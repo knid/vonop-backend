@@ -91,6 +91,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: knid/wemob-admin
+          token: ${{ secrets.ADMIN_REPO_PAT }}
 
       - id: vars
         run: echo "short_sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
