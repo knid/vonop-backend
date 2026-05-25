@@ -23,7 +23,7 @@ func bareModel(id string) string {
 // LLMProvider holds the base URL and API key for a specific LLM provider.
 // All supported providers expose an OpenAI-compatible /chat/completions endpoint.
 type LLMProvider struct {
-	Name              string // "openrouter", "anthropic", "google", "moonshot", "zai"
+	Name              string // "openrouter", "anthropic", "moonshot", "zai"
 	BaseURL           string
 	APIKey            string
 	DefaultReasoning  *ReasoningConfig // applied when no explicit Reasoning/Thinking is set
@@ -115,8 +115,6 @@ func (p *LLMProvider) DefaultModel() string {
 		return bareModel(constants.GatewayPreferredChatModel)
 	case "moonshot":
 		return "kimi-k2.6"
-	case "google":
-		return "gemini-2.5-flash"
 	case "zai":
 		return "glm-4.7"
 	default:
@@ -135,8 +133,6 @@ func (p *LLMProvider) FastModel() string {
 	case "anthropic":
 		// TODO keep synced with GatewayDefaultChatModel when Anthropic publishes a new haiku
 		return "claude-haiku-4-5-20251001"
-	case "google":
-		return "gemini-2.5-flash"
 	default:
 		return "google/gemini-2.5-flash" // OpenRouter format
 	}
