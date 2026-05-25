@@ -56,6 +56,27 @@ func (db *Database) GetAgentRun(runID uuid.UUID) (*models.AppAgentRun, error) {
 	return &r, nil
 }
 
+// GetLastNonSuccessAgentRun returns the most recent agent run for a project
+// that did NOT complete successfully (failed, canceled, budget_exceeded).
+// Returns (nil, nil) if every run for the project succeeded.
+func (db *Database) GetLastNonSuccessAgentRun(projectID uuid.UUID) (*models.AppAgentRun, error) {
+	var r models.AppAgentRun
+	err := db.DB.NewSelect().
+		Model(&r).
+		Where("app_project_id = ?", projectID).
+		Where("status != ?", models.AgentRunStatusCompleted).
+		Order("created_at DESC").
+		Limit(1).
+		Scan(context.Background())
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &r, nil
+}
+
 // MarkOrphanedRunsFailed flips `running` rows whose created_at is older than
 // staleAfter to `failed`. Pass 0 to fail every running row (used at server
 // startup, where any survivor is by definition a leftover from a prior

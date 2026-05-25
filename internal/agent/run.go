@@ -199,6 +199,16 @@ func Run(
 	// full prompt body while the persisted DB row (above) keeps the literal
 	// text the user typed.
 	expandedMessage, _, _ := ExpandSlashCommand(message)
+
+	// If the user is trying to resume after a failed run, augment their
+	// message with a resume context block so the LLM knows what was already
+	// accomplished before the failure.
+	if isContinueMessage(expandedMessage) {
+		if resumeCtx := buildResumeContext(deps, repo, project.ID); resumeCtx != "" {
+			expandedMessage = resumeCtx + expandedMessage
+		}
+	}
+
 	turnContent := expandedMessage
 	if fileTreePrefix := BuildFileTreeUserPrefix(fileMap); fileTreePrefix != "" {
 		// File tree rides with the user turn instead of the system prefix —
@@ -296,7 +306,8 @@ func Run(
 		if r := recover(); r != nil {
 			slog.Error("agent.Run panicked", "error", r, "project_id", project.ID, "stack", string(debug.Stack()))
 			runErr = finaliseFailureV2(ctx, deps, repo, run, project, emitter, "agent_loop",
-				CodeInternal, fmt.Sprintf("panic: %v", r), nil, tracker, runStart)
+				CodeInternal, fmt.Sprintf("panic: %v", r), nil, tracker, runStart,
+				fileMap, message)
 		}
 	}()
 
@@ -319,7 +330,8 @@ func Run(
 	if creditCheck != nil && !creditCheck() {
 		return finaliseFailureV2(ctx, deps, repo, run, project, emitter, "agent_loop",
 			CodeCreditsExhausted, "AI credits exhausted before run started", nil,
-			tracker, runStart)
+			tracker, runStart,
+			fileMap, message)
 	}
 
 	// The dedicated keepalive goroutine that used to emit a typed
@@ -499,7 +511,8 @@ func Run(
 			"project_id", project.ID, "run_id", runID)
 		return finaliseFailureV2(ctx, deps, repo, run, project, emitter, "agent_loop",
 			CodeRepetitionLoop, "model got stuck repeating output", nil,
-			tracker, runStart)
+			tracker, runStart,
+			fileMap, message)
 	}
 	if llmErr != nil {
 		// A ctx-triggered stream abort surfaces here as llmErr — classify it
@@ -512,7 +525,8 @@ func Run(
 			code, msg := classifyCtxErr(ctxErr)
 			return finaliseFailureV2(ctx, deps, repo, run, project, emitter, "agent_loop",
 				code, msg, ctxErr,
-				tracker, runStart)
+				tracker, runStart,
+				fileMap, message)
 		}
 		// Truncation isn't a provider fault — it means the model exhausted
 		// its per-call token budget and the continuation loop failed too.
@@ -521,11 +535,13 @@ func Run(
 		if errors.Is(llmErr, utils.ErrResponseTruncated) {
 			return finaliseFailureV2(ctx, deps, repo, run, project, emitter, "agent_loop",
 				CodeTruncated, "model response exceeded token budget", llmErr,
-				tracker, runStart)
+				tracker, runStart,
+				fileMap, message)
 		}
 		return finaliseFailureV2(ctx, deps, repo, run, project, emitter, "agent_loop",
 			CodeProviderError, "LLM call failed", llmErr,
-			tracker, runStart)
+			tracker, runStart,
+			fileMap, message)
 	}
 
 	// Post-loop budget checks to classify why the loop ended.
@@ -533,18 +549,21 @@ func Run(
 		code, msg := classifyCtxErr(ctxErr)
 		return finaliseFailureV2(ctx, deps, repo, run, project, emitter, "agent_loop",
 			code, msg, ctxErr,
-			tracker, runStart)
+			tracker, runStart,
+			fileMap, message)
 	}
 	if creditCheck != nil && !creditCheck() {
 		return finaliseFailureV2(ctx, deps, repo, run, project, emitter, "agent_loop",
 			CodeCreditsExhausted, "AI credits exhausted mid-run", nil,
-			tracker, runStart)
+			tracker, runStart,
+			fileMap, message)
 	}
 	if _, _, total, _ := tracker.Totals(); total > maxTokensPerRun {
 		return finaliseFailureV2(ctx, deps, repo, run, project, emitter, "agent_loop",
 			CodeBudgetExceeded,
 			fmt.Sprintf("token budget exceeded (%d > %d)", total, maxTokensPerRun), nil,
-			tracker, runStart)
+			tracker, runStart,
+			fileMap, message)
 	}
 
 	emitter.Emit(EventTurnEnd, TurnEndEvent{
@@ -719,13 +738,17 @@ func normaliseImages(images []string) []map[string]string {
 func convertHistory(history []models.AppChatMessage) []utils.Message {
 	var out []utils.Message
 	for _, m := range history {
-		// Skip failed assistant turns — these rows exist so the chat UI can
-		// render an error card (keyed off ErrorKind), but their Content is a
-		// fallback string like "Generation failed." that, when replayed to the
-		// LLM, poisons the conversation: the model sees itself "responding"
-		// with error text and the prompt cache is invalidated. The previous
-		// user turn is kept so on retry the model still has the question.
 		if m.ErrorKind != "" {
+			// Instead of silently dropping failed assistant turns, inject a
+			// synthetic user message that tells the LLM what happened. This
+			// preserves resume context so that when the user types "continue"
+			// the model knows a previous run failed and can pick up where it
+			// left off rather than treating the request as brand-new.
+			summary := fmt.Sprintf(
+				"The previous assistant generation failed with: %s. Please continue from where it left off.",
+				humanizeErrorKind(m.ErrorKind),
+			)
+			out = append(out, utils.Message{Role: "user", Content: summary})
 			continue
 		}
 		content := m.Content
@@ -789,7 +812,8 @@ func finaliseSuccess(
 	if err != nil {
 		return finaliseFailureV2(ctx, deps, repo, run, project, emitter, "commit",
 			CodeGitError, "failed to write and commit files", err,
-			tracker, runStart)
+			tracker, runStart,
+			fileMap, userMessage)
 	}
 
 	// 1b. Auto-deploy the backend/ subtree if this turn touched it.
@@ -1032,13 +1056,27 @@ func finaliseFailureV2(
 	wrapped error,
 	tracker *utils.TokenTracker,
 	runStart time.Time,
+	fileMap *SafeFileMap,
+	originalUserMessage string,
 ) error {
-	// 1. Emit error event. We do NOT touch the working tree on failure —
-	// tool mutations only ever land in the in-memory fileMap, which is
-	// discarded on return, so disk is already at the pre-run commit.
-	// (`repo` is kept in the signature for symmetry with the success path
-	// and in case future failure handling needs it.)
-	_ = repo
+	// 1. Attempt to commit partial progress so the user isn't left with
+	// nothing when a run fails mid-loop (credits exhausted, timeout, etc.).
+	// We skip this when the failure itself happened during commit (phase
+	// == "commit") to avoid retrying a broken commit.
+	if phase != "commit" && phase != "setup" && repo != nil && fileMap != nil {
+		sanitizeFileMapForBuild(fileMap)
+		if partialCommit, err := FinaliseRun(repo, fileMap, originalUserMessage); err == nil {
+			if partialCommit != run.PreCommit {
+				run.FinalCommit = partialCommit
+				slog.Info("agent: committed partial progress on failure",
+					"run_id", run.ID, "phase", phase, "code", code,
+					"pre_commit", run.PreCommit, "partial_commit", partialCommit)
+			}
+		} else {
+			slog.Warn("agent: failed to commit partial progress on failure",
+				"run_id", run.ID, "error", err)
+		}
+	}
 	emitter.Emit(EventError, ErrorEvent{
 		RunID:   run.ID,
 		Phase:   phase,
@@ -1302,4 +1340,113 @@ func classifyErrorKind(code ErrorCode, wrapped error) string {
 		return "internal"
 	}
 	return "unknown"
+}
+
+// humanizeErrorKind converts the ErrorKind string persisted on failed
+// assistant messages into a concise, user-facing (and LLM-facing) description.
+func humanizeErrorKind(kind string) string {
+	switch kind {
+	case "credit_out":
+		return "AI credits exhausted"
+	case "rate_limit":
+		return "rate limit hit"
+	case "provider_error":
+		return "LLM provider error"
+	case "timeout":
+		return "run timed out"
+	case "context_canceled":
+		return "run was canceled"
+	case "internal":
+		return "internal error"
+	default:
+		return "unknown error"
+	}
+}
+
+// isContinueMessage returns true when the user's message is clearly an attempt
+// to resume after an interrupted run. Covers English and Turkish (the primary
+// languages used with the product) plus common variants.
+func isContinueMessage(msg string) bool {
+	lower := strings.ToLower(strings.TrimSpace(msg))
+	// Strip trailing punctuation so "continue!" and "devam et." still match.
+	lower = strings.TrimRight(lower, "!.?")
+	continues := []string{
+		"continue", "go on", "resume", "keep going", "proceed",
+		"carry on", "pick up where you left off", "finish it",
+		"devam et", "devam",
+	}
+	for _, c := range continues {
+		if lower == c {
+			return true
+		}
+	}
+	return false
+}
+
+// buildResumeContext queries the most recent failed run for this project and
+// produces a concise block that tells the LLM what was accomplished before the
+// failure. It is prepended to the current user turn when isContinueMessage
+// detects a resume intent.
+func buildResumeContext(
+	deps *RunDependencies,
+	repo *gitrepo.Repo,
+	projectID uuid.UUID,
+) string {
+	if deps == nil || deps.DB == nil || repo == nil {
+		return ""
+	}
+	lastRun, err := deps.DB.GetLastNonSuccessAgentRun(projectID)
+	if err != nil || lastRun == nil {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("[Resume Context]\n")
+	sb.WriteString("The previous assistant run failed")
+	if lastRun.ToolCallCount > 0 {
+		fmt.Fprintf(&sb, " after %d tool call(s)", lastRun.ToolCallCount)
+	}
+	if lastRun.Turns > 0 {
+		fmt.Fprintf(&sb, " across %d turn(s)", lastRun.Turns)
+	}
+	sb.WriteString(".\n")
+	sb.WriteString("Reason: ")
+	sb.WriteString(classifyErrorKindFromStatus(lastRun.Status, lastRun.Error))
+	sb.WriteString(".\n")
+	// If partial progress was committed (Fix 2), list the files that changed.
+	if lastRun.FinalCommit != "" && lastRun.FinalCommit != lastRun.PreCommit {
+		changed, diffErr := repo.ChangedPathsSince(lastRun.PreCommit)
+		if diffErr == nil && len(changed) > 0 {
+			sb.WriteString("Files already written/modified before the failure:\n")
+			for _, p := range changed {
+				fmt.Fprintf(&sb, "  - %s\n", p)
+			}
+		}
+	}
+	sb.WriteString("Please continue from where the previous attempt left off.\n")
+	sb.WriteString("[/Resume Context]\n\n")
+	return sb.String()
+}
+
+// classifyErrorKindFromStatus maps an AppAgentRun status + error string back
+// to a human-readable failure reason for the resume context.
+func classifyErrorKindFromStatus(status, errStr string) string {
+	switch status {
+	case models.AgentRunStatusCanceled:
+		if strings.Contains(errStr, "credit") {
+			return "AI credits exhausted"
+		}
+		return "run was canceled"
+	case models.AgentRunStatusBudgetExceeded:
+		return "run exceeded budget/time limit"
+	case models.AgentRunStatusFailed:
+		if strings.Contains(errStr, "provider") {
+			return "LLM provider error"
+		}
+		if strings.Contains(errStr, "repetition") {
+			return "model got stuck in a repetition loop"
+		}
+		return "internal error"
+	default:
+		return "unknown error"
+	}
 }
