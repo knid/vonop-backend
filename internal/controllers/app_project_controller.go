@@ -80,18 +80,19 @@ func (c *Controller) CreateAppProject(ctx context.Context, user *models.User, re
 		projectType = "app"
 	}
 
-	// Enforce app project limit by type. A5/A7/A8: limits errors now fail
-	// closed instead of silently allowing the action.
-	limits, err := c.GetUserLimits(user)
-	if err != nil {
-		return nil, fmt.Errorf("could not load plan limits: %w", err)
-	}
 	// §B Phase 4: project quota is org-scoped (Plan A made limits org-scoped),
 	// so the count must be too. Resolve the actor's org early so both the count
 	// and the new project row write the same organization_id.
 	orgIDForCount, err := c.RequireOrgIDForUser(user, req.OrganizationID)
 	if err != nil {
 		return nil, err
+	}
+
+	// Enforce app project limit by type. A5/A7/A8: limits errors now fail
+	// closed instead of silently allowing the action.
+	limits, err := c.GetOrgLimits(orgIDForCount.String())
+	if err != nil {
+		return nil, fmt.Errorf("could not load plan limits: %w", err)
 	}
 	{
 		isMobile := projectType == models.ProjectTypeMobileAppNative

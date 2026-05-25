@@ -247,9 +247,9 @@ func (c *Controller) CopyTemplate(ctx context.Context, user *models.User, slug s
 	// Enforce app project limit (same logic as CreateAppProject)
 	isMobile := template.ProjectType == models.ProjectTypeMobileAppNative
 	var userLimits *models.StandardUserLimits
-	limits, limErr := c.GetUserLimits(user)
+	limits, limErr := c.GetOrgLimits(orgID.String())
 	if limErr != nil {
-		slog.Warn("CopyTemplate: failed to get user limits", "error", limErr, "user_id", user.ID)
+		slog.Warn("CopyTemplate: failed to get org limits", "error", limErr, "org_id", orgID, "user_id", user.ID)
 	} else {
 		userLimits = limits
 		var maxApps int
