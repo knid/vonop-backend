@@ -15,16 +15,25 @@ func (v *HttpViews) GenerateAppStream(w http.ResponseWriter, r *http.Request) {
 		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
 		return
 	}
-	if requireActiveSubscription(w, v.Controller, user) {
-		return
-	}
-	if v.checkMinimumCredits(w, user) {
-		return
-	}
 
 	var req requests.GenerateAppRequest
 	if err := utils.ParseJSONBody(r, &req); err != nil {
 		utils.ValidationError(w, err)
+		return
+	}
+
+	// Resolve the target org before subscription/credit checks so gates
+	// are evaluated against the org where the app will actually live.
+	targetOrgID, err := v.Controller.RequireOrgIDForUser(user, req.OrganizationID)
+	if err != nil {
+		utils.JSONErrorCode(w, constants.ErrForbidden, http.StatusForbidden, nil)
+		return
+	}
+
+	if requireActiveSubscription(w, v.Controller, user, targetOrgID) {
+		return
+	}
+	if v.checkMinimumCredits(w, user, targetOrgID) {
 		return
 	}
 

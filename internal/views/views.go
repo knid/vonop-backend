@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/controllers"
 	"github.com/knid/wemob/internal/models"
@@ -16,16 +17,20 @@ type HttpViews struct {
 	Controller *controllers.Controller
 }
 
-// requireActiveSubscription checks that the user's personal org has an
-// active subscription. Returns true if the request should be blocked
-// (response already written).
-//
-// Reads SubscriptionStatus from the user's personal Organization (Plan 5).
-// The user is still passed so the lookup can resolve via GetPersonalOrgByUserID.
-func requireActiveSubscription(w http.ResponseWriter, c *controllers.Controller, user *models.User) bool {
-	org, err := c.DB.GetPersonalOrgByUserID(user.ID.String())
+// requireActiveSubscription checks that the target org has an active
+// subscription. If targetOrgID is provided (non-nil and non-zero), it checks
+// that org; otherwise it falls back to the user's personal org.
+// Returns true if the request should be blocked (response already written).
+func requireActiveSubscription(w http.ResponseWriter, c *controllers.Controller, user *models.User, targetOrgID ...uuid.UUID) bool {
+	var org *models.Organization
+	var err error
+	if len(targetOrgID) > 0 && targetOrgID[0] != uuid.Nil {
+		org, err = c.DB.GetOrganizationByID(targetOrgID[0].String())
+	} else {
+		org, err = c.DB.GetPersonalOrgByUserID(user.ID.String())
+	}
 	if err != nil || org == nil {
-		slog.Error("requireActiveSubscription: failed to load personal org", "error", err, "user_id", user.ID)
+		slog.Error("requireActiveSubscription: failed to load org", "error", err, "user_id", user.ID)
 		utils.JSONError(w, constants.ErrSubscriptionRequired, "active subscription required", http.StatusForbidden, nil)
 		return true
 	}
@@ -53,13 +58,21 @@ func (v *HttpViews) checkAnalyticsAccess(w http.ResponseWriter, user *models.Use
 	return false
 }
 
-// checkMinimumCredits verifies the user has at least 1 AI credit.
+// checkMinimumCredits verifies the user has at least 1 AI credit in the
+// target org. If targetOrgID is provided (non-nil and non-zero), it checks
+// that org; otherwise it falls back to the user's personal org.
 // Returns true if blocked (response already written).
-func (v *HttpViews) checkMinimumCredits(w http.ResponseWriter, user *models.User) bool {
-	orgID, err := v.Controller.RequireOrgIDForUser(user, nil)
-	if err != nil {
-		utils.JSONInternalError(w, err)
-		return true
+func (v *HttpViews) checkMinimumCredits(w http.ResponseWriter, user *models.User, targetOrgID ...uuid.UUID) bool {
+	var orgID uuid.UUID
+	var err error
+	if len(targetOrgID) > 0 && targetOrgID[0] != uuid.Nil {
+		orgID = targetOrgID[0]
+	} else {
+		orgID, err = v.Controller.RequireOrgIDForUser(user, nil)
+		if err != nil {
+			utils.JSONInternalError(w, err)
+			return true
+		}
 	}
 	balance, err := v.Controller.GetOrCreateCreditsBalance(user, orgID)
 	if err != nil {
@@ -81,13 +94,13 @@ func (v *HttpViews) checkMinimumCredits(w http.ResponseWriter, user *models.User
 
 		planName := ""
 		monthlyLimit := 0
-		if limits, pn, limitsErr := v.Controller.GetUserLimitsWithPlan(user); limitsErr == nil {
+		if limits, pn, limitsErr := v.Controller.GetOrgLimitsWithPlan(orgID.String()); limitsErr == nil {
 			monthlyLimit = limits.MonthlyAICredits
 			planName = pn
 		}
-		// Subscription billing period anchors on the personal org (Plan 5).
+		// Subscription billing period anchors on the target org.
 		var subsStart time.Time
-		if org, orgErr := v.Controller.DB.GetPersonalOrgByUserID(user.ID.String()); orgErr == nil && org != nil {
+		if org, orgErr := v.Controller.DB.GetOrganizationByID(orgID.String()); orgErr == nil && org != nil {
 			subsStart = org.SubscriptionStartAt
 		}
 		_, renewEnd := utils.BillingPeriod(subsStart, time.Now())
