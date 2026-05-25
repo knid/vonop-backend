@@ -1434,7 +1434,7 @@ func main() {
 	// Access-Control-Allow-Origin headers (otherwise browsers report a
 	// CORS error instead of showing the real 429).
 	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   []string{"https://app.wemob.io", "https://dashboard.wemob.io", "https://wemob.io", "https://www.wemob.io", "http://localhost:3000", "http://127.0.0.1:3000", "https://*.wemob.app", "https://*.preview.wemob.app", "https://device1.zebu-pain.ts.net", "https://mba.zebu-pain.ts.net"},
+		AllowedOrigins:   []string{"https://app.wemob.io", "https://dashboard.wemob.io", "https://wemob.io", "https://www.wemob.io", "http://localhost:3000", "http://127.0.0.1:3000", "https://*.wemob.app", "https://*.preview.wemob.app", "https://device1.zebu-pain.ts.net", "https://mba.zebu-pain.ts.net", "http://wemob-backend.zebu-pain.ts.net:3000"},
 		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token", "Location"},
 		ExposedHeaders:   []string{"Link"},
