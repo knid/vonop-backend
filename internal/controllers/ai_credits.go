@@ -644,7 +644,7 @@ func (c *Controller) CreditsForTracker(tracker *utils.TokenTracker) int {
 	tpc, om, crd := c.creditFormulaParams()
 	total := 0
 	for _, e := range tracker.Entries() {
-		total += models.TokensToCreditsWithConfig(e.PromptTokens, e.CompletionTokens, e.CacheReadInputTokens, tpc, om, crd)
+		total += models.TokensToCreditsWithConfig(e.PromptTokens, e.CompletionTokens, e.CacheReadInputTokens, tpc, om, crd, e.CacheReadInclusive)
 	}
 	return total
 }
