@@ -1361,7 +1361,7 @@ func classifyErrorKind(code ErrorCode, wrapped error) string {
 	case CodeProviderError:
 		return "provider_error"
 	case CodeBudgetExceeded:
-		return "timeout"
+		return "budget_exceeded"
 	case CodeCanceled:
 		if wrapped != nil && errors.Is(wrapped, context.Canceled) {
 			return "context_canceled"
