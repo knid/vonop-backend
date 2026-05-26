@@ -2544,6 +2544,16 @@ if (Platform.OS === "web") {
 }
 ` + "```" + `
 
+## Clipboard hooks (wrong API — crashes at runtime)
+` + "```" + `tsx
+// WRONG — @/lib/clipboard does NOT export useClipboard
+import { useClipboard } from "@/lib/clipboard";
+
+// CORRECT — @/lib/clipboard exports plain async functions
+import { copy } from "@/lib/clipboard";
+await copy(resultText);
+` + "```" + `
+
 ## react-router (Expo Router replaces it entirely)
 ` + "```" + `tsx
 // Do not use react-router
