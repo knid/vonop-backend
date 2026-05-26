@@ -70,22 +70,22 @@ func TestReadFilesTool_RejectsEmptyAndOversizedBatches(t *testing.T) {
 	}
 }
 
-func TestWriteFileTool_RejectsRewriteOfLargeExistingFile(t *testing.T) {
+func TestWriteFileTool_AllowsRewriteOfLargeExistingFile(t *testing.T) {
 	rc := newPathScopeTestRC(models.ProjectTypeApp)
-	// Pre-seed an existing file just over the rewrite cap so write_file
-	// must steer the model toward multi_edit instead.
-	rc.FileMap.Set("app/page.tsx", strings.Repeat("a", maxRewriteExistingBytes+1))
+	// Pre-seed an existing file larger than the old 5 KB rewrite cap.
+	// write_file should now allow wholesale overwrites of any size.
+	rc.FileMap.Set("app/page.tsx", strings.Repeat("a", 6*1024))
 
 	out, isError, err := WriteFileTool{}.Execute(context.Background(), rc,
 		json.RawMessage(`{"path":"app/page.tsx","content":"new content"}`))
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-	if !isError {
-		t.Fatalf("expected isError=true for wholesale rewrite of large existing file; out=%s", out)
+	if isError {
+		t.Fatalf("expected isError=false for wholesale rewrite of large existing file; out=%s", out)
 	}
-	if !strings.Contains(out, "multi_edit") {
-		t.Errorf("expected guidance pointing to multi_edit; got: %s", out)
+	if !strings.Contains(out, "update") {
+		t.Errorf("expected update confirmation; got: %s", out)
 	}
 }
 
@@ -108,13 +108,13 @@ func TestWriteFileTool_AllowsCreationOfNewFileAtAnySize(t *testing.T) {
 
 	body, _ := json.Marshal(map[string]any{
 		"path":    "app/big-new.tsx",
-		"content": strings.Repeat("a", maxRewriteExistingBytes*4),
+		"content": strings.Repeat("a", 24*1024),
 	})
 	_, isError, err := WriteFileTool{}.Execute(context.Background(), rc, body)
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
 	if isError {
-		t.Error("expected isError=false: rewrite cap should only apply to existing files")
+		t.Error("expected isError=false: new file creation should succeed regardless of size")
 	}
 }
