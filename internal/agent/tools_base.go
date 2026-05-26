@@ -353,14 +353,6 @@ func (DeleteFileTool) Execute(ctx context.Context, rc *RunContext, input json.Ra
 const (
 	maxWriteBytes = 200 * 1024 // 200 KB
 
-	// maxRewriteExistingBytes caps the size of an existing file that
-	// write_file is allowed to wholesale overwrite. Whole-file rewrites cost
-	// the LLM the entire body in output tokens (and again as fresh input on
-	// the next turn before caching catches up); a 60 KB rewrite is ~15k
-	// output tokens (~$0.225 on Sonnet 4.6) plus ~$0.20 of cascading
-	// cache-write/read. Above this threshold the model must use multi_edit
-	// instead, which only emits the changed regions.
-	maxRewriteExistingBytes = 5 * 1024 // 5 KB
 )
 
 type WriteFileTool struct{}
@@ -405,14 +397,9 @@ func (WriteFileTool) Execute(ctx context.Context, rc *RunContext, input json.Raw
 	}
 
 	op := "update"
-	existing, exists := rc.FileMap.Get(path)
+	_, exists := rc.FileMap.Get(path)
 	if !exists {
 		op = "create"
-	} else if len(existing) > maxRewriteExistingBytes {
-		return fmt.Sprintf(
-			"refusing to wholesale-overwrite %s: existing file is %d bytes (>%d KB rewrite cap). use multi_edit for targeted changes — same semantics, but only the changed regions are emitted as output tokens. if you genuinely need to replace the whole file, delete_file first then write_file with the new content.",
-			path, len(existing), maxRewriteExistingBytes/1024,
-		), true, nil
 	}
 	rc.FileMap.Set(path, args.Content)
 	rc.Emitter.Emit(EventFileWritten, FileWrittenEvent{

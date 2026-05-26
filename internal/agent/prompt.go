@@ -125,10 +125,10 @@ Tool preference:
   into one tool call instead of one LLM turn per edit — same semantics as
   edit_file, but one round-trip.
 - edit_file for a single targeted change to an existing file.
-- write_file ONLY for creating a new file. The runtime rejects write_file
-  on existing files larger than 5 KB — for those, use multi_edit. Whole-
-  file rewrites cost the entire body in output tokens; multi_edit only
-  emits the changed regions.
+- write_file for creating a new file or fully overwriting an existing
+  file. Prefer multi_edit for targeted changes to existing files — it only
+  emits the changed regions and is cheaper in output tokens. Use write_file
+  when the change is so broad that replacing the whole file is simpler.
 - list_files with a glob to refresh structure on demand. A FILE TREE block
   rides with the user's message at the start of each turn — read it for
   the current state. After write_file / edit_file / delete_file, your own
