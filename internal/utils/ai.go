@@ -262,11 +262,12 @@ type TokenEntry struct {
 	CacheReadInputTokens     int
 	LatencyMs                int64
 	IsStreaming              bool
-	InputMessages            []Message // optional: messages sent to LLM (only when TrackContent is set)
-	OutputText               string    // optional: LLM text completion (only when TrackContent is set)
-	SpanName                 string    // LLM function name (e.g. "get_json", "stream_text") for PostHog $ai_span_name
-	RecordedAt               time.Time // wall-clock time when this entry was recorded
-	CostUSD                  float64   // estimated cost in USD (computed from model pricing)
+	InputMessages            []Message  // optional: messages sent to LLM (only when TrackContent is set)
+	OutputText               string     // optional: LLM text completion (only when TrackContent is set)
+	ToolCalls                []ToolCall // optional: tool calls emitted by the LLM in this round
+	SpanName                 string     // LLM function name (e.g. "get_json", "stream_text") for PostHog $ai_span_name
+	RecordedAt               time.Time  // wall-clock time when this entry was recorded
+	CostUSD                  float64    // estimated cost in USD (computed from model pricing)
 }
 
 // modelCosts maps normalized model names to per-million-token pricing {input, output}.
@@ -483,6 +484,19 @@ func (t *TokenTracker) RecordWithContent(model string, usage UsageInfo, latencyM
 		RecordedAt:               time.Now(),
 		CostUSD:                  resolveCostUSD(model, usage),
 	})
+}
+
+// SetLastEntryToolCalls attaches the tool calls emitted by the LLM in the
+// most recent round to the last TokenEntry. This feeds PostHog's
+// $ai_tools_called property on the per-generation event.
+func (t *TokenTracker) SetLastEntryToolCalls(toolCalls []ToolCall) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if len(t.entries) == 0 {
+		return
+	}
+	t.entries[len(t.entries)-1].ToolCalls = make([]ToolCall, len(toolCalls))
+	copy(t.entries[len(t.entries)-1].ToolCalls, toolCalls)
 }
 
 // Entries returns a copy of all recorded token entries.
@@ -1541,8 +1555,32 @@ func StreamWithTools(
 						outputForTracking = strings.Join(toolSummary, " ")
 					}
 					tracker.RecordWithContent(model, roundUsage, time.Since(roundStart).Milliseconds(), true, currentMessages, outputForTracking, "stream_with_tools")
+					if len(toolCallsMap) > 0 {
+						indices := make([]int, 0, len(toolCallsMap))
+						for idx := range toolCallsMap {
+							indices = append(indices, idx)
+						}
+						sort.Ints(indices)
+						tcs := make([]ToolCall, 0, len(indices))
+						for _, idx := range indices {
+							tcs = append(tcs, *toolCallsMap[idx])
+						}
+						tracker.SetLastEntryToolCalls(tcs)
+					}
 				} else {
 					tracker.Record(model, roundUsage, time.Since(roundStart).Milliseconds(), true, "stream_with_tools")
+					if len(toolCallsMap) > 0 {
+						indices := make([]int, 0, len(toolCallsMap))
+						for idx := range toolCallsMap {
+							indices = append(indices, idx)
+						}
+						sort.Ints(indices)
+						tcs := make([]ToolCall, 0, len(indices))
+						for _, idx := range indices {
+							tcs = append(tcs, *toolCallsMap[idx])
+						}
+						tracker.SetLastEntryToolCalls(tcs)
+					}
 				}
 			}
 		}
