@@ -1196,6 +1196,26 @@ func textToOutputChoices(text string) []map[string]interface{} {
 	}
 }
 
+// toolCallsToPostHog converts the backend ToolCall slice into the shape
+// PostHog expects for the $ai_tools_called property on $ai_generation events.
+func toolCallsToPostHog(toolCalls []utils.ToolCall) []map[string]interface{} {
+	result := make([]map[string]interface{}, 0, len(toolCalls))
+	for _, tc := range toolCalls {
+		item := map[string]interface{}{
+			"id": tc.ID,
+		}
+		if tc.Type != "" {
+			item["type"] = tc.Type
+		}
+		if tc.Function != nil {
+			item["name"] = tc.Function.Name
+			item["arguments"] = tc.Function.Arguments
+		}
+		result = append(result, item)
+	}
+	return result
+}
+
 // RecordTokenUsage persists LLM token usage to the DB and sends PostHog
 // $ai_generation (per LLM call) + $ai_trace (grouping) events for the
 // built-in LLM Analytics dashboard.
@@ -1338,6 +1358,9 @@ func (c *Controller) RecordTokenUsage(user *models.User, action, model, provider
 					outputPreview = outputPreview[:1000] + "..."
 				}
 				props.Set("$ai_output", outputPreview)
+			}
+			if len(entry.ToolCalls) > 0 {
+				props.Set("$ai_tools_called", toolCallsToPostHog(entry.ToolCalls))
 			}
 			capture := posthog.Capture{
 				DistinctId: user.ID.String(),
