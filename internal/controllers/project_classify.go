@@ -11,28 +11,19 @@ import (
 
 // classifyProjectType asks a fast LLM to label the user prompt as either
 // "mobile_app_native", "ecommerce", or "app" (with "app" as the default).
-// The mobile keyword fast-path runs first, then the ecommerce keyword fast-path,
-// then the LLM distinguishes "ecommerce" vs "app" for remaining prompts.
+// The mobile keyword fast-path runs first (cheap and reliable), then the LLM
+// classifies everything else. Keyword fallback only runs if the LLM call fails.
 //
 // The optional `user` is purely for PostHog attribution — the call runs before
 // CreateAppProject persists anything, so credit deduction is handled by the
 // caller after the project lands. Pass nil to skip the trace.
 func (c *Controller) classifyProjectType(ctx context.Context, prompt string, user *models.User) string {
-	// Fast path: mobile keyword classifier (added in P0.1 T15)
+	// Fast path: mobile keyword classifier — cheap and reliable for native mobile
+	// signals (iOS, Android, React Native, Expo). The LLM handles everything else.
 	if looksLikeMobileNative(prompt) {
 		return models.ProjectTypeMobileAppNative
 	}
 
-	// Second fast path: keyword-based ecommerce detection. Runs before the LLM
-	// so we don't burn a model call on obvious store prompts, and again after
-	// the LLM as a safety net when the cheap classifier misses implicit language.
-	if looksLikeEcommerce(prompt) {
-		return models.ProjectTypeEcommerce
-	}
-
-	// (Existing LLM-based classifier code follows — DO NOT remove it. The mobile
-	// fast-path runs first, but the LLM still distinguishes "ecommerce" vs "app"
-	// for non-mobile prompts.)
 	provider := c.llmProviderForUser(user)
 	// Use a fast/cheap model for classification
 	model := provider.FastModel()
@@ -46,23 +37,33 @@ func (c *Controller) classifyProjectType(ctx context.Context, prompt string, use
 	}
 	ctx = utils.WithTokenTracker(ctx, tracker)
 
-	system := `Classify the user's project description into exactly one category.
-Reply with ONLY the category name, nothing else.
+	system := `You are a project-type classifier. Read the user's description and reply with EXACTLY ONE category name from the list below. No explanations, no punctuation, no extra text — just the category word.
 
 Categories:
-- mobile_app_native: Native mobile app (iOS, Android, React Native, Expo). Push notifications, biometric, IAP, deep links, offline.
-- ecommerce: Online store, shop, marketplace with products, cart, checkout, payments
-- app: Any other web application (blog, dashboard, portfolio, SaaS, etc.)
+- ecommerce — The user wants to sell products or services online. This includes stores, shops, marketplaces, boutiques, or any site with products, catalog, cart, checkout, payments, orders, inventory, shipping. Even if the description is short, vague, or in another language, classify as ecommerce when the intent is clearly commercial selling.
+- app — Any web application that is NOT primarily for selling products: blogs, dashboards, portfolios, SaaS tools, landing pages, booking systems, social networks, content sites.
+- mobile_app_native — Native mobile app for iOS or Android (React Native, Expo, Swift, Kotlin). Look for explicit mobile signals: push notifications, biometric auth, in-app purchases, deep links, offline mode, App Store, Play Store.
+
+Classification rules:
+1. Default to ecommerce when the user mentions selling, products, shopping, or store-related activity — even if the wording is casual or in Turkish/another language.
+2. Only choose app when the description is clearly non-commercial (blog, portfolio, dashboard, tool) and has no product-selling intent.
+3. Only choose mobile_app_native when there are explicit mobile-native signals.
 
 Examples:
 - "build me an online clothing store" → ecommerce
 - "kozmetik markamız için e ticaret sitesi" → ecommerce
 - "el kremi satmak istiyorum" → ecommerce
 - "ürün satışı yapacağım" → ecommerce
+- "yemek satışı sitesi" → ecommerce
+- "ayakkabı mağazası" → ecommerce
 - "create a project management dashboard" → app
 - "boutique de vêtements en ligne" → ecommerce
 - "habit tracker mobile app with push notifications" → mobile_app_native
-- "iOS fitness app with HealthKit" → mobile_app_native`
+- "iOS fitness app with HealthKit" → mobile_app_native
+- "satış yapmak istiyorum" → ecommerce
+- "e ticaret" → ecommerce
+- "online mağaza" → ecommerce
+- "ürünlerimi internetten satacağım" → ecommerce`
 
 	result, err := utils.GetTextFromLLM(ctx, model, system, prompt, provider, 256)
 	if user != nil {
@@ -82,19 +83,13 @@ Examples:
 	if result == "ecommerce" || result == "e-commerce" {
 		return models.ProjectTypeEcommerce
 	}
-	// Safety net: if the LLM said "app" but keywords strongly suggest ecommerce,
-	// trust the keywords. This catches cases where the cheap/fast model misses
-	// implicit or non-English store language that the dictionary covers.
-	if looksLikeEcommerce(prompt) {
-		return models.ProjectTypeEcommerce
-	}
 	return models.ProjectTypeApp
 }
 
 // looksLikeEcommerce returns true if the prompt strongly suggests an
-// e-commerce app based on a small keyword/phrase dictionary. Runs as a
-// pre-LLM fast path (saves a model call on obvious store prompts) and as
-// a post-LLM safety net when the cheap classifier mislabels implicit language.
+// e-commerce app based on a small keyword/phrase dictionary.
+// Kept only as a fallback when the LLM call itself fails (network error,
+// provider outage, etc.) so we still have a reasonable default.
 func looksLikeEcommerce(prompt string) bool {
 	lower := strings.ToLower(prompt)
 
