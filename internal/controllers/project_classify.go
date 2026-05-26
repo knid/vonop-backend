@@ -11,9 +11,8 @@ import (
 
 // classifyProjectType asks a fast LLM to label the user prompt as either
 // "mobile_app_native", "ecommerce", or "app" (with "app" as the default).
-// The mobile keyword fast-path runs first; the LLM still distinguishes
-// "ecommerce" vs "app" for non-mobile prompts. Falls back to keyword detection
-// if the LLM call fails.
+// The mobile keyword fast-path runs first, then the ecommerce keyword fast-path,
+// then the LLM distinguishes "ecommerce" vs "app" for remaining prompts.
 //
 // The optional `user` is purely for PostHog attribution — the call runs before
 // CreateAppProject persists anything, so credit deduction is handled by the
@@ -22,6 +21,13 @@ func (c *Controller) classifyProjectType(ctx context.Context, prompt string, use
 	// Fast path: mobile keyword classifier (added in P0.1 T15)
 	if looksLikeMobileNative(prompt) {
 		return models.ProjectTypeMobileAppNative
+	}
+
+	// Second fast path: keyword-based ecommerce detection. Runs before the LLM
+	// so we don't burn a model call on obvious store prompts, and again after
+	// the LLM as a safety net when the cheap classifier misses implicit language.
+	if looksLikeEcommerce(prompt) {
+		return models.ProjectTypeEcommerce
 	}
 
 	// (Existing LLM-based classifier code follows — DO NOT remove it. The mobile
@@ -51,6 +57,8 @@ Categories:
 Examples:
 - "build me an online clothing store" → ecommerce
 - "kozmetik markamız için e ticaret sitesi" → ecommerce
+- "el kremi satmak istiyorum" → ecommerce
+- "ürün satışı yapacağım" → ecommerce
 - "create a project management dashboard" → app
 - "boutique de vêtements en ligne" → ecommerce
 - "habit tracker mobile app with push notifications" → mobile_app_native
@@ -74,12 +82,19 @@ Examples:
 	if result == "ecommerce" || result == "e-commerce" {
 		return models.ProjectTypeEcommerce
 	}
+	// Safety net: if the LLM said "app" but keywords strongly suggest ecommerce,
+	// trust the keywords. This catches cases where the cheap/fast model misses
+	// implicit or non-English store language that the dictionary covers.
+	if looksLikeEcommerce(prompt) {
+		return models.ProjectTypeEcommerce
+	}
 	return models.ProjectTypeApp
 }
 
 // looksLikeEcommerce returns true if the prompt strongly suggests an
-// e-commerce app based on a small keyword/phrase dictionary. Used as the
-// fallback when the LLM classifier fails.
+// e-commerce app based on a small keyword/phrase dictionary. Runs as a
+// pre-LLM fast path (saves a model call on obvious store prompts) and as
+// a post-LLM safety net when the cheap classifier mislabels implicit language.
 func looksLikeEcommerce(prompt string) bool {
 	lower := strings.ToLower(prompt)
 
@@ -89,6 +104,9 @@ func looksLikeEcommerce(prompt string) bool {
 		"shopping cart", "storefront", "product catalog",
 		"product listing", "product page", "checkout page",
 		"add to cart", "buy now", "shopping platform",
+		// Turkish strong signals
+		"e ticaret", "eticaret", "online satış", "online magaza",
+		"mağaza açmak", "ürün satmak", "satış sitesi",
 	}
 	for _, s := range strongSignals {
 		if strings.Contains(lower, s) {
@@ -97,11 +115,15 @@ func looksLikeEcommerce(prompt string) bool {
 	}
 
 	// Combination signals — "store"/"shop" + commerce indicator
-	storeWords := []string{"store", "shop", "marketplace", "boutique"}
+	storeWords := []string{"store", "shop", "marketplace", "boutique", "mağaza", "magaza"}
 	commerceIndicators := []string{
 		"product", "cart", "payment", "price", "order",
 		"checkout", "inventory", "catalog", "shipping",
 		"purchase", "sell", "buy",
+		// Turkish commerce indicators
+		"ürün", "urun", "satmak", "satış", "satis",
+		"sipariş", "siparis", "fiyat", "ödeme", "odeme",
+		"sepet", "kargo", "alışveriş", "alisveris",
 	}
 	for _, sw := range storeWords {
 		if strings.Contains(lower, sw) {
