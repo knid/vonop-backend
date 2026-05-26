@@ -9,6 +9,17 @@ import (
 	"github.com/knid/wemob/internal/utils"
 )
 
+// planningDiscipline is injected as a final system message to reduce tool-round
+// churn. It reminds the model to batch operations and minimize rounds.
+const planningDiscipline = `## Planning Discipline
+Before calling any tool, decide the complete set of files you need to read,
+write, or edit. Batch them into the fewest tool calls possible:
+- read_files (plural) for every file you need to inspect — one call, all paths.
+- Parallel write_file / edit_file calls for independent files in the SAME turn.
+- multi_edit for 2+ changes to the SAME file.
+Do not re-read a file you already saw this run unless the user explicitly asks
+for a refresh. Do not narrate your plan at length — act with tools immediately.`
+
 // mobileConfigGetter abstracts GetMobileAppConfig so context.go can be tested
 // without a real *database.Database. *database.Database satisfies this interface.
 type mobileConfigGetter interface {
@@ -51,6 +62,7 @@ func BuildSystemMessages(project *models.AppProject, deps *RunDependencies, atta
 	if manifest := AttachmentsAddendum(attachmentsPool); manifest != "" {
 		msgs = append(msgs, utils.Message{Role: "system", Content: manifest})
 	}
+	msgs = append(msgs, utils.Message{Role: "system", Content: planningDiscipline})
 	return msgs
 }
 
