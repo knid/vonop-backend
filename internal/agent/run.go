@@ -262,19 +262,32 @@ func Run(
 		creditCheck = deps.CreditChecker(tracker)
 	}
 
-	// Resolve the tool-round budget from remote config so it can be tuned
-	// without a redeploy. Initial generation (draft) uses AIGenerationMaxRounds;
-	// chat edits use AIBuilderToolMaxRounds. Falls back to defaultMaxTurns when RC
-	// is unavailable or the flag returns a non-positive value.
+	// Resolve the tool-round budget and nudge/strip thresholds from remote
+	// config so they can be tuned without a redeploy. Draft (new project) uses
+	// the "generation" flags; chat edits use the "builder" flags.
 	maxTurns := defaultMaxTurns
+	nudgeAfter := 3
+	stripAfter := 5
 	if deps.RemoteConfig != nil {
 		if project.Status == "draft" {
 			if rcTurns := deps.RemoteConfig.GetInt(remoteconfig.AIGenerationMaxRounds, remoteconfig.Global); rcTurns > 0 {
 				maxTurns = rcTurns
 			}
+			if rcNudge := deps.RemoteConfig.GetInt(remoteconfig.AIGenerationNudgeAfter, remoteconfig.Global); rcNudge > 0 {
+				nudgeAfter = rcNudge
+			}
+			if rcStrip := deps.RemoteConfig.GetInt(remoteconfig.AIGenerationStripAfter, remoteconfig.Global); rcStrip > 0 {
+				stripAfter = rcStrip
+			}
 		} else {
 			if rcTurns := deps.RemoteConfig.GetInt(remoteconfig.AIBuilderToolMaxRounds, remoteconfig.Global); rcTurns > 0 {
 				maxTurns = rcTurns
+			}
+			if rcNudge := deps.RemoteConfig.GetInt(remoteconfig.AIBuilderToolNudgeAfter, remoteconfig.Global); rcNudge > 0 {
+				nudgeAfter = rcNudge
+			}
+			if rcStrip := deps.RemoteConfig.GetInt(remoteconfig.AIBuilderToolStripAfter, remoteconfig.Global); rcStrip > 0 {
+				stripAfter = rcStrip
 			}
 		}
 	}
@@ -471,8 +484,8 @@ func Run(
 			// max keeps the continuation dance (finish_reason=length → send
 			// "continue") from firing in all but pathological runs.
 			MaxTokens:      64000,
-			NudgeAfter:     3,
-			StripAfter:     5,
+			NudgeAfter:     nudgeAfter,
+			StripAfter:     stripAfter,
 			// Moonshot K2.6 prompt_cache_key: stable per-project so the system
 			// prompt is cached across runs. Only set for Moonshot — other
 			// providers may reject unknown fields.

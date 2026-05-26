@@ -74,6 +74,14 @@ var AIGenerationMaxRounds = Key{Flag: "rc-ai-generation-max-rounds", Fallback: 8
 var AIMaxTokensPerRun = Key{Flag: "rc-ai-max-tokens-per-run", Fallback: 500000}
 var AIMoonshotThinkingEnabled = Key{Flag: "rc-ai-moonshot-thinking-enabled", Fallback: true}
 
+// Nudge/Strip thresholds per project type. Draft (new project) gets more lenient
+// defaults because scaffolding from scratch legitimately needs more consecutive
+// tool rounds than targeted chat edits.
+var AIGenerationNudgeAfter = Key{Flag: "rc-ai-generation-nudge-after", Fallback: 5}
+var AIGenerationStripAfter = Key{Flag: "rc-ai-generation-strip-after", Fallback: 8}
+var AIBuilderToolNudgeAfter = Key{Flag: "rc-ai-builder-tool-nudge-after", Fallback: 3}
+var AIBuilderToolStripAfter = Key{Flag: "rc-ai-builder-tool-strip-after", Fallback: 5}
+
 // --- Category 4: AI Gateway ---
 
 var GatewayModelsFree = Key{Flag: "rc-gateway-models-free", Fallback: "gpt-4.1-mini,claude-haiku-4-5"}
