@@ -106,7 +106,6 @@ func (r *Registry) Execute(ctx context.Context, rc *RunContext, name string, inp
 // the agent runs without web search for that project.
 func BuildRegistryFor(project *models.AppProject, deps *RunDependencies, model string) *Registry {
 	r := NewRegistry()
-	r.Register(ReadFileTool{})
 	r.Register(ReadFilesTool{})
 	r.Register(ListFilesTool{})
 	r.Register(GrepTool{})

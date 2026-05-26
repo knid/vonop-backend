@@ -724,7 +724,7 @@ manually. NEVER import API_URL — always go through apiFetch.
 ## Repository layout — what's already there
 Every mobile_app_native project is scaffolded at creation time with a
 MINIMAL Expo SDK 54 baseline under mobile/. You should ALWAYS use
-read_file or list_files BEFORE writing new code so you don't duplicate
+read_files or list_files BEFORE writing new code so you don't duplicate
 existing scaffolding. The minimal baseline includes:
 
 - mobile/package.json — Expo + NativeWind + react-native-reusables baseline.
@@ -744,7 +744,7 @@ existing scaffolding. The minimal baseline includes:
 ## Adding Features
 The template is INTENTIONALLY minimal. When the user asks for a feature that requires a package not in the template:
 
-1. Check if the package is already in mobile/package.json using read_file
+1. Check if the package is already in mobile/package.json using read_files
 2. If NOT present, add it via edit_file in the SAME turn as your import
 3. If the package requires an Expo plugin, add it to mobile/app.json plugins array
 4. Pin version ranges consistent with other entries (~x.y.z for expo-*, ^x.y.z for others)
@@ -2777,11 +2777,11 @@ tool. You will be aborted if you:
 Every piece of code MUST land inside a write_file or edit_file tool call.
 
 ## Tool preference
-- grep BEFORE read_file when locating a symbol or pattern.
+- grep BEFORE read_files when locating a symbol or pattern.
 - multi_edit for 2+ changes to the same file.
 - edit_file for a single targeted change.
 - write_file only for new files or complete rewrites.
-- read_file before edit_file if you haven't seen the file this run.
+- read_files before edit_file if you haven't seen the file this run.
 - list_files with a glob to refresh structure. A FILE TREE block rides
   with the user's message at the start of each turn — read it for the
   current state. After write_file / edit_file, your tool result is the

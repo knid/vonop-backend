@@ -198,7 +198,7 @@ type ReadFilesTool struct{}
 
 func (ReadFilesTool) Name() string { return "read_files" }
 func (ReadFilesTool) Description() string {
-	return "Read multiple files in one call. Pass an array of project-relative paths. Returns each file's content delimited by '===== <path> =====' headers, or an error line for paths that fail. Strongly prefer this over multiple sequential read_file calls when you need to inspect ≥2 files — same semantics, one round-trip."
+	return "Read one or more files in a single call. Pass an array of project-relative paths (even a single path). Returns each file's content delimited by '===== <path> =====' headers, or an error line for paths that fail. Always use this instead of individual file reads — same semantics, one round-trip."
 }
 func (ReadFilesTool) Schema() map[string]any {
 	return map[string]any{
@@ -287,7 +287,7 @@ func (ListFilesTool) Execute(ctx context.Context, rc *RunContext, input json.Raw
 	matches := rc.FileMap.Match(args.Glob)
 	// Drop platform-managed files (.env.local, Dockerfile, next.config.mjs) so
 	// the agent doesn't list or suggest editing them. They remain readable via
-	// read_file if the agent explicitly requests one.
+	// read_files if the agent explicitly requests one.
 	var visible []string
 	for _, p := range matches {
 		if utils.IsHiddenEditorFile(p) {
@@ -477,7 +477,7 @@ func (EditFileTool) Execute(ctx context.Context, rc *RunContext, input json.RawM
 	count := strings.Count(content, args.OldString)
 	switch count {
 	case 0:
-		return fmt.Sprintf("old_string not found in %s — the file content may have drifted. call read_file to resync and retry", path), true, nil
+		return fmt.Sprintf("old_string not found in %s — the file content may have drifted. call read_files to resync and retry", path), true, nil
 	case 1:
 		// ok
 	default:
@@ -690,7 +690,7 @@ func (MultiEditTool) Execute(ctx context.Context, rc *RunContext, input json.Raw
 		count := strings.Count(working, e.OldString)
 		switch count {
 		case 0:
-			return fmt.Sprintf("edit %d: old_string not found — earlier edits may have mutated this region. call read_file to resync and retry", i+1), true, nil
+			return fmt.Sprintf("edit %d: old_string not found — earlier edits may have mutated this region. call read_files to resync and retry", i+1), true, nil
 		case 1:
 			// ok
 		default:
