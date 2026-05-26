@@ -793,7 +793,66 @@ func convertHistory(history []models.AppChatMessage) []utils.Message {
 		if m.Role == "user" {
 			content, _, _ = ExpandSlashCommand(content)
 			content = "<user_message>" + escapeUntrustedTag(content, "user_message") + "</user_message>"
+			out = append(out, utils.Message{Role: m.Role, Content: content})
+			continue
 		}
+
+		if m.Role == "assistant" {
+			var parts []models.ChatMessagePart
+			if len(m.Parts) > 0 && string(m.Parts) != "[]" {
+				_ = json.Unmarshal(m.Parts, &parts)
+			}
+
+			// Fallback for legacy rows without Parts
+			if len(parts) == 0 {
+				out = append(out, utils.Message{Role: "assistant", Content: content})
+				continue
+			}
+
+			var pendingText string
+			var pendingToolCalls []utils.ToolCall
+			var pendingToolResults []utils.Message
+
+			flush := func() {
+				if pendingText == "" && len(pendingToolCalls) == 0 {
+					return
+				}
+				out = append(out, utils.Message{
+					Role:      "assistant",
+					Content:   pendingText,
+					ToolCalls: pendingToolCalls,
+				})
+				out = append(out, pendingToolResults...)
+				pendingText = ""
+				pendingToolCalls = nil
+				pendingToolResults = nil
+			}
+
+			for _, p := range parts {
+				if p.Type == "text" {
+					flush()
+					pendingText = p.Text
+				} else if p.Type == "tool_call" {
+					pendingToolCalls = append(pendingToolCalls, utils.ToolCall{
+						ID:   p.ToolCallID,
+						Type: "function",
+						Function: &utils.FunctionCall{
+							Name:      p.Name,
+							Arguments: string(p.Input),
+						},
+					})
+					pendingToolResults = append(pendingToolResults, utils.Message{
+						Role:       "tool",
+						ToolCallID: p.ToolCallID,
+						Name:       p.Name,
+						Content:    p.Result,
+					})
+				}
+			}
+			flush()
+			continue
+		}
+
 		out = append(out, utils.Message{Role: m.Role, Content: content})
 	}
 	return out
