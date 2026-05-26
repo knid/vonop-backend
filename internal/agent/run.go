@@ -370,6 +370,7 @@ func Run(
 	executor := func(name string, argsJSON string) (string, error) {
 		toolStart := time.Now()
 		toolCallID := uuid.NewString()
+		tracker.RecordToolUsed(name)
 		// Push a placeholder tool_call part — the result/duration/is_error
 		// fields land in the same struct after registry.Execute returns.
 		// Capturing the index up front lets us mutate the same slot rather
