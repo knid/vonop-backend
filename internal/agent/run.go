@@ -1065,7 +1065,7 @@ func creditsBilled(deps *RunDependencies, tracker *utils.TokenTracker) int {
 	}
 	total := 0
 	for _, e := range tracker.Entries() {
-		total += models.TokensToCreditsWithConfig(e.PromptTokens, e.CompletionTokens, e.CacheReadInputTokens, tpc, om, crd)
+		total += models.TokensToCreditsWithConfig(e.PromptTokens, e.CompletionTokens, e.CacheReadInputTokens, tpc, om, crd, e.CacheReadInclusive)
 	}
 	return total
 }

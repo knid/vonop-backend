@@ -86,7 +86,12 @@ const AICreditsCacheReadDivisor = 10
 // TokensToCreditsWithConfig is like TokensToCredits but uses caller-provided
 // conversion parameters from remote config. cacheReadDivisor falls back to the
 // hardcoded default if non-positive.
-func TokensToCreditsWithConfig(promptTokens, completionTokens, cacheReadTokens, tokensPerCredit, outputMultiplier, cacheReadDivisor int) int {
+//
+// cacheReadInclusive should be true when the provider (e.g. DeepSeek) includes
+// cache-read tokens inside prompt_tokens. In that case the cache-read tokens
+// are already counted at full weight in promptTokens, so we subtract them
+// before adding back their discounted weight to avoid double-counting.
+func TokensToCreditsWithConfig(promptTokens, completionTokens, cacheReadTokens, tokensPerCredit, outputMultiplier, cacheReadDivisor int, cacheReadInclusive ...bool) int {
 	if tokensPerCredit <= 0 {
 		return 0
 	}
@@ -94,6 +99,11 @@ func TokensToCreditsWithConfig(promptTokens, completionTokens, cacheReadTokens, 
 		cacheReadDivisor = AICreditsCacheReadDivisor
 	}
 	weighted := promptTokens + cacheReadTokens/cacheReadDivisor + (completionTokens * outputMultiplier)
+	if len(cacheReadInclusive) > 0 && cacheReadInclusive[0] {
+		// cacheReadTokens are already in promptTokens at 1× weight;
+		// replace that with the discounted weight.
+		weighted = promptTokens - cacheReadTokens + cacheReadTokens/cacheReadDivisor + (completionTokens * outputMultiplier)
+	}
 	if weighted <= 0 {
 		return 0
 	}

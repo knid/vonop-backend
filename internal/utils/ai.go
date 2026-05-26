@@ -260,6 +260,9 @@ type TokenEntry struct {
 	TotalTokens              int
 	CacheCreationInputTokens int
 	CacheReadInputTokens     int
+	// CacheReadInclusive is true when the provider (e.g. DeepSeek) includes
+	// cache-read tokens inside PromptTokens. Anthropic reports them separately.
+	CacheReadInclusive       bool
 	LatencyMs                int64
 	IsStreaming              bool
 	InputMessages            []Message // optional: messages sent to LLM (only when TrackContent is set)
@@ -285,6 +288,7 @@ var modelCosts = map[string][2]float64{
 	"kimi-k2.6":                 {1.0, 4.0},
 	"kimi-k2.5":                 {2.0, 8.0},
 	// OpenRouter models
+	"deepseek-v4-pro":           {0.435, 0.87},
 	"deepseek-v4-flash":         {0.1, 0.2},
 	"deepseek-chat":             {0.5, 2.0},
 	"deepseek-reasoner":         {0.5, 2.0},
@@ -294,6 +298,17 @@ var modelCosts = map[string][2]float64{
 	"grok-3-fast-beta":          {5.0, 25.0},
 	"gemini-2.5-flash":          {0.15, 0.6},
 	"gemini-2.5-pro":            {1.25, 10.0},
+}
+
+// cacheReadIsInclusive returns true for providers where cache-read tokens are
+// counted inside prompt_tokens (DeepSeek via OpenRouter). For Anthropic,
+// cache_read_input_tokens are reported separately and are NOT included in
+// prompt_tokens.
+func cacheReadIsInclusive(model string) bool {
+	if idx := strings.LastIndex(model, "/"); idx >= 0 {
+		model = model[idx+1:]
+	}
+	return strings.Contains(model, "deepseek")
 }
 
 // EstimateInputOutputCostUSD returns separate input and output costs for a single LLM call.
@@ -307,7 +322,10 @@ func EstimateInputOutputCostUSD(model string, inputTokens, outputTokens, cacheCr
 		return 0, 0
 	}
 	inputPrice, outputPrice := prices[0], prices[1]
-	regularInput := inputTokens - cacheCreation - cacheRead
+	regularInput := inputTokens - cacheCreation
+	if cacheReadIsInclusive(model) {
+		regularInput -= cacheRead
+	}
 	if regularInput < 0 {
 		regularInput = 0
 	}
@@ -330,9 +348,15 @@ func estimateCostUSD(model string, inputTokens, outputTokens, cacheCreation, cac
 	}
 	inputPrice, outputPrice := prices[0], prices[1]
 	// Cache pricing: creation = 1.25x input, read = 0.1x input, regular input = 1x.
-	// inputTokens here is PromptTokens, which now = regular input + cache creation
-	// (cache reads are NOT included — see AnthropicUsage.ToUsageInfo).
+	// Anthropic: prompt_tokens = regular input + cache creation (cache reads are
+	//   reported separately in cache_read_input_tokens).
+	// DeepSeek:  prompt_tokens = regular input + cache reads (cache reads are
+	//   reported inside prompt_tokens_details.cached_tokens and INCLUDED in
+	//   prompt_tokens). No separate cache creation tokens.
 	regularInput := inputTokens - cacheCreation
+	if cacheReadIsInclusive(model) {
+		regularInput -= cacheRead
+	}
 	if regularInput < 0 {
 		regularInput = 0
 	}
@@ -436,6 +460,7 @@ func (t *TokenTracker) Record(model string, usage UsageInfo, latencyMs int64, is
 		TotalTokens:              usage.TotalTokens,
 		CacheCreationInputTokens: usage.CacheCreationInputTokens,
 		CacheReadInputTokens:     usage.CacheReadInputTokens,
+		CacheReadInclusive:       cacheReadIsInclusive(model),
 		LatencyMs:                latencyMs,
 		IsStreaming:              isStreaming,
 		SpanName:                 name,
@@ -475,6 +500,7 @@ func (t *TokenTracker) RecordWithContent(model string, usage UsageInfo, latencyM
 		TotalTokens:              usage.TotalTokens,
 		CacheCreationInputTokens: usage.CacheCreationInputTokens,
 		CacheReadInputTokens:     usage.CacheReadInputTokens,
+		CacheReadInclusive:       cacheReadIsInclusive(model),
 		LatencyMs:                latencyMs,
 		IsStreaming:              isStreaming,
 		InputMessages:            msgs,
@@ -681,6 +707,33 @@ type UsageInfo struct {
 	Cost float64 `json:"cost,omitempty"`
 }
 
+// UnmarshalJSON parses UsageInfo from the provider response. It handles both
+// the flat Anthropic-style fields (cache_creation_input_tokens,
+// cache_read_input_tokens) and the nested DeepSeek/OpenRouter field
+// prompt_tokens_details.cached_tokens.
+func (u *UsageInfo) UnmarshalJSON(data []byte) error {
+	type Alias UsageInfo
+	var aux struct {
+		*Alias
+		PromptTokensDetails struct {
+			CachedTokens int `json:"cached_tokens"`
+		} `json:"prompt_tokens_details"`
+	}
+	aux.Alias = (*Alias)(u)
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	// DeepSeek via OpenRouter reports cached tokens inside
+	// prompt_tokens_details.cached_tokens. These tokens are INCLUDED in
+	// prompt_tokens (unlike Anthropic where cache_read_input_tokens are
+	// EXCLUDED). Only populate CacheReadInputTokens from the nested field
+	// when the flat Anthropic field is absent.
+	if aux.PromptTokensDetails.CachedTokens > 0 && u.CacheReadInputTokens == 0 {
+		u.CacheReadInputTokens = aux.PromptTokensDetails.CachedTokens
+	}
+	return nil
+}
+
 type ChatResponse struct {
 	Choices []Choice  `json:"choices"`
 	Usage   UsageInfo `json:"usage"`
@@ -697,7 +750,22 @@ func buildLLMRequestBody(req ChatRequest, provider *LLMProvider) ([]byte, error)
 	if err != nil {
 		return nil, err
 	}
-	return json.Marshal(prepared)
+	body, err := json.Marshal(prepared)
+	if err != nil {
+		return nil, err
+	}
+	// OpenRouter: inject usage.include=true so the response carries the
+	// upstream-billed cost in usage.cost. Without this, streaming responses
+	// omit cost and we fall back to catalog math that misses provider
+	// discounts (prompt-cache, routing surcharges, thinking tokens).
+	if provider != nil && provider.IsOpenRouter() {
+		var m map[string]any
+		if err := json.Unmarshal(body, &m); err == nil {
+			m["usage"] = map[string]any{"include": true}
+			body, _ = json.Marshal(m)
+		}
+	}
+	return body, nil
 }
 
 
@@ -1520,6 +1588,7 @@ func StreamWithTools(
 				"prompt_tokens", roundUsage.PromptTokens,
 				"completion_tokens", roundUsage.CompletionTokens,
 				"total_tokens", roundUsage.TotalTokens,
+				"cache_read_tokens", roundUsage.CacheReadInputTokens,
 				"latency_ms", roundLatency,
 				"tool_calls", len(toolCallsMap),
 				"history_msgs", len(currentMessages),
