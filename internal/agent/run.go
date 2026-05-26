@@ -263,12 +263,19 @@ func Run(
 	}
 
 	// Resolve the tool-round budget from remote config so it can be tuned
-	// without a redeploy. Falls back to defaultMaxTurns when RC is unavailable
-	// or the flag returns a non-positive value.
+	// without a redeploy. Initial generation (draft) uses AIGenerationMaxRounds;
+	// chat edits use AIBuilderToolMaxRounds. Falls back to defaultMaxTurns when RC
+	// is unavailable or the flag returns a non-positive value.
 	maxTurns := defaultMaxTurns
 	if deps.RemoteConfig != nil {
-		if rcTurns := deps.RemoteConfig.GetInt(remoteconfig.AIBuilderToolMaxRounds, remoteconfig.Global); rcTurns > 0 {
-			maxTurns = rcTurns
+		if project.Status == "draft" {
+			if rcTurns := deps.RemoteConfig.GetInt(remoteconfig.AIGenerationMaxRounds, remoteconfig.Global); rcTurns > 0 {
+				maxTurns = rcTurns
+			}
+		} else {
+			if rcTurns := deps.RemoteConfig.GetInt(remoteconfig.AIBuilderToolMaxRounds, remoteconfig.Global); rcTurns > 0 {
+				maxTurns = rcTurns
+			}
 		}
 	}
 
@@ -464,8 +471,8 @@ func Run(
 			// max keeps the continuation dance (finish_reason=length → send
 			// "continue") from firing in all but pathological runs.
 			MaxTokens:      64000,
-			NudgeAfter:     50,
-			StripAfter:     -1,
+			NudgeAfter:     3,
+			StripAfter:     5,
 			// Moonshot K2.6 prompt_cache_key: stable per-project so the system
 			// prompt is cached across runs. Only set for Moonshot — other
 			// providers may reject unknown fields.
