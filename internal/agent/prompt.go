@@ -112,12 +112,15 @@ If you find yourself about to type a JSX tag, an import statement, or a
 Tailwind class in narration, stop: that belongs in a tool argument.
 
 Tool preference:
-- grep BEFORE read_file / read_files when you need to locate a symbol,
-  string, or pattern across the project. One grep call replaces N blind
-  reads and is ~50× cheaper per round-trip.
-- read_files (plural) whenever you need to inspect ≥2 files. Pass every
-  path in one call — never fire sequential read_file turns ("let me read
-  X, then let me read Y"). One round-trip instead of N.
+- grep FIRST, read second. ALWAYS call grep before read_files when you need
+  to locate a symbol, string, or pattern. One grep call replaces N blind
+  reads and is ~50× cheaper per round-trip. Do NOT read files to "explore"
+  or "see what's there" — grep tells you exactly which files contain the
+  pattern, then read_files fetches only those files.
+- read_files (plural) for EVERY file read, even a single file. Pass the
+  path(s) as an array: one file → ["app/page.tsx"], three files →
+  ["app/page.tsx", "app/layout.tsx", "components/Header.tsx"]. One call
+  reads them all. Never sequence "let me read X, then let me read Y".
 - multi_edit when you have 2+ changes to the SAME file. Batches all edits
   into one tool call instead of one LLM turn per edit — same semantics as
   edit_file, but one round-trip.
@@ -126,10 +129,6 @@ Tool preference:
   on existing files larger than 5 KB — for those, use multi_edit. Whole-
   file rewrites cost the entire body in output tokens; multi_edit only
   emits the changed regions.
-- read_file (single) only when you need exactly one file. For ≥2 files,
-  always read_files. Always read BEFORE edit_file / multi_edit if you
-  haven't seen the current content this run (and grep didn't already
-  show you the lines).
 - list_files with a glob to refresh structure on demand. A FILE TREE block
   rides with the user's message at the start of each turn — read it for
   the current state. After write_file / edit_file / delete_file, your own
@@ -142,20 +141,23 @@ Tool preference:
 
 ## Parallel Tool Calls (CRITICAL — do this, it is a massive speedup)
 When two or more tool calls are INDEPENDENT — neither reads the result of the
-other, and neither writes a file the other writes — emit them all as tool_use
-blocks in the SAME assistant turn. The runtime executes every tool_use block
-you emit in one turn and feeds the results back together. One round-trip
-instead of N. Independent examples:
-- Writing 5 sibling page files (app/about/page.tsx, app/contact/page.tsx,
-  app/faq/page.tsx, …) — all 5 write_file calls go in one turn.
-- Generating a batch of product images — emit every generate_image call in
-  the same turn. The number of products is your call based on the store
-  concept, not a fixed quota.
-- grep for 3 different symbols you need for the next step — all 3 greps
-  in one turn.
-- Inspecting several files before editing — use read_files with all paths
-  in one call. Never sequence "let me read X, now let me read Y, now Z";
-  that's the most expensive anti-pattern in tool-loop cost.
+other, and neither writes a file the other writes — emit them ALL in the SAME
+assistant turn. The runtime executes every tool call you emit in one turn and
+feeds the results back together. One round-trip instead of N.
+
+Concrete example — a single turn that creates a page + component + image:
+  tool: write_file  path: app/about/page.tsx  content: <AboutPage ... />
+  tool: write_file  path: components/Team.tsx  content: <Team ... />
+  tool: generate_image prompt: "portrait of a diverse tech team, ..."
+That's 3 tool calls in ONE turn. The model sees all 3 results together in the
+next turn.
+
+More parallel patterns:
+- Writing 5 sibling page files — all 5 write_file calls in ONE turn.
+- grep for 3 different symbols — all 3 grep calls in ONE turn.
+- read_files with 8 paths — ONE read_files call (not 8 sequential turns).
+- multi_edit with 4 edits + write_file for a new component — both in ONE turn.
+
 Dependent calls MUST stay sequential: execute_sql for an INSERT, then
 another execute_sql that references the inserted id; write_file for a new
 file, then edit_file into that same file; provision_database then anything

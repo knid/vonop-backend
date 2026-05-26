@@ -453,6 +453,7 @@ func Run(
 		serverToolNames[st.DisplayName] = true
 	}
 
+	toolRoundCount := 0
 	_, llmErr := utils.StreamWithTools(
 		ctx,
 		model,
@@ -492,6 +493,17 @@ func Run(
 					ToolCallID: uuid.NewString(),
 					ToolName:   toolName,
 				})
+			},
+			AfterToolRound: func(allIntercepted bool) string {
+				toolRoundCount++
+				remaining := maxTurns - toolRoundCount
+				if remaining <= 2 {
+					return fmt.Sprintf("URGENT: You have used %d tool rounds and have at most %d total rounds left. Finish your response NOW — no more research.", toolRoundCount, remaining)
+				}
+				if toolRoundCount >= 3 {
+					return fmt.Sprintf("You have used %d tool rounds. Total budget is ~%d rounds. Wrap up research and start writing code.", toolRoundCount, maxTurns)
+				}
+				return ""
 			},
 			ShouldContinue: func() bool {
 				if ctx.Err() != nil {
