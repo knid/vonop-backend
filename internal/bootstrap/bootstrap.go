@@ -75,11 +75,13 @@ func BootstrapController() (*controllers.Controller, asynq.RedisClientOpt) {
 	}
 
 	var sm secret.SecretManager
-	sm = secret.NewInfisicalSecretManager(
+	ism := secret.NewInfisicalSecretManager(
 		infisicalClient.(*infisical.InfisicalClient),
 		os.Getenv("INFISICAL_PROJECT_ID"),
 		os.Getenv("ENVIRONMENT"),
 	)
+	ism.WarmCache()
+	sm = ism
 
 	betterstackHandler := slogbetterstack.Option{
 		Token:    sm.GetSecret("BETTERSTACK_TOKEN"),
