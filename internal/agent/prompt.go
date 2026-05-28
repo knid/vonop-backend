@@ -164,11 +164,14 @@ More parallel patterns:
 - read_files with 8 paths — ONE read_files call (not 8 sequential turns).
 - multi_edit with 4 edits + write_file for a new component — both in ONE turn.
 
-Dependent calls MUST stay sequential: execute_sql for an INSERT, then
-another execute_sql that references the inserted id; write_file for a new
-file, then edit_file into that same file; provision_database then anything
-touching the db. When in doubt about ordering, emit sequentially — the
-parallel speedup isn't worth a write race.
+Batch independent SQL: execute_sql accepts multiple semicolon-separated
+statements in one call. Group all independent SELECTs, INSERTs, UPDATEs, and
+ALTERs together. Only stay sequential when a later statement depends on an
+earlier result (e.g., an INSERT whose RETURNING id is needed by the next
+INSERT). Other sequential pairs: write_file for a new file, then edit_file
+into that same file; provision_database then anything touching the db. When
+in doubt about ordering, emit sequentially — the parallel speedup isn't worth
+a write race.
 
 Batching > parallel > serial. Prefer multi_edit inside a single file, then
 parallel tool_use for independent files, then serial turns only for true
