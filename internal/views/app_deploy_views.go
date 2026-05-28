@@ -432,6 +432,7 @@ func (v *HttpViews) BuildAppExpo(w http.ResponseWriter, r *http.Request) {
 	if triggerErr != nil && (build == nil || len(tasks) == 0) {
 		var platformErr *controllers.BuildPlatformNotAllowedError
 		var capErr *controllers.MemberCreditCapError
+		var appleSigningErr *controllers.AppleSigningPreconditionError
 		switch {
 		case errors.As(triggerErr, &platformErr):
 			utils.JSONError(w, constants.ErrFeatureNotAvailable, platformErr.Error(), http.StatusForbidden, map[string]any{
@@ -452,6 +453,8 @@ func (v *HttpViews) BuildAppExpo(w http.ResponseWriter, r *http.Request) {
 			})
 		case errors.Is(triggerErr, controllers.ErrOrgInDunning):
 			utils.JSONErrorCode(w, constants.ErrOrgInDunning, http.StatusPaymentRequired, nil)
+		case errors.As(triggerErr, &appleSigningErr):
+			utils.JSONError(w, constants.ErrValidationBody, appleSigningErr.Message, http.StatusBadRequest, nil)
 		default:
 			utils.JSONInternalError(w, triggerErr)
 		}
