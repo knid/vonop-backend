@@ -36,6 +36,16 @@ func (e *BuildPlatformNotAllowedError) Error() string {
 	return fmt.Sprintf("your subscription does not allow %s builds", label)
 }
 
+// AppleSigningPreconditionError signals that an iOS build can't start because
+// Apple signing setup is missing, invalid, or expired.
+type AppleSigningPreconditionError struct {
+	Message string
+}
+
+func (e *AppleSigningPreconditionError) Error() string {
+	return e.Message
+}
+
 // BuildExpoMobile triggers a new Expo build for a mobile_app_native project.
 //
 // Flow:
@@ -115,14 +125,20 @@ func (c *Controller) BuildExpoMobile(ctx context.Context, project *models.AppPro
 	//     downtime) → cert+profile can't be ensured.
 	if wantIOS {
 		if project.DefaultAppleConnectionID == nil {
-			return nil, nil, fmt.Errorf("iOS builds require an Apple connection on this app — add an App Store Connect API key in Credentials and set it as the default for this app")
+			return nil, nil, &AppleSigningPreconditionError{
+				Message: "iOS builds require an Apple connection on this app — add an App Store Connect API key in Credentials and set it as the default for this app",
+			}
 		}
 		conn, err := c.DB.GetAppleConnectionById(project.DefaultAppleConnectionID.String())
 		if err != nil || conn == nil {
-			return nil, nil, fmt.Errorf("iOS builds: Apple connection lookup failed — verify the linked App Store Connect key still exists: %w", err)
+			return nil, nil, &AppleSigningPreconditionError{
+				Message: fmt.Sprintf("iOS builds: Apple connection lookup failed — verify the linked App Store Connect key still exists: %v", err),
+			}
 		}
 		if _, err := c.EnsureAppleSigningAssets(ctx, project, conn); err != nil {
-			return nil, nil, fmt.Errorf("iOS builds: could not mint signing cert + profile via Apple — verify your ASC API key is still valid: %w", err)
+			return nil, nil, &AppleSigningPreconditionError{
+				Message: fmt.Sprintf("iOS builds: could not mint signing cert + profile via Apple — verify your ASC API key is still valid: %v", err),
+			}
 		}
 	}
 	bundleID := bundleIDForProject(project, opts.BundleIDOverride)
