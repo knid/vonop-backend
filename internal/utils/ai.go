@@ -1284,8 +1284,10 @@ func StreamWithTools(
 		}
 
 		// Trim message history if it exceeds the max message cap.
+		// We must not split a tool round — a tool message must always follow its
+		// assistant message, and all tool messages for an assistant must be contiguous.
+		// Anthropic rejects requests where a tool_result lacks a preceding tool_use.
 		if len(opts) > 0 && opts[0].MaxMessages > 0 && len(currentMessages) > opts[0].MaxMessages {
-			dropped := 0
 			// Keep all leading system messages; drop oldest non-system messages.
 			systemCount := 0
 			for i := range currentMessages {
@@ -1295,13 +1297,25 @@ func StreamWithTools(
 					break
 				}
 			}
-			target := opts[0].MaxMessages
-			if systemCount >= target {
-				target = systemCount + 1
+			// How many non-system messages we can keep.
+			nonSystemKeep := opts[0].MaxMessages - systemCount
+			if nonSystemKeep < 0 {
+				nonSystemKeep = 0
 			}
-			if len(currentMessages) > target {
-				dropped = len(currentMessages) - target
-				currentMessages = append(currentMessages[:systemCount], currentMessages[systemCount+dropped:]...)
+			// Ideal start index for non-system messages.
+			keepFrom := len(currentMessages) - nonSystemKeep
+			if keepFrom < systemCount {
+				keepFrom = systemCount
+			}
+			// Never start the kept suffix on a tool message — that would orphan it
+			// from its assistant (Anthropic: "tool_result must have a corresponding
+			// tool_use in the previous message").
+			for keepFrom < len(currentMessages) && currentMessages[keepFrom].Role == "tool" {
+				keepFrom++
+			}
+			if keepFrom > systemCount {
+				dropped := keepFrom - systemCount
+				currentMessages = append(currentMessages[:systemCount], currentMessages[keepFrom:]...)
 				slog.Warn("StreamWithTools trimmed message history", "dropped", dropped, "remaining", len(currentMessages), "max", opts[0].MaxMessages)
 			}
 		}
