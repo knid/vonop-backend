@@ -28,9 +28,10 @@ type mobileConfigGetter interface {
 
 // BuildSystemMessages returns the cached system messages for a run:
 //
-//  1. Base prompt          (BasePromptWeb or BasePromptMobileNative — by project type)
-//  2. Variant addendum     (stable across this project's runs, if applicable)
-//  3. Project assets       (per-turn — asset uploads/deletes invalidate this block only)
+//  1. Shared base prompt   (BasePromptWebShared or BasePromptMobileNativeShared — by project type)
+//  2. Mode-specific block  (FirstGen or Chat addendum, depending on run mode)
+//  3. Variant addendum     (stable across this project's runs, if applicable)
+//  4. Project assets       (per-turn — asset uploads/deletes invalidate this block only)
 //
 // The file tree is intentionally NOT a system block. It now rides along with
 // the user turn (see BuildFileTreeUserPrefix), because every write_file used
@@ -45,17 +46,27 @@ type mobileConfigGetter interface {
 // deps is passed in so the AI addendum can render only the chat models the
 // current user's subscription tier can actually reach; passing nil degrades
 // to a conservative generic block.
-func BuildSystemMessages(project *models.AppProject, deps *RunDependencies, attachmentsPool []models.AppAsset) []utils.Message {
-	base := BasePromptWeb
+func BuildSystemMessages(project *models.AppProject, deps *RunDependencies, attachmentsPool []models.AppAsset, isFirstGen bool) []utils.Message {
+	base := BasePromptWebShared
+	modeAddendum := BasePromptWebChat
 	if project != nil {
 		switch project.ProjectType {
 		case models.ProjectTypeMobileAppNative:
-			base = BasePromptMobileNative
+			base = BasePromptMobileNativeShared
+			modeAddendum = BasePromptMobileNativeChat
+		}
+	}
+	if isFirstGen {
+		if project != nil && project.ProjectType == models.ProjectTypeMobileAppNative {
+			modeAddendum = BasePromptMobileNativeFirstGen
+		} else {
+			modeAddendum = BasePromptWebFirstGen
 		}
 	}
 	addendum := buildAddendum(project, deps)
 
 	msgs := []utils.Message{{Role: "system", Content: base}}
+	msgs = append(msgs, utils.Message{Role: "system", Content: modeAddendum})
 	if addendum != "" {
 		msgs = append(msgs, utils.Message{Role: "system", Content: addendum})
 	}

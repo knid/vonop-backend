@@ -13,7 +13,7 @@ func TestBuildSystemMessages_MobileAppNativeUsesExpoPrompt(t *testing.T) {
 		ProjectType: models.ProjectTypeMobileAppNative,
 		Settings:    map[string]any{},
 	}
-	msgs := BuildSystemMessages(project, nil, nil)
+	msgs := BuildSystemMessages(project, nil, nil, false)
 	joined := concatMessages(msgs)
 
 	if !strings.Contains(joined, "Expo Router") {
@@ -32,7 +32,7 @@ func TestBuildSystemMessages_AppTypeUsesWebPrompt(t *testing.T) {
 		ProjectType: models.ProjectTypeApp,
 		Settings:    map[string]any{},
 	}
-	msgs := BuildSystemMessages(project, nil, nil)
+	msgs := BuildSystemMessages(project, nil, nil, false)
 	joined := concatMessages(msgs)
 
 	if strings.Contains(joined, "Expo Router") {
@@ -56,7 +56,7 @@ func TestBuildSystemMessages_MobileNativeIncludesConfigAddendum(t *testing.T) {
 		Permissions:         []string{"camera", "location"},
 	}
 	deps := newDepsWithMobileConfig(t, project, cfg)
-	msgs := BuildSystemMessages(project, deps, nil)
+	msgs := BuildSystemMessages(project, deps, nil, false)
 	joined := concatMessages(msgs)
 
 	if !strings.Contains(joined, "camera.takePhoto") {
@@ -82,7 +82,7 @@ func TestBuildSystemMessages_MobileNativeNoConfigSkipsAddendum(t *testing.T) {
 		Settings:    map[string]any{},
 	}
 	deps := newDepsWithMobileConfig(t, project, nil) // explicitly no config
-	msgs := BuildSystemMessages(project, deps, nil)
+	msgs := BuildSystemMessages(project, deps, nil, false)
 	joined := concatMessages(msgs)
 
 	if strings.Contains(joined, "Current MobileAppConfig") {
@@ -117,7 +117,7 @@ func TestBuildSystemMessages_NativeWithDatabaseUsesNativeAddendum(t *testing.T) 
 		ProjectType: models.ProjectTypeMobileAppNative,
 		Settings:    map[string]any{"has_database": true},
 	}
-	msgs := BuildSystemMessages(project, nil, nil)
+	msgs := BuildSystemMessages(project, nil, nil, false)
 	joined := concatMessages(msgs)
 
 	if !strings.Contains(joined, "DATABASE ADDENDUM (native + backend)") {
@@ -133,7 +133,7 @@ func TestBuildSystemMessages_WebWithDatabaseUsesGenericAddendum(t *testing.T) {
 		ProjectType: models.ProjectTypeApp,
 		Settings:    map[string]any{"has_database": true},
 	}
-	msgs := BuildSystemMessages(project, nil, nil)
+	msgs := BuildSystemMessages(project, nil, nil, false)
 	joined := concatMessages(msgs)
 
 	if strings.Contains(joined, "DATABASE ADDENDUM (native + backend)") {
@@ -146,7 +146,7 @@ func TestBuildSystemMessages_LocalDatabaseAddendumOnFlag(t *testing.T) {
 		ProjectType: models.ProjectTypeMobileAppNative,
 		Settings:    map[string]any{"has_local_database": true},
 	}
-	msgs := BuildSystemMessages(project, nil, nil)
+	msgs := BuildSystemMessages(project, nil, nil, false)
 	joined := concatMessages(msgs)
 
 	if !strings.Contains(joined, "LOCAL DATABASE ADDENDUM") {
@@ -159,7 +159,7 @@ func TestBuildSystemMessages_LocalDatabaseAddendumNotInjectedWithoutFlag(t *test
 		ProjectType: models.ProjectTypeMobileAppNative,
 		Settings:    map[string]any{},
 	}
-	msgs := BuildSystemMessages(project, nil, nil)
+	msgs := BuildSystemMessages(project, nil, nil, false)
 	joined := concatMessages(msgs)
 
 	if strings.Contains(joined, "LOCAL DATABASE ADDENDUM") {
@@ -172,7 +172,7 @@ func TestBuildSystemMessages_BothAddendaForSyncedNative(t *testing.T) {
 		ProjectType: models.ProjectTypeMobileAppNative,
 		Settings:    map[string]any{"has_database": true, "has_local_database": true},
 	}
-	msgs := BuildSystemMessages(project, nil, nil)
+	msgs := BuildSystemMessages(project, nil, nil, false)
 	joined := concatMessages(msgs)
 
 	if !strings.Contains(joined, "DATABASE ADDENDUM (native + backend)") {
@@ -201,7 +201,7 @@ func TestBuildSystemMessages_FileTreeNotInSystemBlocks(t *testing.T) {
 			Settings:    map[string]any{},
 		}
 
-		msgs := BuildSystemMessages(project, nil, nil)
+		msgs := BuildSystemMessages(project, nil, nil, false)
 		joined := concatMessages(msgs)
 
 		if strings.Contains(joined, fileTreeSentinel) {
@@ -225,6 +225,73 @@ func TestBuildFileTreeUserPrefix_RendersTree(t *testing.T) {
 	}
 	if !strings.Contains(prefix, "app/layout.tsx") || !strings.Contains(prefix, "app/page.tsx") {
 		t.Error("expected file paths in user-prefix output")
+	}
+}
+
+func TestBuildSystemMessages_FirstGenWebIncludesWorkOrders(t *testing.T) {
+	project := &models.AppProject{
+		ProjectType: models.ProjectTypeApp,
+		Settings:    map[string]any{},
+	}
+	msgs := BuildSystemMessages(project, nil, nil, true)
+	joined := concatMessages(msgs)
+
+	if !strings.Contains(joined, "Layout & Home First") {
+		t.Error("expected first-gen web to include Layout & Home First work order")
+	}
+	if !strings.Contains(joined, "UI First, Wiring Second") {
+		t.Error("expected first-gen web to include UI First work order")
+	}
+	if strings.Contains(joined, "EDITING DISCIPLINE") {
+		t.Error("first-gen web must NOT include chat editing discipline")
+	}
+}
+
+func TestBuildSystemMessages_ChatWebIncludesEditingDiscipline(t *testing.T) {
+	project := &models.AppProject{
+		ProjectType: models.ProjectTypeApp,
+		Settings:    map[string]any{},
+	}
+	msgs := BuildSystemMessages(project, nil, nil, false)
+	joined := concatMessages(msgs)
+
+	if strings.Contains(joined, "Layout & Home First") {
+		t.Error("chat web must NOT include Layout & Home First work order")
+	}
+	if !strings.Contains(joined, "EDITING DISCIPLINE") {
+		t.Error("expected chat web to include editing discipline")
+	}
+}
+
+func TestBuildSystemMessages_FirstGenMobileIncludesWorkOrders(t *testing.T) {
+	project := &models.AppProject{
+		ProjectType: models.ProjectTypeMobileAppNative,
+		Settings:    map[string]any{},
+	}
+	msgs := BuildSystemMessages(project, nil, nil, true)
+	joined := concatMessages(msgs)
+
+	if !strings.Contains(joined, "home screen first") {
+		t.Error("expected first-gen mobile to include home screen first work order")
+	}
+	if strings.Contains(joined, "EDITING DISCIPLINE") {
+		t.Error("first-gen mobile must NOT include chat editing discipline")
+	}
+}
+
+func TestBuildSystemMessages_ChatMobileIncludesEditingDiscipline(t *testing.T) {
+	project := &models.AppProject{
+		ProjectType: models.ProjectTypeMobileAppNative,
+		Settings:    map[string]any{},
+	}
+	msgs := BuildSystemMessages(project, nil, nil, false)
+	joined := concatMessages(msgs)
+
+	if strings.Contains(joined, "home screen first") {
+		t.Error("chat mobile must NOT include home screen first work order")
+	}
+	if !strings.Contains(joined, "EDITING DISCIPLINE") {
+		t.Error("expected chat mobile to include editing discipline")
 	}
 }
 
