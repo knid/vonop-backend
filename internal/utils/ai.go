@@ -1306,6 +1306,28 @@ func StreamWithTools(
 			}
 		}
 
+		// Moonshot (and occasionally other providers) omit tool_call.id in
+		// streaming deltas. Without a matching id on the assistant message's
+		// tool_calls, the provider rejects the next round with
+		// "tool_call_id is not found". Backfill empty ids in the entire
+		// history so in-flight runs survive the round transition.
+		for i := 0; i < len(currentMessages); i++ {
+			if currentMessages[i].Role != "assistant" || len(currentMessages[i].ToolCalls) == 0 {
+				continue
+			}
+			for j := range currentMessages[i].ToolCalls {
+				if currentMessages[i].ToolCalls[j].ID == "" {
+					currentMessages[i].ToolCalls[j].ID = fmt.Sprintf("call_synth_%d_%d", i, j)
+				}
+			}
+			// The tool results for this assistant message follow immediately.
+			for j := 0; j < len(currentMessages[i].ToolCalls) && i+1+j < len(currentMessages) && currentMessages[i+1+j].Role == "tool"; j++ {
+				if currentMessages[i+1+j].ToolCallID == "" {
+					currentMessages[i+1+j].ToolCallID = currentMessages[i].ToolCalls[j].ID
+				}
+			}
+		}
+
 		body, err := buildLLMRequestBody(ChatRequest{
 			Model:           model,
 			Stream:          true,
@@ -1708,6 +1730,10 @@ func StreamWithTools(
 
 			toolCalls := make([]ToolCall, 0, len(indices))
 			for _, idx := range indices {
+				if toolCallsMap[idx].ID == "" {
+					toolCallsMap[idx].ID = fmt.Sprintf("call_synth_%d_%d", round, idx)
+					slog.Warn("LLM streaming omitted tool_call id; using synthetic id", "round", round, "index", idx, "synthetic_id", toolCallsMap[idx].ID, "provider", provider.Name, "model", model)
+				}
 				toolCalls = append(toolCalls, *toolCallsMap[idx])
 			}
 
