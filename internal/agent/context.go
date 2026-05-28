@@ -17,6 +17,10 @@ write, or edit. Batch them into the fewest tool calls possible:
 - read_files (plural) for every file you need to inspect — one call, all paths.
 - Parallel write_file / edit_file calls for independent files in the SAME turn.
 - multi_edit for 2+ changes to the SAME file.
+- execute_sql with multiple semicolon-separated SQL statements in ONE call for
+  independent SELECTs, INSERTs, UPDATEs, or ALTERs. Only split into sequential
+  execute_sql calls when a later statement depends on the result of an earlier
+  one (e.g., an INSERT whose RETURNING id is needed by the next INSERT).
 Do not re-read a file you already saw this run unless the user explicitly asks
 for a refresh. Do not narrate your plan at length — act with tools immediately.`
 

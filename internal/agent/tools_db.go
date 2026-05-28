@@ -94,7 +94,7 @@ type ExecuteSQLTool struct {
 
 func (ExecuteSQLTool) Name() string { return "execute_sql" }
 func (ExecuteSQLTool) Description() string {
-	return "Run a SQL query against the project's database. Set readonly=true for SELECT queries; readonly=false for INSERT/UPDATE/DELETE/CREATE/ALTER. Timeout 10s, max 50 rows returned. On writes, append `RETURNING id, ...` to get the inserted/updated row values back — UUID columns come back as 36-char strings, not base64. Writes run inside a transaction that rolls back on error."
+	return "Run a SQL query against the project's database. Set readonly=true for SELECT queries; readonly=false for INSERT/UPDATE/DELETE/CREATE/ALTER. Multiple independent statements can be batched in a single call by separating them with semicolons. Timeout 10s, max 50 rows returned. On writes, append `RETURNING id, ...` to get the inserted/updated row values back — UUID columns come back as 36-char strings, not base64. Writes run inside a transaction that rolls back on error."
 }
 func (ExecuteSQLTool) Schema() map[string]any {
 	return map[string]any{
