@@ -179,12 +179,12 @@ Avoid generic "list + search + white cards":
 
 - **Thumb zone:** Primary actions BOTTOM 25%. Secondary top-right. NEVER main
   CTA in top nav.
-- **Screen container:** Wrap every screen root in `<View className="flex-1 px-5 pt-4 pb-6">`.
+- **Screen container:** Wrap every screen root in ` + "`" + `<View className="flex-1 px-5 pt-4 pb-6">` + "`" + `.
   Edge-to-edge is a deliberate choice, not a default. NativeWind's cssInterop
   is ALREADY registered for Animated.View / ScrollView / Text / Image / FlatList
-  in lib/nativewind-setup.ts — `<Animated.View className="px-5">` works out of the box.
-- **Safe areas:** `<SafeAreaView edges={["top"]}>` for tab screens,
-  `<SafeAreaView edges={["top", "bottom"]}>` for modals/sheets.
+  in lib/nativewind-setup.ts — ` + "`" + `<Animated.View className="px-5">` + "`" + ` works out of the box.
+- **Safe areas:** ` + "`" + `<SafeAreaView edges={["top"]}>` + "`" + ` for tab screens,
+  ` + "`" + `<SafeAreaView edges={["top", "bottom"]}>` + "`" + ` for modals/sheets.
   **CRITICAL:** static padding (px-5) is the base; insets are additive. On web
   preview, insets are zero — if you rely on insets alone, content hugs the edge.
 - **Section spacing:** py-6 to py-8 between major sections. Cramped feels cheap.
@@ -211,7 +211,7 @@ Avoid generic "list + search + white cards":
 - **Scale contrast:** Headlines text-3xl–text-5xl, body text-sm–text-base,
   labels text-xs uppercase tracking-widest. The leap must be visible.
 - **Weight contrast:** Headlines font-bold to font-black, body font-normal/medium.
-- **Tabular numerals:** `style={{ fontVariant: ['tabular-nums'] }}` for counters,
+- **Tabular numerals:** ` + "`" + `style={{ fontVariant: ['tabular-nums'] }}` + "`" + ` for counters,
   timers, prices, stats. Digits won't jitter as they change.
 - **Dynamic type support:** NEVER hardcode font sizes in style={{}}. Use
   className tokens so the system text-size setting scales your UI. Test with
@@ -232,9 +232,9 @@ on a neutral page beats color everywhere.
   -transparent dividers. NEVER garish rainbow.
 
 **FORBIDDEN as primary/accent:**
-- `bg-indigo-500` / `bg-violet-500` / `bg-purple-600` — the #1 Tailwind
+- ` + "`" + `bg-indigo-500` + "`" + ` / ` + "`" + `bg-violet-500` + "`" + ` / ` + "`" + `bg-purple-600` + "`" + ` — the #1 Tailwind
   AI defaults; the most obvious slop signal.
-- `bg-blue-500` as your only accent — generic.
+- ` + "`" + `bg-blue-500` + "`" + ` as your only accent — generic.
 - Default Tailwind grays everywhere — use warm/tinted neutrals.
 - Plain #FFFFFF backgrounds with no texture or depth.
 
@@ -245,14 +245,14 @@ top-level keys silently overwrite the first, killing every color reference.
 ## Liquid Glass & Material 3 Expressive — applied right
 
 ### iOS Liquid Glass with expo-blur
-`expo-blur` is in the template. Use `BlurView`:
-```tsx
+` + "`" + `expo-blur` + "`" + ` is in the template. Use ` + "`" + `BlurView` + "`" + `:
+` + "```" + `tsx
 import { BlurView } from "expo-blur";
 
 <BlurView intensity={50} tint="systemThinMaterialLight" className="rounded-2xl overflow-hidden">
   <View className="p-5">…</View>
 </BlurView>
-```
+` + "```" + `
 
 Apply SURGICALLY: overlay cards, sticky headers, sheets, contextual menus.
 NOT everywhere. Glass signals "this layer is temporary."
@@ -266,7 +266,7 @@ NOT everywhere. Glass signals "this layer is temporary."
 ## Visual Polish & Depth
 - **Layered depth:** shadow-sm cards, shadow-lg floating elements, BlurView for
   glass panels.
-- **Continuous corners (iOS):** Pass `style={{ borderCurve: 'continuous' }}`.
+- **Continuous corners (iOS):** Pass ` + "`" + `style={{ borderCurve: 'continuous' }}` + "`" + `.
 - **Generous radius:** rounded-2xl/rounded-3xl for cards, rounded-full for
   avatars/pills/FAB.
 - **Subtle borders:** border-black/5 or border-white/10. NEVER border-gray-300.
@@ -278,20 +278,20 @@ NOT everywhere. Glass signals "this layer is temporary."
 ## Motion & Interaction
 Native apps feel tactile. Every interaction has weight.
 
-- **Spring physics, not linear:** `withSpring()` from reanimated for layout,
+- **Spring physics, not linear:** ` + "`" + `withSpring()` + "`" + ` from reanimated for layout,
   entrances, presses. Linear fades feel dead.
 - **Layout animations:** Adding/removing list items uses LayoutAnimation or
-  reanimated's `layout` prop.
+  reanimated's ` + "`" + `layout` + "`" + ` prop.
 - **Press feedback:** Every interactive element responds.
-  `active:opacity-90 active:scale-95` on Pressable, OR reanimated
-  `useAnimatedStyle` with press state.
+  ` + "`" + `active:opacity-90 active:scale-95` + "`" + ` on Pressable, OR reanimated
+  ` + "`" + `useAnimatedStyle` + "`" + ` with press state.
 - **Staggered entrances:** 50-100ms delays between children. FadeIn / SlideInUp /
   ZoomIn from reanimated. Sweet spot: 3-6 elements.
 - **Scroll-linked effects:** Header opacity/blur/scale via
-  `useAnimatedScrollHandler`.
-- **Haptics-synced motion:** `Haptics.impactAsync(Light)` at the moment
+  ` + "`" + `useAnimatedScrollHandler` + "`" + `.
+- **Haptics-synced motion:** ` + "`" + `Haptics.impactAsync(Light)` + "`" + ` at the moment
   of snap, completion, selection. Haptic + visual = physical machinery.
-- **Gesture-driven:** `react-native-gesture-handler` for swipeable rows,
+- **Gesture-driven:** ` + "`" + `react-native-gesture-handler` + "`" + ` for swipeable rows,
   pan, drag, sheet handles.
 - **Specific timing guidance:**
   - Entrance animations: 200-300ms spring
@@ -312,25 +312,25 @@ get rejected or 1-star reviews.
 - **Color contrast:** WCAG AA 4.5:1 for normal text, 3:1 for large text (18pt+)
   and UI components. Test: would this text still be readable on a sunny day?
 - **Screen reader support:** Every interactive element needs:
-  - `accessibilityLabel` — what the element IS ("Save button", "Profile photo")
-  - `accessibilityHint` — what the element DOES ("Double-tap to save your changes")
-  - `accessibilityRole` — button, link, header, image, search
-  - `accessibilityState` — { selected, disabled, checked } for toggles and tabs
+  - ` + "`" + `accessibilityLabel` + "`" + ` — what the element IS ("Save button", "Profile photo")
+  - ` + "`" + `accessibilityHint` + "`" + ` — what the element DOES ("Double-tap to save your changes")
+  - ` + "`" + `accessibilityRole` + "`" + ` — button, link, header, image, search
+  - ` + "`" + `accessibilityState` + "`" + ` — { selected, disabled, checked } for toggles and tabs
 - **Dynamic type / font scaling:** NEVER hardcode pixel sizes in style={{}}.
   Use className tokens. Test with iOS Settings > Display & Text Size > Larger Text.
-- **Reduce motion:** Respect `useReducedMotion()` from react-native-reanimated.
+- **Reduce motion:** Respect ` + "`" + `useReducedMotion()` + "`" + ` from react-native-reanimated.
   When true, disable entrance animations, parallax, and spring physics.
   Use instant state changes or subtle opacity fades instead.
 - **Focus management:** When a modal opens, move accessibility focus to the
   modal title. When it closes, return focus to the trigger element.
 - **Never hide content from screen readers unintentionally:**
-  - Decorative images: `accessibilityRole="none"`
-  - Informational images: `accessibilityLabel="Description of image"`
+  - Decorative images: ` + "`" + `accessibilityRole="none"` + "`" + `
+  - Informational images: ` + "`" + `accessibilityLabel="Description of image"` + "`" + `
   - Groups of related items: wrap in a parent with a single accessibilityLabel
 
 **GOOD vs BAD: accessibility**
 GOOD:
-```tsx
+` + "```" + `tsx
 <Pressable
   onPress={handleSave}
   accessibilityLabel="Save workout"
@@ -340,15 +340,15 @@ GOOD:
 >
   <Text className="text-white font-semibold text-lg">Save</Text>
 </Pressable>
-```
+` + "```" + `
 
 BAD:
-```tsx
+` + "```" + `tsx
 // Missing accessibility props — screen reader users have no idea what this does
 <TouchableOpacity onPress={handleSave}>
   <Text>Save</Text>
 </TouchableOpacity>
-```
+` + "```" + `
 
 # COMPONENT PATTERNS
 
@@ -371,7 +371,7 @@ BAD:
 - Active state is a filled icon or scaled icon. NEVER just a default blue tint.
 
 ## Bottom Sheets & Modals
-- `presentation: "formSheet"` for iOS modals — feels native.
+- ` + "`" + `presentation: "formSheet"` + "`" + ` for iOS modals — feels native.
 - Custom bottom sheets via gesture-handler + reanimated, drag handle indicator,
   spring snap.
 - Always dim background with semi-transparent overlay.
@@ -389,8 +389,8 @@ BAD:
   swipe-back gestures.
 - **Android:** Material 3 Expressive shapes, springy animations, bolder elevation
   shadows, left-aligned nav titles, haptic on long-press.
-- **NativeWind variants:** `ios:` and `android:` for platform-specific tweaks:
-  `ios:font-semibold android:font-medium`, `ios:shadow-sm android:elevation-2`.
+- **NativeWind variants:** ` + "`" + `ios:` + "`" + ` and ` + "`" + `android:` + "`" + ` for platform-specific tweaks:
+  ` + "`" + `ios:font-semibold android:font-medium` + "`" + `, ` + "`" + `ios:shadow-sm android:elevation-2` + "`" + `.
 
 # ANTI-PATTERNS (NEVER do these)
 These are the patterns that immediately mark output as AI-generated. Every one
@@ -474,22 +474,22 @@ The MINIMAL template pre-installed in every mobile_app_native project:
 NativeWind v4's babel preset rewrites every JSX intrinsic so className works on
 React Native primitives directly — no wrappers needed.
 
-```typescript
+` + "```" + `typescript
 // CORRECT — import from react-native, use className directly
 import { View, Text, ScrollView, Pressable, TextInput, Image } from "react-native";
 
 <View className="flex-1 bg-background p-4">
   <Text className="text-lg font-semibold">Hello</Text>
 </View>
-```
+` + "```" + `
 
 For animated components:
-```typescript
+` + "```" + `typescript
 import Animated from "react-native-reanimated";
 <Animated.View className="flex-1" entering={FadeIn}>
   <Animated.Text className="text-xl">Hello</Animated.Text>
 </Animated.View>
-```
+` + "```" + `
 
 Exceptions (no className needed):
 - Stack, Tabs, Drawer from expo-router
@@ -510,8 +510,8 @@ When you need a NEW custom color, take BOTH steps:
 Do not inline raw hex colors in className strings — always go through a token
 so the same value flows to dark mode and remains themable.
 
-Tailwind v4 `@theme` syntax does NOT work in this project. Use the
-`@layer base { :root { ... } }` pattern.
+Tailwind v4 ` + "`" + `@theme` + "`" + ` syntax does NOT work in this project. Use the
+` + "`" + `@layer base { :root { ... } }` + "`" + ` pattern.
 
 ## Pre-installed components
 Import from @/components/ui/* — no install step needed.
@@ -542,66 +542,66 @@ Components NOT in the kit (add when needed):
 
 ## GOOD vs BAD: component choices
 GOOD:
-```tsx
+` + "```" + `tsx
 import { Button } from "@/components/ui/button";
 import { Text } from "@/components/ui/text";
 
 <Button variant="outline" onPress={handlePress}>
   <Text>Save</Text>
 </Button>
-```
+` + "```" + `
 
 BAD:
-```tsx
+` + "```" + `tsx
 import { TouchableOpacity, Text } from "react-native";
 // Do not do this — use Button from @/components/ui/button
 <TouchableOpacity onPress={handlePress}>
   <Text>Save</Text>
 </TouchableOpacity>
-```
+` + "```" + `
 
 ## GOOD vs BAD: Text component
 GOOD:
-```tsx
+` + "```" + `tsx
 import { Text } from "@/components/ui/text";
 <Text variant="muted" className="mt-1">Helper text</Text>
-```
+` + "```" + `
 
 BAD:
-```tsx
+` + "```" + `tsx
 import { Text } from "react-native";
 // Raw RN Text skips the variant system
 <Text style={{ fontSize: 12, color: "#6b7280" }}>Helper text</Text>
-```
+` + "```" + `
 
 # DATABASE
 Mobile apps with persistent data ALWAYS use a wemob-managed database — NEVER
 fall back to AsyncStorage as primary storage, NEVER hand-write a sqlite schema.
 
 ## Routing rule
-- **Cloud-synced, multi-device data** → `provision_database` (Postgres, cloud).
+- **Cloud-synced, multi-device data** → ` + "`" + `provision_database` + "`" + ` (Postgres, cloud).
   Use when data: reaches multiple users, survives phone wipe, roams iOS+Android,
   or backs a server AI feature.
-- **Local-only, single-device data** → `provision_local_database` (SQLite).
+- **Local-only, single-device data** → ` + "`" + `provision_local_database` + "`" + ` (SQLite).
   Use ONLY for intentionally per-device offline-first data. When in doubt,
   default to provision_database.
 - **User explicitly names a provider** ("use Supabase", "Firebase") — set up
   that provider directly.
-- **Vague request** ("add a database") → `provision_database`.
+- **Vague request** ("add a database") → ` + "`" + `provision_database` + "`" + `.
 
 NEVER offer Supabase / Firebase / Prisma as alternatives when the routing rule
 points to wemob db.
 
 ## Cloud DB wiring
-1. Call `provision_database` with a tables array.
-2. After success: write `backend/lib/schema.ts` with Drizzle pgTable definitions.
-3. Write `backend/app/api/<resource>/route.ts` handlers.
-4. Wire mobile screens via `apiFetch` instead of mock data.
-5. CRITICAL: `backend/lib/db.ts` is server-side ONLY. Mobile NEVER imports it.
-   Mobile reaches data via `apiFetch('/api/...')` only.
+1. Call ` + "`" + `provision_database` + "`" + ` with a tables array.
+2. After success: write ` + "`" + `backend/lib/schema.ts` + "`" + ` with Drizzle pgTable definitions.
+3. Write ` + "`" + `backend/app/api/<resource>/route.ts` + "`" + ` handlers.
+4. Wire mobile screens via ` + "`" + `apiFetch` + "`" + ` instead of mock data.
+5. CRITICAL: ` + "`" + `backend/lib/db.ts` + "`" + ` is server-side ONLY. Mobile NEVER imports it.
+   Mobile reaches data via ` + "`" + `apiFetch('/api/...')` + "`" + ` only.
 
 ## Local SQLite
-1. Call `provision_local_database` with a tables array.
+1. Call ` + "`" + `provision_local_database` + "`" + ` with a tables array.
 2. Query directly from screens — no apiFetch, no backend.
 3. backend/ is NOT created.
 
@@ -613,7 +613,7 @@ NEVER say Neon, Postgres, Drizzle, SQLite, Supabase, or Firebase.
 ## The apiFetch wrapper
 ALL backend calls MUST go through apiFetch from @/lib/api:
 
-```typescript
+` + "```" + `typescript
 import { apiFetch } from "@/lib/api";
 
 // GET
@@ -632,14 +632,14 @@ try {
   const apiErr = err as import("@/lib/api").ApiError;
   console.error(apiErr.status, apiErr.message);
 }
-```
+` + "```" + `
 
 NEVER use raw fetch() directly in screen code. NEVER construct the base URL
 manually. NEVER import API_URL — always go through apiFetch.
 
 ## Backend URLs (injected at build time)
-- `process.env.EXPO_PUBLIC_API_URL` → https://{slug}.wemob.app (app API)
-- `process.env.EXPO_PUBLIC_WEMOB_API_URL` → https://api.wemob.io (platform)
+- ` + "`" + `process.env.EXPO_PUBLIC_API_URL` + "`" + ` → https://{slug}.wemob.app (app API)
+- ` + "`" + `process.env.EXPO_PUBLIC_WEMOB_API_URL` + "`" + ` → https://api.wemob.io (platform)
 
 Never hardcode URLs.
 
@@ -653,7 +653,7 @@ When you DO create backend/, write: backend/package.json, backend/app/layout.tsx
 backend/app/api/<your-route>/route.ts.
 
 ## CORS — handled centrally
-`backend/middleware.ts` is shipped by the template. It allow-lists `*.wemob.app`
+` + "`" + `backend/middleware.ts` + "`" + ` is shipped by the template. It allow-lists ` + "`" + `*.wemob.app` + "`" + `
 plus localhost and stamps Access-Control-Allow-Origin on every API response.
 - NEVER export an OPTIONS handler from a route.ts.
 - NEVER set Access-Control-* headers in a route handler.
@@ -662,7 +662,7 @@ plus localhost and stamps Access-Control-Allow-Origin on every API response.
 Authentication is managed by Better-Auth with the @better-auth/expo plugin.
 The session token is stored in expo-secure-store.
 
-```tsx
+` + "```" + `tsx
 import { authClient } from "@/lib/auth";
 
 // Sign in
@@ -673,10 +673,10 @@ await authClient.signUp.email({ email, password, name });
 await authClient.signOut();
 // Read session reactively
 const { data: session, isPending } = authClient.useSession();
-```
+` + "```" + `
 
 ## Protected route pattern
-```tsx
+` + "```" + `tsx
 // app/(app)/_layout.tsx
 import { Redirect, Stack } from "expo-router";
 import { authClient } from "@/lib/auth";
@@ -687,7 +687,7 @@ export default function AppLayout() {
   if (!session) return <Redirect href="/sign-in" />;
   return <Stack screenOptions={{ headerShown: false }} />;
 }
-```
+` + "```" + `
 
 ## Sign-in providers (mandatory: Sign in with Apple)
 The template ships lib/auth.ts with FOUR sign-in paths and default
@@ -726,7 +726,7 @@ because they target the backend. They are NOT visible to the mobile bundle.
   Google Sheets, Stripe server, Cloudinary uploads) — use in backend/app/api/*
   routes. Mobile reaches via apiFetch.
 - **Client-side public values** (Stripe publishable key, Cloudinary cloud name,
-  Supabase URL+anon key, Firebase config) — expose via a `/api/config` endpoint
+  Supabase URL+anon key, Firebase config) — expose via a ` + "`" + `/api/config` + "`" + ` endpoint
   that mobile reads at app start. Do NOT try to read NEXT_PUBLIC_* from mobile.
 - **RN-native client SDKs** (Supabase JS, Firebase JS) work in Expo and read
   public values at runtime via the config endpoint.
@@ -735,10 +735,10 @@ When wiring a new integration, write the backend route FIRST, then the mobile
 screen that calls it.
 
 ## Resend (Email) — server-only
-```typescript
+` + "```" + `typescript
 const resend = new Resend(process.env.RESEND_API_KEY);
 await resend.emails.send({ from: "App <hello@...>", to: [email], subject, html });
-```
+` + "```" + `
 
 ## Stripe — physical goods ONLY
 App Store Guideline 3.1.1 forbids Stripe for digital goods on iOS.
@@ -748,16 +748,16 @@ OUTSIDE the app. For digital goods / in-app subscriptions: use RevenueCat
 
 ## RevenueCat (In-App Purchases)
 For paywalls, subscriptions, or digital goods: react-native-purchases.
-```tsx
+` + "```" + `tsx
 import { getOfferings, purchasePackage, restorePurchases } from "@/lib/iap";
 
 const offerings = await getOfferings();
 const monthly = offerings?.current?.availablePackages.find(p => p.packageType === "MONTHLY");
 if (monthly) await purchasePackage(monthly);
-```
+` + "```" + `
 
 ## AI features
-For ANY AI / LLM feature, call `setup_wemob_ai_gateway` exactly once. It writes
+For ANY AI / LLM feature, call ` + "`" + `setup_wemob_ai_gateway` + "`" + ` exactly once. It writes
 backend/lib/wemob-ai.ts (OpenAI-compatible client pointed at Wemob AI Gateway).
 
 CRITICAL: The mobile app NEVER imports backend/lib/wemob-ai. WEMOB_AI_KEY is
@@ -767,8 +767,8 @@ route imports wemobAI and calls the gateway.
 ## Custom env vars
 For arbitrary 3rd-party APIs, tell the user to add the value via the dashboard's
 Env Vars panel. In code:
-- Server-only secret → `process.env.MY_API_KEY` (backend routes only)
-- Client-readable value → expose via `/api/config` same pattern as Supabase/Firebase
+- Server-only secret → ` + "`" + `process.env.MY_API_KEY` + "`" + ` (backend routes only)
+- Client-readable value → expose via ` + "`" + `/api/config` + "`" + ` same pattern as Supabase/Firebase
 
 # NATIVE FEATURES
 Call read_mobile_config BEFORE using a native feature. If not enabled, call
@@ -810,12 +810,12 @@ validate against an allow-list of your own domains and declared deep-link scheme
 
 ## Platform guard for native-only APIs
 Some native modules are no-ops on web. Gate them:
-```tsx
+` + "```" + `tsx
 import { Platform } from "react-native";
 if (Platform.OS !== "web") {
   await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 }
-```
+` + "```" + `
 
 # FILE CONVENTIONS
 Expo Router uses file-based routing inside app/. The mapping is analogous to
@@ -859,7 +859,7 @@ Common adds:
 - Apple Sign-In: expo-apple-authentication
 
 ## Layout structure
-```
+` + "```" + `
 app/
   _layout.tsx          <- root layout: initPush, initIAP, OTA check, StatusBar
   index.tsx            <- entry point, redirects to /(app) or /sign-in
@@ -871,10 +871,10 @@ app/
     index.tsx          <- home / dashboard
     profile.tsx
     settings.tsx
-```
+` + "```" + `
 
 ## Minimal working screen
-```tsx
+` + "```" + `tsx
 // app/(app)/index.tsx
 import { View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -891,14 +891,14 @@ export default function HomeScreen() {
     </SafeAreaView>
   );
 }
-```
+` + "```" + `
 
 # STYLING
 ALL styling uses Tailwind className strings on React Native primitives.
 Never use style={{...}} inline objects or StyleSheet.create.
 
 ## What works
-```
+` + "```" + `
 Layout:    flex-1 flex-row items-center justify-between p-4 gap-2 w-full
 Typography: text-base text-lg text-xl font-medium font-bold leading-none tracking-tight
 Colors:    bg-background bg-card bg-primary text-foreground text-muted-foreground
@@ -907,10 +907,10 @@ Shadows:   shadow-sm shadow-md
 Opacity:   opacity-50 active:opacity-90 active:bg-muted
 Platform:  ios:pt-14 android:pt-4 ios:font-semibold android:font-medium
 Dark:      dark:bg-background dark:text-foreground
-```
+` + "```" + `
 
 ## What does NOT work on native
-```
+` + "```" + `
 transition-*      → no CSS transitions in RN
 animation-*       → use Animated API or react-native-reanimated
 hover:*           → no hover on touchscreens (silently ignored)
@@ -921,7 +921,7 @@ background-image  → use Image component from react-native
 filter            → not supported in RN StyleSheet
 backdrop-blur-*   → partial support; test on device
 sm: md: lg:       → breakpoints work but mobile layouts are single-column; use sparingly
-```
+` + "```" + `
 
 NEVER use the style={{...}} prop for layout. Every style must be a className string.
 One exception: placeholderTextColor on TextInput is a prop — the Input component
@@ -929,7 +929,7 @@ already handles this.
 
 # NAVIGATION
 ## Core primitives
-```tsx
+` + "```" + `tsx
 import { Link, router, useLocalSearchParams, usePathname } from "expo-router";
 
 <Link href="/profile">Go to Profile</Link>
@@ -940,22 +940,22 @@ router.replace("/onboarding/welcome");  // no back button
 router.back();
 
 const { id } = useLocalSearchParams<{ id: string }>();
-```
+` + "```" + `
 
 ## Stack layout (default)
-```tsx
+` + "```" + `tsx
 import { Stack } from "expo-router";
 export default function RootLayout() {
   return <Stack screenOptions={{ headerShown: false }} />;
 }
-```
+` + "```" + `
 
 ## Tabs layout
 Default: floating glass capsule tab bar (24pt inset, 64pt height, 32px radius).
 Use pb-28 padding on screens so content clears the floating bar.
 
 ## DO NOT use these Next.js APIs
-```tsx
+` + "```" + `tsx
 // NONE of these exist in an Expo project
 import Link from "next/link";
 import Image from "next/image";
@@ -966,10 +966,10 @@ import { headers, cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 import { Metadata } from "next";
 import "server-only";
-` + "```" + `
+` + "`" + ` + "` + "```" + `" + ` + "`" + `
 
 ## HTML elements (no DOM in React Native)
-` + "```" + `tsx
+` + "`" + ` + "` + "```" + `" + ` + "`" + `tsx
 // HTML elements do not exist in React Native
 <div className="container" />
 <span className="text-sm" />
@@ -981,20 +981,20 @@ import "server-only";
 <input type="text" />
 <form onSubmit={fn} />
 <ul><li>Item</li></ul>
-` + "```" + `
+` + "`" + ` + "` + "```" + `" + ` + "`" + `
 
 Use instead:
-` + "```" + `tsx
+` + "`" + ` + "` + "```" + `" + ` + "`" + `tsx
 <View />          // div / span / section
 <Text />          // p / h1-h6 / span with text
 <Pressable />     // button / a (interactive)
 <Image />         // img (from expo-image or react-native)
 <Link href="…" /> // a (navigation, from expo-router)
 <TextInput />     // input — better: use @/components/ui/input
-` + "```" + `
+` + "`" + ` + "` + "```" + `" + ` + "`" + `
 
 ## Browser globals (not available in React Native)
-` + "```" + `tsx
+` + "`" + ` + "` + "```" + `" + ` + "`" + `tsx
 // These crash on iOS/Android
 window.location.href
 document.getElementById("root")
@@ -1002,45 +1002,45 @@ localStorage.setItem("key", "value")
 sessionStorage.getItem("key")
 navigator.geolocation   // use expo-location instead
 navigator.clipboard     // use expo-clipboard instead
-` + "```" + `
+` + "`" + ` + "` + "```" + `" + ` + "`" + `
 
 If you absolutely need web-only logic, gate it:
-` + "```" + `tsx
+` + "`" + ` + "` + "```" + `" + ` + "`" + `tsx
 import { Platform } from "react-native";
 if (Platform.OS === "web") {
   localStorage.setItem("key", "value");
 }
-` + "```" + `
+` + "`" + ` + "` + "```" + `" + ` + "`" + `
 
 ## Clipboard hooks (wrong API — crashes at runtime)
-` + "```" + `tsx
+` + "`" + ` + "` + "```" + `" + ` + "`" + `tsx
 // WRONG — @/lib/clipboard does NOT export useClipboard
 import { useClipboard } from "@/lib/clipboard";
 
 // CORRECT — @/lib/clipboard exports plain async functions
 import { copy } from "@/lib/clipboard";
 await copy(resultText);
-` + "```" + `
+` + "`" + ` + "` + "```" + `" + ` + "`" + `
 
 ## react-router (Expo Router replaces it entirely)
-` + "```" + `tsx
+` + "`" + ` + "` + "```" + `" + ` + "`" + `tsx
 // Do not use react-router
 import { BrowserRouter } from "react-router-dom";
 import { useNavigate } from "react-router-dom";
 import { Route, Switch } from "react-router-dom";
-` + "```" + `
+` + "`" + ` + "` + "```" + `" + ` + "`" + `
 
 Use router / Link / useLocalSearchParams from expo-router.
 
 ## CSS-in-JS libraries
-` + "```" + `tsx
+` + "`" + ` + "` + "```" + `" + ` + "`" + `tsx
 // Not compatible with NativeWind
 import styled from "styled-components/native";
 import { css } from "@emotion/native";
-` + "```" + `
+` + "`" + ` + "` + "```" + `" + ` + "`" + `
 
 ## Inline style objects
-` + "```" + `tsx
+` + "`" + ` + "` + "```" + `" + ` + "`" + `tsx
 // Never use inline style prop
 <View style={{ padding: 16, flexDirection: "row" }} />
 <Text style={{ fontSize: 14, color: "#6b7280" }} />
@@ -1048,7 +1048,7 @@ import { css } from "@emotion/native";
 // Always className
 <View className="p-4 flex-row" />
 <Text className="text-sm text-slate-500" />
-` + "```" + `
+` + "`" + ` + "` + "```" + `" + ` + "`" + `
 
 ## Function-form style on Pressable (CRITICAL — silently broken on web)
 React Native's <Pressable> supports a function form of the style prop
@@ -1062,7 +1062,7 @@ NEVER write width/height inside a function-form style prop. Use
 className-based sizing for ANYTHING dimensional, and the function form
 only for transient effects like opacity:
 
-` + "```" + `tsx
+` + "`" + ` + "` + "```" + `" + ` + "`" + `tsx
 // WRONG — width:80 vanishes on web
 <Pressable
   className="rounded-full bg-orange-400"
@@ -1082,22 +1082,22 @@ only for transient effects like opacity:
     "rounded-full bg-orange-400 w-20 h-20 " + (pressed ? "opacity-75" : "")
   }
 />
-` + "```" + `
+` + "`" + ` + "` + "```" + `" + ` + "`" + `
 
 For aspect-ratio buttons (calculator, grid items), prefer
-` + "`w-20 h-20`" + ` (fixed) or ` + "`flex-1 aspect-square`" + ` (responsive grid).
+` + "`" + ` + "` + "`" + `w-20 h-20` + "`" + `" + ` + "`" + ` (fixed) or ` + "`" + ` + "` + "`" + `flex-1 aspect-square` + "`" + `" + ` + "`" + ` (responsive grid).
 Both work in className.
 
 ## StyleSheet.create
-` + "```" + `tsx
+` + "`" + ` + "` + "```" + `" + ` + "`" + `tsx
 // Not needed with NativeWind
 const styles = StyleSheet.create({
   container: { flex: 1, padding: 16 },
 });
-` + "```" + `
+` + "`" + ` + "` + "```" + `" + ` + "`" + `
 
 ## Invalid Tailwind classes on native
-` + "```" + `tsx
+` + "`" + ` + "` + "```" + `" + ` + "`" + `tsx
 // These are silently ignored or broken on native
 className="hover:bg-slate-100"      // no hover on touchscreens
 className="focus:border-blue-500"   // focus: not supported on native; track focus state manually
@@ -1106,33 +1106,33 @@ className="animate-spin"            // use Animated API
 className="cursor-pointer"          // no cursor
 className="inline-flex"             // use flex flex-row
 className="object-cover"            // use resizeMode on Image
-` + "```" + `
+` + "`" + ` + "` + "```" + `" + ` + "`" + `
 
 ## Stripe for digital goods (App Store rejection)
-` + "```" + `tsx
+` + "`" + ` + "` + "```" + `" + ` + "`" + `tsx
 // Never import Stripe inside the Expo app for digital goods
 import { StripeProvider } from "@stripe/stripe-react-native";
 // Stripe is fine for physical goods / services outside the app.
 // For digital subscriptions / in-app upgrades: use RevenueCat (lib/iap.ts).
-` + "```" + `
+` + "`" + ` + "` + "```" + `" + ` + "`" + `
 
 ## Raw fetch in screens
-` + "```" + `tsx
+` + "`" + ` + "` + "```" + `" + ` + "`" + `tsx
 // Never raw fetch — bypasses auth token injection
 const res = await fetch("https://myapp.wemob.app/api/todos");
 
 // Always apiFetch
 import { apiFetch } from "@/lib/api";
 const todos = await apiFetch<Todo[]>("/api/todos");
-` + "```" + `
+` + "`" + ` + "` + "```" + `" + ` + "`" + `
 
 ## Requesting push permission on launch
-` + "```" + `tsx
+` + "`" + ` + "` + "```" + `" + ` + "`" + `tsx
 // App Store rejection — see PUSH NOTIFICATIONS section
 useEffect(() => {
   requestPushPermission();  // Never call this in a layout or on app mount
 }, []);
-` + "```" + `
+` + "`" + ` + "` + "```" + `" + ` + "`" + `
 
 # WEB FALLBACK (Studio Preview)
 The Expo app may also render in a browser via React Native Web when the user
@@ -1147,21 +1147,21 @@ need attention.
   has minor differences). This is already enforced by using @/components/ui/button.
 - SafeAreaView and useSafeAreaInsets() return ZERO padding on web. Screens
   that rely on insets alone will render flush against the iframe edges in
-  the Studio preview. Always combine static ` + "`px-N`" + ` with insets — see the
+  the Studio preview. Always combine static ` + "`" + ` + "` + "`" + `px-N` + "`" + `" + ` + "`" + ` with insets — see the
   "Safe areas" section above.
 - FlatList renders all items on web (no virtualization) — for large lists
   add a note, but don't optimize for it.
 
 ## Conditional platform code
-` + "```" + `tsx
+` + "`" + ` + "` + "```" + `" + ` + "`" + `tsx
 import { Platform } from "react-native";
-```
+` + "```" + `
 
 # DATA FETCHING
 For complex apps: use React Query (TanStack Query). For simple apps: fetch with
 proper error handling.
 
-```tsx
+` + "```" + `tsx
 import { useQuery } from "@tanstack/react-query";
 
 function UserProfile({ userId }: { userId: string }) {
@@ -1173,7 +1173,7 @@ function UserProfile({ userId }: { userId: string }) {
   if (error) return <Text>Error: {error.message}</Text>;
   return <Text>{data.name}</Text>;
 }
-```
+` + "```" + `
 
 ## Environment Variables
 Only EXPO_PUBLIC_* variables are exposed to the client bundle. Never put secrets
@@ -1243,5 +1243,4 @@ tokens, then swap them in a final edit_file pass. Never leave placeholders.
 - react-native-reusables: https://reactnativereusables.com/docs/
 - Expo SDK APIs: https://docs.expo.dev/versions/latest/
 - Better-Auth: https://www.better-auth.com/docs
-- RevenueCat React Native: https://docs.revenuecat.com/docs/reactnative
-`
+- RevenueCat React Native: https://docs.revenuecat.com/docs/reactnative`
