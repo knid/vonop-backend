@@ -132,6 +132,13 @@ func Run(
 		history = nil
 	}
 
+	// Seed the file drawer from historical read_file/read_files tool results so
+	// the model still sees file contents even though convertHistory truncates
+	// them from the message history to prevent token bloat.
+	for path, content := range extractFileDrawerFromHistory(history) {
+		fileDrawer[path] = content
+	}
+
 	// --- Step 8: persist the user message ---
 	attachmentSnapshot := make([]models.ChatMessageAttachment, 0, len(turnAttachments.Current))
 	currentImageURLs := make([]string, 0, len(turnAttachments.Current))
@@ -893,6 +900,116 @@ func convertHistory(history []models.AppChatMessage) []utils.Message {
 		}
 
 		out = append(out, utils.Message{Role: m.Role, Content: content})
+	}
+	return out
+}
+
+// extractFileDrawerFromHistory scans the last 2 assistant turns for
+// read_file / read_files tool results and returns a map of path -> content.
+// These contents seed the file drawer so the model still sees recently-read
+// files even though convertHistory truncates them from the message history.
+func extractFileDrawerFromHistory(history []models.AppChatMessage) map[string]string {
+	drawer := make(map[string]string)
+
+	// Count assistant turns to identify the last 2.
+	assistantCount := 0
+	for _, m := range history {
+		if m.Role == "assistant" && m.ErrorKind == "" {
+			assistantCount++
+		}
+	}
+
+	assistantIdx := 0
+	for _, m := range history {
+		if m.Role != "assistant" || m.ErrorKind != "" {
+			continue
+		}
+		assistantIdx++
+		if assistantIdx < assistantCount-1 {
+			// Only scan the last 2 assistant turns.
+			continue
+		}
+
+		var parts []models.ChatMessagePart
+		if len(m.Parts) > 0 && string(m.Parts) != "[]" {
+			_ = json.Unmarshal(m.Parts, &parts)
+		}
+
+		for _, p := range parts {
+			if p.Type != "tool_call" || p.Result == "" {
+				continue
+			}
+			switch p.Name {
+			case "read_file":
+				if path, content := parseReadFileResult(p.Result); path != "" {
+					drawer[path] = content
+				}
+			case "read_files":
+				for path, content := range parseReadFilesResult(p.Result) {
+					drawer[path] = content
+				}
+			}
+		}
+	}
+
+	return drawer
+}
+
+// parseReadFileResult extracts the single file path and content from a
+// read_file tool result. The format is:
+//
+//	===== path =====
+//	content...
+func parseReadFileResult(result string) (string, string) {
+	result = strings.TrimSpace(result)
+	const prefix = "===== "
+	if !strings.HasPrefix(result, prefix) {
+		return "", ""
+	}
+	result = strings.TrimPrefix(result, prefix)
+	idx := strings.Index(result, " =====")
+	if idx < 0 {
+		return "", ""
+	}
+	path := result[:idx]
+	rest := strings.TrimPrefix(result[idx:], " =====")
+	rest = strings.TrimSpace(rest)
+	return path, rest
+}
+
+// parseReadFilesResult extracts path -> content mappings from a read_files
+// tool result. The format is a concatenation of:
+//
+//	===== path =====
+//	content...
+func parseReadFilesResult(result string) map[string]string {
+	out := make(map[string]string)
+	const marker = "===== "
+	for {
+		idx := strings.Index(result, marker)
+		if idx < 0 {
+			break
+		}
+		result = result[idx+len(marker):]
+		endPath := strings.Index(result, " =====")
+		if endPath < 0 {
+			break
+		}
+		path := result[:endPath]
+		rest := strings.TrimPrefix(result[endPath:], " =====")
+		rest = strings.TrimPrefix(rest, "\n")
+
+		// Find the start of the next file block, or end of string.
+		next := strings.Index(rest, "\n===== ")
+		var content string
+		if next >= 0 {
+			content = rest[:next]
+			result = rest[next:]
+		} else {
+			content = rest
+			result = ""
+		}
+		out[path] = strings.TrimSuffix(content, "\n")
 	}
 	return out
 }
