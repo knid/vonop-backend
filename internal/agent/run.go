@@ -217,20 +217,22 @@ func Run(
 		}
 	}
 
-	turnContent := expandedMessage
-	if fileTreePrefix := BuildFileTreeUserPrefix(fileMap); fileTreePrefix != "" {
-		// File tree rides with the user turn instead of the system prefix —
-		// keeps prompt-cache stable across rounds when write_file mutates
-		// the tree mid-run. See BuildSystemMessages doc.
-		turnContent = fileTreePrefix + "\n" + expandedMessage
+	// buildTurnContent rebuilds the user-turn prefix (file tree + file drawer)
+	// so it stays current across tool rounds. write_file/edit_file mutate the
+	// tree, and read_file populates the drawer — both need to be visible on
+	// subsequent rounds after TrimResults compresses old tool outputs.
+	buildTurnContent := func() string {
+		turnContent := expandedMessage
+		if fileTreePrefix := BuildFileTreeUserPrefix(fileMap); fileTreePrefix != "" {
+			turnContent = fileTreePrefix + "\n" + turnContent
+		}
+		if drawerMsg := buildFileDrawerMsg(fileDrawer); drawerMsg != "" {
+			turnContent = drawerMsg + "\n\n" + turnContent
+		}
+		return turnContent
 	}
-	// File drawer: recent file contents the model has accessed, kept outside
-	// conversation history so tool-output bloat doesn't accumulate across turns.
-	// Merged into the current user turn (not a separate message) so the
-	// Anthropic cache marker on the last user message covers a stable prefix.
-	if drawerMsg := buildFileDrawerMsg(fileDrawer); drawerMsg != "" {
-		turnContent = drawerMsg + "\n\n" + turnContent
-	}
+
+	turnContent := buildTurnContent()
 	userTurn := utils.Message{Role: "user", Content: turnContent}
 	if len(currentImageURLs) > 0 {
 		userTurn.Images = currentImageURLs
@@ -506,6 +508,9 @@ func Run(
 			StripAfter:     stripAfter,
 			TrimResults:    truncateToolResult,
 			MaxMessages:    25,
+			RefreshPrefix: func(msg *utils.Message) {
+				msg.Content = buildTurnContent()
+			},
 			// Moonshot K2.6 prompt_cache_key: stable per-project so the system
 			// prompt is cached across runs. Only set for Moonshot — other
 			// providers may reject unknown fields.
