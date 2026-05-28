@@ -850,7 +850,7 @@ subscriptions.
 // generation runs (project.Status == "draft"). These work-order rules don't
 // apply to chat-mode edits.
 const BasePromptWebFirstGen = `## Work Order: Layout & Home First (CRITICAL — viewable-on-credit-exhaust)
-On a brand-new project (empty FILE TREE under app/), your VERY FIRST
+If app/layout.tsx or app/page.tsx does not exist, your VERY FIRST
 assistant turn MUST include write_file for both:
 1. app/layout.tsx — root layout with next/font setup, <html> + <body>, the
    project's typography variables and "min-h-screen bg-background
@@ -867,8 +867,8 @@ still see and explore their site. If they don't land first, the user sees
 a broken Next.js error and may abandon the product. Treat this as a hard
 ordering constraint, not a suggestion.
 
-This rule does NOT apply when the FILE TREE already shows app/layout.tsx
-or app/page.tsx (continuing an existing project, ecommerce template, or
+This rule does NOT apply when both app/layout.tsx AND app/page.tsx
+already exist (continuing an existing project, ecommerce template, or
 chat-mode edit). In that case proceed with the user's request normally.
 
 ## Work Order: UI First, Wiring Second (CRITICAL — viewable-on-credit-exhaust)
