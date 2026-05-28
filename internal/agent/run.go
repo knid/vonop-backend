@@ -138,6 +138,19 @@ func Run(
 	for path, content := range extractFileDrawerFromHistory(history) {
 		fileDrawer[path] = content
 	}
+	// The drawer above carries the content from the last read_file/read_files
+	// call in the previous turn. If that turn also called edit_file/write_file,
+	// the drawer content is stale (pre-edit). Refresh mutated files from the
+	// current on-disk fileMap so the model doesn't hallucinate that edits were
+	// lost.
+	for _, path := range mutatedPathsFromLastTurn(history) {
+		if content, ok := fileMap.Get(path); ok {
+			fileDrawer[path] = content
+		}
+	}
+	for _, path := range deletedPathsFromLastTurn(history) {
+		delete(fileDrawer, path)
+	}
 
 	// --- Step 8: persist the user message ---
 	attachmentSnapshot := make([]models.ChatMessageAttachment, 0, len(turnAttachments.Current))
@@ -954,6 +967,86 @@ func extractFileDrawerFromHistory(history []models.AppChatMessage) map[string]st
 	}
 
 	return drawer
+}
+
+// mutatedPathsFromLastTurn returns the file paths that were successfully
+// edited or written in the most recent assistant turn. Used to refresh the
+// file drawer so it doesn't carry stale pre-edit content across runs.
+func mutatedPathsFromLastTurn(history []models.AppChatMessage) []string {
+	var out []string
+	lastTurn := lastAssistantTurn(history)
+	if lastTurn == nil {
+		return out
+	}
+	var parts []models.ChatMessagePart
+	if len(lastTurn.Parts) > 0 && string(lastTurn.Parts) != "[]" {
+		_ = json.Unmarshal(lastTurn.Parts, &parts)
+	}
+	for _, p := range parts {
+		if p.Type != "tool_call" || p.IsError {
+			continue
+		}
+		switch p.Name {
+		case "edit_file", "write_file":
+			if path := parseToolPath(p.Input); path != "" {
+				out = append(out, path)
+			}
+		case "multi_edit":
+			if path := parseToolPath(p.Input); path != "" {
+				out = append(out, path)
+			}
+		}
+	}
+	return out
+}
+
+// deletedPathsFromLastTurn returns the file paths that were successfully
+// deleted in the most recent assistant turn. Used to evict deleted files
+// from the file drawer.
+func deletedPathsFromLastTurn(history []models.AppChatMessage) []string {
+	var out []string
+	lastTurn := lastAssistantTurn(history)
+	if lastTurn == nil {
+		return out
+	}
+	var parts []models.ChatMessagePart
+	if len(lastTurn.Parts) > 0 && string(lastTurn.Parts) != "[]" {
+		_ = json.Unmarshal(lastTurn.Parts, &parts)
+	}
+	for _, p := range parts {
+		if p.Type != "tool_call" || p.IsError {
+			continue
+		}
+		if p.Name == "delete_file" {
+			if path := parseToolPath(p.Input); path != "" {
+				out = append(out, path)
+			}
+		}
+	}
+	return out
+}
+
+// lastAssistantTurn returns the most recent non-error assistant message in
+// history, or nil if there isn't one.
+func lastAssistantTurn(history []models.AppChatMessage) *models.AppChatMessage {
+	for i := len(history) - 1; i >= 0; i-- {
+		m := history[i]
+		if m.Role == "assistant" && m.ErrorKind == "" {
+			return &m
+		}
+	}
+	return nil
+}
+
+// parseToolPath extracts the "path" field from a tool-call input JSON.
+func parseToolPath(input json.RawMessage) string {
+	var args struct {
+		Path string `json:"path"`
+	}
+	if err := json.Unmarshal(input, &args); err != nil {
+		return ""
+	}
+	return args.Path
 }
 
 // parseReadFileResult extracts the single file path and content from a

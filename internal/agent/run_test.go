@@ -360,3 +360,77 @@ func TestExtractFileDrawerFromHistory_MultiplePartsInOneTurn(t *testing.T) {
 	assert.Equal(t, "alpha", drawer["a.txt"])
 	assert.Equal(t, "beta", drawer["b.txt"])
 }
+
+func TestMutatedPathsFromLastTurn_SuccessfulEdits(t *testing.T) {
+	parts, _ := json.Marshal([]models.ChatMessagePart{
+		{Type: "tool_call", Name: "read_files", Input: []byte(`{"paths":["a.txt"]}`), Result: "===== a.txt =====\nold"},
+		{Type: "tool_call", Name: "edit_file", Input: []byte(`{"path":"a.txt"}`), Result: "edited a.txt", IsError: false},
+		{Type: "tool_call", Name: "write_file", Input: []byte(`{"path":"b.txt"}`), Result: "created b.txt", IsError: false},
+		{Type: "tool_call", Name: "multi_edit", Input: []byte(`{"path":"c.txt"}`), Result: "edited c.txt", IsError: false},
+	})
+	history := []models.AppChatMessage{
+		{Role: "assistant", Content: "done", Parts: parts},
+	}
+	paths := mutatedPathsFromLastTurn(history)
+	assert.ElementsMatch(t, []string{"a.txt", "b.txt", "c.txt"}, paths)
+}
+
+func TestMutatedPathsFromLastTurn_SkipsErrors(t *testing.T) {
+	parts, _ := json.Marshal([]models.ChatMessagePart{
+		{Type: "tool_call", Name: "edit_file", Input: []byte(`{"path":"a.txt"}`), Result: "old_string not found", IsError: true},
+	})
+	history := []models.AppChatMessage{
+		{Role: "assistant", Content: "oops", Parts: parts},
+	}
+	paths := mutatedPathsFromLastTurn(history)
+	assert.Empty(t, paths)
+}
+
+func TestDeletedPathsFromLastTurn_SuccessfulDeletions(t *testing.T) {
+	parts, _ := json.Marshal([]models.ChatMessagePart{
+		{Type: "tool_call", Name: "delete_file", Input: []byte(`{"path":"a.txt"}`), Result: "deleted a.txt", IsError: false},
+	})
+	history := []models.AppChatMessage{
+		{Role: "assistant", Content: "done", Parts: parts},
+	}
+	paths := deletedPathsFromLastTurn(history)
+	assert.ElementsMatch(t, []string{"a.txt"}, paths)
+}
+
+func TestDeletedPathsFromLastTurn_SkipsErrors(t *testing.T) {
+	parts, _ := json.Marshal([]models.ChatMessagePart{
+		{Type: "tool_call", Name: "delete_file", Input: []byte(`{"path":"a.txt"}`), Result: "protected file", IsError: true},
+	})
+	history := []models.AppChatMessage{
+		{Role: "assistant", Content: "oops", Parts: parts},
+	}
+	paths := deletedPathsFromLastTurn(history)
+	assert.Empty(t, paths)
+}
+
+func TestLastAssistantTurn(t *testing.T) {
+	history := []models.AppChatMessage{
+		{Role: "user", Content: "hi"},
+		{Role: "assistant", Content: "hello"},
+		{Role: "user", Content: "bye"},
+		{Role: "assistant", Content: "goodbye"},
+	}
+	turn := lastAssistantTurn(history)
+	require.NotNil(t, turn)
+	assert.Equal(t, "goodbye", turn.Content)
+}
+
+func TestLastAssistantTurn_SkipsErrors(t *testing.T) {
+	history := []models.AppChatMessage{
+		{Role: "assistant", Content: "ok", ErrorKind: ""},
+		{Role: "assistant", Content: "oops", ErrorKind: "internal"},
+	}
+	turn := lastAssistantTurn(history)
+	require.NotNil(t, turn)
+	assert.Equal(t, "ok", turn.Content)
+}
+
+func TestLastAssistantTurn_EmptyHistory(t *testing.T) {
+	assert.Nil(t, lastAssistantTurn(nil))
+	assert.Nil(t, lastAssistantTurn([]models.AppChatMessage{}))
+}
