@@ -250,3 +250,54 @@ func projectHasAuth(project *models.AppProject) bool {
 	}
 	return false
 }
+
+const (
+	fileDrawerMaxChars   = 48000 // ~12K tokens at 4 chars/token
+	fileDrawerMaxPerFile = 12000 // ~3K tokens per file
+)
+
+// buildFileDrawerMsg renders recently-accessed file contents as a user message
+// block. It caps total size so the drawer doesn't itself become a context bloat
+// source — files over the per-file cap are truncated, and excess files are
+// dropped with a "... (N more files)" note.
+func buildFileDrawerMsg(drawer map[string]string) string {
+	if len(drawer) == 0 {
+		return ""
+	}
+	type entry struct {
+		path string
+		size int
+	}
+	entries := make([]entry, 0, len(drawer))
+	for path, content := range drawer {
+		entries = append(entries, entry{path, len(content)})
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].path < entries[j].path
+	})
+
+	var sb strings.Builder
+	sb.WriteString("CURRENT FILES\n")
+	sb.WriteString("=============\n\n")
+
+	totalChars := 0
+	rendered := 0
+	for _, e := range entries {
+		content := drawer[e.path]
+		if len(content) > fileDrawerMaxPerFile {
+			content = content[:fileDrawerMaxPerFile] + "\n... (truncated)"
+		}
+		block := fmt.Sprintf("[%s]\n%s\n[/%s]\n\n", e.path, content, e.path)
+		if totalChars+len(block) > fileDrawerMaxChars {
+			remaining := len(entries) - rendered
+			if remaining > 0 {
+				fmt.Fprintf(&sb, "... (%d more files)\n", remaining)
+			}
+			break
+		}
+		sb.WriteString(block)
+		totalChars += len(block)
+		rendered++
+	}
+	return strings.TrimRight(sb.String(), "\n")
+}
