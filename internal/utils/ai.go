@@ -625,7 +625,7 @@ type ReasoningConfig struct {
 	Enabled *bool  `json:"enabled,omitempty"`    // explicitly enable/disable
 }
 
-// ThinkingConfig controls thinking mode on ZAI (GLM-4.7).
+// ThinkingConfig controls thinking mode on Moonshot (Kimi).
 // See https://docs.z.ai/guides/capabilities/thinking-mode
 type ThinkingConfig struct {
 	Type          string `json:"type"`                     // "enabled" or "disabled"
@@ -658,7 +658,7 @@ type ChatRequest struct {
 type Message struct {
 	Role             string     `json:"role"`
 	Content          string     `json:"content,omitempty"`
-	ReasoningContent string     `json:"reasoning_content,omitempty"` // ZAI: preserve thinking across tool rounds
+	ReasoningContent string     `json:"reasoning_content,omitempty"` // Moonshot: preserve thinking across tool rounds
 	ToolCalls        []ToolCall `json:"tool_calls,omitempty"`
 	ToolCallID       string     `json:"tool_call_id,omitempty"`
 	Name             string     `json:"name,omitempty"`
@@ -797,7 +797,7 @@ func parseLLMResponseBody(body []byte, provider *LLMProvider) (ChatResponse, err
 
 // prepareChatRequest translates provider-agnostic ChatRequest fields into the
 // format expected by the target LLM provider. For providers that use the
-// "thinking" format (ZAI, Moonshot/Kimi), it converts the OpenRouter-style
+// "thinking" format (Moonshot/Kimi), it converts the OpenRouter-style
 // "reasoning" config into the thinking config and sets required defaults.
 func prepareChatRequest(req ChatRequest, provider *LLMProvider) (ChatRequest, error) {
 	if provider == nil {
@@ -1096,7 +1096,7 @@ func getTextFromLLMOnce(ctx context.Context, model, system, message string, prov
 type StreamDelta struct {
 	Content          string     `json:"content,omitempty"`
 	Reasoning        string     `json:"reasoning,omitempty"`          // OpenRouter
-	ReasoningContent string     `json:"reasoning_content,omitempty"`  // ZAI
+	ReasoningContent string     `json:"reasoning_content,omitempty"`  // Moonshot
 	ToolCalls        []ToolCall `json:"tool_calls,omitempty"`
 }
 
@@ -1601,7 +1601,7 @@ func StreamWithTools(
 						}
 					}
 
-					// Accumulate reasoning (ZAI: reasoning_content, OpenRouter: reasoning)
+					// Accumulate reasoning (Moonshot: reasoning_content, OpenRouter: reasoning)
 					if r := choice.Delta.GetReasoning(); r != "" {
 						fullReasoning.WriteString(r)
 						if onReasoning != nil {
