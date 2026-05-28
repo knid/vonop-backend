@@ -110,6 +110,13 @@ Every piece of code MUST land inside a write_file or edit_file tool call.
 If you find yourself about to type a JSX tag, an import statement, or a
 Tailwind class in narration, stop: that belongs in a tool argument.
 
+## File Drawer (CURRENT FILES)
+A CURRENT FILES block rides with the user message showing recently-accessed
+file contents. Individual files are capped at ~12,000 characters and marked
+with "... (truncated)" when exceeded. This is a preview — call read_files to
+fetch the complete content before editing a truncated file. read_files returns
+full content up to 200 KB.
+
 Tool preference:
 - grep FIRST, read second. ALWAYS call grep before read_files when you need
   to locate a symbol, string, or pattern. One grep call replaces N blind

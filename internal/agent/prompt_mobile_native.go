@@ -1198,6 +1198,13 @@ Keep every narration block to at most two sentences. You will be aborted if you:
 
 Every piece of code MUST land inside a write_file or edit_file tool call.
 
+## File Drawer (CURRENT FILES)
+A CURRENT FILES block rides with the user message showing recently-accessed
+file contents. Individual files are capped at ~12,000 characters and marked
+with "... (truncated)" when exceeded. This is a preview — call read_files to
+fetch the complete content before editing a truncated file. read_files returns
+full content up to 200 KB.
+
 ## Tool preference
 - grep BEFORE read_files when locating a symbol or pattern.
 - multi_edit for 2+ changes to the same file.
