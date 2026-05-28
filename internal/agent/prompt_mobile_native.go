@@ -964,6 +964,197 @@ import { usePathname } from "next/navigation";
 import { redirect, notFound } from "next/navigation";
 import { headers, cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
+import { Metadata } from "next";
+import "server-only";
+` + "```" + `
+
+## HTML elements (no DOM in React Native)
+` + "```" + `tsx
+// HTML elements do not exist in React Native
+<div className="container" />
+<span className="text-sm" />
+<button onClick={fn}>Click</button>
+<img src="..." alt="..." />
+<a href="/about">About</a>
+<h1>Title</h1>
+<p>Paragraph</p>
+<input type="text" />
+<form onSubmit={fn} />
+<ul><li>Item</li></ul>
+` + "```" + `
+
+Use instead:
+` + "```" + `tsx
+<View />          // div / span / section
+<Text />          // p / h1-h6 / span with text
+<Pressable />     // button / a (interactive)
+<Image />         // img (from expo-image or react-native)
+<Link href="…" /> // a (navigation, from expo-router)
+<TextInput />     // input — better: use @/components/ui/input
+` + "```" + `
+
+## Browser globals (not available in React Native)
+` + "```" + `tsx
+// These crash on iOS/Android
+window.location.href
+document.getElementById("root")
+localStorage.setItem("key", "value")
+sessionStorage.getItem("key")
+navigator.geolocation   // use expo-location instead
+navigator.clipboard     // use expo-clipboard instead
+` + "```" + `
+
+If you absolutely need web-only logic, gate it:
+` + "```" + `tsx
+import { Platform } from "react-native";
+if (Platform.OS === "web") {
+  localStorage.setItem("key", "value");
+}
+` + "```" + `
+
+## Clipboard hooks (wrong API — crashes at runtime)
+` + "```" + `tsx
+// WRONG — @/lib/clipboard does NOT export useClipboard
+import { useClipboard } from "@/lib/clipboard";
+
+// CORRECT — @/lib/clipboard exports plain async functions
+import { copy } from "@/lib/clipboard";
+await copy(resultText);
+` + "```" + `
+
+## react-router (Expo Router replaces it entirely)
+` + "```" + `tsx
+// Do not use react-router
+import { BrowserRouter } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
+import { Route, Switch } from "react-router-dom";
+` + "```" + `
+
+Use router / Link / useLocalSearchParams from expo-router.
+
+## CSS-in-JS libraries
+` + "```" + `tsx
+// Not compatible with NativeWind
+import styled from "styled-components/native";
+import { css } from "@emotion/native";
+` + "```" + `
+
+## Inline style objects
+` + "```" + `tsx
+// Never use inline style prop
+<View style={{ padding: 16, flexDirection: "row" }} />
+<Text style={{ fontSize: 14, color: "#6b7280" }} />
+
+// Always className
+<View className="p-4 flex-row" />
+<Text className="text-sm text-slate-500" />
+` + "```" + `
+
+## Function-form style on Pressable (CRITICAL — silently broken on web)
+React Native's <Pressable> supports a function form of the style prop
+that takes the press state. This pattern interacts badly with NativeWind's
+web runtime: width/height set inside the function are SILENTLY DROPPED in
+the web preview, collapsing buttons to ~20px (content size) even though
+the native build looks fine. Symptom: tiny buttons clustered at the bottom
+of the screen in the studio preview iframe.
+
+NEVER write width/height inside a function-form style prop. Use
+className-based sizing for ANYTHING dimensional, and the function form
+only for transient effects like opacity:
+
+` + "```" + `tsx
+// WRONG — width:80 vanishes on web
+<Pressable
+  className="rounded-full bg-orange-400"
+  style={({ pressed }) => ({
+    width: 80,            // dropped by NativeWind on web
+    height: 80,           // sometimes dropped
+    opacity: pressed ? 0.75 : 1,
+  })}
+/>
+
+// RIGHT — sizing via className, press state via active:* utilities
+<Pressable className="rounded-full bg-orange-400 w-20 h-20 active:opacity-75" />
+
+// ALSO RIGHT — className itself can be a function on Pressable
+<Pressable
+  className={({ pressed }) =>
+    "rounded-full bg-orange-400 w-20 h-20 " + (pressed ? "opacity-75" : "")
+  }
+/>
+` + "```" + `
+
+For aspect-ratio buttons (calculator, grid items), prefer
+` + "`w-20 h-20`" + ` (fixed) or ` + "`flex-1 aspect-square`" + ` (responsive grid).
+Both work in className.
+
+## StyleSheet.create
+` + "```" + `tsx
+// Not needed with NativeWind
+const styles = StyleSheet.create({
+  container: { flex: 1, padding: 16 },
+});
+` + "```" + `
+
+## Invalid Tailwind classes on native
+` + "```" + `tsx
+// These are silently ignored or broken on native
+className="hover:bg-slate-100"      // no hover on touchscreens
+className="focus:border-blue-500"   // focus: not supported on native; track focus state manually
+className="transition-colors"       // no CSS transitions
+className="animate-spin"            // use Animated API
+className="cursor-pointer"          // no cursor
+className="inline-flex"             // use flex flex-row
+className="object-cover"            // use resizeMode on Image
+` + "```" + `
+
+## Stripe for digital goods (App Store rejection)
+` + "```" + `tsx
+// Never import Stripe inside the Expo app for digital goods
+import { StripeProvider } from "@stripe/stripe-react-native";
+// Stripe is fine for physical goods / services outside the app.
+// For digital subscriptions / in-app upgrades: use RevenueCat (lib/iap.ts).
+` + "```" + `
+
+## Raw fetch in screens
+` + "```" + `tsx
+// Never raw fetch — bypasses auth token injection
+const res = await fetch("https://myapp.wemob.app/api/todos");
+
+// Always apiFetch
+import { apiFetch } from "@/lib/api";
+const todos = await apiFetch<Todo[]>("/api/todos");
+` + "```" + `
+
+## Requesting push permission on launch
+` + "```" + `tsx
+// App Store rejection — see PUSH NOTIFICATIONS section
+useEffect(() => {
+  requestPushPermission();  // Never call this in a layout or on app mount
+}, []);
+` + "```" + `
+
+# WEB FALLBACK (Studio Preview)
+The Expo app may also render in a browser via React Native Web when the user
+previews it in the Wemob Studio. Most code just works, but a few patterns
+need attention.
+
+## What differs on web
+- Native modules (camera, biometrics, haptics, push) are no-ops — gate with
+  Platform.OS !== "web".
+- expo-secure-store falls back to localStorage on web — session works.
+- Touch events: use Pressable (works on both), not TouchableOpacity (web
+  has minor differences). This is already enforced by using @/components/ui/button.
+- SafeAreaView and useSafeAreaInsets() return ZERO padding on web. Screens
+  that rely on insets alone will render flush against the iframe edges in
+  the Studio preview. Always combine static ` + "`px-N`" + ` with insets — see the
+  "Safe areas" section above.
+- FlatList renders all items on web (no virtualization) — for large lists
+  add a note, but don't optimize for it.
+
+## Conditional platform code
+` + "```" + `tsx
+import { Platform } from "react-native";
 ```
 
 # DATA FETCHING
