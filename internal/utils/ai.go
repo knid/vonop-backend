@@ -1151,6 +1151,7 @@ type ToolCallConfig struct {
 	MaxContinuations  int            // Max finish_reason=length continuation rounds (default 3). -1 = disable continuations entirely.
 	ShouldContinue    func() bool    // Called before each round/continuation. Return false to abort. nil = always continue.
 	PromptCacheKey    string         // Moonshot K2.6 session-level prompt cache key (sent on every round)
+	MaxMessages       int            // Maximum messages to send to the LLM; drops oldest non-system messages when exceeded. 0 = unlimited.
 }
 
 // An optional ToolCallConfig can be passed to override defaults.
@@ -1280,6 +1281,29 @@ func StreamWithTools(
 		}
 		if ctx.Err() != nil {
 			return "", ctx.Err()
+		}
+
+		// Trim message history if it exceeds the max message cap.
+		if len(opts) > 0 && opts[0].MaxMessages > 0 && len(currentMessages) > opts[0].MaxMessages {
+			dropped := 0
+			// Keep all leading system messages; drop oldest non-system messages.
+			systemCount := 0
+			for i := range currentMessages {
+				if currentMessages[i].Role == "system" {
+					systemCount++
+				} else {
+					break
+				}
+			}
+			target := opts[0].MaxMessages
+			if systemCount >= target {
+				target = systemCount + 1
+			}
+			if len(currentMessages) > target {
+				dropped = len(currentMessages) - target
+				currentMessages = append(currentMessages[:systemCount], currentMessages[systemCount+dropped:]...)
+				slog.Warn("StreamWithTools trimmed message history", "dropped", dropped, "remaining", len(currentMessages), "max", opts[0].MaxMessages)
+			}
 		}
 
 		body, err := buildLLMRequestBody(ChatRequest{

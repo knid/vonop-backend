@@ -76,11 +76,11 @@ func TestConvertHistory_AssistantSingleToolRound(t *testing.T) {
 	assert.Equal(t, "read_files", out[0].ToolCalls[0].Function.Name)
 	assert.Equal(t, `{"paths":["a.txt"]}`, out[0].ToolCalls[0].Function.Arguments)
 
-	// Tool result message
+	// Tool result message — read_files is ALWAYS truncated (drawer provides contents)
 	assert.Equal(t, "tool", out[1].Role)
 	assert.Equal(t, "tc1", out[1].ToolCallID)
 	assert.Equal(t, "read_files", out[1].Name)
-	assert.Equal(t, "content of a", out[1].Content)
+	assert.Contains(t, out[1].Content, "file content omitted")
 }
 
 func TestConvertHistory_AssistantMultiRound(t *testing.T) {
@@ -103,10 +103,10 @@ func TestConvertHistory_AssistantMultiRound(t *testing.T) {
 	require.Len(t, out[0].ToolCalls, 1)
 	assert.Equal(t, "tc1", out[0].ToolCalls[0].ID)
 
-	// Round 1 tool result
+	// Round 1 tool result — read_files ALWAYS truncated
 	assert.Equal(t, "tool", out[1].Role)
 	assert.Equal(t, "tc1", out[1].ToolCallID)
-	assert.Equal(t, "r1", out[1].Content)
+	assert.Contains(t, out[1].Content, "file content omitted")
 
 	// Round 2 assistant
 	assert.Equal(t, "assistant", out[2].Role)
@@ -114,7 +114,7 @@ func TestConvertHistory_AssistantMultiRound(t *testing.T) {
 	require.Len(t, out[2].ToolCalls, 1)
 	assert.Equal(t, "tc2", out[2].ToolCalls[0].ID)
 
-	// Round 2 tool result
+	// Round 2 tool result — edit_file on last turn keeps full result
 	assert.Equal(t, "tool", out[3].Role)
 	assert.Equal(t, "tc2", out[3].ToolCallID)
 	assert.Equal(t, "r2", out[3].Content)
@@ -228,4 +228,135 @@ func TestConvertHistory_SkipsSystemRolePassthrough(t *testing.T) {
 	require.Len(t, out, 1)
 	assert.Equal(t, "system", out[0].Role)
 	assert.Equal(t, "be helpful", out[0].Content)
+}
+
+func TestConvertHistory_ReadFilesAlwaysTruncated(t *testing.T) {
+	parts1, _ := json.Marshal([]models.ChatMessagePart{
+		{Type: "tool_call", ToolCallID: "tc1", Name: "read_files", Input: []byte(`{}`), Result: "===== a.txt =====\nold content a\n===== b.txt =====\nold content b"},
+	})
+	parts2, _ := json.Marshal([]models.ChatMessagePart{
+		{Type: "tool_call", ToolCallID: "tc2", Name: "read_files", Input: []byte(`{}`), Result: "===== c.txt =====\nnew content c"},
+	})
+	history := []models.AppChatMessage{
+		{Role: "assistant", Content: "", Parts: parts1},
+		{Role: "assistant", Content: "", Parts: parts2},
+	}
+	out := convertHistory(history)
+
+	// Both assistant turns produce 1 assistant + 1 tool result = 4 messages total
+	require.Len(t, out, 4)
+
+	// First turn tool result — read_files should ALWAYS be truncated
+	assert.Equal(t, "tool", out[1].Role)
+	assert.Contains(t, out[1].Content, "file content omitted")
+
+	// Second turn tool result — read_files should ALSO be truncated (even though it's the last turn)
+	assert.Equal(t, "tool", out[3].Role)
+	assert.Contains(t, out[3].Content, "file content omitted")
+}
+
+func TestConvertHistory_OnlyLastAssistantTurnKeepsFullNonReadResults(t *testing.T) {
+	parts1, _ := json.Marshal([]models.ChatMessagePart{
+		{Type: "tool_call", ToolCallID: "tc1", Name: "edit_file", Input: []byte(`{}`), Result: "first edit result"},
+	})
+	parts2, _ := json.Marshal([]models.ChatMessagePart{
+		{Type: "tool_call", ToolCallID: "tc2", Name: "edit_file", Input: []byte(`{}`), Result: "second edit result"},
+	})
+	history := []models.AppChatMessage{
+		{Role: "assistant", Content: "", Parts: parts1},
+		{Role: "assistant", Content: "", Parts: parts2},
+	}
+	out := convertHistory(history)
+
+	require.Len(t, out, 4)
+
+	// First turn — non-read tool result should be truncated
+	assert.Equal(t, "tool", out[1].Role)
+	assert.Contains(t, out[1].Content, "first edit result")
+	// It should be truncated since it's not the last assistant turn
+	assert.True(t, len(out[1].Content) < len("first edit result")+10, "expected truncated result for first turn")
+
+	// Second (last) turn — non-read tool result should keep full content
+	assert.Equal(t, "tool", out[3].Role)
+	assert.Equal(t, "second edit result", out[3].Content)
+}
+
+func TestExtractFileDrawerFromHistory_ReadFiles(t *testing.T) {
+	parts, _ := json.Marshal([]models.ChatMessagePart{
+		{Type: "tool_call", ToolCallID: "tc1", Name: "read_files", Input: []byte(`{}`), Result: "===== a.txt =====\ncontent of a\n===== b.txt =====\ncontent of b"},
+	})
+	history := []models.AppChatMessage{
+		{Role: "assistant", Content: "", Parts: parts},
+	}
+	drawer := extractFileDrawerFromHistory(history)
+
+	require.Len(t, drawer, 2)
+	assert.Equal(t, "content of a", drawer["a.txt"])
+	assert.Equal(t, "content of b", drawer["b.txt"])
+}
+
+func TestExtractFileDrawerFromHistory_ReadFile(t *testing.T) {
+	parts, _ := json.Marshal([]models.ChatMessagePart{
+		{Type: "tool_call", ToolCallID: "tc1", Name: "read_file", Input: []byte(`{}`), Result: "===== foo.go =====\npackage main\n\nfunc main() {}"},
+	})
+	history := []models.AppChatMessage{
+		{Role: "assistant", Content: "", Parts: parts},
+	}
+	drawer := extractFileDrawerFromHistory(history)
+
+	require.Len(t, drawer, 1)
+	assert.Equal(t, "package main\n\nfunc main() {}", drawer["foo.go"])
+}
+
+func TestExtractFileDrawerFromHistory_OnlyLastTwoTurns(t *testing.T) {
+	parts1, _ := json.Marshal([]models.ChatMessagePart{
+		{Type: "tool_call", ToolCallID: "tc1", Name: "read_files", Input: []byte(`{}`), Result: "===== old.txt =====\nold content"},
+	})
+	parts2, _ := json.Marshal([]models.ChatMessagePart{
+		{Type: "tool_call", ToolCallID: "tc2", Name: "read_files", Input: []byte(`{}`), Result: "===== mid.txt =====\nmid content"},
+	})
+	parts3, _ := json.Marshal([]models.ChatMessagePart{
+		{Type: "tool_call", ToolCallID: "tc3", Name: "read_files", Input: []byte(`{}`), Result: "===== new.txt =====\nnew content"},
+	})
+	history := []models.AppChatMessage{
+		{Role: "assistant", Content: "", Parts: parts1},
+		{Role: "assistant", Content: "", Parts: parts2},
+		{Role: "assistant", Content: "", Parts: parts3},
+	}
+	drawer := extractFileDrawerFromHistory(history)
+
+	// Only last 2 turns scanned, so old.txt should be absent
+	require.Len(t, drawer, 2)
+	assert.NotContains(t, drawer, "old.txt")
+	assert.Equal(t, "mid content", drawer["mid.txt"])
+	assert.Equal(t, "new content", drawer["new.txt"])
+}
+
+func TestExtractFileDrawerFromHistory_SkipsNonReadTools(t *testing.T) {
+	parts, _ := json.Marshal([]models.ChatMessagePart{
+		{Type: "tool_call", ToolCallID: "tc1", Name: "edit_file", Input: []byte(`{}`), Result: "edit done"},
+		{Type: "tool_call", ToolCallID: "tc2", Name: "read_file", Input: []byte(`{}`), Result: "===== x.txt =====\nhello"},
+	})
+	history := []models.AppChatMessage{
+		{Role: "assistant", Content: "", Parts: parts},
+	}
+	drawer := extractFileDrawerFromHistory(history)
+
+	require.Len(t, drawer, 1)
+	assert.Equal(t, "hello", drawer["x.txt"])
+}
+
+func TestExtractFileDrawerFromHistory_MultiplePartsInOneTurn(t *testing.T) {
+	parts, _ := json.Marshal([]models.ChatMessagePart{
+		{Type: "tool_call", ToolCallID: "tc1", Name: "read_files", Input: []byte(`{}`), Result: "===== a.txt =====\nalpha"},
+		{Type: "tool_call", ToolCallID: "tc2", Name: "read_files", Input: []byte(`{}`), Result: "===== b.txt =====\nbeta"},
+	})
+	history := []models.AppChatMessage{
+		{Role: "assistant", Content: "", Parts: parts},
+	}
+	drawer := extractFileDrawerFromHistory(history)
+
+	require.Len(t, drawer, 2)
+	assert.Equal(t, "alpha", drawer["a.txt"])
+	assert.Equal(t, "beta", drawer["b.txt"])
 }
