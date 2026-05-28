@@ -130,7 +130,7 @@ func NewController(db *database.Database, concurrentBuildLimiter chan struct{},
 }
 
 // llmProvider resolves the active LLM provider from the LLM_PROVIDER secret.
-// Supported values: "openrouter" (default), "anthropic", "moonshot", "zai".
+// Supported values: "openrouter" (default), "anthropic", "moonshot".
 // Google models (e.g. "google/gemini-2.5-flash-lite") are routed through OpenRouter.
 //
 // When the primary is "anthropic" and OPENROUTER_API_KEY is set, an OpenRouter
@@ -155,10 +155,6 @@ func (c *Controller) llmProvider() *utils.LLMProvider {
 			moonshotReasoning = nil
 		}
 		p := &utils.LLMProvider{Name: "moonshot", BaseURL: "https://api.moonshot.ai/v1", APIKey: c.SecretManager.GetSecret("MOONSHOT_API_KEY"), DefaultReasoning: moonshotReasoning, FastModelOverride: fastModel}
-		c.attachOpenRouterFallback(p, fastModel)
-		return p
-	case "zai":
-		p := &utils.LLMProvider{Name: "zai", BaseURL: "https://api.z.ai/api/paas/v4", APIKey: c.SecretManager.GetSecret("ZAI_API_KEY"), DefaultReasoning: c.reasoningConfig(), FastModelOverride: fastModel}
 		c.attachOpenRouterFallback(p, fastModel)
 		return p
 	default:
@@ -208,8 +204,6 @@ func (c *Controller) llmProviderForUser(user *models.User) *utils.LLMProvider {
 			moonshotReasoning = nil
 		}
 		p = &utils.LLMProvider{Name: "moonshot", BaseURL: "https://api.moonshot.ai/v1", APIKey: c.SecretManager.GetSecret("MOONSHOT_API_KEY"), DefaultReasoning: moonshotReasoning, FastModelOverride: fastModel, ConfiguredModel: model}
-	case "zai":
-		p = &utils.LLMProvider{Name: "zai", BaseURL: "https://api.z.ai/api/paas/v4", APIKey: c.SecretManager.GetSecret("ZAI_API_KEY"), DefaultReasoning: c.reasoningConfig(), FastModelOverride: fastModel, ConfiguredModel: model}
 	default:
 		p = &utils.LLMProvider{Name: "openrouter", BaseURL: "https://openrouter.ai/api/v1", APIKey: c.SecretManager.GetSecret("OPENROUTER_API_KEY"), DefaultReasoning: c.reasoningConfig(), FastModelOverride: fastModel, ConfiguredModel: model}
 	}
@@ -224,7 +218,7 @@ func (c *Controller) llmProviderForUser(user *models.User) *utils.LLMProvider {
 }
 
 // parseProviderModel splits a "provider/model" string into provider name and
-// bare model ID. Known providers: anthropic, moonshot, zai, openrouter.
+// bare model ID. Known providers: anthropic, moonshot, openrouter.
 // If the first segment is not a known provider, the whole string is treated as
 // an OpenRouter model ID (e.g. "deepseek/deepseek-v4-flash", "google/gemini-2.5-flash-lite").
 func (c *Controller) parseProviderModel(providerModel string) (provider, model string) {
@@ -235,7 +229,7 @@ func (c *Controller) parseProviderModel(providerModel string) (provider, model s
 	}
 
 	switch parts[0] {
-	case "anthropic", "moonshot", "zai", "openrouter":
+	case "anthropic", "moonshot", "openrouter":
 		return parts[0], parts[1]
 	default:
 		// First segment is a vendor namespace on OpenRouter (e.g. "deepseek/...")

@@ -23,7 +23,7 @@ func bareModel(id string) string {
 // LLMProvider holds the base URL and API key for a specific LLM provider.
 // All supported providers expose an OpenAI-compatible /chat/completions endpoint.
 type LLMProvider struct {
-	Name              string // "openrouter", "anthropic", "moonshot", "zai"
+	Name              string // "openrouter", "anthropic", "moonshot"
 	BaseURL           string
 	APIKey            string
 	DefaultReasoning  *ReasoningConfig // applied when no explicit Reasoning/Thinking is set
@@ -55,11 +55,6 @@ func (p *LLMProvider) IsOpenRouter() bool {
 	return p.Name == "openrouter"
 }
 
-// IsZAI returns true when using the ZAI (GLM-4.7) provider.
-func (p *LLMProvider) IsZAI() bool {
-	return p.Name == "zai"
-}
-
 // IsMoonshot returns true when using the Moonshot (Kimi) provider.
 func (p *LLMProvider) IsMoonshot() bool {
 	return p.Name == "moonshot"
@@ -71,9 +66,9 @@ func (p *LLMProvider) IsAnthropic() bool {
 }
 
 // UsesThinkingFormat returns true for providers that use a non-OpenRouter
-// thinking/reasoning format. This includes ZAI, Moonshot, and Anthropic.
+// thinking/reasoning format. This includes Moonshot and Anthropic.
 func (p *LLMProvider) UsesThinkingFormat() bool {
-	return p.IsZAI() || p.IsMoonshot() || p.IsAnthropic()
+	return p.IsMoonshot() || p.IsAnthropic()
 }
 
 // WebSearchTool returns the builtin web search tool for providers that support it, or nil.
@@ -115,8 +110,6 @@ func (p *LLMProvider) DefaultModel() string {
 		return bareModel(constants.GatewayPreferredChatModel)
 	case "moonshot":
 		return "kimi-k2.6"
-	case "zai":
-		return "glm-4.7"
 	default:
 		return constants.GatewayPreferredChatModel // OpenRouter format
 	}
@@ -140,7 +133,7 @@ func (p *LLMProvider) FastModel() string {
 
 // SupportsVision returns true if the provider supports multimodal (image) input.
 func (p *LLMProvider) SupportsVision() bool {
-	return !p.IsZAI()
+	return true
 }
 
 // SetLLMHeaders applies auth and provider-specific headers to an HTTP request.
