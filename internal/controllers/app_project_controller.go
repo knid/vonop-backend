@@ -41,10 +41,10 @@ func (e *AppLimitError) Error() string {
 
 // CreateDraftAppProject creates a new app project in "draft" status — no
 // generation is kicked off. Used by the home composer flow, which creates the
-// project synchronously, navigates the user to the studio, and then lets the
-// studio kick off the initial generation through the normal chat endpoint.
-// This keeps the UI consistent from the very first prompt instead of forcing
-// the user through a bespoke bootstrap screen.
+// project (with a fast local name) and redirects the user to the AI studio
+// immediately. The real LLM-generated name is applied in the background.
+// The studio then kicks off the initial generation through the normal chat
+// endpoint. This avoids making the user wait on the home page.
 func (c *Controller) CreateDraftAppProject(ctx context.Context, user *models.User, req requests.GenerateAppRequest) (*models.AppProject, error) {
 	project, err := c.CreateAppProject(ctx, user, req)
 	if err != nil {
@@ -124,7 +124,11 @@ func (c *Controller) CreateAppProject(ctx context.Context, user *models.User, re
 		}
 	}
 
-	name, slug := c.generateAppNameAndSlug(ctx, req.Prompt, user)
+	// Use a fast local fallback for name/slug so the create request returns
+	// instantly. The real LLM name generation runs in the background (see
+	// refineProjectNameAsync) and patches the project shortly after creation.
+	// This lets the home composer redirect to the AI studio without waiting.
+	name, slug := fallbackNameAndSlug(req.Prompt)
 
 	// Reuse the org we already resolved for the quota gate above. Avoids a
 	// second RequireOrgIDForUser call (and its DB roundtrip).
@@ -160,6 +164,12 @@ func (c *Controller) CreateAppProject(ctx context.Context, user *models.User, re
 		slog.Error("Failed to create app project", "error", err)
 		return nil, fmt.Errorf("failed to create project")
 	}
+
+	// Kick off async LLM name generation. The project was created with a
+	// fast local fallback name so the caller (home composer) can redirect
+	// to the AI studio immediately. The goroutine will update the real name
+	// (and a nicer slug if it is still safe to do so) in the background.
+	go c.refineProjectNameAsync(project.ID, req.Prompt, user)
 
 	// Initialize git repo for this project
 	if _, initErr := c.GitRepoService.Init(project.ID.String()); initErr != nil {
@@ -674,5 +684,52 @@ func (c *Controller) MoveAppProjectToOrg(user *models.User, projectID string, de
 	}
 	project.OrganizationID = destOrgID
 	return project, nil
+}
+
+// refineProjectNameAsync runs the real LLM name generator in the background
+// after a project has already been created with a fast local fallback name.
+// It updates the display Name (always) and the Slug (only when it is still
+// safe — i.e. no runtime_app row has been created yet).
+func (c *Controller) refineProjectNameAsync(id uuid.UUID, prompt string, user *models.User) {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("refineProjectNameAsync panic recovered", "project_id", id, "panic", r)
+		}
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+	defer cancel()
+
+	refinedName, refinedSlug := c.generateAppNameAndSlug(ctx, prompt, user)
+	if refinedName == "" {
+		return
+	}
+
+	proj, err := c.DB.GetAppProjectByID(id.String())
+	if err != nil {
+		return
+	}
+
+	changed := false
+	if refinedName != proj.Name {
+		proj.Name = refinedName
+		changed = true
+	}
+
+	// Only change the slug if it would be an improvement and it is still
+	// safe to do so (no runtime app / domain has been wired up yet).
+	if refinedSlug != "" && refinedSlug != proj.Slug {
+		if ra, raErr := c.DB.GetRuntimeAppByAppProjectID(id.String()); raErr == nil && ra == nil {
+			proj.Slug = refinedSlug
+			changed = true
+		}
+	}
+
+	if changed {
+		proj.UpdatedAt = time.Now()
+		if _, uerr := c.DB.UpdateAppProject(proj); uerr != nil {
+			slog.Warn("refineProjectNameAsync update failed", "error", uerr, "project_id", id)
+		}
+	}
 }
 
