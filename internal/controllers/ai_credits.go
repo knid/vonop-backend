@@ -608,8 +608,8 @@ func (c *Controller) GrantInitialFreeCreditsIfNeeded(user *models.User, orgID uu
 // TokensToCredits converts token counts to credits using remote-config values
 // for tokens-per-credit, output multiplier, and cache-read divisor. Falls back
 // to hardcoded defaults if remote config is unavailable.
-func (c *Controller) TokensToCredits(promptTokens, completionTokens, cacheReadTokens int) int {
-	tpc, om, crd := c.creditFormulaParams()
+func (c *Controller) TokensToCredits(planName string, promptTokens, completionTokens, cacheReadTokens int) int {
+	tpc, om, crd := c.creditFormulaParamsForPlan(planName)
 	return models.TokensToCreditsWithConfig(promptTokens, completionTokens, cacheReadTokens, tpc, om, crd)
 }
 
@@ -617,9 +617,27 @@ func (c *Controller) TokensToCredits(promptTokens, completionTokens, cacheReadTo
 // credit formula, falling back to hardcoded defaults when RC returns
 // non-positive values (treated as "unset").
 func (c *Controller) creditFormulaParams() (tokensPerCredit, outputMultiplier, cacheReadDivisor int) {
-	tokensPerCredit = c.RemoteConfig.GetInt(remoteconfig.AICreditsTokensPerCredit, remoteconfig.Global)
-	outputMultiplier = c.RemoteConfig.GetInt(remoteconfig.AICreditsOutputMultiplier, remoteconfig.Global)
-	cacheReadDivisor = c.RemoteConfig.GetInt(remoteconfig.AICreditsCacheReadDivisor, remoteconfig.Global)
+	return c.creditFormulaParamsForPlan("")
+}
+
+// creditFormulaParamsForPlan resolves per-plan flags first, then global flags,
+// then hardcoded defaults. Empty planName skips the per-plan lookup.
+func (c *Controller) creditFormulaParamsForPlan(planName string) (tokensPerCredit, outputMultiplier, cacheReadDivisor int) {
+	if planName != "" {
+		pn := strings.ToLower(planName)
+		tokensPerCredit = c.RemoteConfig.GetInt(remoteconfig.PlanAICreditsTokensPerCredit(pn), remoteconfig.Global)
+		outputMultiplier = c.RemoteConfig.GetInt(remoteconfig.PlanAICreditsOutputMultiplier(pn), remoteconfig.Global)
+		cacheReadDivisor = c.RemoteConfig.GetInt(remoteconfig.PlanAICreditsCacheReadDivisor(pn), remoteconfig.Global)
+	}
+	if tokensPerCredit <= 0 {
+		tokensPerCredit = c.RemoteConfig.GetInt(remoteconfig.AICreditsTokensPerCredit, remoteconfig.Global)
+	}
+	if outputMultiplier <= 0 {
+		outputMultiplier = c.RemoteConfig.GetInt(remoteconfig.AICreditsOutputMultiplier, remoteconfig.Global)
+	}
+	if cacheReadDivisor <= 0 {
+		cacheReadDivisor = c.RemoteConfig.GetInt(remoteconfig.AICreditsCacheReadDivisor, remoteconfig.Global)
+	}
 	if tokensPerCredit <= 0 {
 		tokensPerCredit, _ = remoteconfig.AICreditsTokensPerCredit.Fallback.(int)
 	}
@@ -637,11 +655,11 @@ func (c *Controller) creditFormulaParams() (tokensPerCredit, outputMultiplier, c
 // users are actually charged — aggregating tokens first and rounding once
 // systematically under-bills (e.g. a 35-call run was billed 53 credits with
 // aggregate-then-round but should have been 71 with per-call rounding).
-func (c *Controller) CreditsForTracker(tracker *utils.TokenTracker) int {
+func (c *Controller) CreditsForTracker(planName string, tracker *utils.TokenTracker) int {
 	if tracker == nil {
 		return 0
 	}
-	tpc, om, crd := c.creditFormulaParams()
+	tpc, om, crd := c.creditFormulaParamsForPlan(planName)
 	total := 0
 	for _, e := range tracker.Entries() {
 		total += models.TokensToCreditsWithConfig(e.PromptTokens, e.CompletionTokens, e.CacheReadInputTokens, tpc, om, crd, e.CacheReadInclusive)
@@ -676,8 +694,9 @@ func (c *Controller) MakeCreditBudgetChecker(user *models.User, orgID uuid.UUID,
 	if err != nil {
 		return nil
 	}
+	_, planName, _ := c.GetUserLimitsWithPlan(user)
 	return func() bool {
-		spent := c.CreditsForTracker(tracker)
+		spent := c.CreditsForTracker(planName, tracker)
 		if spent >= budget {
 			slog.Warn("credit budget exhausted mid-generation",
 				"user_id", user.ID, "spent", spent, "budget", budget)
@@ -1262,7 +1281,8 @@ func (c *Controller) RecordTokenUsage(user *models.User, action, model, provider
 	// cache-read tokens included. Used only as a PostHog property on the
 	// grouping trace event for ops visibility — actual deduction happens via
 	// DeductCredits at the agent.Run finalisation site.
-	creditsSpent := c.CreditsForTracker(tracker)
+	_, planName, _ := c.GetUserLimitsWithPlan(user)
+	creditsSpent := c.CreditsForTracker(planName, tracker)
 
 	if c.PostHog != nil {
 		// Caller-supplied trace id takes precedence so error events emitted
@@ -1307,7 +1327,7 @@ func (c *Controller) RecordTokenUsage(user *models.User, action, model, provider
 				Set("app_type", appType).
 				Set("app_id", reference).
 				Set("project_id", reference).
-				Set("credits_estimated", c.TokensToCredits(entry.PromptTokens, entry.CompletionTokens, entry.CacheReadInputTokens))
+				Set("credits_estimated", c.TokensToCredits(planName, entry.PromptTokens, entry.CompletionTokens, entry.CacheReadInputTokens))
 			if tracker.OrganizationID != "" {
 				props.Set("org_id", tracker.OrganizationID)
 			}

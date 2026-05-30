@@ -150,6 +150,10 @@ type RunDependencies struct {
 	PostHog       posthog.Client
 	RemoteConfig  *remoteconfig.Service
 
+	// UserPlanName is the lowercased subscription plan (starter, hobby, pro, max).
+	// Used by creditsBilled to resolve per-plan AI credit formula parameters.
+	UserPlanName string
+
 	// Callbacks bound per-run by the view/controller layer.
 	CreditChecker            CreditCheckerFactory
 	DeductCredits            CreditDeductor

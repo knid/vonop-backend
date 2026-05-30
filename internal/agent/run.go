@@ -1384,9 +1384,21 @@ func creditsBilled(deps *RunDependencies, tracker *utils.TokenTracker) int {
 	}
 	tpc, om, crd := 0, 0, 0
 	if deps != nil && deps.RemoteConfig != nil {
-		tpc = deps.RemoteConfig.GetInt(remoteconfig.AICreditsTokensPerCredit, remoteconfig.Global)
-		om = deps.RemoteConfig.GetInt(remoteconfig.AICreditsOutputMultiplier, remoteconfig.Global)
-		crd = deps.RemoteConfig.GetInt(remoteconfig.AICreditsCacheReadDivisor, remoteconfig.Global)
+		if deps.UserPlanName != "" {
+			pn := strings.ToLower(deps.UserPlanName)
+			tpc = deps.RemoteConfig.GetInt(remoteconfig.PlanAICreditsTokensPerCredit(pn), remoteconfig.Global)
+			om = deps.RemoteConfig.GetInt(remoteconfig.PlanAICreditsOutputMultiplier(pn), remoteconfig.Global)
+			crd = deps.RemoteConfig.GetInt(remoteconfig.PlanAICreditsCacheReadDivisor(pn), remoteconfig.Global)
+		}
+		if tpc <= 0 {
+			tpc = deps.RemoteConfig.GetInt(remoteconfig.AICreditsTokensPerCredit, remoteconfig.Global)
+		}
+		if om <= 0 {
+			om = deps.RemoteConfig.GetInt(remoteconfig.AICreditsOutputMultiplier, remoteconfig.Global)
+		}
+		if crd <= 0 {
+			crd = deps.RemoteConfig.GetInt(remoteconfig.AICreditsCacheReadDivisor, remoteconfig.Global)
+		}
 	}
 	if tpc <= 0 {
 		tpc, _ = remoteconfig.AICreditsTokensPerCredit.Fallback.(int)

@@ -92,7 +92,8 @@ func (c *Controller) DraftListing(ctx context.Context, user *models.User, appID 
 		"anthropic", project.ID.String(), "standard", tracker)
 	_, _, total, _ := tracker.Totals()
 	if total > 0 {
-		credits := c.CreditsForTracker(tracker)
+		_, planName, _ := c.GetUserLimitsWithPlan(user)
+		credits := c.CreditsForTracker(planName, tracker)
 		orgID, orgErr := c.ResolveOrgForProjectID(user, project.ID.String())
 		if orgErr != nil {
 			slog.Warn("listing_draft: resolve org failed", "err", orgErr)
