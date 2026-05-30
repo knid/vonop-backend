@@ -22,6 +22,23 @@ type Repo struct {
 	service   *Service
 }
 
+// Worktree is a disposable git worktree created from a project's repository.
+// It shares the object store (fast + cheap) but has a completely independent
+// working tree.
+//
+// Intended for deploy-time source transformations (badge/analytics injection,
+// defensive scaffolding like ensureNextjsRootLayout) without mutating the main
+// persistent checkout used by the agent, file APIs, etc.
+//
+// Always call Remove() when done (defer recommended). The worktree is created
+// from HEAD (detached) at the moment of creation.
+type Worktree struct {
+	Path      string
+	ProjectID string
+	service   *Service
+	mainRepo  string // main checkout path (for `git worktree` commands)
+}
+
 type CommitInfo struct {
 	Hash      string
 	Message   string
@@ -620,4 +637,111 @@ func writeFileAtomic(path string, data []byte) error {
 		return err
 	}
 	return os.Rename(tmpName, path)
+}
+
+// NewDisposableWorktree creates a short-lived git worktree for this project,
+// based on the current HEAD (detached). The worktree is placed under the
+// project's directory in .worktrees/ and is completely independent of the
+// main persistent checkout.
+//
+// This is the recommended way to perform deploy-time transformations
+// (branding injection, analytics injection, defensive scaffolding) without
+// ever mutating the user's canonical source.
+//
+// Caller must call Remove() when finished (use defer).
+func (r *Repo) NewDisposableWorktree() (*Worktree, error) {
+	unlock := r.service.lock(r.ProjectID)
+	defer unlock()
+
+	head, err := r.head()
+	if err != nil {
+		return nil, fmt.Errorf("gitrepo: get head for worktree: %w", err)
+	}
+
+	wtBase := filepath.Join(r.service.BasePath, r.ProjectID, ".worktrees")
+	if err := os.MkdirAll(wtBase, 0o755); err != nil {
+		return nil, fmt.Errorf("gitrepo: mkdir worktrees dir: %w", err)
+	}
+
+	wtPath, err := os.MkdirTemp(wtBase, "deploy-*")
+	if err != nil {
+		return nil, fmt.Errorf("gitrepo: create temp worktree dir: %w", err)
+	}
+
+	// Create the worktree from the main repo (this registers it properly with .git/worktrees)
+	if err := r.service.git(r.Path, "worktree", "add", "--detach", wtPath, head); err != nil {
+		_ = os.RemoveAll(wtPath)
+		return nil, fmt.Errorf("gitrepo: git worktree add: %w", err)
+	}
+
+	return &Worktree{
+		Path:      wtPath,
+		ProjectID: r.ProjectID,
+		service:   r.service,
+		mainRepo:  r.Path,
+	}, nil
+}
+
+// Remove destroys the worktree using the proper `git worktree remove` command
+// (so git's internal tracking is cleaned) followed by filesystem removal.
+// Safe to call multiple times.
+func (wt *Worktree) Remove() error {
+	if wt == nil || wt.Path == "" {
+		return nil
+	}
+
+	// Tell git to forget the worktree (best effort)
+	_ = wt.service.git(wt.mainRepo, "worktree", "remove", "--force", wt.Path)
+
+	// Nuke the directory
+	err := os.RemoveAll(wt.Path)
+	wt.Path = ""
+	return err
+}
+
+// ReadAllFiles reads all user files from the worktree (same filtering rules
+// as Repo.ReadAllFiles: skips .git, _wemob, .gitignore, and build artifacts).
+func (wt *Worktree) ReadAllFiles() (map[string]string, error) {
+	if wt == nil || wt.Path == "" {
+		return nil, fmt.Errorf("gitrepo: worktree not initialized")
+	}
+
+	files := make(map[string]string)
+	err := filepath.WalkDir(wt.Path, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, _ := filepath.Rel(wt.Path, path)
+		if rel == "." {
+			return nil
+		}
+		if shouldSkipDir(rel, d) {
+			return filepath.SkipDir
+		}
+		if d.IsDir() {
+			return nil
+		}
+		if rel == ".gitignore" {
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		files[rel] = string(data)
+		return nil
+	})
+	return files, err
+}
+
+// WriteFile writes content into the worktree (creates parent dirs as needed).
+func (wt *Worktree) WriteFile(relPath string, content []byte) error {
+	if wt == nil || wt.Path == "" {
+		return fmt.Errorf("gitrepo: worktree not initialized")
+	}
+	full := filepath.Join(wt.Path, relPath)
+	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+		return fmt.Errorf("gitrepo: mkdir in worktree: %w", err)
+	}
+	return os.WriteFile(full, content, 0o644)
 }

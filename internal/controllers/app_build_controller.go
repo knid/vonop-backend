@@ -632,6 +632,10 @@ func injectWemobBadge(fileMap map[string]string) {
 		"app/layout.jsx",
 		"src/app/layout.tsx",
 		"src/app/layout.jsx",
+		"backend/app/layout.tsx",
+		"backend/app/layout.jsx",
+		"backend/src/app/layout.tsx",
+		"backend/src/app/layout.jsx",
 	}
 
 	for _, path := range layoutPaths {

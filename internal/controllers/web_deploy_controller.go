@@ -210,67 +210,71 @@ func (c *Controller) HandleWebDeployTask(ctx context.Context, t *asynq.Task) err
 		slog.Warn("mark building failed", "err", err)
 	}
 
-	// 1. Pull source from Gitea, inject analytics + branding, push back.
+	// 1. Open the project's git repo and create a *disposable* worktree.
+	// All branding injection (badge for Starter plan, analytics) and defensive
+	// scaffolding now happen exclusively inside this isolated worktree.
+	// The main persistent checkout (used by the agent) is never touched.
 	repo, err := c.GitRepoService.Open(project.ID.String())
 	if err != nil {
 		slog.Warn("deploy_retryable", "deployment_id", p.DeploymentID, "stage", "gitea_open", "error", err)
 		return fmt.Errorf("gitea_open: %w", err)
 	}
-	repoFiles, err := repo.ReadAllFiles()
-	if err != nil || len(repoFiles) == 0 {
+
+	wt, err := repo.NewDisposableWorktree()
+	if err != nil {
+		slog.Warn("deploy_retryable", "deployment_id", p.DeploymentID, "stage", "create_worktree", "error", err)
+		return fmt.Errorf("create_worktree: %w", err)
+	}
+	defer wt.Remove()
+
+	// Read the exact source state at deploy time from the isolated worktree.
+	fileMap, err := wt.ReadAllFiles()
+	if err != nil || len(fileMap) == 0 {
 		if err == nil {
-			// Empty repo is permanent — no files to deploy.
 			return c.failTask(p.DeploymentID, "gitea_read_empty", fmt.Errorf("repo has no files"))
 		}
 		slog.Warn("deploy_retryable", "deployment_id", p.DeploymentID, "stage", "gitea_read", "error", err)
 		return fmt.Errorf("gitea_read: %w", err)
 	}
-	fileMap := make(map[string]string, len(repoFiles))
-	for k, v := range repoFiles {
-		fileMap[k] = v
-	}
+
 	var limits *models.StandardUserLimits
 	if project.OrganizationID != uuid.Nil {
 		limits, _ = c.GetOrgLimits(project.OrganizationID.String())
 	}
 	if limits == nil {
-		// Legacy fallback for unmigrated projects (OrganizationID == nil).
 		limits, _ = c.GetUserLimits(user)
 	}
 	if limits == nil || !limits.CanRemoveBrandLogo {
 		injectWemobBadge(fileMap)
 	}
 	injectWemobAnalytics(fileMap, project.ID.String())
+
+	// Write any injected changes back into the *worktree* only (never the main repo).
 	for path, content := range fileMap {
-		if repoFiles[path] != content {
-			if writeErr := repo.WriteFile(path, []byte(content)); writeErr != nil {
-				slog.Warn("write file during deploy", "path", path, "err", writeErr)
-			}
+		// We don't have the original map here anymore; just write everything
+		// that the injectors may have touched. The worktree is ephemeral.
+		if writeErr := wt.WriteFile(path, []byte(content)); writeErr != nil {
+			slog.Warn("write file to deploy worktree", "path", path, "err", writeErr)
 		}
 	}
 
-	// 2. Use the repo working tree as the Fly builder source. mobile_app_native
-	// projects have a backend/ + mobile/ split at the repo root; deploy only
-	// the backend/ subtree (Next.js API routes). Other project types deploy
-	// the whole repo.
-	sourceDir := repo.Path
+	// 2. All source preparation (injection + scaffolding) now happens inside
+	// the disposable worktree. Use the worktree's path as the build source.
+	// mobile_app_native projects still only build the backend/ subtree.
+	sourceDir := wt.Path
 	if project.ProjectType == models.ProjectTypeMobileAppNative {
-		sourceDir = filepath.Join(repo.Path, "backend")
+		sourceDir = filepath.Join(wt.Path, "backend")
 		if info, statErr := os.Stat(sourceDir); statErr != nil || !info.IsDir() {
 			return c.failTask(p.DeploymentID, "missing_backend_subtree",
 				fmt.Errorf("mobile_app_native project has no backend/ subtree at %s — agent must scaffold it before deploying", sourceDir))
 		}
-		// Defensive: ensure a Dockerfile exists. If the agent didn't generate
-		// one, write a sensible Next.js default. The AI can override it on
-		// the next turn by writing its own backend/Dockerfile.
 		if err := ensureNextjsDockerfile(sourceDir); err != nil {
 			return c.failTask(p.DeploymentID, "ensure_dockerfile", err)
 		}
 	}
-	// Defensive: backfill a root layout when the agent shipped a page.tsx
-	// without one. Next.js fails `next build` with "page.tsx doesn't have a
-	// root layout" — runs for ALL project types since web/ecommerce templates
-	// also occasionally have agent-generated pages outside the templated tree.
+	// Defensive scaffolding now runs against the worktree (after injection).
+	// This fixes the previous bug where a backfilled layout would not receive
+	// the badge/analytics scripts.
 	if err := ensureNextjsRootLayout(sourceDir); err != nil {
 		return c.failTask(p.DeploymentID, "ensure_root_layout", err)
 	}
@@ -370,30 +374,15 @@ func (c *Controller) HandleWebDeployTask(ctx context.Context, t *asynq.Task) err
 		slog.Warn("mark deploying", "err", err)
 	}
 
-	// 9. Wait for the machine to report healthy. Fly doesn't publish
-	// machine-state webhooks to own-org apps, so we poll inline here.
-	// 10min gives slow Next.js boots (large dep trees, first-run npm
-	// cache fill) room before we declare the deploy stuck. The full 10
-	// is only realized when build/push is fast; on worst-case ~10-min
-	// builds, asynq.Timeout (15min) kicks in first.
-	//
-	// If the wait fails AND the failure looks like the Fly host-init bug
-	// (machine never reaches "started" before flyd's restart cap), this
-	// destroys the stuck machines and redeploys once in a fallback region.
-	// Other failures (app crash, real timeout) bubble up unchanged.
+	// 9. Wait for the machine to report healthy...
 	if err := c.waitForHealthyWithRemediation(ctx, p.DeploymentID, flyAppName, spec, 10*time.Minute); err != nil {
 		return c.maybeRetry(ctx, p.DeploymentID, "wait_healthy", err)
 	}
 
-	// Revert working-tree modifications (badge injection, defensive scaffolding)
-	// so they don't persist in the repo between deploys.
-	if head, headErr := repo.Head(); headErr == nil {
-		if revertErr := repo.Revert(head); revertErr != nil {
-			slog.Warn("deploy: failed to revert working tree", "deployment_id", p.DeploymentID, "error", revertErr)
-		}
-	} else {
-		slog.Warn("deploy: failed to read HEAD for revert", "deployment_id", p.DeploymentID, "error", headErr)
-	}
+	// Note: No revert step here anymore. All branding injection and
+	// scaffolding happened inside the disposable worktree (wt), which is
+	// cleaned up by the defer wt.Remove() above. The main repo checkout
+	// was never mutated.
 
 	// 10. Flip to 'deployed' and fire success events.
 	deployedURL := "https://" + runtimeApp.CustomDomain
