@@ -1153,6 +1153,7 @@ type ToolCallConfig struct {
 	PromptCacheKey    string         // Moonshot K2.6 session-level prompt cache key (sent on every round)
 	MaxMessages       int            // Maximum messages to send to the LLM; drops oldest non-system messages when exceeded. 0 = unlimited.
 	RefreshPrefix     func(msg *Message)                                   // Called before each round (except round 0) to refresh the user-turn prefix (e.g. file tree + file drawer). Modifies the message in-place.
+	StripTools        []string       // Tool names to remove when stripping (e.g. read-only research tools). When empty, stripping removes all tools.
 }
 
 // An optional ToolCallConfig can be passed to override defaults.
@@ -1255,22 +1256,41 @@ func StreamWithTools(
 		}
 		// Progressively nudge the AI to stop researching and produce a final response.
 		// Phase 1 (nudgeAfter): inject a nudge message but keep tools available.
-		// Phase 2 (stripAfter): strip tools entirely to force text generation.
+		// Phase 2 (stripAfter): strip research tools to stop infinite loops while
+		// keeping write/edit tools so the AI can still complete its task.
 		roundTools := tools
 		if len(opts) > 0 && opts[0].FilterTools != nil {
 			roundTools = opts[0].FilterTools(roundTools)
 		}
 		if stripAfter >= 0 && consecutiveToolRounds >= stripAfter {
 			if !stripped {
-				stripContent := "FINAL WARNING: You MUST generate your complete response NOW. All tools have been removed. Use the information you have already gathered."
+				stripContent := "FINAL WARNING: You MUST generate your complete response NOW. Research tools have been removed — use write_file, edit_file, and other action tools to complete your task with the information you have already gathered."
 				if len(opts) > 0 && opts[0].StripMessage != "" {
 					stripContent = opts[0].StripMessage
 				}
 				appendToLastUserMsg(stripContent)
 				stripped = true
 			}
-			roundTools = nil
-			slog.Warn("Stripping tools to force final response", "round", round, "consecutive_tool_rounds", consecutiveToolRounds)
+			if len(opts) > 0 && len(opts[0].StripTools) > 0 {
+				filtered := make([]Tool, 0, len(roundTools))
+				for _, t := range roundTools {
+					skip := false
+					for _, stripName := range opts[0].StripTools {
+						if t.Function.Name == stripName {
+							skip = true
+							break
+						}
+					}
+					if !skip {
+						filtered = append(filtered, t)
+					}
+				}
+				roundTools = filtered
+				slog.Warn("Stripping research tools", "round", round, "consecutive_tool_rounds", consecutiveToolRounds, "remaining_tools", len(roundTools))
+			} else {
+				roundTools = nil
+				slog.Warn("Stripping all tools to force final response", "round", round, "consecutive_tool_rounds", consecutiveToolRounds)
+			}
 		} else if consecutiveToolRounds >= nudgeAfter && !nudged {
 			nudgeContent := "You have already gathered sufficient context from tool calls. Please wrap up your research and generate your final complete response. You may make one or two more targeted tool calls if absolutely necessary, but prioritize producing your response."
 			if len(opts) > 0 && opts[0].NudgeMessage != "" {

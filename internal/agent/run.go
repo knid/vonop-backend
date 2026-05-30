@@ -520,6 +520,7 @@ func Run(
 			MaxTokens:      64000,
 			NudgeAfter:     nudgeAfter,
 			StripAfter:     stripAfter,
+			StripTools:     []string{"read_files", "list_files", "grep", "read_attachment", "web_search", "read_build_logs", "read_deploy_logs", "read_mobile_config"},
 			TrimResults:    truncateToolResult,
 			MaxMessages:    25,
 			RefreshPrefix: func(msg *utils.Message) {
