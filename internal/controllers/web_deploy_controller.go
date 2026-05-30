@@ -211,9 +211,8 @@ func (c *Controller) HandleWebDeployTask(ctx context.Context, t *asynq.Task) err
 	}
 
 	// 1. Open the project's git repo and create a *disposable* worktree.
-	// All branding injection (badge for Starter plan, analytics) and defensive
-	// scaffolding now happen exclusively inside this isolated worktree.
-	// The main persistent checkout (used by the agent) is never touched.
+	// Branding injection + defensive scaffolding happen exclusively inside
+	// this isolated worktree. The user's main checkout is never mutated.
 	repo, err := c.GitRepoService.Open(project.ID.String())
 	if err != nil {
 		slog.Warn("deploy_retryable", "deployment_id", p.DeploymentID, "stage", "gitea_open", "error", err)
@@ -227,7 +226,24 @@ func (c *Controller) HandleWebDeployTask(ctx context.Context, t *asynq.Task) err
 	}
 	defer wt.Remove()
 
-	// Read the exact source state at deploy time from the isolated worktree.
+	// 2. Run defensive scaffolding first inside the worktree (this may
+	// backfill a missing root layout). Then read the final state and inject.
+	sourceDir := wt.Path
+	if project.ProjectType == models.ProjectTypeMobileAppNative {
+		sourceDir = filepath.Join(wt.Path, "backend")
+		if info, statErr := os.Stat(sourceDir); statErr != nil || !info.IsDir() {
+			return c.failTask(p.DeploymentID, "missing_backend_subtree",
+				fmt.Errorf("mobile_app_native project has no backend/ subtree at %s — agent must scaffold it before deploying", sourceDir))
+		}
+		if err := ensureNextjsDockerfile(sourceDir); err != nil {
+			return c.failTask(p.DeploymentID, "ensure_dockerfile", err)
+		}
+	}
+	if err := ensureNextjsRootLayout(sourceDir); err != nil {
+		return c.failTask(p.DeploymentID, "ensure_root_layout", err)
+	}
+
+	// 3. Read the final state (post-ensure) and perform injection on it.
 	fileMap, err := wt.ReadAllFiles()
 	if err != nil || len(fileMap) == 0 {
 		if err == nil {
@@ -249,34 +265,11 @@ func (c *Controller) HandleWebDeployTask(ctx context.Context, t *asynq.Task) err
 	}
 	injectWemobAnalytics(fileMap, project.ID.String())
 
-	// Write any injected changes back into the *worktree* only (never the main repo).
+	// Write injected files back into the worktree only.
 	for path, content := range fileMap {
-		// We don't have the original map here anymore; just write everything
-		// that the injectors may have touched. The worktree is ephemeral.
 		if writeErr := wt.WriteFile(path, []byte(content)); writeErr != nil {
 			slog.Warn("write file to deploy worktree", "path", path, "err", writeErr)
 		}
-	}
-
-	// 2. All source preparation (injection + scaffolding) now happens inside
-	// the disposable worktree. Use the worktree's path as the build source.
-	// mobile_app_native projects still only build the backend/ subtree.
-	sourceDir := wt.Path
-	if project.ProjectType == models.ProjectTypeMobileAppNative {
-		sourceDir = filepath.Join(wt.Path, "backend")
-		if info, statErr := os.Stat(sourceDir); statErr != nil || !info.IsDir() {
-			return c.failTask(p.DeploymentID, "missing_backend_subtree",
-				fmt.Errorf("mobile_app_native project has no backend/ subtree at %s — agent must scaffold it before deploying", sourceDir))
-		}
-		if err := ensureNextjsDockerfile(sourceDir); err != nil {
-			return c.failTask(p.DeploymentID, "ensure_dockerfile", err)
-		}
-	}
-	// Defensive scaffolding now runs against the worktree (after injection).
-	// This fixes the previous bug where a backfilled layout would not receive
-	// the badge/analytics scripts.
-	if err := ensureNextjsRootLayout(sourceDir); err != nil {
-		return c.failTask(p.DeploymentID, "ensure_root_layout", err)
 	}
 
 	// 3. Get/create the runtime_apps row.
