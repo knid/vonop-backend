@@ -299,6 +299,9 @@ var modelCosts = map[string][2]float64{
 	"grok-3-fast-beta":          {5.0, 25.0},
 	"gemini-2.5-flash":          {0.15, 0.6},
 	"gemini-2.5-pro":            {1.25, 10.0},
+	// Step models (via OpenRouter)
+	"step-3.5-flash":            {0.09, 0.30},
+	"step-3.7-flash":            {0.20, 1.15},
 }
 
 // cacheReadIsInclusive returns true for providers where cache-read tokens are

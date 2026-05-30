@@ -84,6 +84,8 @@ var GatewayModelCatalog = []GatewayModelInfo{
 	{ID: "anthropic/claude-sonnet-4.6", Name: "Claude Sonnet 4.6", Provider: "anthropic", Type: "chat", MaxContext: 200000, InputUSDPerM: 3.00, OutputUSDPerM: 15.00, CostPer1kInput: 3, CostPer1kOutput: 15, Capabilities: []string{"streaming", "vision"}},
 	{ID: "anthropic/claude-opus-4.7", Name: "Claude Opus 4.7", Provider: "anthropic", Type: "chat", MaxContext: 200000, InputUSDPerM: 5.00, OutputUSDPerM: 25.00, CostPer1kInput: 5, CostPer1kOutput: 25, Capabilities: []string{"streaming", "vision"}},
 	{ID: "google/gemini-2.5-pro", Name: "Gemini 2.5 Pro", Provider: "google", Type: "chat", MaxContext: 1048576, InputUSDPerM: 1.25, OutputUSDPerM: 5.00, CostPer1kInput: 1, CostPer1kOutput: 4, Capabilities: []string{"streaming", "vision"}},
+	{ID: "stepfun/step-3.5-flash", Name: "Step 3.5 Flash", Provider: "stepfun", Type: "chat", MaxContext: 32768, InputUSDPerM: 0.09, OutputUSDPerM: 0.30, CostPer1kInput: 1, CostPer1kOutput: 1, Capabilities: []string{"streaming"}},
+	{ID: "stepfun/step-3.7-flash", Name: "Step 3.7 Flash", Provider: "stepfun", Type: "chat", MaxContext: 32768, InputUSDPerM: 0.20, OutputUSDPerM: 1.15, CostPer1kInput: 1, CostPer1kOutput: 1, Capabilities: []string{"streaming"}},
 	// Image models — proxied directly to fal.ai, not through OpenRouter.
 	{ID: "fal-ai/flux/schnell", Name: "FLUX Schnell", Provider: "fal", Type: "image", CostCredits: 5, Capabilities: []string{"fast"}},
 	{ID: "fal-ai/flux-pro/v1.1", Name: "FLUX Pro v1.1", Provider: "fal", Type: "image", CostCredits: 15, Capabilities: []string{"hd"}},
