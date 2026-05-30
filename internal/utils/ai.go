@@ -26,6 +26,11 @@ const toolExecTimeout = 2 * time.Minute
 // growth from pathologically large LLM responses.
 const maxResponseBufferSize = 2 * 1024 * 1024 // 2 MB
 
+// maxBase64ImageBytes is the maximum raw image size we will convert to base64
+// before sending to LLM providers (OpenRouter, Moonshot, etc.). Larger images
+// are left as URLs to avoid excessive prompt bloat and request size limits.
+const maxBase64ImageBytes = 8 * 1024 * 1024 // 8 MiB raw (base64 will be ~33% larger)
+
 // ErrResponseTruncated is returned when the LLM response was cut off due to
 // reaching the output token limit (finish_reason=length). The response text
 // is still delivered via the onChunk callback — callers should check for this
@@ -77,6 +82,7 @@ func truncateBody(s string, maxLen int) string {
 var imageDownloadClient = &http.Client{Timeout: 15 * time.Second}
 
 // downloadImageToBase64 fetches an image URL and returns it as a base64 data URI.
+// It rejects images larger than maxBase64ImageBytes to prevent prompt bloat.
 func downloadImageToBase64(url string) (string, error) {
 	resp, err := imageDownloadClient.Get(url)
 	if err != nil {
@@ -90,6 +96,9 @@ func downloadImageToBase64(url string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("read image body: %w", err)
 	}
+	if len(data) > maxBase64ImageBytes {
+		return "", fmt.Errorf("image too large for base64 conversion (%d bytes > %d)", len(data), maxBase64ImageBytes)
+	}
 	mediaType := resp.Header.Get("Content-Type")
 	if mediaType == "" {
 		mediaType = "image/png"
@@ -98,14 +107,17 @@ func downloadImageToBase64(url string) (string, error) {
 	return fmt.Sprintf("data:%s;base64,%s", mediaType, b64), nil
 }
 
-// convertMessagesForMoonshot converts any HTTPS image URLs in messages to
-// base64 data URIs. Kimi K2.6 only accepts base64-encoded images; it rejects
-// HTTPS URLs in image_url blocks.
+// convertImageURLsToBase64 converts any HTTP/HTTPS image URLs in the
+// Messages' Images field into base64 data URIs.
 //
-// It shallow-copies the slice and deep-copies only image slices that contain
-// at least one HTTP URL, avoiding unnecessary allocations when images are
-// already base64.
-func convertMessagesForMoonshot(msgs []Message) ([]Message, error) {
+// This is required for some providers (Moonshot/Kimi) and strongly recommended
+// for OpenRouter when sending images hosted behind our own asset URLs (which
+// 302 to short-lived presigned S3 objects). Converting to base64 removes any
+// dependency on the LLM provider successfully fetching the image later.
+//
+// The function shallow-copies the slice and only deep-copies image slices
+// that actually contain HTTP URLs.
+func convertImageURLsToBase64(msgs []Message) ([]Message, error) {
 	if len(msgs) == 0 {
 		return msgs, nil
 	}
@@ -812,22 +824,28 @@ func prepareChatRequest(req ChatRequest, provider *LLMProvider) (ChatRequest, er
 		return req, nil
 	}
 
-	// --- Moonshot K2.6 specific transformations ---
+	// --- Provider-specific image + thinking transformations ---
+	if provider.IsMoonshot() || provider.IsOpenRouter() {
+		// Moonshot (Kimi) requires base64 images (rejects HTTPS URLs).
+		// OpenRouter accepts both, but we convert to base64 for reliability
+		// when the images are our own Wemob asset URLs (302 → short-lived
+		// presigned S3). This avoids transient "provider failed to fetch image"
+		// errors during long agent runs.
+		if len(req.Messages) > 0 {
+			converted, err := convertImageURLsToBase64(req.Messages)
+			if err != nil {
+				return req, err
+			}
+			req.Messages = converted
+		}
+	}
+
 	if provider.IsMoonshot() {
 		// Kimi K2.6 defaults thinking to "enabled" when omitted. Explicitly
 		// default to disabled for predictable agent behavior unless reasoning
 		// was explicitly requested.
 		if req.Reasoning == nil && req.Thinking == nil && provider.DefaultReasoning == nil {
 			req.Thinking = &ThinkingConfig{Type: "disabled"}
-		}
-
-		// K2.6 only accepts base64-encoded images; HTTPS URLs are rejected.
-		if len(req.Messages) > 0 {
-			converted, err := convertMessagesForMoonshot(req.Messages)
-			if err != nil {
-				return req, err
-			}
-			req.Messages = converted
 		}
 	}
 
