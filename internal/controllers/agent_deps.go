@@ -20,6 +20,7 @@ import (
 // This method is called once per HTTP chat/generate request from the view layer.
 func (c *Controller) AgentDeps(user *models.User) *agent.RunDependencies {
 	provider := c.llmProviderForUser(user)
+	_, planName, _ := c.GetUserLimitsWithPlan(user)
 
 	return &agent.RunDependencies{
 		DB:            c.DB,
@@ -30,6 +31,7 @@ func (c *Controller) AgentDeps(user *models.User) *agent.RunDependencies {
 		LLMProvider:   provider,
 		PostHog:       c.PostHog,
 		RemoteConfig:  c.RemoteConfig,
+		UserPlanName:  planName,
 
 		CreditChecker: func(tracker *utils.TokenTracker) func() bool {
 			// Budget is org-scoped; resolve via the user's personal org for the

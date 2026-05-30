@@ -40,6 +40,21 @@ var AICreditsOutputMultiplier = Key{Flag: "rc-ai-credits-output-multiplier", Fal
 var AICreditsCacheReadDivisor = Key{Flag: "rc-ai-credits-cache-read-divisor", Fallback: 10}
 var AICreditsMinBalance = Key{Flag: "rc-ai-credits-min-balance", Fallback: -100}
 
+// PlanAICreditsTokensPerCredit returns the per-plan rc flag for tokens-per-credit.
+func PlanAICreditsTokensPerCredit(planName string) Key {
+	return PlanInt(planName, "ai-credits-tokens-per-credit", 5000)
+}
+
+// PlanAICreditsOutputMultiplier returns the per-plan rc flag for output multiplier.
+func PlanAICreditsOutputMultiplier(planName string) Key {
+	return PlanInt(planName, "ai-credits-output-multiplier", 5)
+}
+
+// PlanAICreditsCacheReadDivisor returns the per-plan rc flag for cache-read divisor.
+func PlanAICreditsCacheReadDivisor(planName string) Key {
+	return PlanInt(planName, "ai-credits-cache-read-divisor", 10)
+}
+
 // StarterPlanEnabled controls whether new users are automatically assigned
 // the free Starter plan on signup. When false, users must select a paid plan
 // (Hobby/Pro/Max) before they can use Wemob. Supports A/B testing via PostHog

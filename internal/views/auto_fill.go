@@ -97,7 +97,8 @@ func (v *HttpViews) NavBarAutoFillWithAI(w http.ResponseWriter, r *http.Request)
 	// Post-hoc token-based billing — no project context, charge personal org.
 	_, _, total, _ := tracker.Totals()
 	if total > 0 {
-		credits := v.Controller.CreditsForTracker(tracker)
+		_, planName, _ := v.Controller.GetUserLimitsWithPlan(user)
+		credits := v.Controller.CreditsForTracker(planName, tracker)
 		orgID, orgErr := v.Controller.RequireOrgIDForUser(user, nil)
 		if orgErr != nil {
 			slog.Warn("navbar_autofill: resolve personal org failed", "error", orgErr, "user_id", user.ID)

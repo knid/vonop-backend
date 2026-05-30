@@ -120,7 +120,8 @@ func (c *Controller) CreateDashboard(ctx context.Context, project *models.AppPro
 		c.RecordTokenUsage(user, "dashboard_create", model, provider.Name, project.ID.String(), project.ProjectType, tracker)
 		_, _, total, _ := tracker.Totals()
 		if total > 0 {
-			credits := c.CreditsForTracker(tracker)
+			_, planName, _ := c.GetUserLimitsWithPlan(user)
+			credits := c.CreditsForTracker(planName, tracker)
 			orgID, orgErr := c.ResolveOrgForProjectID(user, project.ID.String())
 			if orgErr != nil {
 				slog.Warn("dashboard_create: resolve org failed", "error", orgErr, "user_id", user.ID)
@@ -404,7 +405,8 @@ func (c *Controller) StreamDashboardChat(ctx context.Context, dashboard *models.
 		c.RecordTokenUsage(user, "dashboard_chat", model, provider.Name, dashboard.AppProjectID.String(), "dashboard", tracker)
 		_, _, total, _ := tracker.Totals()
 		if total > 0 {
-			credits := c.CreditsForTracker(tracker)
+			_, planName, _ := c.GetUserLimitsWithPlan(user)
+			credits := c.CreditsForTracker(planName, tracker)
 			orgID, orgErr := c.ResolveOrgForProjectID(user, dashboard.AppProjectID.String())
 			if orgErr != nil {
 				slog.Warn("dashboard_chat: resolve org failed", "error", orgErr, "user_id", user.ID)
@@ -646,7 +648,8 @@ func (c *Controller) RefreshDashboardSchema(ctx context.Context, projectID strin
 		c.RecordTokenUsage(user, "dashboard_schema_refresh", model, provider.Name, projectID, "dashboard", tracker)
 		_, _, total, _ := tracker.Totals()
 		if total > 0 {
-			credits := c.CreditsForTracker(tracker)
+			_, planName, _ := c.GetUserLimitsWithPlan(user)
+			credits := c.CreditsForTracker(planName, tracker)
 			orgID, orgErr := c.ResolveOrgForProjectID(user, projectID)
 			if orgErr != nil {
 				slog.Warn("dashboard_schema_refresh: resolve org failed", "error", orgErr, "user_id", user.ID)
