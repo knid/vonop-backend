@@ -308,7 +308,7 @@ func TestExtractFileDrawerFromHistory_ReadFile(t *testing.T) {
 	assert.Equal(t, "package main\n\nfunc main() {}", drawer["foo.go"])
 }
 
-func TestExtractFileDrawerFromHistory_OnlyLastTwoTurns(t *testing.T) {
+func TestExtractFileDrawerFromHistory_LastFiveTurns(t *testing.T) {
 	parts1, _ := json.Marshal([]models.ChatMessagePart{
 		{Type: "tool_call", ToolCallID: "tc1", Name: "read_files", Input: []byte(`{}`), Result: "===== old.txt =====\nold content"},
 	})
@@ -325,9 +325,8 @@ func TestExtractFileDrawerFromHistory_OnlyLastTwoTurns(t *testing.T) {
 	}
 	drawer := extractFileDrawerFromHistory(history)
 
-	// Only last 2 turns scanned, so old.txt should be absent
-	require.Len(t, drawer, 2)
-	assert.NotContains(t, drawer, "old.txt")
+	require.Len(t, drawer, 3)
+	assert.Equal(t, "old content", drawer["old.txt"])
 	assert.Equal(t, "mid content", drawer["mid.txt"])
 	assert.Equal(t, "new content", drawer["new.txt"])
 }

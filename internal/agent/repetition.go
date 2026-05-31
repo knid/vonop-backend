@@ -14,9 +14,23 @@ import (
 // It's line-based to stay cheap and to tolerate small drift (trailing
 // whitespace, slightly varying indentation). Lines shorter than
 // minLineLenForTracking are ignored so bullet markers, blank lines, and
-// short boilerplate don't trip the detector.
+// very short boilerplate fragments don't trip the detector on common
+// terse one-off outputs.
+//
+// Tuning (fix 6, trace 7d295609-a32a-4606-a3e3-4cf20c786229): lowered
+// minLineLenForTracking from 40→20 (in the requested 15-25 range).
+// The old cutoff let short repeated narrations through (e.g. the
+// production "Dosya içeriğini yeniden okuyayım." at ~36 bytes, plus
+// EN/FR/ES/etc. equivalents of re-read intent in the 25-35 byte range).
+// This sustained the re-read-the-file loop until token budget or manual
+// cancel. Threshold 20 catches semantically repetitive short full
+// sentences indicating the stuck pattern while still suppressing pure
+// boilerplate <18 bytes (bullets, "OK.", fragments). The line-based
+// trimmed exact-string counting is unchanged, so normal short-but-unique
+// narration never hits repetitionLoopThreshold=8. No secondary
+// allowlist added in this minimal change (optional path not taken).
 const (
-	minLineLenForTracking  = 40
+	minLineLenForTracking  = 20
 	repetitionLoopThreshold = 8
 )
 

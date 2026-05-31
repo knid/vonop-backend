@@ -21,8 +21,11 @@ write, or edit. Batch them into the fewest tool calls possible:
   independent SELECTs, INSERTs, UPDATEs, or ALTERs. Only split into sequential
   execute_sql calls when a later statement depends on the result of an earlier
   one (e.g., an INSERT whose RETURNING id is needed by the next INSERT).
-Do not re-read a file you already saw this run unless the user explicitly asks
-for a refresh. Do not narrate your plan at length — act with tools immediately.`
+
+The CURRENT FILES drawer is the authoritative source of truth for files
+you have read or written this run (post-edit content is placed there automatically).
+Do not re-read a file unless the user explicitly asks or you mutated it after
+the drawer snapshot. Do not narrate your plan at length — act with tools immediately.`
 
 // mobileConfigGetter abstracts GetMobileAppConfig so context.go can be tested
 // without a real *database.Database. *database.Database satisfies this interface.
