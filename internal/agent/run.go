@@ -98,6 +98,9 @@ func Run(
 	fileMap := NewSafeFileMap(rawFiles)
 	fileDrawer := make(map[string]string)
 
+	// Determine early so we can do proactive drawer seeding for first-gen runs.
+	isFirstGen := project != nil && project.Status == "draft"
+
 	// --- Step 5: pre-run commit baseline ---
 	runID := uuid.New()
 	preCommit, err := PreRunCommit(repo, runID.String())
@@ -152,6 +155,10 @@ func Run(
 		delete(fileDrawer, path)
 	}
 
+	// Ensure important files are in the drawer from the very first turn.
+	// This directly fixes: "buildTurnContent only refreshes keys already in the map".
+	ensureImportantFilesInDrawer(fileMap, fileDrawer, project, isFirstGen)
+
 	// --- Step 8: persist the user message ---
 	attachmentSnapshot := make([]models.ChatMessageAttachment, 0, len(turnAttachments.Current))
 	currentImageURLs := make([]string, 0, len(turnAttachments.Current))
@@ -196,7 +203,6 @@ func Run(
 	}
 
 	// --- Step 9: build system messages + registry + tracker ---
-	isFirstGen := project != nil && project.Status == "draft"
 	llmMessages := BuildSystemMessages(project, deps, turnAttachments.Pool, isFirstGen)
 
 	// Modal commands (/plan, /explain, /review) inject an extra system block
@@ -236,6 +242,7 @@ func Run(
 	// tree, and read_file populates the drawer — both need to be visible on
 	// subsequent rounds after TrimResults compresses old tool outputs.
 	buildTurnContent := func() string {
+		// Phase 1: Refresh files the model (or previous turns) have already put in the drawer.
 		for path := range fileDrawer {
 			if c, ok := fileMap.Get(path); ok {
 				fileDrawer[path] = c
@@ -243,6 +250,11 @@ func Run(
 				delete(fileDrawer, path)
 			}
 		}
+
+		// Phase 2 (the important fix): Explicitly ensure structurally important files
+		// are present. This is what allows buildTurnContent to *add* new keys instead of
+		// only ever refreshing keys that were already inside the drawer map.
+		ensureImportantFilesInDrawer(fileMap, fileDrawer, project, isFirstGen)
 		turnContent := expandedMessage
 		if fileTreePrefix := BuildFileTreeUserPrefix(fileMap); fileTreePrefix != "" {
 			turnContent = fileTreePrefix + "\n" + turnContent
@@ -1184,7 +1196,7 @@ func truncateToolResult(name, result string) string {
 	const maxLen = 500
 	switch name {
 	case "read_file", "read_files":
-		return "(see CURRENT FILES drawer above for the latest content; re-read only if the file changed since last view)"
+		return "(see CURRENT FILES drawer above for the latest content. On first generation you may re-read important files if the drawer version is incomplete or lower fidelity.)"
 	case "read_deploy_logs", "read_build_logs":
 		if idx := strings.Index(result, "\n"); idx > 0 {
 			return result[:idx] + " ..."
