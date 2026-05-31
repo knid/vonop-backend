@@ -24,9 +24,8 @@ write, or edit. Batch them into the fewest tool calls possible:
 
 The CURRENT FILES drawer is the authoritative source of truth for files
 you have read or written this run (post-edit content is placed there automatically).
-On first generation, read the files you need to do excellent work even if they
-are not yet in the drawer. Later, avoid re-reading unless the file has changed
-or the drawer version is insufficient. Do not narrate your plan at length — act with tools immediately.`
+Do not re-read a file unless the user explicitly asks or you mutated it after
+the drawer snapshot. Do not narrate your plan at length — act with tools immediately.`
 
 // mobileConfigGetter abstracts GetMobileAppConfig so context.go can be tested
 // without a real *database.Database. *database.Database satisfies this interface.
@@ -319,87 +318,4 @@ func buildFileDrawerMsg(drawer map[string]string) string {
 		rendered++
 	}
 	return strings.TrimRight(sb.String(), "\n")
-}
-
-// ensureImportantFilesInDrawer makes sure a set of structurally important files
-// are present (and fresh) in the drawer.
-//
-// This is the proper fix for the limitation:
-//
-//     "buildTurnContent only refreshes keys that are already inside the drawer map — it never adds new ones."
-//
-// Previously the refresh logic could only ever update files the model (or history)
-// had already put into the drawer. By calling this function every time we build
-// the prefix, we can introduce new high-value files that the system knows the
-// model will need, without waiting for an explicit read_file call.
-//
-// The set of files is intentionally small and high-signal so we don't bloat context.
-func ensureImportantFilesInDrawer(fileMap *SafeFileMap, drawer map[string]string, project *models.AppProject, isFirstGen bool) {
-	if fileMap == nil || drawer == nil || project == nil {
-		return
-	}
-
-	// Always ensure these core files are in the drawer
-	core := []string{
-		"app/layout.tsx",
-		"app/page.tsx",
-		"app/globals.css",
-	}
-
-	for _, p := range core {
-		if content, ok := fileMap.Get(p); ok {
-			drawer[p] = content
-		}
-	}
-
-	// On first-gen, be much more aggressive: pull in all "structurally important"
-	// files so the model has good grounding without needing to call read_file first.
-	// This directly attacks the reactive population problem that caused read loops.
-	if isFirstGen {
-		files := fileMap.Snapshot()
-
-		// Reuse the same priority heuristics from buildFileTreeBlock
-		prioritySuffixes := []string{
-			"package.json", "app.json", "tsconfig.json", "tailwind.config.js",
-			".env", "/index.tsx", "/_layout.tsx", "/page.tsx", "globals.css",
-			"layout.tsx", "ProductCard", "SiteHeader", "CartDrawer", "CheckoutForm",
-		}
-
-		for path, content := range files {
-			isPriority := false
-			for _, suffix := range prioritySuffixes {
-				if strings.HasSuffix(path, suffix) {
-					isPriority = true
-					break
-				}
-			}
-			// Also include most files under app/ and components/ on first-gen
-			// (they are the ones the model is expected to customize)
-			if !isPriority && (strings.HasPrefix(path, "app/") || strings.HasPrefix(path, "components/")) {
-				// Limit to reasonable size to avoid bloating the drawer
-				if len(content) < 15000 {
-					isPriority = true
-				}
-			}
-
-			if isPriority {
-				drawer[path] = content
-			}
-		}
-	}
-
-	// Ecommerce-specific important files
-	if project.ProjectType == "ecommerce" {
-		ecom := []string{
-			"components/ecommerce/ProductCard.tsx",
-			"components/ecommerce/SiteHeader.tsx",
-			"components/ecommerce/CartDrawer.tsx",
-			"lib/wemob-store.ts",
-		}
-		for _, p := range ecom {
-			if content, ok := fileMap.Get(p); ok {
-				drawer[p] = content
-			}
-		}
-	}
 }
