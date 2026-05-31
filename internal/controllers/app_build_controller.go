@@ -426,9 +426,13 @@ func (c *Controller) UndeployApp(projectID string) error {
 	for _, d := range deployments {
 		switch d.Status {
 		case "deployed", "queued", "building", "deploying":
-			d.Status = "undeployed"
-			d.UpdatedAt = time.Now()
-			if _, err := c.DB.UpdateAppDeployment(&d); err != nil {
+			_, err := c.DB.DB.NewUpdate().
+				Model((*models.AppDeployment)(nil)).
+				Set("status = ?", "undeployed").
+				Set("updated_at = ?", time.Now()).
+				Where("id = ?", d.ID).
+				Exec(context.Background())
+			if err != nil {
 				slog.Error("failed to update deployment status", "error", err, "deployment_id", d.ID)
 			}
 		}
