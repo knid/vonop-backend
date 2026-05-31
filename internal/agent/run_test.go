@@ -80,7 +80,7 @@ func TestConvertHistory_AssistantSingleToolRound(t *testing.T) {
 	assert.Equal(t, "tool", out[1].Role)
 	assert.Equal(t, "tc1", out[1].ToolCallID)
 	assert.Equal(t, "read_files", out[1].Name)
-	assert.Contains(t, out[1].Content, "file content omitted")
+	assert.Contains(t, out[1].Content, "CURRENT FILES drawer")
 }
 
 func TestConvertHistory_AssistantMultiRound(t *testing.T) {
@@ -106,7 +106,7 @@ func TestConvertHistory_AssistantMultiRound(t *testing.T) {
 	// Round 1 tool result — read_files ALWAYS truncated
 	assert.Equal(t, "tool", out[1].Role)
 	assert.Equal(t, "tc1", out[1].ToolCallID)
-	assert.Contains(t, out[1].Content, "file content omitted")
+	assert.Contains(t, out[1].Content, "CURRENT FILES drawer")
 
 	// Round 2 assistant
 	assert.Equal(t, "assistant", out[2].Role)
@@ -248,11 +248,11 @@ func TestConvertHistory_ReadFilesAlwaysTruncated(t *testing.T) {
 
 	// First turn tool result — read_files should ALWAYS be truncated
 	assert.Equal(t, "tool", out[1].Role)
-	assert.Contains(t, out[1].Content, "file content omitted")
+	assert.Contains(t, out[1].Content, "CURRENT FILES drawer")
 
 	// Second turn tool result — read_files should ALSO be truncated (even though it's the last turn)
 	assert.Equal(t, "tool", out[3].Role)
-	assert.Contains(t, out[3].Content, "file content omitted")
+	assert.Contains(t, out[3].Content, "CURRENT FILES drawer")
 }
 
 func TestConvertHistory_OnlyLastAssistantTurnKeepsFullNonReadResults(t *testing.T) {
