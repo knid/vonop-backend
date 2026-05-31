@@ -6,6 +6,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-playground/validator/v10"
+	"github.com/google/uuid"
 
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/models"
@@ -32,6 +33,15 @@ func (v *HttpViews) ComposePush(w http.ResponseWriter, r *http.Request) {
 			"compose-push only supports mobile_app_native projects",
 			http.StatusBadRequest, nil)
 		return
+	}
+
+	// Phase B Studio gating: require explicit notification.send capability
+	// (falls back to role defaults in HasPermission / RequirePermission).
+	if project.OrganizationID != uuid.Nil {
+		if _, err := v.Controller.RequirePermission(user, project.OrganizationID.String(), constants.PermNotificationSend); err != nil {
+			utils.JSONErrorCode(w, constants.ErrForbidden, http.StatusForbidden, nil)
+			return
+		}
 	}
 
 	var req requests.ComposePushRequest

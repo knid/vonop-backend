@@ -10,6 +10,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-playground/validator/v10"
+	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/controllers"
 	"github.com/knid/wemob/internal/models"
@@ -94,6 +95,14 @@ func (v *HttpViews) DeployAppWeb(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
+	}
+
+	// Phase B: web deploys also gated under build.trigger (cost + action)
+	if project.OrganizationID != uuid.Nil {
+		if _, err := v.Controller.RequirePermission(user, project.OrganizationID.String(), constants.PermBuildTrigger); err != nil {
+			utils.JSONErrorCode(w, constants.ErrForbidden, http.StatusForbidden, nil)
+			return
+		}
 	}
 
 	if existing, err := v.Controller.DB.GetBuildingAppDeployment(project.ID.String()); err == nil && existing != nil && existing.ID.String() != "" {
@@ -404,6 +413,14 @@ func (v *HttpViews) BuildAppExpo(w http.ResponseWriter, r *http.Request) {
 			"this endpoint only accepts mobile_app_native projects",
 			http.StatusBadRequest, nil)
 		return
+	}
+
+	// Phase B Studio gating rollout: builds & deploys require build.trigger
+	if project.OrganizationID != uuid.Nil {
+		if _, err := v.Controller.RequirePermission(user, project.OrganizationID.String(), constants.PermBuildTrigger); err != nil {
+			utils.JSONErrorCode(w, constants.ErrForbidden, http.StatusForbidden, nil)
+			return
+		}
 	}
 
 	var req requests.ExpoBuildRequest

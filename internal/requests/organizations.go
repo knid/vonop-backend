@@ -14,12 +14,14 @@ type UpdateOrganizationRequest struct {
 }
 
 type InviteMemberRequest struct {
-	Email string `json:"email" validate:"required,email" errormgs:"valid email is required"`
-	Role  string `json:"role" validate:"required,oneof=admin member" errormgs:"role must be admin or member"`
+	Email       string   `json:"email" validate:"required,email" errormgs:"valid email is required"`
+	Role        string   `json:"role" validate:"required,oneof=admin member" errormgs:"role must be admin or member"`
+	Permissions []string `json:"permissions,omitempty"` // optional override; if empty, defaults derived from Role
 }
 
 type UpdateMemberRoleRequest struct {
-	Role string `json:"role" validate:"required,oneof=admin member" errormgs:"role must be admin or member"`
+	Role        string   `json:"role" validate:"required,oneof=admin member" errormgs:"role must be admin or member"`
+	Permissions []string `json:"permissions,omitempty"` // optional; if provided, sets explicit perms (else defaults for new Role)
 }
 
 type TransferOwnershipRequest struct {

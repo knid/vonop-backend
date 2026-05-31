@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/models"
 )
 
@@ -17,8 +18,8 @@ var (
 	// ErrMinVersionNotMobileNative — only mobile_app_native projects have
 	// a min_version mechanism. WebView/web projects can't enforce one.
 	ErrMinVersionNotMobileNative = errors.New("min_version is only supported on mobile_app_native projects")
-	// ErrMinVersionPermissionDenied — caller is not org owner/admin.
-	ErrMinVersionPermissionDenied = errors.New("only organization owners and admins can update min_version")
+	// ErrMinVersionPermissionDenied — caller lacks the minversion.update permission (or not a member).
+	ErrMinVersionPermissionDenied = errors.New("insufficient permissions to update min_version")
 	// ErrMinVersionUnknownPlatform — req.Platform isn't ios or android.
 	ErrMinVersionUnknownPlatform = errors.New("platform must be ios or android")
 )
@@ -124,9 +125,9 @@ func (c *Controller) UpdateMinVersion(user *models.User, projectID string, platf
 		return nil, ErrMinVersionNotMobileNative
 	}
 
-	// Org-membership role check. Mirrors MoveAppProjectToOrg's pattern.
+	// Org permission check (Phase B). Uses granular perms with role fallback.
 	member, err := c.DB.GetOrganizationMember(project.OrganizationID.String(), user.ID.String())
-	if err != nil || member == nil || (member.Role != "owner" && member.Role != "admin") {
+	if err != nil || member == nil || !HasPermission(member, constants.PermMinVersionUpdate) {
 		return nil, ErrMinVersionPermissionDenied
 	}
 

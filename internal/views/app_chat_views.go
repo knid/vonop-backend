@@ -109,6 +109,18 @@ func (v *HttpViews) ChatApp(w http.ResponseWriter, r *http.Request) {
 	// all the way through instead of running a separate bootstrap flow.
 	isInitialGeneration := project.Status == "draft"
 
+	// Phase B Studio gating: chat / generate actions. Allow if user holds either
+	// ai.chat or ai.generate (covers mixed custom perms and role defaults).
+	// Non-org (personal legacy) projects bypass.
+	if project.OrganizationID != uuid.Nil {
+		hasAI := v.Controller.UserHasPermission(user, project.OrganizationID.String(), constants.PermAIChat) ||
+			v.Controller.UserHasPermission(user, project.OrganizationID.String(), constants.PermAIGenerate)
+		if !hasAI {
+			utils.JSONErrorCode(w, constants.ErrForbidden, http.StatusForbidden, nil)
+			return
+		}
+	}
+
 	jobType := "app_chat"
 	chatEvent := constants.EVENT_APP_CHAT_SENT
 	if isInitialGeneration {

@@ -44,7 +44,11 @@ type AICreditTransaction struct {
 	User           *User         `bun:"rel:belongs-to,join:user_id=id"`
 	Amount         int           `bun:",notnull"`  // positive = added, negative = consumed
 	Action         string        `bun:",notnull"`  // e.g. "generate", "chat", "screenshot_to_code", "element_edit", "purchase", "monthly_grant", "gateway_chat", "gateway_chat_pending"
-	Reference      string        `bun:",nullzero"` // optional: website ID, Stripe payment ID, etc.
+	Reference      string        `bun:",nullzero"` // optional: website ID, Stripe payment ID, etc. (legacy string form)
+	// ProjectID provides typed, indexable attribution for agency cost reporting.
+	// Populated on all modern deduction paths (agent runs, dashboard AI, builds, etc.).
+	// Backfilled where possible from Reference during the 2026-05 cost attribution work.
+	ProjectID      uuid.UUID     `bun:",nullzero,type:uuid"`
 	// PendingAmount carries the fractional credit cost for sub-credit gateway
 	// calls (action="gateway_chat_pending"), where Amount is 0 because no whole
 	// credit moved out of pending_gateway. Preserves audit fidelity for
@@ -54,6 +58,10 @@ type AICreditTransaction struct {
 }
 
 // LLMTokenUsage records per-request token consumption for billing visibility and dashboards.
+//
+// CreditCost is populated at write time (see RecordTokenUsage) so that per-prompt
+// and per-generation cost attribution is queryable without re-computation or
+// joining credit tx rows. ProjectID is now also populated on new rows.
 type LLMTokenUsage struct {
 	ID               uuid.UUID `bun:",pk,type:uuid,default:uuid_generate_v4()"`
 	UserID           uuid.UUID `bun:",notnull,type:uuid"`
@@ -64,8 +72,11 @@ type LLMTokenUsage struct {
 	CompletionTokens int       `bun:",notnull,default:0"`
 	TotalTokens      int       `bun:",notnull,default:0"`
 	CallCount        int       `bun:",notnull,default:0"`
-	Reference        string    `bun:",nullzero"`         // project/app ID
-	CreatedAt        time.Time `bun:"created_at,nullzero,notnull,default:current_timestamp"`
+	Reference        string    `bun:",nullzero"`         // project/app ID (legacy string form)
+	// ProjectID provides typed, indexable attribution (added alongside Reference in 2026-05 cost work).
+	ProjectID  uuid.UUID `bun:",nullzero,type:uuid"`
+	CreditCost int       `bun:",notnull,default:0"` // credits consumed for these tokens (plan-aware formula at write time)
+	CreatedAt  time.Time `bun:"created_at,nullzero,notnull,default:current_timestamp"`
 }
 
 // AICreditsMinBalance is the maximum allowed overdraft (negative floor).

@@ -138,6 +138,14 @@ func (v *HttpViews) ExportToGitHub(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Phase B: gate code export (GitHub push, repo creation) behind code.export perm
+	if project.OrganizationID != uuid.Nil {
+		if _, err := v.Controller.RequirePermission(user, project.OrganizationID.String(), constants.PermCodeExport); err != nil {
+			utils.JSONErrorCode(w, constants.ErrForbidden, http.StatusForbidden, nil)
+			return
+		}
+	}
+
 	var req requests.ExportToGitHubRequest
 	if err := utils.ParseJSONBody(r, &req); err != nil {
 		utils.ValidationError(w, err)
@@ -189,6 +197,14 @@ func (v *HttpViews) PushToGitHub(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
+	}
+
+	// Phase B: same code.export gate for incremental pushes
+	if project.OrganizationID != uuid.Nil {
+		if _, err := v.Controller.RequirePermission(user, project.OrganizationID.String(), constants.PermCodeExport); err != nil {
+			utils.JSONErrorCode(w, constants.ErrForbidden, http.StatusForbidden, nil)
+			return
+		}
 	}
 
 	export, err := v.Controller.PushToGitHub(user, project.ID)
@@ -261,6 +277,14 @@ func (v *HttpViews) RemoveGitHubExport(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
+	}
+
+	// Phase B: removal also requires code.export (symmetric with create/push)
+	if project.OrganizationID != uuid.Nil {
+		if _, err := v.Controller.RequirePermission(user, project.OrganizationID.String(), constants.PermCodeExport); err != nil {
+			utils.JSONErrorCode(w, constants.ErrForbidden, http.StatusForbidden, nil)
+			return
+		}
 	}
 
 	if err := v.Controller.RemoveGitHubExport(user, project.ID); err != nil {

@@ -720,7 +720,7 @@ func (v *HttpViews) GetProjectAIUsage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	since := time.Now().AddDate(0, -1, 0)
-	promptTotal, completionTotal, totalTokens, totalCalls, err := v.Controller.DB.GetLLMTokenUsageSummaryByProject(project.ID.String(), "gateway_", since)
+	promptTotal, completionTotal, totalTokens, totalCalls, creditCost, err := v.Controller.DB.GetLLMTokenUsageSummaryByProject(project.ID.String(), "gateway_", since)
 	if err != nil {
 		utils.JSONInternalError(w, err)
 		return
@@ -736,6 +736,7 @@ func (v *HttpViews) GetProjectAIUsage(w http.ResponseWriter, r *http.Request) {
 			TotalTokens:      e.TotalTokens,
 			CallCount:        e.CallCount,
 			Reference:        e.Reference,
+			CreditCost:       e.CreditCost,
 			CreatedAt:        e.CreatedAt.Format("2006-01-02T15:04:05Z"),
 		})
 	}
@@ -747,6 +748,7 @@ func (v *HttpViews) GetProjectAIUsage(w http.ResponseWriter, r *http.Request) {
 			TotalCompletionTokens: completionTotal,
 			TotalTokens:           totalTokens,
 			TotalCallCount:        totalCalls,
+			TotalCreditCost:       creditCost, // new from enriched summary
 		},
 	}, http.StatusOK)
 }

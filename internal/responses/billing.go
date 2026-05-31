@@ -102,6 +102,7 @@ type TokenUsageEntry struct {
 	TotalTokens      int    `json:"total_tokens"`
 	CallCount        int    `json:"call_count"`
 	Reference        string `json:"reference,omitempty"`
+	CreditCost       int    `json:"credit_cost,omitempty"` // populated for new rows (Phase A cost attribution enrichment)
 	CreatedAt        string `json:"created_at"`
 }
 
@@ -110,6 +111,7 @@ type TokenUsageSummary struct {
 	TotalCompletionTokens int `json:"total_completion_tokens"`
 	TotalTokens           int `json:"total_tokens"`
 	TotalCallCount        int `json:"total_call_count,omitempty"`
+	TotalCreditCost       int `json:"total_credit_cost,omitempty"` // sum of per-entry costs when available
 }
 
 type TokenUsageResponse struct {
@@ -118,13 +120,17 @@ type TokenUsageResponse struct {
 }
 
 type CreditTransactionResponse struct {
-	ID          string `json:"id"`
-	Type        string `json:"type"`
-	Action      string `json:"action"`
-	Amount      int    `json:"amount"`
-	BalanceAfter int   `json:"balance_after"`
-	CreatedAt   string `json:"created_at"`
-	Description string `json:"description,omitempty"`
+	ID           string `json:"id"`
+	Type         string `json:"type"`
+	Action       string `json:"action"`
+	Amount       int    `json:"amount"`
+	BalanceAfter int    `json:"balance_after"`
+	CreatedAt    string `json:"created_at"`
+	Description  string `json:"description,omitempty"`
+	// Reference and ProjectID added in 2026-05 cost attribution work.
+	// Agencies can now see which project/app a cost belongs to.
+	Reference string `json:"reference,omitempty"`
+	ProjectID string `json:"project_id,omitempty"`
 }
 
 type CreditHistoryResponse struct {

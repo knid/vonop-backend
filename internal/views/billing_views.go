@@ -334,6 +334,13 @@ func (v *HttpViews) GetCreditHistory(w http.ResponseWriter, r *http.Request) {
 			BalanceAfter: runningBalance,
 			CreatedAt:    tx.CreatedAt.Format("2006-01-02T15:04:05Z"),
 			Description:  describeTxAction(tx.Action),
+			Reference: tx.Reference,
+			ProjectID: func() string {
+				if tx.ProjectID != uuid.Nil {
+					return tx.ProjectID.String()
+				}
+				return ""
+			}(),
 		})
 		runningBalance -= tx.Amount
 	}
@@ -407,7 +414,7 @@ func (v *HttpViews) GetTokenUsage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	since := time.Now().AddDate(0, -1, 0)
-	promptTotal, completionTotal, totalTokens, err := v.Controller.DB.GetLLMTokenUsageSummary(user.ID.String(), since)
+	promptTotal, completionTotal, totalTokens, creditCost, err := v.Controller.DB.GetLLMTokenUsageSummary(user.ID.String(), since)
 	if err != nil {
 		utils.JSONInternalError(w, err)
 		return
@@ -423,6 +430,7 @@ func (v *HttpViews) GetTokenUsage(w http.ResponseWriter, r *http.Request) {
 			TotalTokens:      e.TotalTokens,
 			CallCount:        e.CallCount,
 			Reference:        e.Reference,
+			CreditCost:       e.CreditCost,
 			CreatedAt:        e.CreatedAt.Format("2006-01-02T15:04:05Z"),
 		})
 	}
@@ -433,6 +441,7 @@ func (v *HttpViews) GetTokenUsage(w http.ResponseWriter, r *http.Request) {
 			TotalPromptTokens:     promptTotal,
 			TotalCompletionTokens: completionTotal,
 			TotalTokens:           totalTokens,
+			TotalCreditCost:       creditCost,
 		},
 	}, http.StatusOK)
 }

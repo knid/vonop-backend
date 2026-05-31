@@ -38,7 +38,8 @@ type OrganizationMember struct {
 	Organization   *Organization `bun:"rel:belongs-to,join:organization_id=id"`
 	UserID         uuid.UUID     `bun:",notnull,type:uuid"`
 	User           *User         `bun:"rel:belongs-to,join:user_id=id"`
-	Role           string        `bun:",notnull,default:'member'"` // owner, admin, member
+	Role           string        `bun:",notnull,default:'member'"` // owner, admin, member (kept for label/preset + backward compat)
+	Permissions    []string      `bun:"permissions,type:jsonb"`    // granular capabilities; empty => derive from Role via defaults
 	MonthlyCreditCap  *int          `bun:",nullzero"` // NULL = unlimited within pool
 	CreatedAt      time.Time     `bun:"created_at,nullzero,notnull,default:current_timestamp"`
 	UpdatedAt      time.Time     `bun:"updated_at,nullzero,notnull,default:current_timestamp"`
@@ -51,7 +52,8 @@ type OrganizationInvite struct {
 	OrganizationID uuid.UUID     `bun:",notnull,type:uuid"`
 	Organization   *Organization `bun:"rel:belongs-to,join:organization_id=id"`
 	Email          string        `bun:",notnull"`
-	Role           string        `bun:",notnull,default:'member'"`
+	Role           string        `bun:",notnull,default:'member'"` // label/preset
+	Permissions    []string      `bun:"permissions,type:jsonb"`    // granular capabilities chosen at invite time; empty => derive from Role
 	InvitedByID    uuid.UUID     `bun:",notnull,type:uuid"`
 	InvitedBy      *User         `bun:"rel:belongs-to,join:invited_by_id=id"`
 	Token          string        `bun:",unique,notnull"`

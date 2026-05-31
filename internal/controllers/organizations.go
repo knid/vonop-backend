@@ -39,11 +39,12 @@ func (c *Controller) CreateOrganization(user *models.User, req requests.CreateOr
 		return nil, err
 	}
 
-	// Add the creator as owner member
+	// Add the creator as owner member (Phase B: populate explicit default permissions)
 	member := models.OrganizationMember{
 		OrganizationID: createdOrg.ID,
 		UserID:         user.ID,
 		Role:           "owner",
+		Permissions:    constants.DefaultPermissionsForRole("owner"),
 	}
 	c.DB.CreateOrganizationMember(&member)
 
@@ -107,7 +108,7 @@ func (c *Controller) UpdateOrganization(user *models.User, orgID string, req req
 	if err != nil {
 		return nil, errors.New("organization not found or access denied")
 	}
-	if member.Role != "owner" && member.Role != "admin" {
+	if !HasPermission(member, constants.PermOrgSettings) {
 		return nil, errors.New("insufficient permissions")
 	}
 
@@ -176,10 +177,11 @@ func (c *Controller) GetOrganizationMembers(user *models.User, orgID string) ([]
 	var result []responses.OrganizationMemberResponse
 	for _, m := range members {
 		resp := responses.OrganizationMemberResponse{
-			ID:        m.ID,
-			UserID:    m.UserID,
-			Role:      m.Role,
-			CreatedAt: m.CreatedAt,
+			ID:          m.ID,
+			UserID:      m.UserID,
+			Role:        m.Role,
+			Permissions: m.Permissions,
+			CreatedAt:   m.CreatedAt,
 		}
 		if m.User != nil {
 			resp.UserName = m.User.Name
@@ -195,7 +197,7 @@ func (c *Controller) InviteOrganizationMember(user *models.User, orgID string, r
 	if err != nil {
 		return nil, errors.New("organization not found or access denied")
 	}
-	if member.Role != "owner" && member.Role != "admin" {
+	if !HasPermission(member, constants.PermMemberInvite) {
 		return nil, errors.New("insufficient permissions to invite members")
 	}
 
@@ -204,10 +206,17 @@ func (c *Controller) InviteOrganizationMember(user *models.User, orgID string, r
 		return nil, err
 	}
 
+	// Phase B: permissions on invite — explicit list from request or role defaults
+	invitePerms := req.Permissions
+	if len(invitePerms) == 0 {
+		invitePerms = constants.DefaultPermissionsForRole(req.Role)
+	}
+
 	invite := models.OrganizationInvite{
 		OrganizationID: member.OrganizationID,
 		Email:          req.Email,
 		Role:           req.Role,
+		Permissions:    invitePerms,
 		InvitedByID:    user.ID,
 		Token:          token,
 		ExpiresAt:      time.Now().AddDate(0, 0, 7),
@@ -244,11 +253,12 @@ func (c *Controller) InviteOrganizationMember(user *models.User, orgID string, r
 	}()
 
 	return &responses.OrganizationInviteResponse{
-		ID:        created.ID,
-		Email:     created.Email,
-		Role:      created.Role,
-		ExpiresAt: created.ExpiresAt,
-		CreatedAt: created.CreatedAt,
+		ID:          created.ID,
+		Email:       created.Email,
+		Role:        created.Role,
+		Permissions: created.Permissions,
+		ExpiresAt:   created.ExpiresAt,
+		CreatedAt:   created.CreatedAt,
 	}, nil
 }
 
@@ -270,11 +280,16 @@ func (c *Controller) AcceptOrganizationInvite(user *models.User, inviteToken str
 		return nil, errors.New("invite was sent to a different email address")
 	}
 
-	// Create member
+	// Create member (Phase B: copy permissions from the invite)
+	invitePerms := invite.Permissions
+	if len(invitePerms) == 0 {
+		invitePerms = constants.DefaultPermissionsForRole(invite.Role)
+	}
 	newMember := models.OrganizationMember{
 		OrganizationID: invite.OrganizationID,
 		UserID:         user.ID,
 		Role:           invite.Role,
+		Permissions:    invitePerms,
 	}
 
 	created, err := c.DB.CreateOrganizationMember(&newMember)
@@ -290,12 +305,13 @@ func (c *Controller) AcceptOrganizationInvite(user *models.User, inviteToken str
 	c.DB.UpdateOrganizationInvite(invite)
 
 	return &responses.OrganizationMemberResponse{
-		ID:        created.ID,
-		UserID:    created.UserID,
-		UserName:  user.Name,
-		UserEmail: user.Email,
-		Role:      created.Role,
-		CreatedAt: created.CreatedAt,
+		ID:          created.ID,
+		UserID:      created.UserID,
+		UserName:    user.Name,
+		UserEmail:   user.Email,
+		Role:        created.Role,
+		Permissions: created.Permissions,
+		CreatedAt:   created.CreatedAt,
 	}, nil
 }
 
@@ -304,7 +320,7 @@ func (c *Controller) RemoveOrganizationMember(user *models.User, orgID, memberID
 	if err != nil {
 		return errors.New("organization not found or access denied")
 	}
-	if callerMember.Role != "owner" && callerMember.Role != "admin" {
+	if !HasPermission(callerMember, constants.PermMemberManage) {
 		return errors.New("insufficient permissions")
 	}
 
@@ -345,8 +361,8 @@ func (c *Controller) UpdateMemberRole(user *models.User, orgID, memberID string,
 	if err != nil {
 		return nil, errors.New("organization not found or access denied")
 	}
-	if callerMember.Role != "owner" {
-		return nil, errors.New("only the owner can change member roles")
+	if !HasPermission(callerMember, constants.PermMemberManage) {
+		return nil, errors.New("only members with member.manage permission can change roles/permissions")
 	}
 
 	targetMember, err := c.DB.GetOrganizationMemberByID(orgID, memberID)
@@ -359,16 +375,24 @@ func (c *Controller) UpdateMemberRole(user *models.User, orgID, memberID string,
 	}
 
 	targetMember.Role = req.Role
+	// Phase B: if explicit permissions supplied in the update, use them; else reset to the (new) role's defaults.
+	// This allows owners/admins to set custom granular perms per member.
+	if len(req.Permissions) > 0 {
+		targetMember.Permissions = req.Permissions
+	} else {
+		targetMember.Permissions = constants.DefaultPermissionsForRole(req.Role)
+	}
 	updated, err := c.DB.UpdateOrganizationMember(targetMember)
 	if err != nil {
 		return nil, err
 	}
 
 	return &responses.OrganizationMemberResponse{
-		ID:        updated.ID,
-		UserID:    updated.UserID,
-		Role:      updated.Role,
-		CreatedAt: updated.CreatedAt,
+		ID:          updated.ID,
+		UserID:      updated.UserID,
+		Role:        updated.Role,
+		Permissions: updated.Permissions,
+		CreatedAt:   updated.CreatedAt,
 	}, nil
 }
 
@@ -378,7 +402,7 @@ func (c *Controller) ListPendingInvites(user *models.User, orgID string) ([]resp
 	if err != nil {
 		return nil, errors.New("organization not found or access denied")
 	}
-	if member.Role != "owner" && member.Role != "admin" {
+	if !HasPermission(member, constants.PermMemberInvite) {
 		return nil, errors.New("insufficient permissions")
 	}
 	invites, err := c.DB.ListPendingOrganizationInvites(orgID)
@@ -388,11 +412,12 @@ func (c *Controller) ListPendingInvites(user *models.User, orgID string) ([]resp
 	out := make([]responses.OrganizationInviteResponse, 0, len(invites))
 	for _, inv := range invites {
 		out = append(out, responses.OrganizationInviteResponse{
-			ID:        inv.ID,
-			Email:     inv.Email,
-			Role:      inv.Role,
-			ExpiresAt: inv.ExpiresAt,
-			CreatedAt: inv.CreatedAt,
+			ID:          inv.ID,
+			Email:       inv.Email,
+			Role:        inv.Role,
+			Permissions: inv.Permissions,
+			ExpiresAt:   inv.ExpiresAt,
+			CreatedAt:   inv.CreatedAt,
 		})
 	}
 	return out, nil
@@ -404,7 +429,7 @@ func (c *Controller) CancelOrganizationInvite(user *models.User, orgID, inviteID
 	if err != nil {
 		return errors.New("organization not found or access denied")
 	}
-	if member.Role != "owner" && member.Role != "admin" {
+	if !HasPermission(member, constants.PermMemberInvite) {
 		return errors.New("insufficient permissions")
 	}
 	return c.DB.DeleteOrganizationInvite(orgID, inviteID)
@@ -554,7 +579,7 @@ func (c *Controller) RequireOrgIDForUser(user *models.User, reqOrgID *uuid.UUID)
 		if err != nil {
 			return uuid.Nil, errors.New("organization not found or access denied")
 		}
-		if member.Role != "owner" && member.Role != "admin" {
+		if !HasPermission(member, constants.PermProjectCreate) {
 			return uuid.Nil, errors.New("insufficient permissions to create project in this organization")
 		}
 		return *reqOrgID, nil
