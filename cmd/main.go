@@ -170,6 +170,10 @@ func createSchema(db *bun.DB) error {
 		// Allow NULL price_id so empty Stripe secrets don't conflict on unique constraint
 		`ALTER TABLE standard_user_subscriptions ALTER COLUMN price_id DROP NOT NULL`,
 		`UPDATE standard_user_subscriptions SET price_id = NULL WHERE price_id = ''`,
+		// app_deployments.commit_hash was modeled as optional (bun:",nullzero", never populated by code)
+		// but the column ended up NOT NULL in prod. Drop the constraint so full-model Bun updates
+		// (and UndeployApp) cannot violate it when the zero-value is written as NULL.
+		`ALTER TABLE app_deployments ALTER COLUMN commit_hash DROP NOT NULL`,
 		// soft_delete column for all tables that use bun:",soft_delete,nullzero"
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS deleted_at timestamptz`,
 		// User locale preference — drives email template language selection (Resend).
