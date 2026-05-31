@@ -6,6 +6,7 @@ import (
 
 	"github.com/go-playground/validator/v10"
 	"github.com/google/uuid"
+	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/responses"
@@ -237,4 +238,61 @@ func (c *Controller) DeleteIOSStoreAccess(user *models.User, accessId string) (*
 	return &responses.SuccessResponse{
 		Success: true,
 	}, nil
+}
+
+// -----------------------------------------------------------------------------
+// Phase B: Granular organization permission system
+// -----------------------------------------------------------------------------
+
+// HasPermission reports whether the given member has the capability.
+// If the member's Permissions slice is non-empty, it is treated as the
+// source of truth (custom override). Otherwise we fall back to the
+// role-derived defaults. This provides seamless backward compatibility
+// for pre-Phase-B rows.
+func HasPermission(member *models.OrganizationMember, perm string) bool {
+	if member == nil {
+		return false
+	}
+	perms := member.Permissions
+	if len(perms) == 0 {
+		perms = constants.DefaultPermissionsForRole(member.Role)
+	}
+	for _, p := range perms {
+		if p == perm {
+			return true
+		}
+	}
+	return false
+}
+
+// UserHasPermission is the high-level helper controllers/views use.
+// It looks up membership (hiding existence on error) and checks the perm.
+func (c *Controller) UserHasPermission(user *models.User, orgID, perm string) bool {
+	if user == nil || orgID == "" || perm == "" {
+		return false
+	}
+	member, err := c.DB.GetOrganizationMember(orgID, user.ID.String())
+	if err != nil {
+		return false
+	}
+	return HasPermission(member, perm)
+}
+
+// RequirePermission is the org-scoped analog of RequireOrgAdminOrOwner.
+// It verifies membership + that the caller holds the specific permission.
+// It deliberately returns the same opaque error as RequireOrgMembership so
+// existence is not leaked. Use for any action now governed by a capability.
+func (c *Controller) RequirePermission(user *models.User, orgIDStr, perm string) (uuid.UUID, error) {
+	orgID, err := uuid.Parse(orgIDStr)
+	if err != nil {
+		return uuid.Nil, errors.New("invalid organization id")
+	}
+	member, err := c.DB.GetOrganizationMember(orgIDStr, user.ID.String())
+	if err != nil {
+		return uuid.Nil, errors.New("organization not found or access denied")
+	}
+	if !HasPermission(member, perm) {
+		return uuid.Nil, errors.New("organization not found or access denied")
+	}
+	return orgID, nil
 }

@@ -372,6 +372,23 @@ func (v *HttpViews) GetOrgCreditsForMember(w http.ResponseWriter, r *http.Reques
 	utils.JSONResponse(w, result, http.StatusOK)
 }
 
+// GetOrgProjectCredits returns per-project credit spend breakdown for admins/owners.
+// This is the primary new surface for agency cost attribution ("which client/app cost how much").
+func (v *HttpViews) GetOrgProjectCredits(w http.ResponseWriter, r *http.Request) {
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
+		return
+	}
+	orgID := chi.URLParam(r, "orgId")
+	result, err := v.Controller.GetOrgProjectCreditSummaries(user, orgID)
+	if err != nil {
+		utils.JSONInternalError(w, err)
+		return
+	}
+	utils.JSONResponse(w, result, http.StatusOK)
+}
+
 func (v *HttpViews) SetMemberCreditCap(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {

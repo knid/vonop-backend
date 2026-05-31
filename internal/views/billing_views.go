@@ -334,6 +334,13 @@ func (v *HttpViews) GetCreditHistory(w http.ResponseWriter, r *http.Request) {
 			BalanceAfter: runningBalance,
 			CreatedAt:    tx.CreatedAt.Format("2006-01-02T15:04:05Z"),
 			Description:  describeTxAction(tx.Action),
+			Reference: tx.Reference,
+			ProjectID: func() string {
+				if tx.ProjectID != uuid.Nil {
+					return tx.ProjectID.String()
+				}
+				return ""
+			}(),
 		})
 		runningBalance -= tx.Amount
 	}

@@ -671,11 +671,11 @@ func (c *Controller) MoveAppProjectToOrg(user *models.User, projectID string, de
 	}
 
 	srcMember, err := c.DB.GetOrganizationMember(project.OrganizationID.String(), user.ID.String())
-	if err != nil || (srcMember.Role != "owner" && srcMember.Role != "admin") {
+	if err != nil || !HasPermission(srcMember, constants.PermOrgSettings) {
 		return nil, errors.New("insufficient permissions on source organization")
 	}
 	dstMember, err := c.DB.GetOrganizationMember(destOrgID.String(), user.ID.String())
-	if err != nil || (dstMember.Role != "owner" && dstMember.Role != "admin") {
+	if err != nil || !HasPermission(dstMember, constants.PermOrgSettings) {
 		return nil, errors.New("insufficient permissions on destination organization")
 	}
 

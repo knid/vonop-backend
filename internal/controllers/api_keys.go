@@ -9,6 +9,7 @@ import (
 
 	"github.com/go-playground/validator/v10"
 	"github.com/google/uuid"
+	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/responses"
@@ -124,7 +125,7 @@ func (c *Controller) DeleteAPIKey(user *models.User, keyID string) error {
 	if err != nil {
 		return errors.New("API key not found")
 	}
-	if member.Role != "owner" && member.Role != "admin" && key.UserID != user.ID {
+	if !HasPermission(member, constants.PermOrgSettings) && key.UserID != user.ID {
 		return errors.New("API key not found")
 	}
 	return c.DB.DeleteAPIKey(key)

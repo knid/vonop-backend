@@ -369,7 +369,7 @@ func (db *Database) GetLLMTokenUsageByProject(projectID, actionPrefix string, li
 	var entries []models.LLMTokenUsage
 	q := db.DB.NewSelect().
 		Model(&entries).
-		Where("reference = ?", projectID)
+		Where("(project_id = ? OR (project_id IS NULL AND reference = ?))", projectID, projectID)
 	if actionPrefix != "" {
 		q = q.Where("action LIKE ?", actionPrefix+"%")
 	}
@@ -525,4 +525,65 @@ func (db *Database) GetLLMTokenUsageSummaryByProject(projectID, actionPrefix str
 	}
 	err = q.Scan(context.Background(), &result)
 	return result.Prompt, result.Completion, result.Total, result.Calls, err
+}
+
+// === 2026-05 Cost Attribution additions ===
+
+// ProjectCreditSummary is the rollup for one project in a billing period.
+// Used for agency client billing and "which app cost how much" views.
+type ProjectCreditSummary struct {
+	ProjectID     uuid.UUID `bun:"project_id"`
+	Spent         int       `bun:"spent"`          // absolute value of negative amounts
+	TxCount       int       `bun:"tx_count"`
+	FirstSpendAt  time.Time `bun:"first_spend_at"`
+	LastSpendAt   time.Time `bun:"last_spend_at"`
+}
+
+// GetProjectCreditSummary returns aggregate credit spend for a single project
+// (prefers the new explicit project_id column; falls back to reference for
+// historical rows written before the 2026-05 columns).
+func (db *Database) GetProjectCreditSummary(orgID, projectID string, periodStart, periodEnd time.Time) (*ProjectCreditSummary, error) {
+	var row ProjectCreditSummary
+	err := db.DB.NewRaw(`
+		SELECT
+			COALESCE(project_id, reference::uuid) AS project_id,
+			COALESCE(SUM(-amount), 0) AS spent,
+			COUNT(*) AS tx_count,
+			MIN(created_at) AS first_spend_at,
+			MAX(created_at) AS last_spend_at
+		FROM ai_credit_transactions
+		WHERE organization_id = ?
+		  AND amount < 0
+		  AND created_at >= ?
+		  AND created_at < ?
+		  AND (project_id = ? OR (project_id IS NULL AND reference = ?))
+		GROUP BY COALESCE(project_id, reference::uuid)
+	`, orgID, periodStart, periodEnd, projectID, projectID).Scan(context.Background(), &row)
+	if err != nil {
+		return nil, err
+	}
+	return &row, nil
+}
+
+// GetOrgProjectCreditSummaries returns spend per project for an org in the
+// given period (for admin "costs by client" reports). Sorted by spend desc.
+func (db *Database) GetOrgProjectCreditSummaries(orgID string, periodStart, periodEnd time.Time, limit int) ([]ProjectCreditSummary, error) {
+	var rows []ProjectCreditSummary
+	err := db.DB.NewRaw(`
+		SELECT
+			COALESCE(project_id, reference::uuid) AS project_id,
+			COALESCE(SUM(-amount), 0) AS spent,
+			COUNT(*) AS tx_count,
+			MIN(created_at) AS first_spend_at,
+			MAX(created_at) AS last_spend_at
+		FROM ai_credit_transactions
+		WHERE organization_id = ?
+		  AND amount < 0
+		  AND created_at >= ?
+		  AND created_at < ?
+		GROUP BY COALESCE(project_id, reference::uuid)
+		ORDER BY spent DESC
+		LIMIT ?
+	`, orgID, periodStart, periodEnd, limit).Scan(context.Background(), &rows)
+	return rows, err
 }

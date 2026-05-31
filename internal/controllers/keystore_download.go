@@ -30,9 +30,8 @@ var ErrKeystoreOTPRequired = errors.New("keystore download: no pending OTP for t
 var ErrKeystoreOTPInvalid = errors.New("keystore download: invalid or expired OTP")
 
 // RequestKeystoreDownload starts the download flow:
-//  1. Verifies the requesting user is an org admin or owner (P0.4 — was
-//     previously any member, which let agency contractors with view access
-//     exfiltrate signing material).
+//  1. Verifies the requesting user has the keystore.access permission in the org
+//     (Phase B granular; falls back to role defaults so legacy owner/admin work).
 //  2. Invalidates any existing keystore-download OTPs for this user.
 //  3. Mints a new 6-digit OTP and stores it as a UserActionToken.
 //  4. Emails the OTP to the user.
@@ -40,7 +39,7 @@ var ErrKeystoreOTPInvalid = errors.New("keystore download: invalid or expired OT
 // The token's stored value is "{projectID}:{otp}" so we can validate both
 // in Redeem without an extra column.
 func (c *Controller) RequestKeystoreDownload(ctx context.Context, requestingUser *models.User, orgIDStr, projectIDStr string) error {
-	if _, err := c.RequireOrgAdminOrOwner(requestingUser, orgIDStr); err != nil {
+	if _, err := c.RequirePermission(requestingUser, orgIDStr, constants.PermKeystoreAccess); err != nil {
 		return err
 	}
 
@@ -108,7 +107,7 @@ func (c *Controller) RequestKeystoreDownload(ctx context.Context, requestingUser
 // role at consume time, since role demotions between Request and Redeem
 // should revoke access immediately).
 func (c *Controller) RedeemKeystoreDownload(ctx context.Context, requestingUser *models.User, orgIDStr, projectIDStr, otp string) (string, error) {
-	if _, err := c.RequireOrgAdminOrOwner(requestingUser, orgIDStr); err != nil {
+	if _, err := c.RequirePermission(requestingUser, orgIDStr, constants.PermKeystoreAccess); err != nil {
 		return "", err
 	}
 

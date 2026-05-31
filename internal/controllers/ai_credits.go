@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/constants"
+	"github.com/knid/wemob/internal/database"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/services/remoteconfig"
 	"github.com/knid/wemob/internal/utils"
@@ -1484,7 +1485,7 @@ func (c *Controller) GetOrgCreditsViewForAdmin(user *models.User, orgID string) 
 	if err != nil {
 		return nil, errors.New("organization not found or access denied")
 	}
-	if caller.Role != "owner" && caller.Role != "admin" {
+	if !HasPermission(caller, constants.PermOrgSettings) {
 		return nil, errors.New("insufficient permissions")
 	}
 
@@ -1574,10 +1575,29 @@ func (c *Controller) SetMemberCreditCap(user *models.User, orgID, memberID strin
 	if err != nil {
 		return nil, errors.New("organization not found or access denied")
 	}
-	if caller.Role != "owner" && caller.Role != "admin" {
+	if !HasPermission(caller, constants.PermOrgSettings) {
 		return nil, errors.New("insufficient permissions")
 	}
 	return c.DB.UpdateMemberCap(orgID, memberID, cap)
+}
+
+// GetOrgProjectCreditSummaries returns per-project credit spend for the org in the current billing period.
+// Caller must be owner or admin. This is the key new endpoint for agency cost attribution.
+func (c *Controller) GetOrgProjectCreditSummaries(user *models.User, orgID string) ([]database.ProjectCreditSummary, error) {
+	caller, err := c.DB.GetOrganizationMember(orgID, user.ID.String())
+	if err != nil {
+		return nil, errors.New("organization not found or access denied")
+	}
+	if !HasPermission(caller, constants.PermOrgSettings) {
+		return nil, errors.New("insufficient permissions")
+	}
+
+	bal, err := c.DB.GetAICreditsBalanceByOrg(orgID)
+	if err != nil {
+		return nil, fmt.Errorf("get balance: %w", err)
+	}
+
+	return c.DB.GetOrgProjectCreditSummaries(orgID, bal.PeriodStart, bal.PeriodEnd, 200)
 }
 
 // RecordLLMError emits a synthetic error $ai_generation span so the failure
