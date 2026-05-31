@@ -76,8 +76,7 @@ var GatewayModelCatalog = []GatewayModelInfo{
 	// Chat models — IDs are OpenRouter-format since the gateway proxies chat
 	// through OpenRouter. Provider is the underlying model author (shown in
 	// the /v2/gateway/models UI), not our upstream. Prices approximate
-	// public OpenRouter rates as of 2026-04-23; update alongside upstream
-	// price changes.
+	// public OpenRouter rates; update alongside upstream price changes.
 	{ID: "openai/gpt-4.1-mini", Name: "GPT-4.1 Mini", Provider: "openai", Type: "chat", MaxContext: 1047576, InputUSDPerM: 0.40, OutputUSDPerM: 1.60, CostPer1kInput: 1, CostPer1kOutput: 3, Capabilities: []string{"streaming", "vision"}},
 	{ID: "openai/gpt-4.1", Name: "GPT-4.1", Provider: "openai", Type: "chat", MaxContext: 1047576, InputUSDPerM: 2.00, OutputUSDPerM: 8.00, CostPer1kInput: 2, CostPer1kOutput: 8, Capabilities: []string{"streaming", "vision"}},
 	{ID: "anthropic/claude-haiku-4-5", Name: "Claude Haiku 4.5", Provider: "anthropic", Type: "chat", MaxContext: 200000, InputUSDPerM: 1.00, OutputUSDPerM: 5.00, CostPer1kInput: 1, CostPer1kOutput: 5, Capabilities: []string{"streaming", "vision"}},
@@ -86,6 +85,7 @@ var GatewayModelCatalog = []GatewayModelInfo{
 	{ID: "google/gemini-2.5-pro", Name: "Gemini 2.5 Pro", Provider: "google", Type: "chat", MaxContext: 1048576, InputUSDPerM: 1.25, OutputUSDPerM: 5.00, CostPer1kInput: 1, CostPer1kOutput: 4, Capabilities: []string{"streaming", "vision"}},
 	{ID: "stepfun/step-3.5-flash", Name: "Step 3.5 Flash", Provider: "stepfun", Type: "chat", MaxContext: 32768, InputUSDPerM: 0.09, OutputUSDPerM: 0.30, CostPer1kInput: 1, CostPer1kOutput: 1, Capabilities: []string{"streaming"}},
 	{ID: "stepfun/step-3.7-flash", Name: "Step 3.7 Flash", Provider: "stepfun", Type: "chat", MaxContext: 32768, InputUSDPerM: 0.20, OutputUSDPerM: 1.15, CostPer1kInput: 1, CostPer1kOutput: 1, Capabilities: []string{"streaming"}},
+	{ID: "xiaomi/mimo-v2.5", Name: "Mimo v2.5", Provider: "xiaomi", Type: "chat", MaxContext: 131072, InputUSDPerM: 0.14, OutputUSDPerM: 0.28, CostPer1kInput: 1, CostPer1kOutput: 1, Capabilities: []string{"streaming"}},
 	// Image models — proxied directly to fal.ai, not through OpenRouter.
 	{ID: "fal-ai/flux/schnell", Name: "FLUX Schnell", Provider: "fal", Type: "image", CostCredits: 5, Capabilities: []string{"fast"}},
 	{ID: "fal-ai/flux-pro/v1.1", Name: "FLUX Pro v1.1", Provider: "fal", Type: "image", CostCredits: 15, Capabilities: []string{"hd"}},

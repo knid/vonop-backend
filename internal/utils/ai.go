@@ -314,6 +314,8 @@ var modelCosts = map[string][2]float64{
 	// Step models (via OpenRouter)
 	"step-3.5-flash":            {0.09, 0.30},
 	"step-3.7-flash":            {0.20, 1.15},
+	// Xiaomi models (via OpenRouter)
+	"mimo-v2.5":                 {0.14, 0.28},
 }
 
 // cacheReadIsInclusive returns true for providers where cache-read tokens are
