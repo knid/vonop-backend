@@ -389,6 +389,24 @@ func (v *HttpViews) GetOrgProjectCredits(w http.ResponseWriter, r *http.Request)
 	utils.JSONResponse(w, result, http.StatusOK)
 }
 
+// GetOrgProjectActionCredits returns per-project + per-action credit spend.
+// High-value addition for Phase A: lets agencies see exactly which operations
+// (generate_app, app_chat, gateway_*, etc.) drove costs for each client project.
+func (v *HttpViews) GetOrgProjectActionCredits(w http.ResponseWriter, r *http.Request) {
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
+		return
+	}
+	orgID := chi.URLParam(r, "orgId")
+	result, err := v.Controller.GetOrgProjectActionCreditBreakdowns(user, orgID)
+	if err != nil {
+		utils.JSONInternalError(w, err)
+		return
+	}
+	utils.JSONResponse(w, result, http.StatusOK)
+}
+
 func (v *HttpViews) SetMemberCreditCap(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {

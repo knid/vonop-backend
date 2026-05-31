@@ -342,29 +342,31 @@ func (db *Database) GetLLMTokenUsageByUser(userID string, limit int) ([]models.L
 	return entries, err
 }
 
-func (db *Database) GetLLMTokenUsageSummary(userID string, since time.Time) (prompt, completion, total int, err error) {
+func (db *Database) GetLLMTokenUsageSummary(userID string, since time.Time) (prompt, completion, total, creditCost int, err error) {
 	var result struct {
 		Prompt     int `bun:"prompt"`
 		Completion int `bun:"completion"`
 		Total      int `bun:"total"`
+		CreditCost int `bun:"credit_cost"`
 	}
 	err = db.DB.NewSelect().
 		TableExpr("llm_token_usages").
 		ColumnExpr("COALESCE(SUM(prompt_tokens), 0) AS prompt").
 		ColumnExpr("COALESCE(SUM(completion_tokens), 0) AS completion").
 		ColumnExpr("COALESCE(SUM(total_tokens), 0) AS total").
+		ColumnExpr("COALESCE(SUM(credit_cost), 0) AS credit_cost").
 		Where("user_id = ?", userID).
 		Where("created_at >= ?", since).
 		Scan(context.Background(), &result)
-	return result.Prompt, result.Completion, result.Total, err
+	return result.Prompt, result.Completion, result.Total, result.CreditCost, err
 }
 
 // GetLLMTokenUsageByProject returns the most recent LLM token usage
-// entries for a given project (scoped by the Reference column which
-// the gateway and dashboard controllers populate with the project ID).
-// If actionPrefix is non-empty, only entries whose action starts with it
-// are returned — pass "gateway_" to exclude codegen traffic from the
-// dashboard's per-app AI usage card.
+// entries for a given project (now prefers the typed project_id column;
+// falls back to legacy reference string for older rows). If actionPrefix
+// is non-empty, only entries whose action starts with it are returned —
+// pass "gateway_" to exclude codegen traffic from the dashboard's per-app
+// AI usage card.
 func (db *Database) GetLLMTokenUsageByProject(projectID, actionPrefix string, limit int) ([]models.LLMTokenUsage, error) {
 	var entries []models.LLMTokenUsage
 	q := db.DB.NewSelect().
@@ -505,12 +507,13 @@ func (db *Database) OrgUsageBreakdown(orgID string, periodStart, periodEnd time.
 	return rows, err
 }
 
-func (db *Database) GetLLMTokenUsageSummaryByProject(projectID, actionPrefix string, since time.Time) (prompt, completion, total, callCount int, err error) {
+func (db *Database) GetLLMTokenUsageSummaryByProject(projectID, actionPrefix string, since time.Time) (prompt, completion, total, callCount, creditCost int, err error) {
 	var result struct {
 		Prompt     int `bun:"prompt"`
 		Completion int `bun:"completion"`
 		Total      int `bun:"total"`
 		Calls      int `bun:"calls"`
+		CreditCost int `bun:"credit_cost"`
 	}
 	q := db.DB.NewSelect().
 		TableExpr("llm_token_usages").
@@ -518,22 +521,28 @@ func (db *Database) GetLLMTokenUsageSummaryByProject(projectID, actionPrefix str
 		ColumnExpr("COALESCE(SUM(completion_tokens), 0) AS completion").
 		ColumnExpr("COALESCE(SUM(total_tokens), 0) AS total").
 		ColumnExpr("COALESCE(SUM(call_count), 0) AS calls").
-		Where("reference = ?", projectID).
+		ColumnExpr("COALESCE(SUM(credit_cost), 0) AS credit_cost").
+		Where("(project_id = ? OR (project_id IS NULL AND reference = ?))", projectID, projectID).
 		Where("created_at >= ?", since)
 	if actionPrefix != "" {
 		q = q.Where("action LIKE ?", actionPrefix+"%")
 	}
 	err = q.Scan(context.Background(), &result)
-	return result.Prompt, result.Completion, result.Total, result.Calls, err
+	return result.Prompt, result.Completion, result.Total, result.Calls, result.CreditCost, err
 }
 
 // === 2026-05 Cost Attribution additions ===
 
 // ProjectCreditSummary is the rollup for one project in a billing period.
 // Used for agency client billing and "which app cost how much" views.
+//
+// ProjectName and ProjectSlug are populated via join (empty for deleted
+// projects or pre-backfill legacy rows that cannot be resolved).
 type ProjectCreditSummary struct {
 	ProjectID     uuid.UUID `bun:"project_id"`
-	Spent         int       `bun:"spent"`          // absolute value of negative amounts
+	ProjectName   string    `bun:"project_name"`
+	ProjectSlug   string    `bun:"project_slug"`
+	Spent         int       `bun:"spent"` // absolute value of negative amounts
 	TxCount       int       `bun:"tx_count"`
 	FirstSpendAt  time.Time `bun:"first_spend_at"`
 	LastSpendAt   time.Time `bun:"last_spend_at"`
@@ -541,23 +550,36 @@ type ProjectCreditSummary struct {
 
 // GetProjectCreditSummary returns aggregate credit spend for a single project
 // (prefers the new explicit project_id column; falls back to reference for
-// historical rows written before the 2026-05 columns).
+// historical rows written before the 2026-05 columns). Now also joins to
+// surface project name/slug for more useful reporting payloads.
 func (db *Database) GetProjectCreditSummary(orgID, projectID string, periodStart, periodEnd time.Time) (*ProjectCreditSummary, error) {
 	var row ProjectCreditSummary
 	err := db.DB.NewRaw(`
+		WITH spends AS (
+			SELECT
+				COALESCE(project_id, reference::uuid) AS project_id,
+				COALESCE(SUM(-amount), 0) AS spent,
+				COUNT(*) AS tx_count,
+				MIN(created_at) AS first_spend_at,
+				MAX(created_at) AS last_spend_at
+			FROM ai_credit_transactions
+			WHERE organization_id = ?
+			  AND amount < 0
+			  AND created_at >= ?
+			  AND created_at < ?
+			  AND (project_id = ? OR (project_id IS NULL AND reference = ?))
+			GROUP BY COALESCE(project_id, reference::uuid)
+		)
 		SELECT
-			COALESCE(project_id, reference::uuid) AS project_id,
-			COALESCE(SUM(-amount), 0) AS spent,
-			COUNT(*) AS tx_count,
-			MIN(created_at) AS first_spend_at,
-			MAX(created_at) AS last_spend_at
-		FROM ai_credit_transactions
-		WHERE organization_id = ?
-		  AND amount < 0
-		  AND created_at >= ?
-		  AND created_at < ?
-		  AND (project_id = ? OR (project_id IS NULL AND reference = ?))
-		GROUP BY COALESCE(project_id, reference::uuid)
+			s.project_id,
+			COALESCE(p.name, '') AS project_name,
+			COALESCE(p.slug, '') AS project_slug,
+			s.spent,
+			s.tx_count,
+			s.first_spend_at,
+			s.last_spend_at
+		FROM spends s
+		LEFT JOIN app_projects p ON p.id = s.project_id
 	`, orgID, periodStart, periodEnd, projectID, projectID).Scan(context.Background(), &row)
 	if err != nil {
 		return nil, err
@@ -567,23 +589,133 @@ func (db *Database) GetProjectCreditSummary(orgID, projectID string, periodStart
 
 // GetOrgProjectCreditSummaries returns spend per project for an org in the
 // given period (for admin "costs by client" reports). Sorted by spend desc.
+// Project names are joined for richer, immediately-usable data (no extra
+// roundtrips needed by callers).
 func (db *Database) GetOrgProjectCreditSummaries(orgID string, periodStart, periodEnd time.Time, limit int) ([]ProjectCreditSummary, error) {
 	var rows []ProjectCreditSummary
 	err := db.DB.NewRaw(`
+		WITH spends AS (
+			SELECT
+				COALESCE(project_id, reference::uuid) AS project_id,
+				COALESCE(SUM(-amount), 0) AS spent,
+				COUNT(*) AS tx_count,
+				MIN(created_at) AS first_spend_at,
+				MAX(created_at) AS last_spend_at
+			FROM ai_credit_transactions
+			WHERE organization_id = ?
+			  AND amount < 0
+			  AND created_at >= ?
+			  AND created_at < ?
+			GROUP BY COALESCE(project_id, reference::uuid)
+			ORDER BY spent DESC
+			LIMIT ?
+		)
 		SELECT
-			COALESCE(project_id, reference::uuid) AS project_id,
-			COALESCE(SUM(-amount), 0) AS spent,
-			COUNT(*) AS tx_count,
-			MIN(created_at) AS first_spend_at,
-			MAX(created_at) AS last_spend_at
-		FROM ai_credit_transactions
-		WHERE organization_id = ?
-		  AND amount < 0
-		  AND created_at >= ?
-		  AND created_at < ?
-		GROUP BY COALESCE(project_id, reference::uuid)
-		ORDER BY spent DESC
-		LIMIT ?
+			s.project_id,
+			COALESCE(p.name, '') AS project_name,
+			COALESCE(p.slug, '') AS project_slug,
+			s.spent,
+			s.tx_count,
+			s.first_spend_at,
+			s.last_spend_at
+		FROM spends s
+		LEFT JOIN app_projects p ON p.id = s.project_id
+		ORDER BY s.spent DESC
 	`, orgID, periodStart, periodEnd, limit).Scan(context.Background(), &rows)
 	return rows, err
+}
+
+// === Phase A high-value additions: action breakdown + per-run generation costs ===
+
+// ProjectActionCreditBreakdownRow gives spend for a (project, action) pair.
+// Enables "cost by project + action" visibility (e.g. codegen vs gateway vs edits).
+type ProjectActionCreditBreakdownRow struct {
+	ProjectID   uuid.UUID `bun:"project_id"`
+	ProjectName string    `bun:"project_name"`
+	ProjectSlug string    `bun:"project_slug"`
+	Action      string    `bun:"action"`
+	Spent       int       `bun:"spent"`
+	TxCount     int       `bun:"tx_count"`
+}
+
+// GetOrgProjectActionCreditBreakdowns returns per-project-per-action credit
+// spend within the period (for detailed agency cost attribution reports).
+func (db *Database) GetOrgProjectActionCreditBreakdowns(orgID string, periodStart, periodEnd time.Time, limit int) ([]ProjectActionCreditBreakdownRow, error) {
+	var rows []ProjectActionCreditBreakdownRow
+	err := db.DB.NewRaw(`
+		WITH spends AS (
+			SELECT
+				COALESCE(project_id, reference::uuid) AS project_id,
+				action,
+				COALESCE(SUM(-amount), 0) AS spent,
+				COUNT(*) AS tx_count
+			FROM ai_credit_transactions
+			WHERE organization_id = ?
+			  AND amount < 0
+			  AND created_at >= ?
+			  AND created_at < ?
+			GROUP BY COALESCE(project_id, reference::uuid), action
+			ORDER BY spent DESC
+			LIMIT ?
+		)
+		SELECT
+			s.project_id,
+			COALESCE(p.name, '') AS project_name,
+			COALESCE(p.slug, '') AS project_slug,
+			s.action,
+			s.spent,
+			s.tx_count
+		FROM spends s
+		LEFT JOIN app_projects p ON p.id = s.project_id
+		ORDER BY s.spent DESC
+	`, orgID, periodStart, periodEnd, limit).Scan(context.Background(), &rows)
+	return rows, err
+}
+
+// ExpensiveGeneration is a lightweight row for "top expensive generations"
+// queries against the authoritative AppAgentRun cost records (CostUSD +
+// CreditsUsed are written at run completion).
+type ExpensiveGeneration struct {
+	ID          uuid.UUID `bun:"id"`
+	Status      string    `bun:"status"`
+	CreditsUsed int       `bun:"credits_used"`
+	CostUSD     float64   `bun:"cost_usd"`
+	Model       string    `bun:"model"`
+	DurationMs  int       `bun:"duration_ms"`
+	CreatedAt   time.Time `bun:"created_at"`
+}
+
+// GetTopExpensiveGenerationsByProject returns the highest-credit runs for a
+// project, ordered by credits_used desc (then recency). Ideal for spotting
+// runaway prompts/generations per client app.
+func (db *Database) GetTopExpensiveGenerationsByProject(projectID uuid.UUID, limit int) ([]ExpensiveGeneration, error) {
+	var rows []ExpensiveGeneration
+	err := db.DB.NewSelect().
+		TableExpr("app_agent_runs").
+		Column("id", "status", "credits_used", "cost_usd", "model", "duration_ms", "created_at").
+		Where("app_project_id = ?", projectID).
+		OrderExpr("credits_used DESC, created_at DESC").
+		Limit(limit).
+		Scan(context.Background(), &rows)
+	return rows, err
+}
+
+// GetAgentRunCostSummaryByProject aggregates run-level costs for quick
+// per-project generation cost rollup (distinct from tx ledger, useful for
+// "what did the builder actually cost for this app?").
+func (db *Database) GetAgentRunCostSummaryByProject(projectID uuid.UUID, since time.Time) (totalCredits int, totalUSD float64, runCount int, err error) {
+	var result struct {
+		Credits int     `bun:"credits"`
+		USD     float64 `bun:"usd"`
+		Count   int     `bun:"count"`
+	}
+	err = db.DB.NewSelect().
+		TableExpr("app_agent_runs").
+		ColumnExpr("COALESCE(SUM(credits_used), 0) AS credits").
+		ColumnExpr("COALESCE(SUM(cost_usd), 0) AS usd").
+		ColumnExpr("COUNT(*) AS count").
+		Where("app_project_id = ?", projectID).
+		Where("created_at >= ?", since).
+		Scan(context.Background(), &result)
+	return result.Credits, result.USD, result.Count, err
 }

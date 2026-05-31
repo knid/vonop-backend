@@ -58,6 +58,10 @@ type AICreditTransaction struct {
 }
 
 // LLMTokenUsage records per-request token consumption for billing visibility and dashboards.
+//
+// CreditCost is populated at write time (see RecordTokenUsage) so that per-prompt
+// and per-generation cost attribution is queryable without re-computation or
+// joining credit tx rows. ProjectID is now also populated on new rows.
 type LLMTokenUsage struct {
 	ID               uuid.UUID `bun:",pk,type:uuid,default:uuid_generate_v4()"`
 	UserID           uuid.UUID `bun:",notnull,type:uuid"`
@@ -70,8 +74,9 @@ type LLMTokenUsage struct {
 	CallCount        int       `bun:",notnull,default:0"`
 	Reference        string    `bun:",nullzero"`         // project/app ID (legacy string form)
 	// ProjectID provides typed, indexable attribution (added alongside Reference in 2026-05 cost work).
-	ProjectID        uuid.UUID `bun:",nullzero,type:uuid"`
-	CreatedAt        time.Time `bun:"created_at,nullzero,notnull,default:current_timestamp"`
+	ProjectID  uuid.UUID `bun:",nullzero,type:uuid"`
+	CreditCost int       `bun:",notnull,default:0"` // credits consumed for these tokens (plan-aware formula at write time)
+	CreatedAt  time.Time `bun:"created_at,nullzero,notnull,default:current_timestamp"`
 }
 
 // AICreditsMinBalance is the maximum allowed overdraft (negative floor).

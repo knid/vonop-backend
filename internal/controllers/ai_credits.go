@@ -1260,10 +1260,23 @@ func (c *Controller) RecordTokenUsage(user *models.User, action, model, provider
 		model = model[idx+1:]
 	}
 
+	// Compute credits early (plan-aware) so we can enrich the LLMTokenUsage row
+	// for per-prompt cost visibility. This is the same value used for the trace.
+	_, planName, _ := c.GetUserLimitsWithPlan(user)
+	creditsSpent := c.CreditsForTracker(planName, tracker)
+
 	// Only persist LLM token usage when real tokens flowed — zero-token runs
 	// (e.g. aborted before any round completed) are a trace-only concern and
 	// shouldn't pollute the usage table.
 	if total > 0 {
+		// Best-effort parse of reference (normally the project UUID string) into
+		// the typed ProjectID column for consistent indexing/joins.
+		var pid uuid.UUID
+		if reference != "" {
+			if parsed, err := uuid.Parse(reference); err == nil {
+				pid = parsed
+			}
+		}
 		if err := c.DB.CreateLLMTokenUsage(&models.LLMTokenUsage{
 			UserID:           user.ID,
 			Action:           action,
@@ -1273,17 +1286,12 @@ func (c *Controller) RecordTokenUsage(user *models.User, action, model, provider
 			TotalTokens:      total,
 			CallCount:        callCount,
 			Reference:        reference,
+			ProjectID:        pid,
+			CreditCost:       creditsSpent,
 		}); err != nil {
 			slog.Error("failed to record LLM token usage", "error", err, "user_id", user.ID, "action", action)
 		}
 	}
-
-	// creditsSpent matches what DeductCredits charges: per-call rounded with
-	// cache-read tokens included. Used only as a PostHog property on the
-	// grouping trace event for ops visibility — actual deduction happens via
-	// DeductCredits at the agent.Run finalisation site.
-	_, planName, _ := c.GetUserLimitsWithPlan(user)
-	creditsSpent := c.CreditsForTracker(planName, tracker)
 
 	if c.PostHog != nil {
 		// Caller-supplied trace id takes precedence so error events emitted
@@ -1598,6 +1606,56 @@ func (c *Controller) GetOrgProjectCreditSummaries(user *models.User, orgID strin
 	}
 
 	return c.DB.GetOrgProjectCreditSummaries(orgID, bal.PeriodStart, bal.PeriodEnd, 200)
+}
+
+// GetOrgProjectActionCreditBreakdowns returns credit spend grouped by (project, action)
+// for the org's current billing period. Mirrors GetOrgProjectCreditSummaries but adds
+// the action dimension for deeper cost attribution (e.g. "was it codegen or in-app chat?").
+func (c *Controller) GetOrgProjectActionCreditBreakdowns(user *models.User, orgID string) ([]database.ProjectActionCreditBreakdownRow, error) {
+	caller, err := c.DB.GetOrganizationMember(orgID, user.ID.String())
+	if err != nil {
+		return nil, errors.New("organization not found or access denied")
+	}
+	if !HasPermission(caller, constants.PermOrgSettings) {
+		return nil, errors.New("insufficient permissions")
+	}
+
+	bal, err := c.DB.GetAICreditsBalanceByOrg(orgID)
+	if err != nil {
+		return nil, fmt.Errorf("get balance: %w", err)
+	}
+
+	return c.DB.GetOrgProjectActionCreditBreakdowns(orgID, bal.PeriodStart, bal.PeriodEnd, 500)
+}
+
+// GetAgentRunCostSummaryForProject returns aggregated builder/generation costs
+// (from AppAgentRun records) for a single project since the given time.
+func (c *Controller) GetAgentRunCostSummaryForProject(user *models.User, projectID string, since time.Time) (totalCredits int, totalUSD float64, runCount int, err error) {
+	if _, err := c.GetAppProject(projectID, user); err != nil {
+		return 0, 0, 0, err
+	}
+	pid, err := uuid.Parse(projectID)
+	if err != nil {
+		return 0, 0, 0, fmt.Errorf("bad project id: %w", err)
+	}
+	return c.DB.GetAgentRunCostSummaryByProject(pid, since)
+}
+
+// GetTopExpensiveGenerationsForProject returns the most credit-heavy agent runs
+// for the project (lightweight rows including credits + usd cost). Caller must
+// have project access (enforced via GetAppProject).
+func (c *Controller) GetTopExpensiveGenerationsForProject(user *models.User, projectID string, limit int) ([]database.ExpensiveGeneration, error) {
+	if _, err := c.GetAppProject(projectID, user); err != nil {
+		return nil, err
+	}
+	pid, err := uuid.Parse(projectID)
+	if err != nil {
+		return nil, fmt.Errorf("bad project id: %w", err)
+	}
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+	return c.DB.GetTopExpensiveGenerationsByProject(pid, limit)
 }
 
 // RecordLLMError emits a synthetic error $ai_generation span so the failure

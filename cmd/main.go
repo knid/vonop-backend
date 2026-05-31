@@ -394,6 +394,7 @@ func createSchema(db *bun.DB) error {
 		// queries and "which prompt cost too much" features for agencies.
 		`ALTER TABLE ai_credit_transactions ADD COLUMN IF NOT EXISTS project_id uuid`,
 		`ALTER TABLE llm_token_usages ADD COLUMN IF NOT EXISTS project_id uuid`,
+		`ALTER TABLE llm_token_usages ADD COLUMN IF NOT EXISTS credit_cost int NOT NULL DEFAULT 0`,
 		`CREATE INDEX IF NOT EXISTS idx_ai_credit_transactions_org_project_created
 			ON ai_credit_transactions(organization_id, project_id, created_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_llm_token_usages_project_created
@@ -1769,6 +1770,7 @@ func main() {
 					r.Get("/credits", httpViews.GetOrgCreditsForAdmin)
 					r.Get("/credits/me", httpViews.GetOrgCreditsForMember)
 					r.Get("/credits/projects", httpViews.GetOrgProjectCredits)
+					r.Get("/credits/projects/actions", httpViews.GetOrgProjectActionCredits)
 					r.Get("/invites", httpViews.ListPendingInvites)
 					r.Delete("/invites/{inviteId}", httpViews.CancelOrganizationInvite)
 					r.Post("/transfer-ownership", httpViews.TransferOrganizationOwnership)
