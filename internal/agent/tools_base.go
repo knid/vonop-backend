@@ -475,7 +475,7 @@ func (EditFileTool) Execute(ctx context.Context, rc *RunContext, input json.RawM
 	count := strings.Count(content, args.OldString)
 	switch count {
 	case 0:
-		return fmt.Sprintf("old_string not found in %s — the file content may have drifted. call read_files to resync and retry", path), true, nil
+		return fmt.Sprintf("old_string not found in %s — the file content may have changed since your last view. Consider using grep to find the current text before retrying", path), true, nil
 	case 1:
 		// ok
 	default:
@@ -691,7 +691,7 @@ func (MultiEditTool) Execute(ctx context.Context, rc *RunContext, input json.Raw
 		count := strings.Count(working, e.OldString)
 		switch count {
 		case 0:
-			return fmt.Sprintf("edit %d: old_string not found — earlier edits may have mutated this region. call read_files to resync and retry", i+1), true, nil
+			return fmt.Sprintf("edit %d: old_string not found — earlier edits may have mutated this region or the content differs from your last view. Use grep first to inspect the current state if needed", i+1), true, nil
 		case 1:
 			// ok
 		default:

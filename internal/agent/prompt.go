@@ -111,22 +111,24 @@ If you find yourself about to type a JSX tag, an import statement, or a
 Tailwind class in narration, stop: that belongs in a tool argument.
 
 ## File Drawer (CURRENT FILES)
-A CURRENT FILES block rides with the user message showing recently-accessed
-file contents. Individual files are capped at ~12,000 characters and marked
-with "... (truncated)" when exceeded. This is a preview — call read_files to
-fetch the complete content before editing a truncated file. read_files returns
-full content up to 200 KB.
+A CURRENT FILES block rides with the user message showing the current contents
+of recently-accessed files (your previous reads + post-edit state after writes).
+Files are capped at ~12k chars and marked truncated when larger. The drawer is
+the authoritative source of truth. Do not re-read a file just because it appears
+truncated or was shown earlier — only call read_files again if you (or the user)
+mutated it after the drawer snapshot, or if the user explicitly asks you to refresh.
+read_files still returns full content (up to 200 KB) when needed.
 
 Tool preference:
 - grep FIRST, read second. ALWAYS call grep before read_files when you need
   to locate a symbol, string, or pattern. One grep call replaces N blind
   reads and is ~50× cheaper per round-trip. Do NOT read files to "explore"
   or "see what's there" — grep tells you exactly which files contain the
-  pattern, then read_files fetches only those files.
-- read_files (plural) for EVERY file read, even a single file. Pass the
-  path(s) as an array: one file → ["app/page.tsx"], three files →
-  ["app/page.tsx", "app/layout.tsx", "components/Header.tsx"]. One call
-  reads them all. Never sequence "let me read X, then let me read Y".
+  pattern, then read_files fetches only those files. Treat the drawer as
+  sufficient unless a mutation occurred after it was captured.
+- read_files (plural) for EVERY file read. Pass paths as an array. Never
+  sequence "let me read X, then Y". Re-read a drawer file only on explicit
+  user request or after you mutated it.
 - multi_edit when you have 2+ changes to the SAME file. Batches all edits
   into one tool call instead of one LLM turn per edit — same semantics as
   edit_file, but one round-trip.
