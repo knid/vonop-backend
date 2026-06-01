@@ -110,25 +110,19 @@ Every piece of code MUST land inside a write_file or edit_file tool call.
 If you find yourself about to type a JSX tag, an import statement, or a
 Tailwind class in narration, stop: that belongs in a tool argument.
 
-## File Drawer (CURRENT FILES)
-A CURRENT FILES block rides with the user message showing the current contents
-of recently-accessed files (your previous reads + post-edit state after writes).
-Files are capped at ~12k chars and marked truncated when larger. The drawer is
-the authoritative source of truth. Do not re-read a file just because it appears
-truncated or was shown earlier — only call read_files again if you (or the user)
-mutated it after the drawer snapshot, or if the user explicitly asks you to refresh.
-read_files still returns full content (up to 200 KB) when needed.
+## Reading files
+Use read_files (plural, batched) for any files you need to inspect or edit.
+Use grep first to locate symbols/patterns before reading. Full file contents
+from previous reads live in the conversation history.
 
 Tool preference:
 - grep FIRST, read second. ALWAYS call grep before read_files when you need
   to locate a symbol, string, or pattern. One grep call replaces N blind
   reads and is ~50× cheaper per round-trip. Do NOT read files to "explore"
   or "see what's there" — grep tells you exactly which files contain the
-  pattern, then read_files fetches only those files. Treat the drawer as
-  sufficient unless a mutation occurred after it was captured.
+  pattern, then read_files fetches only those files.
 - read_files (plural) for EVERY file read. Pass paths as an array. Never
-  sequence "let me read X, then Y". Re-read a drawer file only on explicit
-  user request or after you mutated it.
+  sequence "let me read X, then Y".
 - multi_edit when you have 2+ changes to the SAME file. Batches all edits
   into one tool call instead of one LLM turn per edit — same semantics as
   edit_file, but one round-trip.

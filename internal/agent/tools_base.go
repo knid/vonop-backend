@@ -183,9 +183,6 @@ func (ReadFileTool) Execute(ctx context.Context, rc *RunContext, input json.RawM
 	if !ok {
 		return fmt.Sprintf("file not found: %s", path), true, nil
 	}
-	if rc.FileDrawer != nil {
-		rc.FileDrawer[path] = content
-	}
 	if len(content) > maxReadBytes {
 		return fmt.Sprintf("<truncated: file is %d bytes, max %d>\n\n%s",
 			len(content), maxReadBytes, content[:maxReadBytes]), false, nil
@@ -250,11 +247,6 @@ func (ReadFilesTool) Execute(ctx context.Context, rc *RunContext, input json.Raw
 		if !ok {
 			sb.WriteString("ERROR: file not found")
 			continue
-		}
-		// Store full untruncated content in the drawer so the model always
-		// sees the complete file on subsequent turns.
-		if rc.FileDrawer != nil {
-			rc.FileDrawer[path] = content
 		}
 		if len(content) > maxReadBytes {
 			fmt.Fprintf(&sb, "<truncated: file is %d bytes, max %d>\n\n%s", len(content), maxReadBytes, content[:maxReadBytes])
@@ -410,9 +402,6 @@ func (WriteFileTool) Execute(ctx context.Context, rc *RunContext, input json.Raw
 		op = "create"
 	}
 	rc.FileMap.Set(path, args.Content)
-	if rc.FileDrawer != nil {
-		rc.FileDrawer[path] = args.Content
-	}
 	rc.Emitter.Emit(EventFileWritten, FileWrittenEvent{
 		RunID:     rc.RunID,
 		Path:      path,
@@ -486,9 +475,6 @@ func (EditFileTool) Execute(ctx context.Context, rc *RunContext, input json.RawM
 		return fmt.Sprintf("resulting file too large: %d bytes (max %d)", len(newContent), maxWriteBytes), true, nil
 	}
 	rc.FileMap.Set(path, newContent)
-	if rc.FileDrawer != nil {
-		rc.FileDrawer[path] = newContent
-	}
 	rc.Emitter.Emit(EventFileWritten, FileWrittenEvent{
 		RunID:     rc.RunID,
 		Path:      path,
@@ -704,9 +690,6 @@ func (MultiEditTool) Execute(ctx context.Context, rc *RunContext, input json.Raw
 	}
 
 	rc.FileMap.Set(path, working)
-	if rc.FileDrawer != nil {
-		rc.FileDrawer[path] = working
-	}
 	rc.Emitter.Emit(EventFileWritten, FileWrittenEvent{
 		RunID:     rc.RunID,
 		Path:      path,
