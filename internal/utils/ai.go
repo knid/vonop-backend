@@ -1175,7 +1175,7 @@ type ToolCallConfig struct {
 	ShouldContinue    func() bool    // Called before each round/continuation. Return false to abort. nil = always continue.
 	PromptCacheKey    string         // Moonshot K2.6 session-level prompt cache key (sent on every round)
 	MaxMessages       int            // Maximum messages to send to the LLM; drops oldest non-system messages when exceeded. 0 = unlimited.
-	RefreshPrefix     func(msg *Message)                                   // Called before each round (except round 0) to refresh the user-turn prefix (e.g. file tree + file drawer). Modifies the message in-place.
+	RefreshPrefix     func(msg *Message)                                   // Called before each round (except round 0) to refresh the user-turn prefix (e.g. file tree). Modifies the message in-place.
 	StripTools        []string       // Tool names to remove when stripping (e.g. read-only research tools). When empty, stripping removes all tools.
 }
 
@@ -1365,8 +1365,8 @@ func StreamWithTools(
 		}
 
 		// Refresh the user-turn prefix before each round so the model sees
-		// current file contents (e.g. file tree + file drawer) even after old
-		// tool results are truncated by TrimResults.
+		// current file contents (e.g. file tree) even after old tool results
+		// are truncated by TrimResults.
 		if len(opts) > 0 && opts[0].RefreshPrefix != nil && round > 0 {
 			for i := range currentMessages {
 				if currentMessages[i].Role == "user" && !strings.HasPrefix(currentMessages[i].Content, "[System]") {

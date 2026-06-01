@@ -130,9 +130,8 @@ type RunContext struct {
 	RunID      uuid.UUID
 	Project    *models.AppProject
 	User       *models.User
-	FileMap    *SafeFileMap
-	FileDrawer map[string]string // path -> content for recently-accessed files
-	Emitter    EventEmitter
+	FileMap *SafeFileMap
+	Emitter   EventEmitter
 	Tracker    *utils.TokenTracker
 	Deps       *RunDependencies
 }

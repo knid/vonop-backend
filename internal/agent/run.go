@@ -96,7 +96,6 @@ func Run(
 		return New(CodeGitError, "setup", "failed to read project files", err)
 	}
 	fileMap := NewSafeFileMap(rawFiles)
-	fileDrawer := make(map[string]string)
 
 	// --- Step 5: pre-run commit baseline ---
 	runID := uuid.New()
@@ -130,26 +129,6 @@ func Run(
 	if err != nil {
 		slog.Warn("failed to load history, starting fresh", "error", err, "project_id", project.ID)
 		history = nil
-	}
-
-	// Seed the file drawer from historical read_file/read_files tool results so
-	// the model still sees file contents even though convertHistory truncates
-	// them from the message history to prevent token bloat.
-	for path, content := range extractFileDrawerFromHistory(history) {
-		fileDrawer[path] = content
-	}
-	// The drawer above carries the content from the last read_file/read_files
-	// call in the previous turn. If that turn also called edit_file/write_file,
-	// the drawer content is stale (pre-edit). Refresh mutated files from the
-	// current on-disk fileMap so the model doesn't hallucinate that edits were
-	// lost.
-	for _, path := range mutatedPathsFromLastTurn(history) {
-		if content, ok := fileMap.Get(path); ok {
-			fileDrawer[path] = content
-		}
-	}
-	for _, path := range deletedPathsFromLastTurn(history) {
-		delete(fileDrawer, path)
 	}
 
 	// --- Step 8: persist the user message ---
@@ -231,29 +210,12 @@ func Run(
 		}
 	}
 
-	// buildTurnContent rebuilds the user-turn prefix (file tree + file drawer)
-	// so it stays current across tool rounds. write_file/edit_file mutate the
-	// tree, and read_file populates the drawer — both need to be visible on
-	// subsequent rounds after TrimResults compresses old tool outputs.
-	buildTurnContent := func() string {
-		for path := range fileDrawer {
-			if c, ok := fileMap.Get(path); ok {
-				fileDrawer[path] = c
-			} else {
-				delete(fileDrawer, path)
-			}
-		}
-		turnContent := expandedMessage
-		if fileTreePrefix := BuildFileTreeUserPrefix(fileMap); fileTreePrefix != "" {
-			turnContent = fileTreePrefix + "\n" + turnContent
-		}
-		if drawerMsg := buildFileDrawerMsg(fileDrawer); drawerMsg != "" {
-			turnContent = drawerMsg + "\n\n" + turnContent
-		}
-		return turnContent
+	// Simple user turn prefix: just the current file tree.
+	// Full tool results (including previous reads) now live directly in history.
+	turnContent := expandedMessage
+	if fileTreePrefix := BuildFileTreeUserPrefix(fileMap); fileTreePrefix != "" {
+		turnContent = fileTreePrefix + "\n" + turnContent
 	}
-
-	turnContent := buildTurnContent()
 	userTurn := utils.Message{Role: "user", Content: turnContent}
 	if len(currentImageURLs) > 0 {
 		userTurn.Images = currentImageURLs
@@ -340,14 +302,13 @@ func Run(
 	}
 
 	rc := &RunContext{
-		RunID:      runID,
-		Project:    project,
-		User:       user,
-		FileMap:    fileMap,
-		FileDrawer: fileDrawer,
-		Emitter:    emitter,
-		Tracker:    tracker,
-		Deps:       deps,
+		RunID:   runID,
+		Project: project,
+		User:    user,
+		FileMap: fileMap,
+		Emitter: emitter,
+		Tracker: tracker,
+		Deps:    deps,
 	}
 
 	// --- Step 10: emit run_start ---
@@ -506,63 +467,6 @@ func Run(
 		serverToolNames[st.DisplayName] = true
 	}
 
-	// Lightweight intercept: only serve from the drawer when the file is already known.
-	// This prevents unnecessary re-read loops ("Dosya içeriğini yeniden okuyayım.") without
-	// duplicating full tool logic or suppressing tool events for first reads.
-	interceptRead := func(name, args string) (string, bool) {
-		if name != "read_file" && name != "read_files" {
-			return "", false
-		}
-
-		// Helper to serve a single path from the drawer if present.
-		serveFromDrawer := func(path string) (string, bool) {
-			p, err := sanitizePath(path)
-			if err != nil {
-				return "", false
-			}
-			if isProtectedRead(p) {
-				return "", false
-			}
-			if c, ok := rc.FileDrawer[p]; ok {
-				return c, true
-			}
-			return "", false
-		}
-
-		if name == "read_file" {
-			var a struct{ Path string `json:"path"` }
-			if e := json.Unmarshal([]byte(args), &a); e != nil || a.Path == "" {
-				return "", false
-			}
-			if result, ok := serveFromDrawer(a.Path); ok {
-				return result, true
-			}
-			return "", false
-		}
-
-		// read_files
-		var a struct{ Paths []string `json:"paths"` }
-		if e := json.Unmarshal([]byte(args), &a); e != nil || len(a.Paths) == 0 {
-			return "", false
-		}
-
-		var results []string
-		servedAny := false
-		for _, r := range a.Paths {
-			if result, ok := serveFromDrawer(r); ok {
-				results = append(results, "===== "+r+" =====\n"+result)
-				servedAny = true
-			} else {
-				// If any path is not in the drawer, we let the real tool handle the whole batch.
-				return "", false
-			}
-		}
-
-		if servedAny {
-			return strings.Join(results, "\n\n"), true
-		}
-		return "", false
-	}
 	toolRoundCount := 0
 	_, llmErr := utils.StreamWithTools(
 		ctx,
@@ -585,12 +489,11 @@ func Run(
 			NudgeAfter:     nudgeAfter,
 			StripAfter:     stripAfter,
 			StripTools:     []string{"read_files", "list_files", "grep", "read_attachment", "web_search", "read_build_logs", "read_deploy_logs", "read_mobile_config"},
-			TrimResults:    truncateToolResult,
-			InterceptToolCall: interceptRead,
-			MaxMessages:    25,
-			RefreshPrefix: func(msg *utils.Message) {
-				msg.Content = buildTurnContent()
-			},
+			TrimResults: truncateToolResult,
+			MaxMessages:   25,
+			// No RefreshPrefix: with basic history we rely on full tool results
+			// being replayed from persisted messages. File tree is only built once
+			// at the start of the turn.
 			// Moonshot K2.6 prompt_cache_key: stable per-project so the system
 			// prompt is cached across runs. Only set for Moonshot — other
 			// providers may reject unknown fields.
@@ -872,10 +775,9 @@ func normaliseImages(images []string) []map[string]string {
 }
 
 func convertHistory(history []models.AppChatMessage) []utils.Message {
-	// Count assistant turns so we can keep full tool results for the last
-	// assistant turn and truncate everything older. read_file/read_files
-	// results are ALWAYS truncated regardless of keepFull — the file drawer
-	// provides those contents outside the message history.
+	// Basic history replay: keep full tool results (including reads) for the
+	// most recent assistant turn. Older turns get light truncation via
+	// truncateToolResult. No separate file drawer.
 	assistantCount := 0
 	for _, m := range history {
 		if m.Role == "assistant" && m.ErrorKind == "" {
@@ -960,11 +862,7 @@ func convertHistory(history []models.AppChatMessage) []utils.Message {
 						},
 					})
 					result := p.Result
-					// read_file/read_files are ALWAYS truncated — the file drawer
-					// carries those contents outside the message history.
-					if p.Name == "read_file" || p.Name == "read_files" {
-						result = truncateToolResult(p.Name, result)
-					} else if !keepFull {
+					if !keepFull {
 						result = truncateToolResult(p.Name, result)
 					}
 					pendingToolResults = append(pendingToolResults, utils.Message{
@@ -984,118 +882,8 @@ func convertHistory(history []models.AppChatMessage) []utils.Message {
 	return out
 }
 
-// extractFileDrawerFromHistory scans the last 5 assistant turns for
-// read_file / read_files tool results and returns a map of path -> content.
-// These contents seed the file drawer so the model still sees recently-read
-// files even though convertHistory truncates them from the message history.
-func extractFileDrawerFromHistory(history []models.AppChatMessage) map[string]string {
-	drawer := make(map[string]string)
-
-	assistantCount := 0
-	for _, m := range history {
-		if m.Role == "assistant" && m.ErrorKind == "" {
-			assistantCount++
-		}
-	}
-
-	assistantIdx := 0
-	for _, m := range history {
-		if m.Role != "assistant" || m.ErrorKind != "" {
-			continue
-		}
-		assistantIdx++
-		if assistantIdx < assistantCount-4 {
-			continue
-		}
-
-		var parts []models.ChatMessagePart
-		if len(m.Parts) > 0 && string(m.Parts) != "[]" {
-			_ = json.Unmarshal(m.Parts, &parts)
-		}
-
-		for _, p := range parts {
-			if p.Type != "tool_call" || p.Result == "" {
-				continue
-			}
-			switch p.Name {
-			case "read_file":
-				if path, content := parseReadFileResult(p.Result); path != "" {
-					drawer[path] = content
-				}
-			case "read_files":
-				for path, content := range parseReadFilesResult(p.Result) {
-					drawer[path] = content
-				}
-			}
-		}
-	}
-
-	return drawer
-}
-
-// mutatedPathsFromLastTurn returns the file paths that were successfully
-// edited or written in recent assistant turns. Used to refresh the
-// file drawer so it doesn't carry stale pre-edit content across runs.
-func mutatedPathsFromLastTurn(history []models.AppChatMessage) []string {
-	var out []string
-	seen := 0
-	for i := len(history) - 1; i >= 0 && seen < 5; i-- {
-		m := history[i]
-		if m.Role != "assistant" || m.ErrorKind != "" {
-			continue
-		}
-		seen++
-		var parts []models.ChatMessagePart
-		if len(m.Parts) > 0 && string(m.Parts) != "[]" {
-			_ = json.Unmarshal(m.Parts, &parts)
-		}
-		for _, p := range parts {
-			if p.Type != "tool_call" || p.IsError {
-				continue
-			}
-			switch p.Name {
-			case "edit_file", "write_file", "multi_edit":
-				if path := parseToolPath(p.Input); path != "" {
-					out = append(out, path)
-				}
-			}
-		}
-	}
-	return out
-}
-
-// deletedPathsFromLastTurn returns the file paths that were successfully
-// deleted in recent assistant turns. Used to evict deleted files
-// from the file drawer.
-func deletedPathsFromLastTurn(history []models.AppChatMessage) []string {
-	var out []string
-	seen := 0
-	for i := len(history) - 1; i >= 0 && seen < 5; i-- {
-		m := history[i]
-		if m.Role != "assistant" || m.ErrorKind != "" {
-			continue
-		}
-		seen++
-		var parts []models.ChatMessagePart
-		if len(m.Parts) > 0 && string(m.Parts) != "[]" {
-			_ = json.Unmarshal(m.Parts, &parts)
-		}
-		for _, p := range parts {
-			if p.Type != "tool_call" || p.IsError {
-				continue
-			}
-			if p.Name == "delete_file" {
-				if path := parseToolPath(p.Input); path != "" {
-					out = append(out, path)
-				}
-			}
-		}
-	}
-	return out
-}
-
 // lastAssistantTurn returns the most recent non-error assistant message in
-// history, or nil if there isn't one.
+// history, or nil if there isn't one. (Kept for test compatibility during transition.)
 func lastAssistantTurn(history []models.AppChatMessage) *models.AppChatMessage {
 	for i := len(history) - 1; i >= 0; i-- {
 		m := history[i]
@@ -1106,86 +894,13 @@ func lastAssistantTurn(history []models.AppChatMessage) *models.AppChatMessage {
 	return nil
 }
 
-// parseToolPath extracts the "path" field from a tool-call input JSON.
-func parseToolPath(input json.RawMessage) string {
-	var args struct {
-		Path string `json:"path"`
-	}
-	if err := json.Unmarshal(input, &args); err != nil {
-		return ""
-	}
-	return args.Path
-}
-
-// parseReadFileResult extracts the single file path and content from a
-// read_file tool result. The format is:
-//
-//	===== path =====
-//	content...
-func parseReadFileResult(result string) (string, string) {
-	result = strings.TrimSpace(result)
-	const prefix = "===== "
-	if !strings.HasPrefix(result, prefix) {
-		return "", ""
-	}
-	result = strings.TrimPrefix(result, prefix)
-	idx := strings.Index(result, " =====")
-	if idx < 0 {
-		return "", ""
-	}
-	path := result[:idx]
-	rest := strings.TrimPrefix(result[idx:], " =====")
-	rest = strings.TrimSpace(rest)
-	return path, rest
-}
-
-// parseReadFilesResult extracts path -> content mappings from a read_files
-// tool result. The format is a concatenation of:
-//
-//	===== path =====
-//	content...
-func parseReadFilesResult(result string) map[string]string {
-	out := make(map[string]string)
-	const marker = "===== "
-	for {
-		idx := strings.Index(result, marker)
-		if idx < 0 {
-			break
-		}
-		result = result[idx+len(marker):]
-		endPath := strings.Index(result, " =====")
-		if endPath < 0 {
-			break
-		}
-		path := result[:endPath]
-		rest := strings.TrimPrefix(result[endPath:], " =====")
-		rest = strings.TrimPrefix(rest, "\n")
-
-		// Find the start of the next file block, or end of string.
-		next := strings.Index(rest, "\n===== ")
-		var content string
-		if next >= 0 {
-			content = rest[:next]
-			result = rest[next:]
-		} else {
-			content = rest
-			result = ""
-		}
-		out[path] = strings.TrimSuffix(content, "\n")
-	}
-	return out
-}
-
 // truncateToolResult compresses old tool outputs so they don't bloat the
 // context window across turns. The model still sees the full result on the
 // turn it was produced; on later turns it gets a summary and can re-call the
 // tool if it needs the data again.
 func truncateToolResult(name, result string) string {
 	const maxLen = 500
-	switch name {
-	case "read_file", "read_files":
-		return "(see CURRENT FILES drawer above for the latest content; re-read only if the file changed since last view)"
-	case "read_deploy_logs", "read_build_logs":
+	if name == "read_deploy_logs" || name == "read_build_logs" {
 		if idx := strings.Index(result, "\n"); idx > 0 {
 			return result[:idx] + " ..."
 		}
@@ -1193,12 +908,11 @@ func truncateToolResult(name, result string) string {
 			return result[:200] + " ..."
 		}
 		return result
-	default:
-		if len(result) > maxLen {
-			return result[:maxLen] + " ..."
-		}
-		return result
 	}
+	if len(result) > maxLen {
+		return result[:maxLen] + " ..."
+	}
+	return result
 }
 
 // escapeUntrustedTag replaces literal closing-tag substrings inside untrusted
