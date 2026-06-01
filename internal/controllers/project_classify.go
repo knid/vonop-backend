@@ -29,6 +29,7 @@ func (c *Controller) classifyProjectType(ctx context.Context, prompt string, use
 	model := provider.FastModel()
 
 	tracker := utils.NewTokenTracker()
+	tracker.TrackContent = true // ensure the exact classify prompt + model output are captured in PostHog LLM traces for debugging misclassifications
 	if user != nil {
 		tracker.UserID = user.ID.String()
 		if orgID, orgErr := c.RequireOrgIDForUser(user, nil); orgErr == nil {
@@ -71,19 +72,39 @@ Examples:
 	}
 	if err != nil {
 		slog.Warn("LLM classification failed, falling back to keyword detection", "error", err)
+		// Record a proper error event so it appears in PostHog LLM traces (with the real error)
+		// even though we will keyword-fallback. This makes repeated classify failures visible.
+		if user != nil {
+			c.RecordLLMError(user, tracker, "project_classify", model, provider.Name, "", "standard", 0, "classify_failed", err.Error())
+		}
 		if looksLikeEcommerce(prompt) {
 			return models.ProjectTypeEcommerce
 		}
 		return models.ProjectTypeApp
 	}
-	result = strings.TrimSpace(strings.ToLower(result))
-	if result == "mobile_app_native" || result == "mobile" {
+
+	clean := sanitizeClassifyResult(result)
+	if clean == "mobile_app_native" || clean == "mobile" {
 		return models.ProjectTypeMobileAppNative
 	}
-	if result == "ecommerce" || result == "e-commerce" {
+	if clean == "ecommerce" || clean == "e-commerce" || clean == "store" {
 		return models.ProjectTypeEcommerce
 	}
 	return models.ProjectTypeApp
+}
+
+// sanitizeClassifyResult makes the LLM classifier output tolerant to common
+// variations (punctuation, newlines, extra words, capitalization) while still
+// requiring the core category token. This prevents Haiku/Flash from silently
+// returning "app" on valid e-commerce prompts.
+func sanitizeClassifyResult(s string) string {
+	s = strings.TrimSpace(s)
+	if idx := strings.IndexAny(s, "\n\r"); idx >= 0 {
+		s = s[:idx]
+	}
+	s = strings.TrimSpace(s)
+	s = strings.Trim(s, `"'.,!? `)
+	return strings.ToLower(strings.TrimSpace(s))
 }
 
 // looksLikeEcommerce returns true if the prompt strongly suggests an
@@ -102,6 +123,8 @@ func looksLikeEcommerce(prompt string) bool {
 		// Turkish strong signals
 		"e ticaret", "eticaret", "online satış", "online magaza",
 		"mağaza açmak", "ürün satmak", "satış sitesi",
+		"satmak istiyorum", "satış yapmak istiyorum", "satış yapacağım",
+		"ürün satışı", "e-ticaret sitesi", "eticaret sitesi", "satış sitesi",
 	}
 	for _, s := range strongSignals {
 		if strings.Contains(lower, s) {
@@ -128,6 +151,26 @@ func looksLikeEcommerce(prompt string) bool {
 				}
 			}
 		}
+	}
+
+	// Pure Turkish selling intent (very common): "X satmak istiyorum"
+	// Covers cases that don't mention an explicit store word.
+	if strings.Contains(lower, "satmak istiyorum") ||
+		strings.Contains(lower, "satış yapmak istiyorum") ||
+		strings.Contains(lower, "satış yapacağım") ||
+		strings.Contains(lower, "satışı yapacağım") {
+		return true
+	}
+
+	// Broader selling intent fallback (covers documented examples + common patterns)
+	if strings.Contains(lower, "satış sitesi") ||
+		strings.Contains(lower, "satışı sitesi") ||
+		strings.Contains(lower, "mağaza aç") ||
+		strings.Contains(lower, "mağazası aç") ||
+		strings.Contains(lower, "satmak istiyorum") ||
+		(strings.Contains(lower, "store") && (strings.Contains(lower, "sell") || strings.Contains(lower, "product") || strings.Contains(lower, "buy") || strings.Contains(lower, "clothing"))) ||
+		strings.Contains(lower, "boutique") {
+		return true
 	}
 
 	return false

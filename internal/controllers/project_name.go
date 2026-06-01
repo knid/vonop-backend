@@ -26,6 +26,7 @@ func (c *Controller) generateAppNameAndSlug(ctx context.Context, prompt string, 
 	model := provider.FastModel()
 
 	tracker := utils.NewTokenTracker()
+	tracker.TrackContent = true // ensure the exact name-generation prompt + model output are captured in PostHog LLM traces
 	if user != nil {
 		tracker.UserID = user.ID.String()
 		if orgID, orgErr := c.RequireOrgIDForUser(user, nil); orgErr == nil {
@@ -48,6 +49,9 @@ Examples:
 	}
 	if err != nil {
 		slog.Warn("LLM name generation failed, falling back to truncated prompt", "error", err)
+		if user != nil {
+			c.RecordLLMError(user, tracker, "project_name", model, provider.Name, "", "standard", 0, "name_gen_failed", err.Error())
+		}
 		return fallbackNameAndSlug(prompt)
 	}
 
