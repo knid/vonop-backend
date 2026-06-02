@@ -229,22 +229,26 @@ func (ReadFilesTool) Execute(ctx context.Context, rc *RunContext, input json.Raw
 	}
 
 	var sb strings.Builder
+	hadError := false
 	for i, raw := range args.Paths {
 		if i > 0 {
 			sb.WriteString("\n\n")
 		}
 		path, err := sanitizePath(raw)
 		if err != nil {
+			hadError = true
 			fmt.Fprintf(&sb, "===== %s =====\nERROR: %s", raw, err.Error())
 			continue
 		}
 		fmt.Fprintf(&sb, "===== %s =====\n", path)
 		if isProtectedRead(path) {
+			hadError = true
 			fmt.Fprintf(&sb, "ERROR: reading %s is not allowed (contains secrets or system files)", path)
 			continue
 		}
 		content, ok := rc.FileMap.Get(path)
 		if !ok {
+			hadError = true
 			sb.WriteString("ERROR: file not found")
 			continue
 		}
@@ -254,7 +258,7 @@ func (ReadFilesTool) Execute(ctx context.Context, rc *RunContext, input json.Raw
 		}
 		sb.WriteString(content)
 	}
-	return sb.String(), false, nil
+	return sb.String(), hadError, nil
 }
 
 // ---------- list_files ----------
@@ -424,6 +428,81 @@ func (WriteFileTool) Execute(ctx context.Context, rc *RunContext, input json.Raw
 		Content:   args.Content,
 	})
 	return fmt.Sprintf("%sd %s (%d bytes)", op, path, len(args.Content)), false, nil
+}
+
+// ---------- write_files ----------
+
+const writeFilesMaxFiles = 20
+
+type WriteFilesTool struct{}
+
+func (WriteFilesTool) Name() string { return "write_files" }
+func (WriteFilesTool) Description() string {
+	return "Create or fully overwrite multiple files in one call. Each entry has the same semantics as write_file. Existing files require overwrite=true and a reason."
+}
+func (WriteFilesTool) Schema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"files": map[string]any{
+				"type":        "array",
+				"description": "Files to write in order.",
+				"items": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"path":        map[string]any{"type": "string"},
+						"content":     map[string]any{"type": "string"},
+						"description": map[string]any{"type": "string"},
+						"overwrite":   map[string]any{"type": "boolean"},
+						"reason":      map[string]any{"type": "string"},
+					},
+					"required": []string{"path", "content"},
+				},
+			},
+		},
+		"required": []string{"files"},
+	}
+}
+
+func (WriteFilesTool) Execute(ctx context.Context, rc *RunContext, input json.RawMessage) (string, bool, error) {
+	var args struct {
+		Files []struct {
+			Path        string `json:"path"`
+			Content     string `json:"content"`
+			Description string `json:"description"`
+			Overwrite   bool   `json:"overwrite"`
+			Reason      string `json:"reason"`
+		} `json:"files"`
+	}
+	if err := json.Unmarshal(input, &args); err != nil {
+		return fmt.Sprintf("invalid input: %v", err), true, nil
+	}
+	if len(args.Files) == 0 {
+		return "files must contain at least one entry", true, nil
+	}
+	if len(args.Files) > writeFilesMaxFiles {
+		return fmt.Sprintf("too many files: %d (max %d) — split into multiple calls", len(args.Files), writeFilesMaxFiles), true, nil
+	}
+
+	var sb strings.Builder
+	hadError := false
+	tool := WriteFileTool{}
+	for i, f := range args.Files {
+		payload, _ := json.Marshal(f)
+		result, isErr, err := tool.Execute(ctx, rc, payload)
+		if i > 0 {
+			sb.WriteString("\n")
+		}
+		if isErr || err != nil {
+			hadError = true
+		}
+		if err != nil {
+			fmt.Fprintf(&sb, "%s: %v", f.Path, err)
+			continue
+		}
+		sb.WriteString(result)
+	}
+	return sb.String(), hadError, nil
 }
 
 // ---------- edit_file ----------
@@ -718,6 +797,90 @@ func (MultiEditTool) Execute(ctx context.Context, rc *RunContext, input json.Raw
 		Content:   working,
 	})
 	return fmt.Sprintf("edited %s (%d replacements, %d bytes)", path, len(args.Edits), len(working)), false, nil
+}
+
+// ---------- patch_files ----------
+
+const patchFilesMaxFiles = 20
+
+type PatchFilesTool struct{}
+
+func (PatchFilesTool) Name() string { return "patch_files" }
+func (PatchFilesTool) Description() string {
+	return "Apply exact-string edit batches to multiple files in one call. Each file entry has the same semantics as multi_edit."
+}
+func (PatchFilesTool) Schema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"files": map[string]any{
+				"type":        "array",
+				"description": "Files to patch in order.",
+				"items": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"path": map[string]any{"type": "string"},
+						"edits": map[string]any{
+							"type": "array",
+							"items": map[string]any{
+								"type": "object",
+								"properties": map[string]any{
+									"old_string": map[string]any{"type": "string"},
+									"new_string": map[string]any{"type": "string"},
+								},
+								"required": []string{"old_string", "new_string"},
+							},
+						},
+						"description": map[string]any{"type": "string"},
+					},
+					"required": []string{"path", "edits"},
+				},
+			},
+		},
+		"required": []string{"files"},
+	}
+}
+
+func (PatchFilesTool) Execute(ctx context.Context, rc *RunContext, input json.RawMessage) (string, bool, error) {
+	var args struct {
+		Files []struct {
+			Path  string `json:"path"`
+			Edits []struct {
+				OldString string `json:"old_string"`
+				NewString string `json:"new_string"`
+			} `json:"edits"`
+			Description string `json:"description"`
+		} `json:"files"`
+	}
+	if err := json.Unmarshal(input, &args); err != nil {
+		return fmt.Sprintf("invalid input: %v", err), true, nil
+	}
+	if len(args.Files) == 0 {
+		return "files must contain at least one entry", true, nil
+	}
+	if len(args.Files) > patchFilesMaxFiles {
+		return fmt.Sprintf("too many files: %d (max %d) — split into multiple calls", len(args.Files), patchFilesMaxFiles), true, nil
+	}
+
+	var sb strings.Builder
+	hadError := false
+	tool := MultiEditTool{}
+	for i, f := range args.Files {
+		payload, _ := json.Marshal(f)
+		result, isErr, err := tool.Execute(ctx, rc, payload)
+		if i > 0 {
+			sb.WriteString("\n")
+		}
+		if isErr || err != nil {
+			hadError = true
+		}
+		if err != nil {
+			fmt.Fprintf(&sb, "%s: %v", f.Path, err)
+			continue
+		}
+		sb.WriteString(result)
+	}
+	return sb.String(), hadError, nil
 }
 
 // ---------- generate_image ----------

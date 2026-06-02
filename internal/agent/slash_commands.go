@@ -119,12 +119,31 @@ func SlashCommandSystemAddendum(text string) string {
 	return sc.SystemAddendum
 }
 
+// SlashCommandIsReadOnly returns true when the current slash command is a
+// modal planning/audit/explanation turn that must not generate or mutate files.
+func SlashCommandIsReadOnly(text string) bool {
+	cmd, args, parsed := parseSlashCommand(text)
+	if !parsed {
+		return false
+	}
+	sc, found := slashCommands[cmd]
+	if !found {
+		return false
+	}
+	if sc.RequiresArgs && strings.TrimSpace(args) == "" {
+		return false
+	}
+	return sc.SystemAddendum == addendumReadOnly ||
+		sc.SystemAddendum == addendumPlanOnly ||
+		sc.SystemAddendum == addendumAuditOnly
+}
+
 // Addendums shared by multiple read-only / planning commands. Kept as
 // constants so the exact wording stays in one place.
 const (
-	addendumReadOnly  = "CURRENT TURN IS READ-ONLY. You MUST NOT call write_file, edit_file, multi_edit, or delete_file on this turn. Respond with an explanation only."
-	addendumPlanOnly  = "CURRENT TURN IS PLANNING ONLY. You MUST NOT call write_file, edit_file, multi_edit, or delete_file on this turn. Respond with a plan only."
-	addendumAuditOnly = "CURRENT TURN IS READ-ONLY. You MUST NOT call write_file, edit_file, multi_edit, or delete_file on this turn. Respond with an audit report only."
+	addendumReadOnly  = "CURRENT TURN IS READ-ONLY. You MUST NOT call write_file, write_files, edit_file, multi_edit, patch_files, or delete_file on this turn. Respond with an explanation only."
+	addendumPlanOnly  = "CURRENT TURN IS PLANNING ONLY. You MUST NOT call write_file, write_files, edit_file, multi_edit, patch_files, or delete_file on this turn. Respond with a plan only."
+	addendumAuditOnly = "CURRENT TURN IS READ-ONLY. You MUST NOT call write_file, write_files, edit_file, multi_edit, patch_files, or delete_file on this turn. Respond with an audit report only."
 )
 
 func init() {

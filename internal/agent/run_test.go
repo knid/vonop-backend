@@ -2,6 +2,7 @@ package agent
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/knid/wemob/internal/models"
@@ -109,7 +110,7 @@ func TestConvertHistory_AssistantMultiRound(t *testing.T) {
 	require.Len(t, out[0].ToolCalls, 1)
 	assert.Equal(t, "tc1", out[0].ToolCalls[0].ID)
 
-	// Round 1 tool result — read_files ALWAYS truncated
+	// Round 1 tool result
 	assert.Equal(t, "tool", out[1].Role)
 	assert.Equal(t, "tc1", out[1].ToolCallID)
 	// basic history: reads are no longer special-cased to drawer message
@@ -237,7 +238,7 @@ func TestConvertHistory_SkipsSystemRolePassthrough(t *testing.T) {
 	assert.Equal(t, "be helpful", out[0].Content)
 }
 
-func TestConvertHistory_ReadFilesAlwaysTruncated(t *testing.T) {
+func TestConvertHistory_ReadFilesKeepFullResults(t *testing.T) {
 	parts1, _ := json.Marshal([]models.ChatMessagePart{
 		{Type: "tool_call", ToolCallID: "tc1", Name: "read_files", Input: []byte(`{}`), Result: "===== a.txt =====\nold content a\n===== b.txt =====\nold content b"},
 	})
@@ -253,7 +254,7 @@ func TestConvertHistory_ReadFilesAlwaysTruncated(t *testing.T) {
 	// Both assistant turns produce 1 assistant + 1 tool result = 4 messages total
 	require.Len(t, out, 4)
 
-	// Basic history: first (non-last) turn is truncated only if long; here it's short so full
+	// Earlier turns keep full read results.
 	assert.Equal(t, "tool", out[1].Role)
 	assert.Contains(t, out[1].Content, "old content a")
 
@@ -262,9 +263,10 @@ func TestConvertHistory_ReadFilesAlwaysTruncated(t *testing.T) {
 	assert.Contains(t, out[3].Content, "new content c")
 }
 
-func TestConvertHistory_OnlyLastAssistantTurnKeepsFullNonReadResults(t *testing.T) {
+func TestConvertHistory_KeepsFullNonReadResults(t *testing.T) {
+	firstResult := "first edit result " + strings.Repeat("x", 1000)
 	parts1, _ := json.Marshal([]models.ChatMessagePart{
-		{Type: "tool_call", ToolCallID: "tc1", Name: "edit_file", Input: []byte(`{}`), Result: "first edit result"},
+		{Type: "tool_call", ToolCallID: "tc1", Name: "edit_file", Input: []byte(`{}`), Result: firstResult},
 	})
 	parts2, _ := json.Marshal([]models.ChatMessagePart{
 		{Type: "tool_call", ToolCallID: "tc2", Name: "edit_file", Input: []byte(`{}`), Result: "second edit result"},
@@ -277,13 +279,11 @@ func TestConvertHistory_OnlyLastAssistantTurnKeepsFullNonReadResults(t *testing.
 
 	require.Len(t, out, 4)
 
-	// First turn — non-read tool result should be truncated
+	// Earlier turns keep full non-read tool results.
 	assert.Equal(t, "tool", out[1].Role)
-	assert.Contains(t, out[1].Content, "first edit result")
-	// It should be truncated since it's not the last assistant turn
-	assert.True(t, len(out[1].Content) < len("first edit result")+10, "expected truncated result for first turn")
+	assert.Equal(t, firstResult, out[1].Content)
 
-	// Second (last) turn — non-read tool result should keep full content
+	// Last turn also keeps full content.
 	assert.Equal(t, "tool", out[3].Role)
 	assert.Equal(t, "second edit result", out[3].Content)
 }

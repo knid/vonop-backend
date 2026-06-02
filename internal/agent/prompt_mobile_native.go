@@ -1207,11 +1207,15 @@ full content up to 200 KB.
 
 ## Tool preference
 - grep BEFORE read_files when locating a symbol or pattern.
+- write_files for creating multiple files in one call.
+- patch_files for exact-string edits across multiple files.
 - multi_edit for 2+ changes to the same file.
 - edit_file for a single targeted change.
 - write_file for new files or complete rewrites.
 - list_files with a glob to refresh structure.
 - delete_file when a file is no longer needed.
+- run_check after meaningful file changes to catch build/typecheck errors
+  before you finish.
 
 ## Parallel tool calls
 When two or more tool calls are independent, emit them in the same turn.
@@ -1228,7 +1232,7 @@ Dependent calls MUST stay sequential.
 // BasePromptMobileNativeFirstGen is appended to BasePromptMobileNativeShared for initial
 // app generation runs (project.Status == "draft").
 const BasePromptMobileNativeFirstGen = `## Work order: home screen first (CRITICAL)
-On a new project, your VERY FIRST turn MUST customize app/(app)/index.tsx.
+On a new project, your VERY FIRST turn MUST customize mobile/app/(app)/index.tsx.
 It must render a real home experience: header, hero/intro, primary CTA, and at
 least one content block — even with stub data. Other screens come AFTER.
 
@@ -1242,7 +1246,7 @@ After home lands, finish the entire visible UI surface BEFORE any backend wiring
 Use inline stub data so each screen renders a complete, polished experience.
 
 Run order:
-  1. app/(app)/index.tsx                         (Home First)
+  1. mobile/app/(app)/index.tsx                  (Home First)
   2. Every other screen + component with stubs   (UI First)
   3. Image generation                            (Images Last)
   4. Database / native modules / integrations    (only if requested)

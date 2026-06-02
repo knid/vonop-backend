@@ -112,6 +112,12 @@ type ErrorEvent struct {
 	Code    ErrorCode `json:"code"`
 }
 
+type CheckpointEvent struct {
+	RunID  uuid.UUID `json:"run_id"`
+	Commit string    `json:"commit"`
+	Reason string    `json:"reason"`
+}
+
 type DoneEvent struct {
 	RunID        uuid.UUID  `json:"run_id"`
 	FinalCommit  string     `json:"final_commit"`
@@ -140,6 +146,7 @@ const (
 	EventFileDeleted    = "file_deleted"
 	EventTurnEnd        = "turn_end"
 	EventCreditsUpdate  = "credits_update"
+	EventCheckpoint     = "checkpoint"
 	EventError          = "error"
 	EventDone           = "done"
 )

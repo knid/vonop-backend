@@ -3,6 +3,8 @@ package agent
 import (
 	"strings"
 	"testing"
+
+	"github.com/knid/wemob/internal/models"
 )
 
 const yachtSaaSPrompt = `Create a Yacht Logbook SaaS platform.
@@ -15,7 +17,7 @@ func TestValidateGeneratedAppRejectsMarketingBrochureForSaaSRequest(t *testing.T
 		"app/page.tsx":   "export default function Page(){ return <main>Hero Testimonials CTA Yacht showcase</main> }",
 	})
 
-	err := validateGeneratedApp(files, NewBuildState(yachtSaaSPrompt, true), yachtSaaSPrompt, true)
+	err := validateGeneratedApp(files, NewBuildState(yachtSaaSPrompt, true), yachtSaaSPrompt, true, models.ProjectTypeApp)
 	if err == nil {
 		t.Fatal("expected validation error")
 	}
@@ -41,8 +43,36 @@ func TestValidateGeneratedAppAllowsOperationalSaaSShape(t *testing.T) {
 		}`,
 	})
 
-	if err := validateGeneratedApp(files, NewBuildState(yachtSaaSPrompt, true), yachtSaaSPrompt, true); err != nil {
+	if err := validateGeneratedApp(files, NewBuildState(yachtSaaSPrompt, true), yachtSaaSPrompt, true, models.ProjectTypeApp); err != nil {
 		t.Fatalf("expected validation success, got: %v", err)
+	}
+}
+
+func TestValidateGeneratedAppAllowsMobileNativeShape(t *testing.T) {
+	files := NewSafeFileMap(map[string]string{
+		"mobile/package.json":           `{"scripts":{"typecheck":"tsc --noEmit"}}`,
+		"mobile/app/_layout.tsx":        "export default function Layout() { return null }",
+		"mobile/app/(app)/index.tsx":    "export default function Home() { return null }",
+		"mobile/app/(auth)/sign-in.tsx": "export default function SignIn() { return null }",
+	})
+
+	if err := validateGeneratedApp(files, NewBuildState("mobile app", true), "mobile app", true, models.ProjectTypeMobileAppNative); err != nil {
+		t.Fatalf("expected mobile validation success, got: %v", err)
+	}
+}
+
+func TestValidateGeneratedAppRejectsMobileNativeMissingHome(t *testing.T) {
+	files := NewSafeFileMap(map[string]string{
+		"mobile/package.json":    `{"scripts":{"typecheck":"tsc --noEmit"}}`,
+		"mobile/app/_layout.tsx": "export default function Layout() { return null }",
+	})
+
+	err := validateGeneratedApp(files, NewBuildState("mobile app", true), "mobile app", true, models.ProjectTypeMobileAppNative)
+	if err == nil {
+		t.Fatal("expected mobile validation error")
+	}
+	if !strings.Contains(err.Error(), "mobile/app/(app)/index.tsx") {
+		t.Fatalf("expected missing mobile home path, got: %v", err)
 	}
 }
 
@@ -51,7 +81,7 @@ func TestValidateGeneratedAppRejectsImagePlaceholders(t *testing.T) {
 		"app/page.tsx": "const hero = '__IMG_HERO__'",
 	})
 
-	err := validateGeneratedApp(files, nil, "change image", false)
+	err := validateGeneratedApp(files, nil, "change image", false, models.ProjectTypeApp)
 	if err == nil {
 		t.Fatal("expected placeholder validation error")
 	}
