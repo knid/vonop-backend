@@ -19,9 +19,11 @@ const slugMaxBaseLen = 50
 // derives a URL-safe slug with a 5-char random suffix. Falls back to a
 // truncated prompt if the LLM call fails.
 //
-// The optional `user` is purely for PostHog attribution. Pass nil to skip
-// the trace.
-func (c *Controller) generateAppNameAndSlug(ctx context.Context, prompt string, user *models.User) (string, string) {
+// The optional `user` is for PostHog attribution. `projectRef` (the project
+// UUID string) should be passed when available (e.g. from refineProjectNameAsync)
+// so the name-generation LLM call is properly attributed to the project in
+// PostHog traces and token usage records. Pass "" if unknown.
+func (c *Controller) generateAppNameAndSlug(ctx context.Context, prompt string, user *models.User, projectRef string) (string, string) {
 	provider := c.llmProviderForUser(user)
 	model := provider.FastModel()
 
@@ -32,6 +34,9 @@ func (c *Controller) generateAppNameAndSlug(ctx context.Context, prompt string, 
 		if orgID, orgErr := c.RequireOrgIDForUser(user, nil); orgErr == nil {
 			tracker.OrganizationID = orgID.String()
 		}
+	}
+	if projectRef != "" {
+		tracker.ProjectID = projectRef
 	}
 	ctx = utils.WithTokenTracker(ctx, tracker)
 
@@ -45,12 +50,12 @@ Examples:
 
 	result, err := utils.GetTextFromLLM(ctx, model, system, prompt, provider, 64)
 	if user != nil {
-		c.RecordTokenUsage(user, "project_name", model, provider.Name, "", "standard", tracker)
+		c.RecordTokenUsage(user, "project_name", model, provider.Name, projectRef, "standard", tracker)
 	}
 	if err != nil {
 		slog.Warn("LLM name generation failed, falling back to truncated prompt", "error", err)
 		if user != nil {
-			c.RecordLLMError(user, tracker, "project_name", model, provider.Name, "", "standard", 0, "name_gen_failed", err.Error())
+			c.RecordLLMError(user, tracker, "project_name", model, provider.Name, projectRef, "standard", 0, "name_gen_failed", err.Error())
 		}
 		return fallbackNameAndSlug(prompt)
 	}

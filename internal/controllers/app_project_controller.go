@@ -700,7 +700,7 @@ func (c *Controller) refineProjectNameAsync(id uuid.UUID, prompt string, user *m
 	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 	defer cancel()
 
-	refinedName, refinedSlug := c.generateAppNameAndSlug(ctx, prompt, user)
+	refinedName, refinedSlug := c.generateAppNameAndSlug(ctx, prompt, user, id.String())
 	if refinedName == "" {
 		return
 	}
