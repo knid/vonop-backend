@@ -70,7 +70,7 @@ Go monolith (module `github.com/knid/wemob`) serving a REST API for the Wemob mo
   - `fal.Service` — FAL AI image generation
   - `caddy.Admin` — Caddy reverse proxy admin API
   - Additional: `giteabackup`, `integrations`, `jobstream`, `ota`, `storeauth`
-- **tasks/**: Async task payloads for [Asynq](https://github.com/hibiken/asynq) (Redis-backed). Task types: `agent:run` (AI generation/chat), `deploy:web`, `fly:delete-app`, `billing:org-grace-teardown`, `cron:credential-health-daily`, `cron:reap-stuck-agent-runs`, `cron:reap-stuck-build-tasks`, `cron:fly-bandwidth-sync`.
+- **tasks/**: Async task payloads for [Asynq](https://github.com/hibiken/asynq) (Redis-backed). Task types: `agent:run` (AI generation/chat), `deploy:web`, `fly:delete-app`, `billing:org-grace-teardown`, `user:account-purge`, `cron:credential-health-daily`, `cron:reap-stuck-agent-runs`, `cron:reap-stuck-build-tasks`, `cron:fly-bandwidth-sync`.
 - **constants/**: App-wide constants (build limits, LLM model, event names for PostHog/Resend, Slack channels, proxy settings).
 - **utils/**: Shared helpers (auth token extraction, JSON parsing/response, validation, logging, image handling, session management).
 

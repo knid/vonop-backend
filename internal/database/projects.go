@@ -13,6 +13,14 @@ func (db *Database) GetProjects(user *models.User) ([]models.Project, error) {
 	return projects, err
 }
 
+// GetProjectsByUserID is the ID-string variant used by account purge (where the
+// user row may already be soft-deleted by the time the async task runs).
+func (db *Database) GetProjectsByUserID(userID string) ([]models.Project, error) {
+	var projects []models.Project
+	err := db.DB.NewSelect().Model(&projects).Where("user_id = ?", userID).Scan(context.Background())
+	return projects, err
+}
+
 func (db *Database) GetProjectById(id string) (*models.Project, error) {
 	var project models.Project
 	err := db.DB.NewSelect().Model(&project).Where("id = ?", id).Scan(context.Background())

@@ -198,6 +198,18 @@ func (db *Database) GetPersonalOrgByUserID(userID string) (*models.Organization,
 	return &org, nil
 }
 
+// GetOrganizationsOwnedByUserID returns all organizations (personal or otherwise)
+// for which the given user is the owner. Used during account purge to decide
+// which workspaces to fully tear down and delete.
+func (db *Database) GetOrganizationsOwnedByUserID(userID string) ([]models.Organization, error) {
+	var orgs []models.Organization
+	err := db.DB.NewSelect().
+		Model(&orgs).
+		Where("owner_id = ?", userID).
+		Scan(context.Background())
+	return orgs, err
+}
+
 // ListPendingOrganizationInvites returns invites for the given org that have
 // not yet been accepted and are not expired. Sorted by created_at DESC.
 func (db *Database) ListPendingOrganizationInvites(orgID string) ([]models.OrganizationInvite, error) {
