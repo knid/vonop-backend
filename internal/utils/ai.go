@@ -1268,18 +1268,6 @@ func StreamWithTools(
 	continuationCount := 0
 	var fullText strings.Builder // declared outside loop so ShouldContinue abort can return partial text
 
-	trimPendingToolResults := func() {
-		if len(opts) == 0 || opts[0].TrimResults == nil || prevToolResultRange[1] <= prevToolResultRange[0] {
-			return
-		}
-		for i := prevToolResultRange[0]; i < prevToolResultRange[1] && i < len(currentMessages); i++ {
-			if currentMessages[i].Role == "tool" {
-				currentMessages[i].Content = opts[0].TrimResults(currentMessages[i].Name, currentMessages[i].Content)
-			}
-		}
-		prevToolResultRange = [2]int{0, 0}
-	}
-
 	for round := 0; round < maxRounds; round++ {
 		// Check caller abort signal before starting any round
 		if len(opts) > 0 && opts[0].ShouldContinue != nil && !opts[0].ShouldContinue() {
@@ -1289,6 +1277,16 @@ func StreamWithTools(
 		// Notify caller that a new round is starting (e.g. to reset per-round state).
 		if len(opts) > 0 && opts[0].OnRoundStart != nil {
 			opts[0].OnRoundStart(round)
+		}
+		// Trim the PREVIOUS round's tool results now (deferred from last iteration).
+		// This ensures the model sees full results for one round before they're compressed.
+		if len(opts) > 0 && opts[0].TrimResults != nil && prevToolResultRange[1] > prevToolResultRange[0] {
+			for i := prevToolResultRange[0]; i < prevToolResultRange[1] && i < len(currentMessages); i++ {
+				if currentMessages[i].Role == "tool" {
+					currentMessages[i].Content = opts[0].TrimResults(currentMessages[i].Name, currentMessages[i].Content)
+				}
+			}
+			prevToolResultRange = [2]int{0, 0}
 		}
 		// Progressively nudge the AI to stop researching and produce a final response.
 		// Phase 1 (nudgeAfter): inject a nudge message but keep tools available.
@@ -1805,11 +1803,6 @@ func StreamWithTools(
 				}
 			}
 		}
-
-		// Trim tool results that were pending from the previous request only
-		// after this round's LLM call has consumed them. Trimming at the top of
-		// the loop means the model never sees the full tool output at all.
-		trimPendingToolResults()
 
 		// If LLM wants to call tools — discard buffered chunks (they're reasoning, not code)
 		if lastFinishReason == "tool_calls" && len(toolCallsMap) > 0 {
