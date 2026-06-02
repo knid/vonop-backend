@@ -4,14 +4,34 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/knid/wemob/internal/models"
 )
 
-func validateGeneratedApp(fileMap *SafeFileMap, state *BuildState, prompt string, isFirstGen bool) error {
+func validateGeneratedApp(fileMap *SafeFileMap, state *BuildState, prompt string, isFirstGen bool, projectType string) error {
 	if fileMap == nil {
 		return fmt.Errorf("generated app validation failed: no files are available")
 	}
 	if !isFirstGen {
 		return validateNoImagePlaceholders(fileMap)
+	}
+	if projectType == models.ProjectTypeMobileAppNative {
+		if _, ok := fileMap.Get("mobile/package.json"); !ok {
+			return fmt.Errorf("generated app validation failed: mobile/package.json is missing")
+		}
+		if _, ok := fileMap.Get("mobile/app/_layout.tsx"); !ok {
+			return fmt.Errorf("generated app validation failed: mobile/app/_layout.tsx is missing")
+		}
+		if _, ok := fileMap.Get("mobile/app/(app)/index.tsx"); !ok {
+			return fmt.Errorf("generated app validation failed: mobile/app/(app)/index.tsx is missing")
+		}
+		if err := validateNoImagePlaceholders(fileMap); err != nil {
+			return err
+		}
+		if state != nil {
+			state.SetPhase(BuildPhaseFinal)
+		}
+		return nil
 	}
 	if _, ok := fileMap.Get("app/layout.tsx"); !ok {
 		return fmt.Errorf("generated app validation failed: app/layout.tsx is missing")

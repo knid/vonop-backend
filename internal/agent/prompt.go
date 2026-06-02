@@ -131,6 +131,10 @@ Tool preference:
   pattern, then read_files fetches only those files.
 - read_files (plural) for EVERY file read. Pass paths as an array. Never
   sequence "let me read X, then Y".
+- write_files for creating multiple files in one call. Prefer it over many
+  separate write_file calls.
+- patch_files for exact-string edits across multiple files. Prefer it over
+  many separate edit_file / multi_edit calls.
 - multi_edit when you have 2+ changes to the SAME file. Batches all edits
   into one tool call instead of one LLM turn per edit — same semantics as
   edit_file, but one round-trip.
@@ -145,6 +149,8 @@ Tool preference:
   tool result is the source of truth; you don't need list_files again
   unless you've lost track.
 - delete_file when a file is no longer needed.
+- run_check after meaningful file changes to catch build/typecheck errors
+  before you finish.
 - web_search for current information the model wasn't trained on.
 - generate_image for original imagery. See "Work Order" below — images are
   always the final phase.

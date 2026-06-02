@@ -30,7 +30,7 @@ func TestReadFilesTool_ReturnsContentsForAllPaths(t *testing.T) {
 	}
 }
 
-func TestReadFilesTool_MissingPathReportsErrorInline(t *testing.T) {
+func TestReadFilesTool_MissingPathReportsToolErrorAndInlineDetail(t *testing.T) {
 	rc := newPathScopeTestRC(models.ProjectTypeApp)
 	rc.FileMap.Set("a.tsx", "AAA")
 
@@ -39,8 +39,8 @@ func TestReadFilesTool_MissingPathReportsErrorInline(t *testing.T) {
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-	if isError {
-		t.Fatalf("expected isError=false (per-path errors are inline), got: %s", out)
+	if !isError {
+		t.Fatalf("expected isError=true for missing path, got: %s", out)
 	}
 	if !strings.Contains(out, "AAA") {
 		t.Errorf("expected a.tsx content in output: %s", out)

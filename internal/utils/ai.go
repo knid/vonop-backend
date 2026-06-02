@@ -69,6 +69,22 @@ func isValidJSON(s string) bool {
 	return json.Valid([]byte(s))
 }
 
+// isParallelSafeTool returns true for tools that do not mutate shared project
+// state and can run concurrently without changing agent semantics.
+func isParallelSafeTool(name string) bool {
+	switch name {
+	case "read_files", "list_files", "grep", "read_attachment", "generate_image",
+		"read_build_logs", "read_deploy_logs", "read_mobile_config":
+		return true
+	default:
+		return false
+	}
+}
+
+func isPinnedCurrentRunMessage(m Message) bool {
+	return m.Role == "user" && strings.HasPrefix(m.Content, "CURRENT RUN CONTEXT\n")
+}
+
 // truncateBody truncates a string to maxLen characters for safe logging.
 func truncateBody(s string, maxLen int) string {
 	if len(s) <= maxLen {
@@ -274,15 +290,15 @@ type TokenEntry struct {
 	CacheReadInputTokens     int
 	// CacheReadInclusive is true when the provider (e.g. DeepSeek) includes
 	// cache-read tokens inside PromptTokens. Anthropic reports them separately.
-	CacheReadInclusive       bool
-	LatencyMs                int64
-	IsStreaming              bool
-	InputMessages            []Message  // optional: messages sent to LLM (only when TrackContent is set)
-	OutputText               string     // optional: LLM text completion (only when TrackContent is set)
-	ToolCalls                []ToolCall // optional: tool calls emitted by the LLM in this round
-	SpanName                 string     // LLM function name (e.g. "get_json", "stream_text") for PostHog $ai_span_name
-	RecordedAt               time.Time  // wall-clock time when this entry was recorded
-	CostUSD                  float64    // estimated cost in USD (computed from model pricing)
+	CacheReadInclusive bool
+	LatencyMs          int64
+	IsStreaming        bool
+	InputMessages      []Message  // optional: messages sent to LLM (only when TrackContent is set)
+	OutputText         string     // optional: LLM text completion (only when TrackContent is set)
+	ToolCalls          []ToolCall // optional: tool calls emitted by the LLM in this round
+	SpanName           string     // LLM function name (e.g. "get_json", "stream_text") for PostHog $ai_span_name
+	RecordedAt         time.Time  // wall-clock time when this entry was recorded
+	CostUSD            float64    // estimated cost in USD (computed from model pricing)
 }
 
 // modelCosts maps normalized model names to per-million-token pricing {input, output}.
@@ -301,21 +317,21 @@ var modelCosts = map[string][2]float64{
 	"kimi-k2.6":                 {1.0, 4.0},
 	"kimi-k2.5":                 {2.0, 8.0},
 	// OpenRouter models
-	"deepseek-v4-pro":           {0.435, 0.87},
-	"deepseek-v4-flash":         {0.1, 0.2},
-	"deepseek-chat":             {0.5, 2.0},
-	"deepseek-reasoner":         {0.5, 2.0},
-	"deepseek-r1":               {0.5, 2.0},
-	"grok-3-beta":               {3.0, 15.0},
-	"grok-3":                    {3.0, 15.0},
-	"grok-3-fast-beta":          {5.0, 25.0},
-	"gemini-2.5-flash":          {0.15, 0.6},
-	"gemini-2.5-pro":            {1.25, 10.0},
+	"deepseek-v4-pro":   {0.435, 0.87},
+	"deepseek-v4-flash": {0.1, 0.2},
+	"deepseek-chat":     {0.5, 2.0},
+	"deepseek-reasoner": {0.5, 2.0},
+	"deepseek-r1":       {0.5, 2.0},
+	"grok-3-beta":       {3.0, 15.0},
+	"grok-3":            {3.0, 15.0},
+	"grok-3-fast-beta":  {5.0, 25.0},
+	"gemini-2.5-flash":  {0.15, 0.6},
+	"gemini-2.5-pro":    {1.25, 10.0},
 	// Step models (via OpenRouter)
-	"step-3.5-flash":            {0.09, 0.30},
-	"step-3.7-flash":            {0.20, 1.15},
+	"step-3.5-flash": {0.09, 0.30},
+	"step-3.7-flash": {0.20, 1.15},
 	// Xiaomi models (via OpenRouter)
-	"mimo-v2.5":                 {0.14, 0.28},
+	"mimo-v2.5": {0.14, 0.28},
 }
 
 // cacheReadIsInclusive returns true for providers where cache-read tokens are
@@ -399,15 +415,15 @@ func resolveCostUSD(model string, usage UsageInfo) float64 {
 
 // TokenTracker is a thread-safe accumulator that collects token usage across multiple LLM calls.
 type TokenTracker struct {
-	mu           sync.Mutex
-	entries      []TokenEntry
-	toolsUsed    []string  // tool names called during this trace (for PostHog $ai_trace)
-	TrackContent bool      // opt-in: when true, StreamWithTools records message content per round
-	TraceInput   string    // user's original message (for $ai_trace)
-	TraceOutput  string    // final assistant response (for $ai_trace)
-	UserID         string // for slog attribution
-	ProjectID      string // for slog attribution
-	OrganizationID string // for PostHog org_id attribution on $ai_generation / $ai_trace
+	mu             sync.Mutex
+	entries        []TokenEntry
+	toolsUsed      []string // tool names called during this trace (for PostHog $ai_trace)
+	TrackContent   bool     // opt-in: when true, StreamWithTools records message content per round
+	TraceInput     string   // user's original message (for $ai_trace)
+	TraceOutput    string   // final assistant response (for $ai_trace)
+	UserID         string   // for slog attribution
+	ProjectID      string   // for slog attribution
+	OrganizationID string   // for PostHog org_id attribution on $ai_generation / $ai_trace
 	// TraceID, when non-empty, overrides the auto-generated trace id in
 	// RecordTokenUsage so callers (agent.Run) can bind the PostHog trace to
 	// an external identifier such as AppAgentRun.ID. Error events emitted
@@ -600,15 +616,15 @@ type ResponseFormat struct {
 // --- Tool calling types ---
 
 type Tool struct {
-	Type       string       `json:"type"`                   // "function", "builtin_function", "server_tool"
+	Type       string       `json:"type"` // "function", "builtin_function", "server_tool"
 	Function   ToolFunction `json:"function,omitempty"`
 	ServerTool *ServerTool  `json:"-"` // Anthropic server-side tools; not serialized to OpenAI format
 }
 
 // ServerTool represents an Anthropic server-side tool (e.g. web_search).
 type ServerTool struct {
-	Type    string `json:"type"`              // e.g. "web_search_20250305"
-	Name    string `json:"name"`              // e.g. "web_search"
+	Type    string `json:"type"` // e.g. "web_search_20250305"
+	Name    string `json:"name"` // e.g. "web_search"
 	MaxUses int    `json:"max_uses,omitempty"`
 }
 
@@ -637,9 +653,9 @@ type ToolExecutor func(name string, arguments string) (string, error)
 // ReasoningConfig controls thinking/reasoning mode on OpenRouter.
 // See https://openrouter.ai/docs/guides/best-practices/reasoning-tokens
 type ReasoningConfig struct {
-	Effort  string `json:"effort,omitempty"`     // "none", "low", "medium", "high", "xhigh"
-	Exclude bool   `json:"exclude,omitempty"`    // true = model thinks but doesn't return reasoning tokens
-	Enabled *bool  `json:"enabled,omitempty"`    // explicitly enable/disable
+	Effort  string `json:"effort,omitempty"`  // "none", "low", "medium", "high", "xhigh"
+	Exclude bool   `json:"exclude,omitempty"` // true = model thinks but doesn't return reasoning tokens
+	Enabled *bool  `json:"enabled,omitempty"` // explicitly enable/disable
 }
 
 // ThinkingConfig controls thinking mode on Moonshot (Kimi).
@@ -656,20 +672,20 @@ type StreamOptionsConfig struct {
 
 type ChatRequest struct {
 	Model               string               `json:"model"`
-	Messages            []Message             `json:"messages"`
-	Stream              bool                  `json:"stream,omitempty"`
-	StreamOptions       *StreamOptionsConfig  `json:"stream_options,omitempty"`
-	MaxTokens           int                   `json:"max_tokens,omitempty"`
-	MaxCompletionTokens int                   `json:"max_completion_tokens,omitempty"`
-	Temperature         *float64              `json:"temperature,omitempty"`
-	TopP                *float64              `json:"top_p,omitempty"`
-	ResponseFormat      *ResponseFormat       `json:"response_format,omitempty"`
-	Tools               []Tool                `json:"tools,omitempty"`
-	ToolChoice          any                   `json:"tool_choice,omitempty"`
-	Reasoning           *ReasoningConfig      `json:"reasoning,omitempty"`
-	Thinking            *ThinkingConfig       `json:"thinking,omitempty"`
-	DisablePromptCache  bool                  `json:"-"` // skip Anthropic cache_control on system blocks (for one-shot calls with no follow-up)
-	PromptCacheKey      string                `json:"prompt_cache_key,omitempty"` // Moonshot K2.6 session-level prompt cache key
+	Messages            []Message            `json:"messages"`
+	Stream              bool                 `json:"stream,omitempty"`
+	StreamOptions       *StreamOptionsConfig `json:"stream_options,omitempty"`
+	MaxTokens           int                  `json:"max_tokens,omitempty"`
+	MaxCompletionTokens int                  `json:"max_completion_tokens,omitempty"`
+	Temperature         *float64             `json:"temperature,omitempty"`
+	TopP                *float64             `json:"top_p,omitempty"`
+	ResponseFormat      *ResponseFormat      `json:"response_format,omitempty"`
+	Tools               []Tool               `json:"tools,omitempty"`
+	ToolChoice          any                  `json:"tool_choice,omitempty"`
+	Reasoning           *ReasoningConfig     `json:"reasoning,omitempty"`
+	Thinking            *ThinkingConfig      `json:"thinking,omitempty"`
+	DisablePromptCache  bool                 `json:"-"`                          // skip Anthropic cache_control on system blocks (for one-shot calls with no follow-up)
+	PromptCacheKey      string               `json:"prompt_cache_key,omitempty"` // Moonshot K2.6 session-level prompt cache key
 }
 
 type Message struct {
@@ -723,11 +739,11 @@ type Choice struct {
 }
 
 type UsageInfo struct {
-	PromptTokens             int     `json:"prompt_tokens"`
-	CompletionTokens         int     `json:"completion_tokens"`
-	TotalTokens              int     `json:"total_tokens"`
-	CacheCreationInputTokens int     `json:"cache_creation_input_tokens,omitempty"`
-	CacheReadInputTokens     int     `json:"cache_read_input_tokens,omitempty"`
+	PromptTokens             int `json:"prompt_tokens"`
+	CompletionTokens         int `json:"completion_tokens"`
+	TotalTokens              int `json:"total_tokens"`
+	CacheCreationInputTokens int `json:"cache_creation_input_tokens,omitempty"`
+	CacheReadInputTokens     int `json:"cache_read_input_tokens,omitempty"`
 	// Cost is the upstream-billed USD for this call. OpenRouter returns
 	// it in usage.cost when the request sets `usage.include = true`; it
 	// already accounts for prompt-cache discounts, provider routing
@@ -798,7 +814,6 @@ func buildLLMRequestBody(req ChatRequest, provider *LLMProvider) ([]byte, error)
 	}
 	return body, nil
 }
-
 
 // parseLLMResponseBody unmarshals a non-streaming LLM response body.
 func parseLLMResponseBody(body []byte, provider *LLMProvider) (ChatResponse, error) {
@@ -1009,7 +1024,6 @@ func stripCodeFences(s string) string {
 	return s
 }
 
-
 func GetTextFromLLM(ctx context.Context, model, system, message string, provider *LLMProvider, maxTokens ...int) (string, error) {
 	return withFallback(provider, model, func(p *LLMProvider, m string) (string, error) {
 		return getTextFromLLMOnce(ctx, m, system, message, p, maxTokens...)
@@ -1118,8 +1132,8 @@ func getTextFromLLMOnce(ctx context.Context, model, system, message string, prov
 
 type StreamDelta struct {
 	Content          string     `json:"content,omitempty"`
-	Reasoning        string     `json:"reasoning,omitempty"`          // OpenRouter
-	ReasoningContent string     `json:"reasoning_content,omitempty"`  // Moonshot
+	Reasoning        string     `json:"reasoning,omitempty"`         // OpenRouter
+	ReasoningContent string     `json:"reasoning_content,omitempty"` // Moonshot
 	ToolCalls        []ToolCall `json:"tool_calls,omitempty"`
 }
 
@@ -1141,42 +1155,39 @@ type StreamChunk struct {
 	Usage   *UsageInfo     `json:"usage,omitempty"`
 }
 
-
-
 // MultiContentPart represents a content part in a multimodal message.
 type MultiContentPart struct {
-	Type     string            `json:"type"`
-	Text     string            `json:"text,omitempty"`
-	ImageURL *ImageURLContent  `json:"image_url,omitempty"`
+	Type     string           `json:"type"`
+	Text     string           `json:"text,omitempty"`
+	ImageURL *ImageURLContent `json:"image_url,omitempty"`
 }
 
 type ImageURLContent struct {
 	URL string `json:"url"`
 }
 
-
 // ToolCallConfig holds optional configuration for StreamWithTools.
 type ToolCallConfig struct {
-	MaxRounds         int                                                    // Maximum tool-calling rounds (default 10)
-	NudgeAfter        int                                                    // Inject nudge after this many consecutive tool rounds (default 3)
-	StripAfter        int                                                    // Strip tools entirely after this many consecutive rounds (default 5)
-	MaxTokens         int                                                    // Max completion tokens per round (default 16384)
-	TrimArgs          func(toolName, args string) string                     // Trim tool call arguments in history to reduce token usage
-	TrimResults       func(toolName, result string) string                   // Trim tool result messages in history to reduce token usage
+	MaxRounds         int                                                        // Maximum tool-calling rounds (default 10)
+	NudgeAfter        int                                                        // Inject nudge after this many consecutive tool rounds (default 3)
+	StripAfter        int                                                        // Strip tools entirely after this many consecutive rounds (default 5)
+	MaxTokens         int                                                        // Max completion tokens per round (default 16384)
+	TrimArgs          func(toolName, args string) string                         // Trim tool call arguments in history to reduce token usage
+	TrimResults       func(toolName, result string) string                       // Trim tool result messages in history to reduce token usage
 	InterceptToolCall func(toolName, toolArgs string) (result string, skip bool) // Intercept tool calls before execution; if skip=true, use result and skip executor
-	NudgeMessage      string                                                 // Custom nudge message (replaces default "stop researching" text)
-	StripMessage      string                                                 // Custom message when tools are stripped (replaces default "FINAL WARNING" text)
-	AfterToolRound    func(allIntercepted bool) string                       // Called after each tool round; allIntercepted=true when every call was intercepted; non-empty return is injected as a system message
-	FilterTools       func(tools []Tool) []Tool                              // Called each round to filter/modify tools; return nil to strip all tools
-	OnToolCallStart   func(toolName string)                                  // Called when a tool call name is first detected during SSE streaming (before args are complete)
-	OnToolResult      func(toolName string, result string, isError bool)    // Called after each tool executes (success, failure, dedup, or intercept). Useful for emitting tool_result SSE events.
-	OnRoundStart      func(round int)                                       // Called at the start of each round (useful for resetting per-round state like text buffers)
-	MaxContinuations  int            // Max finish_reason=length continuation rounds (default 3). -1 = disable continuations entirely.
-	ShouldContinue    func() bool    // Called before each round/continuation. Return false to abort. nil = always continue.
-	PromptCacheKey    string         // Moonshot K2.6 session-level prompt cache key (sent on every round)
-	MaxMessages       int            // Maximum messages to send to the LLM; drops oldest non-system messages when exceeded. 0 = unlimited.
-	RefreshPrefix     func(msg *Message)                                   // Called before each round (except round 0) to refresh the user-turn prefix (e.g. file tree). Modifies the message in-place.
-	StripTools        []string       // Tool names to remove when stripping (e.g. read-only research tools). When empty, stripping removes all tools.
+	NudgeMessage      string                                                     // Custom nudge message (replaces default "stop researching" text)
+	StripMessage      string                                                     // Custom message when tools are stripped (replaces default "FINAL WARNING" text)
+	AfterToolRound    func(allIntercepted bool) string                           // Called after each tool round; allIntercepted=true when every call was intercepted; non-empty return is injected as a system message
+	FilterTools       func(tools []Tool) []Tool                                  // Called each round to filter/modify tools; return nil to strip all tools
+	OnToolCallStart   func(toolName string)                                      // Called when a tool call name is first detected during SSE streaming (before args are complete)
+	OnToolResult      func(toolName string, result string, isError bool)         // Called after each tool executes (success, failure, dedup, or intercept). Useful for emitting tool_result SSE events.
+	OnRoundStart      func(round int)                                            // Called at the start of each round (useful for resetting per-round state like text buffers)
+	MaxContinuations  int                                                        // Max finish_reason=length continuation rounds (default 3). -1 = disable continuations entirely.
+	ShouldContinue    func() bool                                                // Called before each round/continuation. Return false to abort. nil = always continue.
+	PromptCacheKey    string                                                     // Moonshot K2.6 session-level prompt cache key (sent on every round)
+	MaxMessages       int                                                        // Maximum messages to send to the LLM; drops oldest non-system messages when exceeded. 0 = unlimited.
+	RefreshPrefix     func(msg *Message)                                         // Called before each round (except round 0) to refresh the user-turn prefix (e.g. file tree). Modifies the message in-place.
+	StripTools        []string                                                   // Tool names to remove when stripping (e.g. read-only research tools). When empty, stripping removes all tools.
 }
 
 // An optional ToolCallConfig can be passed to override defaults.
@@ -1331,6 +1342,8 @@ func StreamWithTools(
 		// We must not split a tool round — a tool message must always follow its
 		// assistant message, and all tool messages for an assistant must be contiguous.
 		// Anthropic rejects requests where a tool_result lacks a preceding tool_use.
+		// Keep the current run context user message pinned, because it carries the
+		// live file tree/build state/original request across long tool loops.
 		if len(opts) > 0 && opts[0].MaxMessages > 0 && len(currentMessages) > opts[0].MaxMessages {
 			// Keep all leading system messages; drop oldest non-system messages.
 			systemCount := 0
@@ -1341,13 +1354,27 @@ func StreamWithTools(
 					break
 				}
 			}
+			pinnedIdx := -1
+			for i := systemCount; i < len(currentMessages); i++ {
+				if isPinnedCurrentRunMessage(currentMessages[i]) {
+					pinnedIdx = i
+					break
+				}
+			}
 			// How many non-system messages we can keep.
 			nonSystemKeep := opts[0].MaxMessages - systemCount
 			if nonSystemKeep < 0 {
 				nonSystemKeep = 0
 			}
+			suffixKeep := nonSystemKeep
+			if pinnedIdx >= systemCount {
+				suffixKeep--
+			}
+			if suffixKeep < 0 {
+				suffixKeep = 0
+			}
 			// Ideal start index for non-system messages.
-			keepFrom := len(currentMessages) - nonSystemKeep
+			keepFrom := len(currentMessages) - suffixKeep
 			if keepFrom < systemCount {
 				keepFrom = systemCount
 			}
@@ -1359,7 +1386,14 @@ func StreamWithTools(
 			}
 			if keepFrom > systemCount {
 				dropped := keepFrom - systemCount
-				currentMessages = append(currentMessages[:systemCount], currentMessages[keepFrom:]...)
+				trimmed := make([]Message, 0, opts[0].MaxMessages+1)
+				trimmed = append(trimmed, currentMessages[:systemCount]...)
+				if pinnedIdx >= systemCount && pinnedIdx < keepFrom {
+					trimmed = append(trimmed, currentMessages[pinnedIdx])
+					dropped--
+				}
+				trimmed = append(trimmed, currentMessages[keepFrom:]...)
+				currentMessages = trimmed
 				slog.Warn("StreamWithTools trimmed message history", "dropped", dropped, "remaining", len(currentMessages), "max", opts[0].MaxMessages)
 			}
 		}
@@ -1399,15 +1433,15 @@ func StreamWithTools(
 		}
 
 		body, err := buildLLMRequestBody(ChatRequest{
-			Model:           model,
-			Stream:          true,
-			StreamOptions:   &StreamOptionsConfig{IncludeUsage: true},
-			MaxTokens:       maxTokens,
-			Reasoning:       reasoning,
-			Messages:        currentMessages,
-			Tools:           roundTools,
-			ResponseFormat:  responseFormat,
-			PromptCacheKey:  promptCacheKey,
+			Model:          model,
+			Stream:         true,
+			StreamOptions:  &StreamOptionsConfig{IncludeUsage: true},
+			MaxTokens:      maxTokens,
+			Reasoning:      reasoning,
+			Messages:       currentMessages,
+			Tools:          roundTools,
+			ResponseFormat: responseFormat,
+			PromptCacheKey: promptCacheKey,
 		}, provider)
 		if err != nil {
 			return "", fmt.Errorf("round %d: error building request: %w", round, err)
@@ -1496,7 +1530,7 @@ func StreamWithTools(
 			}
 			return "", fmt.Errorf("round %d: LLM returned status %d", round, resp.StatusCode)
 		}
-		rateLimitRetries = 0   // reset after successful request
+		rateLimitRetries = 0 // reset after successful request
 		transientRetries = 0
 
 		fullText.Reset()
@@ -1819,105 +1853,59 @@ func StreamWithTools(
 			assistantMsgIdx := len(currentMessages)
 			currentMessages = append(currentMessages, assistantMsg)
 
-			// Execute each tool (with dedup) and append results
-			dedupCount := 0
-			interceptCount := 0
-			for _, tc := range toolCalls {
-				if ctx.Err() != nil {
-					return "", ctx.Err()
+			type preparedToolCall struct {
+				tc       ToolCall
+				name     string
+				args     string
+				cacheKey string
+				result   string
+				cached   bool
+				skipExec bool
+			}
+			type executedToolCall struct {
+				result string
+				err    error
+			}
+
+			runTool := func(toolName, toolArgs string) executedToolCall {
+				slog.Info("Executing tool call", "tool", toolName, "round", round)
+
+				if onToolCall != nil {
+					onToolCall(toolName, toolArgs)
 				}
 
-				toolName := ""
-				toolArgs := ""
-				if tc.Function != nil {
-					toolName = tc.Function.Name
-					toolArgs = tc.Function.Arguments
-				}
-
-				var result string
-
-				// Intercept tool calls before cache check and execution
-				if len(opts) > 0 && opts[0].InterceptToolCall != nil {
-					interceptResult, skip := opts[0].InterceptToolCall(toolName, toolArgs)
-					if skip {
-						result = interceptResult
-						interceptCount++
-						// Cache intercepted results so they can be deduped in later rounds
-						cacheKey := normalizeToolCacheKey(toolName, toolArgs)
-						toolCallHistory[cacheKey] = result
-						slog.Info("Tool call intercepted", "tool", toolName, "round", round)
-						goto toolResultDone
+				// Execute with per-tool timeout to prevent a single slow tool from blocking the loop
+				toolCtx, toolCancel := context.WithTimeout(ctx, toolExecTimeout)
+				ch := make(chan executedToolCall, 1)
+				go func() {
+					defer func() {
+						if r := recover(); r != nil {
+							slog.Error("tool callback panicked", "tool", toolName, "panic", r)
+							ch <- executedToolCall{"", fmt.Errorf("tool %s panicked: %v", toolName, r)}
+						}
+					}()
+					r, e := executor(toolName, toolArgs)
+					ch <- executedToolCall{r, e}
+				}()
+				select {
+				case tr := <-ch:
+					toolCancel()
+					if tr.err != nil {
+						tr.result = sanitizeToolError(toolName, tr.err)
 					}
-					// Non-empty result with skip=false means modified args
-					// (e.g. write_files batch with already-written files stripped out)
-					if interceptResult != "" {
-						toolArgs = interceptResult
-						if tc.Function != nil {
-							tc.Function.Arguments = interceptResult
-						}
+					return tr
+				case <-toolCtx.Done():
+					toolCancel()
+					if ctx.Err() != nil {
+						slog.Error("tool execution aborted: parent context cancelled", "tool", toolName, "round", round, "error", ctx.Err())
+						return executedToolCall{"", ctx.Err()}
 					}
+					slog.Warn("tool execution timed out", "tool", toolName, "round", round, "timeout", toolExecTimeout)
+					return executedToolCall{fmt.Sprintf("Error: tool %s timed out after %s", toolName, toolExecTimeout), nil}
 				}
+			}
 
-				{
-					cacheKey := normalizeToolCacheKey(toolName, toolArgs)
-					if cached, ok := toolCallHistory[cacheKey]; ok {
-						// Return cached result instead of re-executing
-						result = cached
-						dedupCount++
-						slog.Info("Tool call deduped (cached)", "tool", toolName, "round", round)
-					} else {
-						// Validate JSON arguments before execution to avoid wasting a tool round
-						if toolArgs != "" && toolArgs != "{}" && !isValidJSON(toolArgs) {
-							slog.Warn("Tool call has invalid JSON arguments", "tool", toolName, "round", round, "args_len", len(toolArgs))
-							result = fmt.Sprintf("Error: invalid JSON arguments for tool %s. Please provide valid JSON.", toolName)
-							toolCallHistory[cacheKey] = result
-							goto toolResultDone
-						}
-
-						slog.Info("Executing tool call", "tool", toolName, "round", round)
-
-						if onToolCall != nil {
-							onToolCall(toolName, toolArgs)
-						}
-
-						// Execute with per-tool timeout to prevent a single slow tool from blocking the loop
-						toolCtx, toolCancel := context.WithTimeout(ctx, toolExecTimeout)
-						type toolResult struct {
-							result string
-							err    error
-						}
-						ch := make(chan toolResult, 1)
-						go func() {
-							defer func() {
-								if r := recover(); r != nil {
-									slog.Error("tool callback panicked", "tool", toolName, "panic", r)
-									ch <- toolResult{"", fmt.Errorf("tool %s panicked: %v", toolName, r)}
-								}
-							}()
-							r, e := executor(toolName, toolArgs)
-							ch <- toolResult{r, e}
-						}()
-						select {
-						case tr := <-ch:
-							toolCancel()
-							result = tr.result
-							if tr.err != nil {
-								result = sanitizeToolError(toolName, tr.err)
-							}
-						case <-toolCtx.Done():
-							toolCancel()
-							if ctx.Err() != nil {
-								slog.Error("tool execution aborted: parent context cancelled", "tool", toolName, "round", round, "error", ctx.Err())
-								return "", ctx.Err()
-							}
-							slog.Warn("tool execution timed out", "tool", toolName, "round", round, "timeout", toolExecTimeout)
-							result = fmt.Sprintf("Error: tool %s timed out after %s", toolName, toolExecTimeout)
-						}
-						toolCallHistory[cacheKey] = result
-					}
-				}
-			toolResultDone:
-
+			finishToolResult := func(toolName string, result string, tc ToolCall) {
 				// Ensure tool result is non-empty; LLM providers reject empty tool results.
 				if result == "" {
 					slog.Warn("tool returned empty result", "tool", toolName, "round", round)
@@ -1938,6 +1926,123 @@ func StreamWithTools(
 					ToolCallID: tc.ID,
 					Name:       toolName,
 				})
+			}
+
+			// Prepare each tool call sequentially so interception, deduplication,
+			// and JSON validation keep their existing deterministic semantics.
+			dedupCount := 0
+			interceptCount := 0
+			prepared := make([]preparedToolCall, 0, len(toolCalls))
+			allParallelSafe := len(opts) == 0 || opts[0].InterceptToolCall == nil
+			for _, tc := range toolCalls {
+				if ctx.Err() != nil {
+					return "", ctx.Err()
+				}
+
+				toolName := ""
+				toolArgs := ""
+				if tc.Function != nil {
+					toolName = tc.Function.Name
+					toolArgs = tc.Function.Arguments
+				}
+				if !isParallelSafeTool(toolName) {
+					allParallelSafe = false
+				}
+
+				call := preparedToolCall{tc: tc, name: toolName, args: toolArgs}
+
+				// Intercept tool calls before cache check and execution.
+				if len(opts) > 0 && opts[0].InterceptToolCall != nil {
+					interceptResult, skip := opts[0].InterceptToolCall(toolName, toolArgs)
+					if skip {
+						call.result = interceptResult
+						call.skipExec = true
+						interceptCount++
+						call.cacheKey = normalizeToolCacheKey(toolName, toolArgs)
+						toolCallHistory[call.cacheKey] = call.result
+						slog.Info("Tool call intercepted", "tool", toolName, "round", round)
+						prepared = append(prepared, call)
+						continue
+					}
+					// Non-empty result with skip=false means modified args
+					// (e.g. write_files batch with already-written files stripped out)
+					if interceptResult != "" {
+						toolArgs = interceptResult
+						call.args = interceptResult
+						if tc.Function != nil {
+							tc.Function.Arguments = interceptResult
+						}
+					}
+				}
+
+				call.cacheKey = normalizeToolCacheKey(toolName, call.args)
+				if cached, ok := toolCallHistory[call.cacheKey]; ok {
+					call.result = cached
+					call.cached = true
+					call.skipExec = true
+					dedupCount++
+					slog.Info("Tool call deduped (cached)", "tool", toolName, "round", round)
+					prepared = append(prepared, call)
+					continue
+				}
+
+				// Validate JSON arguments before execution to avoid wasting a tool round.
+				if call.args != "" && call.args != "{}" && !isValidJSON(call.args) {
+					slog.Warn("Tool call has invalid JSON arguments", "tool", toolName, "round", round, "args_len", len(call.args))
+					call.result = fmt.Sprintf("Error: invalid JSON arguments for tool %s. Please provide valid JSON.", toolName)
+					call.skipExec = true
+					toolCallHistory[call.cacheKey] = call.result
+					prepared = append(prepared, call)
+					continue
+				}
+
+				prepared = append(prepared, call)
+			}
+
+			if allParallelSafe {
+				var wg sync.WaitGroup
+				results := make([]executedToolCall, len(prepared))
+				for i, call := range prepared {
+					if call.skipExec {
+						results[i] = executedToolCall{result: call.result}
+						continue
+					}
+					wg.Add(1)
+					go func(i int, call preparedToolCall) {
+						defer wg.Done()
+						results[i] = runTool(call.name, call.args)
+					}(i, call)
+				}
+				wg.Wait()
+				for i, call := range prepared {
+					if ctx.Err() != nil {
+						return "", ctx.Err()
+					}
+					result := results[i].result
+					if results[i].err != nil {
+						return result, results[i].err
+					}
+					if !call.skipExec {
+						toolCallHistory[call.cacheKey] = result
+					}
+					finishToolResult(call.name, result, call.tc)
+				}
+			} else {
+				for _, call := range prepared {
+					if ctx.Err() != nil {
+						return "", ctx.Err()
+					}
+					result := call.result
+					if !call.skipExec {
+						tr := runTool(call.name, call.args)
+						result = tr.result
+						if tr.err != nil {
+							return result, tr.err
+						}
+						toolCallHistory[call.cacheKey] = result
+					}
+					finishToolResult(call.name, result, call.tc)
+				}
 			}
 
 			// Capture the range of tool result messages now, before any system
