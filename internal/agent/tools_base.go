@@ -24,10 +24,10 @@ const maxReadBytes = 200 * 1024 // 200 KB
 // invent fake hashes.
 var protectedPaths = map[string]bool{
 	// Lock files — npm/yarn/pnpm/bun manage these, not the LLM
-	"package-lock.json":  true,
-	"yarn.lock":          true,
-	"pnpm-lock.yaml":     true,
-	"bun.lockb":          true,
+	"package-lock.json": true,
+	"yarn.lock":         true,
+	"pnpm-lock.yaml":    true,
+	"bun.lockb":         true,
 	// Build/config files where a wrong edit silently breaks the build pipeline
 	// (Next.js / TS / PostCSS / Drizzle drivers) without a clear error path.
 	// tailwind.config.* is intentionally NOT here — the agent legitimately
@@ -344,6 +344,9 @@ func (DeleteFileTool) Execute(ctx context.Context, rc *RunContext, input json.Ra
 	if !rc.FileMap.Delete(path) {
 		return fmt.Sprintf("file not found: %s", path), true, nil
 	}
+	if rc.BuildState != nil {
+		rc.BuildState.RecordFileDelete(path)
+	}
 	rc.Emitter.Emit(EventFileDeleted, FileDeletedEvent{RunID: rc.RunID, Path: path})
 	return fmt.Sprintf("deleted %s", path), false, nil
 }
@@ -359,7 +362,7 @@ type WriteFileTool struct{}
 
 func (WriteFileTool) Name() string { return "write_file" }
 func (WriteFileTool) Description() string {
-	return "Create a new file or fully overwrite an existing file. Prefer edit_file for targeted changes to existing files."
+	return "Create a new file. To fully overwrite an existing file, pass overwrite=true with a short reason; prefer edit_file or multi_edit for targeted changes."
 }
 func (WriteFileTool) Schema() map[string]any {
 	return map[string]any{
@@ -368,6 +371,8 @@ func (WriteFileTool) Schema() map[string]any {
 			"path":        map[string]any{"type": "string"},
 			"content":     map[string]any{"type": "string"},
 			"description": map[string]any{"type": "string"},
+			"overwrite":   map[string]any{"type": "boolean", "description": "Set true only when intentionally replacing the entire existing file."},
+			"reason":      map[string]any{"type": "string", "description": "Required when overwrite=true. Explain why a full rewrite is safer than edit_file or multi_edit."},
 		},
 		"required": []string{"path", "content"},
 	}
@@ -378,6 +383,8 @@ func (WriteFileTool) Execute(ctx context.Context, rc *RunContext, input json.Raw
 		Path        string `json:"path"`
 		Content     string `json:"content"`
 		Description string `json:"description"`
+		Overwrite   bool   `json:"overwrite"`
+		Reason      string `json:"reason"`
 	}
 	if err := json.Unmarshal(input, &args); err != nil {
 		return fmt.Sprintf("invalid input: %v", err), true, nil
@@ -400,8 +407,15 @@ func (WriteFileTool) Execute(ctx context.Context, rc *RunContext, input json.Raw
 	_, exists := rc.FileMap.Get(path)
 	if !exists {
 		op = "create"
+	} else if !args.Overwrite {
+		return fmt.Sprintf("file already exists: %s — use edit_file/multi_edit for targeted changes, or call write_file again with overwrite=true and a reason if a full rewrite is intentional", path), true, nil
+	} else if strings.TrimSpace(args.Reason) == "" {
+		return fmt.Sprintf("overwrite reason is required for existing file: %s", path), true, nil
 	}
 	rc.FileMap.Set(path, args.Content)
+	if rc.BuildState != nil {
+		rc.BuildState.RecordFileWrite(path, op)
+	}
 	rc.Emitter.Emit(EventFileWritten, FileWrittenEvent{
 		RunID:     rc.RunID,
 		Path:      path,
@@ -475,6 +489,9 @@ func (EditFileTool) Execute(ctx context.Context, rc *RunContext, input json.RawM
 		return fmt.Sprintf("resulting file too large: %d bytes (max %d)", len(newContent), maxWriteBytes), true, nil
 	}
 	rc.FileMap.Set(path, newContent)
+	if rc.BuildState != nil {
+		rc.BuildState.RecordFileWrite(path, "update")
+	}
 	rc.Emitter.Emit(EventFileWritten, FileWrittenEvent{
 		RunID:     rc.RunID,
 		Path:      path,
@@ -488,9 +505,9 @@ func (EditFileTool) Execute(ctx context.Context, rc *RunContext, input json.RawM
 // ---------- grep ----------
 
 const (
-	grepMaxMatches  = 200
-	grepMaxBytes    = 64 * 1024
-	grepMaxLineLen  = 400
+	grepMaxMatches = 200
+	grepMaxBytes   = 64 * 1024
+	grepMaxLineLen = 400
 )
 
 type GrepTool struct{}
@@ -690,6 +707,9 @@ func (MultiEditTool) Execute(ctx context.Context, rc *RunContext, input json.Raw
 	}
 
 	rc.FileMap.Set(path, working)
+	if rc.BuildState != nil {
+		rc.BuildState.RecordFileWrite(path, "update")
+	}
 	rc.Emitter.Emit(EventFileWritten, FileWrittenEvent{
 		RunID:     rc.RunID,
 		Path:      path,
