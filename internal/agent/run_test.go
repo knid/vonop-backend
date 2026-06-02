@@ -28,7 +28,13 @@ func TestConvertHistory_AssistantErrorKind(t *testing.T) {
 	out := convertHistory(history)
 	require.Len(t, out, 1)
 	assert.Equal(t, "user", out[0].Role)
-	assert.Contains(t, out[0].Content, "run timed out")
+	assert.Contains(t, out[0].Content, "oops")
+}
+
+func TestFailureDisplayMessageIncludesWrappedDetail(t *testing.T) {
+	got := failureDisplayMessage("LLM call failed", assert.AnError)
+	assert.Contains(t, got, "LLM call failed")
+	assert.Contains(t, got, assert.AnError.Error())
 }
 
 func TestConvertHistory_AssistantLegacyNoParts(t *testing.T) {

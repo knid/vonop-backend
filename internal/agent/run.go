@@ -480,16 +480,6 @@ func Run(
 
 	toolSchemas := registryToUtilsTools(registry)
 
-	// Server tools (e.g. Anthropic-native web_search) are executed by the
-	// provider — no local executor call, so nothing here emits a tool-call
-	// event and the UI never draws a tool card for them. We surface a
-	// start event by name from OnToolCallStart, skipping local tools (the
-	// executor already emits starts for those with correlatable IDs).
-	serverToolNames := make(map[string]bool, len(registry.ServerTools()))
-	for _, st := range registry.ServerTools() {
-		serverToolNames[st.DisplayName] = true
-	}
-
 	toolRoundCount := 0
 	_, llmErr := utils.StreamWithTools(
 		ctx,
@@ -523,17 +513,11 @@ func Run(
 				}
 				return ""
 			}(),
-			OnToolCallStart: func(toolName string) {
-				if !serverToolNames[toolName] {
-					return
-				}
-				emitter.Emit(EventToolCallStart, ToolCallStartEvent{
-					RunID:      runID,
-					Turn:       turn,
-					ToolCallID: uuid.NewString(),
-					ToolName:   toolName,
-				})
-			},
+			// Provider-executed server tools do not pass through our local
+			// executor, so we cannot emit a matching tool_call_result. Emitting
+			// starts without terminal results leaves the chat UI with orphan
+			// running cards, so we intentionally suppress these callbacks.
+			OnToolCallStart: nil,
 			AfterToolRound: func(allIntercepted bool) string {
 				toolRoundCount++
 				remaining := maxTurns - toolRoundCount
@@ -848,9 +832,13 @@ func convertHistory(history []models.AppChatMessage) []utils.Message {
 			// preserves resume context so that when the user types "continue"
 			// the model knows a previous run failed and can pick up where it
 			// left off rather than treating the request as brand-new.
+			reason := strings.TrimSpace(m.Content)
+			if reason == "" {
+				reason = humanizeErrorKind(m.ErrorKind)
+			}
 			summary := fmt.Sprintf(
 				"The previous assistant generation failed with: %s. Please continue from where it left off.",
-				humanizeErrorKind(m.ErrorKind),
+				reason,
 			)
 			out = append(out, utils.Message{Role: "user", Content: summary})
 			continue
@@ -1271,10 +1259,11 @@ func finaliseFailureV2(
 				"run_id", run.ID, "error", err)
 		}
 	}
+	failureMessage := failureDisplayMessage(message, wrapped)
 	emitter.Emit(EventError, ErrorEvent{
 		RunID:   run.ID,
 		Phase:   phase,
-		Message: message,
+		Message: failureMessage,
 		Code:    code,
 	})
 
@@ -1283,24 +1272,26 @@ func finaliseFailureV2(
 	// readable fallback so old clients during a rolling deploy don't show
 	// empty bubbles.
 	errorKind := classifyErrorKind(code, wrapped)
-	fallbackText := "Generation failed."
-	if checkpointCommit != "" {
-		fallbackText = "Generation failed. Partial progress was saved as a checkpoint."
-	}
-	fallbackParts, _ := json.Marshal([]models.ChatMessagePart{
-		{Type: "text", Text: fallbackText},
-	})
-	orphanMsg := &models.AppChatMessage{
-		AppProjectID: run.AppProjectID,
-		RunID:        &run.ID,
-		Role:         "assistant",
-		Content:      fallbackText,
-		Images:       []byte("[]"),
-		Attachments:  []byte("[]"),
-		ToolCalls:    []byte("[]"),
-		Parts:        fallbackParts,
-		ErrorKind:    errorKind,
-	}
+
+  fallbackText := failureMessage
+  if checkpointCommit != "" {
+        fallbackText = "Generation failed. Partial progress was saved as a checkpoint."
+  }
+
+  fallbackParts, _ := json.Marshal([]models.ChatMessagePart{
+        {Type: "text", Text: fallbackText},
+  })
+  orphanMsg := &models.AppChatMessage{
+        AppProjectID: run.AppProjectID,
+        RunID:        &run.ID,
+        Role:         "assistant",
+        Content:      fallbackText,
+        Images:       []byte("[]"),
+        Attachments:  []byte("[]"),
+        ToolCalls:    []byte("[]"),
+        Parts:        fallbackParts,
+        ErrorKind:    errorKind,
+  }
 	if _, err := deps.DB.InsertChatMessage(orphanMsg); err != nil {
 		slog.Warn("failed to persist failure message", "error", err, "run_id", run.ID)
 	}
@@ -1318,7 +1309,7 @@ func finaliseFailureV2(
 	credits := creditsBilled(deps, tracker)
 	costUSD := estimateCost(run.Model, promptTok, completionTok)
 	run.Status = mapCodeToStatus(code)
-	run.Error = fmt.Sprintf("%s: %s", code, message)
+	run.Error = fmt.Sprintf("%s: %s", code, failureMessage)
 	run.PromptTokens = promptTok
 	run.CompletionTokens = completionTok
 	run.CostUSD = costUSD
@@ -1400,8 +1391,8 @@ func finaliseFailureV2(
 	// Flag the tracker so the $ai_trace event carries $ai_is_error even when
 	// no $ai_generation child captured the failure (e.g. deadline mid-stream
 	// before the first round completed).
-	errMsg := fmt.Sprintf("%s: %s", code, message)
-	if wrapped != nil {
+	errMsg := fmt.Sprintf("%s: %s", code, failureMessage)
+	if wrapped != nil && !strings.Contains(failureMessage, wrapped.Error()) {
 		errMsg = fmt.Sprintf("%s (%s)", errMsg, wrapped.Error())
 	}
 	if tracker != nil {
@@ -1422,7 +1413,22 @@ func finaliseFailureV2(
 	}
 
 	_ = ctx
-	return New(code, phase, message, wrapped)
+	return New(code, phase, failureMessage, wrapped)
+}
+
+func failureDisplayMessage(message string, wrapped error) string {
+	msg := strings.TrimSpace(message)
+	if msg == "" {
+		msg = "Generation failed"
+	}
+	if wrapped == nil {
+		return msg
+	}
+	detail := strings.TrimSpace(wrapped.Error())
+	if detail == "" || strings.Contains(msg, detail) {
+		return msg
+	}
+	return msg + ": " + detail
 }
 
 // isUniqueViolation returns true if err is a Postgres unique-constraint

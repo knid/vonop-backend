@@ -140,6 +140,7 @@ func (v *HttpViews) handleStreamOrAsync(w http.ResponseWriter, r *http.Request, 
 			nextSeq++
 			event.Seq = nextSeq
 			lastEvent = &event
+			streamState.Apply(event)
 
 			// Persist milestone events to the DB BEFORE publishing to the
 			// bus. This guarantees that a reconnected subscriber that reads
@@ -164,9 +165,6 @@ func (v *HttpViews) handleStreamOrAsync(w http.ResponseWriter, r *http.Request, 
 
 			// Fan out to any reconnected SSE subscribers
 			bus.Publish(event)
-
-			// Update the partial stream buffer for refresh recovery.
-			streamState.Apply(event)
 
 			// Write to SSE if client is still connected
 			if !clientGone {
@@ -272,6 +270,7 @@ func (v *HttpViews) drainEventsToJob(ctx context.Context, cancel context.CancelF
 			nextSeq++
 			event.Seq = nextSeq
 			lastEvent = &event
+			streamState.Apply(event)
 
 			// Persist BEFORE publish — see handleStreamOrAsync for rationale.
 			if controllers.IsMilestoneEvent(event.Event) {
@@ -294,8 +293,6 @@ func (v *HttpViews) drainEventsToJob(ctx context.Context, cancel context.CancelF
 					b.Publish(event)
 				}
 			}
-
-			streamState.Apply(event)
 
 		case <-stateFlush.C:
 			stateFlusher.Trigger()
@@ -638,8 +635,8 @@ func computeMaxReplayedSeq(job *models.GenerationJob, since int64) int64 {
 	return max
 }
 
-// replayPersistedJobEvents writes the last persisted partial stream buffer
-// followed by each recorded milestone event into the SSE response. Used by
+// replayPersistedJobEvents writes recorded milestone events followed by the
+// last persisted partial stream buffer into the SSE response. Used by
 // StreamJob both for live reconnects (as a primer before tailing the bus)
 // and for terminal reconnects (as the only data source).
 //
@@ -648,19 +645,14 @@ func computeMaxReplayedSeq(job *models.GenerationJob, since int64) int64 {
 // reconnect doesn't redeliver tool cards or file events the client already
 // has. The stream_state snapshot is always sent — it carries no seq, and
 // the client uses it to rehydrate transient narration buffers regardless
-// of what milestones it has seen.
+// of what milestones it has seen. It is sent after milestones so completed
+// tool cards come from the durable log and stream_state only tops up transient
+// in-flight state.
 //
 // Errors from individual writes are intentionally swallowed — the caller has
 // no recovery path mid-stream, and partial replay is still more useful than
 // a 500 response.
 func replayPersistedJobEvents(w http.ResponseWriter, flusher http.Flusher, job *models.GenerationJob, since int64) {
-	if len(job.StreamState) > 0 && string(job.StreamState) != "{}" && string(job.StreamState) != "null" {
-		var stateData any
-		if err := json.Unmarshal(job.StreamState, &stateData); err == nil {
-			_ = utils.WriteSSEEvent(w, flusher, 0, "stream_state", stateData)
-		}
-	}
-
 	var milestoneEvents []json.RawMessage
 	if json.Unmarshal(job.Events, &milestoneEvents) == nil {
 		for _, raw := range milestoneEvents {
@@ -676,6 +668,13 @@ func replayPersistedJobEvents(w http.ResponseWriter, flusher http.Flusher, job *
 				continue
 			}
 			_ = utils.WriteSSEEvent(w, flusher, evt.Seq, evt.Event, evt.Data)
+		}
+	}
+
+	if len(job.StreamState) > 0 && string(job.StreamState) != "{}" && string(job.StreamState) != "null" {
+		var stateData any
+		if err := json.Unmarshal(job.StreamState, &stateData); err == nil {
+			_ = utils.WriteSSEEvent(w, flusher, 0, "stream_state", stateData)
 		}
 	}
 }
