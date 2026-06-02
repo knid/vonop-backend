@@ -500,6 +500,7 @@ func Run(
 			// "continue") from firing in all but pathological runs.
 			MaxTokens:     64000,
 			NudgeAfter:    nudgeAfter,
+			NudgeMessage:  "You have used several tool rounds. Use BUILD STATE as the checklist: continue implementing pending requirements, rewrite any files listed under Needs rewrite, and avoid redundant reads or rewrites.",
 			StripAfter:    stripAfter,
 			StripTools:    []string{"read_files", "list_files", "grep", "read_attachment", "web_search", "read_build_logs", "read_deploy_logs", "read_mobile_config"},
 			MaxMessages:   25,

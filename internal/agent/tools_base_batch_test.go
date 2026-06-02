@@ -104,6 +104,28 @@ func TestWriteFileTool_AllowsIntentionalRewriteOfExistingFile(t *testing.T) {
 	}
 }
 
+func TestWriteFileTool_WarnsOnTinySourceFile(t *testing.T) {
+	rc := newPathScopeTestRC(models.ProjectTypeApp)
+	rc.BuildState = NewBuildState("build dashboard", true)
+
+	out, isError, err := WriteFileTool{}.Execute(context.Background(), rc,
+		json.RawMessage(`{"path":"components/admin-dashboard.tsx","content":"export default function AdminDashboard() { return null }"}`))
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if isError {
+		t.Fatalf("expected tiny source write to succeed with warning; out=%s", out)
+	}
+	if !strings.Contains(out, "WARNING") || !strings.Contains(out, "looks incomplete") {
+		t.Fatalf("expected incomplete-file warning, got: %s", out)
+	}
+	rendered := rc.BuildState.Render(rc.FileMap)
+	if !strings.Contains(rendered, "Needs rewrite") ||
+		!strings.Contains(rendered, "components/admin-dashboard.tsx") {
+		t.Fatalf("expected build state to require rewrite, got:\n%s", rendered)
+	}
+}
+
 func TestWriteFileTool_AllowsCreationOfNewFileAtAnySize(t *testing.T) {
 	rc := newPathScopeTestRC(models.ProjectTypeApp)
 

@@ -417,8 +417,11 @@ func (WriteFileTool) Execute(ctx context.Context, rc *RunContext, input json.Raw
 		return fmt.Sprintf("overwrite reason is required for existing file: %s", path), true, nil
 	}
 	rc.FileMap.Set(path, args.Content)
+	warning := ""
 	if rc.BuildState != nil {
-		rc.BuildState.RecordFileWrite(path, op)
+		if reason := rc.BuildState.RecordFileWrite(path, op, args.Content); reason != "" {
+			warning = fmt.Sprintf(" WARNING: %s looks incomplete (%s). Expand or rewrite it before considering it done.", path, reason)
+		}
 	}
 	rc.Emitter.Emit(EventFileWritten, FileWrittenEvent{
 		RunID:     rc.RunID,
@@ -427,7 +430,7 @@ func (WriteFileTool) Execute(ctx context.Context, rc *RunContext, input json.Raw
 		Bytes:     len(args.Content),
 		Content:   args.Content,
 	})
-	return fmt.Sprintf("%sd %s (%d bytes)", op, path, len(args.Content)), false, nil
+	return fmt.Sprintf("%sd %s (%d bytes)%s", op, path, len(args.Content), warning), false, nil
 }
 
 // ---------- write_files ----------
@@ -569,7 +572,7 @@ func (EditFileTool) Execute(ctx context.Context, rc *RunContext, input json.RawM
 	}
 	rc.FileMap.Set(path, newContent)
 	if rc.BuildState != nil {
-		rc.BuildState.RecordFileWrite(path, "update")
+		rc.BuildState.RecordFileWrite(path, "update", newContent)
 	}
 	rc.Emitter.Emit(EventFileWritten, FileWrittenEvent{
 		RunID:     rc.RunID,
@@ -787,7 +790,7 @@ func (MultiEditTool) Execute(ctx context.Context, rc *RunContext, input json.Raw
 
 	rc.FileMap.Set(path, working)
 	if rc.BuildState != nil {
-		rc.BuildState.RecordFileWrite(path, "update")
+		rc.BuildState.RecordFileWrite(path, "update", working)
 	}
 	rc.Emitter.Emit(EventFileWritten, FileWrittenEvent{
 		RunID:     rc.RunID,

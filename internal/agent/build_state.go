@@ -2,6 +2,7 @@ package agent
 
 import (
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -39,6 +40,7 @@ type BuildState struct {
 	Created         map[string]bool
 	Updated         map[string]bool
 	Deleted         map[string]bool
+	NeedsRewrite    map[string]string
 }
 
 func NewBuildState(originalRequest string, isFirstGen bool) *BuildState {
@@ -53,24 +55,32 @@ func NewBuildState(originalRequest string, isFirstGen bool) *BuildState {
 		Created:         map[string]bool{},
 		Updated:         map[string]bool{},
 		Deleted:         map[string]bool{},
+		NeedsRewrite:    map[string]string{},
 	}
 }
 
-func (s *BuildState) RecordFileWrite(path, op string) {
+func (s *BuildState) RecordFileWrite(path, op, content string) string {
 	if s == nil || path == "" {
-		return
+		return ""
 	}
+	rewriteReason := suspiciousGeneratedFileReason(path, content)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.Deleted, path)
+	if rewriteReason != "" {
+		s.NeedsRewrite[path] = rewriteReason
+	} else {
+		delete(s.NeedsRewrite, path)
+	}
 	if op == "create" {
 		s.Created[path] = true
 		delete(s.Updated, path)
-		return
+		return rewriteReason
 	}
 	if !s.Created[path] {
 		s.Updated[path] = true
 	}
+	return rewriteReason
 }
 
 func (s *BuildState) RecordFileDelete(path string) {
@@ -81,6 +91,7 @@ func (s *BuildState) RecordFileDelete(path string) {
 	defer s.mu.Unlock()
 	delete(s.Created, path)
 	delete(s.Updated, path)
+	delete(s.NeedsRewrite, path)
 	s.Deleted[path] = true
 }
 
@@ -117,6 +128,7 @@ func (s *BuildState) Render(fileMap *SafeFileMap) string {
 	created := sortedKeys(s.Created)
 	updated := sortedKeys(s.Updated)
 	deleted := sortedKeys(s.Deleted)
+	needsRewrite := sortedRewriteItems(s.NeedsRewrite)
 	s.mu.RUnlock()
 
 	if phase == BuildPhaseFoundation && hasAppShell(fileMap) {
@@ -133,8 +145,10 @@ func (s *BuildState) Render(fileMap *SafeFileMap) string {
 	if len(created)+len(updated) > 0 {
 		allWritten := append(append([]string{}, created...), updated...)
 		sort.Strings(allWritten)
+		allWritten = filterRewritePaths(allWritten, needsRewrite)
 		writePathList(&sb, "Do not recreate; edit only if more changes are needed", allWritten)
 	}
+	writeRewriteList(&sb, needsRewrite)
 	if len(requirements) > 0 {
 		sb.WriteString("Requirement checklist:\n")
 		for _, req := range requirements {
@@ -144,8 +158,13 @@ func (s *BuildState) Render(fileMap *SafeFileMap) string {
 			fmt.Fprintf(&sb, "- [%s] %s\n", req.State, req.Text)
 		}
 	}
-	sb.WriteString("\nUse this BUILD STATE plus the FILE TREE as the source of truth. Continue pending requirements; do not restart completed work.\n")
+	sb.WriteString("\nUse this BUILD STATE plus the FILE TREE as the source of truth. Continue pending requirements and rewrite files listed under Needs rewrite; do not restart completed work.\n")
 	return sb.String()
+}
+
+type rewriteItem struct {
+	Path   string
+	Reason string
 }
 
 func hasAppShell(fileMap *SafeFileMap) bool {
@@ -168,6 +187,37 @@ func sortedKeys(m map[string]bool) []string {
 	return out
 }
 
+func sortedRewriteItems(m map[string]string) []rewriteItem {
+	out := make([]rewriteItem, 0, len(m))
+	for path, reason := range m {
+		if strings.TrimSpace(reason) == "" {
+			continue
+		}
+		out = append(out, rewriteItem{Path: path, Reason: reason})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].Path < out[j].Path
+	})
+	return out
+}
+
+func filterRewritePaths(paths []string, rewriteItems []rewriteItem) []string {
+	if len(paths) == 0 || len(rewriteItems) == 0 {
+		return paths
+	}
+	needsRewrite := map[string]bool{}
+	for _, item := range rewriteItems {
+		needsRewrite[item.Path] = true
+	}
+	out := paths[:0]
+	for _, path := range paths {
+		if !needsRewrite[path] {
+			out = append(out, path)
+		}
+	}
+	return out
+}
+
 func writePathList(sb *strings.Builder, label string, paths []string) {
 	if len(paths) == 0 {
 		return
@@ -177,6 +227,56 @@ func writePathList(sb *strings.Builder, label string, paths []string) {
 	for _, p := range paths {
 		fmt.Fprintf(sb, "- %s\n", p)
 	}
+}
+
+func writeRewriteList(sb *strings.Builder, items []rewriteItem) {
+	if len(items) == 0 {
+		return
+	}
+	sb.WriteString("Needs rewrite; too small or placeholder-like, not complete:\n")
+	for _, item := range items {
+		fmt.Fprintf(sb, "- %s (%s)\n", item.Path, item.Reason)
+	}
+}
+
+func suspiciousGeneratedFileReason(path, content string) string {
+	ext := strings.ToLower(filepath.Ext(path))
+	if !generatedSourceExts[ext] || strings.HasSuffix(strings.ToLower(path), ".d.ts") {
+		return ""
+	}
+	trimmed := strings.TrimSpace(content)
+	if trimmed == "" {
+		return "empty source file"
+	}
+	lower := strings.ToLower(trimmed)
+	for _, marker := range placeholderMarkers {
+		if strings.Contains(lower, marker) {
+			return "placeholder-like source file"
+		}
+	}
+	if len(trimmed) < suspiciousGeneratedSourceMinBytes {
+		return fmt.Sprintf("very small source file (%d bytes)", len(trimmed))
+	}
+	return ""
+}
+
+const suspiciousGeneratedSourceMinBytes = 120
+
+var generatedSourceExts = map[string]bool{
+	".js":  true,
+	".jsx": true,
+	".ts":  true,
+	".tsx": true,
+}
+
+var placeholderMarkers = []string{
+	"todo",
+	"stub",
+	"placeholder",
+	"coming soon",
+	"not implemented",
+	"return null",
+	"lorem ipsum",
 }
 
 func extractRequirementHints(prompt string) []RequirementStatus {
