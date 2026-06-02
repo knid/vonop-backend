@@ -368,10 +368,17 @@ func (c *Controller) DeleteUser(userID string) (*models.User, error) {
 		slog.Warn("failed to enqueue user account purge task", "user_id", userModel.ID, "error", enqErr)
 	}
 
-	deletedUser, err := c.DB.DeleteUser(userModel)
+	// Hard-delete the user row immediately to free unique constraints (e.g. email)
+	// so the user can re-signup with the same email (Google or password) right away.
+	// The async purge will clean up projects, orgs, infra, tokens etc. using the ID.
+	_, err = c.DB.DB.NewDelete().Model((*models.User)(nil)).
+		Where("id = ?", userModel.ID).
+		ForceDelete().
+		Exec(context.Background())
 	if err != nil {
 		return nil, err
 	}
+	deletedUser := userModel
 
 	// CRM + PostHog events fired by the view layer (views/users.go).
 	// Admin deletion path (admin_users.go) fires its own event.

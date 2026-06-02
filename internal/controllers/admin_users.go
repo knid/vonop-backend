@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -180,7 +181,11 @@ func (c *Controller) AdminDeleteUser(userID string) error {
 		slog.Warn("failed to enqueue user account purge task (admin)", "user_id", user.ID, "error", enqErr)
 	}
 
-	_, err = c.DB.DeleteUser(user)
+	// Hard-delete the user row immediately (see self-delete path for rationale).
+	_, err = c.DB.DB.NewDelete().Model((*models.User)(nil)).
+		Where("id = ?", user.ID).
+		ForceDelete().
+		Exec(context.Background())
 	if err != nil {
 		return fmt.Errorf("failed to delete user: %w", err)
 	}
