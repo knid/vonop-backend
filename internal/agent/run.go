@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"runtime/debug"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -46,11 +47,11 @@ const (
 // On success: files are committed to git, AppAgentRun is finalised, credits
 // are deducted, events are emitted, and nil is returned.
 //
-// On failure: the in-memory fileMap is discarded (so any uncommitted tool
-// edits never reach disk), AppAgentRun is marked failed, credits for tokens
-// already consumed are billed, an error event is emitted, and a *Error is
-// returned. The pre-run git commit is kept untouched on disk — there's no
-// auto-reset on failure.
+// On failure: if the agent reached the loop/validation phase, partial progress
+// is committed as a checkpoint and surfaced via EventCheckpoint; setup/commit
+// failures do not create checkpoints. AppAgentRun is marked failed, credits for
+// tokens already consumed are billed, an error event is emitted, and a *Error
+// is returned.
 func Run(
 	ctx context.Context,
 	deps *RunDependencies,
@@ -359,6 +360,7 @@ func Run(
 		turn           = 1
 		totalToolCalls = 0
 		parts          []models.ChatMessagePart
+		partsMu        sync.Mutex
 	)
 
 	// Budget check before entering the loop.
@@ -390,6 +392,7 @@ func Run(
 		// fields land in the same struct after registry.Execute returns.
 		// Capturing the index up front lets us mutate the same slot rather
 		// than searching by id at the end.
+		partsMu.Lock()
 		partIdx := len(parts)
 		parts = append(parts, models.ChatMessagePart{
 			Type:       "tool_call",
@@ -397,6 +400,7 @@ func Run(
 			Name:       name,
 			Input:      json.RawMessage(argsJSON),
 		})
+		partsMu.Unlock()
 		emitter.Emit(EventToolCallStart, ToolCallStartEvent{
 			RunID:        runID,
 			Turn:         turn,
@@ -419,10 +423,12 @@ func Run(
 			Summary:    firstLine(result, 140),
 			IsError:    isErr || execErr != nil,
 		})
+		partsMu.Lock()
 		parts[partIdx].Result = result
 		parts[partIdx].IsError = isErr || execErr != nil
 		parts[partIdx].DurationMs = durationMs
 		totalToolCalls++
+		partsMu.Unlock()
 		if execErr != nil {
 			return result, execErr
 		}
@@ -436,6 +442,8 @@ func Run(
 			return
 		}
 		repetition.Feed(chunk)
+		partsMu.Lock()
+		defer partsMu.Unlock()
 		// Append to the trailing text part if there is one; otherwise push a
 		// new text part. This is the chronological mirror of what the model
 		// emitted: text → tool → text → tool → text → ... lands as alternating
@@ -618,11 +626,17 @@ func Run(
 			fileMap, message)
 	}
 
-	if validationErr := validateGeneratedApp(fileMap, buildState, message, isFirstGen); validationErr != nil {
-		return finaliseFailureV2(ctx, deps, repo, run, project, emitter, "validation",
-			CodeValidationFailed, validationErr.Error(), validationErr,
-			tracker, runStart,
-			fileMap, message)
+	if !SlashCommandIsReadOnly(message) {
+		projectType := ""
+		if project != nil {
+			projectType = project.ProjectType
+		}
+		if validationErr := validateGeneratedApp(fileMap, buildState, message, isFirstGen, projectType); validationErr != nil {
+			return finaliseFailureV2(ctx, deps, repo, run, project, emitter, "validation",
+				CodeValidationFailed, validationErr.Error(), validationErr,
+				tracker, runStart,
+				fileMap, message)
+		}
 	}
 
 	emitter.Emit(EventTurnEnd, TurnEndEvent{
@@ -634,9 +648,13 @@ func Run(
 	emitCreditsUpdate(turn)
 
 	// --- Step 13: success shutdown (continued in C2.20) ---
+	partsMu.Lock()
+	finalParts := append([]models.ChatMessagePart(nil), parts...)
+	finalToolCalls := totalToolCalls
+	partsMu.Unlock()
 	return finaliseSuccess(ctx, deps, repo, run, emitter, fileMap,
-		parts, tracker, runStart,
-		totalToolCalls, turn, message, user, project)
+		finalParts, tracker, runStart,
+		finalToolCalls, turn, message, user, project)
 }
 
 // partsToContent flattens an ordered parts slice into the legacy plain-text
@@ -715,7 +733,7 @@ func trackerDelta(t *utils.TokenTracker) TokenUsage {
 // For non-file tools the original args pass through unchanged.
 func stripToolInputForPreview(name string, argsJSON string) json.RawMessage {
 	switch name {
-	case "write_file", "edit_file", "multi_edit", "delete_file":
+	case "write_file", "write_files", "edit_file", "multi_edit", "patch_files", "delete_file":
 		var m map[string]json.RawMessage
 		if err := json.Unmarshal([]byte(argsJSON), &m); err != nil {
 			return json.RawMessage("{}")
@@ -729,6 +747,9 @@ func stripToolInputForPreview(name string, argsJSON string) json.RawMessage {
 		if d, ok := m["description"]; ok {
 			stripped["description"] = d
 		}
+		if files, ok := m["files"]; ok {
+			stripped["files"] = stripBatchFilePreview(files)
+		}
 		out, err := json.Marshal(stripped)
 		if err != nil {
 			return json.RawMessage("{}")
@@ -737,6 +758,29 @@ func stripToolInputForPreview(name string, argsJSON string) json.RawMessage {
 	default:
 		return json.RawMessage(argsJSON)
 	}
+}
+
+func stripBatchFilePreview(files json.RawMessage) json.RawMessage {
+	var arr []map[string]json.RawMessage
+	if err := json.Unmarshal(files, &arr); err != nil {
+		return json.RawMessage("[]")
+	}
+	out := make([]map[string]json.RawMessage, 0, len(arr))
+	for _, f := range arr {
+		item := map[string]json.RawMessage{}
+		if p, ok := f["path"]; ok {
+			item["path"] = p
+		}
+		if d, ok := f["description"]; ok {
+			item["description"] = d
+		}
+		out = append(out, item)
+	}
+	b, err := json.Marshal(out)
+	if err != nil {
+		return json.RawMessage("[]")
+	}
+	return b
 }
 
 // runAction returns the PostHog action label for this run — matches the
@@ -1206,11 +1250,18 @@ func finaliseFailureV2(
 	// nothing when a run fails mid-loop (credits exhausted, timeout, etc.).
 	// We skip this when the failure itself happened during commit (phase
 	// == "commit") to avoid retrying a broken commit.
+	checkpointCommit := ""
 	if phase != "commit" && phase != "setup" && repo != nil && fileMap != nil {
 		sanitizeFileMapForBuild(fileMap)
 		if partialCommit, err := FinaliseRun(repo, fileMap, originalUserMessage); err == nil {
 			if partialCommit != run.PreCommit {
 				run.FinalCommit = partialCommit
+				checkpointCommit = partialCommit
+				emitter.Emit(EventCheckpoint, CheckpointEvent{
+					RunID:  run.ID,
+					Commit: partialCommit,
+					Reason: string(code),
+				})
 				slog.Info("agent: committed partial progress on failure",
 					"run_id", run.ID, "phase", phase, "code", code,
 					"pre_commit", run.PreCommit, "partial_commit", partialCommit)
@@ -1233,6 +1284,9 @@ func finaliseFailureV2(
 	// empty bubbles.
 	errorKind := classifyErrorKind(code, wrapped)
 	fallbackText := "Generation failed."
+	if checkpointCommit != "" {
+		fallbackText = "Generation failed. Partial progress was saved as a checkpoint."
+	}
 	fallbackParts, _ := json.Marshal([]models.ChatMessagePart{
 		{Type: "text", Text: fallbackText},
 	})

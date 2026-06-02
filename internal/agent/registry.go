@@ -78,7 +78,6 @@ func (r *Registry) Names() []string {
 	return out
 }
 
-
 // Execute dispatches to the named tool. Unknown names return isError=true
 // rather than error, so one bad tool call doesn't kill the run.
 func (r *Registry) Execute(ctx context.Context, rc *RunContext, name string, input json.RawMessage) (string, bool, error) {
@@ -110,9 +109,12 @@ func BuildRegistryFor(project *models.AppProject, deps *RunDependencies, model s
 	r.Register(ListFilesTool{})
 	r.Register(GrepTool{})
 	r.Register(WriteFileTool{})
+	r.Register(WriteFilesTool{})
 	r.Register(EditFileTool{})
 	r.Register(MultiEditTool{})
+	r.Register(PatchFilesTool{})
 	r.Register(DeleteFileTool{})
+	r.Register(RunCheckTool{})
 	r.Register(GenerateImageTool{Deps: deps})
 	r.Register(ReadAttachmentTool{Deps: deps})
 
