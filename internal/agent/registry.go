@@ -114,7 +114,6 @@ func BuildRegistryFor(project *models.AppProject, deps *RunDependencies, model s
 	r.Register(MultiEditTool{})
 	r.Register(PatchFilesTool{})
 	r.Register(DeleteFileTool{})
-	r.Register(RunCheckTool{})
 	r.Register(GenerateImageTool{Deps: deps})
 	r.Register(ReadAttachmentTool{Deps: deps})
 

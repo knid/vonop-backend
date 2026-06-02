@@ -149,8 +149,6 @@ Tool preference:
   tool result is the source of truth; you don't need list_files again
   unless you've lost track.
 - delete_file when a file is no longer needed.
-- run_check after meaningful file changes to catch build/typecheck errors
-  before you finish.
 - web_search for current information the model wasn't trained on.
 - generate_image for original imagery. See "Work Order" below — images are
   always the final phase.

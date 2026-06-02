@@ -1214,8 +1214,6 @@ full content up to 200 KB.
 - write_file for new files or complete rewrites.
 - list_files with a glob to refresh structure.
 - delete_file when a file is no longer needed.
-- run_check after meaningful file changes to catch build/typecheck errors
-  before you finish.
 
 ## Parallel tool calls
 When two or more tool calls are independent, emit them in the same turn.
