@@ -132,6 +132,7 @@ func (c *Controller) HandleAgentRunTask(ctx context.Context, t *asynq.Task) erro
 		// Update last-event copy (used by FinalizeJob).
 		evCopy := ev
 		lastEvent = &evCopy
+		streamState.Apply(ev)
 
 		if IsMilestoneEvent(ev.Event) {
 			je := models.JobEvent{
@@ -147,8 +148,6 @@ func (c *Controller) HandleAgentRunTask(ctx context.Context, t *asynq.Task) erro
 			}
 			stateFlusher.Trigger()
 		}
-
-		streamState.Apply(ev)
 	}
 
 	emitter := newRedisEventEmitter(runCtx, c.RedisPubSub, p.JobID, onEvent)

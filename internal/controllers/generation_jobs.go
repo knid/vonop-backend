@@ -70,6 +70,7 @@ var milestoneEvents = map[string]bool{
 	"file_written":     true,
 	"file_deleted":     true,
 	"turn_end":         true,
+	"credits_update":   true,
 }
 
 // CreateJob creates a new generation job, enforcing both a per-user and a

@@ -13,12 +13,13 @@ import (
 // has been folded in; before that the entry is in either Pending or "running"
 // state depending on whether the args have arrived yet.
 type streamStateToolCall struct {
-	Tool      string `json:"tool"`
-	Arguments string `json:"arguments,omitempty"`
-	Pending   bool   `json:"pending,omitempty"`
-	Result    string `json:"result,omitempty"`
-	Summary   string `json:"summary,omitempty"`
-	Status    string `json:"status,omitempty"` // "ok" | "error"
+	ToolCallID string `json:"tool_call_id,omitempty"`
+	Tool       string `json:"tool"`
+	Arguments  string `json:"arguments,omitempty"`
+	Pending    bool   `json:"pending,omitempty"`
+	Result     string `json:"result,omitempty"`
+	Summary    string `json:"summary,omitempty"`
+	Status     string `json:"status,omitempty"` // "ok" | "error"
 }
 
 // streamStateProgress mirrors responses.ProgressEvent but only the display-relevant fields.
@@ -41,6 +42,8 @@ type StreamStateBuffer struct {
 	toolCalls        []streamStateToolCall
 	progress         *streamStateProgress
 	phase            string
+	creditsUsed      int
+	cursorSeq        int64
 	dirty            bool
 }
 
@@ -135,7 +138,7 @@ func (b *StreamStateBuffer) Apply(event responses.SSEEvent) bool {
 
 	case "tool_result":
 		if d, ok := event.Data.(responses.ToolResultEvent); ok {
-			b.attachToolResult(d.Tool, d.Preview, d.Summary, d.Status)
+			b.attachToolResult("", d.Tool, d.Preview, d.Summary, d.Status)
 			b.dirty = true
 			return true
 		}
@@ -145,7 +148,7 @@ func (b *StreamStateBuffer) Apply(event responses.SSEEvent) bool {
 			summary, _ := m["summary"].(string)
 			status, _ := m["status"].(string)
 			if tool != "" {
-				b.attachToolResult(tool, preview, summary, status)
+				b.attachToolResult("", tool, preview, summary, status)
 				b.dirty = true
 				return true
 			}
@@ -213,6 +216,7 @@ func (b *StreamStateBuffer) Apply(event responses.SSEEvent) bool {
 		b.toolCalls = nil
 		b.progress = nil
 		b.phase = ""
+		b.creditsUsed = 0
 		b.dirty = true
 		return true
 
@@ -242,13 +246,15 @@ func (b *StreamStateBuffer) Apply(event responses.SSEEvent) bool {
 
 	case "tool_call_start":
 		// Append a placeholder so an in-flight tool shows up on reconnect.
-		var tool, args string
+		var toolCallID, tool, args string
 		if d, ok := event.Data.(agent.ToolCallStartEvent); ok {
+			toolCallID = d.ToolCallID
 			tool = d.ToolName
 			if len(d.InputPreview) > 0 {
 				args = string(d.InputPreview)
 			}
 		} else if m, ok := event.Data.(map[string]any); ok {
+			toolCallID, _ = m["tool_call_id"].(string)
 			tool, _ = m["tool_name"].(string)
 			if raw, ok := m["input_preview"]; ok && raw != nil {
 				if s, ok := raw.(string); ok {
@@ -259,34 +265,30 @@ func (b *StreamStateBuffer) Apply(event responses.SSEEvent) bool {
 			}
 		}
 		if tool != "" {
+			tc := streamStateToolCall{ToolCallID: toolCallID, Tool: tool}
 			if args != "" {
-				b.toolCalls = append(b.toolCalls, streamStateToolCall{Tool: tool, Arguments: args})
+				tc.Arguments = args
 			} else {
-				b.toolCalls = append(b.toolCalls, streamStateToolCall{Tool: tool, Pending: true})
+				tc.Pending = true
 			}
+			b.toolCalls = append(b.toolCalls, tc)
+			b.setCursorSeq(event.Seq)
 			b.dirty = true
 			return true
 		}
 
 	case "tool_call_result":
-		var tool, summary, status string
-		var isError bool
+		var toolCallID, tool string
 		if d, ok := event.Data.(agent.ToolCallResultEvent); ok {
+			toolCallID = d.ToolCallID
 			tool = d.ToolName
-			summary = d.Summary
-			status = d.Status
-			isError = d.IsError
 		} else if m, ok := event.Data.(map[string]any); ok {
+			toolCallID, _ = m["tool_call_id"].(string)
 			tool, _ = m["tool_name"].(string)
-			summary, _ = m["summary"].(string)
-			status, _ = m["status"].(string)
-			isError, _ = m["is_error"].(bool)
 		}
 		if tool != "" {
-			if isError && status == "" {
-				status = "error"
-			}
-			b.attachToolResult(tool, summary, summary, status)
+			b.completeAgentToolCall(toolCallID, tool)
+			b.setCursorSeq(event.Seq)
 			b.dirty = true
 			return true
 		}
@@ -294,6 +296,26 @@ func (b *StreamStateBuffer) Apply(event responses.SSEEvent) bool {
 	case "turn_end":
 		// Mid-run turn boundary: no state change, but we accept the event
 		// so the dirty flag isn't falsely tripped for a no-op.
+		return false
+
+	case "credits_update":
+		var credits int
+		if d, ok := event.Data.(agent.CreditsUpdateEvent); ok {
+			credits = d.CreditsUsed
+		} else if m, ok := event.Data.(map[string]any); ok {
+			switch v := m["credits_used"].(type) {
+			case float64:
+				credits = int(v)
+			case int:
+				credits = v
+			}
+		}
+		if credits > b.creditsUsed {
+			b.creditsUsed = credits
+			b.setCursorSeq(event.Seq)
+			b.dirty = true
+			return true
+		}
 		return false
 
 	// Agent error: terminal for the partial buffer, same as done.
@@ -307,6 +329,8 @@ func (b *StreamStateBuffer) Apply(event responses.SSEEvent) bool {
 		b.toolCalls = nil
 		b.progress = nil
 		b.phase = ""
+		b.creditsUsed = 0
+		b.setCursorSeq(event.Seq)
 		b.dirty = true
 		return true
 	}
@@ -326,24 +350,60 @@ func (b *StreamStateBuffer) replaceOrAppendToolCall(tool, arguments string) {
 	b.toolCalls = append(b.toolCalls, streamStateToolCall{Tool: tool, Arguments: arguments})
 }
 
+func (b *StreamStateBuffer) setCursorSeq(seq int64) {
+	if seq > b.cursorSeq {
+		b.cursorSeq = seq
+	}
+}
+
+// completeAgentToolCall removes terminal agent tool calls from stream_state.
+// Agent tool starts/results are persisted as milestones, so keeping completed
+// cards here would replay the same card once from events and once from the
+// snapshot. In-flight calls remain until their result milestone arrives.
+func (b *StreamStateBuffer) completeAgentToolCall(toolCallID, tool string) {
+	for i := len(b.toolCalls) - 1; i >= 0; i-- {
+		if toolCallID != "" && b.toolCalls[i].ToolCallID == toolCallID {
+			b.toolCalls = append(b.toolCalls[:i], b.toolCalls[i+1:]...)
+			return
+		}
+		if toolCallID == "" && b.toolCalls[i].Tool == tool && b.toolCalls[i].Result == "" {
+			b.toolCalls = append(b.toolCalls[:i], b.toolCalls[i+1:]...)
+			return
+		}
+	}
+}
+
 // attachToolResult folds a tool_result event into the most recent matching
 // tool entry that doesn't already carry a result. This keeps reconnect state
 // consistent with what the client would have seen live.
-func (b *StreamStateBuffer) attachToolResult(tool, preview, summary, status string) {
+func (b *StreamStateBuffer) attachToolResult(toolCallID, tool, preview, summary, status string) {
+	if toolCallID != "" {
+		for i := len(b.toolCalls) - 1; i >= 0; i-- {
+			if b.toolCalls[i].ToolCallID == toolCallID {
+				b.toolCalls[i].Result = preview
+				b.toolCalls[i].Summary = summary
+				b.toolCalls[i].Status = status
+				b.toolCalls[i].Pending = false
+				return
+			}
+		}
+	}
 	for i := len(b.toolCalls) - 1; i >= 0; i-- {
 		if b.toolCalls[i].Tool == tool && b.toolCalls[i].Result == "" {
 			b.toolCalls[i].Result = preview
 			b.toolCalls[i].Summary = summary
 			b.toolCalls[i].Status = status
+			b.toolCalls[i].Pending = false
 			return
 		}
 	}
 	// No prior tool_call entry — shouldn't happen, but record it defensively.
 	b.toolCalls = append(b.toolCalls, streamStateToolCall{
-		Tool:    tool,
-		Result:  preview,
-		Summary: summary,
-		Status:  status,
+		ToolCallID: toolCallID,
+		Tool:       tool,
+		Result:     preview,
+		Summary:    summary,
+		Status:     status,
 	})
 }
 
@@ -364,6 +424,7 @@ func (b *StreamStateBuffer) Snapshot() (json.RawMessage, bool) {
 		"thinking_text":     b.thinkingText,
 		"conversation_text": b.conversationText,
 		"tool_calls":        b.toolCalls,
+		"cursor_seq":        b.cursorSeq,
 	}
 	if b.progress != nil {
 		payload["progress"] = b.progress
@@ -371,10 +432,12 @@ func (b *StreamStateBuffer) Snapshot() (json.RawMessage, bool) {
 	if b.phase != "" {
 		payload["phase"] = b.phase
 	}
+	if b.creditsUsed > 0 {
+		payload["credits_used"] = b.creditsUsed
+	}
 	raw, err := json.Marshal(payload)
 	if err != nil {
 		return nil, false
 	}
 	return raw, true
 }
-
