@@ -355,13 +355,8 @@ func (c *Controller) LoginUser(userLoginReq requests.UserLoginRequest) (*respons
 
 }
 
-func (c *Controller) DeleteUser(tokenStr string) (*models.User, error) {
-	user, err := c.GetUser(tokenStr)
-	if err != nil {
-		return nil, err
-	}
-
-	userModel, err := c.DB.GetUserById(user.ID.String())
+func (c *Controller) DeleteUser(userID string) (*models.User, error) {
+	userModel, err := c.DB.GetUserById(userID)
 	if err != nil {
 		return nil, err
 	}
@@ -369,8 +364,8 @@ func (c *Controller) DeleteUser(tokenStr string) (*models.User, error) {
 	// Enqueue full async purge (projects + Fly/Neon/gitea/S3 + owned orgs + user data).
 	// Best-effort: if enqueue fails we still delete the account record (login stops)
 	// and an admin can trigger manual cleanup. The task is idempotent.
-	if enqErr := c.EnqueueUserAccountPurge(user.ID); enqErr != nil {
-		slog.Warn("failed to enqueue user account purge task", "user_id", user.ID, "error", enqErr)
+	if enqErr := c.EnqueueUserAccountPurge(userModel.ID); enqErr != nil {
+		slog.Warn("failed to enqueue user account purge task", "user_id", userModel.ID, "error", enqErr)
 	}
 
 	deletedUser, err := c.DB.DeleteUser(userModel)
