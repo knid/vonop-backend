@@ -121,6 +121,17 @@ polarizing ones.
 - **Neo-Brutalist Native** — high-contrast borders, bold typography, raw
   shapes, intentional clashes. Polarizing — only when context fits.
 
+## Registers: Brand vs Product (CRITICAL for tailoring)
+Determine the register from the app's purpose before styling decisions. This prevents generic output and ensures the right level of ambition/restraint.
+
+**Product register** (design *SERVES* the product — the vast majority of native mobile apps, tools, dashboards, authenticated flows, settings, utilities): Earned familiarity with best-in-class apps (Linear, Arc, Notion, Mela, Monzo, etc.). The interface should disappear into the task. Default to Restrained. One well-tuned sans family is often sufficient (via expo-font). Use fixed rem scales for UI (not fluid clamp on everything — users view at consistent DPI). Tighter 1.125–1.2 type scale ratios for dense information. Full semantic state vocabulary (hover/focus/active/disabled/loading/error/success/selected). Consistent affordances across the app. Quick transitions (150–250ms). Motion conveys state/feedback, never decoration. No display/decorative fonts in labels, buttons, or data tables. Modals/sheets as last resort after exhausting inline/progressive disclosure. Consistency and predictability are virtues.
+
+**Brand register** (design *IS* the product — marketing surfaces, onboarding marketing, portfolio-like apps, content-first experiences where the visual impression *is* the value): POV-driven, distinctive, willing to be polarizing or strange. Palette *is* voice. Earn Committed (30–60% surface in one saturated color), Full palette, or even Drenched strategies. Imagery is often required when the brief implies physical product, place, or editorial (one decisive, art-directed generated image beats five mediocre). Asymmetric compositions, fluid clamp spacing that breathes, art direction that can vary per section if narrative demands. Follow voice words + real catalog procedure for fonts; reject saturated reflex lanes (e.g. editorial-typographic magazine with italic display serif + drop caps when not literally a magazine).
+
+For any project, write one concrete "physical scene sentence" before choosing light/dark or palette: "who uses this, where (ambient light), in what mood." This forces the theme decision. "Warm" is carried by accent + typography + imagery + texture, *not* by defaulting the body bg to cream/sand/beige.
+
+Most Wemob-generated mobile apps are Product register. Web projects the user builds may be Brand (landings) or Product (internal tools).
+
 ## Forced Variety
 Lock in ≥1 distinctive constraint per project to prevent convergence:
 - Custom display font via expo-font (NEVER system default everywhere)
@@ -171,11 +182,27 @@ Avoid generic "list + search + white cards":
 - Subtle separators (border-black/5), NOT harsh lines
 - Search with real-time filtering, not a separate screen
 
+## Styling Workflow & Internal Passes (use on every screen/surface)
+Before writing or finalizing code, run these mental passes (in rough order). Do not treat styling as one big step at the end.
+
+1. **Shape / primary action first** (already in checklist): What is the ONE job? Visual anchor? Key states (empty/loading/error/success)?
+2. **Register check**: Product or Brand? Adjust ambition, scale, imagery, palette commitment accordingly.
+3. **Typeset pass**: Font choice (procedure + reflex reject), scale ratios, line length, weights, dynamic type, optical tweaks.
+4. **Layout / Spatial pass**: Squint test, rhythm (tight groups + generous separations), bento/variety vs uniform, flex/grid choice, spacing scale adherence, no nested/identical cards, optical alignment, touch targets.
+5. **Colorize pass**: Strategy (Restrained etc.), physical scene, brand-hue tinted neutrals, one dominant accent used sparingly, semantic states, contrast, no gray-on-color, no forbidden defaults. Test WCAG.
+6. **Motion & Interaction pass**: Purposeful only, springs + proper easing, reduced motion, full 8 states, press feedback, haptics where native, gesture hints.
+7. **Polish / self-audit**: Run slop tests (first + second order), anti-pattern list, component patterns, accessibility, texture/depth, platform nuance. Compare to reference apps in your persona. Align to any existing DESIGN.md / tokens in the project (or create a lightweight DESIGN.md on first major surface for future chat consistency — tokens, scale, register decisions, forbidden patterns for this app).
+8. **Verify**: Use the real preview (or generate screenshots mentally). Does it feel like it belongs on the 2026 shelf for that persona? Is the interface calm, purposeful, and distinctive without being noisy?
+
+For chat edits: read existing DESIGN.md or style-related files first. Preserve committed decisions unless the user explicitly asks to change direction. Small targeted refinements (typeset this list, colorize the empty state, layout the form) are often higher value than full redesigns.
+
 # VISUAL SYSTEM
 
 ## Layout & Composition
 
-**The 2026 calmness principle:** remove anything that doesn't directly help the user.
+**The 2026 calmness principle:** remove anything that doesn't directly help the user. Space is the most underused design tool — use it with intention for rhythm and hierarchy.
+
+**Squint test (run mentally on every screen):** Blur your eyes. Can you still identify the primary element, secondary elements, and clear groupings within ~2 seconds? If not, strengthen hierarchy via space + weight before adding color/size.
 
 - **Thumb zone:** Primary actions BOTTOM 25%. Secondary top-right. NEVER main
   CTA in top nav.
@@ -187,10 +214,10 @@ Avoid generic "list + search + white cards":
   ` + "`" + `<SafeAreaView edges={["top", "bottom"]}>` + "`" + ` for modals/sheets.
   **CRITICAL:** static padding (px-5) is the base; insets are additive. On web
   preview, insets are zero — if you rely on insets alone, content hugs the edge.
-- **Section spacing:** py-6 to py-8 between major sections. Cramped feels cheap.
-- **Hierarchy via scale:** Headlines text-3xl–text-5xl with leading-tight,
-  body text-base. The leap should be striking (≥3:1 ratio).
-- **Bento grids:** Asymmetric for dashboards. Some cards span 2 cols, some tall.
+- **Spacing system & rhythm (4pt base preferred):** Use a consistent scale (4/8/12/16/24/32/48/64/96px or Tailwind's). Prefer 4pt base over 8pt (too coarse). Tight groupings for related elements (8-12px), generous separation between distinct sections/groups (48-96px+). Vary spacing — monotone equal padding everywhere kills rhythm. Use ` + "`" + `gap` + "`" + ` for siblings instead of margins (avoids collapse).
+- **Section spacing:** py-6 to py-8 between major sections. Cramped feels cheap. Use ` + "`" + `clamp()` + "`" + ` for fluid spacing on larger viewports where it makes sense.
+- **Hierarchy via scale + space + weight:** Headlines text-3xl–text-5xl with leading-tight, body text-base. The leap should be striking (≥3:1 ratio). Space alone (generous whitespace around an element) can create primary emphasis.
+- **Bento grids & variety:** Asymmetric for dashboards. Some cards span 2 cols, some tall. Never identical card grids everywhere (icon + heading + text repeated is the #1 slop signal). Cards only when they are the best affordance — never nest cards inside cards. Use spacing + alignment for grouping instead. Break vertical rhythm with full-bleed, color blocks, horizontal snaps, etc.
 - **Break vertical rhythm:** Insert a full-bleed image, color-blocked quote,
   or horizontal scroll row. Endless lists are dead.
 - **Horizontal snap rows:** For related content. horizontal ScrollView with
@@ -199,48 +226,70 @@ Avoid generic "list + search + white cards":
   INTERNAL padding; container touches edges.
 - **Adaptive layouts:** Use flex-wrap, min-w, and NativeWind's sm:/md: variants
   for iPad and foldables. Test: does your layout work at 320px wide AND 1024px?
+- **Flex vs Grid:** Flex for 1D (rows, navs, button groups, most internals). Grid for 2D (dashboards, complex pages). Use ` + "`" + `repeat(auto-fit, minmax(280px, 1fr))` + "`" + ` for breakpoint-free responsive grids. Named grid areas for complex layouts.
+- **Optical adjustments & touch targets:** Icons that look off-center (play arrows, chevrons) need nudges. Text often needs -0.05em optical left alignment. Touch targets ≥44pt × 44pt (or 48dp) minimum — expand hit area with padding or pseudo even if visual element is smaller.
+- **Z-index:** Build a semantic scale (dropdown → sticky → modal-backdrop → modal → toast → tooltip). Never arbitrary 999/9999.
 
 ## Typography
-- **Custom display font** via expo-font for headlines. Build pipeline installs
-  @expo-google-fonts/* packages. Pick a pair with intent — NEVER repeat across
-  projects:
-  - Modern: Inter + Space Grotesk
-  - Editorial: Playfair Display + DM Sans
-  - Bold: Clash Display + General Sans
-  - Refined: Instrument Serif + Instrument Sans
-- **Scale contrast:** Headlines text-3xl–text-5xl, body text-sm–text-base,
-  labels text-xs uppercase tracking-widest. The leap must be visible.
-- **Weight contrast:** Headlines font-bold to font-black, body font-normal/medium.
-- **Tabular numerals:** ` + "`" + `style={{ fontVariant: ['tabular-nums'] }}` + "`" + ` for counters,
-  timers, prices, stats. Digits won't jitter as they change.
-- **Dynamic type support:** NEVER hardcode font sizes in style={{}}. Use
-  className tokens so the system text-size setting scales your UI. Test with
-  Accessibility > Display & Text Size > Larger Text.
-- **Line height:** Headlines leading-tight or leading-none, body leading-relaxed.
+**Font selection procedure (run every brand-leaning or new project):** 
+1. Read the brief and write three concrete brand-voice words (physical-object words like "warm and mechanical and opinionated" or "calm and clinical and careful" — not vague "modern/elegant").
+2. List the three fonts you would reach for by reflex. If any are in the saturated reflex-reject list (Inter, Roboto, Open Sans, Lato, Fraunces, Newsreader, Playfair Display, Cormorant, DM Sans, Outfit, Instrument Sans/Serif, Space Grotesk, Syne, IBM Plex family, etc.), reject them — they are training-data monoculture.
+3. Browse real catalogs (Google Fonts with intent, or higher-quality foundries) for a font that feels like the physical object the brand evokes.
+4. Cross-check and pair on a contrast axis (serif + sans, geometric + humanist) or commit to one family with strong weight/size variation. One well-chosen family with committed contrast often beats a timid display+body pair.
+
+For Product register UIs: one family is frequently correct and desirable for consistency. System/familiar sans stacks are fine and expected.
+
+- **Custom display font** via expo-font for headlines (never system default everywhere on brand surfaces). Build pipeline supports @expo-google-fonts/*.
+- **Scale contrast:** Headlines text-3xl–text-5xl, body text-sm–text-base (tighter 1.125–1.2 ratio steps for dense Product UIs; ≥1.25 for brand), labels text-xs uppercase tracking-widest. The leap must be visible and striking.
+- **Weight contrast:** Headlines font-bold to font-black, body font-normal/medium. For light text on dark in dark mode, consider a slight weight reduction because light type reads heavier.
+- **Line length:** Cap body prose at 65–75ch. Data/tables can be denser.
+- **Tabular numerals:** ` + "`" + `style={{ fontVariant: ['tabular-nums'] }}` + "`" + ` for counters, timers, prices, stats. Digits won't jitter.
+- **Dynamic type support:** NEVER hardcode font sizes in style={{}}. Use className tokens so the system text-size setting scales your UI. Test with Accessibility > Display & Text Size > Larger Text.
+- **Line height & tracking:** Headlines leading-tight or leading-none, body leading-relaxed. Display letter-spacing floor ≥ -0.04em (tighter makes letters touch and reads cramped). Use ` + "`" + `text-wrap: balance` + "`" + ` on headlines where supported in web preview; prefer className tokens.
+- **Text-wrap & optical:** ` + "`" + `text-wrap: pretty` + "`" + ` for long prose to reduce orphans. Text at margin-left:0 often looks slightly indented due to letterform whitespace — negative margin optical adjustment only when it visibly improves.
 
 ## Color & Theme
 
 **One dominant accent rule:** ONE bold accent used SPARINGLY. A single coral CTA
-on a neutral page beats color everywhere.
+on a neutral page beats color everywhere. More color is not better — strategic
+color wins.
 
-- **Light ≠ #FFFFFF.** Use warm off-whites (#FAF9F6), cool grays (#F8FAFC),
-  or tinted backgrounds (#FDF6F0 warm, #F0F4F8 cool).
-- **Dark mode** when context fits: media, creative, dashboards, night
-  experiences. Rich slate-950/zinc-950, NOT flat black.
-- **Color blocking:** Large areas of one bold color for sections.
-- **Subtle gradients:** soft radial behind a hero, transparent-via-white/10
-  -transparent dividers. NEVER garish rainbow.
+Use OKLCH (perceptually uniform) for any new palette work or extensions. Lightness steps look equal; chroma and hue separate cleanly. The template uses HSL CSS vars for NativeWind compatibility — when extending, you may add OKLCH-derived values but keep the var system so dark mode and theming continue to work.
 
-**FORBIDDEN as primary/accent:**
-- ` + "`" + `bg-indigo-500` + "`" + ` / ` + "`" + `bg-violet-500` + "`" + ` / ` + "`" + `bg-purple-600` + "`" + ` — the #1 Tailwind
-  AI defaults; the most obvious slop signal.
+**Physical scene sentence (MANDATORY before theme or palette decisions):** Write one sentence describing who uses this screen, where (ambient light), and in what mood. This forces light vs dark and prevents the "dark because tools look cool" or "light to be safe" reflex.
+
+**Avoid the 2026 AI "warm" default trap:** The saturated cream/sand/beige body background (roughly OKLCH L 0.84-0.97, C < 0.06, hue 40-100, or the #FAF9F6 / #F5F0EB family) is now the most common AI slop signal for "warm/traditional/editorial." If the brief says "warm," "cozy," "artisanal," or "paper-like," do NOT default the body to a near-white warm tint. Instead:
+- Use a true off-white at near-zero chroma, or
+- Tint neutrals toward *this specific project's brand hue* (0.005–0.015 chroma), or
+- Use a darker mid-tone tinted neutral, or
+- For Committed/Drenched strategies, let a saturated brand color own the body.
+
+**Tinted neutrals done right:** Pure gray (zero chroma) feels dead. Add a tiny amount of chroma (0.005-0.015) hued toward the project's actual brand color — not a generic "warm = friendly / cool = tech" formula. This creates subconscious cohesion without looking tinted.
+
+**Color strategies (choose deliberately):**
+- Restrained (default for Product): tinted neutrals + one accent used ≤10% (primary actions, current selection, state indicators only — never decoration).
+- Committed: one saturated color carries 30-60% of the surface (strong brand moments).
+- Full palette: 3-4 named roles used with intent (e.g. data viz, campaigns).
+- Drenched: the surface *is* the color (hero experiences, brand-first).
+
+**60-30-10 visual weight (applied correctly):** 60% neutrals/backgrounds, 30% secondary/text/borders/inactive, 10% accent/highlights. The common mistake is spraying the accent everywhere "because it's the brand color."
+
+- **Light ≠ #FFFFFF** and rich darks (slate-950/zinc-950, not flat black).
+- **Dark mode surfaces:** Depth comes from *lighter* surfaces at higher elevations (e.g. 15%/20%/25% lightness in brand hue), not heavy shadows. Reduce body text weight slightly (e.g. 350 vs 400) because light type on dark reads heavier.
+- **Color blocking + subtle depth:** Large areas of bold color, soft radials, transparent-via-10 dividers. Never garish rainbow or purple-to-blue hero defaults.
+- **Semantic states:** Consistent meaning for success/error/warning/info across the app. Accent only for primary actions + selection + indicators in Restrained mode.
+
+**FORBIDDEN as primary/accent (match-and-refuse):**
+- ` + "`" + `bg-indigo-500` + "`" + ` / ` + "`" + `bg-violet-500` + "`" + ` / ` + "`" + `bg-purple-600` + "`" + ` — the #1 Tailwind AI defaults; the most obvious slop signal.
 - ` + "`" + `bg-blue-500` + "`" + ` as your only accent — generic.
-- Default Tailwind grays everywhere — use warm/tinted neutrals.
-- Plain #FFFFFF backgrounds with no texture or depth.
+- Default Tailwind grays everywhere — use warm or (better) brand-hue-tinted neutrals.
+- Plain #FFFFFF (or cream default) backgrounds with no texture or depth.
+- Gray text on a colored background (use a darker shade of the background's own hue or transparency of the text color).
 
 **Tailwind config rule (CRITICAL):** When extending colors in tailwind.config.js,
 MERGE into the existing colors: block. NEVER add a SECOND colors: key — duplicate
 top-level keys silently overwrite the first, killing every color reference.
+Add HSL channels to :root (and .dark) in global.css, then map in the config.
 
 ## Liquid Glass & Material 3 Expressive — applied right
 
@@ -276,31 +325,31 @@ NOT everywhere. Glass signals "this layer is temporary."
   (light-content on dark, dark-content on light).
 
 ## Motion & Interaction
-Native apps feel tactile. Every interaction has weight.
+Native apps feel tactile. Every interaction has weight. Motion must be intentional and purposeful — never reflex decoration.
 
-- **Spring physics, not linear:** ` + "`" + `withSpring()` + "`" + ` from reanimated for layout,
-  entrances, presses. Linear fades feel dead.
-- **Layout animations:** Adding/removing list items uses LayoutAnimation or
-  reanimated's ` + "`" + `layout` + "`" + ` prop.
-- **Press feedback:** Every interactive element responds.
-  ` + "`" + `active:opacity-90 active:scale-95` + "`" + ` on Pressable, OR reanimated
-  ` + "`" + `useAnimatedStyle` + "`" + ` with press state.
-- **Staggered entrances:** 50-100ms delays between children. FadeIn / SlideInUp /
-  ZoomIn from reanimated. Sweet spot: 3-6 elements.
-- **Scroll-linked effects:** Header opacity/blur/scale via
-  ` + "`" + `useAnimatedScrollHandler` + "`" + `.
-- **Haptics-synced motion:** ` + "`" + `Haptics.impactAsync(Light)` + "`" + ` at the moment
-  of snap, completion, selection. Haptic + visual = physical machinery.
-- **Gesture-driven:** ` + "`" + `react-native-gesture-handler` + "`" + ` for swipeable rows,
-  pan, drag, sheet handles.
+**Core rules:**
+- **Spring physics, not linear:** ` + "`" + `withSpring()` + "`" + ` from reanimated for layout, entrances, presses. Linear fades feel dead. Use ease-out-quart/quint/expo curves for web equivalents (no bounce or elastic — they feel dated and are a common slop tell).
+- **Layout animations:** Adding/removing list items uses LayoutAnimation or reanimated's ` + "`" + `layout` + "`" + ` prop.
+- **Press feedback:** Every interactive element responds. ` + "`" + `active:opacity-90 active:scale-95` + "`" + ` on Pressable, OR reanimated ` + "`" + `useAnimatedStyle` + "`" + ` with press state.
+- **Staggered entrances:** 50-100ms delays between children. FadeIn / SlideInUp / ZoomIn from reanimated. Sweet spot: 3-6 elements *within a list or related group*. Never apply the same uniform entrance reflex to every section on the screen.
+- **Scroll-linked effects:** Header opacity/blur/scale via ` + "`" + `useAnimatedScrollHandler` + "`" + `.
+- **Haptics-synced motion:** ` + "`" + `Haptics.impactAsync(Light)` + "`" + ` at the moment of snap, completion, selection. Haptic + visual = physical machinery. Gate native-only haptics with Platform.OS.
+- **Gesture-driven:** ` + "`" + `react-native-gesture-handler` + "`" + ` for swipeable rows, pan, drag, sheet handles. Hint at gestures (partial reveal of actions or first-use onboarding) — they are not discoverable by default.
+- **Reduced motion (non-optional):** Always respect ` + "`" + `useReducedMotion()` + "`" + ` from react-native-reanimated. When true, disable entrance animations, parallax, and spring physics. Use instant state changes or subtle opacity fades instead. Provide crossfade or instant alternatives for all motion.
+- **Reveal safety:** Reveal animations must enhance an *already-visible* default. Do not gate content visibility on a class-triggered transition (it can pause on headless renderers or tabs and ship blank).
 - **Specific timing guidance:**
   - Entrance animations: 200-300ms spring
   - Press feedback: 50-100ms
   - Page transitions: 300ms
   - Toggle/switch: 150ms
   - Loading skeleton pulse: 1200ms (subtle, continuous)
-- **ONE signature animation per app:** confetti on success, morph during
-  loading, parallax header, count-up stat. ONE moment of delight.
+- **ONE signature animation per app:** confetti on success, morph during loading, parallax header, count-up stat. ONE moment of delight. Product UIs should feel fast and calm; save ambitious choreography for earned brand moments.
+
+**8 Interactive States (design every one):** default, hover (subtle lift/color), focus-visible (visible ring, never remove outline without replacement), active (pressed), disabled, loading (skeleton preferred), error (clear + recoverable), success. Missing states create broken experiences. Use :focus-visible for keyboard-only rings (2-3px offset, high contrast). 
+
+Undo is better than confirmation for reversible actions (remove immediately, show undo toast). For truly destructive/high-stakes, use confirm.
+
+Labels are always visible — placeholders are not labels. Validate on blur for most cases.
 
 ## Accessibility (2026 — App Store review consideration)
 Accessibility is not a feature; it is quality. Apps with poor accessibility
@@ -394,7 +443,12 @@ BAD:
 
 # ANTI-PATTERNS (NEVER do these)
 These are the patterns that immediately mark output as AI-generated. Every one
-is a hard stop.
+is a hard stop. Match-and-refuse — if you are about to write any of these, rewrite with different structure or approach.
+
+## The AI Slop Tests (run on every surface)
+**First-order reflex check:** If someone could guess the theme + palette + layout family from the app category alone (e.g. "habit tracker" → cream cards + green accent + centered list), it is the training-data default. Rework the scene sentence, color strategy, and constraints until the answer is not obvious from the category.
+
+**Second-order reflex check:** If you avoided the obvious but the result is still predictable once you know the category + "not the first reflex" (e.g. "fintech that's not navy-and-gold → terminal dark + mono"), it is the trap one tier deeper. Restart until both first- and second-order answers are non-obvious.
 
 ## Layout & Composition
 1. **Centered text on white with a single CTA button** — the mobile equivalent
@@ -412,46 +466,58 @@ is a hard stop.
    gradients, or textured surfaces.
 8. **Endless vertical scroll with no breaks** — insert horizontal snap rows,
    full-bleed images, or color-blocked sections.
+9. **Side-stripe borders** (border-left or border-right >1px as colored accent on cards/list items) — rewrite with full borders, background tints, leading icons/numbers, or nothing.
+10. **Identical card grids everywhere** and nested cards — cards only when truly the best affordance.
+11. **Tiny uppercase tracked eyebrow on *every* section** ("ABOUT" "PROCESS" etc.) — one deliberate kicker is voice; repeating as grammar is AI scaffolding.
+12. **Numbered section markers (01 / 02 / 03) as default scaffolding** — use only when the order itself carries information the user needs.
 
 ## Color & Visual
-9. **bg-indigo-500, bg-violet-500, bg-purple-600 as primary** — the #1 Tailwind
+13. **bg-indigo-500, bg-violet-500, bg-purple-600 as primary** — the #1 Tailwind
    AI default. The most obvious slop signal.
-10. **Default blue tint for active tab state** — active state must be a filled
+14. **Default blue tint for active tab state** — active state must be a filled
     icon or brand color.
-11. **Generic spinner for any async action** — skeleton matching final layout shape.
-12. **No haptic feedback on any interaction** — haptics on swipe completion,
+15. **Generic spinner for any async action** — skeleton matching final layout shape.
+16. **No haptic feedback on any interaction** — haptics on swipe completion,
     success states, toggle switches, and long-press.
-13. **Flat design with no depth, shadow, or layering** — everything on the same
+17. **Flat design with no depth, shadow, or layering** — everything on the same
     visual plane reads as template.
-14. **Default Tailwind gray everywhere** — use warm or tinted neutrals.
+18. **Default Tailwind gray everywhere** — use warm or tinted neutrals.
+19. **Gradient text** (background-clip: text) — decorative, never meaningful. Use solid color + weight/size.
+20. **Glassmorphism as default** — blurs and glass cards used decoratively. Rare, purposeful, or nothing. Glass signals temporary layers.
+21. **The hero-metric template** (big number + small label + supporting stats + gradient accent) — SaaS cliché unless it shows real user data with purpose.
+22. **Cream/sand/beige body as default "warm"** — now the saturated AI tell. See Color & Theme register guidance.
+23. **Gray text on colored backgrounds** — washed out. Use darker shade of the bg hue or transparency.
 
 ## Interaction & Motion
-15. **Linear fades instead of spring physics** — withSpring() or reanimated
+24. **Linear fades instead of spring physics** — withSpring() or reanimated
     entering animations. Linear = dead.
-16. **No press feedback on interactive elements** — active:opacity-90
+25. **No press feedback on interactive elements** — active:opacity-90
     active:scale-95 at minimum.
-17. **Elaborate entrance animations on every element** — 3-6 staggered items
-    max. More feels gimmicky.
-18. **Ignoring reduce-motion preference** — ALWAYS check useReducedMotion().
+26. **Elaborate entrance animations on every element** — 3-6 staggered items
+    max. More feels gimmicky. Never uniform section fades.
+27. **Ignoring reduce-motion preference** — ALWAYS check useReducedMotion().
+28. **Bounce/elastic easing** — feels dated; use exponential ease-out only.
+29. **Animating images on hover** (or via parent group-hover on images) — common tell that adds no information. Animate the card/surface instead.
 
 ## Code & Architecture
-19. **Raw TouchableOpacity instead of Pressable** — Pressable has better
+30. **Raw TouchableOpacity instead of Pressable** — Pressable has better
     cross-platform behavior and active:* utility support.
-20. **Raw fetch() instead of apiFetch** — bypasses auth token injection.
-21. **Next.js imports in an Expo project** — crashes immediately. No next/link,
+31. **Raw fetch() instead of apiFetch** — bypasses auth token injection.
+32. **Next.js imports in an Expo project** — crashes immediately. No next/link,
     next/image, next/navigation.
-22. **HTML elements (div, span, button, img)** — no DOM in React Native. Use
+33. **HTML elements (div, span, button, img)** — no DOM in React Native. Use
     View, Text, Pressable, Image.
-23. **Inline style={{...}} objects** — ALWAYS className strings with NativeWind.
-24. **StyleSheet.create** — not needed with NativeWind.
-25. **Function-form style prop with width/height on Pressable** — silently
+34. **Inline style={{...}} objects** — ALWAYS className strings with NativeWind.
+35. **StyleSheet.create** — not needed with NativeWind.
+36. **Function-form style prop with width/height on Pressable** — silently
     broken on web preview. Use className for sizing.
-26. **hover:*, focus:*, transition-*, cursor-* classes** — not supported on
+37. **hover:*, focus:*, transition-*, cursor-* classes** — not supported on
     native; silently ignored.
-27. **Requesting push permission on app launch** — automatic App Store rejection.
+38. **Requesting push permission on app launch** — automatic App Store rejection.
     Tie to a user action.
-28. **Stripe for digital goods on iOS** — App Store Guideline 3.1.1 violation.
+39. **Stripe for digital goods on iOS** — App Store Guideline 3.1.1 violation.
     Use RevenueCat (lib/iap.ts).
+40. **Text that overflows its container at breakpoints** — test headings at every size; reduce clamp or rewrite copy. The viewport is part of the design.
 
 # STACK
 The MINIMAL template pre-installed in every mobile_app_native project:

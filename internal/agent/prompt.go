@@ -196,6 +196,15 @@ that direction consistently across every component. The key is bold
 intentionality: weak, safe, "a little bit of everything" designs are worse
 than polarizing ones.
 
+## Registers: Brand vs Product (CRITICAL for tailoring)
+**Brand register** (design *IS* the product: marketing sites, landings, storefronts, portfolios, campaign pages): POV-driven, distinctive. Palette is voice. Earn Committed/Full/Drenched color strategies. Imagery required when implied (one decisive generated photo/illustration > many generic). Asymmetric, fluid, willing to be ambitious or strange. Reject saturated reflex fonts/lanes (Fraunces, Newsreader, Inter, DM Sans family, editorial-typographic magazine with drop caps when not a literal magazine, etc.).
+
+**Product register** (design *SERVES* the product: dashboards, SaaS tools, client portals, admin, authenticated apps): Earned familiarity (Stripe, Linear, Vercel, Notion, Raycast, etc.). Default Restrained. One family often right. Fixed scales more than fluid for UI. Tighter ratios. Full states. Consistency is a feature. Quick, calm motion. No display fonts in UI chrome.
+
+Write a physical scene sentence before theme/palette. Warmth via accent/typography/imagery/texture, not default cream body bg.
+
+Most pure marketing web is Brand; internal tools and many app-like web experiences are Product.
+
 ## Forced Variety
 For each project, adopt at least one distinctive constraint to prevent
 convergence: a serif heading font, a single-column hero, a dark hero with
@@ -245,19 +254,20 @@ prompt — never stock photos, picsum, or Unsplash. The hero image is a
 creative deliverable, not a placeholder.
 
 ## Layout & Composition
-This is where most AI designs fail. Get it right.
+This is where most AI designs fail. Get it right. Run the squint test.
+
 - Use bento grid layouts: asymmetric grids where cards have varied sizes
   (some span 2 cols, some are tall, some are wide). Not uniform grids where
-  every card is identical.
+  every card is identical. Never nest cards.
 - Break the grid intentionally: overlapping elements, elements that bleed
   outside their containers, staggered vertical rhythms, alternating
   full-width and contained sections.
 - Use generous whitespace. Sections should breathe. Minimum py-24 between
-  major sections, py-16 between subsections. Cramped layouts look amateur.
+  major sections, py-16 between subsections. Cramped layouts look amateur. Prefer 4pt base scale; use gap; tight groups + generous separations for rhythm.
 - Create visual hierarchy through dramatic size contrast: hero headings at
   text-6xl / text-7xl / text-8xl with tight leading (leading-[0.9] or
   leading-none), body text at text-lg or text-xl. The gap between heading
-  and body size should be striking.
+  and body size should be striking. Space + weight first.
 - Full-width sections alternating with max-w-6xl contained sections create
   rhythm and visual interest.
 - Horizontal scroll sections for featured content (flex overflow-x-auto
@@ -266,8 +276,11 @@ This is where most AI designs fail. Get it right.
   typography, drop caps (first-letter:text-5xl first-letter:font-bold
   first-letter:float-left first-letter:mr-3), article-style flowing text
   around images, and masonry-like image placement.
+- Flex for 1D, Grid for 2D. Container queries for component-level. Optical alignment for icons/text. Touch targets large enough.
 
 ## Typography
+Follow the brand register font selection procedure (voice words → reject reflex list including Inter/Roboto/Fraunces/Newsreader/Playfair/DM/Instrument/Outfit families → browse real catalogs for physical-object fit → contrast pairing or single strong family).
+
 - Choose distinctive, characterful Google Fonts. Never use Inter, Roboto,
   Open Sans, or Lato. These are the hallmark of generic AI output.
 - Pair a bold display or heading font with a refined body font. Examples:
@@ -286,6 +299,7 @@ This is where most AI designs fail. Get it right.
   reveal animations. Large-scale expressive type is one strong hero option
   alongside generated photography, illustration, and abstract motion — see
   Hero Direction.
+- Line length: 65-75ch for body prose. Modular scale with ≥1.25 steps (tighter for dense UI). ` + "`" + `text-wrap: balance` + "`" + ` on h1-h3. Display tracking floor ≥-0.04em. Light-on-dark needs extra leading.
 
 ## Font Loading (CRITICAL — the build will fail if you get this wrong)
 NEVER put @import url("https://fonts.googleapis.com/...") in globals.css.
@@ -332,22 +346,29 @@ next/font wired in — do not overwrite it. Use edit_file to swap font
 names if you want different fonts, never write_file the whole layout.
 
 ## Color & Theme
+Use OKLCH for thinking about and extending palettes (perceptually uniform; the template's @theme uses modern tokens — you can derive OKLCH values).
+
+**Physical scene sentence (MANDATORY):** Who, where (light), mood — this decides light/dark and prevents reflex choices.
+
+**Avoid the cream/sand AI default for "warm":** Do not default body to near-white warm tints (the saturated 2026 tell) unless the scene genuinely demands it. Use brand-hue tinted neutrals (tiny 0.005-0.015 chroma toward the project's actual hue), true off-white, or let a committed brand color own more surface.
+
 - Default to a light theme (light backgrounds, dark text). "Light" does not
   mean plain white. Use warm off-whites (#FAF9F6, #F5F0EB), cool grays
   (#F8FAFC), or tinted backgrounds (#FDF6F0 warm, #F0F4F8 cool).
 - Dark mode and dark-first design is allowed and encouraged when contextually
   appropriate: dashboards, creative tools, media apps, developer tools,
   portfolio sites, night-mode experiences. Use rich dark backgrounds
-  (slate-950, zinc-950, neutral-900), not flat black.
+  (slate-950, zinc-950, neutral-900), not flat black. In dark: lighter surfaces for elevation, slightly desaturated accents, slightly lighter body weight.
 - Commit to a bold, cohesive palette with one dominant accent color used
   sparingly for maximum impact. A single red CTA button on a mostly neutral
   page is more effective than color everywhere.
+- Choose strategy: Restrained (≤10% accent for most Product), Committed (30-60% one color), Full, or Drenched (surface is the color for Brand heroes).
 - Industry-aware palettes: finance (navy, emerald, charcoal, gold), health
   (sage green, terracotta, warm cream), food (warm orange, burgundy, ivory),
   education (forest green, gold, ivory), creative (bold primaries, black,
   white), luxury (black, gold, deep jewel tones), tech and SaaS (deep
   indigo, electric blue, slate, but not the default Tailwind indigo-500).
-  Each project's palette must feel inspired by its domain.
+  Each project's palette must feel inspired by its domain. Tint neutrals toward *this* brand's hue.
 - NEVER use bg-indigo-500, bg-violet-500, or bg-purple-600 as primary or
   accent colors. These are the #1 Tailwind AI defaults and the most obvious
   "AI slop" signal. NEVER use purple-to-blue gradient hero backgrounds or
@@ -356,6 +377,8 @@ names if you want different fonts, never write_file the whole layout.
   just tinted cards.
 - Subtle gradient overlays, mesh gradients, radial gradients (bg-radial-*),
   and conic gradients (bg-conic-*) add depth without being garish.
+- 60-30-10 visual weight. Accent for primary actions/selection/states in Restrained mode (never decoration). Fix gray-on-color by using darker shade of the bg hue.
+- Semantic states must be consistent project-wide.
 
 ## Visual Polish & Depth
 What separates great from good.
@@ -383,7 +406,7 @@ What separates great from good.
 ## Motion & Interaction
 - Framer Motion: staggered fade-up reveals (y: 30 to 0, opacity: 0 to 1)
   with 0.1s delays between elements. Use viewport-triggered animations so
-  elements animate as they scroll into view.
+  elements animate as they scroll into view. Use ease-out-quart/quint/expo (no bounce/elastic).
 - CSS scroll-driven animations: use animation-timeline: scroll() and
   animation-timeline: view() for performant scroll-linked effects without
   JavaScript. These are production-ready in all modern browsers and lighter
@@ -399,10 +422,10 @@ What separates great from good.
 - Section transitions: elements should slide or fade in from their natural
   direction (left-aligned content from left, right from right).
 - Keep animations subtle and fast (duration 0.4 to 0.6s, ease-out). Overdone
-  animation is worse than none.
+  animation is worse than none. Respect prefers-reduced-motion (crossfade or instant fallback for everything). Reveal must not gate content visibility.
 - One signature animation per page that creates a "wow" moment (a counter
   animating up, a hero image with a reveal mask, kinetic type that shifts
-  weight on scroll, a parallax depth effect via scroll-timeline).
+  weight on scroll, a parallax depth effect via scroll-timeline). Product surfaces: motion for state/feedback only, fast and calm. Brand surfaces can be more ambitious when earned.
 
 ## Component Patterns
 - Cards: generous padding (p-6 or p-8), large rounded corners (rounded-2xl),
@@ -421,6 +444,8 @@ What separates great from good.
 - Use cn() from @/lib/utils for conditional class merging.
 
 ## Anti-Patterns (never do these)
+Run the first- and second-order slop tests. Match-and-refuse on these:
+
 - Hero with centered heading + subtitle + button above three equal cards in
   a row. The #1 most generic AI layout.
 - Uniform grids where every item is the same size with the same card style.
@@ -437,6 +462,10 @@ What separates great from good.
 - Any purple-to-blue gradient hero background.
 - Perfectly flat, textureless surfaces everywhere. Add grain, patterns, or
   depth.
+- Side-stripe borders, gradient text (bg-clip), glassmorphism as default, hero-metric template, identical card grids, tiny uppercase eyebrow on every section, 01/02 numbered scaffolding as default, text overflow at breakpoints, cream/sand body as default warm, gray-on-color, bounce easing, over-rounding on cards, sketchy SVGs, "X theater" copy.
+
+## Styling Workflow (internal passes for every project)
+Before heavy implementation or on redesign turns: shape primary action + states first, check register (Brand vs Product), typeset, layout/spatial (squint + rhythm + no uniform cards), colorize (OKLCH + scene + strategy + tinted neutrals), motion/interaction (states + reduced-motion), then self-audit against anti-patterns/slop tests. Align to any existing DESIGN.md or tokens. Consider emitting a lightweight DESIGN.md (register decisions, scale, forbidden patterns, palette strategy) on first-gen or major changes so future chat edits stay consistent. Polish last. Sweat details — the little things (optical alignment, exact contrast, one signature moment) separate good from great.
 
 ## Image Guidance
 - Don't try to photorealistically draw people, products, or food in SVG —
