@@ -504,7 +504,6 @@ func Run(
 			NudgeAfter:    nudgeAfter,
 			StripAfter:    stripAfter,
 			StripTools:    []string{"read_files", "list_files", "grep", "read_attachment", "web_search", "read_build_logs", "read_deploy_logs", "read_mobile_config"},
-			TrimResults:   truncateToolResult,
 			MaxMessages:   25,
 			RefreshPrefix: refreshRunPrefix,
 			// Moonshot K2.6 prompt_cache_key: stable per-project so the system
@@ -796,18 +795,8 @@ func normaliseImages(images []string) []map[string]string {
 }
 
 func convertHistory(history []models.AppChatMessage) []utils.Message {
-	// Basic history replay: keep full tool results (including reads) for the
-	// most recent assistant turn. Older turns get light truncation via
-	// truncateToolResult. No separate file drawer.
-	assistantCount := 0
-	for _, m := range history {
-		if m.Role == "assistant" && m.ErrorKind == "" {
-			assistantCount++
-		}
-	}
-
+	// Basic history replay: keep full tool results. No separate file drawer.
 	var out []utils.Message
-	assistantIdx := 0
 	for _, m := range history {
 		if m.ErrorKind != "" {
 			// Instead of silently dropping failed assistant turns, inject a
@@ -836,9 +825,6 @@ func convertHistory(history []models.AppChatMessage) []utils.Message {
 		}
 
 		if m.Role == "assistant" {
-			assistantIdx++
-			keepFull := assistantIdx == assistantCount // only the LAST assistant turn keeps full results
-
 			var parts []models.ChatMessagePart
 			if len(m.Parts) > 0 && string(m.Parts) != "[]" {
 				_ = json.Unmarshal(m.Parts, &parts)
@@ -882,15 +868,11 @@ func convertHistory(history []models.AppChatMessage) []utils.Message {
 							Arguments: string(p.Input),
 						},
 					})
-					result := p.Result
-					if !keepFull {
-						result = truncateToolResult(p.Name, result)
-					}
 					pendingToolResults = append(pendingToolResults, utils.Message{
 						Role:       "tool",
 						ToolCallID: p.ToolCallID,
 						Name:       p.Name,
-						Content:    result,
+						Content:    p.Result,
 					})
 				}
 			}
@@ -913,27 +895,6 @@ func lastAssistantTurn(history []models.AppChatMessage) *models.AppChatMessage {
 		}
 	}
 	return nil
-}
-
-// truncateToolResult compresses old tool outputs so they don't bloat the
-// context window across turns. The model still sees the full result on the
-// turn it was produced; on later turns it gets a summary and can re-call the
-// tool if it needs the data again.
-func truncateToolResult(name, result string) string {
-	const maxLen = 500
-	if name == "read_deploy_logs" || name == "read_build_logs" {
-		if idx := strings.Index(result, "\n"); idx > 0 {
-			return result[:idx] + " ..."
-		}
-		if len(result) > 200 {
-			return result[:200] + " ..."
-		}
-		return result
-	}
-	if len(result) > maxLen {
-		return result[:maxLen] + " ..."
-	}
-	return result
 }
 
 // escapeUntrustedTag replaces literal closing-tag substrings inside untrusted
