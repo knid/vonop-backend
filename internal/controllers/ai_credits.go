@@ -1333,6 +1333,7 @@ func (c *Controller) RecordTokenUsage(user *models.User, action, model, provider
 				Set("$ai_latency", float64(entry.LatencyMs)/1000.0).
 				Set("$ai_is_error", false).
 				Set("$ai_stream", entry.IsStreaming).
+				Set("action", action).
 				Set("app_type", appType).
 				Set("app_id", reference).
 				Set("project_id", reference).
@@ -1417,6 +1418,7 @@ func (c *Controller) RecordTokenUsage(user *models.User, action, model, provider
 		traceProps := posthog.NewProperties().
 			Set("$ai_trace_id", traceID).
 			Set("$ai_trace_name", action).
+			Set("action", action).
 			Set("$ai_session_id", sessionID).
 			Set("$ai_model", model).
 			Set("$ai_provider", provider).

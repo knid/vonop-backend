@@ -49,3 +49,61 @@ func TestProjectTypeConstantsMatchSpec(t *testing.T) {
 		t.Errorf("ProjectTypeEcommerce = %q, want ecommerce", models.ProjectTypeEcommerce)
 	}
 }
+
+func TestLooksLikeEcommerce(t *testing.T) {
+	cases := []struct {
+		name   string
+		prompt string
+		want   bool
+	}{
+		// Documented Turkish e-commerce cases (must not regress)
+		{"el kremi satmak istiyorum", "el kremi satmak istiyorum", true},
+		{"satış yapmak istiyorum", "satış yapmak istiyorum", true},
+		{"ürün satışı yapacağım", "ürün satışı yapacağım", true},
+		{"yemek satışı sitesi", "yemek satışı sitesi", true},
+		{"ayakkabı mağazası", "ayakkabı mağazası açmak istiyorum", true},
+		{"kozmetik e ticaret", "kozmetik markamız için e ticaret sitesi", true},
+		{"online mağaza", "ürünlerimi internetten satacağım online mağaza", true},
+
+		// English cases
+		{"online clothing store", "build me an online clothing store", true},
+		{"boutique", "boutique de vêtements en ligne", true},
+
+		// Non-ecommerce
+		{"dashboard", "create a project management dashboard", false},
+		{"portfolio", "personal portfolio site", false},
+		{"empty", "", false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := looksLikeEcommerce(tc.prompt)
+			if got != tc.want {
+				t.Errorf("looksLikeEcommerce(%q) = %v, want %v", tc.prompt, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestSanitizeClassifyResult(t *testing.T) {
+	cases := []struct {
+		input string
+		want  string
+	}{
+		{"ecommerce", "ecommerce"},
+		{"Ecommerce.", "ecommerce"},
+		{" ecommerce \n", "ecommerce"},
+		{"\"e-commerce\"", "e-commerce"},
+		{"The answer is app", "the answer is app"}, // still won't match, which is correct
+		{"mobile_app_native", "mobile_app_native"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.input, func(t *testing.T) {
+			got := sanitizeClassifyResult(tc.input)
+			if got != tc.want {
+				t.Errorf("sanitizeClassifyResult(%q) = %q, want %q", tc.input, got, tc.want)
+			}
+		})
+	}
+}
