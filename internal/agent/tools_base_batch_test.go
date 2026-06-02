@@ -70,10 +70,8 @@ func TestReadFilesTool_RejectsEmptyAndOversizedBatches(t *testing.T) {
 	}
 }
 
-func TestWriteFileTool_AllowsRewriteOfLargeExistingFile(t *testing.T) {
+func TestWriteFileTool_RejectsAccidentalRewriteOfExistingFile(t *testing.T) {
 	rc := newPathScopeTestRC(models.ProjectTypeApp)
-	// Pre-seed an existing file larger than the old 5 KB rewrite cap.
-	// write_file should now allow wholesale overwrites of any size.
 	rc.FileMap.Set("app/page.tsx", strings.Repeat("a", 6*1024))
 
 	out, isError, err := WriteFileTool{}.Execute(context.Background(), rc,
@@ -81,25 +79,28 @@ func TestWriteFileTool_AllowsRewriteOfLargeExistingFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-	if isError {
-		t.Fatalf("expected isError=false for wholesale rewrite of large existing file; out=%s", out)
+	if !isError {
+		t.Fatalf("expected isError=true for accidental rewrite; out=%s", out)
 	}
-	if !strings.Contains(out, "update") {
-		t.Errorf("expected update confirmation; got: %s", out)
+	if !strings.Contains(out, "file already exists") {
+		t.Errorf("expected existing-file warning; got: %s", out)
 	}
 }
 
-func TestWriteFileTool_AllowsRewriteOfSmallExistingFile(t *testing.T) {
+func TestWriteFileTool_AllowsIntentionalRewriteOfExistingFile(t *testing.T) {
 	rc := newPathScopeTestRC(models.ProjectTypeApp)
 	rc.FileMap.Set("app/stub.tsx", "stub")
 
-	_, isError, err := WriteFileTool{}.Execute(context.Background(), rc,
-		json.RawMessage(`{"path":"app/stub.tsx","content":"export default function () { return null }"}`))
+	out, isError, err := WriteFileTool{}.Execute(context.Background(), rc,
+		json.RawMessage(`{"path":"app/stub.tsx","content":"export default function () { return null }","overwrite":true,"reason":"replace generated stub with full file"}`))
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
 	if isError {
-		t.Error("expected isError=false when overwriting a small existing file")
+		t.Fatalf("expected isError=false when overwrite is explicit; out=%s", out)
+	}
+	if !strings.Contains(out, "update") {
+		t.Errorf("expected update confirmation; got: %s", out)
 	}
 }
 

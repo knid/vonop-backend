@@ -130,8 +130,9 @@ type RunContext struct {
 	RunID      uuid.UUID
 	Project    *models.AppProject
 	User       *models.User
-	FileMap *SafeFileMap
-	Emitter   EventEmitter
+	FileMap    *SafeFileMap
+	BuildState *BuildState
+	Emitter    EventEmitter
 	Tracker    *utils.TokenTracker
 	Deps       *RunDependencies
 }

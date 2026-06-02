@@ -176,6 +176,7 @@ func Run(
 
 	// --- Step 9: build system messages + registry + tracker ---
 	isFirstGen := project != nil && project.Status == "draft"
+	buildState := NewBuildState(message, isFirstGen)
 	llmMessages := BuildSystemMessages(project, deps, turnAttachments.Pool, isFirstGen)
 
 	// Modal commands (/plan, /explain, /review) inject an extra system block
@@ -210,13 +211,26 @@ func Run(
 		}
 	}
 
-	// Simple user turn prefix: just the current file tree.
-	// Full tool results (including previous reads) now live directly in history.
-	turnContent := expandedMessage
-	if fileTreePrefix := BuildFileTreeUserPrefix(fileMap); fileTreePrefix != "" {
-		turnContent = fileTreePrefix + "\n" + turnContent
+	// Keep the current filesystem plus durable build progress on the live user
+	// turn. This is refreshed after every tool round so the model has a
+	// compact source of truth even when older tool messages are trimmed.
+	coreUserContent := expandedMessage
+	userTurn := utils.Message{Role: "user", Content: coreUserContent}
+	refreshRunPrefix := func(msg *utils.Message) {
+		prefix := renderRunPrefix(fileMap, buildState)
+		if prefix == "" {
+			return
+		}
+		c := msg.Content
+		const requestMarker = "\n\nUSER REQUEST\n============\n\n"
+		if strings.HasPrefix(c, "CURRENT RUN CONTEXT\n") {
+			if idx := strings.Index(c, requestMarker); idx >= 0 {
+				c = c[idx+len(requestMarker):]
+			}
+		}
+		msg.Content = "CURRENT RUN CONTEXT\n===================\n\n" + prefix + requestMarker + c
 	}
-	userTurn := utils.Message{Role: "user", Content: turnContent}
+	refreshRunPrefix(&userTurn)
 	if len(currentImageURLs) > 0 {
 		userTurn.Images = currentImageURLs
 	}
@@ -302,13 +316,14 @@ func Run(
 	}
 
 	rc := &RunContext{
-		RunID:   runID,
-		Project: project,
-		User:    user,
-		FileMap: fileMap,
-		Emitter: emitter,
-		Tracker: tracker,
-		Deps:    deps,
+		RunID:      runID,
+		Project:    project,
+		User:       user,
+		FileMap:    fileMap,
+		BuildState: buildState,
+		Emitter:    emitter,
+		Tracker:    tracker,
+		Deps:       deps,
 	}
 
 	// --- Step 10: emit run_start ---
@@ -485,15 +500,13 @@ func Run(
 			// Sonnet 4.6's non-extended output cap. Running at the provider
 			// max keeps the continuation dance (finish_reason=length → send
 			// "continue") from firing in all but pathological runs.
-			MaxTokens:      64000,
-			NudgeAfter:     nudgeAfter,
-			StripAfter:     stripAfter,
-			StripTools:     []string{"read_files", "list_files", "grep", "read_attachment", "web_search", "read_build_logs", "read_deploy_logs", "read_mobile_config"},
-			TrimResults: truncateToolResult,
+			MaxTokens:     64000,
+			NudgeAfter:    nudgeAfter,
+			StripAfter:    stripAfter,
+			StripTools:    []string{"read_files", "list_files", "grep", "read_attachment", "web_search", "read_build_logs", "read_deploy_logs", "read_mobile_config"},
+			TrimResults:   truncateToolResult,
 			MaxMessages:   25,
-			// No RefreshPrefix: with basic history we rely on full tool results
-			// being replayed from persisted messages. File tree is only built once
-			// at the start of the turn.
+			RefreshPrefix: refreshRunPrefix,
 			// Moonshot K2.6 prompt_cache_key: stable per-project so the system
 			// prompt is cached across runs. Only set for Moonshot — other
 			// providers may reject unknown fields.
@@ -518,10 +531,11 @@ func Run(
 				toolRoundCount++
 				remaining := maxTurns - toolRoundCount
 				if remaining <= 2 {
-					return fmt.Sprintf("URGENT: You have used %d tool rounds and have at most %d total rounds left. Finish your response NOW — no more research.", toolRoundCount, remaining)
+					buildState.SetPhase(BuildPhaseValidation)
+					return fmt.Sprintf("URGENT: You have used %d tool rounds and have at most %d total rounds left. Finish pending BUILD STATE requirements now; do not research or recreate existing files.", toolRoundCount, remaining)
 				}
 				if toolRoundCount >= 3 {
-					return fmt.Sprintf("You have used %d tool rounds. Total budget is ~%d rounds. Wrap up research and start writing code.", toolRoundCount, maxTurns)
+					return fmt.Sprintf("You have used %d tool rounds. Total budget is ~%d rounds. Use BUILD STATE as the checklist: continue pending requirements and avoid re-reading or recreating completed files.", toolRoundCount, maxTurns)
 				}
 				return ""
 			},
@@ -601,6 +615,13 @@ func Run(
 		return finaliseFailureV2(ctx, deps, repo, run, project, emitter, "agent_loop",
 			CodeBudgetExceeded,
 			fmt.Sprintf("token budget exceeded (%d > %d)", total, maxTokensPerRun), nil,
+			tracker, runStart,
+			fileMap, message)
+	}
+
+	if validationErr := validateGeneratedApp(fileMap, buildState, message, isFirstGen); validationErr != nil {
+		return finaliseFailureV2(ctx, deps, repo, run, project, emitter, "validation",
+			CodeValidationFailed, validationErr.Error(), validationErr,
 			tracker, runStart,
 			fileMap, message)
 	}
@@ -1496,7 +1517,7 @@ func classifyErrorKind(code ErrorCode, wrapped error) string {
 			return "context_canceled"
 		}
 		return "context_canceled"
-	case CodeInternal, CodeGitError, CodeToolFailed,
+	case CodeInternal, CodeGitError, CodeToolFailed, CodeValidationFailed,
 		CodeTruncated, CodeRepetitionLoop, CodeRunInProgress:
 		return "internal"
 	}

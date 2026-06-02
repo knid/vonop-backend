@@ -1368,7 +1368,7 @@ func StreamWithTools(
 		// current file contents (e.g. file tree) even after old tool results
 		// are truncated by TrimResults.
 		if len(opts) > 0 && opts[0].RefreshPrefix != nil && round > 0 {
-			for i := range currentMessages {
+			for i := len(currentMessages) - 1; i >= 0; i-- {
 				if currentMessages[i].Role == "user" && !strings.HasPrefix(currentMessages[i].Content, "[System]") {
 					opts[0].RefreshPrefix(&currentMessages[i])
 					break
