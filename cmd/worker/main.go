@@ -95,6 +95,9 @@ func main() {
 	// Stripe customer.subscription.deleted event. Re-checks the org's status
 	// before destroying anything (re-subscribe wins).
 	mux.HandleFunc(tasks.TypeOrgGraceTeardown, controller.HandleOrgGraceTeardownTask)
+	// User account deletion: full purge of projects + infra (Fly/Neon/gitea/S3)
+	// + owned orgs + user data. Enqueued from both self-delete and admin-delete.
+	mux.HandleFunc(tasks.TypeUserAccountPurge, controller.HandleUserAccountPurgeTask)
 	mux.HandleFunc("cron:dns-check", func(ctx context.Context, _ *asynq.Task) error {
 		return controller.CheckPendingDomainsTask(ctx)
 	})

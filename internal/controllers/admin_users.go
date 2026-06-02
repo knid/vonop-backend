@@ -165,12 +165,21 @@ func (c *Controller) AdminUpdateUser(userID string, req requests.AdminUpdateUser
 	return c.adminUserDetail(user)
 }
 
-// AdminDeleteUser soft-deletes a user.
+// AdminDeleteUser soft-deletes a user and enqueues a full async purge of their
+// projects, deployments, Fly apps, Neon DBs, git repos, S3 assets, owned orgs,
+// and user-scoped records (via user:account-purge Asynq task).
 func (c *Controller) AdminDeleteUser(userID string) error {
 	user, err := c.DB.GetUserById(userID)
 	if err != nil {
 		return fmt.Errorf("user not found: %w", err)
 	}
+
+	// Best-effort enqueue of the purge task (same task used by self-delete).
+	// TaskID dedup prevents duplicate work if called multiple times.
+	if enqErr := c.EnqueueUserAccountPurge(user.ID); enqErr != nil {
+		slog.Warn("failed to enqueue user account purge task (admin)", "user_id", user.ID, "error", enqErr)
+	}
+
 	_, err = c.DB.DeleteUser(user)
 	if err != nil {
 		return fmt.Errorf("failed to delete user: %w", err)
