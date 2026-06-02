@@ -504,6 +504,8 @@ func Run(
 			StripTools:    []string{"read_files", "list_files", "grep", "read_attachment", "web_search", "read_build_logs", "read_deploy_logs", "read_mobile_config"},
 			MaxMessages:   25,
 			RefreshPrefix: refreshRunPrefix,
+			TrimArgs:      trimToolArgsForHistory,
+			TrimResults:   trimToolResultForHistory,
 			// Moonshot K2.6 prompt_cache_key: stable per-project so the system
 			// prompt is cached across runs. Only set for Moonshot — other
 			// providers may reject unknown fields.
@@ -1273,25 +1275,25 @@ func finaliseFailureV2(
 	// empty bubbles.
 	errorKind := classifyErrorKind(code, wrapped)
 
-  fallbackText := failureMessage
-  if checkpointCommit != "" {
-        fallbackText = "Generation failed. Partial progress was saved as a checkpoint."
-  }
+	fallbackText := failureMessage
+	if checkpointCommit != "" {
+		fallbackText = "Generation failed. Partial progress was saved as a checkpoint."
+	}
 
-  fallbackParts, _ := json.Marshal([]models.ChatMessagePart{
-        {Type: "text", Text: fallbackText},
-  })
-  orphanMsg := &models.AppChatMessage{
-        AppProjectID: run.AppProjectID,
-        RunID:        &run.ID,
-        Role:         "assistant",
-        Content:      fallbackText,
-        Images:       []byte("[]"),
-        Attachments:  []byte("[]"),
-        ToolCalls:    []byte("[]"),
-        Parts:        fallbackParts,
-        ErrorKind:    errorKind,
-  }
+	fallbackParts, _ := json.Marshal([]models.ChatMessagePart{
+		{Type: "text", Text: fallbackText},
+	})
+	orphanMsg := &models.AppChatMessage{
+		AppProjectID: run.AppProjectID,
+		RunID:        &run.ID,
+		Role:         "assistant",
+		Content:      fallbackText,
+		Images:       []byte("[]"),
+		Attachments:  []byte("[]"),
+		ToolCalls:    []byte("[]"),
+		Parts:        fallbackParts,
+		ErrorKind:    errorKind,
+	}
 	if _, err := deps.DB.InsertChatMessage(orphanMsg); err != nil {
 		slog.Warn("failed to persist failure message", "error", err, "run_id", run.ID)
 	}
