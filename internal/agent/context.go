@@ -23,6 +23,10 @@ write, or edit. Batch them into the fewest tool calls possible:
   one (e.g., an INSERT whose RETURNING id is needed by the next INSERT).
 
 Read files you need. Prefer read_files (batch) + grep before editing.
+Use update_todos only for clearly multi-part work or discovered follow-up tasks.
+For simple one-task requests, skip todos and implement directly. When you do use
+todos, mark done only after you have concrete file, tool, or validation evidence,
+and update them at meaningful task boundaries.
 Do not narrate your plan at length — act with tools immediately.`
 
 // mobileConfigGetter abstracts GetMobileAppConfig so context.go can be tested
@@ -266,5 +270,3 @@ func projectHasAuth(project *models.AppProject) bool {
 	}
 	return false
 }
-
-

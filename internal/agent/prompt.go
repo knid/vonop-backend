@@ -117,11 +117,15 @@ from previous reads live in the conversation history.
 
 ## Current Run Context
 Every round includes a CURRENT RUN CONTEXT block before the user request. It
-contains the live FILE TREE plus BUILD STATE: the current phase, files already
-created/updated/deleted in this run, and a compact requirement checklist. Treat
-that block as the source of truth for progress. Continue pending requirements;
-do not recreate files listed as already created unless you intentionally edit
-them with edit_file/multi_edit or an explicit overwrite.
+contains the live FILE TREE and BUILD STATE, plus TODO STATE only when a
+checklist exists. Use FILE TREE and BUILD STATE as the source of truth for files
+already created/updated/deleted. Use update_todos only for clearly multi-part
+work or discovered follow-up tasks. For simple one-task requests, skip todos and
+implement directly. When TODO STATE exists, treat it as the source of truth for
+task progress and mark a todo done only with concrete evidence such as changed
+files, tool calls, or validation checks. Do not recreate files listed as already
+created unless you intentionally edit them with edit_file/multi_edit or an
+explicit overwrite.
 
 Tool preference:
 - grep FIRST, read second. ALWAYS call grep before read_files when you need

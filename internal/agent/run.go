@@ -108,6 +108,8 @@ func Run(
 	// --- Step 6: insert AppAgentRun row ---
 	provider := deps.LLMProvider
 	model := resolveModel(deps.SecretManager, project, provider)
+	isFirstGen := project != nil && project.Status == "draft"
+	todos := NewTodoList(message)
 	run := &models.AppAgentRun{
 		ID:           runID,
 		AppProjectID: project.ID,
@@ -116,6 +118,7 @@ func Run(
 		PreCommit:    preCommit,
 		Model:        model,
 		Provider:     provider.Name,
+		Todos:        todos.RawJSON(),
 	}
 	if _, err := deps.DB.InsertAgentRun(run); err != nil {
 		// Check for the partial unique index violation (Postgres SQLSTATE 23505).
@@ -176,7 +179,6 @@ func Run(
 	}
 
 	// --- Step 9: build system messages + registry + tracker ---
-	isFirstGen := project != nil && project.Status == "draft"
 	buildState := NewBuildState(message, isFirstGen)
 	llmMessages := BuildSystemMessages(project, deps, turnAttachments.Pool, isFirstGen)
 
@@ -218,7 +220,7 @@ func Run(
 	coreUserContent := expandedMessage
 	userTurn := utils.Message{Role: "user", Content: coreUserContent}
 	refreshRunPrefix := func(msg *utils.Message) {
-		prefix := renderRunPrefix(fileMap, buildState)
+		prefix := renderRunPrefix(fileMap, buildState, todos)
 		if prefix == "" {
 			return
 		}
@@ -322,6 +324,7 @@ func Run(
 		User:       user,
 		FileMap:    fileMap,
 		BuildState: buildState,
+		Todos:      todos,
 		Emitter:    emitter,
 		Tracker:    tracker,
 		Deps:       deps,
@@ -336,6 +339,7 @@ func Run(
 		MaxTurns:  maxTurns,
 		Tools:     registry.Names(),
 	})
+	emitTodoSnapshot(rc)
 
 	// --- Step 11: panic guard ---
 	defer func() {
@@ -523,10 +527,10 @@ func Run(
 				remaining := maxTurns - toolRoundCount
 				if remaining <= 2 {
 					buildState.SetPhase(BuildPhaseValidation)
-					return fmt.Sprintf("URGENT: You have used %d tool rounds and have at most %d total rounds left. Finish pending BUILD STATE requirements now; do not research or recreate existing files.", toolRoundCount, remaining)
+					return fmt.Sprintf("URGENT: You have used %d tool rounds and have at most %d total rounds left. Finish the user request now; if TODO STATE has open items, close them with evidence. Do not research or recreate existing files.", toolRoundCount, remaining)
 				}
 				if toolRoundCount >= 3 {
-					return fmt.Sprintf("You have used %d tool rounds. Total budget is ~%d rounds. Use BUILD STATE as the checklist: continue pending requirements and avoid re-reading or recreating completed files.", toolRoundCount, maxTurns)
+					return fmt.Sprintf("You have used %d tool rounds. Total budget is ~%d rounds. Avoid re-reading or recreating completed files. Use TODO STATE only if a checklist exists; otherwise continue the direct user request.", toolRoundCount, maxTurns)
 				}
 				return ""
 			},
@@ -1273,25 +1277,25 @@ func finaliseFailureV2(
 	// empty bubbles.
 	errorKind := classifyErrorKind(code, wrapped)
 
-  fallbackText := failureMessage
-  if checkpointCommit != "" {
-        fallbackText = "Generation failed. Partial progress was saved as a checkpoint."
-  }
+	fallbackText := failureMessage
+	if checkpointCommit != "" {
+		fallbackText = "Generation failed. Partial progress was saved as a checkpoint."
+	}
 
-  fallbackParts, _ := json.Marshal([]models.ChatMessagePart{
-        {Type: "text", Text: fallbackText},
-  })
-  orphanMsg := &models.AppChatMessage{
-        AppProjectID: run.AppProjectID,
-        RunID:        &run.ID,
-        Role:         "assistant",
-        Content:      fallbackText,
-        Images:       []byte("[]"),
-        Attachments:  []byte("[]"),
-        ToolCalls:    []byte("[]"),
-        Parts:        fallbackParts,
-        ErrorKind:    errorKind,
-  }
+	fallbackParts, _ := json.Marshal([]models.ChatMessagePart{
+		{Type: "text", Text: fallbackText},
+	})
+	orphanMsg := &models.AppChatMessage{
+		AppProjectID: run.AppProjectID,
+		RunID:        &run.ID,
+		Role:         "assistant",
+		Content:      fallbackText,
+		Images:       []byte("[]"),
+		Attachments:  []byte("[]"),
+		ToolCalls:    []byte("[]"),
+		Parts:        fallbackParts,
+		ErrorKind:    errorKind,
+	}
 	if _, err := deps.DB.InsertChatMessage(orphanMsg); err != nil {
 		slog.Warn("failed to persist failure message", "error", err, "run_id", run.ID)
 	}

@@ -132,6 +132,7 @@ type RunContext struct {
 	User       *models.User
 	FileMap    *SafeFileMap
 	BuildState *BuildState
+	Todos      *TodoList
 	Emitter    EventEmitter
 	Tracker    *utils.TokenTracker
 	Deps       *RunDependencies
