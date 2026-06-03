@@ -97,6 +97,7 @@ var AICompactAfterTokens = Key{Flag: "rc-ai-compact-after-tokens", Fallback: 250
 var AICompactIntervalTokens = Key{Flag: "rc-ai-compact-interval-tokens", Fallback: 150000}
 var AITrimToolResultChars = Key{Flag: "rc-ai-trim-tool-result-chars", Fallback: 4000}
 var AITrimToolArgChars = Key{Flag: "rc-ai-trim-tool-arg-chars", Fallback: 1200}
+var AIKeepRecentToolRounds = Key{Flag: "rc-ai-keep-recent-tool-rounds", Fallback: 5}
 var AIMoonshotThinkingEnabled = Key{Flag: "rc-ai-moonshot-thinking-enabled", Fallback: true}
 
 // Nudge/Strip thresholds per project type. Draft (new project) gets more lenient
