@@ -229,7 +229,7 @@ func defaultMobileConfigResponse(oneSignalAppID string) map[string]any {
 		PullToRefreshEnabled: true,
 		ExternalBrowserLinks: true,
 		BridgeEnabled:        true,
-		DarkModeEnabled:      true,
+		DarkModeEnabled:      false,
 		RatingSessions:       5,
 		CachingStrategy:      "network-first",
 		OTAEnabled:           true,

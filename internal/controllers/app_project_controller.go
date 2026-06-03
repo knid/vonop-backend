@@ -211,7 +211,7 @@ func (c *Controller) CreateAppProject(ctx context.Context, user *models.User, re
 			OfflineEnabled:       false,
 			CachingStrategy:      "network-first",
 			BiometricEnabled:     false,
-			DarkModeEnabled:      true,
+			DarkModeEnabled:      false,
 			RatingEnabled:        false,
 			RatingSessions:       5,
 			UpdateCheckEnabled:   false,
@@ -732,4 +732,3 @@ func (c *Controller) refineProjectNameAsync(id uuid.UUID, prompt string, user *m
 		}
 	}
 }
-
