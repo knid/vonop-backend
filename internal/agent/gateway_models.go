@@ -15,6 +15,14 @@ import (
 // Returns an empty slice when deps is nil, no callback is bound, or the user's
 // tier has no chat models allowed — callers decide how to present that state.
 func gatewayAllowedChatModels(deps *RunDependencies) []constants.GatewayModelInfo {
+	return gatewayAllowedModelsByType(deps, "chat")
+}
+
+func gatewayAllowedImageModels(deps *RunDependencies) []constants.GatewayModelInfo {
+	return gatewayAllowedModelsByType(deps, "image")
+}
+
+func gatewayAllowedModelsByType(deps *RunDependencies, modelType string) []constants.GatewayModelInfo {
 	if deps == nil || deps.GatewayAllowedModels == nil {
 		return nil
 	}
@@ -24,11 +32,11 @@ func gatewayAllowedChatModels(deps *RunDependencies) []constants.GatewayModelInf
 	}
 	set := make(map[string]bool, len(allowed))
 	for _, id := range allowed {
-		set[id] = true
+		set[constants.GatewayCanonicalModelID(id)] = true
 	}
 	var out []constants.GatewayModelInfo
 	for _, m := range constants.GatewayModelCatalog {
-		if m.Type == "chat" && set[m.ID] {
+		if m.Type == modelType && set[m.ID] {
 			out = append(out, m)
 		}
 	}
@@ -81,6 +89,25 @@ func renderGatewayChatModelsBlock(models []constants.GatewayModelInfo) string {
 			marker = " (default)"
 		}
 		fmt.Fprintf(&sb, "    %s — %s%s%s\n", m.ID, m.Name, tag, marker)
+	}
+	return strings.TrimRight(sb.String(), "\n")
+}
+
+func renderGatewayImageModelsBlock(models []constants.GatewayModelInfo) string {
+	if len(models) == 0 {
+		return "    none on the user's current plan"
+	}
+	var sb strings.Builder
+	for _, m := range models {
+		caps := strings.Join(m.Capabilities, ", ")
+		if caps == "" {
+			caps = "image"
+		}
+		marker := ""
+		if m.ID == constants.GatewayDefaultImageModel {
+			marker = " (default)"
+		}
+		fmt.Fprintf(&sb, "    %s — %s [%s]%s\n", m.ID, m.Name, caps, marker)
 	}
 	return strings.TrimRight(sb.String(), "\n")
 }
