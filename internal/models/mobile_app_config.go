@@ -40,7 +40,7 @@ type MobileAppConfig struct {
 	BiometricEnabled bool `bun:",notnull,default:false" json:"biometric_enabled"`
 
 	// Dark mode (runtime)
-	DarkModeEnabled bool `bun:",notnull,default:true" json:"dark_mode_enabled"`
+	DarkModeEnabled bool `bun:",notnull,default:false" json:"dark_mode_enabled"`
 
 	// Rating (runtime)
 	RatingEnabled  bool `bun:",notnull,default:false" json:"rating_enabled"`

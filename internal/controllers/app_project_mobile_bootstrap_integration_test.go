@@ -102,8 +102,8 @@ func TestCreateAppProject_MobileAppNative_SeedsMobileAppConfig(t *testing.T) {
 	if !cfg.ExternalBrowserLinks {
 		t.Error("default ExternalBrowserLinks = true expected")
 	}
-	if !cfg.DarkModeEnabled {
-		t.Error("default DarkModeEnabled = true expected")
+	if cfg.DarkModeEnabled {
+		t.Error("default DarkModeEnabled = false expected")
 	}
 	if cfg.OfflineEnabled {
 		t.Error("default OfflineEnabled = false expected")
@@ -183,8 +183,8 @@ func TestCreateAppProject_MobileAppNative_ScaffoldsRepoSkeleton(t *testing.T) {
 		"mobile/package.json",
 		"mobile/app.json",
 		"mobile/metro.config.js",
-		"mobile/babel.config.js",     // Metro requires `nativewind/babel` plugin
-		"mobile/tailwind.config.js",  // withNativeWind() loads this at startup
+		"mobile/babel.config.js",    // Metro requires `nativewind/babel` plugin
+		"mobile/tailwind.config.js", // withNativeWind() loads this at startup
 		"mobile/postcss.config.mjs",
 		"mobile/tsconfig.json",
 		"mobile/global.css",

@@ -233,8 +233,8 @@ Most pure marketing web is Brand; internal tools and many app-like web experienc
 
 ## Forced Variety
 For each project, adopt at least one distinctive constraint to prevent
-convergence: a serif heading font, a single-column hero, a dark hero with
-light body, a full-bleed image section, an asymmetric two-column hero, a bold
+convergence: a serif heading font, a single-column hero, a tinted-light hero
+with a bold color block, a full-bleed image section, an asymmetric two-column hero, a bold
 typographic hero, or a horizontal-scroll feature section. The constraint
 should feel natural to the design direction, not forced.
 
@@ -374,17 +374,22 @@ names if you want different fonts, never write_file the whole layout.
 ## Color & Theme
 Use OKLCH for thinking about and extending palettes (perceptually uniform; the template's @theme uses modern tokens — you can derive OKLCH values).
 
-**Physical scene sentence (MANDATORY):** Who, where (light), mood — this decides light/dark and prevents reflex choices.
+**Physical scene sentence (MANDATORY):** Who, where (light), mood — this informs palette, contrast, and texture inside the light-first theme policy below. It must not override the default to light.
 
 **Avoid the cream/sand AI default for "warm":** Do not default body to near-white warm tints (the saturated 2026 tell) unless the scene genuinely demands it. Use brand-hue tinted neutrals (tiny 0.005-0.015 chroma toward the project's actual hue), true off-white, or let a committed brand color own more surface.
 
-- Default to a light theme (light backgrounds, dark text). "Light" does not
-  mean plain white. Use warm off-whites (#FAF9F6, #F5F0EB), cool grays
-  (#F8FAFC), or tinted backgrounds (#FDF6F0 warm, #F0F4F8 cool).
-- Dark mode and dark-first design is allowed and encouraged when contextually
-  appropriate: dashboards, creative tools, media apps, developer tools,
-  portfolio sites, night-mode experiences. Use rich dark backgrounds
-  (slate-950, zinc-950, neutral-900), not flat black. In dark: lighter surfaces for elevation, slightly desaturated accents, slightly lighter body weight.
+- Theme policy: default every new app to a light theme (light backgrounds,
+  dark text). Do not choose dark-first, dark mode, night mode, or a dark hero
+  unless the user explicitly asks for a dark theme/mode or a dark brand
+  direction. "This is a dashboard", "developer tool", "media app", or
+  "premium" is not enough by itself.
+- "Light" does not mean plain white. Use true off-whites, cool grays, tinted
+  neutrals, layered surfaces, texture, and bold accents while preserving a
+  light overall read.
+- Dark support is allowed only when explicitly requested. Use rich dark
+  backgrounds (slate-950, zinc-950, neutral-900), not flat black. In dark:
+  lighter surfaces for elevation, slightly desaturated accents, slightly
+  lighter body weight.
 - Commit to a bold, cohesive palette with one dominant accent color used
   sparingly for maximum impact. A single red CTA button on a mostly neutral
   page is more effective than color everywhere.
@@ -426,8 +431,9 @@ What separates great from good.
 - Decorative elements: floating gradient blobs (absolute positioned,
   blurred), geometric shapes, line art, or abstract decorations that add
   character.
-- Dark section inversions: alternate between light and dark background
-  sections (bg-gray-950 text-white) for dramatic contrast and rhythm.
+- Light section rhythm: alternate between true off-white, brand-tinted neutral,
+  and committed color-block sections for contrast and rhythm. Use dark
+  inversions only when the user explicitly requested a dark direction.
 
 ## Motion & Interaction
 - Framer Motion: staggered fade-up reveals (y: 30 to 0, opacity: 0 to 1)

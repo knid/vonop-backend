@@ -112,8 +112,9 @@ polarizing ones.
 - **Editorial Calm** — serif headings (Playfair, Instrument Serif), generous
   whitespace, asymmetric layouts, magazine-style image treatment. For reading,
   journaling, slow content.
-- **Dark Dashboard** — deep slate (zinc-950, NOT flat black), neon accent
-  strokes, data-forward density, charts as hero. Dev tools, finance, analytics.
+- **Data Dashboard** — light-first data density, precise charts, restrained
+  accent strokes, and layered neutral surfaces. Use a dark dashboard only if
+  the user explicitly asks for a dark theme/mode.
 - **Warm Artisanal** — earth tones, hand-drawn icons, paper textures,
   organic shapes. Wellness, meal planning, journaling.
 - **Dopamine Maximalist** — vibrant gradients, bouncy springs, confetti on
@@ -128,14 +129,15 @@ Determine the register from the app's purpose before styling decisions. This pre
 
 **Brand register** (design *IS* the product — marketing surfaces, onboarding marketing, portfolio-like apps, content-first experiences where the visual impression *is* the value): POV-driven, distinctive, willing to be polarizing or strange. Palette *is* voice. Earn Committed (30–60% surface in one saturated color), Full palette, or even Drenched strategies. Imagery is often required when the brief implies physical product, place, or editorial (one decisive, art-directed generated image beats five mediocre). Asymmetric compositions, fluid clamp spacing that breathes, art direction that can vary per section if narrative demands. Follow voice words + real catalog procedure for fonts; reject saturated reflex lanes (e.g. editorial-typographic magazine with italic display serif + drop caps when not literally a magazine).
 
-For any project, write one concrete "physical scene sentence" before choosing light/dark or palette: "who uses this, where (ambient light), in what mood." This forces the theme decision. "Warm" is carried by accent + typography + imagery + texture, *not* by defaulting the body bg to cream/sand/beige.
+For any project, write one concrete "physical scene sentence" before palette decisions: "who uses this, where (ambient light), in what mood." This informs palette, contrast, and texture, but the default theme remains light. Do not choose dark-first, dark mode, night mode, or dark chrome unless the user explicitly asks for a dark theme/mode or a dark brand direction. "Warm" is carried by accent + typography + imagery + texture, *not* by defaulting the body bg to cream/sand/beige.
 
 Most Wemob-generated mobile apps are Product register. Web projects the user builds may be Brand (landings) or Product (internal tools).
 
 ## Forced Variety
 Lock in ≥1 distinctive constraint per project to prevent convergence:
 - Custom display font via expo-font (NEVER system default everywhere)
-- Dark-first or tinted-light palette (NEVER plain #FFFFFF)
+- Tinted-light or high-contrast light palette (NEVER plain #FFFFFF). Dark-first
+  is only valid when explicitly requested by the user.
 - Asymmetric home — bento grid, NOT centered vertical list
 - Horizontal-scroll feature row instead of yet-another vertical list
 - Floating capsule action bar instead of standard tab bar
@@ -256,7 +258,13 @@ color wins.
 
 Use OKLCH (perceptually uniform) for any new palette work or extensions. Lightness steps look equal; chroma and hue separate cleanly. The template uses HSL CSS vars for NativeWind compatibility — when extending, you may add OKLCH-derived values but keep the var system so dark mode and theming continue to work.
 
-**Physical scene sentence (MANDATORY before theme or palette decisions):** Write one sentence describing who uses this screen, where (ambient light), and in what mood. This forces light vs dark and prevents the "dark because tools look cool" or "light to be safe" reflex.
+**Physical scene sentence (MANDATORY before palette decisions):** Write one sentence describing who uses this screen, where (ambient light), and in what mood. This informs contrast, surface warmth/coolness, and accent choices inside the light-first policy below; it must not become a reason to choose dark by default.
+
+**Theme policy:** Default every generated app to a light theme (light
+backgrounds, dark text). Do not choose dark-first, dark mode, night mode, or
+dark chrome unless the user explicitly asks for a dark theme/mode or a dark
+brand direction. Context alone (dashboard, developer tool, finance, media,
+premium, evening use) is not enough.
 
 **Avoid the 2026 AI "warm" default trap:** The saturated cream/sand/beige body background (roughly OKLCH L 0.84-0.97, C < 0.06, hue 40-100, or the #FAF9F6 / #F5F0EB family) is now the most common AI slop signal for "warm/traditional/editorial." If the brief says "warm," "cozy," "artisanal," or "paper-like," do NOT default the body to a near-white warm tint. Instead:
 - Use a true off-white at near-zero chroma, or
@@ -274,8 +282,12 @@ Use OKLCH (perceptually uniform) for any new palette work or extensions. Lightne
 
 **60-30-10 visual weight (applied correctly):** 60% neutrals/backgrounds, 30% secondary/text/borders/inactive, 10% accent/highlights. The common mistake is spraying the accent everywhere "because it's the brand color."
 
-- **Light ≠ #FFFFFF** and rich darks (slate-950/zinc-950, not flat black).
-- **Dark mode surfaces:** Depth comes from *lighter* surfaces at higher elevations (e.g. 15%/20%/25% lightness in brand hue), not heavy shadows. Reduce body text weight slightly (e.g. 350 vs 400) because light type on dark reads heavier.
+- **Light ≠ #FFFFFF:** Use layered off-whites, brand-hue-tinted neutrals,
+  subtle depth, and texture while preserving a light overall read.
+- **Dark mode surfaces (explicit user request only):** Depth comes from
+  *lighter* surfaces at higher elevations (e.g. 15%/20%/25% lightness in
+  brand hue), not heavy shadows. Reduce body text weight slightly (e.g. 350 vs
+  400) because light type on dark reads heavier.
 - **Color blocking + subtle depth:** Large areas of bold color, soft radials, transparent-via-10 dividers. Never garish rainbow or purple-to-blue hero defaults.
 - **Semantic states:** Consistent meaning for success/error/warning/info across the app. Accent only for primary actions + selection + indicators in Restrained mode.
 
