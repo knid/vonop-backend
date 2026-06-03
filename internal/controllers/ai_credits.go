@@ -1451,6 +1451,11 @@ func (c *Controller) RecordTokenUsage(user *models.User, action, model, provider
 		}
 		if tools := tracker.ToolsUsed(); len(tools) > 0 {
 			traceProps.Set("$ai_tools", tools)
+			// Mirror the tool list to plain properties so non-LLM-specific
+			// queries and MCP summaries can surface it even if they don't
+			// inspect PostHog's reserved $ai_* namespace.
+			traceProps.Set("tools", tools)
+			traceProps.Set("tool_count", len(tools))
 		}
 		if tracker.TraceErrorCode != "" {
 			traceProps.Set("$ai_is_error", true)

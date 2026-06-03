@@ -15,8 +15,11 @@ const planningDiscipline = `## Planning Discipline
 Before calling any tool, decide the complete set of files you need to read,
 write, or edit. Batch them into the fewest tool calls possible:
 - read_files (plural) for every file you need to inspect — one call, all paths.
-- Parallel write_file / edit_file calls for independent files in the SAME turn.
+- write_files for 2+ new/full-rewrite files in ONE call.
+- patch_files for exact-string edits across 2+ existing files in ONE call.
 - multi_edit for 2+ changes to the SAME file.
+- Parallel tool calls only when the operations are independent; for multiple
+  file writes/edits, prefer write_files/patch_files first.
 - execute_sql with multiple semicolon-separated SQL statements in ONE call for
   independent SELECTs, INSERTs, UPDATEs, or ALTERs. Only split into sequential
   execute_sql calls when a later statement depends on the result of an earlier
