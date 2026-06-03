@@ -110,6 +110,7 @@ func Run(
 	model := resolveModel(deps.SecretManager, project, provider)
 	isFirstGen := project != nil && project.Status == "draft"
 	todos := NewTodoList(message)
+	memory := NewAgentRunMemory(message)
 	run := &models.AppAgentRun{
 		ID:           runID,
 		AppProjectID: project.ID,
@@ -119,6 +120,7 @@ func Run(
 		Model:        model,
 		Provider:     provider.Name,
 		Todos:        todos.RawJSON(),
+		Memory:       memory.RawJSON(),
 	}
 	if _, err := deps.DB.InsertAgentRun(run); err != nil {
 		// Check for the partial unique index violation (Postgres SQLSTATE 23505).
@@ -317,6 +319,23 @@ func Run(
 			maxTokensPerRun = rcTokens
 		}
 	}
+	compactAfterTokens := 250_000
+	compactIntervalTokens := 150_000
+	trimToolResultChars := 4_000
+	trimToolArgChars := 1_200
+	if deps.RemoteConfig != nil {
+		compactAfterTokens = deps.RemoteConfig.GetInt(remoteconfig.AICompactAfterTokens, remoteconfig.Global)
+		compactIntervalTokens = deps.RemoteConfig.GetInt(remoteconfig.AICompactIntervalTokens, remoteconfig.Global)
+		if rcTrim := deps.RemoteConfig.GetInt(remoteconfig.AITrimToolResultChars, remoteconfig.Global); rcTrim > 0 {
+			trimToolResultChars = rcTrim
+		}
+		if rcTrim := deps.RemoteConfig.GetInt(remoteconfig.AITrimToolArgChars, remoteconfig.Global); rcTrim > 0 {
+			trimToolArgChars = rcTrim
+		}
+	}
+	if compactIntervalTokens <= 0 {
+		compactIntervalTokens = compactAfterTokens
+	}
 
 	rc := &RunContext{
 		RunID:      runID,
@@ -433,6 +452,8 @@ func Run(
 		parts[partIdx].DurationMs = durationMs
 		totalToolCalls++
 		partsMu.Unlock()
+		memory.RecordTool(name, argsJSON, result, isErr || execErr != nil)
+		memory.Persist(ctx, deps.DB, runID)
 		if execErr != nil {
 			return result, execErr
 		}
@@ -440,6 +461,7 @@ func Run(
 	}
 
 	repetition := newRepetitionDetector()
+	lastCompactedTokens := 0
 
 	narrationSink := func(chunk string) {
 		if chunk == "" {
@@ -508,6 +530,35 @@ func Run(
 			StripTools:    []string{"read_files", "list_files", "grep", "read_attachment", "web_search", "read_build_logs", "read_deploy_logs", "read_mobile_config"},
 			MaxMessages:   25,
 			RefreshPrefix: refreshRunPrefix,
+			TrimResults: func(toolName, result string) string {
+				return trimToolResultForLLM(toolName, result, trimToolResultChars)
+			},
+			TrimArgs: func(toolName, args string) string {
+				return trimToolArgsForLLM(toolName, args, trimToolArgChars)
+			},
+			CompactHistory: func(messages []utils.Message) ([]utils.Message, bool) {
+				if compactAfterTokens <= 0 {
+					return messages, false
+				}
+				_, _, total, _ := tracker.Totals()
+				if total < compactAfterTokens {
+					return messages, false
+				}
+				if lastCompactedTokens > 0 && total-lastCompactedTokens < compactIntervalTokens {
+					return messages, false
+				}
+				compacted := compactLLMHistory(messages, memory, todos, 12)
+				lastCompactedTokens = total
+				if llmMessagesEqual(compacted, messages) {
+					return messages, false
+				}
+				memory.Persist(ctx, deps.DB, runID)
+				slog.Info("agent compacted LLM history",
+					"project_id", project.ID, "run_id", runID,
+					"tokens", total, "compact_after", compactAfterTokens,
+					"messages_before", len(messages), "messages_after", len(compacted))
+				return compacted, true
+			},
 			// Moonshot K2.6 prompt_cache_key: stable per-project so the system
 			// prompt is cached across runs. Only set for Moonshot — other
 			// providers may reject unknown fields.
@@ -705,7 +756,8 @@ func registryToUtilsTools(r *Registry) []utils.Tool {
 // trackerDelta returns the current token usage from the tracker as a TokenUsage.
 func trackerDelta(t *utils.TokenTracker) TokenUsage {
 	p, c, _, _ := t.Totals()
-	return TokenUsage{Input: p, Output: c}
+	cr, cw := t.CacheTotals()
+	return TokenUsage{Input: p, Output: c, CacheRead: cr, CacheWrite: cw}
 }
 
 // ---- helpers ----
@@ -1058,6 +1110,7 @@ func finaliseSuccess(
 
 	// 3. Finalise the AppAgentRun row.
 	promptTok, completionTok, totalTok, _ := tracker.Totals()
+	cacheReadTok, cacheWriteTok := tracker.CacheTotals()
 	durationMs := int(time.Since(runStart).Milliseconds())
 	credits := creditsBilled(deps, tracker, project.ID.String())
 	costUSD := estimateCost(run.Model, promptTok, completionTok)
@@ -1068,6 +1121,8 @@ func finaliseSuccess(
 	run.ToolCallCount = totalToolCalls
 	run.PromptTokens = promptTok
 	run.CompletionTokens = completionTok
+	run.CacheReadTokens = cacheReadTok
+	run.CacheWriteTokens = cacheWriteTok
 	run.CostUSD = costUSD
 	run.CreditsUsed = credits
 	run.DurationMs = durationMs
@@ -1094,7 +1149,7 @@ func finaliseSuccess(
 		Turns:        turns,
 		ToolCalls:    totalToolCalls,
 		FilesChanged: countFileOps(toolCalls),
-		Tokens:       TokenUsage{Input: promptTok, Output: completionTok},
+		Tokens:       TokenUsage{Input: promptTok, Output: completionTok, CacheRead: cacheReadTok, CacheWrite: cacheWriteTok},
 		CreditsUsed:  credits,
 		DurationMs:   durationMs,
 	})
@@ -1314,8 +1369,10 @@ func finaliseFailureV2(
 	// cost by repeatedly starting runs that hit the token cap or clicking
 	// Stop mid-turn.
 	var promptTok, completionTok int
+	var cacheReadTok, cacheWriteTok int
 	if tracker != nil {
 		promptTok, completionTok, _, _ = tracker.Totals()
+		cacheReadTok, cacheWriteTok = tracker.CacheTotals()
 	}
 	credits := creditsBilled(deps, tracker, run.AppProjectID.String())
 	costUSD := estimateCost(run.Model, promptTok, completionTok)
@@ -1323,6 +1380,8 @@ func finaliseFailureV2(
 	run.Error = fmt.Sprintf("%s: %s", code, failureMessage)
 	run.PromptTokens = promptTok
 	run.CompletionTokens = completionTok
+	run.CacheReadTokens = cacheReadTok
+	run.CacheWriteTokens = cacheWriteTok
 	run.CostUSD = costUSD
 	run.CreditsUsed = credits
 	run.DurationMs = int(time.Since(runStart).Milliseconds())
@@ -1626,6 +1685,13 @@ func buildResumeContext(
 	sb.WriteString("Reason: ")
 	sb.WriteString(classifyErrorKindFromStatus(lastRun.Status, lastRun.Error))
 	sb.WriteString(".\n")
+	if mem := ParseAgentRunMemory(lastRun.Memory); mem != nil {
+		if rendered := mem.Render(nil); rendered != "" {
+			sb.WriteString("\n")
+			sb.WriteString(rendered)
+			sb.WriteString("\n")
+		}
+	}
 	// If partial progress was committed (Fix 2), list the files that changed.
 	if lastRun.FinalCommit != "" && lastRun.FinalCommit != lastRun.PreCommit {
 		changed, diffErr := repo.ChangedPathsSince(lastRun.PreCommit)

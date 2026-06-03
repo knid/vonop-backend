@@ -580,6 +580,17 @@ func (t *TokenTracker) Totals() (prompt, completion, total, callCount int) {
 	return
 }
 
+// CacheTotals returns aggregated prompt-cache creation/read token counts.
+func (t *TokenTracker) CacheTotals() (cacheRead, cacheWrite int) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	for _, e := range t.entries {
+		cacheRead += e.CacheReadInputTokens
+		cacheWrite += e.CacheCreationInputTokens
+	}
+	return
+}
+
 // Context helpers for passing a TokenTracker through context.
 type tokenTrackerKey struct{}
 
@@ -1188,6 +1199,7 @@ type ToolCallConfig struct {
 	MaxMessages       int                                                        // Maximum messages to send to the LLM; drops oldest non-system messages when exceeded. 0 = unlimited.
 	RefreshPrefix     func(msg *Message)                                         // Called before each round (except round 0) to refresh the user-turn prefix (e.g. file tree). Modifies the message in-place.
 	StripTools        []string                                                   // Tool names to remove when stripping (e.g. read-only research tools). When empty, stripping removes all tools.
+	CompactHistory    func(messages []Message) ([]Message, bool)                 // Called before each round to replace old history with a compact LLM view. bool=true when changed.
 }
 
 // An optional ToolCallConfig can be passed to override defaults.
@@ -1407,6 +1419,13 @@ func StreamWithTools(
 					opts[0].RefreshPrefix(&currentMessages[i])
 					break
 				}
+			}
+		}
+
+		if len(opts) > 0 && opts[0].CompactHistory != nil {
+			if compacted, changed := opts[0].CompactHistory(currentMessages); changed {
+				currentMessages = compacted
+				slog.Warn("StreamWithTools compacted message history", "round", round, "remaining", len(currentMessages))
 			}
 		}
 

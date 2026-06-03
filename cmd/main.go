@@ -439,6 +439,9 @@ func createSchema(db *bun.DB) error {
 		// Structured agent todo snapshot. This is the durable progress ledger
 		// shown to users and reinjected into long-running agent prompts.
 		`ALTER TABLE app_agent_runs ADD COLUMN IF NOT EXISTS todos jsonb NOT NULL DEFAULT '[]'::jsonb`,
+		// Compact agent memory used to resume and condense long tool loops
+		// without mutating the user-visible chat transcript.
+		`ALTER TABLE app_agent_runs ADD COLUMN IF NOT EXISTS memory jsonb NOT NULL DEFAULT '{}'::jsonb`,
 		// Sub-credit gateway audit: stores the fractional credit cost when a
 		// gateway_chat_pending row is written (Amount=0). Nullable so legacy
 		// rows and non-gateway transactions stay untouched.

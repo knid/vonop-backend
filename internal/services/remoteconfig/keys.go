@@ -13,22 +13,28 @@ type Key struct {
 
 var ReferralSignupCredits = Key{Flag: "rc-referral-signup-credits", Fallback: 10}
 var ReferralSubscriptionCredits = Key{Flag: "rc-referral-subscription-credits", Fallback: 50}
+
 // Base pack — cheapest per-credit rate; used as the reference for computing
 // savings_percent on larger packs. Keep $0.10/credit as the baseline.
 var CreditPack100Credits = Key{Flag: "rc-credit-pack-100-credits", Fallback: 100}
 var CreditPack100Price = Key{Flag: "rc-credit-pack-100-price", Fallback: 10}
+
 // Entry pack — 10% savings over the base rate ($18 vs $20 nominal).
 var CreditPack200Credits = Key{Flag: "rc-credit-pack-200-credits", Fallback: 200}
 var CreditPack200Price = Key{Flag: "rc-credit-pack-200-price", Fallback: 18}
+
 // Small-mid pack — 30% savings over the base rate ($35 vs $50 nominal).
 var CreditPack500Credits = Key{Flag: "rc-credit-pack-500-credits", Fallback: 500}
 var CreditPack500Price = Key{Flag: "rc-credit-pack-500-price", Fallback: 35}
+
 // Mid pack — 50% savings over the base rate ($50 vs $100 nominal).
 var CreditPack1000Credits = Key{Flag: "rc-credit-pack-1000-credits", Fallback: 1000}
 var CreditPack1000Price = Key{Flag: "rc-credit-pack-1000-price", Fallback: 50}
+
 // Power pack — ~58% savings over the base rate ($125 vs $300 nominal).
 var CreditPack3000Credits = Key{Flag: "rc-credit-pack-3000-credits", Fallback: 3000}
 var CreditPack3000Price = Key{Flag: "rc-credit-pack-3000-price", Fallback: 125}
+
 // First-completion pack — micro top-up sized to finish a typical first app
 // (median first run is ~30 credits, p90 is ~57 — 50 credits @ $3 covers the
 // long tail). Server filters this pack out once the user has any prior
@@ -87,6 +93,10 @@ var AIMaxStructureFiles = Key{Flag: "rc-ai-max-structure-files", Fallback: 25}
 var AIBuilderToolMaxRounds = Key{Flag: "rc-ai-builder-tool-max-rounds", Fallback: 30}
 var AIGenerationMaxRounds = Key{Flag: "rc-ai-generation-max-rounds", Fallback: 8}
 var AIMaxTokensPerRun = Key{Flag: "rc-ai-max-tokens-per-run", Fallback: 500000}
+var AICompactAfterTokens = Key{Flag: "rc-ai-compact-after-tokens", Fallback: 250000}
+var AICompactIntervalTokens = Key{Flag: "rc-ai-compact-interval-tokens", Fallback: 150000}
+var AITrimToolResultChars = Key{Flag: "rc-ai-trim-tool-result-chars", Fallback: 4000}
+var AITrimToolArgChars = Key{Flag: "rc-ai-trim-tool-arg-chars", Fallback: 1200}
 var AIMoonshotThinkingEnabled = Key{Flag: "rc-ai-moonshot-thinking-enabled", Fallback: true}
 
 // Nudge/Strip thresholds per project type. Draft (new project) gets more lenient
@@ -122,9 +132,9 @@ var GatewayImageTimeoutSeconds = Key{Flag: "rc-gateway-image-timeout-seconds", F
 // "deepseek/deepseek-v4-flash" (implicit openrouter).
 
 var BuilderProviderModelStarter = Key{Flag: "rc-builder-provider-model-starter", Fallback: "deepseek/deepseek-v4-flash"}
-var BuilderProviderModelHobby   = Key{Flag: "rc-builder-provider-model-hobby",   Fallback: "moonshot/kimi-k2.6"}
-var BuilderProviderModelPro     = Key{Flag: "rc-builder-provider-model-pro",     Fallback: "anthropic/claude-sonnet-4.6"}
-var BuilderProviderModelMax     = Key{Flag: "rc-builder-provider-model-max",     Fallback: "anthropic/claude-opus-4.7"}
+var BuilderProviderModelHobby = Key{Flag: "rc-builder-provider-model-hobby", Fallback: "moonshot/kimi-k2.6"}
+var BuilderProviderModelPro = Key{Flag: "rc-builder-provider-model-pro", Fallback: "anthropic/claude-sonnet-4.6"}
+var BuilderProviderModelMax = Key{Flag: "rc-builder-provider-model-max", Fallback: "anthropic/claude-opus-4.7"}
 
 // Gateway chat pricing — cost-based (computed from upstream OpenRouter USD
 // prices in the model catalog), not token-based. Markup is an integer

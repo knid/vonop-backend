@@ -22,6 +22,7 @@ func (db *Database) UpdateAgentRun(r *models.AppAgentRun) error {
 	_, err := db.DB.NewUpdate().
 		Model(r).
 		ExcludeColumn("todos").
+		ExcludeColumn("memory").
 		Where("id = ?", r.ID).
 		Exec(context.Background())
 	return err
@@ -37,6 +38,21 @@ func (db *Database) UpdateAgentRunTodos(ctx context.Context, runID uuid.UUID, to
 	_, err := db.DB.NewUpdate().
 		Model((*models.AppAgentRun)(nil)).
 		Set("todos = ?::jsonb", string(todos)).
+		Where("id = ?", runID).
+		Exec(ctx)
+	return err
+}
+
+// UpdateAgentRunMemory stores the latest compact run memory snapshot. It is
+// separate from UpdateAgentRun so terminal writes cannot accidentally clobber
+// mid-run memory progress with a stale struct copy.
+func (db *Database) UpdateAgentRunMemory(ctx context.Context, runID uuid.UUID, memory json.RawMessage) error {
+	if len(memory) == 0 {
+		memory = json.RawMessage("{}")
+	}
+	_, err := db.DB.NewUpdate().
+		Model((*models.AppAgentRun)(nil)).
+		Set("memory = ?::jsonb", string(memory)).
 		Where("id = ?", runID).
 		Exec(ctx)
 	return err
@@ -81,7 +97,10 @@ func (db *Database) GetLastNonSuccessAgentRun(projectID uuid.UUID) (*models.AppA
 	err := db.DB.NewSelect().
 		Model(&r).
 		Where("app_project_id = ?", projectID).
-		Where("status != ?", models.AgentRunStatusCompleted).
+		Where("status IN (?, ?, ?)",
+			models.AgentRunStatusFailed,
+			models.AgentRunStatusCanceled,
+			models.AgentRunStatusBudgetExceeded).
 		Order("created_at DESC").
 		Limit(1).
 		Scan(context.Background())
