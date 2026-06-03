@@ -43,6 +43,27 @@ func mapStripeStatus(status stripe.SubscriptionStatus) string {
 	}
 }
 
+func stripeUnixTime(ts int64) time.Time {
+	if ts <= 0 {
+		return time.Time{}
+	}
+	return time.Unix(ts, 0).UTC()
+}
+
+func subscriptionItemPeriodStart(sub *stripe.Subscription) time.Time {
+	if sub == nil || sub.Items == nil || len(sub.Items.Data) == 0 || sub.Items.Data[0] == nil {
+		return time.Time{}
+	}
+	return stripeUnixTime(sub.Items.Data[0].CurrentPeriodStart)
+}
+
+func invoiceLinePeriodStart(invoice *stripe.Invoice) time.Time {
+	if invoice == nil || invoice.Lines == nil || len(invoice.Lines.Data) == 0 || invoice.Lines.Data[0] == nil || invoice.Lines.Data[0].Period == nil {
+		return time.Time{}
+	}
+	return stripeUnixTime(invoice.Lines.Data[0].Period.Start)
+}
+
 func (c *Controller) HandleWebhook(w http.ResponseWriter, req *http.Request) {
 	const MaxBodyBytes = int64(65536)
 	req.Body = http.MaxBytesReader(w, req.Body, MaxBodyBytes)
@@ -159,11 +180,17 @@ func (c *Controller) processWebhookEventTx(tx bun.Tx, event stripe.Event) ([]fun
 		// Map Stripe status to our internal status
 		org.SubscriptionStatus = mapStripeStatus(sub.Status)
 
+		periodStart := subscriptionItemPeriodStart(&sub)
+		if periodStart.IsZero() {
+			periodStart = time.Now().UTC()
+		}
+
 		// Set timing based on actual Stripe status
 		if sub.Status == "trialing" {
-			org.TrialStartAt = time.Now()
+			org.TrialStartAt = periodStart
+			org.SubscriptionStartAt = periodStart
 		} else {
-			org.SubscriptionStartAt = time.Now()
+			org.SubscriptionStartAt = periodStart
 		}
 
 		// Mark trial as used if subscription has/had a trial
@@ -303,6 +330,7 @@ func (c *Controller) processWebhookEventTx(tx bun.Tx, event stripe.Event) ([]fun
 
 		// Map Stripe status to our internal status
 		newStatus := mapStripeStatus(sub.Status)
+		periodStart := subscriptionItemPeriodStart(&sub)
 
 		setupJustFinished := false
 
@@ -310,9 +338,10 @@ func (c *Controller) processWebhookEventTx(tx bun.Tx, event stripe.Event) ([]fun
 		case "active":
 			org.SubscriptionID = subs.ID
 			org.SubscriptionStatus = newStatus
-			// Only set SubscriptionStartAt on initial activation (not renewals)
-			if org.SubscriptionStartAt.IsZero() {
-				org.SubscriptionStartAt = time.Now()
+			if !periodStart.IsZero() {
+				org.SubscriptionStartAt = periodStart
+			} else if org.SubscriptionStartAt.IsZero() {
+				org.SubscriptionStartAt = time.Now().UTC()
 			}
 			if !owner.SetupFinished {
 				owner.SetupFinished = true
@@ -328,8 +357,14 @@ func (c *Controller) processWebhookEventTx(tx bun.Tx, event stripe.Event) ([]fun
 		case "trialing":
 			org.SubscriptionID = subs.ID
 			org.SubscriptionStatus = newStatus
-			if org.TrialStartAt.IsZero() {
-				org.TrialStartAt = time.Now()
+			if !periodStart.IsZero() {
+				org.TrialStartAt = periodStart
+				org.SubscriptionStartAt = periodStart
+			} else if org.TrialStartAt.IsZero() {
+				org.TrialStartAt = time.Now().UTC()
+				if org.SubscriptionStartAt.IsZero() {
+					org.SubscriptionStartAt = org.TrialStartAt
+				}
 			}
 			if err := c.CancelOrgGraceTeardown(org.ID); err != nil {
 				slog.Warn("trialing: failed to cancel grace teardown", "error", err, "org_id", org.ID)
@@ -339,6 +374,9 @@ func (c *Controller) processWebhookEventTx(tx bun.Tx, event stripe.Event) ([]fun
 			// Keep SubscriptionID — Stripe is still retrying payment, plan limits stay valid
 			org.SubscriptionID = subs.ID
 			org.SubscriptionStatus = newStatus
+			if !periodStart.IsZero() {
+				org.SubscriptionStartAt = periodStart
+			}
 
 		case "canceled":
 			// Free tier removed 2026-05-13: cancelled orgs go to no plan.
@@ -356,6 +394,9 @@ func (c *Controller) processWebhookEventTx(tx bun.Tx, event stripe.Event) ([]fun
 			// Keep SubscriptionID — subscription still exists in Stripe, just unpaid
 			org.SubscriptionID = subs.ID
 			org.SubscriptionStatus = newStatus
+			if !periodStart.IsZero() {
+				org.SubscriptionStartAt = periodStart
+			}
 
 		default:
 			// incomplete, incomplete_expired, paused — null the plan for the
@@ -517,6 +558,9 @@ func (c *Controller) processWebhookEventTx(tx bun.Tx, event stripe.Event) ([]fun
 		}
 
 		org.SubscriptionStatus = "active"
+		if periodStart := invoiceLinePeriodStart(&invoice); !periodStart.IsZero() {
+			org.SubscriptionStartAt = periodStart
+		}
 
 		// A6: payment-succeeded after a cancellation/dunning event implies
 		// re-subscribe. Cancel any pending grace teardown so the org's apps
@@ -533,7 +577,9 @@ func (c *Controller) processWebhookEventTx(tx bun.Tx, event stripe.Event) ([]fun
 			if lineItem.Pricing != nil && lineItem.Pricing.PriceDetails != nil && lineItem.Pricing.PriceDetails.Price != "" {
 				if subs, err := c.DB.GetSubscriptionByPriceID(lineItem.Pricing.PriceDetails.Price); err == nil {
 					org.SubscriptionID = subs.ID
-					org.SubscriptionStartAt = time.Now()
+					if org.SubscriptionStartAt.IsZero() {
+						org.SubscriptionStartAt = time.Now().UTC()
+					}
 					restoredSub = subs
 				}
 			}
