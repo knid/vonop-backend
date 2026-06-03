@@ -207,6 +207,9 @@ func renderRunPrefix(fileMap *SafeFileMap, state *BuildState, todos *TodoList) s
 	if tree := BuildFileTreeUserPrefix(fileMap); strings.TrimSpace(tree) != "" {
 		parts = append(parts, tree)
 	}
+	if brief := BuildDesignBriefUserPrefix(fileMap); strings.TrimSpace(brief) != "" {
+		parts = append(parts, brief)
+	}
 	if rendered := state.Render(fileMap); strings.TrimSpace(rendered) != "" {
 		parts = append(parts, rendered)
 	}

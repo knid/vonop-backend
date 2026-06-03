@@ -11,10 +11,32 @@ const yachtSaaSPrompt = `Create a Yacht Logbook SaaS platform.
 Admin/Yacht Owner can manage yachts. Captain can only see assigned yacht.
 Include weekly status entry form, log history, smart alerts, and mobile-first dashboard.`
 
+const testDesignBrief = `# Design Brief
+
+## Register
+Product register.
+
+## Design Direction
+Restrained marine operations console with precise hierarchy.
+
+## Typography
+One neutral sans family with tabular numerals for operational data.
+
+## Color
+Light-first neutral palette with deep green primary and rust alert accent.
+
+## Layout
+Dashboard-first app shell with role-specific work zones.
+
+## Components
+Use Wemob UI primitives for buttons, cards, forms, empty states, and metrics.
+`
+
 func TestValidateGeneratedAppRejectsMarketingBrochureForSaaSRequest(t *testing.T) {
 	files := NewSafeFileMap(map[string]string{
 		"app/layout.tsx": "export default function Layout({children}) { return children }",
 		"app/page.tsx":   "export default function Page(){ return <main>Hero Testimonials CTA Yacht showcase</main> }",
+		"DESIGN.md":      testDesignBrief,
 	})
 
 	err := validateGeneratedApp(files, NewBuildState(yachtSaaSPrompt, true), yachtSaaSPrompt, true, models.ProjectTypeApp)
@@ -41,10 +63,26 @@ func TestValidateGeneratedAppAllowsOperationalSaaSShape(t *testing.T) {
 				<section>Smart alert threshold battery service warning</section>
 			</main>
 		}`,
+		"DESIGN.md": testDesignBrief,
 	})
 
 	if err := validateGeneratedApp(files, NewBuildState(yachtSaaSPrompt, true), yachtSaaSPrompt, true, models.ProjectTypeApp); err != nil {
 		t.Fatalf("expected validation success, got: %v", err)
+	}
+}
+
+func TestValidateGeneratedAppRejectsMissingDesignBrief(t *testing.T) {
+	files := NewSafeFileMap(map[string]string{
+		"app/layout.tsx": "export default function Layout({children}) { return children }",
+		"app/page.tsx":   "export default function Page(){ return <main>Product surface</main> }",
+	})
+
+	err := validateGeneratedApp(files, NewBuildState("build a web app", true), "build a web app", true, models.ProjectTypeApp)
+	if err == nil {
+		t.Fatal("expected design brief validation error")
+	}
+	if !strings.Contains(err.Error(), "DESIGN.md") {
+		t.Fatalf("expected DESIGN.md in validation error, got: %v", err)
 	}
 }
 
