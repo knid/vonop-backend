@@ -548,10 +548,10 @@ func Run(
 					return messages, false
 				}
 				compacted := compactLLMHistory(messages, memory, todos, 12)
-				if len(compacted) == len(messages) {
+				lastCompactedTokens = total
+				if llmMessagesEqual(compacted, messages) {
 					return messages, false
 				}
-				lastCompactedTokens = total
 				memory.Persist(ctx, deps.DB, runID)
 				slog.Info("agent compacted LLM history",
 					"project_id", project.ID, "run_id", runID,

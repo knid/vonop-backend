@@ -46,6 +46,21 @@ func TestCompactLLMHistoryKeepsSystemMemoryPinnedAndTail(t *testing.T) {
 	assert.Equal(t, 1, mem.Compactions)
 }
 
+func TestLLMMessagesEqualDetectsSameLengthMemoryRefresh(t *testing.T) {
+	oldMessages := []utils.Message{
+		{Role: "system", Content: "base"},
+		{Role: "user", Content: agentMemoryMarker + "\nold summary"},
+		{Role: "assistant", Content: "recent"},
+	}
+	newMessages := []utils.Message{
+		{Role: "system", Content: "base"},
+		{Role: "user", Content: agentMemoryMarker + "\nnew summary"},
+		{Role: "assistant", Content: "recent"},
+	}
+
+	assert.False(t, llmMessagesEqual(oldMessages, newMessages))
+}
+
 func TestTrimToolArgsForLLMDropsBulkyFields(t *testing.T) {
 	args := `{"path":"app/page.tsx","old_string":"` + strings.Repeat("a", 2000) + `","new_string":"` + strings.Repeat("b", 2000) + `"}`
 	got := trimToolArgsForLLM("edit_file", args, 500)

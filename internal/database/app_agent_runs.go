@@ -97,7 +97,10 @@ func (db *Database) GetLastNonSuccessAgentRun(projectID uuid.UUID) (*models.AppA
 	err := db.DB.NewSelect().
 		Model(&r).
 		Where("app_project_id = ?", projectID).
-		Where("status != ?", models.AgentRunStatusCompleted).
+		Where("status IN (?, ?, ?)",
+			models.AgentRunStatusFailed,
+			models.AgentRunStatusCanceled,
+			models.AgentRunStatusBudgetExceeded).
 		Order("created_at DESC").
 		Limit(1).
 		Scan(context.Background())

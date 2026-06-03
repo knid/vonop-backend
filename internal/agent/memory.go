@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 	"time"
@@ -199,8 +200,15 @@ func compactLLMHistory(messages []utils.Message, memory *AgentRunMemory, todos *
 		out = append(out, filtered[pinnedIdx])
 	}
 	out = append(out, filtered[tailStart:]...)
+	if llmMessagesEqual(out, messages) {
+		return messages
+	}
 	memory.MarkCompacted()
 	return out
+}
+
+func llmMessagesEqual(a, b []utils.Message) bool {
+	return reflect.DeepEqual(a, b)
 }
 
 func trimToolResultForLLM(toolName, result string, maxChars int) string {
