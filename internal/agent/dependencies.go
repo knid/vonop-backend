@@ -16,12 +16,11 @@ import (
 )
 
 // CreditCheckerFactory is bound by the controller with the user, and called by
-// the agent once the TokenTracker exists. The returned func is used as the
-// per-round ShouldContinue budget check.
-type CreditCheckerFactory func(tracker *utils.TokenTracker) func() bool
+// the agent once the project and TokenTracker exist. The returned func is used
+// as the per-round ShouldContinue budget check.
+type CreditCheckerFactory func(projectID string, tracker *utils.TokenTracker) func() bool
 
-// CreditDeductor is called on successful run completion with the total credit
-// cost. Never called on failure (fixes a known bug in the old system).
+// CreditDeductor is called when a run finalizes with consumed token credits.
 type CreditDeductor func(ctx context.Context, credits int, action, projectID string) error
 
 // EventTracker posts a PostHog event. Matches the shape of the existing
@@ -136,35 +135,40 @@ type LLMErrorRecorder func(
 // Controller.AgentDeps(). The agent package never reaches into Controller
 // directly — everything goes through this struct.
 type RunDependencies struct {
-	DB            *database.Database
-	GitRepo       *gitrepo.Service
+	DB      *database.Database
+	GitRepo *gitrepo.Service
 
 	// mobileConfigFetcher overrides DB for GetMobileAppConfig lookups. Used in
 	// tests to inject a fake without a real database connection. When nil,
 	// context.go falls back to DB directly.
 	mobileConfigFetcher mobileConfigGetter
-	AssetsStorage *storage.S3Storage
-	SecretManager secret.SecretManager
-	NeonService   *neon.Service
-	LLMProvider   *utils.LLMProvider
-	PostHog       posthog.Client
-	RemoteConfig  *remoteconfig.Service
+	AssetsStorage       *storage.S3Storage
+	SecretManager       secret.SecretManager
+	NeonService         *neon.Service
+	LLMProvider         *utils.LLMProvider
+	PostHog             posthog.Client
+	RemoteConfig        *remoteconfig.Service
 
-	// UserPlanName is the lowercased subscription plan (starter, hobby, pro, max).
-	// Used by creditsBilled to resolve per-plan AI credit formula parameters.
+	// UserPlanName is the lowercased personal subscription plan
+	// (starter, hobby, pro, max). Used by creditsBilled as a fallback when
+	// project-scoped plan resolution is unavailable.
 	UserPlanName string
+	// PlanNameForProject returns the lowercased subscription plan for the org
+	// that owns projectID. Used by creditsBilled so team projects charge with
+	// the owning org's per-plan AI credit formula.
+	PlanNameForProject func(projectID string) string
 
 	// Callbacks bound per-run by the view/controller layer.
-	CreditChecker            CreditCheckerFactory
-	DeductCredits            CreditDeductor
-	TrackUserEvent           EventTracker
-	SendResendEvent          ResendEventSender
-	GenerateImage            ImageGenerator
-	NeonConnString           NeonConnResolver
-	ProvisionDatabase        DatabaseProvisioner
-	EnableAI                 AIEnabler
-	EnableLocalDatabase      LocalDatabaseEnabler
-	AutoDeployBackend        BackendAutoDeployer
+	CreditChecker        CreditCheckerFactory
+	DeductCredits        CreditDeductor
+	TrackUserEvent       EventTracker
+	SendResendEvent      ResendEventSender
+	GenerateImage        ImageGenerator
+	NeonConnString       NeonConnResolver
+	ProvisionDatabase    DatabaseProvisioner
+	EnableAI             AIEnabler
+	EnableLocalDatabase  LocalDatabaseEnabler
+	AutoDeployBackend    BackendAutoDeployer
 	GatewayAllowedModels GatewayAllowedModelsFn
 	TriggerMobileBuild   MobileBuildTrigger
 	TriggerWebDeploy     WebDeployTrigger
