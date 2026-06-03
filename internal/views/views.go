@@ -113,7 +113,7 @@ func (v *HttpViews) checkMinimumCredits(w http.ResponseWriter, user *models.User
 				"balance":          balance.Balance,
 				"used":             monthlyLimit - balance.Balance,
 				"limit":            monthlyLimit,
-				"renewal_date":     renewEnd.Format(time.RFC3339),
+				"renewal_date":     renewEnd.UTC().Format(time.RFC3339),
 				"plan_name":        planName,
 			})
 		return true

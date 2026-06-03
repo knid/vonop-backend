@@ -195,8 +195,8 @@ func (v *HttpViews) GetAICreditsBalance(w http.ResponseWriter, r *http.Request) 
 
 	utils.JSONResponse(w, responses.AICreditsBalanceResponse{
 		Balance:     balance.Balance,
-		PeriodStart: balance.PeriodStart.Format("2006-01-02T15:04:05Z"),
-		PeriodEnd:   balance.PeriodEnd.Format("2006-01-02T15:04:05Z"),
+		PeriodStart: balance.PeriodStart.UTC().Format(time.RFC3339),
+		PeriodEnd:   balance.PeriodEnd.UTC().Format(time.RFC3339),
 	}, http.StatusOK)
 }
 
@@ -238,8 +238,8 @@ func (v *HttpViews) GetCreditBreakdown(w http.ResponseWriter, r *http.Request) {
 		SubLimit:          bd.SubLimit,
 		SubUsedThisPeriod: bd.SubUsedThisPeriod,
 		PurchasedBalance:  bd.PurchasedBalance,
-		PeriodStart:       bd.PeriodStart.Format("2006-01-02T15:04:05Z"),
-		PeriodEnd:         bd.PeriodEnd.Format("2006-01-02T15:04:05Z"),
+		PeriodStart:       bd.PeriodStart.UTC().Format(time.RFC3339),
+		PeriodEnd:         bd.PeriodEnd.UTC().Format(time.RFC3339),
 	}, http.StatusOK)
 }
 
@@ -334,7 +334,7 @@ func (v *HttpViews) GetCreditHistory(w http.ResponseWriter, r *http.Request) {
 			BalanceAfter: runningBalance,
 			CreatedAt:    tx.CreatedAt.Format("2006-01-02T15:04:05Z"),
 			Description:  describeTxAction(tx.Action),
-			Reference: tx.Reference,
+			Reference:    tx.Reference,
 			ProjectID: func() string {
 				if tx.ProjectID != uuid.Nil {
 					return tx.ProjectID.String()
