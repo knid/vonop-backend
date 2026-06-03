@@ -210,8 +210,8 @@ func (v *HttpViews) GatewayChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Reject image models on the chat endpoint
-	if strings.HasPrefix(model, "fal-ai/") {
+	modelInfo := constants.GatewayModelByID(model)
+	if modelInfo != nil && modelInfo.Type == "image" {
 		slog.Warn("gateway chat: image model on chat endpoint",
 			"model", model, "user_id", user.ID, "project_id", projectID)
 		middleware.GatewayError(w, "image models must use the /v2/gateway/images/generate endpoint", "invalid_request_error", "wrong_endpoint", http.StatusBadRequest)
@@ -506,8 +506,8 @@ func (v *HttpViews) GatewayImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Image models must have fal-ai/ prefix
-	if !strings.HasPrefix(req.Model, "fal-ai/") {
+	modelInfo := constants.GatewayModelByID(req.Model)
+	if modelInfo == nil || modelInfo.Type != "image" {
 		middleware.GatewayError(w, "chat models must use the /v2/gateway/chat/completions endpoint", "invalid_request_error", "wrong_endpoint", http.StatusBadRequest)
 		return
 	}
@@ -588,17 +588,29 @@ func (v *HttpViews) GatewayImage(w http.ResponseWriter, r *http.Request) {
 		URL string `json:"url"`
 	}
 	var images []imageResult
-	generated := 0
 
-	for i := 0; i < numImages; i++ {
-		url, err := fal.GenerateImage(ctx, apiKey, req.Model, req.Prompt, req.ImageSize)
-		if err != nil {
-			slog.Error("gateway image: generation failed", "error", err, "model", req.Model, "image_index", i)
-			break
-		}
-		images = append(images, imageResult{URL: url})
-		generated++
+	urls, err := fal.GenerateImagesWithOptions(ctx, apiKey, fal.GenerateOptions{
+		Model:        constants.GatewayCanonicalModelID(req.Model),
+		Prompt:       req.Prompt,
+		ImageSize:    req.ImageSize,
+		NumImages:    numImages,
+		ImageURL:     req.ImageURL,
+		ImageURLs:    req.ImageURLs,
+		MaskImageURL: req.MaskImageURL,
+		Quality:      req.Quality,
+		OutputFormat: req.OutputFormat,
+		AspectRatio:  req.AspectRatio,
+		Resolution:   req.Resolution,
+	})
+	if err != nil {
+		slog.Error("gateway image: generation failed", "error", err, "model", req.Model, "num_images", numImages)
+	} else if len(urls) > numImages {
+		urls = urls[:numImages]
 	}
+	for _, url := range urls {
+		images = append(images, imageResult{URL: url})
+	}
+	generated := len(images)
 
 	// Refund credits for images that failed to generate
 	failedCount := numImages - generated
@@ -619,6 +631,8 @@ func (v *HttpViews) GatewayImage(w http.ResponseWriter, r *http.Request) {
 		middleware.GatewayError(w, "all image generations failed", "server_error", "generation_failed", http.StatusInternalServerError)
 		return
 	}
+
+	v.Controller.RecordGatewayImageUsage(user, projectID, req.Model, generated, costPerImage*generated)
 
 	utils.JSONResponse(w, map[string]any{
 		"images": images,

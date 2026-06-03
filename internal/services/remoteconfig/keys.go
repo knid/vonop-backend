@@ -109,10 +109,10 @@ var AIBuilderToolStripAfter = Key{Flag: "rc-ai-builder-tool-strip-after", Fallba
 
 // --- Category 4: AI Gateway ---
 
-var GatewayModelsFree = Key{Flag: "rc-gateway-models-free", Fallback: "gpt-4.1-mini,claude-haiku-4-5"}
-var GatewayModelsStarter = Key{Flag: "rc-gateway-models-starter", Fallback: "gpt-4.1-mini,claude-haiku-4-5,fal-ai/flux/schnell"}
-var GatewayModelsPro = Key{Flag: "rc-gateway-models-pro", Fallback: "gpt-4.1-mini,gpt-4.1,claude-haiku-4-5,claude-sonnet-4.6,fal-ai/flux/schnell,fal-ai/flux-pro/v1.1"}
-var GatewayModelsBusiness = Key{Flag: "rc-gateway-models-business", Fallback: "gpt-4.1-mini,gpt-4.1,claude-haiku-4-5,claude-sonnet-4.6,claude-opus-4.7,gemini-2.5-pro,fal-ai/flux/schnell,fal-ai/flux-pro/v1.1"}
+var GatewayModelsFree = Key{Flag: "rc-gateway-models-free", Fallback: "openai/gpt-5.4-nano,anthropic/claude-haiku-4-5,qwen/qwen3.7-plus"}
+var GatewayModelsStarter = Key{Flag: "rc-gateway-models-starter", Fallback: "openai/gpt-5.4-nano,openai/gpt-5.4-mini,anthropic/claude-haiku-4-5,google/gemini-3.1-flash-lite,qwen/qwen3.7-plus,fal-ai/flux/schnell,fal-ai/nano-banana-2,fal-ai/flux-2-pro"}
+var GatewayModelsPro = Key{Flag: "rc-gateway-models-pro", Fallback: "openai/gpt-5.4-nano,openai/gpt-5.4-mini,openai/gpt-5.4,anthropic/claude-haiku-4-5,anthropic/claude-sonnet-4.6,google/gemini-3.5-flash,google/gemini-3.1-flash-lite,x-ai/grok-4.3,qwen/qwen3.7-plus,qwen/qwen3.7-max,minimax/minimax-m3,inception/mercury-2,deepseek/deepseek-r1,fal-ai/flux/schnell,fal-ai/flux-pro/v1.1,fal-ai/flux-pro/v1.1-ultra,fal-ai/nano-banana-2,fal-ai/nano-banana-pro,fal-ai/flux-2-pro,fal-ai/flux-pro/kontext,fal-ai/gpt-image-2"}
+var GatewayModelsBusiness = Key{Flag: "rc-gateway-models-business", Fallback: "openai/gpt-5.4-nano,openai/gpt-5.4-mini,openai/gpt-5.4,openai/gpt-5.4-pro,anthropic/claude-haiku-4-5,anthropic/claude-sonnet-4.6,anthropic/claude-opus-4.8,anthropic/claude-opus-4.8-fast,google/gemini-3.1-pro-preview,google/gemini-3.5-flash,google/gemini-3.1-flash-lite,x-ai/grok-4.3,x-ai/grok-build-0.1,qwen/qwen3.7-plus,qwen/qwen3.7-max,minimax/minimax-m3,inception/mercury-2,deepseek/deepseek-r1,stepfun/step-3.7-flash,fal-ai/flux/schnell,fal-ai/flux-pro/v1.1,fal-ai/flux-pro/v1.1-ultra,fal-ai/nano-banana-2,fal-ai/nano-banana-2/edit,fal-ai/nano-banana-pro,fal-ai/nano-banana-pro/edit,fal-ai/flux-2-pro,fal-ai/flux-pro/kontext,fal-ai/gpt-image-2,fal-ai/gpt-image-2/image-to-image,fal-ai/bytedance/seedream/v4.5/edit,xai/grok-imagine-image,xai/grok-imagine-image/edit"}
 
 var GatewayRPMFree = Key{Flag: "rc-gateway-rpm-free", Fallback: 10}
 var GatewayRPMStarter = Key{Flag: "rc-gateway-rpm-starter", Fallback: 30}
