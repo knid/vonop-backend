@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 
 	"github.com/google/uuid"
+	"github.com/knid/wemob/internal/models"
 )
 
 // Event is the SSE envelope the emitter produces. Callers don't construct
@@ -98,6 +99,11 @@ type CreditsUpdateEvent struct {
 	Tokens      int       `json:"tokens,omitempty"`
 }
 
+type TodoSnapshotEvent struct {
+	RunID uuid.UUID          `json:"run_id"`
+	Todos []models.AgentTodo `json:"todos"`
+}
+
 type TokenUsage struct {
 	Input      int `json:"input"`
 	Output     int `json:"output"`
@@ -146,6 +152,7 @@ const (
 	EventFileDeleted    = "file_deleted"
 	EventTurnEnd        = "turn_end"
 	EventCreditsUpdate  = "credits_update"
+	EventTodoSnapshot   = "todo_snapshot"
 	EventCheckpoint     = "checkpoint"
 	EventError          = "error"
 	EventDone           = "done"

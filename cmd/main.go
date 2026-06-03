@@ -435,6 +435,9 @@ func createSchema(db *bun.DB) error {
 		// success; otherwise one of the agent ErrorKind enum values used to
 		// render the rich error card from history. See finaliseFailureV2.
 		`ALTER TABLE app_chat_messages ADD COLUMN IF NOT EXISTS error_kind text NOT NULL DEFAULT ''`,
+		// Structured agent todo snapshot. This is the durable progress ledger
+		// shown to users and reinjected into long-running agent prompts.
+		`ALTER TABLE app_agent_runs ADD COLUMN IF NOT EXISTS todos jsonb NOT NULL DEFAULT '[]'::jsonb`,
 		// Sub-credit gateway audit: stores the fractional credit cost when a
 		// gateway_chat_pending row is written (Amount=0). Nullable so legacy
 		// rows and non-gateway transactions stay untouched.

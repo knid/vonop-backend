@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"github.com/knid/wemob/internal/agent"
+	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/responses"
 )
 
@@ -42,6 +43,7 @@ type StreamStateBuffer struct {
 	toolCalls        []streamStateToolCall
 	progress         *streamStateProgress
 	phase            string
+	todos            []models.AgentTodo
 	creditsUsed      int
 	cursorSeq        int64
 	dirty            bool
@@ -216,6 +218,7 @@ func (b *StreamStateBuffer) Apply(event responses.SSEEvent) bool {
 		b.toolCalls = nil
 		b.progress = nil
 		b.phase = ""
+		b.todos = nil
 		b.creditsUsed = 0
 		b.dirty = true
 		return true
@@ -318,6 +321,16 @@ func (b *StreamStateBuffer) Apply(event responses.SSEEvent) bool {
 		}
 		return false
 
+	case "todo_snapshot":
+		todos, ok := extractTodos(event.Data)
+		if !ok {
+			return false
+		}
+		b.todos = todos
+		b.setCursorSeq(event.Seq)
+		b.dirty = true
+		return true
+
 	// Agent error: terminal for the partial buffer, same as done.
 	// NOTE: the agent emits "error" (see internal/agent/events.go). A previous
 	// version of this reducer checked "agent_error" and silently never cleared
@@ -329,6 +342,7 @@ func (b *StreamStateBuffer) Apply(event responses.SSEEvent) bool {
 		b.toolCalls = nil
 		b.progress = nil
 		b.phase = ""
+		b.todos = nil
 		b.creditsUsed = 0
 		b.setCursorSeq(event.Seq)
 		b.dirty = true
@@ -407,6 +421,28 @@ func (b *StreamStateBuffer) attachToolResult(toolCallID, tool, preview, summary,
 	})
 }
 
+func extractTodos(data any) ([]models.AgentTodo, bool) {
+	if d, ok := data.(agent.TodoSnapshotEvent); ok {
+		return append([]models.AgentTodo(nil), d.Todos...), true
+	}
+	if m, ok := data.(map[string]any); ok {
+		rawTodos, ok := m["todos"]
+		if !ok {
+			return nil, false
+		}
+		raw, err := json.Marshal(rawTodos)
+		if err != nil {
+			return nil, false
+		}
+		var todos []models.AgentTodo
+		if err := json.Unmarshal(raw, &todos); err != nil {
+			return nil, false
+		}
+		return todos, true
+	}
+	return nil, false
+}
+
 // Snapshot returns the current state as a JSON-serialisable map and clears the
 // dirty flag. It returns (nil, false) when nothing has changed since the last
 // snapshot, which the caller can use to skip writes.
@@ -434,6 +470,9 @@ func (b *StreamStateBuffer) Snapshot() (json.RawMessage, bool) {
 	}
 	if b.creditsUsed > 0 {
 		payload["credits_used"] = b.creditsUsed
+	}
+	if len(b.todos) > 0 {
+		payload["todos"] = b.todos
 	}
 	raw, err := json.Marshal(payload)
 	if err != nil {

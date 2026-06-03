@@ -24,10 +24,8 @@ func TestBuildStateRenderTracksFilesDeterministically(t *testing.T) {
 		t.Fatalf("expected foundation to advance when app shell exists, got:\n%s", rendered)
 	}
 	assertBefore(t, rendered, "- app/page.tsx", "- components/z.tsx")
-	if !strings.Contains(rendered, "admin/owner dashboard") ||
-		!strings.Contains(rendered, "chronological log/history view") ||
-		!strings.Contains(rendered, "smart alert/visual indicator behavior") {
-		t.Fatalf("expected requirement hints in render, got:\n%s", rendered)
+	if strings.Contains(rendered, "Requirement checklist") {
+		t.Fatalf("build state should not render task checklist, got:\n%s", rendered)
 	}
 }
 
@@ -50,12 +48,23 @@ func TestRenderRunPrefixIncludesFileTreeAndBuildState(t *testing.T) {
 	state := NewBuildState("build dashboard", true)
 	state.RecordFileWrite("app/page.tsx", "create")
 
-	rendered := renderRunPrefix(fileMap, state)
+	todos := NewTodoList("build dashboard")
+	if _, err := todos.Apply([]TodoUpdate{{
+		Title:  "build dashboard",
+		Status: "pending",
+	}}); err != nil {
+		t.Fatalf("seed todo: %v", err)
+	}
+
+	rendered := renderRunPrefix(fileMap, state, todos)
 	if !strings.Contains(rendered, "FILE TREE") {
 		t.Fatalf("expected file tree in prefix, got:\n%s", rendered)
 	}
 	if !strings.Contains(rendered, "BUILD STATE") {
 		t.Fatalf("expected build state in prefix, got:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "TODO STATE") {
+		t.Fatalf("expected todo state in prefix, got:\n%s", rendered)
 	}
 	if !strings.Contains(rendered, "Do not recreate") {
 		t.Fatalf("expected do-not-recreate guidance, got:\n%s", rendered)

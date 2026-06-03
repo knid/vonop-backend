@@ -113,7 +113,6 @@ func (s *BuildState) Render(fileMap *SafeFileMap) string {
 	}
 	s.mu.RLock()
 	phase := s.Phase
-	requirements := append([]RequirementStatus(nil), s.Requirements...)
 	created := sortedKeys(s.Created)
 	updated := sortedKeys(s.Updated)
 	deleted := sortedKeys(s.Deleted)
@@ -135,16 +134,7 @@ func (s *BuildState) Render(fileMap *SafeFileMap) string {
 		sort.Strings(allWritten)
 		writePathList(&sb, "Do not recreate; edit only if more changes are needed", allWritten)
 	}
-	if len(requirements) > 0 {
-		sb.WriteString("Requirement checklist:\n")
-		for _, req := range requirements {
-			if strings.TrimSpace(req.Text) == "" {
-				continue
-			}
-			fmt.Fprintf(&sb, "- [%s] %s\n", req.State, req.Text)
-		}
-	}
-	sb.WriteString("\nUse this BUILD STATE plus the FILE TREE as the source of truth. Continue pending requirements; do not restart completed work.\n")
+	sb.WriteString("\nUse this BUILD STATE plus the FILE TREE as the source of truth for files. Use TODO STATE as the source of truth for task progress; do not restart completed work.\n")
 	return sb.String()
 }
 
@@ -212,12 +202,15 @@ func extractRequirementHints(prompt string) []RequirementStatus {
 	return out
 }
 
-func renderRunPrefix(fileMap *SafeFileMap, state *BuildState) string {
+func renderRunPrefix(fileMap *SafeFileMap, state *BuildState, todos *TodoList) string {
 	parts := []string{}
 	if tree := BuildFileTreeUserPrefix(fileMap); strings.TrimSpace(tree) != "" {
 		parts = append(parts, tree)
 	}
 	if rendered := state.Render(fileMap); strings.TrimSpace(rendered) != "" {
+		parts = append(parts, rendered)
+	}
+	if rendered := todos.Render(); strings.TrimSpace(rendered) != "" {
 		parts = append(parts, rendered)
 	}
 	return strings.Join(parts, "\n")

@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/agent"
+	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/responses"
 )
 
@@ -97,5 +98,43 @@ func TestStreamStateBufferAgentToolIDsAndCredits(t *testing.T) {
 	}
 	if _, exists := terminal["credits_used"]; exists {
 		t.Fatalf("credits_used should be cleared on done: %s", raw)
+	}
+}
+
+func TestStreamStateBufferTodoSnapshot(t *testing.T) {
+	b := NewStreamStateBuffer()
+	runID := uuid.New()
+
+	ok := b.Apply(responses.SSEEvent{
+		Seq:   8,
+		Event: "todo_snapshot",
+		Data: agent.TodoSnapshotEvent{
+			RunID: runID,
+			Todos: []models.AgentTodo{{
+				ID:     "todo-1",
+				Title:  "dashboard",
+				Status: models.AgentTodoStatusInProgress,
+			}},
+		},
+	})
+	if !ok {
+		t.Fatal("expected todo_snapshot to mutate buffer")
+	}
+	raw, ok := b.Snapshot()
+	if !ok {
+		t.Fatal("expected dirty snapshot")
+	}
+	var got struct {
+		CursorSeq int                `json:"cursor_seq"`
+		Todos     []models.AgentTodo `json:"todos"`
+	}
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("unmarshal snapshot: %v", err)
+	}
+	if got.CursorSeq != 8 {
+		t.Fatalf("cursor_seq = %d, want 8", got.CursorSeq)
+	}
+	if len(got.Todos) != 1 || got.Todos[0].Status != models.AgentTodoStatusInProgress {
+		t.Fatalf("unexpected todos snapshot: %+v", got.Todos)
 	}
 }

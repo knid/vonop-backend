@@ -3,6 +3,7 @@ package database
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -20,8 +21,24 @@ func (db *Database) InsertAgentRun(r *models.AppAgentRun) (*models.AppAgentRun, 
 func (db *Database) UpdateAgentRun(r *models.AppAgentRun) error {
 	_, err := db.DB.NewUpdate().
 		Model(r).
+		ExcludeColumn("todos").
 		Where("id = ?", r.ID).
 		Exec(context.Background())
+	return err
+}
+
+// UpdateAgentRunTodos stores the latest structured todo snapshot for a run.
+// This is intentionally separate from UpdateAgentRun because final status/cost
+// writes use full-model updates and must not overwrite mid-run todo progress.
+func (db *Database) UpdateAgentRunTodos(ctx context.Context, runID uuid.UUID, todos json.RawMessage) error {
+	if len(todos) == 0 {
+		todos = json.RawMessage("[]")
+	}
+	_, err := db.DB.NewUpdate().
+		Model((*models.AppAgentRun)(nil)).
+		Set("todos = ?::jsonb", string(todos)).
+		Where("id = ?", runID).
+		Exec(ctx)
 	return err
 }
 
