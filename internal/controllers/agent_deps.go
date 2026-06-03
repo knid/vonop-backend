@@ -32,18 +32,34 @@ func (c *Controller) AgentDeps(user *models.User) *agent.RunDependencies {
 		PostHog:       c.PostHog,
 		RemoteConfig:  c.RemoteConfig,
 		UserPlanName:  planName,
-
-		CreditChecker: func(tracker *utils.TokenTracker) func() bool {
-			// Budget is org-scoped; resolve via the user's personal org for the
-			// pre-check (the project's org is used for the actual deduction in
-			// DeductCredits below). For the typical solo-user case both resolve
-			// to the same personal org.
-			orgID, err := c.RequireOrgIDForUser(user, nil)
+		PlanNameForProject: func(projectID string) string {
+			orgID, err := c.ResolveOrgForProjectID(user, projectID)
 			if err != nil {
-				slog.Error("agent_deps: failed to resolve personal org for credit checker", "error", err, "user_id", user.ID)
-				return nil
+				slog.Error("agent_deps: failed to resolve project org for plan", "error", err, "user_id", user.ID, "project_id", projectID)
+				return planName
 			}
-			return c.MakeCreditBudgetChecker(user, orgID, tracker)
+			_, projectPlanName, err := c.GetOrgLimitsWithPlan(orgID.String())
+			if err != nil {
+				slog.Error("agent_deps: failed to resolve project org plan", "error", err, "user_id", user.ID, "project_id", projectID, "org_id", orgID)
+				return planName
+			}
+			return projectPlanName
+		},
+
+		CreditChecker: func(projectID string, tracker *utils.TokenTracker) func() bool {
+			// Budget is org-scoped; resolve the org that owns the project so the
+			// pre-check and the final deduction use the same balance.
+			orgID, err := c.ResolveOrgForProjectID(user, projectID)
+			if err != nil {
+				slog.Error("agent_deps: failed to resolve project org for credit checker", "error", err, "user_id", user.ID, "project_id", projectID)
+				return func() bool { return false }
+			}
+			checker := c.MakeCreditBudgetChecker(user, orgID, tracker)
+			if checker == nil {
+				slog.Error("agent_deps: failed to create credit checker", "user_id", user.ID, "project_id", projectID, "org_id", orgID)
+				return func() bool { return false }
+			}
+			return checker
 		},
 		DeductCredits: func(ctx context.Context, credits int, action, projectID string) error {
 			// Resolve the project's organization so the deduction lands on the

@@ -263,7 +263,7 @@ func Run(
 	// cumulative billed credits so the frontend can render a live meter
 	// after each turn end. Tokens is informational (input+output total).
 	emitCreditsUpdate := func(turn int) {
-		credits := creditsBilled(deps, tracker)
+		credits := creditsBilled(deps, tracker, project.ID.String())
 		_, _, total, _ := tracker.Totals()
 		emitter.Emit(EventCreditsUpdate, CreditsUpdateEvent{
 			RunID:       runID,
@@ -276,7 +276,7 @@ func Run(
 	// Bind the credit checker to the run's token tracker.
 	var creditCheck func() bool
 	if deps.CreditChecker != nil {
-		creditCheck = deps.CreditChecker(tracker)
+		creditCheck = deps.CreditChecker(project.ID.String(), tracker)
 	}
 
 	// Resolve the tool-round budget and nudge/strip thresholds from remote
@@ -1059,7 +1059,7 @@ func finaliseSuccess(
 	// 3. Finalise the AppAgentRun row.
 	promptTok, completionTok, totalTok, _ := tracker.Totals()
 	durationMs := int(time.Since(runStart).Milliseconds())
-	credits := creditsBilled(deps, tracker)
+	credits := creditsBilled(deps, tracker, project.ID.String())
 	costUSD := estimateCost(run.Model, promptTok, completionTok)
 
 	run.Status = models.AgentRunStatusCompleted
@@ -1178,14 +1178,21 @@ func countFileOps(calls []models.ChatMessageToolCall) int {
 // systematically under-billed cache-heavy runs (e.g. 53 vs 71 credits on a
 // 35-call agent loop). Falls back to the per-key defaults if PostHog is
 // unreachable.
-func creditsBilled(deps *RunDependencies, tracker *utils.TokenTracker) int {
+func creditsBilled(deps *RunDependencies, tracker *utils.TokenTracker, projectID ...string) int {
 	if tracker == nil {
 		return 0
 	}
 	tpc, om, crd := 0, 0, 0
 	if deps != nil && deps.RemoteConfig != nil {
-		if deps.UserPlanName != "" {
-			pn := strings.ToLower(deps.UserPlanName)
+		planName := ""
+		if len(projectID) > 0 && projectID[0] != "" && deps.PlanNameForProject != nil {
+			planName = deps.PlanNameForProject(projectID[0])
+		}
+		if planName == "" {
+			planName = deps.UserPlanName
+		}
+		if planName != "" {
+			pn := strings.ToLower(planName)
 			tpc = deps.RemoteConfig.GetInt(remoteconfig.PlanAICreditsTokensPerCredit(pn), remoteconfig.Global)
 			om = deps.RemoteConfig.GetInt(remoteconfig.PlanAICreditsOutputMultiplier(pn), remoteconfig.Global)
 			crd = deps.RemoteConfig.GetInt(remoteconfig.PlanAICreditsCacheReadDivisor(pn), remoteconfig.Global)
@@ -1310,7 +1317,7 @@ func finaliseFailureV2(
 	if tracker != nil {
 		promptTok, completionTok, _, _ = tracker.Totals()
 	}
-	credits := creditsBilled(deps, tracker)
+	credits := creditsBilled(deps, tracker, run.AppProjectID.String())
 	costUSD := estimateCost(run.Model, promptTok, completionTok)
 	run.Status = mapCodeToStatus(code)
 	run.Error = fmt.Sprintf("%s: %s", code, failureMessage)

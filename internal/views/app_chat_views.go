@@ -50,12 +50,6 @@ func (v *HttpViews) ChatApp(w http.ResponseWriter, r *http.Request) {
 		utils.JSONErrorCode(w, constants.ErrAuthRequired, http.StatusUnauthorized, nil)
 		return
 	}
-	if requireActiveSubscription(w, v.Controller, user) {
-		return
-	}
-	if v.checkMinimumCredits(w, user) {
-		return
-	}
 
 	appID := chi.URLParam(r, "appId")
 	project, err := v.Controller.GetAppProject(appID, user)
@@ -65,6 +59,13 @@ func (v *HttpViews) ChatApp(w http.ResponseWriter, r *http.Request) {
 	}
 	if project == nil {
 		utils.JSONErrorCode(w, constants.ErrProjectNotFound, http.StatusNotFound, nil)
+		return
+	}
+
+	if requireActiveSubscription(w, v.Controller, user, project.OrganizationID) {
+		return
+	}
+	if v.checkMinimumCredits(w, user, project.OrganizationID) {
 		return
 	}
 
