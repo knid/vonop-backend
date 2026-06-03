@@ -100,6 +100,40 @@ func BuildFileTreeUserPrefix(fileMap *SafeFileMap) string {
 	return buildFileTreeBlock(fileMap)
 }
 
+const (
+	designBriefPath     = "DESIGN.md"
+	maxDesignBriefChars = 8000
+)
+
+// BuildDesignBriefUserPrefix returns the persisted design contract for the
+// current app. It rides in the user turn rather than a system block so edits to
+// DESIGN.md do not invalidate the cached base prompt.
+func BuildDesignBriefUserPrefix(fileMap *SafeFileMap) string {
+	if fileMap == nil {
+		return ""
+	}
+	content, ok := fileMap.Get(designBriefPath)
+	if !ok || strings.TrimSpace(content) == "" {
+		return ""
+	}
+	content = strings.TrimSpace(content)
+	truncated := false
+	if len(content) > maxDesignBriefChars {
+		content = content[:maxDesignBriefChars]
+		truncated = true
+	}
+	var sb strings.Builder
+	sb.WriteString("DESIGN BRIEF\n")
+	sb.WriteString("============\n\n")
+	sb.WriteString("Persisted from DESIGN.md. Treat this as the visual source of truth for this project; preserve it unless the user asks for a redesign.\n\n")
+	sb.WriteString(content)
+	if truncated {
+		sb.WriteString("\n\n[DESIGN.md truncated for context]\n")
+	}
+	sb.WriteString("\n")
+	return sb.String()
+}
+
 // buildAddendum composes project-specific prompt blocks.
 //
 // Ecommerce projects receive EcommerceAddendum only — it already covers the

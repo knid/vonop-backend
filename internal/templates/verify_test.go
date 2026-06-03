@@ -19,6 +19,8 @@ func TestGetTemplateSmoke(t *testing.T) {
 		{"lib/schema/index.ts", "pgTable"},
 		{".gitignore", "node_modules"},
 		{"lib/utils.ts", "twMerge"},
+		{"components/ui/section.tsx", "SectionHeader"},
+		{"components/ui/surface.tsx", "BentoGrid"},
 		{"app/cart/page.tsx", "getCart"},
 		{"app/api/checkout/route.ts", "getAdapter"},
 		{"app/api/cart/route.ts", "wemob_cart_session"},
@@ -38,7 +40,7 @@ func TestGetTemplateSmoke(t *testing.T) {
 }
 
 func TestIsTemplateFile(t *testing.T) {
-	yes := []string{"package.json", "components/ecommerce/product-card.tsx", "lib/utils.ts"}
+	yes := []string{"package.json", "components/ecommerce/product-card.tsx", "lib/utils.ts", "components/ui/section.tsx"}
 	for _, p := range yes {
 		if !IsTemplateFile(p) {
 			t.Errorf("IsTemplateFile(%q) should be true", p)
