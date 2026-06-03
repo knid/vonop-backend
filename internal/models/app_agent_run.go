@@ -42,6 +42,7 @@ type AppAgentRun struct {
 	DurationMs       int             `bun:",notnull,default:0" json:"duration_ms"`
 	Error            string          `bun:",type:text,default:''" json:"error,omitempty"`
 	Todos            json.RawMessage `bun:",type:jsonb,notnull,default:'[]'" json:"todos"`
+	Memory           json.RawMessage `bun:",type:jsonb,notnull,default:'{}'" json:"memory"`
 	CreatedAt        time.Time       `bun:"created_at,nullzero,notnull,default:current_timestamp" json:"created_at"`
 	CompletedAt      time.Time       `bun:",nullzero" json:"completed_at,omitempty"`
 }
