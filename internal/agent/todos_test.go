@@ -26,7 +26,7 @@ func TestTodoListStartsEmptyForDirectRequests(t *testing.T) {
 		Status: models.AgentTodoStatusDone,
 		Evidence: models.AgentTodoEvidence{
 			Files: []string{"app/page.tsx"},
-			Tools: []string{"write_file"},
+			Tools: []string{"write_files"},
 		},
 	}}); err != nil {
 		t.Fatalf("apply: %v", err)

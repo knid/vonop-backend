@@ -142,7 +142,16 @@ type RunContext struct {
 	Emitter        EventEmitter
 	Tracker        *utils.TokenTracker
 	Deps           *RunDependencies
+	ImageCacheMu   sync.Mutex
+	ImageCache     map[string]string
+	ImageInflight  map[string]*imageInflightCall
 	skillMu        sync.Mutex
+}
+
+type imageInflightCall struct {
+	done chan struct{}
+	url  string
+	err  error
 }
 
 func (rc *RunContext) ActiveSkillIDs() []string {

@@ -354,6 +354,8 @@ func Run(
 		Emitter:        emitter,
 		Tracker:        tracker,
 		Deps:           deps,
+		ImageCache:     make(map[string]string),
+		ImageInflight:  make(map[string]*imageInflightCall),
 	}
 
 	// --- Step 10: emit run_start ---
@@ -541,13 +543,13 @@ func Run(
 			// Sonnet 4.6's non-extended output cap. Running at the provider
 			// max keeps the continuation dance (finish_reason=length → send
 			// "continue") from firing in all but pathological runs.
-			MaxTokens:     64000,
-			NudgeAfter:    nudgeAfter,
-			StripAfter:    stripAfter,
-			StripTools:    []string{"read_files", "list_files", "grep", "read_attachment", "web_search", "read_build_logs", "read_deploy_logs", "read_mobile_config", "list_skills", "search_skills", "load_skill"},
-			MaxMessages:   25,
-      KeepRecentToolRounds: keepRecentToolRounds,
-			RefreshPrefix: refreshRunPrefix,
+			MaxTokens:            64000,
+			NudgeAfter:           nudgeAfter,
+			StripAfter:           stripAfter,
+			StripTools:           []string{"read_files", "list_files", "grep", "read_attachment", "web_search", "read_build_logs", "read_deploy_logs", "read_mobile_config", "list_skills", "search_skills", "load_skill"},
+			MaxMessages:          25,
+			KeepRecentToolRounds: keepRecentToolRounds,
+			RefreshPrefix:        refreshRunPrefix,
 			TrimResults: func(toolName, result string) string {
 				return trimToolResultForLLM(toolName, result, trimToolResultChars)
 			},

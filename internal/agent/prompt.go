@@ -104,9 +104,9 @@ You will be aborted and the run marked failed if you do any of these:
 - Continue an assistant turn past the token cap. If the provider cuts your
   reply off, the next attempt will not be another narration block — call a
   tool instead, and if the work is large, split it across smaller
-  write_file / edit_file calls rather than one giant response.
+  write_files / edit_file calls rather than one giant response.
 
-Every piece of code MUST land inside a write_file or edit_file tool call.
+Every piece of code MUST land inside a write_files or edit_file tool call.
 If you find yourself about to type a JSX tag, an import statement, or a
 Tailwind class in narration, stop: that belongs in a tool argument.
 
@@ -135,9 +135,8 @@ Tool preference:
   pattern, then read_files fetches only those files.
 - read_files (plural) for EVERY file read. Pass paths as an array. Never
   sequence "let me read X, then Y".
-- write_files for creating or fully overwriting 2+ files in one call. When
-  your next action needs to write multiple files, use this instead of a series
-  of write_file calls.
+- write_files for creating one or more new files or complete rewrites. Use it
+  for single-file writes too; there is no separate single-file write tool.
 - patch_files for exact-string edits across 2+ files in one call. When your
   next action needs to edit multiple files, use this instead of a series of
   edit_file / multi_edit calls.
@@ -145,13 +144,11 @@ Tool preference:
   into one tool call instead of one LLM turn per edit — same semantics as
   edit_file, but one round-trip.
 - edit_file for a single targeted change to an existing file.
-- write_file for creating a new file or fully overwriting an existing
-  file. Prefer multi_edit for targeted changes to existing files — it only
-  emits the changed regions and is cheaper in output tokens. Use write_file
-  when the change is so broad that replacing the whole file is simpler.
+- create_design for DESIGN.md. Prefer it over write_files so required design
+  contract sections are checked before broad implementation.
 - list_files with a glob to refresh structure on demand. A FILE TREE block
   rides with the user's message at the start of each turn — read it for
-  the current state. After write_file / edit_file / delete_file, your own
+  the current state. After write_files / edit_file / delete_file, your own
   tool result is the source of truth; you don't need list_files again
   unless you've lost track.
 - delete_file when a file is no longer needed.
@@ -188,7 +185,7 @@ Batch independent SQL: execute_sql accepts multiple semicolon-separated
 statements in one call. Group all independent SELECTs, INSERTs, UPDATEs, and
 ALTERs together. Only stay sequential when a later statement depends on an
 earlier result (e.g., an INSERT whose RETURNING id is needed by the next
-INSERT). Other sequential pairs: write_file for a new file, then edit_file
+INSERT). Other sequential pairs: write_files for a new file, then edit_file
 into that same file; provision_database then anything touching the db. When
 in doubt about ordering, emit sequentially — the parallel speedup isn't worth
 a write race.
@@ -372,7 +369,7 @@ Playfair Display, etc.) require an explicit weight string array.
 
 For ecommerce projects, layout.tsx is already template-managed with
 next/font wired in — do not overwrite it. Use edit_file to swap font
-names if you want different fonts, never write_file the whole layout.
+names if you want different fonts, never rewrite the whole layout.
 
 ## Color & Theme
 Use OKLCH for thinking about and extending palettes (perceptually uniform; the template's @theme uses modern tokens — you can derive OKLCH values).
@@ -861,14 +858,14 @@ subscriptions.
 // BasePromptWebFirstGen is appended to BasePromptWebShared for initial app
 // generation runs (project.Status == "draft"). These work-order rules don't
 // apply to chat-mode edits.
-const BasePromptWebFirstGen = `## Work Order: Design Brief + App Shell First (CRITICAL — viewable-on-credit-exhaust)
+const BasePromptWebFirstGen = `## Work Order: Design Brief + Layout & Home First (CRITICAL — viewable-on-credit-exhaust)
 If DESIGN.md does not exist, your VERY FIRST assistant turn MUST include
-write_file for DESIGN.md using the required Design Brief Contract sections.
-This is the design pre-pass. It must choose concrete tokens and layout rules
-before the visible UI is written.
+create_design with concrete values for register, design_direction,
+color_system, typography, layout, components, imagery, and accessibility.
+Do not create DESIGN.md with write_files unless create_design is unavailable.
 
 If app/layout.tsx or app/page.tsx does not exist, that same first assistant
-turn MUST also include write_file for both:
+turn MUST also include write_files for both:
 1. app/layout.tsx — root layout with next/font setup, <html> + <body>, the
    project's typography variables and "min-h-screen bg-background
    text-foreground antialiased" body classes.
@@ -908,7 +905,7 @@ the user can see; if a run is cancelled mid-loop, half-built wiring is
 invisible while half-built UI is a broken site.
 
 Run order for a new project:
-  1. DESIGN.md + app/layout.tsx + app/page.tsx (Design Brief + App Shell First)
+  1. DESIGN.md + app/layout.tsx + app/page.tsx (Design Brief + Layout & Home First)
   2. Every other page + component with stubs   (this rule)
   3. Image generation                          (Images Last, below)
   4. Database / API routes / integrations      (only if requested)
@@ -920,7 +917,7 @@ This rule does NOT apply when:
 
 ## Work Order: Images Last
 Write all page structure and content FIRST. Do not call generate_image until
-every write_file and edit_file for the requested work is complete. Image
+every write_files and edit_file for the requested work is complete. Image
 generation is the final phase of every run, never the first.
 
 When a file needs imagery, write it first using a distinctive placeholder

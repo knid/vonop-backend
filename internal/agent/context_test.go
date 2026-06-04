@@ -185,7 +185,7 @@ func TestBuildSystemMessages_BothAddendaForSyncedNative(t *testing.T) {
 
 // TestBuildSystemMessages_FileTreeNotInSystemBlocks locks in the prompt-cache
 // fix: the rendered FILE TREE block must NOT appear in system messages. If it
-// did, every write_file would mutate the system prefix and force a fresh
+// did, every full-file write would mutate the system prefix and force a fresh
 // prompt-cache write across the whole downstream conversation. The tree now
 // rides with the user turn via BuildFileTreeUserPrefix instead.
 //
@@ -280,8 +280,8 @@ func TestBuildSystemMessages_FirstGenWebIncludesWorkOrders(t *testing.T) {
 	msgs := BuildSystemMessages(project, nil, nil, true)
 	joined := concatMessages(msgs)
 
-	if !strings.Contains(joined, "Design Brief + App Shell First") {
-		t.Error("expected first-gen web to include design brief + app shell work order")
+	if !strings.Contains(joined, "Design Brief + Layout & Home First") {
+		t.Error("expected first-gen web to include design brief + layout/home work order")
 	}
 	if !strings.Contains(joined, "DESIGN.md") {
 		t.Error("expected first-gen web to require DESIGN.md")

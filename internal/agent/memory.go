@@ -81,13 +81,16 @@ func (m *AgentRunMemory) RecordTool(name, args, result string, isError bool) {
 	}
 	m.UpdatedAt = time.Now()
 	paths := extractToolPaths(args)
+	if name == "create_design" {
+		paths = []string{designFilePath}
+	}
 	if isError {
 		m.Errors = appendLimited(m.Errors, fmt.Sprintf("%s: %s", name, firstLine(result, 220)), 30)
 		m.NextAction = "Review the failed tool result, fix the cause, and continue the current user request."
 		return
 	}
 	switch name {
-	case "write_file", "write_files", "edit_file", "multi_edit", "patch_files", "delete_file":
+	case "create_design", "write_files", "edit_file", "multi_edit", "patch_files", "delete_file":
 		m.FilesChanged = appendUniqueLimited(m.FilesChanged, paths, 80)
 		if len(paths) > 0 {
 			m.Completed = appendLimited(m.Completed, fmt.Sprintf("%s: %s", name, strings.Join(paths, ", ")), 40)
