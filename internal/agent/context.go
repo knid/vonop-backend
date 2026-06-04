@@ -59,22 +59,15 @@ type mobileConfigGetter interface {
 // current user's subscription tier can actually reach; passing nil degrades
 // to a conservative generic block.
 func BuildSystemMessages(project *models.AppProject, deps *RunDependencies, attachmentsPool []models.AppAsset, isFirstGen bool) []utils.Message {
-	base := BasePromptWebShared
-	modeAddendum := BasePromptWebChat
-	if project != nil {
-		switch project.ProjectType {
-		case models.ProjectTypeMobileAppNative:
-			base = BasePromptMobileNativeShared
-			modeAddendum = BasePromptMobileNativeChat
-		}
+	return BuildSystemMessagesForProfile(ResolveAgentProfile(project), project, deps, attachmentsPool, isFirstGen)
+}
+
+func BuildSystemMessagesForProfile(profile *AgentProfile, project *models.AppProject, deps *RunDependencies, attachmentsPool []models.AppAsset, isFirstGen bool) []utils.Message {
+	if profile == nil {
+		profile = ResolveAgentProfile(project)
 	}
-	if isFirstGen {
-		if project != nil && project.ProjectType == models.ProjectTypeMobileAppNative {
-			modeAddendum = BasePromptMobileNativeFirstGen
-		} else {
-			modeAddendum = BasePromptWebFirstGen
-		}
-	}
+	base := profile.BasePrompt
+	modeAddendum := profile.ModePrompt(isFirstGen)
 	addendum := buildAddendum(project, deps)
 
 	msgs := []utils.Message{{Role: "system", Content: base}}

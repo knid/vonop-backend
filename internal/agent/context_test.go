@@ -22,8 +22,8 @@ func TestBuildSystemMessages_MobileAppNativeUsesExpoPrompt(t *testing.T) {
 	if !strings.Contains(joined, "NativeWind") {
 		t.Error("expected 'NativeWind' to appear in mobile_app_native system messages")
 	}
-	if !strings.Contains(joined, "react-native-reusables") {
-		t.Error("expected 'react-native-reusables' to appear in mobile_app_native system messages")
+	if !strings.Contains(joined, "mobile template") {
+		t.Error("expected compact mobile base prompt to mention the mobile template")
 	}
 }
 

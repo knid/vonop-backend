@@ -1,6 +1,9 @@
 package agent
 
-import "testing"
+import (
+	"slices"
+	"testing"
+)
 
 func TestSlashCommandIsReadOnly(t *testing.T) {
 	cases := []struct {
@@ -23,5 +26,17 @@ func TestSlashCommandIsReadOnly(t *testing.T) {
 				t.Fatalf("SlashCommandIsReadOnly(%q) = %v, want %v", tc.text, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestSlashCommandSkillIDs(t *testing.T) {
+	if ids := SlashCommandSkillIDs("/seo"); !slices.Contains(ids, "web-seo") {
+		t.Fatalf("/seo skill ids = %v, want web-seo", ids)
+	}
+	if ids := SlashCommandSkillIDs("/a11y"); !slices.Contains(ids, "accessibility") {
+		t.Fatalf("/a11y skill ids = %v, want accessibility", ids)
+	}
+	if ids := SlashCommandSkillIDs("/plan"); len(ids) != 0 {
+		t.Fatalf("/plan should not activate a skill directly, got %v", ids)
 	}
 }
