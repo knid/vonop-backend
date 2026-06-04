@@ -9,17 +9,17 @@ import (
 	"github.com/knid/wemob/internal/models"
 )
 
-type captureEmitter struct {
+type mcpCaptureEmitter struct {
 	events []Event
 }
 
-func (e *captureEmitter) Emit(eventType string, data any) bool {
+func (e *mcpCaptureEmitter) Emit(eventType string, data any) bool {
 	e.events = append(e.events, Event{Type: eventType, Data: data})
 	return true
 }
 
-func (e *captureEmitter) Buffer() []Event { return e.events }
-func (e *captureEmitter) Close()          {}
+func (e *mcpCaptureEmitter) Buffer() []Event { return e.events }
+func (e *mcpCaptureEmitter) Close()          {}
 
 func TestMCPToolExecutorBlockedPolicy(t *testing.T) {
 	executed := false
@@ -60,7 +60,7 @@ func TestMCPToolExecutorBlockedPolicy(t *testing.T) {
 
 func TestMCPToolExecutorApprovalFlow(t *testing.T) {
 	var executedReq MCPToolExecutionRequest
-	emitter := &captureEmitter{}
+	emitter := &mcpCaptureEmitter{}
 	projectID := uuid.New()
 	userID := uuid.New()
 	tool := MCPToolExecutor{Tool: MCPRuntimeTool{
