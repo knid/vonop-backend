@@ -18,7 +18,25 @@ func TestLoadEmbeddedSkillCatalog(t *testing.T) {
 	}
 
 	ids := skillIDs(catalog)
-	for _, id := range []string{"accessibility", "nextjs-app-router", "tailwind-v4", "web-builder-foundation", "web-seo", "expo-router", "mobile-builder-foundation", "nativewind-ui"} {
+	for _, id := range []string{
+		"accessibility",
+		"api-design",
+		"backend-patterns",
+		"coding-standards",
+		"expo-react-native-best-practices",
+		"expo-router",
+		"frontend-design-direction",
+		"frontend-patterns",
+		"mobile-builder-foundation",
+		"nativewind-ui",
+		"nextjs-app-router",
+		"postgres-patterns",
+		"security-review",
+		"tailwind-v4",
+		"verification-loop",
+		"web-builder-foundation",
+		"web-seo",
+	} {
 		if !slices.Contains(ids, id) {
 			t.Fatalf("expected skill id %q in catalog: %v", id, ids)
 		}
