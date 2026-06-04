@@ -39,6 +39,39 @@ api.wemob.io {
     }
 }
 
+mcp.wemob.io {
+    encode zstd gzip
+
+    handle /.well-known/* {
+        reverse_proxy api:8001
+    }
+
+    handle /oauth/* {
+        reverse_proxy api:8001
+    }
+
+    handle /mcp* {
+        reverse_proxy api:8001
+    }
+
+    handle {
+        rewrite * /mcp
+        reverse_proxy api:8001
+    }
+
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "no-referrer-when-downgrade"
+    }
+
+    log {
+        output file /var/log/caddy/mcp_access.log
+        format console
+    }
+}
+
 *.preview.wemob.app {
     tls {
         dns cloudflare {env.CF_API_TOKEN}
