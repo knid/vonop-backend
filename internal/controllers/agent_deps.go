@@ -213,6 +213,10 @@ func (c *Controller) enableProjectAIForAgent(ctx context.Context, project *model
 		project.Settings = make(map[string]any)
 	}
 	project.Settings["has_ai"] = true
+	if project.UsesSplitWebRuntime() || project.ProjectType == models.ProjectTypeMobileAppNative || project.FrontendRuntime == models.FrontendRuntimeNone {
+		project.BackendEnabled = true
+		project.BackendRuntime = models.BackendRuntimeNextJSAPI
+	}
 	if _, err := c.DB.UpdateAppProject(project); err != nil {
 		return fmt.Errorf("persist has_ai on project: %w", err)
 	}

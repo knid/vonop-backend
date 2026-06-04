@@ -7,6 +7,9 @@ import (
 //go:embed all:nextjs
 var nextjsFS embed.FS
 
+//go:embed all:vite
+var viteFS embed.FS
+
 // GetTemplate reads a template file by its generated-project-relative path.
 // For example: "package.json", "components/ecommerce/product-card.tsx", "lib/utils.ts".
 // The ".gitignore" path is mapped to ".gitignore.tmpl" on disk to avoid git interference.
@@ -17,6 +20,20 @@ func GetTemplate(path string) string {
 		fsPath = "nextjs/.gitignore.tmpl"
 	}
 	data, err := nextjsFS.ReadFile(fsPath)
+	if err != nil {
+		return ""
+	}
+	return string(data)
+}
+
+// GetViteTemplate reads a Vite template file by its template-relative path.
+// For example: "package.json", "src/App.tsx", or ".gitignore".
+func GetViteTemplate(path string) string {
+	fsPath := "vite/" + path
+	if path == ".gitignore" {
+		fsPath = "vite/.gitignore.tmpl"
+	}
+	data, err := viteFS.ReadFile(fsPath)
 	if err != nil {
 		return ""
 	}
@@ -36,6 +53,19 @@ var BaseFilePaths = []string{
 	"app/error.tsx",
 	"app/global-error.tsx",
 	".gitignore",
+}
+
+var ViteFilePaths = []string{
+	"package.json",
+	"index.html",
+	"tsconfig.json",
+	"vite.config.ts",
+	".gitignore",
+	"src/main.tsx",
+	"src/App.tsx",
+	"src/index.css",
+	"src/lib/api.ts",
+	"src/lib/utils.ts",
 }
 
 // DBFilePaths are template-managed files injected only after successful Neon provisioning.
@@ -116,9 +146,9 @@ var UIFilePaths = []string{
 
 // IsTemplateFile checks if a file path is managed by any template category.
 func IsTemplateFile(path string) bool {
-	for _, paths := range [][]string{BaseFilePaths, DBFilePaths, EcommerceFilePaths, UIFilePaths} {
+	for _, paths := range [][]string{BaseFilePaths, ViteFilePaths, DBFilePaths, EcommerceFilePaths, UIFilePaths} {
 		for _, tp := range paths {
-			if path == tp {
+			if path == tp || path == "frontend/"+tp {
 				return true
 			}
 		}
@@ -130,7 +160,7 @@ func IsTemplateFile(path string) bool {
 func AllTemplatePaths() []string {
 	seen := make(map[string]bool)
 	var all []string
-	for _, paths := range [][]string{BaseFilePaths, DBFilePaths, EcommerceFilePaths, UIFilePaths} {
+	for _, paths := range [][]string{BaseFilePaths, ViteFilePaths, DBFilePaths, EcommerceFilePaths, UIFilePaths} {
 		for _, p := range paths {
 			if !seen[p] {
 				seen[p] = true

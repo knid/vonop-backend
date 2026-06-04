@@ -16,6 +16,21 @@ func InjectTemplates(repo *gitrepo.Repo, project *models.AppProject) (int, error
 	lang := constants.DetectLanguage(project.Prompt)
 	written := 0
 
+	if project.UsesSplitWebRuntime() {
+		for _, p := range templates.ViteFilePaths {
+			content := templates.GetViteTemplate(p)
+			if content == "" {
+				continue
+			}
+			dest := "frontend/" + p
+			if err := repo.WriteFile(dest, []byte(content)); err != nil {
+				return written, fmt.Errorf("write %s: %w", dest, err)
+			}
+			written++
+		}
+		return written, nil
+	}
+
 	// Pull color scheme / typography off Settings for theme generation.
 	// Non-ecommerce projects still get these tokens via BaseFilePaths'
 	// globals.css below — the LLM reads @theme to inform its design.

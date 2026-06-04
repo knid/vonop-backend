@@ -144,7 +144,12 @@ func hasAppShell(fileMap *SafeFileMap) bool {
 	}
 	_, hasLayout := fileMap.Get("app/layout.tsx")
 	_, hasPage := fileMap.Get("app/page.tsx")
-	return hasLayout && hasPage
+	if hasLayout && hasPage {
+		return true
+	}
+	_, hasVitePackage := fileMap.Get("frontend/package.json")
+	_, hasViteApp := fileMap.Get("frontend/src/App.tsx")
+	return hasVitePackage && hasViteApp
 }
 
 func sortedKeys(m map[string]bool) []string {

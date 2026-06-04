@@ -8,12 +8,16 @@ import (
 	"github.com/knid/wemob/internal/models"
 )
 
-func validateGeneratedApp(fileMap *SafeFileMap, state *BuildState, prompt string, isFirstGen bool, projectType string) error {
+func validateGeneratedApp(fileMap *SafeFileMap, state *BuildState, prompt string, isFirstGen bool, project *models.AppProject) error {
 	if fileMap == nil {
 		return fmt.Errorf("generated app validation failed: no files are available")
 	}
 	if !isFirstGen {
 		return validateNoImagePlaceholders(fileMap)
+	}
+	projectType := ""
+	if project != nil {
+		projectType = project.ProjectType
 	}
 	if projectType == models.ProjectTypeMobileAppNative {
 		if _, ok := fileMap.Get("mobile/package.json"); !ok {
@@ -24,6 +28,41 @@ func validateGeneratedApp(fileMap *SafeFileMap, state *BuildState, prompt string
 		}
 		if _, ok := fileMap.Get("mobile/app/(app)/index.tsx"); !ok {
 			return fmt.Errorf("generated app validation failed: mobile/app/(app)/index.tsx is missing")
+		}
+		if err := validateNoImagePlaceholders(fileMap); err != nil {
+			return err
+		}
+		if state != nil {
+			state.SetPhase(BuildPhaseFinal)
+		}
+		return nil
+	}
+	if project != nil && project.UsesSplitWebRuntime() {
+		if _, ok := fileMap.Get("frontend/package.json"); !ok {
+			return fmt.Errorf("generated app validation failed: frontend/package.json is missing")
+		}
+		if _, ok := fileMap.Get("frontend/src/App.tsx"); !ok {
+			return fmt.Errorf("generated app validation failed: frontend/src/App.tsx is missing")
+		}
+		if err := validateDesignBrief(fileMap); err != nil {
+			return err
+		}
+		if err := validateNoImagePlaceholders(fileMap); err != nil {
+			return err
+		}
+		if isOperationalSaaSRequest(prompt) {
+			if err := validateOperationalSaaSShape(fileMap, prompt); err != nil {
+				return err
+			}
+		}
+		if state != nil {
+			state.SetPhase(BuildPhaseFinal)
+		}
+		return nil
+	}
+	if project != nil && project.FrontendRuntime == models.FrontendRuntimeNone {
+		if _, ok := fileMap.Get("backend/package.json"); !ok {
+			return fmt.Errorf("generated app validation failed: backend/package.json is missing")
 		}
 		if err := validateNoImagePlaceholders(fileMap); err != nil {
 			return err

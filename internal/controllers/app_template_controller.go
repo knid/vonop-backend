@@ -275,19 +275,24 @@ func (c *Controller) CopyTemplate(ctx context.Context, user *models.User, slug s
 	}
 
 	projectSlug := makeSlug(template.Name)
+	frontendRuntime, frontendHosting, backendEnabled, backendRuntime := defaultProjectCapabilities(template.ProjectType)
 
 	project := &models.AppProject{
-		UserID:         user.ID,
-		OrganizationID: orgID,
-		Name:           template.Name,
-		Slug:           projectSlug,
-		Prompt:         template.Prompt,
-		ProjectType:    template.ProjectType,
-		Theme:          template.Theme,
-		DataModels:     template.DataModels,
-		Settings:       template.Settings,
-		Status:         "ready",
-		TemplateID:     &template.ID,
+		UserID:          user.ID,
+		OrganizationID:  orgID,
+		Name:            template.Name,
+		Slug:            projectSlug,
+		Prompt:          template.Prompt,
+		ProjectType:     template.ProjectType,
+		FrontendRuntime: frontendRuntime,
+		FrontendHosting: frontendHosting,
+		BackendEnabled:  backendEnabled,
+		BackendRuntime:  backendRuntime,
+		Theme:           template.Theme,
+		DataModels:      template.DataModels,
+		Settings:        template.Settings,
+		Status:          "ready",
+		TemplateID:      &template.ID,
 	}
 
 	project, err = c.DB.CreateAppProject(project)
@@ -298,10 +303,20 @@ func (c *Controller) CopyTemplate(ctx context.Context, user *models.User, slug s
 
 	// Clone template git repo into new project
 	if template.SourceRepoID != "" {
-		if _, cloneErr := c.GitRepoService.Clone(template.SourceRepoID, project.ID.String()); cloneErr != nil {
+		repo, cloneErr := c.GitRepoService.Clone(template.SourceRepoID, project.ID.String())
+		if cloneErr != nil {
 			slog.Error("Failed to clone template git repo", "error", cloneErr,
 				"template_id", template.ID, "project_id", project.ID)
 			return nil, fmt.Errorf("failed to copy template files")
+		}
+		if shouldPreserveLegacyCopiedTemplate(project, repo) {
+			project.FrontendRuntime = models.FrontendRuntimeNextJSLegacy
+			project.FrontendHosting = models.FrontendHostingFly
+			project.BackendEnabled = false
+			project.BackendRuntime = models.BackendRuntimeNone
+			if _, updateErr := c.DB.UpdateAppProject(project); updateErr != nil {
+				slog.Warn("CopyTemplate: failed to persist inferred legacy runtime", "error", updateErr, "project_id", project.ID)
+			}
 		}
 	} else {
 		// Initialize empty repo if template has no source
@@ -327,6 +342,13 @@ func (c *Controller) CopyTemplate(ctx context.Context, user *models.User, slug s
 	}
 
 	return project, nil
+}
+
+func shouldPreserveLegacyCopiedTemplate(project *models.AppProject, repo interface{ FileExists(string) bool }) bool {
+	return project.ProjectType == models.ProjectTypeApp &&
+		project.FrontendRuntime == models.FrontendRuntimeViteReact &&
+		repo.FileExists("package.json") &&
+		!repo.FileExists("frontend/package.json")
 }
 
 func (c *Controller) CreateTemplateFromApp(user *models.User, appID string, req requests.CreateTemplateFromAppRequest) (*models.AppTemplate, error) {

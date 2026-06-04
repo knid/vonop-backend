@@ -91,6 +91,58 @@ Next steps for this run:
 3. Show a loading state while the request is in flight + a friendly
    error toast (use react-native-reusables primitives) if it fails.`
 
+const splitWebSetupAIResultTemplate = `Wemob AI Gateway is ready for this project.
+
+What is now true:
+- backend/lib/wemob-ai.ts has been written. It exports a preconfigured
+  OpenAI client plus a small image helper:
+    import { wemobAI, generateImage } from '@/lib/wemob-ai';
+- The ` + "`openai`" + ` npm package has been added to backend/package.json
+  (a minimal Next.js backend was also scaffolded under backend/ if it
+  didn't already exist). Do NOT add openai or next/react/react-dom again.
+- Two env vars are auto-injected into the deployed backend at deploy time:
+    WEMOB_AI_KEY                  (server-side only, never expose)
+    NEXT_PUBLIC_WEMOB_GATEWAY_URL (OpenAI-compatible base URL)
+- Available chat models on the user's current plan:
+%s
+- Available image models on the user's current plan:
+%s
+
+How to wire AI into this split web app:
+
+  CRITICAL ARCHITECTURE: AI features cross two tiers. The Vite frontend
+  (frontend/) NEVER imports backend/lib/wemob-ai. Instead it calls a backend
+  HTTP route. The backend route calls wemobAI().
+
+1. Backend route (backend/app/api/<feature>/route.ts):
+    import { wemobAI } from '@/lib/wemob-ai';
+    import { NextRequest, NextResponse } from 'next/server';
+    export async function POST(req: NextRequest) {
+      const { messages } = await req.json();
+      const res = await wemobAI().chat.completions.create({
+        model: '%s',
+        messages,
+      });
+      return NextResponse.json({ text: res.choices[0]?.message?.content ?? '' });
+    }
+
+2. Frontend component (frontend/src/...):
+    import { apiFetch } from '@/lib/api';
+    const data = await apiFetch<{ text: string }>('/api/<feature>', {
+      method: 'POST',
+      json: { messages: [{ role: 'user', content: '...' }] },
+    });
+
+- Streaming chat: use model '%s' in the backend route, return a streamed
+  Response, and consume it from frontend/ with fetch + ReadableStream.
+
+Rules:
+1. backend/lib/wemob-ai.ts MUST only be imported from backend/app/api/**/route.ts
+   or other backend/server files. NEVER import it from frontend/.
+2. In every user-facing message + UI string, call this "AI" or
+   "yapay zeka" — never "Wemob Gateway", "OpenRouter", "Claude", "GPT",
+   "Anthropic", or any underlying model name.`
+
 // setupAIResultTemplate is the success payload the tool returns. The chat
 // model list and the default model ID are injected at call time so the LLM
 // only ever sees models the user's tier can actually reach. Before this was
@@ -240,13 +292,17 @@ func (s SetupAIGatewayTool) Execute(ctx context.Context, rc *RunContext, input j
 	// binary itself NEVER imports the helper — WEMOB_AI_KEY is
 	// server-side-only and must never reach a React Native build.
 	isMobileNative := rc.Project != nil && rc.Project.ProjectType == models.ProjectTypeMobileAppNative
+	isSplitWeb := rc.Project != nil && (rc.Project.UsesSplitWebRuntime() || rc.Project.FrontendRuntime == models.FrontendRuntimeNone)
 	libAIPath := "lib/wemob-ai.ts"
 	pkgJSONPath := "package.json"
 	resultTemplate := setupAIResultTemplate
-	if isMobileNative {
+	if isMobileNative || isSplitWeb {
 		libAIPath = "backend/lib/wemob-ai.ts"
 		pkgJSONPath = "backend/package.json"
 		resultTemplate = mobileNativeSetupAIResultTemplate
+		if isSplitWeb {
+			resultTemplate = splitWebSetupAIResultTemplate
+		}
 
 		// Scaffold a minimal Next.js backend if the agent hasn't created
 		// one yet. Without backend/package.json, addDependenciesToPackageJSONAt

@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"io/fs"
 	"log/slog"
+	"mime"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -47,11 +49,15 @@ func isUniqueViolation(err error) bool {
 // exist, so the worker's EnsureApp call inside processWebDeployTask becomes
 // a fast no-op.
 func (c *Controller) CreateQueuedWebDeployment(project *models.AppProject, user *models.User) (*models.AppDeployment, error) {
+	provider := models.FrontendHostingFly
+	if project.UsesSplitWebRuntime() {
+		provider = models.FrontendHostingS3CDN
+	}
 	deployment := &models.AppDeployment{
 		AppProjectID: project.ID,
 		UserID:       user.ID,
 		Platform:     "web",
-		Provider:     "fly",
+		Provider:     provider,
 		Status:       "queued",
 		Version:      1,
 	}
@@ -69,11 +75,13 @@ func (c *Controller) CreateQueuedWebDeployment(project *models.AppProject, user 
 	actorID := user.ID
 	if err := database.AppendDeploymentEvent(context.Background(), c.DB.DB, deployment.ID,
 		models.DeploymentEventSubmitted, models.DeploymentEventActorUser, &actorID,
-		map[string]any{"method": "fly"}); err != nil {
+		map[string]any{"method": provider}); err != nil {
 		slog.Warn("append deployment_events.submitted failed", "err", err)
 	}
 
-	go c.preWarmFlyApp(project)
+	if !project.UsesSplitWebRuntime() || project.BackendEnabled {
+		go c.preWarmFlyApp(project)
+	}
 
 	return deployment, nil
 }
@@ -208,6 +216,10 @@ func (c *Controller) HandleWebDeployTask(ctx context.Context, t *asynq.Task) err
 
 	if err := c.MarkDeploymentBuilding(p.DeploymentID); err != nil {
 		slog.Warn("mark building failed", "err", err)
+	}
+
+	if project.UsesSplitWebRuntime() || project.FrontendRuntime == models.FrontendRuntimeNone {
+		return c.handleSplitWebDeployTask(ctx, p.DeploymentID, deployment, project, user)
 	}
 
 	// 1. Open the project's git repo and create a *disposable* worktree.
@@ -395,12 +407,314 @@ func (c *Controller) HandleWebDeployTask(ctx context.Context, t *asynq.Task) err
 	return nil
 }
 
+func (c *Controller) handleSplitWebDeployTask(ctx context.Context, deploymentID string, deployment *models.AppDeployment, project *models.AppProject, user *models.User) error {
+	if project.FrontendRuntime == models.FrontendRuntimeNone && !project.BackendEnabled {
+		return c.failTask(deploymentID, "backend_only_disabled",
+			fmt.Errorf("backend-only project has backend_enabled=false"))
+	}
+	repo, err := c.GitRepoService.Open(project.ID.String())
+	if err != nil {
+		slog.Warn("split_deploy_retryable", "deployment_id", deploymentID, "stage", "gitea_open", "error", err)
+		return fmt.Errorf("gitea_open: %w", err)
+	}
+
+	wt, err := repo.NewDisposableWorktree()
+	if err != nil {
+		slog.Warn("split_deploy_retryable", "deployment_id", deploymentID, "stage", "create_worktree", "error", err)
+		return fmt.Errorf("create_worktree: %w", err)
+	}
+	defer wt.Remove()
+
+	providerData := map[string]any{
+		"frontend_runtime": project.FrontendRuntime,
+		"frontend_hosting": project.FrontendHosting,
+		"backend_enabled":  project.BackendEnabled,
+		"backend_runtime":  project.BackendRuntime,
+	}
+
+	deployedURL := "https://" + project.Slug + "." + constants.WEMOB_APP_BASE_DOMAIN
+	if project.FrontendRuntime == models.FrontendRuntimeViteReact {
+		includeBadge, badgeErr := c.shouldInjectWemobBadge(project, user)
+		if badgeErr != nil {
+			slog.Warn("resolve vite badge setting failed", "deployment_id", deploymentID, "err", badgeErr)
+		}
+		if err := injectViteDeployScripts(wt.Path, project.ID.String(), includeBadge); err != nil {
+			return c.failTask(deploymentID, "inject_vite_scripts", err)
+		}
+		frontendDir := filepath.Join(wt.Path, "frontend")
+		distDir, buildLog, buildErr := buildViteFrontend(ctx, frontendDir)
+		if buildErr != nil {
+			return c.maybeRetryWithDetails(ctx, deploymentID, "frontend_build", buildErr, map[string]any{
+				"build_log": buildLog,
+			})
+		}
+		prefix, uploaded, uploadErr := c.uploadStaticFrontend(ctx, project, deployment, distDir)
+		if uploadErr != nil {
+			return c.maybeRetry(ctx, deploymentID, "static_upload", uploadErr)
+		}
+		providerData["static_s3_prefix"] = prefix
+		providerData["static_file_count"] = uploaded
+		providerData["static_index_key"] = prefix + "/index.html"
+		if cdnBaseURL := strings.TrimRight(os.Getenv("WEMOB_STATIC_CDN_BASE_URL"), "/"); cdnBaseURL != "" {
+			providerData["static_cdn_base_url"] = cdnBaseURL
+		}
+	}
+
+	if project.BackendEnabled {
+		if err := c.MarkDeploymentDeploying(deploymentID); err != nil {
+			slog.Warn("mark deploying failed", "err", err)
+		}
+		backendURL, backendErr := c.deployBackendSubtreeForSplit(ctx, deploymentID, project, user, wt.Path)
+		if backendErr != nil {
+			return backendErr
+		}
+		providerData["backend_url"] = backendURL
+	} else {
+		runtimeApp, err := c.ensureRuntimeApp(project, models.FrontendRuntimeViteReact, "")
+		if err != nil {
+			return c.failTask(deploymentID, "ensure_runtime_app", err)
+		}
+		runtimeApp.ProductionURL = deployedURL
+		runtimeApp.LastDeployedAt = time.Now()
+		if _, err := c.DB.UpdateRuntimeApp(runtimeApp); err != nil {
+			slog.Warn("update static runtime_app", "err", err)
+		}
+	}
+
+	provider := models.FrontendHostingS3CDN
+	if project.FrontendRuntime == models.FrontendRuntimeNone {
+		provider = models.FrontendHostingFly
+	}
+	if _, err := c.DB.DB.NewUpdate().
+		Model((*models.AppDeployment)(nil)).
+		Set("provider = ?", provider).
+		Set("provider_data = ?", providerData).
+		Set("updated_at = ?", time.Now()).
+		Where("id = ?", deploymentID).
+		Exec(ctx); err != nil {
+		return c.failTask(deploymentID, "persist_static_metadata", err)
+	}
+
+	if err := c.MarkDeploymentSucceeded(deploymentID, deployedURL); err != nil {
+		slog.Warn("mark static deploy succeeded", "err", err)
+	}
+	go c.EventService.SendEvent(user, constants.EVENT_WEB_DEPLOYMENT_SUCCEEDED, map[string]any{
+		"app_id":       project.ID.String(),
+		"version":      deployment.Version,
+		"deployed_url": deployedURL,
+	})
+	go c.TrackUserEvent(user, constants.EVENT_WEB_DEPLOYMENT_SUCCEEDED,
+		c.AppEventProps(project.ID.String()).
+			Set("deploy_version", deployment.Version).
+			Set("deployed_url", deployedURL).
+			Set("provider", provider))
+	slog.Info("split_deploy_succeeded", "deployment_id", deploymentID, "project_id", project.ID, "backend", project.BackendEnabled)
+	return nil
+}
+
+func (c *Controller) shouldInjectWemobBadge(project *models.AppProject, user *models.User) (bool, error) {
+	var limits *models.StandardUserLimits
+	if project.OrganizationID != uuid.Nil {
+		limits, _ = c.GetOrgLimits(project.OrganizationID.String())
+	}
+	if limits == nil {
+		limits, _ = c.GetUserLimits(user)
+	}
+	if limits == nil {
+		return true, nil
+	}
+	return !limits.CanRemoveBrandLogo, nil
+}
+
+func injectViteDeployScripts(worktreePath string, projectID string, includeBadge bool) error {
+	indexPath := filepath.Join(worktreePath, "frontend", "index.html")
+	data, err := os.ReadFile(indexPath)
+	if err != nil {
+		return fmt.Errorf("read frontend/index.html: %w", err)
+	}
+	fileMap := map[string]string{"frontend/index.html": string(data)}
+	injectViteStaticScripts(fileMap, projectID, includeBadge)
+	return os.WriteFile(indexPath, []byte(fileMap["frontend/index.html"]), 0o644)
+}
+
+func buildViteFrontend(ctx context.Context, frontendDir string) (distDir string, buildLog string, err error) {
+	info, statErr := os.Stat(filepath.Join(frontendDir, "package.json"))
+	if statErr != nil || info == nil || info.IsDir() {
+		return "", "", fmt.Errorf("missing frontend/package.json at %s", frontendDir)
+	}
+	installLog, installErr := runNPMCommand(ctx, frontendDir, "install", "--no-audit", "--no-fund", "--ignore-scripts", "--legacy-peer-deps")
+	buildLog += installLog
+	if installErr != nil {
+		return "", buildLog, fmt.Errorf("npm install: %w", installErr)
+	}
+	out, buildErr := runNPMCommand(ctx, frontendDir, "run", "build")
+	buildLog += out
+	if buildErr != nil {
+		return "", buildLog, fmt.Errorf("npm run build: %w", buildErr)
+	}
+	distDir = filepath.Join(frontendDir, "dist")
+	if info, statErr := os.Stat(distDir); statErr != nil || !info.IsDir() {
+		return "", buildLog, fmt.Errorf("frontend build did not produce dist/")
+	}
+	return distDir, buildLog, nil
+}
+
+func runNPMCommand(ctx context.Context, dir string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, "npm", args...)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "CI=1")
+	out, err := cmd.CombinedOutput()
+	return string(out), err
+}
+
+func (c *Controller) uploadStaticFrontend(ctx context.Context, project *models.AppProject, deployment *models.AppDeployment, distDir string) (prefix string, uploaded int, err error) {
+	if c.AssetsStorage == nil {
+		return "", 0, fmt.Errorf("assets storage is not configured")
+	}
+	prefix = fmt.Sprintf("static-sites/%s/v%d", project.ID.String(), deployment.Version)
+	err = filepath.WalkDir(distDir, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if d.IsDir() {
+			return nil
+		}
+		rel, relErr := filepath.Rel(distDir, path)
+		if relErr != nil {
+			return relErr
+		}
+		rel = filepath.ToSlash(rel)
+		data, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return readErr
+		}
+		contentType := mime.TypeByExtension(filepath.Ext(path))
+		if contentType == "" {
+			contentType = "application/octet-stream"
+		}
+		if rel == "index.html" {
+			contentType = "text/html; charset=utf-8"
+		}
+		if err := c.AssetsStorage.UploadFileByteWithContentType(ctx, prefix+"/"+rel, data, contentType); err != nil {
+			return err
+		}
+		uploaded++
+		return nil
+	})
+	return prefix, uploaded, err
+}
+
+func (c *Controller) deployBackendSubtreeForSplit(ctx context.Context, deploymentID string, project *models.AppProject, user *models.User, worktreePath string) (string, error) {
+	sourceDir := filepath.Join(worktreePath, "backend")
+	if info, statErr := os.Stat(sourceDir); statErr != nil || !info.IsDir() {
+		return "", c.failTask(deploymentID, "missing_backend_subtree",
+			fmt.Errorf("backend_enabled project has no backend/ subtree at %s", sourceDir))
+	}
+	if err := ensureNextjsDockerfile(sourceDir); err != nil {
+		return "", c.failTask(deploymentID, "ensure_backend_dockerfile", err)
+	}
+	if err := ensureNextjsRootLayout(sourceDir); err != nil {
+		return "", c.failTask(deploymentID, "ensure_backend_root_layout", err)
+	}
+
+	flyAppName := "wemob-" + project.Slug
+	runtimeApp, err := c.ensureRuntimeApp(project, models.BackendRuntimeNextJSAPI, flyAppName)
+	if err != nil {
+		return "", c.failTask(deploymentID, "ensure_backend_runtime_app", err)
+	}
+
+	envVars := c.CollectAllEnvVars(project)
+	authVars, err := c.CollectBetterAuthEnvVars(ctx, project)
+	if err != nil {
+		return "", c.maybeRetry(ctx, deploymentID, "collect_auth_env", err)
+	}
+	for k, v := range authVars {
+		envVars[k] = v
+	}
+
+	if err := c.FlyService.EnsureApp(flyAppName); err != nil {
+		return "", c.maybeRetry(ctx, deploymentID, "ensure_backend_app", err)
+	}
+
+	var (
+		imageRef          string
+		buildLog          string
+		buildErr, syncErr error
+		wg                sync.WaitGroup
+	)
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		imageRef, buildLog, buildErr = c.FlyService.BuildAndPush(flyAppName, sourceDir, deploymentID, envVars)
+	}()
+	go func() {
+		defer wg.Done()
+		syncErr = c.FlyService.SyncSecrets(flyAppName, envVars)
+	}()
+	wg.Wait()
+	if buildErr != nil {
+		return "", c.maybeRetryWithDetails(ctx, deploymentID, "backend_build", buildErr, map[string]any{
+			"build_log": buildLog,
+		})
+	}
+	if syncErr != nil {
+		return "", c.maybeRetry(ctx, deploymentID, "backend_sync_secrets", syncErr)
+	}
+
+	var limits *models.StandardUserLimits
+	if project.OrganizationID != uuid.Nil {
+		limits, _ = c.GetOrgLimits(project.OrganizationID.String())
+	}
+	if limits == nil {
+		limits, _ = c.GetUserLimits(user)
+	}
+	spec := fly.PlanMachineSpec(limits, c.resolveDeployRegion(ctx, deploymentID, project, limits))
+	spec.Image = imageRef
+	if err := c.FlyService.DeployMachines(flyAppName, spec); err != nil {
+		return "", c.maybeRetry(ctx, deploymentID, "backend_deploy_machines", err)
+	}
+
+	runtimeApp.CurrentImageRef = imageRef
+	runtimeApp.LastDeployedAt = time.Now()
+	runtimeApp.ProductionURL = "https://" + runtimeApp.CustomDomain
+	if _, err := c.DB.UpdateRuntimeApp(runtimeApp); err != nil {
+		slog.Warn("update backend runtime_app", "err", err)
+	}
+
+	if err := c.waitForHealthyWithRemediation(ctx, deploymentID, flyAppName, spec, 10*time.Minute); err != nil {
+		return "", c.maybeRetry(ctx, deploymentID, "backend_wait_healthy", err)
+	}
+	return "https://" + runtimeApp.CustomDomain, nil
+}
+
+func (c *Controller) ensureRuntimeApp(project *models.AppProject, framework string, flyAppName string) (*models.RuntimeApp, error) {
+	customDomain := project.Slug + "." + constants.WEMOB_APP_BASE_DOMAIN
+	runtimeApp, err := c.DB.GetRuntimeAppByAppProjectID(project.ID.String())
+	if err == nil && runtimeApp != nil {
+		runtimeApp.GiteaRepoName = project.Slug
+		runtimeApp.Framework = framework
+		runtimeApp.CustomDomain = customDomain
+		if flyAppName != "" {
+			runtimeApp.FlyAppName = flyAppName
+		}
+		return c.DB.UpdateRuntimeApp(runtimeApp)
+	}
+	return c.DB.CreateRuntimeApp(&models.RuntimeApp{
+		AppProjectID:  project.ID,
+		GiteaRepoName: project.Slug,
+		FlyAppName:    flyAppName,
+		Framework:     framework,
+		CustomDomain:  customDomain,
+		ProductionURL: "https://" + customDomain,
+	})
+}
+
 // resolveDeployRegion picks the region for this deploy attempt. Precedence:
-//   1. host-init-bug remediation override (per-attempt, persisted in
-//      deployment_events) — re-running the known-bad primary would burn
-//      another 10min WaitForHealthy budget.
-//   2. project.Region (E6 region selection), gated on limits.CanChooseRegion.
-//   3. FlyService.Region (FLY_PRIMARY_REGION fallback).
+//  1. host-init-bug remediation override (per-attempt, persisted in
+//     deployment_events) — re-running the known-bad primary would burn
+//     another 10min WaitForHealthy budget.
+//  2. project.Region (E6 region selection), gated on limits.CanChooseRegion.
+//  3. FlyService.Region (FLY_PRIMARY_REGION fallback).
 func (c *Controller) resolveDeployRegion(ctx context.Context, deploymentID string, project *models.AppProject, limits *models.StandardUserLimits) string {
 	if id, err := uuid.Parse(deploymentID); err == nil {
 		if meta, err := database.LatestEventMetadata(ctx, c.DB.DB, id, models.DeploymentEventFlyHostRemediation); err == nil && meta != nil {

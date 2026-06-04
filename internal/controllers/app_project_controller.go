@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -79,6 +80,16 @@ func (c *Controller) CreateAppProject(ctx context.Context, user *models.User, re
 	if projectType == "" {
 		projectType = "app"
 	}
+	frontendRuntime, frontendHosting, backendEnabled, backendRuntime := defaultProjectCapabilities(projectType)
+	if override := strings.TrimSpace(req.FrontendRuntime); override != "" &&
+		projectType == models.ProjectTypeApp &&
+		os.Getenv("WEMOB_ALLOW_FRONTEND_RUNTIME_OVERRIDE") == "1" {
+		frontendRuntime, frontendHosting = frontendCapabilitiesForRuntime(override)
+		if frontendRuntime == models.FrontendRuntimeNone {
+			backendEnabled = true
+			backendRuntime = models.BackendRuntimeNextJSAPI
+		}
+	}
 
 	// §B Phase 4: project quota is org-scoped (Plan A made limits org-scoped),
 	// so the count must be too. Resolve the actor's org early so both the count
@@ -147,16 +158,20 @@ func (c *Controller) CreateAppProject(ctx context.Context, user *models.User, re
 	}
 
 	project := &models.AppProject{
-		UserID:         user.ID,
-		OrganizationID: orgID,
-		Name:           name,
-		Slug:           slug,
-		Prompt:         req.Prompt,
-		ProjectType:    projectType,
-		Theme:          []byte("{}"),
-		DataModels:     []byte("[]"),
-		Settings:       settings,
-		Status:         "generating",
+		UserID:          user.ID,
+		OrganizationID:  orgID,
+		Name:            name,
+		Slug:            slug,
+		Prompt:          req.Prompt,
+		ProjectType:     projectType,
+		FrontendRuntime: frontendRuntime,
+		FrontendHosting: frontendHosting,
+		BackendEnabled:  backendEnabled,
+		BackendRuntime:  backendRuntime,
+		Theme:           []byte("{}"),
+		DataModels:      []byte("[]"),
+		Settings:        settings,
+		Status:          "generating",
 	}
 
 	project, err = c.DB.CreateAppProject(project)
@@ -278,6 +293,28 @@ functionality (persisted data, auth, payments, push, marketing landing).
 	}
 
 	return project, nil
+}
+
+func defaultProjectCapabilities(projectType string) (frontendRuntime, frontendHosting string, backendEnabled bool, backendRuntime string) {
+	switch projectType {
+	case models.ProjectTypeMobileAppNative:
+		return models.FrontendRuntimeExpoNative, models.FrontendHostingCodemagic, false, models.BackendRuntimeNone
+	case models.ProjectTypeEcommerce:
+		return models.FrontendRuntimeNextJSLegacy, models.FrontendHostingFly, false, models.BackendRuntimeNone
+	default:
+		return models.FrontendRuntimeViteReact, models.FrontendHostingS3CDN, false, models.BackendRuntimeNone
+	}
+}
+
+func frontendCapabilitiesForRuntime(runtime string) (frontendRuntime, frontendHosting string) {
+	switch runtime {
+	case models.FrontendRuntimeNextJSLegacy:
+		return models.FrontendRuntimeNextJSLegacy, models.FrontendHostingFly
+	case models.FrontendRuntimeNone:
+		return models.FrontendRuntimeNone, models.FrontendHostingNone
+	default:
+		return models.FrontendRuntimeViteReact, models.FrontendHostingS3CDN
+	}
 }
 
 func (c *Controller) GetAppProjectsByUserFiltered(user *models.User, types []string) ([]models.AppProject, error) {

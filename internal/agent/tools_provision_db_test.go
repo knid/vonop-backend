@@ -166,3 +166,48 @@ func TestProvisionDatabase_WebProjectUnchanged(t *testing.T) {
 		t.Error("web result should still mention force-dynamic")
 	}
 }
+
+func TestProvisionDatabase_SplitWebWritesBackendPaths(t *testing.T) {
+	project := &models.AppProject{
+		ProjectType:     models.ProjectTypeApp,
+		FrontendRuntime: models.FrontendRuntimeViteReact,
+		FrontendHosting: models.FrontendHostingS3CDN,
+		Settings:        map[string]any{},
+	}
+	rc := fakeRunContextForDB(t, project, map[string]string{
+		"frontend/package.json": `{"name":"frontend","dependencies":{}}`,
+	})
+	deps := &RunDependencies{
+		ProvisionDatabase: func(_ context.Context, _ *models.AppProject, _ []models.DataModel) error { return nil },
+		NeonConnString:    func(_ string) (string, error) { return "", nil },
+	}
+	tool := ProvisionDatabaseTool{Deps: deps}
+
+	input, _ := json.Marshal(map[string]any{
+		"tables": []map[string]any{{"name": "posts", "columns": []map[string]any{{"name": "id", "type": "uuid"}}}},
+	})
+	result, isErr, err := tool.Execute(context.Background(), rc, input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if isErr {
+		t.Fatalf("unexpected isError=true: %s", result)
+	}
+
+	if _, ok := rc.FileMap.Get("backend/lib/db.ts"); !ok {
+		t.Error("split web should write backend/lib/db.ts")
+	}
+	if _, ok := rc.FileMap.Get("lib/db.ts"); ok {
+		t.Error("split web must NOT write root lib/db.ts")
+	}
+	pkg, _ := rc.FileMap.Get("backend/package.json")
+	if !strings.Contains(pkg, "@neondatabase/serverless") || !strings.Contains(pkg, "drizzle-orm") {
+		t.Errorf("backend/package.json missing database deps: %s", pkg)
+	}
+	if !strings.Contains(result, "frontend/") || !strings.Contains(result, "backend/app/api") {
+		t.Errorf("split web result should describe frontend→backend CRUD pattern, got first 500 chars: %s", result[:min(500, len(result))])
+	}
+	if strings.Contains(result, "force-dynamic") {
+		t.Error("split web result must not mention root Next.js force-dynamic pages")
+	}
+}

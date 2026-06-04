@@ -122,6 +122,8 @@ func isProtectedRead(path string) bool {
 const (
 	mobileNativePathPrefixMobile  = "mobile/"
 	mobileNativePathPrefixBackend = "backend/"
+	splitWebPathPrefixFrontend    = "frontend/"
+	splitWebPathPrefixBackend     = "backend/"
 )
 
 // enforceProjectPathScope rejects writes outside the canonical subtrees
@@ -133,6 +135,22 @@ const (
 func enforceProjectPathScope(rc *RunContext, path string) string {
 	if rc == nil || rc.Project == nil {
 		return ""
+	}
+	if rc.Project.ProjectType == models.ProjectTypeApp &&
+		(rc.Project.UsesSplitWebRuntime() || rc.Project.FrontendRuntime == models.FrontendRuntimeNone) {
+		if path == designFilePath {
+			return ""
+		}
+		if rc.Project.UsesSplitWebRuntime() && strings.HasPrefix(path, splitWebPathPrefixFrontend) {
+			return ""
+		}
+		if strings.HasPrefix(path, splitWebPathPrefixBackend) {
+			return ""
+		}
+		return fmt.Sprintf(
+			"path %q is outside the allowed split-web subtrees. Write Vite UI under %q (e.g. frontend/src/App.tsx) and Next.js API routes under %q (e.g. backend/app/api/chat/route.ts).",
+			path, splitWebPathPrefixFrontend, splitWebPathPrefixBackend,
+		)
 	}
 	if rc.Project.ProjectType != models.ProjectTypeMobileAppNative {
 		return ""

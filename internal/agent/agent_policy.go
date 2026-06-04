@@ -113,19 +113,11 @@ func ValidateAgentOutput(profile *AgentProfile, fileMap *SafeFileMap, state *Bui
 	if profile != nil && profile.ValidationPolicy != nil {
 		return profile.ValidationPolicy(fileMap, state, prompt, isFirstGen, project, skills)
 	}
-	projectType := ""
-	if project != nil {
-		projectType = project.ProjectType
-	}
-	return validateGeneratedApp(fileMap, state, prompt, isFirstGen, projectType)
+	return validateGeneratedApp(fileMap, state, prompt, isFirstGen, project)
 }
 
 func DefaultValidationPolicy(fileMap *SafeFileMap, state *BuildState, prompt string, isFirstGen bool, project *models.AppProject, skills []SkillFile) error {
-	projectType := ""
-	if project != nil {
-		projectType = project.ProjectType
-	}
-	return validateGeneratedApp(fileMap, state, prompt, isFirstGen, projectType)
+	return validateGeneratedApp(fileMap, state, prompt, isFirstGen, project)
 }
 
 var mutatingToolNames = []string{

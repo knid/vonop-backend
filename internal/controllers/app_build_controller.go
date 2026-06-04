@@ -323,17 +323,17 @@ func (c *Controller) BuildExpoMobile(ctx context.Context, project *models.AppPro
 				triggerErr = fmt.Errorf("insufficient credits to trigger iOS build: %w", chargeErr)
 			} else {
 				cmBuildID, triggerErr = c.CodemagicService.TriggerExpoIOSBuild(ctx, codemagic.ExpoIOSBuildParams{
-					ProjectID:                      project.ID,
-					BuildID:                        build.ID,
-					TaskID:                         task.ID,
-					AppTitle:                       build.Title,
-					AppSlug:                        project.Slug,
-					BundleID:                       bundleID,
-					BuildNumber:                    nextNum,
-					MarketingVersion:               marketingVer,
-					SplashColor:                    build.SplashScreenColor,
-					IconKey:                        opts.Icon,
-					EASProjectUUID:                 project.ID.String(),
+					ProjectID:        project.ID,
+					BuildID:          build.ID,
+					TaskID:           task.ID,
+					AppTitle:         build.Title,
+					AppSlug:          project.Slug,
+					BundleID:         bundleID,
+					BuildNumber:      nextNum,
+					MarketingVersion: marketingVer,
+					SplashColor:      build.SplashScreenColor,
+					IconKey:          opts.Icon,
+					EASProjectUUID:   project.ID.String(),
 					// XcodeScheme intentionally left blank — the Codemagic workflow
 					// derives it post-prebuild (P1.1.A T4 fix).
 					ExpoPublicAPIURL:               expoPublicAPIURL,
@@ -551,6 +551,11 @@ func (c *Controller) ValidateAppFiles(ctx context.Context, projectID string, use
 // GetPreviewBundle returns all project files and env vars for the E2B
 // sandbox preview. The shape varies by project_type:
 //
+//   - vite_react: returns the frontend/ subtree with the prefix stripped so
+//     the existing sandbox can run npm scripts from its root. backend/ files
+//     are returned separately for split-aware clients.
+//   - frontend_runtime=none: returns only the backend/ subtree with the prefix
+//     stripped so internal backend-only previews run against the API app.
 //   - mobile_app_native: returns only the mobile/ subtree (with the prefix
 //     stripped) so the sandbox runs `npx expo start --web` against the
 //     Expo project directly. backend/ is omitted — it deploys to Fly,
@@ -574,13 +579,41 @@ func (c *Controller) GetPreviewBundle(project *models.AppProject) (map[string]in
 
 	envVars := c.CollectAllEnvVars(project)
 
-	if project.ProjectType == models.ProjectTypeMobileAppNative {
-		mobileFiles := make(map[string]string, len(fileMap))
-		for path, content := range fileMap {
-			if strings.HasPrefix(path, "mobile/") {
-				mobileFiles[strings.TrimPrefix(path, "mobile/")] = content
-			}
+	if project.UsesSplitWebRuntime() {
+		frontendFiles := stripPreviewSubtree(fileMap, "frontend/")
+		if len(frontendFiles) == 0 {
+			return nil, fmt.Errorf("no frontend files found")
 		}
+		return map[string]interface{}{
+			"files":            frontendFiles,
+			"backend_files":    stripPreviewSubtree(fileMap, "backend/"),
+			"env_vars":         envVars,
+			"project_type":     project.ProjectType,
+			"frontend_runtime": project.FrontendRuntime,
+			"frontend_root":    "frontend",
+			"backend_enabled":  project.BackendEnabled,
+			"backend_runtime":  project.BackendRuntime,
+		}, nil
+	}
+
+	if project.FrontendRuntime == models.FrontendRuntimeNone {
+		backendFiles := stripPreviewSubtree(fileMap, "backend/")
+		if len(backendFiles) == 0 {
+			return nil, fmt.Errorf("no backend files found")
+		}
+		return map[string]interface{}{
+			"files":            backendFiles,
+			"env_vars":         envVars,
+			"project_type":     project.ProjectType,
+			"frontend_runtime": project.FrontendRuntime,
+			"backend_enabled":  project.BackendEnabled,
+			"backend_runtime":  project.BackendRuntime,
+			"backend_root":     "backend",
+		}, nil
+	}
+
+	if project.ProjectType == models.ProjectTypeMobileAppNative {
+		mobileFiles := stripPreviewSubtree(fileMap, "mobile/")
 		return map[string]interface{}{
 			"files":        mobileFiles,
 			"env_vars":     envVars,
@@ -598,6 +631,16 @@ func (c *Controller) GetPreviewBundle(project *models.AppProject) (map[string]in
 		"env_vars":     envVars,
 		"project_type": project.ProjectType,
 	}, nil
+}
+
+func stripPreviewSubtree(fileMap map[string]string, prefix string) map[string]string {
+	files := make(map[string]string)
+	for path, content := range fileMap {
+		if strings.HasPrefix(path, prefix) {
+			files[strings.TrimPrefix(path, prefix)] = content
+		}
+	}
+	return files
 }
 
 // injectCustomErrorPages writes app/error.tsx, app/not-found.tsx, and
@@ -629,7 +672,7 @@ func injectCustomErrorPages(fileMap map[string]string, lang string) {
 // using dangerouslySetInnerHTML here.
 func injectWemobBadge(fileMap map[string]string) {
 	escapedBody := strings.ReplaceAll(constants.WEMOB_BADGE_SCRIPT, "`", "\\`")
-	jsxScript := `<script data-wemob-badge dangerouslySetInnerHTML={{ __html: ` + "`" + escapedBody + "`" + ` }}></script>`
+	jsxScript := `<script data-wemob-badge-loader dangerouslySetInnerHTML={{ __html: ` + "`" + escapedBody + "`" + ` }}></script>`
 
 	layoutPaths := []string{
 		"app/layout.tsx",
@@ -685,6 +728,39 @@ func injectWemobAnalytics(fileMap map[string]string, projectID string) {
 			return
 		}
 	}
+}
+
+func injectViteStaticScripts(fileMap map[string]string, projectID string, includeBadge bool) {
+	const indexPath = "frontend/index.html"
+	content, ok := fileMap[indexPath]
+	if !ok {
+		return
+	}
+
+	var scripts []string
+	if includeBadge && !strings.Contains(content, "data-wemob-badge") {
+		scripts = append(scripts, inlineScriptTag("wemob-badge-loader", constants.WEMOB_BADGE_SCRIPT))
+	}
+	if !strings.Contains(content, "data-wemob-analytics") {
+		script := strings.ReplaceAll(constants.WEMOB_ANALYTICS_SCRIPT, "__WEMOB_PROJECT_ID__", projectID)
+		scripts = append(scripts, inlineScriptTag("wemob-analytics", script))
+	}
+	if len(scripts) == 0 {
+		return
+	}
+
+	injection := strings.Join(scripts, "\n") + "\n"
+	lower := strings.ToLower(content)
+	if idx := strings.LastIndex(lower, "</body>"); idx >= 0 {
+		fileMap[indexPath] = content[:idx] + injection + content[idx:]
+		return
+	}
+	fileMap[indexPath] = content + "\n" + injection
+}
+
+func inlineScriptTag(name, body string) string {
+	body = strings.ReplaceAll(body, "</script", "<\\/script")
+	return `<script data-` + name + `>` + body + `</script>`
 }
 
 // CaptureAppScreenshot takes a desktop screenshot of the preview URL and uploads it to S3.
@@ -782,5 +858,3 @@ func (c *Controller) WebPreviewURL(project *models.AppProject) string {
 	}
 	return base + "/_web/"
 }
-
-

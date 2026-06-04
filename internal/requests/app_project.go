@@ -7,10 +7,11 @@ import (
 )
 
 type GenerateAppRequest struct {
-	Prompt         string     `json:"prompt" validate:"required" errormgs:"is required"`
-	ProjectType    string     `json:"project_type" validate:"omitempty,oneof=app ecommerce mobile_app_native" errormgs:"must be 'app', 'ecommerce', or 'mobile_app_native'"`
-	Images         []string   `json:"images,omitempty"`
-	OrganizationID *uuid.UUID `json:"organization_id,omitempty"`
+	Prompt          string     `json:"prompt" validate:"required" errormgs:"is required"`
+	ProjectType     string     `json:"project_type" validate:"omitempty,oneof=app ecommerce mobile_app_native" errormgs:"must be 'app', 'ecommerce', or 'mobile_app_native'"`
+	FrontendRuntime string     `json:"frontend_runtime,omitempty" validate:"omitempty,oneof=nextjs_legacy vite_react expo_native none" errormgs:"must be a supported frontend runtime"`
+	Images          []string   `json:"images,omitempty"`
+	OrganizationID  *uuid.UUID `json:"organization_id,omitempty"`
 }
 
 func (r *GenerateAppRequest) Validate(validate *validator.Validate) error {
