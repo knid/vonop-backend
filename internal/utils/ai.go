@@ -1310,7 +1310,7 @@ func StreamWithTools(
 		}
 		if stripAfter >= 0 && consecutiveToolRounds >= stripAfter {
 			if !stripped {
-				stripContent := "FINAL WARNING: You MUST generate your complete response NOW. Research tools have been removed — use write_file, edit_file, and other action tools to complete your task with the information you have already gathered."
+				stripContent := "FINAL WARNING: You MUST generate your complete response NOW. Research tools have been removed — use write_files, edit_file, and other action tools to complete your task with the information you have already gathered."
 				if len(opts) > 0 && opts[0].StripMessage != "" {
 					stripContent = opts[0].StripMessage
 				}
@@ -2098,7 +2098,7 @@ func StreamWithTools(
 				// Clear extended reasoning to save tokens, but keep the assistant's
 				// short text content so the LLM retains context about what it just did.
 				currentMessages[assistantMsgIdx].ReasoningContent = ""
-				// Trim tool call arguments (e.g. strip file content from write_file)
+				// Trim tool call arguments (e.g. strip file content from write_files)
 				for i := range currentMessages[assistantMsgIdx].ToolCalls {
 					tc := &currentMessages[assistantMsgIdx].ToolCalls[i]
 					if tc.Function != nil {

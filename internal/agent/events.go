@@ -68,11 +68,14 @@ type ToolCallResultEvent struct {
 }
 
 type FileWrittenEvent struct {
-	RunID     uuid.UUID `json:"run_id"`
-	Path      string    `json:"path"`
-	Operation string    `json:"operation"` // "create" | "update"
-	Bytes     int       `json:"bytes"`
-	Content   string    `json:"content"`
+	RunID      uuid.UUID `json:"run_id"`
+	Path       string    `json:"path"`
+	Operation  string    `json:"operation"` // "create" | "update"
+	Bytes      int       `json:"bytes"`
+	Content    string    `json:"content"`
+	BatchID    string    `json:"batch_id,omitempty"`
+	BatchIndex int       `json:"batch_index,omitempty"`
+	BatchTotal int       `json:"batch_total,omitempty"`
 }
 
 type FileDeletedEvent struct {

@@ -11,8 +11,18 @@ const yachtSaaSPrompt = `Create a Yacht Logbook SaaS platform.
 Admin/Yacht Owner can manage yachts. Captain can only see assigned yacht.
 Include weekly status entry form, log history, smart alerts, and mobile-first dashboard.`
 
+const validDesignBrief = `# DESIGN.md
+
+## Register
+Product
+
+## Design Direction
+Operational, dense, and calm.
+`
+
 func TestValidateGeneratedAppRejectsMarketingBrochureForSaaSRequest(t *testing.T) {
 	files := NewSafeFileMap(map[string]string{
+		"DESIGN.md":      validDesignBrief,
 		"app/layout.tsx": "export default function Layout({children}) { return children }",
 		"app/page.tsx":   "export default function Page(){ return <main>Hero Testimonials CTA Yacht showcase</main> }",
 	})
@@ -31,6 +41,7 @@ func TestValidateGeneratedAppRejectsMarketingBrochureForSaaSRequest(t *testing.T
 
 func TestValidateGeneratedAppAllowsOperationalSaaSShape(t *testing.T) {
 	files := NewSafeFileMap(map[string]string{
+		"DESIGN.md":      validDesignBrief,
 		"app/layout.tsx": "export default function Layout({children}) { return children }",
 		"app/page.tsx": `export default function Page(){
 			return <main>
@@ -87,5 +98,38 @@ func TestValidateGeneratedAppRejectsImagePlaceholders(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "app/page.tsx") {
 		t.Fatalf("expected path in error, got: %v", err)
+	}
+}
+
+func TestValidateGeneratedAppRejectsMissingDesignBrief(t *testing.T) {
+	files := NewSafeFileMap(map[string]string{
+		"app/layout.tsx": "export default function Layout({children}) { return children }",
+		"app/page.tsx":   "export default function Page(){ return <main>Ready</main> }",
+	})
+
+	err := validateGeneratedApp(files, NewBuildState("portfolio", true), "portfolio", true, models.ProjectTypeApp)
+	if err == nil {
+		t.Fatal("expected design validation error")
+	}
+	if !strings.Contains(err.Error(), "DESIGN.md is missing") {
+		t.Fatalf("expected missing DESIGN.md error, got: %v", err)
+	}
+}
+
+func TestValidateGeneratedAppRejectsMalformedDesignBrief(t *testing.T) {
+	files := NewSafeFileMap(map[string]string{
+		"DESIGN.md":      "# Design Brief\n\n## Identity\nMara Voss\n",
+		"app/layout.tsx": "export default function Layout({children}) { return children }",
+		"app/page.tsx":   "export default function Page(){ return <main>Ready</main> }",
+	})
+
+	err := validateGeneratedApp(files, NewBuildState("portfolio", true), "portfolio", true, models.ProjectTypeApp)
+	if err == nil {
+		t.Fatal("expected design validation error")
+	}
+	for _, want := range []string{"register", "design direction"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("expected %q in validation error, got: %v", want, err)
+		}
 	}
 }

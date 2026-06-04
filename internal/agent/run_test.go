@@ -136,7 +136,7 @@ func TestConvertHistory_AssistantMultiRound(t *testing.T) {
 func TestConvertHistory_MixedConversation(t *testing.T) {
 	parts, _ := json.Marshal([]models.ChatMessagePart{
 		{Type: "text", Text: "Done."},
-		{Type: "tool_call", ToolCallID: "tc1", Name: "write_file", Input: []byte(`{}`), Result: "ok"},
+		{Type: "tool_call", ToolCallID: "tc1", Name: "write_files", Input: []byte(`{}`), Result: "ok"},
 	})
 	history := []models.AppChatMessage{
 		{Role: "user", Content: "make it blue"},

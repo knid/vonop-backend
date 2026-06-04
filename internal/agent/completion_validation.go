@@ -39,6 +39,13 @@ func validateGeneratedApp(fileMap *SafeFileMap, state *BuildState, prompt string
 	if _, ok := fileMap.Get("app/page.tsx"); !ok {
 		return fmt.Errorf("generated app validation failed: app/page.tsx is missing")
 	}
+	design, ok := fileMap.Get(designFilePath)
+	if !ok {
+		return fmt.Errorf("generated app validation failed: DESIGN.md is missing")
+	}
+	if err := validateDesignBriefContent(design); err != nil {
+		return fmt.Errorf("generated app validation failed: %w", err)
+	}
 	if err := validateNoImagePlaceholders(fileMap); err != nil {
 		return err
 	}

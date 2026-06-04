@@ -70,12 +70,12 @@ func TestReadFilesTool_RejectsEmptyAndOversizedBatches(t *testing.T) {
 	}
 }
 
-func TestWriteFileTool_RejectsAccidentalRewriteOfExistingFile(t *testing.T) {
+func TestWriteFilesTool_RejectsAccidentalRewriteOfExistingFile(t *testing.T) {
 	rc := newPathScopeTestRC(models.ProjectTypeApp)
 	rc.FileMap.Set("app/page.tsx", strings.Repeat("a", 6*1024))
 
-	out, isError, err := WriteFileTool{}.Execute(context.Background(), rc,
-		json.RawMessage(`{"path":"app/page.tsx","content":"new content"}`))
+	out, isError, err := WriteFilesTool{}.Execute(context.Background(), rc,
+		json.RawMessage(`{"files":[{"path":"app/page.tsx","content":"new content"}]}`))
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -87,12 +87,12 @@ func TestWriteFileTool_RejectsAccidentalRewriteOfExistingFile(t *testing.T) {
 	}
 }
 
-func TestWriteFileTool_AllowsIntentionalRewriteOfExistingFile(t *testing.T) {
+func TestWriteFilesTool_AllowsIntentionalRewriteOfExistingFile(t *testing.T) {
 	rc := newPathScopeTestRC(models.ProjectTypeApp)
 	rc.FileMap.Set("app/stub.tsx", "stub")
 
-	out, isError, err := WriteFileTool{}.Execute(context.Background(), rc,
-		json.RawMessage(`{"path":"app/stub.tsx","content":"export default function () { return null }","overwrite":true,"reason":"replace generated stub with full file"}`))
+	out, isError, err := WriteFilesTool{}.Execute(context.Background(), rc,
+		json.RawMessage(`{"files":[{"path":"app/stub.tsx","content":"export default function () { return null }","overwrite":true,"reason":"replace generated stub with full file"}]}`))
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -104,18 +104,86 @@ func TestWriteFileTool_AllowsIntentionalRewriteOfExistingFile(t *testing.T) {
 	}
 }
 
-func TestWriteFileTool_AllowsCreationOfNewFileAtAnySize(t *testing.T) {
+func TestWriteFilesTool_AllowsCreationOfNewFileAtAnySize(t *testing.T) {
 	rc := newPathScopeTestRC(models.ProjectTypeApp)
 
 	body, _ := json.Marshal(map[string]any{
-		"path":    "app/big-new.tsx",
-		"content": strings.Repeat("a", 24*1024),
+		"files": []map[string]any{
+			{
+				"path":    "app/big-new.tsx",
+				"content": strings.Repeat("a", 24*1024),
+			},
+		},
 	})
-	_, isError, err := WriteFileTool{}.Execute(context.Background(), rc, body)
+	_, isError, err := WriteFilesTool{}.Execute(context.Background(), rc, body)
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
 	if isError {
 		t.Error("expected isError=false: new file creation should succeed regardless of size")
+	}
+}
+
+func TestWriteFilesTool_IsAtomicWhenAnyEntryFails(t *testing.T) {
+	rc := newPathScopeTestRC(models.ProjectTypeApp)
+
+	out, isError, err := WriteFilesTool{}.Execute(context.Background(), rc,
+		json.RawMessage(`{"files":[
+			{"path":"DESIGN.md","content":"# Design Brief\n\n## Identity\nMissing required sections\n"},
+			{"path":"app/page.tsx","content":"export default function Page(){ return null }"}
+		]}`))
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if !isError {
+		t.Fatalf("expected batch validation failure, got: %s", out)
+	}
+	if !strings.Contains(out, "failed before writing any files") {
+		t.Fatalf("expected atomic failure message, got: %s", out)
+	}
+	if _, ok := rc.FileMap.Get("app/page.tsx"); ok {
+		t.Fatal("valid sibling file was written despite batch failure")
+	}
+}
+
+func TestWriteFilesTool_RejectsDuplicatePathsBeforeWriting(t *testing.T) {
+	rc := newPathScopeTestRC(models.ProjectTypeApp)
+
+	out, isError, err := WriteFilesTool{}.Execute(context.Background(), rc,
+		json.RawMessage(`{"files":[
+			{"path":"app/page.tsx","content":"first"},
+			{"path":"./app/page.tsx","content":"second"}
+		]}`))
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if !isError {
+		t.Fatalf("expected duplicate path failure, got: %s", out)
+	}
+	if !strings.Contains(out, "duplicate path") {
+		t.Fatalf("expected duplicate path message, got: %s", out)
+	}
+	if _, ok := rc.FileMap.Get("app/page.tsx"); ok {
+		t.Fatal("duplicate batch wrote a file")
+	}
+}
+
+func TestWriteFilesTool_ReturnsBatchSummary(t *testing.T) {
+	rc := newPathScopeTestRC(models.ProjectTypeApp)
+	rc.FileMap.Set("app/existing.tsx", "old")
+
+	out, isError, err := WriteFilesTool{}.Execute(context.Background(), rc,
+		json.RawMessage(`{"files":[
+			{"path":"app/new.tsx","content":"new"},
+			{"path":"app/existing.tsx","content":"updated","overwrite":true,"reason":"replace generated stub"}
+		]}`))
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if isError {
+		t.Fatalf("expected success, got: %s", out)
+	}
+	if !strings.Contains(out, "wrote 2 files: created 1, updated 1") {
+		t.Fatalf("expected batch summary, got: %s", out)
 	}
 }

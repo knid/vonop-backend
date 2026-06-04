@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/utils"
 )
@@ -355,90 +356,96 @@ func (DeleteFileTool) Execute(ctx context.Context, rc *RunContext, input json.Ra
 	return fmt.Sprintf("deleted %s", path), false, nil
 }
 
-// ---------- write_file ----------
+// ---------- shared full-file writes ----------
 
 const (
 	maxWriteBytes = 200 * 1024 // 200 KB
-
 )
 
-type WriteFileTool struct{}
-
-func (WriteFileTool) Name() string { return "write_file" }
-func (WriteFileTool) Description() string {
-	return "Create a new file. To fully overwrite an existing file, pass overwrite=true with a short reason; prefer edit_file or multi_edit for targeted changes."
-}
-func (WriteFileTool) Schema() map[string]any {
-	return map[string]any{
-		"type": "object",
-		"properties": map[string]any{
-			"path":        map[string]any{"type": "string"},
-			"content":     map[string]any{"type": "string"},
-			"description": map[string]any{"type": "string"},
-			"overwrite":   map[string]any{"type": "boolean", "description": "Set true only when intentionally replacing the entire existing file."},
-			"reason":      map[string]any{"type": "string", "description": "Required when overwrite=true. Explain why a full rewrite is safer than edit_file or multi_edit."},
-		},
-		"required": []string{"path", "content"},
-	}
+type fileWritePlan struct {
+	Path       string
+	Content    string
+	Operation  string
+	BatchID    string
+	BatchIndex int
+	BatchTotal int
 }
 
-func (WriteFileTool) Execute(ctx context.Context, rc *RunContext, input json.RawMessage) (string, bool, error) {
-	var args struct {
-		Path        string `json:"path"`
-		Content     string `json:"content"`
-		Description string `json:"description"`
-		Overwrite   bool   `json:"overwrite"`
-		Reason      string `json:"reason"`
-	}
-	if err := json.Unmarshal(input, &args); err != nil {
-		return fmt.Sprintf("invalid input: %v", err), true, nil
-	}
-	path, err := sanitizePath(args.Path)
+func planFileWrite(rc *RunContext, rawPath, content string, overwrite bool, reason, batchID string, batchIndex, batchTotal int) (*fileWritePlan, string) {
+	path, err := sanitizePath(rawPath)
 	if err != nil {
-		return err.Error(), true, nil
+		return nil, err.Error()
 	}
 	if isProtected(path) {
-		return fmt.Sprintf("protected file, cannot overwrite: %s", path), true, nil
+		return nil, fmt.Sprintf("protected file, cannot overwrite: %s", path)
 	}
 	if msg := enforceProjectPathScope(rc, path); msg != "" {
-		return msg, true, nil
+		return nil, msg
 	}
-	if len(args.Content) > maxWriteBytes {
-		return fmt.Sprintf("content too large: %d bytes (max %d)", len(args.Content), maxWriteBytes), true, nil
+	if len(content) > maxWriteBytes {
+		return nil, fmt.Sprintf("content too large: %d bytes (max %d)", len(content), maxWriteBytes)
+	}
+	if isDesignFilePath(path) {
+		if err := validateDesignBriefContent(content); err != nil {
+			return nil, err.Error()
+		}
 	}
 
 	op := "update"
 	_, exists := rc.FileMap.Get(path)
 	if !exists {
 		op = "create"
-	} else if !args.Overwrite {
-		return fmt.Sprintf("file already exists: %s — use edit_file/multi_edit for targeted changes, or call write_file again with overwrite=true and a reason if a full rewrite is intentional", path), true, nil
-	} else if strings.TrimSpace(args.Reason) == "" {
-		return fmt.Sprintf("overwrite reason is required for existing file: %s", path), true, nil
+	} else if !overwrite {
+		return nil, fmt.Sprintf("file already exists: %s — use edit_file/multi_edit for targeted changes, or call write_files again with overwrite=true and a reason if a full rewrite is intentional", path)
+	} else if strings.TrimSpace(reason) == "" {
+		return nil, fmt.Sprintf("overwrite reason is required for existing file: %s", path)
 	}
-	rc.FileMap.Set(path, args.Content)
+
+	return &fileWritePlan{
+		Path:       path,
+		Content:    content,
+		Operation:  op,
+		BatchID:    batchID,
+		BatchIndex: batchIndex,
+		BatchTotal: batchTotal,
+	}, ""
+}
+
+func commitFileWrite(rc *RunContext, plan fileWritePlan) string {
+	rc.FileMap.Set(plan.Path, plan.Content)
 	if rc.BuildState != nil {
-		rc.BuildState.RecordFileWrite(path, op)
+		rc.BuildState.RecordFileWrite(plan.Path, plan.Operation)
 	}
 	rc.Emitter.Emit(EventFileWritten, FileWrittenEvent{
-		RunID:     rc.RunID,
-		Path:      path,
-		Operation: op,
-		Bytes:     len(args.Content),
-		Content:   args.Content,
+		RunID:      rc.RunID,
+		Path:       plan.Path,
+		Operation:  plan.Operation,
+		Bytes:      len(plan.Content),
+		Content:    plan.Content,
+		BatchID:    plan.BatchID,
+		BatchIndex: plan.BatchIndex,
+		BatchTotal: plan.BatchTotal,
 	})
-	return fmt.Sprintf("%sd %s (%d bytes)", op, path, len(args.Content)), false, nil
+	return fmt.Sprintf("%sd %s (%d bytes)", plan.Operation, plan.Path, len(plan.Content))
+}
+
+func writeFileContent(rc *RunContext, rawPath, content string, overwrite bool, reason, batchID string, batchIndex, batchTotal int) (string, bool, error) {
+	plan, msg := planFileWrite(rc, rawPath, content, overwrite, reason, batchID, batchIndex, batchTotal)
+	if msg != "" {
+		return msg, true, nil
+	}
+	return commitFileWrite(rc, *plan), false, nil
 }
 
 // ---------- write_files ----------
 
-const writeFilesMaxFiles = 20
+const writeFilesMaxFiles = 50
 
 type WriteFilesTool struct{}
 
 func (WriteFilesTool) Name() string { return "write_files" }
 func (WriteFilesTool) Description() string {
-	return "Create or fully overwrite multiple files in one call. Each entry has the same semantics as write_file. Existing files require overwrite=true and a reason."
+	return "Create or fully overwrite one or more files in one call. Existing files require overwrite=true and a reason."
 }
 func (WriteFilesTool) Schema() map[string]any {
 	return map[string]any{
@@ -484,25 +491,138 @@ func (WriteFilesTool) Execute(ctx context.Context, rc *RunContext, input json.Ra
 		return fmt.Sprintf("too many files: %d (max %d) — split into multiple calls", len(args.Files), writeFilesMaxFiles), true, nil
 	}
 
-	var sb strings.Builder
-	hadError := false
-	tool := WriteFileTool{}
+	batchID := ""
+	if len(args.Files) > 1 {
+		batchID = uuid.NewString()
+	}
+	seenPaths := make(map[string]int, len(args.Files))
+	plans := make([]fileWritePlan, 0, len(args.Files))
+	var validationErrors []string
 	for i, f := range args.Files {
-		payload, _ := json.Marshal(f)
-		result, isErr, err := tool.Execute(ctx, rc, payload)
-		if i > 0 {
-			sb.WriteString("\n")
-		}
-		if isErr || err != nil {
-			hadError = true
-		}
-		if err != nil {
-			fmt.Fprintf(&sb, "%s: %v", f.Path, err)
+		plan, msg := planFileWrite(rc, f.Path, f.Content, f.Overwrite, f.Reason, batchID, i+1, len(args.Files))
+		if msg != "" {
+			label := strings.TrimSpace(f.Path)
+			if label == "" {
+				label = fmt.Sprintf("files[%d]", i)
+			}
+			validationErrors = append(validationErrors, fmt.Sprintf("%s: %s", label, msg))
 			continue
 		}
-		sb.WriteString(result)
+		if firstIndex, ok := seenPaths[plan.Path]; ok {
+			validationErrors = append(validationErrors, fmt.Sprintf("%s: duplicate path also appears at files[%d]", plan.Path, firstIndex))
+			continue
+		}
+		seenPaths[plan.Path] = i
+		plans = append(plans, *plan)
 	}
-	return sb.String(), hadError, nil
+	if len(validationErrors) > 0 {
+		return "write_files failed before writing any files:\n" + strings.Join(validationErrors, "\n"), true, nil
+	}
+
+	created := 0
+	updated := 0
+	var lines []string
+	for _, plan := range plans {
+		if plan.Operation == "create" {
+			created++
+		} else {
+			updated++
+		}
+		lines = append(lines, commitFileWrite(rc, plan))
+	}
+	summary := fmt.Sprintf("wrote %d %s: created %d, updated %d", len(plans), pluralize("file", len(plans)), created, updated)
+	if len(lines) == 0 {
+		return summary, false, nil
+	}
+	return summary + "\n" + strings.Join(lines, "\n"), false, nil
+}
+
+func pluralize(word string, count int) string {
+	if count == 1 {
+		return word
+	}
+	return word + "s"
+}
+
+// ---------- create_design ----------
+
+type CreateDesignTool struct{}
+
+func (CreateDesignTool) Name() string { return "create_design" }
+func (CreateDesignTool) Description() string {
+	return "Create DESIGN.md from structured design decisions. Use this instead of write_files for DESIGN.md on first generation."
+}
+func (CreateDesignTool) Schema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"register": map[string]any{
+				"type":        "string",
+				"enum":        []string{"brand", "product"},
+				"description": "Whether the design is the product impression (brand) or serves a workflow (product).",
+			},
+			"design_direction": map[string]any{"type": "string", "description": "Concrete visual point of view and rationale."},
+			"color_system":     map[string]any{"type": "string", "description": "Named tokens, hex values, roles, and palette strategy."},
+			"typography":       map[string]any{"type": "string", "description": "Font choices, scale, weight, and usage rules."},
+			"layout":           map[string]any{"type": "string", "description": "Spacing, grid, page rhythm, and responsive rules."},
+			"components":       map[string]any{"type": "string", "description": "Key reusable components and state expectations."},
+			"imagery":          map[string]any{"type": "string", "description": "Image style, subject matter, crops, and what to avoid."},
+			"accessibility":    map[string]any{"type": "string", "description": "Contrast, focus, motion, and text wrapping constraints."},
+			"forbidden_patterns": map[string]any{
+				"type":        "string",
+				"description": "Specific generic or off-direction choices this app must avoid.",
+			},
+			"overwrite": map[string]any{"type": "boolean", "description": "Set true only when intentionally replacing an existing DESIGN.md."},
+			"reason":    map[string]any{"type": "string", "description": "Required when overwrite=true."},
+		},
+		"required": []string{"register", "design_direction", "color_system", "typography", "layout", "components", "imagery", "accessibility"},
+	}
+}
+
+func (CreateDesignTool) Execute(ctx context.Context, rc *RunContext, input json.RawMessage) (string, bool, error) {
+	var args struct {
+		Register          string `json:"register"`
+		DesignDirection   string `json:"design_direction"`
+		ColorSystem       string `json:"color_system"`
+		Typography        string `json:"typography"`
+		Layout            string `json:"layout"`
+		Components        string `json:"components"`
+		Imagery           string `json:"imagery"`
+		Accessibility     string `json:"accessibility"`
+		ForbiddenPatterns string `json:"forbidden_patterns"`
+		Overwrite         bool   `json:"overwrite"`
+		Reason            string `json:"reason"`
+	}
+	if err := json.Unmarshal(input, &args); err != nil {
+		return fmt.Sprintf("invalid input: %v", err), true, nil
+	}
+	content := renderDesignBrief(args.Register, args.DesignDirection, args.ColorSystem, args.Typography, args.Layout, args.Components, args.Imagery, args.Accessibility, args.ForbiddenPatterns)
+	return writeFileContent(rc, designFilePath, content, args.Overwrite, args.Reason, "", 0, 0)
+}
+
+func renderDesignBrief(register, direction, colors, typography, layout, components, imagery, accessibility, forbidden string) string {
+	var sb strings.Builder
+	sb.WriteString("# DESIGN.md\n\n")
+	writeDesignSection(&sb, "Register", register)
+	writeDesignSection(&sb, "Design Direction", direction)
+	writeDesignSection(&sb, "Color System", colors)
+	writeDesignSection(&sb, "Typography", typography)
+	writeDesignSection(&sb, "Layout", layout)
+	writeDesignSection(&sb, "Components", components)
+	writeDesignSection(&sb, "Imagery", imagery)
+	writeDesignSection(&sb, "Accessibility", accessibility)
+	if strings.TrimSpace(forbidden) != "" {
+		writeDesignSection(&sb, "Forbidden Patterns", forbidden)
+	}
+	return sb.String()
+}
+
+func writeDesignSection(sb *strings.Builder, title, body string) {
+	sb.WriteString("## ")
+	sb.WriteString(title)
+	sb.WriteString("\n")
+	sb.WriteString(strings.TrimSpace(body))
+	sb.WriteString("\n\n")
 }
 
 // ---------- edit_file ----------
@@ -548,7 +668,7 @@ func (EditFileTool) Execute(ctx context.Context, rc *RunContext, input json.RawM
 	}
 	content, ok := rc.FileMap.Get(path)
 	if !ok {
-		return fmt.Sprintf("file not found: %s — use write_file to create it", path), true, nil
+		return fmt.Sprintf("file not found: %s — use write_files to create it", path), true, nil
 	}
 	if args.OldString == "" {
 		return "old_string must not be empty", true, nil
@@ -762,7 +882,7 @@ func (MultiEditTool) Execute(ctx context.Context, rc *RunContext, input json.Raw
 	}
 	content, ok := rc.FileMap.Get(path)
 	if !ok {
-		return fmt.Sprintf("file not found: %s — use write_file to create it", path), true, nil
+		return fmt.Sprintf("file not found: %s — use write_files to create it", path), true, nil
 	}
 
 	working := content
@@ -928,14 +1048,82 @@ func (g GenerateImageTool) Execute(ctx context.Context, rc *RunContext, input js
 	if g.Deps == nil || g.Deps.GenerateImage == nil {
 		return "image generation not available", true, nil
 	}
-	url, err := g.Deps.GenerateImage(ctx, args.Prompt, args.Width, args.Height, args.Style, rc.Project.ID.String())
+	cacheKey := imageCacheKey(args.Prompt, args.Width, args.Height, args.Style)
+	call, leader := beginImageGeneration(rc, cacheKey)
+	if !leader {
+		<-call.done
+		if call.err != nil {
+			return fmt.Sprintf("image generation failed: %v", call.err), true, nil
+		}
+		resp, _ := json.Marshal(map[string]any{
+			"url":    call.url,
+			"width":  args.Width,
+			"height": args.Height,
+			"cached": true,
+		})
+		return string(resp), false, nil
+	}
+	projectID := ""
+	if rc != nil && rc.Project != nil {
+		projectID = rc.Project.ID.String()
+	}
+	url, err := g.Deps.GenerateImage(ctx, args.Prompt, args.Width, args.Height, args.Style, projectID)
 	if err != nil {
+		finishImageGeneration(rc, cacheKey, call, "", err)
 		return fmt.Sprintf("image generation failed: %v", err), true, nil
 	}
+	finishImageGeneration(rc, cacheKey, call, url, nil)
 	resp, _ := json.Marshal(map[string]any{
 		"url":    url,
 		"width":  args.Width,
 		"height": args.Height,
 	})
 	return string(resp), false, nil
+}
+
+func imageCacheKey(prompt string, width, height int, style string) string {
+	return fmt.Sprintf("%s\x00%d\x00%d\x00%s", strings.Join(strings.Fields(strings.ToLower(prompt)), " "), width, height, strings.ToLower(strings.TrimSpace(style)))
+}
+
+func beginImageGeneration(rc *RunContext, key string) (*imageInflightCall, bool) {
+	if rc == nil {
+		return &imageInflightCall{done: make(chan struct{})}, true
+	}
+	rc.ImageCacheMu.Lock()
+	defer rc.ImageCacheMu.Unlock()
+	if rc.ImageCache != nil {
+		if cachedURL, ok := rc.ImageCache[key]; ok {
+			call := &imageInflightCall{done: make(chan struct{}), url: cachedURL}
+			close(call.done)
+			return call, false
+		}
+	}
+	if rc.ImageInflight == nil {
+		rc.ImageInflight = make(map[string]*imageInflightCall)
+	}
+	if call, ok := rc.ImageInflight[key]; ok {
+		return call, false
+	}
+	call := &imageInflightCall{done: make(chan struct{})}
+	rc.ImageInflight[key] = call
+	return call, true
+}
+
+func finishImageGeneration(rc *RunContext, key string, call *imageInflightCall, url string, err error) {
+	call.url = url
+	call.err = err
+	if rc == nil {
+		close(call.done)
+		return
+	}
+	rc.ImageCacheMu.Lock()
+	if err == nil {
+		if rc.ImageCache == nil {
+			rc.ImageCache = make(map[string]string)
+		}
+		rc.ImageCache[key] = url
+	}
+	delete(rc.ImageInflight, key)
+	rc.ImageCacheMu.Unlock()
+	close(call.done)
 }

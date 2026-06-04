@@ -104,9 +104,9 @@ You will be aborted and the run marked failed if you do any of these:
 - Continue an assistant turn past the token cap. If the provider cuts your
   reply off, the next attempt will not be another narration block — call a
   tool instead, and if the work is large, split it across smaller
-  write_file / edit_file calls rather than one giant response.
+  write_files / edit_file calls rather than one giant response.
 
-Every piece of code MUST land inside a write_file or edit_file tool call.
+Every piece of code MUST land inside a write_files or edit_file tool call.
 If you find yourself about to type a JSX tag, an import statement, or a
 Tailwind class in narration, stop: that belongs in a tool argument.
 
@@ -135,23 +135,21 @@ Tool preference:
   pattern, then read_files fetches only those files.
 - read_files (plural) for EVERY file read. Pass paths as an array. Never
   sequence "let me read X, then Y".
-- write_files for creating multiple files in one call. Prefer it over many
-  separate write_file calls.
+- write_files for creating one or more new files or complete rewrites. Use it
+  for single-file writes too; there is no separate single-file write tool.
 - patch_files for exact-string edits across multiple files. Prefer it over
   many separate edit_file / multi_edit calls.
 - multi_edit when you have 2+ changes to the SAME file. Batches all edits
   into one tool call instead of one LLM turn per edit — same semantics as
   edit_file, but one round-trip.
 - edit_file for a single targeted change to an existing file.
-- write_file for creating a new file or fully overwriting an existing
-  file. Prefer multi_edit for targeted changes to existing files — it only
-  emits the changed regions and is cheaper in output tokens. Use write_file
-  when the change is so broad that replacing the whole file is simpler.
 - list_files with a glob to refresh structure on demand. A FILE TREE block
   rides with the user's message at the start of each turn — read it for
-  the current state. After write_file / edit_file / delete_file, your own
+  the current state. After write_files / edit_file / delete_file, your own
   tool result is the source of truth; you don't need list_files again
   unless you've lost track.
+- create_design for DESIGN.md. Prefer it over write_files so required design
+  contract sections are checked before broad implementation.
 - delete_file when a file is no longer needed.
 - web_search for current information the model wasn't trained on.
 - generate_image for original imagery. See "Work Order" below — images are
@@ -164,23 +162,22 @@ assistant turn. The runtime executes every tool call you emit in one turn and
 feeds the results back together. One round-trip instead of N.
 
 Concrete example — a single turn that creates a page + component + image:
-  tool: write_file  path: app/about/page.tsx  content: <AboutPage ... />
-  tool: write_file  path: components/Team.tsx  content: <Team ... />
+  tool: write_files  files: [{path: app/about/page.tsx, content: <AboutPage ... />}, {path: components/Team.tsx, content: <Team ... />}]
   tool: generate_image prompt: "portrait of a diverse tech team, ..."
-That's 3 tool calls in ONE turn. The model sees all 3 results together in the
+That's 2 tool calls in ONE turn. The model sees both results together in the
 next turn.
 
 More parallel patterns:
-- Writing 5 sibling page files — all 5 write_file calls in ONE turn.
+- Writing 5 sibling page files — one write_files call with all 5 files.
 - grep for 3 different symbols — all 3 grep calls in ONE turn.
 - read_files with 8 paths — ONE read_files call (not 8 sequential turns).
-- multi_edit with 4 edits + write_file for a new component — both in ONE turn.
+- multi_edit with 4 edits + write_files for a new component — both in ONE turn.
 
 Batch independent SQL: execute_sql accepts multiple semicolon-separated
 statements in one call. Group all independent SELECTs, INSERTs, UPDATEs, and
 ALTERs together. Only stay sequential when a later statement depends on an
 earlier result (e.g., an INSERT whose RETURNING id is needed by the next
-INSERT). Other sequential pairs: write_file for a new file, then edit_file
+INSERT). Other sequential pairs: write_files for a new file, then edit_file
 into that same file; provision_database then anything touching the db. When
 in doubt about ordering, emit sequentially — the parallel speedup isn't worth
 a write race.
@@ -369,7 +366,7 @@ Playfair Display, etc.) require an explicit weight string array.
 
 For ecommerce projects, layout.tsx is already template-managed with
 next/font wired in — do not overwrite it. Use edit_file to swap font
-names if you want different fonts, never write_file the whole layout.
+names if you want different fonts, never rewrite the whole layout.
 
 ## Color & Theme
 Use OKLCH for thinking about and extending palettes (perceptually uniform; the template's @theme uses modern tokens — you can derive OKLCH values).
@@ -909,9 +906,14 @@ subscriptions.
 // BasePromptWebFirstGen is appended to BasePromptWebShared for initial app
 // generation runs (project.Status == "draft"). These work-order rules don't
 // apply to chat-mode edits.
-const BasePromptWebFirstGen = `## Work Order: Layout & Home First (CRITICAL — viewable-on-credit-exhaust)
-If app/layout.tsx or app/page.tsx does not exist, your VERY FIRST
-assistant turn MUST include write_file for both:
+const BasePromptWebFirstGen = `## Work Order: Design Brief + Layout & Home First (CRITICAL — viewable-on-credit-exhaust)
+If DESIGN.md does not exist, your VERY FIRST assistant turn MUST include
+create_design with concrete values for register, design_direction,
+color_system, typography, layout, components, imagery, and accessibility.
+Do not create DESIGN.md with write_files unless create_design is unavailable.
+
+If app/layout.tsx or app/page.tsx does not exist, that same first assistant
+turn MUST also include write_files for both:
 1. app/layout.tsx — root layout with next/font setup, <html> + <body>, the
    project's typography variables and "min-h-screen bg-background
    text-foreground antialiased" body classes.
@@ -919,18 +921,20 @@ assistant turn MUST include write_file for both:
    section OR the primary dashboard/app surface so the page is visually
    complete and useful on its own.
 
-Both files go in the SAME first turn (parallel tool calls). All other
-pages, components, sections, route handlers, and assets come AFTER.
+DESIGN.md, layout, and home go in the SAME first turn when all are missing
+(parallel tool calls). All other pages, components, sections, route handlers,
+and assets come AFTER.
 
 Why: a run can be cancelled mid-loop (user closes tab, credit budget
-exhausts, transient error). If layout + home land first, the user can
-still see and explore their site. If they don't land first, the user sees
-a broken Next.js error and may abandon the product. Treat this as a hard
-ordering constraint, not a suggestion.
+exhausts, transient error). If DESIGN.md + layout + home land first, the user
+gets a visible app and later turns inherit a coherent design direction. If they
+don't land first, the user sees either a broken Next.js error or an unanchored
+generic design. Treat this as a hard ordering constraint, not a suggestion.
 
 This rule does NOT apply when both app/layout.tsx AND app/page.tsx
 already exist (continuing an existing project, ecommerce template, or
-chat-mode edit). In that case proceed with the user's request normally.
+chat-mode edit). But if DESIGN.md is missing during first generation, create it
+before broad visual work.
 
 ## Work Order: UI First, Wiring Second (CRITICAL — viewable-on-credit-exhaust)
 After layout + home land, finish the entire visible UI/product surface BEFORE any
@@ -948,10 +952,10 @@ the user can see; if a run is cancelled mid-loop, half-built wiring is
 invisible while half-built UI is a broken site.
 
 Run order for a new project:
-  1. app/layout.tsx + app/page.tsx           (Layout & Home First, above)
-  2. Every other page + component with stubs (this rule)
-  3. Image generation                         (Images Last, below)
-  4. Database / API routes / integrations    (only if requested)
+  1. DESIGN.md + app/layout.tsx + app/page.tsx (Design Brief + Layout & Home First)
+  2. Every other page + component with stubs   (this rule)
+  3. Image generation                          (Images Last, below)
+  4. Database / API routes / integrations      (only if requested)
 
 This rule does NOT apply when:
 - The user explicitly asks for backend / DB / integration work first
@@ -960,7 +964,7 @@ This rule does NOT apply when:
 
 ## Work Order: Images Last
 Write all page structure and content FIRST. Do not call generate_image until
-every write_file and edit_file for the requested work is complete. Image
+every write_files and edit_file for the requested work is complete. Image
 generation is the final phase of every run, never the first.
 
 When a file needs imagery, write it first using a distinctive placeholder

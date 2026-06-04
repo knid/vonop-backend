@@ -1274,7 +1274,7 @@ Keep every narration block to at most two sentences. You will be aborted if you:
 - Write a plan or checklist longer than two sentences — act with tools.
 - Repeat the same narration across rounds.
 
-Every piece of code MUST land inside a write_file or edit_file tool call.
+Every piece of code MUST land inside a write_files or edit_file tool call.
 
 ## File Drawer (CURRENT FILES)
 A CURRENT FILES block rides with the user message showing recently-accessed
@@ -1285,11 +1285,10 @@ full content up to 200 KB.
 
 ## Tool preference
 - grep BEFORE read_files when locating a symbol or pattern.
-- write_files for creating multiple files in one call.
+- write_files for creating one or more new files or complete rewrites.
 - patch_files for exact-string edits across multiple files.
 - multi_edit for 2+ changes to the same file.
 - edit_file for a single targeted change.
-- write_file for new files or complete rewrites.
 - list_files with a glob to refresh structure.
 - delete_file when a file is no longer needed.
 
@@ -1331,7 +1330,7 @@ This rule does NOT apply when the user explicitly asks for backend work first.
 
 ## Work order: images last
 Write all screen structure and content first. Call generate_image only after
-every write_file and edit_file is complete. Use __IMG_<SLOT>__ placeholder
+every write_files and edit_file is complete. Use __IMG_<SLOT>__ placeholder
 tokens, then swap them in a final edit_file pass. Never leave placeholders.
 
 `

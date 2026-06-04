@@ -15,7 +15,8 @@ const planningDiscipline = `## Planning Discipline
 Before calling any tool, decide the complete set of files you need to read,
 write, or edit. Batch them into the fewest tool calls possible:
 - read_files (plural) for every file you need to inspect — one call, all paths.
-- Parallel write_file / edit_file calls for independent files in the SAME turn.
+- create_design for DESIGN.md before broad first-generation UI work.
+- write_files for one or more full-file writes in the SAME turn.
 - multi_edit for 2+ changes to the SAME file.
 - execute_sql with multiple semicolon-separated SQL statements in ONE call for
   independent SELECTs, INSERTs, UPDATEs, or ALTERs. Only split into sequential
@@ -43,7 +44,7 @@ type mobileConfigGetter interface {
 //  4. Project assets       (per-turn — asset uploads/deletes invalidate this block only)
 //
 // The file tree is intentionally NOT a system block. It now rides along with
-// the user turn (see BuildFileTreeUserPrefix), because every write_file used
+// the user turn (see BuildFileTreeUserPrefix), because every full-file write used
 // to mutate the system prefix and force a fresh prompt-cache write across all
 // downstream blocks. Moving it into the user message keeps system content
 // stable across rounds; the agent uses list_files / grep to refresh state

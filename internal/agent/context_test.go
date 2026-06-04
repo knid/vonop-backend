@@ -185,7 +185,7 @@ func TestBuildSystemMessages_BothAddendaForSyncedNative(t *testing.T) {
 
 // TestBuildSystemMessages_FileTreeNotInSystemBlocks locks in the prompt-cache
 // fix: the rendered FILE TREE block must NOT appear in system messages. If it
-// did, every write_file would mutate the system prefix and force a fresh
+// did, every full-file write would mutate the system prefix and force a fresh
 // prompt-cache write across the whole downstream conversation. The tree now
 // rides with the user turn via BuildFileTreeUserPrefix instead.
 //

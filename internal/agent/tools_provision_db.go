@@ -20,7 +20,7 @@ What is now true:
 - In every user-facing message, call this "your database" / "wemob db" / "veritabanın". NEVER say Neon, Postgres, Drizzle, Supabase, or Firebase to the user.
 
 Next steps for this run:
-1. write_file lib/schema.ts with Drizzle pgTable definitions matching the schema you just provisioned.
+1. write_files lib/schema.ts with Drizzle pgTable definitions matching the schema you just provisioned.
 2. Replace any hardcoded mock data in pages and components with real db.select / db.insert calls.
 3. Add export const dynamic = "force-dynamic" to every page.tsx that reads from the DB.`
 
@@ -69,8 +69,8 @@ Rules:
    to the user.
 
 Next steps for this run:
-1. write_file backend/lib/schema.ts with Drizzle pgTable definitions matching the schema you just provisioned.
-2. write_file backend/app/api/<resource>/route.ts handlers for each table the UI needs (GET list, POST create, optionally PUT/DELETE on /<id>).
+1. write_files backend/lib/schema.ts with Drizzle pgTable definitions matching the schema you just provisioned.
+2. write_files backend/app/api/<resource>/route.ts handlers for each table the UI needs (GET list, POST create, optionally PUT/DELETE on /<id>).
 3. Wire mobile screens to call those routes via apiFetch instead of any hardcoded mock data.`
 
 // ProvisionDatabaseTool is the agent-callable entry point for creating the

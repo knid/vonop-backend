@@ -127,13 +127,22 @@ func matchGlob(glob, p string) bool {
 // state for a single agent run. It is constructed at the top of Run() and
 // never mutated outside the orchestrator.
 type RunContext struct {
-	RunID      uuid.UUID
-	Project    *models.AppProject
-	User       *models.User
-	FileMap    *SafeFileMap
-	BuildState *BuildState
-	Todos      *TodoList
-	Emitter    EventEmitter
-	Tracker    *utils.TokenTracker
-	Deps       *RunDependencies
+	RunID         uuid.UUID
+	Project       *models.AppProject
+	User          *models.User
+	FileMap       *SafeFileMap
+	BuildState    *BuildState
+	Todos         *TodoList
+	Emitter       EventEmitter
+	Tracker       *utils.TokenTracker
+	Deps          *RunDependencies
+	ImageCacheMu  sync.Mutex
+	ImageCache    map[string]string
+	ImageInflight map[string]*imageInflightCall
+}
+
+type imageInflightCall struct {
+	done chan struct{}
+	url  string
+	err  error
 }
