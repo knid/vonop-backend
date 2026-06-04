@@ -366,7 +366,7 @@ type WriteFileTool struct{}
 
 func (WriteFileTool) Name() string { return "write_file" }
 func (WriteFileTool) Description() string {
-	return "Create a new file. To fully overwrite an existing file, pass overwrite=true with a short reason; prefer edit_file or multi_edit for targeted changes."
+	return "Create or fully overwrite exactly one file. For 2+ files, use write_files. To overwrite an existing file, pass overwrite=true with a short reason; prefer edit_file or multi_edit for targeted changes."
 }
 func (WriteFileTool) Schema() map[string]any {
 	return map[string]any{
@@ -438,7 +438,7 @@ type WriteFilesTool struct{}
 
 func (WriteFilesTool) Name() string { return "write_files" }
 func (WriteFilesTool) Description() string {
-	return "Create or fully overwrite multiple files in one call. Each entry has the same semantics as write_file. Existing files require overwrite=true and a reason."
+	return "Create or fully overwrite multiple files in one call. Use this whenever the same next action writes 2+ files. Each entry has the same semantics as write_file. Existing files require overwrite=true and a reason."
 }
 func (WriteFilesTool) Schema() map[string]any {
 	return map[string]any{
@@ -511,7 +511,7 @@ type EditFileTool struct{}
 
 func (EditFileTool) Name() string { return "edit_file" }
 func (EditFileTool) Description() string {
-	return "Surgically replace exactly one occurrence of old_string with new_string in an existing file. Fails if old_string does not appear or appears more than once — in that case, add surrounding context to old_string and retry."
+	return "Surgically replace exactly one occurrence of old_string with new_string in exactly one existing file. For 2+ edits in this file, use multi_edit; for edits across 2+ files, use patch_files. Fails if old_string does not appear or appears more than once — in that case, add surrounding context to old_string and retry."
 }
 func (EditFileTool) Schema() map[string]any {
 	return map[string]any{
@@ -807,7 +807,7 @@ type PatchFilesTool struct{}
 
 func (PatchFilesTool) Name() string { return "patch_files" }
 func (PatchFilesTool) Description() string {
-	return "Apply exact-string edit batches to multiple files in one call. Each file entry has the same semantics as multi_edit."
+	return "Apply exact-string edit batches to multiple files in one call. Use this whenever the same next action edits 2+ files. Each file entry has the same semantics as multi_edit."
 }
 func (PatchFilesTool) Schema() map[string]any {
 	return map[string]any{

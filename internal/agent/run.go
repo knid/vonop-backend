@@ -321,6 +321,7 @@ func Run(
 	compactIntervalTokens := 150_000
 	trimToolResultChars := 4_000
 	trimToolArgChars := 1_200
+	keepRecentToolRounds := 5
 	if deps.RemoteConfig != nil {
 		compactAfterTokens = deps.RemoteConfig.GetInt(remoteconfig.AICompactAfterTokens, remoteconfig.Global)
 		compactIntervalTokens = deps.RemoteConfig.GetInt(remoteconfig.AICompactIntervalTokens, remoteconfig.Global)
@@ -329,6 +330,9 @@ func Run(
 		}
 		if rcTrim := deps.RemoteConfig.GetInt(remoteconfig.AITrimToolArgChars, remoteconfig.Global); rcTrim > 0 {
 			trimToolArgChars = rcTrim
+		}
+		if rcKeep := deps.RemoteConfig.GetInt(remoteconfig.AIKeepRecentToolRounds, remoteconfig.Global); rcKeep > 0 {
+			keepRecentToolRounds = rcKeep
 		}
 	}
 	if compactIntervalTokens <= 0 {
@@ -542,6 +546,7 @@ func Run(
 			StripAfter:    stripAfter,
 			StripTools:    []string{"read_files", "list_files", "grep", "read_attachment", "web_search", "read_build_logs", "read_deploy_logs", "read_mobile_config", "list_skills", "search_skills", "load_skill"},
 			MaxMessages:   25,
+      KeepRecentToolRounds: keepRecentToolRounds,
 			RefreshPrefix: refreshRunPrefix,
 			TrimResults: func(toolName, result string) string {
 				return trimToolResultForLLM(toolName, result, trimToolResultChars)

@@ -214,12 +214,17 @@ extra fields.
 // to a conservative "the setup tool will list available models" line.
 func buildAIAddendum(deps *RunDependencies) string {
 	allowedChat := gatewayAllowedChatModels(deps)
+	allowedImage := gatewayAllowedImageModels(deps)
 
 	modelBlock := "Available chat models will be listed when you call\nsetup_wemob_ai_gateway — use whatever that tool reports."
+	imageModelBlock := "Available image models will be listed when you call setup_wemob_ai_gateway."
 	defaultModel := constants.GatewayDefaultChatModel
 	if len(allowedChat) > 0 {
 		modelBlock = "Available chat models on the user's current plan (pass as the\nmodel field on wemobAI().chat.completions.create — anything else\nwill 403 at runtime):\n" + renderGatewayChatModelsBlock(allowedChat)
 		defaultModel = defaultGatewayChatModel(allowedChat)
+	}
+	if len(allowedImage) > 0 {
+		imageModelBlock = "Available image models on the user's current plan (pass as the\nmodel field on generateImage — anything else will 403 at runtime):\n" + renderGatewayImageModelsBlock(allowedImage)
 	}
 
 	return `# AI ADDENDUM
@@ -236,14 +241,13 @@ client plus a thin image helper:
 - wemobAI() returns an OpenAI client pointed at the Wemob Gateway. Use it
   exactly like the real OpenAI SDK — chat, streaming, tools, tool_choice,
   response_format, seed, and vision all pass through to the upstream.
-- generateImage({ model, prompt, imageSize, numImages }) returns string[] of
+- generateImage({ model, prompt, imageSize, numImages, imageUrl, imageUrls }) returns string[] of
   public image URLs. Use it for AI-generated imagery the user requests at
   runtime (not for placeholder hero art — use the generate_image tool for that).
 
 ` + modelBlock + `
 
-Available image models: fal-ai/flux/schnell (default), fal-ai/flux-pro/v1.1,
-fal-ai/flux-pro/v1.1-ultra.
+` + imageModelBlock + `
 
 The openai npm package is already in package.json — do not add it again, and
 do not add @anthropic-ai/sdk, @google/generative-ai, or any other AI SDK. They

@@ -15,29 +15,29 @@ import (
 // available weights. If a font is not in this map, we assume it's a variable
 // font and omit the weight parameter (Next.js handles it automatically).
 var NonVariableFonts = map[string][]string{
-	"Bebas Neue":         {"400"},
-	"Racing Sans One":    {"400"},
-	"Bungee":             {"400"},
-	"Bungee Shade":       {"400"},
-	"Creepster":          {"400"},
-	"Nosifer":             {"400"},
-	"Faster One":         {"400"},
-	"Monoton":            {"400"},
-	"Press Start 2P":     {"400"},
-	"Rubik Mono One":     {"400"},
-	"Vast Shadow":        {"400"},
+	"Bebas Neue":           {"400"},
+	"Racing Sans One":      {"400"},
+	"Bungee":               {"400"},
+	"Bungee Shade":         {"400"},
+	"Creepster":            {"400"},
+	"Nosifer":              {"400"},
+	"Faster One":           {"400"},
+	"Monoton":              {"400"},
+	"Press Start 2P":       {"400"},
+	"Rubik Mono One":       {"400"},
+	"Vast Shadow":          {"400"},
 	"Fredericka the Great": {"400"},
-	"Lobster":            {"400"},
-	"Pacifico":           {"400"},
-	"Righteous":          {"400"},
-	"Permanent Marker":   {"400"},
-	"Alfa Slab One":      {"400"},
-	"Abril Fatface":      {"400"},
-	"Playfair Display SC": {"400", "700", "900"},
-	"Merriweather":       {"300", "400", "700", "900"},
-	"Lora":               {"400", "500", "600", "700"},
-	"Roboto Condensed":   {"300", "400", "700"},
-	"Oswald":             {"200", "300", "400", "500", "600", "700"},
+	"Lobster":              {"400"},
+	"Pacifico":             {"400"},
+	"Righteous":            {"400"},
+	"Permanent Marker":     {"400"},
+	"Alfa Slab One":        {"400"},
+	"Abril Fatface":        {"400"},
+	"Playfair Display SC":  {"400", "700", "900"},
+	"Merriweather":         {"300", "400", "700", "900"},
+	"Lora":                 {"400", "500", "600", "700"},
+	"Roboto Condensed":     {"300", "400", "700"},
+	"Oswald":               {"200", "300", "400", "500", "600", "700"},
 }
 
 // FontWeightParam returns the weight option string for a font constructor.
@@ -77,12 +77,12 @@ func getColor(scheme map[string]any, key, fallback string) string {
 func BuildGlobalsCSSTheme(colorScheme, darkColorScheme map[string]any) string {
 	var sb strings.Builder
 
-	fg := getColor(colorScheme, "text", "#111827")
-	bg := getColor(colorScheme, "background", "#FFFFFF")
-	surface := getColor(colorScheme, "surface", "#F3F4F6")
-	primary := getColor(colorScheme, "primary", "#3B82F6")
-	secondary := getColor(colorScheme, "secondary", "#6366F1")
-	accent := getColor(colorScheme, "accent", "#F59E0B")
+	fg := getColor(colorScheme, "text", "#171713")
+	bg := getColor(colorScheme, "background", "#FAFAF7")
+	surface := getColor(colorScheme, "surface", "#F0F1EA")
+	primary := getColor(colorScheme, "primary", "#123C32")
+	secondary := getColor(colorScheme, "secondary", "#44546A")
+	accent := getColor(colorScheme, "accent", "#C2410C")
 
 	// --- @import + @theme ---
 	// Defines both the raw palette tokens AND the shadcn-style semantic tokens
@@ -104,6 +104,7 @@ func BuildGlobalsCSSTheme(colorScheme, darkColorScheme map[string]any) string {
   --color-foreground: %s;
   --color-card: %s;
   --color-card-foreground: %s;
+  --color-elevated: color-mix(in srgb, %s 82%%, white);
   --color-muted: %s;
   --color-muted-foreground: color-mix(in srgb, %s 60%%, %s);
   --color-border: color-mix(in srgb, %s 15%%, %s);
@@ -111,6 +112,14 @@ func BuildGlobalsCSSTheme(colorScheme, darkColorScheme map[string]any) string {
   --color-ring: %s;
   --color-destructive: #DC2626;
   --color-destructive-foreground: #FFFFFF;
+  --radius-xs: 0.375rem;
+  --radius-sm: 0.5rem;
+  --radius-md: 0.75rem;
+  --radius-lg: 1rem;
+  --radius-xl: 1.25rem;
+  --shadow-soft: 0 1px 2px color-mix(in srgb, %s 8%%, transparent), 0 16px 40px color-mix(in srgb, %s 8%%, transparent);
+  --shadow-lifted: 0 10px 30px color-mix(in srgb, %s 12%%, transparent);
+  --spacing-section: clamp(4rem, 8vw, 8rem);
 }
 `,
 		primary,
@@ -125,11 +134,15 @@ func BuildGlobalsCSSTheme(colorScheme, darkColorScheme map[string]any) string {
 		fg,
 		bg,
 		fg,
+		bg,
 		surface,
 		fg, bg,
 		fg, bg,
 		fg, bg,
 		primary,
+		fg,
+		fg,
+		fg,
 	))
 
 	// --- @layer base: html + body ---
@@ -166,26 +179,11 @@ func BuildGlobalsCSSTheme(colorScheme, darkColorScheme map[string]any) string {
 func BuildEcommerceGlobalsCSSTheme(colorScheme, darkColorScheme map[string]any) string {
 	base := BuildGlobalsCSSTheme(colorScheme, darkColorScheme)
 
-	primary := getColor(colorScheme, "primary", "#3B82F6")
+	primary := getColor(colorScheme, "primary", "#123C32")
 
 	return base + fmt.Sprintf(`
 /* E-commerce utilities */
 @layer utilities {
-  .gradient-text {
-    background: linear-gradient(135deg, var(--color-primary), var(--color-accent));
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-  }
-
-  .glow-primary {
-    box-shadow: 0 0 20px color-mix(in srgb, var(--color-primary) 30%%, transparent);
-  }
-
-  .glow-accent {
-    box-shadow: 0 0 20px color-mix(in srgb, var(--color-accent) 30%%, transparent);
-  }
-
   .glass {
     background: color-mix(in srgb, var(--color-surface) 80%%, transparent);
     backdrop-filter: blur(12px);
@@ -265,8 +263,8 @@ func BuildEcommerceLayout(storeName string, typography map[string]any, lang stri
 	storeName = strings.ReplaceAll(storeName, `\`, `\\`)
 	storeName = strings.ReplaceAll(storeName, `"`, `\"`)
 
-	headingFont := "Inter"
-	bodyFont := "Inter"
+	headingFont := "Geist"
+	bodyFont := "Geist"
 	if typography != nil {
 		if v, ok := typography["heading_font"].(string); ok && v != "" {
 			headingFont = v
@@ -374,7 +372,6 @@ export default async function RootLayout({ children }: { children: React.ReactNo
 `, fontImports, fontConstructors, storeName, storeName, lang, bodyClassName)
 }
 
-
 // GetContentWithLang returns the hardcoded content for a template file, with a language code
 // for localizing dynamic templates (not-found, error).
 func GetContentWithLang(path string, colorScheme, darkColorScheme map[string]any, projectType string, dataModels []models.DataModel, lang string) string {
@@ -454,4 +451,3 @@ func GetEcommerceContent(path string, lang string) string {
 func GetUIContent(path string) string {
 	return GetTemplate(path)
 }
-
