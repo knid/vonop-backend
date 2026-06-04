@@ -34,9 +34,9 @@ func NewAdmin(adminURL, domainsDir, caddyfilePath string) *Admin {
 }
 
 // AddCustomDomainRoute writes a Caddyfile snippet for the given hostname that
-// reverse-proxies to the named Fly app, then reloads Caddy. Idempotent —
-// overwrites any existing snippet for the same hostname. No-op if the Admin
-// is not configured.
+// sends traffic through the backend edge router, then reloads Caddy.
+// Idempotent — overwrites any existing snippet for the same hostname. No-op if
+// the Admin is not configured.
 func (a *Admin) AddCustomDomainRoute(hostname, flyAppName string) error {
 	if a == nil || a.DomainsDir == "" {
 		return nil
@@ -50,15 +50,14 @@ func (a *Admin) AddCustomDomainRoute(hostname, flyAppName string) error {
     tls {
         on_demand
     }
-    reverse_proxy https://%[2]s.fly.dev {
-        header_up Host %[2]s.fly.dev
-        transport http {
-            tls
-            tls_server_name %[2]s.fly.dev
-        }
+    rewrite * /internal/edge/proxy?host={host}
+    reverse_proxy api:8001 {
+        header_up Host api.wemob.io
+        header_up X-Original-URI {http.request.orig_uri}
+        header_up X-Internal-Token {env.EDGE_INTERNAL_TOKEN}
     }
 }
-`, hostname, flyAppName)
+`, hostname)
 
 	if err := os.WriteFile(fname, []byte(snippet), 0o644); err != nil {
 		return fmt.Errorf("write snippet for %s: %w", hostname, err)

@@ -34,6 +34,7 @@ services:
       - custom-domains:/etc/caddy/custom-domains:ro
     environment:
       - CF_API_TOKEN=${CF_API_TOKEN}
+      - EDGE_INTERNAL_TOKEN=${EDGE_INTERNAL_TOKEN}
     depends_on:
       api:
         condition: service_healthy

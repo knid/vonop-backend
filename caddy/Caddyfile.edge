@@ -11,7 +11,7 @@
 # wemob.app subdomains: pattern-based routing, single wildcard cert.
 *.wemob.app {
     tls {
-        dns cloudflare {env.CLOUDFLARE_API_TOKEN}
+        dns cloudflare {env.CF_API_TOKEN}
     }
 
     @host header_regexp host Host ^(?P<slug>[^.]+)\.wemob\.app$

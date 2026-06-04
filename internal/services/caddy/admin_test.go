@@ -69,7 +69,8 @@ func TestAddCustomDomainRoute_SetsOriginHeader(t *testing.T) {
 	if err != nil {
 		t.Fatalf("snippet missing: %v", err)
 	}
-	if !strings.Contains(string(body), "wemob-example.fly.dev") {
+	if !strings.Contains(string(body), "/internal/edge/proxy?host={host}") ||
+		!strings.Contains(string(body), "header_up X-Internal-Token {env.EDGE_INTERNAL_TOKEN}") {
 		t.Fatalf("snippet content unexpected: %s", body)
 	}
 }
